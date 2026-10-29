@@ -32,11 +32,18 @@ pub(super) fn playback(target: Option<&str>) -> AnimationPlayback {
     })).unwrap()
 }
 fn apply(world: &mut World, scene: &Scene) {
+    let instances = super::opacity_instances(world);
     let mut models = world.remove_resource::<ModelVisuals>().unwrap();
     let mut materials = world
         .remove_resource::<Assets<StandardMaterial>>()
         .unwrap_or_default();
-    apply_motion_playback(&mut world.commands(), &mut models, &mut materials, scene);
+    apply_motion_playback(
+        &mut world.commands(),
+        &mut models,
+        &mut materials,
+        &instances,
+        scene,
+    );
     world.flush();
     world.insert_resource(models);
     world.insert_resource(materials);
@@ -337,32 +344,70 @@ fn prepared_rigid_geometry_has_local_mesh_bounds_and_lod_invalidates_stale_bound
 #[test]
 fn shot_source_keeps_prepared_motion_parts_across_short_viewport_exit() {
     let (mut scene, resources) = fixture();
-    scene.surface = Some(serde_json::from_value(serde_json::json!({"width":800,"height":600,"pixelRatio":1})).unwrap());
+    scene.surface = Some(
+        serde_json::from_value(serde_json::json!({"width":800,"height":600,"pixelRatio":1}))
+            .unwrap(),
+    );
     scene.viewport.zoom = 1.;
-    scene.nodes.push(serde_json::from_value(serde_json::json!({
-        "id":"preview","type":"film-set-shot-preview","x":300,"y":0,"width":240,"height":185,
-        "shotPreview":{"filmSetNodeId":"film","clipId":"a","kind":"dynamic","name":"镜头",
-            "aspect":1.7777778,"duration":4,"state":"ready",
-            "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}
-    })).unwrap());
+    scene.nodes.push(
+        serde_json::from_value(serde_json::json!({
+            "id":"preview","type":"film-set-shot-preview","x":300,"y":0,"width":240,"height":185,
+            "shotPreview":{"filmSetNodeId":"film","clipId":"a","kind":"dynamic","name":"镜头",
+                "aspect":1.7777778,"duration":4,"state":"ready",
+                "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}
+        }))
+        .unwrap(),
+    );
     let mut world = world_with_resources();
     scene.animation_playback = Some(playback(Some("p0")));
-    super::super::demand::update(&mut world.resource_mut::<ModelVisuals>(), &scene, None, &Default::default(), 0.);
+    super::super::demand::update(
+        &mut world.resource_mut::<ModelVisuals>(),
+        &scene,
+        None,
+        &Default::default(),
+        &Default::default(),
+        0.,
+    );
     run_sync(&mut world, &scene, &resources);
     let part = world.resource::<ModelVisuals>().roots["film"].part_entities["p0"];
-    let before = world.resource::<ModelVisuals>().playback_events.iter()
-        .filter(|event| event["event"] == "target-preparation").count();
+    let before = world
+        .resource::<ModelVisuals>()
+        .playback_events
+        .iter()
+        .filter(|event| event["event"] == "target-preparation")
+        .count();
     scene.animation_playback = None;
     scene.viewport.x = -10_000.;
     for now in [1., 5.] {
-        super::super::demand::update(&mut world.resource_mut::<ModelVisuals>(), &scene, None, &Default::default(), now);
+        super::super::demand::update(
+            &mut world.resource_mut::<ModelVisuals>(),
+            &scene,
+            None,
+            &Default::default(),
+            &Default::default(),
+            now,
+        );
         run_sync(&mut world, &scene, &resources);
     }
     scene.viewport.x = 0.;
     scene.animation_playback = Some(playback(Some("p0")));
-    super::super::demand::update(&mut world.resource_mut::<ModelVisuals>(), &scene, None, &Default::default(), 6.);
+    super::super::demand::update(
+        &mut world.resource_mut::<ModelVisuals>(),
+        &scene,
+        None,
+        &Default::default(),
+        &Default::default(),
+        6.,
+    );
     run_sync(&mut world, &scene, &resources);
     let models = world.resource::<ModelVisuals>();
     assert_eq!(models.roots["film"].part_entities["p0"], part);
-    assert_eq!(models.playback_events.iter().filter(|event| event["event"] == "target-preparation").count(), before);
+    assert_eq!(
+        models
+            .playback_events
+            .iter()
+            .filter(|event| event["event"] == "target-preparation")
+            .count(),
+        before
+    );
 }

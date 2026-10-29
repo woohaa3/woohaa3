@@ -1,5 +1,9 @@
 # Client code map
 
+## Shared presentation package
+
+[web/ui](web/ui/README.md) owns primitives, forms, dialogs, media, settings presentation, assistant presentation, feedback, icons and the ThemeSource React bridge. React is a peer; only UI owns Radix/Lucide. Frontend retains DialogHost/stack, theme persistence and business services. Extension named UI imports bind to the existing host SDK ui group; legacy extension-api exports retain object identity. UI styles and generated theme CSS live in web/ui/src/styles. Ladle discovers UI stories and business integration stories in web/ui/showcase; production ESM/declarations exclude development helpers. The standalone public-entry consumer and tooling/shared-ui-boundary.test.ts verify the dependency direction.
+
 ## Managed media entities (2026-10-26)
 
 The public [managed lifecycle contract](web/contracts/src/canvas/managed-node-lifecycle.ts) is injected into working projection, edit planning, Yjs command transactions and CAS writes. Persistent [relations and selection policy](web/contracts/src/canvas/managed-node.ts) survive extension unload. Film-set owns [entity planning](web/extensions/film-set/src/state/shared/managed-shot-media-lifecycle.ts), [clipboard remapping](web/extensions/film-set/src/state/shared/managed-shot-media-copy.ts) and the [offline legacy codec](web/extensions/film-set/src/state/shared/managed-shot-media-migration.ts); hosts do not select these rules by provider name. The [offline CLI](scripts/migrate-film-set-shooting-shots.mjs) is independently runnable in this client. Command capability v7 rejects old writers; cache metadata records the capability. Render Scene remains v29.
@@ -30,7 +34,7 @@ Film-set static image references: `web/contracts/src/canvas/film-set-shot-image-
 | `web/services` | Canvas, task, media, application, MCP and local telemetry services |
 | `web/extensions` / `extensions` | Public extension implementations and shared extension support |
 | `web/vendor` | Maintained third-party sources and their notices |
-| `web/tooling` / `web/e2e` / `web/showcase` | Cross-package tests, browser tests and component showcase |
+| `web/tooling` / `web/e2e` / `web/ui/showcase` | Cross-package tests, browser tests and component showcase |
 | `bevy` | WASM/native renderer and recording tools |
 | `desktop` | Tauri desktop shell and native host integration |
 | `scripts` | Client development, build, packaging and verification |
@@ -41,6 +45,8 @@ Bevy WASM builds resolve one shared mode policy in `scripts/lib/bevy-build-mode.
 Start at `web/backend/src/composition.ts` for local host composition, `web/frontend/src/main.tsx` for the interface, and `bevy/src/lib.rs` for rendering. Extension discovery follows `extensions.config.json`. Generated API bindings enter this repository only as `api/gen/es` output: a protocol change arrives as a regenerated binding, never as a local edit.
 
 Canvas text raster resolution is shared by the browser WASM and the native canvas: `bevy/src/canvas2d/text_presentation.rs` owns the logical-size metadata, the bounded zoom steps and the glyph cap, and every 2D text producer (labels, edge labels, generation status, drag-attach bar, node action toolbar) only declares logical text. See the rendering map for the scheduling and invalidation rules.
+
+Texture upload validation lives in `bevy/src/texture_upload.rs`, re-exported by `lib.rs`. Native HTTP bodies move into the bridge inbox without an extra pixel copy; borrowed WASM uploads retain their independent copy. The native frontend sends ordinary byte views directly, preserving slice boundaries, and snapshots shared buffers for XHR compatibility.
 
 Portable configuration handoff: `scripts/export-config.mjs` reads development configuration through `scripts/lib/development-config.mjs`; `scripts/lib/config-handoff.mjs` owns the separate configuration archive and merge/backup behavior. Tauri `desktop/src/local_host.rs` owns stop/import/restart and delegates `--import-config` to `scripts/desktop-host.mjs`. Application extension settings use the service's config-store API; imported model/deployment files belong to the user data directory.
 
@@ -91,3 +97,5 @@ Large-canvas benchmark: `scripts/canvas-benchmark/` owns deterministic fixtures,
 
 Installed-app large-canvas experience: `web/contracts/src/canvas/scene-package.ts` defines the versioned portable scene, job and receipt contract. `web/backend/src/scene-package/` validates bounded ZIP/PNG/model content, remaps identities, stages media and serves local-only `/api/scene-packages` routes; `web/services/canvas-service/src/storage/sqlite/scene-package.ts` owns durable jobs, fencing and atomic canonical/Yjs/receipt publication. This path is independent of remote migration ACL/tombstones and E2E seeding. `web/frontend/src/cordis/plugins/scene-experience/` owns import/duplicate/reset controls and receipt-only navigation/report UI; `canvas-locate` fits accepted renderer bounds into the safe content rectangle. `canvas-runtime/diagnostics-reader.ts` bounds asynchronous diagnostics; the report keeps a 30-second capped window and distinguishes frontend callbacks, renderer completion and unavailable GPU presentation. `scripts/canvas-benchmark/scene-package.mjs` generates three deterministic connected scenes; `experience-kit.mjs` verifies same clean source identity, installer hashes and scene validity before distributing the Windows installer and scenes together. Build and manual Windows checks are documented in `desktop/WINDOWS.md`.
 The frontend's HTTP adaptation and receipt decoding live in `web/frontend/src/cordis/services/scene-package-client.ts`; the scene experience plugin consumes that service and owns only UI/collection behavior.
+
+共享 UI 的 ThemeSource 通过 `@woohaa3/contracts/theme` 读取纯主题类型，不经过 contracts 根入口的旧业务兼容导出。

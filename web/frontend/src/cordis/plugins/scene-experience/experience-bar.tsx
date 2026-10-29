@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import { Button } from '../../../shared/ui/Button.js';
+import { Button } from '@woohaa3/ui/primitives';
 import { useService } from '../../react.js';
 import { appBuildVersion } from '../../services/build-info.js';
 import { sceneDiagnosticsSnapshot } from '../canvas-runtime/scene-diagnostics.js';

@@ -8,12 +8,9 @@
  * 只经同源 `postMessage` 通知本面板刷新状态。
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import {
-  Button,
-  SettingsSection,
-  SettingsFeedback,
-  ServiceLogo,
-} from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
+import { SettingsSection, SettingsFeedback } from "@woohaa3/ui/settings";
+import { ServiceLogo } from "@woohaa3/ui/icons";
 import type { ChatGptService } from "./service.js";
 
 export type SettingsPanelHostProps = {

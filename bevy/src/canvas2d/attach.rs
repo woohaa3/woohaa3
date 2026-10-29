@@ -10,15 +10,14 @@
 
 use std::collections::HashMap;
 
-use bevy::{prelude::*, camera::visibility::NoFrustumCulling, sprite::Anchor, text::LineBreak};
+use bevy::{prelude::*, camera::visibility::NoFrustumCulling};
 
 use crate::protocol::{DragAttach, GraphNode};
 use crate::theme::ThemeResource;
 
 use super::Visuals;
 use super::geometry::Geometry;
-use super::layout::{hex, port};
-use super::text_presentation::{LogicalText, TextScaleMode};
+use super::layout::port;
 
 /// 拖动粘连操作条高度，必须与 contracts 的 `DRAG_ATTACH_ACTION_BAR_HEIGHT` 一致
 /// （change: add-drag-touch-connections；由 `render-scene.test.ts` 断言两边相同）。
@@ -62,18 +61,15 @@ fn estimated_width(text: &str, size: f32) -> f32 {
 /// 在共享几何里追加粘连 overlay，并返回操作条文字标签。
 ///
 /// `base_z` 由调用方按节点数量给出，保证 overlay 高于所有节点卡片、又低于框选（500）。
+/// `nodes` 是当前投影的节点表，仅用于解析待提交连线的端点；owner 自身由调用方按实体定位。
 pub(crate) fn draw_drag_attach(
     geometry: &mut Geometry,
     theme: &ThemeResource,
-    nodes: &[GraphNode],
+    owner: &GraphNode,
+    node_map: &HashMap<&str, &GraphNode>,
     attach: &DragAttach,
     base_z: f32,
 ) -> Vec<AttachLabel> {
-    let node_map: HashMap<&str, &GraphNode> =
-        nodes.iter().map(|node| (node.id.as_str(), node)).collect();
-    let Some(owner) = node_map.get(attach.node_id.as_str()).copied() else {
-        return Vec::new();
-    };
     if owner.composite_asset.is_some() { return Vec::new(); }
     let mode = attach.mode.as_deref();
     let accent = theme.token_u32("interactionAccent");
@@ -176,23 +172,15 @@ pub(crate) fn draw_drag_attach(
 pub(crate) fn draw_drag_attach_probe(
     geometry: &mut Geometry,
     theme: &ThemeResource,
-    nodes: &[GraphNode],
+    owner: &GraphNode,
     attach: &DragAttach,
+    contact: Option<&GraphNode>,
     base_z: f32,
     time: f32,
 ) -> bool {
-    let node_map: HashMap<&str, &GraphNode> =
-        nodes.iter().map(|node| (node.id.as_str(), node)).collect();
-    let Some(owner) = node_map.get(attach.node_id.as_str()).copied() else {
-        return false;
-    };
     let Some(active) = attach.mode.as_deref() else {
         return false;
     };
-    let contact = attach
-        .contact_node_id
-        .as_deref()
-        .and_then(|id| node_map.get(id).copied());
     let accent = theme.token_u32("interactionAccent");
     let (start, end) = if active == "predecessor" {
         let p = port(owner, false);
@@ -297,6 +285,7 @@ pub(crate) fn sync_attach_probe(
     mut commands: Commands,
     time: Res<Time>,
     scene: Res<crate::app::CurrentScene>,
+    index: Res<crate::app::NodeIndex>,
     theme: Res<ThemeResource>,
     mut visuals: ResMut<Visuals>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -311,13 +300,22 @@ pub(crate) fn sync_attach_probe(
         clear_probe_mesh(&mut commands, &mut visuals, &mut meshes);
         return;
     };
+    let Some(owner) = index.node(&scene.0, &attach.node_id).map(|(_, node)| node) else {
+        clear_probe_mesh(&mut commands, &mut visuals, &mut meshes);
+        return;
+    };
+    let contact = attach
+        .contact_node_id
+        .as_deref()
+        .and_then(|id| index.node(&scene.0, id).map(|(_, node)| node));
     let base_z = 10.0 + scene.0.nodes.len() as f32 * 0.1 + 1.5 + 1.0;
     let mut geometry = Geometry::default();
     let drawn = draw_drag_attach_probe(
         &mut geometry,
         &theme,
-        &scene.0.nodes,
+        owner,
         attach,
+        contact,
         base_z,
         time.elapsed_secs(),
     );
@@ -326,62 +324,6 @@ pub(crate) fn sync_attach_probe(
         visuals.attach_probe_active = true;
     } else {
         clear_probe_mesh(&mut commands, &mut visuals, &mut meshes);
-    }
-}
-
-/// 更新/回收粘连操作条文字实体（按角色 key 复用，独立于普通节点标签池）。
-///
-/// `z` 必须高于普通节点标签与卡片，否则文字会被卡片 mesh 覆盖。
-pub(crate) fn sync_attach_labels(
-    commands: &mut Commands,
-    visuals: &mut Visuals,
-    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
-    labels: Vec<AttachLabel>,
-    z: f32,
-) {
-    let keys: Vec<String> = labels.iter().map(|label| label.key.clone()).collect();
-    for label in labels {
-        if let Some(entity) = visuals.attach_labels.get(&label.key).copied() {
-            if let Ok((mut text, mut transform, mut color, mut meta)) = text_query.get_mut(entity) {
-                if text.0 != label.text {
-                    text.0 = label.text.clone();
-                }
-                transform.translation = Vec3::new(label.position.x, -label.position.y, z);
-                color.0 = hex(label.color);
-                if !meta.matches(label.size, None, TextScaleMode::World) {
-                    meta.set(label.size, None, TextScaleMode::World);
-                }
-                continue;
-            }
-        }
-        let entity = commands
-            .spawn((
-                Text2d::new(label.text),
-                TextFont {
-                    font: visuals.font.clone().into(),
-                    font_size: FontSize::Px(label.size),
-                    ..default()
-                },
-                TextColor(hex(label.color)),
-                TextLayout::new(Justify::Left, LineBreak::NoWrap),
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(label.position.x, -label.position.y, z),
-                LogicalText::world(label.size, None),
-            ))
-            .id();
-        visuals.attach_labels.insert(label.key, entity);
-    }
-    // 回收不再存在的角色（拖动手势结束或模式变化）。
-    let stale: Vec<String> = visuals
-        .attach_labels
-        .keys()
-        .filter(|key| !keys.contains(key))
-        .cloned()
-        .collect();
-    for key in stale {
-        if let Some(entity) = visuals.attach_labels.remove(&key) {
-            commands.entity(entity).despawn();
-        }
     }
 }
 
@@ -428,6 +370,10 @@ mod tests {
         }
     }
 
+    fn node_map(nodes: &[GraphNode]) -> HashMap<&str, &GraphNode> {
+        nodes.iter().map(|node| (node.id.as_str(), node)).collect()
+    }
+
     fn positions(geometry: Geometry) -> usize {
         let mesh = geometry.build();
         mesh.attribute(Mesh::ATTRIBUTE_POSITION)
@@ -440,8 +386,10 @@ mod tests {
     fn bar_only_emits_geometry_and_two_labels() {
         let theme = ThemeResource::default();
         let nodes = vec![node("a", 0.0, 0.0, 200.0, 80.0)];
+        let map = node_map(&nodes);
         let mut geometry = Geometry::default();
-        let labels = draw_drag_attach(&mut geometry, &theme, &nodes, &attach(None, None), 100.0);
+        let labels =
+            draw_drag_attach(&mut geometry, &theme, &nodes[0], &map, &attach(None, None), 100.0);
         assert!(positions(geometry) > 20);
         assert_eq!(labels.len(), 2);
         assert_eq!(labels[0].text, "（Q）粘连前序");
@@ -452,6 +400,7 @@ mod tests {
     fn bar_and_pending_edges_emit_geometry() {
         let theme = ThemeResource::default();
         let nodes = vec![node("a", 0.0, 0.0, 200.0, 80.0), node("b", 600.0, 0.0, 200.0, 80.0)];
+        let map = node_map(&nodes);
         let mut spec = attach(None, None);
         spec.pending_edges = vec![DragAttachEdge {
             id: "e1".into(),
@@ -459,7 +408,7 @@ mod tests {
             target: "b".into(),
         }];
         let mut geometry = Geometry::default();
-        draw_drag_attach(&mut geometry, &theme, &nodes, &spec, 100.0);
+        draw_drag_attach(&mut geometry, &theme, &nodes[0], &map, &spec, 100.0);
         // 虚线曲线由多段短线组成，顶点数远高于一个实心圆角矩形。
         assert!(positions(geometry) > 200);
     }
@@ -470,15 +419,24 @@ mod tests {
         let nodes = vec![node("a", 0.0, 0.0, 200.0, 80.0), node("b", 260.0, 0.0, 200.0, 80.0)];
         // 无 mode：不绘制触须。
         let mut idle = Geometry::default();
-        assert!(!draw_drag_attach_probe(&mut idle, &theme, &nodes, &attach(None, None), 100.0, 0.0));
+        assert!(!draw_drag_attach_probe(
+            &mut idle,
+            &theme,
+            &nodes[0],
+            &attach(None, None),
+            None,
+            100.0,
+            0.0
+        ));
         assert_eq!(positions(idle), 0);
         // 有 mode：绘制触须（多段折线 + 圆钮 + 接触反馈）。
         let mut active = Geometry::default();
         assert!(draw_drag_attach_probe(
             &mut active,
             &theme,
-            &nodes,
+            &nodes[0],
             &attach(Some("successor"), Some("b")),
+            Some(&nodes[1]),
             100.0,
             0.0,
         ));
@@ -490,9 +448,25 @@ mod tests {
         let theme = ThemeResource::default();
         let nodes = vec![node("a", 0.0, 0.0, 200.0, 80.0)];
         let mut first = Geometry::default();
-        draw_drag_attach_probe(&mut first, &theme, &nodes, &attach(Some("successor"), None), 100.0, 0.0);
+        draw_drag_attach_probe(
+            &mut first,
+            &theme,
+            &nodes[0],
+            &attach(Some("successor"), None),
+            None,
+            100.0,
+            0.0,
+        );
         let mut later = Geometry::default();
-        draw_drag_attach_probe(&mut later, &theme, &nodes, &attach(Some("successor"), None), 100.0, 0.12);
+        draw_drag_attach_probe(
+            &mut later,
+            &theme,
+            &nodes[0],
+            &attach(Some("successor"), None),
+            None,
+            100.0,
+            0.12,
+        );
         // 不同时间采样得到不同触须几何（扭动动画）。
         let first = first.build();
         let later = later.build();

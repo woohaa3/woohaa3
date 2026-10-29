@@ -105,14 +105,11 @@
 .task-history__error-summary { display: inline-block; max-width: 320px; color: var(--app-status-danger); overflow: hidden; text-overflow: ellipsis; }
 .task-history__thumb img { width: 48px; height: 48px; object-fit: cover; border: 1px solid var(--mc-border); border-radius: 6px; }
 .task-history__result-icon { width: 14px; height: 14px; vertical-align: -2px; }
-.task-history__result-text { display: inline-block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.task-history__result-summary { display: -webkit-box; max-width: 320px; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .task-history__cell-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .task-history__jump-reason { color: var(--mc-text-muted); font-size: 11px; }
 
 /* 复制字段：成功/失败有可访问文本反馈，不只依赖颜色。 */
-.task-history__copy { display: inline-flex; align-items: center; gap: 4px; }
-.task-history__copy svg { width: 13px; height: 13px; }
-.task-history__copy-feedback { font-size: 11px; color: var(--mc-text-muted); }
 
 .task-history__pager { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 16px; }
 .task-history__busy { color: var(--mc-text-muted); font-size: 12px; }

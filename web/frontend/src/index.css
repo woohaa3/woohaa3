@@ -64,6 +64,13 @@ html[data-native-canvas="true"] {
  * 单例 Bevy canvas 的宿主容器（fix: 切换画布白屏）。
  * canvas 元素跨 page scope 存活，由 CanvasHost 命令式挂入本容器；容器负责尺寸。
  */
+/* 画布手势不应触发浏览器原生选区；浮层和编辑器不在此范围内。 */
+.bevy-canvas-surface,
+#bevy-canvas {
+	-webkit-user-select: none;
+	user-select: none;
+}
+
 .bevy-canvas-surface {
 	position: absolute;
 	inset: 0;

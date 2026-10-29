@@ -1,4 +1,5 @@
 import { createNodeImplementationRegistry } from "../extension-api/node-implementations.js";
+import { createFileModelPreparation } from "./services/file-model-preparation.js";
 import { createMediaContentService } from "./services/media-content.js";
 
 import { createPersistentSurfaces } from "./services/persistent-surfaces.js";
@@ -381,7 +382,15 @@ export async function installCanvasPageServices(
   const compositeAssets = new CompositeAssetRegistry();
   ctx.provide("compositeAssets" as never, compositeAssets as never);
   ctx.effect(() => () => compositeAssets.clear(), "composite-asset-registry");
-  const nodeImplementations = createNodeImplementationRegistry(compositeAssets);
+  const fileModelPreparation = createFileModelPreparation({
+    // canvasRuntime 由页面插件注入；install 阶段只捕获惰性读取。
+    runtime: () => (ctx.get("canvasRuntime" as never) as {
+      runtime(): {
+        setModelMediaTexture(id: string, width: number, height: number, rgba: Uint8Array, source?: string): boolean | void;
+      } | null;
+    } | undefined) ?? null
+  });
+  const nodeImplementations = createNodeImplementationRegistry(compositeAssets, fileModelPreparation);
   ctx.provide("nodeImplementations" as never, nodeImplementations as never);
   ctx.effect(() => () => nodeImplementations.clear(), "node-implementation-registry");
   const inputScopes = new InputScopeService();

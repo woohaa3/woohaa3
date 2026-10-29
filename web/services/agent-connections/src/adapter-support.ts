@@ -179,14 +179,14 @@ export type { AgentCredentialPurpose };
  * （change: 2026-10-16-add-agent-appserver-and-sdk-connections，任务 4.3/5.4 / design D6）。
  *
  * 宿主重启后 `query` 核对不应**重跑**推理：扩展内存里保留本进程内已落定的终态即可回答
- * `query`；进程重启后无记录则返回 null（宿主保留既有回执为 `unknown`，不重推理）。
+ * `query`；进程重启后无记录则返回 null（宿主按 failed 结算，不重推理）。
  * 这只缓存**宿主事件语义**的终态，不含隐式推理或凭据。
  */
 export type TurnOutcomeJournal = {
   /** 记录终态（重复覆盖以最后落定为准）。 */
-  set(requestId: string, outcome: { status: "succeeded" | "partial" | "failed" | "cancelled" | "unknown"; assistantText?: string; runId?: string; taskId?: string; receipt?: unknown; error?: { code: string; message: string } }): void;
+  set(requestId: string, outcome: { status: "succeeded" | "partial" | "failed" | "cancelled"; assistantText?: string; runId?: string; taskId?: string; receipt?: unknown; error?: { code: string; message: string } }): void;
   /** 读取已落定终态；无记录返回 null（宿主不重推理）。 */
-  get(requestId: string): { status: "succeeded" | "partial" | "failed" | "cancelled" | "unknown"; assistantText?: string; runId?: string; taskId?: string; receipt?: unknown; error?: { code: string; message: string } } | null;
+  get(requestId: string): { status: "succeeded" | "partial" | "failed" | "cancelled"; assistantText?: string; runId?: string; taskId?: string; receipt?: unknown; error?: { code: string; message: string } } | null;
   /** 结束（重试/清理）后移除。 */
   release(requestId: string): void;
   /** 已落定 requestId（诊断/对账）。 */

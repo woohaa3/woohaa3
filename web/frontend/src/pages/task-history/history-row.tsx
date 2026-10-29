@@ -6,9 +6,10 @@
  */
 import type { ComponentType } from "react";
 import { isTerminalTaskState, type TaskModelType } from "@woohaa3/contracts";
-import { Button } from "../../shared/ui/Button.js";
-import { FileImageIcon, FileTextIcon, FilmIcon, ImageIcon, MusicIcon } from "../../shared/ui/icons.js";
-import { CopyField, TaskStateBadge } from "./history-detail.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { FileImageIcon, FileTextIcon, FilmIcon, ImageIcon, MusicIcon } from "@woohaa3/ui/icons";
+import { TaskStateBadge } from "./history-detail.js";
+import { CopyField } from "@woohaa3/ui/feedback";
 import { formatDuration, formatLocalTime, formatRelative, sourceLabel } from "./history-format.js";
 import type { HistoryRow } from "./history-state.js";
 
@@ -147,7 +148,7 @@ function ResultSummaryCell({ row, resolveMediaUrl }: { row: HistoryRow; resolveM
     );
   }
   return (
-    <span className="task-history__muted task-history__result-text" title={row.result.text}>
+    <span className="task-history__muted task-history__result-summary" title={row.result.text}>
       {row.result.text ?? "文本结果"}
       {row.result.textTruncated ? "（已截断）" : ""}
     </span>

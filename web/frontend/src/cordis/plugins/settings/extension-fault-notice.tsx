@@ -6,7 +6,7 @@
  * 「重新加载此扩展」推进 epoch 后重新装配并清零计数；装配方未提供重新装配时提示刷新页面。
  */
 import { useSyncExternalStore } from "react";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import { useExtensionFaults } from "../../host.js";
 
 export function ExtensionFaultNotice({ extensionId }: { extensionId: string }) {

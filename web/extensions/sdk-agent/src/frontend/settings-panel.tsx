@@ -1,16 +1,10 @@
 /** 模型 API 设置：填写地址和 Key 后一次保存，连接身份由后端管理。 */
 import { useEffect, useRef, useState } from "react";
 import { isAgentConnectionStatus } from "@woohaa3/contracts";
-import {
-  Button,
-  TextInput,
-  SelectInput,
-  Collapsible,
-  ChevronDownIcon,
-  SettingsSection,
-  SettingsFeedback,
-  ServiceLogo,
-} from "@woohaa3/frontend/extension-api";
+import { Button, Collapsible } from "@woohaa3/ui/primitives";
+import { TextInput, SelectInput } from "@woohaa3/ui/forms";
+import { ChevronDownIcon, ServiceLogo } from "@woohaa3/ui/icons";
+import { SettingsSection, SettingsFeedback } from "@woohaa3/ui/settings";
 import type {
   SdkAgentAdapterView,
   SdkAgentConnectionView,
@@ -263,23 +257,7 @@ export function SdkAgentSettingsPanel({
         >
           <div className="settings-section__field">
             <span>API 协议</span>
-            <SelectInput
-              label="API 协议"
-              value={adapterId}
-              disabled={Boolean(busy) || loading}
-              onValueChange={(value) => {
-                setAdapterId(value);
-                setBaseUrl("");
-                setSecret("");
-                setModelsText("");
-                setConfirm(null);
-                setNotice(null);
-              }}
-              options={adapters.filter((entry) => entry.adapterId === adapterId || !["codex-agent-sdk", "claude-agent-sdk"].includes(entry.adapterId)).map((entry) => ({
-                value: entry.adapterId,
-                label: entry.label,
-              }))}
-            />
+            <SelectInput label="API 协议" value={adapterId} disabled={Boolean(busy) || loading} onValueChange={(value) => { setAdapterId(value); setBaseUrl(""); setSecret(""); setModelsText(""); setConfirm(null); setNotice(null); }} options={adapters.filter(entry => entry.adapterId === adapterId || !["codex-agent-sdk", "claude-agent-sdk"].includes(entry.adapterId)).map(entry => ({ value: entry.adapterId, label: entry.label }))} />
           </div>
           {adapter?.allowCustomBaseUrl ? <label className="settings-section__field">
             <span>Base URL</span>

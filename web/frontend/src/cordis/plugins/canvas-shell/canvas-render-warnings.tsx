@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { BevyRuntime } from "../canvas-runtime/bevy-runtime.js";
 import type { RuntimeIssue } from "../canvas-runtime/runtime-issues.js";
 import type { ModelRenderIssue } from "../canvas-runtime/model-resource-failures.js";
-import { Button, IconButton } from "../../../shared/ui/Button.js";
-import { CloseIcon } from "../../../shared/ui/icons.js";
+import { Button, IconButton } from "@woohaa3/ui/primitives";
+import { CloseIcon } from "@woohaa3/ui/icons";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { canvasMotionIssues } from "./canvas-motion-issues.js";
 

@@ -10,10 +10,10 @@
  * 命中内容 hash 时以内容为准：metadata 相同但 hash 不同不会被误删；hash 不可用或失败时
  * 保留候选，交由 Media Service 内容寻址收敛。去重只作用于**同一次**请求。
  */
-import { ALLOWED_MEDIA_TYPES, mediaKindForType, normalizeMediaType, uploadedMediaKind } from "@woohaa3/contracts";
+import { ALLOWED_MEDIA_TYPES, GLB_MEDIA_TYPE, isGlbFile, mediaKindForType, normalizeMediaType, uploadedMediaKind } from "@woohaa3/contracts";
 
 /** 粘贴/拖放支持的文件类别（与上传白名单一致）。 */
-export type PasteFileKind = "image" | "video" | "audio" | "text";
+export type PasteFileKind = "image" | "video" | "audio" | "text" | "model3d";
 
 export type ClassifiedFile = {
   /** 浏览器 File 的结构子集（便于单测传字面量）。 */
@@ -47,6 +47,8 @@ export function classifyPasteFile(file: { name: string; type: string; size: numb
   if (name === "") return null;
   // 目录在多数浏览器表现为 size 0 且无 MIME；明确拒绝零字节文件（spec「零字节」）。
   if (file.size <= 0) return null;
+  // GLB 文件模型（change: 2026-10-28-support-glb-model-nodes）：扩展名优先，`.gltf` 拒绝。
+  if (isGlbFile(file)) return "model3d";
   const type = normalizeMediaType(file.type);
   if (ALLOWED_TYPE_SET.has(type)) {
     const kind = mediaKindForType(type);
@@ -74,6 +76,7 @@ export function classifyPasteFile(file: { name: string; type: string; size: numb
 export function isSupportedMimeType(mime: string | null | undefined): boolean {
   const type = normalizeMediaType(mime ?? "");
   if (type === "") return true;
+  if (type === GLB_MEDIA_TYPE) return true;
   if (ALLOWED_TYPE_SET.has(type)) {
     const kind = mediaKindForType(type);
     return kind === "image" || kind === "video" || kind === "audio" || kind === "text";

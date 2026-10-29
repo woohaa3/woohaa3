@@ -23,6 +23,12 @@ pub(crate) const CAPTURE_LAYER: usize = 7;
 pub(crate) const CAPTURE_WIDTH: u32 = 1280;
 pub(crate) const CAPTURE_HEIGHT: u32 = 720;
 
+/// 请求在 bridge slot 里等待路由的上限（秒）。
+///
+/// 前端轮询 20 秒后超时并主动取消；这里留出余量兜底"调用方直接消失/旧前端"的情况，
+/// 避免请求永久留在 slot 里把归属片场 pin 在 High。
+pub(crate) const CAPTURE_QUEUE_TIMEOUT_SECS: f64 = 30.0;
+
 /// 已排队的请求映射：(rig, shot request_id) → bridge identity。
 #[derive(Resource, Default)]
 pub(crate) struct ShotCaptureRouting {
@@ -37,8 +43,11 @@ impl ShotCaptureRouting {
     /// 卡片 rig 截图额外 pin **归属片场**：临时离屏相机渲染的是该片场在该层上的模型与媒体，
     /// 片场若被降档/回收，成片就会缺内容（change: 2026-10-15，任务 8.4）。
     pub(crate) fn pins(&self, scene: &crate::protocol::Scene) -> std::collections::HashSet<String> {
-        let mut pins: std::collections::HashSet<String> =
-            self.pending.iter().map(|p| p.bridge.node_id.clone()).collect();
+        let mut pins: std::collections::HashSet<String> = self
+            .pending
+            .iter()
+            .map(|p| p.bridge.node_id.clone())
+            .collect();
         pins.extend(self.pending.iter().filter_map(|p| p.pin_owner.clone()));
         if let Some(node_id) = crate::bridge::queued_shot_capture_node() {
             pins.insert(node_id);
@@ -46,6 +55,32 @@ impl ShotCaptureRouting {
         // 首次请求尚未路由时也必须保留归属片场，否则屏外模型会先于 rig 创建被回收。
         crate::shot_node_preview::pin_capture_owners(scene, &mut pins);
         pins
+    }
+}
+
+impl ShotCaptureRouting {
+    /// 当前截图请求的（节点 id, 来源）：含仍在 bridge slot 里的一帧窗口与已路由的请求。
+    ///
+    /// 只进诊断快照，用于回答「哪个业务流程把根 pin 在 High」；去重后保持确定顺序。
+    pub(crate) fn requests(&self) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = Vec::new();
+        let mut push = |node: &str, source: &str| {
+            let entry = (node.to_owned(), source.to_owned());
+            if !out.contains(&entry) {
+                out.push(entry);
+            }
+        };
+        for pending in &self.pending {
+            push(&pending.bridge.node_id, &pending.bridge.source);
+            if let Some(owner) = pending.pin_owner.as_deref() {
+                push(owner, &pending.bridge.source);
+            }
+        }
+        if let Some((node, source)) = crate::bridge::queued_shot_capture_details() {
+            push(&node, &source);
+        }
+        out.sort();
+        out
     }
 }
 
@@ -75,22 +110,47 @@ pub(crate) fn route_capture_request(
     mut results: ResMut<ShotCaptureResults>,
     models: Res<super::ModelVisuals>,
     scene: Res<crate::app::CurrentScene>,
+    time: Res<Time>,
 ) {
+    // 排队超时还没被路由：按稳定失败码收尾并释放 pin（2026-10-28 卡住的截图 pin 修复）。
+    if let Some(expired) =
+        bridge::expire_queued_shot_capture(time.elapsed_secs_f64(), CAPTURE_QUEUE_TIMEOUT_SECS)
+    {
+        bridge::set_shot_capture_result(ShotCaptureBridgeResult {
+            request_id: expired.request_id,
+            rig_generation: 0,
+            bridge_generation: expired.bridge_generation,
+            outcome: ShotCaptureBridgeOutcome::Failed {
+                code: "capture-queue-timeout".to_owned(),
+            },
+        });
+    }
     // Native 后台准备：目标片场仍处于 Pending（未发布完整表示）时，截图必须等待合法
     // High Published 根与既有 GPU readiness，而不是把半场/灰底当成结果。请求留在 bridge
-    // slot 中由后续帧继续等待（既有 capture 超时与公平调度负责收尾），**不在**同步请求内
-    // 强制创建或阻塞等后台任务。
+    // slot 中由后续帧继续等待；本系统开头的排队超时兜底，前端轮询超时/中止时也会主动
+    // 调用 `cancel_shot_capture` —— 否则这一帧窗口（以及下面两处早退）会把归属片场
+    // 一直 pin 在 High。**不在**同步请求内强制创建或阻塞等后台任务。
     if let Some(node) = bridge::queued_shot_capture_node() {
-        let owner = scene.0.nodes.iter().find(|entry| entry.id == node)
+        let owner = scene
+            .0
+            .nodes
+            .iter()
+            .find(|entry| entry.id == node)
             .and_then(|entry| entry.shot_preview.as_ref())
-            .map(|preview| preview.film_set_node_id.as_str()).unwrap_or(&node);
+            .map(|preview| preview.film_set_node_id.as_str())
+            .unwrap_or(&node);
         if capture_must_wait(&models, owner) {
             return;
         }
         // Preview requests pin the owner at High even outside the viewport. Wait for that
         // representation and its GPU readiness, rather than capturing the last LOD cover.
-        if owner != node && (models.quality(owner) != super::quality::Quality::High
-            || preview_cards.cards.get(&node).is_none_or(|card| !card.confirmed)) {
+        if owner != node
+            && (models.quality(owner) != super::quality::Quality::High
+                || preview_cards
+                    .cards
+                    .get(&node)
+                    .is_none_or(|card| !card.confirmed))
+        {
             return;
         }
     }
@@ -102,7 +162,9 @@ pub(crate) fn route_capture_request(
             request_id: request.request_id,
             rig_generation: 0,
             bridge_generation: request.bridge_generation,
-            outcome: ShotCaptureBridgeOutcome::Failed { code: code.to_owned() },
+            outcome: ShotCaptureBridgeOutcome::Failed {
+                code: code.to_owned(),
+            },
         });
     };
     let adapter_rig = adapter
@@ -128,8 +190,12 @@ pub(crate) fn route_capture_request(
         &mut queue,
         &mut results,
         rig,
-        request.width.clamp(1, crate::shot_camera::MAX_CAPTURE_DIMENSION),
-        request.height.clamp(1, crate::shot_camera::MAX_CAPTURE_DIMENSION),
+        request
+            .width
+            .clamp(1, crate::shot_camera::MAX_CAPTURE_DIMENSION),
+        request
+            .height
+            .clamp(1, crate::shot_camera::MAX_CAPTURE_DIMENSION),
         rig_generation,
     );
     match outcome {
@@ -229,9 +295,12 @@ mod preparation_gate_tests {
             super::super::batch_strategy::BatchStrategy::Spatial,
             true,
         );
-        visuals
-            .preparation
-            .demand("film", key, snapshot, super::super::preparation::Priority::Visible);
+        visuals.preparation.demand(
+            "film",
+            key,
+            snapshot,
+            super::super::preparation::Priority::Visible,
+        );
         assert!(
             capture_must_wait(&visuals, "film"),
             "准备中不得把半场当结果"

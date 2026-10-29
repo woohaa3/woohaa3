@@ -55,7 +55,7 @@ export function filmSetObjectContainerData(filmSetNodeId: string, itemId: string
 export function filmSetObjectModelNodeData(filmSetNodeId: string, item: FilmSetModelItem): CanvasNodeData {
   return {
     ...filmSetObjectContainerData(filmSetNodeId, item.id),
-    ...model3DNodeDataFields({ kind: "model3d", title: item.name, model: item.model })
+    ...model3DNodeDataFields({ kind: "model3d", title: item.name, source: "script", model: item.model })
   } as CanvasNodeData;
 }
 export function resolveFilmSetObject(canvas: Pick<ServerCanvas, "document" | "nodeData">, containerId: string) {

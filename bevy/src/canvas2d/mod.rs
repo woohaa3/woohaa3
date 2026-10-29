@@ -24,7 +24,7 @@ mod focus_reference;
 mod container_cache;
 mod dash;
 mod decoration_cache;
-mod draw_order;
+pub(crate) mod draw_order;
 mod edge_cache;
 mod film_set;
 #[cfg(test)]
@@ -32,7 +32,7 @@ pub(crate) use film_set::draw_film_set_run_mask;
 pub(crate) mod alpha_checker;
 mod focus_backdrop;
 mod generation;
-mod group;
+pub(crate) mod group;
 mod group_motion;
 mod group_outline;
 mod group_surface;
@@ -47,7 +47,6 @@ mod node_action;
 mod render;
 mod render_edges;
 mod ownership_links;
-pub(crate) mod selection_outline;
 mod shared_key;
 pub(crate) mod scope_panel;
 pub(crate) mod text_presentation;
@@ -78,8 +77,6 @@ pub(crate) mod shot_preview {
     pub(crate) use crate::canvas_query::shot_preview::*;
 }
 
-use std::collections::HashMap;
-
 use bevy::prelude::*;
 
 pub(crate) use attach::sync_attach_probe;
@@ -91,11 +88,17 @@ pub(crate) use group_motion::sync as sync_group_motion;
 pub(crate) use group_surface::sync as sync_group_surfaces;
 pub(crate) use init::{font_ready, setup};
 pub(crate) use node_action::sync_node_action_bars;
-pub(crate) use render::sync_scene;
+pub(crate) use group::is_running as group_is_running;
+pub(crate) use render::{
+    begin_selection_outlines, canvas_render_requested, produce_card_geometry, produce_card_hover,
+    produce_card_selection, produce_container_geometry, produce_edges, produce_film_set_selection,
+    produce_group_selection, sync_canvas_overlay,
+};
+pub(crate) use labels::{sync_canvas_labels, LabelRequests};
 pub(crate) use textures::sync_textures;
 
-/// 2D 渲染的共享资源与生命周期状态：共享几何 mesh/material、font handle、节点标签、
-/// 纹理 Sprite 与边标签实体映射。
+/// 2D 渲染的共享资源与生命周期状态：共享几何 mesh/material、font handle、纹理内容表与
+/// 批处理块。节点标签、纹理 Sprite 与选中描边由 ECS 组件/Query 拥有，不在此 Resource 中。
 ///
 /// 字段保持私有：仅有本模块的子孙（`init` / `textures` / `render` / `generation`）访问。
 #[derive(Resource)]
@@ -117,8 +120,6 @@ pub(crate) struct Visuals {
     blend_material: Handle<ColorMaterial>,
     blend_mesh_entity: Option<Entity>,
     font: Handle<Font>,
-    labels: HashMap<String, Vec<Entity>>,
-    textures: HashMap<String, (Entity, Handle<Image>, Vec2)>,
     /// 纹理按内容身份 + 尺寸共享的引用表
     /// （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
     ///
@@ -127,8 +128,6 @@ pub(crate) struct Visuals {
     texture_store: texture_store::TextureStore,
     edge_blocks: Vec<edge_cache::Block>,
     shared_key: Option<shared_key::SharedKey>,
-    /// 拖动粘连操作条的复用文字实体（按角色 key；change: add-drag-touch-connections）。
-    attach_labels: HashMap<String, Entity>,
     /// 拖动粘连触须的逐帧动画覆盖层（独立于主 card mesh，避免每帧重建整场几何）。
     attach_probe_mesh: Handle<Mesh>,
     attach_probe_entity: Option<Entity>,
@@ -140,16 +139,61 @@ pub(crate) struct Visuals {
     /// 独立于主 card mesh，避免逐帧重建时影响边标签。
     running_mesh: Handle<Mesh>,
     running_mesh_entity: Option<Entity>,
-    running_labels: HashMap<String, Entity>,
     /// 覆盖层当前是否含非空几何（用于从「有运行节点」到「无」时清空一次）。
     running_active: bool,
     /// 节点顶部操作横条覆盖层（change: 2026-10-13-add-node-to-film-set-shortcut）：
     /// 逐帧重建，锚定节点上方并随位置/视口顶部碰撞变化，独立于主 card mesh 与标签池。
     node_action_mesh: Handle<Mesh>,
     node_action_entity: Option<Entity>,
-    node_action_labels: HashMap<String, Entity>,
     /// 横条覆盖层当前是否含非空几何（用于从「有横条」到「无」时清空一次）。
     node_action_active: bool,
+}
+
+impl Visuals {
+    /// 测试/无窗口宿主：空几何与默认句柄的 Visuals。
+    #[cfg(test)]
+    pub(crate) fn default_for_test() -> Self {
+        Self {
+            card_blocks: Vec::new(),
+            card_decorations: Vec::new(),
+            container_blocks: Vec::new(),
+            mesh: default(),
+            material: default(),
+            mesh_entity: None,
+            blend_mesh: default(),
+            blend_material: default(),
+            blend_mesh_entity: None,
+            font: default(),
+            texture_store: default(),
+            edge_blocks: default(),
+            shared_key: None,
+            attach_probe_mesh: default(),
+            attach_probe_entity: None,
+            attach_probe_active: false,
+            media_alpha_checker: None,
+            running_mesh: default(),
+            running_mesh_entity: None,
+            running_active: false,
+            node_action_mesh: default(),
+            node_action_entity: None,
+            node_action_active: false,
+        }
+    }
+
+    /// 共享不透明 2D 材质（选择描边批次与第三方 producer 的 flush 复用）。
+    pub(crate) fn mesh_material(&self) -> Handle<ColorMaterial> {
+        self.material.clone()
+    }
+
+    /// 共享半透明叠加材质。
+    pub(crate) fn blend_visuals(&self) -> (Handle<Mesh>, Handle<ColorMaterial>) {
+        (self.blend_mesh.clone(), self.blend_material.clone())
+    }
+
+    /// 字体句柄（标签 producer 新建文字实体时复用）。
+    pub(crate) fn font(&self) -> Handle<Font> {
+        self.font.clone()
+    }
 }
 
 #[derive(Component)]

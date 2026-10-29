@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
-import { AssistantToolbar } from "../../ui/assistant-execution/toolbar.js";
+import { AssistantToolbar } from "@woohaa3/ui/assistant";
 import type { PanelPresentationIntent } from "../../contract/model-interaction.js";
-import { IconButton } from "../../../shared/ui/Button.js";
+import { IconButton } from "@woohaa3/ui/primitives";
 import {
   CloseIcon,
   CollapseIcon,
   ExpandIcon,
-} from "../../../shared/ui/icons.js";
+} from "@woohaa3/ui/icons";
 import "./execution-panel/execution-panel.css";
 import "./authoring-generate-panel.css";
 

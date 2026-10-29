@@ -7,7 +7,7 @@
  * 目录名与这里无关——`.` 前缀只表示扩展未安装（change: 2026-10-19-restore-runtime-extension-toggling）。
  */
 import { useState } from "react";
-import { Switch } from "../../../shared/ui/Switch.js";
+import { Switch } from "@woohaa3/ui/primitives";
 import type { ExtensionManagerFacade } from "../extension-manager/contract.js";
 import type { BackendSettingsStore } from "./backend-settings-store.js";
 import { pluginStateKind, type PluginSettingsGroup, type PluginViewIndex } from "./plugin-groups.js";

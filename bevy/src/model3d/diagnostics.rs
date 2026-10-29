@@ -8,6 +8,19 @@ impl ModelVisuals {
         meshes: &Assets<Mesh>,
         materials: &Assets<StandardMaterial>,
     ) -> String {
+        self.budget_json_with_requests(meshes, materials, &[])
+    }
+
+    /// 同 [`Self::budget_json`]，额外记录当前截图请求的（节点, 来源）。
+    ///
+    /// 来源只进本地诊断快照：pin 集合只有节点 id，分辨不出是视频导出、镜头图片参考、
+    /// 镜头参考录制还是模型编辑器截图把根按在 High。
+    pub(crate) fn budget_json_with_requests(
+        &self,
+        meshes: &Assets<Mesh>,
+        materials: &Assets<StandardMaterial>,
+        capture_requests: &[(String, String)],
+    ) -> String {
         let mut vertices = 0usize;
         let mut triangles = 0usize;
         let mut parts = 0usize;
@@ -52,7 +65,10 @@ impl ModelVisuals {
             for (_entity, base, geometry) in &root.geometries {
                 let count = 1;
                 #[cfg(feature = "explicit-instancing")]
-                let count = root.instance_parts.get(_entity).map_or(count, |ids| ids.len());
+                let count = root
+                    .instance_parts
+                    .get(_entity)
+                    .map_or(count, |ids| ids.len());
                 // 每几何有效档位：总览根的自定义 Mesh / Box 恒 High，按实际 handle 计数，
                 // 不按根 desired 枚举漏计（change: 2026-10-15-add-film-set-overview-lod，design D3/D6）。
                 let effective = super::mesh::effective_quality(geometry, root.quality, root.overview_lod);
@@ -157,10 +173,27 @@ impl ModelVisuals {
         overview_roots.sort_by(|a, b| a["nodeId"].as_str().cmp(&b["nodeId"].as_str()));
         let overview_total = overview_roots.len();
         overview_roots.truncate(64);
+        // 当前截图 pin 的节点 id（有界、排序）：把"谁把它按在 High"从原因再落到具体请求目标。
+        // 只进诊断快照；遥测侧仍只取末 12 字符摘要（dev 构建）。
+        let mut overview_pins: Vec<&str> = self.capture_pins().iter().map(String::as_str).collect();
+        overview_pins.sort_unstable();
+        overview_pins.truncate(8);
+        let capture_requests: Vec<_> = capture_requests
+            .iter()
+            .take(8)
+            .map(|(node, source)| {
+                serde_json::json!({
+                    "nodeId": node,
+                    "source": if source.is_empty() { "unknown" } else { source.as_str() },
+                })
+            })
+            .collect();
         let pending = self.pending.as_ref().map(|pending| pending.diagnostics());
         value["overviewLod"] = serde_json::json!({
             "scope": "bounded per-root declared overview LOD state; actual active handles, not desired-times-theoretical ratios",
             "roots": overview_roots,
+            "pins": overview_pins,
+            "captureRequests": capture_requests,
             "total": overview_total,
             "truncated": overview_total.saturating_sub(64),
             "pending": pending,
@@ -204,9 +237,19 @@ impl ModelVisuals {
         });
         value["nativePreparation"] = preparation;
         #[cfg(feature = "explicit-instancing")]
-        let value = { let mut value = value;
-            let groups: usize = self.roots.values().map(|root| root.instance_parts.len()).sum();
-            let parts: usize = self.roots.values().flat_map(|root| root.instance_parts.values()).map(|ids| ids.len()).sum();
+        let value = {
+            let mut value = value;
+            let groups: usize = self
+                .roots
+                .values()
+                .map(|root| root.instance_parts.len())
+                .sum();
+            let parts: usize = self
+                .roots
+                .values()
+                .flat_map(|root| root.instance_parts.values())
+                .map(|ids| ids.len())
+                .sum();
             value["explicitInstances"] = serde_json::json!({"groups": groups, "parts": parts,
                 "cpuTransformBytes": parts * super::instancing::INSTANCE_STRIDE}); value };
         value.to_string()

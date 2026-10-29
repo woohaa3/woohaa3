@@ -13,7 +13,10 @@ import { bevyNodeSize, COMPOSITE_ASSET_DEFAULT_SIZE } from "./render-scene.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 import {
   clonePlacement,
+  decodeGlbModelReference,
   decodeModelDefinition,
+  isGlbModelNodeData,
+  type GlbModelReference,
   type ModelContentVersion,
   type ModelDefinition,
   type ModelPlacement
@@ -90,12 +93,28 @@ export type ModelImportOrigin = {
   conversion?: FilmSetConversionOriginRecord;
 };
 
-/** 三维模型节点的结构化 nodeData。 */
-export type Model3DNodeData = {
-  kind: typeof MODEL3D_NODE_TYPE;
-  title: string;
-  model: ModelDefinition;
-};
+/**
+ * 三维模型节点的结构化 nodeData。
+ *
+ * 两种权威来源互斥（change: 2026-10-28-support-glb-model-nodes）：
+ * - `script`：既有 JavaScript 模型脚本；
+ * - `glb`：画布作用域 GLB 资产引用。
+ */
+export type Model3DNodeData =
+  | {
+      kind: typeof MODEL3D_NODE_TYPE;
+      title: string;
+      source: "script";
+      model: ModelDefinition;
+      file?: undefined;
+    }
+  | {
+      kind: typeof MODEL3D_NODE_TYPE;
+      title: string;
+      source: "glb";
+      file: GlbModelReference;
+      model?: undefined;
+    };
 
 /**
  * 片场节点的结构化 nodeData
@@ -222,10 +241,35 @@ export type Model3DNodeDataDecodeResult =
 /** 从 flat nodeData 读取模型节点完整定义。 */
 export function decodeModel3DNodeData(nodeData: unknown): Model3DNodeDataDecodeResult {
   if (!isJsonObject(nodeData)) return { ok: false, reason: "nodeData 必须是对象" };
+  const title = typeof nodeData.title === "string" && nodeData.title.trim() ? nodeData.title.trim() : "模型";
+  if (isGlbModelNodeData(nodeData)) {
+    const file = decodeGlbModelReference(nodeData);
+    if (!file.ok) return file;
+    return { ok: true, value: { kind: MODEL3D_NODE_TYPE, title, source: "glb", file: file.value } };
+  }
+  // 未知来源标记不得被当作脚本模型静默接受：来源判别是权威内容的一部分。
+  if (nodeData.modelSourceKind !== undefined) {
+    return { ok: false, reason: `未知模型来源 ${String(nodeData.modelSourceKind)}` };
+  }
+  // 只写 `modelAssetId` 会形成「有资产引用但没有来源判别」的歧义内容，不得被当作脚本模型接受。
+  if (nodeData.modelAssetId !== undefined) {
+    return { ok: false, reason: '模型资产引用必须与 modelSourceKind = "glb" 同时出现' };
+  }
   const model = decodeModelDefinition(nodeData);
   if (!model.ok) return model;
-  const title = typeof nodeData.title === "string" && nodeData.title.trim() ? nodeData.title.trim() : "模型";
-  return { ok: true, value: { kind: MODEL3D_NODE_TYPE, title, model: model.value } };
+  return { ok: true, value: { kind: MODEL3D_NODE_TYPE, title, source: "script", model: model.value } };
+}
+
+/**
+ * 只读取脚本模型；文件模型与非法内容一律返回 null。
+ *
+ * 片场、运动、历史等依赖脚本求值的能力用它显式拒绝文件模型，而不是把 GLB 当成空脚本。
+ */
+export function scriptModel3DNodeData(nodeData: unknown): { title: string; model: ModelDefinition } | null {
+  const decoded = decodeModel3DNodeData(nodeData);
+  return decoded.ok && decoded.value.source === "script"
+    ? { title: decoded.value.title, model: decoded.value.model }
+    : null;
 }
 
 export type FilmSetNodeDataDecodeResult =
@@ -238,7 +282,9 @@ export const FILM_SET_TOP_LEVEL_MODEL_FIELDS = [
   "modelScriptLanguage",
   "modelScriptVersion",
   "modelContentVersion",
-  "modelPlacement"
+  "modelPlacement",
+  "modelSourceKind",
+  "modelAssetId"
 ] as const;
 
 /** 旧节点级动作/镜头/时间线字段（D10）：items-only 生产读取必须严格拒绝。 */

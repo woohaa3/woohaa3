@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { Context } from "@deepseek-ai/cordis";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
 

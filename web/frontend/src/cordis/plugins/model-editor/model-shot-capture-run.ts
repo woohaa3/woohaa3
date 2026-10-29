@@ -33,6 +33,7 @@ export async function renderWithBevy(
     const frame = await runtime.requestCapture({
       generation,
       nodeId: input.nodeId,
+      source: "model-editor",
       width: size.width,
       height: size.height
     });

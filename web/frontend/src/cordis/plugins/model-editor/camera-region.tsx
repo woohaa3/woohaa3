@@ -1,9 +1,9 @@
 /** 生成入口直接呈现；外部工具镜头指引按需展开，缺少生成入口时保留完整指引。 */
 import { useState, type ReactNode } from "react";
-import { Collapsible } from "../../../shared/ui/Collapsible.js";
-import { ChevronDownIcon } from "../../../shared/ui/icons.js";
+import { Collapsible } from "@woohaa3/ui/primitives";
+import { ChevronDownIcon } from "@woohaa3/ui/icons";
 import { cameraMcpGuide } from "../../mcp-hint.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 
 export type CameraRegionProps = {
   nodeId: string;

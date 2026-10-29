@@ -43,7 +43,7 @@
     "@ai-sdk/provider": "^4.0.14",
     "@types/node": "^20.11.25",
     "ai": "^7.0.99",
-    "typescript": "^5.6.2",
+    "typescript": "^7.0.2",
     "vitest": "^2.0.0"
   }
 }

@@ -8,6 +8,10 @@
   "module": "./dist/index.js",
   "types": "./src/index.ts",
   "exports": {
+    "./theme": {
+      "types": "./src/theme/index.ts",
+      "import": "./dist/theme/index.js"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./dist/index.js"
@@ -34,7 +38,7 @@
     "src"
   ],
   "scripts": {
-    "build": "node ../scripts/build-package.mjs && node ../scripts/build-package.mjs --entry src/canvas/yjs/index.ts --outdir dist/canvas-yjs --platform neutral && node ../scripts/build-package.mjs --entry src/extension/index.ts --outdir dist/extension && node ../scripts/build-package.mjs --entry src/extension/plugin.ts --outdir dist/extension --entry-name plugin && node ../scripts/build-package.mjs --entry src/extension/service.ts --outdir dist/extension --entry-name service",
+    "build": "node ../scripts/build-package.mjs && node ../scripts/build-package.mjs --entry src/canvas/yjs/index.ts --outdir dist/canvas-yjs --platform neutral && node ../scripts/build-package.mjs --entry src/extension/index.ts --outdir dist/extension && node ../scripts/build-package.mjs --entry src/extension/plugin.ts --outdir dist/extension --entry-name plugin && node ../scripts/build-package.mjs --entry src/extension/service.ts --outdir dist/extension --entry-name service && node ../scripts/build-package.mjs --entry src/theme/index.ts --outdir dist/theme",
     "watch": "node ../scripts/build-package.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -53,7 +57,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
-    "typescript": "^5.6.3",
+    "typescript": "^7.0.2",
     "vitest": "^2.0.0"
   }
 }

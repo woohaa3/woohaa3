@@ -1,7 +1,6 @@
 //! 2D camera、字体与共享 mesh/material 初始化
 //! （change: refactor-bevy-rust-file-size，任务 3.1 / design D3）。
 
-use std::collections::HashMap;
 
 use bevy::sprite_render::AlphaMode2d;
 use bevy::{prelude::*, render::view::Tonemapping};
@@ -54,23 +53,18 @@ pub(crate) fn setup(
         blend_material,
         blend_mesh_entity: None,
         font: assets.load("fonts/NotoSansSC-Regular.otf"),
-        labels: HashMap::new(),
-        textures: HashMap::new(),
         texture_store: Default::default(),
         edge_blocks: Vec::new(),
         shared_key: None,
-        attach_labels: HashMap::new(),
         attach_probe_mesh,
         attach_probe_entity: None,
         attach_probe_active: false,
         media_alpha_checker: None,
         running_mesh,
         running_mesh_entity: None,
-        running_labels: HashMap::new(),
         running_active: false,
         node_action_mesh,
         node_action_entity: None,
-        node_action_labels: HashMap::new(),
         node_action_active: false,
     });
 }

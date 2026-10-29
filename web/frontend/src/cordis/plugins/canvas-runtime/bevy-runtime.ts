@@ -451,6 +451,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     rendererBackend: () => module.async_canvas_work_diagnostics ? "native" : "wasm",
     runtimeHealthSnapshot: () => supervisor?.snapshot() ?? null,
     getWorkDiagnostics: () => !disposed && module.canvas_work_diagnostics ? JSON.parse(module.canvas_work_diagnostics()) as Record<string, unknown> : {},
+    lastScene: () => lastScene,
     setPositions: (input) => {
       if (disposed) throw new Error("Bevy runtime disposed");
       if (!module.set_positions) throw new Error("Bevy 运行时缺少 set_positions 边界");
@@ -632,7 +633,8 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         nodeId: input.nodeId,
         generation: input.generation,
         ...(input.width ? { width: input.width } : {}),
-        ...(input.height ? { height: input.height } : {})
+        ...(input.height ? { height: input.height } : {}),
+        ...(input.source ? { source: input.source } : {})
       }, () => !disposed && captureGeneration === generation && (!supervisor || supervisor.phase === "running"));
       } finally { releaseOwner(); }
     },

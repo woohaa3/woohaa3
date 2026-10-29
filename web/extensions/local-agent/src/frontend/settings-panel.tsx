@@ -1,12 +1,8 @@
 /** 打开设置即检测工具与服务，启用动作不要求用户创建或命名连接。 */
 import { useEffect, useRef, useState } from "react";
-import {
-  Button,
-  RefreshIcon,
-  SettingsSection,
-  SettingsFeedback,
-  ServiceLogo,
-} from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
+import { RefreshIcon, ServiceLogo } from "@woohaa3/ui/icons";
+import { SettingsSection, SettingsFeedback } from "@woohaa3/ui/settings";
 import type {
   LocalAgentAdapterView,
   LocalAgentConnectionView,

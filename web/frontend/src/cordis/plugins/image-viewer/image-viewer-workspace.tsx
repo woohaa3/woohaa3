@@ -11,7 +11,7 @@ import { useService } from "../../react.js";
 import { classifyWheelEvent, INITIAL_WHEEL_SOURCE } from "../canvas-shell/input/wheel-gesture.js";
 import { FocusHeader } from "../../focus/header.js";
 import { useFocusLayout } from "../../focus/workspace.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import type { ImageViewerSession } from "./session.js";
 import "./image-viewer.css";
 

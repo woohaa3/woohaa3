@@ -119,7 +119,7 @@ describe("Dialog system 架构审计", () => {
     // 回归：overlay 是 `display:grid; place-items:center` 且含安全区内边距，
     // `@media (max-width:560px)` 下 `.dlg--fullscreen { width: 100vw }` 会让弹窗宽度超过
     // overlay content box 并向两侧溢出，导致窄屏横向滚动（`video-dialogs.spec.ts` 390×844）。
-    const css = readFileSync(path.join(SRC_ROOT, "cordis", "ui", "ui.css"), "utf8");
+    const css = readFileSync(path.resolve(SRC_ROOT, "../../ui/src/styles/dialogs.css"), "utf8");
     const media = css.match(/@media \(max-width: 560px\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
     expect(media).toContain(".dlg--fullscreen");
     const fullscreen = media.match(/\.dlg--fullscreen\s*\{([^}]*)\}/)?.[1] ?? "";

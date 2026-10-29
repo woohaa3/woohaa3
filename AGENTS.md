@@ -32,6 +32,7 @@ Canvas          ──只读 Yjs WebSocket──►  前端
 | --- | --- |
 | [api/gen/es](api/gen/es) | 客户端面 protobuf-es 绑定。协议源与生成管线在仓外，**禁止手改、禁止加 `.proto`** |
 | [web/contracts](web/contracts) | 跨边界唯一代码依赖：DTO、schema、纯领域 / codec / reducer。无 I/O、无装配、无 HTTP |
+| [web/ui](web/ui) | 独立公共展示组件、图标、样式与主题桥；无应用/业务反向依赖 |
 | [web/frontend](web/frontend) | React / Cordis 界面、浏览器适配、画布运行时集成、公共 `extension-api` |
 | [web/backend](web/backend) | 本机宿主装配根、路由聚合、端口适配、扩展清单 |
 | [web/services](web/services) | 领域服务实现：canvas / task / media / application / mcp / telemetry / agent-connections |
@@ -40,7 +41,7 @@ Canvas          ──只读 Yjs WebSocket──►  前端
 | [bevy](bevy) | WASM / 原生渲染、空间查询、模型预览、录制 |
 | [desktop](desktop) | Tauri 壳与原生宿主集成 |
 | [scripts](scripts) | 开发、构建、打包、边界与扩展预检 |
-| [web/tooling](web/tooling) / [web/e2e](web/e2e) / [web/showcase](web/showcase) | 跨包门禁、浏览器测试、组件展示 |
+| [web/tooling](web/tooling) / [web/e2e](web/e2e) / [web/ui/showcase](web/ui/showcase) | 跨包门禁、浏览器测试、组件展示 |
 | [web/vendor](web/vendor) | 仓内维护的第三方源码与许可证 |
 | [locks](locks) | 依赖锁文件 |
 
@@ -76,8 +77,9 @@ Canvas          ──只读 Yjs WebSocket──►  前端
 依赖方向：
 
 ```text
-extensions  ──►  contracts / frontend/extension-api / provider-sdk
-frontend    ──►  contracts
+extensions  ──►  ui / contracts / frontend/extension-api / provider-sdk
+frontend    ──►  ui / contracts
+ui          ──►  contracts / React peers / Radix / Lucide
 backend     ──►  services  ──►  contracts
 services    ──►  contracts
 bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
@@ -93,7 +95,8 @@ bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
 | --- | --- |
 | `extension.json` | 宿主认识扩展的唯一声明。`hostPlugin` 指向扩展层工厂；工厂返回 `ExtensionPlugin`，不是旧名 `HostExtensionPlugin` |
 | `src/frontend/metadata.ts` | 浏览器身份的唯一来源（JSON 可序列化，不可引用 plugin/UI） |
-| `@woohaa3/frontend/extension-api` | 前端 Context、slots、公共 UI、画布 facade |
+| `@woohaa3/frontend/extension-api` | 前端 Context、slots、画布 facade；旧 UI 同实例兼容 |
+| `@woohaa3/ui` | 公共组件、图标与展示类型；CSS 由宿主提供 |
 | `@woohaa3/contracts` | 纯类型与 codec |
 | `@woohaa3/provider-sdk` | 仅后端 Provider：出网守卫、模型刷新、SSRF 校验 |
 
@@ -117,7 +120,7 @@ bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
 | 通用壳：手势、帧提交、设置弹窗、导航、slots | `web/frontend/src/cordis/plugins` | 扩展里复制一份宿主壳 |
 | 浏览器适配、远程 API、本地 store | `web/frontend/src/cordis/services` | plugin 里直接 `fetch` / `new WebSocket` |
 | 给扩展用的公共 UI / facade | `web/frontend/src/extension-api` | 让扩展 import `cordis/plugins/...` |
-| 无 Cordis 的展示组件 | `web/frontend/src/shared` | 塞进 page-scope 或扩展 |
+| 无 Cordis 的公共展示组件 | `web/ui/src` | 塞进 page-scope 或扩展 |
 | 独立整页（不装画布） | `web/frontend/src/pages` | 画布 plugin catalog |
 | 领域权威：命令、Yjs、任务、媒体、MCP | 对应 `web/services/<name>` | backend 里写业务规则 |
 | 装配、路由、端口适配 | `web/backend` | 在 composition 里识别具体扩展 |
@@ -131,7 +134,7 @@ bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
 
 | 任务 | 先看 |
 | --- | --- |
-| 页面、路由、面板、主题 | `web/frontend/src/cordis/page-scope.ts`、`canvas-manifest.ts`、`shared/ui` |
+| 页面、路由、面板、主题 | `web/frontend/src/cordis/page-scope.ts`、`canvas-manifest.ts`、`web/ui/src` |
 | 画布保存、同步、撤销 | `web/services/canvas-service`、`web/frontend/src/cordis/services/canvas-session.ts` |
 | 生成、参数、历史 | `web/frontend/src/cordis/plugins/task-execution`、`web/services/task-service` |
 | 3D / 片场 / 模型 | `web/extensions/film-set`、`web/frontend/src/cordis/plugins/model-scene`、`bevy/src/model3d` |

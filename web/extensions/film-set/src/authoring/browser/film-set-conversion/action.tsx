@@ -1,7 +1,10 @@
 /** 聚焦标题栏的创建入口与创建弹窗内容，三个入口共用控制器。 */
 import { useState, useSyncExternalStore } from "react";
 import type { FilmSetConversionModelCandidate, FilmSetConversionSettings, FilmSetConversionSourceKind, ServerCanvas } from "@woohaa3/contracts";
-import { AssistantComposer, AssistantDeliverySelection, AssistantToolbar, Button, FilmIcon, type AgentConversationService } from "@woohaa3/frontend/extension-api";
+import { AssistantComposer, AssistantToolbar } from "@woohaa3/ui/assistant";
+import { AssistantDeliverySelection, type AgentConversationService } from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
+import { FilmIcon } from "@woohaa3/ui/icons";
 import { type FilmSetConversionController } from "./controller.js";
 import { resolveFilmSetConversionAvailability } from "./view.js";
 import type { FilmSetConversionPreferenceStore } from "./preference.js";

@@ -5,8 +5,11 @@
 mod animation_preview;
 mod editor_overlay;
 mod focus;
-#[cfg(feature = "wasm")]
 mod frame_pacing;
+
+/// JS→WASM 提交后立即唤醒停帧的渲染循环（仅 WASM 有事件循环代理）。
+#[cfg(feature = "wasm")]
+pub(crate) use frame_pacing::{set_enabled as set_idle_frame_pacing, wake};
 mod helpers;
 mod input;
 mod positions;
@@ -73,6 +76,10 @@ pub(crate) fn start() {
             }),
     );
     configure_canvas(&mut app);
+    // 静止降频（change: 2026-10-28 draw call 优化）：静态画布不再按 120 FPS 重画同一张画面。
+    app.init_resource::<frame_pacing::PacingState>()
+        .add_systems(Startup, frame_pacing::install_wake)
+        .add_systems(Last, frame_pacing::sync_pacing);
     app.run();
 }
 
@@ -124,13 +131,16 @@ fn configure_canvas(app: &mut App) {
         .init_resource::<model3d::film_set_media::FilmSetMediaVisuals>()
         .init_resource::<ModelAssetTable>()
         .init_resource::<NodeIndex>()
+        .init_resource::<crate::canvas_ecs::CanvasProjectionState>()
+        .init_resource::<canvas2d::LabelRequests>()
+        .init_resource::<crate::canvas_ecs::SelectionOutlineBatch>()
+        .init_resource::<crate::canvas_ecs::SelectionOutlineLayer>()
         .init_resource::<crate::app::PreviewLayerPool>()
         .init_resource::<SurfaceState>()
         .init_resource::<FrameFlags>()
         .init_resource::<FocusRig>()
         .init_resource::<AnimationCameraState>()
         .init_resource::<model3d::filmset_camera::FilmSetCameraAssets>()
-        .init_resource::<model3d::filmset_camera::FilmSetCameraVisual>()
         .init_resource::<ThemeResource>()
         .init_resource::<canvas2d::GenerationClock>()
         .init_resource::<canvas2d::text_presentation::PresentationCache>()
@@ -160,42 +170,86 @@ fn configure_canvas(app: &mut App) {
             Update,
             (
                 (
-                    ingest_bridge,
-                    sync_surface,
-                    sync_ready,
-                    canvas2d::sync_textures,
                     (
-                        model3d::film_set_media::sync_film_set_planes,
-                        canvas2d::scope_panel::sync_images,
-                        model3d::film_set_media::sync_film_set_textures,
+                        (
+                            ingest_bridge,
+                            crate::canvas_ecs::project_canvas_nodes
+                                .run_if(crate::canvas_ecs::projection_requested),
+                            bevy::ecs::schedule::ApplyDeferred,
+                        )
+                            .chain(),
+                        sync_surface,
+                        sync_ready,
+                        canvas2d::sync_textures,
+                        (
+                            model3d::film_set_media::sync_film_set_planes,
+                            canvas2d::scope_panel::sync_images,
+                            // GLB 内嵌纹理 → 共享 Image（先于片场批次 drain 与模型 spawn）。
+                            model3d::model_textures::sync_model_textures,
+                            model3d::film_set_media::sync_film_set_textures,
+                        )
+                            .chain(),
+                        canvas2d::sync_camera,
+                        focus::sync_focus,
+                        scene3d::sync_grid.before(crate::isometric_grid::IsometricGridSet::Style),
+                        // 门禁结算（含 hover stop/reset/start）与模型 spawn 同一系统，且在动画求值前
+                        // 完成（change: play-model-animations-on-hover，design D4）。
+                        scene3d::sync_models.in_set(model3d::TransformAnimationSet::Playback),
+                        // 页面内历史缩略图：同一 App 内一次性离屏渲染，排在模型根同步之后
+                        // （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
+                        crate::history_preview::sync,
+                        // Native 片场后台准备：非阻塞 poll + 全局预算装配，排在消费者之前
+                        // （change: 2026-10-18-prepare-native-film-sets-in-background，design D4/D5）。
+                        (
+                            scene3d::advance_preparation,
+                            model3d::run_effect::sync,
+                            model3d::empty_placeholder::sync,
+                        )
+                            .chain(),
+                        crate::model_preview::sync,
+                        // 卡片预览：消费同一帧的采样镜头/播放投影，并在模型落位后并入卡片渲染层
+                        // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
+                        crate::shot_node_preview::sync,
+                        scene3d::sync_editor_gizmo,
+                        scene3d::sync_shot_adapter,
+                        scene3d::reclaim_extra_shot_rigs,
+                        scene3d::sync_shot_main_view,
+                        canvas2d::sync_group_surfaces,
                     )
                         .chain(),
-                    canvas2d::sync_camera,
-                    focus::sync_focus,
-                    scene3d::sync_grid.before(crate::isometric_grid::IsometricGridSet::Style),
-                    // 门禁结算（含 hover stop/reset/start）与模型 spawn 同一系统，且在动画求值前
-                    // 完成（change: play-model-animations-on-hover，design D4）。
-                    scene3d::sync_models.in_set(model3d::TransformAnimationSet::Playback),
-                    // 页面内历史缩略图：同一 App 内一次性离屏渲染，排在模型根同步之后
-                    // （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
-                    crate::history_preview::sync,
-                    // Native 片场后台准备：非阻塞 poll + 全局预算装配，排在消费者之前
-                    // （change: 2026-10-18-prepare-native-film-sets-in-background，design D4/D5）。
+                    // ECS 画布帧（change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs）：
+                    // presentation → 分类型几何 → 选中描边批次 → 标签/文字。每个 set 边界都会
+                    // 应用 deferred，producer 当帧即可读到投影实体与展示子实体。
                     (
-                        scene3d::advance_preparation,
-                        model3d::run_effect::sync,
-                        model3d::empty_placeholder::sync,
+                        crate::canvas_ecs::sync_group_panels
+                            .in_set(crate::canvas_ecs::CanvasRenderSet::Presentation),
+                        (
+                            canvas2d::produce_card_geometry,
+                            canvas2d::produce_card_hover,
+                            canvas2d::produce_container_geometry,
+                            canvas2d::produce_edges,
+                            canvas2d::sync_canvas_overlay,
+                        )
+                            .chain()
+                            .in_set(crate::canvas_ecs::CanvasRenderSet::Geometry),
+                        (
+                            canvas2d::begin_selection_outlines,
+                            canvas2d::produce_card_selection,
+                            canvas2d::produce_group_selection,
+                            canvas2d::produce_film_set_selection,
+                            crate::canvas_ecs::flush_selection_outlines,
+                        )
+                            .chain()
+                            .in_set(crate::canvas_ecs::CanvasRenderSet::Selection)
+                            .run_if(canvas2d::canvas_render_requested),
+                        (
+                            canvas2d::sync_canvas_labels,
+                            canvas2d::focus_details::sync,
+                        )
+                            .chain()
+                            .in_set(crate::canvas_ecs::CanvasRenderSet::Labels),
                     )
                         .chain(),
-                    crate::model_preview::sync,
-                    // 卡片预览：消费同一帧的采样镜头/播放投影，并在模型落位后并入卡片渲染层
-                    // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
-                    crate::shot_node_preview::sync,
-                    scene3d::sync_editor_gizmo,
-                    scene3d::sync_shot_adapter,
-                    scene3d::reclaim_extra_shot_rigs,
-                    scene3d::sync_shot_main_view,
-                    (canvas2d::sync_group_surfaces, canvas2d::sync_scene, canvas2d::focus_details::sync).chain(),
                     (canvas2d::sync_generation, canvas2d::history_pulse::sync).chain(),
                     canvas2d::sync_attach_probe,
                 )
@@ -205,7 +259,7 @@ fn configure_canvas(app: &mut App) {
                 .chain(),
         )
         // 顶部操作横条覆盖层（change: 2026-10-13-add-node-to-film-set-shortcut）：独立小 mesh +
-        // 独立标签池，逐帧读场景重建；排在 `sync_scene` 之后，不参与主场景 chain 的元组上限。
+        // 独立标签池，逐帧读场景重建；排在画布几何之后，不参与主场景 chain 的元组上限。
         .add_systems(
             Update,
             (
@@ -214,7 +268,7 @@ fn configure_canvas(app: &mut App) {
                 canvas2d::sync_focus_backdrop,
                 canvas2d::sync_group_motion,
             )
-                .after(canvas2d::sync_scene),
+                .after(crate::canvas_ecs::CanvasRenderSet::Geometry),
         )
         // 画布文字栅格呈现（change: 2026-10-22-improve-canvas-text-clarity，design D4）：
         // 必须排在**全部**标签生产者与 deferred 命令应用之后，Bevy 的文字布局在 PostUpdate
@@ -230,7 +284,7 @@ fn configure_canvas(app: &mut App) {
                 .after(canvas2d::sync_node_action_bars)
                 .after(canvas2d::sync_attach_probe)
                 .after(canvas2d::sync_generation)
-                .after(canvas2d::sync_scene),
+                .after(crate::canvas_ecs::CanvasRenderSet::Labels),
         )
         // 动画求值在门禁结算之后（同帧 Playback.before(Evaluate)），且不在 scene chain 内：
         // hover 持续播放期间不要求重新序列化场景（change: play-model-animations-on-hover，D4）。

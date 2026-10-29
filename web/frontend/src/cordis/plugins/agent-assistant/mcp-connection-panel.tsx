@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { McpInstallClient, McpInstallTarget } from "@woohaa3/contracts";
 import { createMcpInstallationRemote, type McpInstallationRemote } from "../../services/mcp-installation-remote.js";
-import { Button, CheckIcon, IconButton, McpClientLogo, SettingsFeedback, Tooltip } from "../../../shared/ui/index.js";
+import { Button, CheckIcon, IconButton, McpClientLogo, SettingsFeedback, Tooltip } from "@woohaa3/ui";
 import { mcpInstallation } from "../../mcp-installation.js";
 import { resolveModelMcpServerUrl } from "../../mcp-endpoint.js";
 import { mcpCanvasPrompt } from "../../mcp-hint.js";

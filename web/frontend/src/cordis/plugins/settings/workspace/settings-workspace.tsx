@@ -1,33 +1,45 @@
 /**
- * 设置工作区：画布内的唯一设置弹窗内容
- * （change: 2026-10-17-move-settings-into-canvas-dialog，任务 2.1/2.2 / design D2）。
+ * 设置工作区：画布内的唯一设置弹窗内容。
  *
- * 原来这里是独立 `/settings` 页面（`100vh` 整页滚动 + 返回画布按钮）。现在设置是画布壳内的
- * 大型模态工作区：
- * - 固定左轨「设置」、关闭按钮与分区导航（关闭经 Host 的 guard，不在组件里挂全局 Escape/遮罩监听）；
- * - 左侧 200px 轨道，右侧 `minmax(0,1fr)` + `min-height:0`，只有正文滚动；
- * - 插件列表点击后在右栏替换为插件详情（同一实例内），返回列表时保留列表滚动位置。
+ * 层级导航（画布设置-扩展层级导航，2026-10-28 / 交互设计说明 v1）：
+ * 左栏永远是右栏内容的父级，进入下一级时右栏的内容成为父级导航、右栏换新内容——
+ * - L1 分区：左栏是设置分区（核心服务 / 插件配置 / …），右栏是分区正文；
+ * - L2 插件概览：左栏换成插件列表（含返回与搜索），右栏是该插件的概览；
+ * - L3 插件子页：左栏换成子页导航（概览 / 配置 / 模型 / 管理），右栏是子页正文。
+ *
+ * 两条不变式：
+ * 1. **关闭按钮语义单一**：X 只关整棵设置树，从不在内部分层关闭；
+ * 2. **草稿门禁唯一**：分区切换、进插件、切子页、返回全部走同一个 `onRequestNavigate`，
+ *    写请求中直接拒绝，未保存草稿先确认。
+ *
+ * 过渡动效约 300ms、进入与返回对称；动效期间左栏与正文不接受点击，防止栈错乱。
+ * 面包屑可跨级直达目标层（无中间帧）。
  *
  * 不持有第二份配置：各分区读写注入的既有服务（设置 store / 插件管理 facade / ThemeService）。
  * 组件本身不创建 popup/poller/socket，也不因打开设置而刷新、重启或重装扩展。
  */
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Button } from "../../../../shared/ui/Button.js";
-import { SegmentedControl } from "../../../../shared/ui/SegmentedControl.js";
-import { ActivityIcon, ChatIcon, PluginIcon, SettingsIcon, SunIcon } from "../../../../shared/ui/icons.js";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Button } from "@woohaa3/ui/primitives";
+import { SegmentedControl } from "@woohaa3/ui/primitives";
+import { ActivityIcon, ChatIcon, PluginIcon, SettingsIcon, SunIcon } from "@woohaa3/ui/icons";
 import type { ThemeService } from "../../../contract/platform.js";
 import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
 import { RuntimeComponentsSection } from "../runtime-components-section.js";
 import { BackendSettingsSection } from "../backend-settings-section.js";
 import { PluginSettingsSection, type ManagedExtensionsSource } from "../plugin-settings-section.js";
 import { indexPlugins } from "../plugin-groups.js";
-import type { SettingsPanelSource } from "../plugin-panels.js";
+import { EMPTY_SETTINGS_PANELS, settingsPanelIds, type SettingsPanelSource } from "../plugin-panels.js";
 import type { BackendSettingsStore } from "../backend-settings-store.js";
 import type { SettingsEditSession } from "../edit-session.js";
 import type { ExtensionSettingsAssembly } from "../plugin.js";
+import type { MarketplaceInstallState } from "../marketplace-install.js";
 import { NotificationSettingsSection } from "../notification-settings-section.js";
 import type { TaskNotificationService } from "../../../contract/notification.js";
+import { pluginPages, resolvePluginPage, type PluginPageDescriptor, type PluginPageId } from "../plugin-pages.js";
 import { PluginConfigContent } from "./plugin-config-content.js";
+import { PluginInstallPage, installDetailOf, type PluginInstallMode } from "./plugin-install-page.js";
+import { SettingsBreadcrumb } from "./settings-breadcrumb.js";
+import { PluginListRail, PluginPageRail, SectionRailNav } from "./rail-navigation.js";
 import { SettingsDialogChrome } from "./settings-dialog-chrome.js";
 
 export type SettingsSectionId = "backend" | "plugins" | "appearance" | "notifications" | "runtimes";
@@ -58,14 +70,35 @@ const SECTION_ICONS: Record<SettingsSectionId, ReactNode> = {
 
 const THEME_LABELS: Record<string, string> = { default: "浅色", dark: "暗色" };
 
+/** 层级：0 = 分区，1 = 插件概览（左栏是插件列表），2 = 插件子页（左栏是子页导航）。 */
+type SettingsLevel = 0 | 1 | 2;
+
+/** 过渡方向：进入下一级 / 返回上一级 / 同级切换（只换右栏）。 */
+type MotionDirection = "forward" | "back" | "sibling";
+
+/** 左右栏同步平移的时长：与设计稿一致（300–320ms），动效期间不接受重复点击。 */
+const MOTION_MS = 320;
+
 /**
- * 右栏视图：分区列表，或某个插件的详情。
+ * 右栏视图：分区，或某个插件的某个子页。
  *
- * `plugin` 是设置内部的视图身份（不进入 URL，也不进入 Dialog payload）；弹窗关闭即丢弃。
+ * `page` 是设置内部的视图身份（不进入 URL，也不进入 Dialog payload）；弹窗关闭即丢弃。
+ * `subNav` 表示已经进过这个插件的子页：此时左栏是子页导航（L3），其中「概览」也留在 L3——
+ * 这样从「配置」回「概览」只需一次同级点击，不会把左栏退化回插件列表。
  */
-type SettingsView =
+export type SettingsView =
   | { kind: "section"; section: SettingsSectionId }
-  | { kind: "plugin"; section: SettingsSectionId; pluginId: string };
+  | { kind: "plugin"; pluginId: string; page: PluginPageId; subNav?: boolean }
+  /** 「添加扩展」页：插件列表的兄弟页（同一层级），不再常驻在列表顶部。 */
+  | { kind: "install"; mode: PluginInstallMode };
+
+/** 内部导航请求：交给 Host 的草稿 / 写请求门禁。 */
+export type SettingsNavRequest =
+  | { kind: "section"; section: SettingsSectionId }
+  | { kind: "plugin"; section: "plugins"; pluginId: string }
+  | { kind: "plugin-page"; section: "plugins"; pluginId: string; page: PluginPageId }
+  | { kind: "install"; section: "plugins"; mode: PluginInstallMode }
+  | { kind: "service"; section: "backend"; serviceId: string };
 
 export type SettingsWorkspaceProps = {
   backend: BackendSettingsStore;
@@ -78,16 +111,10 @@ export type SettingsWorkspaceProps = {
   /** 请求关闭整个设置（Header 关闭按钮）。经 Dialog Host guard，dirty 时先确认。 */
   onRequestClose: () => void;
   /**
-   * 内部视图切换前的门禁（切分区 / 进插件详情 / 返回列表）。
+   * 内部视图切换前的门禁（切分区 / 进插件 / 切子页 / 返回）。
    * 返回 `false` 表示用户取消或存在进行中的写请求，视图保持不动。
    */
-  onRequestNavigate?: (input: {
-    kind: "section" | "plugin" | "service";
-    section: SettingsSectionId;
-    pluginId?: string;
-    /** kind === "service" 时的目标核心服务页签。 */
-    serviceId?: string;
-  }) => Promise<boolean> | boolean;
+  onRequestNavigate?: (input: SettingsNavRequest) => Promise<boolean> | boolean;
   /** 本次设置实例的编辑会话：行与扩展面板把 dirty/pending 汇总进来。 */
   editSession?: SettingsEditSession;
   /** 设置专项扩展装配（未激活扩展按需加载 settings.plugin-config）。 */
@@ -106,10 +133,9 @@ export type SettingsWorkspaceProps = {
   onOpenTelemetry?: () => void;
   initialSection?: SettingsSectionId;
   /**
-   * 初始直接打开某个插件的详情（`settingsOpen.open({ pluginId })`）。
+   * 初始直接打开某个插件的概览（`settingsOpen.open({ pluginId })`）。
    *
-   * 只是初始视图提示：插件不存在时仍停在插件列表，不报错也不卡在半截视图——设置里少一个
-   * 插件不是调用方该处理的异常。打开后切走再由用户自己导航。
+   * 只是初始视图提示：插件不存在时停在「插件不存在」的稳定提示，不报错也不卡在半截视图。
    */
   initialPluginId?: string;
 };
@@ -132,48 +158,112 @@ export function SettingsWorkspace({
 }: SettingsWorkspaceProps) {
   const [view, setView] = useState<SettingsView>(() =>
     initialPluginId
-      ? { kind: "plugin", section: "plugins", pluginId: initialPluginId }
+      ? { kind: "plugin", pluginId: initialPluginId, page: "overview" }
       : { kind: "section", section: initialSection }
   );
   /** 当前核心服务页签；缺省时由分区落到第一个有配置的服务。切换沿用 view 实例，切分区后仍保留。 */
   const [serviceId, setServiceId] = useState<string | null>(null);
-  // 插件列表滚动位置：进入详情再返回时恢复（同一实例内）。
-  const listScrollRef = useRef<number>(0);
+  /** 本次层级平移的方向；`null` 表示没有进行中的动效。 */
+  const [motion, setMotion] = useState<MotionDirection | null>(null);
+  const motionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 回到插件列表时要恢复的滚动位置（列表在离开层级时卸载）。 */
+  const listScrollRef = useRef(0);
   const settingsState = useSyncExternalStore(backend.subscribe, backend.getState, backend.getState);
   const managerView = useSyncExternalStore(extensions.subscribe, extensions.getSnapshot, extensions.getSnapshot);
-  const pluginCount =
-    settingsState.status === "ready" ? indexPlugins(settingsState.snapshot, managerView).groups.length : null;
+  const panels = settingsPanels ?? EMPTY_SETTINGS_PANELS;
+  const panelsVersion = useSyncExternalStore(panels.subscribe, panels.version, panels.version);
+  const index = indexPlugins(settingsState.status === "ready" ? settingsState.snapshot : null, managerView);
+  // 订阅 slot 版本：扩展前端按需加载、注册面板后，左栏与概览的「配置」入口立即出现。
+  const panelIds = useMemo(() => settingsPanelIds(panels), [panels, panelsVersion]);
+  const pluginCount = settingsState.status === "ready" ? index.groups.length : null;
+  const snapshot = settingsState.status === "ready" ? settingsState.snapshot : null;
+  const canManage = backend.canManage();
+  // 受管安装能力：宿主启用受管目录 + 管理员；市场安装还要求市场控制器在场。
+  const fileAvailable = Boolean(snapshot?.extensionInstallations && canManage);
+  const marketAvailable = Boolean(fileAvailable && managed?.marketplace);
+  // 安装详情的身份只在「添加扩展」页里可见：面包屑据此多一段扩展名，返回靠点「添加扩展」。
+  const marketplace = managed?.marketplace;
+  const readMarketState = marketplace ? marketplace.getState : () => emptyMarketState;
+  const marketState = useSyncExternalStore(
+    marketplace ? marketplace.subscribe : noopSubscribe,
+    readMarketState,
+    readMarketState
+  );
+  const installDetail = view.kind === "install" ? installDetailOf(marketplace, marketState) : null;
+
   useEffect(() => {
     void backend.load();
   }, [backend]);
+  useEffect(() => {
+    return () => {
+      if (motionTimer.current) clearTimeout(motionTimer.current);
+    };
+  }, []);
+
+  const activeGroup = view.kind === "plugin" ? index.groups.find((group) => group.id === view.pluginId) : undefined;
+  const pages: readonly PluginPageDescriptor[] = activeGroup ? pluginPages(index, activeGroup, panelIds) : [];
+  // 目标子页已不存在（例如插件停用后模型页消失）时回落到概览：右栏与左栏读同一个解析结果。
+  const currentPage = view.kind === "plugin" ? resolvePluginPage(pages, view.page) : null;
+  // 左栏形态由「是否进过子页」决定，而不是由当前页是不是概览决定（L3 也有概览）。
+  const level: SettingsLevel =
+    view.kind === "section" ? 0 : view.kind === "install" ? 1 : view.subNav === true && activeGroup ? 2 : 1;
+
+  /** 某个视图落在第几级；用于判断这次切换是进入、返回还是同级。 */
+  const levelOf = (candidate: SettingsView): SettingsLevel =>
+    candidate.kind === "section"
+      ? 0
+      : candidate.kind === "plugin" && candidate.subNav === true && index.groups.some((group) => group.id === candidate.pluginId)
+        ? 2
+        : 1;
+
+  const commit = (next: SettingsView) => {
+    const from = levelOf(view);
+    const to = levelOf(next);
+    // 离开插件层级时记下列表滚动位置（左栏列表与一级页是同一份内容）。
+    if (from > 0 && to === 0) listScrollRef.current = readScrollPosition();
+    else if (from === 1 && to === 2) listScrollRef.current = 0;
+    // 离开「添加扩展」：详情属于那一层的私有状态，下次进来回到列表。
+    if (view.kind === "install" && next.kind !== "install") managed?.marketplace?.close();
+    setView(next);
+    setMotion(from === to ? "sibling" : to > from ? "forward" : "back");
+    if (motionTimer.current) clearTimeout(motionTimer.current);
+    motionTimer.current = setTimeout(() => setMotion(null), MOTION_MS);
+  };
+
+  /** 同一个视图不重复导航：点当前项、点当前子页都是无操作。 */
+  const sameView = (candidate: SettingsView): boolean => {
+    if (view.kind !== candidate.kind) return false;
+    if (view.kind === "section" && candidate.kind === "section") return view.section === candidate.section;
+    if (view.kind === "install" && candidate.kind === "install") return view.mode === candidate.mode;
+    if (view.kind === "plugin" && candidate.kind === "plugin") {
+      return (
+        view.pluginId === candidate.pluginId &&
+        (view.subNav === true) === (candidate.subNav === true) &&
+        currentPage?.id === resolvePluginPage(pages, candidate.page).id
+      );
+    }
+    return false;
+  };
 
   const navigate = (next: SettingsView) => {
+    if (sameView(next)) return;
     // 同步门禁（通常是布尔）走同步路径：分区切换立即生效，不等待额外微任务。
     if (!onRequestNavigate) {
-      commitView(next);
+      commit(next);
       return;
     }
-    const outcome = onRequestNavigate({
-      kind: next.kind,
-      section: next.section,
-      ...(next.kind === "plugin" ? { pluginId: next.pluginId } : {})
-    });
+    const outcome = onRequestNavigate(navRequestFor(view, next));
     if (typeof outcome === "boolean") {
-      if (outcome) commitView(next);
+      if (outcome) commit(next);
       return;
     }
     void outcome.then((allowed) => {
-      if (allowed) commitView(next);
+      if (allowed) commit(next);
     });
   };
 
-  const commitView = (next: SettingsView) => {
-    if (view.kind === "plugin" && next.kind === "section") listScrollRef.current = readScrollPosition();
-    setView(next);
-  };
-
   const changeSection = (section: SettingsSectionId) => {
-    if (section === view.section) return;
+    if (view.kind === "section" && section === view.section) return;
     navigate({ kind: "section", section });
   };
 
@@ -185,11 +275,12 @@ export function SettingsWorkspace({
    */
   const changeService = (nextServiceId: string) => {
     if (nextServiceId === serviceId) return;
+    const request: SettingsNavRequest = { kind: "service", section: "backend", serviceId: nextServiceId };
     if (!onRequestNavigate) {
       setServiceId(nextServiceId);
       return;
     }
-    const outcome = onRequestNavigate({ kind: "service", section: "backend", serviceId: nextServiceId });
+    const outcome = onRequestNavigate(request);
     if (typeof outcome === "boolean") {
       if (outcome) setServiceId(nextServiceId);
       return;
@@ -199,117 +290,209 @@ export function SettingsWorkspace({
     });
   };
 
-  const openPlugin = (pluginId: string) => {
-    navigate({ kind: "plugin", section: "plugins", pluginId });
+  const openPlugin = (pluginId: string) => navigate({ kind: "plugin", pluginId, page: "overview" });
+  /** 进入插件的子页导航（L3）：含「概览」，子页之间只换右栏。 */
+  const openPluginPage = (pluginId: string) => (page: PluginPageId) =>
+    navigate({ kind: "plugin", pluginId, page, subNav: true });
+  const backToSections = () => {
+    // 返回「插件配置」一级页：那是这棵插件树的父级。
+    changeSection("plugins");
   };
 
-  const backToList = () => {
-    navigate({ kind: "section", section: "plugins" });
-  };
+  const railKey =
+    view.kind === "section" ? "sections" : level === 2 && view.kind === "plugin" ? `plugin:${view.pluginId}` : "plugins";
+  const rail =
+    view.kind === "section" ? (
+      <SectionRailNav
+        entries={SECTIONS.map((entry) => ({ id: entry.id, label: entry.label, icon: SECTION_ICONS[entry.id] }))}
+        activeId={view.section}
+        pluginCount={pluginCount}
+        onSelect={(id) => changeSection(id as SettingsSectionId)}
+      />
+    ) : level === 2 && activeGroup && currentPage ? (
+      <PluginPageRail
+        pluginId={activeGroup.id}
+        label={activeGroup.label}
+        pages={pages}
+        activeId={currentPage.id}
+        onSelect={openPluginPage(activeGroup.id)}
+        // 返回上一级 = 插件概览（L2）；离开这棵插件树才用左栏列表的返回。
+        onBack={() => openPlugin(activeGroup.id)}
+      />
+    ) : (
+      <PluginListRail
+        index={index}
+        {...(activeGroup ? { activeId: activeGroup.id } : {})}
+        onSelect={openPlugin}
+        onBack={backToSections}
+      />
+    );
+
+  const viewKey =
+    view.kind === "section"
+      ? `section:${view.section}`
+      : view.kind === "install"
+        ? `install:${view.mode}`
+        : `plugin:${view.pluginId}:${currentPage?.id ?? "overview"}`;
+
+  // 每次换视图把正文滚回顶部；回到插件列表时恢复离开前的位置。
+  useEffect(() => {
+    const scroller = globalThis.document?.querySelector<HTMLElement>(".settings-workbench__body");
+    if (!scroller) return;
+    scroller.scrollTop = listScrollRef.current;
+    listScrollRef.current = 0;
+  }, [viewKey]);
 
   return (
     <SettingsDialogChrome
       {...(instanceId ? { instanceId } : {})}
       onRequestClose={onRequestClose}
-      section={view.section}
+      section={view.kind === "section" ? view.section : "plugins"}
+      level={level}
+      motion={motion}
       nav={
-        <nav className="settings-workbench__nav" aria-label="设置分区">
-          {SECTIONS.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              className={entry.id === view.section ? "settings-workbench__nav-item is-active" : "settings-workbench__nav-item"}
-              onClick={() => changeSection(entry.id)}
-              data-testid={`settings-nav-${entry.id}`}
-            >
-              {SECTION_ICONS[entry.id]}
-              <span>{entry.label}</span>
-              {entry.id === "plugins" && pluginCount !== null ? (
-                <span className="settings-workbench__nav-count">{pluginCount}</span>
-              ) : null}
-            </button>
-          ))}
-        </nav>
+        <div className="settings-rail__level" key={railKey}>
+          {rail}
+        </div>
       }
     >
-      {view.kind === "plugin" ? (
-        <PluginConfigContent
-          pluginId={view.pluginId}
-          store={backend}
-          manager={extensions}
-          {...(managed ? { managed: managed.controller } : {})}
-          {...(settingsPanels ? { settingsPanels } : {})}
-          {...(editSession ? { editSession } : {})}
-          {...(extensionSettings ? { extensionSettings } : {})}
-          onBack={backToList}
-        />
-      ) : view.section === "backend" ? (
-        <Panel
-          title="核心服务"
-          hint="本机运行的核心服务自己的配置，按服务分开；只列有配置的服务，插件声明的配置在「插件配置」里各自的详情上。写入本地配置文件，标注「即时生效」的项保存后立刻生效。"
-          action={
-            <Button size="sm" tone="ghost" onClick={() => changeSection("plugins")} data-testid="settings-goto-plugins">
-              去插件配置
-            </Button>
-          }
-        >
-          <BackendSettingsSection
+      <div className="settings-view" key={viewKey}>
+        {view.kind !== "section" ? (
+          <div className="settings-sticky-head">
+            <SettingsBreadcrumb
+              testId="settings-breadcrumbs"
+              crumbs={
+                view.kind === "install"
+                  ? [
+                      { label: "设置" },
+                      { label: "插件配置", onClick: backToSections },
+                      {
+                        label: "添加扩展",
+                        ...(installDetail ? { onClick: () => marketplace?.close() } : {})
+                      },
+                      ...(installDetail ? [{ label: installDetail.label }] : [])
+                    ]
+                  : [
+                      { label: "设置" },
+                      { label: "插件配置", onClick: backToSections },
+                      {
+                        label: activeGroup?.label ?? view.pluginId,
+                        ...(level === 2 ? { onClick: () => openPlugin(view.pluginId) } : {})
+                      },
+                      ...(level === 2 && currentPage ? [{ label: currentPage.label }] : [])
+                    ]
+              }
+            />
+          </div>
+        ) : null}
+        {view.kind === "plugin" ? (
+          <PluginConfigContent
+            pluginId={view.pluginId}
+            {...(currentPage ? { page: currentPage.id } : {})}
             store={backend}
-            activeServiceId={serviceId}
-            onSelectService={changeService}
-            onGoToPlugins={() => changeSection("plugins")}
-            extensions={extensions}
-            onOpenPlugin={openPlugin}
+            manager={extensions}
+            {...(managed ? { managed: managed.controller } : {})}
+            {...(settingsPanels ? { settingsPanels } : {})}
             {...(editSession ? { editSession } : {})}
-            {...(onOpenTelemetry ? { onOpenTelemetry } : {})}
+            {...(extensionSettings ? { extensionSettings } : {})}
+            onBack={backToSections}
+            onSelectPage={openPluginPage(view.pluginId)}
           />
-        </Panel>
-      ) : view.section === "plugins" ? (
-        <>
+        ) : view.kind === "install" ? (
+          <PluginInstallPage
+            mode={view.mode}
+            onSelectMode={(mode) => navigate({ kind: "install", mode })}
+            {...(managed ? { managed } : {})}
+            snapshot={snapshot}
+            canManage={canManage}
+            marketAvailable={marketAvailable}
+            fileAvailable={fileAvailable}
+          />
+        ) : view.section === "backend" ? (
+          <Panel
+            title="核心服务"
+            hint="本机运行的核心服务自己的配置，按服务分开；只列有配置的服务，插件声明的配置在「插件配置」里各自的详情上。写入本地配置文件，标注「即时生效」的项保存后立刻生效。"
+            action={
+              <Button size="sm" tone="ghost" onClick={() => changeSection("plugins")} data-testid="settings-goto-plugins">
+                去插件配置
+              </Button>
+            }
+          >
+            <BackendSettingsSection
+              store={backend}
+              activeServiceId={serviceId}
+              onSelectService={changeService}
+              onGoToPlugins={() => changeSection("plugins")}
+              extensions={extensions}
+              onOpenPlugin={openPlugin}
+              {...(editSession ? { editSession } : {})}
+              {...(onOpenTelemetry ? { onOpenTelemetry } : {})}
+            />
+          </Panel>
+        ) : view.section === "plugins" ? (
           <PluginSettingsSection
             store={backend}
             manager={extensions}
             onOpenPlugin={openPlugin}
+            onRequestInstall={(mode) => navigate({ kind: "install", mode })}
             {...(settingsPanels ? { settingsPanels } : {})}
             {...(managed ? { managed } : {})}
           />
-          <ScrollRestore position={listScrollRef.current} />
-        </>
-      ) : view.section === "runtimes" ? (
-        <Panel title="运行时组件" hint="管理按需下载的可选功能。"><RuntimeComponentsSection /></Panel>
-      ) : view.section === "appearance" ? (
-        <Panel title="外观" hint="主题只保存在此浏览器。">
-          <ThemeSection theme={theme} />
-        </Panel>
-      ) : (
-        <Panel title="通知" hint="任务结果提醒。开关是本地偏好，立即生效，不需要保存。">
-          {notifications ? (
-            <NotificationSettingsSection notifications={notifications} />
-          ) : (
-            <p className="settings-page__hint" data-testid="notification-settings-unavailable">
-              当前实例没有可用的任务通知服务。
-            </p>
-          )}
-        </Panel>
-      )}
+        ) : view.section === "runtimes" ? (
+          <Panel title="运行时组件" hint="管理按需下载的可选功能。"><RuntimeComponentsSection /></Panel>
+        ) : view.section === "appearance" ? (
+          <Panel title="外观" hint="主题只保存在此浏览器。">
+            <ThemeSection theme={theme} />
+          </Panel>
+        ) : (
+          <Panel title="通知" hint="任务结果提醒。开关是本地偏好，立即生效，不需要保存。">
+            {notifications ? (
+              <NotificationSettingsSection notifications={notifications} />
+            ) : (
+              <p className="settings-page__hint" data-testid="notification-settings-unavailable">
+                当前实例没有可用的任务通知服务。
+              </p>
+            )}
+          </Panel>
+        )}
+      </div>
     </SettingsDialogChrome>
   );
 }
 
-/** 当前右栏滚动位置（用于插件列表返回恢复）。 */
+const noopSubscribe = () => () => undefined;
+/** 没有市场控制器时的稳定空态：getSnapshot 必须每次返回同一个引用。 */
+const emptyMarketState: MarketplaceInstallState = {
+  sources: [],
+  sourceId: null,
+  query: "",
+  searching: false,
+  refreshing: false,
+  fetchedAt: null,
+  items: [],
+  unavailableReason: null,
+  selected: null,
+  installing: false,
+  installingId: null,
+  trusting: null,
+  error: null,
+  notice: null
+};
+
+/** 两个视图之间的导航请求：交给 Host 判定能否切换。 */
+function navRequestFor(from: SettingsView, next: SettingsView): SettingsNavRequest {
+  if (next.kind === "section") return { kind: "section", section: next.section };
+  if (next.kind === "install") return { kind: "install", section: "plugins", mode: next.mode };
+  const samePlugin = from.kind === "plugin" && from.pluginId === next.pluginId;
+  return samePlugin
+    ? { kind: "plugin-page", section: "plugins", pluginId: next.pluginId, page: next.page }
+    : { kind: "plugin", section: "plugins", pluginId: next.pluginId };
+}
+
+/** 当前右栏滚动位置（用于回到插件列表时恢复）。 */
 function readScrollPosition(): number {
   const scroller = globalThis.document?.querySelector<HTMLElement>(".settings-workbench__body");
   return scroller?.scrollTop ?? 0;
-}
-
-/** 插件列表重新挂载后恢复滚动位置（只在挂载时执行一次）。 */
-function ScrollRestore({ position }: { position: number }) {
-  useEffect(() => {
-    if (position <= 0) return;
-    const scroller = globalThis.document?.querySelector<HTMLElement>(".settings-workbench__body");
-    if (scroller) scroller.scrollTop = position;
-  }, [position]);
-  return null;
 }
 
 function Panel({

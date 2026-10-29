@@ -24,7 +24,7 @@ export type ImportItem = {
   /** 稳定 item/operation identity；迟到异步结果据此忽略。 */
   id: string;
   name: string;
-  kind: "image" | "video" | "audio" | "text" | null;
+  kind: "image" | "video" | "audio" | "text" | "model3d" | null;
   size: number;
   stage: ImportItemStage;
   /** 安全错误摘要（不含 URL/授权信息）。 */

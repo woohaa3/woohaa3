@@ -110,8 +110,8 @@ export const FILM_SET_CONVERSION_STEPS = [
 ] as const;
 export type FilmSetConversionStep = (typeof FILM_SET_CONVERSION_STEPS)[number];
 
-/** 转换任务状态判别值。 */
-export const FILM_SET_CONVERSION_STATES = ["running", "completed", "failed", "cancelled", "unknown"] as const;
+/** 转换任务状态判别值。无法确认的结果由 `failed` + `unknown-result` 错误码表达。 */
+export const FILM_SET_CONVERSION_STATES = ["running", "completed", "failed", "cancelled"] as const;
 export type FilmSetConversionState = (typeof FILM_SET_CONVERSION_STATES)[number];
 
 /** 稳定错误码（用于前端就近展示与恢复动作，不暴露内部堆栈）。 */
@@ -191,8 +191,7 @@ export type FilmSetConversionStatus = { execution?: import("../../extension/assi
       /** 是否可复用候选或安全重试。 */
       retryable: boolean;
     }
-  | { status: "cancelled"; requestId: string; sourceNodeId: string }
-  | { status: "unknown"; requestId: string; sourceNodeId: string });
+  | { status: "cancelled"; requestId: string; sourceNodeId: string });
 
 /** 状态查询结果：`null` 表示不存在该请求。 */
 export type FilmSetConversionStatusResult =

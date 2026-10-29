@@ -10,7 +10,7 @@
  */
 import { useEffect, useState } from "react";
 import { useRuntimeContext } from "./react.js";
-import { Button } from "../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import type { AppRuntime } from "./page-scope.js";
 import { initialPreparationState } from "./services/canvas-preparation-store.js";
 import type { CanvasPreparationState } from "./contract/canvas-preparation.js";

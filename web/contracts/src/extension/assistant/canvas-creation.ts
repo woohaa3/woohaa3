@@ -18,7 +18,7 @@ export type CanvasCreationView = {
   commandId: string;
   turnRequestId: string;
   scopeEpoch: number;
-  stage: "preparing" | "root-created" | "accepted" | "failed" | "unknown";
+  stage: "preparing" | "root-created" | "accepted" | "failed";
   conversationId?: string;
   turnId?: string;
   rootRevision?: number;

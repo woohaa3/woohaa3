@@ -2,7 +2,7 @@
  * 公共前端 API 依赖方向与循环审计
  * （change: 2026-10-10-unify-extension-frontend-entry，任务 2.2/3.4 / design D2/D6）。
  *
- * 静态保证：`frontend/src/extension-api` 的运行时依赖闭包只含 `shared/ui` 与
+ * 静态保证：`frontend/src/extension-api` 的运行时依赖闭包只含 `@woohaa3/ui` 与
  * `task-execution/execution-panel` 等叶子模块，不含扫描器、装配根（canvas-manifest /
  * install-services / page-scope / kernel）、app-host 或具体业务插件。公共入口不得反向依赖
  * extension 扫描发现层，避免循环装配。
@@ -39,7 +39,6 @@ const ALLOWED_RUNTIME_PREFIXES = [
   // Pure page input controllers and presentation; these do not import a host composition root.
   "cordis/services/assistant-execution/",
   "cordis/ui/assistant-execution/",
-  "shared/ui/",
   // Pure same-origin URL constructors shared by remote adapters and upload planning.
   "cordis/services/paths.js",
   // change: 2026-10-15-support-configurable-app-base-path，design D6：通用公开 URL 解析能力
@@ -116,7 +115,7 @@ describe("extension-api 依赖方向审计（任务 2.2/3.4）", () => {
         if (!isTypeOnly && !allowed) offenders.push(`${path.relative(SRC_ROOT, file)} -> ${relative} (runtime)`);
       }
     }
-    // 允许的运行时引用：ui.ts 转出 shared/ui 与 execution-panel；entry/context 只有类型依赖。
+    // 允许的运行时引用：ui.ts 转出 @woohaa3/ui 与 execution-panel；entry/context 只有类型依赖。
     expect(offenders).toEqual([]);
   });
 

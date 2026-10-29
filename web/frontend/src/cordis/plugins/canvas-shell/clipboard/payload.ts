@@ -155,7 +155,7 @@ export function buildCanvasCopyPayload(
     }
     materializedNodeIds.add(node.id);
     materializedModelData.set(node.id, JSON.parse(JSON.stringify(model3DNodeDataFields({
-      kind: "model3d", title: item.name, model: item.model
+      kind: "model3d", title: item.name, source: "script", model: item.model
     }))) as Woohaa3CanvasJsonObject);
   }
   if (included.size === 0) return null;
@@ -208,7 +208,7 @@ export function buildCanvasCopyPayload(
     if (!data) continue;
     for (const assetId of imageEditAssetIdsOf(data)) referencedAssetIds.add(assetId);
     // 内容引用与视频封面：只带指针不带资产会得到「有引用、没有图」的节点。
-    for (const field of ["outputAssetId", "posterAssetId"] as const) {
+    for (const field of ["outputAssetId", "posterAssetId", "modelAssetId"] as const) {
       const assetId = data[field];
       if (typeof assetId === "string" && assetId !== "") referencedAssetIds.add(assetId);
     }

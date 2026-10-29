@@ -14,7 +14,7 @@ import { ownsShotMedia } from "../../state/shared/managed-shot-media.js";
  *   相同请求返回原任务/原结果，同 ID 不同输入拒绝（`request-id-reused`）；
  * - 提交经 `commandId = film-set-conversion:<canvasId>:<requestId>` 的 `submitDerived` 原子提交，
  *   重复提交命中 durable command 回执并回读同一结果；
- * - running 但本地无进行中任务（如服务重启）时状态为 `unknown`：先查询，不自动重新推理；
+ * - running 但本地无进行中任务（如服务重启）时先查询/撤销，无法证明则结算 `failed`，不自动重新推理；
  *   已提交结果被取消时返回实际结果（提交边界为准）。
  *
  * 只复用既有 `CanvasCommand`（`node.add`）与 `CanvasAuthority.submitDerived`，不新增第二套命令。
@@ -25,7 +25,7 @@ import {
   canonicalFilmSetFields,
   createFilmSetSnapshot,
   createMotionSnapshot,
-  decodeModel3DNodeData,
+  scriptModel3DNodeData,
   filmSetConversionCapabilityRejectionCode,
   filmSetConversionInputHash,
   filmSetConversionNodeTaskStatus,
@@ -127,7 +127,7 @@ export type FilmSetConversionServiceDependencies = {
    */
 };
 
-/** 提交结果：3D 直接完成，图片/视频完成后返回终态；running/unknown 由状态查询继续跟踪。 */
+/** 提交结果：3D 直接完成，图片/视频完成后返回终态；running 由状态查询继续跟踪，无法确认则 failed。 */
 export type FilmSetConversionSubmitOutcome =
   | { ok: true; receipt: Extract<FilmSetConversionReceipt, { ok: true }>; status: FilmSetConversionStatus }
   | { ok: false; code: FilmSetConversionErrorCode; message: string; retryable?: boolean };
@@ -277,13 +277,11 @@ export class FilmSetConversionService {
     return {
       ok: true,
       receipt: receiptOf(record, duplicate),
-      status: current.ok && current.status
-        ? current.status
-        : { status: "unknown", requestId: record.requestId, sourceNodeId: record.sourceNodeId }
+      status: current.ok && current.status ? current.status : toStatus(record)
     };
   }
 
-  /** 查询状态；running 但本地无进行中任务（重启/中断）返回 `unknown`（不自动重跑）。 */
+  /** 查询状态；running 但本地无进行中任务（重启/中断）时先查询/撤销，再按 failed 结算（不自动重跑）。 */
   async status(input: { canvasId: string; requestId: string }): Promise<FilmSetConversionStatusResult> {
     if (!input.canvasId.trim() || !input.requestId.trim()) {
       return { ok: false, code: "malformed-request", message: "canvasId 与 requestId 不能为空" };
@@ -304,7 +302,12 @@ export class FilmSetConversionService {
         await this.patchNodeStatus(cancelled, toStatus(cancelled));
         return { ok: true, status: toStatus(cancelled) };
       }
-      return { ok: true, status: { status: "unknown", requestId: record.requestId, sourceNodeId: record.sourceNodeId, ...(record.execution ? { execution: record.execution } : {}) } };
+      // D2：无法证明结果时先撤销仍匹配的 Provider 运行，再按 failed 结算；重试建立新尝试。
+      this.deps.execution?.cancel?.(record);
+      await this.fail(record, "unknown-result", "转换结果无法确认，可能已部分写入；已撤销匹配运行，重试前请核对原请求", true);
+      const settled = await this.deps.registry.get(input.canvasId, input.requestId);
+      if (settled) return { ok: true, status: toStatus(settled) };
+      return { ok: true, status: { status: "failed", requestId: record.requestId, sourceNodeId: record.sourceNodeId, code: "unknown-result", message: "转换结果无法确认", attempt: record.attempt, retryable: true, ...(record.execution ? { execution: record.execution } : {}) } };
     }
     return { ok: true, status: toStatus(record) };
   }
@@ -435,12 +438,12 @@ export class FilmSetConversionService {
       await this.runModelCopy(existing, room, exported.canvas);
       return this.outcomeFromRecord(existing, true);
     }
-    // 图片/视频：结果未知，先查询，不自动重新推理。
-    return {
-      ok: true,
-      receipt: receiptOf(existing, true),
-      status: { status: "unknown", requestId: existing.requestId, sourceNodeId: existing.sourceNodeId }
-    };
+    // 图片/视频：结果未知，先查询，不自动重新推理；查询无法证明时结算 failed。
+    const current = await this.status({ canvasId: existing.canvasId, requestId: existing.requestId });
+    if (current.ok && current.status) {
+      return { ok: true, receipt: receiptOf(existing, true), status: current.status };
+    }
+    return { ok: false, code: "unknown-result", message: "转换结果无法确认，请核对原请求后重试" };
   }
 
   /** model3d 权威复制：保留 part ID/placement，映射持久镜头，原子创建独立片场。 */
@@ -454,16 +457,16 @@ export class FilmSetConversionService {
     if (!(await this.ensurePlaceholder(record, room))) return;
     const node = canvas.document.nodes.find((entry) => entry.id === record.sourceNodeId);
     const data = canvas.nodeData[record.sourceNodeId] as CanvasNodeData | undefined;
-    const decoded = decodeModel3DNodeData(data);
-    if (!node || !decoded.ok) {
-      await this.fail(record, "source-not-ready", "来源模型不完整，无法复制", false);
+    const decoded = scriptModel3DNodeData(data);
+    if (!node || !decoded) {
+      await this.fail(record, "unsupported-source", "文件模型无法复制为片场", false);
       return;
     }
     await this.updateRunning(record, { step: "analyze-content" });
     const cameras = readModelCameras(data);
     const built = buildModelCopyCandidate({
       title: filmSetConversionTitle(record.title),
-      model: decoded.value.model,
+      model: decoded.model,
       cameras
     });
     await this.updateRunning(record, { step: "generate-film-set" });
@@ -585,7 +588,10 @@ export class FilmSetConversionService {
             }
             if (settled?.state === "completed" && settled.result) return { status: "succeeded", receipt: settled.result };
             if (settled?.state === "failed") return { status: "failed", error: settled.error };
-            return { status: abort.signal.aborted ? "cancelled" : "unknown" };
+            if (abort.signal.aborted) return { status: "cancelled" };
+            // 执行已返回但没有任何权威终态：先撤销/结算记录，再以 failed 返回父回合。
+            await this.fail(record, "unknown-result", "转换结果无法确认，可能已部分写入；已保留原回执", true);
+            return { status: "failed", error: { code: "unknown-result", message: "转换结果无法确认，可能已部分写入" } };
           } finally { executionContext.signal.removeEventListener("abort", stop); abort.signal.removeEventListener("abort", abortDone); }
         }, async execution => {
           record.execution = execution;
@@ -911,9 +917,7 @@ export class FilmSetConversionService {
         retryable: settled.error.retryable
       };
     }
-    const status = settled.state === "running"
-      ? { status: "unknown" as const, requestId: settled.requestId, sourceNodeId: settled.sourceNodeId }
-      : toStatus(settled);
+    const status = toStatus(settled);
     return { ok: true, receipt: receiptOf(settled, duplicate), status };
   }
 

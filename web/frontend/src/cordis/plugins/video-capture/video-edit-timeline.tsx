@@ -23,7 +23,7 @@ import {
   RectangleIcon,
   UndoIcon,
   VolumeIcon
-} from "../../../shared/ui/index.js";
+} from "@woohaa3/ui";
 import type { TimelineDragMode, Tool } from "./video-edit-helpers.js";
 import type { VideoDialogPayload } from "./types.js";
 

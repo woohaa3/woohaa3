@@ -13,7 +13,7 @@
  * 关键约束（design D2/D7）：
  * - owner 只来自宿主可信 principal，绝不来自请求 body；
  * - requestId 绑定 owner+canvas+conversation+规范输入 hash，重放返回原回合，不重复推理；
- * - succeeded/partial/failed/cancelled/unknown 来自宿主 ledger 与领域回执，不从助手正文推断；
+ * - succeeded/partial/failed/cancelled 来自宿主 ledger 与领域回执，不从助手正文推断；
  * - 同一节点旧任务与较新会话各自保留关联，打开/关闭/查询都不创建新执行。
  */
 import { isBoolean, isBoundedId, isJsonObject, isStringArray } from "../../validation.js";
@@ -22,8 +22,11 @@ import { isBoolean, isBoundedId, isJsonObject, isStringArray } from "../../valid
 export const AGENT_CONVERSATION_BASE_PATH = "/api/agent-conversations" as const;
 
 /**
- * 权威回合状态。`unknown` 只由宿主 ledger/重启恢复产生：已完成一轮但没有权威终态回执，
- * 查询核对后才能结算；UI MUST NOT 从助手正文推断。
+ * 权威回合状态。
+ *
+ * 无法证明结果不再有独立状态：先按原身份查询回执，能证明按事实结算，否则结算 `failed` 并
+ * 保留机器错误码（`result-unconfirmed` / `write-unconfirmed` / `outcome-unknown`）。
+ * 旧数据里的 `unknown` 由 `normalizeConversationTurnStatus` 归一为 `failed`。
  */
 export const CONVERSATION_TURN_STATUSES = [
   "queued",
@@ -32,13 +35,23 @@ export const CONVERSATION_TURN_STATUSES = [
   "succeeded",
   "partial",
   "failed",
-  "cancelled",
-  "unknown"
+  "cancelled"
 ] as const;
 export type ConversationTurnStatus = (typeof CONVERSATION_TURN_STATUSES)[number];
 
 export function isConversationTurnStatus(value: unknown): value is ConversationTurnStatus {
   return typeof value === "string" && (CONVERSATION_TURN_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * 读取期归一（旧数据 / 旧事件 / 旧 API payload）。
+ *
+ * `unknown` 按 `failed` 返回，避免旧值继续下传成一个用户可见状态；其余无法识别的值返回
+ * `null`，由调用方决定拒绝或兜底。调用方在缺少错误码时补 `result-unconfirmed`。
+ */
+export function normalizeConversationTurnStatus(value: unknown): ConversationTurnStatus | null {
+  if (value === "unknown") return "failed";
+  return isConversationTurnStatus(value) ? value : null;
 }
 
 /** 活动回合（尚未终态）的判定：驱动单会话串行与“查看执行与对话”入口。 */
@@ -49,12 +62,31 @@ export function isActiveTurnStatus(value: ConversationTurnStatus): boolean {
 }
 
 /** 会话整体状态：由最近回合派生（宿主投影，不是第二事实源）。 */
-export const CONVERSATION_STATUSES = ["idle", "active", "succeeded", "partial", "failed", "cancelled", "unknown"] as const;
+export const CONVERSATION_STATUSES = ["idle", "active", "succeeded", "partial", "failed", "cancelled"] as const;
 export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
 
 export function isConversationStatus(value: unknown): value is ConversationStatus {
   return typeof value === "string" && (CONVERSATION_STATUSES as readonly string[]).includes(value);
 }
+
+/** 读取期归一：旧 `unknown` 会话状态按 `failed` 呈现。 */
+export function normalizeConversationStatus(value: unknown): ConversationStatus | null {
+  if (value === "unknown") return "failed";
+  return isConversationStatus(value) ? value : null;
+}
+
+/** 无法证明结果的稳定机器错误码（跨进程按字符串判定，不对应独立用户状态）。 */
+export const UNCONFIRMED_RESULT_ERROR_CODE = "result-unconfirmed" as const;
+/** 缺少交付回执的稳定机器错误码（回合/组创作/文本保存）。 */
+export const UNCONFIRMED_WRITE_ERROR_CODE = "write-unconfirmed" as const;
+/** 外部工作日志无法确认的稳定机器错误码（保留原码，提示不得自动重试）。 */
+export const UNCONFIRMED_OUTCOME_ERROR_CODE = "outcome-unknown" as const;
+
+/** 结算为失败时统一附带的「可能已部分写入」说明。 */
+export const UNCONFIRMED_RESULT_MESSAGE =
+  "无法确认执行结果，可能已部分写入；重试前请核对原请求，系统不会自动重试。";
+export const UNCONFIRMED_WRITE_MESSAGE =
+  "回复完成，但作品更新未确认，可能已部分写入；重试前请核对原请求。";
 
 /**
  * entry intent 的动作：`discuss` 仅讨论（无写许可），`generate`/`modify` 声明本次明确目标动作。
@@ -365,7 +397,8 @@ export type AgentConversationAdapterEvent =
   | { type: "tool-completed"; tool: string; callId?: string; ok: boolean; summary?: string };
 
 export type AgentAdapterRunOutcome = {
-  status: "succeeded" | "partial" | "failed" | "cancelled" | "unknown";
+  /** 无法确认的路径已按 `failed` 结算；机器错误码说明原因。 */
+  status: "succeeded" | "partial" | "failed" | "cancelled";
   assistantText?: string;
   runId?: string;
   taskId?: string;

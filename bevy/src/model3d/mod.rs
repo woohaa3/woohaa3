@@ -64,6 +64,7 @@ mod diagnostics;
 pub(crate) mod instancing;
 mod item_placement;
 mod mesh;
+pub(crate) mod model_textures;
 mod motion_plan;
 mod motion_reset;
 mod opacity;
@@ -90,7 +91,7 @@ pub(crate) use grid::{setup as setup_grid, setup_camera};
 
 pub(crate) use runtime::{
     FocusVisuals, ModelAssets, ModelVisuals, apply_animation_playback, apply_motion_playback,
-    sync_models, sync_quality,
+    sync_models, sync_quality, sync_quality_with_demand,
 };
 
 /// Native 片场准备管线：只对 native-canvas 的显式总览策略根生效。

@@ -36,6 +36,10 @@ import { ImageFocusStore } from "./image-focus-store.js";
 import { VideoFocusStore } from "./video-focus-store.js";
 import { ModelSceneOverrideStore } from "./model-scene-override-store.js";
 import { installPerfFrameWindow } from "./perf-frame-window.js";
+import {
+  installOverviewLodTelemetry,
+  type OverviewLodTelemetryHandle
+} from "./overview-lod-telemetry.js";
 import { groupBadgeScreenRect } from "@woohaa3/contracts";
 import {
   applyFilmSetObjectAction,
@@ -174,6 +178,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private loadPromise: Promise<BevyRuntime> | null = null;
   /** 帧窗口（`perf.frame`）：DOM canvas 挂上后开，卸载/释放时关（design D4）。 */
   private frameWindow: import("../../services/telemetry-performance.js").PerfFrameWindow | null = null;
+  /** 片场总览 LOD 采样（`perf.lod`）：与帧窗口同生命周期，只在画布挂载期间记录。 */
+  private lodTelemetry: OverviewLodTelemetryHandle | null = null;
   private readonly loadAbort = new AbortController();
 
   constructor(private readonly options: CanvasRuntimeOptions) {}
@@ -721,9 +727,10 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
           // 聚焦投影变化只请求失效；同一帧的输入/媒体 tick 会合并进一次提交（design D2）。
           this.controllerInstance?.invalidate("model-focus");
         },
-        onViewportChange: () => {
+        onViewportChange: (viewport) => {
           this.viewportRevision += 1;
           for (const listener of this.viewportListeners) listener();
+          this.lodTelemetry?.viewportChanged(viewport.zoom);
           this.options.onViewportChange?.(this.controllerInstance?.viewport() ?? { x: 0, y: 0, zoom: 1 });
         },
         onFrame: () => {
@@ -736,7 +743,16 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     // 帧窗口只在挂载后开：没有 DOM canvas 就没有帧，先开窗会让 fps 的分母包含等待时间
     // （change: 2026-10-25-enhance-telemetry-performance-collection，design D4）。
     this.frameWindow?.dispose();
-    this.frameWindow = installPerfFrameWindow();
+    this.frameWindow = installPerfFrameWindow(() => runtime.getFrameCounters?.() ?? null);
+    // 片场总览 LOD 采样：只在画布挂载期间读渲染器已有的按根诊断，缩放停止/定时心跳各采一次
+    // （2026-10-28 片场总览 LOD 遥测采样）。
+    this.lodTelemetry?.dispose();
+    this.lodTelemetry = installOverviewLodTelemetry({
+      read: () => runtime.getWorkDiagnostics?.() ?? {},
+      // 场景只用来把 `high-owner` 细分为选中/聚焦/编辑/声明缺失；读不到不影响档位采样。
+      readScene: () => runtime.lastScene?.() ?? null,
+      isHidden: () => (globalThis.document?.visibilityState ?? "visible") === "hidden"
+    });
     const unsubscribe = this.options.subscribeModelScenes(() => {
       // prepared resource 就绪/替换不改变画布对象，但会改变内容身份与可准入性。
       this.modelContentVersion += 1;
@@ -760,6 +776,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       // 卸载即关闭窗口：残留的定时器会在没有画布时继续聚合，发出与用户所见无关的样本。
       this.frameWindow?.dispose();
       this.frameWindow = null;
+      this.lodTelemetry?.dispose();
+      this.lodTelemetry = null;
       controller.dispose();
       textureSync.dispose();
       videoSessions.dispose();
@@ -792,6 +810,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     this.detach?.();
     this.frameWindow?.dispose();
     this.frameWindow = null;
+    this.lodTelemetry?.dispose();
+    this.lodTelemetry = null;
     this.loadAbort.abort();
     this.runtimeInstance?.dispose();
     this.controllerInstance = null;

@@ -1,18 +1,18 @@
 /**
- * 插件详情内容（设置弹窗右栏）
- * （change: 2026-10-17-move-settings-into-canvas-dialog，任务 2.2 / design D2）。
+ * 插件详情内容（设置弹窗右栏的二级 / 三级视图）。
  *
- * 原来这里是独立的 `settings-plugin-config` 大弹窗外壳（自带 Dialog.Content/Header）；
- * 现在设置工作区自己就是唯一弹窗，插件详情只是右栏的内部视图：
- * - 顶部「返回插件列表」+ 插件名；
- * - 内容仍是同一份权威数据（配置项、模型策略、安全诊断与扩展面板）；
- * - 扩展面板的 `requestClose` 在此语境表示「返回列表」，与 Header 关闭设置分开。
+ * 层级导航（画布设置-扩展层级导航，2026-10-28）：
+ * - L2 概览：身份、启停、说明、配置规模与「进入配置 / 模型 / 管理」的入口；
+ * - L3 子页：配置（扩展面板 + 声明式配置项）、模型（模型目录与站点级启停）、管理（来源、签名、卸载/回滚）。
+ *   子页之间只换右栏；返回列表由左栏的返回项承担，本组件不再自带「返回插件列表」按钮。
+ *
+ * 内容仍是同一份权威数据（配置项、模型策略、安全诊断与扩展面板），不持有第二份状态。
  */
 import { Component, useEffect, useMemo, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
-import { Button } from "../../../../shared/ui/Button.js";
-import { Switch } from "../../../../shared/ui/Switch.js";
-import { BackIcon, CopyIcon } from "../../../../shared/ui/icons.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { Switch } from "@woohaa3/ui/primitives";
+import { CopyIcon } from "@woohaa3/ui/icons";
 import { appPublicUrl } from "../../../services/app-base-path.js";
 import type { BackendSettingsStore } from "../backend-settings-store.js";
 import {
@@ -32,6 +32,7 @@ import { SettingRow } from "../setting-row.js";
 import { ArkEndpointSection, isArkEndpointEntry } from "../ark-endpoints.js";
 import {
   EMPTY_SETTINGS_PANELS,
+  settingsPanelIds,
   settingsPanelsOf,
   type SettingsPanelSource
 } from "../plugin-panels.js";
@@ -45,16 +46,28 @@ import type { ManagedExtensionsController } from "../managed-extensions.js";
 import { GeneratedModelsSection } from "./model-catalog.js";
 import { useExtensionFaults } from "../../../host.js";
 import { slotContributionOrigin } from "../../../slots.js";
+import {
+  pluginPages,
+  pluginSubPages,
+  resolvePluginPage,
+  type PluginPageDescriptor,
+  type PluginPageId
+} from "../plugin-pages.js";
+import { PluginPageEntry } from "./rail-navigation.js";
 import "../settings.css";
 
 export type PluginConfigContentProps = {
   pluginId: string;
+  /** 当前子页；缺省概览。目标子页不存在时回落到概览。 */
+  page?: PluginPageId;
   store: BackendSettingsStore;
   manager: ExtensionManagerFacade;
   /** 扩展自带设置面板（`settings.plugin-config`）；缺省无面板。 */
   settingsPanels?: SettingsPanelSource;
-  /** 「返回插件列表」（作为内部导航，遵守草稿门禁；不关闭设置）。 */
+  /** 「返回插件列表」（作为内部导航，遵守草稿门禁；不关闭设置）。面板的 requestClose 也复用它。 */
   onBack: () => void;
+  /** 进入某个子页（L3）；缺省时概览只展示规模，不显示入口行。 */
+  onSelectPage?: (page: PluginPageId) => void;
   /** 设置编辑会话：插件详情的扩展面板把 dirty/pending 汇总进同一门禁。 */
   editSession?: SettingsEditSession;
   /** 设置专项扩展装配：打开未激活扩展详情时按需加载其设置贡献。 */
@@ -64,14 +77,16 @@ export type PluginConfigContentProps = {
 /** 单个插件的详情内容；插件不存在或清单未读到给提示，不打开其它插件。 */
 export function PluginConfigContent({
   pluginId,
+  page = "overview",
   store,
   manager,
   managed,
   settingsPanels,
   onBack,
+  onSelectPage,
   editSession,
   extensionSettings
-}: PluginConfigContentProps & { /** 受管扩展的卸载/回滚/身份说明只在详情页出现。 */ managed?: ManagedExtensionsController }) {
+}: PluginConfigContentProps & { /** 受管扩展的卸载/回滚/身份说明只在「管理」页出现。 */ managed?: ManagedExtensionsController }) {
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const view = useSyncExternalStore(manager.subscribe, manager.getSnapshot, manager.getSnapshot);
   const panels = settingsPanels ?? EMPTY_SETTINGS_PANELS;
@@ -79,6 +94,7 @@ export function PluginConfigContent({
   const panelsVersion = useSyncExternalStore(panels.subscribe, panels.version, panels.version);
   const pluginPanels = useMemo(() => settingsPanelsOf(panels, pluginId), [panels, pluginId, panelsVersion]);
   const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view);
+  const panelIds = useMemo(() => settingsPanelIds(panels), [panels, panelsVersion]);
   const group = index.groups.find((candidate) => candidate.id === pluginId);
   const [panelError, setPanelError] = useState<string | null>(null);
   /**
@@ -107,14 +123,17 @@ export function PluginConfigContent({
   if (!group) {
     return (
       <div className="settings-workbench__detail" data-testid="plugin-config-missing">
-        <PluginDetailHeader title="插件详情" onBack={onBack} />
+        <h2 className="settings-workbench__detail-title">插件详情</h2>
         <p className="settings-page__hint">
           找不到插件 <code>{pluginId}</code>：它可能已被移除，或插件清单还没读到。
         </p>
+        <Button size="sm" onClick={onBack}>返回插件列表</Button>
       </div>
     );
   }
 
+  const pages = pluginPages(index, group, panelIds);
+  const current = resolvePluginPage(pages, page);
   const layer = PLUGIN_LAYER_LABELS[group.layer];
   const inactive = inactiveStateOf(index, group);
   const diagnostics = diagnosticsOf(index, group);
@@ -156,243 +175,325 @@ export function PluginConfigContent({
   const modelRefresh = group.modelRefresh;
   const endpointEntries = group.entries.filter(isArkEndpointEntry);
   const configEntries = group.entries.filter((entry) => !isArkEndpointEntry(entry));
+  const inactiveHint = inactive ? (
+    <p className="settings-page__hint" data-testid={`plugin-config-inactive-${group.id}`}>
+      该插件当前未运行（{inactive}）：这里保存的配置要等启用后才生效。
+    </p>
+  ) : null;
+  const diagnosticsHint = diagnostics.length > 0 ? (
+    <p className="settings-page__hint" role="status">{diagnostics.join("；")}</p>
+  ) : null;
 
   return (
-    <div className="settings-workbench__detail" data-testid={`plugin-config-${group.id}`}>
-      <PluginDetailHeader
-        title={group.label}
-        onBack={onBack}
-        icon={<PluginIconMark icon={group.icon} testId={`plugin-config-icon-${group.id}`} />}
-        {...(managed && group.installed?.managed
-          ? { actions: <ManagedExtensionActions installed={group.installed} controller={managed} canManage={store.canManage()} /> }
-          : {})}
-        meta={
-          <>
-            <span className="plugin-card__badge">{layer.badge}</span>
-            {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
-            {group.installed?.managed ? (
-              <span
-                className="plugin-card__badge is-source"
-                data-tone={extensionSource(group.installed).tone}
-                data-testid={`plugin-config-source-${group.id}`}
-              >
-                {extensionSource(group.installed).label}
-              </span>
-            ) : null}
-            {extensionObservationBadge(group.installed) ? (
-              <span
-                className="plugin-card__badge is-observe"
-                data-testid={`plugin-config-observe-${group.id}`}
-                title={extensionObservationBadge(group.installed)!.title}
-              >
-                {extensionObservationBadge(group.installed)!.label}
-              </span>
-            ) : null}
-            {extensionTrustBadge(group.installed) ? (
-              <span
-                className="plugin-card__badge is-trust"
-                data-tone={extensionTrustBadge(group.installed)!.tone}
-                data-testid={`plugin-config-trust-${group.id}`}
-              >
-                {extensionTrustBadge(group.installed)!.label}
-              </span>
-            ) : null}
-            {group.version ? (
-              <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`plugin-config-version-${group.id}`}>
-                {versionLabel(group.version)}
-              </span>
-            ) : null}
-            {/* 安全说明跟着徽标走：签名只证来源与完整性，扩展与宿主同进程、同权限。 */}
-            {group.installed?.managed ? (
-              <span className="plugin-config__note" data-testid={`managed-trust-note-${group.id}`}>
-                与本机宿主同权限，不是沙箱
-              </span>
-            ) : null}
-          </>
-        }
-      />
+    <div
+      className="settings-workbench__detail"
+      data-testid={`plugin-config-${group.id}`}
+      data-page={current.id}
+    >
+      {current.id === "overview" ? (
+        <>
+          <PluginDetailHeader
+            title={group.label}
+            icon={<PluginIconMark icon={group.icon} testId={`plugin-config-icon-${group.id}`} />}
+            meta={
+              <>
+                <span className="plugin-card__badge">{layer.badge}</span>
+                {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
+                {group.installed?.managed ? (
+                  <span
+                    className="plugin-card__badge is-source"
+                    data-tone={extensionSource(group.installed).tone}
+                    data-testid={`plugin-config-source-${group.id}`}
+                  >
+                    {extensionSource(group.installed).label}
+                  </span>
+                ) : null}
+                {extensionObservationBadge(group.installed) ? (
+                  <span
+                    className="plugin-card__badge is-observe"
+                    data-testid={`plugin-config-observe-${group.id}`}
+                    title={extensionObservationBadge(group.installed)!.title}
+                  >
+                    {extensionObservationBadge(group.installed)!.label}
+                  </span>
+                ) : null}
+                {extensionTrustBadge(group.installed) ? (
+                  <span
+                    className="plugin-card__badge is-trust"
+                    data-tone={extensionTrustBadge(group.installed)!.tone}
+                    data-testid={`plugin-config-trust-${group.id}`}
+                  >
+                    {extensionTrustBadge(group.installed)!.label}
+                  </span>
+                ) : null}
+                {group.version ? (
+                  <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`plugin-config-version-${group.id}`}>
+                    {versionLabel(group.version)}
+                  </span>
+                ) : null}
+                {/* 安全说明跟着徽标走：签名只证来源与完整性，扩展与宿主同进程、同权限。 */}
+                {group.installed?.managed ? (
+                  <span className="plugin-config__note" data-testid={`managed-trust-note-${group.id}`}>
+                    与本机宿主同权限，不是沙箱
+                  </span>
+                ) : null}
+              </>
+            }
+          />
 
-      <section className="plugin-overview" data-testid={`plugin-overview-${group.id}`}>
-        <div className="plugin-overview__top">
-          <span className="plugin-overview__status" data-tone={statusTone}>
-            <i />{statusLabel}
-          </span>
-          <div className="plugin-overview__controls">
-            {manageable ? (
-              <PluginStateControl
-                index={index}
-                group={group}
-                manager={manager}
-                store={store}
-                siteManageable={view.siteManageable}
-                testId={`plugin-config-switch-${group.id}`}
-              />
-            ) : (
-              <Switch
-                checked={!inactive}
-                disabled
-                onCheckedChange={() => undefined}
-                aria-label={`${group.label} 的启停由宿主管理，不能单独停用`}
-                title="内置扩展由宿主管理，不能单独停用"
-                testId={`plugin-config-switch-${group.id}`}
-              />
-            )}
-          </div>
-        </div>
-        <p className="plugin-overview__description">{group.description || "暂无说明。"}</p>
-        <div className="plugin-overview__stats">
-          <div className="plugin-overview__stat">
-            <strong>{group.entries.length}</strong>
-            <span>配置项</span>
-          </div>
-          {models.length > 0 ? (
-            <div className="plugin-overview__stat">
-              <strong>{enabledModels}/{models.length}</strong>
-              <span>已启用模型</span>
+          <section className="plugin-overview" data-testid={`plugin-overview-${group.id}`}>
+            <div className="plugin-overview__top">
+              <span className="plugin-overview__status" data-tone={statusTone}>
+                <i />{statusLabel}
+              </span>
+              <div className="plugin-overview__controls">
+                {manageable ? (
+                  <PluginStateControl
+                    index={index}
+                    group={group}
+                    manager={manager}
+                    store={store}
+                    siteManageable={view.siteManageable}
+                    testId={`plugin-config-switch-${group.id}`}
+                  />
+                ) : (
+                  <Switch
+                    checked={!inactive}
+                    disabled
+                    onCheckedChange={() => undefined}
+                    aria-label={`${group.label} 的启停由宿主管理，不能单独停用`}
+                    title="内置扩展由宿主管理，不能单独停用"
+                    testId={`plugin-config-switch-${group.id}`}
+                  />
+                )}
+              </div>
             </div>
-          ) : null}
-          <div className="plugin-overview__stat">
-            <strong>{extensionSource(group.installed).label}</strong>
-            <span>安装来源</span>
-          </div>
-        </div>
-        {directory ? (
-          <div className="plugin-overview__path" title={directory}>
-            <span>安装位置</span>
-            <code>{directory}</code>
-            <button
-              type="button"
-              className="plugin-overview__copy"
-              aria-label="复制安装路径"
-              title="复制安装路径"
-              onClick={() => void navigator.clipboard?.writeText(directory)}
-            >
-              <CopyIcon size={13} />
-            </button>
-          </div>
-        ) : null}
-      </section>
-      <ManagedExtensionDetails installed={group.installed} />
-      {inactive ? (
-        <p className="settings-page__hint" data-testid={`plugin-config-inactive-${group.id}`}>
-          该插件当前未运行（{inactive}）：这里保存的配置要等启用后才生效。
-        </p>
-      ) : null}
-      {diagnostics.length > 0 ? (
-        <p className="settings-page__hint" role="status">{diagnostics.join("；")}</p>
-      ) : null}
-
-      {pluginPanels.length > 0 ? (
-        inactive !== null ? (
-          <p className="settings-page__hint" data-testid={`plugin-config-panel-inactive-${group.id}`}>
-            该插件当前未运行（{inactive}）：先用上方开关启用它，再配置来源连接。
-          </p>
-        ) : (
-          <section className="settings-workbench__section">
-            <div className="plugin-config__panels" data-testid={`plugin-config-panels-${group.id}`}>
-              {pluginPanels.map((panel) => (
-                <ExtensionSettingsPanelHost
-                  key={panel.id}
-                  id={panel.id}
-                  pluginId={group.id}
-                  render={panel.render}
-                  {...(panel.source ? { source: panel.source } : {})}
-                  {...(editSession ? { editSession } : {})}
-                  onRequestClose={onBack}
-                  onError={setPanelError}
-                />
-              ))}
+            <p className="plugin-overview__description">{group.description || "暂无说明。"}</p>
+            <div className="plugin-overview__stats">
+              <div className="plugin-overview__stat">
+                <strong>{group.entries.length}</strong>
+                <span>配置项</span>
+              </div>
+              {models.length > 0 ? (
+                <div className="plugin-overview__stat">
+                  <strong>{enabledModels}/{models.length}</strong>
+                  <span>已启用模型</span>
+                </div>
+              ) : null}
+              <div className="plugin-overview__stat">
+                <strong>{extensionSource(group.installed).label}</strong>
+                <span>安装来源</span>
+              </div>
             </div>
-            {panelError ? (
-              <p className="settings-page__error" role="alert" data-testid={`plugin-config-panel-error-${group.id}`}>
-                {panelError} 声明式配置仍可在下方修改。
-              </p>
+            {directory ? (
+              <div className="plugin-overview__path" title={directory}>
+                <span>安装位置</span>
+                <code>{directory}</code>
+                <button
+                  type="button"
+                  className="plugin-overview__copy"
+                  aria-label="复制安装路径"
+                  title="复制安装路径"
+                  onClick={() => void navigator.clipboard?.writeText(directory)}
+                >
+                  <CopyIcon size={13} />
+                </button>
+              </div>
             ) : null}
           </section>
-        )
-      ) : loadState.status === "loading" ? (
-        <p className="settings-page__hint" role="status" data-testid={`plugin-config-panel-loading-${group.id}`}>
-          正在加载该插件的设置面板…
-        </p>
-      ) : loadState.status === "failed" ? (
-        <p className="settings-page__hint" data-testid={`plugin-config-panel-unavailable-${group.id}`}>
-          该插件没有可用的专用设置面板（{loadState.reason ?? "扩展未声明设置入口"}）；下方声明式配置仍可读写。
-        </p>
-      ) : null}
 
-      {modelRefresh ? (
-        <section className="settings-workbench__section">
-          <h3 className="settings-page__group-title">可用模型</h3>
-          <p className="settings-page__hint">{modelRefresh.hint}</p>
-          <ModelRefresh
-            path={modelRefresh.path}
-            testId={modelRefreshTestId(group)}
-            onDiscovered={() => manager.refreshModels()}
-            {...(editSession ? { editSession } : {})}
-            entryId={`plugin-model-refresh:${group.id}`}
-          />
-        </section>
-      ) : null}
-      {configEntries.length > 0 ? (
-        <section className="settings-workbench__section">
-          <h3 className="settings-page__group-title">配置项</h3>
-          <ul className="settings-page__list" data-testid={`plugin-config-entries-${group.id}`}>
-            {configEntries.map((entry) => (
-              <SettingRow
-                key={`${entry.key}:${String(entry.value)}:${entry.configured}`}
-                entry={entry}
-                store={store}
-                inactive={inactive !== null}
+          {inactiveHint}
+          {diagnosticsHint}
+
+          {onSelectPage ? <PluginPageEntries pages={pluginSubPages(pages)} onOpen={onSelectPage} /> : null}
+        </>
+      ) : current.id === "config" ? (
+        <>
+          <PluginPageHeader page={current} />
+          {diagnosticsHint}
+          {pluginPanels.length > 0 ? (
+            inactive !== null ? (
+              <p className="settings-page__hint" data-testid={`plugin-config-panel-inactive-${group.id}`}>
+                该插件当前未运行（{inactive}）：先用上方开关启用它，再配置来源连接。
+              </p>
+            ) : (
+              <section className="settings-workbench__section">
+                <div className="plugin-config__panels" data-testid={`plugin-config-panels-${group.id}`}>
+                  {pluginPanels.map((panel) => (
+                    <ExtensionSettingsPanelHost
+                      key={panel.id}
+                      id={panel.id}
+                      pluginId={group.id}
+                      render={panel.render}
+                      {...(panel.source ? { source: panel.source } : {})}
+                      {...(editSession ? { editSession } : {})}
+                      onRequestClose={onBack}
+                      onError={setPanelError}
+                    />
+                  ))}
+                </div>
+                {panelError ? (
+                  <p className="settings-page__error" role="alert" data-testid={`plugin-config-panel-error-${group.id}`}>
+                    {panelError} 声明式配置仍可在下方修改。
+                  </p>
+                ) : null}
+              </section>
+            )
+          ) : loadState.status === "loading" ? (
+            <p className="settings-page__hint" role="status" data-testid={`plugin-config-panel-loading-${group.id}`}>
+              正在加载该插件的设置面板…
+            </p>
+          ) : loadState.status === "failed" ? (
+            <p className="settings-page__hint" data-testid={`plugin-config-panel-unavailable-${group.id}`}>
+              该插件没有可用的专用设置面板（{loadState.reason ?? "扩展未声明设置入口"}）；下方声明式配置仍可读写。
+            </p>
+          ) : null}
+
+          {configEntries.length > 0 ? (
+            <section className="settings-workbench__section">
+              <h3 className="settings-page__group-title">配置项</h3>
+              <ul className="settings-page__list" data-testid={`plugin-config-entries-${group.id}`}>
+                {configEntries.map((entry) => (
+                  <SettingRow
+                    key={`${entry.key}:${String(entry.value)}:${entry.configured}`}
+                    entry={entry}
+                    store={store}
+                    inactive={inactive !== null}
+                    {...(editSession ? { editSession } : {})}
+                  />
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {endpointEntries.length > 0 ? (
+            <section className="settings-workbench__section">
+              <ArkEndpointSection entries={endpointEntries} store={store} inactive={inactive !== null} />
+            </section>
+          ) : null}
+
+        </>
+      ) : current.id === "models" ? (
+        <>
+          <PluginPageHeader page={current} />
+          {modelRefresh ? (
+            <section className="settings-workbench__section">
+              <h3 className="settings-page__group-title">可用模型</h3>
+              <p className="settings-page__hint">{modelRefresh.hint}</p>
+              <ModelRefresh
+                path={modelRefresh.path}
+                testId={modelRefreshTestId(group)}
+                onDiscovered={() => manager.refreshModels()}
                 {...(editSession ? { editSession } : {})}
+                entryId={`plugin-model-refresh:${group.id}`}
               />
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      {endpointEntries.length > 0 ? (
-        <section className="settings-workbench__section">
-          <ArkEndpointSection entries={endpointEntries} store={store} inactive={inactive !== null} />
-        </section>
-      ) : null}
-      {models.length > 0 || modelRefresh ? (
-        <section className="settings-workbench__section">
-          <GeneratedModelsSection
-            groupId={group.id}
-            models={models}
-            manager={manager}
-            siteManageable={view.siteManageable}
-          />
-        </section>
-      ) : null}
+            </section>
+          ) : null}
+          {models.length > 0 || modelRefresh ? (
+            <section className="settings-workbench__section">
+              <GeneratedModelsSection
+                groupId={group.id}
+                models={models}
+                manager={manager}
+                siteManageable={view.siteManageable}
+              />
+            </section>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <PluginPageHeader page={current} />
+          <section className="settings-workbench__section">
+            <h3 className="settings-page__group-title">安装与版本</h3>
+            <dl className="plugin-manage__facts">
+              <div>
+                <dt>安装来源</dt>
+                <dd>
+                  <span className="plugin-card__badge is-source" data-tone={extensionSource(group.installed).tone}>
+                    {extensionSource(group.installed).label}
+                  </span>
+                  {extensionTrustBadge(group.installed) ? (
+                    <span className="plugin-card__badge is-trust" data-tone={extensionTrustBadge(group.installed)!.tone}>
+                      {extensionTrustBadge(group.installed)!.label}
+                    </span>
+                  ) : null}
+                </dd>
+              </div>
+              {group.version ? (
+                <div>
+                  <dt>版本</dt>
+                  <dd>{versionLabel(group.version)}</dd>
+                </div>
+              ) : null}
+              {directory ? (
+                <div>
+                  <dt>安装位置</dt>
+                  <dd>
+                    <code>{directory}</code>
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+            <p className="settings-page__hint">签名只证明来源与完整性；扩展与本机宿主同进程、同权限，不是沙箱。</p>
+          </section>
+          <ManagedExtensionDetails installed={group.installed} />
+          {managed && group.installed?.managed ? (
+            <section className="settings-workbench__section">
+              <h3 className="settings-page__group-title">卸载与回滚</h3>
+              <ManagedExtensionActions installed={group.installed} controller={managed} canManage={store.canManage()} />
+            </section>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
 
-/** 详情头部：返回列表（内部导航）+ 插件身份。 */
+/** 概览页的下一级入口：配置 / 模型 / 管理。对应设计稿里「权限 / 高级配置」两张卡片。 */
+function PluginPageEntries({
+  pages,
+  onOpen
+}: {
+  pages: readonly PluginPageDescriptor[];
+  onOpen: (page: PluginPageId) => void;
+}) {
+  if (pages.length === 0) {
+    return <p className="settings-page__hint">这个插件没有可配置的内容：只需要启停。</p>;
+  }
+  return (
+    <div className="plugin-entries" data-testid="plugin-page-entries">
+      {pages.map((page) => (
+        <PluginPageEntry key={page.id} page={page} onOpen={() => onOpen(page.id)} />
+      ))}
+    </div>
+  );
+}
+
+/** 详情头部：插件身份（不含返回——返回在左栏）。 */
 function PluginDetailHeader({
   title,
-  onBack,
   icon,
-  meta,
-  actions
+  meta
 }: {
   title: string;
-  onBack: () => void;
   icon?: ReactNode;
   meta?: ReactNode;
-  /** 头部右侧操作（受管扩展的回滚 / 卸载）。 */
-  actions?: ReactNode;
 }) {
   return (
     <header className="settings-workbench__detail-head">
-      <Button size="sm" tone="ghost" icon={<BackIcon />} onClick={onBack} data-testid="plugin-config-back">
-        返回插件列表
-      </Button>
       {icon}
       <h2 className="settings-workbench__detail-title">{title}</h2>
-      {/* meta 在标题行里 flex-grow 并右对齐，操作块必须排在它之后才能贴到最右。 */}
+      {/* meta 在标题行里 flex-grow 并右对齐。 */}
       {meta ? <div className="plugin-config__meta">{meta}</div> : null}
-      {actions ? <div className="plugin-config__actions">{actions}</div> : null}
+    </header>
+  );
+}
+
+/** 子页标题：讲清这一页管什么、有多少。 */
+function PluginPageHeader({ page }: { page: PluginPageDescriptor }) {
+  return (
+    <header className="settings-workbench__page-head" data-testid={`plugin-page-head-${page.id}`}>
+      <h2 className="settings-workbench__detail-title">{page.label}</h2>
+      <p className="settings-page__hint">{page.hint}</p>
     </header>
   );
 }

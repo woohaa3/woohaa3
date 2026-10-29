@@ -18,7 +18,7 @@ export type AgentDetailActionEmphasis = "low" | "strong";
 export type AgentDetailAction = {
   /** 具名动作文案（MUST NOT 仅为图标）。 */
   label: string;
-  /** 与入口同排的摘要（阶段/结果/待核对）。 */
+  /** 与入口同排的摘要（阶段/结果）。 */
   summary: string;
   /** 显著程度：运行与终态为 strong，idle 既往会话为 low。 */
   emphasis: AgentDetailActionEmphasis;
@@ -50,10 +50,8 @@ export function resolveAgentDetailAction(input: {
       return { label: "查看结果与对话", summary: "已完成", emphasis: "strong" };
     case "partial":
       return { label: "查看未完成项与对话", summary: "部分完成", emphasis: "strong" };
-    case "unknown":
-      return { label: "查看执行状态与对话", summary: "执行状态未知，可查看已有结果", emphasis: "strong" };
     case "cancelled":
-      return { label: "查看已执行内容", summary: "已停止，可核对已提交内容", emphasis: "strong" };
+      return { label: "查看已执行内容", summary: "已停止，已提交内容保留", emphasis: "strong" };
     default:
       return null;
   }

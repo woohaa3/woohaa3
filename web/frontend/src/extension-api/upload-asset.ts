@@ -10,7 +10,11 @@
  * 纯规划逻辑（`planUploadedNode`）无 DOM/fetch 依赖，便于单测；网络调用在 `uploadMediaFile`。
  */
 import {
+  GLB_MODEL_FORMAT,
+  MODEL_FORMAT_METADATA_KEY,
   createHighEntropyId,
+  isGlbFile,
+  normalizeGlbModelReference,
   uploadedMediaKind,
   inferWoohaa3CanvasInputRole,
   type CanvasCommand,
@@ -23,7 +27,7 @@ import { mediaUrlFor as mediaUrlForStorageKey } from "../cordis/services/paths.j
 
 /** 上传菜单接受的文件类型（与 Media Service 白名单一致）。 */
 export const UPLOAD_ACCEPT =
-  "image/png,image/jpeg,image/webp,image/gif,image/avif,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,audio/mp4,text/plain,text/markdown,application/json";
+  "image/png,image/jpeg,image/webp,image/gif,image/avif,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,audio/mp4,text/plain,text/markdown,application/json,.glb,model/gltf-binary";
 
 /** 浏览器文件的三要素（`File` 的结构子集，便于单测传字面量）。 */
 export type UploadFile = { name: string; type: string; size: number };
@@ -39,22 +43,30 @@ export type UploadedMedia = {
   deduplicated: boolean;
 };
 
-/** 文件 → 规范节点类型；不支持的类型返回 `null`。`generate`（3D 模型）不来自上传。 */
+/**
+ * 文件 → 规范节点类型；不支持的类型返回 `null`。
+ *
+ * `image`/`video`/`audio`/`text` 与节点类型同名；`.glb` 上传映射为普通 `model3d`
+ * （change: 2026-10-28-support-glb-model-nodes，任务 2.1）。
+ */
 export function uploadedNodeType(file: UploadFile): string | null {
+  if (isGlbFile(file)) return "model3d";
   const kind = uploadedMediaKind(file);
   if (!kind) return null;
-  // upload 的 kind 与节点类型同名（text/image/video/audio）。
   return kind;
 }
 
-/** 已成功的媒体上传 → 稳定资产（内容寻址）。仅用于 image/video/audio。 */
+/** 已成功的媒体上传 → 稳定资产（内容寻址）。 */
 export function buildUploadedAsset(input: {
   media: UploadedMedia;
-  mediaKind: "image" | "video" | "audio";
+  mediaKind: "image" | "video" | "audio" | "file";
   file: UploadFile;
+  /** 文件模型的格式标记（写入 metadata，供下载恢复扩展名）。 */
+  modelFormat?: "glb";
   now?: string;
 }): StoredAsset {
   const { media, mediaKind, file } = input;
+  const modelFormat = input.modelFormat ?? (mediaKind === "file" && isGlbFile(file) ? GLB_MODEL_FORMAT : undefined);
   return {
     id: `asset-upload-${media.checksum}`,
     title: file.name || "上传素材",
@@ -67,7 +79,8 @@ export function buildUploadedAsset(input: {
       storageKey: media.storageKey,
       checksum: media.checksum,
       contentType: media.contentType,
-      size: media.size
+      size: media.size,
+      ...(modelFormat ? { [MODEL_FORMAT_METADATA_KEY]: modelFormat } : {})
     }
   };
 }
@@ -190,6 +203,18 @@ function uploadedNodeData(nodeType: string, asset: StoredAsset, file: UploadFile
       outputAssetId: asset.id,
       resourceKind: nodeType,
       taskStatus: "successed"
+    };
+  }
+  if (nodeType === "model3d") {
+    // 文件模型只保存稳定资产引用与派生内容版本；不写 `modelScript`（不以空脚本伪装）。
+    const reference = normalizeGlbModelReference({ assetId: asset.id });
+    if (!reference.ok) return undefined;
+    return {
+      title: file.name || "模型",
+      modelSourceKind: "glb",
+      modelAssetId: reference.value.assetId,
+      modelContentVersion: reference.value.contentVersion,
+      modelPlacement: reference.value.placement
     };
   }
   return undefined;

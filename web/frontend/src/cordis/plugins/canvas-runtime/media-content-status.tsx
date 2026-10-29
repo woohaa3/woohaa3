@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { useService } from "../../react.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 /** Content diagnostics share the selected media node; they never rewrite an unavailable reference. */
 export function MediaContentStatus() {
   const service = useService("mediaContent"), selection = useService("selection"), canvas = useService("canvasState"), runtime = useService("canvasRuntime");

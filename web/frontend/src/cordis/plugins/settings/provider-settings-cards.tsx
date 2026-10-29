@@ -8,8 +8,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import "./settings.css";
 import type { SettingsEntryView, SettingsWriteValue } from "@woohaa3/contracts";
-import { Switch } from "../../../shared/ui/Switch.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Switch } from "@woohaa3/ui/primitives";
+import { Button } from "@woohaa3/ui/primitives";
 import type { BackendSettingsStore } from "./backend-settings-store.js";
 import { SettingRow } from "./setting-row.js";
 import { providerConfigGroups } from "./plugin-groups.js";

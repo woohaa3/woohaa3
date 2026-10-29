@@ -15,21 +15,22 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type {
-  AgentEntryIntent,
-  ConversationSnapshot,
-  ConversationTurn,
-  ConversationMessage,
-  ConversationToolActivity,
+import {
+  UNCONFIRMED_WRITE_ERROR_CODE,
+  type AgentEntryIntent,
+  type ConversationSnapshot,
+  type ConversationTurn,
+  type ConversationMessage,
+  type ConversationToolActivity,
 } from "@woohaa3/contracts";
 import type { AgentConversationServiceHandle } from "../../../services/agent-conversation-service.js";
 import { assistantInputController } from "../../../services/assistant-execution/controller.js";
 import { assistantConversationPort } from "../../../services/assistant-execution/conversation-port.js";
 import type { AgentConversationSubmitInput, AgentConversationSubmitResult } from "../../../contract/agent-conversation.js";
-import { AssistantComposer } from "../../../ui/assistant-execution/composer.js";
-import { AssistantToolbar } from "../../../ui/assistant-execution/toolbar.js";
-import { Button } from "../../../../shared/ui/Button.js";
-import { AssistantModelSelector, AssistantListSelector } from "../../../ui/assistant-execution/model-selector.js";
+import { AssistantComposer } from "@woohaa3/ui/assistant";
+import { AssistantToolbar } from "@woohaa3/ui/assistant";
+import { Button } from "@woohaa3/ui/primitives";
+import { AssistantModelSelector, AssistantListSelector } from "@woohaa3/ui/assistant";
 import { agentDirectory } from "../../../services/assistant-execution/directory.js";
 import { agentDirectoryModels, agentModelSelection, assistantSelectionMemory, rememberAssistantPreference } from "../../../services/assistant-execution/selection.js";
 import {
@@ -37,7 +38,7 @@ import {
   ChevronRightIcon,
   WarningIcon,
   LoadingIcon,
-} from "../../../../shared/ui/icons.js";
+} from "@woohaa3/ui/icons";
 import { buildConversationTimeline } from "./agent-conversation-timeline.js";
 import "./agent-conversation-panel.css";
 
@@ -56,7 +57,6 @@ const TURN_STATUS_LABEL: Record<string, string> = {
   partial: "部分完成",
   failed: "失败",
   cancelled: "已停止",
-  unknown: "执行状态未知",
 };
 
 const TURN_STAGE_LABEL: Record<string, string> = {
@@ -75,7 +75,7 @@ const TURN_STAGE_LABEL: Record<string, string> = {
   committing: "提交中",
 };
 
-/** 终态回合不再刷新（unknown 仍可能被 adapter 回执收敛，故视为非终态）。 */
+/** 终态回合不再刷新。 */
 function isTurnSettled(status: string): boolean {
   return (
     status === "succeeded" ||
@@ -305,7 +305,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
   const canClearContext =
     Boolean(props.nodeId) && detail !== null && !turnActive;
   const timeline = detail ? buildConversationTimeline(detail) : [];
-  const stopUnknownTurn = async () => {
+  const stopTurn = async () => {
     if (!turn || stopping) return;
     setStopping(true);
     setStopError(null);
@@ -314,7 +314,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
       if (!result.ok) throw new Error(result.error);
       await service.openDetail(props.conversationId);
     } catch (error) {
-      setStopError(error instanceof Error ? error.message : "停止未确认，请核对状态");
+      setStopError(error instanceof Error ? error.message : "停止失败，请重试");
     } finally { setStopping(false); }
   };
 
@@ -440,11 +440,11 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
             ) : item.kind === "tool" ? (
               <ToolRow key={item.key} tool={item.tool} turnStatus={item.turnStatus} />
             ) : (
-              <TurnResult key={item.key} turn={item.turn} recovered={detail.events.some(event => event.turnId === item.turn.turnId && event.type === "receipt" && (event.payload as { reconciled?: boolean } | null)?.reconciled === true)} />
+              <TurnResult key={item.key} turn={item.turn} />
             ),
           )
         )}
-        {turnActive && activeTurn?.status !== "unknown" ? (
+        {turnActive ? (
           <div className="agent-detail__progress">
             <p className="agent-detail__working">
               <LoadingIcon size={14} />
@@ -461,16 +461,15 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
             ) : null}
           </div>
         ) : null}
-        {turn?.target.mode === "text" && ["queued", "running", "committing"].includes(turn.status) ? <Button tone="neutral" disabled={stopping || !props.targetExecution?.()} onClick={() => void stopUnknownTurn()}>停止此回合</Button> : null}
-        {turn?.status === "unknown" ? (
-          <div className="agent-detail__result">
-            <p>{liveReturn ? "可先停止此回合，再返回生成面板继续搭建。" : "可先停止此回合，再关闭详情继续搭建。"}</p>
+        {turn?.target.mode === "text" && ["queued", "running", "committing"].includes(turn.status) ? <Button tone="neutral" disabled={stopping || !props.targetExecution?.()} onClick={() => void stopTurn()}>停止此回合</Button> : null}
+        {turn?.status === "failed" && turn.error?.code === UNCONFIRMED_WRITE_ERROR_CODE && turn.target.mode === "text" ? (
+          <div className="agent-detail__result" data-status="failed">
+            <p>重试会先查询原提交并复用候选，不会重新推理。</p>
             <div className="agent-detail__actions">
-              {turn.target.mode === "text" ? <button type="button" disabled={stopping || !props.targetExecution?.()} onClick={() => {
+              <button type="button" disabled={stopping || !props.targetExecution?.()} onClick={() => {
                 if (!service.retryTextSave) return;
                 setStopping(true); void service.retryTextSave(turn.requestId).then(result => { if (!result.ok) setStopError(result.error); else void service.openDetail(props.conversationId); }).finally(() => setStopping(false));
-              }}>重试保存</button> : null}
-              <button type="button" disabled={stopping} onClick={() => void stopUnknownTurn()}>{stopping ? "正在停止…" : "停止此回合"}</button>
+              }}>重试保存</button>
             </div>
             {stopError ? <p className="agent-detail__error">{stopError}</p> : null}
           </div>
@@ -537,7 +536,7 @@ function ToolRow({ tool, turnStatus }: { tool: ConversationToolActivity; turnSta
   const unresolved = tool.status === "started" && !running;
   const label =
     tool.status === "started"
-      ? running ? "进行中" : turnStatus === "unknown" ? "调用结果未知" : "未收到完成回执"
+      ? running ? "进行中" : "未收到完成回执"
       : tool.status === "failed"
         ? "失败"
         : "已完成";
@@ -570,13 +569,9 @@ function resultLabel(turn: ConversationTurn): string {
   return TURN_STATUS_LABEL[turn.status] ?? turn.status;
 }
 
-function TurnResult({ turn, recovered }: { turn: ConversationTurn; recovered: boolean }) {
-  const groupReceipt = turn.receipt as { kind?: string; actions?: unknown[] } | undefined;
+function TurnResult({ turn }: { turn: ConversationTurn }) {
   return (
     <div className="agent-detail__result" data-status={turn.status}>
-      {turn.status === "unknown" ? (
-        <p>{recovered ? "本机宿主重启后未取得完整执行回执。" : "未收到执行完成回执，当前无法确认结果。"}系统没有在等待你确认。{groupReceipt?.kind === "canvas-group" && groupReceipt.actions?.length === 0 ? "此回合尚无已登记的画布操作。" : "请核对已有结果。"}</p>
-      ) : null}
       {turn.receipt !== undefined ? (
         <details className="agent-detail__receipt">
           <summary>

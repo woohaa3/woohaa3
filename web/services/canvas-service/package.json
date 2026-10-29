@@ -38,7 +38,7 @@
     "@types/node": "^22.15.3",
     "@types/ws": "^8.5.13",
     "@woohaa3/extension-film-set": "workspace:*",
-    "typescript": "^5.6.3",
+    "typescript": "^7.0.2",
     "vitest": "^2.0.0"
   }
 }

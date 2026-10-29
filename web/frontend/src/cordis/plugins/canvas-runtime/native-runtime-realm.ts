@@ -54,7 +54,11 @@ export async function createNativeRuntimeRealm(
     xhr.setRequestHeader("X-Woohaa-Token", bootstrap.token ?? "external-host");
     if (typeof body === "string") xhr.setRequestHeader("Content-Type", "application/json");
     else xhr.overrideMimeType("text/plain; charset=x-user-defined");
-    xhr.send(body === undefined ? null : typeof body === "string" ? body : new Uint8Array(body).buffer);
+    // Preserve regular byte views (and their slice boundaries) without copying.
+    // XHR cannot send shared memory; only that uncommon case needs a snapshot.
+    if (body === undefined || typeof body === "string") xhr.send(body ?? null);
+    else if (body.buffer instanceof ArrayBuffer) xhr.send(body as Uint8Array<ArrayBuffer>);
+    else xhr.send(new Uint8Array(body));
     if (xhr.status !== 200) throw new Error(`桌面画布通信失败 (${xhr.status})`);
     return xhr;
   };

@@ -75,9 +75,6 @@ export function createSkillQueries(context: SkillQueryContext) {
     if (attempt.state === "running" || attempt.state === "queued" || attempt.state === "cancel-requested") {
       return { available: false, ...base, reason: "running", message: "当前尝试尚未结束", fallbackAvailable: false };
     }
-    if (attempt.state === "unknown") {
-      return { available: false, ...base, reason: "output-unavailable", message: "尝试状态待核对，不视为成功", fallbackAvailable: false };
-    }
     const reason: SkillStepOutputReason = attempt.state === "cancelled" ? "cancelled"
       : attempt.state === "superseded" ? "superseded" : "failed";
     const fallbackAttempt = step.latestSuccessfulRunId

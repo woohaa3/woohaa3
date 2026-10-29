@@ -164,29 +164,18 @@ pub(super) fn draw_static(
     labels
 }
 
-pub(super) fn draw_decorations(
+/// 悬停端点半钮（非选中态装饰）。持久选中描边由 selection producer 生产。
+pub(super) fn draw_hover_ports(
     geometry: &mut Geometry,
     theme: &ThemeResource,
     node: &GraphNode,
-    selected: bool,
     hover: Option<&NodeHover>,
     index: usize,
 ) {
     let (accent, _, _) = theme.node_palette(&node.kind);
-    let z = 10.0 + index as f32 * 0.1;
-    if selected {
-        super::selection_outline::draw(
-            geometry,
-            theme,
-            &super::selection_outline::Card { node, z },
-        );
-    }
-    if selected && node.resizable {
-        draw_resize_grip(geometry, theme, node, z + 0.005);
-    }
+    let (_, _, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     // 端点：静止时 MUST NOT 绘制常驻图形；仅指针悬停该节点时在左右中点显示「+」圆钮
     // （change: add-node-endpoint-hover）。指针落在某侧端点命中区时该侧用节点强调色。
-    // 颜色全部取自既有主题 token（不新增 token、不升主题 schema）。
     if let Some(hover) = hover.filter(|hover| hover.node_id.as_deref() == Some(node.id.as_str())) {
         let hovered_port = hover.port.as_deref();
         for (output, side) in [(false, "input"), (true, "output")] {
@@ -206,6 +195,52 @@ pub(super) fn draw_decorations(
     }
 }
 
+/// 普通卡片的持久选中描边 producer 几何：外发光、选中边框/面与 resize 抓手。
+///
+/// 与 `draw_hover_ports` 分离后，selection producer 只按 `CanvasSelection` 查询写入
+/// `SelectionOutlineBatch`，不再要求卡片装饰块随选中状态重建。
+pub(crate) fn draw_selection_outline(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    node: &GraphNode,
+    index: usize,
+) {
+    let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
+    let (width, height) = (node.width, node.height);
+    geometry.rounded_rect(
+        x - 4.,
+        y - 4.,
+        width + 8.,
+        height + 8.,
+        11.,
+        z,
+        theme.token_u32("canvasNodeSelectedHalo"),
+    );
+    // Cover the normal rim while staying below static icons/content and media.
+    geometry.rounded_rect(
+        x,
+        y,
+        width,
+        height,
+        8.,
+        z + 0.0031,
+        theme.token_u32("canvasNodeBorderSelected"),
+    );
+    let border = 1.7;
+    geometry.rounded_rect(
+        x + border,
+        y + border,
+        width - border * 2.,
+        height - border * 2.,
+        7.,
+        z + 0.0032,
+        theme.token_u32("canvasNodeSurface"),
+    );
+    if node.resizable {
+        draw_resize_grip(geometry, theme, node, z + 0.005);
+    }
+}
+
 #[cfg(test)]
 pub(super) fn draw(
     geometry: &mut Geometry,
@@ -216,7 +251,10 @@ pub(super) fn draw(
     index: usize,
 ) -> Vec<Label> {
     let labels = draw_static(geometry, theme, node, index);
-    draw_decorations(geometry, theme, node, selected, hover, index);
+    if selected {
+        draw_selection_outline(geometry, theme, node, index);
+    }
+    draw_hover_ports(geometry, theme, node, hover, index);
     labels
 }
 

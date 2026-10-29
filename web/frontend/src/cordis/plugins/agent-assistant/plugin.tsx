@@ -1,7 +1,7 @@
 import { lazy, Suspense, useSyncExternalStore, useMemo } from "react";
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { definePlugin } from "../../plugin.js";
-import { SparklesIcon } from "../../../shared/ui/icons.js";
+import { SparklesIcon } from "@woohaa3/ui/icons";
 import { objectPayload } from "../../services/dialogs/registry.js";
 import { createBackendSettingsStore } from "../settings/backend-settings-store.js";
 import type { SettingsRemote } from "../../services/settings-remote.js";

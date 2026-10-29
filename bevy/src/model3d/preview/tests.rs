@@ -87,9 +87,27 @@ fn native_custom_meshes_with_equal_counts_preserve_distinct_vertices_and_topolog
     use crate::model3d::{resources::SharedResources, scene::ModelGeometry};
     let mut resources = SharedResources::default();
     let mut meshes = Assets::<Mesh>::default();
-    let first = ModelGeometry::Mesh { vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]], faces: vec![[0, 1, 2]] };
-    let moved = ModelGeometry::Mesh { vertices: vec![[0., 0., 0.], [2., 0., 0.], [0., 1., 0.]], faces: vec![[0, 1, 2]] };
-    let reversed = ModelGeometry::Mesh { vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]], faces: vec![[0, 2, 1]] };
+    let first = ModelGeometry::Mesh {
+        vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+        faces: vec![[0, 1, 2]],
+        normals: None,
+        uvs: None,
+        colors: None,
+    };
+    let moved = ModelGeometry::Mesh {
+        vertices: vec![[0., 0., 0.], [2., 0., 0.], [0., 1., 0.]],
+        faces: vec![[0, 1, 2]],
+        normals: None,
+        uvs: None,
+        colors: None,
+    };
+    let reversed = ModelGeometry::Mesh {
+        vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+        faces: vec![[0, 2, 1]],
+        normals: None,
+        uvs: None,
+        colors: None,
+    };
     let a = super::render::high_mesh(&mut resources, &mut meshes, &first).unwrap();
     let b = super::render::high_mesh(&mut resources, &mut meshes, &moved).unwrap();
     let c = super::render::high_mesh(&mut resources, &mut meshes, &reversed).unwrap();
@@ -137,6 +155,7 @@ fn humanoid_ops() -> Vec<ModelOp> {
             double_sided: false,
             unlit: false,
             opacity: None,
+            base_color_texture: None,
         },
         ModelOp::Group {
             id: "arm".into(),

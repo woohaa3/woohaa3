@@ -5,9 +5,9 @@
 import { describe, expect, it } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from "./Dialog.js";
-import { AlertDialog } from "./AlertDialog.js";
-import { MediaDialog } from "./MediaDialog.js";
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
+import { AlertDialog } from "@woohaa3/ui/dialogs";
+import { MediaDialog } from "@woohaa3/ui/media";
 
 // React 18 需要显式声明 act 环境。
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

@@ -395,11 +395,10 @@ export class RunStateStore {
         && old.execution?.turnRequestId === conversion.execution?.turnRequestId
         && ["completed", "failed", "cancelled"].includes(old.status);
       if (sameSettledConversion && old && conversion) {
-        conversion = old.status === "failed" && conversion.status === "running"
-          ? { status: "unknown", requestId: old.requestId, sourceNodeId: old.sourceNodeId, execution: old.execution }
-          : old;
+        // 已结算的转换（含 failed）保持原终态；同一请求的迟到 running 快照不能重新点亮扫描。
+        conversion = old;
       }
-      // Retain the terminal observation: repeated save-retry snapshots must stay verifying.
+      // Retain the terminal observation: repeated save-retry snapshots keep the settled failure visible.
       if (conversion && !sameSettledConversion) this.filmConversions.set(node.id, conversion);
       const summary = summaries.get(node.id) ?? summarizeNodeRunState({ canvasId: this.canvasId, nodeId: node.id, isAggregate: true, records: [] });
       summary.filmSetFeedback = normalizeFilmSetRunFeedback({ canvasId: this.canvasId, nodeId: node.id, conversion,

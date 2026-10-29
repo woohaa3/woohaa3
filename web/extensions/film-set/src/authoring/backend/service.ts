@@ -1,7 +1,7 @@
 import { canonicalFilmSetFields, filmSetAnimationsOf, filmSetClipHash, filmSetClipPrecondition } from "@woohaa3/contracts";
 import type { CanvasAuthority } from "@woohaa3/contracts";
 import type { CanvasCommand, CanvasNodeData, ServerCanvas } from "@woohaa3/contracts";
-import { animationSnapshotHash, createFilmSetSnapshot, createModelSnapshot, decodeFilmSetNodeData, decodeModel3DNodeData, defaultInitialShotCamera, importModelSnapshot, isFilmSetNode, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, modelSourceHash, normalizeModelDefinition, isJsonObject, validateSelfContainedModel, type FilmSetNodeData, type AnimationTimeline, type InitialShotCamera, type ModelImportOrigin, type ModelPlacement, type SupportedModelScriptVersion } from "@woohaa3/contracts";
+import { animationSnapshotHash, createFilmSetSnapshot, createModelSnapshot, decodeFilmSetNodeData, scriptModel3DNodeData, defaultInitialShotCamera, importModelSnapshot, isFilmSetNode, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, modelSourceHash, normalizeModelDefinition, isJsonObject, validateSelfContainedModel, type FilmSetNodeData, type AnimationTimeline, type InitialShotCamera, type ModelImportOrigin, type ModelPlacement, type SupportedModelScriptVersion } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, type CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
 import type { FilmSetNodeOutcome, ReadFilmSetOutcome } from "@woohaa3/contracts";
 
@@ -364,14 +364,14 @@ export function resolveNodeModelSource(
     };
   }
   if (node.type === "model3d") {
-    const decoded = decodeModel3DNodeData(data);
-    if (!decoded.ok) return { ok: false, code: "invalid-model-node", message: decoded.reason };
+    const decoded = scriptModel3DNodeData(data);
+    if (!decoded) return { ok: false, code: "model-source-glb", message: "文件模型不提供脚本内容" };
     return {
       ok: true,
       value: {
-        modelScript: decoded.value.model.modelScript,
-        modelScriptVersion: decoded.value.model.modelScriptVersion,
-        placement: decoded.value.model.placement
+        modelScript: decoded.model.modelScript,
+        modelScriptVersion: decoded.model.modelScriptVersion,
+        placement: decoded.model.placement
       }
     };
   }

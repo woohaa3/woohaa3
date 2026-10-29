@@ -9,7 +9,7 @@ import { validateExplicitName } from "@woohaa3/contracts";
 import type { NodeRenameStore } from "./rename-store.js";
 import type { CanvasEditService } from "../../services/canvas-state/index.js";
 import { submitNodeRename } from "./rename-node.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 
 export type NodeRenameDialogProps = {
   store: NodeRenameStore;

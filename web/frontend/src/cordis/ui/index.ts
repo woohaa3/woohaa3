@@ -1,12 +1,7 @@
-export { Tips } from "./Tips.js";
-export type { TipsProps } from "./Tips.js";
-export { color, font, radius, shadow, space, theme } from "./theme.js";
-export type { Theme } from "./theme.js";
 
 // 统一应用主题（change: unify-application-theme-tokens）：Provider + 默认/哨兵 preset。
-export { ThemeProvider, useAppTheme, useOptionalAppTheme, useThemeService } from "../services/theme/index.js";
 export { AppThemeService } from "../services/theme/index.js";
-export type { ThemeProviderProps, ThemeServiceOptions, ThemePresetRegistry } from "../services/theme/index.js";
+export type { ThemeServiceOptions, ThemePresetRegistry } from "../services/theme/index.js";
 export {
   APP_THEME_BUILTIN_PRESETS,
   APP_THEME_BUILTIN_PRESET_IDS,
@@ -56,12 +51,6 @@ export { CanvasContextMenu } from "../plugins/canvas-menu/canvas-context-menu.js
 export type { CanvasContextMenuProps, CanvasContextMenuItem } from "../plugins/canvas-menu/canvas-context-menu.js";
 
 // Frontend Dialog system（change: add-frontend-dialog-system）
-export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, DialogToolbar, DialogSection, DialogFooter, DialogMediaWorkspace, DialogStage, DialogIconButton } from "../services/dialogs/Dialog.js";
-export type { DialogIconButtonProps } from "../services/dialogs/Dialog.js";
-export { AlertDialog } from "../services/dialogs/AlertDialog.js";
-export type { AlertDialogProps, AsyncConfirmResult } from "../services/dialogs/AlertDialog.js";
-export { MediaDialog } from "../services/dialogs/MediaDialog.js";
-export type { MediaDialogProps } from "../services/dialogs/MediaDialog.js";
 export { DialogHost, useDialogHost } from "../services/dialogs/DialogHost.js";
 export { DialogService } from "../services/dialogs/service.js";
 export type { DialogServiceOptions } from "../services/dialogs/service.js";
@@ -136,7 +125,6 @@ export { CanvasZoomControls } from "../plugins/canvas-shell/canvas-zoom-controls
 export type { CanvasZoomControlsProps } from "../plugins/canvas-shell/canvas-zoom-controls.js";
 // 生产 UI primitives（change: adopt-radix-lucide-canvas-ui，design D1）：
 // 唯一允许 Plugin/Dialog renderer/Showcase 消费 Radix/Lucide 的公共入口。
-export * from "../../shared/ui/index.js";
 
 // 画布「全部生成历史」只读弹窗（change: add-canvas-generation-history-dialog）
 export { CanvasHistoryBrowser, createCanvasHistoryRenderer } from "../plugins/node-history/canvas-history-browser.js";

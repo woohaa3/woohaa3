@@ -316,3 +316,50 @@ describe("MarketplaceInstallPanel", () => {
     expect(sameContainer.querySelector('[data-testid="marketplace-builtin-not-newer"]')?.textContent).toContain("不低于所选版本");
   });
 });
+describe("刷新骨架", () => {
+  it("刷新期间旧卡片让位给骨架，请求结束后回到列表", async () => {
+    let searchCalls = 0;
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const remote = fakeRemote({
+      search: (async () => {
+        searchCalls += 1;
+        // 第一次（首次打开）立即返回；之后的刷新挂住，模拟慢请求。
+        if (searchCalls > 1) await gate;
+        return {
+          ok: true as const,
+          items: [{ extensionId: "demo", label: "Demo", latest: "1.1.0", description: "示例" }],
+          sources: [{ sourceId: "woohaa-server", label: "团队市场", ok: true }],
+          unavailable: []
+        };
+      }) as MarketplaceRemote["search"]
+    });
+    const controller = createMarketplaceInstallController({
+      remote,
+      onJob: () => undefined,
+      readTrustedKeys: () => "",
+      writeSetting: async () => ({ ok: true })
+    });
+    const container = render(<MarketplaceInstallPanel controller={controller} jobs={undefined as never} snapshot={snapshot()} canManage defaultOpen view />);
+    await flush();
+    await flush();
+    expect(container.querySelector('[data-testid="marketplace-results"]')).not.toBeNull();
+
+    void controller.refresh();
+    // 延迟一小段才换骨架：够快的请求不会闪。
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 220));
+    });
+    expect(container.querySelector('[data-testid="marketplace-skeleton"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="marketplace-results"]')).toBeNull();
+
+    await act(async () => {
+      release?.();
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="marketplace-skeleton"]')).toBeNull();
+    expect(container.querySelector('[data-testid="marketplace-results"]')).not.toBeNull();
+  });
+});

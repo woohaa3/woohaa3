@@ -10,7 +10,7 @@ import type { Plugin } from "@deepseek-ai/cordis";
 import { useSyncExternalStore } from "react";
 import { MediaImportService } from "./service.js";
 import { definePlugin } from "../../plugin.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import type { ImportAnchor, ImportService, ImportState } from "../../contracts.js";
 
 export const MEDIA_IMPORT_PLUGIN_ID = "media-import";

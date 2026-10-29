@@ -20,8 +20,8 @@ import {
   type VideoEditAnnotationShape,
   type VideoEditIntent
 } from "@woohaa3/contracts";
-import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "../../services/dialogs/Dialog.js";
-import { Button } from "../../../shared/ui/index.js";
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
+import { Button } from "@woohaa3/ui";
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import {
   MIN_RANGE_SECONDS,
@@ -75,6 +75,7 @@ export function createVideoEditRenderer({ onConfirm, story }: { onConfirm: Video
     const [redoStacks, setRedoStacks] = useState<Record<string, VideoEditAnnotationShape[]>>({});
     const [busy, setLocalBusy] = useState(story?.busy ?? false);
     const [error, setError] = useState<string | null>(story?.error ?? null);
+    const [rangeDirty, setRangeDirty] = useState(false);
     const [playerSize] = usePlayerSize(playerRef);
     const [videoState, setVideoState] = useState({
       duration: story?.video?.duration ?? 0,
@@ -175,7 +176,7 @@ export function createVideoEditRenderer({ onConfirm, story }: { onConfirm: Video
 
     useEffect(() => {
       const onKeyDown = (event: KeyboardEvent) => {
-        if (busy) return;
+        if (busy || rangeDirty) return;
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
           if (isTextEditingTarget(event.target)) return; // 文本编辑保留浏览器文本历史。
           event.preventDefault();
@@ -191,7 +192,7 @@ export function createVideoEditRenderer({ onConfirm, story }: { onConfirm: Video
       };
       window.addEventListener("keydown", onKeyDown);
       return () => window.removeEventListener("keydown", onKeyDown);
-    }, [activeIntentId, busy, redo, removeIntent, undo]);
+    }, [activeIntentId, busy, rangeDirty, redo, removeIntent, undo]);
 
     // --- timeline drag ---------------------------------------------------------
     useEffect(() => {
@@ -423,7 +424,7 @@ export function createVideoEditRenderer({ onConfirm, story }: { onConfirm: Video
             setError={setError}
             ready={ready}
             playing={playing}
-            busyNow={busyNow}
+            busyNow={busyNow || rangeDirty}
             duration={duration}
             playheadTime={playheadTime}
             setScrubTime={setScrubTime}
@@ -451,10 +452,13 @@ export function createVideoEditRenderer({ onConfirm, story }: { onConfirm: Video
             ordered={ordered}
             activeIntentId={activeIntentId}
             busyNow={busyNow}
+            rangeDirty={rangeDirty}
             setActiveIntentId={setActiveIntentId}
             removeIntent={removeIntent}
             activeIntent={activeIntent}
             updateActive={updateActive}
+            duration={duration}
+            onRangeDirty={setRangeDirty}
           />
         </DialogBody>
         {error ? <p className="dlg__error" role="alert">{error}</p> : null}
@@ -462,7 +466,7 @@ export function createVideoEditRenderer({ onConfirm, story }: { onConfirm: Video
           <span>共 {intents.length} 个编辑点</span>
           <div className="video-edit-dialog__footer-actions">
             <Button size="sm" disabled={busyNow} onClick={requestClose}>取消</Button>
-            <Button size="sm" tone="primary" disabled={intents.length === 0 || busyNow} onClick={() => void confirm()}>确认编辑</Button>
+            <Button size="sm" tone="primary" disabled={intents.length === 0 || busyNow || rangeDirty} onClick={() => void confirm()}>确认编辑</Button>
           </div>
         </DialogFooter>
       </Dialog.Content>

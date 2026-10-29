@@ -1,5 +1,22 @@
+//! 分块几何缓存回归（change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs）。
+//!
+//! 这里按真实帧顺序驱动 ECS 画布管线：投影 → presentation → 分类型几何 → 选中描边 → 标签。
+//! 标签断言改为查询 `CanvasLabel(role, slot) + ChildOf(owner)`，不再读取 `Visuals` 里的实体表。
 use super::*;
+mod baseline;
+mod selection;
+mod third_party;
 use crate::app::{CurrentScene, FrameFlags};
+use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole, CanvasNodeId};
+use crate::canvas2d::{
+    begin_selection_outlines, produce_card_geometry, produce_card_hover, produce_card_selection,
+    produce_container_geometry, produce_edges, produce_film_set_selection, produce_group_selection,
+    sync_canvas_labels, sync_canvas_overlay,
+};
+use crate::canvas_ecs::{
+    flush_selection_outlines, project_canvas_nodes, sync_group_panels, CanvasProjectionState,
+    SelectionOutlineBatch, SelectionOutlineLayer,
+};
 use bevy::{asset::AssetId, ecs::system::RunSystemOnce};
 
 fn world() -> World {
@@ -11,6 +28,10 @@ fn world() -> World {
     // 纹理/预览定位走同代节点索引（design D7 / 任务 7.2）。
     world.insert_resource(crate::app::NodeIndex::default());
     world.insert_resource(crate::app::ModelAssetTable::default());
+    world.insert_resource(CanvasProjectionState::default());
+    world.insert_resource(LabelRequests::default());
+    world.insert_resource(SelectionOutlineBatch::default());
+    world.insert_resource(SelectionOutlineLayer::default());
     world.insert_resource(Visuals {
         card_blocks: Vec::new(),
         card_decorations: Vec::new(),
@@ -22,23 +43,18 @@ fn world() -> World {
         blend_material: default(),
         blend_mesh_entity: None,
         font: default(),
-        labels: default(),
-        textures: default(),
         texture_store: default(),
         edge_blocks: default(),
         shared_key: None,
-        attach_labels: default(),
         attach_probe_mesh: default(),
         attach_probe_entity: None,
         attach_probe_active: false,
         media_alpha_checker: None,
         node_action_mesh: default(),
         node_action_entity: None,
-        node_action_labels: default(),
         node_action_active: false,
         running_mesh: default(),
         running_mesh_entity: None,
-        running_labels: default(),
         running_active: false,
     });
     let nodes = (0..33)
@@ -55,21 +71,84 @@ fn world() -> World {
     }));
     world
 }
+
+fn rebuild_index(world: &mut World) {
+    let scene = world.resource::<CurrentScene>().0.clone();
+    world.resource_mut::<crate::app::NodeIndex>().rebuild(&scene);
+}
+
+fn geometry_frame(world: &mut World) {
+    world.run_system_once(produce_card_geometry).unwrap();
+    world.run_system_once(produce_card_hover).unwrap();
+    world.run_system_once(produce_container_geometry).unwrap();
+    world.run_system_once(produce_edges).unwrap();
+    world.run_system_once(sync_canvas_overlay).unwrap();
+    world.flush();
+}
+
 fn render(world: &mut World) -> u64 {
-    world.resource_mut::<FrameFlags>().changed = true;
     {
         let mut flags = world.resource_mut::<FrameFlags>();
+        flags.changed = true;
+        flags.scene_received = true;
+        flags.positions_received = true;
         flags.card_blocks_rebuilt = 0;
         flags.card_decorations_rebuilt = 0;
         flags.edge_blocks_rebuilt = 0;
         flags.container_blocks_rebuilt = 0;
         flags.mesh_rebuilt = false;
     }
-    world
-        .run_system_once(super::super::render::sync_scene)
-        .unwrap();
+    rebuild_index(world);
+    world.run_system_once(project_canvas_nodes).unwrap();
+    world.flush();
+    world.run_system_once(sync_group_panels).unwrap();
+    world.flush();
+    geometry_frame(world);
+    world.run_system_once(begin_selection_outlines).unwrap();
+    world.run_system_once(produce_card_selection).unwrap();
+    world.run_system_once(produce_group_selection).unwrap();
+    world.run_system_once(produce_film_set_selection).unwrap();
+    world.run_system_once(flush_selection_outlines).unwrap();
+    world.run_system_once(sync_canvas_labels).unwrap();
+    world.flush();
     world.resource::<FrameFlags>().card_blocks_rebuilt
 }
+
+fn node_entity(world: &mut World, id: &str) -> Option<Entity> {
+    world
+        .query::<(Entity, &CanvasNodeId)>()
+        .iter(world)
+        .find(|(_, node_id)| node_id.0 == id)
+        .map(|(entity, _)| entity)
+}
+
+fn labels_of(world: &mut World, id: &str) -> Vec<Entity> {
+    let Some(owner) = node_entity(world, id) else {
+        return Vec::new();
+    };
+    let mut rows: Vec<(u16, Entity)> = world
+        .query::<(Entity, &CanvasLabel, &ChildOf)>()
+        .iter(world)
+        .filter(|(_, _, child)| child.parent() == owner)
+        .map(|(entity, label, _)| (label.slot, entity))
+        .collect();
+    rows.sort_by_key(|(slot, _)| *slot);
+    rows.into_iter().map(|(_, entity)| entity).collect()
+}
+
+fn has_labels(world: &mut World, id: &str) -> bool {
+    !labels_of(world, id).is_empty()
+}
+
+fn labels_with_role(world: &mut World, role: CanvasLabelRole) -> Vec<Entity> {
+    world
+        .query::<(Entity, &CanvasLabel)>()
+        .iter(world)
+        .filter(|(_, label)| label.role == role)
+        .map(|(entity, _)| entity)
+        .collect()
+}
+
 fn handles(world: &World) -> Vec<AssetId<Mesh>> {
     world
         .resource::<Visuals>()
@@ -78,6 +157,7 @@ fn handles(world: &World) -> Vec<AssetId<Mesh>> {
         .filter_map(|b| b.mesh.as_ref().map(Handle::id))
         .collect()
 }
+
 fn changed(before: &[AssetId<Mesh>], after: &[AssetId<Mesh>]) -> Vec<usize> {
     before
         .iter()
@@ -99,21 +179,23 @@ fn local_move_selection_hover_and_theme_rebuild_only_their_blocks() {
     assert_eq!(changed(&initial, &handles(&world)), [1]);
     let moved = handles(&world);
     world.resource_mut::<CurrentScene>().0.selection.nodes = vec!["0".into()];
-    let labels = world.resource::<Visuals>().labels["0"].clone();
+    let labels = labels_of(&mut world, "0");
+    assert!(!labels.is_empty());
     assert_eq!(render(&mut world), 0);
     assert_eq!(handles(&world), moved);
-    assert_eq!(world.resource::<Visuals>().labels["0"], labels);
-    let selected_decor = world.resource::<Visuals>().card_decorations[0]
-        .handle()
-        .unwrap();
+    assert_eq!(labels_of(&mut world, "0"), labels);
+    // 选中描边走独立批次，不再混进卡片几何或装饰块。
+    assert!(
+        world
+            .resource::<SelectionOutlineLayer>()
+            .entity()
+            .is_some(),
+        "选中描边必须有独立批次实体"
+    );
     world.resource_mut::<CurrentScene>().0.hover =
         Some(serde_json::from_value(serde_json::json!({"nodeId":"17", "port":"input"})).unwrap());
     assert_eq!(render(&mut world), 0);
     let hovered = handles(&world);
-    assert_eq!(
-        world.resource::<Visuals>().card_decorations[0].handle(),
-        Some(selected_decor)
-    );
     let hover_decor = world.resource::<Visuals>().card_decorations[1]
         .handle()
         .unwrap();
@@ -137,12 +219,6 @@ fn local_move_selection_hover_and_theme_rebuild_only_their_blocks() {
             .is_some()
     );
     assert!(!world.resource::<Assets<Mesh>>().contains(hover_decor));
-    world.resource_mut::<CurrentScene>().0.nodes[0].resizable = true;
-    assert_eq!(render(&mut world), 0);
-    assert_ne!(
-        world.resource::<Visuals>().card_decorations[0].handle(),
-        Some(selected_decor)
-    );
     // Progress and camera data are not static-card draw inputs.
     world.resource_mut::<CurrentScene>().0.nodes[0].progress = 50.;
     world.resource_mut::<CurrentScene>().0.viewport.x += 100.;
@@ -161,13 +237,13 @@ fn deletion_kind_changes_and_clear_release_buffers_without_stale_labels() {
         serde_json::from_value(serde_json::json!({"title":"Group", "memberCount":1})).unwrap(),
     );
     assert_eq!(render(&mut world), 1);
-    assert_eq!(world.resource::<Visuals>().labels["0"].len(), 1);
+    assert_eq!(labels_of(&mut world, "0").len(), 1);
     world.resource_mut::<CurrentScene>().0.nodes.truncate(16);
     render(&mut world);
     assert_eq!(handles(&world).len(), 1);
     assert!(!world.resource::<Assets<Mesh>>().contains(initial[1]));
     assert!(!world.resource::<Assets<Mesh>>().contains(initial[2]));
-    assert!(!world.resource::<Visuals>().labels.contains_key("32"));
+    assert!(!has_labels(&mut world, "32"));
     let mut blocks = std::mem::take(&mut world.resource_mut::<Visuals>().card_blocks);
     let ids: Vec<_> = blocks.iter().map(|b| b.entity.unwrap()).collect();
     let mut meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
@@ -182,7 +258,14 @@ fn deletion_kind_changes_and_clear_release_buffers_without_stale_labels() {
     render(&mut world);
     assert!(handles(&world).is_empty());
     assert!(world.resource::<Visuals>().card_decorations.is_empty());
-    assert!(world.resource::<Visuals>().labels.is_empty());
+    assert!(
+        world
+            .query::<&CanvasLabel>()
+            .iter(&world)
+            .next()
+            .is_none(),
+        "删除全部节点后不得残留标签实体"
+    );
 }
 
 #[test]
@@ -246,9 +329,6 @@ fn media_focus_keeps_background_cards_and_restores_current_card() {
     let mut world = world();
     world.resource_mut::<CurrentScene>().0.selection.nodes = vec!["0".into()];
     render(&mut world);
-    let decoration = world.resource::<Visuals>().card_decorations[0]
-        .handle()
-        .unwrap();
     let initial = handles(&world);
     world.resource_mut::<CurrentScene>().0.image_focus = Some(
         serde_json::from_value(
@@ -260,14 +340,14 @@ fn media_focus_keeps_background_cards_and_restores_current_card() {
     assert_eq!(render(&mut world), 1);
     assert_eq!(handles(&world).len(), initial.len());
     assert_eq!(changed(&initial, &handles(&world)), [0]);
-    assert!(!world.resource::<Assets<Mesh>>().contains(decoration));
-    assert!(!world.resource::<Visuals>().labels.contains_key("0"));
-    assert!(world.resource::<Visuals>().labels.contains_key("17"));
+    assert!(!world.resource::<Assets<Mesh>>().contains(initial[0]));
+    assert!(!has_labels(&mut world, "0"));
+    assert!(has_labels(&mut world, "17"));
     world.resource_mut::<CurrentScene>().0.nodes[17].title = "Remote change while focused".into();
     assert_eq!(render(&mut world), 1);
     world.resource_mut::<CurrentScene>().0.image_focus = None;
     assert_eq!(render(&mut world), 1);
-    let label = world.resource::<Visuals>().labels["17"][0];
+    let label = labels_of(&mut world, "17")[0];
     assert!(world.get::<Text2d>(label).unwrap().0.starts_with("Remote"));
 }
 
@@ -289,7 +369,7 @@ fn viewport_only_step_change_updates_text_without_rebuilding_meshes() {
         .iter()
         .filter_map(|block| block.handle())
         .collect();
-    let label = world.resource::<Visuals>().labels["0"][0];
+    let label = labels_of(&mut world, "0")[0];
     // 纯视口增量：`flags.changed` 保持 false，只有相机需要跟随。
     {
         let mut flags = world.resource_mut::<FrameFlags>();
@@ -303,9 +383,9 @@ fn viewport_only_step_change_updates_text_without_rebuilding_meshes() {
         flags.card_decorations_rebuilt = 0;
     }
     world.resource_mut::<CurrentScene>().0.viewport.zoom = 8.0;
-    world
-        .run_system_once(super::super::render::sync_scene)
-        .unwrap();
+    geometry_frame(&mut world);
+    world.run_system_once(sync_canvas_labels).unwrap();
+    world.flush();
     world.run_system_once(text_presentation::sync).unwrap();
     // 静态几何完全未重建。
     let flags = world.resource::<FrameFlags>();
@@ -354,6 +434,7 @@ fn edge_blocks_retain_unaffected_meshes_and_labels_on_local_changes() {
             .collect::<Vec<_>>()
     };
     let initial = snapshot(&world);
+    assert_eq!(labels_with_role(&mut world, CanvasLabelRole::Edge).len(), 33);
     render(&mut world);
     assert_eq!(snapshot(&world), initial);
     world.resource_mut::<CurrentScene>().0.nodes[17].x += 25.;
@@ -363,12 +444,12 @@ fn edge_blocks_retain_unaffected_meshes_and_labels_on_local_changes() {
     assert_ne!(moved[1].0, initial[1].0);
     assert_eq!(moved[2], initial[2]);
     assert!(!world.resource::<Assets<Mesh>>().contains(initial[1].0));
-    assert!(
-        initial[1]
-            .1
-            .iter()
-            .all(|entity| world.get_entity(*entity).is_err())
-    );
+    // 标签请求按 owner+role+slot 复用实体；重建块后文案仍与当前边一致。
+    let edge_labels = labels_with_role(&mut world, CanvasLabelRole::Edge);
+    assert_eq!(edge_labels.len(), 33);
+    assert!(edge_labels
+        .iter()
+        .any(|entity| world.get::<Text2d>(*entity).unwrap().0 == "Edge 17"));
     world.resource_mut::<CurrentScene>().0.nodes[0].title = "Only card text changed".into();
     world.resource_mut::<CurrentScene>().0.selection.nodes = vec!["0".into()];
     render(&mut world);
@@ -387,13 +468,12 @@ fn edge_blocks_retain_unaffected_meshes_and_labels_on_local_changes() {
     world.resource_mut::<CurrentScene>().0.edges.clear();
     render(&mut world);
     assert!(world.resource::<Visuals>().edge_blocks.is_empty());
-    for (mesh, labels) in hovered {
+    assert!(
+        labels_with_role(&mut world, CanvasLabelRole::Edge).is_empty(),
+        "清空边后不得残留连线标签"
+    );
+    for (mesh, _labels) in hovered {
         assert!(!world.resource::<Assets<Mesh>>().contains(mesh));
-        assert!(
-            labels
-                .iter()
-                .all(|entity| world.get_entity(*entity).is_err())
-        );
     }
 }
 
@@ -409,7 +489,7 @@ fn shared_group_and_overlay_buffers_ignore_unrelated_card_changes() {
         (visuals.mesh.id(), visuals.blend_mesh.id())
     };
     let initial = shared(&world);
-    let label = world.resource::<Visuals>().labels["31"].clone();
+    let label = labels_of(&mut world, "31");
     world.resource_mut::<CurrentScene>().0.selection.nodes = vec!["0".into()];
     world.resource_mut::<CurrentScene>().0.hover =
         Some(serde_json::from_value(serde_json::json!({"nodeId":"0"})).unwrap());
@@ -418,7 +498,7 @@ fn shared_group_and_overlay_buffers_ignore_unrelated_card_changes() {
     render(&mut world);
     assert_eq!(shared(&world), initial);
     assert!(!world.resource::<FrameFlags>().mesh_rebuilt);
-    assert_eq!(world.resource::<Visuals>().labels["31"], label);
+    assert_eq!(labels_of(&mut world, "31"), label);
     let container = world.resource::<Visuals>().container_blocks[1].state();
     world.resource_mut::<CurrentScene>().0.nodes[31].x += 25.;
     render(&mut world);
@@ -445,7 +525,7 @@ fn shared_group_and_overlay_buffers_ignore_unrelated_card_changes() {
         moved,
         "cancel must remove old attach geometry"
     );
-    assert!(world.resource::<Visuals>().attach_labels.is_empty());
+    assert!(labels_with_role(&mut world, CanvasLabelRole::Attach).is_empty());
 }
 
 #[test]
@@ -510,7 +590,11 @@ fn container_blocks_update_locally_and_keep_group_fill_out_of_overlays() {
     for handle in selected.into_iter().flatten().flatten() {
         assert!(!world.resource::<Assets<Mesh>>().contains(handle));
     }
-    assert!(world.resource::<Visuals>().labels.is_empty());
+    assert!(world
+        .query::<&CanvasLabel>()
+        .iter(&world)
+        .next()
+        .is_none());
 }
 
 #[test]

@@ -17,7 +17,7 @@ import { DialogHost } from "./DialogHost.js";
 import { DialogService } from "./service.js";
 import { DialogHostStore } from "./host-store.js";
 import { DialogRegistry } from "./registry.js";
-import { AlertDialog } from "./AlertDialog.js";
+import { AlertDialog } from "@woohaa3/ui/dialogs";
 import { alertDefinition } from "./alert-dialog.js";
 import type { DialogRendererProps } from "./renderer-registry.js";
 

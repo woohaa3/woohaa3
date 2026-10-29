@@ -33,6 +33,9 @@ pub(crate) struct ModelVisuals {
     /// Highest-quality consumers retain capture visibility independently of card focus.
     pub(super) capture_retention: HashMap<u64, CaptureRetention>,
     pub(super) capture_pins: std::collections::HashSet<String>,
+    /// 真正的高质量消费者（进行中的截图/导出请求）。可见镜头卡片只进入 `capture_pins`
+    /// 保留驻留，不构成 High 需求（2026-10-28 总览缩放时卡片把片场按在 High 的修复）。
+    pub(super) high_demand: std::collections::HashSet<String>,
     /// 上一次门禁结算时正在播放的模型节点；用于 A→B 切换时原子 stop 旧根
     /// （change: play-model-animations-on-hover，design D1/D3）。
     pub(super) active_model: Option<String>,
@@ -157,6 +160,9 @@ pub(crate) struct ModelRoot {
     pub(super) entities: Vec<Entity>,
     /// 内容 identity（Scene IR/version/material/animation）；决定是否重建 hierarchy。
     pub(super) content_signature: String,
+    /// 建立该根时的模型纹理表 revision；纹理晚到/被回收后变化时重建，使材质重新绑定句柄
+    /// （change: 2026-10-28-support-glb-model-nodes）。
+    pub(super) texture_revision: u64,
     /// 该资源表条目的 `Arc`；保证本帧引用期间不被 LRU 淘汰。
     pub(super) resource: std::sync::Arc<ModelSnapshot>,
     /// 实例的 placement；placement 变化只刷新根 transform，不重建。
@@ -272,14 +278,14 @@ fn route_native(
         node,
         scene,
         focus,
-        models.capture_pins.contains(&node.id),
+        models.high_demand.contains(&node.id),
         resource,
     );
     let high_consumer = super::quality::purpose(
         node,
         scene,
         focus,
-        models.capture_pins.contains(&node.id),
+        models.high_demand.contains(&node.id),
     )
     .requires_high()
         || super::quality::card_visible(node, scene, focus);
@@ -343,7 +349,7 @@ pub(crate) fn sync_models(
         let allowed = allowed && (models.batching_strategy != super::batch_strategy::BatchStrategy::Explicit
             || node.model_preview.is_some());
         let batched = allowed
-            && !models.capture_pins.contains(&node.id) && !scene
+            && !models.high_demand.contains(&node.id) && !scene
             .model_editor
             .as_ref()
             .is_some_and(|e| e.node_id == node.id)
@@ -368,8 +374,14 @@ pub(crate) fn sync_models(
             );
             continue;
         }
+        let texture_revision = super::model_textures::revision();
+        // 只有真正引用内嵌纹理的模型需要在纹理表变化时重建；脚本模型与无纹理 GLB 不受影响。
+        let needs_textures = resource.ops.iter().any(|op| {
+            matches!(op, crate::protocol::ModelOp::Material { base_color_texture: Some(_), .. })
+        });
         let rebuild = models.roots.get(&node.id).is_none_or(|root| {
             root.content_signature != content_signature || root.batched != batched
+                || (needs_textures && root.texture_revision != texture_revision)
                 || !Arc::ptr_eq(&root.resource, resource)
         });
         if rebuild {
@@ -396,7 +408,7 @@ pub(crate) fn sync_models(
                     node,
                     scene,
                     focus.node.as_deref(),
-                    models.capture_pins.contains(&node.id),
+                    models.high_demand.contains(&node.id),
                     resource,
                 ),
                 &mut models.shared,
@@ -406,6 +418,7 @@ pub(crate) fn sync_models(
             );
             root.representation_generation = generation;
             root.content_signature = content_signature.to_owned();
+            root.texture_revision = texture_revision;
             root.resource = resource.clone();
             root.placement = reference.placement.clone();
             // 重建后的新动画实体按当前门禁初始化：只有目标仍是唯一合法 hover 模型时从零播放，
@@ -506,8 +519,13 @@ impl ModelVisuals {
         self.active_model.is_some()
             || self.motion_plan.is_some()
             || self.motion_targets.is_some()
-            || !self.capture_pins.is_empty()
+            || !self.high_demand.is_empty()
             || !self.capture_retention.is_empty()
+    }
+
+    /// 是否仍有排队/运行中/待装配的准备任务（静止降频据此判定需要连续帧）。
+    pub(crate) fn has_in_flight_preparation(&self) -> bool {
+        self.preparation.has_in_flight()
     }
 
     pub(crate) fn preview_meshes(&self, id: &str) -> Vec<bevy::asset::AssetId<Mesh>> {
@@ -538,7 +556,7 @@ impl ModelVisuals {
             layers = layers.with(0);
         }
         #[cfg(feature = "canvas-core")]
-        if focused || self.capture_pins.contains(id) {
+        if focused || self.high_demand.contains(id) {
             layers = layers.with(super::capture::CAPTURE_LAYER);
         }
         Some(layers)
@@ -661,4 +679,4 @@ pub(crate) use motion::compose_delta;
 /// Quality-only updates never rebuild the hierarchy, execute author scripts or
 /// touch canonical AABBs. Cached variants are bounded to three per geometry.
 mod quality;
-pub(crate) use quality::sync_quality;
+pub(crate) use quality::{sync_quality, sync_quality_with_demand};

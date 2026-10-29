@@ -15,7 +15,7 @@ import { CanvasMinimap } from "./canvas-minimap.js";
 import { CanvasSearchPanel } from "../../ui/CanvasSearchPanel.js";
 import { CanvasUndoControls } from "./canvas-undo-controls.js";
 import { CanvasUndoToast } from "./canvas-undo-toast.js";
-import { SearchIcon } from "../../../shared/ui/icons.js";
+import { SearchIcon } from "@woohaa3/ui/icons";
 import { canvasSearchStore } from "../../services/canvas-search-store.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";

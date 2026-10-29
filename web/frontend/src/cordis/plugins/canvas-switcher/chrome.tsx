@@ -13,11 +13,11 @@ import { ScenePackageImport } from "../scene-experience/import-controls.js";
  * 宿主只做通用布局与上下文注入，不认识任何具体扩展，也不按扩展 ID 分支。
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Dialog } from "../../services/dialogs/Dialog.js";
-import { Button } from "../../../shared/ui/Button.js";
-import { ScrollArea } from "../../../shared/ui/ScrollArea.js";
-import { Tooltip } from "../../../shared/ui/Tooltip.js";
-import { CanvasSwitcherIcon, ChevronDownIcon, CloseIcon, SearchIcon } from "../../../shared/ui/icons.js";
+import { Dialog } from "@woohaa3/ui/dialogs";
+import { Button } from "@woohaa3/ui/primitives";
+import { ScrollArea } from "@woohaa3/ui/primitives";
+import { Tooltip } from "@woohaa3/ui/primitives";
+import { CanvasSwitcherIcon, ChevronDownIcon, CloseIcon, SearchIcon } from "@woohaa3/ui/icons";
 import type { DialogDefinition } from "../../services/dialogs/types.js";
 import type { DialogRenderer, DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import type { CanvasCatalogService, CanvasSelectionService, CanvasSummary } from "../../contract/canvas-catalog.js";
@@ -448,8 +448,8 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
     const visibleEntries = normalizedQuery === ""
       ? displayEntries
       : displayEntries.filter((entry) => (entry.title.trim() || "未命名画布").toLowerCase().includes(normalizedQuery));
-    const isEmpty = catalogState.status === "ready" && catalogState.entries.length === 0;
-    const isFilteredEmpty = normalizedQuery !== "" && visibleEntries.length === 0;
+    const isEmpty = catalogState.status === "ready" && catalogState.entries.length === 0 && catalogState.total === 0 && !catalogState.loadingMore;
+    const isFilteredEmpty = catalogState.status === "ready" && normalizedQuery !== "" && visibleEntries.length === 0 && !isEmpty;
     const showSources = hasSources && (sourceState.error !== null || sourceState.items.length > 0);
 
     // 概览行的刷新状态：一次只表达一个事实（进行中 / 失败 / 自动刷新 + 相对时间）。
@@ -606,9 +606,6 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
             {catalogState.status === "error" && refreshError === null ? (
               <p className="canvas-switcher__error" role="status">{catalogState.error}</p>
             ) : null}
-            {catalogState.status === "ready" && catalogState.entries.length === 0 ? (
-              <p className="canvas-switcher__status">暂无画布</p>
-            ) : null}
             {isEmpty ? (
               <div className="canvas-switcher__empty" data-testid="canvas-switcher-empty">
                 <CanvasSwitcherIcon className="canvas-switcher__empty-icon" />
@@ -621,7 +618,7 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
               </div>
             ) : null}
             {isFilteredEmpty ? (
-              <p className="canvas-switcher__status">没有匹配「{query.trim()}」的画布</p>
+              <p className="canvas-switcher__status">已加载的画布中没有匹配「{query.trim()}」的结果{hasMore ? "，可继续加载更多" : ""}。</p>
             ) : null}
             <ScrollArea className="canvas-switcher__scroll" label="画布列表">
               <ul className="canvas-switcher__list" role="list">
@@ -780,10 +777,10 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
           {error ? <p className="canvas-switcher__error" role="status">{error}</p> : null}
         </Dialog.Body>
         <Dialog.Footer>
-          {renderCreateOptions()}
-          <Button tone="primary" onClick={onCreate} disabled={busy}>
+          {!isEmpty ? renderCreateOptions() : null}
+          {!isEmpty ? <Button tone="primary" onClick={onCreate} disabled={busy}>
             新建画布
-          </Button>
+          </Button> : null}
           <Button onClick={requestClose} disabled={busy}>
             关闭
           </Button>

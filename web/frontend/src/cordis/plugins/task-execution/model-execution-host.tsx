@@ -16,7 +16,7 @@
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
-import { Button } from "../../../shared/ui/index.js";
+import { Button } from "@woohaa3/ui";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";

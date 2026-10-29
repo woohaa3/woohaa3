@@ -14,8 +14,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TaskHistoryQuery, TaskInspectionSnapshot } from "@woohaa3/contracts";
-import { Button } from "../../shared/ui/index.js";
-import { LocateIcon, RefreshIcon } from "../../shared/ui/index.js";
+import { Button } from "@woohaa3/ui";
+import { LocateIcon, RefreshIcon } from "@woohaa3/ui";
 import type { TaskMonitorRemote } from "./remote.js";
 import { formatLocalTime, localTimeZoneName } from "./format.js";
 import {

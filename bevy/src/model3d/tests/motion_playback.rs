@@ -1,7 +1,9 @@
 //! 活动动画节点运动求值测试
 //! （change: 2026-10-05-bind-model-animation-to-shots，任务 4.1）。
 
-use super::{reference_for, resource_table, run_sync, scene_with, world_with_resources};
+use super::{
+    opacity_instances, reference_for, resource_table, run_sync, scene_with, world_with_resources,
+};
 use crate::model3d::runtime::{ModelVisuals, apply_motion_playback};
 use crate::protocol::{
     AnimationPlayback, GraphNode, ModelOp, ModelPlacement, ModelSnapshot, PlaybackCamera, Scene,
@@ -113,12 +115,13 @@ fn entity_of(world: &World, part: &str) -> Entity {
 }
 
 fn run_motion(world: &mut World, scene: &Scene) {
+    let instances = opacity_instances(world);
     let mut visuals = world.remove_resource::<ModelVisuals>().unwrap();
     let mut materials = world
         .remove_resource::<Assets<StandardMaterial>>()
         .unwrap_or_default();
     let mut commands = world.commands();
-    let camera = apply_motion_playback(&mut commands, &mut visuals, &mut materials, scene);
+    let camera = apply_motion_playback(&mut commands, &mut visuals, &mut materials, &instances, scene);
     world.flush();
     world.insert_resource(visuals);
     world.insert_resource(materials);
@@ -180,12 +183,13 @@ fn leaving_animation_node_restores_base_pose() {
 }
 
 fn run_motion_expect_none(world: &mut World, scene: &Scene) {
+    let instances = opacity_instances(world);
     let mut visuals = world.remove_resource::<ModelVisuals>().unwrap();
     let mut materials = world
         .remove_resource::<Assets<StandardMaterial>>()
         .unwrap_or_default();
     let mut commands = world.commands();
-    let camera = apply_motion_playback(&mut commands, &mut visuals, &mut materials, scene);
+    let camera = apply_motion_playback(&mut commands, &mut visuals, &mut materials, &instances, scene);
     world.flush();
     world.insert_resource(visuals);
     world.insert_resource(materials);
@@ -387,6 +391,12 @@ fn opacity_track_uses_a_material_instance_and_restores_the_shared_material() {
         .0
         .clone();
     assert_ne!(instance, shared, "局部目标必须获得专属材质实例");
+    let record = world
+        .entity(entity)
+        .get::<crate::canvas_ecs::components::OpacityMaterialInstance>()
+        .expect("实例状态在实体组件上");
+    assert_eq!(record.instance, instance, "组件记录当前实例");
+    assert_eq!(record.original, shared, "组件记录原共享材质");
     let instance_alpha = world
         .resource::<Assets<StandardMaterial>>()
         .get(&instance)
@@ -417,6 +427,11 @@ fn opacity_track_uses_a_material_instance_and_restores_the_shared_material() {
         world.entity(entity).get::<MeshMaterial3d<StandardMaterial>>().expect("restored").0,
         shared
     );
+    let restored = world
+        .entity(entity)
+        .get::<crate::canvas_ecs::components::OpacityMaterialInstance>()
+        .expect("恢复后仍保留实例归属");
+    assert!(!restored.hidden, "恢复后组件不得继续标记隐藏");
     assert_ne!(
         world.entity(entity).get::<Visibility>().copied(),
         Some(Visibility::Hidden)

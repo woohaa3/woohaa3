@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button } from '../../../shared/ui/Button.js';
+import { Button } from '@woohaa3/ui/primitives';
 import { createScenePackageClient, markSceneEntry, type SceneJob } from './scene-experience.js';
 import './scene-experience.css';
 const defaultClient = createScenePackageClient();

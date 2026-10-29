@@ -114,7 +114,7 @@ describe("createExtensionRuntimeProvider", () => {
       groups: ["ui", "model"],
       exports: ["Dialog", "Popover", "Listbox", "UiPortalScope", "AssistantConnectionPicker"]
     });
-    const { UiPortalScope } = await import("../../shared/ui/UiProvider.js");
+    const { UiPortalScope } = await import("@woohaa3/ui/primitives");
     expect(bindings.sdk.UiPortalScope).toBe(UiPortalScope);
     const { AssistantConnectionPicker } = await import("../plugins/task-execution/assistant-connection-picker.js");
     expect(bindings.sdk.AssistantConnectionPicker).toBe(AssistantConnectionPicker);

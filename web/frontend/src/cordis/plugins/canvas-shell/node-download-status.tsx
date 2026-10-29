@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { NodeDownloadService } from "../../services/node-download.js";
-import { Button, IconButton } from "../../../shared/ui/Button.js";
-import { CloseIcon } from "../../../shared/ui/icons.js";
+import { Button, IconButton } from "@woohaa3/ui/primitives";
+import { CloseIcon } from "@woohaa3/ui/icons";
 
 /** Status alone is DOM chrome; the node button and its hit region are rendered by Bevy. */
 export function NodeDownloadStatus({ service }: { service: NodeDownloadService }) {

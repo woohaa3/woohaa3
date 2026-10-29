@@ -8,8 +8,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ExtensionManagerFacade, ExtensionModelRow } from "../../extension-manager/contract.js";
-import { Button } from "../../../../shared/ui/Button.js";
-import { Switch } from "../../../../shared/ui/Switch.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { Switch } from "@woohaa3/ui/primitives";
 import {
   CheckIcon,
   CloseIcon,
@@ -17,7 +17,7 @@ import {
   SearchIcon,
   UnavailableIcon,
   WarningIcon
-} from "../../../../shared/ui/icons.js";
+} from "@woohaa3/ui/icons";
 import "../settings.css";
 
 const MODEL_TYPE_LABEL: Record<string, string> = {

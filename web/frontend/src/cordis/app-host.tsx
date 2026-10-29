@@ -12,10 +12,10 @@
 import { Suspense, useSyncExternalStore } from "react";
 import { lazy } from "react";
 import { DialogHost } from "./services/dialogs/DialogHost.js";
-import { ThemeProvider } from "./services/theme/index.js";
-import { UiProvider } from "../shared/ui/UiProvider.js";
+import { ThemeProvider } from "@woohaa3/ui/theme";
+import { UiProvider } from "@woohaa3/ui/primitives";
 import { CanvasHost } from "./plugins/canvas-shell/canvas-host.js";
-import { Button } from "../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import { CanvasRecoveryPage } from "./canvas-recovery.js";
 import { AppErrorBoundary } from "./app-error-boundary.js";
 import { InputScopeHost } from "./input-scope-host.js";

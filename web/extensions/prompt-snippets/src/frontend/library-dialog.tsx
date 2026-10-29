@@ -11,17 +11,9 @@
  * 落地到 Woohaa3 生产组件；showcase 直接组合本组件，不复制 markup。
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@woohaa3/frontend/extension-api";
-import {
-  Button,
-  DropdownMenu,
-  DropdownMenuItem,
-  EllipsisIcon,
-  IconButton,
-  PlusIcon,
-  SegmentedControl,
-  Tooltip
-} from "@woohaa3/frontend/extension-api";
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
+import { Button, DropdownMenu, DropdownMenuItem, IconButton, SegmentedControl, Tooltip } from "@woohaa3/ui/primitives";
+import { EllipsisIcon, PlusIcon } from "@woohaa3/ui/icons";
 import type { DialogRendererProps } from "@woohaa3/frontend/extension-api";
 import type { SnippetCatalog, CatalogFilter } from "./catalog.js";
 import type { PromptSnippet, PromptSnippetTag } from "@woohaa3/contracts";

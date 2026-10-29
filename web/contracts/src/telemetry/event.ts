@@ -31,6 +31,15 @@ export const TELEMETRY_EVENT_NAMES = [
   "perf.segment",
   "perf.frame",
   /**
+   * 一次总览 LOD 采样：当前可见画布上**所有声明总览 LOD 的片场**的档位分布
+   * （2026-10-28 片场总览 LOD 遥测采样）。
+   *
+   * 只记聚合计数，不携带完整节点 ID、标题或任何画布内容：这条事实回答"看画布时片场停在哪档"；
+   * dev 构建另带 `owners`（节点 id 末 12 字符摘要）用于把非总览档位的根落到可回查的个体，
+   * 以及 `pins`（当前截图 pin 的目标节点摘要）用于回答"是谁把它按在 High"，发布构建不携带。
+   */
+  "perf.lod",
+  /**
    * 扩展贡献在宿主中渲染或回调失败（change: 2026-10-21-harden-extension-fault-isolation）。
    * 只带 `extension`/`slot`/`epoch` 属性与错误类别 `errorCode`，不带错误消息与堆栈。
    */
@@ -85,6 +94,44 @@ export const TELEMETRY_ATTRIBUTE_KEYS = [
   "wasmAcceptMs",
   "frameExecMs",
   "frameExecutions",
+  // 每帧 3D 主 pass 的 draw call 记录数（`perf.frame`，仅 dev 可读时携带）：
+  // 5 秒级回归里 `fps` 看不出的"画得太多"由这条回答（2026-10-28 片场总览 LOD 修复）。
+  "drawCalls",
+  // 总览 LOD 采样（`perf.lod`）的分布计数：实际已发布档位、准备中数量与最大投影占比。
+  // 只做聚合，不引入节点维度；`maxAttributes` 仍能装下一条样本。
+  "low",
+  "medium",
+  "high",
+  "preparing",
+  "fractionMax",
+  // 总览 LOD 的原因分布（`perf.lod`）：`overview=12,offscreen=2` 形式的固定词表计数。
+  // 用来区分「同一档位」下的不同成因（屏外未决策 / 高优先消费者 / 退化 bounds），
+  // 不含节点身份；词表封闭，长度有界。
+  "reasons",
+  // 总览 LOD 的非总览根摘要（`perf.lod`，仅 dev 构建）：`<nodeId 末 12 字符>:<原因>`。
+  // 回答「到底是哪几个根停在 High」——只给不透明摘要，用于本机回查画布文档，
+  // 不含标题/素材/脚本；最多 3 条，超出以 `+N` 收尾。
+  "owners",
+  // 当前截图 pin 的目标节点摘要（`perf.lod`，仅 dev 构建）：`capture.pins` 里的节点 id 末 12 字符。
+  // 与 `owners` 的区别：`owners` 是被 pin 住的根，`pins` 是发起 pin 的截图目标
+  // （可能是镜头预览节点），用来区分「整场截图/视频导出」与「镜头参考录制」。最多 3 条 + `+N`。
+  "pins",
+  // 总览 LOD 采样的画布侧旁证（`perf.lod`，仅 dev 构建）：这一帧激活的离屏预览相机数，
+  // 与渲染器持有的模型 mesh 实体数。draw call 是所有视图的合计，这两个数把
+  // 「几何多」与「同一份几何被多个离屏相机重复画」区分开。
+  "views",
+  "entities",
+  // 绘制结构的旁证（`perf.lod`，仅 dev 构建）：总部件数、已进入静态批次的部件数、
+  // 批次实体数。用来区分「部件太多无法合批」与「合批粒度过细（同材质被网格切片拆开）」。
+  "parts",
+  "batched",
+  "batches",
+  // 帧节奏状态（`perf.lod`，仅 dev 构建）：`idle` / `dwell` / `active:<忙碌项列表>`。
+  // 静止降频是否真的落在停帧上只能从运行侧读；没生效时这份词表指出是哪一项一直要求连续帧。
+  "pacing",
+  // 总览片场栅格缓存状态（`perf.lod`，仅 dev）：`sets=N,live=M,high=..,hot=..,pin=..,bounds=..,layer=..`。
+  // 用来判读「每个片场一张缓存图」是否真的接管，以及没接管时卡在哪一条件。
+  "raster",
   /** 扩展身份（`extension.render-failed`）：宿主盖章的 extensionId，不是用户内容。 */
   "extension",
   /** 宿主 slot 名（`extension.render-failed`）。 */
@@ -164,7 +211,7 @@ export type TelemetryPerfInputKind = (typeof TELEMETRY_PERF_INPUT_KINDS)[number]
  * `stage`——混进来会让 `groupBy` 的分组结果出现"这个 kind 的 stage 是空的"这种无法解释的行。
  */
 export const TELEMETRY_PERF_ATTRIBUTE_KEYS: Readonly<
-  Record<"perf.startup" | "perf.interaction" | "perf.segment" | "perf.frame", readonly TelemetryAttributeKey[]>
+  Record<"perf.startup" | "perf.interaction" | "perf.segment" | "perf.frame" | "perf.lod", readonly TelemetryAttributeKey[]>
 > = {
   "perf.startup": ["mode", "stage"],
   "perf.interaction": ["mode", "kind"],
@@ -180,18 +227,42 @@ export const TELEMETRY_PERF_ATTRIBUTE_KEYS: Readonly<
     "stringify",
     "wasmAcceptMs",
     "frameExecMs",
-    "frameExecutions"
+    "frameExecutions",
+    "drawCalls"
+  ],
+  // 只记分布、准备状态与原因分布；`owners`/`pins` 仅 dev 构建携带，且只放节点 id 的末 12 字符摘要。
+  "perf.lod": [
+    "mode",
+    "low",
+    "medium",
+    "high",
+    "preparing",
+    "fractionMax",
+    "reasons",
+    "owners",
+    "pins",
+    "views",
+    "entities",
+    "parts",
+    "batched",
+    "batches",
+    // 帧节奏与总览片场栅格缓存状态（仅 dev）：排障时回答"缓存有没有接管、为什么没接管"。
+    // 漏登记会让整条样本在契约校验里被判非法、静默丢弃——2026-10-29 就这样丢了几小时样本。
+    "pacing",
+    "raster"
   ]
 };
 
 /** 每类性能事件必须携带的属性键；缺任何一个整条丢弃（不是补默认值）。 */
 export const TELEMETRY_PERF_REQUIRED_ATTRIBUTES: Readonly<
-  Record<"perf.startup" | "perf.interaction" | "perf.segment" | "perf.frame", readonly TelemetryAttributeKey[]>
+  Record<"perf.startup" | "perf.interaction" | "perf.segment" | "perf.frame" | "perf.lod", readonly TelemetryAttributeKey[]>
 > = {
   "perf.startup": ["mode", "stage"],
   "perf.interaction": ["mode", "kind"],
   "perf.segment": ["mode", "kind", "stage"],
-  "perf.frame": ["mode"]
+  "perf.frame": ["mode"],
+  // 分布计数缺一不可：一条只有 `mode` 的样本无法解释"哪个档位有多少片场"。
+  "perf.lod": ["mode", "low", "medium", "high"]
 };
 
 /**
@@ -205,7 +276,11 @@ export const TELEMETRY_PERF_FRAME_WINDOW_MS = 60_000;
 /** 是否性能事件名（决定属性校验走严格分支）。 */
 export function isTelemetryPerfEventName(value: unknown): value is keyof typeof TELEMETRY_PERF_ATTRIBUTE_KEYS {
   return (
-    value === "perf.startup" || value === "perf.interaction" || value === "perf.segment" || value === "perf.frame"
+    value === "perf.startup" ||
+    value === "perf.interaction" ||
+    value === "perf.segment" ||
+    value === "perf.frame" ||
+    value === "perf.lod"
   );
 }
 
@@ -394,6 +469,36 @@ function isValidPerfAttributes(
   if (current.mode !== undefined && !isTelemetryPerfMode(current.mode)) return false;
   if (current.stage !== undefined && !isTelemetryPerfStage(current.stage)) return false;
   if (current.kind !== undefined && !isTelemetryPerfInputKind(current.kind)) return false;
+  // LOD 分布是计数与占比：负数/非有限值会让聚合表把"没数据"画成负档位，整条丢弃。
+  // draw call 是每帧计数：负数/非整数无法与基线对账，整条丢弃。
+  if (name === "perf.frame" && current.drawCalls !== undefined) {
+    const value = current.drawCalls;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return false;
+  }
+  if (name === "perf.lod") {
+    for (const key of ["low", "medium", "high", "preparing", "fractionMax", "views", "entities", "parts", "batched", "batches"] as const) {
+      const value = current[key];
+      if (value === undefined) continue;
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return false;
+    }
+    // `owners` 是本机定位用的非总览根摘要：字符串、最多 4 段（3 条 + `+N`），
+    // 语义由采样侧保证，这里只守住形状与基数。
+    if (current.owners !== undefined) {
+      const owners = current.owners;
+      if (typeof owners !== "string") return false;
+      const parts = owners.split(",");
+      if (parts.length > 4) return false;
+      if (parts.some((part) => part === "" || part.length > 40)) return false;
+    }
+    // `pins` 同形状：3 条摘要 + `+N`，语义由采样侧保证。
+    if (current.pins !== undefined) {
+      const pins = current.pins;
+      if (typeof pins !== "string") return false;
+      const parts = pins.split(",");
+      if (parts.length > 4) return false;
+      if (parts.some((part) => part === "" || part.length > 40)) return false;
+    }
+  }
   return true;
 }
 

@@ -111,3 +111,52 @@ test("react-dom and react-dom/client resolve to host bindings instead of a secon
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+test("new UI subpaths and historic SDK exports share the host binding", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "extension-ui-"));
+  try {
+    await mkdir(path.join(cwd, "src/frontend"), { recursive: true });
+    await writeFile(path.join(cwd, "package.json"), '{"type":"module"}');
+    await writeFile(path.join(cwd, "src/frontend/metadata.ts"), 'export const metadata = { extensionId: "fixture" };');
+    await writeFile(path.join(cwd, "src/frontend/index.ts"), `
+      import { Button as NewButton, UiProvider } from "@woohaa3/ui/primitives";
+      import { Button as OldButton } from "@woohaa3/frontend/extension-api";
+      import type { ButtonProps } from "@woohaa3/ui";
+      export const descriptor = { NewButton, OldButton, UiProvider };
+    `);
+    const result = await buildExtensionBrowser({ cwd });
+    assert.deepEqual(result.manifest.requiredSdkExports, ["Button", "UiProvider"]);
+    const entry = await import(pathToFileURL(path.join(result.outDir, result.entry)).href);
+    const Button = () => null, UiProvider = () => null;
+    const { descriptor } = await entry.loadExtension({ token: {}, sdk: { Button, UiProvider } });
+    assert.equal(descriptor.NewButton, Button); assert.equal(descriptor.OldButton, Button);
+    assert.equal(descriptor.UiProvider, UiProvider);
+    const { readFile } = await import("node:fs/promises");
+    for (const file of result.manifest.files.filter(f => f.path.endsWith(".js"))) {
+      const source = await readFile(path.join(result.outDir, file.path), "utf8");
+      assert.doesNotMatch(source, /@radix-ui|react\.production|createContext\(|from ["']@woohaa3\/ui/);
+    }
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+for (const source of [
+  'import { DoesNotExist } from "@woohaa3/ui";',
+  'import type { DoesNotExist } from "@woohaa3/ui/forms";',
+  'import { Button } from "@woohaa3/ui/private";',
+  'import { Button } from "@woohaa3/ui/forms";',
+  'import * as UI from "@woohaa3/ui";',
+  'import UI from "@woohaa3/ui";',
+  'import "@woohaa3/ui/styles.css";',
+  'import "@woohaa3/ui";',
+  'export * from "@woohaa3/ui";',
+  'const module = import("@woohaa3/ui");'
+]) test(`rejects unsupported UI dependency before building: ${source}`, async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "extension-ui-reject-"));
+  try {
+    await mkdir(path.join(cwd, "src/frontend"), { recursive: true });
+    await writeFile(path.join(cwd, "package.json"), '{"type":"module"}');
+    await writeFile(path.join(cwd, "src/frontend/metadata.ts"), 'export const metadata = { extensionId: "fixture" };');
+    await writeFile(path.join(cwd, "src/frontend/index.ts"), source + '\nexport const descriptor = {};');
+    await assert.rejects(buildExtensionBrowser({ cwd }), /UI/);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});

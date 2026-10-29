@@ -29,6 +29,64 @@ function nativeTarget() {
   return target as typeof globalThis;
 }
 
+it("native texture uploads send the original byte view, including its slice boundaries", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  mountBevyCanvas(host);
+  const target = nativeTarget();
+  const sent: unknown[] = [];
+  (target as unknown as { XMLHttpRequest: unknown }).XMLHttpRequest = class {
+    status = 200;
+    responseText = JSON.stringify({ ok: true, value: null });
+    open() {}
+    setRequestHeader() {}
+    overrideMimeType() {}
+    send(body: unknown) { sent.push(body); }
+  };
+  const realm = await createNativeRuntimeRealm(target, vi.fn());
+  const backing = new Uint8Array([99, 1, 2, 3, 4, 88]);
+  const pixels = backing.subarray(1, 5);
+  try {
+    realm.module.set_texture("image", 1, 1, pixels, "asset");
+    realm.module.set_model_media_texture!("plane", 1, 1, pixels);
+    for (const body of sent.slice(-2)) {
+      expect(body).toBe(pixels);
+      expect(body).toBeInstanceOf(Uint8Array);
+      expect(Array.from(body as Uint8Array)).toEqual([1, 2, 3, 4]);
+    }
+  } finally {
+    realm.dispose();
+  }
+});
+
+it.runIf(typeof SharedArrayBuffer !== "undefined")("shared pixel views are copied to an XHR-compatible snapshot", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  mountBevyCanvas(host);
+  const target = nativeTarget();
+  let sent: unknown;
+  (target as unknown as { XMLHttpRequest: unknown }).XMLHttpRequest = class {
+    status = 200;
+    responseText = JSON.stringify({ ok: true, value: null });
+    open() {}
+    setRequestHeader() {}
+    overrideMimeType() {}
+    send(body: unknown) { sent = body; }
+  };
+  const realm = await createNativeRuntimeRealm(target, vi.fn());
+  const backing = new Uint8Array(new SharedArrayBuffer(6));
+  backing.set([99, 1, 2, 3, 4, 88]);
+  try {
+    realm.module.set_texture("image", 1, 1, backing.subarray(1, 5), "asset");
+    expect(sent).toBeInstanceOf(Uint8Array);
+    expect((sent as Uint8Array).buffer).toBeInstanceOf(ArrayBuffer);
+    backing.fill(0);
+    expect(Array.from(sent as Uint8Array)).toEqual([1, 2, 3, 4]);
+  } finally {
+    realm.dispose();
+  }
+});
+
 it("画布切到新宿主后仍连通", async () => {
   const hostA = document.createElement("div");
   const hostB = document.createElement("div");

@@ -35,6 +35,7 @@ async function fixture() {
     status: "inserted" as const,
     entryId: "history",
   }));
+  const registerTaskFailure = vi.fn(async () => undefined);
   const port = createCanvasAssistantTextPort({
     resolveRoom: async () => room,
     authorize,
@@ -45,7 +46,7 @@ async function fixture() {
         contentType: "image/png",
       }),
     },
-    history: { registerTaskResult, registerTaskFailure: vi.fn() } as never,
+    history: { registerTaskResult, registerTaskFailure } as never,
   });
   const read = () => {
     const result = room.exportCanvas();
@@ -96,6 +97,7 @@ async function fixture() {
     run,
     authorize,
     registerTaskResult,
+    registerTaskFailure,
     room,
   };
 }
@@ -400,6 +402,15 @@ it("a queued durable commit wins a racing stop, and revoked users leave no stran
     taskStatus: "failed",
     result: { kind: "text", text: "saved" },
   });
+  // 失败立即结束运行中并按失败登记历史，不把 job 留在 running。
+  expect(f.registerTaskFailure).toHaveBeenCalledWith(
+    expect.objectContaining({
+      canvasId: "cv",
+      nodeId: "text",
+      runId: b.runId,
+      outcome: "failed",
+    }),
+  );
 });
 
 it("deleting an accepted target rejects its candidate without recreating artwork or a node", async () => {

@@ -73,6 +73,8 @@ pub(crate) struct MaterialSpec {
     pub(crate) unlit: bool,
     /// blend 模式的静态透明度；opaque 下恒为 1（不参与呈现）。
     pub(crate) opacity: f32,
+    /// GLB 内嵌 baseColor 纹理 id；材质构建时按 id 解析为运行时句柄。
+    pub(crate) base_color_texture: Option<String>,
 }
 
 impl MaterialSpec {
@@ -89,6 +91,7 @@ impl MaterialSpec {
                 double_sided,
                 unlit,
                 opacity,
+                base_color_texture,
             } => {
                 let base = parse_hex(base_color).to_srgba();
                 let em = parse_hex(emissive).to_srgba();
@@ -117,6 +120,7 @@ impl MaterialSpec {
                         } else {
                             1.0
                         },
+                        base_color_texture: base_color_texture.clone(),
                     },
                 ))
             }
@@ -147,6 +151,13 @@ impl MaterialSpec {
             // 首版只提供基础 blend；不承诺复杂多层透明正确排序。
             material.base_color.set_alpha(self.opacity.clamp(0.0, 1.0));
             material.alpha_mode = bevy::material::AlphaMode::Blend;
+        }
+        // GLB 内嵌 baseColor 纹理：按内容 id 解析已上传的共享 `Image`。纹理未驻留时保持纯色，
+        // 不阻塞模型其余部分显示（纹理上传与模型注册由前端保证先后顺序）。
+        if let Some(id) = self.base_color_texture.as_deref()
+            && let Some(handle) = crate::model3d::model_textures::handle(id)
+        {
+            material.base_color_texture = Some(handle);
         }
         material
     }

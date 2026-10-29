@@ -5,8 +5,8 @@
  */
 import { useState } from "react";
 import type { SettingsEntryView, SettingsWriteValue } from "@woohaa3/contracts";
-import { Button } from "../../../shared/ui/Button.js";
-import { Switch } from "../../../shared/ui/Switch.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { Switch } from "@woohaa3/ui/primitives";
 import type { BackendSettingsStore } from "./backend-settings-store.js";
 
 const ENDPOINT_KEY = /^providers\.ark\.ep\.(language|image|video)\.(.+)$/;

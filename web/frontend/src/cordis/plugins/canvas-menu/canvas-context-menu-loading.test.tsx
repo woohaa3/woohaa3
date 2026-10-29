@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { UiProvider } from "../../../shared/ui/UiProvider.js";
+import { UiProvider } from "@woohaa3/ui/primitives";
 import ContextMenuHost from "./canvas-context-menu-host.js";
 
 const mocks = vi.hoisted(() => ({

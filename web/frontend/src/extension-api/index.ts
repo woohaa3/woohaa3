@@ -5,7 +5,7 @@
  *  公共 Context/Service 契约、画布只读 facade、locate/catalog 与公共 UI/Dialog primitives）。
  *
  * extension 作者从此入口获得：入口描述/plugin 定义辅助、Context/Service 纯类型与公共 UI。
- * 运行时依赖闭包限于 `shared/ui`、Dialog primitives 与 `task-execution/execution-panel`；不包含
+ * 运行时依赖闭包限于 `@woohaa3/ui`、Dialog primitives 与 `task-execution/execution-panel`；不包含
  * 扫描器、装配根、Canvas manifest 或具体业务插件，避免循环装配。
  */
 /**

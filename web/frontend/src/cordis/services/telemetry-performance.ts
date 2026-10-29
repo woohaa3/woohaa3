@@ -37,6 +37,10 @@ export type PerfFrameCounters = {
   readonly wasmAcceptMs: number;
   readonly frameExecutions: number;
   readonly frameExecutionMs: number;
+  /** 渲染器实际出帧数（累计）；只有能读到运行时计数时才存在。 */
+  readonly renderFrames?: number;
+  /** 3D 主 pass draw call 记录数（累计）；与 `renderFrames` 配对求每帧均值。 */
+  readonly drawCalls?: number;
 };
 
 export type PerfFrameWindowOptions = {
@@ -105,6 +109,11 @@ export function createPerfFrameWindow(options: PerfFrameWindowOptions): PerfFram
     const current = sample();
     const elapsedMs = Math.max(0, telemetryNow() - windowStartedAt);
     const delta = diffCounters(current, baseline, elapsedMs);
+    // 每帧 draw call 均值：只有窗口内真的出过帧、且两次都读到了运行时计数才写。
+    const drawCalls =
+      delta.renderFrames > 0
+        ? Math.round(delta.drawCalls / delta.renderFrames)
+        : undefined;
     reset();
     // 半窗（页面切后台）、缺构建模式、无客户端：一律不写。窗口里的 0 会污染分位数。
     const mode = telemetryBuildMode();
@@ -129,7 +138,8 @@ export function createPerfFrameWindow(options: PerfFrameWindowOptions): PerfFram
           stringify: delta.sceneStringify,
           wasmAcceptMs: Math.round(delta.wasmAcceptMs),
           frameExecMs: round1(delta.averageFrameMs),
-          frameExecutions: delta.frameExecutions
+          frameExecutions: delta.frameExecutions,
+          ...(drawCalls === undefined ? {} : { drawCalls })
         }
       });
     } catch {
@@ -183,10 +193,16 @@ export function createPerfFrameWindow(options: PerfFrameWindowOptions): PerfFram
   };
 }
 
-type FrameDelta = PerfFrameCounters & { readonly averageFrameMs: number; readonly fps: number };
+type FrameDelta = PerfFrameCounters & {
+  readonly renderFrames: number;
+  readonly drawCalls: number;
+  readonly averageFrameMs: number;
+  readonly fps: number;
+};
 
 function diffCounters(current: PerfFrameCounters, baseline: PerfFrameCounters, elapsedMs: number): FrameDelta {
-  const delta = (key: keyof PerfFrameCounters): number => Math.max(0, current[key] - baseline[key]);
+  const delta = (key: keyof PerfFrameCounters): number =>
+    Math.max(0, (current[key] ?? 0) - (baseline[key] ?? 0));
   const frameExecutions = delta("frameExecutions");
   const frameExecutionMs = delta("frameExecutionMs");
   const seconds = Math.max(0, elapsedMs) / 1000;
@@ -201,6 +217,8 @@ function diffCounters(current: PerfFrameCounters, baseline: PerfFrameCounters, e
     wasmAcceptMs: delta("wasmAcceptMs"),
     frameExecutions,
     frameExecutionMs,
+    renderFrames: delta("renderFrames"),
+    drawCalls: delta("drawCalls"),
     averageFrameMs: frameExecutions === 0 ? 0 : frameExecutionMs / frameExecutions,
     // 帧率的分母是窗口的真实墙钟时长：没有样本就是 0，不补估算值。
     fps: frameExecutions === 0 || seconds <= 0 ? 0 : frameExecutions / seconds

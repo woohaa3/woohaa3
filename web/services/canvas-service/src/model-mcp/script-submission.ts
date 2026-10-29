@@ -16,7 +16,8 @@ import {
   MODEL_SCRIPT_LANGUAGE,
   PREFERRED_MODEL_SCRIPT_VERSION,
   decodeAnimationPayload,
-  decodeModelPlacement
+  decodeModelPlacement,
+  isGlbModelNodeData
 } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, type CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
 import { executeSceneIr } from "./script-executor.js";
@@ -65,6 +66,11 @@ export async function submitScript(
   // D8：片场不保存顶层 authored 模型；节点级脚本提交必须拒绝（几何经 item / 导入路径写入）。
   if (isFilmSetNode(node.type, exported.canvas.nodeData[nodeId] as CanvasNodeData | undefined)) {
     return { ok: false, code: "film-set-top-level-model", message: "片场节点不保存顶层模型，请提交到指定 model item" };
+  }
+  // 文件模型（GLB）以原始文件为唯一权威内容，不接受脚本写入
+  // （change: 2026-10-28-support-glb-model-nodes）：混源会让展示内容不再对应原文件。
+  if (isGlbModelNodeData(exported.canvas.nodeData[nodeId])) {
+    return { ok: false, code: "model-source-glb", message: "文件模型不接受脚本提交；请上传新的 GLB 或使用脚本模型节点" };
   }
   if (!input.requestId || input.requestId.trim() === "") {
     return { ok: false, code: "malformed-request", message: `${node.type} 提交必须提供 requestId` };
@@ -116,6 +122,9 @@ export async function submitScript(
       if (!currentNode) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
       if (!isModelAuthoringNodeType(currentNode.type)) {
         return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是模型节点` };
+      }
+      if (isGlbModelNodeData(canvas.nodeData[nodeId])) {
+        return { ok: false, code: "model-source-glb", message: "文件模型不接受脚本提交" };
       }
       if (input.expectedModelContentHash !== undefined) {
         const current = readModelContentVersion((canvas.nodeData[nodeId] as CanvasNodeData | undefined)?.modelContentVersion);

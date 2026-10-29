@@ -11,9 +11,9 @@ import { ContributionBoundary as Guard, guardedToolbarAction, useExtensionFaults
 import { guardedContextMenuItems, selectGuardedContextMenuItem } from "./contribution-guard.js";
 import type { SyncStatusView } from "./sync-status.js";
 import { useFocusLayoutSource } from "./focus/workspace.js";
-import { Button, IconButton } from "../shared/ui/Button.js";
-import { Tooltip } from "../shared/ui/Tooltip.js";
-import { MapIcon } from "../shared/ui/icons.js";
+import { Button, IconButton } from "@woohaa3/ui/primitives";
+import { Tooltip } from "@woohaa3/ui/primitives";
+import { MapIcon } from "@woohaa3/ui/icons";
 import { DesktopCanvasBar } from "../desktop/canvas-window-controls.js";
 import { desktopBootstrap } from "../desktop/window-controls.js";
 import { normalizeCanvasMenuSections } from "@woohaa3/contracts";
@@ -589,6 +589,7 @@ export function CanvasControlPanel({
               const Guidance = action.tooltip;
               const button = (
                 <IconButton
+                  tone={action.tone === "primary" ? "primary" : "ghost"}
                   className={`canvas-control-panel__icon${action.tone === "primary" ? " canvas-control-panel__icon--primary" : ""}`}
                   label={action.label}
                   disabled={action.disabled ?? false}

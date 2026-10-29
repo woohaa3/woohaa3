@@ -28,7 +28,7 @@ import type {
   PromptSnippetSource,
   SlotsService
 } from "@woohaa3/frontend/extension-api";
-import { SnippetLibraryIcon } from "@woohaa3/frontend/extension-api";
+import { SnippetLibraryIcon } from "@woohaa3/ui/icons";
 import { PROMPT_SNIPPETS_PLUGIN_ID } from "../shared.js";
 import type { SnippetCatalog } from "./catalog.js";
 import { createSnippetCatalog } from "./catalog.js";

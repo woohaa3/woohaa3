@@ -1,6 +1,6 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
-import { IconButton } from "../shared/ui/Button.js";
-import { CloseIcon, FitScreenIcon, MinusIcon, RefreshIcon, RestoreWindowIcon } from "../shared/ui/icons.js";
+import { IconButton } from "@woohaa3/ui/primitives";
+import { CloseIcon, FitScreenIcon, MinusIcon, RefreshIcon, RestoreWindowIcon } from "@woohaa3/ui/icons";
 import { controlWindow, desktopBootstrap, type WindowAction } from "./window-controls.js";
 import "./canvas-window-controls.css";
 

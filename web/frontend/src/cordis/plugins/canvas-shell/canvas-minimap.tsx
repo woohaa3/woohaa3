@@ -13,9 +13,9 @@ import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } fro
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
-import { IconButton } from "../../../shared/ui/Button.js";
-import { Tooltip } from "../../../shared/ui/Tooltip.js";
-import { CollapseIcon, FitScreenIcon } from "../../../shared/ui/icons.js";
+import { IconButton } from "@woohaa3/ui/primitives";
+import { Tooltip } from "@woohaa3/ui/primitives";
+import { CollapseIcon, FitScreenIcon } from "@woohaa3/ui/icons";
 import {
   fitMinimapTransform,
   minimapPoint,

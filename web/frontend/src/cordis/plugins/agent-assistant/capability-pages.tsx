@@ -1,5 +1,5 @@
 import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";
-import { Button } from "../../../shared/ui/index.js";
+import { Button } from "@woohaa3/ui";
 import type { McpPanelSnapshot } from "./mcp-connection-panel.js";
 
 export type CapabilityPage = "overview" | "agents" | "mcp" | "sources" | "generation-history";

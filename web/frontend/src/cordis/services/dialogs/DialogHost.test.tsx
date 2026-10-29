@@ -53,7 +53,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-import { AlertDialog } from "./AlertDialog.js";
+import { AlertDialog } from "@woohaa3/ui/dialogs";
 import type { DialogRendererProps } from "./renderer-registry.js";
 
 function AlertProbe({ instance, requestClose, setBusy }: DialogRendererProps) {

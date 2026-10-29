@@ -6,10 +6,10 @@
  */
 import type { TaskHistoryCandidateModel, TaskHistoryCandidateProvider, TaskHistoryCandidates, TaskModelType } from "@woohaa3/contracts";
 import type { TaskHistoryConnectionStatus } from "../../shared/task-history/client.js";
-import { SegmentedControl } from "../../shared/ui/SegmentedControl.js";
-import { IconButton } from "../../shared/ui/Button.js";
-import { Tooltip } from "../../shared/ui/Tooltip.js";
-import { CloseIcon, RefreshIcon } from "../../shared/ui/icons.js";
+import { SegmentedControl } from "@woohaa3/ui/primitives";
+import { IconButton } from "@woohaa3/ui/primitives";
+import { Tooltip } from "@woohaa3/ui/primitives";
+import { CloseIcon, RefreshIcon } from "@woohaa3/ui/icons";
 import { CONNECTION_LABELS, formatLocalTime } from "./history-format.js";
 import { HISTORY_TIME_SHORTCUTS } from "./history-time.js";
 import type { HistoryFilters, HistoryTab } from "./history-state.js";

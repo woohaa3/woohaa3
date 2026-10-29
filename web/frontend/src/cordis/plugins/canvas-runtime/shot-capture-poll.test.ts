@@ -54,3 +54,32 @@ it("正常 RGBA 帧仍可返回", async () => {
   await vi.advanceTimersByTimeAsync(16);
   expect(await capture).toMatchObject({ width: 1, height: 1, rgba: new Uint8Array([10, 20, 30, 255]) });
 });
+
+it("轮询超时后取消仍在渲染器里的请求，避免归属片场一直被 pin 在 High", async () => {
+  vi.useFakeTimers();
+  const module = {
+    request_shot_capture: vi.fn(),
+    poll_shot_capture: vi.fn(() => new Uint8Array()),
+    cancel_shot_capture: vi.fn()
+  } as unknown as BevyModule;
+  const assertion = expect(pollShotCapture(module, { requestId: 5, nodeId: "n", generation: 1 }))
+    .rejects.toThrow("capture-poll-timeout");
+  await vi.advanceTimersByTimeAsync(20016);
+  await assertion;
+  expect(module.cancel_shot_capture).toHaveBeenCalledWith(5);
+});
+
+it("实例失效中止轮询时同样取消请求", async () => {
+  vi.useFakeTimers();
+  let current = true;
+  const module = {
+    request_shot_capture: vi.fn(),
+    poll_shot_capture: vi.fn(() => new Uint8Array()),
+    cancel_shot_capture: vi.fn()
+  } as unknown as BevyModule;
+  const capture = pollShotCapture(module, { requestId: 6, nodeId: "n", generation: 1 }, () => current);
+  current = false;
+  await vi.advanceTimersByTimeAsync(16);
+  expect(await capture).toBeNull();
+  expect(module.cancel_shot_capture).toHaveBeenCalledWith(6);
+});

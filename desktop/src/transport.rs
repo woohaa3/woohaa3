@@ -8,7 +8,9 @@ use serde_json::{Value, json};
 use tauri::Manager;
 use woohaa_bevy_canvas as canvas;
 
-const MAX_CONTROL_BYTES: usize = 8 * 1024 * 1024;
+/// 控制消息上限：与浏览器侧模型资源 payload（16MB）一致，容纳含法线/UV/顶点色的 GLB Scene IR
+/// （change: 2026-10-28-support-glb-model-nodes）。
+const MAX_CONTROL_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TEXTURE_BYTES: usize = 2048 * 2048 * 4;
 thread_local! {
     // 最近一次 full 基线、导航序号及真实接受代数；仅宿主主线程访问。
@@ -112,8 +114,8 @@ mod tests {
     }
     #[test]
     fn raw_texture_boundary_validates_metadata_and_byte_length() {
-        assert!(texture(r#"{"id":"a","width":2,"height":2,"plane":false}"#, &[0; 4]).is_err());
-        assert!(texture(r#"{"id":"","width":1,"height":1,"plane":false}"#, &[0; 4]).is_err());
+        assert!(texture(r#"{"id":"a","width":2,"height":2,"plane":false}"#, vec![0; 4]).is_err());
+        assert!(texture(r#"{"id":"","width":1,"height":1,"plane":false}"#, vec![0; 4]).is_err());
     }
 }
 
@@ -261,7 +263,7 @@ pub fn control(body: &[u8]) -> Result<Value, String> {
     Ok(result)
 }
 
-pub fn texture(header: &str, bytes: &[u8]) -> Result<(), String> {
+pub fn texture(header: &str, bytes: Vec<u8>) -> Result<(), String> {
     #[derive(Deserialize)]
     struct Texture {
         id: String,
@@ -284,9 +286,9 @@ pub fn texture(header: &str, bytes: &[u8]) -> Result<(), String> {
         return Err("Texture content identity too large".into());
     }
     let result = if meta.plane {
-        canvas::set_model_media_texture(&meta.id, meta.width, meta.height, bytes)
+        canvas::set_model_media_texture_owned(&meta.id, meta.width, meta.height, bytes)
     } else {
-        canvas::set_texture(&meta.id, meta.width, meta.height, bytes, &meta.content)
+        canvas::set_texture_owned(&meta.id, meta.width, meta.height, bytes, &meta.content)
     };
     result.map_err(|e| e.to_string())
 }
@@ -407,7 +409,7 @@ pub fn install(
                 } else if uri.path() == "/texture" {
                     texture(
                         params.get("meta").map(String::as_str).unwrap_or(""),
-                        request.body(),
+                        request.into_body(),
                     )
                     .map(|_| Value::Null)
                 } else {

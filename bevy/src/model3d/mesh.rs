@@ -16,14 +16,17 @@ pub(crate) fn mesh_key(geometry: &ModelGeometry) -> String {
         ModelGeometry::Cylinder { radius, height } => format!("cyl:{:08x}:{:08x}", radius.to_bits(), height.to_bits()),
         ModelGeometry::Sphere { radius } => format!("sphere:{:08x}", radius.to_bits()),
         ModelGeometry::Capsule { radius, height } => format!("capsule:{:08x}:{:08x}", radius.to_bits(), height.to_bits()),
-        ModelGeometry::Mesh { vertices, faces } => {
+        ModelGeometry::Mesh { vertices, faces, normals, uvs, colors } => {
             use std::hash::{Hash, Hasher};
             let mut hash = std::collections::hash_map::DefaultHasher::new();
             vertices.len().hash(&mut hash);
             faces.len().hash(&mut hash);
             for value in vertices.iter().flatten() { value.to_bits().hash(&mut hash); }
             for value in faces.iter().flatten() { value.hash(&mut hash); }
-            format!("mesh-hash-v1:{}:{}:{:016x}", vertices.len(), faces.len(), hash.finish())
+            for value in normals.iter().flatten().flatten() { value.to_bits().hash(&mut hash); }
+            for value in uvs.iter().flatten().flatten() { value.to_bits().hash(&mut hash); }
+            for value in colors.iter().flatten().flatten() { value.to_bits().hash(&mut hash); }
+            format!("mesh-hash-v2:{}:{}:{:016x}", vertices.len(), faces.len(), hash.finish())
         },
     }
 }
@@ -47,6 +50,10 @@ pub(super) fn quality_key(base: &str, geometry: &ModelGeometry, quality: Quality
 pub(super) fn effective_quality(geometry: &ModelGeometry, requested: Quality, overview: bool) -> Quality {
     match geometry {
         ModelGeometry::Box { .. } => Quality::High,
+        // 带顶点属性（GLB 文件模型）的网格不做简化：简化会丢弃法线/UV/顶点色，改变外观。
+        ModelGeometry::Mesh { normals: Some(_), .. }
+        | ModelGeometry::Mesh { uvs: Some(_), .. }
+        | ModelGeometry::Mesh { colors: Some(_), .. } => Quality::High,
         ModelGeometry::Mesh { .. } if overview => Quality::High,
         _ => requested,
     }
@@ -63,9 +70,15 @@ pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> 
         ModelGeometry::Box { size } => size.iter().all(|v| valid(*v)),
         ModelGeometry::Sphere { radius } => valid(*radius),
         ModelGeometry::Cylinder { radius, height } | ModelGeometry::Capsule { radius, height } => valid(*radius) && valid(*height),
-        ModelGeometry::Mesh { vertices, faces } => !vertices.is_empty() && !faces.is_empty()
+        ModelGeometry::Mesh { vertices, faces, normals, uvs, colors } => !vertices.is_empty() && !faces.is_empty()
             && vertices.iter().flatten().all(|v| v.is_finite())
-            && faces.iter().flatten().all(|i| (*i as usize) < vertices.len()),
+            && faces.iter().flatten().all(|i| (*i as usize) < vertices.len())
+            && normals.as_ref().is_none_or(|values| values.len() == vertices.len()
+                && values.iter().flatten().all(|v| v.is_finite()))
+            && uvs.as_ref().is_none_or(|values| values.len() == vertices.len()
+                && values.iter().flatten().all(|v| v.is_finite()))
+            && colors.as_ref().is_none_or(|values| values.len() == vertices.len()
+                && values.iter().flatten().all(|v| v.is_finite() && (0.0..=1.0).contains(v))),
     };
     if !legal { return None; }
     let (longitudes, stacks, latitudes) = quality.subdivisions();
@@ -93,7 +106,7 @@ pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> 
                     .into(),
             )
         }
-        ModelGeometry::Mesh { vertices, faces } => {
+        ModelGeometry::Mesh { vertices, faces, normals, uvs, colors } => {
             let mut mesh = Mesh::new(
                 PrimitiveTopology::TriangleList,
                 RenderAssetUsages::default(),
@@ -102,8 +115,23 @@ pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> 
                 Mesh::ATTRIBUTE_POSITION,
                 vertices.iter().map(|vertex| *vertex).collect::<Vec<_>>(),
             );
+            // 文件模型自带法线/UV/顶点色时逐项保留；缺失属性按旧脚本模型语义回退。
+            let has_normals = normals
+                .as_ref()
+                .is_some_and(|values| values.len() == vertices.len());
+            if let Some(values) = normals.as_ref().filter(|_| has_normals) {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, values.clone());
+            }
+            if let Some(values) = uvs.as_ref().filter(|values| values.len() == vertices.len()) {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, values.clone());
+            }
+            if let Some(values) = colors.as_ref().filter(|values| values.len() == vertices.len()) {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, values.clone());
+            }
             mesh.insert_indices(Indices::U32(faces.iter().flatten().copied().collect()));
-            mesh.compute_smooth_normals();
+            if !has_normals {
+                mesh.compute_smooth_normals();
+            }
             Some(mesh)
         }
     }
@@ -128,8 +156,50 @@ mod tests {
         for radius in [0., -1., f32::NAN, f32::INFINITY] {
             assert!(build_mesh_quality(&ModelGeometry::Sphere { radius }, Quality::Low).is_none());
         }
-        let bad = ModelGeometry::Mesh { vertices: vec![[0., 0., 0.]], faces: vec![[0, 1, 2]] };
+        let bad = ModelGeometry::Mesh {
+            vertices: vec![[0., 0., 0.]],
+            faces: vec![[0, 1, 2]],
+            normals: None,
+            uvs: None,
+            colors: None,
+        };
         assert!(build_mesh_quality(&bad, Quality::High).is_none());
+    }
+    fn attributed_geometry() -> ModelGeometry {
+        ModelGeometry::Mesh {
+            vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+            faces: vec![[0, 1, 2]],
+            normals: Some(vec![[0., 0., 1.]; 3]),
+            uvs: Some(vec![[0., 0.], [1., 0.], [0., 1.]]),
+            colors: Some(vec![[1., 0., 0., 1.]; 3]),
+        }
+    }
+    #[test]
+    fn file_mesh_keeps_provided_attributes_and_forces_high_quality() {
+        let geometry = attributed_geometry();
+        let mesh = build_mesh_quality(&geometry, Quality::High).expect("mesh");
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+        // 简化会丢弃法线/UV/顶点色，带属性的文件网格固定 High。
+        assert_eq!(effective_quality(&geometry, Quality::Low, false), Quality::High);
+        // 属性参与 mesh 身份：同位置/面的无属性网格不得共享缓存。
+        let plain = ModelGeometry::Mesh {
+            vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+            faces: vec![[0, 1, 2]],
+            normals: None,
+            uvs: None,
+            colors: None,
+        };
+        assert_ne!(mesh_key(&geometry), mesh_key(&plain));
+    }
+    #[test]
+    fn invalid_attribute_lengths_are_rejected() {
+        let mut geometry = attributed_geometry();
+        if let ModelGeometry::Mesh { normals, .. } = &mut geometry {
+            *normals = Some(vec![[0., 0., 1.]; 2]);
+        }
+        assert!(build_mesh_quality(&geometry, Quality::High).is_none());
     }
     #[test]
     fn close_dimensions_cannot_alias_and_quality_has_separate_identity() {

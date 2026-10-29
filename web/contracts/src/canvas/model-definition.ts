@@ -55,6 +55,121 @@ export type ModelDefinition = {
   placement: ModelPlacement;
 };
 
+/**
+ * 普通 `model3d` 的第二种权威来源：画布作用域 GLB 资产
+ * （change: 2026-10-28-support-glb-model-nodes，design「内容与持久化」）。
+ *
+ * 只保存稳定资产 id 与内容版本；**不**保存二进制、临时 URL、解析结果或 GPU 资源。脚本与
+ * GLB 不能同时作为同一节点的权威内容：带 `modelSourceKind === "glb"` 的 nodeData 不得含
+ * `modelScript` 等脚本字段。
+ */
+export const GLB_MODEL_SOURCE_KIND = "glb" as const;
+export type GlbModelSourceKind = typeof GLB_MODEL_SOURCE_KIND;
+
+export type GlbModelReference = {
+  /** 画布资产 id（`asset.upsert` 中稳定、内容寻址）。 */
+  assetId: string;
+  contentVersion: ModelContentVersion;
+  placement: ModelPlacement;
+};
+
+/** 资产 id 的稳定上限（与 asset id 生成规则一致，防御超长身份进入持久层）。 */
+export const MODEL_ASSET_ID_MAX = 200;
+
+/** 读取 flat nodeData 上的模型资产 id；缺失/非法返回 null。 */
+export function readGlbModelAssetId(input: unknown): string | null {
+  if (!isJsonObject(input)) return null;
+  const assetId = input.modelAssetId;
+  return isBoundedId(assetId, MODEL_ASSET_ID_MAX) ? assetId : null;
+}
+
+/** 节点是否声称以 GLB 资产为权威模型来源。 */
+export function isGlbModelNodeData(input: unknown): boolean {
+  return isJsonObject(input) && input.modelSourceKind === GLB_MODEL_SOURCE_KIND;
+}
+
+export type GlbModelReferenceDecodeResult =
+  | { ok: true; value: GlbModelReference }
+  | { ok: false; reason: string };
+
+/**
+ * 从 flat nodeData 读取并校验 GLB 模型引用。
+ *
+ * 强制单一权威来源：出现任何脚本字段（含空串）即拒绝，避免「空脚本伪装文件模型」。
+ */
+export function decodeGlbModelReference(input: unknown): GlbModelReferenceDecodeResult {
+  if (!isJsonObject(input)) return { ok: false, reason: "nodeData 必须是对象" };
+  if (input.modelSourceKind !== GLB_MODEL_SOURCE_KIND) {
+    return { ok: false, reason: `modelSourceKind 必须是 ${GLB_MODEL_SOURCE_KIND}` };
+  }
+  for (const field of ["modelScript", "modelScriptLanguage", "modelScriptVersion"] as const) {
+    if (input[field] !== undefined) {
+      return { ok: false, reason: `文件模型不得同时保存脚本字段 ${field}` };
+    }
+  }
+  const assetId = input.modelAssetId;
+  if (!isBoundedId(assetId, MODEL_ASSET_ID_MAX)) {
+    return { ok: false, reason: "modelAssetId 非法" };
+  }
+  const contentVersion = decodeModelContentVersion(input.modelContentVersion);
+  if (!contentVersion.ok) return contentVersion;
+  const placement = decodeLocalModelPlacement(input.modelPlacement);
+  if (!placement.ok) return placement;
+  return {
+    ok: true,
+    value: {
+      assetId,
+      contentVersion: contentVersion.value,
+      placement: placement.value
+    }
+  };
+}
+
+/** GLB 资产来源内容标识：资产 id 的稳定哈希（与脚本 sourceHash 同一算法族）。 */
+export function glbModelSourceHash(assetId: string): string {
+  return fnv1a64Hex(`woohaa-model-glb-source-v1\u0000${assetId}`);
+}
+
+/**
+ * GLB 模型内容标识：资产 id + placement 的确定性哈希。
+ *
+ * 使用独立前缀，保证与同名字符串的脚本模型内容 hash 不会碰撞。
+ */
+export function glbModelContentHash(input: { assetId: string; placement: ModelPlacement }): string {
+  return fnv1a64Hex(
+    ["woohaa-model-content-glb-v1", input.assetId, placementKey(input.placement)].join("\u0000")
+  );
+}
+
+/** 按实际保存的内容归一化 GLB 模型引用（revision 语义与脚本模型一致）。 */
+export function normalizeGlbModelReference(input: {
+  assetId: unknown;
+  placement?: unknown;
+  previous?: ModelContentVersion | null;
+}): GlbModelReferenceDecodeResult {
+  if (!isBoundedId(input.assetId, MODEL_ASSET_ID_MAX)) {
+    return { ok: false, reason: "modelAssetId 非法" };
+  }
+  const placement = decodeLocalModelPlacement(input.placement);
+  if (!placement.ok) return placement;
+  const contentHash = glbModelContentHash({ assetId: input.assetId, placement: placement.value });
+  const previous = input.previous ?? null;
+  const revision =
+    previous && previous.contentHash === contentHash ? previous.revision : (previous?.revision ?? 0) + 1;
+  return {
+    ok: true,
+    value: {
+      assetId: input.assetId,
+      contentVersion: {
+        revision,
+        sourceHash: glbModelSourceHash(input.assetId),
+        contentHash
+      },
+      placement: placement.value
+    }
+  };
+}
+
 /** 内容标识 / 版本字段的稳定上限（防止超长身份进入持久层）。 */
 export const MODEL_CONTENT_HASH_MAX = 200;
 /** 本节点模型内容版本上限，避免无界增长。 */

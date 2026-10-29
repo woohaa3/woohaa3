@@ -3,8 +3,8 @@ import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import type { FilmSetObjectSession } from "./object-session.js";
 import type { FilmSetObjectAction } from "./object-action.js";
 import { FILM_SET_MAX_VISIBLE_OBJECTS, filmSetVisibleObjectIds } from "@woohaa3/contracts";
-import { Button } from "@woohaa3/frontend/extension-api";
-import { DiamondIcon, ImageIcon, VideoIcon, LayoutGridIcon, TrashIcon } from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
+import { DiamondIcon, ImageIcon, VideoIcon, LayoutGridIcon, TrashIcon } from "@woohaa3/ui/icons";
 import { FilmSetObjectTransformFields } from "./film-set-object-transform-fields.js";
 
 export type FilmSetObjectToolbarProps = {

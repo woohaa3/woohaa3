@@ -228,6 +228,9 @@ mod tests {
         let geometry = ModelGeometry::Mesh {
             vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
             faces: vec![[0, 1, 2]],
+            normals: None,
+            uvs: None,
+            colors: None,
         };
         let (shared, _) = cache.mesh(&mut meshes, "custom", &geometry, Quality::Low).unwrap();
         cache.mesh(&mut meshes, "custom", &geometry, Quality::Medium).unwrap();

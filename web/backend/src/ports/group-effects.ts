@@ -22,7 +22,7 @@ export function createGroupEffects(canvas: CanvasService, grants: ToolGrantRegis
       const runs = input.actions.filter(a => a.runId && a.nodeId);
       if (!input.actions.length) {
         if (input.signal.aborted || input.outcome.status === "cancelled") return { ...input.outcome, status: "cancelled" };
-        return { ...input.outcome, status: input.outcome.status === "failed" ? "failed" : "unknown", error: input.outcome.error ?? { code: "write-unconfirmed", message: "没有可核对的结构或运行回执" } };
+        return { ...input.outcome, status: "failed", error: input.outcome.error ?? { code: "write-unconfirmed", message: "没有可核对的结构或运行回执" } };
       }
       while (true) {
         const outcomes: { runId: string; nodeId: string; state: string; outputAssetIds: string[] }[] = [];
@@ -53,9 +53,16 @@ export function createGroupEffects(canvas: CanvasService, grants: ToolGrantRegis
           continue;
         }
         // Recovery reads evidence once. It cannot prove an interrupted inference finished.
+        if (active || uncertain) {
+          // D2：先撤销仍匹配的子 run，再结算失败；撤销失败不阻塞结算。
+          cancel(input);
+          return {
+            ...input.outcome, status: "failed", receipt,
+            error: input.outcome.error ?? { code: "result-unconfirmed", message: "子 run 仍活动或状态无法证明，已撤销匹配运行并结算失败" }
+          };
+        }
         const status = input.outcome.status === "cancelled" ? "cancelled"
-          : active || uncertain || input.outcome.status === "unknown" ? "unknown"
-          : failed || ["failed", "partial"].includes(input.outcome.status) ? "partial" : "succeeded";
+          : failed ? "partial" : "succeeded";
         return { ...input.outcome, status, receipt };
       }
     }

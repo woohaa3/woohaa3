@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { stableStringify, type CanvasCreationPort, type CanvasCreationRequest, type CanvasCreationView } from "@woohaa3/contracts";
+import { stableStringify, UNCONFIRMED_RESULT_ERROR_CODE, UNCONFIRMED_RESULT_MESSAGE, type CanvasCreationPort, type CanvasCreationRequest, type CanvasCreationView } from "@woohaa3/contracts";
 import type { CanvasCreationStore, CanvasCreationRecord } from "../repository/canvas-creation-store.js";
 import type { AgentConversationService } from "./agent-conversation-service.js";
 import type { AgentConnectionRegistry } from "./agent-connection-registry.js";
@@ -31,7 +31,10 @@ export class CanvasCreationService {
         const turn = this.deps.conversations.queryTurn({ owner, requestId: record.view.turnRequestId });
         if (turn.ok) record.view = { ...record.view, stage: "accepted", conversationId: turn.conversation.conversationId, turnId: turn.turn.turnId };
         else if (record.view.stage === "preparing") record.view.stage = "root-created";
-      } else if (record.view.stage === "preparing") record.view.stage = "unknown";
+      } else if (record.view.stage === "preparing") {
+        record.view = { ...record.view, stage: "failed", error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: UNCONFIRMED_RESULT_MESSAGE } };
+        this.deps.store.save(record);
+      }
       // Read recovery must not overwrite a concurrently advancing durable phase.
     }
     return record.view;
@@ -95,7 +98,7 @@ export class CanvasCreationService {
       this.deps.store.save(record);
       if (!accepted.reused) void this.deps.conversations.dispatchTurn(accepted.turn.turnId);
     } catch (error) {
-      record.view = { ...record.view, stage: "failed", error: { code: (error as { code?: string }).code ?? "unknown", message: error instanceof Error ? error.message : "创建结果待核对" } };
+      record.view = { ...record.view, stage: "failed", error: { code: (error as { code?: string }).code ?? UNCONFIRMED_RESULT_ERROR_CODE, message: error instanceof Error ? error.message : UNCONFIRMED_RESULT_MESSAGE } };
       this.deps.store.save(record);
     }
     return record.view;

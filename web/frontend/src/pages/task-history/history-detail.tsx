@@ -1,4 +1,5 @@
-import { AudioPlayer } from "../../shared/ui/AudioPlayer.js";
+import { CopyField } from "@woohaa3/ui/feedback";
+import { AudioPlayer } from "@woohaa3/ui/media";
 /**
  * 任务历史详情（change: improve-task-history-experience，任务 4.4–4.7、5.2–5.4）。
  *
@@ -6,12 +7,11 @@ import { AudioPlayer } from "../../shared/ui/AudioPlayer.js";
  * 成功优先产物、失败优先错误、运行中优先进度；请求/技术默认折叠；媒体受控同源读取，
  * 不自动播放，失败有局部反馈且不改变任务终态。Escape 只在详情内处理一次并恢复触发元素焦点。
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isTerminalTaskState, type TaskExecutionDetail, type TaskExecutionState } from "@woohaa3/contracts";
-import { Button, IconButton } from "../../shared/ui/Button.js";
-import { Collapsible } from "../../shared/ui/Collapsible.js";
-import { Tooltip } from "../../shared/ui/Tooltip.js";
-import { CheckIcon, CloseIcon, CollapseIcon, CopyIcon, ExpandIcon, LocateIcon } from "../../shared/ui/icons.js";
+import { Button, IconButton } from "@woohaa3/ui/primitives";
+import { Collapsible } from "@woohaa3/ui/primitives";
+import { CloseIcon, CollapseIcon, ExpandIcon, LocateIcon } from "@woohaa3/ui/icons";
 import { STATE_LABELS, formatDuration, formatLocalTime, sourceLabel, stageLabel } from "./history-format.js";
 
 export type HistoryDetailProps = {
@@ -258,56 +258,6 @@ export function TaskStateBadge({ state }: { state: TaskExecutionState }) {
     <span className={`task-history__state is-${state}`} data-state={state}>
       <span className="task-history__state-glyph" aria-hidden="true" />
       {STATE_LABELS[state]}
-    </span>
-  );
-}
-
-/** 复制字段：成功/失败反馈，注入 adapter（Showcase 不触碰真实 clipboard）。 */
-export function CopyField({
-  value,
-  label,
-  copyText,
-  className,
-  children
-}: {
-  value: string;
-  label: string;
-  copyText: (value: string) => Promise<boolean | void>;
-  className?: string;
-  children?: ReactNode;
-}) {
-  const [status, setStatus] = useState<"idle" | "copied" | "error">("idle");
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    []
-  );
-  return (
-    <span className={["task-history__copy", className].filter(Boolean).join(" ")} data-copy-status={status}>
-      {children}
-      <Tooltip content={`${label}：${value}`}>
-        <IconButton
-          label={`复制${label}`}
-          size="sm"
-          onClick={() => {
-            void Promise.resolve(copyText(value)).then(
-              (ok) => {
-                setStatus(ok === false ? "error" : "copied");
-                if (timer.current) clearTimeout(timer.current);
-                timer.current = setTimeout(() => setStatus("idle"), 1600);
-              },
-              () => setStatus("error")
-            );
-          }}
-        >
-          {status === "copied" ? <CheckIcon /> : <CopyIcon />}
-        </IconButton>
-      </Tooltip>
-      <span className="task-history__copy-feedback" role="status" aria-live="polite">
-        {status === "copied" ? "已复制" : status === "error" ? "复制失败" : ""}
-      </span>
     </span>
   );
 }

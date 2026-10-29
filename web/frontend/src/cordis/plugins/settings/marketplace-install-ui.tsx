@@ -9,8 +9,9 @@
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { compareSemver, type MarketplaceSigningKey, type MarketplaceVersionInfo, type SettingsSnapshot } from "@woohaa3/contracts";
-import { Button } from "../../../shared/ui/Button.js";
-import { TextInput } from "../../../shared/ui/FormControls.js";
+import { RefreshIcon, SearchIcon } from "@woohaa3/ui/icons";
+import { Button } from "@woohaa3/ui/primitives";
+import { TextInput } from "@woohaa3/ui/forms";
 import { appPublicUrl } from "../../services/app-base-path.js";
 import { resolvePluginIcon } from "./plugin-icons.js";
 import { versionTrusted, type MarketplaceInstallController } from "./marketplace-install.js";
@@ -146,6 +147,29 @@ function ExtensionCard({
   );
 }
 
+/**
+ * 加载骨架的显示时机。
+ *
+ * 首次加载（列表为空）立刻出骨架；刷新/重新搜索时列表已有内容，先等一小段再换骨架——
+ * 够快的请求不会闪，慢请求也不会让卡片「僵在那里」看起来像坏了。
+ */
+function useSkeletonVisible(busy: boolean, hasItems: boolean): boolean {
+  const [visible, setVisible] = useState(busy && !hasItems);
+  useEffect(() => {
+    if (!busy) {
+      setVisible(false);
+      return undefined;
+    }
+    if (!hasItems) {
+      setVisible(true);
+      return undefined;
+    }
+    const timer = setTimeout(() => setVisible(true), 160);
+    return () => clearTimeout(timer);
+  }, [busy, hasItems]);
+  return busy && (visible || !hasItems);
+}
+
 function Skeleton() {
   return (
     <ul className="marketplace-grid" aria-hidden="true">
@@ -238,6 +262,8 @@ export function MarketplaceInstallPanel({
     void controller.installListed(extensionId, versionToInstall);
   };
 
+  // 骨架覆盖「首次加载 / 搜索 / 刷新」三种忙态：刷新时不再让旧卡片僵在原处。
+  const showSkeleton = useSkeletonVisible(state.searching || state.refreshing, state.items.length > 0);
   const status = state.searching
     ? state.sources.length === 0
       ? "正在读取市场…"
@@ -275,10 +301,7 @@ export function MarketplaceInstallPanel({
         <div className="marketplace-install__body" data-testid="marketplace-install-body">
           {selected ? (
             <section className="marketplace-detail" data-testid="marketplace-detail">
-              <button className="marketplace-detail__back" onClick={() => { setConfirmKey(null); controller.close(); }}>
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7M19 12H5" /></svg>
-                返回列表
-              </button>
+              {/* 返回由外面的层级导航承担（面包屑「添加扩展」）：详情是这一页的内容，不是叠在列表上的浮层。 */}
               <div className="marketplace-detail__hero">
                 <span className="marketplace-icon is-large" aria-hidden="true">
                   <PluginGlyph icon={detail?.extension.icon ?? installedIndex.get(selected.extensionId)?.icon} size={23} />
@@ -427,13 +450,13 @@ export function MarketplaceInstallPanel({
                     }}
                   >
                     <span className="marketplace-search__icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                      <SearchIcon size={14} />
                     </span>
                     <TextInput value={text} placeholder="搜索扩展名称、ID 或描述" onChange={(event) => setText(event.currentTarget.value)} data-testid="marketplace-search-input" />
                     <Button size="sm" type="submit" disabled={state.searching}>搜索</Button>
                   </form>
                   <Button size="sm" tone="ghost" onClick={() => void controller.refresh()} title="刷新" className="marketplace-refresh">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={state.refreshing ? "is-spinning" : undefined}><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" /></svg>
+                    <RefreshIcon size={14} className={state.refreshing ? "is-spinning" : undefined} />
                   </Button>
                 </div>
               ) : null}
@@ -452,9 +475,13 @@ export function MarketplaceInstallPanel({
                   ) : null}
                 </div>
               ) : null}
-              {state.searching && state.items.length === 0 ? <Skeleton /> : null}
-              {state.items.length > 0 ? (
-                <ul className="marketplace-grid" data-testid="marketplace-results" style={{ opacity: state.searching ? 0.45 : 1 }}>
+              {showSkeleton ? (
+                <div data-testid="marketplace-skeleton" data-reason={state.items.length > 0 ? "refresh" : "initial"}>
+                  <Skeleton />
+                </div>
+              ) : null}
+              {state.items.length > 0 && !showSkeleton ? (
+                <ul className="marketplace-grid" data-testid="marketplace-results">
                   {state.items.map((item) => (
                     <ExtensionCard
                       key={item.extensionId}

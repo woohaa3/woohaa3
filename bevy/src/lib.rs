@@ -22,6 +22,11 @@ mod theme_generated;
 /// 2D 共享纯几何与 interaction 查询（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
 /// 不依赖 Bevy/ECS/wasm，可在 native 下单独测试；`canvas2d` 渲染复用其布局与曲线函数。
 mod canvas_query;
+/// 画布节点 ECS 投影层与公共组件（change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs）。
+/// 组件在全部 feature 下编译（3D 模块复用 owner/part marker）；投影与批处理只在 `canvas-core`。
+/// 实体只活在当前 renderer 实例内：结构变化由唯一投影点处理，位置增量只更新组件，
+/// renderer 重建整体丢弃实体层级。第三方扩展最小接入方式见 `canvas_ecs/README.md`。
+mod canvas_ecs;
 /// 画布级 3D 根逐像素深度的平局偏移：纯几何 + 线程本地已接受表
 /// （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D4）。
 mod depth_order;
@@ -262,61 +267,20 @@ impl std::fmt::Display for BoundaryError {
     }
 }
 
-/// 上传/更新一张 RGBA 纹理；按 node ID 合并，latest-wins。
-///
-/// `content` 是稳定内容身份（`sourceKey`），Rust 侧按「内容 + 尺寸」共享同一 `Image`，
-/// 避免 1000 个节点重复上传同一资产（change: 2026-10-23-scale-canvas-media-residency，
-/// design D4 / 任务 4.4）。传空串表示没有稳定内容身份（独占纹理）。
+/// 唤醒停帧的渲染循环：JS→WASM 的提交即使落在静止心跳（250 ms）间隙也必须立刻被处理。
 #[cfg(feature = "canvas-core")]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn set_texture(
-    id: &str,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-    content: &str,
-) -> Result<(), BoundaryError> {
-    protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
-    if content.len() > 4096 {
-        return Err(BoundaryError::from_str("Texture content identity too large"));
-    }
-    bridge::queue_texture(
-        id,
-        width,
-        height,
-        rgba,
-        (!content.is_empty()).then_some(content),
-    );
-    Ok(())
+#[inline]
+fn wake_canvas() {
+    #[cfg(feature = "wasm")]
+    crate::app::wake();
 }
 
-/// 原节点的源像素细节；整批校验成功才入队，空 JSON 显式清理。
 #[cfg(feature = "canvas-core")]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn set_image_focus_details(manifest:&str,rgba:&[u8])->Result<(),BoundaryError> {
-    if manifest.is_empty() {
-        if !rgba.is_empty() {return Err(BoundaryError::from_str("Unexpected focus detail pixels"));}
-        return bridge::queue_focus_details(None,&[]).map_err(BoundaryError::from_str);
-    }
-    if manifest.len()>16384 {return Err(BoundaryError::from_str("Focus detail manifest too large"));}
-    let frame:protocol::focus_details::FocusDetails=serde_json::from_str(manifest).map_err(|e|BoundaryError::from_str(&e.to_string()))?;
-    bridge::queue_focus_details(Some(frame),rgba).map_err(BoundaryError::from_str)
-}
-
-/// 上传/更新一张片场媒体平面 RGBA 纹理（键为全局唯一 `planeId`，latest-wins）
-/// （change: 2026-10-08-make-film-set-model-only，design D5）。
+mod texture_upload;
 #[cfg(feature = "canvas-core")]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn set_model_media_texture(
-    id: &str,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-) -> Result<(), BoundaryError> {
-    protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
-    bridge::queue_film_set_texture(id, width, height, rgba);
-    Ok(())
-}
+pub use texture_upload::{set_image_focus_details, set_model_media_texture, set_texture};
+#[cfg(all(feature = "canvas-core", not(feature = "wasm")))]
+pub use texture_upload::{set_model_media_texture_owned, set_texture_owned};
 
 /// 提交一份完整渲染快照；通过校验后覆盖未消费的旧快照（latest-wins）。
 ///
@@ -329,6 +293,7 @@ pub fn set_model_media_texture(
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
+    wake_canvas();
     if json.len() > protocol::MAX_SCENE_BYTES {
         return Err(BoundaryError::from_str("Scene payload too large"));
     }
@@ -375,6 +340,7 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_viewport(json: &str) -> Result<u32, BoundaryError> {
+    wake_canvas();
     let request: protocol::ViewportUpdateRequest =
         serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
     request.validate().map_err(BoundaryError::from_str)?;
@@ -403,6 +369,7 @@ pub fn set_viewport(json: &str) -> Result<u32, BoundaryError> {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_observer(json: &str) -> Result<u32, BoundaryError> {
+    wake_canvas();
     let request: protocol::ObserverUpdateRequest =
         serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
     request.validate().map_err(BoundaryError::from_str)?;
@@ -426,6 +393,7 @@ pub fn observer_capability() -> String {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_positions(json: &str) -> Result<u32, BoundaryError> {
+    wake_canvas();
     if json.len() > protocol::MAX_POSITION_UPDATE_BYTES {
         return Err(BoundaryError::from_str("Position payload too large"));
     }
@@ -530,6 +498,7 @@ pub fn query_gizmo_hit(json: &str) -> String {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn prepare_and_register_model_resource(json: &str) -> Result<String, BoundaryError> {
+    wake_canvas();
     if json.len() > protocol::MAX_SCENE_BYTES {
         return Err(BoundaryError::from_str("Model resource payload too large"));
     }
@@ -623,6 +592,7 @@ pub fn prepare_and_register_model_resource(json: &str) -> Result<String, Boundar
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn declare_model_resource(json: &str) -> Result<String, BoundaryError> {
+    wake_canvas();
     if json.len() > 64 * 1024 {
         return Err(BoundaryError::from_str("Model descriptor payload too large"));
     }
@@ -661,6 +631,7 @@ struct DeclaredModelDescriptor {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_model_payload_leases(json: &str) -> Result<String, BoundaryError> {
+    wake_canvas();
     if json.len() > 4 * 1024 * 1024 {
         return Err(BoundaryError::from_str("Model lease payload too large"));
     }
@@ -768,6 +739,7 @@ pub fn shot_diagnostics() -> String {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn request_shot_capture(json: &str) -> Result<(), BoundaryError> {
+    wake_canvas();
     shot_capture_wire::request(json)
 }
 
@@ -791,6 +763,7 @@ pub fn poll_shot_capture(request_id: f64, generation: f64) -> Vec<u8> {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn request_history_thumbnail(json: &str) -> Result<(), BoundaryError> {
+    wake_canvas();
     history_preview::wire::request(json)
 }
 
@@ -808,6 +781,15 @@ pub fn poll_history_thumbnail(request_id: f64, generation: f64) -> Vec<u8> {
 /// 浏览器入口：初始化并进入 winit 事件循环。
 ///
 /// 原生宿主**不**调用它——它有自己的 OS loop，只使用 `build_native_canvas_app` + 显式 tick。
+/// 开关静止降频（默认开启）：关闭后画布恢复 120 FPS 连续更新。
+///
+/// 策略按「是否需要连续帧」在 120 FPS 与静止心跳之间切换，MUST 可关闭以便对照排查。
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn set_idle_frame_pacing(enabled: bool) {
+    crate::app::set_idle_frame_pacing(enabled);
+}
+
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn start() {

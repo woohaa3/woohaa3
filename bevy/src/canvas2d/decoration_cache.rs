@@ -1,4 +1,8 @@
-//! Sparse per-block card selection/hover/resize buffers, independent of static labels/content.
+//! Sparse per-block card hover-port buffers, independent of static labels/content and of
+//! persistent selection outlines (owned by the Card selection producer).
+//!
+//! change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs —— 输入改为 ECS 节点 Query；
+//! 选中态不再参与块 key，也不再重建本缓存。
 use super::{Visuals, geometry::Geometry};
 use crate::{protocol::Scene, theme::ThemeResource};
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
@@ -9,8 +13,6 @@ struct Key {
     kind: String,
     index: usize,
     rect: [f32; 4],
-    selected: bool,
-    resizable: bool,
     hover: Option<Option<String>>,
 }
 #[derive(Default)]
@@ -37,50 +39,56 @@ impl Block {
         self.theme.clear();
     }
 }
+
+/// 一个需要端点半钮的卡片投影输入。
+pub(super) struct HoverInput<'a> {
+    pub(crate) index: usize,
+    pub(crate) node: std::borrow::Cow<'a, crate::protocol::GraphNode>,
+}
+
 pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     visuals: &mut Visuals,
     scene: &Scene,
     theme: &ThemeResource,
+    projected: &[HoverInput<'_>],
+    document_len: usize,
 ) -> u64 {
     let focused_id = super::image_focus::presented_media_focus(scene).map(|focus| focus.node_id);
     let mut rebuilt = 0;
-    let selected: std::collections::HashSet<_> =
-        scene.selection.nodes.iter().map(String::as_str).collect();
     let mut blocks = std::mem::take(&mut visuals.card_decorations);
-    let count = scene.nodes.len().div_ceil(BLOCK_SIZE);
+    let count = document_len.div_ceil(BLOCK_SIZE);
     for block in blocks.iter_mut().skip(count) {
         block.clear(commands, meshes);
     }
     blocks.truncate(count);
     blocks.resize_with(count, Block::default);
-    for (block_index, nodes) in scene.nodes.chunks(BLOCK_SIZE).enumerate() {
+    for block_index in 0..count {
         let block = &mut blocks[block_index];
-        let keys: Vec<_> = nodes
+        let range = block_index * BLOCK_SIZE..((block_index + 1) * BLOCK_SIZE).min(document_len);
+        let keys: Vec<_> = projected
             .iter()
-            .enumerate()
-            .filter(|(_, n)| {
-                n.group.is_none()
-                    && n.composite_asset.is_none()
-                    && focused_id != Some(n.id.as_str())
+            .filter(|input| range.contains(&input.index))
+            .filter(|input| {
+                input.node.group.is_none()
+                    && input.node.composite_asset.is_none()
+                    && focused_id != Some(input.node.id.as_str())
             })
-            .filter_map(|(local, node)| {
-                let selected = selected.contains(node.id.as_str());
+            .filter_map(|input| {
+                let node = input.node.as_ref();
                 let hover = scene
                     .hover
                     .as_ref()
                     .filter(|h| h.node_id.as_deref() == Some(node.id.as_str()));
-                if !selected && !node.resizable && hover.is_none() {
+                if hover.is_none() {
                     return None;
                 }
                 Some(Key {
                     id: node.id.clone(),
                     kind: node.kind.clone(),
-                    index: block_index * BLOCK_SIZE + local,
+                    index: input.index,
                     rect: [node.x, node.y, node.width, node.height],
-                    selected,
-                    resizable: node.resizable,
                     hover: hover.map(|h| h.port.clone()),
                 })
             })
@@ -95,12 +103,14 @@ pub(super) fn sync(
         }
         let mut geometry = Geometry::default();
         for key in &keys {
-            let node = &scene.nodes[key.index];
-            super::cards::draw_decorations(
+            let input = projected
+                .iter()
+                .find(|input| input.index == key.index)
+                .expect("hover key derives from projected input");
+            super::cards::draw_hover_ports(
                 &mut geometry,
                 theme,
-                node,
-                key.selected,
+                input.node.as_ref(),
                 scene.hover.as_ref(),
                 super::draw_order::render_index(&scene.nodes, key.index),
             );
@@ -117,7 +127,7 @@ pub(super) fn sync(
                 commands
                     .spawn((
                         Mesh2d(handle),
-                        MeshMaterial2d(visuals.material.clone()),
+                        MeshMaterial2d(visuals.mesh_material()),
                         NoFrustumCulling,
                     ))
                     .id(),
@@ -129,6 +139,7 @@ pub(super) fn sync(
     visuals.card_decorations = blocks;
     rebuilt
 }
+
 #[cfg(test)]
 pub(super) fn clear(commands: &mut Commands, meshes: &mut Assets<Mesh>, blocks: &mut Vec<Block>) {
     for block in blocks.iter_mut() {

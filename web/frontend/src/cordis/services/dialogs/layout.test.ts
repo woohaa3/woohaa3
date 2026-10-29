@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(fileURLToPath(new URL("../../ui/ui.css", import.meta.url)), "utf8");
+const css = readFileSync(fileURLToPath(new URL("../../../../../ui/src/styles/dialogs.css", import.meta.url)), "utf8");
 
 describe("Dialog 样式约束", () => {
   it("Content 使用 100dvh 与 safe-area 约束", () => {

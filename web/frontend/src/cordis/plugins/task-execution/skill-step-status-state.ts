@@ -19,8 +19,7 @@ export const SKILL_STEP_STATE_LABELS: Record<SkillMediaState, string> = {
   cancelled: "已取消",
   superseded: "已被后续尝试替代",
   succeeded: "已完成",
-  failed: "失败",
-  unknown: "待核对"
+  failed: "失败"
 };
 
 export function skillStepCurrentAttempt(step: SkillMediaStepView) {
@@ -46,19 +45,19 @@ export function resolveSkillStepActions(input: {
   writable: boolean;
   readOnly: boolean;
 }): SkillStepActions {
-  const state = skillStepCurrentAttempt(input.step)?.state ?? "unknown";
+  const state = skillStepCurrentAttempt(input.step)?.state ?? "failed";
   const writable = input.writable && !input.readOnly;
   return {
     canStop: writable && (state === "queued" || state === "running" || state === "cancel-requested"),
     canRegenerate: writable,
-    needsRecovery: state === "failed" || state === "cancelled" || state === "unknown"
+    needsRecovery: state === "failed" || state === "cancelled"
   };
 }
 
 /** 主状态行：当前尝试与替代关系；旧尝试不参与主状态。 */
 export function skillStepStatusText(step: SkillMediaStepView): string {
   const current = skillStepCurrentAttempt(step);
-  if (!current) return "步骤状态待核对";
+  if (!current) return "步骤状态未确认，已按失败结算";
   const base = `第 ${current.attempt} 次 · ${SKILL_STEP_STATE_LABELS[current.state]}`;
   if (current.supersededByRunId || current.supersededByAttempt) {
     return `${base} · 由第 ${current.supersededByAttempt ?? "?"} 次接续`;

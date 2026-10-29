@@ -23,7 +23,10 @@ export function skillRowKey(step: Pick<SkillMediaStepView, "skillRunId" | "stepI
   return `skill:${step.skillRunId}:${step.stepId}`;
 }
 
-/** 当前尝试；快照损坏（指针缺失）时返回 `undefined`，由调用方按「待核对」处理。 */
+/**
+ * 当前尝试；快照损坏（指针缺失）时返回 `undefined`。此时步骤已无法证明结果，按失败记录
+ * 呈现，不保留独立的待核对状态。
+ */
 export function currentSkillAttempt(step: SkillMediaStepView) {
   return step.attempts.find((attempt) => attempt.attempt === step.currentAttempt);
 }
@@ -49,19 +52,18 @@ export function skillStepTitle(step: SkillMediaStepView, capabilities: ActivityR
 export function adaptSkillRow(step: SkillMediaStepView, capabilities: ActivityRowCapabilities = {}): ActivityRow {
   const current = currentSkillAttempt(step);
   const active = current ? skillStateActive(current.state) : false;
-  const state = current?.state ?? "unknown";
+  const state = current?.state ?? "failed";
   const title = skillStepTitle(step, capabilities);
   const attemptLabel = `第 ${current?.attempt ?? step.currentAttempt} 次 · 提示词 r${current?.promptRevision ?? step.promptRevision}`;
   const secondary = current?.modelKey ? `${attemptLabel} · ${current.modelKey}` : attemptLabel;
   const locate = capabilities.locateNode ? () => capabilities.locateNode!(step.nodeId) : undefined;
-  const refresh = capabilities.skill?.refresh ? () => capabilities.skill!.refresh!(step) : undefined;
   return {
     key: skillRowKey(step),
     kind: "skill",
     title,
     secondary,
-    ...(current?.error ? { detail: current.error } : {}),
-    status: current ? SKILL_STATE_LABELS[current.state] : SKILL_STATE_LABELS.unknown,
+    ...(current?.error ? { detail: current.error } : !current ? { detail: "未找到当前尝试记录，结果无法确认，已按失败结算。" } : {}),
+    status: SKILL_STATE_LABELS[state],
     state,
     tone: skillStateTone(state),
     nodeId: step.nodeId,
@@ -71,9 +73,8 @@ export function adaptSkillRow(step: SkillMediaStepView, capabilities: ActivityRo
     actions: {
       close: !active,
       ...(locate ? { locate } : {}),
-      ...(refresh ? { verify: refresh } : {}),
-      // 详情包含旧尝试与提示词核对，点击锁定，避免只读悬停时无法阅读。
-      ...(refresh ? { pinOnOpen: true } : {})
+      // 详情包含旧尝试与提示词历史，点击锁定，避免只读悬停时无法阅读。
+      ...(capabilities.skill?.refresh ? { pinOnOpen: true } : {})
     },
     source: { kind: "skill", step }
   };
