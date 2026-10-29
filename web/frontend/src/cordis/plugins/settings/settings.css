@@ -42,28 +42,6 @@
 .settings-rail .dlg__description { margin-top: 2px; font-size: 11px; }
 .settings-rail .dlg__close { width: 26px; height: 26px; }
 .settings-rail .dlg__close-icon { width: 14px; height: 14px; }
-.settings-rail__footer {
-	flex: none;
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 5px;
-	margin-top: auto;
-	padding: 12px 14px;
-	border-top: 1px solid var(--mc-border);
-	color: var(--mc-text-muted);
-	font-size: 11px;
-	line-height: 1.4;
-}
-.settings-rail__dot {
-	width: 6px;
-	height: 6px;
-	border-radius: 999px;
-	background: var(--app-status-success);
-	box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-status-success) 16%, transparent);
-}
-.settings-rail__muted { flex-basis: 100%; padding-left: 11px; opacity: 0.8; }
-
 .settings-workbench__nav {
 	display: flex;
 	flex-direction: column;
@@ -124,6 +102,9 @@
 	background: var(--mc-panel);
 }
 .settings-workbench__body {
+	/* 内边距同时以变量暴露：粘性条要用负边距抵消它，断点改内边距时不会错位。 */
+	--settings-gutter-y: 22px;
+	--settings-gutter-x: 26px;
 	flex: 1;
 	min-width: 0;
 	min-height: 0;
@@ -875,10 +856,10 @@
  * 插件配置重设计（change: 2026-10-26-redesign-settings-plugin-page）
  * 列表按可扫描行组织；安装是同一弹窗内的视图，不再叠抽屉。
  * ------------------------------------------------------------------ */
-.settings-plugin-page { display: flex; flex-direction: column; min-width: 0; }
+.settings-plugin-page { display: flex; flex-direction: column; min-width: 0; padding-bottom: 56px; }
 .settings-plugin-head {
 	display: flex;
-	align-items: flex-start;
+	align-items: center;
 	justify-content: space-between;
 	gap: 18px;
 	flex-wrap: wrap;
@@ -892,15 +873,14 @@
 	font-weight: 650;
 	letter-spacing: -0.025em;
 }
-.settings-plugin-head__title p {
-	margin: 6px 0 0;
-	font-size: 12.5px;
-	line-height: 1.55;
+/* 规模与状态压成一行次要文字：列表页只留标题、规模与搜索。 */
+.settings-plugin-head__meta {
+	margin: 4px 0 0;
+	font-size: 12px;
+	line-height: 1.5;
 	color: var(--mc-text-muted);
-	max-width: 64ch;
+	font-variant-numeric: tabular-nums;
 }
-.settings-plugin-head__actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.settings-plugin-head__actions .ui-button { height: 36px; }
 .settings-plugin-search {
 	display: flex;
 	align-items: center;
@@ -934,28 +914,6 @@
 }
 .settings-plugin-search input::placeholder { color: var(--mc-text-muted); opacity: 0.9; }
 .settings-plugin-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
-.settings-plugin-statusbar {
-	display: flex;
-	align-items: center;
-	gap: 9px;
-	flex-wrap: wrap;
-	padding: 9px 0;
-	border-bottom: 1px solid var(--mc-border);
-	color: var(--mc-text-muted);
-	font-size: 12px;
-}
-.settings-plugin-live { display: inline-flex; align-items: center; gap: 6px; color: var(--mc-text); font-weight: 550; }
-.settings-plugin-live__dot {
-	width: 6px;
-	height: 6px;
-	border-radius: 999px;
-	background: var(--app-status-success);
-	box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-status-success) 16%, transparent);
-}
-.settings-plugin-statusbar__rule { width: 1px; height: 12px; background: var(--mc-border); }
-.settings-plugin-statusbar .settings-plugins__summary { margin: 0; font-size: 12px; }
-.settings-plugin-statusbar__count { color: var(--mc-text-muted); font-variant-numeric: tabular-nums; }
-.settings-plugin-statusbar__count strong { color: var(--mc-text); font-weight: 600; }
 .settings-plugin-toolbar {
 	display: flex;
 	align-items: center;
@@ -1062,13 +1020,6 @@
 .plugin-row > .managed-extension .managed-extension__actions { margin-top: 2px; }
 
 /* 添加扩展：同一弹窗内的视图，不盖第二层遮罩。 */
-.settings-plugin-install { display: flex; flex-direction: column; min-width: 0; }
-.settings-plugin-install__head { display: flex; align-items: flex-start; gap: 12px; padding-bottom: 13px; border-bottom: 1px solid var(--mc-border); }
-.settings-plugin-install__title { min-width: 0; flex: 1; }
-.settings-plugin-install__title h2 { margin: 0; font-size: 21px; line-height: 1.25; font-weight: 650; letter-spacing: -0.02em; }
-.settings-plugin-install__title p { margin: 5px 0 0; font-size: 12px; line-height: 1.55; color: var(--mc-text-muted); }
-.settings-plugin-install__body { min-width: 0; padding-top: 14px; }
-.settings-plugin-install-shell[hidden] { display: none; }
 .marketplace-install.is-view { margin: 0; padding: 0; border: 0; gap: 12px; }
 .marketplace-install.is-view .marketplace-install__body { gap: 12px; }
 .marketplace-install.is-view .settings-page__list { margin: 0; border-top: 1px solid var(--mc-border); }
@@ -1134,19 +1085,15 @@
 
 @media (max-width: 1060px) {
 	.settings-workbench { grid-template-columns: 184px minmax(0, 1fr); }
-	.settings-workbench__body { padding: 18px 20px 22px; }
-	.settings-plugin-head__actions { flex: 1 1 100%; }
+	.settings-workbench__body { --settings-gutter-y: 18px; --settings-gutter-x: 20px; padding: 18px 20px 22px; }
 	.settings-plugin-search { flex: 1; width: auto; min-width: 200px; }
 }
 @media (max-width: 900px) {
 	.settings-dialog { max-width: min(980px, calc(100vw - 20px)); height: calc(100dvh - 20px); }
 	.settings-workbench { grid-template-columns: 168px minmax(0, 1fr); }
 	.settings-rail .dlg__header { padding: 14px 10px 10px 12px; }
-	.settings-workbench__body { padding: 16px 16px 20px; }
+	.settings-workbench__body { --settings-gutter-y: 16px; --settings-gutter-x: 16px; padding: 16px 16px 20px; }
 	.settings-plugin-head__title h2 { font-size: 21px; }
-	.settings-plugin-head__actions .ui-button .ui-button__label { display: none; }
-	.settings-plugin-head__actions .ui-button { width: 36px; padding: 0; }
-	.settings-plugin-statusbar { gap: 7px; }
 	.plugin-row__description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 	.plugin-row__side { min-width: 104px; }
 }
@@ -1432,3 +1379,372 @@
 	max-height: none;
 	overflow: visible;
 }
+
+/* ==========================================================================
+ * 扩展层级导航（2026-10-28 交互设计说明 v1）
+ *
+ * 左栏 = 右栏内容的父级：L1 分区 → L2 插件列表 → L3 插件子页。
+ * 进入下一级时左右栏同步水平平移（约 300ms，cubic-bezier(0.22,1,0.36,1)），
+ * 返回与进入对称；同级切换只换右栏。动效期间左右栏不接受点击。
+ * ========================================================================== */
+
+.settings-workbench[data-level="1"],
+.settings-workbench[data-level="2"] {
+	grid-template-columns: 224px minmax(0, 1fr);
+}
+
+/* 左栏的层级容器：随层级整块替换，自身撑满品牌与页脚之间的高度。 */
+.settings-rail__level {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+}
+.settings-rail__level-body {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+}
+.settings-rail__level .settings-workbench__nav { flex: 0 0 auto; }
+
+/* 返回上一级：图标 + 父级名，点击回上一层（不是关闭设置）。 */
+.settings-rail__back {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+	margin: 2px 10px 8px;
+	padding: 0 6px;
+	min-height: 30px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--mc-text-muted);
+	cursor: pointer;
+	font: inherit;
+	font-size: 12px;
+	text-align: left;
+}
+.settings-rail__back:hover { color: var(--mc-text); background: var(--mc-panel); }
+.settings-rail__back svg { flex: none; opacity: 0.8; }
+.settings-rail__back-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-weight: 600;
+	color: var(--mc-text);
+}
+
+/* 左栏搜索：200px 级宽度下只留图标与输入，占位文案尽量短。 */
+.settings-rail__search {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+	margin: 0 10px 8px;
+	padding: 0 8px;
+	height: 28px;
+	border: 1px solid var(--mc-border);
+	border-radius: 7px;
+	background: var(--mc-panel);
+	color: var(--mc-text-muted);
+}
+.settings-rail__search svg { flex: none; opacity: 0.7; }
+.settings-rail__search input {
+	flex: 1;
+	min-width: 0;
+	border: 0;
+	outline: none;
+	background: transparent;
+	color: var(--mc-text);
+	font: inherit;
+	font-size: 12px;
+}
+.settings-rail__search input::placeholder { color: var(--mc-text-muted); }
+
+/* 左栏插件列表：分组标题 + 紧凑行（图标 / 名称 / 真实状态点）。 */
+.settings-rail__list {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: 0 8px 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.settings-rail__group { display: flex; flex-direction: column; gap: 1px; }
+.settings-rail__group + .settings-rail__group { margin-top: 8px; }
+.settings-rail__group-title {
+	padding: 4px 6px 2px;
+	font-size: 10.5px;
+	font-weight: 650;
+	letter-spacing: 0.02em;
+	color: var(--mc-text-muted);
+}
+.settings-rail__item {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-height: 30px;
+	padding: 0 7px;
+	border: 1px solid transparent;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--mc-text-muted);
+	cursor: pointer;
+	font: inherit;
+	font-size: 12px;
+	text-align: left;
+	min-width: 0;
+}
+.settings-rail__item:hover { color: var(--mc-text); background: var(--mc-panel); }
+.settings-rail__item.is-active {
+	color: var(--mc-accent);
+	background: var(--app-interaction-accent-soft);
+	border-color: color-mix(in srgb, var(--mc-accent) 28%, var(--mc-border));
+	font-weight: 600;
+}
+.settings-rail__item .plugin-card__icon { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+.settings-rail__item .plugin-card__icon-image { width: 16px; height: 16px; }
+.settings-rail__item-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: inherit;
+}
+.settings-rail__item-dot {
+	flex: none;
+	width: 5px;
+	height: 5px;
+	border-radius: 999px;
+	background: currentColor;
+	opacity: 0.55;
+}
+.settings-rail__item-dot[data-tone="success"] { color: var(--app-status-success); opacity: 1; }
+.settings-rail__item-dot[data-tone="warning"] { color: var(--app-status-warning); opacity: 1; }
+.settings-rail__item-dot[data-tone="muted"] { color: var(--mc-text-muted); }
+.settings-rail__empty {
+	margin: 8px 6px;
+	font-size: 11.5px;
+	color: var(--mc-text-muted);
+}
+
+/* 右栏视图容器：动效挂在它上面，宽度不被长键名撑开。 */
+.settings-view { display: flex; flex-direction: column; min-width: 0; }
+
+/* 面包屑：设置 / 插件配置 / 插件名 / 子页；可点段直接跨级回跳。 */
+.settings-crumbs {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 2px;
+	margin: 0 0 10px;
+	font-size: 11.5px;
+	color: var(--mc-text-muted);
+}
+.settings-crumbs__item { display: inline-flex; align-items: center; gap: 2px; }
+.settings-crumbs__sep { color: var(--mc-border); }
+.settings-crumbs__link {
+	padding: 1px 4px;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--mc-text-muted);
+	cursor: pointer;
+	font: inherit;
+	font-size: 11.5px;
+}
+.settings-crumbs__link:hover { color: var(--mc-accent); background: var(--app-web-subtle); }
+.settings-crumbs__current { padding: 1px 4px; color: var(--mc-text); font-weight: 600; }
+
+/* 子页标题：标题 + 这一页管什么的说明。 */
+.settings-workbench__page-head { display: flex; flex-direction: column; gap: 2px; }
+.settings-workbench__page-head .settings-page__hint { margin: 2px 0 0; }
+
+/* 概览页的下一级入口：图标 / 标题 + 说明 / chevron，整行可点。 */
+.plugin-entries { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+.plugin-entry {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	padding: 11px 12px;
+	border: 1px solid var(--mc-border);
+	border-radius: 10px;
+	background: var(--mc-panel);
+	color: var(--mc-text);
+	cursor: pointer;
+	font: inherit;
+	text-align: left;
+}
+.plugin-entry:hover { border-color: color-mix(in srgb, var(--mc-accent) 34%, var(--mc-border)); background: var(--app-web-subtle); }
+.plugin-entry__icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: 30px;
+	height: 30px;
+	border-radius: 8px;
+	background: var(--app-web-subtle);
+	color: var(--mc-text-muted);
+}
+.plugin-entry__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.plugin-entry__title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12.5px;
+	font-weight: 600;
+}
+.plugin-entry__count {
+	min-width: 18px;
+	padding: 0 5px;
+	border: 1px solid var(--mc-border);
+	border-radius: 999px;
+	color: var(--mc-text-muted);
+	font-size: 10.5px;
+	line-height: 16px;
+	font-weight: 500;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+.plugin-entry__hint { font-size: 11.5px; color: var(--mc-text-muted); line-height: 1.5; }
+.plugin-entry__chevron { flex: none; color: var(--mc-text-muted); }
+.plugin-entry:hover .plugin-entry__chevron { color: var(--mc-accent); }
+
+/* 管理页的事实清单（安装来源 / 版本 / 安装位置）。 */
+.plugin-manage__facts {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 8px 16px;
+	margin: 0 0 10px;
+	font-size: 12px;
+}
+.plugin-manage__facts > div { display: contents; }
+.plugin-manage__facts dt { color: var(--mc-text-muted); }
+.plugin-manage__facts dd {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+/* 层级平移：进入下一级（右推左）与返回（左推右）对称；同级只换右栏。 */
+@keyframes settings-level-in-forward {
+	from { opacity: 0; transform: translate3d(18px, 0, 0); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes settings-level-in-back {
+	from { opacity: 0; transform: translate3d(-18px, 0, 0); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes settings-view-in-forward {
+	from { opacity: 0; transform: translate3d(32px, 0, 0); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes settings-view-in-back {
+	from { opacity: 0; transform: translate3d(-32px, 0, 0); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes settings-view-in-sibling {
+	from { opacity: 0; transform: translate3d(10px, 0, 0); }
+	to { opacity: 1; transform: none; }
+}
+
+.settings-workbench[data-motion="forward"] .settings-rail__level {
+	animation: settings-level-in-forward 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.settings-workbench[data-motion="forward"] .settings-view {
+	animation: settings-view-in-forward 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.settings-workbench[data-motion="back"] .settings-rail__level {
+	animation: settings-level-in-back 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.settings-workbench[data-motion="back"] .settings-view {
+	animation: settings-view-in-back 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.settings-workbench[data-motion="sibling"] .settings-view {
+	animation: settings-view-in-sibling 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 动效期间禁用重复点击：防止连续导航把栈搞乱（滚动仍走正文容器）。 */
+.settings-workbench[data-motion="forward"] .settings-rail__level,
+.settings-workbench[data-motion="back"] .settings-rail__level,
+.settings-workbench[data-motion="forward"] .settings-view,
+.settings-workbench[data-motion="back"] .settings-view {
+	pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.settings-workbench[data-motion] .settings-rail__level,
+	.settings-workbench[data-motion] .settings-view {
+		animation: none;
+	}
+}
+
+/* ==========================================================================
+ * 顶部粘性条 / 悬浮入口 / 添加扩展页（2026-10-28 反馈）
+ *
+ * 1. 面包屑随层级走，但滚动时不希望失去方位：粘在正文顶部，滚动内容从它下面穿过；
+ * 2. 插件列表顶部不再堆「从文件安装 / 从市场安装」两个按钮：右下角一个悬浮 + 进「添加扩展」页；
+ * 3. 「添加扩展」是插件列表的兄弟页：标题 + 来源分段切换 + 既有面板，返回靠左栏与面包屑。
+ * ========================================================================== */
+
+/* 正文唯一滚动容器是 .settings-workbench__body；粘性条用负边距抵消正文内边距，
+   贴住滚动口上沿，滚动内容从它下面穿过。 */
+.settings-sticky-head {
+	position: sticky;
+	/* 负 top 抵消正文的上内边距：滚动内容不会从条子上面露出来。 */
+	top: calc(-1 * var(--settings-gutter-y, 22px));
+	z-index: 4;
+	margin: calc(-1 * var(--settings-gutter-y, 22px)) calc(-1 * var(--settings-gutter-x, 26px)) 12px;
+	padding: 15px var(--settings-gutter-x, 26px) 9px;
+	background: var(--mc-panel);
+	border-bottom: 1px solid var(--mc-border);
+}
+.settings-sticky-head .settings-crumbs { margin: 0; }
+
+/* 悬浮「+」：绝对定位在正文右侧（父级 .settings-main 是定位上下文），
+   不随正文滚动；尺寸按图标按钮的桌面命中区。 */
+.settings-main { position: relative; }
+.settings-plugin-fab {
+	position: absolute;
+	right: 24px;
+	bottom: 22px;
+	z-index: 5;
+	display: grid;
+	place-items: center;
+	width: 42px;
+	height: 42px;
+	border: 1px solid color-mix(in srgb, var(--mc-accent) 46%, transparent);
+	border-radius: 999px;
+	background: var(--mc-accent);
+	color: #fff;
+	cursor: pointer;
+	box-shadow: 0 8px 22px color-mix(in srgb, var(--mc-accent) 34%, transparent);
+	transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+.settings-plugin-fab:hover {
+	background: color-mix(in srgb, var(--mc-accent) 88%, #000);
+	transform: translateY(-1px);
+	box-shadow: 0 10px 26px color-mix(in srgb, var(--mc-accent) 40%, transparent);
+}
+.settings-plugin-fab:active { transform: none; }
+.settings-plugin-fab:focus-visible { outline: 2px solid var(--app-interaction-focus); outline-offset: 3px; }
+
+/* 「添加扩展」页：标题就是面包屑最后一段，页面里不再重复一次标题与副标题；
+   详情打开时整页换内容（data-view="detail"），页头与来源切换一起让位。 */
+.settings-install-page { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.settings-install-page > .ui-segmented { align-self: flex-start; }
+
+/* 刷新 / 搜索期间骨架占满内容列，不出现「半张旧列表 + 半截空」。 */
+.marketplace-install [data-testid="marketplace-skeleton"] { margin: 0; }
+

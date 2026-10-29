@@ -18,6 +18,43 @@ import { createBackendSettingsStore, type BackendSettingsRemote } from "../backe
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+/** 受管任务控制器的稳定空状态（每次新建对象会让 useSyncExternalStore 无限重渲染）。 */
+const MANAGED_STUB_STATE = { jobs: [], error: null, submitting: false, restart: { status: "idle", message: null }, unquarantining: [] };
+/** 同理：待重开列表也必须是稳定引用。 */
+const NO_PENDING_REOPEN: readonly string[] = [];
+
+/** 最小的市场控制器：安装页只订阅它，测试不驱动真实网络。 */
+const MARKETPLACE_STUB_STATE = {
+  sources: [],
+  sourceId: null,
+  query: "",
+  searching: false,
+  refreshing: false,
+  fetchedAt: null,
+  items: [],
+  unavailableReason: "本地模式下没有市场来源",
+  selected: null,
+  installing: false,
+  installingId: null,
+  trusting: null,
+  error: null,
+  notice: null
+};
+const MARKETPLACE_STUB = {
+  getState: () => MARKETPLACE_STUB_STATE,
+  subscribe: () => () => undefined,
+  load: async () => undefined,
+  refresh: async () => undefined,
+  setSource: async () => undefined,
+  search: async () => undefined,
+  select: async () => undefined,
+  chooseVersion: () => undefined,
+  close: () => undefined,
+  install: async () => undefined,
+  installListed: async () => undefined,
+  trustKey: async () => undefined
+};
+
 const roots = new Set<Root>();
 afterEach(() => {
   act(() => {
@@ -140,6 +177,8 @@ async function renderWorkspace(
     initialPluginId?: string;
     /** 打开本机遥测复盘页；缺省不显示入口。 */
     onOpenTelemetry?: () => void;
+    /** 挂载受管安装能力（悬浮 + 需要它）；`marketplace` 决定 + 默认进市场还是文件。 */
+    install?: { marketplace?: boolean; selectedLabel?: string };
   } = {}
 ) {
   const backend = createBackendSettingsStore(remote);
@@ -159,6 +198,52 @@ async function renderWorkspace(
   document.body.appendChild(container);
   const root = createRoot(container);
   roots.add(root);
+  const closeDetail = vi.fn();
+  // 详情状态必须是稳定引用：getSnapshot 每次新建对象会让 useSyncExternalStore 无限重渲染。
+  const selectedMarketState = options.install?.selectedLabel
+    ? {
+        ...MARKETPLACE_STUB_STATE,
+        selected: {
+          extensionId: "photocraft",
+          loading: false,
+          version: "0.1.1",
+          detail: {
+            sourceId: "woohaa-server",
+            extension: {
+              extensionId: "photocraft",
+              label: options.install.selectedLabel,
+              versions: [{ version: "0.1.1", packageDigest: "sha256:a", size: 2048, keyId: "k1" }]
+            },
+            trustedKeyIds: [],
+            signingKeys: []
+          }
+        }
+      }
+    : null;
+  const managedStub = options.install
+    ? ({
+        controller: {
+          // 稳定快照：每次返回新对象会让 useSyncExternalStore 无限重渲染。
+          getState: () => MANAGED_STUB_STATE,
+          subscribe: () => () => undefined,
+          busy: () => false,
+          installFile: async () => undefined,
+          cancel: async () => undefined
+        },
+        pendingReopen: { get: () => NO_PENDING_REOPEN, subscribe: () => () => undefined },
+        ...(options.install.marketplace
+          ? {
+              marketplace: options.install.selectedLabel
+                ? {
+                    ...MARKETPLACE_STUB,
+                    getState: () => selectedMarketState!,
+                    close: closeDetail
+                  }
+                : MARKETPLACE_STUB
+            }
+          : {})
+      } as never)
+    : undefined;
   await act(async () => {
     root.render(
       <SettingsWorkspace
@@ -167,6 +252,7 @@ async function renderWorkspace(
         extensions={extensions.facade}
         onRequestClose={onRequestClose}
         onRequestNavigate={onRequestNavigate}
+        {...(managedStub ? { managed: managedStub } : {})}
         {...(options.initialPluginId ? { initialPluginId: options.initialPluginId } : {})}
         {...(options.onOpenTelemetry ? { onOpenTelemetry: options.onOpenTelemetry } : {})}
       />
@@ -294,15 +380,31 @@ describe("设置工作区", () => {
     expect(ark.querySelector('[data-setting-key="providers.ark.apiKey"]')).toBeNull();
 
     await act(async () => query<HTMLButtonElement>(container, "settings-plugin-open-ark-provider")!.click());
-    // 内部导航：右栏换成详情，同一实例（没有第二张弹窗/第二个 nav）。
+    // 内部导航：同一实例（没有第二张弹窗），左栏换成插件列表（父级），右栏是概览。
     expect(onRequestNavigate).toHaveBeenCalledWith({ kind: "plugin", section: "plugins", pluginId: "ark-provider" });
-    expect(container.querySelectorAll('[data-testid="settings-nav-backend"]')).toHaveLength(1);
-    expect(query(container, "plugin-config-back")).not.toBeNull();
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(query(container, "settings-nav-backend")).toBeNull();
+    expect(query(container, "plugin-rail-list")).not.toBeNull();
+    expect(query(container, "plugin-config-ark-provider")).not.toBeNull();
+    expect(query(container, "settings-breadcrumbs")?.textContent).toContain("插件配置");
+    // 概览不直接摊开长表单：配置项在下一级的「配置」页。
+    expect(container.querySelector('[data-setting-key="providers.ark.apiKey"]')).toBeNull();
+    expect(query(container, "plugin-entry-config")).not.toBeNull();
+
+    // 进入「配置」：左栏换成子页导航，右栏换成配置项，仍是一张弹窗。
+    await act(async () => query<HTMLButtonElement>(container, "plugin-entry-config")!.click());
+    expect(onRequestNavigate).toHaveBeenCalledWith({
+      kind: "plugin-page",
+      section: "plugins",
+      pluginId: "ark-provider",
+      page: "config"
+    });
+    expect(query(container, "plugin-page-nav-ark-provider")).not.toBeNull();
     expect(container.querySelector('[data-setting-key="providers.ark.apiKey"]')).not.toBeNull();
 
-    // 返回列表：回到插件配置分区。
-    await act(async () => query<HTMLButtonElement>(container, "plugin-config-back")!.click());
-    expect(query(container, "settings-plugin-local-storage")).not.toBeNull();
+    // 返回插件列表：同一实例，左栏还是那份列表。
+    await act(async () => query<HTMLButtonElement>(container, "plugin-page-back")!.click());
+    expect(query(container, "plugin-rail-local-storage")).not.toBeNull();
     expect(container.querySelector('[data-setting-key="providers.ark.apiKey"]')).toBeNull();
   });
 
@@ -321,7 +423,7 @@ describe("设置工作区", () => {
     await act(async () => query<HTMLButtonElement>(container, "settings-plugin-open-ark-provider")!.click());
     // 门禁拒绝：仍在插件列表，不进入详情。
     expect(query(container, "settings-plugin-open-ark-provider")).not.toBeNull();
-    expect(query(container, "plugin-config-back")).toBeNull();
+    expect(query(container, "plugin-rail-list")).toBeNull();
   });
 
   it("未授权时提示需要管理员；核心服务与插件配置都不可写", async () => {
@@ -542,5 +644,143 @@ describe("初始直开插件详情", () => {
     );
     // 落到「插件不存在」的稳定提示，而不是空详情或崩溃。
     expect(query(container, "plugin-config-missing")).not.toBeNull();
+  });
+});
+describe("扩展层级导航", () => {
+  const arkKey = () =>
+    tokenEntry({
+      key: "providers.ark.apiKey",
+      label: "API Key",
+      group: "Ark（火山方舟）",
+      ownerExtensionId: "ark-provider"
+    });
+  const layered = () =>
+    snapshotOf([arkKey()], [
+      plugin("ark-provider", { label: "Ark（火山方舟）", configPrefix: "providers.ark", provider: true, siteManaged: true }),
+      plugin("film-set", { label: "片场" })
+    ]);
+  const open = async (initial: { initialPluginId?: string } = {}) =>
+    renderWorkspace({ fetchSnapshot: async () => ({ ok: true, snapshot: layered() }), write: async () => ({ ok: true, snapshot: layered() }) }, initial);
+
+  it("进入插件后左栏换成插件列表，面包屑可跨级回到一级页", async () => {
+    const { container } = await open();
+    act(() => query<HTMLButtonElement>(container, "settings-nav-plugins")!.click());
+    await act(async () => query<HTMLButtonElement>(container, "settings-plugin-open-ark-provider")!.click());
+
+    // L2：分区导航让位给父级（插件列表），右栏是概览。
+    expect(query(container, "settings-nav-plugins")).toBeNull();
+    expect(query(container, "plugin-rail-list")).not.toBeNull();
+    expect(query(container, "settings-breadcrumbs")?.textContent).toBe("设置插件配置Ark（火山方舟）");
+    expect(query(container, "plugin-entry-config")).not.toBeNull();
+
+    // 面包屑「插件配置」直接回到一级页。
+    await act(async () => query<HTMLButtonElement>(container, "settings-crumb-1")!.click());
+    expect(query(container, "settings-nav-plugins")).not.toBeNull();
+    expect(query(container, "plugin-rail-list")).toBeNull();
+  });
+
+  it("子页之间只是同级切换：从「配置」回「概览」仍留在子页导航里", async () => {
+    const { container, onRequestNavigate } = await open({ initialPluginId: "ark-provider" });
+    expect(query(container, "plugin-rail-list")).not.toBeNull();
+
+    await act(async () => query<HTMLButtonElement>(container, "plugin-entry-config")!.click());
+    expect(query(container, "plugin-page-nav-ark-provider")).not.toBeNull();
+    expect(query(container, "plugin-config-ark-provider")!.getAttribute("data-page")).toBe("config");
+    expect(onRequestNavigate).toHaveBeenCalledWith({
+      kind: "plugin-page",
+      section: "plugins",
+      pluginId: "ark-provider",
+      page: "config"
+    });
+
+    // 概览也属于子页导航：左栏不退回插件列表。
+    await act(async () => query<HTMLButtonElement>(container, "plugin-page-overview")!.click());
+    expect(query(container, "plugin-page-nav-ark-provider")).not.toBeNull();
+    expect(query(container, "plugin-rail-list")).toBeNull();
+    expect(query(container, "plugin-config-ark-provider")!.getAttribute("data-page")).toBe("overview");
+
+    // 返回上一级才回到插件列表。
+    await act(async () => query<HTMLButtonElement>(container, "plugin-page-back")!.click());
+    expect(query(container, "plugin-rail-list")).not.toBeNull();
+  });
+
+  it("左栏搜索过滤插件，并可直接切到另一个插件", async () => {
+    const { container } = await open({ initialPluginId: "ark-provider" });
+    const search = query<HTMLInputElement>(container, "plugin-rail-search")!;
+    typeInto(search, "片场");
+    expect(query(container, "plugin-rail-film-set")).not.toBeNull();
+    expect(query(container, "plugin-rail-ark-provider")).toBeNull();
+
+    await act(async () => query<HTMLButtonElement>(container, "plugin-rail-film-set")!.click());
+    expect(query(container, "settings-breadcrumbs")?.textContent).toContain("片场");
+    expect(query(container, "plugin-config-ark-provider")).toBeNull();
+  });
+
+  it("没有配置项的插件也能打开概览，并说明只需要启停", async () => {
+    const { container } = await open({ initialPluginId: "film-set" });
+    expect(query(container, "plugin-config-film-set")).not.toBeNull();
+    expect(query(container, "plugin-entry-config")).toBeNull();
+    expect(query(container, "plugin-config-film-set")?.textContent).toContain("只需要启停");
+  });
+});
+describe("添加扩展页", () => {
+  const withInstall = () => {
+    const snapshot = {
+      ...snapshotOf([arkKey()], [plugin("ark-provider", { label: "Ark（火山方舟）", configPrefix: "providers.ark", provider: true, siteManaged: true })]),
+      extensionInstallations: { revision: 1, jobs: [], restartSupported: true, allowUnsignedLocal: false }
+    };
+    return { fetchSnapshot: async () => ({ ok: true as const, snapshot }), write: async () => ({ ok: true as const, snapshot }) };
+  };
+  const arkKey = () => tokenEntry({ key: "providers.ark.apiKey", label: "API Key", group: "Ark（火山方舟）", ownerExtensionId: "ark-provider" });
+
+  it("悬浮 + 进入「添加扩展」：左栏仍是插件列表，面包屑标出当前页", async () => {
+    const { container, onRequestNavigate } = await renderWorkspace(withInstall(), { install: { marketplace: true } });
+    act(() => query<HTMLButtonElement>(container, "settings-nav-plugins")!.click());
+    await act(async () => query<HTMLButtonElement>(container, "plugin-install-open")!.click());
+
+    expect(onRequestNavigate).toHaveBeenCalledWith({ kind: "install", section: "plugins", mode: "market" });
+    expect(query(container, "plugin-install-page")).not.toBeNull();
+    // 同一层级：左栏是插件列表（父级），不是分区导航。
+    expect(query(container, "plugin-rail-list")).not.toBeNull();
+    expect(query(container, "settings-nav-plugins")).toBeNull();
+    expect(query(container, "settings-breadcrumbs")?.textContent).toBe("设置插件配置添加扩展");
+
+    // 来源切换走同一门禁，仍停在安装页。
+    await act(async () => {
+      const fileTab = [...container.querySelectorAll('[data-testid="plugin-install-mode"] button')].find((button) =>
+        button.textContent?.includes("从文件安装")
+      ) as HTMLButtonElement | undefined;
+      fileTab?.click();
+    });
+    expect(onRequestNavigate).toHaveBeenCalledWith({ kind: "install", section: "plugins", mode: "file" });
+    expect(query(container, "plugin-install-page")!.getAttribute("data-mode")).toBe("file");
+
+    // 返回：左栏的返回项回到插件列表。
+    await act(async () => query<HTMLButtonElement>(container, "plugin-rail-back")!.click());
+    expect(query(container, "plugin-settings")).not.toBeNull();
+    expect(query(container, "plugin-install-page")).toBeNull();
+  });
+});
+describe("添加扩展的详情层级", () => {
+  const installSnapshot = () => {
+    const snapshot = {
+      ...snapshotOf([], [plugin("ark-provider", { label: "Ark（火山方舟）", configPrefix: "providers.ark", provider: true })]),
+      extensionInstallations: { revision: 1, jobs: [], restartSupported: true, allowUnsignedLocal: false }
+    };
+    return { fetchSnapshot: async () => ({ ok: true as const, snapshot }), write: async () => ({ ok: true as const, snapshot }) };
+  };
+
+  it("打开市场详情时面包屑多一段扩展名，「添加扩展」变成可点回列表", async () => {
+    const { container } = await renderWorkspace(installSnapshot(), {
+      install: { marketplace: true, selectedLabel: "PhotoCraft 图片编辑" }
+    });
+    act(() => query<HTMLButtonElement>(container, "settings-nav-plugins")!.click());
+    await act(async () => query<HTMLButtonElement>(container, "plugin-install-open")!.click());
+
+    // 详情是这一页的内容：面包屑带上扩展名，列表页头不再出现。
+    expect(query(container, "settings-breadcrumbs")?.textContent).toBe("设置插件配置添加扩展PhotoCraft 图片编辑");
+    expect(query(container, "plugin-install-page")!.getAttribute("data-view")).toBe("detail");
+    expect(query(container, "plugin-install-mode")).toBeNull();
+    expect(query(container, "settings-crumb-2")).not.toBeNull();
   });
 });

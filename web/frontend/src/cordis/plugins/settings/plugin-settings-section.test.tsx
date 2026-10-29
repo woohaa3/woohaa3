@@ -295,3 +295,58 @@ describe("插件目录管理", () => {
     expect(onOpen).toHaveBeenCalledWith("sdk-agent");
   });
 });
+describe("安装入口（悬浮 +）", () => {
+  const installSnapshot = (): SettingsSnapshot => ({
+    settings: [],
+    plugins: [plugin("film-set", { label: "片场" })],
+    installedExtensions: [{ id: "film-set", label: "片场", description: "", directory: "/plugins/film-set", writable: false }],
+    files: { config: "c", secrets: "s" },
+    extensionInstallations: { revision: 1, jobs: [], restartSupported: true, allowUnsignedLocal: false }
+  });
+
+  async function renderWithInstall(onRequestInstall: (mode: "market" | "file") => void, marketplace = true) {
+    const snapshot = installSnapshot();
+    const store = createBackendSettingsStore({
+      fetchSnapshot: async () => ({ ok: true, snapshot }),
+      write: async () => ({ ok: false, code: "unavailable", error: "x" })
+    });
+    await store.load();
+    const { facade } = facadeWith({});
+    const managed = {
+      controller: MANAGED_STUB.controller,
+      pendingReopen: MANAGED_STUB.pendingReopen,
+      ...(marketplace ? { marketplace: {} as never } : {})
+    } as never;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.add(root);
+    await act(async () => {
+      root.render(
+        <PluginSettingsSection store={store} manager={facade} managed={managed} onRequestInstall={onRequestInstall} />
+      );
+    });
+    return container;
+  }
+
+  it("列表头只留标题、规模与搜索，安装收成右下角悬浮 +", async () => {
+    const onRequestInstall = vi.fn();
+    const container = await renderWithInstall(onRequestInstall);
+    expect(query(container, "plugin-install-open")).not.toBeNull();
+    // 顶部不再常驻两个安装按钮。
+    expect(query(container, "plugin-install-market")).toBeNull();
+    expect(query(container, "plugin-install-file")).toBeNull();
+    expect(query(container, "plugins-settings-search")).not.toBeNull();
+    expect(query(container, "plugins-settings-summary")?.textContent).toContain("1 个插件");
+
+    act(() => query<HTMLButtonElement>(container, "plugin-install-open")!.click());
+    expect(onRequestInstall).toHaveBeenCalledWith("market");
+  });
+
+  it("没有市场控制器时悬浮 + 直接进文件安装", async () => {
+    const onRequestInstall = vi.fn();
+    const container = await renderWithInstall(onRequestInstall, false);
+    act(() => query<HTMLButtonElement>(container, "plugin-install-open")!.click());
+    expect(onRequestInstall).toHaveBeenCalledWith("file");
+  });
+});

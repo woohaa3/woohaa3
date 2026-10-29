@@ -7,10 +7,10 @@
  * change: 2026-10-26-redesign-settings-plugin-page：列表从卡片网格改为分组行，并增加搜索 /
  * 筛选；市场与文件安装从顶部常驻面板改为「添加扩展」内联视图，不再在设置弹窗里叠第二层浮层。
  */
-import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Button } from "../../../shared/ui/Button.js";
 import { Switch } from "../../../shared/ui/Switch.js";
-import { BackIcon, ChevronDownIcon, ChevronRightIcon, FileTextIcon, PlusIcon, SearchIcon } from "../../../shared/ui/icons.js";
+import { ChevronDownIcon, ChevronRightIcon, PlusIcon, SearchIcon } from "../../../shared/ui/icons.js";
 import type { ExtensionManagerFacade } from "../extension-manager/contract.js";
 import type { BackendSettingsStore } from "./backend-settings-store.js";
 import { PluginIconMark } from "./plugin-icons.js";
@@ -20,18 +20,25 @@ import {
   diagnosticsOf,
   indexPlugins,
   isActionable,
-  isConfigurable,
   isManageable,
-  isSiteRowRunning,
   versionLabel,
   type PluginSettingsGroup,
   type PluginViewIndex
 } from "./plugin-groups.js";
+import {
+  PLUGIN_BROWSER_FILTERS,
+  filterPluginGroups,
+  isStoppedStatus,
+  pluginBrowserTotals,
+  pluginRowStatus,
+  pluginSourceOptions,
+  sectionizePluginGroups,
+  type PluginBrowserFilter
+} from "./plugin-browser.js";
 import { PluginStateControl } from "./plugin-state-control.js";
 import { ExtensionFaultNotice } from "./extension-fault-notice.js";
-import { ManagedInstallBar, ReleaseChangedNotice } from "./managed-extensions-ui.js";
+import { ReleaseChangedNotice } from "./managed-extensions-ui.js";
 import { extensionObservationBadge, extensionSource, extensionTrustBadge, signedKeyId } from "./extension-source.js";
-import { MarketplaceInstallPanel } from "./marketplace-install-ui.js";
 import type { ManagedExtensionsController } from "./managed-extensions.js";
 import {
   EMPTY_SETTINGS_PANELS,
@@ -44,46 +51,14 @@ const SECTION_HINTS: Record<string, string> = {
   扩展插件: "开关写宿主的扩展配置并立即生效：停用即卸下，启用即装回，无需重开页面。"
 };
 
-type PluginFilter = "all" | "running" | "disabled" | "configurable";
-
-const FILTERS: ReadonlyArray<{ id: PluginFilter; label: string }> = [
-  { id: "all", label: "全部" },
-  { id: "running", label: "运行中" },
-  { id: "disabled", label: "已停用" },
-  { id: "configurable", label: "可配置" }
-];
-
-
-/** 行右侧的状态：站点/浏览器用权威状态，宿主内置按安装结果。 */
-function pluginStatus(index: PluginViewIndex, group: PluginSettingsGroup): { label: string; tone: "success" | "warning" | "muted" } {
-  const site = index.siteRows.get(group.id);
-  if (site) {
-    if (site.busy) return { label: "正在应用…", tone: "warning" };
-    return {
-      label: site.actualStateLabel,
-      tone: isSiteRowRunning(site.actualState) ? (site.actualState === "degraded" ? "warning" : "success") : "muted"
-    };
-  }
-  const browser = index.browserRows.get(group.id);
-  if (browser) {
-    if (browser.status === "failed") return { label: "异常", tone: "warning" };
-
-    return browser.status === "disabled"
-      ? { label: "已停用", tone: "muted" }
-      : { label: "运行中", tone: "success" };
-  }
-  return index.installedIds.has(group.id) ? { label: "运行中", tone: "success" } : { label: "未安装", tone: "muted" };
-}
-
-function isStopped(label: string, tone: "success" | "warning" | "muted"): boolean {
-  return tone === "muted" || label.includes("停用") || label.includes("未启用") || label.includes("未安装");
-}
 
 export type PluginSettingsSectionProps = {
   store: BackendSettingsStore;
   manager: ExtensionManagerFacade;
   /** 打开某个插件的配置详情（由 settings 插件注册的 dialog 提供）。 */
   onOpenPlugin?: (pluginId: string) => void;
+  /** 进入「添加扩展」页（右下角悬浮 +）；缺省不显示该入口。 */
+  onRequestInstall?: (mode: "market" | "file") => void;
   /** 扩展自带设置面板（`settings.plugin-config` slot）；有面板的插件行也可打开配置。 */
   settingsPanels?: SettingsPanelSource;
   /**
@@ -104,7 +79,7 @@ export type ManagedExtensionsSource = {
 
 const NO_PENDING: readonly string[] = [];
 
-export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPanels, managed }: PluginSettingsSectionProps) {
+export function PluginSettingsSection({ store, manager, onOpenPlugin, onRequestInstall, settingsPanels, managed }: PluginSettingsSectionProps) {
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const pendingReopen = useSyncExternalStore(
     managed?.pendingReopen.subscribe ?? noopSubscribe,
@@ -118,51 +93,23 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
   const panelIds = settingsPanelIds(panels);
   const [sectionToggled, setSectionToggled] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<PluginFilter>("all");
+  const [filter, setFilter] = useState<PluginBrowserFilter>("all");
   /** 来源筛选：`all` 或 `builtin`/某个 sourceId（见 extension-source.ts）。 */
   const [sourceFilter, setSourceFilter] = useState<string>("all");
-  const [installMode, setInstallMode] = useState<"market" | "file" | null>(null);
 
   const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view);
   const canInstallFile = Boolean(
     state.status === "ready" && state.snapshot?.extensionInstallations && store.canManage()
   );
   const canUseMarket = Boolean(canInstallFile && managed?.marketplace);
+  // 悬浮入口只在真的能装的时候出现；默认落到市场，没有市场时落到文件安装。
+  const installMode = canUseMarket ? "market" : canInstallFile ? "file" : null;
   const normalizedQuery = query.trim().toLowerCase();
-  const groups = index.groups.filter((group) => {
-    const status = pluginStatus(index, group);
-    if (normalizedQuery) {
-      const haystack = `${group.label} ${group.description} ${group.id}`.toLowerCase();
-      if (!haystack.includes(normalizedQuery)) return false;
-    }
-    if (filter === "running") return !isStopped(status.label, status.tone);
-    if (filter === "disabled") return isStopped(status.label, status.tone);
-    if (filter === "configurable") return isConfigurable(index, group) || panelIds.has(group.id);
-    if (sourceFilter !== "all" && extensionSource(group.installed).id !== sourceFilter) return false;
-    return true;
-  });
+  const groups = filterPluginGroups(index, index.groups, { query: normalizedQuery, filter, sourceFilter, panelIds });
   // 只在真的有多个来源时出现来源筛选，避免单来源场景多一行噪声。
-  const sourceOptions = (() => {
-    const seen = new Map<string, string>();
-    for (const group of index.groups) {
-      const source = extensionSource(group.installed);
-      if (!seen.has(source.id)) seen.set(source.id, source.label);
-    }
-    return seen.size > 1 ? [...seen].map(([id, label]) => ({ id, label })) : [];
-  })();
-  const totals = {
-    all: index.groups.length,
-    running: index.groups.filter((group) => {
-      const status = pluginStatus(index, group);
-      return !isStopped(status.label, status.tone);
-    }).length,
-    disabled: index.groups.filter((group) => {
-      const status = pluginStatus(index, group);
-      return isStopped(status.label, status.tone);
-    }).length,
-    configurable: index.groups.filter((group) => isConfigurable(index, group) || panelIds.has(group.id)).length
-  };
-  const sections = sectionize(groups).map((section) => ({
+  const sourceOptions = pluginSourceOptions(index.groups);
+  const totals = pluginBrowserTotals(index, panelIds);
+  const sections = sectionizePluginGroups(groups).map((section) => ({
     ...section,
     // 受管扩展行带卸载/回滚操作，所在分区不算「纯信息」，不默认收起。
     informational: section.groups.every(
@@ -173,36 +120,25 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
 
   return (
     <div className="settings-plugin-page" data-testid="plugin-settings">
-      {installMode === null ? (
-        <>
-          <header className="settings-plugin-head">
-            <div className="settings-plugin-head__title">
-              <h2>插件配置</h2>
-              <p>管理内置扩展与市场安装。点一行进入配置，启停直接在行上操作。</p>
-            </div>
-            <div className="settings-plugin-head__actions">
-              <label className="settings-plugin-search">
-                <SearchIcon size={15} />
-                <input
-                  type="search"
-                  value={query}
-                  placeholder="搜索插件、能力或配置…"
-                  onChange={(event) => setQuery(event.currentTarget.value)}
-                  data-testid="plugins-settings-search"
-                />
-              </label>
-              {canInstallFile ? (
-                <Button size="sm" icon={<FileTextIcon size={15} />} onClick={() => setInstallMode("file")} data-testid="plugin-install-file">
-                  从文件安装
-                </Button>
-              ) : null}
-              {canUseMarket ? (
-                <Button size="sm" tone="primary" icon={<PlusIcon size={15} />} onClick={() => setInstallMode("market")} data-testid="plugin-install-market">
-                  从市场安装
-                </Button>
-              ) : null}
-            </div>
-          </header>
+      <header className="settings-plugin-head">
+        <div className="settings-plugin-head__title">
+          <h2>插件配置</h2>
+          <p className="settings-plugin-head__meta" data-testid="plugins-settings-summary">
+            {totals.all} 个插件 · {totals.running} 个运行中
+            {totals.disabled > 0 ? ` · ${totals.disabled} 个已停用` : ""} · {configCount} 项配置
+          </p>
+        </div>
+        <label className="settings-plugin-search">
+          <SearchIcon size={15} />
+          <input
+            type="search"
+            value={query}
+            placeholder="搜索插件、能力或配置…"
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            data-testid="plugins-settings-search"
+          />
+        </label>
+      </header>
 
           {state.status === "loading" ? <p className="settings-page__hint" role="status">正在读取插件配置…</p> : null}
           {state.status === "unauthorized" ? (
@@ -225,20 +161,10 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
             <p className="settings-page__error" role="alert" data-testid="plugins-settings-site-error">{view.siteError}</p>
           ) : null}
 
-          <div className="settings-plugin-statusbar">
-            <span className="settings-plugin-live"><span className="settings-plugin-live__dot" />本机宿主运行中</span>
-            <span className="settings-plugin-statusbar__rule" />
-            <p className="settings-plugins__summary" data-testid="plugins-settings-summary">
-              {totals.all} 个插件 · {configCount} 项配置
-            </p>
-            <span className="settings-plugin-statusbar__count"><strong>{totals.running}</strong> 个运行中</span>
-            {totals.disabled > 0 ? <span className="settings-plugin-statusbar__count">{totals.disabled} 个已停用</span> : null}
-          </div>
-
           <div className="settings-plugin-toolbar">
             <div className="settings-plugin-filter-groups">
             <div className="settings-plugin-filters" aria-label="插件筛选">
-              {FILTERS.map((entry) => (
+              {PLUGIN_BROWSER_FILTERS.map((entry) => (
                 <button
                   key={entry.id}
                   type="button"
@@ -347,42 +273,20 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
           {!store.canManage() ? (
             <p className="settings-page__hint" data-testid="plugins-settings-readonly">仅管理员可修改插件启停与配置。</p>
           ) : null}
-        </>
-      ) : null}
 
-      {installMode === "market" && managed?.marketplace ? (
-        <PluginInstallShell
-          title="从市场安装"
-          hint="从服务端团队市场搜索扩展；安装前会校验签名与发布者声明。"
-          onBack={() => setInstallMode(null)}
+      {/* 安装不再占一排按钮：右下角悬浮 + 进入「添加扩展」页（同一层级位移）。 */}
+      {installMode && onRequestInstall ? (
+        <button
+          type="button"
+          className="settings-plugin-fab"
+          onClick={() => onRequestInstall(installMode)}
+          title="添加扩展"
+          aria-label="添加扩展"
+          data-testid="plugin-install-open"
         >
-          <MarketplaceInstallPanel
-            controller={managed.marketplace}
-            jobs={managed.controller}
-            snapshot={state.status === "ready" ? state.snapshot : null}
-            canManage={store.canManage()}
-            defaultOpen
-            view
-          />
-        </PluginInstallShell>
+          <PlusIcon size={19} />
+        </button>
       ) : null}
-
-      <div className="settings-plugin-install-shell" hidden={installMode !== "file"}>
-        <PluginInstallShell
-          title="从文件安装"
-          hint="选择 .wxt 扩展包；安装前会校验签名、逐文件摘要与扩展声明。"
-          onBack={() => setInstallMode(null)}
-        >
-          {managed ? (
-            <ManagedInstallBar
-              controller={managed.controller}
-              snapshot={state.status === "ready" ? state.snapshot : null}
-              canManage={store.canManage()}
-              variant="view"
-            />
-          ) : null}
-        </PluginInstallShell>
-      </div>
     </div>
   );
 }
@@ -405,12 +309,12 @@ function PluginRow({
   hasSettingsPanel: boolean;
   onOpen?: () => void;
 }) {
-  // 受管扩展的卸载/回滚在详情页，所以即便没有任何配置项也必须能点进去。
-  const openable = (isConfigurable(index, group) || hasSettingsPanel || group.installed?.managed === true) && onOpen !== undefined;
+  // 详情页总有内容（概览 / 启停 / 安装信息），所以每一行都能点进去；配置规模只是行上的提示。
+  const openable = onOpen !== undefined;
   const layer = PLUGIN_LAYER_LABELS[group.layer];
   const diagnostics = diagnosticsOf(index, group);
   const manageable = isManageable(index, group);
-  const status = pluginStatus(index, group);
+  const status = pluginRowStatus(index, group);
 
   return (
     <article
@@ -494,7 +398,7 @@ function PluginRow({
             />
           ) : (
             <Switch
-              checked={!isStopped(status.label, status.tone)}
+              checked={!isStoppedStatus(status.label, status.tone)}
               disabled
               onCheckedChange={() => undefined}
               aria-label={`${group.label} 的启停由宿主管理，不能单独停用`}
@@ -516,48 +420,6 @@ function PluginRow({
   );
 }
 
-/** 安装视图外壳：返回插件列表，内容留在同一设置弹窗内。 */
-function PluginInstallShell({
-  title,
-  hint,
-  onBack,
-  children
-}: {
-  title: string;
-  hint: string;
-  onBack: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <section className="settings-plugin-install">
-      <header className="settings-plugin-install__head">
-        <Button size="sm" tone="ghost" icon={<BackIcon />} onClick={onBack} data-testid="plugin-install-back">
-          返回插件列表
-        </Button>
-        <div className="settings-plugin-install__title">
-          <h2>{title}</h2>
-          <p>{hint}</p>
-        </div>
-      </header>
-      <div className="settings-plugin-install__body">{children}</div>
-    </section>
-  );
-}
-
 const noopSubscribe = () => () => undefined;
 const emptyPending = () => NO_PENDING;
 
-/** 按分层标题归组，保持插件树顺序；base 与 core 合成「内置插件」一节。 */
-function sectionize(groups: readonly PluginSettingsGroup[]): Array<{ title: string; groups: PluginSettingsGroup[] }> {
-  const order: string[] = [];
-  const byTitle = new Map<string, PluginSettingsGroup[]>();
-  for (const group of groups) {
-    const title = PLUGIN_LAYER_LABELS[group.layer].section;
-    if (!byTitle.has(title)) {
-      byTitle.set(title, []);
-      order.push(title);
-    }
-    byTitle.get(title)!.push(group);
-  }
-  return order.map((title) => ({ title, groups: byTitle.get(title)! }));
-}

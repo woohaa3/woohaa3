@@ -1,10 +1,12 @@
 /**
- * 画布内设置 · 插件详情 E2E（change: 2026-10-17-move-settings-into-canvas-dialog）
+ * 画布内设置 · 扩展层级导航 E2E
+ * （change: 2026-10-17-move-settings-into-canvas-dialog 起；2026-10-28 扩展层级导航）
  *
  * 设置不再是 `/settings` 独立页，而是画布壳内的一张大型弹窗：
  * - 旧 `/settings` 仍可用，解析为 Canvas + 一次性打开意图（地址被 replace 规范化）；
- * - 插件是卡片，点卡片在**同一弹窗右栏**进入详情，不叠加第二张弹窗；
- * - 卡片只放基本信息与启停；配置项、模型与扩展面板都在详情里（同一份权威状态）；
+ * - 左栏永远是右栏内容的父级：分区 → 插件列表 → 插件子页；
+ * - 点插件在同一弹窗从插件列表进入概览，再进「配置 / 模型 / 管理」，不叠加第二张弹窗；
+ * - 配置项、模型与扩展面板都在子页里（同一份权威状态）；
  * - 停用态显式说明「保存后要等启用才生效」，hot 项也不许再标「即时生效」。
  *
  * 右栏正文是唯一滚动容器：Ark 有十几个配置项，滚不动就等于后面的项看不到。
@@ -43,30 +45,36 @@ test.describe("画布内设置 · 插件详情", () => {
     await expect(page.locator('[data-testid^="generation-provider-open-"]').first()).toBeVisible();
   });
 
-  test("点卡片在同一弹窗进入详情：只有一张弹窗，返回列表保留同一实例", async ({ page }) => {
+  test("点卡片在同一弹窗进入层级：列表 → 概览 → 配置，只有一张弹窗", async ({ page }) => {
     await openSettings(page);
 
-    // 「插件配置」按分层归组卡片：这里只断言扩展插件节的卡片（内置插件节取决于部署目录）。
+    // 「插件配置」按分层归组：这里只断言扩展插件节的行（内置插件节取决于部署目录）。
     await page.locator('[data-testid="settings-nav-plugins"]').click();
     await expect(page.getByRole("heading", { name: "插件配置" })).toBeVisible();
-    // 卡片自带权威启停状态（站点插件行）。
+    // 行自带权威启停状态（站点插件行）。
     await expect(page.locator('[data-testid^="settings-plugin-switch-"]').first()).toBeVisible();
 
-    const openable = page.locator('[data-testid^="settings-plugin-open-"]:not([disabled])').first();
-    await expect(openable).toBeVisible();
-    await openable.click();
+    await page.locator('[data-testid^="settings-plugin-open-"]').first().click();
 
-    // 详情复用同一设置实例的右栏：不是第二张大弹窗。
-    await expect(page.locator('[data-testid="plugin-config-back"]')).toBeVisible();
-    await expect(page.locator('[data-testid="settings-nav-backend"]')).toHaveCount(1);
+    // L2：左栏换成插件列表（分区导航让位给父级），右栏是概览，仍是一张弹窗。
+    await expect(page.locator('[data-testid="plugin-rail-list"]')).toBeVisible();
+    await expect(page.locator('[data-testid="settings-nav-backend"]')).toHaveCount(0);
     await expect(page.locator('[role="dialog"]')).toHaveCount(1);
-    // 详情仍提供配置项与返回入口。
+    await expect(page.locator('[data-testid="settings-breadcrumbs"]')).toContainText("插件配置");
+
+    // 概览不直接摊开长表单，而是给下一级入口；进入配置后才有配置项。
+    await page.locator('[data-testid="plugin-entry-config"]').click();
+    await expect(page.locator('[data-testid^="plugin-page-nav-"]')).toBeVisible();
     await expect(page.locator('[data-setting-key]').first()).toBeVisible();
 
-    // 返回列表：同一实例，仍是一张弹窗。
-    await page.locator('[data-testid="plugin-config-back"]').click();
-    await expect(page.locator('[data-testid^="settings-plugin-open-"]').first()).toBeVisible();
+    // 返回插件列表：同一实例，左栏仍是那份列表。
+    await page.locator('[data-testid="plugin-page-back"]').click();
+    await expect(page.locator('[data-testid="plugin-rail-list"]')).toBeVisible();
     await expect(page.locator('[role="dialog"]')).toHaveCount(1);
+
+    // 再返回一级回到分区导航。
+    await page.locator('[data-testid="plugin-rail-back"]').click();
+    await expect(page.locator('[data-testid="settings-nav-backend"]')).toBeVisible();
   });
 
   test("未保存草稿的关闭被保护：Escape 先确认，继续编辑保留输入", async ({ page }) => {
@@ -92,19 +100,46 @@ test.describe("画布内设置 · 插件详情", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await openSettings(page);
     await page.locator('[data-testid="settings-nav-plugins"]').click();
-    // 选一个在当前部署里确实可打开的插件（有配置项的 Provider）。
-    const openable = page.locator('[data-testid^="settings-plugin-open-"]:not([disabled])').first();
-    await expect(openable).toBeVisible();
-    await openable.click();
+    // 选一个在当前部署里确实可打开的插件（有配置项的 Provider），进「配置」页。
+    await page.locator('[data-testid^="settings-plugin-open-"]').first().click();
+    const entry = page.locator('[data-testid="plugin-entry-config"]');
+    if (await entry.count()) {
+      await entry.click();
+    } else {
+      // 这个插件没有配置项时退到模型页，仍然验证长列表能滚。
+      await page.locator('[data-testid="plugin-page-models"]').click();
+    }
 
-    // 配置项行（`data-setting-key`）在详情里按项渲染；验证最后一项能滚进视口。
-    const last = page.locator('[data-setting-key]').last();
+    // 长列表按项渲染；验证最后一项能滚进视口。
+    const rows = page.locator('[data-setting-key], [data-testid^="plugin-config-models-"] > li');
+    const last = rows.last();
     await expect(last).toHaveCount(1);
     await last.scrollIntoViewIfNeeded();
     await expect(last).toBeInViewport();
 
-    // 关闭与分区导航仍在视口内（不是整页滚动把 chrome 推走）。
+    // 关闭与左栏仍在视口内（不是整页滚动把 chrome 推走）。
     await expect(page.locator('[aria-label="关闭设置"]')).toBeInViewport();
-    await expect(page.locator('[data-testid="settings-nav-backend"]')).toBeInViewport();
+    await expect(page.locator('[data-testid="plugin-rail-list"], [data-testid^="plugin-page-nav-"]')).toBeVisible();
   });
 });
+  test("安装入口是右下角悬浮 +，进入独立的「添加扩展」页", async ({ page }) => {
+    await openSettings(page);
+    await page.locator('[data-testid="settings-nav-plugins"]').click();
+    // 顶部不再常驻「从文件安装 / 从市场安装」两个按钮。
+    await expect(page.locator('[data-testid="plugin-install-market"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="plugin-install-file"]')).toHaveCount(0);
+
+    const fab = page.locator('[data-testid="plugin-install-open"]');
+    await expect(fab).toBeVisible();
+    await fab.click();
+
+    await expect(page.locator('[data-testid="plugin-install-page"]')).toBeVisible();
+    await expect(page.locator('[data-testid="settings-breadcrumbs"]')).toContainText("添加扩展");
+    // 同层页：左栏仍是插件列表（父级），不是分区导航。
+    await expect(page.locator('[data-testid="plugin-rail-list"]')).toBeVisible();
+    await expect(page.locator('[data-testid="settings-nav-plugins"]')).toHaveCount(0);
+
+    // 返回一级页。
+    await page.locator('[data-testid="plugin-rail-back"]').click();
+    await expect(page.locator('[data-testid="plugin-settings"]')).toBeVisible();
+  });

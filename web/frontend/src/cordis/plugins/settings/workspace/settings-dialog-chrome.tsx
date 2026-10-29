@@ -19,9 +19,11 @@ export function SettingsDialogChrome({
   children,
   onRequestClose,
   instanceId,
-  section
+  section,
+  level,
+  motion
 }: {
-  /** 左侧分区导航（固定，不随正文滚动）。 */
+  /** 左侧导航（固定，不随正文滚动）；随层级切换整块替换。 */
   nav: ReactNode;
   /** 右栏正文（唯一滚动区）。 */
   children: ReactNode;
@@ -29,6 +31,10 @@ export function SettingsDialogChrome({
   instanceId?: string;
   /** 当前分区（仅供样式/测试定位，不参与状态）。 */
   section?: string;
+  /** 当前层级：0 分区 / 1 插件概览 / 2 插件子页。只影响样式与动效。 */
+  level?: 0 | 1 | 2;
+  /** 进行中的层级平移方向；动效期间左右栏不接受点击。 */
+  motion?: "forward" | "back" | "sibling" | null;
 }) {
   const [scrolling, setScrolling] = useState(false);
   const scrollEnd = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,7 +60,11 @@ export function SettingsDialogChrome({
       {...(instanceId ? { instanceId } : {})}
       onOverlayClick={onRequestClose}
     >
-      <div className="settings-workbench">
+      <div
+        className="settings-workbench"
+        data-level={level ?? 0}
+        {...(motion ? { "data-motion": motion } : {})}
+      >
         <aside className="settings-rail">
           <div className="settings-rail__brand">
             <Dialog.Header onClose={onRequestClose} closeLabel="关闭设置">
@@ -63,11 +73,6 @@ export function SettingsDialogChrome({
             </Dialog.Header>
           </div>
           {nav}
-          <div className="settings-rail__footer" aria-hidden="true">
-            <span className="settings-rail__dot" />
-            <span>本机宿主</span>
-            <span className="settings-rail__muted">设置只影响本机</span>
-          </div>
         </aside>
         <div className="settings-main">
           <div

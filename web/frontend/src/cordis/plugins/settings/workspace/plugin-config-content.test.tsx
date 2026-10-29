@@ -132,12 +132,15 @@ function facadeWith(view: Partial<ExtensionManagerView>) {
 
 async function renderDialog(options: {
   pluginId: string;
+  /** 三级页：概览（默认）/ 配置 / 模型 / 管理。 */
+  page?: "overview" | "config" | "models" | "manage";
   settings?: SettingsEntryView[];
   plugins?: SettingPluginView[];
   view?: Partial<ExtensionManagerView>;
   write?: BackendSettingsRemote["write"];
   settingsPanels?: import("../plugin-panels.js").SettingsPanelSource;
   installedVersions?: Record<string, string>;
+  onSelectPage?: (page: "overview" | "config" | "models" | "manage") => void;
 }) {
   const snapshot: SettingsSnapshot = {
     settings: options.settings ?? [],
@@ -164,9 +167,11 @@ async function renderDialog(options: {
     root.render(
       <PluginConfigContent
         pluginId={options.pluginId}
+        {...(options.page ? { page: options.page } : {})}
         store={store}
         manager={facade}
         {...(options.settingsPanels ? { settingsPanels: options.settingsPanels } : {})}
+        {...(options.onSelectPage ? { onSelectPage: options.onSelectPage } : {})}
         onBack={onBack}
       />
     );
@@ -204,6 +209,7 @@ describe("插件配置弹窗", () => {
   it("LiteLLM 提供刷新发现，不要求手写模型名单", async () => {
     const { container } = await renderDialog({
       pluginId: "litellm-provider",
+      page: "models",
       settings: [entry("providers.litellm.apiKey", { secret: true, label: "API Key", ownerExtensionId: "litellm-provider" })],
       plugins: [{
         id: "litellm-provider",
@@ -228,6 +234,7 @@ describe("插件配置弹窗", () => {
   it("全部启用和全部关闭一次写这张卡片上的模型，关闭前先确认", async () => {
     const { container, setModelsEnabled } = await renderDialog({
       pluginId: "litellm-provider",
+      page: "models",
       plugins: [{
         id: "litellm-provider",
         label: "LiteLLM",
@@ -269,6 +276,7 @@ describe("插件配置弹窗", () => {
     );
     const { container, setModelsEnabled } = await renderDialog({
       pluginId: "ark-provider",
+      page: "models",
       plugins: [arkPlugin()],
       view: { modelRows: models }
     });
@@ -285,6 +293,7 @@ describe("插件配置弹窗", () => {
   it("全部关闭后可撤销到操作前的状态", async () => {
     const { container, setModelsEnabled } = await renderDialog({
       pluginId: "ark-provider",
+      page: "models",
       plugins: [arkPlugin()],
       view: {
         modelRows: [
@@ -315,6 +324,7 @@ describe("插件配置弹窗", () => {
     );
     const { container } = await renderDialog({
       pluginId: "ark-provider",
+      page: "models",
       plugins: [arkPlugin()],
       view: { modelRows: models }
     });
@@ -331,24 +341,34 @@ describe("插件配置弹窗", () => {
     expect(query(container, "plugin-config-models-ark-provider")!.children).toHaveLength(10);
   });
 
-  it("显示插件身份与该插件的配置项；未运行时提示要等启用", async () => {
-    const { container } = await renderDialog({
+  it("概览展示身份与启停；配置项在「配置」页，未运行时提示要等启用", async () => {
+    const overview = await renderDialog({
       pluginId: "ark-provider",
       settings: arkEntries(),
       plugins: [arkPlugin()],
       view: { siteRows: [siteRow()] }
     });
-    expect(container.textContent).toContain("Ark（火山方舟）");
-    expect(container.textContent).toContain("火山方舟视频生成 Provider");
-    expect(container.textContent).toContain("Provider");
-    expect(query(container, "plugin-config-entries-ark-provider")).not.toBeNull();
-    expect(query(container, "plugin-config-inactive-ark-provider")?.textContent).toContain("当前未运行");
-    const apiKey = query<HTMLInputElement>(container, "setting-input-providers.ark.apiKey")!;
+    expect(overview.container.textContent).toContain("Ark（火山方舟）");
+    expect(overview.container.textContent).toContain("火山方舟视频生成 Provider");
+    expect(overview.container.textContent).toContain("Provider");
+    // 概览只放身份与启停：配置项不在这里，避免一进详情就掉进长表单。
+    expect(query(overview.container, "plugin-config-entries-ark-provider")).toBeNull();
+    expect(query(overview.container, "plugin-config-inactive-ark-provider")?.textContent).toContain("当前未运行");
+    const control = query<HTMLButtonElement>(overview.container, "plugin-config-switch-ark-provider")!;
+    expect(control.getAttribute("aria-checked")).toBe("false");
+
+    const config = await renderDialog({
+      pluginId: "ark-provider",
+      page: "config",
+      settings: arkEntries(),
+      plugins: [arkPlugin()],
+      view: { siteRows: [siteRow()] }
+    });
+    expect(query(config.container, "plugin-config-entries-ark-provider")).not.toBeNull();
+    const apiKey = query<HTMLInputElement>(config.container, "setting-input-providers.ark.apiKey")!;
     expect(apiKey.type).toBe("password");
     // 停用态不许再说「即时生效」。
-    expect(container.querySelector('[data-setting-key="providers.ark.videoCreateUrl"]')?.textContent).toContain("启用后生效");
-    const control = query<HTMLButtonElement>(container, "plugin-config-switch-ark-provider")!;
-    expect(control.getAttribute("aria-checked")).toBe("false");
+    expect(config.container.querySelector('[data-setting-key="providers.ark.videoCreateUrl"]')?.textContent).toContain("启用后生效");
   });
 
   it("有扩展自带设置面板时，运行中直接渲染面板", async () => {
@@ -361,6 +381,7 @@ describe("插件配置弹窗", () => {
     };
     const { container } = await renderDialog({
       pluginId: "sdk-agent",
+      page: "config",
       plugins: [sdkAgentPlugin()],
       view: {
         siteRows: [
@@ -392,6 +413,7 @@ describe("插件配置弹窗", () => {
     };
     const { container } = await renderDialog({
       pluginId: "sdk-agent",
+      page: "config",
       plugins: [sdkAgentPlugin()],
       view: {
         siteRows: [
@@ -441,6 +463,7 @@ describe("插件配置弹窗", () => {
     }));
     const { container } = await renderDialog({
       pluginId: "ark-provider",
+      page: "config",
       settings: arkEntries(),
       plugins: [arkPlugin()],
       view: { siteRows: [siteRow({ desiredEnabled: true, actualState: "active", actualStateLabel: "运行中" })] },
@@ -456,6 +479,7 @@ describe("插件配置弹窗", () => {
   it("列出该 Provider 提供的模型并可站点级启停", async () => {
     const { container, setModelEnabled } = await renderDialog({
       pluginId: "ark-provider",
+      page: "models",
       settings: arkEntries(),
       plugins: [arkPlugin()],
       view: {
@@ -501,6 +525,7 @@ describe("插件配置弹窗", () => {
     );
     const { container, setModelEnabled } = await renderDialog({
       pluginId: "remote-server",
+      page: "models",
       plugins: [remotePlugin],
       view: { siteRows: [siteRow({ extensionId: "remote-server", name: "服务端接入", providerManaged: false, actualState: "active", actualStateLabel: "运行中", desiredEnabled: true })], modelRows: remoteModels }
     });
@@ -518,7 +543,7 @@ describe("插件配置弹窗", () => {
     expect(setModelEnabled).toHaveBeenCalledWith("remote-server:m1", true);
   });
 
-  it("Ark 从模型目录勾选后再填写接入点", async () => {
+  it("Ark 的接入点按模型列在配置页：勾选后才出现输入框", async () => {
     const write = vi.fn(async () => ({ ok: true as const, snapshot: { settings: [], plugins: [arkPlugin()], installedExtensions: [{ id: "ark-provider", label: "Ark", description: "", directory: "/plugins/ark-provider", writable: false }], files: { config: "c", secrets: "s" } } }));
     const seedance = entry("providers.ark.ep.video.doubao-seedance-2-5-260628", {
       label: "Seedance 2.5",
@@ -535,6 +560,7 @@ describe("插件配置弹窗", () => {
     });
     const { container } = await renderDialog({
       pluginId: "ark-provider",
+      page: "config",
       settings: [...arkEntries(), seedance, seedream],
       plugins: [arkPlugin()],
       view: { siteRows: [siteRow({ desiredEnabled: true, actualState: "active", actualStateLabel: "运行中" })] },
