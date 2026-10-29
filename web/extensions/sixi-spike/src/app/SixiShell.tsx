@@ -49,7 +49,10 @@ function HostCanvasCurtain() {
   useLayoutEffect(() => {
     setHostCanvasHidden(inShell);
     return () => {
-      setHostCanvasHidden(true);
+      // 只有在四喜界面模式下卸载时才保持隐藏（例如主题切换、热重载）。
+      // 画布态（inShell=false）卸载意味着宿主正进入 node-focus 工作区：
+      // 此时不能重新盖住 .app，否则 model workspace 也会消失。
+      if (inShell) setHostCanvasHidden(true);
     };
   }, [inShell]);
   return null;
