@@ -21,6 +21,7 @@ import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
 import type { BevyRuntime } from "./bevy-runtime.js";
 import { rasterizeDrawable, defaultRasterCanvasFactory, type RasterCanvasFactory } from "./media-raster.js";
 import { NodeResourceLoading, type NodeResourceLoad } from "../../services/node-resource-loading.js";
+import { createImageResourceInvalidation } from "./image-resource-invalidation.js";
 import { appPublicUrl } from "../../services/app-base-path.js";
 import { withMediaCanvasHint } from "../../services/paths.js";
 import { selectThumbnailTier, THUMBNAIL_TIERS, type ThumbnailTier } from "./residency/policy.js";
@@ -64,7 +65,7 @@ export type TextureSyncOptions = {
   loadImage?: (url: string) => Promise<HTMLImageElement>;
   /** 帧 canvas 工厂：测试可注入。 */
   createCanvas?: RasterCanvasFactory;
-  /** 变化后的回调（触发一次 scene flush）。 */
+  /** 合并后的状态呈现回调（80ms 窗口）；不推迟解码、上传或 isLoading。 */
   onChange?: () => void;
   /**
    * 页面级资源需求与预算 owner（change: 2026-10-23，design D1）。
@@ -131,7 +132,8 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
   const entries = new Map<string, NodeEntry>();
   /** contentKey → 共享解码内容。 */
   const contents = new Map<string, ContentEntry>();
-  const loading = new NodeResourceLoading(options.onChange);
+  const invalidation = createImageResourceInvalidation(options.onChange);
+  const loading = new NodeResourceLoading(invalidation.request);
   const uploads = new MediaOperationBoundary(options.runtime);
   const uploaded = new Set<string>();
   let runtimeGeneration = options.runtime.generation?.() ?? 0;
@@ -291,7 +293,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       })
       .then(() => {
         if (disposed) return;
-        options.onChange?.();
+        invalidation.request();
       });
   };
 
@@ -504,7 +506,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         content.released = true;
       }
       previousOverride = override;
-      if (changed) options.onChange?.();
+      if (changed) invalidation.request();
     },
     textureNodeIds() {
       return new Set(uploaded);
@@ -512,6 +514,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     isLoading: loading.isLoading,
     dispose() {
       disposed = true;
+      invalidation.dispose();
       uploads.run("focus-details:dispose",null,previousDetails?.nodeId??"",()=>options.runtime.setImageFocusDetails?.(null));
       previousDetails=null;
       uploads.retainNodes(new Set());

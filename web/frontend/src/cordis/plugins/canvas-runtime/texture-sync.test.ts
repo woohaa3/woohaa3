@@ -51,6 +51,33 @@ function runtimeRecorder() {
 }
 
 describe("createTextureSync", () => {
+  it("合并同批图片解码与上传通知，但不推迟纹理上传和加载状态", async () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const { context } = fakeCanvasContext();
+    const { runtime, uploaded } = runtimeRecorder();
+    const current = canvas(true);
+    const sync = createTextureSync({
+      runtime, getCanvas: () => current, onChange,
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => context }),
+      loadImage: async () => fakeImage()
+    });
+    try {
+      sync.sync();
+      expect(sync.isLoading?.("n1")).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      sync.sync();
+      expect(uploaded).toHaveLength(1);
+      expect(sync.isLoading?.("n1")).toBe(false);
+      expect(onChange).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(80);
+      expect(onChange).toHaveBeenCalledTimes(1);
+    } finally {
+      sync.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("坏图片持续失败不阻断其他资源；未上传不标记可用，手动重试可恢复", async () => {
     const { context } = fakeCanvasContext();
     const current = canvas(true);
