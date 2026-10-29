@@ -18,6 +18,7 @@ pub fn set_texture(
     rgba: &[u8],
     content: &str,
 ) -> Result<(), BoundaryError> {
+    crate::wake_canvas();
     protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
     if content.len() > 4096 {
         return Err(BoundaryError::from_str("Texture content identity too large"));
@@ -54,6 +55,7 @@ pub fn set_texture_owned(
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_image_focus_details(manifest:&str,rgba:&[u8])->Result<(),BoundaryError> {
+    crate::wake_canvas();
     if manifest.is_empty() {
         if !rgba.is_empty() {return Err(BoundaryError::from_str("Unexpected focus detail pixels"));}
         return bridge::queue_focus_details(None,&[]).map_err(BoundaryError::from_str);
@@ -73,6 +75,7 @@ pub fn set_model_media_texture(
     height: u32,
     rgba: &[u8],
 ) -> Result<(), BoundaryError> {
+    crate::wake_canvas();
     protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
     bridge::queue_film_set_texture(id, width, height, rgba);
     Ok(())
