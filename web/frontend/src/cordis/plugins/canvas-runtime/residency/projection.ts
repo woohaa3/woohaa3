@@ -1,4 +1,4 @@
-import { readFilmSetGroupMarker, contentKeyForFilmSetGroupSource, builtinNodeCapabilityResolver, effectiveCanvasNodeSize, type NodeCapabilityResolver } from "@woohaa3/contracts";
+import { activeFilmSetSceneBindings, readFilmSetGroupMarker, contentKeyForFilmSetGroupSource, builtinNodeCapabilityResolver, effectiveCanvasNodeSize, type NodeCapabilityResolver } from "@woohaa3/contracts";
 /**
  * 从 working 画布投影页面资源需求
  * （change: 2026-10-23-scale-canvas-media-residency，design D1/D7）。
@@ -106,7 +106,7 @@ export function collectResidencyCandidates(
     // cannot reuse the previous `(sourceNodeId, contentKey)` resource.
     const marker = node.type === "group" ? readFilmSetGroupMarker(canvas.nodeData[node.id]) : null;
     if (marker) {
-      for (const binding of marker.sceneBindings) {
+      for (const binding of activeFilmSetSceneBindings(marker)) {
         const key = contentKeyForFilmSetGroupSource(canvas, binding.sourceNodeId);
         candidates.push({
           nodeId: `${node.id}:${binding.bindingId}`,
