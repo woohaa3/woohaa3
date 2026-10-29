@@ -149,6 +149,8 @@ export * from "./canvas/media-content.js";
 export * from "./canvas/group-presentation.js";
 export * from "./canvas/group-badge.js";
 export * from "./canvas/ground-anchor.js";
+export * from "./canvas/film-set-animation-projection.js";
+export * from "./canvas/film-set-group-projection.js";
 
 export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService } from "./extension/services/host/media-formats.js";
 export * from "./canvas/scene-package.js";

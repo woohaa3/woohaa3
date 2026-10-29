@@ -1,6 +1,6 @@
 import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it } from "vitest";
-import { groupBadgeRect, groupBadgeScreenRect } from "./group-badge.js";
+import { clampGroupBadgeScale, groupBadgeRect, groupBadgeScreenRect, isGroupBadgeScale } from "./group-badge.js";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 
 
@@ -31,13 +31,6 @@ describe("independent group badge scale", () => {
     expect(groupBadgeRect({x:0,y:0,width:600,height:400},1e6).width).toBe(88e6);
     expect(isGroupBadgeScale(1e9)).toBe(true);
     expect(clampGroupBadgeScale(1e9)).toBe(1e9);
-  });
-
-  it("屏幕投影把徽标放在 group 矩形下方，缩放仍保持外部锚点", () => {
-    const badge = groupBadgeScreenRect({ left: 100, top: 50, width: 500, height: 300 }, 2, 1);
-    expect(badge.top).toBe(50 + 300 + 6 * 2);
-    expect(badge.left + badge.width / 2).toBe(100 + 500 / 2);
-    expect(badge.height).toBe(64 * 2);
   });
 
   it("屏幕投影把徽标放在 group 矩形下方，缩放仍保持外部锚点", () => {
