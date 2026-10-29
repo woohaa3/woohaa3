@@ -31,6 +31,7 @@ export async function prepareDesktopNode(){
  return {node:binary,nodeSha256:actual};
 }
 export async function prepareDesktopHost({output=path.join(root,'.local/desktop-host'),frontend=path.join(root,'web/frontend/dist'),build='development',runtimeReleaseVersion}={}){
+ const appVersion=runtimeReleaseVersion??JSON.parse(fs.readFileSync(path.join(root,'desktop/tauri.conf.json'),'utf8')).version;
  const artifact=nodeArtifact();const suffix=process.platform==='win32'?'.exe':'';
  const {node,nodeSha256:actual}=await prepareDesktopNode();
  // Rebuild the staging tree. Never copy user configuration from source packages.
@@ -77,7 +78,7 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  fs.mkdirSync(path.join(output,'tools'),{recursive:true});
  fs.copyFileSync(path.join(root,'.local/desktop-node',artifact.archive.replace(/(?:\.tar\.gz|\.zip)$/,''),'LICENSE'),path.join(output,'tools/NODE_LICENSE'));
  if(process.platform==='win32')writeRuntimeLinks(output,state.links??[]);
- fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,build,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size,inventory:[...state.keys()].map(dir=>{const pkg=JSON.parse(fs.readFileSync(path.join(dir,'package.json'),'utf8'));return {name:pkg.name,version:pkg.version};})},null,2));
+ fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,version:appVersion,build,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size,inventory:[...state.keys()].map(dir=>{const pkg=JSON.parse(fs.readFileSync(path.join(dir,'package.json'),'utf8'));return {name:pkg.name,version:pkg.version};})},null,2));
  assertPortableTree(output);
  console.log(`[desktop-host] ${state.size} packages, ${extensions.length} extensions → ${output}`);
  return {resourceRoot:output,node,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size};
@@ -89,7 +90,8 @@ export async function prepareDevelopmentHost(){
   const dest=path.join(output,name);if(!fs.existsSync(dest)){if(process.platform==='win32'&&!fs.statSync(source).isDirectory())fs.copyFileSync(source,dest);else fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir');}
  }
  fs.writeFileSync(path.join(output,'desktop-host.mjs'),`import './scripts/desktop-host.mjs';\n`);
- fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,build:'development',nodeVersion:DESKTOP_NODE_VERSION,developmentRoot:root}));
+ const appVersion=JSON.parse(fs.readFileSync(path.join(root,'desktop/tauri.conf.json'),'utf8')).version;
+ fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,version:appVersion,build:'development',nodeVersion:DESKTOP_NODE_VERSION,developmentRoot:root}));
  fs.mkdirSync(path.join(output,'tools'),{recursive:true});
  for(const [name,source] of [['model-renderer',path.join(root,`bevy/target/${artifact.triple}/debug/model-renderer${suffix}`)],['shot-recorder',path.join(root,`desktop/target/debug/shot-recorder${suffix}`)]]){const dest=path.join(output,'tools',name+suffix);if(fs.existsSync(source)&&!fs.existsSync(dest)){if(process.platform==='win32')fs.copyFileSync(source,dest);else fs.symlinkSync(source,dest);}}
  return {...prepared,resourceRoot:output};
