@@ -24,15 +24,26 @@ The job pins Node 24.22.0, pnpm 11.17.0, Rust 1.97.1, wasm-bindgen 0.2.128 and B
 
 ## Signed update channel
 
-Keep the updater private key on the release machine, with its matching `.pub` file alongside it. Increase `desktop/tauri.conf.json`'s version before building an update. Set the update endpoint explicitly; the client has no default publisher CDN.
+Keep the updater private key on the release machine, with its matching `.pub` file alongside it. Increase `desktop/tauri.conf.json`'s version before building an update. The client has no default publisher CDN: configure exactly one channel, a self-hosted HTTPS index or a GitHub Release.
 
 ```powershell
+# Self-hosted HTTPS index
 $env:WOOHAA_DESKTOP_SIGNING_KEY = 'C:\private\woohaa\updater.key'
 $env:WOOHAA_DESKTOP_UPDATE_ENDPOINT = 'https://updates.example.com/windows-x64/latest.json'
 pnpm desktop:release --build-frontend
 ```
 
-Upload the version directory from `artifacts/desktop/standalone-windows-x64/upload/` to the corresponding HTTPS directory, then upload `latest.json` last. The index uses platform key `windows-x86_64`; keep it separate from macOS. Permit anonymous reads of the index and version artifacts. Never upload the private signing key. The index includes the updater signature; installed clients validate with the matching embedded public key.
+```powershell
+# GitHub Release
+$env:WOOHAA_DESKTOP_SIGNING_KEY = 'C:\private\woohaa\updater.key'
+$env:WOOHAA_DESKTOP_UPDATE_GITHUB_REPO = 'owner/name'
+pnpm desktop:release --build-frontend
+pnpm desktop:publish:github --repo owner/name --tag v0.1.7 --draft
+```
+
+For the CDN channel, upload the version directory from `artifacts/desktop/standalone-windows-x64/upload/` to the corresponding HTTPS directory, then upload `latest.json` last. The index uses platform key `windows-x86_64`; keep it separate from macOS. Permit anonymous reads of the index and version artifacts.
+
+For GitHub Releases the build derives `https://github.com/<repo>/releases/latest/download/latest-windows-x86_64.json`, so each platform publishes its own index asset: a shared `latest.json` written by both platforms would overwrite the other platform's entry. `--draft` keeps the release invisible until you publish it, because `releases/latest` ignores drafts and prereleases. `WOOHAA_DESKTOP_UPDATE_GITHUB_RELEASE` pins a tag for a beta channel and `WOOHAA_DESKTOP_UPDATE_GITHUB_ASSET` overrides the asset name. Never upload the private signing key. The index includes the updater signature; installed clients validate with the matching embedded public key.
 
 ## Installation and lifecycle checks
 

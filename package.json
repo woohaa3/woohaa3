@@ -42,6 +42,7 @@
     "dev:extensions": "pnpm -C web run dev:extensions",
     "dev:web": "node scripts/dev.mjs",
     "desktop:release": "node scripts/release-desktop.mjs",
+    "desktop:publish:github": "node scripts/publish-desktop-github.mjs",
     "desktop:host:check": "node scripts/verify-desktop-host.mjs",
     "boundary:check": "node scripts/check-public-boundary.mjs",
     "test:scripts": "node --test scripts/*.test.mjs scripts/lib/*.test.mjs",
