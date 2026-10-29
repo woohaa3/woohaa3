@@ -85,7 +85,7 @@ pub(crate) fn sync(
     nodes: Query<(Entity, &crate::canvas_ecs::components::CanvasNodeId, &crate::canvas_ecs::components::GroupPresentation)>,
     mut surfaces: Query<(Entity, &mut GroupSurface)>,
 ) {
-    if !flags.changed {
+    if !(flags.scene_received || flags.positions_received || flags.surface_changed || flags.theme_changed || flags.camera_changed) && !scene.is_changed() && !theme.is_changed() {
         return;
     }
     let focus = scene.0.model_focus.is_some();

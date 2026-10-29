@@ -212,6 +212,8 @@ pub(crate) struct FrameFlags {
     pub(crate) positions_received: bool,
     pub(crate) surface_changed: bool,
     pub(crate) theme_changed: bool,
+    /// Derived input summary retained for animation/overlay consumers; static 2D producers use
+    /// the explicit scene/position/theme/surface bits instead of this broad gate.
     pub(crate) changed: bool,
     /// 相机/网格是否需要跟随视口（内容变化或纯视口增量）；纯视口不重建静态几何
     /// （change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3/D4）。

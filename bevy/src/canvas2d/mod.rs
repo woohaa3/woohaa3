@@ -1,4 +1,4 @@
-//! 2D 画布渲染域：`Visuals`、2D camera/font/material setup、纹理上传、label 生命周期
+//! 2D 画布渲染域：`CanvasOverlayCache`、2D camera/font/material setup、纹理上传、label 生命周期
 //! 与 2D scene 重建（change: refactor-bevy-runtime-modules，任务 3.3 / 3.4 / design D5；
 //! change: refactor-bevy-rust-file-size 拆分为 facade + 子模块）。
 //!
@@ -96,15 +96,13 @@ pub(crate) use render::{
 pub(crate) use labels::{sync_canvas_labels, LabelRequests};
 pub(crate) use textures::sync_textures;
 
-/// 2D 渲染的共享资源与生命周期状态：共享几何 mesh/material、font handle、纹理内容表与
-/// 批处理块。节点标签、纹理 Sprite 与选中描边由 ECS 组件/Query 拥有，不在此 Resource 中。
+/// 2D 渲染的共享材质、字体与主卡片块资源。装饰、容器、连线块和纹理内容表分别由
+/// `CardDecorationCache`、`ContainerBlockCache`、`EdgeBlockCache` 与 `TextureStore` 拥有；
+/// 节点标签、纹理 Sprite 与选中描边由 ECS 组件/Query 或专用批次拥有。
 ///
 /// 字段保持私有：仅有本模块的子孙（`init` / `textures` / `render` / `generation`）访问。
 #[derive(Resource)]
-pub(crate) struct Visuals {
-    card_blocks: Vec<card_cache::Block>,
-    card_decorations: Vec<decoration_cache::Block>,
-    container_blocks: Vec<container_cache::Block>,
+pub(crate) struct CanvasOverlayCache {
     mesh: Handle<Mesh>,
     material: Handle<ColorMaterial>,
     /// 共享 2D 几何实体；首个非空快照到达后才生成（避免 0 顶点 mesh 触发 wgpu panic）。
@@ -119,13 +117,6 @@ pub(crate) struct Visuals {
     blend_material: Handle<ColorMaterial>,
     blend_mesh_entity: Option<Entity>,
     font: Handle<Font>,
-    /// 纹理按内容身份 + 尺寸共享的引用表
-    /// （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
-    ///
-    /// `textures` 是「节点 → 展示实例」，本表是「内容 → GPU 图像」；删除节点只减引用，
-    /// 最后一个引用结束才移除 `Assets<Image>`。
-    texture_store: texture_store::TextureStore,
-    edge_blocks: Vec<edge_cache::Block>,
     shared_key: Option<shared_key::SharedKey>,
     /// 拖动粘连触须的逐帧动画覆盖层（独立于主 card mesh，避免每帧重建整场几何）。
     attach_probe_mesh: Handle<Mesh>,
@@ -146,14 +137,11 @@ pub(crate) struct Visuals {
     node_action_active: bool,
 }
 
-impl Visuals {
-    /// 测试/无窗口宿主：空几何与默认句柄的 Visuals。
+impl CanvasOverlayCache {
+    /// 测试/无窗口宿主：空几何与默认句柄的 CanvasOverlayCache。
     #[cfg(test)]
     pub(crate) fn default_for_test() -> Self {
         Self {
-            card_blocks: Vec::new(),
-            card_decorations: Vec::new(),
-            container_blocks: Vec::new(),
             mesh: default(),
             material: default(),
             mesh_entity: None,
@@ -161,8 +149,6 @@ impl Visuals {
             blend_material: default(),
             blend_mesh_entity: None,
             font: default(),
-            texture_store: default(),
-            edge_blocks: default(),
             shared_key: None,
             attach_probe_mesh: default(),
             attach_probe_entity: None,

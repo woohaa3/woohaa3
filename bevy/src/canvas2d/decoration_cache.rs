@@ -3,12 +3,13 @@
 //!
 //! change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs —— 输入改为 ECS 节点 Query；
 //! 选中态不再参与块 key，也不再重建本缓存。
-use super::{Visuals, geometry::Geometry};
+use super::{CanvasMaterials, geometry::Geometry};
 use crate::{protocol::Scene, theme::ThemeResource};
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 const BLOCK_SIZE: usize = 16;
 #[derive(PartialEq)]
-struct Key {
+/// 单一悬停装饰输入；由当前 presentation DTO 派生，块比较只看这一份值。
+struct DecorationInput {
     id: String,
     kind: String,
     index: usize,
@@ -17,10 +18,15 @@ struct Key {
 }
 #[derive(Default)]
 pub(super) struct Block {
-    keys: Vec<Key>,
+    keys: Vec<DecorationInput>,
     theme: String,
     entity: Option<Entity>,
     mesh: Option<Handle<Mesh>>,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct CardDecorationCache {
+    pub(super) blocks: Vec<Block>,
 }
 impl Block {
     #[cfg(test)]
@@ -49,15 +55,16 @@ pub(super) struct HoverInput<'a> {
 pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    visuals: &mut Visuals,
+    visuals: &mut CardDecorationCache,
     scene: &Scene,
     theme: &ThemeResource,
     projected: &[HoverInput<'_>],
+    materials: &CanvasMaterials,
     document_len: usize,
 ) -> u64 {
     let focused_id = super::image_focus::presented_media_focus(scene).map(|focus| focus.node_id);
     let mut rebuilt = 0;
-    let mut blocks = std::mem::take(&mut visuals.card_decorations);
+    let mut blocks = std::mem::take(&mut visuals.blocks);
     let count = document_len.div_ceil(BLOCK_SIZE);
     for block in blocks.iter_mut().skip(count) {
         block.clear(commands, meshes);
@@ -84,7 +91,7 @@ pub(super) fn sync(
                 if hover.is_none() {
                     return None;
                 }
-                Some(Key {
+                Some(DecorationInput {
                     id: node.id.clone(),
                     kind: node.kind.clone(),
                     index: input.index,
@@ -127,7 +134,7 @@ pub(super) fn sync(
                 commands
                     .spawn((
                         Mesh2d(handle),
-                        MeshMaterial2d(visuals.mesh_material()),
+                        MeshMaterial2d(materials.solid.clone()),
                         NoFrustumCulling,
                     ))
                     .id(),
@@ -136,7 +143,7 @@ pub(super) fn sync(
         block.keys = keys;
         block.theme = theme.fingerprint().to_owned();
     }
-    visuals.card_decorations = blocks;
+    visuals.blocks = blocks;
     rebuilt
 }
 

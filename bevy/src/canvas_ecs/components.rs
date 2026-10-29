@@ -14,6 +14,123 @@
 
 use bevy::prelude::*;
 
+use crate::protocol::{GraphNode, NodeActions};
+
+/// Inputs consumed by card geometry producers. Keeping geometry and labels separate lets a
+/// title update invalidate text without invalidating the card mesh.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CardGeometryInput {
+    pub(crate) bounds: [f32; 4],
+    pub(crate) texture: bool,
+    pub(crate) media_loading: bool,
+    pub(crate) busy: bool,
+    pub(crate) history: bool,
+    pub(crate) model: bool,
+    pub(crate) model_preview: bool,
+    pub(crate) ghost: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CardLabelsInput {
+    pub(crate) title: String,
+    pub(crate) type_label: String,
+    pub(crate) body: String,
+    pub(crate) card_label: Option<String>,
+}
+
+#[derive(Component, Clone, Debug, PartialEq)]
+pub(crate) struct CardVisual {
+    pub(crate) geometry: CardGeometryInput,
+    pub(crate) labels: CardLabelsInput,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ContainerGeometryInput {
+    pub(crate) bounds: [f32; 4],
+    pub(crate) collapsed: bool,
+    pub(crate) running: bool,
+    pub(crate) member_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ContainerLabelsInput {
+    pub(crate) title: String,
+    pub(crate) type_label: String,
+}
+
+#[derive(Component, Clone, Debug, PartialEq)]
+pub(crate) struct ContainerVisual {
+    pub(crate) geometry: ContainerGeometryInput,
+    pub(crate) labels: ContainerLabelsInput,
+}
+
+#[derive(Component, Clone, Debug, PartialEq)]
+pub(crate) struct EdgeVisual {
+    pub(crate) id: String,
+    pub(crate) source: String,
+    pub(crate) target: String,
+    pub(crate) label: String,
+    pub(crate) bounds: Option<([f32; 2], [f32; 2])>,
+    pub(crate) selected: bool,
+    pub(crate) hovered: bool,
+    pub(crate) overlay_z: Option<f32>,
+}
+
+/// The accepted action-bar input. Drawing and interaction both consume this component.
+#[derive(Component, Clone, PartialEq)]
+pub(crate) struct NodeActionBar {
+    pub(crate) actions: NodeActions,
+    pub(crate) summary: Option<String>,
+}
+
+/// Stable overlay layer markers. A layer entity is flushed by query and may hold an empty mesh
+/// when its content disappears, so transient overlays never retain stale entity handles.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct NodeActionLayer;
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AttachProbeLayer;
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RunningProgressLayer;
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MediaBackdrop;
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MediaAlphaChecker;
+
+impl CardVisual {
+    pub(crate) fn from_node(node: &GraphNode) -> Self {
+        Self {
+            geometry: CardGeometryInput {
+                bounds: [node.x, node.y, node.width, node.height],
+                texture: node.texture,
+                media_loading: node.media_loading,
+                busy: node.busy,
+                history: crate::canvas_query::layout::has_history_strip(node),
+                model: node.model.is_some(),
+                model_preview: node.model_preview.is_some(),
+                ghost: node.ghost,
+            },
+            labels: CardLabelsInput { title: node.title.clone(), type_label: node.type_label.clone(), body: node.body.clone(), card_label: node.card_label.clone() },
+        }
+    }
+}
+
+impl ContainerVisual {
+    pub(crate) fn from_node(node: &GraphNode) -> Option<Self> {
+        let group = node.group.as_ref();
+        let composite = node.composite_asset.as_ref();
+        if group.is_none() && composite.is_none() { return None; }
+        let (collapsed, running, member_count) = if let Some(group) = group {
+            (group.collapsed, crate::canvas2d::group_is_running(node), group.member_count.max(0) as u32)
+        } else {
+            (false, false, composite.and_then(|asset| asset.panel.as_ref()).map_or(0, |_| 0))
+        };
+        Some(Self {
+            geometry: ContainerGeometryInput { bounds: [node.x, node.y, node.width, node.height], collapsed, running, member_count },
+            labels: ContainerLabelsInput { title: group.map_or_else(|| node.title.clone(), |group| group.title.clone()), type_label: node.type_label.clone() },
+        })
+    }
+}
+
 /// 稳定节点身份：与协议 `nodeId` 相同，跨 accepted snapshot 复用实体。
 #[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct CanvasNodeId(pub String);

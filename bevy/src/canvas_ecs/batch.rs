@@ -10,7 +10,7 @@
 
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
-use crate::canvas2d::Visuals;
+use crate::canvas2d::CanvasMaterials;
 use crate::canvas2d::geometry::Geometry;
 
 /// 生产者可写入的批次接口。第三方系统只需取得该 writer 即可复用公共 flush 协议。
@@ -76,7 +76,7 @@ pub(crate) fn flush_selection_outlines(
     mut commands: Commands,
     mut batch: ResMut<SelectionOutlineBatch>,
     mut layer: ResMut<SelectionOutlineLayer>,
-    visuals: ResMut<Visuals>,
+    materials: Res<CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let handle = meshes.add(batch.take().build());
@@ -92,7 +92,7 @@ pub(crate) fn flush_selection_outlines(
                 commands
                     .spawn((
                         Mesh2d(handle),
-                        MeshMaterial2d(visuals.mesh_material()),
+                        MeshMaterial2d(materials.solid.clone()),
                         NoFrustumCulling,
                         Name::new("canvas-selection-outlines"),
                     ))
