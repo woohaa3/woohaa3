@@ -153,6 +153,9 @@ export function sixiHostPreset(mode: ThemeMode): HostPreset {
     canvasNodeContent: onSurface(t.colorFillTertiary),
     canvasNodeBorder: onSurface(t.colorBorder),
     canvasNodeBorderSelected: onSurface(t.colorPrimary),
+    canvasGroupSurface: onBackdrop(mode === "light" ? t.colorFillSecondary : t.colorFillTertiary),
+    canvasGroupLabel: onBackdrop(t.colorFillTertiary),
+    canvasGroupLabelText: onBackdrop(t.colorText),
     // Bevy 按不透明色画偏移阴影：亮色用浅灰一档，暗色压成底色本身（看起来就是"没有发光的影"）。
     canvasNodeShadow: mode === "light" ? onBackdrop(t.colorBorderSecondary) : backdrop,
     canvasNodeSelectedHalo: accentSoft,
