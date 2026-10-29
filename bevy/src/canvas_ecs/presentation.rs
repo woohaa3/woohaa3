@@ -15,12 +15,19 @@ use crate::theme::ThemeResource;
 const BLOCK_SIZE: usize = 16;
 
 /// group 面板 key：矩形、drop 目标与主题变化才重建 mesh。
+///
+/// mesh 是组本地坐标，所以只有宽高参与重建判定；位置只更新实体 transform。
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PanelKey {
     rect: [f32; 4],
     drop_target: bool,
     theme: u64,
     sort_z: f32,
+}
+
+/// 把组本地 mesh 放到画布位置：协议 y 向下，世界 y 向上，因此取反。
+fn placement(rect: [f32; 4], sort_z: f32) -> Transform {
+    Transform::from_xyz(rect[0], -rect[1], sort_z)
 }
 
 /// group 面板实体：owner 节点 + 当前 key + 独占 mesh。
@@ -94,7 +101,7 @@ pub(crate) fn sync_group_panels(
                 }
                 commands
                     .entity(panel_entity)
-                    .insert(Transform::from_xyz(0., 0., key.sort_z));
+                    .insert(placement(key.rect, key.sort_z));
                 panel.key = key;
             }
             None => {
@@ -106,7 +113,7 @@ pub(crate) fn sync_group_panels(
                     .spawn((
                         Mesh2d(handle.clone()),
                         MeshMaterial2d(visuals.blend_visuals().1),
-                        Transform::from_xyz(0., 0., key.sort_z),
+                        placement(key.rect, key.sort_z),
                         NoFrustumCulling,
                         GroupPanel {
                             owner: entity,
@@ -221,9 +228,39 @@ mod tests {
         world.run_system_once(sync_group_panels).unwrap();
         world.flush();
         assert_eq!(panel_count(&mut world), 1, "稳定几何不得重复创建");
+        let initial = world.get::<Transform>(panel_entity).unwrap().translation;
+        assert_eq!(
+            (initial.x, initial.y),
+            (10., -20.),
+            "组位置由实体 transform 承担"
+        );
+        // 纯移动：只更新 transform，不重建 mesh；背板不得留在旧位置。
         world.entity_mut(entity).insert(CanvasLayout {
-            x: 10.,
-            y: 20.,
+            x: 42.,
+            y: 64.,
+            width: 300.,
+            height: 200.,
+        });
+        world.run_system_once(sync_group_panels).unwrap();
+        world.flush();
+        let moved = world.get::<Transform>(panel_entity).unwrap().translation;
+        assert_eq!(moved.x, 42.);
+        assert_eq!(moved.y, -64.);
+        let panel = world.get::<GroupPanel>(panel_entity).unwrap();
+        assert_eq!(panel.mesh, handle, "纯位置增量不得重建 mesh");
+        // mesh 仍是组本地坐标（0..width），由 transform 搬到 42/64。
+        let mesh = world.resource::<Assets<Mesh>>().get(&handle).unwrap();
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("panel needs positions");
+        };
+        let min_x = points.iter().map(|point| point[0]).fold(f32::MAX, f32::min);
+        let max_x = points.iter().map(|point| point[0]).fold(f32::MIN, f32::max);
+        assert!((min_x - 0.).abs() < 0.01 && (max_x - 300.).abs() < 0.01);
+        world.entity_mut(entity).insert(CanvasLayout {
+            x: 42.,
+            y: 64.,
             width: 300.,
             height: 240.,
         });
