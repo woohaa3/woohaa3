@@ -58,6 +58,11 @@ export type ShotPreviewSceneInputSource = {
   playback: BevyAnimationPlayback | null;
   /** 已解析的模型聚焦目标集合（片场世界包围球的共享事实源）。 */
   targets: readonly FocusTargetInput[];
+  /**
+   * 正在拖动中的徽标倍率预览（只覆盖对应 group）。归属线起点必须跟着预览走，
+   * 否则拖动时徽标中心已经移动、线头却停在上一次提交的位置。
+   */
+  badgeScaleOverrides?: ReadonlyMap<string, number>;
 };
 
 /**
@@ -131,7 +136,7 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
    * 片场 3D 徽标在画布坐标系里的矩形。
    *
    * 与 Bevy 绘制同源：徽标画在**成员布局矩形**（`getGroupLayoutSizes`）下缘 6px，再按
-   * `groupBadgeScale` 只向下放大。用节点自身尺寸推导会让徽标整体高出一整段。
+   * `groupBadgeScale` 保持气泡中线对齐等比放大。用节点自身尺寸推导会让徽标整体高出一整段。
    */
   const badgeRectOf = (filmSetNodeId: string): { x: number; y: number; width: number; height: number; center: { x: number; y: number } } | null => {
     const node = canvas.document.nodes.find((entry) => entry.id === filmSetNodeId);
@@ -145,7 +150,8 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
       width: layout?.width ?? node.width ?? 180,
       height: layout?.height ?? node.height ?? 112
     };
-    return groupBadgeRect(rect, data?.groupBadgeScale);
+    const scale = source.badgeScaleOverrides?.get(filmSetNodeId) ?? data?.groupBadgeScale;
+    return groupBadgeRect(rect, scale);
   };
 
   const shotPreviewCameraProjection = (filmSetNodeId: string, clipId: string): { x: number; y: number } | null => {

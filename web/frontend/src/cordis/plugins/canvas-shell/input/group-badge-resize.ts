@@ -30,7 +30,7 @@ function currentSource(nodeId: string) {
   return {data, signature: JSON.stringify([data?.groupCollapsed ?? false, data?.groupBadgeScale ?? null])};
 }
 
-/** 同一中点的对角向量投影，仅有一个倍率；拖动不提交规范状态。 */
+/** 以中点为中心、沿对角方向的向量投影，仅有一个倍率；拖动不提交规范状态。 */
 export function createGroupBadgeResize(core: InteractionCore) {
   const cancel = () => {
     const gesture = core.state.gesture;
@@ -62,6 +62,8 @@ export function createGroupBadgeResize(core: InteractionCore) {
     const world = core.pointerWorld(event);
     const {vector, start} = gesture;
     // Pointer delta starts at the pressed point, so the fixed handle inset cannot cause a jump.
+    // 水平中心固定，右下角手柄到中心的半对角线随倍率伸缩；指针沿对角线移动 d 时
+    // 倍率变化 d/|半对角线|，手柄始终贴着指针。
     const ratio = 1 + ((world.x-start.x)*vector.x + (world.y-start.y)*vector.y)
       / (vector.x*vector.x + vector.y*vector.y);
     gesture.scale = Math.min(gesture.maxScale, clampGroupBadgeScale(gesture.originScale * ratio));

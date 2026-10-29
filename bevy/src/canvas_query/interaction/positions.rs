@@ -119,14 +119,22 @@ fn relocate(node: &SnapshotNode, p: &NodePosition) -> Result<SnapshotNode, &'sta
     next.preview = node
         .preview
         .map(|_| layout::content_rect_for_bounds(p.x, p.y, w, h));
-    next.resize = node.resize.and_then(|_| {
+    next.resize = node.resize.and_then(|grip| {
         next.scope.as_ref().map(scope::grip).or_else(|| {
-            Some(ScopeGrip::Rect(ScopeRect {
-                x: next.bounds.0 + next.bounds.2 - layout::RESIZE_HANDLE_SIZE,
-                y: next.bounds.1 + next.bounds.3 - layout::RESIZE_HANDLE_SIZE,
-                width: layout::RESIZE_HANDLE_SIZE,
-                height: layout::RESIZE_HANDLE_SIZE,
-            }))
+            Some(match grip {
+                ScopeGrip::Corners(_) => scope::corners_grip(layout::resize_corner_rects(
+                    next.bounds.0,
+                    next.bounds.1,
+                    next.bounds.2,
+                    next.bounds.3,
+                )),
+                _ => ScopeGrip::Rect(ScopeRect {
+                    x: next.bounds.0 + next.bounds.2 - layout::RESIZE_HANDLE_SIZE,
+                    y: next.bounds.1 + next.bounds.3 - layout::RESIZE_HANDLE_SIZE,
+                    width: layout::RESIZE_HANDLE_SIZE,
+                    height: layout::RESIZE_HANDLE_SIZE,
+                }),
+            })
         })
     });
     if !rect_finite(next.layout_bounds)
@@ -159,6 +167,9 @@ fn grip_finite(grip: Option<&ScopeGrip>) -> bool {
     match grip {
         None => true,
         Some(ScopeGrip::Rect(rect)) => rect_finite((rect.x, rect.y, rect.width, rect.height)),
+        Some(ScopeGrip::Corners(rects)) => rects
+            .iter()
+            .all(|rect| rect_finite((rect.x, rect.y, rect.width, rect.height))),
         Some(ScopeGrip::Handles(handles)) => handles.iter().all(|handle| handle.is_finite()),
     }
 }

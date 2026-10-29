@@ -2,7 +2,7 @@
  * 地面范围对角锁定等比缩放测试
  * （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D6）。
  */
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { resizeTarget, scopeResizeTarget } from "./interaction-2d-helpers.js";
@@ -58,4 +58,43 @@ it("普通矩形缩放也使用目标节点类别下限", () => {
     expect(resizeTarget(gesture, { x: -1000, y: -1000 })).toEqual({ width: 200, height: 150 });
     expect(resizeTarget(gesture, { x: 0, y: 0 })).toBeNull();
   } finally { woohaa3CanvasStore.getState().applyRemoteCanvas(previous!); }
+});
+
+describe("组四角缩放（resizeTarget corner）", () => {
+  const previous = woohaa3CanvasStore.getState().canvas;
+  const canvas = createEmptyWoohaa3ServerCanvas("corner-resize");
+  canvas.document.nodes.push({ id: "g", type: "group", position: { x: 100, y: 50 }, width: 400, height: 300 });
+  beforeAll(() => { woohaa3CanvasStore.getState().applyRemoteCanvas(canvas); });
+  afterAll(() => { woohaa3CanvasStore.getState().applyRemoteCanvas(previous!); });
+
+  // 组矩形 x=100 y=50 400×300：左上 (100,50)、右下 (500,350)。
+  const base = { nodeId: "g", start: { x: 0, y: 0 }, originWidth: 400, originHeight: 300, origin: { x: 100, y: 50 } };
+
+  it("右下角沿用既有向右下生长，左上角不动", () => {
+    expect(resizeTarget({ ...base, start: { x: 500, y: 350 }, corner: "se" }, { x: 520, y: 370 }))
+      .toEqual({ width: 420, height: 320, position: { x: 100, y: 50 } });
+  });
+
+  it("左上角拖拽固定右下角", () => {
+    expect(resizeTarget({ ...base, start: { x: 100, y: 50 }, corner: "nw" }, { x: 80, y: 30 }))
+      .toEqual({ width: 420, height: 320, position: { x: 80, y: 30 } });
+  });
+
+  it("左下角拖拽固定右上角", () => {
+    expect(resizeTarget({ ...base, start: { x: 100, y: 350 }, corner: "sw" }, { x: 60, y: 380 }))
+      .toEqual({ width: 440, height: 330, position: { x: 60, y: 50 } });
+  });
+
+  it("右上角拖拽固定左下角", () => {
+    expect(resizeTarget({ ...base, start: { x: 500, y: 50 }, corner: "ne" }, { x: 540, y: 20 }))
+      .toEqual({ width: 440, height: 330, position: { x: 100, y: 20 } });
+  });
+
+  it("缩到下限时仍固定对角，不会把对角顶偏", () => {
+    const target = resizeTarget({ ...base, start: { x: 100, y: 50 }, corner: "nw" }, { x: 10000, y: 10000 });
+    expect(target).not.toBeNull();
+    const position = target!.position!;
+    expect(position.x + target!.width).toBe(500);
+    expect(position.y + target!.height).toBe(350);
+  });
 });

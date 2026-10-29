@@ -36,6 +36,13 @@ pub(super) const GROUP_FILL_ALPHA: f32 = 0.55;
 /// 组面板圆角，与组外框的 12 单位语言一致。
 const GROUP_PANEL_RADIUS: f32 = 12.;
 
+/// 组四角缩放抓手的圆点半径与浅色外圈半径；外圈保证圆点在深色底图上也能看清。
+const CORNER_HANDLE_RADIUS: f32 = 4.5;
+const CORNER_HANDLE_HALO: f32 = 6.5;
+
+/// 徽标包围盒线框的 alpha：比组选中框更浅，只提示可缩放，不抢模型内容。
+const BADGE_FRAME_ALPHA: f32 = 0.42;
+
 pub(crate) fn is_running(node: &crate::protocol::GraphNode) -> bool {
     node.group
         .as_ref()
@@ -48,9 +55,11 @@ pub(crate) fn is_running(node: &crate::protocol::GraphNode) -> bool {
         })
 }
 
-/// Build one transparent panel mesh for one group. It deliberately uses local
-/// z=0; the caller puts the entity itself at the group's world z so Bevy's
-/// Transparent2d phase can sort each panel independently.
+/// Build one transparent panel mesh for one group. The mesh is **group-local**
+/// (origin at the group's top-left corner) and uses local z=0: the caller places
+/// the entity at the group's canvas position and world z, so pure move increments
+/// only update the transform (Bevy's Transparent2d phase sorts each panel by the
+/// entity z) and never rebuild the mesh.
 ///
 /// 面板用 `canvasNodeSurface` + [`GROUP_FILL_ALPHA`]，这是所有组唯一的底色层；3D 相机只画
 /// 徽标后方的气泡尾巴，不再叠加徽标底座或半透明组底（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D4）。
@@ -77,7 +86,8 @@ pub(crate) fn draw_group_panel(
     geometry.build()
 }
 
-/// 在组矩形内铺一层底色。徽标固定在矩形外侧，因此背板可以完整覆盖组内容。
+/// 在组本地矩形内铺一层底色（原点在组左上角，位置由实体 transform 承担）。
+/// 徽标固定在矩形外侧，因此背板可以完整覆盖组内容。
 fn panel(
     geometry: &mut Geometry,
     node: &crate::protocol::GraphNode,
@@ -87,8 +97,8 @@ fn panel(
 ) {
     let radius = GROUP_PANEL_RADIUS;
     geometry.rounded_rect_radii_alpha(
-        node.x,
-        node.y,
+        0.,
+        0.,
         node.width,
         node.height,
         [radius; 4],
@@ -111,6 +121,11 @@ pub(crate) fn draw_group(
     z: f32,
 ) -> (String, Vec2, f32, u32) {
     let (x, y, width, height) = (node.x, node.y, node.width, node.height);
+    // 带 3D 徽标的组选中时用浅色线框标出徽标包围盒。线框是半透明几何，必须走容器
+    // 自己的 blend 层（选中描边批次使用不透明材质）；收起态也保留，因为它正是徽标范围。
+    if selected && crate::canvas_query::group_model::resize_center(node).is_some() {
+        draw_badge_scale_frame(geometry, theme, node, z);
+    }
     // 收起组只保留徽标卡片（由卡片通路绘制），气泡背板/尾巴一律不画
     // （change: 2026-10-28-migrate-film-set-to-groups）。
     if presentation.collapsed {
@@ -121,7 +136,8 @@ pub(crate) fn draw_group(
             theme.token_u32("canvasBodyText"),
         );
     }
-    if selected && node.resizable { super::cards::draw_resize_grip(geometry, theme, node, z + 0.03); }
+    // 选中抓手不再走卡片态的右下角三角+条纹：组的四个角统一由 `draw_group_selection`
+    // 画同一套角标，否则右下角会多出一个形状不同的旧抓手。
     // 选中态用更强的虚线框颜色表达，而不是铺一层不透明选中底：容器铺底会盖住成员
     // （change: fix-group-and-marquee-preview）。
     // Continuous group surfaces are drawn by the per-group transparent panel
@@ -154,19 +170,6 @@ pub(crate) fn draw_group(
             );
         }
     }
-    if let Some(corner) = crate::canvas_query::group_model::resize_center(node) {
-        let color = theme.token_u32("canvasResizeHandle");
-        for length in [5., 9.] {
-            geometry.line(
-                corner - Vec2::X * length,
-                corner - Vec2::Y * length,
-                1.5,
-                z + 0.02,
-                color,
-            );
-        }
-    }
-
     // 左上角标题：`标题 · N 项`；无标题时只显示计数。
     let title = if presentation.title.trim().is_empty() {
         String::new()
@@ -224,17 +227,65 @@ pub(crate) fn draw_group_selection(
             color,
         );
     }
-    if node.resizable {
-        let corner = Vec2::new(node.x + node.width - 4., node.y + node.height - 4.);
-        for length in [6., 11.] {
-            geometry.line(
-                corner - Vec2::X * length,
-                corner - Vec2::Y * length,
-                1.5,
-                z + 0.02,
-                theme.token_u32("canvasResizeHandle"),
-            );
-        }
+    if node.resizable && !node.group.as_ref().is_some_and(|group| group.collapsed) {
+        draw_resize_corners(geometry, theme, node, z);
+    }
+    // 徽标线框由 `draw_group` 画进容器 blend 层；这里只补右下角缩放手柄。
+    // `resize_center` 只在单选可写的带模型组返回，与线框出现条件一致。
+    if let Some(corner) = crate::canvas_query::group_model::resize_center(node) {
+        draw_badge_resize_handle(geometry, theme, corner, z);
+    }
+}
+
+/// 徽标包围盒的浅色线框。
+///
+/// 只画半透明细线，不铺底、不碰模型：3D 徽标本身没有底板，线框是选中态唯一可见的
+/// 徽标边界。alpha < 1 进入 blend 层，避免遮住场景内容。
+fn draw_badge_scale_frame(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    node: &crate::protocol::GraphNode,
+    z: f32,
+) {
+    let path = crate::canvas_query::group_model::badge_path(node);
+    if path.len() < 2 {
+        return;
+    }
+    let color = theme.token_u32("canvasResizeHandle");
+    for edge in path.windows(2) {
+        geometry.line_alpha(edge[0], edge[1], 1.5, z + 0.015, color, BADGE_FRAME_ALPHA);
+    }
+}
+
+/// 徽标右下角的缩放手柄：沿用「向外两条短线」的角标语言，与线框相交处不额外加粗。
+fn draw_badge_resize_handle(geometry: &mut Geometry, theme: &ThemeResource, corner: Vec2, z: f32) {
+    let color = theme.token_u32("canvasResizeHandle");
+    for length in [5., 9.] {
+        geometry.line(
+            corner - Vec2::X * length,
+            corner - Vec2::Y * length,
+            1.5,
+            z + 0.02,
+            color,
+        );
+    }
+}
+
+/// 组四角缩放抓手：压在外框角点上的小圆点，贴合圆角气泡的轮廓语言。
+///
+/// 圆心与 `layout::resize_corner_rects` 的 20×20 命中框同心，四角完全同形；浅色外圈让
+/// 抓手在气泡半透明底色与画布背景上都保持对比。
+fn draw_resize_corners(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    node: &crate::protocol::GraphNode,
+    z: f32,
+) {
+    let core = theme.token_u32("canvasResizeHandle");
+    let halo = theme.token_u32("canvasNodeSurface");
+    for corner in crate::canvas_query::group_model::resize_corners(node) {
+        geometry.circle(corner, CORNER_HANDLE_HALO, z + 0.02, halo, 24);
+        geometry.circle(corner, CORNER_HANDLE_RADIUS, z + 0.021, core, 24);
     }
 }
 
@@ -598,6 +649,70 @@ mod tests {
     }
 
     #[test]
+    fn selected_resizable_badge_draws_light_bounding_frame() {
+        let mut node = model_group(500., 300.);
+        node.group.as_mut().unwrap().badge_scale = 2.;
+        node.group.as_mut().unwrap().badge_resizable = true;
+        let badge = crate::canvas_query::group_model::badge_rect(&node);
+
+        let mut geometry = Geometry::default();
+        draw_group(
+            &mut geometry,
+            &ThemeResource::default(),
+            &node,
+            node.group.as_ref().unwrap(),
+            true,
+            GROUP_Z,
+        );
+        let (_, blend) = geometry.into_layers();
+        let Some(VertexAttributeValues::Float32x4(colors)) = blend.attribute(Mesh::ATTRIBUTE_COLOR)
+        else {
+            panic!("badge frame must be translucent");
+        };
+        // 线框只有浅色细线，不铺底：全部顶点都是同一个 alpha。
+        assert!(
+            colors
+                .iter()
+                .all(|color| (color[3] - BADGE_FRAME_ALPHA).abs() < 1e-6)
+        );
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            blend.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("badge frame needs positions");
+        };
+        // 线框贴合徽标包围盒（含 1.5 单位线宽），不是组矩形。
+        let min_x = points.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
+        let max_x = points.iter().map(|p| p[0]).fold(f32::MIN, f32::max);
+        let min_y = points.iter().map(|p| -p[1]).fold(f32::MAX, f32::min);
+        let max_y = points.iter().map(|p| -p[1]).fold(f32::MIN, f32::max);
+        assert!((min_x - badge.x).abs() < 0.85);
+        assert!((max_x - (badge.x + badge.z)).abs() < 0.85);
+        assert!((min_y - badge.y).abs() < 0.85);
+        assert!((max_y - (badge.y + badge.w)).abs() < 0.85);
+    }
+
+    #[test]
+    fn unresizable_badge_has_no_scale_frame() {
+        let node = model_group(500., 300.);
+        let mut geometry = Geometry::default();
+        draw_group(
+            &mut geometry,
+            &ThemeResource::default(),
+            &node,
+            node.group.as_ref().unwrap(),
+            true,
+            GROUP_Z,
+        );
+        let (_, blend) = geometry.into_layers();
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            blend.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("blend fallback");
+        };
+        assert!(points.iter().all(|point| point[0] < -100000.));
+    }
+
+    #[test]
     fn prepared_group_has_one_continuous_outline_in_normal_selected_and_running_states() {
         let mut node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({
             "id":"g","type":"group","x":0,"y":0,"width":500,"height":300,
@@ -622,6 +737,11 @@ mod tests {
                     selected,
                     GROUP_Z,
                 );
+                // 选中态边框与四角抓手由 `draw_group_selection` 生产（`draw_group` 只画未选中
+                // 边框），所以这里合并两者，继续断言「整组只有一条连续外周」。
+                if selected {
+                    draw_group_selection(&mut geometry, &ThemeResource::default(), &node, GROUP_Z);
+                }
                 let (opaque, blend) = geometry.into_layers();
                 let Some(bevy::mesh::VertexAttributeValues::Float32x3(points)) =
                     opaque.attribute(Mesh::ATTRIBUTE_POSITION)

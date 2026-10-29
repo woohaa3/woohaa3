@@ -27,14 +27,17 @@ function setup(options: {zoom?:number;collapsed?:boolean;writable?:boolean} = {}
 }
 
 describe("group badge independent resize",()=>{
-  it.each([0.5,1,2])("在 %s× 画布缩放下居中等比预览，松手只提交徽标倍率",zoom=>{
+  it.each([0.5,1,2])("在 %s× 画布缩放下保持中线对齐等比预览，松手只提交徽标倍率",zoom=>{
     const f=setup({zoom});
     const nodes=structuredClone(f.current().document.nodes);
     f.pointer("pointerdown"); f.pointer("pointermove",44,32); f.controller.flush();
     const group=f.scene().nodes.find(n=>n.id==="g")!;
     expect(group.group?.badgeScale).toBe(2);
     const badge=groupBadgeRect(group,group.group?.badgeScale);
+    // 中线永远与气泡中心 300 对齐；上缘固定，只向下增长。
+    expect(badge.y).toBe(406);
     expect(badge.center).toEqual({x:300,y:470});
+    expect(badge.x + badge.width/2).toBe(300);
     expect(badge.width/badge.height).toBe(88/64);
     expect(f.current().nodeData.g.groupBadgeScale).toBeUndefined();
     f.pointer("pointerup",44,32);

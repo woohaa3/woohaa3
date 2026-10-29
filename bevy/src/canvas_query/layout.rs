@@ -253,6 +253,24 @@ pub(crate) fn resize_rect(x: f32, y: f32, width: f32, height: f32) -> (f32, f32,
     )
 }
 
+/// 组容器四角 resize 命中矩形，顺序 `nw, ne, sw, se`；每个以矩形角点为**中心**，
+/// 与绘制的圆形抓手同心，因此抓手半透明的外侧也能点中（抓取半径不受圆角裁切影响）。
+pub(crate) fn resize_corner_rects(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> [(f32, f32, f32, f32); 4] {
+    let size = RESIZE_HANDLE_SIZE;
+    let half = size / 2.;
+    [
+        (x - half, y - half, size, size),
+        (x + width - half, y - half, size, size),
+        (x - half, y + height - half, size, size),
+        (x + width - half, y + height - half, size, size),
+    ]
+}
+
 /// 连线删除按钮的**中心**：无标签时居中于两端口中点，有标签时排在标签胶囊右侧
 /// （与 contracts `bevyEdgeDeleteRect` 同一公式）。`label_width` 由 `edge_label_width` 给出，
 /// 因此窄标签不会把按钮推远。

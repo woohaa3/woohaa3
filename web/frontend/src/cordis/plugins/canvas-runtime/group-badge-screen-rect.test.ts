@@ -13,9 +13,10 @@ describe("groupBadgePresentationScreenRect", () => {
     // 徽标顶 = 卡片顶 + (布局高度 + 6) × 倍率；用节点高度会少算 (2017.25-1158) 个画布单位。
     expect(badge.top).toBeCloseTo(card.top + (layout.height + 6) * zoom, 5);
     expect(badge.top).toBeGreaterThan(card.top + (node.height + 6) * zoom + 200);
-    // 徽标基础 88×64，只向下放大。
+    // 徽标基础 88×64，等比放大。
     expect(badge.width).toBeCloseTo(88 * 12.628596561078915 * zoom, 5);
     expect(badge.height).toBeCloseTo(64 * 12.628596561078915 * zoom, 5);
+    // 放大不改变中线：徽标中心始终与布局中心（气泡中线）重合。
     expect(badge.left + badge.width / 2).toBeCloseTo(card.left + (layout.width / 2) * zoom, 5);
   });
 

@@ -96,8 +96,8 @@ pub(crate) fn badge_rect(node: &GraphNode) -> Vec4 {
     let base = base_badge_rect(node);
     let scale = badge_scale(node);
     let size = Vec2::new(base.z, base.w) * scale;
-    // Keep the badge top fixed below the bubble. Scaling grows it downward, so it never
-    // intrudes into the group body.
+    // 气泡与徽标永远中线对齐：水平中心固定在气泡中心，缩放时两侧对称扩张；
+    // 上缘固定在气泡下方，只向下增长（与 contracts `groupBadgeRect` 同步）。
     let center = Vec2::new(base.x + base.z / 2., base.y + size.y / 2.);
     Vec4::new(
         center.x - size.x / 2.,
@@ -121,6 +121,24 @@ pub(crate) fn resize_center(node: &GraphNode) -> Option<Vec2> {
     Some(Vec2::new(rect.x + rect.z - 5., rect.y + rect.w - 5.))
 }
 
+/// 组结构缩放的四个抓手位置，顺序与 [`crate::canvas_query::scope::CORNER_NAMES`] 一致
+/// （`nw, ne, sw, se`）。
+///
+/// 抓手画成压在外框角点上的小圆点：圆的圆心就是矩形的角点，与 `layout::resize_corner_rects`
+/// 的 20×20 命中框同心，所以「画在哪、点在哪」一致；圆点也贴合圆角气泡的轮廓语言。
+pub(crate) fn resize_corners(node: &GraphNode) -> [Vec2; 4] {
+    let left = node.x;
+    let top = node.y;
+    let right = node.x + node.width;
+    let bottom = node.y + node.height;
+    [
+        Vec2::new(left, top),
+        Vec2::new(right, top),
+        Vec2::new(left, bottom),
+        Vec2::new(right, bottom),
+    ]
+}
+
 pub(crate) fn badge_path(node: &GraphNode) -> Vec<Vec2> {
     if !has_badge(node) {
         return Vec::new();
@@ -132,13 +150,19 @@ pub(crate) fn badge_path(node: &GraphNode) -> Vec<Vec2> {
 ///
 /// The tail tip meets the badge's top edge outside the group body, without adding a plate or
 /// changing the group's structural layout bounds.
+///
+/// The tail keeps its own size: its base is `TAIL_BASE` and its height is `BADGE_OUTSET`, both
+/// independent of the group's width **and** of `badgeScale`. `badgeScale` only enlarges the badge
+/// plate and the model inside it (片场组), so every group — normal or film set — draws the same
+/// pointed tail. Only a body narrower than the tail itself clips it, so a degenerate group can
+/// never produce an inverted perimeter.
 pub(crate) fn tail_path(node: &GraphNode) -> Vec<Vec2> {
     if !has_badge(node) || node.group.as_ref().is_some_and(|group| group.collapsed) {
         return Vec::new();
     }
     let badge = badge_rect(node);
     let center_x = node.x + node.width / 2.;
-    let base_half = (TAIL_BASE * badge_scale(node) / 2.).min((node.width - 24.).max(8.) / 2.);
+    let base_half = (TAIL_BASE / 2.).min(node.width.max(0.) / 2.);
     let base_y = node.y + node.height;
     let tip_y = badge.y;
     vec![

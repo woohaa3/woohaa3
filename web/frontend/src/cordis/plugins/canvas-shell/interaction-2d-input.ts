@@ -16,7 +16,7 @@ import { nodeSize, type Point } from "./hit-test.js";
 import { planAggregateConnect, planConnectEdge, planResizeNode } from "../../../extension-api/command-planner.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { createWheelViewport } from "./interaction-viewport.js";
-import { resizeTarget as resizeTargetHelper, scopeResizeTarget, SCOPE_HANDLE_ORDER } from "./interaction-2d-helpers.js";
+import { resizeTarget as resizeTargetHelper, scopeResizeTarget, isGroupResizeCorner, SCOPE_HANDLE_ORDER } from "./interaction-2d-helpers.js";
 import { createDragAttachState, isDragAttachConnectable } from "./drag-attach.js";
 import { createDragGestureFamily } from "./drag-gesture.js";
 import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
@@ -241,6 +241,9 @@ export function create2dInputFamily(core: InteractionCore) {
         const originCenter = origin
           ? { x: origin.x + startSize.width / 2, y: origin.y + startSize.height / 2 }
           : { x: renderNode ? renderNode.x + renderNode.width / 2 : 0, y: renderNode ? renderNode.y + renderNode.height / 2 : 0 };
+        // 组容器的四角抓手走自由缩放的低层（非片场范围手势）：命中方向决定固定哪个对角，
+        // 因此与既有右下角一样在释放时提交一次 `node.update`（含 position）。
+        const groupCorner = !(handlePoint && anchorPoint) && isGroupResizeCorner(hit.handle) ? hit.handle : undefined;
         beginGesture();
         beginPerfGesture("resize");
         state.gesture = {
@@ -254,7 +257,8 @@ export function create2dInputFamily(core: InteractionCore) {
           moved: false,
           mode: handlePoint && anchorPoint ? "scope" : "free",
           ...(handlePoint ? { handle: { x: handlePoint[0], y: handlePoint[1] } } : {}),
-          ...(anchorPoint ? { anchor: { x: anchorPoint[0], y: anchorPoint[1] } } : {})
+          ...(anchorPoint ? { anchor: { x: anchorPoint[0], y: anchorPoint[1] } } : {}),
+          ...(groupCorner && origin ? { corner: groupCorner, origin } : {})
         };
         canvas.setPointerCapture?.(event.pointerId);
         event.preventDefault();

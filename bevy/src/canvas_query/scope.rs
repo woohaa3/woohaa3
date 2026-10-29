@@ -29,6 +29,9 @@ pub(crate) const DIAMOND_GRIP_TOLERANCE: f32 = 2.0;
 /// 抓手方向顺序：`n, ne, e, se, s, sw, w, nw`（与 contracts 一致）。
 pub(crate) const HANDLE_NAMES: [&str; 8] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
 
+/// 四角抓手方向顺序：`nw, ne, sw, se`（组结构缩放的四个角，没有边中点抓手）。
+pub(crate) const CORNER_NAMES: [&str; 4] = ["nw", "ne", "sw", "se"];
+
 /// 范围基准矩形 `(x, y, width, height)`（世界坐标，内容适配矩形）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ScopeRect {
@@ -70,9 +73,11 @@ pub(crate) struct ScopeGeometry {
 }
 
 /// 范围抓手集合：复合资产为 8 个抓手；普通矩形节点沿用右下角方形。
+/// 组容器在选中时暴露四个角抓手（顺序同 [`CORNER_NAMES`]）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum ScopeGrip {
     Handles([Vec2; 8]),
+    Corners([ScopeRect; 4]),
     Rect(ScopeRect),
 }
 
@@ -360,7 +365,18 @@ pub(crate) fn grip(geometry: &ScopeGeometry) -> ScopeGrip {
     }
 }
 
-/// 命中的抓手索引（`n, ne, e, se, s, sw, w, nw`）；`Rect` 分支返回 `None`（沿用自由缩放）。
+/// 组容器四角抓手：四个命中矩形按 `nw, ne, sw, se` 顺序排布。
+pub(crate) fn corners_grip(rects: [(f32, f32, f32, f32); 4]) -> ScopeGrip {
+    ScopeGrip::Corners(rects.map(|(x, y, width, height)| ScopeRect {
+        x,
+        y,
+        width,
+        height,
+    }))
+}
+
+/// 命中的抓手索引（`n, ne, e, se, s, sw, w, nw`）；`Rect` 分支返回 `None`（沿用自由缩放）；
+/// 组四角抓手的索引对应 [`CORNER_NAMES`]。
 pub(crate) fn grip_hit(grip: &ScopeGrip, point: Vec2, tolerance: f32) -> Option<usize> {
     match grip {
         ScopeGrip::Rect(rect) => {
@@ -369,6 +385,17 @@ pub(crate) fn grip_hit(grip: &ScopeGrip, point: Vec2, tolerance: f32) -> Option<
                 && point.y >= rect.y - tolerance
                 && point.y <= rect.y + rect.height + tolerance;
             inside.then_some(usize::MAX)
+        }
+        ScopeGrip::Corners(rects) => {
+            if !finite(point.x) || !finite(point.y) {
+                return None;
+            }
+            rects.iter().position(|rect| {
+                point.x >= rect.x - tolerance
+                    && point.x <= rect.x + rect.width + tolerance
+                    && point.y >= rect.y - tolerance
+                    && point.y <= rect.y + rect.height + tolerance
+            })
         }
         ScopeGrip::Handles(handles) => {
             if !finite(point.x) || !finite(point.y) {

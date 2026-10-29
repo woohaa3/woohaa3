@@ -156,6 +156,8 @@ pub(super) fn draw_scope_grip(
     base_z: f32,
 ) {
     match grip {
+        // 组容器的四角角标由 `super::group::draw_group_selection` 统一绘制，这里不再重复。
+        super::scope::ScopeGrip::Corners(_) => {}
         super::scope::ScopeGrip::Handles(handles) => {
             let half = super::scope::DIAMOND_GRIP_LEG / 2.0;
             for handle in handles {

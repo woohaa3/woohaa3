@@ -562,6 +562,10 @@ export type Gesture =
       handle?: Point;
       /** 地面范围对角锁定锚点世界坐标（`scope` 模式必需）。 */
       anchor?: Point;
+      /** 组四角缩放方向；把左上角固定到对角后再提交（缺省为右下角自由缩放）。 */
+      corner?: import("./interaction-2d-helpers.js").GroupResizeCorner;
+      /** 规范节点绝对左上角；角缩放据它固定对角。 */
+      origin?: Point;
     }
   | { kind: "connect"; pointerId: number; source: string; side: "input" | "output" }
   | {

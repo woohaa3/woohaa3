@@ -420,6 +420,14 @@ pub(super) fn apply_selection(snapshot: &mut InteractionSnapshot, selected: &[St
             node.resize = None;
         } else if let Some(scope) = &node.scope {
             node.resize = Some(scope::grip(scope));
+        } else if node.group {
+            // 组容器：四个角都能拖拽缩放（与绘制的四角角标同源）。
+            node.resize = Some(scope::corners_grip(layout::resize_corner_rects(
+                node.bounds.0,
+                node.bounds.1,
+                node.bounds.2,
+                node.bounds.3,
+            )));
         } else {
             let (x, y, width, height) =
                 layout::resize_rect(node.bounds.0, node.bounds.1, node.bounds.2, node.bounds.3);
@@ -433,11 +441,14 @@ pub(super) fn apply_selection(snapshot: &mut InteractionSnapshot, selected: &[St
     }
 }
 
-/// 抓手索引 → 方向名（`n/ne/e/se/s/sw/w/nw`）；`usize::MAX`（普通矩形右下角）返回 `None`。
-fn handle_name(index: usize) -> Option<String> {
-    scope::HANDLE_NAMES
-        .get(index)
-        .map(|name| (*name).to_owned())
+/// 抓手索引 → 方向名（8 抓手为 `n/ne/e/se/s/sw/w/nw`；组四角为 `nw/ne/sw/se`；
+/// 普通矩形右下角返回 `None`）。
+fn handle_name(grip: &ScopeGrip, index: usize) -> Option<String> {
+    let names: &[&str] = match grip {
+        ScopeGrip::Corners(_) => &scope::CORNER_NAMES,
+        _ => &scope::HANDLE_NAMES,
+    };
+    names.get(index).map(|name| (*name).to_owned())
 }
 
 impl InteractionSnapshot {
@@ -591,14 +602,13 @@ impl InteractionSnapshot {
             // 选中时抓手优先命中 resize（拖动即等比缩放整个片场内容）。
             if node.composite_asset {
                 if let Some(scope) = &node.scope {
-                    if let Some(handle) = node
-                        .resize
-                        .as_ref()
-                        .and_then(|grip| scope::grip_hit(grip, world, DIAMOND_GRIP_TOLERANCE))
-                    {
+                    if let Some((grip, handle)) = node.resize.as_ref().and_then(|grip| {
+                        scope::grip_hit(grip, world, DIAMOND_GRIP_TOLERANCE)
+                            .map(|handle| (grip, handle))
+                    }) {
                         return Some(PointHit::Resize {
                             node_id: node.id.clone(),
-                            handle: handle_name(handle),
+                            handle: handle_name(grip, handle),
                         });
                     }
                     if scope::pick_contains(scope, world) {
@@ -633,14 +643,12 @@ impl InteractionSnapshot {
             }
             // resize 抓手优先于历史条：若仍重叠则 resize 胜出
             // （change: 2026-10-12-unify-generation-history-strip，design D4）。
-            if let Some(handle) = node
-                .resize
-                .as_ref()
-                .and_then(|grip| scope::grip_hit(grip, world, DIAMOND_GRIP_TOLERANCE))
-            {
+            if let Some((grip, handle)) = node.resize.as_ref().and_then(|grip| {
+                scope::grip_hit(grip, world, DIAMOND_GRIP_TOLERANCE).map(|handle| (grip, handle))
+            }) {
                 return Some(PointHit::Resize {
                     node_id: node.id.clone(),
-                    handle: handle_name(handle),
+                    handle: handle_name(grip, handle),
                 });
             }
             if node
@@ -837,7 +845,9 @@ impl InteractionSnapshot {
                 }
                 continue;
             }
-            if (!node.group_collapsed && layout::in_rect(world, node.bounds))
+            if (!node.group_collapsed
+                && (layout::in_rect(world, node.bounds)
+                    || crate::canvas_query::group_model::path_contains(&node.group_badge, world)))
                 || crate::canvas_query::group_model::path_contains(&node.group_outline, world)
             {
                 return Some(node.id.clone());
@@ -854,43 +864,95 @@ impl InteractionSnapshot {
         self.nodes
             .iter()
             .filter_map(|node| {
-                let scope = node.scope.as_ref()?;
-                Some(ScopeGeometryEntry {
-                    node_id: node.id.clone(),
-                    shape: if scope::is_diamond(scope.shape) {
-                        "isometric-diamond".to_owned()
-                    } else {
-                        "rect".to_owned()
-                    },
-                    vertices: [
-                        [scope.vertices[0].x, scope.vertices[0].y],
-                        [scope.vertices[1].x, scope.vertices[1].y],
-                        [scope.vertices[2].x, scope.vertices[2].y],
-                        [scope.vertices[3].x, scope.vertices[3].y],
-                    ],
-                    handles: [
-                        [scope.handles[0].x, scope.handles[0].y],
-                        [scope.handles[1].x, scope.handles[1].y],
-                        [scope.handles[2].x, scope.handles[2].y],
-                        [scope.handles[3].x, scope.handles[3].y],
-                        [scope.handles[4].x, scope.handles[4].y],
-                        [scope.handles[5].x, scope.handles[5].y],
-                        [scope.handles[6].x, scope.handles[6].y],
-                        [scope.handles[7].x, scope.handles[7].y],
-                    ],
-                    aabb: [
-                        scope.aabb.x,
-                        scope.aabb.y,
-                        scope.aabb.width,
-                        scope.aabb.height,
-                    ],
-                    base: [
-                        scope.base.x,
-                        scope.base.y,
-                        scope.base.width,
-                        scope.base.height,
-                    ],
-                })
+                if let Some(scope) = node.scope.as_ref() {
+                    return Some(ScopeGeometryEntry {
+                        node_id: node.id.clone(),
+                        shape: if scope::is_diamond(scope.shape) {
+                            "isometric-diamond".to_owned()
+                        } else {
+                            "rect".to_owned()
+                        },
+                        vertices: [
+                            [scope.vertices[0].x, scope.vertices[0].y],
+                            [scope.vertices[1].x, scope.vertices[1].y],
+                            [scope.vertices[2].x, scope.vertices[2].y],
+                            [scope.vertices[3].x, scope.vertices[3].y],
+                        ],
+                        handles: [
+                            [scope.handles[0].x, scope.handles[0].y],
+                            [scope.handles[1].x, scope.handles[1].y],
+                            [scope.handles[2].x, scope.handles[2].y],
+                            [scope.handles[3].x, scope.handles[3].y],
+                            [scope.handles[4].x, scope.handles[4].y],
+                            [scope.handles[5].x, scope.handles[5].y],
+                            [scope.handles[6].x, scope.handles[6].y],
+                            [scope.handles[7].x, scope.handles[7].y],
+                        ],
+                        aabb: [
+                            scope.aabb.x,
+                            scope.aabb.y,
+                            scope.aabb.width,
+                            scope.aabb.height,
+                        ],
+                        base: [
+                            scope.base.x,
+                            scope.base.y,
+                            scope.base.width,
+                            scope.base.height,
+                        ],
+                    });
+                }
+                // Film-set groups keep their scene inside the free-standing 3D badge, which
+                // lives below the structural bubble. The drop overlay needs the badge rect
+                // so dragging a model onto the visible scene advertises the same target as
+                // the body; unrelated groups are filtered by the contribution's owner check.
+                if node.group && !node.group_collapsed && !node.group_badge.is_empty() {
+                    let min_x = node
+                        .group_badge
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f32::INFINITY, f32::min);
+                    let max_x = node
+                        .group_badge
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    let min_y = node
+                        .group_badge
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f32::INFINITY, f32::min);
+                    let max_y = node
+                        .group_badge
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    let (x, y, width, height) = (min_x, min_y, max_x - min_x, max_y - min_y);
+                    let (cx, cy) = (x + width / 2., y + height / 2.);
+                    return Some(ScopeGeometryEntry {
+                        node_id: node.id.clone(),
+                        shape: "rect".to_owned(),
+                        vertices: [
+                            [x, y],
+                            [x + width, y],
+                            [x + width, y + height],
+                            [x, y + height],
+                        ],
+                        handles: [
+                            [cx, y],
+                            [x + width, y],
+                            [x + width, cy],
+                            [x + width, y + height],
+                            [cx, y + height],
+                            [x, y + height],
+                            [x, cy],
+                            [x, y],
+                        ],
+                        aabb: [x, y, width, height],
+                        base: [x, y, width, height],
+                    });
+                }
+                None
             })
             .collect()
     }

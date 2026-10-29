@@ -7,11 +7,12 @@ import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 import { buildCanvasRenderScene } from "./render-scene.js";
 
 describe("independent group badge scale", () => {
-  it("固定在气泡外侧并向下等比伸缩，不改变结构矩形", () => {
+  it("固定在气泡外侧并保持中线对齐等比伸缩，不改变结构矩形", () => {
     const node = {x:100,y:200,width:600,height:400};
     const original = structuredClone(node);
     for (const scale of [0.5,1,2,2.5,6,12,1000]) {
       const badge = groupBadgeRect(node, scale);
+      // 徽标中心永远与气泡中心同一条竖中线；上缘固定，只向下增长。
       expect(badge.y).toBe(606);
       expect(badge.center).toEqual({x:400,y:606 + badge.height / 2});
       expect(badge.x + badge.width/2).toBe(400);
@@ -38,6 +39,12 @@ describe("independent group badge scale", () => {
     expect(badge.top).toBe(50 + 300 + 6 * 2);
     expect(badge.left + badge.width / 2).toBe(100 + 500 / 2);
     expect(badge.height).toBe(64 * 2);
+    // 放大时中线不变：左右对称扩张，上缘仍然固定在气泡下方。
+    const enlarged = groupBadgeScreenRect({ left: 100, top: 50, width: 500, height: 300 }, 2, 2);
+    expect(enlarged.top).toBe(badge.top);
+    expect(enlarged.left + enlarged.width / 2).toBe(badge.left + badge.width / 2);
+    expect(enlarged.width).toBe(88 * 2 * 2);
+    expect(enlarged.height).toBe(64 * 2 * 2);
   });
 
   it("只保存展示倍率且能撤销到字段缺失；非法输入整批拒绝", () => {

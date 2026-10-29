@@ -122,13 +122,17 @@ export function buildSceneWithResources(
   const contentRight = Math.max(0, options.getContentRect?.().right ?? 0);
   // 拍摄镜头预览：宿主只从权威画布 + 当前播放投影派生只读卡片状态与归属线起点投影
   // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5/D7/D8）。
+  const badgeScaleOverrides = input.badgeResize
+    ? new Map([[input.badgeResize.nodeId, input.badgeResize.scale]])
+    : undefined;
   const shotPreviews = buildShotPreviewSceneInput({
     canvas: canvasState,
     playback: options.getAnimationPlayback?.() ?? null,
-    targets: options.getModelFocusTargets?.() ?? []
+    targets: options.getModelFocusTargets?.() ?? [],
+    badgeScaleOverrides
   });
   const scene = buildCanvasRenderScene({
-    groupBadgeScaleOverrides: input.badgeResize ? new Map([[input.badgeResize.nodeId, input.badgeResize.scale]]) : undefined,
+    groupBadgeScaleOverrides: badgeScaleOverrides,
     groupBadgeResizable: options.isWritable?.() ?? options.getSession()?.isWritable() ?? false,
     canvas: canvasState,
     nodeCapabilities: options.nodeCapabilities,
@@ -173,7 +177,7 @@ export function buildSceneWithResources(
     // 总览 primitive LOD 策略按严格身份从可信 adapter 解析；仅显式声明的业务用例降档，其它
     // World 用途保持 High（change: 2026-10-15-add-film-set-overview-lod，design D1）。
     compositeAssetEmptyPlaceholders: options.compositeAssets?.emptyPlaceholders(canvasState),
-    compositeAssetGeometryQualities: options.compositeAssets?.geometryQualities(canvasState)
+    geometryQualities: options.compositeAssets?.geometryQualities(canvasState)
   });
   const isModelLoading = options.getModelLoading?.() ?? options.isModelLoading;
   applyNodeResourceLoading(scene, {

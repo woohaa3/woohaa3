@@ -94,6 +94,26 @@ describe("resize 手势（change: add-node-resize）", () => {
     controller.dispose();
   });
 
+  it("组四角都能拖拽缩放：左上角固定右下角，并同时提交 position", () => {
+    const member = { id: "m", type: "image", parentId: "n1", position: { x: 40, y: 40 }, width: 200, height: 100 };
+    const { dom, controller } = setupResizable("group", 500, 400, [member]);
+    dom.fire("pointerdown", { clientX: 20, clientY: 20 });
+    dom.fire("pointerup", { clientX: 20, clientY: 20 });
+    controller.flush();
+    submitted.length = 0;
+
+    // 左上角抓手命中框贴住内缘 20×20；向内拖 40/20 后右/下边保持不动。
+    dom.fire("pointerdown", { clientX: 5, clientY: 5 });
+    dom.fire("pointermove", { clientX: 45, clientY: 25 });
+    dom.fire("pointerup", { clientX: 45, clientY: 25 });
+    controller.flush();
+
+    const update = submitted.filter((entry) => entry.type === "node.update");
+    expect(update).toHaveLength(1);
+    expect(update[0]).toMatchObject({ nodeId: "n1", width: 460, height: 380, position: { x: 40, y: 20 } });
+    controller.dispose();
+  });
+
   it("图片节点宽高也可独立变化（节点不受宽高比锁定）", () => {
     const { dom, controller, handle, width } = setupResizable("image", 300, 200);
     dom.fire("pointerdown", { clientX: 150, clientY: 100 });

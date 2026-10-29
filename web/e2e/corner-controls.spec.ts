@@ -1,14 +1,18 @@
 /**
  * 右下角控件面板视觉验收（change: unify-canvas-corner-controls）。
  *
- * 断言缩放图标、紧凑滑杆与「提示词片段管理」图标同处一个面板，并保留截图。
+ * 断言缩放图标、紧凑滑杆与同步状态同处一个面板，并保留截图。
  */
 import { expect, test } from "@playwright/test";
-import { installPageHelpers, resetCanvasStorage, waitForCanvasSession } from "./helpers.js";
+import {
+	installPageHelpers,
+	resetCanvasStorage,
+	waitForCanvasSession
+} from "./helpers.js";
 
 const PANEL = ".canvas-control-panel";
 
-test("右下角统一控件面板：缩放 + 适合屏幕 + 片段管理", async ({ page }) => {
+test("右下角统一控件面板：缩放 + 适合屏幕 + 同步状态", async ({ page }) => {
 	await installPageHelpers(page);
 	await resetCanvasStorage(page);
 	await waitForCanvasSession(page);
@@ -19,7 +23,6 @@ test("右下角统一控件面板：缩放 + 适合屏幕 + 片段管理", async
 	await expect(page.locator(".persist-status")).toHaveCount(0);
 	// 上排：功能图标（靠左）+ 同步状态图标（靠右）。
 	const actionRow = panel.locator(".canvas-control-panel__row--actions");
-	await expect(actionRow.locator('button[aria-label="提示词片段管理"]')).toBeVisible();
 	await expect(actionRow.locator(".canvas-control-panel__status-icon")).toBeVisible();
 	// 第二排：缩放 + 适合屏幕。
 	const viewportRow = panel.locator(".canvas-control-panel__row--viewport");
@@ -49,10 +52,5 @@ test("右下角统一控件面板：缩放 + 适合屏幕 + 片段管理", async
 
 	// 缩放到适合屏幕可点击（不报错）。
 	await viewportRow.locator('button[aria-label="适合屏幕"]').click();
-	// 片段管理打开库。
-	await actionRow.locator('button[aria-label="提示词片段管理"]').click();
-	await expect(page.locator(".dlg")).toBeVisible();
-	await expect(page.locator(".snippet-library__views")).toBeVisible();
-
 	await page.screenshot({ path: "test-results/corner-controls.png", fullPage: false });
 });

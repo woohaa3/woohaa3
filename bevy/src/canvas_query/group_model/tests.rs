@@ -100,6 +100,46 @@ fn footer_model_follows_move_and_resize_and_ignores_detaching_offsets() {
 }
 
 #[test]
+fn bubble_tail_keeps_its_own_size_when_the_group_grows() {
+    let span = |tail: &[Vec2]| {
+        let min = tail.iter().map(|point| point.x).fold(f32::MAX, f32::min);
+        let max = tail.iter().map(|point| point.x).fold(f32::MIN, f32::max);
+        max - min
+    };
+    for width in [220., 700., 2400.] {
+        let n = node(width, 320.);
+        let tail = tail_path(&n);
+        assert!(
+            (span(&tail) - TAIL_BASE).abs() < 0.001,
+            "tail base must not follow the {width} wide body"
+        );
+        assert!((tail[1].x - (n.x + n.width / 2.)).abs() < 0.001);
+        // 尾巴高度只由徽标外侧间距决定，与组尺寸无关。
+        assert!((tail[1].y - (n.y + n.height + BADGE_OUTSET)).abs() < 0.001);
+    }
+    // 徽标倍率只放大徽标底座与模型：片场组（badge_scale = 3）的尖角与普通组同形。
+    for scale in [1., 2., 3.] {
+        let mut scaled = node(1800., 320.);
+        scaled.group.as_mut().unwrap().badge_scale = scale;
+        let tail = tail_path(&scaled);
+        assert!(
+            (span(&tail) - TAIL_BASE).abs() < 0.001,
+            "tail must stay {TAIL_BASE} wide at badgeScale {scale}"
+        );
+        assert!((tail[1].y - (scaled.y + scaled.height + BADGE_OUTSET)).abs() < 0.001);
+    }
+    // 比尾巴还窄的畸形组只会被裁到自身宽度，不会翻折。
+    let mut narrow = node(12., 80.);
+    narrow.width = 12.;
+    let tail = tail_path(&narrow);
+    assert!((span(&tail) - 12.).abs() < 0.001);
+    assert!(
+        tail.iter()
+            .all(|point| point.x >= narrow.x - 0.001 && point.x <= narrow.x + narrow.width + 0.001)
+    );
+}
+
+#[test]
 fn missing_model_retains_structural_frame_and_has_no_orphan_badge() {
     let mut n = node(500., 300.);
     let path = outline(&n);
@@ -165,7 +205,7 @@ fn model_content_does_not_change_badge_size_or_center() {
 }
 
 #[test]
-fn independent_badge_scale_preserves_model_center_and_aspect() {
+fn independent_badge_scale_keeps_centerline_and_preserves_aspect() {
     let mut n = node(600., 400.);
     let original = for_node(&n).unwrap();
     let base = badge_rect(&n);
@@ -173,7 +213,13 @@ fn independent_badge_scale_preserves_model_center_and_aspect() {
         n.group.as_mut().unwrap().badge_scale = scale;
         let next = for_node(&n).unwrap();
         let rect = badge_rect(&n);
-        assert!((rect.y - (n.y + n.height + BADGE_OUTSET)).abs() < 0.001);
+        // 气泡与徽标永远中线对齐：水平中心固定在气泡中心，左右对称扩张；
+        // 上缘固定，只向下增长。
+        assert!((rect.x + rect.z / 2. - (n.x + n.width / 2.)).abs() < 0.001);
+        assert!((rect.y - base.y).abs() < 0.001);
+        assert!((rect.z - base.z * scale).abs() < 0.001);
+        assert!((rect.w - base.w * scale).abs() < 0.001);
+        assert!((next.center.x - (rect.x + rect.z / 2.)).abs() < 0.001);
         assert!((next.center.y - (rect.y + rect.w / 2.)).abs() < 0.001);
         assert!((next.radii.x / original.radii.x - scale).abs() < 0.001);
         assert!((next.radii.y / original.radii.y - scale).abs() < 0.001);

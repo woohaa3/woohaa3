@@ -13,9 +13,10 @@ export function groupBadgeRect(rect: {x: number; y: number; width: number; heigh
   const width = Math.max(24, Math.min(88, rect.width - 32));
   const height = Math.max(24, Math.min(64, rect.height - 32 + 6));
   const top = rect.y + rect.height + 6;
-  const centerX = rect.x + rect.width / 2;
-  // 徽标固定在气泡主体外侧；缩放只向下增长，不侵入组背板。
+  // 气泡与徽标永远保持中线对齐：水平中心固定在气泡中心，缩放时两侧对称扩张。
+  // 上缘固定在气泡下方，只向下增长，不侵入组背板。
   // 不把尺寸限制在 group 矩形内、也不设上限：片场徽标就是场景显示区。
+  const centerX = rect.x + rect.width / 2;
   const maxScale = Number.POSITIVE_INFINITY;
   const scale = clampGroupBadgeScale(requested);
   const scaledWidth = width * scale;
