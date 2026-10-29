@@ -8,7 +8,7 @@
  */
 import { useState } from "react";
 import { ExecutionPanelShell, executionRunSnapshot } from "../../ui/index.js";
-import { Button } from "../../../shared/ui/index.js";
+import { Button } from "@woohaa3/ui";
 import type { ModelPanelProps } from "../../contract/model-interaction.js";
 
 export type SeedancePanelActions = {

@@ -11,10 +11,16 @@ import {
   type AssistantExecutionRef,
   type AssistantTextRun,
 } from "@woohaa3/contracts";
+import {
+  UNCONFIRMED_RESULT_ERROR_CODE,
+  UNCONFIRMED_RESULT_MESSAGE,
+  UNCONFIRMED_WRITE_ERROR_CODE,
+} from "@woohaa3/contracts";
 import type {
   AgentConversationService,
   AcceptTurnResult,
 } from "./agent-conversation-service.js";
+import { isDefiniteFailureCode } from "./agent-conversation-service.js";
 import type { AgentConnectionRegistry } from "./agent-connection-registry.js";
 import type { AgentAdapterRegistry } from "./agent-adapter-registry.js";
 import type {
@@ -240,7 +246,7 @@ export class AssistantTextService {
     } catch (error) {
       this.active.delete(record.run.runId);
       record.error =
-        error instanceof Error ? error.message : "begin 结果待核对";
+        error instanceof Error ? error.message : "提交结果无法确认";
       this.deps.store.save(record);
       this.deps.conversations.reconcileDeliveryTurn({
         owner: record.owner,
@@ -248,9 +254,9 @@ export class AssistantTextService {
         canvasId: prepared.canvasId,
         delivery: delivery(record),
         outcome: {
-          status: "unknown",
+          status: "failed",
           runId: record.run.runId,
-          error: { code: "begin-unknown", message: record.error },
+          error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: record.error },
         },
       });
       await canvas
@@ -258,10 +264,12 @@ export class AssistantTextService {
           owner: record.owner,
           prepared,
           run: record.run,
-          status: "unknown",
+          status: "failed",
           message: record.error,
         })
         .catch(() => undefined);
+      record.stage = "failed";
+      this.deps.store.save(record);
       const queried = this.deps.conversations.queryTurn({
         owner: record.owner,
         requestId: record.requestId,
@@ -339,11 +347,6 @@ export class AssistantTextService {
       });
       if (context.signal.aborted || result.status === "cancelled")
         failure("cancelled", "已停止本次文本生成");
-      if (result.status === "unknown")
-        failure(
-          "upstream-unknown",
-          result.error?.message ?? "助手执行结果未知",
-        );
       if (result.status !== "succeeded")
         failure(
           result.error?.code ?? "generation-failed",
@@ -417,40 +420,50 @@ export class AssistantTextService {
     error: unknown,
     cancelled = false,
   ): Promise<AgentAdapterRunOutcome> {
-    const known = await this.deps.canvas
-      ?.lookup({ owner: record.owner, run: record.run })
-      .catch(() => null);
+    const rawCode = (error as { code?: string })?.code;
+    // 有明确失败原因（权限、连接、内容冲突等）时不再尝试保存：这不是「回执丢失」，而是
+    // 可以证明的失败；只有无法归类的错误才复用候选并重试权威提交。
+    const definite = isDefiniteFailureCode(rawCode);
+    const known = !definite
+      ? await this.deps.canvas
+          ?.lookup({ owner: record.owner, run: record.run })
+          .catch(() => null)
+      : null;
     if (known && record.candidate) {
       try {
         return await this.save(record);
       } catch (saveError) {
-        record.stage = "candidate";
+        record.stage = "failed";
         record.error =
-          saveError instanceof Error ? saveError.message : "保存回执待核对";
+          saveError instanceof Error ? saveError.message : "保存结果无法确认，候选已保留";
         this.deps.store.save(record);
+        await this.deps.canvas
+          ?.settle({
+            owner: record.owner,
+            prepared: record.prepared,
+            run: record.run,
+            status: "failed",
+            message: record.error,
+          })
+          .catch(() => undefined);
         return {
-          status: "unknown",
+          status: "failed",
           runId: record.run.runId,
-          error: { code: "delivery-unknown", message: record.error },
+          error: { code: UNCONFIRMED_WRITE_ERROR_CODE, message: record.error },
         };
       }
     }
-    const code = (error as { code?: string })?.code ?? "delivery-unknown";
-    const message = error instanceof Error ? error.message : "文本交付待核对";
-    const status =
-      cancelled || code === "cancelled"
-        ? "cancelled"
-        : code === "upstream-unknown" ||
-            (record.candidate &&
-              ![
-                "content-conflict",
-                "target-invalid",
-                "unauthorized",
-                "connection-unavailable",
-              ].includes(code))
-          ? "unknown"
-          : "failed";
-    record.stage = status === "unknown" ? "candidate" : status;
+    const message =
+      error instanceof Error ? error.message : UNCONFIRMED_RESULT_MESSAGE;
+    const status = cancelled || rawCode === "cancelled" ? "cancelled" : "failed";
+    // 有候选却没有具体错误码，说明推理已完成、缺的是权威写入回执 → write-unconfirmed；
+    // 其余无法归类的错误（上游/查询不可证）才是 result-unconfirmed。
+    const code = rawCode ?? (status === "cancelled"
+      ? "cancelled"
+      : record.candidate
+        ? UNCONFIRMED_WRITE_ERROR_CODE
+        : UNCONFIRMED_RESULT_ERROR_CODE);
+    record.stage = status;
     record.error = message;
     this.deps.store.save(record);
     await this.deps.canvas
@@ -487,15 +500,18 @@ export class AssistantTextService {
       !["done", "failed", "cancelled"].includes(record.stage)
     ) {
       const outcome: AgentAdapterRunOutcome = {
-        status: "unknown",
+        status: "failed",
         runId: record.run.runId,
         error: {
-          code: "delivery-unknown",
+          code: UNCONFIRMED_RESULT_ERROR_CODE,
           message: record.candidate
-            ? "候选已保留，可重试保存"
-            : "原执行结果待核对；不会自动重新推理",
+            ? "候选已保留，可重试保存；原提交回执无法确认"
+            : UNCONFIRMED_RESULT_MESSAGE,
         },
       };
+      record.stage = "failed";
+      record.error = outcome.error!.message;
+      this.deps.store.save(record);
       this.deps.conversations.reconcileDeliveryTurn({
         owner,
         requestId,
@@ -508,7 +524,7 @@ export class AssistantTextService {
           owner,
           prepared: record.prepared,
           run: record.run,
-          status: "unknown",
+          status: "failed",
           message: outcome.error!.message,
         })
         .catch(() => undefined);
@@ -524,7 +540,7 @@ export class AssistantTextService {
       return { ok: true as const };
     const result = this.deps.conversations.cancelTurn({ owner, requestId });
     // Active dispatch observes its AbortSignal. A recovered turn has no controller.
-    if (turn.ok && ["unknown", "queued"].includes(turn.turn.status)) {
+    if (turn.ok && ["queued", "running", "committing"].includes(turn.turn.status)) {
       record.stage = "cancelled";
       this.deps.store.save(record);
       await this.deps.canvas?.settle({
@@ -633,9 +649,7 @@ export class AssistantTextService {
                       ? "succeeded"
                       : status === "cancelled"
                         ? "cancelled"
-                        : status === "unknown"
-                          ? "unknown"
-                          : "failed",
+                        : "failed",
                 }
               : {}),
             ...(result.turn.error ? { error: result.turn.error.message } : {}),
@@ -674,8 +688,8 @@ export class AssistantTextService {
     const record =
       this.deps.store.get(owner, requestId) ??
       failure("not-found", "文本执行不存在");
-    if (!record.candidate || ["failed", "cancelled"].includes(record.stage))
-      failure("retry-unavailable", "该执行不能重试保存，请显式重新生成");
+    if (!record.candidate)
+      failure("retry-unavailable", "该执行没有可复用的候选正文，请显式重新生成");
     const outcome = await this.save(record).catch((error) =>
       this.failed(record, error),
     );

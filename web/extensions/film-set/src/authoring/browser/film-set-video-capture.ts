@@ -70,7 +70,7 @@ export function createFilmSetVideoExportSession(ctx: Context): FilmSetVideoExpor
       const runtime = ctx.canvasRuntime.runtime();
       if (!runtime?.isReady()) throw new Error("画布渲染器未就绪，请稍后重试");
       if (!sameSource(target) || ctx.canvasRuntime.animationPlaybackState()?.time !== time) throw new Error("镜头播放时刻已变化，视频生成已停止");
-      const frame = await runtime.requestCapture({ nodeId: target.nodeId, generation: captureGeneration++, ...videoSize(target.aspect, target.profile) });
+      const frame = await runtime.requestCapture({ nodeId: target.nodeId, source: "video-export", generation: captureGeneration++, ...videoSize(target.aspect, target.profile) });
       if (!frame) throw new Error(`第 ${time.toFixed(2)} 秒的镜头捕捉失败或超时，请重试`);
       return frame;
     },

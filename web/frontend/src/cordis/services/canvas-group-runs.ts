@@ -7,7 +7,7 @@ import type { CurrentUserService } from "./current-user.js";
 const PATH = "/api/agent-conversations/canvas-creations";
 const labels: Record<string, string> = {
   preparing: "正在准备", "root-created": "等待开始", accepted: "已接受", queued: "等待助手", running: "创作中",
-  committing: "核对结果中", succeeded: "已完成", partial: "部分完成", failed: "创作失败", unknown: "结果待核对", cancelled: "已停止"
+  committing: "正在保存", succeeded: "已完成", partial: "部分完成", failed: "创作失败", cancelled: "已停止"
 };
 
 /** One page-owned poller for all group runs, independent of selection and panel visibility. */
@@ -64,7 +64,7 @@ export function createCanvasGroupRuns(options: {
           rows.push({ rootGroupId: turn?.target.nodeId ?? creation!.rootGroupId,
             conversationId: turn?.conversationId ?? creation?.conversationId, creation, turn, requestId,
             status, label: labels[status] ?? status,
-            active: ["preparing", "root-created", "accepted", "queued", "running", "committing", "unknown"].includes(status),
+            active: ["preparing", "root-created", "accepted", "queued", "running", "committing"].includes(status),
             error: turn?.error?.message ?? creation?.error?.message,
             createdAt: turn?.createdAt ?? snapshot.rows.find(row => row.requestId === requestId)?.createdAt ?? new Date().toISOString() });
         };
@@ -98,7 +98,7 @@ export function createCanvasGroupRuns(options: {
     const epoch = generation;
     const result = await run();
     if (disposed || epoch !== generation) return;
-    if (!result.ok) throw new Error(result.error ?? "请求未确认，请核对运行状态");
+    if (!result.ok) throw new Error(result.error ?? "请求失败，请重试");
     if (pending) await pending;
     if (disposed || epoch !== generation) return;
     await refresh();

@@ -20,6 +20,7 @@ use bevy::prelude::*;
 
 use crate::{
     app::{AnimationCameraState, CurrentScene, ModelAssetTable},
+    canvas_ecs::components::ShotPreviewSprite,
     model3d,
     shot_camera::{
         PreviewTarget, PreviewUpdatePolicy, ShotCameraCommands, ShotCameraConfig,
@@ -100,11 +101,13 @@ pub(crate) fn sync(
                 || index
                     .node(&scene.0, &target.node_id)
                     .is_some_and(|(_, node)| crate::canvas_query::shot_preview::hidden(node));
-            !presentation_hidden
+            // 参考已就绪的卡片不再保留 rig：显示录制内容（状态回到待更新/播放时重建）。
+            (!presentation_hidden && !target.settled)
                 || policy::needs_rig(
                     target.visible,
                     target.live,
                     capture_pins.contains(&target.node_id),
+                    target.settled,
                 )
         })
         .map(|target| target.node_id.as_str())
@@ -175,6 +178,7 @@ pub(crate) fn sync(
                 target.visible,
                 target.live,
                 capture_pins.contains(&target.node_id),
+                target.settled,
             )
         {
             cards.pending_layers.remove(&target.node_id);
@@ -197,6 +201,7 @@ pub(crate) fn sync(
                 target.visible,
                 target.live,
                 capture_pins.contains(&target.node_id),
+                target.settled,
             ) {
                 continue; // 仅屏外闲置卡片不创建；播放与捕捉不依赖视区。
             }
@@ -229,6 +234,11 @@ pub(crate) fn sync(
                     },
                     Transform::from_xyz(0.0, 0.0, 10.01),
                     Visibility::Hidden,
+                    // 归属 rig 与预览节点身份写在实体上；`ShotPreviewCards` 只保留采样状态。
+                    ShotPreviewSprite {
+                        node_id: target.node_id.clone(),
+                        owner: rig,
+                    },
                 ))
                 .id();
             cards.cards.insert(
@@ -352,6 +362,7 @@ pub(crate) fn sync(
             target.visible,
             target.live,
             capture_pins.contains(&target.node_id),
+            target.settled,
         ) && needs
         {
             candidates.push(policy::Candidate {

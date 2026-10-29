@@ -34,6 +34,20 @@ export { woohaa3CanvasStore } from "./canvas-state/index.js";
 export const DEFAULT_CANVAS_ID = "woohaa3-default-canvas";
 
 /**
+ * 一次画布会话的关联标识：32 位小写十六进制，与 trace_id 同形状。
+ *
+ * 不用 crypto.randomUUID()：它在非安全上下文（局域网 http）里不可用，而画布
+ * 完全可能通过这种地址打开。getRandomValues 没有这个限制。
+ */
+function createTelemetrySessionId(): string {
+  const bytes = new Uint8Array(16);
+  const webCrypto = globalThis.crypto;
+  if (webCrypto && typeof webCrypto.getRandomValues === "function") webCrypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
  * 页面级调试/test 钩子：把会话命令出口挂到 `window.__canvasSubmitCommands`，供 E2E 直接
  * 提交语义命令（等价于交互控制器完成一次手势）。生产无副作用。
  */
@@ -249,9 +263,21 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
    */
   const finishSessionOpen = beginStartupSpan("session-open");
   const telemetry = (): TelemetryClient | undefined => options.telemetry ?? activeTelemetryClient();
+  /**
+   * 会话级标识：所有画布动作都带上同一个 session 与 canvas。
+   *
+   * 为什么统一在出口注入而不是每个调用点各写一份：漏一个动作就会让时间线缺一步，
+   * 而这种缺口在管理端看起来像“用户没做”，比没有数据更误导。注入点放在
+   * recordTelemetry 里，调用点仍然只关心动作本身。
+   */
+  const telemetrySessionId = createTelemetrySessionId();
+  const sessionAttributes = { canvas: canvasId, session: telemetrySessionId };
   const recordTelemetry = (input: TelemetryEventInput): void => {
     try {
-      telemetry()?.record(input);
+      telemetry()?.record({
+        ...input,
+        attributes: { ...sessionAttributes, ...(input.attributes ?? {}) }
+      });
     } catch {
       // 防御：任何埋点异常都不得影响画布生命周期。
     }

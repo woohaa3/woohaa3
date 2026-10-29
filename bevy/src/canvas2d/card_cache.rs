@@ -1,7 +1,13 @@
 //! Fixed document-order blocks retain ordinary-card GPU buffers on local changes.
 //! All card primitives are opaque. Transparent groups and overlays remain in the
 //! original shared mesh, so this partition does not change blend submission order.
-use super::{Visuals, geometry::Geometry, labels::sync_labels, text_presentation::LogicalText};
+//!
+//! change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs —— 输入改为 ECS 节点 Query，
+//! 标签通过 `LabelRequests` 交给 `sync_canvas_labels`；块缓存仍只保存几何/资产。
+use super::{
+    Visuals, geometry::Geometry, labels::LabelRequest, labels::LabelRequests, labels::LabelStyle,
+};
+use crate::canvas_ecs::components::CanvasLabelRole;
 use crate::{
     protocol::{GraphNode, Scene},
     theme::ThemeResource,
@@ -78,19 +84,6 @@ impl DrawKey {
             shot_preview: node.shot_preview.clone(),
         }
     }
-    fn matches(&self, node: &GraphNode, attach_owner: Option<&str>) -> bool {
-        self.id == node.id
-            && self.kind == node.kind
-            && self.rect == [node.x, node.y, node.width, node.height]
-            && self.title == node.title
-            && self.type_label == node.type_label
-            && self.body == node.body
-            && self.card_label == node.card_label
-            && self.flags == Self::flags(node)
-            && self.history == Self::history(node)
-            && self.hide_history == (attach_owner == Some(node.id.as_str()))
-            && self.shot_preview == node.shot_preview
-    }
 }
 
 #[derive(Default)]
@@ -101,38 +94,14 @@ pub(super) struct Block {
     theme: String,
     entity: Option<Entity>,
     mesh: Option<Handle<Mesh>>,
+    /// 上一帧提交给 `LabelRequests` 的文案；块命中时原样重提，避免 `begin` 清空后闪失。
+    labels: Vec<LabelRequest>,
 }
 fn ordinary(node: &GraphNode) -> bool {
     node.group.is_none() && node.composite_asset.is_none()
 }
 
 impl Block {
-    fn matches(
-        &self,
-        nodes: &[GraphNode],
-        theme: &str,
-        attach_owner: Option<&str>,
-        focused_id: Option<&str>,
-    ) -> bool {
-        self.theme == theme
-            && self.keys.len()
-                == nodes
-                    .iter()
-                    .filter(|n| ordinary(n) && focused_id != Some(n.id.as_str()))
-                    .count()
-            && self
-                .keys
-                .iter()
-                .zip(
-                    nodes
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, n)| ordinary(n) && focused_id != Some(n.id.as_str())),
-                )
-                .all(|((old_index, key), (index, node))| {
-                    *old_index == index && key.matches(node, attach_owner)
-                })
-    }
     fn clear(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
         if let Some(entity) = self.entity.take() {
             commands.entity(entity).despawn();
@@ -142,7 +111,18 @@ impl Block {
         }
         self.keys.clear();
         self.theme.clear();
+        self.labels.clear();
     }
+}
+
+/// 一个由投影层提交的普通卡片输入（文档下标 + 实体 + 绘制 DTO）。
+pub(super) struct CardInput<'a> {
+    /// 文档下标（16 节点分块用）。
+    pub(crate) index: usize,
+    /// 投影层派生的渲染槽位（ghost 固定最低层）。
+    pub(crate) render: usize,
+    pub(crate) entity: Entity,
+    pub(crate) node: &'a GraphNode,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -150,20 +130,15 @@ pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     visuals: &mut Visuals,
-    text: &mut Query<
-        (
-            &mut Text2d,
-            &mut Transform,
-            &mut TextColor,
-            &mut LogicalText,
-        ),
-        Without<Sprite>,
-    >,
+    requests: &mut LabelRequests,
+    cards: &[CardInput<'_>],
+    document_len: usize,
     scene: &Scene,
     theme: &ThemeResource,
 ) -> u64 {
+    requests.begin(CanvasLabelRole::Card);
     let mut blocks = std::mem::take(&mut visuals.card_blocks);
-    let count = scene.nodes.len().div_ceil(BLOCK_SIZE);
+    let count = document_len.div_ceil(BLOCK_SIZE);
     let focused_id = super::image_focus::presented_media_focus(scene).map(|focus| focus.node_id);
     let attach_owner = scene
         .drag_attach
@@ -175,33 +150,37 @@ pub(super) fn sync(
     blocks.truncate(count);
     blocks.resize_with(count, Block::default);
     let mut rebuilt = 0;
-    for (block_index, nodes) in scene.nodes.chunks(BLOCK_SIZE).enumerate() {
+    for block_index in 0..count {
         let block = &mut blocks[block_index];
-        if block.matches(nodes, theme.fingerprint(), attach_owner, focused_id) {
+        let range = block_index * BLOCK_SIZE..((block_index + 1) * BLOCK_SIZE).min(document_len);
+        let block_cards: Vec<&CardInput<'_>> = cards
+            .iter()
+            .filter(|card| range.contains(&card.index))
+            .filter(|card| ordinary(card.node) && focused_id != Some(card.node.id.as_str()))
+            .collect();
+        let keys: Vec<(usize, DrawKey)> = block_cards
+            .iter()
+            .map(|card| (card.index, DrawKey::new(card.node, attach_owner)))
+            .collect();
+        if block.theme == theme.fingerprint() && block.keys == keys {
+            requests.extend(CanvasLabelRole::Card, &block.labels);
             continue;
         }
-        if !nodes
-            .iter()
-            .any(|node| ordinary(node) && focused_id != Some(node.id.as_str()))
-        {
+        if block_cards.is_empty() {
             block.clear(commands, meshes);
             block.theme = theme.fingerprint().to_owned();
             continue;
         }
         let mut geometry = Geometry::default();
-        block.keys.clear();
-        for (local_index, node) in nodes
-            .iter()
-            .enumerate()
-            .filter(|(_, n)| ordinary(n) && focused_id != Some(n.id.as_str()))
-        {
-            let index = block_index * BLOCK_SIZE + local_index;
-            let key = DrawKey::new(node, attach_owner);
-            let render_index = super::draw_order::render_index(&scene.nodes, index);
+        let mut block_requests = Vec::with_capacity(block_cards.len());
+        for card in &block_cards {
+            let node = card.node;
+            let render_index = card.render;
             let labels = super::cards::draw_static(&mut geometry, theme, node, render_index);
             // 节点下方独立历史条（change: 2026-10-12-unify-generation-history-strip，design D4）：
             // 命中用 `canvas_query::layout::history_strip_rect`。拖动粘连 owner 期间其下方已被
             // 操作条占用，暂不让绘制历史条以免重叠。
+            let key = DrawKey::new(node, attach_owner);
             if key.history.is_some() && !key.hide_history {
                 super::history_strip::draw_history_strip(
                     &mut geometry,
@@ -210,15 +189,14 @@ pub(super) fn sync(
                     10.0 + render_index as f32 * 0.1 + 0.05,
                 );
             }
-            sync_labels(
-                commands,
-                visuals,
-                text,
-                &node.id,
+            let request = LabelRequest {
+                owner: card.entity,
                 labels,
-                10.0 + render_index as f32 * 0.1 + 0.02,
-            );
-            block.keys.push((local_index, key));
+                z: 10.0 + render_index as f32 * 0.1 + 0.02,
+                style: LabelStyle::Node,
+            };
+            requests.push_request(CanvasLabelRole::Card, request.clone());
+            block_requests.push(request);
         }
         let handle = meshes.add(geometry.build());
         if let Some(old) = block.mesh.replace(handle.clone()) {
@@ -231,17 +209,34 @@ pub(super) fn sync(
                 commands
                     .spawn((
                         Mesh2d(handle),
-                        MeshMaterial2d(visuals.material.clone()),
+                        MeshMaterial2d(visuals.mesh_material()),
                         NoFrustumCulling,
                     ))
                     .id(),
             );
         }
+        block.keys = keys;
         block.theme = theme.fingerprint().to_owned();
+        block.labels = block_requests;
         rebuilt += 1;
     }
     visuals.card_blocks = blocks;
     rebuilt
+}
+
+/// 供 producer system 从查询结果构造输入；`node` 来自 `NodeIndex` + focus 投影。
+pub(super) fn input<'a>(
+    entity: Entity,
+    index: usize,
+    render: usize,
+    node: &'a GraphNode,
+) -> CardInput<'a> {
+    CardInput {
+        index,
+        render,
+        entity,
+        node,
+    }
 }
 
 #[cfg(test)]

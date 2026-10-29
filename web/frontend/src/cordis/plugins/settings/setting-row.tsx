@@ -10,8 +10,8 @@
  */
 import { useState, type ReactNode } from "react";
 import type { SettingsEntryView, SettingSource, SettingsWriteValue } from "@woohaa3/contracts";
-import { Button } from "../../../shared/ui/Button.js";
-import { Switch } from "../../../shared/ui/Switch.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { Switch } from "@woohaa3/ui/primitives";
 import type { BackendSettingsStore } from "./backend-settings-store.js";
 import type { SettingsEditSession } from "./edit-session.js";
 import { useSettingsEditReport } from "./workspace/use-settings-edit-report.js";

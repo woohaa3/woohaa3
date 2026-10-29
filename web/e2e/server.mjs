@@ -434,7 +434,7 @@ const serveStatic = createStaticHandler(dist, { basePath, pageTitle: resolveAppP
 // 生产 renderer，不需要完整画布应用（change: port-video-editing-dialogs，任务 5.3/5.4）。
 // Ladle 产物内的资源路径是绝对路径（`/assets/...`、`/fixtures/...`），因此这些前缀在
 // showcase dist 中存在对应文件时优先从 showcase 提供。
-const showcaseDist = path.resolve(root, "web", "showcase", "dist");
+const showcaseDist = path.resolve(root, "web", "ui", "showcase", "dist");
 const showcaseAvailable = fs.existsSync(path.join(showcaseDist, "index.html"));
 const serveShowcase = showcaseAvailable ? createStaticHandler(showcaseDist, { prefix: "/showcase" }) : null;
 const serveShowcaseRoot = showcaseAvailable ? createStaticHandler(showcaseDist) : null;

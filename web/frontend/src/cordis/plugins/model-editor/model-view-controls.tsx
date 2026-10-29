@@ -7,7 +7,7 @@
  * 公共 header 只经 props 接收该节点操作，不按 kind 选镜头工具。
  */
 import { useService } from "../../react.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 
 export function ModelViewControls({ nodeId }: { nodeId: string }) {
   const runtime = useService("canvasRuntime");

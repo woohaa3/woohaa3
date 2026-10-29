@@ -16,8 +16,8 @@ export type { CaptureState, FrameCaptureSource } from "./capture-source.js";
 import type { CapturedFrameEntry, FrameAddReceipt } from "./types.js";
 import { clampRange, formatVideoTime, resolveFirstVideoFrameTime, resolveLastVideoFrameTime } from "./video-geometry.js";
 import { toSafeCaptureError } from "./capture-frames.js";
-import { Button, MuteIcon, PauseIcon, PlayIcon, TrashIcon, VolumeIcon } from "../../../shared/ui/index.js";
-import { DialogIconButton } from "../../services/dialogs/Dialog.js";
+import { Button, MuteIcon, PauseIcon, PlayIcon, TrashIcon, VolumeIcon } from "@woohaa3/ui";
+import { DialogIconButton } from "@woohaa3/ui/dialogs";
 
 export type CaptureKind = "first" | "current" | "last";
 
@@ -68,14 +68,15 @@ export function useCaptureSession(options: CaptureSessionOptions) {
   useEffect(() => {
     const active = new AbortController();
     activeRef.current = active;
-    busyRef.current = false;
-    setBusy(null);
-    setFrames([]);
-    setReceipts([]);
-    setPendingFrameIds([]);
-    setError(null);
+    busyRef.current = Boolean(initial?.busy);
+    setBusy(initial?.busy ?? null);
+    framesRef.current = [...(initial?.frames ?? [])];
+    setFrames(framesRef.current);
+    setReceipts(initial?.receipts ?? []);
+    setPendingFrameIds((initial?.receipts ?? []).filter(receipt => !receipt.ok).map(receipt => receipt.frameId));
+    setError(initial?.error ?? null);
     const sync = () => {
-      if (!active.signal.aborted) setVideoState(source?.state() ?? emptyCaptureState());
+      if (!active.signal.aborted) setVideoState(initial?.video ? { ...emptyCaptureState(), ...initial.video } : source?.state() ?? emptyCaptureState());
     };
     sync();
     const unsubscribe = source?.subscribe(sync);

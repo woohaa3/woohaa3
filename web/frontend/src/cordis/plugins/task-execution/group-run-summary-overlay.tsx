@@ -8,7 +8,7 @@
  * 释放由 store 清理。任务进度、取消与终态仍由成员活动与历史承载，本摘要不成为第二份任务状态源。
  */
 import { useState, useSyncExternalStore } from "react";
-import { CloseIcon } from "../../../shared/ui/icons.js";
+import { CloseIcon } from "@woohaa3/ui/icons";
 import type { GroupRunSummaryState, GroupRunSummaryStore } from "./group-run-actions.js";
 
 export function GroupRunSummaryOverlay({ store }: { store: GroupRunSummaryStore }) {

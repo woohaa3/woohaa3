@@ -78,8 +78,20 @@ export async function handlePublicHttp(
   req.on("close", onClose);
   try {
     const owned = host?.resolvePublicRoute(mapping.extensionId, handlerRoute, method).owned ?? false;
-    if (!host || !owned) {
-      sendError(res, 404, "extension-not-found", "插件未激活");
+    if (!host) {
+      sendError(res, 404, "extension-not-found", "插件宿主不可用");
+      return true;
+    }
+    if (!owned) {
+      // 两种 404 必须分开：扩展没激活，还是激活了但这条 route 没注册。混成一句会把
+      // 「route 前缀写错」误报成「插件未激活」，排查时引向错误方向（2026-10 回归）。
+      if (status !== undefined && status.actualState !== "active") {
+        log({ event: "extension-http-unavailable", status: 404, extensionId: mapping.extensionId, route, actualState: status.actualState });
+        sendError(res, 404, "extension-not-found", `插件未激活（${status.actualState}）`);
+      } else {
+        log({ event: "extension-http-route-unregistered", status: 404, extensionId: mapping.extensionId, route, method });
+        sendError(res, 404, "route-not-registered", `插件 ${mapping.extensionId} 未注册该路由：${method} ${route}`);
+      }
       return true;
     }
     // 具名 action 在进入插件逻辑前校验（change: 2026-10-13-...，任务 1.4/3.3）。

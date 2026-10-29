@@ -7,7 +7,7 @@ import { filmSetTestLifecycles } from "../../../test-support/managed-shot-comman
  * 响应丢失后恢复、服务重启后 unknown 与 3D 恢复、取消与提交边界、源删除/提交竞态、
  * 候选校验失败不遗留空片场。均为非渲染检查。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   readFilmSetGroupMarker,
   decodeModelDefinition,
@@ -144,6 +144,7 @@ function serviceFor(
     resolveModelCapabilities?: boolean;
     submitBudgetMs?: number;
     generationTimeoutMs?: number;
+    execution?: import("@woohaa3/contracts").ContentConversionExecutionPort;
   } = {}
 ): FilmSetConversionService {
   return new FilmSetConversionService({
@@ -151,6 +152,7 @@ function serviceFor(
     registry: options.registry ?? new InMemoryFilmSetConversionRegistry(),
     submitBudgetMs: 15_000,
     ...(options.generator ? { generator: options.generator } : {}),
+    ...(options.execution ? { execution: options.execution } : {}),
     ...(options.resolveModelCapabilities
       ? {
           resolveModelCapabilities: async () => ({
@@ -312,7 +314,7 @@ describe("FilmSetConversionService：幂等与恢复（任务 1.2 / D5）", () =
     expect(exported.canvas.document.nodes.filter((node) => node.id === "film-target")).toHaveLength(1);
   });
 
-  it("服务重启后 running 记录状态为 unknown，3D 重提交可幂等恢复", async () => {
+  it("服务重启后 running 记录按失败结算，重试建立新尝试并完成", async () => {
     const room = await readyRoom("c-restart", [{ id: "model-src", type: "model3d", data: model3dData() }]);
     const registry = new InMemoryFilmSetConversionRegistry();
     const input = request("c-restart");
@@ -333,12 +335,27 @@ describe("FilmSetConversionService：幂等与恢复（任务 1.2 / D5）", () =
       createdAt: NOW,
       updatedAt: NOW
     });
-    const restarted = serviceFor(room, { registry });
+    const cancel = vi.fn();
+    const restarted = serviceFor(room, {
+      registry,
+      execution: {
+        run: async () => undefined,
+        cancel,
+        readStatus: () => undefined,
+        reconcile: vi.fn()
+      }
+    });
     const status = await restarted.status({ canvasId: "c-restart", requestId: input.requestId });
-    expect(status.ok && status.status?.status).toBe("unknown");
-    // 重提交（同输入）恢复：3D 幂等完成。
-    const resumed = await restarted.submit(input);
+    expect(status.ok && status.status).toMatchObject({ status: "failed", code: "unknown-result" });
+    // D2：无法证明时先撤销匹配的 Provider 运行，再结算失败。
+    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ requestId: input.requestId, attempt: 1 }));
+    // 失败是终态：重试建立新尝试并按幂等命令完成，不自动重跑原推理。
+    const resumed = await restarted.retry({ canvasId: "c-restart", requestId: input.requestId });
     expect(resumed.ok && resumed.status.status).toBe("completed");
+    expect(await registry.get("c-restart", input.requestId)).toMatchObject({
+      state: "completed",
+      attempt: 2
+    });
     expect(filmSetNode(room, "film-target")).not.toBeNull();
   });
 });

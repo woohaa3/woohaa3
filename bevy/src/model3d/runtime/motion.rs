@@ -19,6 +19,7 @@ pub(crate) fn apply_motion_playback(
     commands: &mut Commands,
     models: &mut ModelVisuals,
     materials: &mut Assets<StandardMaterial>,
+    opacity: &HashMap<Entity, crate::canvas_ecs::components::OpacityMaterialInstance>,
     scene: &Scene,
 ) -> Option<crate::motion::CameraState> {
     // Restore only the previous clip's actual targets, once, when its owner leaves.
@@ -33,7 +34,7 @@ pub(crate) fn apply_motion_playback(
         })
         .map(|(previous, _)| previous.clone());
     if let Some(previous) = leaving {
-        reset_motion_parts(commands, models, &previous);
+        reset_motion_parts(commands, models, &previous, opacity);
     }
     let Some(playback) = scene.animation_playback.as_ref() else {
         models.motion_targets = None;
@@ -46,7 +47,7 @@ pub(crate) fn apply_motion_playback(
 
     let Some(motion) = &plan.top else {
         if let Some(root) = models.roots.get_mut(&playback.node_id) {
-            root.opacity.sync_frame(materials, commands, &desired);
+            root.opacity.sync_frame(materials, commands, opacity, &desired);
         }
         return None;
     };
@@ -67,7 +68,7 @@ pub(crate) fn apply_motion_playback(
             }
             queue_opacity(root, part_id, delta.opacity, &mut desired);
         }
-        root.opacity.sync_frame(materials, commands, &desired);
+        root.opacity.sync_frame(materials, commands, opacity, &desired);
     }
     Some(camera)
 }
@@ -169,18 +170,19 @@ fn merge_desired(
 }
 
 /// 只恢复上一会话实际引用的部件（离开活动动画节点时）。
-fn reset_motion_parts(commands: &mut Commands, models: &mut ModelVisuals, node_id: &str) {
+fn reset_motion_parts(
+    commands: &mut Commands,
+    models: &mut ModelVisuals,
+    node_id: &str,
+    opacity: &HashMap<Entity, crate::canvas_ecs::components::OpacityMaterialInstance>,
+) {
     let Some(root) = models.roots.get_mut(node_id) else {
         return;
     };
     // 透明度实例必须随姿态一起恢复，否则离开动画节点后画面会保持半透明。
-    root.opacity.restore_all(commands);
-    let Some((id, targets)) = &models.motion_targets else {
-        return;
-    };
-    if id != node_id {
-        return;
-    }
+    root.opacity.restore_all(commands, opacity);
+    let Some((id, targets)) = &models.motion_targets else { return; };
+    if id != node_id { return; }
     for part_id in targets.iter() {
         let Some(entity) = root.part_entities.get(part_id) else {
             continue;

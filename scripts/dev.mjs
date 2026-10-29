@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import fs, { existsSync } from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
@@ -15,8 +16,10 @@ import { canBindPort, findPortOwners, freePort } from "./lib/dev-port-guard.mjs"
 import { startHostWatch } from "./lib/dev-host-watch.mjs";
 import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
 import { decideBackendExit, RESTART_LOOP_LIMIT, RESTART_LOOP_WINDOW_MS } from "./lib/dev-restart-policy.mjs";
+import { findStaleArtifacts, formatStaleArtifacts } from "./lib/artifact-freshness.mjs";
 import { syncBevyAssets } from "./sync-bevy-assets.mjs";
 import { resolveDevEntryArgs, DEV_MODE_ENV } from "./lib/bevy-build-mode.mjs";
+import { supervisorEndpoint } from "./lib/agent-runtime-endpoints.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2).filter((value) => value !== "--");
@@ -29,7 +32,9 @@ const usage = `启动 Vite 和统一后端：
   --backend-port <port>   后端端口（BACKEND_PORT / PORT，默认 5180）
   --native                桌面宿主模式：画布走 native Bevy；仍生成前端导入所需的 WASM 绑定
   --skip-build            使用已有模块/扩展产物；仍按所选 Bevy 模式检查 Rust 源码新鲜度
+  --allow-stale           配合 --skip-build：即使产物比源码旧也继续启动（默认直接报错退出）
   --free-port             启动前结束占用前后端端口的残留进程（SIGTERM，超时后 SIGKILL）
+  --dev-source <dir>      登记开发者扩展目录（可重复）；启用开发者模式，产物变化即热重载
   --watch                 显式开启宿主源码 watch（默认开启）
   --no-watch              关闭宿主源码 watch
   --help                 显示帮助
@@ -51,12 +56,18 @@ function parseOptions() {
     const [name, inline] = args[i].split("=", 2);
     if (name === "--skip-build" && inline === undefined) {
       options.skipBuild = true;
+    } else if (name === "--allow-stale" && inline === undefined) {
+      options.allowStale = true;
     } else if (name === "--native" && inline === undefined) {
       options.native = true;
     } else if (name === "--free-port" && inline === undefined) {
       options.freePort = true;
     } else if ((name === "--watch" || name === "--no-watch") && inline === undefined) {
       options.watch = name === "--watch";
+    } else if (name === "--dev-source") {
+      const value = inline ?? args[++i];
+      if (!value || value.trim().length === 0) throw new Error("--dev-source 需要目录");
+      (options.devSources ??= []).push(value.trim());
     } else if (name === "--frontend-port" || name === "--backend-port") {
       const value = inline ?? args[++i];
       if (!value || !/^\d+$/.test(value)) throw new Error(`${name} 需要整数端口`);
@@ -119,21 +130,55 @@ function supervisorRpc(config, method, params = {}) {
   });
 }
 
+/**
+ * 启动窗口可见性：后端就绪前的 /api 请求必然 502（ingress 连不上上游）。
+ *
+ * 只打「已启动」不够——要明确告诉人这段 502 是启动窗口的预期结果，并给出就绪耗时，
+ * 否则每次启动都要靠猜「后台是不是挂了」。
+ */
+function watchBackendReady(url) {
+  const started = Date.now();
+  const deadline = started + 60_000;
+  const retry = () => {
+    if (Date.now() > deadline) {
+      console.warn(`[dev] 后端 60s 内未就绪：${url}/api/application/health/ready（看上面的后端日志）`);
+      return;
+    }
+    const request = http.get(`${url}/api/application/health/ready`, (res) => {
+      res.resume();
+      if ((res.statusCode ?? 500) < 500) {
+        console.log(`[dev] 后端就绪（${Date.now() - started}ms）`);
+        return;
+      }
+      setTimeout(retry, 500);
+    });
+    request.on("error", () => setTimeout(retry, 500));
+    request.setTimeout(2_000, () => request.destroy(new Error("ready-probe-timeout")));
+  };
+  setTimeout(retry, 300);
+}
+
 async function ensureAgentSupervisor() {
   const runtimeDir = path.join(root, ".local", "agent-runtime");
   fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-  const socketPath = path.join(runtimeDir, "supervisor.sock");
+  // Windows 没有 Unix domain socket 的文件语义：net.Server#listen(<文件路径>) 恒返回 EACCES
+  // 且不触发监听回调，dev 会卡在「Agent Supervisor 启动超时」。这里改用命名管道，并带上
+  // workspaceKey——管道名是全机器共享的命名空间，不像 .local/ 下的文件那样按 checkout 隔离。
+  const workspaceKey = crypto.createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 40);
+  const socketPath = supervisorEndpoint({ workspaceKey, runtimeDir });
   const tokenPath = path.join(runtimeDir, "token");
   const token = existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8").trim() : crypto.randomBytes(32).toString("hex");
   if (!existsSync(tokenPath)) fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-  const workspaceKey = crypto.createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 40);
   const config = { socketPath, token, workspaceKey };
   if (existsSync(socketPath)) {
     try {
       const state = await supervisorRpc(config, "ping");
       if (state?.workspaceKey === workspaceKey) { agentSupervisor = config; return config; }
     } catch { /* stale endpoint; start a replacement below */ }
-    try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
+    // 命名管道没有 unlink 语义：随最后一个句柄关闭由系统回收，跳过清理。
+    if (process.platform !== "win32") {
+      try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
+    }
   }
   const script = path.join(root, "scripts", "agent-runtime-supervisor.mjs");
   const child = spawn(process.execPath, [script, "--socket", socketPath, "--state", runtimeDir, "--token", token, "--workspace", workspaceKey, "--owner-pid", String(process.pid)], {
@@ -336,6 +381,21 @@ async function main() {
     }
   }
 
+  // --skip-build 的语义是「我保证产物是新的」：先在构建前验一遍，避免白等 WASM 构建。
+  // 改完源码忘了重建时，旧 bundle 会在插件初始化阶段报 `ReferenceError: X is not defined`，
+  // 报错完全看不出「dist 过期」（2026-10-28 现场）。
+  if (options.skipBuild && !options.allowStale) {
+    const stale = findStaleArtifacts(root);
+    if (stale.length > 0) {
+      console.error(`[dev] 构建产物比源码旧：${formatStaleArtifacts(stale)}`);
+      console.error(
+        "[dev] --skip-build 直接使用现有 dist；先跑 `pnpm -C web run build:units`，或去掉 --skip-build（--allow-stale 可强行继续）"
+      );
+      await stop(1);
+      return;
+    }
+  }
+
   syncBevyAssets();
   // Vite resolves both generated binding modules even when the native canvas is active.
   // Build helpers reuse their caches; --skip-build still ensures Rust freshness: the script
@@ -349,6 +409,15 @@ async function main() {
     await runManager(["-C", "web", "run", "build:units"]);
   }
   if (stopping) return;
+
+  // 构建后复核：构建自身失败（或 watch 并发写）也会留下半新半旧的 bundle，这里只告警不阻断。
+  if (!options.skipBuild) {
+    const staleAfterBuild = findStaleArtifacts(root);
+    if (staleAfterBuild.length > 0) {
+      console.warn(`[dev] 构建后仍有产物比源码旧：${formatStaleArtifacts(staleAfterBuild)}`);
+      console.warn("[dev] 可能加载旧代码；建议重新跑 `pnpm -C web run build:units`");
+    }
+  }
 
   // 独立 browser 产物（change: 2026-10-12-build-and-load-extensions-independently，任务 6.5）：
   // dev 启动前构建扩展 browser-dist 并装配发布目录，使 Vite dev 能像生产一样从
@@ -389,20 +458,38 @@ async function main() {
   const backendWatchArgs = process.platform === "win32"
     ? ["--watch", `--watch-path=${backendEntry}`, "--watch-preserve-output", backendEntry]
     : ["--watch", "--watch-preserve-output", backendEntry];
-  const startBackend = () => start(process.execPath, watch ? backendWatchArgs : [backendEntry], {
-    env: {
-      ...serviceEnv,
-      WOOHAA3_BASE_PATH: basePath,
-      PORT: String(backendPort),
-      BACKEND_PORT: String(backendPort),
-      WOOHAA3_AGENT_RUNTIME_SOCKET: supervisor.socketPath,
-      WOOHAA3_AGENT_RUNTIME_TOKEN: supervisor.token,
-      WOOHAA3_AGENT_WORKSPACE_KEY: supervisor.workspaceKey,
-      // node --watch keeps its supervisor alive after the child exits with 75.
-      // The backend touches its entry on controlled restart so node --watch starts it again.
-      WOOHAA3_DEV_WATCH: watch ? "1" : "0"
-    }
-  });
+  // 开发者模式（change: 2026-10-27-add-extension-dev-reload，6.3）：显式登记目录才注入开关；
+  // 发布形态没有这个参数，因此没有入口。
+  const devSourceEnv = (options.devSources?.length ?? 0) > 0
+    ? {
+        WOOHAA3_EXTENSION_DEV_MODE: "1",
+        WOOHAA3_EXTENSION_DEV_DIRS: options.devSources.map((dir) => path.resolve(root, dir)).join(",")
+      }
+    : {};
+  if (Object.keys(devSourceEnv).length > 0) {
+    console.log(`[dev] 开发者模式：${options.devSources.length} 个登记目录，产物变化将触发热重载`);
+  }
+  const startBackend = () => {
+    const child = start(process.execPath, watch ? backendWatchArgs : [backendEntry], {
+      env: {
+        ...serviceEnv,
+        ...devSourceEnv,
+        WOOHAA3_BASE_PATH: basePath,
+        PORT: String(backendPort),
+        BACKEND_PORT: String(backendPort),
+        WOOHAA3_AGENT_RUNTIME_SOCKET: supervisor.socketPath,
+        WOOHAA3_AGENT_RUNTIME_TOKEN: supervisor.token,
+        WOOHAA3_AGENT_WORKSPACE_KEY: supervisor.workspaceKey,
+        // node --watch keeps its supervisor alive after the child exits with 75.
+        // The backend touches its entry on controlled restart so node --watch starts it again.
+        WOOHAA3_DEV_WATCH: watch ? "1" : "0"
+      }
+    });
+    // 每次（重新）拉起后端都宣告一次启动窗口：这段 502 是预期结果，不是故障。
+    console.log("[dev] 后端启动中：就绪前的 /api 请求会得到 502（启动窗口，不是故障）");
+    watchBackendReady(backendUrl);
+    return child;
+  };
   supervise("backend", startBackend(), { relaunch: startBackend });
   // 显式监听 IPv4，避免容器禁用 IPv6 回环时 ATC 无法连接通配地址。
   supervise("frontend", start(process.execPath, [vite, "--host", "0.0.0.0", "--port", String(frontendPort), "--strictPort"], {

@@ -41,6 +41,7 @@ export * from "./canvas/agent-canvas-protocol.js";
 export * from "./canvas/agent-canvas-projection.js";
 export * from "./canvas/agent-canvas-internal.js";
 export * from "./canvas/agent-canvas-run.js";
+export * from "./canvas/agent-media-continuation.js";
 export * from "./canvas/canvas-script/index.js";
 export * from "./canvas/domain/index.js";
 export * from "./canvas/model-script.js";
@@ -54,6 +55,8 @@ export * from "./canvas/content-recording-port.js";
 export * from "./canvas/film-set-export-profile.js";
 export * from "./canvas/recording-protocol.js";
 export * from "./canvas/model-definition.js";
+export * from "./canvas/glb/parse.js";
+export * from "./canvas/glb/import.js";
 export * from "./canvas/group-appearance.js";
 export * from "./canvas/scene-ir-v2.js";
 export * from "./canvas/model-executor.js";
@@ -147,7 +150,5 @@ export * from "./canvas/group-presentation.js";
 export * from "./canvas/group-badge.js";
 export * from "./canvas/ground-anchor.js";
 
-export type { MediaFormatValidator, MediaFormatRegistry } from "./extension/services/host/media-formats.js";
-
-export * from "./canvas/film-set-group-projection.js";
-export * from "./canvas/film-set-animation-projection.js";
+export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService } from "./extension/services/host/media-formats.js";
+export * from "./canvas/scene-package.js";

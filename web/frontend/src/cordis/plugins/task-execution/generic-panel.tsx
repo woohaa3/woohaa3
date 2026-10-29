@@ -17,6 +17,7 @@ import {
 } from "../../ui/index.js";
 import type { ModelPanelProps } from "../../contract/model-interaction.js";
 import { projectModelConfig } from "./generic-panel-projection.js";
+import { SkillStepStatus } from "./skill-step-status.js";
 
 export function GenericModelPanel(props: ModelPanelProps) {
   const { model, catalogModels, presentation, status, errorMessage, draft, blockingReasons, readOnly } = props;
@@ -96,6 +97,15 @@ export function GenericModelPanel(props: ModelPanelProps) {
         onCollapse={() => props.requestPresentation({ kind: "collapse" })}
         onClose={() => props.requestPresentation({ kind: "close" })}
       />
+      {model.modelType === "image" || model.modelType === "video" ? (
+        <SkillStepStatus
+          nodeId={props.nodeId}
+          modelKey={model.modelKey}
+          draft={draft}
+          writable={props.writable}
+          readOnly={readOnly}
+        />
+      ) : null}
       {submitError ? (
         <p className="node-execution-dock__error" role="alert">
           {submitError}

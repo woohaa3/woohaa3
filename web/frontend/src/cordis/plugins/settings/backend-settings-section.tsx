@@ -12,7 +12,7 @@
 import { useSyncExternalStore } from "react";
 import type { SettingsSnapshot } from "@woohaa3/contracts";
 import "./settings.css";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import type { ExtensionManagerFacade, ExtensionManagerView, ExtensionSiteRow } from "../extension-manager/contract.js";
 import type { BackendSettingsStore } from "./backend-settings-store.js";
 import { SettingRow } from "./setting-row.js";

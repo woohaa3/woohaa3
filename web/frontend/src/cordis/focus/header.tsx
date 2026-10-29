@@ -14,8 +14,8 @@ import { useSlot } from "../host.js";
 import { ContributionBoundary } from "../contribution-boundary.js";
 import { useService } from "../react.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../services/canvas-state/index.js";
-import { Button } from "../../shared/ui/Button.js";
-import { BackIcon, GenerationHistoryIcon } from "../../shared/ui/icons.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { BackIcon, GenerationHistoryIcon } from "@woohaa3/ui/icons";
 import type { CanvasNavigationResult } from "../navigation/contracts.js";
 
 export type FocusHeaderProps = {

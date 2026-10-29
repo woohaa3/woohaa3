@@ -32,7 +32,7 @@
   "devDependencies": {
     "@woohaa3/extension-sample-site": "workspace:*",
     "@types/node": "^22.15.3",
-    "typescript": "^5.6.3",
+    "typescript": "^7.0.2",
     "vitest": "^2.0.0"
   }
 }

@@ -188,7 +188,7 @@ export function createShotReferenceRecordDeps(input: {
       // 不依赖卡片是否在屏幕上的实际大小。
       //
       // nextPaint 不保证 GPU 就绪；Rust 等捕捉相机自身完成渲染准备后才回读。
-      const frame = await runtime.requestCapture({ nodeId: candidate.previewNodeId, generation: nextCaptureGeneration(), width: candidate.width, height: candidate.height })
+      const frame = await runtime.requestCapture({ nodeId: candidate.previewNodeId, source: "shot-recording", generation: nextCaptureGeneration(), width: candidate.width, height: candidate.height })
         .catch((cause: unknown) => {
           throw new Error(`第 ${time.toFixed(2)} 秒：${cause instanceof Error ? cause.message : String(cause)}`);
         });

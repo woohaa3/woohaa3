@@ -189,6 +189,13 @@ export function addNode(
   if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE || hasShotPreviewOwnership(command.nodeData)) {
     return reject("invalid-shot-preview", "普通节点不能写入拍摄镜头预览归属");
   }
+  // 容器只保存归属：内容必须落在真实 `model3d` 子节点。旧版本曾把片场/模型内容直接写在容器上，
+  // 之后每个命令的 reconciliation 都会因此整批失败（整张画布不可写），所以在写入入口就拒绝。
+  if (command.nodeData && filmSetObjectOwnershipOf(command.nodeData)
+    && node.type !== "model3d"
+    && Object.keys(command.nodeData).some((key) => !["extensionId", "compositeAssetRole", "filmSetObject"].includes(key))) {
+    return reject("invalid-self-contained-node", "对象容器只保存归属，模型内容必须位于 model3d 子节点");
+  }
   if (work.nodes.some((entry) => entry.id === node.id)) {
     return reject("duplicate-node", `节点 ${node.id} 已存在`);
   }
@@ -256,7 +263,18 @@ export function addNode(
   if (command.nodeData) {
     const intentRejection = validateVideoEditIntentsPatch(command.nodeData);
     if (intentRejection) return intentRejection;
-    work.nodeData[nextNode.id] = { ...command.nodeData };
+    const value = { ...command.nodeData };
+    work.nodeData[nextNode.id] = value;
+    // 文件模型（GLB）在创建时就要走与 patch 相同的权威校验与内容身份归一化：导入/粘贴/恢复
+    // 都不能依赖客户端声明的 hash，也不能绕过来源互斥与资产存在性校验。脚本模型的创建语义
+    // 保持原样（历史内容允许带未知/旧版本，由执行侧稳定失败），只有出现来源标记时收口
+    // （change: 2026-10-28-support-glb-model-nodes）。
+    if (value.modelSourceKind !== undefined && isModelDefinitionNode(work, nextNode.id)) {
+      const nodeRejection = validateSelfContained3DNodePatch(work, nextNode.id, value);
+      if (nodeRejection) return nodeRejection;
+      const normalized = normalizeSelfContained3D(work, nextNode.id, value, value);
+      if (normalized) return normalized;
+    }
   }
   return OK;
 }

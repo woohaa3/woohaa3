@@ -6,7 +6,7 @@
  * 不测量 DOM、不写画布。下载按**可读取内容**门禁；转换按**实际写权限**门禁，两者独立。
  */
 import type { ServerCanvas } from "@woohaa3/contracts";
-import { decodeModel3DNodeData, readFilmSetConversionSourceKind } from "@woohaa3/contracts";
+import { readFilmSetConversionSourceKind, scriptModel3DNodeData } from "@woohaa3/contracts";
 import { ownsShotMedia } from "../../../state/shared/managed-shot-media.js";
 
 /** 转换动作可用性：`available: false` 时给出可读原因（按钮禁用并说明）。 */
@@ -34,7 +34,7 @@ export function resolveFilmSetConversionAvailability(input: {
   const data = canvas.nodeData[nodeId];
   if (ownsShotMedia(canvas, nodeId)) return { available: false, reason: "片场镜头媒体不能再次创建片场" };
   if (kind === "model3d") {
-    return decodeModel3DNodeData(data).ok ? { available: true } : { available: false, reason: "模型内容不完整，无法转换" };
+    return scriptModel3DNodeData(data) ? { available: true } : { available: false, reason: "文件模型无法转为片场，请使用脚本模型" };
   }
   const assetId = (data as { outputAssetId?: unknown } | undefined)?.outputAssetId;
   const asset = typeof assetId === "string" ? canvas.assets.find((entry) => entry.id === assetId) : undefined;

@@ -498,6 +498,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       receipts,
       ...(nodeHistory ? { registerHistory: (record) => registerTaskHistoryRecord(nodeHistory!.service, record) } : {}),
       ...(nodeHistory ? { registerFailure: (record) => registerTaskFailureRecord(nodeHistory!.service, record) } : {}),
+      ...(options.onRunSettled ? { onSettled: options.onRunSettled } : {}),
       now: options.now
     });
     runService = new CanvasRunService({
@@ -544,6 +545,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
           runService,
           ...(options.resolveCatalog ? { resolveCatalog: options.resolveCatalog } : {}),
           assistantTextRuns: options.assistantTextRuns,
+          ...(options.skillAttempts ? { skillAttempts: options.skillAttempts } : {}),
           modelRenderer,
           mediaClient: mediaClient ?? null,
           ...(options.contentRuntime ? { contentRuntime: options.contentRuntime } : {}),
@@ -641,6 +643,15 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     const remote = await composition?.catalog?.remoteSummary(canvasId).catch(() => null);
     return remote !== null;
   };
+
+  // 本地包只发布到本机 SQLite；在线迁移的 ACL/receipt 不参与此路径。
+  const packageConfig = resolveStorageConfig();
+  let scenePackages: import("./storage/sqlite/scene-package.js").SqliteScenePackageStore | null = null;
+  if (composition && sync && packageConfig.ok && packageConfig.config.backend === "sqlite") {
+    const { SqliteScenePackageStore } = await import("./storage/sqlite/scene-package.js");
+    scenePackages = new SqliteScenePackageStore({path:packageConfig.config.sqlitePath!});
+    scenePackages.recover();
+  }
 
   // 在线迁移（change: 2026-10-12-add-extension-online-canvas-migration）：
   // 装配细节见 `composition/online-migration.ts`（仅在注入来源端口且目标为 SQLite 时挂载）。
@@ -799,6 +810,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   });
 
   return {
+    scenePackages,
     sync,
     runService,
     consumer,
@@ -860,6 +872,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       await snippets?.close().catch(() => undefined);
       await composition?.close();
       importStore?.close();
+      scenePackages?.close();
     }
   };
 }

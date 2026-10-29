@@ -274,7 +274,7 @@ describe("站点插件入口 reconciliation（任务 4.1/4.2/5.4）", () => {
     expect(reconciler.activeExtensionIds()).toEqual([]);
   });
 
-  it("load 失败后重复 active 通知不自动重试；显式 retry 才重新加载", async () => {
+  it("load 失败后按预算自动重试（宿主重启窗口的 5xx 不该把入口钉死）", async () => {
     let loads = 0;
     const ctx = new Context();
     const registry = new ApplicationExtensionFrontendEntryRegistry();
@@ -282,26 +282,70 @@ describe("站点插件入口 reconciliation（任务 4.1/4.2/5.4）", () => {
       metadata: metadata("flaky"),
       async loadDescriptor() {
         loads += 1;
-        if (loads === 1) throw new Error("网络失败");
+        // 第一次是宿主重启窗口里的 502，之后恢复。
+        if (loads === 1) throw new Error("Failed to fetch dynamically imported module");
         return { extensionId: "flaky", plugin: () => () => undefined };
       }
     });
-    const reconciler = createApplicationExtensionEntryReconciler({ registry, ctx });
+    const reconciler = createApplicationExtensionEntryReconciler({ registry, ctx, retryDelaysMs: [0] });
     reconciler.reconcile([status("flaky", "active")]);
     await flush();
     expect(loads).toBe(1);
     expect(reconciler.diagnostics().find((entry) => entry.extensionId === "flaky")?.status).toBe("load-failed");
-
-    // 相同 active 重复通知：不自动重试（failedEpoch 抑制）。
-    reconciler.reconcile([status("flaky", "active")]);
-    await flush();
-    expect(loads).toBe(1);
-
-    // 显式 retry：解除抑制并重新加载。
-    reconciler.retry("flaky");
-    await flush();
+    // 自动重试命中，入口最终装配。
+    await flush(10);
     expect(loads).toBe(2);
     expect(reconciler.activeExtensionIds()).toEqual(["flaky"]);
+    await reconciler.dispose();
+  });
+
+  it("重试预算用尽后不随重复通知重试；显式 retry 重新给满预算", async () => {
+    let loads = 0;
+    const ctx = new Context();
+    const registry = new ApplicationExtensionFrontendEntryRegistry();
+    registry.register({
+      metadata: metadata("flaky"),
+      async loadDescriptor() {
+        loads += 1;
+        // 前三次（首次 + 2 次自动重试）都失败，显式 retry 之后才恢复。
+        if (loads <= 3) throw new Error("网络失败");
+        return { extensionId: "flaky", plugin: () => () => undefined };
+      }
+    });
+    const reconciler = createApplicationExtensionEntryReconciler({ registry, ctx, retryDelaysMs: [0, 0] });
+    reconciler.reconcile([status("flaky", "active")]);
+    await flush(20);
+    expect(loads).toBe(3);
+    expect(reconciler.diagnostics().find((entry) => entry.extensionId === "flaky")?.status).toBe("load-failed");
+
+    // 预算用尽（failedEpoch 抑制）：重复 active 通知不再重试。
+    reconciler.reconcile([status("flaky", "active")]);
+    await flush(20);
+    expect(loads).toBe(3);
+
+    // 显式 retry：解除抑制、重新给满预算并装载成功。
+    reconciler.retry("flaky");
+    await flush(20);
+    expect(loads).toBe(4);
+    expect(reconciler.activeExtensionIds()).toEqual(["flaky"]);
+    await reconciler.dispose();
+  });
+
+  it("入口在首次 reconcile 之后才注册进 registry 时补装载（热登记）", async () => {
+    const log: string[] = [];
+    const ctx = new Context();
+    const registry = new ApplicationExtensionFrontendEntryRegistry();
+    const reconciler = createApplicationExtensionEntryReconciler({ registry, ctx, retryDelaysMs: [] });
+    // 首次通知时发布目录里还没有这个 id：desired 记下，但不装载。
+    reconciler.reconcile([status("late-entry", "active")]);
+    await flush();
+    expect(reconciler.activeExtensionIds()).toEqual([]);
+
+    registry.register(makeEntry("late-entry", log));
+    reconciler.reconcile([status("late-entry", "active")]);
+    await flush(10);
+    expect(log).toContain("enter:late-entry");
+    expect(reconciler.activeExtensionIds()).toEqual(["late-entry"]);
     await reconciler.dispose();
   });
 

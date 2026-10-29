@@ -10,10 +10,10 @@ import { filmSetCompiledBudget } from "../film-set-clip-compilation.js";
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeModelCameras } from "../model-cameras.js";
 import { decodeImageEditDocument } from "../image-edit.js";
-import { decodeFilmSetNodeData, decodeModel3DNodeData, type FilmSetNodeData } from "../canvas-node-model.js";
+import { decodeFilmSetNodeData, decodeModel3DNodeData, scriptModel3DNodeData, type FilmSetNodeData } from "../canvas-node-model.js";
 import { filmSetObjectOwnershipOf } from "../film-set-object-container.js";
 import { CREATURE_VIDEO_ASSETS_EXTENSION_ID, GAME_FURNACE_EXTENSION_ID, isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "../domain/core/composite-asset-identity.js";
-import { decodeModelContentVersion, modelSourceHash, normalizeModelDefinition } from "../model-definition.js";
+import { decodeModelContentVersion, GLB_MODEL_SOURCE_KIND, isGlbModelNodeData, modelSourceHash, normalizeGlbModelReference, normalizeModelDefinition } from "../model-definition.js";
 import { animationSnapshotHash } from "../animation-snapshot.js";
 import { decodeFilmSetLocalTransform } from "../film-set-content.js";
 import { readFilmSetContent } from "../film-set-content.js";
@@ -165,6 +165,9 @@ export function validateSelfContained3DNodePatch(
       if (!root.ok) return reject("invalid-self-contained-node", root.reason);
       const decoded = decodeModel3DNodeData(mergedData);
       if (!decoded.ok) return reject("invalid-self-contained-node", decoded.reason);
+      if (decoded.value.source === "glb") {
+        return reject("invalid-self-contained-node", "文件模型只属于普通 model3d 节点");
+      }
       return null;
     }
     return reject("invalid-self-contained-node", `复合资产业务 ${extensionId} 不支持节点级模型写入`);
@@ -172,6 +175,15 @@ export function validateSelfContained3DNodePatch(
   if (node.type === "model3d") {
     const decoded = decodeModel3DNodeData(mergedData);
     if (!decoded.ok) return reject("invalid-self-contained-node", decoded.reason);
+    // 权威来源互斥：脚本字段与 GLB 资产字段不得同时出现（含空串脚本）。
+    if (decoded.value.source === "glb") {
+      const assetId = decoded.value.file.assetId;
+      const asset = work.assets.find((entry) => entry.id === assetId);
+      if (!asset) return reject("asset-in-use", "文件模型引用的资产尚未保存");
+      if (asset.mediaKind !== "file") {
+        return reject("invalid-self-contained-node", "文件模型必须引用文件类型的画布资产");
+      }
+    }
     return null;
   }
   return null;
@@ -205,6 +217,20 @@ export function normalizeSelfContained3D(
     return null;
   }
   const previous = readPreviousModelContentVersion(work, nodeId);
+  if (isGlbModelNodeData(merged)) {
+    // 文件模型：只归一化资产引用与 placement；不得写回任何脚本字段。
+    const normalized = normalizeGlbModelReference({
+      assetId: merged.modelAssetId,
+      placement: merged.modelPlacement,
+      previous
+    });
+    if (!normalized.ok) return reject("invalid-self-contained-node", normalized.reason);
+    value.modelSourceKind = GLB_MODEL_SOURCE_KIND;
+    value.modelAssetId = normalized.value.assetId;
+    value.modelContentVersion = normalized.value.contentVersion;
+    value.modelPlacement = normalized.value.placement;
+    return null;
+  }
   const normalized = normalizeModelDefinition({
     modelScript: merged.modelScript,
     modelScriptLanguage: merged.modelScriptLanguage,
@@ -263,12 +289,14 @@ export function validateFilmSetContentPatch(
     if (!source) continue;
     if (item.kind === "model") {
       const sourceData = work.nodeData[sourceNodeId];
-      const sourceModel = source.type === "model3d"
-        ? decodeModel3DNodeData(sourceData)
-        : isFilmSetNode(source.type, sourceData) ? decodeFilmSetNodeData(sourceData) : null;
-      const sourceModelScript = sourceModel && sourceModel.ok
-        ? (sourceModel.value.kind === "model3d" ? sourceModel.value.model.modelScript : filmSetFirstModelScript(sourceModel.value))
-        : null;
+      let sourceModelScript: string | null = null;
+      if (source.type === "model3d") {
+        const script = scriptModel3DNodeData(sourceData);
+        sourceModelScript = script ? script.model.modelScript : null;
+      } else if (isFilmSetNode(source.type, sourceData)) {
+        const filmSet = decodeFilmSetNodeData(sourceData);
+        sourceModelScript = filmSet.ok ? filmSetFirstModelScript(filmSet.value) : null;
+      }
       if (sourceModelScript === null || modelSourceHash(sourceModelScript) !== modelSourceHash(item.model.modelScript)) {
         return reject("invalid-self-contained-node", "来源模型已变化，请重新导入");
       }

@@ -77,7 +77,16 @@ function decodeNodeStatus(input: unknown): FilmSetConversionStatus | null {
     case "cancelled":
       return { status: "cancelled", requestId, sourceNodeId };
     case "unknown":
-      return { status: "unknown", requestId, sourceNodeId };
+      // 旧节点状态归一：无法确认按失败结算，保留机器错误码与恢复入口。
+      return {
+        status: "failed",
+        requestId,
+        sourceNodeId,
+        code: "unknown-result",
+        message: "无法确认转换结果，可能已部分写入；重试前请核对原请求",
+        attempt: 1,
+        retryable: true
+      };
     default:
       return null;
   }
@@ -93,7 +102,6 @@ export function filmSetConversionNodeTaskStatus(
 ): "processing" | "successed" | "failed" | "cancelled" {
   switch (status.status) {
     case "running":
-    case "unknown":
       return "processing";
     case "completed":
       return "successed";

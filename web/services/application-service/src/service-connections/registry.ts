@@ -244,7 +244,7 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
       if (a.removed || b.removed || a.configRevision !== input.retained.configRevision || a.credentialEpoch !== input.retained.credentialEpoch || b.configRevision !== input.removed.configRevision || b.credentialEpoch !== input.removed.credentialEpoch) throw new ServiceConnectionError("stale", "来源已变化，请重新确认");
       // Rebinding cannot silently change a consumer's destination or invent capabilities.
       if (b.endpoints.some(endpoint => !a.endpoints.some(candidate => candidate.protocol === endpoint.protocol && candidate.baseUrl === endpoint.baseUrl))) throw new ServiceConnectionError("invalid", "保留来源缺少原协议入口，请先配置并验证");
-      if (!options.hasUnresolvedWork || await options.hasUnresolvedWork(actor.owner, [...a.bindings, ...b.bindings])) throw new ServiceConnectionError("conflict", "存在活动或待核对执行，合并暂缓");
+      if (!options.hasUnresolvedWork || await options.hasUnresolvedWork(actor.owner, [...a.bindings, ...b.bindings])) throw new ServiceConnectionError("conflict", "存在活动执行，合并暂缓");
       const extraBindings = [...(a.extraBindings ?? []), ...b.bindings.filter(binding => !a.bindings.some(candidate => candidate.bindingId === binding.bindingId))];
       const next: Source = { ...a, bindings: [...a.bindings, ...extraBindings.filter(binding => !a.bindings.some(candidate => candidate.bindingId === binding.bindingId))], extraBindings, configRevision: a.configRevision + 1 };
       const tombstone: Source = { ...b, mergedInto: a.serviceConnectionId, removed: true, enabled: false, credentialKey: null, credentialConfigured: false, configRevision: b.configRevision + 1, credentialEpoch: b.credentialEpoch + 1 };

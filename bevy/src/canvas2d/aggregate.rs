@@ -20,7 +20,7 @@ use super::layout::{hex, port};
 
 #[cfg(test)]
 use crate::canvas_query::aggregate::AGGREGATE_HANDLE_GAP;
-use crate::canvas_query::aggregate::{AGGREGATE_HANDLE_RADIUS, aggregate_handle, selection_bounds};
+use crate::canvas_query::aggregate::{AGGREGATE_HANDLE_RADIUS, aggregate_handle, selection_bounds_iter};
 
 /// 待提交连线预览线宽。
 const PENDING_EDGE_WIDTH: f32 = 2.0;
@@ -39,11 +39,11 @@ const BAND_FILL_ALPHA: f32 = 0.08;
 pub(crate) fn draw_aggregate_selection_band(
     geometry: &mut Geometry,
     theme: &ThemeResource,
-    nodes: &[GraphNode],
+    nodes: &[&GraphNode],
     selected: &[String],
     z: f32,
 ) {
-    let Some(bounds) = selection_bounds(nodes, selected) else {
+    let Some(bounds) = selection_bounds_iter(nodes.iter().copied(), selected) else {
         return;
     };
     let [x, y, width, height] = bounds;
@@ -76,14 +76,17 @@ pub(crate) fn draw_aggregate_selection_band(
 pub(crate) fn draw_aggregate_connect(
     geometry: &mut Geometry,
     theme: &ThemeResource,
-    nodes: &[GraphNode],
+    nodes: &[&GraphNode],
     aggregate: &AggregateConnect,
     selected: &[String],
     base_z: f32,
 ) {
-    let node_map: HashMap<&str, &GraphNode> =
-        nodes.iter().map(|node| (node.id.as_str(), node)).collect();
-    let Some(bounds) = selection_bounds(nodes, selected) else {
+    let node_map: HashMap<&str, &GraphNode> = nodes
+        .iter()
+        .copied()
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+    let Some(bounds) = selection_bounds_iter(nodes.iter().copied(), selected) else {
         return;
     };
     let accent = theme.token_u32("interactionAccent");
@@ -179,6 +182,10 @@ mod tests {
         }
     }
 
+    fn refs(nodes: &[GraphNode]) -> Vec<&GraphNode> {
+        nodes.iter().collect()
+    }
+
     fn positions(geometry: Geometry) -> usize {
         let mesh = geometry.build();
         mesh.attribute(Mesh::ATTRIBUTE_POSITION)
@@ -204,7 +211,7 @@ mod tests {
             pending_edges: vec![],
         };
         let mut geometry = Geometry::default();
-        draw_aggregate_connect(&mut geometry, &theme, &nodes, &aggregate, &selected, 100.0);
+        draw_aggregate_connect(&mut geometry, &theme, &refs(&nodes), &aggregate, &selected, 100.0);
         // 两个把手：各为圆面 + 环 + 圆点。
         assert!(positions(geometry) > 60);
     }
@@ -219,7 +226,7 @@ mod tests {
             pending_edges: vec![],
         };
         let mut geometry = Geometry::default();
-        draw_aggregate_connect(&mut geometry, &theme, &nodes, &aggregate, &[], 100.0);
+        draw_aggregate_connect(&mut geometry, &theme, &refs(&nodes), &aggregate, &[], 100.0);
         assert_eq!(positions(geometry), 0);
     }
 
@@ -244,7 +251,7 @@ mod tests {
         draw_aggregate_connect(
             &mut geometry,
             &theme,
-            &nodes,
+            &refs(&nodes),
             &aggregate,
             &["a".to_owned()],
             100.0,
@@ -274,7 +281,7 @@ mod tests {
         draw_aggregate_connect(
             &mut with_draft,
             &theme,
-            &nodes,
+            &refs(&nodes),
             &dragging,
             &["a".to_owned()],
             100.0,
@@ -283,7 +290,7 @@ mod tests {
         draw_aggregate_connect(
             &mut without,
             &theme,
-            &nodes,
+            &refs(&nodes),
             &idle,
             &["a".to_owned()],
             100.0,
@@ -303,7 +310,7 @@ mod tests {
         draw_aggregate_selection_band(
             &mut geometry,
             &theme,
-            &nodes,
+            &refs(&nodes),
             &["a".to_owned(), "b".to_owned()],
             1.0,
         );
@@ -311,7 +318,7 @@ mod tests {
         assert!(positions(geometry) > 40);
         // 空选区不绘制。
         let mut empty = Geometry::default();
-        draw_aggregate_selection_band(&mut empty, &theme, &nodes, &[], 1.0);
+        draw_aggregate_selection_band(&mut empty, &theme, &refs(&nodes), &[], 1.0);
         assert_eq!(positions(empty), 0);
     }
 

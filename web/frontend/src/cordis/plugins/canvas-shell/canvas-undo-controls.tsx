@@ -8,7 +8,7 @@
  */
 import { useSyncExternalStore } from "react";
 import type { CanvasEditService, CanvasEditSnapshot } from "../../services/canvas-state/index.js";
-import { RedoIcon, UndoIcon } from "../../../shared/ui/icons.js";
+import { RedoIcon, UndoIcon } from "@woohaa3/ui/icons";
 
 export function useCanvasEditSnapshot(edit: CanvasEditService): CanvasEditSnapshot {
   return useSyncExternalStore(

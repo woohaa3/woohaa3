@@ -87,10 +87,10 @@ export function installShotImageReferences(ctx: FilmSetHostContext, playback: { 
         const runtime = ctx.canvasRuntime.runtime();
         if (!runtime?.isReady()) throw new Error("画布渲染器未就绪");
         const nodeId = shotPreviewNodeId(target.filmSetNodeId, target.clipId);
-        await runtime.requestCapture({ nodeId, generation: generation++, width: target.width, height: target.height }); check(target, signal);
+        await runtime.requestCapture({ nodeId, source: "shot-image", generation: generation++, width: target.width, height: target.height }); check(target, signal);
         const ready = await (ctx.canvasRuntime.compositeAssetMediaSessions?.()?.waitForTime(target.filmSetNodeId, 0, 5000, .001) ?? Promise.resolve(true));
         if (!ready) throw new Error("镜头媒体零点帧未就绪");
-        const frame = await runtime.requestCapture({ nodeId, generation: generation++, width: target.width, height: target.height }); check(target, signal);
+        const frame = await runtime.requestCapture({ nodeId, source: "shot-image", generation: generation++, width: target.width, height: target.height }); check(target, signal);
         if (!frame || frame.width !== target.width || frame.height !== target.height) throw new Error("镜头图片捕获失败或尺寸不符");
         const canvas = new OffscreenCanvas(frame.width, frame.height);
         const context = canvas.getContext("2d");

@@ -9,7 +9,7 @@
  */
 import { useEffect, useState } from "react";
 import type { HostSafeModeView, SettingsSnapshot } from "@woohaa3/contracts";
-import { Button } from "../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import type { HostConnectivityService } from "./host-connectivity.js";
 import { createHostRestartRemote, type HostRestartRemote } from "./host-restart-remote.js";
 import { createSettingsRemote, type SettingsRemote } from "./settings-remote.js";

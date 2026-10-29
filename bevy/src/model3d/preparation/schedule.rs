@@ -455,6 +455,11 @@ impl Scheduler {
         self.work.running = self.running.len();
     }
 
+    /// 是否仍有排队/运行中/待装配的任务（静止降频据此判定需要连续帧）。
+    pub(crate) fn has_in_flight(&self) -> bool {
+        !self.queued.is_empty() || !self.running.is_empty() || !self.ready.is_empty()
+    }
+
     /// 是否既无需求也无在途工作（测试等待静止用）。
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {

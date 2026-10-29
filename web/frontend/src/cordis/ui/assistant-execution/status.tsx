@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { AssistantDeliveryTarget } from "../../contract/authoring.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import { resolveAgentDetailAction } from "../../plugins/task-execution/execution-panel/agent-detail-action.js";
 
 export function useAssistantExecutionActions() {

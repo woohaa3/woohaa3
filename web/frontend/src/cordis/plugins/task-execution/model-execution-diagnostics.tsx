@@ -8,7 +8,7 @@
 import type { ReactNode } from "react";
 import { Component } from "react";
 import type { CanvasTaskCatalogModel } from "@woohaa3/contracts";
-import { Button } from "../../../shared/ui/index.js";
+import { Button } from "@woohaa3/ui";
 import { reloadApplication } from "../../app-error-boundary.js";
 
 export type ModelInteractionDiagnostic =

@@ -85,7 +85,7 @@ describe("createShotReferenceRecordDeps（生产接线）", () => {
     });
     const frame = await deps.capture(target, 0.5, new AbortController().signal);
     expect(playback.seek).toHaveBeenCalledWith(0.5);
-    expect(requestCapture).toHaveBeenCalledWith({ nodeId: "shot-preview:test", generation: 7, width: 320, height: 180 });
+    expect(requestCapture).toHaveBeenCalledWith({ nodeId: "shot-preview:test", source: "shot-recording", generation: 7, width: 320, height: 180 });
     expect(frame).toEqual({ rgba: expect.any(Uint8Array), width: 320, height: 180 });
   });
 

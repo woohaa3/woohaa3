@@ -66,8 +66,9 @@ export function uninstall(ctx: ManagerContext, extensionId: string, options: { p
         }
       }
       const hasBackend = Boolean(record.requiresRestart);
-      // 热切换可用时卸载直接撤下运行期实例；否则仍提示重启。
-      const needsRestart = hasBackend && !ctx.deps.runtime?.available();
+      // 只有 hostPlugin 能运行期撤下；站点 backend 工厂随后仍提示重启。
+      const hotSwappable = record.hotSwappable !== false;
+      const needsRestart = hasBackend && (!ctx.deps.runtime?.available() || !hotSwappable);
       commit((draft) => {
         delete draft.extensions[extensionId];
       });
@@ -79,7 +80,7 @@ export function uninstall(ctx: ManagerContext, extensionId: string, options: { p
       let outcome: Awaited<ReturnType<typeof reload>>;
       try {
         if (builtin?.requiresBackend && builtin.hotSwappable) {
-          outcome = await reload(extensionId, builtin.directory, true, { previousDirectory: managedDir });
+          outcome = await reload(extensionId, builtin.directory, true, { previousDirectory: managedDir, hotSwappable: true });
         } else if (builtin?.requiresBackend) {
           // 站点后端内置扩展没有运行期装配入口：撤下受管实例，下一次启动按内置目录装配。
           if (deps.runtime?.available()) await deps.runtime.remove(extensionId);
@@ -89,7 +90,7 @@ export function uninstall(ctx: ManagerContext, extensionId: string, options: { p
           if (record.requiresRestart && deps.runtime?.available()) await deps.runtime.remove(extensionId);
           outcome = await reload(extensionId, builtin.directory, false);
         } else {
-          outcome = await reload(extensionId, null, hasBackend);
+          outcome = await reload(extensionId, null, hasBackend, { hotSwappable });
         }
       } catch (error) {
         // 指针已经删除：卸载本身不回滚，装回内置失败只记日志（下次启动仍会扫描内置根）。

@@ -102,11 +102,7 @@ describe("状态映射（任务 3.8）", () => {
     expect(presentFilmSetConversionStatus(null).kind).toBe("idle");
   });
 
-  it("unknown 先查询、失败按类别给标题并优先具体原因", () => {
-    const unknown = presentFilmSetConversionStatus({ status: "unknown", requestId: "r", sourceNodeId: "s" });
-    expect(unknown.needsQuery).toBe(true);
-    // 结果未知仍可取消：中断/重启后的占位节点必须能脱离「进行中」才可删除。
-    expect(unknown.cancellable).toBe(true);
+  it("失败按类别给标题并优先具体原因；旧 unknown 归一为 failed", () => {
     // 标题按错误类别区分；有具体 message 时详情显示具体原因（例如几何约束）。
     const failed = presentFilmSetConversionStatus({ status: "failed", requestId: "r", sourceNodeId: "s", code: "candidate-invalid", message: "对象 scarf 的 capsule 总高度不得小于直径", attempt: 1, retryable: true });
     expect(failed.label).toBe("片场候选未通过校验");
@@ -188,7 +184,7 @@ describe("控制器：共享动作与请求身份（任务 3.5/3.6/3.7/3.8）", 
     const statusFor = (requestId: string, targetNodeId: string) => {
       const scripted = options.statuses?.[submitted.length - 1] ?? "completed";
       if (scripted === "running") return { status: "running" as const, requestId, sourceNodeId: "img", step: "analyze-content" as const };
-      if (scripted === "unknown") return { status: "unknown" as const, requestId, sourceNodeId: "img" };
+      if (scripted === "unconfirmed") return { status: "failed" as const, requestId, sourceNodeId: "img", code: "unknown-result" as const, message: "无法确认转换结果，可能已部分写入", attempt: 1, retryable: true };
       if (scripted === "failed") return { status: "failed" as const, requestId, sourceNodeId: "img", code: "model-not-configured" as const, message: "尚未配置支持视觉输入的转换模型", attempt: 1, retryable: true };
       return { status: "completed" as const, requestId, sourceNodeId: "img", targetNodeId, commandId: "cmd" };
     };
@@ -412,7 +408,7 @@ describe("控制器：共享动作与请求身份（任务 3.5/3.6/3.7/3.8）", 
     expect(h.controller.getEntry("img", "image").identity?.requestId).toBe(h.submitted[2]!.requestId);
   });
 
-  it("running and unknown targets do not lock a new creation", async () => {
+  it("running and failed targets do not lock a new creation", async () => {
     const running = setup({ models: [supported], statuses: ["running"] });
     await running.controller.activate({ nodeId: "img", nodeType: "image", writable: true });
     await running.controller.startFromSettings({ nodeId: "img", nodeType: "image" });
@@ -420,16 +416,17 @@ describe("控制器：共享动作与请求身份（任务 3.5/3.6/3.7/3.8）", 
     await running.controller.activate({ nodeId: "img", nodeType: "image", writable: true });
     expect(running.submitted).toHaveLength(1);
 
-    const unknown = setup({ models: [supported], statuses: ["unknown"] });
-    await unknown.controller.activate({ nodeId: "img", nodeType: "image", writable: true });
-    await unknown.controller.startFromSettings({ nodeId: "img", nodeType: "image" });
-    await unknown.controller.activate({ nodeId: "img", nodeType: "image", writable: true });
-    expect(unknown.calls.query).toBe(0);
-    expect(unknown.controller.getEntry("img", "image").settingsOpen).toBe(true);
-    const first = unknown.submitted[0]!.requestId;
-    await unknown.controller.startFromSettings({ nodeId: "img", nodeType: "image" });
-    expect(unknown.submitted[1]!.requestId).not.toBe(first);
-    expect(unknown.submitted).toHaveLength(2);
+    const failed = setup({ models: [supported], statuses: ["unconfirmed"] });
+    await failed.controller.activate({ nodeId: "img", nodeType: "image", writable: true });
+    await failed.controller.startFromSettings({ nodeId: "img", nodeType: "image" });
+    expect(failed.controller.getEntry("img", "image").status?.status).toBe("failed");
+    await failed.controller.activate({ nodeId: "img", nodeType: "image", writable: true });
+    expect(failed.calls.query).toBe(0);
+    expect(failed.controller.getEntry("img", "image").settingsOpen).toBe(true);
+    const first = failed.submitted[0]!.requestId;
+    await failed.controller.startFromSettings({ nodeId: "img", nodeType: "image" });
+    expect(failed.submitted[1]!.requestId).not.toBe(first);
+    expect(failed.submitted).toHaveLength(2);
   });
 
   it("收起面板/编辑草稿不提交；重新挂载不自动执行（刷新/切换画布/收起面板不重复执行）", async () => {
@@ -554,7 +551,9 @@ describe("占位节点状态读取与呈现（任务 3.8 / D4）", () => {
 
   it("映射到目标节点的通用任务状态（进行中受任务边界保护）", () => {
     expect(filmSetConversionNodeTaskStatus({ status: "running", requestId: "r", sourceNodeId: "s", step: "prepare-source" })).toBe("processing");
-    expect(filmSetConversionNodeTaskStatus({ status: "unknown", requestId: "r", sourceNodeId: "s" })).toBe("processing");
+    const legacyUnknown = readFilmSetConversionNodeStatus({ filmSetConversion: { status: "unknown", requestId: "r", sourceNodeId: "s" } });
+    expect(legacyUnknown).toMatchObject({ status: "failed", code: "unknown-result" });
+    expect(filmSetConversionNodeTaskStatus(legacyUnknown!)).toBe("failed");
     expect(filmSetConversionNodeTaskStatus({ status: "completed", requestId: "r", sourceNodeId: "s", targetNodeId: "t", commandId: "c" })).toBe("successed");
     expect(filmSetConversionNodeTaskStatus({ status: "failed", requestId: "r", sourceNodeId: "s", code: "candidate-invalid", message: "x", attempt: 1, retryable: false })).toBe("failed");
     expect(filmSetConversionNodeTaskStatus({ status: "cancelled", requestId: "r", sourceNodeId: "s" })).toBe("cancelled");

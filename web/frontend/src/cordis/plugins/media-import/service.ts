@@ -12,6 +12,11 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import {
+  GLB_MAX_FILE_BYTES,
+  GLB_MEDIA_TYPE,
+  parseGlbModel
+} from "@woohaa3/contracts";
+import {
   UPLOAD_ACCEPT,
   buildUploadedAsset,
   buildUploadedTextAsset,
@@ -317,9 +322,68 @@ export class MediaImportService implements ImportService {
 
   // --- internals ----------------------------------------------------------
 
+  /**
+   * GLB 文件模型导入（change: 2026-10-28-support-glb-model-nodes，任务 2.1）。
+   *
+   * 顺序：本地读取 → 预算/格式/可呈现性校验 → 上传原始字节 → 原子提交
+   * `asset.upsert` + `node.add`。校验失败时不产生任何规范资产或节点；上传成功后提交失败只会
+   * 留下不可达的存储对象，规范画布仍保持原状。
+   */
+  private async importModel(file: File, anchor: ImportAnchor & { nodeId: string }): Promise<void> {
+    if (file.size > GLB_MAX_FILE_BYTES) {
+      throw new ImportStageError(
+        "reading",
+        `GLB 文件超过 ${Math.round(GLB_MAX_FILE_BYTES / 1024 / 1024)}MB 上限`
+      );
+    }
+    let parsed: ReturnType<typeof parseGlbModel>;
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await file.arrayBuffer());
+    } catch {
+      throw new ImportStageError("reading", "文件读取失败（编码或权限问题）");
+    }
+    parsed = parseGlbModel(bytes);
+    if (!parsed.ok) throw new ImportStageError("reading", `无法使用该 GLB：${parsed.message}`);
+    // 浏览器可能给出空 MIME 或 octet-stream；上传时显式标注为 GLB，便于下载恢复。
+    const uploadFile = typeof File === "function" && file.type !== GLB_MEDIA_TYPE
+      ? new File([file], file.name || "model.glb", { type: GLB_MEDIA_TYPE, lastModified: file.lastModified })
+      : file;
+    const uploaded = await this.ctx.mediaRemote.upload({
+      file: uploadFile,
+      canvasId: this.canvasId(),
+      onProgress: (percent) => this.setGhostProgress(anchor.nodeId, percent)
+    });
+    if (!uploaded.ok) throw new ImportStageError("uploading", uploaded.error);
+    if (!this.ctx.canvasSession.isWritable()) {
+      throw new ImportStageError("submitting", "网络不可用，画布只读");
+    }
+    const asset = buildUploadedAsset({
+      media: uploaded.media,
+      mediaKind: "file",
+      modelFormat: "glb",
+      file: uploadFile
+    });
+    this.submit(
+      planUploadedNode({
+        nodeType: "model3d",
+        position: anchor.world ?? { x: 0, y: 0 },
+        file: uploadFile,
+        asset,
+        nodeId: anchor.nodeId,
+        ...(anchor.connectFrom ? { connectFrom: anchor.connectFrom } : {})
+      })
+    );
+  }
+
   private async importOne(file: File, anchor: ImportAnchor & { nodeId: string }): Promise<void> {
     const nodeType = uploadedNodeType(file);
-    if (!nodeType) throw new ImportStageError("pending", "不支持的文件类型（仅图片/视频/音频/文本）");
+    if (!nodeType) throw new ImportStageError("pending", "不支持的文件类型（仅图片/视频/音频/文本/GLB）");
+
+    if (nodeType === "model3d") {
+      await this.importModel(file, anchor);
+      return;
+    }
 
     if (nodeType === "text") {
       if (file.size > MAX_TEXT_FILE_BYTES) {

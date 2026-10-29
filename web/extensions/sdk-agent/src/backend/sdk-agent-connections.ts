@@ -190,7 +190,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       // Group runs have authoritative child-run evidence in the host ledger even
       // when no structural command was needed. The host settles their real outputs.
       return receipts.length || input.intent.mode === "canvas-group" ? { status: "succeeded", assistantText: result.outcome.assistantText, receipt } :
-        { status: "unknown", assistantText: result.outcome.assistantText, error: { code: "write-unconfirmed", message: "回复完成，作品更新未确认；请核对原请求" } };
+        { status: "failed", assistantText: result.outcome.assistantText, error: { code: "write-unconfirmed", message: "回复完成，作品更新未确认；请核对原请求" } };
     } catch {
       await gateway?.drain();
       const receipts = gateway?.receipts ?? [];

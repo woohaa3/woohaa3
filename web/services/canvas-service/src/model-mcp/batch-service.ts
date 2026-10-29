@@ -3,6 +3,7 @@ import {
   applyCanvasCommands,
   decodeModelContentVersion,
   isFilmSetNode,
+  isGlbModelNodeData,
   isModelAuthoringNodeType,
   MODEL_SCRIPT_LANGUAGE,
   readModelCameras,
@@ -103,6 +104,10 @@ function checkTargets(
     } else if (isFilmSetNode(node.type, data)) {
       code = "film-set-top-level-model";
       message = "片场模型请使用 item 作者接口";
+    } else if (isGlbModelNodeData(data)) {
+      // 文件模型以原始 GLB 为唯一权威内容（change: 2026-10-28-support-glb-model-nodes）。
+      code = "model-source-glb";
+      message = "文件模型不接受脚本提交";
     } else if (
       item.expectedModelContentHash !== undefined &&
       item.expectedModelContentHash !==

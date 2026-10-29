@@ -1,17 +1,21 @@
 //! Retained edge/label blocks. Warm changes compare borrowed endpoints and draw inputs.
-use super::{Visuals, geometry::Geometry, layout::port};
+//!
+//! change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs —— 端点读取 ECS `CanvasLayout`，
+//! 连线标签通过 `LabelRequests`（owner = 边批次实体）同步，块内不再保存标签实体。
+use super::{Visuals, geometry::Geometry, labels::Label, labels::LabelRequests, labels::LabelStyle};
+use crate::canvas_ecs::components::{CanvasLabelRole, CanvasLayout};
 use crate::{
-    protocol::{Edge, GraphNode, Scene},
+    protocol::{Edge, Scene},
     theme::ThemeResource,
 };
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 use std::collections::HashMap;
 const BLOCK_SIZE: usize = 16;
 type Bounds = Option<([f32; 2], [f32; 2])>;
-fn bounds(edge: &Edge, nodes: &HashMap<&str, &GraphNode>) -> Bounds {
+fn bounds(edge: &Edge, layouts: &HashMap<&str, CanvasLayout>) -> Bounds {
     Some((
-        port(nodes.get(edge.source.as_str())?, true).to_array(),
-        port(nodes.get(edge.target.as_str())?, false).to_array(),
+        layouts.get(edge.source.as_str())?.port(true).to_array(),
+        layouts.get(edge.target.as_str())?.port(false).to_array(),
     ))
 }
 fn hovered(scene: &Scene, edge: &Edge) -> bool {
@@ -31,13 +35,13 @@ struct Key {
     overlay_z: Option<f32>,
 }
 impl Key {
-    fn new(edge: &Edge, scene: &Scene, nodes: &HashMap<&str, &GraphNode>, overlay_z: f32) -> Self {
+    fn new(edge: &Edge, scene: &Scene, layouts: &HashMap<&str, CanvasLayout>, overlay_z: f32) -> Self {
         Self {
             id: edge.id.clone(),
             source: edge.source.clone(),
             target: edge.target.clone(),
             label: edge.label.clone(),
-            bounds: bounds(edge, nodes),
+            bounds: bounds(edge, layouts),
             selected: scene.selection.edge.as_ref() == Some(&edge.id),
             hover: hovered(scene, edge),
             overlay_z: hovered(scene, edge).then_some(overlay_z),
@@ -47,14 +51,14 @@ impl Key {
         &self,
         edge: &Edge,
         scene: &Scene,
-        nodes: &HashMap<&str, &GraphNode>,
+        layouts: &HashMap<&str, CanvasLayout>,
         overlay_z: f32,
     ) -> bool {
         self.id == edge.id
             && self.source == edge.source
             && self.target == edge.target
             && self.label == edge.label
-            && self.bounds == bounds(edge, nodes)
+            && self.bounds == bounds(edge, layouts)
             && self.selected == (scene.selection.edge.as_ref() == Some(&edge.id))
             && self.hover == hovered(scene, edge)
             && self.overlay_z == hovered(scene, edge).then_some(overlay_z)
@@ -67,7 +71,7 @@ pub(super) struct Block {
     depth_offset: f32,
     entity: Option<Entity>,
     mesh: Option<Handle<Mesh>>,
-    labels: Vec<Entity>,
+    labels: Vec<Label>,
 }
 impl Block {
     fn clear(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
@@ -77,15 +81,13 @@ impl Block {
         if let Some(mesh) = self.mesh.take() {
             meshes.remove(mesh.id());
         }
-        for entity in self.labels.drain(..) {
-            commands.entity(entity).despawn();
-        }
+        self.labels.clear();
         self.keys.clear();
         self.theme.clear();
     }
     #[cfg(test)]
-    pub(super) fn state(&self) -> (bevy::asset::AssetId<Mesh>, Vec<Entity>) {
-        (self.mesh.as_ref().unwrap().id(), self.labels.clone())
+    pub(super) fn state(&self) -> (bevy::asset::AssetId<Mesh>, usize) {
+        (self.mesh.as_ref().unwrap().id(), self.labels.len())
     }
 }
 #[allow(clippy::too_many_arguments)]
@@ -93,11 +95,13 @@ pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     visuals: &mut Visuals,
+    requests: &mut LabelRequests,
     scene: &Scene,
     theme: &ThemeResource,
-    nodes: &HashMap<&str, &GraphNode>,
+    layouts: &HashMap<&str, CanvasLayout>,
     overlay_z: f32,
 ) -> u64 {
+    requests.begin(CanvasLabelRole::Edge);
     let mut rebuilt = 0;
     let mut blocks = std::mem::take(&mut visuals.edge_blocks);
     let count = scene.edges.len().div_ceil(BLOCK_SIZE);
@@ -119,46 +123,63 @@ pub(super) fn sync(
                 .keys
                 .iter()
                 .zip(edges)
-                .all(|(key, edge)| key.matches(edge, scene, nodes, overlay_z))
+                .all(|(key, edge)| key.matches(edge, scene, layouts, overlay_z))
         {
+            // 缓存命中：块实体已在，标签请求沿用上一帧文案（不重建、不闪失）。
+            if let Some(entity) = block.entity {
+                requests.push(
+                    CanvasLabelRole::Edge,
+                    entity,
+                    block.labels.clone(),
+                    2.1 + depth_offset,
+                    LabelStyle::Edge,
+                );
+            }
             continue;
         }
-        for entity in block.labels.drain(..) {
-            commands.entity(entity).despawn();
-        }
+        let entity = match block.entity {
+            Some(entity) => entity,
+            None => {
+                let entity = commands
+                    .spawn((
+                        Transform::IDENTITY,
+                        Name::new(format!("canvas-edge-block:{index}")),
+                    ))
+                    .id();
+                block.entity = Some(entity);
+                entity
+            }
+        };
         let mut geometry = Geometry::default();
         block.labels = super::render_edges::draw_block(
-            commands,
             edges,
-            nodes,
+            layouts,
             scene,
             theme,
-            &visuals.font,
             &mut geometry,
             overlay_z,
             depth_offset,
+        );
+        requests.push(
+            CanvasLabelRole::Edge,
+            entity,
+            block.labels.clone(),
+            2.1 + depth_offset,
+            LabelStyle::Edge,
         );
         let handle = meshes.add(geometry.build());
         rebuilt += 1;
         if let Some(old) = block.mesh.replace(handle.clone()) {
             meshes.remove(old.id());
         }
-        if let Some(entity) = block.entity {
-            commands.entity(entity).insert(Mesh2d(handle));
-        } else {
-            block.entity = Some(
-                commands
-                    .spawn((
-                        Mesh2d(handle),
-                        MeshMaterial2d(visuals.material.clone()),
-                        NoFrustumCulling,
-                    ))
-                    .id(),
-            );
-        }
+        commands.entity(entity).insert((
+            Mesh2d(handle),
+            MeshMaterial2d(visuals.mesh_material()),
+            NoFrustumCulling,
+        ));
         block.keys = edges
             .iter()
-            .map(|edge| Key::new(edge, scene, nodes, overlay_z))
+            .map(|edge| Key::new(edge, scene, layouts, overlay_z))
             .collect();
         block.theme = theme.fingerprint().to_owned();
         block.depth_offset = depth_offset;

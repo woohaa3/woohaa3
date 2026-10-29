@@ -196,6 +196,11 @@ jobs:
           echo "pnpm desktop:bundle ${args[*]}"
           pnpm desktop:bundle "${args[@]}"
 
+      - name: Build offline large-canvas experience kit
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types scripts/canvas-benchmark/experience-kit.mjs "artifacts/desktop/${RELEASE_ID}/manifest.json" "artifacts/desktop/${RELEASE_ID}/woohaa-windows-x64-experience.zip"
+
       - name: Record build summary
         run: |
           set -euo pipefail

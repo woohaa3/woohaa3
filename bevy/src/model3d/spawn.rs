@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
+use crate::canvas_ecs::components::{ModelBatch, ModelOwner, ModelPart};
 use crate::protocol::{GraphNode, ModelOp, ModelPlacement, ModelSnapshot};
 
 use super::animation::{
@@ -137,8 +138,11 @@ pub(super) fn spawn_v2(
             super::model_render_layers(),
         ))
         .id();
+    // 根自持 owner：派生实体统一携带 `ModelOwner { root }`，运行时可按根回收/隔离，
+    // 不必把所有实体句柄留在 `ModelRoot` 里（change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs，5.1）。
+    commands.entity(root).insert(ModelOwner { root });
 
-    let specs = scene::build_entity_specs(model);
+    let mut specs = scene::build_entity_specs(model);
     let material_specs = collect_materials(model);
     let mut mesh_cache: HashMap<String, Handle<Mesh>> = HashMap::new();
     let mut material_cache: HashMap<String, Handle<StandardMaterial>> = HashMap::new();
@@ -157,8 +161,11 @@ pub(super) fn spawn_v2(
         })
         .map(|spec| spec.material_key.clone())
         .collect();
+    // 总览片场把只做平移的父级分组平铺到根空间，按材质合并批次（draw call 优化）。
     let plans = if batched && strategy == super::batch_strategy::BatchStrategy::Spatial {
-        super::batching::plan(&specs, &opaque, &Default::default())
+        let planned = super::batching::plan(&specs, &opaque, &Default::default(), overview);
+        super::batching::apply_flatten(&mut specs, &planned.flatten);
+        planned.plans
     } else {
         Vec::new()
     };
@@ -180,8 +187,16 @@ pub(super) fn spawn_v2(
             quality,
         ) {
             batched_parts.extend(group.indices);
-            mesh_cache.insert(format!("instance:{:?}", group.entity), group.mesh);
-            material_cache.insert(format!("instance:{:?}", group.entity), group.material);
+            let batch_id = format!("instance:{:?}", group.entity);
+            commands.entity(group.entity).insert((
+                ModelOwner { root },
+                ModelBatch {
+                    owner: root,
+                    batch_id: batch_id.clone(),
+                },
+            ));
+            mesh_cache.insert(batch_id.clone(), group.mesh);
+            material_cache.insert(batch_id, group.material);
             spawned.push(group.entity);
             batch_parents.push((group.entity, group.parent));
             instance_parts.insert(group.entity, group.instances.parts);
@@ -222,13 +237,21 @@ pub(super) fn spawn_v2(
                 bevy::camera::primitives::Aabb::from_min_max(asset.min, asset.max),
             ))
             .id();
+        let batch_id = format!("batch:{}", batches.len());
+        commands.entity(entity).insert((
+            ModelOwner { root },
+            ModelBatch {
+                owner: root,
+                batch_id: batch_id.clone(),
+            },
+        ));
         for &index in &plan.parts {
             if let Some(spec) = specs.get(index) {
                 part_materials.insert(spec.id.clone(), material.clone());
             }
         }
         batched_parts.extend(plan.parts);
-        mesh_cache.insert(format!("batch:{}", batches.len()), asset.handle.clone());
+        mesh_cache.insert(batch_id, asset.handle.clone());
         spawned.push(entity);
         batch_parents.push((entity, plan.parent));
         batches.push(super::batch_cache::BatchBinding::new(entity, source, asset));
@@ -294,6 +317,15 @@ pub(super) fn spawn_v2(
                 entity
             }
         };
+        // 每个部件实体都携带根 owner 与稳定 `partId`：`ModelRoot.part_entities` 只作为
+        // 热路径 O(1) 索引，实体身份以组件为准（change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs，5.1）。
+        commands.entity(entity).insert((
+            ModelOwner { root },
+            ModelPart {
+                owner: root,
+                part_id: spec.id.clone(),
+            },
+        ));
         entities.insert(spec.id.clone(), entity);
         base_transforms.insert(spec.id.clone(), transform);
         spawned.push(entity);
@@ -339,6 +371,7 @@ pub(super) fn spawn_v2(
         group_children: Default::default(),
         entities: spawned,
         content_signature: String::new(),
+        texture_revision: crate::model3d::model_textures::revision(),
         resource: std::sync::Arc::new(ModelSnapshot::default()),
         placement: ModelPlacement::default(),
         layout: ModelRootLayout::V2 { root },

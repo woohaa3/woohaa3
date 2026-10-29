@@ -43,11 +43,6 @@
   flex: 1;
   min-width: 0;
 }
-.authoring-generate__model-id {
-  flex: 0 1 160px;
-  width: 160px;
-  min-width: 0;
-}
 .authoring-generate__hint {
   color: var(--authoring-secondary);
   font-size: 12px;

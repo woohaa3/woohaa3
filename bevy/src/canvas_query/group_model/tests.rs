@@ -132,14 +132,32 @@ fn model_content_does_not_change_badge_size_or_center() {
     assert!(
         frame
             .first()
-            .is_some_and(|point| point.distance(tail[0]) < 0.001)
+            .is_some_and(|point| point.distance(tail[2]) < 0.001)
     );
     assert!(
         frame
             .last()
             .is_some_and(|point| point.distance(tail[2]) < 0.001)
     );
-    assert!(!frame.iter().any(|point| point.distance(tail[1]) < 0.001));
+    assert!(
+        frame
+            .windows(2)
+            .any(|pair| pair[0].distance(tail[2]) < 0.001 && pair[1].distance(tail[1]) < 0.001)
+    );
+    assert!(
+        frame
+            .windows(2)
+            .any(|pair| pair[0].distance(tail[1]) < 0.001 && pair[1].distance(tail[0]) < 0.001)
+    );
+    let left = tail[0].x;
+    let right = tail[2].x;
+    let bottom = n.y + n.height;
+    assert!(!frame.windows(2).any(|pair| {
+        (pair[0].y - bottom).abs() < 0.001
+            && (pair[1].y - bottom).abs() < 0.001
+            && pair[0].x.min(pair[1].x) <= left + 0.001
+            && pair[0].x.max(pair[1].x) >= right - 0.001
+    }));
     assert!(path_contains(
         &outline(&n),
         Vec2::new(n.x + n.width / 2., n.y + n.height + BADGE_OUTSET / 2.)
@@ -166,10 +184,4 @@ fn independent_badge_scale_preserves_model_center_and_aspect() {
     n.height = 112.;
     let rect = badge_rect(&n);
     assert!((rect.y - (n.y + n.height + BADGE_OUTSET)).abs() < 0.001);
-    // 徽标允许明显大于承载它的 group：片场场景就画在徽标里。
-    n.width = 600.;
-    n.height = 400.;
-    n.group.as_mut().unwrap().badge_scale = 250.;
-    assert!(badge_rect(&n).z > n.width);
-    assert!((badge_rect(&n).z - badge_rect(&n).w * 88. / 64.).abs() < 0.001);
 }

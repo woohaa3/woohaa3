@@ -15,8 +15,8 @@ import type {
   TelemetryStatus,
   TelemetrySummary
 } from "@woohaa3/contracts";
-import { Button, IconButton } from "../../shared/ui/index.js";
-import { BackIcon, RefreshIcon } from "../../shared/ui/index.js";
+import { Button, IconButton } from "@woohaa3/ui";
+import { BackIcon, RefreshIcon } from "@woohaa3/ui";
 import "./telemetry.css";
 import { EventDetailPanel } from "./detail-panel.js";
 import { EventFilters, EventTable, LoadMoreBar } from "./event-list.js";

@@ -8,8 +8,8 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import type { ServerCanvas } from "@woohaa3/contracts";
 import { searchCanvasNodes, type CanvasSearchKind, type CanvasSearchResult } from "../domain/canvas-search.js";
 import type { CanvasSearchStore } from "../services/canvas-search-store.js";
-import { Button, IconButton } from "../../shared/ui/Button.js";
-import { CloseIcon, LocateIcon, SearchIcon } from "../../shared/ui/icons.js";
+import { Button, IconButton } from "@woohaa3/ui/primitives";
+import { CloseIcon, LocateIcon, SearchIcon } from "@woohaa3/ui/icons";
 
 export type CanvasSearchPanelProps = {
   store: CanvasSearchStore;

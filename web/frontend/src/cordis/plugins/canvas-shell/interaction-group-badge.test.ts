@@ -93,7 +93,7 @@ describe("group badge click", () => {
   it("折叠成员不获得资源准入，组徽标自身继续准入且不占离屏相机槽", () => {
     const f = setup({ collapsed: true });
     const candidates = collectResidencyCandidates(f.current(), node => `resource:${node.id}`);
-    expect(candidates.find(c => c.nodeId === "g")).toMatchObject({ eligible: true, previewSlot: false });
+    expect(candidates.find(c => c.nodeId === "g")).toMatchObject({ eligible: true, width: 196, height: 182, previewSlot: false });
     expect(candidates.find(c => c.nodeId === "m")).toMatchObject({ eligible: false });
     f.controller.dispose();
   });

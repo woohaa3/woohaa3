@@ -10,8 +10,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { NodeGenerationKind } from "@woohaa3/contracts";
 import type { ModelThumbnailRenderer } from "./model-thumbnail-render.js";
-import { Dialog, DialogBody, DialogHeader, DialogTitle } from "../../services/dialogs/Dialog.js";
-import { Button, SegmentedControl } from "../../../shared/ui/index.js";
+import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
+import { Button, SegmentedControl } from "@woohaa3/ui";
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import { HistoryPreview } from "./preview.js";
 import { CanvasHistoryController, type CanvasHistoryClient, type CanvasHistoryFilter } from "./canvas-history-controller.js";

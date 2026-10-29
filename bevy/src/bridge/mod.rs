@@ -48,6 +48,8 @@ thread_local! {
     static REVISION: Cell<u32> = const { Cell::new(0) };
     /// 待处理的截图请求（change: 2026-10-07-remove-residual-compatibility —— 直接 Shot Camera 边界）。
     static SHOT_CAPTURE_REQUEST: RefCell<Option<ShotCaptureBridgeRequest>> = const { RefCell::new(None) };
+    static SHOT_CAPTURE_ENQUEUED: std::cell::Cell<Option<std::time::Instant>> =
+        const { std::cell::Cell::new(None) };
     /// 完成的截图结果，按 (requestId, generation) 匹配后由 JS 取走。
     static SHOT_CAPTURE_RESULT: RefCell<Option<ShotCaptureBridgeResult>> = const { RefCell::new(None) };
     /// 页面内历史缩略图请求（latest-wins 单槽；JS 串行发送）
@@ -83,6 +85,10 @@ thread_local! {
     static MODEL_RENDER_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
     /// 预览同步阶段延迟快照（JSON；变化时写入）。
     static PREVIEW_LATENCY_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
+    /// 帧节奏状态标签（`idle` / `dwell` / `active:<reasons>`；变化时写入）。
+    ///
+    /// 静止降频是否真的生效只能从运行侧读：前端看不到 winit 的更新间隔。
+    static FRAME_PACING_DIAGNOSTICS: RefCell<String> = RefCell::new(String::new());
     /// 预览队列/纹理预算 gauge（active/pending/bytes/visible/retained/live/deferred/ready）。
     static PREVIEW_DIAGNOSTICS: Cell<[u64; 8]> = const { Cell::new([0; 8]) };
     /// 拍摄镜头卡片预览的实际工作/预算 gauge
@@ -155,6 +161,11 @@ pub(crate) fn set_shot_preview_diagnostics(gauges: [u64; 8]) {
 pub(crate) fn set_preview_latency_diagnostics(json: String) {
     PREVIEW_LATENCY_DIAGNOSTICS.with(|slot| *slot.borrow_mut() = json);
 }
+/// 记录帧节奏标签（只在翻转时调用，避免每帧格式化）。
+pub(crate) fn set_frame_pacing_diagnostics(label: String) {
+    FRAME_PACING_DIAGNOSTICS.with(|slot| *slot.borrow_mut() = label);
+}
+
 pub(crate) fn work_diagnostics() -> String {
     let latency = PREVIEW_LATENCY_DIAGNOSTICS.with(|slot| slot.borrow().clone());
     let render = RENDER_STAGE_DIAGNOSTICS.with(|v| v.borrow().clone());
@@ -165,8 +176,9 @@ pub(crate) fn work_diagnostics() -> String {
     // 3D 根按可见地面顺序做整对象分离；这里只报告接受点结算到的根/重叠簇规模，
     // 同一根内部的遮挡仍交给深度缓冲（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D3/D4）。
     let depth = crate::depth_order::diagnostics();
+    let pacing = FRAME_PACING_DIAGNOSTICS.with(|v| v.borrow().clone());
     format!(
-        "{{\"snapshotBuilds\":{},\"pickCandidateBuilds\":{},\"meshBuilds\":{},\"cardBlockBuilds\":{},\"cardDecorationBuilds\":{},\"edgeBlockBuilds\":{},\"containerBlockBuilds\":{},\"filmSetItems\":{},\"models\":{},\"renderStages\":{},\"previewLatency\":{},\"previews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"shotPreviews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"depthOrder\":{{\"roots\":{},\"clusters\":{},\"compressedClusters\":{}}}}}",
+        "{{\"snapshotBuilds\":{},\"pickCandidateBuilds\":{},\"meshBuilds\":{},\"cardBlockBuilds\":{},\"cardDecorationBuilds\":{},\"edgeBlockBuilds\":{},\"containerBlockBuilds\":{},\"filmSetItems\":{},\"models\":{},\"renderStages\":{},\"previewLatency\":{},\"previews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"shotPreviews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"depthOrder\":{{\"roots\":{},\"clusters\":{},\"compressedClusters\":{}}},\"pacing\":\"{}\"}}",
         WORK_SNAPSHOT_BUILDS.with(Cell::get),
         WORK_PICK_CANDIDATE_BUILDS.with(Cell::get),
         WORK_MESH_BUILDS.with(Cell::get),
@@ -196,7 +208,8 @@ pub(crate) fn work_diagnostics() -> String {
         shot_preview[7],
         depth.roots,
         depth.clusters,
-        depth.compressed_clusters
+        depth.compressed_clusters,
+        pacing
     )
 }
 
@@ -247,6 +260,8 @@ pub(crate) struct ShotCaptureBridgeRequest {
     pub(crate) bridge_generation: u64,
     /// 目标 rig entity（仅运行时系统读取；跨边界由 node_id → rig 解析）。
     pub(crate) node_id: String,
+    /// 请求来源标签（诊断用；缺省为空串）。
+    pub(crate) source: String,
     pub(crate) width: u32,
     pub(crate) height: u32,
 }
@@ -278,12 +293,17 @@ pub(crate) enum ShotCaptureBridgeOutcome {
 
 /// 排队一次截图请求（latest-wins）。
 pub(crate) fn queue_shot_capture(request: ShotCaptureBridgeRequest) {
+    SHOT_CAPTURE_ENQUEUED.with(|slot| slot.set(Some(std::time::Instant::now())));
     SHOT_CAPTURE_REQUEST.with(|slot| *slot.borrow_mut() = Some(request));
 }
 
 /// 一次性取走截图请求。
 pub(crate) fn take_shot_capture_request() -> Option<ShotCaptureBridgeRequest> {
-    SHOT_CAPTURE_REQUEST.with(|slot| slot.borrow_mut().take())
+    let request = SHOT_CAPTURE_REQUEST.with(|slot| slot.borrow_mut().take());
+    if request.is_some() {
+        SHOT_CAPTURE_ENQUEUED.with(|slot| slot.set(None));
+    }
+    request
 }
 
 /// 仍在 bridge slot 中、尚未被 `route_capture_request` 取走的截图节点。
@@ -292,6 +312,32 @@ pub(crate) fn take_shot_capture_request() -> Option<ShotCaptureBridgeRequest> {
 /// 在 GPU ready/readback 前被降档或回收（B1.6）。
 pub(crate) fn queued_shot_capture_node() -> Option<String> {
     SHOT_CAPTURE_REQUEST.with(|slot| slot.borrow().as_ref().map(|r| r.node_id.clone()))
+}
+
+/// 仍在 bridge slot 中的截图请求的（节点 id, 来源标签）：诊断用。
+pub(crate) fn queued_shot_capture_details() -> Option<(String, String)> {
+    SHOT_CAPTURE_REQUEST.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|r| (r.node_id.clone(), r.source.clone()))
+    })
+}
+
+/// 排队超过 `timeout` 秒仍未被路由的请求：取走并按超时收尾，释放它 pin 住的片场。
+///
+/// 用排队时刻的单调时钟计时（`now` 仅为调用方语义对齐，不参与计算）：请求可能在
+/// 前端已经放弃轮询之后仍留在 slot 里，不清理会让归属片场永久停在 High
+/// （2026-10-28 卡住的截图 pin 修复）。
+pub(crate) fn expire_queued_shot_capture(
+    _now: f64,
+    timeout: f64,
+) -> Option<ShotCaptureBridgeRequest> {
+    let queued = SHOT_CAPTURE_ENQUEUED.with(|slot| slot.get())?;
+    if queued.elapsed().as_secs_f64() < timeout {
+        return None;
+    }
+    SHOT_CAPTURE_ENQUEUED.with(|slot| slot.set(None));
+    SHOT_CAPTURE_REQUEST.with(|slot| slot.borrow_mut().take())
 }
 
 /// 发布完成的截图结果（latest-wins）。
@@ -446,21 +492,42 @@ pub(crate) fn queue_positions(positions: Vec<NodePosition>, viewport: Option<Vie
 ///
 /// `content` 是稳定内容身份（同资产同档位共享同一 GPU 纹理）；`None` 表示独占纹理
 /// （例如上传中的本地幽灵预览）。内容身份**不含** nodeId。
-pub(crate) fn queue_texture(id: &str, width: u32, height: u32, rgba: &[u8], content: Option<&str>) {
+pub(crate) fn queue_texture(
+    id: &str,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    content: Option<&str>,
+) {
+    queue_texture_owned(id, width, height, rgba.to_vec(), content);
+}
+
+/// Native requests already own their bytes; move them into the inbox.
+pub(crate) fn queue_texture_owned(
+    id: &str,
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+    content: Option<&str>,
+) {
     TEXTURES.with(|textures| {
         textures.borrow_mut().insert(
             id.to_owned(),
-            (width, height, rgba.to_vec(), content.map(str::to_owned)),
+            (width, height, rgba, content.map(str::to_owned)),
         );
     });
 }
 
 /// 记录一次合法片场媒体平面纹理上传（键为全局唯一 `planeId`；latest-wins）。
 pub(crate) fn queue_film_set_texture(id: &str, width: u32, height: u32, rgba: &[u8]) {
+    queue_film_set_texture_owned(id, width, height, rgba.to_vec());
+}
+
+pub(crate) fn queue_film_set_texture_owned(id: &str, width: u32, height: u32, rgba: Vec<u8>) {
     FILM_SET_TEXTURES.with(|textures| {
         textures
             .borrow_mut()
-            .insert(id.to_owned(), (width, height, rgba.to_vec()));
+            .insert(id.to_owned(), (width, height, rgba));
     });
 }
 

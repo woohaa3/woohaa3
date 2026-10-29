@@ -13,9 +13,9 @@
  */
 import { useEffect, useState } from "react";
 import type { InteractionController } from "./interaction-controller.js";
-import { IconButton } from "../../../shared/ui/Button.js";
-import { Tooltip } from "../../../shared/ui/Tooltip.js";
-import { ZoomInIcon, ZoomOutIcon } from "../../../shared/ui/icons.js";
+import { IconButton } from "@woohaa3/ui/primitives";
+import { Tooltip } from "@woohaa3/ui/primitives";
+import { ZoomInIcon, ZoomOutIcon } from "@woohaa3/ui/icons";
 
 /** 滑杆上限（%），与 contracts 的 `WOOHAA3_CANVAS_MAX_ZOOM`（12 倍）一致。 */
 const ZOOM_SLIDER_MAX_PERCENT = 1200;

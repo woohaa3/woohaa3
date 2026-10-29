@@ -5,8 +5,7 @@
 //! world/场景 helper。
 
 mod batching;
-mod film_set_layout;
-mod filmset_camera;
+mod ownership;
 #[cfg(feature = "explicit-instancing")]
 mod instancing;
 mod lifecycle;
@@ -111,6 +110,18 @@ pub(super) fn world_with_resources() -> World {
     world.init_resource::<ModelVisuals>();
     world.init_resource::<FocusVisuals>();
     world
+}
+
+/// 从实体组件派生本帧透明度实例视图（`OpacityMaterials` 只保留回收策略）。
+pub(super) fn opacity_instances(
+    world: &mut World,
+) -> HashMap<Entity, crate::canvas_ecs::components::OpacityMaterialInstance> {
+    let mut query = world
+        .query::<(Entity, &crate::canvas_ecs::components::OpacityMaterialInstance)>();
+    query
+        .iter(world)
+        .map(|(entity, instance)| (entity, instance.clone()))
+        .collect()
 }
 
 mod demand;

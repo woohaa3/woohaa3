@@ -10,7 +10,8 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { UiProvider, type CanvasGroupRun } from "@woohaa3/frontend/extension-api";
+import { UiProvider } from "@woohaa3/ui/primitives";
+import { type CanvasGroupRun } from "@woohaa3/frontend/extension-api";
 import { ACTIVITY_EXIT_DURATION_MS, ACTIVITY_TERMINAL_LINGER_MS, TaskActivityStore } from "../src/frontend/store.js";
 import { TaskActivityFeed } from "../src/frontend/feed.js";
 

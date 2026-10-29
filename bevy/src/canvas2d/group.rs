@@ -36,7 +36,7 @@ pub(super) const GROUP_FILL_ALPHA: f32 = 0.55;
 /// 组面板圆角，与组外框的 12 单位语言一致。
 const GROUP_PANEL_RADIUS: f32 = 12.;
 
-pub(super) fn is_running(node: &crate::protocol::GraphNode) -> bool {
+pub(crate) fn is_running(node: &crate::protocol::GraphNode) -> bool {
     node.group
         .as_ref()
         .and_then(|g| g.run_status.as_ref())
@@ -110,53 +110,39 @@ pub(crate) fn draw_group(
     selected: bool,
     z: f32,
 ) -> (String, Vec2, f32, u32) {
-    let (x, y, width, height) = (node.x, node.y, node.width, node.height);
-    if presentation.collapsed {
-        return (
-            String::new(),
-            Vec2::ZERO,
-            0.,
-            theme.token_u32("canvasBodyText"),
-        );
-    }
-    if selected && node.resizable {
-        super::cards::draw_resize_grip(geometry, theme, node, z + 0.03);
-    }
+    let (x, y, width, _height) = (node.x, node.y, node.width, node.height);
+    if selected && node.resizable { super::cards::draw_resize_grip(geometry, theme, node, z + 0.03); }
     // 选中态用更强的虚线框颜色表达，而不是铺一层不透明选中底：容器铺底会盖住成员
     // （change: fix-group-and-marquee-preview）。
-    let border = if presentation.drop_target {
-        theme.token_u32("interactionAccent")
-    } else if selected {
-        theme.token_u32("canvasNodeBorderSelected")
-    } else {
-        theme.token_u32("canvasNodeBorder")
-    };
     // Continuous group surfaces are drawn by the per-group transparent panel
     // entity; this shared mesh owns only the perimeter, text and controls.
-    let path = super::group_outline::path(node);
-    if is_running(node) {
-        let color = if selected {
-            border
+    // 选中态边框由 `draw_group_selection` 独立生产：这里跳过，避免同一位置重复几何。
+    if !selected {
+        let border = if presentation.drop_target {
+            theme.token_u32("interactionAccent")
         } else {
-            super::group_motion::mix(border, theme.token_u32("interactionAccent"), 0.55)
+            theme.token_u32("canvasNodeBorder")
         };
-        super::group_outline::stroke(
-            geometry,
-            &path,
-            0.,
-            super::group_outline::length(&path),
-            2.,
-            z + 0.001,
-            color,
-        );
-    } else {
-        dashed_polyline(
-            geometry,
-            &crate::canvas_query::group_model::frame_path(node),
-            GROUP_BORDER,
-            z + 0.001,
-            border,
-        );
+        let path = super::group_outline::path(node);
+        if is_running(node) {
+            super::group_outline::stroke(
+                geometry,
+                &path,
+                0.,
+                super::group_outline::length(&path),
+                2.,
+                z + 0.001,
+                super::group_motion::mix(border, theme.token_u32("interactionAccent"), 0.55),
+            );
+        } else {
+            dashed_polyline(
+                geometry,
+                &crate::canvas_query::group_model::frame_path(node),
+                GROUP_BORDER,
+                z + 0.001,
+                border,
+            );
+        }
     }
     if let Some(corner) = crate::canvas_query::group_model::resize_center(node) {
         let color = theme.token_u32("canvasResizeHandle");
@@ -170,18 +156,7 @@ pub(crate) fn draw_group(
             );
         }
     }
-    if selected && node.resizable {
-        let corner = Vec2::new(x + width - 4., y + height - 4.);
-        for length in [6., 11.] {
-            geometry.line(
-                corner - Vec2::X * length,
-                corner - Vec2::Y * length,
-                1.5,
-                z + 0.02,
-                theme.token_u32("canvasResizeHandle"),
-            );
-        }
-    }
+
     // 左上角标题：`标题 · N 项`；无标题时只显示计数。
     let title = if presentation.title.trim().is_empty() {
         String::new()
@@ -207,6 +182,50 @@ pub(crate) fn draw_group(
         12.,
         theme.token_u32("canvasBodyText"),
     )
+}
+
+/// group 持久选中描边 producer：选中边框（虚线/运行描边）与选中 resize 抓手。
+///
+/// 与基础 group 几何互斥，同一位置不会产生两份描边。
+pub(crate) fn draw_group_selection(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    node: &crate::protocol::GraphNode,
+    z: f32,
+) {
+    let color = theme.token_u32("canvasNodeBorderSelected");
+    let path = super::group_outline::path(node);
+    if is_running(node) {
+        super::group_outline::stroke(
+            geometry,
+            &path,
+            0.,
+            super::group_outline::length(&path),
+            2.,
+            z + 0.001,
+            color,
+        );
+    } else {
+        dashed_polyline(
+            geometry,
+            &crate::canvas_query::group_model::frame_path(node),
+            GROUP_BORDER,
+            z + 0.001,
+            color,
+        );
+    }
+    if node.resizable {
+        let corner = Vec2::new(node.x + node.width - 4., node.y + node.height - 4.);
+        for length in [6., 11.] {
+            geometry.line(
+                corner - Vec2::X * length,
+                corner - Vec2::Y * length,
+                1.5,
+                z + 0.02,
+                theme.token_u32("canvasResizeHandle"),
+            );
+        }
+    }
 }
 
 pub(crate) fn draw_run_status(
@@ -527,16 +546,10 @@ mod tests {
             else {
                 panic!("panel must carry vertex colors");
             };
-            assert!(
-                colors
-                    .iter()
-                    .all(|color| (color[3] - GROUP_FILL_ALPHA).abs() < 1e-6)
-            );
-            assert!(
-                colors
-                    .iter()
-                    .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999)
-            );
+            assert!(colors.iter().all(|color| (color[3] - GROUP_FILL_ALPHA).abs() < 1e-6));
+            assert!(colors
+                .iter()
+                .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999));
         }
     }
 
@@ -594,7 +607,9 @@ mod tests {
                 };
                 let layout = crate::canvas_query::group_model::for_node(&node).unwrap();
                 let badge = crate::canvas_query::group_model::badge_rect(&node);
-                assert!(points.iter().all(|p| -p[1] <= badge.y + badge.w + 1.));
+                assert!(points
+                    .iter()
+                    .all(|p| -p[1] <= badge.y + badge.w + 1.));
                 assert!(
                     !points
                         .iter()

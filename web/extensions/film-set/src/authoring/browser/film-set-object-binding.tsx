@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button } from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
 import { filmSetClipPrecondition, filmSetItemAdapterHash, type FilmSetAnimationClip, type FilmSetAnimations, type FilmSetItem } from "@woohaa3/contracts";
 import type { FilmSetHostContext } from "../../state/browser/host-ports.js";
 

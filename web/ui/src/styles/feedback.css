@@ -1,0 +1,3 @@
+.ui-copy-field { display: inline-flex; align-items: center; gap: 4px; }
+.ui-copy-field svg { width: 13px; height: 13px; }
+.ui-copy-field-feedback { font-size: 11px; color: var(--app-web-text-muted); }

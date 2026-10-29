@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Button, IconButton, ChevronDownIcon } from "@woohaa3/frontend/extension-api";
+import { Button, IconButton } from "@woohaa3/ui/primitives";
+import { ChevronDownIcon } from "@woohaa3/ui/icons";
 
 /** 收起只隐藏内容，保留宿主生成面板的草稿、连接、模型选择与运行状态。 */
 export function FilmSetGenerateDock({ hidden, collapsed, onCollapsedChange, shotName, selectedItem, targetItemId, onTargetChange, children }: {

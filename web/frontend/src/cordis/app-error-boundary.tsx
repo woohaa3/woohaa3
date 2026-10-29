@@ -12,7 +12,7 @@
  * 边界不静默吞错：`componentDidCatch` 仍把原始错误打到 console。
  */
 import { Component, type ReactNode } from "react";
-import { Button } from "../shared/ui/index.js";
+import { Button } from "@woohaa3/ui";
 
 /**
  * 刷新当前应用。

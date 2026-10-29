@@ -17,8 +17,8 @@ import {
   DialogMediaWorkspace,
   DialogStage,
   DialogTitle
-} from "../../services/dialogs/Dialog.js";
-import { PlayIcon, PauseIcon } from "../../../shared/ui/index.js";
+} from "@woohaa3/ui/dialogs";
+import { PlayIcon, PauseIcon } from "@woohaa3/ui";
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import {
   useCaptureSession,

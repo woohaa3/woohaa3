@@ -223,6 +223,137 @@ describe("性能事件（change: 2026-10-25-enhance-telemetry-performance-collec
     expect(event?.attributes?.mode).toBe("dev");
   });
 
+  it("perf.lod 归一：档位分布进属性，不需要 durationMs", () => {
+    // 2026-10-28 片场总览 LOD 遥测采样。
+    const event = normalizeTelemetryEvent(
+      base({
+        name: "perf.lod",
+        surface: "canvas",
+        attributes: {
+          mode: "production",
+          low: 2,
+          medium: 1,
+          high: 3,
+          preparing: 1,
+          fractionMax: 0.412,
+          reasons: "overview=5,offscreen=1"
+        }
+      }),
+      { now: NOW }
+    );
+    expect(event?.name).toBe("perf.lod");
+    expect(event?.durationMs).toBeUndefined();
+    expect(event?.attributes).toEqual({
+      mode: "production",
+      low: 2,
+      medium: 1,
+      high: 3,
+      preparing: 1,
+      fractionMax: 0.412,
+      reasons: "overview=5,offscreen=1"
+    });
+  });
+
+  it("perf.lod 缺分布计数、出现负数或节点维度时整条丢弃", () => {
+    // 缺 low/medium/high 之一：无法解释"哪个档位有多少片场"。
+    expect(
+      normalizeTelemetryEvent(base({ name: "perf.lod", attributes: { mode: "dev", low: 1, medium: 0 } }), { now: NOW })
+    ).toBeNull();
+    // 负数会让聚合表画出负档位。
+    expect(
+      normalizeTelemetryEvent(
+        base({ name: "perf.lod", attributes: { mode: "dev", low: -1, medium: 0, high: 0 } }),
+        { now: NOW }
+      )
+    ).toBeNull();
+    // 逐节点事件走诊断面，不进入遥测白名单。
+    expect(
+      normalizeTelemetryEvent(
+        base({ name: "perf.lod", attributes: { mode: "dev", low: 1, medium: 0, high: 0, node: "film-1" } }),
+        { now: NOW }
+      )
+    ).toBeNull();
+  });
+
+  it("perf.lod 的 owners 只接受有界摘要串", () => {
+    // dev 构建用来把「哪几个根停在 High」落到可回查的节点 id 末 12 字符；最多 3 条 + `+N`。
+    const event = normalizeTelemetryEvent(
+      base({
+        name: "perf.lod",
+        attributes: {
+          mode: "dev",
+          low: 1,
+          medium: 0,
+          high: 2,
+          reasons: "overview=1,high-owner=2",
+          owners: "1f2770cab380:high-owner,d4fa99cf-ad88:high-owner"
+        }
+      }),
+      { now: NOW }
+    );
+    expect(event?.attributes?.owners).toBe("1f2770cab380:high-owner,d4fa99cf-ad88:high-owner");
+  });
+
+  it("perf.lod 的 owners 形状不合法时整条丢弃", () => {
+    for (const owners of [
+      "a:high-owner,b:high-owner,c:high-owner,d:high-owner,e:other",
+      `${"x".repeat(41)}:other`
+    ]) {
+      expect(
+        normalizeTelemetryEvent(
+          base({ name: "perf.lod", attributes: { mode: "dev", low: 0, medium: 0, high: 1, owners } }),
+          { now: NOW }
+        )
+      ).toBeNull();
+    }
+  });
+
+  it("perf.lod 的 pins 只接受有界摘要串", () => {
+    const event = normalizeTelemetryEvent(
+      base({
+        name: "perf.lod",
+        attributes: {
+          mode: "dev",
+          low: 1,
+          medium: 0,
+          high: 2,
+          pins: "shot-previe,1f2770cab380"
+        }
+      }),
+      { now: NOW }
+    );
+    expect(event?.attributes?.pins).toBe("shot-previe,1f2770cab380");
+  });
+
+  it("perf.lod 的 pins 形状不合法时整条丢弃", () => {
+    for (const pins of ["a,b,c,d,e", "x".repeat(41)]) {
+      expect(
+        normalizeTelemetryEvent(
+          base({ name: "perf.lod", attributes: { mode: "dev", low: 0, medium: 0, high: 1, pins } }),
+          { now: NOW }
+        )
+      ).toBeNull();
+    }
+  });
+
+  it("pins 不属于其它性能事件的属性集合", () => {
+    expect(
+      normalizeTelemetryEvent(
+        base({ name: "perf.frame", attributes: { mode: "dev", pins: "1f2770cab380" } }),
+        { now: NOW }
+      )
+    ).toBeNull();
+  });
+
+  it("owners 不属于其它性能事件的属性集合", () => {
+    expect(
+      normalizeTelemetryEvent(
+        base({ name: "perf.frame", attributes: { mode: "dev", owners: "1f2770cab380:other" } }),
+        { now: NOW }
+      )
+    ).toBeNull();
+  });
+
   it("缺 mode 的性能事件整条丢弃", () => {
     for (const name of ["perf.startup", "perf.interaction", "perf.segment", "perf.frame"]) {
       expect(normalizeTelemetryEvent(base({ name, attributes: {} }), { now: NOW })).toBeNull();

@@ -50,6 +50,14 @@ export { TASK_ACTIVITY_PLUGIN_ID } from "../shared.js";
  */
 export const TASK_ACTIVITY_STORE_SERVICE = "taskActivityStore";
 
+/**
+ * Skill 步骤轮询间隔（任务 5.2）。
+ *
+ * 步骤来源是应用服务快照：面板用有界轮询保持「当前尝试」与宿主事实一致，打开详情时再按
+ * 步骤身份显式核对一次（事件重放/断线恢复）。轮询失败保留上次快照，不清空记录。
+ */
+const SKILL_STEPS_POLL_MS = 3_000;
+
 /** 宿主在 extension scope 注入的能力。 */
 type ExtensionContext = Context & {
   canvasNavigation: CanvasNavigationService;
@@ -113,8 +121,7 @@ export function taskActivityExtension(): Plugin.Function<void> {
           },
           action: async (row, action) => {
             if (action === "stop") await groupRuns.stop(row.requestId);
-            else if (action === "retry") await groupRuns.retry(row.creation!.requestId);
-            else await groupRuns.refresh();
+            else await groupRuns.retry(row.creation!.requestId);
           },
           openConversation: (row) => {
             const conversations = ctx.get("agentConversationService" as never) as AgentConversationServiceHandle | undefined;
@@ -127,6 +134,24 @@ export function taskActivityExtension(): Plugin.Function<void> {
               throw new Error("无法打开对话详情，详情面板尚未就绪");
             }
           }
+        },
+        skill: {
+          resolveTitle: (nodeId) => {
+            const data = ctx.canvasState.getWorkingCanvas()?.nodeData[nodeId] as { title?: string } | undefined;
+            return data?.title || "";
+          },
+          refresh: async (step) => {
+            const conversations = ctx.get("agentConversationService" as never) as AgentConversationServiceHandle | undefined;
+            if (!conversations?.skillStepDetail) throw new Error("Skill 步骤服务尚未就绪");
+            const result = await conversations.skillStepDetail({
+              canvasId,
+              skillRunId: step.skillRunId,
+              stepId: step.stepId
+            });
+            if (!result.ok) throw new Error(result.error || "状态核对失败");
+            // resetRequired 只说明事件页不连续；快照本身就是权威事实，直接回填即可。
+            store.applySkillStep(result.value.step);
+          }
         }
       });
 
@@ -134,6 +159,20 @@ export function taskActivityExtension(): Plugin.Function<void> {
       const disposeGroups = groupRuns.subscribe(syncGroups);
       syncGroups();
       const disposeOpen = ctx.on("ui.task-activity.open-requested", ({ nodeId }) => store.openGroup(nodeId));
+
+      // Skill 步骤：宿主应用服务是事实源；面板持有有界轮询，失败时保留上次快照。
+      let skillTimer: ReturnType<typeof setInterval> | undefined;
+      const syncSkills = () => {
+        const conversations = ctx.get("agentConversationService" as never) as AgentConversationServiceHandle | undefined;
+        if (!conversations?.skillSteps) return;
+        void conversations.skillSteps({ canvasId, limit: 20 })
+          .then((result) => {
+            if (result.ok) store.replaceSkillSteps(result.value.steps);
+          })
+          .catch(() => undefined);
+      };
+      syncSkills();
+      skillTimer = setInterval(syncSkills, SKILL_STEPS_POLL_MS);
 
       // 3) 注册 listener 并把 disposer 绑定到 scope。
       const disposeStarted = ctx.on("task.activity.started", (payload) => {
@@ -208,10 +247,11 @@ export function taskActivityExtension(): Plugin.Function<void> {
         render: () => <TaskActivityFeed {...feedProps} />
       });
 
-      // 反序清理：overlay → bridge → listener → store。
+      // 反序清理：overlay → bridge → listener / 轮询 → store。
       return () => {
         removeOverlay();
         bridge.stop();
+        if (skillTimer !== undefined) clearInterval(skillTimer);
         disposeStarted();
         disposeUpdated();
         disposeFinished();

@@ -128,7 +128,7 @@ export function createAgentConversationService(
     snapshot = { ...snapshot, ...patch, ...(patch.active ? { turnsByRequest: { ...snapshot.turnsByRequest, [patch.active.requestId]: patch.active } } : {}) };
     // Retain every active request and only a bounded window of settled summaries.
     const indexed = Object.entries(snapshot.turnsByRequest ?? {});
-    const settled = indexed.filter(([, value]) => !["queued", "running", "committing", "unknown"].includes(value.turn.status));
+    const settled = indexed.filter(([, value]) => !["queued", "running", "committing"].includes(value.turn.status));
     if (settled.length > 256) {
       const evicted = new Set(settled.slice(0, settled.length - 256).map(([key]) => key));
       snapshot = { ...snapshot, turnsByRequest: Object.fromEntries(indexed.filter(([key]) => !evicted.has(key))) };
@@ -527,7 +527,12 @@ export function createAgentConversationService(
       return result;
     },
     cancelTurn: (requestId) => remote.cancel(requestId),
-    linkRun: (requestId, input) => remote.link(requestId, input)
+    linkRun: (requestId, input) => remote.link(requestId, input),
+    skillStep: (input) => remote.skillStepByNode(input.canvasId, input.nodeId),
+    skillSteps: (input) => remote.skillSteps(input.canvasId, input.limit),
+    skillStepDetail: (input) => remote.skillStepDetail(input),
+    cancelSkillStep: (input) => remote.cancelSkillStep(input),
+    regenerateSkillStep: (input) => remote.regenerateSkillStep(input)
   };
 }
 

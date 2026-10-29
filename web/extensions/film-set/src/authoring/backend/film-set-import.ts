@@ -1,7 +1,7 @@
 import { readFilmSetGroupMarker, createFilmSetGroupMarker, contentKeyForFilmSetGroupSource, readFilmSetAnimationProjection, filmSetAnimationsOf, cloneFilmSetAnimations } from "@woohaa3/contracts";
 import type { CanvasAuthority } from "@woohaa3/contracts";
 import type { CanvasCommand, CanvasNodeData, ServerCanvas, StoredAsset } from "@woohaa3/contracts";
-import { cloneFilmSetLocalTransform, type FilmSetLocalTransform, decodeModel3DNodeData, decodeFilmSetContent, emptyFilmSetContent, extendedTimelineDuration, filmSetContentHash, planFilmSetImportItems, type FilmSetImportItemDraft, type FilmSetImportSource } from "@woohaa3/contracts";
+import { appendFilmSetItems, cloneFilmSetLocalTransform, type FilmSetLocalTransform, decodeFilmSetNodeData, scriptModel3DNodeData, decodeFilmSetContent, emptyFilmSetContent, extendedTimelineDuration, filmSetContentHash, planFilmSetImportItems, type FilmSetImportItemDraft, type FilmSetImportSource } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, type CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
 import type { ImportFilmSetContentOutcome } from "@woohaa3/contracts";
 
@@ -215,14 +215,14 @@ export function resolveImportSource(
     if (source.type !== "model3d") {
       return { ok: false, code: "unsupported-source", message: "仅普通模型、图片和视频可导入片场" };
     }
-    const decoded = decodeModel3DNodeData(canvas.nodeData[source.id] as CanvasNodeData | undefined);
-    if (!decoded.ok) return { ok: false, code: "invalid-source", message: decoded.reason };
-    if (item.expectedSourceHash && decoded.value.model.contentVersion.sourceHash !== item.expectedSourceHash) {
+    const decoded = scriptModel3DNodeData(canvas.nodeData[source.id] as CanvasNodeData | undefined);
+    if (!decoded) return { ok: false, code: "unsupported-source", message: "文件模型无法导入片场" };
+    if (item.expectedSourceHash && decoded.model.contentVersion.sourceHash !== item.expectedSourceHash) {
       return { ok: false, code: "stale-source", message: "来源模型已被并发修改" };
     }
     return {
       ok: true,
-      value: { kind: "model", name: item.name, model: decoded.value.model }
+      value: { kind: "model", name: item.name, model: decoded.model }
     };
   }
   if (item.kind === "image" || item.kind === "video") {

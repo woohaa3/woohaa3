@@ -8,7 +8,7 @@
  * - 存储不可用 = 故障，要给出文件路径并保证不自动删除用户数据。
  * 合并成"暂无数据"会让复盘在最需要线索时失去线索。
  */
-import { Button } from "../../shared/ui/index.js";
+import { Button } from "@woohaa3/ui";
 import type { TelemetryViewState } from "./model.js";
 
 export type TelemetryStatePanelProps = {

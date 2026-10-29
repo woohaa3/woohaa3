@@ -253,6 +253,10 @@ export function createAggregateConnectFamily(
   const { state, submit, writable, schedule, buildScene } = core;
 
   const currentMembers = (): string[] | null => {
+    // A single group already owns its speech-bubble frame and output semantics. Returning an
+    // aggregate projection here would make the renderer add a second rounded selection band on
+    // top of the group's pointed frame.
+    if (state.selected.length < 2) return null;
     const canvas = workingCanvas();
     if (!canvas) return null;
     const members = expandSelectionMembers(canvas, state.selected);

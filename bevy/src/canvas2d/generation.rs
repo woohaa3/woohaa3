@@ -7,15 +7,16 @@
 
 use std::collections::HashMap;
 
-use bevy::{camera::visibility::NoFrustumCulling, prelude::*, sprite::Anchor, text::LineBreak};
+use bevy::{prelude::*, camera::visibility::NoFrustumCulling};
 
-use crate::app::CurrentScene;
+use crate::app::{CurrentScene, NodeIndex};
+use crate::canvas_ecs::components::{CanvasDepth, CanvasLabelRole, CanvasNodeId};
 use crate::generation_progress::{display_percent, estimate_percent};
 
 use super::Visuals;
 use super::geometry::Geometry;
+use super::labels::{LabelRequests, LabelStyle};
 use super::layout::{generation_ring_rect, shows_generation_ring};
-use super::text_presentation::{LogicalText, TextScaleMode};
 
 /// 运行状态/加载提示的逻辑字号（世界单位）。
 const RUNNING_LABEL_FONT: f32 = 13.0;
@@ -38,21 +39,15 @@ pub(crate) fn sync_generation(
     mut commands: Commands,
     time: Res<Time>,
     scene: Res<CurrentScene>,
-    index: Res<crate::app::NodeIndex>,
+    index: Res<NodeIndex>,
     theme: Res<crate::theme::ThemeResource>,
     mut visuals: ResMut<Visuals>,
     mut clock: ResMut<GenerationClock>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut text_query: Query<
-        (
-            &mut Text2d,
-            &mut Transform,
-            &mut TextColor,
-            &mut LogicalText,
-        ),
-        Without<Sprite>,
-    >,
+    mut requests: ResMut<LabelRequests>,
+    nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
 ) {
+    requests.begin(CanvasLabelRole::Running);
     // 图片/视频聚焦期间隐藏所有普通节点覆盖层
     // （change: 2026-10-08-add-image-focus-editing-and-unified-node-history，任务 4.2；
     //  change: 2026-10-10-add-video-node-focus-workspace 扩展为视频聚焦）。
@@ -61,26 +56,27 @@ pub(crate) fn sync_generation(
         return;
     }
     let now = time.elapsed_secs();
-    let running: Vec<&crate::protocol::GraphNode> = scene
-        .0
-        .nodes
+    // 只读公共 ECS 组件定位候选节点，完整绘制 DTO 仍按 id 从同代快照取。
+    let running: Vec<(Entity, usize, crate::protocol::GraphNode)> = nodes
         .iter()
-        .filter(|node| {
+        .filter_map(|(entity, id, depth)| {
+            let node = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0)?.into_owned();
             // 进度/加载覆盖层只作用于普通内容节点：
             // - 生成任务：`shows_generation_ring` 覆盖紧凑与纯模型节点
             //   （change: 2026-10-12-unify-generation-history-strip）；
             // - 媒体解码/缓冲：`media_loading`（change: 2026-10-12-unify-node-editors-and-focus-transitions）。
             // 聚合节点（复合资产）用运行遮罩、group 用容器呈现，都不走此覆盖层。
             let plain = node.group.is_none() && node.composite_asset.is_none();
-            plain && (shows_generation_ring(node) || (node.media_loading && !node.busy))
+            (plain && (shows_generation_ring(&node) || (node.media_loading && !node.busy)))
+                .then_some((entity, depth.render, node))
         })
         .collect();
 
     // 清理已离开运行态的起点；为新运行节点写入稳定起点。
     clock
         .started
-        .retain(|id, _| running.iter().any(|node| node.busy && &node.id == id));
-    for node in &running {
+        .retain(|id, _| running.iter().any(|(_, _, node)| node.busy && &node.id == id));
+    for (_, _, node) in &running {
         if node.busy {
             clock.started.entry(node.id.clone()).or_insert(now);
         }
@@ -92,14 +88,10 @@ pub(crate) fn sync_generation(
     }
 
     let mut geometry = Geometry::default();
-    let mut active: Vec<String> = Vec::with_capacity(running.len());
-    for node in &running {
-        active.push(node.id.clone());
+    for (entity, render, node) in &running {
         // 该节点在文档中的 z 带（与卡片外壳同一公式）。进度覆盖层必须落在自身 z 带内，
         // 才能被上层卡片正确遮挡（change: 2026-10-09-fix-model-preview-layering-and-projection）。
-        // 同代节点索引按 id O(1) 定位（change: 2026-10-23-scale-canvas-media-residency，任务 7.2）。
-        let index = index.position(&node.id).unwrap_or(0);
-        let top_z = 10.0 + index as f32 * 0.1 + 0.01;
+        let top_z = 10.0 + *render as f32 * 0.1 + 0.01;
         let (accent, _, _) = theme.node_palette(&node.kind);
         let (cx, cy, cw, ch) = generation_ring_rect(node);
         // 内容面：与卡片内容区同形，作为进度环承载面（等价于预览区被替换）。
@@ -137,92 +129,21 @@ pub(crate) fn sync_generation(
             );
             (format!("{}%", percent.round() as i32), center)
         };
-        update_label(
-            &mut commands,
-            &mut visuals,
-            &mut text_query,
-            &node.id,
-            label,
-            position,
+        requests.push(
+            CanvasLabelRole::Running,
+            *entity,
+            vec![(label, position, RUNNING_LABEL_FONT, accent)],
             top_z + 0.01,
-            accent,
+            LabelStyle::Running,
         );
-    }
-
-    // 移除已不运行的百分比标签。
-    let stale: Vec<String> = visuals
-        .running_labels
-        .keys()
-        .filter(|id| !active.contains(id))
-        .cloned()
-        .collect();
-    for id in stale {
-        if let Some(entity) = visuals.running_labels.remove(&id) {
-            commands.entity(entity).despawn();
-        }
     }
 
     replace_overlay_mesh(&mut commands, &mut visuals, &mut meshes, geometry.build());
     visuals.running_active = true;
 }
 
-/// 更新或新建一个运行节点的百分比标签。
-#[allow(clippy::too_many_arguments)]
-fn update_label(
-    commands: &mut Commands,
-    visuals: &mut Visuals,
-    text_query: &mut Query<
-        (
-            &mut Text2d,
-            &mut Transform,
-            &mut TextColor,
-            &mut LogicalText,
-        ),
-        Without<Sprite>,
-    >,
-    id: &str,
-    label: String,
-    position: Vec2,
-    z: f32,
-    color: u32,
-) {
-    if let Some(entity) = visuals.running_labels.get(id).copied() {
-        if let Ok((mut text, mut transform, mut text_color, mut meta)) = text_query.get_mut(entity)
-        {
-            if text.0 != label {
-                text.0 = label;
-            }
-            transform.translation = Vec3::new(position.x, -position.y, z);
-            text_color.0 = super::layout::hex(color);
-            if !meta.matches(RUNNING_LABEL_FONT, None, TextScaleMode::World) {
-                meta.set(RUNNING_LABEL_FONT, None, TextScaleMode::World);
-            }
-            return;
-        }
-    }
-    let entity = commands
-        .spawn((
-            Text2d::new(label),
-            TextFont {
-                font: visuals.font.clone().into(),
-                font_size: FontSize::Px(RUNNING_LABEL_FONT),
-                ..default()
-            },
-            TextColor(super::layout::hex(color)),
-            TextLayout::new(Justify::Center, LineBreak::NoWrap),
-            Anchor::CENTER,
-            Transform::from_xyz(position.x, -position.y, z),
-            LogicalText::world(RUNNING_LABEL_FONT, None),
-        ))
-        .id();
-    visuals.running_labels.insert(id.to_owned(), entity);
-}
-
 /// 清空运行覆盖层（无运行节点时调用一次）。
 fn clear_overlay(commands: &mut Commands, visuals: &mut Visuals, meshes: &mut Assets<Mesh>) {
-    for (_, entity) in visuals.running_labels.drain() {
-        commands.entity(entity).despawn();
-    }
     if visuals.running_active {
         // 从「有运行节点」变为「无」：用不可见兜底几何替换旧覆盖层，然后释放实体句柄。
         if let Some(entity) = visuals.running_mesh_entity {

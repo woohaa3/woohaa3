@@ -46,8 +46,8 @@ describe("projectAgentTurnOperations", () => {
     expect(projectAgentTurnOperations(snapshot(turn({ status: "committing" })), "canvas-1")[0]?.state).toBe("running");
   });
 
-  it("终态与待核对不产生运行记录，节点不会停在执行中", () => {
-    for (const status of ["succeeded", "partial", "failed", "cancelled", "unknown"] as const) {
+  it("终态不产生运行记录，节点不会停在执行中", () => {
+    for (const status of ["succeeded", "partial", "failed", "cancelled"] as const) {
       expect(projectAgentTurnOperations(snapshot(turn({ status })), "canvas-1")).toEqual([]);
     }
   });

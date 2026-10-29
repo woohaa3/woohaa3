@@ -30,7 +30,7 @@ export type RoomExecutionHost = {
   readonly storageSeq: number;
   readonly publishedDoc: Y.Doc;
   nowIso(): string;
-  exportCanvas(): { ok: true; canvas: ServerCanvas } | { ok: false; message: string };
+  exportCanvas(): { ok: true; canvas: ServerCanvas } | { ok: false; code?: string; message: string };
   /** durable 成功后由 owner 推进 published/revision、按序调用 observer 并广播。 */
   finalizeAccepted(input: {
     storageSeq: number;

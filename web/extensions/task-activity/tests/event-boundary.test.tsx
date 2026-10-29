@@ -24,7 +24,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { CanvasTaskActivity } from "@woohaa3/contracts";
 import { TaskActivityStore } from "../src/frontend/store.js";
 import { TaskActivityFeed } from "../src/frontend/feed.js";
-import { UiProvider } from "@woohaa3/frontend/extension-api";
+import { UiProvider } from "@woohaa3/ui/primitives";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

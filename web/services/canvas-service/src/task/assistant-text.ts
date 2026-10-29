@@ -463,7 +463,7 @@ export function createCanvasAssistantTextPort(deps: {
                     type: "job.upsert",
                     job: {
                       ...job,
-                      status: status === "unknown" ? "running" : "failed",
+                      status: "failed",
                       error: message,
                       updatedAt: new Date().toISOString(),
                     },
@@ -499,8 +499,7 @@ export function createCanvasAssistantTextPort(deps: {
         },
       });
       if (!result.ok) fail(result.code, result.message);
-      if ((await room.lookupCommand(run.commandId)) || status === "unknown")
-        return;
+      if (await room.lookupCommand(run.commandId)) return;
       await deps.history?.registerTaskFailure({
         canvasId: prepared.canvasId,
         nodeId: prepared.nodeId,

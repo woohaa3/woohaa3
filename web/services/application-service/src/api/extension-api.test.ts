@@ -495,6 +495,63 @@ describe("受控原始 HTTP handler 分派（design D4）", () => {
     expect(result.raw).toContain("cookie=sid=1");
   });
 
+  it("公开路由的 404 区分「路由未注册」与「插件未激活」", async () => {
+    const store = createSqliteSiteExtensionConfigStore({ path: tempDb() });
+    const work = createSqliteExtensionWorkRepository({ path: tempDb() });
+    resources.push(store, work);
+    const host = createApplicationExtensionHost();
+    const metadata: ApplicationExtensionMetadata = {
+      ...METADATA,
+      extensionId: "route-plugin",
+      capabilities: [{ id: "raw", kind: "handler", description: "raw", auth: "public" }]
+    };
+    const plane = createSiteExtensionControlPlane({
+      host,
+      store,
+      workStore: work,
+      metadata: { list: () => [metadata], get: (id) => (id === "route-plugin" ? metadata : undefined) },
+      definitions: [
+        {
+          extensionId: "route-plugin",
+          activate: (h) => {
+            h.registerRawHttpHandler?.({
+              route: "connections",
+              method: "GET",
+              auth: "public",
+              purpose: "read",
+              handle: async (_req, res) => {
+                res.statusCode = 200;
+                res.end("ok");
+              }
+            });
+          }
+        }
+      ],
+      now: () => new Date("2026-10-04T00:00:00.000Z")
+    });
+    const handler = createApplicationExtensionApiHandler({
+      controlPlane: plane,
+      host,
+      authenticator: createFakeRequestAuthenticator(() => null),
+      publicRoutes: [{ extensionId: "route-plugin", publicPath: "/api/route-plugin", route: "route-plugin", methods: ["GET"] }]
+    });
+    await plane.write({ extensionId: "route-plugin", expectedRevision: 0, enabled: true, values: {}, secretRefs: [], actor: "admin" });
+
+    const registered = await call(handler, makeRequest({ method: "GET", url: "/api/route-plugin/connections" }));
+    expect(registered.status).toBe(200);
+
+    // 激活了但这条 route 没注册：不能报「插件未激活」，否则排查会被引向扩展没起来。
+    const missing = await call(handler, makeRequest({ method: "GET", url: "/api/route-plugin/not-registered" }));
+    expect(missing.status).toBe(404);
+    expect(missing.body).toMatchObject({ code: "route-not-registered" });
+    expect((missing.body as { message: string }).message).toContain("未注册该路由");
+
+    await plane.write({ extensionId: "route-plugin", expectedRevision: plane.snapshot().revision, enabled: false, values: {}, secretRefs: [], actor: "admin" });
+    const inactive = await call(handler, makeRequest({ method: "GET", url: "/api/route-plugin/connections" }));
+    expect(inactive.status).toBe(404);
+    expect(inactive.body).toMatchObject({ code: "extension-not-found" });
+  });
+
   it.each([0, 20])("流式 deadline=%i：0 不限时，正数到达后实际取消连接", async deadlineMs => {
     const store = createSqliteSiteExtensionConfigStore({ path: ":memory:" });
     const work = createSqliteExtensionWorkRepository({ path: ":memory:" });

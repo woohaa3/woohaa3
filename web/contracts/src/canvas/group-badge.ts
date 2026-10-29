@@ -14,10 +14,11 @@ export function groupBadgeRect(rect: {x: number; y: number; width: number; heigh
   const height = Math.max(24, Math.min(64, rect.height - 32 + 6));
   const top = rect.y + rect.height + 6;
   const centerX = rect.x + rect.width / 2;
+  const baseCenterY = top + height / 2;
   // 徽标固定在气泡主体外侧；缩放只向下增长，不侵入组背板。
-  // 不把尺寸限制在 group 矩形内、也不设上限：片场徽标就是场景显示区。
-  const maxScale = Number.POSITIVE_INFINITY;
-  const scale = clampGroupBadgeScale(requested);
+  const maxScale = Math.max(1, Math.min(GROUP_BADGE_MAX_SCALE, (rect.width - 32) / width,
+    2 * (baseCenterY - rect.y - 32) / height));
+  const scale = Math.min(clampGroupBadgeScale(requested), maxScale);
   const scaledWidth = width * scale;
   const scaledHeight = height * scale;
   const center = {x: centerX, y: top + scaledHeight / 2};

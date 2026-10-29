@@ -183,6 +183,7 @@ export type ToolRow = {
   created_at: string;
 };
 
+// 旧版本可能遗留 `unknown`；读取期按终态处理（等价 failed），避免它继续当活动回合。
 const TERMINAL_TURN_STATES = new Set(["succeeded", "partial", "failed", "cancelled", "unknown"]);
 
 export function isTerminalTurnStatus(status: string): boolean {

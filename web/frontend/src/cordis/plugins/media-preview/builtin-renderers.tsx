@@ -7,8 +7,8 @@
  * `alert` 用 AlertDialog。renderer 工厂注入 `DialogsService`，因此不依赖模块级单例。
  */
 import { lazy, Suspense, useSyncExternalStore } from "react";
-import { AlertDialog } from "../../services/dialogs/AlertDialog.js";
-const MediaDialog = lazy(() => import("../../services/dialogs/MediaDialog.js").then(module => ({ default: module.MediaDialog })));
+import { AlertDialog } from "@woohaa3/ui/dialogs";
+const MediaDialog = lazy(() => import("@woohaa3/ui/media").then(module => ({ default: module.MediaDialog })));
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import { resolveAudioPreview, resolveImagePreview } from "./media-preview.js";
 import { resolveTextPreview } from "./text-preview.js";
@@ -17,7 +17,7 @@ import type { DialogsService } from "../../contracts.js";
 import type { ServerCanvas } from "@woohaa3/contracts";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { DialogBody, DialogContent, DialogHeader, DialogTitle } from "../../services/dialogs/Dialog.js";
+import { DialogBody, DialogContent, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
 
 type AlertPayload = {
   title: string;

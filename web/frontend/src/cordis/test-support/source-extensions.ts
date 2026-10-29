@@ -149,6 +149,10 @@ export function createSourceExtensionRuntimeService(
       return runtime;
     },
     current: () => runtime,
+    // 源码型测试 runtime 没有发布目录，刷新条目是空操作（change: 2026-10-27-add-extension-dev-reload）。
+    async refreshEntry() {
+      return { changed: false, artifactId: null };
+    },
     metadata: () => [...byId.values()].map((entry) => entry.metadata),
     entry: (extensionId) => byId.get(extensionId),
     async loadDescriptor(extensionId) {

@@ -111,8 +111,22 @@ export function buildCanvasCopyPayload(
     if (managed) previewOwnerByNode.set(node.id, managed.ownerNodeId);
   }
   for (const node of nodes) {
-    const owner = previewOwnerByNode.get(node.id);
-    if (owner && included.has(owner)) included.add(node.id);
+    if (!included.has(node.id)) continue;
+    const ownership = filmSetObjectOwnershipOf(canvas.nodeData[node.id]);
+    if (!ownership || included.has(ownership.filmSetNodeId)) continue;
+    const ownerData = canvas.nodeData[ownership.filmSetNodeId];
+    const decoded = decodeFilmSetNodeData(ownerData);
+    if (!decoded.ok) continue;
+    const item = decoded.value.filmSetContent.items.find(candidate => candidate.id === ownership.itemId);
+    if (!item || item.kind !== "model") {
+      // 空容器没有可独立复制的内容；从选区中移除，避免产生悬空容器。
+      included.delete(node.id);
+      continue;
+    }
+    materializedNodeIds.add(node.id);
+    materializedModelData.set(node.id, JSON.parse(JSON.stringify(model3DNodeDataFields({
+      kind: "model3d", title: item.name, source: "script", model: item.model
+    }))) as Woohaa3CanvasJsonObject);
   }
   if (included.size === 0) return null;
   const copyNodes: CopyNode[] = nodes.filter(node => included.has(node.id)).map(toCopyNode);
@@ -162,7 +176,7 @@ export function buildCanvasCopyPayload(
     if (!data) continue;
     for (const assetId of imageEditAssetIdsOf(data)) referencedAssetIds.add(assetId);
     // 内容引用与视频封面：只带指针不带资产会得到「有引用、没有图」的节点。
-    for (const field of ["outputAssetId", "posterAssetId"] as const) {
+    for (const field of ["outputAssetId", "posterAssetId", "modelAssetId"] as const) {
       const assetId = data[field];
       if (typeof assetId === "string" && assetId !== "") referencedAssetIds.add(assetId);
     }

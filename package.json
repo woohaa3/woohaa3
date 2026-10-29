@@ -31,8 +31,8 @@
     "dev:services": "pnpm run assets:sync && pnpm -C web run build:units && node scripts/dev-orchestrator.mjs",
     "services:build": "pnpm -C web run build:units",
     "prepare": "node scripts/sync-bevy-assets.mjs",
-    "ui": "pnpm -C web/showcase dev",
-    "ui:build": "pnpm -C web/showcase build",
+    "ui": "pnpm -C web/ui/showcase dev",
+    "ui:build": "pnpm -C web/ui/showcase build",
     "test": "pnpm -C web run test",
     "typecheck": "pnpm -C web run typecheck",
     "build:browser": "pnpm -C web run build:browser",
@@ -47,6 +47,7 @@
     "test:scripts": "node --test scripts/*.test.mjs scripts/lib/*.test.mjs",
     "build:wasm": "pnpm run build:bevy",
     "config:export": "node scripts/export-config.mjs",
+    "task:compact": "node scripts/task-compact.mjs",
     "desktop:runtimes": "node scripts/package-runtime-components.mjs"
   },
   "devDependencies": {

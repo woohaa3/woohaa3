@@ -4,7 +4,7 @@
  *  通过共享 Popover portal 避免被 dock 的裁切/滚动容器截断）。
  */
 import { useState } from "react";
-import { CloseIcon, Popover, WarningIcon } from "../../../../shared/ui/index.js";
+import { CloseIcon, Popover, WarningIcon } from "@woohaa3/ui";
 
 export function ErrorInspector({ error }: { error: string }) {
 	const [open, setOpen] = useState(false);

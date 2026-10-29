@@ -11,6 +11,9 @@
  * - 停用（或 failed/degraded/unconfigured/draining）时释放该入口的 fiber（幂等、可等待）；
  * - 只 reconcile **站点插件入口**，绝不重置核心宿主、画布会话或 browser-local 插件装配；
  * - 重复相同权威通知不推进 epoch、不重复加载/apply；相同 failed epoch 需显式重试或新激活 epoch；
+ * - **加载失败自动有界重试**（2026-10-28 现场：宿主重启窗口里的 5xx 让入口永久失联）：入口代码/CSS 经宿主
+ *   同源代理取，宿主重启窗口里会拿到 5xx；那种一次性失败不得把入口永久钉在 load-failed 上
+ *   （否则只能刷新页面才恢复）。重试预算按入口计，用尽后回到「同一 epoch 不自动重试」语义；
  * - 旧 owner 异步释放完成前不创建替代 owner；partial apply 失败主动 dispose + await 回滚。
  *
  * 实现地址来自发布 loader；本 controller 只按 extensionId 决定是否加载已登记入口。
@@ -31,6 +34,13 @@ export type ApplicationExtensionEntryReconcilerOptions = {
   /** 该 scope 是否仍然存活（page dispose 后为 false）。 */
   isScopeAlive?: () => boolean;
   logger?: (event: Record<string, unknown>) => void;
+  /**
+   * 加载失败后的自动重试间隔（毫秒，按序消费）；缺省 1s / 3s / 6s。
+   *
+   * 只用于**加载**失败（descriptor 取不到），不用于插件构造或 apply 失败——后者是确定性失败。
+   * 传空数组即关闭自动重试。
+   */
+  retryDelaysMs?: readonly number[];
 };
 
 /** 单个入口的运行时诊断。 */
@@ -77,10 +87,22 @@ type EntryState = {
   failedEpoch: number | null;
   /** 熔断注销（change: 2026-10-21-harden-extension-fault-isolation，design D3）。 */
   detachFaults: (() => void) | null;
+  /** 当前 epoch 内已用掉的自动重试次数（显式 retry 清零）。 */
+  retries: number;
+  /** 待触发的自动重试定时器。 */
+  retryTimer: unknown | null;
   /** 可公开诊断。 */
   status: ApplicationExtensionEntryDiagnostic["status"];
   error: string | null;
 };
+
+/**
+ * 加载失败后的自动重试间隔（毫秒）：第 1 次 1s、第 2 次 3s、第 3 次 6s，之后交给显式重试。
+ *
+ * 只用来盖住宿主重启/短暂 5xx 的窗口（dev 的宿主 watch、受管扩展安装后的受控重启）；
+ * 不是心跳，不会无限重试。
+ */
+export const DEFAULT_LOAD_RETRY_DELAYS_MS = [1_000, 3_000, 6_000] as const;
 
 export function createApplicationExtensionEntryReconciler(
   options: ApplicationExtensionEntryReconcilerOptions
@@ -93,13 +115,55 @@ export function createApplicationExtensionEntryReconciler(
   const stateOf = (extensionId: string): EntryState => {
     let state = states.get(extensionId);
     if (!state) {
-      state = { desired: false, epoch: 0, pending: null, owned: null, closing: null, failedEpoch: null, detachFaults: null, status: "registered", error: null };
+      state = {
+        desired: false,
+        epoch: 0,
+        pending: null,
+        owned: null,
+        closing: null,
+        failedEpoch: null,
+        detachFaults: null,
+        retries: 0,
+        retryTimer: null,
+        status: "registered",
+        error: null
+      };
       states.set(extensionId, state);
     }
     return state;
   };
 
   const loader = options.loadDescriptor ?? ((entry) => entry.loadDescriptor());
+  const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_LOAD_RETRY_DELAYS_MS;
+
+  const clearRetry = (state: EntryState): void => {
+    if (state.retryTimer === null) return;
+    clearTimeoutRef(state.retryTimer);
+    state.retryTimer = null;
+  };
+
+  /**
+   * 安排一次自动重试；返回 false 表示预算已用尽（调用方记 failedEpoch，回到显式重试语义）。
+   *
+   * 只用于**加载**失败：加载没有副作用，代价是再发一次请求；插件构造/apply 失败是确定性
+   * 失败，重试只会重复同一次抛错，仍走显式 retry。
+   */
+  const scheduleRetry = (extensionId: string, state: EntryState, epoch: number): boolean => {
+    if (disposed || !isScopeAlive()) return false;
+    const delay = retryDelaysMs[state.retries];
+    if (delay === undefined) return false;
+    state.retries += 1;
+    clearRetry(state);
+    state.retryTimer = setTimeoutRef(() => {
+      state.retryTimer = null;
+      if (disposed || !isScopeAlive()) return;
+      if (!state.desired || state.epoch !== epoch) return;
+      if (state.owned || state.pending || state.closing) return;
+      log({ event: "site-extension-entry-load-retry", extensionId, attempt: state.retries });
+      void enter(extensionId, epoch);
+    }, delay);
+    return true;
+  };
 
   const enter = async (extensionId: string, epoch: number): Promise<void> => {
     const state = stateOf(extensionId);
@@ -137,6 +201,8 @@ export function createApplicationExtensionEntryReconciler(
         return;
       }
       state.owned = { fiber, epoch };
+      state.retries = 0;
+      clearRetry(state);
       state.status = "waiting";
       attachFaults(extensionId, fiber, assemblyEpoch, registryEntry.metadata.required === true);
       void fiber.await().catch((error: unknown) => {
@@ -147,7 +213,8 @@ export function createApplicationExtensionEntryReconciler(
       if (state.epoch === epoch) {
         state.status = "load-failed";
         state.error = error instanceof Error ? error.message : "功能加载失败，请重试";
-        state.failedEpoch = epoch;
+        // 一次性失败（宿主重启窗口的 5xx、CSS 超时）自动重试；预算用尽才记 failedEpoch。
+        if (!scheduleRetry(extensionId, state, epoch)) state.failedEpoch = epoch;
       }
       log({ event: "site-extension-entry-load-failed", extensionId, message: state.error });
     } finally {
@@ -238,10 +305,20 @@ export function createApplicationExtensionEntryReconciler(
       // 只 reconcile 服务端状态驱动入口；常驻（always）由 kernel 清单装配，避免双重 owner。
       if (!entry || entry.metadata.activation !== "server-active") continue;
       const state = stateOf(extensionId);
-      if (state.desired && state.epoch > 0) continue; // 重复相同通知：不推进/不重复。
-      state.desired = true;
-      state.epoch += 1;
-      state.failedEpoch = null;
+      if (!state.desired) {
+        state.desired = true;
+        state.epoch += 1;
+        state.failedEpoch = null;
+        state.retries = 0;
+        clearRetry(state);
+        void enter(extensionId, state.epoch);
+        continue;
+      }
+      // 重复相同通知：不推进 epoch。只在**空转**时补一次装载——覆盖两种情况：
+      // 1) 首次 reconcile 时发布目录还没有这个 id（入口后来经热登记注册进来）；
+      // 2) 上一次装载的迟到结果被 epoch 变化作废，而当前没有 pending/owner。
+      if (state.owned || state.pending || state.closing || state.retryTimer) continue;
+      if (state.failedEpoch === state.epoch) continue;
       void enter(extensionId, state.epoch);
     }
     // 非 active：失效并释放。
@@ -251,6 +328,8 @@ export function createApplicationExtensionEntryReconciler(
       state.desired = false;
       state.epoch += 1; // 使旧 pending 加载失效
       state.failedEpoch = null;
+      state.retries = 0;
+      clearRetry(state);
       if (state.owned) void disposeOne(extensionId);
       else if (!state.pending) state.status = "registered";
     }
@@ -260,6 +339,8 @@ export function createApplicationExtensionEntryReconciler(
     const state = stateOf(extensionId);
     state.failedEpoch = null;
     state.error = null;
+    state.retries = 0; // 显式重试重新给满自动重试预算
+    clearRetry(state);
     state.status = "registered";
     if (state.desired && !state.owned && !state.closing && !state.pending) {
       state.epoch += 1;
@@ -292,6 +373,7 @@ export function createApplicationExtensionEntryReconciler(
       for (const state of states.values()) {
         state.desired = false;
         state.epoch += 1;
+        clearRetry(state);
       }
       await Promise.allSettled([...states.keys()].map((extensionId) => disposeOne(extensionId)));
       await Promise.allSettled([...states.values()].map((state) => state.closing).filter((p): p is Promise<void> => p !== null));
@@ -301,8 +383,19 @@ export function createApplicationExtensionEntryReconciler(
         state.owned = null;
         state.pending = null;
         state.closing = null;
+        state.retryTimer = null;
+        state.retries = 0;
       }
       states.clear();
     }
   };
+}
+
+/** setTimeout 引用；测试可用 vitest fake timers。 */
+function setTimeoutRef(callback: () => void, ms: number): unknown {
+  return (globalThis as { setTimeout: (cb: () => void, ms: number) => unknown }).setTimeout(callback, ms);
+}
+
+function clearTimeoutRef(handle: unknown): void {
+  (globalThis as { clearTimeout: (h: unknown) => void }).clearTimeout(handle);
 }

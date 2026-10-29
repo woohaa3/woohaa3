@@ -19,6 +19,9 @@ pub(crate) fn sphere() -> ModelGeometry {
     ModelGeometry::Mesh {
         vertices: vertices.clone(),
         faces,
+        normals: None,
+        uvs: None,
+        colors: None,
     }
 }
 #[test]
@@ -91,6 +94,9 @@ fn open_surface_preserves_every_boundary_and_hard_edge_vertex() {
         &ModelGeometry::Mesh {
             vertices: vertices.clone(),
             faces,
+            normals: None,
+            uvs: None,
+            colors: None,
         },
         Quality::Low,
     )
@@ -164,6 +170,9 @@ fn high_and_oversized_meshes_are_never_simplified() {
     let geometry = ModelGeometry::Mesh {
         vertices: vec![[0., 0., 0.]; MAX_VERTICES + 1],
         faces: vec![[0, 1, 2]; 100],
+        normals: None,
+        uvs: None,
+        colors: None,
     };
     assert!(matches!(
         generate(&geometry, Quality::Low),

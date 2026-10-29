@@ -10,6 +10,7 @@
  * 本模块纯函数、JSON-only：不写 Store / Y.Doc / nodeData；实际提交由调用方经语义命令完成。
  */
 import {
+  GLB_MODEL_SOURCE_KIND,
   DEFAULT_MODEL_PLACEMENT,
   deriveModelContentVersion,
   clonePlacement,
@@ -267,6 +268,7 @@ export function createModel3DNodeData(input: {
   return {
     kind: "model3d",
     title: input.title,
+    source: "script",
     model: createModelSnapshot({ ...input.model, revision: input.revision ?? 1 })
   };
 }
@@ -311,6 +313,15 @@ export function filmSetNodeDataFields(animation: FilmSetNodeData): Record<string
 
 /** 把结构化模型节点数据序列化为 flat nodeData 字段。 */
 export function model3DNodeDataFields(model: Model3DNodeData): Record<string, unknown> {
+  if (model.source === "glb") {
+    return {
+      title: model.title,
+      modelSourceKind: GLB_MODEL_SOURCE_KIND,
+      modelAssetId: model.file.assetId,
+      modelContentVersion: model.file.contentVersion,
+      modelPlacement: model.file.placement
+    };
+  }
   return {
     title: model.title,
     modelScript: model.model.modelScript,

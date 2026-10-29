@@ -1,4 +1,4 @@
-import { Button } from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
 import { useEffect, useMemo, useState } from "react";
 import { filmSetExportProfileLabel, type FilmSetExportProfile } from "@woohaa3/contracts";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";

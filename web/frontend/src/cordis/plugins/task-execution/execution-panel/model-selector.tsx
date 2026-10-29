@@ -7,12 +7,12 @@
  * 菜单 open 状态受控，由 `ExecutionPanel` 汇总为 `localOverlayOpen`，用于让面板级 Escape
  * 路由知道是否有更内层浮层（design D7）。浮层 dismiss 由 primitive 承担。
  */
-import { ChevronDownIcon, Popover } from "../../../../shared/ui/index.js";
+import { ChevronDownIcon, Popover } from "@woohaa3/ui";
 import { hiddenBy, summarize } from "./panel-shared.js";
 import { ParameterField } from "./parameter-field.js";
 import type { ExecutionPanelParameterField } from "./types.js";
 
-export { AssistantListSelector as ModelSelector } from "../../../ui/assistant-execution/model-selector.js";
+export { AssistantListSelector as ModelSelector } from "@woohaa3/ui/assistant";
 
 export function SettingsMenu({
 	fields,

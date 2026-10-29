@@ -16,10 +16,10 @@ export type LocateNodesResult =
 export type CanvasLocateService = {
   /**
    * 定位一批节点：`select=false` 时不改选区（例如定位当前多选）。
-   * 保持当前缩放，把目标平移到视野中心（带过渡动画，尊重减少动态效果偏好）。
+   * 默认保持缩放居中；fit 显式按实际呈现边界容纳整批节点。
    * 返回 `ok:false` 表示目标已失效或宿主未就绪，不改变视口。
    */
-  locateNodes(nodeIds: readonly string[], options?: { select?: boolean }): LocateNodesResult;
+  locateNodes(nodeIds: readonly string[], options?: { select?: boolean; fit?: boolean; safeArea?: {left:number;top:number;right:number;bottom:number} }): LocateNodesResult;
   /** 定位当前选区中心（不改选区）。 */
   locateSelection(nodeIds: readonly string[]): LocateNodesResult;
 };
@@ -31,6 +31,8 @@ export type CanvasLocateOptions = {
   surface?: () => { width: number; height: number } | null;
   /** 打开 DOM 面板造成的遮挡（像素，相对宿主）。 */
   safeArea?: () => { left: number; top: number; right: number; bottom: number };
+  /** Accepted Render Scene world bounds; fit waits if any target is missing. */
+  renderBounds?: () => readonly ({id:string} & Rect)[] | null;
   /**
    * 带动画地平移视口到目标（保持缩放）。缺省回退到即时 restoreViewport。
    * 由控制器提供（利用其 rAF 调度与减少动态效果门禁）。
@@ -58,16 +60,25 @@ export function createCanvasLocateService(options: CanvasLocateOptions): CanvasL
         return visible;
       });
       const rects: Rect[] = visibleNodes.map(node => groupPresentationRect(node,
-        canvas.nodeData[node.id]?.groupCollapsed === true, nodeWorldRect(node, byId), canvas.nodeData[node.id]?.groupBadgeScale));
+        canvas.nodeData[node.id]?.groupCollapsed === true, nodeWorldRect(node, byId)));
+      if (settings.fit && options.renderBounds) {
+        const rendered = new Map(options.renderBounds()?.map(node => [node.id,node]));
+        if (nodeIds.some(id => !rendered.has(id))) return {ok:false,reason:"场景边界尚未就绪"};
+        rects.splice(0,rects.length,...nodeIds.map(id => rendered.get(id)!));
+      }
       const bounds = unionRects(rects);
       if (!bounds) return { ok: false, reason: "目标作品没有有效尺寸" };
       const hostSize = options.surface?.() ?? controller.surface();
-      // 保持当前缩放，只把目标中心平移到视野中心（不缩放）。
+      const safe = settings.safeArea ?? options.safeArea?.() ?? {left:0,top:0,right:0,bottom:0};
+      const width = (hostSize?.width ?? 0)-safe.left-safe.right;
+      const height = (hostSize?.height ?? 0)-safe.top-safe.bottom;
+      if (width <= 0 || height <= 0) return {ok:false,reason:"可用画布区域太小"};
+      const zoom = settings.fit ? Math.min(width/bounds.width,height/bounds.height) : controller.viewport().zoom;
       const viewport = computeCenteredViewport({
         bounds,
         hostSize: hostSize ? { width: hostSize.width, height: hostSize.height } : null,
-        zoom: controller.viewport().zoom,
-        ...(options.safeArea ? { safeArea: options.safeArea() } : {})
+        zoom,
+        safeArea: safe
       });
       if (!viewport) return { ok: false, reason: "当前视口不可用于定位" };
       if (settings.select !== false) {

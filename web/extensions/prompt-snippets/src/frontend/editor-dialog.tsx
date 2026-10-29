@@ -7,8 +7,8 @@
  * 刷新或重新编辑入口（不 last-write-wins）。
  */
 import { useMemo, useState } from "react";
-import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@woohaa3/frontend/extension-api";
-import { Button } from "@woohaa3/frontend/extension-api";
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
+import { Button } from "@woohaa3/ui/primitives";
 import type { DialogRendererProps } from "@woohaa3/frontend/extension-api";
 import type { SnippetCatalog, MutationResult } from "./catalog.js";
 import type { SnippetEditorPayload } from "./dialogs.js";

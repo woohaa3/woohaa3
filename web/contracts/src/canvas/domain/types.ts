@@ -82,6 +82,15 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
   modelScriptStatus?: "ok" | "failed";
   /** 模型脚本应用失败的安全错误信息（不包含本机路径或堆栈）。 */
   modelScriptError?: string | null;
+  /**
+   * 普通 `model3d` 的权威来源判别（change: 2026-10-28-support-glb-model-nodes）。
+   *
+   * 缺失表示脚本模型（与历史内容兼容）；`"glb"` 表示以画布资产 `modelAssetId` 中的原始
+   * GLB 为权威内容，此时节点不得保存任何 `modelScript*` 字段。
+   */
+  modelSourceKind?: "glb";
+  /** 文件模型引用的画布作用域资产 id（内容寻址、稳定；不写二进制或临时 URL）。 */
+  modelAssetId?: string;
   frozenPreview?: GenerationResult;
   /**
    * 视频编辑意图（change: port-video-editing-dialogs，design D4/D6）。

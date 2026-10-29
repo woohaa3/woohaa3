@@ -169,12 +169,16 @@ export async function createBackendService(options: BackendServiceOptions = {}):
         }
       }
     : baseSink;
+  // 启动阶段耗时：启动慢时先看这一段，而不是靠猜。事件落到宿主日志（模块 boot）。
+  const phaseStartedAt = Date.now();
+  const phase = (name: string): void => sink({ module: "boot", event: "boot-phase", phase: name, ms: Date.now() - phaseStartedAt });
   // 启动期槽位发现（change: 2026-10-15-scan-bootstrap-slots-as-extension-directories，任务 3.1/3.2）：
   // 调用方显式注入槽位实现时不再扫目录（测试/受控部署路径）；否则扫描扩展目录，`bootstrapExtensions`
   // 缺省也能发现槽位实现。声明非法、跨根重复 identity、槽位冲突由宿主抛出，启动 fail-fast。
   const extensionHost =
     options.extensionHost ??
     (options.bootstrapExtensions && options.loadExtensionHost !== true ? undefined : await loadExtensionHostFromEnv({ logger: sink, env }));
+  phase("extension-host");
   const slotSource = options.bootstrapExtensions ? null : slotImplementationSource(extensionHost, env);
   const bootstrapExtensions =
     options.bootstrapExtensions ?? (slotSource ? await slotSource.createDeclarations({}) : undefined);
@@ -198,6 +202,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
   const declaredPlugins = extensionHost?.createHostPlugins ? await extensionHost.createHostPlugins({}) : undefined;
   // 扩展层插件是一份扁平列表：角色（provider / storage / marketplace-source）可多选，
   // 只有 `storage` 影响装载语义（主存储必须先就绪），其余只是标注。
+  phase("host-plugins");
   const extensions = options.providerPlugins ?? declaredPlugins?.plugins ?? [];
   const storageExtensions = options.storagePlugins ?? declaredPlugins?.storage ?? [];
   let layerSettled: Promise<void> = Promise.resolve();
@@ -214,6 +219,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
         ...(options.settings ? { settings: options.settings } : {})
       })
     );
+    phase("base-layer");
     // 运行期扩展发布目录（内容寻址资源 + release catalog）：命中即响应，未命中交下游。
     if (extensionHost?.handleReleaseRequest) {
       const releaseRequest = extensionHost.handleReleaseRequest;
@@ -224,6 +230,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
       await loadCoreLayer(ctx, {
         env,
         basePath,
+        logger: sink,
         ...(extensionHost ? { extensionHost } : {}),
         ...(options.modelsConfig ? { modelsConfig: options.modelsConfig } : {}),
         ...(options.mediaStorage ? { mediaStorage: options.mediaStorage } : {}),
@@ -247,6 +254,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
           : {})
       })
     );
+    phase("core-layer");
     // 可选插件并发启动、不阻塞就绪（change: 2026-10-21-harden-extension-fault-isolation，D5）：
     // 只有当前主存储后端（`storage.primary`）是就绪前提，必须等它；其余存储后端与 Provider 并发发起。
     // 判定来自设置值与插件声明，不写死扩展身份（extension-purity）。
@@ -258,11 +266,13 @@ export async function createBackendService(options: BackendServiceOptions = {}):
     ]);
     // 运行期追加入口（change: 2026-10-21-isolate-extension-host-process，任务 8.4）：首次安装的受管后端扩展
     // 由 Extension Manager 追加代理插件；关闭时连同运行期追加的一起卸载（disposeAll 覆盖启动期与运行期）。
+    phase("extension-layer");
     ctx.provide("extensionLayer", layer);
     disposers.push(() => layer.disposeAll());
     layerSettled = layer.settled;
     // 站点开关管着的扩展由控制面的首次 reconcile 启动；就绪只等必需提供者，可选扩展继续在后台协调。
     await ctx.get("application")?.service.ready();
+    phase("application-ready");
     // 创建崩溃恢复（change: 2026-10-13-...，任务 11.2 / D1；恢复自迁移前的统一后端）：
     // 启动时结算遗留 provisioning 预留（内容已建 → 补 finalize；内容未建 → 清理预留）。只结算早于
     // 宽限期的预留，避免与在途创建竞争；失败不阻断启动（重试路径仍可续作）。
@@ -283,10 +293,12 @@ export async function createBackendService(options: BackendServiceOptions = {}):
     } catch (error) {
       sink({ module: "canvas", event: "provisioning-reconcile-failed", message: error instanceof Error ? error.message : String(error) });
     }
+    phase("provisioning-reconcile");
   } catch (error) {
     await close();
     throw error;
   }
+  phase("composition-ready");
   ctx.emit("host/ready");
 
   const service = <K extends keyof HostServices>(name: K): HostServices[K] => {

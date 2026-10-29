@@ -40,12 +40,15 @@ import type { ApplicationRequestAuthenticator } from "../auth/adapter.js";
 import { sendError, sendJson, readJson, safeUrl } from "./extension-api/http-helpers.js";
 import type { AgentConversationService, AgentConversationServiceError } from "../extensions/agent-conversation-service.js";
 import type { AgentConnectionRegistry } from "../extensions/agent-connection-registry.js";
+import type { SkillMediaService } from "../skill-media/service.js";
 
 export type AgentConversationApiDependencies = {
   assistantText?: import("../extensions/assistant-text-service.js").AssistantTextService;
   canvasCreations?: import("../extensions/canvas-creation-service.js").CanvasCreationService;
   accessRuntime?: import("@woohaa3/contracts").AccessRuntime;
   service: AgentConversationService;
+  /** Skill 媒体步骤续接（change: 2026-10-28-add-agent-skill-media-regeneration）。 */
+  skillMedia?: SkillMediaService;
   authenticator?: ApplicationRequestAuthenticator;
   /** 受控项目读写授权（owner+canvas 隔离）；缺失时拒绝（fail closed）。 */
   canvasAccess?: ApplicationExtensionCanvasAccessFacade;
@@ -360,6 +363,93 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         return true;
       }
 
+      // Skill 媒体步骤：按节点读取当前尝试、事件重放、用户停止与重新生成
+      // （change: 2026-10-28-add-agent-skill-media-regeneration，任务 5.1/5.2）。
+      if (suffix === "skill-steps/by-node" && method === "GET") {
+        if (!deps.skillMedia) return respondSkillError(res, { code: "unavailable", message: "Skill 续接未启用" });
+        const canvasId = url.searchParams.get("canvasId") ?? "";
+        const nodeId = url.searchParams.get("nodeId") ?? "";
+        if (!canvasId || !nodeId) return badRequest(res, "canvasId 与 nodeId 必填");
+        const allowed = await authorizeCanvas(deps, owner, canvasId, "read");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        const result = await deps.skillMedia.snapshotByNode({ owner, canvasId, nodeId });
+        if (!result.ok) return respondSkillError(res, result);
+        sendJson(res, 200, { ok: true, step: result.step });
+        return true;
+      }
+      if (suffix === "skill-steps" && method === "GET") {
+        if (!deps.skillMedia) return respondSkillError(res, { code: "unavailable", message: "Skill 续接未启用" });
+        const canvasId = url.searchParams.get("canvasId") ?? "";
+        if (!canvasId) return badRequest(res, "canvasId 必填");
+        const allowed = await authorizeCanvas(deps, owner, canvasId, "read");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        const limit = Number(url.searchParams.get("limit") ?? 50);
+        if (!Number.isInteger(limit) || limit < 1) return badRequest(res, "limit 必须是正整数");
+        const result = await deps.skillMedia.list({ owner, canvasId, limit });
+        if (!result.ok) return respondSkillError(res, result);
+        sendJson(res, 200, { ok: true, steps: result.steps });
+        return true;
+      }
+      const skillStepRead = /^skill-steps\/([^/]+)\/([^/]+)$/.exec(suffix);
+      if (skillStepRead && method === "GET") {
+        if (!deps.skillMedia) return respondSkillError(res, { code: "unavailable", message: "Skill 续接未启用" });
+        const canvasId = url.searchParams.get("canvasId") ?? "";
+        if (!canvasId) return badRequest(res, "canvasId 必填");
+        const allowed = await authorizeCanvas(deps, owner, canvasId, "read");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        const skillRunId = decodeURIComponent(skillStepRead[1]!);
+        const stepId = decodeURIComponent(skillStepRead[2]!);
+        const after = Number(url.searchParams.get("after") ?? 0);
+        if (!Number.isInteger(after) || after < 0) return badRequest(res, "after 必须是非负整数");
+        const snapshot = await deps.skillMedia.snapshot({ owner, canvasId, skillRunId, stepId });
+        if (!snapshot.ok) return respondSkillError(res, snapshot);
+        const page = await deps.skillMedia.events({ owner, canvasId, skillRunId, stepId, after: after > 0 ? after - 1 : 0, limit: 200 });
+        if (!page.ok) return respondSkillError(res, page);
+        sendJson(res, 200, { ok: true, step: snapshot.step, events: page.page.events, cursor: page.page.cursor, resetRequired: page.page.resetRequired });
+        return true;
+      }
+      const skillStepCancel = /^skill-steps\/([^/]+)\/([^/]+)\/cancel$/.exec(suffix);
+      if (skillStepCancel && method === "POST") {
+        if (!deps.skillMedia) return respondSkillError(res, { code: "unavailable", message: "Skill 续接未启用" });
+        const body = await readJson(req, maxBytes);
+        if (body === null || typeof body !== "object" || Array.isArray(body)) return badRequest(res, "请求体非法");
+        const input = body as Record<string, unknown>;
+        const canvasId = typeof input.canvasId === "string" ? input.canvasId : "";
+        if (!canvasId) return badRequest(res, "canvasId 必填");
+        const allowed = await authorizeCanvas(deps, owner, canvasId, "write");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        const result = await deps.skillMedia.cancel({ owner, canvasId, skillRunId: decodeURIComponent(skillStepCancel[1]!), stepId: decodeURIComponent(skillStepCancel[2]!) });
+        if (!result.ok) return respondSkillError(res, result);
+        sendJson(res, 200, { ok: true, step: result.step, state: result.state });
+        return true;
+      }
+      const skillStepRegenerate = /^skill-steps\/([^/]+)\/([^/]+)\/regenerate$/.exec(suffix);
+      if (skillStepRegenerate && method === "POST") {
+        if (!deps.skillMedia) return respondSkillError(res, { code: "unavailable", message: "Skill 续接未启用" });
+        const body = await readJson(req, maxBytes);
+        if (body === null || typeof body !== "object" || Array.isArray(body)) return badRequest(res, "请求体非法");
+        const input = body as Record<string, unknown>;
+        const canvasId = typeof input.canvasId === "string" ? input.canvasId : "";
+        const requestId = typeof input.requestId === "string" ? input.requestId : "";
+        if (!canvasId || !requestId) return badRequest(res, "canvasId 与 requestId 必填");
+        const allowed = await authorizeCanvas(deps, owner, canvasId, "write");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        const result = await deps.skillMedia.replace({
+          owner,
+          canvasId,
+          skillRunId: decodeURIComponent(skillStepRegenerate[1]!),
+          stepId: decodeURIComponent(skillStepRegenerate[2]!),
+          requestId,
+          ...(typeof input.runId === "string" ? { runId: input.runId } : {}),
+          ...(typeof input.prompt === "string" ? { prompt: input.prompt } : {}),
+          ...(typeof input.modelKey === "string" ? { modelKey: input.modelKey } : {}),
+          ...(input.parameters && typeof input.parameters === "object" && !Array.isArray(input.parameters) ? { parameters: input.parameters as Record<string, unknown> } : {})
+        });
+        if (!result.ok) return respondSkillError(res, result);
+        sendJson(res, 200, { ok: true, step: result.step, runId: result.runId });
+        return true;
+      }
+
       const conversationRead = /^conversations\/([^/]+)$/.exec(suffix);
       if (conversationRead && method === "GET") {
         const conversationId = decodeURIComponent(conversationRead[1]!);
@@ -516,6 +606,17 @@ async function authorizeCanvas(
   const result = await deps.canvasAccess.authorize({ subject: owner, canvasId, permission });
   if (!result.ok) return { ok: false, error: { code: result.code === "unavailable" ? "adapter-unavailable" : "unauthorized", message: result.message } };
   return { ok: true };
+}
+
+function respondSkillError(res: ServerResponse, error: { code: string; message: string }): true {
+  const status = error.code === "unauthorized" ? 401
+    : error.code === "forbidden" || error.code === "group-scope-revoked" ? 403
+    : error.code === "skill-step-not-found" ? 404
+    : error.code === "unavailable" ? 503
+    : error.code === "request-id-reused" || error.code === "skill-attempt-superseded" ? 409
+    : 400;
+  sendJson(res, status, { code: error.code, message: error.message, protocolVersion: WOOHAA3_PROTOCOL_VERSION });
+  return true;
 }
 
 function respondError(res: ServerResponse, error: AgentConversationServiceError): true {

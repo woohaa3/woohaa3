@@ -14,9 +14,9 @@ import type { NodeHistoryController } from "./controller.js";
 import { CURRENT_PRESENTATION_ID } from "./controller.js";
 import { HistoryPreview } from "./preview.js";
 import type { ModelThumbnailRenderer } from "./model-thumbnail-render.js";
-import { Button, IconButton } from "../../../shared/ui/Button.js";
-import { Tooltip } from "../../../shared/ui/Tooltip.js";
-import { CloseIcon } from "../../../shared/ui/icons.js";
+import { Button, IconButton } from "@woohaa3/ui/primitives";
+import { Tooltip } from "@woohaa3/ui/primitives";
+import { CloseIcon } from "@woohaa3/ui/icons";
 
 export type NodeHistoryPanelProps = {
   controller: NodeHistoryController;

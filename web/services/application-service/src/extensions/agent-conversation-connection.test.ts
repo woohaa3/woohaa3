@@ -340,7 +340,7 @@ describe("旧数据兼容（任务 2.2）", () => {
 
 
 describe("运行引擎升级会话屏障", () => {
-  for (const status of ["succeeded", "unknown"] as const) it(`拒绝排队回合，结算为 ${status} 后分别归档或继续阻止升级`, async () => {
+  for (const status of ["succeeded", "failed"] as const) it(`拒绝排队回合，结算为 ${status} 后归档`, async () => {
     const { service, store, controls } = setup();
     const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1", nodeId: "node", connectionId: "c1" });
     if (!created.ok) throw new Error("create failed");
@@ -352,11 +352,11 @@ describe("运行引擎升级会话屏障", () => {
     controls.outcomes.push({ status, assistantText: "reply" });
     await service.dispatchTurn(accepted.turn.turnId);
     await service.whenSettled(accepted.turn.turnId);
-    expect(store.prepareConnectionMigration?.("user-a", "c1")).toBe(status === "succeeded");
-    expect(service.findConversationForTarget({ owner: "user-a", canvasId: "canvas-1", nodeId: "node" }).conversation === null).toBe(status === "succeeded");
+    expect(store.prepareConnectionMigration?.("user-a", "c1")).toBe(true);
+    expect(service.findConversationForTarget({ owner: "user-a", canvasId: "canvas-1", nodeId: "node" }).conversation === null).toBe(true);
     expect(service.queryTurn({ owner: "user-a", requestId: "migration-request" }).ok).toBe(true);
     expect(controls.seen).toHaveLength(1);
-    if (status === "succeeded") expect(store.prepareConnectionMigration?.("user-a", "c1")).toBe(true);
+    expect(store.prepareConnectionMigration?.("user-a", "c1")).toBe(true);
   });
 });
 

@@ -1,5 +1,5 @@
 import type { AppRouterService } from "../cordis/navigation/app-router.js";
-import { Button } from "../shared/ui/index.js";
+import { Button } from "@woohaa3/ui";
 /** Carries only an entry kind across page disposal, never credentials or target drafts. */
 export function openAgentAssistant(router: AppRouterService, kind: "login" | "installed" | "api-key") {
   if (router.getLocation().page === "canvas") {

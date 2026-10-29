@@ -127,6 +127,49 @@ describe("帧窗口聚合", () => {
     window.dispose();
   });
 
+  it("能读到渲染计数时按窗口内渲染帧数折算每帧 draw call", () => {
+    setTelemetryBuildModeForTesting("dev");
+    const sink = client();
+    setTelemetryClientForTesting(sink);
+    const timers = fakeTimers();
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+
+    // 首个窗口没有先前基线：累计值本身就是窗口量。
+    let state = counters();
+    const window = createPerfFrameWindow({
+      read: () => state,
+      setInterval: timers.setInterval,
+      clearInterval: timers.clearInterval
+    });
+    state = counters({ renderFrames: 400, drawCalls: 4800, frameExecutions: 300 });
+    clock = 60_000;
+    timers.tick();
+    // 窗口内 400 个渲染帧、4800 次记录 → 每帧 12 次；累计值不直接外泄。
+    expect(sink.events[0]?.attributes?.drawCalls).toBe(12);
+    window.dispose();
+  });
+
+  it("读不到渲染计数时不写 drawCalls", () => {
+    setTelemetryBuildModeForTesting("dev");
+    const sink = client();
+    setTelemetryClientForTesting(sink);
+    const timers = fakeTimers();
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    let state = counters();
+    const window = createPerfFrameWindow({
+      read: () => state,
+      setInterval: timers.setInterval,
+      clearInterval: timers.clearInterval
+    });
+    state = counters({ frameExecutions: 300 });
+    clock = 60_000;
+    timers.tick();
+    expect(sink.events[0]?.attributes).not.toHaveProperty("drawCalls");
+    window.dispose();
+  });
+
   it("页面隐藏时丢弃半窗，恢复后从新窗口重新累计", () => {
     setTelemetryBuildModeForTesting("production");
     const sink = client();

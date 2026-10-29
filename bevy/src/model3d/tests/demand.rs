@@ -27,7 +27,7 @@ fn fixture(count: usize) -> (Scene, ModelAssets) {
         scene.nodes.push(serde_json::from_value(serde_json::json!({
             "id":format!("preview-{index}"),"type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":185,
             "shotPreview":{"filmSetNodeId":id,"clipId":"clip","kind":"dynamic","name":"镜头",
-                "aspect":1.7777778,"duration":5,"state":"ready",
+                "aspect":1.7777778,"duration":5,"state":"preparing",
                 "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}
         })).unwrap());
     }
@@ -39,6 +39,7 @@ fn update(world: &mut World, scene: &Scene, resources: &ModelAssets, now: f64) {
         &mut world.resource_mut::<ModelVisuals>(),
         scene,
         None,
+        &Default::default(),
         &Default::default(),
         now,
     );

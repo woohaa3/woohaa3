@@ -227,10 +227,11 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
       fs.mkdirSync(path.dirname(versionDir), { recursive: true });
       fs.renameSync(tree, versionDir);
     }
-    // 含后端代码：有运行期热切换能力时不需要重启（扩展层 add/remove + 各版本独立模块 URL）；
-    // 宿主不支持热切换（最小装配 / 无扩展层）时才退回受控重启。
+    // 含后端代码：只有 hostPlugin 能运行期换版（扩展层 add/swap + 各版本独立模块 URL）。
+    // 站点 backend 工厂没有运行期装配入口，即使宿主支持换版也按受控重启处理。
     const hasBackend = Boolean(preflight.requiresRestart) || Boolean(existing?.requiresRestart);
-    const requiresRestart = hasBackend && !ctx.deps.runtime?.available();
+    const hotSwappable = preflight.hotSwappable !== false;
+    const requiresRestart = hasBackend && (!ctx.deps.runtime?.available() || !hotSwappable);
     // 观察期：热生效（纯前端 / 蓝绿）从切换完成开始计时（reload 成功后再写），重启生效从下次启动开始。
     const observeUntil: string | null = null;
     commit((draft) => {
@@ -246,6 +247,7 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
         observeUntil,
         observeAfterRestart: requiresRestart,
         requiresRestart: Boolean(preflight.requiresRestart),
+        hotSwappable,
         restartPending: requiresRestart
       };
       draft.extensions[extensionId] = history(base, { revision: draft.revision + 1, action: "install", version, from: existing?.current ?? null, sourceId, actor: (job as Job & { actor?: string }).actor ?? "system" });
@@ -268,7 +270,7 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
     // reload：失败即切回旧版本（或撤销安装）
     board.update(job, { phase: "reload" });
     try {
-      const outcome = await reload(extensionId, versionDir, hasBackend, { previousDirectory });
+      const outcome = await reload(extensionId, versionDir, hasBackend, { previousDirectory, hotSwappable });
       if (outcome !== "restart-required") {
         // 切换完成（或热登记完成）：观察期从此刻开始（D10 第 5 步）。
         commit((draft) => {

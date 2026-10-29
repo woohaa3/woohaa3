@@ -38,8 +38,8 @@ it("retains the confirmed projection on a failed later page and keeps exact acti
 });
 it("keeps pre-acceptance recovery records without manufacturing conversations", async () => {
   const { service, request } = fixture(); await service.refresh();
-  request.mockImplementation(async ({ path }) => ({ ok: true, data: path.includes("group-executions") ? { turns: [] } : { creations: [{ ...creation("unknown"), conversationId: undefined, turnId: undefined, stage: "unknown" }] } }));
-  await service.refresh(); expect(service.getSnapshot().rows).toMatchObject([{ rootGroupId: "unknown", label: "结果待核对", active: true }]);
+  request.mockImplementation(async ({ path }) => ({ ok: true, data: path.includes("group-executions") ? { turns: [] } : { creations: [{ ...creation("unknown"), conversationId: undefined, turnId: undefined, stage: "failed" }] } }));
+  await service.refresh(); expect(service.getSnapshot().rows).toMatchObject([{ rootGroupId: "unknown", label: "创作失败", active: false }]);
   await service.retry("unknown"); expect(request).toHaveBeenCalledWith({ path: "/api/agent-conversations/canvas-creations/unknown/retry", method: "POST", body: {} });
 });
 it("drops late pages across private data spaces and disposes polling", async () => {

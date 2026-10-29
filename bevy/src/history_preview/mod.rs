@@ -59,6 +59,13 @@ pub(crate) struct ActiveThumbnail {
     frames: u32,
 }
 
+impl ActiveThumbnail {
+    /// 是否有在飞的一次性缩略图作业（静止降频据此判定需要连续帧）。
+    pub(crate) fn has_pending(&self) -> bool {
+        self.job.is_some()
+    }
+}
+
 struct Job {
     request_id: u64,
     generation: u64,

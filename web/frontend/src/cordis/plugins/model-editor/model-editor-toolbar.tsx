@@ -20,10 +20,10 @@ import {
   type ModelCameraFocusOffset
 } from "@woohaa3/contracts";
 import type { ModelEditorSession, ModelCameraPose } from "../../../extension-api/model-workspace-session.js";
-import { Button, IconButton } from "../../../shared/ui/Button.js";
-import { SegmentedControl } from "../../../shared/ui/SegmentedControl.js";
-import { Tooltip } from "../../../shared/ui/Tooltip.js";
-import { CloseIcon } from "../../../shared/ui/icons.js";
+import { Button, IconButton } from "@woohaa3/ui/primitives";
+import { SegmentedControl } from "@woohaa3/ui/primitives";
+import { Tooltip } from "@woohaa3/ui/primitives";
+import { CloseIcon } from "@woohaa3/ui/icons";
 import { CameraRegion } from "./camera-region.js";
 
 export type ModelEditorToolbarProps = {

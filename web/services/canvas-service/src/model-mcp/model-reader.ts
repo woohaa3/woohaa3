@@ -20,7 +20,9 @@ import {
   decodeModelPlacement,
   isModelAuthoringNodeType,
   readModelCameras,
-  resolveModelReferenceInputs
+  resolveModelReferenceInputs,
+  isGlbModelNodeData,
+  readGlbModelAssetId
 } from "@woohaa3/contracts";
 import type { GetModelNodeInput, GetModelNodeOutcome, ListModelNodesOutcome, ModelNodeSummary } from "./service-types.js";
 
@@ -139,6 +141,8 @@ export function projectModelNode(canvas: import("@woohaa3/contracts").ServerCanv
         ? data.panelPrompt
         : "",
     source: typeof data?.modelScript === "string" ? data.modelScript : "",
+    ...(isGlbModelNodeData(data) ? { modelSourceKind: "glb" as const } : {}),
+    ...(isGlbModelNodeData(data) && readGlbModelAssetId(data) ? { modelAssetId: readGlbModelAssetId(data) as string } : {}),
     ...(typeof data?.modelScriptLanguage === "string" ? { language: data.modelScriptLanguage } : {}),
     ...(typeof data?.modelScriptVersion === "string" ? { version: data.modelScriptVersion } : {}),
     ...(data?.modelScriptStatus ? { status: data.modelScriptStatus } : {}),
@@ -168,6 +172,7 @@ export async function listModelNodes(
     if (!isModelAuthoringNodeType(node.type) && !(node.type === "group" && readFilmSetGroupMarker(exported.canvas.nodeData[node.id]))) continue;
     const data = exported.canvas.nodeData[node.id] as CanvasNodeData | undefined;
     const hasScript = typeof data?.modelScript === "string" && data.modelScript !== "";
+    const isFileModel = isGlbModelNodeData(data);
     const status = data?.modelScriptStatus;
     nodes.push({
       nodeId: node.id,
@@ -180,8 +185,9 @@ export async function listModelNodes(
           : "",
       references: resolveModelReferenceInputs(exported.canvas, node.id).references,
       hasScript,
+      ...(isFileModel ? { sourceKind: "glb" as const } : {}),
       ...(status ? { status } : {}),
-      pending: node.type === "group" ? false : !hasScript || status === "failed",
+      pending: isFileModel ? status === "failed" : (!hasScript || status === "failed"),
       cameraCount: readAuthoringCameras(data, node.type).length
     });
   }

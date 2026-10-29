@@ -73,6 +73,10 @@ pub(super) fn sync_models(
     time: Res<Time>,
     capture: Res<model3d::capture::ShotCaptureRouting>,
     render_work: Res<crate::model_preview::render_work::RenderWork>,
+    opacity: Query<(
+        Entity,
+        &crate::canvas_ecs::components::OpacityMaterialInstance,
+    )>,
 ) {
     // 门禁结算必须每帧运行：hover 可能未改变 `Scene` 指纹（如 pointer 位移落在同一节点），
     // 但重建/生命周期仍需要按最新 hover 初始化 playback（change: play-model-animations-on-hover，
@@ -81,11 +85,21 @@ pub(super) fn sync_models(
     let models = &mut *visuals;
     // 按需 spawn 集合（C2.1–C2.3）：descriptor 注册独立于 ECS/GPU 需求。
     // 截图（含等待 GPU ready/readback 期间）作为强制高质量消费者 pin 其节点（B1.6）。
-    let mut pins = capture.pins(&scene.0);
+    // 截图请求 pin 住的根需要 High；可见镜头卡片只让源片场保持驻留（不被回收），
+    // 不构成高优先消费者——卡片内容已固化时没必要把整场按 High 加载
+    // （2026-10-28 总览缩放时可见卡片把片场按在 High 的修复）。
+    let capture_pins = capture.pins(&scene.0);
+    let mut pins = capture_pins.clone();
     crate::shot_node_preview::pin_visible_owners(&scene.0, &mut pins);
     let now = time.elapsed_secs_f64();
-    let demand_changed =
-        model3d::demand::update(models, &scene.0, rig.focus_node.as_deref(), &pins, now);
+    let demand_changed = model3d::demand::update(
+        models,
+        &scene.0,
+        rig.focus_node.as_deref(),
+        &pins,
+        &capture_pins,
+        now,
+    );
     // 模型 payload lease：只有当前需求引用重型 IR（design D5）。先按最新需求收敛预算，
     // 再同步根：本次淘汰掉的 cold payload 会在同步里以缺资源跳过，等待重新取得需求。
     let leases = model3d::demand::payload_lease_keys(&scene.0, models);
@@ -108,10 +122,18 @@ pub(super) fn sync_models(
     model3d::apply_animation_playback(&mut commands, models, &scene.0);
     // 活动动画节点的运动求值（change: 2026-10-05-bind-model-animation-to-shots）：独立模型
     // 姿态与唯一时钟；相机姿态写入共享资源供 shot adapter / 聚焦相机复用。
+    // 透明度实例状态从实体组件派生（Resource 只保留回收策略）。
+    let opacity: std::collections::HashMap<
+        Entity,
+        crate::canvas_ecs::components::OpacityMaterialInstance,
+    > = opacity
+        .iter()
+        .map(|(entity, instance)| (entity, instance.clone()))
+        .collect();
     animation_camera.0 =
-        model3d::apply_motion_playback(&mut commands, models, &mut materials, &scene.0);
+        model3d::apply_motion_playback(&mut commands, models, &mut materials, &opacity, &scene.0);
     // 质量档位只替换共享 handle，不重建 hierarchy、不执行脚本、不改 canonical AABB。
-    let quality_changed = model3d::sync_quality(
+    let quality_changed = model3d::sync_quality_with_demand(
         &mut commands,
         &mut meshes,
         models,
@@ -119,6 +141,7 @@ pub(super) fn sync_models(
         rig.focus_node.as_deref(),
         now,
         &pins,
+        &capture_pins,
     );
     if quality_changed {
         models.trim_resources(&mut meshes, &mut materials);
@@ -126,7 +149,24 @@ pub(super) fn sync_models(
     // 准备管线的发布/取消/退役同样推进诊断快照；只在有变更时发布一次，不逐帧输出。
     let preparation_changed = models.take_preparation_changed();
     if flags.changed || demand_changed || quality_changed || preparation_changed {
-        crate::bridge::set_model_render_diagnostics(models.budget_json(&meshes, &materials));
+        // 诊断里把两种 pin 分开：真实截图请求带来源标签，可见卡片标 visible-card。
+        let mut capture_requests = capture.requests();
+        for node in &pins {
+            if capture_requests.iter().any(|(pinned, _)| pinned == node) {
+                continue;
+            }
+            let source = if capture_pins.contains(node) {
+                "capture"
+            } else {
+                "visible-card"
+            };
+            capture_requests.push((node.clone(), source.to_owned()));
+        }
+        crate::bridge::set_model_render_diagnostics(models.budget_json_with_requests(
+            &meshes,
+            &materials,
+            &capture_requests,
+        ));
     }
     // 相机每帧推进过渡；即使没有新 scene，也要在结束帧恢复所有模型。
     if flags.changed || *visible_focus != rig.focus_node {

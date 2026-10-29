@@ -1,5 +1,11 @@
 //! Local group/film-scope buffers; each group panel owns an independent transparent entity z.
-use super::{Visuals, geometry::Geometry, labels::sync_labels, text_presentation::LogicalText};
+//!
+//! change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs —— 输入改为 ECS 节点 Query；
+//! group 面板实体由 presentation system 按 owner 组件维护，本模块只生产共享几何与标签请求。
+use super::{
+    Visuals, geometry::Geometry, labels::LabelRequest, labels::LabelRequests, labels::LabelStyle,
+};
+use crate::canvas_ecs::components::CanvasLabelRole;
 use crate::{
     protocol::{GraphNode, GroupPresentation, Scene},
     theme::ThemeResource,
@@ -9,7 +15,10 @@ const BLOCK_SIZE: usize = 16;
 #[derive(PartialEq)]
 struct Key {
     id: String,
+    /// 文档下标（16 节点分块）。
     index: usize,
+    /// 渲染槽位（ghost 固定最低层）。
+    render: usize,
     rect: [f32; 4],
     scope: Option<(f32, f32, f32, f32)>,
     scope_vertices: Option<[Vec2; 4]>,
@@ -27,10 +36,11 @@ struct Key {
     film_run: Option<crate::protocol::FilmSetRunFeedback>,
 }
 impl Key {
-    fn new(n: &GraphNode, index: usize, scene: &Scene) -> Self {
+    fn new(n: &GraphNode, index: usize, render: usize, scene: &Scene) -> Self {
         Self {
             id: n.id.clone(),
             index,
+            render,
             rect: [n.x, n.y, n.width, n.height],
             scope: n
                 .composite_asset
@@ -63,6 +73,15 @@ impl Key {
         }
     }
 }
+
+/// 一个容器投影输入（group 或 composite-asset）。
+pub(super) struct ContainerInput<'a> {
+    pub(crate) index: usize,
+    pub(crate) render: usize,
+    pub(crate) entity: Entity,
+    pub(crate) node: std::borrow::Cow<'a, GraphNode>,
+}
+
 #[derive(Default)]
 pub(super) struct Block {
     keys: Vec<Key>,
@@ -71,19 +90,11 @@ pub(super) struct Block {
     sort_z: f32,
     entities: [Option<Entity>; 2],
     meshes: [Option<Handle<Mesh>>; 2],
-    /// Each group panel is its own transparent entity so its transform z is
-    /// the panel's actual Transparent2d sort key instead of a shared block z.
-    panels: Vec<(Entity, Handle<Mesh>)>,
+    /// 上一帧提交的标签请求；块命中时原样重提。
+    labels: Vec<LabelRequest>,
 }
 impl Block {
-    fn clear_panels(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
-        for (entity, mesh) in self.panels.drain(..) {
-            commands.entity(entity).despawn();
-            meshes.remove(mesh.id());
-        }
-    }
     fn clear(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
-        self.clear_panels(commands, meshes);
         for entity in &mut self.entities {
             if let Some(entity) = entity.take() {
                 commands.entity(entity).despawn();
@@ -97,6 +108,7 @@ impl Block {
         self.keys.clear();
         self.theme.clear();
         self.band = None;
+        self.labels.clear();
     }
     #[cfg(test)]
     pub(super) fn blend_entity(&self) -> Option<Entity> {
@@ -109,41 +121,38 @@ impl Block {
             .map(|handle| handle.as_ref().map(Handle::id))
     }
 }
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     visuals: &mut Visuals,
-    text: &mut Query<
-        (
-            &mut Text2d,
-            &mut Transform,
-            &mut TextColor,
-            &mut LogicalText,
-        ),
-        Without<Sprite>,
-    >,
+    requests: &mut LabelRequests,
+    containers: &[ContainerInput<'_>],
+    document_len: usize,
     scene: &Scene,
     theme: &ThemeResource,
 ) -> u64 {
+    requests.begin(CanvasLabelRole::Container);
     let band = scene.aggregate_connect.as_ref().and_then(|_| {
         crate::canvas_query::aggregate::selection_bounds(&scene.nodes, &scene.selection.nodes)
     });
     let mut blocks = std::mem::take(&mut visuals.container_blocks);
-    let count = scene.nodes.len().div_ceil(BLOCK_SIZE);
+    let count = document_len.div_ceil(BLOCK_SIZE);
     for block in blocks.iter_mut().skip(count) {
         block.clear(commands, meshes);
     }
     blocks.truncate(count);
     blocks.resize_with(count, Block::default);
     let mut rebuilt = 0;
-    for (block_index, nodes) in scene.nodes.chunks(BLOCK_SIZE).enumerate() {
+    for block_index in 0..count {
         let block = &mut blocks[block_index];
-        let keys: Vec<_> = nodes
+        let range = block_index * BLOCK_SIZE..((block_index + 1) * BLOCK_SIZE).min(document_len);
+        let keys: Vec<_> = containers
             .iter()
-            .enumerate()
-            .filter(|(_, n)| n.group.is_some() || n.composite_asset.is_some())
-            .map(|(local, n)| Key::new(n, block_index * BLOCK_SIZE + local, scene))
+            .filter(|input| range.contains(&input.index))
+            .filter(|input| input.node.group.is_some() || input.node.composite_asset.is_some())
+            .map(|input| Key::new(input.node.as_ref(), input.index, input.render, scene))
             .collect();
         let band = if block_index == 0 { band } else { None };
         // Bevy Transparent2d sorts by the entity transform, independently of mesh vertex z.
@@ -154,6 +163,7 @@ pub(super) fn sync(
             && block.theme == theme.fingerprint()
             && block.sort_z == sort_z
         {
+            requests.extend(CanvasLabelRole::Container, &block.labels);
             continue;
         }
         if keys.is_empty() && band.is_none() {
@@ -162,43 +172,36 @@ pub(super) fn sync(
             block.sort_z = sort_z;
             continue;
         }
-        block.clear_panels(commands, meshes);
         let mut geometry = Geometry::default();
         if band.is_some() {
+            let all_nodes: Vec<&GraphNode> = scene.nodes.iter().collect();
             super::aggregate::draw_aggregate_selection_band(
                 &mut geometry,
                 theme,
-                &scene.nodes,
+                &all_nodes,
                 &scene.selection.nodes,
                 super::group::GROUP_Z,
             );
         }
+        let mut block_requests = Vec::with_capacity(keys.len());
         for key in &keys {
-            let node = &scene.nodes[key.index];
-            let z = super::draw_order::render_z(&scene.nodes, key.index);
+            let Some(input) = containers
+                .iter()
+                .find(|input| input.index == key.index)
+            else {
+                continue;
+            };
+            let node = input.node.as_ref();
+            let z = super::draw_order::render_z(&scene.nodes, key.render);
             let mut labels = if let Some(group) = &node.group {
-                if group.collapsed {
-                    Vec::new()
-                } else {
-                    let panel = meshes.add(super::group::draw_group_panel(theme, node, group));
-                    let entity = commands
-                        .spawn((
-                            Mesh2d(panel.clone()),
-                            MeshMaterial2d(visuals.blend_material.clone()),
-                            Transform::from_xyz(0., 0., z),
-                            NoFrustumCulling,
-                        ))
-                        .id();
-                    block.panels.push((entity, panel));
-                    vec![super::group::draw_group(
-                        &mut geometry,
-                        theme,
-                        node,
-                        group,
-                        key.selected,
-                        z,
-                    )]
-                }
+                vec![super::group::draw_group(
+                    &mut geometry,
+                    theme,
+                    node,
+                    group,
+                    key.selected,
+                    z,
+                )]
             } else if key.panel.is_some() {
                 // 有模型内容的子容器同样走范围面板：它复用 3D 世界呈现链路，模型由 3D
                 // 相机（order 0）画在画布之下，2D 相机（order 1）只能透出未绘制区域。
@@ -283,14 +286,19 @@ pub(super) fn sync(
                     theme.token_u32("interactionAccent"),
                 ));
             }
-            sync_labels(commands, visuals, text, &node.id, labels, z + 0.02);
+            let request = LabelRequest {
+                owner: input.entity,
+                labels,
+                z: z + 0.02,
+                style: LabelStyle::Node,
+            };
+            requests.push_request(CanvasLabelRole::Container, request.clone());
+            block_requests.push(request);
         }
         let (mut opaque, mut blend) = geometry.into_layers();
         let opaque_depth = 0.0002 * block_index as f32 / (count + 1) as f32;
         shift_depth(&mut opaque, opaque_depth);
-        // The shared blend mesh retains overlays such as run masks. Group
-        // panels were emitted as individual transparent entities above so
-        // their own transform z controls Transparent2d ordering.
+        // The shared blend mesh retains overlays such as run masks and the aggregate band.
         shift_depth(&mut blend, -sort_z);
         for (layer, built) in [opaque, blend].into_iter().enumerate() {
             let handle = meshes.add(built);
@@ -302,9 +310,9 @@ pub(super) fn sync(
                 commands.entity(entity).insert((Mesh2d(handle), transform));
             } else {
                 let material = if layer == 1 {
-                    visuals.blend_material.clone()
+                    visuals.blend_visuals().1
                 } else {
-                    visuals.material.clone()
+                    visuals.mesh_material()
                 };
                 block.entities[layer] = Some(
                     commands
@@ -322,6 +330,7 @@ pub(super) fn sync(
         block.band = band;
         block.theme = theme.fingerprint().to_owned();
         block.sort_z = sort_z;
+        block.labels = block_requests;
         rebuilt += 1;
     }
     visuals.container_blocks = blocks;

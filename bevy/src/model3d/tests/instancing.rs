@@ -47,13 +47,22 @@ fn explicit_roots_share_mesh_preserve_parts_and_restore_for_high_consumers() {
     assert_eq!(budget["instanceTriangles"], 16 * 12);
     {
         let mut models = world.resource_mut::<ModelVisuals>();
-        crate::model3d::demand::update(&mut models, &scene, None, &Default::default(), 0.);
+        crate::model3d::demand::update(
+            &mut models,
+            &scene,
+            None,
+            &Default::default(),
+            &Default::default(),
+            0.,
+        );
         let demand = models.demand.clone();
+        let high = std::collections::HashSet::from(["a".into()]);
         assert!(crate::model3d::demand::update(
             &mut models,
             &scene,
             None,
-            &std::collections::HashSet::from(["a".into()]),
+            &high,
+            &high,
             0.1
         ));
         assert_eq!(models.demand, demand);
@@ -67,6 +76,7 @@ fn explicit_roots_share_mesh_preserve_parts_and_restore_for_high_consumers() {
         &mut world.resource_mut::<ModelVisuals>(),
         &scene,
         None,
+        &Default::default(),
         &Default::default(),
         0.2
     ));

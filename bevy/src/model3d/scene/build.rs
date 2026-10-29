@@ -123,6 +123,9 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                 scale,
                 vertices,
                 faces,
+                normals,
+                uvs,
+                colors,
                 ..
             } => specs.push(spec(
                 id,
@@ -133,6 +136,9 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                 Some(ModelGeometry::Mesh {
                     vertices: vertices.clone(),
                     faces: faces.clone(),
+                    normals: normals.clone(),
+                    uvs: uvs.clone(),
+                    colors: colors.clone(),
                 }),
                 op,
                 None,

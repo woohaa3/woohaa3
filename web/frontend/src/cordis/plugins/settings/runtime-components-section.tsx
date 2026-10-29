@@ -1,6 +1,6 @@
 import { useSyncExternalStore, useState } from "react";
 import { getAppPublicFetch } from "../../services/app-base-path.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 
 import { runtimeComponents } from "../../services/runtime-components.js";
 
@@ -8,14 +8,15 @@ const LABELS: Record<string, string> = { codex: "Codex", claude: "Claude", dsh: 
 const STATUSES: Record<string, string> = { missing: "未安装", checking: "检查中", downloading: "下载中", verifying: "校验中", extracting: "解压中", ready: "可用", failed: "安装失败", incompatible: "版本不兼容" };
 const BUSY = new Set(["checking", "downloading", "verifying", "extracting"]);
 
-export function RuntimeComponentsSection() {
-  const runtimeState = useSyncExternalStore(runtimeComponents.subscribe, runtimeComponents.getSnapshot, runtimeComponents.getSnapshot);
+export type RuntimeComponentsSectionProps = { source?: typeof runtimeComponents; fetcher?: typeof fetch };
+export function RuntimeComponentsSection({ source = runtimeComponents, fetcher = (input, init) => getAppPublicFetch()(input, init) }: RuntimeComponentsSectionProps = {}) {
+  const runtimeState = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot);
   const snapshot = runtimeState.snapshot;
   const [error, setError] = useState("");
   const [pending, setPending] = useState<string>();
   const [paths, setPaths] = useState<Record<string, string>>({});
   const request = async (suffix = "", body?: unknown) => {
-    const response = await getAppPublicFetch()(`/api/runtime-components${suffix}`, body === undefined ? {} : {
+    const response = await fetcher(`/api/runtime-components${suffix}`, body === undefined ? {} : {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
     });
     const value = await response.json();
@@ -31,7 +32,7 @@ export function RuntimeComponentsSection() {
         if (first) setPaths((previous) => ({ ...previous, [id]: typeof first === "string" ? first : first.entry }));
         else setError("未找到本机程序，请填写绝对路径。");
       }
-      await runtimeComponents.refresh();
+      await source.refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "组件操作失败"); }
     finally { setPending(undefined); }
   };

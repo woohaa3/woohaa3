@@ -83,7 +83,11 @@ export type ApplicationExtensionMetadata = {
   configSchema: ApplicationExtensionConfigSchemaIdentity;
   dependencies: ApplicationExtensionHostDependency[];
   capabilities: ApplicationExtensionCapabilitySummary[];
-  /** 可信清单的首次启动默认值；不覆盖已保存的管理员配置。 */
+  /**
+   * 可信清单的首次启动默认值；不覆盖已保存的管理员配置。
+   *
+   * 未声明按 `false` 处理（控制面只看 `=== true`）：站点扩展不会因为漏写这一项而自动启用。
+   */
   defaultEnabled?: boolean;
 };
 

@@ -184,6 +184,7 @@ describe("直接配置模型 API", () => {
     const { api } = fixture();
     vi.mocked(api.list).mockResolvedValue(ok({ connections: [], adapters: [...SDK_AGENT_ADAPTERS] }));
     await mount(api);
+    expect(el.querySelector('button[aria-label="模型服务"]')).toBeNull();
     for (const label of ["OpenAI Responses API", "Anthropic Messages API", "Chat Completions API", "Gemini API"]) {
       await select("API 协议", label);
       const address = el.querySelector<HTMLInputElement>('input[aria-label="Base URL"]')!;

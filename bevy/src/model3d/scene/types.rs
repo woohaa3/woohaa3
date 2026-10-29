@@ -48,6 +48,10 @@ pub(crate) enum ModelGeometry {
     Mesh {
         vertices: Vec<[f32; 3]>,
         faces: Vec<[u32; 3]>,
+        /// 可选顶点属性（GLB 文件模型）；缺失时运行时计算平滑法线。
+        normals: Option<Vec<[f32; 3]>>,
+        uvs: Option<Vec<[f32; 2]>>,
+        colors: Option<Vec<[f32; 4]>>,
     },
 }
 

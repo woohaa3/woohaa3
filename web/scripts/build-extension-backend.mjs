@@ -24,7 +24,7 @@
  *
  * 输出 { outFile, exports, modules }；不改写扩展目录里的 extension.json / package.json（改写由 pack:extension 在暂存目录完成）。
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, watch as fsWatch } from "node:fs";
 import fs from "node:fs/promises";
 import { builtinModules } from "node:module";
 import path from "node:path";
@@ -184,9 +184,86 @@ export async function buildExtensionBackend(options = {}) {
   };
 }
 
+/**
+ * 作者侧后端增量构建（change: 2026-10-27-add-extension-dev-reload，6.2）。
+ *
+ * 与前端 watch 同一形态：复用同一条构建函数，源码变了再跑一次；失败只记录、不退出。
+ */
+async function watchExtensionBackend({ dir, outDir, debounceMs = 120, watch: watchFn = fsWatch, log = console }) {
+  let timer = null;
+  let running = false;
+  let queued = false;
+
+  const build = async () => {
+    if (running) {
+      queued = true;
+      return;
+    }
+    running = true;
+    try {
+      const result = await buildExtensionBackend({ cwd: dir, outDir });
+      log.log(
+        result.outFile
+          ? `[extension-backend] rebuilt ${path.relative(process.cwd(), result.outFile)} exports=${result.exports.join(",")}`
+          : `[extension-backend] ${path.basename(dir)}：没有后端声明，跳过`
+      );
+    } catch (error) {
+      log.error(`[extension-backend] rebuild failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      running = false;
+      if (queued) {
+        queued = false;
+        schedule();
+      }
+    }
+  };
+  const schedule = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      void build();
+    }, debounceMs);
+    timer.unref?.();
+  };
+
+  const targets = [path.join(dir, "src"), path.join(dir, "extension.json")].filter((target) => existsSync(target));
+  const watchers = [];
+  for (const target of targets) {
+    try {
+      const watcher = watchFn(target, { recursive: true }, () => schedule());
+      watcher.on?.("error", () => undefined);
+      watchers.push(watcher);
+    } catch (error) {
+      log.error(`[extension-backend] watch unavailable for ${target}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  await build();
+  log.log("[extension-backend] watching for changes (Ctrl+C to stop)");
+  return () => {
+    if (timer !== null) clearTimeout(timer);
+    for (const watcher of watchers) {
+      try {
+        watcher.close();
+      } catch {
+        /* 已失效的监听器忽略 */
+      }
+    }
+  };
+}
+
 async function main() {
   const dir = path.resolve(readArg("cwd") ?? process.cwd());
   const outDirName = readArg("outdir") ?? BACKEND_DIST_DIR;
+  if (process.argv.includes("--watch")) {
+    const stop = await watchExtensionBackend({ dir, outDir: path.join(dir, outDirName) });
+    const shutdown = () => {
+      stop();
+      process.exit(0);
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+    return;
+  }
   const result = await buildExtensionBackend({ cwd: dir, outDir: path.join(dir, outDirName) });
   if (!result.outFile) {
     console.log("[extension-backend] " + path.basename(dir) + "：没有后端声明，跳过");

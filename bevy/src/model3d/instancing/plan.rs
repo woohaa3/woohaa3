@@ -16,7 +16,7 @@ pub(super) fn plans(
     opaque: &HashSet<String>,
 ) -> Vec<batching::BatchPlan> {
     let mut result = Vec::new();
-    for plan in batching::plan(specs, opaque, &HashSet::new()) {
+    for plan in batching::plan(specs, opaque, &HashSet::new(), false).plans {
         let mut groups: HashMap<String, Vec<Vec<usize>>> = HashMap::new();
         for index in plan.parts {
             let geometry = specs[index].geometry.as_ref().unwrap();

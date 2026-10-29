@@ -27,6 +27,7 @@ import type { CanvasRuntimeService } from "../../contracts.js";
 import type { CanvasLayoutAdapter } from "../../navigation/contracts.js";
 import { definePlugin } from "../../plugin.js";
 import { documentWorkspaceAvailable, resolveFocusWorkspace, watchFocusWorkspace } from "../../focus/host.js";
+import { imageFocusTargetValid } from "../../focus/image-focus-target.js";
 import type { CanvasSlotProps } from "../../contract/platform.js";
 
 export const CANVAS_RUNTIME_PLUGIN_ID = "canvas-runtime";
@@ -256,11 +257,21 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
           if (kind === "model") return target !== undefined;
           // 图片/视频聚焦目标由各自 feature 解析（image/video focus targets）。
           if (kind === "video") return host.isVideoFocusTargetValid?.(nodeId) ?? false;
-          return host.isImageFocusTargetValid?.(nodeId) ?? false;
+          // 图片：扩展注册的目标集合优先；图片编辑器扩展缺席（集合从未写入）时回落到宿主的
+          // canonical 判定，否则未安装 PhotoCraft 的画布上任何图片双击都会被判成
+          // 「聚焦目标不可用」（change: default-image-focus-viewer）。
+          return imageFocusTargetValid({
+            registered: host.isImageFocusTargetValid?.(nodeId) === true,
+            canvas: workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas,
+            nodeId
+          });
         },
         // 独立文件文档目标由编辑 feature 提供的 slot 声明可用性；没有贡献时不可进入。
         isDocumentTargetValid: (documentId) => documentWorkspaceAvailable(ctx.slots, documentId),
         targetUnavailableReason: (nodeId, kind) => {
+          // 图片目标不可用只可能是素材本身不能用（节点类型/未就绪/无受控地址）：给出可执行的原因，
+          // 不要退回通用的「聚焦目标不可用」（change: default-image-focus-viewer）。
+          if (kind === "image") return "这张图片还没有可查看的内容：素材未就绪或地址不可用。";
           if (kind !== "extension") return null;
           const result = resolveFocusWorkspace(ctx.slots, workspaceProps(nodeId));
           return result.ok ? "模型尚未准备完成，请稍后重试或检查模型错误。" : result.reason;

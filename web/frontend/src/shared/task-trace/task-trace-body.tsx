@@ -10,9 +10,9 @@
  */
 import { useState, type ReactNode } from "react";
 import { isTerminalTaskState, type TaskExecutionDetail, type TaskRequestInput } from "@woohaa3/contracts";
-import { AudioPlayer } from "../ui/AudioPlayer.js";
-import { Button, IconButton } from "../ui/index.js";
-import { CheckIcon, CopyIcon, LocateIcon } from "../ui/index.js";
+import { AudioPlayer } from "@woohaa3/ui/media";
+import { Button, IconButton } from "@woohaa3/ui";
+import { CheckIcon, CopyIcon, LocateIcon } from "@woohaa3/ui";
 import { actorLabel, copyToClipboard, effectiveTotalMs, formatDuration, formatLocalTime, sourceLabel, stageLabel, stateLabel } from "./format.js";
 import { formatClockRange, groupTimeline } from "./timeline.js";
 import "./task-trace.css";

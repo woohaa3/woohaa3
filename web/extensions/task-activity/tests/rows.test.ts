@@ -124,7 +124,7 @@ describe("组创作记录适配器", () => {
 
     expect(adaptGroupRow(groupRun({ status: "succeeded", label: "已完成", active: false })).tone).toBe("success");
     expect(groupRunTone("partial")).toBe("danger");
-    expect(groupRunTone("unknown")).toBe("danger");
+    expect(groupRunTone("failed")).toBe("danger");
     expect(groupRunTone("cancelled")).toBe("muted");
     expect(groupRowKey(groupRun())).toBe("group:request-g1");
   });
@@ -137,7 +137,6 @@ describe("组创作记录适配器", () => {
     });
     expect(writable.title).toBe("故事组");
     expect(writable.actions.stop).toBeTypeOf("function");
-    expect(writable.actions.verify).toBeTypeOf("function");
     expect(writable.actions.openConversation).toBeTypeOf("function");
     // turnId 已落地：不允许重试原请求。
     expect(writable.actions.retry).toBeUndefined();
@@ -150,7 +149,7 @@ describe("组创作记录适配器", () => {
   });
 
   it("停止与重试的条件由来源语义给出", () => {
-    expect(canStopGroupRun(groupRun({ status: "unknown" }))).toBe(true);
+    expect(canStopGroupRun(groupRun({ status: "failed" }))).toBe(false);
     expect(canStopGroupRun(groupRun({ status: "succeeded", active: false }))).toBe(false);
     expect(canStopGroupRun(groupRun({ conversationId: undefined, creation: { ...groupRun().creation!, conversationId: undefined } }))).toBe(false);
     expect(canRetryGroupRun(groupRun({ creation: { ...groupRun().creation!, turnId: undefined } }))).toBe(true);

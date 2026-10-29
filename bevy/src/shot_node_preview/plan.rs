@@ -53,6 +53,11 @@ pub(super) struct Target {
     /// 播放会话代数（活动卡片取自播放投影；封面恒为 0）。
     pub(super) generation: u32,
     pub(super) visible: bool,
+    /// 卡片参考内容已就绪（录制完成）且不是活动播放目标：内容已固化，**不建实时 rig**。
+    ///
+    /// 这种卡片显示的是已录制的媒体（画布纹理），实时渲染一份同样的画面既不改结果，
+    /// 又白占一路离屏相机与整场几何（2026-10-28 总览 draw call 优化）。
+    pub(super) settled: bool,
     pub(super) backdrop: Option<Color>,
     /// 归属片场仍在 native 后台准备中（未发布完整表示）。
     ///
@@ -80,8 +85,9 @@ pub(crate) fn pin_capture_owners(scene: &Scene, pins: &mut std::collections::Has
     pins.extend(owners);
 }
 
-/// A visible shot is a composition consumer, just like a focused view/capture.
-/// Its source must not silently switch to overview geometry or disappear offscreen.
+/// 可见镜头卡片让源片场保持**驻留**（不被当作屏外闲置回收），但这**不**把它提升为
+/// 高优先消费者：卡片参考内容就绪后已经固化，在总览尺寸下按源片场自身的总览档位渲染即可。
+/// 真正需要 High 的只有进行中的截图/导出请求（`ShotCaptureRouting::pins`）。
 pub(crate) fn pin_visible_owners(scene: &Scene, pins: &mut std::collections::HashSet<String>) {
     if card_geometry::focuses_isolate(scene) {
         return;
@@ -94,11 +100,31 @@ pub(crate) fn pin_visible_owners(scene: &Scene, pins: &mut std::collections::Has
         .unwrap_or(Vec2::ZERO);
     for node in &scene.nodes {
         if let Some(preview) = node.shot_preview.as_ref() {
+            // 参考已就绪的卡片显示录制内容，源片场不必为它保留（除非正在播放该镜头）。
+            if settled_card(preview, &node.id, scene) {
+                continue;
+            }
             if !preview.hidden && card_geometry::visible_on_surface(node, viewport, surface) {
                 pins.insert(preview.film_set_node_id.clone());
             }
         }
     }
+}
+
+/// 卡片参考已就绪（录制完成）且不是当前活动播放目标。
+///
+/// `state` 来自渲染场景里该预览节点的状态投影：`ready` 表示参考媒体已经存在，卡片按录制
+/// 内容显示；`preparing`/`stale`/`error` 仍需实时取景兜底。
+pub(crate) fn settled_card(
+    preview: &crate::protocol::ShotPreviewPresentation,
+    node_id: &str,
+    scene: &Scene,
+) -> bool {
+    preview.state == "ready"
+        && !scene.animation_playback.as_ref().is_some_and(|playback| {
+            playback.view_mode == "shot-node-preview"
+                && playback.target_preview_node_id.as_deref() == Some(node_id)
+        })
 }
 
 /// 由场景派生全部卡片预览目标；只取同时具备合格源片场包围球的预览节点。
@@ -197,47 +223,14 @@ pub(super) fn targets_with_preparation(
             bounds,
             aspect: card_geometry::shot_preview_aspect(node),
             content: format!(
-                "{}:group={}:background={backdrop}",
+                "{}:background={backdrop}",
                 content_identity(
                     owner,
                     owner.composite_asset.as_ref(),
                     owner.model.as_ref(),
                     preview,
                     &quality_of(&owner.id),
-                ),
-                scene
-                    .film_set_groups
-                    .iter()
-                    .find(|group| group.owner_id == owner.id)
-                    .map(|group| {
-                        let transform = group
-                            .scene_transform
-                            .as_ref()
-                            .map(|t| format!("{}:{}:{}:{}:{}", t.x, t.y, t.z, t.yaw, t.scale))
-                            .unwrap_or_default();
-                        let bindings = group
-                            .bindings
-                            .iter()
-                            .map(|binding| {
-                                format!(
-                                    "{}:{}:{}:{}:{}:{}:{}:{}:{}:{:?}",
-                                    binding.binding_id,
-                                    binding.content_key,
-                                    binding.transform.x,
-                                    binding.transform.y,
-                                    binding.transform.z,
-                                    binding.transform.yaw,
-                                    binding.transform.scale,
-                                    binding.visible,
-                                    binding.aspect_ratio,
-                                    binding.diagnostic
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("|");
-                        format!("{transform}:{bindings}")
-                    })
-                    .unwrap_or_default()
+                )
             ),
             time: if is_live {
                 live.map(|sampling| sampling.playback.time.to_bits())
@@ -258,6 +251,7 @@ pub(super) fn targets_with_preparation(
                     viewport,
                     surface,
                 ),
+            settled: !is_live && preview.state == "ready",
             awaiting_root: preparing_of(&owner.id),
             backdrop: Some(crate::model3d::scene::parse_hex(backdrop)),
         });
@@ -325,10 +319,14 @@ mod tests {
     use super::*;
 
     fn preview_node(id: &str, x: f32) -> GraphNode {
+        preview_node_with_state(id, x, "ready")
+    }
+
+    fn preview_node_with_state(id: &str, x: f32, state: &str) -> GraphNode {
         serde_json::from_str(&format!(
             r#"{{"id":"{id}","type":"film-set-shot-preview","x":{x},"y":0,"width":240,"height":167,
                 "shotPreview":{{"filmSetNodeId":"film","clipId":"clip-1","kind":"dynamic","name":"镜头",
-                "aspect":1.7777778,"duration":5,"state":"ready",
+                "aspect":1.7777778,"duration":5,"state":"{state}",
                 "coverCamera":{{"azimuth":0.5,"elevation":0.7,"distance":8,"focusOffset":[0,1,0]}}}}}}"#
         ))
         .unwrap()
@@ -430,7 +428,11 @@ mod tests {
 
     #[test]
     fn only_visible_shots_pin_their_source_for_composition_quality() {
-        let mut scene = scene_of(owner_node(0.0, 1.6), preview_node("shot", 0.0));
+        // 参考尚未就绪（录制中/待更新）：卡片仍要实时取景，因此需要源片场驻留。
+        let mut scene = scene_of(
+            owner_node(0.0, 1.6),
+            preview_node_with_state("shot", 0.0, "preparing"),
+        );
         scene.surface = Some(
             serde_json::from_value(serde_json::json!({"width":1024,"height":768,"pixelRatio":1}))
                 .unwrap(),
@@ -442,6 +444,34 @@ mod tests {
         pins.clear();
         pin_visible_owners(&scene, &mut pins);
         assert!(pins.is_empty());
+    }
+
+    #[test]
+    fn ready_cards_are_settled_and_need_no_rig_or_source_pin() {
+        // 参考已录制完成：卡片显示录制内容，不再为它建实时 rig，也不为它保留源片场。
+        let mut scene = scene_of(owner_node(0.0, 1.6), preview_node("shot", 0.0));
+        scene.surface = Some(
+            serde_json::from_value(serde_json::json!({"width":1024,"height":768,"pixelRatio":1}))
+                .unwrap(),
+        );
+        let target = targets(&scene, &|_| None, &|_| "high".into(), None).remove(0);
+        assert!(target.settled);
+        assert!(target.visible);
+        let mut pins = std::collections::HashSet::new();
+        pin_visible_owners(&scene, &mut pins);
+        assert!(pins.is_empty());
+
+        // 待更新/录制中仍然实时取景。
+        let mut live_scene = scene_of(
+            owner_node(0.0, 1.6),
+            preview_node_with_state("shot", 0.0, "stale"),
+        );
+        live_scene.surface = scene.surface.clone();
+        let target = targets(&live_scene, &|_| None, &|_| "high".into(), None).remove(0);
+        assert!(!target.settled);
+        let mut pins = std::collections::HashSet::new();
+        pin_visible_owners(&live_scene, &mut pins);
+        assert!(pins.contains("film"));
     }
 
     #[test]

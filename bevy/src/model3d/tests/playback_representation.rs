@@ -32,11 +32,18 @@ pub(super) fn playback(target: Option<&str>) -> AnimationPlayback {
     })).unwrap()
 }
 fn apply(world: &mut World, scene: &Scene) {
+    let instances = super::opacity_instances(world);
     let mut models = world.remove_resource::<ModelVisuals>().unwrap();
     let mut materials = world
         .remove_resource::<Assets<StandardMaterial>>()
         .unwrap_or_default();
-    apply_motion_playback(&mut world.commands(), &mut models, &mut materials, scene);
+    apply_motion_playback(
+        &mut world.commands(),
+        &mut models,
+        &mut materials,
+        &instances,
+        scene,
+    );
     world.flush();
     world.insert_resource(models);
     world.insert_resource(materials);
@@ -358,6 +365,7 @@ fn shot_source_keeps_prepared_motion_parts_across_short_viewport_exit() {
         &scene,
         None,
         &Default::default(),
+        &Default::default(),
         0.,
     );
     run_sync(&mut world, &scene, &resources);
@@ -376,6 +384,7 @@ fn shot_source_keeps_prepared_motion_parts_across_short_viewport_exit() {
             &scene,
             None,
             &Default::default(),
+            &Default::default(),
             now,
         );
         run_sync(&mut world, &scene, &resources);
@@ -386,6 +395,7 @@ fn shot_source_keeps_prepared_motion_parts_across_short_viewport_exit() {
         &mut world.resource_mut::<ModelVisuals>(),
         &scene,
         None,
+        &Default::default(),
         &Default::default(),
         6.,
     );

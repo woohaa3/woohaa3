@@ -88,6 +88,19 @@ describe("把手显示与门禁（design D1）", () => {
     controller.dispose();
   });
 
+  it("单选 group 不投影聚合选区带，避免叠加第二条普通描边", () => {
+    const canvasState = nodesCanvas([
+      { id: "g", type: "group", x: 0, y: 0, width: 500, height: 400 },
+      { id: "m1", x: 40, y: 40, width: 200, height: 120, parentId: "g" },
+      { id: "m2", x: 40, y: 220, width: 200, height: 120, parentId: "g" },
+    ]);
+    const { dom, controller, scenes } = setup(canvasState);
+    select(dom, ["g"]);
+    controller.flush();
+    expect(lastAggregate(scenes)).toBeUndefined();
+    controller.dispose();
+  });
+
   it("只读会话拖拽把手不提交（也不开始）", () => {
     setSession({ isWritable: () => false, submitCommands: () => ({ ok: true }) as never });
     const { dom, controller } = setup(baseCanvas(), { isWritable: () => false });

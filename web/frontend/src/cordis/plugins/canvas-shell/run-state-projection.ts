@@ -49,7 +49,7 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
       continue;
     }
     if (summary && "filmSetFeedback" in summary) {
-      node.aggregateRun = { active: summary.filmSetFeedback != null, filmSet: summary.filmSetFeedback ?? undefined };
+      node.aggregateRun = { active: summary.filmSetFeedback != null && summary.filmSetFeedback.phase !== "failed", filmSet: summary.filmSetFeedback ?? undefined };
       delete node.historyStrip;
       continue;
     }

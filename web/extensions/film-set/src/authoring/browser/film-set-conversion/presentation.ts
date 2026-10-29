@@ -75,14 +75,14 @@ export function describeFilmSetConversionFailure(code: FilmSetConversionErrorCod
 /** 断点展示视图：主按钮旁的就近提示。 */
 export type FilmSetConversionPresentation = {
   /** 状态种类（用于样式与行为分支）。 */
-  kind: "idle" | "running" | "completed" | "failed" | "cancelled" | "unknown";
+  kind: "idle" | "running" | "completed" | "failed" | "cancelled";
   /** 主要文案（就绪时为空串）。 */
   label: string;
   /** 真实阶段文案（`running` 时存在）。 */
   step?: string;
   /** 失败原因（`failed` 时存在）。 */
   reason?: string;
-  /** 就近恢复动作文案（失败/取消/未知时存在）。 */
+  /** 就近恢复动作文案（失败/取消时存在）。 */
   recovery?: string;
   /** 是否可取消（未提交工作）。 */
   cancellable: boolean;
@@ -90,8 +90,6 @@ export type FilmSetConversionPresentation = {
   retryable: boolean;
   /** 是否提供「打开片场」。 */
   openable: boolean;
-  /** 是否应查询核对（unknown，不自动重跑）。 */
-  needsQuery: boolean;
   /** 是否以 polite live region 播报（后台完成不抢焦点）。 */
   announce: boolean;
 };
@@ -99,7 +97,7 @@ export type FilmSetConversionPresentation = {
 /** 按权威状态映射断点视图；`null` 表示尚无请求（就绪）。 */
 export function presentFilmSetConversionStatus(status: FilmSetConversionStatus | null): FilmSetConversionPresentation {
   if (!status) {
-    return { kind: "idle", label: "", cancellable: false, retryable: false, openable: false, needsQuery: false, announce: false };
+    return { kind: "idle", label: "", cancellable: false, retryable: false, openable: false, announce: false };
   }
   switch (status.status) {
     case "running":
@@ -110,17 +108,12 @@ export function presentFilmSetConversionStatus(status: FilmSetConversionStatus |
         cancellable: true,
         retryable: false,
         openable: false,
-        needsQuery: false,
         announce: true
       };
     case "completed":
-      return { kind: "completed", label: "片场已创建", cancellable: false, retryable: false, openable: true, needsQuery: false, announce: true };
+      return { kind: "completed", label: "片场已创建", cancellable: false, retryable: false, openable: true, announce: true };
     case "cancelled":
-      return { kind: "cancelled", label: "已取消转换", recovery: "重新转换", cancellable: false, retryable: true, openable: false, needsQuery: false, announce: true };
-    case "unknown":
-      // 结果未知（例如服务重启后本地已无在途任务）仍可取消：取消把未提交工作落为终态，
-      // 使占位片场节点脱离「进行中」而可删除（否则会永久卡在无法删除的状态）。
-      return { kind: "unknown", label: "正在确认转换结果", recovery: "查询结果", cancellable: true, retryable: false, openable: false, needsQuery: true, announce: true };
+      return { kind: "cancelled", label: "已取消转换", recovery: "重新转换", cancellable: false, retryable: true, openable: false, announce: true };
     case "failed": {
       const described = describeFilmSetConversionFailure(status.code);
       // 标题按错误类别区分；详情优先显示后端给出的**具体**原因（例如「对象 X 的 capsule 总高度不得小于直径」），
@@ -134,7 +127,6 @@ export function presentFilmSetConversionStatus(status: FilmSetConversionStatus |
         cancellable: false,
         retryable: status.retryable,
         openable: false,
-        needsQuery: false,
         announce: true
       };
     }

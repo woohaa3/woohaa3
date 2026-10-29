@@ -1,8 +1,8 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Tooltip } from "../../../shared/ui/Tooltip.js";
+import { Tooltip } from "@woohaa3/ui/primitives";
 import { useOptionalService, useService } from "../../react.js";
 import { agentDirectory } from "../../services/assistant-execution/directory.js";
-import { ASSISTANT_SETUP_TOOLTIP } from "../../ui/assistant-execution/model-selector.js";
+import { ASSISTANT_SETUP_TOOLTIP } from "@woohaa3/ui/assistant";
 
 const noopSubscribe = () => () => undefined;
 

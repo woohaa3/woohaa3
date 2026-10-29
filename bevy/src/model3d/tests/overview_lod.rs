@@ -7,7 +7,7 @@
 //! `overview_work` 计数与 `budget_json` 断言；每几何有效档位（球体 Low / 盒体与自定义 Mesh
 //! High）用 Automatic 策略逐实体核对，并单独单测 `mesh::effective_quality`。
 use super::super::quality::Quality;
-use super::super::runtime::{ModelVisuals, sync_quality};
+use super::super::runtime::{ModelVisuals, sync_quality, sync_quality_with_demand};
 use super::*;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -68,9 +68,20 @@ fn quality(
     now: f64,
     pins: &HashSet<String>,
 ) {
+    quality_with_demand(world, scene, focus, now, pins, pins);
+}
+
+fn quality_with_demand(
+    world: &mut World,
+    scene: &Scene,
+    focus: Option<&str>,
+    now: f64,
+    pins: &HashSet<String>,
+    high_demand: &HashSet<String>,
+) {
     let mut models = world.remove_resource::<ModelVisuals>().unwrap();
     let mut meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
-    sync_quality(
+    sync_quality_with_demand(
         &mut world.commands(),
         &mut meshes,
         &mut models,
@@ -78,6 +89,7 @@ fn quality(
         focus,
         now,
         pins,
+        high_demand,
     );
     world.flush();
     world.insert_resource(meshes);
@@ -109,13 +121,13 @@ fn settle(world: &mut World, scene: &Scene, now: &mut f64, expected: Quality) {
 
 #[test]
 #[cfg(feature = "canvas-core")]
-fn visible_shot_card_promotes_overview_source_to_capture_quality() {
+fn visible_shot_card_keeps_source_resident_without_forcing_high() {
     let (mut scene, resources) = fixture(mixed_snapshot("shot-source", 3, 3), 0.05, 1.0);
     scene.nodes.push(
         serde_json::from_value(serde_json::json!({
             "id":"shot","type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":167,
             "shotPreview":{"filmSetNodeId":"film","clipId":"clip","kind":"static","name":"shot",
-                "aspect":1.7777778,"duration":0,"state":"ready",
+                "aspect":1.7777778,"duration":0,"state":"preparing",
                 "coverCamera":{"azimuth":0,"elevation":0.5,"distance":200,"focusOffset":[0,0,0]}}
         }))
         .unwrap(),
@@ -127,9 +139,20 @@ fn visible_shot_card_promotes_overview_source_to_capture_quality() {
     let mut pins = HashSet::new();
     crate::shot_node_preview::pin_visible_owners(&scene, &mut pins);
     assert!(pins.contains("film"));
+    // 可见卡片只让源片场保持驻留：参考内容已固化，缩到总览时不升 High
+    // （2026-10-28）。
+    for _ in 0..16 {
+        now += 0.1;
+        quality_with_demand(&mut world, &scene, None, now, &pins, &HashSet::new());
+    }
+    assert_eq!(
+        world.resource::<ModelVisuals>().quality("film").tier(),
+        Quality::Low
+    );
+    // 进行中的截图/导出请求仍然把源片场升到 High。
     for _ in 0..64 {
         now += 0.1;
-        quality(&mut world, &scene, None, now, &pins);
+        quality_with_demand(&mut world, &scene, None, now, &pins, &pins);
         if world.resource::<ModelVisuals>().quality("film") == Quality::High {
             break;
         }
@@ -511,6 +534,7 @@ fn local_motion_split_keeps_low_and_pose() {
         playback.time = generation as f32;
         scene.animation_playback = Some(playback.clone());
         run_sync(&mut world, &scene, &resources);
+        let instances = super::opacity_instances(&mut world);
         let mut models = world.remove_resource::<ModelVisuals>().unwrap();
         let mut materials = world
             .remove_resource::<Assets<StandardMaterial>>()
@@ -519,6 +543,7 @@ fn local_motion_split_keeps_low_and_pose() {
             &mut world.commands(),
             &mut models,
             &mut materials,
+            &instances,
             &scene,
         );
         world.flush();
@@ -534,7 +559,7 @@ fn local_motion_split_keeps_low_and_pose() {
 fn shared_custom_mesh_stays_high_for_overview_while_card_uses_low() {
     // 片场与普通卡片共享同一自定义 Mesh：片场消费原 High，卡片沿用 Low 简化。
     use crate::model3d::{scene::ModelGeometry, simplification::tests::sphere};
-    let ModelGeometry::Mesh { vertices, faces } = sphere() else {
+    let ModelGeometry::Mesh { vertices, faces, .. } = sphere() else {
         panic!()
     };
     let snapshot: ModelSnapshot = serde_json::from_value(serde_json::json!({
@@ -592,6 +617,9 @@ fn shared_custom_mesh_stays_high_for_overview_while_card_uses_low() {
         &ModelGeometry::Mesh {
             vertices: vertices.clone(),
             faces: faces.clone(),
+            normals: None,
+            uvs: None,
+            colors: None,
         },
         Quality::High,
     )
@@ -603,8 +631,8 @@ fn shared_custom_mesh_stays_high_for_overview_while_card_uses_low() {
 
 #[test]
 fn frame_budget_limits_specs_and_merges_latest_target() {
-    // 重片场跨帧准备；每帧至多 64 source specs；High 优先合并最新目标。
-    let (mut scene, resources) = fixture(mixed_snapshot("heavy", 200, 0), 4.0, 1.0);
+    // 重片场跨帧准备；每帧至多一个满批次（256 source specs）；High 优先合并最新目标。
+    let (mut scene, resources) = fixture(mixed_snapshot("heavy", 600, 0), 4.0, 1.0);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
@@ -628,8 +656,8 @@ fn frame_budget_limits_specs_and_merges_latest_target() {
     now += 0.5;
     let work = &world.resource::<ModelVisuals>().overview_work;
     assert!(
-        work.specs_prepared - prepared_before <= 64,
-        "每帧至多 64 source specs"
+        work.specs_prepared - prepared_before <= 256,
+        "每帧至多 256 source specs（一个满批次）"
     );
     assert!(work.specs_prepared - prepared_before >= 1);
     assert!(work.prepare_calls >= 1);
@@ -695,7 +723,7 @@ fn failed_preparation_keeps_old_representation_and_reports_reason() {
 #[test]
 fn content_replacement_cancels_in_flight_preparation() {
     // 内容替换使在途旧准备失效，不发布旧布局。
-    let (mut scene, resources) = fixture(mixed_snapshot("a", 200, 0), 4.0, 1.0);
+    let (mut scene, resources) = fixture(mixed_snapshot("a", 600, 0), 4.0, 1.0);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
@@ -709,7 +737,7 @@ fn content_replacement_cancels_in_flight_preparation() {
         "重片场应分帧准备"
     );
     let mut resources = resources;
-    let mut replacement = mixed_snapshot("b", 200, 0);
+    let mut replacement = mixed_snapshot("b", 600, 0);
     replacement.signature = "b".into();
     let reference = scene.nodes[0].model.as_mut().unwrap();
     *reference = reference_for(&replacement, ModelPlacement::default());
@@ -773,7 +801,7 @@ fn diagnostics_are_bounded_and_report_actual_work() {
 fn unpublished_low_reports_published_high_and_high_handles() {
     // 目标 Low 尚未准备完成：诊断同时报告 desired Low、published High 与准备状态；
     // 活动面数按 High handle 统计，不提前宣称减量。
-    let (mut scene, resources) = fixture(mixed_snapshot("pending", 200, 0), 4.0, 1.0);
+    let (mut scene, resources) = fixture(mixed_snapshot("pending", 600, 0), 4.0, 1.0);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
@@ -976,11 +1004,17 @@ fn bevy_overview_tier_triangles_match_tool_table() {
 #[test]
 fn custom_mesh_retains_authored_faces_at_every_tier() {
     use crate::model3d::{scene::ModelGeometry, simplification::tests::sphere};
-    let ModelGeometry::Mesh { vertices, faces } = sphere() else {
+    let ModelGeometry::Mesh { vertices, faces, .. } = sphere() else {
         panic!()
     };
     let authored = faces.len();
-    let geometry = ModelGeometry::Mesh { vertices, faces };
+    let geometry = ModelGeometry::Mesh {
+        vertices,
+        faces,
+        normals: None,
+        uvs: None,
+        colors: None,
+    };
     for quality in [Quality::High, Quality::Medium, Quality::Low] {
         let mesh = super::super::mesh::build_mesh_quality(&geometry, quality).unwrap();
         assert_eq!(
@@ -1002,6 +1036,9 @@ fn effective_quality_only_lowers_supported_primitives() {
     let custom = ModelGeometry::Mesh {
         vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
         faces: vec![[0, 1, 2]],
+        normals: None,
+        uvs: None,
+        colors: None,
     };
     assert_eq!(
         effective_quality(&box_geometry, Quality::Low, true),

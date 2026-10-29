@@ -8,7 +8,9 @@
  *
  * 机器协议沿用 `clip`（clipId/clipPatch），产品文案统一称「拍摄镜头」。
  */
-import { Button, IconButton, Popover, PlusIcon, EllipsisIcon, TextInput, SelectInput } from "@woohaa3/frontend/extension-api";
+import { Button, IconButton, Popover } from "@woohaa3/ui/primitives";
+import { PlusIcon, EllipsisIcon } from "@woohaa3/ui/icons";
+import { TextInput, SelectInput } from "@woohaa3/ui/forms";
 import type { ShotImageReferences } from "./shot-image-reference.js";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";

@@ -1,4 +1,5 @@
 import { createNodeImplementationRegistry } from "../extension-api/node-implementations.js";
+import { createFileModelPreparation } from "./services/file-model-preparation.js";
 import { createMediaContentService } from "./services/media-content.js";
 
 import { createPersistentSurfaces } from "./services/persistent-surfaces.js";
@@ -381,7 +382,15 @@ export async function installCanvasPageServices(
   const compositeAssets = new CompositeAssetRegistry();
   ctx.provide("compositeAssets" as never, compositeAssets as never);
   ctx.effect(() => () => compositeAssets.clear(), "composite-asset-registry");
-  const nodeImplementations = createNodeImplementationRegistry(compositeAssets);
+  const fileModelPreparation = createFileModelPreparation({
+    // canvasRuntime 由页面插件注入；install 阶段只捕获惰性读取。
+    runtime: () => (ctx.get("canvasRuntime" as never) as {
+      runtime(): {
+        setModelMediaTexture(id: string, width: number, height: number, rgba: Uint8Array, source?: string): boolean | void;
+      } | null;
+    } | undefined) ?? null
+  });
+  const nodeImplementations = createNodeImplementationRegistry(compositeAssets, fileModelPreparation);
   ctx.provide("nodeImplementations" as never, nodeImplementations as never);
   ctx.effect(() => () => nodeImplementations.clear(), "node-implementation-registry");
   const inputScopes = new InputScopeService();
@@ -446,7 +455,15 @@ export async function installCanvasPageServices(
   for (const entry of options.serverActiveEntries ?? []) {
     entryRegistry.register(entry);
   }
-  const reconciler = createPageExtensionReconciler(ctx, { registry: entryRegistry, status: applicationExtensionStatus, runtime: options.extensionRuntime, logger: options.logger });
+  const reconciler = createPageExtensionReconciler(ctx, {
+    registry: entryRegistry,
+    status: applicationExtensionStatus,
+    runtime: options.extensionRuntime,
+    logger: options.logger,
+    // scope 启动完成后由 composition root 写入（change: 2026-10-27-add-extension-dev-reload）：
+    // 这里只为「发布指针变化」与「实例级重装」之间建立一条惰性链路。
+    reloadExtension: () => ctx.get("extensionReload" as never) as ((extensionId: string) => Promise<unknown>) | undefined
+  });
   // 记录 page startup 上报的加载诊断（含 optional 失败）。
   for (const diagnostic of options.loadDiagnostics ?? []) {
     options.extensionRuntime?.report(diagnostic);
@@ -562,6 +579,7 @@ export async function installCanvasPageServices(
   const canvasLocate = createCanvasLocateService({
     getCanvas: () => woohaa3CanvasStore.getState().canvas,
     getController: () => (ctx.get("canvasRuntime" as never) as { controller: () => never } | undefined)?.controller() ?? null,
+    renderBounds: () => (ctx.get("canvasRuntime" as never) as import("./contract/canvas-runtime.js").CanvasRuntimeService | undefined)?.runtime()?.acceptedScene?.()?.nodes ?? null,
     // 定位作品：保持当前缩放并平滑居中（尊重减少动态效果偏好）。
     panViewportTo: (viewport) => {
       const controller = (ctx.get("canvasRuntime" as never) as { controller: () => { panViewportTo?: (v: typeof viewport) => void } | null } | undefined)?.controller();

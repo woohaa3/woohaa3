@@ -10,6 +10,7 @@
  *   「市场装市场」的信任提升，核心自带来源随宿主发布、没有这个问题。
  * - 受管根被另一个进程锁住时 Manager 不可写（`MARKETPLACE_WRITER_LOCKED` 记日志），宿主照常启动。
  */
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ExtensionDocumentStore } from "@woohaa3/contracts";
 import type { LoadedExtensionHost } from "../../../extensions/manifest.js";
@@ -148,11 +149,39 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
       if (!toolkit.loadRuntimePlugin) return undefined;
       const layer = () => ctx.get("extensionLayer");
       const versionOf = (directory: string) => path.basename(directory);
-      const mount = async (extensionId: string, directory: string) => {
-        const loaded = await toolkit.loadRuntimePlugin!({ dir: directory, extensionId, version: versionOf(directory) });
+      /**
+       * 运行期安装的站点扩展不在启动扫描的 host.metadata 里；从包声明派生一份与
+       * `siteEntryOf` 同形的元数据，否则 hostPlugin + site 只会装载插件、不会进站点目录，
+       * 前端 `server-active` 要等到下次启动才生效。
+       */
+      const siteMetadataOf = (extensionId: string, directory: string, descriptor: unknown) => {
+        const found = host.metadata?.find((entry) => entry.extensionId === extensionId);
+        if (found) return found;
+        const site = (descriptor as { site?: Record<string, unknown> } | null)?.site;
+        if (!site) return null;
+        return {
+          extensionId,
+          directory,
+          name: typeof site.name === "string" ? site.name : extensionId,
+          description: typeof site.description === "string" ? site.description : "",
+          version: typeof site.version === "string" ? site.version : versionOf(directory),
+          managementScope: "site",
+          host: "backend",
+          configSchema: site.configSchema,
+          dependencies: Array.isArray(site.dependencies) ? site.dependencies : [],
+          capabilities: Array.isArray(site.capabilities) ? site.capabilities : [],
+          ...(site.defaultEnabled === undefined ? {} : { defaultEnabled: site.defaultEnabled }),
+          frontendEntry: existsSync(path.join(directory, "browser-dist", "artifact-manifest.json")),
+          backendHosts: ["backend"],
+          configScope: "site"
+        } as never;
+      };
+      const mount = async (extensionId: string, directory: string, version?: string) => {
+        // `version` 同时是模块身份：开发者模式的产物始终在同一目录，靠它制造新的模块 URL（D6）。
+        const loaded = await toolkit.loadRuntimePlugin!({ dir: directory, extensionId, version: version ?? versionOf(directory) });
         const plane = application()?.service.plugins();
         const gate = application()?.siteGate;
-        const metadata = host.metadata?.find((entry) => entry.extensionId === extensionId) ?? null;
+        const metadata = siteMetadataOf(extensionId, directory, loaded.descriptor);
         let definition = null as ReturnType<NonNullable<typeof gate>["add"]> | null;
         if (metadata && plane && gate) {
           definition = gate.add(extensionId);
@@ -174,9 +203,21 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
       };
       return {
         available: () => Boolean(layer()),
-        async swap(extensionId, directory, _version, previousDirectory) {
+        async swap(extensionId, directory, version, previousDirectory, previousVersion) {
           const target = layer();
           if (!target) throw Object.assign(new Error("宿主不支持运行期装配"), { code: "extension-host-unsupported" });
+          const plane = application()?.service.plugins();
+          const gate = application()?.siteGate;
+          // 站点扩展的旧版本在控制面里还有一条运行期记录；先移除，否则新版本 addExtension
+          // 会撞 extension-exists。provider/storage 插件没有这条记录，listed 为 false。
+          const listed = plane?.snapshot().catalog.some((entry) => entry.extensionId === extensionId) ?? false;
+          if (listed && plane) {
+            const removed = await plane.removeExtension(extensionId);
+            if (!removed.ok && removed.code !== "extension-not-found") {
+              throw Object.assign(new Error(removed.message ?? "站点扩展无法热切换"), { code: removed.code });
+            }
+            gate?.remove(extensionId);
+          }
           // 换版窗口：从撤旧到装配完成之间，该扩展的路由 / Provider 都不存在。
           // 网关据此返回可重试的 extension-reloading，而不是让调用方看到 404。
           beginSwap(extensionId);
@@ -184,12 +225,13 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
             // 先撤旧：同名插件不能并存。
             await target.remove(extensionId);
             try {
-              await mount(extensionId, directory);
+              await mount(extensionId, directory, version);
               return { swapped: true };
             } catch (error) {
               if (previousDirectory) {
                 try {
-                  await mount(extensionId, previousDirectory);
+                  // 装回时必须带旧 token：同目录不同 token 才是不同模块实例。
+                  await mount(extensionId, previousDirectory, previousVersion ?? undefined);
                 } catch (restoreError) {
                   log({ event: "extension-swap-restore-failed", extensionId, message: restoreError instanceof Error ? restoreError.message : String(restoreError) });
                 }
@@ -201,7 +243,17 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
           }
         },
         async remove(extensionId) {
+          const plane = application()?.service.plugins();
+          const gate = application()?.siteGate;
+          const listed = plane?.snapshot().catalog.some((entry) => entry.extensionId === extensionId) ?? false;
+          if (listed && plane) {
+            const removed = await plane.removeExtension(extensionId);
+            if (!removed.ok && removed.code !== "extension-not-found") {
+              throw Object.assign(new Error(removed.message ?? "站点扩展无法卸载"), { code: removed.code });
+            }
+          }
           await layer()?.remove(extensionId);
+          gate?.remove(extensionId);
         }
       };
     };
@@ -280,6 +332,20 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
     );
     ctx.provide("extensionManager", manager);
     ctx.effect(() => () => manager.close());
+
+    // 开发者模式热重载（change: 2026-10-27-add-extension-dev-reload，D2/D6/D7）：
+    // 编排在脚本层（那里本来就懂开发者目录），这里只暴露「用新 token 重装后端」这一个窄端口，
+    // 由宿主启动时接上。没有该端口（最小装配）时只走前端面。
+    const port = runtimeSwap();
+    // 把「用新 token 重装后端」注册给宿主：开发者模式的编排在脚本层，只有这里知道运行时端口。
+    // `previousToken` 为空表示没有可装回的版本，失败即失败（D6 的 last-good）。
+    const unregisterDevSwap = host.registerDevSwapPort?.({
+      async swapDev(extensionId: string, directory: string, token: string, previousToken: string | null): Promise<void> {
+        if (!port?.available()) throw new Error("宿主不支持运行期装配，无法热切换后端产物");
+        await port.swap(extensionId, directory, token, previousToken ? directory : null, previousToken ?? null);
+      }
+    });
+    if (unregisterDevSwap) ctx.effect(() => unregisterDevSwap);
     ctx.effect(() => unregisterGithub);
 
     const interval = config.observeIntervalMs ?? OBSERVE_INTERVAL_MS;

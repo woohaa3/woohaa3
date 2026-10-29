@@ -8,7 +8,7 @@
  * - 取消是显式按钮，`too-late` 时明确告知正在保存；
  * - 进度来自宿主查询，阶段文案与活动浮层共用。
  */
-import { Button } from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readFilmSetExportProfile, type FilmSetExportProfile, type RecordingStatusView } from "@woohaa3/contracts";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";

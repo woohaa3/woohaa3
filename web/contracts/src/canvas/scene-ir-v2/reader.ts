@@ -36,7 +36,7 @@ export function readMaterial(
   if (!id) return fail("invalid-material", `第 ${index} 个 material 缺少合法 id`);
   if (existing.has(id)) return fail("duplicate-material", `重复的 material id：${id}`);
   for (const key of Object.keys(raw)) {
-    if (!["t", "id", "baseColor", "roughness", "metallic", "emissive", "emissiveStrength", "alphaMode", "doubleSided", "unlit", "opacity"].includes(key)) {
+    if (!["t", "id", "baseColor", "roughness", "metallic", "emissive", "emissiveStrength", "alphaMode", "doubleSided", "unlit", "opacity", "baseColorTexture"].includes(key)) {
       return fail("invalid-material", `material ${id} 含未知字段 ${key}`);
     }
   }
@@ -76,6 +76,14 @@ export function readMaterial(
     }
     opacity = value;
   }
+  let baseColorTexture: string | undefined;
+  if (raw.baseColorTexture !== undefined && raw.baseColorTexture !== null) {
+    const textureId = readTextureId(raw.baseColorTexture);
+    if (textureId === null) {
+      return fail("invalid-material", `material ${id} 的 baseColorTexture 非法`);
+    }
+    baseColorTexture = textureId;
+  }
   return {
     ok: true,
     value: {
@@ -90,9 +98,17 @@ export function readMaterial(
       doubleSided: raw.doubleSided === true,
       // 只在显式声明时写入规范 op：旧场景的 Scene IR 与内容身份逐字节不变（D4）。
       ...(raw.unlit === true ? { unlit: true } : {}),
-      ...(opacity === undefined ? {} : { opacity })
+      ...(opacity === undefined ? {} : { opacity }),
+      ...(baseColorTexture === undefined ? {} : { baseColorTexture })
     }
   };
+}
+
+/** 纹理 id：内容寻址或上传时分配，字母数字与少量分隔符，长度受限。 */
+const TEXTURE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+
+export function readTextureId(input: unknown): string | null {
+  return typeof input === "string" && TEXTURE_ID.test(input) ? input : null;
 }
 
 function readRequiredColor(
@@ -213,7 +229,84 @@ export function readShape(
   if (faces.length > SCENE_IR_V2_MAX_MESH_FACES) {
     return fail("mesh-too-large", `mesh ${id} 面数 ${faces.length} 超过上限`);
   }
-  return { ok: true, value: { t: "mesh", ...base, vertices, faces } };
+  const attributes = readMeshAttributes(raw, id, vertices.length);
+  if (!attributes.ok) return attributes;
+  return { ok: true, value: { t: "mesh", ...base, vertices, faces, ...attributes.value } };
+}
+
+/**
+ * 读取可选顶点属性（normals/uvs/colors）。
+ *
+ * 长度必须与位置数一致；非有限或有损值整条拒绝（不静默丢弃属性导致外观错误）。
+ */
+function readMeshAttributes(
+  raw: Record<string, unknown>,
+  id: string,
+  vertexCount: number
+): ReadResult<{ normals?: Vec3[]; uvs?: [number, number][]; colors?: [number, number, number, number][] }> {
+  const result: { normals?: Vec3[]; uvs?: [number, number][]; colors?: [number, number, number, number][] } = {};
+  if (raw.normals !== undefined && raw.normals !== null) {
+    const normals = readNormals(raw.normals);
+    if (!normals || normals.length !== vertexCount) {
+      return fail("invalid-mesh", `对象 ${id} 的 normals 数量必须与顶点数一致`);
+    }
+    result.normals = normals;
+  }
+  if (raw.uvs !== undefined && raw.uvs !== null) {
+    const uvs = readUvs(raw.uvs);
+    if (!uvs || uvs.length !== vertexCount) {
+      return fail("invalid-mesh", `对象 ${id} 的 uvs 数量必须与顶点数一致`);
+    }
+    result.uvs = uvs;
+  }
+  if (raw.colors !== undefined && raw.colors !== null) {
+    const colors = readColors(raw.colors);
+    if (!colors || colors.length !== vertexCount) {
+      return fail("invalid-mesh", `对象 ${id} 的 colors 数量必须与顶点数一致`);
+    }
+    result.colors = colors;
+  }
+  return { ok: true, value: result };
+}
+
+function readNormals(input: unknown): Vec3[] | null {
+  if (!Array.isArray(input)) return null;
+  const normals: Vec3[] = [];
+  for (const entry of input) {
+    const vec = readVec3(entry, null);
+    if (!vec || vec.some((value) => value < -1.0001 || value > 1.0001)) return null;
+    normals.push(vec);
+  }
+  return normals;
+}
+
+function readUvs(input: unknown): [number, number][] | null {
+  if (!Array.isArray(input)) return null;
+  const uvs: [number, number][] = [];
+  for (const entry of input) {
+    if (!Array.isArray(entry) || entry.length < 2) return null;
+    const u = readNumber(entry[0], null);
+    const v = readNumber(entry[1], null);
+    if (u === null || v === null) return null;
+    uvs.push([u, v]);
+  }
+  return uvs;
+}
+
+function readColors(input: unknown): [number, number, number, number][] | null {
+  if (!Array.isArray(input)) return null;
+  const colors: [number, number, number, number][] = [];
+  for (const entry of input) {
+    if (!Array.isArray(entry) || entry.length < 4) return null;
+    const values: number[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const value = readNumber(entry[index], null);
+      if (value === null || value < 0 || value > 1) return null;
+      values.push(value);
+    }
+    colors.push([values[0], values[1], values[2], values[3]]);
+  }
+  return colors;
 }
 
 function readSegment(

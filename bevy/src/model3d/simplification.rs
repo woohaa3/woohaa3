@@ -169,7 +169,7 @@ fn protected_vertices(vertices: &[[f32; 3]], faces: &[[u32; 3]]) -> Result<Vec<b
 }
 
 pub(super) fn generate(geometry: &ModelGeometry, quality: Quality) -> Result<Reduced, Fallback> {
-    let ModelGeometry::Mesh { vertices, faces } = geometry else {
+    let ModelGeometry::Mesh { vertices, faces, .. } = geometry else {
         return Err(Fallback::Invalid);
     };
     if vertices.len() > MAX_VERTICES || faces.len() > MAX_FACES {

@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "typescript-legacy";
 import { expect, it } from "vitest";
 import { checkExtensionDependencies, moduleSpecifiers, sourceModules } from "../../../tooling/extension-dependencies.js";
 

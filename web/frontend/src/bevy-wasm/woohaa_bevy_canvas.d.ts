@@ -16,6 +16,7 @@ export function set_image_focus_details(manifest:string,pixels:Uint8Array):void;
 export function set_model_media_texture(id: string, width: number, height: number, rgba: Uint8Array): void;
 export function request_shot_capture(json: string): void;
 export function poll_shot_capture(requestId: number, generation: number): Uint8Array;
+export function cancel_shot_capture(requestId: number): void;
 export function request_history_thumbnail(json: string): void;
 export function poll_history_thumbnail(requestId: number, generation: number): Uint8Array;
 export function shot_diagnostics(): string;

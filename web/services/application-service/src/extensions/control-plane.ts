@@ -49,12 +49,15 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
   /**
    * 目标启用状态：以配置文件的 `extensions.<id>.enabled` 为准（注入 `toggles` 时），
    * 未提供注入则回退到 SQLite 的 `desiredEnabled`（旧部署/测试）。
+   *
+   * 缺省值是 manifest 的 `defaultEnabled`，且**只有显式 `true` 才算启用**：市场安装的扩展、
+   * 以及以后忘写这个字段的内置扩展都有一个安全默认——不会被自动激活。
    */
   const isDesiredEnabled = (extensionId: string): boolean => {
     if (options.toggles) {
       const explicit = options.toggles.all()[extensionId];
       if (explicit !== undefined) return explicit;
-      return catalog.source.get(extensionId)?.defaultEnabled ?? false;
+      return catalog.source.get(extensionId)?.defaultEnabled === true;
     }
     return options.store.get(extensionId)?.desiredEnabled ?? false;
   };

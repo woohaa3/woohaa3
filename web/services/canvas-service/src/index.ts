@@ -29,3 +29,4 @@ export { SqliteEditCompletionRepository } from "./storage/sqlite/edit-completion
 export { SqliteSnippetRepository } from "./storage/sqlite/snippets.js";
 export * from "./agent-authoring/group-scope.js";
 export * from "./task/assistant-text.js";
+export { SqliteScenePackageStore } from "./storage/sqlite/scene-package.js";

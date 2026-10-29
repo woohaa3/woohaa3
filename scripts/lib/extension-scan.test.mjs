@@ -4,7 +4,7 @@
  *
  * 运行：`node --test scripts/lib/extension-scan.test.mjs`
  */
-import { test } from "node:test";
+import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -19,7 +19,10 @@ import {
   resolveExtensionRoots,
   scanExtensions,
   readWorkspaceGlobs,
-  browserExtensions
+  browserExtensions,
+  originOf,
+  EXTENSION_DEV_DIRS_ENV,
+  EXTENSION_DEV_MODE_ENV
 } from "./extension-scan.mjs";
 import { MANAGED_DIR_ENV, managedLayout, openInstallations } from "./extension-installations.mjs";
 
@@ -395,4 +398,126 @@ test("受管根不能与配置根重叠", (t) => {
     () => resolveExtensionRoots({ repoRoot, env: { [MANAGED_DIR_ENV]: path.join(repoRoot, "web", "extensions", "managed") } }),
     (error) => error instanceof ExtensionScanError && error.code === "EXTENSION_MANAGED_ROOT_OVERLAP"
   );
+});
+
+
+describe("开发者模式 dev-source（change: 2026-10-27-add-extension-dev-reload）", () => {
+  test("登记目录后以 dev 来源进入扫描结果", (t) => {
+    const repoRoot = makeRepo(t);
+    writeConfig(repoRoot, { schemaVersion: 1, roots: ["web/extensions"] });
+    const devDir = path.join(repoRoot, "outside", "my-ext");
+    addExtension(devDir, { extensionId: "my-ext" });
+
+    const scan = scanExtensions({ repoRoot, env: { [EXTENSION_DEV_DIRS_ENV]: devDir, [EXTENSION_DEV_MODE_ENV]: "1" } });
+    const record = scan.extensions.find((entry) => entry.extensionId === "my-ext");
+    assert.ok(record, "开发者目录应被扫描到");
+    assert.equal(record.origin, "dev");
+    assert.equal(record.dev, true);
+    assert.equal(originOf(record), "dev");
+  });
+
+  test("父目录登记时扫描其中的扩展", (t) => {
+    const repoRoot = makeRepo(t);
+    writeConfig(repoRoot, { schemaVersion: 1, roots: ["web/extensions"] });
+    const parent = path.join(repoRoot, "workspace");
+    addExtension(path.join(parent, "alpha"), { extensionId: "alpha" });
+    addExtension(path.join(parent, "beta"), { extensionId: "beta" });
+
+    const scan = scanExtensions({ repoRoot, env: { [EXTENSION_DEV_DIRS_ENV]: parent, [EXTENSION_DEV_MODE_ENV]: "1" } });
+    assert.deepEqual(
+      scan.extensions.filter((entry) => entry.origin === "dev").map((entry) => entry.extensionId),
+      ["alpha", "beta"]
+    );
+  });
+
+  test("优先级 dev > managed > builtin，并记录被覆盖的形态", (t) => {
+    const repoRoot = makeRepo(t);
+    writeConfig(repoRoot, { schemaVersion: 1, roots: ["web/extensions"] });
+    addExtension(path.join(repoRoot, "web", "extensions", "shared"), { extensionId: "shared" });
+
+    // 受管根放一个更高的版本，本该覆盖内置。
+    const managedRoot = path.join(repoRoot, ".woohaa3", "extensions");
+    writeManagedVersion(managedRoot, "shared", "9.9.9");
+    commitPointers(managedRoot, { shared: "9.9.9" });
+
+    const withDev = scanExtensions({
+      repoRoot,
+      env: { [EXTENSION_DEV_DIRS_ENV]: path.join(repoRoot, "dev", "shared"), [MANAGED_DIR_ENV]: managedRoot, [EXTENSION_DEV_MODE_ENV]: "1" }
+    });
+    assert.equal(withDev.extensions.find((entry) => entry.extensionId === "shared")?.origin, "managed");
+
+    const devDir = path.join(repoRoot, "dev", "shared");
+    addExtension(devDir, { extensionId: "shared" });
+    const scan = scanExtensions({ repoRoot, env: { [EXTENSION_DEV_DIRS_ENV]: devDir, [MANAGED_DIR_ENV]: managedRoot, [EXTENSION_DEV_MODE_ENV]: "1" } });
+    const record = scan.extensions.find((entry) => entry.extensionId === "shared");
+    assert.equal(record.origin, "dev", "dev 应高于 managed");
+    assert.equal(record.shadowedOrigin, "managed");
+    assert.ok(scan.warnings.some((warning) => warning.code === "EXTENSION_DEV_OVERRIDES_INSTALLED"));
+  });
+
+  test("没有开发开关时不提供入口（发布形态）", (t) => {
+    const repoRoot = makeRepo(t);
+    writeConfig(repoRoot, { schemaVersion: 1, roots: ["web/extensions"] });
+    const devDir = path.join(repoRoot, "outside", "prod-ext");
+    addExtension(devDir, { extensionId: "prod-ext" });
+
+    // 桌面宿主发布形态同样设 NODE_ENV=production，因此判定只认显式开关：
+    // 没有开关时，即便登记了目录也不装配。
+    for (const env of [
+      { [EXTENSION_DEV_DIRS_ENV]: devDir },
+      { [EXTENSION_DEV_DIRS_ENV]: devDir, NODE_ENV: "production" },
+      { [EXTENSION_DEV_DIRS_ENV]: devDir, [EXTENSION_DEV_MODE_ENV]: "0" }
+    ]) {
+      const scan = scanExtensions({ repoRoot, env });
+      assert.equal(scan.extensions.find((entry) => entry.extensionId === "prod-ext"), undefined);
+      assert.deepEqual(scan.devDirs, []);
+    }
+
+    const enabled = scanExtensions({ repoRoot, env: { [EXTENSION_DEV_DIRS_ENV]: devDir, [EXTENSION_DEV_MODE_ENV]: "1" } });
+    assert.ok(enabled.extensions.find((entry) => entry.extensionId === "prod-ext"));
+  });
+
+  test("非法目录只告警跳过，不影响其它扩展与宿主启动", (t) => {
+    const repoRoot = makeRepo(t);
+    writeConfig(repoRoot, { schemaVersion: 1, roots: ["web/extensions"] });
+    addExtension(path.join(repoRoot, "web", "extensions", "kept"), { extensionId: "kept" });
+    const parent = path.join(repoRoot, "devroot");
+    fs.mkdirSync(path.join(parent, "not-an-extension"), { recursive: true }); // 既无包名也无声明
+    addExtension(path.join(parent, "fine"), { extensionId: "fine" });
+
+    const scan = scanExtensions({ repoRoot, env: { [EXTENSION_DEV_DIRS_ENV]: `${path.join(repoRoot, "missing-dir")},${parent}`, [EXTENSION_DEV_MODE_ENV]: "1" } });
+    const ids = scan.extensions.map((entry) => entry.extensionId).sort();
+    assert.deepEqual(ids, ["fine", "kept"]);
+    assert.ok(scan.warnings.some((warning) => warning.code === "EXTENSION_DEV_DIR_MISSING"));
+    assert.ok(scan.warnings.some((warning) => warning.code === "EXTENSION_DEV_REJECTED"));
+  });
+
+  test("同一扩展重复登记只保留第一个并告警", (t) => {
+    const repoRoot = makeRepo(t);
+    writeConfig(repoRoot, { schemaVersion: 1, roots: ["web/extensions"] });
+    const first = path.join(repoRoot, "a", "dup");
+    const second = path.join(repoRoot, "b", "dup");
+    addExtension(first, { extensionId: "dup" });
+    addExtension(second, { extensionId: "dup" });
+
+    const scan = scanExtensions({ repoRoot, env: { [EXTENSION_DEV_DIRS_ENV]: `${path.join(repoRoot, "a")},${path.join(repoRoot, "b")}`, [EXTENSION_DEV_MODE_ENV]: "1" } });
+    assert.deepEqual(scan.extensions.filter((entry) => entry.extensionId === "dup").map((entry) => entry.dir), [first]);
+    assert.ok(scan.warnings.some((warning) => warning.code === "EXTENSION_DEV_DUPLICATE"));
+  });
+
+  test("dev-source 不写 installations.json", (t) => {
+    const repoRoot = makeRepo(t);
+    writeConfig(repoRoot, { schemaVersion: 1, roots: ["web/extensions"] });
+    const managedRoot = path.join(repoRoot, ".woohaa3", "extensions");
+    fs.mkdirSync(managedRoot, { recursive: true });
+    const installationsFile = path.join(managedRoot, "installations.json");
+    const before = JSON.stringify({ schemaVersion: 1, revision: 3, extensions: {} });
+    fs.writeFileSync(installationsFile, before);
+
+    const devDir = path.join(repoRoot, "dev", "installed-like");
+    addExtension(devDir, { extensionId: "installed-like" });
+    scanExtensions({ repoRoot, env: { [EXTENSION_DEV_DIRS_ENV]: devDir, [MANAGED_DIR_ENV]: managedRoot, [EXTENSION_DEV_MODE_ENV]: "1" } });
+
+    assert.equal(fs.readFileSync(installationsFile, "utf8"), before, "开发者模式不得改写安装记录");
+  });
 });

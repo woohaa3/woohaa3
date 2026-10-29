@@ -71,7 +71,8 @@ describe("trusted candidate delivery on the conversation ledger", () => {
     await restarted.dispatchTurn(f.accepted.turn.turnId);
     expect(f.query).not.toHaveBeenCalled();
     expect(f.run).not.toHaveBeenCalled();
-    expect(restarted.queryTurn({ owner: "owner", requestId: f.input.requestId })).toMatchObject({ ok: true, turn: { status: "unknown" } });
+    // Candidate delivery 由领域 reconciler 按原请求结算；本层不擅自判失败。
+    expect(restarted.queryTurn({ owner: "owner", requestId: f.input.requestId })).toMatchObject({ ok: true, turn: { status: "queued" } });
     expect(restarted.readConversation({ owner: "other", conversationId: f.input.conversationId }).ok).toBe(false);
     expect(restarted.cancelTurn({ owner: "owner", requestId: f.input.requestId }).ok).toBe(true);
     expect(restarted.queryTurn({ owner: "owner", requestId: f.input.requestId })).toMatchObject({ ok: true, turn: { status: "cancelled" } });

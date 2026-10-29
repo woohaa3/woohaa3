@@ -23,14 +23,14 @@ it("gates scanning on trusted film set identity", () => {
   store.syncFilmSetTurns([turn]);
   expect(store.getNodeSummary("film")?.filmSetFeedback).toBeUndefined();
 });
-it("reconciles conversion unknown independently of legacy task protection", () => {
+it("reconciles a failed conversion independently of legacy task protection", () => {
   const store = setup();
   store.reconcileCanonical({ document: { nodes: [{ id: "film" }] }, nodeData: { film: {
     extensionId: "film-set", activeRunId: "run", taskStatus: "processing",
-    filmSetConversion: { status: "unknown", requestId: "conversion", sourceNodeId: "image" }
+    filmSetConversion: { status: "failed", code: "unknown-result", message: "无法确认转换结果", attempt: 1, retryable: true, requestId: "conversion", sourceNodeId: "image" }
   } } });
-  expect(store.getNodeSummary("film")?.filmSetFeedback?.phase).toBe("verifying");
-  expect(store.isBusy("film")).toBe(true);
+  expect(store.getNodeSummary("film")?.filmSetFeedback?.phase).toBe("failed");
+  store.dispose();
 });
 it("pending is static, rejection clears it without operation or history writes", () => {
   const store = setup();
@@ -53,9 +53,9 @@ it("repeated save retries need new execution evidence before scanning resumes", 
   });
   reconcile("failed");
   reconcile("running");
-  expect(store.getNodeSummary("film")?.filmSetFeedback?.phase).toBe("verifying");
+  expect(store.getNodeSummary("film")?.filmSetFeedback?.phase).toBe("failed");
   reconcile("running");
-  expect(store.getNodeSummary("film")?.filmSetFeedback?.phase).toBe("verifying");
+  expect(store.getNodeSummary("film")?.filmSetFeedback?.phase).toBe("failed");
   reconcile("running", "attempt-2");
   expect(store.getNodeSummary("film")?.filmSetFeedback?.phase).toBe("committing");
 });

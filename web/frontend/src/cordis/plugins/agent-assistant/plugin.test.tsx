@@ -7,7 +7,7 @@ import { AgentAssistant } from "./assistant.js";
 import { RuntimeProvider } from "../../react.js";
 import { startFrontendRuntime, type FrontendRuntime } from "../../kernel.js";
 import { SlotRegistry } from "../../slots.js";
-import { SelectInput } from "../../../shared/ui/FormControls.js";
+import { SelectInput } from "@woohaa3/ui/forms";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import type { GenerationModelsStatusService, GenerationModelsStatusSnapshot } from "../../services/generation-models-status.js";
 import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";
@@ -52,7 +52,8 @@ it("按 demo 显示能力总览和五项侧栏，MCP 与模型提供商独立", 
   await f.click("模型提供商");
   await f.click("添加连接");
   const drawer = f.el.querySelector('.agent-assistant__drawer-layer:not([hidden])')!;
-  expect([...drawer.querySelectorAll('.agent-assistant__method')].map(item => item.querySelector("strong")?.textContent)).toEqual(["按协议接入 LLM", "账号授权"]);
+  expect([...drawer.querySelectorAll('.agent-assistant__method')].map(item => item.querySelector("strong")?.textContent)).toEqual(["我有 ChatGPT 账号", "我有 API Key"]);
+  expect(drawer.querySelector('[data-kind="api-key"]')?.textContent).not.toMatch(/OpenAI|Anthropic|Gemini/);
   expect(drawer.textContent).not.toContain("安装这个 MCP 服务");
   expect(f.listConnections).toHaveBeenCalledTimes(1);
 });
@@ -90,15 +91,16 @@ it.each([api, local, oauth])("按 connectionId=$connectionId 解析真实来源�
 it("点击接入方式切换到独立配置页，返回恢复选择位置并保留 Key 草稿与浮层归属", async () => {
   const f = await render([], true, undefined, { kind: "generation", page: "add" });
   const apiButton = f.el.querySelector<HTMLButtonElement>('[data-kind="api-key"]')!;
+  expect(apiButton.textContent).toContain("兼容服务");
   const login = f.el.querySelector<HTMLButtonElement>('[data-kind="login"]')!;
   await act(async () => apiButton.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
   expect(f.el.querySelector("input")).toBeNull();
   const drawerBody = apiButton.closest<HTMLElement>(".agent-assistant__drawer-body")!;
   drawerBody.scrollTop = 320;
-  await f.click("按协议接入 LLM");
+  await f.click("我有 API Key");
   expect(apiButton.closest("[hidden]")).not.toBeNull();
   expect(drawerBody.scrollTop).toBe(0);
-  expect(f.el.querySelector(".agent-assistant__form-heading h3")?.textContent).toBe("按协议接入 LLM");
+  expect(f.el.querySelector(".agent-assistant__form-heading h3")?.textContent).toBe("我有 API Key");
   const field = f.el.querySelector<HTMLInputElement>('input[aria-label="新增 API Key"]')!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "draft-key");
@@ -115,13 +117,13 @@ it("点击接入方式切换到独立配置页，返回恢复选择位置并保�
   expect(apiButton.closest("[hidden]")).toBeNull();
   expect(field.closest("[hidden]")).not.toBeNull();
   expect(option?.closest("[hidden]")).not.toBeNull();
-  await f.click("账号授权");
+  await f.click("我有 ChatGPT 账号");
   expect(drawerBody.scrollTop).toBe(0);
-  expect(f.el.querySelector(".agent-assistant__form-heading h3")?.textContent).toBe("账号授权");
+  expect(f.el.querySelector(".agent-assistant__form-heading h3")?.textContent).toBe("我有 ChatGPT 账号");
   expect(field.closest("[hidden]")).not.toBeNull();
   expect(option?.closest("[hidden]")).not.toBeNull();
   await f.click("返回选择");
-  await f.click("按协议接入 LLM");
+  await f.click("我有 API Key");
   await f.click("本地 Agent");
   expect(field.closest("[hidden]")).not.toBeNull();
   await f.click("模型提供商");

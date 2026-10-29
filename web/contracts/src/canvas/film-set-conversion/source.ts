@@ -7,7 +7,7 @@
  */
 import type { ServerCanvas, StoredAsset } from "../domain/types.js";
 import type { CanvasNodeData } from "../domain/index.js";
-import { decodeModel3DNodeData } from "../canvas-node-model.js";
+import { scriptModel3DNodeData } from "../canvas-node-model.js";
 import { modelSourceHash } from "../model-definition.js";
 import type {
   FilmSetConversionRange,
@@ -64,12 +64,12 @@ export function readFilmSetConversionSource(input: {
   const title = typeof data?.title === "string" && data.title.trim() ? data.title.trim() : node.type;
 
   if (kind === "model3d") {
-    const decoded = decodeModel3DNodeData(data);
-    if (!decoded.ok) return { ok: false, code: "source-not-ready", message: "来源模型不完整，无法复制" };
+    const decoded = scriptModel3DNodeData(data);
+    if (!decoded) return { ok: false, code: "unsupported-source", message: "文件模型无法转为片场，请使用脚本模型" };
     return {
       ok: true,
-      title: decoded.value.title,
-      source: { nodeId: input.sourceNodeId, kind, contentHash: modelSourceHash(decoded.value.model.modelScript) }
+      title: decoded.title,
+      source: { nodeId: input.sourceNodeId, kind, contentHash: modelSourceHash(decoded.model.modelScript) }
     };
   }
 

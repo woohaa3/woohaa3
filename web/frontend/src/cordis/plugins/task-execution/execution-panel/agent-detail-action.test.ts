@@ -31,7 +31,7 @@ describe("resolveAgentDetailAction", () => {
     }
   });
 
-  it("失败/完成/部分完成/unknown/cancelled 使用各自具名动作与摘要", () => {
+  it("失败/完成/部分完成/cancelled 使用各自具名动作与摘要", () => {
     expect(resolveAgentDetailAction({ status: "failed", hasConversation: true })).toEqual({
       label: "查看原因与对话",
       summary: "生成失败",
@@ -43,12 +43,11 @@ describe("resolveAgentDetailAction", () => {
       emphasis: "strong"
     });
     expect(resolveAgentDetailAction({ status: "partial", hasConversation: true })!.label).toBe("查看未完成项与对话");
-    expect(resolveAgentDetailAction({ status: "unknown", hasConversation: true })!.label).toBe("查看执行状态与对话");
     expect(resolveAgentDetailAction({ status: "cancelled", hasConversation: true })!.label).toBe("查看已执行内容");
   });
 
   it("所有可见入口都带非空具名文案（不依赖图标/颜色）", () => {
-    const statuses: ConversationTurnStatus[] = ["queued", "running", "committing", "succeeded", "partial", "failed", "unknown", "cancelled"];
+    const statuses: ConversationTurnStatus[] = ["queued", "running", "committing", "succeeded", "partial", "failed", "cancelled"];
     for (const status of statuses) {
       const action = resolveAgentDetailAction({ status, hasConversation: true });
       expect(action!.label.trim().length).toBeGreaterThan(0);

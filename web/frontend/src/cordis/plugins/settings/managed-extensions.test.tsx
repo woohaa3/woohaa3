@@ -13,6 +13,7 @@ import type { ExtensionInstallJobView, InstalledExtensionView, SettingPluginView
 import { createBackendSettingsStore } from "./backend-settings-store.js";
 import { PluginSettingsSection } from "./plugin-settings-section.js";
 import { PluginConfigContent } from "./workspace/plugin-config-content.js";
+import { PluginInstallPage } from "./workspace/plugin-install-page.js";
 import { createManagedExtensionsController, describeJob, failureReason } from "./managed-extensions.js";
 import type { ExtensionInstallRemote } from "../../services/extension-install-remote.js";
 import type { ExtensionManagerFacade, ExtensionManagerView } from "../extension-manager/contract.js";
@@ -109,23 +110,38 @@ async function render(
   const root = createRoot(container);
   roots.add(root);
   await act(async () => {
+    const managed = {
+      controller,
+      pendingReopen: { get: () => pending, subscribe: () => () => undefined },
+      ...(extras.reopenCanvas ? { reopenCanvas: extras.reopenCanvas } : {})
+    };
+    // 文件安装已从列表顶部移到「添加扩展」页：这里两个视图同时挂载，
+    // 列表侧断言行与徽标，安装页侧断言任务、失败原因与重启提示。
     root.render(
-      <PluginSettingsSection
-        store={store}
-        manager={facade()}
-        managed={{
-          controller,
-          pendingReopen: { get: () => pending, subscribe: () => () => undefined },
-          ...(extras.reopenCanvas ? { reopenCanvas: extras.reopenCanvas } : {})
-        }}
-      />
+      <>
+        <PluginSettingsSection store={store} manager={facade()} managed={managed} />
+        <PluginInstallPage
+          mode="file"
+          onSelectMode={() => undefined}
+          managed={managed}
+          snapshot={snapshot}
+          canManage
+          marketAvailable={false}
+          fileAvailable={Boolean(snapshot.extensionInstallations)}
+        />
+      </>
     );
   });
   return { container, controller, reload, timers };
 }
 
 /** 详情页：受管扩展的卸载 / 回滚 / 身份说明只在这里出现（行里只留徽标）。 */
-async function renderDetail(snapshot: SettingsSnapshot, remote: ExtensionInstallRemote, timers = manualTimers()) {
+async function renderDetail(
+  snapshot: SettingsSnapshot,
+  remote: ExtensionInstallRemote,
+  timers = manualTimers(),
+  page: "overview" | "manage" = "manage"
+) {
   const store = createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write: async () => ({ ok: false, code: "x", error: "x" }) });
   await store.load();
   const controller = createManagedExtensionsController({ remote, reload: async () => undefined, setTimer: timers.setTimer, clearTimer: timers.clearTimer });
@@ -134,7 +150,9 @@ async function renderDetail(snapshot: SettingsSnapshot, remote: ExtensionInstall
   const root = createRoot(container);
   roots.add(root);
   await act(async () => {
-    root.render(<PluginConfigContent pluginId="demo" store={store} manager={facade()} managed={controller} onBack={() => undefined} />);
+    root.render(
+      <PluginConfigContent pluginId="demo" page={page} store={store} manager={facade()} managed={controller} onBack={() => undefined} />
+    );
   });
   return { container, controller };
 }
@@ -161,17 +179,20 @@ describe("受管扩展设置面", () => {
     expect(container.querySelector('[data-testid="managed-rollback-demo"]')).toBeNull();
   });
 
-  it("详情页把卸载/回滚放头部操作区，同权限说明跟着徽标", async () => {
-    const { container } = await renderDetail(baseSnapshot([managedEntry("demo")]), remoteWith());
-    const actions = container.querySelector('[data-testid="managed-actions-demo"]');
+  it("「管理」页放卸载/回滚与身份说明；概览只留同权限提示", async () => {
+    const manage = await renderDetail(baseSnapshot([managedEntry("demo")]), remoteWith());
+    const actions = manage.container.querySelector('[data-testid="managed-actions-demo"]');
     expect(actions).not.toBeNull();
-    // 挂在详情头部，而不是正文说明下面。
-    expect(actions?.closest(".settings-workbench__detail-head")).not.toBeNull();
-    expect(container.querySelector('[data-testid="managed-rollback-demo"]')?.textContent).toBe("回滚到 v1.0.0");
-    expect(container.querySelector('[data-testid="managed-uninstall-demo"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="managed-trust-note-demo"]')?.textContent).toContain("同权限");
-    // 没有需要提示的状态时，正文不再渲染受管明细块。
-    expect(container.querySelector('[data-testid="managed-extension-demo"]')).toBeNull();
+    // 卸载/回滚收在「管理」页的独立分区里，不再顶在详情头部。
+    expect(actions?.closest(".settings-workbench__section")).not.toBeNull();
+    expect(manage.container.querySelector('[data-testid="managed-rollback-demo"]')?.textContent).toBe("回滚到 v1.0.0");
+    expect(manage.container.querySelector('[data-testid="managed-uninstall-demo"]')).not.toBeNull();
+    // 没有需要提示的状态时，不再渲染受管明细块。
+    expect(manage.container.querySelector('[data-testid="managed-extension-demo"]')).toBeNull();
+
+    const overview = await renderDetail(baseSnapshot([managedEntry("demo")]), remoteWith(), manualTimers(), "overview");
+    expect(overview.container.querySelector('[data-testid="managed-trust-note-demo"]')?.textContent).toContain("同权限");
+    expect(overview.container.querySelector('[data-testid="managed-uninstall-demo"]')).toBeNull();
   });
 
   it("宿主未启用受管安装（无 extensionInstallations）：不显示「从文件安装」", async () => {

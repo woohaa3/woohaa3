@@ -315,7 +315,7 @@ describe("text delivery uses actual ledger and Canvas", () => {
     await f.service().accept(f.input());
     expect(await f.settle("a")).toMatchObject({
       ok: true,
-      turn: { status: "unknown" },
+      turn: { status: "failed", error: { code: "write-unconfirmed" } },
     });
     expect(f.records().get("owner", "a")?.candidate?.text).toBe(
       "\n# Actual text\n",
@@ -328,6 +328,13 @@ describe("text delivery uses actual ledger and Canvas", () => {
       turn: { status: "succeeded" },
     });
     expect(f.generate).toHaveBeenCalledTimes(1);
+    // 重试复用候选与稳定提交命令：只产生一份正文、只登记一次历史。
+    const exported = f.room.exportCanvas();
+    expect(
+      exported.ok &&
+        exported.canvas.assets.filter((asset) => asset.mediaKind === "text"),
+    ).toHaveLength(1);
+    expect(f.history.registerTaskResult).toHaveBeenCalledTimes(1);
   });
   it("accepts independent rounds and only stops the selected one", async () => {
     const gates = [deferred<void>(), deferred<void>()];
@@ -366,27 +373,31 @@ it("never replays inference when begin persisted but its acknowledgement was los
   };
   expect(await f.service().accept(f.input())).toMatchObject({
     ok: true,
-    turn: { status: "unknown" },
+    turn: { status: "failed", error: { code: "result-unconfirmed" } },
   });
   f.restart();
   await f.service().reconcile("owner", "a");
   expect(await f.service().accept(f.input())).toMatchObject({
     ok: true,
     reused: true,
-    turn: { status: "unknown" },
+    turn: { status: "failed", error: { code: "result-unconfirmed" } },
   });
   expect(f.generate).not.toHaveBeenCalled();
   expect(f.room.exportCanvas()).toMatchObject({
     ok: true,
     canvas: {
       jobs: [{ id: expect.stringContaining("text-job:") }],
-      nodeData: { text: { taskStatus: "unknown" } },
+      nodeData: { text: { taskStatus: "failed" } },
     },
   });
   await f.service().cancel("owner", "a");
+  // failed 是终态：用户停止不能再把它改写成 cancelled。
   expect(
     f.conversations().queryTurn({ owner: "owner", requestId: "a" }),
-  ).toMatchObject({ ok: true, turn: { status: "cancelled" } });
+  ).toMatchObject({
+    ok: true,
+    turn: { status: "failed", error: { code: "result-unconfirmed" } },
+  });
 });
 
 it("recovers accepted ledger acknowledgement loss without inferring an unconfirmed round", async () => {
@@ -401,7 +412,7 @@ it("recovers accepted ledger acknowledgement loss without inferring an unconfirm
   expect(await f.service().accept(f.input())).toMatchObject({
     ok: true,
     reused: true,
-    turn: { status: "unknown" },
+    turn: { status: "failed", error: { code: "result-unconfirmed" } },
   });
   expect(f.generate).not.toHaveBeenCalled();
 });

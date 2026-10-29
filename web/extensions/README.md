@@ -51,6 +51,13 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 | `required` | 发布装配的必需扩展：缺它的产物就在指针切换前失败（由装配器按扫描汇总，不再写死 id 清单） |
 | `icon` | 插件图标，二选一：品牌图形 `{ "asset": "./assets/icon.png" }`（包内相对路径，宿主按约定注入 `/plugin-icons/<extensionId><ext>`，生成物由 `pnpm -C web run icons:sync` 同步）；语义图形 `{ "glyph": "migration" }`（`PLUGIN_ICON_NAMES` 里的名字，给没有浏览器前端的后端扩展用） |
 
+声明了 `site` 的扩展**必须显式写** `site.defaultEnabled`（布尔）：站点扩展的启停缺省是**关**，
+控制面只认显式 `true`（`extensions.<id>.enabled` 显式值 > `defaultEnabled === true` > 停用）。
+漏写会被 [extension-default-enabled.test.ts](../tooling/extension-default-enabled.test.ts) 判失败。
+默认停用的现实例子是 `remote-server`：公开用户没有可连的 woohaa-server，装了也不该默认占一个点不动的入口。
+只有 `hostPlugin`、没有 `site` 的 Provider / 存储后端不进控制面，它们的 `defaultEnabled` 与
+配置文件里的 `enabled` 都不生效。
+
 Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节（路径由插件自己用
 `ctx.gateway.route` 注册并鉴权）；插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
 
@@ -165,6 +172,25 @@ remote-server 的「同步远端」：只在已连接且条目为「仅本机」
 `artifactId` 变化，其余 artifact 与宿主全部 JS/CSS hash 不变，`index.html` 的发布 link 指向新
 release。旧 release 与旧 artifact 保留在发布目录，供已打开页面继续加载（回滚窗口）。
 
+## 本地开发与热重载（开发者模式）
+
+改扩展代码后不必重新打包、刷新页面或重启宿主：宿主认一个本机目录作为 `dev-source`，**构建留在你这边**，宿主只监听产物并触发一次重装。
+
+```bash
+# 终端 1：作者侧增量构建（产物写到 browser-dist/ 与 backend-dist/）
+pnpm --filter @woohaa3/extension-<id> run build:browser -- --watch
+node web/scripts/build-extension-backend.mjs --cwd web/extensions/<id> --watch
+
+# 终端 2：宿主登记该目录；之后每次构建产物变化都会自动热重载
+pnpm dev --dev-source web/extensions/<id>
+```
+
+- `--dev-source` 可重复；也可以直接设 `WOOHAA3_EXTENSION_DEV_MODE=1` 与 `WOOHAA3_EXTENSION_DEV_DIRS`。
+- 生效范围：**只换这一个扩展的实例**。页面、Canvas scope、其它扩展与画布会话都不动。
+- 已知代价：该扩展自己持有的模块级状态会重置（store 单例、未持久化的草稿会话）。
+- 边界：不签名、不进 `installations.json`、不参与市场信任；同 id 时开发者目录优先于受管与内置版本，移除即回落。
+- 发布形态没有这个入口：它只在本机开发时由你显式开启。
+
 ## 打包与分发（`.wxt`）
 
 change: 2026-10-21-add-extension-marketplace-point。仓库内的扩展（内置根）照旧随发布装配；要**单独分发**一个扩展，打成 `.wxt` 包，由本机宿主的 Extension Manager 安装到**受管根**（`WOOHAA3_EXTENSION_MANAGED_DIR`，开发缺省 `.woohaa3/extensions/`，生产 `shared/extensions-managed`）。
@@ -253,3 +279,14 @@ extensions:
 
 `sample-site-extension` 是仅供测试使用的样例：其前端只验证进入/释放生命周期；生产发布发现
 不登记测试 fixture（其入口不是约定 browser 入口，且无 `browser-dist` artifact）。
+
+### 公共 UI
+
+组件、图标与展示类型从 `@woohaa3/ui` 或 `@woohaa3/ui/primitives`、`forms`、`dialogs`、`media`、`settings`、`assistant`、`feedback`、`icons`、`theme` 具名导入，并声明 workspace 依赖。Context、slots、Dialog 注册和业务 facade 继续从 `@woohaa3/frontend/extension-api` 导入。
+
+```tsx
+import { Button } from "@woohaa3/ui/primitives";
+import { CopyIcon } from "@woohaa3/ui/icons";
+```
+
+扩展 browser build 把公共 UI 绑定到宿主同一 React/UI/portal Context，CSS 由宿主提供。扩展不能导入 UI CSS、私有路径、namespace/default 或动态 UI 模块，也不能自行打包 React/Radix/UI。旧 extension-api 的 UI 导出与旧 artifact 保留同实例兼容。独立普通 Web 消费者显式导入 `@woohaa3/ui/styles.css`。

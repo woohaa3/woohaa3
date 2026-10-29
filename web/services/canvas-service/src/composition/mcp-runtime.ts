@@ -44,6 +44,8 @@ export type McpRuntimeDeps = {
   runService: CanvasRunService | null;
   /** 任务模型目录：Agent 能力面与默认模型回退使用同一事实源。 */
   resolveCatalog?: () => Promise<import("@woohaa3/contracts").CanvasTaskCatalog>;
+  /** Skill 尝试校验（宿主注入；缺省不启用 continuation 校验）。 */
+  skillAttempts?: () => import("../agent-authoring/run-adapter.js").SkillAttemptGuard | undefined;
   modelRenderer: RendererClient | null;
   mediaClient: import("../clients/media-client.js").CanvasMediaClient | null;
   agentDeltaJournal: AgentDeltaJournal;
@@ -181,6 +183,7 @@ export function buildMcpRuntime(deps: McpRuntimeDeps): McpRuntime {
         assistantText: deps.assistantTextRuns,
         ...(deps.runService ? { runService: deps.runService } : {}),
         ...(deps.resolveCatalog ? { resolveCatalog: deps.resolveCatalog } : {}),
+        ...(deps.skillAttempts ? { skillAttempts: deps.skillAttempts } : {}),
         now: deps.now
       })
     : undefined;

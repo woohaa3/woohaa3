@@ -1,8 +1,140 @@
-/* 设置面「从市场安装」（change: 2026-10-21-add-server-extension-marketplace，tasks 7.5）。 */
-.marketplace-install { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 4px; padding: 12px 14px; border: 1px solid var(--mc-border); border-radius: 10px; }
-.marketplace-install__body { display: flex; flex-direction: column; gap: 8px; }
+/* 设置面「从市场安装」：信息卡 + 同层详情页。颜色与字体只用 --mc-* / --app-* token。 */
+.marketplace-install { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 4px; padding: 12px 14px; border: 1px solid var(--mc-border); border-radius: 10px; }
+.marketplace-install.is-view { margin: 0; padding: 0; border: 0; }
+.marketplace-install__body { display: flex; flex-direction: column; gap: 12px; }
+
+/* 来源切换 */
+.marketplace-sources { display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; background: var(--app-web-surface); border: 1px solid var(--mc-border); border-radius: 10px; }
+.marketplace-source {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--mc-text-muted); font-family: inherit; font-size: 12.5px; cursor: pointer;
+}
+.marketplace-source:hover { color: var(--mc-text); }
+.marketplace-source.is-on { background: var(--app-web-subtle); color: var(--mc-text); box-shadow: 0 0 0 1px var(--app-web-border) inset, 0 1px 2px var(--app-web-shadow); }
+.marketplace-source__bad { font-size: 10.5px; color: var(--app-status-warning); }
+
+/* 搜索行 */
+.marketplace-toolbar { display: flex; align-items: center; gap: 8px; }
+.marketplace-search { position: relative; flex: 1; min-width: 0; display: flex; gap: 8px; }
+.marketplace-search__icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; color: var(--mc-text-muted); pointer-events: none; }
+.marketplace-search .ui-text-input { padding-left: 33px; height: 36px; }
+.marketplace-search > .ui-button { flex: none; white-space: nowrap; }
+.marketplace-refresh { flex: none; }
+.marketplace-refresh .is-spinning { animation: marketplace-spin .8s linear infinite; }
+
+/* 状态行 */
+.marketplace-status { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--mc-text-muted); }
+.marketplace-status__time { display: inline-flex; align-items: center; gap: 7px; }
+.marketplace-status__count { padding-left: 10px; border-left: 1px solid var(--mc-border); color: var(--app-web-text-muted); }
+.marketplace-spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--mc-text-muted) 30%, transparent); border-top-color: var(--mc-accent); animation: marketplace-spin .7s linear infinite; }
+@keyframes marketplace-spin { to { transform: rotate(360deg); } }
+
+/* 卡片网格 */
+.marketplace-grid { list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; }
+.marketplace-card {
+  position: relative; display: flex; flex-direction: column; gap: 9px; min-height: 150px;
+  padding: 14px 15px 12px; border: 1px solid var(--mc-border); border-radius: 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--app-web-elevated) 82%, transparent), var(--app-web-panel));
+  cursor: pointer; transition: border-color .15s, background .15s;
+}
+.marketplace-card:hover { border-color: color-mix(in srgb, var(--mc-accent) 42%, var(--mc-border)); }
+.marketplace-card.is-installing { border-color: color-mix(in srgb, var(--mc-accent) 55%, var(--mc-border)); }
+.marketplace-card.is-skeleton { cursor: default; }
+.marketplace-card__progress { position: absolute; left: 14px; right: 14px; top: 6px; height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--mc-text-muted) 14%, transparent); overflow: hidden; }
+.marketplace-card__progress::after { content: ""; display: block; width: 40%; height: 100%; background: var(--mc-accent); border-radius: 2px; animation: marketplace-slide 1.1s ease-in-out infinite; }
+@keyframes marketplace-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+.marketplace-card__head { display: flex; gap: 10px; align-items: flex-start; }
+.marketplace-icon {
+  flex: none; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--mc-accent) 14%, var(--app-web-surface)), var(--app-web-surface));
+  color: var(--app-node-model-foreground);
+  border: 1px solid var(--app-web-border);
+}
+.marketplace-icon.is-large { width: 46px; height: 46px; border-radius: 12px; }
+.marketplace-icon__image { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+.marketplace-card[data-tone="warm"] .marketplace-icon { color: var(--app-node-audio-foreground); background: linear-gradient(160deg, color-mix(in srgb, var(--app-node-audio-foreground) 14%, var(--app-web-surface)), var(--app-web-surface)); }
+.marketplace-card[data-tone="pink"] .marketplace-icon { color: var(--app-node-image-foreground); background: linear-gradient(160deg, color-mix(in srgb, var(--app-node-image-foreground) 14%, var(--app-web-surface)), var(--app-web-surface)); }
+.marketplace-card[data-tone="blue"] .marketplace-icon { color: var(--app-node-text-foreground); background: linear-gradient(160deg, color-mix(in srgb, var(--app-node-text-foreground) 14%, var(--app-web-surface)), var(--app-web-surface)); }
+.marketplace-card[data-tone="purple"] .marketplace-icon { color: var(--app-node-model-foreground); background: linear-gradient(160deg, color-mix(in srgb, var(--app-node-model-foreground) 14%, var(--app-web-surface)), var(--app-web-surface)); }
+.marketplace-card__ident { min-width: 0; flex: 1; }
+.marketplace-card__title { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.marketplace-card__title h4 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mc-text); }
+.marketplace-card__sub { margin: 2px 0 0; font-size: 11px; color: var(--mc-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.marketplace-card__desc { margin: 0; font-size: 12.5px; line-height: 1.55; color: color-mix(in srgb, var(--mc-text) 78%, var(--mc-text-muted)); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 38px; }
+.marketplace-card__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--mc-text-muted); }
+.marketplace-card__meta > span + span::before { content: "·"; margin-right: 8px; color: var(--app-web-border-strong); }
+.marketplace-tag { padding: 1px 7px; border-radius: 999px; font-size: 10.5px; }
+.marketplace-tag.is-hot { color: var(--app-status-success); background: var(--app-status-success-background); }
+.marketplace-tag.is-restart { color: var(--app-status-warning); background: var(--app-status-warning-background); }
+.marketplace-card__foot { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 2px; }
+.marketplace-card__spacer { flex: 1; }
+
+.marketplace-badge { flex: none; padding: 1px 6px; border-radius: 5px; font-size: 10.5px; line-height: 17px; border: 1px solid var(--app-web-border); background: var(--app-web-subtle); color: var(--mc-text-muted); }
+.marketplace-badge.is-ok { color: var(--app-status-success); background: var(--app-status-success-background); border-color: color-mix(in srgb, var(--app-status-success) 28%, transparent); }
+.marketplace-badge.is-up { color: var(--app-status-info); background: var(--app-status-info-background); border-color: color-mix(in srgb, var(--app-status-info) 28%, transparent); }
+.marketplace-badge.is-warn { color: var(--app-status-warning); background: var(--app-status-warning-background); border-color: color-mix(in srgb, var(--app-status-warning) 28%, transparent); }
+
+/* 骨架屏 */
+/* 骨架用主题 token 取色：硬编码白色透明度在浅色主题下等于透明，骨架会变成空框。 */
+.marketplace-skeleton {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--mc-text-muted) 11%, transparent) 25%,
+    color-mix(in srgb, var(--mc-text-muted) 24%, transparent) 37%,
+    color-mix(in srgb, var(--mc-text-muted) 11%, transparent) 63%
+  );
+  background-size: 400% 100%;
+  animation: marketplace-shimmer 1.3s ease infinite;
+}
+.marketplace-skeleton.is-icon { width: 38px; height: 38px; border-radius: 10px; flex: none; }
+@keyframes marketplace-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+/* 详情（同层页面） */
+/* 详情是整页内容：不再撑一个固定最小高度，否则页脚会被推到很远的底部留一大片空白。 */
+.marketplace-detail { display: flex; flex-direction: column; gap: 12px; }
+.marketplace-detail__hero { display: flex; gap: 12px; align-items: flex-start; }
+.marketplace-detail__ident { min-width: 0; flex: 1; }
+.marketplace-detail__title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.marketplace-detail__title h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; color: var(--mc-text); }
+.marketplace-detail__sub { margin: 3px 0 0; font-size: 11.5px; color: var(--mc-text-muted); }
+.marketplace-detail__desc { margin: 0; font-size: 12.5px; line-height: 1.65; color: color-mix(in srgb, var(--mc-text) 80%, var(--mc-text-muted)); max-width: 760px; }
+.marketplace-detail__cols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
+.marketplace-detail__section { margin: 0 0 8px; font-size: 11.5px; font-weight: 500; color: var(--mc-text-muted); letter-spacing: .02em; }
+.marketplace-versions { list-style: none; display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; padding: 0; }
+.marketplace-version {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px;
+  border: 1px solid var(--mc-border); border-radius: 9px; background: var(--app-web-subtle);
+  color: var(--mc-text); font-family: inherit; font-size: 12px; cursor: pointer; text-align: left;
+}
+.marketplace-version:hover { border-color: var(--app-web-border-strong); }
+.marketplace-version.is-on { border-color: color-mix(in srgb, var(--mc-accent) 45%, var(--mc-border)); background: color-mix(in srgb, var(--mc-accent) 10%, transparent); }
+.marketplace-version__radio { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--app-web-border-strong); display: grid; place-items: center; flex: none; }
+.marketplace-version.is-on .marketplace-version__radio { border-color: var(--mc-accent); }
+.marketplace-version.is-on .marketplace-version__radio::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--mc-accent); }
+.marketplace-version__label { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.marketplace-version__spacer { flex: 1; }
+.marketplace-version__date, .marketplace-version__size { font-size: 11px; color: var(--mc-text-muted); font-variant-numeric: tabular-nums; }
+.marketplace-version__size { min-width: 58px; text-align: right; }
+.marketplace-detail__meta { list-style: none; display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; font-size: 12px; line-height: 1.55; color: var(--mc-text-muted); }
+.marketplace-detail__warn { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 12px; border-radius: 9px; font-size: 12px; color: var(--app-status-warning); background: var(--app-status-warning-background); border: 1px solid color-mix(in srgb, var(--app-status-warning) 30%, transparent); }
+.marketplace-detail__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--app-status-warning); font-size: 12px; }
+.marketplace-detail__confirm p { margin: 0; flex-basis: 100%; }
+.marketplace-detail__confirm code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.marketplace-detail__foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--mc-border); }
+.marketplace-detail__spacer { flex: 1; }
+.marketplace-kv { display: grid; grid-template-columns: 76px 1fr; gap: 7px 10px; margin: 0; font-size: 12px; line-height: 1.5; }
+.marketplace-kv dt { color: var(--mc-text-muted); }
+.marketplace-kv dd { margin: 0; color: color-mix(in srgb, var(--mc-text) 82%, var(--mc-text-muted)); }
+
+/* 旧类名仍被设置面其它位置引用：保持最小兜底。 */
 .marketplace-install__detail { display: flex; flex-direction: column; gap: 8px; }
 .marketplace-install__meta { margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--mc-text-muted); line-height: 1.7; }
 .marketplace-install__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--app-status-warning); border-radius: 8px; font-size: 12px; }
 .marketplace-install__confirm p { margin: 0; flex-basis: 100%; }
-.managed-extension__withdrawn { margin: 6px 0 0; font-size: 12px; color: var(--app-status-warning); line-height: 1.6; }
+
+@media (max-width: 1080px) {
+  .marketplace-grid { grid-template-columns: 1fr; }
+  .marketplace-detail__cols { grid-template-columns: 1fr; }
+}

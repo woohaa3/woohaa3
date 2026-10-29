@@ -39,6 +39,11 @@ import { installPerfFrameWindow } from "./perf-frame-window.js";
 import { getGroupLayoutSizes } from "@woohaa3/contracts";
 import { groupBadgePresentationScreenRect } from "./group-badge-screen-rect.js";
 import {
+  installOverviewLodTelemetry,
+  type OverviewLodTelemetryHandle
+} from "./overview-lod-telemetry.js";
+import { groupBadgeScreenRect } from "@woohaa3/contracts";
+import {
   applyFilmSetObjectAction,
   applyFilmSetObjectGesture,
   applyModelEditorFocusGesture,
@@ -175,6 +180,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private loadPromise: Promise<BevyRuntime> | null = null;
   /** 帧窗口（`perf.frame`）：DOM canvas 挂上后开，卸载/释放时关（design D4）。 */
   private frameWindow: import("../../services/telemetry-performance.js").PerfFrameWindow | null = null;
+  /** 片场总览 LOD 采样（`perf.lod`）：与帧窗口同生命周期，只在画布挂载期间记录。 */
+  private lodTelemetry: OverviewLodTelemetryHandle | null = null;
   private readonly loadAbort = new AbortController();
 
   constructor(private readonly options: CanvasRuntimeOptions) {}
@@ -425,6 +432,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   /** 当前 attach 的页面级资源需求 owner（change: 2026-10-23-scale-canvas-media-residency）。 */
   private residencyInstance: import("./residency/index.js").CanvasResourceCoordinator | null = null;
   /** 当前资源协调器（诊断/测试；未挂载返回 null）。 */
+  resourceResidencyDiagnostics = (): unknown => this.residencyInstance?.diagnostics() ?? null;
   residency = (): import("./residency/index.js").CanvasResourceCoordinator | null => this.residencyInstance;
 
   /**
@@ -563,22 +571,12 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
     // 普通 group 的执行面板跟随外部 3D 徽标，而不是跟随气泡主体。使用当前 screen rect
     // 保留拖动/缩放预览，再把同一份徽标几何投影到屏幕。
-    //
-    // 基准必须是**渲染矩形**而不是节点自身尺寸：Rust 把徽标画在渲染场景节点矩形的下缘，
-    // 而 group 的渲染矩形是成员包围后的布局尺寸（`getGroupLayoutSizes`，可比节点自身高得多）。
-    // 用节点尺寸推导会把徽标算高一整段，面板随之压回场景上。
     if (card && node?.type === "group" && this.controllerInstance) {
       const controller = this.controllerInstance;
-      const data = canvas?.nodeData[nodeId];
-      const layout = canvas ? getGroupLayoutSizes(canvas.document.nodes).get(nodeId) ?? null : null;
-      return groupBadgePresentationScreenRect({
-        card,
-        zoom: controller.viewport().zoom,
-        node,
-        layout,
-        collapsed: data?.groupCollapsed === true,
-        scale: data?.groupBadgeScale
-      }) ?? card;
+      const zoom = controller.viewport().zoom;
+      if (Number.isFinite(zoom) && zoom > 0) {
+        return groupBadgeScreenRect(card, zoom, canvas?.nodeData[nodeId]?.groupBadgeScale);
+      }
     }
     const scopes = this.controllerInstance?.queryCompositeAssetScopes();
     if (!scopes?.ok) return card;
@@ -731,9 +729,10 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
           // 聚焦投影变化只请求失效；同一帧的输入/媒体 tick 会合并进一次提交（design D2）。
           this.controllerInstance?.invalidate("model-focus");
         },
-        onViewportChange: () => {
+        onViewportChange: (viewport) => {
           this.viewportRevision += 1;
           for (const listener of this.viewportListeners) listener();
+          this.lodTelemetry?.viewportChanged(viewport.zoom);
           this.options.onViewportChange?.(this.controllerInstance?.viewport() ?? { x: 0, y: 0, zoom: 1 });
         },
         onFrame: () => {
@@ -746,7 +745,16 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     // 帧窗口只在挂载后开：没有 DOM canvas 就没有帧，先开窗会让 fps 的分母包含等待时间
     // （change: 2026-10-25-enhance-telemetry-performance-collection，design D4）。
     this.frameWindow?.dispose();
-    this.frameWindow = installPerfFrameWindow();
+    this.frameWindow = installPerfFrameWindow(() => runtime.getFrameCounters?.() ?? null);
+    // 片场总览 LOD 采样：只在画布挂载期间读渲染器已有的按根诊断，缩放停止/定时心跳各采一次
+    // （2026-10-28 片场总览 LOD 遥测采样）。
+    this.lodTelemetry?.dispose();
+    this.lodTelemetry = installOverviewLodTelemetry({
+      read: () => runtime.getWorkDiagnostics?.() ?? {},
+      // 场景只用来把 `high-owner` 细分为选中/聚焦/编辑/声明缺失；读不到不影响档位采样。
+      readScene: () => runtime.lastScene?.() ?? null,
+      isHidden: () => (globalThis.document?.visibilityState ?? "visible") === "hidden"
+    });
     const unsubscribe = this.options.subscribeModelScenes(() => {
       // prepared resource 就绪/替换不改变画布对象，但会改变内容身份与可准入性。
       this.modelContentVersion += 1;
@@ -770,6 +778,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       // 卸载即关闭窗口：残留的定时器会在没有画布时继续聚合，发出与用户所见无关的样本。
       this.frameWindow?.dispose();
       this.frameWindow = null;
+      this.lodTelemetry?.dispose();
+      this.lodTelemetry = null;
       controller.dispose();
       textureSync.dispose();
       videoSessions.dispose();
@@ -802,6 +812,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     this.detach?.();
     this.frameWindow?.dispose();
     this.frameWindow = null;
+    this.lodTelemetry?.dispose();
+    this.lodTelemetry = null;
     this.loadAbort.abort();
     this.runtimeInstance?.dispose();
     this.controllerInstance = null;

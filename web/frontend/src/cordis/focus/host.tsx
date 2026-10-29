@@ -19,7 +19,7 @@ import type { ServerCanvas } from "@woohaa3/contracts";
 import type { CanvasNavigationService } from "../navigation/contracts.js";
 import type { CanvasSlotProps, SlotContribution, SlotsService } from "../contract/platform.js";
 import { useService } from "../react.js";
-import { Button } from "../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import { useFocusLayoutSource } from "./workspace.js";
 import { ContributionBoundary } from "../contribution-boundary.js";
 

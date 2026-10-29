@@ -105,8 +105,42 @@ type GithubAsset = {
 type GithubRelease = {
   readonly tag_name?: string;
   readonly name?: string;
+  /** 发布时间（ISO 8601）；缺失时不展示「更新于」。 */
+  readonly published_at?: string;
   readonly assets?: readonly GithubAsset[];
 };
+
+/**
+ * 市场仓根目录的 `catalog.json`：给 GitHub Release 补人可读的名称 / 描述 / 图标 / 生效方式。
+ * 全部可选；缺失、无权限或形状不对时退回 Release 自身的信息，不影响搜索与安装。
+ */
+type GithubCatalogEntry = {
+  readonly name?: string;
+  readonly description?: string;
+  readonly icon?: string;
+  readonly hotReload?: boolean;
+};
+
+/** 目录文件名（仓库根）。 */
+const CATALOG_FILE = "catalog.json";
+
+/** 宽松解析目录：只收认识的字段；任何不合法条目直接忽略。 */
+export function parseGithubCatalog(raw: unknown): Record<string, GithubCatalogEntry> {
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (!isObject(raw) || !isObject(raw.extensions)) return {};
+  const out: Record<string, GithubCatalogEntry> = {};
+  for (const [extensionId, value] of Object.entries(raw.extensions)) {
+    if (!EXTENSION_ID.test(extensionId) || !isObject(value)) continue;
+    const entry: { name?: string; description?: string; icon?: string; hotReload?: boolean } = {};
+    if (typeof value.name === "string" && value.name.trim()) entry.name = value.name.trim();
+    if (typeof value.description === "string" && value.description.trim()) entry.description = value.description.trim();
+    if (typeof value.icon === "string" && value.icon.trim()) entry.icon = value.icon.trim();
+    if (typeof value.hotReload === "boolean") entry.hotReload = value.hotReload;
+    if (Object.keys(entry).length > 0) out[extensionId] = entry;
+  }
+  return out;
+}
 
 const isSha256Digest = (value: unknown): value is string =>
   typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value);
@@ -179,6 +213,28 @@ export function createGithubReleaseSource(options: GithubSourceOptions): Marketp
     return all;
   };
 
+  /**
+   * 读取仓库根目录的 `catalog.json`（可选）。失败一律按「没有目录」处理：
+   * 搜索仍按 Release 给出候选，只是卡片退回 `仓库@tag` 与发行说明。
+   */
+  const fetchCatalog = async (repo: string, signal?: AbortSignal): Promise<Record<string, GithubCatalogEntry>> => {
+    const config = options.config();
+    const headers: Record<string, string> = { Accept: "application/vnd.github.raw+json" };
+    if (config.token) headers.Authorization = `Bearer ${config.token}`;
+    try {
+      const response = await fetchImpl(`${config.apiBase}/repos/${repo}/contents/${CATALOG_FILE}`, {
+        method: "GET",
+        headers,
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
+      });
+      if (!response.ok) return {};
+      const body = await response.json().catch(() => null);
+      return parseGithubCatalog(body);
+    } catch {
+      return {};
+    }
+  };
+
   /** 资产 → ReleaseRef；无有效 sha256 digest 的资产不可装（Manager 必须能复核摘要）。 */
   const assetToRef = (asset: GithubAsset, extensionId: string, version: string): ReleaseRef | null => {
     if (!isSha256Digest(asset.digest)) return null;
@@ -202,29 +258,52 @@ export function createGithubReleaseSource(options: GithubSourceOptions): Marketp
       const config = options.config();
       const text = query.text?.trim().toLowerCase() ?? "";
       // 同一扩展可能出现在多个仓库 / 多个 Release：合并后 latest 取最高 semver。
-      const byExtension = new Map<string, MarketplaceListing>();
+      // `catalog.json` 与 Release 并行读取：目录只补展示字段，候选仍完全由 Release 决定。
+      const byExtension = new Map<string, { listing: MarketplaceListing; size?: number; publishedAt?: string }>();
       for (const repo of config.repos) {
-        const releases = await collectReleases(repo, signal);
+        const [releases, catalog] = await Promise.all([collectReleases(repo, signal), fetchCatalog(repo, signal)]);
         for (const release of releases) {
           for (const asset of release.assets ?? []) {
             const parsed = parseAssetName(asset.name ?? "");
             if (!parsed) continue;
+            const entry = catalog[parsed.extensionId];
             const existing = byExtension.get(parsed.extensionId);
             if (existing) {
-              if (compareSemver(parsed.version, existing.latest) > 0) {
-                byExtension.set(parsed.extensionId, { ...existing, latest: parsed.version });
+              if (compareSemver(parsed.version, existing.listing.latest) > 0) {
+                byExtension.set(parsed.extensionId, {
+                  listing: { ...existing.listing, latest: parsed.version },
+                  size: assetSize(asset, 0),
+                  ...(release.published_at ? { publishedAt: release.published_at } : {})
+                });
               }
               continue;
             }
-            if (text && !parsed.extensionId.toLowerCase().includes(text)) continue;
-            const label = `${repo}@${release.tag_name ?? parsed.version}`;
-            const description = release.name ?? undefined;
-            byExtension.set(parsed.extensionId, { extensionId: parsed.extensionId, label, latest: parsed.version, ...(description ? { description } : {}) });
+            if (text && !parsed.extensionId.toLowerCase().includes(text) && !(entry?.name ?? "").toLowerCase().includes(text)) continue;
+            const label = entry?.name ?? `${repo}@${release.tag_name ?? parsed.version}`;
+            const description = entry?.description ?? release.name;
+            byExtension.set(parsed.extensionId, {
+              listing: {
+                extensionId: parsed.extensionId,
+                label,
+                latest: parsed.version,
+                ...(description ? { description } : {}),
+                ...(entry?.icon ? { icon: entry.icon } : {}),
+                ...(entry?.hotReload !== undefined ? { hotReload: entry.hotReload } : {})
+              },
+              size: assetSize(asset, 0),
+              ...(release.published_at ? { publishedAt: release.published_at } : {})
+            });
           }
         }
       }
       // GitHub 的分页按仓库独立：多仓库合并没有统一的下一页游标，这里一次取全（页数有上限）。
-      return { items: [...byExtension.values()] };
+      return {
+        items: [...byExtension.values()].map(({ listing, size, publishedAt }) => ({
+          ...listing,
+          ...(size !== undefined ? { size } : {}),
+          ...(publishedAt ? { publishedAt } : {})
+        }))
+      };
     },
 
     async resolve(extensionId: string, range: string, signal: AbortSignal): Promise<ReleaseRef | null> {
@@ -257,8 +336,10 @@ export function createGithubReleaseSource(options: GithubSourceOptions): Marketp
       const config = options.config();
       const versions: MarketplaceVersionInfo[] = [];
       const labels = new Map<string, string>();
+      let catalogName: string | undefined;
       for (const repo of config.repos) {
-        const releases = await collectReleases(repo, signal);
+        const [releases, catalog] = await Promise.all([collectReleases(repo, signal), fetchCatalog(repo, signal)]);
+        catalogName ??= catalog[extensionId]?.name;
         for (const release of releases) {
           for (const asset of release.assets ?? []) {
             const parsed = parseAssetName(asset.name ?? "");
@@ -269,6 +350,7 @@ export function createGithubReleaseSource(options: GithubSourceOptions): Marketp
               version: parsed.version,
               packageDigest: digest,
               size: assetSize(asset, 0),
+              ...(release.published_at ? { publishedAt: release.published_at } : {}),
               ...(digest ? {} : { state: "yanked", yankReason: "GitHub 未提供该资产的 sha256 摘要，无法安装" })
             });
           }
@@ -277,7 +359,7 @@ export function createGithubReleaseSource(options: GithubSourceOptions): Marketp
       if (versions.length === 0) return null;
       return {
         extensionId,
-        label: [...labels.values()][0] ?? extensionId,
+        label: catalogName ?? [...labels.values()][0] ?? extensionId,
         versions: versions.sort((a, b) => compareSemver(b.version, a.version))
       };
     },

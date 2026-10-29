@@ -12,8 +12,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
 import { deriveFocusConnections, type ConnectionDot } from "./derive.js";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
-import { ChevronRightIcon, ChevronDownIcon, FileTextIcon, ImageIcon, VideoIcon, MusicIcon, LayoutGridIcon, DiamondIcon } from "../../../shared/ui/icons.js";
-import { Popover, Button } from "../../../shared/ui/index.js";
+import { ChevronRightIcon, ChevronDownIcon, FileTextIcon, ImageIcon, VideoIcon, MusicIcon, LayoutGridIcon, DiamondIcon } from "@woohaa3/ui/icons";
+import { Popover, Button } from "@woohaa3/ui";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 
 export function FocusConnectionsBar({ focusNodeId, side }: { focusNodeId: string; side: "incoming" | "outgoing" }) {

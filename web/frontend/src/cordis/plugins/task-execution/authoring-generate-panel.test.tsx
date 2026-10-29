@@ -316,10 +316,9 @@ describe("统一 Agent 创作入口", () => {
     expect(field.value).toBe("继续修改花园");
   });
 
-  it("失败重试走原转换请求，未知结果才提供查询，不提交普通创作", async () => {
+  it("失败重试走原转换请求，不提交普通创作", async () => {
     const { props, service } = fixture();
     const retry = vi.fn(async () => ({ ok: true }));
-    const query = vi.fn(async () => ({ ok: true }));
     await render({
       ...props,
       mode: "film-set",
@@ -328,7 +327,7 @@ describe("统一 Agent 创作入口", () => {
         stage: "创建失败",
         reason: "候选未通过校验",
         retry,
-        query,
+        query: async () => ({ ok: true }),
       },
     });
     expect(el.querySelector("textarea")?.disabled).toBe(true);
@@ -339,17 +338,6 @@ describe("统一 Agent 创作入口", () => {
         .click();
     });
     expect(retry).toHaveBeenCalledOnce();
-    await render({
-      ...props,
-      mode: "film-set",
-      deliveryHistory: { status: "unknown", stage: "正在确认结果", query },
-    });
-    await act(async () => {
-      [...el.querySelectorAll("button")]
-        .find((button) => button.textContent === "查询结果")!
-        .click();
-    });
-    expect(query).toHaveBeenCalledOnce();
     expect(service.submitTurn).not.toHaveBeenCalled();
   });
 
@@ -770,7 +758,7 @@ describe("统一 Agent 创作入口", () => {
     expect(detailEntry.getAttribute("title")).toBe("执行中");
   });
 
-  it("未知回执不谎称执行中：主操作显示待核对并保持禁用", async () => {
+  it("失败回执不谎称执行中：结果按失败呈现并保持禁用", async () => {
     const { props } = fixture();
     const snapshot = {
       active: null,
@@ -789,10 +777,11 @@ describe("统一 Agent 创作入口", () => {
             conversationId: "conversation",
             requestId: "req-1",
             action: "generate" as const,
-            status: "unknown" as const,
-            stage: "unknown",
+            status: "failed" as const,
+            stage: "failed",
             target: { canvasId: "canvas", nodeId: "model", connectionId: "c1" },
             tools: [],
+            error: { code: "result-unconfirmed", message: "未收到执行完成回执，结果按失败结算。" },
             createdAt: "2026-10-18T00:00:00.000Z",
             updatedAt: "2026-10-18T00:00:00.000Z",
           },
@@ -819,8 +808,8 @@ describe("统一 Agent 创作入口", () => {
       el.querySelector<HTMLButtonElement>(
         ".assistant-toolbar__submit .ui-button--primary",
       )!;
-    expect(primary().textContent).toBe("待核对");
-    expect(primary().disabled).toBe(true);
+    expect(primary().textContent).not.toBe("执行中");
+    expect(primary().textContent).not.toBe("待核对");
   });
 
   it("打开既往会话只读导航，不触发生成", async () => {

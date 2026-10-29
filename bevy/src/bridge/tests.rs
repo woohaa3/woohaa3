@@ -32,6 +32,57 @@ mod tests {
     }
 
     #[test]
+    fn borrowed_uploads_keep_independent_pixels_after_caller_reuses_its_buffer() {
+        let _ = take_input();
+        let mut pixels = vec![1, 2, 3, 4];
+        queue_texture("image", 1, 1, &pixels, Some("asset"));
+        queue_film_set_texture("plane", 1, 1, &pixels);
+        pixels.fill(0);
+        let input = take_input();
+        assert_eq!(input.textures["image"].2, vec![1, 2, 3, 4]);
+        assert_eq!(input.film_set_textures["plane"].2, vec![1, 2, 3, 4]);
+    }
+
+    #[cfg(not(feature = "wasm"))]
+    #[test]
+    fn owned_texture_uploads_move_pixels_and_preserve_valid_pending_values() {
+        let _ = take_input();
+        let pixels = vec![1, 2, 3, 4];
+        let allocation = pixels.as_ptr();
+        crate::set_texture_owned("image", 1, 1, pixels, "asset").unwrap();
+        assert!(crate::set_texture_owned("image", 2, 2, vec![0; 4], "asset").is_err());
+        assert!(crate::set_texture_owned("image", 1, 1, vec![0; 4], &"x".repeat(4097)).is_err());
+        let input = take_input();
+        assert_eq!(input.textures["image"].2.as_ptr(), allocation);
+        assert_eq!(input.textures["image"].2, vec![1, 2, 3, 4]);
+        assert_eq!(input.textures["image"].3.as_deref(), Some("asset"));
+
+        crate::set_texture_owned("image", 1, 1, vec![0; 4], "old").unwrap();
+        let latest = vec![5, 6, 7, 8];
+        let latest_allocation = latest.as_ptr();
+        crate::set_texture_owned("image", 1, 1, latest, "new").unwrap();
+        let input = take_input();
+        assert_eq!(input.textures["image"].2.as_ptr(), latest_allocation);
+        assert_eq!(input.textures["image"].3.as_deref(), Some("new"));
+        assert!(take_input().textures.is_empty());
+    }
+
+    #[cfg(not(feature = "wasm"))]
+    #[test]
+    fn owned_plane_upload_moves_pixels_and_rejects_invalid_replacements() {
+        let _ = take_input();
+        let pixels = vec![1, 2, 3, 4];
+        let allocation = pixels.as_ptr();
+        crate::set_model_media_texture_owned("plane", 1, 1, pixels).unwrap();
+        assert!(crate::set_model_media_texture_owned("plane", 2, 2, vec![0; 4]).is_err());
+        let input = take_input();
+        assert_eq!(input.film_set_textures["plane"].2.as_ptr(), allocation);
+        assert_eq!(input.film_set_textures["plane"].2, vec![1, 2, 3, 4]);
+        assert!(input.textures.is_empty());
+        assert!(take_input().film_set_textures.is_empty());
+    }
+
+    #[test]
     fn ready_and_revision_round_trip() {
         set_ready(true);
         assert!(ready());

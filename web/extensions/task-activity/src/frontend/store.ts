@@ -33,6 +33,7 @@ import {
   isTerminalTaskState,
   type BackgroundActivityJob,
   type CanvasTaskActivity,
+  type SkillMediaStepView,
   type TaskExecutionState
 } from "@woohaa3/contracts";
 import type {
@@ -44,6 +45,7 @@ import { isLocalRejection } from "@woohaa3/contracts";
 import type { CanvasGroupRun, CanvasGroupRunsSnapshot, TaskActivityRow } from "@woohaa3/frontend/extension-api";
 import { adaptGroupRow } from "./adapt-group-row.js";
 import { adaptJobRow, isActiveBackgroundJob } from "./adapt-job-row.js";
+import { adaptSkillRow, skillRowKey, skillStepActive } from "./adapt-skill-row.js";
 import { adaptTaskRow } from "./adapt-task-row.js";
 import {
   compareRows,
@@ -77,6 +79,8 @@ export type ActivityFeedSnapshot = {
    * 过渡字段，仅为兼容既有读法保留。
    */
   groups: readonly CanvasGroupRun[];
+  /** Skill 媒体步骤读模型（等价于 `rows` 里的 skill 记录；任务 5.2）。 */
+  skills: readonly SkillMediaStepView[];
   groupError: string;
   selectedGroupId: string | null;
   openRevision: number;
@@ -106,6 +110,9 @@ export class TaskActivityStore {
   private groupRuns: readonly CanvasGroupRun[] = [];
   private groupError = "";
   private readonly dismissedGroups = new Set<string>();
+  /** Skill 步骤来源是宿主轮询快照，与组记录一样用 dismiss 集合实现「移除后不复活」。 */
+  private skillSteps: readonly SkillMediaStepView[] = [];
+  private readonly dismissedSkills = new Set<string>();
   private selectedGroupId: string | null = null;
   private openRevision = 0;
   private items: ActivityFeedItem[] = [];
@@ -121,6 +128,7 @@ export class TaskActivityStore {
     items: [],
     jobs: [],
     groups: [],
+    skills: [],
     groupError: "",
     selectedGroupId: null,
     openRevision: 0,
@@ -167,6 +175,52 @@ export class TaskActivityStore {
     }
     this.groupRuns = input.rows;
     this.groupError = input.error;
+    this.publish();
+  }
+
+  /**
+   * Skill 步骤：整表替换最近步骤（宿主轮询快照）。
+   *
+   * 与组记录的差异只有身份来源：步骤重新 active（用户重新生成/重试）时清除移除标记；
+   * 首次观察到步骤离开 active 时记一次未读，重复终态快照不重复计数。
+   */
+  replaceSkillSteps(steps: readonly SkillMediaStepView[]): void {
+    if (this.disposed) return;
+    const next: SkillMediaStepView[] = [];
+    for (const step of steps) {
+      const key = skillRowKey(step);
+      const previous = this.skillSteps.find((entry) => skillRowKey(entry) === key);
+      // 乱序轮询：较旧的服务端快照不得覆盖较新的步骤事实（迟到的旧结果只属于历史）。
+      if (previous && step.updatedAt < previous.updatedAt) {
+        next.push(previous);
+        continue;
+      }
+      const active = skillStepActive(step);
+      if (active) this.dismissedSkills.delete(key);
+      if (!active && (!previous || skillStepActive(previous))) this.unread++;
+      next.push(step);
+    }
+    this.skillSteps = next;
+    this.publish();
+  }
+
+  /** 核对单个步骤（详情读回权威快照）后原地更新，不重新拉整表。 */
+  applySkillStep(step: SkillMediaStepView): void {
+    if (this.disposed) return;
+    const key = skillRowKey(step);
+    const index = this.skillSteps.findIndex((entry) => skillRowKey(entry) === key);
+    if (index === -1) {
+      this.replaceSkillSteps([...this.skillSteps, step]);
+      return;
+    }
+    const previous = this.skillSteps[index]!;
+    if (step.updatedAt < previous.updatedAt) return;
+    const active = skillStepActive(step);
+    if (active) this.dismissedSkills.delete(key);
+    if (!active && skillStepActive(previous)) this.unread++;
+    const next = [...this.skillSteps];
+    next[index] = step;
+    this.skillSteps = next;
     this.publish();
   }
 
@@ -310,7 +364,7 @@ export class TaskActivityStore {
    * 旧签名接收 taskKey，而记录键是 `task:<runId>`，因此先按 taskKey/runId 解析出 runId。
    */
   dismiss(key: string): void {
-    if (key.startsWith("task:") || key.startsWith("job:") || key.startsWith("group:")) {
+    if (key.startsWith("task:") || key.startsWith("job:") || key.startsWith("group:") || key.startsWith("skill:")) {
       this.dismissRow(key);
       return;
     }
@@ -460,6 +514,10 @@ export class TaskActivityStore {
         selected: this.selectedGroupId === run.rootGroupId
       }));
     }
+    for (const step of this.skillSteps) {
+      if (this.dismissedSkills.has(skillRowKey(step))) continue;
+      rows.push(adaptSkillRow(step, this.capabilities));
+    }
     rows.sort(compareRows);
     return rows;
   }
@@ -478,6 +536,10 @@ export class TaskActivityStore {
       case "group":
         // 组来源是整表轮询：标记 dismiss，`replaceGroupRuns` 在重新 active 时清除。
         this.dismissedGroups.add(row.source.run.requestId);
+        break;
+      case "skill":
+        // Skill 来源同样是整表轮询：重新 active 时由 `replaceSkillSteps` 清除标记。
+        this.dismissedSkills.add(row.key);
         break;
     }
     // 未读只统计仍留在面板里的终态记录；移除即回退（任务 / 后台活动 / 组一致）。
@@ -518,9 +580,9 @@ export class TaskActivityStore {
       if (this.expiryTimers.has(key)) continue;
       this.expiryTimers.set(key, setTimeout(() => {
         if (this.disposed) return;
-        // 任务 / 后台活动：退出期间即标记移除，事件重放不得让它复活。组记录的来源是整表轮询，
-        // 由 `dismissedGroups` 承担同一职责（`replaceGroupRuns` 重新 active 时清除）。
-        if (!key.startsWith("group:")) this.expired.add(key);
+        // 任务 / 后台活动：退出期间即标记移除，事件重放不得让它复活。组/Skill 记录的来源是
+        // 整表轮询，由 `dismissedGroups` / `dismissedSkills` 承担同一职责（重新 active 时清除）。
+        if (!key.startsWith("group:") && !key.startsWith("skill:")) this.expired.add(key);
         this.exiting.add(key);
         // 保持记录和面板挂载到动画结束；即使 CSS 动画未执行也能按时清理。
         this.expiryTimers.set(key, setTimeout(() => {
@@ -544,9 +606,11 @@ export class TaskActivityStore {
     const items = rows.flatMap((row) => (row.source.kind === "task" ? [row.source.item] : []));
     const jobs = rows.flatMap((row) => (row.source.kind === "job" ? [row.source.job] : []));
     const groups = rows.flatMap((row) => (row.source.kind === "group" ? [row.source.run] : []));
+    const skills = rows.flatMap((row) => (row.source.kind === "skill" ? [row.source.step] : []));
     this.snapshot = {
       rows,
       groups,
+      skills,
       groupError: this.groupError,
       selectedGroupId: this.selectedGroupId,
       openRevision: this.openRevision,

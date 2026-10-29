@@ -9,26 +9,42 @@ pub(crate) const AGGREGATE_HANDLE_GAP: f32 = 18.0;
 
 /// 选中节点的轴对齐包围盒（世界坐标）；空集合返回 `None`。
 pub(crate) fn selection_bounds(nodes: &[GraphNode], selected: &[String]) -> Option<[f32; 4]> {
+    selection_bounds_iter(nodes.iter(), selected)
+}
+
+/// 同一包围盒派生，供只持有 ECS 布局组件的生产者使用（不遍历协议快照）。
+pub(crate) fn selection_bounds_iter<'a>(
+    nodes: impl IntoIterator<Item = &'a GraphNode>,
+    selected: &[String],
+) -> Option<[f32; 4]> {
+    selection_bounds_rects(
+        nodes
+            .into_iter()
+            .map(|node| (node.id.as_str(), [node.x, node.y, node.width, node.height])),
+        selected,
+    )
+}
+
+/// 同一包围盒派生，输入为 `(nodeId, [x, y, width, height])`。
+pub(crate) fn selection_bounds_rects<'a>(
+    nodes: impl IntoIterator<Item = (&'a str, [f32; 4])>,
+    selected: &[String],
+) -> Option<[f32; 4]> {
     let ids: std::collections::HashSet<&str> = selected.iter().map(String::as_str).collect();
     let mut min_x = f32::INFINITY;
     let mut min_y = f32::INFINITY;
     let mut max_x = f32::NEG_INFINITY;
     let mut max_y = f32::NEG_INFINITY;
     let mut found = false;
-    for node in nodes {
-        if !ids.contains(node.id.as_str()) {
+    for (id, [x, y, width, height]) in nodes {
+        if !ids.contains(id) {
             continue;
         }
         found = true;
-        let rect = if node.group.as_ref().is_some_and(|group| group.collapsed) {
-            crate::canvas_query::group_model::badge_rect(node)
-        } else {
-            bevy::prelude::Vec4::new(node.x, node.y, node.width, node.height)
-        };
-        min_x = min_x.min(rect.x);
-        min_y = min_y.min(rect.y);
-        max_x = max_x.max(rect.x + rect.z);
-        max_y = max_y.max(rect.y + rect.w);
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x + width);
+        max_y = max_y.max(y + height);
     }
     found.then_some([min_x, min_y, max_x - min_x, max_y - min_y])
 }

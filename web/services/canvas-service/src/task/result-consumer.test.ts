@@ -45,13 +45,14 @@ function harness(outcomes: ProjectionOutcome[], items: TaskExecutionDetail[]) {
       return { items: items.filter((item) => item.recordRevision > after), cursor: 10 };
     }
   } as unknown as CanvasTaskClient;
+  const events: Array<Record<string, unknown>> = [];
   const consumer = createTaskResultConsumer({
     projector,
     taskClient,
     receipts: {} as ProjectionReceiptStore,
-    logger: () => undefined
+    logger: (event) => events.push(event)
   });
-  return { consumer, projections, afterCalls };
+  return { consumer, projections, afterCalls, events };
 }
 
 afterEach(() => {
@@ -125,6 +126,27 @@ describe("createTaskResultConsumer 补偿重试", () => {
     await h.consumer.reconcileOnce();
     expect(h.afterCalls.at(-1)).toBe(10);
     expect(h.projections).toHaveLength(1);
+  });
+
+  it("画布已删除（permanent）直接放弃：不重试、不逐条刷日志", async () => {
+    const h = harness(
+      [{ status: "failed", code: "canvas-not-found", message: "not-found: Yjs 文档 canvas-1 不存在", permanent: true }],
+      [historyRecord(5)]
+    );
+
+    const first = await h.consumer.reconcileOnce();
+    expect(first).toMatchObject({ dropped: 1, failed: 0 });
+    // 水位推进到快照高水位：同一条记录不会被反复读取/重试。
+    const second = await h.consumer.reconcileOnce();
+    expect(second).toMatchObject({ dropped: 0, failed: 0, skipped: 0 });
+    expect(h.afterCalls.at(-1)).toBe(10);
+    expect(h.projections).toHaveLength(1);
+
+    // 只留汇总行 + 样本，不再一条任务打一行。
+    expect(h.events.filter((event) => event.event === "task-projection-failed")).toHaveLength(0);
+    const summary = h.events.find((event) => event.event === "task-reconcile");
+    expect(summary).toMatchObject({ dropped: 1, failed: 0 });
+    expect((summary?.droppedSamples as unknown[]).length).toBe(1);
   });
 
   it("非终态记录不参与补偿", async () => {

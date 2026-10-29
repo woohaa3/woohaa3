@@ -11,6 +11,10 @@
  * - 统一有限超时（缺省 15s）：超时使本任务失效，但延迟到达的 native import 仍只更新纯代码缓存。
  *
  * native import 不可取消；loader 不声称 timeout 终止网络，也不承诺清 Map 能重执行 ESM。
+ * 与之相关的实测事实（2026-10-28）：**浏览器会把失败的 module fetch 缓存在本 document 的
+ * module map 里**（Chromium：同一 URL 再次 import 不会重新发请求，直接复用失败结果）。
+ * 因此「删掉 loader 自己的缓存再 import 同一 URL」等于空转；重试必须换一个 URL 变体，
+ * 见 `retryURL`。
  */
 import {
   decodeExtensionBrowserArtifactManifest,
@@ -92,6 +96,13 @@ export function createExtensionArtifactLoader(options: ExtensionArtifactLoaderOp
   const log = options.logger ?? (() => undefined);
   /** canonical entry URL → 成功 module Promise（App 级；key 含 runtime token）。 */
   const moduleCache = new Map<string, Promise<ExtensionBrowserModule>>();
+  /**
+   * canonical entry URL → 已失败的求值次数（App 级）。
+   *
+   * 只用于给下一次尝试生成不同的 URL：浏览器缓存了失败导入，同一 URL 重试不会重新请求。
+   * 成功后的缓存键仍是 canonical URL，因此命中缓存的行为不变。
+   */
+  const failedAttempts = new Map<string, number>();
   /** canonical style URL → 完成 Promise（App 级共享；失败从 cache 移除以便重试）。 */
   const styleCache = new Map<string, Promise<void>>();
   let disposed = false;
@@ -103,11 +114,15 @@ export function createExtensionArtifactLoader(options: ExtensionArtifactLoaderOp
     const key = cacheKey(entry);
     const cached = moduleCache.get(key);
     if (cached) return cached;
-    const pending = importer(appPublicUrl(entry.entryURL))
+    const attempt = failedAttempts.get(key) ?? 0;
+    const url = attempt === 0 ? appPublicUrl(entry.entryURL) : retryURL(appPublicUrl(entry.entryURL), attempt);
+    const pending = importer(url)
       .then((value) => readThinEntry(value, entry.metadata.extensionId))
       .catch((error: unknown) => {
-        // 求值失败属于不可原地修复（native import 缓存可能固化）；移除以便显式重试时重新请求。
+        // 求值失败：删掉本层缓存，并记一次失败次数——下一次尝试换 URL 变体，否则浏览器的
+        // module map 会直接复用这次失败，连请求都不会发。
         moduleCache.delete(key);
+        failedAttempts.set(key, attempt + 1);
         if (error instanceof ExtensionLoadError) throw error;
         throw new ExtensionLoadError(
           "evaluation",
@@ -218,8 +233,19 @@ export function createExtensionArtifactLoader(options: ExtensionArtifactLoaderOp
       disposed = true;
       moduleCache.clear();
       styleCache.clear();
+      failedAttempts.clear();
     }
   };
+}
+
+/**
+ * 重试 URL：只在路径后加一个查询参数，资源身份（pathname 里的 artifactId）不变。
+ *
+ * 宿主的发布资源处理器按 pathname 取文件，查询串被忽略；换 URL 只为了让浏览器重新发请求
+ * （失败导入按 URL 缓存在 module map 里）。
+ */
+function retryURL(url: string, attempt: number): string {
+  return `${url}${url.includes("?") ? "&" : "?"}woohaa-retry=${attempt}`;
 }
 
 /** 缺省样式准备：插入 <link> 并等待 load；失败移除 link 后抛可重试 CSS 错误。 */

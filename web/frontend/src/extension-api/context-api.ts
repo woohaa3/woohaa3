@@ -111,7 +111,7 @@ export type TaskActivityFeedItem = CanvasTaskActivity & {
 };
 
 /** 活动记录来源种类；只决定数据来源与可用动作，不决定寿命或清理规则。 */
-export type TaskActivityRowKind = "task" | "job" | "group";
+export type TaskActivityRowKind = "task" | "job" | "group" | "skill";
 
 /** 活动记录语义色（状态灯与状态文案）。 */
 export type TaskActivityRowTone = "active" | "success" | "danger" | "muted";
@@ -123,7 +123,7 @@ export type TaskActivityRowTone = "active" | "success" | "danger" | "muted";
  * 该能力仍是只读的，没有写入口。
  */
 export type TaskActivityRow = {
-  /** 稳定身份：`task:<runId>` | `job:<id>` | `group:<requestId>`。 */
+  /** 稳定身份：`task:<runId>` | `job:<id>` | `group:<requestId>` | `skill:<skillRunId>:<stepId>`。 */
   key: string;
   kind: TaskActivityRowKind;
   title: string;

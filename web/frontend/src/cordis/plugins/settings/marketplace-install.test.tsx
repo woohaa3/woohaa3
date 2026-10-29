@@ -124,6 +124,29 @@ describe("marketplace install controller", () => {
     expect(versionTrusted(controller.getState().selected!.detail!, "1.0.0")).toBe(true);
   });
 
+  it("再次 load 先用缓存出内容，再后台刷新", async () => {
+    const remote = fakeRemote();
+    const controller = createMarketplaceInstallController({ remote, onJob: () => undefined, readTrustedKeys: () => "", writeSetting: async () => ({ ok: true }) });
+    await controller.load();
+    expect(controller.getState().fetchedAt).not.toBeNull();
+    expect(remote.calls.search).toHaveLength(1);
+
+    await controller.load();
+    expect(controller.getState().items).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(remote.calls.search).toHaveLength(2);
+  });
+
+  it("refresh 保留列表并标记刷新中", async () => {
+    const remote = fakeRemote();
+    const controller = createMarketplaceInstallController({ remote, onJob: () => undefined, readTrustedKeys: () => "", writeSetting: async () => ({ ok: true }) });
+    await controller.load();
+    const refreshing = controller.refresh();
+    expect(controller.getState()).toMatchObject({ refreshing: true, items: [{ extensionId: "demo" }] });
+    await refreshing;
+    expect(controller.getState()).toMatchObject({ refreshing: false });
+  });
+
   it("来源不可用：给出原因、不列结果", async () => {
     const remote = fakeRemote({
       search: async () => ({ ok: true, items: [], sources: [{ sourceId: "woohaa-server", label: "团队市场", ok: false, reason: "本地模式：未配置服务端地址" }], unavailable: [{ sourceId: "woohaa-server", reason: "本地模式：未配置服务端地址" }] })
@@ -224,6 +247,19 @@ describe("MarketplaceInstallPanel", () => {
     expect(container.querySelector('[data-testid="marketplace-notice"]')).toBeNull();
   });
 
+  it("卡片主操作直接按精确版本安装，不切换到详情", async () => {
+    const remote = fakeRemote();
+    const controller = createMarketplaceInstallController({ remote, onJob: () => undefined, readTrustedKeys: () => "k1=PUB1", writeSetting: async () => ({ ok: true }) });
+    const container = render(<MarketplaceInstallPanel controller={controller} snapshot={snapshot()} canManage />);
+    click(container.querySelector('[data-testid="marketplace-install-toggle"]'));
+    await flush();
+    const buttons = container.querySelectorAll('[data-testid="marketplace-item-demo"] button');
+    click(buttons[1] ?? null);
+    await flush();
+    expect(remote.calls.install).toEqual([{ sourceId: "woohaa-server", extensionId: "demo", range: "1.1.0" }]);
+    expect(container.querySelector('[data-testid="marketplace-detail"]')).toBeNull();
+  });
+
   it("安装视图里直接显示任务进度与取消，不再要求去别的列表找", async () => {
     const jobsState = {
       jobs: [{ jobId: "job-9", action: "install" as const, sourceId: "woohaa-server", extensionId: "demo", version: "1.1.0", status: "running" as const, phase: "download" as const, progress: 0.45, startedAt: new Date().toISOString() }],
@@ -278,5 +314,52 @@ describe("MarketplaceInstallPanel", () => {
     const blocked = sameContainer.querySelector('[data-testid="marketplace-install-submit"]') as HTMLButtonElement;
     expect(blocked.disabled).toBe(true);
     expect(sameContainer.querySelector('[data-testid="marketplace-builtin-not-newer"]')?.textContent).toContain("不低于所选版本");
+  });
+});
+describe("刷新骨架", () => {
+  it("刷新期间旧卡片让位给骨架，请求结束后回到列表", async () => {
+    let searchCalls = 0;
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const remote = fakeRemote({
+      search: (async () => {
+        searchCalls += 1;
+        // 第一次（首次打开）立即返回；之后的刷新挂住，模拟慢请求。
+        if (searchCalls > 1) await gate;
+        return {
+          ok: true as const,
+          items: [{ extensionId: "demo", label: "Demo", latest: "1.1.0", description: "示例" }],
+          sources: [{ sourceId: "woohaa-server", label: "团队市场", ok: true }],
+          unavailable: []
+        };
+      }) as MarketplaceRemote["search"]
+    });
+    const controller = createMarketplaceInstallController({
+      remote,
+      onJob: () => undefined,
+      readTrustedKeys: () => "",
+      writeSetting: async () => ({ ok: true })
+    });
+    const container = render(<MarketplaceInstallPanel controller={controller} jobs={undefined as never} snapshot={snapshot()} canManage defaultOpen view />);
+    await flush();
+    await flush();
+    expect(container.querySelector('[data-testid="marketplace-results"]')).not.toBeNull();
+
+    void controller.refresh();
+    // 延迟一小段才换骨架：够快的请求不会闪。
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 220));
+    });
+    expect(container.querySelector('[data-testid="marketplace-skeleton"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="marketplace-results"]')).toBeNull();
+
+    await act(async () => {
+      release?.();
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="marketplace-skeleton"]')).toBeNull();
+    expect(container.querySelector('[data-testid="marketplace-results"]')).not.toBeNull();
   });
 });

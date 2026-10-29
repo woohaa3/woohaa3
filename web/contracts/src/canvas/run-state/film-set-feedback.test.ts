@@ -14,8 +14,9 @@ function turn(overrides: Partial<ConversationTurn> = {}): ConversationTurn {
 }
 
 describe("film set execution feedback", () => {
-  it("unknown delivery overrides stale processing and a running candidate", () => {
-    expect(normalize({ ...input, conversion: { ...running, status: "unknown" }, turns: [turn()] })).toMatchObject({ phase: "verifying" });
+  it("failed delivery overrides stale processing and a running candidate", () => {
+    expect(normalize({ ...input, conversion: { ...running, status: "failed", code: "unknown-result", message: "无法确认", attempt: 1, retryable: true }, turns: [turn()] }))
+      .toMatchObject({ phase: "failed", labelCode: "failed" });
   });
   it("candidate completion does not settle delivery; save keeps operation identity", () => {
     const a = normalize({ ...input, conversion: running, turns: [turn({ status: "succeeded" })] });
@@ -34,9 +35,14 @@ describe("film set execution feedback", () => {
       canvasId: "canvas", nodeId: "film", mode: "film-set", delivery: { purpose: "film-set-conversion", domainRequestId: "conversion", attemptId: "attempt-1" }
     } })] })).toBeNull();
   });
-  it.each(["queued", "committing", "unknown", "failed", "cancelled", "partial", "succeeded"] as const)("uses actual agent stage %s", status => {
+  it.each(["queued", "committing", "failed", "cancelled", "partial", "succeeded"] as const)("uses actual agent stage %s", status => {
     expect(normalize({ ...input, turns: [turn({ status })] })?.phase ?? null)
-      .toBe(status === "queued" ? "queued" : status === "committing" ? "committing" : status === "unknown" ? "verifying" : null);
+      .toBe(status === "queued" ? "queued" : status === "committing" ? "committing" : null);
+  });
+  it("legacy interrupted operation is reported as a static failure", () => {
+    const record = { canvasId: "canvas", nodeId: "film", operationId: "run", kind: "film-set" as const, owner: "server" as const,
+      state: "interrupted" as const, createdAt: "2026-10-22", updatedAt: "2026-10-22" };
+    expect(normalize({ ...input, records: [record] })).toMatchObject({ phase: "failed", labelCode: "failed", source: "operation" });
   });
   it("uses attempt identity and never merges independent targets of the same source", () => {
     const first = normalize({ ...input, conversion: running });

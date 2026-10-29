@@ -1,128 +1,315 @@
-//! 2D scene 同步：普通卡片局部分块，组/片场/边与覆盖层保留共享几何
-//! （change: refactor-bevy-rust-file-size，任务 3.1 / design D3）。
-
+//! 2D 画布帧系统：投影 → 展示实体 → 按类型几何 → 选中描边 → 标签/覆盖层 → flush
+//! （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs，design D2 / 任务 2.1–2.4）。
+//!
+//! `sync_scene` 的大同步过程拆分为独立 system：所有节点输入来自 ECS Query（稳定身份、
+//! 布局、深度与展示组件），完整绘制 DTO 仍按 id 从 `CurrentScene`/`NodeIndex` 读取。
+//! 16 节点块、共享 mesh 句柄、Geometry、纹理共享与预算仍是 Resource。
 use std::collections::HashMap;
 
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
-use crate::app::{CurrentScene, FrameFlags};
+use crate::app::{CurrentScene, FrameFlags, ModelAssetTable, NodeIndex};
+use crate::canvas_ecs::components::{
+    CanvasDepth, CanvasLabelRole, CanvasLayout, CanvasNodeId, CanvasSelection, CardPresentation,
+    FilmSetPresentation, GroupPresentation,
+};
+use crate::canvas_ecs::{CanvasBatchWriter, SelectionOutlineBatch};
 use crate::protocol::GraphNode;
 use crate::theme::ThemeResource;
 
 use super::Visuals;
 use super::geometry::Geometry;
-use super::text_presentation::LogicalText;
+use super::labels::{LabelRequests, LabelStyle};
 
+/// 静态 2D 场景只在 accepted scene/视口/主题变化时重建。
+pub(crate) fn canvas_render_requested(flags: Res<FrameFlags>) -> bool {
+    flags.changed
+}
+
+/// 一个按文档顺序投影的节点：实体 + 完整绘制 DTO。
+struct ProjectedNode {
+    entity: Entity,
+    node: GraphNode,
+}
+
+/// 按 `CanvasDepth::index` 排序的投影节点；绘制 DTO 由 `node_for_draw` 取。
+///
+/// 只在共享 overlay 确认需要重建后调用，避免稳态帧克隆节点内容。
+fn projected_nodes(
+    scene: &crate::protocol::Scene,
+    index: &NodeIndex,
+    nodes: &Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
+) -> Vec<ProjectedNode> {
+    let mut projected: Vec<(usize, Entity, GraphNode)> = nodes
+        .iter()
+        .filter_map(|(entity, id, depth)| {
+            crate::canvas_ecs::node_for_draw(scene, index, &id.0)
+                .map(|node| (depth.index, entity, node.into_owned()))
+        })
+        .collect();
+    projected.sort_by_key(|(index, _, _)| *index);
+    projected
+        .into_iter()
+        .map(|(_, entity, node)| ProjectedNode { entity, node })
+        .collect()
+}
+
+/// 普通卡片几何（静态内容 + 历史条）。
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn sync_scene(
+pub(crate) fn produce_card_geometry(
     mut commands: Commands,
     scene: Res<CurrentScene>,
-    index: Res<crate::app::NodeIndex>,
-    model_assets: Res<crate::app::ModelAssetTable>,
+    index: Res<NodeIndex>,
     theme: Res<ThemeResource>,
     mut visuals: ResMut<Visuals>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut images: ResMut<Assets<Image>>,
+    mut requests: ResMut<LabelRequests>,
     mut flags: ResMut<FrameFlags>,
-    mut text_query: Query<
-        (
-            &mut Text2d,
-            &mut Transform,
-            &mut TextColor,
-            &mut LogicalText,
-        ),
-        Without<Sprite>,
-    >,
-    mut sprites: Query<(&mut Sprite, &mut Transform), Without<Text2d>>,
+    nodes: Query<(
+        Entity,
+        &CanvasNodeId,
+        &CanvasDepth,
+        &CardPresentation,
+    )>,
 ) {
-    if !flags.changed && !(flags.observer_changed && !scene.0.model_focus_context.is_empty()) {
-        return;
+    let mut cards: Vec<(usize, Entity, usize, std::borrow::Cow<'_, GraphNode>)> =
+        Vec::with_capacity(nodes.iter().len());
+    for (entity, id, depth, _) in &nodes {
+        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
+            continue;
+        };
+        cards.push((depth.index, entity, depth.render, node));
     }
-    let source = &scene.0;
-    let overlay = crate::canvas_query::focus_context::overlay(source);
-    let scene = overlay.as_ref();
-    // 先算要移除的节点，再统一解绑：`retain` 闭包里同时借用 `visuals` 与 `texture_store`
-    // 会让借用检查器拒绝（两者都是 `visuals` 的字段）。
-    let mut removed: Vec<(String, Entity)> = Vec::new();
-    visuals
-        .textures
-        .retain(|id, (entity, _handle, texture_px)| {
-            // 同代节点索引：保留判定按 id O(1) 定位，不再逐纹理扫描整份文档
-            // （change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 7.2）。
-            if let Some((original_index, original)) =
-                index.node(source, id).filter(|(_, node)| node.texture)
-            {
-                let shown = source.model_focus.is_none();
-                commands.entity(*entity).insert(if shown {
-                    Visibility::Inherited
-                } else {
-                    Visibility::Hidden
-                });
-                let node = crate::canvas_query::focus_context::node(source, original);
-                let index = crate::canvas_query::focus_context::index(source, id, original_index);
-                if let Ok((mut sprite, mut transform)) = sprites.get_mut(*entity) {
-                    let (content, center, color, z) =
-                        super::image_focus::sprite_layout(scene, &node, *texture_px, index);
-                    sprite.custom_size = Some(content);
-                    sprite.color = color;
-                    transform.translation = Vec3::new(center.x, -center.y, z);
-                }
-                true
-            } else {
-                removed.push((id.clone(), *entity));
-                false
-            }
-        });
-    // 只解绑被移除的节点：同内容仍被其他节点使用时纹理保留
-    // （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
-    for (id, entity) in removed {
-        commands.entity(entity).despawn();
-        for stale in visuals.texture_store.release(&id) {
-            images.remove(stale.id());
-        }
-    }
-
-    let mut geometry = Geometry::default();
-    let node_map: HashMap<&str, &GraphNode> =
-        scene.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-    // 边、边标签、悬停删除按钮与草稿线（抽至 `render_edges`，合并后保持 render.rs 在文件体积守卫内）。
-    let (overlay_z, edge_blocks) =
-        super::render_edges::sync_edges(&mut commands, scene, &theme, &mut visuals, &mut meshes);
-
-    flags.edge_blocks_rebuilt = edge_blocks;
-
-    let focused_id = super::image_focus::presented_media_focus(scene).map(|focus| focus.node_id);
-    visuals.labels.retain(|id, entities| {
-        if node_map.contains_key(id.as_str()) && focused_id != Some(id.as_str()) {
-            true
-        } else {
-            for entity in entities {
-                commands.entity(*entity).despawn();
-            }
-            false
-        }
-    });
+    cards.sort_by_key(|(index, _, _, _)| *index);
+    let cards: Vec<_> = cards
+        .iter()
+        .map(|(index, entity, render, node)| {
+            super::card_cache::input(*entity, *index, *render, node.as_ref())
+        })
+        .collect();
     flags.card_blocks_rebuilt = super::card_cache::sync(
         &mut commands,
         &mut meshes,
         &mut visuals,
-        &mut text_query,
-        scene,
+        &mut requests,
+        &cards,
+        scene.0.nodes.len(),
+        &scene.0,
         &theme,
     );
+}
 
-    flags.card_decorations_rebuilt =
-        super::decoration_cache::sync(&mut commands, &mut meshes, &mut visuals, scene, &theme);
+/// 普通卡片的悬停端点半钮（选中描边由 selection producer 独占）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn produce_card_hover(
+    mut commands: Commands,
+    scene: Res<CurrentScene>,
+    index: Res<NodeIndex>,
+    theme: Res<ThemeResource>,
+    mut visuals: ResMut<Visuals>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut flags: ResMut<FrameFlags>,
+    nodes: Query<(
+        Entity,
+        &CanvasNodeId,
+        &CanvasDepth,
+        &CardPresentation,
+    )>,
+) {
+    let mut projected = Vec::with_capacity(nodes.iter().len());
+    for (_, id, depth, _) in &nodes {
+        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
+            continue;
+        };
+        projected.push((
+            depth.index,
+            super::decoration_cache::HoverInput {
+                index: depth.index,
+                node,
+            },
+        ));
+    }
+    projected.sort_by_key(|(index, _)| *index);
+    let projected: Vec<_> = projected.into_iter().map(|(_, input)| input).collect();
+    flags.card_decorations_rebuilt = super::decoration_cache::sync(
+        &mut commands,
+        &mut meshes,
+        &mut visuals,
+        &scene.0,
+        &theme,
+        &projected,
+        scene.0.nodes.len(),
+    );
+}
 
+/// group 与片场容器几何。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn produce_container_geometry(
+    mut commands: Commands,
+    scene: Res<CurrentScene>,
+    index: Res<NodeIndex>,
+    theme: Res<ThemeResource>,
+    mut visuals: ResMut<Visuals>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut requests: ResMut<LabelRequests>,
+    mut flags: ResMut<FrameFlags>,
+    nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
+) {
+    let mut containers = Vec::new();
+    for (entity, id, depth) in &nodes {
+        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
+            continue;
+        };
+        if node.group.is_none() && node.composite_asset.is_none() {
+            continue;
+        }
+        containers.push((
+            depth.index,
+            super::container_cache::ContainerInput {
+                index: depth.index,
+                render: depth.render,
+                entity,
+                node,
+            },
+        ));
+    }
+    containers.sort_by_key(|(index, _)| *index);
+    let containers: Vec<_> = containers.into_iter().map(|(_, input)| input).collect();
     flags.container_blocks_rebuilt = super::container_cache::sync(
         &mut commands,
         &mut meshes,
         &mut visuals,
-        &mut text_query,
-        scene,
+        &mut requests,
+        &containers,
+        scene.0.nodes.len(),
+        &scene.0,
         &theme,
     );
+}
 
+/// 边、边标签、删除按钮与草稿线（端点读取 ECS 布局）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn produce_edges(
+    mut commands: Commands,
+    scene: Res<CurrentScene>,
+    theme: Res<ThemeResource>,
+    mut visuals: ResMut<Visuals>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut requests: ResMut<LabelRequests>,
+    mut flags: ResMut<FrameFlags>,
+    nodes: Query<(Entity, &CanvasNodeId, &CanvasLayout)>,
+) {
+    let layouts: HashMap<&str, CanvasLayout> = nodes
+        .iter()
+        .map(|(_, id, layout)| (id.0.as_str(), *layout))
+        .collect();
+    // 连线删除按钮高于所有节点卡片（卡片 z = 10.0 + index*0.1），与命中测试「按钮优先于节点」
+    // 保持一致（change: add-edge-hover-delete）。
+    let overlay_z = 10.0 + scene.0.nodes.len() as f32 * 0.1 + 1.5;
+    flags.edge_blocks_rebuilt = super::edge_cache::sync(
+        &mut commands,
+        &mut meshes,
+        &mut visuals,
+        &mut requests,
+        &scene.0,
+        &theme,
+        &layouts,
+        overlay_z,
+    );
+}
+
+/// 帧起点：清空选择描边几何。
+pub(crate) fn begin_selection_outlines(mut batch: ResMut<SelectionOutlineBatch>) {
+    batch.begin();
+}
+
+/// Card 持久选中描边 producer。
+pub(crate) fn produce_card_selection(
+    scene: Res<CurrentScene>,
+    index: Res<NodeIndex>,
+    theme: Res<ThemeResource>,
+    mut batch: ResMut<SelectionOutlineBatch>,
+    nodes: Query<(&CanvasNodeId, &CanvasDepth, &CanvasSelection, &CardPresentation)>,
+) {
+    let writer = batch.writer();
+    for (id, depth, selection, _) in &nodes {
+        if !selection.selected {
+            continue;
+        }
+        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
+            continue;
+        };
+        if node.group.is_some() || node.composite_asset.is_some() {
+            continue;
+        }
+        super::cards::draw_selection_outline(writer, &theme, &node, depth.render);
+    }
+}
+
+/// Group 持久选中描边 producer。
+pub(crate) fn produce_group_selection(
+    scene: Res<CurrentScene>,
+    index: Res<NodeIndex>,
+    theme: Res<ThemeResource>,
+    mut batch: ResMut<SelectionOutlineBatch>,
+    nodes: Query<(&CanvasNodeId, &CanvasDepth, &CanvasSelection, &GroupPresentation)>,
+) {
+    let writer = batch.writer();
+    for (id, depth, selection, _) in &nodes {
+        if !selection.selected {
+            continue;
+        }
+        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
+            continue;
+        };
+        super::group::draw_group_selection(writer, &theme, &node, depth.z);
+    }
+}
+
+/// FilmSet 持久选中描边 producer（面板范围框与纯模型范围框共用同一批次）。
+pub(crate) fn produce_film_set_selection(
+    scene: Res<CurrentScene>,
+    index: Res<NodeIndex>,
+    theme: Res<ThemeResource>,
+    mut batch: ResMut<SelectionOutlineBatch>,
+    nodes: Query<(&CanvasNodeId, &CanvasDepth, &CanvasSelection, &FilmSetPresentation)>,
+) {
+    let writer = batch.writer();
+    for (id, depth, selection, presentation) in &nodes {
+        if !selection.selected {
+            continue;
+        }
+        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
+            continue;
+        };
+        if presentation.panel {
+            super::scope_panel::draw_selection(writer, &theme, &node, depth.z);
+        } else {
+            super::film_set::draw_film_set_selection(writer, &theme, &node, depth.z);
+        }
+    }
+}
+
+/// 共享 overlay 几何：归属线、草稿线、拍摄归属、粘连操作条、聚合把手与框选。
+///
+/// 只读取公共节点组件与瞬时 scene state；`shared_key` 未变化时跳过重建，但卡片/容器
+/// 几何与选中描边批次仍按各自 cache 独立提交。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sync_canvas_overlay(
+    mut commands: Commands,
+    scene: Res<CurrentScene>,
+    index: Res<NodeIndex>,
+    model_assets: Res<ModelAssetTable>,
+    theme: Res<ThemeResource>,
+    mut visuals: ResMut<Visuals>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut requests: ResMut<LabelRequests>,
+    mut flags: ResMut<FrameFlags>,
+    nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
+) {
+    let source = &scene.0;
+    let overlay = crate::canvas_query::focus_context::overlay(source);
+    let scene = overlay.as_ref();
     let ownership_links = super::ownership_links::segments(source, &model_assets.0);
     let mut shared_key = super::shared_key::SharedKey::new(scene, &theme);
     shared_key.ownership_links = ownership_links.clone();
@@ -132,6 +319,33 @@ pub(crate) fn sync_scene(
         return;
     }
     visuals.shared_key = Some(shared_key);
+
+    // 投影节点按文档顺序排列；完整绘制 DTO 由 `node_for_draw` 取。
+    let projected = projected_nodes(source, &index, &nodes);
+    let node_map: HashMap<&str, &GraphNode> = projected
+        .iter()
+        .map(|projected| (projected.node.id.as_str(), &projected.node))
+        .collect();
+    let layouts: HashMap<&str, CanvasLayout> = projected
+        .iter()
+        .map(|projected| {
+            (
+                projected.node.id.as_str(),
+                CanvasLayout::from_node(&projected.node),
+            )
+        })
+        .collect();
+    let entities: HashMap<&str, Entity> = projected
+        .iter()
+        .map(|projected| (projected.node.id.as_str(), projected.entity))
+        .collect();
+    let nodes: Vec<&GraphNode> = projected.iter().map(|projected| &projected.node).collect();
+
+    let overlay_z = 10.0 + scene.nodes.len() as f32 * 0.1 + 1.5;
+    // 单节点拖动粘连 overlay 标签：owner 为拖动节点实体。
+    requests.begin(CanvasLabelRole::Attach);
+    let attach_base_z = overlay_z + 1.0;
+    let mut geometry = Geometry::default();
     super::ownership_links::draw(
         &mut geometry,
         &ownership_links,
@@ -142,54 +356,34 @@ pub(crate) fn sync_scene(
             1.
         },
     );
-    super::render_edges::draw_draft(&mut geometry, scene, &theme, &node_map);
-    // 拍摄镜头归属线（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）：
-    // 派生呈现，不在 `document.edges` 里；起点由映射层按当前观察相机投影给出，终点复用卡片
-    // 左侧中点（与命中共用 `canvas_query::shot_preview` 几何）。无端口/删除/重连命中。
-    super::render_edges::draw_shot_preview_links(
-        &mut geometry,
-        scene,
-        &theme,
-        &node_map,
-        overlay_z,
-    );
+    super::render_edges::draw_draft(&mut geometry, scene, &theme, &layouts);
+    super::render_edges::draw_shot_preview_links(&mut geometry, scene, &theme, &layouts, overlay_z);
 
     // 单节点拖动粘连 overlay（change: add-drag-touch-connections）：绘制在普通边与节点之后、
-    // 框选之前；只被动消费语义投影，不执行碰撞或创建命令。owner 已不在节点集合时清除标签。
-    let attach_base_z = overlay_z + 1.0;
+    // 框选之前；只被动消费语义投影，不执行碰撞或创建命令。
     if let Some(attach) = &scene.drag_attach {
-        if node_map.contains_key(attach.node_id.as_str()) {
+        if let Some(owner) = node_map.get(attach.node_id.as_str()).copied() {
             let labels = super::attach::draw_drag_attach(
                 &mut geometry,
                 &theme,
-                &scene.nodes,
+                owner,
+                &node_map,
                 attach,
                 attach_base_z,
             );
-            super::attach::sync_attach_labels(
-                &mut commands,
-                &mut visuals,
-                &mut text_query,
-                labels,
-                attach_base_z + 0.003,
-            );
-        } else {
-            super::attach::sync_attach_labels(
-                &mut commands,
-                &mut visuals,
-                &mut text_query,
-                Vec::new(),
-                attach_base_z + 0.003,
-            );
+            if let Some(entity) = entities.get(attach.node_id.as_str()).copied() {
+                requests.push(
+                    CanvasLabelRole::Attach,
+                    entity,
+                    labels
+                        .into_iter()
+                        .map(|label| (label.text, label.position, label.size, label.color))
+                        .collect(),
+                    attach_base_z + 0.003,
+                    LabelStyle::Attach,
+                );
+            }
         }
-    } else {
-        super::attach::sync_attach_labels(
-            &mut commands,
-            &mut visuals,
-            &mut text_query,
-            Vec::new(),
-            attach_base_z + 0.003,
-        );
     }
 
     // 多选聚合把手 overlay（change: add-multi-select-aggregate-connect）：与粘连同为高层
@@ -198,7 +392,7 @@ pub(crate) fn sync_scene(
         super::aggregate::draw_aggregate_connect(
             &mut geometry,
             &theme,
-            &scene.nodes,
+            &nodes,
             aggregate,
             &scene.selection.nodes,
             attach_base_z + 0.02,
@@ -206,19 +400,11 @@ pub(crate) fn sync_scene(
     }
 
     // 框选选区矩形（change: fix-group-and-marquee-preview）：最后绘制，覆盖在所有节点与
-    // 连线之上。共享 mesh 无深度测试，覆盖顺序即提交顺序，因此必须早于 `geometry.build()`、
-    // 晚于节点循环，否则节点卡片会盖住选框（change: 修复框选虚线框不可见）。
+    // 连线之上。共享 mesh 无深度测试，覆盖顺序即提交顺序。
     if let Some(marquee) = &scene.marquee {
         super::marquee::draw_marquee(&mut geometry, &theme, marquee);
     }
 
-    // 空几何（例如删掉最后一个节点）也必须替换共享 mesh：否则上一帧的节点卡片会留在
-    // 屏幕上（文字标签与纹理 Sprite 会各自回收，只剩卡片轮廓），表现为「删除后节点不消失」。
-    // `Geometry::build` 对空输入返回不可见的兜底 mesh，因此这里无需提前 return。
-    //
-    // 不透明几何（卡片外壳、边、把手）与半透明叠加层分两张 mesh 分别更新
-    // （change: 2026-10-09-fix-model-preview-layering-and-projection）：前者写深度实现真实
-    // z 遮挡，后者保持 Blend 只做深度测试。
     let (opaque_geometry, blend_geometry) = geometry.into_layers();
     replace_geometry(
         &mut commands,
@@ -234,9 +420,6 @@ pub(crate) fn sync_scene(
         true,
         blend_geometry,
     );
-
-    // 通知 app 层记录一次静态 2D mesh 重建（change: 2026-10-10-optimize-canvas-interaction-hot-path）。
-    // canvas2d 不得导入 bridge，故只置资源标记，由 app 层消费上报。
     flags.mesh_rebuilt = true;
     flags.canvas_committed = true;
 }
@@ -255,18 +438,15 @@ fn replace_geometry(
     blend: bool,
     built: Mesh,
 ) {
-    let (entity_slot, handle_slot, material) = if blend {
-        (
-            &mut visuals.blend_mesh_entity,
-            &mut visuals.blend_mesh,
-            visuals.blend_material.clone(),
-        )
+    let material = if blend {
+        visuals.blend_material.clone()
     } else {
-        (
-            &mut visuals.mesh_entity,
-            &mut visuals.mesh,
-            visuals.material.clone(),
-        )
+        visuals.material.clone()
+    };
+    let (entity_slot, handle_slot) = if blend {
+        (&mut visuals.blend_mesh_entity, &mut visuals.blend_mesh)
+    } else {
+        (&mut visuals.mesh_entity, &mut visuals.mesh)
     };
     let new_handle = meshes.add(built);
     match *entity_slot {

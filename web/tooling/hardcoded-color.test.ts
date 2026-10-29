@@ -21,16 +21,18 @@ const SKIP_DIRS = new Set([
   "server-dist",
   ".git",
   "test-results",
-  "playwright-report"
+  "playwright-report",
+  "test-support"
 ]);
 
 export type ColorViolation = { file: string; value: string };
 
 /** 精确登记的例外：`repo 相对路径` → 用途说明。 */
 export const COLOR_ALLOWLIST: Record<string, string> = {
+  "web/ui/src/icons/mcp-client-marks.tsx": "第三方客户端品牌标记的原始配色，非应用 chrome",
   "web/frontend/src/cordis/services/model-download.ts": "导出模型材质的黑白回退值（领域内容色，非 UI chrome）",
   // canonical 生成物：本身即 token 定义来源（由 generate-theme-tokens.mjs 产出）。
-  "web/frontend/src/cordis/ui/generated-theme.css": "canonical --app-* token 定义（生成物）",
+  "web/ui/src/styles/generated-theme.css": "canonical --app-* token 定义（生成物）",
   // 用户选择的标注色（文字色 / 高亮色），属领域内容色，不随主题重写（design D9）。
   "web/frontend/src/cordis/plugins/task-execution/execution-panel/ExecutionPanel.tsx":
     "用户可选的标注/文字颜色默认值（领域内容色）",
@@ -48,17 +50,17 @@ export const COLOR_ALLOWLIST: Record<string, string> = {
   "bevy/src/canvas2d/layout.rs": "u32 → Color 转换工具，非颜色字面值",
   "bevy/src/theme.rs": "hex → Color 转换与 token 访问器，非颜色字面值",
   // showcase 夹具：确定性占位媒体字节（内联 SVG），属媒体内容色而非 app chrome。
-  "web/showcase/src/task-history-fixtures.ts": "确定性占位媒体（内联 SVG）内容色",
+  "web/ui/showcase/src/task-history-fixtures.ts": "确定性占位媒体（内联 SVG）内容色",
   // showcase 夹具：生成历史占位缩略图（内联 SVG），同上属媒体内容色。
-  "web/showcase/src/canvas-history-fixtures.ts": "确定性占位媒体（内联 SVG）内容色",
+  "web/ui/showcase/src/canvas-history-fixtures.ts": "确定性占位媒体（内联 SVG）内容色",
   // showcase 夹具：用户标注色默认值（领域内容色），与 ExecutionPanel 同类。
-  "web/showcase/src/video-dialog-fixtures.tsx": "用户标注色默认值（领域内容色）",
+  "web/ui/showcase/src/video-dialog-fixtures.tsx": "用户标注色默认值（领域内容色）",
   // showcase 夹具：程序化模型 fixture 的 Scene IR 输入（领域内容色，非 app chrome）。
-  "web/showcase/src/fixtures/shot-camera-fixture.tsx": "程序化模型 Scene IR 输入（领域内容色）",
+  "web/ui/showcase/src/fixtures/shot-camera-fixture.tsx": "程序化模型 Scene IR 输入（领域内容色）",
   // showcase 夹具：图片编辑色板/原图占位内容色（领域内容色，与生产色板一致）。
-  "web/showcase/src/image-focus-fixtures.tsx": "图片编辑色板与原图占位内容色（领域内容色）",
+  "web/ui/showcase/src/image-focus-fixtures.tsx": "图片编辑色板与原图占位内容色（领域内容色）",
   // showcase 夹具：片场检查面板的程序化模型 Scene IR 输入（领域内容色，非 app chrome）。
-  "web/showcase/src/film-set-inspector-fixtures.tsx": "程序化模型 Scene IR 输入（领域内容色）"
+  "web/ui/showcase/src/film-set-inspector-fixtures.tsx": "程序化模型 Scene IR 输入（领域内容色）"
 };
 
 /** 透明的中性合成常量（允许，不构成品牌色）。 */
@@ -113,7 +115,7 @@ function collectFiles(dir: string, match: RegExp, out: string[] = []): string[] 
     if (SKIP_DIRS.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) collectFiles(full, match, out);
-    else if (match.test(entry.name) && !/\.test\./.test(entry.name)) out.push(full);
+    else if (match.test(entry.name) && !/\.test\.|^tests\.rs$/.test(entry.name)) out.push(full);
   }
   return out;
 }
@@ -121,9 +123,10 @@ function collectFiles(dir: string, match: RegExp, out: string[] = []): string[] 
 describe("硬编码 chrome 色守卫（任务 5.1 / design D9）", () => {
   it("Web 应用 CSS/TS/TSX 不含未登记颜色 literal", () => {
     const files = [
+      ...collectFiles(path.join(WEB_ROOT, "ui/src"), /\.(css|ts|tsx)$/),
       ...collectFiles(path.join(WEB_ROOT, "frontend/src"), /\.(css|ts|tsx)$/),
-      ...collectFiles(path.join(WEB_ROOT, "showcase/src"), /\.(css|ts|tsx)$/),
-      ...collectFiles(path.join(WEB_ROOT, "showcase/.ladle"), /\.(css|ts|tsx)$/)
+      ...collectFiles(path.join(WEB_ROOT, "ui/showcase/src"), /\.(css|ts|tsx)$/),
+      ...collectFiles(path.join(WEB_ROOT, "ui/showcase/.ladle"), /\.(css|ts|tsx)$/)
     ];
     expect(files.length, "应至少扫描到一个 Web 文件").toBeGreaterThan(0);
     const violations: ColorViolation[] = [];
@@ -158,7 +161,7 @@ describe("硬编码 chrome 色守卫（任务 5.1 / design D9）", () => {
     ).toEqual([]);
     // 登记例外放行。
     expect(
-      scanHardcodedColors({ file: "web/frontend/src/cordis/ui/generated-theme.css", source: ".x { color: #ff0000; }" })
+      scanHardcodedColors({ file: "web/ui/src/styles/generated-theme.css", source: ".x { color: #ff0000; }" })
     ).toEqual([]);
     // Bevy 品牌色检出。
     expect(

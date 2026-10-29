@@ -34,6 +34,13 @@ export type BevyModule = {
   /** 轮询匹配 (requestId, generation) 的结果帧（无则空数组）。 */
   poll_shot_capture?: (requestId: number, generation: number) => Uint8Array;
   /**
+   * 取消仍在 bridge slot 中、尚未路由的截图请求（`requestId` 匹配才生效）。
+   *
+   * 轮询超时/中止后调用：请求留在 slot 里会持续 pin 归属片场为 High。旧 WASM 可省略，
+   * 此时由渲染器侧排队超时兜底。
+   */
+  cancel_shot_capture?: (requestId: number) => void;
+  /**
    * 请求一次页面内模型历史缩略图
    * （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
    *
@@ -210,6 +217,19 @@ export type BevyRuntime = {
   generation(): number;
   /** 实际工作计数快照（JSON）：供 E2E/排障读取（D1 卡片/边块/容器块重建计数）。 */
   getWorkDiagnostics?(): Record<string, unknown>;
+  /** Read-only accepted scene geometry; never serialize its content into reports. */
+  acceptedScene?(): CanvasRenderScene | null;
+  /** Bounded low frequency diagnostics. Native uses asynchronous RPC. */
+  readSceneDiagnostics?(): Promise<import("./diagnostics-reader.js").WorkDiagnosticResult>;
+  rendererBackend?(): "native" | "wasm";
+  runtimeHealthSnapshot?(): Record<string,unknown> | null;
+  /**
+   * 最近提交并接受的渲染场景只读快照。
+   *
+   * LOD 采样用它把「高优先消费者」细分为选中 / 聚焦 / 编辑 / 声明缺失；
+   * 旧 fake 可省略，缺省时采样退回笼统的 `high-owner`。
+   */
+  lastScene?(): unknown;
   /**
    * 最近接受的 interaction generation；`setScene` 成功后更新，未接受任何场景时为 0
    * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，design D3）。
@@ -377,6 +397,12 @@ export type BevyRuntime = {
     /** 输出像素尺寸（由镜头画幅派生；缺省回退 16:9）。 */
     width?: number;
     height?: number;
+    /**
+     * 请求来源的稳定标签（诊断用）：`video-export` / `shot-image` / `shot-recording` /
+     * `model-editor`。渲染器把 pin 集合记进本地诊断，只有节点 id 时分辨不出是哪条业务流程
+     * 把根按在 High。
+     */
+    source?: string;
   }): Promise<{ rgba: Uint8Array; width: number; height: number } | null>;
   /** shot camera 运行时诊断快照（rig/preview/gizmo/capture 计数）。 */
   shotDiagnostics(): { rigs: number; previewImages: number; gizmoEntities: number; capturesInFlight: number; capturesQueued: number };

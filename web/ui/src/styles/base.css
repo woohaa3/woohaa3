@@ -1,0 +1,18 @@
+/* 兼容别名（change: unify-application-theme-tokens，design D3）：
+ * 迁移期仍读取 `--mc-*` 的组件拿到的是**只引用 canonical `--app-*`** 的 alias，
+ * 自身不含独立颜色 literal。迁移完成后移除。 */
+:root {
+	--mc-backdrop: var(--app-web-backdrop);
+	--mc-text: var(--app-web-text-primary);
+	--mc-text-muted: var(--app-web-text-muted);
+	--mc-panel: var(--app-web-panel);
+	--mc-border: var(--app-web-border);
+	--mc-border-strong: var(--app-web-border-strong);
+	--mc-accent: var(--app-interaction-accent);
+	--mc-font: "Noto Sans SC", "Noto Sans", system-ui, -apple-system, "Segoe UI",
+		sans-serif;
+	--app-font: var(--mc-font);
+}
+
+
+.app-theme-root { font-family: var(--app-font); color: var(--app-web-text-primary); }

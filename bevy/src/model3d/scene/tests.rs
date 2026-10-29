@@ -289,6 +289,7 @@ fn material_maps_to_pbr_subset() {
             double_sided: false,
             unlit: false,
             opacity: None,
+            base_color_texture: None,
         }],
     ));
     let spec = materials.get("armor").expect("material");
@@ -349,4 +350,53 @@ fn parent_transform_propagates_to_descendants() {
             .translation
             .abs_diff_eq(Vec3::new(-1.0, 2.0, 0.0), 1e-5)
     );
+}
+
+#[test]
+fn file_mesh_attributes_and_material_texture_parse_additively() {
+    let mesh: crate::protocol::ModelOp = serde_json::from_str(
+        r#"{"t":"mesh","id":"m","parent":null,"position":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1],"material":"glb-m0","color":null,"vertices":[[0,0,0],[1,0,0],[0,1,0]],"faces":[[0,1,2]],"normals":[[0,0,1],[0,0,1],[0,0,1]],"uvs":[[0,0],[1,0],[0,1]],"colors":[[1,0,0,1],[0,1,0,1],[0,0,1,1]]}"#,
+    )
+    .expect("file mesh");
+    match mesh {
+        crate::protocol::ModelOp::Mesh { normals, uvs, colors, .. } => {
+            assert_eq!(normals.map(|values| values.len()), Some(3));
+            assert_eq!(uvs.map(|values| values.len()), Some(3));
+            assert_eq!(colors.map(|values| values.len()), Some(3));
+        }
+        _ => panic!("expected mesh"),
+    }
+    // 旧脚本场景缺少新字段时仍按无属性/无纹理解析（内容身份不变）。
+    let legacy: crate::protocol::ModelOp = serde_json::from_str(
+        r##"{"t":"mesh","id":"m","parent":null,"position":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1],"material":null,"color":"#cccccc","vertices":[[0,0,0]],"faces":[[0,0,0]]}"##,
+    )
+    .expect("legacy mesh");
+    assert!(matches!(
+        legacy,
+        crate::protocol::ModelOp::Mesh { normals: None, uvs: None, colors: None, .. }
+    ));
+}
+
+#[test]
+fn file_material_texture_id_is_preserved_and_unresolved_texture_stays_plain() {
+    let materials = collect_materials(&snapshot(
+        true,
+        vec![ModelOp::Material {
+            id: "glb-m0".into(),
+            base_color: "#ffffff".into(),
+            roughness: 0.7,
+            metallic: 0.1,
+            emissive: "#000000".into(),
+            emissive_strength: 0.0,
+            alpha_mode: "opaque".into(),
+            double_sided: false,
+            unlit: false,
+            opacity: None,
+            base_color_texture: Some("glbtex:0123456789abcdef".into()),
+        }],
+    ));
+    let spec = materials.get("glb-m0").expect("material");
+    assert_eq!(spec.base_color_texture.as_deref(), Some("glbtex:0123456789abcdef"));
+    // 纹理尚未上传时材质仍可构建（纯色回退），不阻塞节点其余部分。
+    assert!(spec.to_material().base_color_texture.is_none());
 }

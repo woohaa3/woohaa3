@@ -17,10 +17,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore }
 import { type DialogHostSnapshot } from "./host-store.js";
 import { type DialogRendererProps } from "./renderer-registry.js";
 import { captureFocus, focusInitial, restoreFocus } from "./focus.js";
-import { DialogSurfaceRoot } from "../../../shared/ui/DialogSurface.js";
+import { DialogSurfaceRoot } from "@woohaa3/ui/primitives";
 import type { DialogInstance } from "./types.js";
 import type { DialogsService } from "../../contracts.js";
-import { Dialog } from "./Dialog.js";
+import { Dialog } from "@woohaa3/ui/dialogs";
 import { ContributionBoundary } from "../../contribution-boundary.js";
 
 /** 订阅 Host 快照；未变更时返回同一引用（service 保证）。 */

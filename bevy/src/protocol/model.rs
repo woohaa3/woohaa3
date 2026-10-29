@@ -378,6 +378,11 @@ pub(crate) enum ModelOp {
         /// blend 模式下的静态透明度（0..=1）；缺失按 [`DEFAULT_BLEND_OPACITY`]。
         #[serde(default)]
         opacity: Option<f32>,
+        /// GLB 文件模型的内嵌 baseColor 纹理 id（change: 2026-10-28-support-glb-model-nodes）。
+        ///
+        /// 纹理本身经独立的模型纹理通道上传并按 id 解析；缺失时保持纯色。
+        #[serde(default, rename = "baseColorTexture")]
+        base_color_texture: Option<String>,
     },
     Group {
         id: String,
@@ -436,6 +441,13 @@ pub(crate) enum ModelOp {
         material: Option<String>,
         vertices: Vec<[f32; 3]>,
         faces: Vec<[u32; 3]>,
+        /// 可选顶点属性（GLB 文件模型）；长度必须与 `vertices` 一致，否则整条 op 被拒绝。
+        #[serde(default)]
+        normals: Option<Vec<[f32; 3]>>,
+        #[serde(default)]
+        uvs: Option<Vec<[f32; 2]>>,
+        #[serde(default)]
+        colors: Option<Vec<[f32; 4]>>,
     },
     /// V2 原生球体 primitive（quality 档由运行时固定）。
     Sphere {

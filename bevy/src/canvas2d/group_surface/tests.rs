@@ -9,17 +9,35 @@ fn node() -> crate::protocol::GraphNode {
     }))
     .unwrap()
 }
+fn rebuild_index(
+    mut index: ResMut<crate::app::NodeIndex>,
+    scene: Res<CurrentScene>,
+) {
+    index.rebuild(&scene.0);
+}
+
 fn app() -> App {
     let mut app = App::new();
     app.init_resource::<Assets<Mesh>>()
         .init_resource::<Assets<StandardMaterial>>()
         .init_resource::<ThemeResource>()
         .init_resource::<FrameFlags>()
+        .init_resource::<crate::app::NodeIndex>()
+        .init_resource::<crate::canvas_ecs::CanvasProjectionState>()
         .insert_resource(CurrentScene(crate::protocol::Scene {
             nodes: vec![node()],
             ..default()
         }))
-        .add_systems(Update, sync);
+        .add_systems(
+            Update,
+            (
+                rebuild_index,
+                crate::canvas_ecs::project_canvas_nodes,
+                bevy::ecs::schedule::ApplyDeferred,
+                sync,
+            )
+                .chain(),
+        );
     app.world_mut().resource_mut::<FrameFlags>().changed = true;
     app
 }

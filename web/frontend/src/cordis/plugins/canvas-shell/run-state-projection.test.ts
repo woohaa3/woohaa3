@@ -46,8 +46,12 @@ describe("applyRunStateProjection", () => {
   it("explicit film feedback controls decoration even when compatibility busy remains true", () => {
     const nodes = [node("film", { type: "model", busy: true, compositeAsset: { x: 0, y: 0, width: 100, height: 100 } })];
     applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true, aggregateRunning: true,
-      filmSetFeedback: { operationKey: "attempt", phase: "verifying", source: "conversion", labelCode: "verifying" } })], records: [] });
-    expect(nodes[0].aggregateRun).toMatchObject({ active: true, filmSet: { phase: "verifying" } });
+      filmSetFeedback: { operationKey: "attempt", phase: "running", source: "conversion", labelCode: "generating" } })], records: [] });
+    expect(nodes[0].aggregateRun).toMatchObject({ active: true, filmSet: { phase: "running" } });
+    // failed 是静态终态：保留失败摘要，但不再显示运行中遮罩。
+    applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true, aggregateRunning: true,
+      filmSetFeedback: { operationKey: "attempt", phase: "failed", source: "conversion", labelCode: "failed" } })], records: [] });
+    expect(nodes[0].aggregateRun).toMatchObject({ active: false, filmSet: { phase: "failed" } });
     applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true, aggregateRunning: true, filmSetFeedback: null })], records: [] });
     expect(nodes[0].aggregateRun?.active).toBe(false);
     expect(nodes[0].busy).toBe(true);

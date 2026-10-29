@@ -14,11 +14,11 @@
 import { useEffect, useState } from "react";
 import type { Context } from "@deepseek-ai/cordis";
 import type { DialogRegistration } from "../../contracts.js";
-import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "../../services/dialogs/Dialog.js";
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
 import { objectPayload } from "../../services/dialogs/registry.js";
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import type { DialogDefinition } from "../../services/dialogs/types.js";
-import { Button } from "../../../shared/ui/index.js";
+import { Button } from "@woohaa3/ui";
 import { TaskTraceBody } from "../../../shared/task-trace/task-trace-body.js";
 import type { TaskMonitorRemote } from "../../../shared/task-trace/remote.js";
 import type { TaskExecutionDetail } from "@woohaa3/contracts";

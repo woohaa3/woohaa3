@@ -84,7 +84,7 @@ describe("group ledger recovery", () => {
     const adapter = fakeAdapter(controls);
     adapter.capabilities = () => ({ discussion: true, targets: ["canvas-group"], tools: true, models: "remote" });
     const store = createSqliteAgentConversationStore({ path: path.join(tempDir(), "group.sqlite") });
-    const settle = vi.fn(async (input) => ({ status: "unknown" as const, receipt: { kind: "canvas-group", actions: input.actions, outcomes: [{ runId: "child", state: "running" }] } }));
+    const settle = vi.fn(async (input) => ({ status: "failed" as const, receipt: { kind: "canvas-group", actions: input.actions, outcomes: [{ runId: "child", state: "running" }] } }));
     const cancel = vi.fn();
     const service = createAgentConversationService({ store, registry: fakeRegistry(adapter), groupScopeEpoch: () => 7, groupEffects: { settle, cancel } });
     const created = service.createConversation({ owner: "owner", canvasId: "canvas", nodeId: "root", adapterId: "fake" });
@@ -100,10 +100,10 @@ describe("group ledger recovery", () => {
     await service.reconcileUnknown();
     expect(controls.seen).toEqual([]); expect(controls.queries).toEqual([]);
     expect(settle).toHaveBeenCalledWith(expect.objectContaining({ recovery: true }));
-    expect(service.queryTurn({ owner: "owner", requestId: "request" })).toMatchObject({ ok: true, turn: { status: "unknown", receipt: { outcomes: [{ runId: "child", state: "running" }] } } });
+    expect(service.queryTurn({ owner: "owner", requestId: "request" })).toMatchObject({ ok: true, turn: { status: "failed", receipt: { outcomes: [{ runId: "child", state: "running" }] } } });
     service.cancelTurn({ owner: "owner", requestId: "request" });
     expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ owner: "owner", actions: [{ canvasId: "canvas", nodeId: "n", runId: "child" }] }));
-    expect(service.queryTurn({ owner: "owner", requestId: "request" })).toMatchObject({ ok: true, turn: { status: "cancelled" } });
+    expect(service.queryTurn({ owner: "owner", requestId: "request" })).toMatchObject({ ok: true, turn: { status: "failed" } });
   });
 });
 
@@ -495,7 +495,7 @@ describe("agent conversation service", () => {
     expect(foreign.error.code).toBe("not-found");
   });
 
-  it("重启把未结算回合标记 unknown 并核对 adapter，无回执时结算为 failed，不自动重推理", async () => {
+  it("重启读取未结算回合并核对 adapter，无回执时结算为 failed，不自动重推理", async () => {
     const { controls, service } = setup();
     const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
     if (!created.ok) return;
@@ -505,14 +505,14 @@ describe("agent conversation service", () => {
 
     const marked = await service.reconcileUnknown();
     expect(marked).toHaveLength(1);
-    expect(marked[0]!.status).toBe("unknown");
+    expect(marked[0]!.status).toBe("queued");
     expect(controls.queries).toHaveLength(1);
     expect(controls.seen).toHaveLength(0); // 未触发新的推理
     const after = service.queryTurn({ owner: "user-a", requestId: "req-1" });
     if (!after.ok) return;
-    // 重启后 adapter 无法给出回执：不能永久留在 unknown（界面上没有继续/停止出口），按失败结算。
+    // 重启后 adapter 无法给出回执：不能永久留在活动态，按失败结算。
     expect(after.turn.status).toBe("failed");
-    expect(after.turn.error).toMatchObject({ code: "turn-unreconciled" });
+    expect(after.turn.error).toMatchObject({ code: "result-unconfirmed" });
   });
 
   it("catalog 投影真实授权/能力，不静默替换模型", async () => {
@@ -666,22 +666,22 @@ describe("agent conversation · 节点会话复用与清空（design D8）", () 
 });
 
 
-it("无权威回执的目标回复保持 unknown，仍可清空关联且不删除未核对回合；查询不重发推理", async () => {
+it("无权威回执的目标回复结算 failed，仍可清空关联且不删除历史；查询不重发推理", async () => {
   const { service, controls } = setup({ outcomes: [{ status: "succeeded", assistantText: "我已修改" }] });
   const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1", nodeId: "node-1" });
   if (!created.ok) throw new Error("create failed");
   const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "no-proof", entry: entry({ action: "generate", nodeId: "node-1", mode: "model3d" }) });
   if (!accepted.ok) throw new Error("accept failed");
   await service.dispatchTurn(accepted.turn.turnId); await service.whenSettled(accepted.turn.turnId);
-  expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "unknown", error: { code: "write-unconfirmed" } } });
+  expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "failed", error: { code: "write-unconfirmed" } } });
   // change: 2026-10-22-remove-agent-execution-limits，任务 3.2：清空只解除目标关联，
-  // 不再被活动/unknown 回合阻止，也不删除未核对回合（历史与回执仍可查）。
+  // 不再被活动回合阻止，也不删除历史（回执仍可查）。
   expect(service.clearContext({ owner: "user-a", canvasId: "canvas-1", nodeId: "node-1" })).toMatchObject({ ok: true, cleared: 1 });
-  expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "unknown" } });
+  expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "failed" } });
   expect(controls.seen).toHaveLength(1);
-  // 没有在途控制器时，单目标 unknown 也可由用户停止结算（不再是组回合专属出口）。
+  // failed 是终态：用户停止不能再把它改写成 cancelled。
   service.cancelTurn({ owner: "user-a", requestId: "no-proof" });
-  expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "cancelled" } });
+  expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "failed" } });
 });
 
 
@@ -761,7 +761,6 @@ it("discovers every group turn from the owner ledger across pages, archived conv
     // Archiving the conversation must not hide its outstanding execution.
     store.clearTarget({ owner: "owner", canvasId: "canvas", nodeId });
   }
-  store.markUnsettledUnknown("2026-10-25T00:00:00Z");
   const requests: string[] = []; let cursor: string | undefined;
   do {
     const page = service.listGroupExecutions({ owner: "owner", canvasId: "canvas", nodeId: "manual", limit: 2, cursor });

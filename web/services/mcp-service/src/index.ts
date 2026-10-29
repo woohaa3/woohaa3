@@ -9,3 +9,4 @@ export * from "./model-mcp/mcp-http.js";
 export * from "./agent-authoring/index.js";
 export * from "./downstream/canvas-client.js";
 export * from "./downstream/agent-canvas-client.js";
+export * from "./downstream/skill-step-client.js";

@@ -311,6 +311,11 @@ describe("前端协议边界审计", () => {
       "cordis/plugins/canvas-runtime/composite-asset-media-session.ts -> media-preview",
       // canvas-runtime 装配契约复用聚焦目标类型（type-only；从 host 抽出）。
       "cordis/plugins/canvas-runtime/canvas-runtime-options.ts -> canvas-shell",
+      // image-viewer ↔ canvas-shell / canvas-runtime：宿主默认图片聚焦查看器复用共享滚轮分类、
+      // 媒体栅格化与图片加载失败分类，与 video-editor 走同一条共享路径
+      // （change: default-image-focus-viewer）。
+      "cordis/plugins/image-viewer/image-viewer-workspace.tsx -> canvas-shell",
+      "cordis/plugins/image-viewer/session.ts -> canvas-runtime",
       // video-editor ↔ canvas-shell / canvas-runtime / video-capture / media-preview：视频聚焦工作区
       // 复用共享二维媒体栅格化、滚轮分类、聚焦布局类型与共享截帧主体/受控媒体 URL
       // （change: 2026-10-10-add-video-node-focus-workspace；

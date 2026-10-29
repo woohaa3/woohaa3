@@ -9,7 +9,7 @@
  * 投影逻辑在纯模块 `agent-mcp.ts`；本组件只负责渲染与复制交互。
  */
 import { useState } from "react";
-import { Button } from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
 import type { McpBuiltinDiscoveryView } from "@woohaa3/contracts";
 import { resolveAgentMcpEntry } from "./agent-mcp.js";
 

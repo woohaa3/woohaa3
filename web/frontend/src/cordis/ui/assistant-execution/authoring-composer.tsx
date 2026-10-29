@@ -1,13 +1,12 @@
 import { AssistantTextInput } from "./text-input.js";
 /** 宿主统一的 3D 创作入口。草稿属于当前页面，会话事实仍由 Agent 服务持有。 */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { TextInput } from "../../../shared/ui/FormControls.js";
-import { AssistantComposer } from "./composer.js";
+import { AssistantComposer } from "@woohaa3/ui/assistant";
 import {
   AssistantModelSelector,
   AssistantConnectionSelector,
   ASSISTANT_SETUP_HINT,
-} from "./model-selector.js";
+} from "@woohaa3/ui/assistant";
 import { useAssistantExecutionActions } from "./status.js";
 import { useAssistantDeliveryInput } from "./delivery-input.js";
 import {
@@ -21,8 +20,8 @@ import {
 } from "../../services/assistant-execution/selection.js";
 import { AuthoringGenerateLayout } from "../../plugins/task-execution/authoring-generate-layout.js";
 import { AuthoringMcpButton } from "../../plugins/task-execution/model-parameter-panel.js";
-import { Button } from "../../../shared/ui/Button.js";
-import { SendIcon } from "../../../shared/ui/icons.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { SendIcon } from "@woohaa3/ui/icons";
 import { resolveAgentDetailAction } from "../../plugins/task-execution/execution-panel/agent-detail-action.js";
 import type { AgentConversationSnapshotView } from "../../contract/agent-conversation.js";
 import type { AuthoringGenerationProps } from "../../contract/authoring.js";
@@ -246,15 +245,12 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     Boolean(
       turn && ["queued", "running", "committing"].includes(turn.turn.status),
     );
-  // 待核对（unknown）不是执行中：宿主重启后没有回执的回合不能继续提交，但主操作不得
-  // 谎称仍在执行；用户从详情里停止该回合后即可继续。
-  const needsReview = turn?.turn.status === "unknown";
+  // 失败是终态：停止后即可继续提交；不再保留独立的待核对锁定。
   const locked =
     busy ||
     Boolean(delivery) ||
     Boolean(selection?.blockedReason) ||
-    (props.mode !== "text" && Boolean(inProgress)) ||
-    (props.mode !== "text" && Boolean(needsReview));
+    (props.mode !== "text" && Boolean(inProgress));
   const noConnection = !service || !connectionId || !selectedConnection;
   const emptyDirectory =
     !connections.length && !selection?.loading && !selection?.error;
@@ -550,97 +546,83 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
         }
         model={
           delivery || !noConnection ? (
-            delivery || modelOptions.length > 0 ? (
-              <AssistantModelSelector
-                label="模型"
-                model={model}
-                placeholder={delivery ? "本次模型" : undefined}
-                keepOpenOnModelSelect
-                options={[
-                  {
-                    value: "",
-                    label: toolDefault ? "跟随工具设置" : "选择模型",
-                  },
-                  ...(invalidModel
-                    ? [
-                        {
-                          value: model,
-                          label: delivery ? model : `${model}（已不可用）`,
-                          disabled: true,
-                        },
-                      ]
-                    : []),
-                  ...modelOptions.map((entry) => ({
-                    value: entry.id,
-                    label: entry.label,
-                  })),
-                ]}
-                open={openSelector === "model"}
-                onOpenChange={(open) => setOpenSelector(open ? "model" : null)}
-                disabled={locked}
-                onChange={(value) => {
-                  setModels((current) => ({ ...current, [modelKey]: value }));
-                  setEfforts((current) => ({
-                    ...current,
-                    [`${modelKey}:${value}`]: "",
-                  }));
-                  remember(value);
-                }}
-                variant={
-                  supportedEfforts.length || invalidEffort
-                    ? {
-                        value: effort,
-                        options: [
-                          { value: "", label: "默认" },
-                          ...(invalidEffort
-                            ? [
-                                {
-                                  value: effort,
-                                  label: delivery
-                                    ? effort
-                                    : `${effort}（已不可用）`,
-                                  disabled: true,
-                                },
-                              ]
-                            : []),
-                          ...supportedEfforts.map((value) => ({
-                            value,
-                            label: value,
-                          })),
-                        ],
-                        onChange: (value) => {
-                          setEfforts((current) => ({
-                            ...current,
-                            [effortKey]: value as AgentReasoningEffort | "",
-                          }));
-                          remember(model, value as AgentReasoningEffort | "");
-                        },
-                      }
-                    : undefined
-                }
-              />
-            ) : (
-              <TextInput
-                aria-label="模型 ID"
-                className="authoring-generate__model-id"
-                placeholder={
-                  catalog.key === modelKey && catalog.loading
-                    ? "正在读取模型…"
-                    : toolDefault
-                      ? "留空跟随工具设置"
-                      : "填写模型 ID"
-                }
-                value={model}
-                disabled={locked}
-                onChange={(event) => {
-                  setModels((current) => ({
-                    ...current,
-                    [modelKey]: event.target.value,
-                  }));
-                  remember(event.target.value);
-                }}
-              />
-            )
+            <AssistantModelSelector
+              label="模型"
+              model={model}
+              placeholder={delivery ? "本次模型" : undefined}
+              keepOpenOnModelSelect
+              options={[
+                {
+                  value: "",
+                  label: toolDefault
+                    ? "跟随工具设置"
+                    : modelOptions.length
+                      ? "选择模型"
+                      : catalog.key === modelKey && catalog.loading
+                        ? "正在读取模型…"
+                        : modelError
+                          ? "模型读取失败"
+                          : "暂无可用模型",
+                  disabled: !toolDefault && !modelOptions.length,
+                },
+                ...(invalidModel
+                  ? [
+                      {
+                        value: model,
+                        label: delivery ? model : `${model}（已不可用）`,
+                        disabled: true,
+                      },
+                    ]
+                  : []),
+                ...modelOptions.map((entry) => ({
+                  value: entry.id,
+                  label: entry.label,
+                })),
+              ]}
+              open={openSelector === "model"}
+              onOpenChange={(open) => setOpenSelector(open ? "model" : null)}
+              disabled={locked}
+              onChange={(value) => {
+                setModels((current) => ({ ...current, [modelKey]: value }));
+                setEfforts((current) => ({
+                  ...current,
+                  [`${modelKey}:${value}`]: "",
+                }));
+                remember(value);
+              }}
+              variant={
+                supportedEfforts.length || invalidEffort
+                  ? {
+                      value: effort,
+                      options: [
+                        { value: "", label: "默认" },
+                        ...(invalidEffort
+                          ? [
+                              {
+                                value: effort,
+                                label: delivery
+                                  ? effort
+                                  : `${effort}（已不可用）`,
+                                disabled: true,
+                              },
+                            ]
+                          : []),
+                        ...supportedEfforts.map((value) => ({
+                          value,
+                          label: value,
+                        })),
+                      ],
+                      onChange: (value) => {
+                        setEfforts((current) => ({
+                          ...current,
+                          [effortKey]: value as AgentReasoningEffort | "",
+                        }));
+                        remember(model, value as AgentReasoningEffort | "");
+                      },
+                    }
+                  : undefined
+              }
+            />
           ) : null
         }
         detail={
@@ -682,16 +664,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                       停止此回合
                     </Button>
                   ) : null}
-                  {row.status === "unknown" ? (
-                    <Button
-                      size="sm"
-                      tone="ghost"
-                      disabled={deliveryActions.busy}
-                      onClick={() => void props.groupRuns?.refresh()}
-                    >
-                      核对结果
-                    </Button>
-                  ) : null}
                 </span>
               ))}
             </>
@@ -701,11 +673,9 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                 <span key={row.requestId} className="authoring-generate__run">
                   <span>
                     文本回合 {index + 1} ·{" "}
-                    {row.turn.status === "unknown"
-                      ? "待核对"
-                      : row.turn.status === "committing"
-                        ? "正在保存"
-                        : "生成中"}
+                    {row.turn.status === "committing"
+                      ? "正在保存"
+                      : "生成中"}
                   </span>
                   <Button
                     size="sm"
@@ -753,7 +723,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                               );
                           }}
                         >
-                          核对未确认的文本回合
+                          查询提交结果
                         </Button>
                       )}
                     </span>
@@ -767,16 +737,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                   onClick={() => {
                     if (port) void controller.query(port);
                   }}
-                >
-                  查询结果
-                </Button>
-              ) : null}
-              {delivery?.status === "unknown" ? (
-                <Button
-                  size="sm"
-                  tone="ghost"
-                  disabled={deliveryActions.busy}
-                  onClick={() => void deliveryActions.perform(delivery.query)}
                 >
                   查询结果
                 </Button>
@@ -848,11 +808,9 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
             >
               {busy
                 ? "正在提交"
-                : needsReview
-                  ? "待核对"
-                  : inProgress && props.mode !== "text"
-                    ? "执行中"
-                    : target.action}
+                : inProgress && props.mode !== "text"
+                  ? "执行中"
+                  : target.action}
             </Button>
           )
         }

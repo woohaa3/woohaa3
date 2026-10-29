@@ -636,6 +636,9 @@ fn oversized_single_allocation_fails_explicitly_without_sync_fallback() {
         scale: [1.0; 3],
         vertices: vec![[0.0, 0.0, 0.0]; MAX_WORK_BYTES / 12 + 16],
         faces: vec![[0, 1, 2]],
+        normals: None,
+        uvs: None,
+        colors: None,
         color: None,
         material: None,
     });

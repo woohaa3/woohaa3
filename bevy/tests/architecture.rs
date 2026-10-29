@@ -18,6 +18,10 @@ fn read(relative: &str) -> String {
         .unwrap_or_else(|error| panic!("无法读取 {relative}: {error}"))
 }
 
+fn wasm_facade_source() -> String {
+    [read("lib.rs"), read("texture_upload.rs")].join("\n")
+}
+
 /// 去掉行注释与块注释，避免解释性提及触发误报。
 fn strip_comments(source: &str) -> String {
     let without_block = {
@@ -146,8 +150,8 @@ fn lib_is_facade_without_ecs_definitions() {
 }
 
 #[test]
-fn wasm_exports_are_exactly_thirty_two() {
-    let source = read("lib.rs");
+fn wasm_exports_are_exactly_thirty_four() {
+    let source = wasm_facade_source();
     // 只统计真正标记函数的属性行（doc 里的行内引用带反引号，不计入）。
     // 5 个基础导出 + request_shot_capture/poll_shot_capture（change:
     // 2026-10-07-remove-residual-compatibility，替换旧 request_capture/poll_capture）
@@ -168,6 +172,7 @@ fn wasm_exports_are_exactly_thirty_two() {
     // + set_observer / observer_capability（聚焦朝向增量，旧 WASM 可缺省回退 full）。
     // + declare_model_resource / set_model_payload_leases
     //   （change: 2026-10-23-scale-canvas-media-residency —— descriptor 声明与 payload lease 分离）。
+    // + request_history_thumbnail / poll_history_thumbnail（现有历史缩略图请求与回读）。
     // 导出属性有两种写法，都是 wasm-bindgen 导出，必须一起计数：
     // - `#[wasm_bindgen]`：仅 wasm 编译的条目；
     // - `#[cfg_attr(feature = "wasm", wasm_bindgen)]`：wasm 与 native 共享实现、只在 wasm
@@ -180,7 +185,7 @@ fn wasm_exports_are_exactly_thirty_two() {
                 || trimmed == r#"#[cfg_attr(feature = "wasm", wasm_bindgen)]"#
         })
         .count();
-    assert_eq!(count, 32, "WASM 导出数量必须固定为 32，实际 {count}");
+    assert_eq!(count, 34, "WASM 导出数量必须固定为 34，实际 {count}");
 }
 
 #[test]
@@ -189,7 +194,7 @@ fn wasm_facade_exports_have_stable_types_and_build_template_declarations() {
     let types = fs::read_to_string(root.join("web/frontend/src/bevy-wasm/woohaa_bevy_canvas.d.ts"))
         .unwrap();
     let template = fs::read_to_string(root.join("scripts/build-bevy-wasm.mjs")).unwrap();
-    let source = read("lib.rs");
+    let source = wasm_facade_source();
     let mut exported = false;
     for line in source.lines() {
         if line.trim() == "#[wasm_bindgen]"
@@ -458,7 +463,9 @@ fn facade_exports_and_renderer_entry_points_remain_stable() {
                 "mod init;",
                 "mod render;",
                 "mod textures;",
-                "pub(crate) use render::sync_scene;",
+                "pub(crate) use render::{",
+                "produce_card_geometry,",
+                "pub(crate) use labels::{sync_canvas_labels, LabelRequests};",
                 "pub(crate) use textures::sync_textures;",
             ],
         ),

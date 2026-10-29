@@ -147,7 +147,7 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
       const found = await readRecord(owner, connectionId);
       if (!found) return { ok: false, error: { code: "not-found", message: "连接不存在" } };
       if (found.record.runtimeVersion === runtimeVersion) return { ok: true, value: { changed: false } };
-      if (!beforeMigration()) return { ok: false, error: { code: "version-conflict", message: "原连接仍有活动或待核对回合，升级暂缓" } };
+      if (!beforeMigration()) return { ok: false, error: { code: "version-conflict", message: "原连接仍有活动回合，升级暂缓" } };
       const next: ConnectionMetadataRecord = { ...found.record, runtimeVersion, runCategory: "agent-sdk", configRevision: found.record.configRevision + 1, native: undefined, nativeBindings: undefined, runtimeProbe: undefined, lastStatus: undefined, updatedAt: now() };
       const saved = await documents.batch([
         { op: "set", key: `runtime-migrations/${connectionId}/${found.record.configRevision}`, value: toDocumentValue(found.record), expectedRevision: null },

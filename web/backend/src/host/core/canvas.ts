@@ -1,3 +1,7 @@
+import path from "node:path";
+import {ScenePackageService} from "../../scene-package/service.js";
+import {createScenePackageHandler} from "../../scene-package/http.js";
+import {readStorePath} from "../../composition/config.js";
 import { mergeCanvasContentRuntimes } from "../../extensions/canvas-content.js";
 /**
  * 核心层 · canvas：画布、Yjs 同步与画布侧 MCP 服务。
@@ -14,6 +18,7 @@ import {
 } from "@woohaa3/contracts";
 import { createCanvasService } from "@woohaa3/canvas-service";
 import type { CanvasMediaAssetSyncPort } from "@woohaa3/canvas-service";
+import { currentCanvasGroupScope } from "@woohaa3/canvas-service";
 import { createCanvasMediaBackfill } from "./canvas-media-backfill.js";
 import { createCanvasStorageOwnership, resolveCanvasOwnershipPath } from "./canvas-storage-ownership.js";
 import { createHostRecordingService } from "../../recording-executor/assembly.js";
@@ -195,6 +200,43 @@ export const canvasPlugin: HostPlugin<{
     };
 
     const canvas = await createCanvasService({
+      // Skill 媒体续接（change: 2026-10-28-add-agent-skill-media-regeneration）：
+      // begin 前用 Application ledger 复核当前 attempt；任务终态只回写该 attempt 的历史。
+      // application 在本插件之后装载，因此两处都在调用时懒取。
+      skillAttempts: () => {
+        const media = ctx.get("application")?.service.skillMedia();
+        if (!media) return undefined;
+        return {
+          assertCurrent: (input: {
+            owner?: string;
+            canvasId: string;
+            nodeId: string;
+            runId: string;
+            skill: import("@woohaa3/contracts").SkillMediaRunRef;
+          }) =>
+            media.assertCurrent({
+              owner: input.owner ?? currentCanvasGroupScope()?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "",
+              canvasId: input.canvasId,
+              nodeId: input.nodeId,
+              runId: input.runId,
+              skill: input.skill
+            })
+        };
+      },
+      onRunSettled: (record: import("@woohaa3/canvas-service").PptaskExecutionRecord) => {
+        const media = ctx.get("application")?.service.skillMedia();
+        if (!media) return;
+        media.settleFromRun({
+          canvasId: record.canvasId,
+          nodeId: record.nodeId,
+          runId: record.runId,
+          jobId: record.jobId,
+          state: record.status,
+          ...(record.output?.mediaKind ? { mediaKind: record.output.mediaKind } : {}),
+          ...(record.error ? { error: record.error } : {}),
+          terminalAt: record.terminalAt
+        });
+      },
       assistantTextRuns: {
         run: (input: Parameters<import("@woohaa3/contracts").AssistantTextRunGateway["run"]>[0]) => ctx.get("application")!.service.assistantTextRuns().run(input),
         status: (input: Parameters<import("@woohaa3/contracts").AssistantTextRunGateway["status"]>[0]) => ctx.get("application")!.service.assistantTextRuns().status(input),
@@ -278,7 +320,11 @@ export const canvasPlugin: HostPlugin<{
       if (!service) throw new Error("画布存储未启用");
       return service.getCanvas(canvasId);
     });
-    ctx.effect(() => () => canvas.close());
+    const scenePackages = canvas.scenePackages && !ctx.access.runtime.enabled
+      ? new ScenePackageService({store:canvas.scenePackages,directory:path.join(path.dirname(readStorePath(env)),"scene-packages"),importMedia:input=>ctx.media.port().importBytes(input),verifyMedia:async(key,expected,canvasId)=>{const result=await ctx.media.port().verify(key,expected,{canvasId});return result.exists&&result.matches;}}) : null;
+    const packageHandler=createScenePackageHandler(scenePackages);
+    ctx.effect(()=>ctx.gateway.route(ROUTE_ORDER.canvas-1,packageHandler));
+    ctx.effect(() => async () => {await scenePackages?.close();await canvas.close();});
     ctx.provide("canvas", canvas);
     ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.canvas, (req, res) => canvas.handle(req, res)));
     ctx.effect(() => ctx.gateway.readiness(READINESS_ORDER.canvas, () => canvas.readiness()));

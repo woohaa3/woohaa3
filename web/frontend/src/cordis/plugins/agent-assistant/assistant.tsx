@@ -2,11 +2,11 @@ import { Component, lazy, Suspense, useEffect, useRef, useState, useSyncExternal
 import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";
 import { useSlot } from "../../host.js";
 import { useOptionalService } from "../../react.js";
-import { Button, SettingsFeedback, ServiceLogo } from "../../../shared/ui/index.js";
-import { BackIcon, CloseIcon, SparklesIcon } from "../../../shared/ui/icons.js";
+import { Button, SettingsFeedback, ServiceLogo } from "@woohaa3/ui";
+import { BackIcon, CloseIcon, SparklesIcon } from "@woohaa3/ui/icons";
 import type { BackendSettingsStore } from "../settings/backend-settings-store.js";
-import { UiPortalScope } from "../../../shared/ui/UiProvider.js";
-import { Dialog, DialogHeader, DialogTitle, DialogBody } from "../../services/dialogs/Dialog.js";
+import { UiPortalScope } from "@woohaa3/ui/primitives";
+import { Dialog, DialogHeader, DialogTitle, DialogBody } from "@woohaa3/ui/dialogs";
 import { McpConnectionPanel, type McpPanelSnapshot } from "./mcp-connection-panel.js";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import { providerConfigGroups } from "../settings/plugin-groups.js";
@@ -19,8 +19,8 @@ type Page = "connections" | "add" | "configuration";
 type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string; section?: "generation-history" | "diagnostics" };
 const kinds = [
   { id: "installed", label: "我有本地 agent", title: "连接本地 agent", services: [{ id: "chatgpt", name: "本地 ChatGPT" }, { id: "opencode", name: "本地 OpenCode" }, { id: "codebuddy", name: "本地 CodeBuddy" }], detail: "使用运行本应用的电脑上已安装的 agent。" },
-  { id: "api-key", label: "按协议接入 LLM", title: "按协议接入 LLM", services: [{ id: "responses-protocol", name: "Responses" }, { id: "messages-protocol", name: "Messages" }, { id: "chat-protocol", name: "Chat Completions" }, { id: "gemini-protocol", name: "Gemini" }], detail: "选择接口协议，填写服务地址与 API Key，接入兼容的 LLM 服务。" },
-  { id: "login", label: "账号授权", title: "连接 ChatGPT", services: [{ id: "chatgpt", name: "ChatGPT" }], detail: "使用已有的 ChatGPT 账号登录并授权。" },
+  { id: "login", label: "我有 ChatGPT 账号", title: "连接 ChatGPT", services: [{ id: "chatgpt", name: "ChatGPT" }], detail: "使用已有的 ChatGPT 账号登录并授权。" },
+  { id: "api-key", label: "我有 API Key", title: "连接自定义兼容服务", services: [], detail: "填写兼容服务的协议、地址和 API Key。" },
 ] as const;
 const GenerationProviders = lazy(() => import("../settings/provider-settings-cards.js").then(module => ({ default: module.ProviderSettingsCards })));
 
@@ -344,7 +344,7 @@ function ServiceSources({ service, connections, contributions, payload, settings
         {source?.managedByAdministrator ? <p>此共享来源由管理员管理。</p> : provider && settingsStore ? <Suspense fallback={<p>正在读取配置…</p>}><GenerationProviders store={settingsStore} compact providerId={provider} onSaved={() => { onSaved(); back(); }} /></Suspense> : Contribution && binding ? <Contribution connectionId={binding.consumerId} onSaved={() => { onSaved(); back(); }} /> : <p>当前来源未提供配置适配器，请启用对应扩展。</p>}
       </UiPortalScope></div>;
     })}
-    {confirmation ? <div className="provider-connection__confirmation"><p>{confirmation.action === "protocol" ? "确认新增此协议入口并共用当前认证？请确认该地址属于同一受信任服务。手填模型只开放讨论，不授予目标工具权限。" : confirmation.action === "enabled" ? `确认${confirmation.enabled ? "启用" : "停用"}整个来源？将影响该来源的全部消费绑定和后续调用；已提交回执仍保留。` : confirmation.action === "merge" ? "确认使用保留来源的认证重绑消费者？原来源和历史保留；活动或待核对执行会阻止合并。" : confirmation.action === "assistant" ? "确认调整站点共享讨论用途？此操作影响已获站点使用权限的用户；不会授予作品写入或工具权限。" : "确认让此 Provider 使用当前来源？不会复制 Key，也不会发送生成请求。"}</p><Button size="sm" disabled={busy} onClick={() => setConfirmation(null)}>取消</Button><Button size="sm" disabled={busy} onClick={() => void confirmChange()}>确认</Button></div> : null}
+    {confirmation ? <div className="provider-connection__confirmation"><p>{confirmation.action === "protocol" ? "确认新增此协议入口并共用当前认证？请确认该地址属于同一受信任服务。手填模型只开放讨论，不授予目标工具权限。" : confirmation.action === "enabled" ? `确认${confirmation.enabled ? "启用" : "停用"}整个来源？将影响该来源的全部消费绑定和后续调用；已提交回执仍保留。` : confirmation.action === "merge" ? "确认使用保留来源的认证重绑消费者？原来源和历史保留；执行中的回合会阻止合并。" : confirmation.action === "assistant" ? "确认调整站点共享讨论用途？此操作影响已获站点使用权限的用户；不会授予作品写入或工具权限。" : "确认让此 Provider 使用当前来源？不会复制 Key，也不会发送生成请求。"}</p><Button size="sm" disabled={busy} onClick={() => setConfirmation(null)}>取消</Button><Button size="sm" disabled={busy} onClick={() => void confirmChange()}>确认</Button></div> : null}
     {selectedProvider && settings?.status === "unauthorized" ? <p>此共享来源由管理员管理。</p> : null}
     </AssistantDrawer>
   </>;

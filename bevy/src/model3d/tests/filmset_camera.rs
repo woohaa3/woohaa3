@@ -6,8 +6,9 @@
 //! 网格/材质资源有界复用，不创建真实相机或 render pass。
 
 use super::{reference_for, resource_table, run_sync, scene_with, world_with_resources};
+use crate::canvas_ecs::components::FilmSetCameraMarker;
 use crate::model3d::filmset_camera::{
-    FilmSetCameraAssets, FilmSetCameraRoot, FilmSetCameraVisual, sync,
+    FilmSetCameraAssets, FilmSetCameraRoot, sync,
 };
 use crate::motion::CameraState;
 use crate::protocol::{
@@ -117,7 +118,6 @@ impl Harness {
         let snapshot = box_snapshot();
         let mut world = world_with_resources();
         world.init_resource::<FilmSetCameraAssets>();
-        world.init_resource::<FilmSetCameraVisual>();
         let resources = resource_table([(
             reference_for(&snapshot, ModelPlacement::default()).resource_key,
             snapshot,
@@ -136,12 +136,15 @@ impl Harness {
     }
 
     fn sync(&mut self, scene: &Scene, sampled: Option<CameraState>) {
-        let visuals = self
-            .world
-            .remove_resource::<crate::model3d::ModelVisuals>()
-            .unwrap();
+        let markers: Vec<(Entity, FilmSetCameraMarker)> = {
+            let mut query = self.world.query::<(Entity, &FilmSetCameraMarker)>();
+            query
+                .iter(&self.world)
+                .map(|(entity, marker)| (entity, marker.clone()))
+                .collect()
+        };
+        let visuals = self.world.remove_resource::<crate::model3d::ModelVisuals>().unwrap();
         let mut assets = self.world.remove_resource::<FilmSetCameraAssets>().unwrap();
-        let mut visual = self.world.remove_resource::<FilmSetCameraVisual>().unwrap();
         let mut meshes = self.world.remove_resource::<Assets<Mesh>>().unwrap();
         let mut materials = self
             .world
@@ -153,7 +156,7 @@ impl Harness {
             &mut meshes,
             &mut materials,
             &mut assets,
-            &mut visual,
+            &markers,
             scene,
             sampled,
             &visuals,
@@ -162,24 +165,31 @@ impl Harness {
         self.world.flush();
         self.world.insert_resource(visuals);
         self.world.insert_resource(assets);
-        self.world.insert_resource(visual);
         self.world.insert_resource(meshes);
         self.world.insert_resource(materials);
     }
 
     /// 当前标记根集合（按预览节点 id）。
-    fn roots(&self) -> Vec<Entity> {
+    fn roots(&mut self) -> Vec<Entity> {
         let mut roots: Vec<Entity> = self
-            .world
-            .resource::<FilmSetCameraVisual>()
-            .roots()
+            .markers()
+            .into_iter()
+            .map(|(entity, _)| entity)
             .collect();
         roots.sort_by_key(|entity| entity.index());
         roots
     }
 
-    fn marker_count(&self) -> usize {
-        self.world.resource::<FilmSetCameraVisual>().marker_count()
+    fn markers(&mut self) -> Vec<(Entity, FilmSetCameraMarker)> {
+        let mut query = self.world.query::<(Entity, &FilmSetCameraMarker)>();
+        query
+            .iter(&self.world)
+            .map(|(entity, marker)| (entity, marker.clone()))
+            .collect()
+    }
+
+    fn marker_count(&mut self) -> usize {
+        self.markers().len()
     }
 
     fn root_count(&mut self) -> usize {

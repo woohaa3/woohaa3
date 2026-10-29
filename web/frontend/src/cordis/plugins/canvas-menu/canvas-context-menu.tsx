@@ -9,7 +9,7 @@
  * 迁移期保留 `.canvas-context-menu*` class 以稳定 E2E selector 与既有视觉定位（design D7）；
  * 完成后再由 CSS 收敛到 `ui-menu*`。
  */
-import { CursorMenu, type MenuItem } from "../../../shared/ui/Menu.js";
+import { CursorMenu, type MenuItem } from "@woohaa3/ui/primitives";
 
 export type CanvasContextMenuItem = {
   icon?: import("react").ComponentType<{ className?: string }>;

@@ -23,7 +23,7 @@ import {
 import type { CapturedFrameEntry, FrameAddReceipt } from "../video-capture/types.js";
 import type { VideoFocusSession } from "./session.js";
 import type { VideoFocusTarget } from "./targets.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import { FocusHeader } from "../../focus/header.js";
 import { useFocusLayout } from "../../focus/workspace.js";
 import "./video-editor.css";

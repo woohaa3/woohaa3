@@ -45,4 +45,4 @@ In a newly built desktop app choose **工作区 → 导入配置…** and select
 
 The configuration package contains shared API credentials and is not encrypted. Keep it out of Git and distribute it through your agreed internal channel. An older app without **导入配置…** must be rebuilt/upgraded to use these packages.
 
-Image editing is supplied by the prebuilt PhotoCraft extension bundled in `extensions/photocraft`, enabled by default even in a standalone checkout. This directory contains runtime artifacts and third-party licenses only; no editor sources, build scripts or runtime npm dependencies. The host exposes focus presentation, media format registration and completion APIs; editor code and assets are extension-owned.
+Image editing is supplied by the PhotoCraft extension published from the marketplace repository (`woohaa3/woohaa3-marketplace`, `extensions/photocraft`). It is not bundled in this checkout; install it from the GitHub Release source (or a local-file package) and enable it in the plugin list. The host exposes focus presentation, media format registration and completion APIs; editor code and assets are extension-owned.

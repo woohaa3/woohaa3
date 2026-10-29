@@ -22,8 +22,12 @@ pub(super) const MAX_PIXELS: u64 = 8_388_608;
 pub(super) const MAX_CANDIDATES: usize = 32;
 
 /// 屏外卡片按需保持休眠；播放或显式捕捉需要 rig，与卡片是否可见无关。
-pub(super) fn needs_rig(visible: bool, live: bool, capturing: bool) -> bool {
-    visible || live || capturing
+///
+/// `settled` 表示卡片参考内容已就绪（录制完成）且不是活动播放目标：此时卡片显示的是
+/// 已录制的媒体，实时取景只会再造一份同样的画面，因此**可见也不建 rig**
+/// （2026-10-28 总览 draw call 优化）。
+pub(super) fn needs_rig(visible: bool, live: bool, capturing: bool, settled: bool) -> bool {
+    (visible && !settled) || live || capturing
 }
 
 /// 缩放/尺寸输入停止变化 200ms 后才切换纹理档位。
@@ -324,10 +328,14 @@ mod capture_demand_tests {
     use super::*;
     #[test]
     fn offscreen_capture_and_playback_require_rigs_but_idle_cards_do_not() {
-        assert!(!needs_rig(false, false, false));
-        assert!(needs_rig(true, false, false));
-        assert!(needs_rig(false, true, false));
-        assert!(needs_rig(false, false, true));
+        assert!(!needs_rig(false, false, false, false));
+        assert!(needs_rig(true, false, false, false));
+        assert!(needs_rig(false, true, false, false));
+        assert!(needs_rig(false, false, true, false));
+        // 参考已就绪：可见也不建 rig；播放/捕捉仍然要。
+        assert!(!needs_rig(true, false, false, true));
+        assert!(needs_rig(true, true, false, true));
+        assert!(needs_rig(true, false, true, true));
     }
 
     #[test]

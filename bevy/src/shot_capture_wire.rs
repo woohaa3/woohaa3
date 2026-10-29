@@ -13,6 +13,9 @@ pub(crate) fn request(json: &str) -> Result<(), BoundaryError> {
         width: Option<u32>,
         #[serde(default)]
         height: Option<u32>,
+        /// 请求来源标签（诊断用；缺省为空串）。
+        #[serde(default)]
+        source: String,
     }
     let parsed: ShotCaptureRequestJson =
         serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
@@ -30,6 +33,7 @@ pub(crate) fn request(json: &str) -> Result<(), BoundaryError> {
         rig_generation: 0,
         bridge_generation: parsed.generation as u64,
         node_id: parsed.node_id,
+        source: parsed.source,
         width: parsed
             .width
             .unwrap_or(crate::model3d::capture::CAPTURE_WIDTH),
