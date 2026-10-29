@@ -19,15 +19,15 @@ use bevy::{
 use crate::app::TextureBatch;
 use crate::canvas_ecs::components::{CanvasNodeId, CanvasTextureSprite};
 
-use super::Visuals;
 use super::texture_store::TextureAction;
+use super::TextureStore;
 
 /// 消费本帧 keyed 纹理批次并回收不再挂载的 Sprite。
 pub(crate) fn sync_textures(
     mut commands: Commands,
     scene: Res<crate::app::CurrentScene>,
     index: Res<crate::app::NodeIndex>,
-    mut visuals: ResMut<Visuals>,
+    mut texture_store: ResMut<TextureStore>,
     mut images: ResMut<Assets<Image>>,
     mut batch: ResMut<TextureBatch>,
     nodes: Query<(Entity, &CanvasNodeId)>,
@@ -63,7 +63,7 @@ pub(crate) fn sync_textures(
             .iter()
             .find(|(_, _, _, sprite)| sprite.owner == owner)
             .map(|(entity, _, _, sprite)| (entity, sprite.node_id.clone(), sprite.content_id.clone()));
-        let handle = match visuals.texture_store.resolve(content, texture_px) {
+        let handle = match texture_store.resolve(content, texture_px) {
             TextureAction::Reused(shared) => shared,
             TextureAction::Fresh => {
                 let image = Image::new(
@@ -98,8 +98,7 @@ pub(crate) fn sync_textures(
             }
         };
         // 共享表里换绑可能释放旧 handle（同内容换 handle / 换源 / 换档）。
-        let released = visuals
-            .texture_store
+        let released = texture_store
             .bind(&id, content, texture_px, handle.clone());
         for stale in released {
             if stale != handle {
@@ -165,7 +164,7 @@ pub(crate) fn sync_textures(
     }
     for (entity, id) in stale {
         commands.entity(entity).despawn();
-        for released in visuals.texture_store.release(&id) {
+        for released in texture_store.release(&id) {
             images.remove(released.id());
         }
     }

@@ -2,8 +2,8 @@
 //!
 //! change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs —— 端点读取 ECS `CanvasLayout`，
 //! 连线标签通过 `LabelRequests`（owner = 边批次实体）同步，块内不再保存标签实体。
-use super::{Visuals, geometry::Geometry, labels::Label, labels::LabelRequests, labels::LabelStyle};
-use crate::canvas_ecs::components::{CanvasLabelRole, CanvasLayout};
+use super::{CanvasMaterials, geometry::Geometry, labels::Label, labels::LabelRequests, labels::LabelStyle};
+use crate::canvas_ecs::components::{CanvasLabelRole, CanvasLayout, EdgeVisual};
 use crate::{
     protocol::{Edge, Scene},
     theme::ThemeResource,
@@ -24,16 +24,7 @@ fn hovered(scene: &Scene, edge: &Edge) -> bool {
         .as_ref()
         .is_some_and(|h| h.edge_id.as_deref() == Some(edge.id.as_str()))
 }
-struct Key {
-    id: String,
-    source: String,
-    target: String,
-    label: String,
-    bounds: Bounds,
-    selected: bool,
-    hover: bool,
-    overlay_z: Option<f32>,
-}
+type Key = EdgeVisual;
 impl Key {
     fn new(edge: &Edge, scene: &Scene, layouts: &HashMap<&str, CanvasLayout>, overlay_z: f32) -> Self {
         Self {
@@ -43,7 +34,7 @@ impl Key {
             label: edge.label.clone(),
             bounds: bounds(edge, layouts),
             selected: scene.selection.edge.as_ref() == Some(&edge.id),
-            hover: hovered(scene, edge),
+            hovered: hovered(scene, edge),
             overlay_z: hovered(scene, edge).then_some(overlay_z),
         }
     }
@@ -54,14 +45,7 @@ impl Key {
         layouts: &HashMap<&str, CanvasLayout>,
         overlay_z: f32,
     ) -> bool {
-        self.id == edge.id
-            && self.source == edge.source
-            && self.target == edge.target
-            && self.label == edge.label
-            && self.bounds == bounds(edge, layouts)
-            && self.selected == (scene.selection.edge.as_ref() == Some(&edge.id))
-            && self.hover == hovered(scene, edge)
-            && self.overlay_z == hovered(scene, edge).then_some(overlay_z)
+        self == &Self::new(edge, scene, layouts, overlay_z)
     }
 }
 #[derive(Default)]
@@ -72,6 +56,11 @@ pub(super) struct Block {
     entity: Option<Entity>,
     mesh: Option<Handle<Mesh>>,
     labels: Vec<Label>,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct EdgeBlockCache {
+    pub(super) blocks: Vec<Block>,
 }
 impl Block {
     fn clear(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
@@ -94,16 +83,17 @@ impl Block {
 pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    visuals: &mut Visuals,
+    visuals: &mut EdgeBlockCache,
     requests: &mut LabelRequests,
     scene: &Scene,
     theme: &ThemeResource,
     layouts: &HashMap<&str, CanvasLayout>,
     overlay_z: f32,
+    materials: &CanvasMaterials,
 ) -> u64 {
     requests.begin(CanvasLabelRole::Edge);
     let mut rebuilt = 0;
-    let mut blocks = std::mem::take(&mut visuals.edge_blocks);
+    let mut blocks = std::mem::take(&mut visuals.blocks);
     let count = scene.edges.len().div_ceil(BLOCK_SIZE);
     for block in blocks.iter_mut().skip(count) {
         block.clear(commands, meshes);
@@ -174,7 +164,7 @@ pub(super) fn sync(
         }
         commands.entity(entity).insert((
             Mesh2d(handle),
-            MeshMaterial2d(visuals.mesh_material()),
+            MeshMaterial2d(materials.solid.clone()),
             NoFrustumCulling,
         ));
         block.keys = edges
@@ -184,7 +174,7 @@ pub(super) fn sync(
         block.theme = theme.fingerprint().to_owned();
         block.depth_offset = depth_offset;
     }
-    visuals.edge_blocks = blocks;
+    visuals.blocks = blocks;
     rebuilt
 }
 #[cfg(test)]

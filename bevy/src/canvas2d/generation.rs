@@ -10,10 +10,9 @@ use std::collections::HashMap;
 use bevy::{prelude::*, camera::visibility::NoFrustumCulling};
 
 use crate::app::{CurrentScene, NodeIndex};
-use crate::canvas_ecs::components::{CanvasDepth, CanvasLabelRole, CanvasNodeId};
+use crate::canvas_ecs::components::{CanvasDepth, CanvasLabelRole, CanvasNodeId, RunningProgressLayer};
 use crate::generation_progress::{display_percent, estimate_percent};
 
-use super::Visuals;
 use super::geometry::Geometry;
 use super::labels::{LabelRequests, LabelStyle};
 use super::layout::{generation_ring_rect, shows_generation_ring};
@@ -41,18 +40,19 @@ pub(crate) fn sync_generation(
     scene: Res<CurrentScene>,
     index: Res<NodeIndex>,
     theme: Res<crate::theme::ThemeResource>,
-    mut visuals: ResMut<Visuals>,
+    materials: Res<super::CanvasMaterials>,
     mut clock: ResMut<GenerationClock>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
     nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
+    layers: Query<(Entity, Option<&Mesh2d>), With<RunningProgressLayer>>,
 ) {
     requests.begin(CanvasLabelRole::Running);
     // 图片/视频聚焦期间隐藏所有普通节点覆盖层
     // （change: 2026-10-08-add-image-focus-editing-and-unified-node-history，任务 4.2；
     //  change: 2026-10-10-add-video-node-focus-workspace 扩展为视频聚焦）。
     if super::image_focus::has_presented_media_focus(&scene.0) || scene.0.model_focus.is_some() {
-        clear_overlay(&mut commands, &mut visuals, &mut meshes);
+        clear_overlay(&mut commands, &mut meshes, &layers);
         return;
     }
     let now = time.elapsed_secs();
@@ -83,7 +83,7 @@ pub(crate) fn sync_generation(
     }
 
     if running.is_empty() {
-        clear_overlay(&mut commands, &mut visuals, &mut meshes);
+        clear_overlay(&mut commands, &mut meshes, &layers);
         return;
     }
 
@@ -138,52 +138,42 @@ pub(crate) fn sync_generation(
         );
     }
 
-    replace_overlay_mesh(&mut commands, &mut visuals, &mut meshes, geometry.build());
-    visuals.running_active = true;
+    replace_overlay_mesh(&mut commands, &mut meshes, &materials, &layers, geometry.build());
 }
 
 /// 清空运行覆盖层（无运行节点时调用一次）。
-fn clear_overlay(commands: &mut Commands, visuals: &mut Visuals, meshes: &mut Assets<Mesh>) {
-    if visuals.running_active {
-        // 从「有运行节点」变为「无」：用不可见兜底几何替换旧覆盖层，然后释放实体句柄。
-        if let Some(entity) = visuals.running_mesh_entity {
-            let handle = meshes.add(Geometry::default().build());
-            let old = std::mem::replace(&mut visuals.running_mesh, handle.clone());
-            meshes.remove(&old);
-            if let Ok(mut entity_commands) = commands.get_entity(entity) {
-                entity_commands.insert(Mesh2d(handle));
-            }
+fn clear_overlay(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    layers: &Query<(Entity, Option<&Mesh2d>), With<RunningProgressLayer>>,
+) {
+    if let Some((entity, old_handle)) = layers.iter().next() {
+        let handle = meshes.add(Geometry::default().build());
+        if let Some(old) = old_handle { meshes.remove(old.0.id()); }
+        if let Ok(mut entity_commands) = commands.get_entity(entity) {
+            entity_commands.insert(Mesh2d(handle));
         }
-        visuals.running_active = false;
     }
 }
 
 /// 替换运行覆盖层共享 mesh（首个运行节点出现时创建实体）。
 fn replace_overlay_mesh(
     commands: &mut Commands,
-    visuals: &mut Visuals,
     meshes: &mut Assets<Mesh>,
+    materials: &super::CanvasMaterials,
+    layers: &Query<(Entity, Option<&Mesh2d>), With<RunningProgressLayer>>,
     built: Mesh,
 ) {
     let handle = meshes.add(built);
-    match visuals.running_mesh_entity {
-        Some(entity) => {
-            let old = std::mem::replace(&mut visuals.running_mesh, handle.clone());
-            meshes.remove(&old);
+    match layers.iter().next() {
+        Some((entity, old_handle)) => {
+            if let Some(old) = old_handle { meshes.remove(old.0.id()); }
             if let Ok(mut entity_commands) = commands.get_entity(entity) {
                 entity_commands.insert(Mesh2d(handle));
             }
         }
         None => {
-            visuals.running_mesh = handle.clone();
-            let entity = commands
-                .spawn((
-                    Mesh2d(handle),
-                    MeshMaterial2d(visuals.blend_material.clone()),
-                    NoFrustumCulling,
-                ))
-                .id();
-            visuals.running_mesh_entity = Some(entity);
+            commands.spawn((RunningProgressLayer, Mesh2d(handle), MeshMaterial2d(materials.blend.clone()), NoFrustumCulling));
         }
     }
 }

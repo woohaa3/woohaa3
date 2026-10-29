@@ -5,7 +5,7 @@
 use bevy::sprite_render::AlphaMode2d;
 use bevy::{prelude::*, render::view::Tonemapping};
 
-use super::Visuals;
+use super::CanvasOverlayCache;
 use super::geometry::Geometry;
 
 /// 2D camera、字体与共享 mesh/material 初始化。
@@ -39,36 +39,30 @@ pub(crate) fn setup(
         alpha_mode: AlphaMode2d::Blend,
         ..ColorMaterial::default()
     });
-    let running_mesh = meshes.add(Geometry::default().build());
-    let attach_probe_mesh = meshes.add(Geometry::default().build());
-    let node_action_mesh = meshes.add(Geometry::default().build());
-    commands.insert_resource(Visuals {
-        card_blocks: Vec::new(),
-        card_decorations: Vec::new(),
-        container_blocks: Vec::new(),
+    let font = assets.load("fonts/NotoSansSC-Regular.otf");
+    commands.insert_resource(super::CanvasMaterials {
+        solid: material.clone(),
+        blend: blend_material.clone(),
+        font: font.clone(),
+    });
+    commands.insert_resource(CanvasOverlayCache {
         mesh,
         material,
         mesh_entity: None,
         blend_mesh,
         blend_material,
         blend_mesh_entity: None,
-        font: assets.load("fonts/NotoSansSC-Regular.otf"),
-        texture_store: Default::default(),
-        edge_blocks: Vec::new(),
+        font,
         shared_key: None,
-        attach_probe_mesh,
-        attach_probe_entity: None,
-        attach_probe_active: false,
-        running_mesh,
-        running_mesh_entity: None,
-        running_active: false,
-        node_action_mesh,
-        node_action_entity: None,
-        node_action_active: false,
     });
+    commands.insert_resource(super::TextureStore::default());
+    commands.insert_resource(super::CardDecorationCache::default());
+    commands.insert_resource(super::CardBlockCache::default());
+    commands.insert_resource(super::ContainerBlockCache::default());
+    commands.insert_resource(super::EdgeBlockCache::default());
 }
 
 /// 字体 asset 是否已就绪（供 app 发布 ready，本模块不依赖 bridge）。
-pub(crate) fn font_ready(fonts: &Assets<Font>, visuals: &Visuals) -> bool {
+pub(crate) fn font_ready(fonts: &Assets<Font>, visuals: &CanvasOverlayCache) -> bool {
     fonts.get(&visuals.font).is_some()
 }

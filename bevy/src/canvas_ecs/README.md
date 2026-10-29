@@ -35,7 +35,7 @@
 
 ## 新增第三方展示类型
 
-不需要修改中心 enum、trait 或 `Visuals`。在自己的模块/插件里：
+不需要修改中心 enum、trait 或 `CanvasOverlayCache`。在自己的模块/插件里：
 
 1. 定义只携带绘制参数的 presentation component，例如
    `#[derive(Component)] struct MyPresentation { inset: f32 }`；
@@ -70,8 +70,20 @@ component + system，验证选中时产生几何、取消选中后同一批次�
 
 - 资产、纹理内容共享、16 节点几何块、mesh/material handle、LRU/预算、异步 preparation 与
   layer pool 仍是 Resource，不搬进组件。
+- 共享材质与字体句柄由 `CanvasMaterials` 持有；逐帧覆盖层通过 marker + Query 生命周期管理，
+  不把不同展示类型的实体句柄混在同一缓存 Resource 中。
 - `ModelVisuals.part_entities` / `part_batches` 只是 O(1) 热路径索引，实体身份由
   `ModelOwner` / `ModelPart` / `ModelBatch` 组件表达；透明度实例的实体局部状态在
   `OpacityMaterialInstance`，Resource 只保留实例回收策略。
+- 2D 批处理按职责拆分为 `CardBlockCache`、`CardDecorationCache`、
+  `ContainerBlockCache`、`EdgeBlockCache` 与 `TextureStore`；`CanvasMaterials` 只保留
+  可跨实体共享的材质和字体句柄，缓存不再把不同展示类型的块混在同一个 Resource 中。
 - 组件不复制完整协议 DTO；需要完整绘制输入的 system 从 `CurrentScene` 经 `NodeIndex` 取。
 - 非法布局、重复/空 id 或倒退的 revision 不提交本次投影，保留上一份合法实体集合。
+## Render invalidation inputs
+
+Cards and containers carry `CardVisual` / `ContainerVisual` components. Each component keeps a
+`geometry` input separate from a `labels` input, so producers can invalidate mesh blocks only for
+size, texture, history, or run-state changes while title and type-label edits refresh text alone.
+`NodeActionBar` is the accepted toolbar input; its visibility is decided by the shared
+`canvas_query::action_bar_visible` predicate used by both drawing and interaction.

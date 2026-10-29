@@ -19,7 +19,7 @@ fn world() -> World {
     world.insert_resource(crate::app::SurfaceState::with_size(Vec2::new(800.0, 600.0)));
     world.insert_resource(text_presentation::PresentationCache::default());
     world.insert_resource(LabelRequests::default());
-    world.insert_resource(Visuals::default_for_test());
+    world.insert_resource(CanvasOverlayCache::default_for_test());
     world
 }
 

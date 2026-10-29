@@ -156,6 +156,18 @@ pub(super) fn draw_static(
     labels
 }
 
+/// Produce the card geometry input. Kept as a separate entry point so cache producers can
+/// invalidate mesh blocks independently from label requests.
+pub(super) fn geometry(geometry: &mut Geometry, theme: &ThemeResource, node: &GraphNode, index: usize) {
+    let _ = draw_static(geometry, theme, node, index);
+}
+
+/// Produce only label requests for a card. The temporary geometry sink preserves the existing
+/// layout helpers while keeping label refreshes out of the GPU mesh replacement path.
+pub(super) fn labels(theme: &ThemeResource, node: &GraphNode, index: usize) -> Vec<Label> {
+    draw_static(&mut Geometry::default(), theme, node, index)
+}
+
 /// 悬停端点半钮（非选中态装饰）。持久选中描边由 selection producer 生产。
 pub(super) fn draw_hover_ports(
     geometry: &mut Geometry,
