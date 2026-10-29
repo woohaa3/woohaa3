@@ -90,6 +90,12 @@ pub(crate) fn foreground_z(scene: &Scene) -> f32 {
     10.0 + scene.nodes.len() as f32 * 0.1 + 4.0
 }
 
+/// 画布遮罩紧贴素材下方（世界 z，越大越靠前）：遮罩压暗原画布，素材在遮罩之上，
+/// 于是素材的透明像素直接透出被压暗的真实画布。
+pub(crate) fn backdrop_z(scene: &Scene) -> f32 {
+    foreground_z(scene) - 0.1
+}
+
 /// 覆盖整张画布的世界空间矩形，跟随同一个媒体聚焦相机。
 pub(crate) fn backdrop_rect(scene: &Scene) -> Option<[f32; 4]> {
     presented_media_focus(scene)?;

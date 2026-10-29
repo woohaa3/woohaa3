@@ -151,7 +151,6 @@ fn configure_canvas(app: &mut App) {
         .add_plugins(model3d::run_effect::RunEffectPlugin)
         .add_plugins(crate::shot_node_preview::ShotNodePreviewPlugin)
         .add_plugins(crate::isometric_grid::IsometricGridPlugin)
-        .init_resource::<crate::canvas2d::alpha_checker::MediaAlphaCheckerTexture>()
         .add_plugins(crate::orbit_camera::OrbitCameraPlugin)
         .add_plugins(crate::transform_gizmo::TransformGizmoPlugin)
         .configure_sets(
@@ -264,7 +263,6 @@ fn configure_canvas(app: &mut App) {
             Update,
             (
                 canvas2d::sync_node_action_bars,
-                canvas2d::sync_alpha_checker,
                 canvas2d::sync_focus_backdrop,
                 canvas2d::sync_group_motion,
             )

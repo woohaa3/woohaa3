@@ -13,6 +13,7 @@
 import {
   findAdaptiveOption,
   isPptaskParameterControl,
+  requirementOfOption,
   type CanvasTaskCatalogModel
 } from "@woohaa3/contracts";
 import type { ExecutionPanelParameterField } from "./execution-panel/types.js";
@@ -51,6 +52,13 @@ export function projectParameterFields(
           ? schema["x-pptask-control"]
           : undefined;
       const adaptiveValue = findAdaptiveOption(schema.enum)?.value;
+      // 选项级联动（`x-pptask-requires`）：只有声明过的选项才带，未声明时字段完全没有这个概念。
+      const requiresByValue: Record<string, Readonly<Record<string, unknown>>> = {};
+      for (const entry of Array.isArray(schema.enum) ? schema.enum : []) {
+        const requirement = requirementOfOption(entry);
+        const value = readString(readObject(entry)?.value) ?? (typeof entry === "string" ? entry : undefined);
+        if (requirement !== undefined && value !== undefined) requiresByValue[value] = requirement;
+      }
       fields.push({
         key,
         label,
@@ -59,6 +67,7 @@ export function projectParameterFields(
         defaultValue: defaultValue as string | number | boolean | undefined,
         ...(semantic !== undefined ? { semantic } : {}),
         ...(adaptiveValue !== undefined ? { adaptiveValue } : {}),
+        ...(Object.keys(requiresByValue).length > 0 ? { requiresByValue } : {}),
         ...isRequired,
         hiddenWhen: readHiddenWhen(schema["x-hidden-when"])
       });

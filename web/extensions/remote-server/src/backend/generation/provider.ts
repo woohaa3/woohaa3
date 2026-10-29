@@ -34,7 +34,7 @@ import type { RemoteSession } from "../session.js";
 import { GENERATION_FAILURE } from "../../../../../../api/gen/es/woohaa/errors/v1alpha1/wirecodes_gen.js";
 import { generationFailureText, generationRpcErrorText, isRemoteGenerationModelType, asRecord, decodeCancelResponse, decodeSubmitResponse, decodeTask, REMOTE_GENERATION_PROVIDER_ID, type GenerationAdmission } from "./protocol.js";
 import { convergeGenerationParameters } from "./parameters.js";
-import { translateImageParameters } from "./image-models.js";
+import { translateParameters } from "./model-families.js";
 import type { GenerationClient, GenerationSessionRef } from "./client.js";
 
 /** 稳定错误：`code` 会由 pptask 的 `serializeError` 落进任务记录，界面/诊断只展示稳定短语。 */
@@ -144,10 +144,12 @@ export function prepareRemoteGenerationInput(
     // 1. **收敛**：默认值合并 + 脏值清洗 + 已声明字段按 enum/type 校准。untrusted 的
     //    参数（面板的隐藏字段、清空后留下的空串、批处理残留的旧模型参数）在这里被拦下，
     //    不把「用户没选的值」当成「用户选了这个值」发给服务端。
-    // 2. **翻译**：面板语义（resolution / aspectRatio）→ 上游字段（像素 size /
-    //    image_size / aspect_ratio）。服务端把 parameters 原样转给 LiteLLM，不认语义键。
-    parameters: translateImageParameters(
+    // 2. **翻译**：面板语义（resolution / aspectRatio / durationSeconds）→ 上游字段
+    //    （图片的像素 size / image_size / aspect_ratio，视频的 seconds / 像素 size）。
+    //    服务端把 parameters 原样转给 LiteLLM，不认语义键。
+    parameters: translateParameters(
       input.providerModelId,
+      input.modelType,
       convergeGenerationParameters({
         inputSchema: model.inputSchema,
         defaultInput: model.defaultInput,

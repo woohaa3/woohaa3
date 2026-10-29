@@ -23,6 +23,7 @@
 import {
   ADAPTIVE_PARAMETER_VALUE,
   aspectRatioField,
+  backgroundField,
   isAdaptiveParameterValue,
   qualityField,
   resolutionField,
@@ -188,12 +189,34 @@ export function imageFamilyParameters(modelId: string): {
           maximum: 10,
           'x-component': 'NumberPicker',
         },
+        // Azure 文档：`output_format` 只支持 PNG / JPEG（WEBP 不支持），默认 PNG。
+        outputFormat: {
+          type: 'string',
+          title: '输出格式',
+          default: 'png',
+          'x-component': 'Select',
+          enum: [
+            { value: 'png', label: 'PNG' },
+            { value: 'jpeg', label: 'JPEG' },
+          ],
+        },
+        // 透明背景要求 PNG（见 backgroundField 的注释）：选 transparent 时联动切格式。
+        background: backgroundField({
+          values: [
+            { value: 'auto', label: '自动' },
+            { value: 'transparent', label: '透明', requires: { outputFormat: 'png' } },
+            { value: 'opaque', label: '不透明' },
+          ],
+          fallback: 'auto',
+        }),
       },
       defaults: {
         resolution: defaultResolution,
         aspectRatio: '1:1',
         quality: profile.defaultQuality,
         n: 1,
+        outputFormat: 'png',
+        background: 'auto',
       },
     };
   }
@@ -331,6 +354,22 @@ function resolveGptImageSize(input: Record<string, unknown>): string {
   return GPT_IMAGE_SIZES['1:1']!['1K']!;
 }
 
+/**
+ * 透明背景与输出格式的联动保护。
+ *
+ * Azure 文档明确 `background: transparent` 要求 `output_format: png`；面板已经会在选中
+ * 透明时联动切格式，但旧草稿、批处理、直接调用 API 都可能绕过面板。这里做最后一道：
+ * 透明 + 非 png 时把格式**提升为 png**，而不是丢掉 `transparent` —— 用户要的是透明，
+ * 悄悄退回不透明会让他看到一张带底色的图却不知道为什么。
+ */
+function applyTransparency(fields: Record<string, string | number>): void {
+  if (fields.background !== 'transparent') return;
+  if (fields.output_format === 'png') return;
+  fields.output_format = 'png';
+  // JPEG 专属的压缩参数在 PNG 下无意义，带上会被严格的上游拒绝。
+  delete fields.output_compression;
+}
+
 /** OpenAI Images 的 body 字段（gpt-image / dall-e 共用）。 */
 function openAiImageFields(input: Record<string, unknown>): Record<string, string | number> {
   const fields: Record<string, string | number> = {};
@@ -350,6 +389,7 @@ function openAiImageFields(input: Record<string, unknown>): Record<string, strin
   if (count > 0) fields.n = Math.min(10, count);
   const compression = boundedInt(input.outputCompression ?? input.output_compression, 0, 100);
   if (compression !== undefined) fields.output_compression = compression;
+  applyTransparency(fields);
   return fields;
 }
 

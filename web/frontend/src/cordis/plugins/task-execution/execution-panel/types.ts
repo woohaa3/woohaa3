@@ -63,6 +63,14 @@ export interface ExecutionPanelParameterField {
 		field: string;
 		equals: string | number | boolean;
 	}>;
+	/**
+	 * 每个选项的联动约束（`x-pptask-requires`）：选中它就要把别的字段改成某值。
+	 *
+	 * 典型是「透明背景要求 PNG 输出」。面板选中该选项时**先改写目标字段再落值**，
+	 * 并把目标字段显示为锁定态——让用户看见「因为选了透明，格式被固定成 PNG」，
+	 * 而不是提交后收到上游 400。
+	 */
+	requiresByValue?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 /** 模型选项与参数模式。 */

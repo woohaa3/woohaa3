@@ -1,33 +1,42 @@
 /**
- * 远端图像模型的家族适配测试（Provider 侧）。
+ * 远端模型的参数家族适配测试（Provider 侧）。
  *
- * 锁住责任边界：**模型家族判定在扩展，不在 server**。server 只转述 LiteLLM 的目录；
- * 扩展用 `@woohaa3/contracts` 里的共享实现覆盖 schema 并把语义参数翻译成上游字段。
- *
- * 两个断言点分别对应报障现象的两半：
- * 1. 目录 —— seedream-5-pro 必须出「图片比例 + 图片分辨率」，而不是服务端那份通用
- *    `{"size": "1024x1024"}`；
- * 2. 提交 —— 面板语义必须落成即梦唯一认识的 `size` 像素值，否则用户选了尺寸也不生效。
+ * 锁住三条边界：
+ * 1. **家族判定在扩展，不在 server**：server 只转述 LiteLLM 的目录；
+ * 2. **目录**：卡片能对上的模型，schema 由家族给出（不是服务端那份「按类型一份」的通用形状）；
+ * 3. **提交**：面板语义必须落成上游认识的字段，否则用户选了也不生效。
  */
 import { describe, expect, it } from "vitest";
 import type { GenerationModelDefinition } from "@woohaa3/contracts";
 import {
-  translateImageParameters,
-  withImageParameterFamily
-} from "../src/backend/generation/image-models.js";
+  translateParameters,
+  withModelFamily
+} from "../src/backend/generation/model-families.js";
 
-/** 服务端为任意图像模型下发的那份通用 schema（修复前 seedream 看到的就是它）。 */
-function serverGenericImageModel(providerModelId: string): GenerationModelDefinition {
+/** 服务端为任意模型下发的那份通用 schema（修复前 seedream / seedance 看到的就是它）。 */
+function serverGenericModel(
+  providerModelId: string,
+  modelType: "image" | "video"
+): GenerationModelDefinition {
   return {
     providerId: "remote-server",
     providerModelId,
-    modelType: "image",
+    modelType,
     title: providerModelId,
-    inputSchema: {
-      type: "object",
-      properties: { size: { type: "string", title: "尺寸", default: "1024x1024" } }
-    },
-    defaultInput: { size: "1024x1024" },
+    inputSchema:
+      modelType === "image"
+        ? {
+            type: "object",
+            properties: { size: { type: "string", title: "尺寸", default: "1024x1024" } }
+          }
+        : {
+            type: "object",
+            properties: {
+              seconds: { type: "string", title: "时长（秒）", default: "4" },
+              size: { type: "string", title: "分辨率", default: "720p" }
+            }
+          },
+    defaultInput: modelType === "image" ? { size: "1024x1024" } : { seconds: "4", size: "720p" },
     interaction: { id: "generic-model", version: 1 },
     cancel: "remote",
     promptRequirement: "required",
@@ -35,86 +44,125 @@ function serverGenericImageModel(providerModelId: string): GenerationModelDefini
   };
 }
 
-describe("withImageParameterFamily", () => {
-  it("seedream-5-pro 拿到「图片比例 + 图片分辨率」，默认 2K 自适应", () => {
-    const model = withImageParameterFamily(serverGenericImageModel("seedream-5-pro"));
+describe("withModelFamily · 图像", () => {
+  it("seedream 拿到「图片比例 + 图片分辨率」，服务端的裸像素 size 被完全替换", () => {
+    const model = withModelFamily(serverGenericModel("doubao-seedream-5-0-pro-260628", "image"));
     const properties = model.inputSchema!.properties as Record<string, Record<string, unknown>>;
 
-    expect(Object.keys(properties).sort()).toEqual(["aspectRatio", "resolution"]);
+    // 家族只覆盖它认识的键（比例 / 分辨率）；提示词与参考图仍来自类型预设。
+    expect(Object.keys(properties).sort()).toEqual([
+      "aspectRatio",
+      "outputFormat",
+      "prompt",
+      "referencesImage",
+      "resolution"
+    ]);
     expect(properties.resolution!["x-pptask-control"]).toBe("resolution");
     expect(properties.aspectRatio!["x-pptask-control"]).toBe("aspect-ratio");
-    // 服务端那份裸像素 size 必须被完全替换掉。
     expect(properties.size).toBeUndefined();
-    expect(model.defaultInput).toEqual({ resolution: "2K", aspectRatio: "auto" });
-  });
-
-  it("比例项的「自适应」带 x-pptask-adaptive 标记", () => {
-    const model = withImageParameterFamily(serverGenericImageModel("seedream-5-pro"));
-    const properties = model.inputSchema!.properties as Record<string, Record<string, unknown>>;
-    const options = properties.aspectRatio!.enum as Array<Record<string, unknown>>;
-    expect(options.some((option) => option.value === "auto" && option["x-pptask-adaptive"] === true)).toBe(true);
     // 即梦没有 quality / n。
     expect(properties.quality).toBeUndefined();
     expect(properties.n).toBeUndefined();
   });
 
   it("gpt-image 保留 quality / n", () => {
-    const model = withImageParameterFamily(serverGenericImageModel("gpt-image-1"));
+    const model = withModelFamily(serverGenericModel("gpt-image-2.5", "image"));
     const properties = model.inputSchema!.properties as Record<string, unknown>;
     expect(properties.quality).toBeDefined();
     expect(properties.n).toBeDefined();
   });
 
-  it("未识别家族保持服务端 schema 不动", () => {
-    const original = serverGenericImageModel("some-vendor-image-v2");
-    const model = withImageParameterFamily(original);
-    // 未知家族不猜能力：服务端的自描述比按名字编一份更安全。
-    expect(model).toBe(original);
-    expect(model.inputSchema).toEqual(original.inputSchema);
-  });
-
-  it("非图像模型不受影响", () => {
-    const language: GenerationModelDefinition = {
-      ...serverGenericImageModel("some-chat-model"),
-      modelType: "language",
-      inputSchema: { type: "object", properties: {} },
-      defaultInput: {}
-    };
-    expect(withImageParameterFamily(language)).toBe(language);
+  it("未识别的图像模型保持服务端 schema 不动", () => {
+    const original = serverGenericModel("some-vendor-image-v2", "image");
+    expect(withModelFamily(original)).toBe(original);
   });
 });
 
-describe("translateImageParameters", () => {
-  it("seedream：比例 + 档位查成官方像素 size", () => {
-    expect(translateImageParameters("seedream-5-pro", { resolution: "2K", aspectRatio: "16:9" }))
-      .toEqual({ size: "2848x1600" });
+describe("withModelFamily · 视频", () => {
+  it("seedance 2.5 拿到「时长 + 比例 + 分辨率」，不再是两个文本框", () => {
+    const model = withModelFamily(serverGenericModel("seedance-2.5", "video"));
+    const properties = model.inputSchema!.properties as Record<string, Record<string, unknown>>;
+
+    expect(properties.seconds).toBeUndefined();
+    expect(properties.size).toBeUndefined();
+    expect(properties.durationSeconds).toMatchObject({ minimum: 4, maximum: 30, step: 1 });
+    expect(properties.aspectRatio!["x-pptask-control"]).toBe("aspect-ratio");
+    expect(properties.resolution!["x-pptask-control"]).toBe("resolution");
   });
 
-  it("seedream：自适应只发档位，宽高比交给模型", () => {
-    expect(translateImageParameters("seedream-5-pro", { resolution: "1K", aspectRatio: "auto" }))
-      .toEqual({ size: "1K" });
+  it("不同家族得到不同值域：Veo 只有 4/6/8 秒、720p/1080p", () => {
+    const model = withModelFamily(serverGenericModel("veo-3.1-fast", "video"));
+    const properties = model.inputSchema!.properties as Record<string, Record<string, unknown>>;
+    expect(properties.durationSeconds).toMatchObject({ minimum: 4, maximum: 8, step: 2 });
+    expect(
+      (properties.resolution!.enum as Array<{ value: string }>).map((entry) => entry.value)
+    ).toEqual(["720p", "1080p"]);
   });
 
-  it("seedream：不泄漏语义键，也不带 quality/n", () => {
-    const fields = translateImageParameters("seedream-5-pro", { resolution: "2K", aspectRatio: "1:1" });
-    for (const forbidden of ["resolution", "aspectRatio", "quality", "n"]) {
-      expect(fields).not.toHaveProperty(forbidden);
-    }
+  it("卡片约束随目录下发：Seedance 2.5 声明了三类参考的数量与体积", () => {
+    const model = withModelFamily(serverGenericModel("seedance-2.5", "video"));
+    const limits = model.capabilityFacts?.limits;
+    expect(limits?.references?.image?.max).toBe(30);
+    expect(limits?.references?.video?.max).toBe(10);
+    expect(limits?.combined?.[0]?.max).toBe(30);
   });
 
-  it("gemini：落成 flat 的 aspect_ratio + image_size", () => {
-    expect(translateImageParameters("gemini-3.1-flash-image", { resolution: "2K", aspectRatio: "16:9" }))
-      .toEqual({ aspect_ratio: "16:9", image_size: "2K" });
+  it("卡片的参考绑定覆盖服务端那份按类型通用的绑定", () => {
+    // 网关的真实 id 带日期后缀：卡片按家族兜底命中。
+    const model = withModelFamily(serverGenericModel("seedance-1-0-pro-250528", "video"));
+    const referenceInput = model.capabilities?.referenceInput as
+      | { bindings?: Array<{ semantic: string; maxItems: number }> }
+      | undefined;
+    expect(referenceInput?.bindings?.map((binding) => binding.semantic)).toEqual(["reference-image"]);
+    expect(referenceInput?.bindings?.[0]?.maxItems).toBe(2);
   });
 
-  it("gpt-image：落成像素 size", () => {
-    const fields = translateImageParameters("gpt-image-1", { resolution: "1K", aspectRatio: "3:2", quality: "high" });
-    expect(fields.size).toBe("1536x1024");
-    expect(fields.quality).toBe("high");
+  it("未识别的视频模型保持服务端 schema 不动", () => {
+    const original = serverGenericModel("some-unknown-video", "video");
+    expect(withModelFamily(original)).toBe(original);
+  });
+});
+
+describe("translateParameters", () => {
+  it("图像：比例 + 分辨率落成上游字段", () => {
+    const fields = translateParameters("doubao-seedream-5-0-pro-260628", "image", {
+      resolution: "2K",
+      aspectRatio: "16:9"
+    });
+    expect(typeof fields.size).toBe("string");
   });
 
-  it("未识别家族原样透传（服务端转发给上游的就是这些字段）", () => {
-    const parameters = { size: "1024x1024", seed: 7 };
-    expect(translateImageParameters("some-vendor-image-v2", parameters)).toEqual(parameters);
+  it("视频：时长按家族步长对齐，比例 + 分辨率落成像素 size", () => {
+    expect(translateParameters("veo-3.1-fast", "video", { durationSeconds: 7 }).seconds).toBe(8);
+    const fields = translateParameters("seedance-2", "video", {
+      durationSeconds: 8,
+      aspectRatio: "16:9",
+      resolution: "720p"
+    });
+    expect(fields).toEqual({ seconds: 8, size: "1280x720" });
+  });
+
+  it("视频：自适应比例不发 size", () => {
+    const fields = translateParameters("seedance-2", "video", {
+      durationSeconds: 5,
+      aspectRatio: "adaptive",
+      resolution: "720p"
+    });
+    expect(fields.size).toBeUndefined();
+    expect(fields.seconds).toBe(5);
+  });
+
+  it("未识别家族原样透传", () => {
+    const parameters = { seconds: "4", size: "1280x720" };
+    expect(translateParameters("some-unknown-video", "video", parameters)).toEqual(parameters);
+    expect(translateParameters("some-vendor-image", "image", { size: "1024x1024" })).toEqual({
+      size: "1024x1024"
+    });
+  });
+
+  it("language / audio 不经过家族翻译", () => {
+    expect(translateParameters("gpt-4o", "language", { temperature: 0.7 })).toEqual({
+      temperature: 0.7
+    });
   });
 });

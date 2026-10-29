@@ -29,7 +29,6 @@ mod film_set;
 mod focus_reference;
 #[cfg(test)]
 pub(crate) use film_set::draw_film_set_run_mask;
-pub(crate) mod alpha_checker;
 mod focus_backdrop;
 pub(crate) mod focus_details;
 mod generation;
@@ -79,7 +78,6 @@ pub(crate) mod shot_preview {
 
 use bevy::prelude::*;
 
-pub(crate) use alpha_checker::sync as sync_alpha_checker;
 pub(crate) use attach::sync_attach_probe;
 pub(crate) use camera::sync_camera;
 pub(crate) use focus_backdrop::sync as sync_focus_backdrop;
@@ -133,8 +131,6 @@ pub(crate) struct Visuals {
     attach_probe_entity: Option<Entity>,
     /// 触须覆盖层当前是否含非空几何（用于从「有触须」到「无」时清空一次）。
     attach_probe_active: bool,
-    /// 媒体聚焦透明棋盘格实体（A5：透明区域要显示棋盘格，而不是应用网格背景）。
-    media_alpha_checker: Option<Entity>,
     /// 运行中节点的逐帧进度覆盖层（change: add-node-running-progress）：
     /// 独立于主 card mesh，避免逐帧重建时影响边标签。
     running_mesh: Handle<Mesh>,
@@ -170,7 +166,6 @@ impl Visuals {
             attach_probe_mesh: default(),
             attach_probe_entity: None,
             attach_probe_active: false,
-            media_alpha_checker: None,
             running_mesh: default(),
             running_mesh_entity: None,
             running_active: false,

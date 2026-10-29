@@ -252,6 +252,23 @@ describe("参数语义投影（x-pptask-control / x-pptask-adaptive）", () => {
             type: "string",
             title: "风格",
             enum: ["photo", "anime"]
+          },
+          background: {
+            type: "string",
+            title: "背景",
+            default: "auto",
+            "x-pptask-control": "background",
+            enum: [
+              { value: "auto", label: "自动" },
+              { value: "transparent", label: "透明", "x-pptask-requires": { outputFormat: "png" } },
+              { value: "opaque", label: "不透明" }
+            ]
+          },
+          outputFormat: {
+            type: "string",
+            title: "输出格式",
+            default: "png",
+            enum: ["png", "jpeg"]
           }
         }
       },
@@ -274,6 +291,15 @@ describe("参数语义投影（x-pptask-control / x-pptask-adaptive）", () => {
     expect(byKey.style.semantic).toBeUndefined();
   });
 
+  it("x-pptask-requires 投影为 requiresByValue，只带声明过的选项", () => {
+    const byKey = semanticFields();
+    expect(byKey.background.semantic).toBe("background");
+    expect(byKey.background.requiresByValue).toEqual({ transparent: { outputFormat: "png" } });
+    // 没有声明联动的字段完全没有这个概念。
+    expect(byKey.outputFormat.requiresByValue).toBeUndefined();
+    expect(byKey.aspectRatio.requiresByValue).toBeUndefined();
+  });
+
   it("x-pptask-adaptive 投影为 adaptiveValue，普通枚举没有自适应值", () => {
     const byKey = semanticFields();
     expect(byKey.aspectRatio.adaptiveValue).toBe("auto");
@@ -293,7 +319,10 @@ describe("参数语义投影（x-pptask-control / x-pptask-adaptive）", () => {
     expect(byKey.aspectRatio.defaultValue).toBe("auto");
     expect(config.defaultsByModel?.["semantic-image"]).toEqual({
       aspectRatio: "auto",
-      resolution: "1K"
+      resolution: "1K",
+      // 新增字段的 default 也会进默认值表：面板打开时就有值，不必等用户点一遍。
+      background: "auto",
+      outputFormat: "png"
     });
   });
 });
