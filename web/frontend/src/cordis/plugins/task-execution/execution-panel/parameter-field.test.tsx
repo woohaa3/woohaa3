@@ -34,7 +34,11 @@ function selectField(
   };
 }
 
-function setup(field: ExecutionPanelParameterField, initialValue: string) {
+function setup(
+  field: ExecutionPanelParameterField,
+  initialValue: string,
+  extra: { lockedBy?: string } = {}
+) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -45,6 +49,7 @@ function setup(field: ExecutionPanelParameterField, initialValue: string) {
       <ParameterField
         field={field}
         value={value}
+        {...(extra.lockedBy !== undefined ? { lockedBy: extra.lockedBy } : {})}
         onChange={(next) => {
           changes.push(next);
           setValue(String(next));
@@ -330,6 +335,44 @@ describe("参数语义（x-pptask-control）", () => {
       expect(adaptive).not.toBeNull();
       expect(adaptive.getAttribute("data-state")).toBe("on");
       expect(tileLabels(view.container.querySelector(".mc-panel__ratio-options")!)).toEqual(["1:1", "16:9"]);
+    } finally {
+      await view.cleanup();
+    }
+  });
+});
+describe("联动锁定", () => {
+  const formatField: ExecutionPanelParameterField = {
+    key: "outputFormat",
+    label: "输出格式",
+    type: "select",
+    options: [
+      { value: "png", label: "PNG" },
+      { value: "jpeg", label: "JPEG" }
+    ]
+  };
+
+  it("没有 lockedBy 时可以正常点选", async () => {
+    const view = setup(formatField, "png");
+    try {
+      await view.render();
+      const option = view.container.querySelector<HTMLButtonElement>(".ui-segmented__option")!;
+      expect(option.disabled).toBe(false);
+      expect(view.container.querySelector(".mc-panel__settings-lock")).toBeNull();
+    } finally {
+      await view.cleanup();
+    }
+  });
+
+  it("被别的字段锁定时：组内按钮全部禁用，标签说明锁定者", async () => {
+    const view = setup(formatField, "png", { lockedBy: "背景" });
+    try {
+      await view.render();
+      const buttons = [...view.container.querySelectorAll<HTMLButtonElement>(".ui-segmented__option")];
+      expect(buttons.length).toBeGreaterThan(0);
+      // 锁定态下连当前值也不可点：改了会被联动覆盖，允许点只会产生抖动。
+      expect(buttons.every((button) => button.disabled)).toBe(true);
+      expect(view.container.querySelector(".mc-panel__settings-lock")?.textContent).toBe("由「背景」决定");
+      expect(view.container.querySelector("[data-locked-by]")).not.toBeNull();
     } finally {
       await view.cleanup();
     }

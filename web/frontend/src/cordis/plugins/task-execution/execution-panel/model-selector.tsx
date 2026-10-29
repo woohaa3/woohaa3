@@ -12,6 +12,28 @@ import { hiddenBy, summarize } from "./panel-shared.js";
 import { ParameterField } from "./parameter-field.js";
 import type { ExecutionPanelParameterField } from "./types.js";
 
+/**
+ * 联动锁定：哪些字段被别的字段的当前取值强制成了某个值。
+ *
+ * 例如「透明背景」要求 `outputFormat: png`：用户选了透明，格式字段就被锁在 PNG。
+ * 面板据此把该控件置为禁用并说明原因——**不隐藏**：隐藏会让人以为这个参数消失了，
+ * 锁定加一句「由『背景』决定」才是可解释的。
+ */
+function lockedFields(
+	fields: ReadonlyArray<ExecutionPanelParameterField>,
+	parameters: Record<string, unknown>
+): Map<string, { byLabel: string; value: unknown }> {
+	const locked = new Map<string, { byLabel: string; value: unknown }>();
+	for (const field of fields) {
+		const requires = field.requiresByValue?.[String(parameters[field.key] ?? "")];
+		if (requires === undefined) continue;
+		for (const [target, forced] of Object.entries(requires)) {
+			locked.set(target, { byLabel: field.label, value: forced });
+		}
+	}
+	return locked;
+}
+
 export { AssistantListSelector as ModelSelector } from "@woohaa3/ui/assistant";
 
 export function SettingsMenu({
@@ -29,6 +51,7 @@ export function SettingsMenu({
 }) {
 	const visible = fields.filter((field) => !hiddenBy(field, parameters));
 	const summary = summarize(fields, parameters);
+	const locked = lockedFields(visible, parameters);
 	return (
 		<div className="mc-panel__settings">
 			<Popover
@@ -53,14 +76,23 @@ export function SettingsMenu({
 					</button>
 				}
 			>
-				{visible.map((field) => (
-					<ParameterField
-						key={field.key}
-						field={field}
-						value={parameters[field.key]}
-						onChange={(value) => onChange({ [field.key]: value })}
-					/>
-				))}
+				{visible.map((field) => {
+					const lock = locked.get(field.key);
+					return (
+						<ParameterField
+							key={field.key}
+							field={field}
+							value={parameters[field.key]}
+							{...(lock !== undefined ? { lockedBy: lock.byLabel } : {})}
+							onChange={(value) => {
+								// 选中带联动的选项时**一次写入两个字段**：目标先被改写，用户不会看到
+								// 「格式还是 JPEG、背景已经是透明」的中间态。
+								const requires = field.requiresByValue?.[String(value)] ?? {};
+								onChange({ ...requires, [field.key]: value });
+							}}
+						/>
+					);
+				})}
 			</Popover>
 		</div>
 	);

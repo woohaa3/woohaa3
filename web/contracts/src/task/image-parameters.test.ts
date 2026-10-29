@@ -84,6 +84,23 @@ describe("imageRequestFields", () => {
       .toEqual({ image_size: "2K" });
   });
 
+  it("透明背景强制 PNG：非 png 的旧草稿被提升，JPEG 专属压缩被丢掉", () => {
+    // 面板会联动切格式，但旧草稿/批处理可能绕过面板。这里做最后一道保护：
+    // 用户要的是透明，悄悄退回不透明会让他看到一张带底色的图。
+    expect(imageRequestFields("gpt-image-1", { background: "transparent", outputFormat: "jpeg" }))
+      .toMatchObject({ background: "transparent", output_format: "png" });
+    const withCompression = imageRequestFields("gpt-image-1", {
+      background: "transparent",
+      outputFormat: "jpeg",
+      outputCompression: 80
+    });
+    expect(withCompression.output_format).toBe("png");
+    expect(withCompression.output_compression).toBeUndefined();
+    // 已经是 png 时不改动。
+    expect(imageRequestFields("gpt-image-1", { background: "transparent", outputFormat: "png" }).output_format)
+      .toBe("png");
+  });
+
   it("gpt-image 比例+档位查成像素值；自适应发 auto", () => {
     expect(imageRequestFields("gpt-image-1", { resolution: "1K", aspectRatio: "16:9" }).size)
       .toBe("1536x864");

@@ -22,10 +22,44 @@ export const PPTASK_PARAMETER_CONTROL = "x-pptask-control";
 /** enum 选项标记：该项代表「自适应」。 */
 export const PPTASK_PARAMETER_ADAPTIVE = "x-pptask-adaptive";
 
-/** 语义控件种类。 */
-export type PptaskParameterControl = "aspect-ratio" | "resolution" | "quality";
+/**
+ * enum 选项标记：选中该项时**强制**另一个字段取某个值（联动约束）。
+ *
+ * 为什么需要它：有些参数单独看是合法的，组合起来才会被上游拒绝。典型是 OpenAI 的透明背景
+ * ——`background: transparent` 要求 `output_format: png`，选 jpeg 会 400。把这条规则
+ * 声明在枚举项上，面板就能「选透明 → 格式自动切成 PNG 并锁住」，而不是等提交后才报错。
+ *
+ * 形状：`{ [field]: value }`，可多个。前端只做**改写 + 锁定展示**，真正的校验仍在
+ * Provider / 服务端——声明是「推荐组合」，不是唯一真相。
+ */
+export const PPTASK_PARAMETER_REQUIRES = "x-pptask-requires";
 
-const PARAMETER_CONTROLS: readonly PptaskParameterControl[] = ["aspect-ratio", "resolution", "quality"];
+/** 联动约束：某字段被强制为某值。 */
+export type PptaskParameterRequirement = Record<string, string | number | boolean>;
+
+export function isPptaskParameterRequirement(value: unknown): value is PptaskParameterRequirement {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return Object.values(value).every(
+    (entry) => typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean"
+  );
+}
+
+/** 从枚举项上读出联动约束；没有声明时返回 undefined。 */
+export function requirementOfOption(option: unknown): PptaskParameterRequirement | undefined {
+  if (typeof option !== "object" || option === null || Array.isArray(option)) return undefined;
+  const declared = (option as Record<string, unknown>)[PPTASK_PARAMETER_REQUIRES];
+  return isPptaskParameterRequirement(declared) ? declared : undefined;
+}
+
+/** 语义控件种类。 */
+export type PptaskParameterControl = "aspect-ratio" | "resolution" | "quality" | "background";
+
+const PARAMETER_CONTROLS: readonly PptaskParameterControl[] = [
+  "aspect-ratio",
+  "resolution",
+  "quality",
+  "background"
+];
 
 export function isPptaskParameterControl(value: unknown): value is PptaskParameterControl {
   return typeof value === "string" && (PARAMETER_CONTROLS as readonly string[]).includes(value);
@@ -38,7 +72,12 @@ export const ADAPTIVE_PARAMETER_LABEL = "自适应";
 /** 比例控件的常用画幅优先顺序（UI 4 列网格前 5 个）。 */
 export const PREFERRED_ASPECT_RATIOS = ["1:1", "3:4", "4:3", "9:16", "16:9"] as const;
 
-export type ParameterSelectOption = { value: string; label: string };
+export type ParameterSelectOption = {
+  value: string;
+  label: string;
+  /** 选中该项时强制的其它字段值（`x-pptask-requires`）。 */
+  requires?: PptaskParameterRequirement;
+};
 
 export type ParameterHiddenWhenRule = {
   field: string;
@@ -66,7 +105,15 @@ export function semanticSelectField(options: SemanticSelectFieldOptions): Record
   const adaptive = normalizeAdaptive(options.adaptive);
   const enumValues: Array<ParameterSelectOption & Record<string, unknown>> = [
     ...(adaptive ? [{ ...adaptive, [PPTASK_PARAMETER_ADAPTIVE]: true }] : []),
-    ...options.options.map((entry) => (typeof entry === "string" ? { value: entry, label: entry } : { ...entry })),
+    ...options.options.map((entry) =>
+      typeof entry === "string"
+        ? { value: entry, label: entry }
+        : {
+            value: entry.value,
+            label: entry.label,
+            ...(entry.requires !== undefined ? { [PPTASK_PARAMETER_REQUIRES]: entry.requires } : {}),
+          }
+    ),
   ];
   return {
     type: "string",
@@ -131,6 +178,33 @@ export function qualityField(options: QualityFieldOptions): Record<string, unkno
     fallback: options.fallback,
     options: options.levels,
     hiddenWhen: options.hiddenWhen,
+  });
+}
+
+export type BackgroundFieldOptions = {
+  /** 可选背景值；缺省是 `auto` / `transparent` / `opaque`。 */
+  values?: readonly (string | ParameterSelectOption)[];
+  fallback?: string;
+  title?: string;
+  hiddenWhen?: readonly ParameterHiddenWhenRule[];
+};
+
+/**
+ * 背景字段（透明背景）。
+ *
+ * 透明不是独立能力：OpenAI 的 `background: transparent` 要求 `output_format: png`
+ * （Azure 文档「Transparency」一节：set `background` to `transparent` and `output_format`
+ * to `PNG`）。所以透明选项上挂一条 `requires: { outputFormat: "png" }`，面板选它就把
+ * 格式切到 PNG；反过来没依赖格式时不会乱锁。
+ */
+export function backgroundField(options: BackgroundFieldOptions = {}): Record<string, unknown> {
+  const values = options.values ?? ["auto", "transparent", "opaque"];
+  return semanticSelectField({
+    control: "background",
+    title: options.title ?? "背景",
+    ...(options.fallback !== undefined ? { fallback: options.fallback } : {}),
+    options: values,
+    ...(options.hiddenWhen ? { hiddenWhen: options.hiddenWhen } : {})
   });
 }
 
