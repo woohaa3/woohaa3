@@ -360,7 +360,19 @@ pub(crate) fn sync_models(
         let allowed = allowed
             && (models.batching_strategy != super::batch_strategy::BatchStrategy::Explicit
                 || node.model_preview.is_some());
+        // 片场 group 的徽标场景沿用旧 composite 根的总览 primitive LOD：group owner 持有
+        // 所有绑定的聚合几何，后续 `sync_quality` 可整场原子切档。未声明时保持 High。
+        let overview = super::quality::has_overview_lod_declaration(node);
+        // 总览片场合批会把只做平移的父级部件平铺到 binding 根（`batching::apply_flatten`），
+        // 动画目标组因此失去几何，旋转/位移只写到没有子几何的组实体上。带部件动作的播放
+        // （hover 拍摄预览卡片、录制/截图）必须使用非合批表示；纯镜头动作不需要拆部件。
+        let part_motion = scene.animation_playback.as_ref().is_some_and(|playback| {
+            playback.node_id == node.id
+                && (!playback.model_motion.is_empty()
+                    || playback.objects.iter().any(|object| !object.model_motion.is_empty()))
+        });
         let batched = allowed
+            && !(overview && part_motion)
             && !models.high_demand.contains(&node.id) && !scene
             .model_editor
             .as_ref()
@@ -374,9 +386,6 @@ pub(crate) fn sync_models(
             .iter()
             .find(|group| group.owner_id == node.id)
         {
-            // 片场 group 的徽标场景沿用旧 composite 根的总览 primitive LOD：group owner 持有
-            // 所有绑定的聚合几何，后续 `sync_quality` 可整场原子切档。未声明时保持 High。
-            let overview = super::quality::has_overview_lod_declaration(node);
             let quality = if overview {
                 super::quality::initial(
                     node,
@@ -460,7 +469,7 @@ pub(crate) fn sync_models(
                 &mut models.shared,
                 batched,
                 models.batching_strategy,
-                super::quality::has_overview_lod_declaration(node),
+                overview,
             );
             root.representation_generation = generation;
             root.content_signature = content_signature.to_owned();

@@ -513,8 +513,8 @@ fn focus_owner_restores_high_for_overview_root() {
 }
 
 #[test]
-fn local_motion_split_keeps_low_and_pose() {
-    // 低档片场播放：不因 playing 强制 High；对象拆块后仍按当前有效档位准备。
+fn local_motion_playback_keeps_low_and_unbatches_parts() {
+    // 低档片场播放：不因 playing 强制 High；带部件动作时切换非合批表示，保留真实层级。
     let (mut scene, resources) = fixture(mixed_snapshot("motion", 40, 0), 0.05, 1.0);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
@@ -552,7 +552,9 @@ fn local_motion_split_keeps_low_and_pose() {
     }
     let root = &world.resource::<ModelVisuals>().roots["film"];
     assert_eq!(root.quality.tier(), Quality::Low, "播放不得强制 High");
-    assert!(root.prepared_targets.contains("s0"));
+    assert!(!root.batched, "带部件动作的播放必须使用非合批表示");
+    assert!(root.batches.is_empty());
+    assert!(root.part_entities.contains_key("s0"));
 }
 
 #[test]
@@ -1499,6 +1501,90 @@ fn group_badge_batches_same_material_parts_under_binding_root() {
     assert_eq!(
         *world.get::<Visibility>(binding_root).unwrap(),
         Visibility::Hidden
+    );
+}
+
+/// 片场 group 的 hover 预览必须保留 authored 层级：总览合批会把只做平移的父级组
+/// 平铺到 binding 根，导致 `apply_motion_playback` 写到组实体上的旋转没有可见几何。
+/// （回归：hover 镜头节点只看到镜头环绕，聚焦后人物四肢才动。）
+#[test]
+fn group_part_motion_playback_unbatches_binding_hierarchy() {
+    let snapshot: ModelSnapshot = serde_json::from_value(serde_json::json!({
+        "sceneVersion":"woohaa-model-scene-ir-v2", "signature":"group-motion-hierarchy", "extent":12,
+        "ops":[
+            {"t":"group","id":"1:a"},
+            {"t":"group","id":"1:a4:root","parent":"1:a","position":[0,0,0]},
+            {"t":"group","id":"1:a5:torso","parent":"1:a4:root","position":[0,1,0]},
+            {"t":"box","id":"1:a3:arm","parent":"1:a5:torso","position":[0,-0.5,0],
+             "size":[0.2,1,0.2],"color":"#ffffff"}
+        ]
+    }))
+    .unwrap();
+    let mut node: GraphNode = serde_json::from_value(serde_json::json!({
+        "id":"film", "type":"group", "x":0, "y":0, "width":400, "height":300,
+        "group": {"title":"", "memberCount":1, "outputCapableLeafCount":0, "badgeScale":3,
+                  "geometryQuality":"overview-primitives-v1"}
+    }))
+    .unwrap();
+    node.model = Some(reference_for(&snapshot, ModelPlacement::default()));
+    let reference = node.model.as_ref().unwrap().clone();
+    let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
+    let mut scene = scene_with(&node, Some(reference));
+    scene.viewport.zoom = 0.05;
+    scene.surface = Some(surface(1.0));
+    scene.film_set_groups = vec![serde_json::from_value(serde_json::json!({
+        "schemaVersion":"woohaa-film-set-group-render-v1",
+        "ownerId":"film",
+        "badgeOrigin":{"x":200.0,"y":300.0},
+        "bindings":[{
+            "bindingId":"a", "sourceNodeId":"source", "kind":"model3d", "contentKey":"model3d:v1",
+            "transform":{"x":0.0,"y":0.0,"z":0.0,"yaw":0.0,"scale":1.0}, "visible":true
+        }]
+    }))
+    .unwrap()];
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+
+    // 合批后手臂几何被平铺到 binding 根，torso 组实体没有子几何。
+    {
+        let models = world.resource::<ModelVisuals>();
+        let root = &models.roots["film"];
+        assert!(root.batched);
+        let arm = root.part_entities["1:a3:arm"];
+        let torso = root.part_entities["1:a5:torso"];
+        assert_ne!(
+            world.get::<ChildOf>(arm).expect("arm parent").parent(),
+            torso,
+            "flattened arm must leave the torso hierarchy"
+        );
+    }
+
+    // 带 object 动作的 hover 预览必须切换非合批表示，手臂重新挂回 torso。
+    scene.animation_playback = Some(serde_json::from_value(serde_json::json!({
+        "clipId":"clip", "sourceIdentity":"s", "generation":1,
+        "viewMode":"shot-node-preview", "targetPreviewNodeId":"preview", "nodeId":"film",
+        "version":"woohaa-motion-ir-v1", "time":0.5, "duration":4, "looped":true, "playing":true,
+        "initialCamera":{"aspect":"16:9","azimuth":0,"elevation":0.4,"distance":5,"focusOffset":[0,0,0]},
+        "cameraMotion":[],
+        "objects":[{
+            "itemId":"a",
+            "playback":{"startTime":0,"duration":4,"timeScale":1,"loop":true},
+            "partIds":{"root":"1:a4:root","torso":"1:a5:torso"},
+            "modelMotion":[{"targetId":"1:a5:torso","motion":{"kind":"rotate","axis":"y","speed":1}}]
+        }]
+    }))
+    .unwrap());
+    run_sync(&mut world, &scene, &resources);
+    let models = world.resource::<ModelVisuals>();
+    let root = &models.roots["film"];
+    assert!(!root.batched, "带 object 动作的 hover 预览必须切换非合批表示");
+    assert_eq!(
+        world
+            .get::<ChildOf>(root.part_entities["1:a3:arm"])
+            .expect("arm parent")
+            .parent(),
+        root.part_entities["1:a5:torso"],
+        "非合批表示必须保留 authored torso 层级"
     );
 }
 
