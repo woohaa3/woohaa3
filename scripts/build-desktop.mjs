@@ -336,12 +336,16 @@ async function runBuild(options) {
     });
   }
   if (options.copy) {
+    // 复制目标是跨构建复用的目录：不清掉的话，每次发布都会把历史版本的安装包一起带进构件
+    // （实测一次归档里叠了三个版本、元数据 527 MB），而这次构建只该产出这一版。
+    const bundlesDir = path.join(outDir, "bundles");
+    fs.rmSync(bundlesDir, { recursive: true, force: true });
     for (const artifact of collected) {
-      const destination = path.join(outDir, "bundles", artifact.kind, artifact.name);
+      const destination = path.join(bundlesDir, artifact.kind, artifact.name);
       fs.mkdirSync(path.dirname(destination), { recursive: true });
       fs.cpSync(artifact.path, destination, { recursive: true });
     }
-    console.log(`[desktop] 已复制产物到 ${relative(path.join(outDir, "bundles"))}`);
+    console.log(`[desktop] 已复制产物到 ${relative(bundlesDir)}`);
   }
 
   const indexSha256 = (await hashPath(path.join(frontendDist, "index.html"))).sha256;
