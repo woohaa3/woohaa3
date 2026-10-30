@@ -6,7 +6,7 @@ import path from "node:path";
 import { filmSetMediaPlanesForNode, canonicalFilmSetFields, type FilmSetNodeData, type StoredAsset, type BevyNativeMediaFrame } from "@woohaa3/contracts";
 
 export type FilmSetNativeMediaFrame = BevyNativeMediaFrame;
-export type FilmSetMediaReader = (storageKey: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
+export type FilmSetMediaReader = (storageKey: string, canvasId?: string, extensionId?: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
 function run(command: string, args: string[], limit: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const process = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
@@ -32,7 +32,7 @@ export async function prepareFilmSetNativeMedia(input: {
       const asset = input.assets.find(asset => asset.id === item.assetId);
       const storageKey = asset?.metadata?.storageKey;
       if (asset?.status !== "ready" || typeof storageKey !== "string") throw new Error("片场媒体资产尚未就绪");
-      const media = await input.read(storageKey);
+      const media = await input.read(storageKey, undefined, "film-set");
       if (!media.contentType.startsWith(`${item.kind}/`) || !media.bytes.length || media.bytes.length > 16 * 1024 * 1024) throw new Error("片场媒体类型或字节预算非法");
       const file = path.join(directory, `source-${frames.length}`);
       await writeFile(file, media.bytes, { mode: 0o600 });

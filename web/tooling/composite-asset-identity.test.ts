@@ -91,14 +91,14 @@ describe("复合资产节点身份 no-compat 审计（任务 7.7）", () => {
     }
   });
 
-  it("规范身份常量保持共享 type + extensionId（D1/D11）", () => {
+  it("规范身份只保留共享 canonical type，不含具体扩展 id", () => {
     const identity = readFileSync(
       path.join(REPO_ROOT, "web/contracts/src/canvas/domain/core/composite-asset-identity.ts"),
       "utf8"
     );
     expect(identity).toContain('COMPOSITE_ASSET_NODE_TYPE = "composite-asset"');
-    expect(identity).toContain('FILM_SET_EXTENSION_ID = "film-set"');
-    expect(identity).toContain('CREATURE_VIDEO_ASSETS_EXTENSION_ID = "creature-video-assets"');
+    expect(identity).not.toContain('FILM_SET_EXTENSION_ID');
+    expect(identity).not.toContain('CREATURE_VIDEO_ASSETS_EXTENSION_ID');
   });
 
   it("MCP 片场节点创建工具已更名，不再暴露 create_animation_node", () => {

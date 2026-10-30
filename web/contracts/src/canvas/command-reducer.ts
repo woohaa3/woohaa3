@@ -19,9 +19,6 @@ import { stableStringify } from "./canvas-script/planner/hash.js";
 import type { CanvasCommand } from "./commands.js";
 import type { ServerCanvas } from "./domain/index.js";
 import { applyEditCommand } from "./command-reducer/edit-command.js";
-import { patchFilmSetClip } from "./command-reducer/film-set-clip-commands.js";
-import { patchFilmSetItem } from "./command-reducer/film-set-item-commands.js";
-import { patchFilmSetGroupBinding, ungroupFilmSetGroup } from "./command-reducer/film-set-group-commands.js";
 import {
   addNode,
   patchNodeData,
@@ -30,11 +27,13 @@ import {
 } from "./command-reducer/node-commands.js";
 import { addEdge, removeAsset, removeEdge, removeJob, upsertAsset, upsertJob } from "./command-reducer/edge-resource-commands.js";
 import { finalize } from "./command-reducer/finalize.js";
-import { observeContentResolver, type ContentContributionResolver } from "./content-contribution.js";
+import { findContentCommandOwnerForLegacyType, observeContentResolver, type ContentContributionResolver } from "./content-contribution.js";
 import { ManagedNodeLifecycleRegistry, planManagedNodeLifecycles, type ManagedNodeLifecycleResolver } from "./managed-node-lifecycle.js";
 import { isCanvasCommandShape, toWorkingState } from "./command-reducer/working-state.js";
 import { OK, reject, type ApplyCanvasCommandsResult, type CommandApplyResult, type WorkingState } from "./command-reducer/types.js";
 import { readFilmSetGroupMarker, validateFilmSetGroupBindings } from "./film-set-group.js";
+import { contentCommandResultError, immutableContentSnapshot } from "./content-command-guard.js";
+import { locateContentNode } from "./content-location.js";
 
 export type {
   ApplyCanvasCommandsResult,
@@ -131,22 +130,65 @@ function applyExtensionCommand(
   canvas: ServerCanvas,
   content: ContentContributionResolver | undefined
 ): CommandApplyResult {
-  const owner = content?.resolve(command.extensionId)?.commands;
-  if (!owner || !owner.kinds.includes(command.kind)) return reject("content-owner-unavailable", command.extensionId);
-  const envelope = { extensionId: command.extensionId, nodeId: command.nodeId, kind: command.kind, payload: command.payload };
+  const contribution = content?.resolve(command.extensionId);
+  const owner = contribution?.commands;
+  if (!owner) return reject("content-owner-unavailable", command.extensionId);
+  if (!owner.kinds.includes(command.kind) && !owner.legacyTypes?.includes(command.kind)) return reject("content-owner-unavailable", command.extensionId);
   try {
+    const envelope = immutableContentSnapshot({ extensionId: command.extensionId, nodeId: command.nodeId, kind: command.kind, payload: command.payload });
     const decoded = owner.decode(envelope);
-    if (!decoded.ok) return reject("content-command-rejected", decoded.code);
-    const current = snapshot(canvas, work);
-    if (!owner.satisfied(decoded.value, current)) return reject("content-command-rejected", "content-command-unsatisfied");
+    if (!decoded.ok) return reject("content-command-rejected", decoded.reason || decoded.code);
+    const current = immutableContentSnapshot(snapshot(canvas, work));
     const applied = owner.apply(decoded.value, current);
+    if (!applied.ok) return reject("content-command-rejected", applied.reason || applied.code);
+    const result = immutableContentSnapshot(applied.canvas);
+    const isLocatedOwner = (type: string, data: unknown): string | null => {
+      const located = locateContentNode(content, type, data);
+      return located.ok && located.location ? located.location.extensionId : null;
+    };
+    const violation = contentCommandResultError(command.extensionId, canvas, result, isLocatedOwner, Boolean(contribution.ownerLocators?.length));
+    if (violation) return reject("content-command-rejected", violation);
+    if (!owner.satisfied(decoded.value, result)) return reject("content-command-rejected", "content-command-unsatisfied");
+    work.title = result.title ?? "";
+    work.nodes = result.document.nodes.map((node) => ({ ...node, data: {} }));
+    work.edges = result.document.edges;
+    work.nodeData = result.nodeData;
+    work.assets = result.assets;
+    work.jobs = result.jobs;
+    return OK;
+  } catch {
+    return reject("content-codec-failed", command.extensionId);
+  }
+}
+
+function writeBackCanvas(work: WorkingState, canvas: ServerCanvas): void {
+  work.title = canvas.title ?? "";
+  work.nodes = canvas.document.nodes.map((node) => ({ ...node, data: {} }));
+  work.edges = canvas.document.edges;
+  work.nodeData = canvas.nodeData;
+  work.assets = canvas.assets;
+  work.jobs = canvas.jobs;
+}
+
+function applyExtensionEdit(
+  work: WorkingState,
+  command: Extract<CanvasCommand, { type: "extension.edit" }>,
+  canvas: ServerCanvas,
+  content: ContentContributionResolver | undefined
+): CommandApplyResult {
+  const owner = content?.resolve(command.extensionId)?.edit;
+  if (!owner) return reject("content-owner-unavailable", command.extensionId);
+  if (command.direction !== "forward" && command.direction !== "inverse") return reject("invalid-command", "extension.edit direction 非法");
+  const input = {
+    direction: command.direction,
+    edit: command.edit,
+    preconditions: command.preconditions ?? [],
+    canvas: snapshot(canvas, work)
+  } as const;
+  try {
+    const applied = owner.apply(input);
     if (!applied.ok) return reject("content-command-rejected", applied.code);
-    work.title = applied.canvas.title ?? "";
-    work.nodes = applied.canvas.document.nodes.map((node) => ({ ...node, data: {} }));
-    work.edges = applied.canvas.document.edges;
-    work.nodeData = applied.canvas.nodeData;
-    work.assets = applied.canvas.assets;
-    work.jobs = applied.canvas.jobs;
+    writeBackCanvas(work, applied.canvas);
     return OK;
   } catch {
     return reject("content-codec-failed", command.extensionId);
@@ -154,34 +196,42 @@ function applyExtensionCommand(
 }
 
 function applyCommand(work: WorkingState, command: CanvasCommand, canvas: ServerCanvas, content: ContentContributionResolver | undefined): CommandApplyResult {
+  // 过渡窗口：owner 可认领旧命令 type；未认领时保持内核兼容路径。
+  const legacyOwner = findContentCommandOwnerForLegacyType(content, command.type);
+  if (legacyOwner) {
+    const target = "nodeId" in command && typeof command.nodeId === "string"
+      ? command.nodeId
+      : "groupId" in command && typeof command.groupId === "string" ? command.groupId : undefined;
+    return applyExtensionCommand(work, {
+      type: "extension.command",
+      extensionId: legacyOwner.extensionId,
+      ...(target ? { nodeId: target } : {}),
+      kind: command.type,
+      payload: command
+    }, canvas, content);
+  }
   switch (command.type) {
     case "edit.apply":
-      return applyEditCommand(work, command);
+      return applyEditCommand(work, command, content);
     case "canvas.setTitle":
       work.title = command.title;
       return OK;
     case "node.add":
-      return addNode(work, command);
+      return addNode(work, command, content);
     case "node.update":
       return updateNode(work, command);
     case "node.remove":
-      return removeNodes(work, command.nodeIds);
+      return removeNodes(work, command.nodeIds, content);
     case "nodeData.patch":
       if (command.expectedNodeData && Object.entries(command.expectedNodeData).some(([id, data]) => !work.nodes.some(n => n.id === id) || stableStringify(work.nodeData[id] ?? null) !== stableStringify(data))) return reject("edit-precondition-failed", "媒体来源或目标已变化，请重新解析");
       if (command.expectedInputMapping !== undefined && JSON.stringify(work.nodeData[command.nodeId]?.inputMapping ?? []) !== JSON.stringify(command.expectedInputMapping)) {
         return reject("invalid-connection", "输入连接已变化，请重新执行");
       }
-      return patchNodeData(work, command.nodeId, command.value);
-    case "filmSet.clipPatch":
-      return patchFilmSetClip(work, command);
-    case "filmSet.itemPatch":
-      return patchFilmSetItem(work, command);
-    case "filmSetGroup.bindingPatch":
-      return patchFilmSetGroupBinding(work, command);
-    case "filmSetGroup.ungroup":
-      return ungroupFilmSetGroup(work, command);
+      return patchNodeData(work, command.nodeId, command.value, content);
     case "extension.command":
       return applyExtensionCommand(work, command, canvas, content);
+    case "extension.edit":
+      return applyExtensionEdit(work, command, canvas, content);
     case "edge.add":
       return addEdge(work, command.edge);
     case "edge.remove":
@@ -194,5 +244,8 @@ function applyCommand(work: WorkingState, command: CanvasCommand, canvas: Server
       return upsertJob(work, command.job);
     case "job.remove":
       return removeJob(work, command.jobId);
+    default:
+      // 未被 owner `legacyTypes` 认领的旧/未知命令必须在副作用前稳定拒绝。
+      return reject("invalid-command", `不支持的命令类型：${String((command as { type?: unknown }).type)}`);
   }
 }

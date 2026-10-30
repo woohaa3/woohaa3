@@ -142,13 +142,20 @@ fn hardware_run_effect_shader_and_output_isolation() {
         .resource_mut::<ModelAssetTable>()
         .0
         .insert("fixture".into(), Arc::new(model));
-    app.world_mut().resource_mut::<CurrentScene>().0.nodes = serde_json::from_value(serde_json::json!([{
+    let mut state = app.world_mut().resource_mut::<CurrentScene>();
+    state.0.nodes = serde_json::from_value(serde_json::json!([{
         "id":"film","type":"model","x":180,"y":100,"width":280,"height":260,
         "model":{"resourceKey":"fixture","signature":"run-fixture"},
         "compositeAsset":{"x":160,"y":100,"width":320,"height":280,"scopeShape":"isometric-diamond",
             "scopeGround":{"cx":320,"cy":300,"hx":170,"hz":140}},
-        "aggregateRun":{"active":true,"filmSet":{"operationKey":"fixture-operation","phase":"running","source":"agent","labelCode":"generating"}}
+        "aggregateRun":{"active":true}
+    }]))
+    .unwrap();
+    state.0.run_feedback = serde_json::from_value(serde_json::json!([{
+        "nodeId":"film","active":true,"operationKey":"fixture-operation","phase":"running","source":"agent","labelCode":"generating"
     }])).unwrap();
+    state.0.index_primitives();
+    drop(state);
     let mut image = Image::new_uninit(
         Extent3d {
             width: 640,
@@ -264,10 +271,7 @@ fn hardware_run_effect_shader_and_output_isolation() {
         .unwrap()
         .is_active = true;
     app.world_mut().resource_mut::<CurrentScene>().0.nodes[0]
-        .aggregate_run
-        .as_mut()
-        .unwrap()
-        .film_set
+        .run_feedback
         .as_mut()
         .unwrap()
         .phase = "queued".into();

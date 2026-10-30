@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { filmSetClipHash, filmSetClipPrecondition, filmSetBindingHash, filmSetItemAdapterHash, isFilmSetClipPatchOp, staticShotCameraMotion } from "@woohaa3/contracts";
+import { filmSetClipHash, filmSetClipPatchCommand, filmSetClipPrecondition, filmSetBindingHash, filmSetItemAdapterHash, isFilmSetClipPatchOp, staticShotCameraMotion } from "@woohaa3/contracts";
 import { createToolRegistrar } from "./guide.js";
 import { jsonResult, toolError } from "./tool-results.js";
 import type { ModelMcpHttpOptions, ToolRegistration } from "./http-types.js";
@@ -56,7 +56,7 @@ export function registerFilmSetClipTools(reg: ToolRegistration, options: ModelMc
       const denied = reg.grantDenied("mutate_film_set_clip", { canvasId, nodeId, clipId: op.newClipId });
       if (denied) return toolError(denied, "unauthorized");
     }
-    const result = await options.service.applyCommands({ canvasId, commandId: `film-set-clip:${canvasId}:${nodeId}:${clipId}:${requestId}`, baseRevision: 0, commands: [{ type: "filmSet.clipPatch", nodeId, clipId, expectedHash, op }] });
+    const result = await options.service.applyCommands({ canvasId, commandId: `film-set-clip:${canvasId}:${nodeId}:${clipId}:${requestId}`, baseRevision: 0, commands: [filmSetClipPatchCommand({ nodeId, clipId, expectedHash, op })] });
     return result.ok ? jsonResult({ ...result, nodeId, clipId }) : toolError(result.message, result.code);
   });
 }

@@ -67,12 +67,12 @@ describe("content contribution registry", () => {
       extensionId: "game-furnace",
       mcpTools: [{ name: "import_content", title: "导入", description: "导入", inputSchema: {}, handle: () => ({ ok: true }) }]
     })).toThrow(/content-tool-conflict/);
-    expect(() => registry.register({
+    registry.register({
       extensionId: "game-furnace",
       routes: [{ method: "POST", path: ["import"], handle: () => ({ status: 204 }) }]
-    })).toThrow(/content-route-conflict/);
-    expect(registry.resolve("game-furnace")).toBeNull();
-    expect(registry.resolve("film-set")?.extensionId).toBe("film-set");
+    });
+    expect(registry.route("game-furnace", "POST", ["import"])).not.toBeNull();
+    expect(registry.route("film-set", "POST", ["import"])).not.toBeNull();
   });
 });
 
@@ -89,5 +89,15 @@ describe("content resolver seam", () => {
       sanitizeNodeDataForClipboard({ title: "标题", prompt: "保持" })
     );
     expect(buildCanvasRenderScene({ canvas, content: EMPTY_CONTENT_RESOLVER }).version).toBe(buildCanvasRenderScene({ canvas }).version);
+  });
+});
+
+describe("content declaration catalog", () => {
+  it("exposes deduplicated target modes and event owners from active contributions", () => {
+    const registry = new ContentContributionRegistry();
+    registry.register({ extensionId: "npc-production", targetModes: ["npc-production", "canvas-group"], eventOwners: ["npc-production"] });
+    registry.register({ extensionId: "game-furnace", targetModes: ["npc-production"], eventOwners: ["furnace"] });
+    expect(registry.targetModes()).toEqual(["canvas-group", "npc-production"]);
+    expect(registry.eventOwners()).toEqual(["furnace", "npc-production"]);
   });
 });

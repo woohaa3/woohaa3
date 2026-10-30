@@ -13,9 +13,16 @@ import type { ComponentType } from "react";
 import type { AgentConversationService } from "./agent-conversation.js";
 import type { PanelPresentationIntent } from "./model-interaction.js";
 
-/** 生成目标模式；`camera` 仅为旧入口兼容值，新的片场镜头统一使用 `film-set`。 */
+/**
+ * 生成目标模式。内建模式只保留通用语义；扩展可声明自己的稳定 mode 并由宿主能力目录校验，
+ * 兼容值 `camera` 仍供旧入口使用。
+ */
 export type AuthoringGenerateMode =
-  "model3d" | "canvas-group" | "film-set" | "camera" | "text";
+  | "model3d"
+  | "canvas-group"
+  | "camera"
+  | "text"
+  | (string & {});
 
 /** A finite domain delivery adapter. Conversation data and presentation remain host owned. */
 export type AssistantDeliveryTarget = {

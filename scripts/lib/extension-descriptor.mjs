@@ -176,7 +176,7 @@ const KEBAB_ID = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const CONTENT_FIELD_NAME = /^[A-Za-z][A-Za-z0-9]*$/;
 const CONTENT_TOOL_NAME = /^[a-z][a-z0-9_]*$/;
 const CONTENT_ROUTE_PREFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
-const CONTENT_KEYS = ["ownedFields", "ownedWireFields", "routePrefix", "mcpTools", "targetModes", "eventOwners"];
+const CONTENT_KEYS = ["ownedFields", "ownedWireFields", "routePrefix", "mcpTools", "targetModes", "eventOwners", "ownerLocators"];
 /** 只接受包内相对模块（`./backend` 这类子路径），拒绝 URL/绝对路径/脚本地址。 */
 const PACKAGE_SUBPATH = /^\.\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 /** 品牌图形允许的扩展名（与 contracts 的图标资产白名单一致）。 */
@@ -401,6 +401,23 @@ export function validateExtensionDescriptor(value) {
       validateContentNames(content.eventOwners, "content.eventOwners", KEBAB_ID, errors);
       if (content.routePrefix !== undefined && (typeof content.routePrefix !== "string" || !CONTENT_ROUTE_PREFIX.test(content.routePrefix))) {
         errors.push("content.routePrefix 必须是相对 kebab 路径");
+      }
+      const locators = content.ownerLocators;
+      if (locators !== undefined) {
+        if (!Array.isArray(locators) || locators.length === 0) {
+          errors.push("content.ownerLocators 必须是非空数组");
+        } else {
+          for (const [index, locator] of locators.entries()) {
+            const label = `content.ownerLocators[${index}]`;
+            if (!isPlainObject(locator)) {
+              errors.push(`${label} 必须是对象`);
+              continue;
+            }
+            for (const key of unknownKeys(locator, ["nodeTypes", "fields"])) errors.push(`${label} 未知字段：${key}`);
+            validateContentNames(locator.nodeTypes, `${label}.nodeTypes`, /^[a-z][a-z0-9-]{0,63}$/, errors);
+            validateContentNames(locator.fields, `${label}.fields`, CONTENT_FIELD_NAME, errors);
+          }
+        }
       }
     }
   }

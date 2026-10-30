@@ -131,7 +131,7 @@ describe("Agent Canvas script 内部能力面（任务 4.3–4.5）", () => {
     if (exported.ok) expect(exported.canvas.document.nodes).toHaveLength(2);
   });
 
-  it("组脚本可以创建自包含片场节点", async () => {
+  it("通用脚本拒绝业务语义 kind，复合内容必须走扩展工具", async () => {
     const { service, room } = await setup();
     const source = `canvas.node("film-set", { key: "studio", title: "片场" });`;
     const submitted = await service.submitScript({
@@ -141,14 +141,10 @@ describe("Agent Canvas script 内部能力面（任务 4.3–4.5）", () => {
       version: "woohaa-canvas-js-v1",
       source
     });
-    expect(submitted.ok).toBe(true);
+    expect(submitted.ok).toBe(false);
     const exported = room.exportCanvas();
     expect(exported.ok).toBe(true);
-    if (exported.ok) {
-      const node = exported.canvas.document.nodes.find(entry => entry.type === "group");
-      expect(node).toBeDefined();
-      expect(node && exported.canvas.nodeData[node.id]).toMatchObject({ filmSetGroup: { sceneBindings: [] } });
-    }
+    if (exported.ok) expect(exported.canvas.document.nodes).toHaveLength(0);
   });
 
   it("重试相同 requestId 返回冻结首次回执（duplicate），不推进 revision", async () => {

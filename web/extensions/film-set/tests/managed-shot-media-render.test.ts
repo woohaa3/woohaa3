@@ -2,12 +2,13 @@ import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js"
 import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it, vi } from "vitest";
 import {
-  buildCanvasRenderScene, canonicalFilmSetFields,
+  buildCanvasRenderScene, canonicalFilmSetFields, ContentContributionRegistry,
   createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, createMotionSnapshot, shotPreviewNodeId,
   shotImageReferenceAssetId,
   type ServerCanvas, type StoredAsset} from "@woohaa3/contracts";
 import { CompositeAssetRegistry } from "@woohaa3/frontend/extension-api";
 import { createFilmSetModelAdapter } from "../src/preview/browser/model-adapter.js";
+import { filmSetPresentation } from "../src/state/shared/content/presentation.js";
 import { createShotMediaProvider, shotMediaRef, shotMediaSource } from "../src/authoring/browser/shot-media-provider.js";
 import type { FilmSetHostContext } from "../src/state/browser/host-ports.js";
 import type { ShotImageReferences } from "../src/authoring/browser/shot-image-reference.js";
@@ -96,13 +97,17 @@ describe("managed shot media render pipeline", () => {
     const registry = new CompositeAssetRegistry();
     registry.register(createFilmSetModelAdapter());
     const projected = registry.projectCanvas(canvas)!;
-    const scene = buildCanvasRenderScene({ canvas: projected });
+    const content = new ContentContributionRegistry();
+    content.register({ extensionId: "film-set", presentation: filmSetPresentation });
+    const scene = buildCanvasRenderScene({ canvas: projected, content });
     const node = scene.nodes.find(node => node.id === id)!;
     expect(node.type).toBe(kind === "static" ? "image" : "video");
     // Both live preview and requestCapture route through this descriptor. They
     // must work before PNG/video materialization has written outputAssetId.
     expect(canvas.nodeData[id].outputAssetId).toBeUndefined();
-    expect(node.shotPreview).toMatchObject({ filmSetNodeId: "film", clipId: "clip-1", kind });
+    expect(scene.previewCards?.find(card => card.nodeId === id)).toMatchObject({
+      ownerNodeId: "film", entityId: "clip-1", animated: kind === "dynamic"
+    });
     expect(registry.children(projected).get(id)).toMatchObject({ ownerNodeId: "film", role: "preview" });
     expect(canvas).toEqual(canonical);
     expect(canvas.nodeData[id].shotPreview).toBeUndefined();
@@ -112,7 +117,9 @@ describe("managed shot media render pipeline", () => {
     canvas.nodeData.film.filmSetGroup!.clips![0]!.backdrop = "#112233";
     const registry = new CompositeAssetRegistry();
     registry.register(createFilmSetModelAdapter());
-    const scene = buildCanvasRenderScene({ canvas: registry.projectCanvas(canvas)!, shotPreviews: new Map([[id, { state: "ready", progress: 0.6, playing: true }]]) });
-    expect(scene.nodes.find(node => node.id === id)?.shotPreview).toMatchObject({ backdrop: "#112233", progress: 0.6, playing: true });
+    const content = new ContentContributionRegistry();
+    content.register({ extensionId: "film-set", presentation: filmSetPresentation });
+    const scene = buildCanvasRenderScene({ canvas: registry.projectCanvas(canvas)!, content, previewLocalStates: new Map([[id, { state: "ready", progress: 0.6, playing: true }]]) });
+    expect(scene.previewCards?.find(card => card.nodeId === id)).toMatchObject({ backdrop: "#112233", progress: 0.6, playing: true });
   });
 });

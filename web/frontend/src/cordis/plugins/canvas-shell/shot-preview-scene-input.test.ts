@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createFilmSetGroupMarker, shotPreviewNodeId, staticShotCameraMotion, type ServerCanvas } from "@woohaa3/contracts";
-import { buildShotPreviewSceneInput, shotPreviewLinkOrigin } from "./shot-preview-scene-input.js";
+import { buildContentPresentationSceneInput, shotPreviewLinkOrigin } from "./shot-preview-scene-input.js";
 
 // 「主用」画布上的真实片场徽标（group 高 2017.25、倍率 12.63 → 1110×808，画布坐标）。
 const badge = { center: { x: 747.875, y: 4237.37 } };
@@ -24,7 +24,7 @@ describe("shotPreviewLinkOrigin", () => {
   });
 });
 
-describe("buildShotPreviewSceneInput 归属线起点", () => {
+describe("buildContentPresentationSceneInput 归属线起点", () => {
   const groupId = "film-group";
   const clipId = "clip-1";
   const previewId = shotPreviewNodeId(groupId, clipId);
@@ -54,8 +54,8 @@ describe("buildShotPreviewSceneInput 归属线起点", () => {
   } as unknown as ServerCanvas;
 
   const originOf = (badgeScaleOverrides?: ReadonlyMap<string, number>) => {
-    const input = buildShotPreviewSceneInput({ canvas, playback: null, targets: [], badgeScaleOverrides });
-    const origin = input.shotPreviewCameraProjection(groupId, clipId);
+    const input = buildContentPresentationSceneInput({ canvas, playback: null, targets: [], badgeScaleOverrides });
+    const origin = input.entityAnchorProjection(groupId, clipId);
     expect(origin).not.toBeNull();
     return origin!;
   };

@@ -43,7 +43,7 @@ pub struct RecordingRenderPlan {
 pub(crate) struct RecordingMediaPlane {
     resource_id: String,
     #[serde(flatten)]
-    plane: crate::protocol::ModelMediaPlane,
+    plane: crate::protocol::MediaPlane,
 }
 
 /// 冻结的媒体播放映射（与 contracts / proto `ResourceDescriptor` 同语义）。

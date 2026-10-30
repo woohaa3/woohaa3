@@ -1,7 +1,7 @@
 import { migrateFilmSetCanvasFixture } from "../../../../test-support/film-set-groups.js";
 import { readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { describe, expect, it } from "vitest";
-import { canonicalFilmSetFields, createEmptyWoohaa3ServerCanvas, filmSetClipPrecondition, hashModelScript, hashMotionScript, type CanvasCommand, decodeFilmSetNodeData, filmSetAnimationsOf } from "@woohaa3/contracts";
+import { canonicalFilmSetFields, ContentContributionRegistry, createEmptyWoohaa3ServerCanvas, filmSetClipPrecondition, filmSetContentContribution, hashModelScript, hashMotionScript, type CanvasCommand, decodeFilmSetNodeData, filmSetAnimationsOf } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { CanvasRoom } from "../sync/room.js";
 import { InMemoryYjsDocumentRepository } from "../sync/in-memory-yjs-repository.js";
@@ -40,7 +40,9 @@ function legacyCanvas() {
 /** 已在隔离 reader 升级后的 canonical 片场画布，用于 room 内的 durable 命令断言。 */
 async function migratedRoom() {
   const repository = new InMemoryYjsDocumentRepository();
-  const room = new CanvasRoom({ canvasId: "c", repository, now: () => now });
+  const content = new ContentContributionRegistry();
+  content.register(filmSetContentContribution);
+  const room = new CanvasRoom({ canvasId: "c", repository, now: () => now, content });
   const canvas = createEmptyWoohaa3ServerCanvas("c", now);
   canvas.document.nodes.push({ id: "fs", type: "composite-asset", position: { x: 0, y: 0 } });
   const read = readLegacyFilmSetNodeData(legacyCanvas().nodeData.fs);
@@ -64,7 +66,7 @@ function snapshot(room: CanvasRoom) { const read = room.exportCanvas(); if (!rea
 function rename(room: CanvasRoom, name: string): CanvasCommand {
   const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(snapshot(room), "fs")!)); if (!decoded.ok) throw Error(decoded.reason);
   const op = { kind: "rename" as const, name };
-  return { type: "filmSet.clipPatch", nodeId: "fs", clipId: "legacy-default", op, expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(decoded.value), "legacy-default", op) };
+  return { type: "extension.command", extensionId: "film-set", nodeId: "fs", kind: "clip.patch", payload: { clipId: "legacy-default", op, expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(decoded.value), "legacy-default", op) } };
 }
 describe("durable clip commands and explicit migration", () => {
   it("隔离 reader 只读转换旧 flat 片场，产出严格 canonical 内容", () => {
@@ -109,7 +111,7 @@ describe("durable clip commands and explicit migration", () => {
     expect((await commands(room, "stale", [first])).ok).toBe(false);
     const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(snapshot(room), "fs")!)); if (!decoded.ok) throw Error(decoded.reason);
     const timeline = { kind: "timeline" as const, timeline: { duration: 8, loop: true } };
-    const pending = { type: "filmSet.clipPatch" as const, nodeId: "fs", clipId: "legacy-default", op: timeline, expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(decoded.value), "legacy-default", timeline) };
+    const pending = { type: "extension.command" as const, extensionId: "film-set", nodeId: "fs", kind: "clip.patch", payload: { clipId: "legacy-default", op: timeline, expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(decoded.value), "legacy-default", timeline) } };
     await commands(room, "rename2", [rename(room, "其他名称")]);
     expect((await commands(room, "timeline", [pending])).ok).toBe(true); room.dispose();
   });

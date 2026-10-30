@@ -17,6 +17,7 @@ import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/inde
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields } from "./film-set-clip-view.js";
 import { filmSetClipPrecondition, type FilmSetClipPatchOp } from "./film-set-clip-ops.js";
+import { filmSetClipPatchCommand } from "./film-set-content.js";
 import { decodeFilmSetNodeData, type FilmSetNodeData } from "./canvas-node-model.js";
 import { staticShotCameraMotion, type FilmSetAnimationClip } from "./film-set-animations.js";
 import { FILM_SET_SHOT_PREVIEW_NODE_TYPE, shotPreviewNodeId } from "./film-set-shot-preview.js";
@@ -63,13 +64,12 @@ function staticClip(id: string, name: string): FilmSetAnimationClip {
 function clipPatch(canvas: ServerCanvas, op: FilmSetClipPatchOp, clipId = CLIP_1) {
   const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(canvas, "film")!));
   if (!decoded.ok) throw new Error(decoded.reason);
-  return {
-    type: "filmSet.clipPatch",
+  return filmSetClipPatchCommand({
     nodeId: "film",
     clipId,
     expectedHash: filmSetClipPrecondition(decoded.value.filmSetAnimations!, clipId, op),
     op
-  };
+  });
 }
 
 function withFilmSet(): ServerCanvas {

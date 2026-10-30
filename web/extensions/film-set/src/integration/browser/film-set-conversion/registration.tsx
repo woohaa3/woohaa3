@@ -107,6 +107,7 @@ export function installFilmSetConversionEntries(ctx: ConversionContext): () => v
     id: "film-set-conversion",
     owner: "film-set",
     order: -10,
+    contentAction: "convert",
     // Hide the action for the extension's own managed shot media and for nodes already
     // inside a group (a film set is itself a group; nested groups are not supported);
     // other supported sources remain visible while readiness and write permission only

@@ -346,7 +346,8 @@ mod tests {
     fn node(width: f32, height: f32) -> crate::protocol::GraphNode {
         crate::protocol::GraphNode {
             model_preview: None,
-            shot_preview: None,
+            preview_card: None,
+            run_feedback: None,
 
             id: "g".into(),
             kind: "group".into(),

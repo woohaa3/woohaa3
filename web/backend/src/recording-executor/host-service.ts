@@ -96,7 +96,7 @@ export type RecordingCanvasReader = {
    * 必须按画布作用域读；调用方（{@link HostRecordingService}）在冻结时用请求的 canvasId 绑定，
    * 省略表示与画布无关（保持旧行为）。
    */
-  readMedia?: (storageKey: string, canvasId?: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
+  readMedia?: (storageKey: string, canvasId?: string, extensionId?: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
 };
 
 /** 把成片字节上传到 Media，得到 stable storageKey。 */
@@ -380,7 +380,7 @@ export class HostRecordingService implements CanvasRecordingPort {
         // 素材读取必须带上本次积木所属画布：远端画布的素材只在托管存储里，绑错作用域会 404。
         // freeze 还没产出快照，所以用请求的 canvasId（它随后写入 snapshot.origin.canvasId）。
         ...(this.options.canvas.readMedia
-          ? { read: (storageKey: string) => this.options.canvas.readMedia!(storageKey, canvasId) }
+          ? { read: (storageKey: string) => this.options.canvas.readMedia!(storageKey, canvasId, runtime.extensionId) }
           : {})
       }
     });

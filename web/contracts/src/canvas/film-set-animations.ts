@@ -35,10 +35,8 @@ export type FilmSetAnimationBinding = { itemId: string; motion?: MotionDefinitio
  * `theme` 表示跟随主题（镜头预览清屏色）；自定义值必须是六位 `#rrggbb`。背景只作用于该镜头的
  * 预览、拍摄与导出画面，编辑片场的工作区视图不受影响。
  */
-export const FILM_SET_BACKDROP_THEME = "theme" as const;
-export type FilmSetBackdrop = typeof FILM_SET_BACKDROP_THEME | string;
-/** 严格六位十六进制（大写统一为小写；与渲染侧 `parse_hex` 一致）。 */
-const BACKDROP_HEX = /^#[0-9a-f]{6}$/;
+export { FILM_SET_BACKDROP_THEME, filmSetBackdropIsCustom, readFilmSetBackdrop, type FilmSetBackdrop } from "./film-set-backdrop.js";
+import { readFilmSetBackdrop } from "./film-set-backdrop.js";
 
 export type FilmSetAnimationClip = {
   id: string;
@@ -78,27 +76,6 @@ export function isFilmSetShotKind(value: unknown): value is FilmSetShotKind {
   return typeof value === "string" && (FILM_SET_SHOT_KINDS as readonly string[]).includes(value);
 }
 
-/**
- * 校验并规范化镜头背景（D6）。
- *
- * 缺失 / `theme` → `undefined`（不写入规范数据，旧镜头身份不变）；自定义色只接受六位
- * `#rrggbb`（统一小写）。其它值（`#0008`、颜色名、3 位短写）一律拒绝，不静默回退。
- */
-export function readFilmSetBackdrop(input: unknown): { ok: true; value: string | undefined } | { ok: false; reason: string } {
-  if (input === undefined || input === null) return { ok: true, value: undefined };
-  if (typeof input !== "string") return { ok: false, reason: "backdrop 必须是字符串" };
-  if (input === FILM_SET_BACKDROP_THEME) return { ok: true, value: undefined };
-  const normalized = input.trim().toLowerCase();
-  if (!BACKDROP_HEX.test(normalized)) {
-    return { ok: false, reason: "backdrop 必须是 theme 或六位十六进制颜色（如 #000000）" };
-  }
-  return { ok: true, value: normalized };
-}
-
-/** 镜头背景是否已显式设为自定义颜色。 */
-export function filmSetBackdropIsCustom(clip: { backdrop?: string }): boolean {
-  return typeof clip.backdrop === "string" && clip.backdrop !== FILM_SET_BACKDROP_THEME;
-}
 
 /** 是否静态拍摄镜头（零时长、非循环、空镜头动作）。 */
 export function isStaticShot(clip: { kind: FilmSetShotKind }): boolean {

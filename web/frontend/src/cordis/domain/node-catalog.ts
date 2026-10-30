@@ -41,24 +41,21 @@ export type CanvasNodeTemplate = {
  * 节点菜单目录；空白右键与拉线创建共用，顺序与旧 Godot 菜单一致。
  *
  * 片场由 film-set 扩展经 `canvas.node-template` 贡献（携带扩展自己的默认镜头/片段），
- * 宿主目录不再重复列出，避免右键菜单出现两个「片场」。共享描述符仍保留 film-set，
- * 供 MCP 与默认 nodeData 复用。
+ * 宿主目录不再重复列出，避免右键菜单出现两个「片场」。Agent 通用 kind 不再包含片场。
  */
 export const NODE_TEMPLATES: readonly CanvasNodeTemplate[] = [
-  ...AGENT_NODE_DESCRIPTORS
-    .filter((descriptor) => descriptor.kind !== "film-set")
-    .map((descriptor) => ({
-      id: (descriptor.kind === "model" ? "model3d" : descriptor.kind) as CanvasNodeTemplateId,
-      label: descriptor.kind === "model" ? "3D 模型" : descriptor.label,
-      nodeType: descriptor.canonicalType,
-      taskKind: descriptor.taskKind !== undefined
-    }))
+  ...AGENT_NODE_DESCRIPTORS.map((descriptor) => ({
+    id: (descriptor.kind === "model" ? "model3d" : descriptor.kind) as CanvasNodeTemplateId,
+    label: descriptor.kind === "model" ? "3D 模型" : descriptor.label,
+    nodeType: descriptor.canonicalType,
+    taskKind: descriptor.taskKind !== undefined
+  }))
 ];
 
 /** model 语义别名与 model3d 菜单项返回同一份模板。 */
 export function findNodeTemplate(id: string): CanvasNodeTemplate | null {
-  // 优先稳定菜单 id；film-set 与扩展占位模板共用 composite-asset canonical type，不能让
-  // canonical 查询意外吞掉显式的 composite-asset 模板。
+  // 优先稳定菜单 id；扩展占位模板与 composite-asset canonical type 共用时，不能让
+  // canonical 查询意外吞掉显式模板。
   const fixed = NODE_TEMPLATES.find((template) => template.id === id)
     ?? NODE_TEMPLATES.find((template) => template.nodeType === id);
   if (fixed) return fixed;
@@ -101,7 +98,7 @@ export function connectNodeDataFor(
   if (!base) return undefined;
   // 自包含 3D 节点不从来源节点取得运行数据：连线只作来源说明，不注入任务 inputMapping
   // （change: 2026-10-05-bind-model-animation-to-shots）；复合资产节点同理。
-  if (toNodeType === "model3d" || toNodeType === "composite-asset" || toNodeType === "film-set") return { ...base };
+  if (toNodeType === "model3d" || toNodeType === "composite-asset") return { ...base };
   const data: CanvasNodeData = { ...base };
   data.inputMapping = [
     {

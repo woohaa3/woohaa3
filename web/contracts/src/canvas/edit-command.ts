@@ -10,13 +10,8 @@
  * 解码与语义。
  */
 import type { CanvasNodeData, Woohaa3CanvasJsonObject } from "./domain/index.js";
-import { decodeFilmSetLocalTransform } from "./film-set-content.js";
-import type { FilmSetItem } from "./film-set-content.js";
-import type { FilmSetItemBindingRestore, FilmSetItemOrderAnchor } from "./film-set-item-edit.js";
-import type { FilmSetAnimationClip } from "./film-set-animations.js";
 import {
   EDIT_APPLY_LIMITS,
-  EDIT_NODE_DATA_FIELDS,
   EDIT_NODE_FIELDS,
   type EditApplyCommand,
   type EditFieldSnapshot,
@@ -31,7 +26,6 @@ import {
 export {
   EDIT_APPLY_LIMITS,
   EDIT_NODE_FIELDS,
-  EDIT_NODE_DATA_FIELDS,
   type EditNodeField,
   type EditNodeDataField,
   type EditFieldSnapshot,
@@ -58,8 +52,22 @@ function isEditNodeField(value: unknown): value is EditNodeField {
   return typeof value === "string" && (EDIT_NODE_FIELDS as readonly string[]).includes(value);
 }
 
-function isEditNodeDataField(value: unknown): value is EditNodeDataField {
-  return typeof value === "string" && (EDIT_NODE_DATA_FIELDS as readonly string[]).includes(value);
+/** 由专门权威路径管理的结构字段；不能经 `edit.apply` 的字段快照回退。 */
+const RESERVED_NODE_DATA_FIELDS = new Set([
+  "prompt", "parameters", "references", "taskStatus", "taskKind", "outputAssetId", "posterAssetId",
+  "activeRunId", "jobId", "mediaContent", "managedBy", "extensionId", "compositeAssetRole",
+  // 连接映射由边/输入协调统一维护；它不是用户可独立撤销的字段。
+  "inputMapping"
+]);
+
+/**
+ * 是否允许作为通用 nodeData 历史字段。
+ *
+ * 任务、媒体与托管归属由专门权威路径管理，不能经字段历史回退；其余字段由净差异规划决定，
+ * 内核不枚举具体业务字段名。
+ */
+export function isEditNodeDataField(value: unknown): value is EditNodeDataField {
+  return typeof value === "string" && value.length > 0 && value.length <= 200 && !RESERVED_NODE_DATA_FIELDS.has(value) && !/[./[\]\\]/.test(value);
 }
 
 function isPosition(value: unknown): value is { x: number; y: number } {
@@ -100,6 +108,12 @@ function decodePrecondition(value: unknown): EditPrecondition | null {
         fields.push(decoded);
       }
       return { kind: "node-fields", nodeId: value.nodeId, fields };
+    }
+    case "node-data-equals": {
+      if (!isNonEmptyString(value.nodeId) || typeof value.present !== "boolean") return null;
+      return value.present
+        ? { kind: "node-data-equals", nodeId: value.nodeId, present: true, value: value.value }
+        : { kind: "node-data-equals", nodeId: value.nodeId, present: false };
     }
     case "node-data-fields": {
       if (!isNonEmptyString(value.nodeId) || !Array.isArray(value.fields)) return null;
@@ -142,39 +156,6 @@ function decodePrecondition(value: unknown): EditPrecondition | null {
       if (!Array.isArray(value.assetIds) || !value.assetIds.every(isNonEmptyString)) return null;
       return { kind: "assets-present", assetIds: [...value.assetIds] };
     }
-    case "film-set-item-state":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.itemId) && typeof value.contentHash === "string"
-        ? { kind: "film-set-item-state", nodeId: value.nodeId, itemId: value.itemId, contentHash: value.contentHash }
-        : null;
-    case "film-set-item-missing":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.itemId)
-        ? { kind: "film-set-item-missing", nodeId: value.nodeId, itemId: value.itemId }
-        : null;
-    case "film-set-clip-present":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.clipId)
-        ? { kind: "film-set-clip-present", nodeId: value.nodeId, clipId: value.clipId }
-        : null;
-    case "film-set-item-binding":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.clipId) && isNonEmptyString(value.itemId) && typeof value.bindingHash === "string"
-        ? { kind: "film-set-item-binding", nodeId: value.nodeId, clipId: value.clipId, itemId: value.itemId, bindingHash: value.bindingHash }
-        : null;
-    case "film-set-item-binding-closure": {
-      if (!isNonEmptyString(value.nodeId) || !isNonEmptyString(value.itemId) || !Array.isArray(value.bindings)) return null;
-      const bindings: { clipId: string; bindingHash: string }[] = [];
-      for (const entry of value.bindings) {
-        if (!isRecord(entry) || !isNonEmptyString(entry.clipId) || typeof entry.bindingHash !== "string") return null;
-        bindings.push({ clipId: entry.clipId, bindingHash: entry.bindingHash });
-      }
-      return { kind: "film-set-item-binding-closure", nodeId: value.nodeId, itemId: value.itemId, bindings };
-    }
-    case "film-set-clip-state":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.clipId) && typeof value.clipHash === "string"
-        ? { kind: "film-set-clip-state", nodeId: value.nodeId, clipId: value.clipId, clipHash: value.clipHash }
-        : null;
-    case "film-set-shot-preview-state":
-      return isNonEmptyString(value.previewNodeId) && isNonEmptyString(value.filmSetNodeId) && isNonEmptyString(value.clipId)
-        ? { kind: "film-set-shot-preview-state", previewNodeId: value.previewNodeId, filmSetNodeId: value.filmSetNodeId, clipId: value.clipId }
-        : null;
     default:
       return null;
   }
@@ -260,78 +241,9 @@ function decodeOperation(value: unknown): EditOperation | null {
     }
     case "canvas-title-set":
       return typeof value.title === "string" ? { kind: "canvas-title-set", title: value.title } : null;
-    case "film-set-item-transform": {
-      if (!isNonEmptyString(value.nodeId) || !isNonEmptyString(value.itemId)) return null;
-      const transform = decodeFilmSetLocalTransform(value.localTransform);
-      if (!transform.ok) return null;
-      if (value.expectedLocalTransform !== undefined) {
-        const expected = decodeFilmSetLocalTransform(value.expectedLocalTransform);
-        if (!expected.ok) return null;
-        return { kind: "film-set-item-transform", nodeId: value.nodeId, itemId: value.itemId, localTransform: transform.value, expectedLocalTransform: expected.value };
-      }
-      return { kind: "film-set-item-transform", nodeId: value.nodeId, itemId: value.itemId, localTransform: transform.value };
-    }
-    case "film-set-item-set":
-      return isNonEmptyString(value.nodeId) && isRecord(value.item) && isNonEmptyString(value.item.id)
-        ? { kind: "film-set-item-set", nodeId: value.nodeId, item: value.item as FilmSetItem } : null;
-    case "film-set-item-remove":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.itemId)
-        ? { kind: "film-set-item-remove", nodeId: value.nodeId, itemId: value.itemId }
-        : null;
-    case "film-set-item-restore": {
-      if (!isNonEmptyString(value.nodeId) || !isRecord(value.item)) return null;
-      const itemId = (value.item as { id?: unknown }).id;
-      if (!isNonEmptyString(itemId)) return null;
-      const anchor = decodeOrderAnchor(value.orderAnchor);
-      if (!anchor) return null;
-      const bindings = decodeBindingRestores(value.bindings);
-      if (!bindings) return null;
-      return { kind: "film-set-item-restore", nodeId: value.nodeId, item: value.item as FilmSetItem, orderAnchor: anchor, bindings };
-    }
-    case "film-set-clip-set": {
-      if (!isNonEmptyString(value.nodeId) || !isNonEmptyString(value.clipId) || !isRecord(value.clip)) return null;
-      if (value.defaultClipId !== null && !isNonEmptyString(value.defaultClipId)) return null;
-      if ((value.clip as { id?: unknown }).id !== value.clipId) return null;
-      return {
-        kind: "film-set-clip-set",
-        nodeId: value.nodeId,
-        clipId: value.clipId,
-        clip: value.clip as FilmSetAnimationClip,
-        defaultClipId: value.defaultClipId as string | null
-      };
-    }
-    case "film-set-clip-remove": {
-      if (!isNonEmptyString(value.nodeId) || !isNonEmptyString(value.clipId)) return null;
-      if (value.defaultClipId !== null && !isNonEmptyString(value.defaultClipId)) return null;
-      return { kind: "film-set-clip-remove", nodeId: value.nodeId, clipId: value.clipId, defaultClipId: value.defaultClipId as string | null };
-    }
     default:
       return null;
   }
-}
-
-/** 交替顺序锚点：`{}` / `{after}` / `{before}` / `{after,before}` 均可。 */
-function decodeOrderAnchor(value: unknown): FilmSetItemOrderAnchor | null {
-  if (value === undefined) return {};
-  if (!isRecord(value)) return null;
-  if (value.after !== undefined && !isNonEmptyString(value.after)) return null;
-  if (value.before !== undefined && !isNonEmptyString(value.before)) return null;
-  return {
-    ...(value.after !== undefined ? { after: value.after as string } : {}),
-    ...(value.before !== undefined ? { before: value.before as string } : {})
-  };
-}
-
-/** 绑定闭包：`{clipId, binding}[]`，binding 的形状由 reducer/reducer 的片场解码校验。 */
-function decodeBindingRestores(value: unknown): FilmSetItemBindingRestore[] | null {
-  if (!Array.isArray(value) || value.length > EDIT_APPLY_LIMITS.maxPreconditions) return null;
-  const out: FilmSetItemBindingRestore[] = [];
-  for (const entry of value) {
-    if (!isRecord(entry) || !isNonEmptyString(entry.clipId) || !isRecord(entry.binding)) return null;
-    if (!isNonEmptyString(entry.binding.itemId)) return null;
-    out.push({ clipId: entry.clipId, binding: entry.binding as FilmSetItemBindingRestore["binding"] });
-  }
-  return out;
 }
 
 /**

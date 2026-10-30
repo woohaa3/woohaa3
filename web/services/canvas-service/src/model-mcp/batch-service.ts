@@ -226,6 +226,7 @@ export async function authorModelBatch(
       if (targetFailure) return targetFailure;
       const projected = applyCanvasCommands(canvas, commands, {
         now: deps.now?.(),
+        ...(deps.content ? { content: deps.content } : {}),
       });
       if (!projected.ok)
         return failure(projected.rejection.code, projected.rejection.message);

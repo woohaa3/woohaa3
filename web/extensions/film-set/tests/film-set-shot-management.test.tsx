@@ -16,6 +16,7 @@ import {
   createEmptyWoohaa3ServerCanvas,
   createMotionSnapshot,
   filmSetAnimationsOf,
+  type CanvasCommand,
   type FilmSetAnimationClip,
   type FilmSetAnimations,
   type ModelCamera,
@@ -24,6 +25,8 @@ import {
 import type { FilmSetContext as Context } from "../src/integration/browser/context.js";
 import { createTestCanvasState } from "./canvas-state.js";
 const store = createTestCanvasState();
+type ClipOp = { kind: string; clip?: unknown; confirmClearContent?: boolean; duration?: number; toKind?: string; name?: string; timeline?: unknown };
+const opOf = (command: CanvasCommand | undefined): ClipOp | undefined => ((command as Extract<CanvasCommand, { type: "extension.command" }> | undefined)?.payload as { op?: ClipOp } | undefined)?.op;
 import { FilmSetAnimationControls } from "../src/authoring/browser/film-set-animation-controls.js";
 import { FilmSetPlaybackService } from "../src/preview/browser/playback-service.js";
 import { ModelEditorSession } from "@woohaa3/frontend/extension-api";
@@ -76,7 +79,7 @@ function canvasWith(animations: FilmSetAnimations): ServerCanvas {
 function render(animations: FilmSetAnimations, options: { writable?: boolean; camera?: ModelCamera } = {}) {
   const canvas = canvasWith(animations);
   store.getState().applyRemoteCanvas(canvas as never);
-  const submitted: Array<{ type: string; clipId: string; op: { kind: string; clip?: unknown; confirmClearContent?: boolean; duration?: number } }> = [];
+  const submitted: CanvasCommand[] = [];
   const playback = new FilmSetPlaybackService();
   const session = new ModelEditorSession({
     readCameras: () => options.camera ? [options.camera] : [],
@@ -95,7 +98,7 @@ function render(animations: FilmSetAnimations, options: { writable?: boolean; ca
     modelWorkspace: { session },
     canvasSession: {
       isWritable: () => options.writable ?? true,
-      submitCommands: (commands: typeof submitted) => { submitted.push(...commands); return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } }; }
+      submitCommands: (commands: CanvasCommand[]) => { submitted.push(...commands); return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } }; }
     }
   } as unknown as Context;
   const element = document.createElement("div");
@@ -144,7 +147,7 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
     expect(h.submitted).toHaveLength(0);
     await act(async () => { h.button("确认转换")!.click(); });
     expect(h.submitted).toHaveLength(1);
-    expect(h.submitted[0]!.op).toMatchObject({ kind: "set-kind", toKind: "static", confirmClearContent: true });
+    expect(opOf(h.submitted[0])).toMatchObject({ kind: "set-kind", toKind: "static", confirmClearContent: true });
   });
 
   it("静态→动态要求显式正时长后提交", async () => {
@@ -154,8 +157,8 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
     const duration = document.querySelector(".film-set-animation-controls input[type=number]") as HTMLInputElement;
     expect(duration).not.toBeNull();
     await act(async () => { h.button("确认转换")!.click(); });
-    expect(h.submitted[0]!.op).toMatchObject({ kind: "set-kind", toKind: "dynamic" });
-    expect((h.submitted[0]!.op.duration ?? 0) > 0).toBe(true);
+    expect(opOf(h.submitted[0])).toMatchObject({ kind: "set-kind", toKind: "dynamic" });
+    expect((opOf(h.submitted[0])!.duration ?? 0) > 0).toBe(true);
   });
 
   it("新建动态镜头携带 kind 与正时长，选择只改本地播放状态", async () => {
@@ -163,7 +166,7 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
     act(() => h.button("新建拍摄镜头")!.click());
     await act(async () => { h.button("新建动态镜头")!.click(); });
     expect(h.submitted).toHaveLength(1);
-    const op = h.submitted[0]!.op as { kind: string; clip: { kind: string; timeline: { duration: number } } };
+    const op = opOf(h.submitted[0]) as { kind: string; clip: { kind: string; timeline: { duration: number } } };
     expect(op.kind).toBe("create");
     expect(op.clip.kind).toBe("dynamic");
     expect(op.clip.timeline.duration).toBeGreaterThan(0);
@@ -197,11 +200,11 @@ it.each(["短名", "audit-fixes-20261019-这是一个合法的长镜头名称", 
   const next=name+"新";
   input.value=next;
   await act(async()=>input.dispatchEvent(new FocusEvent("focusout",{bubbles:true})));
-  expect(h.submitted).toContainEqual(expect.objectContaining({op:expect.objectContaining({kind:"rename",name:next})}));
+  expect(h.submitted).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ op: expect.objectContaining({kind:"rename",name:next}) }) }));
   const duration=document.querySelector<HTMLInputElement>('.film-set-animation-controls input[type="number"]')!;
   duration.value="3";
   await act(async()=>duration.dispatchEvent(new FocusEvent("focusout",{bubbles:true})));
-  expect(h.submitted).toContainEqual(expect.objectContaining({op:expect.objectContaining({kind:"timeline",timeline:expect.objectContaining({duration:3})})}));
+  expect(h.submitted).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ op: expect.objectContaining({kind:"timeline",timeline:expect.objectContaining({duration:3})}) }) }));
 });
 
 

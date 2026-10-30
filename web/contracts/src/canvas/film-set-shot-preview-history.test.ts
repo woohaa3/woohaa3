@@ -15,6 +15,7 @@ import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/inde
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields, filmSetAnimationsOf } from "./film-set-clip-view.js";
 import { filmSetClipPrecondition, type FilmSetClipPatchOp } from "./film-set-clip-ops.js";
+import { filmSetClipPatchCommand } from "./film-set-content.js";
 import { decodeFilmSetNodeData, type FilmSetNodeData } from "./canvas-node-model.js";
 import { type EditPlan } from "./edit-plan.js";
 import { staticShotCameraMotion, type FilmSetAnimationClip } from "./film-set-animations.js";
@@ -78,13 +79,12 @@ function previewNode(canvas: ServerCanvas, nodeId: string) {
 }
 
 function clipPatch(canvas: ServerCanvas, op: FilmSetClipPatchOp, clipId = CLIP_1) {
-  return {
-    type: "filmSet.clipPatch",
+  return filmSetClipPatchCommand({
     nodeId: "film",
     clipId,
     expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(animation(canvas)), clipId, op),
     op
-  };
+  });
 }
 
 function staticClip(id: string, name: string): FilmSetAnimationClip {
@@ -229,18 +229,16 @@ describe("并发前置条件原子拒绝（任务 2.5）", () => {
     expect(previewNode(concurrentlyMoved, PREVIEW_1)!.position).toEqual({ x: 900, y: 900 });
   });
 
-  it("预览归属被绕过删除时以预览状态条件拒绝", () => {
+  it("预览归属被绕过删除时以节点数据快照条件拒绝", () => {
     const canvas = withFilmSet();
-    // 手工构造带预览状态条件的编辑：预览已被删除时整批拒绝。
-    const removed = expectOk(apply(canvas, [{ type: "node.remove", nodeIds: ["film"] }]));
-    void removed;
+    // 受保护编辑用通用 nodeData 快照保护预览归属：预览已被删除时整批拒绝。
     const tampered = structuredClone(canvas);
     tampered.document.nodes = tampered.document.nodes.filter((node) => node.id !== PREVIEW_1);
     delete tampered.nodeData[PREVIEW_1];
     const result = apply(tampered, [
       {
         type: "edit.apply",
-        preconditions: [{ kind: "film-set-shot-preview-state", previewNodeId: PREVIEW_1, filmSetNodeId: "film", clipId: CLIP_1 }],
+        preconditions: [{ kind: "node-data-equals", nodeId: PREVIEW_1, present: true, value: canvas.nodeData[PREVIEW_1] }],
         operations: [{ kind: "node-update", nodeId: PREVIEW_1, position: { x: 1, y: 1 } }]
       }
     ]);

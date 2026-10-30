@@ -160,8 +160,8 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
     hoverNodeStore.setPlaybackTarget({
       kind: "shot-preview",
       previewNodeId: shotPreviewNodeId(FILM_SET, clipId),
-      filmSetNodeId: FILM_SET,
-      clipId
+      ownerNodeId: FILM_SET,
+      entityId: clipId
     });
   }
 
@@ -204,7 +204,7 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
     expect(active?.viewMode).toBe("shot-node-preview");
     expect(active?.targetPreviewNodeId).toBe(shotPreviewNodeId(FILM_SET, "clip-1"));
     expect(active?.time).toBe(0);
-    expect(active?.objects?.length ?? 0).toBeGreaterThan(0);
+    expect(active?.managedItemMotion?.length ?? 0).toBeGreaterThan(0);
 
     hoverNodeStore.reset();
     expect(latest()).toBeNull();
@@ -316,8 +316,8 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
     const target = {
       kind: "shot-preview" as const,
       previewNodeId: shotPreviewNodeId(FILM_SET, "clip-1"),
-      filmSetNodeId: FILM_SET,
-      clipId: "clip-1"
+      ownerNodeId: FILM_SET,
+      entityId: "clip-1"
     };
     hoverNodeStore.setPlaybackTarget(target, true);
     vi.advanceTimersByTime(1000);
@@ -415,10 +415,10 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
     const runtime = makeRuntime();
     // 宿主只在进入片场聚焦**成功**后发布事件（design D8）。
     runtime.setFocused(true);
-    runtime.ctx.emit("ui.shot-preview.enter-requested", {
+    runtime.ctx.emit("ui.content-preview.enter-requested", {
       previewNodeId: shotPreviewNodeId(FILM_SET, "clip-2"),
-      filmSetNodeId: FILM_SET,
-      clipId: "clip-2"
+      ownerNodeId: FILM_SET,
+      entityId: "clip-2"
     } as never);
     const snapshot = playbackService.getSnapshot();
     expect(snapshot.preview).toBe(true);

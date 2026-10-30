@@ -531,6 +531,7 @@ export function createCanvasAssistantTextPort(deps: {
           const image = await deps.media.read(
             input.storageKey,
             prepared.canvasId,
+            "assistant-text",
           );
           if (
             !image.bytes.length ||

@@ -123,15 +123,14 @@ fn settle(world: &mut World, scene: &Scene, now: &mut f64, expected: Quality) {
 #[cfg(feature = "canvas-core")]
 fn visible_shot_card_keeps_source_resident_without_forcing_high() {
     let (mut scene, resources) = fixture(mixed_snapshot("shot-source", 3, 3), 0.05, 1.0);
-    scene.nodes.push(
-        serde_json::from_value(serde_json::json!({
-            "id":"shot","type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":167,
-            "shotPreview":{"filmSetNodeId":"film","clipId":"clip","kind":"static","name":"shot",
-                "aspect":1.7777778,"duration":0,"state":"preparing",
-                "coverCamera":{"azimuth":0,"elevation":0.5,"distance":200,"focusOffset":[0,0,0]}}
-        }))
-        .unwrap(),
-    );
+    let shot: GraphNode = serde_json::from_value(serde_json::json!({
+        "id":"shot","type":"slot","x":0,"y":0,"width":240,"height":167
+    })).unwrap();
+    scene.nodes.push(with_preview_card(shot, serde_json::json!({
+        "nodeId":"shot","ownerNodeId":"film","entityId":"clip","animated":false,"title":"shot",
+        "aspect":1.7777778,"duration":0,"state":"preparing",
+        "coverCamera":{"azimuth":0,"elevation":0.5,"distance":200,"focusOffset":[0,0,0]}
+    })));
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
@@ -1210,12 +1209,12 @@ fn group_film_set_fixture(declared: bool, zoom: f32) -> (Scene, ModelAssets) {
     let mut scene = scene_with(&node, node.model.clone());
     scene.viewport.zoom = zoom;
     scene.surface = Some(surface(1.0));
-    scene.film_set_groups = vec![serde_json::from_value(serde_json::json!({
-        "schemaVersion": "woohaa-film-set-group-render-v1",
-        "ownerId": "film",
-        "badgeOrigin": {"x": 200.0, "y": 300.0},
-        "bindings": [{
-            "bindingId": "a", "sourceNodeId": "source", "kind": "model3d", "contentKey": "model3d:v1",
+    scene.managed_item_groups = vec![serde_json::from_value(serde_json::json!({
+        "schemaVersion": "woohaa-managed-item-group-v1",
+        "ownerNodeId": "film",
+        "origin": {"x": 200.0, "y": 300.0},
+        "items": [{
+            "itemId": "a", "sourceNodeId": "source", "kind": "model3d", "contentKey": "model3d:v1",
             "transform": {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "scale": 1.0}, "visible": true
         }]
     }))
@@ -1272,12 +1271,12 @@ fn group_badge_batch_fixture(parts: usize, binding_x: f32) -> (Scene, ModelAsset
     let mut scene = scene_with(&node, Some(reference));
     scene.viewport.zoom = 0.05;
     scene.surface = Some(surface(1.0));
-    scene.film_set_groups = vec![serde_json::from_value(serde_json::json!({
-        "schemaVersion": "woohaa-film-set-group-render-v1",
-        "ownerId": "film",
-        "badgeOrigin": {"x": 200.0, "y": 300.0},
-        "bindings": [{
-            "bindingId": "a", "sourceNodeId": "source", "kind": "model3d", "contentKey": "model3d:v1",
+    scene.managed_item_groups = vec![serde_json::from_value(serde_json::json!({
+        "schemaVersion": "woohaa-managed-item-group-v1",
+        "ownerNodeId": "film",
+        "origin": {"x": 200.0, "y": 300.0},
+        "items": [{
+            "itemId": "a", "sourceNodeId": "source", "kind": "model3d", "contentKey": "model3d:v1",
             "transform": {"x": binding_x, "y": 0.0, "z": 0.0, "yaw": 0.0, "scale": 1.0}, "visible": true
         }]
     }))
@@ -1326,18 +1325,18 @@ fn group_badge_multi_binding_fixture(bindings: &[&str], parts: usize) -> (Scene,
         .enumerate()
         .map(|(index, id)| {
             serde_json::json!({
-                "bindingId": id, "sourceNodeId": format!("source-{id}"), "kind": "model3d",
+                "itemId": id, "sourceNodeId": format!("source-{id}"), "kind": "model3d",
                 "contentKey": "model3d:v1",
                 "transform": {"x": index as f32 * 4.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "scale": 1.0},
                 "visible": true
             })
         })
         .collect();
-    scene.film_set_groups = vec![serde_json::from_value(serde_json::json!({
-        "schemaVersion": "woohaa-film-set-group-render-v1",
-        "ownerId": "film",
-        "badgeOrigin": {"x": 200.0, "y": 300.0},
-        "bindings": bindings
+    scene.managed_item_groups = vec![serde_json::from_value(serde_json::json!({
+        "schemaVersion": "woohaa-managed-item-group-v1",
+        "ownerNodeId": "film",
+        "origin": {"x": 200.0, "y": 300.0},
+        "items": bindings
     }))
     .unwrap()];
     (scene, resources)
@@ -1490,7 +1489,7 @@ fn group_badge_batches_same_material_parts_under_binding_root() {
     );
 
     // 隐藏 binding：写在 binding 根上，批次作为子实体随层级一起不可见。
-    scene.film_set_groups[0].bindings[0].visible = false;
+    scene.managed_item_groups[0].items[0].visible = false;
     let mut models = world.remove_resource::<ModelVisuals>().unwrap();
     let mut commands = world.commands();
     crate::model3d::item_placement::sync(&mut commands, &mut models, &scene);

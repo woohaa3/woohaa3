@@ -47,7 +47,13 @@ export type CanvasCommandRejectionCode =
   /** owner 拒绝了命令内容。message 只放稳定码。 */
   | "content-command-rejected"
   /** owner codec 抛错。message 不包含异常文本。 */
-  | "content-codec-failed";
+  | "content-codec-failed"
+  /** owner codec 拒绝了补丁；message 是 owner 的稳定错误码。 */
+  | "content-patch-rejected"
+  /** 节点内容版本高于当前扩展支持版本；只读保留，拒绝写入。 */
+  | "content-migration-too-new"
+  /** owner 交互策略拒绝该动作。 */
+  | "content-interaction-rejected";
 
 export type CanvasCommandRejection = {
   code: CanvasCommandRejectionCode;

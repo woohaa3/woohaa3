@@ -57,6 +57,8 @@ export type ContentRecordingSnapshot = {
     canvasRevision: number;
     /** 提交时的来源 incarnation；删除后重建同 id 不会被继承。 */
     sourceIncarnation: string;
+    /** 冻结内容的 owner；媒体读取按它显式声明扩展作用域。 */
+    extensionId?: string;
   };
   profile: {
     profileKey: string;
@@ -218,6 +220,8 @@ export type ContentRecordingUnavailableReason =
  * 不允许从 working projection 或前端状态取输入。
  */
 export type ContentRecordingRuntime = {
+  /** 内容 owner；宿主用它给媒体读取声明显式扩展作用域。 */
+  extensionId?: string;
   /** 该节点类型是否由本扩展负责录制（宿主据此拒绝其它节点）。 */
   matches(nodeType: string, data: unknown): boolean;
   /**

@@ -15,7 +15,7 @@ import {
 } from "@woohaa3/contracts";
 import { projectCompositeFocusContext } from "./composite-focus-context.js";
 import { applyRunStateProjection } from "./run-state-projection.js";
-import { buildShotPreviewSceneInput } from "./shot-preview-scene-input.js";
+import { buildContentPresentationSceneInput } from "./shot-preview-scene-input.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
 import { modelPreviewStore } from "../../services/model-preview-store.js";
@@ -120,12 +120,13 @@ export function buildSceneWithResources(
   const viewport = input.viewportPreview ?? input.fallbackViewport;
   const surface = surfaceSize();
   const contentRight = Math.max(0, options.getContentRect?.().right ?? 0);
-  // 拍摄镜头预览：宿主只从权威画布 + 当前播放投影派生只读卡片状态与归属线起点投影
-  // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5/D7/D8）。
+  // 内容呈现输入：宿主只从权威画布 + 当前播放投影派生只读卡片状态与归属线起点投影
+  // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5/D7/D8；
+  //  change: 2026-10-28-generic-extension-content-ownership 任务 4.3）。
   const badgeScaleOverrides = input.badgeResize
     ? new Map([[input.badgeResize.nodeId, input.badgeResize.scale]])
     : undefined;
-  const shotPreviews = buildShotPreviewSceneInput({
+  const presentationInput = buildContentPresentationSceneInput({
     canvas: canvasState,
     playback: options.getAnimationPlayback?.() ?? null,
     targets: options.getModelFocusTargets?.() ?? [],
@@ -150,8 +151,9 @@ export function buildSceneWithResources(
     nodeActionToolbars: options.getNodeActionToolbars?.(),
     selectionActionToolbar: options.getSelectionActionToolbar?.() ?? undefined,
     dropTargetGroupIds: input.dropTargetGroupIds,
-    shotPreviews: shotPreviews.shotPreviews,
-    shotPreviewCameraProjection: shotPreviews.shotPreviewCameraProjection,
+    content: options.compositeAssets?.contentContributions,
+    previewLocalStates: presentationInput.previewLocalStates,
+    entityAnchorProjection: presentationInput.entityAnchorProjection,
     theme: options.getTheme?.() ?? defaultAppTheme(),
     modelFocus: options.getModelFocus?.() ?? null,
     imageFocus: options.getImageFocus?.() ?? null,
@@ -211,16 +213,18 @@ export function buildSceneWithResources(
   // 统一生成运行状态 → 节点底部历史条与聚合运行遮罩投影
   // （change: 2026-10-12-unify-generation-history-strip，design D4/D5）。
   const runState = options.getRunState?.() ?? null;
-  if (runState) applyRunStateProjection(scene.nodes, runState);
+  if (runState) applyRunStateProjection(scene, runState);
   const reduceMotion = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  for (const node of scene.nodes) {
-    if (node.aggregateRun?.filmSet) {
-      node.aggregateRun.reduceMotion = reduceMotion;
-      // Historical model/media projections are read-only outputs of an older work, never live executions.
-      if ((node.id === focusNode && options.getModelSceneOverride?.(node.id))
-        || (sourceNodes.has(node.id) && options.compositeAssets?.resolveNode(canvasState, sourceNodes.get(node.id)!)?.historyProjection?.(node.id))) delete node.aggregateRun;
-    }
+  const historicalProjection = (nodeId: string) => (nodeId === focusNode && options.getModelSceneOverride?.(nodeId))
+    || (sourceNodes.has(nodeId) && options.compositeAssets?.resolveNode(canvasState, sourceNodes.get(nodeId)!)?.historyProjection?.(nodeId));
+  for (const feedback of scene.runFeedback ?? []) {
+    feedback.reduceMotion = reduceMotion;
   }
+  // Historical model/media projections are read-only outputs of an older work, never live executions.
+  for (const node of scene.nodes) {
+    if (node.aggregateRun && historicalProjection(node.id)) delete node.aggregateRun;
+  }
+  scene.runFeedback = scene.runFeedback?.filter((feedback) => !historicalProjection(feedback.nodeId));
   for (const node of scene.nodes) for (const dot of node.historyStrip?.dots ?? []) {
     dot.hovered = input.hoveredHistory?.nodeId === node.id && input.hoveredHistory.presentationId === dot.presentationId;
     dot.pressed = input.pressedHistory?.nodeId === node.id && input.pressedHistory.presentationId === dot.presentationId;

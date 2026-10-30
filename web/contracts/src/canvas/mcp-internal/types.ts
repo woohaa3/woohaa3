@@ -293,7 +293,7 @@ export type McpMutateFilmSetItemRequest = {
   nodeId: string;
   itemId: string;
   requestId: string;
-  op: import("../commands.js").FilmSetItemPatchOp;
+  op: import("../film-set-content/command-types.js").FilmSetItemPatchOp;
 };
 
 /**

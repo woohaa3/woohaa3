@@ -53,10 +53,11 @@ pub(crate) struct AnimationPlayback {
     pub(crate) camera_motion: Vec<crate::motion::RawCameraTrack>,
     #[serde(default)]
     pub(crate) model_motion: Vec<crate::motion::RawModelTrack>,
-    /// 片场内部对象的 child 运动（change: 2026-10-09-add-film-set-object-motion-and-editing）。
-    /// 按片场统一播放头 `time` 映射对象局部时间后求值；目标为组合作用域编码 id。
+    /// 受管条目 child 运动（change: 2026-10-09-add-film-set-object-motion-and-editing；
+    ///  change: 2026-10-28-generic-extension-content-ownership 任务 4.3 通用化）。
+    /// 按 owner 统一播放头 `time` 映射条目局部时间后求值；目标为组合作用域编码 id。
     #[serde(default)]
-    pub(crate) objects: Vec<crate::protocol::FilmSetObjectMotion>,
+    pub(crate) managed_item_motion: Vec<crate::protocol::ManagedItemMotion>,
 }
 
 /// 动画节点的初始镜头（与 `motion::InitialCameraState` 同构）。

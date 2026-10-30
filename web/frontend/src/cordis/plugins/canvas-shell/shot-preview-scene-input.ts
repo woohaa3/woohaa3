@@ -1,16 +1,17 @@
 /**
- * 拍摄镜头预览的宿主 scene 输入派生
- * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5/D7/D8）。
+ * 内容呈现的宿主 scene 输入派生
+ * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5/D7/D8；
+ *  change: 2026-10-28-generic-extension-content-ownership 任务 4.3：通用输入命名）。
  *
  * 渲染层只消费**只读派生**，因此这里把两件事投影成 `buildCanvasRenderScene` 的输入：
  *
- * 1. `shotPreviews`：每张预览卡片的本地状态与播放进度。进度/播放只承载浏览器本地播放投影，
- *    不是 canonical；失败状态来自共享动作校验门禁（不伪造画布/GPU 就绪）。
- * 2. `shotPreviewCameraProjection`：归属线的画布 2D 起点。片场 group 固定取**徽标中心**
- *    （徽标即场景入口，与 Bevy 绘制同一几何派生）；只有没有外部徽标的复合资产片场才把镜头
- *    当前相机世界姿态投影为起点——静态与非活动动态镜头用 `initialCamera`，活动动态镜头用
- *    **同一 T** 的采样相机（与 Rust `AnimationCameraState` 同一公式）。
+ * 1. `previewLocalStates`：每张预览卡片的本地状态与播放进度。进度/播放只承载浏览器本地播放
+ *    投影，不是 canonical；失败状态来自共享动作校验门禁（不伪造画布/GPU 就绪）。
+ * 2. `entityAnchorProjection`：把 owner 条目的相机世界姿态投影为画布 2D 起点，供归属线使用。
+ *    静态与非活动动态条目用其 `initialCamera`；活动动态条目用**同一 T** 的采样相机（与
+ *    Rust `AnimationCameraState` 同一公式：`bounds.center + focusOffset` 环绕 + 世界 → 画布）。
  *
+ * 具体业务归属（当前为片场镜头）仍由本宿主模块读取；任务 4.2 将改由 owner adapter 声明。
  * 本模块纯函数、无副作用：不写 ServerCanvas / CanvasCommand / Y.Doc，也不创建第二份权威数据。
  */
 import {
@@ -33,22 +34,22 @@ import {
 } from "@woohaa3/contracts";
 import { modelBounds, type FocusTargetInput } from "./model-focus-session.js";
 
-/** 单张预览卡片的本地呈现输入（render scene `shotPreviews` 条目）。 */
-export type ShotPreviewLocalState = {
+/** 单张预览卡片的本地呈现输入（render scene `previewLocalStates` 条目）。 */
+export type PreviewLocalState = {
   state: "preparing" | "ready" | "stale" | "error";
   progress?: number;
   playing?: boolean;
   diagnostic?: string;
 };
 
-/** 宿主注入的拍摄镜头 scene 输入。 */
-export type ShotPreviewSceneInput = {
+/** 宿主注入的内容呈现 scene 输入。 */
+export type ContentPresentationSceneInput = {
   /** 预览节点 id → 本地状态；缺省即 `ready` 且无播放进度。 */
-  shotPreviews: ReadonlyMap<string, ShotPreviewLocalState>;
+  previewLocalStates: ReadonlyMap<string, PreviewLocalState>;
   /**
-   * 归属线起点投影：把镜头当前相机世界姿态投影为画布 2D 点；缺失返回 `null`（不伪造起点）。
+   * 归属线起点投影：把 owner 内条目的相机世界姿态投影为画布 2D 点；缺失返回 `null`（不伪造起点）。
    */
-  shotPreviewCameraProjection: (filmSetNodeId: string, clipId: string) => { x: number; y: number } | null;
+  entityAnchorProjection: (ownerNodeId: string, entityId: string) => { x: number; y: number } | null;
 };
 
 export type ShotPreviewSceneInputSource = {
@@ -81,10 +82,10 @@ export function shotPreviewLinkOrigin(
 }
 
 /** 由权威画布 + 播放投影派生宿主 scene 输入（纯函数）。 */
-export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource): ShotPreviewSceneInput {
+export function buildContentPresentationSceneInput(source: ShotPreviewSceneInputSource): ContentPresentationSceneInput {
   const canvas = source.canvas;
   if (!canvas) {
-    return { shotPreviews: new Map(), shotPreviewCameraProjection: () => null };
+    return { previewLocalStates: new Map(), entityAnchorProjection: () => null };
   }
   const playback = source.playback;
   const targets = new Map(source.targets.map((target) => [target.nodeId, target]));
@@ -102,7 +103,7 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
     return readFilmSetAnimationProjection(canvas, nodeId);
   };
 
-  const shotPreviews = new Map<string, ShotPreviewLocalState>();
+  const previewLocalStates = new Map<string, PreviewLocalState>();
   for (const node of canvas.document.nodes) {
     // 旧形态读 `shotPreview`；迁移后的预览改成 group 拥有的 owner-managed 媒体节点。
     const ownership = shotPreviewOwnershipOf(nodeData[node.id]) ?? managedShotPreviewOwnershipOf(nodeData[node.id]);
@@ -113,7 +114,7 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
     if (!resolved) continue;
     // 失败状态来自共享动作校验门禁：脚本/绑定不可预览时明确报出原因，保留归属。
     const gate = resolveAnimationGate(checkAnimationMotion(resolved));
-    const local: ShotPreviewLocalState = gate.canPreview
+    const local: PreviewLocalState = gate.canPreview
       ? { state: "ready" }
       : { state: "error", ...(gate.reason ? { diagnostic: gate.reason } : {}) };
     // 活动动态卡片承载本地播放进度（不进入 canonical）；命中身份须同时匹配片场/镜头/卡片。
@@ -129,7 +130,7 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
       if (duration > 0) local.progress = Math.min(1, Math.max(0, playback.time / duration));
       local.playing = playback.playing;
     }
-    shotPreviews.set(node.id, local);
+    previewLocalStates.set(node.id, local);
   }
 
   /**
@@ -154,7 +155,9 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
     return groupBadgeRect(rect, scale);
   };
 
-  const shotPreviewCameraProjection = (filmSetNodeId: string, clipId: string): { x: number; y: number } | null => {
+  const entityAnchorProjection = (ownerNodeId: string, entityId: string): { x: number; y: number } | null => {
+    const filmSetNodeId = ownerNodeId;
+    const clipId = entityId;
     const data = filmSetData(filmSetNodeId);
     if (!data) return null;
     const resolved = resolveFilmSetClip(data, clipId);
@@ -183,7 +186,7 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
     return shotPreviewLinkOrigin(null, { x: projected.x, y: projected.y });
   };
 
-  return { shotPreviews, shotPreviewCameraProjection };
+  return { previewLocalStates, entityAnchorProjection };
 }
 
 /**

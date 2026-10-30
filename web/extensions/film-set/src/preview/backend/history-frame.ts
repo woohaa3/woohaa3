@@ -31,7 +31,7 @@ export async function prepareFilmSetHistoryFrame(input: {
     ops: projection.ops as unknown[],
     compositeAssetFrame: { ...frame, media },
     motion: {
-      duration: 0, looped: false, cameraMotion: [], modelMotion: [], objects: [], timeSeconds: 0,
+      duration: 0, looped: false, cameraMotion: [], modelMotion: [], managedItemMotion: [], timeSeconds: 0,
       initialCamera: { azimuth: camera.azimuth, elevation: camera.elevation, distance: camera.distance, focusOffset: [camera.focusOffset.x, camera.focusOffset.y, camera.focusOffset.z] as [number, number, number], aspect: camera.aspect }
     }
   };

@@ -14,12 +14,13 @@
  * 新增字段必须同时更新本 allowlist、spec 与 round-trip 测试（见 tasks 6.1）。
  */
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
+import { readCompositeAssetExtensionId } from "./core/composite-asset-identity.js";
 import type { CanvasNodeData } from "./types";
 import type { Woohaa3CanvasJsonObject } from "./core";
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeModelCameras } from "../model-cameras.js";
-import { decodeFilmSetNodeData, decodeModel3DNodeData } from "../canvas-node-model.js";
-import { filmSetNodeDataFields, model3DNodeDataFields } from "../animation-snapshot.js";
+import { decodeModel3DNodeData } from "../canvas-node-model.js";
+import { model3DNodeDataFields } from "../animation-snapshot.js";
 
 /** 首版允许运行时持久化的 nodeData 顶层字段。 */
 export const RUNTIME_NODE_CONFIG_FIELDS = [
@@ -102,9 +103,22 @@ export type RuntimeNodeConfigPatchResult =
  * - 值必须是合法有限 JSON：非法类型或非有限数值 → 整条 patch 拒绝，不进协调层。
  * - 移除后为空 → 拒绝（不得提交空补丁）。
  */
-export function sanitizeRuntimeNodeConfigPatch(input: unknown, context?: { content?: ContentContributionResolver }): RuntimeNodeConfigPatchResult {
+export function sanitizeRuntimeNodeConfigPatch(input: unknown, context?: { content?: ContentContributionResolver; extensionId?: string }): RuntimeNodeConfigPatchResult {
   observeContentResolver(context?.content);
   if (!isRecord(input)) return { ok: false, reason: "nodeData patch 必须是对象" };
+  // 复合资产：运行时字段由 owner 决定，内核不按字段名白名单裁剪业务数据。
+  const extensionId = context?.extensionId ?? readOwnerExtensionId(input);
+  const codec = extensionId ? context?.content?.resolve(extensionId)?.nodeData : null;
+  if (codec) {
+    try {
+      const sanitized = codec.sanitizeRuntime(input, { nodeType: "composite-asset" });
+      if (!isRecord(sanitized) || Object.keys(sanitized).length === 0) return { ok: false, reason: "nodeData patch 不含任何允许字段" };
+      if (!isFiniteJsonValue(sanitized)) return { ok: false, reason: "nodeData patch 必须是有限 JSON" };
+      return { ok: true, value: sanitized as CanvasNodeData };
+    } catch {
+      return { ok: false, reason: "content-codec-failed" };
+    }
+  }
 
   const value: Woohaa3CanvasJsonObject = {};
 
@@ -177,21 +191,14 @@ export function sanitizeNodeDataForClipboard(input: unknown, context?: { content
       }
       continue;
     }
-    // 自包含 3D 节点：复制时携带完整自身定义（模型 + 运动 + 镜头 + 时间线 + 片场内容），
+    // 自包含 3D 节点：复制时携带完整自身定义（模型 + 运动 + 镜头 + 时间线），
     // 不依赖来源节点（change: 2026-10-05-bind-model-animation-to-shots）。
-    if (key === "modelContentVersion" || key === "motionBasedOnModelVersion" || key === "initialCamera" || key === "timeline" || key === "origin" || key === "filmSetContent") {
-      const animation = decodeFilmSetNodeData(source);
-      if (animation.ok) {
-        const fields = filmSetNodeDataFields(animation.value);
-        for (const [field, fieldValue] of Object.entries(fields)) {
+    // 业务复合内容由 owner `copy` 负责（payload 在识别到 composite-asset 时直接走 owner）。
+    if (key === "modelContentVersion" || key === "motionBasedOnModelVersion" || key === "initialCamera" || key === "timeline" || key === "origin") {
+      const model = decodeModel3DNodeData(source);
+      if (model.ok) {
+        for (const [field, fieldValue] of Object.entries(model3DNodeDataFields(model.value))) {
           if (isFiniteJsonValue(fieldValue)) value[field] = fieldValue as Woohaa3CanvasJsonObject[string];
-        }
-      } else {
-        const model = decodeModel3DNodeData(source);
-        if (model.ok) {
-          for (const [field, fieldValue] of Object.entries(model3DNodeDataFields(model.value))) {
-            if (isFiniteJsonValue(fieldValue)) value[field] = fieldValue as Woohaa3CanvasJsonObject[string];
-          }
         }
       }
       continue;
@@ -294,4 +301,8 @@ function isFiniteNumber(input: unknown): boolean {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function readOwnerExtensionId(input: unknown): string | undefined {
+  return readCompositeAssetExtensionId(input) ?? undefined;
 }

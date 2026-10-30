@@ -27,7 +27,8 @@ export const FILM_SET_CONVERSION_MAX_ASSET_BYTES = 32 * 1024 * 1024;
  */
 export type FilmSetConversionAssetReader = (
   storageKey: string,
-  canvasId?: string
+  canvasId?: string,
+  extensionId?: string
 ) => Promise<{ bytes: Uint8Array; contentType: string }>;
 
 export type FilmSetConversionMediaReaderOptions = {
@@ -46,7 +47,7 @@ export function createFilmSetConversionMediaReader(
   const probeDuration = options.probeDuration ?? probeFilmSetVideoDuration;
 
   const read = async (storageKey: string, canvasId?: string): Promise<{ bytes: Uint8Array; contentType: string }> => {
-    const media = await options.read(storageKey, canvasId);
+    const media = await options.read(storageKey, canvasId, "film-set");
     if (!(media.bytes instanceof Uint8Array) || media.bytes.byteLength === 0) {
       throw new Error("来源素材内容为空，无法读取");
     }

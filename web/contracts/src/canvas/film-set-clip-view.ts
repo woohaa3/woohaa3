@@ -15,7 +15,7 @@ import {
 import type { FilmSetContent } from "./film-set-content.js";
 import { FILM_SET_CONTENT_VERSION } from "./film-set-content.js";
 import type { MotionDefinition } from "./motion-script.js";
-import { FILM_SET_EXTENSION_ID } from "./domain/core/composite-asset-identity.js";
+import { FILM_SET_EXTENSION_ID } from "./film-set-legacy-identity.js";
 
 /** 运行时片段视图（只读投影；不写回 canonical nodeData）。 */
 export type FilmSetClipView = {

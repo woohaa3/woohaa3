@@ -42,6 +42,7 @@ const RELAY_PAGE_SIZE = 200;
 
 export type SyncUpgradeOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   repository: YjsDocumentRepository;
   mediaStorage?: MediaStorage;
   /** 与画布 API 相同的受信任代理服务令牌；未配置时只允许 loopback。 */
@@ -157,6 +158,7 @@ export function createSyncUpgradeHandler(options: SyncUpgradeOptions): SyncUpgra
   const registry = new CanvasRoomRegistry({
     repository: options.repository,
     lifecycle: options.lifecycle,
+    ...(options.content ? { content: options.content } : {}),
     mediaStorage: options.mediaStorage,
     now,
     broadcast: upstream

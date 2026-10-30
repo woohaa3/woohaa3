@@ -4,6 +4,7 @@ import { mergeCanvasContentRuntimes } from "./canvas-content.js";
 import { slotImplementationSource } from "./bootstrap.js";
 import type { LoadedExtensionHost } from "./manifest.js";
 const declaration = (extensionId: string) => ({ extensionId, runtime: {
+  content: [{ extensionId }],
   managedLifecycles: [{ extensionId, schemaVersion: 1 as const, plan: () => ({ nodes: [] }) }],
   managedMigrations: [{ extensionId, schemaVersion: 1 as const, migrate: (canvas: ServerCanvas) => ({ canvas, changed: false }) }]
 } });
@@ -12,8 +13,13 @@ describe("trusted content runtime composition", () => {
     const result = mergeCanvasContentRuntimes([declaration("test.b"), declaration("test.a")]);
     expect(result?.managedLifecycles?.map(a => a.extensionId)).toEqual(["test.a", "test.b"]);
     expect(result?.managedMigrations).toHaveLength(2);
+    expect(result?.content?.map((entry) => entry.extensionId)).toEqual(["test.b", "test.a"]);
     expect(() => mergeCanvasContentRuntimes([declaration("test.a"), declaration("test.a")])).toThrow("conflict");
     expect(() => mergeCanvasContentRuntimes([{ ...declaration("test.a"), extensionId: "test.forged" }])).toThrow("owner-mismatch");
+  });
+  it("rejects content contributions whose owner differs from the declaring extension", () => {
+    expect(() => mergeCanvasContentRuntimes([{ extensionId: "test.a", runtime: { content: [{ extensionId: "test.b" }] } }])).toThrow("owner-mismatch");
+    expect(() => mergeCanvasContentRuntimes([{ extensionId: "test.a", runtime: { content: [{ extensionId: "test.a" }, { extensionId: "test.a" }] } }])).toThrow("conflict");
   });
   it("injects only trusted migration implementations before storage declarations open repositories", async () => {
     const createSlotDeclarations = vi.fn(async () => []);

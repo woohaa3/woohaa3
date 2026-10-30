@@ -420,6 +420,7 @@ export function installInteractionController(options: InteractionControllerOptio
   const hover = createHoverTracker({
     projectCanvas: canvas => options.compositeAssets?.projectCanvas(canvas) ?? canvas,
     nodeCapabilities: options.nodeCapabilities,
+    content: options.compositeAssets?.contentContributions,
     state,
     historyAt: nodeId => {
       const node = frameSubmission.renderedNode(nodeId);

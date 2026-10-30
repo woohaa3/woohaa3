@@ -23,7 +23,7 @@ export async function stageRecordingResources(input: {
    * 素材读取端口。第二个参数是**快照冻结时的画布 id**（`snapshot.origin.canvasId`）：
    * 远端画布的素材只在托管存储 `<canvasId>/media/<key>` 里，丢了作用域就会去主存储找而失败。
    */
-  read?: (storageKey: string, canvasId?: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
+  read?: (storageKey: string, canvasId?: string, extensionId?: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
 }): Promise<void> {
   await mkdir(input.directory, { recursive: true, mode: 0o700 });
   // change: 2026-10-22-remove-agent-execution-limits，任务 7.5：原单文件 256 MiB 与合计
@@ -31,7 +31,7 @@ export async function stageRecordingResources(input: {
   for (const [index, resource] of input.snapshot.resources.entries()) {
     input.signal.throwIfAborted();
     if (!input.read) throw new Error("录制素材读取端口未装配");
-    const media = await input.read(resource.storageKey, input.snapshot.origin.canvasId);
+    const media = await input.read(resource.storageKey, input.snapshot.origin.canvasId, input.snapshot.origin.extensionId);
     input.signal.throwIfAborted();
     if (media.bytes.byteLength !== resource.sizeBytes || media.contentType !== resource.contentType ||
         createHash("sha256").update(media.bytes).digest("hex") !== resource.checksum) {

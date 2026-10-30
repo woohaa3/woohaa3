@@ -5,12 +5,12 @@
  * reads, but they are no longer an authoring target. All new object edits use
  * `filmSetGroup.bindingPatch` against the canonical group marker.
  */
-import type { CanvasCommand } from "../commands.js";
+import type { FilmSetLegacyItemPatchCommand } from "../film-set-content/command-types.js";
 import { reject, type CommandApplyResult, type WorkingState } from "./types.js";
 
 export function patchFilmSetItem(
   _work: WorkingState,
-  _command: Extract<CanvasCommand, { type: "filmSet.itemPatch" }>
+  _command: FilmSetLegacyItemPatchCommand
 ): CommandApplyResult {
   return reject("invalid-self-contained-node", "旧 composite 片场仅支持只读兼容，请迁移为 film-set group");
 }

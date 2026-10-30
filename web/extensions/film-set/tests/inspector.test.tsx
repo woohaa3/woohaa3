@@ -199,8 +199,8 @@ describe("FilmSetInspector single column and generation dock", () => {
     const h = renderOverlay(filmSetCanvas(true), false, { generate: true });
     act(() => h.objectSession.select("ground"));
     await act(async () => { button("加入该镜头").click(); });
-    expect(h.submitted).toEqual([expect.objectContaining({ type: "filmSet.clipPatch", clipId: "clip-1", expectedHash: expect.any(String),
-      op: expect.objectContaining({ kind: "binding", itemId: "ground", expectedAdapterHash: expect.any(String) }) })]);
+    expect(h.submitted).toEqual([expect.objectContaining({ type: "extension.command", extensionId: "film-set", kind: "clip.patch", payload: expect.objectContaining({ clipId: "clip-1", expectedHash: expect.any(String),
+      op: expect.objectContaining({ kind: "binding", itemId: "ground", expectedAdapterHash: expect.any(String) }) }) })]);
   });
 
   it("preview hides the composer without unmounting it; returning to edit restores it", () => {

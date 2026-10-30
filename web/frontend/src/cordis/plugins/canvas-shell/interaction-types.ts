@@ -216,10 +216,10 @@ export type InteractionControllerOptions = {
    * 双击拍摄镜头预览卡片 → 进入所属片场并选择该镜头
    * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4 / design D8）。
    *
-   * 只携带**已校验归属**的预览节点身份（`shotPreview.filmSetNodeId` + `clipId`）；片场扩展
-   * 负责进入聚焦、选择该 clipId 并在零点暂停。宿主不读取片场业务数据，也不猜默认镜头。
+   * 只携带**已校验归属**的预览节点身份（owner 与 entity）；业务扩展负责进入聚焦、选择实体
+   * 并在零点暂停。宿主不读取业务数据，也不猜默认实体。
    */
-  onShotPreviewEnterIntent?: (request: { previewNodeId: string; filmSetNodeId: string; clipId: string }) => void;
+  onShotPreviewEnterIntent?: (request: { previewNodeId: string; ownerNodeId: string; entityId: string }) => void;
   /**
    * 聚焦目标/runtime projection 失效上报（change: fix-model-focus-navigation-and-camera-parity，D5）。
    * runtime/host 据此请求 Canvas Navigation 原子收敛（不再由 selection 直接退出）。

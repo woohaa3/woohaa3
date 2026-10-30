@@ -137,6 +137,7 @@ export function canvasShellExtension(): Plugin.Function<void> {
         id: "node-download",
         owner: CANVAS_SHELL_PLUGIN_ID,
         order: 0,
+        contentAction: "download",
         // 下载门禁只读**内容就绪性**，MUST NOT 被只读拒绝（design D7）。
         available: () => true,
         describe: ({ nodeId, nodeType }) => {
@@ -147,7 +148,8 @@ export function canvasShellExtension(): Plugin.Function<void> {
             canvas: workingCanvasOf(woohaa3CanvasStore.getState()),
             nodeId,
             nodeType,
-            mediaContent: ctx.mediaContent
+            mediaContent: ctx.mediaContent,
+            content: ctx.compositeAssets.contentContributions
           });
           return {
             label: "下载",
@@ -164,7 +166,8 @@ export function canvasShellExtension(): Plugin.Function<void> {
             canvas: workingCanvasOf(woohaa3CanvasStore.getState()),
             nodeId,
             nodeType,
-            mediaContent: ctx.mediaContent
+            mediaContent: ctx.mediaContent,
+            content: ctx.compositeAssets.contentContributions
           });
           if (!availability.available) return;
           ctx.emit("ui.node-download.save-requested", { nodeId });
@@ -202,7 +205,13 @@ export function canvasShellExtension(): Plugin.Function<void> {
           focused: focused()
         });
         if (!target) return null;
-        return { selectedNodeIds: target.nodeIds, writable: ctx.canvasSession.isWritable() };
+        const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+        return {
+          selectedNodeIds: target.nodeIds,
+          writable: ctx.canvasSession.isWritable(),
+          content: ctx.compositeAssets.contentContributions,
+          ...(canvas ? { nodeData: canvas.nodeData, nodes: canvas.document.nodes } : {})
+        };
       };
       const offBridge = setNodeActionBridge({
         toolbars: () => {
@@ -210,7 +219,13 @@ export function canvasShellExtension(): Plugin.Function<void> {
           if (!target) return new Map();
           const description = describeNodeActions({
             contributions: contributions(),
-            context: { nodeId: target.nodeId, nodeType: target.nodeType, writable: target.writable }
+            context: {
+              nodeId: target.nodeId,
+              nodeType: target.nodeType,
+              writable: target.writable,
+              content: ctx.compositeAssets.contentContributions,
+              nodeData: workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData[target.nodeId]
+            }
           });
           return description ? new Map<string, BevyNodeActionsPresentation>([[target.nodeId, description.presentation]]) : new Map();
         },
@@ -218,7 +233,13 @@ export function canvasShellExtension(): Plugin.Function<void> {
           const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
           const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
           if (!node) return;
-          const context: NodeActionContext = { nodeId, nodeType: node.type, writable: ctx.canvasSession.isWritable() };
+          const context: NodeActionContext = {
+            nodeId,
+            nodeType: node.type,
+            writable: ctx.canvasSession.isWritable(),
+            content: ctx.compositeAssets.contentContributions,
+            nodeData: canvas?.nodeData[nodeId]
+          };
           routeNodeActionHit({
             hit: { nodeId, actionId, menu },
             context,
@@ -336,6 +357,6 @@ export function canvasShellExtension(): Plugin.Function<void> {
       // page scope dispose 时关闭查找，避免跨画布残留（任务 4.2）。
       ctx.effect(() => () => canvasSearchStore.close(), "canvas-shell-search-reset");
     },
-    { name: CANVAS_SHELL_PLUGIN_ID, inject: ["mediaContent", "nodeImplementations", "slots", "canvasRuntime", "canvasLocate", "canvasEdit", "canvasSession", "canvasNavigation"] }
+    { name: CANVAS_SHELL_PLUGIN_ID, inject: ["mediaContent", "nodeImplementations", "slots", "canvasRuntime", "canvasLocate", "canvasEdit", "canvasSession", "canvasNavigation", "compositeAssets"] }
   );
 }

@@ -370,11 +370,11 @@ pub(crate) fn sync_models(
                 .as_ref()
                 .is_some_and(|e| e.node_id == node.id);
         if let Some(group) = scene
-            .film_set_groups
+            .managed_item_groups
             .iter()
-            .find(|group| group.owner_id == node.id)
+            .find(|group| group.owner_node_id == node.id)
         {
-            // 片场 group 的徽标场景沿用旧 composite 根的总览 primitive LOD：group owner 持有
+            // 受管条目组的徽标场景沿用旧 composite 根的总览 primitive LOD：group owner 持有
             // 所有绑定的聚合几何，后续 `sync_quality` 可整场原子切档。未声明时保持 High。
             let overview = super::quality::has_overview_lod_declaration(node);
             let quality = if overview {

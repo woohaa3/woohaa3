@@ -11,7 +11,7 @@ import { modelBounds, type FocusHitResult } from "./model-focus-session.js";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import type { InteractionCore } from "./interaction-core.js";
-import { builtinNodeCapabilityResolver, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { builtinNodeCapabilityResolver, resolveContentDoubleClickTarget } from "@woohaa3/contracts";
 
 export function createDoubleClickHandler(core: InteractionCore) {
   const { options, canvas, model, setSelection, activeViewport, surfaceSize } = core;
@@ -77,13 +77,17 @@ export function createDoubleClickHandler(core: InteractionCore) {
     // （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4 / design D8）。
     // 归属由 nodeData 严格解码得到；缺失/非法即不派发（保留节点与归属保护，不猜默认镜头）。
     if (cardEntry) {
-      const ownership = shotPreviewOwnershipOf(canvasState.nodeData?.[cardEntry.id]);
-      if (ownership) {
+      const target = resolveContentDoubleClickTarget(
+        options.compositeAssets?.contentContributions,
+        cardEntry.type,
+        canvasState.nodeData?.[cardEntry.id]
+      );
+      if (target?.kind === "shot-preview" && target.entityId) {
         event.preventDefault();
         options.onShotPreviewEnterIntent?.({
           previewNodeId: cardEntry.id,
-          filmSetNodeId: ownership.filmSetNodeId,
-          clipId: ownership.clipId
+          ownerNodeId: target.nodeId,
+          entityId: target.entityId
         });
         return;
       }

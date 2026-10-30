@@ -174,8 +174,8 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
               case "ui.node-history.open-requested":
                 ctx.emit("ui.node-history.open-requested", payload as never);
                 return;
-              case "ui.shot-preview.enter-requested":
-                ctx.emit("ui.shot-preview.enter-requested", payload as never);
+              case "ui.content-preview.enter-requested":
+                ctx.emit("ui.content-preview.enter-requested", payload as never);
                 return;
             }
           },
@@ -211,11 +211,11 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
           onShotPreviewEnterIntent: (request) => {
             // 双击拍摄镜头预览卡片：进入所属片场聚焦并选择该镜头（任务 5.4 / design D8）。
             // 归属由输入层严格解码，这里只经 Navigation 进入片场 focus；具体选择哪一路镜头由
-            // 片场扩展消费 `ui.shot-preview.enter-requested` 时决定（宿主不猜默认镜头）。
+            // 片场扩展消费 `ui.content-preview.enter-requested` 时决定（宿主不猜默认镜头）。
             void ctx.canvasNavigation
-              .requestEnterNodeFocus({ nodeId: request.filmSetNodeId, kind: "model", owner: "direct" })
+              .requestEnterNodeFocus({ nodeId: request.ownerNodeId, kind: "model", owner: "direct" })
               .then(result => {
-                if (result.ok) ctx.emit("ui.shot-preview.enter-requested", request as never);
+                if (result.ok) ctx.emit("ui.content-preview.enter-requested", request as never);
               });
           },
           ...(options.loadRuntime ? { loadRuntime: options.loadRuntime } : {}),

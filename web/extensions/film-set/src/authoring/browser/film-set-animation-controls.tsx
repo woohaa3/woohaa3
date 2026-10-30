@@ -20,6 +20,7 @@ import {
   readFilmSetAnimationProjection,
   filmSetAnimationsOf,
   filmSetBackdropIsCustom,
+  filmSetClipPatchCommand,
   filmSetClipPrecondition,
   isFilmSetShotKind,
   readFilmSetBackdrop,
@@ -78,7 +79,7 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
   const mutate = async (op: FilmSetClipPatchOp, id = shot?.id): Promise<boolean> => {
     if (!writable || !id) return false;
     setError(null);
-    const result = ctx.canvasSession.submitCommands([{ type: "filmSet.clipPatch", nodeId, clipId: id, op, expectedHash: filmSetClipPrecondition(collection, id, op) }], `web-clip-${crypto.randomUUID()}`);
+    const result = ctx.canvasSession.submitCommands([filmSetClipPatchCommand({ nodeId, clipId: id, op, expectedHash: filmSetClipPrecondition(collection, id, op) })], `web-clip-${crypto.randomUUID()}`);
     if (!result.ok) { setError("拍摄镜头修改未提交，请检查连接和写入权限"); return false; }
     const outcome = await result.handle.settled;
     if (outcome.state === "rejected") { setError(outcome.error ?? "拍摄镜头修改被拒绝，请重新读取后重试"); return false; }

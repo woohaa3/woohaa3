@@ -6,16 +6,22 @@ import type { ContentFieldDebt } from "./extension-purity-allowlist.js";
 
 export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   {
-    file: "web/contracts/src/canvas/command-reducer/edit-command-film-set.ts",
-    literals: ["filmSetContent","filmSetNodeId"],
+    file: "web/contracts/src/canvas/film-set-content/commands.ts",
+    literals: ["film-set", "filmSetContent"],
     stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
+    reason: "历史债：片场 owner codec 仍在 contracts 内核树内；任务 6.2 迁到扩展目录。"
   },
   {
-    file: "web/contracts/src/canvas/command-reducer/edit-command.ts",
-    literals: ["filmSetObjectContainersHidden"],
+    file: "web/contracts/src/canvas/film-set-content/edit-plan.ts",
+    literals: ["film-set", "filmSetContent"],
     stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
+    reason: "历史债：片场 owner 编辑规划仍在 contracts 内核树内；任务 6.2 迁到扩展目录。"
+  },
+  {
+    file: "web/contracts/src/canvas/film-set-content/edit.ts",
+    literals: ["filmSetContent"],
+    stage: "command",
+    reason: "历史债：片场 owner 编辑执行器仍在 contracts 内核树内；任务 6.2 迁到扩展目录。"
   },
   {
     file: "web/contracts/src/canvas/command-reducer/film-set-clip-commands.ts",
@@ -30,65 +36,12 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
   },
   {
-    file: "web/contracts/src/canvas/command-reducer/film-set-shot-previews.ts",
-    literals: ["shotPreview"],
-    stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
-  },
-  {
     file: "web/contracts/src/canvas/command-reducer/node-commands.ts",
-    literals: ["film-set","filmSetNodeId"],
-    stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
-  },
-  {
-    file: "web/contracts/src/canvas/command-reducer/node-data-validation.ts",
-    literals: ["filmSetAnimations","filmSetContent","scenePlacement"],
-    stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
-  },
-  {
-    file: "web/contracts/src/canvas/command-satisfaction.ts",
-    literals: ["filmSetContent"],
-    stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
-  },
-  {
-    file: "web/contracts/src/canvas/edit-command-types.ts",
-    literals: ["filmSetNodeId","filmSetObjectContainersHidden"],
-    stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
-  },
-  {
-    file: "web/contracts/src/canvas/edit-command.ts",
-    literals: ["filmSetNodeId"],
-    stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
-  },
-  {
-    file: "web/contracts/src/canvas/edit-plan-film-set-clip.ts",
-    literals: ["filmSetContent","filmSetNodeId"],
-    stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
-  },
-  {
-    file: "web/contracts/src/canvas/edit-plan-film-set.ts",
-    literals: ["filmSetContent"],
-    stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
-  },
-  {
-    file: "web/contracts/src/canvas/edit-plan-node-data.ts",
-    literals: ["filmSetObjectContainersHidden"],
-    stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
-  },
-  {
-    file: "web/contracts/src/canvas/domain/core/composite-asset-identity.ts",
     literals: ["film-set"],
-    stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
+    stage: "command",
+    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
   },
+
   {
     file: "web/services/canvas-service/src/animation/legacy-film-set-animations.ts",
     literals: ["filmSetContent"],
@@ -126,62 +79,8 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
   },
   {
-    file: "web/frontend/src/cordis/contract/authoring.ts",
-    literals: ["film-set"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/cordis/events/catalog.ts",
-    literals: ["film-set","filmSetNodeId"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/cordis/plugins/canvas-runtime/canvas-runtime-options.ts",
-    literals: ["filmSetNodeId"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/cordis/plugins/canvas-runtime/plugin.tsx",
-    literals: ["filmSetNodeId"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
     file: "web/frontend/src/cordis/plugins/canvas-shell/canvas-motion-issues.ts",
     literals: ["filmSetContent"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/cordis/plugins/canvas-shell/canvas-node-index.ts",
-    literals: ["filmSetNodeId"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/cordis/plugins/canvas-shell/interaction-double-click.ts",
-    literals: ["filmSetNodeId"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/cordis/plugins/canvas-shell/interaction-hover.ts",
-    literals: ["filmSetNodeId"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/cordis/plugins/canvas-shell/interaction-types.ts",
-    literals: ["filmSetNodeId"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/cordis/plugins/canvas-shell/shot-preview-scene-input.ts",
-    literals: ["filmSetNodeId"],
     stage: "interaction",
     reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
   },
@@ -228,26 +127,8 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
   },
   {
-    file: "web/frontend/src/cordis/services/hover-store.ts",
-    literals: ["filmSetNodeId"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
     file: "web/frontend/src/cordis/ui/assistant-execution/authoring-composer.tsx",
     literals: ["film-set"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/extension-api/composite-assets.ts",
-    literals: ["shotPreviewLinks"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/extension-api/model-workspace.ts",
-    literals: ["filmSetNodeId"],
     stage: "interaction",
     reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
   },
@@ -259,7 +140,7 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
   {
     file: "scripts/lib/model-native-migration.ts",
-    literals: ["film-set","scenePlacement"],
+    literals: ["film-set"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
@@ -319,13 +200,7 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
   {
     file: "web/contracts/src/canvas/domain/core/shot-reference.ts",
-    literals: ["film-set","filmSetAnimations","filmSetNodeId","shotPreview"],
-    stage: "node-data",
-    reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
-  },
-  {
-    file: "web/contracts/src/canvas/domain/runtime-node-data.ts",
-    literals: ["filmSetContent"],
+    literals: ["film-set","filmSetAnimations"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
@@ -385,7 +260,7 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
   {
     file: "web/contracts/src/canvas/film-set-object-container.ts",
-    literals: ["film-set","filmSetContent","filmSetNodeId"],
+    literals: ["film-set","filmSetContent"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
@@ -397,19 +272,19 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
   {
     file: "web/contracts/src/canvas/film-set-shot-image-reference.ts",
-    literals: ["filmSetNodeId","scenePlacement"],
+    literals: ["scenePlacement"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
   {
     file: "web/contracts/src/canvas/film-set-shot-preview.ts",
-    literals: ["filmSetAnimations","filmSetNodeId","shotPreview"],
+    literals: ["film-set","filmSetAnimations"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
   {
     file: "web/contracts/src/canvas/film-set-shot-reference.ts",
-    literals: ["film-set","filmSetNodeId"],
+    literals: ["film-set"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
@@ -422,12 +297,6 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   {
     file: "web/contracts/src/canvas/node-history/types.ts",
     literals: ["filmSetAnimations","filmSetContent","scenePlacement"],
-    stage: "node-data",
-    reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
-  },
-  {
-    file: "web/contracts/src/canvas/protocol.ts",
-    literals: ["filmSetNodeId"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
@@ -451,12 +320,6 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
   {
     file: "web/contracts/src/extension/assistant/conversation-codec.ts",
-    literals: ["film-set"],
-    stage: "node-data",
-    reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
-  },
-  {
-    file: "web/contracts/src/extension/assistant/conversation.ts",
     literals: ["film-set"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
@@ -517,13 +380,7 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
   {
     file: "web/services/canvas-service/src/storage/migrations/film-set-shooting-shots.ts",
-    literals: ["film-set","filmSetAnimations","filmSetContent","scenePlacement","shotPreview"],
-    stage: "node-data",
-    reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
-  },
-  {
-    file: "web/services/canvas-service/src/task/shot-reference-resolution.ts",
-    literals: ["filmSetNodeId"],
+    literals: ["film-set","filmSetAnimations","filmSetContent","scenePlacement"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
@@ -534,116 +391,14 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
   {
-    file: "bevy/src/canvas_query/interaction/tests.rs",
-    literals: ["filmSetNodeId"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "bevy/src/canvas_query/interaction/tests/node_action.rs",
-    literals: ["filmSetNodeId"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "bevy/src/canvas_query/shot_preview.rs",
-    literals: ["filmSetNodeId","shotPreview"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "bevy/src/canvas2d/ownership_links.rs",
-    literals: ["filmSetNodeId"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "bevy/src/model3d/filmset_camera.rs",
-    literals: ["filmSetNodeId","shotPreview"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
     file: "bevy/src/model3d/preparation/schedule.rs",
     literals: ["film-set"],
     stage: "render",
     reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
   },
   {
-    file: "bevy/src/model3d/tests/demand.rs",
-    literals: ["filmSetNodeId","shotPreview"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "bevy/src/model3d/tests/filmset_camera.rs",
-    literals: ["filmSetNodeId","shotPreview"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "bevy/src/model3d/tests/overview_lod.rs",
-    literals: ["filmSetNodeId","shotPreview"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "bevy/src/model3d/tests/playback_representation.rs",
-    literals: ["filmSetNodeId","shotPreview"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "bevy/src/protocol/scene.rs",
-    literals: ["filmSetNodeId","shotPreview","shotPreviewLinks"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "bevy/src/protocol/tests_shot_preview.rs",
-    literals: ["filmSetNodeId","shotPreview","shotPreviewLinks"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "bevy/src/shot_node_preview/plan.rs",
-    literals: ["filmSetNodeId","shotPreview"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "web/backend/src/recording-executor/scheduler.ts",
-    literals: ["filmSetNodeId"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
     file: "web/contracts/src/canvas/render-scene/film-set-projection.ts",
     literals: ["scenePlacement"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "web/contracts/src/canvas/render-scene/scene-builder.ts",
-    literals: ["filmSetNodeId","shotPreview","shotPreviewLinks"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "web/contracts/src/canvas/render-scene/shot-preview-projection.ts",
-    literals: ["filmSetNodeId","shotPreview"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "web/contracts/src/canvas/render-scene/wire-scene.ts",
-    literals: ["shotPreview","shotPreviewLinks"],
-    stage: "render",
-    reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
-  },
-  {
-    file: "web/contracts/src/canvas/render-scene/wire-shot-preview.ts",
-    literals: ["filmSetNodeId"],
     stage: "render",
     reason: "历史债：渲染 wire 或场景构建仍含扩展字段。去向：第 6 组改为通用原语。"
   },
@@ -672,12 +427,6 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "历史债：内核仍写死扩展路由、工具或媒体作用域。去向：第 4 组改为内容路由。"
   },
   {
-    file: "web/services/canvas-service/src/clients/media-client.ts",
-    literals: ["film-set"],
-    stage: "route",
-    reason: "历史债：内核仍写死扩展路由、工具或媒体作用域。去向：第 4 组改为内容路由。"
-  },
-  {
     file: "web/services/mcp-service/src/model-mcp/animation-tools.ts",
     literals: ["film-set","filmSetAnimations","filmSetContent","scenePlacement"],
     stage: "route",
@@ -688,18 +437,6 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     literals: ["filmSetAnimations","filmSetContent"],
     stage: "route",
     reason: "历史债：内核仍写死扩展路由、工具或媒体作用域。去向：第 4 组改为内容路由。"
-  },
-  {
-    file: "web/contracts/src/canvas/agent-node-descriptors.ts",
-    literals: ["film-set"],
-    stage: "node-data",
-    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
-  },
-  {
-    file: "web/contracts/src/canvas/canvas-script/api-guide.ts",
-    literals: ["film-set"],
-    stage: "node-data",
-    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
   },
   {
     file: "web/contracts/src/canvas/film-set-animation-projection.ts",
@@ -727,7 +464,7 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
   {
     file: "web/contracts/src/canvas/film-set-group-migration.ts",
-    literals: ["filmSetAnimations","filmSetContent","filmSetNodeId","filmSetObjectContainersHidden","scenePlacement","shotPreview"],
+    literals: ["filmSetAnimations","filmSetContent","filmSetObjectContainersHidden","scenePlacement"],
     stage: "command",
     reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
   },
@@ -738,21 +475,15 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
   },
   {
-    file: "web/frontend/src/cordis/domain/node-catalog.ts",
+    file: "web/contracts/src/canvas/command-reducer/node-data-validation.ts",
     literals: ["film-set"],
     stage: "node-data",
-    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+    reason: "旧 composite 片场只读迁移窗口的显式拒绝分支；新写入已走 owner codec。待片场旧数据全部迁移后删除。"
   },
   {
-    file: "web/services/mcp-service/src/agent-authoring/graph-tools.ts",
+    file: "web/contracts/src/canvas/film-set-legacy-identity.ts",
     literals: ["film-set"],
-    stage: "node-data",
-    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+    stage: "identity",
+    reason: "旧 composite 片场只读身份的唯一集中处（change 2026-10-28-generic-extension-content-ownership 明确保留）；通用身份模块不再含具体 id。待旧数据迁移完成后随文件删除。"
   },
-  {
-    file: "web/services/mcp-service/src/agent-authoring/tool-schemas.ts",
-    literals: ["film-set"],
-    stage: "node-data",
-    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
-  }
 ];

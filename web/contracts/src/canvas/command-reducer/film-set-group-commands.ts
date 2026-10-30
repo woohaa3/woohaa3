@@ -1,5 +1,5 @@
 import { convertShotReferenceConsumers } from "./film-set-clip-commands.js";
-import type { CanvasCommand } from "../commands.js";
+import type { FilmSetGroupBindingPatchCommand, FilmSetGroupUngroupCommand } from "../film-set-content/command-types.js";
 import {
   decodeFilmSetGroupMarker,
   patchFilmSetGroupBinding as patchFilmSetGroupBindingMarker,
@@ -24,7 +24,7 @@ function canvasFromWork(work: WorkingState) {
 
 export function patchFilmSetGroupBinding(
   work: WorkingState,
-  command: Extract<CanvasCommand, { type: "filmSetGroup.bindingPatch" }>
+  command: FilmSetGroupBindingPatchCommand
 ): CommandApplyResult {
   const node = work.nodes.find(entry => entry.id === command.groupId);
   if (!node) return reject("unknown-node", `片场 group ${command.groupId} 不存在`);
@@ -45,7 +45,7 @@ export function patchFilmSetGroupBinding(
 
 export function ungroupFilmSetGroup(
   work: WorkingState,
-  command: Extract<CanvasCommand, { type: "filmSetGroup.ungroup" }>
+  command: FilmSetGroupUngroupCommand
 ): CommandApplyResult {
   const group = work.nodes.find(node => node.id === command.groupId);
   if (!group || group.type !== "group") return reject("invalid-film-set-group", "片场 group 不存在");

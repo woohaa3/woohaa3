@@ -231,7 +231,8 @@ test("content 声明校验字段格式，并拒绝跨扩展重名", () => {
     routePrefix: "import",
     mcpTools: ["import_content"],
     targetModes: ["film-set"],
-    eventOwners: ["film-set"]
+    eventOwners: ["film-set"],
+    ownerLocators: [{ nodeTypes: ["group"], fields: ["filmSetGroup"] }]
   };
   assert.equal(validateExtensionDescriptor({ ...MINIMAL, content }).ok, true);
   assert.match(errorsOf({ ...MINIMAL, content: { ownedFields: ["film-set"] } }), /ownedFields/);
@@ -239,6 +240,9 @@ test("content 声明校验字段格式，并拒绝跨扩展重名", () => {
   assert.match(errorsOf({ ...MINIMAL, content: { routePrefix: "/import" } }), /routePrefix/);
   assert.match(errorsOf({ ...MINIMAL, content: { ownedFields: ["title", "title"] } }), /ownedFields 不得重复/);
   assert.match(errorsOf({ ...MINIMAL, content: { extra: true } }), /content 未知字段：extra/);
+  assert.match(errorsOf({ ...MINIMAL, content: { ownerLocators: [{ nodeTypes: ["Group"], fields: ["filmSetGroup"] }] } }), /ownerLocators.*nodeTypes/);
+  assert.match(errorsOf({ ...MINIMAL, content: { ownerLocators: [{ nodeTypes: ["group"], fields: [] }] } }), /ownerLocators.*fields/);
+  assert.match(errorsOf({ ...MINIMAL, content: { ownerLocators: [{ nodeTypes: ["group"], fields: ["filmSetGroup"], extra: true }] } }), /ownerLocators.*未知字段/);
   const collisions = contentDeclarationCollisions([
     { extensionId: "film-set", directory: "a", descriptor: { content } },
     { extensionId: "game-furnace", directory: "b", descriptor: { content: { ownedFields: ["filmSetContent"], mcpTools: ["other_tool"] } } }

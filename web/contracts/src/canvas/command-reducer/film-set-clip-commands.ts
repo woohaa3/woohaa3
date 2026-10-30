@@ -1,6 +1,6 @@
 import { readFilmSetGroupMarker, createFilmSetGroupMarker, type FilmSetGroupClip } from "../film-set-group.js";
 import { readFilmSetAnimationProjection } from "../film-set-animation-projection.js";
-import type { CanvasCommand } from "../commands.js";
+import type { FilmSetClipPatchCommand } from "../film-set-content/command-types.js";
 import { resolveFilmSetClip } from "../film-set-clip-view.js";
 import { applyFilmSetClipPatch } from "../film-set-clip-ops.js";
 import { compileFilmSetClip, filmSetCompiledBudget } from "../film-set-clip-compilation.js";
@@ -9,7 +9,7 @@ import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.
 import { shotPreviewNodeId } from "../film-set-shot-preview.js";
 import { isShotImageReferenceTargetNode, isShotReferenceTargetNode, shotReferenceRoleForKind } from "../domain/core/shot-reference.js";
 
-export function patchFilmSetClip(work: WorkingState, command: Extract<CanvasCommand, { type: "filmSet.clipPatch" }>): CommandApplyResult {
+export function patchFilmSetClip(work: WorkingState, command: FilmSetClipPatchCommand): CommandApplyResult {
   const node = work.nodes.find(entry => entry.id === command.nodeId);
   const group = node?.type === "group" ? readFilmSetGroupMarker(work.nodeData[command.nodeId]) : null;
   if (!group) return reject("invalid-self-contained-node", "旧片场只读，请先迁移为群组");

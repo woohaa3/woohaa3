@@ -76,8 +76,10 @@ export class CanvasRoom {
   private queue: Promise<unknown> = Promise.resolve();
 
   private readonly lifecycle: import("@woohaa3/contracts").ManagedNodeLifecycleResolver | undefined;
+  private readonly content: import("@woohaa3/contracts").ContentContributionResolver | undefined;
   constructor(options: CanvasRoomOptions) {
     this.lifecycle = options.lifecycle;
+    this.content = options.content;
     this.canvasId = options.canvasId;
     this.repository = options.repository;
     this.mediaStorage = options.mediaStorage;
@@ -381,6 +383,7 @@ export class CanvasRoom {
       mediaStorage: this.mediaStorage,
       verifyAssets: this.verifyAssets,
       lifecycle: this.lifecycle,
+      ...(this.content ? { content: this.content } : {}),
       get storageSeq() {
         return self.storageSeq;
       },

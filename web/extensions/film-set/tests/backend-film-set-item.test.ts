@@ -5,8 +5,10 @@ import { migrateLegacyFilmSetToGroup, readFilmSetAnimationProjection } from "@wo
  */
 import { describe, expect, it } from "vitest";
 import {
+  filmSetContentContribution,
   filmSetNodeDataFields,
   createFilmSetSnapshot,
+  ContentContributionRegistry,
   createEmptyWoohaa3ServerCanvas,
   createModel3DNodeData,
   filmSetItemById,
@@ -22,7 +24,9 @@ const SCRIPT = "scene.box({ id: 'torso' });";
 
 async function readyRoom(withItem = true): Promise<CanvasRoom> {
   const repository = new InMemoryYjsDocumentRepository();
-  const room = new CanvasRoom({ canvasId: "c1", repository, now: () => NOW });
+  const content = new ContentContributionRegistry();
+  content.register(filmSetContentContribution);
+  const room = new CanvasRoom({ canvasId: "c1", repository, now: () => NOW, content });
   const base = createEmptyWoohaa3ServerCanvas("c1", NOW);
   const snapshot = createFilmSetSnapshot({
     title: "片场",

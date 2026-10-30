@@ -712,29 +712,48 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     const ordered = registrations
       .filter((registration) => registration.canvasContent)
       .slice()
-      .sort(compareByOrder((registration) => registration.canvasContentOrder, (registration) => registration.extensionId));
+      .sort(compareByOrder(
+        (registration) => registration.canvasContentOrder ?? FALLBACK_ORDER,
+        (registration) => registration.extensionId
+      ));
     for (const registration of ordered) {
       const declared = registration.canvasContent;
-      if (!moduleCache.has(declared.module)) {
-        moduleCache.set(
-          declared.module,
-          await importModule(declared.module, {
-            extensionId: registration.extensionId,
-            directory: registration.directory,
-            subpath: declared.factory,
-            descriptorPath: registration.descriptorPath
-          })
-        );
+      let runtime = {};
+      if (declared) {
+        if (!moduleCache.has(declared.module)) {
+          moduleCache.set(
+            declared.module,
+            await importModule(declared.module, {
+              extensionId: registration.extensionId,
+              directory: registration.directory,
+              subpath: declared.factory,
+              descriptorPath: registration.descriptorPath
+            })
+          );
+        }
+        const factory = moduleCache.get(declared.module)[declared.factory];
+        if (typeof factory !== "function") {
+          throw new ExtensionLoadError(
+            "EXTENSION_EXPORT_INVALID",
+            `扩展 ${registration.extensionId} 的 canvasContent 工厂导出不是函数：${declared.factory}（目录 ${registration.directory}）`,
+            { extensionId: registration.extensionId, directory: registration.directory, export: declared.factory }
+          );
+        }
+        runtime = await factory(optionsByExtensionId[registration.extensionId] ?? {});
       }
-      const factory = moduleCache.get(declared.module)[declared.factory];
-      if (typeof factory !== "function") {
-        throw new ExtensionLoadError(
-          "EXTENSION_EXPORT_INVALID",
-          `扩展 ${registration.extensionId} 的 canvasContent 工厂导出不是函数：${declared.factory}（目录 ${registration.directory}）`,
-          { extensionId: registration.extensionId, directory: registration.directory, export: declared.factory }
-        );
+      if (Array.isArray(runtime?.content) && runtime.content.length > 0) {
+        const declared = registration.descriptor?.content ?? {};
+        runtime = {
+          ...runtime,
+          content: runtime.content.map((item) => ({
+            ...item,
+            ...(declared.targetModes ? { targetModes: [...declared.targetModes] } : {}),
+            ...(declared.eventOwners ? { eventOwners: [...declared.eventOwners] } : {}),
+            ...(declared.ownerLocators ? { ownerLocators: declared.ownerLocators.map((locator) => ({ nodeTypes: [...locator.nodeTypes], fields: [...locator.fields] })) } : {})
+          }))
+        };
       }
-      const runtime = await factory(optionsByExtensionId[registration.extensionId] ?? {});
+      const hasContent = Array.isArray(runtime?.content) && runtime.content.length > 0;
       const hasFrames = runtime?.frames !== undefined;
       const hasConversion = runtime?.conversion !== undefined;
       const hasMcp = runtime?.mcp !== undefined;
@@ -768,7 +787,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       const shapeOk =
         runtime &&
         typeof runtime === "object" &&
-        (hasFrames || hasConversion || hasMcp || hasRecording) &&
+        (hasContent || hasFrames || hasConversion || hasMcp || hasRecording) &&
         framesOk &&
         conversionOk &&
         mcpOk &&
@@ -776,7 +795,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       if (!shapeOk) {
         throw new ExtensionLoadError(
           "EXTENSION_EXPORT_INVALID",
-          `扩展 ${registration.extensionId} 的 canvasContent 工厂返回值不是画布内容运行时（需要 frames / conversion / mcp / recording 至少一组，且组内方法齐全）：${declared.factory}`,
+          `扩展 ${registration.extensionId} 的 canvasContent 返回值不是画布内容运行时（需要 content / frames / conversion / mcp / recording 至少一组，且组内方法齐全）：${declared?.factory}`,
           { extensionId: registration.extensionId, directory: registration.directory }
         );
       }

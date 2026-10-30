@@ -20,6 +20,7 @@ import {
   filmSetAnimationsOf,
   filmSetClipPrecondition,
   filmSetItemAdapterHash,
+  type FilmSetExtensionCommand,
   type FilmSetNodeData,
   type FilmSetAnimationClip,
   type FilmSetModelItem,
@@ -163,23 +164,26 @@ describe("FilmSetAdaptationConfirm 提交 clipPatch（任务 6.7）", () => {
     return { submitted, clip, item };
   }
 
-  it("确认按钮提交一条携带 expectedAdapterHash 与 expectedHash 的 filmSet.clipPatch", async () => {
+  it("确认按钮提交一条携带 expectedAdapterHash 与 expectedHash 的 extension.command", async () => {
     const h = setup();
     const button = [...document.querySelectorAll("button")].find(entry => entry.textContent?.includes("确认动作适配"));
     expect(button).toBeTruthy();
     await act(async () => { (button as HTMLButtonElement).click(); await Promise.resolve(); });
     expect(h.submitted).toHaveLength(1);
-    const command = h.submitted[0] as Extract<CanvasCommand, { type: "filmSet.clipPatch" }>;
-    expect(command.type).toBe("filmSet.clipPatch");
-    expect(command.clipId).toBe(h.clip.id);
-    expect(command.op).toMatchObject({ kind: "confirm-adaptation", itemId: h.item.id, expectedAdapterHash: filmSetItemAdapterHash(h.item) });
+    const command = h.submitted[0] as FilmSetExtensionCommand;
+    expect(command.type).toBe("extension.command");
+    if (command.type !== "extension.command") return;
+    expect(command.extensionId).toBe("film-set");
+    const payload = command.payload as { clipId: string; op: unknown; expectedHash: string };
+    expect(payload.clipId).toBe(h.clip.id);
+    expect(payload.op).toMatchObject({ kind: "confirm-adaptation", itemId: h.item.id, expectedAdapterHash: filmSetItemAdapterHash(h.item) });
     // expectedHash 必须来自与组件相同的当前片段权威读取（解码后的规范化集合）。
     const canvas = woohaa3CanvasStore.getState().canvas!;
     const decoded = decodeFilmSetNodeData(canvas.nodeData["film"]);
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) return;
     const clips = filmSetAnimationsOf(decoded.value);
-    const expected = filmSetClipPrecondition(clips, h.clip.id, command.op);
-    expect(command.expectedHash).toBe(expected);
+    const expected = filmSetClipPrecondition(clips, h.clip.id, payload.op as never);
+    expect(payload.expectedHash).toBe(expected);
   });
 });

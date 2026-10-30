@@ -66,49 +66,17 @@ pub(crate) fn prepare_group(
     group_candidates(scene, &focus.node_id, lookup)
 }
 
-pub(super) fn group_candidates(
-    scene: &Scene,
-    owner_id: &str,
-    lookup: impl Fn(&str) -> Option<Arc<ModelSnapshot>>,
-) -> FilmSetItemPreparation {
-    let Some(group) = scene
-        .film_set_groups
-        .iter()
-        .find(|entry| entry.owner_id == owner_id)
-    else {
-        return FilmSetItemPreparation::closed();
-    };
-    let Some(owner) = scene.nodes.iter().find(|node| node.id == group.owner_id) else {
-        return FilmSetItemPreparation::closed();
-    };
-    let owner_model = owner
-        .model
-        .as_ref()
-        .and_then(|reference| lookup(&reference.resource_key));
+pub(super) fn group_candidates(scene: &Scene, owner_id: &str, lookup: impl Fn(&str) -> Option<Arc<ModelSnapshot>>) -> FilmSetItemPreparation {
+    let Some(group) = scene.managed_item_groups.iter().find(|entry| entry.owner_node_id == owner_id) else { return FilmSetItemPreparation::closed(); };
+    let Some(owner) = scene.nodes.iter().find(|node| node.id == group.owner_node_id) else { return FilmSetItemPreparation::closed(); };
+    let owner_model = owner.model.as_ref().and_then(|reference| lookup(&reference.resource_key));
     let root = super::media_geometry::film_set_root(owner, owner_model.as_deref());
-    let root = group
-        .scene_transform
-        .as_ref()
-        .map(|t| root.mul_transform(super::group_runtime::scene_transform(t)))
-        .unwrap_or(root);
-    let roots: Vec<_> = group
-        .bindings
-        .iter()
-        .map(|binding| format!("{}:{}", binding.binding_id.len(), binding.binding_id))
-        .collect();
-    let combined: std::collections::HashMap<_, _> = owner_model
-        .as_deref()
-        .map(|model| {
-            super::scene::placed_subtree_aabbs(model, &roots, None)
-                .into_iter()
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut candidates = Vec::with_capacity(group.bindings.len());
-    for binding in &group.bindings {
-        if !binding.visible {
-            continue;
-        }
+    let root = group.owner_transform.as_ref().map(|t| root.mul_transform(super::group_runtime::scene_transform(t))).unwrap_or(root);
+    let roots: Vec<_> = group.items.iter().map(|binding| format!("{}:{}", binding.item_id.len(), binding.item_id)).collect();
+    let combined: std::collections::HashMap<_, _> = owner_model.as_deref().map(|model| super::scene::placed_subtree_aabbs(model, &roots, None).into_iter().collect()).unwrap_or_default();
+    let mut candidates = Vec::with_capacity(group.items.len());
+    for binding in &group.items {
+        if !binding.visible { continue; }
         let transform = bevy::prelude::Transform {
             translation: bevy::prelude::Vec3::new(
                 binding.transform.x,
@@ -118,18 +86,11 @@ pub(super) fn group_candidates(
             rotation: bevy::prelude::Quat::from_rotation_y(binding.transform.yaw),
             scale: bevy::prelude::Vec3::splat(binding.transform.scale),
         };
-        let combined_id = format!("{}:{}", binding.binding_id.len(), binding.binding_id);
+        let combined_id = format!("{}:{}", binding.item_id.len(), binding.item_id);
         let from_combined = combined.get(&combined_id);
-        let media_plane =
-            if matches!(binding.kind.as_str(), "image" | "video") && binding.diagnostic.is_none() {
-                Some(super::media_geometry::group_media_plane(
-                    &group.owner_id,
-                    binding,
-                    owner_model.as_deref(),
-                ))
-            } else {
-                None
-            };
+        let media_plane = if matches!(binding.kind.as_str(), "image" | "video") && binding.diagnostic.is_none() {
+            Some(super::media_geometry::group_media_plane(&group.owner_node_id, binding, owner_model.as_deref()))
+        } else { None };
         let local = if let Some(bounds) = from_combined {
             *bounds
         } else if binding.diagnostic.is_some() {
@@ -179,8 +140,8 @@ pub(super) fn group_candidates(
         let bounds = local.transformed(&transform);
         let basis = bevy::math::Mat3::from_quat(root.rotation) * root.scale.x;
         candidates.push(FilmSetItemCandidate {
-            node_id: group.owner_id.clone(),
-            item_id: binding.binding_id.clone(),
+            node_id: group.owner_node_id.clone(),
+            item_id: binding.item_id.clone(),
             min: bounds.min,
             max: bounds.max,
             unit: root.scale.x,
@@ -205,22 +166,9 @@ pub(super) fn group_candidates(
         )
         .transformed(&root.mul_transform(transform));
         let basis = bevy::math::Mat3::from_quat(root.rotation) * root.scale.x;
-        candidates.push(FilmSetItemCandidate {
-            node_id: group.owner_id.clone(),
-            item_id: "film-set-ground".into(),
-            min: bounds.min,
-            max: bounds.max,
-            unit: root.scale.x,
-            yaw: ground.transform.as_ref().map(|t| t.yaw).unwrap_or(0.0),
-            world_to_local: Some(basis.inverse().to_cols_array()),
-            plane_inverse: None,
-        });
+        candidates.push(FilmSetItemCandidate { node_id: group.owner_node_id.clone(), item_id: "film-set-ground".into(), min: bounds.min, max: bounds.max, unit: root.scale.x, yaw: ground.transform.as_ref().map(|t| t.yaw).unwrap_or(0.0), world_to_local: Some(basis.inverse().to_cols_array()), plane_inverse: None });
     }
-    FilmSetItemPreparation {
-        owner: Some(group.owner_id.clone()),
-        candidates,
-        part_bounds_evaluations: 0,
-    }
+    FilmSetItemPreparation { owner: Some(group.owner_node_id.clone()), candidates, part_bounds_evaluations: 0 }
 }
 
 /// accepted `modelFocus` 定位的复合资产节点；目标缺失/非片场/非复合资产返回 `None`。
@@ -249,9 +197,10 @@ fn item_candidates(
         .as_ref()
         .and_then(|reference| lookup(&reference.resource_key));
     candidates.extend(
-        film_set.media.iter().map(|plane| {
-            super::media_geometry::item_candidate(node, media_model.as_deref(), plane)
-        }),
+        film_set
+            .media_planes
+            .iter()
+            .map(|plane| super::media_geometry::item_candidate(node, media_model.as_deref(), plane)),
     );
     if film_set.item_roots.is_empty() {
         return (candidates, 0);
@@ -317,7 +266,7 @@ mod tests {
             "model":{"resourceKey":"v:sig"},
             "compositeAsset":{"x":0,"y":0,"width":260,"height":195,
                 "itemRoots":roots,
-                "media":[{"id":format!("{id}::photo"),"itemId":"photo","kind":"image",
+                "mediaPlanes":[{"id":format!("{id}::photo"),"itemId":"photo","kind":"image",
                     "x":0,"y":10,"z":0,"width":32,"height":24,"yaw":0}]}
         }))
     }
@@ -346,10 +295,10 @@ mod tests {
         let owner =
             node(json!({"id":"group","type":"group","x":120,"y":80,"width":400,"height":300}));
         let mut scene = scene(vec![owner], Some("group"));
-        scene.film_set_groups = serde_json::from_value(json!([{
-            "schemaVersion":"woohaa-film-set-group-render-v1", "ownerId":"group",
-            "badgeOrigin":{"x":0,"y":0}, "bindings":[{
-                "bindingId":"binding", "sourceNodeId":"source", "kind":"model3d",
+        scene.managed_item_groups = serde_json::from_value(json!([{
+            "schemaVersion":"woohaa-managed-item-group-v1", "ownerNodeId":"group",
+            "origin":{"x":0,"y":0}, "items":[{
+                "itemId":"binding", "sourceNodeId":"source", "kind":"model3d",
                 "contentKey":"model:v1", "resourceKey":"model:v1",
                 "transform":{"x":10,"y":0,"z":0,"yaw":0,"scale":2}, "visible":true
             }]
@@ -365,7 +314,7 @@ mod tests {
         assert_eq!(result.candidates[0].min, expected.min);
         assert_eq!(result.candidates[0].max, expected.max);
         assert!(result.candidates[0].world_to_local.is_some());
-        scene.film_set_groups[0].bindings[0].visible = false;
+        scene.managed_item_groups[0].items[0].visible = false;
         assert!(prepare_group(&scene, lookup).candidates.is_empty());
     }
 
@@ -374,21 +323,17 @@ mod tests {
         let owner =
             node(json!({"id":"group","type":"group","x":120,"y":80,"width":400,"height":300}));
         let mut scene = scene(vec![owner], Some("group"));
-        scene.film_set_groups = serde_json::from_value(json!([{
-            "schemaVersion":"woohaa-film-set-group-render-v1", "ownerId":"group", "badgeOrigin":{"x":0,"y":0},
-            "sceneTransform":{"x":2,"y":1,"z":0,"yaw":0.4,"scale":1.5},
-            "bindings":[{"bindingId":"photo","sourceNodeId":"source","kind":"image","contentKey":"v1",
+        scene.managed_item_groups = serde_json::from_value(json!([{
+            "schemaVersion":"woohaa-managed-item-group-v1", "ownerNodeId":"group", "origin":{"x":0,"y":0},
+            "ownerTransform":{"x":2,"y":1,"z":0,"yaw":0.4,"scale":1.5},
+            "items":[{"itemId":"photo","sourceNodeId":"source","kind":"image","contentKey":"v1",
                 "aspectRatio":2,"transform":{"x":3,"y":0,"z":1,"yaw":0.3,"scale":2},"visible":true}]
         }])).unwrap();
         let result = prepare_group(&scene, |_| None);
-        let binding = &scene.film_set_groups[0].bindings[0];
+        let binding = &scene.managed_item_groups[0].items[0];
         let root = super::super::media_geometry::film_set_root(&scene.nodes[0], None)
-            .mul_transform(super::super::group_runtime::scene_transform(
-                scene.film_set_groups[0].scene_transform.as_ref().unwrap(),
-            ))
-            .mul_transform(super::super::group_runtime::scene_transform(
-                &binding.transform,
-            ));
+            .mul_transform(super::super::group_runtime::scene_transform(scene.managed_item_groups[0].owner_transform.as_ref().unwrap()))
+            .mul_transform(super::super::group_runtime::scene_transform(&binding.transform));
         let plane = super::super::media_geometry::group_media_plane("group", binding, None);
         assert_eq!(plane.height, 0.5);
         assert_eq!(plane.width, 1.0);
@@ -495,7 +440,7 @@ mod tests {
         let only_media = node(json!({
             "id":"media","type":"model","x":0,"y":0,"width":260,"height":195,
             "compositeAsset":{"x":0,"y":0,"width":260,"height":195,
-                "media":[{"id":"media::photo","itemId":"photo","kind":"image",
+                "mediaPlanes":[{"id":"media::photo","itemId":"photo","kind":"image",
                     "x":0,"y":10,"z":0,"width":32,"height":24,"yaw":0}]}
         }));
         let items = prepare(&scene(vec![only_media], Some("media")), |_| None);

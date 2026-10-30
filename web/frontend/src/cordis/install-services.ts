@@ -503,7 +503,7 @@ export async function installCanvasPageServices(
     : null;
   // 宿主重连门禁（fault-isolation D6）：App 级 hostConnectivity 存在时才设置，会话在重连期间拒绝提交。
   const submissionGate = hostSubmissionGate(ctx);
-  const session = await createCanvasSession({ canvasId, remote: canvasRemote, lifecycle: compositeAssets.managedLifecycles, ...(access ? { access } : {}), ...submissionGate });
+  const session = await createCanvasSession({ canvasId, remote: canvasRemote, lifecycle: compositeAssets.managedLifecycles, content: compositeAssets.contentContributions, ...(access ? { access } : {}), ...submissionGate });
   ctx.provide("canvasSession" as never, session as never);
   ctx.effect(() => preloadAgentDirectory(agentConversations, ctx.currentUser, session), "agent-directory-preload");
   const groupRuns = createCanvasGroupRuns({ canvasId, transport: applicationRemote.transport, conversations: agentConversations, user: ctx.currentUser, writable: () => session.isWritable() });
@@ -546,6 +546,7 @@ export async function installCanvasPageServices(
   // 页面级编辑历史（撤销/重做）；随 page scope dispose 清空（change: 2026-10-09，任务 1.5）。
   const canvasEdit = createCanvasEditService({
     lifecycle: compositeAssets.managedLifecycles,
+    content: compositeAssets.contentContributions,
     session,
     getCanvas: () => woohaa3CanvasStore.getState().canvas
   });

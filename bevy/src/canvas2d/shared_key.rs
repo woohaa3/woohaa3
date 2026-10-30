@@ -15,7 +15,7 @@ struct Reference {
 #[derive(PartialEq)]
 pub(super) struct SharedKey {
     pub(super) focus_ownership_links: bool,
-    pub(super) ownership_links: Vec<([f32; 2], [f32; 2])>,
+    pub(super) ownership_link_segments: Vec<([f32; 2], [f32; 2])>,
     theme: String,
     references: Vec<Reference>,
     draft: Option<Draft>,
@@ -26,7 +26,7 @@ pub(super) struct SharedKey {
     overlay_count: Option<usize>,
     /// 拍摄镜头归属线（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）：
     /// 派生呈现，起点随相机姿态变更。参与 key 使线随起点/目标增量重绘。
-    shot_preview_links: Vec<crate::protocol::ShotPreviewLink>,
+    ownership_links: Vec<crate::protocol::OwnershipLink>,
 }
 impl SharedKey {
     pub(super) fn new(scene: &Scene, theme: &ThemeResource) -> Self {
@@ -66,7 +66,7 @@ impl SharedKey {
             .collect();
         Self {
             focus_ownership_links: false,
-            ownership_links: Vec::new(),
+            ownership_link_segments: Vec::new(),
             theme: theme.fingerprint().to_owned(),
             references,
             draft: scene.draft.clone(),
@@ -80,7 +80,7 @@ impl SharedKey {
             },
             overlay_count: (scene.drag_attach.is_some() || scene.aggregate_connect.is_some())
                 .then_some(scene.nodes.len()),
-            shot_preview_links: scene.shot_preview_links.clone(),
+            ownership_links: scene.ownership_links.clone(),
         }
     }
 }

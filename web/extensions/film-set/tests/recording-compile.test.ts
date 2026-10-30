@@ -189,8 +189,8 @@ describe("freezeFilmSetRecording", () => {
     expect(scene.compositeAssetFrame.resourceExtent).toBeGreaterThan(0);
     const motion = JSON.parse(result.snapshot.motionJson);
     expect(motion.modelMotion).toEqual([]);
-    expect(motion.objects.length).toBeGreaterThan(0);
-    expect(motion.objects[0]).toHaveProperty("modelMotion");
+    expect(motion.managedItemMotion.length).toBeGreaterThan(0);
+    expect(motion.managedItemMotion[0]).toHaveProperty("modelMotion");
     expect(motion.initialCamera.aspect).toBe("16:9");
   });
 

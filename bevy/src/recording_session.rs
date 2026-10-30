@@ -377,7 +377,7 @@ mod tests {
                 },
                 "background": "#101418",
                 "sceneIrJson": "{\"sceneVersion\":\"woohaa-model-scene-ir-v2\",\"signature\":\"s\",\"extent\":4.0,\"ops\":[{\"t\":\"box\",\"id\":\"b\",\"size\":[1,1,1],\"color\":\"#ffffff\"}]}",
-                "motionJson": "{\"duration\":2.0,\"looped\":false,\"cameraMotion\":[],\"modelMotion\":[],\"objects\":[],\"initialCamera\":{\"azimuth\":0.5,\"elevation\":0.5,\"distance\":4.0,\"focusOffset\":[0,0,0],\"aspect\":\"16:9\"},\"timeSeconds\":0}"
+                "motionJson": "{\"duration\":2.0,\"looped\":false,\"cameraMotion\":[],\"modelMotion\":[],\"managedItemMotion\":[],\"initialCamera\":{\"azimuth\":0.5,\"elevation\":0.5,\"distance\":4.0,\"focusOffset\":[0,0,0],\"aspect\":\"16:9\"},\"timeSeconds\":0}"
             }
         })
     }

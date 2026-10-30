@@ -94,14 +94,8 @@ pub(crate) fn model_bounds_for_node(
     node_id: &str,
 ) -> Option<ModelBounds> {
     let node = scene.nodes.iter().find(|node| node.id == node_id)?;
-    if scene
-        .film_set_groups
-        .iter()
-        .any(|group| group.owner_id == node_id)
-    {
-        let candidates = super::film_set_pick::group_candidates(scene, node_id, |key| {
-            resources.get(key).cloned()
-        });
+    if scene.managed_item_groups.iter().any(|group| group.owner_node_id == node_id) {
+        let candidates = super::film_set_pick::group_candidates(scene, node_id, |key| resources.get(key).cloned());
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
         for candidate in &candidates.candidates {
@@ -165,7 +159,7 @@ pub(crate) fn model_bounds_for_node(
     let media = node
         .composite_asset
         .as_ref()
-        .map(|scope| scope.media.as_slice())
+        .map(|scope| scope.media_planes.as_slice())
         .unwrap_or(&[]);
     if media.is_empty() {
         return model_bounds;
@@ -203,12 +197,7 @@ pub(crate) fn display_unit_for_node(
     node_id: &str,
 ) -> Option<DisplayUnit> {
     let node = scene.nodes.iter().find(|node| node.id == node_id)?;
-    if node.composite_asset.is_none()
-        && !scene
-            .film_set_groups
-            .iter()
-            .any(|group| group.owner_id == node_id)
-    {
+    if node.composite_asset.is_none() && !scene.managed_item_groups.iter().any(|group| group.owner_node_id == node_id) {
         return None;
     }
     let placement = node
@@ -537,7 +526,7 @@ mod focus_offset_tests {
                 "contentExtent":2,
                 "layoutAabb":{"min":[-3,-1,-2],"max":[7,4,3]},
                 "rootPlacement":{"offset":{"x":0,"y":0,"z":0},"scale":1,"yaw":37},
-                "media":[{"id":"photo","kind":"image","x":10,"y":8,"z":0,"width":20,"height":16,"yaw":0.3}]}
+                "mediaPlanes":[{"id":"photo","kind":"image","x":10,"y":8,"z":0,"width":20,"height":16,"yaw":0.3}]}
         })).unwrap());
         let models = ModelVisuals::default();
         let resources = ModelAssets::new();
@@ -570,7 +559,7 @@ mod focus_offset_tests {
                 .abs_diff_eq(Vec3::new(441.21295, -252.51680, -127.00615), 1e-3)
         );
         assert!((shot.distance - 14.43611).abs() < 1e-4);
-        scene.nodes[0].composite_asset.as_mut().unwrap().media[0].width *= 5.0;
+        scene.nodes[0].composite_asset.as_mut().unwrap().media_planes[0].width *= 5.0;
         let second = model_bounds_for_node(&scene, &models, &resources, "film").unwrap();
         assert_eq!(first.center, second.center);
         assert_eq!(first.radius, second.radius);
@@ -615,14 +604,14 @@ mod focus_offset_tests {
         );
         scene.nodes.push(serde_json::from_value(serde_json::json!({
             "id":"film", "type":"model", "x":200, "y":180, "width":400, "height":300,
-            "compositeAsset":{"x":200,"y":180,"width":400,"height":300,"media":[
+            "compositeAsset":{"x":200,"y":180,"width":400,"height":300,"mediaPlanes":[
                 {"id":"film::video","kind":"video","x":0,"y":0.5,"z":0,"width":1.6,"height":0.9,"yaw":0}
             ]}
         })).unwrap());
         let bounds =
             focused_model_bounds(&scene, &ModelVisuals::default(), &ModelAssets::new()).unwrap();
         let expected = super::super::media_geometry::plane_transform(
-            &scene.nodes[0].composite_asset.as_ref().unwrap().media[0],
+            &scene.nodes[0].composite_asset.as_ref().unwrap().media_planes[0],
             &super::super::media_geometry::film_set_root(&scene.nodes[0], None),
         );
         assert!(bounds.center.abs_diff_eq(expected.translation, 1e-4));
@@ -744,7 +733,7 @@ mod focus_offset_tests {
         let mut scene = Scene::default();
         scene.nodes.push(serde_json::from_value(serde_json::json!({
             "id":"film", "type":"model", "x":200, "y":180, "width":400, "height":300,
-            "compositeAsset":{"x":200,"y":180,"width":400,"height":300,"media":[
+            "compositeAsset":{"x":200,"y":180,"width":400,"height":300,"mediaPlanes":[
                 {"id":"film::video","kind":"video","x":0,"y":0.5,"z":0,"width":1.6,"height":0.9,"yaw":0}
             ]}
         })).unwrap());

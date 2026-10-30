@@ -14,6 +14,24 @@ import { createWoohaa3CanvasEdge } from "./domain/index.js";
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields } from "./film-set-clip-view.js";
 import { defaultGroupAppearance } from "./group-appearance.js";
+import { ContentContributionRegistry } from "./content-contribution.js";
+
+/** 公开契约测试里的最小 owner codec：只验证注册表分派，不复制任何私有业务字段。 */
+function testContent(): ContentContributionRegistry {
+  const registry = new ContentContributionRegistry();
+  registry.register({
+    extensionId: "game-furnace",
+    nodeData: {
+      decode: (data) => ({ ok: true, value: data }),
+      validatePatch: () => null,
+      normalize: (data) => data,
+      sanitizeRuntime: (data) => data,
+      copy: (data) => ({ data, assetRefs: [], remap: {} }),
+      diff: (before, after) => ({ ok: true, forward: after, inverse: before })
+    }
+  });
+  return registry;
+}
 
 const NOW = "2026-09-26T00:00:00.000Z";
 
@@ -354,6 +372,38 @@ describe("通用复合资产节点（change: 2026-10-11 身份迁移）", () => 
     canvas.nodeData = { ext: { extensionId: "creature-video-assets" } };
     return canvas;
   }
+
+  function withExtension3d(): ServerCanvas {
+    const canvas = base();
+    canvas.document.nodes = [
+      { id: "ext", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 }, width: 260, height: 195 }
+    ];
+    canvas.nodeData = {
+      ext: {
+        extensionId: "game-furnace",
+        modelScript: "scene.box({ id: 'a', size: [1,1,1] });",
+        modelScriptLanguage: "javascript",
+        modelScriptVersion: "woohaa-model-js-v2",
+        modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "old-hash" },
+        modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }
+      }
+    };
+    return canvas;
+  }
+
+  it("普通模型脚本 patch 经 self-contained 归一化推进 contentHash", () => {
+    const canvas = withExtension3d();
+    const result = applyCanvasCommands(canvas, [
+      { type: "nodeData.patch", nodeId: "ext", value: { modelScript: "scene.box({ id: 'b', size: [2,2,2] });" } }
+    ], { now: NOW, content: testContent() });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const data = result.canvas.nodeData.ext as Record<string, unknown>;
+      const version = data.modelContentVersion as { contentHash: string };
+      // 只改源码的 patch 不能保留旧 contentHash（与 model3d 同规则）。
+      expect(version.contentHash).not.toBe("old-hash");
+    }
+  });
 
   it("不能作为 edge 端点（source 与 target）", () => {
     const canvas = withComposite();

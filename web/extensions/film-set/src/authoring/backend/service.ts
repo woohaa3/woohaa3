@@ -1,5 +1,5 @@
 import { readFilmSetGroupMarker, createFilmSetGroupMarker, migrateLegacyFilmSetToGroup, readFilmSetAnimationProjection } from "@woohaa3/contracts";
-import { canonicalFilmSetFields, filmSetAnimationsOf, filmSetClipHash, filmSetClipPrecondition } from "@woohaa3/contracts";
+import { canonicalFilmSetFields, filmSetAnimationsOf, filmSetClipHash, filmSetClipPatchCommand, filmSetClipPrecondition } from "@woohaa3/contracts";
 import type { CanvasAuthority } from "@woohaa3/contracts";
 import type { CanvasCommand, CanvasNodeData, ServerCanvas } from "@woohaa3/contracts";
 import { animationSnapshotHash, createFilmSetSnapshot, createModelSnapshot, decodeFilmSetNodeData, scriptModel3DNodeData, defaultInitialShotCamera, importModelSnapshot, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, modelSourceHash, normalizeModelDefinition, isJsonObject, validateSelfContainedModel, type FilmSetNodeData, type AnimationTimeline, type InitialShotCamera, type ModelImportOrigin, type ModelPlacement, type SupportedModelScriptVersion } from "@woohaa3/contracts";
@@ -184,13 +184,12 @@ export class FilmSetNodeService {
       const op = { kind: "confirm-adaptation" as const, itemId: input.itemId, expectedAdapterHash: input.expectedAdapterHash };
       return {
         ok: true,
-        commands: [{
-          type: "filmSet.clipPatch",
+        commands: [filmSetClipPatchCommand({
           nodeId: input.nodeId,
           clipId: input.clipId,
           op,
           expectedHash: filmSetClipPrecondition(collection, input.clipId, op)
-        }]
+        })]
       };
     });
   }

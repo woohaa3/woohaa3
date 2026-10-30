@@ -62,6 +62,7 @@ import {
   NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH
 } from "./render-scene/node-action-toolbar.js";
 import {
+  filmSetPresentationPrimitives,
   shotPreviewCardAttachment,
   shotPreviewContentRect
 } from "./render-scene/shot-preview-projection.js";
@@ -979,7 +980,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v31");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v32");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));
@@ -1602,15 +1603,23 @@ describe("renderSceneFingerprint（change: optimize-model-scene-snapshot-hot-pat
     expect(renderSceneFingerprint(baseScene())).toBe(renderSceneFingerprint(baseScene()));
   });
 
-  it("film feedback identity, phase and reduced motion participate in equality and fingerprint", () => {
+  it("run feedback phase and reduced motion participate in equality and fingerprint", () => {
     const base = baseScene();
-    const withRun = { ...base, nodes: base.nodes.map(node => ({ ...node, aggregateRun: {
-      active: true, filmSet: { operationKey: "attempt-1", phase: "running" as const, source: "agent" as const, labelCode: "generating" as const }
-    } })) };
+    const withRun: CanvasRenderScene = {
+      ...base,
+      nodes: base.nodes.map(node => ({ ...node, aggregateRun: { active: true } })),
+      runFeedback: [{ nodeId: "n1", active: true, phase: "running", source: "agent", labelCode: "generating" }]
+    };
     expect(renderSceneEquals(withRun, structuredClone(withRun))).toBe(true);
-    for (const change of [{ filmSet: { ...withRun.nodes[0]!.aggregateRun.filmSet, operationKey: "attempt-2" } },
-      { filmSet: { ...withRun.nodes[0]!.aggregateRun.filmSet, phase: "committing" as const } }, { reduceMotion: true }]) {
-      const next = { ...withRun, nodes: withRun.nodes.map(node => ({ ...node, aggregateRun: { ...node.aggregateRun, ...change } })) };
+    for (const change of [
+      { phase: "committing" },
+      { labelCode: "saving" },
+      { reduceMotion: true }
+    ]) {
+      const next: CanvasRenderScene = {
+        ...withRun,
+        runFeedback: withRun.runFeedback!.map(feedback => ({ ...feedback, ...change }))
+      };
       expect(renderSceneEquals(withRun, next)).toBe(false);
       expect(renderSceneFingerprint(withRun)).not.toBe(renderSceneFingerprint(next));
     }
@@ -1723,8 +1732,29 @@ it("media placements emit content-local geometry that the shared root scales", (
   expect(plane).toMatchObject({ id: "film::photo", itemId: "photo", unit: 1, x: 3, y: 4.5, z: 5, width: 1.5, height: 1, yaw: 0.2 });
 });
 
-describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set-shooting-shot-previews）", () => {
+describe("通用预览卡片与归属线原语（任务 4.3）", () => {
   const shotNodeId = shotPreviewNodeId("film", "clip-1");
+
+  /**
+   * 测试用片场 adapter：与扩展实现共用同一投影入口；宿主只提供本地呈现态与相机锚点投影。
+   * 生产实现位于片场扩展，contracts 不注册任何业务 adapter。
+   */
+  function filmSetContent() {
+    const contribution = {
+      extensionId: "film-set",
+      presentation: {
+        presentPrimitives: (context: import("./content-contribution.js").ContentPresentationContext) => filmSetPresentationPrimitives({
+          canvas: context.canvas,
+          ...(context.localStates ? { localStates: context.localStates } : {}),
+          ...(context.projectEntityAnchor ? { projectEntityAnchor: context.projectEntityAnchor } : {})
+        })
+      }
+    } as import("./content-contribution.js").ContentContribution;
+    return {
+      resolve: (extensionId: string) => extensionId === "film-set" ? contribution : null,
+      implementations: () => [contribution]
+    };
+  }
 
   function filmSetCanvas(): ServerCanvas {
     const base = createFilmSetSnapshot({
@@ -1760,9 +1790,9 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
   }
 
   it("预览卡片投影源镜头的标题/类型/画幅/时长，不复制权威数据", () => {
-    const scene = buildCanvasRenderScene({ canvas: filmSetCanvas(), theme: defaultAppTheme() });
-    const card = scene.nodes.find((node) => node.id === shotNodeId)!.shotPreview!;
-    expect(card).toMatchObject({ filmSetNodeId: "film", clipId: "clip-1", kind: "dynamic", name: "运镜", duration: 4, state: "ready" });
+    const scene = buildCanvasRenderScene({ canvas: filmSetCanvas(), theme: defaultAppTheme(), content: filmSetContent() });
+    const card = scene.previewCards!.find((entry) => entry.nodeId === shotNodeId)!;
+    expect(card).toMatchObject({ ownerNodeId: "film", entityId: "clip-1", animated: true, title: "运镜", duration: 4, state: "ready" });
     expect(card.aspect).toBeCloseTo(16 / 9, 6);
     // 标题/类型为只读投影：卡片主标题 = 镜头名，次要标记 = 类型。
     const node = scene.nodes.find((entry) => entry.id === shotNodeId)!;
@@ -1800,32 +1830,42 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
         } as never
       }
     });
-    const scene = buildCanvasRenderScene({ canvas: source, theme: defaultAppTheme(), shotPreviewCameraProjection: () => ({ x: 10, y: 10 }) });
+    const scene = buildCanvasRenderScene({
+      canvas: source,
+      theme: defaultAppTheme(),
+      content: filmSetContent(),
+      entityAnchorProjection: () => ({ x: 10, y: 10 })
+    });
     const node = scene.nodes.find((entry) => entry.id === previewId)!;
-    expect(node.shotPreview).toMatchObject({ filmSetNodeId: groupId, clipId, kind: "dynamic", name: "运镜", duration: 4 });
+    expect(scene.previewCards!.find((entry) => entry.nodeId === previewId)).toMatchObject({ ownerNodeId: groupId, entityId: clipId, animated: true, title: "运镜", duration: 4 });
     expect(node.title).toBe("运镜");
     expect(node.typeLabel).toBe("动态镜头");
-    expect(scene.shotPreviewLinks).toHaveLength(1);
-    expect(scene.shotPreviewLinks![0]).toMatchObject({ ownerNodeId: groupId, previewNodeId: previewId, clipId });
+    expect(scene.ownershipLinks).toHaveLength(1);
+    expect(scene.ownershipLinks![0]).toMatchObject({ ownerNodeId: groupId, targetNodeIds: [previewId] });
   });
 
   it("镜头始终外显，旧隐藏设置不影响卡片、连线或规范布局", () => {
     const source = filmSetCanvas();
     const before = structuredClone(source.document.nodes);
     source.nodeData.film.filmSetShotPreviewsHidden = ["clip-1"];
-    const scene = buildCanvasRenderScene({ canvas: source, theme: defaultAppTheme(), shotPreviewCameraProjection: () => ({ x: 10, y: 10 }) });
-    const shot = scene.nodes.find(node => node.id === shotNodeId)?.shotPreview;
-    expect(shot).toMatchObject({ clipId: "clip-1", kind: "dynamic" });
-    expect(shot?.hidden).toBeUndefined();
-    expect(scene.shotPreviewLinks?.length).toBeGreaterThan(0);
+    const scene = buildCanvasRenderScene({
+      canvas: source,
+      theme: defaultAppTheme(),
+      content: filmSetContent(),
+      entityAnchorProjection: () => ({ x: 10, y: 10 })
+    });
+    const card = scene.previewCards!.find((entry) => entry.nodeId === shotNodeId)!;
+    expect(card).toMatchObject({ entityId: "clip-1", animated: true });
+    expect(card.hidden).toBeUndefined();
+    expect(scene.ownershipLinks?.length).toBeGreaterThan(0);
     expect(source.document.nodes).toEqual(before);
   });
 
   it("projects each shot's custom backdrop to the shared preview/capture rig", () => {
     const source = filmSetCanvas();
     (source.nodeData.film as unknown as { filmSetAnimations: { clips: { backdrop?: string }[] } }).filmSetAnimations.clips[0]!.backdrop = "#284e62";
-    const scene = buildCanvasRenderScene({ canvas: source, theme: defaultAppTheme() });
-    expect(scene.nodes.find(node => node.id === shotNodeId)!.shotPreview!.backdrop).toBe("#284e62");
+    const scene = buildCanvasRenderScene({ canvas: source, theme: defaultAppTheme(), content: filmSetContent() });
+    expect(scene.previewCards!.find((entry) => entry.nodeId === shotNodeId)!.backdrop).toBe("#284e62");
   });
 
   it("本地播放状态与状态机进入卡片且只影响内容，不写 canonical", () => {
@@ -1833,17 +1873,19 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
     const playing = buildCanvasRenderScene({
       canvas: base,
       theme: defaultAppTheme(),
-      shotPreviews: new Map([[shotNodeId, { progress: 0.5, playing: true }]])
+      content: filmSetContent(),
+      previewLocalStates: new Map([[shotNodeId, { progress: 0.5, playing: true }]])
     });
-    const card = playing.nodes.find((node) => node.id === shotNodeId)!.shotPreview!;
+    const card = playing.previewCards!.find((entry) => entry.nodeId === shotNodeId)!;
     expect(card.progress).toBe(0.5);
     expect(card.playing).toBe(true);
     const stale = buildCanvasRenderScene({
       canvas: base,
       theme: defaultAppTheme(),
-      shotPreviews: new Map([[shotNodeId, { state: "stale" }]])
+      content: filmSetContent(),
+      previewLocalStates: new Map([[shotNodeId, { state: "stale" }]])
     });
-    expect(stale.nodes.find((node) => node.id === shotNodeId)!.shotPreview!.state).toBe("stale");
+    expect(stale.previewCards!.find((entry) => entry.nodeId === shotNodeId)!.state).toBe("stale");
     // 未知/非法归属或源镜头已消失：不绘制内容，但保留节点。
     const missingSource = buildCanvasRenderScene({
       canvas: canvas({
@@ -1854,23 +1896,24 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
           updatedAt: "2026-10-15T00:00:00.000Z"
         },
         nodeData: { p: { shotPreview: { schemaVersion: 1, filmSetNodeId: "gone", clipId: "clip-1" } } as never }
-      })
+      }),
+      content: filmSetContent()
     });
-    expect(missingSource.nodes[0].shotPreview).toBeUndefined();
+    expect(missingSource.previewCards).toBeUndefined();
     // 播放状态不改变 revision。
     expect(playing.revision).toBe(base.revision);
   });
 
   it("归属线由注入的相机投影派生，起点/终点身份稳定", () => {
     const canvasState = filmSetCanvas();
-    const projection = (filmSetNodeId: string, clipId: string) => (filmSetNodeId === "film" && clipId === "clip-1" ? { x: 200, y: 180 } : null);
-    const scene = buildCanvasRenderScene({ canvas: canvasState, theme: defaultAppTheme(), shotPreviewCameraProjection: projection });
-    expect(scene.shotPreviewLinks).toHaveLength(1);
-    const link = scene.shotPreviewLinks![0]!;
-    expect(link).toMatchObject({ id: "link:film:clip-1", ownerNodeId: "film", previewNodeId: shotNodeId, clipId: "clip-1", start: { x: 200, y: 180 } });
+    const projection = (ownerNodeId: string, entityId: string) => (ownerNodeId === "film" && entityId === "clip-1" ? { x: 200, y: 180 } : null);
+    const scene = buildCanvasRenderScene({ canvas: canvasState, theme: defaultAppTheme(), content: filmSetContent(), entityAnchorProjection: projection });
+    expect(scene.ownershipLinks).toHaveLength(1);
+    const link = scene.ownershipLinks![0]!;
+    expect(link).toMatchObject({ id: "link:film:clip-1", ownerNodeId: "film", targetNodeIds: [shotNodeId], start: { x: 200, y: 180 } });
     // 缺失投影：不伪造起点，不派生线。
-    const none = buildCanvasRenderScene({ canvas: canvasState, theme: defaultAppTheme() });
-    expect(none.shotPreviewLinks).toBeUndefined();
+    const none = buildCanvasRenderScene({ canvas: canvasState, theme: defaultAppTheme(), content: filmSetContent() });
+    expect(none.ownershipLinks).toBeUndefined();
     // 归属线不进入普通 edges。
     expect(scene.edges).toHaveLength(0);
   });
@@ -1882,14 +1925,106 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
     const scene = buildCanvasRenderScene({
       canvas: filmSetCanvas(),
       theme: defaultAppTheme(),
-      shotPreviewCameraProjection: () => ({ x: 100, y: 100 })
+      content: filmSetContent(),
+      entityAnchorProjection: () => ({ x: 100, y: 100 })
     });
     const moved = buildCanvasRenderScene({
       canvas: filmSetCanvas(),
       theme: defaultAppTheme(),
-      shotPreviewCameraProjection: () => ({ x: 130, y: 100 })
+      content: filmSetContent(),
+      entityAnchorProjection: () => ({ x: 130, y: 100 })
     });
     expect(renderSceneFingerprint(scene)).not.toBe(renderSceneFingerprint(moved));
+  });
+});
+
+describe("通用呈现原语的载荷与容错（任务 4.3）", () => {
+  function primitiveContent(primitives: () => import("./render-scene/wire-primitives.js").ContentPresentationPrimitives | null) {
+    const contribution = { extensionId: "third-party", presentation: { presentPrimitives: primitives } } as import("./content-contribution.js").ContentContribution;
+    return {
+      resolve: (extensionId: string) => extensionId === "third-party" ? contribution : null,
+      implementations: () => [contribution]
+    };
+  }
+
+  function card(nodeId: string, patch: Record<string, unknown> = {}) {
+    return {
+      nodeId,
+      ownerNodeId: "owner",
+      entityId: "entity",
+      title: "卡片",
+      typeLabel: "自定义",
+      animated: false,
+      aspect: 1.5,
+      duration: 0,
+      coverCamera: { azimuth: 0, elevation: 0.4, distance: 4, focusOffset: [0, 0, 0] as [number, number, number] },
+      state: "ready" as const,
+      ...patch
+    };
+  }
+
+  function primitiveCanvas(): ServerCanvas {
+    return canvas({
+      document: {
+        schemaVersion: "asset-canvas-v1",
+        nodes: [
+          { id: "owner", type: "group", position: { x: 0, y: 0 }, width: 320, height: 240 },
+          { id: "card-a", type: "image", position: { x: 400, y: 0 }, width: 240, height: 167 },
+          { id: "card-b", type: "image", position: { x: 400, y: 200 }, width: 240, height: 167 }
+        ],
+        edges: [],
+        updatedAt: "2026-10-15T00:00:00.000Z"
+      }
+    });
+  }
+
+  it("未知扩展载荷原样透传，渲染器不解读", () => {
+    const scene = buildCanvasRenderScene({
+      canvas: primitiveCanvas(),
+      content: primitiveContent(() => ({
+        previewCards: [card("card-a", { payload: { extensionId: "npc-production", schemaVersion: "v9", data: { pose: "idle" } } })]
+      }))
+    });
+    expect(scene.previewCards).toHaveLength(1);
+    expect(scene.previewCards![0]!.payload).toEqual({ extensionId: "npc-production", schemaVersion: "v9", data: { pose: "idle" } });
+  });
+
+  it("非法载荷信封或重复 nodeId 被丢弃，同帧其它原语照常保留", () => {
+    const scene = buildCanvasRenderScene({
+      canvas: primitiveCanvas(),
+      content: primitiveContent(() => ({
+        previewCards: [
+          card("card-a", { payload: { extensionId: "", schemaVersion: "v1" } }),
+          card("card-a"),
+          card("card-b", { payload: { extensionId: "x", schemaVersion: "" } })
+        ]
+      }))
+    });
+    // 第一条非法载荷丢弃；第二条同 nodeId 合法卡片保留；第三条非法载荷丢弃。
+    expect(scene.previewCards).toHaveLength(1);
+    expect(scene.previewCards![0]!.nodeId).toBe("card-a");
+  });
+
+  it("adapter 抛错只丢失该扩展呈现，不整帧失败", () => {
+    const scene = buildCanvasRenderScene({
+      canvas: primitiveCanvas(),
+      content: primitiveContent(() => { throw new Error("boom"); })
+    });
+    expect(scene.nodes).toHaveLength(3);
+    expect(scene.previewCards).toBeUndefined();
+  });
+
+  it("运行反馈原语按 nodeId 关联并拒绝非法阶段码", () => {
+    const scene = buildCanvasRenderScene({
+      canvas: primitiveCanvas(),
+      content: primitiveContent(() => ({
+        runFeedback: [
+          { nodeId: "owner", active: true, phase: "running", labelCode: "generating", source: "operation" },
+          { nodeId: "card-a", active: true, phase: "", labelCode: "generating" }
+        ]
+      }))
+    });
+    expect(scene.runFeedback).toEqual([{ nodeId: "owner", active: true, phase: "running", labelCode: "generating", source: "operation" }]);
   });
 });
 

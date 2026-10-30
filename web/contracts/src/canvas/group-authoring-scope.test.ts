@@ -34,11 +34,12 @@ describe("canvas group scope", () => {
     expect(sanitizeWoohaa3CanvasNodeData({ root: { retainWhenEmpty: "true" } }).root).toEqual({});
     expect(sanitizeWoohaa3CanvasNodeData({ root: { title: "legacy" } }).root).toEqual({ title: "legacy" });
   });
-  it("requires a group target and rejects unknown modes while preserving old model defaults", () => {
+  it("requires a group target and rejects unstable mode syntax while preserving old model defaults", () => {
     const entry = { action: "generate", canvasId: "c", prompt: "scene" };
     expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, mode: "canvas-group" } }).ok).toBe(false);
     expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, mode: "canvas-group", nodeId: "root" } }).ok).toBe(true);
-    expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, mode: "future" } }).ok).toBe(false);
+    expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, mode: "../future" } }).ok).toBe(false);
+    expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, mode: "future-extension-mode" } }).ok).toBe(true);
     expect(decodeAcceptTurnRequest({ requestId: "r", entry }).ok).toBe(true);
   });
   it("projects only live descendants, never cross edges, assets or global jobs", () => {

@@ -28,13 +28,14 @@ export type FrontendEventPayloads = {
   "ui.node-history.switch-requested": { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string; viewOnly?: boolean };
   "ui.node-download.save-requested": { nodeId: string };
   /**
-   * 双击拍摄镜头预览卡片 → 进入所属片场并选择该镜头
-   * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4 / design D8）。
+   * 双击内容预览卡片 → 进入所属 owner 并选择该实体
+   * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4 / design D8；
+   *  change: 2026-10-28-generic-extension-content-ownership，任务 5.2）。
    *
-   * 画布输入层只发布**已校验归属**的目标身份；片场扩展负责进入聚焦、选择该 clipId 并在零点
-   * 暂停。宿主不读取片场业务数据，也不猜默认镜头。
+   * 画布输入层只发布**已校验归属**的目标身份；所属扩展负责进入聚焦、选择实体并暂停播放。
+   * 宿主不读取业务数据，也不猜默认镜头。
    */
-  "ui.shot-preview.enter-requested": { previewNodeId: string; filmSetNodeId: string; clipId: string };
+  "ui.content-preview.enter-requested": { previewNodeId: string; ownerNodeId: string; entityId: string };
   "task.activity.started": TaskActivityStarted;
   "task.activity.updated": TaskActivityUpdated;
   "task.activity.finished": TaskActivityFinished;
@@ -109,8 +110,8 @@ export const frontendEventCatalog = {
   "ui.node-download.save-requested": {
     scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["canvas-shell"]
   },
-  "ui.shot-preview.enter-requested": {
-    scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["film-set"]
+  "ui.content-preview.enter-requested": {
+    scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["extension-content"]
   },
   "task.activity.updated": {
     scope: "canvas",
@@ -127,7 +128,7 @@ export const frontendEventCatalog = {
   "extension.activity.updated": {
     scope: "canvas",
     kind: "fact",
-    producers: ["film-set"],
+    producers: ["extension-content"],
     consumers: ["task-activity"]
   },
   "extension.release.changed": {

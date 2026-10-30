@@ -10,7 +10,7 @@ import type { ServerCanvas } from "./domain/types.js";
  * `service/canvas-service/src/model-renderer` 的 `RendererSceneRequest` 由它 + 请求/截图参数组成。
  */
 import type { Aabb } from "./model-transform.js";
-import type { BevyFilmSetObjectMotion } from "./render-scene/wire-transient.js";
+import type { BevyManagedItemMotion } from "./render-scene/wire-transient.js";
 import type { BevyNativeMediaFrame } from "./render-scene.js";
 import type { CanvasNodeData } from "./domain/types.js";
 import type { FilmSetGroupHistoryPayload, FilmSetHistoryAnimationPayload } from "./node-history/types.js";
@@ -23,7 +23,7 @@ import type { StoredAsset } from "./domain/types.js";
  * `canvasId` 可选：远端画布的字节只在托管存储里，调用方知道所属画布时必须带；
  * 省略表示与画布无关（保持旧行为）。
  */
-export type ContentMediaReader = (storageKey: string, canvasId?: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
+export type ContentMediaReader = (storageKey: string, canvasId?: string, extensionId?: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
 
 /** 动画采样请求（渲染器协议的一部分）。 */
 export type ContentMotionRequest = {
@@ -31,7 +31,7 @@ export type ContentMotionRequest = {
   looped: boolean;
   cameraMotion: unknown[];
   modelMotion: unknown[];
-  objects?: BevyFilmSetObjectMotion[];
+  managedItemMotion?: BevyManagedItemMotion[];
   initialCamera: {
     azimuth: number;
     elevation: number;

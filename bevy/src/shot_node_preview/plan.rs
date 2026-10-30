@@ -11,9 +11,7 @@ use bevy::prelude::*;
 
 use crate::{
     model3d::shot_adapter::ModelBounds,
-    protocol::{
-        CompositeAssetPresentation, GraphNode, ModelReference, Scene, ShotPreviewPresentation,
-    },
+    protocol::{CompositeAssetPresentation, GraphNode, ModelReference, Scene, PreviewCard},
     shot_camera::ShotCameraPose,
 };
 
@@ -79,8 +77,8 @@ pub(crate) fn pin_capture_owners(scene: &Scene, pins: &mut std::collections::Has
         .nodes
         .iter()
         .filter(|node| pins.contains(&node.id))
-        .filter_map(|node| node.shot_preview.as_ref())
-        .map(|preview| preview.film_set_node_id.clone())
+        .filter_map(|node| node.preview_card.as_ref())
+        .map(|preview| preview.owner_node_id.clone())
         .collect();
     pins.extend(owners);
 }
@@ -99,13 +97,13 @@ pub(crate) fn pin_visible_owners(scene: &Scene, pins: &mut std::collections::Has
         .map(|surface| Vec2::new(surface.width, surface.height))
         .unwrap_or(Vec2::ZERO);
     for node in &scene.nodes {
-        if let Some(preview) = node.shot_preview.as_ref() {
+        if let Some(preview) = node.preview_card.as_ref() {
             // 参考已就绪的卡片显示录制内容，源片场不必为它保留（除非正在播放该镜头）。
             if settled_card(preview, &node.id, scene) {
                 continue;
             }
             if !preview.hidden && card_geometry::visible_on_surface(node, viewport, surface) {
-                pins.insert(preview.film_set_node_id.clone());
+                pins.insert(preview.owner_node_id.clone());
             }
         }
     }
@@ -116,7 +114,7 @@ pub(crate) fn pin_visible_owners(scene: &Scene, pins: &mut std::collections::Has
 /// `state` 来自渲染场景里该预览节点的状态投影：`ready` 表示参考媒体已经存在，卡片按录制
 /// 内容显示；`preparing`/`stale`/`error` 仍需实时取景兜底。
 pub(crate) fn settled_card(
-    preview: &crate::protocol::ShotPreviewPresentation,
+    preview: &crate::protocol::PreviewCard,
     node_id: &str,
     scene: &Scene,
 ) -> bool {
@@ -161,21 +159,16 @@ pub(super) fn targets_with_preparation(
         .unwrap_or(Vec2::ZERO);
     let mut result = Vec::new();
     for node in &scene.nodes {
-        let Some(preview) = node.shot_preview.as_ref() else {
+        let Some(preview) = node.preview_card.as_ref() else {
             continue;
         };
         let Some(owner) = scene.nodes.iter().find(|candidate| {
-            candidate.id == preview.film_set_node_id
-                && (candidate.composite_asset.is_some()
-                    || scene
-                        .film_set_groups
-                        .iter()
-                        .any(|group| group.owner_id == candidate.id))
+            candidate.id == preview.owner_node_id && (candidate.composite_asset.is_some() || scene.managed_item_groups.iter().any(|group| group.owner_node_id == candidate.id))
         }) else {
             continue;
         };
         let is_live = live.is_some_and(|sampling| {
-            preview.kind == "dynamic"
+            preview.animated
                 && sampling.playback.node_id == owner.id
                 && sampling.playback.target_preview_node_id.as_deref() == Some(node.id.as_str())
         });
@@ -217,56 +210,22 @@ pub(super) fn targets_with_preparation(
         result.push(Target {
             node_id: node.id.clone(),
             owner: owner.id.clone(),
-            clip_id: preview.clip_id.clone(),
+            clip_id: preview.entity_id.clone(),
             live: is_live,
             pose,
             bounds,
             aspect: card_geometry::shot_preview_aspect(node),
-            content: format!(
-                "{}:group={}:background={backdrop}",
-                content_identity(
-                    owner,
-                    owner.composite_asset.as_ref(),
-                    owner.model.as_ref(),
-                    preview,
-                    &quality_of(&owner.id),
-                ),
-                // 片场 group 的绑定/sceneTransform 就是实时组合内容，任何一项变化都必须让
-                // 卡片重新采样（change: 2026-10-28-migrate-film-set-to-groups）。
-                scene
-                    .film_set_groups
-                    .iter()
-                    .find(|group| group.owner_id == owner.id)
-                    .map(|group| {
-                        let transform = group
-                            .scene_transform
-                            .as_ref()
-                            .map(|t| format!("{}:{}:{}:{}:{}", t.x, t.y, t.z, t.yaw, t.scale))
-                            .unwrap_or_default();
-                        let bindings = group
-                            .bindings
-                            .iter()
-                            .map(|binding| {
-                                format!(
-                                    "{}:{}:{}:{}:{}:{}:{}:{}:{}:{:?}",
-                                    binding.binding_id,
-                                    binding.content_key,
-                                    binding.transform.x,
-                                    binding.transform.y,
-                                    binding.transform.z,
-                                    binding.transform.yaw,
-                                    binding.transform.scale,
-                                    binding.visible,
-                                    binding.aspect_ratio,
-                                    binding.diagnostic
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("|");
-                        format!("{transform}:{bindings}")
-                    })
-                    .unwrap_or_default()
-            ),
+            content: format!("{}:group={}:background={backdrop}", content_identity(
+                owner,
+                owner.composite_asset.as_ref(),
+                owner.model.as_ref(),
+                preview,
+                &quality_of(&owner.id),
+            ), scene.managed_item_groups.iter().find(|group| group.owner_node_id == owner.id).map(|group| {
+                let transform = group.owner_transform.as_ref().map(|t| format!("{}:{}:{}:{}:{}", t.x, t.y, t.z, t.yaw, t.scale)).unwrap_or_default();
+                let bindings = group.items.iter().map(|binding| format!("{}:{}:{}:{}:{}:{}:{}:{}:{}:{:?}", binding.item_id, binding.content_key, binding.transform.x, binding.transform.y, binding.transform.z, binding.transform.yaw, binding.transform.scale, binding.visible, binding.aspect_ratio, binding.diagnostic)).collect::<Vec<_>>().join("|");
+                format!("{transform}:{bindings}")
+            }).unwrap_or_default()),
             time: if is_live {
                 live.map(|sampling| sampling.playback.time.to_bits())
                     .unwrap_or(0)
@@ -302,7 +261,7 @@ pub(super) fn content_identity(
     owner: &GraphNode,
     asset: Option<&CompositeAssetPresentation>,
     reference: Option<&ModelReference>,
-    preview: &ShotPreviewPresentation,
+    preview: &PreviewCard,
     quality: &str,
 ) -> String {
     let placements = asset.map(|asset| {
@@ -314,7 +273,7 @@ pub(super) fn content_identity(
     let media: Vec<String> = asset
         .map(|asset| {
             asset
-                .media
+                .media_planes
                 .iter()
                 .map(|plane| {
                     format!(
@@ -331,10 +290,10 @@ pub(super) fn content_identity(
         roots
     });
     format!(
-        "owner={}:clip={}:kind={}:aspect={:?}:duration={:?}:cover={:?}:backdrop={:?}:items={:?}:media={:?}:roots={:?}:model={}:sig={}:quality={}:content={:?}",
+        "owner={}:clip={}:animated={}:aspect={:?}:duration={:?}:cover={:?}:backdrop={:?}:items={:?}:media={:?}:roots={:?}:model={}:sig={}:quality={}:content={:?}",
         owner.id,
-        preview.clip_id,
-        preview.kind,
+        preview.entity_id,
+        preview.animated,
         preview.aspect,
         preview.duration,
         preview.cover_camera,
@@ -354,17 +313,24 @@ mod tests {
     use super::*;
 
     fn preview_node(id: &str, x: f32) -> GraphNode {
-        preview_node_with_state(id, x, "ready")
+        let mut node: GraphNode = serde_json::from_value(serde_json::json!({
+            "id": id, "type": "slot", "x": x, "y": 0, "width": 240, "height": 167,
+        }))
+        .unwrap();
+        node.preview_card = Some(serde_json::from_value(serde_json::json!({
+            "nodeId": id, "ownerNodeId": "film", "entityId": "clip-1",
+            "animated": true, "title": "镜头", "typeLabel": "动态镜头",
+            "aspect": 1.7777778, "duration": 5, "state": "ready",
+            "coverCamera": {"azimuth": 0.5, "elevation": 0.7, "distance": 8, "focusOffset": [0, 1, 0]},
+        }))
+        .unwrap());
+        node
     }
 
     fn preview_node_with_state(id: &str, x: f32, state: &str) -> GraphNode {
-        serde_json::from_str(&format!(
-            r#"{{"id":"{id}","type":"film-set-shot-preview","x":{x},"y":0,"width":240,"height":167,
-                "shotPreview":{{"filmSetNodeId":"film","clipId":"clip-1","kind":"dynamic","name":"镜头",
-                "aspect":1.7777778,"duration":5,"state":"{state}",
-                "coverCamera":{{"azimuth":0.5,"elevation":0.7,"distance":8,"focusOffset":[0,1,0]}}}}}}"#
-        ))
-        .unwrap()
+        let mut node = preview_node(id, x);
+        node.preview_card.as_mut().unwrap().state = state.to_owned();
+        node
     }
 
     fn owner_node(x: f32, media_size: f32) -> GraphNode {
@@ -372,7 +338,7 @@ mod tests {
             r#"{{"id":"film","type":"composite-asset","x":{x},"y":0,"width":400,"height":300,
                 "compositeAsset":{{"x":0,"y":0,"width":400,"height":300,"contentExtent":2,
                 "itemPlacements":{{"a":{{"offset":[0,0,0],"scale":1,"yaw":0}}}},
-                "media":[{{"id":"film::video","kind":"video","x":0,"y":0.5,"z":0,"width":{media_size},"height":0.9,"yaw":0}}]}}}}"#
+                "mediaPlanes":[{{"id":"film::video","kind":"video","x":0,"y":0.5,"z":0,"width":{media_size},"height":0.9,"yaw":0}}]}}}}"#
         ))
         .unwrap()
     }
@@ -386,7 +352,7 @@ mod tests {
 
     fn identity(scene: &Scene, quality: &str) -> String {
         let owner = &scene.nodes[0];
-        let preview = scene.nodes[1].shot_preview.as_ref().unwrap();
+        let preview = scene.nodes[1].preview_card.as_ref().unwrap();
         content_identity(
             owner,
             owner.composite_asset.as_ref(),
@@ -401,20 +367,17 @@ mod tests {
         let mut owner = owner_node(0.0, 1.6);
         owner.composite_asset = None;
         let mut scene = scene_of(owner, preview_node("shot-preview:x", 100.0));
-        scene.film_set_groups = serde_json::from_value(serde_json::json!([{
-            "schemaVersion":"woohaa-film-set-group-render-v1", "ownerId":"film", "badgeOrigin":{"x":0,"y":0},
-            "bindings":[{"bindingId":"actor","sourceNodeId":"source","kind":"model3d","contentKey":"v1","transform":{"x":0,"y":0,"z":0,"yaw":0,"scale":1},"visible":true}]
+        scene.managed_item_groups = serde_json::from_value(serde_json::json!([{
+            "schemaVersion":"woohaa-managed-item-group-v1", "ownerNodeId":"film", "origin":{"x":0,"y":0},
+            "items":[{"itemId":"actor","sourceNodeId":"source","kind":"model3d","contentKey":"v1","transform":{"x":0,"y":0,"z":0,"yaw":0,"scale":1},"visible":true}]
         }])).unwrap();
         let before = targets(&scene, &|_| None, &|_| "high".into(), None);
         assert_eq!(before.len(), 1);
-        scene.film_set_groups[0].bindings[0].transform.x = 3.0;
+        scene.managed_item_groups[0].items[0].transform.x = 3.0;
         let after = targets(&scene, &|_| None, &|_| "high".into(), None);
         assert_eq!(after.len(), 1);
         assert_ne!(before[0].content, after[0].content);
-        scene.film_set_groups[0].scene_transform = Some(
-            serde_json::from_value(serde_json::json!({"x":1,"y":0,"z":0,"yaw":0,"scale":1}))
-                .unwrap(),
-        );
+        scene.managed_item_groups[0].owner_transform = Some(serde_json::from_value(serde_json::json!({"x":1,"y":0,"z":0,"yaw":0,"scale":1})).unwrap());
         let moved = targets(&scene, &|_| None, &|_| "high".into(), None);
         assert_ne!(after[0].content, moved[0].content);
     }
@@ -427,7 +390,7 @@ mod tests {
                 .unwrap(),
         );
         let before = identity(&scene, "high");
-        scene.nodes[1].shot_preview.as_mut().unwrap().hidden = true;
+        scene.nodes[1].preview_card.as_mut().unwrap().hidden = true;
         assert_eq!(identity(&scene, "high"), before);
         let list = targets(&scene, &|_| None, &|_| "high".into(), None);
         assert_eq!(list.len(), 1);
@@ -521,7 +484,7 @@ mod tests {
         let themed = project(&scene).remove(0);
         assert_ne!(first.content, themed.content);
         assert_ne!(first.backdrop, themed.backdrop);
-        scene.nodes[1].shot_preview.as_mut().unwrap().backdrop = Some("#abcdef".into());
+        scene.nodes[1].preview_card.as_mut().unwrap().backdrop = Some("#abcdef".into());
         let custom = project(&scene).remove(0);
         scene
             .theme
@@ -546,7 +509,7 @@ mod tests {
         assert_eq!(identity(&base, "high:1"), identity(&panned, "high:1"));
         // 卡片名称变化（源镜头改名由 title/typeLabel 投影）不重编译几何身份。
         let mut renamed = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
-        renamed.nodes[1].shot_preview.as_mut().unwrap().name = "新名字".to_owned();
+        renamed.nodes[1].preview_card.as_mut().unwrap().title = "新名字".to_owned();
         assert_eq!(identity(&base, "high:1"), identity(&renamed, "high:1"));
     }
 
@@ -558,12 +521,7 @@ mod tests {
         assert_ne!(identity(&base, "high:1"), identity(&base, "overview:1"));
         // 镜头构图变化（封面相机）必须重采。
         let mut turned = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
-        turned.nodes[1]
-            .shot_preview
-            .as_mut()
-            .unwrap()
-            .cover_camera
-            .azimuth = 1.2;
+        turned.nodes[1].preview_card.as_mut().unwrap().cover_camera.azimuth = 1.2;
         assert_ne!(identity(&base, "high:1"), identity(&turned, "high:1"));
         // 共享 item 摆放变化必须重采。
         let mut moved_item = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
@@ -583,11 +541,7 @@ mod tests {
         // 归属源不同（同内容不同片场）不得互相复用。
         let mut other_owner = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
         other_owner.nodes[0].id = "film-2".to_owned();
-        other_owner.nodes[1]
-            .shot_preview
-            .as_mut()
-            .unwrap()
-            .film_set_node_id = "film-2".to_owned();
+        other_owner.nodes[1].preview_card.as_mut().unwrap().owner_node_id = "film-2".to_owned();
         assert_ne!(identity(&base, "high:1"), identity(&other_owner, "high:1"));
     }
 
@@ -670,7 +624,7 @@ mod tests {
         assert_eq!(covers[0].pose.azimuth, 0.5);
         // 非动态卡片不进入活动态。
         let mut statics = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
-        statics.nodes[1].shot_preview.as_mut().unwrap().kind = "static".to_owned();
+        statics.nodes[1].preview_card.as_mut().unwrap().animated = false;
         let live = targets(
             &statics,
             &bounds,

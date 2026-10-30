@@ -10,7 +10,7 @@
  */
 import type { CanvasAuthority } from "@woohaa3/contracts";
 import type { CanvasCommand, FilmSetItemPatchOp, ServerCanvas } from "@woohaa3/contracts";
-import { filmSetNodeDataFields, readFilmSetAnimationProjection, readFilmSetGroupMarker, filmSetContentHash } from "@woohaa3/contracts";
+import { filmSetGroupBindingPatchCommand, filmSetNodeDataFields, readFilmSetAnimationProjection, readFilmSetGroupMarker, filmSetContentHash } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, type CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
 
 export type FilmSetItemCommandInput = {
@@ -137,7 +137,7 @@ export class FilmSetItemService {
     const t = input.op.localTransform;
     const expected = input.op.expectedLocalTransform;
     if (expected && JSON.stringify(item.localTransform) !== JSON.stringify(expected)) return { ok: false, code: "stale-transform", message: "对象变换已被修改" };
-    return { ok: true, commands: [{ type: "filmSetGroup.bindingPatch", groupId: input.nodeId, bindingId: input.itemId, patch: { transform: { x: t.offset.x, y: t.offset.y, z: t.offset.z, yaw: t.yaw, scale: t.scale } } }] };
+    return { ok: true, commands: [filmSetGroupBindingPatchCommand({ groupId: input.nodeId, bindingId: input.itemId, patch: { transform: { x: t.offset.x, y: t.offset.y, z: t.offset.z, yaw: t.yaw, scale: t.scale } } })] };
   }
 }
 

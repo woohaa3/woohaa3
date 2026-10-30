@@ -22,7 +22,7 @@ impl MotionPlan {
             && old.duration == input.duration
             && old.model_motion == input.model_motion
             && old.camera_motion == input.camera_motion
-            && old.objects == input.objects
+            && old.managed_item_motion == input.managed_item_motion
     }
 }
 pub(super) fn resolve(models: &mut ModelVisuals, input: &AnimationPlayback) -> Arc<MotionPlan> {
@@ -40,7 +40,7 @@ pub(super) fn resolve(models: &mut ModelVisuals, input: &AnimationPlayback) -> A
     )
     .ok();
     let objects: Vec<_> = input
-        .objects
+        .managed_item_motion
         .iter()
         .map(|object| {
             crate::motion::validate(
@@ -61,7 +61,7 @@ pub(super) fn resolve(models: &mut ModelVisuals, input: &AnimationPlayback) -> A
                 .map(|track| track.target_id.clone()),
         );
     }
-    for (object, valid) in input.objects.iter().zip(&objects) {
+    for (object, valid) in input.managed_item_motion.iter().zip(&objects) {
         if valid.is_none() {
             continue;
         }

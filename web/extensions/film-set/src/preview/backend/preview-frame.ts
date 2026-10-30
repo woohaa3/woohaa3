@@ -52,7 +52,7 @@ export async function prepareFilmSetPreviewFrame(input: {
       motion: {
         duration: view?.timeline.duration ?? 0, looped: view?.timeline.loop ?? false,
         cameraMotion: cameraTracks?.ok ? cameraTracks.ir.cameraMotion : [], modelMotion: [],
-        objects: view ? buildFilmSetObjectMotions({ filmSetContent: view.content, bindings: view.clip.bindings }).motions : [],
+        managedItemMotion: view ? buildFilmSetObjectMotions({ filmSetContent: view.content, bindings: view.clip.bindings }).motions : [],
         initialCamera: { azimuth: camera.azimuth, elevation: camera.elevation, distance: camera.distance, focusOffset: [camera.focusOffset.x, camera.focusOffset.y, camera.focusOffset.z] as [number, number, number], aspect: camera.aspect },
         timeSeconds: input.timeSeconds
       }

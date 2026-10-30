@@ -18,8 +18,8 @@ import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identit
 
 describe("Agent 节点描述符（任务 1.2）", () => {
   it("暴露全部可创建语义种类与标签", () => {
-    expect(AGENT_NODE_DESCRIPTORS.map((entry) => entry.kind)).toEqual(["text", "image", "model", "film-set", "video", "audio"]);
-    expect(AGENT_NODE_DESCRIPTORS.map((entry) => entry.label)).toEqual(["文本", "图片", "模型", "片场", "视频", "音频"]);
+    expect(AGENT_NODE_DESCRIPTORS.map((entry) => entry.kind)).toEqual(["text", "image", "model", "video", "audio"]);
+    expect(AGENT_NODE_DESCRIPTORS.map((entry) => entry.label)).toEqual(["文本", "图片", "模型", "视频", "音频"]);
   });
 
   it("模型语义种类映射为 canonical model3d 且不带任务字段", () => {
@@ -29,12 +29,12 @@ describe("Agent 节点描述符（任务 1.2）", () => {
     expect(defaultAgentNodeData("model")?.modelContentVersion).toBeDefined();
     expect(defaultAgentNodeData("model")?.taskKind).toBeUndefined();
     expect(agentDescriptorForCanonicalType("model3d")?.kind).toBe("model");
-    expect(agentDescriptorForCanonicalType(COMPOSITE_ASSET_NODE_TYPE)?.kind).toBe("model");
+    expect(agentDescriptorForCanonicalType(COMPOSITE_ASSET_NODE_TYPE)).toBeNull();
     expect(agentDescriptorForCanonicalType("generate")).toBeNull();
     expect(canonicalTypeFor("model")).toBe("model3d");
-    expect(canonicalTypeFor("film-set")).toBe("group");
-    expect(defaultAgentNodeData("film-set")).toMatchObject({ filmSetGroup: { sceneBindings: [] } });
-    expect(agentDescriptorForCanonicalType("group", defaultAgentNodeData("film-set"))?.kind).toBe("film-set");
+    expect(canonicalTypeFor("film-set")).toBe("film-set");
+    expect(findAgentNodeDescriptor("film-set")).toBeNull();
+    expect(defaultAgentNodeData("film-set")).toBeUndefined();
     expect(agentDescriptorForCanonicalType("group", {})).toBeNull();
   });
 

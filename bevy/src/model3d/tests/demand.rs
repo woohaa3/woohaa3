@@ -24,12 +24,14 @@ fn fixture(count: usize) -> (Scene, ModelAssets) {
         .unwrap();
         node.model = Some(reference.clone());
         scene.nodes.push(node);
-        scene.nodes.push(serde_json::from_value(serde_json::json!({
-            "id":format!("preview-{index}"),"type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":185,
-            "shotPreview":{"filmSetNodeId":id,"clipId":"clip","kind":"dynamic","name":"镜头",
-                "aspect":1.7777778,"duration":5,"state":"preparing",
-                "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}
-        })).unwrap());
+        let preview: GraphNode = serde_json::from_value(serde_json::json!({
+            "id":format!("preview-{index}"),"type":"slot","x":0,"y":0,"width":240,"height":185
+        })).unwrap();
+        scene.nodes.push(with_preview_card(preview, serde_json::json!({
+            "nodeId":format!("preview-{index}"),"ownerNodeId":id,"entityId":"clip","animated":true,"title":"镜头",
+            "aspect":1.7777778,"duration":5,"state":"preparing",
+            "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}
+        })));
     }
     (scene, resources)
 }

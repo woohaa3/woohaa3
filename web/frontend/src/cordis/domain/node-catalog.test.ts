@@ -64,10 +64,8 @@ describe("node-catalog", () => {
     expect(data?.inputMapping?.[0]).toMatchObject({ sourceNodeId: "n1", sortKey: "0" });
     // 模型节点不承载任务字段/输入映射（旧 generate 类型已下线）。
     expect(connectNodeDataFor({ id: "n1", type: "image" }, "generate")).toBeUndefined();
-    // 自包含 3D 节点拉线创建只作来源说明：不注入任务 inputMapping。
-    const fromImage = connectNodeDataFor({ id: "n1", type: "image" }, "film-set");
-    expect(fromImage?.filmSetGroup?.sceneBindings).toEqual([]);
-    expect(fromImage?.inputMapping).toBeUndefined();
+    // 片场已由扩展 node-template 贡献默认内容，宿主不再内置业务默认 nodeData。
+    expect(connectNodeDataFor({ id: "n1", type: "image" }, "film-set")).toBeUndefined();
   });
 
   it("拉线边标签与旧 _wire_label 等价", () => {
@@ -84,11 +82,7 @@ describe("node-catalog", () => {
     expect(model?.modelScriptVersion).toBe("woohaa-model-js-v2");
     expect(model?.modelContentVersion).toBeTruthy();
 
-    const animation = defaultNodeDataForType("film-set");
-    expect(animation?.filmSetGroup?.sceneBindings).toEqual([]);
-    expect(animation?.filmSetGroup?.clips ?? []).toEqual([]);
-    expect(animation?.filmSetContent).toBeUndefined();
-    expect(animation?.modelScript).toBeUndefined();
+    expect(defaultNodeDataForType("film-set")).toBeUndefined();
     expect(defaultNodeDataForType("group")).toBeUndefined();
 
   });

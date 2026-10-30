@@ -30,7 +30,8 @@ fn model_node() -> GraphNode {
         composite_asset: None,
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     }
 }
 
@@ -204,7 +205,8 @@ fn focus_hides_non_target_models_without_despawn() {
         composite_asset: None,
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     };
     let snapshot = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),

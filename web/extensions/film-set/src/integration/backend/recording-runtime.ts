@@ -19,6 +19,7 @@ export type FilmSetRecordingRuntimeOptions = {
 export function createFilmSetRecordingRuntime(options: FilmSetRecordingRuntimeOptions = {}): ContentRecordingRuntime {
   const now = options.now ?? (() => new Date().toISOString());
   return {
+    extensionId: "film-set",
     matches: matchesFilmSetRecording,
     async freeze(input): Promise<ContentRecordingFreezeResult> {
       const projection = input.canvas.sourceCanvas ? readFilmSetAnimationProjection(input.canvas.sourceCanvas, input.nodeId) : null;

@@ -95,7 +95,7 @@ export type CanvasRuntimeOptions = {
    * 双击拍摄镜头预览卡片 → 进入所属片场并选择该镜头
    * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4）。
    */
-  onShotPreviewEnterIntent?: (request: { previewNodeId: string; filmSetNodeId: string; clipId: string }) => void;
+  onShotPreviewEnterIntent?: (request: { previewNodeId: string; ownerNodeId: string; entityId: string }) => void;
   /** typed event 出口（Cordis `ctx.emit`）。 */
   emit: (
     name:
@@ -104,7 +104,7 @@ export type CanvasRuntimeOptions = {
       | "ui.video-frame-capture.open-requested"
       | "ui.node-history.open-requested"
       | "ui.node-history.switch-requested"
-      | "ui.shot-preview.enter-requested",
+      | "ui.content-preview.enter-requested",
     payload: unknown
   ) => void;
   /** 用户是否偏好减少动态效果（change: enable-video-node-live-preview）。 */

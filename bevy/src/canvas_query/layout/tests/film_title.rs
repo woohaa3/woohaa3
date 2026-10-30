@@ -24,7 +24,6 @@ fn film_node_typed(title: &str, scope: (f32, f32, f32, f32), half: f32) -> Graph
     node.title = title.into();
     node.composite_asset = Some(crate::protocol::CompositeAssetPresentation {
         panel: None,
-        ownership_links: None,
         root_placement: None,
         content_extent: None,
         layout_aabb: None,
@@ -41,7 +40,7 @@ fn film_node_typed(title: &str, scope: (f32, f32, f32, f32), half: f32) -> Graph
         y: scope.1,
         width: scope.2,
         height: scope.3,
-        media: Vec::new(),
+        media_planes: Vec::new(),
         item_roots: std::collections::HashMap::new(),
         item_placements: std::collections::HashMap::new(),
     });

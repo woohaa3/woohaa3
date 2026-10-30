@@ -28,7 +28,7 @@ export type ModelWorkspaceService = {
 };
 /** Shared input-owner eligibility; the playback target is typed and never guessed from ground geometry. */
 export type HoverPlaybackTarget =
-  | { kind: "shot-preview"; previewNodeId: string; filmSetNodeId: string; clipId: string }
+  | { kind: string; previewNodeId: string; ownerNodeId: string; entityId: string }
   | null;
 export type HoverPlaybackSnapshot = { target: HoverPlaybackTarget; blocked: boolean; epoch: number };
 export type HoverStateService = { getNodeId(): string | null; getPlaybackSnapshot(): HoverPlaybackSnapshot; subscribe(listener: () => void): () => void };

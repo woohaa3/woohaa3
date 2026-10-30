@@ -32,7 +32,7 @@ export type ApplicationExtensionMediaResourcesFacade = {
    * 读主存储，把一张存在的远端素材报成 404。省略表示「与画布无关」（扩展素材、独立页），
    * 保持历史行为。
    */
-  read(storageKey:string,canvasId?:string):Promise<{bytes:Uint8Array;contentType:string}>;
+  read(storageKey:string,canvasId?:string,extensionId?:string):Promise<{bytes:Uint8Array;contentType:string}>;
   /**
    * 写入内容寻址的稳定资源。
    *

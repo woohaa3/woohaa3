@@ -4,7 +4,7 @@ import { executeModelScriptVersioned } from "./model-executor-v2.js";
 import { isSupportedModelScriptVersion, sceneIrVersionFor } from './model-script.js';
 import { prepareModelResource } from './prepared-model.js';
 import { compositeAssetSceneOps } from './composite-asset-scene.js';
-import { isFilmSetNode } from './domain/core/composite-asset-identity.js';
+import { isFilmSetNode } from './film-set-legacy-identity.js';
 import { filmSetGroupModelPreparation } from "./film-set-group-model.js";
 import { isFilmSetGroupNode } from './film-set-group.js';
 import { getGroupRequiredMinSize } from './domain/index.js';

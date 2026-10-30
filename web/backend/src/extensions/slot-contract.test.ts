@@ -142,7 +142,7 @@ describe("storage 槽位 → 画布服务（端到端）", () => {
         repository,
         yjsRepository: new InMemoryYjsDocumentRepository(),
         writerLock: createInMemoryWriterLock(),
-        storageConfig: { backend: "sqlite", sqlitePath: "/unused/slot.sqlite", limits: {} }
+        storageConfig: { backend: "sqlite", sqlitePath: ":memory:", limits: {} }
       },
       documents: {} as RuntimeStorageProvider["documents"],
       readExtensionConfig: () => ({}),

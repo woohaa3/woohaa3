@@ -231,6 +231,7 @@ export type CanvasStorageComposition = {
 
 export type ComposeCanvasStorageOptions = {
   managedLifecycles?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   env: Env;
   /**
    * 已解析的存储配置（bootstrap `storage` 槽位注入）。提供时不再从 `env` 解析：部署侧凭据
@@ -299,6 +300,7 @@ export async function composeCanvasStorage(
 
   const service = new CanvasApplicationService({
     lifecycle: options.managedLifecycles,
+    ...(options.content ? { content: options.content } : {}),
     repository,
     mediaStorage: options.mediaStorage,
     limits: config.limits,

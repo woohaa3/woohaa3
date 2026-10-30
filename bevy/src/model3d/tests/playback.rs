@@ -33,7 +33,8 @@ fn model_node() -> GraphNode {
         composite_asset: None,
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     }
 }
 

@@ -18,8 +18,9 @@ describe("owner codec 分派", () => {
     const valid = { schemaVersion: 4, items: [] };
     const invalid = { schemaVersion: 99, items: [] };
     expect(normalizeCanvas(filmCanvas(valid), { content: registry }).nodeData.film).toEqual(normalizeCanvas(filmCanvas(valid)).nodeData.film);
-    expect(normalizeCanvas(filmCanvas(invalid), { content: registry }).nodeData.film).toEqual(normalizeCanvas(filmCanvas(invalid)).nodeData.film);
-    expect(normalizeCanvas(filmCanvas(invalid)).nodeData.film).not.toHaveProperty("filmSetContent");
+    // 已注册 owner：非法内容按 codec 结果收敛；未注册 owner：原样保留供只读/迁移读取。
+    expect(normalizeCanvas(filmCanvas(invalid), { content: registry }).nodeData.film).not.toHaveProperty("filmSetContent");
+    expect(normalizeCanvas(filmCanvas(invalid)).nodeData.film).toHaveProperty("filmSetContent");
   });
 
   it("未知或伪造身份稳定拒绝，codec 异常不带出异常文本", () => {

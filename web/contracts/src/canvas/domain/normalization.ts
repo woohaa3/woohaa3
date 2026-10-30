@@ -9,12 +9,12 @@ import { DEFAULT_CANVAS_TITLE,
   type ServerCanvas,
   type StoredAsset } from "./types";
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
-import { decodeFilmSetContent, FILM_SET_CONTENT_FIELD } from "../film-set-content.js";
 import { isPureModelNodeType } from "./core/input-role.js";
 import { FILM_SET_SHOT_PREVIEW_NODE_TYPE, isShotPreviewNode } from "./core/shot-preview-node.js";
 import { isSupportedShotReferenceEdgeData, resolveShotReferenceSource, shotReferenceRoleForKind, SHOT_IMAGE_REFERENCE_EDGE_KIND, SHOT_REFERENCE_EDGE_KIND } from "./core/shot-reference.js";
 import { shotReferenceDecision } from "./core/connection-rules.js";
-import { isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "./core/composite-asset-identity.js";
+import { COMPOSITE_ASSET_NODE_TYPE, isCompositeAssetNodeType, readCompositeAssetExtensionId } from "./core/composite-asset-identity.js";
+import { isFilmSetNode } from "../film-set-legacy-identity.js";
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { DIRECTOR_STUDIO_DEFAULT_TITLE, LEGACY_ANIMATION_DEFAULT_TITLE } from "../director-studio-title.js";
 import { decodeFilmSetGroupMarker, FILM_SET_GROUP_FIELD, validateFilmSetGroupBindings } from "../film-set-group.js";
@@ -118,9 +118,9 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   // 视频编辑 intent 安全收敛（change: port-video-editing-dialogs，design D4/D6）：
   // 丢弃危险/非法 intent（含 data URL / object URL / 临时签名 URL），只保留稳定身份。
   applyVideoEditIntentSanitizer(nodeData);
-  // 片场内部内容收敛（change: 2026-10-08-make-film-set-model-only）：
-  // 缺失字段保持缺失（旧片场为空集合，不在此补写）；非法集合按空集合丢弃，绝不写入部分内容。
-  applyFilmSetContentSanitizer(nodeData, nodeTypes, options?.content);
+  // 业务 nodeData 收敛：已注册 owner 的 codec 产出规范值；未注册 owner 原样保留，
+  // 供只读呈现与离线迁移读取（change: 2026-10-28-generic-extension-content-ownership，任务 2.2）。
+  applyContentOwnerSanitizer(nodeData, nodeTypes, options?.content);
   applyFilmSetGroupSanitizer(nodeData, nodeTypes);
   // Missing resources remain represented by bindings and retry diagnostics.
   // Existing foreign references still cannot grant group capabilities.
@@ -212,43 +212,30 @@ function applyVideoEditIntentSanitizer(nodeData: Record<string, CanvasNodeData>)
 }
 
 /**
- * 片场内部内容收敛（change: 2026-10-08-make-film-set-model-only，design D3；
- * change: 2026-10-11-extract-film-set-extension D5/D11）。
+ * 业务 nodeData 收敛（change: 2026-10-28-generic-extension-content-ownership，任务 2.2）。
  *
- * 严格按业务身份处理：
- * - 片场业务（`composite-asset` + `extensionId="film-set"`）：合法集合写回规范化值，非法集合删除字段；
- * - 未知/不可用业务（缺失/未知 `extensionId` 的复合资产）**保留原数据与引用**，不做删除或改写，
- *   以便停用/未注册业务的已保存内容不丢失；静态展示不等于业务授权。
- * 非复合资产节点出现的同名字段被清除，避免任意 opaque state 通过未识别字段进入持久层。
+ * 只对 `composite-asset` 且语法合法的 `extensionId` 分派：已注册 owner 调用其
+ * `normalize`；未注册 owner **原样保留**，不猜测字段、不删除引用。codec 抛错时同样保留
+ * 原数据，避免单节点失败拖垮整张画布。
  */
-function applyFilmSetContentSanitizer(
+function applyContentOwnerSanitizer(
   nodeData: Record<string, CanvasNodeData>,
   nodeTypes: Map<string, string>,
   content?: ContentContributionResolver
 ): void {
   for (const [nodeId, data] of Object.entries(nodeData)) {
-    if (!data || data[FILM_SET_CONTENT_FIELD] === undefined) continue;
-    const type = nodeTypes.get(nodeId);
-    // 未知/不可用业务的合法原数据必须保留（不删引用、不改写）。
-    if (isCompositeAssetNodeType(type) && readCompositeAssetExtensionId(data) === null) continue;
+    if (!data || !isCompositeAssetNodeType(nodeTypes.get(nodeId))) continue;
     const extensionId = readCompositeAssetExtensionId(data);
-    const codec = extensionId ? content?.resolve(extensionId)?.nodeData : undefined;
-    if (codec) {
-      const normalized = codec.normalize(data);
+    if (extensionId === null) continue;
+    const codec = content?.resolve(extensionId)?.nodeData;
+    if (!codec) continue;
+    try {
+      const normalized = codec.normalize(data, { nodeId, nodeType: COMPOSITE_ASSET_NODE_TYPE });
       if (typeof normalized === "object" && normalized !== null && !Array.isArray(normalized)) {
         nodeData[nodeId] = normalized as CanvasNodeData;
       }
-      continue;
-    }
-    if (!isFilmSetNode(type, data)) {
-      delete data[FILM_SET_CONTENT_FIELD];
-      continue;
-    }
-    const result = decodeFilmSetContent(data[FILM_SET_CONTENT_FIELD]);
-    if (result.ok) {
-      data[FILM_SET_CONTENT_FIELD] = result.value as unknown as CanvasNodeData[string];
-    } else {
-      delete data[FILM_SET_CONTENT_FIELD];
+    } catch {
+      // 保留原数据：规范化失败不能让画布不可读。
     }
   }
 }

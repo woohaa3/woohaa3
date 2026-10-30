@@ -10,8 +10,9 @@ import {
   type FilmSetRunPhase,
   type NodeGenerationHistoryListItem,
   type BevyHistoryDotState,
-  type BevyRenderNode,
+  type BevyRunFeedbackPrimitive,
   type CanvasNodeRunSummary,
+  type CanvasRenderScene,
   type CanvasOperationRecord,
   type CanvasOperationState
 } from "@woohaa3/contracts";
@@ -43,11 +44,11 @@ const FILM_SET_GROUP_STATE: Record<FilmSetRunPhase, string> = {
 /**
  * 就地投影运行状态到 render scene。
  *
- * - 聚合节点：写 `aggregateRun.active`（运行遮罩），不加历史条。
+ * - 聚合节点：写 `aggregateRun.active`（运行遮罩），阶段/文案写入场景级 `runFeedback` 原语。
  * - 普通节点：按 createdAt 升序生成有界圆点；当前生效版本用独立装饰（不挤占状态颜色）。
  * - group 与片场不写历史条；片场执行反馈并入 `group.runStatus`，与普通组共用气泡边缘动效。
  */
-export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input: NodeRunStateProjection): void {
+export function applyRunStateProjection(scene: CanvasRenderScene, input: NodeRunStateProjection): void {
   const summaries = new Map(input.summaries.map((entry) => [entry.nodeId, entry]));
   const recordsByNode = new Map<string, CanvasOperationRecord[]>();
   for (const record of input.records) {
@@ -55,7 +56,9 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
     if (list) list.push(record);
     else recordsByNode.set(record.nodeId, [record]);
   }
-  for (const node of nodes) {
+  // 保留 owner adapter 声明的运行反馈（无运行状态摘要的节点），只覆盖本宿主投影的节点。
+  const feedback: BevyRunFeedbackPrimitive[] = (scene.runFeedback ?? []).filter((entry) => !summaries.has(entry.nodeId));
+  for (const node of scene.nodes) {
     const summary = summaries.get(node.id);
     if (node.group) {
       const filmSet = summary?.filmSetFeedback;
@@ -65,9 +68,21 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
       else delete node.group.runStatus;
       continue;
     }
+    // 聚合 owner 的反馈统一走通用原语：渲染器只消费阶段/文案码，不识别业务身份。
+    const aggregate = summary && "filmSetFeedback" in summary ? summary.filmSetFeedback ?? null : null;
     if (summary && "filmSetFeedback" in summary) {
-      node.aggregateRun = { active: summary.filmSetFeedback != null && summary.filmSetFeedback.phase !== "failed", filmSet: summary.filmSetFeedback ?? undefined };
+      node.aggregateRun = { active: aggregate != null && aggregate.phase !== "failed" };
       delete node.historyStrip;
+      if (aggregate) {
+        feedback.push({
+          nodeId: node.id,
+          active: aggregate.phase !== "failed",
+          phase: aggregate.phase,
+          labelCode: aggregate.labelCode,
+          operationKey: aggregate.operationKey,
+          source: aggregate.source
+        });
+      }
       continue;
     }
     if (summary?.isAggregate || (node.compositeAsset && node.busy)) {
@@ -96,6 +111,8 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
       truncated: items.length - visible.length
     };
   }
+  if (feedback.length > 0) scene.runFeedback = feedback;
+  else delete scene.runFeedback;
 }
 
 /** 统一操作状态 → 历史条圆点状态。 */

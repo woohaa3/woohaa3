@@ -4,7 +4,10 @@
  * 自 `command-reducer.ts` 拆出（change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，
  * R12）。复用 domain 结构校验，语义与 edit.apply 的对应操作完全一致。
  */
-import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
+import { isFilmSetNode } from "../film-set-legacy-identity.js";
+import { isCompositeAssetNodeType, readCompositeAssetExtensionId } from "../domain/core/composite-asset-identity.js";
+import { decideContentWrite, EMPTY_CONTENT_RESOLVER, type ContentContributionResolver } from "../content-contribution.js";
+import { decideContentAction } from "../content-interaction.js";
 import { minimumNodeSizeFor } from "../node-dimensions.js";
 import {
   filmSetObjectContainerId,
@@ -160,13 +163,29 @@ function connectDataReader(
   };
 }
 
+function rejectionCodeFor(code: string): "content-owner-unavailable" | "content-codec-failed" | "content-patch-rejected" {
+  if (code === "content-owner-unavailable" || code === "content-codec-failed") return code;
+  return "content-patch-rejected";
+}
+
 export function addNode(
   work: WorkingState,
-  command: Extract<CanvasCommand, { type: "node.add" }>
+  command: Extract<CanvasCommand, { type: "node.add" }>,
+  content: ContentContributionResolver | undefined = EMPTY_CONTENT_RESOLVER
 ): CommandApplyResult {
   const { node } = command;
   if (isFilmSetNode(node.type, command.nodeData) || filmSetObjectOwnershipOf(command.nodeData)) {
     return reject("invalid-self-contained-node", "旧 composite 片场与对象容器只允许迁移读取，请创建 film-set group");
+  }
+  // 最小尺寸下限：挡住 model MCP 等写入方提交畸形尺寸（design D5）。结构校验先于 owner
+  // 可用性判断，保证停用扩展时尺寸错误码仍然稳定。
+  const sizeRejection = validateNodeSize(node.width, node.height, node.type);
+  if (sizeRejection) return sizeRejection;
+  if (isCompositeAssetNodeType(node.type)) {
+    const extensionId = readCompositeAssetExtensionId(command.nodeData);
+    if (extensionId === null) return reject("invalid-self-contained-node", "复合资产节点缺少合法 extensionId，拒绝创建");
+    const decision = decideContentWrite(extensionId, {}, command.nodeData ?? {}, content, { nodeId: node.id, nodeType: node.type });
+    if (!decision.ok) return reject(rejectionCodeFor(decision.code), decision.code);
   }
   const managed = command.nodeData?.managedBy;
   if (managed !== undefined) {
@@ -199,9 +218,6 @@ export function addNode(
   if (work.nodes.some((entry) => entry.id === node.id)) {
     return reject("duplicate-node", `节点 ${node.id} 已存在`);
   }
-  // 最小尺寸下限：挡住 model MCP 等写入方提交畸形尺寸（design D5）。
-  const sizeRejection = validateNodeSize(node.width, node.height, node.type);
-  if (sizeRejection) return sizeRejection;
   // group parent 不变式（change: add-canvas-node-grouping）：新节点必须挂在已有 group 下。
   const parentRejection = validateGroupParent(work, node.id, node.parentId, command.nodeData, node.type);
   if (parentRejection) return parentRejection;
@@ -315,10 +331,20 @@ export function updateNode(
   return OK;
 }
 
-export function removeNodes(work: WorkingState, nodeIds: readonly string[]): CommandApplyResult {
+export function removeNodes(
+  work: WorkingState,
+  nodeIds: readonly string[],
+  content?: import("../content-contribution.js").ContentContributionResolver
+): CommandApplyResult {
   if (nodeIds.length === 0) return OK;
   const missing = nodeIds.find((id) => !work.nodes.some((node) => node.id === id));
   if (missing) return reject("unknown-node", `节点 ${missing} 不存在`);
+
+  for (const id of nodeIds) {
+    const node = work.nodes.find((entry) => entry.id === id)!;
+    const decision = decideContentAction(content, "delete", node.type, work.nodeData[id]);
+    if (!decision.allowed) return reject("content-interaction-rejected", `节点 ${id} 仅可只读：${decision.reason}`);
+  }
 
   const directModelChild = nodeIds.find((id) => {
     const node = work.nodes.find((entry) => entry.id === id);
@@ -408,7 +434,8 @@ export function removeNodes(work: WorkingState, nodeIds: readonly string[]): Com
 export function patchNodeData(
   work: WorkingState,
   nodeId: string,
-  value: CanvasNodeData | null
+  value: CanvasNodeData | null,
+  content: ContentContributionResolver | undefined = EMPTY_CONTENT_RESOLVER
 ): CommandApplyResult {
   const node = work.nodes.find((entry) => entry.id === nodeId);
   if (isFilmSetNode(node?.type, work.nodeData[nodeId]) || isFilmSetNode(node?.type, value)) {
@@ -457,7 +484,7 @@ export function patchNodeData(
   if (appearanceRejection) return appearanceRejection;
   const filmSetGroupRejection = validateFilmSetGroupDataPatch(work, nodeId, value);
   if (filmSetGroupRejection) return filmSetGroupRejection;
-  const nodeRejection = validateSelfContained3DNodePatch(work, nodeId, value);
+  const nodeRejection = validateSelfContained3DNodePatch(work, nodeId, value, content);
   if (nodeRejection) return nodeRejection;
   const merged = { ...(work.nodeData[nodeId] ?? {}), ...value };
   if (merged.managedBy !== undefined && !managedNodeRelationOf(merged)) return reject("invalid-command", "托管归属非法");
@@ -465,7 +492,7 @@ export function patchNodeData(
   // 任何来源的 patch（通用命令、MCP、导入、粘贴、恢复）都不能依赖客户端声明的 hash；模型源码/
   // 语言/API 版本/摆放的实际内容决定 contentHash 与 revision，只改源码的 patch 不会保留旧身份。
   if (isModelDefinitionNode(work, nodeId)) {
-    const normalized = normalizeSelfContained3D(work, nodeId, value, merged);
+    const normalized = normalizeSelfContained3D(work, nodeId, value, merged, content);
     if (normalized) return normalized;
   }
   const conversion = convertFilmSetGroupConsumers(work, nodeId, value);

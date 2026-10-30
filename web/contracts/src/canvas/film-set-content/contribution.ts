@@ -4,6 +4,8 @@
 import type { ContentContribution, ContentNodeDataCodec } from "../content-contribution.js";
 const FILM_SET_EXTENSION_ID = "film-set";
 import { decodeFilmSetContent, filmSetAssetReferences } from "./codec.js";
+import { filmSetCommandCodec } from "./commands.js";
+import { filmSetEditPlanner } from "./edit-plan.js";
 import { FILM_SET_CONTENT_FIELD } from "./types.js";
 
 const INVALID = "film-set-content-invalid";
@@ -50,5 +52,7 @@ export const filmSetNodeDataCodec: ContentNodeDataCodec = {
 
 export const filmSetContentContribution: ContentContribution = {
   extensionId: FILM_SET_EXTENSION_ID,
-  nodeData: filmSetNodeDataCodec
+  nodeData: filmSetNodeDataCodec,
+  commands: filmSetCommandCodec,
+  edit: filmSetEditPlanner
 };

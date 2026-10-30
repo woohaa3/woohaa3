@@ -41,7 +41,7 @@ export const CANVAS_SCRIPT_API_SIGNATURES: readonly CanvasScriptApiSignature[] =
   {
     name: "node",
     signature: "canvas.node(kind, { key?, title?, prompt?, placement? })",
-    description: "记录 create_node；kind 取自 text/image/video/audio/model/film-set。film-set 创建自包含片场节点，随后用片场工具写入对象与镜头。只接受语义字段，拒绝 nodeData/canonical type。",
+    description: "记录 create_node；kind 取自 text/image/video/audio/model。复合内容（如片场）由扩展 MCP 工具创建；只接受语义字段，拒绝 nodeData/canonical type。",
     returns: "本次执行的节点 handle"
   },
   {

@@ -173,7 +173,7 @@ pub(crate) fn work_diagnostics() -> String {
     let render = RENDER_STAGE_DIAGNOSTICS.with(|v| v.borrow().clone());
     let model = MODEL_RENDER_DIAGNOSTICS.with(|v| v.borrow().clone());
     let preview = PREVIEW_DIAGNOSTICS.with(Cell::get);
-    let shot_preview = SHOT_PREVIEW_DIAGNOSTICS.with(Cell::get);
+    let preview_card = SHOT_PREVIEW_DIAGNOSTICS.with(Cell::get);
     let film_set_items = crate::canvas_query::film_set_pick::diagnostics_json();
     // 3D 根按可见地面顺序做整对象分离；这里只报告接受点结算到的根/重叠簇规模，
     // 同一根内部的遮挡仍交给深度缓冲（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D3/D4）。

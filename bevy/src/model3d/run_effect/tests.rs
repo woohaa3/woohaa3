@@ -19,11 +19,17 @@ fn app() -> App {
             pixel_ratio: 1.,
         })
         .add_systems(Update, sync);
-    app.world_mut().resource_mut::<CurrentScene>().0.nodes = serde_json::from_value(serde_json::json!([{
+    let mut state = app.world_mut().resource_mut::<CurrentScene>();
+    state.0.nodes = serde_json::from_value(serde_json::json!([{
         "id":"film", "type":"model", "x":100, "y":100, "width":200, "height":140,
         "compositeAsset":{"x":100,"y":100,"width":200,"height":140},
-        "aggregateRun":{"active":true,"filmSet":{"operationKey":"operation","phase":"running","source":"agent","labelCode":"modifying"}}
+        "aggregateRun":{"active":true}
+    }]))
+    .unwrap();
+    state.0.run_feedback = serde_json::from_value(serde_json::json!([{
+        "nodeId":"film","active":true,"operationKey":"operation","phase":"running","source":"agent","labelCode":"modifying"
     }])).unwrap();
+    state.0.index_primitives();
     app
 }
 
@@ -55,10 +61,7 @@ fn stable_identity_does_not_upload_per_frame_and_layers_exclude_outputs() {
         }
     }
     app.world_mut().resource_mut::<CurrentScene>().0.nodes[0]
-        .aggregate_run
-        .as_mut()
-        .unwrap()
-        .film_set
+        .run_feedback
         .as_mut()
         .unwrap()
         .phase = "committing".into();
@@ -78,10 +81,7 @@ fn verifying_stops_scan_and_terminal_then_deletion_reclaims_every_asset() {
     let mut app = app();
     app.update();
     app.world_mut().resource_mut::<CurrentScene>().0.nodes[0]
-        .aggregate_run
-        .as_mut()
-        .unwrap()
-        .film_set
+        .run_feedback
         .as_mut()
         .unwrap()
         .phase = "verifying".into();

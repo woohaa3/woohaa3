@@ -112,6 +112,7 @@ describe("对象编辑单元操作与顺序锚点（任务 3.4）", () => {
 // Current protected marker editing is covered below; legacy item helpers above
 // remain useful only to offline migration readers.
 import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
+import { filmSetGroupBindingPatchCommand } from "./film-set-content.js";
 import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
 import { readFilmSetGroupMarker } from "./film-set-group.js";
 import { readFilmSetAnimationProjection } from "./film-set-animation-projection.js";
@@ -126,7 +127,7 @@ describe("group binding 的受保护编辑", () => {
   it("变换、撤销、重做只更改编排；来源卡片新版本保持当前内容", () => {
     const canvas = migrateFilmSetFixture(fixture().canvas, "film");
     const source = readFilmSetGroupMarker(canvas.nodeData.film)!.sceneBindings[0]!.sourceNodeId;
-    const plan = planCanvasEdit(canvas, [{ type: "filmSetGroup.bindingPatch", groupId: "film", bindingId: "A", patch: { transform: { x: 7, y: 0, z: 0, scale: 2, yaw: .3 } } }]);
+    const plan = planCanvasEdit(canvas, [filmSetGroupBindingPatchCommand({ groupId: "film", bindingId: "A", patch: { transform: { x: 7, y: 0, z: 0, scale: 2, yaw: .3 } } })]);
     expect(plan.ok).toBe(true); if (!plan.ok) throw Error(plan.reason);
     const moved = edit(canvas, plan.forward);
     expect(moved.nodeData[source]).toEqual(canvas.nodeData[source]);
@@ -155,7 +156,7 @@ describe("group binding 的受保护编辑", () => {
 
   it("编排并发修改拒绝旧撤销，资源失效后历史编排仍可恢复为诊断", () => {
     const canvas = migrateFilmSetFixture(fixture().canvas, "film");
-    const plan = planCanvasEdit(canvas, [{ type: "filmSetGroup.bindingPatch", groupId: "film", bindingId: "A", patch: { visibility: false } }]);
+    const plan = planCanvasEdit(canvas, [filmSetGroupBindingPatchCommand({ groupId: "film", bindingId: "A", patch: { visibility: false } })]);
     expect(plan.ok).toBe(true); if (!plan.ok) throw Error(plan.reason);
     const moved = edit(canvas, plan.forward);
     const stale = structuredClone(moved);

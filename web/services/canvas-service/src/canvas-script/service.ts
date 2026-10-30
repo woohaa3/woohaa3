@@ -74,6 +74,8 @@ export type CanvasScriptNodeKind = {
 };
 
 export type CanvasScriptServiceDependencies = {
+  /** 内容 owner 注册表；脚本写入必须与 HTTP/WS 使用同一份语义。 */
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   accessRuntime?: import("@woohaa3/contracts").AccessRuntime;
   resolveRoom: (canvasId: string) => Promise<CanvasRoom | null>;
   /** 写/读授权端口；缺失 → 能力 fail-closed。 */
@@ -191,7 +193,7 @@ export class CanvasScriptService {
       if (preconditionFailure) return { ok: false, error: canvasScriptError("precondition-failed", "precondition", preconditionFailure.message) };
       const scope = currentCanvasGroupScope();
       const commands = scope ? normalizeGroupScopeCommands(compiled.commands, scope.rootGroupId) : compiled.commands;
-      const projected = applyCanvasCommands(exported.canvas, commands);
+      const projected = applyCanvasCommands(exported.canvas, commands, this.deps.content ? { content: this.deps.content } : undefined);
       if (projected.ok && scope) { const reason = validateCanvasGroupChange(exported.canvas, projected.canvas, scope.rootGroupId); if (reason) return { ok: false, error: canvasScriptError("forbidden", "authorize", reason) }; }
       if (!projected.ok) return { ok: false, error: toScriptError(projected.rejection.code, projected.rejection.message) };
       if (this.deps.verifyScope) {
@@ -362,7 +364,7 @@ export class CanvasScriptService {
 
     const scope = currentCanvasGroupScope();
     const commands = scope ? normalizeGroupScopeCommands(compiled.commands, scope.rootGroupId) : compiled.commands;
-    const projected = applyCanvasCommands(input.canvas, commands);
+    const projected = applyCanvasCommands(input.canvas, commands, this.deps.content ? { content: this.deps.content } : undefined);
     if (!projected.ok) return { ok: false, code: projected.rejection.code, message: projected.rejection.message };
     if (scope) { const reason = validateCanvasGroupChange(input.canvas, projected.canvas, scope.rootGroupId); if (reason) return { ok: false, code: "group-scope-forbidden", message: reason }; }
     const affected = new Set(compiled.organization.affectedNodeIds);

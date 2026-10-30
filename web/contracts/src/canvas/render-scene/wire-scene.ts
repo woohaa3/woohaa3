@@ -10,10 +10,15 @@ import type { AppThemeSnapshot } from "../../theme/index.js";
 import type { BevyModelPlacement, BevyModelPreview, BevyModelReference } from "./wire-model.js";
 import type { BevyNodeKind } from "./node-geometry.js";
 import type { BevyRenderDraft, BevyRenderMarquee, BevyRenderSurface } from "./wire-transient.js";
-import type { BevyShotPreviewLink, BevyShotPreviewPresentation } from "./wire-shot-preview.js";
+import type {
+  BevyMediaPlanePrimitive,
+  BevyOwnershipLinkPrimitive,
+  BevyPreviewCardPrimitive,
+  BevyRunFeedbackPrimitive
+} from "./wire-primitives.js";
 
-/** 拍摄镜头预览卡片/归属线 wire 类型（自本文件拆出；保持既有引用路径可用）。 */
-export * from "./wire-shot-preview.js";
+/** 通用呈现原语 wire 类型（预览卡片/归属线/运行反馈/媒体平面/受管条目运动）。 */
+export * from "./wire-primitives.js";
 
 /**
  * CanvasRenderScene 版本；结构变化时必须升版本。
@@ -67,19 +72,30 @@ export * from "./wire-shot-preview.js";
  * - change: 2026-10-23-scale-canvas-media-residency —— v26 起模型引用只需 **轻量 descriptor
  *   已声明**：payload 未驻留是合法 cold/preparing 状态，重型 IR 由需求 lease 与预算淘汰。
  *   旧 renderer 会把 cold 引用当作未知资源并拒绝整帧，因此必须同步提升能力版本。
+ * - change: 2026-10-28-generic-extension-content-ownership（任务 4.3）—— 业务呈现字段改为通用
+ *   原语：节点 `shotPreview` → 场景 `previewCards`，`shotPreviewLinks`/`compositeAsset.ownershipLinks`
+ *   → 场景 `ownershipLinks`，`aggregateRun.filmSet` → 场景 `runFeedback`，
+ *   `AnimationPlayback.objects` → `managedItemMotion`，`compositeAsset.media` → `mediaPlanes`，
+ *   `filmSetGroups` → `managedItemGroups`；业务语义只经版本化 `payload` 透传。旧 renderer 会忽略
+ *   未知字段并少画卡片/归属线/运行反馈，因此必须同步提升能力版本拒绝混合组合。
+ * - v30：group-owned film-set bindings 携带 prepared source identities；媒体内容保留 provider
+ *   identity 与 schema version。
+ * - v31：group presentation 可携带可信的 overview primitive LOD 声明；旧 renderer 会静默把
+ *   所有 group 徽标保持在 High，因此必须拒绝混合组合。
+ * - v32：通用呈现原语落到上述字段；v31 及更旧版本按版本不匹配拒绝，不能原地改 v31 语义。
  */
-// v27: node capability-driven rendering paths.
-// v28: optional trusted overview-only emptyPlaceholder; older renderers reject the whole frame.
-// v30: group-owned film-set bindings carry prepared source identities;
-//      media content keeps a provider identity and schema version.
-// v31: group presentations may carry the trusted overview primitive LOD declaration;
-//      older renderers would silently keep every group badge at High, so reject mixed combinations.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v31" as const;
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v32" as const;
 
-/** Group-owned scene primitives. Kept separate from the legacy composite wire during migration. */
-export const FILM_SET_GROUP_RENDER_SCHEMA_VERSION = "woohaa-film-set-group-render-v1" as const;
-export type BevyFilmSetGroupBinding = {
-  bindingId: string;
+/**
+ * 受管条目组呈现 schema 版本（原片场 group 渲染 schema）。
+ *
+ * 组渲染是 owner 提供的通用原语：`ownerMode` 只声明条目如何组合（`model3d`/`image`/`video`
+ * 的变换、可见性与资源身份），不含任何扩展 id 或业务字段名。
+ */
+export const MANAGED_ITEM_GROUP_SCHEMA_VERSION = "woohaa-managed-item-group-v1" as const;
+
+export type BevyManagedItemGroupItem = {
+  itemId: string;
   sourceNodeId: string;
   kind: "model3d" | "image" | "video";
   contentKey: string;
@@ -91,14 +107,16 @@ export type BevyFilmSetGroupBinding = {
   diagnostic?: string;
   aspectRatio?: number;
 };
-export type BevyFilmSetGroupPreparation = {
-  schemaVersion: typeof FILM_SET_GROUP_RENDER_SCHEMA_VERSION;
-  ownerId: string;
-  badgeOrigin: { x: number; y: number };
-  bindings: BevyFilmSetGroupBinding[];
+
+export type BevyManagedItemGroup = {
+  schemaVersion: typeof MANAGED_ITEM_GROUP_SCHEMA_VERSION;
+  ownerNodeId: string;
+  /** 组徽标原点（画布坐标）。 */
+  origin: { x: number; y: number };
+  items: BevyManagedItemGroupItem[];
   ground?: { width: number; depth: number; color?: string };
-  sceneTransform?: { x: number; y: number; z: number; yaw: number; scale: number };
-  activeClip?: string | null;
+  ownerTransform?: { x: number; y: number; z: number; yaw: number; scale: number };
+  activeItemId?: string | null;
 };
 
 /** 与 Rust `GraphNode` 对应。 */
@@ -171,21 +189,13 @@ export type BevyRenderNode = {
    */
   historyStrip?: BevyHistoryStripPresentation;
   /**
-   * 聚合节点运行遮罩（change: 2026-10-12-unify-generation-history-strip，design D5）。
+   * 聚合节点运行遮罩（change: 2026-10-12-unify-generation-history-strip，design D5；
+   *  change: 2026-10-28-generic-extension-content-ownership 任务 4.3）。
    *
-   * 仅聚合节点（片场等）携带；`active` 表示存在运行中操作，驱动覆盖整个节点范围的半透明
-   * 遮罩与“运行中”文案。缺失或 `active: false` 表示不绘制。
+   * 仅聚合节点携带；`active` 表示存在运行中操作，驱动覆盖整个节点范围的半透明遮罩与“运行中”
+   * 文案。具体阶段/文案由场景级 `runFeedback` 原语提供；缺失或 `active: false` 表示不绘制。
    */
   aggregateRun?: BevyAggregateRunPresentation;
-  /**
-   * 拍摄镜头预览卡片呈现
-   * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D2/D8）。
-   *
-   * 仅 `film-set-shot-preview` 节点携带；除节点标准位置/尺寸外的标题、类型、画幅、时长、
-   * 状态与播放进度都是所属源镜头的**只读投影**，不是第二份权威数据。缺失即不绘制预览内容
-   * （未知/停用扩展、或非法帧）。
-   */
-  shotPreview?: BevyShotPreviewPresentation;
 };
 
 export type BevyNodeAction = {
@@ -246,8 +256,6 @@ export type BevyCompositeAssetPresentation = {
   emptyPlaceholder?: CompositeAssetEmptyPlaceholder;
   /** Shared canvas container surface, rendered inside Bevy. */
   panel?: import("../composite-children.js").CompositeContainerPanel;
-  /** Derived ownership only; local model anchor → target card bottoms. Not editable document edges. */
-  ownershipLinks?: { anchor: [number, number, number]; targetNodeIds: string[]; targetItemIds?: Record<string, string> };
   rootPlacement?: BevyModelPlacement;
   contentExtent?: number;
   /** 范围形状声明；缺失即复合资产类别默认 `isometric-diamond`。 */
@@ -271,7 +279,7 @@ export type BevyCompositeAssetPresentation = {
   width: number;
   height: number;
   /** 场内媒体平面（图片/视频）；缺失即无媒体平面（change: 2026-10-08-make-film-set-model-only）。 */
-  media?: BevyModelMediaPlane[];
+  mediaPlanes?: BevyMediaPlanePrimitive[];
   /**
    * 稳定 itemId → 组合作用域根 id（change: 2026-10-09-add-film-set-object-motion-and-editing）。
    * 供对象模式 picking 按 item 分组派生 AABB；缺失即对象 picking 不可用。
@@ -293,25 +301,10 @@ export type BevyCompositeAssetCompositionInfo = {
 };
 
 /**
- * 片场媒体平面投影（change: 2026-10-08-make-film-set-model-only，design D5）。
- *
- * 世界坐标由映射层派生（含片场 root、局部变换与竖直落地）；Rust 只据此放置真实平面。
- * `id` 全局唯一（`nodeId::itemId`），是纹理上传键。
+ * 兼容别名：媒体平面原语（原 `BevyModelMediaPlane`）。
+ * 新调用方应直接用 `BevyMediaPlanePrimitive`；渲染层只消费原语字段。
  */
-export type BevyModelMediaPlane = {
-  id: string;
-  itemId?: string;
-  unit?: number;
-  kind: "image" | "video";
-  x: number;
-  y: number;
-  z: number;
-  width: number;
-  height: number;
-  yaw: number;
-  /** 是否已上传纹理；未就绪时 Rust 保留平面几何但显示占位。 */
-  hasTexture: boolean;
-};
+export type BevyModelMediaPlane = BevyMediaPlanePrimitive;
 
 /**
  * 历史条圆点状态（change: 2026-10-12-unify-generation-history-strip，design D4）。
@@ -359,10 +352,14 @@ export type BevyHistoryStripPresentation = {
   truncated: number;
 };
 
-/** 聚合节点运行遮罩呈现（change: 2026-10-12-unify-generation-history-strip，design D5）。 */
+/**
+ * 聚合节点运行遮罩呈现（change: 2026-10-12-unify-generation-history-strip，design D5；
+ *  change: 2026-10-28-generic-extension-content-ownership 任务 4.3）。
+ *
+ * 只保留通用布尔；阶段/文案来自场景级 `runFeedback` 原语（`nodeId` 关联）。
+ */
 export type BevyAggregateRunPresentation = {
-  filmSet?: import("../run-state/film-set-feedback.js").FilmSetRunFeedback;
-  /** 是否存在运行反馈；片场使用 filmSet 扫描，其它聚合保留范围遮罩。 */
+  /** 是否存在运行反馈；驱动范围遮罩。 */
   active: boolean;
   /** 减少动态效果偏好下使用静态可区分形态。 */
   reduceMotion?: boolean;
@@ -472,17 +469,27 @@ export type CanvasRenderScene = {
   revision: number;
   nodes: BevyRenderNode[];
   edges: BevyRenderEdge[];
-  /** Film-set group preparation primitives. Legacy composite fields are never emitted here. */
-  filmSetGroups?: BevyFilmSetGroupPreparation[];
   /**
-   * 派生拍摄镜头归属线集合
-   * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。
+   * 受管条目组原语（change: 2026-10-28-generic-extension-content-ownership 任务 4.3）。
    *
-   * 独立于 `edges` 的呈现集合：表示源镜头小相机到预览卡片的永久归属，无端口/删除/重连，
-   * 不参与普通边拓扑或 inputMapping。缺失或空即无可见拍摄镜头。只承载派生呈现，不进入
-   * ServerCanvas / Y.Doc。
+   * 每个 owner 节点声明其受管条目（模型/图片/视频）的材质、变换与可见性；渲染层按通用几何
+   * 组合与命中，不读取任何业务字段。旧 `filmSetGroups` 字段已删除。
    */
-  shotPreviewLinks?: BevyShotPreviewLink[];
+  managedItemGroups?: BevyManagedItemGroup[];
+  /**
+   * 预览卡片原语（任务 4.3）：由 owner adapter 投影，渲染层只按通用卡片呈现。
+   * 同一 `nodeId` 至多一项；未知/重复项被丢弃。
+   */
+  previewCards?: BevyPreviewCardPrimitive[];
+  /**
+   * 归属线原语（任务 4.3）：派生呈现，独立于普通 `edges` 拓扑，不参与端口/删除/重连。
+   */
+  ownershipLinks?: BevyOwnershipLinkPrimitive[];
+  /**
+   * 运行反馈原语（任务 4.3）：按 `nodeId` 关联到 owner 节点，驱动通用运行遮罩/扫描装饰。
+   * 具体业务身份只出现在 `payload`。
+   */
+  runFeedback?: BevyRunFeedbackPrimitive[];
   selection: BevyRenderSelection;
   viewport: { x: number; y: number; zoom: number };
   draft: BevyRenderDraft | null;

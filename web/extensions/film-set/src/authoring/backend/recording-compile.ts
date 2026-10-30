@@ -61,6 +61,7 @@ import {
   type FilmSetNodeData,
   type StoredAsset
 } from "@woohaa3/contracts";
+import { FILM_SET_EXTENSION_ID } from "../../state/shared/identity.js";
 
 /**
  * 编译/渲染/编码语义版本：唯一来源在 `@woohaa3/contracts`（前后端与 worker 共用）。
@@ -301,7 +302,8 @@ export function freezeFilmSetRecording(input: {
       clipId: clip.id,
       sourceIdentity: `${animationSnapshotHash(animation)}-${mediaFingerprint}`,
       canvasRevision: input.canvasRevision,
-      sourceIncarnation: input.sourceIncarnation
+      sourceIncarnation: input.sourceIncarnation,
+      extensionId: FILM_SET_EXTENSION_ID
     },
     profile,
     timing: {
@@ -326,7 +328,7 @@ export function freezeFilmSetRecording(input: {
       looped: Boolean(clip.timeline.loop),
       cameraMotion: cameraTracks.ir.cameraMotion,
       modelMotion: [],
-      objects: objectMotions.motions,
+      managedItemMotion: objectMotions.motions,
       initialCamera: {
         azimuth: clip.initialCamera.azimuth,
         elevation: clip.initialCamera.elevation,

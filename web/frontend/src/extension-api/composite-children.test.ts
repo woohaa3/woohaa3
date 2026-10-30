@@ -20,8 +20,8 @@ it("an independent extension shares containers, entity links, dragging and clean
   expect(registry.dragAlongNodeIds(canvas, "owner")).toEqual(["container", "output"]);
   const scene = buildCanvasRenderScene({ canvas, compositeAssetScopeShapes: registry.scopeShapes(canvas) });
   registry.projectChildren(scene, canvas);
-  expect(scene.nodes.find(n => n.id === "owner")?.compositeAsset?.ownershipLinks?.targetNodeIds).toEqual(["container", "output", "pinned"]);
-  expect(scene.nodes.find(n => n.id === "owner")?.compositeAsset?.ownershipLinks?.targetItemIds).toEqual({ container: "object-a" });
+  expect(scene.ownershipLinks?.find(link => link.ownerNodeId === "owner")?.targetNodeIds).toEqual(["container", "output", "pinned"]);
+  expect(scene.ownershipLinks?.find(link => link.ownerNodeId === "owner")?.targetItemIds).toEqual({ container: "object-a" });
   expect(scene.nodes.find(n => n.id === "container")?.compositeAsset).toMatchObject({ scopeShape: "rect", panel: { title: "References", imageIds: ["thumbnail"] } });
   expect(scene.nodes.find(n => n.id === "output")?.compositeAsset).toBeUndefined();
   expect(JSON.stringify(canvas)).toBe(before);
@@ -41,7 +41,7 @@ it("does not accept ownership from a different owner or unknown extension", () =
   expect(registry.children(canvas).size).toBe(0);
 });
 
-it("keeps shot-preview ownership links for group film sets but drops them inside composite assets", () => {
+it("keeps ownership links for group owners but drops them inside composite assets", () => {
   const canvas = createEmptyWoohaa3ServerCanvas("shot-links"), registry = new CompositeAssetRegistry();
   for (const [id, type] of [["owner", "composite-asset"], ["group", "group"], ["composite-card", "video"], ["group-card", "video"]]) {
     canvas.document.nodes.push({ id, type, position: { x: 0, y: 0 } });
@@ -65,14 +65,14 @@ it("keeps shot-preview ownership links for group film sets but drops them inside
     selection: { nodes: [], edge: null },
     viewport: { x: 0, y: 0, zoom: 1 },
     draft: null,
-    shotPreviewLinks: [
-      { id: "a", ownerNodeId: "owner", previewNodeId: "composite-card", clipId: "clip", start: { x: 0, y: 0 } },
-      { id: "b", ownerNodeId: "group", previewNodeId: "group-card", clipId: "clip", start: { x: 0, y: 0 } }
+    ownershipLinks: [
+      { id: "a", ownerNodeId: "owner", targetNodeIds: ["composite-card"], start: { x: 0, y: 0 } },
+      { id: "b", ownerNodeId: "group", targetNodeIds: ["group-card"], start: { x: 0, y: 0 } }
     ]
   } as unknown as ReturnType<typeof buildCanvasRenderScene>;
   registry.projectChildren(scene, canvas);
   // 片场复合资产内部的预览卡片与其它子对象共用 ownershipLinks，不需要独立归属线。
   // 片场 group 的预览卡片由 group 托管，但它浮在画布上与徽标相隔很远——归属线是唯一关联呈现。
-  expect((scene.shotPreviewLinks ?? []).map(link => link.previewNodeId)).toEqual(["group-card"]);
+  expect((scene.ownershipLinks ?? []).map(link => link.targetNodeIds[0])).toEqual(["group-card"]);
   dispose();
 });

@@ -9,9 +9,9 @@
   },
   "content": {
     "ownedFields": ["filmSetContent", "filmSetAnimations", "filmSetObjectContainersHidden", "scenePlacement"],
-    "ownedWireFields": ["shotPreview", "shotPreviewLinks", "filmSetNodeId"],
     "routePrefix": "film-set",
     "targetModes": ["film-set"],
-    "eventOwners": ["film-set"]
+    "eventOwners": ["film-set"],
+    "ownerLocators": [{ "nodeTypes": ["group"], "fields": ["filmSetGroup"] }]
   }
 }

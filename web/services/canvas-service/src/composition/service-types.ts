@@ -252,6 +252,8 @@ export type CanvasMediaAssetSyncPort = {
 };
 
 export type CanvasService = {
+  /** 内容 owner 注册表：`/content` 路由、内容 MCP 与验证工具共用。 */
+  content: import("@woohaa3/contracts").ContentContributionResolver;
   /** 本地场景包独立事务/收据；不复用在线来源权限。 */
   scenePackages: import("../storage/sqlite/scene-package.js").SqliteScenePackageStore | null;
   handle: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;

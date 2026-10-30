@@ -14,6 +14,7 @@ import { decodeEditApplyCommand } from "../edit-command.js";
 import { collectWoohaa3CanvasRemovalIds, type CanvasNodeData, type Woohaa3CanvasNode } from "../domain/index.js";
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
 import { findActiveRunNode } from "./working-state.js";
+import { EMPTY_CONTENT_RESOLVER, type ContentContributionResolver } from "../content-contribution.js";
 import {
   addNode,
   patchNodeData,
@@ -22,14 +23,12 @@ import {
   updateNode
 } from "./node-commands.js";
 import { addEdge, removeEdge } from "./edge-resource-commands.js";
-import {
-  applyFilmSetOperation,
-  evaluateFilmSetPrecondition,
-  isFilmSetOperation,
-  isFilmSetPrecondition
-} from "./edit-command-film-set.js";
 
-export function applyEditCommand(work: WorkingState, command: EditApplyCommand): CommandApplyResult {
+export function applyEditCommand(
+  work: WorkingState,
+  command: EditApplyCommand,
+  content: ContentContributionResolver | undefined = EMPTY_CONTENT_RESOLVER
+): CommandApplyResult {
   const decoded = decodeEditApplyCommand(command);
   if (!decoded) return reject("invalid-command", "edit.apply 结构非法或超出上限");
 
@@ -43,7 +42,7 @@ export function applyEditCommand(work: WorkingState, command: EditApplyCommand):
   }
 
   for (const operation of decoded.operations) {
-    const result = applyEditOperation(work, operation);
+    const result = applyEditOperation(work, operation, content);
     if (!result.ok) return result;
   }
   return OK;
@@ -60,11 +59,6 @@ export function evaluateEditPreconditions(
   preconditions: readonly EditPrecondition[]
 ): CommandApplyResult | null {
   for (const condition of preconditions) {
-    if (isFilmSetPrecondition(condition.kind)) {
-      const result = evaluateFilmSetPrecondition(work, condition);
-      if (result) return result;
-      continue;
-    }
     switch (condition.kind) {
       case "node-exists":
         if (!work.nodes.some((node) => node.id === condition.nodeId)) {
@@ -83,6 +77,17 @@ export function evaluateEditPreconditions(
           if (!matchNodeField(node, snapshot.field, snapshot)) {
             return reject("edit-precondition-failed", `作品 ${condition.nodeId} 的${snapshot.field}已被其他操作修改，无法执行`);
           }
+        }
+        break;
+      }
+      case "node-data-equals": {
+        const data = work.nodeData[condition.nodeId];
+        if (!condition.present) {
+          if (data !== undefined) return reject("edit-precondition-failed", `作品 ${condition.nodeId} 的 nodeData 已出现，无法执行`);
+          break;
+        }
+        if (data === undefined || stableJson(data) !== stableJson(condition.value)) {
+          return reject("edit-precondition-failed", `作品 ${condition.nodeId} 的 nodeData 已被其他操作修改，无法执行`);
         }
         break;
       }
@@ -192,7 +197,7 @@ export function matchNodeDataField(
   const raw: unknown = data?.[field];
   const present = raw !== undefined;
   if (!snapshot.present) return !present;
-  if (field === "filmSetObjectContainersHidden" || field === "groupAppearance" || field === "filmSetGroup") return present && JSON.stringify(raw) === JSON.stringify(snapshot.value);
+  if (raw !== null && typeof raw === "object") return present && JSON.stringify(raw) === JSON.stringify(snapshot.value);
   return present && raw === snapshot.value;
 }
 
@@ -217,11 +222,14 @@ export function validateEditOperationActiveRun(
 }
 
 /** 应用单条白名单操行；复用既有结构校验，语义与对应原生命令一致。 */
-export function applyEditOperation(work: WorkingState, operation: EditOperation): CommandApplyResult {
-  if (isFilmSetOperation(operation)) return applyFilmSetOperation(work, operation);
+export function applyEditOperation(
+  work: WorkingState,
+  operation: EditOperation,
+  content: ContentContributionResolver | undefined = EMPTY_CONTENT_RESOLVER
+): CommandApplyResult {
   switch (operation.kind) {
     case "node-add":
-      return addNode(work, { type: "node.add", node: operation.node, nodeData: operation.nodeData });
+      return addNode(work, { type: "node.add", node: operation.node, nodeData: operation.nodeData }, content);
     case "node-update":
       return updateNode(work, {
         type: "node.update",
@@ -233,7 +241,7 @@ export function applyEditOperation(work: WorkingState, operation: EditOperation)
         ...(operation.zIndex !== undefined ? { zIndex: operation.zIndex } : {})
       });
     case "node-remove":
-      return removeNodes(work, operation.nodeIds);
+      return removeNodes(work, operation.nodeIds, content);
     case "edge-add":
       return addEdge(work, {
         id: operation.edge.id,
@@ -246,11 +254,21 @@ export function applyEditOperation(work: WorkingState, operation: EditOperation)
     case "edge-remove":
       return removeEdge(work, operation.edgeId);
     case "node-data-set":
-      return patchNodeData(work, operation.nodeId, operation.value);
+      return patchNodeData(work, operation.nodeId, operation.value, content);
     case "node-data-unset":
       return unsetNodeDataFields(work, operation.nodeId, operation.fields);
     case "canvas-title-set":
       work.title = operation.title;
       return OK;
   }
+}
+
+
+/** 确定性 JSON 比较：只用于 owner diff 的前置条件，键顺序不影响相等判断。 */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, entry) =>
+    entry && typeof entry === "object" && !Array.isArray(entry)
+      ? Object.fromEntries(Object.keys(entry).sort().map((key) => [key, (entry as Record<string, unknown>)[key]]))
+      : entry
+  );
 }

@@ -3,7 +3,7 @@ import { ManagedNodeLifecycleRegistry, type CanvasContentRuntime } from "@woohaa
 /** Merge trusted declarations without choosing a business extension by position. */
 export function mergeCanvasContentRuntimes(entries: readonly { extensionId: string; runtime: CanvasContentRuntime }[]): CanvasContentRuntime | undefined {
   if (!entries.length) return undefined;
-  const result: CanvasContentRuntime = { managedLifecycles: [], managedMigrations: [] };
+  const result: CanvasContentRuntime = { managedLifecycles: [], managedMigrations: [], content: [] };
   const lifecycle = new ManagedNodeLifecycleRegistry(), migrations = new Set<string>();
   for (const { extensionId, runtime } of entries) {
     for (const adapter of runtime.managedLifecycles ?? []) {
@@ -15,6 +15,11 @@ export function mergeCanvasContentRuntimes(entries: readonly { extensionId: stri
       if (migrations.has(migration.extensionId)) throw Error("managed-migration-registration-conflict");
       migrations.add(migration.extensionId);
       result.managedMigrations = [...result.managedMigrations!, migration];
+    }
+    for (const contribution of runtime.content ?? []) {
+      if (contribution.extensionId !== extensionId) throw Error("canvas-content-registration-owner-mismatch");
+      if (result.content!.some((existing) => existing.extensionId === extensionId)) throw Error("canvas-content-registration-conflict: content");
+      result.content = [...result.content!, contribution];
     }
     for (const capability of ["frames", "conversion", "mcp", "recording"] as const) {
       if (!runtime[capability]) continue;

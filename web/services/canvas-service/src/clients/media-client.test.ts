@@ -26,15 +26,22 @@ describe("CanvasMediaClient.read 画布作用域", () => {
   it("调用方给了 canvasId 时请求体带 canvasId", async () => {
     const { bodies, fetchImpl } = recordingFetch();
     const client = createCanvasMediaClient({ baseUrl: "http://media.local", serviceToken: "token", fetchImpl });
-    const media = await client.read!(STORAGE_KEY, "canvas-a");
+    const media = await client.read!(STORAGE_KEY, "canvas-a", "film-set");
     expect(Array.from(media.bytes)).toEqual([1, 2, 3]);
     expect(bodies).toEqual([{ extensionId: "film-set", storageKey: STORAGE_KEY, canvasId: "canvas-a" }]);
   });
 
-  it("调用方没有画布时不添加 canvasId（保持旧行为）", async () => {
+  it("调用方没有画布时不添加 canvasId，但仍显式声明扩展作用域", async () => {
+    const { bodies, fetchImpl } = recordingFetch();
+    const client = createCanvasMediaClient({ baseUrl: "http://media.local", serviceToken: "token", fetchImpl });
+    await client.read!(STORAGE_KEY, undefined, "game-furnace");
+    expect(bodies).toEqual([{ extensionId: "game-furnace", storageKey: STORAGE_KEY }]);
+  });
+
+  it("没有显式扩展作用域时不猜测业务 id", async () => {
     const { bodies, fetchImpl } = recordingFetch();
     const client = createCanvasMediaClient({ baseUrl: "http://media.local", serviceToken: "token", fetchImpl });
     await client.read!(STORAGE_KEY);
-    expect(bodies).toEqual([{ extensionId: "film-set", storageKey: STORAGE_KEY }]);
+    expect(bodies).toEqual([{ storageKey: STORAGE_KEY }]);
   });
 });

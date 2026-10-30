@@ -156,7 +156,7 @@ export function compositeAssetScopeForNode(input: {
     ...(input.emptyPlaceholder === "brand-plinth-v1" ? { emptyPlaceholder: input.emptyPlaceholder } : {}),
     ...(input.geometryQuality ? { geometryQuality: input.geometryQuality } : {}),
     ...(scopeGround ? { scopeGround } : {}),
-    ...(input.mediaPlanes && input.mediaPlanes.length > 0 ? { media: [...input.mediaPlanes] } : {}),
+    ...(input.mediaPlanes && input.mediaPlanes.length > 0 ? { mediaPlanes: [...input.mediaPlanes] } : {}),
     ...(input.rootPlacement ? { rootPlacement: input.rootPlacement } : {}),
     contentExtent: input.contentExtent ?? 2,
     ...(input.layoutAabb ? { layoutAabb: input.layoutAabb } : {}),

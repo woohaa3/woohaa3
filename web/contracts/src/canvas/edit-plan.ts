@@ -13,23 +13,30 @@
  *
  * 纯函数：只读取传入画布并用共享 reducer 模拟；不访问 DOM/网络/Yjs。
  */
-import { observeContentResolver, type ContentContributionResolver } from "./content-contribution.js";
+import { observeContentResolver, type ContentContributionResolver, type ContentEditOwnerSegment } from "./content-contribution.js";
 import { filmSetObjectOwnershipOf, isFilmSetObjectModelNode } from "./film-set-object-container.js";
 import { planPositionEdit } from "./edit-plan-position.js";
 import type { CanvasCommand } from "./commands.js";
 import { applyCanvasCommands } from "./command-reducer.js";
 import { isShotPreviewNodeType } from "./domain/core/shot-preview-node.js";
+import { COMPOSITE_ASSET_NODE_TYPE, readCompositeAssetExtensionId } from "./domain/core/composite-asset-identity.js";
 import { managedNodeRelationOf } from "./managed-node.js";
 import type { EditOperation, EditPrecondition, EditFieldSnapshot, EditNodeField, EditNodeFieldSnapshot } from "./edit-command.js";
-import { EDIT_NODE_FIELDS, EDIT_NODE_DATA_FIELDS } from "./edit-command.js";
+import { EDIT_NODE_FIELDS } from "./edit-command.js";
 import { planNodeDataFieldDiffs } from "./edit-plan-node-data.js";
-import { planFilmSetItemDiffs } from "./edit-plan-film-set.js";
-import { planFilmSetClipDiffs } from "./edit-plan-film-set-clip.js";
+import { planContentNodeDataDiffs } from "./edit-plan-content.js";
 import type { CanvasNodeData, ServerCanvas, Woohaa3CanvasSerializedNode } from "./domain/index.js";
 
+export type EditPlanStep = {
+  preconditions: EditPrecondition[];
+  operations: EditOperation[];
+  /** owner 专属段：在通用结构操作之后、同一批次内原子应用。 */
+  extensions?: ContentEditOwnerSegment[];
+};
+
 export type EditPlan = {
-  forward: { preconditions: EditPrecondition[]; operations: EditOperation[] };
-  inverse: { preconditions: EditPrecondition[]; operations: EditOperation[] };
+  forward: EditPlanStep;
+  inverse: EditPlanStep;
 };
 
 /** 规划失败的可读原因（不产生可撤销记录）。 */
@@ -48,10 +55,8 @@ function isPlannable(command: CanvasCommand): boolean {
     case "edge.remove":
     case "nodeData.patch":
     case "canvas.setTitle":
-    case "filmSet.itemPatch":
-    case "filmSet.clipPatch":
-    case "filmSetGroup.bindingPatch":
-    case "filmSetGroup.ungroup":
+    case "extension.command":
+    case "extension.edit":
       return true;
     default:
       return false;
@@ -75,10 +80,10 @@ export function planCanvasEdit(canvas: ServerCanvas, commands: readonly CanvasCo
   if (!applied.ok) return { ok: false, reason: applied.rejection.message };
   if (!applied.changed) return { ok: false, reason: "操作没有产生净变化" };
 
-  return diffPlan(canvas, applied.canvas);
+  return diffPlan(canvas, applied.canvas, options.content);
 }
 
-export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanResult {
+export function diffPlan(before: ServerCanvas, after: ServerCanvas, content?: ContentContributionResolver): EditPlanResult {
   const beforeNodes = new Map(before.document.nodes.map((node) => [node.id, node]));
   const afterNodes = new Map(after.document.nodes.map((node) => [node.id, node]));
   const beforeEdges = new Map(before.document.edges.map((edge) => [edge.id, edge]));
@@ -104,6 +109,8 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   let inverseOps: EditOperation[] = [];
   const forwardPre: EditPrecondition[] = [];
   const inversePre: EditPrecondition[] = [];
+  const forwardExtensions: ContentEditOwnerSegment[] = [];
+  const inverseExtensions: ContentEditOwnerSegment[] = [];
 
   // ---- 结构字段变化（含 reparent）。正向必须先新增容器节点（见下）；逆向先重挂子节点。 ----
   const fieldForward: EditOperation[] = [];
@@ -126,32 +133,30 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   }
   forwardOps.push(...fieldForward);
 
-  // Only explicitly owned fields enter history; unrelated node data survives replay.
-  const dataPlan = planNodeDataFieldDiffs(before, after, commonNodes, EDIT_NODE_DATA_FIELDS);
+  // ---- owner 规划：业务字段与专属操作由当前 scope 的 owner 决定（任务 3.4）。
+  //      owner 失败整次拒绝，绝不提交部分结构操作。认领的节点不再进入内核通用字段规划。 ----
+  const ownerPlan = planOwnerEdits(before, after, content);
+  if ("reason" in ownerPlan) return { ok: false, reason: ownerPlan.reason };
+  forwardOps.push(...ownerPlan.forward.operations);
+  inverseOps.push(...ownerPlan.inverse.operations);
+  forwardPre.push(...ownerPlan.forward.preconditions);
+  inversePre.push(...ownerPlan.inverse.preconditions);
+  if (ownerPlan.forward.extensions) forwardExtensions.push(...ownerPlan.forward.extensions);
+  if (ownerPlan.inverse.extensions) inverseExtensions.push(...ownerPlan.inverse.extensions);
+
+  // 复合资产：没有 owner `edit` 规划时仍由 owner nodeData `diff` 决定业务数据（任务 2.4）。
+  const ownerDataPlan = planContentNodeDataDiffs(before, after, commonNodes, content, ownerPlan.claimed);
+  if ("ok" in ownerDataPlan) return { ok: false, reason: ownerDataPlan.reason };
+  forwardOps.push(...ownerDataPlan.forwardOps);
+  inverseOps.push(...ownerDataPlan.inverseOps);
+  forwardPre.push(...ownerDataPlan.forwardPre);
+  inversePre.push(...ownerDataPlan.inversePre);
+  // 其余节点按净差异记录任意非受保护字段；无关 nodeData 在重放时保留。
+  const dataPlan = planNodeDataFieldDiffs(before, after, commonNodes.filter(node => !ownerDataPlan.nodeIds.has(node.id) && !ownerPlan.claimed.has(node.id)));
   forwardOps.push(...dataPlan.forwardOps);
   inverseOps.push(...dataPlan.inverseOps);
   forwardPre.push(...dataPlan.forwardPre);
   inversePre.push(...dataPlan.inversePre);
-
-  // ---- 片场对象净差异：transform / remove / restore（change:
-  //      2026-10-10-improve-film-set-editing-and-inspector，任务 3.3 / design D6）。
-  //      只规划受支持的 item 级操作；遇到无法表达的对象内容/绑定变化则整批拒绝，
-  //      绝不筛掉不支持命令后提交部分成功。 ----
-  const filmSetPlan = planFilmSetItemDiffs(before, after, commonNodes);
-  if (!filmSetPlan.ok) return filmSetPlan;
-  forwardOps.push(...filmSetPlan.forwardOps);
-  inverseOps.push(...filmSetPlan.inverseOps);
-  forwardPre.push(...filmSetPlan.forwardPre);
-  inversePre.push(...filmSetPlan.inversePre);
-
-  // ---- 拍摄镜头定义与预览布局闭包（change: 2026-10-15，任务 2.5 / design D3）：
-  //      源镜头定义（含类型转换、删除恢复、默认切换）与受影响预览的完整布局进入受保护编辑。
-  //      正向/逆向都排在对象级操作**之后**：对象恢复需先建立 item，镜头定义才能引用它。 ----
-  const clipPlan = planFilmSetClipDiffs(before, after, commonNodes);
-  forwardOps.push(...clipPlan.forwardOps);
-  inverseOps.push(...clipPlan.inverseOps);
-  forwardPre.push(...clipPlan.forwardPre);
-  inversePre.push(...clipPlan.inversePre);
 
   const removedNodesOrdered = orderChildrenFirst(removedNodes);
   for (const edge of addedEdges) {
@@ -206,12 +211,72 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
     inversePre.push({ kind: "canvas-title-equals", title: after.title ?? "" });
   }
 
-  if (forwardOps.length === 0) return { ok: false, reason: "操作没有产生净变化" };
+  if (forwardOps.length === 0 && forwardExtensions.length === 0) return { ok: false, reason: "操作没有产生净变化" };
   return {
     ok: true,
-    forward: { preconditions: forwardPre, operations: forwardOps },
-    inverse: { preconditions: inversePre, operations: inverseOps }
+    forward: {
+      preconditions: forwardPre,
+      operations: forwardOps,
+      ...(forwardExtensions.length > 0 ? { extensions: forwardExtensions } : {})
+    },
+    inverse: {
+      preconditions: inversePre,
+      operations: inverseOps,
+      ...(inverseExtensions.length > 0 ? { extensions: inverseExtensions } : {})
+    }
   };
+}
+
+type OwnerPlanResult =
+  | { claimed: Set<string>; forward: EditPlanStep; inverse: EditPlanStep }
+  | { reason: string };
+
+/**
+ * 依次调用当前 scope 的 owner 编辑规划器。
+ *
+ * owner 缺省认领 `composite-asset` 且 `extensionId` 等于自身 id 的节点；声明 `matchesNode`
+ * 后可认领其它容器（例如 group 上的 owner marker）。任一步失败整次拒绝。
+ */
+function planOwnerEdits(
+  before: ServerCanvas,
+  after: ServerCanvas,
+  content: ContentContributionResolver | undefined
+): OwnerPlanResult {
+  const claimed = new Set<string>();
+  const forward: EditPlanStep = { preconditions: [], operations: [], extensions: [] };
+  const inverse: EditPlanStep = { preconditions: [], operations: [], extensions: [] };
+  if (!content) return { claimed, forward, inverse };
+  for (const contribution of content.implementations()) {
+    const planner = contribution.edit;
+    if (!planner) continue;
+    const matches = planner.matchesNode ?? ((type: string, data: unknown) =>
+      type === COMPOSITE_ASSET_NODE_TYPE && readCompositeAssetExtensionId(data) === contribution.extensionId);
+    const owned = new Set<string>();
+    for (const node of [...after.document.nodes, ...before.document.nodes]) {
+      if (matches(node.type, after.nodeData[node.id] ?? before.nodeData[node.id])) owned.add(node.id);
+    }
+    if (owned.size === 0) continue;
+    let planned: ReturnType<typeof planner.plan>;
+    try {
+      planned = planner.plan(before, after);
+    } catch {
+      return { reason: `owner-edit-failed:${contribution.extensionId}` };
+    }
+    if (!planned.ok) return { reason: planned.code };
+    const { forward: nextForward, inverse: nextInverse } = planned.plan;
+    if (!Array.isArray(nextForward.preconditions) || !Array.isArray(nextForward.operations)
+      || !Array.isArray(nextInverse.preconditions) || !Array.isArray(nextInverse.operations)) {
+      return { reason: `owner-edit-invalid:${contribution.extensionId}` };
+    }
+    for (const id of owned) claimed.add(id);
+    forward.preconditions.push(...nextForward.preconditions);
+    forward.operations.push(...nextForward.operations);
+    if (nextForward.extensions) forward.extensions!.push(...nextForward.extensions);
+    inverse.preconditions.push(...nextInverse.preconditions);
+    inverse.operations.push(...nextInverse.operations);
+    if (nextInverse.extensions) inverse.extensions!.push(...nextInverse.extensions);
+  }
+  return { claimed, forward, inverse };
 }
 
 function nodeAddOperation(node: Woohaa3CanvasSerializedNode, source: ServerCanvas): Extract<EditOperation, { kind: "node-add" }> {

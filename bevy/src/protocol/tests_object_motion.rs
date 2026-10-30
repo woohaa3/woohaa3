@@ -2,10 +2,10 @@
 //! （change: 2026-10-09-add-film-set-object-motion-and-editing，任务 5.1/5.2/7.2）。
 
 use super::super::motion::validate;
-use crate::protocol::{AnimationPlayback, FilmSetObjectMotion, FilmSetObjectPlayback};
+use crate::protocol::{AnimationPlayback, ManagedItemMotion, ManagedItemMotionPlayback};
 
-fn object(playback: FilmSetObjectPlayback) -> FilmSetObjectMotion {
-    FilmSetObjectMotion {
+fn object(playback: ManagedItemMotionPlayback) -> ManagedItemMotion {
+    ManagedItemMotion {
         item_id: "a".into(),
         playback,
         model_motion: Vec::new(),
@@ -13,8 +13,8 @@ fn object(playback: FilmSetObjectPlayback) -> FilmSetObjectMotion {
     }
 }
 
-fn config(start_time: f32, duration: f32, time_scale: f32, looped: bool) -> FilmSetObjectPlayback {
-    FilmSetObjectPlayback {
+fn config(start_time: f32, duration: f32, time_scale: f32, looped: bool) -> ManagedItemMotionPlayback {
+    ManagedItemMotionPlayback {
         start_time,
         duration,
         time_scale,
@@ -68,15 +68,15 @@ fn object_motion_validates_targets_and_evaluates() {
 }
 
 #[test]
-fn animation_playback_parses_objects_projection() {
-    // 线格式：animationPlayback.objects 反序列化出对象投影（camelCase itemId/partIds）。
+fn animation_playback_parses_managed_item_motion_projection() {
+    // 线格式：animationPlayback.managedItemMotion 反序列化出条目运动投影（camelCase itemId/partIds）。
     let json = serde_json::json!({
         "nodeId": "anim",
         "version": "woohaa-motion-ir-v1",
         "time": 1.0,
         "duration": 4.0,
         "initialCamera": { "azimuth": 0.0, "elevation": 0.7, "distance": 8.0, "focusOffset": [0,0,0] },
-        "objects": [{
+        "managedItemMotion": [{
             "itemId": "a",
             "playback": { "startTime": 0.0, "duration": 3.0, "timeScale": 1.0, "loop": true },
             "modelMotion": [],
@@ -84,11 +84,8 @@ fn animation_playback_parses_objects_projection() {
         }]
     });
     let playback: AnimationPlayback = serde_json::from_value(json).expect("playback");
-    assert_eq!(playback.objects.len(), 1);
-    assert_eq!(playback.objects[0].item_id, "a");
-    assert_eq!(
-        playback.objects[0].part_ids.get("root").map(String::as_str),
-        Some("1:a")
-    );
-    assert!(playback.objects[0].playback.looped);
+    assert_eq!(playback.managed_item_motion.len(), 1);
+    assert_eq!(playback.managed_item_motion[0].item_id, "a");
+    assert_eq!(playback.managed_item_motion[0].part_ids.get("root").map(String::as_str), Some("1:a"));
+    assert!(playback.managed_item_motion[0].playback.looped);
 }

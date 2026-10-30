@@ -67,7 +67,7 @@ export async function createHostRecordingService(
     canvas: {
       ...createCanvasReader(input.canvas),
       ...(input.media.resources
-        ? { readMedia: (storageKey: string, canvasId?: string) => input.media.resources!.read(storageKey, canvasId) }
+        ? { readMedia: (storageKey: string, canvasId?: string, extensionId?: string) => input.media.resources!.read(storageKey, canvasId, extensionId) }
         : {})
     },
     upload: createMediaUploader(input.media),
@@ -77,7 +77,7 @@ export async function createHostRecordingService(
         await stageRecordingResources({ directory, snapshot: request.snapshot, signal: request.signal,
           // 录制快照冻结了 origin.canvasId：素材就是该画布作用域下的对象，按它读才不会落到主存储。
           ...(input.media.resources
-            ? { read: (storageKey: string) => input.media.resources!.read(storageKey, request.snapshot.origin.canvasId) }
+            ? { read: (storageKey: string) => input.media.resources!.read(storageKey, request.snapshot.origin.canvasId, request.snapshot.origin.extensionId) }
             : {}) });
         const result = await dispatcher(request);
         if (result.ok) {

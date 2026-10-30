@@ -20,7 +20,7 @@ pub(crate) fn accept_gizmo_scene(scene: &Scene) {
         if editor.tool_mode == "object"
             && !editor.item_id.as_ref().is_some_and(|id| {
                 composite.item_roots.contains_key(id)
-                    || composite.media.iter().any(|plane| &plane.item_id == id)
+                    || composite.media_planes.iter().any(|plane| &plane.item_id == id)
             })
         {
             return None;

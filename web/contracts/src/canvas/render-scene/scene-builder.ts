@@ -53,7 +53,6 @@ import {
   type BevyRenderMarquee,
   type BevyRenderNode,
   type BevyRenderSurface,
-  type BevyShotPreviewLink,
   type BevyVideoFocus,
   type CanvasRenderScene,
   type CompositeAssetScopeShape,
@@ -71,12 +70,15 @@ import {
   readPlacement,
   resolveTextureKey
 } from "./node-projection.js";
-import { shotPreviewCardPresentation, shotPreviewCardPresentationForFilmSetGroup, shotPreviewLinksForFilmSet, shotPreviewLinksForFilmSetGroup } from "./shot-preview-projection.js";
-import { managedShotPreviewOwnershipOf, shotPreviewOwnershipOf } from "../film-set-shot-preview.js";
-import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
-import type { FilmSetNodeData } from "../canvas-node-model.js";
+import type {
+  BevyOwnershipLinkPrimitive,
+  BevyPreviewCardPrimitive,
+  BevyRunFeedbackPrimitive
+} from "./wire-primitives.js";
+import type { ContentPresentationAdapter } from "../content-contribution.js";
+import { isFilmSetNode } from "../film-set-legacy-identity.js";
 import { activeFilmSetSceneBindings, prepareFilmSetGroup, readFilmSetGroupMarker } from "../film-set-group.js";
-import { FILM_SET_GROUP_RENDER_SCHEMA_VERSION, type BevyFilmSetGroupPreparation, type BevyFilmSetGroupBinding } from "./wire-scene.js";
+import { MANAGED_ITEM_GROUP_SCHEMA_VERSION, type BevyManagedItemGroup, type BevyManagedItemGroupItem } from "./wire-scene.js";
 
 export type CanvasRenderSceneInput = {
   /** 扩展内容贡献。缺省时空解析器，不改变现有场景。 */
@@ -223,31 +225,28 @@ export type CanvasRenderSceneInput = {
    */
   selectionActionToolbar?: BevyNodeActionsPresentation;
   /**
-   * 每预览节点的本地播放状态（change: 2026-10-15-add-film-set-shooting-shot-previews）。
+   * 每预览节点的本地播放状态（change: 2026-10-15-add-film-set-shooting-shot-previews；
+   *  change: 2026-10-28-generic-extension-content-ownership 任务 4.3 通用化）。
    *
-   * 由 canvas-shell/film-set 播放 owner 注入：`progress`/`playing` 只承载**本地**播放投影，
-   * 不是 canonical 数据。卡片状态机（准备中/待更新/失败）也在此声明。缺省即全部 `ready`
-   * 且无播放进度。
+   * 由扩展 adapter 消费：`progress`/`playing` 只承载**本地**播放投影，不是 canonical 数据。
+   * 卡片状态机（准备中/待更新/失败）也在此声明。缺省即全部 `ready` 且无播放进度。
    */
-  shotPreviews?: ReadonlyMap<string, {
-    state?: import("./wire-scene.js").BevyShotPreviewCardState;
+  previewLocalStates?: ReadonlyMap<string, {
+    state?: import("./wire-primitives.js").BevyPreviewCardState;
     progress?: number;
     playing?: boolean;
     diagnostic?: string;
   }>;
   /**
-   * 每镜头的归属线起点投影（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。
+   * 条目锚点投影（任务 4.3）：把 owner 内条目的相机世界姿态经当前观察相机投影为画布 2D 起点。
    *
-   * 由 canvas-shell 注入：把镜头当前相机世界姿态（静态/非活动用 initialCamera，活动动态用
-   * 同一 T 的采样相机）经当前观察相机投影为画布 2D 起点。缺省即不派生归属线（不伪造起点）。
+   * 由宿主注入通用回调；缺省即不派生归属线（不伪造起点）。扩展 adapter 只按 owner/entity
+   * 身份调用，不感知具体相机实现。
    */
-  shotPreviewCameraProjection?: (filmSetNodeId: string, clipId: string) => { x: number; y: number } | null;
+  entityAnchorProjection?: (ownerNodeId: string, entityId: string) => { x: number; y: number } | null;
 };
 
 
-/** 校验并返回本帧使用的主题；非法输入直接抛错（不得部分降级）。 */
-
-/** 校验并返回本帧使用的主题；非法输入直接抛错（不得部分降级）。 */
 /** 校验并返回本帧使用的主题；非法输入直接抛错（不得部分降级）。 */
 export function resolveSceneTheme(input: unknown): AppThemeSnapshot {
   const result = validateAppThemePreset(input ?? defaultAppTheme());
@@ -471,35 +470,6 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         };
       }
     }
-    // 拍摄镜头预览卡片呈现（change: 2026-10-15-add-film-set-shooting-shot-previews，design D2/D8）：
-    // 只读投影源镜头的标题/类型/画幅/时长/状态，不复制第二份权威数据；无归属或源已消失时不绘制。
-    // 旧形态写 `shotPreview`；迁移后的形态是 owner-managed 媒体节点（`managedBy` + `mediaContent`）。
-    const legacyShotOwnership = shotPreviewOwnershipOf(data);
-    const shotOwnership = legacyShotOwnership ?? managedShotPreviewOwnershipOf(data);
-    if (shotOwnership) {
-      const filmSetData = nodeData[shotOwnership.filmSetNodeId] as FilmSetNodeData | undefined;
-      const local = input.shotPreviews?.get(node.id);
-      const ownerNode = canvas.document.nodes.find(entry => entry.id === shotOwnership.filmSetNodeId);
-      const groupMarker = ownerNode?.type === "group" ? readFilmSetGroupMarker(filmSetData) : null;
-      const presentation = groupMarker
-        ? shotPreviewCardPresentationForFilmSetGroup({ groupNodeId: shotOwnership.filmSetNodeId, groupData: filmSetData, clipId: shotOwnership.clipId, state: local?.state, progress: local?.progress, playing: local?.playing, diagnostic: local?.diagnostic })
-        : legacyShotOwnership ? shotPreviewCardPresentation({
-          filmSetNodeId: shotOwnership.filmSetNodeId,
-          previewData: data,
-          filmSetData,
-          state: local?.state,
-          progress: local?.progress,
-          playing: local?.playing,
-          diagnostic: local?.diagnostic
-        }) : null;
-      if (presentation) {
-        rendered.shotPreview = presentation;
-        // 卡片主标题 = 镜头名，次要标记 = 静态/动态类型（design D8）。这些是源镜头的只读投影，
-        // 不在预览节点上复制权威数据。
-        rendered.title = presentation.name;
-        rendered.typeLabel = presentation.kind === "static" ? "静态镜头" : "动态镜头";
-      }
-    }
     return rendered;
   });
 
@@ -592,45 +562,17 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       label: typeof edge.data?.label === "string" ? edge.data.label : ""
     }));
 
-  // 派生拍摄镜头归属线（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）：
-  // 独立于普通边拓扑；起点由注入的相机投影给出，缺失即不派生该线（不伪造起点）。
-  const previewNodeById = new Map(nodes.map((node) => [node.id, node]));
-  const shotPreviewLinks: BevyShotPreviewLink[] = [];
-  if (input.shotPreviewCameraProjection) {
-    for (const node of canvas.document.nodes) {
-      const data = nodeData[node.id];
-      if (hidden.has(node.id)) continue;
-      if (isFilmSetNode(node.type, data)) {
-        shotPreviewLinks.push(...shotPreviewLinksForFilmSet({
-          filmSetNodeId: node.id,
-          data: data as FilmSetNodeData | undefined,
-          previewNodeById: (previewId) => { const node = previewNodeById.get(previewId); return node?.shotPreview?.hidden ? undefined : node; },
-          cameraProjection: (clipId) => input.shotPreviewCameraProjection!(node.id, clipId)
-        }));
-      } else if (node.type === "group" && readFilmSetGroupMarker(data)) {
-        shotPreviewLinks.push(...shotPreviewLinksForFilmSetGroup({
-          groupNodeId: node.id,
-          groupData: data,
-          previewNodeById: (previewId) => { const preview = previewNodeById.get(previewId); return preview?.shotPreview?.hidden ? undefined : preview; },
-          cameraProjection: (clipId) => input.shotPreviewCameraProjection!(node.id, clipId)
-        }));
-      }
-    }
-  }
-
-  // Film-set groups are rendered from source cards and bindings.  The
-  // preparation is deliberately a read projection: unavailable cards remain
-  // represented by diagnostics and never cause the binding to disappear.
-  const filmSetGroups: BevyFilmSetGroupPreparation[] = [];
+  // 受管条目组原语（任务 4.3，原 `filmSetGroups`）：owner 声明条目的材质/变换/可见性与组级
+  // 地面/整体变换。渲染层只按通用几何组合与命中，不读取业务字段。
+  const managedItemGroups: BevyManagedItemGroup[] = [];
   for (const node of canvas.document.nodes) {
     if (hidden.has(node.id) || node.type !== "group" || !readFilmSetGroupMarker(nodeData[node.id])) continue;
     const prepared = prepareFilmSetGroup(canvas, node.id);
     if (!prepared) continue;
-    const diagnosticByBinding = new Map(prepared.diagnostics.map(diagnostic => [diagnostic.bindingId, diagnostic.message]));
+    const diagnosticByItem = new Map(prepared.diagnostics.map(diagnostic => [diagnostic.bindingId, diagnostic.message]));
     const objectIds = new Set((input.modelResources?.get(node.id)?.ops ?? input.modelScenesV2?.get(node.id) ?? []).map(op => op.id));
-    const sceneBindings = activeFilmSetSceneBindings(prepared.marker);
-    for (const binding of sceneBindings) if (objectIds.has(encodeFilmSetPartId(binding.bindingId, "resource-unavailable"))) diagnosticByBinding.set(binding.bindingId, diagnosticByBinding.get(binding.bindingId) ?? "资源准备失败，请检查来源卡片后重试");
-    const bindings: BevyFilmSetGroupBinding[] = sceneBindings.map(binding => {
+    for (const binding of activeFilmSetSceneBindings(prepared.marker)) if (objectIds.has(encodeFilmSetPartId(binding.bindingId, "resource-unavailable"))) diagnosticByItem.set(binding.bindingId, diagnosticByItem.get(binding.bindingId) ?? "资源准备失败，请检查来源卡片后重试");
+    const items: BevyManagedItemGroupItem[] = activeFilmSetSceneBindings(prepared.marker).map(binding => {
       const resolved = prepared.bindings.find(candidate => candidate.bindingId === binding.bindingId);
       const sourcePresentation = projectedNodes.find(candidate => candidate.id === binding.sourceNodeId);
       const sourceData = nodeData[binding.sourceNodeId];
@@ -639,7 +581,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       const width = sourceAsset?.metadata?.width, height = sourceAsset?.metadata?.height;
       const aspectRatio = typeof width === "number" && Number.isFinite(width) && width > 0 && typeof height === "number" && Number.isFinite(height) && height > 0 ? width / height : 1;
       return {
-        bindingId: binding.bindingId,
+        itemId: binding.bindingId,
         sourceNodeId: binding.sourceNodeId,
         kind: binding.kind,
         contentKey: resolved?.contentKey ?? binding.contentKey,
@@ -648,18 +590,56 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         transform: { ...binding.transform },
         visible: binding.visibility,
         ...(binding.kind === "model3d" ? {} : { aspectRatio }),
-        ...(diagnosticByBinding.has(binding.bindingId) ? { diagnostic: diagnosticByBinding.get(binding.bindingId) } : {})
+        ...(diagnosticByItem.has(binding.bindingId) ? { diagnostic: diagnosticByItem.get(binding.bindingId) } : {})
       };
     });
-    filmSetGroups.push({
-      schemaVersion: FILM_SET_GROUP_RENDER_SCHEMA_VERSION,
-      ownerId: node.id,
-      ...(prepared.marker.sceneTransform ? { sceneTransform: { ...prepared.marker.sceneTransform } } : {}),
-      badgeOrigin: { x: absoluteOffset(node).x + (node.width ?? 0) / 2, y: absoluteOffset(node).y + (node.height ?? 0) },
-      bindings,
+    managedItemGroups.push({
+      schemaVersion: MANAGED_ITEM_GROUP_SCHEMA_VERSION,
+      ownerNodeId: node.id,
+      ...(prepared.marker.sceneTransform ? { ownerTransform: { ...prepared.marker.sceneTransform } } : {}),
+      origin: { x: absoluteOffset(node).x + (node.width ?? 0) / 2, y: absoluteOffset(node).y + (node.height ?? 0) },
+      items,
       ...(prepared.marker.ground ? { ground: { ...prepared.marker.ground } } : {}),
-      ...(prepared.marker.activeClip === undefined ? {} : { activeClip: prepared.marker.activeClip })
+      ...(prepared.marker.activeClip === undefined ? {} : { activeItemId: prepared.marker.activeClip })
     });
+  }
+
+  // 扩展呈现原语（任务 4.3）：宿主只调用 owner adapter、校验并去重；不再按业务字段派生。
+  // 未知原语/非法载荷被丢弃，同帧其它节点照常绘制（不整帧失败、不静默画错内容）。
+  const previewCards: BevyPreviewCardPrimitive[] = [];
+  const ownershipLinks: BevyOwnershipLinkPrimitive[] = [];
+  const runFeedback: BevyRunFeedbackPrimitive[] = [];
+  const nodePresentationById = new Map(nodes.map((node) => [node.id, node]));
+  const localStates = input.previewLocalStates ? Object.fromEntries(input.previewLocalStates) : undefined;
+  const presentations: readonly ContentPresentationAdapter[] = (input.content?.implementations() ?? [])
+    .map((contribution) => contribution.presentation)
+    .filter((presentation): presentation is ContentPresentationAdapter => !!presentation);
+  if (presentations.length > 0) {
+    const context = {
+      canvas,
+      ...(localStates ? { localStates } : {}),
+      ...(input.entityAnchorProjection ? { projectEntityAnchor: input.entityAnchorProjection } : {})
+    };
+    for (const presentation of presentations) {
+      let primitives: ReturnType<ContentPresentationAdapter["presentPrimitives"]> = null;
+      try {
+        primitives = presentation.presentPrimitives(context);
+      } catch {
+        // 扩展投射失败只丢失该扩展的呈现，不整帧失败。
+        primitives = null;
+      }
+      if (!primitives || typeof primitives !== "object") continue;
+      mergePreviewCards(previewCards, primitives.previewCards, nodePresentationById, hidden);
+      mergeOwnershipLinks(ownershipLinks, primitives.ownershipLinks, nodePresentationById);
+      mergeRunFeedback(runFeedback, primitives.runFeedback, nodePresentationById);
+    }
+  }
+  // 卡片标题/类型标记来自 owner 投影（渲染层不再猜业务文案）。
+  for (const card of previewCards) {
+    const node = nodePresentationById.get(card.nodeId);
+    if (!node) continue;
+    node.title = card.title;
+    if (card.typeLabel) node.typeLabel = card.typeLabel;
   }
 
   return {
@@ -667,8 +647,10 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     revision: canvas.revision,
     nodes,
     edges,
-    ...(filmSetGroups.length > 0 ? { filmSetGroups } : {}),
-    ...(shotPreviewLinks.length > 0 ? { shotPreviewLinks } : {}),
+    ...(managedItemGroups.length > 0 ? { managedItemGroups } : {}),
+    ...(previewCards.length > 0 ? { previewCards } : {}),
+    ...(ownershipLinks.length > 0 ? { ownershipLinks } : {}),
+    ...(runFeedback.length > 0 ? { runFeedback } : {}),
     selection: {
       nodes: [...(input.selection?.nodes ?? [])].filter(id => !hidden.has(id)),
       edge: input.selection?.edge ?? null
@@ -694,6 +676,91 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       ? { selectionActions: input.selectionActionToolbar }
       : {})
   };
+}
+
+/** 校验版本化载荷信封：扩展 id/schema 版本必须是有界非空字符串；非法即丢弃该原语。 */
+function validPayload(payload: unknown): boolean {
+  if (payload === undefined) return true;
+  if (!payload || typeof payload !== "object") return false;
+  const envelope = payload as { extensionId?: unknown; schemaVersion?: unknown };
+  return typeof envelope.extensionId === "string"
+    && envelope.extensionId.length > 0
+    && envelope.extensionId.length <= 200
+    && typeof envelope.schemaVersion === "string"
+    && envelope.schemaVersion.length > 0
+    && envelope.schemaVersion.length <= 128;
+}
+
+const PREVIEW_STATES = new Set(["preparing", "ready", "stale", "error"]);
+
+/** 合并预览卡片原语：结构校验、隐藏过滤、按 nodeId 去重（先到先得）。 */
+function mergePreviewCards(
+  target: BevyPreviewCardPrimitive[],
+  incoming: readonly BevyPreviewCardPrimitive[] | undefined,
+  nodeById: ReadonlyMap<string, BevyRenderNode>,
+  hidden: ReadonlySet<string>
+): void {
+  if (!incoming) return;
+  const seen = new Set(target.map((card) => card.nodeId));
+  for (const card of incoming) {
+    if (!card || typeof card !== "object") continue;
+    if (typeof card.nodeId !== "string" || !nodeById.has(card.nodeId) || hidden.has(card.nodeId) || seen.has(card.nodeId)) continue;
+    if (typeof card.ownerNodeId !== "string" || card.ownerNodeId.length === 0) continue;
+    if (typeof card.entityId !== "string" || card.entityId.length === 0) continue;
+    if (typeof card.title !== "string" || typeof card.typeLabel !== "string" || typeof card.animated !== "boolean") continue;
+    if (!PREVIEW_STATES.has(card.state)) continue;
+    if (!Number.isFinite(card.aspect) || card.aspect <= 0 || !Number.isFinite(card.duration) || card.duration < 0) continue;
+    if (card.progress !== undefined && (!Number.isFinite(card.progress) || card.progress < 0 || card.progress > 1)) continue;
+    const camera = card.coverCamera;
+    if (!camera || ![camera.azimuth, camera.elevation, camera.distance, ...camera.focusOffset].every((value) => Number.isFinite(value)) || camera.distance <= 0) continue;
+    if (!validPayload(card.payload)) continue;
+    seen.add(card.nodeId);
+    target.push(card);
+  }
+}
+
+/** 合并归属线原语：身份非空、目标存在、按 id 去重。 */
+function mergeOwnershipLinks(
+  target: BevyOwnershipLinkPrimitive[],
+  incoming: readonly BevyOwnershipLinkPrimitive[] | undefined,
+  nodeById: ReadonlyMap<string, BevyRenderNode>
+): void {
+  if (!incoming) return;
+  const seen = new Set(target.map((link) => link.id));
+  for (const link of incoming) {
+    if (!link || typeof link !== "object") continue;
+    if (typeof link.id !== "string" || link.id.length === 0 || seen.has(link.id)) continue;
+    if (typeof link.ownerNodeId !== "string" || !nodeById.has(link.ownerNodeId)) continue;
+    if (!Array.isArray(link.targetNodeIds)) continue;
+    const targets = link.targetNodeIds.filter((id): id is string => typeof id === "string" && nodeById.has(id) && id !== link.ownerNodeId);
+    if (targets.length === 0) continue;
+    if (link.start && (!Number.isFinite(link.start.x) || !Number.isFinite(link.start.y))) continue;
+    if (link.anchor && !link.anchor.every((value) => Number.isFinite(value))) continue;
+    if (!validPayload(link.payload)) continue;
+    seen.add(link.id);
+    target.push({ ...link, targetNodeIds: targets });
+  }
+}
+
+/** 合并运行反馈原语：按 nodeId 去重；阶段/文案码必须是有界非空字符串。 */
+function mergeRunFeedback(
+  target: BevyRunFeedbackPrimitive[],
+  incoming: readonly BevyRunFeedbackPrimitive[] | undefined,
+  nodeById: ReadonlyMap<string, BevyRenderNode>
+): void {
+  if (!incoming) return;
+  const seen = new Set(target.map((feedback) => feedback.nodeId));
+  for (const feedback of incoming) {
+    if (!feedback || typeof feedback !== "object") continue;
+    if (typeof feedback.nodeId !== "string" || !nodeById.has(feedback.nodeId) || seen.has(feedback.nodeId)) continue;
+    if (typeof feedback.active !== "boolean" || typeof feedback.phase !== "string" || feedback.phase.length === 0 || feedback.phase.length > 64) continue;
+    if (typeof feedback.labelCode !== "string" || feedback.labelCode.length === 0 || feedback.labelCode.length > 64) continue;
+    if (feedback.operationKey !== undefined && (typeof feedback.operationKey !== "string" || feedback.operationKey.length > 256)) continue;
+    if (feedback.progress !== undefined && (!Number.isFinite(feedback.progress) || feedback.progress < 0 || feedback.progress > 1)) continue;
+    if (!validPayload(feedback.payload)) continue;
+    seen.add(feedback.nodeId);
+    target.push(feedback);
+  }
 }
 
 /**
@@ -777,9 +844,18 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
   for (const edge of scene.edges) {
     parts.push(`e=${edge.id},${edge.source},${edge.target},${edge.label}`);
   }
-  // 派生归属线（change: 2026-10-15-add-film-set-shooting-shot-previews）：起点/目标变化即重绘。
-  for (const link of scene.shotPreviewLinks ?? []) {
-    parts.push(`shot-link=${link.id},${link.ownerNodeId},${link.previewNodeId},${link.clipId},${link.start.x},${link.start.y}`);
+  // 通用呈现原语（任务 4.3）：内容变化即重绘；载荷只比较版本信封，不深入业务数据。
+  for (const card of scene.previewCards ?? []) {
+    parts.push(`card=${card.nodeId},${card.ownerNodeId},${card.entityId},${card.hidden ? 1 : 0},${card.title},${card.typeLabel},${card.animated ? 1 : 0},${card.aspect},${card.duration},${card.state},${card.progress ?? ""},${card.playing === undefined ? "" : card.playing ? 1 : 0},${card.diagnostic ?? ""},${card.backdrop ?? ""},${card.payload ? `${card.payload.extensionId}@${card.payload.schemaVersion}` : ""}`);
+  }
+  for (const link of scene.ownershipLinks ?? []) {
+    parts.push(`own=${link.id},${link.ownerNodeId},${link.start ? `${link.start.x},${link.start.y}` : ""},${link.anchor?.join(",") ?? ""},${link.targetNodeIds.join(";")},${link.targetItemIds ? stablePresentationStringify(link.targetItemIds) : ""}`);
+  }
+  for (const feedback of scene.runFeedback ?? []) {
+    parts.push(`run=${feedback.nodeId},${feedback.active ? 1 : 0},${feedback.phase},${feedback.labelCode},${feedback.operationKey ?? ""},${feedback.source ?? ""},${feedback.progress ?? ""},${feedback.reduceMotion ? 1 : 0}`);
+  }
+  for (const group of scene.managedItemGroups ?? []) {
+    parts.push(`items=${group.ownerNodeId},${group.activeItemId ?? ""},${group.ground ? `${group.ground.width},${group.ground.depth},${group.ground.color ?? ""}` : ""},${group.items.map((item) => `${item.itemId}:${item.sourceNodeId}:${item.kind}:${item.contentKey}:${item.resourceKey ?? ""}:${item.signature ?? ""}:${item.visible ? 1 : 0}:${item.transform.x},${item.transform.y},${item.transform.z},${item.transform.yaw},${item.transform.scale}`).join("|")}`);
   }
   // 活动播放投影的 viewMode/目标卡片参与指纹，使 hover 目标切换触发一次 set_scene。
   if (scene.animationPlayback) {

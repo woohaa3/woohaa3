@@ -113,7 +113,7 @@ describe("画布 Mod+C（change: fix-desktop-native-menu-clipboard-shortcuts）"
     controller.dispose(); service.dispose(); nodeSelectionStore.reset();
   });
 
-  it("copies a whole film-set closure synchronously without freezing its managed media", () => {
+  it("refuses to copy a legacy composite film-set closure", () => {
     selectedNode();
     let canvas: ServerCanvas = canvasWith([{ id: "n1", x: 0, y: 0 }]);
     canvas.document.nodes[0]!.type = "composite-asset";
@@ -125,10 +125,8 @@ describe("画布 Mod+C（change: fix-desktop-native-menu-clipboard-shortcuts）"
     const { dom, controller } = mountCopyTarget(canvas);
     const data = clipboardData();
     dom.fire("copy", { target: dom.canvas, clipboardData: data });
-    const copied = parseCanvasCopyPayload(data.getData("text/plain"));
-    const media = copied?.nodes.find(node => node.id !== "n1");
-    expect(media?.type).toBe("video");
-    expect(copied?.nodeData[media!.id]).toMatchObject({ managedBy: { ownerNodeId: "n1" }, mediaContent: { providerId: "film-set.shot" } });
+    expect(data.getData("text/plain")).toBe("");
+    expect(dom.target[MEMORY_CLIPBOARD_KEY]).toBeUndefined();
     controller.dispose(); nodeSelectionStore.reset();
   });
   it("DOM copy 事件把画布载荷写入 clipboardData 并认领事件", () => {
