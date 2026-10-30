@@ -724,4 +724,58 @@ describe("缺省启停（配置文件 + manifest defaultEnabled）", () => {
     expect(second.plane.status(METADATA.extensionId)).toMatchObject({ desiredEnabled: false, actualState: "disabled" });
     await second.plane.dispose();
   });
+
+  it.each(["manifest", "file"])("%s 启用的无数据库配置实例保留路由，提交配置后释放基线版本", async (source) => {
+    let disposals = 0;
+    const toggles = memoryToggles(source === "file" ? { [METADATA.extensionId]: true } : {});
+    const { plane, host, store } = makePlane({
+      metadata: [{ ...METADATA, defaultEnabled: source === "manifest" }],
+      toggles: toggles.store,
+      definitions: [{
+        extensionId: METADATA.extensionId,
+        activate: (h) => {
+          h.registerCapability({ id: "sample.action", value: { ok: true } });
+          h.registerHandler({ route: "sample/connections", auth: "public", handle: () => ({ body: { connections: [] } }) });
+          h.registerRawHttpHandler?.({ route: "connections", method: "GET", auth: "public", purpose: "read", handle: async () => undefined });
+          return { dispose: () => { disposals += 1; } };
+        }
+      }]
+    });
+    const readConnections = () => host.dispatch("sample/connections", { body: null, context: { authLevel: "public" } });
+    await plane.reconcile();
+    expect(store.get(METADATA.extensionId)).toBeUndefined();
+    expect(host.activeVersions(METADATA.extensionId)).toEqual([0]);
+    expect(host.resolveCapability("sample.action")).toEqual({ ok: true });
+    expect(host.resolvePublicRoute(METADATA.extensionId, "connections", "GET")).toEqual({ owned: true });
+    expect((await readConnections()).body).toEqual({ connections: [] });
+    await plane.reconcile();
+    expect((await readConnections()).body).toEqual({ connections: [] });
+    expect(host.resolvePublicRoute(METADATA.extensionId, "connections", "GET")).toEqual({ owned: true });
+    expect(disposals).toBe(0);
+
+    const written = await plane.write({
+      extensionId: METADATA.extensionId, expectedRevision: store.revision(), enabled: true, values: {}, secretRefs: [], actor: "admin"
+    });
+    expect(written.ok).toBe(true);
+    expect(host.activeVersions(METADATA.extensionId)).toEqual([1]);
+    expect((await readConnections()).body).toEqual({ connections: [] });
+    expect(host.resolvePublicRoute(METADATA.extensionId, "connections", "GET")).toEqual({ owned: true });
+    expect(disposals).toBe(1);
+    await plane.dispose();
+    await host.dispose();
+    expect(disposals).toBe(2);
+  });
+
+  it("配置文件停用无数据库配置的基线实例时正常释放路由", async () => {
+    const toggles = memoryToggles();
+    const { plane, host } = makePlane({ metadata: [{ ...METADATA, defaultEnabled: true }], toggles: toggles.store });
+    await plane.reconcile();
+    expect(host.resolveCapability("sample.action")).toEqual({ ok: true });
+    await toggles.store.set(METADATA.extensionId, false);
+    await plane.reconcile();
+    expect(host.activeVersions(METADATA.extensionId)).toEqual([]);
+    expect(host.resolveCapability("sample.action")).toBeUndefined();
+    expect(plane.status(METADATA.extensionId)).toMatchObject({ desiredEnabled: false, actualState: "disabled" });
+    await plane.dispose();
+  });
 });
