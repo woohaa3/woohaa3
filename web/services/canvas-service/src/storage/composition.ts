@@ -230,6 +230,7 @@ export type CanvasStorageComposition = {
 };
 
 export type ComposeCanvasStorageOptions = {
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   managedLifecycles?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   env: Env;
   /**
@@ -298,6 +299,7 @@ export async function composeCanvasStorage(
   const repository = options.repository ?? await createRepository(config);
 
   const service = new CanvasApplicationService({
+    content: options.content,
     lifecycle: options.managedLifecycles,
     repository,
     mediaStorage: options.mediaStorage,

@@ -117,6 +117,7 @@ export type EditPrecondition =
  * 白名单编辑操作。刻意复用既有 node/edge 结构语义，不含 asset/job/嵌套 edit.apply。
  */
 export type EditOperation =
+  | { kind: "extension.edit"; extensionId: string; nodeId: string; op: unknown }
   | {
       kind: "node-add";
       node: {

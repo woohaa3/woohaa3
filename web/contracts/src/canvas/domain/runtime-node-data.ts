@@ -13,6 +13,7 @@
  *
  * 新增字段必须同时更新本 allowlist、spec 与 round-trip 测试（见 tasks 6.1）。
  */
+import { sanitizeContentNodeData } from "../content-node-data.js";
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import type { CanvasNodeData } from "./types";
 import type { Woohaa3CanvasJsonObject } from "./core";
@@ -153,7 +154,9 @@ export function sanitizeRuntimeNodeConfigPatch(input: unknown, context?: { conte
  */
 export function sanitizeNodeDataForClipboard(input: unknown, context?: { content?: ContentContributionResolver }): CanvasNodeData {
   observeContentResolver(context?.content);
-  const source = isRecord(input) ? input : {};
+  const original = isRecord(input) ? input : {};
+  const owned = context?.content && Object.prototype.hasOwnProperty.call(original, "extensionId");
+  const source = owned ? sanitizeContentNodeData(original as CanvasNodeData, context!.content!) : original;
   const value: Woohaa3CanvasJsonObject = {};
   for (const [key, raw] of Object.entries(source)) {
     if (NODE_DATA_TRANSIENT_SET.has(key)) continue;
@@ -179,7 +182,7 @@ export function sanitizeNodeDataForClipboard(input: unknown, context?: { content
     }
     // 自包含 3D 节点：复制时携带完整自身定义（模型 + 运动 + 镜头 + 时间线 + 片场内容），
     // 不依赖来源节点（change: 2026-10-05-bind-model-animation-to-shots）。
-    if (key === "modelContentVersion" || key === "motionBasedOnModelVersion" || key === "initialCamera" || key === "timeline" || key === "origin" || key === "filmSetContent") {
+    if (!owned && (key === "modelContentVersion" || key === "motionBasedOnModelVersion" || key === "initialCamera" || key === "timeline" || key === "origin" || key === "filmSetContent")) {
       const animation = decodeFilmSetNodeData(source);
       if (animation.ok) {
         const fields = filmSetNodeDataFields(animation.value);

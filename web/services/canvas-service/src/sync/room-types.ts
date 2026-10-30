@@ -86,6 +86,7 @@ export type CanvasRoomState =
   | "quarantined";
 
 export type CanvasRoomOptions = {
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   canvasId: string;
   repository: YjsDocumentRepository;

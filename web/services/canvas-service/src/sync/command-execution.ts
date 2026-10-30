@@ -20,6 +20,7 @@ import { validateCanvasGroupChange } from "@woohaa3/contracts";
 
 /** room 命令管线所需的最小受控上下文；由 `CanvasRoom` 提供（唯一 doc/revision owner）。 */
 export type RoomExecutionHost = {
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   readonly canvasId: string;
   readonly state: CanvasRoomState;
@@ -180,6 +181,7 @@ export async function executeCommand(
     mediaStorage: host.mediaStorage,
     now: host.nowIso(),
     verifyAssets: host.verifyAssets,
+    content: host.content,
     lifecycle: host.lifecycle
   });
   if (!outcome.ok) {

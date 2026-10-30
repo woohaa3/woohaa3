@@ -56,6 +56,7 @@ export function applyCanvasCommands(
   observeContentResolver(options.content);
   const now = options.now ?? new Date().toISOString();
   const work = toWorkingState(canvas);
+  work.content = options.content;
   const positionedNodeIds = explicitNodePositions(commands);
 
   for (const [index, command] of commands.entries()) {
@@ -135,12 +136,12 @@ function applyExtensionCommand(
   if (!owner || !owner.kinds.includes(command.kind)) return reject("content-owner-unavailable", command.extensionId);
   const envelope = { extensionId: command.extensionId, nodeId: command.nodeId, kind: command.kind, payload: command.payload };
   try {
-    const decoded = owner.decode(envelope);
+    const decoded = owner.decode(structuredClone(envelope));
     if (!decoded.ok) return reject("content-command-rejected", decoded.code);
-    const current = snapshot(canvas, work);
-    if (!owner.satisfied(decoded.value, current)) return reject("content-command-rejected", "content-command-unsatisfied");
+    const current = structuredClone(snapshot(canvas, work));
     const applied = owner.apply(decoded.value, current);
     if (!applied.ok) return reject("content-command-rejected", applied.code);
+    if (!owner.satisfied(structuredClone(decoded.value), structuredClone(applied.canvas))) return reject("content-command-rejected", "content-command-unsatisfied");
     work.title = applied.canvas.title ?? "";
     work.nodes = applied.canvas.document.nodes.map((node) => ({ ...node, data: {} }));
     work.edges = applied.canvas.document.edges;

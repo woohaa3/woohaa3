@@ -12,6 +12,7 @@ import type { YjsDocumentRepository } from "./yjs-repository.js";
 import { CanvasRoom, type RoomBroadcast } from "./room.js";
 
 export type CanvasRoomRegistryOptions = {
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   repository: YjsDocumentRepository;
   mediaStorage?: MediaStorage;
@@ -77,8 +78,10 @@ export class CanvasRoomRegistry {
   private readonly seedFromUpstream: CanvasRoomRegistryOptions["seedFromUpstream"];
   private readonly roomDetachers = new Map<string, () => void>();
 
+  private readonly content: import("@woohaa3/contracts").ContentContributionResolver | undefined;
   private readonly lifecycle: import("@woohaa3/contracts").ManagedNodeLifecycleResolver | undefined;
   constructor(options: CanvasRoomRegistryOptions) {
+    this.content = options.content;
     this.lifecycle = options.lifecycle;
     this.repository = options.repository;
     this.mediaStorage = options.mediaStorage;
@@ -197,7 +200,8 @@ export class CanvasRoomRegistry {
         now: this.now,
         broadcast: this.broadcast,
         verifyAssets: this.verifyAssets,
-      lifecycle: this.lifecycle,
+        content: this.content,
+        lifecycle: this.lifecycle,
         ...(this.bootstrap ? { bootstrap: () => this.bootstrap!(canvasId) } : {}),
         ...(this.seedFromUpstream ? { seedFromUpstream: () => this.seedFromUpstream!(canvasId) } : {}),
         ...(this.generateRoomEpoch ? { generateRoomEpoch: this.generateRoomEpoch } : {}),

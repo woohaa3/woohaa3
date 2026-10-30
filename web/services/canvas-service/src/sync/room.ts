@@ -75,8 +75,10 @@ export class CanvasRoom {
   /** 命令序列化：同 room 的命令排队执行。 */
   private queue: Promise<unknown> = Promise.resolve();
 
+  private readonly content: import("@woohaa3/contracts").ContentContributionResolver | undefined;
   private readonly lifecycle: import("@woohaa3/contracts").ManagedNodeLifecycleResolver | undefined;
   constructor(options: CanvasRoomOptions) {
+    this.content = options.content;
     this.lifecycle = options.lifecycle;
     this.canvasId = options.canvasId;
     this.repository = options.repository;
@@ -380,6 +382,7 @@ export class CanvasRoom {
       repository: this.repository,
       mediaStorage: this.mediaStorage,
       verifyAssets: this.verifyAssets,
+      content: this.content,
       lifecycle: this.lifecycle,
       get storageSeq() {
         return self.storageSeq;

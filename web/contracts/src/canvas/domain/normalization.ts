@@ -1,3 +1,4 @@
+import { normalizeContentNodeData } from "../content-node-data.js";
 import { sanitizeWoohaa3CanvasNodeData,
   sanitizeSerializedParentIds,
   type Woohaa3CanvasEdge,
@@ -227,19 +228,15 @@ function applyFilmSetContentSanitizer(
   content?: ContentContributionResolver
 ): void {
   for (const [nodeId, data] of Object.entries(nodeData)) {
-    if (!data || data[FILM_SET_CONTENT_FIELD] === undefined) continue;
+    if (!data) continue;
     const type = nodeTypes.get(nodeId);
-    // 未知/不可用业务的合法原数据必须保留（不删引用、不改写）。
-    if (isCompositeAssetNodeType(type) && readCompositeAssetExtensionId(data) === null) continue;
-    const extensionId = readCompositeAssetExtensionId(data);
-    const codec = extensionId ? content?.resolve(extensionId)?.nodeData : undefined;
-    if (codec) {
-      const normalized = codec.normalize(data);
-      if (typeof normalized === "object" && normalized !== null && !Array.isArray(normalized)) {
-        nodeData[nodeId] = normalized as CanvasNodeData;
-      }
+    if (content && isCompositeAssetNodeType(type)) {
+      nodeData[nodeId] = normalizeContentNodeData(data, content);
       continue;
     }
+    if (data[FILM_SET_CONTENT_FIELD] === undefined) continue;
+    // 未知/不可用业务的合法原数据必须保留（不删引用、不改写）。
+    if (isCompositeAssetNodeType(type) && readCompositeAssetExtensionId(data) === null) continue;
     if (!isFilmSetNode(type, data)) {
       delete data[FILM_SET_CONTENT_FIELD];
       continue;

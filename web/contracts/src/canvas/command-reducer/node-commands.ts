@@ -1,3 +1,4 @@
+import { applyContentNodeDataPatch, replaceContentNodeData } from "../content-node-data.js";
 /**
  * 命令 reducer 的节点类命令（add/update/remove/nodeData.patch）与 group parent 校验。
  *
@@ -263,6 +264,14 @@ export function addNode(
   if (command.nodeData) {
     const intentRejection = validateVideoEditIntentsPatch(command.nodeData);
     if (intentRejection) return intentRejection;
+  }
+  if (nextNode.type === "composite-asset" && work.content) {
+    const owned = applyContentNodeDataPatch({}, command.nodeData ?? {}, work.content);
+    if (!owned.ok) return reject(owned.code, owned.message);
+    work.nodeData[nextNode.id] = owned.value;
+    return OK;
+  }
+  if (command.nodeData) {
     const value = { ...command.nodeData };
     work.nodeData[nextNode.id] = value;
     // 文件模型（GLB）在创建时就要走与 patch 相同的权威校验与内容身份归一化：导入/粘贴/恢复
@@ -433,6 +442,9 @@ export function patchNodeData(
     || hasShotPreviewOwnership(work.nodeData[nodeId])) {
     return reject("invalid-shot-preview", "拍摄镜头预览归属不能通过普通数据写入修改");
   }
+  if (value === null && node?.type === "composite-asset" && work.content) {
+    return reject("content-owner-unavailable", "content-owner-unavailable");
+  }
   if (value === null) {
     delete work.nodeData[nodeId];
     return OK;
@@ -457,6 +469,12 @@ export function patchNodeData(
   if (appearanceRejection) return appearanceRejection;
   const filmSetGroupRejection = validateFilmSetGroupDataPatch(work, nodeId, value);
   if (filmSetGroupRejection) return filmSetGroupRejection;
+  if (node?.type === "composite-asset" && work.content) {
+    const owned = applyContentNodeDataPatch(work.nodeData[nodeId] ?? {}, value, work.content);
+    if (!owned.ok) return reject(owned.code, owned.message);
+    work.nodeData[nodeId] = owned.value;
+    return OK;
+  }
   const nodeRejection = validateSelfContained3DNodePatch(work, nodeId, value);
   if (nodeRejection) return nodeRejection;
   const merged = { ...(work.nodeData[nodeId] ?? {}), ...value };
@@ -499,6 +517,10 @@ export function unsetNodeDataFields(
       changed = true;
     }
   }
-  if (changed) work.nodeData[nodeId] = next;
+  if (changed && work.content && work.nodes.find(node => node.id === nodeId)?.type === "composite-asset") {
+    const owned = replaceContentNodeData(data, next, work.content);
+    if (!owned.ok) return reject(owned.code, owned.message);
+    work.nodeData[nodeId] = owned.value;
+  } else if (changed) work.nodeData[nodeId] = next;
   return OK;
 }

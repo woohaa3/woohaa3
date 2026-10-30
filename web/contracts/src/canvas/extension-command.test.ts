@@ -63,3 +63,21 @@ describe("extension.command", () => {
     expect(batch.ok).toBe(true);
   });
 });
+it("contains mutations and errors from extension command callbacks", () => {
+  const canvas = createEmptyWoohaa3ServerCanvas("canvas", "2026-10-30T00:00:00.000Z");
+  canvas.document.nodes.push({ id: "n", type: "image", position: { x: 0, y: 0 } });
+  canvas.nodeData.n = { nested: { value: "original" } };
+  const before = JSON.stringify(canvas);
+  const content = new ContentContributionRegistry();
+  content.register({ extensionId: "test.mutation", commands: {
+    kinds: ["break"], decode: command => ({ ok: true, value: command.payload }), satisfied: () => true,
+    apply: (_value, current) => {
+      (current.nodeData.n!.nested as { value: string }).value = "mutated";
+      throw Error("private callback detail");
+    }
+  } });
+  const result = applyCanvasCommands(canvas, [{ type: "extension.command", extensionId: "test.mutation", kind: "break", payload: null }], { content });
+  expect(result).toMatchObject({ ok: false, rejection: { code: "content-codec-failed" } });
+  expect(JSON.stringify(result)).not.toContain("private");
+  expect(JSON.stringify(canvas)).toBe(before);
+});
