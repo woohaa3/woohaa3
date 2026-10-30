@@ -386,11 +386,22 @@ export async function buildExtensionBrowser(options = {}) {
     );
   }
 
-  // 生成 staging 源码。browser-dist 是 builder 独占产物目录：每次构建先清空，避免
-  // 旧 entry/chunk hash 残留（manifest 与 artifactId 只反映本次输入，复现性要求目录无陈旧文件）。
+  // 生成 staging 源码。staging 目录每次重建（它是构建过程的临时工作区，与本目录无关）。
   await fs.rm(targetStaging, { recursive: true, force: true, maxRetries: 6, retryDelay: 200 });
   await fs.mkdir(targetStaging, { recursive: true });
-  await fs.rm(targetOut, { recursive: true, force: true, maxRetries: 6, retryDelay: 200 });
+  /*
+   * **不要清空 `browser-dist`**（踩过，表现是「改一下扩展代码，四喜整块消失、只剩原生画布」）：
+   *
+   * 宿主在内存里登记的发布目录是 `URL → browser-dist/<file>` 的绝对路径映射，且**只增不删**。
+   * 构建期间如果先 `rm -rf` 再把文件写回来，那么从删空到新 manifest 落盘这整段时间里，
+   * 旧 release 指向的每个文件都是 404/500：正在加载的页面拿不到入口，扩展加载失败、
+   * 整块界面不渲染。手动在宿主进程外跑一次构建就能稳定复现。
+   *
+   * 改成就地增量写：`entry-<hash>.js` / `chunks/<name>-<hash>.js` 都是**内容寻址**的，
+   * 同名必然同内容，旧文件不会覆盖新文件，也不会污染 artifactId（它由本次的 fileRecords
+   * 计算，与目录里残留什么无关）。于是新文件就位前，旧入口始终可读。
+   * 陈旧文件由下面的 `pruneStaleOutputs` 在宽限期之后清理，避免长期堆积。
+   */
   await fs.mkdir(targetOut, { recursive: true });
   // 先求值纯 metadata（唯一身份来源），薄入口内联其值，避免入口静态依赖 metadata 模块。
   const metadataValue = await evaluateMetadata(metadataSource, targetStaging);
@@ -589,10 +600,25 @@ export async function buildExtensionBrowser(options = {}) {
       if (file.isDirectory()) { await publishAssets(path.join(folder, file.name), `${prefix}${file.name}/`); continue; }
       if (!file.isFile()) throw new Error(`Invalid extension public asset: ${relative}`);
       const abs = path.join(targetOut, relative);
-      if (existsSync(abs)) throw new Error(`Extension public asset collision: ${relative}`);
       const bytes = await fs.readFile(path.join(folder, file.name));
-      await fs.mkdir(path.dirname(abs), { recursive: true });
-      await fs.writeFile(abs, bytes);
+      /*
+       * `public/` 资源**不走内容寻址**：产物名沿用源路径（`assets/editor/app.js`），所以
+       * 「同名、内容变了」是正常的重新构建，必须覆盖。不清空产物目录之后这条尤其重要
+       *（清空时 existsSync 恒为 false，这个检查其实是死代码）。
+       *
+       * 代价：旧 release 的 artifactId 指向同一磁盘路径，会读到新内容。这比整块 404 好——
+       * 宿主指针切到新 release 之前，旧 release 至少仍然可用。
+       */
+      if (existsSync(abs)) {
+        const existing = await fs.readFile(abs);
+        if (!existing.equals(bytes)) {
+          await fs.writeFile(abs, bytes);
+          // 覆盖让 mtime 变新，宽限期清理因此不会误删。
+        }
+      } else {
+        await fs.mkdir(path.dirname(abs), { recursive: true });
+        await fs.writeFile(abs, bytes);
+      }
       fileRecords.push({ relative, abs, bytes: bytes.length, gzipBytes: gzipSync(bytes).length,
         sha256: sha256Hex(bytes), kind: "asset" });
     }
@@ -673,8 +699,55 @@ export async function buildExtensionBrowser(options = {}) {
   await fs.writeFile(path.join(targetOut, "metadata.json"), JSON.stringify(metadataValue, null, 2), "utf8");
   await fs.writeFile(path.join(targetOut, "artifact-manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
   await fs.rm(targetStaging, { recursive: true, force: true, maxRetries: 6, retryDelay: 200 });
+  // manifest 落盘之后才能清理陈旧产物（见上方「不要清空 browser-dist」）。
+  await pruneStaleOutputs(targetOut, new Set(fileRecords.map((record) => record.relative)));
 
   return { artifactId, entry: entryRelative, styles, manifest, outDir: targetOut };
+}
+
+/**
+ * 清理 `browser-dist` 里本次构建不再产出的文件。
+ *
+ * 只删**足够旧**的：宿主内存里的发布目录只增不删，仍可能被上一版 release 指向，而它要等
+ * 宿主重启才重扫。所以留一个宽限期，让正在跑的宿主有时间把指针切到新 release；
+ * 过期文件在下次构建时才会被清掉。
+ *
+ * 只处理两种内容寻址的产物（`entry-<hash>.*` 与 `chunks/`）与 `assets/`；`metadata.json`
+ * 与 `artifact-manifest.json` 是固定名，每次覆盖写，不参与清理。
+ */
+async function pruneStaleOutputs(outDir, keep) {
+  const graceMs = Number(process.env.WOOHAA_EXTENSION_PRUNE_GRACE_MS ?? 10 * 60_000);
+  const cutoff = Date.now() - graceMs;
+  const walk = async (relative) => {
+    const absolute = path.join(outDir, relative);
+    let entries;
+    try { entries = await fs.readdir(absolute, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const childRelative = relative.length > 0 ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) { await walk(childRelative); continue; }
+      if (!entry.isFile() || keep.has(childRelative)) continue;
+      if (!/^(entry-|chunks\/|assets\/)/.test(childRelative)) continue;
+      try {
+        const stat = await fs.stat(path.join(outDir, childRelative));
+        if (stat.mtimeMs < cutoff) await fs.rm(path.join(outDir, childRelative), { force: true });
+      } catch {
+        /* 删不掉就留给下次构建；陈旧文件不影响正确性 */
+      }
+    }
+  };
+  for (const root of ["chunks", "assets"]) await walk(root);
+  let top;
+  try { top = await fs.readdir(outDir, { withFileTypes: true }); } catch { return; }
+  for (const entry of top) {
+    if (!entry.isFile() || !entry.name.startsWith("entry-")) continue;
+    if (keep.has(entry.name)) continue;
+    try {
+      const stat = await fs.stat(path.join(outDir, entry.name));
+      if (stat.mtimeMs < cutoff) await fs.rm(path.join(outDir, entry.name), { force: true });
+    } catch {
+      /* 同上 */
+    }
+  }
 }
 
 /** 用 esbuild 单独打包 metadata 并动态 import 求值（不触碰实现）。 */
