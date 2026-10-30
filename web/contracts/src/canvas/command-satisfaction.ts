@@ -45,7 +45,7 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
       const decoded = decodeEditApplyCommand(command);
       if (!decoded) return false;
       // 整批后置条件：所有内部操作的效果都必须可观察，才算这次受保护编辑已生效。
-      return decoded.operations.every((operation) => isEditOperationSatisfied(canvas, operation));
+      return decoded.operations.every((operation) => isEditOperationSatisfied(canvas, operation, content));
     }
     case "canvas.setTitle":
       return (canvas.title ?? "") === command.title;
@@ -128,8 +128,8 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
       const owner = content?.resolve(command.extensionId)?.commands;
       if (!owner || !owner.kinds.includes(command.kind)) return false;
       try {
-        const decoded = owner.decode({ extensionId: command.extensionId, nodeId: command.nodeId, kind: command.kind, payload: command.payload });
-        return decoded.ok && owner.satisfied(decoded.value, canvas);
+        const decoded = owner.decode(structuredClone({ extensionId: command.extensionId, nodeId: command.nodeId, kind: command.kind, payload: command.payload }));
+        return decoded.ok && owner.satisfied(structuredClone(decoded.value), structuredClone(canvas));
       } catch {
         return false;
       }
@@ -152,8 +152,19 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
   }
 }
 
-function isEditOperationSatisfied(canvas: ServerCanvas, operation: EditOperation): boolean {
+function isEditOperationSatisfied(canvas: ServerCanvas, operation: EditOperation, content?: ContentContributionResolver): boolean {
   switch (operation.kind) {
+    case "extension.edit": {
+      const node = findNode(canvas, operation.nodeId);
+      if (!node || (node.type === "composite-asset" && canvas.nodeData[operation.nodeId]?.extensionId !== operation.extensionId)) return false;
+      const expand = content?.resolve(operation.extensionId)?.edit?.expand;
+      if (!expand) return false;
+      try {
+        const result = expand({ nodeId: operation.nodeId, op: structuredClone(operation.op) });
+        const fragment = decodeEditApplyCommand({ ...(result && typeof result === "object" ? result : {}), type: "edit.apply" });
+        return !!fragment && fragment.operations.every(entry => entry.kind !== "extension.edit" && isEditOperationSatisfied(canvas, entry, content));
+      } catch { return false; }
+    }
     case "node-add": {
       const node = findNode(canvas, operation.node.id);
       if (!node) return false;

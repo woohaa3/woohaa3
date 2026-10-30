@@ -46,6 +46,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isJsonPayload(value: unknown, ancestors = new Set<object>(), depth = 0): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "object" || depth > 64 || ancestors.has(value)) return false;
+  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) return false;
+  ancestors.add(value);
+  const valid = Object.values(value).every(entry => isJsonPayload(entry, ancestors, depth + 1));
+  ancestors.delete(value);
+  return valid;
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -183,6 +194,9 @@ function decodePrecondition(value: unknown): EditPrecondition | null {
 function decodeOperation(value: unknown): EditOperation | null {
   if (!isRecord(value)) return null;
   switch (value.kind) {
+    case "extension.edit":
+      return isNonEmptyString(value.extensionId) && isNonEmptyString(value.nodeId) && Object.prototype.hasOwnProperty.call(value, "op") && isJsonPayload(value.op)
+        ? { kind: "extension.edit", extensionId: value.extensionId, nodeId: value.nodeId, op: value.op } : null;
     case "node-add": {
       const node = value.node;
       if (!isRecord(node)) return null;

@@ -60,6 +60,7 @@ export type ApplyCanvasCommandsResult =
 
 /** 可变工作副本；命令逐个作用于它，最后一次性写回规范聚合。 */
 export type WorkingState = {
+  content?: import("../content-contribution.js").ContentContributionResolver;
   title: string;
   nodes: Woohaa3CanvasNode[];
   edges: Woohaa3CanvasEdge[];

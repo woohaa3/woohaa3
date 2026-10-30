@@ -147,6 +147,8 @@ function isBrowserOffline(): boolean {
 
 export type CreateCanvasSessionOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
+  getContent?: () => import("@woohaa3/contracts").ContentContributionResolver | undefined;
+  subscribeContent?: (listener: () => void) => () => void;
   canvasId?: string;
   /** Canvas 远端 adapter；会话在其上维护投影与写入门禁。 */
   remote: CanvasRemoteService;
@@ -335,7 +337,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       durationMs: elapsedMs(started), ...(errorCode ? { errorCode } : {}) });
   };
   /** 会话内 working projection：canonical + 有序 pending batches，仅内存。 */
-  const projection = new WorkingProjectionStore(options.lifecycle);
+  const projection = new WorkingProjectionStore(options.lifecycle, options.getContent);
   /**
    * 规范投影复用缓存（change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 8.1）。
    *
@@ -757,6 +759,12 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   };
 
   await attach();
+  let stopContent = options.subscribeContent?.(() => {
+    if (disposed) return;
+    projection.refreshContent();
+    woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
+    publish({ remote: { ...status.remote, pendingCount: projection.pendingBatches.length } });
+  });
   const session: CanvasSession = {
     getStatus: () => status,
     subscribe: (listener) => {
@@ -853,6 +861,8 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       settleSync("cancelled");
       settleOpen("cancelled");
       disposed = true;
+      stopContent?.();
+      stopContent = undefined;
       detach();
       listeners.clear();
       void database.close();

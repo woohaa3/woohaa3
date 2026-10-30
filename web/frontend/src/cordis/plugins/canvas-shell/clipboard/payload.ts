@@ -83,7 +83,8 @@ export type CanvasCopyPayload = {
  */
 export function buildCanvasCopyPayload(
   canvas: ServerCanvas,
-  selectedNodeIds: readonly string[]
+  selectedNodeIds: readonly string[],
+  options: { content?: import("@woohaa3/contracts").ContentContributionResolver } = {}
 ): CanvasCopyPayload | null {
   const nodes = canvas.document.nodes;
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -141,7 +142,9 @@ export function buildCanvasCopyPayload(
   const nodeTypeById = new Map(nodes.map((node) => [node.id, node.type]));
   for (const id of [...included].sort()) {
     const raw = rawNodeData[id];
-    const cleaned = sanitizeNodeDataForClipboard(raw ?? {});
+    let cleaned: ReturnType<typeof sanitizeNodeDataForClipboard>;
+    try { cleaned = sanitizeNodeDataForClipboard(raw ?? {}, { content: options.content }); }
+    catch { return null; }
     // A standalone provider-backed media copy is a frozen ordinary node. Keep
     // the source reference for the async snapshot path, but never paste the
     // extension lifecycle lock into another canvas.

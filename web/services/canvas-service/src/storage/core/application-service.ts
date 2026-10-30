@@ -42,6 +42,7 @@ export const DEFAULT_CANVAS_STORAGE_LIMITS: CanvasStorageLimits = {
 };
 
 export type CanvasApplicationServiceOptions = {
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   repository: CanvasRepository;
   /** 中立媒体存储；提供时校验资产引用的远端存在性与 metadata 一致性。 */
@@ -60,6 +61,7 @@ export type CreateCanvasRequest = {
 };
 
 export class CanvasApplicationService {
+  private readonly content: import("@woohaa3/contracts").ContentContributionResolver | undefined;
   private readonly lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   private readonly repository: CanvasRepository;
   private readonly mediaStorage?: MediaStorage;
@@ -68,6 +70,7 @@ export class CanvasApplicationService {
   private readonly generateCanvasId: () => string;
 
   constructor(options: CanvasApplicationServiceOptions) {
+    this.content = options.content;
     this.lifecycle = options.lifecycle;
     this.repository = options.repository;
     this.mediaStorage = options.mediaStorage;
@@ -146,7 +149,7 @@ export class CanvasApplicationService {
       throw revisionConflict(current);
     }
 
-    const applied = applyCanvasCommands(current, decoded.commands, { now: this.now(), lifecycle: this.lifecycle });
+    const applied = applyCanvasCommands(current, decoded.commands, { now: this.now(), lifecycle: this.lifecycle, content: this.content });
     if (!applied.ok) throw commandRejected(applied.rejection);
 
     // 只校验新增/变更的资产引用，避免每次提交都访问全部历史 COS 对象。

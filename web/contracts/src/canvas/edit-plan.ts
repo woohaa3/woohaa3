@@ -13,7 +13,7 @@
  *
  * 纯函数：只读取传入画布并用共享 reducer 模拟；不访问 DOM/网络/Yjs。
  */
-import { observeContentResolver, type ContentContributionResolver } from "./content-contribution.js";
+import { type ContentContributionResolver } from "./content-contribution.js";
 import { filmSetObjectOwnershipOf, isFilmSetObjectModelNode } from "./film-set-object-container.js";
 import { planPositionEdit } from "./edit-plan-position.js";
 import type { CanvasCommand } from "./commands.js";
@@ -21,7 +21,7 @@ import { applyCanvasCommands } from "./command-reducer.js";
 import { isShotPreviewNodeType } from "./domain/core/shot-preview-node.js";
 import { managedNodeRelationOf } from "./managed-node.js";
 import type { EditOperation, EditPrecondition, EditFieldSnapshot, EditNodeField, EditNodeFieldSnapshot } from "./edit-command.js";
-import { EDIT_NODE_FIELDS, EDIT_NODE_DATA_FIELDS } from "./edit-command.js";
+import { decodeEditApplyCommand, EDIT_NODE_FIELDS, EDIT_NODE_DATA_FIELDS } from "./edit-command.js";
 import { planNodeDataFieldDiffs } from "./edit-plan-node-data.js";
 import { planFilmSetItemDiffs } from "./edit-plan-film-set.js";
 import { planFilmSetClipDiffs } from "./edit-plan-film-set-clip.js";
@@ -41,6 +41,7 @@ const TEXTUAL_FIELDS: readonly EditNodeField[] = ["position", "width", "height",
 
 function isPlannable(command: CanvasCommand): boolean {
   switch (command.type) {
+    case "extension.command":
     case "node.add":
     case "node.update":
     case "node.remove":
@@ -64,7 +65,6 @@ function isPlannable(command: CanvasCommand): boolean {
  * 返回 `ok:false` 时调用方 MUST NOT 宣称可撤销（例如动作无净变化、或包含不支持记录的字段）。
  */
 export function planCanvasEdit(canvas: ServerCanvas, commands: readonly CanvasCommand[], options: { lifecycle?: import("./managed-node-lifecycle.js").ManagedNodeLifecycleResolver; content?: ContentContributionResolver } = {}): EditPlanResult {
-  observeContentResolver(options.content);
   const relevant = commands.filter(isPlannable);
   if (relevant.length === 0) return { ok: false, reason: "没有可记录的结构动作" };
 
@@ -75,7 +75,43 @@ export function planCanvasEdit(canvas: ServerCanvas, commands: readonly CanvasCo
   if (!applied.ok) return { ok: false, reason: applied.rejection.message };
   if (!applied.changed) return { ok: false, reason: "操作没有产生净变化" };
 
-  return diffPlan(canvas, applied.canvas);
+  const generic = diffPlan(canvas, applied.canvas);
+  const extensionIds = [...new Set(relevant.filter(command => command.type === "extension.command").map(command => command.extensionId))];
+  if (!extensionIds.length) return generic;
+  const extensionOnly = relevant.every(command => command.type === "extension.command");
+  const result: EditPlan = !extensionOnly && generic.ok ? generic : { forward: { preconditions: [], operations: [] }, inverse: { preconditions: [], operations: [] } };
+  for (const extensionId of extensionIds) {
+    const planner = options.content?.resolve(extensionId)?.edit;
+    if (!planner) return { ok: false, reason: "content-edit-unavailable" };
+    try {
+      const planned = planner.plan(structuredClone(canvas), structuredClone(applied.canvas));
+      if (!planned.ok) return { ok: false, reason: planned.code };
+      const fragment = (value: unknown) => decodeEditApplyCommand({ ...(value && typeof value === "object" ? value : {}), type: "edit.apply" });
+      const forward = fragment(planned.forward), inverse = fragment(planned.inverse);
+      if (!forward || !inverse) return { ok: false, reason: "content-edit-invalid" };
+      const guarded = decodeEditApplyCommand({ ...forward, preconditions: [...forward.preconditions, ...planned.preconditions] });
+      if (!guarded) return { ok: false, reason: "content-edit-invalid" };
+      result.forward.operations.push(...guarded.operations);
+      result.forward.preconditions.push(...guarded.preconditions);
+      result.inverse.operations.push(...inverse.operations);
+      result.inverse.preconditions.push(...inverse.preconditions);
+    } catch { return { ok: false, reason: "content-codec-failed" }; }
+  }
+  for (const side of [result.forward, result.inverse]) {
+    if (!decodeEditApplyCommand({ ...side, type: "edit.apply" })) return { ok: false, reason: "content-edit-limit-exceeded" };
+  }
+  // Owners must cover the complete effect without duplicating structural operations.
+  const replay = applyCanvasCommands(canvas, [{ type: "edit.apply", ...result.forward }], options);
+  if (!replay.ok || editStateKey(replay.canvas) !== editStateKey(applied.canvas)) return { ok: false, reason: "content-edit-forward-mismatch" };
+  const undo = applyCanvasCommands(replay.canvas, [{ type: "edit.apply", ...result.inverse }], options);
+  if (!undo.ok || editStateKey(undo.canvas) !== editStateKey(canvas)) return { ok: false, reason: "content-edit-inverse-mismatch" };
+  return { ok: true, ...result };
+}
+
+function editStateKey(canvas: ServerCanvas): string {
+  return JSON.stringify([canvas.title, canvas.document.nodes, canvas.document.edges, canvas.nodeData, canvas.assets, canvas.jobs], (_key, value) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) : value);
 }
 
 export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanResult {

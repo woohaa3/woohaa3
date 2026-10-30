@@ -796,3 +796,18 @@ describe("存储 sequence 冲突自动重发", () => {
     }
   });
 });
+
+
+describe("content registry session subscription", () => {
+  it("releases its registry listener on shutdown", async () => {
+    const factory = new IDBFactory();
+    const entry = fakeSocket([]);
+    const remote = { openCanvasSession: () => entry.socket, closeCanvasSession: () => undefined, reconnectCanvasSession: () => undefined } as unknown as CanvasRemoteService;
+    const release = vi.fn();
+    const subscribeContent = vi.fn(() => release);
+    const session = await createCanvasSession({ canvasId: CANVAS, remote, database: new CanvasDatabase({ indexedDb: factory }), subscribeContent });
+    expect(subscribeContent).toHaveBeenCalledOnce();
+    session.shutdown();
+    expect(release).toHaveBeenCalledOnce();
+  });
+});

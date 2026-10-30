@@ -30,8 +30,12 @@ import {
 } from "./edit-command-film-set.js";
 
 export function applyEditCommand(work: WorkingState, command: EditApplyCommand): CommandApplyResult {
-  const decoded = decodeEditApplyCommand(command);
+  let decoded = decodeEditApplyCommand(command);
   if (!decoded) return reject("invalid-command", "edit.apply 结构非法或超出上限");
+
+  const expanded = expandExtensionEdits(work, decoded);
+  if (!expanded.ok) return expanded;
+  decoded = expanded.command;
 
   const failed = evaluateEditPreconditions(work, decoded.preconditions);
   if (failed) return failed;
@@ -47,6 +51,38 @@ export function applyEditCommand(work: WorkingState, command: EditApplyCommand):
     if (!result.ok) return result;
   }
   return OK;
+}
+
+/** Resolve every owner before applying anything; expanded fragments cannot recurse. */
+function expandExtensionEdits(work: WorkingState, command: EditApplyCommand):
+  | { ok: true; command: EditApplyCommand }
+  | Exclude<CommandApplyResult, { ok: true }> {
+  const preconditions = [...command.preconditions];
+  const operations: EditOperation[] = [];
+  for (const operation of command.operations) {
+    if (operation.kind !== "extension.edit") { operations.push(operation); continue; }
+    const node = work.nodes.find(entry => entry.id === operation.nodeId);
+    if (!node) return reject("unknown-node", operation.nodeId);
+    const data = work.nodeData[operation.nodeId];
+    if (node.type === "composite-asset" && data?.extensionId !== operation.extensionId) {
+      return reject("content-owner-unavailable", operation.extensionId);
+    }
+    const expand = work.content?.resolve(operation.extensionId)?.edit?.expand;
+    if (!expand) return reject("content-owner-unavailable", operation.extensionId);
+    try {
+      const result = expand({ nodeId: operation.nodeId, op: structuredClone(operation.op) });
+      const fragment = decodeEditApplyCommand({ ...(result && typeof result === "object" ? result : {}), type: "edit.apply" });
+      if (!fragment || fragment.operations.some(entry => entry.kind === "extension.edit")) {
+        return reject("edit-operation-invalid", "content-edit-invalid");
+      }
+      preconditions.push(...fragment.preconditions);
+      operations.push(...fragment.operations);
+    } catch {
+      return reject("content-codec-failed", operation.extensionId);
+    }
+  }
+  const expanded = decodeEditApplyCommand({ type: "edit.apply", preconditions, operations });
+  return expanded ? { ok: true, command: expanded } : reject("edit-operation-invalid", "content-edit-limit-exceeded");
 }
 
 /**
@@ -220,6 +256,8 @@ export function validateEditOperationActiveRun(
 export function applyEditOperation(work: WorkingState, operation: EditOperation): CommandApplyResult {
   if (isFilmSetOperation(operation)) return applyFilmSetOperation(work, operation);
   switch (operation.kind) {
+    case "extension.edit":
+      return reject("edit-operation-invalid", "content-edit-unexpanded");
     case "node-add":
       return addNode(work, { type: "node.add", node: operation.node, nodeData: operation.nodeData });
     case "node-update":

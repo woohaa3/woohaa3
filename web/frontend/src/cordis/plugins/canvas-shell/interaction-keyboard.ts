@@ -49,7 +49,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     const copyable = copyableSelection();
     if (!copyable) return null;
     // Payload includes the generic owner closure; standalone media is frozen below.
-    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
+    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others, { content: options.compositeAssets?.getContent() });
     if (!payload) return null;
     const text = serializeCanvasCopyPayload(payload);
     (target as unknown as Record<string, unknown>)[MEMORY_CLIPBOARD_KEY] = text;
@@ -59,7 +59,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
   const freezeClipboardText = async (): Promise<string | null> => {
     const copyable = copyableSelection();
     if (!copyable) return null;
-    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
+    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others, { content: options.compositeAssets?.getContent() });
     if (!payload) return null;
     const included = new Set(payload.nodes.map(n => n.id));
     const liveIds = payload.nodes.filter(n => {
@@ -70,7 +70,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (!liveIds.length) return buildClipboardText();
     if (!options.mediaContent) throw Error("媒体内容 provider 未就绪，无法复制");
     const frozen = await options.mediaContent.freeze(copyable.canvasState, liveIds, crypto.randomUUID());
-    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others);
+    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others, { content: options.compositeAssets?.getContent() });
     if (!frozenPayload) return null;
     const text = serializeCanvasCopyPayload(frozenPayload);
     (target as unknown as Record<string, unknown>)[MEMORY_CLIPBOARD_KEY] = text;
@@ -291,7 +291,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (isEditableElement(event.target) || hasSelectedText(target)) return;
     const copyable = copyableSelection();
     if (!copyable) return;
-    const closure = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
+    const closure = buildCanvasCopyPayload(copyable.canvasState, copyable.others, { content: options.compositeAssets?.getContent() });
     const included = new Set(closure?.nodes.map(n => n.id));
     if (closure?.nodes.some(n => {
       const data = copyable.canvasState.nodeData[n.id];

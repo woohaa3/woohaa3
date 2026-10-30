@@ -41,6 +41,7 @@ export const DEFAULT_MAX_SYNC_CONNECTIONS = 256;
 const RELAY_PAGE_SIZE = 200;
 
 export type SyncUpgradeOptions = {
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   repository: YjsDocumentRepository;
   mediaStorage?: MediaStorage;
@@ -156,6 +157,7 @@ export function createSyncUpgradeHandler(options: SyncUpgradeOptions): SyncUpgra
   const upstream = options.upstream;
   const registry = new CanvasRoomRegistry({
     repository: options.repository,
+    content: options.content,
     lifecycle: options.lifecycle,
     mediaStorage: options.mediaStorage,
     now,
