@@ -149,13 +149,22 @@ describe("group 结构命令规划（change: add-canvas-node-grouping，任务 1
   });
 
   it("planRefitGroups 在几何未变时不产生命令", () => {
+    // 组已贴合成员（成员 + 12 内边距，且不小于节点最小尺寸 260×195）→ 无差异。
+    // 旧用例用「容器比成员大」当作未变：那是只扩不缩时代的语义，现在组会收缩贴合。
+    const nodes: Woohaa3CanvasNode[] = [
+      { ...groupNode(), position: { x: 0, y: 0 }, width: 260, height: 195 },
+      { id: "a", type: "image", parentId: "g", position: { x: 12, y: 12 }, width: 200, height: 100, data: {} }
+    ];
+    expect(planRefitGroups(nodes, ["g"])).toEqual([]);
+  });
+
+  it("planRefitGroups 容器比成员大时收缩贴合（成员世界坐标不变）", () => {
     const nodes: Woohaa3CanvasNode[] = [
       groupNode(),
       { id: "a", type: "image", parentId: "g", position: { x: 40, y: 40 }, width: 200, height: 100, data: {} }
     ];
     const commands = planRefitGroups(nodes, ["g"]);
-    // 成员已在容器内且容器尺寸足够 → 无差异。
-    expect(commands).toEqual([]);
+    expect(commands.length).toBeGreaterThan(0);
   });
 
   it("nodeAbsoluteRect 用绝对坐标计算 group 矩形", () => {

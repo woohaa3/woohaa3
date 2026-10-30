@@ -50,7 +50,10 @@ const SVG_EXCEPTIONS = new Set<string>([
   "cordis/plugins/task-execution/execution-panel/icons.tsx",
   // 小地图是画布空间的自定义数据可视化（节点/连线/视口框），不是可替换的通用操作图标
   // （2026-10-26）。
-  "cordis/plugins/canvas-shell/canvas-minimap.tsx"
+  "cordis/plugins/canvas-shell/canvas-minimap.tsx",
+  // 开发期报错助手是**开发工具**（仅在 DEV 构建加载），警告三角不值得为它引入图标库
+  // （change: 2026-10-30-add-dev-error-assistant）。
+  "cordis/plugins/dev-error-assistant/panel.tsx"
 ]);
 
 /** 允许保留字体/装饰符号的文件（纯装饰、无独立交互语义）。 */

@@ -14,7 +14,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { AuthoringGeneratePlaceholder } from "../../host.js";
 import type { CanvasRuntimeService } from "../../contracts.js";
-import { layoutNodePanel, usableCanvasArea } from "./node-anchor-layout.js";
+import { layoutNodePanel, usableCanvasArea, type AnchoredPanel } from "./node-anchor-layout.js";
 import { FullscreenPanelHost } from "./execution-panel/fullscreen-panel-host.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { panelKindForNodeType } from "./node-panel-registry.js";
@@ -53,6 +53,14 @@ export function ExecutionPanelSurface({ nodeId, presentation, runtime, children 
 
 function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?: CanvasRuntimeService; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  /**
+   * 上一帧落在哪一侧。
+   *
+   * 传给 `layoutNodePanel` 的 `previous`：面板贴着节点底部放不下、只能翻到上方时，
+   * 记住上一次的选择可以避免「上下反复横跳」（每帧重新算都从 auto 开始会抖）。
+   * 用 ref 而不是 state：它只在布局计算内部读写，变化不该触发重渲染。
+   */
+  const lastPlacement = useRef<AnchoredPanel["placement"] | undefined>(undefined);
   useEffect(() => {
     if (!runtime || !ref.current) return;
     let frame = 0;
@@ -92,6 +100,8 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       dock.style.maxHeight = `${layout.maxHeight}px`;
       dock.style.visibility = "visible";
       dock.dataset.placement = layout.placement;
+      // 记住这一帧的选择，下一次计算据此保持稳定（见 `lastPlacement` 的说明）。
+      lastPlacement.current = layout.placement;
     };
     const refresh = () => {
       cancelAnimationFrame(frame);

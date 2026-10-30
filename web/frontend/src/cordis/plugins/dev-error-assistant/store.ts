@@ -322,6 +322,12 @@ export function createDevErrorLog(now: () => number = Date.now): DevErrorLog {
 function safeString(value: unknown): string {
   if (value === null || value === undefined) return String(value);
   if (typeof value === "function") return `[Function ${(value as { name?: string }).name || "anonymous"}]`;
+  // **Error 必须先于 JSON.stringify 判断**：`name` / `message` / `stack` 都是不可枚举
+  // 属性，stringify 会得到 `{}` —— 日志里只剩一个空对象，等于把错误内容丢了
+  //（踩过：`console.error("前缀", error)` 显示成「前缀 {}」）。
+  if (value instanceof Error) {
+    return value.stack ? `${value.name}: ${value.message}\n${value.stack}` : `${value.name}: ${value.message}`;
+  }
   if (typeof value === "object") {
     try {
       return JSON.stringify(value);

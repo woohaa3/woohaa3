@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { applyCanvasCommands, findGroupContainingCenter, getWoohaa3CanvasNodeAbsolutePosition,
-  reparentDraggedNodes, type Woohaa3CanvasNode } from "@woohaa3/contracts";
+  refitWoohaa3CanvasGroups, reparentDraggedNodes, type Woohaa3CanvasNode } from "@woohaa3/contracts";
 import { planGroupStructureChange } from "../src/extension-api/command-planner.js";
 import { createDragGestureFamily } from "../src/cordis/plugins/canvas-shell/drag-gesture.js";
 import { woohaa3CanvasStore } from "../src/cordis/services/canvas-state/index.js";
@@ -15,7 +15,7 @@ afterEach(() => woohaa3CanvasStore.getState().applyWorkingCanvas(null));
 it.each([
   { name: "nested local move", at: { x: 160, y: 180 }, parent: "inner", remote: false },
   { name: "leave nested groups", at: { x: 900, y: 600 }, parent: undefined, remote: false },
-  { name: "enter target and refit", at: { x: 880, y: -10 }, parent: "target", remote: false },
+  { name: "enter target and refit", at: { x: 920, y: 20 }, parent: "target", remote: false },
   { name: "latest working ancestor coordinates", at: { x: 380, y: 290 }, parent: "inner", remote: true }
 ])("$name matches the complete parenting planner and preserves world placement", ({ at, parent, remote }) => {
   const canonical = canvasWith([]);
@@ -24,7 +24,9 @@ it.each([
     { id: "inner", type: "group", parentId: "g", position: { x: 30, y: 40 }, width: 300, height: 260 },
     { id: "g", type: "group", position: { x: 100, y: 100 }, width: 600, height: 500 },
     { id: "leaf", type: "image", parentId: "inner", position: { x: 10, y: 20 }, width: 100, height: 80 },
-    { id: "target", type: "group", position: { x: 900, y: 0 }, width: 100, height: 100 },
+    // target 必须装得下 leaf（100×80）加两侧内边距，否则释放会被判定为「装不下」而投到组外；
+    // 本用例要守的是「落入 → 组撑开」，不是「装不下」。
+    { id: "target", type: "group", position: { x: 900, y: 0 }, width: 220, height: 200 },
     { id: "unrelated", type: "image", position: { x: 1500, y: 900 }, width: 100, height: 80 }
   ];
   canonical.nodeData = { unrelated: { prompt: "keep" } };
@@ -47,7 +49,10 @@ it.each([
   const projected = nodes.map(n => n.id === "leaf" ? { ...n,
     position: { x: at.x - parentPosition.x, y: at.y - parentPosition.y } } : n);
   const target = findGroupContainingCenter(projected, "leaf");
-  const after = reparentDraggedNodes(projected, ["leaf"], target).nodes;
+  const reparented = reparentDraggedNodes(projected, ["leaf"], target).nodes;
+  // 手势在释放结算后会让被拖成员的父组贴合成员（change: canvas-grouping-redesign）。
+  const leafParent = reparented.find(n => n.id === "leaf")?.parentId;
+  const after = leafParent ? refitWoohaa3CanvasGroups([...reparented], new Set([leafParent])).nodes : reparented;
   expect(commands).toEqual(planGroupStructureChange(nodes, after));
   const applied = applyCanvasCommands(latest, commands, { now: "2026-10-13T00:00:00.000Z" });
   expect(applied.ok).toBe(true); if (!applied.ok) return;
@@ -60,7 +65,9 @@ it.each([
   expect(latest).toEqual(before); expect(woohaa3CanvasStore.getState().canvas).toEqual(canonical);
   if (parent === "target") {
     const targetNode = resultById.get("target")!;
-    expect(targetNode.position.x).toBeLessThan(900); expect(targetNode.width).toBeGreaterThan(100);
+    // 组贴合成员（会缩也会撑，change: canvas-grouping-redesign）：目标组必须包住落入的 leaf。
+    expect(targetNode.position.x).toBeLessThanOrEqual(at.x); expect(targetNode.position.y).toBeLessThanOrEqual(at.y);
+    expect(targetNode.position.x + targetNode.width).toBeGreaterThanOrEqual(at.x + 100);
   }
 });
 
@@ -70,15 +77,17 @@ it("mixed group/non-group drag keeps the full structural fallback and descendant
     { id: "g", type: "group", position: { x: 100, y: 100 }, width: 300, height: 260 },
     { id: "child", type: "image", parentId: "g", position: { x: 20, y: 30 }, width: 100, height: 80 },
     { id: "free", type: "image", position: { x: 600, y: 500 }, width: 100, height: 80 },
-    { id: "target", type: "group", position: { x: 900, y: 0 }, width: 160, height: 180 }
+    { id: "target", type: "group", position: { x: 900, y: 0 }, width: 220, height: 200 }
   ];
   woohaa3CanvasStore.getState().applyRemoteCanvas(canonical);
   const commands = family().dragDropCommands(new Map([["g", { x: 100, y: 100 }], ["free", { x: 600, y: 500 }]]),
-    new Map([["g", { x: 130, y: 140 }], ["free", { x: 920, y: 10 }]]));
+    new Map([["g", { x: 130, y: 140 }], ["free", { x: 920, y: 20 }]]));
   const nodes = canonical.document.nodes.map(n => ({ ...n, data: {} })) as Woohaa3CanvasNode[];
   const projected = nodes.map(n => n.id === "g" ? { ...n, position: { x: 130, y: 140 } }
-    : n.id === "free" ? { ...n, position: { x: 920, y: 10 } } : n);
-  const after = reparentDraggedNodes(projected, ["free"], findGroupContainingCenter(projected, "free")).nodes;
+    : n.id === "free" ? { ...n, position: { x: 920, y: 20 } } : n);
+  const reparented = reparentDraggedNodes(projected, ["free"], findGroupContainingCenter(projected, "free")).nodes;
+  const freeParent = reparented.find(n => n.id === "free")?.parentId;
+  const after = freeParent ? refitWoohaa3CanvasGroups([...reparented], new Set([freeParent])).nodes : reparented;
   expect(commands).toEqual(planGroupStructureChange(nodes, after));
   const applied = applyCanvasCommands(canonical, commands, { now: "2026-10-13T00:00:00.000Z" });
   expect(applied.ok).toBe(true); if (!applied.ok) return;
@@ -87,7 +96,7 @@ it("mixed group/non-group drag keeps the full structural fallback and descendant
   expect(getWoohaa3CanvasNodeAbsolutePosition(byId.get("child")!, byId)).toEqual({ x: 150, y: 170 });
   expect(byId.get("child")!.position).toEqual({ x: 20, y: 30 });
   expect(byId.get("free")!.parentId).toBe("target");
-  expect(getWoohaa3CanvasNodeAbsolutePosition(byId.get("free")!, byId)).toEqual({ x: 920, y: 10 });
+  expect(getWoohaa3CanvasNodeAbsolutePosition(byId.get("free")!, byId)).toEqual({ x: 920, y: 20 });
 });
 
 it("warm no-structure release uses the shared index without copying or iterating the full node array", () => {

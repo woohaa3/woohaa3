@@ -26,6 +26,7 @@ describe("Frontend Event Catalog（任务 2.1）", () => {
       "ui.node-history.switch-requested",
       "ui.node-rename.open-requested",
       "ui.shot-preview.enter-requested",
+      "ui.sticky-note.edit-requested",
       "ui.task-activity.open-requested",
       "ui.text-preview.open-requested",
       "ui.video-frame-capture.open-requested"

@@ -349,7 +349,12 @@ describe("前端协议边界审计", () => {
       "cordis/plugins/canvas-shell/canvas-render-warnings.tsx -> canvas-runtime",
       // 纯视口增量路由读取 runtime 能力（base/version），不接受第二套 viewport
       // （change: 2026-10-10-optimize-canvas-interaction-hot-path，任务 3.4）。
-      "cordis/plugins/canvas-shell/interaction-frame-plan.ts -> canvas-runtime"
+      "cordis/plugins/canvas-shell/interaction-frame-plan.ts -> canvas-runtime",
+      // scene-experience 是宿主画布的场景栏目：画布外壳装配它，它读取画布运行时诊断
+      // （change: 2026-10-29-scene-experience-plugin）。
+      "cordis/plugins/canvas-shell/canvas-host.tsx -> scene-experience",
+      "cordis/plugins/canvas-switcher/chrome.tsx -> scene-experience",
+      "cordis/plugins/scene-experience/experience-bar.tsx -> canvas-runtime"
     ]);
     const extensionsDir = path.join(CORDIS_DIR, "plugins");
     const extensionNames = readdirSync(extensionsDir, { withFileTypes: true })

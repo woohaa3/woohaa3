@@ -19,9 +19,13 @@ function setup(selected: string[] = [], kind: "node" | "model-preview" = "node")
     model: { modelScript: "scene.box({id:'body',size:[1,1,1]});", modelScriptVersion: "woohaa-model-js-v2" }, timeline: { duration: 0, loop: false } })) as never;
   const result = applyCanvasCommands(migrateFilmSetFixture(canvas, "film"), []);
   if (!result.ok) throw new Error(result.rejection.message);
-  woohaa3CanvasStore.getState().applyRemoteCanvas(result.canvas);
-  const original = result.canvas.document.nodes.find(node => node.id === modelId)!;
-  nodeSelectionStore.setFromRuntime({ nodeIds: selected, primaryNodeId: selected[0] ?? null, editingFocus: false }, new Set(result.canvas.document.nodes.map(node => node.id)));
+  // 迁移后组贴合唯一成员（成员 + 12 内边距），成员没有可移动的余量，释放会被夹回原位。
+  // 本用例守的是「拖动卡片并保持组绑定」，所以把组放大出足够余量（change: canvas-grouping-redesign）。
+  const roomy = { ...result.canvas, document: { ...result.canvas.document, nodes: result.canvas.document.nodes.map(node =>
+    node.id === "film" ? { ...node, width: 600, height: 500 } : node) } };
+  woohaa3CanvasStore.getState().applyRemoteCanvas(roomy);
+  const original = roomy.document.nodes.find(node => node.id === modelId)!;
+  nodeSelectionStore.setFromRuntime({ nodeIds: selected, primaryNodeId: selected[0] ?? null, editingFocus: false }, new Set(roomy.document.nodes.map(node => node.id)));
   const dom = harness();
   const { runtime, scenes } = runtimeCapturing({ pointHit: () => ({ kind, nodeId: modelId }) });
   const controller = installInteractionController({ canvas: dom.canvas, target: dom.target as never,
@@ -49,7 +53,11 @@ it.each([
   const moved = canvas.document.nodes.find(node => node.id === modelId)!;
   expect(getWoohaa3CanvasNodeAbsolutePosition(moved, new Map(canvas.document.nodes.map(node => [node.id, node])))).toEqual({ x: original.position.x + 60, y: original.position.y + 40 });
   expect(canvas.nodeData.film.filmSetGroup!.sceneBindings[0]!.transform).toEqual({ x: 0, y: 0, z: 0, yaw: 0, scale: 1 });
-  expect(submitted.filter(command => command.type === "node.update" && command.nodeId === modelId)).toHaveLength(1);
+  // 释放后父组会贴合成员（change: canvas-grouping-redesign）：组向成员收缩并前移，成员的相对坐标
+  // 因此回到内边距 (12,12)，世界坐标已由上面的断言守住。所以不再要求「恰好一条成员 update」，
+  // 只要求这次拖动确实提交了命令，且卡片自身没有被摘出组。
+  expect(submitted.some(command => command.type === "node.update")).toBe(true);
+  expect(moved.parentId).toBe("film");
   expect(nodeSelectionStore.getSnapshot().nodeIds).toContain(modelId);
 });
 

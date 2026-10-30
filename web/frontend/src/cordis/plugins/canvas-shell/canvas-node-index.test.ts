@@ -185,7 +185,12 @@ describe("拖动释放净位置快路径（design D5）", () => {
     const drag = createDragGestureFamily(dragCore(submissions));
     // 拖动 m 的绝对落点 (160, 260)（相对 g 即 60, 60）。
     const commands = drag.dragDropCommands(new Map([["m", { x: 110, y: 220 }]]), new Map([["m", { x: 160, y: 260 }]])) as typeof submissions;
-    expect(commands).toEqual([{ type: "node.update", nodeId: "m", position: { x: 60, y: 60 } }]);
+    // 成员移动后父组会贴合成员（change: canvas-grouping-redesign）：组收缩到成员 + 12 内边距，
+    // 成员换算成相对新组原点的 (12, 12)；组本身的绝对位置随之前移，所以成员世界坐标不变。
+    expect(commands).toEqual([
+      { type: "node.update", nodeId: "g", position: { x: 148, y: 248 }, width: 260, height: 195 },
+      { type: "node.update", nodeId: "m", position: { x: 12, y: 12 } }
+    ]);
   });
 
   it("无净变化：不产生位置命令", () => {

@@ -93,8 +93,9 @@ describe("resize 手势（change: add-node-resize）", () => {
     controller.flush();
     const shrink = submitted.filter(entry => entry.type === "node.update");
     expect(shrink).toHaveLength(1);
-    // 右下角固定左上角；宽度收到成员右边 240，高度保留底部页脚 80（140 + 80）。
-    expect(shrink[0]).toMatchObject({nodeId: "n1", width: 240, height: 220});
+    // 右下角固定左上角；宽度收到成员右边 240，高度收到成员下边 140 + 底部内边距 12 = 152
+    // （旧版留给组徽章的 80 页脚已随组改版移除，change: canvas-grouping-redesign）。
+    expect(shrink[0]).toMatchObject({nodeId: "n1", width: 240, height: 152});
     expect(submitted.some(entry => "nodeId" in entry && entry.nodeId === "m")).toBe(false);
     expect(woohaa3CanvasStore.getState().canvas?.document.nodes.find(n => n.id === "m")?.position)
       .toEqual({x: 40, y: 40});
