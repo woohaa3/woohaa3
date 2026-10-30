@@ -15,18 +15,6 @@ import { COS_ENV_KEYS,
   resolveCosConfig,
   resolveCosRegion,
   type CosConfig } from "../src/backend.js";
-import { COS_PUBLIC_EXPOSER_ID } from "../src/public-exposer.js";
-
-/** 三个有内置默认值的公开桶字段：apply 的配置类型要求它们在场。 */
-/** 公开桶的夹具值：真实桶由构建环境注入，测试不引用它。 */
-const PUBLIC_BUCKET = {
-  publicBucketName: "fixture-bucket-1234567890",
-  publicBucketUrl: "https://fixture-bucket-1234567890.cos.ap-guangzhou.myqcloud.com",
-  publicPrefix: "fixture-prefix"
-};
-
-const PUBLIC_DEFAULTS = { publicEnabled: false };
-
 const CONFIG: CosConfig = {
   secretId: "secret-id",
   secretKey: "secret-key",
@@ -209,67 +197,18 @@ describe("配置归一化（缺项不再抛错）", () => {
 
   it("缺配置时 apply 记结构化日志、不注册任何后端", async () => {
     const { ctx, registered, exposers, logs } = fakeCtx();
-    await createCosStoragePlugin().apply(ctx, PUBLIC_DEFAULTS);
+    await createCosStoragePlugin().apply(ctx, {});
 
     expect(registered).toEqual([]);
     expect(exposers).toEqual([]);
     expect(logs).toEqual([
-      { event: "cos-storage-unconfigured", missing: ["secretId", "secretKey", "bucketName", "bucketUrl", "prefix"] },
-      { event: "cos-public-disabled" }
+      { event: "cos-storage-unconfigured", missing: ["secretId", "secretKey", "bucketName", "bucketUrl", "prefix"] }
     ]);
   });
 
-  it("私有桶配置齐备且开启公开桶时：两个后端 + 一个地址提供者", async () => {
+  it("配置齐备时只注册 cos 后端；公开桶归 local-storage，不再由本插件提供", async () => {
     const { ctx, registered, exposers, logs, disposers } = fakeCtx();
     await createCosStoragePlugin().apply(ctx, {
-      ...PUBLIC_DEFAULTS,
-      ...PUBLIC_BUCKET,
-      publicEnabled: true,
-      secretId: "id",
-      secretKey: "key",
-      bucketName: "bucket",
-      bucketUrl: "https://bucket.cos.ap-beijing.myqcloud.com",
-      prefix: "assets"
-    });
-
-    expect(registered.map((backend) => backend.backendId)).toEqual(["cos", "cos-public"]);
-    expect(registered[0]?.label).toBe("COS / S3 对象存储");
-    expect(registered[1]?.label).toBe("COS 公开临时桶");
-    // 公开桶不暴露 presign：它的地址不签名。
-    expect(registered[1]?.presign).toBeUndefined();
-    expect(exposers.map((item) => item.exposerId)).toEqual([COS_PUBLIC_EXPOSER_ID]);
-    // 内置默认：没有显式配置 exposer.primary 也能直接用。
-    expect(exposers[0]).toMatchObject({ default: true });
-    expect(logs[0]).toMatchObject({ event: "cos-storage-activated", backendId: "cos" });
-    expect(logs[1]).toMatchObject({ event: "cos-public-activated", backendId: "cos-public", credentialSource: "shared" });
-
-    disposers.forEach((dispose) => dispose());
-    expect(registered).toEqual([]);
-    expect(exposers).toEqual([]);
-  });
-
-  it("只有公开桶凭据、私有桶未配置时仍然注册（纯本地部署的典型用法）", async () => {
-    const { ctx, registered, exposers, logs } = fakeCtx();
-    await createCosStoragePlugin().apply(ctx, {
-      ...PUBLIC_DEFAULTS,
-      ...PUBLIC_BUCKET,
-      publicEnabled: true,
-      publicSecretId: "public-id",
-      publicSecretKey: "public-key"
-    });
-
-    // 私有桶没配置：只有公开桶后端，但地址能力照样可用。
-    expect(registered.map((backend) => backend.backendId)).toEqual(["cos-public"]);
-    expect(exposers.map((item) => item.exposerId)).toEqual([COS_PUBLIC_EXPOSER_ID]);
-    expect(logs[0]).toMatchObject({ event: "cos-storage-unconfigured" });
-    expect(logs[1]).toMatchObject({ event: "cos-public-activated", credentialSource: "public" });
-  });
-
-  it("开关关闭时不注册公开桶，并记一条可诊断日志", async () => {
-    const { ctx, registered, exposers, logs } = fakeCtx();
-    await createCosStoragePlugin().apply(ctx, {
-      ...PUBLIC_DEFAULTS,
-      publicEnabled: false,
       secretId: "id",
       secretKey: "key",
       bucketName: "bucket",
@@ -278,8 +217,14 @@ describe("配置归一化（缺项不再抛错）", () => {
     });
 
     expect(registered.map((backend) => backend.backendId)).toEqual(["cos"]);
+    expect(registered[0]?.label).toBe("COS / S3 对象存储");
+    // 私有桶自带 presign，因此它同时是一个隐式地址提供者（不需要注册 exposer）。
+    expect(registered[0]?.presign).toBeTypeOf("function");
     expect(exposers).toEqual([]);
-    expect(logs).toContainEqual({ event: "cos-public-disabled" });
+    expect(logs).toEqual([{ event: "cos-storage-activated", backendId: "cos" }]);
+
+    disposers.forEach((dispose) => dispose());
+    expect(registered).toEqual([]);
   });
 });
 

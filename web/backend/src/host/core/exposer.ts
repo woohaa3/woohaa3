@@ -11,8 +11,11 @@
  *
  * 解析顺序（与设计稿一致）：
  * ① 当前后端（含画布路由）有 `presign` → 就地签名，不复制；
- * ② 否则选中 `storage.expose` 指到的提供者；`requiresReplica` 时缺对象先复制过去再签；
+ * ② 否则用画布 exposure 覆盖 / `exposer.primary` 选中的提供者；`requiresReplica` 时缺对象先复制过去；
  * ③ 都没有 → `StorageExposeUnavailableError`。
+ *
+ * **没有默认提供者**：未选中就是没有对外地址。以前「注册即默认」的公开临时桶改成必须显式
+ * 选中（`exposer.primary = local-public`）——把素材推上公网不该是一件悄悄发生的事。
  *
  * 隐式提供者：任何带 `presign` 的后端同时也是一个提供者（`exposerId = backendId`，
  * `requiresReplica: true`）。这样 cos / server 不必各写一份 exposer，历史配置值继续有效。
@@ -41,14 +44,6 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
   const log = options.logger ?? (() => undefined);
   const storage = options.storage;
   const registered = new Map<string, StorageExposer>();
-
-  /** 未显式选择时的兜底：注册方声明 `default: true` 的提供者（按注册顺序取第一个）。 */
-  const defaultIdOf = (): string | undefined => {
-    for (const exposer of registered.values()) {
-      if (exposer.default === true) return exposer.exposerId;
-    }
-    return undefined;
-  };
 
   const selectedIdOf = (): string | undefined => {
     const value = options.settings.expose()?.trim();
@@ -113,7 +108,7 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
       return out;
     },
     resolve,
-    selectedId: () => selectedIdOf() ?? defaultIdOf(),
+    selectedId: selectedIdOf,
     available(namespace, scope) {
       const current = storage.current(namespace, scope);
       // 画布级覆盖优先：空串 = 这张画布明确不对外。
@@ -122,7 +117,7 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
         return override === "" ? false : resolve(override) !== undefined;
       }
       if (current.presign) return true;
-      const id = selectedIdOf() ?? defaultIdOf();
+      const id = selectedIdOf();
       if (!id) return false;
       return resolve(id) !== undefined;
     },
@@ -144,24 +139,24 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
         );
       }
 
-      // ② 画布覆盖 / 部署默认选中的提供者 / 注册方声明的内置默认。
-      const id = override !== undefined ? override.trim() : (selectedIdOf() ?? defaultIdOf());
+      // ② 画布覆盖 / 部署显式选中的提供者。
+      const id = override !== undefined ? override.trim() : selectedIdOf();
       if (!id) throw new StorageExposeUnavailableError();
 
       const exposer = resolve(id);
       if (!exposer) {
         // 区分「没注册」与「注册了但签不了」：两者的修法完全不同。
         if (storage.resolve(id)) {
-          throw new StorageExposeUnavailableError(`对外存储后端 ${id} 没有签名能力：请改配支持 presign 的后端`);
+          throw new StorageExposeUnavailableError(`对外存储后端 ${id} 没有签名能力：请在 exposer.primary 改选地址提供者`);
         }
-        throw new StorageExposeUnavailableError(`对外存储后端未注册：${id}（设置 storage.expose）`);
+        throw new StorageExposeUnavailableError(`对外地址提供者未注册：${id}（设置 exposer.primary）`);
       }
 
       if (exposer.requiresReplica) {
         const targetId = exposer.targetBackendId ?? exposer.exposerId;
         const target = storage.resolve(targetId);
         if (!target) {
-          throw new StorageExposeUnavailableError(`对外存储后端未注册：${targetId}（设置 storage.expose）`);
+          throw new StorageExposeUnavailableError(`对外地址提供者未注册：${targetId}（设置 exposer.primary）`);
         }
         // 缺对象才复制：key 内容寻址，复制幂等、可缓存。
         if ((await target.head(scoped, input.scope)) === null) {

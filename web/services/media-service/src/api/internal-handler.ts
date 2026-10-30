@@ -184,7 +184,7 @@ async function handleSign(
   const { storageKey } = decoded.value;
   const ttl = decoded.value.expiresSeconds ?? options.signTtlSeconds ?? DEFAULT_SIGN_TTL_SECONDS;
   if (typeof options.storage.getHttpsUrl !== "function") {
-    sendError(res, 503, "unavailable", "当前存储没有对外地址能力：请配置支持签名的存储后端（storage.expose）");
+    sendError(res, 503, "unavailable", "当前存储没有对外地址能力：请在 exposer.primary 选择地址提供者");
     return true;
   }
   try {

@@ -18,7 +18,7 @@ import type { StorageScope } from "./storage.js";
 export class StorageExposeUnavailableError extends Error {
   readonly code = "STORAGE_EXPOSE_UNAVAILABLE" as const;
 
-  constructor(message = "没有可用的对外地址：请给 storage.expose 配置支持签名的后端或地址提供者") {
+  constructor(message = "没有可用的对外地址：当前存储后端不能就地签名，且 exposer.primary 未选择地址提供者") {
     super(message);
     this.name = "StorageExposeUnavailableError";
   }
@@ -46,23 +46,22 @@ export type StorageExposeInput = {
  * `requiresReplica` 是唯一的形态判据：
  * - `true`：字节必须先落在 `targetBackendId`（云端对象存储、服务端托管存储）；
  *   core 在调用 `expose` 之前完成复制，缺对象时从来源读一次（内容寻址，复制幂等）。
- * - `false`：字节不需要搬家（例如 CDN 回源签名：源站仍在对象存储里）。core 不复制，提供者自己决定怎么
- *   让那个 URL 可达——它拿到的是 namespace/key/scope，可以自己去 `ctx.storage` 读。
+ * - `false`：core 不复制，提供者自己把字节弄到该去的地方再给地址——它拿到的是
+ *   namespace/key/scope，可以自己去 `ctx.storage` 读。两种典型：CDN 回源签名（字节不动），
+ *   以及「公开临时桶」这类**由提供者推送**的目标（本机宿主随包的 `local-public` 就是这样，
+ *   公开桶因此不必注册成存储后端，也就不会混进「主存储」的可选项）。
+ *
+ * 没有「默认提供者」这回事：未显式选择时一律不生效。把素材交给第三方（尤其是推上公网）
+ * 必须是一次可追溯的选择，而不是某个插件注册后就自动接管。
  */
 export type StorageExposer = {
-  /** 设置在 `storage.expose`（以及画布级 `exposure`）里引用的 id。 */
+  /** 设置在 `exposer.primary`（以及画布级 `exposure`）里引用的 id。 */
   readonly exposerId: string;
   /** 设置页与日志里的显示名。 */
   readonly label?: string;
   /** 提供这个提供者的插件 id（设置页据此跳转到它的配置）。 */
   readonly ownerExtensionId?: string;
-  /**
-   * 未显式配置 `exposer.primary`、画布也没有 exposure 覆盖时，是否直接用它。
-   *
-   * 内置的「公开临时桶」用它实现「打开开关就生效」：不需要用户再去找设置项填 id。
-   * 多个默认项同时注册时按注册顺序取第一个（与 `canvasScoped` 同一取舍）。
-   */
-  readonly default?: boolean;
+  /** 字节是否必须先在 `targetBackendId` 落地（判据见类型说明）。 */
   readonly requiresReplica: boolean;
   /** `requiresReplica` 为 true 时要复制到哪个后端；缺省与 `exposerId` 同名。 */
   readonly targetBackendId?: string;
@@ -78,18 +77,18 @@ export type HostExposerService = {
    * 可选的提供者：注册过的，加上「后端自带 `presign`」的隐式提供者（id 即 backendId）。
    *
    * 隐式项让 cos / server 这类能就地签名的后端不必再写一份 exposer，也让设置页的下拉值
-   * 与 `storage.expose` 的历史配置保持一致。
+   * 与 `exposer.primary` 的历史配置保持一致。
    */
   list(): readonly StorageExposer[];
   resolve(exposerId: string): StorageExposer | undefined;
-  /** 部署默认的地址提供者 id（`storage.expose`）；空表示只用后端自己的签名能力。 */
+  /** 显式选中的地址提供者 id（`exposer.primary`，旧键 `storage.expose`）；未选为空。 */
   selectedId(): string | undefined;
   /** 这一次请求能不能拿到地址。 */
   available(namespace: string, scope?: StorageScope): boolean;
   /**
    * 取外部地址的解析顺序：
    * ① 当前后端（含画布路由）能就地签名 → 直接签，不复制；
-   * ② 否则用画布记录 / 部署默认选中的提供者；`requiresReplica` 时缺对象先复制过去；
+   * ② 否则用画布记录 / 显式选中的提供者；`requiresReplica` 时缺对象先复制过去；
    * ③ 都没有 → `StorageExposeUnavailableError`。
    */
   expose(input: StorageExposeInput): Promise<string>;

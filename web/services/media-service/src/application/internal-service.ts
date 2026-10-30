@@ -182,7 +182,7 @@ export function createMediaApplicationService(
     async sign(storageKey, expiresSeconds, scope) {
       const checked = checkedScope(scope);
       if (typeof options.storage.getHttpsUrl !== "function") {
-        throw new MediaApplicationError("unavailable", "当前存储没有对外地址能力：请配置支持签名的存储后端（storage.expose）");
+        throw new MediaApplicationError("unavailable", "当前存储没有对外地址能力：请在 exposer.primary 选择地址提供者");
       }
       const ttl = expiresSeconds ?? options.signTtlSeconds ?? DEFAULT_SIGN_TTL_SECONDS;
       try {

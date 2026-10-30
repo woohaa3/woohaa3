@@ -25,12 +25,6 @@ import {
   type StorageObject,
   type StorageObjectStat
 } from "@woohaa3/contracts";
-import {
-  COS_PUBLIC_BACKEND_ID,
-  COS_PUBLIC_LABEL,
-  createCosPublicExposer,
-  resolveCosPublicConfig
-} from "./public-exposer.js";
 
 type CosError = Error & { statusCode?: number; code?: string };
 type CosCallback<T> = (error: CosError | null, data: T) => void;
@@ -107,70 +101,15 @@ export const COS_STORAGE_CONFIG = defineConfigSchema({
     legacyEnv: "COS_PREFIX",
     label: "对象前缀",
     description: "对象键前缀；最终键为 <prefix>/media/<key>"
-  },
-  // 公开临时桶：地址不签名，用于「第三方 API 只能自己拉 http 地址」的场景；
-  // 桶内内容由运维侧定期清理。桶名 / 域名 / 前缀由构建期注入或运行期填写，
-  // 公开仓库里不带任何具体桶。
-  publicEnabled: {
-    kind: "boolean",
-    reload: "hot",
-    legacyEnv: "COS_PUBLIC_ENABLED",
-    default: false,
-    label: "启用公开临时桶",
-    description: "开启后，只存本地的部署也能把素材放到公开桶并拿到可直接拉取的地址；内容会被定期清理"
-  },
-  publicSecretId: {
-    kind: "string",
-    secret: true,
-    reload: "hot",
-    legacyEnv: "COS_PUBLIC_SECRET_ID",
-    label: "公开桶 SecretId",
-    description: "公开临时桶的 SecretId；留空时复用私有桶凭据"
-  },
-  publicSecretKey: {
-    kind: "string",
-    secret: true,
-    reload: "hot",
-    legacyEnv: "COS_PUBLIC_SECRET_KEY",
-    label: "公开桶 SecretKey",
-    description: "公开临时桶的 SecretKey；留空时复用私有桶凭据"
-  },
-  publicBucketName: {
-    kind: "string",
-    reload: "hot",
-    legacyEnv: "COS_PUBLIC_BUCKET_NAME",
-    label: "公开桶名称",
-    description: "公开临时桶名（含 APPID 后缀）"
-  },
-  publicBucketUrl: {
-    kind: "url",
-    protocols: ["https:", "http:"],
-    reload: "hot",
-    legacyEnv: "COS_PUBLIC_BUCKET_URL",
-    label: "公开桶地址",
-    description: "公开临时桶访问域名；region 由它解析"
-  },
-  publicPrefix: {
-    kind: "string",
-    reload: "hot",
-    legacyEnv: "COS_PUBLIC_PREFIX",
-    label: "公开桶前缀",
-    description: "公开桶内的对象前缀；最终键为 <prefix>/<namespace>/<key>"
   }
 });
 
 export type CosStorageConfigValues = {
-  publicEnabled?: boolean;
   secretId?: string;
   secretKey?: string;
   bucketName?: string;
   bucketUrl?: string;
   prefix?: string;
-  publicSecretId?: string;
-  publicSecretKey?: string;
-  publicBucketName?: string;
-  publicBucketUrl?: string;
-  publicPrefix?: string;
 };
 
 export type CosConfigResolution =
@@ -339,7 +278,7 @@ export function createCosStoragePlugin(): ExtensionPlugin<typeof COS_STORAGE_CON
     label: COS_STORAGE_LABEL,
     icon: "cloud",
     configPrefix: COS_STORAGE_CONFIG_PREFIX,
-    inject: ["log", "storage", "exposer"],
+    inject: ["log", "storage"],
     Config: COS_STORAGE_CONFIG,
     apply(ctx, config) {
       const log = ctx.log.scope(COS_STORAGE_PLUGIN_ID);
@@ -353,50 +292,6 @@ export function createCosStoragePlugin(): ExtensionPlugin<typeof COS_STORAGE_CON
       } else {
         log({ event: "cos-storage-unconfigured", missing: [...resolved.missing] });
       }
-
-      // 公开临时桶：**独立于私有桶**。纯本地部署（只配 local-storage）也能开启它，
-      // 从而获得「第三方 API 能直接拉取」的地址——这正是它的主要用途。
-      if (config.publicEnabled !== true) {
-        log({ event: "cos-public-disabled" });
-        return;
-      }
-      const publicResolved = resolveCosPublicConfig({
-        ...(config.publicSecretId ? { secretId: config.publicSecretId } : {}),
-        ...(config.publicSecretKey ? { secretKey: config.publicSecretKey } : {}),
-        ...(config.publicBucketName ? { bucketName: config.publicBucketName } : {}),
-        ...(config.publicBucketUrl ? { bucketUrl: config.publicBucketUrl } : {}),
-        ...(config.publicPrefix ? { prefix: config.publicPrefix } : {}),
-        // 私有桶配了就用它那份凭据（同一操作者的两个桶），否则必须单独配公开桶凭据。
-        ...(resolved.ok ? { fallbackSecretId: resolved.config.secretId, fallbackSecretKey: resolved.config.secretKey } : {})
-      });
-      if (!publicResolved.ok) {
-        // 缺凭据时整块跳过：注册一个签不出地址的提供者只会把错误推迟到调用期。
-        log({ event: "cos-public-unconfigured", missing: [...publicResolved.missing] });
-        return;
-      }
-      const publicConfig = publicResolved.config;
-      const publicBackend = createCosBackend(publicConfig, undefined, {
-        backendId: COS_PUBLIC_BACKEND_ID,
-        label: COS_PUBLIC_LABEL,
-        signing: false
-      });
-      ctx.effect(() => ctx.storage.register(publicBackend));
-      ctx.effect(() =>
-        ctx.exposer.register({
-          ...createCosPublicExposer(publicConfig),
-          // 设置页据此把「打开该提供者的配置」链到本插件，而不是显示「未找到提供者」。
-          ownerExtensionId: COS_STORAGE_PLUGIN_ID,
-          default: true
-        })
-      );
-      log({
-        event: "cos-public-activated",
-        backendId: COS_PUBLIC_BACKEND_ID,
-        bucketName: publicConfig.bucketName,
-        bucketUrl: publicConfig.bucketUrl,
-        prefix: publicConfig.prefix,
-        credentialSource: publicConfig.credentialSource
-      });
     }
   };
 }

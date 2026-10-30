@@ -79,7 +79,7 @@ export function providersForSettingKey(
 /**
  * 选项列表。
  *
- * - `exposer.primary` / `storage.expose` 允许空值（只用后端的签名能力），因此带一个空选项；
+ * - `exposer.primary` / `storage.expose` 允许空值（不指定提供者，也就没有对外地址；没有默认提供者）；
  * - 当前值不在提供者里时保留它并标注「未注册」：不静默吞掉已有配置，也不假装它可用。
  */
 export function storageSettingOptions(
@@ -92,7 +92,7 @@ export function storageSettingOptions(
     label: provider.registered ? provider.label : provider.label + "（未注册）"
   }));
   if (key === "storage.expose" || key === "exposer.primary") {
-    options.unshift({ value: "", label: "未选择（只用后端的签名能力）" });
+    options.unshift({ value: "", label: "未选择（不指定提供者）" });
   } else if (!currentValue) {
     // 主存储尚未选择时给一个占位项：原生 select 的 value 必须能匹配到 option。
     options.unshift({ value: "", label: "请选择后端" });

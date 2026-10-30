@@ -129,7 +129,7 @@ describe("expose 解析顺序", () => {
     expect(cos.objects.get("media/sha256-abc.png")?.bytes).toEqual(Uint8Array.of(9));
   });
 
-  it("③ 谁都不能签时抛 StorageExposeUnavailableError（提示 storage.expose）", async () => {
+  it("③ 谁都不能签时抛 StorageExposeUnavailableError（提示 exposer.primary）", async () => {
     const { storage, exposer } = setup({ primary: "local" }, [memoryBackend("local")]);
     await storage.bucket("media").put("sha256-abc.png", Uint8Array.of(1), "image/png");
 
@@ -137,14 +137,14 @@ describe("expose 解析顺序", () => {
     await expect(exposer.expose({ namespace: "media", key: "sha256-abc.png" })).rejects.toBeInstanceOf(
       StorageExposeUnavailableError
     );
-    await expect(exposer.expose({ namespace: "media", key: "sha256-abc.png" })).rejects.toThrow(/storage\.expose/);
+    await expect(exposer.expose({ namespace: "media", key: "sha256-abc.png" })).rejects.toThrow(/exposer\.primary/);
   });
 
   it("对外后端未注册 / 本身没有 presign 都报可操作的错", async () => {
     const local = memoryBackend("local");
     const missing = setup({ primary: "local", expose: "cos" }, [local]);
     await expect(missing.exposer.expose({ namespace: "media", key: "a.png" })).rejects.toThrow(
-      /对外存储后端未注册：cos/
+      /对外地址提供者未注册：cos/
     );
 
     const plain = memoryBackend("cos");
@@ -276,38 +276,38 @@ describe("无效的历史配置", () => {
     expect(exposer.selectedId()).toBeUndefined();
     expect(logs.some((event) => event.event === "exposer-primary-ignored" && event.value === "local")).toBe(true);
 
-    // 默认提供者仍然可用：坏值不再挡住「打开开关就生效」。
-    exposer.register({ exposerId: "cos-public", requiresReplica: false, default: true, expose: async () => "https://u" });
-    expect(exposer.selectedId()).toBe("cos-public");
+    // 坏值被忽略后就是「未选择」：注册了提供者也不会因此自动生效。
+    exposer.register({ exposerId: "local-public", requiresReplica: false, expose: async () => "https://u" });
+    expect(exposer.selectedId()).toBeUndefined();
   });
 });
 
-describe("内置默认提供者", () => {
-  it("没有显式配置时用注册方声明的 default（开启开关即生效）", async () => {
+describe("没有默认提供者", () => {
+  it("只注册不选择时不出地址：把素材交给第三方必须是显式选择", async () => {
     const local = memoryBackend("local");
     const { storage, exposer } = setup({ primary: "local" }, [local]);
     await storage.bucket("media").put("a.png", Uint8Array.of(1), "image/png");
     exposer.register({
-      exposerId: "cos-public",
-      requiresReplica: true,
-      targetBackendId: "local",
-      default: true,
+      exposerId: "local-public",
+      requiresReplica: false,
       async expose(input) {
         return "https://public.invalid/" + input.namespace + "/" + input.key;
       }
     });
 
-    expect(exposer.selectedId()).toBe("cos-public");
-    expect(exposer.available("media")).toBe(true);
-    expect(await exposer.expose({ namespace: "media", key: "a.png" })).toBe(
-      "https://public.invalid/media/a.png"
-    );
+    expect(exposer.selectedId()).toBeUndefined();
+    expect(exposer.available("media")).toBe(false);
+    await expect(exposer.expose({ namespace: "media", key: "a.png" })).rejects.toThrow(StorageExposeUnavailableError);
   });
 
-  it("显式配置优先于 default", () => {
-    const { exposer } = setup({ expose: "cos" }, [memoryBackend("cos", { presign: true })]);
-    exposer.register({ exposerId: "cos-public", requiresReplica: false, default: true, expose: async () => "u" });
-    expect(exposer.selectedId()).toBe("cos");
+  it("显式选中后才生效", async () => {
+    const local = memoryBackend("local");
+    const { exposer } = setup({ primary: "local", expose: "local-public" }, [local]);
+    exposer.register({ exposerId: "local-public", requiresReplica: false, expose: async () => "https://public.invalid/a" });
+
+    expect(exposer.selectedId()).toBe("local-public");
+    expect(exposer.available("media")).toBe(true);
+    expect(await exposer.expose({ namespace: "media", key: "a.png" })).toBe("https://public.invalid/a");
   });
 });
 

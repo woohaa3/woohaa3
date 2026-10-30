@@ -74,7 +74,7 @@ export const SETTING_DEFINITIONS = {
     default: "",
     reload: "hot",
     label: "对外地址提供者",
-    description: "需要外部地址时使用的提供者 id（后端自带签名时也可直接填后端 id）；留空表示只用当前后端的签名能力"
+    description: "需要外部地址时使用的提供者 id（后端自带签名时也可直接填后端 id）；留空表示不选提供者——没有默认提供者，此时只有当前后端自带签名才有对外地址"
   },
   "storage.expose": {
     kind: "string",

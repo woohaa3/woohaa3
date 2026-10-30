@@ -98,7 +98,7 @@ describe("storageSettingOptions", () => {
 
   it("对外后端带空选项，保留未注册的当前值并标注", () => {
     const options = storageSettingOptions("storage.expose", providers, "legacy");
-    expect(options[0]).toEqual({ value: "", label: "未选择（只用后端的签名能力）" });
+    expect(options[0]).toEqual({ value: "", label: "未选择（不指定提供者）" });
     expect(options.at(-1)).toEqual({ value: "legacy", label: "legacy（未注册）" });
   });
 });
@@ -176,7 +176,7 @@ describe("对外地址提供者（exposer 扩展点）", () => {
       [{ id: "edge", label: "边缘节点", ownerExtensionId: "remote-server", registered: true }],
       ""
     );
-    expect(options[0]).toEqual({ value: "", label: "未选择（只用后端的签名能力）" });
+    expect(options[0]).toEqual({ value: "", label: "未选择（不指定提供者）" });
     expect(options.map((option) => option.value)).toContain("edge");
   });
 
@@ -206,11 +206,11 @@ describe("对外地址提供者（exposer 扩展点）", () => {
 describe("exposer.primary 的无效旧值", () => {
   it("不再作为选项显示，也不再标注「未注册」", () => {
     const providers = [
-      { id: "cos-public", label: "COS 公开临时桶", ownerExtensionId: "cos-storage", registered: true }
+      { id: "local-public", label: "公开临时桶", ownerExtensionId: "local-storage", registered: true }
     ];
     const options = storageSettingOptions("exposer.primary", providers, "local");
     // 只剩空值与真正可用的提供者；运行时已把 `local` 按未设置处理。
-    expect(options.map((option) => option.value)).toEqual(["", "cos-public"]);
+    expect(options.map((option) => option.value)).toEqual(["", "local-public"]);
     expect(options.some((option) => option.label.includes("未注册"))).toBe(false);
   });
 });
