@@ -141,7 +141,8 @@ pub(crate) fn draw_group(
         }
     }
 
-    // 左上角胶囊标签：`标题 · N 项`（change: canvas-grouping-redesign）。
+    // 组名标签：浮在组框**上方外侧**，像一枚独立的小卡片（change: canvas-grouping-redesign）。
+    // 参考稿里组没有底板，标签是唯一可见的组身份，所以它不能压在成员身上。
     let title = if presentation.title.trim().is_empty() {
         String::new()
     } else {
@@ -152,18 +153,19 @@ pub(crate) fn draw_group(
     } else {
         format!("{} · {} 项", title, presentation.member_count)
     };
-    const PILL_FONT: f32 = 12.;
-    const PILL_PAD_X: f32 = 8.;
-    const PILL_HEIGHT: f32 = 24.;
-    const PILL_RADIUS: f32 = 8.;
-    const PILL_INSET: f32 = 10.;
-    let max_label_width = (width - PILL_INSET * 2. - PILL_PAD_X * 2. - 24.).max(24.);
+    const PILL_FONT: f32 = 14.;
+    const PILL_PAD_X: f32 = 12.;
+    const PILL_HEIGHT: f32 = 32.;
+    const PILL_RADIUS: f32 = 10.;
+    /// 标签底边到组框顶边的间隙。
+    const PILL_GAP: f32 = 8.;
+    let max_label_width = (width - PILL_PAD_X * 2.).max(48.);
     let short_label = shortened(&label, max_label_width, PILL_FONT);
     let text_width = crate::canvas_query::layout::estimated_text_width(&short_label, PILL_FONT);
     let pill_width = (text_width + PILL_PAD_X * 2.).max(PILL_HEIGHT);
     geometry.rounded_rect(
-        x + PILL_INSET,
-        y + PILL_INSET,
+        x,
+        y - PILL_GAP - PILL_HEIGHT,
         pill_width,
         PILL_HEIGHT,
         PILL_RADIUS,
@@ -173,8 +175,8 @@ pub(crate) fn draw_group(
     (
         short_label,
         Vec2::new(
-            x + PILL_INSET + PILL_PAD_X,
-            y + PILL_INSET + (PILL_HEIGHT - PILL_FONT) / 2.,
+            x + PILL_PAD_X,
+            y - PILL_GAP - PILL_HEIGHT + (PILL_HEIGHT - PILL_FONT) / 2.,
         ),
         PILL_FONT,
         theme.token_u32("canvasGroupLabelText"),

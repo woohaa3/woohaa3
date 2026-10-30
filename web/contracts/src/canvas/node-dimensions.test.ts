@@ -85,7 +85,7 @@ describe("shared effective canvas dimensions", () => {
     const scene = assertVisibleGeometry(canvas);
     const nodes = canvas.document.nodes.map(n => ({...n, data: {}}));
     const byId = new Map(nodes.map(n => [n.id, n]));
-    const outer = {x: 100, y: 200, width: 360, height: 340};
+    const outer = {x: 100, y: 200, width: 332, height: 272};
     expect(scene.nodes.find(n => n.id === "outer")).toMatchObject(outer);
     expect(getWoohaa3CanvasNodeRect(nodes[0]!, byId)).toEqual(outer);
     expect(getWoohaa3CanvasSelectionBounds([nodes[0]!], nodes)).toEqual(outer);

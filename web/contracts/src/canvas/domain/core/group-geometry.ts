@@ -12,9 +12,15 @@ import { effectiveCanvasNodeSize } from "../../node-dimensions.js";
 import { DEFAULT_NODE_DIMS } from "./node-factory";
 import type { Woohaa3CanvasNode } from "./canvas-runtime";
 
-export const groupPadding = 40;
-/** Reserved footer for the group identification model and separation from members. */
-export const groupBottomPadding = 80;
+/**
+ * 组成员到组框的内边距（change: canvas-grouping-redesign）。
+ *
+ * 参考稿里组框紧贴成员、只留一圈窄边，组名浮在框外上方，因此不再需要旧版那个
+ * 40/80 的大留白（80 的 footer 原本是留给组徽章的，徽章已随 redesign 移除）。
+ */
+export const groupPadding = 12;
+/** 底部内边距：与左右一致，组框不再额外留出 footer。 */
+export const groupBottomPadding = 12;
 /** Shallow badge lip in canvas units, outside member/resize bounds. */
 export const groupBadgeOutset = 6;
 

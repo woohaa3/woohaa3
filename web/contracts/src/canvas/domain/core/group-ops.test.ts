@@ -48,7 +48,7 @@ function byId(nodes: Woohaa3CanvasNode[]): Map<string, Woohaa3CanvasNode> {
 }
 
 describe("groupWoohaa3CanvasNodes", () => {
-  it("左右上 40px、底部 80px 包围节点并保持成员绝对坐标", () => {
+  it("四周 12px 包围节点并保持成员绝对坐标", () => {
     const nodes = [node("a", { x: 100, y: 100 }), node("b", { x: 400, y: 300 })];
     const result = groupWoohaa3CanvasNodes(nodes, ["a", "b"]);
     expect(result).not.toBeNull();
@@ -56,15 +56,15 @@ describe("groupWoohaa3CanvasNodes", () => {
 
     const group = next.find((entry) => entry.id === groupId)!;
     expect(group.type).toBe("group");
-    // 包围盒 = (100,100)-(600,400)，每侧 padding 40。
-    expect(group.position).toEqual({ x: 60, y: 60 });
-    expect(group.width).toBe(580); // 500 + 80
-    expect(group.height).toBe(420); // 300 + 40 + 80
+    // 包围盒 = (100,100)-(600,400)，每侧 padding 12。
+    expect(group.position).toEqual({ x: 88, y: 88 });
+    expect(group.width).toBe(524); // 500 + 24
+    expect(group.height).toBe(324); // 300 + 24
 
     // 成员相对坐标 = 绝对 - group 原点，绝对位置不变。
     const a = next.find((entry) => entry.id === "a")!;
     expect(a.parentId).toBe(groupId);
-    expect(a.position).toEqual({ x: 40, y: 40 });
+    expect(a.position).toEqual({ x: 12, y: 12 });
     expect(getWoohaa3CanvasNodeAbsolutePosition(a, byId(next))).toEqual({ x: 100, y: 100 });
   });
 
@@ -378,21 +378,25 @@ describe("mergeDraggedNodePositions", () => {
 
 
 describe("group footer layout projection", () => {
-  it("existing groups gain footer space without mutating members or stored dimensions", () => {
+  it("existing groups hug members without mutating them or stored dimensions", () => {
     const nodes = [node("g", {x: 0, y: 0}, {type: "group", width: 300, height: 180}),
       node("m", {x: 40, y: 40}, {parentId: "g"})];
     const before = structuredClone(nodes);
-    expect(getGroupLayoutSizes(nodes).get("g")).toEqual({width: 300, height: 220});
-    expect(getGroupRequiredMinSize(nodes, "g")).toEqual({minWidth: 280, minHeight: 220});
+    // 成员 (40,40)–(240,140) + 四周 12；组存储的 300×180 已够大，只被高度上限抬到 195。
+    expect(getGroupLayoutSizes(nodes).get("g")).toEqual({width: 300, height: 195});
+    expect(getGroupRequiredMinSize(nodes, "g")).toEqual({minWidth: 260, minHeight: 195});
     expect(nodes).toEqual(before);
   });
-  it("nested groups include their own footer and live member size overrides", () => {
+  it("nested groups hug their members and honour live member size overrides", () => {
     const nodes = [node("g", {x: 0, y: 0}, {type: "group", width: 300, height: 220}),
       node("inner", {x: 40, y: 40}, {type: "group", parentId: "g", width: 280, height: 200}),
       node("m", {x: 40, y: 40}, {parentId: "inner"})];
     const sizes = getGroupLayoutSizes(nodes, new Map([["m", {width: 400, height: 300}]]));
-    expect(sizes.get("inner")).toEqual({width: 480, height: 420});
-    expect(sizes.get("g")).toEqual({width: 560, height: 540});
+    // inner：成员从 (40,40) 起、被调成 400×300，右/下边到 440/340，
+    // 左右上 padding 12、底部 12 → 452×352。
+    expect(sizes.get("inner")).toEqual({width: 452, height: 352});
+    // g：inner 在 (40,40)、可见尺寸 452×352，同理得 504×404。
+    expect(sizes.get("g")).toEqual({width: 504, height: 404});
   });
   it("manual enlargement stays intact; resize previews may shrink back to the protected minimum", () => {
     const nodes = [node("g", {x: 0, y: 0}, {type: "group", width: 900, height: 800}),
