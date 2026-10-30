@@ -340,6 +340,36 @@ describe("参数语义（x-pptask-control）", () => {
     }
   });
 });
+describe("音色选择器", () => {
+  it("semantic=voice 渲染成下拉：显示人读名称，回传上游音色 id", async () => {
+    const field = selectField(
+      [
+        { value: "male-qn-qingse", label: "青涩青年音色（中文）" },
+        { value: "English_expressive_narrator", label: "Expressive Narrator（英文）" }
+      ],
+      { key: "voice", label: "音色", semantic: "voice", defaultValue: "male-qn-qingse" }
+    );
+    const view = setup(field, "male-qn-qingse");
+    try {
+      await view.render();
+      const select = view.container.querySelector<HTMLSelectElement>(".mc-panel__settings-select");
+      expect(select).not.toBeNull();
+      expect([...select!.options].map((option) => option.textContent)).toContain(
+        "Expressive Narrator（英文）"
+      );
+      expect(select!.value).toBe("male-qn-qingse");
+
+      await act(async () => {
+        select!.value = "English_expressive_narrator";
+        select!.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      expect(view.changes.at(-1)).toBe("English_expressive_narrator");
+    } finally {
+      await view.cleanup();
+    }
+  });
+});
+
 describe("联动锁定", () => {
   const formatField: ExecutionPanelParameterField = {
     key: "outputFormat",

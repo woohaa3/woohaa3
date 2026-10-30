@@ -564,6 +564,25 @@
   gap: 6px;
 }
 
+/* 长枚举（音色）用下拉：与分段按钮同高同色，但不会铺满参数弹层。 */
+.mc-panel__settings-select {
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 9px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--app-web-subtle);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mc-panel__settings-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* 联动锁定的解释：让「为什么这一项不能改」就地可读，而不是灰一个控件让人猜。 */
 .mc-panel__settings-lock {
   color: var(--text-muted);

@@ -5,10 +5,10 @@
  *
  * 1. **参数最大集合**（`controls.ts`）：有限、可穷举的预设控件。新增能力先进这里，
  *    而不是先在某个 Provider 里写死。
- * 2. **类型预设**（`types.ts`）：video 该有时长 / 比例 / 分辨率，image 该有质量 / 数量。
- *    这是「类型」的知识，与厂商无关。
+ * 2. **类型预设**（`types.ts`）：video 该有时长 / 比例 / 分辨率，image 该有质量 / 数量，
+ *    audio 该有音色 / 输出格式 / 语速。这是「类型」的知识，与厂商无关。
  * 3. **模型卡片**（`cards/`）：在类型预设上剪枝、收窄、声明约束。**目录结构即分类**：
- *    `cards/<image|video>/<vendor>/<model>.ts`。
+ *    `cards/<image|video|audio>/<vendor>/<model>.ts`。
  *
  * 值域：通用部分（档位、步长、枚举）来自家族表（`../image-parameters`、
  * `../video-parameters`），按 `providerModelId` 匹配；**随版本变化的厂商数字写在卡片的
@@ -28,9 +28,14 @@ export {
   type ParameterControlKind,
   type ParameterControlSpec
 } from "./controls.js";
-export { MODEL_TYPE_PRESETS, type ModelTypePreset } from "./types.js";
+export {
+  MODEL_TYPE_PRESETS,
+  type ModelTypePreset,
+  type PresetModelType
+} from "./types.js";
 export {
   MB,
+  audioCard,
   imageCard,
   videoCard,
   type CardInput,
@@ -44,6 +49,7 @@ export {
   type ReferenceKind
 } from "./limits.js";
 export {
+  AUDIO_CARDS,
   BUILTIN_PRESET_CARDS,
   IMAGE_CARDS,
   VIDEO_CARDS

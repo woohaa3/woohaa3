@@ -15,6 +15,7 @@
  */
 import type { GenerationModelLimits } from "../model-capabilities.js";
 import type { SeedreamSizePreset } from "./cards/image/ark/seedream-spec.js";
+import type { PresetModelType } from "./types.js";
 
 /**
  * 上游厂商。与 `cards/<类型>/<厂商>/` 的目录名一一对应。
@@ -46,7 +47,7 @@ export type PresetCard = {
    * 通用值域由家族表按 id 给出；厂商专属块（如 `seedream`）里的数字以这页为准。
    */
   docs: string;
-  modelType: "image" | "video";
+  modelType: PresetModelType;
   /** 一句话说明这张卡片的差异，展示在模型选择器里。 */
   note?: string;
   /** 保留的语义键；未列出的即被剪枝。 */
@@ -87,6 +88,15 @@ export function videoCard(input: CardInput): PresetCard {
   return {
     ...input,
     modelType: "video",
+    providerId: input.providerId ?? "remote-server"
+  };
+}
+
+/** 声明一张音频卡片。 */
+export function audioCard(input: CardInput): PresetCard {
+  return {
+    ...input,
+    modelType: "audio",
     providerId: input.providerId ?? "remote-server"
   };
 }

@@ -20,6 +20,7 @@ export * from "./task/protocol.js";
 export * from "./task/schema-validation.js";
 export * from "./task/parameter-schema.js";
 export * from "./task/image-parameters.js";
+export * from "./task/audio-parameters.js";
 export * from "./task/model-presets.js";
 export * from "./task/generation-parameters/index.js";
 export * from "./task/video-parameters.js";

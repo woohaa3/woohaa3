@@ -34,6 +34,7 @@ export default {
 
 const IMAGE_CARDS = presetCardsOf(BUILTIN_PRESET_CARDS, "image");
 const VIDEO_CARDS = presetCardsOf(BUILTIN_PRESET_CARDS, "video");
+const AUDIO_CARDS = presetCardsOf(BUILTIN_PRESET_CARDS, "audio");
 
 /** 面板外的说明栏：列出被剪掉的键与生效后的约束。 */
 function CardNotes({ entry }: { entry: ComposedEntry | undefined }) {
@@ -84,7 +85,7 @@ function Stage({
   cards,
   note
 }: {
-  taskKind: "image-generation" | "video-generation";
+  taskKind: "image-generation" | "video-generation" | "audio-generation";
   cards: readonly import("@woohaa3/contracts").PresetCard[];
   note: string;
 }) {
@@ -150,6 +151,16 @@ export const VideoCards: Story = () => (
 );
 VideoCards.storyName = "视频卡片";
 
+/** 音频卡片：OpenAI TTS、MiniMax Speech、托管通用。 */
+export const AudioCards: Story = () => (
+  <Stage
+    taskKind="audio-generation"
+    cards={AUDIO_CARDS}
+    note="音频卡片：音色 / 输出格式 / 语速由卡片收窄；没有参考素材，也没有家族表——值域就写在这几张卡片上。"
+  />
+);
+AudioCards.storyName = "音频卡片";
+
 /** 今天的样子：服务端按类型写死，只有两个文本框，且没有卡片约束。 */
 export const TodayGeneric: Story = () => (
   <Stage
@@ -175,6 +186,7 @@ export const ControlUniverse: Story = () => (
           <th style={{ textAlign: "left", padding: "4px 12px" }}>控件</th>
           <th style={{ textAlign: "left", padding: "4px 12px" }}>图片预设</th>
           <th style={{ textAlign: "left", padding: "4px 12px" }}>视频预设</th>
+          <th style={{ textAlign: "left", padding: "4px 12px" }}>音频预设</th>
         </tr>
       </thead>
       <tbody>
@@ -190,6 +202,9 @@ export const ControlUniverse: Story = () => (
             </td>
             <td style={{ padding: "3px 12px" }}>
               {MODEL_TYPE_PRESETS.video.keys.includes(control.key) ? "✓" : "—"}
+            </td>
+            <td style={{ padding: "3px 12px" }}>
+              {MODEL_TYPE_PRESETS.audio.keys.includes(control.key) ? "✓" : "—"}
             </td>
           </tr>
         ))}

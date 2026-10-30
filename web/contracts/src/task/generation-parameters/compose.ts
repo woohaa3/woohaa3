@@ -18,7 +18,7 @@ import { videoFamilyParameters, videoFamilyFor } from "../video-parameters.js";
 import type { GenerationModelLimits } from "../model-capabilities.js";
 import type { PresetCard } from "./card.js";
 import { CONTROL_BY_KEY } from "./controls.js";
-import { MODEL_TYPE_PRESETS } from "./types.js";
+import { MODEL_TYPE_PRESETS, type PresetModelType } from "./types.js";
 
 export type ComposedPresetCard = {
   /** 合成后的目录模型，可直接交给 `projectParameterFields`。 */
@@ -39,9 +39,12 @@ function mergeOptions(
 /**
  * 家族 schema。图像与视频共用同一套接缝（`imageFamilyParameters` / `videoFamilyParameters`），
  * 因此「新增一个厂商家族」只改家族表，卡片不需要跟着改。
+ *
+ * 音频没有版本化的值域（音色 / 格式 / 语速由模型目录与卡片本身给出），所以返回 null：
+ * 卡片直接按类型预设 + `narrow` 合成，不经过家族表。
  */
 function familySchema(
-  modelType: "image" | "video",
+  modelType: PresetModelType,
   providerModelId: string
 ): { properties: Record<string, unknown>; defaults: Record<string, unknown> } | null {
   if (modelType === "image") {
@@ -51,6 +54,7 @@ function familySchema(
       ? null
       : { properties: { ...family.properties }, defaults: { ...family.defaults } };
   }
+  if (modelType === "audio") return null;
   if (videoFamilyFor(providerModelId) === undefined) return null;
   const family = videoFamilyParameters(providerModelId);
   return family === null

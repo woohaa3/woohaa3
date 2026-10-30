@@ -7,9 +7,13 @@
 import { catalogModelBindings, type CanvasTaskCatalogModel, type CanvasTaskInputBinding } from "../dto.js";
 import type { GenerationModelLimits } from "../model-capabilities.js";
 import type { PresetCard } from "./card.js";
+import type { PresetModelType } from "./types.js";
 
 /** 按模型类型筛卡片。 */
-export function presetCardsOf(cards: readonly PresetCard[], modelType: "image" | "video"): readonly PresetCard[] {
+export function presetCardsOf(
+  cards: readonly PresetCard[],
+  modelType: PresetModelType
+): readonly PresetCard[] {
   return cards.filter((card) => card.modelType === modelType);
 }
 

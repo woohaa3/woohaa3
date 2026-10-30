@@ -88,6 +88,7 @@ describe("生成参数语义 schema builder", () => {
     expect(isPptaskParameterControl("aspect-ratio")).toBe(true);
     expect(isPptaskParameterControl("resolution")).toBe(true);
     expect(isPptaskParameterControl("quality")).toBe(true);
+    expect(isPptaskParameterControl("voice")).toBe(true);
     expect(isPptaskParameterControl("slider")).toBe(false);
     expect(isPptaskParameterControl(undefined)).toBe(false);
   });
