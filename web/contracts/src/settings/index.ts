@@ -12,6 +12,7 @@
  * 下面的 `SETTING_DEFINITIONS` 只是宿主自己的配置项；插件的配置项由插件声明 Config schema，
  * 宿主合并成一张定义表后再解析（见 `resolveSettings` 的 `definitions`）。
  */
+import { DEFAULT_GITHUB_MARKETPLACE_REPOS } from "../backend/marketplace.js";
 import { isJsonObject } from "../validation.js";
 import type { PluginIcon } from "../plugin-icon.js";
 import type { CanvasTaskModelType } from "../task/dto.js";
@@ -164,23 +165,26 @@ export const SETTING_DEFINITIONS = {
     description: "仅用于开发：允许从本地文件安装未签名的 .wxt；市场来源的包始终要求签名。未签名扩展与宿主同进程运行，没有隔离"
   },
   /**
-   * GitHub Release 市场来源（核心自带，与 local-file 同级）。出网行为必须显式开启：
-   * enabled 未开时来源不可用，不发起任何请求。repos 为逗号分隔的 `owner/repo` 列表。
+   * GitHub Release 市场来源（核心自带，与 local-file 同级）。
+   *
+   * 缺省开启并指向官方市场仓库：插件面板开箱就能搜索安装。关闭后来源不可用、不发起任何请求。
+   * 未配令牌时走 github.com 网页端点（不消耗 REST API 60 次/小时的匿名限额）；配了令牌或
+   * 换过 API 基址才走 REST（私有仓库 / GitHub Enterprise Server）。
    */
   "extensions.marketplace.github.enabled": {
     kind: "boolean",
-    default: false,
+    default: true,
     reload: "hot",
     label: "启用 GitHub 扩展来源",
-    description: "允许从 GitHub Release 安装 .wxt 扩展包。开启后本机会访问 GitHub（api.github.com 或下面配置的 API 地址）；关闭时不发起任何请求"
+    description: "允许从 GitHub Release 安装 .wxt 扩展包。开启后本机会访问 GitHub；关闭时不发起任何请求"
   },
   /** GitHub 仓库列表：逗号分隔的 `owner/repo`；每个仓库的 Release 资产都是候选包。 */
   "extensions.marketplace.github.repos": {
     kind: "string",
-    default: "",
+    default: DEFAULT_GITHUB_MARKETPLACE_REPOS,
     reload: "hot",
     label: "GitHub 扩展仓库列表",
-    description: "逗号分隔的 owner/repo 列表（如 my-org/my-extension）。安装候选来自这些仓库 Release 的 .wxt 资产，文件名须为 <extensionId>-<version>.wxt"
+    description: "逗号分隔的 owner/repo 列表，缺省为官方市场仓库。安装候选来自这些仓库 Release 的 .wxt 资产，文件名须为 <extensionId>-<version>.wxt"
   },
   /** GitHub REST API 地址；企业自建 GitHub（GitHub Enterprise Server）可改为 https://<host>/api/v3。 */
   "extensions.marketplace.github.apiBase": {
@@ -191,14 +195,14 @@ export const SETTING_DEFINITIONS = {
     label: "GitHub API 地址",
     description: "GitHub REST API 基址，缺省 https://api.github.com；GitHub Enterprise Server 改为 https://<host>/api/v3"
   },
-  /** GitHub 访问令牌：私有仓库或提高限流用；只应写在密钥文件，缺省匿名访问（60 次/小时限流）。 */
+  /** GitHub 访问令牌：私有仓库或强制走 REST API 用；只应写在密钥文件，缺省匿名走网页端点。 */
   "extensions.marketplace.github.token": {
     kind: "string",
     default: "",
     reload: "hot",
     secret: true,
     label: "GitHub 访问令牌",
-    description: "访问私有仓库或提高 API 限流用；留空为匿名访问。请写在密钥文件（woohaa.secrets.yml），不要写进普通配置文件"
+    description: "访问私有仓库用；填写后改走 REST API（私有仓库只能这样）。留空时匿名读 github.com 网页端点，不占 API 限额。请写在密钥文件（woohaa.secrets.yml），不要写进普通配置文件"
   }
 } as const satisfies Record<string, SettingDefinition>;
 

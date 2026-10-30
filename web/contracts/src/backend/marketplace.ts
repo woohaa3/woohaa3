@@ -10,6 +10,12 @@ import type { ExtensionEngines } from "../extension/services/host/marketplace.js
 /** 核心自带的本地文件来源（上传 `.wxt`）。 */
 export const MARKETPLACE_LOCAL_FILE_SOURCE_ID = "local-file";
 
+/**
+ * 缺省市场仓库（公开仓）：GitHub Release 来源开箱即用的候选仓库。
+ * 配置 `extensions.marketplace.github.repos` 可整体替换它。
+ */
+export const DEFAULT_GITHUB_MARKETPLACE_REPOS = "woohaa3/woohaa3-marketplace";
+
 /** 安装失败码（design D11）。稳定短标识，前端据此给出中文原因。 */
 export const MARKETPLACE_FAILURE_CODES = [
   "MARKETPLACE_SOURCE_UNAVAILABLE",
