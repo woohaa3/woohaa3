@@ -306,7 +306,7 @@ export type InteractionControllerOptions = {
     /** 当前是否对象模式（整体模式返回 false，主按钮保留整体/镜头语义）。 */
     active(): boolean;
     /** 单击命中：按屏幕点选择对象并返回是否命中/改变选择。 */
-    select(point: { x: number; y: number }): boolean;
+    select(point: { x: number; y: number }, options?: { preserveOnMiss?: boolean }): boolean;
     /** 命中选中对象时开始拖动；返回是否已开始。 */
     begin(point: { x: number; y: number }, shift: boolean): boolean;
     move(point: { x: number; y: number }): void;

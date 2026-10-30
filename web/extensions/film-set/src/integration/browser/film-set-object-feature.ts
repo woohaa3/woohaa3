@@ -169,7 +169,6 @@ export function installFilmSetObjectFeature(
     if (!ctx.filmSetPlayback.getSnapshot().preview) return;
     objectGesture.handler.cancelIfDragging();
     objectSession.cancelEdit();
-    objectSession.setTool("move");
   });
   let runtimeGeneration = ctx.canvasRuntime.runtime()?.generation();
   const unsubscribeRuntime = ctx.canvasRuntime.subscribe(() => {
@@ -178,7 +177,6 @@ export function installFilmSetObjectFeature(
     runtimeGeneration = generation;
     objectGesture.handler.cancelIfDragging();
     objectSession.cancelEdit();
-    objectSession.setTool("move");
   });
 
   return {

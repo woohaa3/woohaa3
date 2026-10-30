@@ -14,6 +14,8 @@ export type CompositeChildPresentation = CompositeChildRelation & {
   closable?: boolean;
 };
 export type CompositeAssetAdapter = {
+  /** Workspace chrome dimensions, evaluated by the shared layout owner. */
+  focusLayout?(nodeId: string): import("../cordis/focus/layout.js").FocusLayoutConfig;
   emptyPlaceholder?: import("@woohaa3/contracts").CompositeAssetEmptyPlaceholder;
   showEmptyPlaceholder?(nodeId: string, data: CanvasNodeData): boolean;
   extensionId: string;
@@ -65,7 +67,7 @@ export type CompositeAssetAdapter = {
   objectPreview?(nodeId: string): { itemId: string; transform: FilmSetLocalTransform } | null;
   gizmo?(nodeId: string): BevyModelEditor | null;
   readCameras?(nodeId: string, data: CanvasNodeData): ModelCamera[];
-  writeCameras?(nodeId: string, cameras: readonly ModelCamera[]): boolean;
+  writeCameras?(nodeId: string, cameras: readonly ModelCamera[]): boolean | Promise<boolean>;
   captureOrigin?(nodeId: string, cameraId: string): import("./model-workspace.js").ModelCaptureOrigin | null;
   awaitCaptureReady?(nodeId: string): Promise<boolean>;
   /** Business owner decides whether explicit frame capture is available for this target. */

@@ -45,7 +45,7 @@ export function readCameras(nodeId: string, ctx?: Context): ModelCamera[] {
   return Array.isArray(data?.modelCameras) ? (data.modelCameras as ModelCamera[]) : [];
 }
 
-export function submitCameras(ctx: Context, nodeId: string, cameras: readonly ModelCamera[]): boolean {
+export function submitCameras(ctx: Context, nodeId: string, cameras: readonly ModelCamera[]): boolean | Promise<boolean> {
   if (!ctx.canvasSession.isWritable()) return false;
   const adapter = ctx.compositeAssets.resolve(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), nodeId);
   if (adapter?.writeCameras) return adapter.writeCameras(nodeId, cameras);

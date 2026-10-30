@@ -6,7 +6,8 @@ import { MODEL_CAMERA_ASPECTS, type ModelCameraAspect, readFilmSetGroupMarker, d
 export function filmSetEditorCameras(data: unknown, selectedClipId: string | null) {
   const marker = readFilmSetGroupMarker(data);
   if (marker) {
-    const clip = marker.clips?.find(clip => clip.id === selectedClipId) ?? marker.clips?.find(clip => clip.id === marker.activeClip) ?? marker.clips?.[0];
+    const clip = selectedClipId === null ? marker.clips?.find(clip => clip.id === marker.activeClip) ?? marker.clips?.[0] : marker.clips?.find(clip => clip.id === selectedClipId);
+    if (selectedClipId !== null && !clip) return [];
     const camera = marker.cameras?.find(camera => camera.id === clip?.cameraId) ?? marker.cameras?.[0];
     return camera ? [{ ...camera, id: clip ? `clip:${clip.id}` : "scene-camera", name: clip?.name ?? "场景镜头", order: 0, aspect: (MODEL_CAMERA_ASPECTS as readonly string[]).includes(camera.aspect ?? "") ? camera.aspect as ModelCameraAspect : "16:9" as const }] : [];
   }
@@ -23,8 +24,12 @@ export function filmSetEditorCameras(data: unknown, selectedClipId: string | nul
 export function sceneCameraWriter(
   submit: FilmSetHostContext["canvasSession"]["submitCommands"],
   readData: (nodeId: string) => unknown,
-  readProjection?: (nodeId: string) => FilmSetNodeData | null
+  readProjection?: (nodeId: string) => FilmSetNodeData | null,
+  record?: FilmSetHostContext["canvasEdit"]["record"]
 ): NonNullable<CompositeAssetAdapter["writeCameras"]> {
+  const write = (commands: Parameters<typeof submit>[0], commandId: string) => record
+    ? record(commands, "修改拍摄镜头构图").then(result => result.ok)
+    : submit(commands, commandId).ok;
   return (nodeId, cameras) => {
     if (cameras.length !== 1) return false;
     const camera = cameras[0];
@@ -34,7 +39,7 @@ export function sceneCameraWriter(
       const existing = marker.cameras?.[0];
       if (!existing) return false;
       const { azimuth, elevation, distance, aspect, focusOffset } = camera;
-      return submit([{ type: "nodeData.patch", nodeId, value: { filmSetGroup: { ...marker, cameras: [{ ...existing, azimuth, elevation, distance, aspect, focusOffset: focusOffset ?? { x: 0, y: 0, z: 0 } }] } } as never }], `film-set-camera-${crypto.randomUUID()}`).ok;
+      return write([{ type: "nodeData.patch", nodeId, value: { filmSetGroup: { ...marker, cameras: [{ ...existing, azimuth, elevation, distance, aspect, focusOffset: focusOffset ?? { x: 0, y: 0, z: 0 } }] } } as never }], `film-set-camera-${crypto.randomUUID()}`);
     }
     const projected = readProjection?.(nodeId);
     const decoded = projected ? { ok: true as const, value: projected } : decodeFilmSetNodeData(readData(nodeId));
@@ -45,11 +50,11 @@ export function sceneCameraWriter(
     if (!clip && (camera.id !== "scene-camera" || collection.clips.length > 0)) return false;
     const { azimuth, elevation, distance, aspect } = camera;
     const initialCamera = { azimuth, elevation, distance, aspect, focusOffset: camera.focusOffset ?? { x: 0, y: 0, z: 0 } };
-    return submit([
+    return write([
       ...(!readFilmSetGroupMarker(readData(nodeId)) ? [{ type: "nodeData.patch" as const, nodeId, value: { sceneCamera: initialCamera } as never }] : []),
       ...(clip ? [{ type: "filmSet.clipPatch" as const, nodeId, clipId: clip.id,
         op: { kind: "camera" as const, initialCamera },
         expectedHash: filmSetClipPrecondition(collection, clip.id, { kind: "camera", initialCamera }) }] : [])
-    ], `film-set-camera-${crypto.randomUUID()}`).ok;
+    ], `film-set-camera-${crypto.randomUUID()}`);
   };
 }

@@ -222,3 +222,14 @@ describe("helpers", () => {
     expect(describeRecordingFailure("something-new", "")).toBe("视频生成失败，请重试");
   });
 });
+
+it("unmount or hiding stops observation without cancelling or resubmitting the accepted native job", async () => {
+  const remote = remoteWith([status(), status({ state: "succeeded" })]);
+  let observing = true;
+  const driver = createRecordingDriver({ remote: remote as never, canvasId: "c1", sleep: async () => { observing = false; } });
+  const result = await driver.wait("job-1", undefined, () => observing);
+  expect(result).toMatchObject({ ok: false, code: "recording-observation-stopped" });
+  expect(remote.calls).toEqual({ submit: 0, status: 1, cancel: 0 });
+  const current = await driver.status("job-1");
+  expect(current).toMatchObject({ ok: true, value: { status: { state: "succeeded" } } });
+});

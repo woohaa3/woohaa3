@@ -119,6 +119,9 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     "assistant" | "model" | null
   >(null);
   const busy = input.busy;
+  useEffect(() => {
+    props.onDraftStateChange?.({ hasDraft: prompt.trim().length > 0, busy });
+  }, [props.onDraftStateChange, controller, prompt, busy]);
   const notice = input.notice;
   const [catalog, setCatalog] = useState<{
     key: string;

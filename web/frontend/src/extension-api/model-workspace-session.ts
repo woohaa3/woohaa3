@@ -67,6 +67,8 @@ export type ModelEditorSessionState = {
   capturePhase: CapturePhase;
   /** 最近一次截图/上传失败的安全信息。 */
   captureError: string | null;
+  cameraWriteError: string | null;
+  cameraWritePending: boolean;
 };
 
 const INITIAL: ModelEditorSessionState = {
@@ -78,7 +80,9 @@ const INITIAL: ModelEditorSessionState = {
   focusPreview: null,
   previewUrl: null,
   capturePhase: "idle",
-  captureError: null
+  captureError: null,
+  cameraWriteError: null,
+  cameraWritePending: false
 };
 
 export type ModelEditorSessionDeps = {
@@ -87,12 +91,13 @@ export type ModelEditorSessionDeps = {
   /** 会话是否可写（只读时禁用所有持久化动作）。 */
   isWritable: () => boolean;
   /** 提交一次完整规范化 `modelCameras` patch（会话负责生成的 commandId）。 */
-  submitCameras: (nodeId: string, cameras: readonly ModelCamera[]) => boolean;
+  submitCameras: (nodeId: string, cameras: readonly ModelCamera[]) => boolean | Promise<boolean>;
   /** 撤销一个 object URL（缺省 no-op；测试可注入）。 */
   revokeObjectUrl?: (url: string) => void;
 };
 
 export class ModelEditorSession {
+  private writeGeneration = 0;
   private gestureCamera: string | null = null;
   private state: ModelEditorSessionState = { ...INITIAL };
   private readonly listeners = new Set<() => void>();
@@ -117,6 +122,7 @@ export class ModelEditorSession {
 
   /** 进入模型编辑（聚焦打开时调用）。默认镜头模式并重置截图状态。 */
   enter(nodeId: string): void {
+    ++this.writeGeneration;
     this.revokePreview();
     this.optimisticCameras = null;
     this.state = { ...INITIAL, nodeId, toolMode: "camera" };
@@ -128,6 +134,7 @@ export class ModelEditorSession {
 
   /** 退出编辑：撤销 preview、释放 capture 状态（迟到结果由 generation 丢弃）。 */
   exit(): void {
+    ++this.writeGeneration;
     this.revokePreview();
     this.optimisticCameras = null;
     this.state = { ...INITIAL };
@@ -255,7 +262,7 @@ export class ModelEditorSession {
   /** 开始一次镜头 pose 手势：冻结时只记录 preview（含画幅与仰角），不写规范状态。 */
   beginPose(): void {
     const selected = this.selectedCamera();
-    if (!selected || !this.deps.isWritable()) return;
+    if (!selected || !this.deps.isWritable() || this.state.cameraWritePending) return;
     this.gestureCamera = JSON.stringify(selected);
     this.state = {
       ...this.state,
@@ -330,6 +337,7 @@ export class ModelEditorSession {
 
   /** 取消一次 pose 手势：丢弃 preview，不提交（design D7/task 4.5）。 */
   cancelPose(): void {
+    this.gestureCamera = null;
     if (this.state.posePreview === null) return;
     this.state = { ...this.state, posePreview: null };
     this.emit();
@@ -337,6 +345,7 @@ export class ModelEditorSession {
 
   /** 取消一次焦点手势：丢弃 preview，不提交（design D7/task 4.5）。 */
   cancelFocus(): void {
+    this.gestureCamera = null;
     if (this.state.focusPreview === null) return;
     this.state = { ...this.state, focusPreview: null };
     this.emit();
@@ -394,7 +403,7 @@ export class ModelEditorSession {
    */
   beginFocus(): boolean {
     const selected = this.selectedCamera();
-    if (!selected || !this.deps.isWritable()) return false;
+    if (!selected || !this.deps.isWritable() || this.state.cameraWritePending) return false;
     this.gestureCamera = JSON.stringify(selected);
     const offset = modelCameraFocusOffset(selected);
     this.state = { ...this.state, focusPreview: { ...offset }, posePreview: null };
@@ -492,7 +501,23 @@ export class ModelEditorSession {
   private submitCameras(nodeId: string, cameras: readonly ModelCamera[]): boolean {
     if (!this.deps.isWritable()) return false;
     const value = cameras.map((camera) => ({ ...camera }));
+    if (this.state.cameraWritePending) return false;
     const submitted = this.deps.submitCameras(nodeId, value);
+    if (typeof submitted !== "boolean") {
+      const generation = ++this.writeGeneration;
+      const targetName = this.selectedCamera()?.name ?? nodeId;
+      this.state = { ...this.state, cameraWritePending: true, cameraWriteError: null };
+      void submitted.then(ok => {
+        if (generation !== this.writeGeneration) return;
+        this.state = { ...this.state, cameraWritePending: false, cameraWriteError: ok ? null : `${targetName}：构图修改被拒绝，请读取最新状态后重新操作。` };
+        this.emit();
+      }, () => {
+        if (generation !== this.writeGeneration) return;
+        this.state = { ...this.state, cameraWritePending: false, cameraWriteError: `${targetName}：无法确认构图修改，请检查连接后读取原命令结果。` };
+        this.emit();
+      });
+      return true;
+    }
     if (submitted) this.optimisticCameras = { nodeId, value };
     return submitted;
   }

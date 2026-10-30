@@ -303,14 +303,30 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
       // 片场对象模式：单击选择命中对象；拖动移动/Shift 旋转（change: 2026-10-09 片场对象编辑）。
       // 在 gizmo 之后、整体拖动之前裁决，保持整体模式与镜头工具优先。
       if (objectGesture?.active() && placementEditable()) {
-        if (objectGesture.begin(point, event.shiftKey)) {
+        const cameraMode = options.getModelEditor?.()?.toolMode === "camera";
+        if (!cameraMode && objectGesture.begin(point, event.shiftKey)) {
           activeObjectDrag = true;
           canvas.setPointerCapture?.(event.pointerId);
           event.preventDefault();
           return;
         }
         // 未命中已选中对象：单击只更新选择，不开始拖动，也不落到相机手势。
-        objectGesture.select(point);
+        if (objectGesture.select(point, { preserveOnMiss: cameraMode }) || !cameraMode) {
+          canvas.setPointerCapture?.(event.pointerId);
+          event.preventDefault();
+          return;
+        }
+      }
+      // A selected constrained camera tool also works on the empty viewport. Geometry handles
+      // and object picking above keep priority; focus remains handle-only.
+      const editor = options.getModelEditor?.();
+      const toolHandle = editor?.toolMode === "camera" && editor.shot
+        ? editor.cameraTool === "orbit" ? "orbit-ring" : editor.cameraTool === "elevation" ? "elevation-ring" : editor.cameraTool === "distance" ? "distance" : null
+        : null;
+      if (toolHandle && shotGesture && placementEditable() && shotGesture.begin(toolHandle, point)) {
+        activeShotHandle = toolHandle;
+        cameraDragKey = dragKey();
+        feedback(toolHandle, true);
         canvas.setPointerCapture?.(event.pointerId);
         event.preventDefault();
         return;

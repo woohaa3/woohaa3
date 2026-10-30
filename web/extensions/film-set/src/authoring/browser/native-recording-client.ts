@@ -85,7 +85,7 @@ export type RecordingDriver = {
     | { ok: false; code: string; message: string }
   >;
   /** 等待终态；超时返回 `pending`（任务仍在跑，可继续查询）。 */
-  wait(jobId: string, onProgress?: (status: RecordingStatusView) => void): Promise<
+  wait(jobId: string, onProgress?: (status: RecordingStatusView) => void, isObserving?: () => boolean): Promise<
     | { ok: true; status: RecordingStatusView }
     | { ok: false; code: string; message: string }
     | { ok: false; code: "recording-still-running"; message: string; status: RecordingStatusView }
@@ -134,10 +134,11 @@ export function createRecordingDriver(deps: RecordingDriverDeps): RecordingDrive
       };
     },
 
-    async wait(jobId, onProgress) {
+    async wait(jobId, onProgress, isObserving) {
       const deadline = now() + timeoutMs;
       let last: RecordingStatusView | null = null;
       while (now() < deadline) {
+        if (isObserving && !isObserving()) return { ok: false, code: "recording-observation-stopped", message: "已停止观察，视频仍在后台生成，可在活动浮层查看结果" };
         const result = await deps.remote.recordingStatus({ canvasId: deps.canvasId, jobId });
         if (!result.ok) {
           return {
@@ -146,6 +147,7 @@ export function createRecordingDriver(deps: RecordingDriverDeps): RecordingDrive
             message: describeRecordingFailure(result.code, result.error)
           };
         }
+        if (isObserving && !isObserving()) return { ok: false, code: "recording-observation-stopped", message: "已停止观察，视频仍在后台生成，可在活动浮层查看结果" };
         last = result.value.status;
         onProgress?.(last);
         if (isTerminal(last.state)) {

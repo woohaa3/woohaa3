@@ -50,7 +50,12 @@ export function ModelEditorWorkspace({
   );
   // 普通模型仍需要右侧检查器（AI 修改 + 信息）；片场由扩展检查器承载，可经「镜头工具」收起。
   const panel = filmSet ? toolsOpen : nodeId !== null;
-  useFocusLayout(useMemo(() => ({ panel, animationPreview }), [panel, animationPreview]));
+  const extensionLayoutKey = useSyncExternalStore(ctx.compositeAssets.subscribe, () => {
+    const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
+    return JSON.stringify(nodeId ? ctx.compositeAssets.resolve(canvas, nodeId)?.focusLayout?.(nodeId) ?? {} : {});
+  }, () => "{}");
+  const extensionLayout = useMemo(() => JSON.parse(extensionLayoutKey) as import("../../focus/layout.js").FocusLayoutConfig, [extensionLayoutKey]);
+  useFocusLayout(useMemo(() => ({ panel, animationPreview, ...extensionLayout }), [panel, animationPreview, extensionLayout]));
 
   const historyOpen = navigation.panel?.type === "node-history" && navigation.panel.nodeId === nodeId;
   return (

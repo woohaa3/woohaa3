@@ -149,6 +149,7 @@ describe("FilmSetAdaptationConfirm 提交 clipPatch（任务 6.7）", () => {
     const submitted: CanvasCommand[] = [];
     const ctx = {
       canvasState: woohaa3CanvasStore.facade, compositeAssets: new CompositeAssetRegistry(),
+      canvasEdit: { record: async (commands: CanvasCommand[]) => { submitted.push(...commands); return { ok: true }; } },
       canvasSession: {
         isWritable: () => true,
         submitCommands: (commands: CanvasCommand[]) => { submitted.push(...commands); return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } }; }
@@ -165,7 +166,7 @@ describe("FilmSetAdaptationConfirm 提交 clipPatch（任务 6.7）", () => {
 
   it("确认按钮提交一条携带 expectedAdapterHash 与 expectedHash 的 filmSet.clipPatch", async () => {
     const h = setup();
-    const button = [...document.querySelectorAll("button")].find(entry => entry.textContent?.includes("确认动作适配"));
+    const button = [...document.querySelectorAll("button")].find(entry => entry.textContent?.includes("确认适配关联"));
     expect(button).toBeTruthy();
     await act(async () => { (button as HTMLButtonElement).click(); await Promise.resolve(); });
     expect(h.submitted).toHaveLength(1);

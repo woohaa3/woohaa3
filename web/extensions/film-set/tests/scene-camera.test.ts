@@ -70,3 +70,48 @@ describe("镜头相机自动保存", () => {
     expect(h.submit).not.toHaveBeenCalled();
   });
 });
+
+it("camera writes use the shared protected plan, acknowledge once and replay through undo/redo", async () => {
+  const { applyCanvasCommands, planCanvasEdit } = await import("../../../test-support/managed-shot-commands.js");
+  const h = harness();
+  const base = createEmptyWoohaa3ServerCanvas("journal");
+  base.document.nodes.push({ id: "film", type: "group", position: { x: 0, y: 0 } });
+  base.nodeData.film = h.data;
+  let canvas = base;
+  let inverse: Parameters<typeof applyCanvasCommands>[1] = [];
+  let forward: Parameters<typeof applyCanvasCommands>[1] = [];
+  let records = 0;
+  const write = sceneCameraWriter(h.submit, () => canvas.nodeData.film, id => readFilmSetAnimationProjection(canvas, id), async commands => {
+    records++;
+    const plan = planCanvasEdit(canvas, commands);
+    if (!plan.ok) return { ok: false, reason: plan.reason };
+    forward = [{ type: "edit.apply", ...plan.forward }];
+    inverse = [{ type: "edit.apply", ...plan.inverse }];
+    const result = applyCanvasCommands(canvas, forward);
+    if (!result.ok) return { ok: false, reason: result.rejection.message };
+    canvas = result.canvas;
+    return { ok: true, entry: {} as never };
+  });
+  const session = new ModelEditorSession({ readCameras: () => filmSetEditorCameras(canvas.nodeData.film, "a"), isWritable: () => true, submitCameras: write });
+  session.enter("film");
+  session.commitAzimuth(1.2);
+  await Promise.resolve();
+  expect(records).toBe(1);
+  expect(h.submit).not.toHaveBeenCalled();
+  expect(session.selectedCamera()?.azimuth).toBe(1.2);
+  const undo = applyCanvasCommands(canvas, inverse);
+  expect(undo.ok).toBe(true);
+  if (!undo.ok) return;
+  canvas = undo.canvas;
+  expect(session.selectedCamera()?.azimuth).toBe(0.3);
+  const redo = applyCanvasCommands(canvas, forward);
+  expect(redo.ok).toBe(true);
+  if (!redo.ok) return;
+  canvas = redo.canvas;
+  expect(session.selectedCamera()?.azimuth).toBe(1.2);
+});
+
+it("a removed selected shot returns no replacement camera", () => {
+  const h = harness();
+  expect(filmSetEditorCameras(h.data, "removed")).toEqual([]);
+});

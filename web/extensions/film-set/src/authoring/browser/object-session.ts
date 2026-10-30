@@ -31,6 +31,8 @@ export type FilmSetObjectSessionDeps = {
 
 export class FilmSetObjectSession extends FilmSetObjectState {
   private submission = 0;
+  private selection = 0;
+  selectionVersion(): number { return this.selection; }
   constructor(private readonly deps: FilmSetObjectSessionDeps) { super(); }
 
   setTool(tool: import("@woohaa3/contracts").ObjectGizmoTool): void {
@@ -98,6 +100,7 @@ export class FilmSetObjectSession extends FilmSetObjectState {
 
   /** 选择对象（session-only）；item 不存在时清空选择。 */
   select(itemId: string | null): void {
+    ++this.selection;
     if (!this.state.nodeId) return;
     this.editBase = null;
     if (itemId === null) {
@@ -237,7 +240,7 @@ export class FilmSetObjectSession extends FilmSetObjectState {
   /** 权威内容变化后清理失效选择（远端删除/切换）。 */
   reconcile(): void {
     if (!this.state.nodeId) return;
-    if (!this.deps.isWritable()) { this.cancelEdit(); this.setTool("move"); return; }
+    if (!this.deps.isWritable()) { this.cancelEdit(); return; }
     const itemId = this.state.selectedItemId;
     if (!itemId) return;
     const selected = filmSetItemById(this.deps.readContent(this.state.nodeId), itemId);

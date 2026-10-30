@@ -12,7 +12,7 @@ import { Button, IconButton, Popover } from "@woohaa3/ui/primitives";
 import { PlusIcon, EllipsisIcon } from "@woohaa3/ui/icons";
 import { TextInput, SelectInput } from "@woohaa3/ui/forms";
 import type { ShotImageReferences } from "./shot-image-reference.js";
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
 import {
   clipConversionImpact,
@@ -41,15 +41,21 @@ function kindLabel(kind: FilmSetShotKind): string {
   return kind === "static" ? "静态镜头" : "动态镜头";
 }
 
-export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, compositionOpen, onCompositionOpenChange, images }: {
+export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, compositionOpen, onCompositionOpenChange, images, onSelectShot, presentation }: {
   ctx: Context; nodeId: string; writable: boolean; composition?: ReactNode;
   compositionOpen?: boolean; onCompositionOpenChange?: (open: boolean) => void;
   images?: ShotImageReferences;
+  onSelectShot?: (id: string) => void;
+  presentation?: "create" | "properties";
 }) {
   const [menu, setMenu] = useState<"create" | "more" | null>(null);
   useSyncExternalStore(ctx.compositeAssets.subscribe, ctx.compositeAssets.getRevision, ctx.compositeAssets.getRevision);
   const canvasState = useSyncExternalStore(ctx.canvasState.subscribe, ctx.canvasState.getWorkingCanvas, ctx.canvasState.getWorkingCanvas);
   const playback = useSyncExternalStore(ctx.filmSetPlayback.subscribe, ctx.filmSetPlayback.getSnapshot, ctx.filmSetPlayback.getSnapshot);
+  const pending = useRef(false);
+  const target = useRef("");
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   useSyncExternalStore(images?.subscribe ?? (() => () => {}), images?.revision ?? (() => 0), () => 0);
@@ -62,8 +68,9 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
   const animation = readFilmSetAnimationProjection(ctx.compositeAssets.projectCanvas(canvas), nodeId);
   const collection = animation ? filmSetAnimationsOf(animation) : null;
   // 选择是本地状态：优先当前本地选中，其次持久默认，最后第一枚镜头（都不写 defaultClipId）。
-  const chosen = playback.nodeId === nodeId ? playback.clipId : null;
-  const shot = collection?.clips.find(clip => clip.id === chosen) ?? collection?.clips.find(clip => clip.id === collection.defaultClipId) ?? collection?.clips[0];
+  const chosen = playback.nodeId === nodeId ? playback.clipId : undefined;
+  const shot = chosen === undefined ? collection?.clips.find(clip => clip.id === collection.defaultClipId) ?? collection?.clips[0] : collection?.clips.find(clip => clip.id === chosen);
+  target.current = `${nodeId}:${shot?.id ?? ""}`;
   useEffect(() => {
     setPendingKind(null);
     setError(null);
@@ -71,18 +78,23 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
     setRenaming(false);
   }, [nodeId, shot?.id]);
   useEffect(() => {
-    if (playback.nodeId !== nodeId || playback.clipId !== (shot?.id ?? null)) ctx.filmSetPlayback.select(nodeId, shot?.id ?? null);
-  }, [nodeId, shot?.id, playback.nodeId, playback.clipId]);
+    if (presentation !== "create" && playback.nodeId !== nodeId) ctx.filmSetPlayback.select(nodeId, shot?.id ?? null);
+  }, [nodeId, shot?.id, playback.nodeId, playback.clipId, presentation]);
   if (!animation || !collection) return <p role="alert">片场资源无法读取，请检查来源卡片</p>;
 
   const mutate = async (op: FilmSetClipPatchOp, id = shot?.id): Promise<boolean> => {
-    if (!writable || !id) return false;
+    if (!writable || !id || pending.current) return false;
+    const original = target.current;
+    pending.current = true;
     setError(null);
-    const result = ctx.canvasSession.submitCommands([{ type: "filmSet.clipPatch", nodeId, clipId: id, op, expectedHash: filmSetClipPrecondition(collection, id, op) }], `web-clip-${crypto.randomUUID()}`);
-    if (!result.ok) { setError("拍摄镜头修改未提交，请检查连接和写入权限"); return false; }
-    const outcome = await result.handle.settled;
-    if (outcome.state === "rejected") { setError(outcome.error ?? "拍摄镜头修改被拒绝，请重新读取后重试"); return false; }
-    return true;
+    try {
+      const result = await ctx.canvasEdit.record([{ type: "filmSet.clipPatch", nodeId, clipId: id, op, expectedHash: filmSetClipPrecondition(collection, id, op) }], "修改拍摄镜头");
+      if (!alive.current || target.current !== original) return false;
+      if (!result.ok) { setError(`${shot?.name ?? id}：${result.reason}`); return false; }
+      return true;
+    } catch { if (alive.current && target.current === original) setError("镜头修改无法确认，请读取原操作结果后继续。"); return false; }
+    finally { pending.current = false; }
+
   };
 
   // 新建镜头继承当前所选镜头的背景（D6）。
@@ -101,7 +113,7 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
       bindings: [],
       ...(shot?.backdrop ? { backdrop: shot.backdrop } : {})
     };
-    if (await mutate({ kind: "create", clip }, id)) ctx.filmSetPlayback.select(nodeId, id);
+    if (await mutate({ kind: "create", clip }, id)) { if (onSelectShot) onSelectShot(id); else ctx.filmSetPlayback.select(nodeId, id); }
   };
 
   const imageState = shot?.kind === "static" ? images?.state(nodeId, shot.id) : undefined;
@@ -133,15 +145,18 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
   const remove = () => shot && void mutate({ kind: "delete" });
   const setDefault = () => shot && void mutate({ kind: "set-default" });
 
-  return <section className="film-set-animation-controls" aria-label="拍摄镜头管理">
-    <div className="film-set-section-heading">
-      <h3>拍摄镜头<span className="film-set-count">{collection.clips.length}</span></h3>
-      <div className="film-set-shot-tools">
-        <Popover open={menu === "create"} onOpenChange={open => setMenu(open ? "create" : null)} align="end" className="film-set-shot-menu"
+  const createMenu = (<Popover open={menu === "create"} onOpenChange={open => setMenu(open ? "create" : null)} align="end" className="film-set-shot-menu"
           trigger={<IconButton label="新建拍摄镜头" size="sm" tone="ghost" disabled={!writable || collection.clips.length >= 32}><PlusIcon size={16} /></IconButton>}>
           <Button size="sm" tone="ghost" onClick={() => { setMenu(null); void create("static"); }}>新建静态镜头</Button>
           <Button size="sm" tone="ghost" onClick={() => { setMenu(null); void create("dynamic"); }}>新建动态镜头</Button>
-        </Popover>
+        </Popover>);
+  if (presentation === "create") return <div className="film-set-create-shot">{createMenu}{error ? <p className="film-set-object-error">{error}</p> : null}</div>;
+
+  return <section className="film-set-animation-controls" aria-label="拍摄镜头管理">
+    <div className="film-set-section-heading">
+      <h3>{presentation === "properties" ? "镜头属性" : <>拍摄镜头<span className="film-set-count">{collection.clips.length}</span></>}</h3>
+      <div className="film-set-shot-tools">
+        {presentation !== "properties" ? createMenu : null}
         <Popover open={menu === "more"} onOpenChange={open => setMenu(open ? "more" : null)} align="end" className="film-set-shot-menu"
           trigger={<IconButton label="拍摄镜头操作" size="sm" tone="ghost" disabled={!shot}><EllipsisIcon size={16} /></IconButton>}>
           <Button size="sm" tone="ghost" disabled={!writable} onClick={() => { setMenu(null); setRenaming(true); }}>重命名</Button>
@@ -153,17 +168,17 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
       </div>
     </div>
     {collection.clips.length === 0 ? <p className="film-set-object-list__empty">还没有拍摄镜头。新建静态镜头做固定构图，或新建动态镜头加入时长与动作。</p> : null}
-    <div className="film-set-shot-picker"><SelectInput label="拍摄镜头" value={shot?.id ?? ""} onValueChange={value => { ctx.modelWorkspace.session.commitForCapture(); ctx.filmSetPlayback.select(nodeId, value); }}
+    {presentation !== "properties" ? <div className="film-set-shot-picker"><SelectInput label="拍摄镜头" value={shot?.id ?? ""} onValueChange={value => { ctx.modelWorkspace.session.cancelPose(); ctx.modelWorkspace.session.cancelFocus(); if (onSelectShot) onSelectShot(value); else ctx.filmSetPlayback.select(nodeId, value); }}
       options={collection.clips.map((clip, index) => ({ value: clip.id, label: `${index + 1}. ${clip.name}${clip.id === collection.defaultClipId ? " · 默认" : ""}` }))} />
       {shot?.kind === "dynamic" ? <Button size="sm" aria-pressed={playback.preview} onClick={() => playback.preview ? ctx.filmSetPlayback.edit() : ctx.filmSetPlayback.preview()}>{playback.preview ? "返回编辑" : "动画预览"}</Button> : null}
-    </div>
+    </div> : null}
     {shot ? <>
-      <p className="film-set-shot-kind">{kindLabel(shot.kind)} · {shot.kind === "static" ? "图片参考" : "视频参考"}</p>
+      {presentation !== "properties" ? <p className="film-set-shot-kind">{kindLabel(shot.kind)} · {shot.kind === "static" ? "图片参考" : "视频参考"}</p> : null}
       {renaming ? <label>名称<TextInput aria-label="拍摄镜头名称" key={shot.id + shot.name} defaultValue={shot.name} maxLength={80} disabled={!writable} onBlur={event => { if (event.target.value.trim() !== shot.name) void mutate({ kind: "rename", name: event.target.value }).then(ok => { if (ok) setRenaming(false); }); else setRenaming(false); }} /></label> : null}
       {shot.kind === "dynamic" ? <>
         <div className="film-set-shot-timing"><label>时长（秒）<TextInput key={shot.id + shot.timeline.duration} type="number" min={0} max={3600} step={0.1} defaultValue={shot.timeline.duration} disabled={!writable} onBlur={event => { const duration = Number(event.target.value); if (duration !== shot.timeline.duration) void mutate({ kind: "timeline", timeline: { ...shot.timeline, duration } }); }} /></label>
         <label><input type="checkbox" checked={shot.timeline.loop} disabled={!writable} onChange={event => void mutate({ kind: "timeline", timeline: { ...shot.timeline, loop: event.target.checked } })} />循环</label></div>
-      </> : <p className="film-set-object-hint">静态镜头保持零时长。需要动作或运镜时转换为动态镜头。</p>}
+      </> : presentation !== "properties" ? <p className="film-set-object-hint">静态镜头保持零时长。需要动作或运镜时转换为动态镜头。</p> : null}
       <div className="film-set-shot-backdrop">
         <label>背景<SelectInput label="镜头背景" value={filmSetBackdropIsCustom(shot) ? "custom" : "theme"} disabled={!writable}
           onValueChange={value => void mutate({ kind: "backdrop", backdrop: value === "theme" ? "theme" : customBackdropValid(customBackdrop) })}
@@ -186,10 +201,10 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
           event.preventDefault();
           onCompositionOpenChange(!compositionOpen);
         } : undefined}>构图<span>{shot.initialCamera.aspect}</span></summary>
-        <p className="film-set-object-hint">修改构图后自动保存，画布预览卡同步更新。</p>
+        {presentation !== "properties" ? <p className="film-set-object-hint">修改构图后自动保存，画布预览卡同步更新。</p> : null}
         {composition}
       </details>
-      {shot.kind === "static" ? <div className="film-set-image-reference">
+      {shot.kind === "static" ? <div className="film-set-image-reference"><h3>输出 · {shot.name}</h3>
         <p>{imageState?.status === "ready" ? "图片参考已更新" : imageState?.status === "failed" ? `图片参考更新失败：${imageState.error}` : "图片参考准备中 · 退出片场后自动更新"}</p>
         {imageState?.status === "ready" && imageState.error ? <p className="film-set-object-hint">{imageState.error}</p> : null}
         {imageState?.status === "failed" ? <Button size="sm" disabled={!writable} onClick={() => images?.retry(nodeId, shot.id)}>重试</Button> : null}

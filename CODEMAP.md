@@ -1,5 +1,7 @@
 # Client code map
 
+片场聚焦检查器（2026-10-30）：`web/extensions/film-set/src/authoring/browser/inspector.tsx` 分离固定镜头、列表与属性滚动，构图折叠不再控制工具；动态播放条在编辑态可达，输出按镜头类型组织。扩展经公共 `CompositeAssetAdapter.focusLayout` 声明 chrome 占位，经异步 `writeCameras` 使用同一个 `canvasEdit` journal，经 authoring `onDraftStateChange` 固定非空 AI 草稿目标；宿主不读取片场私有字段。
+
 ## Shared presentation package
 
 [web/ui](web/ui/README.md) owns primitives, forms, dialogs, media, settings presentation, assistant presentation, feedback, icons and the ThemeSource React bridge. React is a peer; only UI owns Radix/Lucide. Frontend retains DialogHost/stack, theme persistence and business services. Extension named UI imports bind to the existing host SDK ui group; legacy extension-api exports retain object identity. UI styles and generated theme CSS live in web/ui/src/styles. Ladle discovers UI stories and business integration stories in web/ui/showcase; production ESM/declarations exclude development helpers. The standalone public-entry consumer and tooling/shared-ui-boundary.test.ts verify the dependency direction.

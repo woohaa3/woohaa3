@@ -82,7 +82,7 @@ it("注入 action 时删除按钮与键盘共用 action.deleteSelected（任务 
   };
   setup(true, action);
   // 按钮路径：点击「删除对象」经 action 而非直接 onDelete。
-  const del = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("删除对象")) as HTMLButtonElement;
+  const del = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("从片场移除")) as HTMLButtonElement;
   act(() => del.click());
   expect(calls.delete).toBe(1);
   // 键盘路径：列表内 Delete 走同一 action。

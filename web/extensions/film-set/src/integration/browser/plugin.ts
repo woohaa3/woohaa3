@@ -41,6 +41,7 @@ export function filmSetExtension() {
       lifetime.own(() => feature.dispose());
       lifetime.own(() => preview.clear());
       lifetime.own(history.subscribe(() => { ctx.compositeAssets.invalidate(); feature.session.reconcile(); }));
+      const cameraTools = new Map<string, ReturnType<typeof ctx.modelWorkspace.session.getState>["cameraTool"]>();
       lifetime.own(playback.subscribe(() => {
         ctx.compositeAssets.invalidate();
         const nodeId = ctx.modelWorkspace.session.getState().nodeId;
@@ -48,18 +49,35 @@ export function filmSetExtension() {
         const selected = playback.getSnapshot();
         const data = ctx.compositeAssets.projectCanvas(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[nodeId];
         const camera = filmSetEditorCameras(data, selected.nodeId === nodeId ? selected.clipId : null)[0];
+        if (!camera) { ctx.modelWorkspace.session.cancelPose(); ctx.modelWorkspace.session.cancelFocus(); }
         if (camera && ctx.modelWorkspace.session.getState().selectedCameraId !== camera.id) {
           const toolMode = ctx.modelWorkspace.session.getState().toolMode;
           ctx.modelWorkspace.session.enter(nodeId);
+          const tool = cameraTools.get(camera.id);
+          if (tool) ctx.modelWorkspace.session.setCameraTool(tool);
           ctx.modelWorkspace.session.setToolMode(toolMode);
         }
         ctx.modelWorkspace.refreshGizmo();
       }));
-      lifetime.own(feature.session.subscribe(() => ctx.modelWorkspace.refreshGizmo()));
+      let selectionVersion = feature.session.selectionVersion();
+      lifetime.own(feature.session.subscribe(() => {
+        const next = feature.session.selectionVersion();
+        if (next !== selectionVersion) {
+          selectionVersion = next;
+          ctx.modelWorkspace.session.cancelPose();
+          ctx.modelWorkspace.session.cancelFocus();
+          ctx.modelWorkspace.session.setToolMode("model");
+        }
+        ctx.modelWorkspace.refreshGizmo();
+      }));
       let previous = ctx.modelWorkspace.session.getState();
       lifetime.own(ctx.modelWorkspace.session.subscribe(() => {
         const next = ctx.modelWorkspace.session.getState();
-        if (next.selectedCameraId !== previous.selectedCameraId || next.toolMode !== previous.toolMode || next.cameraTool !== previous.cameraTool) feature.session.select(null);
+        if (next.selectedCameraId !== previous.selectedCameraId || next.toolMode !== previous.toolMode || next.cameraTool !== previous.cameraTool) {
+          feature.action.cancelGesture();
+          feature.session.cancelEdit();
+        }
+        if (next.selectedCameraId) cameraTools.set(next.selectedCameraId, next.cameraTool);
         previous = next;
       }));
       const objectFeedback = new Map<string, string>();
@@ -83,6 +101,11 @@ export function filmSetExtension() {
           }
           return { ...projected, nodeData };
         },
+        focusLayout(nodeId) {
+          const panel = ctx.canvasNavigation.getSnapshot().panel;
+          return { desktop: true, panelMaxWidth: panel?.type === "node-history" && panel.nodeId === nodeId ? 740 : 320,
+            toolbar: 48, player: playback.getSnapshot().preview ? 80 : 260, animationPreview: false };
+        },
         blocksFocusInput: () => playback.getSnapshot().preview,
         keydown(event) {
           const state = playback.getSnapshot();
@@ -93,7 +116,7 @@ export function filmSetExtension() {
         },
         gizmo(nodeId) {
           const state = feature.session.getState();
-          if (state.nodeId !== nodeId || !state.selectedItemId || playback.getSnapshot().preview || ctx.canvasRuntime.modelFocusMode() === "history" || !ctx.canvasSession.isWritable()) return null;
+          if (ctx.modelWorkspace.session.getState().toolMode === "camera" || state.nodeId !== nodeId || !state.selectedItemId || playback.getSnapshot().preview || ctx.canvasRuntime.modelFocusMode() === "history" || !ctx.canvasSession.isWritable()) return null;
           const entry = ctx.canvasRuntime.queryCompositeAssetItemBounds(nodeId).find(item => item.itemId === state.selectedItemId);
           return entry ? { version: MODEL_EDITOR_VERSION, nodeId, toolMode: "object", objectTool: state.tool, itemId: state.selectedItemId,
             parentBasis: gizmoParentBasis(entry.worldToLocal, entry.yaw, entry.unit), feedback: state.feedback, focus: entry.center, radius: entry.radius } : null;
@@ -102,7 +125,7 @@ export function filmSetExtension() {
           const selected = playback.getSnapshot();
           return filmSetEditorCameras(data, selected.nodeId === nodeId ? selected.clipId : null);
         },
-        writeCameras: sceneCameraWriter((...args) => ctx.canvasSession.submitCommands(...args), nodeId => (ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[nodeId], nodeId => readFilmSetAnimationProjection(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), nodeId)),
+        writeCameras: sceneCameraWriter((...args) => ctx.canvasSession.submitCommands(...args), nodeId => (ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[nodeId], nodeId => readFilmSetAnimationProjection(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), nodeId), (commands, label) => ctx.canvasEdit.record(commands, label)),
         beginCapture: nodeId => pinFilmSetCapture(ctx, nodeId),
         captureEnabled: (nodeId, cameraId) => {
           const data = readFilmSetAnimationProjection(ctx.canvasState.getCanvas(), nodeId);

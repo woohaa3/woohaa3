@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { ModelEditorSession } from "../../../extension-api/model-workspace-session.js";
+import { SHOT_CAMERA_DEFAULT_ELEVATION } from "@woohaa3/contracts";
 import type { ModelCamera } from "@woohaa3/contracts";
 
 function camera(overrides: Partial<ModelCamera> = {}): ModelCamera {
@@ -201,7 +202,7 @@ describe("焦点手势 / 重命名 / 重置（change: 模型编辑 gizmo 焦点�
       name: "镜头 1",
       order: 0,
       azimuth: 0,
-      elevation: Math.PI / 4,
+      elevation: SHOT_CAMERA_DEFAULT_ELEVATION,
       distance: 2,
       aspect: "1:1"
     });
@@ -273,4 +274,41 @@ it("remote camera edits and deletion cancel frozen pose/focus without overwritin
   expect(h.session.getState().posePreview).toBeNull();expect(h.submitted).toHaveLength(0);
   h.session.beginFocus();h.session.updateFocus({x:1,y:2,z:3});h.setCameras([]);h.session.reconcileGesture();h.session.endFocus();
   expect(h.session.getState().focusPreview).toBeNull();expect(h.submitted).toHaveLength(0);
+});
+
+
+describe("asynchronous authoritative camera writes", () => {
+  it("keeps canonical pose until acknowledgment and rejects a second submission while pending", async () => {
+    let finish!: (ok: boolean) => void;
+    let writes = 0;
+    const session = new ModelEditorSession({ readCameras: () => [camera()], isWritable: () => true,
+      submitCameras: () => { ++writes; return new Promise<boolean>(resolve => { finish = resolve; }); } });
+    session.enter("film");
+    session.commitAzimuth(0.8);
+    expect(session.getState().cameraWritePending).toBe(true);
+    expect(session.selectedCamera()?.azimuth).toBe(0.2);
+    session.commitDistance(8);
+    expect(writes).toBe(1);
+    finish(false);
+    await Promise.resolve();
+    expect(session.getState().cameraWritePending).toBe(false);
+    expect(session.getState().cameraWriteError).toContain("镜头 1");
+    expect(session.selectedCamera()?.azimuth).toBe(0.2);
+  });
+
+  it("cancel, target switch and runtime reentry discard old previews and late acknowledgments", async () => {
+    let finish!: (ok: boolean) => void;
+    let writes = 0;
+    const session = new ModelEditorSession({ readCameras: () => [camera(), camera({ id: "b", order: 1 })], isWritable: () => true,
+      submitCameras: () => { ++writes; return new Promise<boolean>(resolve => { finish = resolve; }); } });
+    session.enter("film");
+    session.beginPose(); session.updatePose({ azimuth: 1 }); session.cancelPose(); session.endPose();
+    expect(writes).toBe(0);
+    session.beginFocus(); session.updateFocus({ x: 3, y: 0, z: 0 }); session.selectCamera("b"); session.endFocus();
+    expect(writes).toBe(0);
+    session.commitAzimuth(1);
+    session.enter("other");
+    finish(false); await Promise.resolve();
+    expect(session.getState()).toMatchObject({ nodeId: "other", cameraWritePending: false, cameraWriteError: null });
+  });
 });

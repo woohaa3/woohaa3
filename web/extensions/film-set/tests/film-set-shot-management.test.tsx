@@ -93,6 +93,7 @@ function render(animations: FilmSetAnimations, options: { writable?: boolean; ca
     },
     filmSetPlayback: playback,
     modelWorkspace: { session },
+    canvasEdit: { record: async (commands: typeof submitted) => { submitted.push(...commands); return { ok: true }; } },
     canvasSession: {
       isWritable: () => options.writable ?? true,
       submitCommands: (commands: typeof submitted) => { submitted.push(...commands); return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } }; }
