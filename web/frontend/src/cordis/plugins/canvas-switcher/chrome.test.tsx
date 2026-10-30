@@ -381,6 +381,7 @@ describe("CanvasSwitcher dialog renderer", () => {
       switchTo: () => undefined,
       create: async () => ({ ok: true, canvasId: "new" }),
       rename: async () => ({ ok: true }),
+      exportArchive: async () => ({ ok: true }),
       remove: async () => ({ ok: true })
     });
     const shared = renderToStaticMarkup(
