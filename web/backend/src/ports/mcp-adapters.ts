@@ -7,39 +7,21 @@ import { currentCanvasGroupScope } from "@woohaa3/canvas-service";
  * `ModelMcpService` / `AgentCanvasInternalService`。授权、actorId、错误映射仍由 Canvas 侧完成；
  * 本适配器只做形状转换。
  */
-import type { AgentCanvasInternalService, ModelMcpService, CreateFilmSetNodeOutcome } from "@woohaa3/canvas-service";
+import type { AgentCanvasInternalService, ModelMcpService } from "@woohaa3/canvas-service";
 import type {
   CanvasCommand,
   McpCameraMutation,
-  McpCreateFilmSetNodeRequest,
-  McpImportModelSnapshotRequest,
-  McpMutateFilmSetItemRequest,
   SupportedModelScriptVersion
 } from "@woohaa3/contracts";
 import type { CanvasMcpClient } from "@woohaa3/mcp-service";
-import type { AgentCanvasClient, McpMutateFilmSetItemResult } from "@woohaa3/mcp-service";
-
-type MutateFilmSetItemOutcome = McpMutateFilmSetItemResult;
+import type { AgentCanvasClient } from "@woohaa3/mcp-service";
 
 const MCP_ACTOR_CANVAS_READ = "canvas-model-mcp";
 const MCP_ACTOR_CANVAS_INTERNAL = "wolf-woohaa3-mcp-internal-actor";
 
 /** ModelMcpService（内部 actor）→ MCP CanvasMcpClient。 */
 export function modelMcpServiceToClient(
-  service: ModelMcpService | null,
-  options: {
-    /** 动画节点权威写入（change: 2026-10-05-bind-model-animation-to-shots）。 */
-    createFilmSetNode?: (input: McpCreateFilmSetNodeRequest & { canvasId: string }) => Promise<CreateFilmSetNodeOutcome>;
-    commitAnimation?: (input: import("@woohaa3/contracts").McpCommitAnimationRequest) => Promise<CreateFilmSetNodeOutcome>;
-    importModelSnapshot?: (input: McpImportModelSnapshotRequest & { canvasId: string }) => Promise<CreateFilmSetNodeOutcome>;
-    /** 片场对象级权威变更（change: 2026-10-09-add-film-set-object-motion-and-editing）。 */
-    mutateFilmSetItem?: (input: McpMutateFilmSetItemRequest & { canvasId: string }) => Promise<MutateFilmSetItemOutcome>;
-    /** 片场媒体条目受控导入（D5）。 */
-    addFilmSetMedia?: (input: import("@woohaa3/contracts").McpAddFilmSetMediaRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>;
-    /** agent 发起显式导出与查询（D8）。 */
-    exportFilmSetClip?: (input: import("@woohaa3/contracts").McpExportFilmSetClipRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>;
-    getFilmSetExport?: (input: import("@woohaa3/contracts").McpGetFilmSetExportRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>;
-  }
+  service: ModelMcpService | null
 ): CanvasMcpClient {
   const unavailable = { ok: false as const, code: "unavailable", message: "模型 MCP 当前不可用" };
   // change: 2026-10-07-remove-residual-compatibility —— 不再提供默认画布回退；canvasId 必填。
@@ -124,38 +106,6 @@ export function modelMcpServiceToClient(
     async submitScripts(input) {
       if (!service?.submitScripts) return unavailable as never;
       return service.submitScripts(input, { principalId: MCP_ACTOR_CANVAS_INTERNAL }) as never;
-    },
-    async createFilmSetNode(input) {
-      if (!options.createFilmSetNode) return unavailable as never;
-      return options.createFilmSetNode({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async importModelSnapshot(input) {
-      if (!options.importModelSnapshot) return unavailable as never;
-      return options.importModelSnapshot({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async commitAnimation(input) {
-      if (!options.commitAnimation) return unavailable as never;
-      return options.commitAnimation({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async mutateFilmSetItem(input) {
-      if (!options.mutateFilmSetItem) return unavailable as never;
-      return options.mutateFilmSetItem({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async addFilmSetMedia(input) {
-      if (!options.addFilmSetMedia) return unavailable as never;
-      return options.addFilmSetMedia({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async exportFilmSetClip(input) {
-      if (!options.exportFilmSetClip) {
-        return { ok: false, code: "recording-unavailable", message: "当前宿主未提供原生录制能力" } as never;
-      }
-      return options.exportFilmSetClip({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async getFilmSetExport(input) {
-      if (!options.getFilmSetExport) {
-        return { ok: false, code: "recording-unavailable", message: "当前宿主未提供原生录制能力" } as never;
-      }
-      return options.getFilmSetExport({ ...input, canvasId: canvasId(input.canvasId) }) as never;
     },
     async ready() {
       return service ? { ready: true } : { ready: false, reason: "模型 MCP 当前不可用" };

@@ -1,7 +1,7 @@
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { FILM_SET_CONTENT_PREVIOUS_VERSION, FILM_SET_CONTENT_VERSION, MODEL_RENDER_BUDGET, type McpGetNodeResult } from "@woohaa3/contracts";
+import { MODEL_RENDER_BUDGET } from "@woohaa3/contracts";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH } from "./mcp-http.js";
 import type { ModelMcpToolService } from "./mcp-http.js";
 
@@ -79,7 +79,6 @@ describe("Model Canvas Streamable HTTP MCP", () => {
     expect(byName.get("get_model_api")?.access).toBe("read");
     expect(byName.get("get_model_statistics")?.access).toBe("read");
     expect(byName.get("submit_model_script")?.access).toBe("write");
-    expect(byName.get("mutate_film_set_clip")?.access).toBe("write");
     // 工具清单按名称稳定排序。
     const names = discovery.tools.map((tool) => tool.name);
     expect([...names].sort()).toEqual(names);
@@ -144,147 +143,8 @@ describe("Model Canvas Streamable HTTP MCP", () => {
       "get_model_node",
       "get_model_statistics",
       "submit_model_script",
-      "render_model_preview",
-      "create_film_set_node",
-      "import_model_snapshot"
+      "render_model_preview"
     ]));
-  });
-
-  it("create_film_set_node 与 import_model_snapshot 调用下游能力（change: 2026-10-05-bind-model-animation-to-shots）", async () => {
-    const created: Array<Record<string, unknown>> = [];
-    const imported: Array<Record<string, unknown>> = [];
-    const { base } = await start({
-      async getModelNode(input) {
-        return { ok: true, ...input, title: "t", prompt: "", source: "", references: [], cameras: [] };
-      },
-      async submitScript(input) {
-        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd", idempotent: false };
-      },
-      async createFilmSetNode(input) {
-        created.push(input as unknown as Record<string, unknown>);
-        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd-a", duplicate: false, noop: false };
-      },
-      async importModelSnapshot(input) {
-        imported.push(input as unknown as Record<string, unknown>);
-        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd-b", duplicate: false, noop: false };
-      }
-    });
-
-    const create = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 10,
-      method: "tools/call",
-      params: {
-        name: "create_film_set_node",
-        arguments: {
-          canvasId: "canvas-a",
-          nodeId: "anim-1",
-          requestId: "req-1",
-          modelScript: "function build() { return 1; }",
-          modelScriptVersion: "woohaa-model-js-v2",
-          motionScript: "motion.model.rotate('torso', { speed: 1 });",
-          duration: 4,
-          loop: true
-        }
-      }
-    });
-    expect(create.status).toBe(200);
-    expect(JSON.stringify(create.body)).toContain("cmd-a");
-    expect(created[0]).toMatchObject({
-      canvasId: "canvas-a",
-      nodeId: "anim-1",
-      requestId: "req-1",
-      model: { modelScriptVersion: "woohaa-model-js-v2" },
-      timeline: { duration: 4, loop: true }
-    });
-
-    const importedResult = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 11,
-      method: "tools/call",
-      params: {
-        name: "import_model_snapshot",
-        arguments: {
-          canvasId: "canvas-a",
-          nodeId: "anim-1",
-          requestId: "req-2",
-          itemId: "actor",
-          modelScript: "function build() { return 2; }",
-          modelScriptVersion: "woohaa-model-js-v2",
-          expectedSourceHash: "hash-1"
-        }
-      }
-    });
-    expect(JSON.stringify(importedResult.body)).toContain("cmd-b");
-    expect(imported[0]).toMatchObject({ canvasId: "canvas-a", itemId: "actor", expectedSourceHash: "hash-1" });
-  });
-
-  it("submit_film_set 的参数版本跟随片场内容契约（回归：工具钉住 v3、保存端要求 v4）", async () => {
-    const commits: Array<Record<string, unknown>> = [];
-    const { base } = await start({
-      async getModelNode(input) {
-        return { ok: true, ...input, title: "t", prompt: "", source: "", references: [], cameras: [] };
-      },
-      async submitScript(input) {
-        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd", idempotent: false };
-      },
-      async commitAnimation(input) {
-        commits.push(input as unknown as Record<string, unknown>);
-        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd-film", duplicate: false, noop: false };
-      }
-    });
-    const submit = (schemaVersion: number, requestId: string) => mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 13,
-      method: "tools/call",
-      params: {
-        name: "submit_film_set",
-        arguments: {
-          canvasId: "canvas-a",
-          nodeId: "film-1",
-          requestId,
-          expectedSnapshotHash: "hash-1",
-          animation: {
-            filmSetContent: { schemaVersion, items: [] },
-            filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] }
-          }
-        }
-      }
-    });
-
-    // 当前契约版本必须能直达保存端；任何版本漂移都不得被参数校验提前吞掉。
-    const accepted = await submit(FILM_SET_CONTENT_VERSION, "req-current");
-    expect((accepted.body.result as { isError?: boolean }).isError).toBeUndefined();
-    expect(commits).toHaveLength(1);
-    expect(commits[0]).toMatchObject({
-      canvasId: "canvas-a",
-      nodeId: "film-1",
-      requestId: "req-current",
-      expectedSnapshotHash: "hash-1"
-    });
-
-    // 上一代版本由参数校验拒绝，且不到达保存端。
-    const rejected = await submit(FILM_SET_CONTENT_PREVIOUS_VERSION, "req-legacy");
-    expect((rejected.body.result as { isError?: boolean }).isError).toBe(true);
-    expect(commits).toHaveLength(1);
-
-    // 工具声明同样跟随契约常量，不写字面量版本号。
-    const listed = await mcpPost(base, { jsonrpc: "2.0", id: 14, method: "tools/list", params: {} });
-    const tool = (listed.body.result as { tools: Array<{ name: string; inputSchema: { properties?: Record<string, any> } }> })
-      .tools.find((entry) => entry.name === "submit_film_set");
-    expect(tool?.inputSchema.properties?.animation?.properties?.filmSetContent?.properties?.schemaVersion?.const)
-      .toBe(FILM_SET_CONTENT_VERSION);
-  });
-
-  it("动画能力缺席时两个工具返回稳定不可用错误", async () => {
-    const { base } = await start();
-    const create = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 12,
-      method: "tools/call",
-      params: { name: "create_film_set_node", arguments: { canvasId: "canvas-a", nodeId: "a", requestId: "r", modelScript: "x", modelScriptVersion: "v" } }
-    });
-    expect(JSON.stringify(create.body)).toContain("片场能力当前不可用");
   });
 
   it("读取权威节点并提交 modelScript", async () => {
@@ -471,93 +331,6 @@ describe("模型脚本指南的朝向约定（change: model-orientation-conventi
     expect(text).toContain("瞬态");
   });
 
-  it("指南与工具描述明确 sceneCamera 不是拍摄镜头，并要求创建 clip", async () => {
-    const { base } = await start();
-    const guide = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 12,
-      method: "tools/call",
-      params: { name: "get_model_api", arguments: {} }
-    });
-    const text = ((guide.body.result as { content: Array<{ text: string }> }).content[0]?.text) ?? "";
-    expect(text).toContain("sceneCamera 只是无任何拍摄镜头时的回退构图");
-    expect(text).toContain("不是镜头");
-    expect(text).toContain('op:{kind:"create"');
-    expect(text).toContain("静态构图也要创建 static 镜头");
-    expect(text).toContain("clipTemplate");
-    expect(text).toContain("确认 clips 非空");
-
-    const listed = await mcpPost(base, { jsonrpc: "2.0", id: 13, method: "tools/list", params: {} });
-    const submit = ((listed.body.result as { tools: Array<{ name: string; description?: string }> }).tools)
-      .find(tool => tool.name === "submit_film_set");
-    expect(submit?.description).toContain("所有动画字段");
-    expect(submit?.description).toContain("不能只设置 sceneCamera");
-  });
-
-  it("空镜头集合在 get_film_set_clips 与 submit_film_set 上返回创建提示", async () => {
-    const { base } = await start({
-      async getModelNode(input) {
-        return {
-          ok: true, ...input, title: "t", prompt: "", source: "", references: [], cameras: [],
-          animation: {
-            title: "t",
-            scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
-            filmSetContent: { schemaVersion: FILM_SET_CONTENT_VERSION, items: [] },
-            filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] },
-            initialCamera: { azimuth: 0, elevation: 0.35, distance: 4, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } },
-            timeline: { duration: 0, loop: false }
-          }
-        } as unknown as McpGetNodeResult;
-      },
-      async submitScript(input) {
-        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd", idempotent: false };
-      },
-      async commitAnimation(input) {
-        return {
-          ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd-film", duplicate: false, noop: false,
-          animation: { filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] } }
-        } as unknown as import("../downstream/canvas-client.js").McpCreateFilmSetNodeOutcome;
-      }
-    });
-    const result = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 14,
-      method: "tools/call",
-      params: { name: "get_film_set_clips", arguments: { canvasId: "canvas-a", nodeId: "film-1" } }
-    });
-    const structured = (result.body.result as { structuredContent?: Record<string, unknown> }).structuredContent;
-    expect(structured).toMatchObject({ clipCount: 0 });
-    expect(String(structured?.hint)).toContain("sceneCamera");
-    expect(String(structured?.hint)).toContain("clipTemplate");
-    expect(structured?.clipTemplate).toMatchObject({
-      kind: "static",
-      timeline: { duration: 0, loop: false },
-      initialCamera: { azimuth: 0, elevation: 0.35, distance: 4, aspect: "16:9" },
-      bindings: []
-    });
-
-    const submitted = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 15,
-      method: "tools/call",
-      params: {
-        name: "submit_film_set",
-        arguments: {
-          canvasId: "canvas-a",
-          nodeId: "film-1",
-          requestId: "req-empty",
-          expectedSnapshotHash: "hash-a",
-          animation: {
-            filmSetContent: { schemaVersion: FILM_SET_CONTENT_VERSION, items: [] },
-            filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] }
-          }
-        }
-      }
-    });
-    const submittedContent = (submitted.body.result as { structuredContent?: Record<string, unknown> }).structuredContent;
-    expect(submittedContent).toMatchObject({ clipCount: 0 });
-    expect(String(submittedContent?.hint)).toContain("mutate_film_set_clip");
-  });
 });
 
 describe("render_model_preview MCP（change: enhance-model-scene-authoring-api）", () => {
@@ -717,26 +490,6 @@ describe("render_model_preview MCP（change: enhance-model-scene-authoring-api�
     expect(names).not.toContain("get_node_output");
   });
 
-  it("real clip tool forwards captured actor scope through the registrar", async () => {
-    const calls: unknown[] = [];
-    const authorized: unknown[] = [];
-    const { base } = await start({
-      getModelNode: async () => ({ ok: false, code: "unused", message: "unused" }),
-      submitScript: async () => ({ ok: false, code: "unused", message: "unused" }),
-      applyCommands: async input => { calls.push(input); return { ok: true, canvasId: input.canvasId, commandId: input.commandId, revision: 1, duplicate: false, noop: false }; }
-    }, { authorize: input => {
-      authorized.push(input);
-      return input.clipId === "jump" && input.itemId === "hero" ? { ok: true } : { ok: false, reason: "out-of-scope" };
-    } });
-    const argumentsFor = (itemId: string) => ({ canvasId: "c", nodeId: "film", clipId: "jump", requestId: "r", expectedHash: "hash", op: { kind: "binding", itemId, expectedAdapterHash: "adapter", binding: null } });
-    const call = (itemId: string) => mcpPost(base, { jsonrpc: "2.0", id: 50, method: "tools/call", params: { name: "mutate_film_set_clip", arguments: argumentsFor(itemId) } }, { authorization: "Bearer actor" });
-    expect((await call("other")).body.result).toMatchObject({ isError: true });
-    expect(calls).toHaveLength(0);
-    expect((await call("hero")).body.result).not.toMatchObject({ isError: true });
-    expect(calls).toHaveLength(1);
-    expect(authorized).toContainEqual({ token: "actor", tool: "mutate_film_set_clip", canvasId: "c", nodeId: "film", clipId: "jump", itemId: "hero" });
-  });
-
 });
 
 describe("模型规模统计 MCP（change: 2026-10-18-align-model-statistics-with-agent）", () => {
@@ -850,121 +603,5 @@ describe("模型规模统计 MCP（change: 2026-10-18-align-model-statistics-wit
     expect(result.content.map((entry) => entry.text).join("\n")).toContain("候选脚本");
     expect(result.content.map((entry) => entry.text).join("\n")).toContain("点数 42,880");
     expect(result.structuredContent).toMatchObject({ ok: true, source: "candidate" });
-  });
-});
-
-describe("片场媒体导入与原生导出 MCP（change: 2026-10-19-extend-film-set-for-motion-graphics）", () => {
-  it("add_film_set_media 把请求原样转给下游并回执新条目", async () => {
-    const calls: Array<Record<string, unknown>> = [];
-    const { base } = await start({
-      async getModelNode() {
-        return { ok: true, canvasId: "x", nodeId: "x", title: "", prompt: "", source: "", references: [], cameras: [] };
-      },
-      async submitScript(input) {
-        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "c", idempotent: false };
-      },
-      async addFilmSetMedia(input) {
-        calls.push(input as unknown as Record<string, unknown>);
-        return {
-          ok: true,
-          canvasId: input.canvasId,
-          nodeId: input.nodeId,
-          itemId: input.itemId ?? "derived",
-          itemKind: "image",
-          commandId: "cmd-media",
-          duplicate: false,
-          noop: false,
-          contentHash: "hash",
-          itemCount: 1
-        };
-      }
-    });
-    const response = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 40,
-      method: "tools/call",
-      params: {
-        name: "add_film_set_media",
-        arguments: { canvasId: "canvas-a", nodeId: "film", requestId: "r1", sourceNodeId: "img-1", expectedContentHash: "h0" }
-      }
-    });
-    const result = response.body.result as { isError?: boolean; structuredContent?: Record<string, unknown> };
-    expect(result.isError).toBeUndefined();
-    expect(calls[0]).toMatchObject({ canvasId: "canvas-a", nodeId: "film", requestId: "r1", sourceNodeId: "img-1", expectedContentHash: "h0" });
-    expect(result.structuredContent).toMatchObject({ ok: true, itemId: "derived" });
-  });
-
-  it("原生录制不可用时 export_film_set_clip 返回 recording-unavailable，不创建任务", async () => {
-    const { base } = await start();
-    const response = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 41,
-      method: "tools/call",
-      params: {
-        name: "export_film_set_clip",
-        arguments: { canvasId: "canvas-a", nodeId: "film", clipId: "clip-1", requestId: "r1", profile: "hd" }
-      }
-    });
-    const result = response.body.result as { isError?: boolean; structuredContent?: Record<string, unknown> };
-    expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ ok: false, code: "recording-unavailable" });
-  });
-
-  it("export_film_set_clip 提交 profile 并返回 jobId，get_film_set_export 透传阶段与成片身份", async () => {
-    const exported: Array<Record<string, unknown>> = [];
-    const { base } = await start({
-      async getModelNode() {
-        return { ok: true, canvasId: "x", nodeId: "x", title: "", prompt: "", source: "", references: [], cameras: [] };
-      },
-      async submitScript(input) {
-        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "c", idempotent: false };
-      },
-      async exportFilmSetClip(input) {
-        exported.push(input as unknown as Record<string, unknown>);
-        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, clipId: input.clipId, jobId: "job-1", state: "queued", duplicate: false };
-      },
-      async getFilmSetExport(input) {
-        return { ok: true, canvasId: input.canvasId, jobId: input.jobId, state: "succeeded", completedFrames: 60, totalFrames: 60, nodeId: "video-1", assetId: "asset-1" };
-      }
-    });
-    const started = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 42,
-      method: "tools/call",
-      params: {
-        name: "export_film_set_clip",
-        arguments: { canvasId: "canvas-a", nodeId: "film", clipId: "clip-1", requestId: "r1", profile: "hd60", expectedContentHash: "h0" }
-      }
-    });
-    const startResult = started.body.result as { structuredContent?: Record<string, unknown> };
-    expect(exported[0]).toMatchObject({ profile: "hd60", clipId: "clip-1", expectedContentHash: "h0" });
-    expect(startResult.structuredContent).toMatchObject({ ok: true, jobId: "job-1" });
-
-    const polled = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 43,
-      method: "tools/call",
-      params: { name: "get_film_set_export", arguments: { canvasId: "canvas-a", jobId: "job-1" } }
-    });
-    const pollResult = polled.body.result as { structuredContent?: Record<string, unknown> };
-    expect(pollResult.structuredContent).toMatchObject({ ok: true, state: "succeeded", nodeId: "video-1", assetId: "asset-1" });
-  });
-
-  it("导出工具清单与指南覆盖透明度、新缓动、材质、媒体、镜头背景与导出 profile", async () => {
-    const { base } = await start();
-    const listed = await mcpPost(base, { jsonrpc: "2.0", id: 44, method: "tools/list", params: {} });
-    const names = ((listed.body.result as { tools: Array<{ name: string }> }).tools).map(tool => tool.name);
-    expect(names).toEqual(expect.arrayContaining(["add_film_set_media", "export_film_set_clip", "get_film_set_export"]));
-
-    const guide = await mcpPost(base, {
-      jsonrpc: "2.0",
-      id: 45,
-      method: "tools/call",
-      params: { name: "get_model_api", arguments: {} }
-    });
-    const text = ((guide.body.result as { content: Array<{ text: string }> }).content[0]?.text) ?? "";
-    for (const expected of ["opacity", "easeInOut", "unlit", "add_film_set_media", "backdrop", "hd60", "recording-unavailable"]) {
-      expect(text).toContain(expected);
-    }
   });
 });

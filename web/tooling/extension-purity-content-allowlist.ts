@@ -409,18 +409,6 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "历史债：内核仍写死扩展路由、工具或媒体作用域。去向：第 4 组改为内容路由。"
   },
   {
-    file: "web/services/mcp-service/src/model-mcp/animation-tools.ts",
-    literals: ["film-set","filmSetAnimations","filmSetContent","scenePlacement"],
-    stage: "route",
-    reason: "历史债：内核仍写死扩展路由、工具或媒体作用域。去向：第 4 组改为内容路由。"
-  },
-  {
-    file: "web/services/mcp-service/src/model-mcp/film-set-clip-tools.ts",
-    literals: ["filmSetAnimations","filmSetContent"],
-    stage: "route",
-    reason: "历史债：内核仍写死扩展路由、工具或媒体作用域。去向：第 4 组改为内容路由。"
-  },
-  {
     file: "web/contracts/src/canvas/film-set-animation-projection.ts",
     literals: ["filmSetAnimations","filmSetContent","scenePlacement"],
     stage: "render",

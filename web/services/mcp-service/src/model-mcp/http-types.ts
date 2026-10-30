@@ -8,9 +8,7 @@ import type {
   CanvasCommand,
   McpApplyCommandsResult,
   McpCameraMutation,
-  McpCreateFilmSetNodeRequest,
   McpGetNodeResult,
-  McpImportModelSnapshotRequest,
   McpListNodesResult,
   McpModelStatisticsResult,
   McpMutateCamerasResult,
@@ -19,9 +17,6 @@ import type {
   SupportedModelScriptVersion
 } from "@woohaa3/contracts";
 import type { AgentAuthoringToolDeps } from "../agent-authoring/tools.js";
-import type { McpCreateFilmSetNodeOutcome, McpMutateFilmSetItemResult } from "../downstream/canvas-client.js";
-
-export type { McpCreateFilmSetNodeRequest, McpImportModelSnapshotRequest };
 
 export const MODEL_MCP_HTTP_PATH = "/mcp/model-canvas";
 
@@ -70,21 +65,6 @@ export type ModelMcpToolService = {
     requestId: string;
     mutation: McpCameraMutation;
   }) => Promise<McpMutateCamerasResult>;
-  createFilmSetNode?: (input: McpCreateFilmSetNodeRequest & { canvasId: string }) => Promise<McpCreateFilmSetNodeOutcome>;
-  commitAnimation?: (input: import("@woohaa3/contracts").McpCommitAnimationRequest) => Promise<McpCreateFilmSetNodeOutcome>;
-  importModelSnapshot?: (input: McpImportModelSnapshotRequest & { canvasId: string }) => Promise<McpCreateFilmSetNodeOutcome>;
-  mutateFilmSetItem?: (input: {
-    canvasId: string;
-    nodeId: string;
-    itemId: string;
-    requestId: string;
-    op: import("@woohaa3/contracts").FilmSetItemPatchOp;
-  }) => Promise<McpMutateFilmSetItemResult>;
-  /** 片场媒体条目受控导入（D5）；省略时工具明确不可用。 */
-  addFilmSetMedia?: (input: import("@woohaa3/contracts").McpAddFilmSetMediaRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>;
-  /** agent 发起显式导出（D8）；省略时工具返回 `recording-unavailable`。 */
-  exportFilmSetClip?: (input: import("@woohaa3/contracts").McpExportFilmSetClipRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>;
-  getFilmSetExport?: (input: import("@woohaa3/contracts").McpGetFilmSetExportRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>;
 };
 
 export type ModelMcpHttpHandler = {

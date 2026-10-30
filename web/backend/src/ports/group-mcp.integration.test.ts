@@ -38,7 +38,7 @@ describe("real HTTP group MCP boundary", () => {
     const tools = ["get_canvas_graph", "get_canvas_changes", "create_canvas_node", "set_node_prompt", "delete_canvas_entities", "run_canvas_node"];
     const grant = await facade.tools.issue({ delegation: { subject: "owner", authLevel: "authenticated" }, workId: "turn", canvasId: "c", nodeId: "root", mode: "canvas-group", expectedScopeEpoch: canvasGroupEpoch("c", "root"), tools });
     const handler = createModelMcpHttpHandler({
-      service: groupScopedClient(modelMcpServiceToClient(model, {}), host),
+      service: groupScopedClient(modelMcpServiceToClient(model), host),
       agentAuthoring: { client: groupScopedClient(agentCanvasServiceToClient(internal, { principalId: "" }), host), runAvailability: { available: true } },
       toolGrant: { authorize: grants.authorize, allowedTools: token => grants.verify(token)?.tools ?? [] }
     });

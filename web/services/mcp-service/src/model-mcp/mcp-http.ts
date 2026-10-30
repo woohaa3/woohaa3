@@ -1,8 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { registerModelBatchTools } from "./batch-tools.js";
 import { registerExtensionTools } from "./extension-tools.js";
-import { registerFilmSetClipTools } from "./film-set-clip-tools.js";
-import { registerFilmSetExportTools } from "./film-set-export-tools.js";
 /**
  * Model Canvas MCP 的 Streamable HTTP 入口公共入口
  * （change: 2026-10-09-refactor-large-source-files-and-remove-compatibility R11 —— 拆分为
@@ -16,8 +14,6 @@ import { toNodeHandler } from "@modelcontextprotocol/node";
 import { registerAgentAuthoringTools } from "../agent-authoring/tools.js";
 import { registerModelTools } from "./model-tools.js";
 import { registerCameraTools } from "./camera-tools.js";
-import { registerAnimationTools } from "./animation-tools.js";
-import { registerFilmSetItemTool } from "./film-set-item-tools.js";
 import { normalizePath, toolError } from "./tool-results.js";
 import {
   MODEL_MCP_HTTP_PATH,
@@ -185,12 +181,8 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
   registerModelTools(reg, options);
   registerModelBatchTools(reg, options);
   registerCameraTools(reg, options);
-  // 迁移窗口：内容 owner 已通过贡献面提供同名工具时，上面的 wrapper 会让内置副本让位。
-  // 全部片场工具迁出后删除这些 registrar 与 GRANTED_TOOLS 中的业务名称（任务 7.1）。
-  registerAnimationTools(reg, options);
-  registerFilmSetItemTool(reg, options);
-  registerFilmSetClipTools(reg, options);
-  registerFilmSetExportTools(reg, options);
+  // 片场业务工具已完全由内容 owner 的贡献目录提供（任务 6.2/7.1）；
+  // 宿主不再注册同名内置副本，也不再保留业务 grant 名单。
 
   if (options.agentAuthoring) registerAgentAuthoringTools(server, options.agentAuthoring);
   registeringExtensionTools = true;
@@ -202,10 +194,6 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
 
 /** 需经 grant 校验的写工具集合（读工具不需要预算）。 */
 const GRANTED_TOOLS = new Set([
-  "submit_film_set",
-  "mutate_film_set_clip",
-  "add_film_set_media",
-  "export_film_set_clip",
   "submit_model_script",
   "submit_model_scripts",
   "validate_model_scripts",
@@ -216,8 +204,6 @@ const GRANTED_TOOLS = new Set([
   "delete_model_camera",
   "rename_model_camera",
   "reset_model_camera",
-  "create_film_set_node",
-  "import_model_snapshot",
   "mutate_model_cameras",
   "mutate_model_cameras_batch"
 ]);

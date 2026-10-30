@@ -5,7 +5,8 @@ import { CanvasRoom, InMemoryYjsDocumentRepository, ModelMcpService } from "@woo
 import { createModelMcpHttpHandler } from "@woohaa3/mcp-service";
 import { modelMcpServiceToClient } from "./mcp-adapters.js";
 import { createFilmSetSnapshot, filmSetNodeDataFields } from "@woohaa3/contracts";
-import { filmSetMcpRuntime } from "../../../extensions/film-set/src/integration/backend/mcp-runtime.js";
+import { filmSetMcpTools } from "../../../extensions/film-set/src/integration/backend/mcp-tools.js";
+import type { ApplicationExtensionMcpTool, ContentMcpToolContext } from "@woohaa3/contracts";
 import { createToolGrantRegistry } from "./authoring-adapters.js";
 import { migrateFilmSetCanvasFixture } from "../../../test-support/film-set-groups.js";
 
@@ -20,11 +21,34 @@ it("旧 composite 片场在迁移后只读；局部授权仍被拒绝", async ()
   const room = new CanvasRoom({ canvasId, repository: new InMemoryYjsDocumentRepository(), verifyAssets: false, content });
   await room.initialize({ canvas: migrateFilmSetCanvasFixture(canvas), roomEpoch: "epoch" });
   const model = new ModelMcpService({ resolveRoom: async () => room });
-  const filmSet = filmSetMcpRuntime.createNodeService({ resolveRoom: async () => room });
   const grants = createToolGrantRegistry();
   const baseGrant = { canvasIds: [canvasId], nodeIds: ["scene"], tools: ["get_model_node", "submit_film_set"] };
   for (const [token, scope] of [["whole", {}], ["item", { itemId: "table" }], ["clip", { clipId: "shot" }], ["camera", { cameraId: "camera" }]] as const) grants.issue({ ...baseGrant, token, workId: `w-${token}`, ...scope });
-  const handler = createModelMcpHttpHandler({ service: modelMcpServiceToClient(model, { commitAnimation: input => filmSet.commitAnimation(input) }), toolGrant: { authorize: input => grants.authorize(input) } });
+  const toolContext: ContentMcpToolContext = {
+    extensionId: "film-set",
+    permission: "write",
+    resolveRoom: async () => room,
+    readNode: (input => model.getModelNode(input)) as ContentMcpToolContext["readNode"],
+    applyCommands: input => model.applyCommands!(input)
+  };
+  const extensionTools = {
+    list: (): readonly ApplicationExtensionMcpTool[] => filmSetMcpTools.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      route: `content/film-set/${tool.name}`,
+      permission: tool.permission ?? "write",
+      inputSchema: tool.inputSchema
+    })),
+    call: async ({ name, args }: { name: string; args: Record<string, unknown> }) => {
+      const tool = filmSetMcpTools.find(entry => entry.name === name);
+      if (!tool) return { ok: false, code: "unknown-tool", message: name };
+      const result = await tool.handle(args, toolContext);
+      return result.ok
+        ? { ok: true, ...(result.structured as Record<string, unknown> | undefined), ...(result.text ? { text: result.text } : {}) }
+        : { ok: false, code: (result.structured as { code?: string } | undefined)?.code ?? "extension-failed", message: result.text ?? "扩展操作失败" };
+    }
+  };
+  const handler = createModelMcpHttpHandler({ service: modelMcpServiceToClient(model), extensionTools, toolGrant: { authorize: input => grants.authorize(input) } });
   const server = http.createServer((req, res) => { void handler.handle(req, res); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const call = async (name: string, args: Record<string, unknown>, token = "whole") => {
@@ -60,7 +84,7 @@ it("real model MCP commits valid scripts and returns valid text for rejected scr
   const room = new CanvasRoom({ canvasId: canvasId, repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
   await room.initialize({ canvas: migrateFilmSetCanvasFixture(canvas), roomEpoch: "epoch" });
   const model = new ModelMcpService({ resolveRoom: async () => room });
-  const handler = createModelMcpHttpHandler({ service: modelMcpServiceToClient(model, {}) });
+  const handler = createModelMcpHttpHandler({ service: modelMcpServiceToClient(model) });
   const server = http.createServer((req, res) => { void handler.handle(req, res); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const call = async (script: string, requestId: string) => {

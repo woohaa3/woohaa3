@@ -23,10 +23,6 @@ export * from "./render-scene/node-action-toolbar.js";
 // 片场范围与媒体平面投影。
 export * from "./render-scene/film-set-projection.js";
 
-// 拍摄镜头预览卡片与归属线派生呈现
-// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5/D8）。
-export * from "./render-scene/shot-preview-projection.js";
-
 // 复合资产范围形状几何（change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
 export * from "./render-scene/composite-asset-scope.js";
 
