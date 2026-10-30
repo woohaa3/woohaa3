@@ -56,6 +56,36 @@ export function createMcpInstaller(options: McpInstallerOptions = {}) {
     return null;
   }
 
+  /** 读目录的 package.json；缺失或损坏都当作没有清单。 */
+  const manifestOf = async (dir: string) => {
+    try { return JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")) as Record<string, any>; }
+    catch { return null; }
+  };
+
+  /** `dsh` 安装包根：PATH 里的 bin 是软链，Windows 的 .cmd 旁边才是 node_modules。 */
+  async function dshPackageRoot() {
+    const bin = await executable(["dsh"]);
+    if (!bin) return null;
+    for (const start of [path.dirname(await realpath(bin).catch(() => bin)), path.dirname(bin)]) {
+      let dir = start;
+      for (let depth = 0; depth < 8; depth++) {
+        if ((await manifestOf(dir))?.name === "@deepseek-ai/dsh") return dir;
+        const nested = path.join(dir, "node_modules", "@deepseek-ai", "dsh");
+        if ((await manifestOf(nested))?.name === "@deepseek-ai/dsh") return nested;
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+    }
+    return null;
+  }
+
+  /** DSH 安装自带该插件时 profile 无需再声明依赖：launcher 的运行时解析覆盖安装依赖图。 */
+  async function providedByHarness(plugin: string) {
+    const root = await dshPackageRoot();
+    return root !== null && await exists(path.join(root, "node_modules", plugin, "package.json"));
+  }
+
   /** 检测证据是「或」关系；只读，不创建目录或文件，也不执行客户端命令。 */
   async function detected(spec: McpClientSpec) {
     for (const evidence of spec.detect) {
@@ -135,7 +165,7 @@ export function createMcpInstaller(options: McpInstallerOptions = {}) {
     } finally { await rm(temp, { force: true }); }
   }
 
-  /** 插件类目标写入前确认 profile 已具备对应插件，缺失时拒绝写入。 */
+  /** 插件可解析才写入：profile 声明它，或 DSH 安装自带它；两者都查不到时拒绝。 */
   async function requirePlugin(target: InstallTarget, plugin: string) {
     const manifest = await readFile(path.join(path.dirname(target.path), "package.json"), "utf8")
       .then(text => JSON.parse(text) as Record<string, any>).catch(() => null);
@@ -143,9 +173,8 @@ export function createMcpInstaller(options: McpInstallerOptions = {}) {
     const declared = (Array.isArray(bundles) && bundles.includes(plugin))
       || [manifest?.dependencies, manifest?.devDependencies, manifest?.peerDependencies]
         .some(deps => deps !== null && typeof deps === "object" && plugin in deps);
-    if (!declared) {
-      throw new InstallationError(`该 profile 未安装 MCP 客户端插件，请先执行 dsh plugin --profile ${target.key} add ${plugin} 后重试；原文件未修改。`);
-    }
+    if (declared || await providedByHarness(plugin)) return;
+    throw new InstallationError(`该 profile 与其 DSH 安装都未提供 ${plugin}；本机安装器不代装依赖，请先执行 dsh plugin --profile ${target.key} add ${plugin} 后重试；原文件未修改。`);
   }
 
   async function installTarget(spec: McpClientSpec, target: InstallTarget, url: string) {
