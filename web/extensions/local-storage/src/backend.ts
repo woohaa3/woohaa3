@@ -23,6 +23,7 @@ import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import {
   defineConfigSchema,
+  StorageExposeUnavailableError,
   StorageObjectNotFoundError,
   type ExtensionPlugin,
   type StorageBackend,
@@ -32,9 +33,10 @@ import {
 } from "@woohaa3/contracts";
 import {
   LOCAL_PUBLIC_EXPOSER_ID,
-  createCosPublicBucketWriter,
   createPublicBucketExposer,
-  resolvePublicBucketConfig
+  publicBucketDefaults,
+  resolvePublicBucketConfig,
+  type PublicBucketConfig
 } from "./public-bucket.js";
 
 export const LOCAL_STORAGE_PLUGIN_ID = "local-storage";
@@ -50,6 +52,9 @@ export const LOCAL_STORAGE_LOCATOR_PREFIX = `media://local/`;
 
 /** sidecar 后缀；与对象同目录，删除对象时一并删除。 */
 const META_SUFFIX = ".meta.json";
+
+/** 构建期注入的公开桶信息：设置页展示为默认值，运行期也用它兜底。 */
+const PUBLIC_BUCKET_DEFAULTS = publicBucketDefaults();
 
 export const LOCAL_STORAGE_CONFIG = defineConfigSchema({
   root: {
@@ -72,6 +77,7 @@ export const LOCAL_STORAGE_CONFIG = defineConfigSchema({
   },
   publicBucketName: {
     kind: "string",
+    ...(PUBLIC_BUCKET_DEFAULTS.bucketName ? { default: PUBLIC_BUCKET_DEFAULTS.bucketName } : {}),
     reload: "hot",
     label: "公开桶名称",
     description: "公开临时桶名（含 APPID 后缀）；留空用构建期注入值"
@@ -79,12 +85,14 @@ export const LOCAL_STORAGE_CONFIG = defineConfigSchema({
   publicBucketUrl: {
     kind: "url",
     protocols: ["https:", "http:"],
+    ...(PUBLIC_BUCKET_DEFAULTS.bucketUrl ? { default: PUBLIC_BUCKET_DEFAULTS.bucketUrl } : {}),
     reload: "hot",
     label: "公开桶地址",
     description: "公开临时桶访问域名；留空用构建期注入值，region 由它解析"
   },
   publicPrefix: {
     kind: "string",
+    ...(PUBLIC_BUCKET_DEFAULTS.prefix ? { default: PUBLIC_BUCKET_DEFAULTS.prefix } : {}),
     reload: "hot",
     label: "公开桶前缀",
     description: "公开桶内的对象前缀；留空用构建期注入值，最终键为 <prefix>/<namespace>/<key>"
@@ -271,7 +279,7 @@ export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE
     label: LOCAL_STORAGE_LABEL,
     icon: "storage",
     configPrefix: LOCAL_STORAGE_CONFIG_PREFIX,
-    inject: ["log", "storage", "exposer"],
+    inject: ["log", "storage", "exposer", "config"],
     Config: LOCAL_STORAGE_CONFIG,
     apply(ctx, config) {
       const log = ctx.log.scope(LOCAL_STORAGE_PLUGIN_ID);
@@ -279,30 +287,47 @@ export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE
       ctx.effect(() => ctx.storage.register(backend));
       log({ event: "local-storage-activated", backendId: backend.backendId });
 
-      // 公开临时桶：默认关闭；开启后只注册提供者，**不**声明默认，仍要显式选
+      // 公开临时桶：默认关闭；开启后注册提供者，**不**声明默认，仍要显式选
       // `exposer.primary = local-public` 才生效——推素材上公网不该是隐式后果。
       if (config.publicEnabled !== true) {
         log({ event: "local-public-disabled" });
         return;
       }
-      const resolved = resolvePublicBucketConfig({
-        ...(config.publicSecretId ? { secretId: config.publicSecretId } : {}),
-        ...(config.publicSecretKey ? { secretKey: config.publicSecretKey } : {}),
-        ...(config.publicBucketName ? { bucketName: config.publicBucketName } : {}),
-        ...(config.publicBucketUrl ? { bucketUrl: config.publicBucketUrl } : {}),
-        ...(config.publicPrefix ? { prefix: config.publicPrefix } : {}),
-        env: process.env
-      });
-      if (!resolved.ok) {
-        // 缺项就整块跳过：注册一个推不上去的提供者只会把错误推迟到调用期。
-        log({ event: "local-public-unconfigured", missing: [...resolved.missing] });
+      const defaults = publicBucketDefaults();
+      const bucketName = (config.publicBucketName ?? "").trim() || (defaults.bucketName ?? "").trim();
+      const bucketUrl = ((config.publicBucketUrl ?? "").trim() || (defaults.bucketUrl ?? "").trim()).replace(/\/+$/, "");
+      const prefix = ((config.publicPrefix ?? "").trim() || (defaults.prefix ?? "").trim()).replace(/^\/+|\/+$/g, "");
+      const missing = [
+        ...(bucketName ? [] : ["publicBucketName"]),
+        ...(bucketUrl ? [] : ["publicBucketUrl"]),
+        ...(prefix ? [] : ["publicPrefix"])
+      ];
+      if (missing.length > 0) {
+        // 桶信息是「推到哪」的前提；凭据可以晚到（cos-storage 比本插件晚装载），所以不在这里判。
+        log({ event: "local-public-unconfigured", missing });
         return;
       }
-      const publicConfig = resolved.config;
-      const writer = createCosPublicBucketWriter(publicConfig);
+      const resolveConfig = (): PublicBucketConfig => {
+        // 凭据按用时的最新配置解析：公开桶自己的 → COS_PUBLIC_* → storage.cos / COS_SECRET_*。
+        const shared = ctx.config?.section("storage.cos") ?? {};
+        const resolved = resolvePublicBucketConfig({
+          ...(config.publicSecretId ? { secretId: config.publicSecretId } : {}),
+          ...(config.publicSecretKey ? { secretKey: config.publicSecretKey } : {}),
+          ...(typeof shared.secretId === "string" && shared.secretId ? { sharedSecretId: shared.secretId } : {}),
+          ...(typeof shared.secretKey === "string" && shared.secretKey ? { sharedSecretKey: shared.secretKey } : {}),
+          bucketName,
+          bucketUrl,
+          prefix,
+          env: process.env
+        });
+        if (!resolved.ok) {
+          throw new StorageExposeUnavailableError(`公开临时桶未配置：${resolved.missing.join("、")}`);
+        }
+        return resolved.config;
+      };
       ctx.effect(() =>
         ctx.exposer.register({
-          ...createPublicBucketExposer({ config: publicConfig, writer, storage: ctx.storage }),
+          ...createPublicBucketExposer({ resolveConfig, storage: ctx.storage }),
           // 设置页据此把「打开该提供者的配置」链回本插件。
           ownerExtensionId: LOCAL_STORAGE_PLUGIN_ID
         })
@@ -310,10 +335,9 @@ export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE
       log({
         event: "local-public-activated",
         exposerId: LOCAL_PUBLIC_EXPOSER_ID,
-        bucketName: publicConfig.bucketName,
-        bucketUrl: publicConfig.bucketUrl,
-        prefix: publicConfig.prefix,
-        credentialSource: publicConfig.credentialSource
+        bucketName,
+        bucketUrl,
+        prefix
       });
     }
   };

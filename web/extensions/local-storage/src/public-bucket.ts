@@ -70,6 +70,9 @@ export type PublicBucketResolution =
 export type PublicBucketInput = {
   secretId?: string;
   secretKey?: string;
+  /** 共享凭据（来自 `storage.cos` 配置段）：公开桶没单独配时复用它。 */
+  sharedSecretId?: string;
+  sharedSecretKey?: string;
   bucketName?: string;
   bucketUrl?: string;
   prefix?: string;
@@ -114,13 +117,15 @@ export function resolvePublicBucketConfig(input: PublicBucketInput): PublicBucke
     return "";
   };
 
-  // 凭据分两级：公开桶自己的（配置或 COS_PUBLIC_*），以及私有桶那对（COS_SECRET_*）。
-  // 两级成对取，不把 A 的 id 和 B 的 key 拼在一起——那种组合永远签不出来。
+  // 凭据分两级：公开桶自己的（配置或 COS_PUBLIC_*），以及私有桶那对（storage.cos 配置、
+  // COS_SECRET_*）。两级成对取，不把 A 的 id 和 B 的 key 拼在一起——那种组合永远签不出来。
   const dedicatedId = (input.secretId ?? "").trim() || envValue("COS_PUBLIC_SECRET_ID");
   const dedicatedKey = (input.secretKey ?? "").trim() || envValue("COS_PUBLIC_SECRET_KEY");
   const dedicated = dedicatedId !== "" && dedicatedKey !== "";
-  const secretId = dedicated ? dedicatedId : envValue("COS_SECRET_ID");
-  const secretKey = dedicated ? dedicatedKey : envValue("COS_SECRET_KEY");
+  const sharedId = (input.sharedSecretId ?? "").trim() || envValue("COS_SECRET_ID");
+  const sharedKey = (input.sharedSecretKey ?? "").trim() || envValue("COS_SECRET_KEY");
+  const secretId = dedicated ? dedicatedId : sharedId;
+  const secretKey = dedicated ? dedicatedKey : sharedKey;
 
   const defaults = input.defaults ?? publicBucketDefaults();
   const bucketName = (input.bucketName ?? "").trim() || (defaults.bucketName ?? "").trim();
@@ -218,16 +223,27 @@ export function createCosPublicBucketWriter(config: PublicBucketConfig): PublicB
  * 对象已存在且尺寸一致时跳过上传（键内容寻址，重复调用幂等）。
  */
 export function createPublicBucketExposer(options: {
-  config: PublicBucketConfig;
-  writer: PublicBucketWriter;
+  /** 固定配置（测试/调用方已解析好）。 */
+  config?: PublicBucketConfig;
+  writer?: PublicBucketWriter;
+  /** 按需解析：允许启动后再读凭据（例如 cos-storage 比本插件晚装载）。 */
+  resolveConfig?: () => PublicBucketConfig;
   storage: HostStorageService;
 }): StorageExposer {
-  const { config, writer, storage } = options;
+  const { storage } = options;
+  const current = (): { config: PublicBucketConfig; writer: PublicBucketWriter } => {
+    if (options.config && options.writer) return { config: options.config, writer: options.writer };
+    if (!options.resolveConfig) throw new Error("公开临时桶缺少配置解析器");
+    const config = options.resolveConfig();
+    return { config, writer: createCosPublicBucketWriter(config) };
+  };
   return {
     exposerId: LOCAL_PUBLIC_EXPOSER_ID,
     label: LOCAL_PUBLIC_LABEL,
     requiresReplica: false,
     async expose(input) {
+      // 每次现解析：热重载/共享凭据在启动后补齐时都不需要重启插件。
+      const { config, writer } = current();
       const objectKey = publicObjectKey(config, input.namespace + "/" + input.key);
       const object = await storage.bucket(input.namespace, input.scope).get(input.key);
       if ((await writer.stat(objectKey)) !== object.bytes.byteLength) {

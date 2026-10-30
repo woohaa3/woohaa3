@@ -31,8 +31,18 @@ import type { HostStorageService } from "./storage.js";
 import type { HostTelemetryService } from "./telemetry.js";
 import type { HostWebServerService } from "./web-server.js";
 
+/** 扩展可读的配置面：只暴露按段读取，不把 SettingsService 写进公共契约。 */
+export type HostConfigReader = {
+  section(prefix: string): Readonly<Record<string, string | number | boolean>>;
+};
+
 export type HostExtensionContext = Context & {
   readonly log: HostLogService;
+  /**
+   * 宿主统一配置（可选）：需要读其它插件配置段时使用（例如公开桶复用 COS 凭据）。
+   * 大多数扩展只用自己的第二参 `config`，不应把这里当默认入口。
+   */
+  readonly config?: HostConfigReader;
   readonly generation: HostGenerationService;
   readonly storage: HostStorageService;
   /**

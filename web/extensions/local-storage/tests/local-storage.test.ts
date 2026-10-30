@@ -172,7 +172,7 @@ describe("delete", () => {
   });
 });
 describe("插件形状", () => {
-  const createCtx = () => {
+  const createCtx = (cosSecrets: { secretId?: string; secretKey?: string } = {}) => {
     const registered: StorageBackend[] = [];
     const exposers: StorageExposer[] = [];
     const logs: Array<Record<string, unknown>> = [];
@@ -201,6 +201,9 @@ describe("插件形状", () => {
           logs.push(event);
         }
       },
+      config: {
+        section: () => cosSecrets
+      },
       effect: (callback: () => () => void) => {
         disposers.push(callback());
       }
@@ -213,7 +216,7 @@ describe("插件形状", () => {
     expect(plugin.name).toBe("local-storage");
     expect(plugin.label).toBe("本地存储");
     expect(plugin.configPrefix).toBe("storage.local");
-    expect(plugin.inject).toEqual(["log", "storage", "exposer"]);
+    expect(plugin.inject).toEqual(["log", "storage", "exposer", "config"]);
     expect(plugin.Config.fields.root.default).toBe(".woohaa3/storage");
     // 公开临时桶默认关闭：完全本地的部署不会因为装了插件就把素材推上公网。
     expect(plugin.Config.fields.publicEnabled.default).toBe(false);
@@ -252,8 +255,38 @@ describe("插件形状", () => {
     expect(exposers[0]).toMatchObject({ ownerExtensionId: "local-storage", requiresReplica: false });
     expect("default" in (exposers[0] as object)).toBe(false);
     expect(logs).toContainEqual(
-      expect.objectContaining({ event: "local-public-activated", exposerId: "local-public", credentialSource: "own" })
+      expect.objectContaining({ event: "local-public-activated", exposerId: "local-public" })
     );
+  });
+
+  it("桶信息齐全但凭据缺失时仍注册提供者，调用时给出明确缺项", async () => {
+    const plugin = createLocalStoragePlugin();
+    const { ctx, exposers } = createCtx();
+    await plugin.apply(ctx, {
+      root,
+      publicEnabled: true,
+      publicBucketName: "fixture-bucket-1234567890",
+      publicBucketUrl: "https://fixture-bucket-1234567890.cos.ap-guangzhou.myqcloud.com",
+      publicPrefix: "fixture-prefix"
+    });
+
+    expect(exposers.map((item) => item.exposerId)).toEqual(["local-public"]);
+    await expect(exposers[0]!.expose({ namespace: "media", key: "a.png" })).rejects.toThrow("公开临时桶未配置");
+  });
+
+  it("公开桶没配凭据时回落到 storage.cos 的共享凭据", async () => {
+    const plugin = createLocalStoragePlugin();
+    const { ctx, exposers, logs } = createCtx({ secretId: "shared-id", secretKey: "shared-key" });
+    await plugin.apply(ctx, {
+      root,
+      publicEnabled: true,
+      publicBucketName: "fixture-bucket-1234567890",
+      publicBucketUrl: "https://fixture-bucket-1234567890.cos.ap-guangzhou.myqcloud.com",
+      publicPrefix: "fixture-prefix"
+    });
+
+    expect(exposers.map((item) => item.exposerId)).toEqual(["local-public"]);
+    expect(logs.some((event) => event.event === "local-public-activated")).toBe(true);
   });
 
   it("缺桶信息时只记日志、不注册提供者（缺项不猜）", async () => {
