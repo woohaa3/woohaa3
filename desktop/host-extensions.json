@@ -15,7 +15,6 @@
     "oauth-agent",
     "sdk-agent",
     "remote-server",
-    "prompt-snippets",
     "task-activity"
   ]
 }

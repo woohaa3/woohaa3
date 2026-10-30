@@ -4,7 +4,7 @@
  *  其后按「配置文件是事实来源」重写：启停不再写浏览器 localStorage）。
  *
  * store 是配置文件 `extensions.frontend.<id>.enabled` 在浏览器侧的**只读投影 + 写入转发**：
- * - 读取：由调用方注入从宿主设置快照投影出的目标状态（`defaultPreferences` 兜底启用）；
+ * - 读取：由调用方注入从宿主设置快照投影出的目标状态（`defaults` 兜底，缺省启用）；
  * - 写入：交给注入的 `persist`（走宿主设置 API，写进宿主配置文件并热生效），
  *   store 自己不持有任何持久化介质；
  * - 失败时保留最后成功值、返回失败，不制造「已保存」假象。
@@ -33,8 +33,13 @@ export type ExtensionPreferenceStoreOptions = {
   /** 可配置 optional Plugin ID allowlist（静态可信）。 */
   ids: readonly string[];
   /**
+   * 各 ID 的开箱默认值（通常来自 extension metadata 的 `defaultEnabled`）。
+   * 缺省按启用；只影响配置里没有显式选择的 ID。
+   */
+  defaults?: Readonly<Record<string, boolean>>;
+  /**
    * 从宿主设置快照投影出的目标状态（配置文件 `extensions.frontend.<id>.enabled`）。
-   * 缺省表示宿主未提供：回退全部启用。
+   * 缺省表示宿主未提供：回退 `defaults`（再缺省启用）。
    */
   desired?: FrontendExtensionPreferences;
   /**
@@ -46,6 +51,7 @@ export type ExtensionPreferenceStoreOptions = {
 
 export class ExtensionPreferenceStore {
   private readonly ids: readonly string[];
+  private readonly defaults: Readonly<Record<string, boolean>>;
   private readonly persist?: (id: string, enabled: boolean) => Promise<ExtensionPreferenceWriteResult>;
   private readonly listeners = new Set<() => void>();
   private snapshot: ExtensionPreferenceSnapshot;
@@ -55,6 +61,7 @@ export class ExtensionPreferenceStore {
 
   constructor(options: ExtensionPreferenceStoreOptions) {
     this.ids = options.ids;
+    this.defaults = options.defaults ?? {};
     this.persist = options.persist;
     this.snapshot = this.project(options.desired);
   }
@@ -75,7 +82,7 @@ export class ExtensionPreferenceStore {
   /**
    * 用新的配置投影替换目标选择（宿主热重载 / 重新拉取快照后调用）。
    *
-   * 只包含 allowlist 内的 ID；未出现的 ID 取默认启用。
+   * 只包含 allowlist 内的 ID；未出现的 ID 取 `defaults`（再缺省启用）。
    */
   applyDesired(desired: FrontendExtensionPreferences): void {
     if (this.disposed) return;
@@ -156,7 +163,11 @@ export class ExtensionPreferenceStore {
   }
 
   private project(desired: FrontendExtensionPreferences | undefined): ExtensionPreferenceSnapshot {
-    const resolved = normalizePreferences(this.ids, { ...defaultPreferences(this.ids), ...(desired ?? {}) });
+    const resolved = normalizePreferences(this.ids, {
+      ...defaultPreferences(this.ids),
+      ...this.defaults,
+      ...(desired ?? {})
+    });
     return {
       preferences: resolved,
       diagnostic: null,

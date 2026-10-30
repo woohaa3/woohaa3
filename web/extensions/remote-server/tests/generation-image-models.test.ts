@@ -45,13 +45,14 @@ function serverGenericModel(
 }
 
 describe("withModelFamily · 图像", () => {
-  it("seedream 拿到「图片比例 + 图片分辨率」，服务端的裸像素 size 被完全替换", () => {
+  it("seedream 拿到「图片比例 + 图片分辨率 + 透明背景」，服务端的裸像素 size 被完全替换", () => {
     const model = withModelFamily(serverGenericModel("doubao-seedream-5-0-pro-260628", "image"));
     const properties = model.inputSchema!.properties as Record<string, Record<string, unknown>>;
 
-    // 家族只覆盖它认识的键（比例 / 分辨率）；提示词与参考图仍来自类型预设。
+    // 家族覆盖它认识的键（比例 / 分辨率 / 透明背景）；提示词、参考图与输出格式仍来自类型预设与卡片。
     expect(Object.keys(properties).sort()).toEqual([
       "aspectRatio",
+      "background",
       "outputFormat",
       "prompt",
       "referencesImage",
@@ -59,10 +60,17 @@ describe("withModelFamily · 图像", () => {
     ]);
     expect(properties.resolution!["x-pptask-control"]).toBe("resolution");
     expect(properties.aspectRatio!["x-pptask-control"]).toBe("aspect-ratio");
+    expect(properties.background!["x-pptask-control"]).toBe("background");
     expect(properties.size).toBeUndefined();
     // 即梦没有 quality / n。
     expect(properties.quality).toBeUndefined();
     expect(properties.n).toBeUndefined();
+  });
+
+  it("seedream 4.5 没有透明背景（官方只给 pro / flash）", () => {
+    const model = withModelFamily(serverGenericModel("doubao-seedream-4-5-251128", "image"));
+    const properties = model.inputSchema!.properties as Record<string, unknown>;
+    expect(properties.background).toBeUndefined();
   });
 
   it("gpt-image 保留 quality / n", () => {

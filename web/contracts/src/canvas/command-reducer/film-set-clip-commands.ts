@@ -1,10 +1,9 @@
+import { readFilmSetGroupMarker, createFilmSetGroupMarker, type FilmSetGroupClip } from "../film-set-group.js";
+import { readFilmSetAnimationProjection } from "../film-set-animation-projection.js";
 import type { CanvasCommand } from "../commands.js";
-import { decodeFilmSetNodeData } from "../canvas-node-model.js";
-import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
-import { canonicalFilmSetFields, LEGACY_FILM_SET_ANIMATION_FIELDS, LEGACY_FILM_SET_TOP_MODEL_FIELDS, resolveFilmSetClip } from "../film-set-clip-view.js";
+import { resolveFilmSetClip } from "../film-set-clip-view.js";
 import { applyFilmSetClipPatch } from "../film-set-clip-ops.js";
 import { compileFilmSetClip, filmSetCompiledBudget } from "../film-set-clip-compilation.js";
-import { animationSnapshotHash } from "../animation-snapshot.js";
 import type { CanvasNodeData } from "../domain/index.js";
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
 import { shotPreviewNodeId } from "../film-set-shot-preview.js";
@@ -12,10 +11,12 @@ import { isShotImageReferenceTargetNode, isShotReferenceTargetNode, shotReferenc
 
 export function patchFilmSetClip(work: WorkingState, command: Extract<CanvasCommand, { type: "filmSet.clipPatch" }>): CommandApplyResult {
   const node = work.nodes.find(entry => entry.id === command.nodeId);
-  if (!isFilmSetNode(node?.type, work.nodeData[command.nodeId])) return reject("unknown-node", "片场节点不存在");
+  const group = node?.type === "group" ? readFilmSetGroupMarker(work.nodeData[command.nodeId]) : null;
+  if (!group) return reject("invalid-self-contained-node", "旧片场只读，请先迁移为群组");
   const previous = work.nodeData[command.nodeId] ?? {};
-  const decoded = decodeFilmSetNodeData(previous);
-  if (!decoded.ok) return reject("invalid-self-contained-node", decoded.reason);
+  const projected = readFilmSetAnimationProjection({ document: { nodes: work.nodes }, nodeData: work.nodeData, assets: work.assets }, command.nodeId);
+  if (!projected) return reject("invalid-self-contained-node", "片场群组资源无法解析");
+  const decoded = { value: projected };
   const result = applyFilmSetClipPatch({ animation: decoded.value, clipId: command.clipId, op: command.op, expectedHash: command.expectedHash });
   if (!result.ok) return reject("invalid-self-contained-node", `${result.code}: ${result.reason}`);
   if (!result.changed) return OK;
@@ -29,16 +30,22 @@ export function patchFilmSetClip(work: WorkingState, command: Extract<CanvasComm
     const compiled = compileFilmSetClip(command.nodeId, target);
     if (!compiled.ok || compiled.diagnostics.length) return reject("invalid-self-contained-node", !compiled.ok ? compiled.reason : compiled.diagnostics.join("；"));
   }
-  const next = { ...previous, ...canonicalFilmSetFields(animation) } as CanvasNodeData;
   const previousKind = resolveFilmSetClip(decoded.value, targetId)?.clip.kind;
   if (target && previousKind && previousKind !== target.clip.kind) {
     const converted = convertShotReferenceConsumers(work, command.nodeId, targetId, target.clip.kind);
     if (!converted.ok) return converted;
   }
-  for (const field of LEGACY_FILM_SET_ANIMATION_FIELDS) delete next[field];
-  for (const field of LEGACY_FILM_SET_TOP_MODEL_FIELDS) delete next[field];
-  next.animationSnapshotHash = animationSnapshotHash(animation);
-  work.nodeData[command.nodeId] = next;
+  const marker = createFilmSetGroupMarker(group);
+  marker.clips = result.value.clips.map(clip => {
+    const cameraId = `camera:${clip.id}`;
+    marker.cameras = (marker.cameras ?? []).filter(camera => camera.id !== cameraId);
+    marker.cameras.push({ id: cameraId, name: clip.name, ...clip.initialCamera });
+    return { id: clip.id, name: clip.name, cameraId, duration: clip.timeline.duration, loop: clip.timeline.loop, cameraMotion: clip.cameraMotion, bindings: clip.bindings, ...(clip.backdrop ? { backdrop: clip.backdrop } : {}) } satisfies FilmSetGroupClip;
+  });
+  marker.activeClip = result.value.defaultClipId;
+  const usedCameras = new Set(marker.clips.map(clip => clip.cameraId));
+  marker.cameras = marker.cameras?.filter(camera => usedCameras.has(camera.id));
+  work.nodeData[command.nodeId] = { ...previous, filmSetGroup: marker } as CanvasNodeData;
   return OK;
 }
 

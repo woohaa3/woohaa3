@@ -26,7 +26,7 @@ import { encodeFilmSetPartId, readFilmSetContent } from "../film-set-content.js"
 import type { ModelFocusProjection } from "../model-focus.js";
 import { getGroupLayoutSizes } from "../domain/core/group-geometry.js";
 import { groupAppearanceModel } from "../group-appearance.js";
-import { groupPresentationRect, hiddenByCollapsedGroups } from "../group-presentation.js";
+import { hiddenByCollapsedGroups } from "../group-presentation.js";
 import { clampGroupBadgeScale } from "../group-badge.js";
 import { canvasGroundAnchor, compareCanvasGroundOrder } from "../ground-anchor.js";
 import { defaultAppTheme, validateAppThemePreset, type AppThemeSnapshot } from "../../theme/index.js";
@@ -71,10 +71,12 @@ import {
   readPlacement,
   resolveTextureKey
 } from "./node-projection.js";
-import { shotPreviewCardPresentation, shotPreviewLinksForFilmSet } from "./shot-preview-projection.js";
-import { shotPreviewOwnershipOf } from "../film-set-shot-preview.js";
+import { shotPreviewCardPresentation, shotPreviewCardPresentationForFilmSetGroup, shotPreviewLinksForFilmSet, shotPreviewLinksForFilmSetGroup } from "./shot-preview-projection.js";
+import { managedShotPreviewOwnershipOf, shotPreviewOwnershipOf } from "../film-set-shot-preview.js";
 import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
 import type { FilmSetNodeData } from "../canvas-node-model.js";
+import { activeFilmSetSceneBindings, prepareFilmSetGroup, readFilmSetGroupMarker } from "../film-set-group.js";
+import { FILM_SET_GROUP_RENDER_SCHEMA_VERSION, type BevyFilmSetGroupPreparation, type BevyFilmSetGroupBinding } from "./wire-scene.js";
 
 export type CanvasRenderSceneInput = {
   /** 扩展内容贡献。缺省时空解析器，不改变现有场景。 */
@@ -132,14 +134,24 @@ export type CanvasRenderSceneInput = {
   compositeAssetEmptyPlaceholders?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetEmptyPlaceholder>;
   compositeAssetScopeShapes?: ReadonlyMap<string, CompositeAssetScopeShape>;
   /**
-   * 每复合资产节点的总览 primitive LOD 策略声明
-   * （change: 2026-10-15-add-film-set-overview-lod，design D1）。
+   * 每节点的总览 primitive LOD 策略声明
+   * （change: 2026-10-15-add-film-set-overview-lod，design D1；
+   *  change: film-set group 迁移后同时覆盖 group 徽标场景）。
    *
-   * 由宿主按可信 adapter 严格身份解析后注入；存在即写入 `compositeAsset.geometryQuality`，运行时
-   * 据此按世界投影尺寸选择整场图元细分。缺省不写入即 World 用途保持 High。只承载派生呈现声明，
-   * 不进入 canonical 内容 hash、脚本执行 key 或持久 DTO。
+   * 由宿主按可信 adapter 严格身份解析后注入；存在即写入复合资产的
+   * `compositeAsset.geometryQuality` 或 group 的 `geometryQuality`，运行时据此按世界投影尺寸选择
+   * 整场图元细分。缺省不写入即 World 用途保持 High。只承载派生呈现声明，不进入 canonical 内容
+   * hash、脚本执行 key 或持久 DTO。
    */
-  compositeAssetGeometryQualities?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetGeometryQuality>;
+  geometryQualities?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetGeometryQuality>;
+  /**
+   * 每节点总览纹理缓存声明（change: 2026-10-29-cache-film-set-overview-textures）。
+   *
+   * 由宿主按可信 adapter 严格身份解析后注入；存在即写入 group 的 `overviewCache`，渲染器据此
+   * 把稳定主体替换为缓存纹理。缺省不写入即逐帧实时绘制。只承载派生呈现声明，不进入 canonical
+   * 内容 hash、脚本执行 key 或持久 DTO。
+   */
+  overviewCaches?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetOverviewCache>;
   /**
    * 每复合资产节点的**业务类型显示名**（如「片场」「游戏炼丹炉」）
    * （change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
@@ -329,18 +341,24 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const previewCard = capabilities.modelPreview;
     // 纯模型节点（片场 animation3d + 通用扩展节点 extension3d）：无卡片，节点矩形即范围框。
     const pureModel = !!capabilities.scope;
+    // Legacy film-set composites remain readable for migration/history, but are
+    // never emitted as executable compositeAsset wire. Canonical film-set
+    // rendering is provided by the group preparation plane below.
     const filmSet = pureModel;
     const size = groupSizes.get(node.id) ?? effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id), capabilities);
     const override = input.positionOverrides?.get(node.id);
     const offset = absoluteOffset(node);
     // 位置预览（拖拽）是绝对画布坐标；无预览时用文档局部坐标 + 父级绝对偏移投影。
     const data = nodeData[node.id];
+    const executableComposite = filmSet && !isFilmSetNode(node.type, data);
     const collapsed = node.type === "group" && data?.groupCollapsed === true;
-    const { x, y, width, height } = groupPresentationRect(node, collapsed, {
+    // Preserve the structural anchor so collapsing never moves/resizes the badge.
+    // Rust derives the visible bounds from the badge when group.collapsed is true.
+    const { x, y, width, height } = {
       x: override ? override.x : node.position.x + offset.x,
       y: override ? override.y : node.position.y + offset.y,
       ...size,
-    });
+    };
     const displayName = resolveNodeDisplayName({
       type: node.type,
       explicitName: data?.title,
@@ -361,7 +379,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       : null;
     // 片场：模型与媒体平面共用同一等比适配因子，让范围框（节点矩形）罩住整套内容，
     // 拖动角落缩放矩形即等比缩放内容（change: 2026-10-08-make-film-set-model-only 修订）。
-    const pureFit = filmSet
+    const pureFit = executableComposite
       ? pureModelFit({
           nodeId: node.id,
           data,
@@ -396,7 +414,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       // 片场（animation3d）纯模型：不携带卡片分类名（Bevy 不绘制卡片），只给条件范围几何。
       // 普通 model3d 保留「3D 模型」分类名（change: 2026-10-08-make-film-set-model-only）。
       ...(capabilities.appearance?.cardLabel ? { cardLabel: capabilities.appearance.cardLabel } : {}),
-      ...(filmSet
+      ...(executableComposite
       ? {
           compositeAsset: compositeAssetScopeForNode({
             x,
@@ -411,7 +429,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
             // 总览 LOD 策略只由可信 adapter 声明；缺失即 World 用途保持 High
             // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
             emptyPlaceholder: input.compositeAssetEmptyPlaceholders?.get(node.id),
-            geometryQuality: input.compositeAssetGeometryQualities?.get(node.id),
+            geometryQuality: input.geometryQualities?.get(node.id),
             mediaPlanes: filmSetMediaPlanes,
             layoutAabb: filmSetLayoutAabb,
             rootPlacement: placement,
@@ -439,6 +457,13 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           collapsed,
           badgeScale: clampGroupBadgeScale(input.groupBadgeScaleOverrides?.get(node.id) ?? data?.groupBadgeScale ?? 1),
           badgeResizable: input.groupBadgeResizable === true && selectedIds.size === 1 && selectedIds.has(node.id),
+          // 所有 group（普通组与片场组）都绘制节点顶部操作横条；具体动作仍由
+          // `canvas.node-action` 贡献按通用能力与节点身份决定。
+          actionBar: true,
+          // 可信 adapter 的声明同时覆盖 group 徽标的场景组合（片场迁移后不再有 compositeAsset）。
+          ...(input.geometryQualities?.get(node.id) ? { geometryQuality: input.geometryQualities.get(node.id) } : {}),
+          // 总览纹理缓存同样是 group 级声明；缺省保持逐帧实时。
+          ...(input.overviewCaches?.get(node.id) ? { overviewCache: input.overviewCaches.get(node.id) } : {}),
           ...(resource?.aabb ? { modelBounds: { aabb: resource.aabb, extent: resource.extent } } : {})
         } : {})
       };
@@ -458,19 +483,25 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     }
     // 拍摄镜头预览卡片呈现（change: 2026-10-15-add-film-set-shooting-shot-previews，design D2/D8）：
     // 只读投影源镜头的标题/类型/画幅/时长/状态，不复制第二份权威数据；无归属或源已消失时不绘制。
-    const shotOwnership = shotPreviewOwnershipOf(data);
+    // 旧形态写 `shotPreview`；迁移后的形态是 owner-managed 媒体节点（`managedBy` + `mediaContent`）。
+    const legacyShotOwnership = shotPreviewOwnershipOf(data);
+    const shotOwnership = legacyShotOwnership ?? managedShotPreviewOwnershipOf(data);
     if (shotOwnership) {
       const filmSetData = nodeData[shotOwnership.filmSetNodeId] as FilmSetNodeData | undefined;
       const local = input.shotPreviews?.get(node.id);
-      const presentation = shotPreviewCardPresentation({
-        filmSetNodeId: shotOwnership.filmSetNodeId,
-        previewData: data,
-        filmSetData,
-        state: local?.state,
-        progress: local?.progress,
-        playing: local?.playing,
-        diagnostic: local?.diagnostic
-      });
+      const ownerNode = canvas.document.nodes.find(entry => entry.id === shotOwnership.filmSetNodeId);
+      const groupMarker = ownerNode?.type === "group" ? readFilmSetGroupMarker(filmSetData) : null;
+      const presentation = groupMarker
+        ? shotPreviewCardPresentationForFilmSetGroup({ groupNodeId: shotOwnership.filmSetNodeId, groupData: filmSetData, clipId: shotOwnership.clipId, state: local?.state, progress: local?.progress, playing: local?.playing, diagnostic: local?.diagnostic })
+        : legacyShotOwnership ? shotPreviewCardPresentation({
+          filmSetNodeId: shotOwnership.filmSetNodeId,
+          previewData: data,
+          filmSetData,
+          state: local?.state,
+          progress: local?.progress,
+          playing: local?.playing,
+          diagnostic: local?.diagnostic
+        }) : null;
       if (presentation) {
         rendered.shotPreview = presentation;
         // 卡片主标题 = 镜头名，次要标记 = 静态/动态类型（design D8）。这些是源镜头的只读投影，
@@ -578,14 +609,67 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   if (input.shotPreviewCameraProjection) {
     for (const node of canvas.document.nodes) {
       const data = nodeData[node.id];
-      if (hidden.has(node.id) || !isFilmSetNode(node.type, data)) continue;
-      shotPreviewLinks.push(...shotPreviewLinksForFilmSet({
-        filmSetNodeId: node.id,
-        data: data as FilmSetNodeData | undefined,
-        previewNodeById: (previewId) => { const node = previewNodeById.get(previewId); return node?.shotPreview?.hidden ? undefined : node; },
-        cameraProjection: (clipId) => input.shotPreviewCameraProjection!(node.id, clipId)
-      }));
+      if (hidden.has(node.id)) continue;
+      if (isFilmSetNode(node.type, data)) {
+        shotPreviewLinks.push(...shotPreviewLinksForFilmSet({
+          filmSetNodeId: node.id,
+          data: data as FilmSetNodeData | undefined,
+          previewNodeById: (previewId) => { const node = previewNodeById.get(previewId); return node?.shotPreview?.hidden ? undefined : node; },
+          cameraProjection: (clipId) => input.shotPreviewCameraProjection!(node.id, clipId)
+        }));
+      } else if (node.type === "group" && readFilmSetGroupMarker(data)) {
+        shotPreviewLinks.push(...shotPreviewLinksForFilmSetGroup({
+          groupNodeId: node.id,
+          groupData: data,
+          previewNodeById: (previewId) => { const preview = previewNodeById.get(previewId); return preview?.shotPreview?.hidden ? undefined : preview; },
+          cameraProjection: (clipId) => input.shotPreviewCameraProjection!(node.id, clipId)
+        }));
+      }
     }
+  }
+
+  // Film-set groups are rendered from source cards and bindings.  The
+  // preparation is deliberately a read projection: unavailable cards remain
+  // represented by diagnostics and never cause the binding to disappear.
+  const filmSetGroups: BevyFilmSetGroupPreparation[] = [];
+  for (const node of canvas.document.nodes) {
+    if (hidden.has(node.id) || node.type !== "group" || !readFilmSetGroupMarker(nodeData[node.id])) continue;
+    const prepared = prepareFilmSetGroup(canvas, node.id);
+    if (!prepared) continue;
+    const diagnosticByBinding = new Map(prepared.diagnostics.map(diagnostic => [diagnostic.bindingId, diagnostic.message]));
+    const objectIds = new Set((input.modelResources?.get(node.id)?.ops ?? input.modelScenesV2?.get(node.id) ?? []).map(op => op.id));
+    const sceneBindings = activeFilmSetSceneBindings(prepared.marker);
+    for (const binding of sceneBindings) if (objectIds.has(encodeFilmSetPartId(binding.bindingId, "resource-unavailable"))) diagnosticByBinding.set(binding.bindingId, diagnosticByBinding.get(binding.bindingId) ?? "资源准备失败，请检查来源卡片后重试");
+    const bindings: BevyFilmSetGroupBinding[] = sceneBindings.map(binding => {
+      const resolved = prepared.bindings.find(candidate => candidate.bindingId === binding.bindingId);
+      const sourcePresentation = projectedNodes.find(candidate => candidate.id === binding.sourceNodeId);
+      const sourceData = nodeData[binding.sourceNodeId];
+      const assetId = sourceData?.outputAssetId ?? sourceData?.mediaContent?.payload?.assetId;
+      const sourceAsset = typeof assetId === "string" ? assets.get(assetId) : undefined;
+      const width = sourceAsset?.metadata?.width, height = sourceAsset?.metadata?.height;
+      const aspectRatio = typeof width === "number" && Number.isFinite(width) && width > 0 && typeof height === "number" && Number.isFinite(height) && height > 0 ? width / height : 1;
+      return {
+        bindingId: binding.bindingId,
+        sourceNodeId: binding.sourceNodeId,
+        kind: binding.kind,
+        contentKey: resolved?.contentKey ?? binding.contentKey,
+        ...(sourcePresentation?.model?.resourceKey ? { resourceKey: sourcePresentation.model.resourceKey } : {}),
+        ...(sourcePresentation?.model?.signature ? { signature: sourcePresentation.model.signature } : {}),
+        transform: { ...binding.transform },
+        visible: binding.visibility,
+        ...(binding.kind === "model3d" ? {} : { aspectRatio }),
+        ...(diagnosticByBinding.has(binding.bindingId) ? { diagnostic: diagnosticByBinding.get(binding.bindingId) } : {})
+      };
+    });
+    filmSetGroups.push({
+      schemaVersion: FILM_SET_GROUP_RENDER_SCHEMA_VERSION,
+      ownerId: node.id,
+      ...(prepared.marker.sceneTransform ? { sceneTransform: { ...prepared.marker.sceneTransform } } : {}),
+      badgeOrigin: { x: absoluteOffset(node).x + (node.width ?? 0) / 2, y: absoluteOffset(node).y + (node.height ?? 0) },
+      bindings,
+      ...(prepared.marker.ground ? { ground: { ...prepared.marker.ground } } : {}),
+      ...(prepared.marker.activeClip === undefined ? {} : { activeClip: prepared.marker.activeClip })
+    });
   }
 
   return {
@@ -593,6 +677,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     revision: canvas.revision,
     nodes,
     edges,
+    ...(filmSetGroups.length > 0 ? { filmSetGroups } : {}),
     ...(shotPreviewLinks.length > 0 ? { shotPreviewLinks } : {}),
     selection: {
       nodes: [...(input.selection?.nodes ?? [])].filter(id => !hidden.has(id)),

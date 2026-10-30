@@ -275,8 +275,10 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       TEXTURE_MAX_DIMENSION
     );
       if (!raster) throw new Error("视频预览无法读取像素");
-      return options.runtime.setTexture(session.nodeId, raster.width, raster.height, raster.pixels,
-        { sourceKey: session.sourceUrl }) !== false;
+      // 实时帧**不能**携带稳定内容身份：内容身份在 Rust 侧表示「同内容同尺寸可共享、像素不变」，
+      // 视频每帧像素都变，带 `sourceUrl` 会让第二帧起被当成已驻留内容而跳过上传，
+      // 画布上的视频就停在首帧（真实缺陷：hover 视频不播放）。以独占纹理逐帧覆盖。
+      return options.runtime.setTexture(session.nodeId, raster.width, raster.height, raster.pixels) !== false;
     });
     if (!accepted) { loading.setLoading(session.load, false); return false; }
     session.hasRealFrame = true;

@@ -26,6 +26,8 @@ struct Key {
     depth: f32,
     badge: bool,
     badge_scale: f32,
+    /// 收起态不绘制背板与气泡尾巴；结构矩形不变时也必须靠它触发重建。
+    collapsed: bool,
 }
 
 /// group 3D 气泡尾巴实体：owner 节点 + 几何 key + 独占 mesh。
@@ -62,6 +64,10 @@ fn transform(node: &crate::protocol::GraphNode, depth: f32) -> Transform {
 fn mesh(node: &crate::protocol::GraphNode) -> Mesh {
     let origin = Vec2::new(node.x + node.width / 2., node.y + node.height / 2.);
     let mut geometry = Geometry::default();
+    // 收起态不绘制背板，也不保留指向徽标的气泡尾巴（否则只剩一条悬空的尾巴颜色）。
+    if node.group.as_ref().is_some_and(|group| group.collapsed) {
+        return geometry.build();
+    }
     // The badge itself has no plate. The tail is a small opaque shape on the 3D camera so
     // the model stays in front of it while the 2D body panel remains behind the external badge.
     let tail = group_model::tail_path(node);
@@ -85,7 +91,7 @@ pub(crate) fn sync(
     nodes: Query<(Entity, &crate::canvas_ecs::components::CanvasNodeId, &crate::canvas_ecs::components::GroupPresentation)>,
     mut surfaces: Query<(Entity, &mut GroupSurface)>,
 ) {
-    if !flags.changed {
+    if !(flags.scene_received || flags.positions_received || flags.surface_changed || flags.theme_changed || flags.camera_changed) && !scene.is_changed() && !theme.is_changed() {
         return;
     }
     let focus = scene.0.model_focus.is_some();
@@ -139,6 +145,7 @@ pub(crate) fn sync(
             depth,
             badge: group_model::has_badge(&node),
             badge_scale: group_model::badge_scale(&node),
+            collapsed: node.group.as_ref().is_some_and(|group| group.collapsed),
         };
         let existing = surfaces.iter_mut().find(|(_, surface)| surface.owner == owner);
         match existing {
@@ -149,6 +156,7 @@ pub(crate) fn sync(
                 if surface.key.rect[2..] != key.rect[2..]
                     || surface.key.badge != key.badge
                     || surface.key.badge_scale != key.badge_scale
+                    || surface.key.collapsed != key.collapsed
                 {
                     let handle = meshes.add(mesh(&node));
                     meshes.remove(surface.mesh.id());

@@ -115,13 +115,18 @@ export type NodeHistoryModelPayload = {
 };
 
 /** 动画版本 payload：运动、初始镜头、时间线与适配关联。 */
-export type NodeHistoryAnimationPayload = LegacyNodeHistoryAnimationPayload | FilmSetHistoryAnimationPayload;
+export type NodeHistoryAnimationPayload = LegacyNodeHistoryAnimationPayload | FilmSetHistoryAnimationPayload | FilmSetGroupHistoryPayload;
 /**
  * 片场历史动画 payload（items-only，change 2026-10-11-extract-film-set-extension D7/D8/D10）。
  *
  * 保存独立根 + 共享 items + 全部 clips/defaultClipId（含 binding 动作/适配/播放与片段独立镜头），
  * **不另存顶层模型**。schema 2 的旧片场 payload 只允许由隔离离线 reader 转换，在线读取直接拒绝。
  */
+export type FilmSetGroupHistoryPayload = {
+  schemaVersion: 4;
+  filmSetGroup: import("../film-set-group.js").FilmSetGroupMarker;
+  origin?: never;
+};
 export type FilmSetHistoryAnimationPayload = {
   /** payload 布局版本（items-only）：与内部 `filmSetContent.schemaVersion` 无关。 */
   schemaVersion: 3;
@@ -231,7 +236,7 @@ export type NodeHistoryPreview =
   | { kind: "video"; href: string; posterHref: string | null; durationSeconds: number | null }
   | { kind: "audio"; href: string; durationSeconds: number | null }
   | { kind: "model"; thumbnailHref: string | null; entry: NodeHistoryPreviewEntry }
-  | { kind: "failure"; outcome: NodeHistoryOutcome; message: string };
+  | { kind: "failure"; outcome: Exclude<NodeHistoryOutcome, "succeeded">; message: string };
 
 /** 模型预览的条目身份：渲染器按它读取权威脚本并缓存结果。 */
 export type NodeHistoryPreviewEntry = {

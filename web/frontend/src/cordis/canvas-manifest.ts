@@ -10,7 +10,7 @@ import { agentAssistantExtension } from "./plugins/agent-assistant/plugin.js";
  *
  * `CANVAS_PLUGIN_CATALOG` 是宿主**内置**插件的唯一权威目录：装配信息（`create`/`required`）与
  * 展示元数据（`name`/`description`）。业务 extension（ChatGPT、片场、prompt-snippets、
- * task-activity、game-furnace、runninghub-provider）不再手写于此：它们由发布目录的纯 metadata
+ * task-activity、runninghub-provider）不再手写于此：它们由发布目录的纯 metadata
  * 与已校验 browser artifact 在运行时派生（design D4/D6），本模块只负责合并内置与运行时条目。
  *
  * 用户可配置的 optional Plugin 仍由显式 allowlist 固定；运行时把发布目录中的 browser-local

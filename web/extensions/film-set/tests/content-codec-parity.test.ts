@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeFilmSetContent as decodeFromContracts, emptyFilmSetContent } from "../../../contracts/src/canvas/film-set-content.js";
+import { decodeFilmSetContent as decodeFromContracts, emptyFilmSetContent } from "@woohaa3/contracts";
 import { decodeFilmSetContent as decodeFromShared } from "../src/state/shared/content/codec.js";
 
 describe("片场内容 codec 只有一份实现", () => {

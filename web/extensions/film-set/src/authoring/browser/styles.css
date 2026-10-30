@@ -1,11 +1,11 @@
-.film-set-object-dock { padding: 16px; border-bottom: 1px solid var(--app-web-border); }
+.film-set-object-dock { padding: 12px; border-bottom: 1px solid var(--app-web-border); }
 .film-set-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; min-height: 24px; }
 .film-set-section-heading h3 { margin: 0; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .film-set-count { margin-left: 5px; font-size: 12px; font-weight: 500; color: var(--app-web-text-muted); font-variant-numeric: tabular-nums; }
-.film-set-object-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; }
+.film-set-object-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; }
 .film-set-object-list__empty { padding: 18px 12px; border: 1px dashed var(--app-web-border); border-radius: 8px; font-size: 12px; line-height: 1.6; color: var(--app-web-text-muted); }
 .film-set-object-row {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 8px 10px;
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 5px 8px;
   border: 1px solid transparent; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; text-align: left;
 }
 .film-set-object-row:hover { background: var(--app-web-subtle); }
@@ -42,14 +42,14 @@
 
 .film-set-object-row:focus-visible { outline: 2px solid var(--app-interaction-accent); outline-offset: 2px; }
 
-.film-set-animation-controls { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; max-width: 100%; box-sizing: border-box; gap: 12px; padding: 16px; border-bottom: 1px solid var(--app-web-border); }
+.film-set-animation-controls { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; max-width: 100%; box-sizing: border-box; gap: 8px; padding: 12px; border-bottom: 1px solid var(--app-web-border); }
 .film-set-animation-controls label { min-width: 0; max-width: 100%; display: flex; gap: 8px; align-items: center; }
 .film-set-animation-controls input:not([type="checkbox"]):not([type="color"]), .film-set-animation-controls select { width: 0; max-width: 100%; min-width: 0; flex: 1 1 0; text-overflow: ellipsis; }
 .film-set-animation-modes, .film-set-animation-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .film-set-animation-modes [aria-pressed="true"] { font-weight: 700; }
 .film-set-animation-player { display: grid; gap: 10px; }
 .film-set-animation-player p { font-size: 12px; opacity: .7; }
-.film-set-animation-player { position: absolute; z-index: 30; left: var(--focus-content-x, 16px); bottom: var(--focus-player-bottom, 12px); width: var(--focus-content-width, calc(100% - 32px)); box-sizing: border-box; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--mc-panel); pointer-events: auto; }
+.film-set-animation-player { position: absolute; z-index: 30; left: var(--focus-content-x, 16px); bottom: var(--focus-player-bottom, 12px); width: var(--focus-content-width, calc(100% - 32px)); box-sizing: border-box; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 8px; border-radius: 8px; background: var(--mc-panel); pointer-events: auto; }
 .film-set-animation-player input[type="range"] { flex: 1; min-width: 90px; }
 .film-set-animation-player output { font-variant-numeric: tabular-nums; font-size: 12px; }
 .film-set-animation-player p { flex-basis: 100%; margin: 0; }
@@ -130,7 +130,7 @@
 .film-set-generate-dock > * { pointer-events: auto; }
 .film-set-generate-dock[hidden], .film-set-generate-dock__expanded[hidden] { display: none; }
 .film-set-generate-dock__expanded { width: 100%; min-width: 0; max-height: calc(var(--focus-content-height, 100vh) - 24px); overflow-y: auto; }
-.film-set-generate-dock__heading { display: flex; align-items: center; gap: 12px; padding: 0 4px 8px; font-size: 12px; color: var(--app-web-text-primary); }
+.film-set-generate-dock__heading { display: flex; align-items: center; gap: 8px; padding: 0 4px 4px; font-size: 12px; color: var(--app-web-text-primary); }
 .film-set-generate-dock__title { flex-shrink: 0; font-weight: 600; }
 .film-set-generate-dock__shot { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .film-set-generate-dock__target { max-width: 38%; min-width: 0; margin-left: auto; padding: 4px 8px; border: 1px solid var(--app-web-border); border-radius: 6px; background: var(--app-web-panel); color: inherit; font: inherit; text-overflow: ellipsis; }
@@ -162,3 +162,37 @@
 .film-set-object-list__item { display: flex; align-items: center; gap: 4px; }
 .film-set-object-list__item > .film-set-object-row { flex: 1; min-width: 0; }
 .film-set-object-list__item > .ui-button { flex-shrink: 0; }
+
+/* Lists and properties share the host inspector bounds, never its scroll position. */
+/* Playback/AI reserve the viewport bottom, while the inspector fills its own column. */
+.app[data-focus-kind] .model-editor-dock[data-film-set] { bottom: 0; height: auto; }
+.model-editor-dock[data-film-set] { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.film-set-current-shot { padding: 4px 12px; flex: none; }
+.film-set-current-shot > button { display: flex; width: 100%; justify-content: space-between; gap: 12px; }
+.film-set-current-shot > button > span:last-child { flex: none; color: var(--app-web-text-muted); font-size: 12px; }
+.film-set-inspector-list { flex: 0 1 auto; min-height: 80px; max-height: 35%; overflow: auto; overscroll-behavior: contain; }
+.film-set-shot-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-set-inspector-list .film-set-object-list { max-height: none; overflow: visible; }
+.film-set-inspector-divider { height: 9px; flex: none; cursor: row-resize; border-block: 1px solid var(--app-web-border); touch-action: none; }
+.film-set-inspector-divider:hover { background: var(--app-web-hover); }
+.film-set-inspector-properties { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.film-set-inspecting { margin: 8px 12px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-set-output { display: grid; gap: 6px; padding: 12px; }
+.film-set-output h3, .film-set-image-reference h3 { margin: 0; font-size: 13px; }
+.film-set-viewport-tools { position: absolute; z-index: 25; left: calc(var(--focus-content-x, 0px) + 12px); top: calc(var(--focus-header, 100px) + 8px); max-width: calc(var(--focus-content-width, 100%) - 24px); display: flex; gap: 2px; padding: 4px; border-radius: 6px; background: var(--app-web-panel); color: var(--app-web-text-primary); pointer-events: auto; }
+.film-set-viewport-tools[hidden] { display: none; }
+.film-set-viewport-tools > div { display: flex; gap: 2px; }
+.film-set-generate-dock { bottom: calc(var(--focus-player-bottom, 44px) + 76px); }
+.film-set-generate-dock__target { max-width: 65%; }
+
+.model-editor-dock[data-film-set] .model-inspector-header > div { min-width: 0; }
+.model-editor-dock[data-film-set] .model-inspector-header h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-set-output, .film-set-image-reference { min-width: 0; overflow-wrap: anywhere; }
+
+.film-set-create-shot { margin-left: auto; }
+
+.film-set-inspector-list > .film-set-object-dock { border-bottom: 0; }
+
+.model-editor-dock[data-film-set] .model-inspector-header { padding: 10px 12px; }
+.film-set-viewport-tools button { min-height: 30px; padding: 4px 8px; }
+.film-set-animation-player__transport, .film-set-animation-player__actions { display: flex; align-items: center; gap: 4px; }

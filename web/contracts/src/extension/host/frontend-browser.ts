@@ -63,6 +63,13 @@ export type ExtensionFrontendMetadata = {
   activation: ApplicationExtensionFrontendActivation;
   configScope: ApplicationExtensionFrontendConfigScope;
   required: boolean;
+  /**
+   * `browser-local` optional 的**开箱默认启停**；缺省视为启用（兼容旧 artifact）。
+   *
+   * 只影响「宿主配置文件里还没有显式选择」时的目标状态；显式 `extensions.frontend.<id>.enabled`
+   * 始终优先，升级不重置用户选择。
+   */
+  defaultEnabled?: boolean;
   sdkAbi: number;
   /** 本扩展贡献的纯 app/page 路由元数据（可选；仅站点入口可声明）。 */
   appPages?: readonly ExtensionAppPageMetadata[];
@@ -339,6 +346,9 @@ function readMetadata(raw: unknown): ExtensionBrowserDecodeResult<ExtensionFront
     return fail("malformed", "metadata.configScope 非法");
   }
   if (typeof raw.required !== "boolean") return fail("malformed", "metadata.required 必须是布尔值");
+  if (raw.defaultEnabled !== undefined && typeof raw.defaultEnabled !== "boolean") {
+    return fail("malformed", "metadata.defaultEnabled 必须是布尔值");
+  }
   if (!isNonNegativeInteger(raw.sdkAbi)) return fail("malformed", "metadata.sdkAbi 非法");
   if (raw.settingsPanel !== undefined && typeof raw.settingsPanel !== "boolean") {
     return fail("malformed", "metadata.settingsPanel 必须是布尔值");
@@ -348,6 +358,10 @@ function readMetadata(raw: unknown): ExtensionBrowserDecodeResult<ExtensionFront
   }
   if (raw.configScope === "site" && raw.activation === "browser-local") {
     return fail("malformed", "站点 extension 不得使用 browser-local activation");
+  }
+  // 站点入口的首次默认值由 extension.json 的 `site.defaultEnabled` 声明，两套默认值不得混用。
+  if (raw.configScope === "site" && raw.defaultEnabled !== undefined) {
+    return fail("malformed", "站点 extension 不得声明 defaultEnabled");
   }
   if (raw.configScope === "browser-local" && raw.activation !== "browser-local") {
     return fail("malformed", "browser-local extension activation 必须是 browser-local");
@@ -374,6 +388,7 @@ function readMetadata(raw: unknown): ExtensionBrowserDecodeResult<ExtensionFront
       activation: raw.activation,
       configScope: raw.configScope,
       required: raw.required,
+      ...(raw.defaultEnabled !== undefined ? { defaultEnabled: raw.defaultEnabled } : {}),
       sdkAbi: raw.sdkAbi,
       ...(appPages ? { appPages } : {}),
       ...(raw.settingsPanel !== undefined ? { settingsPanel: raw.settingsPanel } : {})

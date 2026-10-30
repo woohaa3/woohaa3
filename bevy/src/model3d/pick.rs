@@ -21,7 +21,10 @@ use crate::protocol::{GraphNode, ModelSnapshot, Scene};
 /// 复合资产按通用 presentation 排除——其 overview hover 只能来自共享 interaction snapshot 的
 /// 地面范围命中；普通模型本体与聚焦内部对象候选不受影响（design D4）。
 pub(crate) fn is_model_candidate(node: &GraphNode) -> bool {
-    node.composite_asset.is_none() && node.group.is_none() && node.model_preview.is_none() && node.model.is_some()
+    node.composite_asset.is_none()
+        && node.group.is_none()
+        && node.model_preview.is_none()
+        && node.model.is_some()
 }
 
 /// 派生普通模型候选世界 AABB；`lookup` 提供不可变资源表（`set_scene` 接受点注入 `bridge`）。
@@ -131,7 +134,7 @@ mod tests {
     /// 同时固定范围边界语义（地面内/边界命中、AABB 空白角不命中）与普通模型回退保留。
     #[test]
     fn composite_hover_never_comes_from_model_aabb_geometry() {
-        use crate::canvas_query::scope::{self, ScopeGround, ScopeRect, SCOPE_MIN_HALF};
+        use crate::canvas_query::scope::{self, SCOPE_MIN_HALF, ScopeGround, ScopeRect};
         use crate::isometric_grid::plan::{scope_axis_x, scope_axis_y};
 
         // 片场：内容适配矩形 0,0,260,195，地面矩形 hx=hz=80 → 菱形；模型 AABB 会向卡片外
@@ -156,15 +159,27 @@ mod tests {
         assert_eq!(candidates.len(), 1, "只有普通模型入选");
         assert_eq!(candidates[0].node_id, "m");
         assert!(
-            !candidates.iter().any(|candidate| candidate.node_id == "film"),
+            !candidates
+                .iter()
+                .any(|candidate| candidate.node_id == "film"),
             "复合资产三维 AABB 不得成为 hover 回退候选"
         );
 
         // 地面范围唯一几何：内部与右顶点（含边界）命中；AABB 空白角不命中。
         let geometry = scope::geometry(
-            ScopeRect { x: 0.0, y: 0.0, width: 260.0, height: 195.0 },
+            ScopeRect {
+                x: 0.0,
+                y: 0.0,
+                width: 260.0,
+                height: 195.0,
+            },
             crate::protocol::CompositeAssetScopeShape::IsometricDiamond,
-            Some(ScopeGround { cx: 130.0, cy: 97.5, hx: 80.0, hz: 80.0 }),
+            Some(ScopeGround {
+                cx: 130.0,
+                cy: 97.5,
+                hx: 80.0,
+                hz: 80.0,
+            }),
             SCOPE_MIN_HALF,
         );
         assert!(scope::contains(&geometry, geometry.center));
@@ -173,25 +188,30 @@ mod tests {
         let blank = bevy::prelude::Vec2::new(geometry.aabb.x, geometry.aabb.y);
         assert!(!scope::contains(&geometry, blank), "AABB 空白角在范围外");
         // 投影轴保持等距地面斜率，范围不额外扩张。
-        assert!((scope_axis_y() / scope_axis_x() - crate::isometric_grid::CANVAS_CAMERA_PITCH.sin()).abs() < 1e-4);
+        assert!(
+            (scope_axis_y() / scope_axis_x() - crate::isometric_grid::CANVAS_CAMERA_PITCH.sin())
+                .abs()
+                < 1e-4
+        );
     }
 
     /// 未注册资源或缺失模型引用的节点不产生候选（保持既有接受点语义）。
     #[test]
     fn missing_reference_or_resource_is_skipped() {
         let no_reference = node(r#"{"id":"a","type":"image","x":0,"y":0}"#);
-        let unknown = node(
-            r#"{"id":"b","type":"model3d","x":0,"y":0,"model":{"resourceKey":"v:other"}}"#,
-        );
+        let unknown =
+            node(r#"{"id":"b","type":"model3d","x":0,"y":0,"model":{"resourceKey":"v:other"}}"#);
         let scene = Scene {
             nodes: vec![no_reference, unknown],
             ..Scene::default()
         };
         assert!(model_candidates(&scene, |_| None).is_empty());
         // 仅注册 `v:sig` 时，引用未知 key 的节点仍被跳过。
-        assert!(model_candidates(&scene, |key| {
-            (key == "v:sig").then(|| Arc::new(snapshot()))
-        })
-        .is_empty());
+        assert!(
+            model_candidates(&scene, |key| {
+                (key == "v:sig").then(|| Arc::new(snapshot()))
+            })
+            .is_empty()
+        );
     }
 }

@@ -1,6 +1,6 @@
 //! Small dynamic mesh; time never participates in the static card cache key.
 use super::{
-    Visuals,
+    CanvasOverlayCache,
     geometry::Geometry,
     layout::{NODE_HISTORY_STRIP_DOT_RADIUS, history_strip_dot},
 };
@@ -47,7 +47,11 @@ pub(crate) fn pulse(seconds: f32) -> f32 {
 
 fn scale_towards(scale: f32, target: f32, elapsed: f32) -> f32 {
     let next = scale + (target - scale) * (1.0 - (-elapsed / 0.075).exp());
-    if (target - next).abs() < 0.002 { target } else { next }
+    if (target - next).abs() < 0.002 {
+        target
+    } else {
+        next
+    }
 }
 
 fn shade(color: u32, tone: f32) -> u32 {
@@ -66,7 +70,7 @@ pub(crate) fn sync(
     scene: Res<CurrentScene>,
     surface: Res<SurfaceState>,
     theme: Res<crate::theme::ThemeResource>,
-    visuals: Res<Visuals>,
+    visuals: Res<CanvasOverlayCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut layer: Local<PulseLayer>,
 ) {
@@ -77,8 +81,10 @@ pub(crate) fn sync(
     let rebuild = scene.is_changed() || surface.is_changed() || hidden != layer.hidden;
     if rebuild {
         layer.hidden = hidden;
-        let previous: HashMap<_, _> = std::mem::take(&mut layer.targets).into_iter()
-            .map(|dot| (dot.key, (dot.scale, dot.tone))).collect();
+        let previous: HashMap<_, _> = std::mem::take(&mut layer.targets)
+            .into_iter()
+            .map(|dot| (dot.key, (dot.scale, dot.tone)))
+            .collect();
         if !hidden {
             let view = &scene.0.viewport;
             for (index, node) in scene.0.nodes.iter().enumerate() {
@@ -112,12 +118,40 @@ pub(crate) fn sync(
                         && screen.x <= surface.size.x
                         && screen.y <= surface.size.y
                     {
-                        let key = format!("{}:{}", node.id, dot.presentation_id.as_deref().unwrap_or(&dot_index.to_string()));
-                        let target_scale = if dot.pressed { 0.78 } else if dot.hovered { 1.4 } else { 1.0 };
-                        let target_tone = if dot.pressed { -0.26 } else if dot.hovered { 0.22 } else { 0.0 };
+                        let key = format!(
+                            "{}:{}",
+                            node.id,
+                            dot.presentation_id
+                                .as_deref()
+                                .unwrap_or(&dot_index.to_string())
+                        );
+                        let target_scale = if dot.pressed {
+                            0.78
+                        } else if dot.hovered {
+                            1.4
+                        } else {
+                            1.0
+                        };
+                        let target_tone = if dot.pressed {
+                            -0.26
+                        } else if dot.hovered {
+                            0.22
+                        } else {
+                            0.0
+                        };
                         let (scale, tone) = previous.get(&key).copied().unwrap_or((1.0, 0.0));
-                        layer.targets.push(DotTarget { key, center, z: 10.0 + index as f32 * 0.1 + 0.056,
-                            state: dot.state.clone(), current: dot.current, selected: dot.selected == Some(true), scale, target_scale, tone, target_tone });
+                        layer.targets.push(DotTarget {
+                            key,
+                            center,
+                            z: 10.0 + index as f32 * 0.1 + 0.056,
+                            state: dot.state.clone(),
+                            current: dot.current,
+                            selected: dot.selected == Some(true),
+                            scale,
+                            target_scale,
+                            tone,
+                            target_tone,
+                        });
                     }
                 }
             }
@@ -129,7 +163,12 @@ pub(crate) fn sync(
     }
     let now = time.elapsed_secs();
     let changed = rebuild || theme.is_changed() || layer.mesh.is_none();
-    let animating = layer.targets.iter().any(|dot| dot.state == "running" || dot.state == "queued" || dot.scale != dot.target_scale || dot.tone != dot.target_tone);
+    let animating = layer.targets.iter().any(|dot| {
+        dot.state == "running"
+            || dot.state == "queued"
+            || dot.scale != dot.target_scale
+            || dot.tone != dot.target_tone
+    });
     if !changed && (!animating || now - layer.sampled_at < 1. / 30.) {
         return;
     }
@@ -150,8 +189,14 @@ pub(crate) fn sync(
         dot.tone = scale_towards(dot.tone, dot.target_tone, elapsed);
         let radius = NODE_HISTORY_STRIP_DOT_RADIUS * dot.scale;
         if dot.current {
-            geometry.ring(dot.center, radius + 1.8, 1.0, dot.z,
-                theme.token_u32("canvasProgressTrack"), 18);
+            geometry.ring(
+                dot.center,
+                radius + 1.8,
+                1.0,
+                dot.z,
+                theme.token_u32("canvasProgressTrack"),
+                18,
+            );
         }
         if dot.selected {
             let ring_color = if dot.state == "running" || dot.state == "queued" {
@@ -159,11 +204,20 @@ pub(crate) fn sync(
             } else {
                 theme.token_u32("interactionAccent")
             };
-            geometry.ring(dot.center, radius + 2.1, 1.2, dot.z + 0.001,
-                shade(ring_color, dot.tone), 18);
+            geometry.ring(
+                dot.center,
+                radius + 2.1,
+                1.2,
+                dot.z + 0.001,
+                shade(ring_color, dot.tone),
+                18,
+            );
         }
-        let fill = if dot.state == "running" || dot.state == "queued" { color }
-            else { super::history_strip::dot_color(&theme, &dot.state) };
+        let fill = if dot.state == "running" || dot.state == "queued" {
+            color
+        } else {
+            super::history_strip::dot_color(&theme, &dot.state)
+        };
         geometry.circle(dot.center, radius, dot.z + 0.002, shade(fill, dot.tone), 18);
     }
     let mesh = meshes.add(geometry.build());
@@ -240,7 +294,9 @@ mod tests {
         let pressed = scale_towards(hover, 0.78, 1.0 / 30.0);
         assert!(pressed < hover && pressed > 0.78);
         let mut released = pressed;
-        for _ in 0..30 { released = scale_towards(released, 1.0, 1.0 / 30.0); }
+        for _ in 0..30 {
+            released = scale_towards(released, 1.0, 1.0 / 30.0);
+        }
         assert_eq!(released, 1.0);
     }
 }

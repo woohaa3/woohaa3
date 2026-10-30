@@ -12,7 +12,7 @@ export function ComposerAndSelectors() {
   return <ComponentStage>{record => <>
     <label>禁用 <Switch checked={disabled} onCheckedChange={disable} /></label>
     <label>加载 <Switch checked={loading} onCheckedChange={load} /></label>
-    <AssistantComposer value={text} onChange={change} onSubmit={() => record("Ctrl/Cmd+Enter 提交")} disabled={disabled} placeholder="普通 Enter 换行，Ctrl/Cmd+Enter 提交" />
+    <AssistantComposer value={text} onChange={change} onSubmit={() => record("Enter 提交")} disabled={disabled} placeholder="Enter 提交，Shift+Enter 换行" />
     <AssistantToolbar disabled={disabled} refreshing={loading} onRefresh={() => { load(!loading); record("刷新"); }} onManage={() => record("管理")}
       assistant={<AssistantConnectionSelector empty={false} loading={loading} options={options} model={model} disabled={disabled} open={connectionOpen} onOpenChange={openConnection} onChange={v => { select(v); record(v); }} />}
       parameters={<AssistantModelSelector model={model} options={options} open={modelOpen} onOpenChange={openModel} disabled={disabled}
@@ -24,13 +24,13 @@ export function ComposerAndSelectors() {
   </>}</ComponentStage>;
 }
 
-/** 输入框：空值、长文本、禁用；Enter 换行，Ctrl/Cmd+Enter 提交（输入法组合期间不提交）。 */
+/** 输入框：空值、长文本、禁用；Enter 提交，Shift+Enter 换行（输入法组合期间不提交）。 */
 export function ComposerStates() {
   const [text, change] = useState("");
   const [disabled, disable] = useState(false);
   return <ComponentStage>{record => <>
     <label className="showcase__row"><Switch checked={disabled} onCheckedChange={value => { disable(value); record(value ? "禁用" : "启用"); }} /> 禁用输入</label>
-    <AssistantComposer value={text} onChange={change} onSubmit={() => record("Ctrl/Cmd+Enter 提交")} disabled={disabled} placeholder="Enter 换行；Ctrl/Cmd+Enter 提交；组合输入期间不提交" />
+    <AssistantComposer value={text} onChange={change} onSubmit={() => record("Enter 提交")} disabled={disabled} placeholder="Enter 提交；Shift+Enter 换行；组合输入期间不提交" />
     <Button size="sm" onClick={() => change("已填充的长文本。".repeat(60))}>填入长文本</Button>
     <Button size="sm" onClick={() => change("")}>清空</Button>
     <output>字符数：{text.length}</output>
@@ -55,6 +55,21 @@ export function SelectorStates() {
       variant={{ value: variant, options: [{ value: "", label: "默认 Variant" }, { value: "high", label: "深入" }, { value: "off", label: "不可用", disabled: true }], onChange: value => { choose(value); record(`Variant:${value || "默认"}`); } }} />
     <AssistantConnectionSelector empty loading={false} model="" options={[]} open={false} onOpenChange={() => record("空目录不应打开")} onChange={() => record("空目录不应选择")} onManage={() => record("配置助手")} />
     <output>模型：{model}；Variant：{variant || "（默认）"}</output>
+  </>}</ComponentStage>;
+}
+
+/** 长模型目录：超过 8 个模型时出现即时搜索，按模型名或 provider 过滤。 */
+export function LongModelCatalog() {
+  const [model, select] = useState("opencode/模型 1");
+  const [open, setOpen] = useState(false);
+  const providers = ["opencode", "aihubmix", "openrouter"];
+  const options = Array.from({ length: 24 }, (_, index) => ({
+    value: `${providers[index % providers.length]}/模型 ${index + 1}`,
+    label: `模型 ${index + 1} (${providers[index % providers.length]})`,
+  }));
+  return <ComponentStage>{record => <>
+    <AssistantModelSelector label="选择助手模型" model={model} options={options} open={open} onOpenChange={setOpen} onChange={value => { select(value); record(value); }} />
+    <output>模型：{model}</output>
   </>}</ComponentStage>;
 }
 

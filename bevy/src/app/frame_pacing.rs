@@ -48,8 +48,9 @@ pub(super) fn busy(
     shot: &shot_node_preview::ShotPreviewCards,
     previews: &model_preview::Previews,
     history: &history_preview::ActiveThumbnail,
+    overview: &crate::canvas_ecs::overview_cache::OverviewCacheRegistry,
 ) -> bool {
-    busy_reasons(flags, visuals, shot, previews, history) != 0
+    busy_reasons(flags, visuals, shot, previews, history, overview) != 0
 }
 
 /// 逐项忙碌位图；`0` 表示可以停帧。
@@ -62,6 +63,7 @@ fn busy_reasons(
     shot: &shot_node_preview::ShotPreviewCards,
     previews: &model_preview::Previews,
     history: &history_preview::ActiveThumbnail,
+    overview: &crate::canvas_ecs::overview_cache::OverviewCacheRegistry,
 ) -> u16 {
     let mut bits = 0u16;
     for (bit, value) in [
@@ -77,6 +79,7 @@ fn busy_reasons(
         (1 << 9, shot.has_pending()),
         (1 << 10, previews.has_pending()),
         (1 << 11, history.has_pending()),
+        (1 << 12, overview.has_pending()),
     ] {
         if value {
             bits |= bit;
@@ -86,7 +89,7 @@ fn busy_reasons(
 }
 
 /// 忙碌位图的固定词表（诊断口径，长度有界）。
-const BUSY_LABELS: [&str; 12] = [
+const BUSY_LABELS: [&str; 13] = [
     "scene",
     "positions",
     "viewport",
@@ -99,6 +102,7 @@ const BUSY_LABELS: [&str; 12] = [
     "shot",
     "previews",
     "history",
+    "overview-cache",
 ];
 
 fn busy_label(bits: u16) -> String {
@@ -159,6 +163,8 @@ pub(super) fn sync_pacing(
     shot: Res<shot_node_preview::ShotPreviewCards>,
     previews: Res<model_preview::Previews>,
     history: Res<history_preview::ActiveThumbnail>,
+    overview: Res<crate::canvas_ecs::overview_cache::OverviewCacheRegistry>,
+    overview_dispatch: Res<crate::canvas_ecs::overview_cache::dispatch::OverviewDispatch>,
     mut state: ResMut<PacingState>,
     mut settings: ResMut<WinitSettings>,
 ) {
@@ -167,7 +173,8 @@ pub(super) fn sync_pacing(
         state.started = true;
         state.active_until = now + STARTUP_HOLD_SECS;
     }
-    let bits = busy_reasons(&flags, &visuals, &shot, &previews, &history);
+    let bits = busy_reasons(&flags, &visuals, &shot, &previews, &history, &overview)
+        | if overview_dispatch.has_pending() { 1 << 12 } else { 0 };
     if bits != 0 {
         state.active_until = now + DWELL_SECS;
     }
@@ -249,7 +256,8 @@ mod tests {
         let shot = shot_node_preview::ShotPreviewCards::default();
         let previews = model_preview::Previews::default();
         let history = history_preview::ActiveThumbnail::default();
-        assert!(!busy(&flags, &visuals, &shot, &previews, &history));
+        let overview = crate::canvas_ecs::overview_cache::OverviewCacheRegistry::default();
+        assert!(!busy(&flags, &visuals, &shot, &previews, &history, &overview));
     }
 
     #[test]
@@ -258,6 +266,7 @@ mod tests {
         let shot = shot_node_preview::ShotPreviewCards::default();
         let previews = model_preview::Previews::default();
         let history = history_preview::ActiveThumbnail::default();
+        let overview = crate::canvas_ecs::overview_cache::OverviewCacheRegistry::default();
         for mutate in [
             |flags: &mut FrameFlags| flags.scene_received = true,
             |flags: &mut FrameFlags| flags.viewport_only = true,
@@ -267,7 +276,26 @@ mod tests {
         ] {
             let mut flags = FrameFlags::default();
             mutate(&mut flags);
-            assert!(busy(&flags, &visuals, &shot, &previews, &history));
+            assert!(busy(&flags, &visuals, &shot, &previews, &history, &overview));
         }
+    }
+
+    #[test]
+    fn pending_overview_work_wakes_but_cached_texture_does_not() {
+        use crate::canvas_ecs::overview_cache::{OverviewBudget, OverviewCacheInput, OverviewCacheRegistry, OverviewCacheToken, OverviewReservation};
+        let flags = FrameFlags::default();
+        let visuals = model3d::ModelVisuals::default();
+        let shot = shot_node_preview::ShotPreviewCards::default();
+        let previews = model_preview::Previews::default();
+        let history = history_preview::ActiveThumbnail::default();
+        let mut overview = OverviewCacheRegistry::default();
+        overview.budget = OverviewBudget { byte_limit: 1000, slot_limit: 1, ..Default::default() };
+        let input = OverviewCacheInput { local_placement: [0; 7], media_revision: 1, geometry_revision: 1, layout_revision: 1, theme_revision: 1, quality: 1, tier: 128 };
+        let token = OverviewCacheToken { epoch: 1, owner: 1, generation: 1, slot_generation: 1 };
+        assert!(overview.request(1, token, &input, OverviewReservation::new(100, 50, 1)));
+        assert!(busy(&flags, &visuals, &shot, &previews, &history, &overview));
+        assert!(overview.begin(1, token));
+        assert!(overview.complete(1, token, &input));
+        assert!(!busy(&flags, &visuals, &shot, &previews, &history, &overview));
     }
 }

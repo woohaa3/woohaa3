@@ -71,7 +71,8 @@ impl ModelVisuals {
                     .map_or(count, |ids| ids.len());
                 // 每几何有效档位：总览根的自定义 Mesh / Box 恒 High，按实际 handle 计数，
                 // 不按根 desired 枚举漏计（change: 2026-10-15-add-film-set-overview-lod，design D3/D6）。
-                let effective = super::mesh::effective_quality(geometry, root.quality, root.overview_lod);
+                let effective =
+                    super::mesh::effective_quality(geometry, root.quality, root.overview_lod);
                 if let Some(handle) = self.shared.lookup(base, geometry, effective) {
                     unique.insert(handle.id());
                     if let Some(mesh) = meshes.get(handle) {
@@ -166,7 +167,13 @@ impl ModelVisuals {
                     "reason": root.overview_reason,
                     "preparing": self.pending.as_ref().is_some_and(|p| p.is_for(id)),
                     "representationGeneration": root.representation_generation,
-                    "activeMeshes": root.active_mesh_handles.len()
+                    "activeMeshes": root.active_mesh_handles.len(),
+                    // 合批结果：staticBatches 是实际提交的批次实体数，batchedParts 是被收进
+                    // 批次的部件数，unbatchedParts 是仍逐实体提交的部件数。三者合起来可作为
+                    // 真实 GPU 上 draw call 变化的 CPU 代理（片场组徽标按 binding 合批）。
+                    "batches": root.batches.len(),
+                    "batchedParts": root.part_batches.len(),
+                    "unbatchedParts": root.geometries.len()
                 })
             })
             .collect();
@@ -251,7 +258,9 @@ impl ModelVisuals {
                 .map(|ids| ids.len())
                 .sum();
             value["explicitInstances"] = serde_json::json!({"groups": groups, "parts": parts,
-                "cpuTransformBytes": parts * super::instancing::INSTANCE_STRIDE}); value };
+                "cpuTransformBytes": parts * super::instancing::INSTANCE_STRIDE});
+            value
+        };
         value.to_string()
     }
 }

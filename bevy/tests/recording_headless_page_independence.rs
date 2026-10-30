@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use woohaa_bevy_canvas::recording_barrier::BarrierBudget;
 use woohaa_bevy_canvas::recording_encode::EncoderProfile;
-use woohaa_bevy_canvas::recording_job::{run_job, JobOutcome};
+use woohaa_bevy_canvas::recording_job::{JobOutcome, run_job};
 use woohaa_bevy_canvas::recording_openh264::{OpenH264Encoder, OpenH264EncoderOptions};
 use woohaa_bevy_canvas::recording_prepare::prepare_render_plan;
 use woohaa_bevy_canvas::recording_probe_gpu::GpuFrameProbe;
@@ -57,7 +57,10 @@ fn motion(duration: f32) -> String {
 
 #[test]
 fn worker_completes_without_any_page_or_window_loop() {
-    if matches!(std::env::var("WOOHAA3_GPU_SOFTWARE").ok().as_deref(), Some("1") | Some("true")) {
+    if matches!(
+        std::env::var("WOOHAA3_GPU_SOFTWARE").ok().as_deref(),
+        Some("1") | Some("true")
+    ) {
         eprintln!("跳过：软件渲染适配器不作为验收证据。");
         return;
     }
@@ -88,21 +91,43 @@ fn worker_completes_without_any_page_or_window_loop() {
     let mut encoder = OpenH264Encoder::create(OpenH264EncoderOptions {
         output: output.clone(),
         spool: dir.join("headless-no-page-loop.spool"),
-        profile: EncoderProfile { width: 240, height: 136, bitrate: 800_000, fps_numer: 30, fps_denom: 1 },
+        profile: EncoderProfile {
+            width: 240,
+            height: 136,
+            bitrate: 800_000,
+            fps_numer: 30,
+            fps_denom: 1,
+        },
         keyframe_interval_frames: None,
     })
     .expect("encoder");
 
-    let outcome = run_job(&prepared.job, &mut probe, &mut encoder, &|| false, BarrierBudget::default());
+    let outcome = run_job(
+        &prepared.job,
+        &mut probe,
+        &mut encoder,
+        &|| false,
+        BarrierBudget::default(),
+    );
     match outcome {
-        JobOutcome::Completed { frame_count, width, height, .. } => {
+        JobOutcome::Completed {
+            frame_count,
+            width,
+            height,
+            ..
+        } => {
             // 9 帧全部产出，且这期间**没有任何页面**参与：本测试是一个普通 Rust 进程。
             assert_eq!(frame_count, 9);
             assert_eq!((width, height), (240, 136));
             assert!(output.exists(), "成片应落盘");
             eprintln!("headless: {frame_count} 帧 → {output:?}");
         }
-        JobOutcome::Failed { stage, code, message, .. } => panic!("无页面录制失败：{stage} {code} {message}"),
+        JobOutcome::Failed {
+            stage,
+            code,
+            message,
+            ..
+        } => panic!("无页面录制失败：{stage} {code} {message}"),
         JobOutcome::Cancelled { .. } => panic!("意外取消"),
     }
 }
@@ -138,6 +163,9 @@ fn recording_path_has_no_playback_control_surface() {
     // 结构化断言：字段集合里没有任何 playback/seek 入口。
     let debug = format!("{input:?}");
     for forbidden in ["playhead", "playing", "seek", "currentTime"] {
-        assert!(!debug.contains(forbidden), "录制输入不应包含播放状态字段：{forbidden}");
+        assert!(
+            !debug.contains(forbidden),
+            "录制输入不应包含播放状态字段：{forbidden}"
+        );
     }
 }

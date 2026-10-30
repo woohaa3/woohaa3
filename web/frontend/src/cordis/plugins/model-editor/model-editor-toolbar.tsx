@@ -82,7 +82,7 @@ export function ModelEditorToolbar(props: ModelEditorToolbarProps) {
   const selected = props.session.selectedCamera();
   const pose = selected ? props.session.effectivePose(selected) : null;
   const readOnly = props.readOnly === true;
-  const disabled = readOnly || !props.writable || props.rendererReady === false;
+  const disabled = readOnly || !props.writable || props.rendererReady === false || state.cameraWritePending;
   const busy = props.session.captureBusy;
   const composition = props.presentation === "composition";
 

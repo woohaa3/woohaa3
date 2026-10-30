@@ -162,6 +162,32 @@ describe("film-set 入口在真实 Cordis Context 上装配（白屏回归）", 
     })).toEqual(expect.objectContaining({ reason: "当前会话不可写，无法创建片场" }));
   });
 
+  it("组内节点不显示创建入口（片场是 group，不支持嵌套）", async () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("c1", "2026-10-21T00:00:00.000Z");
+    canvas.document.nodes.push(
+      { id: "group", type: "group", position: { x: 0, y: 0 } },
+      { id: "source", type: "model3d", parentId: "group", position: { x: 40, y: 40 } }
+    );
+    const { ctx, fiber, slots } = bootFilmSet(canvas);
+    disposers.push(() => ctx.fiber.dispose());
+    await fiber.await();
+    const describe = (nodeType: string) => describeNodeActions({
+      contributions: slots.list("canvas.node-action") as NodeActionContribution[],
+      context: { nodeId: "source", nodeType, writable: true }
+    });
+    // 顶层同类节点仍可见（disabled），组内节点连入口都不贡献。
+    expect(describe("model3d")).toBeNull();
+    expect(describe("image")).toBeNull();
+    expect(describe("video")).toBeNull();
+    canvas.document.nodes = canvas.document.nodes
+      .filter((node) => node.id !== "group")
+      .map((node) => node.id === "source" ? { ...node, parentId: undefined } : node);
+    canvas.nodeData.source = { title: "模型", modelScript: "scene.box({ id: 'a' });", modelScriptVersion: "woohaa-model-js-v2" } as never;
+    expect(describe("model3d")?.presentation.actions).toEqual([
+      expect.objectContaining({ id: "film-set-conversion", label: "创建片场" })
+    ]);
+  });
+
   it("中途注册失败时回滚已装配贡献，重复释放无残留", async () => {
     const { ctx, fiber, slots, dialogs } = bootFilmSet(null, "film-set-conversion-focus");
     disposers.push(() => ctx.fiber.dispose());
@@ -180,6 +206,7 @@ describe("film-set 入口在真实 Cordis Context 上装配（白屏回归）", 
     // 提供播放服务是 apply 的第一条语句；此后任一注入 service 缺失或 apply 抛错都会卸载它。
     expect(ctx.get("filmSetPlayback" as never)).toBeTruthy();
     expect(slots.list("canvas.node-template").map((entry) => entry.id)).toContain("film-set-node");
+    expect(slots.list("canvas.node-template").find((entry) => entry.id === "film-set-node")).toMatchObject({ label: "3D 片场" });
     expect(slots.list("canvas.node-action").map((entry) => entry.id)).toContain("film-set-conversion");
     expect(slots.list("canvas.context-menu").map((entry) => entry.id)).toContain("film-set-conversion-menu");
     expect(slots.list("canvas.focus-header").map((entry) => entry.id)).toContain("film-set-conversion-focus");

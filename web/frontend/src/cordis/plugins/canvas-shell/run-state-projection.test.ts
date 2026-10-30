@@ -73,6 +73,41 @@ describe("applyRunStateProjection", () => {
     applyRunStateProjection(nodes, { summaries: [], records: [] });
     expect(nodes[0].group?.runStatus).toBeUndefined();
   });
+  it("片场 group 的执行反馈驱动与普通组相同的气泡运行态", () => {
+    const nodes = [node("film", { type: "group", group: { title: "片场", memberCount: 2, outputCapableLeafCount: 0 } })];
+    const phases = [
+      ["submitting", "preparing", "提交中"],
+      ["queued", "queued", "排队中"],
+      ["running", "running", "生成中"],
+      ["committing", "committing", "保存中"],
+      ["failed", "failed", "失败"]
+    ] as const;
+    for (const [phase, state, label] of phases) {
+      applyRunStateProjection(nodes, {
+        summaries: [summary("film", { isAggregate: true, filmSetFeedback: {
+          operationKey: "attempt", phase, source: "conversion", labelCode: phase === "committing" ? "saving" : phase === "running" ? "generating" : phase
+        } })],
+        records: []
+      });
+      // 片场迁移为 group 后 MUST 走 group 通路；`aggregateRun.filmSet` 会被 renderer 拒绝。
+      expect(nodes[0].group?.runStatus).toEqual({ state, label });
+      expect(nodes[0].aggregateRun).toBeUndefined();
+      expect(nodes[0].historyStrip).toBeUndefined();
+    }
+    applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true, filmSetFeedback: null })], records: [] });
+    expect(nodes[0].group?.runStatus).toBeUndefined();
+  });
+  it("显式组执行状态优先于片场反馈", () => {
+    const nodes = [node("film", { type: "group", group: { title: "片场", memberCount: 1, outputCapableLeafCount: 0 } })];
+    applyRunStateProjection(nodes, {
+      summaries: [summary("film", { isAggregate: true, filmSetFeedback: {
+        operationKey: "attempt", phase: "running", source: "conversion", labelCode: "generating"
+      } })],
+      records: [],
+      groupStatuses: new Map([["film", { state: "queued", label: "等待助手" }]])
+    });
+    expect(nodes[0].group?.runStatus).toEqual({ state: "queued", label: "等待助手" });
+  });
   it("普通节点投影有界圆点，当前版本用装饰且不挤占状态颜色", () => {
     const nodes = [node("n1")];
     applyRunStateProjection(nodes, {

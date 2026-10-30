@@ -133,8 +133,18 @@ impl Geometry {
         // 与 `rounded_rect_alpha` 相同的右下 → 左下 → 左上 → 右上弧段顺序，四角同半径时
         // 顶点序列与历史输出逐字节一致。
         for (cx, cy, start, radius) in [
-            (x + width - bottom_right, y + height - bottom_right, 0.0, bottom_right),
-            (x + bottom_left, y + height - bottom_left, PI / 2.0, bottom_left),
+            (
+                x + width - bottom_right,
+                y + height - bottom_right,
+                0.0,
+                bottom_right,
+            ),
+            (
+                x + bottom_left,
+                y + height - bottom_left,
+                PI / 2.0,
+                bottom_left,
+            ),
             (x + top_left, y + top_left, PI, top_left),
             (x + width - top_right, y + top_right, PI * 1.5, top_right),
         ] {
@@ -174,9 +184,22 @@ impl Geometry {
         self.line_alpha(a, b, width, z, color, 1.);
     }
 
-    pub(crate) fn line_alpha(&mut self, a: Vec2, b: Vec2, width: f32, z: f32, color: u32, alpha: f32) {
+    pub(crate) fn line_alpha(
+        &mut self,
+        a: Vec2,
+        b: Vec2,
+        width: f32,
+        z: f32,
+        color: u32,
+        alpha: f32,
+    ) {
         let normal = (b - a).normalize_or_zero().perp() * width / 2.0;
-        self.polygon_alpha(&[a + normal, a - normal, b - normal, b + normal], z, color, alpha);
+        self.polygon_alpha(
+            &[a + normal, a - normal, b - normal, b + normal],
+            z,
+            color,
+            alpha,
+        );
     }
 
     /// 圆环（端点圆钮的描边环）：以扇形细分画一圈带线宽的环。
@@ -291,16 +314,45 @@ impl Geometry {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn curve_with_controls(&mut self, a: Vec2, c1: Vec2, c2: Vec2, b: Vec2, width: f32, z: f32, color: u32, dashed: bool) {
+    pub(crate) fn curve_with_controls(
+        &mut self,
+        a: Vec2,
+        c1: Vec2,
+        c2: Vec2,
+        b: Vec2,
+        width: f32,
+        z: f32,
+        color: u32,
+        dashed: bool,
+    ) {
         self.curve_with_controls_alpha(a, c1, c2, b, width, z, color, dashed, 1.);
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn curve_with_controls_alpha(&mut self, a: Vec2, c1: Vec2, c2: Vec2, b: Vec2, width: f32, z: f32, color: u32, dashed: bool, alpha: f32) {
+    pub(crate) fn curve_with_controls_alpha(
+        &mut self,
+        a: Vec2,
+        c1: Vec2,
+        c2: Vec2,
+        b: Vec2,
+        width: f32,
+        z: f32,
+        color: u32,
+        dashed: bool,
+        alpha: f32,
+    ) {
         if dashed {
-            let points: Vec<_> = (0..=super::curve::EDGE_CURVE_SEGMENTS).map(|i| {
-                super::curve::cubic_point(a, c1, c2, b, i as f32 / super::curve::EDGE_CURVE_SEGMENTS as f32)
-            }).collect();
+            let points: Vec<_> = (0..=super::curve::EDGE_CURVE_SEGMENTS)
+                .map(|i| {
+                    super::curve::cubic_point(
+                        a,
+                        c1,
+                        c2,
+                        b,
+                        i as f32 / super::curve::EDGE_CURVE_SEGMENTS as f32,
+                    )
+                })
+                .collect();
             super::dash::dashed_polyline_alpha(self, &points, width, z, color, alpha);
             return;
         }
@@ -313,23 +365,111 @@ impl Geometry {
         }
     }
 
-    /// 卡片标题行里的种类符号标识。
-    ///
-    /// 与旧的 `icon` 路径相同，但可缩放：卡片把种类从文字标签改成了符号，
-    /// 需要按标题行高度调整大小（`cards.rs`）。
-    pub(crate) fn kind_glyph(&mut self, kind: &str, center: Vec2, z: f32, color: u32, scale: f32) {
-        let paths: Vec<Vec<(f32, f32)>> = match kind {
-            _ => vec![
-                vec![(-6., -5.), (4., -5.), (4., 5.), (-6., 5.), (-6., -5.)],
-                vec![(-2., -1.), (7., -1.), (7., 7.), (-2., 7.), (-2., -1.)],
-            ],
-        };
-        for path in paths {
-            for pair in path.windows(2) {
+    pub(crate) fn icon(&mut self, kind: &str, center: Vec2, z: f32, color: u32) {
+        match kind {
+            "text" => {
+                // 大写 T：横画 + 中竖 + 底部衬线，与右键菜单的类型图标一致。
+                self.icon_stroke(center, &[(-7., -6.), (7., -6.)], false, z, color);
+                self.icon_stroke(center, &[(0., -6.), (0., 7.)], false, z, color);
+                self.icon_stroke(center, &[(-3.5, 7.), (3.5, 7.)], false, z, color);
+            }
+            "image" => {
+                // 相框 + 太阳 + 山脊。
+                self.icon_stroke(
+                    center,
+                    &[(-8., -6.), (8., -6.), (8., 6.), (-8., 6.)],
+                    true,
+                    z,
+                    color,
+                );
+                self.ring(center + Vec2::new(-3.8, -2.4), 1.5, 1.3, z, color, 16);
+                self.icon_stroke(
+                    center,
+                    &[
+                        (-7.6, 4.9),
+                        (-2.4, -0.4),
+                        (1.6, 3.1),
+                        (4.4, 0.9),
+                        (7.8, 4.6),
+                    ],
+                    false,
+                    z,
+                    color,
+                );
+            }
+            "video" => {
+                // 胶片框：外框 + 两道竖隔 + 三道横隔，与右键菜单的视频图标一致。
+                self.icon_stroke(
+                    center,
+                    &[(-8., -6.5), (8., -6.5), (8., 6.5), (-8., 6.5)],
+                    true,
+                    z,
+                    color,
+                );
+                self.icon_stroke(center, &[(-4., -6.5), (-4., 6.5)], false, z, color);
+                self.icon_stroke(center, &[(4., -6.5), (4., 6.5)], false, z, color);
+                self.icon_stroke(center, &[(-8., -3.25), (8., -3.25)], false, z, color);
+                self.icon_stroke(center, &[(-8., 0.), (8., 0.)], false, z, color);
+                self.icon_stroke(center, &[(-8., 3.25), (8., 3.25)], false, z, color);
+            }
+            "model" => {
+                // 等距立方体：顶面、三条竖棱、底面。
+                self.icon_stroke(
+                    center,
+                    &[(0., -7.), (7., -3.5), (0., 0.), (-7., -3.5)],
+                    true,
+                    z,
+                    color,
+                );
+                self.icon_stroke(center, &[(-7., -3.5), (-7., 3.5)], false, z, color);
+                self.icon_stroke(center, &[(0., 0.), (0., 7.)], false, z, color);
+                self.icon_stroke(center, &[(7., -3.5), (7., 3.5)], false, z, color);
+                self.icon_stroke(center, &[(-7., 3.5), (0., 7.), (7., 3.5)], false, z, color);
+            }
+            "shot" => {
+                // 相机：机身 + 顶部取景凸起 + 镜头环。
+                self.icon_stroke(
+                    center,
+                    &[(-8., -2.5), (8., -2.5), (8., 6.), (-8., 6.)],
+                    true,
+                    z,
+                    color,
+                );
+                self.icon_stroke(
+                    center,
+                    &[(-4.5, -2.5), (-3., -6.), (3., -6.), (4.5, -2.5)],
+                    false,
+                    z,
+                    color,
+                );
+                self.ring(center + Vec2::new(0., 1.75), 3.1, 1.4, z, color, 20);
+            }
+            "audio" => {
+                // 音符：双符头 + 符杆 + 符杠。
+                self.icon_stroke(center, &[(-3.5, 4.5), (-3.5, -5.)], false, z, color);
+                self.icon_stroke(center, &[(3.5, 3.), (3.5, -6.5)], false, z, color);
                 self.line(
-                    center + Vec2::from(pair[0]) * scale,
-                    center + Vec2::from(pair[1]) * scale,
-                    1.5 * scale,
+                    center + Vec2::new(-3.5, -5.),
+                    center + Vec2::new(3.5, -6.5),
+                    2.5,
+                    z,
+                    color,
+                );
+                self.circle(center + Vec2::new(-4.6, 4.6), 2., z, color, 14);
+                self.circle(center + Vec2::new(2.4, 3.1), 2., z, color, 14);
+            }
+            _ => {
+                self.icon_stroke(
+                    center,
+                    &[(-6., -5.), (4., -5.), (4., 5.), (-6., 5.)],
+                    true,
+                    z,
+                    color,
+                );
+                self.icon_stroke(
+                    center,
+                    &[(-2., -1.), (7., -1.), (7., 7.), (-2., 7.)],
+                    true,
                     z,
                     color,
                 );
@@ -337,28 +477,32 @@ impl Geometry {
         }
     }
 
-    /// 卡片左上角的种类图标。
-    ///
-    /// 有意保留：卡片已改为「预览在上、名称在下」并用 [`Self::kind_glyph`] 在标题行里
-    /// 表达种类（见 `cards.rs`），当前没有绘制入口调用它。
-    #[allow(dead_code)]
-    pub(crate) fn icon(&mut self, kind: &str, center: Vec2, z: f32, color: u32) {
-        let paths: Vec<Vec<(f32, f32)>> = match kind {
-            _ => vec![
-                vec![(-6., -5.), (4., -5.), (4., 5.), (-6., 5.), (-6., -5.)],
-                vec![(-2., -1.), (7., -1.), (7., 7.), (-2., 7.), (-2., -1.)],
-            ],
+    /// 以折线描边图标路径；`closed` 时补一段回到起点。
+    fn icon_stroke(
+        &mut self,
+        center: Vec2,
+        points: &[(f32, f32)],
+        closed: bool,
+        z: f32,
+        color: u32,
+    ) {
+        let Some(first) = points.first() else {
+            return;
         };
-        for path in paths {
-            for pair in path.windows(2) {
-                self.line(
-                    center + Vec2::from(pair[0]),
-                    center + Vec2::from(pair[1]),
-                    1.5,
-                    z,
-                    color,
-                );
-            }
+        let mut previous = center + Vec2::new(first.0, first.1);
+        for point in &points[1..] {
+            let next = center + Vec2::new(point.0, point.1);
+            self.line(previous, next, 1.5, z, color);
+            previous = next;
+        }
+        if closed {
+            self.line(
+                previous,
+                center + Vec2::new(first.0, first.1),
+                1.5,
+                z,
+                color,
+            );
         }
     }
 
@@ -438,11 +582,16 @@ mod tests {
             bevy::render::mesh::VertexAttributeValues::Float32x3(values) => values,
             other => panic!("意外的位置属性类型：{other:?}"),
         };
-        assert!(positions.iter().all(|position| position[0] <= -1.0e5 && position[1] <= -1.0e5));
+        assert!(
+            positions
+                .iter()
+                .all(|position| position[0] <= -1.0e5 && position[1] <= -1.0e5)
+        );
     }
 
     #[test]
-    fn polygon_builds_fan_indices_in_range() {        let mut geometry = Geometry::default();
+    fn polygon_builds_fan_indices_in_range() {
+        let mut geometry = Geometry::default();
         geometry.polygon(
             &[
                 Vec2::new(0.0, 0.0),
@@ -466,6 +615,30 @@ mod tests {
         geometry.line(Vec2::ZERO, Vec2::new(10.0, 0.0), 2.0, 0.0, 0xffffff);
         assert_eq!(geometry.positions.len(), 4);
         assert_eq!(geometry.indices.len(), 6);
+    }
+
+    /// 节点左上角图标按种类绘制具象线稿，且始终留在 28×28 图标格内。
+    #[test]
+    fn node_icon_kinds_draw_concrete_glyphs_inside_tile() {
+        for kind in ["text", "image", "video", "model", "shot", "audio"] {
+            let mut geometry = Geometry::default();
+            geometry.icon(kind, Vec2::ZERO, 0.0, 0xffffff);
+            assert!(
+                geometry.positions.len() >= 8,
+                "{kind} 图标应包含可辨识的笔画"
+            );
+            assert!(
+                geometry
+                    .positions
+                    .iter()
+                    .all(|position| position[0].abs() <= 14.0 && position[1].abs() <= 14.0),
+                "{kind} 图标不应越出 28×28 图标格"
+            );
+        }
+        // 未知种类仍回落到通用叠片图标，不留下空白格。
+        let mut fallback = Geometry::default();
+        fallback.icon("unknown", Vec2::ZERO, 0.0, 0xffffff);
+        assert!(!fallback.positions.is_empty());
     }
 
     /// 半透明几何（change: fix-group-and-marquee-preview）：alpha 必须写进顶点色，
@@ -492,7 +665,16 @@ mod tests {
     #[test]
     fn rounded_rect_radii_keeps_square_corners_as_single_vertices() {
         let mut geometry = Geometry::default();
-        geometry.rounded_rect_radii_alpha(0.0, 0.0, 100.0, 40.0, [0., 0., 0., 12.], 0.0, 0xffffff, 0.5);
+        geometry.rounded_rect_radii_alpha(
+            0.0,
+            0.0,
+            100.0,
+            40.0,
+            [0., 0., 0., 12.],
+            0.0,
+            0xffffff,
+            0.5,
+        );
         let (_, blend) = geometry.into_layers();
         let positions = match blend.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
             bevy::render::mesh::VertexAttributeValues::Float32x3(values) => values.clone(),
@@ -500,9 +682,11 @@ mod tests {
         };
         assert_eq!(positions.len(), 3 + 9);
         // 左下圆角的最低点仍在矩形底边上。
-        assert!(positions
-            .iter()
-            .any(|p| (p[0] - 12.).abs() < 1e-4 && (p[1] + 40.).abs() < 1e-4));
+        assert!(
+            positions
+                .iter()
+                .any(|p| (p[0] - 12.).abs() < 1e-4 && (p[1] + 40.).abs() < 1e-4)
+        );
     }
 
     #[test]

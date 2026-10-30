@@ -25,12 +25,6 @@ import { CANVAS_SWITCHER_DIALOG_ID } from "./plugins/canvas-switcher/chrome.js";
 import { GENERATION_TRACE_DIALOG_ID } from "./plugins/task-execution/generation-trace-dialog.js";
 import { AGENT_ASSISTANT_DIALOG_ID } from "./plugins/agent-assistant/plugin.js";
 import { SETTINGS_DIALOG_ID } from "./plugins/settings/workspace/settings-dialog-chrome.js";
-import {
-  SNIPPET_DELETE_DIALOG_ID,
-  SNIPPET_EDITOR_DIALOG_ID,
-  SNIPPET_LIBRARY_DIALOG_ID,
-  SNIPPET_TAG_DELETE_DIALOG_ID
-} from "@woohaa3/extension-prompt-snippets/frontend";
 import { PROMPT_SNIPPET_SOURCE } from "./plugins/service-keys.js";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { woohaa3CanvasStore } from "./services/canvas-state/index.js";
@@ -87,10 +81,6 @@ describe("真实平台 + 静态清单", () => {
         MEDIA_PREVIEW_DIALOG_ID,
         PASTE_REPLACE_DIALOG_ID,
         AGENT_ASSISTANT_DIALOG_ID,
-        SNIPPET_LIBRARY_DIALOG_ID,
-        SNIPPET_EDITOR_DIALOG_ID,
-        SNIPPET_DELETE_DIALOG_ID,
-        SNIPPET_TAG_DELETE_DIALOG_ID,
         GENERATION_TRACE_DIALOG_ID,
         SETTINGS_DIALOG_ID,
         TEXT_PREVIEW_DIALOG_ID,
@@ -137,8 +127,8 @@ describe("真实平台 + 静态清单", () => {
     // 旧任务历史已移出核心；Canvas scope 不再注册任何 app.route。
     expect(slots.list("app.route")).toHaveLength(0);
     expect(runtime.ctx.canvasNavigation.resolvePanel("node-execution")).not.toBeNull();
-    // canvas-menu 自身 + 片段插件的「保存为片段」项 + 任务执行的「查看生成溯源」项。
-    expect(slots.list("canvas.context-menu")).toHaveLength(3);
+    // canvas-menu 自身 + 任务执行的「查看生成溯源」项。
+    expect(slots.list("canvas.context-menu")).toHaveLength(2);
   });
 
   it("通用 extension page scope 只注册自身 route，不装配 Canvas 能力（无核心业务分支）", async () => {
@@ -204,16 +194,16 @@ describe("真实平台 + 静态清单", () => {
     expect(runtime.ctx.canvasSession).toBeDefined();
   });
 
-  it("optional paste-import / prompt-snippets 缺失时基础上传与 prompt 编辑仍可用", async () => {
+  it("optional paste-import 缺失时基础上传与 prompt 编辑仍可用", async () => {
     installGlobals();
     runtime = await startFrontendRuntime({
       installPlatform: installFullPlatform,
       plugins: createSourceCanvasExtensionManifest().filter(
-        (definition) => definition.id !== "paste-import" && definition.id !== "prompt-snippets"
+        (definition) => definition.id !== "paste-import"
       )
     });
     const slots = runtime.ctx.slots;
-    // paste/drop 与片段右键保存项不出现；片段来源 capability 缺失（`#` 引用入口消失）。
+    // paste/drop 不出现；片段库是父仓私有扩展，公开仓运行时不提供 fragment capability。
     expect(slots.list("input.paste")).toHaveLength(0);
     expect(slots.list("input.drop")).toHaveLength(0);
     expect(slots.list("canvas.context-menu")).toHaveLength(2); // canvas-menu + 查看生成溯源
@@ -224,7 +214,7 @@ describe("真实平台 + 静态清单", () => {
     expect(runtime.ctx.canvasSession).toBeDefined();
   });
 
-  it("paste-import / prompt-snippets dispose 后 slot 与 dialog 完全撤销", async () => {
+  it("paste-import dispose 后 slot 与 dialog 完全撤销", async () => {
     installGlobals();
     runtime = await startFrontendRuntime({
       installPlatform: installFullPlatform,
@@ -234,7 +224,7 @@ describe("真实平台 + 静态清单", () => {
     const slots = ctx.slots;
     const dialogs = ctx.dialogs;
     expect(slots.list("input.paste")).toHaveLength(1);
-    expect(slots.list("canvas.context-menu")).toHaveLength(3); // canvas-menu + 片段保存项 + 查看生成溯源
+    expect(slots.list("canvas.context-menu")).toHaveLength(2); // canvas-menu + 查看生成溯源
     const current = runtime;
     runtime = null;
     await current.dispose();
@@ -304,10 +294,6 @@ describe("真实平台 + 静态清单", () => {
       dialogId: PASTE_REPLACE_DIALOG_ID,
       payload: { intentId: "i1", fileName: "f.png", nodeLabel: "n" }
     },
-    { name: "SnippetLibrary", dialogId: SNIPPET_LIBRARY_DIALOG_ID, payload: { forInsert: true } },
-    { name: "SnippetEditor", dialogId: SNIPPET_EDITOR_DIALOG_ID, payload: { mode: "create" } },
-    { name: "SnippetDelete", dialogId: SNIPPET_DELETE_DIALOG_ID, payload: { snippetId: "s1", name: "n" } },
-    { name: "SnippetTagDelete", dialogId: SNIPPET_TAG_DELETE_DIALOG_ID, payload: { tagId: "t1", name: "n" } },
     { name: "CanvasHistory", dialogId: CANVAS_HISTORY_DIALOG_ID, payload: {} },
     {
       name: "VideoFrameCapture",

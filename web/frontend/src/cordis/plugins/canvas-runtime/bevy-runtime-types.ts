@@ -27,6 +27,8 @@ export type BevyModule = {
   set_image_focus_details?: (manifest:string,pixels:Uint8Array)=>void;
   /** 上传片场媒体平面纹理（键为全局唯一 planeId；change: 2026-10-08-make-film-set-model-only）。 */
   set_model_media_texture?: (id: string, width: number, height: number, rgba: Uint8Array) => void;
+  overview_cache_snapshot?: () => string;
+  overview_cache_command?: (json: string) => void;
   rendered_revision: () => number;
   is_ready: () => boolean;
   /** 请求一次镜头截图（change: 2026-10-07-remove-residual-compatibility —— 直接 Shot Camera 边界）。 */
@@ -194,6 +196,8 @@ export type QueryResult<T> =
   | { ok: false; reason: QueryUnavailableReason };
 
 export type BevyRuntime = {
+  overviewCacheSnapshot?(): string;
+  overviewCacheCommand?(json: string): void;
   /** 开发面板读取的累计帧计数；render 完成表示调度完成，不表示 GPU 呈现确认。 */
   getFrameCounters?(): { generation: number; renders: number; updates: number; drawCalls3d?: number } | undefined;
   getRuntimeIssues?(): readonly import("./runtime-issues.js").RuntimeIssue[];

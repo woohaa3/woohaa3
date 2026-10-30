@@ -18,6 +18,8 @@ import { planCompositeChildLayout } from "./composite-children.js";
  * 一致），输出长度固定，不受旧源 ID 长度膨胀影响。
  */
 import { isBoundedId, isJsonObject } from "../validation.js";
+import { decodeMediaContentRef } from "./media-content.js";
+import { managedNodeRelationOf } from "./managed-node.js";
 import type { InitialShotCamera, AnimationTimeline } from "./canvas-node-model.js";
 import type { FilmSetAnimationClip, FilmSetAnimations, FilmSetShotKind } from "./film-set-animations.js";
 import { filmSetAnimationsOf } from "./film-set-clip-view.js";
@@ -108,6 +110,25 @@ export function isShotPreviewNodeData(input: unknown): boolean {
 export function shotPreviewOwnershipOf(input: unknown): ShotPreviewOwnership | null {
   const decoded = decodeShotPreviewData(input);
   return decoded.ok ? decoded.value.shotPreview : null;
+}
+
+/**
+ * 迁移后的镜头预览形态：片场 group 通过 `managedBy` 拥有一个 owner-managed 媒体节点
+ * （`mediaContent.providerId === "film-set.shot"`），不再写 `shotPreview` 字段。
+ *
+ * 归属身份必须与 owner/clip 完全一致（`managedBy` 与 `mediaContent.payload` 互相印证），
+ * 这样卡片呈现与归属线在旧/新两种形态下都指向同一 owner + clip，不产生第二份权威数据。
+ */
+export function managedShotPreviewOwnershipOf(input: unknown): ShotPreviewOwnership | null {
+  const relation = managedNodeRelationOf(input);
+  if (!relation || relation.extensionId !== "film-set") return null;
+  const media = (input as { mediaContent?: unknown } | null | undefined)?.mediaContent;
+  const decoded = decodeMediaContentRef(media);
+  if (!decoded.ok || decoded.value.providerId !== "film-set.shot") return null;
+  const payload = decoded.value.payload as { filmSetNodeId?: unknown; clipId?: unknown };
+  if (typeof payload.filmSetNodeId !== "string" || typeof payload.clipId !== "string") return null;
+  if (payload.filmSetNodeId !== relation.ownerNodeId || payload.clipId !== relation.entityId) return null;
+  return { schemaVersion: SHOT_PREVIEW_SCHEMA_VERSION, filmSetNodeId: payload.filmSetNodeId, clipId: payload.clipId };
 }
 
 /** 预览归属的规范序列化值（写入口使用，剥离未知字段）。 */

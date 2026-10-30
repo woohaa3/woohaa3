@@ -86,6 +86,7 @@ export type CanvasRoomState =
   | "quarantined";
 
 export type CanvasRoomOptions = {
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   canvasId: string;
   repository: YjsDocumentRepository;
@@ -124,4 +125,12 @@ export type CanvasRoomOptions = {
    * 供有界增量日志记录 before/after；只在实际推进 revision 时调用，失败不影响命令结果。
    */
   onDelta?: (input: { before: ServerCanvas; after: ServerCanvas }) => void;
+  /**
+   * 存储 sequence 冲突后自动重载 room 的观察者
+   * （change: 2026-10-29-recover-storage-seq-conflict）。
+   *
+   * 每次尝试重载调用一次；`recovered=false` 表示存储读取失败或文档已不可用（room 被隔离）。
+   * 只用于诊断日志，不影响恢复流程本身。
+   */
+  onStorageSeqRecovered?: (input: { canvasId: string; attempt: number; recovered: boolean }) => void;
 };

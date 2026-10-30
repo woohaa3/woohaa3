@@ -74,9 +74,9 @@ export class FilmSetVideoExportSession {
         progress({ phase: "rendering", completed: index + 1, total });
       }
       const blob = await encoder.finish(); check();
-      release(); release = undefined;
       this.deps.restore(target);
       restored = true;
+      release(); release = undefined;
       if (!blob.size) throw new Error("视频编码没有生成有效文件，请重试");
       progress({ phase: "uploading", completed: total, total });
       const captureId = crypto.randomUUID();
@@ -107,8 +107,8 @@ export class FilmSetVideoExportSession {
       return { ok: false, code: controller.signal.aborted ? "canceled" : "export-failed", message: cause instanceof Error ? cause.message : "视频生成失败，请重试" };
     } finally {
       try { await encoder?.cancel(); } catch { /* Release failures must not keep the player busy. */ }
-      release?.();
       if (!restored) this.deps.restore(target);
+      release?.();
       this.active = null;
     }
   }

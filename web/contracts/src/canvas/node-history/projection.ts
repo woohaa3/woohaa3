@@ -20,6 +20,9 @@ const MAX_TEXT_EXCERPT = 160;
 
 /** 条目 outcome；旧条目缺省视为成功（兼容）。 */
 function outcomeOf(entry: NodeGenerationHistoryEntry): NodeGenerationHistoryListItem["outcome"] {
+  // 失败归档的权威 outcome 同时存在于 failure payload；即使存储/传输层没有回填顶层
+  // outcome，也不能把失败记录降级成成功。
+  if (entry.payload.kind === "failure") return entry.payload.outcome;
   return entry.outcome ?? "succeeded";
 }
 

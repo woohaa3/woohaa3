@@ -12,7 +12,7 @@ export type AssistantComposerProps = {
   maxLength?: number;
 };
 
-/** All assistant surfaces use newline by default and explicit submission outside IME composition. */
+/** All assistant surfaces submit on Enter and keep Shift+Enter for newlines, outside IME composition. */
 export function AssistantComposer(props: AssistantComposerProps) {
   const composing = useRef(false);
   return <TextArea className={props.className} value={props.value} rows={props.rows}
@@ -22,8 +22,8 @@ export function AssistantComposer(props: AssistantComposerProps) {
     onCompositionStart={() => { composing.current = true; }}
     onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={event => {
-      if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing && !composing.current && event.keyCode !== 229 && !props.disabled) {
-        event.preventDefault(); props.onSubmit();
-      }
+      if (event.key !== "Enter" || event.shiftKey || event.altKey) return;
+      if (event.nativeEvent.isComposing || composing.current || event.keyCode === 229 || props.disabled) return;
+      event.preventDefault(); props.onSubmit();
     }} />;
 }

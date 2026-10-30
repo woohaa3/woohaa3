@@ -327,7 +327,7 @@ async function planMerge(
   if (source.type !== target.type) {
     return { ok: false, code: "invalid-node-type", message: "只能合并同类型节点" };
   }
-  const kind = historyKindForNodeType(target.type);
+  const kind = historyKindForNodeType(target.type, canvas.nodeData[target.id]);
   if (!kind || !nodeTypesForHistoryKind(kind).includes(source.type)) {
     return { ok: false, code: "invalid-node-type", message: `节点类型 ${target.type} 不提供合并` };
   }
@@ -426,7 +426,7 @@ async function revalidateInQueue(
   )) {
     return { ok: false, code: "conflict", message: "节点开始了新的编辑会话，合并被取消" };
   }
-  const kind = historyKindForNodeType(target.type);
+  const kind = historyKindForNodeType(target.type, latest.nodeData[target.id]);
   if (!kind || currentIdentityOf(latest, input.sourceNodeId, kind) !== plan.sourceIdentity) {
     return { ok: false, code: "conflict", message: "来源节点当前内容已改变，合并被拒绝" };
   }

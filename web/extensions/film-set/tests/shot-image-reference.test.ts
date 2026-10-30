@@ -1,3 +1,5 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
+import { CompositeAssetRegistry } from "@woohaa3/frontend/extension-api";
 import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +20,7 @@ function fixture() {
   animation.filmSetAnimations!.clips[0] = { ...animation.filmSetAnimations!.clips[0]!, kind: "static", timeline: { duration: 0, loop: false }, bindings: [], cameraMotion: createMotionSnapshot({ motionScript: "", basedOnModelVersion: { revision: 1, sourceHash: "camera", contentHash: "camera" } }) };
   canvas.document.nodes.push({ id: "film", type: "composite-asset", position: { x: 0, y: 0 } });
   canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
+  canvas = migrateFilmSetFixture(canvas, "film");
   const materialized = applyCanvasCommands(canvas, [{ type: "canvas.setTitle", title: "Still" }]);
   if (!materialized.ok) throw new Error(materialized.rejection.message); canvas = materialized.canvas;
   let focused = true, writable = true, rejectRegistration = false, holdRegistration = false;
@@ -28,6 +31,7 @@ function fixture() {
   const upload = vi.fn(async () => ({ ok: true, media: { storageKey: "images/still.png", url: "/api/media/images/still.png", checksum: "a".repeat(64), size: 3 } }));
   const waitForTime = vi.fn(async () => true), commands: CanvasCommand[] = [];
   const ctx = {
+    compositeAssets: new CompositeAssetRegistry(),
     canvasState: { getCanvas: () => canvas, getWorkingCanvas: () => { throw new Error("must read committed source"); }, subscribe: (fn: () => void) => { subscriptions.add(fn); return () => subscriptions.delete(fn); } },
     canvasNavigation: { getSnapshot: () => ({ mode: focused ? { type: "node-focus", nodeId: "film" } : { type: "canvas" } }), subscribe: (fn: () => void) => { navigation.add(fn); return () => navigation.delete(fn); } },
     modelWorkspace: { acquireCapture: async () => release },

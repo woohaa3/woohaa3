@@ -172,7 +172,7 @@ describe("模型聚焦编辑（change: add-model-focus-viewing / editing）", ()
     h.controller.dispose();
   });
 
-  it("选中镜头时左键拖空白处不编辑任何相机", () => {
+  it("显式方位工具以主按钮拖动写镜头，观察相机保持不变", () => {
     const events: string[] = [];
     const canvas = modelCanvas();
     const target = targetFor(canvas);
@@ -216,7 +216,7 @@ describe("模型聚焦编辑（change: add-model-focus-viewing / editing）", ()
     domFire(h.dom, "pointermove", { clientX: 540, clientY: 700 });
     domFire(h.dom, "pointerup", { button: 0, clientX: 540, clientY: 700 });
     h.controller.flush();
-    expect(events).toEqual([]);
+    expect(events).toEqual(["begin", "move", "move", "end"]);
     expect(h.controller.focusProjection()!.yaw).toBe(before.yaw);
     h.controller.dispose();
   });

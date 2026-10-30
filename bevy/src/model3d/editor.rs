@@ -45,8 +45,12 @@ pub(crate) fn editor_signature(editor: Option<&ModelEditor>) -> String {
                 .map(|shot| {
                     format!(
                         "{}:{}:{}:{}:{}:{}:{}:{}",
-                        shot.position[0], shot.position[1], shot.position[2],
-                        shot.focus[0], shot.focus[1], shot.focus[2],
+                        shot.position[0],
+                        shot.position[1],
+                        shot.position[2],
+                        shot.focus[0],
+                        shot.focus[1],
+                        shot.focus[2],
                         shot.fov,
                         shot.aspect
                     )
@@ -177,7 +181,10 @@ mod tests {
         if let Some(shot) = moved.shot.as_mut() {
             shot.focus = [0.0, 9.0, 0.0];
         }
-        assert_ne!(editor_signature(Some(&base)), editor_signature(Some(&moved)));
+        assert_ne!(
+            editor_signature(Some(&base)),
+            editor_signature(Some(&moved))
+        );
     }
 
     #[test]

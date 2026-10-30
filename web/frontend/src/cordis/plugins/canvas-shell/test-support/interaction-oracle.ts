@@ -17,6 +17,7 @@ import {
   bevyPort,
   bevyResizeHandleRect,
   bevySelectionBounds,
+  RESIZE_HANDLE_SIZE,
   type BevyNodeKind,
   type CanvasRenderScene
 } from "@woohaa3/contracts";
@@ -37,6 +38,22 @@ function nodeSize(node: { type: BevyNodeKind; width?: number; height?: number })
 function portPosition(node: { x: number; y: number; type: BevyNodeKind; width?: number; height?: number }, side: "input" | "output"): Point {
   const size = nodeSize(node);
   return bevyPort({ x: node.x, y: node.y, width: size.width, height: size.height }, side);
+}
+
+/**
+ * 组容器四角抓手命中框，顺序 `nw/ne/sw/se`
+ * （与 Rust `layout::resize_corner_rects` 一致：命中框以角点为中心，与圆形抓手同心）。
+ */
+function groupCornerHandleRects(node: { x: number; y: number; width: number; height: number }) {
+  const size = RESIZE_HANDLE_SIZE;
+  const half = size / 2;
+  const corners = [
+    ["nw", node.x - half, node.y - half],
+    ["ne", node.x + node.width - half, node.y - half],
+    ["sw", node.x - half, node.y + node.height - half],
+    ["se", node.x + node.width - half, node.y + node.height - half]
+  ] as const;
+  return corners.map(([handle, x, y]) => ({ handle, rect: { x, y, width: size, height: size } }));
 }
 
 function curvePoints(start: Point, end: Point, steps = 64): Point[] {
@@ -108,9 +125,17 @@ export function hitTestOracle(
     // resize 抓手优先于底部历史条；历史入口已从右上角迁移到节点底部历史条
     // （change: 2026-10-12-unify-generation-history-strip）。
     if (selected.has(node.id)) {
-      const handle = bevyResizeHandleRect({ x: node.x, y: node.y, width, height });
-      if (world.x >= handle.x && world.x <= handle.x + handle.width && world.y >= handle.y && world.y <= handle.y + handle.height) {
-        return { kind: "resize", nodeId: node.id };
+      if (node.type === "group" && node.group?.collapsed !== true) {
+        // 组容器四角都能拖拽缩放，方向名与 Rust `scope::CORNER_NAMES` 一致。
+        const corner = groupCornerHandleRects(nodeRect(node)).find(({ rect }) =>
+          world.x >= rect.x && world.x <= rect.x + rect.width && world.y >= rect.y && world.y <= rect.y + rect.height
+        );
+        if (corner) return { kind: "resize", nodeId: node.id, handle: corner.handle };
+      } else {
+        const handle = bevyResizeHandleRect({ x: node.x, y: node.y, width, height });
+        if (world.x >= handle.x && world.x <= handle.x + handle.width && world.y >= handle.y && world.y <= handle.y + handle.height) {
+          return { kind: "resize", nodeId: node.id };
+        }
       }
     }
     if (node.type !== "group" && !node.compositeAsset) {

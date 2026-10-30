@@ -25,6 +25,8 @@ import { MediaResourceStore } from "./media-resource-store.js";
 import { hoverNodeStore } from "../../services/hover-store.js";
 import { createDefaultMediaDecoder } from "./media-decoder.js";
 import { VideoLeaseRegistry } from "./video-lease-registry.js";
+import { OverviewCacheCoordinator } from "./overview-cache.js";
+import { OverviewCacheBridge } from "./overview-cache-bridge.js";
 
 const defaultMediaDecoder = createDefaultMediaDecoder();
 import { applyFocusTargetTransition } from "./focus-target-transition.js";
@@ -40,7 +42,8 @@ import {
   installOverviewLodTelemetry,
   type OverviewLodTelemetryHandle
 } from "./overview-lod-telemetry.js";
-import { groupBadgeScreenRect } from "@woohaa3/contracts";
+import { getGroupLayoutSizes } from "@woohaa3/contracts";
+import { groupBadgePresentationScreenRect } from "./group-badge-screen-rect.js";
 import {
   applyFilmSetObjectAction,
   applyFilmSetObjectGesture,
@@ -429,8 +432,15 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private compositeAssetMediaSessionsInstance: import("./composite-asset-media-session.js").CompositeAssetMediaSessions | null = null;
   /** 当前 attach 的页面级资源需求 owner（change: 2026-10-23-scale-canvas-media-residency）。 */
   private residencyInstance: import("./residency/index.js").CanvasResourceCoordinator | null = null;
+  private overviewCacheInstance: OverviewCacheCoordinator | null = null;
   /** 当前资源协调器（诊断/测试；未挂载返回 null）。 */
   resourceResidencyDiagnostics = (): unknown => this.residencyInstance?.diagnostics() ?? null;
+  overviewCacheDiagnostics = (): unknown => this.overviewCacheInstance?.diagnostics() ?? null;
+  setOverviewCacheBenchmarkDisabled = (disabled: boolean): void => {
+    this.overviewCacheInstance?.setBenchmarkDisabled(disabled);
+    this.controllerInstance?.invalidate("overview-cache-benchmark");
+  };
+  syncOverviewCache = (inputs: readonly import("./overview-cache.js").OverviewCacheInput[]): void => { this.overviewCacheInstance?.sync(inputs); };
   residency = (): import("./residency/index.js").CanvasResourceCoordinator | null => this.residencyInstance;
 
   /**
@@ -569,12 +579,22 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
     // 普通 group 的执行面板跟随外部 3D 徽标，而不是跟随气泡主体。使用当前 screen rect
     // 保留拖动/缩放预览，再把同一份徽标几何投影到屏幕。
+    //
+    // 基准必须是**渲染矩形**而不是节点自身尺寸：Rust 把徽标画在渲染场景节点矩形的下缘，
+    // 而 group 的渲染矩形是成员包围后的布局尺寸（`getGroupLayoutSizes`，可比节点自身高得多）。
+    // 用节点尺寸推导会把徽标算高一整段，面板随之压回场景上。
     if (card && node?.type === "group" && this.controllerInstance) {
       const controller = this.controllerInstance;
-      const zoom = controller.viewport().zoom;
-      if (Number.isFinite(zoom) && zoom > 0) {
-        return groupBadgeScreenRect(card, zoom, canvas?.nodeData[nodeId]?.groupBadgeScale);
-      }
+      const data = canvas?.nodeData[nodeId];
+      const layout = canvas ? getGroupLayoutSizes(canvas.document.nodes).get(nodeId) ?? null : null;
+      return groupBadgePresentationScreenRect({
+        card,
+        zoom: controller.viewport().zoom,
+        node,
+        layout,
+        collapsed: data?.groupCollapsed === true,
+        scale: data?.groupBadgeScale
+      }) ?? card;
     }
     const scopes = this.controllerInstance?.queryCompositeAssetScopes();
     if (!scopes?.ok) return card;
@@ -667,6 +687,12 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       getModelContentVersion: () => this.modelContentVersion
     });
     this.residencyInstance = residency;
+    const overviewBridge = new OverviewCacheBridge(runtime, residency, owner => {
+      const playback = this.animationPlaybackStore.current();
+      return playback?.nodeId === owner && playback.playing;
+    });
+    this.overviewCacheInstance = new OverviewCacheCoordinator(residency, undefined, overviewBridge.render, overviewBridge.release);
+    overviewBridge.connect(this.overviewCacheInstance);
     this.compositeAssetMediaSessionsInstance = compositeAssetMediaSessions;
     // E2E/排障镜像：观察视频会话/模型聚焦/图片聚焦/放置预览（生产无副作用）。
     installCanvasRuntimeMirrors({
@@ -676,7 +702,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       imageFocus: () => this.imageFocusStore.get(),
       videoFocus: () => this.videoFocusStore.get(),
       videoFocusTargetId: () => this.videoFocusStore.getTargetId(),
-      residency
+      residency,
+      overviewCache: { diagnostics: this.overviewCacheDiagnostics, setBenchmarkDisabled: this.setOverviewCacheBenchmarkDisabled }
     });
     const controller = installInteractionController(
       buildAttachInteractionOptions({
@@ -734,6 +761,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
           this.options.onViewportChange?.(this.controllerInstance?.viewport() ?? { x: 0, y: 0, zoom: 1 });
         },
         onFrame: () => {
+          overviewBridge.frame();
           for (const listener of this.frameListeners) listener();
         }
       })
@@ -782,6 +810,9 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       textureSync.dispose();
       videoSessions.dispose();
       compositeAssetMediaSessions.dispose();
+      this.overviewCacheInstance?.dispose();
+      this.overviewCacheInstance = null;
+      overviewBridge.dispose();
       residency.dispose();
       this.compositeAssetMediaSessionsInstance = null;
       this.residencyInstance = null;

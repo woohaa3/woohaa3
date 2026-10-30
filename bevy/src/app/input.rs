@@ -7,8 +7,8 @@ use bevy::{
 use crate::{bridge, canvas2d, theme::ThemeResource};
 
 use super::{
-    helpers::place_native_surface, CurrentScene, FilmSetTextureBatch, FrameFlags, ModelAssetTable,
-    NodeIndex, SurfaceState, TextureBatch,
+    CurrentScene, FilmSetTextureBatch, FrameFlags, ModelAssetTable, NodeIndex, SurfaceState,
+    TextureBatch, helpers::place_native_surface,
 };
 
 /// 重置帧标记，取走最新 scene/texture batch；检测 theme-only 变化。
@@ -153,7 +153,7 @@ pub(crate) fn sync_surface(
 }
 
 /// 按字体 asset 可用性更新 ready outbox。
-pub(crate) fn sync_ready(fonts: Res<Assets<Font>>, visuals: Res<canvas2d::Visuals>) {
+pub(crate) fn sync_ready(fonts: Res<Assets<Font>>, visuals: Res<canvas2d::CanvasOverlayCache>) {
     bridge::set_ready(canvas2d::font_ready(&fonts, &visuals));
 }
 

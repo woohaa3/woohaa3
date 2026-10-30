@@ -18,7 +18,8 @@ export function resolveNodeVideoSource(
   if (!asset || asset.status !== "ready" || asset.mediaKind !== "video") return null;
   const storageKey = typeof asset.metadata?.storageKey === "string" ? asset.metadata.storageKey : "";
   if (!storageKey) return null;
-  // 画布作用域读提示：视频与海报都属于这张画布的媒体。
+  // 画布作用域读提示：视频与海报都属于这张画布的媒体。存量镜头参考资产只登记了
+  // storageKey、没有 `url`（旧写入路径的缺陷），解析器会按存储身份派生读取地址。
   const url = resolveCanonicalMediaUrl(asset, canvas.id);
   if (!url) return null;
   const posterUrl = typeof asset.posterUrl === "string" ? resolveCanonicalMediaUrl({ url: asset.posterUrl }, canvas.id) : null;

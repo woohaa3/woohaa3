@@ -1,3 +1,4 @@
+import { CANVAS_CAMERA_PITCH } from "./model-focus/canvas-projection.js";
 import { filmSetMediaPlanesForNode } from "./render-scene.js";
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -53,6 +54,8 @@ import {
   NODE_ACTION_TOOLBAR_CHEVRON_WIDTH,
   NODE_ACTION_TOOLBAR_FONT,
   NODE_ACTION_TOOLBAR_GAP,
+  NODE_ACTION_TOOLBAR_ICON_GAP,
+  NODE_ACTION_TOOLBAR_ICON_SIZE,
   NODE_ACTION_TOOLBAR_PAD,
   NODE_ACTION_TOOLBAR_SEPARATOR,
   NODE_ACTION_TOOLBAR_SUMMARY_GAP,
@@ -63,6 +66,7 @@ import {
   shotPreviewContentRect
 } from "./render-scene/shot-preview-projection.js";
 import { SHOT_PREVIEW_HEADER_HEIGHT, shotPreviewNodeId } from "./film-set-shot-preview.js";
+import { createFilmSetGroupMarker } from "./film-set-group.js";
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields } from "./film-set-clip-view.js";
 import { staticShotCameraMotion } from "./film-set-animations.js";
@@ -250,7 +254,7 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
     const scene = buildCanvasRenderScene({ canvas: groupCanvas(), theme: defaultAppTheme(), selection: { nodes: ["g"] } });
     const g = scene.nodes.find((node) => node.id === "g")!;
     expect(g.type).toBe("group");
-    expect(g.group).toEqual({ title: "", memberCount: 2, outputCapableLeafCount: 2, collapsed: false, badgeScale: 1, badgeResizable: false });
+    expect(g.group).toEqual({ title: "", memberCount: 2, outputCapableLeafCount: 2, collapsed: false, badgeScale: 1, badgeResizable: false, actionBar: true });
     // 单选 group 时仍应可 resize（group 支持缩放）。
     expect(g.resizable).toBe(true);
   });
@@ -551,10 +555,10 @@ describe("buildCanvasRenderScene", () => {
     ],edges:[],updatedAt:"2026-10-08T00:00:00Z"}});
     const scene = buildCanvasRenderScene({canvas:current});
     expect(scene.nodes[0]).toMatchObject({width:248,height:232,modelPreview:{targetOffset:[0,0,0]}});
-    // 默认视角正对模型正面（方位 0），保留 30° 俯视。
+    // 默认视角正对模型正面（方位 0），俯仰跟随画布镜头 pitch。
     expect(scene.nodes[0].modelPreview).toMatchObject({
       azimuth: DEFAULT_MODEL_PREVIEW.azimuth,
-      elevation: DEFAULT_MODEL_PREVIEW.elevation
+      elevation: CANVAS_CAMERA_PITCH
     });
     expect(DEFAULT_MODEL_PREVIEW.azimuth).toBe(0);
     // 旧小尺寸只在呈现中按类别下限 clamp，不回写文档。
@@ -607,14 +611,14 @@ describe("buildCanvasRenderScene", () => {
     // 基准矩形仍是 260×195（不是范围 AABB）；只附加形状与地面矩形声明。
     const diamondAsset = diamondScene.nodes[0]!.compositeAsset!;
     expect(diamondAsset.scopeGround).toBeDefined();
-    // 地面范围永远平行网格：AABB 宽高比恒为 2。
+    // 地面范围永远平行网格，宽高比由当前相机俯仰角决定。
     const range = compositeAssetScopeGeometry(
       { x: diamondAsset.x, y: diamondAsset.y, width: diamondAsset.width, height: diamondAsset.height },
       "isometric-diamond",
       32,
       diamondAsset.scopeGround
     );
-    expect(range.aabb.width / range.aabb.height).toBeCloseTo(2, 6);
+    expect(range.aabb.width / range.aabb.height).toBeCloseTo(1 / Math.sin(CANVAS_CAMERA_PITCH), 6);
     // 可信 adapter 覆盖为 rect：范围框即基准矩形，不写 scopeShape/scopeGround。
     const rectScene = buildCanvasRenderScene({
       canvas: current,
@@ -644,23 +648,56 @@ describe("buildCanvasRenderScene", () => {
     expect(renderSceneFingerprint(labelled)).not.toBe(renderSceneFingerprint(fallback));
   });
 
-  it("总览 LOD 策略声明注入 compositeAsset.geometryQuality 并进入 fingerprint，缺省不写入", () => {
+  it("总览 LOD 策略声明注入 compositeAsset/group.geometryQuality 并进入 fingerprint，缺省不写入", () => {
     // change: 2026-10-15-add-film-set-overview-lod，design D1：只由可信 adapter 声明注入。
     const current = canvas({document:{schemaVersion:"asset-canvas-v1",nodes:[
       {id:"asset",type:COMPOSITE_ASSET_NODE_TYPE,position:{x:0,y:0},width:260,height:195}
-    ],edges:[],updatedAt:"2026-10-12T00:00:00Z"},nodeData:{asset:{extensionId:"film-set"}}});
+    ],edges:[],updatedAt:"2026-10-12T00:00:00Z"},nodeData:{asset:{extensionId:"game-furnace"}}});
     // 缺省（普通卡片/炉体/第三方）：不写入，World 用途保持 High。
     const fallback = buildCanvasRenderScene({ canvas: current });
     expect(fallback.nodes[0]!.compositeAsset).not.toHaveProperty("geometryQuality");
     // 可信 adapter 声明后写入，并参与 fingerprint/equality。
     const declared = buildCanvasRenderScene({
       canvas: current,
-      compositeAssetGeometryQualities: new Map([["asset", "overview-primitives-v1"]])
+      geometryQualities: new Map([["asset", "overview-primitives-v1"]])
     });
     expect(declared.nodes[0]!.compositeAsset?.geometryQuality).toBe("overview-primitives-v1");
     expect(renderSceneEquals(declared, fallback)).toBe(false);
     expect(renderSceneFingerprint(declared)).not.toBe(renderSceneFingerprint(fallback));
     // 声明不进入模型内容 identity：resourceKey/signature 不因策略声明改变。
+    expect(declared.nodes[0]!.model?.resourceKey).toBe(fallback.nodes[0]!.model?.resourceKey);
+  });
+
+  it("总览 LOD 策略声明也可落到 group 徽标的呈现", () => {
+    const current = canvas({document:{schemaVersion:"asset-canvas-v1",nodes:[
+      {id:"group",type:"group",position:{x:0,y:0},width:400,height:300}
+    ],edges:[],updatedAt:"2026-10-12T00:00:00Z"},nodeData:{group:{}}});
+    const fallback = buildCanvasRenderScene({ canvas: current });
+    expect(fallback.nodes[0]!.group).not.toHaveProperty("geometryQuality");
+    const declared = buildCanvasRenderScene({
+      canvas: current,
+      geometryQualities: new Map([["group", "overview-primitives-v1"]])
+    });
+    expect(declared.nodes[0]!.group?.geometryQuality).toBe("overview-primitives-v1");
+    expect(renderSceneFingerprint(declared)).not.toBe(renderSceneFingerprint(fallback));
+  });
+
+  it("总览纹理缓存声明注入 group.overviewCache 并进入 fingerprint，缺省不写入", () => {
+    // change: 2026-10-29-cache-film-set-overview-textures：只由可信 adapter 声明注入；
+    // 片场迁移为 group 后，旧的 compositeAsset 不承载该能力。
+    const current = canvas({document:{schemaVersion:"asset-canvas-v1",nodes:[
+      {id:"film",type:"group",position:{x:0,y:0},width:400,height:300}
+    ],edges:[],updatedAt:"2026-10-12T00:00:00Z"},nodeData:{film:{}}});
+    const fallback = buildCanvasRenderScene({ canvas: current });
+    expect(fallback.nodes[0]!.group).not.toHaveProperty("overviewCache");
+    const declared = buildCanvasRenderScene({
+      canvas: current,
+      overviewCaches: new Map([["film", "transparent-world-v1"]])
+    });
+    expect(declared.nodes[0]!.group?.overviewCache).toBe("transparent-world-v1");
+    expect(renderSceneEquals(declared, fallback)).toBe(false);
+    expect(renderSceneFingerprint(declared)).not.toBe(renderSceneFingerprint(fallback));
+    // 声明不进入模型内容 identity：resourceKey/signature 不因缓存策略改变。
     expect(declared.nodes[0]!.model?.resourceKey).toBe(fallback.nodes[0]!.model?.resourceKey);
   });
 
@@ -953,7 +990,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v29");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v32");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));
@@ -1376,6 +1413,8 @@ describe("dragAttach 拖动粘连瞬时投影（change: add-drag-touch-connectio
       ["NODE_ACTION_TOOLBAR_PAD", NODE_ACTION_TOOLBAR_PAD],
       ["NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH", NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH],
       ["NODE_ACTION_TOOLBAR_ACTION_PAD", NODE_ACTION_TOOLBAR_ACTION_PAD],
+      ["NODE_ACTION_TOOLBAR_ICON_SIZE", NODE_ACTION_TOOLBAR_ICON_SIZE],
+      ["NODE_ACTION_TOOLBAR_ICON_GAP", NODE_ACTION_TOOLBAR_ICON_GAP],
       ["NODE_ACTION_TOOLBAR_CHEVRON_WIDTH", NODE_ACTION_TOOLBAR_CHEVRON_WIDTH],
       ["NODE_ACTION_TOOLBAR_SEPARATOR", NODE_ACTION_TOOLBAR_SEPARATOR],
       ["NODE_ACTION_TOOLBAR_FONT", NODE_ACTION_TOOLBAR_FONT],
@@ -1742,6 +1781,43 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
     expect(node.typeLabel).toBe("动态镜头");
     // 预览节点不合成为普通内容节点：无 outputAssetId/媒体引用等字段。
     expect(node).not.toHaveProperty("outputAssetId");
+  });
+
+  it("迁移后的 owner-managed 预览节点仍投影镜头卡片与归属线", () => {
+    const groupId = "film-group";
+    const clipId = "clip-1";
+    const previewId = shotPreviewNodeId(groupId, clipId);
+    const marker = createFilmSetGroupMarker({
+      sceneBindings: [],
+      cameras: [{ id: `camera:${clipId}`, name: "运镜", azimuth: 0, elevation: 0.35, distance: 4, focusOffset: { x: 0, y: 0, z: 0 }, aspect: "16:9" }],
+      clips: [{ id: clipId, name: "运镜", cameraId: `camera:${clipId}`, duration: 4, loop: false, cameraMotion: staticShotCameraMotion(), bindings: [] }],
+      activeClip: clipId
+    });
+    const source = canvas({
+      document: {
+        schemaVersion: "asset-canvas-v1",
+        nodes: [
+          { id: groupId, type: "group", position: { x: 100, y: 60 }, width: 320, height: 240 },
+          { id: previewId, type: "video", position: { x: 560, y: 60 }, width: 240, height: 167 }
+        ],
+        edges: [],
+        updatedAt: "2026-10-15T00:00:00.000Z"
+      },
+      nodeData: {
+        [groupId]: { filmSetGroup: marker } as never,
+        [previewId]: {
+          managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: groupId, entityId: clipId, lifecycle: "owner-managed" },
+          mediaContent: { providerId: "film-set.shot", schemaVersion: 1, payload: { filmSetNodeId: groupId, clipId } }
+        } as never
+      }
+    });
+    const scene = buildCanvasRenderScene({ canvas: source, theme: defaultAppTheme(), shotPreviewCameraProjection: () => ({ x: 10, y: 10 }) });
+    const node = scene.nodes.find((entry) => entry.id === previewId)!;
+    expect(node.shotPreview).toMatchObject({ filmSetNodeId: groupId, clipId, kind: "dynamic", name: "运镜", duration: 4 });
+    expect(node.title).toBe("运镜");
+    expect(node.typeLabel).toBe("动态镜头");
+    expect(scene.shotPreviewLinks).toHaveLength(1);
+    expect(scene.shotPreviewLinks![0]).toMatchObject({ ownerNodeId: groupId, previewNodeId: previewId, clipId });
   });
 
   it("镜头始终外显，旧隐藏设置不影响卡片、连线或规范布局", () => {

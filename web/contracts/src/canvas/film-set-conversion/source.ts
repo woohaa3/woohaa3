@@ -58,6 +58,8 @@ export function readFilmSetConversionSource(input: {
 }): FilmSetConversionSourceSnapshot {
   const node = input.canvas.document.nodes.find((entry) => entry.id === input.sourceNodeId);
   if (!node) return { ok: false, code: "source-not-found", message: `来源节点 ${input.sourceNodeId} 不存在` };
+  // 片场本身是 group，而规范文档不支持嵌套 group：已经在任意组内的节点无法再套片场组。
+  if (node.parentId) return { ok: false, code: "unsupported-source", message: "已在组内的节点不能创建片场" };
   const kind = readFilmSetConversionSourceKind(node.type);
   if (!kind) return { ok: false, code: "unsupported-source", message: "仅图片、视频和普通 3D 模型可转为片场" };
   const data = input.canvas.nodeData[input.sourceNodeId] as CanvasNodeData | undefined;

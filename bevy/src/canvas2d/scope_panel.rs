@@ -30,7 +30,10 @@ pub(super) fn draw(
     let layout = crate::canvas_query::composite_panel::layout(node, panel.image_ids.len());
     let [x, y, width, height] = layout.bounds;
     // A model uses the transparent center; flat image containers use a normal panel background.
-    let frame_only = panel.title.is_empty() && panel.message.is_empty() && panel.hint.is_empty() && panel.image_ids.is_empty();
+    let frame_only = panel.title.is_empty()
+        && panel.message.is_empty()
+        && panel.hint.is_empty()
+        && panel.image_ids.is_empty();
     if frame_only {
         // The embedded real card owns its surface and title; leave the dashed padding visible.
     } else if node.model.is_none() {
@@ -75,7 +78,9 @@ pub(super) fn draw(
             theme.token_u32("canvasEdgeDefault"),
         );
     }
-    if frame_only { return Vec::new(); }
+    if frame_only {
+        return Vec::new();
+    }
     let text = |value: &str, size: f32| -> String {
         let max = ((width - 28.) / (size * 0.85)).max(1.) as usize;
         if value.chars().count() <= max {
@@ -179,7 +184,7 @@ pub(crate) fn sync_images(
     nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
     mut sprites: Query<(Entity, &mut Sprite, &mut Transform, &CompositePanelThumbnail)>,
 ) {
-    if !flags.changed && batch.0.is_empty() {
+    if !(flags.scene_received || flags.positions_received || flags.surface_changed || flags.theme_changed) && !scene.is_changed() && batch.0.is_empty() {
         return;
     }
     let desired = image_slots(&scene.0, &index, &nodes);

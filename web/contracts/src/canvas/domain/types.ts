@@ -5,6 +5,7 @@ import type { VideoEditIntent } from "../../video/video-edit.js";
 import type { ModelCamera } from "../model-cameras.js";
 import type { ImageEditDocument } from "../image-edit.js";
 import type { GroupAppearance } from "../group-appearance.js";
+import type { FilmSetGroupMarker } from "../film-set-group.js";
 
 export type GenerationKind = "text" | "image" | "video" | "audio";
 export type GenerationStatus = "idle" | "queued" | "running" | "success" | "failed" | "draft" | "ready" | "archived";
@@ -27,6 +28,8 @@ export type CanvasNodeInputMapping = {
 };
 
 export type CanvasNodeData = Woohaa3CanvasJsonObject & {
+  /** Canonical film-set group orchestration state. Ordinary groups omit it. */
+  filmSetGroup?: FilmSetGroupMarker;
   /** Neutral extension-owned lifecycle relation. Business payload stays opaque. */
   managedBy?: import("../managed-node.js").ManagedNodeRelation;
   /** 普通组自身的版本化展示模型；片场不使用该字段。缺失时读取层使用默认值，不回写文档。 */
@@ -59,6 +62,16 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
   durationSeconds?: number;
   mediaContent?: import("../media-content.js").MediaContentRef;
   outputAssetId?: string;
+  /**
+   * 浏览器本地历史预览的失败信息。
+   *
+   * 只在 node-history 的 `ExecutionPreview` 渲染投影中写入：选中失败/取消归档时，卡片正文
+   * 用它替代上一个成功输出显示安全原因。**不进入** Y.Doc、ServerCanvas 或任何权威写入。
+   */
+  historyPreviewFailure?: {
+    outcome: "failed" | "cancelled" | "interrupted" | "partial";
+    message: string;
+  };
   /** 视频结果的可选海报资产引用（稳定 asset ID）。 */
   posterAssetId?: string;
   resourceKind?: string;

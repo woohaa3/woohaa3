@@ -37,19 +37,23 @@ export type CanvasNodeTemplate = {
   taskKind: boolean;
 };
 
-/** 节点菜单目录；空白右键与拉线创建共用，顺序与旧 Godot 菜单一致。 */
+/**
+ * 节点菜单目录；空白右键与拉线创建共用，顺序与旧 Godot 菜单一致。
+ *
+ * 片场由 film-set 扩展经 `canvas.node-template` 贡献（携带扩展自己的默认镜头/片段），
+ * 宿主目录不再重复列出，避免右键菜单出现两个「片场」。共享描述符仍保留 film-set，
+ * 供 MCP 与默认 nodeData 复用。
+ */
 export const NODE_TEMPLATES: readonly CanvasNodeTemplate[] = [
-  ...AGENT_NODE_DESCRIPTORS.map((descriptor) => ({
-    id: (descriptor.kind === "model" ? "model3d" : descriptor.kind) as CanvasNodeTemplateId,
-    label: descriptor.kind === "model" ? "3D 模型" : descriptor.label,
-    nodeType: descriptor.canonicalType,
-    taskKind: descriptor.taskKind !== undefined
-  })),
-  // 自包含 3D 节点（change: 2026-10-05-bind-model-animation-to-shots）：直接创建即携带完整本地
-  // 模型定义，不从来源节点读取；模型内容再由聚焦编辑器或 MCP 编辑/导入。
-  // 复合资产节点（change: 2026-10-11-extract-film-set-extension，D1）：每类业务一个菜单项，
-  // 片场 defaultNodeData 带 extensionId="film-set"；炉体模板由其 extension 注册。
-  { id: "composite-asset", label: "导演场", nodeType: "composite-asset", taskKind: false },
+  ...AGENT_NODE_DESCRIPTORS
+    // 片场已迁移为"组"，不再作为独立菜单项出现（change: 2026-10-29-migrate-film-sets-to-groups）。
+    .filter((descriptor) => descriptor.kind !== "film-set")
+    .map((descriptor) => ({
+      id: (descriptor.kind === "model" ? "model3d" : descriptor.kind) as CanvasNodeTemplateId,
+      label: descriptor.kind === "model" ? "3D 模型" : descriptor.label,
+      nodeType: descriptor.canonicalType,
+      taskKind: descriptor.taskKind !== undefined
+    })),
   // 便签：纯批注卡片，不连线、不执行。排在最后，不与"素材"类节点抢位置。
   { id: "sticky-note", label: "便签", nodeType: "sticky-note", taskKind: false }
 ];
@@ -103,7 +107,7 @@ export function connectNodeDataFor(
   if (!base) return undefined;
   // 自包含 3D 节点不从来源节点取得运行数据：连线只作来源说明，不注入任务 inputMapping
   // （change: 2026-10-05-bind-model-animation-to-shots）；复合资产节点同理。
-  if (toNodeType === "model3d" || toNodeType === "composite-asset") return { ...base };
+  if (toNodeType === "model3d" || toNodeType === "composite-asset" || toNodeType === "film-set") return { ...base };
   const data: CanvasNodeData = { ...base };
   data.inputMapping = [
     {

@@ -27,14 +27,23 @@ fn local_time_maps_delay_scale_clamp_and_loop() {
     // 延迟开始：T < startTime 返回 None（显示基础姿态）。
     assert_eq!(object(config(2.0, 3.0, 1.0, false)).local_time(1.0), None);
     // 变速：T=3, startTime=2, timeScale=2 → u=2。
-    assert_eq!(object(config(2.0, 3.0, 2.0, false)).local_time(3.0), Some(2.0));
+    assert_eq!(
+        object(config(2.0, 3.0, 2.0, false)).local_time(3.0),
+        Some(2.0)
+    );
     // 非循环钳制末帧。
-    assert_eq!(object(config(0.0, 3.0, 1.0, false)).local_time(5.0), Some(3.0));
+    assert_eq!(
+        object(config(0.0, 3.0, 1.0, false)).local_time(5.0),
+        Some(3.0)
+    );
     // 循环取模。
     let looped = object(config(0.0, 3.0, 1.0, true)).local_time(7.0).unwrap();
     assert!((looped - 1.0).abs() < 1e-5);
     // 非法 timeScale 回退 1。
-    assert_eq!(object(config(0.0, 3.0, 0.0, false)).local_time(1.0), Some(1.0));
+    assert_eq!(
+        object(config(0.0, 3.0, 0.0, false)).local_time(1.0),
+        Some(1.0)
+    );
 }
 
 #[test]
@@ -77,6 +86,9 @@ fn animation_playback_parses_objects_projection() {
     let playback: AnimationPlayback = serde_json::from_value(json).expect("playback");
     assert_eq!(playback.objects.len(), 1);
     assert_eq!(playback.objects[0].item_id, "a");
-    assert_eq!(playback.objects[0].part_ids.get("root").map(String::as_str), Some("1:a"));
+    assert_eq!(
+        playback.objects[0].part_ids.get("root").map(String::as_str),
+        Some("1:a")
+    );
     assert!(playback.objects[0].playback.looped);
 }

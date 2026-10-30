@@ -12,8 +12,8 @@ use crate::model3d::filmset_camera::{
 };
 use crate::motion::CameraState;
 use crate::protocol::{
-    AnimationPlayback, GraphNode, ModelOp, ModelPlacement, ModelSnapshot, PlaybackCamera,
-    Scene, Selection,
+    AnimationPlayback, GraphNode, ModelOp, ModelPlacement, ModelSnapshot, PlaybackCamera, Scene,
+    Selection,
 };
 use bevy::prelude::*;
 
@@ -93,7 +93,9 @@ fn film_scene(node_id: &str, previews: &[(&str, &str)]) -> Scene {
     let reference = reference_for(&snapshot, ModelPlacement::default());
     let mut scene = scene_with(&film_node(node_id), Some(reference));
     scene.selection = Selection::default();
-    scene.nodes.extend(previews.iter().map(|(id, kind)| preview_node(id, kind)));
+    scene
+        .nodes
+        .extend(previews.iter().map(|(id, kind)| preview_node(id, kind)));
     scene
 }
 
@@ -144,7 +146,10 @@ impl Harness {
         let visuals = self.world.remove_resource::<crate::model3d::ModelVisuals>().unwrap();
         let mut assets = self.world.remove_resource::<FilmSetCameraAssets>().unwrap();
         let mut meshes = self.world.remove_resource::<Assets<Mesh>>().unwrap();
-        let mut materials = self.world.remove_resource::<Assets<StandardMaterial>>().unwrap();
+        let mut materials = self
+            .world
+            .remove_resource::<Assets<StandardMaterial>>()
+            .unwrap();
         let mut commands = self.world.commands();
         sync(
             &mut commands,
@@ -205,20 +210,29 @@ impl Harness {
 
 #[test]
 fn static_shots_have_stable_markers_without_playing_or_hover() {
-    let scene = film_scene("film", &[("shot-preview:a", "static"), ("shot-preview:b", "static")]);
+    let scene = film_scene(
+        "film",
+        &[("shot-preview:a", "static"), ("shot-preview:b", "static")],
+    );
     let mut harness = Harness::new(&scene);
     harness.sync(&scene, None);
     assert_eq!(harness.marker_count(), 2, "每个可见静态镜头一个标记");
     assert_eq!(harness.root_count(), 2);
     // 每个机体的子 mesh 均保持输出隔离，细节不泄漏到成片相机。
     for root in harness.roots() {
-        let children = harness.world.entity(root).get::<Children>().expect("camera parts");
+        let children = harness
+            .world
+            .entity(root)
+            .get::<Children>()
+            .expect("camera parts");
         assert!(!children.is_empty());
         for child in children.iter() {
             let entity = harness.world.entity(child);
             assert!(entity.contains::<Mesh3d>());
             assert!(!entity.contains::<Camera3d>());
-            let layers = entity.get::<bevy::camera::visibility::RenderLayers>().unwrap();
+            let layers = entity
+                .get::<bevy::camera::visibility::RenderLayers>()
+                .unwrap();
             assert!(!layers.iter().any(|layer| layer == 7));
         }
         assert!(!harness.world.entity(root).contains::<Camera3d>());
@@ -232,7 +246,13 @@ fn auxiliary_body_projects_to_viewable_screen_size() {
     let mut harness = Harness::new(&scene);
     harness.sync(&scene, None);
     let root = harness.roots()[0];
-    let scale = harness.world.entity(root).get::<Transform>().expect("root transform").scale.x;
+    let scale = harness
+        .world
+        .entity(root)
+        .get::<Transform>()
+        .expect("root transform")
+        .scale
+        .x;
     let zoom = scene.viewport.zoom;
     // 机身基座直径 = geometry::BODY_WIDTH = 1.0 世界单位（见 filmset_camera 常量）。
     let screen_px = scale * 1.0 * zoom;
@@ -274,11 +294,20 @@ fn same_target_tick_reuses_entities_and_bounded_resources() {
 #[test]
 fn live_dynamic_sampled_pose_and_cleanup_without_leaving_old_pose() {
     let mut scene = film_scene("film", &[("shot-preview:a", "dynamic")]);
-    scene.animation_playback = Some(playback("film", "shot-node-preview", Some("shot-preview:a")));
+    scene.animation_playback = Some(playback(
+        "film",
+        "shot-node-preview",
+        Some("shot-preview:a"),
+    ));
     let mut harness = Harness::new(&scene);
     harness.sync_scene(&scene, Some(camera()));
     let root = harness.roots()[0];
-    let first = harness.world.entity(root).get::<Transform>().unwrap().translation;
+    let first = harness
+        .world
+        .entity(root)
+        .get::<Transform>()
+        .unwrap()
+        .translation;
 
     // 同一 T 的采样相机变化：标记移动，但仍是同一实体（不重建 mesh/material）。
     let moved = CameraState {
@@ -287,7 +316,12 @@ fn live_dynamic_sampled_pose_and_cleanup_without_leaving_old_pose() {
     };
     harness.sync(&scene, Some(moved));
     assert_eq!(harness.roots()[0], root, "活动镜头只更新 transform");
-    let second = harness.world.entity(root).get::<Transform>().unwrap().translation;
+    let second = harness
+        .world
+        .entity(root)
+        .get::<Transform>()
+        .unwrap()
+        .translation;
     assert_ne!(first, second, "采样相机变化推进标记姿态");
 
     // 清除播放投影：回到零点封面相机（同一标记实体，不累积旧实体）。
@@ -345,6 +379,10 @@ fn target_switch_reclaims_previous_marker() {
     assert_ne!(first, second);
     assert!(harness.world.get_entity(first).is_err(), "旧目标实体被回收");
     assert_eq!(harness.root_count(), 1);
-    assert_eq!(harness.mesh_count(), meshes, "切换目标复用全部机壳与线框网格");
+    assert_eq!(
+        harness.mesh_count(),
+        meshes,
+        "切换目标复用全部机壳与线框网格"
+    );
     assert_eq!(harness.material_count(), materials, "切换目标复用黑白材质");
 }

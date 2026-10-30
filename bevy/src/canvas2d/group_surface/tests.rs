@@ -265,3 +265,73 @@ fn badge_scale_rebuilds_only_surface_geometry_and_releases_old_mesh() {
     app.update();
     assert_eq!(surface(&mut app).1, resized);
 }
+
+#[test]
+fn collapsing_hides_the_tail_even_when_the_structural_rect_is_unchanged() {
+    let mut app = app();
+    app.update();
+    let (entity, expanded, _) = surface(&mut app);
+    let expanded_mesh = app
+        .world()
+        .resource::<Assets<Mesh>>()
+        .get(&expanded)
+        .unwrap();
+    let Some(VertexAttributeValues::Float32x3(expanded_positions)) =
+        expanded_mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        panic!();
+    };
+    assert_eq!(expanded_positions.len(), 3, "展开态有一条气泡尾巴");
+
+    // 收起保留结构矩形（徽标位置稳定），尾巴仍必须消失，否则会留下悬空的背板颜色。
+    app.world_mut().resource_mut::<CurrentScene>().0.nodes[0]
+        .group
+        .as_mut()
+        .unwrap()
+        .collapsed = true;
+    app.update();
+    let (same, collapsed, _) = surface(&mut app);
+    assert_eq!(entity, same, "收起复用同一 surface 实体");
+    assert_ne!(collapsed, expanded, "收起必须重建尾巴几何");
+    assert!(
+        app.world()
+            .resource::<Assets<Mesh>>()
+            .get(&expanded)
+            .is_none(),
+        "旧尾巴 mesh 释放"
+    );
+    let collapsed_mesh = app
+        .world()
+        .resource::<Assets<Mesh>>()
+        .get(&collapsed)
+        .unwrap();
+    let Some(VertexAttributeValues::Float32x3(collapsed_positions)) =
+        collapsed_mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        panic!();
+    };
+    assert!(
+        collapsed_positions.iter().all(|point| point[0] < -900_000.),
+        "收起态只剩远离视锥的兜底三角形：{collapsed_positions:?}"
+    );
+
+    app.world_mut().resource_mut::<CurrentScene>().0.nodes[0]
+        .group
+        .as_mut()
+        .unwrap()
+        .collapsed = false;
+    app.update();
+    let (_, restored, _) = surface(&mut app);
+    let restored_mesh = app
+        .world()
+        .resource::<Assets<Mesh>>()
+        .get(&restored)
+        .unwrap();
+    let Some(VertexAttributeValues::Float32x3(restored_positions)) =
+        restored_mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        panic!();
+    };
+    assert_eq!(restored_positions.len(), 3, "重新展开恢复气泡尾巴");
+    assert!(restored_positions.iter().any(|point| point[0] > -900_000.));
+}

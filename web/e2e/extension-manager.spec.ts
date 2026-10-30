@@ -61,7 +61,6 @@ test.describe("插件管理入口收敛", () => {
     await expect(page.locator('[data-testid="settings-plugin-node-history"]')).toBeVisible();
     await expect(page.locator('[data-testid="settings-plugin-switch-node-history"]')).toBeVisible();
     await expect(page.locator('[data-testid="settings-plugin-switch-task-activity"]')).toBeVisible();
-    await expect(page.locator('[data-testid="settings-plugin-switch-prompt-snippets"]')).toBeVisible();
   });
 
   test("设置页关闭 optional → 回到画布应用 → contribution 消失并可恢复", async ({ page }) => {

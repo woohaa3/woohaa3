@@ -77,17 +77,26 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
     }
     if (!descriptor) continue;
     const menu = descriptor.menu === true;
+    const icon = descriptor.icon === "download" || descriptor.icon === "edit"
+      || descriptor.icon === "arrange-horizontal" || descriptor.icon === "arrange-vertical"
+      || descriptor.icon === "arrange-grid" || descriptor.icon === "arrange-diagonal-up"
+      || descriptor.icon === "arrange-diagonal-down"
+      || descriptor.icon === "collapse-groups" || descriptor.icon === "expand-groups"
+      ? descriptor.icon
+      : undefined;
     actions.push({
       id: contribution.id,
       label: descriptor.label,
       enabled: descriptor.enabled,
       ...(descriptor.tone ? { tone: descriptor.tone } : {}),
-      ...(descriptor.icon === "download" ? { icon: descriptor.icon } : {}),
-      ...(descriptor.iconOnly && descriptor.icon === "download" ? { iconOnly: true } : {}),
+      ...(icon ? { icon } : {}),
+      ...(descriptor.iconOnly && icon ? { iconOnly: true } : {}),
       ...(menu ? { menu: true } : {})
     });
     owners.set(contribution.id, contribution);
-    if (descriptor.summary) summary = descriptor.summary;
+    // 摘要是目标身份（组名/节点数），由排序最靠前的贡献拥有；后续动作的状态原因
+    // 仍保留在 descriptor.reason 中，不能覆盖左侧身份摘要。
+    if (descriptor.summary && !summary) summary = descriptor.summary;
   }
   if (actions.length === 0) return null;
   return { presentation: { actions, ...(summary ? { summary } : {}) }, owners };

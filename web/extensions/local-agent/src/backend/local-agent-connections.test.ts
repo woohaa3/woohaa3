@@ -229,7 +229,7 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     expect(new Set(ensureCalls.map((call) => call.connectionId)).size).toBe(3);
   });
 
-  it("原生线程无法恢复时，讨论回合回放宿主账本历史", async () => {
+  it.each(["discuss", "modify"] as const)("原生线程无法恢复时，%s 回合回放宿主账本历史", async action => {
     const { service } = fakeService([record()]);
     const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
     const { transport, inputs } = fakeTransport({ ok: true, outcome: { status: "succeeded", assistantText: "reply" } });
@@ -237,10 +237,12 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
       service,
       processManager: manager,
       transports: { "codex-appserver": transport },
+      tools: fakeToolFacade().facade,
+      mcpEndpoint: MCP_ENDPOINT,
       argsFor: () => []
     });
     const outcome = await adapter.run(runInput({
-      intent: { action: "discuss", canvasId: "canvas-1", nodeId: "n1", mode: "model3d", prompt: "继续刚才的模型" },
+      intent: { action, canvasId: "canvas-1", nodeId: "n1", mode: "model3d", prompt: "继续刚才的模型" },
       history: [
         { messageId: "m1", conversationId: "conv-1", turnId: "old", requestId: "old", role: "user", content: "生成一个立方体", truncated: false, sequence: 1, createdAt: "2026-10-16T00:00:00.000Z" },
         { messageId: "m2", conversationId: "conv-1", turnId: "old", requestId: "old", role: "assistant", content: "已生成一个立方体。", truncated: false, sequence: 2, createdAt: "2026-10-16T00:00:01.000Z" }

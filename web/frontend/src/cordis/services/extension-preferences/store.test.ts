@@ -16,6 +16,22 @@ describe("ExtensionPreferenceStore（配置投影）", () => {
     expect(snapshot.persistenceAvailable).toBe(false);
   });
 
+  it("开箱默认值来自 defaults：未出现的 ID 不按启用处理，显式配置仍优先", () => {
+    const store = new ExtensionPreferenceStore({
+      ids: ["task-activity", "prompt-snippets", "node-history"],
+      defaults: { "prompt-snippets": false },
+      desired: { "node-history": false }
+    });
+    expect(store.getSnapshot().preferences).toEqual({
+      "task-activity": true,
+      "prompt-snippets": false,
+      "node-history": false
+    });
+    // 宿主热更新同样以 defaults 兜底。
+    store.applyDesired({ "node-history": true });
+    expect(store.isEnabled("prompt-snippets")).toBe(false);
+  });
+
   it("按宿主配置投影目标状态，未出现的 ID 取默认启用", () => {
     const store = new ExtensionPreferenceStore({
       ids: IDS,

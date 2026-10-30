@@ -6,7 +6,7 @@
  * - image：ready/受控同源 → media-preview；video：ready + 稳定 storageKey → 只发 nodeId 截帧；
  * - 3D 模型/片场：双击模型或卡片进入聚焦，普通模型在画布上保留内嵌预览。
  */
-import { screenToWorld } from "./hit-test.js";
+import { screenToWorld, type Point } from "./hit-test.js";
 import { modelBounds, type FocusHitResult } from "./model-focus-session.js";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -16,6 +16,16 @@ import { hitsCardTitleRow } from "./card-title-hit.js";
 
 export function createDoubleClickHandler(core: InteractionCore) {
   const { options, canvas, model, setSelection, activeViewport, surfaceSize } = core;
+
+  /**
+   * 空白处双击与空白处右键是同一入口：同一份菜单、同一个位置（屏幕 + 世界）。
+   * 阻断条件与右键 fallback 一致——聚焦工作区（模型/视频）内空白双击不开画布菜单。
+   */
+  const openBlankContextMenu = (event: MouseEvent, world: Point) => {
+    if (model.active || core.modalActive() || options.isVideoFocused?.()) return;
+    event.preventDefault();
+    options.onContextMenu?.({ screen: { x: event.clientX, y: event.clientY }, world, node: null });
+  };
 
   const onDoubleClick = (event: MouseEvent) => {
     // 只有真正的 modal Dialog 阻断双击；非模态 editor/history panel 打开时仍允许双击
@@ -29,7 +39,9 @@ export function createDoubleClickHandler(core: InteractionCore) {
     // 命中由 Rust interaction snapshot 计算；不可用时不派发卡片命中（design D3）。
     const hitResult = core.queryPoint(world, activeViewport().zoom);
     const hit = hitResult.ok ? hitResult.value : null;
-    if (hit?.kind === "node-action" && (hit.actionId === "group-toggle-collapse" || hit.actionId === "group-resize-badge")) { event.preventDefault(); return; }
+    // 徽标缩放把手不是聚焦入口；徽标本体（group-badge-select）双击进入容器聚焦。
+    if (hit?.kind === "node-action" && hit.actionId === "group-resize-badge") { event.preventDefault(); return; }
+    const badgeNodeId = hit?.kind === "node-action" && hit.actionId === "group-badge-select" ? hit.nodeId : null;
     const cardNodeId = hit && (hit.kind === "node" || hit.kind === "model-preview" || hit.kind === "film-scope") ? hit.nodeId : null;
     const canvasState = woohaa3CanvasStore.getState().canvas;
     if (!canvasState) return;
@@ -44,6 +56,20 @@ export function createDoubleClickHandler(core: InteractionCore) {
     const focusKind = (id: string) => {
       const context = contextOf(id); return context ? resolver.resolve(context).focus?.kind(context) : null;
     };
+    // 模型徽标：双击直接进入容器聚焦（与画布横条「编辑」按钮同一入口）。只对有自己模型
+    // 聚焦工作区的容器生效（片场）；普通 group 的徽标仍只负责选择/拖动与展开/收起。
+    if (badgeNodeId) {
+      event.preventDefault();
+      const kind = focusKind(badgeNodeId);
+      if (contextOf(badgeNodeId)?.node.type !== "group" || kind !== "model") return;
+      setSelection([badgeNodeId]);
+      if (options.onModelFocusIntent) {
+        options.onModelFocusIntent({ type: "enter", nodeId: badgeNodeId, kind });
+        return;
+      }
+      model.enterModelFocusForNode?.(badgeNodeId);
+      return;
+    }
     const cardEntry = cardNodeId
       ? canvasState.document.nodes.find((candidate) => candidate.id === cardNodeId)
       : undefined;
@@ -155,7 +181,13 @@ export function createDoubleClickHandler(core: InteractionCore) {
     }
 
     // 既有图片/视频双击分派需要命中卡片节点。
-    if (!cardEntry) return;
+    if (!cardEntry) {
+      // 画布空白处双击等价于空白处右键。命中查询不可用时保持无动作，
+      // 不把「查不到」误当成空白。
+      if (hitResult.ok && !hit) openBlankContextMenu(event, world);
+      return;
+    }
+
     const entry = cardEntry;
     const data = canvasState.nodeData?.[cardEntry.id] as { outputAssetId?: unknown; title?: unknown } | undefined;
     const outputId = typeof data?.outputAssetId === "string" ? data.outputAssetId : "";

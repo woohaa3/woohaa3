@@ -1,3 +1,4 @@
+import { migrateLegacyFilmSetToGroup, readFilmSetAnimationProjection } from "@woohaa3/contracts";
 /**
  * 片场复制导入权威服务测试
  * （change: 2026-10-08-make-film-set-model-only，任务 2.3/6.1）。
@@ -6,14 +7,11 @@ import { describe, expect, it } from "vitest";
 import {
   filmSetNodeDataFields,
   createFilmSetSnapshot,
-  createMotionSnapshot,
   createEmptyWoohaa3ServerCanvas,
   createModel3DNodeData,
   model3DNodeDataFields,
-  decodeFilmSetNodeData,
   resolveFilmSetClip,
   type CanvasNodeData,
-  type FilmSetContent,
   type ServerCanvas,
   type StoredAsset
 } from "@woohaa3/contracts";
@@ -85,7 +83,9 @@ async function readyRoom(): Promise<CanvasRoom> {
     },
     assets: [imageAsset(), videoAsset()]
   };
-  await room.initialize({ canvas, roomEpoch: "epoch-1", createdAt: NOW });
+  const migrated = migrateLegacyFilmSetToGroup(canvas, "film", { commandId: "fixture", groupId: "film" });
+  if (!migrated.ok) throw new Error(migrated.reason);
+  await room.initialize({ canvas: migrated.canvas, roomEpoch: "epoch-1", createdAt: NOW });
   return room;
 }
 
@@ -119,7 +119,7 @@ describe("FilmSetImportService（任务 2.3）", () => {
     // 来源位置不变。
     expect(exported.canvas.document.nodes.find((node) => node.id === "model")?.position).toEqual({ x: 400, y: 0 });
     // 导入对象为纯静态 items（动作只在片段 binding，本次未带动作故无绑定）。
-    const content = exported.canvas.nodeData.film.filmSetContent as FilmSetContent;
+    const content = readFilmSetAnimationProjection(exported.canvas, "film")!.filmSetContent;
     expect(content.schemaVersion).toBe(4);
     expect(content.items.find(item => item.id === "obj-model")?.motion).toBeUndefined();
     expect(content.items.find(item => item.id === "obj-image")?.motion).toBeUndefined();
@@ -172,8 +172,7 @@ describe("FilmSetImportService（任务 2.3）", () => {
     expect(outcome.ok).toBe(true);
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error("export failed");
-    const decoded = decodeFilmSetNodeData(exported.canvas.nodeData["film"]);
-    if (!decoded.ok) throw new Error(decoded.reason);
+    const decoded = ({ ok: true as const, value: readFilmSetAnimationProjection(exported.canvas, "film")! });
     const view = resolveFilmSetClip(decoded.value, defaultClipId(decoded.value));
     expect(view?.timeline.duration).toBe(12);
     expect(view?.timeline.loop).toBe(false);
@@ -184,24 +183,7 @@ describe("FilmSetImportService（任务 2.3）", () => {
     // 把默认镜头改成合法静态镜头：零时长、无动作。
     const exported0 = room.exportCanvas();
     if (!exported0.ok) throw new Error("export failed");
-    const current = decodeFilmSetNodeData(exported0.canvas.nodeData["film"]);
-    if (!current.ok) throw new Error(current.reason);
-    const fields = filmSetNodeDataFields({
-      ...current.value,
-      filmSetAnimations: {
-        schemaVersion: 3 as const,
-        defaultClipId: "static-1",
-        clips: [{
-          id: "static-1",
-          name: "静态镜头",
-          kind: "static" as const,
-          timeline: { duration: 0, loop: false },
-          initialCamera: current.value.sceneCamera,
-          cameraMotion: createMotionSnapshot({ motionScript: "", basedOnModelVersion: { revision: 1, sourceHash: "camera", contentHash: "camera" } }),
-          bindings: []
-        }]
-      }
-    });
+    const fields = { filmSetGroup: { ...exported0.canvas.nodeData.film.filmSetGroup!, activeClip: "static-1", clips: [{ id: "static-1", name: "静态镜头", duration: 0 }] } };
     const patched = await room.submit({
       protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
       canvasId: "c1",
@@ -218,8 +200,7 @@ describe("FilmSetImportService（任务 2.3）", () => {
     expect(outcome.ok).toBe(true);
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error("export failed");
-    const decoded = decodeFilmSetNodeData(exported.canvas.nodeData["film"]);
-    if (!decoded.ok) throw new Error(decoded.reason);
+    const decoded = ({ ok: true as const, value: readFilmSetAnimationProjection(exported.canvas, "film")! });
     const view = resolveFilmSetClip(decoded.value, "static-1");
     expect(view?.timeline.duration).toBe(0);
     expect(view?.timeline.loop).toBe(false);

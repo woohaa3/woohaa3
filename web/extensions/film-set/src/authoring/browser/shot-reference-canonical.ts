@@ -1,3 +1,4 @@
+import { readAnimation } from "../../state/browser/animation-projection.js";
 /**
  * 镜头参考的**冻结与登记**（任务 8.6 / design D9）
  * （change: 2026-10-15-add-film-set-shooting-shot-previews）。
@@ -14,13 +15,20 @@
  *
  * 纯函数：只读画布、返回命令，不提交、不联网。
  */
-import { decodeFilmSetNodeData, DEFAULT_SHOT_REFERENCE_RECORD_PROFILE, filmSetAnimationsOf, shotReferenceAssetMetadata, shotReferenceContentIdentity, shotReferenceOwnershipOf, shotReferenceProfileKey, SHOT_REFERENCE_ROLE, type CanvasCommand, type CanvasNodeData, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+import { DEFAULT_SHOT_REFERENCE_RECORD_PROFILE, filmSetAnimationsOf, mediaPublicUrlFor, shotReferenceAssetMetadata, shotReferenceContentIdentity, shotReferenceOwnershipOf, shotReferenceProfileKey, SHOT_REFERENCE_ROLE, type CanvasCommand, type CanvasNodeData, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
 
 /** 默认录制 profile key；与录制能力保持一致（内容身份也按默认 profile 计算）。 */
 const DEFAULT_SHOT_REFERENCE_PROFILE_KEY = shotReferenceProfileKey(DEFAULT_SHOT_REFERENCE_RECORD_PROFILE);
 
 /** 与录制缓存一致的资产投影。 */
-export type ShotReferenceReadyAsset = { storageKey: string; checksum: string; mediaType: string; size: number };
+export type ShotReferenceReadyAsset = {
+  storageKey: string;
+  checksum: string;
+  mediaType: string;
+  size: number;
+  /** 上传服务给出的同源读取路径；缺失时按 storageKey 派生（见 `buildShotReferenceAsset`）。 */
+  url?: string;
+};
 
 export type ShotReferenceFreezeRequest = {
   canvasId: string;
@@ -60,6 +68,10 @@ export function buildShotReferenceAsset(
     source: "generated",
     status: "ready",
     createdAt,
+    // 画布媒体读取（卡片首帧、下载、预览）都要求资产带同源逻辑路径；只登记 storageKey
+    // 会让镜头视频永远无法解析成可播放来源（真实缺陷：镜头卡片缩略图一直是灰的，只有
+    // hover 实时取景才有画面）。
+    url: ready.url ?? mediaPublicUrlFor(ready.storageKey),
     metadata: {
       storageKey: ready.storageKey,
       // 服务端 `validateAssetReferences` 要求 checksum 为 64 位 hex 且与 storageKey 内嵌哈希一致；
@@ -105,17 +117,17 @@ export function planShotReferenceFreeze(input: {
         invalid.push(`镜头参考来源 ${mapping.sourceNodeId} 不是拍摄镜头预览节点`);
         continue;
       }
-      const animation = decodeFilmSetNodeData(nodeData[ownership.filmSetNodeId]);
-      if (!animation.ok) {
+      const animation = readAnimation(canvas, ownership.filmSetNodeId);
+      if (!animation) {
         invalid.push(`镜头参考所属片场 ${ownership.filmSetNodeId} 无法解析`);
         continue;
       }
-      const clip = filmSetAnimationsOf(animation.value).clips.find((entry) => entry.id === ownership.clipId);
+      const clip = filmSetAnimationsOf(animation).clips.find((entry) => entry.id === ownership.clipId);
       if (!clip || clip.kind !== "dynamic") {
         invalid.push(`镜头参考的镜头 ${ownership.clipId} 已不存在`);
         continue;
       }
-      const contentIdentity = shotReferenceContentIdentity({ animation: animation.value, clipId: clip.id });
+      const contentIdentity = shotReferenceContentIdentity({ animation, clipId: clip.id, assets: canvas.assets });
       if (!contentIdentity) {
         invalid.push(`镜头参考的镜头 ${clip.id} 无法计算内容身份`);
         continue;

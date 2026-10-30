@@ -7,6 +7,8 @@
 import type { ServerCanvas } from "../domain/types.js";
 import { nodeWorldRect, type Rect } from "../geometry.js";
 import { filmSetNodeSize } from "../canvas-node-model.js";
+import { groupBottomPadding, groupPadding } from "../domain/core/group-geometry.js";
+import { DEFAULT_NODE_DIMS } from "../domain/core/node-factory.js";
 
 /** 片场与相邻节点之间的最小间距（世界单位）。 */
 const PLACE_GAP = 32;
@@ -49,6 +51,39 @@ export function planFilmSetConversionPlacement(
     if (!others.some((rect2) => rectsOverlap(candidate, rect2, 0))) return position;
   }
   return candidates[0]!;
+}
+
+/** 现有节点原地包进片场 group 的布局：group 世界坐标、成员局部坐标与气泡尺寸。 */
+export type FilmSetConversionWrapPlan = {
+  group: { x: number; y: number };
+  member: { x: number; y: number };
+  width: number;
+  height: number;
+};
+
+/**
+ * 把来源节点**原地**包进片场 group（3D 转换不再复制卡片）。
+ *
+ * group 矩形按 `getGroupLayoutSizes` 的最小尺寸规则贴合成员：成员放在左上内边距处，
+ * 底部预留 group 页脚（3D 徽标）。因此来源卡片的世界位置不变，外观只多出一个气泡。
+ *
+ * 源节点不存在、或已经在任意 group 内时返回 `null`：规范文档不支持嵌套 group，调用方按
+ * 拒绝处理，绝不把 group 塞进另一个 group。
+ */
+export function planFilmSetConversionWrap(
+  canvas: ServerCanvas,
+  sourceNodeId: string
+): FilmSetConversionWrapPlan | null {
+  const byId = new Map(canvas.document.nodes.map((node) => [node.id, node]));
+  const source = byId.get(sourceNodeId);
+  if (!source || source.parentId) return null;
+  const rect = nodeWorldRect(source, byId);
+  return {
+    group: { x: rect.x - groupPadding, y: rect.y - groupPadding },
+    member: { x: groupPadding, y: groupPadding },
+    width: Math.max(DEFAULT_NODE_DIMS.width, rect.width + groupPadding * 2),
+    height: Math.max(DEFAULT_NODE_DIMS.height, rect.height + groupPadding + groupBottomPadding)
+  };
 }
 
 /**

@@ -11,6 +11,7 @@
 | 设置面板 | 设置 → 插件配置 → 服务端接入：显示状态、测试连接、连接 / 断开（同机默认「使用浏览器登录」，失败可「改用短码」；设备码显示短码与批准页，短码可一键复制）、打开「服务端日志」。已连接时接入状态区给出「服务端模型 N 个」与「刷新模型」，详情页下方「生成的模型」区与其它 Provider 一样列出并可启停 |
 | 顶栏徽标 | `canvas.topbar`：本地模式 / 远端已接入 / 远端连接中 / 远端异常 四态，标签都带「远端」作用域词（它描述远端账号链路，画布实时连接以右下角控件面板为准）；**点击直接打开本扩展的设置面板**（`settingsOpen.open({ pluginId })`） |
 | 画布同步动作 | `canvas.catalog-item-action`：画布切换器里「仅本机」的条目显示「同步远端」；点击后才把这张画布上传/登记到服务端，之后它就是远端画布 |
+| 画布删除 | 同步上游 capability 的 `deleteCanvas(canvasId)`：宿主删除画布时先删远端（作者动作，`canvas.share`）；`not_found` 幂等、`permission_denied` 报无权限、其它故障中止删除。成功后清掉远端目录缓存与待同步标记 |
 | 调试窗口 | 设置面板里的「服务端日志」：连接摘要 + 已脱敏的接入/同步事件，可复制或上报到服务端 |
 | 存储后端 | 向 `ctx.storage` 注册 `backendId=server`：媒体字节落在远端，走签名地址读写 |
 | 托管生成（已接通） | 向 `ctx.generation` 注册 `providerId=remote-server` 的生成 Provider：登录后从服务端拉模型目录，执行映射到 `woohaa.generation.v1alpha1`；服务端提供 language/image/audio/video 四类模型，未开启或版本不支持时保持休眠 |

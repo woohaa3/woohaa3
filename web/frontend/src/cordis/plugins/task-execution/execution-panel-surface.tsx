@@ -14,8 +14,9 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { AuthoringGeneratePlaceholder } from "../../host.js";
 import type { CanvasRuntimeService } from "../../contracts.js";
-import { layoutDockedPanel, usableCanvasArea } from "./node-anchor-layout.js";
+import { layoutNodePanel, usableCanvasArea } from "./node-anchor-layout.js";
 import { FullscreenPanelHost } from "./execution-panel/fullscreen-panel-host.js";
+import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { panelKindForNodeType } from "./node-panel-registry.js";
 import type { ExecutionPanelPresentation } from "../../navigation/contracts.js";
 
@@ -60,7 +61,15 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       const canvas = document.getElementById("bevy-canvas");
       const fixtureArea = dock?.closest<HTMLElement>("[data-node-anchor-area]") ?? null;
       const areaElement = fixtureArea ?? canvas;
-      if (!dock || !areaElement) {
+      const state = woohaa3CanvasStore.getState();
+      const current = workingCanvasOf(state) ?? state.canvas;
+      const groupNode = current?.document.nodes.find(node => node.id === nodeId && node.type === "group");
+      // 组面板锚在外部 3D 徽标**下缘**：徽标矩形由运行时按渲染矩形（成员布局尺寸）与当前
+      // 视口倍率派生，与 Bevy 绘制同源。退回气泡主体会把面板压在徽标上。
+      const presentation = runtime.nodePresentationScreenRect?.(nodeId) ?? null;
+      const badge = groupNode ? presentation : null;
+      const node = presentation ?? runtime.nodeScreenRect(nodeId);
+      if (!dock || !areaElement || !node) {
         if (dock) {
           dock.style.visibility = "hidden";
           dock.removeAttribute("data-placement");
@@ -69,8 +78,7 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       }
       const bounds = areaElement.getBoundingClientRect();
       const area = usableCanvasArea({ left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, fixtureArea ? [] : visibleOcclusions());
-      // 底部停靠：位置只跟画布区域走，不跟节点走 —— 拖动/缩放/平移画布都不会再移动面板。
-      const next = layoutDockedPanel(area, { width: dock.offsetWidth, height: dock.offsetHeight });
+      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, badge ? "below" : "auto");
       if (!next) {
         dock.style.visibility = "hidden";
         dock.removeAttribute("data-placement");

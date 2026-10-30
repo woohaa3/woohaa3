@@ -17,6 +17,7 @@
 
 import { createHash } from "node:crypto";
 import {
+  readFilmSetGroupMarker,
   animationSnapshotHash,
   APP_THEME_DEFAULT_TOKENS,
   DEFAULT_FILM_SET_EXPORT_PROFILE,
@@ -39,6 +40,7 @@ import {
   filmSetMediaPlanesForNode,
   decodeFilmSetNodeData,
   executeMotionScript,
+  mediaPublicUrlFor,
   filmSetAnimationsOf,
   filmSetContentHash,
   resolveFilmSetClip,
@@ -270,6 +272,7 @@ export function freezeFilmSetRecording(input: {
   const contentIdentity = shotReferenceContentIdentity({
     animation,
     clipId: clip.id,
+    assets: input.assets,
     profile: {
       schemaVersion: SHOT_REFERENCE_CONTENT_VERSION,
       width: profile.width,
@@ -355,7 +358,7 @@ export function freezeFilmSetRecording(input: {
   // 媒体字节可读性由宿主在 freeze 之后用 `validateRecordingResources` 异步校验：
   // 冻结本身必须是同步纯编译，才能在权威队列里一次性完成。
   void input.read;
-  const referenceContentIdentity = shotReferenceContentIdentity({ animation, clipId: clip.id, profile: DEFAULT_SHOT_REFERENCE_RECORD_PROFILE });
+  const referenceContentIdentity = shotReferenceContentIdentity({ animation, clipId: clip.id, profile: DEFAULT_SHOT_REFERENCE_RECORD_PROFILE, assets: input.assets });
   if (!referenceContentIdentity) return fail("recording-source-invalid", "无法计算镜头参考身份");
   return { ok: true, snapshot, referenceIdentity: {
     contentIdentity: referenceContentIdentity,
@@ -473,6 +476,9 @@ export function planFilmSetRecordingCommit(input: {
     source: "generated",
     status: "ready",
     createdAt: input.now(),
+    // 与浏览器录制一致：资产必须带同源读取路径，卡片首帧/下载/预览才能解析来源。
+    // 缺 url 的镜头参考只有实时取景可用（真实缺陷：缩略图一直是灰的）。
+    url: mediaPublicUrlFor(request.artifact.storageKey),
     metadata: {
       storageKey: request.artifact.storageKey,
       checksum: request.artifact.checksum,
@@ -561,6 +567,7 @@ export function describeFilmSetRecording(nodeData: unknown, clipId: string): {
  * 除了能解码，还要求确实带有片场内容字段：任意对象都能解码成默认片场，不能据此接管节点。
  */
 export function matchesFilmSetRecording(nodeType: string, data: unknown): boolean {
+  if (nodeType === "group") return readFilmSetGroupMarker(data) !== null;
   if (nodeType !== "film-set" && nodeType !== "composite-asset") return false;
   if (!data || typeof data !== "object") return false;
   const record = data as Record<string, unknown>;

@@ -375,7 +375,10 @@ pub fn parse_control_message(json: &str) -> Result<ControlEnvelope, ProtocolErro
 impl ControlEnvelope {
     /// 唯一 payload 的 `(名称, 值)`。
     pub fn payload_value(&self) -> Option<(&str, &Value)> {
-        self.payload.iter().next().map(|(name, value)| (name.as_str(), value))
+        self.payload
+            .iter()
+            .next()
+            .map(|(name, value)| (name.as_str(), value))
     }
 }
 
@@ -424,18 +427,23 @@ fn validate_payload(name: &str, value: &Value) -> Result<(), ProtocolError> {
         "frameDiagnostic",
         "stateChanged",
     ];
-    if JOB_SCOPED.contains(&name) && !(
-        matches!(name, "leaseHeartbeat" | "leaseRenewal")
-        && value.get("job").is_none()
-        && value.get("executorInstanceId").and_then(Value::as_str).is_some_and(|id| !id.is_empty())
-    ) {
+    if JOB_SCOPED.contains(&name)
+        && !(matches!(name, "leaseHeartbeat" | "leaseRenewal")
+            && value.get("job").is_none()
+            && value
+                .get("executorInstanceId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.is_empty()))
+    {
         let job = value.get("job").unwrap_or(&Value::Null);
         let identity: JobIdentity = serde_json::from_value(job.clone())
             .map_err(|error| ProtocolError::new(ERROR_IDENTITY_INCOMPLETE, error.to_string()))?;
         if !identity.is_complete() {
             return Err(ProtocolError::new(
                 ERROR_IDENTITY_INCOMPLETE,
-                format!("{name} 缺少完整任务身份（jobId/attemptId/executorInstanceId/snapshotHash/contentIdentity/profileKey）"),
+                format!(
+                    "{name} 缺少完整任务身份（jobId/attemptId/executorInstanceId/snapshotHash/contentIdentity/profileKey）"
+                ),
             ));
         }
     }
@@ -453,7 +461,11 @@ fn validate_payload(name: &str, value: &Value) -> Result<(), ProtocolError> {
 }
 
 /// 校验一个资源/成片分块的偏移与大小；乱序或超限都在写入前拒绝。
-pub fn validate_chunk(offset: u64, data_len: usize, expected_offset: u64) -> Result<(), ProtocolError> {
+pub fn validate_chunk(
+    offset: u64,
+    data_len: usize,
+    expected_offset: u64,
+) -> Result<(), ProtocolError> {
     if data_len > MAX_RESOURCE_CHUNK_BYTES {
         return Err(ProtocolError::new(
             ERROR_CHUNK_TOO_LARGE,
@@ -533,7 +545,10 @@ mod tests {
         let json = r#"{"protocolVersion":"RECORDING_PROTOCOL_VERSION_1_ALPHA_1","sequence":"9","progress":{"job":{"jobId":"j","attemptId":"a","executorInstanceId":"e","executionEpoch":"3","snapshotHash":"s","contentIdentity":"c","profileKey":"p"},"state":"RECORDING_JOB_STATE_RENDERING","completedFrames":"4","totalFrames":"10","sampleTime":0.5}}"#;
         let envelope = parse_control_message(json).expect("valid");
         assert_eq!(envelope.sequence, 9);
-        assert_eq!(envelope.payload_value().map(|(name, _)| name), Some("progress"));
+        assert_eq!(
+            envelope.payload_value().map(|(name, _)| name),
+            Some("progress")
+        );
     }
 
     #[test]
@@ -587,9 +602,15 @@ mod tests {
 
     #[test]
     fn purpose_and_state_parsers_reject_unknown_symbols() {
-        assert_eq!(RecordingPurpose::parse("RECORDING_PURPOSE_EXPORT"), Some(RecordingPurpose::Export));
+        assert_eq!(
+            RecordingPurpose::parse("RECORDING_PURPOSE_EXPORT"),
+            Some(RecordingPurpose::Export)
+        );
         assert_eq!(RecordingPurpose::parse("EXPORT"), None);
-        assert_eq!(JobState::parse("RECORDING_JOB_STATE_COMMITTING"), Some(JobState::Committing));
+        assert_eq!(
+            JobState::parse("RECORDING_JOB_STATE_COMMITTING"),
+            Some(JobState::Committing)
+        );
         assert_eq!(JobState::parse("COMMITTING"), None);
     }
 }

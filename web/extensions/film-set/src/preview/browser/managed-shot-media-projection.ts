@@ -1,5 +1,5 @@
 import {
-  decodeFilmSetNodeData, filmSetAnimationsOf, isFilmSetNode, managedNodeRelationOf,
+  decodeFilmSetNodeData, filmSetAnimationsOf, isFilmSetNode, managedNodeRelationOf, readFilmSetGroupMarker,
   shotPreviewNodeId, type CanvasNodeData, type ServerCanvas,
 } from "@woohaa3/contracts";
 import { FILM_SET_EXTENSION_ID } from "../../state/shared/identity.js";
@@ -18,7 +18,16 @@ export function projectManagedShotMediaCanvas(canvas: ServerCanvas): ServerCanva
     if (relation?.extensionId !== FILM_SET_EXTENSION_ID
       || node.id !== shotPreviewNodeId(relation.ownerNodeId, relation.entityId)) continue;
     const owner = canvas.document.nodes.find(entry => entry.id === relation.ownerNodeId);
-    if (!owner || !isFilmSetNode(owner.type, canvas.nodeData[owner.id])) continue;
+    if (!owner) continue;
+    const group = owner.type === "group" ? readFilmSetGroupMarker(canvas.nodeData[owner.id]) : null;
+    if (group?.clips) {
+      const clip = group.clips.find(entry => entry.id === relation.entityId);
+      if (!clip || node.type !== (clip.duration && clip.duration > 0 ? "video" : "image")) continue;
+      nodeData ??= { ...canvas.nodeData };
+      nodeData[node.id] = { ...data, shotPreview: { schemaVersion: 1, filmSetNodeId: owner.id, clipId: clip.id } } as CanvasNodeData;
+      continue;
+    }
+    if (!isFilmSetNode(owner.type, canvas.nodeData[owner.id])) continue;
     const decoded = decodeFilmSetNodeData(canvas.nodeData[owner.id]);
     if (!decoded.ok) continue;
     const clip = filmSetAnimationsOf(decoded.value).clips.find(clip => clip.id === relation.entityId);

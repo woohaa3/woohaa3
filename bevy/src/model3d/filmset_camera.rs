@@ -79,7 +79,10 @@ pub(crate) struct MarkerTarget {
 ///
 /// 聚焦隔离（模型/图片/视频/模型编辑）时返回空集合，标记按既有隔离隐藏。活动动态镜头缺少
 /// 有效采样时**跳过**该标记（不保留上一姿态），非活动镜头始终使用零点封面相机。
-pub(crate) fn marker_targets(scene: &Scene, sampled: Option<&crate::motion::CameraState>) -> Vec<MarkerTarget> {
+pub(crate) fn marker_targets(
+    scene: &Scene,
+    sampled: Option<&crate::motion::CameraState>,
+) -> Vec<MarkerTarget> {
     if crate::canvas_query::shot_preview::focuses_isolate(scene) {
         return Vec::new();
     }
@@ -184,7 +187,8 @@ pub(crate) fn sync(
 
     let scale = display_scale(scene.viewport.zoom);
     for target in &targets {
-        let Some(bounds) = model_bounds_for_node(scene, models, resources, &target.owner_node_id) else {
+        let Some(bounds) = model_bounds_for_node(scene, models, resources, &target.owner_node_id)
+        else {
             // 无合法目标边界：不伪造位置，回收旧标记。
             if let Some(root) = find(&target.preview_node_id) {
                 commands.entity(root).try_despawn();
@@ -193,7 +197,8 @@ pub(crate) fn sync(
         };
         // 采样/封面相机是**场景单位**：与内容共用同一显示变换映射到画布世界
         // （change: 2026-10-23-isolate-film-set-camera-space，任务 2.2 / design D2）。
-        let display = super::shot_adapter::display_unit_for_node(scene, resources, &target.owner_node_id);
+        let display =
+            super::shot_adapter::display_unit_for_node(scene, resources, &target.owner_node_id);
         let Some((focus, position)) = sampled_camera_pose(bounds, display, &target.camera) else {
             if let Some(root) = find(&target.preview_node_id) {
                 commands.entity(root).try_despawn();
@@ -235,9 +240,10 @@ pub(crate) fn sync(
             ))
             .id();
         // 机体与开放视锥按黑白合并为四个子 mesh，所有细节复用两个不透明材质。
-        for (mesh, material) in camera_meshes
-            .into_iter()
-            .zip([dark.clone(), light.clone(), dark, light])
+        for (mesh, material) in
+            camera_meshes
+                .into_iter()
+                .zip([dark.clone(), light.clone(), dark, light])
         {
             commands.spawn((
                 ChildOf(root),
@@ -360,12 +366,18 @@ mod tests {
         assert_eq!(live.len(), 1);
         assert!(live[0].live);
         assert_eq!(live[0].camera.azimuth, 1.9, "活动镜头用采样相机，而非封面");
-        assert!(marker_targets(&scene, None).is_empty(), "无有效采样不得保留上一姿态");
+        assert!(
+            marker_targets(&scene, None).is_empty(),
+            "无有效采样不得保留上一姿态"
+        );
 
         // 目标预览节点不匹配时不进入活动态（唯一活动时钟）。
         let mut mismatched = scene.clone();
-        mismatched.animation_playback.as_mut().unwrap().target_preview_node_id =
-            Some("shot-preview:other".to_owned());
+        mismatched
+            .animation_playback
+            .as_mut()
+            .unwrap()
+            .target_preview_node_id = Some("shot-preview:other".to_owned());
         let covers = marker_targets(&mismatched, Some(&sampled(1.9)));
         assert!(!covers[0].live);
         assert_eq!(covers[0].camera.azimuth, 0.5);

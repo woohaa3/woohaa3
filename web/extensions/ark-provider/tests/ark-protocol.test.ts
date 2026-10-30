@@ -110,6 +110,11 @@ describe('Ark catalog', () => {
       'x-pptask-control': 'aspect-ratio',
       'x-hidden-when': [{ field: 'layerDecomposition', equals: true }],
     });
+    // 背景控件与网关链路共用卡片目录的投影：透明选项自带「输出必须是 PNG」的联动。
+    expect(proProps.background).toMatchObject({ default: 'opaque', 'x-pptask-control': 'background' });
+    const transparent = (proProps.background.enum as Array<{ value: string; 'x-pptask-requires'?: unknown }>)
+      .find((item) => item.value === 'transparent');
+    expect(transparent?.['x-pptask-requires']).toEqual({ outputFormat: 'png' });
 
     // 4.0 官方只给一组像素值、没有「比例 × 档位」，不提供无法兑现的比例控件。
     const fourProps = describeArkModel('doubao-seedream-4-0-250828').inputSchema?.properties as Record<string, any>;
@@ -372,6 +377,20 @@ describe('Ark 同步图片与 Seedream 约束（原 vendor sync-providers 覆盖
       background: 'transparent',
       outputFormat: 'jpeg',
     })).toThrow('requires output_format=png');
+
+    // 5.0 flash 与 pro 同一批支持透明背景（官方「图片透明通道」的模型列表）。
+    expect(buildArkSeedreamRequestBody('doubao-seedream-5-0-flash-260915', {
+      prompt: 'test',
+      image: ['https://example.com/a.png'],
+      background: 'transparent',
+      outputFormat: 'png',
+    })).toMatchObject({ background: 'transparent', output_format: 'png' });
+    // 4.5 / lite 没有这个参数，传了要报错而不是静默忽略。
+    expect(() => buildArkSeedreamRequestBody('doubao-seedream-4-5-251128', {
+      prompt: 'test',
+      image: ['https://example.com/a.png'],
+      background: 'transparent',
+    })).toThrow('does not support transparent background');
   });
 
   it('rejects unsupported Ark models', () => {

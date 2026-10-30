@@ -45,7 +45,7 @@ async function locate(page:Page,ids:string[],models:string[]=[],expectedSelectio
  const byId=new Map<string,any>(state.canvas.document.nodes.map((n:any)=>[n.id,n]));
  const hidden=hiddenByCollapsedGroups(state.canvas);
  const targets=ids.map(id=>{let n=byId.get(id);while(n&&hidden.has(n.id)&&n.parentId&&byId.has(n.parentId))n=byId.get(n.parentId);return n;});
- const bounds=targets.every(Boolean)?unionRects(targets.map(n=>groupPresentationRect(n,state.canvas.nodeData[n.id]?.groupCollapsed===true,nodeWorldRect(n,byId)))):null;
+ const bounds=targets.every(Boolean)?unionRects(targets.map(n=>groupPresentationRect(n,state.canvas.nodeData[n.id]?.groupCollapsed===true,nodeWorldRect(n,byId),state.canvas.nodeData[n.id]?.groupBadgeScale))):null;
  const expectedViewport=bounds?computeCenteredViewport({bounds,hostSize:state.size,zoom:state.viewport.zoom}):null;
  return page.evaluate(async({ids,models,expectedSelection,expectedViewport})=>{
   const w=window as any,start=performance.now(),result=w.__canvasLocate(ids),handlerMs=performance.now()-start;

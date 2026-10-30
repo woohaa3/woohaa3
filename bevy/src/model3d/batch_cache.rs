@@ -179,8 +179,8 @@ impl BatchCache {
             self.work.built(true, 0.0);
         }
         self.source_mesh_builds += built.source_mesh_builds as u64;
-        let buffer_bytes = built.mesh.get_vertex_buffer_size()
-            + built.mesh.indices().map_or(0, |i| i.len() * 4);
+        let buffer_bytes =
+            built.mesh.get_vertex_buffer_size() + built.mesh.indices().map_or(0, |i| i.len() * 4);
         let bytes = key.0.text.len() + buffer_bytes;
         self.created_buffer_bytes += buffer_bytes as u64;
         let asset = Arc::new(BatchAsset {
@@ -209,7 +209,12 @@ impl BatchCache {
         self.peak_retained_bytes = self.peak_retained_bytes.max(self.bytes());
         asset
     }
-    pub fn trim(&mut self, meshes: &mut Assets<Mesh>, live: &impl super::resource_ownership::LiveResources<AssetId<Mesh>>, empty: bool) {
+    pub fn trim(
+        &mut self,
+        meshes: &mut Assets<Mesh>,
+        live: &impl super::resource_ownership::LiveResources<AssetId<Mesh>>,
+        empty: bool,
+    ) {
         let mut bytes: usize = self.entries.values().map(|e| e.bytes).sum();
         let mut candidates: Vec<_> = self
             .entries

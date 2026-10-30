@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { DEFAULT_CANVAS_MAX_BODY_BYTES, type CanvasLogger, type CanvasReadiness, type CanvasRequestHandlerOptions } from "./types.js";
 import { etagFor, readInt, readJsonBody, sendError, sendJson } from "./http-codec.js";
+import { CanvasStorageError, canvasStorageErrorCode } from "../../storage/core/errors.js";
 import { authorizeCanvasRequest, httpStatusForCanvasAccess } from "../../access/resolve-access.js";
 // 会话关闭原因的唯一来源：api/proto 的 SessionError 枚举（generrors 生成）。
 import { SESSION_ERROR } from "../../../../../../api/gen/es/woohaa/errors/v1alpha1/wirecodes_gen.js";
@@ -249,17 +250,56 @@ export async function handleDelete(
   const raw = url.searchParams.get("expectedRevision")
     ?? (Array.isArray(header) ? header[0] : header);
   const expectedRevision = readInt(raw);
-  if (expectedRevision === undefined) {
-    sendError(res, 400, "INVALID_COMMAND_BATCH", "缺少 expectedRevision");
-    return true;
-  }
   const access = await requireCanvasAccess({ req, res, canvasId, permission: "delete", options, log });
   if (!access.ok) return true;
 
+  /**
+   * 先取本地副本：它决定两件事——是否需要 CAS 版本号，以及删除后是否需要清本地内容。
+   *
+   * 「只在远端」的画布在本机没有行（目录从远端合并出来），但用户同样要能删掉它；
+   * 这类画布没有本地 revision，强制要求版本号只会让删除入口永远失败。
+   */
+  const local = await options.service.getCanvas(canvasId).catch((error: unknown) => {
+    if (canvasStorageErrorCode(error) === "CANVAS_NOT_FOUND") return null;
+    throw error;
+  });
+  if (!local && !options.deleteRemote) {
+    throw new CanvasStorageError("CANVAS_NOT_FOUND", `画布 ${canvasId} 不存在`);
+  }
+  if (local && expectedRevision === undefined) {
+    sendError(res, 400, "INVALID_COMMAND_BATCH", "缺少 expectedRevision");
+    return true;
+  }
+  // 版本不匹配必须在远端删除之前判定：否则远端已删、本地 CAS 失败，会留下半删状态。
+  if (local && expectedRevision !== undefined && local.revision !== expectedRevision) {
+    throw new CanvasStorageError("REVISION_CONFLICT", "画布 revision 已变化", { currentRevision: local.revision });
+  }
+
+  // 远端先删：失败即中止，本机内容保持完整可重试（见 `deleteRemote` 的说明）。
+  let remoteDeleted: import("@woohaa3/contracts").CanvasUpstreamDeleteResult | null = null;
+  if (options.deleteRemote) {
+    remoteDeleted = await options.deleteRemote(canvasId);
+    if (remoteDeleted === "forbidden") {
+      sendError(res, 403, "FORBIDDEN", "只有画布作者能删除这张画布");
+      log?.({ event: "canvas-delete-remote-denied", status: 403 });
+      return true;
+    }
+    if (remoteDeleted === "unavailable") {
+      sendError(res, 503, "REPOSITORY_FAILURE", "远端暂时不可用，画布未删除");
+      log?.({ event: "canvas-delete-remote-unavailable", status: 503 });
+      return true;
+    }
+  }
+  // 没有本地副本时，远端也没删到东西（不在远端/没登录）就不能假装删成功。
+  if (!local && remoteDeleted !== "deleted" && remoteDeleted !== "not-found") {
+    throw new CanvasStorageError("CANVAS_NOT_FOUND", `画布 ${canvasId} 不存在`);
+  }
+
   // 任务 5.2：先进入 `deleting` 中间态（读者被阻断、连接将由下面断开），再删权威内容，
   // 最后保存 tombstone。中间态写入失败（除 provider 不支持/无 ACL）即中止，不留半删状态。
+  // 只在确有本地副本时走本地生命周期：远端-only 画布没有可标记的本地 ACL 行。
   const principal = access.principal;
-  if (options.lifecycle && principal) {
+  if (local && options.lifecycle && principal) {
     const begun = await options.lifecycle.beginDelete({
       canvasId,
       principal,
@@ -273,28 +313,30 @@ export async function handleDelete(
     }
   }
 
-  try {
-    await options.service.deleteCanvas(canvasId, expectedRevision, `delete:${canvasId}:${expectedRevision}`);
-  } catch (error) {
-    // 删除失败：复原 ACL 为 active（可恢复，不把画布永久留在不可读的 deleting），再上抛。
-    if (options.lifecycle && principal) {
-      await options.lifecycle
-        .finalize({ canvasId, principal, operationId: `delete-revert:${canvasId}:${expectedRevision}` })
-        .catch(() => undefined);
+  if (local) {
+    try {
+      await options.service.deleteCanvas(canvasId, expectedRevision!, `delete:${canvasId}:${expectedRevision}`);
+    } catch (error) {
+      // 删除失败：复原 ACL 为 active（可恢复，不把画布永久留在不可读的 deleting），再上抛。
+      if (options.lifecycle && principal) {
+        await options.lifecycle
+          .finalize({ canvasId, principal, operationId: `delete-revert:${canvasId}:${expectedRevision}` })
+          .catch(() => undefined);
+      }
+      throw error;
     }
-    throw error;
   }
 
   // 删除成功后断开该画布的全部实时会话，使撤权在生效后同步可见（任务 5.2）。
   // 关闭原因取自契约生成物：它会被浏览器端按同一套码判定（不可重试的终态）。
   await options.closeSessions?.(canvasId, SESSION_ERROR.canvasDeleted);
   // 保存 tombstone（best-effort；缺失不使已删画布变成可认领孤儿）。
-  if (options.lifecycle && principal) {
+  if (local && options.lifecycle && principal) {
     await options.lifecycle.tombstone({ canvasId, principal, operationId: `delete:${canvasId}:${expectedRevision}` }).catch(() => undefined);
   }
   res.statusCode = 204;
   res.end();
-  log?.({ event: "canvas-delete", status: 204 });
+  log?.({ event: "canvas-delete", status: 204, ...(remoteDeleted ? { remote: remoteDeleted } : {}) });
   return true;
 }
 

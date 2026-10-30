@@ -14,7 +14,14 @@ fn initial() -> InitialCameraState {
 }
 
 fn fixture() -> serde_json::Value {
-    serde_json::from_str(&std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/parkour-motion.json")).unwrap()).unwrap()
+    serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/parkour-motion.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap()
 }
 
 fn sample(time: f32) -> ModelDelta {

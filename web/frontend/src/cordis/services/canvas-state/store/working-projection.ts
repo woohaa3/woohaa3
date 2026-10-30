@@ -52,7 +52,7 @@ const NO_CANVAS = "画布尚未 hydrate，拒绝变更";
  * Working projection store。纯内存、可丢弃；不持有任何持久化能力。
  */
 export class WorkingProjectionStore {
-  constructor(private readonly lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver) {}
+  constructor(private readonly lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver, private readonly getContent?: () => import("@woohaa3/contracts").ContentContributionResolver | undefined) {}
   private canonical: ServerCanvas | null = null;
   private pending: PendingBatch[] = [];
   private working: ServerCanvas | null = null;
@@ -124,7 +124,7 @@ export class WorkingProjectionStore {
       return { ok: false, code: rejection.code, message: rejection.message };
     }
     // 本地原子验证：用固定 submittedAt 应用在 working 上（与重放同一语义）。
-    const applied = applyCanvasCommands(base, input.commands, { now: input.submittedAt, lifecycle: this.lifecycle });
+    const applied = applyCanvasCommands(base, input.commands, { now: input.submittedAt, lifecycle: this.lifecycle, content: this.getContent?.() });
     if (!applied.ok) {
       this.rejections = [...this.rejections, {
         commandId: input.commandId,
@@ -143,7 +143,7 @@ export class WorkingProjectionStore {
       error: null
     };
     const needsReplay = this.pending.some(entry => entry.state === "blocked")
-      || (this.canonical !== null && isCanvasCommandBatchSatisfied(this.canonical, batch.commands));
+      || (this.canonical !== null && isCanvasCommandBatchSatisfied(this.canonical, batch.commands, this.getContent?.()));
     this.pending.push(batch);
     if (needsReplay) {
       // Preserve ordered blocking and canonical-first observation semantics.
@@ -198,6 +198,16 @@ export class WorkingProjectionStore {
     this.recompute();
   }
 
+  /** Owner availability changed: replay from canonical, including batches blocked by a missing owner. */
+  refreshContent(): void {
+    for (const batch of this.pending) {
+      if (batch.state !== "blocked") continue;
+      batch.state = batch.resultRevision === null ? "pending" : "accepted";
+      batch.error = null;
+    }
+    this.recompute();
+  }
+
   /** 断线：不形成离线 outbox，仅保留当前 pending 供重连后重放。 */
   markUnknown(): void {
     // pending 保持不变；UI 通过 pendingCount 显示「等待确认」。
@@ -235,7 +245,7 @@ export class WorkingProjectionStore {
       if (
         batch.state === "pending"
         && this.canonical !== null
-        && isCanvasCommandBatchSatisfied(this.canonical, batch.commands)
+        && isCanvasCommandBatchSatisfied(this.canonical, batch.commands, this.getContent?.())
       ) {
         batch.state = "observed";
         batch.resultRevision = this.canonical.revision;
@@ -252,7 +262,7 @@ export class WorkingProjectionStore {
         survivors.push(batch);
         continue;
       }
-      const applied = applyCanvasCommands(working, batch.commands, { now: batch.submittedAt, lifecycle: this.lifecycle });
+      const applied = applyCanvasCommands(working, batch.commands, { now: batch.submittedAt, lifecycle: this.lifecycle, content: this.getContent?.() });
       if (!applied.ok) {
         // 远端变化导致无法重放：blocked，不把部分结果加入 working。
         batch.state = "blocked";

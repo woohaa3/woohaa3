@@ -1,3 +1,4 @@
+import { isFilmSetGroupNode } from "@woohaa3/contracts";
 /**
  * 模型镜头存取、目标解析与 gizmo 派生
  * （change: 2026-09-28-split-frontend-god-plugins，task 4.5；从 model-editor-plugin 拆出）。
@@ -7,7 +8,6 @@ import {
   MODEL_EDITOR_VERSION,
   clampShotDistance,
   filmSetDisplayTransform,
-  isFilmSetNode,
   mapFilmSetSceneCamera,
   shotCameraPosition,
   modelCameraAspectRatio,
@@ -45,7 +45,7 @@ export function readCameras(nodeId: string, ctx?: Context): ModelCamera[] {
   return Array.isArray(data?.modelCameras) ? (data.modelCameras as ModelCamera[]) : [];
 }
 
-export function submitCameras(ctx: Context, nodeId: string, cameras: readonly ModelCamera[]): boolean {
+export function submitCameras(ctx: Context, nodeId: string, cameras: readonly ModelCamera[]): boolean | Promise<boolean> {
   if (!ctx.canvasSession.isWritable()) return false;
   const adapter = ctx.compositeAssets.resolve(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), nodeId);
   if (adapter?.writeCameras) return adapter.writeCameras(nodeId, cameras);
@@ -91,7 +91,7 @@ export function defaultDistanceForNode(nodeId: string, ctx?: Context): number {
 export function isFilmSetNodeId(ctx: Context, nodeId: string): boolean {
   const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
   const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-  return isFilmSetNode(node?.type, canvas?.nodeData?.[nodeId]);
+  return isFilmSetGroupNode(node, canvas?.nodeData?.[nodeId]);
 }
 
 /** 当前节点的模型 AABB（供镜头 fit/span 计算）；缺失返回 null。 */

@@ -1,3 +1,5 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
+import { createEmptyWoohaa3ServerCanvas, readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { canonicalFilmSetFields, createFilmSetSnapshot, createMotionSnapshot, type FilmSetAnimationClip } from "@woohaa3/contracts";
 import { ModelEditorSession } from "@woohaa3/frontend/extension-api";
@@ -12,11 +14,16 @@ function shot(id: string, distance: number): FilmSetAnimationClip {
 
 function harness(writable = true) {
   const clips = [shot("a", 6), shot("b", 12)];
-  const data = canonicalFilmSetFields({ ...createFilmSetSnapshot({ title: "片场", model: { modelScript: 'scene.box({ id: "body" });', modelScriptVersion: "woohaa-model-js-v2" }, timeline: { duration: 0, loop: false } }),
+  const legacy = canonicalFilmSetFields({ ...createFilmSetSnapshot({ title: "片场", model: { modelScript: 'scene.box({ id: "body" });', modelScriptVersion: "woohaa-model-js-v2" }, timeline: { duration: 0, loop: false } }),
     filmSetAnimations: { schemaVersion: 3, defaultClipId: "a", clips } });
+  const original = createEmptyWoohaa3ServerCanvas("c");
+  original.document.nodes.push({ id: "film", type: "composite-asset", position: { x: 0, y: 0 } });
+  original.nodeData.film = legacy as never;
+  const canvas = migrateFilmSetFixture(original, "film");
+  const data = canvas.nodeData.film;
   let chosen: string | null = null;
   const submit = vi.fn(() => ({ ok: true })) as unknown as ReturnType<typeof vi.fn<FilmSetHostContext["canvasSession"]["submitCommands"]>>;
-  const write = sceneCameraWriter(submit, () => data);
+  const write = sceneCameraWriter(submit, () => data, id => readFilmSetAnimationProjection(canvas, id));
   const session = new ModelEditorSession({ readCameras: () => filmSetEditorCameras(data, chosen), isWritable: () => writable, submitCameras: write });
   session.enter("film");
   return { data, clips, submit, write, session, select: (id: string) => { chosen = id; session.enter("film"); } };
@@ -41,7 +48,6 @@ describe("镜头相机自动保存", () => {
     const camera = { azimuth: 0.8, elevation: 0.6, distance: 20, aspect: "16:9", focusOffset: { x: 2, y: 3, z: 4 } };
     expect(h.submit).toHaveBeenCalledTimes(1);
     expect(h.submit.mock.calls[0]![0]).toEqual([
-      { type: "nodeData.patch", nodeId: "film", value: { sceneCamera: camera } },
       expect.objectContaining({ type: "filmSet.clipPatch", nodeId: "film", clipId: "b", expectedHash: expect.any(String), op: { kind: "camera", initialCamera: camera } })
     ]);
     expect(h.clips[0]!.initialCamera.distance).toBe(6);
@@ -63,4 +69,49 @@ describe("镜头相机自动保存", () => {
     expect(h.write("film", [{ ...h.session.selectedCamera()!, id: "clip:removed" }])).toBe(false);
     expect(h.submit).not.toHaveBeenCalled();
   });
+});
+
+it("camera writes use the shared protected plan, acknowledge once and replay through undo/redo", async () => {
+  const { applyCanvasCommands, planCanvasEdit } = await import("../../../test-support/managed-shot-commands.js");
+  const h = harness();
+  const base = createEmptyWoohaa3ServerCanvas("journal");
+  base.document.nodes.push({ id: "film", type: "group", position: { x: 0, y: 0 } });
+  base.nodeData.film = h.data;
+  let canvas = base;
+  let inverse: Parameters<typeof applyCanvasCommands>[1] = [];
+  let forward: Parameters<typeof applyCanvasCommands>[1] = [];
+  let records = 0;
+  const write = sceneCameraWriter(h.submit, () => canvas.nodeData.film, id => readFilmSetAnimationProjection(canvas, id), async commands => {
+    records++;
+    const plan = planCanvasEdit(canvas, commands);
+    if (!plan.ok) return { ok: false, reason: plan.reason };
+    forward = [{ type: "edit.apply", ...plan.forward }];
+    inverse = [{ type: "edit.apply", ...plan.inverse }];
+    const result = applyCanvasCommands(canvas, forward);
+    if (!result.ok) return { ok: false, reason: result.rejection.message };
+    canvas = result.canvas;
+    return { ok: true, entry: {} as never };
+  });
+  const session = new ModelEditorSession({ readCameras: () => filmSetEditorCameras(canvas.nodeData.film, "a"), isWritable: () => true, submitCameras: write });
+  session.enter("film");
+  session.commitAzimuth(1.2);
+  await Promise.resolve();
+  expect(records).toBe(1);
+  expect(h.submit).not.toHaveBeenCalled();
+  expect(session.selectedCamera()?.azimuth).toBe(1.2);
+  const undo = applyCanvasCommands(canvas, inverse);
+  expect(undo.ok).toBe(true);
+  if (!undo.ok) return;
+  canvas = undo.canvas;
+  expect(session.selectedCamera()?.azimuth).toBe(0.3);
+  const redo = applyCanvasCommands(canvas, forward);
+  expect(redo.ok).toBe(true);
+  if (!redo.ok) return;
+  canvas = redo.canvas;
+  expect(session.selectedCamera()?.azimuth).toBe(1.2);
+});
+
+it("a removed selected shot returns no replacement camera", () => {
+  const h = harness();
+  expect(filmSetEditorCameras(h.data, "removed")).toEqual([]);
 });

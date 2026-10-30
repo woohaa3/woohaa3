@@ -20,10 +20,6 @@ import type { FrontendExtensionDefinition } from "../kernel.js";
 import type { CanvasExtensionMetadata } from "../plugins/extension-manager/contract.js";
 import type { ExtensionRuntimeEntry, ExtensionReleaseRuntime } from "../extension-runtime/runtime.js";
 import type { ExtensionRuntimeService } from "../extension-runtime/service.js";
-import {
-  descriptor as promptSnippetsDescriptor,
-  PROMPT_SNIPPETS_FRONTEND_METADATA
-} from "@woohaa3/extension-prompt-snippets/frontend";
 import { descriptor as taskActivityDescriptor, TASK_ACTIVITY_FRONTEND_METADATA } from "@woohaa3/extension-task-activity/frontend";
 
 /** 源码型 adapter 覆盖的常驻与浏览器可选业务入口。 */
@@ -31,10 +27,6 @@ const SOURCE_BROWSER_LOCAL: ReadonlyArray<{
   metadata: ExtensionFrontendMetadata;
   plugin: () => Plugin;
 }> = [
-  {
-    metadata: PROMPT_SNIPPETS_FRONTEND_METADATA,
-    plugin: () => promptSnippetsDescriptor.plugin() as Plugin
-  },
   {
     metadata: TASK_ACTIVITY_FRONTEND_METADATA,
     plugin: () => taskActivityDescriptor.plugin() as Plugin
@@ -48,7 +40,8 @@ export function sourceBrowserLocalMetadata(): CanvasExtensionMetadata[] {
     name: metadata.label,
     description: metadata.description,
     required: metadata.required,
-    configurable: metadata.configScope === "browser-local" && !metadata.required
+    configurable: metadata.configScope === "browser-local" && !metadata.required,
+    ...(metadata.defaultEnabled !== undefined ? { defaultEnabled: metadata.defaultEnabled } : {})
   }));
 }
 

@@ -60,7 +60,8 @@ export function createCanvasLocateService(options: CanvasLocateOptions): CanvasL
         return visible;
       });
       const rects: Rect[] = visibleNodes.map(node => groupPresentationRect(node,
-        canvas.nodeData[node.id]?.groupCollapsed === true, nodeWorldRect(node, byId)));
+        canvas.nodeData[node.id]?.groupCollapsed === true, nodeWorldRect(node, byId),
+        canvas.nodeData[node.id]?.groupBadgeScale));
       if (settings.fit && options.renderBounds) {
         const rendered = new Map(options.renderBounds()?.map(node => [node.id,node]));
         if (nodeIds.some(id => !rendered.has(id))) return {ok:false,reason:"场景边界尚未就绪"};

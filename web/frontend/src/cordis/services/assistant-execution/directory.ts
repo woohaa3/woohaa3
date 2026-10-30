@@ -87,11 +87,13 @@ export class AgentDirectoryStore {
   load = (force = false): Promise<void> => {
     if (!force && this.pending) return this.pending;
     if (!force && this.snapshot.ready && Date.now() - this.loadedAt < MAX_AGE_MS) return Promise.resolve();
+    // 显式刷新/配置变化会丢弃可能已移除的连接，但保留上一次模型目录直到新目录成功返回：
+    // 刷新耗时或失败时不应让已经可用的模型列表瞬间变空。
+    const previousCatalogs = this.snapshot.catalogs;
     if (force) this.service.invalidateDirectory?.();
     const generation = ++this.generation;
     const current = () => generation === this.generation;
-    // Explicit refresh/config changes discard possibly removed connections. Expiry keeps usable data.
-    if (force) this.snapshot = empty();
+    if (force) this.snapshot = { ...empty(), catalogs: previousCatalogs };
     this.publish({ loadingMessage: "正在读取助手连接…", error: "" });
     this.pending = Promise.resolve().then(async () => {
       try {
@@ -114,9 +116,18 @@ export class AgentDirectoryStore {
         if (!current()) return;
         const failures = entries.flatMap(([id, catalog]) => catalog.ok ? [] : [`${names.get(id)}：${catalog.error}`]);
         this.loadedAt = failures.length ? -Infinity : Date.now();
+        // 单次读取失败（进程冷启动、回合进行中）不应清空已经可用的目录：保留上一次成功结果，
+        // 只把原因放进 error，下一次刷新仍会尝试真实目录。
+        const catalogs = { ...previousCatalogs };
+        for (const [id, catalog] of entries) {
+          if (!catalog.ok) continue;
+          const previous = catalogs[id];
+          if (catalog.value.models.length === 0 && previous && previous.models.length > 0) continue;
+          catalogs[id] = catalog.value;
+        }
         this.publish({
           connections: result.value,
-          catalogs: Object.fromEntries(entries.flatMap(([id, catalog]) => catalog.ok ? [[id, catalog.value]] : [])),
+          catalogs,
           ready: true, error: failures.join("；")
         });
       } catch (error) {

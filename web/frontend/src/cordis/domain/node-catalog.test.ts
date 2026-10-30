@@ -11,31 +11,29 @@ import {
 } from "./node-catalog.js";
 
 describe("node-catalog", () => {
-  it("统一目录包含片场语义节点与两类自包含 3D 节点", () => {
+  it("统一目录只列宿主模板；片场由扩展模板贡献，不重复出现", () => {
     expect(NODE_TEMPLATES.map((entry) => entry.id)).toEqual([
       "text",
       "image",
       "model3d",
-      "film-set",
       "video",
       "audio",
-      "composite-asset",
+      // 片场已迁移为"组"，不再是独立模板；便签是本仓新增的纯批注卡片。
       "sticky-note"
     ]);
     expect(NODE_TEMPLATES.map((entry) => entry.label)).toEqual([
       "文本",
       "图片",
       "3D 模型",
-      "片场",
       "视频",
       "音频",
-      "导演场",
       "便签"
     ]);
     expect(findNodeTemplate("model")?.nodeType).toBe("model3d");
     expect(findNodeTemplate("model3d")?.nodeType).toBe("model3d");
-    expect(findNodeTemplate("film-set")?.nodeType).toBe("composite-asset");
-    expect(findNodeTemplate("composite-asset")?.nodeType).toBe("composite-asset");
+    // 片场由 film-set 扩展经 canvas.node-template 贡献默认镜头/片段。
+    expect(findNodeTemplate("film-set")).toBeNull();
+    expect(findNodeTemplate("composite-asset")).toBeNull();
   });
 
   it("菜单只有一份目录，不再有拉线专用的额外项", () => {
@@ -44,10 +42,8 @@ describe("node-catalog", () => {
       "text",
       "image",
       "model3d",
-      "film-set",
       "video",
       "audio",
-      "composite-asset",
       // 便签：纯批注卡片，排在最后，不与素材类节点抢位置。
       "sticky-note"
     ]);
@@ -74,8 +70,8 @@ describe("node-catalog", () => {
     // 模型节点不承载任务字段/输入映射（旧 generate 类型已下线）。
     expect(connectNodeDataFor({ id: "n1", type: "image" }, "generate")).toBeUndefined();
     // 自包含 3D 节点拉线创建只作来源说明：不注入任务 inputMapping。
-    const fromImage = connectNodeDataFor({ id: "n1", type: "image" }, "composite-asset");
-    expect((fromImage?.filmSetContent as { items?: unknown[] } | undefined)?.items).toEqual([]);
+    const fromImage = connectNodeDataFor({ id: "n1", type: "image" }, "film-set");
+    expect(fromImage?.filmSetGroup?.sceneBindings).toEqual([]);
     expect(fromImage?.inputMapping).toBeUndefined();
   });
 
@@ -93,16 +89,13 @@ describe("node-catalog", () => {
     expect(model?.modelScriptVersion).toBe("woohaa-model-js-v2");
     expect(model?.modelContentVersion).toBeTruthy();
 
-    // items-only 片场：没有顶层模型；默认空 items、无 clips（D8）。
-    const animation = defaultNodeDataForType("composite-asset");
+    const animation = defaultNodeDataForType("film-set");
+    expect(animation?.filmSetGroup?.sceneBindings).toEqual([]);
+    expect(animation?.filmSetGroup?.clips ?? []).toEqual([]);
+    expect(animation?.filmSetContent).toBeUndefined();
     expect(animation?.modelScript).toBeUndefined();
-    expect(animation?.extensionId).toBe("film-set");
-    expect(animation?.motionScript).toBeUndefined();
-    expect(animation?.timeline).toBeUndefined();
-    const content = animation?.filmSetContent as { schemaVersion: number; items: Array<{ kind: string }> };
-    expect(content.schemaVersion).toBe(4);
-    expect(content.items).toEqual([]);
-    expect((animation?.filmSetAnimations as { clips: unknown[] }).clips).toEqual([]);
+    expect(defaultNodeDataForType("group")).toBeUndefined();
+
   });
 });
 

@@ -77,7 +77,10 @@ impl Rational {
         let numer = u64::try_from(numer).ok()?;
         let denom = u64::try_from(denom).ok()?;
         let divisor = gcd(numer, denom);
-        Some(Self { numer: numer / divisor, denom: denom / divisor })
+        Some(Self {
+            numer: numer / divisor,
+            denom: denom / divisor,
+        })
     }
 }
 
@@ -283,8 +286,14 @@ mod tests {
             build_timeline(rational(1, 1), rational(0, 1)).unwrap_err(),
             TimelineError::ZeroFrameRate
         );
-        assert_eq!(TimelineError::ZeroDuration.code(), "recording-invalid-duration");
-        assert_eq!(TimelineError::ZeroFrameRate.code(), "recording-invalid-frame-rate");
+        assert_eq!(
+            TimelineError::ZeroDuration.code(),
+            "recording-invalid-duration"
+        );
+        assert_eq!(
+            TimelineError::ZeroFrameRate.code(),
+            "recording-invalid-frame-rate"
+        );
     }
 
     #[test]
@@ -325,7 +334,12 @@ mod tests {
         assert_eq!(Rational::new(1, 0), None);
         assert!(rational(1, 3).lt(rational(1, 2)));
         assert!(!rational(1, 2).lt(rational(1, 3)));
-        assert!(rational(1, 2).sub(rational(1, 3)).expect("diff").eq_value(rational(1, 6)));
+        assert!(
+            rational(1, 2)
+                .sub(rational(1, 3))
+                .expect("diff")
+                .eq_value(rational(1, 6))
+        );
         assert_eq!(rational(1, 3).sub(rational(1, 2)), None);
         assert_eq!(rational(3, 2).ceil_scale(30, 1), Some(45));
         assert_eq!(rational(3, 2).floor_scale(30, 1), Some(45));

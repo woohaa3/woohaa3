@@ -2,7 +2,7 @@
  * 扩展内容贡献（change: 2026-10-26-abstract-extension-content-fields）。
  *
  * 注册表实例就是页面或站点作用域，不使用模块级单例。内核函数只接收只读 resolver；
- * 本阶段不按 owner 分派，缺省空解析器不改变既有结果。
+ * 已接入的命令与 composite nodeData 按 owner 分派；未提供 resolver 的作用域保留阶段性兼容行为。
  */
 import type { ServerCanvas } from "./domain/index.js";
 
@@ -44,6 +44,8 @@ export type ContentCommandCodec = {
 };
 
 export type ContentEditPlanner = {
+  /** Expand an opaque edit into bounded, non-recursive protected structure operations. */
+  expand?(input: { readonly nodeId: string; readonly op: unknown }): unknown;
   plan(before: ServerCanvas, after: ServerCanvas):
     | { ok: true; forward: unknown; inverse: unknown; preconditions: readonly unknown[] }
     | { ok: false; code: string; reason: string };
@@ -106,7 +108,7 @@ export const EMPTY_CONTENT_RESOLVER: ContentContributionResolver = {
   implementations: () => []
 };
 
-/** 基座阶段只接收解析器。后续阶段才按 owner 分派。 */
+/** 保留既有可选 context 接缝；各纯函数在支持的路径显式消费 resolver。 */
 export function observeContentResolver(resolver: ContentContributionResolver | undefined): void {
   void resolver;
 }

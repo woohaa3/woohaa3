@@ -12,10 +12,9 @@ import { decodeModelCameras } from "../model-cameras.js";
 import { decodeImageEditDocument } from "../image-edit.js";
 import { decodeFilmSetNodeData, decodeModel3DNodeData, scriptModel3DNodeData, type FilmSetNodeData } from "../canvas-node-model.js";
 import { filmSetObjectOwnershipOf } from "../film-set-object-container.js";
-import { CREATURE_VIDEO_ASSETS_EXTENSION_ID, GAME_FURNACE_EXTENSION_ID, isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "../domain/core/composite-asset-identity.js";
+import { CREATURE_VIDEO_ASSETS_EXTENSION_ID, isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "../domain/core/composite-asset-identity.js";
 import { decodeModelContentVersion, GLB_MODEL_SOURCE_KIND, isGlbModelNodeData, modelSourceHash, normalizeGlbModelReference, normalizeModelDefinition } from "../model-definition.js";
 import { animationSnapshotHash } from "../animation-snapshot.js";
-import { decodeFilmSetLocalTransform } from "../film-set-content.js";
 import { readFilmSetContent } from "../film-set-content.js";
 import { isFilmSetModelItem } from "../film-set-content.js";
 import { decodeGroupAppearance, readGroupAppearanceForNode } from "../group-appearance.js";
@@ -120,7 +119,7 @@ export function validateGroupAppearancePatch(
  *
  * 复合资产节点必须按 `(type, extensionId)` **完整判别**：
  * - 片场业务（`extensionId="film-set"`）按 items-only 片场契约严格校验；
- * - 已知其它业务（如炉体 `extensionId="game-furnace"`）保留其自身合法节点级模型定义；
+ * - 生物视频资产（`extensionId="creature-video-assets"`）只保存内容引用；
  * - 缺失/未知 `extensionId` 的复合资产**不授予任何业务写权限**：静态展示不等于授权，一律拒绝。
  *
  * 普通 `model3d` 必须含完整本地模型定义。结构非法时整批命令以稳定错误失败，绝不写入部分定义。
@@ -159,18 +158,7 @@ export function validateSelfContained3DNodePatch(
       && ref.schemaVersion === 1 && typeof ref.instanceId === "string"
       && /^[A-Za-z0-9_-]{8,128}$/.test(ref.instanceId)
       && !mergedData.modelScript && !mergedData.modelScriptLanguage && !mergedData.modelScriptVersion) return null;
-    // 已知其它业务（炉体）保留其真实节点级 V2 模型定义；片场 items-only 不适用于此。
-    if (extensionId === GAME_FURNACE_EXTENSION_ID) {
-      const root = decodeFilmSetLocalTransform(mergedData.scenePlacement);
-      if (!root.ok) return reject("invalid-self-contained-node", root.reason);
-      const decoded = decodeModel3DNodeData(mergedData);
-      if (!decoded.ok) return reject("invalid-self-contained-node", decoded.reason);
-      if (decoded.value.source === "glb") {
-        return reject("invalid-self-contained-node", "文件模型只属于普通 model3d 节点");
-      }
-      return null;
-    }
-    return reject("invalid-self-contained-node", `复合资产业务 ${extensionId} 不支持节点级模型写入`);
+    return reject("invalid-self-contained-node", `复合资产业务 ${extensionId} 不支持节点级写入`);
   }
   if (node.type === "model3d") {
     const decoded = decodeModel3DNodeData(mergedData);

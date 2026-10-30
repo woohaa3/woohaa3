@@ -213,7 +213,9 @@ pub(super) fn assemble(
     // 1) 渲染器生命周期校验：场景里已不存在的实例，其需求与迟到结果一律作废。
     let alive: HashSet<&str> = scene.nodes.iter().map(|node| node.id.as_str()).collect();
     models.preparation.retain(|node| alive.contains(node));
-    models.staging.retain(|node, _| alive.contains(node.as_str()));
+    models
+        .staging
+        .retain(|node, _| alive.contains(node.as_str()));
 
     // 2) 非阻塞 poll；把完成结果按当前需求领取为 staging。
     //    共享缓存命中（同内容同档位的 mesh/material/批次已在库）在本帧结束时统一计账：
@@ -318,7 +320,11 @@ pub(super) fn assemble(
         }
     }
     // 回收无人需要的完成产物（额度随真实释放下降）。
-    let assembling: HashSet<PrepareKey> = models.staging.values().map(|staging| staging.key.clone()).collect();
+    let assembling: HashSet<PrepareKey> = models
+        .staging
+        .values()
+        .map(|staging| staging.key.clone())
+        .collect();
     models.preparation.gc(|key| assembling.contains(key));
 
     // 5) 旧根退役与 staging 取消复用同一预算，避免另一处整场销毁尖刺。
@@ -329,10 +335,8 @@ pub(super) fn assemble(
         .preparation
         .work
         .frame_units(work.units, work.mesh_bytes as u64, elapsed);
-    models.preparation.work.cache_hits += models
-        .shared
-        .cache_hits()
-        .saturating_sub(cache_hits_before);
+    models.preparation.work.cache_hits +=
+        models.shared.cache_hits().saturating_sub(cache_hits_before);
     models.preparation.work.published += work.published;
     models.preparation.work.cancelled += work.cancelled;
     models.preparation.work.oversize += work.oversize;
@@ -349,7 +353,11 @@ pub(super) fn assemble(
 fn collect_ready(models: &mut ModelVisuals) {
     // 需求按优先级、再加节点 id 稳定排序，保证同级公平且可复现。
     let mut demands: Vec<_> = models.preparation.demands().cloned().collect();
-    demands.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.node.cmp(&b.node)));
+    demands.sort_by(|a, b| {
+        b.priority
+            .cmp(&a.priority)
+            .then_with(|| a.node.cmp(&b.node))
+    });
     for demand in demands {
         if models.staging.contains_key(&demand.node) {
             continue;
@@ -452,11 +460,7 @@ fn apply_step(
 
 impl Staging {
     /// 最新已接受的根 placement（不携带排队时的旧值）。
-    fn root_transform(
-        &self,
-        scene: &Scene,
-        resources: &ModelAssets,
-    ) -> Option<(Vec3, Quat, f32)> {
+    fn root_transform(&self, scene: &Scene, resources: &ModelAssets) -> Option<(Vec3, Quat, f32)> {
         let node = scene.nodes.iter().find(|node| node.id == self.node)?;
         let resource = node
             .model
@@ -513,13 +517,11 @@ fn spawn_part(
     let material = material_handle(world, models, &staging.ready.prepared, &part.material_key)?;
     let (handle, shared_geometry) = {
         let mut meshes = world.resource_mut::<Assets<Mesh>>();
-        models.shared.adopt_mesh(
-            &mut meshes,
-            &part.base,
-            geometry,
-            part.effective,
-            |_| Some(mesh.clone()),
-        )?
+        models
+            .shared
+            .adopt_mesh(&mut meshes, &part.base, geometry, part.effective, |_| {
+                Some(mesh.clone())
+            })?
     };
     let mut entity = world.spawn((
         Mesh3d(handle.clone()),
@@ -566,10 +568,12 @@ fn record_part(staging: &mut Staging, part: &PreparedPart, entity: Entity) {
 }
 
 /// 记录部件与其有效材质；对象根动作需要按部件查材质来克隆实例。
-fn record_part_material(staging: &mut Staging, part: &PreparedPart, material: Handle<StandardMaterial>) {
-    staging
-        .part_materials
-        .insert(part.id.clone(), material);
+fn record_part_material(
+    staging: &mut Staging,
+    part: &PreparedPart,
+    material: Handle<StandardMaterial>,
+) {
+    staging.part_materials.insert(part.id.clone(), material);
 }
 
 /// 一条批次：登记共享批次资产，创建实体并连接父级；映射逐部件写入。
@@ -590,12 +594,12 @@ fn spawn_batch(
     let asset = {
         // 后台构建的 CPU 网格只登记一次；同 key 的第二实例直接命中共享缓存。
         let mut meshes = world.resource_mut::<Assets<Mesh>>();
-        models.shared.batches.adopt_with(
-            &mut meshes,
-            &batch.source,
-            batch.quality,
-            || batch.take_built(),
-        )?
+        models
+            .shared
+            .batches
+            .adopt_with(&mut meshes, &batch.source, batch.quality, || {
+                batch.take_built()
+            })?
     };
     let entity = world
         .spawn((
@@ -658,16 +662,18 @@ fn publish(
     let prepared = staging.ready.prepared.clone();
     let node = scene.nodes.iter().find(|node| node.id == staging.node);
     // 最新已接受 placement / 姿态：发布时统一应用，不使用排队时的旧值。
-    let (translation, rotation, unit) = staging
-        .root_transform(scene, resources)
-        .unwrap_or((Vec3::ZERO, Quat::IDENTITY, 1.0));
+    let (translation, rotation, unit) =
+        staging
+            .root_transform(scene, resources)
+            .unwrap_or((Vec3::ZERO, Quat::IDENTITY, 1.0));
     // 发布瞬间就带上当前聚焦可见性：否则新根会以 `Inherited` 显示一帧，
     // 在聚焦其他节点时形成闪烁（下一帧 `set_visible_focus` 才纠正）。
     let visible = scene
         .model_focus
         .as_ref()
         .is_none_or(|focus| focus.node_id == staging.node)
-        || (crate::canvas_query::focus_context::contains(&scene, &staging.node) && node.is_some_and(|n| n.model_preview.is_some()));
+        || (crate::canvas_query::focus_context::contains(&scene, &staging.node)
+            && node.is_some_and(|n| n.model_preview.is_some()));
     world.entity_mut(root).insert((
         Transform {
             translation,
@@ -708,9 +714,9 @@ fn publish(
         .map_or(0, |root| root.representation_generation.wrapping_add(1));
     if let Some(mut previous) = previous {
         // 替换表示时旧根的透明度实例也要从材质资产中回收（D2）。
-        previous.opacity.release_instances(
-            &mut world.resource_mut::<Assets<StandardMaterial>>(),
-        );
+        previous
+            .opacity
+            .release_instances(&mut world.resource_mut::<Assets<StandardMaterial>>());
         for entity in &previous.entities {
             world.entity_mut(*entity).insert(Visibility::Hidden);
         }
@@ -724,6 +730,7 @@ fn publish(
         .unwrap_or_else(|| prepared.resource.clone());
     let mesh_handles = std::mem::take(&mut staging.mesh_handles);
     let mut root_state = ModelRoot {
+        group_children: Default::default(),
         entities: std::mem::take(&mut staging.spawned),
         content_signature: prepared.content_signature.clone(),
         texture_revision: crate::model3d::model_textures::revision(),

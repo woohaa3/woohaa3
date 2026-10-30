@@ -436,6 +436,10 @@ export function installInteractionController(options: InteractionControllerOptio
     videoSessions: options.videoSessions,
     // 连续导航期间保持播放资格关闭；结束后按最终视口查询一次固定指针。
     modalActive: () => modalActive() || state.viewportPreview !== null || hoverNodeStore.hasPlaybackOwner() || options.getRuntime()?.acceptsPlayback?.() === false,
+    // 普通视频卡片的 hover 预览不受 capture playback owner 影响：截图/录制只冻结被捕捉内容
+    // （拍摄预览候选与场景动画由上面的 `modalActive` 复合门禁撤销），无关卡片的解码预览
+    // 不参与被捕捉画面。否则后台镜头参考录制重试期间视频 hover 一直不播放。
+    videoPlaybackBlocked: () => modalActive() || state.viewportPreview !== null || options.getRuntime()?.acceptsPlayback?.() === false,
     schedule,
     // 卡片空白但落在模型网格（卡片下方）时命中模型节点，驱动模型 hover 播放（play-model-animations-on-hover）。
     modelPick: (point, surface) => queries.queryModelPick(point, surface)

@@ -20,10 +20,7 @@ pub(super) fn note_accepted_scene(scene: &Scene) {
 }
 
 /// 接受一次聚焦观察镜头增量。拒绝时不改变 snapshot / generation / base。
-pub(crate) fn accept_observer(
-    base: u32,
-    node_id: &str,
-) -> Result<u32, &'static str> {
+pub(crate) fn accept_observer(base: u32, node_id: &str) -> Result<u32, &'static str> {
     let current_base = BASE_GENERATION.with(std::cell::Cell::get);
     if current_base == 0 {
         return Err("unavailable");

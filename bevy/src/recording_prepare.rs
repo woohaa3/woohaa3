@@ -46,11 +46,12 @@ pub fn prepare_render_plan(
     height: u32,
     background: &str,
 ) -> Result<RecordingRenderPlan, ProbeFailure> {
-    let scene: SceneDocument = serde_json::from_str(scene_ir_json).map_err(|error| ProbeFailure {
-        stage: "RECORDING_ERROR_STAGE_COMPILE",
-        code: "recording-scene-ir-invalid",
-        message: error.to_string(),
-    })?;
+    let scene: SceneDocument =
+        serde_json::from_str(scene_ir_json).map_err(|error| ProbeFailure {
+            stage: "RECORDING_ERROR_STAGE_COMPILE",
+            code: "recording-scene-ir-invalid",
+            message: error.to_string(),
+        })?;
     if scene.scene_version != SCENE_SCHEMA {
         return Err(ProbeFailure {
             stage: "RECORDING_ERROR_STAGE_COMPILE",
@@ -65,11 +66,12 @@ pub fn prepare_render_plan(
             message: "场景没有任何图元".into(),
         });
     }
-    let motion: MotionRequest = serde_json::from_str(motion_json).map_err(|error| ProbeFailure {
-        stage: "RECORDING_ERROR_STAGE_COMPILE",
-        code: "recording-motion-invalid",
-        message: error.to_string(),
-    })?;
+    let motion: MotionRequest =
+        serde_json::from_str(motion_json).map_err(|error| ProbeFailure {
+            stage: "RECORDING_ERROR_STAGE_COMPILE",
+            code: "recording-motion-invalid",
+            message: error.to_string(),
+        })?;
     Ok(RecordingRenderPlan {
         scene_version: scene.scene_version,
         signature: scene.signature,
@@ -174,7 +176,8 @@ mod tests {
     #[test]
     fn rejects_unknown_schema_and_empty_scene() {
         let bad_schema = GOOD_SCENE.replace("woohaa-model-scene-ir-v2", "woohaa-model-scene-ir-v1");
-        let error = prepare_render_plan(&bad_schema, GOOD_MOTION, 320, 180, "#000").expect_err("schema");
+        let error =
+            prepare_render_plan(&bad_schema, GOOD_MOTION, 320, 180, "#000").expect_err("schema");
         assert_eq!(error.code, "recording-scene-ir-unsupported");
 
         let empty = GOOD_SCENE.replace(

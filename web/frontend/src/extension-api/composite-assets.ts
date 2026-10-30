@@ -1,6 +1,6 @@
 /** Trusted, scope-owned composite asset adapters. Business identity is never inferred from content. */
-import type { CanvasNodeData, FilmSetLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetScopeShape, CompositeChildRelation, CompositeContainerPanel, CanvasRenderScene, ManagedNodeLifecycleAdapter } from "@woohaa3/contracts";
-import { ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
+import type { CanvasNodeData, FilmSetLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetOverviewCache, CompositeAssetScopeShape, CompositeChildRelation, CompositeContainerPanel, CanvasRenderScene, ManagedNodeLifecycleAdapter } from "@woohaa3/contracts";
+import { ContentContributionRegistry, ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
 export type CompositeAssetMediaSource = { planeId: string; nodeId: string; assetId: string; kind: "image" | "video"; playback?: ModelMediaTimeMap; sourceIdentity: string };
 /** A valid content projection may have no 3D resource; null prepare means unavailable. */
 export type CompositeAssetProjection = { resource?: PreparedModelResource; composition?: BevyCompositeAssetCompositionInfo; diagnostic?: string };
@@ -14,12 +14,15 @@ export type CompositeChildPresentation = CompositeChildRelation & {
   closable?: boolean;
 };
 export type CompositeAssetAdapter = {
+  /** Workspace chrome dimensions, evaluated by the shared layout owner. */
+  focusLayout?(nodeId: string): import("../cordis/focus/layout.js").FocusLayoutConfig;
   emptyPlaceholder?: import("@woohaa3/contracts").CompositeAssetEmptyPlaceholder;
   showEmptyPlaceholder?(nodeId: string, data: CanvasNodeData): boolean;
   extensionId: string;
   owner: string;
+  matchesNode?(node: ServerCanvas["document"]["nodes"][number], data: CanvasNodeData): boolean;
   /**
-   * 业务类型显示名（如「片场」「游戏炼丹炉」）。
+   * 业务类型显示名（如「片场」或第三方业务类型）。
    *
    * 由可信 adapter 按严格身份声明，宿主把结果作为复合资产节点的 `typeLabel` 下发，供渲染层在
    * 画布浮动名称面板中标注聚合节点的**业务类型**（change:
@@ -46,10 +49,13 @@ export type CompositeAssetAdapter = {
    * （change: 2026-10-15-add-film-set-overview-lod，design D1）。
    *
    * 可信 adapter 按严格身份声明 `overview-primitives-v1`，宿主把结果投影为复合资产节点的
-   * `compositeAsset.geometryQuality`，运行时据此按实际世界投影尺寸选择整场图元细分。缺省即
-   * World 用途保持 High；未知值在 register 边界拒绝，不从 nodeData 标题/items/动画或历史类型推断。
+   * `compositeAsset.geometryQuality`，或 group 徽标场景的 `group.geometryQuality`，运行时据此按
+   * 实际世界投影尺寸选择整场图元细分。缺省即 World 用途保持 High；未知值在 register 边界拒绝，
+   * 不从 nodeData 标题/items/动画或历史类型推断。
    */
   geometryQuality?: CompositeAssetGeometryQuality;
+  /** Optional transparent whole-scene overview cache capability. */
+  overviewCache?: CompositeAssetOverviewCache;
   /** Hosts pass nodeId; optional for existing callers that only have node data. */
   executionKey(data: CanvasNodeData, nodeId?: string): string;
   prepare(nodeId: string, data: CanvasNodeData): CompositeAssetProjection | null;
@@ -63,18 +69,29 @@ export type CompositeAssetAdapter = {
   objectPreview?(nodeId: string): { itemId: string; transform: FilmSetLocalTransform } | null;
   gizmo?(nodeId: string): BevyModelEditor | null;
   readCameras?(nodeId: string, data: CanvasNodeData): ModelCamera[];
-  writeCameras?(nodeId: string, cameras: readonly ModelCamera[]): boolean;
+  writeCameras?(nodeId: string, cameras: readonly ModelCamera[]): boolean | Promise<boolean>;
   captureOrigin?(nodeId: string, cameraId: string): import("./model-workspace.js").ModelCaptureOrigin | null;
   awaitCaptureReady?(nodeId: string): Promise<boolean>;
   /** Business owner decides whether explicit frame capture is available for this target. */
+  /** Freeze extension content for one capture; caller releases after the final readback. */
+  beginCapture?(nodeId: string): () => void;
   captureEnabled?(nodeId: string, cameraId: string): boolean;
   /** Optional pure lifecycle planner for extension-owned managed media/entities. */
   managedLifecycle?: ManagedNodeLifecycleAdapter;
+  content?: import("@woohaa3/contracts").ContentContribution;
   blocksFocusInput?(): boolean;
   keydown?(event: KeyboardEvent, focusedNodeId: string | null): boolean;
 };
 export class CompositeAssetRegistry {
   readonly managedLifecycles = new ManagedNodeLifecycleRegistry();
+  private content = new ContentContributionRegistry();
+  private contentEnabled = false;
+  private contentListeners = new Set<() => void>();
+  subscribeContent = (listener: () => void): (() => void) => { this.contentListeners.add(listener); return () => { this.contentListeners.delete(listener); }; };
+  private notifyContent(): void { for (const listener of this.contentListeners) listener(); }
+  private adapterReleases = new Set<() => void>();
+  /** Late activation and release stay visible to sessions created before adapters load. */
+  getContent = (): import("@woohaa3/contracts").ContentContributionResolver | undefined => this.contentEnabled ? this.content : undefined;
   private revision = 0;
   getRevision = (): number => this.revision;
   private generations = new Map<string, number>();
@@ -98,12 +115,23 @@ export class CompositeAssetRegistry {
     if (adapter.geometryQuality !== undefined && adapter.geometryQuality !== "overview-primitives-v1") {
       throw new Error(`复合资产几何质量策略未知：${String(adapter.geometryQuality)}`);
     }
+    if (adapter.overviewCache !== undefined && adapter.overviewCache !== "transparent-world-v1") {
+      throw new Error(`复合资产总览缓存能力未知：${String(adapter.overviewCache)}`);
+    }
     if (adapter.emptyPlaceholder !== undefined && adapter.emptyPlaceholder !== "brand-plinth-v1") throw new Error(`未知复合资产占位：${String(adapter.emptyPlaceholder)}`);
     if (adapter.managedLifecycle && adapter.managedLifecycle.extensionId !== adapter.extensionId) throw Error("托管生命周期与注册扩展身份不一致");
-    const releaseLifecycle = adapter.managedLifecycle ? this.managedLifecycles.register(adapter.managedLifecycle) : () => {};
+    if (adapter.content && adapter.content.extensionId !== adapter.extensionId) throw Error("content-registration-owner-mismatch");
+    const releaseContent = adapter.content ? this.content.register(adapter.content) : () => {};
+    let releaseLifecycle: () => void;
+    try { releaseLifecycle = adapter.managedLifecycle ? this.managedLifecycles.register(adapter.managedLifecycle) : () => {}; }
+    catch (error) { releaseContent(); throw error; }
+    if (adapter.content) this.contentEnabled = true;
     this.adapters.set(adapter.extensionId, adapter); this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate();
+    if (adapter.content) this.notifyContent();
     let alive = true;
-    return () => { if (!alive) return; alive = false; releaseLifecycle(); if (this.adapters.get(adapter.extensionId) === adapter) { this.adapters.delete(adapter.extensionId); for (const [id, owner] of this.projectionOwners) if (owner === adapter.extensionId) { this.projections.delete(id); this.projectionOwners.delete(id); } for (const [id, result] of this.scopeResults) if (result.owner === adapter.extensionId) this.scopeResults.delete(id); this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate(); } };
+    const release = () => { if (!alive) return; alive = false; releaseContent(); this.adapterReleases.delete(release); releaseLifecycle(); if (this.adapters.get(adapter.extensionId) === adapter) { this.adapters.delete(adapter.extensionId); for (const [id, owner] of this.projectionOwners) if (owner === adapter.extensionId) { this.projections.delete(id); this.projectionOwners.delete(id); } for (const [id, result] of this.scopeResults) if (result.owner === adapter.extensionId) this.scopeResults.delete(id); this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate(); if (adapter.content) this.notifyContent(); } };
+    this.adapterReleases.add(release);
+    return release;
   }
   resolve(canvas: ServerCanvas | null, nodeId: string): CompositeAssetAdapter | null {
     const node = canvas?.document.nodes.find(node => node.id === nodeId);
@@ -112,7 +140,9 @@ export class CompositeAssetRegistry {
   /** Resolve an actual node from this canvas without searching the document again. */
   resolveNode(canvas: ServerCanvas, node: ServerCanvas["document"]["nodes"][number]): CompositeAssetAdapter | null {
     const identity = canvas.nodeData[node.id]?.extensionId;
-    return node.type === "composite-asset" && typeof identity === "string" ? this.adapters.get(identity) ?? null : null;
+    for (const adapter of this.adapters.values()) if (adapter.matchesNode?.(node, canvas.nodeData[node.id])) return adapter;
+    const adapter = node.type === "composite-asset" && typeof identity === "string" ? this.adapters.get(identity) : null;
+    return adapter && !adapter.matchesNode ? adapter : null;
   }
   setProjection(nodeId: string, projection: CompositeAssetProjection | null, owner?: string): void {
     if (projection) { this.projections.set(nodeId, projection); if (owner) this.projectionOwners.set(nodeId, owner); }
@@ -186,8 +216,17 @@ export class CompositeAssetRegistry {
     }
     return qualities;
   }
+  overviewCaches(canvas: ServerCanvas | null): ReadonlyMap<string, CompositeAssetOverviewCache> {
+    const capabilities = new Map<string, CompositeAssetOverviewCache>();
+    if (!canvas) return capabilities;
+    for (const node of canvas.document.nodes) {
+      const adapter = this.resolveNode(canvas, node);
+      if (adapter?.overviewCache) capabilities.set(node.id, adapter.overviewCache);
+    }
+    return capabilities;
+  }
   /**
-   * 按严格身份解析每个复合资产节点的**业务类型显示名**（如「片场」「游戏炼丹炉」）。
+   * 按严格身份解析每个复合资产节点的**业务类型显示名**（如「片场」或第三方业务类型）。
    *
    * 由可信 adapter 的 `label` 声明；宿主把它作为该节点的 `typeLabel` 注入 scene mapper，让画布
    * 浮动名称面板标注聚合节点的业务类型，而不是通用「复合资产」
@@ -277,11 +316,17 @@ export class CompositeAssetRegistry {
         ...(Object.keys(targetItemIds).length ? { targetItemIds } : {}) };
     }
     // Managed entities share the same ownership links as containers. Their media/shot renderer stays intact.
-    scene.shotPreviewLinks = scene.shotPreviewLinks?.filter(link => !children.has(link.previewNodeId)) ?? [];
+    //
+    // 只有**片场复合资产**（composite-asset）内部的预览卡片才不需要镜头归属线：它们与其它子对象
+    // 共用同一条 `ownershipLinks`，位置在复合场景里自洽。片场 group 是另一回事：预览卡片虽然
+    // 由 group 托管（出现在 `children()` 里），但它浮在画布上、与徽标相隔很远，归属线是唯一
+    // 的关联呈现——按子节点一律过滤会把 group 片场的归属线全部抹掉。
+    const compositeOwnerIds = new Set([...nodes.values()].filter(node => node.compositeAsset).map(node => node.id));
+    scene.shotPreviewLinks = scene.shotPreviewLinks?.filter(link => !(children.has(link.previewNodeId) && compositeOwnerIds.has(link.ownerNodeId))) ?? [];
   }
   blocksFocusInput(): boolean { return [...this.adapters.values()].some(adapter => adapter.blocksFocusInput?.()); }
   keydown(event: KeyboardEvent, canvas: ServerCanvas | null, nodeId: string | null): boolean { return nodeId ? this.resolve(canvas, nodeId)?.keydown?.(event, nodeId) ?? false : false; }
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   invalidate = (): void => { this.revision += 1; for (const listener of this.listeners) listener(); };
-  clear(): void { this.managedLifecycles.clear(); this.adapters.clear(); this.projections.clear(); this.projectionOwners.clear(); this.scopeResults.clear(); this.invalidate(); }
+  clear(): void { for (const release of [...this.adapterReleases]) release(); this.adapterReleases.clear(); this.content = new ContentContributionRegistry(); this.managedLifecycles.clear(); this.adapters.clear(); this.projections.clear(); this.projectionOwners.clear(); this.scopeResults.clear(); this.invalidate(); }
 }

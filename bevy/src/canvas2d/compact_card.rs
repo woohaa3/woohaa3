@@ -55,7 +55,7 @@ pub(super) fn draw(
     let glyph_advance = if node.type_label.is_empty() {
         0.0
     } else {
-        geometry.kind_glyph(
+        geometry.icon(
             &node.kind,
             Vec2::new(
                 text_left + 6.5 * glyph_scale,
@@ -63,7 +63,6 @@ pub(super) fn draw(
             ),
             z + 0.005,
             theme.token_u32("canvasCloseIcon"),
-            glyph_scale,
         );
         13.0 * glyph_scale + 4.0
     };

@@ -140,6 +140,21 @@ describe("resolveNodeVideoSource", () => {
     expect(resolveNodeVideoSource(canvas, "n1")).toEqual({ url: `/api/media/${STORAGE}?canvas=c1`, posterUrl: null });
   });
 
+  it("存量资产只登记 storageKey 时按存储身份派生同源地址（镜头卡片首帧不再缺来源）", () => {
+    const canvas = videoCanvas([{ id: "n1", outputAssetId: "asset-1" }]);
+    for (const asset of canvas.assets) delete (asset as { url?: string }).url;
+    expect(resolveNodeVideoSource(canvas, "n1")).toEqual({ url: `/api/media/${STORAGE}?canvas=c1`, posterUrl: null });
+  });
+
+  it("存储身份含路径回溯时不派生地址", () => {
+    const canvas = videoCanvas([{ id: "n1", outputAssetId: "asset-1" }]);
+    for (const asset of canvas.assets) {
+      delete (asset as { url?: string }).url;
+      asset.metadata = { ...asset.metadata, storageKey: "../../etc/passwd" };
+    }
+    expect(resolveNodeVideoSource(canvas, "n1")).toBeNull();
+  });
+
   it("未 ready / 非视频 / 缺 output / 非受控 URL 时拒绝", () => {
     expect(resolveNodeVideoSource(videoCanvas([{ id: "n1", outputAssetId: "asset-1" }], { status: "generating" }), "n1")).toBeNull();
     expect(resolveNodeVideoSource(videoCanvas([{ id: "n1", outputAssetId: "asset-1" }], { mediaKind: "image" }), "n1")).toBeNull();
@@ -478,6 +493,32 @@ describe("createVideoFrameSessions", () => {
     clock += VIDEO_FRAME_MIN_UPLOAD_INTERVAL_MS + 1;
     video.emitFrame();
     expect(uploads.length).toBe(first + 1);
+    sessions.dispose();
+  });
+
+  it("实时帧以独占纹理上传（不带内容身份），避免按内容共享时从第二帧起被跳过", () => {
+    // 真实缺陷：实时帧曾携带 `sourceUrl` 作为稳定内容身份，Rust 侧按「内容 + 尺寸」共享纹理，
+    // 第二帧起被判定为已驻留内容而跳过像素写入，画布视频停在首帧（hover 看起来不播放）。
+    const calls: Array<{ id: string; sourceKey: unknown }> = [];
+    const video = fakeVideo();
+    const sessions = createVideoFrameSessions({
+      runtime: {
+        setTexture: (id: string, _width: number, _height: number, _rgba: Uint8Array, source?: { sourceKey?: string }) => {
+          calls.push({ id, sourceKey: source?.sourceKey ?? null });
+        }
+      } as unknown as BevyRuntime,
+      getCanvas: () => videoCanvas([{ id: "n1", outputAssetId: "asset-1" }]),
+      createVideo: () => video,
+      createCanvas: fakeCanvas,
+      minUploadIntervalMs: 0
+    });
+    sessions.sync();
+    sessions.setHovered("n1");
+    video.emitLoaded();
+    video.emitFrame();
+    video.emitFrame();
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls.every(call => call.sourceKey === null)).toBe(true);
     sessions.dispose();
   });
 

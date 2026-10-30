@@ -119,7 +119,7 @@ export default function CanvasCreationAgent(props: {
         <div className="assistant-creation-recovery">
           {draft.pending ? <button type="button" disabled={draft.busy} onClick={() => void submit(true)}>查询原请求</button> : null}
           {draft.result ? <button type="button" onClick={() => locate.locateNodes([draft.result!.rootGroupId])}>定位创作组</button> : null}
-          <span>Ctrl / ⌘ + Enter 创建</span>
+          <span>Enter 创建，Shift+Enter 换行</span>
         </div>
       </div>;
 }

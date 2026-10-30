@@ -24,6 +24,8 @@ import {
   type PresetCard
 } from "./index.js";
 import { canvasModelCapabilities } from "../model-capabilities.js";
+import { seedreamSizePresetFor } from "./cards/image/ark/seedream-cards.js";
+import { seedreamSupportsTransparentBackground } from "./cards/image/ark/seedream-spec.js";
 import { videoFamilyFor, videoPixelSize, videoRequestFields } from "../video-parameters.js";
 import type { CanvasTaskCatalogModel } from "../dto.js";
 
@@ -90,14 +92,18 @@ describe("参数最大集合", () => {
 });
 
 describe("家族优先于类型预设", () => {
-  it("Seedream 命中家族：没有 quality / background，只有 size 语义的比例与分辨率", () => {
+  it("Seedream 命中家族：比例 / 分辨率 / 透明背景来自家族，没有 quality 与 n", () => {
     const { model, dropped } = composePresetCard(cardById("seedream-5.0-pro"));
     const properties = propertiesOf(model);
     expect(properties).toHaveProperty("aspectRatio");
     expect(properties).toHaveProperty("resolution");
     expect(properties).not.toHaveProperty("quality");
     expect(dropped).toContain("quality");
-    expect(dropped).toContain("background");
+    expect(dropped).toContain("n");
+    // 透明背景的值域由家族给出：opaque（默认）/ transparent，没有类型预设的 auto。
+    const background = properties.background as { default?: string; enum: Array<{ value: string }> };
+    expect(background.default).toBe("opaque");
+    expect(background.enum.map((entry) => entry.value)).toEqual(["opaque", "transparent"]);
   });
 
   it("GPT Image 命中家族：质量档位来自家族，而不是类型预设的 4 档", () => {
@@ -233,6 +239,18 @@ describe("卡片表", () => {
     expect(ids.some((id) => id.includes("gpt-image"))).toBe(true);
     expect(ids.some((id) => id.includes("gemini"))).toBe(true);
     expect(ids.some((id) => id.includes("nanobanana") || id.includes("nano-banana"))).toBe(true);
+  });
+
+  it("卡片的 cap 声明与版本表一致：保留 background 的即梦模型必须真的支持透明", () => {
+    // 两处各自表达「谁支持透明」——卡片说「接不接这个键」，版本表说「这个版本有没有」。
+    // 对不上时 compose 会悄悄退回类型预设的 auto/transparent/opaque，所以在这里钉住。
+    for (const card of IMAGE_CARDS.filter((entry) => entry.vendor === "ark")) {
+      const preset = seedreamSizePresetFor(card.providerModelId);
+      expect(preset, card.id).toBeDefined();
+      expect(card.keeps.includes("background"), card.id).toBe(
+        seedreamSupportsTransparentBackground(preset!)
+      );
+    }
   });
 
   it("每张卡片都声明了厂商与官方文档链接", () => {

@@ -41,7 +41,10 @@ export function NativeVideoExportControl({ ctx, disabled, target, profile, onBus
   const [message, setMessage] = useState<string | null>(null);
   // 「生成视频」旁的 profile 选择：缺省沿用调用方给定值，否则读浏览器本地偏好（D7）。
   const [chosenProfile, setChosenProfile] = useState<FilmSetExportProfile>(() => profile ?? readExportProfilePreference());
+  const submitting = useRef(false);
+  const [pending, setPending] = useState(false);
   const jobRef = useRef<string | null>(null);
+  const operation = useRef(0);
   const abortedRef = useRef(false);
 
   const driver = useRef<RecordingDriver | null>(null);
@@ -55,46 +58,72 @@ export function NativeVideoExportControl({ ctx, disabled, target, profile, onBus
   // 卸载/隐藏只停止观察：**不**取消宿主任务。
   useEffect(() => {
     abortedRef.current = false;
+    const onVisibility = () => {
+      if (!document.hidden) return;
+      ++operation.current;
+      abortedRef.current = true;
+      submitting.current = false;
+      setPending(false);
+      setStatus(null);
+      setMessage("视频继续在后台生成，可在活动浮层查看结果。");
+      onBusyChange(false);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      ++operation.current;
       abortedRef.current = true;
     };
-  }, []);
+  }, [onBusyChange]);
 
   const run = useCallback(async () => {
-    if (disabled || !target) return;
+    if (disabled || !target || submitting.current) return;
+    abortedRef.current = false;
+    const generation = ++operation.current;
+    submitting.current = true;
+    setPending(true);
     setError(null);
-    setMessage(null);
+    setMessage(`正在导出：${target.title}`);
     onBusyChange(true);
-    const submission = await driver.current!.submit({
-      requestId: recordingRequestId(target, chosenProfile),
-      nodeId: target.nodeId,
-      clipId: target.clipId,
-      profile: readFilmSetExportProfile(chosenProfile),
-      themeBackdrop: nativeExportThemeBackdrop(ctx),
-      ...(target.displayVersion ? { displayVersion: target.displayVersion } : {})
-    });
-    if (!submission.ok) {
-      setError(submission.message);
-      onBusyChange(false);
-      return;
+    try {
+      const submission = await driver.current!.submit({
+        requestId: recordingRequestId(target, chosenProfile),
+        nodeId: target.nodeId,
+        clipId: target.clipId,
+        profile: readFilmSetExportProfile(chosenProfile),
+        themeBackdrop: nativeExportThemeBackdrop(ctx),
+        ...(target.displayVersion ? { displayVersion: target.displayVersion } : {})
+      });
+      if (generation !== operation.current) return;
+      if (!submission.ok) {
+        setError(submission.message);
+        return;
+      }
+      jobRef.current = submission.submission.jobId;
+      const result = await driver.current!.wait(submission.submission.jobId, value => {
+        // 页面隐藏后不再更新 UI，但任务继续跑。
+        if (!abortedRef.current && generation === operation.current) { setPending(false); setStatus(value); }
+      }, () => !abortedRef.current && generation === operation.current);
+      if (abortedRef.current || generation !== operation.current) return;
+      if (result.ok) {
+        setStatus(result.status);
+        setMessage(`${target.title} 视频已生成，已放在片场右侧`);
+      } else if ("status" in result) {
+        // 本地等待超时：任务仍在宿主里跑，只停止这里的观察。
+        setStatus(result.status);
+        setMessage(result.message);
+      } else {
+        setError(result.message);
+      }
+    } catch (cause) {
+      if (generation === operation.current) setError(cause instanceof Error ? cause.message : "视频导出状态无法读取，请查询原任务。");
+    } finally {
+      if (generation === operation.current) {
+        submitting.current = false;
+        setPending(false);
+        onBusyChange(false);
+      }
     }
-    jobRef.current = submission.submission.jobId;
-    const result = await driver.current!.wait(submission.submission.jobId, value => {
-      // 页面隐藏后不再更新 UI，但任务继续跑。
-      if (!abortedRef.current) setStatus(value);
-    });
-    if (abortedRef.current) return;
-    if (result.ok) {
-      setStatus(result.status);
-      setMessage("视频已生成，已放在片场右侧");
-    } else if ("status" in result) {
-      // 本地等待超时：任务仍在宿主里跑，只停止这里的观察。
-      setStatus(result.status);
-      setMessage(result.message);
-    } else {
-      setError(result.message);
-    }
-    onBusyChange(false);
   }, [disabled, target, onBusyChange, chosenProfile, ctx]);
 
   const cancel = useCallback(async () => {
@@ -110,7 +139,7 @@ export function NativeVideoExportControl({ ctx, disabled, target, profile, onBus
     setError(result.message);
   }, [onBusyChange]);
 
-  const busy = status !== null && !["succeeded", "cancelled", "failed", "stale"].includes(status.state);
+  const busy = pending || (status !== null && !["succeeded", "cancelled", "failed", "stale"].includes(status.state));
   const label = status ? recordingStageLabel(status) : "生成视频";
 
   return <>
@@ -131,7 +160,7 @@ export function NativeVideoExportControl({ ctx, disabled, target, profile, onBus
       onClick={() => void run()}
       title="在后台生成当前片段的视频，并添加到片场右侧"
     >
-      {busy ? label : "生成视频"}
+      {pending ? "提交中…" : busy ? label : "导出视频"}
     </Button>
     {busy ? <>
       <progress

@@ -301,6 +301,7 @@ export function ExecutionPanel({
 				patch({ panelPrompt: next });
 			}}
 			onKeyDown={handleKeyDown}
+			onSubmit={submit}
 			skillError={skillError}
 		/>
 	);

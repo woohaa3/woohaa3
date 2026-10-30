@@ -16,11 +16,15 @@ export type ArkKind = 'language' | 'image' | 'video';
 export type ArkImageFamily = 'pro' | 'sequential';
 export type ArkVideoMode = 'omni_reference' | 'first_last_frame' | 'edit_video' | 'first_frame';
 
+/**
+ * Ark 图片模型的**端点形状**：走哪种请求形态、支不支持图层拆分。
+ *
+ * 能力数字（分辨率档位、参考图上限、输出格式、透明背景）**不在这里**——它们在卡片的
+ * `@woohaa3/contracts` 里（`cards/image/ark/seedream-*.ts`）。目录只声明「有哪些模型、
+ * 每个模型走哪种端点」，图片模型没有卡片即视为不可用。
+ */
 export type ArkImageSpec = {
   family: ArkImageFamily;
-  sizes: readonly string[];
-  maxImages: number;
-  outputFormats: readonly ('jpeg' | 'png')[];
   layerDecomposition: boolean;
 };
 
@@ -49,11 +53,10 @@ export type ArkCatalogModel = {
 
 const PRO_IMAGE: ArkImageSpec = {
   family: 'pro',
-  sizes: ['1K', '1.5K', '2K'],
-  maxImages: 10,
-  outputFormats: ['jpeg', 'png'],
   layerDecomposition: true,
 };
+
+const SEQUENTIAL_IMAGE: ArkImageSpec = { family: 'sequential', layerDecomposition: false };
 
 const SEEDANCE_25: ArkVideoSpec = {
   family: 'seedance-2.5',
@@ -122,9 +125,7 @@ function video(id: string, title: string, spec: ArkVideoSpec): ArkCatalogModel {
   return { id, kind: 'video', title, video: spec };
 }
 
-function sequential(sizes: readonly string[], outputFormats: ArkImageSpec['outputFormats']): ArkImageSpec {
-  return { family: 'sequential', sizes, maxImages: 14, outputFormats, layerDecomposition: false };
-}
+
 
 export const ARK_CATALOG: readonly ArkCatalogModel[] = [
   language('doubao-seed-evolving', 'Doubao Seed Evolving'),
@@ -144,9 +145,9 @@ export const ARK_CATALOG: readonly ArkCatalogModel[] = [
   language('deepseek-v4-flash-ga-260731', 'DeepSeek V4 Flash'),
   image('doubao-seedream-5-0-pro-260628', 'Seedream 5.0 Pro', PRO_IMAGE),
   image('doubao-seedream-5-0-flash-260915', 'Seedream 5.0 Flash', PRO_IMAGE),
-  image('doubao-seedream-5-0-260128', 'Seedream 5.0 Lite', sequential(['2K', '3K', '4K'], ['jpeg', 'png'])),
-  image('doubao-seedream-4-5-251128', 'Seedream 4.5', sequential(['2K', '4K'], ['jpeg'])),
-  image('doubao-seedream-4-0-250828', 'Seedream 4.0', sequential(['1K', '2K', '4K'], ['jpeg'])),
+  image('doubao-seedream-5-0-260128', 'Seedream 5.0 Lite', SEQUENTIAL_IMAGE),
+  image('doubao-seedream-4-5-251128', 'Seedream 4.5', SEQUENTIAL_IMAGE),
+  image('doubao-seedream-4-0-250828', 'Seedream 4.0', SEQUENTIAL_IMAGE),
   video('doubao-seedance-2-5-260628', 'Seedance 2.5', SEEDANCE_25),
   video('doubao-seedance-2-0-260128', 'Seedance 2.0', SEEDANCE_20),
   video('doubao-seedance-2-0-fast-260128', 'Seedance 2.0 Fast', SEEDANCE_20_LIMITED),

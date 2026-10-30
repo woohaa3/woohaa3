@@ -169,7 +169,10 @@ mod tests {
     ) -> Vec2 {
         let view = overview_pose.rotation.inverse() * (world - overview_pose.translation);
         let ndc = overview.get_clip_from_view().project_point3(view);
-        Vec2::new((ndc.x + 1.0) * surface.x / 2.0, (1.0 - ndc.y) * surface.y / 2.0)
+        Vec2::new(
+            (ndc.x + 1.0) * surface.x / 2.0,
+            (1.0 - ndc.y) * surface.y / 2.0,
+        )
     }
 
     #[test]
@@ -204,12 +207,8 @@ mod tests {
                 ] {
                     let world = pose.transform_point(local);
                     let expected = card_pixel(&card, local, rect, (pan_x, pan_y), zoom);
-                    let actual = surface_pixel(
-                        &overview,
-                        &overview_pose,
-                        world,
-                        Vec2::new(1280.0, 800.0),
-                    );
+                    let actual =
+                        surface_pixel(&overview, &overview_pose, world, Vec2::new(1280.0, 800.0));
                     assert!(
                         actual.abs_diff_eq(expected, 0.002),
                         "{actual:?} != {expected:?}"
@@ -270,16 +269,19 @@ mod tests {
                 let lateral = Vec3::new(1.2, -0.7, 0.0);
                 let offsets = |projection: &Projection, pose: &Transform, surface: Vec2| {
                     let centre = surface_pixel(projection, pose, pivot, surface);
-                    [Vec3::new(0.0, 0.0, -distance * 0.5), Vec3::new(0.0, 0.0, -distance * 1.5)]
-                        .map(|depth| {
-                            (surface_pixel(
-                                projection,
-                                pose,
-                                pose.transform_point(lateral + depth),
-                                surface,
-                            ) - centre)
-                                .length()
-                        })
+                    [
+                        Vec3::new(0.0, 0.0, -distance * 0.5),
+                        Vec3::new(0.0, 0.0, -distance * 1.5),
+                    ]
+                    .map(|depth| {
+                        (surface_pixel(
+                            projection,
+                            pose,
+                            pose.transform_point(lateral + depth),
+                            surface,
+                        ) - centre)
+                            .length()
+                    })
                 };
                 let card_offsets = offsets(&card, &pose, Vec2::new(width, height));
                 let overview_offsets = offsets(&overview, &overview_pose, surface);
@@ -320,7 +322,10 @@ mod tests {
         });
         left.update(280.0, 188.0);
         assert!(overview_camera(&scene, &node, &pose, &left, pivot).is_none());
-        let bad_fov = Projection::Perspective(PerspectiveProjection { fov: 0.0, ..default() });
+        let bad_fov = Projection::Perspective(PerspectiveProjection {
+            fov: 0.0,
+            ..default()
+        });
         assert!(overview_camera(&scene, &node, &pose, &bad_fov, pivot).is_none());
         let behind = Projection::Perspective(PerspectiveProjection::default());
         assert!(

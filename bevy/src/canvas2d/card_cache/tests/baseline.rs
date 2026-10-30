@@ -3,6 +3,7 @@
 //! 这不是性能结论，而是「ECS 投影 + 分类型 producer」迁移前后的结构回归：相同输入的
 //! 节点实体、标签实体、几何块、mesh/image 引用数量和顶点 fingerprint 必须稳定。
 use super::*;
+use crate::canvas2d::CanvasOverlayCache;
 
 #[test]
 fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
@@ -40,21 +41,31 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
 
     fn geometry_fingerprint(world: &mut World) -> u64 {
         let ids: Vec<AssetId<Mesh>> = {
-            let visuals = world.resource::<Visuals>();
+            let visuals = world.resource::<CanvasOverlayCache>();
             let mut ids: Vec<AssetId<Mesh>> = Vec::new();
-            for block in &visuals.card_blocks {
+            for block in &world.resource::<crate::canvas2d::CardBlockCache>().blocks {
                 ids.extend(block.mesh.as_ref().map(Handle::id));
             }
             ids.extend(
-                visuals
-                    .card_decorations
+                world
+                    .resource::<crate::canvas2d::CardDecorationCache>()
+                    .blocks
                     .iter()
                     .filter_map(|block| block.handle()),
             );
-            for block in &visuals.container_blocks {
+            for block in &world
+                .resource::<crate::canvas2d::ContainerBlockCache>()
+                .blocks
+            {
                 ids.extend(block.state().into_iter().flatten());
             }
-            ids.extend(visuals.edge_blocks.iter().map(|block| block.state().0));
+            ids.extend(
+                world
+                    .resource::<crate::canvas2d::EdgeBlockCache>()
+                    .blocks
+                    .iter()
+                    .map(|block| block.state().0),
+            );
             ids
         };
         let mut ids = ids;
@@ -80,23 +91,34 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
     fn counts(world: &mut World) -> Counts {
         let nodes = world.query::<&CanvasNodeId>().iter(world).count();
         let labels = world.query::<&CanvasLabel>().iter(world).count();
-        let visuals = world.resource::<Visuals>();
+        let visuals = world.resource::<CanvasOverlayCache>();
         (
             nodes,
             labels,
-            visuals.card_blocks.len(),
-            visuals
-                .card_blocks
+            world
+                .resource::<crate::canvas2d::CardBlockCache>()
+                .blocks
+                .len(),
+            world
+                .resource::<crate::canvas2d::CardBlockCache>()
+                .blocks
                 .iter()
                 .filter(|block| block.entity.is_some())
                 .count(),
-            visuals
-                .card_decorations
+            world
+                .resource::<crate::canvas2d::CardDecorationCache>()
+                .blocks
                 .iter()
                 .filter(|block| block.handle().is_some())
                 .count(),
-            visuals.container_blocks.len(),
-            visuals.edge_blocks.len(),
+            world
+                .resource::<crate::canvas2d::ContainerBlockCache>()
+                .blocks
+                .len(),
+            world
+                .resource::<crate::canvas2d::EdgeBlockCache>()
+                .blocks
+                .len(),
             world.resource::<Assets<Mesh>>().len(),
             world.resource::<Assets<Image>>().len(),
         )
@@ -162,6 +184,11 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
         0,
         "清空场景后标签实体必须全部回收"
     );
-    assert!(world.resource::<Visuals>().card_blocks.is_empty());
+    assert!(
+        world
+            .resource::<crate::canvas2d::CardBlockCache>()
+            .blocks
+            .is_empty()
+    );
     eprintln!("baseline counts: {baseline_counts:?}, fingerprint: {baseline_fingerprint:#x}");
 }

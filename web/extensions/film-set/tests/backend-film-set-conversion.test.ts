@@ -9,6 +9,8 @@ import { filmSetTestLifecycles } from "../../../test-support/managed-shot-comman
  */
 import { describe, expect, it, vi } from "vitest";
 import {
+  readFilmSetGroupMarker,
+  decodeModelDefinition,
   createEmptyWoohaa3ServerCanvas,
   createFilmSetSnapshot,
   canonicalFilmSetFields,
@@ -198,8 +200,8 @@ function validCandidate(title: string) {
   };
 }
 
-describe("FilmSetConversionService：3D 直接复制（任务 1.4 / D3）", () => {
-  it("复制为自包含片场，保留 model item 与内部 part ID，且不调用任何生成端口", async () => {
+describe("FilmSetConversionService：3D 原地包组（任务 1.4 / D3）", () => {
+  it("把来源卡片原地包进片场 group，不复制节点，且不调用任何生成端口", async () => {
     const room = await readyRoom("c-3d", [{ id: "model-src", type: "model3d", data: model3dData() }]);
     let generatorCalls = 0;
     const service = serviceFor(room, {
@@ -213,20 +215,50 @@ describe("FilmSetConversionService：3D 直接复制（任务 1.4 / D3）", () =
 
     const target = filmSetNode(room, "film-target");
     expect(target).not.toBeNull();
-    expect(target!.node.type).toBe("composite-asset");
-    const decoded = decodeFilmSetNodeData(target!.data);
-    expect(decoded.ok).toBe(true);
-    if (!decoded.ok) return;
-    const item = decoded.value.filmSetContent.items.find((entry) => entry.kind === "model");
-    expect(item).toBeTruthy();
-    if (item?.kind !== "model") throw new Error("expected model item");
-    expect(item.model.modelScript).toBe(SCRIPT);
-    expect(item.model.placement).toEqual({ offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 });
-    // 源节点保留。
-    expect(filmSetNode(room, "model-src")!.node.type).toBe("model3d");
-    // 来源 metadata 记录请求身份。
-    expect(decoded.value.origin?.conversion?.requestId).toBe("req-1");
-    expect(decoded.value.origin?.conversion?.sourceKind).toBe("model3d");
+    expect(target!.node.type).toBe("group");
+    const marker = readFilmSetGroupMarker(target!.data);
+    expect(marker).not.toBeNull();
+    const binding = marker!.sceneBindings.find(entry => entry.kind === "model3d")!;
+    // 不复制：绑定直接引用原卡片，画布里也没有额外的副本节点。
+    expect(binding.sourceNodeId).toBe("model-src");
+    expect(filmSetNode(room, "film-target-source")).toBeNull();
+    const source = decodeModelDefinition(target!.canvas.nodeData[binding.sourceNodeId]);
+    expect(source.ok).toBe(true);
+    if (!source.ok) throw new Error(source.reason);
+    expect(source.value.modelScript).toBe(SCRIPT);
+    expect(source.value.placement).toEqual({ offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 });
+    expect(target!.data?.filmSetContent).toBeUndefined();
+    const sourceNode = filmSetNode(room, "model-src")!;
+    expect(sourceNode.node.type).toBe("model3d");
+    // 来源成为片场 group 的成员，且 group 贴合来源卡片的原位置。
+    expect(sourceNode.node.parentId).toBe("film-target");
+    expect(sourceNode.node.position).toEqual({ x: 40, y: 40 });
+    expect(target!.node.position).toEqual({ x: -40, y: -40 });
+    expect(target!.node.width).toBeGreaterThan(sourceNode.node.width ?? 0);
+    expect(target!.node.height).toBeGreaterThan(sourceNode.node.height ?? 0);
+    expect(target!.data?.origin).toMatchObject({ conversion: { requestId: "req-1", sourceKind: "model3d" } });
+  });
+
+  it("已在任意组内的节点拒绝创建片场（不支持嵌套 group）", async () => {
+    const room = await readyRoom("c-3d-grouped", [{ id: "model-src", type: "model3d", data: model3dData() }]);
+    const exported = room.exportCanvas();
+    if (!exported.ok) throw new Error("export");
+    const grouped = await room.submit({
+      protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+      canvasId: "c-3d-grouped",
+      actorId: "test",
+      commandId: "group-src",
+      baseRevision: exported.canvas.revision,
+      commands: [
+        { type: "node.add", node: { id: "outer", type: "group", position: { x: -40, y: -40 } } },
+        { type: "node.update", nodeId: "model-src", parentId: "outer", position: { x: 40, y: 40 } }
+      ]
+    } as never);
+    expect(grouped.ok).toBe(true);
+    const before = room.exportCanvas();
+    const outcome = await serviceFor(room).submit(request("c-3d-grouped"));
+    expect(outcome).toMatchObject({ ok: false, code: "unsupported-source" });
+    expect(room.exportCanvas()).toEqual(before);
   });
 
   it("持久镜头映射为片场片段镜头；无法映射的附加镜头在来源记录说明", async () => {
@@ -243,17 +275,14 @@ describe("FilmSetConversionService：3D 直接复制（任务 1.4 / D3）", () =
     const outcome = await serviceFor(room).submit(request("c-3d-cam"));
     expect(outcome.ok).toBe(true);
     const target = filmSetNode(room, "film-target")!;
-    const decoded = decodeFilmSetNodeData(target.data);
-    if (!decoded.ok) throw new Error(decoded.reason);
-    const clips = decoded.value.filmSetAnimations?.clips ?? [];
-    expect(clips.length).toBe(2);
-    expect(clips.map((clip) => clip.name)).toEqual(["镜头 A", "镜头 B"]);
-    // sceneCamera 使用首个镜头。
-    expect(decoded.value.sceneCamera.azimuth).toBeCloseTo(0.1, 6);
-    expect(decoded.value.origin?.conversion?.unmappedCameras).toBeUndefined();
+    const marker = readFilmSetGroupMarker(target.data)!;
+    expect(marker.clips).toHaveLength(2);
+    expect(marker.clips!.map(clip => clip.name)).toEqual(["镜头 A", "镜头 B"]);
+    expect(marker.cameras![0]!.azimuth).toBeCloseTo(0.1, 6);
+    expect(target.data?.origin).toMatchObject({ conversion: {} });
   });
 
-  it("复制后编辑/删除源模型不影响目标；目标编辑不回写源", async () => {
+  it("删除来源卡片后片场 group 与其既有内容保留（绑定缺失不丢内容）", async () => {
     const room = await readyRoom("c-3d-indep", [{ id: "model-src", type: "model3d", data: model3dData() }]);
     await serviceFor(room).submit(request("c-3d-indep"));
     const before = filmSetNode(room, "film-target")!;
@@ -618,10 +647,10 @@ describe("FilmSetConversionService：媒体候选与端口（任务 1.1/2.4 / D5
     }));
     expect(outcome.ok && outcome.status.status).toBe("completed");
     const target = filmSetNode(room, "film-ok")!;
-    const decoded = decodeFilmSetNodeData(target.data);
-    if (!decoded.ok) throw new Error(decoded.reason);
-    expect(decoded.value.filmSetContent.items.length).toBeGreaterThan(0);
-    expect(decoded.value.origin?.conversion?.modelKey).toBe("litellm:model");
+    const marker = readFilmSetGroupMarker(target.data)!;
+    expect(marker.sceneBindings.some(binding => binding.kind === "model3d")).toBe(true);
+    expect(target.data?.origin).toMatchObject({ conversion: { modelKey: "litellm:model" } });
+    expect(target.data?.filmSetContent).toBeUndefined();
   });
 
   it("生成器收到冻结来源与稳定媒体引用（storageKey），而非仅 URL 文本", async () => {
@@ -708,11 +737,11 @@ describe("FilmSetConversionService：占位片场节点生命周期（任务 1.3
     expect(exported.canvas.document.nodes.filter((node) => node.id === "film-ph")).toHaveLength(1);
     // 对象容器及其内嵌 model3d 卡片都是容器派生物，不参与「目标片场节点」计数。
     expect(exported.canvas.document.nodes.filter(node => !node.id.startsWith("shot-preview:")
-      && !node.id.startsWith("film-object:") && !node.id.startsWith("film-object-model:"))).toHaveLength(2);
+      && !node.id.startsWith("film-object:") && !node.id.startsWith("film-object-model:") && node.parentId !== "film-ph")).toHaveLength(2);
     const target = filmSetNode(room, "film-ph")!;
     const decoded = decodeFilmSetNodeData(target.data);
     if (!decoded.ok) throw new Error(decoded.reason);
-    expect(decoded.value.filmSetContent.items.length).toBeGreaterThan(0);
+    expect(readFilmSetGroupMarker(target.data)!.sceneBindings.length).toBeGreaterThan(0);
     expect(readFilmSetConversionNodeStatus(target.data)?.status).toBe("completed");
     // 进行中时确实在占位节点上呈现过阶段。
     expect(seen.some((entry) => entry.kind === "running")).toBe(true);
@@ -728,7 +757,7 @@ describe("FilmSetConversionService：占位片场节点生命周期（任务 1.3
     const target = filmSetNode(room, "film-target")!;
     const decoded = decodeFilmSetNodeData(target.data);
     if (!decoded.ok) throw new Error(decoded.reason);
-    expect(decoded.value.filmSetContent.items.some((item) => item.kind === "model")).toBe(true);
+    expect(readFilmSetGroupMarker(target.data)!.sceneBindings.some(binding => binding.kind === "model3d")).toBe(true);
     expect(readFilmSetConversionNodeStatus(target.data)?.status).toBe("completed");
     // 占位节点不改动源节点；没有从来源关系派生的普通片场端口边。
     expect(exported.canvas.document.nodes.some((node) => node.id === "model-src")).toBe(true);
@@ -752,8 +781,9 @@ describe("FilmSetConversionService：占位片场节点生命周期（任务 1.3
     }));
     await started;
     const target = filmSetNode(room, "film-empty")!;
-    expect(target.node.type).toBe("composite-asset");
-    expect(target.data?.extensionId).toBe("film-set");
+    expect(target.node.type).toBe("group");
+    expect(readFilmSetGroupMarker(target.data)).not.toBeNull();
+    expect(target.data?.extensionId).toBeUndefined();
     const decoded = decodeFilmSetNodeData(target.data);
     if (!decoded.ok) throw new Error(decoded.reason);
     expect(decoded.value.filmSetContent.items.map((item) => item.kind)).toEqual([]);
@@ -999,13 +1029,10 @@ describe("FilmSetConversionService：提交预算与上游硬超时（design D4/
     expect(filmSetNode(room, "film-target")!.data?.taskStatus).toBe("processing");
     release();
     await service.whenSettled();
-    const decoded = decodeFilmSetNodeData(filmSetNode(room, "film-target")!.data);
-    expect(decoded.ok).toBe(true);
-    if (!decoded.ok) return;
-    const clips = decoded.value.filmSetAnimations!;
-    expect(clips.defaultClipId).toBe("converted-shot");
-    expect(clips.clips[0]).toMatchObject({ kind: "static", timeline: { duration: 0 } });
-    expect(clips.clips[0]!.bindings.map(binding => binding.itemId)).toEqual(decoded.value.filmSetContent.items.filter(item => item.kind !== "ground").map(item => item.id));
+    const marker = readFilmSetGroupMarker(filmSetNode(room, "film-target")!.data)!;
+    expect(marker.activeClip).toBe("converted-shot");
+    expect(marker.clips![0]).toMatchObject({ duration: 0 });
+    expect(marker.sceneBindings.some(binding => binding.kind === "model3d")).toBe(true);
     const canvas = room.exportCanvas();
     expect(canvas.ok && canvas.canvas.document.nodes.some(node => node.type === "image" && canvas.canvas.nodeData[node.id]?.managedBy?.ownerNodeId === "film-target")).toBe(true);
   });

@@ -133,6 +133,18 @@ impl OpacityMaterials {
         }
     }
 
+    /// Group binding replacement removes its entity subtree immediately. Entity-local
+    /// opacity records are ECS components, so the next root release owns final handle cleanup;
+    /// keeping the vector here avoids invalidating unchanged sibling components.
+    pub(crate) fn remove_entities(
+        &mut self,
+        _materials: &mut Assets<StandardMaterial>,
+        _entities: &[Entity],
+    ) {
+        // Components on despawned entities are gone; handles remain owned by this root until
+        // `release_instances`, which prevents a sibling from observing a removed asset.
+    }
+
     /// 根释放时丢弃全部实例并从材质资产中回收（D2 的生命周期归属）。
     ///
     /// 克隆实例不进入共享材质缓存，只能由这里显式移除；否则反复播放会积累无人引用的

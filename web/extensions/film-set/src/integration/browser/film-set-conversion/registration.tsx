@@ -5,7 +5,7 @@ import { FilmSetConversionAction, type FilmSetConversionActionDependencies } fro
 import { createFilmSetConversionDialog, FILM_SET_CREATION_DIALOG_ID } from "../../../authoring/browser/film-set-conversion/settings.js";
 import { createFilmSetConversionClient } from "../../../authoring/browser/film-set-conversion/client.js";
 import { createFilmSetConversionController, type FilmSetConversionController } from "../../../authoring/browser/film-set-conversion/controller.js";
-import { resolveFilmSetConversionAvailability } from "../../../authoring/browser/film-set-conversion/view.js";
+import { filmSetConversionSourceInGroup, resolveFilmSetConversionAvailability } from "../../../authoring/browser/film-set-conversion/view.js";
 import { createFilmSetConversionPreferenceStore } from "../../../authoring/browser/film-set-conversion/preference.js";
 import { ownsShotMedia } from "../../../state/shared/managed-shot-media.js";
 
@@ -107,11 +107,14 @@ export function installFilmSetConversionEntries(ctx: ConversionContext): () => v
     id: "film-set-conversion",
     owner: "film-set",
     order: -10,
-    // Hide the action for the extension's own managed shot media; other supported
-    // sources remain visible while readiness and write permission only disable it.
+    // Hide the action for the extension's own managed shot media and for nodes already
+    // inside a group (a film set is itself a group; nested groups are not supported);
+    // other supported sources remain visible while readiness and write permission only
+    // disable it.
     available: ({ nodeId, nodeType }) => {
       if (readFilmSetConversionSourceKind(nodeType) === null) return false;
-      return !ownsShotMedia(deps.getCanvas(), nodeId);
+      const canvas = deps.getCanvas();
+      return !ownsShotMedia(canvas, nodeId) && !filmSetConversionSourceInGroup(canvas, nodeId);
     },
     describe: ({ nodeId, nodeType, writable }) => {
       const availability = resolveFilmSetConversionAvailability({ canvas: deps.getCanvas(), nodeId, nodeType, writable });
@@ -135,10 +138,12 @@ export function installFilmSetConversionEntries(ctx: ConversionContext): () => v
     priority: 12,
     items: ({ nodeId, connectFrom }: ContextMenuContext) => {
       if (!nodeId || connectFrom) return [];
-      if (ownsShotMedia(deps.getCanvas(), nodeId)) return [];
-      const node = deps.getCanvas()?.document.nodes.find((entry) => entry.id === nodeId);
+      const canvas = deps.getCanvas();
+      if (ownsShotMedia(canvas, nodeId)) return [];
+      if (filmSetConversionSourceInGroup(canvas, nodeId)) return [];
+      const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
       if (!node) return [];
-      const availability = resolveFilmSetConversionAvailability({ canvas: deps.getCanvas(), nodeId, nodeType: node.type, writable: deps.controller.state.isWritable() });
+      const availability = resolveFilmSetConversionAvailability({ canvas, nodeId, nodeType: node.type, writable: deps.controller.state.isWritable() });
       if (!availability.available && availability.reason === "此类节点暂不支持转为片场") return [];
       return [{ id: FILM_SET_CONVERSION_MENU_ID, label: "创建片场", disabled: !availability.available }];
     },

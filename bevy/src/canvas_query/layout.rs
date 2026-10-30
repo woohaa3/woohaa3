@@ -249,10 +249,13 @@ pub(crate) fn has_history_strip(node: &GraphNode) -> bool {
     !node.ghost
         && node.group.is_none()
         && node.composite_asset.is_none()
-        && node
-            .history_strip
-            .as_ref()
-            .is_some_and(|strip| strip.dots.len() > 1 || strip.dots.iter().any(|dot| dot.state != "succeeded" || dot.recoverable == Some(false)))
+        && node.history_strip.as_ref().is_some_and(|strip| {
+            strip.dots.len() > 1
+                || strip
+                    .dots
+                    .iter()
+                    .any(|dot| dot.state != "succeeded" || dot.recoverable == Some(false))
+        })
 }
 
 /// 运行中节点是否应显示逐帧进度环。
@@ -287,6 +290,24 @@ pub(crate) fn resize_rect(x: f32, y: f32, width: f32, height: f32) -> (f32, f32,
         RESIZE_HANDLE_SIZE,
         RESIZE_HANDLE_SIZE,
     )
+}
+
+/// 组容器四角 resize 命中矩形，顺序 `nw, ne, sw, se`；每个以矩形角点为**中心**，
+/// 与绘制的圆形抓手同心，因此抓手半透明的外侧也能点中（抓取半径不受圆角裁切影响）。
+pub(crate) fn resize_corner_rects(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> [(f32, f32, f32, f32); 4] {
+    let size = RESIZE_HANDLE_SIZE;
+    let half = size / 2.;
+    [
+        (x - half, y - half, size, size),
+        (x + width - half, y - half, size, size),
+        (x - half, y + height - half, size, size),
+        (x + width - half, y + height - half, size, size),
+    ]
 }
 
 /// 连线删除按钮的**中心**：无标签时居中于两端口中点，有标签时排在标签胶囊右侧
@@ -382,7 +403,10 @@ fn expand(rect: (f32, f32, f32, f32), padding: f32) -> (f32, f32, f32, f32) {
 
 /// 点是否落在矩形 `(x, y, width, height)` 内（边界包含）。
 pub(crate) fn in_rect(point: Vec2, rect: (f32, f32, f32, f32)) -> bool {
-    point.x >= rect.0 && point.x <= rect.0 + rect.2 && point.y >= rect.1 && point.y <= rect.1 + rect.3
+    point.x >= rect.0
+        && point.x <= rect.0 + rect.2
+        && point.y >= rect.1
+        && point.y <= rect.1 + rect.3
 }
 
 // ── 节点顶部操作横条布局（change: 2026-10-13-add-node-to-film-set-shortcut）──────────────
@@ -402,6 +426,10 @@ pub(crate) const NODE_ACTION_TOOLBAR_PAD: f32 = 4.0;
 pub(crate) const NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH: f32 = 56.0;
 /// 动作标签与控件边缘的水平内边距（世界单位）。
 pub(crate) const NODE_ACTION_TOOLBAR_ACTION_PAD: f32 = 8.0;
+/// 图标与文字同时呈现时的图标格尺寸（与 contracts 同步）。
+pub(crate) const NODE_ACTION_TOOLBAR_ICON_SIZE: f32 = 16.0;
+/// 图标与文字之间的水平间距（与 contracts 同步）。
+pub(crate) const NODE_ACTION_TOOLBAR_ICON_GAP: f32 = 6.0;
 /// 设置箭头独立宽度（世界单位）。
 pub(crate) const NODE_ACTION_TOOLBAR_CHEVRON_WIDTH: f32 = 24.0;
 /// 动作分组之间的细分隔线占位宽度（世界单位）。
@@ -411,12 +439,12 @@ pub(crate) const NODE_ACTION_TOOLBAR_FONT: f32 = 13.0;
 /// 模型名摘要与动作之间的水平间距（世界单位）。
 pub(crate) const NODE_ACTION_TOOLBAR_SUMMARY_GAP: f32 = 8.0;
 /// 摘要最大宽度（超出省略，世界单位）。
-pub(crate) const NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH: f32 = 140.0;
+pub(crate) const NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH: f32 = 280.0;
 /// 顶部碰撞回退判定所用的视口安全边距（屏幕像素）。
 pub(crate) const NODE_ACTION_TOOLBAR_VIEWPORT_MARGIN: f32 = 8.0;
 
-mod node_action_toolbar;
 mod group_run_status;
+mod node_action_toolbar;
 pub(crate) use group_run_status::group_run_status_rect;
 
 pub(crate) use node_action_toolbar::{
@@ -424,17 +452,17 @@ pub(crate) use node_action_toolbar::{
     truncate_node_action_text,
 };
 
-
 /// 连接端口：输入在左中、输出在右中。
 pub(crate) fn port(node: &GraphNode, output: bool) -> Vec2 {
+    if node.group.as_ref().is_some_and(|group| group.collapsed) {
+        let badge = crate::canvas_query::group_model::badge_rect(node);
+        return port_for_bounds(badge.x, badge.y, badge.z, badge.w, output);
+    }
     port_for_bounds(node.x, node.y, node.width, node.height, output)
 }
 
 pub(crate) fn port_for_bounds(x: f32, y: f32, width: f32, height: f32, output: bool) -> Vec2 {
-    Vec2::new(
-        x + if output { width } else { 0.0 },
-        y + height / 2.0,
-    )
+    Vec2::new(x + if output { width } else { 0.0 }, y + height / 2.0)
 }
 
 /// 单字估算宽度：ASCII 约 0.62em，其余（含 CJK）按 1em；控制字符替换为空格（宽度同空格）。
@@ -450,9 +478,7 @@ pub(crate) fn estimated_char_width(c: char, size: f32) -> f32 {
 
 /// 逐字估算整段文本宽度（与 [`shortened`] 同一启发式，供标题底衬等需要实际宽度的场景复用）。
 pub(crate) fn estimated_text_width(text: &str, size: f32) -> f32 {
-    text.chars()
-        .map(|c| estimated_char_width(c, size))
-        .sum()
+    text.chars().map(|c| estimated_char_width(c, size)).sum()
 }
 
 /// 片场标题字号。
@@ -619,7 +645,7 @@ mod tests {
             composite_asset: None,
             history_strip: None,
             aggregate_run: None,
-        shot_preview: None,
+            shot_preview: None,
         }
     }
 
@@ -634,20 +660,33 @@ mod tests {
     #[test]
     fn ring_gate_covers_compact_and_pure_model_nodes() {
         // 富内容图片节点。
-        assert!(shows_generation_ring(&kind_node("image", 248.0, 232.0, true)));
+        assert!(shows_generation_ring(&kind_node(
+            "image", 248.0, 232.0, true
+        )));
         // 紧凑节点（<=116 高）此前被 shows_content 门禁漏掉。
-        assert!(shows_generation_ring(&kind_node("image", 196.0, 64.0, true)));
+        assert!(shows_generation_ring(&kind_node(
+            "image", 196.0, 64.0, true
+        )));
         // 纯模型节点（无 model_preview）此前被 shows_content 漏掉。
-        assert!(shows_generation_ring(&kind_node("model", 196.0, 64.0, true)));
+        assert!(shows_generation_ring(&kind_node(
+            "model", 196.0, 64.0, true
+        )));
         // 非 busy 不显示。
-        assert!(!shows_generation_ring(&kind_node("image", 248.0, 232.0, false)));
+        assert!(!shows_generation_ring(&kind_node(
+            "image", 248.0, 232.0, false
+        )));
     }
 
     #[test]
     fn ring_gate_excludes_aggregate_and_group() {
         // 复合资产（片场）用运行遮罩而非进度环。
         let mut film = kind_node("model", 260.0, 195.0, true);
-        film.composite_asset = Some(crate::protocol::CompositeAssetPresentation { empty_placeholder: None, panel: None, ownership_links: None, root_placement: None, content_extent: None,
+        film.composite_asset = Some(crate::protocol::CompositeAssetPresentation {
+            empty_placeholder: None,
+            panel: None,
+            ownership_links: None,
+            root_placement: None,
+            content_extent: None,
             layout_aabb: None,
             geometry_quality: None,
             scope_shape: crate::protocol::CompositeAssetScopeShape::Rect,
@@ -665,14 +704,18 @@ mod tests {
         let mut group = kind_node("group", 400.0, 300.0, true);
         group.group = Some(crate::protocol::GroupPresentation {
             collapsed: false,
-                badge_scale: 1.,
-                badge_resizable: false,
+            badge_scale: 1.,
+            badge_resizable: false,
+            action_bar: false,
             title: String::new(),
             member_count: 1,
             output_capable_leaf_count: 1,
             model_bounds: None,
             run_status: None,
+            geometry_quality: None,
             drop_target: false,
+        
+            overview_cache: None,
         });
         assert!(!shows_generation_ring(&group));
     }
@@ -842,7 +885,7 @@ mod tests {
             composite_asset: None,
             history_strip: None,
             aggregate_run: None,
-        shot_preview: None,
+            shot_preview: None,
         }
     }
 
@@ -874,16 +917,15 @@ mod tests {
         let layout = node_action_toolbar(&node, &action_list(None), None, None).expect("layout");
         // 底边 = 节点顶边 - GAP；水平居中于节点。
         assert!((layout.bar.1 + layout.bar.3 - (node.y - NODE_ACTION_TOOLBAR_GAP)).abs() < 1e-3);
-        assert!(
-            (layout.bar.0 + layout.bar.2 / 2.0 - (node.x + node.width / 2.0)).abs() < 1e-3
-        );
+        assert!((layout.bar.0 + layout.bar.2 / 2.0 - (node.x + node.width / 2.0)).abs() < 1e-3);
         assert!(!layout.below);
     }
 
     #[test]
     fn node_action_toolbar_actions_do_not_overlap_and_chevron_follows_menu() {
         let node = action_node(500.0, 300.0);
-        let layout = node_action_toolbar(&node, &action_list(Some("gpt-5")), None, None).expect("layout");
+        let layout =
+            node_action_toolbar(&node, &action_list(Some("gpt-5")), None, None).expect("layout");
         assert_eq!(layout.slots.len(), 2);
         let first = layout.slots[0].rect;
         let second = layout.slots[1].rect;
@@ -891,18 +933,52 @@ mod tests {
         let chevron = layout.slots[1].menu.expect("chevron");
         assert!(chevron.0 >= second.0 + second.2);
         let (_, summary) = layout.summary.as_ref().expect("summary");
-        assert!(summary.0 >= chevron.0 + chevron.2);
+        assert!(summary.0 + summary.2 <= first.0 + 1e-3);
         assert!(summary.0 + summary.2 <= layout.bar.0 + layout.bar.2 + 1e-3);
     }
 
     #[test]
     fn node_action_toolbar_falls_below_when_no_room_above() {
         let node = action_node(500.0, 0.0);
-        let layout =
-            node_action_toolbar(&node, &action_list(None), Some((0.0, 0.0, 1.0)), Some((1000.0, 800.0)))
-                .expect("layout");
+        let layout = node_action_toolbar(
+            &node,
+            &action_list(None),
+            Some((0.0, 0.0, 1.0)),
+            Some((1000.0, 800.0)),
+        )
+        .expect("layout");
         assert!(layout.below);
         assert!((layout.bar.1 - (node.y + node.height + NODE_ACTION_TOOLBAR_GAP)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn node_action_toolbar_reserves_icon_cell_for_icon_and_text() {
+        let node = action_node(500.0, 300.0);
+        let action = |icon_only| crate::protocol::NodeActions {
+            actions: vec![crate::protocol::NodeAction {
+                id: "edit".into(),
+                label: "编辑".into(),
+                icon: Some("edit".into()),
+                icon_only,
+                enabled: true,
+                menu: false,
+                tone: String::new(),
+            }],
+            summary: None,
+        };
+        let compact =
+            node_action_toolbar(&node, &action(true), None, None).expect("icon-only layout");
+        let labelled =
+            node_action_toolbar(&node, &action(false), None, None).expect("icon+text layout");
+        assert!((compact.slots[0].rect.2 - NODE_ACTION_TOOLBAR_ACTION_HEIGHT).abs() < 1e-3);
+        let text = estimated_text_width("编辑", NODE_ACTION_TOOLBAR_FONT);
+        assert!(
+            labelled.slots[0].rect.2
+                >= NODE_ACTION_TOOLBAR_ACTION_PAD * 2.0
+                    + NODE_ACTION_TOOLBAR_ICON_SIZE
+                    + NODE_ACTION_TOOLBAR_ICON_GAP
+                    + text
+        );
     }
 
     #[test]
@@ -919,7 +995,8 @@ mod tests {
     fn node_action_toolbar_summary_is_truncated_to_max_width() {
         let node = action_node(500.0, 300.0);
         let long = "一个非常非常非常非常非常非常非常非常长的模型名称";
-        let layout = node_action_toolbar(&node, &action_list(Some(long)), None, None).expect("layout");
+        let layout =
+            node_action_toolbar(&node, &action_list(Some(long)), None, None).expect("layout");
         let (text, rect) = layout.summary.as_ref().expect("summary");
         assert!(text.ends_with('…'));
         assert!(rect.2 <= NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH + 1e-3);

@@ -1,5 +1,7 @@
+import { pinFilmSetCapture } from "../../state/browser/capture-snapshot.js";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
-import { decodeFilmSetNodeData, filmSetAnimationsOf, compositeAssetNodeBoxSize, getWoohaa3CanvasNodeAbsolutePosition, readFilmSetExportProfile, type FilmSetExportProfile } from "@woohaa3/contracts";
+import { filmSetAnimationsOf, compositeAssetNodeBoxSize, getWoohaa3CanvasNodeAbsolutePosition, readFilmSetExportProfile, type FilmSetExportProfile } from "@woohaa3/contracts";
+import { readAnimation } from "../../state/browser/animation-projection.js";
 import { FilmSetVideoExportSession, videoSize, type FilmSetVideoTarget } from "./film-set-video-export.js";
 import { createFilmSetVideoEncoder } from "./film-set-video-encoder.js";
 import { recordingThemeBackdrop } from "./recording-theme-backdrop.js";
@@ -19,33 +21,44 @@ function layoutIdentity(ctx: Context, nodeId: string): string {
 export function videoExportTarget(ctx: Context, profile: FilmSetExportProfile = readFilmSetExportProfile(undefined)): FilmSetVideoTarget | null {
   const canvas = canvasNow(ctx), playback = ctx.canvasRuntime.animationPlaybackState();
   if (!canvas || !playback?.clipId || !playback.sourceIdentity || playback.viewMode !== "focus-preview") return null;
-  const decoded = decodeFilmSetNodeData(canvas.nodeData[playback.nodeId]);
-  if (!decoded.ok) return null;
-  const clip = filmSetAnimationsOf(decoded.value).clips.find(clip => clip.id === playback.clipId);
+  const animation = readAnimation(canvas, playback.nodeId);
+  if (!animation) return null;
+  const clip = filmSetAnimationsOf(animation).clips.find(clip => clip.id === playback.clipId);
   if (!clip) return null;
   return { canvasId: canvas.id, nodeId: playback.nodeId, clipId: clip.id, sourceIdentity: playback.sourceIdentity,
-    generation: playback.generation ?? 0, title: `${decoded.value.title || "片场"} · ${clip.name}`,
+    generation: playback.generation ?? 0, title: `${animation.title || "片场"} · ${clip.name}`,
     duration: clip.timeline.duration, aspect: clip.initialCamera.aspect, time: playback.time, playing: playback.playing,
     layoutIdentity: layoutIdentity(ctx, playback.nodeId), profile };
 }
 
 export function createFilmSetVideoExportSession(ctx: Context): FilmSetVideoExportSession {
   let captureGeneration = 1_000_000;
+  let captured = false;
   const sameSource = (target: FilmSetVideoTarget) => {
     const p = ctx.canvasRuntime.animationPlaybackState();
     return canvasNow(ctx)?.id === target.canvasId && p?.nodeId === target.nodeId && p.clipId === target.clipId
       && p.sourceIdentity === target.sourceIdentity && p.generation === target.generation && p.viewMode === "focus-preview" && layoutIdentity(ctx, target.nodeId) === target.layoutIdentity;
   };
   return new FilmSetVideoExportSession({
-    isCurrent: target => ctx.canvasSession.isWritable() && !document.hidden && ctx.canvasRuntime.modelFocusMode() !== "history" && sameSource(target),
+    isCurrent: target => ctx.canvasSession.isWritable() && !document.hidden && ctx.canvasRuntime.modelFocusMode() !== "history" && (captured ? canvasNow(ctx)?.id === target.canvasId : sameSource(target)),
     seek: time => ctx.filmSetPlayback.seek(time),
     restore: target => {
+      captured = true;
       // 导出结束（成功、失败或取消）后回到交互预览的纹理上限，避免常驻显存翻四倍（D5）。
       ctx.canvasRuntime.compositeAssetMediaSessions?.()?.setExportQuality?.(false);
       if (sameSource(target)) { ctx.filmSetPlayback.seek(target.time); if (target.playing && !document.hidden) ctx.filmSetPlayback.play(); }
     },
     createEncoder: createFilmSetVideoEncoder,
-    acquire: () => ctx.modelWorkspace.acquireCapture(),
+    acquire: async () => {
+      captured = false;
+      const release = await ctx.modelWorkspace.acquireCapture();
+      const target = ctx.canvasRuntime.animationPlaybackState();
+      if (!target) { release(); throw new Error("片场播放已结束"); }
+      try {
+        const unpin = pinFilmSetCapture(ctx, target.nodeId);
+        return () => { captured = true; unpin(); release(); };
+      } catch (error) { release(); throw error; }
+    },
     async capture(target, time, signal) {
       // Flush the new playback time, then wait for embedded video textures at exactly that time.
       await nextPaint(signal);

@@ -175,6 +175,23 @@ describe("复合资产严格 owner 与 scope", () => {
     // executionKey 只读内容，与 geometryQuality 声明无关。
     expect(resolved?.executionKey(canvas.nodeData.film)).toBe("static");
   });
+  it("overview cache is opt-in, rejects unknown values and disappears on adapter disposal", () => {
+    const registry = new CompositeAssetRegistry();
+    const stop = registry.register({ ...adapter("film-set"), overviewCache: "transparent-world-v1" });
+    registry.register(adapter("third-party"));
+    expect(() => registry.register({ ...adapter("bad"), overviewCache: "future" as never })).toThrow("未知");
+    const canvas = createEmptyWoohaa3ServerCanvas("cache-test");
+    canvas.document.nodes.push({ id: "film", type: "composite-asset", position: { x: 0, y: 0 } });
+    canvas.document.nodes.push({ id: "other", type: "composite-asset", position: { x: 0, y: 0 } });
+    canvas.document.nodes.push({ id: "group", type: "group", position: { x: 0, y: 0 } });
+    canvas.nodeData.film = { extensionId: "film-set" } as never;
+    canvas.nodeData.other = { extensionId: "third-party" } as never;
+    const before = JSON.stringify(canvas);
+    expect([...registry.overviewCaches(canvas)]).toEqual([["film", "transparent-world-v1"]]);
+    stop();
+    expect(registry.overviewCaches(canvas).size).toBe(0);
+    expect(JSON.stringify(canvas)).toBe(before);
+  });
 });
 
 it("占位只由可信声明投影，未知值拒绝，释放后清除且不改变范围/拾取输入", () => {

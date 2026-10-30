@@ -1,3 +1,4 @@
+import { normalizeContentNodeData } from "../content-node-data.js";
 import { sanitizeWoohaa3CanvasNodeData,
   sanitizeSerializedParentIds,
   type Woohaa3CanvasEdge,
@@ -18,6 +19,7 @@ import { shotReferenceDecision } from "./core/connection-rules.js";
 import { isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "./core/composite-asset-identity.js";
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { DIRECTOR_STUDIO_DEFAULT_TITLE, LEGACY_ANIMATION_DEFAULT_TITLE } from "../director-studio-title.js";
+import { decodeFilmSetGroupMarker, FILM_SET_GROUP_FIELD, validateFilmSetGroupBindings } from "../film-set-group.js";
 
 export type UploadFileDescriptor = {
   name: string;
@@ -125,12 +127,55 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   // 片场内部内容收敛（change: 2026-10-08-make-film-set-model-only）：
   // 缺失字段保持缺失（旧片场为空集合，不在此补写）；非法集合按空集合丢弃，绝不写入部分内容。
   applyFilmSetContentSanitizer(nodeData, nodeTypes, options?.content);
+  applyFilmSetGroupSanitizer(nodeData, nodeTypes);
+  // Missing resources remain represented by bindings and retry diagnostics.
+  // Existing foreign references still cannot grant group capabilities.
+  for (const node of document.nodes) {
+    if (node.type !== "group") continue;
+    const marker = decodeFilmSetGroupMarker(nodeData[node.id]?.[FILM_SET_GROUP_FIELD]);
+    if (!marker.ok) continue;
+    const validation = validateFilmSetGroupBindings({
+      id: input.id,
+      title: input.title,
+      revision: input.revision,
+      updatedAt: input.updatedAt,
+      document,
+      nodeData,
+      assets,
+      jobs: Array.isArray(input.jobs) ? input.jobs : []
+    }, node.id, marker.value, new Set(marker.value.sceneBindings.map(binding => binding.sourceNodeId)));
+    if (validation) delete nodeData[node.id]![FILM_SET_GROUP_FIELD];
+  }
   // 导演场更名（change: 2026-10-10-add-game-furnace-extension，design D1）：
   // 只把「系统创建且未被用户改写」的旧默认标题幂等更新为新展示名；自定义标题原样保留。
   migrateDirectorStudioLegacyTitle(nodeData, nodeTypes);
 
   const title = typeof input.title === "string" && input.title.trim() ? input.title.trim() : DEFAULT_CANVAS_TITLE;
   return { ...input, title, document, nodeData, assets, jobs: Array.isArray(input.jobs) ? input.jobs : [] };
+}
+
+/**
+ * Film-set group state is an explicit capability. Invalid markers are removed
+ * as a unit so a normal group can never be accidentally treated as a film set,
+ * while a legacy composite remains available to the read-only migration path.
+ */
+function applyFilmSetGroupSanitizer(
+  nodeData: Record<string, CanvasNodeData>,
+  nodeTypes: Map<string, string>
+): void {
+  for (const [nodeId, data] of Object.entries(nodeData)) {
+    if (!data || data[FILM_SET_GROUP_FIELD] === undefined) continue;
+    if (nodeTypes.get(nodeId) !== "group") {
+      delete data[FILM_SET_GROUP_FIELD];
+      continue;
+    }
+    const decoded = decodeFilmSetGroupMarker(data[FILM_SET_GROUP_FIELD]);
+    if (!decoded.ok) {
+      delete data[FILM_SET_GROUP_FIELD];
+      continue;
+    }
+    (data as Record<string, unknown>)[FILM_SET_GROUP_FIELD] = decoded.value;
+  }
 }
 
 function normalizeNodeType(
@@ -188,19 +233,15 @@ function applyFilmSetContentSanitizer(
   content?: ContentContributionResolver
 ): void {
   for (const [nodeId, data] of Object.entries(nodeData)) {
-    if (!data || data[FILM_SET_CONTENT_FIELD] === undefined) continue;
+    if (!data) continue;
     const type = nodeTypes.get(nodeId);
-    // 未知/不可用业务的合法原数据必须保留（不删引用、不改写）。
-    if (isCompositeAssetNodeType(type) && readCompositeAssetExtensionId(data) === null) continue;
-    const extensionId = readCompositeAssetExtensionId(data);
-    const codec = extensionId ? content?.resolve(extensionId)?.nodeData : undefined;
-    if (codec) {
-      const normalized = codec.normalize(data);
-      if (typeof normalized === "object" && normalized !== null && !Array.isArray(normalized)) {
-        nodeData[nodeId] = normalized as CanvasNodeData;
-      }
+    if (content && isCompositeAssetNodeType(type)) {
+      nodeData[nodeId] = normalizeContentNodeData(data, content);
       continue;
     }
+    if (data[FILM_SET_CONTENT_FIELD] === undefined) continue;
+    // 未知/不可用业务的合法原数据必须保留（不删引用、不改写）。
+    if (isCompositeAssetNodeType(type) && readCompositeAssetExtensionId(data) === null) continue;
     if (!isFilmSetNode(type, data)) {
       delete data[FILM_SET_CONTENT_FIELD];
       continue;

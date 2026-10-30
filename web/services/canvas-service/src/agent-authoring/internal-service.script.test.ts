@@ -145,9 +145,9 @@ describe("Agent Canvas script 内部能力面（任务 4.3–4.5）", () => {
     const exported = room.exportCanvas();
     expect(exported.ok).toBe(true);
     if (exported.ok) {
-      const node = exported.canvas.document.nodes.find(entry => entry.type === "composite-asset");
+      const node = exported.canvas.document.nodes.find(entry => entry.type === "group");
       expect(node).toBeDefined();
-      expect(node && exported.canvas.nodeData[node.id]).toMatchObject({ extensionId: "film-set", filmSetContent: { items: [] } });
+      expect(node && exported.canvas.nodeData[node.id]).toMatchObject({ filmSetGroup: { sceneBindings: [] } });
     }
   });
 

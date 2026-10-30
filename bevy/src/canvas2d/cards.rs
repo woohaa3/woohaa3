@@ -23,15 +23,7 @@ pub(super) fn draw_shot_preview(
     let z = 10.0 + index as f32 * 0.1 + 0.004;
     let (cx, cy, cw, ch) = super::shot_preview::content_rect_of(node);
     // 内容承载面：实时画面尚未就绪/待更新/失败时用主题内容底衬，保证状态文案可辨认。
-    geometry.rounded_rect(
-        cx,
-        cy,
-        cw,
-        ch,
-        3.,
-        z,
-        theme.token_u32("canvasNodeContent"),
-    );
+    geometry.rounded_rect(cx, cy, cw, ch, 3., z, theme.token_u32("canvasNodeContent"));
     let mut labels = Vec::new();
     // 状态文案：`ready` 且无诊断时返回空串（不覆盖实时画面），否则在内容区上沿展示。
     let status = super::shot_preview::status_text(node, &shortened);
@@ -138,6 +130,23 @@ pub(super) fn draw_static(
     labels
 }
 
+/// Produce the card geometry input. Kept as a separate entry point so cache producers can
+/// invalidate mesh blocks independently from label requests.
+pub(super) fn geometry(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    node: &GraphNode,
+    index: usize,
+) {
+    let _ = draw_static(geometry, theme, node, index);
+}
+
+/// Produce only label requests for a card. The temporary geometry sink preserves the existing
+/// layout helpers while keeping label refreshes out of the GPU mesh replacement path.
+pub(super) fn labels(theme: &ThemeResource, node: &GraphNode, index: usize) -> Vec<Label> {
+    draw_static(&mut Geometry::default(), theme, node, index)
+}
+
 /// 悬停端点半钮（非选中态装饰）。持久选中描边由 selection producer 生产。
 pub(super) fn draw_hover_ports(
     geometry: &mut Geometry,
@@ -238,8 +247,22 @@ pub(super) fn draw(
 }
 
 /// Shared rectangle grip; interaction uses the same layout::resize_rect.
-pub(super) fn draw_resize_grip(geometry: &mut Geometry, theme: &ThemeResource, node: &GraphNode, z: f32) {
+pub(super) fn draw_resize_grip(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    node: &GraphNode,
+    z: f32,
+) {
     let (x, y, w, h) = super::layout::resize_rect(node.x, node.y, node.width, node.height);
-    super::film_set::draw_scope_grip(geometry, theme,
-        &super::scope::ScopeGrip::Rect(super::scope::ScopeRect { x, y, width: w, height: h }), z);
+    super::film_set::draw_scope_grip(
+        geometry,
+        theme,
+        &super::scope::ScopeGrip::Rect(super::scope::ScopeRect {
+            x,
+            y,
+            width: w,
+            height: h,
+        }),
+        z,
+    );
 }

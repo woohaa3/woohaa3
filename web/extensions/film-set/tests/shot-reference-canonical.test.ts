@@ -69,7 +69,11 @@ describe("planShotReferenceFreeze（冻结与登记）", () => {
     }, now: () => "2026-10-18T00:00:00.000Z" });
     if (!committed.ok) throw new Error(committed.message);
     expect(committed.commands).toHaveLength(1);
-    for (const command of committed.commands) if (command.type === "asset.upsert") canvas.assets.push(command.asset);
+    for (const command of committed.commands) if (command.type === "asset.upsert") {
+      // 原生录制提交与浏览器录制一致：资产带同源读取路径，镜头卡片才能取到首帧。
+      expect(command.asset.url).toBe(`/api/media/${STORAGE_KEY}`);
+      canvas.assets.push(command.asset);
+    }
     const cache = new ShotReferenceVersionCache();
     expect(hydrateShotReferenceCacheFromCanvas(cache, JSON.parse(JSON.stringify(canvas)))).toBe(1);
     const plan = planShotReferenceFreeze({ canvas, readyAsset: ref => cache.readyAsset(ref), now: () => "t" });
@@ -101,6 +105,8 @@ describe("planShotReferenceFreeze（冻结与登记）", () => {
       expect(upsert.asset.status).toBe("ready");
       expect(upsert.asset.metadata?.storageKey).toBe(STORAGE_KEY);
       expect(upsert.asset.metadata?.checksum).toBe(CHECKSUM);
+      // 卡片首帧按 `url` 解析来源；缺它时已录制视频永远拿不到纹理（只剩 hover 实时取景）。
+      expect(upsert.asset.url).toBe(`/api/media/${STORAGE_KEY}`);
       expect(upsert.asset.id).toContain("shot-reference-video:");
     }
     if (patch?.type === "nodeData.patch" && upsert?.type === "asset.upsert") {
@@ -109,6 +115,15 @@ describe("planShotReferenceFreeze（冻结与登记）", () => {
     }
     // 预览节点不被改写。
     expect(canvas.nodeData[previewId]).toBe(nodeData[previewId]);
+  });
+
+  it("优先采用上传服务给出的读取路径", () => {
+    const { canvas } = fixture();
+    const ready = () => ({ storageKey: STORAGE_KEY, checksum: CHECKSUM, mediaType: "video/mp4", size: 9, url: `/api/media/${STORAGE_KEY}?canvas=c1` });
+    const plan = planShotReferenceFreeze({ canvas, readyAsset: ready, now: () => "t" });
+    const upsert = plan.commands.find((command) => command.type === "asset.upsert");
+    if (upsert?.type !== "asset.upsert") throw new Error("应登记资产");
+    expect(upsert.asset.url).toBe(`/api/media/${STORAGE_KEY}?canvas=c1`);
   });
 
   it("已冻结的映射不再产出命令（幂等）", () => {

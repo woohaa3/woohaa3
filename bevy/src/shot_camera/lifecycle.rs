@@ -7,8 +7,8 @@
 
 use bevy::{
     asset::RenderAssetUsages,
-    prelude::*,
     camera::RenderTarget,
+    prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
 };
 
@@ -120,25 +120,21 @@ pub(crate) fn publish_preview_readiness(
                 // multidraw instance counts private, so a GPU-indirect preview
                 // can draw successfully yet never pass that gate. Only views
                 // opting into readiness need direct drawing, as capture does.
-                commands
-                    .entity(camera)
-                    .insert((
-                        super::preview_readiness::ShotPreviewView {
-                            key: readiness.key,
-                            generation: readiness.generation,
-                            meshes: readiness.meshes.clone(),
-                            materials: readiness.materials.clone(),
-                        },
-                        bevy::render::view::NoIndirectDrawing,
-                    ));
+                commands.entity(camera).insert((
+                    super::preview_readiness::ShotPreviewView {
+                        key: readiness.key,
+                        generation: readiness.generation,
+                        meshes: readiness.meshes.clone(),
+                        materials: readiness.materials.clone(),
+                    },
+                    bevy::render::view::NoIndirectDrawing,
+                ));
             }
             None => {
-                commands
-                    .entity(camera)
-                    .remove::<(
-                        super::preview_readiness::ShotPreviewView,
-                        bevy::render::view::NoIndirectDrawing,
-                    )>();
+                commands.entity(camera).remove::<(
+                    super::preview_readiness::ShotPreviewView,
+                    bevy::render::view::NoIndirectDrawing,
+                )>();
             }
         }
     }
@@ -168,10 +164,16 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()));
         app.init_asset::<Image>();
-        let image = app.world_mut().resource_mut::<Assets<Image>>().add(Image::default());
+        let image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
         let id = image.id();
         let published = image.clone();
-        let mut inner = ShotCameraInner { preview_image: Some(image), ..default() };
+        let mut inner = ShotCameraInner {
+            preview_image: Some(image),
+            ..default()
+        };
         let world = World::new();
         let mut queue = bevy::ecs::world::CommandQueue::default();
         release_preview(
@@ -182,10 +184,16 @@ mod tests {
         assert!(inner.preview_image.is_none());
         app.update();
         app.update();
-        assert!(app.world().resource::<Assets<Image>>().contains(id), "已显示的旧图仍有引用");
+        assert!(
+            app.world().resource::<Assets<Image>>().contains(id),
+            "已显示的旧图仍有引用"
+        );
         drop(published);
         app.update();
         app.update();
-        assert!(!app.world().resource::<Assets<Image>>().contains(id), "最后引用释放后自动回收");
+        assert!(
+            !app.world().resource::<Assets<Image>>().contains(id),
+            "最后引用释放后自动回收"
+        );
     }
 }

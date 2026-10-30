@@ -30,6 +30,7 @@ export type CanvasCommandRejectionCode =
   | "invalid-model-cameras"
   | "invalid-image-edit"
   | "invalid-self-contained-node"
+  | "invalid-film-set-group"
   | "missing-edge-id"
   | "invalid-command"
   /** 拍摄镜头预览的归属/生命周期不变式被绕过（独立创建、删除、改归属或写媒体字段）。 */
@@ -59,6 +60,7 @@ export type ApplyCanvasCommandsResult =
 
 /** 可变工作副本；命令逐个作用于它，最后一次性写回规范聚合。 */
 export type WorkingState = {
+  content?: import("../content-contribution.js").ContentContributionResolver;
   title: string;
   nodes: Woohaa3CanvasNode[];
   edges: Woohaa3CanvasEdge[];

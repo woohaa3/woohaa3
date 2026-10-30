@@ -5,9 +5,7 @@
 use super::render::{background_color, encode_png, normalize_readback, render_preview};
 use crate::model3d::scene;
 use crate::protocol::ModelOp;
-use crate::renderer_protocol::{
-    CaptureOptions, RENDERER_PROTOCOL_VERSION, RenderRequest,
-};
+use crate::renderer_protocol::{CaptureOptions, RENDERER_PROTOCOL_VERSION, RenderRequest};
 
 fn request(ops: Vec<ModelOp>, extent: f32, capture: CaptureOptions) -> RenderRequest {
     RenderRequest {
@@ -27,20 +25,14 @@ fn request(ops: Vec<ModelOp>, extent: f32, capture: CaptureOptions) -> RenderReq
 #[test]
 fn background_transparent_is_none() {
     assert_eq!(background_color("transparent"), bevy::prelude::Color::NONE);
-    assert_eq!(
-        background_color("#112233"),
-        scene::parse_hex("#112233")
-    );
+    assert_eq!(background_color("#112233"), scene::parse_hex("#112233"));
 }
 
 #[test]
 fn png_encoding_produces_signature() {
     let pixels = vec![128u8; 4 * 4 * 4];
     let png = encode_png(&pixels, 4, 4).expect("png");
-    assert_eq!(
-        &png[..8],
-        &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]
-    );
+    assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
 }
 
 #[test]
@@ -59,13 +51,16 @@ fn readback_removes_gpu_padding_from_each_row() {
     let mut padded = vec![255u8; 512];
     padded[..12].fill(1);
     padded[256..268].fill(2);
-    assert_eq!(normalize_readback(&padded, 3, 2), [vec![1u8; 12], vec![2u8; 12]].concat());
+    assert_eq!(
+        normalize_readback(&padded, 3, 2),
+        [vec![1u8; 12], vec![2u8; 12]].concat()
+    );
 }
 
 #[test]
 fn native_output_uses_original_high_geometry_and_exact_primitive_identity() {
-    use bevy::prelude::*;
     use crate::model3d::{resources::SharedResources, scene::ModelGeometry};
+    use bevy::prelude::*;
     let mut resources = SharedResources::default();
     let mut meshes = Assets::<Mesh>::default();
     let first = ModelGeometry::Sphere { radius: 1.00001 };
@@ -74,17 +69,26 @@ fn native_output_uses_original_high_geometry_and_exact_primitive_identity() {
     let again = super::render::high_mesh(&mut resources, &mut meshes, &first).unwrap();
     let b = super::render::high_mesh(&mut resources, &mut meshes, &second).unwrap();
     assert_eq!(a, again);
-    assert_ne!(a, b, "native must not round distinct dimensions into one cache key");
+    assert_ne!(
+        a, b,
+        "native must not round distinct dimensions into one cache key"
+    );
     assert_eq!(meshes.get(&a).unwrap().indices().unwrap().len() / 3, 528);
     let expected = crate::model3d::mesh::build_mesh(&first).unwrap();
-    assert_eq!(meshes.get(&a).unwrap().attribute(Mesh::ATTRIBUTE_POSITION), expected.attribute(Mesh::ATTRIBUTE_POSITION));
-    assert_eq!(meshes.get(&a).unwrap().attribute(Mesh::ATTRIBUTE_NORMAL), expected.attribute(Mesh::ATTRIBUTE_NORMAL));
+    assert_eq!(
+        meshes.get(&a).unwrap().attribute(Mesh::ATTRIBUTE_POSITION),
+        expected.attribute(Mesh::ATTRIBUTE_POSITION)
+    );
+    assert_eq!(
+        meshes.get(&a).unwrap().attribute(Mesh::ATTRIBUTE_NORMAL),
+        expected.attribute(Mesh::ATTRIBUTE_NORMAL)
+    );
 }
 
 #[test]
 fn native_custom_meshes_with_equal_counts_preserve_distinct_vertices_and_topology() {
-    use bevy::prelude::*;
     use crate::model3d::{resources::SharedResources, scene::ModelGeometry};
+    use bevy::prelude::*;
     let mut resources = SharedResources::default();
     let mut meshes = Assets::<Mesh>::default();
     let first = ModelGeometry::Mesh {
@@ -111,10 +115,27 @@ fn native_custom_meshes_with_equal_counts_preserve_distinct_vertices_and_topolog
     let a = super::render::high_mesh(&mut resources, &mut meshes, &first).unwrap();
     let b = super::render::high_mesh(&mut resources, &mut meshes, &moved).unwrap();
     let c = super::render::high_mesh(&mut resources, &mut meshes, &reversed).unwrap();
-    assert_ne!(a, b); assert_ne!(a, c); assert_ne!(b, c);
-    assert_ne!(meshes.get(&a).unwrap().attribute(Mesh::ATTRIBUTE_POSITION), meshes.get(&b).unwrap().attribute(Mesh::ATTRIBUTE_POSITION));
-    assert_eq!(meshes.get(&c).unwrap().indices().unwrap().iter().collect::<Vec<_>>(), vec![0, 2, 1]);
-    assert_eq!(super::render::high_mesh(&mut resources, &mut meshes, &first).unwrap(), a);
+    assert_ne!(a, b);
+    assert_ne!(a, c);
+    assert_ne!(b, c);
+    assert_ne!(
+        meshes.get(&a).unwrap().attribute(Mesh::ATTRIBUTE_POSITION),
+        meshes.get(&b).unwrap().attribute(Mesh::ATTRIBUTE_POSITION)
+    );
+    assert_eq!(
+        meshes
+            .get(&c)
+            .unwrap()
+            .indices()
+            .unwrap()
+            .iter()
+            .collect::<Vec<_>>(),
+        vec![0, 2, 1]
+    );
+    assert_eq!(
+        super::render::high_mesh(&mut resources, &mut meshes, &first).unwrap(),
+        a
+    );
     assert_eq!(resources.simplification_diagnostics()["pending"], 0);
 }
 
@@ -136,10 +157,7 @@ fn native_renderer_png() {
     let req = request(ops, 3.0, capture);
     let png = render_preview(&req).expect("native renderer 应产出 PNG");
     assert!(png.len() > 100, "PNG 过小");
-    assert_eq!(
-        &png[..8],
-        &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]
-    );
+    assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
 }
 
 fn humanoid_ops() -> Vec<ModelOp> {

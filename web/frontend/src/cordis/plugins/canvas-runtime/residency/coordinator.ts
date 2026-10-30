@@ -126,6 +126,8 @@ const EMPTY_PURPOSE: Record<ResidencyPurpose, number> = {
 export class CanvasResourceCoordinator {
   private readonly policy: ResidencyPolicy;
   private readonly queues = new Map<ResidencyChannel, ResidencyChannelQueue>();
+  private readonly derivedGpuClaims = new Map<string, { bytes: number; ownerId: string; evict: () => void }>();
+  private gpuClaimRevision = 0;
   private demands = new Map<string, NodeResidencyDemand>();
   private readonly pins = new Set<string>();
   private surfaceValid = false;
@@ -139,18 +141,43 @@ export class CanvasResourceCoordinator {
   /** 准入集合（含档位/用途）每发生一次实质变化递增；供媒体 owner 跳过静止全量重建。 */
   private revision = 0;
   private readonly now: () => number;
+  private readonly onGpuClaimReleased: () => void;
   /** 节点离开需求集合的时刻（毫秒）；宽限内重新取得需求不重新解码（design D1）。 */
   private readonly offscreenSince = new Map<string, number>();
 
-  constructor(options: { policy?: Partial<ResidencyPolicy>; now?: () => number } = {}) {
+  constructor(options: { policy?: Partial<ResidencyPolicy>; now?: () => number; onGpuClaimReleased?: () => void } = {}) {
     this.policy = resolveResidencyPolicy(options.policy ?? {});
     this.now = options.now ?? (() => (typeof performance !== "undefined" ? performance.now() : Date.now()));
+    this.onGpuClaimReleased = options.onGpuClaimReleased ?? (() => undefined);
   }
 
   /** 当前生效策略（只读）。 */
   getPolicy(): ResidencyPolicy {
     return this.policy;
   }
+
+  /** Reserve estimated GPU bytes until the resource is actually released. */
+  reserveDerivedGpu(key: string, bytes: number, ownerId: string, evict: () => void): boolean {
+    if (this.disposed || !Number.isFinite(bytes) || bytes < 0 || this.derivedGpuClaims.has(key)) return false;
+    if (this.estimateGpuBytes() + bytes > this.policy.gpuDerivedBytes) return false;
+    this.derivedGpuClaims.set(key, { bytes, ownerId, evict });
+    this.gpuClaimRevision += 1;
+    return true;
+  }
+
+  /** Settle temporary attachments while retaining the color image reservation. */
+  reduceDerivedGpu(key: string, bytes: number): boolean {
+    const previous = this.derivedGpuClaims.get(key);
+    if (previous === undefined || !Number.isFinite(bytes) || bytes < 0 || bytes > previous.bytes) return false;
+    if (previous.bytes !== bytes) { previous.bytes = bytes; this.gpuClaimRevision += 1; this.onGpuClaimReleased(); }
+    return true;
+  }
+
+  releaseDerivedGpu(key: string): void {
+    if (this.derivedGpuClaims.delete(key)) { this.gpuClaimRevision += 1; this.onGpuClaimReleased(); }
+  }
+
+  derivedGpuRevision(): number { return this.gpuClaimRevision; }
 
   /** 节点当前档位（无需求/未驻留返回 null）。 */
   tierOf(nodeId: string): ThumbnailTier | null {
@@ -249,6 +276,10 @@ export class CanvasResourceCoordinator {
         live: true
       });
     }
+    const priorityBytes = [...next.values()]
+      .filter(demand => demand.purpose === "interactive" || pins.has(demand.nodeId))
+      .reduce((total, demand) => total + estimateDemandBytes(demand), 0);
+    this.evictDerivedForPriority(priorityBytes, next);
     // 需求超过预览槽/预算时按 purpose 裁剪；interactive 与 pins 永不裁剪。
     const candidatesById = new Map(input.candidates.map((candidate) => [candidate.nodeId, candidate]));
     const admitted = this.applyBudget(next, pins, candidatesById);
@@ -275,7 +306,7 @@ export class CanvasResourceCoordinator {
         if (!candidatesById.get(nodeId)?.eligible || !this.demands.has(nodeId)) this.offscreenSince.delete(nodeId);
       }
       // 宽限保留同样受页预算约束：按剩余 GPU 估算余量依次保留，超预算立即淘汰。
-      let gpu = 0;
+      let gpu = this.claimedGpuBytes();
       let previewSlots = 0;
       for (const [nodeId, demand] of admitted) {
         gpu += estimateDemandBytes(demand);
@@ -292,7 +323,7 @@ export class CanvasResourceCoordinator {
         const slot = candidatesById.get(nodeId)?.previewSlot === true;
         if (slot && previewSlots >= slots) continue;
         const cost = estimateDemandBytes(demand);
-        if (admitted.size > 0 && gpu + cost > this.policy.gpuDerivedBytes) break;
+        if ((admitted.size > 0 || this.claimedGpuBytes() > 0) && gpu + cost > this.policy.gpuDerivedBytes) break;
         gpu += cost;
         if (slot) previewSlots += 1;
         admitted.set(nodeId, demand);
@@ -447,6 +478,7 @@ export class CanvasResourceCoordinator {
     this.queues.clear();
     this.demands.clear();
     this.pins.clear();
+    this.derivedGpuClaims.clear();
   }
 
   private estimateGpuBytes(): number {
@@ -455,11 +487,32 @@ export class CanvasResourceCoordinator {
       const edge = selectThumbnailTier(demand.physicalEdge);
       total += edge * edge * 4;
     }
+    return total + this.claimedGpuBytes();
+  }
+
+  private claimedGpuBytes(): number {
+    let total = 0;
+    for (const claim of this.derivedGpuClaims.values()) total += claim.bytes;
     return total;
   }
 
+  private evictDerivedForPriority(priorityBytes: number, next: ReadonlyMap<string, NodeResidencyDemand>): void {
+    if (priorityBytes + this.claimedGpuBytes() <= this.policy.gpuDerivedBytes) return;
+    const claims = [...this.derivedGpuClaims.values()].sort((a, b) =>
+      purposeRankOf(next.get(b.ownerId)?.purpose ?? "warm") - purposeRankOf(next.get(a.ownerId)?.purpose ?? "warm"));
+    const evicted = new Set<string>();
+    for (const claim of claims) {
+      if (priorityBytes + this.claimedGpuBytes() <= this.policy.gpuDerivedBytes) break;
+      if (evicted.has(claim.ownerId)) continue;
+      evicted.add(claim.ownerId);
+      claim.evict();
+    }
+  }
+
   private estimateCpuBytes(): number {
-    return this.estimateGpuBytes();
+    let total = 0;
+    for (const demand of this.demands.values()) total += estimateDemandBytes(demand);
+    return total;
   }
 
   private classify(
@@ -511,21 +564,29 @@ export class CanvasResourceCoordinator {
       return b.physicalEdge - a.physicalEdge;
     });
     const admitted = new Map<string, NodeResidencyDemand>();
-    let gpu = 0;
+    let gpu = this.claimedGpuBytes();
     let previewSlots = 0;
     for (const demand of ordered) {
       const pinned = demand.purpose === "interactive" || pins.has(demand.nodeId);
       // 只有明确声明需要离屏预览相机的需求才占用预览槽（生产路径由
       // `collectResidencyCandidates` 显式给出；图片/视频为 false）。
       const slot = candidatesById.get(demand.nodeId)?.previewSlot === true;
+      if (pinned && this.claimedGpuBytes() > 0 && gpu + estimateDemandBytes(demand) > this.policy.gpuDerivedBytes) {
+        continue;
+      }
       if (!pinned) {
         // 预览槽只对需要离屏预览相机的需求计数；超槽的只有该项延后，不能中断整轮准入
         // （否则排在前面的第 17 个模型会让后面所有普通媒体卡一并被丢掉）。
         if (slot && previewSlots >= slots) continue;
         // GPU 估算预算：超预算时只对实际竞争需求排队，不无限扩大预算。
         const cost = estimateDemandBytes(demand);
-        if (gpu + cost > this.policy.gpuDerivedBytes && admitted.size > 0) break;
+        if (gpu + cost > this.policy.gpuDerivedBytes && (admitted.size > 0 || this.claimedGpuBytes() > 0)) break;
         gpu += cost;
+        if (slot) previewSlots += 1;
+      } else {
+        // Priority demands may exceed the limit, but their cost still reduces the
+        // capacity available to ordinary work.
+        gpu += estimateDemandBytes(demand);
         if (slot) previewSlots += 1;
       }
       admitted.set(demand.nodeId, demand);

@@ -99,7 +99,8 @@ pub(crate) fn apply_focus_projection(
     scene: &CurrentScene,
     camera2d: &mut Query<&mut Camera, (With<crate::canvas2d::MainCanvasCamera>, Without<Camera3d>)>,
 ) {
-    let overlay_active = overlay_camera2d_active(focused) || (focused && !scene.0.model_focus_context.is_empty());
+    let overlay_active =
+        overlay_camera2d_active(focused) || (focused && !scene.0.model_focus_context.is_empty());
     if focused {
         let fov = scene
             .0
@@ -153,7 +154,10 @@ mod tests {
         let placed = place_native_surface(0.0, 0.4, 1280.0, 720.0, 1.0);
         assert!(!placed.inset);
         assert_eq!((placed.window_width, placed.window_height), (1280, 720));
-        assert_eq!((placed.logical_width, placed.logical_height), (1280.0, 720.0));
+        assert_eq!(
+            (placed.logical_width, placed.logical_height),
+            (1280.0, 720.0)
+        );
     }
 
     #[test]
@@ -163,7 +167,10 @@ mod tests {
         assert_eq!((placed.window_width, placed.window_height), (1280, 720));
         assert_eq!((placed.viewport_x, placed.viewport_y), (0, 26));
         assert_eq!((placed.viewport_width, placed.viewport_height), (1280, 694));
-        assert_eq!((placed.logical_width, placed.logical_height), (1280.0, 694.0));
+        assert_eq!(
+            (placed.logical_width, placed.logical_height),
+            (1280.0, 694.0)
+        );
         // Native view layout must cover this swapchain (0,0,1280,720), not the
         // canvas hole (0,26,1280,694). The hole is only the camera viewport.
         assert_eq!(

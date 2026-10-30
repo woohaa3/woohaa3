@@ -26,6 +26,7 @@ import { isEditApplyCommand, type EditApplyCommand } from "./edit-command.js";
 import type {
   FilmSetLocalTransform
 } from "./film-set-content.js";
+import type { FilmSetGroupSceneBinding } from "./film-set-group.js";
 
 /**
  * 片场对象级权威操作（change: 2026-10-09-add-film-set-object-motion-and-editing，任务 2.3；
@@ -66,6 +67,9 @@ export type CanvasCommand =
   /** 扩展内容命令。内核只校验信封，业务由 owner codec 解码和应用。 */
   | { type: "extension.command"; extensionId: string; nodeId?: string; kind: string; payload: unknown }
   | { type: "filmSet.clipPatch"; nodeId: string; clipId: string; expectedHash: string; op: FilmSetClipPatchOp }
+  /** Canonical film-set group binding edit. Composite object patches are legacy read-only paths. */
+  | { type: "filmSetGroup.bindingPatch"; groupId: string; bindingId: string; expectedContentKey?: string; patch: Partial<Pick<FilmSetGroupSceneBinding, "transform" | "visibility" | "contentKey" | "animation">> }
+  | { type: "filmSetGroup.ungroup"; groupId: string; expectedSchemaVersion?: number }
   | {
       type: "edge.add";
       edge: {
@@ -95,6 +99,8 @@ export const CANVAS_COMMAND_TYPES: readonly CanvasCommandType[] = [
   "nodeData.patch",
   "filmSet.itemPatch",
   "filmSet.clipPatch",
+  "filmSetGroup.bindingPatch",
+  "filmSetGroup.ungroup",
   "extension.command",
   "edge.add",
   "edge.remove",
@@ -158,6 +164,15 @@ export function isCanvasCommand(value: unknown): value is CanvasCommand {
     case "filmSet.clipPatch":
       return isNonEmptyString(value.nodeId) && isNonEmptyString(value.clipId)
         && isNonEmptyString(value.expectedHash) && isFilmSetClipPatchOp(value.op);
+    case "filmSetGroup.bindingPatch":
+      return isNonEmptyString(value.groupId) && isNonEmptyString(value.bindingId)
+        && (value.expectedContentKey === undefined || isNonEmptyString(value.expectedContentKey))
+        && isRecord(value.patch)
+        && (value.patch.transform === undefined || isRecord(value.patch.transform))
+        && (value.patch.visibility === undefined || typeof value.patch.visibility === "boolean")
+        && (value.patch.contentKey === undefined || isNonEmptyString(value.patch.contentKey));
+    case "filmSetGroup.ungroup":
+      return isNonEmptyString(value.groupId) && (value.expectedSchemaVersion === undefined || Number.isSafeInteger(value.expectedSchemaVersion));
     case "extension.command":
       return isNonEmptyString(value.extensionId)
         && isNonEmptyString(value.kind)

@@ -12,6 +12,7 @@ import type { YjsDocumentRepository } from "./yjs-repository.js";
 import { CanvasRoom, type RoomBroadcast } from "./room.js";
 
 export type CanvasRoomRegistryOptions = {
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   repository: YjsDocumentRepository;
   mediaStorage?: MediaStorage;
@@ -31,6 +32,8 @@ export type CanvasRoomRegistryOptions = {
    * 透传给每个 `CanvasRoom`（见 `CanvasRoomOptions.onCommitted`）。
    */
   onCommitted?: (input: { canvasId: string; canvas: ServerCanvas; commands: readonly unknown[] }) => void;
+  /** 存储 sequence 冲突后自动重载 room 的观察者（见 `CanvasRoomOptions.onStorageSeqRecovered`）。 */
+  onStorageSeqRecovered?: (input: { canvasId: string; attempt: number; recovered: boolean }) => void;
   /**
    * room **第一次被客户端（浏览器会话）持有**时调用；返回值在 room 销毁时调用，
    * 用于挂接远端同步上游。
@@ -70,12 +73,15 @@ export class CanvasRoomRegistry {
   private readonly bootstrap: ((canvasId: string) => Promise<ServerCanvas | null>) | undefined;
   private readonly generateRoomEpoch: (() => string) | undefined;
   private readonly onCommitted: ((input: { canvasId: string; canvas: ServerCanvas; commands: readonly unknown[] }) => void) | undefined;
+  private readonly onStorageSeqRecovered: CanvasRoomRegistryOptions["onStorageSeqRecovered"];
   private readonly onClientAcquired: CanvasRoomRegistryOptions["onClientAcquired"];
   private readonly seedFromUpstream: CanvasRoomRegistryOptions["seedFromUpstream"];
   private readonly roomDetachers = new Map<string, () => void>();
 
+  private readonly content: import("@woohaa3/contracts").ContentContributionResolver | undefined;
   private readonly lifecycle: import("@woohaa3/contracts").ManagedNodeLifecycleResolver | undefined;
   constructor(options: CanvasRoomRegistryOptions) {
+    this.content = options.content;
     this.lifecycle = options.lifecycle;
     this.repository = options.repository;
     this.mediaStorage = options.mediaStorage;
@@ -86,6 +92,7 @@ export class CanvasRoomRegistry {
     this.bootstrap = options.bootstrap;
     this.generateRoomEpoch = options.generateRoomEpoch;
     this.onCommitted = options.onCommitted;
+    this.onStorageSeqRecovered = options.onStorageSeqRecovered;
     this.onClientAcquired = options.onClientAcquired;
     this.seedFromUpstream = options.seedFromUpstream;
     this.schedule = options.schedule ?? ((run, delayMs) => {
@@ -193,7 +200,8 @@ export class CanvasRoomRegistry {
         now: this.now,
         broadcast: this.broadcast,
         verifyAssets: this.verifyAssets,
-      lifecycle: this.lifecycle,
+        content: this.content,
+        lifecycle: this.lifecycle,
         ...(this.bootstrap ? { bootstrap: () => this.bootstrap!(canvasId) } : {}),
         ...(this.seedFromUpstream ? { seedFromUpstream: () => this.seedFromUpstream!(canvasId) } : {}),
         ...(this.generateRoomEpoch ? { generateRoomEpoch: this.generateRoomEpoch } : {}),
@@ -202,6 +210,9 @@ export class CanvasRoomRegistry {
               onCommitted: (input: { canvas: ServerCanvas; commands: readonly unknown[] }) =>
                 this.onCommitted!({ canvasId, ...input })
             }
+          : {}),
+        ...(this.onStorageSeqRecovered
+          ? { onStorageSeqRecovered: (input: { canvasId: string; attempt: number; recovered: boolean }) => this.onStorageSeqRecovered!(input) }
           : {})
       });
       const loaded = await room.load();

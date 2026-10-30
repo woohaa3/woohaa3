@@ -99,7 +99,10 @@ fn fnv_matches_contract_golden() {
     let golden = fixture();
     assert_eq!(fnv1a64_utf16(""), golden.fnv.empty);
     assert_eq!(fnv1a64_utf16("abc"), golden.fnv.abc);
-    assert_eq!(fnv1a64_utf16(&golden.fnv.unicode.text), golden.fnv.unicode.hash);
+    assert_eq!(
+        fnv1a64_utf16(&golden.fnv.unicode.text),
+        golden.fnv.unicode.hash
+    );
 }
 
 #[test]
@@ -119,8 +122,13 @@ fn point_hit_matches_contract_golden() {
     let golden = fixture();
     let nodes_json = serde_json::to_string(&golden.point_hit.nodes).expect("nodes json");
     for case in &golden.point_hit.cases {
-        let actual = point_hit_kind(&nodes_json, case.world[0], case.world[1], golden.point_hit.zoom)
-            .expect("point hit");
+        let actual = point_hit_kind(
+            &nodes_json,
+            case.world[0],
+            case.world[1],
+            golden.point_hit.zoom,
+        )
+        .expect("point hit");
         match (&case.expect, actual) {
             (None, None) => {}
             (Some(expected), Some(actual)) => {
@@ -130,7 +138,12 @@ fn point_hit_matches_contract_golden() {
                 };
                 assert_eq!(actual, want, "case {:?}", case.world);
             }
-            (expected, actual) => panic!("case {:?}: expected {:?}, got {:?}", case.world, expected.is_some(), actual),
+            (expected, actual) => panic!(
+                "case {:?}: expected {:?}, got {:?}",
+                case.world,
+                expected.is_some(),
+                actual
+            ),
         }
     }
 }

@@ -250,7 +250,7 @@ export type NodeActionActivation = NodeActionContext & {
 export type NodeActionDescriptor = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download" | "arrange-horizontal" | "arrange-vertical" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
+  icon?: "download" | "edit" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
   iconOnly?: boolean;
   /** 按钮文案（中文）。 */
   label: string;
@@ -260,7 +260,7 @@ export type NodeActionDescriptor = {
   reason?: string;
   /** 是否在按钮后附加独立设置箭头（点击派发 `menu: true`）。 */
   menu?: boolean;
-  /** 横条右端的模型名摘要（可选）。 */
+  /** 横条左侧的节点摘要（可选）。 */
   summary?: string | null;
 };
 

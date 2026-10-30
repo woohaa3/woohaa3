@@ -64,7 +64,7 @@ export function SeedanceVideoPanel(props: ModelPanelProps) {
             <textarea
               id={`seedance-prompt-${props.nodeId}`}
               className="mc-panel__textarea nowheel"
-              placeholder="描述视频内容；Enter 发送"
+              placeholder="描述视频内容；Enter 发送，Shift+Enter 换行"
               value={draft.prompt}
               rows={3}
               disabled={!writable}

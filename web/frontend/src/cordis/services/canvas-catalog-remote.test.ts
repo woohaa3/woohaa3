@@ -60,6 +60,28 @@ describe("createCanvasCatalogRemote", () => {
     expect(result).toMatchObject({ ok: true, summary: { id: "a", revision: 3, nodeCount: 1, assetCount: 1 } });
   });
 
+  it("delete 发送 expectedRevision 查询参数，204 视为成功", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), method: init?.method ?? "GET" });
+      return new Response(null, { status: 204 });
+    }) as typeof fetch;
+    const remote = createCanvasCatalogRemote({ fetchImpl: impl });
+    expect(await remote.delete("a b", 7)).toEqual({ ok: true });
+    expect(calls).toEqual([{ url: "/api/canvases/a%20b?expectedRevision=7", method: "DELETE" }]);
+  });
+
+  it("delete 透传版本冲突与无权限的稳定 code", async () => {
+    const conflict = createCanvasCatalogRemote({
+      fetchImpl: fetchOnce({ code: "REVISION_CONFLICT", message: "画布 revision 已变化" }, 409).impl
+    });
+    expect(await conflict.delete("a", 1)).toMatchObject({ ok: false, code: "REVISION_CONFLICT" });
+    const forbidden = createCanvasCatalogRemote({
+      fetchImpl: fetchOnce({ code: "FORBIDDEN", message: "只有画布作者能删除这张画布" }, 403).impl
+    });
+    expect(await forbidden.delete("a", 1)).toMatchObject({ ok: false, code: "FORBIDDEN" });
+  });
+
   it("HTTP 错误透传稳定 code", async () => {
     const { impl } = fetchOnce({ code: "CANVAS_NOT_FOUND", message: "不存在" }, 404);
     const remote = createCanvasCatalogRemote({ fetchImpl: impl });

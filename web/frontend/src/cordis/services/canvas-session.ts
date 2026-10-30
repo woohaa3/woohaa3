@@ -16,6 +16,7 @@ import { CommandLifecycleRegistry, CanvasDatabase, IndexedDbYjsCacheRepository, 
 import * as Y from "yjs";
 import type { CanvasAccess, CanvasCommand, ServerCanvas, TelemetryEventInput } from "@woohaa3/contracts";
 import { yDocToServerCanvas, YJS_SYNC_PROTOCOL_VERSION, YJS_CANVAS_FORMAT_VERSION } from "@woohaa3/contracts/canvas-yjs";
+import type { CommandResultPayload } from "@woohaa3/contracts/canvas-yjs";
 import { ReadonlyCanvasProvider, type ReadonlyProviderState } from "./yjs/readonly-provider.js";
 import type { CanvasSession, CanvasSessionStatus } from "../contracts.js";
 import type { CanvasRemoteService } from "../contracts.js";
@@ -146,6 +147,8 @@ function isBrowserOffline(): boolean {
 
 export type CreateCanvasSessionOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
+  getContent?: () => import("@woohaa3/contracts").ContentContributionResolver | undefined;
+  subscribeContent?: (listener: () => void) => () => void;
   canvasId?: string;
   /** Canvas 远端 adapter；会话在其上维护投影与写入门禁。 */
   remote: CanvasRemoteService;
@@ -316,7 +319,17 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   let yjsProvider: ReadonlyCanvasProvider | undefined;
   let yjsLifecycle: CommandLifecycleRegistry | undefined;
   const saveStarts = new Map<string, number>();
+  /**
+   * storage sequence 冲突的自动重发计数（每个 commandId 至多再发一次）。
+   *
+   * 服务端在冲突后已经自行重载 room 并重试（`CanvasRoom.withStorageSeqRecovery`）；客户端
+   * 这一层兜住「重载后又被另一个 writer 抢先」的残余竞争：用**同一个 commandId** 重发原批次，
+   * 幂等、不产生新身份，也不把这一轮可恢复的失败暴露成编辑失败。
+   */
+  const seqConflictResubmits = new Map<string, number>();
+  const MAX_SEQ_CONFLICT_RESUBMITS = 1;
   const settleSave = (commandId: string, result: "success" | "failure" | "cancelled", errorCode?: string) => {
+    seqConflictResubmits.delete(commandId);
     const started = saveStarts.get(commandId);
     if (started === undefined) return;
     saveStarts.delete(commandId);
@@ -324,7 +337,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       durationMs: elapsedMs(started), ...(errorCode ? { errorCode } : {}) });
   };
   /** 会话内 working projection：canonical + 有序 pending batches，仅内存。 */
-  const projection = new WorkingProjectionStore(options.lifecycle);
+  const projection = new WorkingProjectionStore(options.lifecycle, options.getContent);
   /**
    * 规范投影复用缓存（change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 8.1）。
    *
@@ -502,6 +515,32 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     });
   };
 
+  /**
+   * sequence 冲突自动重发（同一 commandId、同一批命令；每个 commandId 一次）。
+   *
+   * 返回 true 表示这一轮回执已被吞掉：批次仍在 working projection，lifecycle 仍 pending，
+   * 调用方继续等最终回执。返回 false 时调用方按普通失败结算。
+   */
+  const resubmitOnSeqConflict = (result: CommandResultPayload): boolean => {
+    if (result.status !== "failed" || result.code !== "storage-seq-conflict") return false;
+    const attempts = seqConflictResubmits.get(result.commandId) ?? 0;
+    if (attempts >= MAX_SEQ_CONFLICT_RESUBMITS) return false;
+    const batch = projection.pendingBatches.find((entry) => entry.commandId === result.commandId);
+    const provider = yjsProvider;
+    if (!batch || !provider) return false;
+    const sent = provider.submitCommand({
+      protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+      canvasId,
+      commandId: batch.commandId,
+      baseRevision: batch.baseRevision,
+      actorId: "web-canvas",
+      commands: [...batch.commands]
+    });
+    if (!sent.ok) return false;
+    seqConflictResubmits.set(result.commandId, attempts + 1);
+    return true;
+  };
+
   const startYjsSync = async (): Promise<boolean> => {
     // 每次（重）连接都是一次独立的 sync.connect 观测；上一次已结算的不受影响。
     syncStartedAt = telemetryNow();
@@ -575,6 +614,8 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
           .catch(() => undefined);
       },
       onCommandResult: (result) => {
+        // 可恢复的存储 sequence 冲突：先用同一 commandId 重发一次，不把这一轮失败交给调用方。
+        if (resubmitOnSeqConflict(result)) return;
         lifecycle.applyResult({
           commandId: result.commandId,
           status: result.status,
@@ -718,6 +759,12 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   };
 
   await attach();
+  let stopContent = options.subscribeContent?.(() => {
+    if (disposed) return;
+    projection.refreshContent();
+    woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
+    publish({ remote: { ...status.remote, pendingCount: projection.pendingBatches.length } });
+  });
   const session: CanvasSession = {
     getStatus: () => status,
     subscribe: (listener) => {
@@ -814,6 +861,8 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       settleSync("cancelled");
       settleOpen("cancelled");
       disposed = true;
+      stopContent?.();
+      stopContent = undefined;
       detach();
       listeners.clear();
       void database.close();

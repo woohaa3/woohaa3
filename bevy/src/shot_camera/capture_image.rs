@@ -30,7 +30,8 @@ pub(crate) fn create_capture_image(
 /// 从 `ScreenshotCaptured` 的 Image 提取 RGBA；处理 BGRA 交换与行填充。
 pub fn rgba_from_image(image: &Image, width: u32, height: u32) -> Option<Vec<u8>> {
     use bevy::render::render_resource::TextureFormat;
-    if width == 0 || height == 0 || width > MAX_CAPTURE_DIMENSION || height > MAX_CAPTURE_DIMENSION {
+    if width == 0 || height == 0 || width > MAX_CAPTURE_DIMENSION || height > MAX_CAPTURE_DIMENSION
+    {
         return None;
     }
     let expected = (width as usize) * (height as usize) * 4;
@@ -57,14 +58,16 @@ pub fn rgba_from_image(image: &Image, width: u32, height: u32) -> Option<Vec<u8>
     Some(rgba)
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
     fn image(pixel: [u8; 4]) -> Image {
         Image::new(
-            bevy::render::render_resource::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            bevy::render::render_resource::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             bevy::render::render_resource::TextureDimension::D2,
             pixel.to_vec(),
             bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
@@ -74,6 +77,9 @@ mod tests {
     #[test]
     fn rejects_unrendered_transparent_texture_but_accepts_opaque_black() {
         assert!(rgba_from_image(&image([0, 0, 0, 0]), 1, 1).is_none());
-        assert_eq!(rgba_from_image(&image([0, 0, 0, 255]), 1, 1), Some(vec![0, 0, 0, 255]));
+        assert_eq!(
+            rgba_from_image(&image([0, 0, 0, 255]), 1, 1),
+            Some(vec![0, 0, 0, 255])
+        );
     }
 }

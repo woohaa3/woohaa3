@@ -30,6 +30,7 @@ pub(super) struct SnapshotNode {
     pub(super) layout_bounds: (f32, f32, f32, f32),
     pub(super) id: String,
     pub(super) group: bool,
+    pub(super) group_collapsed: bool,
     pub(super) group_outline: Vec<Vec2>,
     pub(super) group_badge: Vec<Vec2>,
     pub(super) group_badge_resize: Option<Vec2>,
@@ -126,6 +127,12 @@ fn union(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> (f32, f32, f32, f3
 pub(super) fn node_hit_bounds(node: &SnapshotNode) -> (f32, f32, f32, f32) {
     let mut rect = node_bounds(node);
     for p in &node.group_outline {
+        rect = union(rect, (p.x, p.y, 0., 0.));
+    }
+    // The badge is deliberately outside the structural group rectangle. Keep its complete
+    // polygon in the broad phase as well as the outline/tail; otherwise the lower half can be
+    // filtered out before `path_contains` gets a chance to perform the exact hit test.
+    for p in &node.group_badge {
         rect = union(rect, (p.x, p.y, 0., 0.));
     }
     if let Some(status) = node.group_status {
@@ -267,9 +274,14 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
         action_descriptors: scene
             .node_actions
             .iter()
+            .filter(|(id, _)| {
+                node_map
+                    .get(id.as_str())
+                    .is_some_and(|node| node.group.as_ref().is_none_or(|group| group.action_bar))
+            })
             .filter_map(|(id, actions)| {
                 let index = *node_index.get(id)?;
-                (!nodes[index].group).then(|| (index, actions.clone()))
+                Some((index, actions.clone()))
             })
             .collect(),
         viewport,
@@ -310,11 +322,10 @@ fn snapshot_node(
     surface: Option<&crate::protocol::SurfaceSize>,
 ) -> SnapshotNode {
     let group = node.group.is_some();
+    let group_collapsed = node.group.as_ref().is_some_and(|g| g.collapsed);
     let film_set = node.composite_asset.is_some();
     let selected = false; // resize handle 只对单选节点；由 scene.selection 决定，见下。
     let _ = selected;
-    let size = Vec2::new(node.width, node.height);
-    let center = Vec2::new(node.x + size.x / 2.0, node.y + size.y / 2.0);
     let output_capable_group = group
         && node
             .group
@@ -350,29 +361,37 @@ fn snapshot_node(
             scope.aabb.width,
             scope.aabb.height,
         ),
+        None if group_collapsed => {
+            let badge = crate::canvas_query::group_model::badge_rect(node);
+            (badge.x, badge.y, badge.z, badge.w)
+        }
         None => (node.x, node.y, node.width, node.height),
     };
-    // 顶部操作横条：复合资产也可贡献操作，锚定其真实范围；group 使用独立横条。
-    let node_actions = if group {
-        None
-    } else {
-        node_actions.get(&node.id).and_then(|actions| {
+    // 绘制、完整快照与视口增量共用徽标/背板锚点。group 只有声明 `actionBar`（普通组与片场组
+    // 都由呈现层声明）时才暴露横条命中，避免旧场景出现「看不见但能点」的动作热区。
+    let actions_visible = !group || node.group.as_ref().is_some_and(|group| group.action_bar);
+    let node_actions = actions_visible
+        .then(|| node_actions.get(&node.id))
+        .flatten()
+        .and_then(|actions| {
             layout::node_action_toolbar(
                 node,
                 actions,
                 Some(viewport),
                 surface.map(|s| (s.width, s.height)),
             )
-        })
-    };
+        });
     SnapshotNode {
         initial_position: Vec2::new(node.x, node.y),
         layout_bounds: (node.x, node.y, node.width, node.height),
         id: node.id.clone(),
         group,
+        group_collapsed,
         group_badge: crate::canvas_query::group_model::badge_path(node),
         group_badge_resize: crate::canvas_query::group_model::resize_center(node),
-        group_outline: if !crate::canvas_query::group_model::badge_path(node).is_empty() {
+        group_outline: if !node.group.as_ref().is_some_and(|group| group.collapsed)
+            && !crate::canvas_query::group_model::badge_path(node).is_empty()
+        {
             crate::canvas_query::group_model::outline(node)
         } else {
             Vec::new()
@@ -381,12 +400,18 @@ fn snapshot_node(
         composite_asset: film_set,
         bounds,
         scope: scope_geometry,
-        center,
+        center: if group_collapsed {
+            Vec2::new(bounds.0 + bounds.2 / 2., bounds.1 + bounds.3 / 2.)
+        } else {
+            Vec2::new(node.x + node.width / 2., node.y + node.height / 2.)
+        },
         input_port,
         output_port,
         output_capable_group,
         history_strip,
-        group_status: layout::group_run_status_rect(node),
+        group_status: (!node.group.as_ref().is_some_and(|group| group.collapsed))
+            .then(|| layout::group_run_status_rect(node))
+            .flatten(),
         // resize 抓手只在选中时命中；快照构建时按 selection 决定（见 `apply_selection`）。
         resize: None,
         resizable: node.resizable,
@@ -409,22 +434,43 @@ pub(super) fn apply_selection(snapshot: &mut InteractionSnapshot, selected: &[St
     for node in &mut snapshot.nodes {
         // 片场：范围右顶点/右下角可拖拽缩放（拖动即等比缩放整个片场内容）。
         // Selection can narrow an accepted capability, never grant a missing one.
-        if set.len() != 1 || !set.contains(node.id.as_str()) || !node.resizable {
+        if set.len() != 1
+            || !set.contains(node.id.as_str())
+            || !node.resizable
+            || node.group_collapsed
+        {
             node.resize = None;
         } else if let Some(scope) = &node.scope {
             node.resize = Some(scope::grip(scope));
+        } else if node.group {
+            // 组容器：四个角都能拖拽缩放（与绘制的四角角标同源）。
+            node.resize = Some(scope::corners_grip(layout::resize_corner_rects(
+                node.bounds.0,
+                node.bounds.1,
+                node.bounds.2,
+                node.bounds.3,
+            )));
         } else {
-            let (x, y, width, height) = layout::resize_rect(node.bounds.0, node.bounds.1, node.bounds.2, node.bounds.3);
-            node.resize = Some(ScopeGrip::Rect(ScopeRect { x, y, width, height }));
+            let (x, y, width, height) =
+                layout::resize_rect(node.bounds.0, node.bounds.1, node.bounds.2, node.bounds.3);
+            node.resize = Some(ScopeGrip::Rect(ScopeRect {
+                x,
+                y,
+                width,
+                height,
+            }));
         }
     }
 }
 
-/// 抓手索引 → 方向名（`n/ne/e/se/s/sw/w/nw`）；`usize::MAX`（普通矩形右下角）返回 `None`。
-fn handle_name(index: usize) -> Option<String> {
-    scope::HANDLE_NAMES
-        .get(index)
-        .map(|name| (*name).to_owned())
+/// 抓手索引 → 方向名（8 抓手为 `n/ne/e/se/s/sw/w/nw`；组四角为 `nw/ne/sw/se`；
+/// 普通矩形右下角返回 `None`）。
+fn handle_name(grip: &ScopeGrip, index: usize) -> Option<String> {
+    let names: &[&str] = match grip {
+        ScopeGrip::Corners(_) => &scope::CORNER_NAMES,
+        _ => &scope::HANDLE_NAMES,
+    };
+    names.get(index).map(|name| (*name).to_owned())
 }
 
 impl InteractionSnapshot {
@@ -592,14 +638,13 @@ impl InteractionSnapshot {
             // 选中时抓手优先命中 resize（拖动即等比缩放整个片场内容）。
             if node.composite_asset {
                 if let Some(scope) = &node.scope {
-                    if let Some(handle) = node
-                        .resize
-                        .as_ref()
-                        .and_then(|grip| scope::grip_hit(grip, world, DIAMOND_GRIP_TOLERANCE))
-                    {
+                    if let Some((grip, handle)) = node.resize.as_ref().and_then(|grip| {
+                        scope::grip_hit(grip, world, DIAMOND_GRIP_TOLERANCE)
+                            .map(|handle| (grip, handle))
+                    }) {
                         return Some(PointHit::Resize {
                             node_id: node.id.clone(),
-                            handle: handle_name(handle),
+                            handle: handle_name(grip, handle),
                         });
                     }
                     if scope::pick_contains(scope, world) {
@@ -634,14 +679,12 @@ impl InteractionSnapshot {
             }
             // resize 抓手优先于历史条：若仍重叠则 resize 胜出
             // （change: 2026-10-12-unify-generation-history-strip，design D4）。
-            if let Some(handle) = node
-                .resize
-                .as_ref()
-                .and_then(|grip| scope::grip_hit(grip, world, DIAMOND_GRIP_TOLERANCE))
-            {
+            if let Some((grip, handle)) = node.resize.as_ref().and_then(|grip| {
+                scope::grip_hit(grip, world, DIAMOND_GRIP_TOLERANCE).map(|handle| (grip, handle))
+            }) {
                 return Some(PointHit::Resize {
                     node_id: node.id.clone(),
-                    handle: handle_name(handle),
+                    handle: handle_name(grip, handle),
                 });
             }
             if node
@@ -670,19 +713,24 @@ impl InteractionSnapshot {
                     node_id: node.id.clone(),
                 });
             }
-            if node.group_badge_resize.is_some_and(|center| (world - center).abs().max_element() <= 6. / zoom.max(0.1)) {
+            if node
+                .group_badge_resize
+                .is_some_and(|center| (world - center).abs().max_element() <= 6. / zoom.max(0.1))
+            {
                 return Some(PointHit::NodeAction {
-                    node_id: node.id.clone(), action_id: "group-resize-badge".into(), menu: false,
+                    node_id: node.id.clone(),
+                    action_id: "group-resize-badge".into(),
+                    menu: false,
                 });
             }
             if crate::canvas_query::group_model::path_contains(&node.group_badge, world) {
                 return Some(PointHit::NodeAction {
                     node_id: node.id.clone(),
-                    action_id: "group-toggle-collapse".into(),
+                    action_id: "group-badge-select".into(),
                     menu: false,
                 });
             }
-            if layout::in_rect(world, node.bounds)
+            if (!node.group_collapsed && layout::in_rect(world, node.bounds))
                 || crate::canvas_query::group_model::path_contains(&node.group_outline, world)
             {
                 return Some(PointHit::Node {
@@ -833,7 +881,9 @@ impl InteractionSnapshot {
                 }
                 continue;
             }
-            if layout::in_rect(world, node.bounds)
+            if (!node.group_collapsed
+                && (layout::in_rect(world, node.bounds)
+                    || crate::canvas_query::group_model::path_contains(&node.group_badge, world)))
                 || crate::canvas_query::group_model::path_contains(&node.group_outline, world)
             {
                 return Some(node.id.clone());
@@ -850,43 +900,95 @@ impl InteractionSnapshot {
         self.nodes
             .iter()
             .filter_map(|node| {
-                let scope = node.scope.as_ref()?;
-                Some(ScopeGeometryEntry {
-                    node_id: node.id.clone(),
-                    shape: if scope::is_diamond(scope.shape) {
-                        "isometric-diamond".to_owned()
-                    } else {
-                        "rect".to_owned()
-                    },
-                    vertices: [
-                        [scope.vertices[0].x, scope.vertices[0].y],
-                        [scope.vertices[1].x, scope.vertices[1].y],
-                        [scope.vertices[2].x, scope.vertices[2].y],
-                        [scope.vertices[3].x, scope.vertices[3].y],
-                    ],
-                    handles: [
-                        [scope.handles[0].x, scope.handles[0].y],
-                        [scope.handles[1].x, scope.handles[1].y],
-                        [scope.handles[2].x, scope.handles[2].y],
-                        [scope.handles[3].x, scope.handles[3].y],
-                        [scope.handles[4].x, scope.handles[4].y],
-                        [scope.handles[5].x, scope.handles[5].y],
-                        [scope.handles[6].x, scope.handles[6].y],
-                        [scope.handles[7].x, scope.handles[7].y],
-                    ],
-                    aabb: [
-                        scope.aabb.x,
-                        scope.aabb.y,
-                        scope.aabb.width,
-                        scope.aabb.height,
-                    ],
-                    base: [
-                        scope.base.x,
-                        scope.base.y,
-                        scope.base.width,
-                        scope.base.height,
-                    ],
-                })
+                if let Some(scope) = node.scope.as_ref() {
+                    return Some(ScopeGeometryEntry {
+                        node_id: node.id.clone(),
+                        shape: if scope::is_diamond(scope.shape) {
+                            "isometric-diamond".to_owned()
+                        } else {
+                            "rect".to_owned()
+                        },
+                        vertices: [
+                            [scope.vertices[0].x, scope.vertices[0].y],
+                            [scope.vertices[1].x, scope.vertices[1].y],
+                            [scope.vertices[2].x, scope.vertices[2].y],
+                            [scope.vertices[3].x, scope.vertices[3].y],
+                        ],
+                        handles: [
+                            [scope.handles[0].x, scope.handles[0].y],
+                            [scope.handles[1].x, scope.handles[1].y],
+                            [scope.handles[2].x, scope.handles[2].y],
+                            [scope.handles[3].x, scope.handles[3].y],
+                            [scope.handles[4].x, scope.handles[4].y],
+                            [scope.handles[5].x, scope.handles[5].y],
+                            [scope.handles[6].x, scope.handles[6].y],
+                            [scope.handles[7].x, scope.handles[7].y],
+                        ],
+                        aabb: [
+                            scope.aabb.x,
+                            scope.aabb.y,
+                            scope.aabb.width,
+                            scope.aabb.height,
+                        ],
+                        base: [
+                            scope.base.x,
+                            scope.base.y,
+                            scope.base.width,
+                            scope.base.height,
+                        ],
+                    });
+                }
+                // Film-set groups keep their scene inside the free-standing 3D badge, which
+                // lives below the structural bubble. The drop overlay needs the badge rect
+                // so dragging a model onto the visible scene advertises the same target as
+                // the body; unrelated groups are filtered by the contribution's owner check.
+                if node.group && !node.group_collapsed && !node.group_badge.is_empty() {
+                    let min_x = node
+                        .group_badge
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f32::INFINITY, f32::min);
+                    let max_x = node
+                        .group_badge
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    let min_y = node
+                        .group_badge
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f32::INFINITY, f32::min);
+                    let max_y = node
+                        .group_badge
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    let (x, y, width, height) = (min_x, min_y, max_x - min_x, max_y - min_y);
+                    let (cx, cy) = (x + width / 2., y + height / 2.);
+                    return Some(ScopeGeometryEntry {
+                        node_id: node.id.clone(),
+                        shape: "rect".to_owned(),
+                        vertices: [
+                            [x, y],
+                            [x + width, y],
+                            [x + width, y + height],
+                            [x, y + height],
+                        ],
+                        handles: [
+                            [cx, y],
+                            [x + width, y],
+                            [x + width, cy],
+                            [x + width, y + height],
+                            [cx, y + height],
+                            [x, y + height],
+                            [x, cy],
+                            [x, y],
+                        ],
+                        aabb: [x, y, width, height],
+                        base: [x, y, width, height],
+                    });
+                }
+                None
             })
             .collect()
     }

@@ -20,6 +20,7 @@ import { validateCanvasGroupChange } from "@woohaa3/contracts";
 
 /** room 命令管线所需的最小受控上下文；由 `CanvasRoom` 提供（唯一 doc/revision owner）。 */
 export type RoomExecutionHost = {
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   readonly canvasId: string;
   readonly state: CanvasRoomState;
@@ -180,6 +181,7 @@ export async function executeCommand(
     mediaStorage: host.mediaStorage,
     now: host.nowIso(),
     verifyAssets: host.verifyAssets,
+    content: host.content,
     lifecycle: host.lifecycle
   });
   if (!outcome.ok) {
@@ -318,12 +320,15 @@ function commitFailure(
   commandId: string
 ): RoomCommandResult {
   if (commit.code === "storage-seq-conflict") {
+    // room 已在本层之上自动重载并重试（见 `CanvasRoom.withStorageSeqRecovery`）；走到这里
+    // 说明重试上限用尽（仍在与别的 writer 竞争），因此这里的失败确实可以再试一次。
     return {
       ok: false,
       status: "failed",
       commandId,
       code: "storage-seq-conflict",
-      message: "存储 sequence 已变化，请重试"
+      message: "存储 sequence 已变化，请重试",
+      retryable: true
     };
   }
   if (commit.code === "command-id-reused") {

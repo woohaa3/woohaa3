@@ -2,10 +2,8 @@
 //!
 //! change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs —— 输入改为 ECS 节点 Query；
 //! group 面板实体由 presentation system 按 owner 组件维护，本模块只生产共享几何与标签请求。
-use super::{
-    Visuals, geometry::Geometry, labels::LabelRequest, labels::LabelRequests, labels::LabelStyle,
-};
-use crate::canvas_ecs::components::CanvasLabelRole;
+use super::{CanvasMaterials, geometry::Geometry, labels::LabelRequest, labels::LabelRequests, labels::LabelStyle};
+use crate::canvas_ecs::components::{CanvasLabelRole, ContainerVisual};
 use crate::{
     protocol::{GraphNode, GroupPresentation, Scene},
     theme::ThemeResource,
@@ -14,6 +12,7 @@ use bevy::{camera::visibility::NoFrustumCulling, mesh::VertexAttributeValues, pr
 const BLOCK_SIZE: usize = 16;
 #[derive(PartialEq)]
 struct Key {
+    geometry_visual: Option<crate::canvas_ecs::components::ContainerGeometryInput>,
     id: String,
     /// 文档下标（16 节点分块）。
     index: usize,
@@ -22,7 +21,6 @@ struct Key {
     rect: [f32; 4],
     scope: Option<(f32, f32, f32, f32)>,
     scope_vertices: Option<[Vec2; 4]>,
-    title: String,
     panel: Option<crate::protocol::CompositeContainerPanel>,
     has_model: bool,
     group: Option<GroupPresentation>,
@@ -38,6 +36,7 @@ struct Key {
 impl Key {
     fn new(n: &GraphNode, index: usize, render: usize, scene: &Scene) -> Self {
         Self {
+            geometry_visual: ContainerVisual::from_node(n).map(|visual| visual.geometry),
             id: n.id.clone(),
             index,
             render,
@@ -46,7 +45,6 @@ impl Key {
                 .composite_asset
                 .as_ref()
                 .map(|asset| (asset.x, asset.y, asset.width, asset.height)),
-            title: n.title.clone(),
             panel: n
                 .composite_asset
                 .as_ref()
@@ -56,7 +54,8 @@ impl Key {
                 .composite_asset
                 .as_ref()
                 .map(|_| super::scope::node_scope(n).vertices),
-            group: n.group.clone(),
+            // Group title is label input; keep the geometry key independent of it.
+            group: n.group.clone().map(|mut group| { group.title.clear(); group }),
             group_model_layout: crate::canvas_query::group_model::for_node(n),
             selected: scene.selection.nodes.contains(&n.id),
             resizable: n.resizable,
@@ -85,6 +84,8 @@ pub(super) struct ContainerInput<'a> {
 #[derive(Default)]
 pub(super) struct Block {
     keys: Vec<Key>,
+    /// 标签输入独立于几何 key；标题变化只更新请求，不替换 mesh。
+    label_keys: Vec<(String, String)>,
     theme: String,
     band: Option<[f32; 4]>,
     sort_z: f32,
@@ -92,6 +93,11 @@ pub(super) struct Block {
     meshes: [Option<Handle<Mesh>>; 2],
     /// 上一帧提交的标签请求；块命中时原样重提。
     labels: Vec<LabelRequest>,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct ContainerBlockCache {
+    pub(super) blocks: Vec<Block>,
 }
 impl Block {
     fn clear(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
@@ -106,6 +112,7 @@ impl Block {
             }
         }
         self.keys.clear();
+        self.label_keys.clear();
         self.theme.clear();
         self.band = None;
         self.labels.clear();
@@ -126,18 +133,19 @@ impl Block {
 pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    visuals: &mut Visuals,
+    visuals: &mut ContainerBlockCache,
     requests: &mut LabelRequests,
     containers: &[ContainerInput<'_>],
     document_len: usize,
     scene: &Scene,
     theme: &ThemeResource,
+    materials: &CanvasMaterials,
 ) -> u64 {
     requests.begin(CanvasLabelRole::Container);
     let band = scene.aggregate_connect.as_ref().and_then(|_| {
         crate::canvas_query::aggregate::selection_bounds(&scene.nodes, &scene.selection.nodes)
     });
-    let mut blocks = std::mem::take(&mut visuals.container_blocks);
+    let mut blocks = std::mem::take(&mut visuals.blocks);
     let count = document_len.div_ceil(BLOCK_SIZE);
     for block in blocks.iter_mut().skip(count) {
         block.clear(commands, meshes);
@@ -154,6 +162,15 @@ pub(super) fn sync(
             .filter(|input| input.node.group.is_some() || input.node.composite_asset.is_some())
             .map(|input| Key::new(input.node.as_ref(), input.index, input.render, scene))
             .collect();
+        let label_keys: Vec<_> = keys.iter().map(|key| {
+            let node = containers.iter().find(|input| input.index == key.index).map(|input| input.node.as_ref());
+            let title = node.map(|n| {
+                let group_title = n.group.as_ref().map(|group| group.title.as_str()).unwrap_or_default();
+                format!("{}\u{1f}" , if group_title.is_empty() { n.title.as_str() } else { group_title })
+            }).unwrap_or_default();
+            let kind = node.map(|n| n.kind.clone()).unwrap_or_default();
+            (title, kind)
+        }).collect();
         let band = if block_index == 0 { band } else { None };
         // Bevy Transparent2d sorts by the entity transform, independently of mesh vertex z.
         // Negative sort depths place all group fills below the transient overlay owner (z=0).
@@ -163,6 +180,25 @@ pub(super) fn sync(
             && block.theme == theme.fingerprint()
             && block.sort_z == sort_z
         {
+            if block.label_keys != label_keys {
+                // 标签变化不触碰几何实体；重新取标签请求并沿用现有 mesh。
+                let mut scratch = Geometry::default();
+                let mut requests_only = Vec::new();
+                for key in &keys {
+                    let Some(input) = containers.iter().find(|input| input.index == key.index) else { continue };
+                    let node = input.node.as_ref();
+                    let z = super::draw_order::render_z(&scene.nodes, key.render);
+                    let labels = if let Some(group) = &node.group {
+                        vec![super::group::draw_group(&mut scratch, theme, node, group, key.selected, z)]
+                    } else if key.panel.is_none() {
+                        super::film_set::draw_film_set_scope(&mut scratch, theme, node, key.selected, key.hovered, z).unwrap_or_default()
+                    } else { Vec::new() };
+                    requests_only.push(LabelRequest { owner: input.entity, labels, z: z + 0.02, style: LabelStyle::Node });
+                }
+                block.labels = requests_only.clone();
+                block.label_keys = label_keys;
+                for request in requests_only { requests.push_request(CanvasLabelRole::Container, request); }
+            }
             requests.extend(CanvasLabelRole::Container, &block.labels);
             continue;
         }
@@ -218,7 +254,9 @@ pub(super) fn sync(
                 )
                 .unwrap_or_default()
             };
-            if let Some(label) = super::group::draw_run_status(&mut geometry, theme, node, z) {
+            if !node.group.as_ref().is_some_and(|group| group.collapsed)
+                && let Some(label) = super::group::draw_run_status(&mut geometry, theme, node, z)
+            {
                 labels.push(label);
             }
             // 聚合节点运行遮罩：覆盖整个范围（change: 2026-10-12-unify-generation-history-strip，
@@ -308,9 +346,9 @@ pub(super) fn sync(
                 commands.entity(entity).insert((Mesh2d(handle), transform));
             } else {
                 let material = if layer == 1 {
-                    visuals.blend_visuals().1
+                    materials.blend.clone()
                 } else {
-                    visuals.mesh_material()
+                    materials.solid.clone()
                 };
                 block.entities[layer] = Some(
                     commands
@@ -325,13 +363,14 @@ pub(super) fn sync(
             }
         }
         block.keys = keys;
+        block.label_keys = label_keys;
         block.band = band;
         block.theme = theme.fingerprint().to_owned();
         block.sort_z = sort_z;
         block.labels = block_requests;
         rebuilt += 1;
     }
-    visuals.container_blocks = blocks;
+    visuals.blocks = blocks;
     rebuilt
 }
 fn shift_depth(mesh: &mut Mesh, delta: f32) {

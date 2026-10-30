@@ -1,7 +1,8 @@
 /** OpenCode 2.x /api API; MCP runtime config belongs to a dedicated location. */
 import { setTimeout as delay } from "node:timers/promises";
+import { isAgentReasoningEffort, type AgentModelView, type AgentReasoningEffort } from "@woohaa3/contracts";
 import { canvasToolName, loopbackHttp, toolResultFailed } from "./loopback-http.js";
-import type { LocalAgentTransport, LocalAgentTransportInput, LocalAgentTransportResult } from "./transport.js";
+import type { LocalAgentTransport, LocalAgentTransportInput, LocalAgentTransportModelInput, LocalAgentTransportResult } from "./transport.js";
 
 /**
  * 分页读取一个会话的全部 assistant 消息（change: 2026-10-22-remove-agent-execution-limits，
@@ -21,6 +22,41 @@ type OpenCodeMessage = {
     state?: { status?: string; content?: unknown; error?: { message?: string } };
   }>;
 };
+
+/** `GET /api/model` 目录项；模型身份是 `providerID/modelID`，运行时按首个 `/` 拆分。 */
+type OpenCodeModelEntry = {
+  modelID?: unknown;
+  providerID?: unknown;
+  name?: unknown;
+  enabled?: unknown;
+  variants?: unknown;
+};
+
+/**
+ * 把 OpenCode 目录映射成助手目录项。
+ *
+ * OpenCode 的 variant id 与 `AgentReasoningEffort` 取值一致，但也会出现非推理 variant；
+ * 只保留宿主认识的取值，避免把任意字符串当成 Variant 传回上游。目录经常混有多个 provider，
+ * 显示名统一带来源——下拉、触发器与搜索都只读 label，不再靠同名去重才补 provider。
+ */
+function openCodeModelDirectory(entries: readonly OpenCodeModelEntry[]): AgentModelView[] {
+  const catalog = new Map<string, AgentModelView>();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object" || entry.enabled === false) continue;
+    const providerID = typeof entry.providerID === "string" ? entry.providerID.trim() : "";
+    const modelID = typeof entry.modelID === "string" ? entry.modelID.trim() : "";
+    if (!providerID || !modelID) continue;
+    const id = `${providerID}/${modelID}`;
+    const reasoningEfforts: AgentReasoningEffort[] = [];
+    for (const variant of Array.isArray(entry.variants) ? entry.variants : []) {
+      const variantId = variant && typeof variant === "object" ? (variant as { id?: unknown }).id : undefined;
+      if (isAgentReasoningEffort(variantId) && !reasoningEfforts.includes(variantId)) reasoningEfforts.push(variantId);
+    }
+    const name = typeof entry.name === "string" && entry.name.trim() !== "" ? entry.name.trim() : modelID;
+    catalog.set(id, { id, label: `${name} (${providerID})`, ...(reasoningEfforts.length ? { reasoningEfforts } : {}) });
+  }
+  return [...catalog.values()];
+}
 
 async function readAllAssistantMessages(
   http: { json: (path: string) => Promise<{ data?: OpenCodeMessage[] }> },
@@ -44,6 +80,10 @@ export type HttpTransportOptions = {
   logger?: (event: Record<string, unknown>) => void;
   /** OpenCode 2.0's runtime tool registry refresh lags behind connected status. */
   catalogSettleMs?: number;
+  /** 模型目录读取期限；目录只是一次只读查询，不与推理回合共享在途期限。 */
+  modelCatalogTimeoutMs?: number;
+  /** 空目录/暂时失败的读取重试间隔（默认 400ms，共 8 次）。 */
+  modelCatalogRetryMs?: number;
 };
 
 export function createOpenCodeTransport(options: HttpTransportOptions = {}): LocalAgentTransport {  // A location's runtime MCP config is shared. Never rotate its token during another turn.
@@ -171,6 +211,44 @@ export function createOpenCodeTransport(options: HttpTransportOptions = {}): Loc
   return {
     id: "opencode-server",
     probe: async () => ({ ok: true }),
+    async models(input: LocalAgentTransportModelInput) {
+      if (!input.loopbackUrl) return { models: [], error: "OpenCode 专用进程未启动" };
+      const signal = AbortSignal.timeout(options.modelCatalogTimeoutMs ?? 20_000);
+      const http = loopbackHttp(input.loopbackUrl, input.httpHeaders ?? {}, signal, options.fetchImpl ?? fetch);
+      try {
+        const ready = await http.ready("/api/info");
+        if (!(ready.headers.get("content-type") ?? "").includes("application/json")) {
+          await ready.body?.cancel();
+          throw new Error("OpenCode /api/info 未返回 JSON");
+        }
+        const info = await ready.json() as { version?: string };
+        if (!/^v?2\./.test(info.version ?? "")) return { models: [], error: `需要 OpenCode v2，实际 ${info.version ?? "未知"}` };
+        // 模型目录按 location 解析：v2 不带 `location[directory]` 时返回空数组，而不是全部模型。
+        const location = `?${new URLSearchParams({ "location[directory]": input.workDir })}`;
+        // 进程刚启动时该 location 的目录索引仍在异步加载，首次读取会返回空数组；回合进行中也可能
+        // 短暂为空。按固定间隔重试一段有界窗口，而不是把「还没加载完」当成「没有模型」——否则下拉
+        // 在第一次打开时就空着，而目录缓存又会把这个空结果保留一分钟。
+        const attempts = 8;
+        const retryMs = options.modelCatalogRetryMs ?? 400;
+        let error = "OpenCode 未返回可用模型，请先在 OpenCode 中登录或配置 provider";
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          try {
+            const response = await http.json(`/api/model${location}`);
+            const models = openCodeModelDirectory(Array.isArray(response.data) ? response.data : []);
+            if (models.length) return { models };
+            error = "OpenCode 未返回可用模型，请先在 OpenCode 中登录或配置 provider";
+          } catch (cause) {
+            error = cause instanceof Error ? cause.message : "OpenCode 模型目录读取失败";
+            // 认证/路由类 4xx 是确定性失败，重试只会拖慢错误反馈。
+            if (/HTTP 4\d\d/.test(error)) return { models: [], error };
+          }
+          if (attempt + 1 < attempts) await delay(retryMs, undefined, { signal });
+        }
+        return { models: [], error };
+      } catch (error) {
+        return { models: [], error: error instanceof Error ? error.message : "OpenCode 模型目录读取失败" };
+      }
+    },
     async run(input) {
       const key = input.loopbackUrl ?? "";
       const previous = locations.get(key) ?? Promise.resolve();

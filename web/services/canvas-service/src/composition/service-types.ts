@@ -176,6 +176,13 @@ export type CanvasServiceOptions = {
     | readonly import("../storage/core/index.js").CanvasCatalogRemoteSource[]
     | (() => readonly import("../storage/core/index.js").CanvasCatalogRemoteSource[]);
   /**
+   * 远端删除端口（可选；宿主按同一组 `canvas-upstream` capability 注入）。
+   *
+   * 删除一张属于远端的画布时先问它；实现自己判定归属，不属于远端返回 `skipped`。
+   * 省略时删除只作用于本机（纯本地部署）。
+   */
+  deleteRemote?: (canvasId: string) => Promise<import("@woohaa3/contracts").CanvasUpstreamDeleteResult>;
+  /**
    * 在线迁移：来源端口（由 Backend 受控来源调用桥注入）。
    * 省略时不挂载 prepare/status/来源目录面（无来源即无迁移入口）。
    */

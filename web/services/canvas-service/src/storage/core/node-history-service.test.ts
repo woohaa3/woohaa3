@@ -463,12 +463,11 @@ describe("节点历史 repository / 应用服务", () => {
     const detail = await service.getDetail({ canvasId: CANVAS, nodeId: "node-1", entryId });
     expect(detail.kind).toBe("model");
     if (detail.kind === "model") {
-      expect(detail.animation?.filmSetContent).toEqual(filmSet);
+      expect(detail.animation?.schemaVersion === 3 ? detail.animation.filmSetContent : undefined).toEqual(filmSet);
     }
     const outcome = await service.restore({ canvasId: CANVAS, nodeId: "node-1", entryId });
-    expect(outcome.ok).toBe(true);
-    const restored = room.canvas.nodeData["node-1"] as { filmSetContent?: unknown };
-    expect(restored.filmSetContent).toEqual(filmSet);
+    expect(outcome.ok).toBe(false);
+    expect(room.canvas.nodeData["node-1"]?.filmSetContent).toEqual(filmSet);
   });
 
   it("恢复旧片场历史 payload（schema 1/2）明确拒绝且不改当前内容", async () => {
@@ -731,6 +730,24 @@ describe("SqliteNodeHistoryRepository", () => {
     expect(page.items).toHaveLength(2);
     expect(page.nextCursor).not.toBeNull();
     expect((await repository.canvasStats(CANVAS)).count).toBe(3);
+    repository.close();
+  });
+
+  it("失败归档经 SQLite 往返后仍保留 outcome，不会被读成成功", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "woohaa3-ngh-"));
+    const repository = new SqliteNodeHistoryRepository({ path: path.join(dir, "history.db") });
+    const room = fakeRoom(canvasWithNode("video"));
+    const service = new NodeHistoryApplicationService({ repository, resolveRoom: async () => room });
+    const failure = await service.registerTaskFailure({
+      canvasId: CANVAS, nodeId: "node-1", runId: "run-bad", kind: "video", outcome: "failed",
+      message: "provider 超时", createdAt: NOW, inputSummary: "海边日落"
+    });
+    const entry = await repository.get(CANVAS, "node-1", failure.entryId);
+    expect(entry?.outcome).toBe("failed");
+    const page = await service.list({ canvasId: CANVAS, nodeId: "node-1" });
+    expect(page.items[0]).toMatchObject({ outcome: "failed", recoverable: false, current: false });
+    const summary = await service.listCanvas({ canvasId: CANVAS, summary: true, summaryNodeId: "node-1" });
+    expect(summary.items[0]).toMatchObject({ outcome: "failed", preview: { kind: "failure", message: "provider 超时" } });
     repository.close();
   });
 });

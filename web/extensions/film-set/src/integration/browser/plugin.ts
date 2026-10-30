@@ -1,8 +1,10 @@
+import { pinFilmSetCapture } from "../../state/browser/capture-snapshot.js";
 import { createShotMediaProvider } from "../../authoring/browser/shot-media-provider.js";
 import "../../authoring/browser/styles.css";
 import { createElement } from "react";
 import { defineExtensionFrontend, defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, MODEL_EDITOR_VERSION, decodeFilmSetNodeData, filmSetAnimationsOf, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { ClapperboardIcon } from "@woohaa3/ui/icons";
+import { CANVAS_MENU_SECTION, FILM_SET_SHOT_PREVIEW_NODE_TYPE, MODEL_EDITOR_VERSION, readFilmSetGroupMarker, readFilmSetAnimationProjection, filmSetAnimationsOf, shotPreviewOwnershipOf } from "@woohaa3/contracts";
 import { installShotImageReferences } from "../../authoring/browser/shot-image-reference.js";
 import { FILM_SET_EXTENSION_ID, FILM_SET_LABEL } from "../../state/shared/identity.js";
 import { FILM_SET_FRONTEND_METADATA } from "./metadata.js";
@@ -18,14 +20,13 @@ import { FilmSetInspector } from "../../authoring/browser/inspector.js";
 import { extendFilmSetDrop } from "./drop.js";
 import { installFilmSetConversionEntries } from "./film-set-conversion/registration.js";
 import type { FilmSetContext } from "./context.js";
-import { projectObjectPresentation } from "../../preview/browser/object-presentation.js";
 import { filmSetEditorCameras, sceneCameraWriter } from "../../authoring/browser/scene-camera.js";
 import { contributionLifetime } from "./contributions.js";
 import { createFilmSetNodeData } from "../../state/shared/node.js";
-import { installFilmSetObjectContainers } from "../../authoring/browser/object-containers.js";
-import { setFilmSetObjectContainerVisible } from "../../authoring/browser/object-container-commands.js";
-import { filmSetObjectOwnershipOf } from "@woohaa3/contracts";
 import { gizmoParentBasis } from "../../authoring/browser/gizmo-constraint.js";
+
+/** 右键菜单文案：与「3D 模型」并列，避免和普通 group 混淆。 */
+const FILM_SET_MENU_LABEL = `3D ${FILM_SET_LABEL}`;
 
 export function filmSetExtension() {
   return defineExtensionPlugin<FilmSetContext>(ctx => {
@@ -40,6 +41,7 @@ export function filmSetExtension() {
       lifetime.own(() => feature.dispose());
       lifetime.own(() => preview.clear());
       lifetime.own(history.subscribe(() => { ctx.compositeAssets.invalidate(); feature.session.reconcile(); }));
+      const cameraTools = new Map<string, ReturnType<typeof ctx.modelWorkspace.session.getState>["cameraTool"]>();
       lifetime.own(playback.subscribe(() => {
         ctx.compositeAssets.invalidate();
         const nodeId = ctx.modelWorkspace.session.getState().nodeId;
@@ -47,43 +49,63 @@ export function filmSetExtension() {
         const selected = playback.getSnapshot();
         const data = ctx.compositeAssets.projectCanvas(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[nodeId];
         const camera = filmSetEditorCameras(data, selected.nodeId === nodeId ? selected.clipId : null)[0];
+        if (!camera) { ctx.modelWorkspace.session.cancelPose(); ctx.modelWorkspace.session.cancelFocus(); }
         if (camera && ctx.modelWorkspace.session.getState().selectedCameraId !== camera.id) {
           const toolMode = ctx.modelWorkspace.session.getState().toolMode;
           ctx.modelWorkspace.session.enter(nodeId);
+          const tool = cameraTools.get(camera.id);
+          if (tool) ctx.modelWorkspace.session.setCameraTool(tool);
           ctx.modelWorkspace.session.setToolMode(toolMode);
         }
         ctx.modelWorkspace.refreshGizmo();
       }));
-      lifetime.own(feature.session.subscribe(() => ctx.modelWorkspace.refreshGizmo()));
+      let selectionVersion = feature.session.selectionVersion();
+      lifetime.own(feature.session.subscribe(() => {
+        const next = feature.session.selectionVersion();
+        if (next !== selectionVersion) {
+          selectionVersion = next;
+          ctx.modelWorkspace.session.cancelPose();
+          ctx.modelWorkspace.session.cancelFocus();
+          ctx.modelWorkspace.session.setToolMode("model");
+        }
+        ctx.modelWorkspace.refreshGizmo();
+      }));
       let previous = ctx.modelWorkspace.session.getState();
       lifetime.own(ctx.modelWorkspace.session.subscribe(() => {
         const next = ctx.modelWorkspace.session.getState();
-        if (next.selectedCameraId !== previous.selectedCameraId || next.toolMode !== previous.toolMode || next.cameraTool !== previous.cameraTool) feature.session.select(null);
+        if (next.selectedCameraId !== previous.selectedCameraId || next.toolMode !== previous.toolMode || next.cameraTool !== previous.cameraTool) {
+          feature.action.cancelGesture();
+          feature.session.cancelEdit();
+        }
+        if (next.selectedCameraId) cameraTools.set(next.selectedCameraId, next.cameraTool);
         previous = next;
       }));
       const objectFeedback = new Map<string, string>();
-      const adapter = createFilmSetModelAdapter(history, () => ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), id => objectFeedback.get(id));
+      const adapter = createFilmSetModelAdapter(history, () => ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), id => objectFeedback.get(id), ctx.compositeAssets);
       lifetime.own(ctx.compositeAssets.register({
         ...adapter,
         // 业务类型显示名：浮动名称面板据此标注聚合节点业务类型（change:
         // 2026-10-12-align-film-set-scope-with-isometric-grid）。范围形状仍是复合资产类别默认
         // （等距地面范围），无需按业务显式声明；通用宿主与 Rust 只消费声明，不按 film-set 业务 ID 分支。
         label: FILM_SET_LABEL,
-        closeChild(canvas, childNodeId) {
-          const object = filmSetObjectOwnershipOf(canvas.nodeData[childNodeId]);
-          const result = object ? setFilmSetObjectContainerVisible(ctx, object.filmSetNodeId, object.itemId, false) : null;
-          if (result) void result.then(outcome => {
-            if (!outcome.ok) ctx.dialogs.open({ dialogId: "alert", payload: { title: "无法关闭容器", description: outcome.reason } });
-          }).catch(error => ctx.dialogs.open({ dialogId: "alert", payload: { title: "无法关闭容器", description: String(error) } }));
+        projectCanvas(current) {
+          const projected = adapter.projectCanvas!(current);
+          if (!preview.size) return projected;
+          const nodeData = { ...projected.nodeData };
+          for (const [nodeId, object] of preview) {
+            const marker = readFilmSetGroupMarker(nodeData[nodeId]);
+            if (!marker) continue;
+            const t = object.transform;
+            nodeData[nodeId] = { ...nodeData[nodeId], filmSetGroup: { ...marker, ...(object.itemId === "film-set-ground" && marker.ground ? { ground: { ...marker.ground, transform: { x: t.offset.x, y: t.offset.y, z: t.offset.z, yaw: t.yaw, scale: t.scale } } } : {}), sceneBindings: marker.sceneBindings.map(binding => binding.bindingId === object.itemId
+              ? { ...binding, transform: { x: t.offset.x, y: t.offset.y, z: t.offset.z, yaw: t.yaw, scale: t.scale } } : binding) } } as never;
+          }
+          return { ...projected, nodeData };
         },
-        projectPresentation(node, data, resource) {
-          projectObjectPresentation(preview)(node, data, resource);
-          if (!node.compositeAsset) return;
-          const owner = filmSetObjectOwnershipOf(data);
-          if (owner) { node.compositeAsset.itemPlacements = {}; return; }
-
+        focusLayout(nodeId) {
+          const panel = ctx.canvasNavigation.getSnapshot().panel;
+          return { desktop: true, panelMaxWidth: panel?.type === "node-history" && panel.nodeId === nodeId ? 740 : 320,
+            toolbar: 48, player: playback.getSnapshot().preview ? 80 : 260, animationPreview: false };
         },
-        objectPreview: nodeId => preview.get(nodeId) ?? null,
         blocksFocusInput: () => playback.getSnapshot().preview,
         keydown(event) {
           const state = playback.getSnapshot();
@@ -94,7 +116,7 @@ export function filmSetExtension() {
         },
         gizmo(nodeId) {
           const state = feature.session.getState();
-          if (state.nodeId !== nodeId || !state.selectedItemId || playback.getSnapshot().preview || ctx.canvasRuntime.modelFocusMode() === "history" || !ctx.canvasSession.isWritable()) return null;
+          if (ctx.modelWorkspace.session.getState().toolMode === "camera" || state.nodeId !== nodeId || !state.selectedItemId || playback.getSnapshot().preview || ctx.canvasRuntime.modelFocusMode() === "history" || !ctx.canvasSession.isWritable()) return null;
           const entry = ctx.canvasRuntime.queryCompositeAssetItemBounds(nodeId).find(item => item.itemId === state.selectedItemId);
           return entry ? { version: MODEL_EDITOR_VERSION, nodeId, toolMode: "object", objectTool: state.tool, itemId: state.selectedItemId,
             parentBasis: gizmoParentBasis(entry.worldToLocal, entry.yaw, entry.unit), feedback: state.feedback, focus: entry.center, radius: entry.radius } : null;
@@ -103,11 +125,12 @@ export function filmSetExtension() {
           const selected = playback.getSnapshot();
           return filmSetEditorCameras(data, selected.nodeId === nodeId ? selected.clipId : null);
         },
-        writeCameras: sceneCameraWriter((...args) => ctx.canvasSession.submitCommands(...args), nodeId => (ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[nodeId]),
+        writeCameras: sceneCameraWriter((...args) => ctx.canvasSession.submitCommands(...args), nodeId => (ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[nodeId], nodeId => readFilmSetAnimationProjection(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), nodeId), (commands, label) => ctx.canvasEdit.record(commands, label)),
+        beginCapture: nodeId => pinFilmSetCapture(ctx, nodeId),
         captureEnabled: (nodeId, cameraId) => {
-          const data = decodeFilmSetNodeData(ctx.canvasState.getCanvas()?.nodeData[nodeId]);
-          if (!data.ok) return false;
-          const collection = filmSetAnimationsOf(data.value);
+          const data = readFilmSetAnimationProjection(ctx.canvasState.getCanvas(), nodeId);
+          if (!data) return false;
+          const collection = filmSetAnimationsOf(data);
           const selected = playback.getSnapshot();
           const clipId = cameraId?.startsWith("clip:") ? cameraId.slice(5) : selected.nodeId === nodeId ? selected.clipId : collection.defaultClipId;
           const clip = collection.clips.find(clip => clip.id === clipId);
@@ -117,12 +140,12 @@ export function filmSetExtension() {
         awaitCaptureReady: nodeId => ctx.canvasRuntime.compositeAssetMediaSessions?.()?.waitForTime(nodeId, ctx.canvasRuntime.animationPlaybackState()?.time ?? 0, 2500) ?? Promise.resolve(true)
       }));
       lifetime.own(ctx.slots.register("canvas.node-template", {
-        id: "film-set-node", owner: FILM_SET_EXTENSION_ID, nodeType: COMPOSITE_ASSET_NODE_TYPE,
-        label: FILM_SET_LABEL, section: CANVAS_MENU_SECTION.creationTools, order: 0,
+        id: "film-set-node", owner: FILM_SET_EXTENSION_ID, nodeType: "group",
+        label: FILM_SET_MENU_LABEL, section: CANVAS_MENU_SECTION.creationTools, order: 0,
+        icon: ClapperboardIcon,
         createNodeData: () => createFilmSetNodeData() as never
       }));
       lifetime.own(extendFilmSetDrop(ctx));
-      lifetime.own(installFilmSetObjectContainers(ctx, objectFeedback));
       // 直接传递 Cordis `ctx`：它已注入 canvasScope/canvasRemote/canvasLocate/canvasRuntime。
       // MUST NOT 展开（`{ ...ctx }`）——展开只复制自有可枚举属性，会丢掉 ctx 的 service 访问器，
       // 使注册模块读到 undefined 的 canvasScope（此前导致 required film-set 启动失败 → 白屏）。

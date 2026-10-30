@@ -1,13 +1,7 @@
-/**
- * 片场内容契约的兼容再导出。
- *
- * 实现在片场扩展 shared：`extensions/film-set/src/state/shared/content/`。
- * 这里用相对路径再导出，避免 `@woohaa3/contracts` 主入口与扩展包形成循环依赖。
- * 主入口会在清债阶段去掉这层再导出。
- */
-export * from "../../../extensions/film-set/src/state/shared/content/types.js";
-export * from "../../../extensions/film-set/src/state/shared/content/codec.js";
-export * from "../../../extensions/film-set/src/state/shared/content/motion.js";
-export * from "../../../extensions/film-set/src/state/shared/content/import-plan.js";
-export * from "../../../extensions/film-set/src/state/shared/content/part-identity.js";
-export { filmSetContentContribution, filmSetNodeDataCodec } from "../../../extensions/film-set/src/state/shared/content/contribution.js";
+/** Legacy content contracts shared by migration readers and runtime projections. */
+export * from "./film-set-content/types.js";
+export * from "./film-set-content/codec.js";
+export * from "./film-set-content/motion.js";
+export * from "./film-set-content/import-plan.js";
+export * from "./film-set-content/part-identity.js";
+export { filmSetContentContribution, filmSetNodeDataCodec } from "./film-set-content/contribution.js";

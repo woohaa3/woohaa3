@@ -21,7 +21,9 @@
  */
 import type { FilmSetContext as Context } from "./context.js";
 import type { Plugin } from "@deepseek-ai/cordis";
-import { decodeFilmSetNodeData, filmSetAnimationsOf, resolveFilmSetClip, isFilmSetNode, shotPreviewOwnershipOf, type FilmSetNodeData } from "@woohaa3/contracts";
+import { filmSetAnimationsOf, resolveFilmSetClip, readFilmSetGroupMarker, shotPreviewOwnershipOf, type FilmSetNodeData } from "@woohaa3/contracts";
+import { readAnimation } from "../../state/browser/animation-projection.js";
+export { readAnimation } from "../../state/browser/animation-projection.js";
 import { AnimationPlaybackController } from "../../preview/shared/playback-controller.js";
 import { defineExtensionPlugin as definePlugin } from "@woohaa3/frontend/extension-api";
 import { HoverPlaybackDelay } from "../../preview/browser/hover-delay.js";
@@ -69,14 +71,12 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
           const ownership = shotPreviewOwnershipOf(canvas.nodeData[node.id]);
           if (!ownership) continue;
           const source = canvas.document.nodes.find((candidate) => candidate.id === ownership.filmSetNodeId);
-          if (!source || !isFilmSetNode(source.type, canvas.nodeData[source.id])) continue;
-          const decoded = decodeFilmSetNodeData(canvas.nodeData[source.id]);
-          if (!decoded.ok) continue;
-          const clip = filmSetAnimationsOf(decoded.value).clips.find((entry) => entry.id === ownership.clipId);
-          // 静态镜头不建立任何播放状态机（design D6）。
-          if (!clip || clip.kind !== "dynamic") continue;
-          const key = animationSnapshotKey(decoded.value, ownership.clipId);
-          if (key) candidates.set(node.id, key);
+          if (!source) continue;
+          if (source.type !== "group" || !readFilmSetGroupMarker(canvas.nodeData[source.id])) continue;
+          const animation = readAnimation(canvas, source.id);
+          const clip = animation ? filmSetAnimationsOf(animation).clips.find(entry => entry.id === ownership.clipId) : null;
+          if (!animation || clip?.kind !== "dynamic") continue;
+          candidates.set(node.id, animationSnapshotKey(animation, ownership.clipId));
         }
       };
       refreshCandidates();
@@ -226,18 +226,6 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
     },
     { name: ANIMATION_PLAYBACK_PLUGIN_ID, inject: ["canvasRuntime", "canvasState", "compositeAssets", "hoverState", "filmSetPlayback", "canvasNavigation"] }
   );
-}
-
-/** 从权威画布读取某节点的完整动画定义；不存在/非法返回 null。 */
-export function readAnimation(
-  canvas: { document: { nodes: readonly { id: string; type: string }[] }; nodeData: Record<string, unknown> } | null,
-  nodeId: string
-): FilmSetNodeData | null {
-  if (!canvas) return null;
-  const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
-  if (!node || !isFilmSetNode(node.type, canvas.nodeData[nodeId])) return null;
-  const decoded = decodeFilmSetNodeData(canvas.nodeData[nodeId]);
-  return decoded.ok ? decoded.value : null;
 }
 
 /**

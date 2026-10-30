@@ -17,12 +17,11 @@ import { SendPlaneIcon } from "./icons.js";
 import { ErrorInspector } from "./error-inspector.js";
 import { formatVideoTime } from "./panel-shared.js";
 import { promptSubmitHint } from "../prompt-keyboard.js";
-import { isMacPlatform } from "../../canvas-shell/input/shortcuts.js";
 import type { ExecutionPanelData, ExecutionPanelSkill, ExecutionPanelStatus } from "./types.js";
 import type { AgentDetailAction } from "./agent-detail-action.js";
 
 const PLACEHOLDER =
-	"描述任何你想要生成的内容，按 @ 引用身份资产；回车换行，Ctrl/⌘+Enter 生成";
+	"描述任何你想要生成的内容，按 @ 引用身份资产；Enter 生成，Shift+Enter 换行";
 
 const BLOCKING_REASONS_ID = "mc-panel-blocking-reasons";
 
@@ -149,6 +148,7 @@ export function PromptBox({
 	prompt,
 	onPromptChange,
 	onKeyDown,
+	onSubmit,
 	skillError,
 }: {
 	videoEditIntents: NonNullable<ExecutionPanelData["videoEditIntents"]>;
@@ -162,10 +162,12 @@ export function PromptBox({
 		onChange: (next: string) => void;
 		disabled: boolean;
 		placeholder: string;
+		onSubmit?: () => void;
 	}) => React.ReactNode;
 	prompt: string;
 	onPromptChange: (next: string) => void;
 	onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+	onSubmit?: () => void;
 	skillError: string | null;
 }) {	return (
 		<>
@@ -225,6 +227,7 @@ export function PromptBox({
 						onChange: onPromptChange,
 						disabled: false,
 						placeholder: PLACEHOLDER,
+						onSubmit,
 					})
 				) : (
 					<textarea
@@ -369,8 +372,9 @@ export function RunActions({
 				<button
 					type="button"
 					className={`mc-panel__send${busy ? " is-processing" : ""}`}
-						data-tooltip={busy ? pendingLabel : !canRun && disabledHint ? disabledHint : `${runLabel ?? "执行生成"} · ${promptSubmitHint(isMacPlatform(typeof navigator !== "undefined" ? navigator : undefined))}`}
-						title={busy ? pendingLabel : !canRun && disabledHint ? disabledHint : promptSubmitHint(isMacPlatform(typeof navigator !== "undefined" ? navigator : undefined))}
+					data-execution-launch=""
+						data-tooltip={busy ? pendingLabel : !canRun && disabledHint ? disabledHint : `${runLabel ?? "执行生成"} · ${promptSubmitHint()}`}
+						title={busy ? pendingLabel : !canRun && disabledHint ? disabledHint : promptSubmitHint()}
 					aria-label={busy ? pendingLabel : (runLabel ?? "执行生成")}
 					aria-busy={busy || undefined}
 					aria-describedby={hasBlockingReasons ? BLOCKING_REASONS_ID : undefined}
@@ -383,7 +387,7 @@ export function RunActions({
 			) : null}
 			{showRun ? (
 				<span className="mc-panel__shortcut-hint" data-testid="prompt-submit-hint">
-					{promptSubmitHint(isMacPlatform(typeof navigator !== "undefined" ? navigator : undefined))}
+					{promptSubmitHint()}
 				</span>
 			) : null}
 		</div>

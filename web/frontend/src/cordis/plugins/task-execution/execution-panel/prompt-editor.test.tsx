@@ -41,9 +41,9 @@ describe("ExecutionPanel prompt editor 插槽", () => {
     expect(html).toContain("原始提示词");
   });
 
-  it("操作区显示平台中文快捷键说明（任务 3.3）", () => {
+  it("操作区显示 Enter 生成、Shift+Enter 换行说明（任务 3.3）", () => {
     const html = renderToStaticMarkup(<ExecutionPanel {...BASE_PROPS} />);
     expect(html).toContain('data-testid="prompt-submit-hint"');
-    expect(html).toMatch(/回车换行，(Ctrl\+Enter|⌘\+Enter) 生成/);
+    expect(html).toContain("Enter 生成，Shift+Enter 换行");
   });
 });

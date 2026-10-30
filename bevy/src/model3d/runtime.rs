@@ -26,8 +26,10 @@ pub(crate) struct ModelVisuals {
     pub(super) batching_strategy: super::batch_strategy::BatchStrategy,
     pub(super) roots: HashMap<String, ModelRoot>,
     pub(super) shared: super::resources::SharedResources,
-    pub(super) mesh_references: super::resource_ownership::ResourceReferences<bevy::asset::AssetId<Mesh>>,
-    pub(super) material_references: super::resource_ownership::ResourceReferences<bevy::asset::AssetId<StandardMaterial>>,
+    pub(super) mesh_references:
+        super::resource_ownership::ResourceReferences<bevy::asset::AssetId<Mesh>>,
+    pub(super) material_references:
+        super::resource_ownership::ResourceReferences<bevy::asset::AssetId<StandardMaterial>>,
     pub(super) demand: Option<std::collections::HashSet<String>>,
     pub(super) offscreen_since: HashMap<String, f64>,
     /// Highest-quality consumers retain capture visibility independently of card focus.
@@ -126,7 +128,8 @@ impl OwnershipKey {
                 .staging_generations
                 .wrapping_add((done * 31 + total) as u64)
                 .wrapping_mul(0x1000_0000_01b3);
-            keys.staging_handles += staging.staged_meshes().len() + staging.staged_materials().len();
+            keys.staging_handles +=
+                staging.staged_meshes().len() + staging.staged_materials().len();
         }
         for (id, retained) in &models.capture_retention {
             keys.capture_keys = keys.capture_keys.wrapping_add(*id);
@@ -157,6 +160,7 @@ pub(crate) struct FocusVisuals {
 /// position、view mode 与 `modelPlacement` 的根 transform 变化只刷新下方 layout 的 Transform，
 /// 不重建 entity/mesh/material；只有内容 identity 变化才原子重建并释放旧资源。
 pub(crate) struct ModelRoot {
+    pub(super) group_children: HashMap<String, ModelRoot>,
     pub(super) entities: Vec<Entity>,
     /// 内容 identity（Scene IR/version/material/animation）；决定是否重建 hierarchy。
     pub(super) content_signature: String,
@@ -224,7 +228,7 @@ pub(super) enum ModelRootLayout {
 ///
 /// 不触碰 mesh/material 或 entity 结构：高频 placement preview 因此不产生资源增长
 /// （change: add-model-focus-editing，任务 1.1 / design D4）。
-fn apply_root_transform(
+pub(super) fn apply_root_transform(
     commands: &mut Commands,
     layout: &ModelRootLayout,
     node: &GraphNode,
@@ -249,7 +253,14 @@ fn apply_root_transform(
 /// Bevy 0.16 的 `despawn` 会递归销毁后代，因此先销毁根即可。统一用 `try_despawn`
 /// 避免对已随根销毁的实体重复告警。透明度动作克隆出的专属材质实例不进入共享缓存，
 /// 必须在这里显式回收（change: 2026-10-19-extend-film-set-for-motion-graphics，D2）。
-fn despawn_root(commands: &mut Commands, materials: &mut Assets<StandardMaterial>, mut root: ModelRoot) {
+pub(super) fn despawn_root(
+    commands: &mut Commands,
+    materials: &mut Assets<StandardMaterial>,
+    mut root: ModelRoot,
+) {
+    for (_, child) in root.group_children.drain() {
+        despawn_root(commands, materials, child);
+    }
     root.opacity.release_instances(materials);
     for entity in &root.entities {
         commands.entity(*entity).try_despawn();
@@ -346,9 +357,22 @@ pub(crate) fn sync_models(
         let content_signature = reference.signature.as_str();
         let allowed = models.batching_strategy.merges();
         #[cfg(feature = "explicit-instancing")]
-        let allowed = allowed && (models.batching_strategy != super::batch_strategy::BatchStrategy::Explicit
-            || node.model_preview.is_some());
+        let allowed = allowed
+            && (models.batching_strategy != super::batch_strategy::BatchStrategy::Explicit
+                || node.model_preview.is_some());
+        // 片场 group 的徽标场景沿用旧 composite 根的总览 primitive LOD：group owner 持有
+        // 所有绑定的聚合几何，后续 `sync_quality` 可整场原子切档。未声明时保持 High。
+        let overview = super::quality::has_overview_lod_declaration(node);
+        // 总览片场合批会把只做平移的父级部件平铺到 binding 根（`batching::apply_flatten`），
+        // 动画目标组因此失去几何，旋转/位移只写到没有子几何的组实体上。带部件动作的播放
+        // （hover 拍摄预览卡片、录制/截图）必须使用非合批表示；纯镜头动作不需要拆部件。
+        let part_motion = scene.animation_playback.as_ref().is_some_and(|playback| {
+            playback.node_id == node.id
+                && (!playback.model_motion.is_empty()
+                    || playback.objects.iter().any(|object| !object.model_motion.is_empty()))
+        });
         let batched = allowed
+            && !(overview && part_motion)
             && !models.high_demand.contains(&node.id) && !scene
             .model_editor
             .as_ref()
@@ -357,6 +381,37 @@ pub(crate) fn sync_models(
                 .model_focus
                 .as_ref()
                 .is_some_and(|e| e.node_id == node.id);
+        if let Some(group) = scene
+            .film_set_groups
+            .iter()
+            .find(|group| group.owner_id == node.id)
+        {
+            let quality = if overview {
+                super::quality::initial(
+                    node,
+                    scene,
+                    focus.node.as_deref(),
+                    models.high_demand.contains(&node.id),
+                    resource,
+                )
+            } else {
+                super::quality::Quality::High
+            };
+            super::group_runtime::sync(
+                commands,
+                meshes,
+                materials,
+                models,
+                node,
+                resource,
+                &reference.placement,
+                group,
+                quality,
+                overview,
+                batched,
+            );
+            continue;
+        }
         // Native 后台准备分流（change: 2026-10-18-prepare-native-film-sets-in-background，
         // design D1）：只对显式声明总览策略的根生效；其它 target/feature 与普通模型卡片
         // 继续走下面原有的同步创建入口。
@@ -414,7 +469,7 @@ pub(crate) fn sync_models(
                 &mut models.shared,
                 batched,
                 models.batching_strategy,
-                super::quality::has_overview_lod_declaration(node),
+                overview,
             );
             root.representation_generation = generation;
             root.content_signature = content_signature.to_owned();
@@ -426,8 +481,10 @@ pub(crate) fn sync_models(
             let start_active = models.active_model.as_deref() == Some(node.id.as_str());
             init_root_playback(commands, &root.animation_entities, start_active);
             models.roots.insert(node.id.clone(), root);
-            models.record_playback(serde_json::json!({"event":"root-prepared", "nodeId":node.id,
-                "cpuMs":rebuild_started.elapsed().as_secs_f64() * 1000.0}));
+            models.record_playback(
+                serde_json::json!({"event":"root-prepared", "nodeId":node.id,
+                "cpuMs":rebuild_started.elapsed().as_secs_f64() * 1000.0}),
+            );
         } else {
             let root = models.roots.get_mut(&node.id).expect("root exists");
             // 内容 signature 不变，但 placement 可能变化：刷新根 transform，保持资源引用。
@@ -444,7 +501,14 @@ pub(crate) fn sync_models(
     }
     if let Some(playback) = &scene.animation_playback {
         let plan = super::motion_plan::resolve(models, playback);
-        super::playback_prepare::prepare(commands, meshes, materials, models, playback, &plan.targets);
+        super::playback_prepare::prepare(
+            commands,
+            meshes,
+            materials,
+            models,
+            playback,
+            &plan.targets,
+        );
     }
     super::item_placement::sync(commands, models, scene);
     // 失去 demand / 节点删除：取消准备需求（迟到结果不得装配或发布）。
@@ -523,6 +587,15 @@ impl ModelVisuals {
             || !self.capture_retention.is_empty()
     }
 
+    pub(crate) fn is_active_model(&self, id: &str) -> bool {
+        self.active_model.as_deref() == Some(id)
+    }
+
+    pub(crate) fn is_active_animated_model(&self, id: &str) -> bool {
+        self.is_active_model(id)
+            && self.roots.get(id).is_some_and(|root| !root.animation_entities.is_empty())
+    }
+
     /// 是否仍有排队/运行中/待装配的准备任务（静止降频据此判定需要连续帧）。
     pub(crate) fn has_in_flight_preparation(&self) -> bool {
         self.preparation.has_in_flight()
@@ -586,11 +659,21 @@ impl ModelVisuals {
     /// 只写层级根：Bevy 的可见性传播会把 `Hidden`/`Inherited` 传给全部后代
     /// （`visibility_propagate_system` 保留子级自身的局部 `Hidden`），因此不必
     /// 遍历整棵子树（change: 2026-10-14-scope-film-set-object-picking-to-focus，design D6）。
-    pub(crate) fn set_visible_focus(&mut self, commands: &mut Commands, focus_node: Option<&str>, scene: &crate::protocol::Scene) {
+    pub(crate) fn set_visible_focus(
+        &mut self,
+        commands: &mut Commands,
+        focus_node: Option<&str>,
+        scene: &crate::protocol::Scene,
+    ) {
         let mut inserts = 0u64;
         let mut skips = 0u64;
         for (id, root) in &self.roots {
-            let visible = focus_node.is_none_or(|selected| selected == id) || (crate::canvas_query::focus_context::contains(scene, id) && scene.nodes.iter().any(|n| n.id == *id && n.model_preview.is_some()));
+            let visible = focus_node.is_none_or(|selected| selected == id)
+                || (crate::canvas_query::focus_context::contains(scene, id)
+                    && scene
+                        .nodes
+                        .iter()
+                        .any(|n| n.id == *id && n.model_preview.is_some()));
             let visibility = if visible {
                 Visibility::Inherited
             } else {

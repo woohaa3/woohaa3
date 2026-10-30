@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "ppserver-provider",
+  "metadata": { "module": "./shared", "export": "PPSERVER_PLUGIN_METADATA", "order": 27 },
+  "hostPlugin": { "module": "./backend", "factory": "createPpserverProviderPlugin", "features": ["provider"], "order": 17 }
+}

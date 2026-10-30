@@ -22,7 +22,7 @@ import {
   type CanvasCommand,
   type Woohaa3CanvasNode,
 } from "@woohaa3/contracts";
-import { planGroupStructureChange, planMoveNodes } from "../../../extension-api/command-planner.js";
+import { planFilmSetMembershipCommands, planGroupStructureChange, planMoveNodes } from "../../../extension-api/command-planner.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import {
   applyDragAttachKey,
@@ -132,6 +132,7 @@ export function createDragGestureFamily(
     previews: Map<string, { x: number; y: number }>
   ): CanvasCommand[] => {
     const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
+    if (!canvasState) return planMoveNodes(Object.fromEntries(previews));
     const index = sharedCanvasNodeIndex(canvasState);
     if (!index) return planMoveNodes(Object.fromEntries(previews));
     // 收起/隐藏的容器不接收拖入，避免落入它不可见的展开范围。
@@ -145,6 +146,7 @@ export function createDragGestureFamily(
       data: {}
     })) as unknown as Woohaa3CanvasNode[];
     const groupSizes = new Map(index.groupBounds.map(group => [group.id, {width: group.width, height: group.height}]));
+    const groupBadgeScales = new Map(index.groups.map(group => [group.id, index.source.nodeData[group.id]?.groupBadgeScale ?? 1]));
     const movingGroups = [...roots.keys()].filter(id => index.byId.get(id)?.type === "group");
     let settled = original;
     if (movingGroups.length > 0) {
@@ -157,6 +159,7 @@ export function createDragGestureFamily(
         groupSizes,
         eligibleGroupIds,
         collapsedGroupIds: index.collapsedGroupIds,
+        groupBadgeScales,
         protectedNodeIds: new Set(index.compositeNodes.map(node => node.id)),
       });
       if (!groupResult.ok) {
@@ -175,6 +178,7 @@ export function createDragGestureFamily(
         groupSizes,
         eligibleGroupIds,
         collapsedGroupIds: index.collapsedGroupIds,
+        groupBadgeScales,
         documentOrder: index.documentOrder,
       });
       if (!nodeResult.ok) {
@@ -195,8 +199,11 @@ export function createDragGestureFamily(
       settled = refitWoohaa3CanvasGroups([...settled], affectedGroupIds).nodes;
     }
     const changedCommands = planGroupStructureChange(original, settled);
+    // 片场成员拖出/拖回：结构差异之外，同一批次切换 binding 的软摘除状态，
+    // 保留对象动作脚本；拖回时恢复。非片场组不会产生补丁。
+    const filmSetCommands = planFilmSetMembershipCommands(canvasState, original, settled);
     // Both pure moves and structural drops use the same atomic diff planner.
-    return changedCommands;
+    return [...changedCommands, ...filmSetCommands];
   };
 
   const evaluate = (): boolean => {

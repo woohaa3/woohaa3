@@ -227,7 +227,9 @@ export type ScopeOptions = {
 export async function startFrontendScope(parent: Context, options: ScopeOptions): Promise<FrontendRuntime> {
   const guardedScope = markServiceAccessGuardScope(parent.extend({}));
   let scopeCtx = guardedScope.ctx;
-  for (const name of options.isolate ?? []) {
+  // `extensionReload` 是 scope 自己的重装入入口：同样按 scope 隔离，避免快速切换时
+  // 两个仍在启动的 scope 争抢同一个全局服务键（重复注册会让页面启动失败、切画布白屏）。
+  for (const name of [...(options.isolate ?? []), "extensionReload"]) {
     scopeCtx = scopeCtx.extend(scopeCtx.isolate(name));
   }
   const ctx = scopeCtx;
@@ -281,6 +283,8 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
     return "reloaded";
   };
   let disposed = false;
+  /** 本 scope 的重装入口 fiber（随 scope 释放，见下方 provide 注释）。 */
+  let reloadServiceFiber: Fiber | null = null;
 
   try {
     await installFiber.await().catch(() => undefined);
@@ -309,11 +313,24 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
     reportLateServiceReads(guardedScope.guard, ctx);
 
     await options.beforeReady?.(ctx);
+    // 实例级重装入口（change: 2026-10-27-add-extension-dev-reload，D1/D5）：reconciler 在 install
+    // 阶段只拿到惰性 getter，这里在 scope 成功后把入口挂到**本 scope 自己的 fiber**上。
+    // 不能由调用方直接 `scopeCtx.provide()`：那会登记到父/root fiber，页面 dispose 不释放，
+    // 第二次进入画布时重复注册会抛错，整页白屏。
+    reloadServiceFiber = ctx.plugin((providerCtx) => {
+      providerCtx.provide("extensionReload" as never, reloadDefinition as never);
+    });
+    // 启动完成即保证服务可读（cordis 只把已 active 的提供者交给 strict get）。
+    await reloadServiceFiber;
     diagnostics.markReady();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     diagnostics.markFailed(message);
-    await Promise.allSettled([installFiber.dispose(), ...assemblies.map((assembly) => assembly.dispose())]);
+    await Promise.allSettled([
+      ...(reloadServiceFiber ? [reloadServiceFiber.dispose()] : []),
+      installFiber.dispose(),
+      ...assemblies.map((assembly) => assembly.dispose())
+    ]);
     throw error;
   }
 
@@ -346,7 +363,8 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
     async dispose() {
       if (disposed) return;
       disposed = true;
-      // 先释放 scope 的 install-phase 资源（remote/session 等），再撤销 feature plugins。
+      // 先释放本 scope 的重装入口，再释放 install-phase 资源与 feature plugins。
+      await reloadServiceFiber?.dispose();
       await Promise.allSettled(assemblies.map((assembly) => assembly.dispose()));
       await installFiber.dispose();
       for (const dispose of disposers.reverse()) dispose();

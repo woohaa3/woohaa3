@@ -19,7 +19,7 @@ web/extensions/<extensionId>/
 较大的插件可以在该目录内增加 `frontend/`、`backend/` 子目录。插件实现不放进宿主目录；宿主只负责
 加载、管理和测试插件。
 
-片场（`film-set`）与游戏炼丹炉（`game-furnace`）采用职责在外、执行环境在内的组织方式；其它扩展无需同步迁移：
+片场（`film-set`）采用职责在外、执行环境在内的组织方式；其它扩展无需同步迁移：
 
 ```text
 src/state/{shared,browser,backend}        # 内容事实、纯规则、草稿和注入式快照存取
@@ -32,7 +32,7 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 
 `frontend/index.ts`、`frontend/metadata.ts` 与 package exports 的既有公共路径保持稳定，门面仅转出或委托。metadata 是独立构建的固定发现入口，可转出 integration 中的纯 metadata，不能可达 activation。内部直接导入职责叶子，不绕回公共聚合门面。两包测试使用 [AST 依赖扫描](../tooling/extension-dependencies.ts) 校验实际解析目标、类型/动态导入、重导出、环境闭包与循环。
 
-页面 integration 持有 slots、输入 owner、焦点/删除观察与活动镜像，退出时幂等释放，部分装配失败逆序回滚。编辑会话管理字段草稿，preview 管理时钟、缓存和短期 token；目标或版本切换时隔离迟到回调。authoring 管理取消、重试与后台收尾，关闭工作区不取消宿主工作租约。片场仍经权威画布命令提交；炼丹炉仍先保存不可变 Media 快照，再确认节点稳定关联，不新增持久状态源。
+页面 integration 持有 slots、输入 owner、焦点/删除观察与活动镜像，退出时幂等释放，部分装配失败逆序回滚。编辑会话管理字段草稿，preview 管理时钟、缓存和短期 token；目标或版本切换时隔离迟到回调。authoring 管理取消、重试与后台收尾，关闭工作区不取消宿主工作租约。片场仍经权威画布命令提交，不新增持久状态源。
 
 ## 声明面：`extension.json`
 
@@ -65,9 +65,13 @@ Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情
 
 - **唯一身份来源**是 `src/frontend/metadata.ts`：只导出 JSON 可序列化的
   `ExtensionFrontendMetadata`（`extensionId`、`version`、`label`、`description`、`activation`、
-  `configScope`、`required`、`sdkAbi`；可选 `settingsPanel`、`icon`）。`icon` 是
+  `configScope`、`required`、`sdkAbi`；可选 `settingsPanel`、`icon`、`defaultEnabled`）。`icon` 是
   `PLUGIN_ICON_NAMES` 里的语义名，浏览器侧的插件清单与设置卡片用它；品牌图形由 `extension.json`
   的 `icon.asset` 在构建时注入，不要在 metadata 里写死路径。它 MUST NOT 引用 plugin/UI/CSS/业务 store 或后端代码。
+- `defaultEnabled` 只对 `configScope: "browser-local"` 的 optional 入口有意义：宿主配置里还没有显式
+  选择时用它决定开箱启停，缺省视为启用；用户已保存的选择始终优先。站点入口改用 `extension.json`
+  的 `site.defaultEnabled`，在 metadata 里声明会被目录校验拒绝。`dev-performance` 等未声明的
+  browser-local optional 保持启用；私有扩展根里的包可自行声明默认关闭。
 - `src/frontend/index.ts` 导出 `descriptor`（`ExtensionFrontendDescriptor`），其身份字段**复用**
   metadata（`{ ...METADATA, plugin: () => ... }`），避免重复维护 activation/required。
 - `descriptor.plugin()` 是**无副作用工厂**，只有宿主请求装配时才构造完整 Cordis plugin。
@@ -103,8 +107,8 @@ export const descriptor: ExtensionFrontendDescriptor = {
 | activation | configScope | 启动行为 | 失败语义 |
 | --- | --- | --- | --- |
 | `always` | `site` | Canvas 启动时与 required 一起**同步准备**（ChatGPT、片场） | required 失败 → 页面进入稳定错误，不挂载半可用画布 |
-| `server-active` | `site` | 只登记 metadata；由服务端权威 active 状态驱动 reconciler 装配/释放（game-furnace、runninghub-provider） | 隔离失败、可重试；不影响核心画布 |
-| `browser-local` | `browser-local` | 由当前 origin 的本地偏好决定是否加入启动清单（prompt-snippets、task-activity） | optional 失败隔离，不影响 required |
+| `server-active` | `site` | 只登记 metadata；由服务端权威 active 状态驱动 reconciler 装配/释放（runninghub-provider） | 隔离失败、可重试；不影响核心画布 |
+| `browser-local` | `browser-local` | 由当前 origin 的本地偏好决定是否加入启动清单（如 task-activity） | optional 失败隔离，不影响 required |
 | `browser-local` + `required` | — | **非法组合**，装配前报错 | — |
 
 **故障隔离**（change: 2026-10-21-harden-extension-fault-isolation）：宿主给扩展注入盖章的 `ctx.slots` / `ctx.dialogs`，扩展只能经它们注册；每个贡献单独包错误边界，同步回调抛错会被跳过并回落宿主默认行为。同一扩展 60 秒内 3 次故障即本会话停用（required 除外），设置卡片可重新加载。后端激活默认 30 秒、释放 10 秒时限，超时即 `failed`。宿主连续 3 次未就绪会以**安全模式**启动：只装 bootstrap 槽位与 required 扩展，其余显示 `suspended`。扩展 MUST NOT 绕过注入的 ctx 取宿主 registry 单例，也 MUST NOT 依赖装配顺序（可选 hostPlugin 并发激活）。

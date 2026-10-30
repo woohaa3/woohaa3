@@ -172,13 +172,21 @@ pub fn derive_orbit_transform(target: &OrbitCameraTarget, pose: &OrbitCameraPose
 /// 把 pose 钳制进 limits（非有限值稳定回退）。
 pub fn clamp_orbit_pose(pose: &OrbitCameraPose, limits: &OrbitCameraLimits) -> OrbitCameraPose {
     let yaw = if pose.yaw.is_finite() { pose.yaw } else { 0.0 };
-    let pitch = if pose.pitch.is_finite() { pose.pitch } else { 0.0 };
+    let pitch = if pose.pitch.is_finite() {
+        pose.pitch
+    } else {
+        0.0
+    };
     let distance = if pose.distance.is_finite() && pose.distance > 0.0 {
         pose.distance
     } else {
         limits.min_distance
     };
-    let pan = if pose.pan.is_finite() { pose.pan } else { Vec3::ZERO };
+    let pan = if pose.pan.is_finite() {
+        pose.pan
+    } else {
+        Vec3::ZERO
+    };
     OrbitCameraPose {
         yaw,
         pitch: pitch.clamp(limits.min_pitch, limits.max_pitch),
@@ -232,8 +240,16 @@ pub(crate) fn apply_orbit_commands(
                 delta_yaw,
                 delta_pitch,
             } => {
-                next.yaw += if delta_yaw.is_finite() { delta_yaw } else { 0.0 };
-                next.pitch += if delta_pitch.is_finite() { delta_pitch } else { 0.0 };
+                next.yaw += if delta_yaw.is_finite() {
+                    delta_yaw
+                } else {
+                    0.0
+                };
+                next.pitch += if delta_pitch.is_finite() {
+                    delta_pitch
+                } else {
+                    0.0
+                };
             }
             OrbitCameraCommand::Pan { delta } => {
                 if delta.is_finite() {
@@ -248,7 +264,10 @@ pub(crate) fn apply_orbit_commands(
                 };
                 next.distance *= factor;
             }
-            OrbitCameraCommand::Reset { pose: reset, target: point } => {
+            OrbitCameraCommand::Reset {
+                pose: reset,
+                target: point,
+            } => {
                 if point.is_finite() {
                     target.point = point;
                 }
@@ -437,7 +456,9 @@ mod tests {
     #[test]
     fn orthographic_height_is_monotonic_and_guards_invalid_distance() {
         let fov = ORBIT_DEFAULT_FOV;
-        assert!(orthographic_viewport_height(400.0, fov) > orthographic_viewport_height(200.0, fov));
+        assert!(
+            orthographic_viewport_height(400.0, fov) > orthographic_viewport_height(200.0, fov)
+        );
         // 非法/非正距离回退为 1.0，不产生 NaN/负值。
         assert!(orthographic_viewport_height(0.0, fov).is_finite());
         assert!(orthographic_viewport_height(f32::NAN, fov) > 0.0);
@@ -470,7 +491,9 @@ mod tests {
             pan: Vec3::new(f32::NAN, 0.0, 0.0),
         };
         let clamped = clamp_orbit_pose(&pose, &limits);
-        assert!(clamped.yaw.is_finite() && clamped.pitch.is_finite() && clamped.distance.is_finite());
+        assert!(
+            clamped.yaw.is_finite() && clamped.pitch.is_finite() && clamped.distance.is_finite()
+        );
         assert!(clamped.pan.is_finite());
         assert!(clamped.pitch <= limits.max_pitch + 1e-6);
         assert!((clamped.distance - limits.min_distance).abs() < 1e-6);
@@ -479,9 +502,7 @@ mod tests {
 
     #[test]
     fn pan_offsets_rotation_center() {
-        let target = OrbitCameraTarget {
-            point: Vec3::ZERO,
-        };
+        let target = OrbitCameraTarget { point: Vec3::ZERO };
         let pose = OrbitCameraPose {
             distance: 5.0,
             pan: Vec3::new(2.0, 0.0, 0.0),

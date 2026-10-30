@@ -41,12 +41,18 @@ pub(crate) fn content_height(aspect: f32) -> f32 {
     } else {
         16.0 / 9.0
     };
-    ((SHOT_PREVIEW_CARD_WIDTH - 32.0) / safe).clamp(SHOT_PREVIEW_CONTENT_MIN_HEIGHT, SHOT_PREVIEW_CONTENT_MAX_HEIGHT)
+    ((SHOT_PREVIEW_CARD_WIDTH - 32.0) / safe).clamp(
+        SHOT_PREVIEW_CONTENT_MIN_HEIGHT,
+        SHOT_PREVIEW_CONTENT_MAX_HEIGHT,
+    )
 }
 
 /// 默认整体尺寸：内容高度 + 标题区 + 底部 16。
 pub(crate) fn default_card_size(aspect: f32) -> Vec2 {
-    Vec2::new(SHOT_PREVIEW_CARD_WIDTH, content_height(aspect) + SHOT_PREVIEW_HEADER_HEIGHT + 16.0)
+    Vec2::new(
+        SHOT_PREVIEW_CARD_WIDTH,
+        content_height(aspect) + SHOT_PREVIEW_HEADER_HEIGHT + 16.0,
+    )
 }
 
 /// 与图片、视频节点共用内容框：顶部 52，左右和底部各 16。
@@ -68,11 +74,15 @@ pub(crate) fn content_center(node: &GraphNode) -> Vec2 {
 /// 内容区内的**完整 aspect** 图像尺寸（contain，不拉伸、不裁剪）。
 pub(crate) fn texture_size(node: &GraphNode, texture: Vec2) -> Vec2 {
     let (_, _, box_width, box_height) = content_rect_of(node);
-    let texture = if texture.x.is_finite() && texture.y.is_finite() && texture.x > 0.0 && texture.y > 0.0 {
-        texture
-    } else {
-        Vec2::new(SHOT_PREVIEW_CARD_WIDTH, content_height(shot_preview_aspect(node)))
-    };
+    let texture =
+        if texture.x.is_finite() && texture.y.is_finite() && texture.x > 0.0 && texture.y > 0.0 {
+            texture
+        } else {
+            Vec2::new(
+                SHOT_PREVIEW_CARD_WIDTH,
+                content_height(shot_preview_aspect(node)),
+            )
+        };
     let scale = (box_width / texture.x).min(box_height / texture.y);
     Vec2::new((texture.x * scale).max(1.0), (texture.y * scale).max(1.0))
 }
@@ -175,7 +185,9 @@ pub(crate) const SHOT_PREVIEW_BADGE_INSET: f32 = 16.0;
 /// 播放标记圆钮中心：内容区左上角内边距处，避免遮挡中央画面与底部进度条。
 pub(crate) fn playback_badge_center(node: &GraphNode) -> Vec2 {
     let (x, y, width, height) = content_rect_of(node);
-    let inset = SHOT_PREVIEW_BADGE_INSET.min(width.max(0.0) / 2.0).min(height.max(0.0) / 2.0);
+    let inset = SHOT_PREVIEW_BADGE_INSET
+        .min(width.max(0.0) / 2.0)
+        .min(height.max(0.0) / 2.0);
     Vec2::new(x + inset, y + inset)
 }
 
@@ -183,7 +195,9 @@ pub(crate) fn playback_badge_center(node: &GraphNode) -> Vec2 {
 ///
 /// 只读 `progress`（浏览器本地投影，不进入 canonical）；静态卡片或越界进度返回 `None`。
 /// 返回 `(x, y, width, height)` 两段，绘制与命中复用同一几何。
-pub(crate) fn playback_progress_bar(node: &GraphNode) -> Option<((f32, f32, f32, f32), (f32, f32, f32, f32))> {
+pub(crate) fn playback_progress_bar(
+    node: &GraphNode,
+) -> Option<((f32, f32, f32, f32), (f32, f32, f32, f32))> {
     let progress = playback_progress(node)?;
     let (x, y, width, height) = content_rect_of(node);
     let bar_height = 3.0_f32.min(height.max(0.0));
@@ -261,7 +275,12 @@ mod tests {
         assert!(tall.y <= box_height + 1e-3 && tall.x < box_width);
         // 非法纹理尺寸回退到镜头 aspect 的默认内容高度，不产生 NaN。
         let fallback = texture_size(&card, Vec2::new(0.0, f32::NAN));
-        assert!(fallback.x.is_finite() && fallback.y.is_finite() && fallback.x > 0.0 && fallback.y > 0.0);
+        assert!(
+            fallback.x.is_finite()
+                && fallback.y.is_finite()
+                && fallback.x > 0.0
+                && fallback.y > 0.0
+        );
     }
 
     #[test]
@@ -275,26 +294,44 @@ mod tests {
     #[test]
     fn visibility_uses_card_rect_and_unknown_surface_is_conservative() {
         let card = node(100.0, 100.0, 240.0, 167.0);
-        assert!(visible_on_surface(&card, [0.0, 0.0, 1.0], Vec2::new(800.0, 600.0)));
+        assert!(visible_on_surface(
+            &card,
+            [0.0, 0.0, 1.0],
+            Vec2::new(800.0, 600.0)
+        ));
         // 完全移出右侧。
-        assert!(!visible_on_surface(&card, [-10_000.0, 0.0, 1.0], Vec2::new(800.0, 600.0)));
+        assert!(!visible_on_surface(
+            &card,
+            [-10_000.0, 0.0, 1.0],
+            Vec2::new(800.0, 600.0)
+        ));
         // 未知/非法 surface 保守视为可见（不误杀）。
         assert!(visible_on_surface(&card, [0.0, 0.0, 1.0], Vec2::ZERO));
-        assert!(visible_on_surface(&card, [f32::NAN, 0.0, 1.0], Vec2::new(800.0, 600.0)));
+        assert!(visible_on_surface(
+            &card,
+            [f32::NAN, 0.0, 1.0],
+            Vec2::new(800.0, 600.0)
+        ));
     }
 
     #[test]
     fn preview_type_is_declared_not_guessed() {
-        assert!(!is_shot_preview_node(&serde_json::from_str::<GraphNode>(
-            r#"{"id":"n","type":"image","x":0,"y":0}"#
-        )
-        .unwrap()));
+        assert!(!is_shot_preview_node(
+            &serde_json::from_str::<GraphNode>(r#"{"id":"n","type":"image","x":0,"y":0}"#).unwrap()
+        ));
         assert!(is_shot_preview_node(&node(0.0, 0.0, 240.0, 167.0)));
         assert!((shot_preview_aspect(&node(0.0, 0.0, 240.0, 167.0)) - 16.0 / 9.0).abs() < 0.001);
     }
 
-    fn state_node(state: &str, kind: &str, playing: Option<bool>, diagnostic: Option<&str>) -> GraphNode {
-        let playing = playing.map(|value| value.to_string()).unwrap_or_else(|| "null".to_owned());
+    fn state_node(
+        state: &str,
+        kind: &str,
+        playing: Option<bool>,
+        diagnostic: Option<&str>,
+    ) -> GraphNode {
+        let playing = playing
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "null".to_owned());
         let diagnostic = diagnostic
             .map(|text| format!("\"{text}\""))
             .unwrap_or_else(|| "null".to_owned());
@@ -313,26 +350,48 @@ mod tests {
         assert_eq!(status_label("error"), Some("预览失败"));
         assert_eq!(status_label("ready"), None);
         let shorten = |text: &str, _w: f32, _s: f32| text.to_owned();
-        assert_eq!(status_text(&state_node("ready", "static", None, None), &shorten), "");
+        assert_eq!(
+            status_text(&state_node("ready", "static", None, None), &shorten),
+            ""
+        );
         assert_eq!(
             status_text(&state_node("preparing", "static", None, None), &shorten),
             "预览准备中"
         );
         // 诊断文案优先于通用状态标签。
         assert_eq!(
-            status_text(&state_node("error", "static", None, Some("镜头动作无效")), &shorten),
+            status_text(
+                &state_node("error", "static", None, Some("镜头动作无效")),
+                &shorten
+            ),
             "镜头动作无效"
         );
         // 普通节点（无 shotPreview）不产生任何预览文案。
-        let plain: GraphNode = serde_json::from_str(r#"{"id":"n","type":"image","x":0,"y":0}"#).unwrap();
+        let plain: GraphNode =
+            serde_json::from_str(r#"{"id":"n","type":"image","x":0,"y":0}"#).unwrap();
         assert!(status_text(&plain, &shorten).is_empty());
     }
 
     #[test]
     fn playback_badge_and_progress_are_dynamic_only_and_bounded() {
-        assert!(shows_playback_badge(&state_node("ready", "dynamic", Some(true), None)));
-        assert!(!shows_playback_badge(&state_node("ready", "dynamic", Some(false), None)));
-        assert!(!shows_playback_badge(&state_node("ready", "static", Some(true), None)));
+        assert!(shows_playback_badge(&state_node(
+            "ready",
+            "dynamic",
+            Some(true),
+            None
+        )));
+        assert!(!shows_playback_badge(&state_node(
+            "ready",
+            "dynamic",
+            Some(false),
+            None
+        )));
+        assert!(!shows_playback_badge(&state_node(
+            "ready",
+            "static",
+            Some(true),
+            None
+        )));
 
         let mut dynamic = state_node("ready", "dynamic", Some(true), None);
         dynamic.shot_preview.as_mut().unwrap().progress = Some(0.5);
@@ -352,15 +411,19 @@ mod tests {
     fn focus_isolation_only_applies_to_focus_modes() {
         let mut scene = crate::protocol::Scene::default();
         assert!(!focuses_isolate(&scene));
-        scene.model_focus = Some(serde_json::from_str(
-            r#"{"nodeId":"m","target":[0,0,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87}"#,
-        )
-        .unwrap());
+        scene.model_focus = Some(
+            serde_json::from_str(
+                r#"{"nodeId":"m","target":[0,0,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87}"#,
+            )
+            .unwrap(),
+        );
         assert!(focuses_isolate(&scene));
     }
 }
 
 /// Presentation visibility does not remove the shot or its offscreen capture target.
 pub(crate) fn hidden(node: &crate::protocol::GraphNode) -> bool {
-    node.shot_preview.as_ref().is_some_and(|preview| preview.hidden)
+    node.shot_preview
+        .as_ref()
+        .is_some_and(|preview| preview.hidden)
 }

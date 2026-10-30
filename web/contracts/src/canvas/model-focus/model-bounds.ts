@@ -19,6 +19,7 @@ import {
 import type { BevyModelPlacement } from "../render-scene/wire-model.js";
 import { axisQ, quatMulLocal } from "./math.js";
 import { canvasPointToWorld, viewRotation } from "./canvas-projection.js";
+import { groupBadgeRect } from "../group-badge.js";
 import { clampDistance } from "./clamp.js";
 import {
   FILM_SET_FIT_MARGIN,
@@ -164,6 +165,29 @@ export function modelAnchor(input: {
   const top = input.relativeAabb ? Math.max(0, input.relativeAabb.max[1]) : 74.0 - MODEL_CARD_GAP;
   const cy = cardBottom + MODEL_CARD_GAP + top - input.offset.y * size;
   return canvasPointToWorld(cx, cy, input.offset.z * size);
+}
+
+/** Accepted group badge layout, shared by browser focus math and the renderer's group model. */
+export function groupModelLayout(input: ModelSceneInput & {
+  node: { x: number; y: number; width: number; height: number; badgeScale?: number };
+}) {
+  const local = modelLocalAabb(input);
+  const safeExtent = input.extent > 0 && Number.isFinite(input.extent) ? input.extent : 1;
+  const natural = 192 / safeExtent;
+  const yaw = ((input.placement?.yaw ?? 0) * Math.PI) / 180;
+  const projected = local ? transformAabb({ translation: [0, 0, 0], rotation: quatMulLocal(viewRotation(), axisQ([0, 1, 0], yaw)), scale: [natural, natural, natural] }, local) : null;
+  const size = projected ? { width: Math.max(0.001, projected.max[0] - projected.min[0]), height: Math.max(0.001, projected.max[1] - projected.min[1]) } : { width: 1, height: 1 };
+  const badge = groupBadgeRect(input.node, input.node.badgeScale ?? 1);
+  const availableWidth = Math.max(1, Math.min(56, badge.width - 20));
+  const availableHeight = Math.max(1, Math.min(44, badge.height - 20));
+  const fit = Math.min(availableWidth / size.width, availableHeight / size.height);
+  const factor = Math.max(0.001, Math.min(1, input.placement?.scale ?? 1)) * fit * badge.scale;
+  const world = local ? transformAabb({ translation: [0, 0, 0], rotation: axisQ([0, 1, 0], yaw), scale: [natural, natural, natural] }, local) : null;
+  const relative = world ? { min: world.min.map(v => v * factor) as Vec3, max: world.max.map(v => v * factor) as Vec3 } : null;
+  const center = { x: badge.x + badge.width / 2, y: badge.y + badge.height / 2 };
+  const projectedCenter = projected?.min && projected.max ? [(projected.min[0] + projected.max[0]) / 2 * factor, (projected.min[1] + projected.max[1]) / 2 * factor] : [0, 0];
+  const anchorCanvas = { x: center.x - projectedCenter[0], y: center.y + projectedCenter[1] };
+  return { relative, anchor: canvasPointToWorld(anchorCanvas.x, anchorCanvas.y, (input.placement?.offset.z ?? 0) * MODEL_SIZE_BASE), unit: natural * factor };
 }
 
 /**

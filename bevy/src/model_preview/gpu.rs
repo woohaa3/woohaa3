@@ -7,6 +7,7 @@ use bevy::{
         erased_render_asset::ErasedRenderAssets,
         mesh::RenderMesh,
         render_asset::RenderAssets,
+        texture::GpuImage,
         render_phase::{ViewBinnedRenderPhases, ViewSortedRenderPhases},
         render_resource::{CachedPipelineState, PipelineCache},
         view::{ExtractedView, visibility::RenderVisibleEntities},
@@ -57,9 +58,21 @@ pub(super) fn evidence(
 /// Consecutive drawn frames required before the texture is published.
 const STABLE_FRAMES: u8 = 2;
 
+fn images_ready(ids: &[bevy::asset::AssetId<Image>], mut contains: impl FnMut(bevy::asset::AssetId<Image>) -> bool) -> bool {
+    ids.iter().copied().all(&mut contains)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{evidence, Evidence::*};
+    use super::{Evidence::*, evidence};
+
+    #[test]
+    fn missing_gpu_image_prevents_readiness() {
+        let image = bevy::asset::AssetId::<bevy::prelude::Image>::default();
+        assert!(!super::images_ready(&[image], |_| false));
+        assert!(super::images_ready(&[image], |_| true));
+        assert!(super::images_ready(&[], |_| false));
+    }
 
     #[test]
     fn a_missing_root_never_counts_as_drawn_content() {
@@ -101,6 +114,7 @@ pub(super) fn observe(
     unprepared: Query<(&PreviewView, &ExtractedView), Without<bevy::render::view::ViewTarget>>,
     materials: Res<ErasedRenderAssets<PreparedMaterial>>,
     meshes: Res<RenderAssets<RenderMesh>>,
+    images: Res<RenderAssets<GpuImage>>,
     opaque: Res<ViewBinnedRenderPhases<Opaque3d>>,
     mask: Res<ViewBinnedRenderPhases<AlphaMask3d>>,
     transparent: Res<ViewSortedRenderPhases<Transparent3d>>,
@@ -119,7 +133,8 @@ pub(super) fn observe(
             && preview
                 .materials
                 .iter()
-                .all(|id| materials.get(*id).is_some());
+                .all(|id| materials.get(*id).is_some())
+            && images_ready(&preview.images, |id| images.get(id).is_some());
         let expected = visible
             .get::<Mesh3d>()
             .map(|class| class.entities_cpu_culling.len() + class.entities_gpu_culling.len())

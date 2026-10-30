@@ -10,6 +10,7 @@
  *   与本机路径，同时保留用户配置。
  */
 import { describe, expect, it } from "vitest";
+import { ContentContributionRegistry } from "../content-contribution.js";
 import { sanitizeRuntimeNodeConfigPatch, sanitizeNodeDataForClipboard } from "./runtime-node-data";
 
 describe("运行时 nodeData allowlist", () => {
@@ -145,5 +146,34 @@ describe("剪贴板复制清理", () => {
       list: [1, 2, Number.NaN]
     });
     expect(cleaned).toEqual({ keep: "v" });
+  });
+});
+
+describe("owner clipboard sanitation", () => {
+  it("calls the owner before removing generic transient state", () => {
+    const content = new ContentContributionRegistry();
+    content.register({ extensionId: "test-recipe", nodeData: {
+      decode: data => ({ ok: true, value: data }),
+      validatePatch: () => null,
+      normalize: data => data,
+      sanitizeRuntime: data => { const next = { ...(data as Record<string, unknown>) }; delete next.recipePreview; return next; },
+      copy: data => ({ data, assetRefs: [], remap: {} }),
+      diff: (before, after) => ({ ok: true, forward: after, inverse: before })
+    } });
+    expect(sanitizeNodeDataForClipboard({ extensionId: "test-recipe", recipe: { count: 2 }, recipePreview: "temporary", activeRunId: "run" }, { content }))
+      .toEqual({ extensionId: "test-recipe", recipe: { count: 2 } });
+  });
+  it("rejects unavailable owners so callers can retain the previous clipboard", () => {
+    expect(() => sanitizeNodeDataForClipboard({ extensionId: "unavailable", recipe: {} }, { content: new ContentContributionRegistry() }))
+      .toThrow("content-owner-unavailable");
+  });
+  it("does not expose codec exception text or normalize invalid output", () => {
+    const content = new ContentContributionRegistry();
+    content.register({ extensionId: "test-recipe", nodeData: {
+      decode: data => ({ ok: true, value: data }), validatePatch: () => null, normalize: data => data,
+      sanitizeRuntime: () => { throw Error("private diagnostic"); },
+      copy: data => ({ data, assetRefs: [], remap: {} }), diff: (before, after) => ({ ok: true, forward: after, inverse: before })
+    } });
+    expect(() => sanitizeNodeDataForClipboard({ extensionId: "test-recipe", recipe: {} }, { content })).toThrow(/^content-codec-failed$/);
   });
 });

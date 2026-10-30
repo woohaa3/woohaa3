@@ -14,7 +14,7 @@ import { filmSetLayoutBounds } from "../film-set-layout.js";
 import { MODEL_SCRIPT_SCENE_IR_V2_VERSION } from "../model-script.js";
 import type { PreparedModelResource } from "../prepared-model.js";
 import type { SceneV2Op } from "../scene-ir-v2.js";
-import type { BevyModelMediaPlane, BevyCompositeAssetPresentation, CompositeAssetGeometryQuality, CompositeAssetScopeShape } from "./wire-scene.js";
+import type { BevyModelMediaPlane, BevyCompositeAssetPresentation, CompositeAssetOverviewCache, CompositeAssetGeometryQuality, CompositeAssetScopeShape } from "./wire-scene.js";
 import type { BevyModelPlacement } from "./wire-model.js";
 import { COMPOSITE_ASSET_SCOPE_AXIS_X, COMPOSITE_ASSET_SCOPE_AXIS_Y, COMPOSITE_ASSET_SCOPE_MARGIN, type ScopeGround, type ScopePoint } from "./composite-asset-scope.js";
 
@@ -108,7 +108,7 @@ export function compositeAssetScopeBaseGround(x: number, y: number, width: numbe
  * 派生片场的范围几何（change: 2026-10-08-make-film-set-model-only 修订；
  *  change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
  *
- * 复合资产（片场、炼丹炉等）没有卡片：模型被居中并等比适配到节点矩形内。`x/y/width/height` 是
+ * 复合资产（片场等）没有卡片：模型被居中并等比适配到节点矩形内。`x/y/width/height` 是
  * **内容适配基准矩形**；`scopeShape` 缺省即 `isometric-diamond`（复合资产类别默认），由
  * `scopeGround`（模型地面占地等比外扩固定边距）派生与地面网格平行的平行四边形（地面宽深相等
  * 时为菱形）作为可见与命中范围；仅当可信 adapter 覆盖为 `rect` 时该基准矩形才是可见范围
@@ -123,6 +123,7 @@ export function compositeAssetScopeForNode(input: {
   scopeShape?: CompositeAssetScopeShape;
   emptyPlaceholder?: import("./wire-scene.js").CompositeAssetEmptyPlaceholder;
   geometryQuality?: CompositeAssetGeometryQuality;
+  overviewCache?: CompositeAssetOverviewCache;
   mediaPlanes?: readonly BevyModelMediaPlane[];
   itemRoots?: Record<string, string>;
   itemPlacements?: Record<string, BevyModelPlacement>;
@@ -155,6 +156,7 @@ export function compositeAssetScopeForNode(input: {
     // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
     ...(input.emptyPlaceholder === "brand-plinth-v1" ? { emptyPlaceholder: input.emptyPlaceholder } : {}),
     ...(input.geometryQuality ? { geometryQuality: input.geometryQuality } : {}),
+    ...(input.overviewCache ? { overviewCache: input.overviewCache } : {}),
     ...(scopeGround ? { scopeGround } : {}),
     ...(input.mediaPlanes && input.mediaPlanes.length > 0 ? { media: [...input.mediaPlanes] } : {}),
     ...(input.rootPlacement ? { rootPlacement: input.rootPlacement } : {}),

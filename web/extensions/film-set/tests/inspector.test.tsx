@@ -102,6 +102,7 @@ function renderOverlay(canvas: ServerCanvas, initialCamera = false, options: { g
       exitModelFocus: () => undefined,
       animationPlaybackState: () => null
     },
+    canvasEdit: { record: async (commands: typeof submitted) => { submitted.push(...commands); return { ok: true }; } },
     canvasSession: {
       isWritable: () => true,
       submitCommands: (commands: unknown[]) => { submitted.push(...commands); return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } }; }
@@ -125,17 +126,40 @@ const button = (label: string) => [...document.querySelectorAll<HTMLButtonElemen
 const target = () => document.querySelector<HTMLSelectElement>('[aria-label="AI 修改目标"]')!;
 
 describe("FilmSetInspector single column and generation dock", () => {
-  it("shows shots and objects together; expanding composition and selecting an object submit no commands", () => {
+  it("separates lists and properties; selecting a shot activates tools without expanding composition", () => {
     const h = renderOverlay(filmSetCanvas(true), true);
-    expect(document.querySelector('[role="tablist"]')).toBeNull();
     expect(document.querySelector(".model-inspector-header h2")?.textContent).toBe("跑酷片场");
-    expect(document.querySelector(".film-set-animation-controls")).not.toBeNull();
-    expect(document.querySelector(".film-set-object-list")).not.toBeNull();
+    act(() => h.objectSession.select("body"));
+    expect(document.querySelector(".film-set-object-fields")).not.toBeNull();
+    act(() => button("检查当前镜头").click());
     const composition = document.querySelector<HTMLDetailsElement>(".film-set-composition")!;
     expect(composition.open).toBe(false);
-    act(() => { composition.querySelector("summary")!.click(); h.objectSession.select("body"); });
-    expect(composition.open).toBe(true);
-    expect(document.querySelector(".film-set-object-fields")).not.toBeNull();
+    expect(document.querySelector(".film-set-shot-picker")).toBeNull();
+    expect(document.querySelector(".film-set-current-shot select")).toBeNull();
+    expect(button("动画预览")).toBeUndefined();
+    expect(h.session.getState().toolMode).toBe("camera");
+    expect(h.objectSession.getState().selectedItemId).toBe("body");
+    expect(document.querySelector("[data-camera-preview]")).not.toBeNull();
+    const list = document.querySelector(".film-set-inspector-list")!;
+    expect(list.querySelector(".film-set-object-list")).not.toBeNull();
+    expect(list.querySelectorAll("ul")).toHaveLength(1);
+    expect(list.querySelector(".film-set-shot-list")).toBeNull();
+    const sharedList = list.querySelector("ul")!;
+    expect(sharedList.querySelector('[aria-label^="模型 ·"]')).not.toBeNull();
+    const shotRow = sharedList.querySelector<HTMLButtonElement>('[aria-label^="镜头 ·"]')!;
+    expect(shotRow).not.toBeNull();
+    act(() => shotRow.click());
+    expect(shotRow.getAttribute("aria-selected")).toBe("true");
+    expect(sharedList.querySelectorAll('[aria-selected="true"]')).toHaveLength(1);
+    expect(document.querySelector(".film-set-list-tabs")).toBeNull();
+    expect(h.session.getState().toolMode).toBe("camera");
+    expect(document.querySelectorAll(".film-set-viewport-tools button")).toHaveLength(4);
+    expect(button("移动对象")).toBeUndefined();
+    act(() => sharedList.querySelector<HTMLButtonElement>('[aria-label^="模型 ·"]')!.click());
+    expect(document.querySelectorAll(".film-set-viewport-tools button")).toHaveLength(3);
+    act(() => button("移动对象").click());
+    expect(h.session.getState().toolMode).toBe("model");
+    expect(h.objectSession.selectedItem()?.id).toBe("body");
     expect(h.submitted).toHaveLength(0);
   });
 
@@ -164,21 +188,21 @@ describe("FilmSetInspector single column and generation dock", () => {
     expect(h.submitted).toHaveLength(0);
   });
 
-  it("composition temporarily collapses AI; restoring AI closes the camera preview and keeps the composer", () => {
+  it("composition is presentation only and never collapses AI or clears selection", () => {
     const h = renderOverlay(filmSetCanvas(true), true, { generate: true });
     const composer = document.querySelector("[data-host-generate] textarea");
-    const composition = document.querySelector<HTMLDetailsElement>(".film-set-composition")!;
     act(() => h.objectSession.select("body"));
-    expect(document.querySelector("[data-camera-preview]")).toBeNull();
+    act(() => button("检查当前镜头").click());
+    act(() => button("推拉").click());
+    const composition = document.querySelector<HTMLDetailsElement>(".film-set-composition")!;
     act(() => composition.querySelector("summary")!.click());
-    expect(h.objectSession.getState().selectedItemId).toBeNull();
-    expect(h.session.getState().toolMode).toBe("camera");
-    expect(document.querySelector("[data-camera-preview]")).not.toBeNull();
-    expect(document.querySelector<HTMLDivElement>(".film-set-generate-dock__expanded")!.hidden).toBe(true);
-    act(() => button("AI 修改").click());
+    expect(composition.open).toBe(true);
+    act(() => composition.querySelector("summary")!.click());
     expect(composition.open).toBe(false);
-    expect(h.session.getState().toolMode).toBe("model");
-    expect(document.querySelector("[data-camera-preview]")).toBeNull();
+    expect(h.objectSession.getState().selectedItemId).toBe("body");
+    expect(h.session.getState().toolMode).toBe("camera");
+    expect(h.session.getState().cameraTool).toBe("distance");
+    expect(document.querySelector<HTMLDivElement>(".film-set-generate-dock__expanded")!.hidden).toBe(false);
     expect(document.querySelector("[data-host-generate] textarea")).toBe(composer);
     expect(h.submitted).toHaveLength(0);
   });
@@ -187,18 +211,18 @@ describe("FilmSetInspector single column and generation dock", () => {
     const h = renderOverlay(filmSetCanvas(true), false, { generate: true });
     act(() => h.objectSession.select("ground"));
     expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ itemId: "ground", writable: false }));
-    act(() => { target().value = ""; target().dispatchEvent(new Event("change", { bubbles: true })); });
+    act(() => { target().value = JSON.stringify(["clip-1", null]); target().dispatchEvent(new Event("change", { bubbles: true })); });
     expect(h.objectSession.getState().selectedItemId).toBe("ground");
     expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ itemId: null, writable: true }));
     act(() => h.objectSession.select("body"));
-    expect(target().value).toBe("body");
+    expect(target().value).toBe(JSON.stringify(["clip-1", null]));
     expect(h.submitted).toHaveLength(0);
   });
 
   it("joining a shot submits one checked binding command and disables the history path", async () => {
     const h = renderOverlay(filmSetCanvas(true), false, { generate: true });
     act(() => h.objectSession.select("ground"));
-    await act(async () => { button("加入该镜头").click(); });
+    await act(async () => { button("为此镜头启用对象动作").click(); });
     expect(h.submitted).toEqual([expect.objectContaining({ type: "filmSet.clipPatch", clipId: "clip-1", expectedHash: expect.any(String),
       op: expect.objectContaining({ kind: "binding", itemId: "ground", expectedAdapterHash: expect.any(String) }) })]);
   });
@@ -217,7 +241,7 @@ describe("FilmSetInspector single column and generation dock", () => {
     const h = renderOverlay(filmSetCanvas(true), false, { generate: true, readOnly: true });
     act(() => h.objectSession.select("ground"));
     expect(document.querySelector<HTMLDivElement>(".film-set-generate-dock")!.hidden).toBe(true);
-    expect(button("加入该镜头").disabled).toBe(true);
+    expect(button("为此镜头启用对象动作").disabled).toBe(true);
     expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ writable: false }));
     expect(h.submitted).toHaveLength(0);
   });
@@ -226,4 +250,31 @@ describe("FilmSetInspector single column and generation dock", () => {
     const h = renderOverlay(filmSetCanvas(), false, { generate: true });
     expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ clipId: null, writable: false, disabledReason: expect.stringContaining("拍摄镜头") }));
   });
+  it("nonempty and busy drafts keep their exact object target while inspecting another target", () => {
+    const h = renderOverlay(filmSetCanvas(true), true, { generate: true });
+    act(() => h.objectSession.select("body"));
+    const input = () => h.renderGenerate.mock.lastCall![0] as import("@woohaa3/frontend/extension-api").AuthoringGenerationProps;
+    act(() => input().onDraftStateChange?.({ hasDraft: true, busy: false }));
+    act(() => h.objectSession.select("ground"));
+    expect(input().itemId).toBe("body");
+    act(() => button("检查当前镜头").click());
+    expect(input().itemId).toBe("body");
+    act(() => { target().value = JSON.stringify(["clip-1", "ground"]); target().dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(input().itemId).toBe("ground");
+    expect(h.submitted).toHaveLength(0);
+  });
+
+  it("dynamic playback is available in edit mode and cancels uncommitted poses before preview", () => {
+    const h = renderOverlay(filmSetCanvas(true), true);
+    expect(document.querySelector(".film-set-animation-player")).not.toBeNull();
+    act(() => { h.session.beginPose(); h.session.updatePose({ azimuth: 0.5 }); });
+    act(() => button("播放").click());
+    expect(h.playback.getSnapshot().preview).toBe(true);
+    expect(h.session.getState().posePreview).toBeNull();
+    expect(document.querySelector<HTMLDivElement>(".film-set-viewport-tools")!.hidden).toBe(true);
+    act(() => document.querySelector<HTMLButtonElement>(".film-set-animation-player__actions button:last-child")!.click());
+    expect(h.playback.getSnapshot().preview).toBe(false);
+    expect(h.submitted).toHaveLength(0);
+  });
+
 });

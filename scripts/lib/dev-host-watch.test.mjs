@@ -41,8 +41,8 @@ function makeRepo() {
     scripts: { build: "x", "build:browser": "z" }
   });
   write("extensions/sample-provider/src/backend.ts", "export {};");
-  pkg("web/extensions/prompt-snippets/package.json", { name: "@woohaa3/extension-prompt-snippets", scripts: { build: "x" } });
-  write("web/extensions/prompt-snippets/src/frontend/index.ts", "export {};");
+  pkg("web/extensions/sample-site-extension/package.json", { name: "@woohaa3/extension-sample-site", scripts: { build: "x" } });
+  write("web/extensions/sample-site-extension/src/frontend.ts", "export {};");
   pkg("web/extensions/.disabled-ext/package.json", { name: "@woohaa3/extension-disabled", scripts: { build: "x" } });
   write("web/extensions/.disabled-ext/src/index.ts", "export {};");
   pkg("web/frontend/package.json", { name: "@woohaa3/frontend", scripts: { build: "vite build" } });
@@ -91,7 +91,7 @@ test("扩展：有 browser 入口时串联 build:browser + assemble:extensions",
     { scope: "workspace", script: "assemble:extensions" }
   ]);
 
-  const noBrowser = targetFor(repo, "web/extensions/prompt-snippets/src/frontend/index.ts");
+  const noBrowser = targetFor(repo, "web/extensions/sample-site-extension/src/frontend.ts");
   assert.deepEqual(noBrowser.steps, [{ scope: "package", script: "build" }]);
 });
 

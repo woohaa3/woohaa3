@@ -13,7 +13,7 @@
  * 具体模型 React UI 由 Registry 解析出的 `definition.Panel` 直接渲染；Host 不含
  * audio/video/`edit_video` 专用布局分支，也不按 providerId 选择组件。
  */
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
 import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
 import { Button } from "@woohaa3/ui";
@@ -22,6 +22,8 @@ import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";
 import { derivePanelDraft, derivePanelTaskState } from "./panel-state.js";
 import { ModelParameterPanel } from "./model-parameter-panel.js";
+import { ShotMediaParametersPanel } from "./shot-media-parameters-panel.js";
+import { readShotMediaParameters } from "./shot-media-parameters.js";
 import {
   EMPTY_UPSTREAM_TEXT_MESSAGE,
   upstreamTextIsEmpty
@@ -67,12 +69,36 @@ import {
 } from "./model-execution-host-helpers.js";
 import type { ModelReferenceItem, ModelSubmitOutcome } from "../../contract/model-interaction.js";
 import type { ModelExecutionHostProps } from "./node-execution-panel-types.js";
+import type { ExecutionOrigin } from "./execution-launch.js";
 export type { ModelExecutionHostProps } from "./node-execution-panel-types.js";
 
 const defaultDraftStore = createModelDraftStore();
 
+function executionButtonOrigin(button: HTMLButtonElement | null): ExecutionOrigin | undefined {
+  if (!button) return;
+  const rect = button.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+  const style = button.ownerDocument.defaultView!.getComputedStyle(button);
+  const radius = Number.parseFloat(style.borderTopLeftRadius) || 0;
+  return {
+    x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, token: crypto.randomUUID(),
+    surface: { width: rect.width, height: rect.height,
+      radius: style.borderTopLeftRadius.endsWith("%") ? Math.min(rect.width, rect.height) * radius / 100 : radius,
+      color: style.backgroundColor === "rgba(0, 0, 0, 0)" || style.backgroundColor === "transparent"
+        ? "var(--app-interaction-accent)" : style.backgroundColor }
+  };
+}
+
 export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const launchSurface = useRef<HTMLDivElement>(null);
+  const launchOrigin = useRef<ExecutionOrigin>();
+  const captureLaunchOrigin = (event: SyntheticEvent<HTMLDivElement>) => {
+    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
+    if (event.type === "click" && !button) return;
+    const origin = executionButtonOrigin(button ?? event.currentTarget.querySelector<HTMLButtonElement>("[data-execution-launch]"));
+    launchOrigin.current = origin;
+    queueMicrotask(() => { if (launchOrigin.current === origin) launchOrigin.current = undefined; });
+  };
   const props = rawProps;
   const {
     canvasId,
@@ -138,6 +164,12 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const pendingSelection = Boolean(context && !canonicalNodeIds.has(context.nodeId));
 
   const panelKind = context?.panelKind ?? null;
+  // 片场组外显的镜头节点是 owner-managed 的标准 image/video：没有可提交的生成配置，
+  // 选中时只展示镜头输出参数，不沿用图片/视频生成面板。
+  const shotMediaParameters = useMemo(
+    () => readShotMediaParameters(workingCanvas, context?.nodeId ?? null),
+    [workingCanvas, context]
+  );
   const modelType = panelKind ? modelTypeForPanelKind(panelKind) : null;
   const typedModels = useMemo(
     () => (catalog && panelKind ? allModelsForPanel(catalog, panelKind) : []),
@@ -337,10 +369,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         return { ok: false, error };
       }
       const outcome = await submitCoordinator.submit({
-        origin: (() => {
-          const rect = launchSurface.current?.getBoundingClientRect();
-          return rect ? { x: rect.left + rect.width / 2, y: rect.top, token: crypto.randomUUID() } : undefined;
-        })(),
+        origin: launchOrigin.current ?? executionButtonOrigin(launchSurface.current?.querySelector<HTMLButtonElement>("[data-execution-launch]") ?? null),
         nodeId,
         modelKey: targetModelKey,
         prompt: input.prompt,
@@ -388,6 +417,19 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
 
   if (!context) return null;
 
+  if (shotMediaParameters) {
+    const shotExpanded = resolveExecutionPanelSurface(presentation, context.nodeType) === "expanded";
+    return (
+      <ExecutionPanelSurface nodeId={context.nodeId} presentation={shotExpanded ? "expanded" : "compact"} runtime={runtime}>
+        <ShotMediaParametersPanel
+          nodeId={context.nodeId}
+          parameters={shotMediaParameters}
+          onClose={() => submitIntent({ kind: "close" })}
+        />
+      </ExecutionPanelSurface>
+    );
+  }
+
   if (!panelKind) {
     return (
       <ExecutionPanelSurface nodeId={context.nodeId} presentation="compact" runtime={runtime}>
@@ -433,6 +475,8 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const body = (
     <div
       ref={launchSurface}
+      onClickCapture={captureLaunchOrigin}
+      onKeyDownCapture={event => { if (event.key === "Enter") captureLaunchOrigin(event); }}
       className="node-execution-dock__expanded-body"
       data-node-id={context.nodeId}
       data-presentation={expanded ? "expanded" : "compact"}
@@ -473,10 +517,11 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
             {...(binding?.actions || panelActions ? { actions: { ...binding?.actions, ...panelActions } } : {})}
             renderers={{
               references: () => referencesSlot,
-              promptEditor: ({ value, onChange, disabled, placeholder }) => (
+              promptEditor: ({ value, onChange, disabled, placeholder, onSubmit }) => (
                 <MentionEditor
                   value={value}
                   onChange={onChange}
+                  onSubmit={onSubmit}
                   candidates={mentionCandidates}
                   disabled={disabled}
                   placeholder={placeholder}

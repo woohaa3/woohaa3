@@ -135,7 +135,7 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
   const groupBounds = groups.map(group => ({ id: group.id,
     ...absolutePosition(group.id)!, ...groupSizes.get(group.id)! }));
   const workingBounds = nodes.flatMap(node => {
-    // Collapsed groups remain as one compact obstacle; every hidden
+    // Collapsed groups occupy only their badge; every hidden
     // descendant (including nested groups) is omitted from the independent
     // candidate set and moves only with its visible ancestor.
     if (hiddenNodeIds.has(node.id)) return [];
@@ -146,10 +146,10 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
       ? groupSizes.get(node.id) ?? { width: readNodeWidth(runtimeNode), height: readNodeHeight(runtimeNode) }
       : { width: readNodeWidth(runtimeNode), height: readNodeHeight(runtimeNode) };
     const frame = node.type === "group"
-      ? groupPresentationRect(runtimeNode, collapsedGroupIds.has(node.id), { x: 0, y: 0, ...size })
+      ? groupPresentationRect(runtimeNode, collapsedGroupIds.has(node.id), { x: 0, y: 0, ...size }, canvas.nodeData[node.id]?.groupBadgeScale)
       : { x: 0, y: 0, ...size };
     // Include the outsourced group badge in the conservative occupied range.
-    const outset = node.type === "group" ? groupBadgeOutset : 0;
+    const outset = node.type === "group" && !collapsedGroupIds.has(node.id) ? groupBadgeOutset : 0;
     return [{ id: node.id, x: position.x + frame.x - outset, y: position.y + frame.y - outset,
       width: frame.width + outset * 2, height: frame.height + outset * 2 }];
   });

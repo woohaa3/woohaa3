@@ -1,5 +1,6 @@
 import type { Story, StoryDefault } from "@ladle/react";
-import { DialogStage, createReplaceConfirmRenderer, PASTE_REPLACE_DIALOG_ID } from "../snippet-fixtures.js";
+import { createReplaceConfirmRenderer, PASTE_REPLACE_DIALOG_ID } from "../../../../frontend/src/cordis/ui/index";
+import { DialogStage } from "../dialog-stage.js";
 
 export default {
 	title: "画布组件/弹窗/单图替换",

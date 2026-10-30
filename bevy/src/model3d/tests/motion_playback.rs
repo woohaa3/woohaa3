@@ -373,14 +373,16 @@ fn opacity_track_uses_a_material_instance_and_restores_the_shared_material() {
 
     let mut scene = base_scene();
     let playback = scene.animation_playback.as_mut().unwrap();
-    playback.model_motion = vec![serde_json::from_value(serde_json::json!({
-        "targetId":"body","startTime":0,"endTime":2,
-        "motion":{"kind":"keyframes","property":"opacity","frames":[
-            {"time":0,"value":0,"easing":"linear"},
-            {"time":2,"value":1,"easing":"linear"}
-        ]}
-    }))
-    .unwrap()];
+    playback.model_motion = vec![
+        serde_json::from_value(serde_json::json!({
+            "targetId":"body","startTime":0,"endTime":2,
+            "motion":{"kind":"keyframes","property":"opacity","frames":[
+                {"time":0,"value":0,"easing":"linear"},
+                {"time":2,"value":1,"easing":"linear"}
+            ]}
+        }))
+        .unwrap(),
+    ];
     run_motion(&mut world, &scene);
 
     // 半透明：材质被换成专属实例，共享材质仍按原样存在。
@@ -403,7 +405,10 @@ fn opacity_track_uses_a_material_instance_and_restores_the_shared_material() {
         .expect("instance asset")
         .base_color
         .alpha();
-    assert!(instance_alpha < 1.0, "opacity 应写入实例 alpha，实际 {instance_alpha}");
+    assert!(
+        instance_alpha < 1.0,
+        "opacity 应写入实例 alpha，实际 {instance_alpha}"
+    );
     assert_eq!(
         world
             .resource::<Assets<StandardMaterial>>()
@@ -424,7 +429,11 @@ fn opacity_track_uses_a_material_instance_and_restores_the_shared_material() {
     scene.animation_playback.as_mut().unwrap().time = 2.0;
     run_motion(&mut world, &scene);
     assert_eq!(
-        world.entity(entity).get::<MeshMaterial3d<StandardMaterial>>().expect("restored").0,
+        world
+            .entity(entity)
+            .get::<MeshMaterial3d<StandardMaterial>>()
+            .expect("restored")
+            .0,
         shared
     );
     let restored = world
@@ -449,14 +458,16 @@ fn zero_opacity_hides_the_part() {
     run_sync(&mut world, &base_scene_no_playback(), &resources);
     let entity = entity_of(&world, "body");
     let mut scene = base_scene();
-    scene.animation_playback.as_mut().unwrap().model_motion = vec![serde_json::from_value(serde_json::json!({
-        "targetId":"body","startTime":0,"endTime":2,
-        "motion":{"kind":"keyframes","property":"opacity","frames":[
-            {"time":0,"value":0,"easing":"linear"},
-            {"time":2,"value":0,"easing":"linear"}
-        ]}
-    }))
-    .unwrap()];
+    scene.animation_playback.as_mut().unwrap().model_motion = vec![
+        serde_json::from_value(serde_json::json!({
+            "targetId":"body","startTime":0,"endTime":2,
+            "motion":{"kind":"keyframes","property":"opacity","frames":[
+                {"time":0,"value":0,"easing":"linear"},
+                {"time":2,"value":0,"easing":"linear"}
+            ]}
+        }))
+        .unwrap(),
+    ];
     run_motion(&mut world, &scene);
     assert_eq!(
         world.entity(entity).get::<Visibility>().copied(),
@@ -476,7 +487,14 @@ fn object_root_opacity_applies_to_every_part_without_touching_meshes() {
     let entities = [entity_of(&world, "body"), entity_of(&world, "hand")];
     let meshes: Vec<_> = entities
         .iter()
-        .map(|entity| world.entity(*entity).get::<Mesh3d>().expect("mesh").0.clone())
+        .map(|entity| {
+            world
+                .entity(*entity)
+                .get::<Mesh3d>()
+                .expect("mesh")
+                .0
+                .clone()
+        })
         .collect();
     let mut scene = base_scene();
     let playback = scene.animation_playback.as_mut().unwrap();
@@ -497,10 +515,16 @@ fn object_root_opacity_applies_to_every_part_without_touching_meshes() {
     }))
     .unwrap()];
     // 夹具里对象根与部件共用同一 itemId：让组合作用域编码与实体 id 对齐。
-    for (runtime, entity_id) in [("hero-root", "body"), ("hero-body", "body"), ("hero-hand", "hand")] {
+    for (runtime, entity_id) in [
+        ("hero-root", "body"),
+        ("hero-body", "body"),
+        ("hero-hand", "hand"),
+    ] {
         let objects = &mut scene.animation_playback.as_mut().unwrap().objects;
         if let Some(object) = objects.first_mut() {
-            object.part_ids.insert(runtime.to_owned(), entity_id.to_owned());
+            object
+                .part_ids
+                .insert(runtime.to_owned(), entity_id.to_owned());
         }
     }
     run_motion(&mut world, &scene);
@@ -525,15 +549,16 @@ fn opacity_material_instances_are_reused_and_released_with_the_root() {
     let baseline = world.resource::<Assets<StandardMaterial>>().len();
 
     let mut scene = base_scene();
-    scene.animation_playback.as_mut().unwrap().model_motion =
-        vec![serde_json::from_value(serde_json::json!({
+    scene.animation_playback.as_mut().unwrap().model_motion = vec![
+        serde_json::from_value(serde_json::json!({
             "targetId":"body","startTime":0,"endTime":2,
             "motion":{"kind":"keyframes","property":"opacity","frames":[
                 {"time":0,"value":0.2,"easing":"linear"},
                 {"time":2,"value":0.8,"easing":"linear"}
             ]}
         }))
-        .unwrap()];
+        .unwrap(),
+    ];
     // 跨多帧反复 seek：同一实体只应持有一份实例。
     for step in 0..12 {
         scene.animation_playback.as_mut().unwrap().time = 0.2 + (step % 6) as f32 * 0.3;
@@ -551,7 +576,9 @@ fn opacity_material_instances_are_reused_and_released_with_the_root() {
         "透明度实例表只应有该目标的唯一实例"
     );
 
-    let root = world.resource::<ModelVisuals>().roots["anim"].entities.clone();
+    let root = world.resource::<ModelVisuals>().roots["anim"]
+        .entities
+        .clone();
     run_sync(&mut world, &Scene::default(), &resources);
     let released = world.resource::<Assets<StandardMaterial>>().len();
     assert_eq!(released, 0, "根释放后克隆实例必须从材质资产中回收");

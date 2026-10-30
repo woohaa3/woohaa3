@@ -3,12 +3,29 @@
  * （change: add-frontend-plugin-manager，任务 2.3/3.1）。
  */
 import { describe, expect, it } from "vitest";
-import { sourceCanvasCatalogMetadata } from "../../test-support/source-extensions.js";
+import type { CanvasExtensionMetadata } from "../../plugins/extension-manager/contract.js";
 import { resolveStartupSelection, isAssembledAtStartup } from "./selector.js";
 import { defaultPreferences } from "./codec.js";
 import { hasPendingExtensionChanges, projectExtensionManagerRows } from "../../plugins/extension-manager/projection.js";
 
-const CATALOG = sourceCanvasCatalogMetadata();
+/** 固定目录：browser-local optional 的启动/面板语义与具体扩展产物无关。 */
+const CATALOG: CanvasExtensionMetadata[] = [
+  {
+    id: "prompt-snippets",
+    name: "提示词片段库",
+    description: "测试用 optional，声明默认关闭。",
+    required: false,
+    configurable: true,
+    defaultEnabled: false
+  },
+  {
+    id: "node-history",
+    name: "节点历史",
+    description: "测试用 optional，未声明默认值即启用。",
+    required: false,
+    configurable: true
+  }
+];
 const IDS = CATALOG.filter((entry) => entry.configurable).map((entry) => entry.id);
 
 describe("启动选择器（任务 3.1）", () => {
@@ -16,6 +33,13 @@ describe("启动选择器（任务 3.1）", () => {
     const snapshot = resolveStartupSelection(CATALOG, defaultPreferences(IDS));
     expect(snapshot.disabledIds).toEqual([]);
     expect(Object.values(snapshot.assembled)).toEqual(IDS.map(() => true));
+  });
+
+  it("缺失目标状态时按 metadata 的 defaultEnabled 取默认（prompt-snippets 默认关闭）", () => {
+    const snapshot = resolveStartupSelection(CATALOG, {});
+    expect(snapshot.assembled["prompt-snippets"]).toBe(false);
+    expect(snapshot.assembled["node-history"]).toBe(true);
+    expect(snapshot.disabledIds).toEqual(["prompt-snippets"]);
   });
 
   it("禁用时记录 disabled ID 且不再装配", () => {
@@ -44,7 +68,7 @@ describe("Plugin Manager 行投影（任务 2.3）", () => {
   it("只包含可配置 optional 行，required 不出现", () => {
     const rows = projectExtensionManagerRows(CATALOG, { assembled, desired: assembled });
     expect(rows.every((row) => row.configurable && !row.required)).toBe(true);
-    expect(rows.map((row) => row.id)).toEqual(["node-history", "prompt-snippets"]);
+    expect(rows.map((row) => row.id)).toEqual(["prompt-snippets", "node-history"]);
     expect(rows.some((row) => row.id === "paste-import" || row.id === "model-editor")).toBe(false);
   });
 

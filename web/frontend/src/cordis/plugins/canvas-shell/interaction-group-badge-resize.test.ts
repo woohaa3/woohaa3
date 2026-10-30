@@ -27,14 +27,17 @@ function setup(options: {zoom?:number;collapsed?:boolean;writable?:boolean} = {}
 }
 
 describe("group badge independent resize",()=>{
-  it.each([0.5,1,2])("在 %s× 画布缩放下居中等比预览，松手只提交徽标倍率",zoom=>{
+  it.each([0.5,1,2])("在 %s× 画布缩放下保持中线对齐等比预览，松手只提交徽标倍率",zoom=>{
     const f=setup({zoom});
     const nodes=structuredClone(f.current().document.nodes);
     f.pointer("pointerdown"); f.pointer("pointermove",44,32); f.controller.flush();
     const group=f.scene().nodes.find(n=>n.id==="g")!;
     expect(group.group?.badgeScale).toBe(2);
     const badge=groupBadgeRect(group,group.group?.badgeScale);
+    // 中线永远与气泡中心 300 对齐；上缘固定，只向下增长。
+    expect(badge.y).toBe(406);
     expect(badge.center).toEqual({x:300,y:470});
+    expect(badge.x + badge.width/2).toBe(300);
     expect(badge.width/badge.height).toBe(88/64);
     expect(f.current().nodeData.g.groupBadgeScale).toBeUndefined();
     f.pointer("pointerup",44,32);
@@ -72,5 +75,22 @@ describe("group badge independent resize",()=>{
     woohaa3CanvasStore.getState().applyRemoteCanvas(remote);
     f.pointer("pointermove",44,32);f.pointer("pointerup",44,32);
     expect(submitted).toHaveLength(0);expect(f.current().nodeData.g.groupBadgeScale).toBe(1.5);f.controller.dispose();
+  });
+});
+
+describe("group badge resize survives unrelated node data churn", () => {
+  it("成员重排改变 group 矩形、其它字段被同步时，松手仍提交倍率", () => {
+    const f = setup();
+    f.pointer("pointerdown");
+    f.pointer("pointermove", 44, 32); f.controller.flush();
+    const churned = structuredClone(f.current());
+    churned.document.nodes = churned.document.nodes.map(node => node.id === "m" ? { ...node, width: 260, height: 130 } : node);
+    (churned.nodeData as Record<string, unknown>).g = { ...churned.nodeData.g, title: "组（已同步）" };
+    woohaa3CanvasStore.getState().applyRemoteCanvas(churned);
+    f.pointer("pointerup", 44, 32);
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]).toMatchObject({ type: "nodeData.patch", nodeId: "g", value: { groupBadgeScale: 2 } });
+    expect((submitted[0] as { expectedNodeData?: Record<string, { title?: string }> }).expectedNodeData?.g?.title).toBe("组（已同步）");
+    f.controller.dispose();
   });
 });

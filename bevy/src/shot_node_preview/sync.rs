@@ -33,7 +33,7 @@ use crate::{
 use super::plan::LiveSampling;
 use super::state::{
     Card, ShotPreviewCards, ShotPreviewRig, SpriteState, acquire_layer, apply_light_layers,
-    apply_owner_layers, card_camera_layers, identity_of, remove_card, rig_state_of,
+    card_camera_layers, identity_of, remove_card, rig_state_of,
     take_generation, target_component_of,
 };
 use super::{plan, policy};
@@ -49,7 +49,6 @@ pub(crate) fn sync(
     scene: Res<CurrentScene>,
     index: Res<crate::app::NodeIndex>,
     models: Res<model3d::ModelVisuals>,
-    mut media: ResMut<model3d::film_set_media::FilmSetMediaVisuals>,
     resources: Res<ModelAssetTable>,
     animation_camera: Res<AnimationCameraState>,
     ready: Res<ShotPreviewReady>,
@@ -130,7 +129,8 @@ pub(crate) fn sync(
             .node(&scene.0, &target.node_id)
             .map(|(_, node)| {
                 // Capture/preview resolution always follows the real card, never a focus tag.
-                let (_, _, width, height) = crate::canvas_query::shot_preview::content_rect_of(node);
+                let (_, _, width, height) =
+                    crate::canvas_query::shot_preview::content_rect_of(node);
                 (width, height)
             })
             .unwrap_or((240.0, 135.0));
@@ -150,10 +150,17 @@ pub(crate) fn sync(
             policy::fit_pixels(requested, available).unwrap_or(UVec2::splat(policy::BUCKET as u32));
         let size = if let Some(card) = cards.cards.get_mut(&target.node_id) {
             let settled = card.resize.update(
-                [width, height, context_zoom, pixel_ratio], requested, card.size, now,
+                [width, height, context_zoom, pixel_ratio],
+                requested,
+                card.size,
+                now,
             );
             // 一次换档先完成发布，避免保留旧图的预算让待确认尺寸反复收缩。
-            if card.published.is_some() && !card.published_current { card.size } else { settled }
+            if card.published.is_some() && !card.published_current {
+                card.size
+            } else {
+                settled
+            }
         } else {
             requested // 首次画面立即创建，不等待缩放防抖。
         };
@@ -287,7 +294,7 @@ pub(crate) fn sync(
                 ShotCameraPreview::new(size.x, size.y)
                     .with_target(PreviewTarget::Offscreen)
                     .with_policy(PreviewUpdatePolicy::Manual)
-                        .with_clear_color(target.backdrop),
+                    .with_clear_color(target.backdrop),
                 ShotCameraEditable { enabled: false },
             ));
             card.applied_rig = Some(rig_state);
@@ -297,13 +304,7 @@ pub(crate) fn sync(
     }
 
     // 4. owner 层并集只在变化时写回模型根与媒体平面；卡片层同时并入场景方向光。
-    apply_owner_layers(
-        &mut commands,
-        &mut cards,
-        &models,
-        &mut media,
-        &owner_layers,
-    );
+    cards.desired_layers = owner_layers;
     apply_light_layers(&mut commands, &mut cards);
 
     // 5. 确认上一帧下发的采样代数（渲染侧真实稳定后才算发布）。
@@ -524,4 +525,43 @@ pub(crate) fn sync(
         cards.work.superseded,
         cards.confirmed_count(),
     ]);
+}
+
+/// Apply the combined source mask after all consumers have made their frame decisions.
+pub(crate) fn sync_source_layers(
+    mut commands: Commands,
+    mut cards: ResMut<ShotPreviewCards>,
+    models: Res<model3d::ModelVisuals>,
+    mut media: ResMut<model3d::film_set_media::FilmSetMediaVisuals>,
+    overview: Res<crate::canvas_ecs::overview_cache::OverviewSourceLayers>,
+) {
+    let desired = std::mem::take(&mut cards.desired_layers);
+    super::state::apply_owner_layers(&mut commands, &mut cards, &models, &mut media, &desired, &overview);
+    cards.desired_layers = desired;
+}
+
+#[cfg(test)]
+mod source_layer_tests {
+    use super::*;
+    use crate::canvas_ecs::overview_cache::{OverviewSourceLayer, OverviewSourceLayers};
+
+    #[test]
+    fn applies_new_overview_decision_in_the_same_update() {
+        let mut app = App::new();
+        app.init_resource::<ShotPreviewCards>()
+            .init_resource::<model3d::ModelVisuals>()
+            .init_resource::<model3d::film_set_media::FilmSetMediaVisuals>()
+            .init_resource::<OverviewSourceLayers>()
+            .add_systems(Update, (
+                |mut cards: ResMut<ShotPreviewCards>, mut overview: ResMut<OverviewSourceLayers>| {
+                    cards.desired_layers.insert("film".into(), vec![33]);
+                    overview.owners.insert("film".into(), OverviewSourceLayer { layer: Some(32), cached: true });
+                },
+                sync_source_layers,
+            ).chain());
+        app.update();
+        let cards = app.world().resource::<ShotPreviewCards>();
+        assert_eq!(cards.applied_layers["film"].1, vec![32, 33]);
+        assert!(cards.applied_overview_cached["film"]);
+    }
 }

@@ -79,6 +79,71 @@ pub(crate) struct GraphNode {
     pub(crate) shot_preview: Option<ShotPreviewPresentation>,
 }
 
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FilmSetGroupBinding {
+    pub(crate) binding_id: String,
+    pub(crate) source_node_id: String,
+    pub(crate) kind: String,
+    pub(crate) content_key: String,
+    #[serde(default)]
+    pub(crate) resource_key: Option<String>,
+    #[serde(default)]
+    pub(crate) signature: Option<String>,
+    pub(crate) transform: FilmSetGroupTransform,
+    #[serde(default = "default_group_binding_visible")]
+    pub(crate) visible: bool,
+    #[serde(default)]
+    pub(crate) diagnostic: Option<String>,
+    #[serde(default = "default_group_binding_aspect")]
+    pub(crate) aspect_ratio: f32,
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct FilmSetGroupTransform {
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) z: f32,
+    pub(crate) yaw: f32,
+    pub(crate) scale: f32,
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct FilmSetGroupGround {
+    #[serde(default)]
+    pub(crate) transform: Option<FilmSetGroupTransform>,
+    pub(crate) width: f32,
+    pub(crate) depth: f32,
+    #[serde(default)]
+    pub(crate) color: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FilmSetGroupPreparation {
+    pub(crate) schema_version: String,
+    pub(crate) owner_id: String,
+    pub(crate) badge_origin: CursorPoint,
+    #[serde(default)]
+    pub(crate) scene_transform: Option<FilmSetGroupTransform>,
+    #[serde(default)]
+    pub(crate) bindings: Vec<FilmSetGroupBinding>,
+    #[serde(default)]
+    pub(crate) ground: Option<FilmSetGroupGround>,
+    #[serde(default)]
+    pub(crate) active_clip: Option<String>,
+}
+
+const FILM_SET_GROUP_RENDER_SCHEMA_VERSION: &str = "woohaa-film-set-group-render-v1";
+
+fn default_group_binding_aspect() -> f32 {
+    1.0
+}
+
+fn default_group_binding_visible() -> bool {
+    true
+}
+
 /// 节点下方独立历史条呈现（change: 2026-10-12-unify-generation-history-strip）。
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -445,6 +510,12 @@ pub(crate) struct CompositeAssetPresentation {
     pub(crate) item_placements: std::collections::HashMap<String, super::ModelPlacement>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+pub(crate) enum CompositeAssetOverviewCache {
+    #[serde(rename = "transparent-world-v1")]
+    TransparentWorldV1,
+}
+
 /// Trusted, derived ownership presentation, independent of editable edges.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -578,6 +649,9 @@ pub(crate) struct GroupPresentation {
     pub(crate) badge_scale: f32,
     #[serde(default)]
     pub(crate) badge_resizable: bool,
+    /// 组容器是否绘制节点顶部操作横条；普通组与片场组都声明，旧场景缺省保持无横条。
+    #[serde(default)]
+    pub(crate) action_bar: bool,
     #[serde(default)]
     pub(crate) title: String,
     #[serde(default)]
@@ -589,12 +663,24 @@ pub(crate) struct GroupPresentation {
     pub(crate) run_status: Option<GroupRunStatus>,
     #[serde(default)]
     pub(crate) model_bounds: Option<GroupModelBounds>,
+    /// 总览 primitive LOD 策略声明；缺失即 group 徽标保持 High。
+    ///
+    /// 片场迁移为 group 后，可信 adapter 的声明经 group 呈现进入运行时；Rust 只消费该声明，
+    /// 不按业务 extensionId、nodeData 形状或历史类型推断。
+    #[serde(default, rename = "geometryQuality")]
+    pub(crate) geometry_quality: Option<CompositeAssetGeometryQuality>,
     /// Render-only emphasis while a node is being released into this group.
     #[serde(default, rename = "dropTarget")]
     pub(crate) drop_target: bool,
+    /// 可信 adapter 声明的通用总览纹理缓存；缺失即逐帧实时绘制
+    /// （change: 2026-10-29-cache-film-set-overview-textures）。
+    #[serde(default, rename = "overviewCache")]
+    pub(crate) overview_cache: Option<CompositeAssetOverviewCache>,
 }
 
-fn default_badge_scale() -> f32 { 1. }
+fn default_badge_scale() -> f32 {
+    1.
+}
 
 #[derive(Clone, Deserialize, PartialEq)]
 pub(crate) struct GroupModelBounds {
@@ -669,6 +755,10 @@ pub(crate) struct Scene {
     #[serde(default, rename = "modelFocusContext")]
     pub(crate) model_focus_context: Vec<FocusContextNode>,
     pub(crate) edges: Vec<Edge>,
+    /// Canonical film-set group scene primitives. Legacy composite fields are
+    /// retained only for the read-only compatibility window.
+    #[serde(default, rename = "filmSetGroups")]
+    pub(crate) film_set_groups: Vec<FilmSetGroupPreparation>,
     /// 派生拍摄镜头归属线集合
     /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。
     /// 独立于 `edges`：表示源镜头到预览卡片的永久归属，无端口/删除/重连，不进入普通边拓扑。
@@ -765,25 +855,44 @@ impl Scene {
         self.theme.validate()?;
         let mut context_ids = std::collections::HashSet::new();
         for entry in &self.model_focus_context {
-            if self.model_focus.as_ref().is_none_or(|f| f.node_id == entry.node_id)
+            if self
+                .model_focus
+                .as_ref()
+                .is_none_or(|f| f.node_id == entry.node_id)
                 || !self.nodes.iter().any(|n| n.id == entry.node_id)
                 || !context_ids.insert(&entry.node_id)
-                || ![entry.x, entry.y, entry.width, entry.height].iter().all(|v| v.is_finite())
-                || entry.width <= 0. || entry.height <= 0. {
+                || ![entry.x, entry.y, entry.width, entry.height]
+                    .iter()
+                    .all(|v| v.is_finite())
+                || entry.width <= 0.
+                || entry.height <= 0.
+            {
                 return Err("Invalid model focus context");
             }
         }
         for node in &self.nodes {
-            if node.resizable && (self.selection.nodes.len() != 1 || self.selection.nodes[0] != node.id) {
+            if node.resizable
+                && (self.selection.nodes.len() != 1 || self.selection.nodes[0] != node.id)
+            {
                 return Err("Invalid resize projection");
             }
-            if node.group.as_ref().is_some_and(|g| !g.badge_scale.is_finite() || !(0.5..=2.5).contains(&g.badge_scale)) {
+            if node
+                .group
+                .as_ref()
+                .is_some_and(|g| !g.badge_scale.is_finite() || g.badge_scale < 0.5)
+            {
                 return Err("Invalid group badge scale");
             }
             if let Some(bounds) = node.group.as_ref().and_then(|g| g.model_bounds.as_ref()) {
-                if node.model.is_none() || !bounds.extent.is_finite() || bounds.extent <= 0.
-                    || (0..3).any(|i| !bounds.aabb.min[i].is_finite()
-                        || !bounds.aabb.max[i].is_finite() || bounds.aabb.min[i] > bounds.aabb.max[i]) {
+                if node.model.is_none()
+                    || !bounds.extent.is_finite()
+                    || bounds.extent <= 0.
+                    || (0..3).any(|i| {
+                        !bounds.aabb.min[i].is_finite()
+                            || !bounds.aabb.max[i].is_finite()
+                            || bounds.aabb.min[i] > bounds.aabb.max[i]
+                    })
+                {
                     return Err("Invalid group model bounds");
                 }
             }
@@ -816,6 +925,89 @@ impl Scene {
             }
             if let Some(shot_preview) = &node.shot_preview {
                 shot_preview.validate()?;
+            }
+        }
+        if self.film_set_groups.len() > 4096 {
+            return Err("Too many film set groups");
+        }
+        let mut group_ids = std::collections::HashSet::new();
+        for group in &self.film_set_groups {
+            if group.schema_version != FILM_SET_GROUP_RENDER_SCHEMA_VERSION
+                || group.owner_id.is_empty()
+                || !group_ids.insert(&group.owner_id)
+                || !group.badge_origin.x.is_finite()
+                || !group.badge_origin.y.is_finite()
+                || !self
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == group.owner_id && node.kind == "group")
+                || group.bindings.len() > 1024
+            {
+                return Err("Invalid film set group preparation");
+            }
+            let mut binding_ids = std::collections::HashSet::new();
+            for binding in &group.bindings {
+                if binding.binding_id.is_empty()
+                    || binding.source_node_id.is_empty()
+                    || !binding_ids.insert(&binding.binding_id)
+                    || !matches!(binding.kind.as_str(), "model3d" | "image" | "video")
+                    || binding.content_key.is_empty()
+                    || binding.content_key.len() > 2048
+                    || binding
+                        .resource_key
+                        .as_ref()
+                        .is_some_and(|value| value.is_empty() || value.len() > 512)
+                    || binding
+                        .signature
+                        .as_ref()
+                        .is_some_and(|value| value.is_empty() || value.len() > 512)
+                    || ![
+                        binding.transform.x,
+                        binding.transform.y,
+                        binding.transform.z,
+                        binding.transform.yaw,
+                        binding.transform.scale,
+                    ]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    || binding.transform.scale <= 0.0
+                    || !binding.aspect_ratio.is_finite()
+                    || binding.aspect_ratio <= 0.0
+                    || binding
+                        .diagnostic
+                        .as_ref()
+                        .is_some_and(|message| message.len() > 1024)
+                {
+                    return Err("Invalid film set group binding");
+                }
+            }
+            if let Some(t) = &group.scene_transform {
+                if ![t.x, t.y, t.z, t.yaw, t.scale]
+                    .iter()
+                    .all(|n| n.is_finite())
+                    || t.scale <= 0.0
+                {
+                    return Err("Invalid film set scene transform");
+                }
+            }
+            if let Some(ground) = &group.ground {
+                if let Some(t) = &ground.transform {
+                    if ![t.x, t.y, t.z, t.yaw, t.scale]
+                        .iter()
+                        .all(|n| n.is_finite())
+                        || t.scale <= 0.0
+                    {
+                        return Err("Invalid film set ground transform");
+                    }
+                }
+                if !ground.width.is_finite()
+                    || !ground.depth.is_finite()
+                    || ground.width <= 0.0
+                    || ground.depth <= 0.0
+                    || ground.color.as_ref().is_some_and(|value| value.len() > 128)
+                {
+                    return Err("Invalid film set group ground");
+                }
             }
         }
         if self.shot_preview_links.len() > 1024 {
@@ -894,7 +1086,11 @@ impl Scene {
                         .iter()
                         .any(|id| id.is_empty() || id.len() > 1024 || id == &node.id)
                     || links.target_item_ids.len() > links.target_node_ids.len()
-                    || links.target_item_ids.iter().any(|(target, item)| !links.target_node_ids.contains(target) || item.is_empty() || item.len() > 1024)
+                    || links.target_item_ids.iter().any(|(target, item)| {
+                        !links.target_node_ids.contains(target)
+                            || item.is_empty()
+                            || item.len() > 1024
+                    })
                 {
                     return Err("Invalid composite ownership links");
                 }

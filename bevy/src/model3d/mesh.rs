@@ -7,13 +7,20 @@ use bevy::{
     render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
 
+use super::quality::{QUALITY_VERSION, Quality};
 use super::scene::ModelGeometry;
-use super::quality::{Quality, QUALITY_VERSION};
 
 pub(crate) fn mesh_key(geometry: &ModelGeometry) -> String {
     match geometry {
-        ModelGeometry::Box { size } => format!("box:{:08x},{:08x},{:08x}", size[0].to_bits(), size[1].to_bits(), size[2].to_bits()),
-        ModelGeometry::Cylinder { radius, height } => format!("cyl:{:08x}:{:08x}", radius.to_bits(), height.to_bits()),
+        ModelGeometry::Box { size } => format!(
+            "box:{:08x},{:08x},{:08x}",
+            size[0].to_bits(),
+            size[1].to_bits(),
+            size[2].to_bits()
+        ),
+        ModelGeometry::Cylinder { radius, height } => {
+            format!("cyl:{:08x}:{:08x}", radius.to_bits(), height.to_bits())
+        }
         ModelGeometry::Sphere { radius } => format!("sphere:{:08x}", radius.to_bits()),
         ModelGeometry::Capsule { radius, height } => format!("capsule:{:08x}:{:08x}", radius.to_bits(), height.to_bits()),
         ModelGeometry::Mesh { vertices, faces, normals, uvs, colors } => {
@@ -32,11 +39,20 @@ pub(crate) fn mesh_key(geometry: &ModelGeometry) -> String {
 }
 
 pub(super) fn quality_key(base: &str, geometry: &ModelGeometry, quality: Quality) -> String {
-    let quality = if matches!(geometry, ModelGeometry::Box { .. }) { Quality::High } else { quality };
+    let quality = if matches!(geometry, ModelGeometry::Box { .. }) {
+        Quality::High
+    } else {
+        quality
+    };
     if matches!(geometry, ModelGeometry::Mesh { .. }) {
-        format!("v{QUALITY_VERSION}:meshopt-0.6.2-s{}-e{:08x}:{quality:?}:{base}",
-            super::simplification::VERSION, super::simplification::error_limit(quality).to_bits())
-    } else { format!("v{QUALITY_VERSION}:{quality:?}:{base}") }
+        format!(
+            "v{QUALITY_VERSION}:meshopt-0.6.2-s{}-e{:08x}:{quality:?}:{base}",
+            super::simplification::VERSION,
+            super::simplification::error_limit(quality).to_bits()
+        )
+    } else {
+        format!("v{QUALITY_VERSION}:{quality:?}:{base}")
+    }
 }
 
 /// 每几何**有效**图元档位（change: 2026-10-15-add-film-set-overview-lod，design D3）。
@@ -47,7 +63,11 @@ pub(super) fn quality_key(base: &str, geometry: &ModelGeometry, quality: Quality
 ///
 /// spawn、runtime quality、playback_prepare、资源 lookup、batch/引用和诊断都经此解析，避免只改
 /// mesh cache key 或让诊断按根 Low 漏计实际 High handle。
-pub(super) fn effective_quality(geometry: &ModelGeometry, requested: Quality, overview: bool) -> Quality {
+pub(super) fn effective_quality(
+    geometry: &ModelGeometry,
+    requested: Quality,
+    overview: bool,
+) -> Quality {
     match geometry {
         ModelGeometry::Box { .. } => Quality::High,
         // 带顶点属性（GLB 文件模型）的网格不做简化：简化会丢弃法线/UV/顶点色，改变外观。
@@ -61,7 +81,10 @@ pub(super) fn effective_quality(geometry: &ModelGeometry, requested: Quality, ov
 
 #[allow(dead_code)]
 pub(super) fn build_mesh(geometry: &ModelGeometry) -> Option<Mesh> {
-    build_mesh_quality(geometry, super::quality::ViewPurpose::Export.select(0.0, Quality::High))
+    build_mesh_quality(
+        geometry,
+        super::quality::ViewPurpose::Export.select(0.0, Quality::High),
+    )
 }
 
 pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> Option<Mesh> {
@@ -80,7 +103,9 @@ pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> 
             && colors.as_ref().is_none_or(|values| values.len() == vertices.len()
                 && values.iter().flatten().all(|v| v.is_finite() && (0.0..=1.0).contains(v))),
     };
-    if !legal { return None; }
+    if !legal {
+        return None;
+    }
     let (longitudes, stacks, latitudes) = quality.subdivisions();
     match geometry {
         ModelGeometry::Box { size } => Some(Cuboid::new(size[0], size[1], size[2]).mesh().into()),
@@ -90,11 +115,9 @@ pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> 
                 .resolution(longitudes)
                 .into(),
         ),
-        ModelGeometry::Sphere { radius } => Some(
-            Sphere::new(*radius)
-                .mesh()
-                .uv(longitudes, stacks),
-        ),
+        ModelGeometry::Sphere { radius } => {
+            Some(Sphere::new(*radius).mesh().uv(longitudes, stacks))
+        }
         ModelGeometry::Capsule { radius, height } => {
             // Bevy Capsule3d 的 height 是两端半球中心距（不含半径）；V2 total height 含半球。
             let cylinder_length = (height - radius * 2.0).max(0.0);
@@ -140,16 +163,35 @@ pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn triangles(mesh: &Mesh) -> usize { mesh.indices().unwrap().len() / 3 }
+    fn triangles(mesh: &Mesh) -> usize {
+        mesh.indices().unwrap().len() / 3
+    }
     #[test]
     fn primitive_budgets_decrease_and_high_matches_existing_profile() {
-        for geometry in [ModelGeometry::Sphere { radius: 1. }, ModelGeometry::Cylinder { radius: 1., height: 3. }, ModelGeometry::Capsule { radius: 1., height: 3. }] {
-            let counts = [Quality::Low, Quality::Medium, Quality::High].map(|q| triangles(&build_mesh_quality(&geometry, q).unwrap()));
+        for geometry in [
+            ModelGeometry::Sphere { radius: 1. },
+            ModelGeometry::Cylinder {
+                radius: 1.,
+                height: 3.,
+            },
+            ModelGeometry::Capsule {
+                radius: 1.,
+                height: 3.,
+            },
+        ] {
+            let counts = [Quality::Low, Quality::Medium, Quality::High]
+                .map(|q| triangles(&build_mesh_quality(&geometry, q).unwrap()));
             assert!(counts[0] < counts[1] && counts[1] < counts[2], "{counts:?}");
         }
         let sphere = ModelGeometry::Sphere { radius: 1. };
-        assert_eq!(triangles(&build_mesh_quality(&sphere, Quality::Low).unwrap()), 48);
-        assert_eq!(triangles(&build_mesh_quality(&sphere, Quality::High).unwrap()), 528);
+        assert_eq!(
+            triangles(&build_mesh_quality(&sphere, Quality::Low).unwrap()),
+            48
+        );
+        assert_eq!(
+            triangles(&build_mesh_quality(&sphere, Quality::High).unwrap()),
+            528
+        );
     }
     #[test]
     fn invalid_geometry_does_not_panic_or_allocate_a_mesh() {
@@ -206,6 +248,9 @@ mod tests {
         let a = ModelGeometry::Sphere { radius: 1.00001 };
         let b = ModelGeometry::Sphere { radius: 1.00002 };
         assert_ne!(mesh_key(&a), mesh_key(&b));
-        assert_ne!(quality_key(&mesh_key(&a), &a, Quality::Low), quality_key(&mesh_key(&a), &a, Quality::High));
+        assert_ne!(
+            quality_key(&mesh_key(&a), &a, Quality::Low),
+            quality_key(&mesh_key(&a), &a, Quality::High)
+        );
     }
 }

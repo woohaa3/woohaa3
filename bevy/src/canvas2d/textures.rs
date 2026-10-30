@@ -19,15 +19,15 @@ use bevy::{
 use crate::app::TextureBatch;
 use crate::canvas_ecs::components::{CanvasNodeId, CanvasTextureSprite};
 
+use super::TextureStore;
 use super::texture_store::TextureAction;
-use super::Visuals;
 
 /// 消费本帧 keyed 纹理批次并回收不再挂载的 Sprite。
 pub(crate) fn sync_textures(
     mut commands: Commands,
     scene: Res<crate::app::CurrentScene>,
     index: Res<crate::app::NodeIndex>,
-    mut visuals: ResMut<Visuals>,
+    mut texture_store: ResMut<TextureStore>,
     mut images: ResMut<Assets<Image>>,
     mut batch: ResMut<TextureBatch>,
     nodes: Query<(Entity, &CanvasNodeId)>,
@@ -35,6 +35,7 @@ pub(crate) fn sync_textures(
         Entity,
         &mut Sprite,
         &mut Transform,
+        &mut Visibility,
         &mut CanvasTextureSprite,
     )>,
 ) {
@@ -58,12 +59,19 @@ pub(crate) fn sync_textures(
         };
         let texture_px = Vec2::new(width as f32, height as f32);
         let content = content.as_deref();
+        // 独占上传（无内容身份，典型是视频实时帧）绝不能写进**别的节点共享**的纹理：
+        // 共享内容按「像素不变」前提复用，原地覆盖会同时改掉其他绑定节点的画面
+        // （例如两个节点共用同一张封面，其中一个开始播放后另一个也跟着变帧）。
+        // 节点当前绑在共享内容上时改为新开一份私有纹理，旧共享引用由 `bind` 结算。
+        let private_upload = content.is_none() && texture_store.is_shared(&id);
         // 同内容同尺寸已有共享纹理：只把该节点绑过去，不重复建 GPU 资源。
         let existing = sprites
             .iter()
-            .find(|(_, _, _, sprite)| sprite.owner == owner)
-            .map(|(entity, _, _, sprite)| (entity, sprite.node_id.clone(), sprite.content_id.clone()));
-        let handle = match visuals.texture_store.resolve(content, texture_px) {
+            .find(|(_, _, _, _, sprite)| sprite.owner == owner)
+            .map(|(entity, _, _, _, sprite)| {
+                (entity, sprite.node_id.clone(), sprite.content_id.clone())
+            });
+        let handle = match texture_store.resolve(content, texture_px) {
             TextureAction::Reused(shared) => shared,
             TextureAction::Fresh => {
                 let image = Image::new(
@@ -77,13 +85,13 @@ pub(crate) fn sync_textures(
                     TextureFormat::Rgba8UnormSrgb,
                     RenderAssetUsages::default(),
                 );
-                match existing.clone() {
+                match existing.clone().filter(|_| !private_upload) {
                     // 同尺寸的既有纹理：原地覆盖，保留 handle 与 Sprite。
                     Some((entity, _, _)) => {
                         let previous = sprites
                             .get(entity)
                             .ok()
-                            .map(|(_, sprite, _, _)| sprite.image.clone());
+                            .map(|(_, sprite, _, _, _)| sprite.image.clone());
                         match previous {
                             Some(previous) if images.contains(previous.id()) => {
                                 images.insert(previous.id(), image);
@@ -98,9 +106,7 @@ pub(crate) fn sync_textures(
             }
         };
         // 共享表里换绑可能释放旧 handle（同内容换 handle / 换源 / 换档）。
-        let released = visuals
-            .texture_store
-            .bind(&id, content, texture_px, handle.clone());
+        let released = texture_store.bind(&id, content, texture_px, handle.clone());
         for stale in released {
             if stale != handle {
                 images.remove(stale.id());
@@ -120,7 +126,7 @@ pub(crate) fn sync_textures(
         match existing {
             Some((entity, _, _)) => {
                 commands.entity(entity).insert(visibility);
-                if let Ok((_, mut sprite, mut transform, mut owner_component)) =
+                if let Ok((_, mut sprite, mut transform, _, mut owner_component)) =
                     sprites.get_mut(entity)
                 {
                     sprite.image = handle.clone();
@@ -155,7 +161,7 @@ pub(crate) fn sync_textures(
     }
     // 节点删除/类型替换/不再显示纹理：回收 Sprite 并让共享表释放本节点引用。
     let mut stale = Vec::new();
-    for (entity, _, _, sprite) in &sprites {
+    for (entity, _, _, _, sprite) in &sprites {
         let alive = by_id.contains_key(sprite.node_id.as_str())
             && index
                 .node(&scene.0, &sprite.node_id)
@@ -166,36 +172,209 @@ pub(crate) fn sync_textures(
     }
     for (entity, id) in stale {
         commands.entity(entity).despawn();
-        for released in visuals.texture_store.release(&id) {
+        for released in texture_store.release(&id) {
             images.remove(released.id());
         }
     }
-    // 跟随节点位置：贴图批次只在**贴图内容变化**时到达；拖动、缩放、布局重排都不产生新
-    // 批次。只靠批次写位置会让 Sprite 停在原地，直到下一次上传才「追上」——表现为拖动卡片
-    // 时图片滞后一拍。这里对每个仍存活的 Sprite 按当前帧的节点几何重算位置与尺寸：
-    // 无批次的一帧只读场景 + 写 Transform，不碰 GPU 资源。
-    let followed: Vec<(Entity, Vec2, Color, Vec2, f32)> = sprites
+    // 纯位置/尺寸/聚焦增量：已绑定的 Sprite 必须跟随节点布局。
+    //
+    // 纹理只在内容或尺寸档变化时上传。若摆放只写在「收到纹理批次」的分支里，拖动节点
+    // （或移动带动成员位移的组）后缩略图会留在旧位置，直到缩放画布触发换档重新上传才
+    // 恢复。这里复用同一 `sprite_layout`，让位置、contain 尺寸、busy 透明与聚焦可见性
+    // 都以当前 accepted 场景为准。
+    let followed: Vec<(Entity, String)> = sprites
         .iter()
-        .filter_map(|(entity, _, _, sprite)| {
-            let (node_index, node) = index.node(&scene.0, &sprite.node_id)?;
-            if !node.texture {
-                return None;
-            }
-            let display = crate::canvas_query::focus_context::node(&scene.0, node);
-            let render_index =
-                crate::canvas_query::focus_context::index(&scene.0, &node.id, node_index);
-            let overlay = crate::canvas_query::focus_context::overlay(&scene.0);
-            let texture_px = Vec2::new(sprite.texture_px[0] as f32, sprite.texture_px[1] as f32);
-            let (custom_size, center, color, z) =
-                super::image_focus::sprite_layout(&overlay, &display, texture_px, render_index);
-            Some((entity, custom_size, color, center, z))
-        })
+        .map(|(entity, _, _, _, owner)| (entity, owner.node_id.clone()))
         .collect();
-    for (entity, size, color, center, z) in followed {
-        if let Ok((_, mut sprite, mut transform, _)) = sprites.get_mut(entity) {
-            sprite.custom_size = Some(size);
-            sprite.color = color;
-            transform.translation = Vec3::new(center.x, -center.y, z);
+    let overlay = crate::canvas_query::focus_context::overlay(&scene.0);
+    let shown = scene.0.model_focus.is_none();
+    for (entity, id) in followed {
+        let Some((index, node)) = index.node(&scene.0, &id).filter(|(_, node)| node.texture) else {
+            continue;
+        };
+        let display = crate::canvas_query::focus_context::node(&scene.0, node);
+        let node_index = crate::canvas_query::focus_context::index(&scene.0, &node.id, index);
+        let Ok((_, sprite, _, _, _)) = sprites.get(entity) else {
+            continue;
+        };
+        let Some(image) = images.get(&sprite.image) else {
+            continue;
+        };
+        let texture_px = Vec2::new(image.width() as f32, image.height() as f32);
+        let (custom_size, center, color, z) =
+            super::image_focus::sprite_layout(&overlay, &display, texture_px, node_index);
+        let translation = Vec3::new(center.x, -center.y, z);
+        let visibility = if shown {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if let Ok((_, mut sprite, mut transform, mut current_visibility, _)) =
+            sprites.get_mut(entity)
+        {
+            if transform.translation != translation {
+                transform.translation = translation;
+            }
+            if sprite.custom_size != Some(custom_size) {
+                sprite.custom_size = Some(custom_size);
+            }
+            if sprite.color != color {
+                sprite.color = color;
+            }
+            if *current_visibility != visibility {
+                *current_visibility = visibility;
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{CurrentScene, NodeIndex};
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn scene() -> crate::protocol::Scene {
+        crate::protocol::Scene {
+            nodes: serde_json::from_value(serde_json::json!([{
+                "id":"img","type":"image","x":10,"y":20,"width":200,"height":100,
+                "texture":true
+            }]))
+            .unwrap(),
+            ..default()
+        }
+    }
+
+    /// 缩略图/图片卡的 Sprite 必须在**纯位置增量**后跟随节点；纹理上传不是刷新位置的前提。
+    #[test]
+    fn texture_sprite_follows_pure_position_updates() {
+        let mut world = World::new();
+        let scene = scene();
+        world.insert_resource(CurrentScene(scene.clone()));
+        world.insert_resource(NodeIndex::default());
+        world.resource_mut::<NodeIndex>().rebuild(&scene);
+        world.insert_resource(TextureStore::default());
+        world.insert_resource(TextureBatch::default());
+        let mut images = Assets::<Image>::default();
+        let image = Image::new(
+            Extent3d {
+                width: 100,
+                height: 50,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            vec![0; 100 * 50 * 4],
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::default(),
+        );
+        let handle = images.add(image);
+        world.insert_resource(images);
+        let owner = world.spawn(CanvasNodeId("img".into())).id();
+        let sprite = world
+            .spawn((
+                Sprite {
+                    image: handle,
+                    ..default()
+                },
+                Transform::default(),
+                Visibility::Inherited,
+                CanvasTextureSprite {
+                    owner,
+                    node_id: "img".into(),
+                    content_id: None,
+                    // 上游改为从 Image 句柄读像素尺寸；`texture_px` 仍是本仓跟随布局时需要
+                    // 的缓存，测试里给与实际图像一致的尺寸。
+                    texture_px: [100, 50],
+                },
+            ))
+            .id();
+        world.run_system_once(sync_textures).unwrap();
+        world.flush();
+        let before = *world.get::<Transform>(sprite).unwrap();
+        let size_before = world.get::<Sprite>(sprite).unwrap().custom_size;
+        // 前端位置增量只改 accepted 节点的 x/y，不重新上传纹理。
+        {
+            let mut scene = world.resource_mut::<CurrentScene>();
+            let node = &mut scene.0.nodes[0];
+            node.x += 150.;
+            node.y += 40.;
+        }
+        world.run_system_once(sync_textures).unwrap();
+        world.flush();
+        let after = *world.get::<Transform>(sprite).unwrap();
+        assert_eq!(after.translation.x - before.translation.x, 150.);
+        assert_eq!(after.translation.y - before.translation.y, -40.);
+        assert_eq!(
+            world.get::<Sprite>(sprite).unwrap().custom_size,
+            size_before
+        );
+    }
+
+    fn two_card_scene() -> crate::protocol::Scene {
+        crate::protocol::Scene {
+            nodes: serde_json::from_value(serde_json::json!([
+                {"id":"a","type":"image","x":0,"y":0,"width":200,"height":100,"texture":true},
+                {"id":"b","type":"image","x":300,"y":0,"width":200,"height":100,"texture":true}
+            ]))
+            .unwrap(),
+            ..default()
+        }
+    }
+
+    fn sprite_image(world: &mut World, node_id: &str) -> Handle<Image> {
+        let mut query = world.query::<(&CanvasTextureSprite, &Sprite)>();
+        query
+            .iter(world)
+            .find(|(sprite, _)| sprite.node_id == node_id)
+            .map(|(_, sprite)| sprite.image.clone())
+            .unwrap_or_else(|| panic!("node {node_id} sprite missing"))
+    }
+
+    /// 独占上传（视频实时帧）不得原地覆盖别的节点共享的纹理。
+    ///
+    /// 共享纹理按「同内容像素不变」复用；实时帧内容身份为空，若仍写入共享 handle，
+    /// 另一个绑定同一封面的节点会一起变帧。此时该节点必须换成自己的私有纹理。
+    #[test]
+    fn exclusive_upload_replaces_shared_binding_with_private_image() {
+        let mut world = World::new();
+        let scene = two_card_scene();
+        world.insert_resource(CurrentScene(scene.clone()));
+        world.insert_resource(NodeIndex::default());
+        world.resource_mut::<NodeIndex>().rebuild(&scene);
+        world.insert_resource(TextureStore::default());
+        world.insert_resource(TextureBatch::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.spawn(CanvasNodeId("a".into()));
+        world.spawn(CanvasNodeId("b".into()));
+        let poster = vec![255u8, 0, 0, 255, 255, 0, 0, 255];
+        {
+            let mut batch = world.resource_mut::<TextureBatch>();
+            batch
+                .0
+                .insert("a".into(), (2, 1, poster.clone(), Some("poster".into())));
+            batch
+                .0
+                .insert("b".into(), (2, 1, poster.clone(), Some("poster".into())));
+        }
+        world.run_system_once(sync_textures).unwrap();
+        world.flush();
+        let shared = sprite_image(&mut world, "a");
+        assert_eq!(sprite_image(&mut world, "b"), shared);
+
+        // a 上传独占实时帧：只替换 a 的纹理，b 仍指向共享封面。
+        world.resource_mut::<TextureBatch>().0.insert(
+            "a".into(),
+            (2, 1, vec![0u8, 255, 0, 255, 0, 255, 0, 255], None),
+        );
+        world.run_system_once(sync_textures).unwrap();
+        world.flush();
+        let private = sprite_image(&mut world, "a");
+        assert_ne!(private, shared);
+        assert_eq!(sprite_image(&mut world, "b"), shared);
+        let images = world.resource::<Assets<Image>>();
+        let poster_pixels = images.get(&shared).unwrap().data.clone().unwrap();
+        assert_eq!(poster_pixels, poster);
+        let frame_pixels = images.get(&private).unwrap().data.clone().unwrap();
+        assert_eq!(frame_pixels, vec![0u8, 255, 0, 255, 0, 255, 0, 255]);
     }
 }

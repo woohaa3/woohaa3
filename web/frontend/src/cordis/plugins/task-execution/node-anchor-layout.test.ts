@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutDockedPanel, layoutNodePanel, usableCanvasArea, DOCK_BOTTOM_MARGIN, DOCK_MAX_HEIGHT_RATIO, DOCK_SIDE_MARGIN } from "./node-anchor-layout.js";
+import { layoutNodePanel, usableCanvasArea } from "./node-anchor-layout.js";
 
 const area = { left: 100, top: 50, width: 900, height: 700 };
 
@@ -57,19 +57,34 @@ describe("layoutNodePanel", () => {
   });
 });
 
-describe("layoutDockedPanel", () => {
-  it("docks centred at the bottom of the canvas area", () => {
-    const panel = layoutDockedPanel(area, { width: 600, height: 240 })!;
-    expect(panel.left + panel.width / 2).toBeCloseTo(area.left + area.width / 2);
-    expect(panel.top + panel.maxHeight).toBeCloseTo(area.top + area.height - DOCK_BOTTOM_MARGIN);
-    expect(panel.placement).toBe("edge");
+describe("组徽标锚点（below 策略）", () => {
+  const viewport = { left: 0, top: 0, width: 1440, height: 2000 };
+
+  it("面板整块落在徽标下缘之外，不盖住场景", () => {
+    const badge = { left: 100, top: 1000, width: 880, height: 640 };
+    const panel = layoutNodePanel(badge, viewport, { width: 760, height: 320 }, undefined, "below")!;
+    expect(panel.placement).toBe("below");
+    expect(panel.top).toBeCloseTo(badge.top + badge.height + 12, 5);
+    expect(panel.top).toBeGreaterThanOrEqual(badge.top + badge.height);
   });
 
-  it("clamps width to the canvas and height to a share of it", () => {
-    const narrow = layoutDockedPanel({ left: 0, top: 0, width: 500, height: 600 }, { width: 760, height: 240 })!;
-    expect(narrow.width).toBe(500 - DOCK_SIDE_MARGIN * 2);
-    const tall = layoutDockedPanel(area, { width: 600, height: 900 })!;
-    expect(tall.maxHeight).toBeCloseTo(area.height * DOCK_MAX_HEIGHT_RATIO);
-    expect(layoutDockedPanel({ left: 0, top: 0, width: 0, height: 0 }, { width: 600, height: 240 })).toBeNull();
+  it("徽标探出视口底边时改贴侧面，而不是压回模型上", () => {
+    const badge = { left: 400, top: 600, width: 880, height: 640 };
+    const area = { left: 0, top: 0, width: 1440, height: 900 };
+    const panel = layoutNodePanel(badge, area, { width: 400, height: 320 }, undefined, "below")!;
+    expect(panel.placement).toBe("left");
+    // 完全不与徽标水平重叠 → 不遮挡模型。
+    expect(panel.left + panel.width).toBeLessThanOrEqual(badge.left);
+    expect(panel.top).toBeGreaterThanOrEqual(area.top);
+    expect(panel.top + Math.min(320, panel.maxHeight)).toBeLessThanOrEqual(area.top + area.height);
+  });
+
+  it("两侧都放不下时才退回视口底边（面板仍可见）", () => {
+    const badge = { left: 0, top: 600, width: 1440, height: 640 };
+    const area = { left: 0, top: 0, width: 1440, height: 900 };
+    const panel = layoutNodePanel(badge, area, { width: 760, height: 320 }, undefined, "below")!;
+    expect(panel.placement).toBe("edge");
+    expect(panel.top).toBeGreaterThanOrEqual(area.top);
+    expect(panel.top + Math.min(320, panel.maxHeight)).toBeLessThanOrEqual(area.top + area.height);
   });
 });

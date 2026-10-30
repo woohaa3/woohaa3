@@ -27,13 +27,29 @@ describe("imageParameterFamily", () => {
 });
 
 describe("imageFamilyParameters", () => {
-  it("seedream 只给比例与分辨率，且分辨率默认 2K", () => {
+  it("seedream 给比例、分辨率与透明背景，且分辨率默认 2K", () => {
     const family = imageFamilyParameters("seedream-5-pro")!;
-    expect(Object.keys(family.properties).sort()).toEqual(["aspectRatio", "resolution"]);
-    expect(family.defaults).toEqual({ resolution: "2K", aspectRatio: "auto" });
+    expect(Object.keys(family.properties).sort()).toEqual(["aspectRatio", "background", "resolution"]);
+    expect(family.defaults).toEqual({ resolution: "2K", aspectRatio: "auto", background: "opaque" });
     // 即梦没有 aspect_ratio / quality 参数，不能声明出来。
     expect(family.properties).not.toHaveProperty("quality");
     expect(family.properties).not.toHaveProperty("n");
+  });
+
+  it("透明背景只在 5.0 pro / flash 上，且「透明」联动 PNG 输出", () => {
+    const background = imageFamilyParameters("seedream-5-pro")!.properties.background as {
+      enum: Array<{ value: string; label: string; "x-pptask-requires"?: Record<string, unknown> }>;
+    };
+    // 即梦认 opaque 而不是 OpenAI 的 auto：面板不给「自动」这一档。
+    expect(background.enum.map((entry) => entry.value)).toEqual(["opaque", "transparent"]);
+    expect(background.enum[0]?.label).toBe("不透明");
+    expect(background.enum[1]?.["x-pptask-requires"]).toEqual({ outputFormat: "png" });
+
+    expect(imageFamilyParameters("seedream-5-flash")!.properties).toHaveProperty("background");
+    // lite / 4.5 / 4.0 官方不支持透明通道：面板不能出现这个控件。
+    for (const id of ["seedream-5-lite", "seedream-4.5", "seedream-4.0"]) {
+      expect(imageFamilyParameters(id)!.properties).not.toHaveProperty("background");
+    }
   });
 
   it("seedream 网关档位收窄：5.0 pro 只给 1K / 2K，flash 保留 1.5K", () => {
@@ -75,6 +91,23 @@ describe("imageRequestFields", () => {
       .toEqual({ size: "2K" });
     expect(imageRequestFields("seedream-5-pro", { resolution: "1.5K", aspectRatio: "16:9" }))
       .toEqual({ size: "2848x1600" });
+  });
+
+  it("seedream 透明背景下发 background，并把格式补成 PNG", () => {
+    // 官方：透明只在 pro / flash 上有效，且配 output_format=jpeg 会被上游拒绝。
+    // 面板会联动切格式，旧草稿 / 批处理绕过面板时由这里兜底。
+    expect(imageRequestFields("seedream-5-pro", {
+      resolution: "2K",
+      aspectRatio: "1:1",
+      background: "transparent",
+      outputFormat: "jpeg"
+    })).toEqual({ size: "2048x2048", background: "transparent", output_format: "png" });
+    expect(imageRequestFields("seedream-5-flash", { background: "transparent" }))
+      .toEqual({ size: "2K", background: "transparent", output_format: "png" });
+    // 不透明是官方默认值：不额外下发，请求形状保持原样。
+    expect(imageRequestFields("seedream-5-pro", { background: "opaque" })).toEqual({ size: "2K" });
+    // lite / 4.5 没有这个参数，选了也不能发出去。
+    expect(imageRequestFields("seedream-5-lite", { background: "transparent" })).toEqual({ size: "2K" });
   });
 
   it("gemini 发 flat 字段，自适应不下发比例", () => {

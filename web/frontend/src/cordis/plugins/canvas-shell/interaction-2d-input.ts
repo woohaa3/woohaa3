@@ -16,7 +16,7 @@ import { nodeSize, type Point } from "./hit-test.js";
 import { planAggregateConnect, planConnectEdge, planResizeNode } from "../../../extension-api/command-planner.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { createWheelViewport } from "./interaction-viewport.js";
-import { resizeTarget as resizeTargetHelper, scopeResizeTarget, SCOPE_HANDLE_ORDER } from "./interaction-2d-helpers.js";
+import { resizeTarget as resizeTargetHelper, scopeResizeTarget, isGroupResizeCorner, SCOPE_HANDLE_ORDER } from "./interaction-2d-helpers.js";
 import { createDragAttachState, isDragAttachConnectable } from "./drag-attach.js";
 import { createDragGestureFamily } from "./drag-gesture.js";
 import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
@@ -241,6 +241,9 @@ export function create2dInputFamily(core: InteractionCore) {
         const originCenter = origin
           ? { x: origin.x + startSize.width / 2, y: origin.y + startSize.height / 2 }
           : { x: renderNode ? renderNode.x + renderNode.width / 2 : 0, y: renderNode ? renderNode.y + renderNode.height / 2 : 0 };
+        // 组容器的四角抓手走自由缩放的低层（非片场范围手势）：命中方向决定固定哪个对角，
+        // 因此与既有右下角一样在释放时提交一次 `node.update`（含 position）。
+        const groupCorner = !(handlePoint && anchorPoint) && isGroupResizeCorner(hit.handle) ? hit.handle : undefined;
         beginGesture();
         beginPerfGesture("resize");
         state.gesture = {
@@ -254,7 +257,8 @@ export function create2dInputFamily(core: InteractionCore) {
           moved: false,
           mode: handlePoint && anchorPoint ? "scope" : "free",
           ...(handlePoint ? { handle: { x: handlePoint[0], y: handlePoint[1] } } : {}),
-          ...(anchorPoint ? { anchor: { x: anchorPoint[0], y: anchorPoint[1] } } : {})
+          ...(anchorPoint ? { anchor: { x: anchorPoint[0], y: anchorPoint[1] } } : {}),
+          ...(groupCorner && origin ? { corner: groupCorner, origin } : {})
         };
         canvas.setPointerCapture?.(event.pointerId);
         event.preventDefault();
@@ -381,9 +385,9 @@ export function create2dInputFamily(core: InteractionCore) {
     // pointer 热路径只查询 Rust interaction snapshot，不扫描全场景或构建渲染快照。
     // 卡片外的片场模型 picking 仍驱动原有 hover 播放。
     const hitResult = core.queryPoint(world, core.activeViewport().zoom, state.hoveredEdgeId);
-    const badge = hitResult.ok && hitResult.value?.kind === "node-action" && hitResult.value.actionId === "group-toggle-collapse" ? hitResult.value : null;
+    const badge = hitResult.ok && hitResult.value?.kind === "node-action" && hitResult.value.actionId === "group-badge-select" ? hitResult.value : null;
     const badgeGrip = hitResult.ok && hitResult.value?.kind === "node-action" && hitResult.value.actionId === "group-resize-badge";
-    canvas.title = badgeGrip ? "拖拽等比缩放徽标" : badge ? (workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData[badge.nodeId]?.groupCollapsed === true ? "点击展开组" : "点击收起组") : "";
+    canvas.title = badgeGrip ? "拖拽等比缩放徽标" : badge ? "选择并拖动组" : "";
     if (canvas.style) canvas.style.cursor = writable() ? badgeGrip ? "nwse-resize" : badge ? "pointer" : "" : "";
     core.settlePointerHover(
       hitResult,
@@ -436,9 +440,18 @@ export function create2dInputFamily(core: InteractionCore) {
         state.gesture.moved = true;
         state.localSizes = new Map([[state.gesture.nodeId, { width: target.width, height: target.height }]]);
         // 地面范围左/上方向拖动同时改变中心：预览也提交 position，避免释放时跳变（design D6）。
-        state.localPositions = target.position
-          ? new Map([[state.gesture.nodeId, target.position]])
-          : new Map();
+        const positions = new Map<string, Point>();
+        if (target.position) positions.set(state.gesture.nodeId, target.position);
+        // 组四角缩放：成员留在画布原位，不跟着框原点移动。显式写成员绝对位置后，
+        // `expandPositionPreviews` 不再按父级位移平移它们。
+        if (state.gesture.corner) {
+          const index = sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
+          for (const childId of index?.children.get(state.gesture.nodeId) ?? []) {
+            const at = index?.absolutePosition(childId);
+            if (at) positions.set(childId, at);
+          }
+        }
+        state.localPositions = positions;
       } else {
         state.localSizes = new Map();
         state.localPositions = new Map();
@@ -510,10 +523,26 @@ export function create2dInputFamily(core: InteractionCore) {
         // 地面范围对角锁定缩放可能同时改变中心（左/上方向），因此与尺寸一并提交 position（design D6）。
         // 预览是绝对画布坐标，提交前换算为持久化相对坐标（与 drag 提交同一换算）。
         const position = state.localPositions.get(nodeId);
-        const index = sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
+        const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
+        const index = sharedCanvasNodeIndex(canvasState);
         const parent = index?.parentAbsolutePosition(nodeId) ?? { x: 0, y: 0 };
         const relativePosition = position ? { x: position.x - parent.x, y: position.y - parent.y } : undefined;
-        submit(planResizeNode({ nodeId, width: size.width, height: size.height, ...(relativePosition ? { position: relativePosition } : {}) }));
+        const commands = planResizeNode({ nodeId, width: size.width, height: size.height, ...(relativePosition ? { position: relativePosition } : {}) });
+        // 组四角缩放：成员保持画布绝对位置。框原点移动了多少，成员的局部坐标就反向补多少，
+        // 同一批次原子提交（成员若越界会让整批被拒绝，因此跳过不可移动的片场对象模型）。
+        const origin = state.gesture.origin;
+        if (state.gesture.corner && position && origin && index) {
+          const dx = position.x - origin.x;
+          const dy = position.y - origin.y;
+          if (dx !== 0 || dy !== 0) {
+            for (const childId of index.children.get(nodeId) ?? []) {
+              const child = index.byId.get(childId);
+              if (!child || isFilmSetObjectModelNode(child, canvasState?.nodeData[childId])) continue;
+              commands.push({ type: "node.update", nodeId: childId, position: { x: child.position.x - dx, y: child.position.y - dy } });
+            }
+          }
+        }
+        submit(commands);
       }
       state.localSizes = new Map();
       state.localPositions = new Map();

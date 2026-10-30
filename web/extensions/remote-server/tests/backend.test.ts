@@ -2140,8 +2140,8 @@ describe("access()：进入画布时回答的内容权限", () => {
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const provider = upstreamProviderOf(host);
     // 服务端回填 allowed_actions；这里只做映射，不自己推判定。
-    expect(await provider.access!("canvas-owned")).toEqual({ canRead: true, canWrite: true });
-    expect(await provider.access!("canvas-viewer")).toEqual({ canRead: true, canWrite: false });
+    expect(await provider.access!("canvas-owned")).toEqual({ canRead: true, canWrite: true, canDelete: true });
+    expect(await provider.access!("canvas-viewer")).toEqual({ canRead: true, canWrite: false, canDelete: false });
     // 看不见与不存在在服务端是同一结论（not_found）：扩展返回 null，由宿主按归属决定是否判只读。
     expect(await provider.access!("canvas-invisible")).toBeNull();
   });
@@ -2154,3 +2154,64 @@ describe("access()：进入画布时回答的内容权限", () => {
 });
 
 
+
+describe("deleteCanvas()：删除属于远端的画布", () => {
+  it("先问远端，成功后清掉目录缓存与待同步标记", async () => {
+    const fake = createFakeServer({ canvasAcl: { "canvas-remote-1": { owner: "device-alice" } } });
+    const documents = createFakeDocuments();
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
+    await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
+    const provider = upstreamProviderOf(host);
+    // 显式启用一张本地画布：它的远端归属由待同步标记表达。
+    await host.call(REMOTE_SERVER_SYNC_ENABLE_ROUTE, { canvasId: "canvas-local-1" });
+    fake.remoteCanvasIds.push("canvas-local-1");
+    await provider.listCanvases!();
+    expect(JSON.stringify(await pendingDocument(documents))).not.toContain("canvas-local-1");
+
+    expect(await provider.deleteCanvas!("canvas-remote-1")).toBe("deleted");
+    expect(fake.remoteCanvasIds).not.toContain("canvas-remote-1");
+    // 缓存同步清理：下一次解析不再把已删画布当远端画布。
+    expect(await provider.resolve("canvas-remote-1")).toBeNull();
+  });
+
+  it("远端已不存在按删除幂等处理；非作者得到 forbidden", async () => {
+    const fake = createFakeServer({
+      canvasIds: ["canvas-owned", "canvas-other"],
+      canvasAcl: {
+        "canvas-owned": { owner: "device-alice" },
+        "canvas-other": { owner: "someone-else" }
+      }
+    });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
+    const provider = upstreamProviderOf(host);
+    await provider.listCanvases!();
+
+    expect(await provider.deleteCanvas!("canvas-other")).toBe("forbidden");
+    expect(fake.remoteCanvasIds).toContain("canvas-other");
+    expect(await provider.deleteCanvas!("canvas-owned")).toBe("deleted");
+    // 远端目录里已经不再有它：宿主应按本机删除语义继续，而不是假装远端删成功。
+    expect(await provider.deleteCanvas!("canvas-owned")).toBe("skipped");
+  });
+
+  it("未登录时返回 skipped，纯本地删除语义不变", async () => {
+    const fake = createFakeServer();
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    expect(await upstreamProviderOf(host).deleteCanvas!("canvas-remote-1")).toBe("skipped");
+  });
+
+  it("远端不可达时返回 unavailable，宿主据此中止删除", async () => {
+    const fake = createFakeServer();
+    let reachable = true;
+    const flaky: typeof globalThis.fetch = async (input, init) => {
+      if (!reachable) throw new TypeError("fetch failed");
+      return fake.fetch(input, init);
+    };
+    const host = await activate({ deployment: fake.deployment, fetchImpl: flaky });
+    await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
+    const provider = upstreamProviderOf(host);
+    await provider.listCanvases!();
+    reachable = false;
+    expect(await provider.deleteCanvas!("canvas-remote-1")).toBe("unavailable");
+  });
+});

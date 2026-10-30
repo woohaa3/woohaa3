@@ -53,7 +53,7 @@ import type { CanvasCatalogRemote, CanvasCatalogService, CanvasSelectionService 
 import type { CanvasPreparationRemote, CanvasPreparationService } from "./contract/canvas-preparation.js";
 import type { CanvasExtensionMetadata } from "./plugins/extension-manager/contract.js";
 import { createExtensionRuntimeService, type ExtensionRuntimeService } from "./extension-runtime/service.js";
-import { resolveExtensionStartupSelection } from "./extension-runtime/selection.js";
+import { extensionDefaultPreferences, resolveExtensionStartupSelection } from "./extension-runtime/selection.js";
 import { installAppHostConnectivity, type AppConnectivityOptions, type AppConnectivityRuntime } from "./app-host-connectivity.js";
 import { browserHistory, subscribePreparationReady } from "./page-scope-helpers.js";
 import { createSettingsRemote, type SettingsRemote } from "./services/settings-remote.js";
@@ -148,6 +148,7 @@ function extensionCatalogMetadata(metadata: readonly import("@woohaa3/contracts"
     ...(entry.directory ? { directory: entry.directory } : {}),
     required: entry.required,
     configurable: entry.configScope === "browser-local" && !entry.required,
+    ...(entry.defaultEnabled !== undefined ? { defaultEnabled: entry.defaultEnabled } : {}),
     ...(entry.icon ? { icon: entry.icon } : {})
   }));
 }
@@ -245,12 +246,14 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     // 配置来源：宿主设置 API（独立 remote 实例，不依赖 scope 内服务装配顺序）。
     const settingsRemote = options.settingsRemote ?? createSettingsRemote();
     const initialPreferences = await readFrontendExtensionPreferences(settingsRemote);
+    const defaults = extensionDefaultPreferences(metadata);
     const preferenceStore = new ExtensionPreferenceStore({
       ids: configurableIds,
+      defaults,
       ...(initialPreferences.ok ? { desired: initialPreferences.preferences } : {}),
       persist: persistFrontendExtension(settingsRemote)
     });
-    // 读取失败不阻断启动：这时按全部启用装配，面板据此显示持久化不可用。
+    // 读取失败不阻断启动：这时按各插件开箱默认装配，面板据此显示持久化不可用。
     if (options.extensionPreferenceStorage !== null) {
       void migrateLegacyPreferences({
         remote: settingsRemote,
@@ -273,7 +276,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     const builtinAssembled: Record<string, boolean> = {};
     for (const entry of catalogMetadata) {
       if (!entry.configurable) continue;
-      builtinAssembled[entry.id] = desired[entry.id] ?? true;
+      builtinAssembled[entry.id] = desired[entry.id] ?? entry.defaultEnabled ?? true;
     }
 
     // 3. 只加载 always + 已启用 browser-local optional；required 失败即 page 失败，optional 失败隔离。
@@ -375,7 +378,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     const plugins = manifest.filter((definition) => isAssembledAtStartup(definition, assembled));
     const disabled = Object.entries(assembled)
       .filter(([, enabled]) => !enabled)
-      .map(([id]) => ({ id, reason: "用户已禁用该可选插件" }));
+      .map(([id]) => ({ id, reason: "未启用该可选插件" }));
 
     const runtime = await startFrontendScope(app.ctx, {
       install: async (ctx) => {
@@ -410,9 +413,6 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     });
     // 面板从此刻起读实时装配状态（见上面的 assembledNow）。
     liveRuntime = runtime;
-    // 实例级重装入口（change: 2026-10-27-add-extension-dev-reload）：reconciler 在 scope 启动早期
-    // 建好，只能惰性取；这里把入口挂回 scope ctx，让「发布指针变化 → 原地重装」这条链闭合。
-    if (runtime.reloadExtension) runtime.ctx.provide("extensionReload" as never, runtime.reloadExtension as never);
     // 配置热生效：宿主配置文件里 `extensions.<id>.enabled` 变了，就装回或卸下对应 fiber，
     // 不重建页面 scope（旧行为是「下次启动生效」）。
     // 可换表覆盖**全部** configurable optional：包含宿主内置（如 node-history）与发布目录扩展。

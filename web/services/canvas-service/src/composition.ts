@@ -1,4 +1,4 @@
-import { ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
+import { ContentContributionRegistry, ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
 import type { FilmSetConversionRegistry, MediaStorageScope, ServerCanvas } from "@woohaa3/contracts";
 import { MCP_INTERNAL_ACTOR_ID } from "@woohaa3/contracts";
 import { createFilmSetConversionProviderSet } from "@woohaa3/contracts";
@@ -124,6 +124,9 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   // 「服务令牌 / loopback」边界（独立单元与本机部署行为不变）。
   const authentication = options.accessRuntime?.enabled === false ? undefined : options.authenticate;
   const env = options.env ?? (process.env as Record<string, string | undefined>);
+  const contributions = options.contentRuntime?.contributions;
+  const content = contributions ? new ContentContributionRegistry() : undefined;
+  content?.activate(contributions ?? []);
   const managedLifecycles = new ManagedNodeLifecycleRegistry();
   for (const adapter of options.contentRuntime?.managedLifecycles ?? []) managedLifecycles.register(adapter);
   const log = options.logger ?? (() => undefined);
@@ -206,6 +209,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       // 归档服务在 `composedHandler` 之前构造，读不到这个块级变量，所以外提一份。
       publishedReaderRef = publishedReader;
       composition = await composeCanvasStorage({
+        content,
         managedLifecycles,
         env,
         ...(options.storageConfig ? { storageConfig: options.storageConfig } : {}),
@@ -390,6 +394,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   const createSyncHandler = (): SyncUpgradeHandler => {
     const verifier = mediaClient ? createMediaVerifierStorage({ client: mediaClient }) : undefined;
     syncHandler ??= createSyncUpgradeHandler({
+      content,
       lifecycle: managedLifecycles,
       ...(upstream ? { upstream } : {}),
       // 资源授权接管后，room 建立前的存在性判定改由下面的 principal read 判定负责；
@@ -451,6 +456,12 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         agentDeltaJournal.record(input.canvasId, input.before, input.after);
       },
       taskClient: () => taskClient,
+      // 单实例写入门禁：未持有部署级 writer lock 的宿主不得接受 room 连接。第二个宿主
+      // 静默写同一份协作存储会把另一个实例的 storageSeq 撞成永久过期（见 gate 的说明）。
+      gate: () =>
+        releaseWriterLock
+          ? { ok: true as const }
+          : { ok: false as const, status: 503, code: "writer-lock-unavailable" },
       // 在线迁移准入：preparing/deleted 的旧 ID 不进入 CanvasRoom（不触发读旧来源）。
       ...(importAdmissionRef ? { admit: (canvasId: string) => importAdmissionRef!(canvasId) } : {}),
       // 访问边界：WS 在 room acquire 前按可信 principal 判定 read（任务 6.2）；未注入认证时
@@ -791,7 +802,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
 
   const composedHandler = composeRequestHandler({
     prepareCompositeHistory: async ({ canvasId, nodeId, payload }) => {
-      if (payload.animation?.schemaVersion !== 3) throw new Error("历史复合资产定义非法");
+      if (payload.animation?.schemaVersion !== 3 && payload.animation?.schemaVersion !== 4) throw new Error("历史复合资产定义非法");
       const room = await activeSync?.registry.resolve(canvasId);
       const exported = room?.exportCanvas();
       const canvas = exported?.ok ? exported.canvas : await composition?.service.getCanvas(canvasId);
@@ -801,7 +812,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       // 历史帧素材属于**这张画布**：分立部署下 read 走内部 HTTP，必须带 canvasId 让服务端按
       // 画布作用域路由；远端画布的素材只在托管存储里。
       const mediaRead = mediaClient?.read;
-      return contentFrames.prepareHistoryFrame({ nodeId, payload: payload.animation, assets: canvas.assets, ...(mediaRead ? { read: (storageKey: string) => mediaRead(storageKey, canvasId) } : {}) });
+      return contentFrames.prepareHistoryFrame({ nodeId, payload: payload.animation, canvas, assets: canvas.assets, ...(mediaRead ? { read: (storageKey: string) => mediaRead(storageKey, canvasId) } : {}) });
     },
     env,
     canvasEnabled,
@@ -832,6 +843,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     lifecycle,
     // 任务 5.5：列表按可信主体的可发现集合在分页前过滤（与「我的目录」同一发现规则）。
     discoverableCanvasIds,
+    ...(options.deleteRemote ? { deleteRemote: options.deleteRemote } : {}),
     // 任务 5.2：原生删除后断开该画布的全部实时会话（sync hub）。
     ...(sync
       ? {

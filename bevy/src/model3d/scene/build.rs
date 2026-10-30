@@ -25,7 +25,16 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                 position,
                 rotation,
                 scale,
-            } => specs.push(spec(id, parent.clone(), position, rotation, scale, None, op, None)),
+            } => specs.push(spec(
+                id,
+                parent.clone(),
+                position,
+                rotation,
+                scale,
+                None,
+                op,
+                None,
+            )),
             ModelOp::Box {
                 id,
                 parent,
@@ -152,8 +161,8 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                 let capsule = shape == "capsule";
                 // segment 的 from/to 在 parent 局部空间；实体自身保留父级 transform，
                 // 几何由 center/rotation/length 表达（相对同一 parent）。
-                let geometry = segment_geometry(*from, *to, *width, depth, *overlap, capsule)
-                    .map(|segment| {
+                let geometry =
+                    segment_geometry(*from, *to, *width, depth, *overlap, capsule).map(|segment| {
                         if capsule {
                             ModelGeometry::Capsule {
                                 radius: segment.width / 2.0,
@@ -181,7 +190,8 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                     None,
                 );
                 // segment 的中心与朝向覆盖 op 的 position/rotation（from/to 是权威表达）。
-                if let Some(segment) = segment_geometry(*from, *to, *width, depth, *overlap, capsule)
+                if let Some(segment) =
+                    segment_geometry(*from, *to, *width, depth, *overlap, capsule)
                 {
                     entry.position = segment.center;
                     entry.rotation_radians = xyz_radians_from_quat(segment.rotation);

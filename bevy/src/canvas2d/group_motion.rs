@@ -1,5 +1,5 @@
 //! Only visible, active creation groups animate. The container/card caches remain untouched.
-use super::{Visuals, geometry::Geometry, group, group_outline};
+use super::{CanvasOverlayCache, geometry::Geometry, group, group_outline};
 use crate::{
     app::{CurrentScene, SurfaceState},
     protocol::GraphNode,
@@ -32,6 +32,9 @@ pub(super) fn draw(
     zoom: f32,
     z: f32,
 ) {
+    if node.group.as_ref().is_some_and(|group| group.collapsed) {
+        return;
+    }
     let path = group_outline::path(node);
     let perimeter = group_outline::length(&path);
     let zoom = zoom.max(0.1);
@@ -83,7 +86,7 @@ pub(crate) fn sync(
     surface: Res<SurfaceState>,
     time: Res<Time>,
     theme: Res<ThemeResource>,
-    visuals: Res<Visuals>,
+    visuals: Res<CanvasOverlayCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut state: Local<GroupMotion>,
 ) {

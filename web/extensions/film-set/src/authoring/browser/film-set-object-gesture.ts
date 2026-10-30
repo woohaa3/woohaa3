@@ -214,8 +214,9 @@ export function createFilmSetObjectGesture(deps: FilmSetObjectGestureDeps): {
     return true;
   };
 
-  const select = (point: { x: number; y: number }): boolean => {
+  const select = (point: { x: number; y: number }, options?: { preserveOnMiss?: boolean }): boolean => {
     const itemId = deps.pick(point);
+    if (!itemId && options?.preserveOnMiss) return false;
     deps.session.select(itemId);
     return itemId !== null;
   };

@@ -21,7 +21,12 @@ function safeSegment(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, process.platform === "win32" ? 32 : 64);
 }
 
-function connect(pathname: string): Promise<net.Socket> {
+/** 端点文件不存在或尚未开始监听：Supervisor 正在被 dev 启动器重启时的正常瞬时状态。 */
+const RETRYABLE_CONNECT_CODES = new Set(["ENOENT", "ECONNREFUSED"]);
+const CONNECT_ATTEMPTS = 4;
+const CONNECT_BACKOFF_MS = 100;
+
+function connectOnce(pathname: string): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(pathname);
     const fail = (error: Error) => { socket.destroy(); reject(error); };
@@ -30,11 +35,33 @@ function connect(pathname: string): Promise<net.Socket> {
   });
 }
 
+/**
+ * 连接可能在 Supervisor 重拉期间短暂失败（socket 文件被 unlink，或新进程还没 listen）。
+ * 只重试**建立连接**这一步：请求本身可能已被处理，重发会把 ensure 变成重复启动。
+ * 最终失败也要带上端点与处理建议——裸的 `connect ENOENT` 看不出这是哪个通道。
+ */
+async function connect(pathname: string, channel: string): Promise<net.Socket> {
+  let lastError: NodeJS.ErrnoException | undefined;
+  for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt += 1) {
+    try {
+      return await connectOnce(pathname);
+    } catch (error) {
+      lastError = error as NodeJS.ErrnoException;
+      if (!RETRYABLE_CONNECT_CODES.has(lastError.code ?? "") || attempt === CONNECT_ATTEMPTS - 1) break;
+      await new Promise(resolve => setTimeout(resolve, CONNECT_BACKOFF_MS * (attempt + 1)));
+    }
+  }
+  const code = lastError?.code ? `${lastError.code} ` : "";
+  throw new Error(
+    `${channel}不可用（${code}${pathname}）。dev 启动器会在 2 秒内自动重启 Agent Supervisor，请稍后重试；若持续失败，重启 pnpm dev。原始错误：${lastError?.message ?? "connect failed"}`
+  );
+}
+
 export function createSupervisorProcessManager(options: ProcessManagerOptions, supervisor: SupervisorConfig): ProcessManager {
   let requestId = 0;
   const handles = new Map<string, ProcessHandle>();
   const call = async (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
-    const socket = await connect(supervisor.socketPath);
+    const socket = await connect(supervisor.socketPath, "Agent Supervisor 控制通道");
     const id = ++requestId;
     return await new Promise((resolve, reject) => {
       let buffer = "";
@@ -61,7 +88,7 @@ export function createSupervisorProcessManager(options: ProcessManagerOptions, s
   };
 
   const stdio = async (stdioPath: string): Promise<StdioConnection> => {
-    const socket = await connect(stdioPath);
+    const socket = await connect(stdioPath, "Agent stdio 通道");
     const listeners = new Set<(line: string) => void>();
     const stderrListeners = new Set<(line: string) => void>();
     const consume = splitLines(line => listeners.forEach(listener => listener(line)));

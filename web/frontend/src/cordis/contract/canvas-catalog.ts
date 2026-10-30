@@ -14,6 +14,7 @@ export type {
   CanvasCatalogCreateResult,
   CanvasArchiveExportResult,
   CanvasArchiveImportResult,
+  CanvasCatalogDeleteResult,
   CanvasCatalogRemote,
   CanvasCatalogService,
   CanvasSelectionService,

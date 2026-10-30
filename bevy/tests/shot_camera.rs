@@ -7,11 +7,11 @@
 use bevy::prelude::*;
 use woohaa_bevy_canvas::shot_camera::{
     Aabb, FocusComponent, MAX_CAPTURE_DIMENSION, ShotCameraAxis, ShotCameraCommands,
-    ShotCameraConfig, ShotCameraError, ShotCameraId, ShotCameraLens,
-    ShotCameraPlugin, ShotCameraPose, ShotCameraPreview, ShotCaptureEnqueue,
-    ShotCaptureQueue, ShotCaptureRequest, ShotCaptureResults, ShotEditCommand, ShotEditCommands,
-    ShotEditSessions, ShotPreviewOutput, begin_edit, cancel_edit, commit_edit, distance_from_drag,
-    resolve_shot_camera, shot_distance_bounds, shot_fit_distance, update_distance, update_focus, update_orbit,
+    ShotCameraConfig, ShotCameraError, ShotCameraId, ShotCameraLens, ShotCameraPlugin,
+    ShotCameraPose, ShotCameraPreview, ShotCaptureEnqueue, ShotCaptureQueue, ShotCaptureRequest,
+    ShotCaptureResults, ShotEditCommand, ShotEditCommands, ShotEditSessions, ShotPreviewOutput,
+    begin_edit, cancel_edit, commit_edit, distance_from_drag, resolve_shot_camera,
+    shot_distance_bounds, shot_fit_distance, update_distance, update_focus, update_orbit,
 };
 
 fn test_app() -> App {
@@ -37,8 +37,12 @@ fn multiple_rigs_coexist_with_stable_identity() {
     app.update();
     assert_ne!(a, b);
     let world = app.world();
-    let derived_a = world.get::<woohaa_bevy_canvas::shot_camera::ShotCameraDerived>(a).unwrap();
-    let derived_b = world.get::<woohaa_bevy_canvas::shot_camera::ShotCameraDerived>(b).unwrap();
+    let derived_a = world
+        .get::<woohaa_bevy_canvas::shot_camera::ShotCameraDerived>(a)
+        .unwrap();
+    let derived_b = world
+        .get::<woohaa_bevy_canvas::shot_camera::ShotCameraDerived>(b)
+        .unwrap();
     assert!(derived_a.fov > 0.0 && derived_a.fov < std::f32::consts::PI);
     assert!(derived_b.fov > 0.0 && derived_b.fov < std::f32::consts::PI);
     assert!(world.get::<ShotCameraId>(a).is_some());
@@ -117,7 +121,9 @@ fn removing_preview_component_releases_output() {
     app.update();
     app.update();
     assert!(app.world().get::<ShotPreviewOutput>(entity).is_some());
-    app.world_mut().entity_mut(entity).remove::<ShotCameraPreview>();
+    app.world_mut()
+        .entity_mut(entity)
+        .remove::<ShotCameraPreview>();
     app.update();
     app.update();
     assert!(
@@ -166,7 +172,11 @@ fn despawn_rig_removes_orbit_gizmos() {
     let mut gizmos = app.world_mut().query::<&ShotGizmo>();
     let mut cameras = app.world_mut().query::<&ShotPreviewCamera>();
     assert_eq!(gizmos.iter(app.world()).count(), 0);
-    assert_eq!(cameras.iter(app.world()).count(), 0, "销毁 rig 后窗口预览相机不得继续渲染");
+    assert_eq!(
+        cameras.iter(app.world()).count(),
+        0,
+        "销毁 rig 后窗口预览相机不得继续渲染"
+    );
 }
 
 #[test]
@@ -295,10 +305,22 @@ fn capture_queue_is_bounded_and_per_request() {
         height: 720,
         generation: 1,
     };
-    assert_eq!(queue.enqueue(request(camera_a, 1)), ShotCaptureEnqueue::Accepted);
-    assert_eq!(queue.enqueue(request(camera_b, 2)), ShotCaptureEnqueue::Queued);
-    assert_eq!(queue.enqueue(request(camera_b, 3)), ShotCaptureEnqueue::Queued);
-    assert_eq!(queue.enqueue(request(camera_b, 4)), ShotCaptureEnqueue::Busy);
+    assert_eq!(
+        queue.enqueue(request(camera_a, 1)),
+        ShotCaptureEnqueue::Accepted
+    );
+    assert_eq!(
+        queue.enqueue(request(camera_b, 2)),
+        ShotCaptureEnqueue::Queued
+    );
+    assert_eq!(
+        queue.enqueue(request(camera_b, 3)),
+        ShotCaptureEnqueue::Queued
+    );
+    assert_eq!(
+        queue.enqueue(request(camera_b, 4)),
+        ShotCaptureEnqueue::Busy
+    );
     // 新请求不取消无关 rig 的进行中请求。
     assert_eq!(queue.active.len(), 1);
     assert_eq!(queue.pending.len(), 2);
@@ -360,7 +382,10 @@ fn resolve_matches_hand_computed_default() {
 fn distance_drag_clamps_into_bounds() {
     // 透视 + 下限放开：拉到极近时仍为有限正值（不再卡在 1.2 之外）。
     let clamped = distance_from_drag(10.0, 10_000.0, 600.0, 5.0);
-    assert!(clamped > 0.0 && clamped.is_finite(), "distance 必须为有限正值");
+    assert!(
+        clamped > 0.0 && clamped.is_finite(),
+        "distance 必须为有限正值"
+    );
     assert!(clamped >= 0.01 - 1e-9, "distance 必须落在放开后的下界以上");
 }
 
@@ -389,8 +414,13 @@ fn lens_projection_is_perspective() {
     let projection = lens.projection();
     match projection {
         Projection::Perspective(perspective) => {
-            assert!((perspective.fov - woohaa_bevy_canvas::shot_camera::SHOT_CAMERA_FOV).abs() < 1e-6);
-            assert!(perspective.near > 0.0 && perspective.near < 0.01, "极小固定近裁剪面");
+            assert!(
+                (perspective.fov - woohaa_bevy_canvas::shot_camera::SHOT_CAMERA_FOV).abs() < 1e-6
+            );
+            assert!(
+                perspective.near > 0.0 && perspective.near < 0.01,
+                "极小固定近裁剪面"
+            );
             assert!(perspective.far > perspective.near);
         }
         _ => panic!("shot camera 应为透视投影"),

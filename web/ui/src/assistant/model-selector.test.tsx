@@ -17,3 +17,24 @@ it("a disabled controlled selector cannot open or select stale entries", () => {
   const change = vi.fn(), open = vi.fn(); mount(<AssistantListSelector model="lost" options={[]} open disabled onOpenChange={open} onChange={change} />);
   expect(document.querySelector('[role="menu"]')).toBeNull(); act(() => host.querySelector("button")!.click()); expect(change).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); expect(host.textContent).toContain("lost");
 });
+function typeInto(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  act(() => { setter.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
+}
+it("长模型目录提供搜索，按名称或 provider 过滤并给出无匹配提示", () => {
+  const options = Array.from({ length: 10 }, (_, index) => ({ value: `m${index}`, label: `模型 ${index} (provider-${index % 2})` }));
+  mount(<AssistantModelSelector model="m0" options={options} open onOpenChange={vi.fn()} onChange={vi.fn()} />);
+  const input = document.querySelector<HTMLInputElement>('input[aria-label="搜索模型"]')!;
+  expect(input).not.toBeNull();
+  typeInto(input, "provider-1");
+  const labels = [...document.querySelectorAll(".assistant-model-panel__option")].map(option => option.textContent);
+  expect(labels).toHaveLength(5);
+  expect(labels.every(label => label?.includes("provider-1"))).toBe(true);
+  typeInto(input, "没有这个模型");
+  expect(document.querySelectorAll(".assistant-model-panel__option")).toHaveLength(0);
+  expect(document.body.textContent).toContain("没有匹配的模型");
+});
+it("短列表不显示搜索框", () => {
+  mount(<AssistantModelSelector model="a" options={[{ value: "a", label: "模型 A" }, { value: "b", label: "模型 B" }]} open onOpenChange={vi.fn()} onChange={vi.fn()} />);
+  expect(document.querySelector('input[aria-label="搜索模型"]')).toBeNull();
+});

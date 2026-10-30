@@ -14,7 +14,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { canonicalFilmSetFields, createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, createModelSnapshot, type ServerCanvas } from "@woohaa3/contracts";
+import { createFilmSetGroupMarker, createEmptyWoohaa3ServerCanvas, createModelSnapshot, type ServerCanvas } from "@woohaa3/contracts";
 import type { FilmSetContext as Context } from "../src/integration/browser/context.js";
 import { installFilmSetObjectFeature } from "../src/integration/browser/film-set-object-feature.js";
 
@@ -23,20 +23,20 @@ type Bounds = { itemId: string; center: [number, number, number]; radius: number
 /** 片场画布：`id` 节点为片场，含一个模型对象 `body`。 */
 function filmSetCanvas(id: string): ServerCanvas {
   const base = createEmptyWoohaa3ServerCanvas("c1");
-  const animation = createFilmSetSnapshot({
-    title: `片场 ${id}`,
-    filmSetContent: {
-      schemaVersion: 4,
-      items: [{ id: "body", kind: "model", name: "角色", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, model: createModelSnapshot({ modelScript: `scene.box({id:"body"});`, modelScriptVersion: "woohaa-model-js-v2" }) }]
-    },
-    timeline: { duration: 0, loop: false }
-  });
+  const model = createModelSnapshot({ modelScript: `scene.box({id:"body"});`, modelScriptVersion: "woohaa-model-js-v2" });
   return {
     ...base,
     revision: 1,
-    document: { ...base.document, nodes: [{ id, type: "composite-asset", position: { x: 0, y: 0 }, width: 196, height: 64 }] },
-    nodeData: { [id]: canonicalFilmSetFields(animation) }
-  } as unknown as ServerCanvas;
+    document: { ...base.document, nodes: [
+      { id, type: "group", position: { x: 0, y: 0 }, width: 196, height: 64 },
+      { id: `${id}-source`, type: "model3d", parentId: id, position: { x: 0, y: 0 } },
+    ] },
+    nodeData: {
+      [id]: { filmSetGroup: createFilmSetGroupMarker({ sceneBindings: [{ bindingId: "body", sourceNodeId: `${id}-source`, kind: "model3d", transform: { x: 0, y: 0, z: 0, scale: 1, yaw: 0 }, visibility: true, contentKey: model.contentVersion.contentHash }] }) },
+      [`${id}-source`]: { modelScript: model.modelScript, modelScriptLanguage: model.modelScriptLanguage, modelScriptVersion: model.modelScriptVersion, modelContentVersion: model.contentVersion, modelPlacement: model.placement },
+    }
+  };
+
 }
 
 function fixture() {

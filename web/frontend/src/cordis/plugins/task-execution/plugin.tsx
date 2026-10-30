@@ -1,3 +1,4 @@
+import { isFilmSetGroupNode } from "@woohaa3/contracts";
 import { resolveTextSubmission } from "../../services/assistant-execution/text-submission.js";
 /**
  * Task Execution Plugin（change: adopt-frontend-cordis-plugin-runtime，design D5/D6；
@@ -371,7 +372,12 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         id: GROUP_BULK_ACTION_ID,
         owner: TASK_EXECUTION_PLUGIN_ID,
         order: -20,
-        available: ({ nodeType }) => nodeType === "group",
+        available: ({ nodeId, nodeType }) => {
+          if (nodeType !== "group") return false;
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
+          const node = canvas?.document.nodes.find(entry => entry.id === nodeId);
+          return !!node && !isFilmSetGroupNode(node, canvas?.nodeData?.[nodeId]);
+        },
         describe: ({ nodeId }) => resolveGroupBulkDescriptor({
           preview: groupRun.preview(nodeId),
           submitting: groupRun.isSubmitting(nodeId)
@@ -538,7 +544,7 @@ function resolvePanelNodeType(nodeId: string): string | null {
 function resolveIsFilmSetNode(nodeId: string): boolean {
   const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
   const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-  return isFilmSetNode(node?.type, canvas?.nodeData?.[nodeId]);
+  return isFilmSetGroupNode(node, canvas?.nodeData?.[nodeId]);
 }
 
 

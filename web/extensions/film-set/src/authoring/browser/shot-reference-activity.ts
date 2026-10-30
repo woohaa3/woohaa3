@@ -15,7 +15,7 @@
  * 纯类：不 import DOM/Zustand/画布，可在 node 环境直接单测。
  */
 import type { BackgroundActivityJob } from "@woohaa3/contracts";
-import type { ShotReferenceRecordingJob } from "./shot-reference-recording-queue.js";
+import { shotReferenceJobKey, type ShotReferenceRecordingJob } from "./shot-reference-recording-queue.js";
 
 export type ShotReferenceActivityDeps = {
   /** 主行标题（调用方从画布解析片场/镜头名；缺失回退「镜头参考」）。 */
@@ -33,6 +33,8 @@ export class ShotReferenceActivity {
   private readonly identities = new Map<string, string>();
   private readonly buckets = new Map<string, number>();
   private readonly running = new Set<string>();
+  /** 尝试 id → 调度器 job key（`canvasId\0filmSetNodeId\0clipId`），用于识别仍在进行中的录制。 */
+  private readonly jobKeys = new Map<string, string>();
 
   constructor(
     private readonly deps: ShotReferenceActivityDeps,
@@ -86,8 +88,13 @@ export class ShotReferenceActivity {
   /**
    * 把调度器的 dirty 集投影成 `queued`，并把已不在 dirty、也并非在录的旧排队项标为
    * `cancelled`。失败项在内容身份未变时保留失败态（退避重试前不闪烁）。
+   *
+   * `inflight` 是调度器仍在执行中的 job key：录制成功后发布资产会先让 job 离开 dirty 集，
+   * 此时若直接按「不在 dirty」判定取消，面板会显示「取消」而录制其实已经成功（`finish`
+   * 随后会把它改回 `succeeded`），所以进行中的 job 一律不取消。
    */
-  syncQueued(dirty: readonly ShotReferenceRecordingJob[]): void {
+  syncQueued(dirty: readonly ShotReferenceRecordingJob[], inflight: readonly string[] = []): void {
+    const inFlight = new Set(inflight);
     const dirtyIds = new Set<string>();
     for (const job of dirty) {
       const key = ShotReferenceActivity.id(job);
@@ -106,6 +113,7 @@ export class ShotReferenceActivity {
     }
     for (const record of [...this.jobs.values()]) {
       if ((record.status !== "queued" && record.status !== "running") || dirtyIds.has(record.id)) continue;
+      if (inFlight.has(this.jobKeys.get(record.id) ?? "")) continue;
       this.running.delete(record.id);
       const next: BackgroundActivityJob = { ...record, status: "cancelled", updatedAt: this.now() };
       this.jobs.set(next.id, next);
@@ -119,6 +127,7 @@ export class ShotReferenceActivity {
     extra: { progress?: number; detail?: string } = {}
   ): void {
     const id = this.current.get(ShotReferenceActivity.id(job))!;
+    this.jobKeys.set(id, shotReferenceJobKey(job));
     const record: BackgroundActivityJob = {
       id,
       canvasId: job.canvasId,

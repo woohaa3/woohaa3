@@ -16,10 +16,10 @@ import { v2SceneExtent, v2SceneAabb, type SceneV2Op } from "./scene-ir-v2.js";
 import type { Aabb } from "./model-transform.js";
 
 const cache = new WeakMap<readonly SceneV2Op[], { key: string; bounds: Aabb | null }>();
-export function filmSetLayoutBounds(ops: readonly SceneV2Op[], content: FilmSetContent, contentExtent = v2SceneExtent(ops)): Aabb | null {
+export function filmSetLayoutBounds(ops: readonly SceneV2Op[], content: FilmSetContent, contentExtent = v2SceneExtent(ops), includeMediaScale = false): Aabb | null {
   const items = content.items.filter(item => item.kind === "model" || item.kind === "ground");
   const media = content.items.filter(item => item.kind === "image" || item.kind === "video");
-  const key = JSON.stringify([contentExtent, items.map(item => [item.id, item.localTransform]), media.map(item => [item.id, item.localTransform, (item as { aspectRatio?: number }).aspectRatio])]);
+  const key = JSON.stringify([contentExtent, includeMediaScale, items.map(item => [item.id, item.localTransform]), media.map(item => [item.id, item.localTransform, (item as { aspectRatio?: number }).aspectRatio])]);
   const cached = cache.get(ops);
   if (cached?.key === key) return cached.bounds;
   const placements = new Map(items.map(item => [encodeFilmSetPartId(item.id, ""), item.localTransform]));
@@ -35,7 +35,7 @@ export function filmSetLayoutBounds(ops: readonly SceneV2Op[], content: FilmSetC
   const yaw = (scene?.rotation?.[1] ?? 0) * Math.PI / 180, cos = Math.cos(yaw), sin = Math.sin(yaw);
   for (const item of media) {
     // 基准高度不含 `localTransform.scale`：对象缩放不参与 fit 基准，保持可见。
-    const height = 48 * contentExtent / 192, width = height * ((item as { aspectRatio?: number }).aspectRatio ?? 1);
+    const height = 48 * contentExtent / 192 * (includeMediaScale ? item.localTransform.scale : 1), width = height * ((item as { aspectRatio?: number }).aspectRatio ?? 1);
     const itemCos = Math.cos(item.localTransform.yaw), itemSin = Math.sin(item.localTransform.yaw);
     for (const x of [-width / 2, width / 2]) for (const y of [0, height]) {
       const ix = item.localTransform.offset.x + x * itemCos;

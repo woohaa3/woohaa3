@@ -1,87 +1,47 @@
+import { projectFilmSetCapture } from "../../state/browser/capture-snapshot.js";
 import { filmSetMediaSources } from "./media-sources.js";
-import { createFilmSetObjectResolver, decodeFilmSetNodeData, resolveFilmSetObject, filmSetObjectOwnershipOf, shotReferenceOwnershipOf, shotPreviewNodeId, filmSetAnimationsOf, isFilmSetNode, DEFAULT_FILM_SET_LOCAL_TRANSFORM, type ServerCanvas, type CanvasNodeData } from "@woohaa3/contracts";
+import { shotPreviewNodeId,  isFilmSetGroupNode, readFilmSetGroupMarker,  type ServerCanvas, type CanvasNodeData } from "@woohaa3/contracts";
 import type { CompositeAssetAdapter, CompositeChildPresentation } from "@woohaa3/frontend/extension-api";
-import { buildFilmSetComposition } from "../shared/composition.js";
 import { HistoryFilmSetSnapshots } from "./history-preview.js";
 import { FILM_SET_EXTENSION_ID } from "../../state/shared/identity.js";
 import { projectManagedShotMediaCanvas } from "./managed-shot-media-projection.js";
 import { filmSetManagedLifecycle } from "../../state/shared/managed-shot-media-lifecycle.js";
 
-/**
- * Geometry identity excludes local transforms and animation clocks, which use frame projections.
- *
- * The film set's own model is its `filmSetContent.items` composition: `groupAppearance` belongs to
- * ordinary groups and is neither read nor hashed here.
- */
-export function filmSetExecutionKey(data: CanvasNodeData): string {
-  const decoded = decodeFilmSetNodeData(data);
-  if (!decoded.ok) return "film-set:invalid";
-  return JSON.stringify([decoded.value.scenePlacement, decoded.value.filmSetContent.items.map(item => {
-    switch (item.kind) {
-      case "model": return [item.id, item.kind, item.model.contentVersion.contentHash, item.model.placement];
-      case "ground": return [item.id, item.kind, item.size, item.color];
-      default: return [item.id, item.kind, item.assetId, item.aspectRatio];
-    }
-  })]);
-}
-export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(), canvas: () => ServerCanvas | null = () => null, feedback: (nodeId: string) => string | undefined = () => undefined): CompositeAssetAdapter {
-  const object = (id: string) => { const current = canvas(); return current ? resolveFilmSetObject(current, id) : null; };
+/** Adapter identity contains orchestration only; geometry preparation reads the resource cards. */
+export function filmSetExecutionKey(data: CanvasNodeData): string { return JSON.stringify(readFilmSetGroupMarker(data)); }
+export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(), canvas: () => ServerCanvas | null = () => null, _feedback: (nodeId: string) => string | undefined = () => undefined, captureOwner?: object): CompositeAssetAdapter {
+  const project = (current: ServerCanvas) => projectManagedShotMediaCanvas(captureOwner ? projectFilmSetCapture(captureOwner, history.project(current)!) : history.project(current)!);
   return {
     extensionId: FILM_SET_EXTENSION_ID, owner: FILM_SET_EXTENSION_ID,
     managedLifecycle: filmSetManagedLifecycle,
+    /** Group-owned badges use the same trusted overview primitive LOD declaration as the old composite node. */
+    geometryQuality: "overview-primitives-v1",
+    /**
+     * 总览纹理缓存：片场组把稳定画面缓存为透明纹理，其他 group 缺省不声明即逐帧实时。
+     * 声明只承载呈现策略，不进入 executionKey、内容 hash 或持久 DTO
+     * （change: 2026-10-29-cache-film-set-overview-textures）。
+     */
+    overviewCache: "transparent-world-v1",
+    matchesNode: (node, data) => isFilmSetGroupNode(node, data),
     children(current, ownerNodeId) {
       const owner = current.document.nodes.find(node => node.id === ownerNodeId);
-      if (!isFilmSetNode(owner?.type, current.nodeData[ownerNodeId])) return [];
-      const children: CompositeChildPresentation[] = [];
-      const resolve = createFilmSetObjectResolver(current);
-      for (const node of current.document.nodes) {
-        const target = resolve(node.id);
-        // The model3d child is physically nested under its outer object container;
-        // only the outer container participates in composite-child movement links.
-        if (target && node.type === "model3d") continue;
-        if (target?.owner.filmSetNodeId === ownerNodeId) children.push({ nodeId: node.id, ownerNodeId, kind: "container", role: "object-entry", focusOwner: true, closable: true, sourceItemId: target.item.id,
-          panel: { title: target.item.name, hint: feedback(node.id) } });
-        else {
-          const shot = shotReferenceOwnershipOf(current.nodeData[node.id]);
-          if (shot?.filmSetNodeId === ownerNodeId && node.id === shotPreviewNodeId(ownerNodeId, shot.clipId) && (() => { const decoded = decodeFilmSetNodeData(current.nodeData[ownerNodeId]); return decoded.ok && filmSetAnimationsOf(decoded.value).clips.some(clip => clip.id === shot.clipId); })()) children.push({ nodeId: node.id, ownerNodeId, kind: "entity", role: "preview" });
-        }
+      if (owner?.type === "group" && isFilmSetGroupNode(owner, current.nodeData[ownerNodeId])) {
+        const marker = readFilmSetGroupMarker(current.nodeData[ownerNodeId]);
+        return (marker?.clips ?? []).flatMap(clip => {
+          const previewId = shotPreviewNodeId(ownerNodeId, clip.id);
+          return current.document.nodes.some(node => node.id === previewId)
+            ? [{ nodeId: previewId, ownerNodeId, kind: "entity", role: "preview" } satisfies CompositeChildPresentation]
+            : [];
+        });
       }
-      return children;
+      return [];
     },
-    // 总览 primitive LOD：片场按世界投影尺寸选择整场图元细分。声明只承载呈现策略，不进入
-    // executionKey/内容 hash 或持久 DTO；普通卡片、炉体、第三方缺省不声明即保持 High
-    // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
-    emptyPlaceholder: "brand-plinth-v1",
-    showEmptyPlaceholder(_id, data) {
-      if (!isFilmSetNode("composite-asset", data) || data.filmSetObject !== undefined || data.shotPreview !== undefined) return false;
-      const decoded = decodeFilmSetNodeData(data);
-      return decoded.ok && decoded.value.filmSetContent.items.length === 0;
-    },
-    geometryQuality: "overview-primitives-v1",
-    scopeShapeForNode: (_id, data) => filmSetObjectOwnershipOf(data) ? "rect" : undefined,
-    executionKey: (data, id) => {
-      if (!filmSetObjectOwnershipOf(data)) return filmSetExecutionKey(data);
-      const target = id ? object(id) : null;
-      return JSON.stringify([data.filmSetObject, target?.item]);
-    },
-    mediaSources: (id, data, playback) => filmSetObjectOwnershipOf(data) ? [] : filmSetMediaSources(id, data, playback),
-    projectCanvas: canvas => projectManagedShotMediaCanvas(history.project(canvas)!),
+    executionKey: filmSetExecutionKey,
+    mediaSources: (id, data, playback) => readFilmSetGroupMarker(data) ? filmSetMediaSources(id, data, playback, canvas() ? project(canvas()!) : null) : [],
+    projectCanvas: project,
     history: (nodeId, detail) => { if (!detail) { history.clear(nodeId); return true; } return history.set(nodeId, detail); },
-    historyProjection: nodeId => { const record = history.get(nodeId); return record ? { resource: record.composition.resource, composition: record.composition } : null; },
-    prepare(nodeId, data) {
-      if (filmSetObjectOwnershipOf(data)) {
-        const target = object(nodeId);
-        if (!target) return null;
-        const animation = { ...target.animation, scenePlacement: DEFAULT_FILM_SET_LOCAL_TRANSFORM,
-          filmSetContent: { ...target.animation.filmSetContent, items: [{ ...target.item, localTransform: DEFAULT_FILM_SET_LOCAL_TRANSFORM }] } };
-        const result = buildFilmSetComposition({ nodeId, animation });
-        return { resource: result.resource, composition: { itemRoots: result.itemRoots, failures: result.failures } };
-      }
-      const decoded = decodeFilmSetNodeData(data);
-      if (!decoded.ok) return null;
-      const result = buildFilmSetComposition({ nodeId, animation: decoded.value });
-      return { resource: result.resource, composition: { itemRoots: result.itemRoots, failures: result.failures },
-        ...(result.failures.length ? { diagnostic: result.failures.map(entry => `${entry.itemId}=${entry.diagnostic}`).join(",") } : {}) };
-    }
+    historyProjection: () => null,
+    // Canonical group geometry belongs to the node preparation capability.
+    prepare() { return null; }
   };
 }

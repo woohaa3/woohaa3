@@ -10,19 +10,25 @@
  */
 import {
   bevyNodeSize,
+  createFilmSetGroupMarker,
   createHighEntropyId,
   createWoohaa3CanvasNodeId,
   COMPOSITE_ASSET_DEFAULT_SIZE,
   getWoohaa3CanvasNodeAbsolutePosition,
   getWoohaa3CanvasNodeRect,
+  groupPadding,
   groupWoohaa3CanvasNodes,
   isPureModelNodeType,
   isValidWoohaa3CanvasConnection,
+  readFilmSetGroupMarker,
+  readNodeHeight,
+  readNodeWidth,
   refitWoohaa3CanvasGroups,
   sortNodesParentsFirst,
   ungroupWoohaa3CanvasNodes,
   type CanvasCommand,
   type CanvasNodeData,
+  type ServerCanvas,
   type Woohaa3CanvasEdge,
   type Woohaa3CanvasJsonObject,
   type Woohaa3CanvasNode,
@@ -260,6 +266,64 @@ export function planGroupedNodeUpdate(
   return planGroupStructureChange(nodes, next);
 }
 
+function isDescendantIn(nodes: ReadonlyMap<string, Woohaa3CanvasNode>, nodeId: string, ancestorId: string): boolean {
+  const seen = new Set<string>();
+  let current = nodes.get(nodeId);
+  while (current?.parentId) {
+    if (current.parentId === ancestorId) return true;
+    if (seen.has(current.parentId)) return false;
+    seen.add(current.parentId);
+    current = nodes.get(current.parentId);
+  }
+  return false;
+}
+
+/**
+ * 片场成员拖出/拖回 → binding 的软摘除状态补丁（change 见 film-set-group 的 detached 约定）。
+ *
+ * 拖出时只改变 `parentId`，不复制或删除卡片；这里在同一批次把片场 binding 标为
+ * `detached`，让对象与动作脚本留在片场但不参与渲染/镜头。拖回时清除标记，原动作恢复。
+ * 只有原本属于该片场的 binding 才会被切换，伪造的外部来源仍由 reducer 拒绝。
+ */
+export function planFilmSetMembershipCommands(
+  canvas: Pick<ServerCanvas, "document" | "nodeData">,
+  before: readonly Woohaa3CanvasNode[],
+  after: readonly Woohaa3CanvasNode[]
+): CanvasCommand[] {
+  const beforeById = new Map(before.map(node => [node.id, node]));
+  const afterById = new Map(after.map(node => [node.id, node]));
+  const commands: CanvasCommand[] = [];
+  for (const group of after) {
+    if (group.type !== "group") continue;
+    const marker = readFilmSetGroupMarker(canvas.nodeData[group.id]);
+    if (!marker) continue;
+    let changed = false;
+    const sceneBindings = marker.sceneBindings.map(binding => {
+      const source = afterById.get(binding.sourceNodeId) ?? beforeById.get(binding.sourceNodeId);
+      if (!source) return binding;
+      const wasInside = isDescendantIn(beforeById, source.id, group.id);
+      const isInside = isDescendantIn(afterById, source.id, group.id);
+      if (wasInside && !isInside && binding.detached !== true) {
+        changed = true;
+        return { ...binding, detached: true };
+      }
+      if (isInside && binding.detached === true) {
+        changed = true;
+        const { detached: _detached, ...active } = binding;
+        return active;
+      }
+      return binding;
+    });
+    if (!changed) continue;
+    commands.push({
+      type: "nodeData.patch",
+      nodeId: group.id,
+      value: { filmSetGroup: createFilmSetGroupMarker({ ...marker, sceneBindings }) }
+    });
+  }
+  return commands;
+}
+
 /** 让指定 group 贴合其直接成员 → 单批次结构更新。 */
 export function planRefitGroups(
   nodes: readonly Woohaa3CanvasNode[],
@@ -386,4 +450,95 @@ export function planTidyGroup(
   });
   const refit = refitWoohaa3CanvasGroups(rewrapped, [groupId]);
   return planGroupStructureChange(nodes, refit.changed ? refit.nodes : rewrapped);
+}
+
+/** 组内排列方式（横条上的图标按钮）。 */
+export type GroupArrangementKind = "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down";
+
+/** 排列时相邻成员之间留出的画布间距；与「整理」的行列密度接近，避免成员贴在一起。 */
+export const GROUP_ARRANGE_GAP = 24;
+
+/**
+ * 排列 group 的**直接成员**（横条上的「横排 / 竖排 / 宫格 / 斜排」图标动作）。
+ *
+ * - `arrange-horizontal`：单行，从左到右；
+ * - `arrange-vertical`：单列，从上到下；
+ * - `arrange-grid`：接近正方形的宫格，行优先；
+ * - `arrange-diagonal-down`：单行阶梯，向右下（↘）展开；
+ * - `arrange-diagonal-up`：单行阶梯，向右上（↗）展开。
+ *
+ * 成员顺序优先沿用画布上的视觉顺序：横排与斜排按 x/y 排序，竖排与宫格按 y/x 排序，
+ * 同一位置再用 id 保证确定性。位置写回 group 的局部坐标，随后用与整理相同的
+ * `refitWoohaa3CanvasGroups` 收紧/扩展容器；组外节点不受影响。
+ */
+export function planArrangeGroupChildren(
+  nodes: readonly Woohaa3CanvasNode[],
+  groupId: string,
+  arrangement: GroupArrangementKind
+): CanvasCommand[] {
+  const group = nodes.find((node) => node.id === groupId && node.type === "group");
+  if (!group) return [];
+  const children = nodes.filter((node) => node.parentId === groupId);
+  if (children.length === 0) return [];
+
+  const ordered = [...children];
+  const byRow = arrangement === "arrange-vertical" || arrangement === "arrange-grid";
+  ordered.sort((a, b) => byRow
+    ? a.position.y - b.position.y || a.position.x - b.position.x || a.id.localeCompare(b.id)
+    : a.position.x - b.position.x || a.position.y - b.position.y || a.id.localeCompare(b.id));
+
+  const sizes = new Map(children.map((child) => [child.id, {
+    width: readNodeWidth(child),
+    height: readNodeHeight(child)
+  }]));
+  const padding = groupPadding;
+  const positions = new Map<string, { x: number; y: number }>();
+
+  if (arrangement === "arrange-horizontal" || arrangement === "arrange-vertical") {
+    let cursor = padding;
+    for (const child of ordered) {
+      const size = sizes.get(child.id)!;
+      if (arrangement === "arrange-horizontal") {
+        positions.set(child.id, { x: cursor, y: padding });
+        cursor += size.width + GROUP_ARRANGE_GAP;
+      } else {
+        positions.set(child.id, { x: padding, y: cursor });
+        cursor += size.height + GROUP_ARRANGE_GAP;
+      }
+    }
+  } else if (arrangement === "arrange-grid") {
+    const columns = Math.max(1, Math.ceil(Math.sqrt(ordered.length)));
+    const cellWidth = Math.max(...ordered.map((child) => sizes.get(child.id)!.width));
+    const cellHeight = Math.max(...ordered.map((child) => sizes.get(child.id)!.height));
+    ordered.forEach((child, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      positions.set(child.id, {
+        x: padding + column * (cellWidth + GROUP_ARRANGE_GAP),
+        y: padding + row * (cellHeight + GROUP_ARRANGE_GAP)
+      });
+    });
+  } else {
+    // 斜排：x 始终向右累计；向下直接累计高度，向上把整条阶梯翻转，使最左成员落在底部。
+    const totalHeight = ordered.reduce((sum, child) => sum + sizes.get(child.id)!.height, 0)
+      + GROUP_ARRANGE_GAP * (ordered.length - 1);
+    let x = padding;
+    let cumulativeBottom = 0;
+    for (const child of ordered) {
+      const size = sizes.get(child.id)!;
+      const y = arrangement === "arrange-diagonal-down"
+        ? padding + cumulativeBottom
+        : padding + totalHeight - (cumulativeBottom + size.height);
+      positions.set(child.id, { x, y });
+      x += size.width + GROUP_ARRANGE_GAP;
+      cumulativeBottom += size.height + GROUP_ARRANGE_GAP;
+    }
+  }
+
+  const moved = nodes.map((node) => {
+    const next = positions.get(node.id);
+    return next ? { ...node, position: { ...next } } : node;
+  });
+  const refit = refitWoohaa3CanvasGroups(moved, [groupId]);
+  return planGroupStructureChange(nodes, refit.changed ? refit.nodes : moved);
 }

@@ -9,7 +9,7 @@ import { FilmSetObjectToolbar } from "../src/authoring/browser/film-set-object-t
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | null = null;
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; });
-function setup(writable = true, action?: FilmSetObjectAction, onExit?: () => void, onContainerVisibilityChange?: (itemId: string, visible: boolean) => void) {
+function setup(writable = true, action?: FilmSetObjectAction, onExit?: () => void) {
   const content: FilmSetContent = { schemaVersion: 4, items: [{ id: "photo", name: "照片", kind: "image", assetId: "asset", aspectRatio: 1.5, localTransform: { offset: { x: 1, y: 2, z: 3 }, scale: 1, yaw: 0 } }] };
   const submitted: FilmSetItemPatchOp[] = [];
   const session = new FilmSetObjectSession({ readContent: () => content, isWritable: () => writable, submitItemOp: ({ op }) => {
@@ -18,7 +18,7 @@ function setup(writable = true, action?: FilmSetObjectAction, onExit?: () => voi
   } });
   session.enter("film"); session.select("photo");
   const element = document.createElement("div"); document.body.appendChild(element); root = createRoot(element);
-  act(() => root!.render(<FilmSetObjectToolbar session={session} nodeId="film" writable={writable} readOnly={false} onDelete={() => session.deleteSelected()} {...(action ? { action } : {})} {...(onExit ? { onExit } : {})} {...(onContainerVisibilityChange ? { onContainerVisibilityChange } : {})} />));
+  act(() => root!.render(<FilmSetObjectToolbar session={session} nodeId="film" writable={writable} readOnly={false} onDelete={() => session.deleteSelected()} {...(action ? { action } : {})} {...(onExit ? { onExit } : {})} />));
   return { session, submitted, content };
 }
 const input = (label: string) => document.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement;
@@ -82,7 +82,7 @@ it("注入 action 时删除按钮与键盘共用 action.deleteSelected（任务 
   };
   setup(true, action);
   // 按钮路径：点击「删除对象」经 action 而非直接 onDelete。
-  const del = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("删除对象")) as HTMLButtonElement;
+  const del = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("从片场移除")) as HTMLButtonElement;
   act(() => del.click());
   expect(calls.delete).toBe(1);
   // 键盘路径：列表内 Delete 走同一 action。
@@ -184,32 +184,9 @@ it("列表内 Escape repeat 不推进层级（任务 5.3）", () => {
 });
 
 
-it("对象容器默认显示，列表可关闭且不要求先选择对象", () => {
-  const exposed: [string, boolean][] = [];
-  const h = setup(true, undefined, undefined, (id, visible) => exposed.push([id, visible]));
-  act(() => h.session.select(null));
-  const button = [...document.querySelectorAll("button")].find(element => element.textContent === "关闭容器")!;
-  expect(button).toBeDefined();
-  expect(button.disabled).toBe(false);
-  act(() => button.click());
-  expect(exposed).toEqual([["photo", false]]);
-});
-
-
-it("外显满六个时关闭按钮仍可用，隐藏对象的显示按钮禁用并说明原因", () => {
-  const h = setup();
-  const first = h.content.items[0];
-  h.content.items = Array.from({ length: 8 }, (_, i) => ({ ...structuredClone(first), id: `object-${i}` }));
-  const changes: unknown[] = [];
-  const render = (hiddenContainerIds: string[]) => act(() => root!.render(<FilmSetObjectToolbar session={h.session} nodeId="film" writable readOnly={false} onDelete={() => {}} hiddenContainerIds={hiddenContainerIds} onContainerVisibilityChange={(...args) => changes.push(args)} />));
-  render(["object-6", "object-7"]);
-  const buttons = () => [...document.querySelectorAll<HTMLButtonElement>(".film-set-object-list__item > button:last-child")];
-  expect(document.body.textContent).toContain("外显 6/6");
-  expect(buttons().slice(0, 6).every(button => !button.disabled && button.textContent === "关闭容器")).toBe(true);
-  expect(buttons().slice(6).every(button => button.disabled && button.title.includes("最多外显 6 个对象"))).toBe(true);
-  render(["object-0", "object-6", "object-7"]);
-  expect(document.body.textContent).toContain("外显 5/6");
-  expect(buttons()[6].disabled).toBe(false);
-  act(() => buttons()[6].click());
-  expect(changes).toEqual([["object-6", true]]);
+it("对象列表不再提供浮出容器入口", () => {
+  setup();
+  expect(document.body.textContent).not.toContain("关闭容器");
+  expect(document.body.textContent).not.toContain("显示容器");
+  expect(document.body.textContent).not.toContain("外显");
 });

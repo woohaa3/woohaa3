@@ -30,3 +30,24 @@ it.each(["context-only", "missing-up", "normal-up", "pan", "cancel"])(
     controller.dispose();
   }
 );
+
+it("opens the same blank menu as right-click on blank double click, but not on a node", () => {
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvasWith([{ id: "n1", x: 0, y: 0 }]));
+  const dom = harness();
+  const { runtime } = runtimeCapturing();
+  const opened: Array<{ screen: { x: number; y: number }; node: { nodeId: string } | null }> = [];
+  const controller = installInteractionController({
+    canvas: dom.canvas, target: dom.target as never,
+    getRuntime: () => runtime, getSession: () => getSession() as never,
+    onContextMenu: request => opened.push(request)
+  });
+  // 空白处：与空白右键同一请求（屏幕坐标 + 世界坐标 + 无节点）。
+  dom.fire("dblclick", { clientX: 400, clientY: 300 });
+  expect(opened).toHaveLength(1);
+  expect(opened[0]).toMatchObject({ screen: { x: 400, y: 300 }, node: null });
+  // 命中节点时保持既有双击语义，不弹节点菜单。
+  dom.fire("dblclick", { clientX: 20, clientY: 20 });
+  expect(opened).toHaveLength(1);
+  controller.dispose();
+});
+

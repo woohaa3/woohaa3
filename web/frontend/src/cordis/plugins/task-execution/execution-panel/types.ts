@@ -217,13 +217,15 @@ export interface ExecutionPanelProps {
 	statusSlot?: React.ReactNode;
 	/**
 	 * 结构化 prompt editor 插槽（change: add-reference-inputs-and-mentions，任务 4.4）。
-	 * 提供时替换缺省 textarea；契约与 textarea 相同（value/onChange/disabled/placeholder）。
+	 * 提供时替换缺省 textarea；契约与 textarea 相同（value/onChange/disabled/placeholder），
+	 * 并接收面板的 `onSubmit` 以保持 Enter 生成、Shift+Enter 换行。
 	 */
 	promptEditorSlot?: (args: {
 		value: string;
 		onChange: (next: string) => void;
 		disabled: boolean;
 		placeholder: string;
+		onSubmit?: () => void;
 	}) => React.ReactNode;
 	/** 删除视频编辑意图。 */
 	onRemoveVideoEditIntent?: (id: string) => void;

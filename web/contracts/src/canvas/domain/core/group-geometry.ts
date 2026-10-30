@@ -39,6 +39,24 @@ function requiredSize(children: LayoutNode[], sizeOf: (node: LayoutNode) => Layo
   };
 }
 
+/**
+ * 成员**完全在框内**的硬下限：左右/上不预留装饰留白，只保留底部页脚（徽标间隔）。
+ *
+ * 渲染投影用它而非 {@link requiredSize}：用户拖框边缩小气泡时成员保持画布绝对位置，
+ * 框可以一直收到贴住成员；手工缩小后的尺寸不会被「成员 + 左右留白」重新撑回去。
+ * 新建/自动适配仍用 `requiredSize` 留出留白（见 {@link getGroupRequiredMinSize}）。
+ */
+function contentSize(children: LayoutNode[], sizeOf: (node: LayoutNode) => LayoutSize) {
+  if (!children.length) return { minWidth: DEFAULT_NODE_DIMS.width, minHeight: DEFAULT_NODE_DIMS.height };
+  const right = Math.max(...children.map(child => child.position.x + sizeOf(child).width));
+  const bottom = Math.max(...children.map(child => child.position.y + sizeOf(child).height));
+  return {
+    minWidth: Math.max(DEFAULT_NODE_DIMS.width, right),
+    // 底部页脚（徽标与成员之间的间隔）仍保留；左右/上不再预留装饰留白。
+    minHeight: Math.max(DEFAULT_NODE_DIMS.height, bottom + groupBottomPadding)
+  };
+}
+
 /** Current group display sizes, including existing documents and nested/resizing members.
  * Pure projection: reserve the footer without moving members or silently rewriting stored nodes.
  */
@@ -54,9 +72,18 @@ export function getGroupLayoutSizes(nodes: readonly LayoutNode[], overrides?: Re
     const cached = sizes.get(node.id); if (cached) return cached;
     const size = effectiveCanvasNodeSize(node, overrides?.get(node.id));
     if (node.type !== "group" || visiting.has(node.id)) return size;
+    // 交互缩放预览的尺寸由手势自行 clamp（`resizeTarget` 按拖动方向贴住成员），
+    // 投影不得再用成员尺寸把它顶回去，否则拖小后的组框会闪回。
+    if (overrides?.has(node.id)) { sizes.set(node.id, size); return size; }
     visiting.add(node.id);
     const members = children.get(node.id) ?? [];
-    const min = members.length ? requiredSize(members, sizeOf) : { minWidth: size.width, minHeight: size.height };
+    // 手工缩小后的组框没有留白，成员仍完全在框内，必须按存储尺寸渲染，否则会被「成员 + 留白」
+    // 重新撑回去。只有存储尺寸装不下成员（历史数据/成员外溢）时才按带留白的最小尺寸修复。
+    const content = members.length ? contentSize(members, sizeOf) : { minWidth: size.width, minHeight: size.height };
+    const contained = size.width >= content.minWidth && size.height >= content.minHeight;
+    const min = contained || !members.length
+      ? content
+      : requiredSize(members, sizeOf);
     const result = { width: Math.max(size.width, min.minWidth), height: Math.max(size.height, min.minHeight) };
     visiting.delete(node.id); sizes.set(node.id, result); return result;
   };
@@ -94,9 +121,9 @@ export function getNodeBounds(nodes: Woohaa3CanvasNode[]) {
 }
 
 /** 计算节点绝对画布坐标（含 group parentId 偏移），供工具条包围盒定位使用 */
-export function getWoohaa3CanvasNodeAbsolutePosition(
-  node: Woohaa3CanvasNode,
-  nodeById: Map<string, Woohaa3CanvasNode>
+export function getWoohaa3CanvasNodeAbsolutePosition<T extends Pick<Woohaa3CanvasNode, "position" | "parentId">>(
+  node: T,
+  nodeById: ReadonlyMap<string, Pick<Woohaa3CanvasNode, "position" | "parentId">>
 ): { x: number; y: number } {
   let x = node.position.x;
   let y = node.position.y;

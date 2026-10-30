@@ -9,9 +9,9 @@ mod plan;
 pub(crate) use lifecycle::{
     ModelCanvasCamera, setup, setup_camera, sync_camera, sync_target, sync_theme,
 };
-pub(crate) use plan::{scene_view, view_rotation};
 #[cfg(test)]
 pub(crate) use plan::grid_view;
+pub(crate) use plan::{scene_view, view_rotation};
 
 // 测试面：仅供 `grid::tests` 通过 `super::*` 访问。
 #[cfg(test)]

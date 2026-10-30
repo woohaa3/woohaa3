@@ -16,15 +16,15 @@ use std::collections::HashMap;
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
 use crate::app::{CurrentScene, NodeIndex};
-use crate::canvas_ecs::components::{CanvasLabelRole, CanvasNodeId};
+use crate::canvas_ecs::components::{CanvasDepth, CanvasLabelRole, CanvasLayout, CanvasNodeId, NodeActionBar, NodeActionLayer};
 use crate::protocol::{GraphNode, NodeActions};
 use crate::theme::ThemeResource;
 
-use super::Visuals;
 use super::geometry::Geometry;
 use super::labels::{Label, LabelRequests, LabelStyle};
 use super::layout::{
-    NODE_ACTION_TOOLBAR_FONT, NODE_ACTION_TOOLBAR_ACTION_HEIGHT, NODE_ACTION_TOOLBAR_PAD,
+    NODE_ACTION_TOOLBAR_ACTION_HEIGHT, NODE_ACTION_TOOLBAR_ACTION_PAD, NODE_ACTION_TOOLBAR_FONT,
+    NODE_ACTION_TOOLBAR_ICON_GAP, NODE_ACTION_TOOLBAR_ICON_SIZE, NODE_ACTION_TOOLBAR_PAD,
     node_action_toolbar,
 };
 
@@ -59,10 +59,8 @@ pub(crate) fn draw(
 
     let mut out = Vec::new();
     for (entity, node) in nodes {
-        // group 使用独立选区横条；复合资产可声明自己的操作（与命中快照同源）。
-        if node.group.is_some() {
-            continue;
-        }
+        // 容器（片场）与普通节点共用同一条动作横条；是否绘制由 `action_bar_visible` 决定
+        // （只有声明 `actionBar` 的容器才带 NodeActionBar 组件）。
         let Some(actions) = node_actions.get(&node.id) else {
             continue;
         };
@@ -90,16 +88,141 @@ pub(crate) fn draw(
                 let fill = if slot.enabled { accent } else { theme.token_u32("interactionDisabled") };
                 geometry.rounded_rect(ax, ay, aw, ah, ACTION_RADIUS * scale, z + 0.002, fill);
             }
-            if slot.icon.as_deref() == Some("download") {
-                let center = Vec2::new(ax + aw / 2.0, ay + ah / 2.0);
+            if let Some(icon) = slot.icon.as_deref().filter(|icon| {
+                matches!(
+                    *icon,
+                    "download"
+                        | "edit"
+                        | "arrange-horizontal"
+                        | "arrange-vertical"
+                        | "arrange-grid"
+                        | "arrange-diagonal-up"
+                        | "arrange-diagonal-down"
+                        | "collapse-groups"
+                        | "expand-groups"
+                )
+            }) {
+                // 纯图标按钮居中；图标 + 文字时图标贴左，文字紧随其后（与 contracts 同一栅格）。
+                let center = if slot.icon_only {
+                    Vec2::new(ax + aw / 2.0, ay + ah / 2.0)
+                } else {
+                    Vec2::new(
+                        ax + (NODE_ACTION_TOOLBAR_ACTION_PAD + NODE_ACTION_TOOLBAR_ICON_SIZE / 2.0)
+                            * scale,
+                        ay + ah / 2.0,
+                    )
+                };
                 let point = |x: f32, y: f32| center + Vec2::new(x, y) * scale;
-                for (from, to) in [((0.0, -7.0), (0.0, 3.0)), ((-4.0, -1.0), (0.0, 3.0)), ((0.0, 3.0), (4.0, -1.0)), ((-6.0, 3.0), (-6.0, 7.0)), ((-6.0, 7.0), (6.0, 7.0)), ((6.0, 7.0), (6.0, 3.0))] {
-                    geometry.line(point(from.0, from.1), point(to.0, to.1), 1.5 * scale, z + 0.004, tint);
+                let segments: &[((f32, f32), (f32, f32))] = match icon {
+                    "download" => &[
+                        ((0.0, -7.0), (0.0, 3.0)),
+                        ((-4.0, -1.0), (0.0, 3.0)),
+                        ((0.0, 3.0), (4.0, -1.0)),
+                        ((-6.0, 3.0), (-6.0, 7.0)),
+                        ((-6.0, 7.0), (6.0, 7.0)),
+                        ((6.0, 7.0), (6.0, 3.0)),
+                    ],
+                    "edit" => &[
+                        ((-6.0, 6.0), (-2.5, 5.5)),
+                        ((-6.0, 6.0), (-5.5, 2.5)),
+                        ((-2.5, 5.5), (-5.5, 2.5)),
+                        ((-2.5, 5.5), (5.5, -2.5)),
+                        ((-5.5, 2.5), (2.5, -5.5)),
+                        ((5.5, -2.5), (2.5, -5.5)),
+                    ],
+                    // 横排：三个纵向条，表示并排的三张卡片。
+                    "arrange-horizontal" => &[
+                        ((-5.5, -6.0), (-5.5, 6.0)),
+                        ((0.0, -6.0), (0.0, 6.0)),
+                        ((5.5, -6.0), (5.5, 6.0)),
+                    ],
+                    // 竖排：三个横向条，表示自上而下的三张卡片。
+                    "arrange-vertical" => &[
+                        ((-6.0, -5.5), (6.0, -5.5)),
+                        ((-6.0, 0.0), (6.0, 0.0)),
+                        ((-6.0, 5.5), (6.0, 5.5)),
+                    ],
+                    // 宫格：2×2 分栏。
+                    "arrange-grid" => &[
+                        ((-6.0, -6.0), (6.0, -6.0)),
+                        ((6.0, -6.0), (6.0, 6.0)),
+                        ((6.0, 6.0), (-6.0, 6.0)),
+                        ((-6.0, 6.0), (-6.0, -6.0)),
+                        ((-6.0, 0.0), (6.0, 0.0)),
+                        ((0.0, -6.0), (0.0, 6.0)),
+                    ],
+                    // 斜排 ↘：三个小方块沿右下方向阶梯排列。
+                    "arrange-diagonal-down" => &[
+                        ((-7.0, -7.0), (-3.0, -7.0)),
+                        ((-3.0, -7.0), (-3.0, -3.0)),
+                        ((-3.0, -3.0), (-7.0, -3.0)),
+                        ((-7.0, -3.0), (-7.0, -7.0)),
+                        ((-2.0, -2.0), (2.0, -2.0)),
+                        ((2.0, -2.0), (2.0, 2.0)),
+                        ((2.0, 2.0), (-2.0, 2.0)),
+                        ((-2.0, 2.0), (-2.0, -2.0)),
+                        ((3.0, 3.0), (7.0, 3.0)),
+                        ((7.0, 3.0), (7.0, 7.0)),
+                        ((7.0, 7.0), (3.0, 7.0)),
+                        ((3.0, 7.0), (3.0, 3.0)),
+                    ],
+                    // 斜排 ↗：同一阶梯翻转，三个小方块沿右上方向排列。
+                    "arrange-diagonal-up" => &[
+                        ((-7.0, 3.0), (-3.0, 3.0)),
+                        ((-3.0, 3.0), (-3.0, 7.0)),
+                        ((-3.0, 7.0), (-7.0, 7.0)),
+                        ((-7.0, 7.0), (-7.0, 3.0)),
+                        ((-2.0, -2.0), (2.0, -2.0)),
+                        ((2.0, -2.0), (2.0, 2.0)),
+                        ((2.0, 2.0), (-2.0, 2.0)),
+                        ((-2.0, 2.0), (-2.0, -2.0)),
+                        ((3.0, -7.0), (7.0, -7.0)),
+                        ((7.0, -7.0), (7.0, -3.0)),
+                        ((7.0, -3.0), (3.0, -3.0)),
+                        ((3.0, -3.0), (3.0, -7.0)),
+                    ],
+                    "expand-groups" => &[
+                        ((0.0, 6.0), (0.0, -2.0)),
+                        ((-4.0, 2.0), (0.0, -2.0)),
+                        ((4.0, 2.0), (0.0, -2.0)),
+                        ((-6.0, -6.0), (-6.0, 6.0)),
+                        ((6.0, -6.0), (6.0, 6.0)),
+                    ],
+                    "collapse-groups" => &[
+                        ((0.0, -6.0), (0.0, 2.0)),
+                        ((-4.0, -2.0), (0.0, 2.0)),
+                        ((4.0, -2.0), (0.0, 2.0)),
+                        ((-6.0, -6.0), (-6.0, 6.0)),
+                        ((6.0, -6.0), (6.0, 6.0)),
+                    ],
+                    _ => &[],
+                };
+                for (from, to) in segments {
+                    geometry.line(
+                        point(from.0, from.1),
+                        point(to.0, to.1),
+                        1.5 * scale,
+                        z + 0.004,
+                        tint,
+                    );
                 }
             }
             if !slot.icon_only {
+                let label_x = ax
+                    + (if slot.icon.is_some() {
+                        NODE_ACTION_TOOLBAR_ACTION_PAD
+                            + NODE_ACTION_TOOLBAR_ICON_SIZE
+                            + NODE_ACTION_TOOLBAR_ICON_GAP
+                    } else {
+                        NODE_ACTION_TOOLBAR_ACTION_PAD
+                    }) * scale;
                 let text_y = ay + (ah - world_font) / 2.0 - scale;
-                labels.push((slot.label.clone(), Vec2::new(ax + 8.0 * scale, text_y), screen_font, tint));
+                labels.push((
+                    slot.label.clone(),
+                    Vec2::new(label_x, text_y),
+                    screen_font,
+                    tint,
+                ));
             }
             if let Some((mx, my, mw, mh)) = slot.menu {
                 let center = Vec2::new(mx + mw / 2.0, my + mh / 2.0);
@@ -183,14 +306,13 @@ pub(crate) fn sync_node_action_bars(
     index: Res<NodeIndex>,
     surface: Res<crate::app::SurfaceState>,
     theme: Res<ThemeResource>,
-    mut visuals: ResMut<Visuals>,
+    materials: Res<super::CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
-    nodes: Query<(Entity, &CanvasNodeId)>,
+    nodes: Query<(Entity, &CanvasNodeId, &CanvasLayout, &CanvasDepth, &NodeActionBar)>,
+    layers: Query<(Entity, Option<&Mesh2d>), With<NodeActionLayer>>,
 ) {
     requests.begin(CanvasLabelRole::NodeAction);
-    // 图片/视频聚焦期间不绘制画布横条（横条只属于普通画布）。
-    let focused = super::image_focus::has_presented_media_focus(&scene.0) || scene.0.model_focus.is_some();
     let viewport = (
         scene.0.viewport.x,
         scene.0.viewport.y,
@@ -199,30 +321,35 @@ pub(crate) fn sync_node_action_bars(
     let surface_size = (surface.size.x, surface.size.y);
     let z = base_z(scene.0.nodes.len());
 
-    if focused {
-        clear_mesh(&mut commands, &mut visuals, &mut meshes);
-        return;
-    }
     let projected: Vec<(Entity, GraphNode)> = nodes
         .iter()
-        .filter_map(|(entity, id)| {
-            crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0)
-                .map(|node| (entity, node.into_owned()))
+        .filter_map(|(entity, id, _layout, _depth, _bar)| {
+            let (_, source) = index.node(&scene.0, &id.0)?;
+            Some((entity, crate::canvas_query::focus_context::node(&scene.0, source).into_owned()))
         })
         .collect();
+    let actions = nodes
+        .iter()
+        .map(|(_, id, _, _, bar)| (id.0.clone(), bar.actions.clone()))
+        .collect::<HashMap<_, _>>();
     let mut geometry = Geometry::default();
     let drawn = draw(
         &mut geometry,
         &theme,
         &projected,
-        &scene.0.node_actions,
+        &actions,
         Some(viewport),
         Some(surface_size),
         z,
     );
     // 多选横条（change: canvas-grouping-redesign）：≥2 节点选中时在选区包围框上方绘制。
     let projected_nodes: Vec<GraphNode> = projected.iter().map(|(_, n)| n.clone()).collect();
-    let selection_labels = if let Some(sa) = scene.0.selection_actions.as_ref().filter(|_| scene.0.selection.nodes.len() >= 2) {
+    let selection_labels = if let Some(sa) = scene
+        .0
+        .selection_actions
+        .as_ref()
+        .filter(|_| scene.0.selection.nodes.len() >= 2)
+    {
         draw_selection_toolbar(
             &mut geometry,
             &theme,
@@ -237,10 +364,10 @@ pub(crate) fn sync_node_action_bars(
         Vec::new()
     };
     if drawn.is_empty() && selection_labels.is_empty() {
-        clear_mesh(&mut commands, &mut visuals, &mut meshes);
+        clear_mesh(&mut commands, &mut meshes, &layers);
         return;
     }
-    replace_mesh(&mut commands, &mut visuals, &mut meshes, geometry.build());
+    replace_mesh(&mut commands, &mut meshes, &materials, &layers, geometry.build());
     for (owner, labels) in drawn {
         requests.push(
             CanvasLabelRole::NodeAction,
@@ -252,7 +379,7 @@ pub(crate) fn sync_node_action_bars(
     }
     // 多选横条标签挂到画布根实体（无节点 owner）。
     if !selection_labels.is_empty() {
-        if let Ok((root_entity, _)) = nodes.iter().next().ok_or(()) {
+        if let Some((root_entity, _, _, _, _)) = nodes.iter().next() {
             requests.push(
                 CanvasLabelRole::NodeAction,
                 root_entity,
@@ -267,48 +394,42 @@ pub(crate) fn sync_node_action_bars(
 /// 替换横条覆盖层 mesh；实体缺失时按需创建（半透明 Blend 材质，避免写深度遮挡）。
 fn replace_mesh(
     commands: &mut Commands,
-    visuals: &mut Visuals,
     meshes: &mut Assets<Mesh>,
+    materials: &super::CanvasMaterials,
+    layers: &Query<(Entity, Option<&Mesh2d>), With<NodeActionLayer>>,
     built: Mesh,
 ) {
     let handle = meshes.add(built);
-    match visuals.node_action_entity {
-        Some(entity) => {
-            let old = std::mem::replace(&mut visuals.node_action_mesh, handle.clone());
-            meshes.remove(&old);
+    match layers.iter().next() {
+        Some((entity, old_handle)) => {
+            if let Some(old) = old_handle {
+                meshes.remove(old.0.id());
+            }
             if let Ok(mut entity_commands) = commands.get_entity(entity) {
                 entity_commands.insert(Mesh2d(handle));
             }
         }
         None => {
-            visuals.node_action_mesh = handle.clone();
-            let entity = commands
-                .spawn((
-                    Mesh2d(handle),
-                    MeshMaterial2d(visuals.blend_material.clone()),
-                    NoFrustumCulling,
-                ))
-                .id();
-            visuals.node_action_entity = Some(entity);
+            commands.spawn((NodeActionLayer, Mesh2d(handle), MeshMaterial2d(materials.blend.clone()), NoFrustumCulling));
         }
     }
-    visuals.node_action_active = true;
 }
 
 /// 清空横条覆盖层（无横条时调用一次）。
-fn clear_mesh(commands: &mut Commands, visuals: &mut Visuals, meshes: &mut Assets<Mesh>) {
-    if !visuals.node_action_active {
-        return;
-    }
-    if let Some(entity) = visuals.node_action_entity {
+fn clear_mesh(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    layers: &Query<(Entity, Option<&Mesh2d>), With<NodeActionLayer>>,
+) {
+    if let Some((entity, old_handle)) = layers.iter().next() {
         let handle = meshes.add(Geometry::default().build());
-        let old = std::mem::replace(&mut visuals.node_action_mesh, handle.clone());
-        meshes.remove(&old);
+        if let Some(old) = old_handle {
+            meshes.remove(old.0.id());
+        }
         if let Ok(mut entity_commands) = commands.get_entity(entity) {
             entity_commands.insert(Mesh2d(handle));
         }
     }
-    visuals.node_action_active = false;
 }
 
 #[cfg(test)]
@@ -399,6 +520,41 @@ mod tests {
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].0, owner);
         assert_eq!(labels[0].1.len(), 3);
+    }
+
+    /// 五种排列图标都是纯图标按钮：绘制线段，不产生文字标签。
+    #[test]
+    fn arrange_icons_draw_geometry_without_labels() {
+        let theme = ThemeResource::default();
+        for icon in [
+            "arrange-horizontal",
+            "arrange-vertical",
+            "arrange-grid",
+            "arrange-diagonal-down",
+            "arrange-diagonal-up",
+        ] {
+            let (_world, nodes) = projected(vec![node("a", 0.0, 200.0)]);
+            let mut map = HashMap::new();
+            map.insert(
+                "a".to_owned(),
+                NodeActions {
+                    actions: vec![NodeAction {
+                        id: icon.into(),
+                        label: icon.into(),
+                        enabled: true,
+                        icon: Some(icon.into()),
+                        icon_only: true,
+                        ..Default::default()
+                    }],
+                    summary: None,
+                },
+            );
+            let mut geometry = Geometry::default();
+            let labels = draw(&mut geometry, &theme, &nodes, &map, None, None, 100.0);
+            assert!(positions(geometry) > 0, "{icon} 应绘制图标线段");
+            assert_eq!(labels.len(), 1, "{icon} 仍应产出横条 owner");
+            assert!(labels[0].1.is_empty(), "{icon} 纯图标按钮不应产生文字标签");
+        }
     }
 
     #[test]

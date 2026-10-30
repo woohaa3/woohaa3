@@ -503,7 +503,7 @@ export async function installCanvasPageServices(
     : null;
   // 宿主重连门禁（fault-isolation D6）：App 级 hostConnectivity 存在时才设置，会话在重连期间拒绝提交。
   const submissionGate = hostSubmissionGate(ctx);
-  const session = await createCanvasSession({ canvasId, remote: canvasRemote, lifecycle: compositeAssets.managedLifecycles, ...(access ? { access } : {}), ...submissionGate });
+  const session = await createCanvasSession({ canvasId, remote: canvasRemote, lifecycle: compositeAssets.managedLifecycles, getContent: compositeAssets.getContent, subscribeContent: compositeAssets.subscribeContent, ...(access ? { access } : {}), ...submissionGate });
   ctx.provide("canvasSession" as never, session as never);
   ctx.effect(() => preloadAgentDirectory(agentConversations, ctx.currentUser, session), "agent-directory-preload");
   const groupRuns = createCanvasGroupRuns({ canvasId, transport: applicationRemote.transport, conversations: agentConversations, user: ctx.currentUser, writable: () => session.isWritable() });
@@ -545,6 +545,7 @@ export async function installCanvasPageServices(
   }
   // 页面级编辑历史（撤销/重做）；随 page scope dispose 清空（change: 2026-10-09，任务 1.5）。
   const canvasEdit = createCanvasEditService({
+    getContent: compositeAssets.getContent,
     lifecycle: compositeAssets.managedLifecycles,
     session,
     getCanvas: () => woohaa3CanvasStore.getState().canvas
@@ -556,7 +557,7 @@ export async function installCanvasPageServices(
   /**
    * 通用扩展画布命令能力（change: 2026-10-10-add-game-furnace-extension，design D4）。
    *
-   * 扩展（如 game-furnace 工作区）经此提交**通用语义画布命令**（`CanvasCommand[]`）；只暴露
+   * 扩展（如片场工作区）经此提交**通用语义画布命令**（`CanvasCommand[]`）；只暴露
    * `session` 根（canonical 权威）而非页面投影（working overlay，扩展不应写它）。经受保护
    * `session.submitCommands` 提交纯命令，扩展不得触碰 store/命令内部结构。宿主不出现任何
    * 业务插件分支。

@@ -8,7 +8,7 @@
  */
 import { useState, useSyncExternalStore } from "react";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
-import { decodeFilmSetNodeData, filmSetAnimationsOf, filmSetClipPrecondition, filmSetItemAdapterHash, type FilmSetNodeData, type FilmSetAnimationClip, type FilmSetItem } from "@woohaa3/contracts";
+import { readFilmSetAnimationProjection, filmSetAnimationsOf, filmSetClipPrecondition, filmSetItemAdapterHash, type FilmSetNodeData, type FilmSetAnimationClip, type FilmSetItem } from "@woohaa3/contracts";
 import { Button } from "@woohaa3/ui/primitives";
 
 export type AdaptationState = {
@@ -53,9 +53,8 @@ export function FilmSetAdaptationConfirm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const canvas = ctx.compositeAssets.projectCanvas(canvasState);
-  const decoded = decodeFilmSetNodeData(canvas?.nodeData[nodeId]);
-  if (!decoded.ok) return null;
-  const animation = decoded.value;
+  const animation = readFilmSetAnimationProjection(canvas, nodeId);
+  if (!animation) return null;
   const clips = filmSetAnimationsOf(animation);
   const clip = clips.clips.find((entry) => entry.id === clipId);
   const item = itemId ? animation.filmSetContent.items.find((entry) => entry.id === itemId) : undefined;
@@ -68,23 +67,18 @@ export function FilmSetAdaptationConfirm({
     setBusy(true);
     setError(null);
     const op = { kind: "confirm-adaptation" as const, itemId: item.id, expectedAdapterHash: filmSetItemAdapterHash(item) };
-    const result = ctx.canvasSession.submitCommands(
-      [{ type: "filmSet.clipPatch", nodeId, clipId: clip.id, op, expectedHash: filmSetClipPrecondition(clips, clip.id, op) }],
-      `web-adapt-${crypto.randomUUID()}`
-    );
-    if (!result.ok) {
-      setError("适配确认未提交，请检查连接和写入权限");
-      setBusy(false);
-      return;
-    }
-    const outcome = await result.handle.settled;
-    if (outcome.state === "rejected") setError(outcome.error ?? "适配确认被拒绝，请重新读取后重试");
+    try {
+      const result = await ctx.canvasEdit.record(
+        [{ type: "filmSet.clipPatch", nodeId, clipId: clip.id, op, expectedHash: filmSetClipPrecondition(clips, clip.id, op) }], "确认适配关联"
+      );
+      if (!result.ok) setError(`${clip.name} / ${item.name}：${result.reason}`);
+    } catch { setError("适配确认未能完成，请读取当前关联后重新操作。"); }
     setBusy(false);
   };
   return (
     <div className="film-set-adaptation" role="status">
       <p>对象动作与当前内容失配，确认后仅更新本片段 {clip?.name ?? clip?.id} 的适配关联。</p>
-      <Button size="sm" loading={busy} disabled={!writable} onClick={() => void confirm()}>确认动作适配</Button>
+      <Button size="sm" loading={busy} disabled={!writable} onClick={() => void confirm()}>确认适配关联</Button>
       {error ? <p role="alert">{error}</p> : null}
     </div>
   );

@@ -17,8 +17,9 @@ describe("groupAppearance", () => {
     expect(first.resourceKey).toBe(second.resourceKey);
     expect(first.aabb).not.toBeNull();
     expect(first.extent).toBeGreaterThan(0);
-    expect(result.scene.ops.some(op => "id" in op && op.id === "group-link-left")).toBe(true);
-    expect(result.scene.ops.some(op => "id" in op && op.id === "group-link-right")).toBe(true);
+    expect(result.scene.ops.some(op => "id" in op && op.id === "group-folder-tab")).toBe(true);
+    expect(result.scene.ops.some(op => "id" in op && op.id === "group-folder-pocket")).toBe(true);
+    expect(defaultGroupAppearance().model.placement.yaw).toBe(0);
   });
   it("缺失时读取确定默认值且不修改输入", () => {
     const data = {} as { groupAppearance?: unknown };

@@ -24,12 +24,13 @@ function currentSource(nodeId: string) {
   const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
   const index = sharedCanvasNodeIndex(canvas);
   if (!canvas || !index || index.byId.get(nodeId)?.type !== "group" || index.hiddenNodeIds.has(nodeId)) return null;
-  const rect = index.groupBounds.find(group => group.id === nodeId);
   const data = canvas.nodeData[nodeId] ?? null;
-  return {data, signature: JSON.stringify([rect, data?.groupCollapsed ?? false, data?.groupBadgeScale ?? null])};
+  // 手势只关心它要写的那个字段：group 矩形会随成员变化（片段预览换尺寸等）而重算，
+  // 把它算进签名会让一次正常的徽标拖动被成员更新打断，松手后倍率悄悄退回原值。
+  return {data, signature: JSON.stringify([data?.groupCollapsed ?? false, data?.groupBadgeScale ?? null])};
 }
 
-/** 同一中点的对角向量投影，仅有一个倍率；拖动不提交规范状态。 */
+/** 以中点为中心、沿对角方向的向量投影，仅有一个倍率；拖动不提交规范状态。 */
 export function createGroupBadgeResize(core: InteractionCore) {
   const cancel = () => {
     const gesture = core.state.gesture;
@@ -61,6 +62,8 @@ export function createGroupBadgeResize(core: InteractionCore) {
     const world = core.pointerWorld(event);
     const {vector, start} = gesture;
     // Pointer delta starts at the pressed point, so the fixed handle inset cannot cause a jump.
+    // 水平中心固定，右下角手柄到中心的半对角线随倍率伸缩；指针沿对角线移动 d 时
+    // 倍率变化 d/|半对角线|，手柄始终贴着指针。
     const ratio = 1 + ((world.x-start.x)*vector.x + (world.y-start.y)*vector.y)
       / (vector.x*vector.x + vector.y*vector.y);
     gesture.scale = Math.min(gesture.maxScale, clampGroupBadgeScale(gesture.originScale * ratio));
@@ -85,8 +88,11 @@ export function createGroupBadgeResize(core: InteractionCore) {
       if (!valid(gesture)) return true;
       update(event, gesture);
       if (!gesture.moved || Math.abs(gesture.scale-gesture.originScale)<0.0001) return true;
+      // 前置条件只锁定本次要写的倍率：手势期间若只改了其它 nodeData 字段（片段/媒体同步），
+      // 用当前快照提交即可，不能因为无关字段变了就丢掉用户这一次拖动。
+      const latest = currentSource(gesture.nodeId)?.data ?? gesture.sourceNodeData;
       void Promise.resolve(core.submit([{type:"nodeData.patch",nodeId:gesture.nodeId,
-        value:{groupBadgeScale:gesture.scale},expectedNodeData:{[gesture.nodeId]:gesture.sourceNodeData}}]))
+        value:{groupBadgeScale:gesture.scale},expectedNodeData:{[gesture.nodeId]:latest}}]))
         .then(result => { if (result === "rejected") core.options.onInteractionError?.(new Error("徽标尺寸未能保存，请重试")); })
         .catch(error => core.options.onInteractionError?.(error));
     } finally { cancel(); }

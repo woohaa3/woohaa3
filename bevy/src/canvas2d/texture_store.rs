@@ -48,7 +48,7 @@ pub(crate) enum TextureAction {
 }
 
 /// 节点纹理的内容共享表。
-#[derive(Debug, Default)]
+#[derive(Resource, Debug, Default)]
 pub(crate) struct TextureStore {
     contents: HashMap<String, Content>,
     nodes: HashMap<String, Binding>,
@@ -80,6 +80,13 @@ impl TextureStore {
         }
     }
 
+    /// 节点当前是否绑在共享内容上（独占上传不得原地覆盖共享纹理）。
+    pub(crate) fn is_shared(&self, node_id: &str) -> bool {
+        self.nodes
+            .get(node_id)
+            .is_some_and(|binding| binding.shared.is_some())
+    }
+
     /// 绑定节点到（可选的）内容身份；返回因换绑而失去最后引用、需要移除的旧 handle。
     pub(crate) fn bind(
         &mut self,
@@ -94,7 +101,9 @@ impl TextureStore {
             && previous.handle == handle
             && previous.shared == key
             && previous.size == size
-            && key.as_ref().is_none_or(|key| self.contents.contains_key(key))
+            && key
+                .as_ref()
+                .is_none_or(|key| self.contents.contains_key(key))
         {
             return Vec::new();
         }
@@ -183,7 +192,10 @@ mod tests {
     use super::*;
 
     fn handle(id: u128) -> Handle<Image> {
-        Handle::Uuid(bevy::asset::uuid::Uuid::from_u128(id), std::marker::PhantomData)
+        Handle::Uuid(
+            bevy::asset::uuid::Uuid::from_u128(id),
+            std::marker::PhantomData,
+        )
     }
 
     const SIZE: Vec2 = Vec2::new(64.0, 32.0);
@@ -195,7 +207,10 @@ mod tests {
         for index in 0..1000 {
             let node = format!("n{index}");
             if index == 0 {
-                assert!(matches!(store.resolve(Some("content"), SIZE), TextureAction::Fresh));
+                assert!(matches!(
+                    store.resolve(Some("content"), SIZE),
+                    TextureAction::Fresh
+                ));
             } else {
                 // 后续节点直接复用同一 handle：不再上传像素、不再建 GPU 纹理。
                 assert!(matches!(
@@ -203,7 +218,11 @@ mod tests {
                     TextureAction::Reused(_)
                 ));
             }
-            assert!(store.bind(&node, Some("content"), SIZE, shared.clone()).is_empty());
+            assert!(
+                store
+                    .bind(&node, Some("content"), SIZE, shared.clone())
+                    .is_empty()
+            );
             assert_eq!(store.shared("content", SIZE), Some(shared.clone()));
         }
         assert_eq!(store.content_count(), 1);
@@ -250,7 +269,10 @@ mod tests {
             store.resolve(Some("content"), Vec2::new(128.0, 64.0)),
             TextureAction::Fresh
         ));
-        assert!(matches!(store.resolve(Some("content"), SIZE), TextureAction::Reused(_)));
+        assert!(matches!(
+            store.resolve(Some("content"), SIZE),
+            TextureAction::Reused(_)
+        ));
     }
 
     #[test]

@@ -81,8 +81,25 @@ export class ExecutionPreview {
     for (const nodeId of this.selected.keys()) {
       if (!canvas.document.nodes.some(node => node.id === nodeId)) continue;
       const item = this.item(nodeId);
-      if (!item || (item.outcome ?? "succeeded") !== "succeeded" || !item.previewable) continue;
+      if (!item) continue;
       const preview = item.preview;
+      if (preview.kind === "failure") {
+        // 选中失败/取消归档时用失败原因替换卡片内容：清掉上一个成功输出的媒体/模型引用，
+        // 避免卡片继续显示旧预览；正文由 render-scene 的 readBody 从该本地字段读取。
+        const data = { ...nodeData[nodeId] };
+        data.historyPreviewFailure = { outcome: preview.outcome, message: preview.message };
+        delete data.outputAssetId;
+        delete data.posterAssetId;
+        delete data.result;
+        delete data.resultPreview;
+        delete data.modelScript;
+        delete data.modelAssetId;
+        delete data.modelPlacement;
+        nodeData[nodeId] = data;
+        changed = true;
+        continue;
+      }
+      if ((item.outcome ?? "succeeded") !== "succeeded" || !item.previewable) continue;
       const data = { ...nodeData[nodeId] };
       const detail = this.details.get(nodeId);
       const asset = (id: string, mediaKind: StoredAsset["mediaKind"], url: string): StoredAsset =>

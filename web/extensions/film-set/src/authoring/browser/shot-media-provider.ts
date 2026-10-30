@@ -1,10 +1,11 @@
 /** Film-set owns payload semantics and full clip production; the host sees only open content refs. */
 import {
-  decodeFilmSetNodeData, filmSetAnimationsOf, isFilmSetNode, readShotReferenceAssetLink,
+  activeFilmSetSceneBindings, filmSetAnimationsOf, readShotReferenceAssetLink,
   shotReferenceContentIdentity, shotImageReferenceIdentity, readyShotImageAsset,
   type MediaContentRef, type ServerCanvas, type StoredAsset,
 } from "@woohaa3/contracts";
 import type { MediaContentContext, MediaContentProvider } from "@woohaa3/frontend/extension-api";
+import { readAnimation } from "../../state/browser/animation-projection.js";
 import type { FilmSetHostContext } from "../../state/browser/host-ports.js";
 import type { ShotImageReferences } from "./shot-image-reference.js";
 import type { ShotReferenceRecordingController } from "./shot-reference-recording-controller.js";
@@ -17,19 +18,17 @@ export function shotMediaRef(filmSetNodeId: string, clipId: string): MediaConten
 export function shotMediaSource(canvas: ServerCanvas, ref: MediaContentRef, background: string) {
   const { filmSetNodeId, clipId } = ref.payload;
   if (typeof filmSetNodeId !== "string" || typeof clipId !== "string" || Object.keys(ref.payload).some(k => k !== "filmSetNodeId" && k !== "clipId")) throw Error("film-set.shot: 来源引用无效");
-  const node = canvas.document.nodes.find(n => n.id === filmSetNodeId);
-  if (!node || !isFilmSetNode(node.type, canvas.nodeData[node.id])) throw Error("film-set.shot: 源片场已删除");
-  const animation = decodeFilmSetNodeData(canvas.nodeData[filmSetNodeId]);
-  if (!animation.ok) throw Error(animation.reason);
-  const clip = filmSetAnimationsOf(animation.value).clips.find(c => c.id === clipId);
+  const animation = readAnimation(canvas, filmSetNodeId);
+  if (!animation) throw Error("film-set.shot: 源片场不存在或资源不可用");
+  const clip = filmSetAnimationsOf(animation).clips.find(c => c.id === clipId);
   if (!clip) throw Error("film-set.shot: 源镜头已删除");
-  const still = clip.kind === "static" ? shotImageReferenceIdentity({ animation: animation.value, clipId,
+  const still = clip.kind === "static" ? shotImageReferenceIdentity({ animation, clipId,
     background: clip.backdrop && clip.backdrop !== "theme" ? clip.backdrop : background, assets: canvas.assets }) : null;
-  const contentIdentity = still?.contentIdentity ?? shotReferenceContentIdentity({ animation: animation.value, clipId });
+  const contentIdentity = still?.contentIdentity ?? shotReferenceContentIdentity({ animation, clipId, assets: canvas.assets });
   if (!contentIdentity) throw Error("film-set.shot: 镜头内容不可用");
   return { mediaKind: clip.kind === "static" ? "image" as const : "video" as const,
     sourceIdentity: `${clip.kind}:${contentIdentity}:${still?.profileKey ?? SHOT_REFERENCE_PROFILE_KEY}`,
-    dependencyNodeIds: [filmSetNodeId], filmSetNodeId, clipId, contentIdentity,
+    dependencyNodeIds: [filmSetNodeId, ...activeFilmSetSceneBindings(canvas.nodeData[filmSetNodeId]?.filmSetGroup ?? { sceneBindings: [] }).map(binding => binding.sourceNodeId)], filmSetNodeId, clipId, contentIdentity,
     profileKey: still?.profileKey ?? SHOT_REFERENCE_PROFILE_KEY, name: clip.name };
 }
 export function createShotMediaProvider(ctx: FilmSetHostContext, images: ShotImageReferences, recording: ShotReferenceRecordingController): MediaContentProvider {

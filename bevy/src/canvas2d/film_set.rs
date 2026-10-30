@@ -28,7 +28,12 @@ pub(crate) fn draw_film_set_run_mask(
     z: f32,
 ) {
     let scope = super::scope::node_scope(node);
-    geometry.polygon_alpha(&scope.vertices, z, theme.token_u32("canvasNodeContent"), 0.45);
+    geometry.polygon_alpha(
+        &scope.vertices,
+        z,
+        theme.token_u32("canvasNodeContent"),
+        0.45,
+    );
 }
 
 /// 绘制片场范围虚线框与条件可见的顶部浮动名称面板，返回其标签（标题 + 可选业务类型名）。
@@ -74,7 +79,17 @@ fn draw_scope_frame(
         super::dash::dashed_polygon(geometry, &scope.vertices, 1.5, base_z, color);
     } else {
         let aabb = scope.aabb;
-        super::dash::dashed_rounded_rect(geometry, aabb.x, aabb.y, aabb.width, aabb.height, 8., 1.5, base_z, color);
+        super::dash::dashed_rounded_rect(
+            geometry,
+            aabb.x,
+            aabb.y,
+            aabb.width,
+            aabb.height,
+            8.,
+            1.5,
+            base_z,
+            color,
+        );
     }
 }
 
@@ -134,8 +149,15 @@ fn draw_scope_title(
 }
 
 /// 范围抓手：地面矩形 8 个方形（四顶点 + 四边中点）；普通矩形右下角方形（与普通节点一致）。
-pub(super) fn draw_scope_grip(geometry: &mut Geometry, theme: &ThemeResource, grip: &super::scope::ScopeGrip, base_z: f32) {
+pub(super) fn draw_scope_grip(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    grip: &super::scope::ScopeGrip,
+    base_z: f32,
+) {
     match grip {
+        // 组容器的四角角标由 `super::group::draw_group_selection` 统一绘制，这里不再重复。
+        super::scope::ScopeGrip::Corners(_) => {}
         super::scope::ScopeGrip::Handles(handles) => {
             let half = super::scope::DIAMOND_GRIP_LEG / 2.0;
             for handle in handles {

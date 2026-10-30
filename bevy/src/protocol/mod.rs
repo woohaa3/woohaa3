@@ -15,17 +15,17 @@
 
 mod animation_playback;
 mod film_set_object;
-mod image_focus;
 pub(crate) mod focus_details;
+mod focus_transition;
+mod image_focus;
 mod model;
+mod observer;
 mod position;
 mod prepared;
 mod scene;
 mod scene_instant;
 mod theme;
-mod focus_transition;
 mod video_focus;
-mod observer;
 mod viewport;
 
 // 保留既有 `crate::protocol::*` 消费路径：facade 是唯一对外入口（design D1）。
@@ -41,10 +41,12 @@ pub(crate) use image_focus::{IMAGE_FOCUS_VERSION, ImageFocus, ImageFocusViewport
 #[allow(unused_imports)]
 pub(crate) use model::{
     CANVAS_RENDER_SCENE_VERSION, DEFAULT_BLEND_OPACITY, MODEL_ASSET_VERSION,
-    MODEL_DESCRIPTOR_VERSION, MODEL_SCENE_IR_V2, ModelAabbDto, ModelAssetDescriptor, ModelDescriptor,
-    ModelDescriptorDto, ModelOffset, ModelOp, ModelPlacement, ModelReference, ModelSnapshot,
-    canonical_signature, fnv1a64_utf16,
+    MODEL_DESCRIPTOR_VERSION, MODEL_SCENE_IR_V2, ModelAabbDto, ModelAssetDescriptor,
+    ModelDescriptor, ModelDescriptorDto, ModelOffset, ModelOp, ModelPlacement, ModelReference,
+    ModelSnapshot, canonical_signature, fnv1a64_utf16,
 };
+#[allow(unused_imports)]
+pub(crate) use observer::{CANVAS_OBSERVER_UPDATE_VERSION, ObserverUpdateRequest, apply_observer};
 #[allow(unused_imports)]
 pub(crate) use position::{
     CANVAS_POSITION_UPDATE_VERSION, MAX_POSITION_UPDATE_BYTES, MAX_POSITION_UPDATES, NodePosition,
@@ -53,7 +55,15 @@ pub(crate) use position::{
 #[allow(unused_imports)]
 pub(crate) use prepared::{PreparedModelMetadata, PreparedModelRequest};
 #[allow(unused_imports)]
-pub(crate) use scene::{FilmSetRunFeedback, AggregateRunPresentation, CompositeAssetGeometryQuality, CompositeAssetPresentation, CompositeAssetScopeShape, Edge, GraphNode, GroupPresentation, GroupRunStatus, HistoryStripDot, HistoryStripPresentation, ModelMediaPlane, Scene, ScopeGroundDto, Selection, ShotCoverCamera, ShotPreviewLink, ShotPreviewPresentation, Viewport};
+pub(crate) use scene::{
+    AggregateRunPresentation, CompositeAssetGeometryQuality, CompositeAssetOverviewCache,
+    CompositeAssetPresentation,
+    CompositeAssetScopeShape, Edge, FilmSetGroupBinding, FilmSetGroupGround,
+    FilmSetGroupPreparation, FilmSetGroupTransform, FilmSetRunFeedback, GraphNode,
+    GroupPresentation, GroupRunStatus, HistoryStripDot, HistoryStripPresentation, ModelMediaPlane,
+    Scene, ScopeGroundDto, Selection, ShotCoverCamera, ShotPreviewLink, ShotPreviewPresentation,
+    Viewport,
+};
 #[allow(unused_imports)]
 pub(crate) use scene_instant::{
     AggregateConnect, AnimationPlayback, CursorPoint, Draft, DragAttach, DragAttachEdge,
@@ -65,8 +75,6 @@ pub(crate) use scene_instant::{
 pub(crate) use theme::{Theme, is_known_theme_token, parse_theme_hex};
 #[allow(unused_imports)]
 pub(crate) use video_focus::{VIDEO_FOCUS_VERSION, VideoFocus};
-#[allow(unused_imports)]
-pub(crate) use observer::{CANVAS_OBSERVER_UPDATE_VERSION, ObserverUpdateRequest, apply_observer};
 pub(crate) use viewport::{CANVAS_VIEWPORT_UPDATE_VERSION, ViewportUpdateRequest};
 
 /// 节点默认宽高（world ≈ CSS 像素）。与 contracts 的默认节点尺寸一致。
@@ -97,9 +105,9 @@ mod tests_instant;
 #[cfg(test)]
 mod tests_object_motion;
 #[cfg(test)]
-mod tests_shot_preview;
-#[cfg(test)]
 mod tests_run_effect;
+#[cfg(test)]
+mod tests_shot_preview;
 
 mod composite_panel;
 pub(crate) use composite_panel::CompositeContainerPanel;

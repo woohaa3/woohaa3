@@ -23,3 +23,19 @@ describe("trusted content runtime composition", () => {
     expect(createSlotDeclarations).toHaveBeenCalledWith({ "test.storage": { retained: true, managedMigrations: declaration("test.entities").runtime.managedMigrations.map(m => expect.objectContaining({ extensionId: m.extensionId, schemaVersion: 1 })) } }, { TEST: "yes" });
   });
 });
+
+describe("trusted generic content ownership", () => {
+  it("merges independent owners and rejects forged or duplicate ownership", () => {
+    const owner = { extensionId: "test.a" };
+    expect(mergeCanvasContentRuntimes([{ extensionId: "test.a", runtime: { contributions: [owner] } }])?.contributions).toEqual([owner]);
+    expect(() => mergeCanvasContentRuntimes([{ extensionId: "test.b", runtime: { contributions: [owner] } }])).toThrow("content-registration-owner-mismatch");
+    expect(() => mergeCanvasContentRuntimes([
+      { extensionId: "test.a", runtime: { contributions: [owner] } },
+      { extensionId: "test.a", runtime: { contributions: [owner] } }
+    ])).toThrow("content-registration-conflict");
+  });
+  it("keeps legacy runtimes on the previous path until contributions are explicitly declared", () => {
+    expect(mergeCanvasContentRuntimes([declaration("test.a")])?.contributions).toBeUndefined();
+    expect(mergeCanvasContentRuntimes([{ extensionId: "test.a", runtime: { contributions: [] } }])?.contributions).toEqual([]);
+  });
+});

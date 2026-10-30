@@ -458,6 +458,19 @@ describe("mediaRemote", () => {
     expect(remote.resolveCanonicalUrl({ url: "https://evil/x" }, "canvas-1")).toBeNull();
   });
 
+  it("资产只登记 storageKey 时按存储身份派生读取地址（存量镜头参考视频）", () => {
+    const remote = createMediaRemote({ fetchImpl: (async () => jsonResponse({})) as unknown as typeof fetch });
+    const legacy = { status: "ready", mediaKind: "video", metadata: { storageKey: "sha256-x" } };
+    expect(remote.resolveCanonicalUrl(legacy)).toBe("/api/media/sha256-x");
+    expect(remote.resolveCanonicalUrl(legacy, "canvas-1")).toBe("/api/media/sha256-x?canvas=canvas-1");
+    // 显式登记了不可控地址时仍拒绝，不回退到存储身份。
+    expect(remote.resolveCanonicalUrl({ ...legacy, url: "https://evil/x" }, "canvas-1")).toBeNull();
+    // 存储身份本身不合法时不派生地址。
+    expect(remote.resolveCanonicalUrl({ metadata: { storageKey: "../../etc/passwd" } })).toBeNull();
+    expect(remote.resolveCanonicalUrl({ metadata: { storageKey: "/api/media/x" } })).toBeNull();
+    expect(remote.resolveCanonicalUrl({ metadata: {} })).toBeNull();
+  });
+
   it("upload 请求目标的画布提示：POST /api/media?canvas=<id>；工程上传同样带", async () => {
     const urls: string[] = [];
     const remote = createMediaRemote({

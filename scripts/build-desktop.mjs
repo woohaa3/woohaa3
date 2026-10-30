@@ -42,6 +42,7 @@ import {
   resolveBundleKinds,
   tauriBuildArgs,
   tauriConfigOverride,
+  tauriFrontendDist,
   validateIconSource
 } from "./lib/desktop-release.mjs";
 
@@ -256,7 +257,7 @@ async function runBuild(options) {
   const override = tauriConfigOverride({
     identifier: options.identifier,
     version: options.version,
-    frontendDist: options.frontend ? frontendDist : null,
+    frontendDist: options.frontend ? tauriFrontendDist(frontendDist, desktopDir) : null,
     defaultsPath
   });
   let hostPackage = null;
@@ -266,7 +267,8 @@ async function runBuild(options) {
     const endpoint = process.env.WOOHAA_DESKTOP_UPDATE_ENDPOINT ?? null;
     const publicKey = process.env.WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY ?? null;
     const standalone = standaloneBundleConfig({ ...prepared, endpoint, publicKey });
-    override.build={...override.build,frontendDist:prepareStartupFrontend(frontendDist,path.join(path.dirname(defaultsPath),"startup-frontend"))};
+    const startupFrontend = prepareStartupFrontend(frontendDist, path.join(path.dirname(defaultsPath), "startup-frontend"));
+    override.build = { ...override.build, frontendDist: tauriFrontendDist(startupFrontend, desktopDir) };
     override.plugins = standalone.plugins;
     const hostArchive = createHostArchive(prepared.resourceRoot, path.join(path.dirname(defaultsPath), "desktop-host.tar.gz"));
     const runtimeFile = path.join(path.dirname(defaultsPath), "desktop-runtime.json");

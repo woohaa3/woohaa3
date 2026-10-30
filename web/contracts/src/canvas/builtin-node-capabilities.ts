@@ -5,10 +5,13 @@ import { isSupportedModelScriptVersion, sceneIrVersionFor } from './model-script
 import { prepareModelResource } from './prepared-model.js';
 import { compositeAssetSceneOps } from './composite-asset-scene.js';
 import { isFilmSetNode } from './domain/core/composite-asset-identity.js';
+import { filmSetGroupModelPreparation } from "./film-set-group-model.js";
+import { isFilmSetGroupNode } from './film-set-group.js';
 import { getGroupRequiredMinSize } from './domain/index.js';
 import { readGroupAppearanceForNode } from './group-appearance.js';
 import { minimumNodeSizeFor } from './node-minimum-size.js';
-import { DEFAULT_MODEL_PREVIEW } from './render-scene/wire-model.js';
+import { DEFAULT_MODEL_PREVIEW, type BevyModelPreview } from './render-scene/wire-model.js';
+import { CANVAS_CAMERA_PITCH } from './model-focus/canvas-projection.js';
 import type { NodeCapabilities, NodeCapabilityResolver, NodeModelPreparation } from './node-capabilities.js';
 
 export const scriptModelPreparation: NodeModelPreparation = {
@@ -28,8 +31,16 @@ export const savedCompositePreparation: NodeModelPreparation = {
     return result;
   }
 };
+/**
+ * 模型卡片预览的默认姿态：正对模型正面（方位 0），俯仰跟随画布镜头
+ * `CANVAS_CAMERA_PITCH`，让片场/模型卡片与画布中的真实模型保持同一视角。
+ */
+export function defaultModelPreview(): BevyModelPreview {
+  return { ...DEFAULT_MODEL_PREVIEW, elevation: CANVAS_CAMERA_PITCH };
+}
+
 export const orbitModelPreview: NonNullable<NodeCapabilities['modelPreview']> = {
-  project: (_context, view) => ({ ...DEFAULT_MODEL_PREVIEW, ...view })
+  project: (_context, view) => ({ ...defaultModelPreview(), ...view })
 };
 /**
  * A group's own appearance model is presentation, never a member task: preparation reports no
@@ -37,11 +48,15 @@ export const orbitModelPreview: NonNullable<NodeCapabilities['modelPreview']> = 
  */
 export const groupAppearancePreparation: NodeModelPreparation = {
   reportsStatus: false,
-  executionKey: ({ data }) => {
+  executionKey: context => {
+    if (isFilmSetGroupNode(context.node, context.data)) return filmSetGroupModelPreparation.executionKey(context);
+    const { data } = context;
     const appearance = readGroupAppearanceForNode(data);
     return `group:${appearance.source}:${String(appearance.value.model.modelScriptVersion)}:${appearance.value.model.modelScript}`;
   },
-  prepare: ({ data }) => {
+  prepare: context => {
+    if (isFilmSetGroupNode(context.node, context.data)) return filmSetGroupModelPreparation.prepare(context);
+    const { data } = context;
     const model = readGroupAppearanceForNode(data).value.model;
     const execution = executeModelScriptVersioned(model.modelScript, model.modelScriptVersion);
     if (!execution.ok) return { status: `fail:${execution.stage}:${execution.code}` };
@@ -77,7 +92,8 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
     scope: { shape: () => 'isometric-diamond' },
     resources: { ...modelResourceDemand, contentKey: context => context.modelResourceKey ?? `${context.canvas.id}:composite:${context.node.id}` },
     focus: { kind: context => isFilmSetNode(context.node.type, context.data) ? 'model' : 'extension' },
-    actions: nodeActionContributions, connections: { endpoints: context => isPureModelNodeType(context.node.type, context.data as Record<string, unknown>) ? 'none' : 'ordinary' },
+    actions: nodeActionContributions,
+    connections: { endpoints: context => isPureModelNodeType(context.node.type, context.data as Record<string, unknown>) ? 'none' : 'ordinary' },
     resize: { ...rectangularNodeResize, mode: 'scope', minimum: context => minimumNodeSizeFor(context.node.type) }
   });
   // 便签：纯批注卡片，不连线、不执行、不可聚焦。尺寸与 Bevy 共用 `bevyNodeSize`。
@@ -89,6 +105,10 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
   entries.set('group', {
     appearance: { palette: 'group', defaultSize: compact },
     container: { project: ({ data }, counts) => ({ title: typeof data?.title === 'string' ? data.title : '', ...counts }) },
+    // 组保留结构容器身份，其自身展示模型与普通模型共用 payload lease；模型直接绘制在画布
+    // 世界，不创建离屏预览相机，因此只占模型 payload、不占预览槽。
+    resources: { channel: 'model', previewSlot: false, contentKey: context => context.modelResourceKey },
+    focus: { kind: context => isFilmSetGroupNode(context.node, context.data) ? 'model' : 'extension' },
     connections: { endpoints: () => 'aggregate' }, actions: nodeActionContributions,
     resize: { mode: 'rect', minimum: ({ canvas, node }) => {
       const min = getGroupRequiredMinSize(canvas.document.nodes.map(entry => ({ ...entry, data: {} })), node.id);

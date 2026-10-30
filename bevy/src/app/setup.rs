@@ -50,7 +50,9 @@ pub(super) fn setup_3d(
             orbit_camera::OrbitCameraSuspended,
         ))
         .id();
-    commands.entity(camera).insert(orbit_camera::OrbitCameraLink(rig));
+    commands
+        .entity(camera)
+        .insert(orbit_camera::OrbitCameraLink(rig));
     commands.insert_resource(FocusObserverRig(rig));
 
     commands.init_resource::<model3d::ModelVisuals>();

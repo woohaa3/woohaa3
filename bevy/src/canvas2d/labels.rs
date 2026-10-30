@@ -1,7 +1,7 @@
 //! 标签实体生命周期：owner/role/slot 组件 + 逐帧请求收件箱
 //! （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs，design D4 / 任务 4.1、4.5）。
 //!
-//! 标签不再存进 `Visuals` 的 `HashMap<String, Vec<Entity>>`。每个标签实体带
+//! 标签不再存进共享 overlay cache 的 `HashMap<String, Vec<Entity>>`。每个标签实体带
 //! [`CanvasLabel`]（role + slot）并通过 `ChildOf` 归属节点/边批次实体：
 //!
 //! - 生产者只收集本帧「这个 owner 应该显示哪些文字」，写入 [`LabelRequests`]；
@@ -10,10 +10,14 @@
 //!
 //! 生命周期仍必须闭合支持 `0 → 1 → 0 → 1`：集合为空时回收全部槽位，下一次非空重新补建。
 
-use bevy::{prelude::*, sprite::Anchor, text::{LineBreak, TextBounds}};
+use bevy::{
+    prelude::*,
+    sprite::Anchor,
+    text::{LineBreak, TextBounds},
+};
 
 use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole};
-use crate::canvas2d::Visuals;
+use crate::canvas2d::CanvasOverlayCache;
 use crate::canvas2d::text_presentation::{LogicalText, TextScaleMode};
 
 /// 标签文案包：`(文案, 位置, 字号, 颜色 0xRRGGBB)`。
@@ -178,7 +182,7 @@ impl LabelRequests {
 pub(crate) fn sync_canvas_labels(
     mut commands: Commands,
     requests: Res<LabelRequests>,
-    visuals: Res<Visuals>,
+    visuals: Res<CanvasOverlayCache>,
     existing: Query<(Entity, &CanvasLabel, &ChildOf)>,
     mut text: Query<(
         &mut Text2d,
@@ -256,7 +260,7 @@ pub(crate) fn sync_canvas_labels(
 
 #[allow(clippy::too_many_arguments)]
 fn label_bundle(
-    visuals: &Visuals,
+    visuals: &CanvasOverlayCache,
     label: String,
     position: Vec2,
     size: f32,

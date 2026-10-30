@@ -8,7 +8,10 @@
 import { describe, expect, it } from "vitest";
 import {
   NODE_ACTION_TOOLBAR_ACTION_HEIGHT,
+  NODE_ACTION_TOOLBAR_ACTION_PAD,
   NODE_ACTION_TOOLBAR_GAP,
+  NODE_ACTION_TOOLBAR_ICON_GAP,
+  NODE_ACTION_TOOLBAR_ICON_SIZE,
   NODE_ACTION_TOOLBAR_PAD,
   NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH,
   NODE_ACTION_TOOLBAR_VIEWPORT_MARGIN,
@@ -66,7 +69,7 @@ describe("nodeActionToolbarLayout（任务 3.1）", () => {
     expect(chevron.width).toBeGreaterThan(0);
   });
 
-  it("模型名摘要在最右且在横条内；超长截断", () => {
+  it("节点摘要在最左且在横条内；超长截断", () => {
     const layout = nodeActionToolbarLayout({
       node: NODE,
       actions: actions("下载", "转为片场"),
@@ -78,7 +81,8 @@ describe("nodeActionToolbarLayout（任务 3.1）", () => {
     const summary = layout.summary!;
     expect(summary.text.endsWith("…")).toBe(true);
     expect(estimateNodeActionTextWidth(summary.text, 13)).toBeLessThanOrEqual(NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH + 0.001);
-    expect(summary.rect.x).toBeGreaterThanOrEqual(layout.actions[1]!.x + layout.actions[1]!.width);
+    expect(summary.rect.x).toBeGreaterThanOrEqual(layout.bar.x);
+    expect(layout.actions[0]!.x).toBeGreaterThanOrEqual(summary.rect.x + summary.rect.width);
     expect(summary.rect.x + summary.rect.width).toBeLessThanOrEqual(layout.bar.x + layout.bar.width + 0.001);
   });
 
@@ -108,6 +112,20 @@ describe("nodeActionToolbarLayout（任务 3.1）", () => {
     expect(layout.actions[0]!.width * zoom).toBeCloseTo(32);
     expect(layout.bar.x * zoom).toBeGreaterThanOrEqual(4);
     expect(layout.placement).toBe("below");
+  });
+
+  it("图标 + 文字按钮同时容纳图标格与文案", () => {
+    const text = Math.ceil(estimateNodeActionTextWidth("编辑", 13));
+    const layout = nodeActionToolbarLayout({
+      node: NODE,
+      actions: [{ id: "edit", label: "编辑", icon: "edit", enabled: true }],
+      viewport: VIEWPORT,
+      surface: SURFACE
+    })!;
+    expect(layout.actions[0]!.width).toBeGreaterThanOrEqual(
+      NODE_ACTION_TOOLBAR_ACTION_PAD * 2 + NODE_ACTION_TOOLBAR_ICON_SIZE + NODE_ACTION_TOOLBAR_ICON_GAP + text
+    );
+    expect(layout.actions[0]!.width).toBeGreaterThan(NODE_ACTION_TOOLBAR_ACTION_HEIGHT);
   });
 
   it("上下两侧均放不下时限制在视口内（change: 2026-10-16-add-group-selection-toolbar）", () => {

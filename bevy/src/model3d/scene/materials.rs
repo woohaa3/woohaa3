@@ -9,12 +9,24 @@ use crate::protocol::{ModelOp, ModelSnapshot};
 pub(crate) fn material_key(op: &ModelOp) -> String {
     match op {
         ModelOp::Material { id, .. } => format!("material:{id}"),
-        ModelOp::Box { color, material, .. }
-        | ModelOp::Cylinder { color, material, .. }
-        | ModelOp::Mesh { color, material, .. }
-        | ModelOp::Sphere { color, material, .. }
-        | ModelOp::Capsule { color, material, .. }
-        | ModelOp::Segment { color, material, .. } => match material {
+        ModelOp::Box {
+            color, material, ..
+        }
+        | ModelOp::Cylinder {
+            color, material, ..
+        }
+        | ModelOp::Mesh {
+            color, material, ..
+        }
+        | ModelOp::Sphere {
+            color, material, ..
+        }
+        | ModelOp::Capsule {
+            color, material, ..
+        }
+        | ModelOp::Segment {
+            color, material, ..
+        } => match material {
             Some(id) => format!("material:{id}"),
             None => format!(
                 "color:{}",

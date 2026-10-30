@@ -1,3 +1,4 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
 import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -29,7 +30,7 @@ function fixture(kind: "static" | "dynamic"): ServerCanvas {
   }
   canvas.document.nodes.push({ id: "film", type: "composite-asset", position: { x: 0, y: 0 } });
   canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
-  const result = applyCanvasCommands(canvas, [{ type: "canvas.setTitle", title: "Film" }]);
+  const result = applyCanvasCommands(migrateFilmSetFixture(canvas, "film"), [{ type: "canvas.setTitle", title: "Film" }]);
   if (!result.ok) throw Error(result.rejection.message);
   return result.canvas;
 }
@@ -105,5 +106,13 @@ describe("managed shot media render pipeline", () => {
     expect(registry.children(projected).get(id)).toMatchObject({ ownerNodeId: "film", role: "preview" });
     expect(canvas).toEqual(canonical);
     expect(canvas.nodeData[id].shotPreview).toBeUndefined();
+  });
+  it("projects a group clip's backdrop and dynamic playback into its preview", () => {
+    const canvas = fixture("dynamic"), id = shotPreviewNodeId("film", "clip-1");
+    canvas.nodeData.film.filmSetGroup!.clips![0]!.backdrop = "#112233";
+    const registry = new CompositeAssetRegistry();
+    registry.register(createFilmSetModelAdapter());
+    const scene = buildCanvasRenderScene({ canvas: registry.projectCanvas(canvas)!, shotPreviews: new Map([[id, { state: "ready", progress: 0.6, playing: true }]]) });
+    expect(scene.nodes.find(node => node.id === id)?.shotPreview).toMatchObject({ backdrop: "#112233", progress: 0.6, playing: true });
   });
 });

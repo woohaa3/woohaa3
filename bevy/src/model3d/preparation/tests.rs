@@ -10,9 +10,7 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 
-use crate::protocol::{
-    GraphNode, ModelOp, ModelPlacement, ModelReference, ModelSnapshot, Scene,
-};
+use crate::protocol::{GraphNode, ModelOp, ModelPlacement, ModelReference, ModelSnapshot, Scene};
 
 use super::super::batch_strategy::BatchStrategy;
 use super::super::quality::Quality;
@@ -83,7 +81,12 @@ fn scene_with(nodes: Vec<GraphNode>) -> Scene {
 fn resources_for(snapshots: &[ModelSnapshot]) -> ModelAssets {
     snapshots
         .iter()
-        .map(|snapshot| (reference_for(snapshot).resource_key, Arc::new(snapshot.clone())))
+        .map(|snapshot| {
+            (
+                reference_for(snapshot).resource_key,
+                Arc::new(snapshot.clone()),
+            )
+        })
         .collect::<HashMap<_, _>>()
 }
 
@@ -98,11 +101,11 @@ fn world_with_resources() -> World {
 /// 复刻调度器行为：取/放资源 + flush，并额外推进一次准备装配。
 fn run_sync(world: &mut World, scene: &Scene, resources: &ModelAssets) {
     let mut visuals = world.remove_resource::<ModelVisuals>().unwrap();
-    let mut focus = world.remove_resource::<super::super::runtime::FocusVisuals>().unwrap_or_default();
+    let mut focus = world
+        .remove_resource::<super::super::runtime::FocusVisuals>()
+        .unwrap_or_default();
     let mut meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
-    let mut materials = world
-        .remove_resource::<Assets<StandardMaterial>>()
-        .unwrap();
+    let mut materials = world.remove_resource::<Assets<StandardMaterial>>().unwrap();
     let mut commands = world.commands();
     sync_models(
         &mut commands,
@@ -127,9 +130,7 @@ fn run_sync_once(world: &mut World, scene: &Scene, resources: &ModelAssets) {
         .remove_resource::<super::super::runtime::FocusVisuals>()
         .unwrap_or_default();
     let mut meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
-    let mut materials = world
-        .remove_resource::<Assets<StandardMaterial>>()
-        .unwrap();
+    let mut materials = world.remove_resource::<Assets<StandardMaterial>>().unwrap();
     let mut commands = world.commands();
     sync_models(
         &mut commands,
@@ -164,11 +165,7 @@ fn advance_until_published(
 ) -> bool {
     for _ in 0..frames {
         advance(world, scene, resources);
-        if world
-            .resource::<ModelVisuals>()
-            .roots
-            .contains_key(node)
-        {
+        if world.resource::<ModelVisuals>().roots.contains_key(node) {
             return true;
         }
     }
@@ -192,20 +189,25 @@ fn pure_preparation_matches_sync_spawn_for_every_spec_kind() {
     )
     .expect("prepared");
     // 参照侧必须做与 prepare 相同的总览平铺：只做平移的父级分组会被改写到根空间
-    // （`batching::apply_flatten`），漏掉这一步比较时每个子部件会差一个父级偏移。
+    // （`batching::apply_flatten`），漏掉这一步比较时每个子部件会差一个父级偏移
+    // （2026-10-28 draw call 优化引入的 flatten 语义）。
     let mut specs = super::super::scene::build_entity_specs(&snapshot);
     let material_specs = super::super::scene::collect_materials(&snapshot);
     let opaque: std::collections::HashSet<String> = specs
         .iter()
         .filter(|spec| {
-            super::super::scene::standard_material_for(&spec.material_key, &material_specs)
-                .alpha_mode
+            super::super::scene::standard_material_for(&spec.material_key, &material_specs).alpha_mode
                 == bevy::material::AlphaMode::Opaque
         })
         .map(|spec| spec.material_key.clone())
         .collect();
-    let planned =
-        super::super::batching::plan(&specs, &opaque, &Default::default(), true);
+    let planned = super::super::batching::plan(
+        &specs,
+        &opaque,
+        &Default::default(),
+        true,
+        &std::collections::HashSet::new(),
+    );
     super::super::batching::apply_flatten(&mut specs, &planned.flatten);
     // 部件范围：批次合并的 + 未合并的 = 原始 specs（无需构建的部件除外）。
     assert_eq!(
@@ -265,9 +267,21 @@ fn prepare_key_ignores_placement_and_viewport_but_tracks_content_quality_and_str
     let same = PrepareKey::new(&snapshot, Quality::Low, true, BatchStrategy::Spatial, true);
     assert_eq!(base, same);
 
-    let other_quality = PrepareKey::new(&snapshot, Quality::Medium, true, BatchStrategy::Spatial, true);
+    let other_quality = PrepareKey::new(
+        &snapshot,
+        Quality::Medium,
+        true,
+        BatchStrategy::Spatial,
+        true,
+    );
     assert_ne!(base, other_quality);
-    let other_strategy = PrepareKey::new(&snapshot, Quality::Low, false, BatchStrategy::Automatic, true);
+    let other_strategy = PrepareKey::new(
+        &snapshot,
+        Quality::Low,
+        false,
+        BatchStrategy::Automatic,
+        true,
+    );
     assert_ne!(base, other_strategy);
     let other_content = PrepareKey::new(
         &Arc::new(mixed_snapshot("content-b")),
@@ -297,8 +311,12 @@ fn two_instances_share_prepared_assets_but_keep_independent_mappings() {
     let mut scene = scene_with(vec![a, b]);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
-    assert!(advance_until_published(&mut world, &scene, &resources, "a", 64));
-    assert!(advance_until_published(&mut world, &scene, &resources, "b", 64));
+    assert!(advance_until_published(
+        &mut world, &scene, &resources, "a", 64
+    ));
+    assert!(advance_until_published(
+        &mut world, &scene, &resources, "b", 64
+    ));
 
     let visuals = world.resource::<ModelVisuals>();
     let root_a = &visuals.roots["a"];
@@ -311,7 +329,10 @@ fn two_instances_share_prepared_assets_but_keep_independent_mappings() {
         "同内容实例必须共享已登记 mesh"
     );
     // 实例映射独立。
-    assert_ne!(root_a.part_entities.get("s0"), root_b.part_entities.get("s0"));
+    assert_ne!(
+        root_a.part_entities.get("s0"),
+        root_b.part_entities.get("s0")
+    );
     // 只准备一次：同 key 不会重复建网格。
     assert!(
         visuals.preparation.work.started <= 1,
@@ -387,7 +408,10 @@ fn staging_is_invisible_and_never_appears_as_published_root() {
             assert_eq!(visuals.preparation_state("film"), RootState::Pending);
             assert!(!visuals.has_root("film"), "staging 不得进入已发布根");
             assert!(visuals.preview_meshes("film").is_empty());
-            assert!(hidden_anchors >= 1, "staging 根必须不可见（第 {frames} 帧）");
+            assert!(
+                hidden_anchors >= 1,
+                "staging 根必须不可见（第 {frames} 帧）"
+            );
         }
         if published {
             break;
@@ -495,7 +519,10 @@ fn continuous_pan_does_not_restart_or_duplicate_preparation() {
         "平移不得重启准备，实际 {} 次",
         visuals.preparation.work.started
     );
-    assert_eq!(visuals.preparation.work.cancelled, 0, "平移不得取消有效任务");
+    assert_eq!(
+        visuals.preparation.work.cancelled, 0,
+        "平移不得取消有效任务"
+    );
 }
 
 /// 换源后旧结果失效；删除节点后迟到完成不发布。
@@ -545,12 +572,22 @@ fn quality_changes_merge_into_latest_demand() {
     let key_low = PrepareKey::new(&snapshot, Quality::Low, true, BatchStrategy::Spatial, true);
     let key_high = PrepareKey::new(&snapshot, Quality::High, true, BatchStrategy::Spatial, true);
     let low_token = scheduler.demand("film", key_low.clone(), snapshot.clone(), Priority::Warm);
-    let high_token = scheduler.demand("film", key_high.clone(), snapshot.clone(), Priority::Visible);
+    let high_token = scheduler.demand(
+        "film",
+        key_high.clone(),
+        snapshot.clone(),
+        Priority::Visible,
+    );
     assert_ne!(low_token, high_token, "档位变化必须推进需求 token");
     assert_eq!(scheduler.demands().count(), 1, "同实例只保留最新需求");
     assert_eq!(scheduler.demand_of("film").unwrap().key, key_high);
     // 相同 key/优先级重复登记保持 token 稳定（仅平移/相同内容 full generation）。
-    let stable = scheduler.demand("film", key_high.clone(), snapshot.clone(), Priority::Visible);
+    let stable = scheduler.demand(
+        "film",
+        key_high.clone(),
+        snapshot.clone(),
+        Priority::Visible,
+    );
     assert_eq!(stable, high_token);
 }
 
@@ -632,7 +669,10 @@ fn oversized_single_allocation_fails_explicitly_without_sync_fallback() {
     scheduler.poll();
     assert_eq!(scheduler.running_len(), 0);
     assert_eq!(scheduler.queued_len(), 0);
-    assert!(scheduler.work.rejected > 0, "超额必须明确记录，不作为同步生成");
+    assert!(
+        scheduler.work.rejected > 0,
+        "超额必须明确记录，不作为同步生成"
+    );
     assert_eq!(scheduler.work.bytes, 0);
 }
 
@@ -774,7 +814,6 @@ fn app_schedule_publishes_across_frames_without_exposing_staging() {
     assert!(models.preparation.work.assembling == 0);
 }
 
-
 /// 缓存命中仍计装配工作单元：一份新实例的映射/实体创建不能被当作零成本。
 #[test]
 fn cache_hits_still_consume_assembly_units() {
@@ -791,13 +830,21 @@ fn cache_hits_still_consume_assembly_units() {
     let mut scene = scene_with(vec![first]);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
-    assert!(advance_until_published(&mut world, &scene, &resources, "first", 128));
+    assert!(advance_until_published(
+        &mut world, &scene, &resources, "first", 128
+    ));
 
     // 第二实例加入：全部资产都应命中共享缓存，但装配仍要占工作单元。
     scene.nodes.push(second);
     run_sync(&mut world, &scene, &resources);
-    let before = world.resource::<ModelVisuals>().preparation.work.units_total;
-    assert!(advance_until_published(&mut world, &scene, &resources, "second", 128));
+    let before = world
+        .resource::<ModelVisuals>()
+        .preparation
+        .work
+        .units_total;
+    assert!(advance_until_published(
+        &mut world, &scene, &resources, "second", 128
+    ));
     let visuals = world.resource::<ModelVisuals>();
     let used = visuals.preparation.work.units_total - before;
     assert!(used > 0, "缓存命中仍必须计入装配工作单元");
@@ -916,7 +963,9 @@ fn publish_respects_current_focus_visibility() {
     });
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
-    assert!(advance_until_published(&mut world, &scene, &resources, "film", 64));
+    assert!(advance_until_published(
+        &mut world, &scene, &resources, "film", 64
+    ));
     let visuals = world.resource::<ModelVisuals>();
     let root = visuals.roots["film"].root_entity();
     assert_eq!(
@@ -946,12 +995,16 @@ fn measure_sync_vs_background_at_film_set_scale() {
             0 => ops.push(serde_json::json!({"t": "box", "id": format!("b{index}"),
                 "parent": "root", "position": [x, 0.0, z], "size": [0.3, 0.6, 0.3],
                 "color": "#9aa4b2"})),
-            1 => ops.push(serde_json::json!({"t": "cylinder", "id": format!("c{index}"),
+            1 => ops.push(
+                serde_json::json!({"t": "cylinder", "id": format!("c{index}"),
                 "parent": "root", "position": [x, 0.3, z], "radius": 0.12, "height": 0.6,
-                "color": "#8b6f47"})),
-            2 => ops.push(serde_json::json!({"t": "capsule", "id": format!("p{index}"),
+                "color": "#8b6f47"}),
+            ),
+            2 => ops.push(
+                serde_json::json!({"t": "capsule", "id": format!("p{index}"),
                 "parent": "root", "position": [x, 0.3, z], "radius": 0.1, "height": 0.7,
-                "color": "#6b7280"})),
+                "color": "#6b7280"}),
+            ),
             _ => ops.push(serde_json::json!({"t": "sphere", "id": format!("s{index}"),
                 "parent": "root", "position": [x, 0.5, z], "radius": 0.2,
                 "color": "#ffffff"})),
@@ -1006,10 +1059,19 @@ fn measure_sync_vs_background_at_film_set_scale() {
     let work = &visuals.preparation.work;
     println!(
         "syncHostMs={:.2} parts={} batches={} | published={published} frames={frames} wallMs={wall:.2} backgroundMs={:.2} assembleMs={:.2} commandMs={:.2} units={} unitsMax={} newMeshBytes={} newMeshBytesMaxPerFrame={} peakWorkBytes={} threads={:?} host={:?}",
-        sync.0, sync.1, sync.2,
-        work.background_ms, work.assemble_ms, work.command_ms,
-        work.units_total, work.units_max, work.new_mesh_bytes_total,
-        work.new_mesh_bytes_max, work.peak_bytes, work.threads, work.host_thread,
+        sync.0,
+        sync.1,
+        sync.2,
+        work.background_ms,
+        work.assemble_ms,
+        work.command_ms,
+        work.units_total,
+        work.units_max,
+        work.new_mesh_bytes_total,
+        work.new_mesh_bytes_max,
+        work.peak_bytes,
+        work.threads,
+        work.host_thread,
     );
 }
 
@@ -1036,7 +1098,9 @@ fn published_root_continues_existing_lod_replacement_and_preview_layers() {
     scene.viewport.zoom = 1.0;
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
-    assert!(advance_until_published(&mut world, &scene, &resources, "film", 128));
+    assert!(advance_until_published(
+        &mut world, &scene, &resources, "film", 128
+    ));
 
     let initial_quality = world.resource::<ModelVisuals>().roots["film"].quality;
     // 进入聚焦（High owner）：既有 LOD replacement 必须仍能接管已发布的根。
@@ -1052,9 +1116,7 @@ fn published_root_continues_existing_lod_replacement_and_preview_layers() {
     });
     let mut visuals = world.remove_resource::<ModelVisuals>().unwrap();
     let mut meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
-    let mut materials = world
-        .remove_resource::<Assets<StandardMaterial>>()
-        .unwrap();
+    let mut materials = world.remove_resource::<Assets<StandardMaterial>>().unwrap();
     let pins = std::collections::HashSet::new();
     let mut commands = world.commands();
     sync_quality(
@@ -1080,9 +1142,19 @@ fn published_root_continues_existing_lod_replacement_and_preview_layers() {
     // 已发布根的需求仍指向同一内容 key（供同内容实例共享），但不再有 staging 或重复准备。
     assert!(visuals.staging.is_empty());
     assert_eq!(visuals.preparation.work.started, 1);
-    assert!(visuals.preparation.claim(
-        &visuals.preparation.demand_of("film").expect("demand kept").key
-    ).is_some(), "已发布内容的产物仍可被同内容实例复用");
+    assert!(
+        visuals
+            .preparation
+            .claim(
+                &visuals
+                    .preparation
+                    .demand_of("film")
+                    .expect("demand kept")
+                    .key
+            )
+            .is_some(),
+        "已发布内容的产物仍可被同内容实例复用"
+    );
     let _ = TransformAnimationSet::Playback;
 }
 
@@ -1112,7 +1184,9 @@ fn content_replacement_keeps_old_representation_until_publish() {
     let mut scene = scene_with(vec![node]);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
-    assert!(advance_until_published(&mut world, &scene, &resources, "film", 64));
+    assert!(advance_until_published(
+        &mut world, &scene, &resources, "film", 64
+    ));
     let old_root = world.resource::<ModelVisuals>().roots["film"].root_entity();
 
     // 换源：只做一次同步（不推进准备），然后逐帧装配。
@@ -1169,7 +1243,9 @@ fn native_preparation_diagnostics_are_bounded_and_complete() {
     let scene = scene_with(vec![node]);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
-    assert!(advance_until_published(&mut world, &scene, &resources, "film", 64));
+    assert!(advance_until_published(
+        &mut world, &scene, &resources, "film", 64
+    ));
 
     let visuals = world.resource::<ModelVisuals>();
     let budget = visuals.budget_json(
@@ -1219,7 +1295,10 @@ fn native_preparation_diagnostics_are_bounded_and_complete() {
     assert_eq!(preparation["stagingTotal"], 0);
     assert_eq!(preparation["retiringEntities"], 0);
     assert_eq!(preparation["budgets"]["unitsPerFrame"], 64);
-    assert_eq!(preparation["budgets"]["newMeshBytesPerFrame"], 4 * 1024 * 1024);
+    assert_eq!(
+        preparation["budgets"]["newMeshBytesPerFrame"],
+        4 * 1024 * 1024
+    );
     // 有变更标记只在真正发布/取消/退役的帧上置位。
     let mut visuals = world.remove_resource::<ModelVisuals>().unwrap();
     assert!(visuals.take_preparation_changed());
@@ -1346,7 +1425,11 @@ fn real_film_sets_prepare_in_background_and_publish() {
             "{} 的部件展开/网格构建必须发生在后台阶段",
             film.title
         );
-        assert!(!work.threads.is_empty(), "{} 必须记录真实后台线程", film.title);
+        assert!(
+            !work.threads.is_empty(),
+            "{} 必须记录真实后台线程",
+            film.title
+        );
         assert!(
             work.units_max <= MAX_UNITS_PER_FRAME + 8,
             "{} 单帧装配 {} 单元超出软预算",
@@ -1359,7 +1442,11 @@ fn real_film_sets_prepare_in_background_and_publish() {
             film.title,
             work.new_mesh_bytes_max
         );
-        assert!(visuals.staging.is_empty(), "{} 发布后不得残留 staging", film.title);
+        assert!(
+            visuals.staging.is_empty(),
+            "{} 发布后不得残留 staging",
+            film.title
+        );
         assert_eq!(visuals.preparation.work.assembling, 0);
     }
 }
@@ -1380,7 +1467,9 @@ fn real_film_sets_warm_reentry_and_pan_do_not_rebuild() {
         let mut scene = scene_with(vec![node]);
         let mut world = world_with_resources();
         run_sync(&mut world, &scene, &resources);
-        assert!(advance_until_published(&mut world, &scene, &resources, "film", 8192));
+        assert!(advance_until_published(
+            &mut world, &scene, &resources, "film", 8192
+        ));
         let after_cold = {
             let visuals = world.resource::<ModelVisuals>();
             (
@@ -1422,7 +1511,9 @@ fn real_film_sets_warm_reentry_and_pan_do_not_rebuild() {
         sibling.model = Some(reference_for(&snapshot));
         scene.nodes.push(sibling);
         run_sync(&mut world, &scene, &resources);
-        assert!(advance_until_published(&mut world, &scene, &resources, "film-2", 8192));
+        assert!(advance_until_published(
+            &mut world, &scene, &resources, "film-2", 8192
+        ));
         let warm = world.resource::<ModelVisuals>();
         println!(
             "[{}] cold units={} → warm-sibling units={} started={} cacheHits={}",
@@ -1455,14 +1546,15 @@ fn real_film_sets_warm_reentry_and_pan_do_not_rebuild() {
             "同内容实例的部件身份必须一致（共享规范内容）"
         );
         assert_ne!(
-            warm.roots["film"].part_entities[&sample],
-            warm.roots["film-2"].part_entities[&sample],
+            warm.roots["film"].part_entities[&sample], warm.roots["film-2"].part_entities[&sample],
             "同一部件在两个实例中必须是不同实体"
         );
-        let shared = warm.roots["film"]
-            .mesh_handles
-            .iter()
-            .any(|handle| warm.roots["film-2"].mesh_handles.iter().any(|o| o.id() == handle.id()));
+        let shared = warm.roots["film"].mesh_handles.iter().any(|handle| {
+            warm.roots["film-2"]
+                .mesh_handles
+                .iter()
+                .any(|o| o.id() == handle.id())
+        });
         assert!(shared, "{} 同内容实例必须共享已登记 mesh", film.title);
 
         // 删除：旧根按预算退役，最终不残留实体或待退役队列。
@@ -1471,14 +1563,23 @@ fn real_film_sets_warm_reentry_and_pan_do_not_rebuild() {
         for _ in 0..8192 {
             advance(&mut world, &scene, &resources);
             let visuals = world.resource::<ModelVisuals>();
-            if visuals.roots.is_empty() && visuals.retiring.is_empty() && visuals.staging.is_empty() {
+            if visuals.roots.is_empty() && visuals.retiring.is_empty() && visuals.staging.is_empty()
+            {
                 break;
             }
         }
         let cleared = world.resource::<ModelVisuals>();
         assert!(cleared.roots.is_empty(), "{} 删除后不得残留根", film.title);
-        assert!(cleared.retiring.is_empty(), "{} 旧根退役必须完成", film.title);
-        assert!(cleared.staging.is_empty(), "{} 删除后不得残留 staging", film.title);
+        assert!(
+            cleared.retiring.is_empty(),
+            "{} 旧根退役必须完成",
+            film.title
+        );
+        assert!(
+            cleared.staging.is_empty(),
+            "{} 删除后不得残留 staging",
+            film.title
+        );
     }
 }
 
@@ -1504,7 +1605,9 @@ fn real_film_sets_keep_representation_consistent_across_lifecycle_events() {
     let mut scene = scene_with(vec![node]);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
-    assert!(advance_until_published(&mut world, &scene, &resources, "film", 8192));
+    assert!(advance_until_published(
+        &mut world, &scene, &resources, "film", 8192
+    ));
     let old_root = world.resource::<ModelVisuals>().roots["film"].root_entity();
 
     // 换源（另一个真实片场）：任何一帧都只有一份完整已发布表示。
@@ -1514,8 +1617,8 @@ fn real_film_sets_keep_representation_consistent_across_lifecycle_events() {
     for _ in 0..8192 {
         let before = world.resource::<ModelVisuals>();
         assert_eq!(before.roots.len(), 1, "内容替换期间只能有一个已发布表示");
-        let published_before = before.roots["film"].content_signature
-            == format!("real:{}", second.node_id);
+        let published_before =
+            before.roots["film"].content_signature == format!("real:{}", second.node_id);
         let root_before = if published_before {
             before.roots["film"].root_entity()
         } else {
@@ -1567,9 +1670,12 @@ fn real_film_sets_keep_representation_consistent_across_lifecycle_events() {
         true,
     );
     visuals.preparation.set_mode(Mode::Inline);
-    visuals
-        .preparation
-        .demand("film", key.clone(), high_resource.clone(), Priority::Visible);
+    visuals.preparation.demand(
+        "film",
+        key.clone(),
+        high_resource.clone(),
+        Priority::Visible,
+    );
     // 已在装配中的同内容实例：状态要么仍 Published（旧完整表示可截），要么 Pending
     // （必须等待）；两种都不得是 Absent。
     let state = visuals.preparation_state("film");

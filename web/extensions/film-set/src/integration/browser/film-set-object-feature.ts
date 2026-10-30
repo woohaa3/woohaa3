@@ -10,7 +10,7 @@ import { FilmSetObjectSession } from "../../authoring/browser/object-session.js"
 import { readFilmSetContentForSession } from "../../state/browser/object-state.js";
 import { createFilmSetObjectGesture } from "../../authoring/browser/film-set-object-gesture.js";
 import type { FilmSetItemPatchOp } from "@woohaa3/contracts";
-import { isFilmSetNode } from "@woohaa3/contracts";
+import { isFilmSetGroupNode, readFilmSetGroupMarker } from "@woohaa3/contracts";
 import type { FilmSetObjectAction } from "../../authoring/browser/object-action.js";
 
 /** 片场对象局部键盘 action（与按钮共用；UI 只调用它，不直接操作手势）。 */
@@ -146,7 +146,7 @@ export function installFilmSetObjectFeature(
     const candidate = ctx.canvasRuntime.modelFocusProjection()?.nodeId ?? null;
     const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
     const node = candidate ? canvas?.document.nodes.find((entry) => entry.id === candidate) : undefined;
-    const isFilmSet = isFilmSetNode(node?.type, canvas?.nodeData?.[candidate ?? ""]);
+    const isFilmSet = isFilmSetGroupNode(node, canvas?.nodeData?.[candidate ?? ""]);
     if (isFilmSet && candidate && objectSession.getState().nodeId !== candidate) {
       objectSession.enter(candidate);
     }
@@ -169,7 +169,6 @@ export function installFilmSetObjectFeature(
     if (!ctx.filmSetPlayback.getSnapshot().preview) return;
     objectGesture.handler.cancelIfDragging();
     objectSession.cancelEdit();
-    objectSession.setTool("move");
   });
   let runtimeGeneration = ctx.canvasRuntime.runtime()?.generation();
   const unsubscribeRuntime = ctx.canvasRuntime.subscribe(() => {
@@ -178,7 +177,6 @@ export function installFilmSetObjectFeature(
     runtimeGeneration = generation;
     objectGesture.handler.cancelIfDragging();
     objectSession.cancelEdit();
-    objectSession.setTool("move");
   });
 
   return {
@@ -212,9 +210,32 @@ function submitProtectedItemOp(
   label: string
 ): { ok: true; handle: { settled: Promise<{ state: string; error: string | null }> } } | { ok: false; reason: string } {
   if (!ctx.canvasSession.isWritable()) return { ok: false, reason: "当前不可写，无法编辑片场对象" };
-  const settled = ctx.canvasEdit
-    .record([{ type: "filmSet.itemPatch", nodeId, itemId, op } as never], label)
-    .then((result) => (result.ok ? { state: "committed", error: null } : { state: "rejected", error: result.reason }));
-  // 规划失败（无法建立合法逆操作）在 record 内以 rejected 结算，不静默降级。
-  return { ok: true, handle: { settled } };
+  const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
+  const group = readFilmSetGroupMarker(canvas?.nodeData[nodeId]);
+  if (group) {
+    if (itemId === "film-set-ground" && group.ground) {
+      if (op.kind === "replace-model") return { ok: false, reason: "地面不支持模型替换" };
+      const marker = { ...group };
+      if (op.kind === "delete") delete marker.ground;
+      else { const t = op.localTransform; marker.ground = { ...group.ground, transform: { x: t.offset.x, y: t.offset.y, z: t.offset.z, yaw: t.yaw, scale: t.scale } }; }
+      const settled = ctx.canvasEdit.record([{ type: "nodeData.patch", nodeId, expectedNodeData: { [nodeId]: canvas!.nodeData[nodeId] }, value: { filmSetGroup: marker } as import("@woohaa3/contracts").CanvasNodeData }], label)
+        .then(result => result.ok ? { state: "committed", error: null } : { state: "rejected", error: result.reason });
+      return { ok: true, handle: { settled } };
+    }
+    const binding = group.sceneBindings.find(entry => entry.bindingId === itemId);
+    if (!binding) return { ok: false, reason: "片场 binding 不存在" };
+    if (op.kind === "delete") {
+      const marker = { ...group, sceneBindings: group.sceneBindings.filter(entry => entry.bindingId !== itemId), clips: group.clips?.map(clip => ({ ...clip, bindings: clip.bindings?.filter(binding => binding.itemId !== itemId) })) };
+      const settled = ctx.canvasEdit.record([{ type: "nodeData.patch", nodeId, expectedNodeData: { [nodeId]: canvas!.nodeData[nodeId] }, value: { filmSetGroup: marker } as import("@woohaa3/contracts").CanvasNodeData }], label)
+        .then(result => result.ok ? { state: "committed", error: null } : { state: "rejected", error: result.reason });
+      return { ok: true, handle: { settled } };
+    }
+    if (op.kind !== "transform") return { ok: false, reason: "请直接编辑来源资源卡片以替换内容" };
+    const transform = op.localTransform;
+    const patch = { transform: { x: transform.offset.x, y: transform.offset.y, z: transform.offset.z, yaw: transform.yaw, scale: transform.scale } };
+    const settled = ctx.canvasEdit.record([{ type: "filmSetGroup.bindingPatch", groupId: nodeId, bindingId: itemId, expectedContentKey: binding.contentKey, patch } as never], label)
+      .then(result => result.ok ? { state: "committed", error: null } : { state: "rejected", error: result.reason });
+    return { ok: true, handle: { settled } };
+  }
+  return { ok: false, reason: "对象编辑仅支持 film-set group，请先迁移旧片场" };
 }

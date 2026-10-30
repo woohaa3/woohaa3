@@ -1,370 +1,75 @@
-import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it } from "vitest";
-import { serverCanvasToYDoc, yDocToServerCanvas } from "./yjs/index.js";
-import {
-  createEmptyWoohaa3ServerCanvas, type ServerCanvas, type CanvasCommand, type EditPlan,
-  createFilmSetSnapshot, canonicalFilmSetFields,
-  createModel3DNodeData, model3DNodeDataFields, decodeFilmSetNodeData, filmSetAnimationsOf,
-  filmSetItemEditHash, modelSourceHash, shotImageReferenceIdentity, shotReferenceContentIdentity,
-  createFilmSetObjectResolver, filmSetObjectModelNodeData, filmSetObjectContainerData, filmSetObjectContainerId, filmSetObjectModelNodeId, resolveFilmSetObject, isFilmSetNode,
-  isCanvasCommandSatisfied, decodeEditApplyCommand
-} from "../index.js";
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
+import { createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, canonicalFilmSetFields, filmSetObjectContainerId, filmSetObjectContainerData, createFilmSetObjectResolver, readFilmSetGroupMarker, migrateLegacyFilmSetToGroup, type CanvasCommand } from "../index.js";
 
-const NOW = "2026-10-24T00:00:00.000Z";
-const containerId = filmSetObjectContainerId("film", "model");
-function fixture(motion = 'motion.model.rotate("root", {speed:1});') {
-  const canvas = createEmptyWoohaa3ServerCanvas("objects", NOW);
-  const animation = createFilmSetSnapshot({ title: "片场", model: { modelScript: 'scene.box({id:"arm",size:[1,1,1]});', modelScriptVersion: "woohaa-model-js-v2" }, motionScript: motion, timeline: { duration: 3, loop: false } });
-  animation.filmSetContent.items.find(item => item.id === "model")!.localTransform = { offset: { x: 2, y: 1, z: 4 }, scale: 2, yaw: 0.6 };
-  canvas.document.nodes = [
-    { id: "film", type: "composite-asset", position: { x: 0, y: 0 }, width: 320, height: 240 },
-    { id: "source", type: "model3d", position: { x: 600, y: 0 } },
-    { id: "image", type: "image", position: { x: 900, y: 0 } }
-  ];
+function fixture() {
+  const canvas = createEmptyWoohaa3ServerCanvas("objects");
+  const animation = createFilmSetSnapshot({ title: "片场", model: { modelScript: "scene.box({id:'body'});", modelScriptVersion: "woohaa-model-js-v2" }, timeline: { duration: 3, loop: false } });
+  canvas.document.nodes = [{ id: "film", type: "composite-asset", position: { x: 100, y: 60 } }];
   canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
-  canvas.nodeData.source = model3DNodeDataFields(createModel3DNodeData({ title: "新模型", model: { modelScript: 'scene.sphere({id:"body",radius:1});', modelScriptVersion: "woohaa-model-js-v2" } })) as never;
   return canvas;
 }
-function apply(canvas: ServerCanvas, commands: CanvasCommand[]) {
-  const result = applyCanvasCommands(canvas, commands, { now: NOW });
-  if (!result.ok) throw new Error(result.rejection.message);
-  return result.canvas;
-}
-function animation(canvas: ServerCanvas) {
-  const decoded = decodeFilmSetNodeData(canvas.nodeData.film);
-  if (!decoded.ok) throw new Error(decoded.reason);
-  return decoded.value;
-}
-function entrance(canvas: ServerCanvas) {
-  return apply(canvas, [{ type: "node.add", node: { id: containerId, type: "composite-asset", position: { x: 400, y: 100 }, width: 248, height: 232 }, nodeData: filmSetObjectContainerData("film", "model") }]);
-}
-function replacement(canvas: ServerCanvas): CanvasCommand {
-  return { type: "filmSet.itemPatch", nodeId: "film", itemId: "model", op: {
-    kind: "replace-model", sourceNodeId: "source", expectedSourceHash: modelSourceHash(String(canvas.nodeData.source.modelScript)),
-    expectedModelHash: (canvas.nodeData.source.modelContentVersion as unknown as { contentHash: string }).contentHash,
-    expectedItemHash: filmSetItemEditHash(animation(canvas).filmSetContent.items.find(item => item.id === "model")!), importedAt: NOW
-  } };
-}
-function edit(canvas: ServerCanvas, plan: EditPlan["forward"]) {
-  return apply(canvas, [{ type: "edit.apply", ...plan }]);
-}
 
-describe("片场对象容器", () => {
-  it("一轮批量解析共享源快照，后续编辑使用新快照且不污染先前结果", () => {
-    const canvas = entrance(fixture()), resolve = createFilmSetObjectResolver(canvas);
-    const first = resolve(containerId)!;
-    for (const node of canvas.document.nodes) {
-      const target = resolve(node.id);
-      if (target) expect(target.animation).toBe(first.animation);
-    }
-    const changed = apply(canvas, [replacement(canvas)]);
-    const next = createFilmSetObjectResolver(changed)(containerId)!;
-    expect(next.item).not.toEqual(first.item);
-    expect(first.item).toEqual(resolve(containerId)!.item);
-    expect(next.item).toEqual(resolveFilmSetObject(changed, containerId)!.item);
-  });
-  it("自动维护唯一归属，不被解码为独立场景；不保存第二份模型", () => {
-    const canvas = entrance(fixture());
-    expect(resolveFilmSetObject(canvas, containerId)?.item.id).toBe("model");
-    expect(isFilmSetNode("composite-asset", canvas.nodeData[containerId])).toBe(false);
-    expect(decodeFilmSetNodeData(canvas.nodeData[containerId]).ok).toBe(false);
-    expect(Object.keys(canvas.nodeData[containerId]).sort()).toEqual(["compositeAssetRole", "extensionId", "filmSetObject"]);
-    expect(applyCanvasCommands(canvas, [{ type: "node.add", node: { id: "forged", type: "composite-asset", position: { x: 0, y: 0 } }, nodeData: filmSetObjectContainerData("film", "model") }]).ok).toBe(false);
-  });
-  it("拒绝伪造归属、改写归属、注入模型及普通连线", () => {
-    const canvas = entrance(fixture());
-    for (const value of [{ title: "伪造" }, { filmSetObject: { schemaVersion: 1, filmSetNodeId: "film", itemId: "ground" } }, null]) {
-      expect(applyCanvasCommands(canvas, [{ type: "nodeData.patch", nodeId: containerId, value: value as never }]).ok).toBe(false);
-    }
-    expect(applyCanvasCommands(canvas, [{ type: "edge.add", edge: { id: "bad", source: "source", target: containerId } }]).ok).toBe(false);
-    expect(applyCanvasCommands(canvas, [{ type: "edge.add", edge: { id: "bad", source: containerId, target: "image" } }]).ok).toBe(false);
-    const data = { ...filmSetObjectContainerData("film", "model"), modelScript: "scene.box({});" };
-    expect(applyCanvasCommands(fixture(), [{ type: "node.add", node: { id: containerId, type: "composite-asset", position: { x: 0, y: 0 } }, nodeData: data as never }]).ok).toBe(false);
-  });
-  it("历史容器残留内容字段时就地收敛，不再让整张画布的所有命令失败", () => {
-    const canvas = entrance(fixture());
-    // 旧数据把片场/模型内容写在了容器上；严格拒绝会让与该容器无关的 node.add / edge.add 也全部失败
-    // （用户表现：新建节点、连线、从端口拉线全部无效）。
-    canvas.nodeData[containerId] = {
-      ...(canvas.nodeData[containerId] as Record<string, unknown>),
-      scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
-      sceneCamera: { azimuth: 0, elevation: 0.7853981633974483, distance: 4, aspect: "16:9" },
-      filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] },
-      animationSnapshotHash: "legacy",
-      modelScriptStatus: "ok",
-      modelScriptError: null
-    } as never;
-    const next = apply(canvas, [{ type: "node.add", node: { id: "probe", type: "text", position: { x: 10, y: 10 } } }]);
-    expect(next.document.nodes.some(node => node.id === "probe")).toBe(true);
-    expect(Object.keys(next.nodeData[containerId] as object).sort()).toEqual(["compositeAssetRole", "extensionId", "filmSetObject"]);
-    // 不变式仍对新的写入生效：容器不能被普通 patch 改写。
-    expect(applyCanvasCommands(next, [{ type: "nodeData.patch", nodeId: containerId, value: { modelScriptStatus: "failed" } as never }]).ok).toBe(false);
-  });
-  it("移动片场会带动容器，显式拖动容器不叠加位移", () => {
-    const canvas = entrance(fixture());
-    const moved = apply(canvas, [{ type: "node.update", nodeId: "film", position: { x: 100, y: 100 } }]);
-    expect(moved.document.nodes.find(node => node.id === containerId)?.position).toEqual({ x: 500, y: 200 });
-    const explicit = apply(canvas, [{ type: "node.update", nodeId: "film", position: { x: 100, y: 100 } }, { type: "node.update", nodeId: containerId, position: { x: 800, y: 300 } }]);
-    expect(explicit.document.nodes.find(node => node.id === containerId)?.position).toEqual({ x: 800, y: 300 });
-  });
-  it("容器内真实 model3d 子节点不能被普通命令移动或改写", () => {
-    const canvas = entrance(fixture());
-    const modelId = filmSetObjectModelNodeId("film", "model");
-    expect(applyCanvasCommands(canvas, [{ type: "node.update", nodeId: modelId, position: { x: 80, y: 40 } }]).ok).toBe(false);
-    expect(applyCanvasCommands(canvas, [{ type: "node.update", nodeId: modelId, parentId: null }]).ok).toBe(false);
-    expect(applyCanvasCommands(canvas, [{ type: "nodeData.patch", nodeId: modelId, value: { title: "伪造" } }]).ok).toBe(false);
-    expect(canvas.document.nodes.find(node => node.id === modelId)?.position).toEqual({ x: 12, y: 12 });
-  });
-  it("模型卡片留出内边距，容器缩放、移动及撤销不改变相对位置", () => {
-    const canvas = entrance(fixture());
-    const modelId = filmSetObjectModelNodeId("film", "model");
-    const card = canvas.document.nodes.find(node => node.id === modelId)!;
-    expect(card).toMatchObject({ parentId: containerId, position: { x: 12, y: 12 }, width: 224, height: 208 });
-    const plan = planCanvasEdit(canvas, [{ type: "node.update", nodeId: containerId, position: { x: 720, y: 240 }, width: 320, height: 280 }]);
-    expect(plan.ok).toBe(true); if (!plan.ok) return;
-    const moved = edit(canvas, plan.forward);
-    expect(moved.document.nodes.find(node => node.id === modelId)).toMatchObject({ parentId: containerId, position: { x: 12, y: 12 }, width: 296, height: 256 });
-    expect(edit(moved, plan.inverse).document.nodes.find(node => node.id === modelId)).toEqual(card);
-  });
-  it("旧卡片恢复内边距时不把派生位置写入独立的撤销操作", () => {
-    const canvas = entrance(fixture());
-    const modelId = filmSetObjectModelNodeId("film", "model");
-    Object.assign(canvas.document.nodes.find(node => node.id === modelId)!, { position: { x: 0, y: 0 }, width: 248, height: 232 });
-    const plan = planCanvasEdit(canvas, [{ type: "nodeData.patch", nodeId: "film", value: { title: "新标题" } }]);
-    expect(plan.ok).toBe(true); if (!plan.ok) return;
-    const updated = edit(canvas, plan.forward);
-    expect(updated.document.nodes.find(node => node.id === modelId)).toMatchObject({ position: { x: 12, y: 12 }, width: 224, height: 208 });
-    expect(applyCanvasCommands(updated, [{ type: "edit.apply", ...plan.inverse }]).ok).toBe(true);
-  });
-  it("移除容器保留对象；删除对象或片场清理容器，撤销恢复原布局", () => {
-    const canvas = entrance(fixture());
-    expect(animation(apply(canvas, [{ type: "node.remove", nodeIds: [containerId] }])).filmSetContent.items.some(item => item.id === "model")).toBe(true);
-    for (const command of [{ type: "filmSet.itemPatch", nodeId: "film", itemId: "model", op: { kind: "delete" } }, { type: "node.remove", nodeIds: ["film"] }] as CanvasCommand[]) {
-      const plan = planCanvasEdit(canvas, [command]);
-      expect(plan.ok).toBe(true); if (!plan.ok) continue;
-      const removed = edit(canvas, plan.forward);
-      expect(removed.document.nodes.some(node => node.id === containerId)).toBe(false);
-      const restored = edit(removed, plan.inverse);
-      expect(resolveFilmSetObject(restored, containerId)?.item.id).toBe("model");
-      expect(restored.document.nodes.find(node => node.id === containerId)?.position).toEqual({ x: 400, y: 100 });
+describe("旧对象容器的只读边界", () => {
+  it("旧 owner、对象 patch 和容器新增均原子拒绝", () => {
+    const canvas = fixture();
+    const before = structuredClone(canvas);
+    const commands: CanvasCommand[] = [
+      { type: "nodeData.patch", nodeId: "film", value: { title: "修改" } },
+      { type: "filmSet.itemPatch", nodeId: "film", itemId: "model", op: { kind: "delete" } },
+      { type: "node.add", node: { id: filmSetObjectContainerId("film", "model"), type: "composite-asset", position: { x: 0, y: 0 } }, nodeData: filmSetObjectContainerData("film", "model") }
+    ];
+    for (const command of commands) {
+      expect(applyCanvasCommands(canvas, [{ type: "canvas.setTitle", title: "不能部分提交" }, command]).ok).toBe(false);
+      expect(canvas).toEqual(before);
     }
   });
-});
 
-describe("对象容器默认显示和关闭", () => {
-  it("新增对象容器从片场左上方向右横排，后续写入保留手动位置", () => {
-    const source = fixture();
-    const scene = animation(source);
-    const model = scene.filmSetContent.items.find(item => item.kind === "model")!;
-    scene.filmSetContent.items.push({ ...structuredClone(model), id: "second" }, { ...structuredClone(model), id: "third" });
-    source.nodeData.film = canonicalFilmSetFields(scene) as never;
-    const canvas = apply(source, [{ type: "nodeData.patch", nodeId: "film", value: {} }]);
-    const ids = scene.filmSetContent.items.map(item => filmSetObjectContainerId("film", item.id));
-    expect(ids.map(id => canvas.document.nodes.find(node => node.id === id)!.position)).toEqual(ids.map((_, index) => ({ x: index * 272, y: -280 })));
-    const moved = apply(canvas, [{ type: "node.update", nodeId: ids[0], position: { x: -400, y: 100 } }]);
-    const updated = apply(moved, [{ type: "nodeData.patch", nodeId: "film", value: { title: "新标题" } }]);
-    expect(updated.document.nodes.find(node => node.id === ids[0])!.position).toEqual({ x: -400, y: 100 });
-    expect(ids.slice(1).map(id => updated.document.nodes.find(node => node.id === id)!.position)).toEqual(ids.slice(1).map(id => canvas.document.nodes.find(node => node.id === id)!.position));
+  it("兼容 reader 读取旧 shell 不写入快照或派生节点", () => {
+    const canvas = fixture();
+    const id = filmSetObjectContainerId("film", "model");
+    canvas.document.nodes.push({ id, type: "composite-asset", position: { x: 400, y: 100 } });
+    canvas.nodeData[id] = filmSetObjectContainerData("film", "model");
+    const before = structuredClone(canvas);
+    expect(createFilmSetObjectResolver(canvas)(id)?.item.id).toBe("model");
+    expect(canvas).toEqual(before);
   });
-  it("旧片场首次写入补齐所有对象，隐藏持久化且不影响对象内容", () => {
-    const canvas = apply(fixture(), [{ type: "nodeData.patch", nodeId: "film", value: {} }]);
-    for (const item of animation(canvas).filmSetContent.items) expect(resolveFilmSetObject(canvas, filmSetObjectContainerId("film", item.id))?.item.id).toBe(item.id);
-    const before = animation(canvas);
-    const hidden = apply(canvas, [{ type: "nodeData.patch", nodeId: "film", value: { filmSetObjectContainersHidden: ["model"] } }]);
-    expect(hidden.document.nodes.some(node => node.id === containerId)).toBe(false);
-    expect(animation(hidden)).toEqual(before);
-    const doc = serverCanvasToYDoc(hidden);
-    try {
-      const loaded = yDocToServerCanvas(doc, { now: NOW });
-      expect(loaded.ok).toBe(true);
-      if (loaded.ok) expect(loaded.canvas.nodeData.film.filmSetObjectContainersHidden).toEqual(["model"]);
-    } finally { doc.destroy(); }
-    const again = apply(hidden, [{ type: "nodeData.patch", nodeId: "film", value: { title: "重命名" } }]);
-    expect(again.document.nodes.some(node => node.id === containerId)).toBe(false);
-    const shown = apply(again, [{ type: "nodeData.patch", nodeId: "film", value: { filmSetObjectContainersHidden: [] } }]);
-    expect(resolveFilmSetObject(shown, containerId)?.item.id).toBe("model");
-  });
-  it("关闭／显示可撤销重做，恢复容器原位置且保留其他容器", () => {
-    const canvas = entrance(fixture());
-    const plan = planCanvasEdit(canvas, [{ type: "nodeData.patch", nodeId: "film", value: { filmSetObjectContainersHidden: ["model"] } }]);
-    expect(plan.ok).toBe(true); if (!plan.ok) return;
-    const hidden = edit(canvas, plan.forward);
-    expect(hidden.document.nodes.some(node => node.id === containerId)).toBe(false);
-    const restored = edit(hidden, plan.inverse);
-    expect(restored.document.nodes.find(node => node.id === containerId)).toEqual(canvas.document.nodes.find(node => node.id === containerId));
-    expect(edit(restored, plan.forward).document.nodes.some(node => node.id === containerId)).toBe(false);
-  });
-  it("新建片场立即生成每个对象容器", () => {
-    const source = fixture();
-    const value = animation(source);
-    value.filmSetContent.items.push({ ...structuredClone(value.filmSetContent.items[0]), id: "second" });
-    source.nodeData.film = canonicalFilmSetFields(value) as never;
-    const canvas = apply(createEmptyWoohaa3ServerCanvas("new", NOW), [{ type: "node.add", node: source.document.nodes[0], nodeData: source.nodeData.film }]);
-    for (const item of animation(canvas).filmSetContent.items) expect(resolveFilmSetObject(canvas, filmSetObjectContainerId("film", item.id))?.item.id).toBe(item.id);
-  });
-  it("非法显示设置整批拒绝", () => {
-    for (const value of [null, "model", [1], ["model", "model"]]) expect(applyCanvasCommands(entrance(fixture()), [{ type: "nodeData.patch", nodeId: "film", value: { filmSetObjectContainersHidden: value } as never }]).ok).toBe(false);
-  });
-});
 
-describe("模型快照替换", () => {
-  it("保留对象身份/摆放/整体动作；来源删除后副本独立，撤销重做恢复精确快照", () => {
-    const canvas = entrance(fixture());
-    const before = animation(canvas);
-    const plan = planCanvasEdit(canvas, [replacement(canvas)]);
-    expect(plan.ok).toBe(true); if (!plan.ok) return;
-    expect(decodeEditApplyCommand({ type: "edit.apply", ...plan.forward })).not.toBeNull();
-    const replaced = edit(canvas, plan.forward);
-    const item = animation(replaced).filmSetContent.items.find(item => item.id === "model")!;
-    expect(item).toMatchObject({ id: "model", name: "片场", localTransform: before.filmSetContent.items.find(item => item.id === "model")!.localTransform, kind: "model", model: { modelScript: 'scene.sphere({id:"body",radius:1});' } });
-    expect(filmSetAnimationsOf(animation(replaced)).clips[0].bindings[0].motion?.motionScript).toContain('"root"');
-    expect(isCanvasCommandSatisfied(replaced, { type: "edit.apply", ...plan.forward })).toBe(true);
-    const withoutSource = apply(replaced, [{ type: "node.remove", nodeIds: ["source"] }]);
-    expect(animation(withoutSource).filmSetContent.items.find(item => item.id === "model")).toEqual(item);
-    const undone = edit(withoutSource, plan.inverse);
-    expect(animation(undone)).toEqual(before);
-    expect(animation(edit(undone, plan.forward)).filmSetContent.items.find(item => item.id === "model")).toEqual(item);
+  it("迁移移除旧 shell、未标记后代及其边，保留真正资源和镜头", () => {
+    const canvas = fixture();
+    const id = filmSetObjectContainerId("film", "model");
+    canvas.document.nodes.push({ id, type: "composite-asset", position: { x: 400, y: 100 } }, { id: "old-child", type: "model3d", parentId: id, position: { x: 12, y: 12 } });
+    canvas.nodeData[id] = filmSetObjectContainerData("film", "model");
+    canvas.nodeData["old-child"] = { modelScript: "scene.box({id:'old'});" };
+    canvas.document.edges.push({ id: "old-edge", source: "old-child", target: "film", data: {} });
+    const migrated = migrateFilmSetFixture(canvas, "film");
+    expect(migrated.document.nodes.some(node => node.id === id || node.id === "old-child")).toBe(false);
+    expect(migrated.document.edges).toEqual([]);
+    expect(migrated.nodeData[id]).toBeUndefined();
+    expect(migrated.nodeData["old-child"]).toBeUndefined();
+    const binding = readFilmSetGroupMarker(migrated.nodeData.film)!.sceneBindings[0]!;
+    expect(migrated.document.nodes.find(node => node.id === binding.sourceNodeId)?.parentId).toBe("film");
+    expect(migrated.nodeData[binding.sourceNodeId]?.modelScript).toContain("body");
+    expect(migrated.nodeData.film.filmSetContent).toBeUndefined();
   });
-  it("不匹配的部件动作停用，撤销同时恢复动作与模型", () => {
-    const canvas = fixture('motion.model.rotate("arm", {speed:1});');
-    const before = animation(canvas);
-    const plan = planCanvasEdit(canvas, [replacement(canvas)]);
-    expect(plan.ok).toBe(true); if (!plan.ok) return;
-    const changed = edit(canvas, plan.forward);
-    expect(filmSetAnimationsOf(animation(changed)).clips[0].bindings[0].motion).toBeUndefined();
-    expect(animation(edit(changed, plan.inverse))).toEqual(before);
+
+  it("物化失败不删除旧容器或改写原 owner", () => {
+    const canvas = fixture();
+    (canvas.nodeData.film.filmSetContent as { items: unknown[] }).items.push({ id: "bad", kind: "model", model: {} });
+    const before = structuredClone(canvas);
+    expect(migrateLegacyFilmSetToGroup(canvas, "film", { commandId: "atomic" }).ok).toBe(false);
+    expect(canvas).toEqual(before);
   });
-  it("来源改变、对象冲突或非模型来源整批拒绝", () => {
-    const canvas = fixture(); const command = replacement(canvas);
-    const changed = apply(canvas, [{ type: "nodeData.patch", nodeId: "source", value: { modelScript: 'scene.box({id:"new"});' } }]);
-    expect(applyCanvasCommands(changed, [command]).ok).toBe(false);
-    const moved = apply(canvas, [{ type: "filmSet.itemPatch", nodeId: "film", itemId: "model", op: { kind: "transform", localTransform: { offset: { x: 3, y: 0, z: 0 }, scale: 1, yaw: 0 } } }]);
-    expect(applyCanvasCommands(moved, [command]).ok).toBe(false);
-    if (command.type === "filmSet.itemPatch" && command.op.kind === "replace-model") command.op.sourceNodeId = "image";
-    expect(applyCanvasCommands(canvas, [command]).ok).toBe(false);
-  });
-  it("替换几何使图片/视频内容身份失效，不改变已有镜头身份", () => {
-    const canvas = fixture(); const old = animation(canvas);
-    const next = animation(apply(canvas, [replacement(canvas)]));
-    expect(shotReferenceContentIdentity({ animation: old, clipId: "clip-1" })).not.toEqual(shotReferenceContentIdentity({ animation: next, clipId: "clip-1" }));
-    for (const value of [old, next]) { const clip = filmSetAnimationsOf(value).clips[0]; clip.kind = "static"; clip.timeline = { duration: 0, loop: false }; clip.bindings = []; }
-    expect(shotImageReferenceIdentity({ animation: old, clipId: "clip-1", assets: [], background: "#ffffff" })).not.toEqual(shotImageReferenceIdentity({ animation: next, clipId: "clip-1", assets: [], background: "#ffffff" }));
-  });
-});
 
-
-it("容器随片场重设分组并保持相对距离，撤销恢复分组和位置", () => {
-  const canvas = entrance(fixture());
-  const grouped = apply(canvas, [{ type: "node.add", node: { id: "group", type: "group", position: { x: 1000, y: 500 }, width: 1200, height: 900 } }]);
-  const plan = planCanvasEdit(grouped, [{ type: "node.update", nodeId: "film", parentId: "group", position: { x: 100, y: 100 } }]);
-  expect(plan.ok).toBe(true); if (!plan.ok) return;
-  const moved = edit(grouped, plan.forward);
-  expect(moved.document.nodes.find(node => node.id === containerId)).toMatchObject({ parentId: "group", position: { x: 500, y: 200 } });
-  const restored = edit(moved, plan.inverse);
-  expect(restored.document.nodes.find(node => node.id === containerId)).toMatchObject({ position: { x: 400, y: 100 } });
-  expect(restored.document.nodes.find(node => node.id === containerId)?.parentId).toBeUndefined();
-});
-
-it("地面对象也能替换为模型；撤销恢复原对象种类和摆放", () => {
-  const canvas = fixture();
-  const value = animation(canvas);
-  const previous = value.filmSetContent.items.find(item => item.id === "model")!;
-  value.filmSetContent.items = [{ id: previous.id, name: previous.name, kind: "ground", size: { width: 5, depth: 5 }, color: "#888888", localTransform: previous.localTransform }];
-  for (const clip of filmSetAnimationsOf(value).clips) clip.bindings = [];
-  canvas.nodeData.film = canonicalFilmSetFields(value) as never;
-  const plan = planCanvasEdit(canvas, [replacement(canvas)]);
-  expect(plan.ok).toBe(true); if (!plan.ok) return;
-  const changed = edit(canvas, plan.forward);
-  expect(animation(changed).filmSetContent.items[0]).toMatchObject({ kind: "model", id: previous.id, localTransform: previous.localTransform });
-  expect(animation(edit(changed, plan.inverse))).toEqual(animation(canvas));
-});
-
-it("保护替换期间对象的完整动作闭包，拒绝覆盖并发新增的绑定", () => {
-  const canvas = fixture();
-  const plan = planCanvasEdit(canvas, [replacement(canvas)]);
-  expect(plan.ok).toBe(true); if (!plan.ok) return;
-  const addBinding = (current: ServerCanvas) => {
-    const next = structuredClone(current), value = animation(next), collection = filmSetAnimationsOf(value);
-    collection.clips.push({ ...structuredClone(collection.clips[0]), id: "concurrent", name: "新增镜头" });
-    next.nodeData.film = canonicalFilmSetFields(value) as never;
-    return next;
-  };
-  expect(applyCanvasCommands(addBinding(canvas), [{ type: "edit.apply", ...plan.forward }]).ok).toBe(false);
-  const changed = edit(canvas, plan.forward);
-  expect(applyCanvasCommands(addBinding(changed), [{ type: "edit.apply", ...plan.inverse }]).ok).toBe(false);
-});
-
-it("非法快照时间不写入对象来源", () => {
-  const canvas = fixture(), command = replacement(canvas);
-  if (command.type === "filmSet.itemPatch" && command.op.kind === "replace-model") command.op.importedAt = "invalid";
-  expect(applyCanvasCommands(canvas, [command]).ok).toBe(false);
-});
-
-
-it("保存并重新加载 Yjs 快照后保留容器归属与已复制模型", () => {
-  const canvas = entrance(fixture());
-  const changed = apply(canvas, [replacement(canvas)]);
-  const doc = serverCanvasToYDoc(changed);
-  try {
-    const loaded = yDocToServerCanvas(doc, { now: NOW });
-    expect(loaded.ok).toBe(true);
-    if (!loaded.ok) return;
-    expect(resolveFilmSetObject(loaded.canvas, containerId)?.item).toEqual(resolveFilmSetObject(changed, containerId)?.item);
-    expect(loaded.canvas.nodeData[containerId]).toEqual(changed.nodeData[containerId]);
-  } finally { doc.destroy(); }
-});
-
-
-describe("每片场最多六个外显对象", () => {
-  function manyObjects() {
-    const canvas = fixture(""), data = animation(canvas);
-    const first = data.filmSetContent.items.find(item => item.kind === "model")!;
-    data.filmSetContent.items = Array.from({ length: 8 }, (_, i) => ({ ...structuredClone(first), id: `item-${i}` }));
-    canvas.nodeData.film = canonicalFilmSetFields(data) as never;
-    return canvas;
-  }
-  const shown = (canvas: ServerCanvas) => canvas.document.nodes.filter(node => node.type === "composite-asset" && resolveFilmSetObject(canvas, node.id)).map(node => resolveFilmSetObject(canvas, node.id)!.item.id).sort();
-  it("旧片场和新建片场均默认外显前六个，保留全部对象且不污染输入", () => {
-    const source = manyObjects(), before = structuredClone(source);
-    const legacy = apply(source, [{ type: "nodeData.patch", nodeId: "film", value: {} }]);
-    const created = apply(createEmptyWoohaa3ServerCanvas("new", NOW), [{ type: "node.add", node: source.document.nodes[0], nodeData: source.nodeData.film }]);
-    for (const canvas of [legacy, created]) {
-      expect(shown(canvas)).toEqual(Array.from({ length: 6 }, (_, i) => `item-${i}`));
-      expect(animation(canvas).filmSetContent.items).toHaveLength(8);
-      expect(canvas.nodeData.film.filmSetObjectContainersHidden).toEqual(["item-6", "item-7"]);
-      expect(canvas.document.nodes.filter(node => node.type === "model3d" && node.parentId)).toHaveLength(6);
-    }
-    expect(source).toEqual(before);
-  });
-  it("第七个显示请求整批拒绝；关闭一个后可以替换外显对象，支持撤销重做", () => {
-    const canvas = apply(manyObjects(), [{ type: "nodeData.patch", nodeId: "film", value: {} }]);
-    const rejected = applyCanvasCommands(canvas, [{ type: "nodeData.patch", nodeId: "film", value: { filmSetObjectContainersHidden: ["item-7"] } }]);
-    expect(rejected.ok).toBe(false);
-    if (!rejected.ok) expect(rejected.rejection.message).toContain("最多外显 6 个对象");
-    const plan = planCanvasEdit(canvas, [{ type: "nodeData.patch", nodeId: "film", value: { filmSetObjectContainersHidden: ["item-0", "item-7"] } }]);
-    expect(plan.ok).toBe(true); if (!plan.ok) return;
-    const swapped = edit(canvas, plan.forward);
-    expect(shown(swapped)).toEqual(["item-1", "item-2", "item-3", "item-4", "item-5", "item-6"]);
-    const restored = edit(swapped, plan.inverse);
-    expect(shown(restored)).toEqual(shown(canvas));
-    expect(shown(edit(restored, plan.forward))).toEqual(shown(swapped));
-  });
-  it("升级已有八个容器的旧片场会同时移除超额容器及其真实子卡片", () => {
-    const source = manyObjects();
-    for (const item of animation(source).filmSetContent.items) {
-      const id = filmSetObjectContainerId("film", item.id);
-      source.document.nodes.push({ id, type: "composite-asset", position: { x: 400, y: 100 } });
-      source.nodeData[id] = filmSetObjectContainerData("film", item.id);
-      if (item.kind === "model") {
-        const modelId = filmSetObjectModelNodeId("film", item.id);
-        source.document.nodes.push({ id: modelId, type: "model3d", parentId: id, position: { x: 12, y: 12 } });
-        source.nodeData[modelId] = filmSetObjectModelNodeData("film", item);
-      }
-    }
-    const result = apply(source, [{ type: "nodeData.patch", nodeId: "film", value: {} }]);
-    expect(shown(result)).toHaveLength(6);
-    expect(result.document.nodes.some(node => node.id === filmSetObjectContainerId("film", "item-6"))).toBe(false);
-    expect(result.document.nodes.some(node => node.id === filmSetObjectModelNodeId("film", "item-6"))).toBe(false);
-    expect(animation(result).filmSetContent.items).toHaveLength(8);
+  it("迁移重试不重复物化，后续普通命令不会重建容器", () => {
+    const migrated = migrateFilmSetFixture(fixture(), "film");
+    const repeated = migrateLegacyFilmSetToGroup(migrated, "film", { commandId: "test-group-migration", groupId: "film" });
+    expect(repeated).toMatchObject({ ok: true, duplicate: true, createdNodeIds: [] });
+    const next = applyCanvasCommands(migrated, [{ type: "canvas.setTitle", title: "新标题" }]);
+    expect(next.ok).toBe(true);
+    if (!next.ok) throw Error(next.rejection.message);
+    expect(next.canvas.document.nodes.map(node => node.type)).toEqual(migrated.document.nodes.map(node => node.type));
+    expect(next.canvas.document.nodes.every(node => node.type !== "composite-asset")).toBe(true);
   });
 });

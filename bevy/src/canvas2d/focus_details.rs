@@ -11,7 +11,7 @@ use crate::{
 };
 use std::sync::Arc;
 
-#[derive(Resource,Default)]
+#[derive(Resource, Default)]
 pub(crate) struct FocusDetailBatch(pub Option<Option<FocusDetailUpload>>);
 
 /// 已接受帧与上传代数（采样策略/等待状态，不是实体身份）。
@@ -28,11 +28,14 @@ pub(crate) struct FocusDetailSource {
     pixels: Arc<[u8]>,
 }
 
-fn layout(rect:[u32;4],source:Vec2,size:Vec2,center:Vec2,z:f32)->(Vec2,Transform) {
-    let a=Vec2::new(rect[0] as f32,rect[1] as f32);
-    let b=Vec2::new(rect[2] as f32,rect[3] as f32);
-    let offset=((a+b)*0.5/source-Vec2::splat(0.5))*size;
-    ((b-a)/source*size,Transform::from_xyz(center.x+offset.x,-center.y-offset.y,z))
+fn layout(rect: [u32; 4], source: Vec2, size: Vec2, center: Vec2, z: f32) -> (Vec2, Transform) {
+    let a = Vec2::new(rect[0] as f32, rect[1] as f32);
+    let b = Vec2::new(rect[2] as f32, rect[3] as f32);
+    let offset = ((a + b) * 0.5 / source - Vec2::splat(0.5)) * size;
+    (
+        (b - a) / source * size,
+        Transform::from_xyz(center.x + offset.x, -center.y - offset.y, z),
+    )
 }
 
 fn clear(

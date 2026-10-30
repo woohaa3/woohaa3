@@ -1,3 +1,4 @@
+import { readFilmSetGroupMarker } from "../../film-set-group.js";
 import type { Woohaa3CanvasNode } from "./canvas-runtime";
 
 /**
@@ -8,7 +9,7 @@ import type { Woohaa3CanvasNode } from "./canvas-runtime";
 export function collectWoohaa3CanvasRemovalIds(
   nodes: Array<Pick<Woohaa3CanvasNode, "id" | "parentId">>,
   nodeIds: readonly string[],
-  nodeData: Record<string, { retainWhenEmpty?: unknown }> = {}
+  nodeData: Record<string, { retainWhenEmpty?: unknown; filmSetGroup?: unknown }> = {}
 ): Set<string> {
   const removed = new Set(nodeIds);
   let changed = true;
@@ -23,7 +24,7 @@ export function collectWoohaa3CanvasRemovalIds(
     }
     for (const node of nodes) {
       const children = nodes.filter((candidate) => candidate.parentId === node.id);
-      if (children.length > 0 && children.every((child) => removed.has(child.id)) && !removed.has(node.id) && nodeData[node.id]?.retainWhenEmpty !== true) {
+      if (children.length > 0 && children.every((child) => removed.has(child.id)) && !removed.has(node.id) && nodeData[node.id]?.retainWhenEmpty !== true && !readFilmSetGroupMarker(nodeData[node.id])) {
         removed.add(node.id);
         changed = true;
       }

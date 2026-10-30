@@ -12,6 +12,9 @@
 //! 归属节点实体，删除节点即回收派生状态。
 
 pub(crate) mod components;
+pub(crate) mod overview_cache;
+#[cfg(feature = "canvas-core")]
+pub(crate) mod layer;
 
 #[cfg(feature = "canvas-core")]
 pub(crate) mod batch;

@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Context } from "@deepseek-ai/cordis";
 import {
   createEmptyWoohaa3ServerCanvas,
+  createFilmSetGroupMarker,
   decodeModelCameras,
   clampShotDistance,
   makeFocusProjector,
@@ -62,8 +63,8 @@ function filmSetCanvas(): ServerCanvas {
   return {
     ...base,
     revision: 1,
-    document: { ...base.document, nodes: [{ id: "m1", type: "composite-asset", position: { x: 200, y: 100 }, width: 196, height: 64 }] },
-    nodeData: { m1: { extensionId: "film-set", title: "F", modelScript: "build(()=>{})", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2" } }
+    document: { ...base.document, nodes: [{ id: "m1", type: "group", position: { x: 200, y: 100 }, width: 196, height: 64 }] },
+    nodeData: { m1: { title: "F", filmSetGroup: createFilmSetGroupMarker() } }
   } as ServerCanvas;
 }
 
@@ -115,6 +116,7 @@ async function harness(canvas: ServerCanvas, mode: { value: "edit" | "history" }
   compositeAssets.register({
     extensionId: "film-set",
     owner: "film-set",
+    matchesNode: (node, data) => node.type === "group" && !!data.filmSetGroup,
     executionKey: () => "film-set",
     prepare: () => null,
     readCameras: () => [...cameras],
@@ -350,7 +352,7 @@ describe("ModelEditorPlugin", () => {
     const sceneFit = shotFitDistance(shotBoundingRadius(scene.aabb), 16 / 9);
     // 与生产同一 clamp：镜头保存 240 场景单位，超出 fit 上限即钳到 fit×2.2。
     const sceneDistance = clampShotDistance(240, sceneFit);
-    const sceneShot = resolveShotCamera(scene.aabb, { azimuth: 1, distance: sceneDistance, aspect: "16:9" })!;
+    const sceneShot = resolveShotCamera(scene.aabb, { azimuth: 1, elevation: Math.PI / 4, distance: sceneDistance, aspect: "16:9" })!;
     const mapped = mapFilmSetSceneCamera(
       { scale: displayScale, yaw: displayYaw },
       bounds.center,
@@ -576,7 +578,7 @@ describe("ModelEditorPlugin", () => {
     const compositeAsset: ServerCanvas = {
       ...base,
       revision: 1,
-      document: { ...base.document, nodes: [{ id: "m1", type: "composite-asset", position: { x: 200, y: 100 }, width: 196, height: 64 }] },
+      document: { ...base.document, nodes: [{ id: "m1", type: "group", position: { x: 200, y: 100 }, width: 196, height: 64 }] },
       nodeData: { m1: { extensionId: "film-set", title: "空片场", modelScript: "", modelScriptLanguage: "", modelScriptVersion: "woohaa-model-js-v2", filmSetContent: { schemaVersion: 2, items: [] } } }
     } as ServerCanvas;
     const h = await harness(compositeAsset);

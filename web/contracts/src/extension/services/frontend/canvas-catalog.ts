@@ -32,6 +32,16 @@ export type CanvasCatalogCreateResult =
   | { ok: false; code: string; error: string };
 
 /**
+ * 删除画布结果。
+ *
+ * 删除是破坏性动作：调用方必须先让用户确认。`expectedRevision` 是本地权威内容的 CAS 版本，
+ * 与创建/重命名不同，删除没有可回显的对象，因此只有成功/失败两态。
+ */
+export type CanvasCatalogDeleteResult =
+  | { ok: true }
+  | { ok: false; code: string; error: string };
+
+/**
  * 归档导出结果。
  *
  * `bytes` 是完整的 `.woohaa-archive` 字节（zip：archive.json + 媒体文件）。
@@ -51,6 +61,8 @@ export interface CanvasCatalogRemote {
   list(input: { offset: number; limit: number }): Promise<CanvasCatalogListResult>;
   get(canvasId: string): Promise<CanvasCatalogSummaryResult>;
   create(input: { canvasId?: string; title?: string }): Promise<CanvasCatalogCreateResult>;
+  /** 删除画布（`DELETE /api/canvases/:id?expectedRevision=N`）。 */
+  delete(canvasId: string, expectedRevision: number): Promise<CanvasCatalogDeleteResult>;
   /** 导出为 `.woohaa-archive` 字节（`GET /api/canvases/:id/archive`）。 */
   exportArchive(canvasId: string): Promise<CanvasArchiveExportResult>;
   /** 从归档字节导入（`POST /api/canvases/archive`）。 */
@@ -69,6 +81,12 @@ export interface CanvasCatalogService {
   loadMore(): Promise<void>;
   /** 创建画布，成功后失效并刷新目录。 */
   create(input?: { title?: string }): Promise<CanvasCatalogCreateResult>;
+  /**
+   * 删除画布，成功后失效并刷新目录。
+   *
+   * 版本号缺省取当前目录条目的 `revision`；条目不在当前页时必须显式给出。
+   */
+  delete(canvasId: string, expectedRevision?: number): Promise<CanvasCatalogDeleteResult>;
   /** 按 ID 读取摘要（用于校验显式 canvasId 是否存在/展示当前标题）。 */
   get(canvasId: string): Promise<CanvasCatalogSummaryResult>;
   /** 导出画布归档包（含媒体字节）。 */

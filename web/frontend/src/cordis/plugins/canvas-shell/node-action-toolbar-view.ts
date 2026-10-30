@@ -59,6 +59,23 @@ export function resolveNodeActionToolbarView(input: {
 }
 
 /**
+ * 容器「编辑」动作的目标：只有自带模型聚焦工作区的容器（片场）返回可进入的 kind。
+ *
+ * 按通用能力判定（group + focus.kind === "model"），宿主不按 film-set 业务 ID 分支；
+ * 普通 group 的聚焦 kind 是 `extension`，不提供画布横条上的直接编辑入口。
+ */
+export function resolveContainerFocusEdit(input: {
+  canvas: ServerCanvas | null;
+  nodeId: string;
+  nodeCapabilities: NodeCapabilityResolver;
+}): "model" | null {
+  const { canvas, nodeId, nodeCapabilities } = input;
+  const context = canvas ? nodeCapabilityContext(canvas, nodeId) : null;
+  if (!context || context.node.type !== "group") return null;
+  return nodeCapabilities.resolve(context).focus?.kind(context) === "model" ? "model" : null;
+}
+
+/**
  * 依来源节点与**当前画布**判定「下载」是否可用；不可用时给出可读原因。
  *
  * 只读取内容就绪性（3D 有模型脚本、图片/视频有 ready 原资产），**不**检查画布写权限：

@@ -13,10 +13,13 @@
  * 执行一次时进行。
  */
 import type { CanvasCommand, Woohaa3CanvasNode } from "@woohaa3/contracts";
-import { planTidyGroup, planUngroupNodes } from "../../../extension-api/command-planner.js";
+import { planArrangeGroupChildren, planTidyGroup, planUngroupNodes, type GroupArrangementKind } from "../../../extension-api/command-planner.js";
 
-/** 结构动作类型：整理（仅布局直接成员并改容器尺寸）与解组（保留成员与绝对位置）。 */
-export type GroupStructureActionKind = "tidy" | "ungroup";
+/** 排列动作类型（横条图标按钮）。 */
+export type GroupArrangeActionKind = GroupArrangementKind;
+
+/** 结构动作类型：整理与排列只布局直接成员；解组保留成员与绝对位置。 */
+export type GroupStructureActionKind = "tidy" | GroupArrangeActionKind | "ungroup";
 
 /**
  * 结构动作只读取的节点字段。
@@ -44,13 +47,23 @@ export type GroupStructureCanvas = {
 /** 结构动作的稳定动作 ID（横条贡献 ID 与右键菜单项 ID 共用，保证两入口同源）。 */
 export const GROUP_STRUCTURE_ACTION_IDS: Readonly<Record<GroupStructureActionKind, string>> = {
   tidy: "group-tidy",
-  ungroup: "group-ungroup"
+  ungroup: "group-ungroup",
+  "arrange-horizontal": "group-arrange-horizontal",
+  "arrange-vertical": "group-arrange-vertical",
+  "arrange-grid": "group-arrange-grid",
+  "arrange-diagonal-up": "group-arrange-diagonal-up",
+  "arrange-diagonal-down": "group-arrange-diagonal-down"
 };
 
 /** 结构动作展示文案（横条与右键共用）。 */
 export const GROUP_STRUCTURE_ACTION_LABELS: Readonly<Record<GroupStructureActionKind, string>> = {
   tidy: "整理",
-  ungroup: "解组"
+  ungroup: "解组",
+  "arrange-horizontal": "横排",
+  "arrange-vertical": "竖排",
+  "arrange-grid": "宫格",
+  "arrange-diagonal-up": "斜排 ↗",
+  "arrange-diagonal-down": "斜排 ↘"
 };
 
 /** 结构动作可用性（不可用时给出可读原因）。 */
@@ -78,7 +91,7 @@ export function toPlannerNodes(nodes: readonly GroupStructureNode[]): Woohaa3Can
 /**
  * 结构动作是否**有可执行变更**（廉价判定，不跑规划）。
  *
- * 整理需要至少一个直接成员（否则 `planTidyGroup` 返回空）；解组只要目标 group 存在就可行
+ * 整理与排列需要至少一个直接成员（否则 planner 返回空）；解组只要目标 group 存在就可行
  * （`planUngroupNodes` 会解散该容器并把成员上提）。
  */
 export function groupStructureIsActionable(
@@ -128,7 +141,8 @@ export function planGroupStructureCommands(
 ): CanvasCommand[] {
   const nodes = toPlannerNodes(canvas.document.nodes);
   if (kind === "tidy") return planTidyGroup(nodes, canvas.document.edges, groupId);
-  return planUngroupNodes(nodes, [groupId]);
+  if (kind === "ungroup") return planUngroupNodes(nodes, [groupId]);
+  return planArrangeGroupChildren(nodes, groupId, kind);
 }
 
 /** 读取当前节点集合（画布未加载时返回空数组）。 */
@@ -167,7 +181,11 @@ export function runGroupStructureAction(
   const canvas = deps.getCanvas();
   if (!canvas) return { ok: false, reason: "作品尚未加载" };
   const commands = planGroupStructureCommands(canvas, kind, groupId);
-  if (commands.length === 0) return { ok: false, reason: "分组内没有成员" };
+  if (commands.length === 0) {
+    // 排列的成员已在目标位置时规划结果为空；不要误报成「没有成员」。
+    const arranged = kind.startsWith("arrange-");
+    return { ok: false, reason: arranged ? "已按该方式排列" : "分组内没有成员" };
+  }
   deps.record(commands, GROUP_STRUCTURE_ACTION_LABELS[kind]);
   return { ok: true, commandCount: commands.length };
 }

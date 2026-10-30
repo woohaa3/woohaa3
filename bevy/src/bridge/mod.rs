@@ -15,13 +15,15 @@ mod assets;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
+use crate::clock::Instant;
 use crate::protocol::{NodePosition, ObserverUpdateRequest, Scene, Viewport};
 
 pub(crate) use assets::{
     AssetRegistration, AssetRegistryStats, asset_registry_stats, declare_model_descriptor,
     declare_model_descriptor_dto, existing_model_metadata, lookup_model_asset,
     missing_model_descriptor, model_assets_snapshot, model_descriptor_declared,
-    queue_model_snapshot, resident_payload_keys, set_model_payload_leases, set_scene_descriptor_keys,
+    queue_model_snapshot, resident_payload_keys, set_model_payload_leases,
+    set_scene_descriptor_keys,
 };
 
 // 测试面：`bridge::tests` 通过 `super::*` 复用这些资源表 helper 与常量。
@@ -47,8 +49,9 @@ thread_local! {
     static REVISION: Cell<u32> = const { Cell::new(0) };
     /// 待处理的截图请求（change: 2026-10-07-remove-residual-compatibility —— 直接 Shot Camera 边界）。
     static SHOT_CAPTURE_REQUEST: RefCell<Option<ShotCaptureBridgeRequest>> = const { RefCell::new(None) };
-    static SHOT_CAPTURE_ENQUEUED: std::cell::Cell<Option<std::time::Instant>> =
-        const { std::cell::Cell::new(None) };
+    /// 排队时刻：必须是 `bevy::platform::time::Instant`（wasm 下走 `performance.now()`）。
+    /// `std::time::Instant` 在 `wasm32-unknown-unknown` 上会 panic（time not implemented）。
+    static SHOT_CAPTURE_ENQUEUED: Cell<Option<Instant>> = const { Cell::new(None) };
     /// 完成的截图结果，按 (requestId, generation) 匹配后由 JS 取走。
     static SHOT_CAPTURE_RESULT: RefCell<Option<ShotCaptureBridgeResult>> = const { RefCell::new(None) };
     /// 页面内历史缩略图请求（latest-wins 单槽；JS 串行发送）
@@ -292,7 +295,7 @@ pub(crate) enum ShotCaptureBridgeOutcome {
 
 /// 排队一次截图请求（latest-wins）。
 pub(crate) fn queue_shot_capture(request: ShotCaptureBridgeRequest) {
-    SHOT_CAPTURE_ENQUEUED.with(|slot| slot.set(Some(std::time::Instant::now())));
+    SHOT_CAPTURE_ENQUEUED.with(|slot| slot.set(Some(Instant::now())));
     SHOT_CAPTURE_REQUEST.with(|slot| *slot.borrow_mut() = Some(request));
 }
 
@@ -491,13 +494,7 @@ pub(crate) fn queue_positions(positions: Vec<NodePosition>, viewport: Option<Vie
 ///
 /// `content` 是稳定内容身份（同资产同档位共享同一 GPU 纹理）；`None` 表示独占纹理
 /// （例如上传中的本地幽灵预览）。内容身份**不含** nodeId。
-pub(crate) fn queue_texture(
-    id: &str,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-    content: Option<&str>,
-) {
+pub(crate) fn queue_texture(id: &str, width: u32, height: u32, rgba: &[u8], content: Option<&str>) {
     queue_texture_owned(id, width, height, rgba.to_vec(), content);
 }
 
@@ -540,7 +537,7 @@ pub(crate) fn take_input() -> FrameInput {
     let film_set_textures =
         FILM_SET_TEXTURES.with(|textures| std::mem::take(&mut *textures.borrow_mut()));
     FrameInput {
-        focus_details: FOCUS_DETAILS.with(|slot|slot.borrow_mut().take()),
+        focus_details: FOCUS_DETAILS.with(|slot| slot.borrow_mut().take()),
         scene,
         positions,
         viewport,
@@ -550,8 +547,11 @@ pub(crate) fn take_input() -> FrameInput {
     }
 }
 
-pub(crate) fn queue_focus_details(frame:Option<crate::protocol::focus_details::FocusDetails>,bytes:&[u8])->Result<(),&'static str> {
-    FOCUS_DETAILS.with(|slot|slot.borrow_mut().queue(frame,bytes))
+pub(crate) fn queue_focus_details(
+    frame: Option<crate::protocol::focus_details::FocusDetails>,
+    bytes: &[u8],
+) -> Result<(), &'static str> {
+    FOCUS_DETAILS.with(|slot| slot.borrow_mut().queue(frame, bytes))
 }
 
 /// `start` 幂等闸门：首次返回 `false`，后续返回 `true`。

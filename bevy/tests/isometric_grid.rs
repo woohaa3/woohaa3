@@ -3,8 +3,8 @@
 
 use bevy::prelude::*;
 use woohaa_bevy_canvas::isometric_grid::{
-    IsometricGrid, IsometricGridConfig, IsometricGridPlugin, IsometricGridTarget,
-    IsometricGridStyle, IsometricGridView, plan_grid, spacing_for_zoom,
+    IsometricGrid, IsometricGridConfig, IsometricGridPlugin, IsometricGridStyle,
+    IsometricGridTarget, IsometricGridView, plan_grid, spacing_for_zoom,
 };
 
 fn app() -> App {
@@ -98,7 +98,11 @@ fn plugin_rebuilds_on_view_change() {
         })
         .id();
     app.update();
-    app.world_mut().get_mut::<IsometricGridTarget>(target).unwrap().view.x = 64.0;
+    app.world_mut()
+        .get_mut::<IsometricGridTarget>(target)
+        .unwrap()
+        .view
+        .x = 64.0;
     app.update();
     let count = {
         let world = app.world_mut();
@@ -130,7 +134,12 @@ fn pure_plan_is_finite_for_defaults() {
     let view = IsometricGridView::default();
     let plan = plan_grid(&view, Vec2::new(800.0, 600.0));
     assert!(spacing_for_zoom(view.zoom).is_finite());
-    assert!(plan.minor.iter().chain(plan.major.iter()).all(|(a, b)| a.is_finite() && b.is_finite()));
+    assert!(
+        plan.minor
+            .iter()
+            .chain(plan.major.iter())
+            .all(|(a, b)| a.is_finite() && b.is_finite())
+    );
 }
 
 #[test]

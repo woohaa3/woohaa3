@@ -15,6 +15,7 @@ import {
   beginGesture,
   beginModelGesture,
   filmSetFitFactor,
+  filmSetLayoutBounds,
   filmSetNaturalScale,
   filmSetSceneAabb,
   isFilmSetNode,
@@ -30,6 +31,13 @@ import {
   isFocused,
   keyboardFly,
   modelAnchor,
+  groupModelLayout,
+  readFilmSetGroupMarker,
+  activeFilmSetSceneBindings,
+  readFilmSetContentForSession,
+  encodeFilmSetPartId,
+  quatFromEulerYXZDegrees,
+  transformAabb,
   modelLayoutAabbRelative,
   modelWorldAabbRelative,
   moveGesture,
@@ -77,13 +85,17 @@ function sceneInput(input: FocusTargetInput) {
   const node = input.canvas.document.nodes.find((entry) => entry.id === input.nodeId);
   const isFilmSet = input.capabilities ? !!input.capabilities.scope : isFilmSetNode(node?.type, input.canvas.nodeData?.[input.nodeId]);
   const size = node ? renderedModelNodeSize(node, input.canvas.nodeData?.[input.nodeId], input.capabilities) : null;
+  const isGroup = node?.type === "group" && !!readFilmSetGroupMarker(input.canvas.nodeData?.[input.nodeId]);
+  const position = node && isGroup ? getWoohaa3CanvasNodeAbsolutePosition(node, new Map(input.canvas.document.nodes.map(entry => [entry.id, entry]))) : null;
+  const groupLayout = isGroup && node && position ? groupModelLayout({ sceneVersion: input.sceneVersion, ops: input.ops as never, extent: input.extent, aabb: input.aabb ?? undefined, placement: input.placement, node: { x: position.x, y: position.y, width: node.width ?? 180, height: node.height ?? 112, badgeScale: (input.canvas.nodeData?.[input.nodeId] as { groupBadgeScale?: number } | undefined)?.groupBadgeScale } }) : null;
   return {
     sceneVersion: input.sceneVersion,
     ops: input.ops as never,
     extent: input.extent,
     aabb: input.aabb ?? undefined,
     placement: input.placement,
-    filmSetFit: isFilmSet && size ? { width: size.width, height: size.height } : null
+    filmSetFit: isFilmSet && size ? { width: size.width, height: size.height } : null,
+    groupLayout
   };
 }
 
@@ -100,6 +112,23 @@ export function modelBounds(input: FocusTargetInput): ModelBounds | null {
     { ...node, data: {} }, new Map(input.canvas.document.nodes.map(entry => [entry.id, { ...entry, data: {} }]))
   );
   const offset = input.placement?.offset ?? { x: 0, y: 0, z: 0 };
+  const group = sceneInput(input).groupLayout;
+  if (group) {
+    const local = groupSceneBounds(input);
+    if (!local) {
+      // 空片场（无可见绑定、也无地面）在组容器里同样要有可进入的聚焦工作区：以徽标锚点
+      // 和节点矩形派生的默认半径取景，与复合资产空片场一致，不退化成「目标不可用」。
+      const half = Math.max(1, Math.min(size.width, size.height) / 4);
+      const aabb: Aabb = {
+        min: [group.anchor[0] - half, group.anchor[1] - half, group.anchor[2] - half],
+        max: [group.anchor[0] + half, group.anchor[1] + half, group.anchor[2] + half]
+      };
+      return { aabb, center: group.anchor, radius: Math.sqrt(3) * half, anchor: group.anchor };
+    }
+    const aabb = transformAabb({ translation: group.anchor, rotation: quatFromEulerYXZDegrees([0, input.placement?.yaw ?? 0, 0]), scale: [group.unit, group.unit, group.unit] }, local);
+    const { center, radius } = aabbCenterRadius(aabb);
+    return { aabb, center, radius, anchor: group.anchor };
+  }
   const anchor = modelAnchor({
     nodeX: position.x,
     nodeY: position.y,
@@ -153,10 +182,28 @@ export function renderedModelNodeSize(node: {
  * 场景单位的一部分（与 Rust `model_unit` 一致）。
  */
 export function filmSetSceneBounds(input: FocusTargetInput): { aabb: Aabb; center: Vec3; radius: number } | null {
-  const scene = filmSetSceneAabb(input.aabb ?? null);
+  const scene = filmSetSceneAabb(groupSceneBounds(input) ?? input.aabb ?? null);
   if (!scene) return null;
   const { center, radius } = aabbCenterRadius(scene);
   return { aabb: scene, center, radius };
+}
+
+/** Live binding placement is separate from the immutable resource used to fit the badge. */
+function groupSceneBounds(input: FocusTargetInput): Aabb | null {
+  const marker = readFilmSetGroupMarker(input.canvas.nodeData[input.nodeId]);
+  if (!marker) return null;
+  const activeBindings = activeFilmSetSceneBindings(marker);
+  const visible = new Set(activeBindings.filter(binding => binding.visibility).map(binding => binding.bindingId));
+  if (marker.ground) visible.add("film-set-ground");
+  const hiddenPrefixes = activeBindings.filter(binding => !binding.visibility).map(binding => encodeFilmSetPartId(binding.bindingId, ""));
+  const transform = marker.sceneTransform;
+  const ops = (input.ops as import("@woohaa3/contracts").SceneV2Op[]).filter(op => !hiddenPrefixes.some(prefix => op.id.startsWith(prefix))).map(op =>
+    op.t === "group" && op.id === "\u0000scene" && transform
+      ? { ...op, position: [transform.x, transform.y, transform.z] as [number, number, number], rotation: [0, transform.yaw * 180 / Math.PI, 0] as [number, number, number], scale: [transform.scale, transform.scale, transform.scale] as [number, number, number] }
+      : op
+  );
+  const content = readFilmSetContentForSession(input.canvas, input.nodeId);
+  return filmSetLayoutBounds(ops, { ...content, items: content.items.filter(item => visible.has(item.id)) }, input.extent, true);
 }
 
 /**
@@ -165,6 +212,8 @@ export function filmSetSceneBounds(input: FocusTargetInput): { aabb: Aabb; cente
  * 节点矩形适配只在这里出现一次；镜头与内容共用它，构图因此与呈现尺寸无关。
  */
 export function filmSetDisplayScale(input: FocusTargetInput): number {
+  const group = sceneInput(input).groupLayout;
+  if (group) return group.unit;
   const natural = filmSetNaturalScale(input.placement, input.extent);
   const size = renderedModelNodeSize(
     input.canvas.document.nodes.find((entry) => entry.id === input.nodeId) ?? { type: "composite-asset" },

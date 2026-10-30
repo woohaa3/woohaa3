@@ -380,3 +380,10 @@ export function nativeTargetError({ platform, arch, target = null }) {
   const triples = { darwin: {arm64:"aarch64-apple-darwin",x64:"x86_64-apple-darwin"}, win32:{x64:"x86_64-pc-windows-msvc"},linux:{x64:"x86_64-unknown-linux-gnu",arm64:"aarch64-unknown-linux-gnu"} };
   return triples[platform]?.[arch] === target ? null : `Desktop packaging requires the native host target; ${target} does not match ${platform}/${arch}`;
 }
+
+/** Keep frontendDist a directory: Tauri parses Windows drive-letter paths as URLs. */
+export function tauriFrontendDist(frontendDist, desktopDir, paths = path) {
+  const relative = paths.relative(desktopDir, frontendDist);
+  if (paths.isAbsolute(relative)) throw new Error("frontendDist 必须与 desktop 配置目录位于同一盘符");
+  return `./${relative.split(paths.sep).join("/")}`;
+}

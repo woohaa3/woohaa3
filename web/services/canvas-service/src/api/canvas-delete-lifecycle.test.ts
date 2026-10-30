@@ -36,7 +36,16 @@ function fakeReq(): IncomingMessage {
   return { method: "DELETE", url: "/api/canvases/c1?expectedRevision=3", headers: {} } as unknown as IncomingMessage;
 }
 
-type LifecycleCalls = { calls: string[]; fail: null | "beginDelete" | "deleteCanvas" | "provider" };
+type LifecycleCalls = {
+  calls: string[];
+  fail: null | "beginDelete" | "deleteCanvas" | "provider";
+  /** 本机是否存在这张画布；`false` 模拟「只在远端」的目录条目。 */
+  localExists?: boolean;
+  /** 本机权威 revision（与请求里的 expectedRevision=3 对比）。 */
+  revision?: number;
+  /** 远端删除结果；`undefined` 表示未注入远端删除端口。 */
+  remote?: "deleted" | "skipped" | "not-found" | "forbidden" | "unavailable";
+};
 
 function fakeLifecycle(state: LifecycleCalls): CanvasLifecyclePort {
   return {
@@ -67,6 +76,12 @@ function options(state: LifecycleCalls, extra: { beginUnsupported?: boolean } = 
   }
   return {
     service: {
+      getCanvas: async () => {
+        if (state.localExists === false) {
+          throw Object.assign(new Error("画布不存在"), { name: "CanvasStorageError", code: "CANVAS_NOT_FOUND" });
+        }
+        return { id: "c1", revision: state.revision ?? 3 } as never;
+      },
       deleteCanvas: async () => {
         state.calls.push("deleteCanvas");
         if (state.fail === "deleteCanvas") throw new Error("db down");
@@ -75,6 +90,14 @@ function options(state: LifecycleCalls, extra: { beginUnsupported?: boolean } = 
     authenticate: async () => PRINCIPAL,
     access: { authorize: async () => ({ allowed: true, permission: "delete" }) } as never,
     lifecycle,
+    ...(state.remote === undefined
+      ? {}
+      : {
+          deleteRemote: async () => {
+            state.calls.push("deleteRemote");
+            return state.remote!;
+          }
+        }),
     closeSessions: (canvasId: string, reason: string) => { state.calls.push(`closeSessions:${canvasId}:${reason}`); }
   } as CanvasRequestHandlerOptions;
 }
@@ -111,5 +134,63 @@ describe("handleDelete 生命周期与撤权（任务 5.2）", () => {
     await handleDelete(fakeReq(), res, "c1", options(state, { beginUnsupported: true }), log);
     expect(captured.status).toBe(204);
     expect(state.calls).toEqual(["beginDelete", "deleteCanvas", "closeSessions:c1:canvas-deleted", "tombstone"]);
+  });
+
+  it("属于远端的画布先删远端，再删本机内容", async () => {
+    const state = { calls: [] as string[], fail: null, remote: "deleted" } as LifecycleCalls;
+    const { res, captured } = fakeRes();
+    await handleDelete(fakeReq(), res, "c1", options(state), log);
+    expect(captured.status).toBe(204);
+    expect(state.calls).toEqual([
+      "deleteRemote",
+      "beginDelete",
+      "deleteCanvas",
+      "closeSessions:c1:canvas-deleted",
+      "tombstone"
+    ]);
+  });
+
+  it("远端删除失败时中止，本机内容保持可重试", async () => {
+    const state = { calls: [] as string[], fail: null, remote: "unavailable" } as LifecycleCalls;
+    const { res, captured } = fakeRes();
+    await handleDelete(fakeReq(), res, "c1", options(state), log);
+    expect(captured.status).toBe(503);
+    expect(state.calls).toEqual(["deleteRemote"]);
+  });
+
+  it("没有删除权时返回 403，不进入本地删除", async () => {
+    const state = { calls: [] as string[], fail: null, remote: "forbidden" } as LifecycleCalls;
+    const { res, captured } = fakeRes();
+    await handleDelete(fakeReq(), res, "c1", options(state), log);
+    expect(captured.status).toBe(403);
+    expect(state.calls).toEqual(["deleteRemote"]);
+  });
+
+  it("只在远端的画布可以删除：不需要本地 revision，删远端后关会话并返回 204", async () => {
+    const state = { calls: [] as string[], fail: null, localExists: false, remote: "deleted" } as LifecycleCalls;
+    const { res, captured } = fakeRes();
+    const req = { method: "DELETE", url: "/api/canvases/remote-only", headers: {} } as unknown as IncomingMessage;
+    await handleDelete(req, res, "remote-only", options(state), log);
+    expect(captured.status).toBe(204);
+    expect(state.calls).toEqual(["deleteRemote", "closeSessions:remote-only:canvas-deleted"]);
+  });
+
+  it("只在远端、但远端也没删到（未连接）时返回 404，不假装成功", async () => {
+    const state = { calls: [] as string[], fail: null, localExists: false, remote: "skipped" } as LifecycleCalls;
+    const { res } = fakeRes();
+    const req = { method: "DELETE", url: "/api/canvases/remote-only", headers: {} } as unknown as IncomingMessage;
+    await expect(handleDelete(req, res, "remote-only", options(state), log)).rejects.toMatchObject({
+      code: "CANVAS_NOT_FOUND"
+    });
+    expect(state.calls).toEqual(["deleteRemote"]);
+  });
+
+  it("本机 revision 不匹配时在远端删除之前拒绝（不留半删状态）", async () => {
+    const state = { calls: [] as string[], fail: null, revision: 4, remote: "deleted" } as LifecycleCalls;
+    const { res } = fakeRes();
+    await expect(handleDelete(fakeReq(), res, "c1", options(state), log)).rejects.toMatchObject({
+      code: "REVISION_CONFLICT"
+    });
+    expect(state.calls).toEqual([]);
   });
 });

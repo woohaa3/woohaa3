@@ -6,7 +6,7 @@ import type { FilmSetNodeData } from "./canvas-node-model.js";
 import type { StoredAsset } from "./domain/index.js";
 import type { ShotReferenceAssetLink } from "./film-set-shot-reference.js";
 import { shotReferenceOwnershipOf } from "./film-set-shot-reference.js";
-import { decodeFilmSetNodeData } from "./canvas-node-model.js";
+import { readFilmSetAnimationProjection } from "./film-set-animation-projection.js";
 import type { ServerCanvas } from "./domain/index.js";
 import { SHOT_IMAGE_REFERENCE_ROLE } from "./domain/core/shot-reference.js";
 
@@ -19,11 +19,11 @@ export function freezeShotImageReferences(canvas: ServerCanvas, nodeId: string, 
     if (mapping.role !== SHOT_IMAGE_REFERENCE_ROLE) continue;
     const ownership = shotReferenceOwnershipOf(canvas.nodeData[mapping.sourceNodeId]);
     if (!ownership || !mapping.slotId) return "shot-image-unavailable: 图片参考来源无效";
-    const decoded = decodeFilmSetNodeData(canvas.nodeData[ownership.filmSetNodeId]);
-    if (!decoded.ok) return "shot-image-unavailable: 片场无法解析";
-    const clip = resolveFilmSetClip(decoded.value, ownership.clipId)?.clip;
+    const animation = readFilmSetAnimationProjection(canvas, ownership.filmSetNodeId);
+    if (!animation) return "shot-image-unavailable: 片场无法解析";
+    const clip = resolveFilmSetClip(animation, ownership.clipId)?.clip;
     const background = clip?.backdrop && clip.backdrop !== "theme" ? clip.backdrop : themeBackground;
-    const identity = shotImageReferenceIdentity({ animation: decoded.value, clipId: ownership.clipId, background, assets: canvas.assets });
+    const identity = shotImageReferenceIdentity({ animation, clipId: ownership.clipId, background, assets: canvas.assets });
     if (!identity) return "shot-image-version-stale: 静态镜头已变化，请重新执行";
     frozen.push({ ...ownership, ...identity, sourceNodeId: mapping.sourceNodeId, slotId: mapping.slotId, background });
   }

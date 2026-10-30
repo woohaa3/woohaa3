@@ -16,9 +16,7 @@ use bevy::prelude::*;
 
 use crate::{
     model3d,
-    shot_camera::{
-        preview_readiness::ShotPreviewReady, ShotCameraTarget, ShotCameraViewMask,
-    },
+    shot_camera::{ShotCameraTarget, ShotCameraViewMask, preview_readiness::ShotPreviewReady},
 };
 
 use super::plan::{SampleIdentity, Target};
@@ -75,7 +73,10 @@ pub(crate) struct Card {
 impl Card {
     pub(super) fn retained_pixels(&self) -> u64 {
         self.size.x as u64 * self.size.y as u64
-            + self.published.as_ref().filter(|_| !self.published_current)
+            + self
+                .published
+                .as_ref()
+                .filter(|_| !self.published_current)
                 .map_or(0, |(_, size)| size.x as u64 * size.y as u64)
     }
 }
@@ -131,6 +132,8 @@ pub(crate) struct ShotPreviewCards {
     /// 并被当作新代确认发布，卡片永久变灰。失效规则与 `model_preview::apply_preview_layer` 一致
     /// （design D7）。
     pub(crate) applied_layers: HashMap<String, (String, Vec<usize>)>,
+    pub(crate) applied_overview_cached: HashMap<String, bool>,
+    pub(crate) desired_layers: HashMap<String, Vec<usize>>,
     /// 上一次写入方向光的卡片层并集（未变则跳过世界查询）。
     pub(crate) applied_light_layers: Vec<usize>,
     pub(crate) next_generation: u64,
@@ -156,8 +159,12 @@ impl ShotPreviewCards {
 
     /// 当前目标与过渡旧图的 Image 数（不重复计算同一张图）。
     pub(crate) fn image_count(&self) -> usize {
-        self.cards.len() + self.cards.values()
-            .filter(|card| card.published.is_some() && !card.published_current).count()
+        self.cards.len()
+            + self
+                .cards
+                .values()
+                .filter(|card| card.published.is_some() && !card.published_current)
+                .count()
     }
 
     /// 实际工作计数快照（诊断；不代表 GPU 时间）。
@@ -167,10 +174,7 @@ impl ShotPreviewCards {
 
     /// 已保留的总像素（诊断与预算）。
     pub(crate) fn retained_pixels(&self) -> u64 {
-        self.cards
-            .values()
-            .map(Card::retained_pixels)
-            .sum()
+        self.cards.values().map(Card::retained_pixels).sum()
     }
 
     /// 已确认稳定的卡片数（诊断）。
@@ -184,17 +188,15 @@ pub(crate) struct ShotNodePreviewPlugin;
 
 impl Plugin for ShotNodePreviewPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ShotPreviewCards>();
+        app.init_resource::<ShotPreviewCards>()
+            .init_resource::<crate::canvas_ecs::overview_cache::OverviewSourceLayers>();
     }
 }
 
 /// 卡片渲染层：由共享层池租出（模型卡片与镜头卡片不会拿到同一层）。
 ///
 /// 返回 `None` 表示层池已满：调用方必须让该卡片排队，不能无界增长层号或与其它 owner 共用。
-pub(crate) fn acquire_layer(
-    pool: &mut crate::app::PreviewLayerPool,
-    owner: &str,
-) -> Option<usize> {
+pub(crate) fn acquire_layer(pool: &mut crate::app::PreviewLayerPool, owner: &str) -> Option<usize> {
     let slot = pool.0.acquire(owner);
     if slot.is_none() {
         pool.0.note_exhausted();
@@ -207,7 +209,9 @@ pub(crate) fn acquire_layer(
 /// 模型根与媒体平面会被追加该层，因此卡片能看见所属片场的内容；网格（层 0）、gizmo 与片场
 /// 小相机（层 1/2/7）都不进入卡片画面。
 pub(crate) fn card_camera_layers(layer: usize) -> ShotCameraViewMask {
-    ShotCameraViewMask(bevy::camera::visibility::RenderLayers::from_layers(&[layer]))
+    ShotCameraViewMask(bevy::camera::visibility::RenderLayers::from_layers(&[
+        layer,
+    ]))
 }
 
 /// 卡片预览采样身份：源内容 + 尺寸档 + 播放会话。
@@ -251,20 +255,35 @@ pub(crate) fn apply_owner_layers(
     models: &model3d::ModelVisuals,
     media: &mut model3d::film_set_media::FilmSetMediaVisuals,
     desired: &HashMap<String, Vec<usize>>,
+    overview: &crate::canvas_ecs::overview_cache::OverviewSourceLayers,
 ) {
     let mut next: HashMap<String, (String, Vec<usize>)> = HashMap::new();
-    for (owner, layers) in desired {
-        let mut sorted = layers.clone();
+    let mut next_cached = HashMap::new();
+    let owners: std::collections::HashSet<_> = desired.keys()
+        .chain(overview.owners.keys())
+        .chain(cards.applied_layers.keys())
+        .cloned().collect();
+    for owner in owners {
+        let mut sorted = desired.get(&owner).cloned().unwrap_or_default();
+        let request = overview.owners.get(&owner).copied().unwrap_or_default();
+        if let Some(layer) = request.layer { sorted.push(layer); }
         sorted.sort_unstable();
         sorted.dedup();
         // 根重建后旧缓存不作数：表示身份变化即重写（与 `model_preview` 同一失效规则，design D7）。
-        let identity = models.quality_identity(owner);
-        if policy::owner_layers_stale(cards.applied_layers.get(owner), &identity, &sorted) {
-            model3d::apply_preview_layers(models, media, commands, owner, &sorted);
+        let identity = models.quality_identity(&owner);
+        if policy::owner_layers_stale(cards.applied_layers.get(&owner), &identity, &sorted)
+            || cards.applied_overview_cached.get(&owner).copied().unwrap_or(false) != request.cached {
+            model3d::apply_overview_source_layers(models, media, commands, &owner, &sorted, request.cached);
         }
-        next.insert(owner.clone(), (identity, sorted));
+        if desired.contains_key(&owner) || overview.owners.contains_key(&owner) {
+            next_cached.insert(owner.clone(), request.cached);
+            next.insert(owner, (identity, sorted));
+        } else {
+            media.forget_overview_layers(&owner);
+        }
     }
     cards.applied_layers = next;
+    cards.applied_overview_cached = next_cached;
 }
 
 /// 让场景方向光同时覆盖全部卡片层，使卡片相机也能被照亮
@@ -290,8 +309,13 @@ pub(crate) fn apply_light_layers(commands: &mut Commands, cards: &mut ShotPrevie
         let mut query = world.query_filtered::<Entity, With<DirectionalLight>>();
         let entities: Vec<Entity> = query.iter(world).collect();
         for entity in entities {
-            let existing = world.get::<RenderLayers>(entity).cloned().unwrap_or_default();
-            let merged = layers.iter().fold(existing, |merged, layer| merged.with(*layer));
+            let existing = world
+                .get::<RenderLayers>(entity)
+                .cloned()
+                .unwrap_or_default();
+            let merged = layers
+                .iter()
+                .fold(existing, |merged, layer| merged.with(*layer));
             world.entity_mut(entity).insert(merged);
         }
     });
@@ -328,11 +352,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn overview_and_shot_layers_are_merged_and_removed_together() {
+        use crate::canvas_ecs::overview_cache::{OverviewSourceLayer, OverviewSourceLayers};
+        let mut world = World::new();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let mut cards = ShotPreviewCards::default();
+        let models = model3d::ModelVisuals::default();
+        let mut media = model3d::film_set_media::FilmSetMediaVisuals::default();
+        let desired = HashMap::from([("film".to_owned(), vec![33, 34])]);
+        let mut overview = OverviewSourceLayers::default();
+        overview.owners.insert("film".into(), OverviewSourceLayer { layer: Some(32), cached: true });
+        apply_owner_layers(&mut Commands::new(&mut queue, &world), &mut cards, &models, &mut media, &desired, &overview);
+        queue.apply(&mut world);
+        assert_eq!(cards.applied_layers["film"].1, vec![32, 33, 34]);
+        assert!(cards.applied_overview_cached["film"]);
+        let mask = model3d::overview_source_mask(&cards.applied_layers["film"].1, true);
+        assert!(!mask.intersects(&bevy::camera::visibility::RenderLayers::layer(0)));
+        for layer in [model3d::capture::CAPTURE_LAYER, 32, 33, 34] {
+            assert!(mask.intersects(&bevy::camera::visibility::RenderLayers::layer(layer)));
+        }
+        overview.owners.clear();
+        apply_owner_layers(&mut Commands::new(&mut queue, &world), &mut cards, &models, &mut media, &desired, &overview);
+        queue.apply(&mut world);
+        assert_eq!(cards.applied_layers["film"].1, vec![33, 34]);
+        assert!(!cards.applied_overview_cached["film"]);
+        apply_owner_layers(&mut Commands::new(&mut queue, &world), &mut cards, &models, &mut media, &HashMap::new(), &overview);
+        queue.apply(&mut world);
+        assert!(cards.applied_layers.is_empty());
+    }
+
+    #[test]
     fn preview_layers_stay_finite_and_inside_engine_capacity() {
         let mut pool = crate::app::PreviewLayerPool::default();
         let mut seen = HashSet::new();
         for index in 0..MAX_PREVIEW_LAYERS {
-            let layer = acquire_layer(&mut pool, &format!("card-{index}")).expect("容量内必须能租到层");
+            let layer =
+                acquire_layer(&mut pool, &format!("card-{index}")).expect("容量内必须能租到层");
             assert!(!crate::preview_layers::PreviewLayers::is_reserved(layer));
             seen.insert(layer);
         }

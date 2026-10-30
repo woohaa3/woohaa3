@@ -18,7 +18,7 @@ import {
   findNodeTemplate
 } from "../../domain/node-catalog.js";
 import { planGroupNodes, planInsertNode, planUngroupNodes } from "../../../extension-api/command-planner.js";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, partitionManagedNodeDeletion, resolveShotReferenceSource } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, isFilmSetGroupNode, partitionManagedNodeDeletion, resolveShotReferenceSource } from "@woohaa3/contracts";
 
 /** 便签的规范节点类型（与 `node-catalog.ts` 的模板 nodeType 一致）。 */
 const STICKY_NOTE_NODE_TYPE = "sticky-note";
@@ -37,10 +37,11 @@ import {
   GROUP_STRUCTURE_ACTION_LABELS,
   describeGroupStructureAction,
   runGroupStructureAction,
+  type GroupStructureActionKind,
   type GroupStructureDeps
 } from "./group-structure-actions.js";
 import type { CanvasContextMenuItem } from "./canvas-context-menu.js";
-import type { SlotsService } from "../../contract/platform.js";
+import type { NodeActionDescriptor, SlotsService } from "../../contract/platform.js";
 import { reportContributionFault } from "../../contribution-guard.js";
 import type { ExtensionFaultService } from "../../extension-faults.js";
 
@@ -131,7 +132,9 @@ export function nodeContextMenuItems(
     const node = nodes.find((candidate) => candidate.id === id);
     return node?.type === "group" || (!!node?.parentId && node.type !== "group");
   });
-  const soloGroup = selected.length === 1 && nodes.find((node) => node.id === selected[0])?.type === "group"
+  const selectedNode = selected.length === 1 ? nodes.find((node) => node.id === selected[0]) : undefined;
+  const selectedFilmSetGroup = !!selectedNode && isFilmSetGroupNode(selectedNode, facts.nodeData?.[selectedNode.id]);
+  const soloGroup = selected.length === 1 && selectedNode?.type === "group" && !selectedFilmSetGroup
     ? selected[0]
     : null;
   // 分组提交期间，该组的批量执行/整理/解组全部禁用（横条与右键共用同一门禁）。
@@ -145,7 +148,7 @@ export function nodeContextMenuItems(
   const bulkReason = bulk && !bulk.enabled ? bulk.reason : groupGateReason;
   // 单选分组时「解组」在右键同时提供选区解组与分组固定入口；选中成员时仍用选区解组/移出。
   // 两者共用同一 planner（`planUngroupNodes`）与同一门禁，行为一致。
-  const canUngroupSelection = canUngroup;
+  const canUngroupSelection = canUngroup && !selectedFilmSetGroup;
   return [
     ...(canGroup ? [{ id: SELECTION_ACTION_IDS.group, label: SELECTION_ACTION_LABELS.group, disabled: !writable, ...(writable ? {} : { reason: READONLY_REASON }) }] : []),
     ...(canUngroupSelection ? [{ id: SELECTION_ACTION_IDS.ungroup, label: SELECTION_ACTION_LABELS.ungroup, disabled: !writable, ...(writable ? {} : { reason: READONLY_REASON }) }] : []),
@@ -190,21 +193,35 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
     // 与右键共用同一 `structureDeps`（同一门禁、同一 planner，一次批次一次撤销）。宿主横条是唯一
     // 渲染者，这里只提供**纯数据描述**与命中派发。批量执行贡献由 task-execution 提供（order -20），
     // 这里排在它之后，形成「批量执行 · N」「整理」「解组」。
-    const groupStructureActions: Array<{ kind: "tidy" | "ungroup"; order: number }> = [
+    const groupStructureActions: Array<{ kind: GroupStructureActionKind; order: number; icon?: NodeActionDescriptor["icon"]; iconOnly?: boolean }> = [
+      // 排列是普通组的常用入口：紧跟展开/收起与批量执行，按「横、竖、宫格、↘、↗」排列；
+      // 只使用图标，避免五个长文案把横条撑到视口外。
+      { kind: "arrange-horizontal", order: -25, icon: "arrange-horizontal", iconOnly: true },
+      { kind: "arrange-vertical", order: -24, icon: "arrange-vertical", iconOnly: true },
+      { kind: "arrange-grid", order: -23, icon: "arrange-grid", iconOnly: true },
+      { kind: "arrange-diagonal-down", order: -22, icon: "arrange-diagonal-down", iconOnly: true },
+      { kind: "arrange-diagonal-up", order: -21, icon: "arrange-diagonal-up", iconOnly: true },
       { kind: "tidy", order: -19 },
       { kind: "ungroup", order: -18 }
     ];
-    const removeGroupStructureActions = groupStructureActions.map(({ kind, order }) =>
+    const removeGroupStructureActions = groupStructureActions.map(({ kind, order, icon, iconOnly }) =>
       ctx.slots.register("canvas.node-action", {
         id: GROUP_STRUCTURE_ACTION_IDS[kind],
         owner: CANVAS_MENU_PLUGIN_ID,
         order,
-        available: ({ nodeType }) => nodeType === "group",
+        available: ({ nodeId, nodeType }) => {
+          if (nodeType !== "group") return false;
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const node = canvas?.document.nodes.find(entry => entry.id === nodeId);
+          return !!node && !isFilmSetGroupNode(node, canvas?.nodeData[nodeId]);
+        },
         describe: ({ nodeId }) => {
           const availability = describeGroupStructureAction(structureDeps, kind, nodeId);
           return {
             label: GROUP_STRUCTURE_ACTION_LABELS[kind],
             tone: "neutral" as const,
+            ...(icon ? { icon } : {}),
+            ...(iconOnly ? { iconOnly: true } : {}),
             enabled: availability.available,
             ...(availability.available ? {} : { reason: availability.reason })
           };
@@ -536,7 +553,7 @@ function insertNode(ctx: Context, templateId: string, context: ContextMenuContex
   if (!ctx.canvasSession.isWritable()) return;
   const world = context.world;
   // 自包含 3D 节点直接创建时携带完整本地模型定义，不从来源节点读取。
-  const nodeData = defaultNodeDataForType(template.nodeType);
+  const nodeData = defaultNodeDataForType(template.id);
   if (nodeData === undefined) return;
   const label = context.connectFrom ? connectLabelFor(context.connectFrom.nodeType, template.nodeType) : "";
   void ctx.canvasEdit.record(
@@ -546,7 +563,7 @@ function insertNode(ctx: Context, templateId: string, context: ContextMenuContex
       nodeData: context.connectFrom
         ? connectNodeDataFor(
             { id: context.connectFrom.nodeId, type: context.connectFrom.nodeType },
-            template.nodeType, [], workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData
+            template.id, [], workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData
           ) ?? nodeData
         : nodeData,
       ...(context.connectFrom ? { connectFromNodeId: context.connectFrom.nodeId } : {}),

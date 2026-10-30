@@ -15,7 +15,7 @@
 
 ## 即梦（Seedream）的图片参数
 
-即梦接口没有 `aspect_ratio` / `quality` / `n`：宽高比只能写进 `size`，分辨率只能选官方档位。面板因此给「图片比例 + 图片分辨率」两个控件，档位与**比例 × 档位的官方像素表**来自 [contracts/seedream-presets.ts](../../../web/contracts/src/task/seedream-presets.ts)（与 LiteLLM / TokenHub 共用同一份数据）：
+即梦接口没有 `aspect_ratio` / `quality` / `n`：宽高比只能写进 `size`，分辨率只能选官方档位。面板因此给「图片比例 + 图片分辨率」两个控件，档位、**比例 × 档位的官方像素表**、参考图上限与透明背景都来自**卡片**（[cards/image/ark/seedream-*.ts](../../../web/contracts/src/task/generation-parameters/cards/image/ark)，与其他 Provider 共用同一份数据）：
 
 - 比例选具体画幅（1:1、16:9…）时，按该版本的官方像素表下发 `WIDTHxHEIGHT`，这才是真正固定宽高比；
 - 比例选「自适应」（默认）时只下发分辨率档位，由模型结合提示词决定宽高——即官方推荐的「方式 1」；

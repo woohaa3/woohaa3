@@ -25,5 +25,13 @@ pub(crate) fn model_candidates(
 /// 由 [`model3d::film_set_pick::prepare`] 派生；无聚焦目标时为 `owner = None`/空候选，
 /// 不接受点不会做任何部件或媒体准备（design D1）。
 pub(crate) fn film_set_items(scene: &protocol::Scene) -> model3d::FilmSetItemPreparation {
+    if scene.model_focus.as_ref().is_some_and(|focus| {
+        scene
+            .film_set_groups
+            .iter()
+            .any(|group| group.owner_id == focus.node_id)
+    }) {
+        return model3d::film_set_pick::prepare_group(scene, bridge::lookup_model_asset);
+    }
     model3d::film_set_pick::prepare(scene, bridge::lookup_model_asset)
 }

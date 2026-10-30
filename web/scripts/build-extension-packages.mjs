@@ -2,9 +2,9 @@
  * 构建全部扩展包的 `dist/`（后端入口 / 共享入口）。
  *
  * 为什么不是一条 `pnpm -r --filter "./extensions/*"`：
- * `web/frontend` 与 `prompt-snippets` / `task-activity` 互为工作区依赖（前端测试与 showcase 引用扩展
- * 入口，扩展又依赖 `@woohaa3/frontend` 的类型/组件）。pnpm 的递归任务图会因此成环并直接失败
- * （ERR_PNPM_TASK_CYCLE），所以这两个包不参与同一轮递归构建：它们的浏览器产物由
+ * `web/frontend` 与 `task-activity` 互为工作区依赖（前端测试引用扩展入口，扩展又依赖
+ * `@woohaa3/frontend` 的类型/组件）。pnpm 的递归任务图会因此成环并直接失败
+ * （ERR_PNPM_TASK_CYCLE），所以这个包不参与同一轮递归构建：它的浏览器产物由
  * `build:browser` 生成，`dist/` 与聚合构建无关。
  *
  * 环由 package.json 的依赖关系**推导**，不是写死的包名单：新增/删除扩展不需要改这个脚本。

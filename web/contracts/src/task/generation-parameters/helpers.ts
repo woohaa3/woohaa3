@@ -21,6 +21,23 @@ export function presetLimitsOf(
   return facts?.limits;
 }
 
+/**
+ * 卡片用 `narrow` 收窄的枚举值（例如 `outputFormat`）；没声明时返回 undefined。
+ *
+ * Provider 做请求字段校验时需要「这个模型能发哪些值」——那是卡片的事实，不能自己再存一份。
+ */
+export function cardEnumValues(card: PresetCard, key: string): readonly string[] | undefined {
+  const values = card.narrow?.[key]?.values;
+  if (!Array.isArray(values)) return undefined;
+  const strings = values.filter((value): value is string => typeof value === "string");
+  return strings.length > 0 ? strings : undefined;
+}
+
+/** 卡片声明的参考图上限（`limits.references.image.max`），没声明时返回 undefined。 */
+export function cardImageReferenceLimit(card: PresetCard): number | undefined {
+  return card.limits?.references?.image?.max;
+}
+
 /** 参考素材绑定的便捷读取（与 `catalogModelBindings` 同源，避免调用方各写一份）。 */
 export function referenceBindingsOf(model: CanvasTaskCatalogModel): readonly CanvasTaskInputBinding[] {
   return catalogModelBindings(model);

@@ -1,17 +1,21 @@
 //! Embedded model cards reuse model3d roots; each camera sees only its own layer.
-mod gpu;
 mod cache;
+mod gpu;
 mod latency;
 mod scheduling;
 use scheduling::schedule;
+#[cfg(all(
+    test,
+    any(feature = "wasm", feature = "native-canvas"),
+    target_os = "macos"
+))]
+mod gpu_tests;
 mod policy;
-mod startup;
-pub(crate) mod render_work;
 mod render_draw_work;
+pub(crate) mod render_work;
+mod startup;
 #[cfg(test)]
 mod tests;
-#[cfg(all(test, any(feature = "wasm", feature = "native-canvas"), target_os = "macos"))]
-mod gpu_tests;
 
 use crate::{
     app::{CurrentScene, FocusRig, ModelAssetTable, SurfaceState},
@@ -20,9 +24,9 @@ use crate::{
 };
 use bevy::{
     asset::RenderAssetUsages,
+    camera::{RenderTarget, visibility::RenderLayers},
     image::ImageSampler,
     prelude::*,
-    camera::{RenderTarget, visibility::RenderLayers},
     render::{
         RenderApp, RenderSystems,
         extract_component::{ExtractComponent, ExtractComponentPlugin},
@@ -41,6 +45,7 @@ pub(crate) struct PreviewView {
     pub(crate) generation: u64,
     pub(crate) meshes: Vec<bevy::asset::AssetId<Mesh>>,
     pub(crate) materials: Vec<bevy::asset::AssetId<StandardMaterial>>,
+    pub(crate) images: Vec<bevy::asset::AssetId<Image>>,
     /// 卡片对应的模型根此刻是否存在。
     ///
     /// 与「根存在但没有 mesh」区分开：缺失时空画面只表示还没 spawn，不能当作已绘制；
@@ -58,6 +63,11 @@ impl Ready {
     /// 卡片视图由 `remove_card` 清理；一次性视图没有卡片生命周期，必须自己归还。
     pub(crate) fn forget(&self, camera: Entity) {
         self.0.lock().unwrap().remove(&camera);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_for_test(&self, camera: Entity, generation: u64) {
+        self.0.lock().unwrap().insert(camera, generation);
     }
 }
 #[derive(Resource, Default)]
@@ -155,7 +165,9 @@ fn apply_preview_layer(
     if let Some(inserted) = models.preview_layer(commands, id, layer, focused) {
         models.hot_path.preview_layer_inserts += inserted;
     }
-    state.applied_layers.insert(id.to_owned(), (identity, layers));
+    state
+        .applied_layers
+        .insert(id.to_owned(), (identity, layers));
 }
 pub(crate) struct ModelPreviewPlugin;
 impl Plugin for ModelPreviewPlugin {
@@ -165,8 +177,12 @@ impl Plugin for ModelPreviewPlugin {
         let ready = Ready::default();
         let work = render_work::RenderWork::default();
         #[cfg(feature = "explicit-instancing")]
-        let work = work.with_instances(app.world().get_resource::<model3d::instancing::InstanceWork>()
-            .cloned().unwrap_or_default());
+        let work = work.with_instances(
+            app.world()
+                .get_resource::<model3d::instancing::InstanceWork>()
+                .cloned()
+                .unwrap_or_default(),
+        );
         app.insert_resource(work.clone());
         app.insert_resource(ready.clone())
             .init_resource::<Previews>()
@@ -176,7 +192,9 @@ impl Plugin for ModelPreviewPlugin {
             render_work::install(render, work);
             render.insert_resource(ready).add_systems(
                 bevy::render::Render,
-                gpu::observe.after(RenderSystems::Prepare).before(RenderSystems::Render),
+                gpu::observe
+                    .after(RenderSystems::Prepare)
+                    .before(RenderSystems::Render),
             );
         }
     }
@@ -208,19 +226,39 @@ pub(crate) fn sync(
     // 若在聚焦中把它当离屏回收，退出就只能退回等距画布相机，模型会沿画布锚点一路下移
     // （表现为「后退时模型固定往下走」）。因此聚焦中的目标卡片不参与离屏回收。
     let focused_card = rig.focus_node.as_deref();
-    let expired: Vec<_> = state.cards.iter().filter(|(id, card)| {
-        let focused = focused_card == Some(id.as_str());
-        !focused && card.offscreen_since.is_some_and(|since| now - since >= 1.0)
-    })
-    .map(|(id, _)| id.clone())
-    .collect();
+    let expired: Vec<_> = state
+        .cards
+        .iter()
+        .filter(|(id, card)| {
+            let focused = focused_card == Some(id.as_str());
+            !focused && card.offscreen_since.is_some_and(|since| now - since >= 1.0)
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
     for id in expired {
-        remove_card(&mut commands, &mut state, &mut pool, &mut images, &ready, &id);
+        remove_card(
+            &mut commands,
+            &mut state,
+            &mut pool,
+            &mut images,
+            &ready,
+            &id,
+        );
     }
-    let quality_changed = state.cards.iter().any(|(id, card)|
-        !card.signature.ends_with(&format!(":{}", models.quality_identity(id))));
+    let quality_changed = state.cards.iter().any(|(id, card)| {
+        !card
+            .signature
+            .ends_with(&format!(":{}", models.quality_identity(id)))
+    });
     let pins_changed = state.capture_pins != *models.capture_pins();
-    if !pins_changed && !flags.camera_changed && !flags.changed && !flags.observer_changed && !quality_changed && !state.retry_allocation && state.focus_node == rig.focus_node {
+    if !pins_changed
+        && !flags.camera_changed
+        && !flags.changed
+        && !flags.observer_changed
+        && !quality_changed
+        && !state.retry_allocation
+        && state.focus_node == rig.focus_node
+    {
         schedule(&mut commands, &mut state, &mut images, &ready, &mut cameras);
         return;
     }
@@ -240,18 +278,39 @@ pub(crate) fn sync(
         .cloned()
         .collect();
     for id in stale {
-        remove_card(&mut commands, &mut state, &mut pool, &mut images, &ready, &id);
+        remove_card(
+            &mut commands,
+            &mut state,
+            &mut pool,
+            &mut images,
+            &ready,
+            &id,
+        );
     }
     let clear = theme.token_color("canvasNodeContent");
     let tick = state.tick;
     state.retry_allocation = false;
     state.deferred.retain(|id, _| alive.contains(id.as_str()));
     state.latency.retain(&alive);
-    let interactive = |id: &str| scene.hover.as_ref().and_then(|h| h.node_id.as_deref()) == Some(id)
-        || scene.animation_playback.as_ref().is_some_and(|p| p.node_id == id);
+    let interactive = |id: &str| {
+        scene.hover.as_ref().and_then(|h| h.node_id.as_deref()) == Some(id)
+            || scene
+                .animation_playback
+                .as_ref()
+                .is_some_and(|p| p.node_id == id)
+    };
     let viewport = crate::model3d::grid::scene_view(scene);
     let mut order: Vec<_> = scene.nodes.iter().enumerate().collect();
-    order.sort_by_key(|(index, node)| (startup::priority(interactive(&node.id), state.deferred.get(&node.id).copied(), tick), *index));
+    order.sort_by_key(|(index, node)| {
+        (
+            startup::priority(
+                interactive(&node.id),
+                state.deferred.get(&node.id).copied(),
+                tick,
+            ),
+            *index,
+        )
+    });
     let mut start_budget = startup::StartBudget::new();
     for (index, node) in order {
         let (Some(view), Some(reference)) = (&node.model_preview, &node.model) else {
@@ -260,7 +319,8 @@ pub(crate) fn sync(
         let Some(resource) = resources.0.get(&reference.resource_key) else {
             continue;
         };
-        let Some((bounds, anchor)) = model3d::model_bounds_for_node(resource, &reference.placement, node)
+        let Some((bounds, anchor)) =
+            model3d::model_bounds_for_node(resource, &reference.placement, node)
         else {
             continue;
         };
@@ -268,7 +328,15 @@ pub(crate) fn sync(
         let index = crate::canvas_query::focus_context::index(scene, &node.id, index);
         let (x, y, width, height) = layout::content_rect(&display);
         let context = crate::canvas_query::focus_context::contains(scene, &node.id);
-        let viewport = if context { crate::isometric_grid::IsometricGridView { x: 0., y: 0., zoom: 1. } } else { viewport };
+        let viewport = if context {
+            crate::isometric_grid::IsometricGridView {
+                x: 0.,
+                y: 0.,
+                zoom: 1.,
+            }
+        } else {
+            viewport
+        };
         let visible = (rig.focus_node.is_none() && scene.model_focus.is_none())
             && x * viewport.zoom + viewport.x < surface.size.x
             && (x + width) * viewport.zoom + viewport.x > 0.
@@ -303,13 +371,22 @@ pub(crate) fn sync(
         // shrink the visible preview of a fixed demand.
         let budget_cards = state.cards.len() + usize::from(!state.cards.contains_key(&node.id));
         let size = budget_target_size(size, budget_cards);
-        let size = state.cards.get(&node.id).map_or(size, |card|
-            policy::retained_size(card.size, size, budget_target_size(card.size, budget_cards) == card.size));
+        let size = state.cards.get(&node.id).map_or(size, |card| {
+            policy::retained_size(
+                card.size,
+                size,
+                budget_target_size(card.size, budget_cards) == card.size,
+            )
+        });
         // Account for real retained generations, rather than assuming every
         // displayed image already follows today's per-card budget.
-        let replaceable = state.cards.get(&node.id).filter(|card| card.image != card.displayed)
+        let replaceable = state
+            .cards
+            .get(&node.id)
+            .filter(|card| card.image != card.displayed)
             .map_or(0, |card| image_bytes(&images, &card.image));
-        let available = policy::MAX_TEXTURE_BYTES.saturating_sub(texture_bytes(&state, &images).saturating_sub(replaceable));
+        let available = policy::MAX_TEXTURE_BYTES
+            .saturating_sub(texture_bytes(&state, &images).saturating_sub(replaceable));
         // Lens framing follows the logical card, independent of texture rounding/capping.
         let aspect = width.max(1.0) / height.max(1.0);
         let relative_center = Vec3::from_array(view.target_offset);
@@ -337,10 +414,21 @@ pub(crate) fn sync(
             far: crate::orbit_camera::ORBIT_DEFAULT_FAR,
             ..default()
         });
-        let signature = cache::signature(node, reference, relative_pose, size, &projection,
-            clear, &models.quality_identity(&node.id));
+        let signature = cache::signature(
+            node,
+            reference,
+            relative_pose,
+            size,
+            &projection,
+            clear,
+            &models.quality_identity(&node.id),
+        );
         let new_card = !state.cards.contains_key(&node.id);
-        if state.cards.get(&node.id).is_none_or(|card| card.signature != signature) {
+        if state
+            .cards
+            .get(&node.id)
+            .is_none_or(|card| card.signature != signature)
+        {
             state.latency.invalidate(&node.id);
         }
         if new_card {
@@ -436,14 +524,28 @@ pub(crate) fn sync(
         let card = state.cards.get_mut(&node.id).unwrap();
         let focused = rig.focus_node.as_deref() == Some(node.id.as_str());
         let card_layer = card.layer;
-        apply_preview_layer(&mut commands, &mut state, &mut models, &node.id, card_layer, focused);
+        apply_preview_layer(
+            &mut commands,
+            &mut state,
+            &mut models,
+            &node.id,
+            card_layer,
+            focused,
+        );
         let card = state.cards.get_mut(&node.id).unwrap();
         card.pivot = pivot;
         card.visible = visible;
-        if visible { card.offscreen_since = None; }
-        else { card.offscreen_since.get_or_insert(now); }
-        card.live = scene.hover.as_ref().and_then(|h| h.node_id.as_deref()) == Some(node.id.as_str())
-            || scene.animation_playback.as_ref().is_some_and(|p| p.node_id == node.id);
+        if visible {
+            card.offscreen_since = None;
+        } else {
+            card.offscreen_since.get_or_insert(now);
+        }
+        card.live = scene.hover.as_ref().and_then(|h| h.node_id.as_deref())
+            == Some(node.id.as_str())
+            || scene
+                .animation_playback
+                .as_ref()
+                .is_some_and(|p| p.node_id == node.id);
         // 根缺失时卡片画不出内容；记录起点，让调度给它一个有界的等待窗口。
         // Native 后台准备中的根同样是「内容还在路上」：不算合法空场、不发布灰底，
         // 只按既有有界等待让位（change: 2026-10-18-prepare-native-film-sets-in-background）。
@@ -464,7 +566,11 @@ pub(crate) fn sync(
             }
         }
         let sprite_state = SpriteState {
-            transform: Transform::from_xyz(x + width / 2., -y - height / 2., 10.01 + index as f32 * 0.1),
+            transform: Transform::from_xyz(
+                x + width / 2.,
+                -y - height / 2.,
+                10.01 + index as f32 * 0.1,
+            ),
             size: Vec2::new(width, height),
             // 运行中让位给进度环：卡片实时画面与图片纹理同策略隐藏
             // （change: show-agent-turn-running-state-on-node）。否则 3D 卡片预览会盖住
@@ -499,10 +605,14 @@ pub(crate) fn sync(
                     continue;
                 };
                 start_budget.started();
-                if card.image != card.displayed { images.remove(card.image.id()); }
+                if card.image != card.displayed {
+                    images.remove(card.image.id());
+                }
                 card.image = preview_image(&mut images, allocated_size);
                 card.size = allocated_size;
-                commands.entity(card.camera).insert(RenderTarget::Image(card.image.clone().into()));
+                commands
+                    .entity(card.camera)
+                    .insert(RenderTarget::Image(card.image.clone().into()));
             }
             // Preserve queue age when superseding unfinished work.
             if ready.0.lock().unwrap().get(&card.camera).copied() == Some(card.generation) {
@@ -519,6 +629,7 @@ pub(crate) fn sync(
                     generation: card.generation,
                     meshes: models.preview_meshes(&node.id),
                     materials: models.preview_materials(&node.id),
+                    images: Vec::new(),
                     rooted: models.has_root(&node.id),
                 },
             ));
@@ -526,8 +637,12 @@ pub(crate) fn sync(
             card.applied_pose = Some(pose);
             models.hot_path.preview_pose_inserts += 1;
         }
-        if signature_changed && admitted { state.deferred.remove(&node.id); }
-        if let Some(generation) = admitted_generation { state.latency.admitted(&node.id, generation); }
+        if signature_changed && admitted {
+            state.deferred.remove(&node.id);
+        }
+        if let Some(generation) = admitted_generation {
+            state.latency.admitted(&node.id, generation);
+        }
     }
     schedule(&mut commands, &mut state, &mut images, &ready, &mut cameras);
     let mut layers = RenderLayers::from_layers(&[0, model3d::capture::CAPTURE_LAYER]);
@@ -547,7 +662,10 @@ fn merge_scene_light_layers(world: &mut World, layers: &RenderLayers) {
     let mut lights = world.query_filtered::<Entity, With<DirectionalLight>>();
     let entities: Vec<_> = lights.iter(world).collect();
     for entity in entities {
-        let existing = world.get::<RenderLayers>(entity).cloned().unwrap_or_default();
+        let existing = world
+            .get::<RenderLayers>(entity)
+            .cloned()
+            .unwrap_or_default();
         world.entity_mut(entity).insert(existing.union(layers));
     }
 }
@@ -582,24 +700,34 @@ fn remove_card(
     state.deferred.remove(id);
     state.latency.cancel(id);
     state.applied_layers.remove(id);
-    let Some(card) = state.cards.remove(id) else { return; };
+    let Some(card) = state.cards.remove(id) else {
+        return;
+    };
     // 层只在旧视图停止（实体销毁 + 就绪记录移除）后归还，下一次出租推进代数。
     pool.0.release(id);
     commands.entity(card.camera).try_despawn();
     commands.entity(card.sprite).try_despawn();
     images.remove(card.image.id());
-    if card.displayed != card.image { images.remove(card.displayed.id()); }
+    if card.displayed != card.image {
+        images.remove(card.displayed.id());
+    }
     ready.0.lock().unwrap().remove(&card.camera);
 }
 fn image_bytes(images: &Assets<Image>, handle: &Handle<Image>) -> u64 {
-    images.get(handle).map_or(0, |image|
-        image.texture_descriptor.size.width as u64 * image.texture_descriptor.size.height as u64 * 4)
+    images.get(handle).map_or(0, |image| {
+        image.texture_descriptor.size.width as u64 * image.texture_descriptor.size.height as u64 * 4
+    })
 }
 
 fn texture_bytes(state: &Previews, images: &Assets<Image>) -> u64 {
     let mut ids = std::collections::HashSet::new();
-    state.cards.values().flat_map(|card| [&card.image, &card.displayed])
-        .filter(|handle| ids.insert(handle.id())).map(|handle| image_bytes(images, handle)).sum()
+    state
+        .cards
+        .values()
+        .flat_map(|card| [&card.image, &card.displayed])
+        .filter(|handle| ids.insert(handle.id()))
+        .map(|handle| image_bytes(images, handle))
+        .sum()
 }
 
 // Render at displayed physical resolution, including zoomed-out cards. Round the longest edge into buckets to avoid reallocating
@@ -634,7 +762,12 @@ fn budget_target_size(size: UVec2, cards: usize) -> UVec2 {
     const PIXELS_PER_GENERATION: f32 = 16_777_216.;
     let budget = PIXELS_PER_GENERATION / cards.max(1) as f32;
     let pixels = size.x as f32 * size.y as f32;
-    if pixels <= budget { return size; }
+    if pixels <= budget {
+        return size;
+    }
     let scale = (budget / pixels).sqrt();
-    UVec2::new((size.x as f32 * scale).floor().max(1.) as u32, (size.y as f32 * scale).floor().max(1.) as u32)
+    UVec2::new(
+        (size.x as f32 * scale).floor().max(1.) as u32,
+        (size.y as f32 * scale).floor().max(1.) as u32,
+    )
 }

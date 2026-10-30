@@ -28,6 +28,38 @@ pub(super) fn sync(commands: &mut Commands, models: &mut ModelVisuals, scene: &S
             commands.entity(*entity).insert(base);
         }
     }
+    // Group geometry is prepared under its owner. Edit the binding part root,
+    // never the independently displayed source card root. Geometry and payload
+    // identity remain stable for transform/visibility edits.
+    for group in &scene.film_set_groups {
+        let Some(root) = models.roots.get_mut(&group.owner_id) else {
+            continue;
+        };
+        for binding in &group.bindings {
+            let id = format!("{}:{}", binding.binding_id.len(), binding.binding_id);
+            let Some(entity) = root.part_entities.get(&id) else {
+                continue;
+            };
+            let base = Transform {
+                translation: Vec3::new(
+                    binding.transform.x,
+                    binding.transform.y,
+                    binding.transform.z,
+                ),
+                rotation: Quat::from_rotation_y(binding.transform.yaw),
+                scale: Vec3::splat(binding.transform.scale),
+            };
+            root.part_bases.insert(id, base);
+            commands.entity(*entity).insert((
+                base,
+                if binding.visible {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                },
+            ));
+        }
+    }
 }
 
 /// Picking uses the same dynamic transforms, but layout still uses the immutable resource bounds.
@@ -73,24 +105,33 @@ mod tests {
         let p = ModelPlacement::default();
         // 计数变体与唯一几何公式共用：取 `[0].1` 即世界 AABB，忽略计数。
         let bounds = |node: &GraphNode| -> crate::model3d::scene::ModelAabb {
-            film_set_item_world_aabbs_counted(&node, &model, &p, &node.composite_asset.as_ref().unwrap().item_roots)
-                .0[0]
+            film_set_item_world_aabbs_counted(
+                &node,
+                &model,
+                &p,
+                &node.composite_asset.as_ref().unwrap().item_roots,
+            )
+            .0[0]
                 .1
         };
         let unit = model_unit(&node, &model, &p);
         let anchor = model_anchor(&node, &model, &p, unit);
         let before = bounds(&node);
-        node.composite_asset.as_mut().unwrap().item_placements.insert(
-            "root".into(),
-            ModelPlacement {
-                offset: crate::protocol::ModelOffset {
-                    x: 2.0,
-                    y: 0.0,
-                    z: 0.0,
+        node.composite_asset
+            .as_mut()
+            .unwrap()
+            .item_placements
+            .insert(
+                "root".into(),
+                ModelPlacement {
+                    offset: crate::protocol::ModelOffset {
+                        x: 2.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    ..default()
                 },
-                ..default()
-            },
-        );
+            );
         let after = bounds(&node);
         assert!((after.center().x - before.center().x - 2.0 * unit).abs() < 1e-3);
         assert_eq!(model_unit(&node, &model, &p), unit);

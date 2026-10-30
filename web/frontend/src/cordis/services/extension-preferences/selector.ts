@@ -30,7 +30,7 @@ export function resolveStartupSelection(
   const disabledIds: string[] = [];
   for (const entry of catalog) {
     if (!entry.configurable) continue;
-    const enabled = desired[entry.id] ?? true;
+    const enabled = desired[entry.id] ?? entry.defaultEnabled ?? true;
     assembled[entry.id] = enabled;
     if (!enabled) disabledIds.push(entry.id);
   }
@@ -39,10 +39,10 @@ export function resolveStartupSelection(
 
 /** 本次启动是否装配某定义（required 与不可配置定义恒为 true）。 */
 export function isAssembledAtStartup(
-  definition: { id: string; required: boolean; configurable?: boolean },
+  definition: { id: string; required: boolean; configurable?: boolean; defaultEnabled?: boolean },
   assembled: Readonly<Record<string, boolean>>
 ): boolean {
   if (definition.required) return true;
   if (definition.configurable !== true) return true;
-  return assembled[definition.id] ?? true;
+  return assembled[definition.id] ?? definition.defaultEnabled ?? true;
 }

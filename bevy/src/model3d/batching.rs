@@ -32,10 +32,14 @@ pub(super) struct Planned {
 }
 
 /// 平铺到根空间的部件：调用方按 `index` 改写 `ModelEntitySpec`。
-#[derive(Debug, Clone, Copy)]
+///
+/// `parent` 是平铺后的直接父级：无屏障时为根（`None`）；遇到动态父级屏障时保留该父级，
+/// 让运行时写在屏障上的 transform 继续作用于整批几何。
+#[derive(Debug, Clone)]
 pub(super) struct FlattenedPart {
     pub index: usize,
     pub position: [f32; 3],
+    pub parent: Option<String>,
 }
 
 #[derive(Debug)]
@@ -68,11 +72,16 @@ pub(super) struct BuiltBatch {
 /// `merge_cells` 让同一 `(parent, material)` 的部件跨空间网格合并：总览档下整根本来就落在
 /// 少量像素里，按 32 单位网格切片只会把同一材质拆成几十个 draw call，却没有可用的局部剔除
 /// 收益（2026-10-28 总览 draw call 优化）。普通模型卡片保持按网格切片。
+///
+/// `barriers` 是**动态父级**：平铺到它为止，批次仍挂在它下面。片场组徽标按 binding 分别
+/// 建模，binding 的摆放/显隐由运行时的 `item_placement::sync` 写在那层实体上；直接把叶子
+/// 平铺到子根会丢掉这份 transform。空集合表示旧的整根平铺语义。
 pub(super) fn plan(
     specs: &[ModelEntitySpec],
     opaque: &HashSet<String>,
     independent: &HashSet<String>,
     merge_cells: bool,
+    barriers: &HashSet<String>,
 ) -> Planned {
     let parents: HashSet<&str> = specs.iter().filter_map(|s| s.parent.as_deref()).collect();
     let index: HashMap<&str, usize> = specs
@@ -87,6 +96,8 @@ pub(super) fn plan(
             || spec.animation.is_some()
             || independent.contains(&spec.id)
             || parents.contains(spec.id.as_str())
+            // 动态父级屏障本身必须保留实体：片场 binding 的摆放/显隐由运行时写在它上面。
+            || barriers.contains(spec.id.as_str())
             || !opaque.contains(&spec.material_key)
             || !spec
                 .position
@@ -108,24 +119,25 @@ pub(super) fn plan(
             Some(ModelGeometry::Mesh { .. }) if !merge_cells => continue,
             _ => {}
         }
-        // 总览片场：父级只做平移时把叶子部件平铺到根空间，按材质合并——父级分组会把同一
-        // 材质拆成几十个批次，而总览下整根本来只有几十像素，分组没有剔除收益
-        // （2026-10-28 draw call 优化）。父级带旋转/缩放或子树有动画时仍按原父级分组。
+        // 总览片场：父级只做平移时把叶子部件平铺到根空间（或最近一道动态父级屏障），按材质
+        // 合并——父级分组会把同一材质拆成几十个批次，而总览下整根本来只有几十像素，分组没有
+        // 剔除收益（2026-10-28 draw call 优化）。父级带旋转/缩放或子树有动画时仍按原父级分组。
         let flattened = merge_cells
-            .then(|| static_offset(specs, &index, spec))
+            .then(|| static_offset(specs, &index, spec, barriers))
             .flatten();
-        if let Some(offset) = flattened {
-            flatten.push(FlattenedPart {
-                index: index_in_specs,
-                position: [
-                    offset.x + spec.position[0],
-                    offset.y + spec.position[1],
-                    offset.z + spec.position[2],
-                ],
-            });
-        }
         let (parent, cell) = match flattened {
-            Some(_) => (None, [0; 3]),
+            Some((offset, barrier)) => {
+                flatten.push(FlattenedPart {
+                    index: index_in_specs,
+                    position: [
+                        offset.x + spec.position[0],
+                        offset.y + spec.position[1],
+                        offset.z + spec.position[2],
+                    ],
+                    parent: barrier.clone(),
+                });
+                (barrier, [0; 3])
+            }
             None if merge_cells => (spec.parent.clone(), [0; 3]),
             None => (
                 spec.parent.clone(),
@@ -177,15 +189,21 @@ pub(super) fn plan(
 ///
 /// 旋转/缩放会改变子级的方向与尺度，没有无损的欧拉角回写路径，因此这类部件保持原分组；
 /// 祖先带动画时位移随时间变化，不能烘焙进静态批次。
+///
+/// 命中 `barriers` 时立即停下并返回该父级 id：屏障自身的摆放由运行时写入，不能烘焙。
 fn static_offset(
     specs: &[ModelEntitySpec],
     index: &HashMap<&str, usize>,
     spec: &ModelEntitySpec,
-) -> Option<Vec3> {
+    barriers: &HashSet<String>,
+) -> Option<(Vec3, Option<String>)> {
     let mut offset = Vec3::ZERO;
     let mut current = spec.parent.as_deref();
     let mut steps = 0;
     while let Some(parent_id) = current {
+        if barriers.contains(parent_id) {
+            return Some((offset, Some(parent_id.to_owned())));
+        }
         let parent = specs.get(*index.get(parent_id)?)?;
         if parent.animation.is_some()
             || !parent.rotation_radians.iter().all(|v| v.abs() < 1e-6)
@@ -201,7 +219,7 @@ fn static_offset(
             return None;
         }
     }
-    Some(offset)
+    Some((offset, None))
 }
 
 /// 把平铺部件改写为根空间变换；未被合批时也按同一位置单绘，画面不变。
@@ -209,7 +227,7 @@ pub(super) fn apply_flatten(specs: &mut [ModelEntitySpec], flatten: &[FlattenedP
     for part in flatten {
         if let Some(spec) = specs.get_mut(part.index) {
             spec.position = part.position;
-            spec.parent = None;
+            spec.parent = part.parent.clone();
         }
     }
 }

@@ -63,6 +63,7 @@ async function renderSwitcher(options: {
   create?: () => Promise<{ ok: boolean; error?: string; canvasId?: string }>;
   rename?: (title: string) => Promise<{ ok: boolean; error?: string }>;
   exportArchive?: (entry: CanvasSummary) => Promise<{ ok: boolean; error?: string }>;
+  remove?: (canvasId: string) => Promise<{ ok: boolean; error?: string }>;
   switchTo?: (canvasId: string) => void;
   slots?: SlotRegistry;
 } = {}): Promise<{ markup: string; deps: CanvasSwitcherDeps }> {
@@ -81,7 +82,8 @@ async function renderSwitcher(options: {
     switchTo: options.switchTo ?? (() => undefined),
     create: options.create ?? (async () => ({ ok: true, canvasId: "new" })),
     rename: options.rename ?? (async () => ({ ok: true })),
-    exportArchive: options.exportArchive ?? (async () => ({ ok: true }))
+    exportArchive: options.exportArchive ?? (async () => ({ ok: true })),
+    remove: options.remove ?? (async () => ({ ok: true }))
   };
   const Renderer = createCanvasSwitcherRenderer(deps);
   const markup = renderToStaticMarkup(
@@ -101,7 +103,11 @@ async function renderSwitcher(options: {
  */
 async function mountSwitcher(
   slots: SlotRegistry,
-  options: { switchTo?: (canvasId: string) => void; sources?: CanvasSwitcherDeps["sources"] } = {}
+  options: {
+    switchTo?: (canvasId: string) => void;
+    sources?: CanvasSwitcherDeps["sources"];
+    remove?: (canvasId: string) => Promise<{ ok: boolean; error?: string }>;
+  } = {}
 ): Promise<{ dialogs: DialogService; cleanup: () => Promise<void> }> {
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const catalog = new CanvasCatalogStore({
@@ -123,6 +129,7 @@ async function mountSwitcher(
     create: async () => ({ ok: true, canvasId: "new" }),
     rename: async () => ({ ok: true }),
     exportArchive: async () => ({ ok: true }),
+    remove: options.remove ?? (async () => ({ ok: true })),
     ...(options.sources ? { sources: options.sources } : {})
   });
   const dispose = dialogs.registerDialog(CANVAS_SWITCHER_DIALOG_ID, {
@@ -354,6 +361,64 @@ describe("CanvasSwitcher dialog renderer", () => {
     const { markup: offline } = await renderSwitcher({ phase: "offline" });
     expect(offline).toContain("离线只读");
     expect(offline).toContain("disabled");
+  });
+
+  it("每个可删条目提供删除入口；明确没有删除权时不渲染", async () => {
+    const { markup } = await renderSwitcher({});
+    expect(markup).toContain("canvas-switcher__item-delete");
+
+    const remote = createFakeCanvasCatalogRemote([
+      { ...makeSummary("a", "画布 A"), access: { canRead: true, canWrite: true, canDelete: false } }
+    ]);
+    const catalog = new CanvasCatalogStore({ remote });
+    await catalog.load();
+    const Renderer = createCanvasSwitcherRenderer({
+      catalog,
+      selection: { getRecentCanvasId: () => null, setRecentCanvasId: () => undefined },
+      session: fakeSession("synced"),
+      slots: new SlotRegistry(),
+      currentCanvasId: () => "a",
+      switchTo: () => undefined,
+      create: async () => ({ ok: true, canvasId: "new" }),
+      rename: async () => ({ ok: true }),
+      remove: async () => ({ ok: true })
+    });
+    const shared = renderToStaticMarkup(
+      <Renderer instance={emptyInstance} requestClose={() => undefined} setBusy={() => undefined} replace={() => undefined} />
+    );
+    expect(shared).not.toContain("canvas-switcher__item-delete");
+  });
+
+  it("删除需要一次行内确认，确认后调用 remove；取消不发请求", async () => {
+    const remove = vi.fn(async () => ({ ok: true }));
+    const mounted = await mountSwitcher(new SlotRegistry(), { remove });
+    try {
+      const deleteButtons = Array.from(document.querySelectorAll(".canvas-switcher__item-delete"));
+      expect(deleteButtons).toHaveLength(2);
+      await act(async () => {
+        (deleteButtons[1] as HTMLButtonElement).click();
+      });
+      const confirm = document.querySelector('[data-testid="canvas-switcher-delete-confirm"]');
+      expect(confirm).not.toBeNull();
+      expect(confirm!.textContent).toContain("画布 B");
+      // 取消：回到普通行，不发请求。
+      await act(async () => {
+        (confirm!.querySelectorAll("button")[1] as HTMLButtonElement).click();
+      });
+      expect(remove).not.toHaveBeenCalled();
+      expect(document.querySelector('[data-testid="canvas-switcher-delete-confirm"]')).toBeNull();
+
+      await act(async () => {
+        (Array.from(document.querySelectorAll(".canvas-switcher__item-delete"))[1] as HTMLButtonElement).click();
+      });
+      const again = document.querySelector('[data-testid="canvas-switcher-delete-confirm"]')!;
+      await act(async () => {
+        (again.querySelector(".ui-button--danger") as HTMLButtonElement).click();
+      });
+      expect(remove).toHaveBeenCalledWith("b", 1);
+    } finally {
+      await mounted.cleanup();
+    }
   });
 
   it("提供新建画布入口", async () => {

@@ -119,6 +119,9 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     "assistant" | "model" | null
   >(null);
   const busy = input.busy;
+  useEffect(() => {
+    props.onDraftStateChange?.({ hasDraft: prompt.trim().length > 0, busy });
+  }, [props.onDraftStateChange, controller, prompt, busy]);
   const notice = input.notice;
   const [catalog, setCatalog] = useState<{
     key: string;
@@ -126,6 +129,8 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     loading: boolean;
     error?: string;
   }>({ key: "", models: [], loading: false });
+  // 目录读取失败后再次展开面板会重读一次：瞬时失败不该要求用户重开整个页面。
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
   const selection = props.sourceSelection;
   const connections = selection?.connections ?? [];
   const sourceId = delivery
@@ -334,8 +339,12 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                 action: inspector ? "修改模型" : "生成",
               };
 
+  // 连接或来源变化时收起选择器；目录重读（catalogAttempt）不打断已展开的面板。
   useEffect(() => {
     setOpenSelector(null);
+  }, [modelKey]);
+
+  useEffect(() => {
     if (
       (connectionModels?.length ?? 0) > 0 ||
       !service?.catalog ||
@@ -344,39 +353,65 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     )
       return;
     let cancelled = false;
-    setCatalog({ key: modelKey, models: [], loading: true });
+    // 重读期间保留已加载的目录：瞬时失败或空响应不应把已经可用的大列表变成空列表，
+    // 否则用户会看到「模型突然全部消失」，且同一次失败还会把当前选择判成已失效。
+    setCatalog((current) =>
+      current.key === modelKey
+        ? { ...current, loading: true }
+        : { key: modelKey, models: [], loading: true },
+    );
     void readAgentCatalog(service, sourceId)
       .then((result) => {
-        if (!cancelled)
-          setCatalog(
-            result.ok
-              ? {
-                  key: modelKey,
-                  models: result.value.models,
-                  loading: false,
-                  ...(result.value.error ? { error: result.value.error } : {}),
-                }
-              : {
-                  key: modelKey,
-                  models: [],
-                  loading: false,
-                  error: result.error,
-                },
-          );
+        if (cancelled) return;
+        setCatalog((current) => {
+          const previous =
+            current.key === modelKey ? current.models : [];
+          const error = result.ok
+            ? result.value.error
+            : result.error;
+          if (result.ok && result.value.models.length > 0)
+            return {
+              key: modelKey,
+              models: result.value.models,
+              loading: false,
+              ...(error ? { error } : {}),
+            };
+          if (previous.length > 0)
+            return {
+              key: modelKey,
+              models: previous,
+              loading: false,
+              ...(error ? { error } : {}),
+            };
+          return {
+            key: modelKey,
+            models: result.ok ? result.value.models : [],
+            loading: false,
+            ...(error ? { error } : {}),
+          };
+        });
       })
       .catch(() => {
-        if (!cancelled)
-          setCatalog({
-            key: modelKey,
-            models: [],
-            loading: false,
-            error: "模型目录读取失败，请刷新连接。",
-          });
+        if (cancelled) return;
+        setCatalog((current) =>
+          current.key === modelKey && current.models.length > 0
+            ? {
+                ...current,
+                loading: false,
+                error: "模型目录读取失败，请刷新连接。",
+              }
+            : {
+                key: modelKey,
+                models: [],
+                loading: false,
+                error: "模型目录读取失败，请刷新连接。",
+              },
+        );
       });
     return () => {
       cancelled = true;
     };
-  }, [service, sourceId, connectionId, modelKey, connectionModelsKey]);
+  }, [service, sourceId, connectionId, modelKey, connectionModelsKey, catalogAttempt]);
 
   // 重开面板时补读一次当前回合（不重复提交）；进行中的持续刷新由页面级 run-state 统一负责，
   // 避免面板与页面各挂一条轮询（节点执行中状态在面板关闭后仍需收敛）。
@@ -470,7 +505,12 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
         inspector={inspector}
         presentation={props.presentation === "expanded" ? "expanded" : "dock"}
         requestPresentation={props.requestPresentation}
-        onRefresh={selection?.onRefresh}
+        onRefresh={() => {
+          // 刷新按钮同时重读连接与模型目录：模型目录不在连接目录里（本机来源按 adapter 读取），
+          // 只刷新连接会让按钮看起来「点了没用」。
+          selection?.onRefresh?.();
+          setCatalogAttempt((attempt) => attempt + 1);
+        }}
         onManage={props.onAuthorize}
         disabled={locked}
         refreshing={selection?.loading}
@@ -580,7 +620,16 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                 })),
               ]}
               open={openSelector === "model"}
-              onOpenChange={(open) => setOpenSelector(open ? "model" : null)}
+              onOpenChange={(open) => {
+                setOpenSelector(open ? "model" : null);
+                if (
+                  open &&
+                  catalog.key === modelKey &&
+                  !catalog.loading &&
+                  catalog.models.length === 0
+                )
+                  setCatalogAttempt((attempt) => attempt + 1);
+              }}
               disabled={locked}
               onChange={(value) => {
                 setModels((current) => ({ ...current, [modelKey]: value }));

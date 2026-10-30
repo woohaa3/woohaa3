@@ -33,15 +33,22 @@ fn film_set_hits_scope_only_without_ports() {
 fn film_set_rect_scope_stays_axis_aligned_without_diamond_expansion() {
     clear_snapshot();
     // 可信矩形覆盖：命中按轴对齐矩形，不被等距菱形替换，也不额外扩张。
-    let g = accept_scene(&scene(vec![rect_film_set("fs", 0.0, 0.0, 260.0, 195.0)], vec![]));
+    let g = accept_scene(&scene(
+        vec![rect_film_set("fs", 0.0, 0.0, 260.0, 195.0)],
+        vec![],
+    ));
     assert_eq!(
         point_query(g, 130.0, 97.5, 1.0, None).hit,
-        Some(PointHit::FilmScope { node_id: "fs".into() })
+        Some(PointHit::FilmScope {
+            node_id: "fs".into()
+        })
     );
     // 矩形顶点（含边界）命中；圆角外一点不命中。
     assert_eq!(
         point_query(g, 0.0, 0.0, 1.0, None).hit,
-        Some(PointHit::FilmScope { node_id: "fs".into() })
+        Some(PointHit::FilmScope {
+            node_id: "fs".into()
+        })
     );
     assert_eq!(point_query(g, 260.5, 97.5, 1.0, None).hit, None);
     assert_eq!(point_query(g, 130.0, 195.5, 1.0, None).hit, None);
@@ -60,7 +67,9 @@ fn film_set_scope_yields_to_foreground_card_regardless_of_scroll() {
     ));
     assert_eq!(
         point_query(g, 130.0, 97.5, 1.0, None).hit,
-        Some(PointHit::Node { node_id: "card".into() })
+        Some(PointHit::Node {
+            node_id: "card".into()
+        })
     );
 }
 
@@ -68,23 +77,42 @@ fn film_set_scope_yields_to_foreground_card_regardless_of_scroll() {
 fn film_set_scope_hit_is_stable_across_pan_and_zoom_increments() {
     clear_snapshot();
     let g = accept_scene(&scene(
-        vec![film_set("fs", 0.0, 0.0, 260.0, 195.0, Some((0.0, 0.0, 260.0, 195.0)))],
+        vec![film_set(
+            "fs",
+            0.0,
+            0.0,
+            260.0,
+            195.0,
+            Some((0.0, 0.0, 260.0, 195.0)),
+        )],
         vec![],
     ));
     let ((right_x, right_y), (blank_x, blank_y)) = rhombus_marks(130.0, 97.5, 80.0);
     let baseline = point_query(g, right_x, right_y, 1.0, None).hit;
-    assert_eq!(baseline, Some(PointHit::FilmScope { node_id: "fs".into() }));
+    assert_eq!(
+        baseline,
+        Some(PointHit::FilmScope {
+            node_id: "fs".into()
+        })
+    );
     // 平移/缩放走纯视口增量：复用世界几何，不引入额外范围扩张，命中结论不变。
     let panned = accept_viewport(
         g,
-        crate::protocol::Viewport { x: -420.0, y: 137.0, zoom: 1.75 },
+        crate::protocol::Viewport {
+            x: -420.0,
+            y: 137.0,
+            zoom: 1.75,
+        },
     )
     .expect("viewport accepted");
     assert_eq!(
         point_query(panned, right_x, right_y, 1.75, None).hit,
         baseline
     );
-    assert_eq!(point_query(panned, blank_x + 2.0, blank_y + 2.0, 1.75, None).hit, None);
+    assert_eq!(
+        point_query(panned, blank_x + 2.0, blank_y + 2.0, 1.75, None).hit,
+        None
+    );
 }
 
 #[test]
@@ -125,21 +153,35 @@ fn film_set_diamond_blank_corner_misses_but_edge_hits() {
     clear_snapshot();
     // 地面矩形 hx=hz=80 → 菱形，中心 (130,97.5)。
     let g = accept_scene(&scene(
-        vec![film_set("fs", 0.0, 0.0, 260.0, 195.0, Some((0.0, 0.0, 260.0, 195.0)))],
+        vec![film_set(
+            "fs",
+            0.0,
+            0.0,
+            260.0,
+            195.0,
+            Some((0.0, 0.0, 260.0, 195.0)),
+        )],
         vec![],
     ));
     let ((right_x, right_y), (blank_x, blank_y)) = rhombus_marks(130.0, 97.5, 80.0);
     // AABB 左上空白角在菱形外：不命中。
-    assert_eq!(point_query(g, blank_x + 2.0, blank_y + 2.0, 1.0, None).hit, None);
+    assert_eq!(
+        point_query(g, blank_x + 2.0, blank_y + 2.0, 1.0, None).hit,
+        None
+    );
     // 右顶点边界包含。
     assert_eq!(
         point_query(g, right_x, right_y, 1.0, None).hit,
-        Some(PointHit::FilmScope { node_id: "fs".into() })
+        Some(PointHit::FilmScope {
+            node_id: "fs".into()
+        })
     );
     // 中心命中。
     assert_eq!(
         point_query(g, 130.0, 97.5, 1.0, None).hit,
-        Some(PointHit::FilmScope { node_id: "fs".into() })
+        Some(PointHit::FilmScope {
+            node_id: "fs".into()
+        })
     );
 }
 
@@ -147,23 +189,49 @@ fn film_set_diamond_blank_corner_misses_but_edge_hits() {
 fn film_set_marquee_uses_real_diamond_positive_area() {
     clear_snapshot();
     let g = accept_scene(&scene(
-        vec![film_set("fs", 0.0, 0.0, 260.0, 195.0, Some((0.0, 0.0, 260.0, 195.0)))],
+        vec![film_set(
+            "fs",
+            0.0,
+            0.0,
+            260.0,
+            195.0,
+            Some((0.0, 0.0, 260.0, 195.0)),
+        )],
         vec![],
     ));
     let ((_rx, _ry), (blank_x, blank_y)) = rhombus_marks(130.0, 97.5, 80.0);
     // AABB 左上空白角：仅触 AABB，不与菱形正面积交叠 → 不选中。
-    assert!(!marquee_query(g, blank_x, blank_y, 6.0, 6.0).node_ids.contains(&"fs".into()));
+    assert!(
+        !marquee_query(g, blank_x, blank_y, 6.0, 6.0)
+            .node_ids
+            .contains(&"fs".into())
+    );
     // 覆盖中心 → 选中。
-    assert!(marquee_query(g, 100.0, 70.0, 60.0, 60.0).node_ids.contains(&"fs".into()));
+    assert!(
+        marquee_query(g, 100.0, 70.0, 60.0, 60.0)
+            .node_ids
+            .contains(&"fs".into())
+    );
     // 反向拖框仍选中。
-    assert!(marquee_query(g, 200.0, 160.0, -60.0, -60.0).node_ids.contains(&"fs".into()));
+    assert!(
+        marquee_query(g, 200.0, 160.0, -60.0, -60.0)
+            .node_ids
+            .contains(&"fs".into())
+    );
 }
 
 #[test]
 fn film_set_selected_exposes_eight_handles_not_aabb_corner() {
     clear_snapshot();
     let mut s = scene(
-        vec![film_set("fs", 0.0, 0.0, 260.0, 195.0, Some((0.0, 0.0, 260.0, 195.0)))],
+        vec![film_set(
+            "fs",
+            0.0,
+            0.0,
+            260.0,
+            195.0,
+            Some((0.0, 0.0, 260.0, 195.0)),
+        )],
         vec![],
     );
     s.selection = Selection {
@@ -181,15 +249,27 @@ fn film_set_selected_exposes_eight_handles_not_aabb_corner() {
         })
     );
     // AABB 空白角不暴露不可见 resize 命中。
-    assert_eq!(point_query(g, blank_x + 2.0, blank_y + 2.0, 1.0, None).hit, None);
+    assert_eq!(
+        point_query(g, blank_x + 2.0, blank_y + 2.0, 1.0, None).hit,
+        None
+    );
     // 未选中节点不暴露抓手（重新接受未选中场景）。
     let unselected = accept_scene(&scene(
-        vec![film_set("fs", 0.0, 0.0, 260.0, 195.0, Some((0.0, 0.0, 260.0, 195.0)))],
+        vec![film_set(
+            "fs",
+            0.0,
+            0.0,
+            260.0,
+            195.0,
+            Some((0.0, 0.0, 260.0, 195.0)),
+        )],
         vec![],
     ));
     assert_eq!(
         point_query(unselected, right_x, right_y, 1.0, None).hit,
-        Some(PointHit::FilmScope { node_id: "fs".into() })
+        Some(PointHit::FilmScope {
+            node_id: "fs".into()
+        })
     );
 }
 
@@ -227,7 +307,9 @@ fn film_set_tall_model_body_above_scope_is_pickable_but_not_a_drop_target() {
     // 范围顶部之上的模型身体可点选。
     assert_eq!(
         point_query(g, 40.0, 300.0, 1.0, None).hit,
-        Some(PointHit::FilmScope { node_id: "fs".into() })
+        Some(PointHit::FilmScope {
+            node_id: "fs".into()
+        })
     );
     // AABB 内、平行四边形外的空白角仍不命中。
     assert_eq!(

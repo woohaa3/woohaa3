@@ -137,7 +137,10 @@ fn invalid_thin_degenerate_and_nonmanifold_surfaces_fall_back() {
     ];
     let tetra = vec![[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]];
     let locks = protected_vertices(&vertices, &tetra).unwrap();
-    assert!(locks[..4].iter().all(|locked| *locked), "all tetrahedral creases must lock their vertices");
+    assert!(
+        locks[..4].iter().all(|locked| *locked),
+        "all tetrahedral creases must lock their vertices"
+    );
     let mut bowtie = tetra.clone();
     bowtie.extend([[0, 5, 4], [0, 4, 6], [0, 6, 5], [4, 5, 6]]);
     assert_eq!(

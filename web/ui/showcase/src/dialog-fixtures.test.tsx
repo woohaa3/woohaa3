@@ -2,7 +2,7 @@ import { UiProvider } from "@woohaa3/ui/primitives";
 /**
  * Dialog 焦点恢复交互（change: align-showcase-reference-ux，任务 1.2）。
  *
- * 用生产的 `DialogService` + `DialogHost` + 片段库 renderer，验证：
+ * 用生产的 `DialogService` + `DialogHost` + 单图替换确认 renderer，验证：
  * - 打开后焦点进入弹窗；
  * - 关闭后焦点回到原触发按钮；
  * - 舞台不残留拦截输入的 overlay。
@@ -14,11 +14,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
-	createLibraryRenderer,
-	SNIPPET_LIBRARY_DIALOG_ID,
-	snippetLibraryDefinition,
-	useShowcaseCatalog,
-} from "./snippet-fixtures.js";
+	createReplaceConfirmRenderer,
+	PASTE_REPLACE_DIALOG_ID,
+	replaceConfirmDefinition,
+} from "../../../frontend/src/cordis/ui/index";
 import { DialogHostStage, type ShowcaseDialogRegistration } from "./dialog-fixtures.js";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -35,27 +34,22 @@ afterEach(() => {
 });
 
 function Harness() {
-	const catalog = useShowcaseCatalog();
 	const registrations = useMemo<ShowcaseDialogRegistration[]>(
 		() => [
 			{
-				dialogId: SNIPPET_LIBRARY_DIALOG_ID,
-				definition: snippetLibraryDefinition,
-				renderer: createLibraryRenderer(catalog, {
-					openEditor: () => undefined,
-					requestDelete: () => undefined,
-					requestDeleteTag: () => undefined,
-				}),
+				dialogId: PASTE_REPLACE_DIALOG_ID,
+				definition: replaceConfirmDefinition,
+				renderer: createReplaceConfirmRenderer(async () => ({ ok: true })),
 			},
 		],
-		[catalog],
+		[],
 	);
 	return (
 		<DialogHostStage
 			registrations={registrations}
-			dialogId={SNIPPET_LIBRARY_DIALOG_ID}
-			payload={{}}
-			triggerLabel="打开片段库"
+			dialogId={PASTE_REPLACE_DIALOG_ID}
+			payload={{ intentId: "intent-1", fileName: "screenshot.png", nodeLabel: "主视觉图" }}
+			triggerLabel="打开替换确认"
 			caption="焦点恢复"
 		/>
 	);

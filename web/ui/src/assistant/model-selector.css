@@ -53,6 +53,40 @@
 }
 .assistant-model-panel__group { display: grid; gap: 5px; min-width: 0; }
 .assistant-model-panel__label { color: var(--app-web-text-muted); font-size: 11px; line-height: 1.4; }
+.assistant-model-panel__searchbar {
+  position: sticky;
+  top: -10px;
+  z-index: 2;
+  margin: -10px -10px 0;
+  padding: 10px 10px 6px;
+  background: var(--app-web-panel);
+}
+.assistant-model-panel__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 220px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+}
+.assistant-model-panel__search:focus-within { border-color: var(--app-interaction-accent); }
+.assistant-model-panel__search-icon { width: 13px; height: 13px; flex: 0 0 auto; color: var(--app-web-text-muted); }
+.assistant-model-panel__search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--app-web-text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 18px;
+}
+.assistant-model-panel__search input::placeholder { color: var(--app-web-text-muted); }
+.assistant-model-panel__empty { padding: 4px 2px; color: var(--app-web-text-muted); font-size: 12px; }
 .assistant-model-panel__options {
   display: flex;
   flex-wrap: wrap;

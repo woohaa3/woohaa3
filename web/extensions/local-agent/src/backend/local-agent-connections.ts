@@ -50,7 +50,7 @@ function capabilitiesFor(): AgentConnectionCapabilities {
   return { textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true };
 }
 
-/** 原生线程不可恢复时，仍把宿主账本中的合法历史交给讨论回合。 */
+/** 原生线程不可恢复时，仍把宿主账本中的合法历史交给续聊回合。 */
 function buildDiscussionPrompt(
   history: ReadonlyArray<AgentAdapterRunInput["history"][number]>,
   prompt: string,
@@ -264,7 +264,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}),
         prompt: discussion
           ? (binding ? input.intent.prompt : buildDiscussionPrompt(input.history, input.intent.prompt))
-          : buildTargetPrompt(input.intent, input.requestId),
+          : buildDiscussionPrompt(binding ? [] : input.history, buildTargetPrompt(input.intent, input.requestId)),
         ...(input.candidate ? { images: input.candidate.images, outputSchema: input.candidate.outputSchema } : {}),
         allowedTools: toolNames,
         toolToken,

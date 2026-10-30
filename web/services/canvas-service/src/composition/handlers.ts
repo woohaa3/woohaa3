@@ -60,6 +60,11 @@ export type ComposedHandlerDeps = {
   discoverableCanvasIds?: (principal: import("@woohaa3/contracts").PrincipalContext) => Promise<string[] | null>;
   /** 删除后关闭该画布的全部实时会话（任务 5.2）。 */
   closeSessions?: (canvasId: string, reason: string) => void | Promise<void>;
+  /**
+   * 远端删除端口（宿主按 `canvas-upstream` capability 注入）：属于远端的画布先删远端，
+   * 再删本机；不注入时删除只作用于本机（纯本地部署）。
+   */
+  deleteRemote?: (canvasId: string) => Promise<import("@woohaa3/contracts").CanvasUpstreamDeleteResult>;
   /** 在线迁移 prepare/status/来源目录路由（change: 2026-10-12-add-extension-online-canvas-migration）。 */
   preparationHandler?: ((req: IncomingMessage, res: ServerResponse) => Promise<boolean>) | null;
   /** 在线迁移访问门（GET/WS 未准备、DELETE tombstone）。 */
@@ -135,6 +140,7 @@ export function composeRequestHandler(deps: ComposedHandlerDeps): (req: Incoming
           ...(deps.lifecycle ? { lifecycle: deps.lifecycle } : {}),
           ...(deps.discoverableCanvasIds ? { discoverableCanvasIds: deps.discoverableCanvasIds } : {}),
           ...(deps.closeSessions ? { closeSessions: deps.closeSessions } : {}),
+          ...(deps.deleteRemote ? { deleteRemote: deps.deleteRemote } : {}),
           logger: tokenLogger,
           readiness: async () => {
             const health = await composition.service.health();

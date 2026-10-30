@@ -1,7 +1,8 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
 import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest";
-import { decodeFilmSetNodeData, canonicalFilmSetFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas, createModel3DNodeData, model3DNodeDataFields, filmSetObjectContainerId, resolveFilmSetObject, filmSetAnimationsOf, shotPreviewNodeId } from "@woohaa3/contracts";
+import { decodeFilmSetNodeData, canonicalFilmSetFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas, createModel3DNodeData, model3DNodeDataFields, filmSetAnimationsOf, shotPreviewNodeId } from "@woohaa3/contracts";
 import { installFilmSetObjectContainers } from "../src/authoring/browser/object-containers.js";
 import { setFilmSetObjectContainerVisible } from "../src/authoring/browser/object-container-commands.js";
 import { createFilmSetModelAdapter } from "../src/preview/browser/model-adapter.js";
@@ -46,94 +47,32 @@ function harness() {
   return { ctx, contributions, record, locate, submitCommands, notify: () => { for (const listener of stateListeners) listener(); }, canvas: () => canvas, readonly: () => { writable = false; }, writeable: () => { writable = true; for (const listener of sessionListeners) listener(); } };
 }
 
-describe("对象容器公开交互", () => {
-  it("旧片场只外显六个对象，满额不提交显示请求，关闭一个后可以换出另一个", async () => {
+describe("对象容器迁移兼容入口", () => {
+  it("打开旧片场不会派生对象节点、注册 drop target 或写入画布", () => {
     const h = harness();
-    const decoded = decodeFilmSetNodeData(h.canvas().nodeData.film);
-    expect(decoded.ok).toBe(true); if (!decoded.ok) return;
-    const first = decoded.value.filmSetContent.items[0];
-    decoded.value.filmSetContent.items = Array.from({ length: 8 }, (_, i) => ({ ...structuredClone(first), id: `actor-${i}` }));
-    h.canvas().nodeData.film = canonicalFilmSetFields(decoded.value) as never;
+    const before = JSON.stringify(h.canvas());
     const dispose = installFilmSetObjectContainers(h.ctx);
-    const adapter = createFilmSetModelAdapter(undefined, h.canvas);
-    expect(adapter.children!(h.canvas(), "film").map(child => child.sourceItemId)).toEqual(Array.from({ length: 6 }, (_, i) => `actor-${i}`));
-    const rejected = await setFilmSetObjectContainerVisible(h.ctx, "film", "actor-6", true);
-    expect(rejected.ok).toBe(false);
-    expect(h.record).not.toHaveBeenCalled();
-    expect((await setFilmSetObjectContainerVisible(h.ctx, "film", "actor-0", false)).ok).toBe(true);
-    expect((await setFilmSetObjectContainerVisible(h.ctx, "film", "actor-6", true)).ok).toBe(true);
-    expect(adapter.children!(h.canvas(), "film").map(child => child.sourceItemId)).toEqual(["actor-1", "actor-2", "actor-3", "actor-4", "actor-5", "actor-6"]);
-    await Promise.resolve(); h.notify();
-    expect(h.submitCommands).toHaveBeenCalledTimes(1);
-    dispose();
-  });
-  it("打开已有片场自动补齐所有对象，不需要手动引出且不进入用户历史", async () => {
-    const h = harness(), dispose = installFilmSetObjectContainers(h.ctx);
-    const id = filmSetObjectContainerId("film", "actor");
-    expect(resolveFilmSetObject(h.canvas(), id)?.item.id).toBe("actor");
-    expect(h.submitCommands).toHaveBeenCalledTimes(1);
-    expect(h.record).not.toHaveBeenCalled();
-    expect(h.contributions.has("canvas.node-action")).toBe(false);
-    expect(h.contributions.has("canvas.context-menu")).toBe(false);
-    await Promise.resolve(); h.notify();
-    expect(h.submitCommands).toHaveBeenCalledTimes(1);
-    dispose();
-  });
-
-  it("关闭容器保留对象，重开插件不补回；显示后重建；只读不提交", async () => {
-    const h = harness();
-    let dispose = installFilmSetObjectContainers(h.ctx);
-    const id = filmSetObjectContainerId("film", "actor");
-    expect((await setFilmSetObjectContainerVisible(h.ctx, "film", "actor", false)).ok).toBe(true);
-    expect(h.canvas().document.nodes.some(node => node.id === id)).toBe(false);
-    expect(h.canvas().nodeData.film.filmSetContent).toBeDefined();
-    dispose(); dispose = installFilmSetObjectContainers(h.ctx);
-    expect(h.canvas().document.nodes.some(node => node.id === id)).toBe(false);
-    expect((await setFilmSetObjectContainerVisible(h.ctx, "film", "actor", true)).ok).toBe(true);
-    expect(resolveFilmSetObject(h.canvas(), id)?.item.id).toBe("actor");
-    h.readonly();
-    expect((await setFilmSetObjectContainerVisible(h.ctx, "film", "actor", false)).ok).toBe(false);
-    dispose();
-  });
-
-  it("只读打开不写入，恢复写权限后自动补齐", () => {
-    const h = harness(); h.readonly();
-    const dispose = installFilmSetObjectContainers(h.ctx);
+    h.notify(); h.readonly(); h.writeable();
+    expect(JSON.stringify(h.canvas())).toBe(before);
     expect(h.submitCommands).not.toHaveBeenCalled();
-    h.writeable();
-    expect(resolveFilmSetObject(h.canvas(), filmSetObjectContainerId("film", "actor"))).not.toBeNull();
+    expect(h.record).not.toHaveBeenCalled();
+    expect(h.contributions.size).toBe(0);
+    expect(createFilmSetModelAdapter(undefined, h.canvas).children!(h.canvas(), "film").filter(child => child.kind === "container")).toEqual([]);
     dispose();
   });
 
-  it("只接收一个普通模型；替换更新容器资源且来源不移动；释放清理所有贡献", async () => {
+  it("显示/关闭旧对象容器入口均拒绝，且不会生成命令", async () => {
     const h = harness();
-    const dispose = installFilmSetObjectContainers(h.ctx);
-    const drop = h.contributions.get("canvas.node-drop");
-    const id = filmSetObjectContainerId("film", "actor");
-    const input = () => ({ canvas: h.canvas(), targetNodeId: id, sourceNodeIds: ["model"] });
-    expect(drop.matchesTarget(input())).toBe(true);
-    expect(drop.acceptsSources(input())).toBe(true);
-    expect(drop.acceptsSources({ ...input(), sourceNodeIds: ["image"] })).toBe(false);
-    expect(drop.acceptsSources({ ...input(), sourceNodeIds: ["model", "image"] })).toBe(false);
-    const adapter = createFilmSetModelAdapter(undefined, h.canvas);
-    expect(adapter.scopeShapeForNode?.(id, h.canvas().nodeData[id])).toBe("rect");
-    const key = adapter.executionKey(h.canvas().nodeData[id], id);
-    expect(adapter.prepare(id, h.canvas().nodeData[id])).not.toBeNull();
-    expect(drop.onDrop(input())).toBe(true);
-    await vi.waitFor(() => expect(resolveFilmSetObject(h.canvas(), id)?.item).toMatchObject({ kind: "model", model: { modelScript: "scene.sphere({id:'new',radius:1});" } }));
-    expect(adapter.executionKey(h.canvas().nodeData[id], id)).not.toBe(key);
-    expect(h.canvas().document.nodes.find(node => node.id === "model")?.position).toEqual({ x: 400, y: 0 });
-    h.readonly();
-    const count = h.record.mock.calls.length;
-    drop.onDrop(input());
-    expect(h.record).toHaveBeenCalledTimes(count);
-    dispose();
-    expect(h.contributions.size).toBe(0);
+    for (const visible of [true, false]) {
+      expect((await setFilmSetObjectContainerVisible(h.ctx, "film", "actor", visible)).ok).toBe(false);
+    }
+    expect(h.record).not.toHaveBeenCalled();
+    expect(h.submitCommands).not.toHaveBeenCalled();
   });
 });
 
 
-it("镜头始终外显，忽略旧隐藏设置，只有对象容器可关闭", () => {
+it("镜头始终外显，忽略旧隐藏设置，不再外显对象容器", () => {
   const h = harness();
   h.canvas().nodeData.film = canonicalFilmSetFields(createFilmSetSnapshot({ title: "片场", model: { modelScript: "scene.box({id:'body'});", modelScriptVersion: "woohaa-model-js-v2" }, motionScript: "motion.model.rotate('body', { speed: 1 });", timeline: { duration: 5, loop: false } })) as never;
   const decoded = decodeFilmSetNodeData(h.canvas().nodeData.film);
@@ -142,9 +81,10 @@ it("镜头始终外显，忽略旧隐藏设置，只有对象容器可关闭", (
   const id = shotPreviewNodeId("film", clip.id);
   h.canvas().nodeData.film.filmSetShotPreviewsHidden = [clip.id];
   h.submitCommands([]);
-  const children = createFilmSetModelAdapter().children!(h.canvas(), "film");
+  const migrated = migrateFilmSetFixture(h.canvas(), "film");
+  const children = createFilmSetModelAdapter().children!(migrated, "film");
   expect(children.find(child => child.nodeId === id)).toMatchObject({ kind: "entity" });
   expect(children.find(child => child.nodeId === id)?.closable).not.toBe(true);
-  expect(children.filter(child => child.kind === "container").every(child => child.closable === true)).toBe(true);
+  expect(children.filter(child => child.kind === "container")).toEqual([]);
   expect(decodeFilmSetNodeData(h.canvas().nodeData.film)).toEqual(decoded);
 });

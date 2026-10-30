@@ -1,16 +1,18 @@
 import {
-  DEFAULT_MODEL_PREVIEW,
+  defaultModelPreview,
   type BevyModelPreview,
 } from "@woohaa3/contracts";
 
 /** Local viewing state only. No nodeData/modelCameras writes. */
 const views = new Map<string, BevyModelPreview>();
+/** Default card pose follows the canvas camera pitch; see `defaultModelPreview`. */
+const fallback = defaultModelPreview();
 const listeners = new Set<() => void>();
 const emit = () => {
   for (const listener of listeners) listener();
 };
 export const modelPreviewStore = {
-  get: (id: string): BevyModelPreview => views.get(id) ?? DEFAULT_MODEL_PREVIEW,
+  get: (id: string): BevyModelPreview => views.get(id) ?? fallback,
   snapshot: (): ReadonlyMap<string, BevyModelPreview> => views,
   set(id: string, patch: Partial<BevyModelPreview>) {
     const previous = this.get(id),

@@ -1,3 +1,4 @@
+import { readFilmSetGroupMarker, fnv1a64Hex } from "@woohaa3/contracts";
 import { decodeFilmSetNodeData, filmSetAnimationsOf } from "@woohaa3/contracts";
 /**
  * 节点生成历史服务：登记 payload 构造与动画读取
@@ -223,7 +224,8 @@ export function buildModelEditEntry(input: RegisterModelEditInput): NodeGenerati
   // 自包含动画节点：以完整动画定义（snapshotHash）作为去重键与当前身份。
   const animationIdentity = input.animation ? animationDefinitionIdentityFromPayload(input.animation) : null;
   const filmSet = input.animation?.schemaVersion === 3 ? input.animation : null;
-  const sourceHash = filmSet ? animationDefinitionSnapshotHash(filmSet) : input.sourceHash;
+  const group = input.animation?.schemaVersion === 4 ? input.animation : null;
+  const sourceHash = group ? fnv1a64Hex(JSON.stringify(group.filmSetGroup)) : filmSet ? animationDefinitionSnapshotHash(filmSet) : input.sourceHash;
   const identity = animationIdentity
     ? { kind: "model-edit" as const, sourceHash, snapshotKey: animationIdentity }
     : {
@@ -247,11 +249,11 @@ export function buildModelEditEntry(input: RegisterModelEditInput): NodeGenerati
     source: { label: "模型编辑", sourceHash },
     payload: {
       kind: "model",
-      modelScript: filmSet ? "" : input.modelScript,
-      language: filmSet ? MODEL_SCRIPT_LANGUAGE : input.language,
-      version: filmSet ? MODEL_SCRIPT_V2_VERSION : input.version,
+      modelScript: (filmSet || group) ? "" : input.modelScript,
+      language: (filmSet || group) ? MODEL_SCRIPT_LANGUAGE : input.language,
+      version: (filmSet || group) ? MODEL_SCRIPT_V2_VERSION : input.version,
       sourceHash,
-      ...(!filmSet ? { placement: input.placement } : {}),
+      ...(!filmSet && !group ? { placement: input.placement } : {}),
       ...(input.modelCameras && input.modelCameras.length > 0 ? { modelCameras: input.modelCameras } : {}),
       ...(input.animation ? { animation: input.animation } : {})
     } satisfies NodeHistoryModelPayload
@@ -275,6 +277,8 @@ export function readAnimationHistoryPayload(
   data: Record<string, unknown> | undefined
 ): NodeHistoryAnimationPayload | null {
   if (!data) return null;
+  const marker = readFilmSetGroupMarker(data);
+  if (marker) return { schemaVersion: 4, filmSetGroup: marker };
   if (data.filmSetAnimations !== undefined || data.filmSetContent !== undefined) {
     const decoded = decodeFilmSetNodeData(data);
     if (!decoded.ok) return null;

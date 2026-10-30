@@ -1,3 +1,5 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
+import { readFilmSetAnimationProjection } from "./film-set-animation-projection.js";
 import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 拍摄镜头预览生命周期与保护测试
@@ -39,7 +41,7 @@ function withFilmSet(): ServerCanvas {
     timeline: { duration: 5, loop: false }
   });
   canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
-  return canvas;
+  return migrateFilmSetFixture(canvas, "film");
 }
 
 function apply(canvas: ServerCanvas, commands: unknown[]): ReturnType<typeof applyCanvasCommands> {
@@ -61,7 +63,7 @@ function previewNodes(canvas: ServerCanvas) {
 }
 
 function clipPatch(canvas: ServerCanvas, op: FilmSetClipPatchOp, clipId = "clip-1") {
-  const decoded = decodeFilmSetNodeData(canvas.nodeData.film);
+  const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(canvas, "film")!));
   if (!decoded.ok) throw new Error(decoded.reason);
   return {
     type: "filmSet.clipPatch",
@@ -99,7 +101,7 @@ describe("预览闭包随源镜头生命周期维护（任务 2.1）", () => {
         name: "新镜头",
         kind: "static",
         timeline: { duration: 0, loop: false },
-        initialCamera: (canvas.nodeData.film as { sceneCamera: unknown }).sceneCamera as never,
+        initialCamera: readFilmSetAnimationProjection(canvas, "film")!.sceneCamera as never,
         cameraMotion: { motionScript: "", motionScriptLanguage: "javascript", motionScriptVersion: "woohaa-motion-js-v1", revision: 1, sourceHash: "s", basedOnModelVersion: { revision: 1, contentHash: "camera" } },
         bindings: []
       } as never
@@ -260,14 +262,16 @@ describe("owner 移动闭包（任务 2.3）", () => {
     expect(getAbsolute(moved, PREVIEW_ID)).toEqual(explicit);
   });
 
-  it("片场重父化到 group 时预览跟随同一 parent，保持世界相对位置", () => {
+  it("片场 group 遵守普通 group 禁止嵌套规则，拒绝后预览世界位置不变", () => {
     const canvas = withPreviewAt();
     const before = getAbsolute(canvas, PREVIEW_ID);
     const grouped = expectOk(apply(canvas, [{ type: "node.add", node: { id: "g", type: "group", position: { x: 0, y: 0 }, width: 2000, height: 2000 } }]));
-    const parented = expectOk(apply(grouped, [{ type: "node.update", nodeId: "film", parentId: "g" }]));
-    const preview = parented.document.nodes.find((node) => node.id === PREVIEW_ID)!;
-    expect(preview.parentId).toBe("g");
-    expect(getAbsolute(parented, PREVIEW_ID)).toEqual(before);
+    const baseline = structuredClone(grouped);
+    const result = apply(grouped, [{ type: "node.update", nodeId: "film", parentId: "g" }]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("invalid-parent");
+    expect(grouped).toEqual(baseline);
+    expect(getAbsolute(grouped, PREVIEW_ID)).toEqual(before);
   });
 });
 

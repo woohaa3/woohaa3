@@ -1,0 +1,36 @@
+import { expect, it, vi } from "vitest";
+import { createEmptyWoohaa3ServerCanvas, createFilmSetGroupMarker, createModel3DNodeData, model3DNodeDataFields, readFilmSetAnimationProjection, type ServerCanvas } from "@woohaa3/contracts";
+import { pinFilmSetCapture, projectFilmSetCapture } from "../src/state/browser/capture-snapshot.js";
+import type { FilmSetHostContext } from "../src/state/browser/host-ports.js";
+
+it("one capture keeps orchestration, source geometry and asset versions fixed until release", () => {
+  let canvas = createEmptyWoohaa3ServerCanvas("capture");
+  canvas.document.nodes = [{ id: "film", type: "group", position: { x: 0, y: 0 } }, { id: "source", type: "model3d", parentId: "film", position: { x: 40, y: 40 } }, { id: "unrelated", type: "text", position: { x: 500, y: 0 } }];
+  canvas.nodeData.source = model3DNodeDataFields(createModel3DNodeData({ title: "Actor", model: { modelScript: "scene.box({id:'before'});", modelScriptVersion: "woohaa-model-js-v2" } })) as never;
+  canvas.nodeData.film = { filmSetGroup: createFilmSetGroupMarker({ sceneBindings: [{ bindingId: "actor", sourceNodeId: "source", kind: "model3d", contentKey: "initial", visibility: true, transform: { x: 1, y: 0, z: 0, scale: 1, yaw: 0 } }] }) };
+  canvas.assets.push({ id: "asset", status: "ready", mediaKind: "image", metadata: { checksum: "before" } } as never);
+  const owner = { invalidate: vi.fn(), projectCanvas: (input: ServerCanvas) => projectFilmSetCapture(owner, input) };
+  const ctx = { compositeAssets: owner, canvasState: { getCanvas: () => canvas, getWorkingCanvas: () => canvas } } as unknown as FilmSetHostContext;
+  const release = pinFilmSetCapture(ctx, "film");
+  expect(() => pinFilmSetCapture(ctx, "film")).toThrow("已有片场捕捉");
+  canvas = structuredClone(canvas);
+  canvas.nodeData.source.modelScript = "scene.sphere({id:'after'});";
+  canvas.nodeData.film.filmSetGroup!.sceneBindings[0]!.transform.x = 9;
+  canvas.nodeData.unrelated = { title: "latest unrelated" };
+  canvas.assets[0]!.metadata!.checksum = "after";
+  canvas.assets.push({ id: "new-asset", status: "ready", mediaKind: "image" } as never);
+  const canonical = structuredClone(canvas);
+  const frozen = owner.projectCanvas(canvas);
+  const actor = readFilmSetAnimationProjection(frozen, "film")!.filmSetContent.items[0]!;
+  expect(actor.kind === "model" && actor.model.modelScript).toContain("before");
+  expect(actor.localTransform.offset.x).toBe(1);
+  expect(frozen.assets.find(asset => asset.id === "asset")!.metadata!.checksum).toBe("before");
+  expect(frozen.assets.some(asset => asset.id === "new-asset")).toBe(true);
+  expect(frozen.nodeData.unrelated.title).toBe("latest unrelated");
+  expect(canvas).toEqual(canonical);
+  expect(projectFilmSetCapture(owner, { ...canvas, id: "other" }).nodeData.source.modelScript).toContain("after");
+  release(); release();
+  expect(owner.projectCanvas(canvas)).toBe(canvas);
+  expect(readFilmSetAnimationProjection(canvas, "film")!.filmSetContent.items[0]!.localTransform.offset.x).toBe(9);
+  expect(owner.invalidate).toHaveBeenCalledTimes(2);
+});

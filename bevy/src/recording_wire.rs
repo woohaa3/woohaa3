@@ -15,11 +15,15 @@ thread_local! {
 }
 
 pub fn write_frame(text: &str) {
-    let mut message: serde_json::Value = match serde_json::from_str(text) { Ok(value) => value, Err(_) => return };
+    let mut message: serde_json::Value = match serde_json::from_str(text) {
+        Ok(value) => value,
+        Err(_) => return,
+    };
     ACTIVE_JOB.with(|job| {
         if let Some(job) = job.borrow().as_ref() {
             for key in ["stateChanged", "progress", "jobControlResponse"] {
-                if let Some(payload) = message.get_mut(key).and_then(|value| value.as_object_mut()) {
+                if let Some(payload) = message.get_mut(key).and_then(|value| value.as_object_mut())
+                {
                     payload.insert("job".into(), job.clone());
                 }
             }
@@ -34,7 +38,13 @@ pub fn write_frame(text: &str) {
 }
 
 /// 写一条失败状态；`job_id` 缺失时只报阶段（例如协议错误）。
-pub fn write_state_failure(sequence: u64, job_id: Option<&str>, stage: &str, code: &str, message: &str) {
+pub fn write_state_failure(
+    sequence: u64,
+    job_id: Option<&str>,
+    stage: &str,
+    code: &str,
+    message: &str,
+) {
     let mut payload = json!({
         "protocolVersion": RECORDING_PROTOCOL_VERSION,
         "sequence": sequence.to_string(),
@@ -45,7 +55,10 @@ pub fn write_state_failure(sequence: u64, job_id: Option<&str>, stage: &str, cod
         }
     });
     if let Some(job_id) = job_id {
-        if let Some(state) = payload.get_mut("stateChanged").and_then(|value| value.as_object_mut()) {
+        if let Some(state) = payload
+            .get_mut("stateChanged")
+            .and_then(|value| value.as_object_mut())
+        {
             state.insert("job".into(), json!({ "jobId": job_id }));
         }
     }
@@ -75,12 +88,24 @@ pub fn run_submit_job(sequence: u64, text: &str) {
     let envelope = match crate::recording_protocol::parse_control_message(text) {
         Ok(envelope) => envelope,
         Err(error) => {
-            write_state_failure(sequence, None, "RECORDING_ERROR_STAGE_CAPABILITY", error.code, &error.message);
+            write_state_failure(
+                sequence,
+                None,
+                "RECORDING_ERROR_STAGE_CAPABILITY",
+                error.code,
+                &error.message,
+            );
             return;
         }
     };
     let Some((_, payload)) = envelope.payload_value() else {
-        write_state_failure(sequence, None, "RECORDING_ERROR_STAGE_CAPABILITY", "recording-malformed-message", "缺少 payload");
+        write_state_failure(
+            sequence,
+            None,
+            "RECORDING_ERROR_STAGE_CAPABILITY",
+            "recording-malformed-message",
+            "缺少 payload",
+        );
         return;
     };
     ACTIVE_JOB.with(|job| *job.borrow_mut() = payload.get("job").cloned());
@@ -90,19 +115,36 @@ pub fn run_submit_job(sequence: u64, text: &str) {
         .and_then(|id| id.as_str())
         .map(str::to_owned);
 
-    let prepared = match crate::recording_session::prepare_submit(payload, default_work_dir().as_deref()) {
-        Ok(prepared) => prepared,
-        Err(failure) => {
-            write_state_failure(sequence, job_id.as_deref(), failure.stage, failure.code, &failure.message);
-            return;
-        }
-    };
+    let prepared =
+        match crate::recording_session::prepare_submit(payload, default_work_dir().as_deref()) {
+            Ok(prepared) => prepared,
+            Err(failure) => {
+                write_state_failure(
+                    sequence,
+                    job_id.as_deref(),
+                    failure.stage,
+                    failure.code,
+                    &failure.message,
+                );
+                return;
+            }
+        };
 
-    let crate::recording_session::PreparedSubmit { job, plan, encoder_options } = prepared;
+    let crate::recording_session::PreparedSubmit {
+        job,
+        plan,
+        encoder_options,
+    } = prepared;
     let probe = match crate::recording_probe_gpu::GpuFrameProbe::new(plan) {
         Ok(probe) => probe,
         Err(failure) => {
-            write_state_failure(sequence, job_id.as_deref(), failure.stage, failure.code, &failure.message);
+            write_state_failure(
+                sequence,
+                job_id.as_deref(),
+                failure.stage,
+                failure.code,
+                &failure.message,
+            );
             return;
         }
     };
@@ -120,8 +162,15 @@ pub fn run_submit_job(sequence: u64, text: &str) {
         }
     };
 
-    let total = ((job.duration_numer as f64 / job.duration_denom as f64) * job.fps_numer as f64 / job.fps_denom as f64).ceil() as u32;
-    let mut probe = ProgressProbe { inner: probe, sequence, completed: 0, total };
+    let total = ((job.duration_numer as f64 / job.duration_denom as f64) * job.fps_numer as f64
+        / job.fps_denom as f64)
+        .ceil() as u32;
+    let mut probe = ProgressProbe {
+        inner: probe,
+        sequence,
+        completed: 0,
+        total,
+    };
     let outcome = crate::recording_job::run_job(
         &job,
         &mut probe,
@@ -136,7 +185,9 @@ pub fn run_submit_job(sequence: u64, text: &str) {
 pub const ENV_WORK_DIR: &str = "WOOHAA3_RECORDING_WORK_DIR";
 
 fn default_work_dir() -> Option<std::path::PathBuf> {
-    std::env::var(ENV_WORK_DIR).ok().map(std::path::PathBuf::from)
+    std::env::var(ENV_WORK_DIR)
+        .ok()
+        .map(std::path::PathBuf::from)
 }
 
 fn report_outcome(sequence: u64, job_id: Option<&str>, outcome: crate::recording_job::JobOutcome) {
@@ -177,7 +228,13 @@ fn report_outcome(sequence: u64, job_id: Option<&str>, outcome: crate::recording
                 .to_string(),
             );
         }
-        JobOutcome::Failed { stage, code, message, frame_index, sample_time } => {
+        JobOutcome::Failed {
+            stage,
+            code,
+            message,
+            frame_index,
+            sample_time,
+        } => {
             let mut payload = serde_json::json!({
                 "protocolVersion": RECORDING_PROTOCOL_VERSION,
                 "sequence": sequence.to_string(),
@@ -194,7 +251,10 @@ fn report_outcome(sequence: u64, job_id: Option<&str>, outcome: crate::recording
                 }
             });
             if let Some(job_id) = job_id {
-                if let Some(state) = payload.get_mut("stateChanged").and_then(|value| value.as_object_mut()) {
+                if let Some(state) = payload
+                    .get_mut("stateChanged")
+                    .and_then(|value| value.as_object_mut())
+                {
                     state.insert("job".into(), serde_json::json!({ "jobId": job_id }));
                 }
             }
@@ -217,7 +277,6 @@ fn report_outcome(sequence: u64, job_id: Option<&str>, outcome: crate::recording
     }
 }
 
-
 struct ProgressProbe {
     inner: crate::recording_probe_gpu::GpuFrameProbe,
     sequence: u64,
@@ -225,10 +284,17 @@ struct ProgressProbe {
     total: u32,
 }
 impl crate::recording_job::FrameProbe for ProgressProbe {
-    fn prepare(&mut self, resources: &[crate::recording_resources::WrittenResource]) -> Result<(), crate::recording_job::ProbeFailure> {
+    fn prepare(
+        &mut self,
+        resources: &[crate::recording_resources::WrittenResource],
+    ) -> Result<(), crate::recording_job::ProbeFailure> {
         self.inner.prepare(resources)
     }
-    fn sample(&mut self, request: &crate::recording_job::FrameRequest, barrier: &mut crate::recording_barrier::FrameBarrier) -> crate::recording_job::FrameOutcome {
+    fn sample(
+        &mut self,
+        request: &crate::recording_job::FrameRequest,
+        barrier: &mut crate::recording_barrier::FrameBarrier,
+    ) -> crate::recording_job::FrameOutcome {
         let frame = self.inner.sample(request, barrier);
         if matches!(frame, crate::recording_job::FrameOutcome::Frame(_)) {
             self.completed += 1;

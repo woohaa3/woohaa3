@@ -123,8 +123,10 @@ mod tests {
 
     #[test]
     fn rejects_unknown_scene_version() {
-        let json = request_json(r##"[{"op":"material","id":"a","color":"#ffffff"}]"##)
-            .replace(crate::protocol::MODEL_SCENE_IR_V2, "woohaa-model-scene-ir-v1");
+        let json = request_json(r##"[{"op":"material","id":"a","color":"#ffffff"}]"##).replace(
+            crate::protocol::MODEL_SCENE_IR_V2,
+            "woohaa-model-scene-ir-v1",
+        );
         assert!(request(&json).is_err());
     }
 

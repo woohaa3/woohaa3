@@ -12,7 +12,8 @@ use bevy::prelude::*;
 
 use super::components::{
     CanvasDepth, CanvasHover, CanvasLayout, CanvasNodeId, CanvasSelection, CanvasVisibility,
-    CardPresentation, CustomPresentation, FilmSetPresentation, GroupPresentation,
+    CardPresentation, CardVisual, ContainerVisual, CustomPresentation, FilmSetPresentation,
+    GroupPresentation, NodeActionBar, OverviewCacheOwner,
 };
 use crate::app::{CurrentScene, FrameFlags};
 use crate::protocol::{GraphNode, Scene};
@@ -42,7 +43,12 @@ pub(crate) fn project_canvas_nodes(
     mut commands: Commands,
     scene: Res<CurrentScene>,
     mut state: ResMut<CanvasProjectionState>,
-    existing: Query<(Entity, &CanvasNodeId)>,
+    existing: Query<(Entity, &CanvasNodeId, Option<&OverviewCacheOwner>)>,
+    mut render_inputs: Query<(
+        Option<&mut CardVisual>,
+        Option<&mut ContainerVisual>,
+        Option<&mut NodeActionBar>,
+    )>,
 ) {
     let source = &scene.0;
     let overlay = crate::canvas_query::focus_context::overlay(source);
@@ -60,9 +66,9 @@ pub(crate) fn project_canvas_nodes(
         return;
     }
 
-    let mut live: std::collections::HashMap<&str, Entity> = existing
+    let mut live: std::collections::HashMap<&str, (Entity, Option<OverviewCacheOwner>)> = existing
         .iter()
-        .map(|(entity, id)| (id.0.as_str(), entity))
+        .map(|(entity, id, owner)| (id.0.as_str(), (entity, owner.copied())))
         .collect();
     for (node_index, node) in projected.nodes.iter().enumerate() {
         let render_index = crate::canvas2d::draw_order::render_index(&projected.nodes, node_index);
@@ -75,16 +81,16 @@ pub(crate) fn project_canvas_nodes(
         let selection = selection_of(projected, node);
         let hover = hover_of(projected, node);
         let visibility = CanvasVisibility { hidden: false };
-        let entity = match live.remove(node.id.as_str()) {
-            Some(entity) => {
+        let (entity, previous_owner) = match live.remove(node.id.as_str()) {
+            Some((entity, previous_owner)) => {
                 commands
                     .entity(entity)
                     .insert((layout, depth, selection, hover, visibility));
-                entity
+                (entity, previous_owner)
             }
             None => {
                 state.structure_changed = true;
-                commands
+                let entity = commands
                     .spawn((
                         CanvasNodeId(node.id.clone()),
                         layout,
@@ -97,13 +103,15 @@ pub(crate) fn project_canvas_nodes(
                         Visibility::Inherited,
                         Name::new(format!("canvas-node:{}", node.id)),
                     ))
-                    .id()
+                    .id();
+                (entity, None)
             }
         };
-        apply_presentation(&mut commands, entity, node);
+        apply_presentation(&mut commands, entity, projected, node, previous_owner);
+        apply_render_inputs(&mut commands, &mut render_inputs, entity, projected, node);
     }
     // 不再可呈现的节点连同派生子实体（标签/纹理/面板/细节）一起回收。
-    for (_, entity) in live {
+    for (_, (entity, _)) in live {
         state.structure_changed = true;
         commands.entity(entity).despawn();
     }
@@ -112,7 +120,85 @@ pub(crate) fn project_canvas_nodes(
     state.generation = state.generation.wrapping_add(1);
 }
 
-fn apply_presentation(commands: &mut Commands, entity: Entity, node: &GraphNode) {
+fn apply_render_inputs(
+    commands: &mut Commands,
+    render_inputs: &mut Query<(
+        Option<&mut CardVisual>,
+        Option<&mut ContainerVisual>,
+        Option<&mut NodeActionBar>,
+    )>,
+    entity: Entity,
+    scene: &Scene,
+    node: &GraphNode,
+) {
+    let desired_card = ContainerVisual::from_node(node).is_none().then(|| CardVisual::from_node(node));
+    let desired_container = ContainerVisual::from_node(node);
+    let desired_action = crate::canvas_query::action_bar_visible(scene, node)
+        .then(|| scene.node_actions.get(&node.id).cloned())
+        .flatten()
+        .map(|actions| NodeActionBar { summary: actions.summary.clone(), actions });
+    if let Ok((mut card, mut container, mut action)) = render_inputs.get_mut(entity) {
+        if let Some(desired) = desired_card {
+            if let Some(current) = card.as_deref_mut() {
+                if *current != desired {
+                    *current = desired;
+                }
+            } else {
+                commands.entity(entity).insert(desired);
+            }
+        } else if card.is_some() {
+            commands.entity(entity).remove::<CardVisual>();
+        }
+        if let Some(desired) = desired_container {
+            if let Some(current) = container.as_deref_mut() {
+                if *current != desired {
+                    *current = desired;
+                }
+            } else {
+                commands.entity(entity).insert(desired);
+            }
+        } else if container.is_some() {
+            commands.entity(entity).remove::<ContainerVisual>();
+        }
+        if let Some(desired) = desired_action {
+            if let Some(current) = action.as_deref_mut() {
+                if *current != desired {
+                    *current = desired;
+                }
+            } else {
+                commands.entity(entity).insert(desired);
+            }
+        } else if action.is_some() {
+            commands.entity(entity).remove::<NodeActionBar>();
+        }
+        return;
+    }
+    if let Some(container) = ContainerVisual::from_node(node) {
+        commands.entity(entity).insert(container);
+        commands.entity(entity).remove::<CardVisual>();
+    } else {
+        commands.entity(entity).insert(CardVisual::from_node(node));
+        commands.entity(entity).remove::<ContainerVisual>();
+    }
+    if crate::canvas_query::action_bar_visible(scene, node) {
+        if let Some(actions) = scene.node_actions.get(&node.id) {
+            commands.entity(entity).insert(NodeActionBar {
+                actions: actions.clone(),
+                summary: actions.summary.clone(),
+            });
+        }
+    } else {
+        commands.entity(entity).remove::<NodeActionBar>();
+    }
+}
+
+fn apply_presentation(
+    commands: &mut Commands,
+    entity: Entity,
+    scene: &Scene,
+    node: &GraphNode,
+    previous: Option<OverviewCacheOwner>,
+) {
     if node.group.is_some() {
         let presentation = node.group.as_ref().expect("group presentation");
         commands
@@ -127,6 +213,21 @@ fn apply_presentation(commands: &mut Commands, entity: Entity, node: &GraphNode)
             running: crate::canvas2d::group_is_running(node),
             resizable: node.resizable,
         });
+        let declared = presentation.overview_cache.is_some();
+        let carried = previous.filter(|owner| owner.enabled);
+        commands.entity(entity).insert(OverviewCacheOwner {
+            enabled: declared,
+            input_fingerprint: declared
+                .then(|| {
+                    crate::canvas_ecs::overview_cache::subject::presentation_fingerprint(
+                        node,
+                        crate::canvas_ecs::overview_cache::subject::preparation(scene, &node.id),
+                    )
+                })
+                .unwrap_or(0),
+            tier: carried.and_then(|owner| owner.tier),
+            fallback: carried.and_then(|owner| owner.fallback),
+        });
     } else if node.composite_asset.is_some() {
         let asset = node.composite_asset.as_ref().expect("composite asset");
         commands
@@ -139,6 +240,7 @@ fn apply_presentation(commands: &mut Commands, entity: Entity, node: &GraphNode)
                 crate::canvas_query::scope::node_scope(node).shape,
             ),
         });
+        commands.entity(entity).insert(OverviewCacheOwner::default());
     } else {
         commands
             .entity(entity)
@@ -154,6 +256,7 @@ fn apply_presentation(commands: &mut Commands, entity: Entity, node: &GraphNode)
             history: crate::canvas_query::layout::has_history_strip(node),
             shot_preview: crate::canvas_query::shot_preview::is_shot_preview_node(node),
         });
+        commands.entity(entity).insert(OverviewCacheOwner::default());
         if node.kind.is_empty() {
             commands.entity(entity).insert(CustomPresentation {
                 kind: node.kind.clone(),

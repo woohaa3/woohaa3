@@ -70,9 +70,39 @@ export * from "./wire-shot-preview.js";
  */
 // v27: node capability-driven rendering paths.
 // v28: optional trusted overview-only emptyPlaceholder; older renderers reject the whole frame.
-// v29: group presentation carries badge scale/resize, model bounds and collapsible members;
+// v30: group-owned film-set bindings carry prepared source identities;
 //      media content keeps a provider identity and schema version.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v29" as const;
+// v31: group presentations may carry the trusted overview primitive LOD declaration;
+//      older renderers would silently keep every group badge at High, so reject mixed combinations.
+// v32: group presentations may carry the trusted transparent overview cache declaration;
+//      older renderers would ignore it and keep drawing the whole subject every frame,
+//      so reject mixed combinations instead of silently dropping the capability.
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v32" as const;
+
+/** Group-owned scene primitives. Kept separate from the legacy composite wire during migration. */
+export const FILM_SET_GROUP_RENDER_SCHEMA_VERSION = "woohaa-film-set-group-render-v1" as const;
+export type BevyFilmSetGroupBinding = {
+  bindingId: string;
+  sourceNodeId: string;
+  kind: "model3d" | "image" | "video";
+  contentKey: string;
+  /** Prepared source-card resource identity; group renderers use this instead of a snapshot. */
+  resourceKey?: string;
+  signature?: string;
+  transform: { x: number; y: number; z: number; yaw: number; scale: number };
+  visible: boolean;
+  diagnostic?: string;
+  aspectRatio?: number;
+};
+export type BevyFilmSetGroupPreparation = {
+  schemaVersion: typeof FILM_SET_GROUP_RENDER_SCHEMA_VERSION;
+  ownerId: string;
+  badgeOrigin: { x: number; y: number };
+  bindings: BevyFilmSetGroupBinding[];
+  ground?: { width: number; depth: number; color?: string };
+  sceneTransform?: { x: number; y: number; z: number; yaw: number; scale: number };
+  activeClip?: string | null;
+};
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
@@ -164,7 +194,7 @@ export type BevyRenderNode = {
 export type BevyNodeAction = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download" | "arrange-horizontal" | "arrange-vertical" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
+  icon?: "download" | "edit" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
   iconOnly?: boolean;
   /** 稳定动作 ID；Rust 命中后回传，贡献据此派发。 */
   id: string;
@@ -180,7 +210,7 @@ export type BevyNodeAction = {
 export type BevyNodeActionsPresentation = {
   /** 从左到右排列的动作。 */
   actions: BevyNodeAction[];
-  /** 模型名摘要（可选，显示在动作右侧）。 */
+  /** 节点摘要（可选，显示在动作左侧）。 */
   summary?: string;
 };
 
@@ -202,6 +232,15 @@ export type CompositeAssetScopeShape = "rect" | "isometric-diamond";
  * 宿主与 Rust 只消费该声明，不按业务 extensionId、nodeData 形状或历史类型推断资格。
  */
 export type CompositeAssetGeometryQuality = "overview-primitives-v1";
+
+/**
+ * 通用总览纹理缓存声明（change: 2026-10-29-cache-film-set-overview-textures）。
+ *
+ * 可信 adapter 按严格身份声明「把整场稳定画面缓存成透明纹理」。当前唯一合法值
+ * `transparent-world-v1`；未声明（普通 group、炉体、第三方）保持逐帧实时绘制。
+ * 声明只承载呈现策略，不进入 executionKey、内容 hash 或持久 DTO；Rust 未知值整帧拒绝。
+ */
+export type CompositeAssetOverviewCache = "transparent-world-v1";
 
 /**
  * 复合资产范围呈现（change: 2026-10-08-make-film-set-model-only，design D1；
@@ -354,6 +393,13 @@ export type BevyGroupPresentation = {
   badgeScale?: number;
   /** 仅可写单选组显示徽标自己的缩放把手，含收起态。 */
   badgeResizable?: boolean;
+  /**
+   * 组容器是否绘制节点顶部操作横条。
+   *
+   * 普通 group 与片场组都声明该标志：展开/收起、排列、整理/解组等动作由
+   * `canvas.node-action` 贡献决定实际呈现；Rust 只消费该声明，不按业务 ID 推断。
+   */
+  actionBar?: boolean;
   /** 可编辑标题（nodeData.title）；缺省空串。 */
   title: string;
   /** 直接成员数。 */
@@ -362,6 +408,18 @@ export type BevyGroupPresentation = {
   outputCapableLeafCount: number;
   /** Prepared local bounds, without ops/mesh; shared model layout and perimeter input. */
   modelBounds?: { aabb: Aabb; extent: number };
+  /**
+   * Trusted adapter's overview primitive LOD declaration. Only group-owned scene
+   * compositions that opt in (currently film sets) get fraction-based tiers;
+   * missing keeps the existing High representation.
+   */
+  geometryQuality?: CompositeAssetGeometryQuality;
+  /**
+   * Trusted adapter's transparent overview cache declaration. Present only for group-owned
+   * compositions that opt in; the renderer may replace the stable subject with a cached
+   * texture and must fall back to live geometry when it cannot guarantee equivalence.
+   */
+  overviewCache?: CompositeAssetOverviewCache;
   /** Private run projection: group-header status button; no ledger identity crosses into renderer. */
   runStatus?: { label: string; state: string };
   /** Render-only target emphasis while a node is being released into this group. */
@@ -432,6 +490,8 @@ export type CanvasRenderScene = {
   revision: number;
   nodes: BevyRenderNode[];
   edges: BevyRenderEdge[];
+  /** Film-set group preparation primitives. Legacy composite fields are never emitted here. */
+  filmSetGroups?: BevyFilmSetGroupPreparation[];
   /**
    * 派生拍摄镜头归属线集合
    * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。

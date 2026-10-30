@@ -161,6 +161,43 @@ function resolveCatalogSources(
   return sources;
 }
 
+/**
+ * 解析远端**删除**端口（与 `canvas-upstream` 同一组 capability）。
+ *
+ * 删除顺序由画布服务决定（远端在前、本机在后）；这里只按声明找到第一个提供 `deleteCanvas`
+ * 的 provider。没有提供者 / 没有注册时就返回 `skipped`，纯本地部署行为不变。
+ *
+ * **每次调用现查**：与目录来源同理，扩展可能在 canvas 装载之后才激活或登录。
+ */
+function resolveRemoteDelete(
+  ctx: HostContext
+): (canvasId: string) => Promise<import("@woohaa3/contracts").CanvasUpstreamDeleteResult> {
+  const log = ctx.log.scope("canvas");
+  return async (canvasId) => {
+    const host = ctx.get("application")?.service.host();
+    if (!host) return "skipped";
+    const seen = new Set<string>();
+    for (const registration of host.snapshot()) {
+      for (const id of registration.capabilities) {
+        if (!isCanvasUpstreamCapabilityId(id) || seen.has(id)) continue;
+        seen.add(id);
+        const value = host.resolveCapability(id);
+        if (!isCanvasUpstreamProviderShape(value)) continue;
+        const provider = value as CanvasUpstreamProvider;
+        if (typeof provider.deleteCanvas !== "function") continue;
+        try {
+          return await provider.deleteCanvas(canvasId);
+        } catch {
+          // 契约要求不得抛错；真抛了也只当作「这次远端删不掉」，绝不越过它去删本机。
+          log({ event: "canvas-remote-delete-threw", level: "warn", code: id });
+          return "unavailable";
+        }
+      }
+    }
+    return "skipped";
+  };
+}
+
 export const canvasPlugin: HostPlugin<{
   env: Record<string, string | undefined>;
   enableYjsSync?: boolean;
@@ -283,6 +320,8 @@ export const canvasPlugin: HostPlugin<{
       // 还不存在、扩展也还没激活——当场求值只会得到空数组，于是「接上服务端却看不到服务端
       // 已有的画布」。与 `upstreamCredential` 同口径：每次列举目录时现查一次 capability。
       catalogSources: () => resolveCatalogSources(ctx),
+      // 远端删除：属于远端的画布先在服务端删掉，否则本机删完又会被目录拉回来。
+      deleteRemote: resolveRemoteDelete(ctx),
       ...(contentRuntime ? { contentRuntime } : {}),
       filmSetConversionProviders: () => filmSetConversionProviders(ctx),
       filmSetConversionExecution: createAssistantDeliveryPort(() => {

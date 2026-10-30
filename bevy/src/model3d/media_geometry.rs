@@ -5,8 +5,34 @@
 //! （`x`/`y`/`z`/`width`/`height`/`yaw`），本模块按节点模型资源派生的根 transform 放置平面；
 //! 不再另走 `canvas_point_to_world(center + x, center + z, y)` 的画布中心嵌入，避免共同根
 //! 平移/旋转/缩放改变模型与媒体的相对位置。
-use crate::protocol::{ModelMediaPlane, GraphNode, ModelSnapshot};
+use crate::protocol::{GraphNode, ModelMediaPlane, ModelSnapshot};
 use bevy::prelude::*;
+
+/// Match the scene-unit plane size used by the recording compiler.
+pub(super) fn group_media_plane(
+    owner: &str,
+    binding: &crate::protocol::FilmSetGroupBinding,
+    model: Option<&ModelSnapshot>,
+) -> ModelMediaPlane {
+    let extent = model
+        .map(|model| model.extent)
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(2.0);
+    let height = extent / 4.0;
+    ModelMediaPlane {
+        item_id: binding.binding_id.clone(),
+        unit: 1.0,
+        id: format!("{}::{}", owner, binding.binding_id),
+        kind: binding.kind.clone(),
+        x: 0.0,
+        y: height / 2.0,
+        z: 0.0,
+        width: height * binding.aspect_ratio,
+        height,
+        yaw: 0.0,
+        has_texture: true,
+    }
+}
 
 /// 媒体平面按内容局部几何 + 共同根 transform 得到的世界 transform。
 ///
@@ -16,7 +42,8 @@ pub(crate) fn plane_transform(plane: &ModelMediaPlane, root: &Transform) -> Tran
     let world = root.transform_point(Vec3::new(plane.x, plane.y, plane.z));
     Transform {
         translation: world,
-        rotation: root.rotation * Quat::from_rotation_y(plane.yaw)
+        rotation: root.rotation
+            * Quat::from_rotation_y(plane.yaw)
             * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
         scale: Vec3::new(plane.width, 1.0, plane.height) * root.scale,
     }
@@ -28,16 +55,36 @@ pub(crate) fn plane_transform(plane: &ModelMediaPlane, root: &Transform) -> Tran
 pub(crate) fn film_set_root(node: &GraphNode, model: Option<&ModelSnapshot>) -> Transform {
     match model {
         Some(model) => {
-            let placement = node.model.as_ref().map(|reference| reference.placement.clone()).unwrap_or_default();
+            let placement = node
+                .model
+                .as_ref()
+                .map(|reference| reference.placement.clone())
+                .unwrap_or_default();
             super::layout::film_set_root_transform(node, model, &placement)
         }
         None => {
             // A media-only node still has a canvas anchor, saved root and layout bounds.
-            let fallback = ModelSnapshot { extent: node.composite_asset.as_ref().and_then(|scope| scope.content_extent).unwrap_or(2.0).max(0.001), ..Default::default() };
-            let placement = node.model.as_ref().map(|reference| reference.placement.clone())
-                .or_else(|| node.composite_asset.as_ref().and_then(|scope| scope.root_placement.clone())).unwrap_or_default();
+            let fallback = ModelSnapshot {
+                extent: node
+                    .composite_asset
+                    .as_ref()
+                    .and_then(|scope| scope.content_extent)
+                    .unwrap_or(2.0)
+                    .max(0.001),
+                ..Default::default()
+            };
+            let placement = node
+                .model
+                .as_ref()
+                .map(|reference| reference.placement.clone())
+                .or_else(|| {
+                    node.composite_asset
+                        .as_ref()
+                        .and_then(|scope| scope.root_placement.clone())
+                })
+                .unwrap_or_default();
             super::layout::film_set_root_transform(node, &fallback, &placement)
-        },
+        }
     }
 }
 
@@ -65,7 +112,11 @@ pub(crate) fn item_candidate(
         .fold(bevy::math::Vec3::splat(f32::NEG_INFINITY), |a, b| a.max(*b));
     // 内容局部轴 → 世界：`R_root × unit`（与 `plane_transform` 的 content→world 完全同链，
     // 不做坐标置换，供媒体拖动逆变换使用）。
-    let unit = if root.scale.x.is_finite() && root.scale.x > 0.0 { root.scale.x } else { 1.0 };
+    let unit = if root.scale.x.is_finite() && root.scale.x > 0.0 {
+        root.scale.x
+    } else {
+        1.0
+    };
     let basis = bevy::math::Mat3::from_cols(
         root.rotation * bevy::math::Vec3::new(unit, 0.0, 0.0),
         root.rotation * bevy::math::Vec3::new(0.0, unit, 0.0),
@@ -90,7 +141,6 @@ pub(crate) fn item_candidate(
         plane_inverse: Some(transform.compute_affine().inverse()),
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -118,7 +168,9 @@ mod tests {
                 .abs()
                 < 1e-4
         );
-        assert!((second.translation - first.translation).abs_diff_eq(Vec3::new(0.0, 24.0, 0.0), 1e-4));
+        assert!(
+            (second.translation - first.translation).abs_diff_eq(Vec3::new(0.0, 24.0, 0.0), 1e-4)
+        );
 
         // 共同根等比缩放作用于位置与尺寸各一次。
         let scaled_root = Transform {
@@ -127,7 +179,12 @@ mod tests {
             scale: Vec3::splat(2.0),
         };
         let scaled = plane_transform(&plane, &scaled_root);
-        assert!((scaled.translation - (Vec3::new(10.0, 20.0, 30.0) + Vec3::new(plane.x, plane.y, plane.z) * 2.0)).length() < 1e-4);
+        assert!(
+            (scaled.translation
+                - (Vec3::new(10.0, 20.0, 30.0) + Vec3::new(plane.x, plane.y, plane.z) * 2.0))
+                .length()
+                < 1e-4
+        );
         assert!(
             ((scaled.transform_point(Vec3::new(0.5, 0.0, 0.0)) - scaled.translation).length()
                 - plane.width * 2.0 * 0.5)

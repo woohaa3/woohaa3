@@ -17,6 +17,7 @@ import { snapGraphPosition } from "./domain/core/serialization.js";
 import { decodeFilmSetNodeData } from "./canvas-node-model.js";
 import { filmSetAnimationsOf } from "./film-set-clip-view.js";
 import { readFilmSetContent } from "./film-set-content.js";
+import { readFilmSetGroupMarker } from "./film-set-group.js";
 
 /** 读取节点（缺失返回 undefined）。 */
 function findNode(canvas: ServerCanvas, nodeId: string) {
@@ -44,7 +45,7 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
       const decoded = decodeEditApplyCommand(command);
       if (!decoded) return false;
       // 整批后置条件：所有内部操作的效果都必须可观察，才算这次受保护编辑已生效。
-      return decoded.operations.every((operation) => isEditOperationSatisfied(canvas, operation));
+      return decoded.operations.every((operation) => isEditOperationSatisfied(canvas, operation, content));
     }
     case "canvas.setTitle":
       return (canvas.title ?? "") === command.title;
@@ -111,12 +112,24 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
       // 对象级操作的后置条件：按稳定 itemId 观察结果，不做数组序号比较。
       // 具体内容由服务端 reducer 派生，这里只要求目标 item 的期望状态成立。
       return filmSetItemSatisfied(canvas, command);
+    case "filmSetGroup.bindingPatch": {
+      const marker = readFilmSetGroupMarker(canvas.nodeData[command.groupId]);
+      const binding = marker?.sceneBindings.find(entry => entry.bindingId === command.bindingId);
+      if (!binding) return false;
+      if (command.patch.animation !== undefined && JSON.stringify(binding.animation) !== JSON.stringify(command.patch.animation)) return false;
+      if (command.patch.contentKey !== undefined && binding.contentKey !== command.patch.contentKey) return false;
+      if (command.patch.visibility !== undefined && binding.visibility !== command.patch.visibility) return false;
+      if (command.patch.transform !== undefined && !shallowEqual(binding.transform, command.patch.transform)) return false;
+      return true;
+    }
+    case "filmSetGroup.ungroup":
+      return !findNode(canvas, command.groupId) && !readFilmSetGroupMarker(canvas.nodeData[command.groupId]);
     case "extension.command": {
       const owner = content?.resolve(command.extensionId)?.commands;
       if (!owner || !owner.kinds.includes(command.kind)) return false;
       try {
-        const decoded = owner.decode({ extensionId: command.extensionId, nodeId: command.nodeId, kind: command.kind, payload: command.payload });
-        return decoded.ok && owner.satisfied(decoded.value, canvas);
+        const decoded = owner.decode(structuredClone({ extensionId: command.extensionId, nodeId: command.nodeId, kind: command.kind, payload: command.payload }));
+        return decoded.ok && owner.satisfied(structuredClone(decoded.value), structuredClone(canvas));
       } catch {
         return false;
       }
@@ -139,8 +152,19 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
   }
 }
 
-function isEditOperationSatisfied(canvas: ServerCanvas, operation: EditOperation): boolean {
+function isEditOperationSatisfied(canvas: ServerCanvas, operation: EditOperation, content?: ContentContributionResolver): boolean {
   switch (operation.kind) {
+    case "extension.edit": {
+      const node = findNode(canvas, operation.nodeId);
+      if (!node || (node.type === "composite-asset" && canvas.nodeData[operation.nodeId]?.extensionId !== operation.extensionId)) return false;
+      const expand = content?.resolve(operation.extensionId)?.edit?.expand;
+      if (!expand) return false;
+      try {
+        const result = expand({ nodeId: operation.nodeId, op: structuredClone(operation.op) });
+        const fragment = decodeEditApplyCommand({ ...(result && typeof result === "object" ? result : {}), type: "edit.apply" });
+        return !!fragment && fragment.operations.every(entry => entry.kind !== "extension.edit" && isEditOperationSatisfied(canvas, entry, content));
+      } catch { return false; }
+    }
     case "node-add": {
       const node = findNode(canvas, operation.node.id);
       if (!node) return false;

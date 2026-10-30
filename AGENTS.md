@@ -102,7 +102,7 @@ bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
 
 每个扩展独立 `build:browser`，产物在自己的 `browser-dist/`。宿主 Vite **不扫描、不编译**扩展源码；运行时按发布目录加载。未启用的入口不产生 JS/CSS 请求。
 
-较大扩展（片场、炼丹炉）按职责分子目录：`state` / `authoring` / `preview` / `integration`，再按 `shared` / `browser` / `backend` 分环境。依赖方向是 integration → authoring / preview → state。约定与示例见 [web/extensions/README.md](web/extensions/README.md)。
+较大扩展（如片场）按职责分子目录：`state` / `authoring` / `preview` / `integration`，再按 `shared` / `browser` / `backend` 分环境。依赖方向是 integration → authoring / preview → state。约定与示例见 [web/extensions/README.md](web/extensions/README.md)。
 
 ### 状态归属
 

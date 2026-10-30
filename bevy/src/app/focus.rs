@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
-use crate::model3d;
 use crate::camera_transition::projection::FocusProjectionBlend;
+use crate::model3d;
 use crate::orbit_camera;
 
 use super::helpers::{apply_focus_projection, surface_size};
@@ -46,10 +46,18 @@ pub(super) fn sync_focus(
     let view = model3d::grid::scene_view(&scene.0);
     // Model cards have their own camera. Expand that camera to the canvas while preserving
     // the card's current screen position; the global isometric camera never saw this image.
-    let preview_id = scene.0.model_focus.as_ref().map(|focus| focus.node_id.as_str())
+    let preview_id = scene
+        .0
+        .model_focus
+        .as_ref()
+        .map(|focus| focus.node_id.as_str())
         .or(rig.focus_node.as_deref());
     let overview = preview_id.and_then(|id| {
-        let node = scene.0.nodes.iter().find(|node| node.id == id && node.model_preview.is_some())?;
+        let node = scene
+            .0
+            .nodes
+            .iter()
+            .find(|node| node.id == id && node.model_preview.is_some())?;
         let (pose, projection) = preview_cameras.get(previews.camera(id)?).ok()?;
         model3d::focus_transition::overview_camera(
             &scene.0,
@@ -61,8 +69,9 @@ pub(super) fn sync_focus(
     });
     let target = match &scene.0.model_focus {
         Some(focus) => model3d::focus::focus_camera_transform(focus),
-        None => overview.as_ref().map(|(pose, _)| *pose)
-            .unwrap_or_else(|| model3d::focus::home_camera_transform(surface_size(&scene.0), &view)),
+        None => overview.as_ref().map(|(pose, _)| *pose).unwrap_or_else(|| {
+            model3d::focus::home_camera_transform(surface_size(&scene.0), &view)
+        }),
     };
     let duration = model3d::focus::FOCUS_TRANSITION_SECS;
 
@@ -70,10 +79,8 @@ pub(super) fn sync_focus(
     // 退出过渡期间 `model_focus` 已为 None，需回落到 `rig.focus_node`（退出的是刚刚聚焦的节点），
     // 否则退出进度会被判为「不匹配当前目标」而被丢弃。
     let progress_node = preview_id.map(str::to_string);
-    let _uses_public_progress = rig.accept_transition_progress(
-        scene.0.focus_transition.as_ref(),
-        progress_node.as_deref(),
-    );
+    let _uses_public_progress =
+        rig.accept_transition_progress(scene.0.focus_transition.as_ref(), progress_node.as_deref());
 
     if !rig.initialized {
         // 首帧：直接落到目标，不产生启动动画。
@@ -97,11 +104,23 @@ pub(super) fn sync_focus(
         };
         let mut to_projection = projection.clone();
         apply_focus_projection(&mut to_projection, true, &scene, &mut camera2d);
-        to_projection.update(surface_size(&scene.0).map(|s| s.0).unwrap_or(1.0), surface_size(&scene.0).map(|s| s.1).unwrap_or(1.0));
-        let pivot = scene.0.model_focus.as_ref().map(|focus| Vec3::from_array(focus.target)).unwrap_or(Vec3::ZERO);
+        to_projection.update(
+            surface_size(&scene.0).map(|s| s.0).unwrap_or(1.0),
+            surface_size(&scene.0).map(|s| s.1).unwrap_or(1.0),
+        );
+        let pivot = scene
+            .0
+            .model_focus
+            .as_ref()
+            .map(|focus| Vec3::from_array(focus.target))
+            .unwrap_or(Vec3::ZERO);
         rig.projection_pivot = pivot;
         rig.projection_blend = Some(FocusProjectionBlend::new(
-            from_projection.clone(), to_projection.clone(), from, target, pivot,
+            from_projection.clone(),
+            to_projection.clone(),
+            from,
+            target,
+            pivot,
         ));
     } else if !focused && rig.active {
         // 退出聚焦：从当前聚焦姿态平滑恢复到正交 home（位置 + 朝向），与进入对称。
@@ -118,11 +137,20 @@ pub(super) fn sync_focus(
         if let Some((_, overview_projection)) = &overview {
             to_projection = overview_projection.clone();
         }
-        to_projection.update(surface_size(&scene.0).map(|s| s.0).unwrap_or(1.0), surface_size(&scene.0).map(|s| s.1).unwrap_or(1.0));
-        for mut cam in &mut camera2d { cam.is_active = false; }
+        to_projection.update(
+            surface_size(&scene.0).map(|s| s.0).unwrap_or(1.0),
+            surface_size(&scene.0).map(|s| s.1).unwrap_or(1.0),
+        );
+        for mut cam in &mut camera2d {
+            cam.is_active = false;
+        }
         let pivot = rig.projection_pivot;
         rig.projection_blend = Some(FocusProjectionBlend::new(
-            from_projection, to_projection, *transform, target, pivot,
+            from_projection,
+            to_projection,
+            *transform,
+            target,
+            pivot,
         ));
     } else {
         // 静止/导航帧：保持终点，不重启过渡。
@@ -155,12 +183,17 @@ pub(super) fn sync_focus(
         // 有公共进度时按进度映射 elapsed，不使用独立 delta（design D6/D7：单一时间源）。
         let advanced = rig.advance(time.delta_secs());
         let animating = rig.animating();
-        let progress = crate::camera_transition::smoothstep(rig.transition.elapsed / rig.transition.duration);
+        let progress =
+            crate::camera_transition::smoothstep(rig.transition.elapsed / rig.transition.duration);
         // 姿态与投影必须来自同一过渡：有投影混合时由它逐帧反解相机平移，保证锚点沿屏幕
         // 直线移动（否则独立插值世界平移会让模型中途鼓出、再「从视口外飞入」）。
         let next = if let Some(blend) = &mut rig.projection_blend {
             blend.progress = progress;
-            *projection = if animating { Projection::custom(blend.clone()) } else { blend.to.clone() };
+            *projection = if animating {
+                Projection::custom(blend.clone())
+            } else {
+                blend.to.clone()
+            };
             blend.pose_at(progress)
         } else {
             advanced
@@ -169,7 +202,9 @@ pub(super) fn sync_focus(
         if !animating {
             let completed_transition = rig.projection_blend.is_some();
             rig.projection_blend = None;
-            for mut cam in &mut camera2d { cam.is_active = !focused || !scene.0.model_focus_context.is_empty(); }
+            for mut cam in &mut camera2d {
+                cam.is_active = !focused || !scene.0.model_focus_context.is_empty();
+            }
             if !focused && completed_transition {
                 // The 2D card takes over at the same pixels; restore the ordinary 3D camera.
                 *transform = model3d::focus::home_camera_transform(surface_size(&scene.0), &view);
@@ -184,7 +219,9 @@ pub(super) fn sync_focus(
         rig.transition.elapsed = rig.transition.duration;
     }
     if focused && !rig.animating() {
-        for mut cam in &mut camera2d { cam.is_active = !scene.0.model_focus_context.is_empty(); }
+        for mut cam in &mut camera2d {
+            cam.is_active = !scene.0.model_focus_context.is_empty();
+        }
     }
     rig.sync_focus_node(
         scene

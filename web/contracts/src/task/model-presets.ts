@@ -10,11 +10,14 @@
  * 模型目录来自网关发现或 Provider 内置目录，id 不可穷举；`imageModelPresetFor` 未命中时
  * 由 Provider 回退到自己的通用取值域。
  *
- * Seedream（即梦）的档位由 `seedream-presets.ts` 提供：那份数据同时描述官方 `size` 像素表，
- * 这里的预设从它派生，避免档位/默认值两处各写一套。
+ * Seedream（即梦）的档位由**卡片**提供（每张卡片就是那个版本的能力来源）：`seedream-cards`
+ * 把卡片投影成统一的 `SeedreamSizePreset`，这里的预设再从它派生，避免档位/默认值两处各写一套。
  */
 
-import { SEEDREAM_SIZE_PRESETS, type SeedreamSizePreset } from "./seedream-presets.js";
+import {
+  SEEDREAM_SIZE_PRESETS,
+  type SeedreamSizePreset
+} from "./generation-parameters/cards/image/ark/index.js";
 
 /** 通用图片画幅（TokenHub / Seedream 等）。 */
 export const IMAGE_ASPECT_RATIOS_STANDARD = [
@@ -129,8 +132,8 @@ const GPT_IMAGE_PRESET: GenerationImageModelPreset = {
 };
 
 /**
- * Seedream（即梦）各版本的分辨率档与画幅来自 `seedream-presets.ts`：同一份数据既描述
- * 官方 `size` 像素表，也参与这里的跨 Provider 预设，避免两处各写一套档位。
+ * Seedream（即梦）各版本的分辨率档与画幅来自卡片（`cards/image/ark/seedream-*.ts`）：
+ * 同一份数据既描述官方 `size` 像素表，也参与这里的跨 Provider 预设，避免两处各写一套档位。
  *
  * `aspectRatios` 仍声明通用画幅：是否真的能固定比例取决于该版本有没有官方像素表，
  * 具体判断由消费预设的 Provider 查 `seedreamSizePresetFor` 完成。

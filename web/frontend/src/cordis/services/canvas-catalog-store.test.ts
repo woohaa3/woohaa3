@@ -7,6 +7,7 @@ import type { CanvasSummary } from "@woohaa3/contracts";
 import { CanvasCatalogStore } from "./canvas-catalog-store.js";
 import type {
   CanvasCatalogCreateResult,
+  CanvasCatalogDeleteResult,
   CanvasCatalogListResult,
   CanvasCatalogRemote,
   CanvasCatalogSummaryResult
@@ -29,11 +30,13 @@ function fakeRemote(script: {
   list?: (input: { offset: number; limit: number }) => Promise<CanvasCatalogListResult>;
   get?: (canvasId: string) => Promise<CanvasCatalogSummaryResult>;
   create?: (input: { canvasId?: string; title?: string }) => Promise<CanvasCatalogCreateResult>;
+  delete?: (canvasId: string, expectedRevision: number) => Promise<CanvasCatalogDeleteResult>;
 }): CanvasCatalogRemote {
   return {
     list: script.list ?? (async (input) => ({ ok: true, entries: [], total: 0, offset: input.offset, limit: input.limit })),
     get: script.get ?? (async (canvasId) => ({ ok: true, summary: detail(canvasId) })),
     create: script.create ?? (async () => ({ ok: true, canvasId: "created", revision: 1, title: "" })),
+    delete: script.delete ?? (async () => ({ ok: true })),
     exportArchive: async (canvasId) => ({
       ok: true,
       bytes: new Uint8Array(),
@@ -118,6 +121,46 @@ describe("CanvasCatalogStore", () => {
     expect(created.ok).toBe(true);
     expect(listCalls).toBe(1);
     expect(store.getState().entries.map((entry) => entry.id)).toEqual(["new"]);
+  });
+
+  it("delete 用目录里的 revision 请求删除，成功后刷新目录", async () => {
+    const calls: Array<[string, number]> = [];
+    let listCalls = 0;
+    const store = new CanvasCatalogStore({
+      remote: fakeRemote({
+        list: async (input) => {
+          listCalls += 1;
+          return {
+            ok: true,
+            entries: listCalls === 1 ? [summary("a")] : [],
+            total: listCalls === 1 ? 1 : 0,
+            offset: input.offset,
+            limit: input.limit
+          };
+        },
+        delete: async (canvasId, expectedRevision) => {
+          calls.push([canvasId, expectedRevision]);
+          return { ok: true };
+        }
+      })
+    });
+    await store.load();
+    expect(await store.delete("a")).toEqual({ ok: true });
+    expect(calls).toEqual([["a", 1]]);
+    expect(store.getState().entries).toEqual([]);
+  });
+
+  it("delete 失败保留目录并透传稳定 code；条目不在当前页时不发请求", async () => {
+    const store = new CanvasCatalogStore({
+      remote: fakeRemote({
+        list: async (input) => ({ ok: true, entries: [summary("a")], total: 1, offset: input.offset, limit: input.limit }),
+        delete: async () => ({ ok: false, code: "FORBIDDEN", error: "只有作者能删除" })
+      })
+    });
+    await store.load();
+    expect(await store.delete("a")).toMatchObject({ ok: false, code: "FORBIDDEN" });
+    expect(store.getState().entries.map((entry) => entry.id)).toEqual(["a"]);
+    expect(await store.delete("missing")).toMatchObject({ ok: false, code: "CANVAS_NOT_FOUND" });
   });
 
   it("dispose 后迟到结果不发布", async () => {

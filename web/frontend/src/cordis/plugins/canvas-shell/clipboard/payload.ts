@@ -13,9 +13,10 @@
 import type { ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition, Woohaa3CanvasSerializedNode } from "@woohaa3/contracts";
 import {
   decodeImageEditDocument,
-  filmSetObjectOwnershipOf, filmSetObjectModelNodeId,
+  filmSetObjectOwnershipOf,
+  isFilmSetNode,
   filmSetAssetReferences,
-  isImageProjectDocument, decodeFilmSetNodeData, model3DNodeDataFields,
+  isImageProjectDocument,
   readFilmSetContent,
   sanitizeNodeDataForClipboard,
   type ImageEditProjectObjectRef,
@@ -82,7 +83,8 @@ export type CanvasCopyPayload = {
  */
 export function buildCanvasCopyPayload(
   canvas: ServerCanvas,
-  selectedNodeIds: readonly string[]
+  selectedNodeIds: readonly string[],
+  options: { content?: import("@woohaa3/contracts").ContentContributionResolver } = {}
 ): CanvasCopyPayload | null {
   const nodes = canvas.document.nodes;
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -102,66 +104,19 @@ export function buildCanvasCopyPayload(
     }
   }
 
-  // Owner closures are relation-driven, independent of media provider identity.
+  // Legacy object shells are read-only migration inputs, never clipboard resources.
+  for (const id of included) if (filmSetObjectOwnershipOf(canvas.nodeData[id]) || isFilmSetNode(byId.get(id)?.type, canvas.nodeData[id])) return null;
   const previewOwnerByNode = new Map<string, string>();
   for (const node of nodes) {
-    const object = filmSetObjectOwnershipOf(canvas.nodeData[node.id]);
-    if (object) { previewOwnerByNode.set(node.id, object.filmSetNodeId); continue; }
     const managed = managedNodeRelationOf(canvas.nodeData[node.id]);
-    if (managed) { previewOwnerByNode.set(node.id, managed.ownerNodeId); continue; }
+    if (managed) previewOwnerByNode.set(node.id, managed.ownerNodeId);
   }
-  let closureGrew = true;
-  while (closureGrew) {
-    closureGrew = false;
-    for (const node of nodes) {
-      const owner = previewOwnerByNode.get(node.id);
-      if (owner && included.has(owner) && !included.has(node.id)) { included.add(node.id); closureGrew = true; }
-    }
-  }
-  for (const id of [...included]) {
-    const owner = previewOwnerByNode.get(id);
-    // 对象容器可以在所属片场未被选中时物化为独立 model3d；拍摄镜头预览仍必须丢弃。
-    const isObjectContainer = !!filmSetObjectOwnershipOf(canvas.nodeData[id]);
-    const isManagedMedia = !!managedNodeRelationOf(canvas.nodeData[id]);
-    if (owner && !included.has(owner) && !isObjectContainer && !isManagedMedia) included.delete(id);
-  }
-  // 单独选择外层容器时只复制其真实 model3d 子节点；容器自身不参与复制。
-  for (const id of validSelected) {
-    const node = byId.get(id);
-    const owner = filmSetObjectOwnershipOf(canvas.nodeData[id]);
-    if (node?.type !== "composite-asset" || !owner || included.has(owner.filmSetNodeId)) continue;
-    if (included.has(filmSetObjectModelNodeId(owner.filmSetNodeId, owner.itemId))) included.delete(id);
-  }
-
-  if (included.size === 0) return null;
-
-  // 单独复制片场对象容器时，将当前对象模型物化为普通 model3d 快照。
-  // 容器仍然是片场生命周期里的 composite-asset；只有在复制闭包不包含所属片场时，
-  // 才切断归属并把当下的模型内容写进载荷，保证粘贴结果不再依赖源片场。
-  const materializedModelData = new Map<string, Woohaa3CanvasJsonObject>();
-  const materializedNodeIds = new Set<string>();
   for (const node of nodes) {
-    if (!included.has(node.id)) continue;
-    const ownership = filmSetObjectOwnershipOf(canvas.nodeData[node.id]);
-    if (!ownership || included.has(ownership.filmSetNodeId)) continue;
-    const ownerData = canvas.nodeData[ownership.filmSetNodeId];
-    const decoded = decodeFilmSetNodeData(ownerData);
-    if (!decoded.ok) continue;
-    const item = decoded.value.filmSetContent.items.find(candidate => candidate.id === ownership.itemId);
-    if (!item || item.kind !== "model") {
-      // 空容器没有可独立复制的内容；从选区中移除，避免产生悬空容器。
-      included.delete(node.id);
-      continue;
-    }
-    materializedNodeIds.add(node.id);
-    materializedModelData.set(node.id, JSON.parse(JSON.stringify(model3DNodeDataFields({
-      kind: "model3d", title: item.name, source: "script", model: item.model
-    }))) as Woohaa3CanvasJsonObject);
+    const owner = previewOwnerByNode.get(node.id);
+    if (owner && included.has(owner)) included.add(node.id);
   }
   if (included.size === 0) return null;
-  const copyNodes: CopyNode[] = nodes
-    .filter((node) => included.has(node.id))
-    .map(node => ({ ...toCopyNode(node), ...(materializedNodeIds.has(node.id) ? { type: "model3d" } : {}) }));
+  const copyNodes: CopyNode[] = nodes.filter(node => included.has(node.id)).map(toCopyNode);
 
   const copyEdges: CopyEdge[] = [];
   const incomingEdges: CopyIncomingEdge[] = [];
@@ -187,7 +142,9 @@ export function buildCanvasCopyPayload(
   const nodeTypeById = new Map(nodes.map((node) => [node.id, node.type]));
   for (const id of [...included].sort()) {
     const raw = rawNodeData[id];
-    const cleaned = materializedModelData.get(id) ?? sanitizeNodeDataForClipboard(raw ?? {});
+    let cleaned: ReturnType<typeof sanitizeNodeDataForClipboard>;
+    try { cleaned = sanitizeNodeDataForClipboard(raw ?? {}, { content: options.content }); }
+    catch { return null; }
     // A standalone provider-backed media copy is a frozen ordinary node. Keep
     // the source reference for the async snapshot path, but never paste the
     // extension lifecycle lock into another canvas.
@@ -208,7 +165,7 @@ export function buildCanvasCopyPayload(
     if (!data) continue;
     for (const assetId of imageEditAssetIdsOf(data)) referencedAssetIds.add(assetId);
     // 内容引用与视频封面：只带指针不带资产会得到「有引用、没有图」的节点。
-    for (const field of ["outputAssetId", "posterAssetId", "modelAssetId"] as const) {
+    for (const field of ["outputAssetId", "posterAssetId"] as const) {
       const assetId = data[field];
       if (typeof assetId === "string" && assetId !== "") referencedAssetIds.add(assetId);
     }

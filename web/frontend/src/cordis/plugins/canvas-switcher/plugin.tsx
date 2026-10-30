@@ -168,6 +168,24 @@ export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions 
       };
 
       /**
+       * 删除画布。
+       *
+       * 删除入口长在目录行上，宿主在这里只做收尾：目录 store 已刷新；删掉的是当前画布时
+       * 清掉「最近画布」并回到缺省解析，让路由器落到下一张或幂等新建，而不是停在一个已删
+       * 的 id 上（那会变成恢复页）。不经过 `pageLeave.settle`：画布已被删除，没有可保存的目标。
+       */
+      const remove = async (targetCanvasId: string, expectedRevision?: number) => {
+        const result = await catalog.delete(targetCanvasId, expectedRevision);
+        if (!result.ok) return { ok: false, error: result.error };
+        if (targetCanvasId === canvasId) {
+          selection.setRecentCanvasId(null);
+          ctx.appRouter.navigate({ page: "canvas" });
+        }
+        refreshTitle();
+        return { ok: true };
+      };
+
+      /**
        * 导出归档包并触发下载。
        *
        * 浏览器只能把文件送到下载目录，选不了盘符 —— 这是浏览器的限制，不是我们省掉了。
@@ -209,6 +227,7 @@ export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions 
           create,
           rename,
           exportArchive,
+          remove,
           sources
         })
       });

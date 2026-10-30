@@ -1,4 +1,4 @@
-import { decodeFilmSetContent, emptyFilmSetContent, isFilmSetMediaItem, type FilmSetContent, type FilmSetItem, type FilmSetLocalTransform, type ServerCanvas } from "@woohaa3/contracts";
+import { isFilmSetMediaItem, type FilmSetItem, type FilmSetLocalTransform } from "@woohaa3/contracts";
 
 export type FilmSetObjectEntry = {
   itemId: string;
@@ -42,11 +42,7 @@ const INITIAL: FilmSetObjectSessionState = {
   pendingItemId: null
 };
 
-export function readFilmSetContentForSession(canvas: ServerCanvas | null, nodeId: string): FilmSetContent {
-  if (!canvas) return emptyFilmSetContent();
-  const decoded = decodeFilmSetContent(canvas.nodeData[nodeId]?.["filmSetContent"]);
-  return decoded.ok ? decoded.value : emptyFilmSetContent();
-}
+export { readFilmSetContentForSession, type FilmSetProjectionCanvas } from "@woohaa3/contracts";
 
 export class FilmSetObjectState {
   protected state: FilmSetObjectSessionState = { ...INITIAL };

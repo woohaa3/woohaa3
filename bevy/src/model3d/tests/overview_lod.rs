@@ -103,14 +103,19 @@ fn settle(world: &mut World, scene: &Scene, now: &mut f64, expected: Quality) {
         *now += 0.5;
         let models = world.resource::<ModelVisuals>();
         let root = &models.roots["film"];
-        if root.quality.tier() == expected && root.quality == root.overview_desired && models.pending.is_none() {
+        if root.quality.tier() == expected
+            && root.quality == root.overview_desired
+            && models.pending.is_none()
+        {
             return;
         }
     }
     let root = &world.resource::<ModelVisuals>().roots["film"];
     panic!(
         "总览档位未稳定为 {expected:?}（当前 {:?}/desired {:?} reason {}）",
-        root.quality.tier(), root.overview_desired, root.overview_reason
+        root.quality.tier(),
+        root.overview_desired,
+        root.overview_reason
     );
 }
 
@@ -442,8 +447,7 @@ fn offscreen_root_stays_low_without_chasing_zoom_and_updates_on_return() {
     {
         let models = world.resource::<ModelVisuals>();
         assert_eq!(
-            models.roots["film"].representation_generation,
-            generation,
+            models.roots["film"].representation_generation, generation,
             "屏外根不得随缩放反复准备"
         );
         assert_eq!(models.overview_work.publishes, publishes);
@@ -509,21 +513,22 @@ fn focus_owner_restores_high_for_overview_root() {
 }
 
 #[test]
-fn local_motion_split_keeps_low_and_pose() {
-    // 低档片场播放：不因 playing 强制 High；对象拆块后仍按当前有效档位准备。
+fn local_motion_playback_keeps_low_and_unbatches_parts() {
+    // 低档片场播放：不因 playing 强制 High；带部件动作时切换非合批表示，保留真实层级。
     let (mut scene, resources) = fixture(mixed_snapshot("motion", 40, 0), 0.05, 1.0);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
     settle(&mut world, &scene, &mut now, Quality::Low);
-    let mut playback: crate::protocol::AnimationPlayback = serde_json::from_value(serde_json::json!({
-        "nodeId":"film","clipId":"a","sourceIdentity":"content-a","generation":1,
-        "version":"woohaa-motion-ir-v1","time":1,"duration":4,"playing":true,
-        "initialCamera":{"distance":8},
-        "modelMotion":[{"targetId":"s0","startTime":0,"endTime":4,
-            "motion":{"kind":"move","axis":"x","speed":2,"range":[0,8]}}]
-    }))
-    .unwrap();
+    let mut playback: crate::protocol::AnimationPlayback =
+        serde_json::from_value(serde_json::json!({
+            "nodeId":"film","clipId":"a","sourceIdentity":"content-a","generation":1,
+            "version":"woohaa-motion-ir-v1","time":1,"duration":4,"playing":true,
+            "initialCamera":{"distance":8},
+            "modelMotion":[{"targetId":"s0","startTime":0,"endTime":4,
+                "motion":{"kind":"move","axis":"x","speed":2,"range":[0,8]}}]
+        }))
+        .unwrap();
     for generation in 1..5 {
         playback.generation = generation;
         playback.time = generation as f32;
@@ -547,7 +552,9 @@ fn local_motion_split_keeps_low_and_pose() {
     }
     let root = &world.resource::<ModelVisuals>().roots["film"];
     assert_eq!(root.quality.tier(), Quality::Low, "播放不得强制 High");
-    assert!(root.prepared_targets.contains("s0"));
+    assert!(!root.batched, "带部件动作的播放必须使用非合批表示");
+    assert!(root.batches.is_empty());
+    assert!(root.part_entities.contains_key("s0"));
 }
 
 #[test]
@@ -776,7 +783,8 @@ fn diagnostics_are_bounded_and_report_actual_work() {
     assert_eq!(overview["roots"][0]["published"], "Low");
     assert_eq!(overview["roots"][0]["desired"], "Low");
     assert!(
-        overview["roots"][0]["viewportFraction"].as_f64().unwrap() < Quality::OVERVIEW_MEDIUM_ENTER as f64
+        overview["roots"][0]["viewportFraction"].as_f64().unwrap()
+            < Quality::OVERVIEW_MEDIUM_ENTER as f64
     );
     assert!(overview["roots"][0]["activeMeshes"].as_u64().unwrap() > 0);
     assert!(overview["work"]["publishes"].as_u64().unwrap() >= 1);
@@ -955,7 +963,6 @@ fn stable_tiers_do_not_regenerate_or_republish() {
     );
 }
 
-
 /// 任务 5.3：用实际 Bevy Mesh 核对 `notes/geometry-budget.json` 的图元档位三角面表，
 /// 防止工具表与运行时细分漂移（工具脚本的 `TIER_TRIANGLES` 必须与此一致）。
 #[test]
@@ -985,11 +992,12 @@ fn bevy_overview_tier_triangles_match_tool_table() {
         ),
     ];
     for (geometry, expected) in table {
-        let actual = [Quality::High, Quality::OverviewMedium, Quality::OverviewLow].map(|quality| {
-            let mesh = super::super::mesh::build_mesh_quality(&geometry, quality)
-                .expect("legal primitive");
-            mesh.indices().expect("indexed").len() / 3
-        });
+        let actual =
+            [Quality::High, Quality::OverviewMedium, Quality::OverviewLow].map(|quality| {
+                let mesh = super::super::mesh::build_mesh_quality(&geometry, quality)
+                    .expect("legal primitive");
+                mesh.indices().expect("indexed").len() / 3
+            });
         assert_eq!(actual, expected, "{geometry:?} 档位三角面必须与工具表一致");
     }
 }
@@ -1057,8 +1065,6 @@ fn effective_quality_only_lowers_supported_primitives() {
     );
 }
 
-
-
 #[test]
 fn zoom_within_low_preserves_meshes_and_batches() {
     let (mut scene, resources) = fixture(mixed_snapshot("fixed-subdivisions", 8, 0), 0.05, 1.0);
@@ -1079,7 +1085,6 @@ fn zoom_within_low_preserves_meshes_and_batches() {
         assert_eq!(models.shared.batches.work.build_attempts, builds);
     }
 }
-
 
 #[test]
 fn medium_dwell_promotes_only_after_ten_seconds_and_resets() {
@@ -1178,4 +1183,462 @@ fn offscreen_time_does_not_count_towards_medium_dwell() {
         world.resource::<ModelVisuals>().roots["film"].quality,
         Quality::High
     );
+}
+
+/// 片场 group 的徽标场景：组合资源按 binding 前缀拆分，但总览 LOD 仍以 group owner 为根。
+fn group_film_set_fixture(declared: bool, zoom: f32) -> (Scene, ModelAssets) {
+    let mut ops = vec![serde_json::json!({"t":"group","id":"1:a"})];
+    for i in 0..3 {
+        ops.push(serde_json::json!({"t":"sphere","id":format!("1:a4:s{i}"),"parent":"1:a","radius":1,"color":"#ffffff"}));
+    }
+    let snapshot: ModelSnapshot = serde_json::from_value(serde_json::json!({
+        "sceneVersion": "woohaa-model-scene-ir-v2", "signature": "group-overview", "extent": 12, "ops": ops
+    }))
+    .unwrap();
+    let mut group = serde_json::json!({
+        "title": "", "memberCount": 1, "outputCapableLeafCount": 0, "badgeScale": 3
+    });
+    if declared {
+        group["geometryQuality"] = serde_json::json!("overview-primitives-v1");
+    }
+    let mut node: GraphNode = serde_json::from_value(serde_json::json!({
+        "id": "film", "type": "group", "x": 0, "y": 0, "width": 400, "height": 300,
+        "group": group
+    }))
+    .unwrap();
+    node.model = Some(reference_for(&snapshot, ModelPlacement::default()));
+    let reference = node.model.as_ref().unwrap();
+    let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
+    let mut scene = scene_with(&node, node.model.clone());
+    scene.viewport.zoom = zoom;
+    scene.surface = Some(surface(1.0));
+    scene.film_set_groups = vec![serde_json::from_value(serde_json::json!({
+        "schemaVersion": "woohaa-film-set-group-render-v1",
+        "ownerId": "film",
+        "badgeOrigin": {"x": 200.0, "y": 300.0},
+        "bindings": [{
+            "bindingId": "a", "sourceNodeId": "source", "kind": "model3d", "contentKey": "model3d:v1",
+            "transform": {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "scale": 1.0}, "visible": true
+        }]
+    }))
+    .unwrap()];
+    (scene, resources)
+}
+
+#[test]
+fn group_owned_film_set_badge_keeps_overview_lod() {
+    let (mut scene, resources) = group_film_set_fixture(true, 0.05);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    {
+        let root = &world.resource::<ModelVisuals>().roots["film"];
+        assert!(root.overview_lod);
+        assert_eq!(root.group_children.len(), 1);
+        assert!(root.group_children["a"].overview_lod);
+    }
+    let mut now = 1.0;
+    settle(&mut world, &scene, &mut now, Quality::Low);
+    scene.viewport.zoom = 8.0;
+    settle(&mut world, &scene, &mut now, Quality::High);
+}
+
+#[test]
+fn group_without_declaration_stays_high() {
+    let (scene, resources) = group_film_set_fixture(false, 0.05);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    let root = &world.resource::<ModelVisuals>().roots["film"];
+    assert!(!root.overview_lod);
+    assert_eq!(root.quality, Quality::High);
+}
+
+/// 合批回归用片场：单个 binding 下 `parts` 个同材质球体，binding 带非零摆放。
+fn group_badge_batch_fixture(parts: usize, binding_x: f32) -> (Scene, ModelAssets) {
+    let mut ops = vec![serde_json::json!({"t":"group","id":"1:a"})];
+    for i in 0..parts {
+        ops.push(serde_json::json!({"t":"sphere","id":format!("1:a4:s{i}"),"parent":"1:a","radius":1,"color":"#ffffff"}));
+    }
+    let snapshot: ModelSnapshot = serde_json::from_value(serde_json::json!({
+        "sceneVersion": "woohaa-model-scene-ir-v2", "signature": format!("group-batch-{parts}"), "extent": 12, "ops": ops
+    }))
+    .unwrap();
+    let mut node: GraphNode = serde_json::from_value(serde_json::json!({
+        "id": "film", "type": "group", "x": 0, "y": 0, "width": 400, "height": 300,
+        "group": {"title":"","memberCount":1,"outputCapableLeafCount":0,"badgeScale":3,
+                  "geometryQuality":"overview-primitives-v1"}
+    }))
+    .unwrap();
+    node.model = Some(reference_for(&snapshot, ModelPlacement::default()));
+    let reference = node.model.as_ref().unwrap().clone();
+    let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
+    let mut scene = scene_with(&node, Some(reference));
+    scene.viewport.zoom = 0.05;
+    scene.surface = Some(surface(1.0));
+    scene.film_set_groups = vec![serde_json::from_value(serde_json::json!({
+        "schemaVersion": "woohaa-film-set-group-render-v1",
+        "ownerId": "film",
+        "badgeOrigin": {"x": 200.0, "y": 300.0},
+        "bindings": [{
+            "bindingId": "a", "sourceNodeId": "source", "kind": "model3d", "contentKey": "model3d:v1",
+            "transform": {"x": binding_x, "y": 0.0, "z": 0.0, "yaw": 0.0, "scale": 1.0}, "visible": true
+        }]
+    }))
+    .unwrap()];
+    (scene, resources)
+}
+
+/// 多 binding 的片场 ops：每个 binding 各指定数量个同材质球体。
+fn group_badge_ops(bindings: &[(&str, usize)]) -> Vec<serde_json::Value> {
+    let mut ops = Vec::new();
+    for (binding, parts) in bindings {
+        let prefix = binding.len();
+        ops.push(serde_json::json!({"t":"group","id":format!("{prefix}:{binding}")}));
+        for i in 0..*parts {
+            ops.push(serde_json::json!({
+                "t":"sphere","id":format!("{prefix}:{binding}4:s{i}"),
+                "parent":format!("{prefix}:{binding}"),"radius":1,"color":"#ffffff"
+            }));
+        }
+    }
+    ops
+}
+
+/// 多 binding 片场：每个 binding 各 `parts` 个同材质球体，binding 摆放沿 x 递增。
+fn group_badge_multi_binding_fixture(bindings: &[&str], parts: usize) -> (Scene, ModelAssets) {
+    let counts: Vec<_> = bindings.iter().map(|binding| (*binding, parts)).collect();
+    let ops = group_badge_ops(&counts);
+    let snapshot: ModelSnapshot = serde_json::from_value(serde_json::json!({
+        "sceneVersion": "woohaa-model-scene-ir-v2", "signature": "group-batch-multi", "extent": 12, "ops": ops
+    }))
+    .unwrap();
+    let mut node: GraphNode = serde_json::from_value(serde_json::json!({
+        "id": "film", "type": "group", "x": 0, "y": 0, "width": 400, "height": 300,
+        "group": {"title":"","memberCount":1,"outputCapableLeafCount":0,"badgeScale":3,
+                  "geometryQuality":"overview-primitives-v1"}
+    }))
+    .unwrap();
+    node.model = Some(reference_for(&snapshot, ModelPlacement::default()));
+    let reference = node.model.as_ref().unwrap().clone();
+    let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
+    let mut scene = scene_with(&node, Some(reference));
+    scene.viewport.zoom = 0.05;
+    scene.surface = Some(surface(1.0));
+    let bindings: Vec<_> = bindings
+        .iter()
+        .enumerate()
+        .map(|(index, id)| {
+            serde_json::json!({
+                "bindingId": id, "sourceNodeId": format!("source-{id}"), "kind": "model3d",
+                "contentKey": "model3d:v1",
+                "transform": {"x": index as f32 * 4.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "scale": 1.0},
+                "visible": true
+            })
+        })
+        .collect();
+    scene.film_set_groups = vec![serde_json::from_value(serde_json::json!({
+        "schemaVersion": "woohaa-film-set-group-render-v1",
+        "ownerId": "film",
+        "badgeOrigin": {"x": 200.0, "y": 300.0},
+        "bindings": bindings
+    }))
+    .unwrap()];
+    (scene, resources)
+}
+
+/// draw call 代理：多个 binding 的同材质球体应合成「每 binding 一个批次」，而不是逐部件。
+#[test]
+fn group_badge_draw_call_proxy_is_one_batch_per_binding() {
+    let (scene, resources) = group_badge_multi_binding_fixture(&["a", "b", "c"], 40);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    let root = &world.resource::<ModelVisuals>().roots["film"];
+    assert_eq!(root.batches.len(), 3, "每个 binding 各一个同材质批次");
+    assert_eq!(root.part_batches.len(), 120);
+    assert!(root.geometries.is_empty(), "合批后不再逐部件提交");
+    for binding in ["a", "b", "c"] {
+        let binding_root = root.part_entities[&format!("1:{binding}")];
+        let batch = root
+            .batches
+            .iter()
+            .find(|batch| {
+                world.entity(batch.entity).get::<ChildOf>().unwrap().parent() == binding_root
+            })
+            .unwrap_or_else(|| panic!("binding {binding} 的批次必须挂在它的根实体下"));
+        assert_eq!(batch.source.specs.len(), 40);
+    }
+    // 主通道 Mesh3d 实体数 = 实际提交的绘制实体数（3 批），远小于 120 个部件。
+    let mesh_entities = world
+        .iter_entities()
+        .filter(|entity| entity.contains::<Mesh3d>())
+        .count();
+    assert_eq!(mesh_entities, 3);
+
+    // 诊断字段是真实 GPU 上 draw call 变化的 CPU 代理，必须如实反映徽标内的批次。
+    let meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
+    let materials = world.remove_resource::<Assets<StandardMaterial>>().unwrap();
+    let models = world.resource::<ModelVisuals>();
+    let budget: serde_json::Value =
+        serde_json::from_str(&models.budget_json(&meshes, &materials)).unwrap();
+    world.insert_resource(meshes);
+    world.insert_resource(materials);
+    assert_eq!(budget["staticBatches"], 3);
+    assert_eq!(budget["batchedParts"], 120);
+    let root = &budget["overviewLod"]["roots"][0];
+    assert_eq!(root["batches"], 3);
+    assert_eq!(root["batchedParts"], 120);
+    assert_eq!(root["unbatchedParts"], 0);
+}
+
+/// 单个 binding 内容变化时只重建该 binding：其它 binding 的批次仍由 owner 持有且实体有效。
+#[test]
+fn unrelated_binding_rebuild_keeps_other_binding_batches() {
+    let (mut scene, mut resources) = group_badge_multi_binding_fixture(&["a", "b"], 10);
+    let key = scene.nodes[0].model.as_ref().unwrap().resource_key.clone();
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    let a_root = world.resource::<ModelVisuals>().roots["film"].part_entities["1:a"];
+    let a_batch = world
+        .resource::<ModelVisuals>()
+        .roots["film"]
+        .batches
+        .iter()
+        .find(|batch| {
+            world.entity(batch.entity).get::<ChildOf>().unwrap().parent() == a_root
+        })
+        .map(|batch| batch.entity)
+        .expect("binding a 批次");
+
+    // 只有 binding b 的内容变化（a 的 ops 逐字节不变）。
+    let ops = group_badge_ops(&[("a", 10), ("b", 11)]);
+    let replacement: ModelSnapshot = serde_json::from_value(serde_json::json!({
+        "sceneVersion": "woohaa-model-scene-ir-v2", "signature": "group-batch-multi-v2",
+        "extent": 12, "ops": ops
+    }))
+    .unwrap();
+    resources.insert(key.clone(), Arc::new(replacement));
+    run_sync(&mut world, &scene, &resources);
+
+    let root = &world.resource::<ModelVisuals>().roots["film"];
+    assert_eq!(root.batches.len(), 2, "a 的批次不能被 b 的重建挤掉");
+    assert_eq!(root.part_batches.len(), 21);
+    assert!(root.batches.iter().any(|batch| batch.entity == a_batch));
+    assert!(
+        world.get_entity(a_batch).is_ok(),
+        "未变化 binding 的批次实体必须保留"
+    );
+
+    // 移除 binding b：只摘除 b 的批次条目与实体，a 仍保留。
+    let b_root = world.resource::<ModelVisuals>().roots["film"].part_entities["1:b"];
+    let b_batch = world
+        .resource::<ModelVisuals>()
+        .roots["film"]
+        .batches
+        .iter()
+        .find(|batch| batch.entity != a_batch)
+        .map(|batch| batch.entity)
+        .expect("binding b 批次");
+    assert_eq!(world.entity(b_batch).get::<ChildOf>().unwrap().parent(), b_root);
+    let ops = group_badge_ops(&[("a", 10)]);
+    let replacement: ModelSnapshot = serde_json::from_value(serde_json::json!({
+        "sceneVersion": "woohaa-model-scene-ir-v2", "signature": "group-batch-multi-v3",
+        "extent": 12, "ops": ops
+    }))
+    .unwrap();
+    resources.insert(key.clone(), Arc::new(replacement));
+    run_sync(&mut world, &scene, &resources);
+    let root = &world.resource::<ModelVisuals>().roots["film"];
+    assert_eq!(root.batches.len(), 1);
+    assert_eq!(root.part_batches.len(), 10);
+    assert!(root.batches.iter().any(|batch| batch.entity == a_batch));
+    assert!(world.get_entity(a_batch).is_ok());
+    assert!(world.get_entity(b_batch).is_err(), "移除的 binding 批次必须销毁");
+}
+
+/// 批量大小是 draw call 的 CPU 代理：同材质部件必须收进一个批次实体，且批次仍挂在
+/// binding 根实体下（运行时摆放/显隐写在那一层，不能被平铺到子根）。
+#[test]
+fn group_badge_batches_same_material_parts_under_binding_root() {
+    let (mut scene, resources) = group_badge_batch_fixture(12, 3.0);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    let binding_root = {
+        let root = &world.resource::<ModelVisuals>().roots["film"];
+        assert_eq!(root.batches.len(), 1, "12 个同材质球应合成一个批次");
+        assert_eq!(root.part_batches.len(), 12);
+        assert!(root.geometries.is_empty(), "合批后不再逐部件提交");
+        let binding_root = root.part_entities["1:a"];
+        let batch_entity = root.batches[0].entity;
+        assert_eq!(
+            world.entity(batch_entity).get::<ChildOf>().unwrap().parent(),
+            binding_root,
+            "批次必须挂在 binding 根实体下"
+        );
+        binding_root
+    };
+
+    // 运行时摆放写到 binding 根；批次作为子实体继承同一 transform/可见性。
+    let mut models = world.remove_resource::<ModelVisuals>().unwrap();
+    let mut commands = world.commands();
+    crate::model3d::item_placement::sync(&mut commands, &mut models, &scene);
+    world.flush();
+    world.insert_resource(models);
+    assert_eq!(
+        world.get::<Transform>(binding_root).unwrap().translation.x,
+        3.0
+    );
+    assert_eq!(
+        *world.get::<Visibility>(binding_root).unwrap(),
+        Visibility::Inherited
+    );
+
+    // 隐藏 binding：写在 binding 根上，批次作为子实体随层级一起不可见。
+    scene.film_set_groups[0].bindings[0].visible = false;
+    let mut models = world.remove_resource::<ModelVisuals>().unwrap();
+    let mut commands = world.commands();
+    crate::model3d::item_placement::sync(&mut commands, &mut models, &scene);
+    world.flush();
+    world.insert_resource(models);
+    assert_eq!(
+        *world.get::<Visibility>(binding_root).unwrap(),
+        Visibility::Hidden
+    );
+}
+
+/// 片场 group 的 hover 预览必须保留 authored 层级：总览合批会把只做平移的父级组
+/// 平铺到 binding 根，导致 `apply_motion_playback` 写到组实体上的旋转没有可见几何。
+/// （回归：hover 镜头节点只看到镜头环绕，聚焦后人物四肢才动。）
+#[test]
+fn group_part_motion_playback_unbatches_binding_hierarchy() {
+    let snapshot: ModelSnapshot = serde_json::from_value(serde_json::json!({
+        "sceneVersion":"woohaa-model-scene-ir-v2", "signature":"group-motion-hierarchy", "extent":12,
+        "ops":[
+            {"t":"group","id":"1:a"},
+            {"t":"group","id":"1:a4:root","parent":"1:a","position":[0,0,0]},
+            {"t":"group","id":"1:a5:torso","parent":"1:a4:root","position":[0,1,0]},
+            {"t":"box","id":"1:a3:arm","parent":"1:a5:torso","position":[0,-0.5,0],
+             "size":[0.2,1,0.2],"color":"#ffffff"}
+        ]
+    }))
+    .unwrap();
+    let mut node: GraphNode = serde_json::from_value(serde_json::json!({
+        "id":"film", "type":"group", "x":0, "y":0, "width":400, "height":300,
+        "group": {"title":"", "memberCount":1, "outputCapableLeafCount":0, "badgeScale":3,
+                  "geometryQuality":"overview-primitives-v1"}
+    }))
+    .unwrap();
+    node.model = Some(reference_for(&snapshot, ModelPlacement::default()));
+    let reference = node.model.as_ref().unwrap().clone();
+    let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
+    let mut scene = scene_with(&node, Some(reference));
+    scene.viewport.zoom = 0.05;
+    scene.surface = Some(surface(1.0));
+    scene.film_set_groups = vec![serde_json::from_value(serde_json::json!({
+        "schemaVersion":"woohaa-film-set-group-render-v1",
+        "ownerId":"film",
+        "badgeOrigin":{"x":200.0,"y":300.0},
+        "bindings":[{
+            "bindingId":"a", "sourceNodeId":"source", "kind":"model3d", "contentKey":"model3d:v1",
+            "transform":{"x":0.0,"y":0.0,"z":0.0,"yaw":0.0,"scale":1.0}, "visible":true
+        }]
+    }))
+    .unwrap()];
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+
+    // 合批后手臂几何被平铺到 binding 根，torso 组实体没有子几何。
+    {
+        let models = world.resource::<ModelVisuals>();
+        let root = &models.roots["film"];
+        assert!(root.batched);
+        let arm = root.part_entities["1:a3:arm"];
+        let torso = root.part_entities["1:a5:torso"];
+        assert_ne!(
+            world.get::<ChildOf>(arm).expect("arm parent").parent(),
+            torso,
+            "flattened arm must leave the torso hierarchy"
+        );
+    }
+
+    // 带 object 动作的 hover 预览必须切换非合批表示，手臂重新挂回 torso。
+    scene.animation_playback = Some(serde_json::from_value(serde_json::json!({
+        "clipId":"clip", "sourceIdentity":"s", "generation":1,
+        "viewMode":"shot-node-preview", "targetPreviewNodeId":"preview", "nodeId":"film",
+        "version":"woohaa-motion-ir-v1", "time":0.5, "duration":4, "looped":true, "playing":true,
+        "initialCamera":{"aspect":"16:9","azimuth":0,"elevation":0.4,"distance":5,"focusOffset":[0,0,0]},
+        "cameraMotion":[],
+        "objects":[{
+            "itemId":"a",
+            "playback":{"startTime":0,"duration":4,"timeScale":1,"loop":true},
+            "partIds":{"root":"1:a4:root","torso":"1:a5:torso"},
+            "modelMotion":[{"targetId":"1:a5:torso","motion":{"kind":"rotate","axis":"y","speed":1}}]
+        }]
+    }))
+    .unwrap());
+    run_sync(&mut world, &scene, &resources);
+    let models = world.resource::<ModelVisuals>();
+    let root = &models.roots["film"];
+    assert!(!root.batched, "带 object 动作的 hover 预览必须切换非合批表示");
+    assert_eq!(
+        world
+            .get::<ChildOf>(root.part_entities["1:a3:arm"])
+            .expect("arm parent")
+            .parent(),
+        root.part_entities["1:a5:torso"],
+        "非合批表示必须保留 authored torso 层级"
+    );
+}
+
+/// 进入模型聚焦/对象编辑时恢复逐部件表示，退出后重新合批（LOD 发布与动画替换都要求
+/// 部件索引与批次归属一致）。
+#[test]
+fn group_badge_rebuilds_between_batched_and_focused_representations() {
+    let (mut scene, resources) = group_badge_batch_fixture(12, 0.0);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].batches.len(),
+        1
+    );
+
+    scene.model_focus = serde_json::from_value(serde_json::json!({
+        "version":"woohaa-model-focus-v1","nodeId":"film","target":[0,0,0],
+        "yaw":0,"pitch":0,"distance":10,"fov":0.87
+    }))
+    .unwrap();
+    run_sync(&mut world, &scene, &resources);
+    {
+        let root = &world.resource::<ModelVisuals>().roots["film"];
+        assert!(root.batches.is_empty(), "聚焦时必须逐部件提交");
+        assert!(root.part_batches.is_empty());
+        assert_eq!(root.geometries.len(), 12);
+        assert_eq!(root.part_entities.len(), 13, "binding 根 + 12 个部件");
+    }
+
+    scene.model_focus = None;
+    run_sync(&mut world, &scene, &resources);
+    let root = &world.resource::<ModelVisuals>().roots["film"];
+    assert_eq!(root.batches.len(), 1, "退出聚焦后重新合批");
+    assert_eq!(root.part_batches.len(), 12);
+    assert!(root.geometries.is_empty());
+}
+
+/// 总览切档必须同时重建批次几何，而不是只更新逐部件实体。
+#[test]
+fn group_badge_batches_follow_overview_quality_changes() {
+    let (mut scene, resources) = group_badge_batch_fixture(12, 0.0);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    let mut now = 1.0;
+    settle(&mut world, &scene, &mut now, Quality::Low);
+    let low = world.resource::<ModelVisuals>().roots["film"].batches[0]
+        .asset
+        .handle
+        .clone();
+    scene.viewport.zoom = 8.0;
+    settle(&mut world, &scene, &mut now, Quality::High);
+    let high = world.resource::<ModelVisuals>().roots["film"].batches[0]
+        .asset
+        .handle
+        .clone();
+    assert_ne!(low.id(), high.id(), "切档必须替换批次几何");
 }

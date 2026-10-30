@@ -132,6 +132,22 @@ fn active_model(world: &World) -> Option<String> {
         .clone()
 }
 
+#[test]
+fn hover_only_disables_overview_cache_for_animated_roots() {
+    let mut world = world_with_resources();
+    let node = model_node();
+    for (snapshot, animated) in [(sphere_snapshot("static"), false), (animated_snapshot("animated", crate::protocol::MODEL_SCENE_IR_V2), true)] {
+        let reference = reference_for(&snapshot, ModelPlacement::default());
+        let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
+        let mut scene = scene_with(&node, Some(reference));
+        scene.hover = Some(hover_node("m"));
+        run_sync(&mut world, &scene, &resources);
+        let models = world.resource::<super::super::runtime::ModelVisuals>();
+        assert!(models.is_active_model("m"));
+        assert_eq!(models.is_active_animated_model("m"), animated);
+    }
+}
+
 /// 记录动画实体并在 spawn 时默认 stopped/reset；释放后无陈旧引用。
 #[test]
 fn animated_model_records_and_releases_animation_entities() {

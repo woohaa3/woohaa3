@@ -1,3 +1,4 @@
+import { COMPOSITE_ASSET_SCOPE_AXIS_Y } from "./render-scene/composite-asset-scope.js";
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 import { normalizeCanvas } from "./domain/normalization.js";
@@ -64,14 +65,14 @@ describe("canvas ground anchor", () => {
   });
 
   it("uses the visible ground diamond bottom for composite assets, not the content rect", () => {
-    // 地面菱形外包框半高 = AXIS_Y × (hx + hz) = 0.35355339 × 200。
+    // 地面菱形外包框半高使用当前相机 pitch 的投影轴。
     expect(
       canvasGroundAnchor({
         y: 0,
         height: 300,
         compositeAsset: { scopeGround: { cx: 0, cy: 250, hx: 100, hz: 100 } },
       }),
-    ).toBeCloseTo(250 + 0.35355339 * 200, 5);
+    ).toBeCloseTo(250 + COMPOSITE_ASSET_SCOPE_AXIS_Y * 200, 5);
     // rect 形状（无 scopeGround）仍用矩形底边。
     expect(
       canvasGroundAnchor({ y: 0, height: 300, compositeAsset: {} }),
@@ -129,7 +130,7 @@ describe("2D container emission order", () => {
 
   it("orders film sets by visible ground bottom, not by the content fit rect", () => {
     // 用户画布里的重叠对：导演场矩形底边 3227.25、地面底角约 3070.25；
-    // 小复合资产矩形底边 3110.75、地面底角约 3078.25。按矩形大场在前，按地面小场在前。
+    // 小复合资产矩形底边 3110.75、地面底角约 3078.25。按矩形小场在前，按地面大场在前。
     const { ids } = scene([
       {
         id: "stage",

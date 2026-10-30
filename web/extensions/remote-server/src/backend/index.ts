@@ -19,6 +19,7 @@ import type {
   ApplicationBackendDiagnosticEntry,
   ApplicationExtensionRequestContext,
   CanvasAccess,
+  CanvasUpstreamDeleteResult,
   CanvasUpstreamLink,
   CanvasUpstreamProvider
 } from "@woohaa3/contracts";
@@ -510,7 +511,9 @@ function accessFromCanvas(canvas: Record<string, unknown>): CanvasAccess | undef
   if (actions.length === 0) return undefined;
   return {
     canRead: actions.includes("canvas.read"),
-    canWrite: actions.includes("canvas.write")
+    canWrite: actions.includes("canvas.write"),
+    // 删除是作者动作：服务端 `DeleteCanvas` 按 `canvas.share` 判定，editor 可写但不可删。
+    canDelete: actions.includes("canvas.share")
   };
 }
 
@@ -872,6 +875,76 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
       };
 
       /**
+       * 远端删除一张画布（画布切换器的「删除」）。
+       *
+       * 只删**属于本来源**的画布：远端目录里有这个 id，或它是用户显式启用的待同步画布。
+       * 否则返回 `skipped`，让宿主按纯本地删除继续——本机画布没上传过，远端没有可删的东西。
+       *
+       * 失败区分「能回答」与「没答案」：`permission_denied` 是明确的没有删除权（作者以外），
+       * `not_found` 是远端已经不在了（删除幂等）；其余（未连接、超时、5xx）返回 `unavailable`，
+       * 宿主据此中止删除，不留下「本机删了、远端还在」的半删状态。
+       */
+      const deleteRemoteCanvas = async (canvasId: string): Promise<CanvasUpstreamDeleteResult> => {
+        const session = await sessionSource.current();
+        if (!session) return "skipped";
+        if (!isBoundedId(canvasId)) return "skipped";
+        const scope = syncScopeOf(session);
+        const ids = await remoteCanvasIds(session);
+        const remoteOwned = ids.has(canvasId) ? true : await syncPending.has(scope, canvasId).catch(() => false);
+        if (!remoteOwned) return "skipped";
+        const deleted = await callConnect<Record<string, never>>(
+          fetchImpl,
+          session.serverUrl,
+          connectProcedurePath(CANVAS_SERVICE, "DeleteCanvas"),
+          { canvasId },
+          { token: session.token }
+        );
+        if (!deleted.ok) {
+          if (deleted.code === "permission_denied") return "forbidden";
+          if (deleted.code === "not_found") {
+            await forgetRemoteCanvas(session, canvasId);
+            return "not-found";
+          }
+          log({
+            event: "remote-canvas-delete-failed",
+            level: "warn",
+            code: deleted.code,
+            reason: "远端删除画布失败",
+            serverUrl: session.serverUrl,
+            status: deleted.status
+          });
+          return "unavailable";
+        }
+        await forgetRemoteCanvas(session, canvasId);
+        log({ event: "remote-canvas-deleted", level: "info", serverUrl: session.serverUrl });
+        return "deleted";
+      };
+
+      /**
+       * 忘掉一张已在远端删除的画布：目录缓存与待同步集合都要清。
+       *
+       * 只清缓存不够：待同步集合会让重启后的 resolve 继续把它当「用户启用过」而重新上传。
+       * 写不进存储只记诊断——远端已经删了，本地标记多留一会儿不会把它复活。
+       */
+      const forgetRemoteCanvas = async (session: RemoteSession, canvasId: string): Promise<void> => {
+        const scope = syncScopeOf(session);
+        if (remoteCatalog !== null && remoteCatalog.scopeKey === catalogScopeKey(scope)) {
+          remoteCatalog.ids.delete(canvasId);
+        }
+        try {
+          await syncPending.remove(scope, canvasId);
+        } catch {
+          log({
+            event: "remote-canvas-delete-marker-failed",
+            level: "warn",
+            code: "storage",
+            reason: "清理待同步标记失败",
+            serverUrl: session.serverUrl
+          });
+        }
+      };
+
+      /**
        * 把已登录会话交给画布同步上游（capability 交接面）。
        *
        * 这是「一键接入」真正生效的一步：只登录不改同步链路，用户会以为接上了却什么都没变。
@@ -1080,6 +1153,10 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
             ...(createdAt === null ? {} : { createdAt }),
             ...(access === undefined ? {} : { access })
           };
+        },
+        /** 远端删除（画布切换器）：归属判定与错误口径见 `deleteRemoteCanvas`。 */
+        deleteCanvas(canvasId: string): Promise<CanvasUpstreamDeleteResult> {
+          return deleteRemoteCanvas(canvasId);
         }
       };
       { const undo = ctx.capabilities!.register(canvasUpstreamCapabilityId(REMOTE_SERVER_EXTENSION_ID), upstreamProvider); ctx.effect(() => undo); }

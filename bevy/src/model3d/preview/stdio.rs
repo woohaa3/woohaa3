@@ -48,7 +48,10 @@ pub fn render_request_json(json: &str) -> (String, bool, Option<String>, Option<
 pub fn run_stdio() -> std::io::Result<()> {
     use std::io::{Read, Write};
 
-    eprintln!("model-renderer 就绪（{}）", crate::renderer_protocol::RENDERER_PROTOCOL_VERSION);
+    eprintln!(
+        "model-renderer 就绪（{}）",
+        crate::renderer_protocol::RENDERER_PROTOCOL_VERSION
+    );
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut input = stdin.lock();

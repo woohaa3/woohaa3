@@ -16,7 +16,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use crate::recording_encode::{sha256_hex, EncodeFailure, EncodeStage};
+use crate::recording_encode::{EncodeFailure, EncodeStage, sha256_hex};
 
 /// 单块上限（与协议常量一致）。
 pub const MAX_CHUNK_BYTES: usize = 1024 * 1024;
@@ -46,7 +46,10 @@ pub struct ResourceFailure {
 
 impl ResourceFailure {
     fn new(code: &'static str, message: impl Into<String>) -> Self {
-        Self { code, message: message.into() }
+        Self {
+            code,
+            message: message.into(),
+        }
     }
 
     /// 映射到 proto 阶段：素材接收属于 `RESOURCE_FETCH`。
@@ -96,12 +99,18 @@ impl ResourceReceiver {
         let mut map = BTreeMap::new();
         for declaration in declarations {
             if declaration.resource_id.trim().is_empty() {
-                return Err(ResourceFailure::new("recording-resource-invalid", "资源 id 不能为空"));
+                return Err(ResourceFailure::new(
+                    "recording-resource-invalid",
+                    "资源 id 不能为空",
+                ));
             }
             if !is_sha256_hex(&declaration.checksum) {
                 return Err(ResourceFailure::new(
                     "recording-resource-invalid",
-                    format!("资源 {} 的 checksum 不是 64 位 hex", declaration.resource_id),
+                    format!(
+                        "资源 {} 的 checksum 不是 64 位 hex",
+                        declaration.resource_id
+                    ),
                 ));
             }
             if declaration.size_bytes == 0 || declaration.size_bytes > MAX_RESOURCE_BYTES {
@@ -157,18 +166,17 @@ impl ResourceReceiver {
         last: bool,
     ) -> Result<(), ResourceFailure> {
         if self.finished {
-            return Err(ResourceFailure::new("recording-resource-closed", "接收器已结束"));
+            return Err(ResourceFailure::new(
+                "recording-resource-closed",
+                "接收器已结束",
+            ));
         }
-        let declaration = self
-            .declarations
-            .get(resource_id)
-            .cloned()
-            .ok_or_else(|| {
-                ResourceFailure::new(
-                    "recording-resource-unknown",
-                    format!("快照未声明资源 {resource_id}"),
-                )
-            })?;
+        let declaration = self.declarations.get(resource_id).cloned().ok_or_else(|| {
+            ResourceFailure::new(
+                "recording-resource-unknown",
+                format!("快照未声明资源 {resource_id}"),
+            )
+        })?;
         if data.len() > MAX_CHUNK_BYTES {
             return Err(ResourceFailure::new(
                 "recording-resource-chunk-too-large",
@@ -241,11 +249,13 @@ impl ResourceReceiver {
             );
         }
 
-        let state = self.in_progress.get_mut(resource_id).expect("created above");
-        state
-            .writer
-            .write_all(data)
-            .map_err(|error| ResourceFailure::new("recording-resource-write-failed", error.to_string()))?;
+        let state = self
+            .in_progress
+            .get_mut(resource_id)
+            .expect("created above");
+        state.writer.write_all(data).map_err(|error| {
+            ResourceFailure::new("recording-resource-write-failed", error.to_string())
+        })?;
         state.bytes.extend_from_slice(data);
         state.expected_offset += data.len() as u64;
         self.total_bytes += data.len() as u64;
@@ -263,16 +273,18 @@ impl ResourceReceiver {
                 format!("资源 {resource_id} 没有在途数据"),
             ));
         };
-        state
-            .writer
-            .flush()
-            .map_err(|error| ResourceFailure::new("recording-resource-write-failed", error.to_string()))?;
+        state.writer.flush().map_err(|error| {
+            ResourceFailure::new("recording-resource-write-failed", error.to_string())
+        })?;
         let size = state.bytes.len() as u64;
         if size != state.declaration.size_bytes {
             let _ = std::fs::remove_file(&state.path);
             return Err(ResourceFailure::new(
                 "recording-resource-size-mismatch",
-                format!("资源 {resource_id} 收到 {size} 字节，声明 {}", state.declaration.size_bytes),
+                format!(
+                    "资源 {resource_id} 收到 {size} 字节，声明 {}",
+                    state.declaration.size_bytes
+                ),
             ));
         }
         let digest = sha256_hex(&state.bytes);
@@ -476,10 +488,17 @@ mod tests {
     fn receives_a_resource_in_contiguous_chunks() {
         let dir = temp_dir("contiguous");
         let bytes = vec![7u8; 2_500];
-        let mut receiver = ResourceReceiver::new(&dir, [declaration("clip:video", &bytes)]).expect("new");
-        receiver.accept_chunk("clip:video", 0, &bytes[..1_024], false).expect("chunk 1");
-        receiver.accept_chunk("clip:video", 1_024, &bytes[1_024..2_048], false).expect("chunk 2");
-        receiver.accept_chunk("clip:video", 2_048, &bytes[2_048..], true).expect("chunk 3");
+        let mut receiver =
+            ResourceReceiver::new(&dir, [declaration("clip:video", &bytes)]).expect("new");
+        receiver
+            .accept_chunk("clip:video", 0, &bytes[..1_024], false)
+            .expect("chunk 1");
+        receiver
+            .accept_chunk("clip:video", 1_024, &bytes[1_024..2_048], false)
+            .expect("chunk 2");
+        receiver
+            .accept_chunk("clip:video", 2_048, &bytes[2_048..], true)
+            .expect("chunk 3");
         let resources = receiver.finish().expect("complete");
         assert_eq!(resources.len(), 1);
         assert_eq!(resources[0].size_bytes, 2_500);
@@ -495,14 +514,22 @@ mod tests {
         let bytes = vec![1u8; 64];
         let mut receiver = ResourceReceiver::new(&dir, [declaration("r", &bytes)]).expect("new");
 
-        let error = receiver.accept_chunk("r", 32, &bytes[32..], false).expect_err("first offset");
+        let error = receiver
+            .accept_chunk("r", 32, &bytes[32..], false)
+            .expect_err("first offset");
         assert_eq!(error.code, "recording-resource-out-of-order");
 
-        receiver.accept_chunk("r", 0, &bytes[..16], false).expect("first");
-        let error = receiver.accept_chunk("r", 32, &bytes[32..], false).expect_err("gap");
+        receiver
+            .accept_chunk("r", 0, &bytes[..16], false)
+            .expect("first");
+        let error = receiver
+            .accept_chunk("r", 32, &bytes[32..], false)
+            .expect_err("gap");
         assert_eq!(error.code, "recording-resource-out-of-order");
         // 重复发送同一块也不接受。
-        let error = receiver.accept_chunk("r", 0, &bytes[..16], false).expect_err("duplicate offset");
+        let error = receiver
+            .accept_chunk("r", 0, &bytes[..16], false)
+            .expect_err("duplicate offset");
         assert_eq!(error.code, "recording-resource-out-of-order");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -512,11 +539,15 @@ mod tests {
         let dir = temp_dir("unknown");
         let bytes = vec![2u8; 8];
         let mut receiver = ResourceReceiver::new(&dir, [declaration("r", &bytes)]).expect("new");
-        let error = receiver.accept_chunk("other", 0, &bytes, true).expect_err("unknown");
+        let error = receiver
+            .accept_chunk("other", 0, &bytes, true)
+            .expect_err("unknown");
         assert_eq!(error.code, "recording-resource-unknown");
 
         let big = vec![0u8; MAX_CHUNK_BYTES + 1];
-        let error = receiver.accept_chunk("r", 0, &big, false).expect_err("oversized chunk");
+        let error = receiver
+            .accept_chunk("r", 0, &big, false)
+            .expect_err("oversized chunk");
         assert_eq!(error.code, "recording-resource-chunk-too-large");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -528,7 +559,9 @@ mod tests {
         let mut bad = declaration("r", &bytes);
         bad.checksum = "0".repeat(64);
         let mut receiver = ResourceReceiver::new(&dir, [bad]).expect("new");
-        let error = receiver.accept_chunk("r", 0, &bytes, true).expect_err("checksum");
+        let error = receiver
+            .accept_chunk("r", 0, &bytes, true)
+            .expect_err("checksum");
         assert_eq!(error.code, "recording-resource-checksum-mismatch");
         // 失败后不应留下私有源文件。
         let leftovers: Vec<_> = std::fs::read_dir(&dir).expect("dir").flatten().collect();
@@ -544,14 +577,18 @@ mod tests {
         smaller.size_bytes = 32;
         let mut receiver = ResourceReceiver::new(&dir, [smaller]).expect("new");
         // 声明比实际小：超预算在写入前拒绝。
-        let error = receiver.accept_chunk("r", 0, &bytes, true).expect_err("too large");
+        let error = receiver
+            .accept_chunk("r", 0, &bytes, true)
+            .expect_err("too large");
         assert_eq!(error.code, "recording-resource-too-large");
 
         // 声明比实际大：收尾时长度不符，删除私有文件。
         let mut larger = declaration("r", &bytes);
         larger.size_bytes = 128;
         let mut receiver = ResourceReceiver::new(&dir, [larger]).expect("new");
-        let error = receiver.accept_chunk("r", 0, &bytes, true).expect_err("short");
+        let error = receiver
+            .accept_chunk("r", 0, &bytes, true)
+            .expect_err("short");
         assert_eq!(error.code, "recording-resource-size-mismatch");
         let leftovers: Vec<_> = std::fs::read_dir(&dir).expect("dir").flatten().collect();
         assert!(leftovers.is_empty(), "长度不符时必须删除私有文件");
@@ -596,13 +633,18 @@ mod tests {
         let dir = temp_dir("cancel");
         let bytes = vec![10u8; 32];
         let mut receiver = ResourceReceiver::new(&dir, [declaration("r", &bytes)]).expect("new");
-        receiver.accept_chunk("r", 0, &bytes[..16], false).expect("part");
+        receiver
+            .accept_chunk("r", 0, &bytes[..16], false)
+            .expect("part");
         receiver.cancel();
         let leftovers: Vec<_> = std::fs::read_dir(&dir).expect("dir").flatten().collect();
         assert!(leftovers.is_empty());
         // 取消后不再接受数据。
         assert_eq!(
-            receiver.accept_chunk("r", 16, &bytes[16..], true).expect_err("closed").code,
+            receiver
+                .accept_chunk("r", 16, &bytes[16..], true)
+                .expect_err("closed")
+                .code,
             "recording-resource-closed"
         );
         std::fs::remove_dir_all(&dir).ok();
@@ -613,7 +655,8 @@ mod tests {
         let dir = temp_dir("injection");
         // 恶意 resource id：内部序号命名，因此不会创建到目录外。
         let bytes = vec![11u8; 8];
-        let mut receiver = ResourceReceiver::new(&dir, [declaration("../../etc/passwd", &bytes)]).expect("new");
+        let mut receiver =
+            ResourceReceiver::new(&dir, [declaration("../../etc/passwd", &bytes)]).expect("new");
         receiver
             .accept_chunk("../../etc/passwd", 0, &bytes, true)
             .expect("received");
@@ -632,13 +675,17 @@ mod tests {
         let mut invalid = declaration("r", &[12u8; 8]);
         invalid.checksum = "xyz".into();
         assert_eq!(
-            ResourceReceiver::new(&dir, [invalid]).expect_err("checksum").code,
+            ResourceReceiver::new(&dir, [invalid])
+                .expect_err("checksum")
+                .code,
             "recording-resource-invalid"
         );
         let mut no_type = declaration("r", &[13u8; 8]);
         no_type.content_type = "video".into();
         assert_eq!(
-            ResourceReceiver::new(&dir, [no_type]).expect_err("content type").code,
+            ResourceReceiver::new(&dir, [no_type])
+                .expect_err("content type")
+                .code,
             "recording-resource-invalid"
         );
         std::fs::remove_dir_all(&dir).ok();

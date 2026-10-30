@@ -18,7 +18,9 @@
 //! - [`materials`]：material key 规范化与受控 PBR 构建。
 
 mod prepared_bounds;
-pub(crate) use prepared_bounds::{PreparedBounds, placed_local_aabb, placed_subtree_aabbs, placed_subtree_aabbs_counted};
+pub(crate) use prepared_bounds::{
+    PreparedBounds, placed_local_aabb, placed_subtree_aabbs, placed_subtree_aabbs_counted,
+};
 mod aabb;
 #[cfg(feature = "explicit-instancing")]
 pub(crate) use aabb::geometry_half_extents_and_center;

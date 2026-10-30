@@ -1,10 +1,10 @@
 //! Progress acknowledgments, never a claim that a GPU frame was presented.
+use bevy::platform::time::Instant;
 use bevy::{
     prelude::*,
     render::{Render, RenderApp, RenderSystems},
 };
 use std::cell::{Cell, RefCell};
-use bevy::platform::time::Instant;
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
 
@@ -28,7 +28,8 @@ impl Plugin for RuntimeHealthPlugin {
             render.add_systems(
                 Render,
                 (|work: Option<Res<crate::model_preview::render_work::RenderWork>>| {
-                    DRAW_CALLS_3D.with(|v| v.set(work.and_then(|work| work.draw_recording_calls())));
+                    DRAW_CALLS_3D
+                        .with(|v| v.set(work.and_then(|work| work.draw_recording_calls())));
                     RENDERS.with(|v| v.set(v.get().wrapping_add(1)));
                     RENDERED.with(|v| v.set(APPLIED.with(Cell::get)));
                     SAMPLES.with(|samples| {
@@ -64,7 +65,9 @@ pub fn runtime_health() -> String {
         crate::bridge::revision(),
         APPLIED.with(Cell::get),
         RENDERED.with(Cell::get),
-        DRAW_CALLS_3D.with(Cell::get).map_or_else(|| "null".to_owned(), |v| v.to_string())
+        DRAW_CALLS_3D
+            .with(Cell::get)
+            .map_or_else(|| "null".to_owned(), |v| v.to_string())
     )
 }
 
@@ -79,11 +82,19 @@ pub fn seed_runtime_generation(previous: u32) {
 pub fn benchmark_frames(enabled: Option<bool>) -> String {
     SAMPLES.with(|samples| {
         let mut samples = samples.borrow_mut();
-        if let Some(enabled) = enabled { samples.arm(enabled); MODEL_READY.with(|ready| ready.borrow_mut().clear()); }
+        if let Some(enabled) = enabled {
+            samples.arm(enabled);
+            MODEL_READY.with(|ready| ready.borrow_mut().clear());
+        }
         let (rows, dropped) = samples.drain();
-        let rows: Vec<_> = rows.iter().map(|row| serde_json::json!({
-            "atMs": row.at_ms, "generation": row.generation
-        })).collect();
+        let rows: Vec<_> = rows
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "atMs": row.at_ms, "generation": row.generation
+                })
+            })
+            .collect();
         serde_json::json!({"version":1,"dropped":dropped,"frames":rows}).to_string()
     })
 }

@@ -15,6 +15,7 @@ import { shotPreviewOwnershipOf } from "./film-set-shot-preview.js";
 import { managedNodeRelationOf } from "./managed-node.js";
 import type { FilmSetItem } from "./film-set-content.js";
 import type { FilmSetNodeData } from "./canvas-node-model.js";
+import type { StoredAsset } from "./domain/index.js";
 import { shotAspectValue } from "./film-set-shot-preview.js";
 
 /** 镜头参考来源预览的片场/镜头归属。 */
@@ -101,12 +102,18 @@ export function shotReferenceContentIdentity(input: {
   animation: FilmSetNodeData;
   clipId: string;
   profile?: ShotReferenceRecordProfile;
+  assets?: readonly StoredAsset[];
 }): string | null {
   const view = resolveFilmSetClip(input.animation, input.clipId);
   if (!view) return null;
   const profile = input.profile ?? DEFAULT_SHOT_REFERENCE_RECORD_PROFILE;
   const items = [...view.content.items]
-    .map(canonicalItemFields)
+    .map(item => {
+      const fields = canonicalItemFields(item);
+      if (item.kind !== "image" && item.kind !== "video") return fields;
+      const asset = input.assets?.find(candidate => candidate.id === item.assetId);
+      return asset ? { ...fields, assetVersion: [asset.metadata?.storageKey, asset.metadata?.checksum, asset.metadata?.contentType] } : fields;
+    })
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
   const tuple = [
     `film-set-shot-reference-v${SHOT_REFERENCE_CONTENT_VERSION}`,

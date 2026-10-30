@@ -127,9 +127,9 @@ export async function recordModelPlacementHistory(
     const record = command as { type?: unknown; nodeId?: unknown; value?: unknown };
     if (record.type !== "nodeData.patch" || typeof record.nodeId !== "string") continue;
     const value = record.value as Record<string, unknown> | undefined;
-    if (!value || value.modelPlacement === undefined) continue;
+    if (!value || (value.modelPlacement === undefined && value.filmSetGroup === undefined)) continue;
     const node = input.canvas.document.nodes.find((candidate) => candidate.id === record.nodeId);
-    if (!node || nodeHistoryKindForNodeType(node.type) !== "model") continue;
+    if (!node || nodeHistoryKindForNodeType(node.type, input.canvas.nodeData[node.id]) !== "model") continue;
     targets.add(record.nodeId);
   }
   for (const nodeId of targets) {

@@ -31,7 +31,7 @@ export function finalize(canvas: ServerCanvas, work: WorkingState, now: string):
 
   // 关键：经 domain 规范化，剥离 Blob/base64/函数等非 JSON 值、剪枝孤儿 nodeData，
   // 与 Web Store 的 `commitCanvas` 落到同一规范形态。
-  const normalized = normalizeCanvas(candidate);
+  const normalized = normalizeCanvas(candidate, { content: work.content });
 
   // 输入 mapping 生命周期收敛（change: add-reference-inputs-and-mentions，任务 2.1）：
   // 生成最终 document 后运行 reconciliation，使 edge 与稳定 slot 在同一提交内一致，

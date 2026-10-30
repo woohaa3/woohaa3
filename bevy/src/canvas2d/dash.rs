@@ -12,26 +12,56 @@ const DASH_LENGTH: f32 = 10.0;
 const DASH_GAP: f32 = 6.0;
 
 /// Preserve world-length dash spacing across sampled curve segments.
-pub(super) fn dashed_polyline(geometry: &mut Geometry, points: &[Vec2], border: f32, z: f32, color: u32) {
+pub(super) fn dashed_polyline(
+    geometry: &mut Geometry,
+    points: &[Vec2],
+    border: f32,
+    z: f32,
+    color: u32,
+) {
     dashed_polyline_with_phase(geometry, points, border, z, color, 0.);
 }
 
 /// Seed a branch from its join's distance along the main perimeter.
-pub(super) fn dashed_polyline_with_phase(geometry: &mut Geometry, points: &[Vec2], border: f32, z: f32, color: u32, distance: f32) {
+pub(super) fn dashed_polyline_with_phase(
+    geometry: &mut Geometry,
+    points: &[Vec2],
+    border: f32,
+    z: f32,
+    color: u32,
+    distance: f32,
+) {
     dashed_polyline_with_phase_alpha(geometry, points, border, z, color, distance, 1.);
 }
 
-pub(super) fn dashed_polyline_alpha(geometry: &mut Geometry, points: &[Vec2], border: f32, z: f32, color: u32, alpha: f32) {
+pub(super) fn dashed_polyline_alpha(
+    geometry: &mut Geometry,
+    points: &[Vec2],
+    border: f32,
+    z: f32,
+    color: u32,
+    alpha: f32,
+) {
     dashed_polyline_with_phase_alpha(geometry, points, border, z, color, 0., alpha);
 }
 
 #[allow(clippy::too_many_arguments)]
-fn dashed_polyline_with_phase_alpha(geometry: &mut Geometry, points: &[Vec2], border: f32, z: f32, color: u32, distance: f32, alpha: f32) {
+fn dashed_polyline_with_phase_alpha(
+    geometry: &mut Geometry,
+    points: &[Vec2],
+    border: f32,
+    z: f32,
+    color: u32,
+    distance: f32,
+    alpha: f32,
+) {
     let period = DASH_LENGTH + DASH_GAP;
     let mut phase = distance.rem_euclid(period);
     for pair in points.windows(2) {
         let length = pair[0].distance(pair[1]);
-        if !length.is_finite() || length <= 0.0001 { continue; }
+        if !length.is_finite() || length <= 0.0001 {
+            continue;
+        }
         let direction = (pair[1] - pair[0]) / length;
         let mut offset = 0.0;
         while length - offset > 0.0001 {
@@ -39,12 +69,22 @@ fn dashed_polyline_with_phase_alpha(geometry: &mut Geometry, points: &[Vec2], bo
             let boundary = if drawing { DASH_LENGTH } else { period };
             let step = (boundary - phase).min(length - offset);
             if drawing && step > 0.0001 {
-                geometry.line_alpha(pair[0] + direction * offset, pair[0] + direction * (offset + step), border, z, color, alpha);
+                geometry.line_alpha(
+                    pair[0] + direction * offset,
+                    pair[0] + direction * (offset + step),
+                    border,
+                    z,
+                    color,
+                    alpha,
+                );
             }
             offset += step;
             phase += step;
-            if phase >= period - 0.0001 { phase = 0.0; }
-            else if (phase - DASH_LENGTH).abs() < 0.0001 { phase = DASH_LENGTH; }
+            if phase >= period - 0.0001 {
+                phase = 0.0;
+            } else if (phase - DASH_LENGTH).abs() < 0.0001 {
+                phase = DASH_LENGTH;
+            }
         }
     }
 }
@@ -67,9 +107,15 @@ pub(crate) fn dashed_rounded_rect(
     // 四条直边：把可用长度按 dash+gap 切片。
     for (a, b) in [
         (Vec2::new(x + radius, y), Vec2::new(right - radius, y)),
-        (Vec2::new(x + radius, bottom), Vec2::new(right - radius, bottom)),
+        (
+            Vec2::new(x + radius, bottom),
+            Vec2::new(right - radius, bottom),
+        ),
         (Vec2::new(x, y + radius), Vec2::new(x, bottom - radius)),
-        (Vec2::new(right, y + radius), Vec2::new(right, bottom - radius)),
+        (
+            Vec2::new(right, y + radius),
+            Vec2::new(right, bottom - radius),
+        ),
     ] {
         dashed_line(geometry, a, b, border, z, color);
     }
@@ -100,7 +146,13 @@ pub(crate) fn dashed_rounded_rect(
 ///
 /// 只复用现有 `Geometry::line`；不新增材质或 renderer。`vertices` 按顺序闭合（末点连回首点），
 /// 每个 dash 段按全局弧长切片，跨顶点时被边自然裁开但相位连续。
-pub(crate) fn dashed_polygon(geometry: &mut Geometry, vertices: &[Vec2], border: f32, z: f32, color: u32) {
+pub(crate) fn dashed_polygon(
+    geometry: &mut Geometry,
+    vertices: &[Vec2],
+    border: f32,
+    z: f32,
+    color: u32,
+) {
     if vertices.len() < 2 {
         return;
     }
@@ -166,23 +218,57 @@ mod tests {
     #[test]
     fn curve_dashes_keep_length_across_sample_boundaries() {
         let mut geometry = Geometry::default();
-        dashed_polyline(&mut geometry, &[Vec2::ZERO, Vec2::new(5.,0.), Vec2::new(14.,0.), Vec2::new(30.,0.)], 1., 0., 0xffffff);
+        dashed_polyline(
+            &mut geometry,
+            &[
+                Vec2::ZERO,
+                Vec2::new(5., 0.),
+                Vec2::new(14., 0.),
+                Vec2::new(30., 0.),
+            ],
+            1.,
+            0.,
+            0xffffff,
+        );
         let mesh = geometry.build();
-        let Some(bevy::mesh::VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!("positions"); };
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions");
+        };
         assert!(points.iter().any(|p| p[0] == 0.));
         assert!(points.iter().any(|p| p[0] == 26.));
-        assert!(points.iter().all(|p| p[0] <= 10. || (p[0] >= 16. && p[0] <= 26.)));
+        assert!(
+            points
+                .iter()
+                .all(|p| p[0] <= 10. || (p[0] >= 16. && p[0] <= 26.))
+        );
     }
 
     #[test]
     fn branch_dashes_continue_the_parent_phase() {
         let mut geometry = Geometry::default();
-        dashed_polyline_with_phase(&mut geometry, &[Vec2::ZERO, Vec2::new(32.,0.)], 1., 0., 0xffffff, 11.);
+        dashed_polyline_with_phase(
+            &mut geometry,
+            &[Vec2::ZERO, Vec2::new(32., 0.)],
+            1.,
+            0.,
+            0xffffff,
+            11.,
+        );
         let mesh = geometry.build();
-        let Some(bevy::mesh::VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!("positions"); };
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions");
+        };
         assert!(points.iter().any(|p| p[0] == 5.));
         assert!(points.iter().any(|p| p[0] == 31.));
-        assert!(points.iter().all(|p| (5.0..=15.).contains(&p[0]) || (21.0..=31.).contains(&p[0])));
+        assert!(
+            points
+                .iter()
+                .all(|p| (5.0..=15.).contains(&p[0]) || (21.0..=31.).contains(&p[0]))
+        );
     }
 
     fn positions(geometry: Geometry) -> usize {
@@ -193,7 +279,17 @@ mod tests {
     #[test]
     fn dashed_rect_emits_multiple_segments() {
         let mut geometry = Geometry::default();
-        dashed_rounded_rect(&mut geometry, 0.0, 0.0, 100.0, 60.0, 8.0, 1.0, 0.0, 0xffffff);
+        dashed_rounded_rect(
+            &mut geometry,
+            0.0,
+            0.0,
+            100.0,
+            60.0,
+            8.0,
+            1.0,
+            0.0,
+            0xffffff,
+        );
         // 四条边各切成多段，顶点数远多于一个实心矩形。
         assert!(positions(geometry) > 100);
     }
