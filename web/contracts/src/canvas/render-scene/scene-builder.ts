@@ -24,10 +24,10 @@ import { prepareModelResource, type PreparedModelResource } from "../prepared-mo
 import { fnv1a64Hex } from "../content-hash.js";
 import { encodeFilmSetPartId, readFilmSetContent } from "../film-set-content.js";
 import type { ModelFocusProjection } from "../model-focus.js";
+import { filmSetGroupBadgePlacement } from "../model-focus/model-bounds.js";
 import { getGroupLayoutSizes } from "../domain/core/group-geometry.js";
 import { groupAppearanceModel } from "../group-appearance.js";
 import { hiddenByCollapsedGroups } from "../group-presentation.js";
-import { clampGroupBadgeScale } from "../group-badge.js";
 import { canvasGroundAnchor, compareCanvasGroundOrder } from "../ground-anchor.js";
 import { defaultAppTheme, validateAppThemePreset, type AppThemeSnapshot } from "../../theme/index.js";
 import { resolveNodeDisplayName, contentTypeLabelForNode } from "../node-display-name.js";
@@ -81,10 +81,8 @@ import { FILM_SET_GROUP_RENDER_SCHEMA_VERSION, type BevyFilmSetGroupPreparation,
 export type CanvasRenderSceneInput = {
   /** 扩展内容贡献。缺省时空解析器，不改变现有场景。 */
   content?: ContentContributionResolver;
-  groupBadgeScaleOverrides?: ReadonlyMap<string, number>;
   /** Group ids carrying a render-only drop target highlight. */
   dropTargetGroupIds?: ReadonlySet<string> | readonly string[];
-  groupBadgeResizable?: boolean;
   canvas: ServerCanvas;
   nodeCapabilities?: NodeCapabilityResolver;
   modelPreviews?: ReadonlyMap<string, import("./wire-model.js").BevyModelPreview>;
@@ -377,6 +375,20 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           ? prepareModelResource({ sceneVersion: MODEL_SCRIPT_SCENE_IR_V2_VERSION, ops: modelOpsV2 })
           : null))
       : null;
+    /**
+     * 片场是场景容器：整场模型按组内容宽度取景，避免 8 个建筑组合后被归一到单个卡片的
+     * 192px 基准。普通组仍用共享画布单位；这里只改展示 placement，不写回 canonical 数据。
+     */
+    const filmSetGroup = node.type === "group" && readFilmSetGroupMarker(data) !== null;
+    const displayPlacement = filmSetGroup && placement && resource
+      ? filmSetGroupBadgePlacement({
+        sceneVersion: resource.sceneVersion,
+        ops: [],
+        extent: resource.extent,
+        aabb: resource.aabb,
+        placement
+      }, width)
+      : placement;
     // 片场：模型与媒体平面共用同一等比适配因子，让范围框（节点矩形）罩住整套内容，
     // 拖动角落缩放矩形即等比缩放内容（change: 2026-10-08-make-film-set-model-only 修订）。
     const pureFit = executableComposite
@@ -455,8 +467,6 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         // written back (change: 2026-10-24-unify-group-and-film-set-authoring).
         ...(kind === "group" ? {
           collapsed,
-          badgeScale: clampGroupBadgeScale(input.groupBadgeScaleOverrides?.get(node.id) ?? data?.groupBadgeScale ?? 1),
-          badgeResizable: input.groupBadgeResizable === true && selectedIds.size === 1 && selectedIds.has(node.id),
           // 所有 group（普通组与片场组）都绘制节点顶部操作横条；具体动作仍由
           // `canvas.node-action` 贡献按通用能力与节点身份决定。
           actionBar: true,
@@ -464,7 +474,9 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           ...(input.geometryQualities?.get(node.id) ? { geometryQuality: input.geometryQualities.get(node.id) } : {}),
           // 总览纹理缓存同样是 group 级声明；缺省保持逐帧实时。
           ...(input.overviewCaches?.get(node.id) ? { overviewCache: input.overviewCaches.get(node.id) } : {}),
-          ...(resource?.aabb ? { modelBounds: { aabb: resource.aabb, extent: resource.extent } } : {})
+          ...(resource?.aabb ? { modelBounds: { aabb: resource.aabb, extent: resource.extent } } : {}),
+          // 片场场景按组宽取景后只向下展开，顶边贴住组底边锚点，避免盖住成员卡片。
+          ...(filmSetGroup ? { badgeTopAnchor: true } : {})
         } : {})
       };
       if (node.type === "group" && dropTargetGroupIds.has(node.id)) rendered.group.dropTarget = true;
@@ -477,7 +489,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           sceneVersion: resource.sceneVersion,
           resourceKey: resource.resourceKey,
           signature: resource.signature,
-          ...(placement ? { placement } : {})
+          ...(displayPlacement ? { placement: displayPlacement } : {})
         };
       }
     }

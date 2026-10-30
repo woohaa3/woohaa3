@@ -31,6 +31,7 @@ import {
   revalidateDragAttachEdges,
 } from "./drag-attach.js";
 import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
+import { groupBadgeProjectionsOf } from "./group-badge-projection.js";
 import { isShotPreviewOnlySelection } from "./shot-preview-protection.js";
 import type { InteractionCore } from "./interaction-core.js";
 import type { Gesture } from "./interaction-types.js";
@@ -145,7 +146,11 @@ export function createDragGestureFamily(
       data: {}
     })) as unknown as Woohaa3CanvasNode[];
     const groupSizes = new Map(index.groupBounds.map(group => [group.id, {width: group.width, height: group.height}]));
-    const groupBadgeScales = new Map(index.groups.map(group => [group.id, index.source.nodeData[group.id]?.groupBadgeScale ?? 1]));
+    const groupBadgeProjections = groupBadgeProjectionsOf(
+      index.source,
+      index.groups.map(group => group.id),
+      groupSizes
+    );
     const movingGroups = [...roots.keys()].filter(id => index.byId.get(id)?.type === "group");
     let settled = original;
     if (movingGroups.length > 0) {
@@ -158,7 +163,7 @@ export function createDragGestureFamily(
         groupSizes,
         eligibleGroupIds,
         collapsedGroupIds: index.collapsedGroupIds,
-        groupBadgeScales,
+        groupBadgeProjections,
         protectedNodeIds: new Set(index.compositeNodes.map(node => node.id)),
       });
       if (!groupResult.ok) {
@@ -177,7 +182,7 @@ export function createDragGestureFamily(
         groupSizes,
         eligibleGroupIds,
         collapsedGroupIds: index.collapsedGroupIds,
-        groupBadgeScales,
+        groupBadgeProjections,
         documentOrder: index.documentOrder,
       });
       if (!nodeResult.ok) {

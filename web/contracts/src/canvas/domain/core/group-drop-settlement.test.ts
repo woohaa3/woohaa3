@@ -18,15 +18,25 @@ const group = (id: string, x: number, y: number, extra: Partial<Woohaa3CanvasNod
 const byId = (nodes: readonly Woohaa3CanvasNode[]) => new Map(nodes.map((node) => [node.id, node]));
 
 describe("frozen group drop geometry", () => {
-  it("collapsed backplates leave space free while scaled badges remain occupied", () => {
+  it("collapsed backplates leave space free while the model badge remains occupied", () => {
     const nodes = [group("g", 0, 0), image("n", 600, 600)];
-    const options = { eligibleGroupIds: new Set<string>(), collapsedGroupIds: new Set(["g"]), groupBadgeScales: new Map([["g", 2]]) };
+    // 徽标 = 模型投影包围盒：320×160，以结构底边中点向下 40 的锚点居中。
+    const options = { eligibleGroupIds: new Set<string>(), collapsedGroupIds: new Set(["g"]),
+      groupBadgeProjections: new Map([["g", { width: 320, height: 160 }]]) };
     const free = settleDraggedNodeBoundaries(nodes, ["n"], new Map([["n", {x: 100, y: 130}]]), options);
     expect(free.ok).toBe(true);
     expect(free.nodes.find(node => node.id === "n")?.position).toEqual({x: 100, y: 130});
     const occupied = settleDraggedNodeBoundaries(nodes, ["n"], new Map([["n", {x: 100, y: 280}]]), options);
     expect(occupied.ok).toBe(true);
     expect(occupied.nodes.find(node => node.id === "n")?.position).not.toEqual({x: 100, y: 280});
+  });
+  it("a group without a model projection keeps its structural rect when collapsed", () => {
+    const nodes = [group("g", 0, 0), image("n", 600, 600)];
+    const options = { eligibleGroupIds: new Set<string>(), collapsedGroupIds: new Set(["g"]) };
+    // 结构矩形仍占位：落在组框内会被推出，落在旧徽标外缘不受影响。
+    const inside = settleDraggedNodeBoundaries(nodes, ["n"], new Map([["n", {x: 100, y: 100}]]), options);
+    expect(inside.ok).toBe(true);
+    expect(inside.nodes.find(node => node.id === "n")?.position).not.toEqual({x: 100, y: 100});
   });
   it("clamps an in-frame center at the structural boundary without refitting", () => {
     const nodes = [group("g", 0, 0, { width: 300, height: 220 }), image("n", 600, 600)];

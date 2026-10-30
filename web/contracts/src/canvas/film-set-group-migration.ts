@@ -1,10 +1,10 @@
 import { getWoohaa3CanvasNodeAbsolutePosition } from "./domain/core/group-geometry.js";
+import { NODE_DATA_REMOVED_FIELDS } from "./domain/removed-node-data.js";
 /** Explicit, pure offline boundary for old film-set snapshots. */
 import type { CanvasNodeData, ServerCanvas, Woohaa3CanvasSerializedNode } from "./domain/index.js";
 import { decodeModelDefinition } from "./model-definition.js";
-import { isGroupBadgeScale } from "./group-badge.js";
 import { planFilmSetMemberGrid } from "./film-set-group-member-layout.js";
-import { decodeFilmSetGroupClip, decodeFilmSetGroupTransform, createFilmSetGroupMarker, decodeFilmSetGroupMarker, readFilmSetGroupMarker, validateFilmSetGroupBindings, contentKeyForFilmSetGroupSource, FILM_SET_GROUP_DEFAULT_BADGE_SCALE, FILM_SET_GROUP_MIGRATION_VERSION, type FilmSetGroupCamera, type FilmSetGroupClip, type FilmSetGroupDiagnostic, type FilmSetGroupMigrationResult, type FilmSetGroupMigrationOptions, type FilmSetGroupSceneBinding } from "./film-set-group.js";
+import { decodeFilmSetGroupClip, decodeFilmSetGroupTransform, createFilmSetGroupMarker, decodeFilmSetGroupMarker, readFilmSetGroupMarker, validateFilmSetGroupBindings, contentKeyForFilmSetGroupSource, FILM_SET_GROUP_MIGRATION_VERSION, type FilmSetGroupCamera, type FilmSetGroupClip, type FilmSetGroupDiagnostic, type FilmSetGroupMigrationResult, type FilmSetGroupMigrationOptions, type FilmSetGroupSceneBinding } from "./film-set-group.js";
 const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 /**
@@ -12,24 +12,6 @@ const finite = (value: unknown): value is number => typeof value === "number" &&
  * canvas is never mutated.  The loose reader intentionally only understands
  * the old persisted snapshot shape; all successful output is marker + cards.
  */
-/**
- * 补齐片场 group 缺省的 3D 徽标倍率：场景画在徽标里，1 倍会让迁移后的片场看起来突然很小。
- * 已经迁移过的画布在下一次启动时补一次；显式设置过（含用户缩小）的倍率保持不变。
- */
-export function ensureFilmSetGroupBadgeScale(canvas: ServerCanvas): { canvas: ServerCanvas; changed: boolean } {
-  let changed = false;
-  const nodeData: Record<string, CanvasNodeData> = { ...canvas.nodeData };
-  for (const node of canvas.document.nodes) {
-    if (node.type !== "group") continue;
-    const data = nodeData[node.id] as Record<string, unknown> | undefined;
-    if (!data || !readFilmSetGroupMarker(data)) continue;
-    if (typeof data.groupBadgeScale === "number" && isGroupBadgeScale(data.groupBadgeScale)) continue;
-    nodeData[node.id] = { ...data, groupBadgeScale: FILM_SET_GROUP_DEFAULT_BADGE_SCALE } as CanvasNodeData;
-    changed = true;
-  }
-  return changed ? { canvas: { ...canvas, nodeData }, changed } : { canvas, changed };
-}
-
 export function migrateLegacyFilmSetToGroup(canvas: ServerCanvas, legacyNodeId: string, options: FilmSetGroupMigrationOptions): FilmSetGroupMigrationResult {
   const legacy = canvas.document.nodes.find(node => node.id === legacyNodeId);
   const legacyData = canvas.nodeData[legacyNodeId] as Record<string, unknown> | undefined;
@@ -247,9 +229,9 @@ export function migrateLegacyFilmSetToGroup(canvas: ServerCanvas, legacyNodeId: 
   delete nodeData[legacyNodeId];
   const groupData = { ...legacyData };
   for (const field of ["extensionId", "filmSetContent", "filmSetAnimations", "scenePlacement", "sceneCamera", "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelContentVersion", "modelPlacement", "modelCameras", "modelScriptStatus", "modelScriptError", "filmSetObject", "filmSetObjectContainersHidden", "filmSetShotPreviewsHidden", "camera", "timeline", "motion", "origin"]) delete groupData[field];
-  // 片场场景显示在 3D 徽标里：没有显式倍率时给一个可见的默认值，避免迁移后看起来「模型非常小」。
-  const badgeScale = typeof groupData.groupBadgeScale === "number" ? groupData.groupBadgeScale : FILM_SET_GROUP_DEFAULT_BADGE_SCALE;
-  nodeData[groupId] = { ...groupData, filmSetGroup: marker, groupBadgeScale: badgeScale } as CanvasNodeData;
+  // 片场场景显示在 3D 徽标里；徽标尺寸只由模型与画布共享模型单位决定，不写任何展示倍率。
+  for (const field of NODE_DATA_REMOVED_FIELDS) delete groupData[field];
+  nodeData[groupId] = { ...groupData, filmSetGroup: marker } as CanvasNodeData;
   // Preserve managed preview/media node identities while moving their owner
   // reference to the new group. This is part of the same pure migration
   // result, so callers can commit it as one Y.Doc transaction.

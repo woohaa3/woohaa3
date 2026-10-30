@@ -7,6 +7,8 @@
 import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
+  createFilmSetGroupMarker,
+  defaultGroupAppearance,
   prepareModelResource,
   type SceneV2Op,
   type ServerCanvas
@@ -83,6 +85,49 @@ describe("resolveModelFocusTargets", () => {
       scenesV2: new Map([["m1", [v2Box()]]])
     });
     expect(targets[0].placement).toEqual({ offset: { x: 1, y: 2, z: 3 }, scale: 2, yaw: 45 });
+  });
+
+  it("组读取 groupAppearance placement，而不是 nodeData.modelPlacement", () => {
+    const c = canvas([{ id: "g", type: "group" }]);
+    const appearance = defaultGroupAppearance();
+    appearance.model.placement = {
+      offset: { x: 1, y: 2, z: 3 },
+      scale: 2,
+      yaw: 45
+    };
+    c.nodeData = {
+      g: {
+        groupAppearance: appearance,
+        modelPlacement: { offset: { x: 9, y: 9, z: 9 }, scale: 9, yaw: 9 }
+      }
+    } as ServerCanvas["nodeData"];
+    const resource = prepareModelResource({ sceneVersion: V2, ops: [v2Box()] });
+    const targets = resolveModelFocusTargets({
+      canvas: c,
+      ...base,
+      resources: new Map([["g", resource]])
+    });
+    expect(targets).toHaveLength(1);
+    expect(targets[0].placement).toEqual(appearance.model.placement);
+  });
+
+  it("片场组保留 nodeData.modelPlacement，作为镜头场景的显示变换", () => {
+    const c = canvas([{ id: "g", type: "group" }]);
+    const placement = { offset: { x: 1, y: 2, z: 3 }, scale: 2, yaw: 45 };
+    c.nodeData = {
+      g: {
+        filmSetGroup: createFilmSetGroupMarker(),
+        modelPlacement: placement
+      }
+    } as ServerCanvas["nodeData"];
+    const resource = prepareModelResource({ sceneVersion: V2, ops: [v2Box()] });
+    const targets = resolveModelFocusTargets({
+      canvas: c,
+      ...base,
+      resources: new Map([["g", resource]])
+    });
+    expect(targets).toHaveLength(1);
+    expect(targets[0].placement).toEqual(placement);
   });
 
   it("画布为空返回空数组", () => {

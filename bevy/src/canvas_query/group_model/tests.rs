@@ -11,8 +11,21 @@ fn node(width: f32, height: f32) -> GraphNode {
     .unwrap()
 }
 
+fn projected_size(n: &GraphNode, aabb: ModelAabbDto, yaw: f32) -> (f32, f32) {
+    let layout = for_node(n).expect("model layout");
+    let projected = ModelAabb::new(aabb.min, aabb.max).transformed(&Transform {
+        rotation: grid::view_rotation() * Quat::from_rotation_y(yaw.to_radians()),
+        scale: Vec3::splat(layout.unit),
+        ..default()
+    });
+    (
+        projected.max[0] - projected.min[0],
+        projected.max[1] - projected.min[1],
+    )
+}
+
 #[test]
-fn badge_model_fits_stable_badge_for_size_yaw_scale_and_eccentric_bounds() {
+fn badge_is_the_model_projection_centered_on_the_fixed_anchor() {
     for width in [180., 320., 1200.] {
         for height in [64., 195., 600.] {
             for yaw in [0., 35., 90.] {
@@ -33,40 +46,37 @@ fn badge_model_fits_stable_badge_for_size_yaw_scale_and_eccentric_bounds() {
                         n.model.as_mut().unwrap().placement.yaw = yaw;
                         n.model.as_mut().unwrap().placement.scale = scale;
                         let layout = for_node(&n).unwrap();
-                        let projected =
-                            ModelAabb::new(aabb.min, aabb.max).transformed(&Transform {
-                                rotation: grid::view_rotation()
-                                    * Quat::from_rotation_y(yaw.to_radians()),
-                                scale: Vec3::splat(layout.unit),
-                                ..default()
-                            });
-                        for x in [projected.min[0], projected.max[0]] {
-                            for y in [projected.min[1], projected.max[1]] {
-                                let point = layout.anchor + Vec2::new(x, -y);
-                                assert!(path_contains(&badge_path(&n), point));
-                                let badge = badge_rect(&n);
-                                assert!(point.y >= badge.y - 0.01);
-                                assert!(point.y <= badge.y + badge.w + 0.01);
-                            }
-                        }
+                        let (w, h) = projected_size(&n, aabb, yaw);
+
+                        // 锚点固定：组结构底边中点向下 40，不随模型尺寸或倍率移动。
                         assert!((layout.center.x - (n.x + n.width / 2.)).abs() < 0.001);
-                        let badge = badge_rect(&n);
-                        assert!((layout.center.y - (badge.y + badge.w / 2.)).abs() < 0.001);
-                        assert!(path_contains(&badge_path(&n), layout.center));
-                        assert!(layout.radii.x * 2. <= MODEL_MAX_WIDTH + 0.001);
-                        assert!(layout.radii.y * 2. <= MODEL_MAX_HEIGHT + 0.001);
                         assert!(
-                            outline(&n)
-                                .iter()
-                                .all(|p| p.y <= n.y + n.height + BADGE_OUTSET + 0.001)
+                            (layout.center.y - (n.y + n.height + GROUP_BADGE_ANCHOR_OFFSET)).abs()
+                                < 0.001
                         );
-                        assert!(outline(&n).iter().any(|p| p.y > n.y + n.height));
-                        assert!(!frame_path(&n).windows(2).any(
-                            |p| (p[0].y - (n.y + n.height)).abs() < 0.001
-                                && (p[1].y - (n.y + n.height)).abs() < 0.001
-                                && p[0].x > n.x + n.width / 2.
-                                && p[1].x < n.x + n.width / 2.
-                        ));
+
+                        // 徽标范围就是投影包围盒，中心对齐锚点；没有任何固定框或倍率。
+                        let rect = badge_rect(&n).unwrap();
+                        assert!((rect.z - w).abs() < 0.001, "width follows projection");
+                        assert!((rect.w - h).abs() < 0.001, "height follows projection");
+                        assert!((rect.x + rect.z / 2. - layout.center.x).abs() < 0.001);
+                        assert!((rect.y + rect.w / 2. - layout.center.y).abs() < 0.001);
+                        assert!((layout.radii.x * 2. - w).abs() < 0.001);
+                        assert!((layout.radii.y * 2. - h).abs() < 0.001);
+
+                        // 命中多边形与绘制范围同源，且闭合。
+                        let polygon = badge_polygon(&n);
+                        assert_eq!(polygon.len(), 5);
+                        assert_eq!(polygon[0], polygon[4]);
+                        assert!(polygon[..4].iter().all(|p| p.x >= rect.x - 0.001
+                            && p.x <= rect.x + rect.z + 0.001
+                            && p.y >= rect.y - 0.001
+                            && p.y <= rect.y + rect.w + 0.001));
+
+                        // 组框保持结构矩形：徽标向下伸出也不会改写圆角气泡路径。
+                        let outline = outline(&n);
+                        assert_eq!(outline, rectangle(&n));
+                        assert!(outline.iter().all(|p| p.y <= n.y + n.height + 0.001));
                         assert_eq!(fill_regions(&n), vec![rectangle(&n)]);
                     }
                 }
@@ -76,7 +86,63 @@ fn badge_model_fits_stable_badge_for_size_yaw_scale_and_eccentric_bounds() {
 }
 
 #[test]
-fn footer_model_follows_move_and_resize_and_ignores_detaching_offsets() {
+fn badge_top_anchor_is_decoded_from_scene_wire() {
+    let n: GraphNode = serde_json::from_value(serde_json::json!({
+        "id":"g", "type":"group", "x":0., "y":0., "width":500., "height":300.,
+        "group":{"title":"组","memberCount":0,"outputCapableLeafCount":0,"badgeTopAnchor":true},
+        "model":{"resourceKey":"test:box","signature":"box"}
+    }))
+    .unwrap();
+    assert!(n.group.unwrap().badge_top_anchor);
+}
+
+#[test]
+fn film_set_badge_top_is_anchored_below_the_structural_bottom() {
+    let mut n = node(1192., 608.);
+    n.group.as_mut().unwrap().badge_top_anchor = true;
+    let layout = for_node(&n).unwrap();
+    let rect = badge_rect(&n).unwrap();
+    let bottom = n.y + n.height + GROUP_BADGE_ANCHOR_OFFSET;
+
+    assert!(
+        (rect.y - bottom).abs() < 0.001,
+        "top edge sits on the anchor"
+    );
+    assert!((layout.center.y - (bottom + layout.radii.y)).abs() < 0.001);
+    assert!((rect.y + rect.w / 2. - layout.center.y).abs() < 0.001);
+    assert!((rect.y + rect.w - (bottom + layout.radii.y * 2.)).abs() < 0.001);
+    assert!(badge_outset(&n) > layout.radii.y * 2. - 1.);
+    assert!(
+        rect.y >= n.y + n.height,
+        "film-set badge never intrudes into the group frame"
+    );
+}
+
+#[test]
+fn group_model_unit_is_the_shared_canvas_model_unit() {
+    for extent in [0.5, 2., 4., 16.] {
+        for scale in [0.25, 1., 3.] {
+            for (width, height) in [(180., 64.), (500., 300.), (2400., 900.)] {
+                let mut n = node(width, height);
+                n.group
+                    .as_mut()
+                    .unwrap()
+                    .model_bounds
+                    .as_mut()
+                    .unwrap()
+                    .extent = extent;
+                n.model.as_mut().unwrap().placement.scale = scale;
+                let layout = for_node(&n).unwrap();
+                // 与 model3d 的 `model_unit` 完全相同：`placement.scale * 64 * 3 / extent`。
+                // 没有 film-set fit、没有 `min(1)`、没有 56×44 钳制。
+                assert!((layout.unit - scale * 64. * 3. / extent).abs() < 0.001);
+            }
+        }
+    }
+}
+
+#[test]
+fn anchor_follows_move_and_resize_and_ignores_model_offsets() {
     let n = node(500., 300.);
     let original = for_node(&n).unwrap();
     let mut moved = n.clone();
@@ -84,150 +150,87 @@ fn footer_model_follows_move_and_resize_and_ignores_detaching_offsets() {
     moved.y -= 900.;
     let next = for_node(&moved).unwrap();
     assert_eq!(next.center, original.center + Vec2::new(700., -900.));
-    assert!(
-        next.anchor
-            .distance(original.anchor + Vec2::new(700., -900.))
-            < 0.001
-    );
     moved.width = 200.;
     moved.height = 64.;
     let small = for_node(&moved).unwrap();
     assert_eq!(small.center.x, moved.x + 100.);
-    assert!(small.unit < original.unit);
+    assert_eq!(small.center.y, moved.y + 64. + GROUP_BADGE_ANCHOR_OFFSET);
+    // 非 `scale` 的 placement 段不参与组徽标：偏移只影响普通卡片，不影响锚点或单位。
     moved.model.as_mut().unwrap().placement.offset.x = 50.;
     moved.model.as_mut().unwrap().placement.offset.y = -30.;
-    assert_eq!(for_node(&moved).unwrap(), small);
+    let offset = for_node(&moved).unwrap();
+    assert_eq!(offset.center, small.center);
+    assert_eq!(offset.unit, small.unit);
 }
 
 #[test]
-fn bubble_tail_keeps_its_own_size_when_the_group_grows() {
-    let span = |tail: &[Vec2]| {
-        let min = tail.iter().map(|point| point.x).fold(f32::MAX, f32::min);
-        let max = tail.iter().map(|point| point.x).fold(f32::MIN, f32::max);
-        max - min
-    };
-    for width in [220., 700., 2400.] {
-        let n = node(width, 320.);
-        let tail = tail_path(&n);
-        assert!(
-            (span(&tail) - TAIL_BASE).abs() < 0.001,
-            "tail base must not follow the {width} wide body"
-        );
-        assert!((tail[1].x - (n.x + n.width / 2.)).abs() < 0.001);
-        // 尾巴高度只由徽标外侧间距决定，与组尺寸无关。
-        assert!((tail[1].y - (n.y + n.height + BADGE_OUTSET)).abs() < 0.001);
-    }
-    // 徽标倍率只放大徽标底座与模型：片场组（badge_scale = 3）的尖角与普通组同形。
-    for scale in [1., 2., 3.] {
-        let mut scaled = node(1800., 320.);
-        scaled.group.as_mut().unwrap().badge_scale = scale;
-        let tail = tail_path(&scaled);
-        assert!(
-            (span(&tail) - TAIL_BASE).abs() < 0.001,
-            "tail must stay {TAIL_BASE} wide at badgeScale {scale}"
-        );
-        assert!((tail[1].y - (scaled.y + scaled.height + BADGE_OUTSET)).abs() < 0.001);
-    }
-    // 比尾巴还窄的畸形组只会被裁到自身宽度，不会翻折。
-    let mut narrow = node(12., 80.);
-    narrow.width = 12.;
-    let tail = tail_path(&narrow);
-    assert!((span(&tail) - 12.).abs() < 0.001);
-    assert!(
-        tail.iter()
-            .all(|point| point.x >= narrow.x - 0.001 && point.x <= narrow.x + narrow.width + 0.001)
-    );
-}
-
-#[test]
-fn missing_model_retains_structural_frame_and_has_no_orphan_badge() {
+fn missing_model_projection_has_no_badge_and_keeps_structural_rect() {
     let mut n = node(500., 300.);
-    let path = outline(&n);
-    n.model = None;
+    let frame = rectangle(&n);
+    assert!(badge_rect(&n).is_some());
+    assert!(badge_outset(&n) > 0.);
+
+    // 没有 model 引用：无布局、无徽标、无伸出，组框仍是结构矩形。
+    let mut without_model = n.clone();
+    without_model.model = None;
+    assert!(for_node(&without_model).is_none());
+    assert!(badge_rect(&without_model).is_none());
+    assert!(badge_polygon(&without_model).is_empty());
+    assert_eq!(badge_outset(&without_model), 0.);
+    assert_eq!(presentation_rect(&without_model), Vec4::new(n.x, n.y, n.width, n.height));
+    assert_eq!(outline(&without_model), frame);
+
+    // 没有 modelBounds（例如资源尚未就绪）：同样不产生占位徽标。
+    n.group.as_mut().unwrap().model_bounds = None;
     assert!(for_node(&n).is_none());
-    assert!(badge_path(&n).is_empty());
-    assert_eq!(outline(&n), rectangle(&n));
-    assert_ne!(outline(&n), path);
+    assert!(badge_rect(&n).is_none());
+    assert_eq!(outline(&n), frame);
 }
 
 #[test]
-fn model_content_does_not_change_badge_size_or_center() {
+fn collapsed_group_presentation_is_the_badge_or_the_structural_rect() {
     let mut n = node(500., 300.);
-    let badge = badge_path(&n);
-    let center = for_node(&n).unwrap().center;
-    for max in [[100., 0., 0.], [3., 100., -3.], [20., 30., 40.]] {
-        n.group
-            .as_mut()
-            .unwrap()
-            .model_bounds
-            .as_mut()
-            .unwrap()
-            .aabb
-            .max = max;
-        assert_eq!(badge_path(&n), badge);
-        assert_eq!(for_node(&n).unwrap().center, center);
-    }
-    let tail = tail_path(&n);
-    let frame = frame_path(&n);
-    assert!(
-        frame
-            .first()
-            .is_some_and(|point| point.distance(tail[2]) < 0.001)
-    );
-    assert!(
-        frame
-            .last()
-            .is_some_and(|point| point.distance(tail[2]) < 0.001)
-    );
-    assert!(
-        frame
-            .windows(2)
-            .any(|pair| pair[0].distance(tail[2]) < 0.001 && pair[1].distance(tail[1]) < 0.001)
-    );
-    assert!(
-        frame
-            .windows(2)
-            .any(|pair| pair[0].distance(tail[1]) < 0.001 && pair[1].distance(tail[0]) < 0.001)
-    );
-    let left = tail[0].x;
-    let right = tail[2].x;
-    let bottom = n.y + n.height;
-    assert!(!frame.windows(2).any(|pair| {
-        (pair[0].y - bottom).abs() < 0.001
-            && (pair[1].y - bottom).abs() < 0.001
-            && pair[0].x.min(pair[1].x) <= left + 0.001
-            && pair[0].x.max(pair[1].x) >= right - 0.001
-    }));
-    assert!(path_contains(
-        &outline(&n),
-        Vec2::new(n.x + n.width / 2., n.y + n.height + BADGE_OUTSET / 2.)
-    ));
+    let badge = badge_rect(&n).unwrap();
+    n.group.as_mut().unwrap().collapsed = true;
+    assert_eq!(presentation_rect(&n), badge);
+    assert!(outline(&n).is_empty(), "收起组只画模型，不画结构框");
+    assert_eq!(frame_path(&n), rectangle(&n));
+
+    n.model = None;
+    assert_eq!(presentation_rect(&n), Vec4::new(n.x, n.y, n.width, n.height));
 }
 
 #[test]
-fn independent_badge_scale_keeps_centerline_and_preserves_aspect() {
-    let mut n = node(600., 400.);
-    let original = for_node(&n).unwrap();
-    let base = badge_rect(&n);
-    for scale in [0.5, 1., 2., 2.5, 6., 12., 250.] {
-        n.group.as_mut().unwrap().badge_scale = scale;
-        let next = for_node(&n).unwrap();
-        let rect = badge_rect(&n);
-        // 气泡与徽标永远中线对齐：水平中心固定在气泡中心，左右对称扩张；
-        // 上缘固定，只向下增长。
-        assert!((rect.x + rect.z / 2. - (n.x + n.width / 2.)).abs() < 0.001);
-        assert!((rect.y - base.y).abs() < 0.001);
-        assert!((rect.z - base.z * scale).abs() < 0.001);
-        assert!((rect.w - base.w * scale).abs() < 0.001);
-        assert!((next.center.x - (rect.x + rect.z / 2.)).abs() < 0.001);
-        assert!((next.center.y - (rect.y + rect.w / 2.)).abs() < 0.001);
-        assert!((next.radii.x / original.radii.x - scale).abs() < 0.001);
-        assert!((next.radii.y / original.radii.y - scale).abs() < 0.001);
-        assert!((rect.z / rect.w - base.z / base.w).abs() < 0.001);
-        assert_eq!((n.width, n.height), (600., 400.));
-    }
-    n.width = 196.;
-    n.height = 112.;
-    let rect = badge_rect(&n);
-    assert!((rect.y - (n.y + n.height + BADGE_OUTSET)).abs() < 0.001);
+fn badge_outset_reports_only_the_part_below_the_structural_bottom() {
+    let mut n = node(500., 300.);
+    let bottom = n.y + n.height;
+    let rect = badge_rect(&n).unwrap();
+    assert_eq!(badge_outset(&n), (rect.y + rect.w - bottom).max(0.));
+    n.group
+        .as_mut()
+        .unwrap()
+        .model_bounds
+        .as_mut()
+        .unwrap()
+        .aabb
+        .max = [4., 0.5, -2.];
+    let small = badge_rect(&n).unwrap();
+    assert_eq!(badge_outset(&n), (small.y + small.w - bottom).max(0.));
+}
+
+#[test]
+fn resize_corners_and_has_badge_follow_accepted_inputs() {
+    let mut n = node(500., 300.);
+    assert_eq!(
+        resize_corners(&n),
+        [
+            Vec2::new(n.x, n.y),
+            Vec2::new(n.x + n.width, n.y),
+            Vec2::new(n.x, n.y + n.height),
+            Vec2::new(n.x + n.width, n.y + n.height),
+        ]
+    );
+    assert!(has_badge(&n));
+    n.model = None;
+    assert!(!has_badge(&n));
 }

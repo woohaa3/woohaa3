@@ -13,8 +13,10 @@ import { activeFilmSetSceneBindings, readFilmSetGroupMarker, contentKeyForFilmSe
 import {
   getGroupLayoutSizes,
   hiddenByCollapsedGroups,
+  groupBadgeBounds,
   groupBadgeRect
 } from "@woohaa3/contracts";
+import { groupBadgeProjectionsForCanvas } from "../../canvas-shell/group-badge-projection.js";
 import type { ServerCanvas } from "@woohaa3/contracts";
 import type { ContentKeyOf } from "./content-identity.js";
 import type { CanvasResourceCoordinator } from "./coordinator.js";
@@ -72,6 +74,7 @@ export function collectResidencyCandidates(
     return { x, y };
   };
   const groupSizes = getGroupLayoutSizes(canvas.document.nodes);
+  const badgeProjections = groupBadgeProjectionsForCanvas(canvas, groupSizes);
   const hidden = hiddenByCollapsedGroups(canvas);
   const candidates: ResidencyCandidate[] = [];
   for (const node of canvas.document.nodes) {
@@ -80,14 +83,10 @@ export function collectResidencyCandidates(
     const size = groupSizes.get(node.id) ?? effectiveCanvasNodeSize(node, undefined, capabilities);
     const key = contentKeyOf(node);
     const frame = { ...absolute(node), ...size };
-    const badge = node.type === "group" ? groupBadgeRect(frame, canvas.nodeData[node.id]?.groupBadgeScale) : null;
+    const projection = node.type === "group" ? badgeProjections.get(node.id) : undefined;
+    const badge = node.type === "group" ? groupBadgeRect(frame, projection) : null;
     const collapsed = canvas.nodeData[node.id]?.groupCollapsed === true;
-    const rect = badge && collapsed ? badge : badge ? {
-      x: Math.min(frame.x, badge.x),
-      y: Math.min(frame.y, badge.y),
-      width: Math.max(frame.x + frame.width, badge.x + badge.width) - Math.min(frame.x, badge.x),
-      height: Math.max(frame.y + frame.height, badge.y + badge.height) - Math.min(frame.y, badge.y),
-    } : frame;
+    const rect = badge && collapsed ? badge : groupBadgeBounds(frame, projection);
     candidates.push({
       nodeId: node.id,
       contentKey: key ?? "",

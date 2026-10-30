@@ -4,7 +4,16 @@
  * 不挂载 React、不读 DOM：覆盖节点可见性、有效尺寸、连线取舍、等比映射与视口框。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, nodeWorldRect, type ServerCanvas } from "@woohaa3/contracts";
+import {
+  createEmptyWoohaa3ServerCanvas,
+  groupAppearanceModel,
+  groupBadgeRect,
+  groupModelProjection,
+  nodeWorldRect,
+  type SceneV2Op,
+  type ServerCanvas
+} from "@woohaa3/contracts";
+import { modelSceneStore } from "../model-scene/model-scene-store.js";
 import {
   fitMinimapTransform,
   minimapPoint,
@@ -95,14 +104,33 @@ describe("projectMinimap", () => {
     const projection = projectMinimap(state);
     expect(projection.nodes.map((node) => node.id)).toEqual(["group"]);
     expect(projection.nodes[0]!.group).toBe(true);
-    // 收起后只占用布局下缘之外的徽标范围。
+    // 收起后只占用徽标范围。
     const byId = new Map(state.document.nodes.map((node) => [node.id, node]));
     const layout = nodeWorldRect(state.document.nodes[0]!, byId);
     const rect = projection.nodes[0]!.rect;
-    expect(rect.width).toBe(88);
-    expect(rect.height).toBe(64);
-    expect(rect.y).toBe(layout.y + layout.height + 6);
-    expect(rect.x + rect.width / 2).toBe(layout.x + layout.width / 2);
+    // 没有 prepared 模型投影：不虚构徽标，收起态保留结构矩形。
+    expect(rect).toEqual(layout);
+    const resource = modelSceneStore.put("group", "woohaa-model-scene-ir-v2", [{
+      t: "box", id: "body", parent: null, position: [0, 0, 0], rotation: [0, 0, 0],
+      scale: [1, 1, 1], size: [2, 1, 1], color: "#ffffff"
+    } as SceneV2Op]);
+    try {
+      const projection = groupModelProjection({
+        sceneVersion: resource.sceneVersion,
+        ops: [],
+        extent: resource.extent,
+        aabb: resource.aabb,
+        placement: groupAppearanceModel(undefined).placement
+      })!;
+      const badge = groupBadgeRect(layout, projection)!;
+      const withBadge = projectMinimap(state).nodes[0]!.rect;
+      // 收起组只占模型投影派生的徽标范围：中心固定在结构底边下方 40。
+      expect(withBadge).toEqual({ x: badge.x, y: badge.y, width: badge.width, height: badge.height });
+      expect(withBadge.x + withBadge.width / 2).toBe(layout.x + layout.width / 2);
+      expect(withBadge.y + withBadge.height / 2).toBe(layout.y + layout.height + 40);
+    } finally {
+      modelSceneStore.delete("group");
+    }
   });
 
   it("复合资产内部的受管节点不进入小地图，边随之省略", () => {

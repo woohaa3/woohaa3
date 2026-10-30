@@ -37,14 +37,16 @@ fn app() -> App {
 }
 
 /// Canonical film-set group: a group container whose own model is the composed scene.
-fn film_set_scene(with_content: bool, badge_scale: f32) -> Scene {
+fn film_set_scene(with_content: bool, model_scale: f32) -> Scene {
     let node: GraphNode = serde_json::from_value(serde_json::json!({
         "id":"set",
         "type":"group",
         "x":100,"y":60,
         "width":320,"height":240,
-        "group":{"title":"片场","memberCount":0,"badgeScale":badge_scale},
-        "model":{"resourceKey":"empty-film-set","signature":"empty"}
+        "group":{"title":"片场","memberCount":0,
+            "modelBounds":{"aabb":{"min":[-1.,-1.,-1.],"max":[1.,1.,1.]},"extent":2.}},
+        "model":{"resourceKey":"empty-film-set","signature":"empty",
+            "placement":{"offset":{"x":0.,"y":0.,"z":0.},"scale":model_scale,"yaw":0.}}
     }))
     .unwrap();
     let group: crate::protocol::FilmSetGroupPreparation =
@@ -65,8 +67,8 @@ fn film_set_scene(with_content: bool, badge_scale: f32) -> Scene {
 
 #[test]
 fn empty_film_set_group_shows_brand_plinth_inside_the_identity_badge() {
-    // MCP/menu-created sets default to scale 1, service-created sets use 3, and the contract
-    // floors the badge at 0.5. The plinth must stay inside the badge at all of them.
+    // 组模型统一用画布模型单位：placement.scale 越大，徽标与底座一起等比放大。
+    // 底座必须始终落在模型投影派生的徽标范围内。
     for scale in [0.5, 1., 3.] {
         let mut app = app();
         app.world_mut().resource_mut::<CurrentScene>().0 = film_set_scene(false, scale);
@@ -74,7 +76,7 @@ fn empty_film_set_group_shows_brand_plinth_inside_the_identity_badge() {
 
         let node = &app.world().resource::<CurrentScene>().0.nodes[0];
         assert!(group_model::has_badge(node));
-        let badge = group_model::badge_rect(node);
+        let badge = group_model::badge_rect(node).expect("badge derives from model bounds");
         let state = app.world().resource::<Placeholders>();
         let entry = state
             .entries

@@ -262,7 +262,9 @@ mod tests {
     fn app_with_media() -> (App, Entity) {
         let node: GraphNode = serde_json::from_value(serde_json::json!({
             "id":"film", "type":"group", "x":0, "y":0, "width":200, "height":150,
-            "group": {"title":"set", "memberCount":1, "overviewCache":"transparent-world-v1"}
+            "group": {"title":"set", "memberCount":1, "overviewCache":"transparent-world-v1",
+                "modelBounds":{"aabb":{"min":[-1.,-1.,-1.],"max":[1.,1.,1.]},"extent":2.}},
+            "model": {"resourceKey":"test:set", "signature":"set"}
         })).unwrap();
         let prep = serde_json::from_value(serde_json::json!({
             "schemaVersion":"woohaa-film-set-group-render-v1", "ownerId":"film",
@@ -287,6 +289,7 @@ mod tests {
             enabled: true, input_fingerprint: 7, tier: Some(OverviewTier::T256), ..default()
         })).id();
         app.world_mut().resource_mut::<OverviewDispatch>().queue.push_back(AdmittedJob { owner: "film".into(), fingerprint: 7, generation: 3, epoch: 1 });
+        app.world_mut().resource_mut::<model3d::ModelVisuals>().mark_root_ready_for_test("film");
         (app, owner)
     }
 

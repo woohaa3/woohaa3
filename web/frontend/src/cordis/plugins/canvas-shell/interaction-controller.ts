@@ -130,7 +130,6 @@ export function installInteractionController(options: InteractionControllerOptio
   /** 一帧的瞬时态快照（供场景构建读取）。 */
   const frameState = () => ({
     selected: state.selected,
-    badgeResize: state.gesture.kind === "group-badge-resize" ? state.gesture : null,
     draft: state.draft,
     marquee: marqueeRect(),
     localPositions: state.localPositions,

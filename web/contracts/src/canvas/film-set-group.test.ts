@@ -12,7 +12,6 @@ import type { ServerCanvas } from "./domain/types.js";
 import {
   createFilmSetGroupMarker,
   decodeFilmSetGroupMarker,
-  ensureFilmSetGroupBadgeScale,
   migrateLegacyFilmSetToGroup,
   prepareFilmSetGroup,
   FilmSetGroupPreparationCache,
@@ -258,28 +257,11 @@ describe("film-set group contract", () => {
     if (migrated.ok) {
       expect(migrated.canvas.document.nodes.some(node => node.id === "film-group" && node.type === "group")).toBe(true);
       expect(migrated.canvas.document.nodes.some(node => node.type === "composite-asset")).toBe(false);
-      // 场景改在 3D 徽标里显示：迁移给出可见的默认倍率，否则片场看起来会突然很小。
-      expect(migrated.canvas.nodeData["film-group"]?.groupBadgeScale).toBe(3);
+      // 场景改在 3D 徽标里显示：徽标尺寸只由模型与画布共享模型单位决定，迁移不写展示倍率。
+      expect(migrated.canvas.nodeData["film-group"]?.groupBadgeScale).toBeUndefined();
       const again = migrateLegacyFilmSetToGroup(migrated.canvas, "film-group", { commandId: "migrate-1", groupId: "film-group" });
       expect(again.ok && again.duplicate).toBe(true);
     }
-  });
-
-  it("backfills the default badge scale once and keeps explicit values", () => {
-    const before = canvas();
-    before.document.nodes.push(
-      { id: "group", type: "group", position: { x: 0, y: 0 }, width: 600, height: 400 },
-      { id: "scaled", type: "group", position: { x: 0, y: 500 }, width: 600, height: 400 },
-      { id: "ordinary", type: "group", position: { x: 0, y: 1000 }, width: 600, height: 400 },
-    );
-    before.nodeData.group = { filmSetGroup: createFilmSetGroupMarker({ sceneBindings: [] }) };
-    before.nodeData.scaled = { filmSetGroup: createFilmSetGroupMarker({ sceneBindings: [] }), groupBadgeScale: 8 };
-    const first = ensureFilmSetGroupBadgeScale(before);
-    expect(first.changed).toBe(true);
-    expect(first.canvas.nodeData.group?.groupBadgeScale).toBe(3);
-    expect(first.canvas.nodeData.scaled?.groupBadgeScale).toBe(8);
-    expect(first.canvas.nodeData.ordinary?.groupBadgeScale).toBeUndefined();
-    expect(ensureFilmSetGroupBadgeScale(first.canvas).changed).toBe(false);
   });
 
   it("hoists a nested legacy film set to the top level so the migrated canvas round-trips", () => {

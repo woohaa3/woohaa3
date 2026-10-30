@@ -24,7 +24,6 @@ import type { Viewport } from "./interaction-core.js";
 import { applyNodeResourceLoading } from "../../services/node-resource-loading.js";
 
 export type SceneBuildInput = {
-  badgeResize?: {nodeId: string; scale: number} | null;
   selected: readonly string[];
   draft: { source: string; side: "input" | "output"; x: number; y: number } | null;
   /** 框选选区矩形（世界坐标，change: fix-group-and-marquee-preview）。 */
@@ -122,18 +121,12 @@ export function buildSceneWithResources(
   const contentRight = Math.max(0, options.getContentRect?.().right ?? 0);
   // 拍摄镜头预览：宿主只从权威画布 + 当前播放投影派生只读卡片状态与归属线起点投影
   // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5/D7/D8）。
-  const badgeScaleOverrides = input.badgeResize
-    ? new Map([[input.badgeResize.nodeId, input.badgeResize.scale]])
-    : undefined;
   const shotPreviews = buildShotPreviewSceneInput({
     canvas: canvasState,
     playback: options.getAnimationPlayback?.() ?? null,
-    targets: options.getModelFocusTargets?.() ?? [],
-    badgeScaleOverrides
+    targets: options.getModelFocusTargets?.() ?? []
   });
   const scene = buildCanvasRenderScene({
-    groupBadgeScaleOverrides: badgeScaleOverrides,
-    groupBadgeResizable: options.isWritable?.() ?? options.getSession()?.isWritable() ?? false,
     canvas: canvasState,
     nodeCapabilities: options.nodeCapabilities,
     modelPreviews: modelPreviewStore.snapshot(),

@@ -80,7 +80,9 @@ export * from "./wire-shot-preview.js";
 // v33: scenes carry the document identity (`canvasId`). `revision` is per-document, so a renderer
 //      must reset its monotonic revision baseline when the identity changes; older renderers
 //      would reject every scene of a canvas whose revision is lower than the previous one's.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v33" as const;
+// v34: group presentations no longer carry badge scale/resizable flags; the badge is the model
+//      itself at the shared canvas model unit, so older renderers would draw a fixed frame.
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v34" as const;
 
 /** Group-owned scene primitives. Kept separate from the legacy composite wire during migration. */
 export const FILM_SET_GROUP_RENDER_SCHEMA_VERSION = "woohaa-film-set-group-render-v1" as const;
@@ -392,10 +394,6 @@ export type BevyAggregateRunPresentation = {
 export type BevyGroupPresentation = {
   /** 紧凑折叠态，不改变 canonical 成员与展开尺寸。 */
   collapsed?: boolean;
-  /** 以模型中点为中心的独立等比显示倍率。 */
-  badgeScale?: number;
-  /** 仅可写单选组显示徽标自己的缩放把手，含收起态。 */
-  badgeResizable?: boolean;
   /**
    * 组容器是否绘制节点顶部操作横条。
    *
@@ -411,6 +409,11 @@ export type BevyGroupPresentation = {
   outputCapableLeafCount: number;
   /** Prepared local bounds, without ops/mesh; shared model layout and perimeter input. */
   modelBounds?: { aabb: Aabb; extent: number };
+  /**
+   * 片场组的外部徽标顶边贴住组底边锚点向下展开；缺省为 false（模型投影中心对齐锚点）。
+   * 只影响徽标几何，不改组框结构、成员布局或模型身份。
+   */
+  badgeTopAnchor?: boolean;
   /**
    * Trusted adapter's overview primitive LOD declaration. Only group-owned scene
    * compositions that opt in (currently film sets) get fraction-based tiers;

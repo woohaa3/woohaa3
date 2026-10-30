@@ -13,7 +13,6 @@ import {
   isFilmSetObjectModelNode
 } from "../film-set-object-container.js";
 import type { CanvasCommand } from "../commands.js";
-import { GROUP_BADGE_MIN_SCALE, isGroupBadgeScale } from "../group-badge.js";
 import {
   DEFAULT_NODE_DIMS,
   collectWoohaa3CanvasRemovalIds,
@@ -179,7 +178,7 @@ export function addNode(
   }
   if (command.nodeData?.retainWhenEmpty !== undefined && (node.type !== "group" || typeof command.nodeData.retainWhenEmpty !== "boolean")) return reject("invalid-group-config", "retainWhenEmpty 只允许 group 的布尔配置");
   if (command.nodeData?.groupCollapsed !== undefined && (node.type !== "group" || typeof command.nodeData.groupCollapsed !== "boolean")) return reject("invalid-group-config", "groupCollapsed 只允许 group 的布尔配置");
-  if (command.nodeData?.groupBadgeScale !== undefined && (node.type !== "group" || !isGroupBadgeScale(command.nodeData.groupBadgeScale))) return reject("invalid-group-config", `groupBadgeScale 只允许 group 的 ${GROUP_BADGE_MIN_SCALE} 倍率及以上的有限数`);
+  if (command.nodeData?.groupBadgeScale !== undefined) return reject("invalid-group-config", "groupBadgeScale 已移除：组徽标按画布共享模型单位呈现，不再接受展示倍率");
   if (command.nodeData?.groupAppearance !== undefined && node.type !== "group") return reject("invalid-group-appearance", "groupAppearance 只属于普通组节点");
   if (command.nodeData?.filmSetGroup !== undefined) {
     const markerRejection = validateFilmSetGroupDataPatch(work, node.id, command.nodeData, node.type);
@@ -451,7 +450,7 @@ export function patchNodeData(
   }
   if (value.retainWhenEmpty !== undefined && (work.nodes.find(node => node.id === nodeId)?.type !== "group" || typeof value.retainWhenEmpty !== "boolean")) return reject("invalid-group-config", "retainWhenEmpty 只允许 group 的布尔配置");
   if (value.groupCollapsed !== undefined && (node?.type !== "group" || typeof value.groupCollapsed !== "boolean")) return reject("invalid-group-config", "groupCollapsed 只允许 group 的布尔配置");
-  if (value.groupBadgeScale !== undefined && (node?.type !== "group" || !isGroupBadgeScale(value.groupBadgeScale))) return reject("invalid-group-config", `groupBadgeScale 只允许 group 的 ${GROUP_BADGE_MIN_SCALE} 倍率及以上的有限数`);
+  if (value.groupBadgeScale !== undefined) return reject("invalid-group-config", "groupBadgeScale 已移除：组徽标按画布共享模型单位呈现，不再接受展示倍率");
   if (!work.nodes.some((node) => node.id === nodeId)) {
     return reject("node-data-orphan", `节点业务数据指向不存在的节点 ${nodeId}`);
   }

@@ -1,5 +1,5 @@
 /** Old shot codecs are interpreted only at this explicit offline boundary. */
-import { ensureFilmSetGroupBadgeScale, ensureFilmSetGroupMemberLayout, migrateLegacyFilmSetToGroup, readFilmSetAnimationProjection, isFilmSetGroupNode, decodeShotPreviewData, filmSetAnimationsOf, isFilmSetNode, managedNodeRelationOf, ManagedNodeLifecycleRegistry, planManagedNodeLifecycles, type ManagedNodeMigrationAdapter } from "@woohaa3/contracts";
+import { ensureFilmSetGroupMemberLayout, migrateLegacyFilmSetToGroup, readFilmSetAnimationProjection, isFilmSetGroupNode, decodeShotPreviewData, filmSetAnimationsOf, isFilmSetNode, managedNodeRelationOf, ManagedNodeLifecycleRegistry, planManagedNodeLifecycles, type ManagedNodeMigrationAdapter } from "@woohaa3/contracts";
 import { managedShotMediaData, managedShotMediaNodeId, managedShotMediaType } from "./managed-shot-media.js";
 import { filmSetManagedLifecycle } from "./managed-shot-media-lifecycle.js";
 
@@ -14,8 +14,6 @@ export const filmSetManagedMediaMigration: ManagedNodeMigrationAdapter = {
       if (!migrated.ok) throw Error(`film-set-group-migration-failed: ${canvas.id}/${node.id}: ${migrated.reason}`);
       canvas = migrated.canvas;
     }
-    // 片场场景画在 3D 徽标里：已经迁移过、还没有显式倍率的画布补一次默认值（幂等）。
-    canvas = ensureFilmSetGroupBadgeScale(canvas).canvas;
     // 成员若散在气泡外（迁移沿用片场坐标系的原始摆放），补一次网格重排；幂等。
     canvas = ensureFilmSetGroupMemberLayout(canvas).canvas;
     for (const node of canvas.document.nodes) {

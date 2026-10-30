@@ -1,4 +1,5 @@
 import { CANVAS_CAMERA_PITCH } from "./model-focus/canvas-projection.js";
+import { groupModelProjection } from "./model-focus/model-bounds.js";
 import { filmSetMediaPlanesForNode } from "./render-scene.js";
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -254,7 +255,7 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
     const scene = buildCanvasRenderScene({ canvas: groupCanvas(), theme: defaultAppTheme(), selection: { nodes: ["g"] } });
     const g = scene.nodes.find((node) => node.id === "g")!;
     expect(g.type).toBe("group");
-    expect(g.group).toEqual({ title: "", memberCount: 2, outputCapableLeafCount: 2, collapsed: false, badgeScale: 1, badgeResizable: false, actionBar: true });
+    expect(g.group).toEqual({ title: "", memberCount: 2, outputCapableLeafCount: 2, collapsed: false, actionBar: true });
     // 单选 group 时仍应可 resize（group 支持缩放）。
     expect(g.resizable).toBe(true);
   });
@@ -294,6 +295,44 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
     const override = { offset: { x: 0, y: 0, z: 0 }, scale: 0.75, yaw: 90 };
     expect(buildCanvasRenderScene({ ...input, modelPlacements: new Map([["g", override]]) })
       .nodes.find(node => node.id === "g")!.model!.placement).toEqual(override);
+  });
+
+  it("片场组按组内容宽度取景并顶边锚定，普通组保持共享单位", () => {
+    const marker = createFilmSetGroupMarker();
+    const source = canvas({
+      document: {
+        schemaVersion: "asset-canvas-v1",
+        nodes: [{ id: "film", type: "group", position: { x: 100, y: 100 }, width: 500, height: 400 }],
+        edges: [],
+        updatedAt: "2026-09-25T00:00:00.000Z"
+      },
+      nodeData: { film: { filmSetGroup: marker } as never }
+    });
+    const resource = prepareModelResource({
+      sceneVersion: MODEL_SCRIPT_SCENE_IR_V2_VERSION,
+      ops: [{ t: "box", id: "body", parent: null, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], size: [2, 1, 1], material: null, color: "#fff" }]
+    });
+    const scene = buildCanvasRenderScene({ canvas: source, modelResources: new Map([["film", resource]]) });
+    const node = scene.nodes.find((entry) => entry.id === "film")!;
+    expect(node.group!.badgeTopAnchor).toBe(true);
+    expect(node.group!.modelBounds).toEqual({ aabb: resource.aabb, extent: resource.extent });
+    expect(node.model!.placement!.scale).toBeGreaterThan(1);
+    const projection = groupModelProjection({
+      sceneVersion: resource.sceneVersion,
+      ops: [],
+      extent: resource.extent,
+      aabb: resource.aabb,
+      placement: node.model!.placement,
+      badgeTopAnchored: true
+    })!;
+    expect(projection.topAnchored).toBe(true);
+    expect(projection.width).toBeCloseTo(500 - 80, 4);
+
+    // 普通组不设置该标志，仍按共享单位；同一份资源在普通组里不会自动放大。
+    const ordinary = buildCanvasRenderScene({ canvas: groupCanvas(), modelResources: new Map([["g", resource]]) });
+    const ordinaryNode = ordinary.nodes.find((entry) => entry.id === "g")!;
+    expect(ordinaryNode.group!.badgeTopAnchor).toBeUndefined();
+    expect(ordinaryNode.model!.placement!.scale).toBe(1);
   });
 
   it("嵌套 group 的叶子计数是递归的", () => {
@@ -1001,7 +1040,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v33");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v34");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));

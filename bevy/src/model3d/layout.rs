@@ -176,9 +176,7 @@ pub(crate) fn model_unit(
     let size = 64.0;
     let natural = size * 3.0 / model.extent.max(0.001);
     let base = placement.scale * natural;
-    if node.group.is_some() {
-        return group_layout(node, model, placement).unit;
-    }
+    // 组徽标与普通模型卡片共用同一单位：没有固定框，也没有 56×44 适配上限。
     if node.composite_asset.is_some() {
         return placement.scale.min(1.0) * natural * film_set_fit(node, model, placement, natural);
     }

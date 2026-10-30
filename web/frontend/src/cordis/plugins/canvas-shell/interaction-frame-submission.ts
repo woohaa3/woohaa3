@@ -31,7 +31,6 @@ export function createFrameSubmission(deps: {
   const transientNow = () => JSON.stringify({
     ...deps.transient(), selected:deps.state.selected, draft:deps.state.draft,
     dropTargetGroupIds: deps.state.dropTargetGroupIds,
-    badgeResize: deps.state.gesture.kind === "group-badge-resize" ? [deps.state.gesture.nodeId, deps.state.gesture.scale] : null,
     hover:[deps.state.hoveredNodeId,deps.state.hoveredPort,deps.state.hoveredEdgeId]
   });
   const baselineBlock = (runtime: BevyRuntime, index: CanvasNodeIndex | null): string | null => {

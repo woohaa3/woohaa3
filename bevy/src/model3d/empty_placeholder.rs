@@ -32,8 +32,8 @@ pub(crate) use super::FILM_SET_PLACEHOLDER_LAYER;
 /// Footprint inset from the accepted scope, leaving room for the vertical projection.
 const PLINTH_INSET: f32 = 0.65;
 /// Badge-fitting footprint fraction: larger than the scope inset so the compact badge still reads
-/// as a plinth, while the platform and its extruded letters stay inside the badge rectangle at
-/// every badge scale.
+/// as a plinth, while the platform and its extruded letters stay inside the model-derived badge
+/// rectangle at every model unit.
 const BADGE_PLINTH_INSET: f32 = 0.72;
 /// Platform side height as a fraction of the shorter footprint edge.
 const PLINTH_DEPTH_RATIO: f32 = 0.13;
@@ -150,8 +150,7 @@ fn plinth_layout(scope: &scope::ScopeGeometry) -> Layout {
 
 /// Empty film-set group: the plinth occupies the identity badge instead of a scene scope, so the
 /// badge keeps a recognisable brand model until the first object or ground arrives.
-fn badge_plinth_layout(node: &crate::protocol::GraphNode) -> Layout {
-    let badge = group_model::badge_rect(node);
+fn badge_plinth_layout(badge: Vec4) -> Layout {
     let center = Vec2::new(badge.x + badge.z * 0.5, badge.y + badge.w * 0.5);
     plinth_layout_from_footprint(ground_diamond(
         center,
@@ -472,6 +471,7 @@ pub(crate) fn sync(
                 // declaration because the group's model lives inside it, not in the scope.
                 let empty_badge = node.group.is_some()
                     && group_model::has_badge(node)
+                    && group_model::badge_rect(node).is_some()
                     && empty_film_sets.contains(node.id.as_str());
                 if empty_badge {
                     return Some((node, true));
@@ -507,7 +507,8 @@ pub(crate) fn sync(
     let shared = state.shared.as_ref().expect("shared assets").clone();
     for (node, badge) in targets {
         let layout = if badge {
-            badge_plinth_layout(node)
+            let rect = group_model::badge_rect(node).expect("badge plinth requires a model rect");
+            badge_plinth_layout(rect)
         } else {
             plinth_layout(&scope::node_scope(node))
         };

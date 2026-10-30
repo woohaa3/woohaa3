@@ -523,7 +523,6 @@ export type InteractionController = {
 
 export type Gesture =
   | { kind: "none" }
-  | import("./input/group-badge-resize.js").GroupBadgeResizeGesture
   | { kind: "group-badge-press"; pointerId: number; nodeId: string; collapsed: boolean; startScreen: Point; moved: boolean }
   | { kind: "history-press"; pointerId: number; nodeId: string; presentationId: string; startScreen: Point }
   | { kind: "model-preview"; pointerId: number; nodeId: string; last: Point }

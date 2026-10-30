@@ -435,8 +435,20 @@ fn hidden_shot_has_no_canvas_hit() {
 fn collapsed_group_toolbar_tracks_badge_after_viewport_and_position_updates() {
     let mut group = group("g", 500., 300., 420., 280., 2);
     group.group.as_mut().unwrap().collapsed = true;
-    group.group.as_mut().unwrap().badge_scale = 2.;
     group.group.as_mut().unwrap().action_bar = true;
+    // 收起组的横条贴着模型徽标，因此夹具必须有可呈现模型（不接受固定占位框）。
+    group.group.as_mut().unwrap().model_bounds = Some(
+        serde_json::from_value(serde_json::json!({
+            "aabb":{"min":[-1.,-1.,-1.],"max":[1.,1.,1.]},"extent":2.
+        }))
+        .unwrap(),
+    );
+    group.model = Some(
+        serde_json::from_value(serde_json::json!({
+            "resourceKey":"test:box", "signature":"box"
+        }))
+        .unwrap(),
+    );
     let scene = scene_with_actions_for("g", vec![group.clone()]);
     let base = accept_scene(&scene);
     let assert_toolbar = |generation, group: &GraphNode, zoom| {
@@ -448,6 +460,9 @@ fn collapsed_group_toolbar_tracks_badge_after_viewport_and_position_updates() {
             None,
         )
         .unwrap();
+        let Some(badge) = badge else {
+            panic!("group fixture must expose a model badge");
+        };
         assert!(
             (layout.bar.1
                 + layout.bar.3
