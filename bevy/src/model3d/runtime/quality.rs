@@ -617,7 +617,16 @@ impl ModelVisuals {
     /// 注意：native 后台准备中的根还没有发布，因此这里返回 `false`；消费者必须用
     /// [`Self::preparation_state`] 区分「准备中」与「确实没有根」，不能把前者当合法空场。
     pub(crate) fn has_root(&self, id: &str) -> bool {
-        self.roots.contains_key(id)
+        self.roots.contains_key(id) || {
+            #[cfg(test)]
+            {
+                self.ready_roots_for_test.contains(id)
+            }
+            #[cfg(not(test))]
+            {
+                false
+            }
+        }
     }
     /// 该节点的准备状态（native 后台准备）：`Published` / `Pending` / `Absent`。
     pub(crate) fn preparation_state(&self, id: &str) -> super::super::preparation::RootState {

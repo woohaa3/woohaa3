@@ -71,9 +71,8 @@ mod tests {
             ghost: false,
             card_label: None,
             group: group.then(|| crate::protocol::GroupPresentation {
+                badge_top_anchor: false,
                 collapsed: false,
-                badge_scale: 1.,
-                badge_resizable: false,
                 action_bar: false,
                 title: String::new(),
                 member_count: 1,

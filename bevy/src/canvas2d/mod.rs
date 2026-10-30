@@ -9,7 +9,6 @@
 //! - [`init`]：2D camera、字体与共享 mesh/material 初始化、字体就绪判定；
 //! - [`textures`]：纹理批次消费与 Sprite 生命周期；
 //! - [`camera`]：2D camera 跟随 viewport；
-//! - [`group_surface`]：组连续底面，借用既有主画布 3D 相机置于模型后方；
 //! - [`render`]：2D scene 重建（labels、edges、cards、共享 mesh 替换）。
 
 pub(crate) mod geometry;
@@ -34,7 +33,6 @@ mod generation;
 pub(crate) mod group;
 mod group_motion;
 mod group_outline;
-mod group_surface;
 mod history_strip;
 pub(crate) mod history_pulse;
 pub(crate) mod image_focus;
@@ -101,7 +99,6 @@ pub(crate) use camera::sync_camera;
 pub(crate) use focus_backdrop::sync as sync_focus_backdrop;
 pub(crate) use generation::{GenerationClock, sync_generation};
 pub(crate) use group_motion::sync as sync_group_motion;
-pub(crate) use group_surface::sync as sync_group_surfaces;
 pub(crate) use init::{font_ready, setup};
 pub(crate) use node_action::sync_node_action_bars;
 pub(crate) use group::is_running as group_is_running;

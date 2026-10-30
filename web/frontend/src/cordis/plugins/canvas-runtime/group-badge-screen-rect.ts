@@ -1,13 +1,14 @@
 /**
- * 组外部 3D 徽标的屏幕矩形（执行面板锚点用）。
+ * 组 3D 徽标的屏幕矩形（执行面板锚点用）。
  *
- * Rust 把徽标画在**渲染场景节点矩形**的下缘 6px，再按 `groupBadgeScale` 保持气泡中线对齐等比放大；
- * 而 group 的渲染矩形是成员包围后的布局尺寸（`getGroupLayoutSizes`），比节点自身尺寸
- * 常常高出一大截。若用节点自身矩形推导锚点，徽标会被算高一整段，面板随之压回场景上。
+ * 徽标就是组模型本体：Rust 把模型绘制在以组结构底边中点向下 40 画布单位为锚点的位置，
+ * 尺寸取模型投影包围盒。而 group 的渲染矩形是成员包围后的布局尺寸
+ * （`getGroupLayoutSizes`），比节点自身尺寸常常高出一大截；若用节点自身矩形推导锚点，
+ * 徽标会被算高一整段，面板随之压回场景上。
  *
- * 这里只做纯几何：调用方给出节点矩形、布局尺寸与当前视口倍率。
+ * 这里只做纯几何：调用方给出节点矩形、布局尺寸、模型投影与当前视口倍率。
  */
-import { groupBadgeScreenRect } from "@woohaa3/contracts";
+import { groupBadgeScreenRect, type GroupBadgeProjection } from "@woohaa3/contracts";
 
 export type ScreenRect = { left: number; top: number; width: number; height: number };
 
@@ -20,7 +21,8 @@ export function groupBadgePresentationScreenRect(input: {
   /** 成员包围后的布局尺寸；缺省退回节点自身尺寸。 */
   layout: { width: number; height: number } | null;
   collapsed: boolean;
-  scale: number | undefined;
+  /** 组模型的投影包围盒；缺失（资源未就绪）时没有徽标范围。 */
+  projection: GroupBadgeProjection | null;
 }): ScreenRect | null {
   const { card, zoom } = input;
   if (!Number.isFinite(zoom) || zoom <= 0) return null;
@@ -39,5 +41,5 @@ export function groupBadgePresentationScreenRect(input: {
     width: width > 0 ? width : card.width,
     height: height > 0 ? height : card.height
   };
-  return groupBadgeScreenRect(presentation, zoom, input.scale);
+  return groupBadgeScreenRect(presentation, zoom, input.projection);
 }

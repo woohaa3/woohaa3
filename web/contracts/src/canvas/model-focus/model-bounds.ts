@@ -19,10 +19,12 @@ import {
 import type { BevyModelPlacement } from "../render-scene/wire-model.js";
 import { axisQ, quatMulLocal } from "./math.js";
 import { canvasPointToWorld, viewRotation } from "./canvas-projection.js";
-import { groupBadgeRect } from "../group-badge.js";
+import { GROUP_BADGE_ANCHOR_OFFSET, groupBadgeRect, type GroupBadgeProjection } from "../group-badge.js";
+import { DEFAULT_MODEL_PLACEMENT } from "../model-definition.js";
 import { clampDistance } from "./clamp.js";
 import {
   FILM_SET_FIT_MARGIN,
+  FILM_SET_GROUP_WIDTH_MARGIN,
   FRAME_PADDING,
   MODEL_CARD_GAP,
   MODEL_FOCUS_FOV,
@@ -167,27 +169,109 @@ export function modelAnchor(input: {
   return canvasPointToWorld(cx, cy, input.offset.z * size);
 }
 
-/** Accepted group badge layout, shared by browser focus math and the renderer's group model. */
+/**
+ * 组模型在当前呈现下的投影包围盒（画布单位，屏幕轴对齐）。
+ *
+ * 与 Rust `group_model::derive` 同源：`model_local_aabb × viewRotation × yaw × unit`，
+ * 其中 `unit` 是画布共享模型单位 `placement.scale × 64 × 3 / extent`；片场组的
+ * `placement.scale` 可先经 `filmSetGroupBadgePlacement` 按组宽放大。无几何或非法数值时
+ * 返回 `null`（不产生徽标范围，也不用固定框占位）。
+ */
+export function groupModelProjection(input: ModelSceneInput): GroupBadgeProjection | null {
+  return projectionOf(input, modelLocalAabb(input));
+}
+
+/**
+ * 片场组的展示 placement：整场模型按组内容宽度（左右各留 `FILM_SET_GROUP_WIDTH_MARGIN`）等比取景。
+ *
+ * 片场是场景容器，不是身份徽标：如果沿用单个模型卡片的 192px 自然单位，8 个建筑组成的
+ * 街景会只剩几十像素。这里只放大展示倍率，不写回 canonical placement，也不恢复可编辑倍率；
+ * 普通组不调用。组宽或模型几何不可用时按传入 placement（缺省为单位缩放）返回，由调用方回退
+ * 到共享单位；缺省 placement 不能被解释成“没有徽标”，否则镜头归属线会退回未取景的旧中心。
+ */
+export function filmSetGroupBadgePlacement(
+  input: ModelSceneInput,
+  groupWidth: number,
+): BevyModelPlacement {
+  const placement = input.placement ?? DEFAULT_MODEL_PLACEMENT;
+  const available = groupWidth - FILM_SET_GROUP_WIDTH_MARGIN * 2;
+  const scale = placement.scale ?? 1;
+  if (!(Number.isFinite(available) && available > 0 && Number.isFinite(scale) && scale > 0)) {
+    return placement;
+  }
+  const projection = groupModelProjection(input);
+  if (!projection || !(projection.width > 0)) return placement;
+  const fit = available / projection.width;
+  if (!(Number.isFinite(fit) && fit > 0)) return placement;
+  return { ...placement, scale: scale * fit };
+}
+
+function projectionOf(input: ModelSceneInput, local: Aabb | null): GroupBadgeProjection | null {
+  if (!local) return null;
+  const unit = modelUnit(input.placement ?? null, input.extent);
+  if (!(Number.isFinite(unit) && unit > 0)) return null;
+  const yaw = ((input.placement?.yaw ?? 0) * Math.PI) / 180;
+  const projected = transformAabb(
+    {
+      translation: [0, 0, 0],
+      rotation: quatMulLocal(viewRotation(), axisQ([0, 1, 0], yaw)),
+      scale: [unit, unit, unit]
+    },
+    local
+  );
+  const width = projected.max[0] - projected.min[0];
+  const height = projected.max[1] - projected.min[1];
+  if (!(Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)) return null;
+  return {
+    width,
+    height,
+    ...(input.badgeTopAnchored ? { topAnchored: true } : {})
+  };
+}
+
+/**
+ * Accepted group model layout, shared by browser focus math and the renderer's group model.
+ *
+ * 普通组的单位与普通 `model3d` 卡片完全一致（`placement.scale × 64 × 3 / extent`），模型多大
+ * 就多大：没有固定徽标框、没有 56×44 适配上限、也没有可编辑展示倍率。锚点固定为组底边中点
+ * 向下 `GROUP_BADGE_ANCHOR_OFFSET` 画布单位，普通组把模型投影中心对齐该点；片场组
+ * （`badgeTopAnchored`）把模型顶边对齐该点并向下展开，配合按组宽取景避免盖住成员卡片。
+ */
 export function groupModelLayout(input: ModelSceneInput & {
-  node: { x: number; y: number; width: number; height: number; badgeScale?: number };
+  node: { x: number; y: number; width: number; height: number };
 }) {
   const local = modelLocalAabb(input);
-  const safeExtent = input.extent > 0 && Number.isFinite(input.extent) ? input.extent : 1;
-  const natural = 192 / safeExtent;
+  const unit = modelUnit(input.placement ?? null, input.extent);
   const yaw = ((input.placement?.yaw ?? 0) * Math.PI) / 180;
-  const projected = local ? transformAabb({ translation: [0, 0, 0], rotation: quatMulLocal(viewRotation(), axisQ([0, 1, 0], yaw)), scale: [natural, natural, natural] }, local) : null;
-  const size = projected ? { width: Math.max(0.001, projected.max[0] - projected.min[0]), height: Math.max(0.001, projected.max[1] - projected.min[1]) } : { width: 1, height: 1 };
-  const badge = groupBadgeRect(input.node, input.node.badgeScale ?? 1);
-  const availableWidth = Math.max(1, Math.min(56, badge.width - 20));
-  const availableHeight = Math.max(1, Math.min(44, badge.height - 20));
-  const fit = Math.min(availableWidth / size.width, availableHeight / size.height);
-  const factor = Math.max(0.001, Math.min(1, input.placement?.scale ?? 1)) * fit * badge.scale;
-  const world = local ? transformAabb({ translation: [0, 0, 0], rotation: axisQ([0, 1, 0], yaw), scale: [natural, natural, natural] }, local) : null;
-  const relative = world ? { min: world.min.map(v => v * factor) as Vec3, max: world.max.map(v => v * factor) as Vec3 } : null;
-  const center = { x: badge.x + badge.width / 2, y: badge.y + badge.height / 2 };
-  const projectedCenter = projected?.min && projected.max ? [(projected.min[0] + projected.max[0]) / 2 * factor, (projected.min[1] + projected.max[1]) / 2 * factor] : [0, 0];
-  const anchorCanvas = { x: center.x - projectedCenter[0], y: center.y + projectedCenter[1] };
-  return { relative, anchor: canvasPointToWorld(anchorCanvas.x, anchorCanvas.y, (input.placement?.offset.z ?? 0) * MODEL_SIZE_BASE), unit: natural * factor };
+  const yawRotation = axisQ([0, 1, 0], yaw);
+  const relative = local && Number.isFinite(unit) && unit > 0
+    ? transformAabb({ translation: [0, 0, 0], rotation: yawRotation, scale: [unit, unit, unit] }, local)
+    : null;
+  const projection = projectionOf(input, local);
+  const badge = groupBadgeRect(input.node, projection);
+  const projected = projection && local
+    ? transformAabb(
+      {
+        translation: [0, 0, 0],
+        rotation: quatMulLocal(viewRotation(), yawRotation),
+        scale: [unit, unit, unit]
+      },
+      local
+    )
+    : null;
+  const anchorCanvas = badge && projected
+    ? {
+      x: badge.center.x - (projected.min[0] + projected.max[0]) / 2,
+      y: badge.center.y + (projected.min[1] + projected.max[1]) / 2
+    }
+    : { x: input.node.x + input.node.width / 2, y: input.node.y + input.node.height + GROUP_BADGE_ANCHOR_OFFSET };
+  return {
+    relative,
+    anchor: canvasPointToWorld(anchorCanvas.x, anchorCanvas.y, (input.placement?.offset.z ?? 0) * MODEL_SIZE_BASE),
+    unit,
+    projection,
+    badge
+  };
 }
 
 /**

@@ -15,9 +15,11 @@ import {
   beginGesture,
   beginModelGesture,
   filmSetFitFactor,
+  filmSetGroupBadgePlacement,
   filmSetLayoutBounds,
   filmSetNaturalScale,
   filmSetSceneAabb,
+  getGroupLayoutSizes,
   isFilmSetNode,
   getWoohaa3CanvasNodeAbsolutePosition,
   enterFocus,
@@ -87,7 +89,29 @@ function sceneInput(input: FocusTargetInput) {
   const size = node ? renderedModelNodeSize(node, input.canvas.nodeData?.[input.nodeId], input.capabilities) : null;
   const isGroup = node?.type === "group" && !!readFilmSetGroupMarker(input.canvas.nodeData?.[input.nodeId]);
   const position = node && isGroup ? getWoohaa3CanvasNodeAbsolutePosition(node, new Map(input.canvas.document.nodes.map(entry => [entry.id, entry]))) : null;
-  const groupLayout = isGroup && node && position ? groupModelLayout({ sceneVersion: input.sceneVersion, ops: input.ops as never, extent: input.extent, aabb: input.aabb ?? undefined, placement: input.placement, node: { x: position.x, y: position.y, width: node.width ?? 180, height: node.height ?? 112, badgeScale: (input.canvas.nodeData?.[input.nodeId] as { groupBadgeScale?: number } | undefined)?.groupBadgeScale } }) : null;
+  const groupSize = isGroup && node ? getGroupLayoutSizes(input.canvas.document.nodes).get(node.id) : null;
+  const groupWidth = groupSize?.width ?? node?.width;
+  const groupHeight = groupSize?.height ?? node?.height;
+  const groupPlacement = isGroup && groupWidth !== undefined
+    ? filmSetGroupBadgePlacement({
+      sceneVersion: input.sceneVersion,
+      ops: input.ops as never,
+      extent: input.extent,
+      aabb: input.aabb ?? undefined,
+      placement: input.placement
+    }, groupWidth)
+    : input.placement;
+  const groupLayout = isGroup && node && position && groupWidth !== undefined
+    ? groupModelLayout({
+      sceneVersion: input.sceneVersion,
+      ops: input.ops as never,
+      extent: input.extent,
+      aabb: input.aabb ?? undefined,
+      placement: groupPlacement,
+      badgeTopAnchored: true,
+      node: { x: position.x, y: position.y, width: groupWidth, height: groupHeight ?? node.height ?? 112 }
+    })
+    : null;
   return {
     sceneVersion: input.sceneVersion,
     ops: input.ops as never,

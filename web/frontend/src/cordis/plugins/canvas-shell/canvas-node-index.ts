@@ -17,7 +17,7 @@ import {
   isMergeEligibleNode,
   readNodeHeight,
   readNodeWidth,
-  groupBadgeOutset,
+  groupBadgeBounds,
   groupPresentationRect,
   FILM_SET_SHOT_PREVIEW_NODE_TYPE,
   shotPreviewOwnershipOf,
@@ -26,6 +26,8 @@ import {
   type Woohaa3CanvasNode
 } from "@woohaa3/contracts";
 import type { DropRect } from "@woohaa3/contracts";
+import { groupBadgeProjectionsForCanvas } from "./group-badge-projection.js";
+import { modelSceneStore } from "../model-scene/model-scene-store.js";
 
 /** 结构/位置索引（丢弃后可重建，不持有规范事实副本）。 */
 export type CanvasNodeIndex = {
@@ -132,6 +134,7 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     && canvas.nodeData[group.id]?.groupCollapsed !== true).map(group => group.id));
   const collapsedGroupIds = new Set(groups.filter(group => canvas.nodeData[group.id]?.groupCollapsed === true).map(group => group.id));
   const groupSizes = getGroupLayoutSizes(nodes);
+  const badgeProjections = groupBadgeProjectionsForCanvas(canvas, groupSizes);
   const groupBounds = groups.map(group => ({ id: group.id,
     ...absolutePosition(group.id)!, ...groupSizes.get(group.id)! }));
   const workingBounds = nodes.flatMap(node => {
@@ -146,12 +149,13 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
       ? groupSizes.get(node.id) ?? { width: readNodeWidth(runtimeNode), height: readNodeHeight(runtimeNode) }
       : { width: readNodeWidth(runtimeNode), height: readNodeHeight(runtimeNode) };
     const frame = node.type === "group"
-      ? groupPresentationRect(runtimeNode, collapsedGroupIds.has(node.id), { x: 0, y: 0, ...size }, canvas.nodeData[node.id]?.groupBadgeScale)
+      ? (collapsedGroupIds.has(node.id)
+        ? groupPresentationRect(runtimeNode, true, { x: 0, y: 0, ...size }, badgeProjections.get(node.id))
+        // 展开组保留结构框，并把模型徽标的真实投影算进保守占用范围。
+        : groupBadgeBounds({ x: 0, y: 0, ...size }, badgeProjections.get(node.id)))
       : { x: 0, y: 0, ...size };
-    // Include the outsourced group badge in the conservative occupied range.
-    const outset = node.type === "group" && !collapsedGroupIds.has(node.id) ? groupBadgeOutset : 0;
-    return [{ id: node.id, x: position.x + frame.x - outset, y: position.y + frame.y - outset,
-      width: frame.width + outset * 2, height: frame.height + outset * 2 }];
+    return [{ id: node.id, x: position.x + frame.x, y: position.y + frame.y,
+      width: frame.width, height: frame.height }];
   });
   // 拍摄镜头预览：从归属数据建立 owner（片场）→ 预览索引，供手势阶段按 owner 命中，
   // 不扫描整画布、不重建几何（change 2026-10-15 D4）。
@@ -238,14 +242,17 @@ export function indexNodeSize(node: Woohaa3CanvasNode): { width: number; height:
   return { width: readNodeWidth(node), height: readNodeHeight(node) };
 }
 
-/** 单槽 memo：以 working canvas 对象身份为 key，selection/pan 不失效（design D5）。 */
+/** 单槽 memo：working canvas 对象身份 + prepared 模型修订号（徽标投影来源）。 */
 let memoSource: ServerCanvas | null = null;
+let memoRevision = -1;
 let memoIndex: CanvasNodeIndex | null = null;
 
-/** 返回与来源身份匹配的共享索引；身份变化时重建（丢弃旧索引）。 */
+/** 返回与来源身份匹配的共享索引；身份或模型资源变化时重建（丢弃旧索引）。 */
 export function sharedCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIndex | null {
-  if (canvas === memoSource) return memoIndex;
+  const revision = modelSceneStore.getRevision();
+  if (canvas === memoSource && revision === memoRevision) return memoIndex;
   memoSource = canvas;
+  memoRevision = revision;
   memoIndex = createCanvasNodeIndex(canvas);
   return memoIndex;
 }

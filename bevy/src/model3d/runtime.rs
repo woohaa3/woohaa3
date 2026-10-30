@@ -25,6 +25,9 @@ pub(crate) struct ModelAnchor;
 pub(crate) struct ModelVisuals {
     pub(super) batching_strategy: super::batch_strategy::BatchStrategy,
     pub(super) roots: HashMap<String, ModelRoot>,
+    /// 测试替身：让 dispatch/overview 用例能声明「模型根已就绪」而不必装配整棵渲染根。
+    #[cfg(test)]
+    pub(super) ready_roots_for_test: std::collections::HashSet<String>,
     pub(super) shared: super::resources::SharedResources,
     pub(super) mesh_references:
         super::resource_ownership::ResourceReferences<bevy::asset::AssetId<Mesh>>,
@@ -571,6 +574,12 @@ impl ModelRoot {
 }
 
 impl ModelVisuals {
+    /// 测试替身：声明某个节点已有可用模型根（不涉及 GPU 资源）。
+    #[cfg(test)]
+    pub(crate) fn mark_root_ready_for_test(&mut self, id: &str) {
+        self.ready_roots_for_test.insert(id.to_owned());
+    }
+
     /// 是否存在需要连续更新的模型活动（hover/动画播放、运动求值、截图 pin/保留）。
     ///
     /// 静止降频据此判断能否停帧（change: 2026-10-14-scope-film-set-object-picking-to-focus，design D9）。

@@ -280,7 +280,7 @@ fn model_anchor_falls_back_for_empty_model() {
     assert!(anchor.x.is_finite() && anchor.y.is_finite());
 }
 
-/// 组形象在固定徽章内居中，模型比例不改变徽章锚点。
+/// 组形象锚定在组结构底边中点向下 40 的固定徽标锚点上，模型尺寸不移动锚点。
 #[test]
 fn group_anchor_centers_model_inside_bottom_footer() {
     let node = GraphNode {
@@ -302,9 +302,8 @@ fn group_anchor_centers_model_inside_bottom_footer() {
         ghost: false,
         card_label: None,
         group: Some(crate::protocol::GroupPresentation {
+            badge_top_anchor: false,
             collapsed: false,
-            badge_scale: 1.,
-            badge_resizable: false,
             action_bar: false,
             title: String::new(),
             member_count: 0,
@@ -349,16 +348,13 @@ fn group_anchor_centers_model_inside_bottom_footer() {
     let local = scene::model_world_aabb(&model, rotation, unit).expect("group model bounds");
     let center_y = -(anchor_canvas.y + (local.min[1] + local.max[1]) / 2.);
     let center_x = anchor_canvas.x + (local.min[0] + local.max[0]) / 2.0;
-    assert!((center_y - (node.y + node.height - 26.)).abs() < 0.5);
+    // 组模型与普通模型共用 `placement.scale * 64 * 3 / extent`，没有 56×44 适配钳制。
+    assert!((unit - 64.0 * 3.0 / model.extent).abs() < 0.001);
+    // 投影中心固定在组结构底边中点向下 40（80 单位页脚的中点），不随模型尺寸移动。
+    assert!((center_y - (node.y + node.height + 40.)).abs() < 0.5);
     assert!((center_x - (node.x + node.width / 2.0)).abs() < 0.5);
-    assert!(local.max[0] - local.min[0] <= node.width);
-    assert!(local.max[1] - local.min[1] <= node.height);
-    assert!(
-        local.max[0] - local.min[0] <= crate::canvas_query::group_model::MODEL_MAX_WIDTH + 0.01
-    );
-    assert!(
-        local.max[1] - local.min[1] <= crate::canvas_query::group_model::MODEL_MAX_HEIGHT + 0.01
-    );
+    // 徽标范围就是模型投影尺寸，可以超出组结构矩形（不再被钳制到框内）。
+    assert!(local.max[0] - local.min[0] > 0.0);
 }
 
 /// 片场（composite-asset）：没有卡片，模型锚定在节点矩形**中心**（无朝下偏移），且模型投影

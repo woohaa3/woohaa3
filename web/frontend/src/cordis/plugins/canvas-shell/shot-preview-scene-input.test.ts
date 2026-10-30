@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { createFilmSetGroupMarker, shotPreviewNodeId, staticShotCameraMotion, type ServerCanvas } from "@woohaa3/contracts";
+import {
+  createFilmSetGroupMarker,
+  filmSetGroupBadgePlacement,
+  groupBadgeRect,
+  groupModelProjection,
+  shotPreviewNodeId,
+  staticShotCameraMotion,
+  type ServerCanvas,
+  type SceneV2Op
+} from "@woohaa3/contracts";
 import { buildShotPreviewSceneInput, shotPreviewLinkOrigin } from "./shot-preview-scene-input.js";
+import type { FocusTargetInput } from "./model-focus-session.js";
 
-// 「主用」画布上的真实片场徽标（group 高 2017.25、倍率 12.63 → 1110×808，画布坐标）。
+// 「主用」画布上的真实片场徽标（组结构底边中点向下 40 画布单位）。
 const badge = { center: { x: 747.875, y: 4237.37 } };
 
 describe("shotPreviewLinkOrigin", () => {
@@ -53,26 +63,77 @@ describe("buildShotPreviewSceneInput 归属线起点", () => {
     }
   } as unknown as ServerCanvas;
 
-  const originOf = (badgeScaleOverrides?: ReadonlyMap<string, number>) => {
-    const input = buildShotPreviewSceneInput({ canvas, playback: null, targets: [], badgeScaleOverrides });
-    const origin = input.shotPreviewCameraProjection(groupId, clipId);
-    expect(origin).not.toBeNull();
-    return origin!;
-  };
+  const box = (size: [number, number, number]): SceneV2Op =>
+    ({ t: "box", id: "b", parent: null, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], size, color: "#ffffff" }) as SceneV2Op;
 
-  it("线头固定在徽标中心：水平中线不变，倍率只沿中线向下扩展", () => {
-    const base = originOf();
-    const scaled = originOf(new Map([[groupId, 2]]));
-    expect(scaled.x).toBeCloseTo(base.x, 5);
-    expect(scaled.y).toBeGreaterThan(base.y);
+  const targetOf = (scale = 1): FocusTargetInput => ({
+    canvas,
+    nodeId: groupId,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    surface: { width: 1000, height: 800 },
+    sceneVersion: "woohaa-model-scene-ir-v2",
+    ops: [box([1, 1, 1])],
+    extent: 2,
+    placement: { offset: { x: 0, y: 0, z: 0 }, scale, yaw: 0 }
   });
 
-  it("拖动中的倍率预览立即移动线头，不必等提交回 nodeData", () => {
-    const committed = { ...(canvas.nodeData[groupId] as Record<string, unknown>) };
-    const before = originOf();
-    (canvas.nodeData as Record<string, unknown>)[groupId] = { ...committed, groupBadgeScale: 2 };
-    expect(originOf()).toEqual(originOf(new Map([[groupId, 2]])));
-    (canvas.nodeData as Record<string, unknown>)[groupId] = committed;
-    expect(originOf().y).toBeCloseTo(before.y, 5);
+  const originOf = (scale = 1, targets: readonly FocusTargetInput[] = [targetOf(scale)]) => {
+    const input = buildShotPreviewSceneInput({ canvas, playback: null, targets });
+    return input.shotPreviewCameraProjection(groupId, clipId);
+  };
+
+  it("线头固定在徽标中心：片场按组宽取景且顶边锚定，模型倍率不影响锚点", () => {
+    const target = targetOf(1);
+    const placement = filmSetGroupBadgePlacement({
+      sceneVersion: target.sceneVersion,
+      ops: target.ops as never,
+      extent: target.extent,
+      aabb: target.aabb ?? undefined,
+      placement: target.placement
+    }, 320);
+    const projection = groupModelProjection({
+      sceneVersion: target.sceneVersion,
+      ops: target.ops as never,
+      extent: target.extent,
+      aabb: target.aabb ?? undefined,
+      placement,
+      badgeTopAnchored: true
+    })!;
+    const expected = groupBadgeRect({ x: 100, y: 60, width: 320, height: 240 }, projection)!;
+
+    const base = originOf(1)!;
+    const scaled = originOf(3)!;
+    expect(expected.y).toBeCloseTo(60 + 240 + 40, 5);
+    expect(base.x).toBeCloseTo(expected.center.x, 5);
+    expect(base.y).toBeCloseTo(expected.center.y, 5);
+    expect(scaled).toEqual(base);
+  });
+
+  it("聚焦目标 placement 缺省时仍按组宽取景，不退回共享单位", () => {
+    const target = { ...targetOf(1), placement: null };
+    const placement = filmSetGroupBadgePlacement({
+      sceneVersion: target.sceneVersion,
+      ops: target.ops as never,
+      extent: target.extent,
+      aabb: target.aabb ?? undefined,
+      placement: null
+    }, 320);
+    const projection = groupModelProjection({
+      sceneVersion: target.sceneVersion,
+      ops: target.ops as never,
+      extent: target.extent,
+      aabb: target.aabb ?? undefined,
+      placement,
+      badgeTopAnchored: true
+    })!;
+    const expected = groupBadgeRect({ x: 100, y: 60, width: 320, height: 240 }, projection)!;
+    const origin = originOf(1, [target])!;
+    expect(expected.y).toBeCloseTo(60 + 240 + 40, 5);
+    expect(origin.x).toBeCloseTo(expected.center.x, 5);
+    expect(origin.y).toBeCloseTo(expected.center.y, 5);
+  });
+
+  it("模型资源未就绪时不画线，而不是用固定框或相机姿态占位", () => {
+    expect(originOf(1, [])).toBeNull();
   });
 });

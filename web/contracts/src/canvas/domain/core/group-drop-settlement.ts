@@ -7,10 +7,10 @@
  */
 import type { Woohaa3CanvasNode } from "./canvas-runtime";
 import { groupPresentationRect } from "../../group-presentation.js";
+import { groupBadgeBounds, type GroupBadgeProjection } from "../../group-badge.js";
 import {
   getGroupLayoutSizes,
   getWoohaa3CanvasNodeAbsolutePosition,
-  groupBadgeOutset,
   groupBottomPadding,
   groupPadding,
   readNodeHeight,
@@ -124,7 +124,7 @@ function buildGroups(
   sizes: ReadonlyMap<string, { width: number; height: number }>,
   eligible?: ReadonlySet<string>,
   collapsed?: ReadonlySet<string>,
-  badgeScales?: ReadonlyMap<string, number>,
+  projections?: ReadonlyMap<string, GroupBadgeProjection>,
 ): GroupCandidate[] {
   return nodes.flatMap((node, order) => {
     if (node.type !== "group" || (eligible && !eligible.has(node.id))) return [];
@@ -132,25 +132,25 @@ function buildGroups(
     // the occupied obstacle range only and must not turn into a drop target.
     const position = nodeAbsolutePosition(node, byId);
     const size = sizes.get(node.id) ?? { width: readNodeWidth(node), height: readNodeHeight(node) };
-    const rect = groupFrameRect(node, position, size, collapsed?.has(node.id) === true, badgeScales?.get(node.id));
+    const rect = groupFrameRect(node, position, size, collapsed?.has(node.id) === true, projections?.get(node.id));
     return [{ ...rect, id: node.id, depth: depthOf(node, byId), order }];
   });
 }
 
-/** Collapsed groups occupy only their scaled badge; expanded groups keep their frame. */
+/** Collapsed groups occupy only their model badge; expanded groups keep their frame. */
 function groupFrameRect(
   node: Woohaa3CanvasNode,
   position: DropPoint,
   size: { width: number; height: number },
   compact: boolean,
-  badgeScale?: number,
+  projection?: GroupBadgeProjection,
 ): DropRect {
   return groupPresentationRect({ type: node.type }, compact, {
     x: position.x,
     y: position.y,
     width: size.width,
     height: size.height,
-  }, badgeScale);
+  }, projection);
 }
 
 function nodeAbsolutePosition(node: Woohaa3CanvasNode, byId: ReadonlyMap<string, Woohaa3CanvasNode>): DropPoint {
@@ -231,7 +231,7 @@ export function settleDraggedNodeBoundaries(
     eligibleGroupIds?: ReadonlySet<string>;
     documentOrder?: ReadonlyMap<string, number>;
     collapsedGroupIds?: ReadonlySet<string>;
-    groupBadgeScales?: ReadonlyMap<string, number>;
+    groupBadgeProjections?: ReadonlyMap<string, GroupBadgeProjection>;
   } = {},
 ): GroupDropSettlementResult {
   const source = [...nodes];
@@ -239,7 +239,7 @@ export function settleDraggedNodeBoundaries(
   if (!validateFiniteNodes(source)) return { ok: false, nodes: source, reason: "invalid-geometry", candidatesEvaluated: 0, movedNodeIds: [] };
   const sizes = options.groupSizes ?? getGroupLayoutSizes(source);
   const groups = buildGroups(source, byId, sizes, options.eligibleGroupIds);
-  const allGroups = buildGroups(source, byId, sizes, undefined, options.collapsedGroupIds, options.groupBadgeScales);
+  const allGroups = buildGroups(source, byId, sizes, undefined, options.collapsedGroupIds, options.groupBadgeProjections);
   const next = new Map(source.map((node) => [node.id, node]));
   const movedNodeIds: string[] = [];
   let candidatesEvaluated = 0;
@@ -300,11 +300,13 @@ export function settleDraggedNodeBoundaries(
   return { ok: true, nodes: result, candidatesEvaluated, movedNodeIds };
 }
 
-function groupRectAt(group: Woohaa3CanvasNode, absolute: DropPoint, sizes: ReadonlyMap<string, { width: number; height: number }>, collapsed?: ReadonlySet<string>, badgeScales?: ReadonlyMap<string, number>): DropRect {
+function groupRectAt(group: Woohaa3CanvasNode, absolute: DropPoint, sizes: ReadonlyMap<string, { width: number; height: number }>, collapsed?: ReadonlySet<string>, projections?: ReadonlyMap<string, GroupBadgeProjection>): DropRect {
   const size = sizes.get(group.id) ?? { width: readNodeWidth(group), height: readNodeHeight(group) };
-  const rect = groupFrameRect(group, absolute, size, collapsed?.has(group.id) === true, badgeScales?.get(group.id));
+  const frame = { x: absolute.x, y: absolute.y, width: size.width, height: size.height };
+  const projection = projections?.get(group.id);
+  const rect = groupPresentationRect(group, collapsed?.has(group.id) === true, frame, projection);
   if (collapsed?.has(group.id)) return rect;
-  return { x: rect.x - groupBadgeOutset, y: rect.y - groupBadgeOutset, width: rect.width + groupBadgeOutset * 2, height: rect.height + groupBadgeOutset * 2 };
+  return groupBadgeBounds(frame, projection);
 }
 
 /** Settle active group overlap while preserving every ordinary node in place. */
@@ -318,7 +320,7 @@ export function settleDraggedGroups(
     maxCandidates?: number;
     protectedNodeIds?: ReadonlySet<string>;
     collapsedGroupIds?: ReadonlySet<string>;
-    groupBadgeScales?: ReadonlyMap<string, number>;
+    groupBadgeProjections?: ReadonlyMap<string, GroupBadgeProjection>;
   } = {},
 ): GroupDropSettlementResult {
   const source = [...nodes];
@@ -326,7 +328,7 @@ export function settleDraggedGroups(
   if (!validateFiniteNodes(source)) return { ok: false, nodes: source, reason: "invalid-geometry", candidatesEvaluated: 0, movedNodeIds: [] };
   const sizes = options.groupSizes ?? getGroupLayoutSizes(source);
   const groups = buildGroups(source, byId, sizes, options.eligibleGroupIds);
-  const allGroups = buildGroups(source, byId, sizes, undefined, options.collapsedGroupIds, options.groupBadgeScales);
+  const allGroups = buildGroups(source, byId, sizes, undefined, options.collapsedGroupIds, options.groupBadgeProjections);
   const moving = new Set(movingGroupIds.filter((id) => byId.get(id)?.type === "group"));
   if (!moving.size) return { ok: true, nodes: source, candidatesEvaluated: 0, movedNodeIds: [] };
   const ideal = new Map<string, DropPoint>();
@@ -341,13 +343,15 @@ export function settleDraggedGroups(
   const collides = (candidateDelta: DropPoint): boolean => {
     for (const id of moving) {
       const group = byId.get(id)!;
-      const rect = groupRectAt(group, { x: ideal.get(id)!.x + candidateDelta.x, y: ideal.get(id)!.y + candidateDelta.y }, sizes, options.collapsedGroupIds, options.groupBadgeScales);
+      const absolute = { x: ideal.get(id)!.x + candidateDelta.x, y: ideal.get(id)!.y + candidateDelta.y };
+      const rect = groupRectAt(group, absolute, sizes, options.collapsedGroupIds, options.groupBadgeProjections);
       if (fixedGroups.some((fixed) => dropRectOverlaps(rect, fixed))) return true;
       if (group.parentId) {
         const parent = groups.find((entry) => entry.id === group.parentId);
         const size = sizes.get(id) ?? { width: readNodeWidth(group), height: readNodeHeight(group) };
         if (parent) {
-          const point = { x: rect.x + groupBadgeOutset, y: rect.y + groupBadgeOutset };
+          // 结构矩形自身的左上角参与父组包含判断；徽标外凸不改变成员的容器语义。
+          const point = { x: absolute.x, y: absolute.y };
           const clamped = clampDropPointToGroup(point, size, parent);
           if (!clamped || clamped.x !== point.x || clamped.y !== point.y) return true;
         }
@@ -361,7 +365,7 @@ export function settleDraggedGroups(
     for (const fixed of fixedGroups) {
       for (const id of moving) {
         const group = byId.get(id)!;
-        const rect = groupRectAt(group, ideal.get(id)!, sizes, options.collapsedGroupIds, options.groupBadgeScales);
+        const rect = groupRectAt(group, ideal.get(id)!, sizes, options.collapsedGroupIds, options.groupBadgeProjections);
         if (!dropRectOverlaps(rect, fixed)) continue;
         const candidates = projectDropPointOutside(rect, { width: rect.width, height: rect.height }, fixed);
         for (const candidate of candidates) {

@@ -2,7 +2,6 @@ import { createCancellationHandlers } from "./input/cancellation.js";
 import { createContextMenuFallback } from "./input/context-menu.js";
 import { createHistoryClick } from "./input/history-click.js";
 import { createGroupBadgeClick } from "./input/group-badge-click.js";
-import { createGroupBadgeResize } from "./input/group-badge-resize.js";
 /**
  * 2D 画布 gesture family（pointer / wheel / 快捷键 / 双击）
  * （change: 2026-09-28-split-frontend-god-plugins，task 3；design D2）。
@@ -35,7 +34,6 @@ export function create2dInputFamily(core: InteractionCore) {
   const aggregate = createAggregateConnectFamily(core);
   const history = createHistoryClick(core);
   const groupBadge = createGroupBadgeClick(core);
-  const badgeResize = createGroupBadgeResize(core);
 
   const drag = createDragGestureFamily(core);
   /**
@@ -174,7 +172,7 @@ export function create2dInputFamily(core: InteractionCore) {
       return;
     }
 
-    if (badgeResize.down(event, hit) || groupBadge.down(event, hit)) return;
+    if (groupBadge.down(event, hit)) return;
 
     if (hit && hit.kind === "aggregate-handle") {
       // change: add-multi-select-aggregate-connect：从选区聚合把手批量拉线。
@@ -370,7 +368,6 @@ export function create2dInputFamily(core: InteractionCore) {
   };
 
   const onPointerMove = (event: PointerEvent) => {
-    if (badgeResize.move(event)) return;
     if (groupBadge.move(event)) return;
     if (history.move(event)) return;
     if (modelPreviewPointerMove(core, event)) return;
@@ -386,9 +383,9 @@ export function create2dInputFamily(core: InteractionCore) {
     // 卡片外的片场模型 picking 仍驱动原有 hover 播放。
     const hitResult = core.queryPoint(world, core.activeViewport().zoom, state.hoveredEdgeId);
     const badge = hitResult.ok && hitResult.value?.kind === "node-action" && hitResult.value.actionId === "group-badge-select" ? hitResult.value : null;
-    const badgeGrip = hitResult.ok && hitResult.value?.kind === "node-action" && hitResult.value.actionId === "group-resize-badge";
-    canvas.title = badgeGrip ? "拖拽等比缩放徽标" : badge ? "选择并拖动组" : "";
-    if (canvas.style) canvas.style.cursor = writable() ? badgeGrip ? "nwse-resize" : badge ? "pointer" : "" : "";
+    // 徽标本体（模型投影范围）只负责选择、拖动与收起/展开；没有独立缩放手柄。
+    canvas.title = badge ? "选择并拖动组" : "";
+    if (canvas.style) canvas.style.cursor = writable() ? badge ? "pointer" : "" : "";
     core.settlePointerHover(
       hitResult,
       { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
@@ -480,7 +477,6 @@ export function create2dInputFamily(core: InteractionCore) {
 
   const onPointerUp = (event: PointerEvent) => {
     contextMenu.end(event);
-    if (badgeResize.up(event)) return;
     if (groupBadge.up(event)) return;
     if (history.up(event)) return;
     if (model.active) {
@@ -644,7 +640,7 @@ export function create2dInputFamily(core: InteractionCore) {
   };
 
   const { onPointerCancel, onBlur, onVisibilityChange } = createCancellationHandlers(
-    core, () => state.gesture.kind === "group-badge-resize" ? badgeResize.cancel() : cancelDragGesture(), () => aggregate.cancel()
+    core, () => cancelDragGesture(), () => aggregate.cancel()
   );
 
   const onPointerLeave = (event: PointerEvent) => {
@@ -692,7 +688,7 @@ export function create2dInputFamily(core: InteractionCore) {
     /** working canvas 更新时清理失效 contact/pending（design D6）；返回是否变化。 */
     pruneAttach: (): boolean => drag.prune(),
     /** 取消完整拖动粘连手势（modal pre-open / dispose / host）。 */
-    cancelDragGesture: () => state.gesture.kind === "group-badge-resize" ? badgeResize.cancel() : drag.cancel(),
+    cancelDragGesture: () => drag.cancel(),
     /** 当前拖动粘连瞬时投影；无或未越过移动阈值时 `null`（design D5）。 */
     attachProjection: () => drag.projection(),
     /** 当前聚合把手瞬时投影；无把手时 `null`（change: add-multi-select-aggregate-connect）。 */

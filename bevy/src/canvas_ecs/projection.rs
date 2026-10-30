@@ -226,8 +226,6 @@ fn apply_presentation(
         commands.entity(entity).insert(GroupPresentation {
             drop_target: presentation.drop_target,
             collapsed: presentation.collapsed,
-            badge: crate::canvas_query::group_model::has_badge(node),
-            badge_scale: presentation.badge_scale,
             member_count: presentation.member_count.max(0) as u32,
             running: crate::canvas2d::group_is_running(node),
             resizable: node.resizable,

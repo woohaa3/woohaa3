@@ -19,12 +19,6 @@ import type { ModelMediaTimeMap } from "./media-time.js";
 export const FILM_SET_GROUP_FIELD = "filmSetGroup" as const;
 export const FILM_SET_GROUP_SCHEMA_VERSION = 1 as const;
 export const FILM_SET_GROUP_MIGRATION_VERSION = 1 as const;
-/**
- * 旧片场卡片（260×195 的 3D 预览区）迁成 group 后，场景改在 3D 徽标里显示。徽标基准约
- * 88×64，未显式设置倍率时用 3 倍接近原来的可见面积，避免片场看起来突然变得很小。
- */
-export const FILM_SET_GROUP_DEFAULT_BADGE_SCALE = 3 as const;
-
 export const FILM_SET_GROUP_BINDING_KINDS = ["model3d", "image", "video"] as const;
 export type FilmSetGroupBindingKind = (typeof FILM_SET_GROUP_BINDING_KINDS)[number];
 
@@ -385,7 +379,7 @@ export type FilmSetGroupMigrationOptions = {
   idFactory?: (kind: string, sourceId: string, index: number) => string;
 };
 
-export { ensureFilmSetGroupBadgeScale, migrateLegacyFilmSetToGroup } from "./film-set-group-migration.js";
+export { migrateLegacyFilmSetToGroup } from "./film-set-group-migration.js";
 
 /** Small async cache used by the browser runtime.  A stale prepare is ignored. */
 export class FilmSetGroupPreparationCache<T> {

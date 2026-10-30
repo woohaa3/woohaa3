@@ -15,8 +15,6 @@ import type { Woohaa3CanvasNode } from "./canvas-runtime";
 export const groupPadding = 40;
 /** Reserved footer for the group identification model and separation from members. */
 export const groupBottomPadding = 80;
-/** Shallow badge lip in canvas units, outside member/resize bounds. */
-export const groupBadgeOutset = 6;
 
 type LayoutNode = Pick<Woohaa3CanvasNode, "id" | "type" | "parentId" | "position" | "width" | "height">;
 type LayoutSize = { width: number; height: number };

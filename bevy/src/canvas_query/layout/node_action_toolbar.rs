@@ -74,8 +74,8 @@ pub(crate) fn node_action_toolbar(
             scope.aabb.height,
         )
     } else if node.group.as_ref().is_some_and(|group| group.collapsed) {
-        let badge = crate::canvas_query::group_model::badge_rect(node);
-        (badge.x, badge.y, badge.z, badge.w)
+        let rect = crate::canvas_query::group_model::presentation_rect(node);
+        (rect.x, rect.y, rect.z, rect.w)
     } else {
         (node.x, node.y, node.width, node.height)
     };

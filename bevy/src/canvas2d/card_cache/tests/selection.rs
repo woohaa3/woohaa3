@@ -103,7 +103,7 @@ fn card_outline_is_present_and_resize_grip_depends_on_resizable() {
 }
 
 #[test]
-fn group_running_uses_solid_stroke_and_keeps_bubble_tail_joins() {
+fn group_running_uses_solid_stroke_on_the_closed_structural_frame() {
     let mut world = selection_world();
     let idle = draw(&mut world, &["group"]);
     assert!(!idle.is_empty(), "group 选中必须产生描边");
@@ -115,24 +115,36 @@ fn group_running_uses_solid_stroke_and_keeps_bubble_tail_joins() {
         "运行中应切换为实线描边，而不是复用虚线几何"
     );
 
-    // 尖角气泡：虚线路径从左右尾接点出发，且不画横跨气泡尾部的闭合边。
-    let node = &world.resource::<CurrentScene>().0.nodes[2];
+    // 组框是闭合圆角矩形：不再有气泡尖尾、开口或徽标描边。
+    let node = world
+        .resource::<CurrentScene>()
+        .0
+        .nodes
+        .iter()
+        .find(|node| node.id == "group")
+        .expect("group fixture");
     let frame = crate::canvas_query::group_model::frame_path(node);
-    let tail = crate::canvas_query::group_model::tail_path(node);
-    assert!(frame.len() > 4, "带模型徽标的 group 必须有尖角尾部路径");
-    assert!(tail.len() == 3, "带模型徽标的 group 必须有尾巴三角形");
-    // `frame_path` 从右尾接点起笔，先画两条斜边再绕回主体；任一侧接点都必须落在描边上。
-    assert!(
-        [tail[0], tail[2]]
-            .into_iter()
-            .any(|join| idle.iter().any(|point| point.distance(join) < 1.6)),
-        "选中描边必须从气泡尾接点开始：{:?}",
-        [tail[0], tail[2]]
+    assert!(frame.len() > 4, "组框是采样圆角矩形");
+    assert_eq!(
+        frame.first().copied(),
+        frame.last().copied(),
+        "组框路径必须闭合"
     );
-    let midpoint = Vec2::new((tail[0].x + tail[2].x) / 2.0, tail[0].y);
+    let bottom = node.y + node.height;
     assert!(
-        !idle.iter().any(|point| point.distance(midpoint) < 2.0),
-        "气泡尾部开口不得被选中虚线闭合：{midpoint:?}"
+        frame.iter().any(|point| (point.y - bottom).abs() < 1.0
+            && point.x >= node.x
+            && point.x <= node.x + node.width),
+        "闭合描边必须经过结构底边"
+    );
+    assert!(
+        idle.iter().all(|point| point.y <= bottom + 8.),
+        "徽标不再向下撑开组框描边（四角抓手的圆点可略超出角点）：{idle:?}"
+    );
+    let start = frame[0];
+    assert!(
+        idle.iter().any(|point| point.distance(start) < 1.6),
+        "选中描边必须覆盖闭合路径起点：{start:?}"
     );
 }
 

@@ -49,13 +49,13 @@ fn union(bounds: &mut Bounds2d, min_x: f32, min_y: f32, max_x: f32, max_y: f32) 
     }
 }
 
-/// 缓存内容的画布空间包围盒：徽标底座 ∪ 徽标内模型布局。
+/// 缓存内容的画布空间包围盒：模型投影范围。
 ///
 /// 媒体平面与模型共用同一条根链并落在 model bounds 附近；GPU 验收覆盖边缘裁切。缺失
-/// prepared model bounds 时回落到徽标矩形（纯媒体 owner 仍有一块稳定区域可缓存）。
+/// prepared model bounds 时没有徽标范围，也就没有可缓存的稳定区域。
 pub(crate) fn content_bounds(node: &GraphNode) -> Option<Bounds2d> {
     node.group.as_ref()?;
-    let badge = crate::canvas_query::group_model::badge_rect(node);
+    let badge = crate::canvas_query::group_model::badge_rect(node)?;
     let mut bounds = Bounds2d {
         min_x: badge.x,
         min_y: badge.y,
@@ -84,7 +84,6 @@ pub(crate) fn presentation_fingerprint(node: &GraphNode, prep: Option<&FilmSetGr
     let Some(group) = node.group.as_ref() else {
         return hash;
     };
-    feed(group.badge_scale.to_bits() as u64);
     feed(group.geometry_quality.is_some() as u64);
     feed(group.overview_cache.is_some() as u64);
     if let Some(bounds) = group.model_bounds.as_ref() {
@@ -158,7 +157,9 @@ mod tests {
         };
         serde_json::from_str(&format!(
             r#"{{"id":"film","type":"group","x":0,"y":0,"width":200,"height":150,
-                "group":{{"title":"set","memberCount":2,"collapsed":false,"badgeScale":1.5{declaration}}}}}"#
+                "model":{{"sceneVersion":"woohaa-model-scene-ir-v2","resourceKey":"k","signature":"s","placement":{{"offset":{{"x":0,"y":0,"z":0}},"scale":1,"yaw":0}}}},
+                "group":{{"title":"set","memberCount":2,"collapsed":false,
+                    "modelBounds":{{"aabb":{{"min":[-1,-1,-1],"max":[1,1,1]}},"extent":2}}{declaration}}}}}"#
         ))
         .unwrap()
     }
@@ -173,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn bounds_follow_the_badge_scale_but_ignore_absolute_position() {
+    fn bounds_follow_the_model_projection_but_ignore_absolute_position() {
         let first = content_bounds(&group(true)).unwrap();
         let mut moved = group(true);
         moved.x += 400.;
@@ -183,12 +184,15 @@ mod tests {
         assert!((second.min_y - first.min_y - 120.).abs() < 0.01);
         assert!(first.valid());
         assert!(first.max_y > 150., "badge extends below the group body");
-        assert!(first.min_y >= 150., "structural group body is not rendered into the cache");
+        // 徽标中心固定在组结构底边下方 40 画布单位，与模型尺寸和组宽无关。
+        assert!(((first.min_y + first.max_y) / 2. - 190.).abs() < 0.01);
         let mut wider = group(true);
         wider.width = 1200.;
         let wider_bounds = content_bounds(&wider).unwrap();
         assert!((wider_bounds.max_x - wider_bounds.min_x - (first.max_x - first.min_x)).abs() < 0.01,
             "a wider group body must not inflate cache resolution");
+        assert!((wider_bounds.max_y - wider_bounds.min_y - (first.max_y - first.min_y)).abs() < 0.01,
+            "a wider group body must not change the badge height");
     }
 
     #[test]
