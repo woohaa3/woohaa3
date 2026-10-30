@@ -193,6 +193,12 @@ pub(crate) fn draw_selection_outline(
     node: &GraphNode,
     index: usize,
 ) {
+    // 便签有自己的一套选中描边：它是倾斜的圆角纸片，套用卡片的轴对齐外框 +
+    // 卡片底色内层（白面）会露出一圈白边、且与纸的角度对不齐。
+    if node.kind == "sticky" {
+        super::sticky_note::draw_selection_outline(geometry, theme, node, index);
+        return;
+    }
     let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     let (width, height) = (node.width, node.height);
     geometry.rounded_rect(

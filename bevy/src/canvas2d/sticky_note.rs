@@ -24,10 +24,19 @@ const NOTE_RADIUS: f32 = 6.0;
 /// 纸的倾斜角（弧度）。参考稿里便签是斜着放的，这点倾斜让它一眼区别于卡片。
 const NOTE_TILT: f32 = -0.035;
 /// 投影的竖直偏移。参考稿的影很淡、只往下沉一点，不是一块贴在纸下的黑边。
-const NOTE_SHADOW_OFFSET: f32 = 3.0;
-/// 投影扩散的层数。用几层低透明度叠出"柔化"的效果 ——
-/// 单层实心偏移在便签这种小尺寸上会读成一条硬边（曾经就是这么画的）。
-const NOTE_SHADOW_LAYERS: usize = 3;
+const NOTE_SHADOW_OFFSET: f32 = 2.5;
+/// 投影的水平偏移。参考稿光从左上来，影子略偏右。
+const NOTE_SHADOW_DX: f32 = 1.0;
+/// 投影相对画布底的浓度（0 = 与画布底同色即不可见，1 = 完全等于阴影色）。
+///
+/// 因为卡片走不透明材质，阴影必须是**实色**，所以浓淡靠与画布底混色表达，
+/// 而不是顶点 alpha（那条路在不透明材质下会被忽略）。参考稿的影极淡，0.10 左右刚好。
+const NOTE_SHADOW_STRENGTH: f32 = 0.10;
+
+/// 选中时外发光比纸大出的距离。
+const NOTE_SELECT_SPREAD: f32 = 4.0;
+/// 选中描边的粗细（纸外沿那一圈色带的宽度）。
+const NOTE_SELECT_WIDTH: f32 = 1.7;
 
 /// 绕中心旋转点集。便签整张纸（含投影）都按同一角度转，
 /// 否则纸转、影不转，看起来像两层东西叠在一起。
@@ -88,29 +97,31 @@ pub(super) fn draw(
 
     let center = Vec2::new(x + width / 2.0, y + height / 2.0);
 
-    // 投影：几层低透明度、逐层放大并下沉的圆角形状叠出柔和边缘。
-    // 单层实心偏移会读成一条硬边（参考稿里没有硬边，只有纸下一抹淡淡的灰）。
-    for layer in 0..NOTE_SHADOW_LAYERS {
-        let spread = layer as f32 * 1.5;
-        let drop = NOTE_SHADOW_OFFSET + layer as f32 * 0.8;
-        let points = rotate_points(
-            &rounded_rect_points(
-                x - spread,
-                y - spread + drop,
-                width + spread * 2.0,
-                height + spread * 2.0,
-                NOTE_RADIUS + spread,
-            ),
-            center,
-            NOTE_TILT,
-        );
-        geometry.polygon_alpha(
-            &points,
-            z + 0.001 + layer as f32 * 0.0001,
-            theme.token_u32("canvasStickyShadow"),
-            0.16,
-        );
-    }
+    // 投影：一层**实色**（不是半透明）。
+    //
+    // 卡片走的是块缓存 + 不透明材质，而 `Geometry::build()` 会把 blend 几何合进同一张
+    // mesh，不透明材质**直接忽略顶点 alpha** —— 用 `polygon_alpha` 传 0.16 会原样画出
+    // 纯黑（踩过，便签底下是一块黑板）。所以这里按现有卡片阴影的做法，把阴影色与画布底
+    // 预先混成"看起来是半透明"的实色。
+    //
+    // 也不能叠多层：不透明绘制后画的完全覆盖先画的，只有最后一层可见。
+    let shadow_color = super::group_motion::mix(
+        theme.token_u32("webBackdrop"),
+        theme.token_u32("canvasStickyShadow"),
+        NOTE_SHADOW_STRENGTH,
+    );
+    let shadow = rotate_points(
+        &rounded_rect_points(
+            x + NOTE_SHADOW_DX,
+            y + NOTE_SHADOW_OFFSET,
+            width,
+            height,
+            NOTE_RADIUS,
+        ),
+        center,
+        NOTE_TILT,
+    );
+    geometry.polygon(&shadow, z + 0.001, shadow_color);
 
     // 纸：圆角矩形，整张跟着倾斜。
     let paper = rotate_points(
@@ -169,6 +180,57 @@ pub(super) fn draw(
         labels.push((line, place(line_index), NOTE_FONT, color));
     }
     labels
+}
+
+/// 便签的选中描边：沿纸的轮廓描一圈，跟着倾斜。
+///
+/// 不能复用卡片的 `draw_selection_outline` —— 那套是轴对齐外框套一圈卡片底色（白面），
+/// 画到倾斜的便签上会露出白边、角度也对不齐（踩过，选中时便签像被框在白色卡纸里）。
+///
+/// **两层都必须画在纸的下层**（z 小于纸）：它们是比纸略大的**实心**多边形，
+/// 靠"纸面盖住中间、只露外沿"形成一圈边。画在纸上面就是整张纸被填成选中色
+/// （踩过，选中时便签整个变黑）。
+pub(super) fn draw_selection_outline(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    node: &GraphNode,
+    index: usize,
+) {
+    let z = 10.0 + index as f32 * 0.1;
+    let (x, y) = (node.x, node.y);
+    let (width, height) = (node.width, node.height);
+    if width <= 0.0 || height <= 0.0 {
+        return;
+    }
+    let center = Vec2::new(x + width / 2.0, y + height / 2.0);
+
+    // 外发光：比纸略大一圈、圆角略大，压在最底下。
+    let halo = rotate_points(
+        &rounded_rect_points(
+            x - NOTE_SELECT_SPREAD,
+            y - NOTE_SELECT_SPREAD,
+            width + NOTE_SELECT_SPREAD * 2.0,
+            height + NOTE_SELECT_SPREAD * 2.0,
+            NOTE_RADIUS + NOTE_SELECT_SPREAD,
+        ),
+        center,
+        NOTE_TILT,
+    );
+    geometry.polygon(&halo, z + 0.0015, theme.token_u32("canvasNodeSelectedHalo"));
+
+    // 选中描边：比纸大出一圈，纸面（z + 0.002 / 0.003）随后盖住中间，只留下外沿。
+    let ring = rotate_points(
+        &rounded_rect_points(
+            x - NOTE_SELECT_WIDTH,
+            y - NOTE_SELECT_WIDTH,
+            width + NOTE_SELECT_WIDTH * 2.0,
+            height + NOTE_SELECT_WIDTH * 2.0,
+            NOTE_RADIUS + NOTE_SELECT_WIDTH,
+        ),
+        center,
+        NOTE_TILT,
+    );
+    geometry.polygon(&ring, z + 0.0018, theme.token_u32("canvasNodeBorderSelected"));
 }
 
 /// 按宽度折行。优先在显式换行处分段；单段超宽时按字断行。

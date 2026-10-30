@@ -171,6 +171,9 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
               case "ui.node-rename.open-requested":
                 ctx.emit("ui.node-rename.open-requested", payload as never);
                 return;
+              case "ui.sticky-note.edit-requested":
+                ctx.emit("ui.sticky-note.edit-requested", payload as never);
+                return;
               case "ui.video-frame-capture.open-requested":
                 ctx.emit("ui.video-frame-capture.open-requested", payload as never);
                 return;
