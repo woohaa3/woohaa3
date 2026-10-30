@@ -36,6 +36,17 @@ describe("content interaction policy", () => {
     expect(decideContentAction(registry(), "copy", "group", {})).toEqual({ allowed: true });
   });
 
+  it("keeps a released owner group read-only while its locator is retained", () => {
+    const content = new ContentContributionRegistry();
+    const release = content.register({ extensionId: "test.group", ownerLocators: [{ nodeTypes: ["group"], fields: ["testGroup"] }] });
+    release();
+    expect(decideContentAction(content, "delete", "group", { testGroup: {} })).toEqual({
+      allowed: false,
+      reason: "content-owner-unavailable"
+    });
+    expect(decideContentAction(content, "delete", "group", {})).toEqual({ allowed: true });
+  });
+
   it("keeps an unregistered composite node read-only for delete/copy", () => {
     expect(decideContentAction(registry(), "copy", "composite-asset", { extensionId: "missing" })).toEqual({
       allowed: false,

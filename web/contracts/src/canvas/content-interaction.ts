@@ -67,7 +67,10 @@ export function decideContentAction(
       return { allowed: false, reason: "content-interaction-failed" };
     }
   }
+  const located = locateContentNode(content, type, data);
+  if (!located.ok) return { allowed: false, reason: "content-location-conflict" };
   const owner = contentOwnerForNode(content, type, data);
+  if (located.location && !owner && !located.location.sources.includes("managed")) return { allowed: false, reason: "content-owner-unavailable" };
   const policy = owner?.interaction;
   if (!policy) return { allowed: true };
   try {

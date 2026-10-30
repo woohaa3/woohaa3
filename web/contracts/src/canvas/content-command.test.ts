@@ -110,7 +110,7 @@ describe("extension.command", () => {
     };
     const dangling: ContentCommandCodec = {
       ...commands(),
-      apply: (_value, current) => ({ ok: true, canvas: { ...current, document: { ...current.document, edges: [...current.document.edges, { id: "bad", source: "node", target: "missing" }] } } })
+      apply: (_value, current) => ({ ok: true, canvas: { ...current, document: { ...current.document, edges: [...current.document.edges, { id: "bad", source: "node", target: "missing", data: {} }] } } })
     };
     for (const [codec, message] of [[crossOwner, "content-command-cross-owner"], [dangling, "content-command-dangling-reference"]] as const) {
       const registry = new ContentContributionRegistry();
