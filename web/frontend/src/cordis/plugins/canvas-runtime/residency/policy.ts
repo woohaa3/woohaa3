@@ -9,8 +9,13 @@
  * （design D3 最后一段）。测试用 `resolveResidencyPolicy` 注入更小预算，不复制常量。
  */
 
-/** 缩略图/纹理尺寸档（长边像素）。禁止全量固定 1024（design D3）。 */
-export const THUMBNAIL_TIERS = [128, 256, 512, 1024] as const;
+/**
+ * 缩略图/纹理尺寸档（长边像素）。禁止全量固定 1024（design D3）。
+ *
+ * 档位跟随**实际显示尺寸**选取：卡片放大到多少物理像素，就取不小于它的最近档。
+ * 因此 2048/4096 两档只在大图放大时才会用到 —— 不放大就不会多占显存。
+ */
+export const THUMBNAIL_TIERS = [128, 256, 512, 1024, 2048, 4096] as const;
 export type ThumbnailTier = (typeof THUMBNAIL_TIERS)[number];
 
 /** 资源需求用途；数值越小优先级越高（design D1 的 purpose）。 */

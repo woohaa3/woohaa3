@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { rasterizeDrawable, type RasterCanvas } from "./media-raster.js";
 
 describe("媒体帧光栅化", () => {
-  it("大图聚焦请求不超过 Bevy 2048 上限，同时保留原图尺寸与比例", () => {
+  it("大图聚焦请求不超过 Bevy 纹理上限，同时保留原图尺寸与比例", () => {
     const source = { width: 6000, height: 3000 };
     const canvas: RasterCanvas = {
       width: 0, height: 0,
@@ -12,8 +12,8 @@ describe("媒体帧光栅化", () => {
       })
     };
     const raster = rasterizeDrawable({}, source, () => canvas, 4096);
-    expect(raster).toMatchObject({ width: 2048, height: 1024 });
-    expect(raster?.pixels.length).toBe(2048 * 1024 * 4);
+    expect(raster).toMatchObject({ width: 4096, height: 2048 });
+    expect(raster?.pixels.length).toBe(4096 * 2048 * 4);
     expect(source).toEqual({ width: 6000, height: 3000 });
   });
 

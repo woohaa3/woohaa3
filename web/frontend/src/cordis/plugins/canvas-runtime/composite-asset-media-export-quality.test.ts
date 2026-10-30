@@ -11,7 +11,7 @@ import {
   type ServerCanvas
 } from "@woohaa3/contracts";
 import { createCompositeAssetMediaSessions, EXPORT_TEXTURE_MAX_DIMENSION } from "./composite-asset-media-session.js";
-import { TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
+import { TEXTURE_FALLBACK_TIER, TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
 
 const NOW = "2026-10-19T00:00:00.000Z";
 
@@ -77,19 +77,20 @@ function recordingFactory(sizes: Array<{ width: number; height: number }>) {
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("片场媒体导出纹理上限（D5）", () => {
-  it("导出上限与 Bevy 纹理上限一致，且高于交互预览", () => {
-    expect(EXPORT_TEXTURE_MAX_DIMENSION).toBe(2048);
-    expect(TEXTURE_MAX_DIMENSION).toBe(1024);
+  it("导出上限取纹理硬上限，且严格高于日常交互档位", () => {
+    expect(TEXTURE_MAX_DIMENSION).toBe(4096);
+    expect(EXPORT_TEXTURE_MAX_DIMENSION).toBe(TEXTURE_MAX_DIMENSION);
+    expect(EXPORT_TEXTURE_MAX_DIMENSION).toBeGreaterThan(TEXTURE_FALLBACK_TIER);
   });
 
-  it("预览用 1024，导出期间改用 2048 并在下一次取帧重新上传", async () => {
+  it("导出期间改用导出档位，退出后回到交互档位并重新上传", async () => {
     const sizes: Array<{ width: number; height: number }> = [];
     const sessions = createCompositeAssetMediaSessions({
       runtime: { retryVersion: () => 0, setModelMediaTexture: () => true } as never,
       getCanvas: () => canvas(),
       getSources: () => sources(canvas()) as never,
       createCanvas: recordingFactory(sizes) as never,
-      // 一张 4096×2160 的图片：预览缩到 1024×540，导出缩到 2048×1080。
+      // 一张 4096×2160 的图片：交互按兜底档 1024，导出升到硬上限 4096。
       loadImage: async () => ({ width: 4096, height: 2160 })
     });
     sessions.sync();
@@ -99,7 +100,8 @@ describe("片场媒体导出纹理上限（D5）", () => {
     sessions.setExportQuality(true);
     sessions.sync();
     await flush();
-    expect(sizes.at(-1)).toEqual({ width: 2048, height: 1080 });
+    // 导出档位等于硬上限：4096×2160 原样取帧，不再降采样。
+    expect(sizes.at(-1)).toEqual({ width: 4096, height: 2160 });
 
     sessions.setExportQuality(false);
     sessions.sync();

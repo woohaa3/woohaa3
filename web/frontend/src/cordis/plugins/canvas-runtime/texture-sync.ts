@@ -34,10 +34,23 @@ import {
 } from "./image-load.js";
 
 /**
- * 纹理最长边上限（像素）。纹理尺寸**保持图片自身宽高比**（不填充、不裁剪），
- * 因此 Bevy 侧 contain 后图片必然顶住内容框的某一轴边缘、无多余边距。
+ * 纹理最长边**上限**（像素），与 Rust `MAX_TEXTURE_EDGE`、`BEVY_TEXTURE_MAX_DIMENSION` 一致。
+ * 纹理尺寸保持图片自身宽高比（不填充、不裁剪），Bevy 侧 contain 后必然顶住内容框某一轴。
+ *
+ * 这是上限，**不是默认档位**：真正的档位由准入投影按显示物理像素选择（见 `THUMBNAIL_TIERS`）。
+ * 不要把本常量直接当作解码尺寸用 —— 那会让每张图都按 4096 解码（单张约 67 MB）。
  */
-export const TEXTURE_MAX_DIMENSION = 1024;
+export const TEXTURE_MAX_DIMENSION = 4096;
+
+/**
+ * 没有准入投影时的兜底档位（注入运行时/单测）。
+ *
+ * 取 1024 而不是上限：兜底路径拿不到实际显示尺寸，按上限解码等于给每张图都分配最大值。
+ */
+export const TEXTURE_FALLBACK_TIER: ThumbnailTier = 1024;
+
+/** 上传中幽灵节点的本地预览档位：临时显示用，不必按上限解码。 */
+export const TEXTURE_PREVIEW_TIER: ThumbnailTier = 1024;
 
 /** 单个节点在本帧的准入信息（由页面资源协调器提供）。 */
 export type TextureAdmission = {
@@ -154,8 +167,14 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
   let boundStructure = "";
   let boundDesired: Map<string, { url: string; tier: ThumbnailTier }> | null = null;
 
-  /** 内容身份：URL 本身（已含画布读提示）；不含 nodeId（design D4）。 */
-  const contentKeyOf = (url: string): string => url;
+  /**
+   * 内容身份：URL + 解码档位。
+   *
+   * 档位必须参与身份：同一张图在卡片上可能是 512，放大后变成 2048 —— 只按 URL 缓存会让
+   * 放大的卡片继续复用旧的低清像素，永远等不到更高一档（表现为"放大还是模糊"）。
+   * 不含 nodeId（design D4）：同图同档仍在节点间共享一次解码。
+   */
+  const contentKeyOf = (url: string, tier: ThumbnailTier): string => `${url}|${tier}`;
 
   /**
    * 该节点当前的准入信息。
@@ -164,7 +183,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
    * **明确未准入**，必须保持占位，不能回落到默认准入（否则先准入再创建的门禁失效）。
    */
   const admissionOf = (nodeId: string): TextureAdmission => {
-    if (!options.admissionOf) return { admitted: true, purpose: "visible", tier: TEXTURE_MAX_DIMENSION };
+    if (!options.admissionOf) return { admitted: true, purpose: "visible", tier: TEXTURE_FALLBACK_TIER };
     return options.admissionOf(nodeId) ?? { admitted: false, purpose: "visible", tier: THUMBNAIL_TIERS[0] };
   };
 
@@ -190,7 +209,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     // 上传中的幽灵节点：本地预览 URL（object URL），同样走解码/上传；真实节点出现后覆盖它。
     const previews = options.getPreviewUrls?.();
     if (previews) {
-      for (const [nodeId, url] of previews) desired.set(nodeId, { url, tier: TEXTURE_MAX_DIMENSION });
+      for (const [nodeId, url] of previews) desired.set(nodeId, { url, tier: TEXTURE_PREVIEW_TIER });
     }
     return desired;
   };
@@ -315,7 +334,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
 
   /** 把某个已解码内容绑定到节点（必要时重新上传）。 */
   const bindNode = (nodeId: string, url: string, tier: ThumbnailTier): void => {
-    const key = contentKeyOf(url);
+    const key = contentKeyOf(url, tier);
     const previous = entries.get(nodeId);
     const unchanged = previous && previous.url === url && previous.tier === tier;
     if (unchanged) {

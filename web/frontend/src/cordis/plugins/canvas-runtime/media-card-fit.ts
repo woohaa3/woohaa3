@@ -1,11 +1,16 @@
 /**
- * 图片卡片按图片比例定尺寸。
+ * 图片卡片按图片自身的像素尺寸定尺寸。
  *
- * 卡片默认是固定的 248×232，图片在内容区里 contain，横图/竖图都会留出灰边。图片解码完成后，
- * 若卡片仍是默认尺寸（没被手动拉过），就把卡片改成「内容区与图片同比例、面积与默认内容区相近」
- * 的尺寸。已经被调过的卡片不动，所以只会适配一次。
+ * 卡片默认是固定的 248×232，图片在里面 contain，横图/竖图都会留灰边。图片解码完成后，若卡片
+ * 仍是默认尺寸（没被手动拉过），就把它改成**原图像素尺寸、按 `CARD_FIT_MAX_EDGE` 封顶**的卡片，
+ * 与参考实现 `fitNodeSize`（infinite-canvas）一致：`scale = min(1, maxEdge / 长边)`。
  *
- * 卡片几何与 Bevy `canvas_query/layout.rs` 保持一致：四边等宽的窄边 `CARD_CONTENT_PAD`，
+ * 三点约束：
+ * - **不放大到超过原图 1:1**（`scale <= 1`）：小图不会被撑成大卡。
+ * - 长边封顶 `CARD_FIT_MAX_EDGE`：4K 图不会铺成 3840 宽，否则画布上一张卡就占满视野。
+ * - 宽度不低于 `MIN_CARD_WIDTH`：低于它 Bevy 会切到紧凑卡片布局。
+ *
+ * 卡片几何与 Bevy `canvas_query/layout.rs` 保持一致：四边等宽窄边 `CARD_CONTENT_PAD`，
  * 名称与尺寸画在卡片上方外侧，不占卡片内部高度。
  */
 import { bevyNodeSize, DEFAULT_NODE_DIMS, type CanvasCommand, type ServerCanvas } from "@woohaa3/contracts";
@@ -15,36 +20,35 @@ const RICH_CONTENT_NODE_SIZE = bevyNodeSize("image");
 const CARD_CONTENT_PAD = 6;
 /** 宽度低于 196 时 Bevy 会切到紧凑卡片布局，因此下限取它而不是节点最小宽度 180。 */
 const MIN_CARD_WIDTH = 196;
-const MAX_CARD_WIDTH = 360;
-const MAX_CARD_HEIGHT = 400;
+/**
+ * 卡片长边上限（世界单位）。
+ *
+ * 与参考实现 `fitNodeSize` 的 640 一致：再大就不会自动铺开，用户仍可手动拉伸。
+ */
+export const CARD_FIT_MAX_EDGE = 640;
 
 /** 视为「没被手动调过」的尺寸：富内容卡默认值与 reducer 的兜底默认值。 */
 const DEFAULT_SIZES = [RICH_CONTENT_NODE_SIZE, DEFAULT_NODE_DIMS];
 
-function contentWidthOf(cardWidth: number): number {
-  return cardWidth - CARD_CONTENT_PAD * 2;
-}
-
-function contentHeightOf(cardHeight: number): number {
-  return cardHeight - CARD_CONTENT_PAD * 2;
-}
-
-/** 默认卡片内容区面积：适配后的卡片保持大致相同的视觉分量。 */
-const TARGET_CONTENT_AREA =
-  contentWidthOf(RICH_CONTENT_NODE_SIZE.width) * contentHeightOf(RICH_CONTENT_NODE_SIZE.height);
-
-/** 按图片宽高比算卡片尺寸；图片尺寸非法时返回 null。 */
+/**
+ * 按**图片像素尺寸**算卡片尺寸（含四边窄边）；图片尺寸非法时返回 null。
+ *
+ * `scale = min(1, CARD_FIT_MAX_EDGE / 长边)`：只缩小、不放大。缩到宽度不足
+ * `MIN_CARD_WIDTH` 时按宽度下限回推（避免落入紧凑卡片布局）。
+ */
 export function fitImageCardSize(media: { width: number; height: number }): { width: number; height: number } | null {
   if (!(media.width > 0) || !(media.height > 0)) return null;
-  const ratio = media.width / media.height;
-  let contentWidth = Math.sqrt(TARGET_CONTENT_AREA * ratio);
-  contentWidth = Math.min(Math.max(contentWidth, contentWidthOf(MIN_CARD_WIDTH)), contentWidthOf(MAX_CARD_WIDTH));
-  let contentHeight = contentWidth / ratio;
-  const maxContentHeight = contentHeightOf(MAX_CARD_HEIGHT);
-  if (contentHeight > maxContentHeight) contentHeight = maxContentHeight;
+  const contentWidth = Math.max(1, media.width);
+  const contentHeight = Math.max(1, media.height);
+  const longest = Math.max(contentWidth, contentHeight);
+  // 只缩小不放大；长边封顶。
+  let scale = Math.min(1, CARD_FIT_MAX_EDGE / longest);
+  // 缩完宽度不够时，以下限宽度为准（竖直长条图会因此变高，但不会挤进紧凑布局）。
+  const minContentWidth = MIN_CARD_WIDTH - CARD_CONTENT_PAD * 2;
+  if (contentWidth * scale < minContentWidth) scale = minContentWidth / contentWidth;
   return {
-    width: Math.round(contentWidth + CARD_CONTENT_PAD * 2),
-    height: Math.round(contentHeight + CARD_CONTENT_PAD * 2)
+    width: Math.round(contentWidth * scale) + CARD_CONTENT_PAD * 2,
+    height: Math.round(contentHeight * scale) + CARD_CONTENT_PAD * 2
   };
 }
 

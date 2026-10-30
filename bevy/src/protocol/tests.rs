@@ -447,7 +447,10 @@ fn texture_length_is_checked() {
     assert!(validate_texture(2, 2, 16).is_ok());
     assert_eq!(validate_texture(2, 2, 15), Err("Invalid texture"));
     assert_eq!(validate_texture(0, 2, 0), Err("Invalid texture"));
-    assert_eq!(validate_texture(3000, 1, 12000), Err("Invalid texture"));
+    // 超过单边上限（MAX_TEXTURE_EDGE = 4096）必须拒绝。
+    assert_eq!(validate_texture(8192, 1, 8192 * 4), Err("Invalid texture"));
+    // 上限本身合法：卡片纹理按显示尺寸选档，4096 档必须能上传。
+    assert!(validate_texture(4096, 1, 4096 * 4).is_ok());
 }
 
 /// V1 模型引用现在应被边界拒绝（change: 2026-10-07-remove-residual-compatibility）。

@@ -15,7 +15,7 @@ import {
   type RasterCanvasFactory
 } from "./media-raster.js";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
-import { TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
+import { TEXTURE_FALLBACK_TIER, TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
 import { isTransientImageFailure, loadImageViaDom, IMAGE_RETRY_DELAYS_MS, IMAGE_RETRY_MAX_ATTEMPTS } from "./image-load.js";
 import type { VideoElementLike } from "./video-frame-session.js";
 import type { CanvasResourceCoordinator, ResidencyPurpose } from "./residency/index.js";
@@ -23,9 +23,10 @@ import type { CanvasResourceCoordinator, ResidencyPurpose } from "./residency/in
 /**
  * 导出取帧时片场媒体平面的纹理边长上限（change: 2026-10-19-extend-film-set-for-motion-graphics，D5）。
  *
- * 与 Rust `protocol::MAX_TEXTURE_EDGE` 一致；交互预览仍用 1024，避免常驻显存翻四倍。
+ * 取整个纹理硬上限：导出是用户显式要的成片质量，必须高于日常交互预览。
+ * 交互预览仍用 `TEXTURE_FALLBACK_TIER`，避免常驻显存按上限摊开。
  */
-export const EXPORT_TEXTURE_MAX_DIMENSION = 2048;
+export const EXPORT_TEXTURE_MAX_DIMENSION = TEXTURE_MAX_DIMENSION;
 
 /** 同时存在的片场媒体会话上限（decoder 硬上限，与统一准入集合取小）。 */
 export const COMPOSITE_ASSET_MEDIA_SESSION_LIMIT = 24;
@@ -176,7 +177,8 @@ export function createCompositeAssetMediaSessions(
   let generationSeq = 1;
   let disposed = false;
   /** 导出取帧时的纹理上限（D5）：交互预览 1024，导出 2048。 */
-  let maxTextureEdge = TEXTURE_MAX_DIMENSION;
+  /** 交互预览按兜底档；导出时升到硬上限（见 `setExportQuality`）。 */
+  let maxTextureEdge = TEXTURE_FALLBACK_TIER;
   /** 非目标平面等待开始时间（公平轮换）；不在集合内即清除。 */
   const waitingSince = new Map<string, number>();
   let lastRotationAt = 0;
@@ -693,7 +695,7 @@ export function createCompositeAssetMediaSessions(
     },
 
     setExportQuality(enabled: boolean) {
-      const next = enabled ? EXPORT_TEXTURE_MAX_DIMENSION : TEXTURE_MAX_DIMENSION;
+      const next = enabled ? EXPORT_TEXTURE_MAX_DIMENSION : TEXTURE_FALLBACK_TIER;
       if (next === maxTextureEdge) return;
       maxTextureEdge = next;
       // 尺寸上限变了：已上传的纹理仍是旧的。

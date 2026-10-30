@@ -5,7 +5,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
-import { createTextureSync, TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
+import { createTextureSync, TEXTURE_FALLBACK_TIER } from "./texture-sync.js";
 import type { BevyRuntime } from "./bevy-runtime.js";
 import { IMAGE_RETRY_DELAYS_MS, ImageLoadError } from "./image-load.js";
 
@@ -192,13 +192,13 @@ describe("createTextureSync", () => {
     };
     let current = canvas(true);
     const { runtime, uploaded } = runtimeRecorder();
-    // 4000x2000 → 缩放到最长边 1024，比例仍为 2:1。
+    // 4000x2000 → 无准入投影时按兜底档 1024 解码，比例仍为 2:1。
     const sync = createTextureSync({ runtime, getCanvas: () => current, loadImage: async () => fakeImage(4000, 2000) });
     sync.sync();
     await new Promise((resolve) => setTimeout(resolve, 0));
     sync.sync();
     const [upload] = uploaded;
-    expect(upload.width).toBe(TEXTURE_MAX_DIMENSION);
+    expect(upload.width).toBe(TEXTURE_FALLBACK_TIER);
     expect(upload.width / upload.height).toBeCloseTo(2, 2);
     sync.dispose();
   });

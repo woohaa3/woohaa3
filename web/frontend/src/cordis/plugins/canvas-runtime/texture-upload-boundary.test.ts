@@ -32,7 +32,8 @@ describe("纹理失败隔离", () => {
     const issues = new RuntimeIssues();
     const boundary = new TextureUploadBoundary(issues);
     const invoke = vi.fn();
-    expect(boundary.upload("node", "n", 4096, 1, new Uint8Array(4096 * 4), invoke)).toBe(false);
+    // 超过 Bevy 纹理硬上限（4096）的尺寸必须在调用前拒绝。
+    expect(boundary.upload("node", "n", 8192, 1, new Uint8Array(8192 * 4), invoke)).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
     expect(issues.getSnapshot()[0]?.retainedPreview).toBe(false);
     boundary.retain(new Set(), new Set());

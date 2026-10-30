@@ -81,7 +81,10 @@ pub(crate) use viewport::{CANVAS_VIEWPORT_UPDATE_VERSION, ViewportUpdateRequest}
 pub(crate) const DEFAULT_NODE_WIDTH: f32 = 224.0;
 pub(crate) const DEFAULT_NODE_HEIGHT: f32 = 116.0;
 /// 单边最大纹理尺寸。
-pub(crate) const MAX_TEXTURE_EDGE: u32 = 2048;
+///
+/// 卡片纹理按实际显示尺寸选档，上限需要跟着放到 4096，否则 4K 图放大后永远停在
+/// 1024 长边（表现为"原图看着模糊"）。
+pub(crate) const MAX_TEXTURE_EDGE: u32 = 4096;
 /// set_scene JSON 载荷上限（16 MiB，与 native renderer 消息上限一致）。
 pub(crate) const MAX_SCENE_BYTES: usize = 16 * 1024 * 1024;
 

@@ -37,7 +37,10 @@ describe("residency policy", () => {
     expect(selectThumbnailTier(120)).toBe(128);
     expect(selectThumbnailTier(200)).toBe(256);
     expect(selectThumbnailTier(900)).toBe(1024);
-    expect(selectThumbnailTier(4000)).toBe(1024);
+    // 放大后不再停在 1024：档位继续跟上实际显示像素，直到纹理硬上限。
+    expect(selectThumbnailTier(1500)).toBe(2048);
+    expect(selectThumbnailTier(3000)).toBe(4096);
+    expect(selectThumbnailTier(9000)).toBe(4096);
     expect(selectThumbnailTier(Number.NaN)).toBe(128);
   });
 });
