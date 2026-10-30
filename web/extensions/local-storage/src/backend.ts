@@ -102,14 +102,14 @@ export const LOCAL_STORAGE_CONFIG = defineConfigSchema({
     secret: true,
     reload: "hot",
     label: "公开桶 SecretId",
-    description: "公开临时桶凭据；留空时依次读环境变量 COS_PUBLIC_SECRET_ID、COS_SECRET_ID"
+    description: "公开临时桶凭据；留空时依次读环境变量 COS_PUBLIC_SECRET_ID、COS_SECRET_ID，或复用「COS / S3 对象存储」的凭据"
   },
   publicSecretKey: {
     kind: "string",
     secret: true,
     reload: "hot",
     label: "公开桶 SecretKey",
-    description: "公开临时桶凭据；留空时依次读环境变量 COS_PUBLIC_SECRET_KEY、COS_SECRET_KEY"
+    description: "公开临时桶凭据；留空时依次读环境变量 COS_PUBLIC_SECRET_KEY、COS_SECRET_KEY，或复用「COS / S3 对象存储」的凭据"
   }
 });
 
