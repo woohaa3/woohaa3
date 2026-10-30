@@ -1,5 +1,34 @@
 # 本机 Bevy 画布基准
 
+## 在当前主画布采集退化现场
+
+针对「初始空场约 111 FPS → 看过片场 → 回到空场仍约 40 FPS」，在发生问题的同一应用窗口、同一次运行内采集，保留真实构建和用户画布。打开 DevTools，把 [capture-session.js](capture-session.js) 全文粘贴到 Console 或 Sources Snippet 执行。脚本只按需读取已有诊断、在内存保留最多 12 段，不自动上传、不改画布，也不开常驻采样循环。
+
+每个状态稳定后执行对应一行，等待返回表格再进入下一阶段：
+
+```js
+await __canvasPerfProbe.sample("initial-empty"); // 初始空场，默认采 20 秒
+await __canvasPerfProbe.sample("film-set");      // 主画布中查看片场后
+await __canvasPerfProbe.sample("returned-empty"); // 返回原空白区域或原空画布后
+await __canvasPerfProbe.sample("returned-after-60s"); // 返回空场等 60 秒，再采一段
+```
+
+阶段之间按真实复现路径移动/切换画布；采样的 20 秒内保持应用可见、停止输入，不刷新、不切主题、不缩放窗口，保持缩放和显示器一致。DevTools 使用独立窗口，避免挤压画布导致比较尺寸变化。缺失字段保留 null；切后台、采样期间切画布/文档 revision 变化、渲染器重建或无出帧的阶段标为 invalid。最后在 Console 执行 `copy(__canvasPerfProbe.json())` 保存完整 JSON；没有 `copy` 的 DevTools 可查看 `__canvasPerfProbe.json()` 的返回值。刷新会清空内存，先保存报告。
+
+报告每段保存阶段前后原始健康计数、Rust 工作诊断、JS 工作计数、资源驻留、总览缓存，以及轻量场景身份/节点数/视口。桌面新版前端使用异步诊断 RPC；旧版前端回落到同步读取，仅在两端各读一次，边界读取耗时单列为 `boundaryReadMs`。当前工具测量的是 20 秒平均完成帧率，没有逐帧尾延迟数据。
+
+比较 initial-empty 与 returned-empty：
+
+| 差异 | 下一步检查 |
+| --- | --- |
+| 返回后 `modelEntities` / 活跃预览 / `drawCalls` 仍高 | 屏外裁剪、预览相机停用、片场根与缓存呈现生命周期；驻留数量单独偏高不能证明仍在绘制 |
+| `prepareMs` 上涨，`models.nativePreparation` 仍有排队/retiring | 准备或退役任务未收敛；结合两端快照观察进度 |
+| `queueMs` / `renderMs` 上涨 | 渲染排队、资源提交或阶段内驱动等待；这些都是 CPU 墙钟，不能称 GPU 耗时 |
+| JS `sceneBuilds` / `sceneSubmits` / `modelPrepareCount` 持续增长 | 场景重复失效、模型重复准备或业务订阅未停止 |
+| 工作量和 CPU 阶段恢复，但 FPS 持续较低 | 在同一真机追加浏览器 Performance trace 或原生 profiler，检查帧间等待、主线程、驱动与系统调度 |
+
+`renderFps` 与性能徽标同源（Bevy PostCleanup），不是 GPU present；不同来源的耗时不可相加。资源预算中的 GPU bytes 是估算，不能当实测显存。`perf.frame` 本机遥测仍按原有 60 秒窗口聚合，本脚本不把短窗伪装成该事件；需要同时复盘时，在采完现场后查看 `/telemetry` 或 `/api/telemetry/events?window=1h&names=perf.frame&names=perf.lod&limit=200`。
+
 工具只在客户端内部运行；真实 GPU + headed Chromium + performance WASM / production frontend。它不会调用在线生成服务或触碰用户画布。浏览器与宿主每个 attempt 重建，E2E 服务使用独立临时 SQLite、内存媒体存储和确定性 provider。基准专用宿主关闭可选后端 Agent/付费 Provider 扩展，保留真实 Canvas/Media/Task 路径。
 
 ## 准备
