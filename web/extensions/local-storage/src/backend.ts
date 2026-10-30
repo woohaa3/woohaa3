@@ -23,6 +23,7 @@ import {
   StorageObjectNotFoundError,
   type ExtensionPlugin,
   type StorageBackend,
+  type MediaLocator,
   type StorageObject,
   type StorageObjectStat
 } from "@woohaa3/contracts";
@@ -34,6 +35,9 @@ export const LOCAL_STORAGE_CONFIG_PREFIX = "storage.local";
 
 /** 缺省存储根目录；相对路径按进程 cwd 解析。 */
 export const DEFAULT_LOCAL_STORAGE_ROOT = ".woohaa3/storage";
+
+/** locator 前缀：`media://<backendId>/<key>` 里的 backendId 固定是 `local`。 */
+export const LOCAL_STORAGE_LOCATOR_PREFIX = `media://local/`;
 
 /** sidecar 后缀；与对象同目录，删除对象时一并删除。 */
 const META_SUFFIX = ".meta.json";
@@ -123,6 +127,19 @@ export function createLocalBackend(config: LocalStorageConfig = {}): StorageBack
   const root = resolveLocalStorageRoot(config);
   const paths = (key: string) => resolveLocalObjectPaths(root, key);
 
+  /** 读一个对象（get 与 readLocator 共用，授权与错误翻译只有一份）。 */
+  const readObject = async (key: string): Promise<StorageObject> => {
+    const { objectPath, metaPath } = paths(key);
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(objectPath);
+    } catch (error) {
+      if (isEnoent(error)) throw new StorageObjectNotFoundError(key);
+      throw error;
+    }
+    return { bytes, contentType: (await readSidecarContentType(metaPath)) ?? inferContentType(key) };
+  };
+
   return {
     backendId: LOCAL_STORAGE_BACKEND_ID,
     label: LOCAL_STORAGE_LABEL,
@@ -139,15 +156,7 @@ export function createLocalBackend(config: LocalStorageConfig = {}): StorageBack
       }
     },
     async get(key): Promise<StorageObject> {
-      const { objectPath, metaPath } = paths(key);
-      let bytes: Buffer;
-      try {
-        bytes = await readFile(objectPath);
-      } catch (error) {
-        if (isEnoent(error)) throw new StorageObjectNotFoundError(key);
-        throw error;
-      }
-      return { bytes, contentType: (await readSidecarContentType(metaPath)) ?? inferContentType(key) };
+      return readObject(key);
     },
     async openRead(key, range) {
       const { objectPath } = paths(key);
@@ -178,6 +187,22 @@ export function createLocalBackend(config: LocalStorageConfig = {}): StorageBack
       await writeFile(objectPath, bytes);
       // 媒体 verify 比对 contentType：sidecar 必须随对象一起写。
       await writeFile(metaPath, JSON.stringify({ contentType }), "utf8");
+    },
+    /**
+     * 稳定键对应的定位符：`media://local/<key>`。
+     *
+     * 与 server 后端同一形状。有了它，同一个「位置」既能展示也能被 {@link readLocator} 解析，
+     * 不会出现「面板上给了一个地址、粘回去却读不到」的情况。
+     */
+    async locatorOf(key): Promise<MediaLocator | undefined> {
+      return LOCAL_STORAGE_LOCATOR_PREFIX + key;
+    },
+    /** 按 locator 读字节：只认本后端的 locator，其余交给存储层报错。 */
+    async readLocator(locator): Promise<StorageObject> {
+      if (!locator.startsWith(LOCAL_STORAGE_LOCATOR_PREFIX)) {
+        throw new Error("不是本地存储的 locator");
+      }
+      return readObject(locator.slice(LOCAL_STORAGE_LOCATOR_PREFIX.length));
     },
     async delete(key): Promise<void> {
       const { objectPath, metaPath } = paths(key);

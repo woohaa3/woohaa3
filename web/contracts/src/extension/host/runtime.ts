@@ -17,6 +17,7 @@ import type { ApplicationExtensionServices } from "../services/host/facades.js";
 import type { GenerationProvider } from "../services/host/generation.js";
 import type { MarketplaceSource } from "../services/host/marketplace.js";
 import type { MediaFormatValidator } from "../services/host/media-formats.js";
+import type { StorageExposer } from "../services/host/exposer.js";
 import type { StorageBackend } from "../services/host/storage.js";
 import type { TelemetryExport } from "../services/host/telemetry.js";
 import type {
@@ -177,6 +178,16 @@ export type ApplicationBackendHost = {
    * 因为「现在没有这个后端」正是调用方想要的终态。
    */
   unregisterStorage?: (backendId: string) => void;
+  /**
+   * 注册一个对外地址提供者（可选能力）。
+   *
+   * 与 `registerStorage` 同形：谁注册谁收回，宿主按 owner 记 id 并在停用/回滚时反序注销。
+   * 与存储分成两个接缝的原因见 `HostExposerService`：地址能力可以独立于字节驻留存在
+   * （例如 CDN 回源签名），缺少它不该让存储注册失败，反之亦然。
+   */
+  registerExposer?: (exposer: StorageExposer) => void;
+  /** 注销一个地址提供者（按 `exposerId`）。实现须幂等。 */
+  unregisterExposer?: (exposerId: string) => void;
   /**
    * 注册一个遥测出口（可选能力；change: 2026-10-20-add-local-client-telemetry，tasks 7.x）。
    *

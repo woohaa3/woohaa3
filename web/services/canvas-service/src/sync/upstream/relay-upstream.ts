@@ -25,6 +25,7 @@ import {
   SessionProtocolVersion,
   type ServerFrame
 } from "../../../../../../api/gen/es/woohaa/canvas/v1/session_pb.js";
+import type { StorageProfile } from "@woohaa3/contracts";
 import type { ExternalUpdateResult, RoomBroadcast } from "../room-types.js";
 import { defaultUpstreamClientInfo, upstreamUserAgent, type UpstreamClientInfo } from "./client-info.js";
 
@@ -121,6 +122,15 @@ export type SyncCanvasOwnershipStore = {
   initial(): readonly string[];
   remember(canvasId: string): void;
   forget(canvasId: string): void;
+  /**
+   * 画布级对外地址覆盖（id → 地址提供者 id）。
+   *
+   * 可选：旧实现没有这一项时就是「所有画布都继承部署默认」。与 `initial()` 同一个落点，
+   * 所以重启后覆盖仍然生效。
+   */
+  exposures?(): Readonly<Record<string, string>>;
+  /** 写一条画布级覆盖；`exposure` 传空串表示这张画布明确不对外。可选，同上。 */
+  rememberExposure?(canvasId: string, exposure: string): void;
 };
 
 export type SyncUpstreamOptions = {
@@ -246,6 +256,15 @@ export type SyncUpstream = {
    */
   remoteCanvasIds(): readonly string[];
   /**
+   * 这张画布的**存储形态**（字节落点 + 地址覆盖）。
+   *
+   * 未归属远端时返回 undefined（继承部署默认）；归属远端时返回
+   * `residency: "canvas-hosted"`，并把画布级 `exposure` 覆盖一并带出（没有覆盖就不带）。
+   */
+  canvasStorageProfile(canvasId: string): StorageProfile | undefined;
+  /** 写一张画布级地址覆盖（空串表示明确不对外）。 */
+  rememberCanvasExposure(canvasId: string, exposure: string): void;
+  /**
    * 把一张画布补记为归远端（远端目录里已经存在的画布，字节本来就在托管存储里）。
    *
    * `link()` 记的是"这次解析到远端"，这个记的是"目录里已经存在"：登录/启动后目录
@@ -298,6 +317,13 @@ export function createSyncUpstream(
    * `ownership.forget`）才收回。
    */
   const remoteCanvasIds = new Set<string>(options.ownership?.initial() ?? []);
+  /**
+   * 画布级地址覆盖（内存镜像 + 持久记录）。
+   *
+   * 与归属分开：归属是「字节在托管存储里」的事实，覆盖只是「这张画布该用哪个地址提供者」的
+   * 偏好，两者可以各自变化（例如本地画布只覆盖 exposure，不改变归属）。
+   */
+  const exposures = new Map<string, string>(Object.entries(options.ownership?.exposures?.() ?? {}));
   /**
    * 解析代次：每次 attach / refresh 递增。
    *
@@ -447,6 +473,20 @@ export function createSyncUpstream(
     linkState: (canvasId) => links.get(canvasId)?.state ?? null,
     linkedCanvasIds: () => [...links.keys()],
     remoteCanvasIds: () => [...remoteCanvasIds],
+    canvasStorageProfile: (canvasId: string) => {
+      if (!remoteCanvasIds.has(canvasId)) return undefined;
+      const exposure = exposures.get(canvasId);
+      return { residency: "canvas-hosted" as const, ...(exposure === undefined ? {} : { exposure }) };
+    },
+    rememberCanvasExposure: (canvasId: string, exposure: string) => {
+      if (canvasId === "") return;
+      exposures.set(canvasId, exposure);
+      try {
+        options.ownership?.rememberExposure?.(canvasId, exposure);
+      } catch {
+        // 记录失败只影响重启后的覆盖，不能影响当前会话的取地址。
+      }
+    },
     rememberOwnership,
     forgetOwnership(canvasId) {
       if (!remoteCanvasIds.delete(canvasId)) return;

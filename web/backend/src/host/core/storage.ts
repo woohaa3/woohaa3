@@ -1,29 +1,31 @@
 /**
- * 核心层 · storage：`ctx.storage` 扩展点。
+ * 核心层 · storage：`ctx.storage` 扩展点（只管字节驻留）。
  *
- * core 只有注册表、按设置选用和按能力路由：后端插件（local / cos·s3 / server）向这里注册，
- * media 与 task 只拿 `bucket(namespace, scope?)` 视图读写字节和取外部地址。主存储与对外后端都来自
- * 设置（`storage.primary` 缺省 `local`、`storage.expose` 可空），`bucket` 每次调用现查，
- * 热切换对使用方无感。
+ * core 只有注册表、按设置选用和按画布形态路由：后端插件（local / cos·s3 / server）向这里注册，
+ * media 与 task 只拿 `bucket(namespace, scope?)` 视图读写字节。主存储来自设置
+ * （`storage.primary`，缺省 `local`），`bucket` 每次调用现查，热切换对使用方无感。
  *
- * 「画布作用域」（`StorageScope`）是使用方透传下来的「这次读写属于哪张画布」。宿主通过
- * `route(namespace, canvasId)` 回答「这张画布该用哪个后端」（典型实现：已同步到远端的画布 →
- * `server`），命中且后端已注册就用它，否则回落 `storage.primary`。
+ * 对外地址不在本服务里解析：那是 `ctx.exposer` 的事（见 `./exposer.ts`）。这里只回答
+ * 「当前作用域落到哪个后端、这个后端能不能就地签」（`current()`），因为只有存储知道路由结果。
+ * 后端上的 `presign` 因此保留为存量能力，但 `storage.expose` 这个设置不再被本服务读取。
+ *
+ * 画布形态（`StorageProfile`）由宿主回答：路由命中 `residency: "canvas-hosted"` 时，字节归
+ * 声明了 `canvasScoped` 的那个后端。core 不认任何具体后端 id；没有声明者或路由未命中时一律
+ * 回落 `storage.primary`（纯本地部署）。
  *
  * 路由之后还有「读时回填」：路由后端不认识同步前就存在的旧对象（它们只在主存储里），于是读路径
  * 先按主存储读出来返回，再 best-effort 补一份到路由后端——存量资产不必等一次显式迁移就能在
  * 远端可用。补传失败只记日志：这次读已经成功，不能因为「顺便补传」失败而变成错误。
- *
- * 「能不能被外部访问」只问后端有没有 `presign`，不问它是不是 COS。
  */
 import {
-  StorageExposeUnavailableError,
   isStorageObjectNotFoundError,
   type HostStorageService,
   type StorageBackend,
   type StorageBucket,
+  type StorageCurrentBackend,
   type StorageObject,
   type StorageObjectStream,
+  type StorageProfile,
   type StorageScope
 } from "@woohaa3/contracts";
 import type { HostPlugin } from "../context.js";
@@ -32,22 +34,20 @@ import { READINESS_ORDER } from "../order.js";
 export type StorageSettings = {
   /** `storage.primary`；空值时按 `local` 处理。 */
   primary(): string;
-  /** `storage.expose`；空值表示只用主存储的签名能力。 */
-  expose(): string | undefined;
 };
 
 export type StorageRegistryOptions = {
   settings: StorageSettings;
   /**
-   * 画布路由：这张 namespace + 画布**是否由画布托管后端承载**。
+   * 画布形态：这张 namespace + 画布**该用哪套存储形态**。
    *
-   * core 不认识「画布同步到了哪里」，只认两件事：宿主说「这张画布归远端」，以及某个已注册
-   * 后端声明了 `canvasScoped`（承载画布托管存储）。承载者是谁由后端自己声明，core 不背任何
-   * 具体后端 id；没有声明者或路由未命中时一律回落 `storage.primary`。
+   * 缺省（返回 undefined）表示「没有覆盖」：字节走 `storage.primary`。返回
+   * `residency: "canvas-hosted"` 表示这张画布归画布托管后端，core 去找声明了 `canvasScoped`
+   * 的后端——承载者是谁由后端自己声明，core 不背任何具体后端 id。
    *
    * 每次调用现查：画布刚启用/停用远端同步立即生效。
    */
-  route?: (namespace: string, canvasId: string) => boolean;
+  route?: (namespace: string, canvasId: string) => StorageProfile | undefined;
   logger?: (event: Record<string, unknown>) => void;
 };
 
@@ -66,10 +66,6 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
   const backends = new Map<string, StorageBackend>();
 
   const primaryId = (): string => options.settings.primary().trim() || DEFAULT_PRIMARY_STORAGE;
-  const exposeIdOf = (): string | undefined => {
-    const value = options.settings.expose()?.trim();
-    return value ? value : undefined;
-  };
 
   const primary = (): StorageBackend => {
     const id = primaryId();
@@ -91,12 +87,13 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
   };
 
   /**
-   * 画布路由：宿主说「归远端」且**确有承载者**时才命中，否则未命中（回落主存储）。
+   * 画布路由：宿主给这张画布声明了 `canvas-hosted` 且**确有承载者**时才命中，否则未命中。
    */
   const routedIdOf = (namespace: string, scope?: StorageScope): string | undefined => {
     const canvasId = scope?.canvasId?.trim();
     if (!canvasId) return undefined;
-    if (options.route?.(namespace, canvasId) !== true) return undefined;
+    const profile = options.route?.(namespace, canvasId);
+    if (profile?.residency !== "canvas-hosted") return undefined;
     const id = canvasBackendIdOf();
     return id && backends.has(id) ? id : undefined;
   };
@@ -142,9 +139,6 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
   /**
    * 按当前后端读对象，并带「读时回填」：路由后端未命中就回主存储读，再补传到路由后端。
    *
-   * get 与 expose 的复制步骤共用它——否则 expose 一条「同步前生成的资产」会因为路由后端
-   * 还没有这个对象而失败，哪怕主存储里明明有。
-   *
    * 主存储未命中就是未命中：不跨后端起猜。归属由宿主持久记录（`ctx.canvas.remoteCanvasIds`），
    * 路由错了是归属的 bug，不能靠「多试一个后端」掩盖——那会让写路径与读路径对同一个对象
    * 给出不同答案。
@@ -182,19 +176,6 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
   const bucket = (namespace: string, scope?: StorageScope): StorageBucket => {
     // 使用方给 namespace 内的 key；core 拼 namespace，后端只加自己的前缀（COS 即 `${prefix}/${namespace}/${key}`）。
     const keyOf = (key: string) => `${namespace}/${key}`;
-    const exposeTarget = (): { backend: StorageBackend; id: string } => {
-      const id = exposeIdOf();
-      if (!id) throw new StorageExposeUnavailableError();
-      const backend = backends.get(id);
-      if (!backend?.presign) {
-        throw new StorageExposeUnavailableError(
-          backend
-            ? `对外存储后端 ${id} 没有签名能力：请改配支持 presign 的后端`
-            : `对外存储后端未注册：${id}（设置 storage.expose）`
-        );
-      }
-      return { backend, id };
-    };
     return {
       namespace,
       ...(scope ? { scope } : {}),
@@ -235,40 +216,16 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
         const current = resolveBackend(namespace, scope);
         await current.backend.put(keyOf(key), bytes, contentType, scope);
       },
-      async putStream(key, bytes, contentType, options) {
+      async putStream(key, bytes, contentType, putOptions) {
         const { backend } = resolveBackend(namespace, scope);
         if (!backend.putStream) throw new Error("当前存储后端不支持流式写入");
-        await backend.putStream(keyOf(key), bytes, contentType, options, scope);
+        await backend.putStream(keyOf(key), bytes, contentType, putOptions, scope);
       },
       async delete(key) {
         const current = resolveBackend(namespace, scope);
         // 不支持删除是能力缺失，不是「删了但没删掉」：明确报错，别让调用方以为数据没了。
         if (!current.backend.delete) throw new Error(`存储后端不支持删除：${current.backend.backendId}`);
         await current.backend.delete(keyOf(key), scope);
-      },
-      canExpose: () => {
-        const mainId = routedIdOf(namespace, scope) ?? primaryId();
-        const main = backends.get(mainId);
-        if (main?.presign) return true;
-        const id = exposeIdOf();
-        if (!id || id === mainId) return false;
-        return typeof backends.get(id)?.presign === "function";
-      },
-      async expose(key, presignOptions) {
-        const scoped = keyOf(key);
-        const current = resolveBackend(namespace, scope);
-        // ① 当前后端能签名就直接签（现在的 COS 部署走这条）。
-        if (current.backend.presign) return current.backend.presign(scoped, presignOptions, scope);
-        // ② 否则用对外后端：缺对象就从当前后端复制过去再签名；key 内容寻址，复制幂等、可缓存。
-        const { backend: target, id } = exposeTarget();
-        const known = await target.head(scoped, scope);
-        if (!known) {
-          // 来源走读时回填：同步前生成的资产可能还在主存储里。
-          const object = await readObject(current, namespace, scoped, scope);
-          await target.put(scoped, object.bytes, object.contentType ?? "application/octet-stream", scope);
-          log({ event: "storage-expose-copy", namespace, backendId: id, size: object.bytes.byteLength });
-        }
-        return target.presign!(scoped, presignOptions, scope);
       }
     };
   };
@@ -301,6 +258,22 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
     },
     list: () => [...backends.values()],
     resolve: (backendId) => backends.get(backendId),
+    bucket,
+    current(namespace, scope): StorageCurrentBackend {
+      // 只投影「落点 + 就地签名能力 + 画布级地址覆盖」：把后端对象交出去会让 exposer 顺手用上
+      // 超出契约的东西。
+      const resolved = resolveBackend(namespace, scope);
+      const presign = resolved.backend.presign;
+      const canvasId = scope?.canvasId?.trim();
+      const exposure = canvasId ? options.route?.(namespace, canvasId)?.exposure : undefined;
+      return {
+        backendId: resolved.id,
+        ...(presign
+          ? { presign: (key, signOptions, scopedScope) => presign.call(resolved.backend, key, signOptions, scopedScope) }
+          : {}),
+        ...(exposure === undefined ? {} : { exposure })
+      };
+    },
     async readLocator(locator) {
       // locator 的解析只在这里发生：拆出 backendId 交给对应后端，使用方看不到键布局。
       const rest = locator.startsWith("media://") ? locator.slice("media://".length) : "";
@@ -314,7 +287,6 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
       }
       return backend.readLocator(locator);
     },
-    bucket,
     async replicate(namespace, key, replicateOptions) {
       const targetId = replicateOptions.targetBackendId?.trim();
       if (!targetId) throw new Error("storage.replicate 缺少目标后端 id");
@@ -342,7 +314,6 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
       return true;
     },
     primaryId,
-    exposeId: exposeIdOf,
     readiness() {
       const id = primaryId();
       return backends.has(id)
@@ -352,20 +323,6 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
   };
 }
 
-/**
- * 这张画布是否**属于远端存储**（持久归属，答案来自画布服务的持久记录）。
- *
- * 只问归属，不问链路状态：`syncStateOf` 回答的是「此刻同步到哪一步」，断线、房间未加载、
- * 空闲回收都会让它变空——用它选后端，会在这些时刻把托管存储里的对象当本地对象找，
- * 把已生成成功的产物报成不存在。
- */
-function isRemoteCanvas(
-  canvas: { remoteCanvasIds: () => readonly string[] } | undefined,
-  canvasId: string
-): boolean {
-  return canvas?.remoteCanvasIds().includes(canvasId) ?? false;
-}
-
 /** 核心层插件：提供 `ctx.storage`，并把「主存储是否可用」挂进就绪检查。 */
 export const storagePlugin: HostPlugin = {
   name: "storage",
@@ -373,11 +330,7 @@ export const storagePlugin: HostPlugin = {
   apply(ctx) {
     const service = createStorageRegistry({
       settings: {
-        primary: () => String(ctx.config.get("storage.primary") ?? DEFAULT_PRIMARY_STORAGE),
-        expose: () => {
-          const value = ctx.config.get("storage.expose");
-          return typeof value === "string" && value.trim() !== "" ? value : undefined;
-        }
+        primary: () => String(ctx.config.get("storage.primary") ?? DEFAULT_PRIMARY_STORAGE)
       },
       // canvas 在本插件之后装载，因此按 key 懒取：路由只在真正读写时被问到。
       //
@@ -387,7 +340,7 @@ export const storagePlugin: HostPlugin = {
       // 生成的结果报成「核验失败」。归属由宿主持久记录（`canvas-storage-ownership`），
       // 重启后、画布未打开时同样成立。
       // 承载者由后端自己声明 `canvasScoped`；没有声明者（没接远端）时自动回落主存储。
-      route: (_namespace, canvasId) => isRemoteCanvas(ctx.get("canvas"), canvasId),
+      route: (_namespace, canvasId) => ctx.get("canvas")?.canvasStorageProfile(canvasId),
       logger: ctx.log.scope("storage")
     });
     ctx.provide("storage", service);

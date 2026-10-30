@@ -14,7 +14,8 @@ import type { CanvasTaskCatalog } from "@woohaa3/contracts";
 import type {
   ResourceAccessPolicy,
   ResourceDirectory,
-  ResourceLifecyclePolicy
+  ResourceLifecyclePolicy,
+  StorageProfile
 } from "@woohaa3/contracts";
 import type { CanvasRunService } from "../task/run-service.js";
 import type { TaskResultConsumer } from "../task/result-consumer.js";
@@ -283,6 +284,10 @@ export type CanvasService = {
    * 宿主重启、画布还没打开、房间被空闲回收时都仍然准确。
    */
   remoteCanvasIds: () => readonly string[];
+  /** 这张画布的存储形态（字节落点 + 地址覆盖）；未覆盖时 undefined。 */
+  canvasStorageProfile: (canvasId: string) => StorageProfile | undefined;
+  /** 写一张画布级地址覆盖（空串表示明确不对外）。 */
+  rememberCanvasExposure: (canvasId: string, exposure: string) => void;
   /**
    * 显式启动一次画布媒体补传（「同步远端」动作在文档链路建立后调用）。
    *

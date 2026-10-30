@@ -5,7 +5,7 @@
  * 写盘失败只记日志（记忆丢失退化成旧行为，不能把画布操作带崩）。
  */
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createCanvasStorageOwnership, resolveCanvasOwnershipPath } from "./canvas-storage-ownership.js";
@@ -55,6 +55,58 @@ describe("画布远端归属的持久记录", () => {
 
       const second = createCanvasStorageOwnership({ filePath });
       expect(second.store.initial()).toEqual(["canvas-2"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("画布级地址覆盖落盘并在重启后读回；forget 一并清掉", async () => {
+    const { dir, filePath } = tempOwnershipFile();
+    try {
+      const first = createCanvasStorageOwnership({ filePath });
+      first.store.remember("c1");
+      first.store.remember("c2");
+      first.store.rememberExposure?.("c1", "edge");
+      // 空串是「这张画布明确不对外」，必须与「没有覆盖」区分开落盘。
+      first.store.rememberExposure?.("c2", "");
+      await first.flush();
+      expect(first.store.exposures?.()).toEqual({ c1: "edge", c2: "" });
+
+      const reopened = createCanvasStorageOwnership({ filePath });
+      expect(reopened.store.exposures?.()).toEqual({ c1: "edge", c2: "" });
+
+      reopened.store.forget("c1");
+      await reopened.flush();
+      expect(reopened.store.exposures?.()).toEqual({ c2: "" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("旧版文件（只有 canvasIds）按「无覆盖」读入，并在下次写入时升级为当前版本", async () => {
+    const { dir, filePath } = tempOwnershipFile();
+    try {
+      writeFileSync(filePath, JSON.stringify({ version: 1, canvasIds: ["c1"] }));
+      const ownership = createCanvasStorageOwnership({ filePath });
+      expect(ownership.store.initial()).toEqual(["c1"]);
+      expect(ownership.store.exposures?.()).toEqual({});
+
+      ownership.store.rememberExposure?.("c1", "edge");
+      await ownership.flush();
+      const parsed = JSON.parse(readFileSync(filePath, "utf8")) as { version: number; exposures: unknown };
+      expect(parsed.version).toBe(2);
+      expect(parsed.exposures).toEqual({ c1: "edge" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("未归属的画布不接受地址覆盖：覆盖只在归属成立后才有意义", () => {
+    const { dir, filePath } = tempOwnershipFile();
+    try {
+      const ownership = createCanvasStorageOwnership({ filePath });
+      ownership.store.rememberExposure?.("ghost", "edge");
+      expect(ownership.store.exposures?.()).toEqual({});
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

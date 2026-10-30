@@ -73,6 +73,28 @@ describe("put / head / get 往返", () => {
   });
 });
 
+describe("locator", () => {
+  it("给出 media://local/<key>，并能按它读回同一份字节", async () => {
+    await backend.put("media/a.png", Uint8Array.of(1, 2, 3), "image/png");
+    const locator = await backend.locatorOf!("media/a.png");
+    expect(locator).toBe("media://local/media/a.png");
+
+    const object = await backend.readLocator!(locator!);
+    expect(Array.from(object.bytes)).toEqual([1, 2, 3]);
+    expect(object.contentType).toBe("image/png");
+  });
+
+  it("外来的 locator 明确拒绝，不跨后端猜", async () => {
+    await expect(backend.readLocator!("media://cos/media/a.png")).rejects.toThrow(/不是本地存储的 locator/);
+  });
+
+  it("locator 指向不存在的对象时抛存储 not-found", async () => {
+    await expect(backend.readLocator!("media://local/media/gone.png")).rejects.toBeInstanceOf(
+      StorageObjectNotFoundError
+    );
+  });
+});
+
 describe("not-found 语义", () => {
   it("head 不存在返回 null，get 抛 StorageObjectNotFoundError（保留跨 bundle 的 code/name/key）", async () => {
     expect(await backend.head("media/missing.png")).toBeNull();

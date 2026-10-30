@@ -20,7 +20,9 @@ import { settingsPartition } from "./plugin-groups.js";
 import type { SettingsEditSession } from "./edit-session.js";
 import { hostServiceGroups, type HostServiceGroup } from "./host-services.js";
 import {
+  exposerProviders,
   isStorageSettingKey,
+  providersForSettingKey,
   relatedProviderPlugin,
   storageProviders,
   storageSettingOptions,
@@ -99,6 +101,12 @@ export function BackendSettingsSection({
   });
   // 扩展点选择项的可选提供者：已注册后端 + 插件声明但尚未注册的后端。
   const providers = storageProviders(snapshot);
+  // 地址提供者是另一个扩展点：选项分开给，但「跳到提供者插件」要在合并列表里找。
+  const addressProviders = exposerProviders(snapshot);
+  const allProviders = [
+    ...providers,
+    ...addressProviders.filter((candidate) => !providers.some((known) => known.id === candidate.id))
+  ];
   if (groups.length === 0) {
     return (
       <div className="settings-services__empty" data-testid="backend-settings-empty">
@@ -140,8 +148,9 @@ export function BackendSettingsSection({
       <ul className="settings-page__list" data-testid="backend-settings-list">
         {active.entries.map((entry) => {
           const storageKey = isStorageSettingKey(entry.key) ? entry.key : null;
-          const options = storageKey && providers.length > 0
-            ? storageSettingOptions(storageKey, providers, typeof entry.value === "string" ? entry.value : "")
+          const keyProviders = storageKey ? providersForSettingKey(storageKey, providers, addressProviders) : providers;
+          const options = storageKey && keyProviders.length > 0
+            ? storageSettingOptions(storageKey, keyProviders, typeof entry.value === "string" ? entry.value : "")
             : null;
           return (
             <SettingRow
@@ -156,7 +165,7 @@ export function BackendSettingsSection({
                       <RelatedProvider
                         entryKey={entry.key}
                         backendId={value}
-                        providers={providers}
+                        providers={allProviders}
                         snapshot={snapshot}
                         siteRows={extensionView.siteRows}
                         {...(onOpenPlugin ? { onOpenPlugin } : {})}

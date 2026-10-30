@@ -101,6 +101,15 @@ export type ApplicationExtensionHostOptions = {
   /** 注销存储后端的宿主钩子（按 backendId；须幂等）。 */
   releaseStorageFor?: (extensionId: string) => ((backendId: string) => void) | undefined;
   /**
+   * 对外地址提供者注册面：站点插件在 activation 里向 `ctx.exposer` 注册提供者。
+   *
+   * 与 `registerStorageFor` 分开：地址能力不是存储的附属物（CDN 回源签名就不存字节）。
+   * 缺失时插件拿不到 `host.registerExposer`，必须记日志跳过。
+   */
+  registerExposerFor?: (extensionId: string) => ((exposer: import("@woohaa3/contracts").StorageExposer) => void) | undefined;
+  /** 注销地址提供者的宿主钩子（按 exposerId；须幂等）。 */
+  releaseExposerFor?: (extensionId: string) => ((exposerId: string) => void) | undefined;
+  /**
    * 遥测出口注册面：站点插件在 activation 里把出口注册进 `ctx.telemetry`。
    *
    * 与存储后端同形但语义不同：core 不按 id 挑选目的地，注册即参与投递（开关另在
@@ -191,6 +200,10 @@ export type ExtensionRecord = {
   storageBackendIds: string[];
   /** 注销存储后端的宿主钩子（与 options 同源）。 */
   releaseStorage?: (backendId: string) => void;
+  /** 本 activation 注册的地址提供者 id（停用/回滚时按反序注销）。 */
+  exposerIds: string[];
+  /** 注销地址提供者的宿主钩子（与 options 同源）。 */
+  releaseExposer?: (exposerId: string) => void;
   /** 本 activation 注册过的遥测出口 id（停用/回滚时按反序注销）。 */
   telemetryExportIds: string[];
   /** 注销遥测出口的宿主钩子（与 options 同源）。 */

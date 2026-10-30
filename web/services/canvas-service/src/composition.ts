@@ -861,6 +861,9 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       combineCanvasSyncState(upstream ? syncStateOf(upstream, canvasId) : undefined, options.mediaAssetSync?.stateOf(canvasId)),
     // 存储路由的判据：归属而不是链路。见 service-types.ts 的同名说明。
     remoteCanvasIds: () => (upstream ? upstream.remoteCanvasIds() : []),
+    // 存储形态：归属 + 画布级地址覆盖。存储层按它决定字节落点与地址提供者。
+    canvasStorageProfile: (canvasId: string) => upstream?.canvasStorageProfile(canvasId),
+    rememberCanvasExposure: (canvasId: string, exposure: string) => upstream?.rememberCanvasExposure(canvasId, exposure),
     syncCanvasMedia: (canvasId: string) => options.mediaAssetSync?.run(canvasId, { force: true }),
     readiness: async () => {
       if (!canvasEnabled) return { ready: false, reason: unavailableReason ?? "画布存储未启用" };

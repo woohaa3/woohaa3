@@ -21,6 +21,7 @@ export * from "./diagnostics.js";
 export * from "./facades.js";
 export * from "./generation.js";
 export * from "./storage.js";
+export * from "./exposer.js";
 export * from "./telemetry.js";
 export * from "./marketplace.js";
 export * from "./media-formats.js";

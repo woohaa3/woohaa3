@@ -1,15 +1,14 @@
 /**
  * 核心层 · storage 扩展点测试（设计稿：docs/diagrams/storage-extension-point.html）。
  *
- * 覆盖：注册表与重复注册、namespace 前缀、主存储每次调用现查（热切换）、expose 的三步解析顺序
- * （当前后端 presign → 对外后端复制后签名 → 明确报错）、就绪只看主存储、插件把设置读进路由，
+ * 覆盖：注册表与重复注册、namespace 前缀、主存储每次调用现查（热切换）、就绪只看主存储、
+ * 插件把设置读进画布形态路由（对外地址的解析在 `exposer.test.ts`），
  * 以及画布作用域相关的四条：路由（归属为远端→server、其余→primary）、scope 透传给后端、
  * 读时回填（旧对象首次访问时补传到路由后端，失败不影响读取）、replicate 幂等，
  * 以及「归属缺失时主存储未命中就是未命中」——读路径不跨后端起猜。
  */
 import { describe, expect, it } from "vitest";
 import {
-  StorageExposeUnavailableError,
   StorageObjectNotFoundError,
   type HostStorageService,
   type StorageBackend,
@@ -85,14 +84,11 @@ function memoryBackend(
   };
 }
 
-function settings(values: { primary?: string; expose?: string }): StorageSettings {
-  return {
-    primary: () => values.primary ?? "",
-    expose: () => values.expose
-  };
+function settings(values: { primary?: string }): StorageSettings {
+  return { primary: () => values.primary ?? "" };
 }
 
-function registryWith(backends: readonly StorageBackend[], values: { primary?: string; expose?: string } = {}): HostStorageService {
+function registryWith(backends: readonly StorageBackend[], values: { primary?: string } = {}): HostStorageService {
   const registry = createStorageRegistry({ settings: settings(values) });
   for (const backend of backends) registry.register(backend);
   return registry;
@@ -114,10 +110,9 @@ describe("注册表", () => {
     unregister();
   });
 
-  it("主存储缺省是 local，expose 空值即没有对外后端", () => {
+  it("主存储缺省是 local，主存储注册后即就绪", () => {
     const registry = registryWith([memoryBackend("local")]);
     expect(registry.primaryId()).toBe("local");
-    expect(registry.exposeId()).toBeUndefined();
     expect(registry.readiness()).toEqual({ ready: true });
   });
 });
@@ -155,7 +150,7 @@ describe("bucket(namespace)", () => {
   });
 
   it("主存储每次调用现查：切换设置后同一 bucket 立即走新后端", async () => {
-    const values: { primary?: string; expose?: string } = { primary: "local" };
+    const values: { primary?: string } = { primary: "local" };
     const registry = createStorageRegistry({ settings: settings(values) });
     const local = memoryBackend("local");
     const second = memoryBackend("second");
@@ -179,95 +174,8 @@ describe("bucket(namespace)", () => {
   });
 });
 
-describe("expose 解析顺序", () => {
-  it("① 主存储有 presign 就直接签名，不碰对外后端", async () => {
-    const local = memoryBackend("local", { presign: true });
-    const cos = memoryBackend("cos", { presign: true });
-    const registry = registryWith([local, cos], { primary: "local", expose: "cos" });
-    const bucket = registry.bucket("media");
-    await bucket.put("sha256-abc.png", Uint8Array.of(1), "image/png");
-
-    expect(bucket.canExpose()).toBe(true);
-    expect(await bucket.expose("sha256-abc.png", { expiresSeconds: 60 })).toBe(
-      "https://local.invalid/media/sha256-abc.png?expires=60"
-    );
-    expect(cos.objects.size).toBe(0);
-  });
-
-  it("② 主存储没有 presign 时用对外后端：缺对象先从主存储复制（含 contentType）再签名", async () => {
-    const local = memoryBackend("local");
-    const cos = memoryBackend("cos", { presign: true });
-    const registry = registryWith([local, cos], { primary: "local", expose: "cos" });
-    const bucket = registry.bucket("media");
-    await bucket.put("sha256-abc.png", Uint8Array.of(1, 2, 3), "image/png");
-
-    expect(await bucket.expose("sha256-abc.png")).toBe("https://cos.invalid/media/sha256-abc.png?expires=900");
-    expect(cos.objects.get("media/sha256-abc.png")).toEqual({ bytes: Uint8Array.of(1, 2, 3), contentType: "image/png" });
-    expect(cos.presigns).toEqual(["media/sha256-abc.png"]);
-  });
-
-  it("带 scope 时 expose 的复制来源也走读时回填（同步前生成的资产仍能签出地址）", async () => {
-    const local = memoryBackend("local");
-    const server = memoryBackend("server", { canvasScoped: true });
-    const cos = memoryBackend("cos", { presign: true });
-    local.objects.set("media/legacy.png", { bytes: Uint8Array.of(1, 2), contentType: "image/png" });
-    const registry = createStorageRegistry({
-      settings: settings({ primary: "local", expose: "cos" }),
-      route: (namespace, canvasId) => namespace === "media" && canvasId === "synced"
-    });
-    registry.register(local);
-    registry.register(server);
-    registry.register(cos);
-
-    const bucket = registry.bucket("media", { canvasId: "synced" });
-    expect(await bucket.expose("legacy.png")).toBe("https://cos.invalid/media/legacy.png?expires=900");
-    expect(cos.objects.get("media/legacy.png")).toEqual({ bytes: Uint8Array.of(1, 2), contentType: "image/png" });
-    // 顺便把旧对象补到了路由后端，下次直接读它。
-    expect(server.objects.get("media/legacy.png")).toEqual({ bytes: Uint8Array.of(1, 2), contentType: "image/png" });
-  });
-
-  it("② 对外后端已有同名对象时不再复制（key 内容寻址，复制幂等）", async () => {
-    const local = memoryBackend("local");
-    const cos = memoryBackend("cos", { presign: true });
-    await cos.put("media/sha256-abc.png", Uint8Array.of(9), "image/png");
-    const registry = registryWith([local, cos], { primary: "local", expose: "cos" });
-
-    expect(await registry.bucket("media").expose("sha256-abc.png")).toContain("cos.invalid");
-    expect(cos.objects.get("media/sha256-abc.png")?.bytes).toEqual(Uint8Array.of(9));
-  });
-
-  it("③ 谁都不能签名时抛 StorageExposeUnavailableError（提示配置对外后端）", async () => {
-    const registry = registryWith([memoryBackend("local")], { primary: "local" });
-    const bucket = registry.bucket("media");
-    await bucket.put("sha256-abc.png", Uint8Array.of(1), "image/png");
-
-    expect(bucket.canExpose()).toBe(false);
-    await expect(bucket.expose("sha256-abc.png")).rejects.toBeInstanceOf(StorageExposeUnavailableError);
-    await expect(bucket.expose("sha256-abc.png")).rejects.toThrow(/storage.expose/);
-  });
-
-  it("对外后端未注册 / 本身没有 presign 都报可操作的错", async () => {
-    const local = memoryBackend("local");
-    const registry = registryWith([local], { primary: "local", expose: "cos" });
-    await expect(registry.bucket("media").expose("a.png")).rejects.toThrow(/对外存储后端未注册：cos/);
-
-    const plain = memoryBackend("cos");
-    const withPlain = registryWith([local, plain], { primary: "local", expose: "cos" });
-    await expect(withPlain.bucket("media").expose("a.png")).rejects.toThrow(/没有签名能力/);
-    expect(withPlain.bucket("media").canExpose()).toBe(false);
-  });
-
-  it("主存储里没有对象时 expose 原样冒泡 not-found，不伪造地址", async () => {
-    const registry = registryWith([memoryBackend("local"), memoryBackend("cos", { presign: true })], {
-      primary: "local",
-      expose: "cos"
-    });
-    await expect(registry.bucket("media").expose("gone.png")).rejects.toBeInstanceOf(StorageObjectNotFoundError);
-  });
-});
-
 describe("画布作用域路由", () => {
-  function routedRegistry(values: { primary?: string; expose?: string } = {}): {
+  function routedRegistry(values: { primary?: string } = {}): {
     registry: HostStorageService;
     local: MemoryBackend;
     server: MemoryBackend;
@@ -278,7 +186,7 @@ describe("画布作用域路由", () => {
     const registry = createStorageRegistry({
       settings: settings({ primary: "local", ...values }),
       // 只有 "synced" 画布同步到了远端；namespace 也参与路由判定。
-      route: (namespace, canvasId) => namespace === "media" && canvasId === "synced"
+      route: (namespace, canvasId) => (namespace === "media" && canvasId === "synced" ? { residency: "canvas-hosted" } : undefined)
     });
     registry.register(local);
     registry.register(server);
@@ -308,7 +216,7 @@ describe("画布作用域路由", () => {
     const registry = createStorageRegistry({
       settings: settings({ primary: "local" }),
       // 宿主说这张画布归远端，但没有后端声明能承载画布托管存储：不能靠猜后端 id。
-      route: () => true
+      route: () => ({ residency: "canvas-hosted" })
     });
     registry.register(local);
 
@@ -325,7 +233,7 @@ describe("画布作用域路由", () => {
     const second = memoryBackend("server-backup", { canvasScoped: true });
     const registry = createStorageRegistry({
       settings: settings({ primary: "local" }),
-      route: () => true,
+      route: () => ({ residency: "canvas-hosted" }),
       logger: (event) => logs.push(event)
     });
     registry.register(local);
@@ -369,7 +277,7 @@ describe("读时回填（旧对象在路由后端的首次读取）", () => {
     local.objects.set("media/legacy.png", { bytes: Uint8Array.of(4, 5, 6), contentType: "image/png" });
     const registry = createStorageRegistry({
       settings: settings({ primary: "local" }),
-      route: (namespace, canvasId) => namespace === "media" && canvasId === "synced",
+      route: (namespace, canvasId) => (namespace === "media" && canvasId === "synced" ? { residency: "canvas-hosted" } : undefined),
       ...(options.logger ? { logger: options.logger } : {})
     });
     registry.register(local);
@@ -470,7 +378,7 @@ describe("replicate", () => {
     local.objects.set("media/legacy.png", { bytes: Uint8Array.of(2), contentType: "image/png" });
     const registry = createStorageRegistry({
       settings: settings({ primary: "local" }),
-      route: (namespace, canvasId) => namespace === "media" && canvasId === "synced"
+      route: (namespace, canvasId) => (namespace === "media" && canvasId === "synced" ? { residency: "canvas-hosted" } : undefined)
     });
     registry.register(local);
     registry.register(server);
@@ -495,8 +403,8 @@ describe("replicate", () => {
 });
 
 describe("storagePlugin", () => {
-  it("把 storage.primary / storage.expose 读进路由，并把主存储就绪挂到 gateway", async () => {
-    const values: Record<string, string> = { "storage.primary": "cos", "storage.expose": "" };
+  it("把 storage.primary 读进路由，并把主存储就绪挂到 gateway", async () => {
+    const values: Record<string, string> = { "storage.primary": "cos" };
     const readiness: Array<() => unknown> = [];
     const provided: Record<string, unknown> = {};
     const ctx = {
@@ -519,7 +427,6 @@ describe("storagePlugin", () => {
     storagePlugin.apply(ctx, undefined as never);
     const storage = provided.storage as HostStorageService;
     expect(storage.primaryId()).toBe("cos");
-    expect(storage.exposeId()).toBeUndefined();
     expect(readiness).toHaveLength(1);
     expect(await readiness[0]?.()).toEqual({ ready: false, reason: "主存储后端未注册：cos（设置 storage.primary）" });
   });
@@ -527,7 +434,7 @@ describe("storagePlugin", () => {
 
 
 it("storagePlugin 按归属路由：归属为远端→server，其余→主存储（不看链路状态）", () => {
-  const values: Record<string, string> = { "storage.primary": "local", "storage.expose": "" };
+  const values: Record<string, string> = { "storage.primary": "local" };
   const provided: Record<string, unknown> = {};
   const ctx = {
     config: { get: (key: string) => values[key] },
@@ -542,11 +449,17 @@ it("storagePlugin 按归属路由：归属为远端→server，其余→主存�
     // canvas 在 storage 之后装载：这里模拟「懒取时已经就绪」。
     // 归属来自画布服务的持久记录；syncStateOf 在这里刻意恒为 undefined（没有链路），
     // 用它判断路由的实现在这条用例下会退化成主存储。
+    // 存储形态由画布服务回答（归属 + 画布级地址覆盖）；这里只给归属，外加一条地址覆盖，
+    // 用来锁「同一张画布的形态会被完整透传」。
     get: (name: string) =>
       name === "canvas"
         ? {
-            remoteCanvasIds: () => ["owned"],
-            syncStateOf: () => undefined
+            canvasStorageProfile: (canvasId: string) =>
+              canvasId === "owned"
+                ? { residency: "canvas-hosted" as const, exposure: "edge" }
+                : canvasId === "pinned"
+                  ? { residency: "canvas-hosted" as const }
+                  : undefined
           }
         : undefined
   } as never;
@@ -558,6 +471,10 @@ it("storagePlugin 按归属路由：归属为远端→server，其余→主存�
 
   expect(storage.bucket("media", { canvasId: "owned" }).backendId()).toBe("server");
   expect(storage.bucket("media", { canvasId: "draft" }).backendId()).toBe("local");
+  // current() 把画布记录的 exposure 原样带出（exposer 据此选择提供者）。
+  expect(storage.current("media", { canvasId: "owned" })).toMatchObject({ backendId: "server", exposure: "edge" });
+  expect(storage.current("media", { canvasId: "pinned" }).exposure).toBeUndefined();
+  expect(storage.current("media", { canvasId: "draft" }).exposure).toBeUndefined();
 });
 
 it("流式读取传递 namespace 与区间，主存储热切换后使用新后端", async () => {
@@ -598,7 +515,7 @@ describe("归属决定后端（主存储未命中不再跨后端起猜）", () =
     const registry = createStorageRegistry({
       settings: settings({ primary: "local" }),
       // 路由未命中：模拟「这张画布没有远端归属记录」。
-      route: () => false,
+      route: () => undefined,
       logger: (event) => logs.push(event)
     });
     registry.register(local);

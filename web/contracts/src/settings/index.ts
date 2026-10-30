@@ -68,12 +68,19 @@ export const SETTING_DEFINITIONS = {
     label: "主存储后端",
     description: "媒体与任务读写字节的后端 id（缺省 local）；后端由扩展层插件注册"
   },
+  "exposer.primary": {
+    kind: "string",
+    default: "",
+    reload: "hot",
+    label: "对外地址提供者",
+    description: "需要外部地址时使用的提供者 id（后端自带签名时也可直接填后端 id）；留空表示只用当前后端的签名能力"
+  },
   "storage.expose": {
     kind: "string",
     default: "",
     reload: "hot",
-    label: "对外存储后端",
-    description: "需要外部地址时使用的后端 id；留空表示只用主存储的签名能力"
+    label: "对外存储后端（旧键）",
+    description: "已由 exposer.primary 取代；仅在 exposer.primary 为空时作为兼容值读取"
   },
   "telemetry.local.enabled": {
     kind: "boolean",

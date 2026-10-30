@@ -1,7 +1,7 @@
 /**
  * 本机宿主插件树上的服务。
  *
- * 基础层：log / gateway / access / config；核心层：storage / telemetry / media / generation /
+ * 基础层：log / gateway / access / config；核心层：storage / exposer / telemetry / media / generation /
  * task / canvas / mcp / toolGrants / application。扩展层只拿得到 contracts 里声明的那几个服务形状
  * （`HostExtensionContext`）。
  *
@@ -16,6 +16,7 @@ import type {
   ApplicationBackendDiagnosticEntry,
   ApplicationBackendExtensionDefinition,
   AssembledFoundationProviders,
+  HostExposerService,
   HostGenerationService,
   HostLogService,
   HostStorageService,
@@ -153,6 +154,12 @@ export type HostServices = {
   generation: GenerationService;
   /** 存储扩展点：后端插件注册，media/task 只用 `bucket(namespace)`。 */
   storage: HostStorageService;
+  /**
+   * 对外地址扩展点：地址提供者注册，media 取外部地址时经它解析。
+   *
+   * 与 `storage` 分开是因为生命周期不同——它不参与启动就绪，缺了只影响需要外部地址的任务。
+   */
+  exposer: HostExposerService;
   /**
    * 本机遥测（change: 2026-10-20-add-local-client-telemetry）：采集、查询、聚合与导出注册面。
    * 业务路径只用 `emit`（同步入队、不等待 I/O）；读写面由 `/api/telemetry/*` 暴露。

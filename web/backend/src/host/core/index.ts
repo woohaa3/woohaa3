@@ -6,6 +6,7 @@ import { registerHostPlugins } from "../inventory.js";
 import { adminApiPlugin } from "./admin-api.js";
 import { applicationPlugin, type ApplicationPluginConfig } from "./application.js";
 import { canvasPlugin } from "./canvas.js";
+import { exposerPlugin } from "./exposer.js";
 import { generationPlugin } from "./generation.js";
 import { marketplacePlugin } from "./marketplace.js";
 import { extensionManagerPlugin } from "./extension-manager/index.js";
@@ -32,7 +33,7 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
   const { env } = options;
   // 插件对象按装载顺序留一份，供设置面登记插件清单。
   // 遥测排在任务之前：任务终态经 `ctx.get("telemetry")` 写入（懒取，不影响单独装载 taskPlugin 的场景）。
-  const plugins = [storagePlugin, telemetryPlugin, mediaPlugin, generationPlugin, marketplacePlugin, adminApiPlugin, taskPlugin, recordingExecutorPlugin, canvasPlugin, mcpPlugin, mcpInstallationPlugin, applicationPlugin, extensionManagerPlugin];
+  const plugins = [storagePlugin, exposerPlugin, telemetryPlugin, mediaPlugin, generationPlugin, marketplacePlugin, adminApiPlugin, taskPlugin, recordingExecutorPlugin, canvasPlugin, mcpPlugin, mcpInstallationPlugin, applicationPlugin, extensionManagerPlugin];
   // 逐插件计时：core 层整体耗时异常时，必须能直接看出是哪个插件慢。
   const timed = async <T>(plugin: string, load: () => PromiseLike<T> | T): Promise<T> => {
     const started = Date.now();
@@ -42,6 +43,8 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
   };
   const fibers = [
     await timed("storage", () => ctx.plugin(storagePlugin)),
+    // exposer 紧跟 storage：它只读存储的路由结果，且不参与就绪（缺地址能力不该拖垮宿主）。
+    await timed("exposer", () => ctx.plugin(exposerPlugin)),
     await timed("telemetry", () => ctx.plugin(telemetryPlugin, { env })),
     await timed("media", () => ctx.plugin(mediaPlugin, { env, ...(options.mediaStorage ? { storage: options.mediaStorage } : {}) })),
     await timed("generation", () => ctx.plugin(generationPlugin, { env })),

@@ -22,6 +22,7 @@ export const BASE_LAYER_INFOS: Readonly<Record<string, HostPluginInfo>> = {
 /** 核心层插件（`host/core/index.ts` 的装载顺序）的显示信息。 */
 export const CORE_LAYER_INFOS: Readonly<Record<string, HostPluginInfo>> = {
   storage: { label: "存储扩展点", description: "存储后端注册表，media 与 task 按它读写字节", icon: "storage" },
+  exposer: { label: "对外地址", description: "地址提供者注册表：把存储里的对象变成外部可访问的 URL（不参与启动就绪）", icon: "network" },
   telemetry: { label: "本机遥测", description: "本机事件记录、聚合与异常复盘，数据不出本机", icon: "activity" },
   media: { label: "媒体", description: "内容寻址、导入校验与 /api/media", icon: "media" },
   generation: { label: "生成", description: "生成 Provider 注册表与站点级模型策略", icon: "generation" },

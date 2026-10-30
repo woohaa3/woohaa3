@@ -15,6 +15,7 @@ import type {
   GenerationProvider,
   MarketplaceSource,
   StorageBackend,
+  StorageExposer,
   TelemetryExport
 } from "@woohaa3/contracts";
 import type { ApplicationExtensionHostOptions, OwnerState } from "./host-types.js";
@@ -22,6 +23,7 @@ import type { ApplicationExtensionHostOptions, OwnerState } from "./host-types.j
 export type RegistrationCores = {
   generation?: { register: (provider: GenerationProvider) => void; unregister: (providerId: string) => void };
   storage?: { register: (backend: StorageBackend) => void; unregister: (backendId: string) => void };
+  exposer?: { register: (exposer: StorageExposer) => void; unregister: (exposerId: string) => void };
   telemetry?: { register: (provider: TelemetryExport) => void; unregister: (exportId: string) => void };
   marketplace?: { register: (extensionId: string, source: MarketplaceSource) => void; unregister: (sourceId: string) => void };
 };
@@ -32,6 +34,8 @@ type Hooks = Pick<
   | "releaseGenerationFor"
   | "registerStorageFor"
   | "releaseStorageFor"
+  | "registerExposerFor"
+  | "releaseExposerFor"
   | "registerTelemetryExportFor"
   | "releaseTelemetryExportFor"
   | "registerMarketplaceSourceFor"
@@ -40,7 +44,7 @@ type Hooks = Pick<
 
 /** core 注册表 → 宿主钩子。四者都直接进 core，中间不做转发层（否则会出现两份「有哪些 X」的真相）。 */
 export function registrationHooksFor(core: RegistrationCores): Hooks {
-  const { generation, storage, telemetry, marketplace } = core;
+  const { generation, storage, exposer, telemetry, marketplace } = core;
   return {
     ...(generation
       ? {
@@ -58,6 +62,13 @@ export function registrationHooksFor(core: RegistrationCores): Hooks {
       ? {
           registerStorageFor: () => (backend: StorageBackend) => storage.register(backend),
           releaseStorageFor: () => (backendId: string) => storage.unregister(backendId)
+        }
+      : {}),
+    // 地址提供者：与存储分开的注册面（见 HostExposerService 的说明）。
+    ...(exposer
+      ? {
+          registerExposerFor: () => (item: StorageExposer) => exposer.register(item),
+          releaseExposerFor: () => (exposerId: string) => exposer.unregister(exposerId)
         }
       : {}),
     // 遥测出口：core 不挑选目的地，注册即参与投递（总开关是 `telemetry.export.enabled`）。
@@ -117,6 +128,19 @@ export function attachRegistrationSeams(
   if (releaseStorage) {
     owner.releaseStorage = releaseStorage;
     host.unregisterStorage = unregisterOwned(owner.storageBackendIds, releaseStorage);
+  }
+
+  const registerExposer = options.registerExposerFor?.(extensionId);
+  if (registerExposer) {
+    host.registerExposer = (exposer) => {
+      registerExposer(exposer);
+      owner.exposerIds.push(exposer.exposerId);
+    };
+  }
+  const releaseExposer = options.releaseExposerFor?.(extensionId);
+  if (releaseExposer) {
+    owner.releaseExposer = releaseExposer;
+    host.unregisterExposer = unregisterOwned(owner.exposerIds, releaseExposer);
   }
 
   // 遥测出口自带部署地址 / 会话与在途批次：谁注册谁收回，停用后不留指向已释放资源的出口。

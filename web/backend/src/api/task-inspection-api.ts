@@ -1,7 +1,39 @@
 /** 内置任务监控只读 API，认证和 tasks.inspect 检查先于任务查询。 */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isJsonObject, parseTaskHistoryQuery, TASKS_INSPECT_ACTION, type AccessRuntime, type TaskInspectionFacade } from "@woohaa3/contracts";
+import {
+  isJsonObject,
+  parseTaskHistoryQuery,
+  TASKS_INSPECT_ACTION,
+  type AccessRuntime,
+  type TaskInspectionFacade,
+  type TaskResultLocation,
+  type TaskResultSummary
+} from "@woohaa3/contracts";
 import { statusForAccessError, type AccessEnforcer, type ApplicationRequestAuthenticator } from "@woohaa3/application-service";
+
+/**
+ * 给详情补上产物的当前位置。
+ *
+ * 位置是**读取时**的事实（画布归属、主存储都可能已经变过），所以不落库、只在返回前算一次；
+ * 解析失败一律降级为「没有位置」——排障面板不能因为定位失败而整个打不开。
+ */
+async function withLocation<T extends { result?: TaskResultSummary }>(
+  detail: T | null,
+  locate: ((input: { storageKey: string; canvasId?: string }) => Promise<TaskResultLocation | null>) | undefined
+): Promise<T | null> {
+  if (!detail?.result?.storageKey || !locate) return detail;
+  const canvasId = (detail as { canvasId?: string }).canvasId;
+  try {
+    const location = await locate({
+      storageKey: detail.result.storageKey,
+      ...(canvasId ? { canvasId } : {})
+    });
+    if (!location) return detail;
+    return { ...detail, result: { ...detail.result, location } };
+  } catch {
+    return detail;
+  }
+}
 
 export function createTaskInspectionApi(deps: {
   /** 缺省按受控身份处理；本地单实例显式 `enabled:false` 时跳过认证/action。 */
@@ -9,6 +41,12 @@ export function createTaskInspectionApi(deps: {
   authenticator: ApplicationRequestAuthenticator;
   accessEnforcer: AccessEnforcer;
   inspection: TaskInspectionFacade;
+  /**
+   * 解析产物字节当前落在哪个后端（可选）。
+   *
+   * 只影响展示：拿不到位置时详情照常返回。
+   */
+  locate?: (input: { storageKey: string; canvasId?: string }) => Promise<TaskResultLocation | null>;
 }) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
@@ -51,7 +89,8 @@ export function createTaskInspectionApi(deps: {
         const taskKey = typeof body.taskKey === "string" ? body.taskKey.trim() : "";
         if (!taskKey) { send(400, { code: "malformed-request", message: "缺少 taskKey" }); return true; }
         const detail = await deps.inspection.detail({ ...(principal ? { principal } : {}), taskKey });
-        send(detail ? 200 : 404, detail ?? { code: "not-found", message: "任务不存在或已超过保留期" });
+        const located = await withLocation(detail, deps.locate);
+        send(located ? 200 : 404, located ?? { code: "not-found", message: "任务不存在或已超过保留期" });
       }
     } catch (error) {
       const status = statusForAccessError(error) ?? 500;

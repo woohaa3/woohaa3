@@ -152,7 +152,8 @@ describe("settings API", () => {
       { id: "sample", label: "样例", description: "", layer: "extension", configPrefix: "providers.sample", settingCount: 0, siteManaged: true, provider: true }
     ]);
     // 没有存储注册表时仍然给出空集合，设置页据此知道「没有可选后端」而不是缺字段。
-    expect(snapshot.extensionPoints).toEqual({ storage: [] });
+    // 没有存储注册表时仍然给出空集合（地址提供者同理），设置页据此知道「没有可选提供者」。
+    expect(snapshot.extensionPoints).toEqual({ storage: [], exposer: [] });
   });
 
   it("GET 快照带上扩展点可用后端与提供者", async () => {

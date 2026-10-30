@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import { createServiceConnectionFetch } from "./service-connection-fetch.js";
 import { createTaskInspectionApi } from "../../api/task-inspection-api.js";
+import { locateArtifact } from "./artifact-location.js";
 import {
   TASKS_INSPECT_ACTION,
   type StorageScope,
@@ -161,7 +162,15 @@ export const taskPlugin: HostPlugin<{ env: Record<string, string | undefined>; m
       accessRuntime: ctx.access.runtime,
       authenticator: ctx.access.authenticator,
       accessEnforcer: ctx.access.accessEnforcer,
-      inspection: task.taskInspection((principal) => ctx.access.accessEnforcer.assertAction(principal, TASKS_INSPECT_ACTION))
+      inspection: task.taskInspection((principal) => ctx.access.accessEnforcer.assertAction(principal, TASKS_INSPECT_ACTION)),
+      // 产物位置是只读诊断：允许跨后端找（位置本来会随主存储 / 画布归属变化）。
+      locate: ({ storageKey, canvasId }) =>
+        locateArtifact({
+          storage: ctx.storage,
+          storageKey,
+          ...(canvasId ? { scope: { canvasId } } : {}),
+          logger: ctx.log.scope("task")
+        })
     });
     ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.taskInspection, inspectionApi));
     ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.task, (req, res) => task.handle(req, res)));

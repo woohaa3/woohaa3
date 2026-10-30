@@ -16,9 +16,9 @@ import type {
 } from "@woohaa3/contracts";
 import type { ExtensionSiteRow } from "../extension-manager/contract.js";
 
-export type StorageSettingKey = "storage.primary" | "storage.expose";
+export type StorageSettingKey = "storage.primary" | "exposer.primary" | "storage.expose";
 
-const STORAGE_SETTING_KEYS: readonly string[] = ["storage.primary", "storage.expose"];
+const STORAGE_SETTING_KEYS: readonly string[] = ["storage.primary", "exposer.primary", "storage.expose"];
 
 export function isStorageSettingKey(key: string): key is StorageSettingKey {
   return STORAGE_SETTING_KEYS.includes(key);
@@ -54,9 +54,32 @@ export function storageProviders(snapshot: SettingsSnapshot | null): StorageProv
 }
 
 /**
+ * 对外地址提供者：来自快照的 `extensionPoints.exposer`，加上「可能提供地址的存储插件」。
+ *
+ * 后者是给未注册场景兜底：提供地址的插件往往同时提供存储后端，配置没填完时注册表里还没有它，
+ * 但设置页仍应能跳去补配置。
+ */
+export function exposerProviders(snapshot: SettingsSnapshot | null): StorageProviderOption[] {
+  // 只列**真正注册过**的提供者：地址能力不能靠猜。曾经把存储后端当兜底补进来，结果下拉里
+  // 出现了 `local`——它没有 presign，选中等于主动配置一个签不出地址的值。
+  return (snapshot?.extensionPoints?.exposer ?? []).map((provider) => ({ ...provider, registered: true }));
+}
+
+/** 某个设置键该用哪一组提供者：`storage.primary` 用后端，`exposer.primary` 用地址提供者。 */
+export function providersForSettingKey(
+  key: StorageSettingKey,
+  storage: readonly StorageProviderOption[],
+  exposer: readonly StorageProviderOption[]
+): readonly StorageProviderOption[] {
+  // `storage.expose` 与 `exposer.primary` 语义相同（都是「谁来出地址」），共用一份列表；
+  // `storage.primary` 才是「谁存字节」，用后端列表。
+  return key === "storage.primary" ? storage : exposer;
+}
+
+/**
  * 选项列表。
  *
- * - `storage.expose` 允许空值（只用主存储的签名能力），因此带一个空选项；
+ * - `exposer.primary` / `storage.expose` 允许空值（只用后端的签名能力），因此带一个空选项；
  * - 当前值不在提供者里时保留它并标注「未注册」：不静默吞掉已有配置，也不假装它可用。
  */
 export function storageSettingOptions(
@@ -68,8 +91,8 @@ export function storageSettingOptions(
     value: provider.id,
     label: provider.registered ? provider.label : provider.label + "（未注册）"
   }));
-  if (key === "storage.expose") {
-    options.unshift({ value: "", label: "未选择（只用主存储的签名能力）" });
+  if (key === "storage.expose" || key === "exposer.primary") {
+    options.unshift({ value: "", label: "未选择（只用后端的签名能力）" });
   } else if (!currentValue) {
     // 主存储尚未选择时给一个占位项：原生 select 的 value 必须能匹配到 option。
     options.unshift({ value: "", label: "请选择后端" });
