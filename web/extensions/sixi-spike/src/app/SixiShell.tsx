@@ -126,15 +126,42 @@ function HostThemeSync({ theme }: { theme: ThemeService }) {
  * **这条只在同一次页面生命周期内有效**：记在模块变量里，不要写进 sessionStorage ——
  * 写进去会跨刷新保留，第二天打开应用就直接进画布态，看起来像"四喜扩展没启动"
  *（踩过：`sixi-spike.current-route` 残留导致每次启动都停在 `/create`）。
+ *
+ * `PENDING_ENTRY_KEY` 也必须有时效：它靠"外壳挂载后清掉"来收尾，而外壳一旦没挂载成功
+ * （扩展加载失败、渲染抛错被错误边界隐藏），清除就永远不会执行 —— 于是这把键永久留在
+ * sessionStorage 里，之后每次打开都直接落到 `/create`：`.sixi-host-root` 不渲染、画布没人盖，
+ * 界面上就是"打开直接是画布，没有四喜"。所以写入时带上时间戳，超过 10 秒的落点视为过期。
  */
 const PENDING_ENTRY_KEY = 'sixi-spike.entry';
+
+/** 落点只在紧跟一次整页跳转时有意义；超时说明那次跳转没落成，读回首页。 */
+const PENDING_ENTRY_TTL_MS = 10_000;
 
 /** 同一次页面里最后一次路由；整页刷新时模块重新求值，自然归零。 */
 let currentRoute: string | null = null;
 
 function readPendingEntry(): string | null {
   try {
-    return sessionStorage.getItem(PENDING_ENTRY_KEY);
+    const raw = sessionStorage.getItem(PENDING_ENTRY_KEY);
+    if (!raw) return null;
+    // 新格式 `{ route, at }`；旧版本直接存字符串，读到即视为过期并清掉。
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      sessionStorage.removeItem(PENDING_ENTRY_KEY);
+      return null;
+    }
+    if (typeof parsed !== "object" || parsed === null) {
+      sessionStorage.removeItem(PENDING_ENTRY_KEY);
+      return null;
+    }
+    const { route, at } = parsed as { route?: unknown; at?: unknown };
+    if (typeof route !== "string" || typeof at !== "number" || Date.now() - at > PENDING_ENTRY_TTL_MS) {
+      sessionStorage.removeItem(PENDING_ENTRY_KEY);
+      return null;
+    }
+    return route;
   } catch {
     return null;
   }
@@ -142,7 +169,7 @@ function readPendingEntry(): string | null {
 
 function writePendingEntry(entry: string | null): void {
   try {
-    if (entry) sessionStorage.setItem(PENDING_ENTRY_KEY, entry);
+    if (entry) sessionStorage.setItem(PENDING_ENTRY_KEY, JSON.stringify({ route: entry, at: Date.now() }));
     else sessionStorage.removeItem(PENDING_ENTRY_KEY);
   } catch {
     /* 存储不可用：落回首页，不影响跳转本身 */
