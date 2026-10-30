@@ -267,6 +267,20 @@ export function collectBundleArtifacts({ desktopDir, target = null, debug = fals
   return artifacts;
 }
 
+/**
+ * 构建前清空本次要产出的 bundle 目录。
+ *
+ * tauri 只在目录里**新增**文件、不清理旧版本：同一台机器第二次构建（尤其是升版本）会留下
+ * 上一版的安装包。产物收集按目录实际条目统计，残留会让 manifest 出现多个同后缀产物
+ * （发布索引要求「恰好一个 updater archive」直接失败），`--copy` 也会把旧安装包一并复制进
+ * 上传目录。这里清掉，产物即「本次构建产出的那些」。
+ */
+export function clearBundleOutputDirs({ desktopDir, target = null, debug = false, kinds }) {
+  for (const kind of kinds) {
+    fs.rmSync(bundleOutputDir({ desktopDir, target, debug, kind }), { recursive: true, force: true });
+  }
+}
+
 /** 请求了却完全没有产物的 bundle 种类，附期望目录，便于直接定位 tauri build 的失败点。 */
 export function missingBundleKinds({ desktopDir, target = null, debug = false, kinds, artifacts }) {
   const produced = new Set(artifacts.map(entry => entry.kind));

@@ -20,6 +20,7 @@ import {
   buildDefaultsDocument,
   buildDesktopManifest,
   bundleOutputDir,
+  clearBundleOutputDirs,
   collectBundleArtifacts,
   formatCommand,
   hashPath,
@@ -295,6 +296,33 @@ test('Windows NSIS collector includes actual executable and signature', t => {
  const desktopDir=tmpDir(t); const dir=path.join(desktopDir,'target/release/bundle/nsis');
  fs.mkdirSync(dir,{recursive:true}); for(const name of ['Custom_1.2.3_x64-setup.exe','Custom_1.2.3_x64-setup.exe.sig']) fs.writeFileSync(path.join(dir,name),'x');
  assert.deepEqual(collectBundleArtifacts({desktopDir,kinds:['nsis']}).map(a=>a.name).sort(),['Custom_1.2.3_x64-setup.exe','Custom_1.2.3_x64-setup.exe.sig']);
+});
+
+test('构建前清空本次 bundle 目录，避免上一版安装包混进 manifest 与上传目录', t => {
+  const desktopDir = tmpDir(t);
+  const nsis = bundleOutputDir({ desktopDir, kind: 'nsis' });
+  const dmg = bundleOutputDir({ desktopDir, kind: 'dmg' });
+  fs.mkdirSync(nsis, { recursive: true });
+  fs.mkdirSync(dmg, { recursive: true });
+  // 上一版残留（0.1.8）+ 另一个未请求的种类（dmg）。
+  for (const name of ['WooHaa3_0.1.8_x64-setup.exe', 'WooHaa3_0.1.8_x64-setup.exe.sig']) {
+    fs.writeFileSync(path.join(nsis, name), 'old');
+  }
+  fs.writeFileSync(path.join(dmg, 'WooHaa3_0.1.8_aarch64.dmg'), 'old-dmg');
+
+  clearBundleOutputDirs({ desktopDir, debug: false, kinds: ['nsis'] });
+  assert.equal(fs.existsSync(nsis), false);
+  // 只清本次请求的种类，别顺手删掉别的产物。
+  assert.equal(fs.existsSync(path.join(dmg, 'WooHaa3_0.1.8_aarch64.dmg')), true);
+
+  // 清空后重新产物：manifest 只会看到本次构建写进去的那一个。
+  fs.mkdirSync(nsis, { recursive: true });
+  for (const name of ['WooHaa3_0.1.9_x64-setup.exe', 'WooHaa3_0.1.9_x64-setup.exe.sig']) {
+    fs.writeFileSync(path.join(nsis, name), 'new');
+  }
+  const artifacts = collectBundleArtifacts({ desktopDir, debug: false, kinds: ['nsis'] });
+  assert.deepEqual(artifacts.map(entry => entry.name).sort(), ['WooHaa3_0.1.9_x64-setup.exe', 'WooHaa3_0.1.9_x64-setup.exe.sig']);
+  assert.equal(artifacts.filter(entry => entry.name.endsWith('.exe')).length, 1);
 });
 
 test('pnpm argument separator is accepted before desktop build flags', () => {
