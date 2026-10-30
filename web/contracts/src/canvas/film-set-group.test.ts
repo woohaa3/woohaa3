@@ -340,6 +340,37 @@ describe("film-set group contract", () => {
     expect(validateFilmSetGroupBindings(migrated.canvas, "film", marker!)).toBeNull();
   });
 
+  it("reuses a card left by an interrupted migration instead of failing the boot", () => {
+    const value = canvas();
+    const modelData = { modelScript: "scene.box({ id: 'body', size: [1, 1, 1] });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "s1", contentHash: "c1" } };
+    value.document.nodes.push(
+      { id: "other", type: "group", position: { x: 0, y: 0 }, width: 600, height: 400 },
+      { id: "shared", type: "model3d", parentId: "other", position: { x: 20, y: 20 }, width: 180, height: 64 },
+      { id: "film", type: "composite-asset", position: { x: 900, y: 0 }, width: 400, height: 300 },
+      // 上一次迁移已经建好这张副本，但标记没落盘就中断了（进程被杀/崩溃）。
+      { id: "film-model3d-1", type: "model3d", parentId: "film", position: { x: 900, y: 0 }, width: 180, height: 64 }
+    );
+    value.nodeData.shared = { ...modelData };
+    value.nodeData["film-model3d-1"] = { ...modelData };
+    value.nodeData.film = {
+      extensionId: "film-set",
+      filmSetContent: {
+        schemaVersion: 4,
+        items: [{ id: "item", kind: "model", name: "房", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, model: { ...modelData, contentVersion: { contentHash: "v1" } }, origin: { sourceNodeId: "shared", kind: "model" } }]
+      }
+    };
+
+    // 关键：不再以「资源卡片 ID 冲突」失败——否则宿主每次启动都会拒绝开画布。
+    const migrated = migrateLegacyFilmSetToGroup(value, "film", { commandId: "retry", groupId: "film" });
+    expect(migrated.ok, migrated.ok ? "" : migrated.reason).toBe(true);
+    if (!migrated.ok) return;
+    expect(migrated.createdNodeIds).toEqual([]);
+    const binding = migrated.canvas.nodeData.film?.filmSetGroup?.sceneBindings[0];
+    expect(binding?.sourceNodeId).toBe("film-model3d-1");
+    expect(migrated.diagnostics.some(diagnostic => diagnostic.code === "reused-existing-card")).toBe(true);
+    expect(validateFilmSetGroupBindings(migrated.canvas, "film", migrated.canvas.nodeData.film!.filmSetGroup!)).toBeNull();
+  });
+
   it("does not mutate preview/media owners when migration validation fails", () => {
     const value = canvas();
     value.document.nodes.push({ id: "film", type: "composite-asset", position: { x: 0, y: 0 } });

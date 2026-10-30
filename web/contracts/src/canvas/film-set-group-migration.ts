@@ -83,31 +83,46 @@ export function migrateLegacyFilmSetToGroup(canvas: ServerCanvas, legacyNodeId: 
         if (!source.parentId || insideLegacy(source.id)) sourceNodeId = source.id;
         else {
           const copyId = idFactory(kind, legacyNodeId, index);
-          if (nodes.some(node => node.id === copyId)) return { ok: false, reason: `资源卡片 ID 冲突：${copyId}`, diagnostics };
-          const world = getWoohaa3CanvasNodeAbsolutePosition(source, canvasById);
-          const copyData = { ...(nodeData[source.id] ?? {}) } as Record<string, unknown>;
-          delete copyData.filmSetObject;
-          nodes.push({
-            id: copyId, type: kind, position: world,
-            width: source.width ?? 260, height: source.height ?? 195,
-            ...(typeof source.zIndex === "number" ? { zIndex: source.zIndex } : {})
-          });
-          nodeData[copyId] = copyData as CanvasNodeData;
-          createdNodeIds.push(copyId);
-          diagnostics.push({ bindingId: String(item.id), sourceNodeId: source.id, code: "shared-source", message: "来源卡片已属于其它容器，当前片场改用内容相同的副本" });
+          const existingCopy = nodes.find(node => node.id === copyId);
+          if (existingCopy) {
+            // 幂等：上一次迁移可能已经建好这张卡片、但标记没落盘就中断了（进程被杀 / 崩溃）。
+            // id 是确定性的，所以同类型就认定是同一张卡片，直接复用；类型不同说明画布状态
+            // 与迁移假设矛盾，仍然明确失败而不是猜。
+            if (existingCopy.type !== kind) return { ok: false, reason: `资源卡片 ID 冲突：${copyId}`, diagnostics };
+            diagnostics.push({ bindingId: String(item.id), sourceNodeId: source.id, code: "reused-existing-card", message: "该卡片已由上一次迁移创建，按幂等复用" });
+          } else {
+            const world = getWoohaa3CanvasNodeAbsolutePosition(source, canvasById);
+            const copyData = { ...(nodeData[source.id] ?? {}) } as Record<string, unknown>;
+            delete copyData.filmSetObject;
+            nodes.push({
+              id: copyId, type: kind, position: world,
+              width: source.width ?? 260, height: source.height ?? 195,
+              ...(typeof source.zIndex === "number" ? { zIndex: source.zIndex } : {})
+            });
+            nodeData[copyId] = copyData as CanvasNodeData;
+            createdNodeIds.push(copyId);
+            diagnostics.push({ bindingId: String(item.id), sourceNodeId: source.id, code: "shared-source", message: "来源卡片已属于其它容器，当前片场改用内容相同的副本" });
+          }
           sourceNodeId = copyId;
         }
       } else diagnostics.push({ bindingId: String(item.id), sourceNodeId: String(origin.sourceNodeId), code: "type-mismatch", message: "来源卡片不存在或类型不匹配，改用快照物化" });
     }
     if (!sourceNodeId) {
-      sourceNodeId = idFactory(kind, legacyNodeId, index);
-      if (nodes.some(node => node.id === sourceNodeId)) return { ok: false, reason: `资源卡片 ID 冲突：${sourceNodeId}`, diagnostics };
-      const sourceNode: Woohaa3CanvasSerializedNode = { id: sourceNodeId, type: kind, ...(legacy.parentId ? { parentId: legacy.parentId } : {}), position: { x: legacy.position.x + 32 + index * 24, y: legacy.position.y + 32 }, width: 260, height: 195 };
-      nodes.push(sourceNode);
-      createdNodeIds.push(sourceNodeId);
-      const snapshot = object(item.model) ? item.model : {};
-      const { contentVersion, placement, ...modelFields } = snapshot;
-      nodeData[sourceNodeId] = kind === "model3d" ? { ...modelFields, ...Object.fromEntries([["modelContentVersion", contentVersion], ["modelPlacement", placement]].filter(([, value]) => value !== undefined)), title: typeof item.name === "string" ? item.name : "模型" } : { title: typeof item.name === "string" ? item.name : (kind === "image" ? "图片" : "视频"), ...(typeof item.assetId === "string" ? { outputAssetId: item.assetId } : {}) };
+      const cardId = idFactory(kind, legacyNodeId, index);
+      const existingCard = nodes.find(node => node.id === cardId);
+      if (existingCard) {
+        // 与上面的副本分支同一口径：确定性 id 已存在且类型一致 → 上一次迁移的产物，复用。
+        if (existingCard.type !== kind) return { ok: false, reason: `资源卡片 ID 冲突：${cardId}`, diagnostics };
+        diagnostics.push({ bindingId: String(item.id), sourceNodeId: legacyNodeId, code: "reused-existing-card", message: "该卡片已由上一次迁移创建，按幂等复用" });
+      } else {
+        const sourceNode: Woohaa3CanvasSerializedNode = { id: cardId, type: kind, ...(legacy.parentId ? { parentId: legacy.parentId } : {}), position: { x: legacy.position.x + 32 + index * 24, y: legacy.position.y + 32 }, width: 260, height: 195 };
+        nodes.push(sourceNode);
+        createdNodeIds.push(cardId);
+        const snapshot = object(item.model) ? item.model : {};
+        const { contentVersion, placement, ...modelFields } = snapshot;
+        nodeData[cardId] = kind === "model3d" ? { ...modelFields, ...Object.fromEntries([["modelContentVersion", contentVersion], ["modelPlacement", placement]].filter(([, value]) => value !== undefined)), title: typeof item.name === "string" ? item.name : "模型" } : { title: typeof item.name === "string" ? item.name : (kind === "image" ? "图片" : "视频"), ...(typeof item.assetId === "string" ? { outputAssetId: item.assetId } : {}) };
+      }
+      sourceNodeId = cardId;
     }
     if (kind === "model3d" && !decodeModelDefinition(nodeData[sourceNodeId]).ok) return { ok: false, reason: `模型对象 ${item.id} 的来源或快照不完整`, diagnostics };
     if (kind !== "model3d" && typeof nodeData[sourceNodeId]?.outputAssetId !== "string") return { ok: false, reason: `媒体对象 ${item.id} 缺少稳定资产`, diagnostics };

@@ -113,7 +113,7 @@ export type FilmSetGroupDecodeResult =
 export type FilmSetGroupDiagnostic = {
   bindingId: string;
   sourceNodeId: string;
-  code: "missing-source" | "type-mismatch" | "content-unavailable" | "invalid-marker" | "shared-source";
+  code: "missing-source" | "type-mismatch" | "content-unavailable" | "invalid-marker" | "shared-source" | "reused-existing-card";
   message: string;
 };
 
