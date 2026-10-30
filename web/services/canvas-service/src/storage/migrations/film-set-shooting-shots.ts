@@ -255,7 +255,21 @@ const expectDerivedProjection = (canvas: ServerCanvas) => {
   const doc = serverCanvasToYDoc(canvas);
   try {
     const exported = yDocToServerCanvas(doc, { now: canvas.updatedAt });
-    return exported.ok ? exported.canvas : null;
+    // schema3 reader 曾在 schema4 已落盘后再次写入投影：它只省略不认识的
+    // schema4 filmSetContent，保留 schema3 内容。不能拿当前 reader 的输出
+    // 代替该历史视图，也不能忽略整个 nodeData；其余字段仍必须逐字相等。
+    const historical = structuredClone(canvas);
+    historical.document.nodes.sort(compareByZIndexThenId);
+    let omitted = false;
+    for (const nodeId of filmSetNodeIds(canvas)) {
+      const data = historical.nodeData[nodeId] as Record<string, unknown>;
+      const content = data.filmSetContent as { schemaVersion?: number } | undefined;
+      if (content?.schemaVersion === 4) {
+        delete data.filmSetContent;
+        omitted = true;
+      }
+    }
+    return [exported.ok ? exported.canvas : null, ...(omitted ? [historical] : [])];
   } finally {
     doc.destroy();
   }
