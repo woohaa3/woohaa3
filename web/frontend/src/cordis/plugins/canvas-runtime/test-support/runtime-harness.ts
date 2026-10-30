@@ -32,6 +32,7 @@ export function v2Ops(radius: number): SceneV2Op[] {
 export function sceneWith(resourceKey: string, signature: string): CanvasRenderScene {
   return {
     version: CANVAS_RENDER_SCENE_VERSION,
+    canvasId: "canvas-harness",
     revision: 1,
     nodes: [
       {

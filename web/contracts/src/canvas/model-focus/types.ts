@@ -38,6 +38,8 @@ export const MODEL_CARD_GAP = 40.0;
 export const MODEL_SIZE_BASE = 64.0;
 /** 片场模型适配节点矩形时四周保留的边距（与 Rust `FILM_SET_FIT_MARGIN` 一致）。 */
 export const FILM_SET_FIT_MARGIN = 16.0;
+/** 片场组按组内容宽度取景时左右保留的边距（与 group 布局的 `groupPadding` 一致）。 */
+export const FILM_SET_GROUP_WIDTH_MARGIN = 40.0;
 
 /**
  * 聚焦缩小的最近距离：允许相机进入包围球内部以贴近观察细节。
@@ -96,4 +98,9 @@ export type ModelSceneInput = {
    * 普通 model3d 不设置。
    */
   filmSetFit?: { width: number; height: number } | null;
+  /**
+   * 片场组的徽标锚定方式：设置后模型顶边贴住组底边锚点向下展开；
+   * 普通组缺省把模型投影中心对齐锚点。
+   */
+  badgeTopAnchored?: boolean;
 };

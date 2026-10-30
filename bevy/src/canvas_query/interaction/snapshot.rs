@@ -32,8 +32,8 @@ pub(super) struct SnapshotNode {
     pub(super) group: bool,
     pub(super) group_collapsed: bool,
     pub(super) group_outline: Vec<Vec2>,
+    /// 徽标范围四角（模型投影包围盒）；无可呈现模型时为空。
     pub(super) group_badge: Vec<Vec2>,
-    pub(super) group_badge_resize: Option<Vec2>,
     pub(super) ghost: bool,
     pub(super) composite_asset: bool,
     /// 粗筛用外接矩形；复合资产为范围 AABB，普通节点为节点矩形。
@@ -142,6 +142,20 @@ pub(super) fn node_hit_bounds(node: &SnapshotNode) -> (f32, f32, f32, f32) {
         rect = union(rect, actions.bar);
     }
     rect
+}
+
+/// 徽标命中多边形：模型投影包围盒的闭合四角；无徽标为空。
+fn badge_polygon(node: &crate::protocol::GraphNode) -> Vec<Vec2> {
+    match crate::canvas_query::group_model::badge_rect(node) {
+        Some(rect) => vec![
+            Vec2::new(rect.x, rect.y),
+            Vec2::new(rect.x + rect.z, rect.y),
+            Vec2::new(rect.x + rect.z, rect.y + rect.w),
+            Vec2::new(rect.x, rect.y + rect.w),
+            Vec2::new(rect.x, rect.y),
+        ],
+        None => Vec::new(),
+    }
 }
 
 /// 重建节点网格（只在完整场景接受点调用；位置增量用 `relocate`）。
@@ -362,8 +376,8 @@ fn snapshot_node(
             scope.aabb.height,
         ),
         None if group_collapsed => {
-            let badge = crate::canvas_query::group_model::badge_rect(node);
-            (badge.x, badge.y, badge.z, badge.w)
+            let rect = crate::canvas_query::group_model::presentation_rect(node);
+            (rect.x, rect.y, rect.z, rect.w)
         }
         None => (node.x, node.y, node.width, node.height),
     };
@@ -387,11 +401,8 @@ fn snapshot_node(
         id: node.id.clone(),
         group,
         group_collapsed,
-        group_badge: crate::canvas_query::group_model::badge_path(node),
-        group_badge_resize: crate::canvas_query::group_model::resize_center(node),
-        group_outline: if !node.group.as_ref().is_some_and(|group| group.collapsed)
-            && !crate::canvas_query::group_model::badge_path(node).is_empty()
-        {
+        group_badge: badge_polygon(node),
+        group_outline: if !node.group.as_ref().is_some_and(|group| group.collapsed) {
             crate::canvas_query::group_model::outline(node)
         } else {
             Vec::new()
@@ -711,16 +722,6 @@ impl InteractionSnapshot {
             {
                 return Some(PointHit::ShotPreview {
                     node_id: node.id.clone(),
-                });
-            }
-            if node
-                .group_badge_resize
-                .is_some_and(|center| (world - center).abs().max_element() <= 6. / zoom.max(0.1))
-            {
-                return Some(PointHit::NodeAction {
-                    node_id: node.id.clone(),
-                    action_id: "group-resize-badge".into(),
-                    menu: false,
                 });
             }
             if crate::canvas_query::group_model::path_contains(&node.group_badge, world) {

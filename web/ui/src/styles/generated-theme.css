@@ -5,7 +5,7 @@
 :root {
   color-scheme: light;
   /* web */
-  --app-web-backdrop: #f8faf9;
+  --app-web-backdrop: #f8f9f7;
   --app-web-surface: #ffffff;
   --app-web-panel: #ffffff;
   --app-web-elevated: #ffffff;

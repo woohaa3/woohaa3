@@ -21,7 +21,8 @@ import {
   type CanvasTaskCatalogModel,
   type DeployLimits,
   type EffectiveModelLimits,
-  type PresetCard
+  type PresetCard,
+  type PresetModelType
 } from "@woohaa3/contracts";
 import type {
   ExecutionPanelModelConfig,
@@ -91,7 +92,7 @@ export function buildCardSet(cards: readonly PresetCard[]): ShowcaseCardSet {
 }
 
 /** 按模型类型取卡片并装配。 */
-export function buildCardSetFor(modelType: "image" | "video"): ShowcaseCardSet {
+export function buildCardSetFor(modelType: PresetModelType): ShowcaseCardSet {
   return buildCardSet(presetCardsOf(BUILTIN_PRESET_CARDS, modelType));
 }
 

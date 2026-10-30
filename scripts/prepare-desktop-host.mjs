@@ -11,6 +11,8 @@ import { systemTar, systemTarArgs } from './lib/desktop-platform-commands.mjs';
 import { writeRuntimeLinks } from './lib/desktop-runtime-links.mjs';
 import { resolvedRuntimeLock } from './package-runtime-components.mjs';
 import { scanExtensions } from './lib/extension-scan.mjs';
+import { loadBuildProfile } from './lib/build-profile.mjs';
+import { applySiteDefaultEnabled } from './lib/site-extension-defaults.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const run=(command,args,options={})=>execFileSync(command,args,{cwd:root,stdio:'inherit',windowsHide:true,...options});
 export async function prepareDesktopNode(){
@@ -47,6 +49,8 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  copyRuntimeFiles(frontend,path.join(output,'frontend'));
  copyRuntimeFiles(path.join(root,'web/contracts/src/base-path'),path.join(output,'web/contracts/src/base-path'));
  fs.copyFileSync(path.join(root,'web/services/task-service/pptask.models.json'),path.join(output,'models.json'));
+ const buildProfile=loadBuildProfile({repoRoot:path.dirname(root),env:process.env});
+ const siteDefaults=buildProfile.ok?buildProfile.resolved.siteExtensionDefaults:{};
  const extensions=[];
  const inventory=JSON.parse(fs.readFileSync(path.join(root,'desktop/host-extensions.json'),'utf8')).extensions;
  const scanned=scanExtensions({repoRoot:root,env:{}}).extensions;
@@ -55,6 +59,7 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
   if(!inventory.includes(extension.extensionId))continue;
   const target=copyRuntimePackage(extension.dir,output,state);const link=path.join(output,'extensions',extension.extensionId);
   copyRuntimeFiles(target,link);
+  if(siteDefaults[extension.extensionId]!==undefined)applySiteDefaultEnabled({extensionDir:link,enabled:siteDefaults[extension.extensionId]});
   // Scanner deliberately accepts directories only. Keep a physical extension root,
   // while its dependency edges share the central collected graph.
   if(process.platform==='win32'){
@@ -71,7 +76,7 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
   extensions.push(extension.extensionId);
  }
  const runtimeDownloads=JSON.parse(fs.readFileSync(path.join(root,'desktop/runtime-downloads.json'),'utf8'));
- const runtimeCdnRoot=process.env.WOOHAA_RUNTIME_CDN_BASE_URL??runtimeDownloads.cdn?.baseUrl??'';
+ const runtimeCdnRoot=(buildProfile.ok?buildProfile.resolved.runtimeCdnUrl:'')||runtimeDownloads.cdn?.baseUrl||'';
  runtimeDownloads.cdn={baseUrl:runtimeReleaseVersion?runtimeReleaseLayout({version:runtimeReleaseVersion,cdnBaseUrl:runtimeCdnRoot}).baseUrl:runtimeCdnRoot};
  fs.writeFileSync(path.join(output,'runtime-downloads.json'),JSON.stringify(runtimeDownloads,null,2)+'\n');
  fs.writeFileSync(path.join(output,'runtime-components.lock.json'),JSON.stringify(resolvedRuntimeLock(),null,2)+'\n');

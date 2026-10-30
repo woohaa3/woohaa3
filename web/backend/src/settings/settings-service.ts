@@ -49,6 +49,27 @@ export { EXTENSION_CONFIG_PREFIX };
 /** 扩展 ID 形态：与目录名一致，禁止路径分隔符与 `..`（键会落到配置文件路径上）。 */
 const EXTENSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
+/** 构建期注入的设置项默认值（build profile 的 `settings`）；未注入时为空。 */
+declare const __WOOHAA3_SETTING_DEFAULTS__: Readonly<Record<string, unknown>> | undefined;
+
+function buildSettingDefaults(): Readonly<Record<string, SettingPrimitive>> {
+  if (typeof __WOOHAA3_SETTING_DEFAULTS__ !== "object" || __WOOHAA3_SETTING_DEFAULTS__ === null) return {};
+  const out: Record<string, SettingPrimitive> = {};
+  for (const [key, value] of Object.entries(__WOOHAA3_SETTING_DEFAULTS__)) {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") out[key] = value;
+  }
+  return out;
+}
+
+/** 设置项默认值：用户配置文件仍优先；这里只替换「没有值时的默认」。 */
+function withBuildDefault<T extends { default?: SettingPrimitive }>(
+  key: string,
+  definition: T,
+  defaults: Readonly<Record<string, SettingPrimitive>>
+): T {
+  return key in defaults ? { ...definition, default: defaults[key] } : definition;
+}
+
 export type SettingsServiceOptions = {
   configFile: string;
   secretsFile: string;
@@ -57,6 +78,8 @@ export type SettingsServiceOptions = {
   watch?: boolean;
   debounceMs?: number;
   logger?: (event: Record<string, unknown>) => void;
+  /** 构建期注入的设置项默认值；缺省读 `__WOOHAA3_SETTING_DEFAULTS__`（测试可显式传入）。 */
+  settingDefaults?: Readonly<Record<string, SettingPrimitive>>;
 };
 
 export type SettingsPatch = Record<string, string | number | boolean | null>;
@@ -165,7 +188,10 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
   const log = options.logger ?? (() => undefined);
   const env = options.env ?? {};
   const listeners = new Set<{ keys: readonly string[]; listener: SettingsListener }>();
-  const definitions: Record<string, SettingDefinition> = { ...SETTING_DEFINITIONS };
+  const buildDefaults = options.settingDefaults ?? buildSettingDefaults();
+  const definitions: Record<string, SettingDefinition> = Object.fromEntries(
+    Object.entries(SETTING_DEFINITIONS).map(([key, definition]) => [key, withBuildDefault(key, definition, buildDefaults)])
+  );
   /** 插件清单：按登记顺序排列（设置页「插件配置」的展示顺序）。 */
   const pluginRegistry = new Map<string, SettingsPluginRegistration>();
 
@@ -237,11 +263,12 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
     if (taken.length > 0) throw new Error(`配置项已被声明：${taken.join("、")}`);
     const added: Record<string, SettingDefinition> = {};
     for (const [field, definition] of Object.entries(fields)) {
-      added[`${prefix}.${field}`] = {
+      const key = `${prefix}.${field}`;
+      added[key] = withBuildDefault(key, {
         ...definition,
         group,
         ...(ownerExtensionId ? { ownerExtensionId } : {})
-      } as SettingDefinition;
+      } as SettingDefinition, buildDefaults);
     }
     Object.assign(definitions, added);
     const next = resolve(layers);

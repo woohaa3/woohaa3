@@ -46,6 +46,7 @@ import {
   tauriFrontendDist,
   validateIconSource
 } from "./lib/desktop-release.mjs";
+import { buildDefines, describeBuildProfile, loadBuildProfile, updateEndpointFor, updaterPlatformKey } from "./lib/build-profile.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -242,6 +243,19 @@ async function runBuild(options) {
   const targetError = nativeTargetError({ platform, arch, target: options.target });
   if (targetError) throw new Error(targetError);
   assertPlatformAndIcons({ platform });
+  // 更新源、信任根与构建期常量都来自 build profile；env 只在 loader 内作为加载期覆盖。
+  // 必须在 buildFrontend 之前加载：公开桶与官方信任根要通过 WOOHAA3_DEFINES 进入前端/后端产物。
+  const buildProfile = loadBuildProfile({ repoRoot: path.dirname(root), env: process.env });
+  if (!buildProfile.ok) {
+    const detail = buildProfile.errors.map((error) => `  ${error.path}: ${error.message}`).join("\n");
+    throw new Error(`build profile 校验失败（${buildProfile.path ?? "未知路径"}）：\n${detail}`);
+  }
+  console.log(`[desktop] ${describeBuildProfile(buildProfile)}`);
+  const defines = buildDefines(buildProfile.resolved);
+  if (defines && !process.env.WOOHAA3_DEFINES?.trim()) {
+    process.env.WOOHAA3_DEFINES = JSON.stringify(defines);
+  }
+  if (defines) console.log(`[desktop] build-profile defines: ${Object.keys(defines).join(", ")}`);
   if (options.buildFrontend && !options.dryRun) {
     // 发布产物自报发布版本：桌面端没有部署脚本，按 git 现场取值只能得到 `<sha>-dirty`
     // （构建过程会写入生成资源，工作区必然是脏的），管理端「上报端版本」因此看不出是哪个版本。
@@ -261,12 +275,18 @@ async function runBuild(options) {
     frontendDist: options.frontend ? tauriFrontendDist(frontendDist, desktopDir) : null,
     defaultsPath
   });
+  const platformKey = updaterPlatformKey({ platform, arch });
+  const updateEndpoint = updateEndpointFor(buildProfile.resolved, platformKey) || null;
+  const updatePublicKey = buildProfile.resolved.updatePublicKeys[0] ?? null;
+  if (!options.dryRun && !options.debug && !options.uiUrl && !buildProfile.resolved.allowUnconfiguredUpdate && (!updateEndpoint || !updatePublicKey)) {
+    throw new Error("缺少桌面更新源或公钥：在 build-profile.json 配 cdn.updatePath 与 desktop.update.publicKeys，或设 desktop.allowUnconfiguredUpdate=true 明确承认不带自动更新。");
+  }
   let hostPackage = null;
   if (!options.dryRun && !options.uiUrl) {
     buildNativeTools();
     const prepared = await prepareDesktopHost({ frontend: frontendDist, build: resolvedReleaseId, runtimeReleaseVersion: options.debug ? undefined : (options.version ?? config.version), ...(process.env.WOOHAA_DESKTOP_HOST_STAGING ? { output: path.resolve(process.env.WOOHAA_DESKTOP_HOST_STAGING) } : {}) });
-    const endpoint = process.env.WOOHAA_DESKTOP_UPDATE_ENDPOINT ?? null;
-    const publicKey = process.env.WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY ?? null;
+    const endpoint = updateEndpoint;
+    const publicKey = updatePublicKey;
     const standalone = standaloneBundleConfig({ ...prepared, endpoint, publicKey });
     const startupFrontend = prepareStartupFrontend(frontendDist, path.join(path.dirname(defaultsPath), "startup-frontend"));
     override.build = { ...override.build, frontendDist: tauriFrontendDist(startupFrontend, desktopDir) };
@@ -336,12 +356,16 @@ async function runBuild(options) {
     });
   }
   if (options.copy) {
+    // 复制目标是跨构建复用的目录：不清掉的话，每次发布都会把历史版本的安装包一起带进构件
+    // （实测一次归档里叠了三个版本、元数据 527 MB），而这次构建只该产出这一版。
+    const bundlesDir = path.join(outDir, "bundles");
+    fs.rmSync(bundlesDir, { recursive: true, force: true });
     for (const artifact of collected) {
-      const destination = path.join(outDir, "bundles", artifact.kind, artifact.name);
+      const destination = path.join(bundlesDir, artifact.kind, artifact.name);
       fs.mkdirSync(path.dirname(destination), { recursive: true });
       fs.cpSync(artifact.path, destination, { recursive: true });
     }
-    console.log(`[desktop] 已复制产物到 ${relative(path.join(outDir, "bundles"))}`);
+    console.log(`[desktop] 已复制产物到 ${relative(bundlesDir)}`);
   }
 
   const indexSha256 = (await hashPath(path.join(frontendDist, "index.html"))).sha256;

@@ -44,6 +44,7 @@ import {
 } from "./overview-lod-telemetry.js";
 import { getGroupLayoutSizes } from "@woohaa3/contracts";
 import { groupBadgePresentationScreenRect } from "./group-badge-screen-rect.js";
+import { groupBadgeProjectionOf } from "../canvas-shell/group-badge-projection.js";
 import {
   applyFilmSetObjectAction,
   applyFilmSetObjectGesture,
@@ -593,7 +594,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         node,
         layout,
         collapsed: data?.groupCollapsed === true,
-        scale: data?.groupBadgeScale
+        projection: groupBadgeProjectionOf(canvas, nodeId, layout)
       }) ?? card;
     }
     const scopes = this.controllerInstance?.queryCompositeAssetScopes();

@@ -26,6 +26,15 @@ struct Stats {
     render_frames: u64,
     render_ms: f64,
     render_max_ms: f64,
+    /// 主世界（Update 图）每帧墙钟：`frameExecMs` 只覆盖 JS 帧循环，渲染三阶段只覆盖
+    /// render sub-app；两者之间的缺口（模型同步、预览准入、LOD、块布局）只有这一项能回答。
+    main_frames: u64,
+    main_ms: f64,
+    main_max_ms: f64,
+    /// 主世界里模型同步系统的每帧墙钟（场景变化时才有工作）。
+    model_frames: u64,
+    model_ms: f64,
+    model_max_ms: f64,
 }
 #[derive(Resource, Clone, Default)]
 pub(crate) struct RenderWork(
@@ -96,11 +105,17 @@ impl RenderWork {
             .map(|p| (p.node_id.clone(), p.clip_id.clone(), p.generation));
         let report = stats.startup.arm(key, now_ms());
         stats.pending.model_ms = cpu_ms;
+        stats.model_frames = stats.model_frames.saturating_add(1);
+        stats.model_ms += cpu_ms;
+        stats.model_max_ms = stats.model_max_ms.max(cpu_ms);
         drop(stats);
         emit(report);
     }
     pub(crate) fn startup_main(&self, cpu_ms: f64, gap_ms: Option<f64>) {
         let mut stats = self.0.lock().unwrap();
+        stats.main_frames = stats.main_frames.saturating_add(1);
+        stats.main_ms += cpu_ms;
+        stats.main_max_ms = stats.main_max_ms.max(cpu_ms);
         stats.pending.main_ms = Some(cpu_ms);
         stats.pending.main_gap_ms = gap_ms;
         stats.pending.main_finished = Some(Instant::now());
@@ -434,5 +449,20 @@ mod tests {
         assert!(snapshot["work"]["prepareMs"].as_f64().unwrap().is_finite());
         assert_eq!(snapshot["scope"], "all-render-views");
         assert_eq!(snapshot["perPreviewPrepare"], "unavailable");
+    }
+
+    #[test]
+    fn accumulates_main_world_and_model_sync_wall_clock_on_every_frame() {
+        let work = RenderWork::default();
+        work.startup_main(4.5, Some(16.0));
+        work.startup_main(5.5, Some(16.0));
+        work.startup_models(None, 2.0);
+        let snapshot: serde_json::Value = serde_json::from_str(&work.snapshot()).unwrap();
+        // 主世界每帧墙钟：JS 帧循环与渲染三阶段之间的缺口只有这两项能回答。
+        assert_eq!(snapshot["work"]["mainFrames"], 2);
+        assert!((snapshot["work"]["mainMs"].as_f64().unwrap() - 10.0).abs() < 1e-9);
+        assert!((snapshot["work"]["mainMaxMs"].as_f64().unwrap() - 5.5).abs() < 1e-9);
+        assert_eq!(snapshot["work"]["modelFrames"], 1);
+        assert!((snapshot["work"]["modelMs"].as_f64().unwrap() - 2.0).abs() < 1e-9);
     }
 }

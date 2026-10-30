@@ -82,6 +82,27 @@ export function ParameterField({
 
 	if (field.type === "select") {
 		const options = field.options ?? [];
+		// 音色是长列表（几十到上百个上游 id），分段按钮会铺满半屏；用原生下拉更合适。
+		// 仍由 `x-pptask-control: "voice"` 显式声明语义，不按 key 名猜。
+		if (field.semantic === "voice") {
+			return (
+				<label className="mc-panel__settings-group">
+					<span className="mc-panel__settings-label">{field.label}</span>
+					<select
+						className="mc-panel__settings-select"
+						value={String(resolved)}
+						disabled={lockedBy !== undefined}
+						onChange={(event) => onChange(event.target.value)}
+					>
+						{options.map((option) => (
+							<option key={option.value} value={option.value}>
+								{option.label}
+							</option>
+						))}
+					</select>
+				</label>
+			);
+		}
 		const ratioCount = options.filter((option) => aspectRatio(option.value) !== null).length;
 		const adaptiveCount = options.filter((option) => isAdaptiveValue(option.value)).length;
 		const ratioCatalog = ratioCount > 0 && ratioCount + adaptiveCount === options.length;

@@ -14,7 +14,7 @@
 //! 靠近相机的前缘在对叠处本就比靠下片场的远端更近，逐像素只会稳定地让上方的地台压住下方。
 //!
 //! 本模块是纯几何 + 线程本地已接受表：不依赖 ECS、bridge、wasm 或模型资源。锚点、外包框与
-//! 分离量只由结构几何与可见地面派生；模型尚未驻留、`has_badge` 瞬态为假都不影响顺序。
+//! 分离量只由结构几何与可见地面派生；模型尚未驻留或徽标范围缺失都不影响顺序。
 //! [`apply_deltas`] 从基线重算，深度只在完整场景接受与位置增量接受时结算。
 
 use std::cell::RefCell;
@@ -34,8 +34,6 @@ const MAX_CLUSTER_SPAN: f32 = 8000.0;
 /// 等距正交投影下，内容沿视线方向的厚度不会被投影宽度/高度直接限制；取 2.5 倍最大边作为
 /// 保守上界（实测片场地台厚度约为最大边的 1.2–1.6 倍），只用于相邻根的分离量，不写回几何。
 const DEPTH_EXTENT_FACTOR: f32 = 2.5;
-/// 组不透明徽章底座相对本组深度平面的偏移：让本组模型站在底座之前。
-const BADGE_REAR_EPSILON: f32 = 0.05;
 
 /// 画布坐标下的节点可见外包框（用于重叠聚类）。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -180,11 +178,6 @@ pub(crate) fn apply_deltas<'a>(deltas: impl Iterator<Item = (&'a str, f32, f32)>
 /// 当前根的观察深度；未知根（无 `model` 引用 / 尚未接受）为 0。
 pub(crate) fn depth_of(id: &str) -> f32 {
     STATE.with(|state| state.borrow().depths.get(id).copied().unwrap_or(0.0))
-}
-
-/// 不透明徽章底座深度：本组深度平面之后一个极小偏移。
-pub(crate) fn group_badge_depth(id: &str) -> f32 {
-    depth_of(id) - BADGE_REAR_EPSILON
 }
 
 pub(crate) fn diagnostics() -> DepthDiagnostics {

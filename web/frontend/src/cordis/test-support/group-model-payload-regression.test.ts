@@ -9,6 +9,7 @@ import {
 } from "@woohaa3/contracts";
 import { loadBevyRuntime } from "../plugins/canvas-runtime/bevy-runtime.js";
 import { mockModule, v2Ops, type Calls } from "../plugins/canvas-runtime/test-support/runtime-harness.js";
+import { modelSceneStore } from "../plugins/model-scene/model-scene-store.js";
 import {
   CanvasResourceCoordinator,
   createContentIdentity,
@@ -98,8 +99,15 @@ describe("组展示模型从资源准入到 WASM payload", () => {
     // 旧夹具按 40/80 内边距算 y=-541；内边距改 12 后候选高度变化，同步重算（change: canvas-grouping-redesign）。
     canvas.document.nodes.push({ id: "group", type: "group", position: { x: 100, y: -473 }, width: 500, height: 400 });
     canvas.document.nodes.push({ id: "member", type: "image", parentId: "group", position: { x: 40, y: 200 }, width: 200, height: 195 });
+    const resource = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: v2Ops(2) });
+    modelSceneStore.set("group", resource);
+    let version = 0;
+    const candidatesFor = createResidencyCandidateCache(createContentIdentity({ modelResourceKey: () => "group-resource" }), () => version);
+    const first = candidatesFor(canvas)[0]!;
+    // 组框整体在视口上方，只让模型投影派生的徽章下缘进入顶部 4px。
+    canvas.document.nodes[0]!.position.y += 4 - (first.y + first.height);
+    version += 1;
     const coordinator = new CanvasResourceCoordinator();
-    const candidatesFor = createResidencyCandidateCache(createContentIdentity({ modelResourceKey: () => "group-resource" }));
     try {
       const candidate = candidatesFor(canvas)[0]!;
       expect(candidate.y + candidate.height).toBe(4);
@@ -111,7 +119,10 @@ describe("组展示模型从资源准入到 WASM payload", () => {
       })();
       expect(coordinator.admittedNodeIds()).toEqual(["group"]);
       expect(coordinator.admittedContentKeys()).toEqual(["group-resource"]);
-    } finally { coordinator.dispose(); }
+    } finally {
+      modelSceneStore.delete("group");
+      coordinator.dispose();
+    }
   });
 
   it("可见组加载自身模型但不占离屏预览槽", () => {

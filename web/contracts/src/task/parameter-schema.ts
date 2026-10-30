@@ -52,13 +52,19 @@ export function requirementOfOption(option: unknown): PptaskParameterRequirement
 }
 
 /** 语义控件种类。 */
-export type PptaskParameterControl = "aspect-ratio" | "resolution" | "quality" | "background";
+export type PptaskParameterControl =
+  | "aspect-ratio"
+  | "resolution"
+  | "quality"
+  | "background"
+  | "voice";
 
 const PARAMETER_CONTROLS: readonly PptaskParameterControl[] = [
   "aspect-ratio",
   "resolution",
   "quality",
-  "background"
+  "background",
+  "voice"
 ];
 
 export function isPptaskParameterControl(value: unknown): value is PptaskParameterControl {

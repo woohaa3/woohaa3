@@ -2,6 +2,7 @@ import { groupPresentationRect, nodeWorldRect } from "@woohaa3/contracts";
 import type { CanvasRuntimeService } from "../../contracts.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
+import { groupBadgeProjectionsForCanvas } from "../canvas-shell/group-badge-projection.js";
 
 type ScreenRect = { left: number; right: number; top: number; bottom: number };
 
@@ -46,7 +47,7 @@ export function watchDockReveal(runtime: CanvasRuntimeService, nodeId: string): 
     }
     const rect = groupPresentationRect(node, canvas.nodeData[node.id]?.groupCollapsed === true,
       nodeWorldRect(node, new Map(canvas.document.nodes.map((entry) => [entry.id, entry]))),
-      canvas.nodeData[node.id]?.groupBadgeScale);
+      groupBadgeProjectionsForCanvas(canvas).get(node.id));
     const start = runtime.worldToClient(rect);
     const end = runtime.worldToClient({ x: rect.x + rect.width, y: rect.y + rect.height });
     const panel = dock!.getBoundingClientRect();

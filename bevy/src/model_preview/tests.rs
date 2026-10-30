@@ -579,6 +579,72 @@ fn focused_card_survives_offscreen_expiry() {
     );
 }
 
+/// 离屏且没有卡片的节点不得占住延迟队列。
+///
+/// 回归：这类节点在准入判断之前就 `continue` 了（只注册拾取层，不做分配），
+/// 因此“排过队、后来被拖出画面”的条目没有任何一帧会去清理它。
+#[test]
+fn offscreen_node_without_card_drops_its_deferred_entry() {
+    let mut app = model_card_app();
+    let mut nodes = app.world().resource::<CurrentScene>().0.nodes.clone();
+    let mut offscreen = nodes[0].clone();
+    offscreen.id = "far".into();
+    offscreen.x = 20_000.0;
+    nodes.push(offscreen);
+    app.world_mut().resource_mut::<CurrentScene>().0.nodes = nodes;
+    app.update();
+    assert!(
+        !app.world().resource::<Previews>().cards.contains_key("far"),
+        "离屏节点不得创建卡片"
+    );
+    {
+        let mut state = app.world_mut().resource_mut::<Previews>();
+        state.deferred.insert("far".into(), 0);
+        assert!(state.has_pending());
+    }
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = true;
+    app.update();
+    let state = app.world().resource::<Previews>();
+    assert!(
+        !state.deferred.contains_key("far"),
+        "离屏且无卡片的节点不得留在延迟队列"
+    );
+}
+
+/// 「曾经排队、后来处理不了」的节点不得永久占住延迟队列。
+///
+/// 回归：`sync` 在资源缺失 / bounds 退化时 `continue`，跳过准入判断也就跳过了延迟项清理；
+/// 而 `retain(alive)` 只看节点是否仍带 `model`/`modelPreview`。于是这条条目永久留在队列里，
+/// `has_pending()` 恒为真，`pacing` 卡在 `active:previews`，画布再也回不到静止降频。
+#[test]
+fn deferred_entry_is_dropped_when_the_node_cannot_be_processed() {
+    let mut app = model_card_app();
+    app.update();
+    {
+        let mut state = app.world_mut().resource_mut::<Previews>();
+        // 人工制造一次「已排队」的延迟项。
+        state.deferred.insert("m".into(), 0);
+        assert!(state.has_pending());
+    }
+    // 资源撤回：节点仍在场景里（仍带 model/modelPreview），但这一帧走不到准入判断。
+    app.world_mut()
+        .resource_mut::<ModelAssetTable>()
+        .0
+        .remove("model");
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = true;
+    app.update();
+    let state = app.world().resource::<Previews>();
+    assert!(
+        state.deferred.is_empty(),
+        "处理不了的节点不得留在延迟队列"
+    );
+    assert!(!state.has_pending(), "队列清空后不得再要求连续帧");
+}
+
 /// 没有模型根的卡片不得长期占住调度槽：有界等待后让位，其它卡片才能推进。
 #[test]
 fn card_without_root_releases_its_scheduling_slot_after_a_bounded_wait() {

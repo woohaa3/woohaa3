@@ -5,11 +5,17 @@ use objc2::{
 };
 use objc2_app_kit::NSView;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSRunLoop, NSRunLoopCommonModes};
-use objc2_quartz_core::CADisplayLink;
+use objc2_quartz_core::{CADisplayLink, CAFrameRateRange};
+
 use std::{
     cell::{Cell, RefCell},
     time::Instant,
 };
+
+/// 画布最大帧率（Hz）。display link 与 WKWebView 共用主线程，超过这个值只会挤占输入与重绘。
+const MAX_FRAME_RATE: f32 = 60.0;
+/// 允许系统在负载下自适应降到的最低帧率（不会高于 [`MAX_FRAME_RATE`]）。
+const MIN_FRAME_RATE: f32 = 30.0;
 
 struct TickIvars {
     callback: Box<dyn Fn()>,
@@ -48,6 +54,19 @@ pub fn start(view: &NSView, callback: Box<dyn Fn()>) -> bool {
     // NSObject init and the one-argument selector match the declarations above.
     let target: Retained<TickTarget> = unsafe { msg_send![super(allocated), init] };
     let link = unsafe { view.displayLinkWithTarget_selector(&target, sel!(tick:)) };
+    // 画布最大帧率 = 60Hz（change: 2026-10-30-cap-canvas-frame-rate-at-60）。
+    //
+    // display link 与 WKWebView 共用主线程：不设上限时按显示器刷新率跑（120Hz 外接屏就是
+    // 90~120 次/秒的 Bevy update + render），静止画布也要占掉主线程 65%，输入与文本重绘只能
+    // 排队——现场表现为执行面板输入框按键 → 画面平均 105ms、峰值 501ms。
+    // 上限 60 让主线程留出余量；下限 30 允许系统在负载下自适应降频，重帧时不至于死等。
+    unsafe {
+        link.setPreferredFrameRateRange(CAFrameRateRange::new(
+            MIN_FRAME_RATE,
+            MAX_FRAME_RATE,
+            MAX_FRAME_RATE,
+        ));
+    }
     // Common modes keep the renderer ticking during window tracking/resize.
     unsafe {
         link.addToRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSRunLoopCommonModes);

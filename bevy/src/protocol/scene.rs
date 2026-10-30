@@ -645,10 +645,6 @@ pub(crate) struct ModelPreview {
 pub(crate) struct GroupPresentation {
     #[serde(default)]
     pub(crate) collapsed: bool,
-    #[serde(default = "default_badge_scale")]
-    pub(crate) badge_scale: f32,
-    #[serde(default)]
-    pub(crate) badge_resizable: bool,
     /// 组容器是否绘制节点顶部操作横条；普通组与片场组都声明，旧场景缺省保持无横条。
     #[serde(default)]
     pub(crate) action_bar: bool,
@@ -663,6 +659,11 @@ pub(crate) struct GroupPresentation {
     pub(crate) run_status: Option<GroupRunStatus>,
     #[serde(default)]
     pub(crate) model_bounds: Option<GroupModelBounds>,
+    /// 片场组的外部徽标顶边贴住组底边锚点向下展开；缺省 false（模型投影中心对齐锚点）。
+    ///
+    /// 只影响徽标几何，不改组框结构、成员布局或模型身份；普通组缺省保持居中。
+    #[serde(default, rename = "badgeTopAnchor")]
+    pub(crate) badge_top_anchor: bool,
     /// 总览 primitive LOD 策略声明；缺失即 group 徽标保持 High。
     ///
     /// 片场迁移为 group 后，可信 adapter 的声明经 group 呈现进入运行时；Rust 只消费该声明，
@@ -676,10 +677,6 @@ pub(crate) struct GroupPresentation {
     /// （change: 2026-10-29-cache-film-set-overview-textures）。
     #[serde(default, rename = "overviewCache")]
     pub(crate) overview_cache: Option<CompositeAssetOverviewCache>,
-}
-
-fn default_badge_scale() -> f32 {
-    1.
 }
 
 #[derive(Clone, Deserialize, PartialEq)]
@@ -751,6 +748,15 @@ pub(crate) struct Scene {
     /// （change: optimize-model-scene-snapshot-hot-path）。
     #[serde(default)]
     pub(crate) version: String,
+    /// 文档身份（画布 id，v33 起由客户端必传）。
+    ///
+    /// `revision` 是**单个文档**的版本号，跨画布没有可比性：投影的单调保护必须按身份重置，
+    /// 否则切到 revision 更小的画布时整帧都会被判「代数倒退」而丢弃
+    /// （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs 的投影保护）。
+    ///
+    /// 缺失或为空表示来源未提供身份：此时维持进程内单调语义（旧客户端/测试）。
+    #[serde(default, rename = "canvasId")]
+    pub(crate) canvas_id: String,
     pub(crate) nodes: Vec<GraphNode>,
     #[serde(default, rename = "modelFocusContext")]
     pub(crate) model_focus_context: Vec<FocusContextNode>,
@@ -875,13 +881,6 @@ impl Scene {
                 && (self.selection.nodes.len() != 1 || self.selection.nodes[0] != node.id)
             {
                 return Err("Invalid resize projection");
-            }
-            if node
-                .group
-                .as_ref()
-                .is_some_and(|g| !g.badge_scale.is_finite() || g.badge_scale < 0.5)
-            {
-                return Err("Invalid group badge scale");
             }
             if let Some(bounds) = node.group.as_ref().and_then(|g| g.model_bounds.as_ref()) {
                 if node.model.is_none()

@@ -15,9 +15,11 @@
  */
 import {
   checkAnimationMotion,
+  filmSetGroupBadgePlacement,
   getGroupLayoutSizes,
   getWoohaa3CanvasNodeAbsolutePosition,
   groupBadgeRect,
+  groupModelProjection,
   managedShotPreviewOwnershipOf,
   readFilmSetAnimationProjection,
   evaluateMotionIr,
@@ -56,13 +58,8 @@ export type ShotPreviewSceneInputSource = {
   canvas: ServerCanvas | null;
   /** 当前活动播放投影（无活动会话为 null）。 */
   playback: BevyAnimationPlayback | null;
-  /** 已解析的模型聚焦目标集合（片场世界包围球的共享事实源）。 */
+  /** 已解析的模型聚焦目标集合（片场世界包围球与徽标投影的共享事实源）。 */
   targets: readonly FocusTargetInput[];
-  /**
-   * 正在拖动中的徽标倍率预览（只覆盖对应 group）。归属线起点必须跟着预览走，
-   * 否则拖动时徽标中心已经移动、线头却停在上一次提交的位置。
-   */
-  badgeScaleOverrides?: ReadonlyMap<string, number>;
 };
 
 /**
@@ -135,23 +132,40 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
   /**
    * 片场 3D 徽标在画布坐标系里的矩形。
    *
-   * 与 Bevy 绘制同源：徽标画在**成员布局矩形**（`getGroupLayoutSizes`）下缘 6px，再按
-   * `groupBadgeScale` 保持气泡中线对齐等比放大。用节点自身尺寸推导会让徽标整体高出一整段。
+   * 与 Bevy 绘制同源：徽标 = 该组模型投影包围盒，以组结构底边中点向下 40 画的锚点居中。
+   * 投影复用聚焦目标里同一份已 prepared 模型几何（`groupModelProjection`）。
    */
   const badgeRectOf = (filmSetNodeId: string): { x: number; y: number; width: number; height: number; center: { x: number; y: number } } | null => {
     const node = canvas.document.nodes.find((entry) => entry.id === filmSetNodeId);
     if (!node || node.type !== "group") return null;
+    const target = targets.get(filmSetNodeId);
     const world = getWoohaa3CanvasNodeAbsolutePosition(node, new Map(canvas.document.nodes.map((entry) => [entry.id, entry])));
-    const data = nodeData[filmSetNodeId] as { groupBadgeScale?: number; groupCollapsed?: boolean } | undefined;
     const layout = getGroupLayoutSizes(canvas.document.nodes).get(filmSetNodeId);
+    const width = layout?.width ?? node.width ?? 180;
+    const projection = target
+      ? groupModelProjection({
+        sceneVersion: target.sceneVersion,
+        ops: target.ops as never,
+        extent: target.extent,
+        aabb: target.aabb ?? undefined,
+        placement: filmSetGroupBadgePlacement({
+          sceneVersion: target.sceneVersion,
+          ops: target.ops as never,
+          extent: target.extent,
+          aabb: target.aabb ?? undefined,
+          placement: target.placement
+        }, width),
+        badgeTopAnchored: true
+      })
+      : null;
+    if (!projection) return null;
     const rect = {
       x: world.x,
       y: world.y,
-      width: layout?.width ?? node.width ?? 180,
+      width,
       height: layout?.height ?? node.height ?? 112
     };
-    const scale = source.badgeScaleOverrides?.get(filmSetNodeId) ?? data?.groupBadgeScale;
-    return groupBadgeRect(rect, scale);
+    return groupBadgeRect(rect, projection);
   };
 
   const shotPreviewCameraProjection = (filmSetNodeId: string, clipId: string): { x: number; y: number } | null => {

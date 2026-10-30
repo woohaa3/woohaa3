@@ -61,9 +61,8 @@ fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
 fn group(id: &str, x: f32, y: f32, w: f32, h: f32, leaves: u32) -> GraphNode {
     GraphNode {
         group: Some(GroupPresentation {
+            badge_top_anchor: false,
             collapsed: false,
-            badge_scale: 1.,
-            badge_resizable: false,
             action_bar: false,
             title: String::new(),
             member_count: 1,

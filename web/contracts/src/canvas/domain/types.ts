@@ -36,8 +36,6 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
   groupAppearance?: GroupAppearance;
   /** 组的持久化展示状态；缺失为展开，不改变成员或展开尺寸。 */
   groupCollapsed?: boolean;
-  /** 组徽标独立等比显示倍率，缺失为 1；不改变模型定义或组框尺寸。 */
-  groupBadgeScale?: number;
   title?: string;
   taskKind?: string;
   prompt?: string;

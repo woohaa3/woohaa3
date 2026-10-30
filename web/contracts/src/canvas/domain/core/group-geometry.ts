@@ -21,8 +21,6 @@ import type { Woohaa3CanvasNode } from "./canvas-runtime";
 export const groupPadding = 12;
 /** 底部内边距：与左右一致，组框不再额外留出 footer。 */
 export const groupBottomPadding = 12;
-/** Shallow badge lip in canvas units, outside member/resize bounds. */
-export const groupBadgeOutset = 6;
 
 type LayoutNode = Pick<Woohaa3CanvasNode, "id" | "type" | "parentId" | "position" | "width" | "height">;
 type LayoutSize = { width: number; height: number };

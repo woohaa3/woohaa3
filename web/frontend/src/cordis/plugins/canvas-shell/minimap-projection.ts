@@ -23,6 +23,7 @@ import {
   type ServerCanvas,
   type Woohaa3CanvasSerializedNode
 } from "@woohaa3/contracts";
+import { groupBadgeProjectionsForCanvas } from "./group-badge-projection.js";
 
 export type MinimapNode = {
   id: string;
@@ -69,6 +70,7 @@ export function projectMinimap(canvas: ServerCanvas | null): MinimapProjection {
   const document = canvas.document;
   const byId = new Map(document.nodes.map((node) => [node.id, node]));
   const hidden = hiddenByCollapsedGroups(canvas);
+  const badgeProjections = groupBadgeProjectionsForCanvas(canvas);
   const nodes: MinimapNode[] = [];
   for (const node of document.nodes) {
     const visible = !hidden.has(node.id) && !insideCompositeAsset(node, byId);
@@ -80,7 +82,7 @@ export function projectMinimap(canvas: ServerCanvas | null): MinimapProjection {
       prompt: data.prompt
     }).displayName;
     const collapsed = node.type === "group" && data.groupCollapsed === true;
-    const rect = groupPresentationRect(node, collapsed, nodeWorldRect(node, byId), data.groupBadgeScale);
+    const rect = groupPresentationRect(node, collapsed, nodeWorldRect(node, byId), badgeProjections.get(node.id));
     const kind = bevyKindForNodeType(node.type);
     nodes.push({
       id: node.id,

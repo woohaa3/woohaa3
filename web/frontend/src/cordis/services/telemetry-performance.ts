@@ -41,6 +41,26 @@ export type PerfFrameCounters = {
   readonly renderFrames?: number;
   /** 3D 主 pass draw call 记录数（累计）；与 `renderFrames` 配对求每帧均值。 */
   readonly drawCalls?: number;
+  /** 渲染阶段累计墙钟与帧数（仅 dev 能读到运行侧工作诊断）：Queue / Prepare / Render 拆开。 */
+  readonly stageQueueMs?: number;
+  readonly stageQueueFrames?: number;
+  readonly stagePrepareMs?: number;
+  readonly stagePrepareFrames?: number;
+  readonly stageRenderMs?: number;
+  readonly stageRenderFrames?: number;
+  /** 累计提交的模型实例数；与 `stageRenderFrames` 配对求每帧均值（draw call 少不代表画得少）。 */
+  readonly drawnInstances?: number;
+  /** 窗口关闭那一刻的帧节奏标签（`idle` / `dwell` / `active:<忙碌项>`）；不是累计量。 */
+  readonly pacing?: string;
+  /** 每帧步骤的累计墙钟（ms），按步骤名分组；只有装了步骤计时才存在。 */
+  readonly stepMs?: Readonly<Record<string, number>>;
+  /** 主世界（Update 图）每帧墙钟累计，以及其中模型同步系统的累计。 */
+  readonly stageMainMs?: number;
+  readonly stageMainFrames?: number;
+  readonly stageModelMs?: number;
+  readonly stageModelFrames?: number;
+  /** 预览卡片规模快照（`d`=延迟队列、`v`=可见、`l`=在途、`r`=就绪、`b`=纹理 MB）；不是累计量。 */
+  readonly previews?: string;
 };
 
 export type PerfFrameWindowOptions = {
@@ -63,8 +83,7 @@ export type PerfFrameWindow = {
   dispose(): void;
 };
 
-const EMPTY_FRAME_COUNTERS: PerfFrameCounters = {
-  sceneBuilds: 0,
+const EMPTY_FRAME_COUNTERS: PerfFrameCounters = {  sceneBuilds: 0,
   sceneSubmits: 0,
   sceneDedupes: 0,
   viewportSubmits: 0,
@@ -75,6 +94,12 @@ const EMPTY_FRAME_COUNTERS: PerfFrameCounters = {
   frameExecutions: 0,
   frameExecutionMs: 0
 };
+
+/**
+ * 窗口内最短可上报片段。画布在整窗到点前卸载时，只有跑够这个时长的可见片段才补写：
+ * 再短的分母里几乎全是挂载开销，帧率与每帧耗时都会失真。
+ */
+const PARTIAL_WINDOW_MIN_MS = 10_000;
 
 /**
  * 创建帧窗口聚合器。
@@ -99,6 +124,16 @@ export function createPerfFrameWindow(options: PerfFrameWindowOptions): PerfFram
     }
   };
 
+  // 步骤耗时（`stepMs`）是"每帧花多少"的相对量，首个窗口也得有基线：否则每次刷新后
+  // 第一条样本永远缺这一步，而"刚刷新就复现"恰恰是最常被观察的一段。其余累计量保持
+  // 原口径（首窗没有先前基线时，累计值本身就是窗口量）。
+  try {
+    const initialSteps = options.read().stepMs;
+    if (initialSteps) baseline = { ...baseline, stepMs: { ...initialSteps } };
+  } catch {
+    // 读不到步骤计时就照常缺省。
+  }
+
   const reset = (): void => {
     baseline = sample();
     windowStartedAt = telemetryNow();
@@ -108,12 +143,24 @@ export function createPerfFrameWindow(options: PerfFrameWindowOptions): PerfFram
     if (disposed) return;
     const current = sample();
     const elapsedMs = Math.max(0, telemetryNow() - windowStartedAt);
+    // 窗口刚被重置就立刻到点（恢复前台后的第一次心跳、连挂两次 attach）：分母里没有
+    // 可用的观察时长，写出去就是一条 0 帧率的假事实。
+    if (elapsedMs < 1_000) {
+      reset();
+      return;
+    }
     const delta = diffCounters(current, baseline, elapsedMs);
     // 每帧 draw call 均值：只有窗口内真的出过帧、且两次都读到了运行时计数才写。
     const drawCalls =
       delta.renderFrames > 0
         ? Math.round(delta.drawCalls / delta.renderFrames)
         : undefined;
+    const renderFps =
+      delta.renderFps === undefined ? undefined : Math.round(delta.renderFps * 10) / 10;
+    const pacing =
+      typeof current.pacing === "string" && current.pacing.length > 0 ? current.pacing : undefined;
+    const previews =
+      typeof current.previews === "string" && current.previews.length > 0 ? current.previews : undefined;
     reset();
     // 半窗（页面切后台）、缺构建模式、无客户端：一律不写。窗口里的 0 会污染分位数。
     const mode = telemetryBuildMode();
@@ -139,7 +186,17 @@ export function createPerfFrameWindow(options: PerfFrameWindowOptions): PerfFram
           wasmAcceptMs: Math.round(delta.wasmAcceptMs),
           frameExecMs: round1(delta.averageFrameMs),
           frameExecutions: delta.frameExecutions,
-          ...(drawCalls === undefined ? {} : { drawCalls })
+          ...(renderFps === undefined ? {} : { renderFps }),
+          ...(drawCalls === undefined ? {} : { drawCalls }),
+          ...(delta.queueMs === undefined ? {} : { queueMs: delta.queueMs }),
+          ...(delta.prepareMs === undefined ? {} : { prepareMs: delta.prepareMs }),
+          ...(delta.renderMs === undefined ? {} : { renderMs: delta.renderMs }),
+          ...(delta.drawnInstances === undefined ? {} : { drawnInstances: delta.drawnInstances }),
+          ...(delta.mainMs === undefined ? {} : { mainMs: delta.mainMs }),
+          ...(delta.modelMs === undefined ? {} : { modelMs: delta.modelMs }),
+          ...(delta.steps === undefined ? {} : { steps: delta.steps }),
+          ...(pacing === undefined ? {} : { pacing }),
+          ...(previews === undefined ? {} : { previews })
         }
       });
     } catch {
@@ -170,12 +227,25 @@ export function createPerfFrameWindow(options: PerfFrameWindowOptions): PerfFram
   return {
     close,
     visibilityChanged(hidden) {
-      // 隐藏即丢掉当前半窗（不把可见段与隐藏段拼成一条），恢复后从新的基线重新累计。
-      if (hidden) close({ discard: true });
-      else reset();
+      // 在可见性**边界**上结算：可见段本身是干净的（隐藏期间没有帧，混进来才会污染分母）。
+      // 用户看了一会儿画布再切走，正是最常见的一次观察，丢掉它就等于没有样本。
+      if (hidden) {
+        const elapsed = telemetryNow() - windowStartedAt;
+        if (elapsed >= PARTIAL_WINDOW_MIN_MS) close();
+        else close({ discard: true });
+      } else reset();
     },
     dispose() {
       if (disposed) return;
+      // 画布在整窗到点前卸载（离开画布页、切到别的画布）时，60 秒整窗永远等不到，
+      // 这类会话在遥测里彻底消失——短会话正是"看过片场再回来"最需要的事实。
+      // 只要这一段是可见的、且已经跑够最短时长，就在卸载前补写。
+      try {
+        const visible = options.isHidden?.() !== true;
+        if (visible && telemetryNow() - windowStartedAt >= PARTIAL_WINDOW_MIN_MS) close();
+      } catch {
+        // 补写失败不影响卸载。
+      }
       disposed = true;
       if (timer !== null) {
         try {
@@ -196,16 +266,43 @@ export function createPerfFrameWindow(options: PerfFrameWindowOptions): PerfFram
 type FrameDelta = PerfFrameCounters & {
   readonly renderFrames: number;
   readonly drawCalls: number;
+  /** 画布出帧率；两侧都读不到渲染器计数时为 `undefined`（不是 0）。 */
+  readonly renderFps: number | undefined;
+  /** 渲染三阶段与实例数的每帧均值；读不到运行侧工作诊断时为 `undefined`。 */
+  readonly queueMs: number | undefined;
+  readonly prepareMs: number | undefined;
+  readonly renderMs: number | undefined;
+  readonly drawnInstances: number | undefined;
+  /** 主世界每帧墙钟均值：`frameExecMs` 与渲染三阶段之间的缺口。 */
+  readonly mainMs: number | undefined;
+  /** 主世界里模型同步系统的每帧墙钟均值。 */
+  readonly modelMs: number | undefined;
+  /** 窗口内最贵的几步（`<步骤>:<每帧 ms>`），按每帧耗时降序取前三。 */
+  readonly steps: string | undefined;
   readonly averageFrameMs: number;
   readonly fps: number;
 };
 
 function diffCounters(current: PerfFrameCounters, baseline: PerfFrameCounters, elapsedMs: number): FrameDelta {
-  const delta = (key: keyof PerfFrameCounters): number =>
+  type NumericCounterKey = Exclude<keyof PerfFrameCounters, "pacing" | "stepMs" | "previews">;
+  const delta = (key: NumericCounterKey): number =>
     Math.max(0, (current[key] ?? 0) - (baseline[key] ?? 0));
+  /** 累计量 / 累计帧数；窗口任一端的计数缺失就不写（不用 0 冒充"没花时间"）。 */
+  const perFrame = (
+    total: NumericCounterKey,
+    frames: NumericCounterKey,
+    round: (value: number) => number
+  ): number | undefined => {
+    if (current[total] === undefined || current[frames] === undefined) return undefined;
+    const denominator = delta(frames);
+    return denominator > 0 ? round(delta(total) / denominator) : undefined;
+  };
   const frameExecutions = delta("frameExecutions");
   const frameExecutionMs = delta("frameExecutionMs");
   const seconds = Math.max(0, elapsedMs) / 1000;
+  // 窗口内渲染器计数可读时才写帧率。窗口基线缺计数按 0 处理（与 `drawCalls` 同一口径：
+  // 首个窗口没有先前基线时，累计值本身就是窗口量）。
+  const renderFrames = current.renderFrames === undefined ? undefined : delta("renderFrames");
   return {
     sceneBuilds: delta("sceneBuilds"),
     sceneSubmits: delta("sceneSubmits"),
@@ -219,6 +316,14 @@ function diffCounters(current: PerfFrameCounters, baseline: PerfFrameCounters, e
     frameExecutionMs,
     renderFrames: delta("renderFrames"),
     drawCalls: delta("drawCalls"),
+    renderFps: renderFrames === undefined || seconds <= 0 ? undefined : renderFrames / seconds,
+    queueMs: perFrame("stageQueueMs", "stageQueueFrames", round2),
+    prepareMs: perFrame("stagePrepareMs", "stagePrepareFrames", round2),
+    renderMs: perFrame("stageRenderMs", "stageRenderFrames", round2),
+    drawnInstances: perFrame("drawnInstances", "stageRenderFrames", Math.round),
+    mainMs: perFrame("stageMainMs", "stageMainFrames", round2),
+    modelMs: perFrame("stageModelMs", "stageModelFrames", round2),
+    steps: formatSteps(current.stepMs, baseline.stepMs, frameExecutions),
     averageFrameMs: frameExecutions === 0 ? 0 : frameExecutionMs / frameExecutions,
     // 帧率的分母是窗口的真实墙钟时长：没有样本就是 0，不补估算值。
     fps: frameExecutions === 0 || seconds <= 0 ? 0 : frameExecutions / seconds
@@ -227,4 +332,29 @@ function diffCounters(current: PerfFrameCounters, baseline: PerfFrameCounters, e
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+/**
+ * 窗口内最贵的三步（每帧毫秒）。第一个窗口没有基线就不报：那时"差分"其实是
+ * 页面加载至今的累计值，会假报成一步很慢。低于 0.05ms 的步骤不参与排序。
+ */
+function formatSteps(
+  current: Readonly<Record<string, number>> | undefined,
+  baseline: Readonly<Record<string, number>> | undefined,
+  frames: number
+): string | undefined {
+  if (!current || !baseline || frames <= 0) return undefined;
+  const parts: Array<[string, number]> = [];
+  for (const [name, value] of Object.entries(current)) {
+    if (!Number.isFinite(value)) continue;
+    const perFrame = Math.max(0, value - (baseline[name] ?? 0)) / frames;
+    if (perFrame >= 0.05) parts.push([name, perFrame]);
+  }
+  if (parts.length === 0) return undefined;
+  parts.sort((a, b) => b[1] - a[1]);
+  return parts.slice(0, 3).map(([name, ms]) => `${name}:${round1(ms)}`).join(",");
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }

@@ -45,7 +45,7 @@ const SettingsWorkspace = lazy(() =>
   import("./workspace/settings-workspace.js").then((module) => ({ default: module.SettingsWorkspace }))
 );
 
-export type SettingsSectionId = "backend" | "plugins" | "appearance" | "runtimes";
+export type SettingsSectionId = "backend" | "plugins" | "appearance" | "runtimes" | "about";
 
 /**
  * 设置专用扩展装配（change: 2026-10-17-move-settings-into-canvas-dialog，任务 5.2）。
@@ -350,7 +350,7 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
             return {
               ok: true,
               payload: {
-                ...(section === "backend" || section === "plugins" || section === "appearance" || section === "notifications" || section === "runtimes"
+                ...(section === "backend" || section === "plugins" || section === "appearance" || section === "notifications" || section === "runtimes" || section === "about"
                   ? { section }
                   : {}),
                 ...(pluginId ? { pluginId } : {})

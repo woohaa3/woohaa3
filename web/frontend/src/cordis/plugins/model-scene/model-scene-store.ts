@@ -17,6 +17,17 @@ import { sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
 export class ModelSceneStore {
   private readonly scenes = new Map<string, PreparedModelResource>();
   private readonly listeners = new Set<() => void>();
+  private revision = 0;
+
+  /**
+   * 单调修订号：prepared resource 出现、替换或释放时递增。
+   *
+   * 文档级几何派生（组徽标投影等）按画布对象身份 memo，必须同时把这个修订号算进 key，
+   * 否则资源异步就绪后缓存会永远停在「无徽标范围」。
+   */
+  getRevision(): number {
+    return this.revision;
+  }
 
   get(nodeId: string): PreparedModelResource | undefined {
     return this.scenes.get(nodeId);
@@ -30,6 +41,7 @@ export class ModelSceneStore {
     const existing = this.scenes.get(nodeId);
     this.scenes.set(nodeId, resource);
     if (existing?.resourceKey === resource.resourceKey) return;
+    this.revision += 1;
     this.emit();
   }
 
@@ -42,7 +54,10 @@ export class ModelSceneStore {
   }
 
   delete(nodeId: string): void {
-    if (this.scenes.delete(nodeId)) this.emit();
+    if (this.scenes.delete(nodeId)) {
+      this.revision += 1;
+      this.emit();
+    }
   }
 
   /** 所有 prepared resource（供 controller 合成轻量引用）。 */

@@ -19,7 +19,15 @@ export type ModelTypePreset = {
   options: Readonly<Record<string, Record<string, unknown>>>;
 };
 
-export const MODEL_TYPE_PRESETS: Readonly<Record<"image" | "video", ModelTypePreset>> = {
+/**
+ * 有参数预设的模型类型。
+ *
+ * `language` 没有参数面板（提示词就是全部输入），所以不在卡片的覆盖范围内；
+ * 其余类型新增时必须同时补一份预设，编译器会在这里报错。
+ */
+export type PresetModelType = Exclude<CanvasTaskModelType, "language">;
+
+export const MODEL_TYPE_PRESETS: Readonly<Record<PresetModelType, ModelTypePreset>> = {
   image: {
     modelType: "image",
     keys: [
@@ -86,6 +94,20 @@ export const MODEL_TYPE_PRESETS: Readonly<Record<"image" | "video", ModelTypePre
       resolution: { title: "分辨率", default: "720p", values: ["480p", "720p", "1080p"] },
       generateAudio: { default: true },
       outputFormat: { default: "mp4", values: ["mp4"] }
+    }
+  },
+  audio: {
+    modelType: "audio",
+    // 音频没有画面类参数：提示词 + 音色 / 输出格式 / 语速就是全部语义。
+    // 语音与音乐可以共用这套键；音乐模型的卡片按需剪掉 voice。
+    keys: ["prompt", "voice", "outputFormat", "speed"],
+    required: ["prompt"],
+    options: {
+      // 服务端 /v1/audio/speech 的缺省音色。具体模型能选哪些音色由卡片收窄；
+      // 未收窄时保持自由文本——上游音色 id 不是一套跨厂商的枚举。
+      voice: { default: "alloy" },
+      outputFormat: { default: "mp3", values: ["mp3", "wav", "opus"] },
+      speed: { default: 1, minimum: 0.25, maximum: 4, step: 0.05 }
     }
   }
 };

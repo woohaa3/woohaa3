@@ -216,8 +216,6 @@ mod tests {
                 GroupPresentation {
                     drop_target: false,
                     collapsed: false,
-                    badge: false,
-                    badge_scale: 1.,
                     member_count: 2,
                     running: false,
                     resizable: false,
@@ -317,8 +315,6 @@ mod tests {
                 GroupPresentation {
                     drop_target: false,
                     collapsed: false,
-                    badge: false,
-                    badge_scale: 1.,
                     member_count: 2,
                     running: false,
                     resizable: false,

@@ -16,7 +16,7 @@ import {
 /** 服务端为任意模型下发的那份通用 schema（修复前 seedream / seedance 看到的就是它）。 */
 function serverGenericModel(
   providerModelId: string,
-  modelType: "image" | "video"
+  modelType: "image" | "video" | "audio"
 ): GenerationModelDefinition {
   return {
     providerId: "remote-server",
@@ -29,14 +29,33 @@ function serverGenericModel(
             type: "object",
             properties: { size: { type: "string", title: "尺寸", default: "1024x1024" } }
           }
-        : {
-            type: "object",
-            properties: {
-              seconds: { type: "string", title: "时长（秒）", default: "4" },
-              size: { type: "string", title: "分辨率", default: "720p" }
+        : modelType === "audio"
+          ? {
+              type: "object",
+              properties: {
+                voice: { type: "string", title: "音色", default: "alloy" },
+                response_format: {
+                  type: "string",
+                  title: "格式",
+                  default: "mp3",
+                  enum: ["mp3", "wav", "opus"]
+                },
+                speed: { type: "number", title: "语速", default: 1, minimum: 0.25, maximum: 4 }
+              }
             }
-          },
-    defaultInput: modelType === "image" ? { size: "1024x1024" } : { seconds: "4", size: "720p" },
+          : {
+              type: "object",
+              properties: {
+                seconds: { type: "string", title: "时长（秒）", default: "4" },
+                size: { type: "string", title: "分辨率", default: "720p" }
+              }
+            },
+    defaultInput:
+      modelType === "image"
+        ? { size: "1024x1024" }
+        : modelType === "audio"
+          ? { voice: "alloy", response_format: "mp3", speed: 1 }
+          : { seconds: "4", size: "720p" },
     interaction: { id: "generic-model", version: 1 },
     cancel: "remote",
     promptRequirement: "required",
@@ -131,6 +150,27 @@ describe("withModelFamily · 视频", () => {
   });
 });
 
+describe("withModelFamily · 音频", () => {
+  it("TTS 卡片替换服务端的语音形状：音色 / 输出格式 / 语速", () => {
+    const model = withModelFamily(serverGenericModel("tts-1", "audio"));
+    const properties = model.inputSchema!.properties as Record<string, Record<string, unknown>>;
+
+    expect(properties.response_format).toBeUndefined();
+    expect(Object.keys(properties).sort()).toEqual(["outputFormat", "prompt", "speed", "voice"]);
+    expect((properties.voice!.enum as Array<{ value: string }>).map((entry) => entry.value)).toContain(
+      "alloy"
+    );
+    expect(properties.speed).toMatchObject({ minimum: 0.25, maximum: 4, default: 1 });
+    // 卡片声明的输入上限随目录下发。
+    expect(model.capabilityFacts?.limits?.promptMaxChars).toBe(4096);
+  });
+
+  it("未识别的音频模型保持服务端 schema 不动", () => {
+    const original = serverGenericModel("some-vendor-speech", "audio");
+    expect(withModelFamily(original)).toBe(original);
+  });
+});
+
 describe("translateParameters", () => {
   it("图像：比例 + 分辨率落成上游字段", () => {
     const fields = translateParameters("doubao-seedream-5-0-pro-260628", "image", {
@@ -168,7 +208,22 @@ describe("translateParameters", () => {
     });
   });
 
-  it("language / audio 不经过家族翻译", () => {
+  it("音频：outputFormat 落成上游的 response_format，语速越界被夹住", () => {
+    expect(
+      translateParameters("tts-1", "audio", {
+        voice: "nova",
+        outputFormat: "WAV",
+        speed: 9
+      })
+    ).toEqual({ voice: "nova", response_format: "wav", speed: 4 });
+  });
+
+  it("未识别的音频模型原样透传（服务端自己认识它的上游）", () => {
+    const parameters = { voice: "alloy", response_format: "mp3", speed: 1 };
+    expect(translateParameters("some-vendor-speech", "audio", parameters)).toEqual(parameters);
+  });
+
+  it("language 不经过家族翻译", () => {
     expect(translateParameters("gpt-4o", "language", { temperature: 0.7 })).toEqual({
       temperature: 0.7
     });

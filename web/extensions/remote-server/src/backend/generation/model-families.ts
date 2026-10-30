@@ -18,6 +18,7 @@
  * 更安全。
  */
 import {
+  audioRequestFields,
   BUILTIN_PRESET_CARDS,
   composePresetCard,
   imageFamilyParameters,
@@ -60,11 +61,13 @@ function cardFor(providerModelId: string, modelType: string) {
 /**
  * 用 Provider 侧的家族 schema 覆盖目录里的通用 schema，并按卡片补上约束。
  *
- * 只处理 image / video：language / audio 的参数仍以服务端为准（没有需要家族化的字段）。
- * 家族未命中时保持服务端 schema 不动。
+ * 处理 image / video / audio：language 的参数仍以服务端为准。
+ * 家族未命中时保持服务端 schema 不动——音频没有家族表，只有卡片能识别时才覆盖。
  */
 export function withModelFamily(model: GenerationModelDefinition): GenerationModelDefinition {
-  if (model.modelType !== "image" && model.modelType !== "video") return model;
+  if (model.modelType !== "image" && model.modelType !== "video" && model.modelType !== "audio") {
+    return model;
+  }
 
   const card = cardFor(model.providerModelId, model.modelType);
   // 卡片只有约束、没有家族时（例如远端通用卡片），仍然要把约束带上。
@@ -82,6 +85,9 @@ export function withModelFamily(model: GenerationModelDefinition): GenerationMod
         : {})
     };
   }
+
+  // 音频没有家族表：卡片没命中就保持服务端下发的语音形状。
+  if (model.modelType === "audio") return model;
 
   const family =
     model.modelType === "image"
@@ -144,6 +150,12 @@ export function translateParameters(
   if (modelType === "video") {
     if (videoFamilyFor(providerModelId) === undefined) return parameters;
     return { ...videoRequestFields(providerModelId, parameters) };
+  }
+  if (modelType === "audio") {
+    // 只有卡片识别出的音频模型才翻译：未识别的模型保持服务端下发的字段名，
+    // 由服务端与 LiteLLM 按它们自己的约定处理。
+    if (cardFor(providerModelId, "audio") === undefined) return parameters;
+    return { ...audioRequestFields(parameters) };
   }
   return parameters;
 }

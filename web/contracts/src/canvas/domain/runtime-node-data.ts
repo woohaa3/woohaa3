@@ -87,7 +87,10 @@ export const NODE_DATA_TRANSIENT_FIELDS = [
   "resourceKind"
 ] as const;
 
-const NODE_DATA_TRANSIENT_SET = new Set<string>(NODE_DATA_TRANSIENT_FIELDS);
+/** 已从文档模型删除的展示字段：读取/复制时丢弃，绝不重新写入。 */
+export { NODE_DATA_REMOVED_FIELDS } from "./removed-node-data.js";
+import { NODE_DATA_REMOVED_FIELDS } from "./removed-node-data.js";
+const NODE_DATA_TRANSIENT_SET = new Set<string>([...NODE_DATA_TRANSIENT_FIELDS, ...NODE_DATA_REMOVED_FIELDS]);
 const LOCAL_ONLY_SET = new Set<string>(NODE_DATA_LOCAL_ONLY_FIELDS);
 const MODEL_PLACEMENT_SET = new Set<string>(RUNTIME_MODEL_PLACEMENT_FIELDS);
 const SHOT_POSE_SET = new Set<string>(RUNTIME_SHOT_POSE_FIELDS);

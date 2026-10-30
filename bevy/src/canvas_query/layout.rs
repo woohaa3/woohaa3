@@ -455,8 +455,8 @@ pub(crate) use node_action_toolbar::{
 /// 连接端口：输入在左中、输出在右中。
 pub(crate) fn port(node: &GraphNode, output: bool) -> Vec2 {
     if node.group.as_ref().is_some_and(|group| group.collapsed) {
-        let badge = crate::canvas_query::group_model::badge_rect(node);
-        return port_for_bounds(badge.x, badge.y, badge.z, badge.w, output);
+        let rect = crate::canvas_query::group_model::presentation_rect(node);
+        return port_for_bounds(rect.x, rect.y, rect.z, rect.w, output);
     }
     port_for_bounds(node.x, node.y, node.width, node.height, output)
 }
@@ -703,9 +703,8 @@ mod tests {
         // group 无进度环。
         let mut group = kind_node("group", 400.0, 300.0, true);
         group.group = Some(crate::protocol::GroupPresentation {
+            badge_top_anchor: false,
             collapsed: false,
-            badge_scale: 1.,
-            badge_resizable: false,
             action_bar: false,
             title: String::new(),
             member_count: 1,

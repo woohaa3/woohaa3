@@ -35,9 +35,6 @@ const GROUP_BORDER: f32 = 1.5;
 const CORNER_HANDLE_RADIUS: f32 = 4.5;
 const CORNER_HANDLE_HALO: f32 = 6.5;
 
-/// 徽标包围盒线框的 alpha：比组选中框更浅，只提示可缩放，不抢模型内容。
-const BADGE_FRAME_ALPHA: f32 = 0.42;
-
 pub(crate) fn is_running(node: &crate::protocol::GraphNode) -> bool {
     node.group
         .as_ref()
@@ -118,12 +115,8 @@ pub(crate) fn draw_group(
     selected: bool,
     z: f32,
 ) -> (String, Vec2, f32, u32) {
-    let (x, y, width, _height) = (node.x, node.y, node.width, node.height);
-    // 带 3D 徽标的组选中时用浅色线框标出徽标包围盒。线框是半透明几何，必须走容器
-    // 自己的 blend 层（选中描边批次使用不透明材质）；收起态也保留，因为它正是徽标范围。
-    if selected && crate::canvas_query::group_model::resize_center(node).is_some() {
-        draw_badge_scale_frame(geometry, theme, node, z);
-    }
+    let (x, y, width, height) = (node.x, node.y, node.width, node.height);
+    let _ = selected;
     // 收起组只保留徽标卡片（由卡片通路绘制），气泡背板/尾巴一律不画
     // （change: 2026-10-28-migrate-film-set-to-groups）。
     if presentation.collapsed {
@@ -167,18 +160,6 @@ pub(crate) fn draw_group(
             z + 0.001,
             theme.token_u32("interactionAccent"),
         );
-    }
-    if let Some(corner) = crate::canvas_query::group_model::resize_center(node) {
-        let color = theme.token_u32("canvasResizeHandle");
-        for length in [5., 9.] {
-            geometry.line(
-                corner - Vec2::X * length,
-                corner - Vec2::Y * length,
-                1.5,
-                z + 0.02,
-                color,
-            );
-        }
     }
 
     // 组名标签：浮在组框**上方外侧**，像一枚独立的小卡片（change: canvas-grouping-redesign）。
@@ -234,14 +215,15 @@ pub(crate) fn draw_group_selection(
 ) {
     let color = theme.token_u32("canvasNodeBorderSelected");
     if node.group.as_ref().is_some_and(|group| group.collapsed) {
-        // 收起组只呈现徽标：选中描边贴在徽标范围上，不再沿结构矩形的气泡轮廓与尾巴走线。
-        dashed_polyline(
-            geometry,
-            &crate::canvas_query::group_model::badge_path(node),
-            GROUP_BORDER,
-            z + 0.001,
-            color,
-        );
+        // 收起组只呈现徽标：选中描边贴在模型投影范围上；没有可呈现模型时保留结构矩形，
+        // 不虚构空徽标范围。
+        let badge = crate::canvas_query::group_model::badge_polygon(node);
+        let path = if badge.is_empty() {
+            crate::canvas_query::group_model::frame_path(node)
+        } else {
+            badge
+        };
+        dashed_polyline(geometry, &path, GROUP_BORDER, z + 0.001, color);
     } else if is_running(node) {
         // 运行中：实线描边（沿轮廓流动的效果由 `group_motion` 叠加）。
         let path = super::group_outline::path(node);
@@ -262,45 +244,6 @@ pub(crate) fn draw_group_selection(
     }
     if node.resizable && !node.group.as_ref().is_some_and(|group| group.collapsed) {
         draw_resize_corners(geometry, theme, node, z);
-    }
-    // 徽标线框由 `draw_group` 画进容器 blend 层；这里只补右下角缩放手柄。
-    // `resize_center` 只在单选可写的带模型组返回，与线框出现条件一致。
-    if let Some(corner) = crate::canvas_query::group_model::resize_center(node) {
-        draw_badge_resize_handle(geometry, theme, corner, z);
-    }
-}
-
-/// 徽标包围盒的浅色线框。
-///
-/// 只画半透明细线，不铺底、不碰模型：3D 徽标本身没有底板，线框是选中态唯一可见的
-/// 徽标边界。alpha < 1 进入 blend 层，避免遮住场景内容。
-fn draw_badge_scale_frame(
-    geometry: &mut Geometry,
-    theme: &ThemeResource,
-    node: &crate::protocol::GraphNode,
-    z: f32,
-) {
-    let path = crate::canvas_query::group_model::badge_path(node);
-    if path.len() < 2 {
-        return;
-    }
-    let color = theme.token_u32("canvasResizeHandle");
-    for edge in path.windows(2) {
-        geometry.line_alpha(edge[0], edge[1], 1.5, z + 0.015, color, BADGE_FRAME_ALPHA);
-    }
-}
-
-/// 徽标右下角的缩放手柄：沿用「向外两条短线」的角标语言，与线框相交处不额外加粗。
-fn draw_badge_resize_handle(geometry: &mut Geometry, theme: &ThemeResource, corner: Vec2, z: f32) {
-    let color = theme.token_u32("canvasResizeHandle");
-    for length in [5., 9.] {
-        geometry.line(
-            corner - Vec2::X * length,
-            corner - Vec2::Y * length,
-            1.5,
-            z + 0.02,
-            color,
-        );
     }
 }
 
@@ -405,9 +348,8 @@ mod tests {
             &theme,
             &node(400.0, 300.0),
             &GroupPresentation {
+                badge_top_anchor: false,
                 collapsed: false,
-                badge_scale: 1.,
-                badge_resizable: false,
                 action_bar: false,
                 title: "镜头发散".into(),
                 member_count: 3,
@@ -442,9 +384,8 @@ mod tests {
             &theme,
             &node(400.0, 300.0),
             &GroupPresentation {
+                badge_top_anchor: false,
                 collapsed: true,
-                badge_scale: 1.,
-                badge_resizable: false,
                 action_bar: false,
                 title: "镜头发散".into(),
                 member_count: 3,
@@ -474,9 +415,8 @@ mod tests {
             &theme,
             &node(400.0, 300.0),
             &GroupPresentation {
+                badge_top_anchor: false,
                 collapsed: true,
-                badge_scale: 1.,
-                badge_resizable: false,
                 action_bar: false,
                 title: String::new(),
                 member_count: 3,
@@ -507,21 +447,41 @@ mod tests {
             panic!("selection outline needs positions");
         };
         assert!(!points.is_empty());
-        let badge = crate::canvas_query::group_model::badge_rect(&node);
-        let bottom = node.y + node.height;
+        let badge = crate::canvas_query::group_model::badge_rect(&node).unwrap();
         for point in points {
             let canvas = Vec2::new(point[0], -point[1]);
             assert!(
-                canvas.y >= bottom - 0.01,
-                "收起选中描边不得回到气泡位置：{canvas:?}"
-            );
-            assert!(
                 canvas.x >= badge.x - 2.
                     && canvas.x <= badge.x + badge.z + 2.
+                    && canvas.y >= badge.y - 2.
                     && canvas.y <= badge.y + badge.w + 2.,
-                "收起选中描边必须落在徽标范围内：{canvas:?} vs {badge:?}"
+                "收起选中描边必须落在模型投影范围内：{canvas:?} vs {badge:?}"
             );
         }
+    }
+
+    /// 没有可呈现模型的组收起时保留结构矩形，不虚构空徽标范围。
+    #[test]
+    fn collapsed_group_without_model_keeps_the_structural_rect() {
+        let mut plain = node(500., 300.);
+        plain.group = Some(
+            serde_json::from_value(serde_json::json!({ "collapsed": true, "title": "组" }))
+                .unwrap(),
+        );
+        assert!(crate::canvas_query::group_model::badge_rect(&plain).is_none());
+        let mut geometry = Geometry::default();
+        draw_group_selection(&mut geometry, &ThemeResource::default(), &plain, GROUP_Z);
+        let mesh = geometry.build();
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("selection outline needs positions");
+        };
+        let farthest_y = points.iter().map(|p| -p[1]).fold(f32::MIN, f32::max);
+        assert!(
+            (farthest_y - (plain.y + plain.height)).abs() < 2.,
+            "无模型收起仍按结构矩形描边：{farthest_y}"
+        );
     }
 
     /// 展开态保持原有气泡描边（含尾巴），确认收起分支没有影响正常组。
@@ -553,9 +513,8 @@ mod tests {
             &theme,
             &node(200.0, 150.0),
             &GroupPresentation {
+                badge_top_anchor: false,
                 collapsed: false,
-                badge_scale: 1.,
-                badge_resizable: false,
                 action_bar: false,
                 title: "   ".into(),
                 member_count: 1,
@@ -589,9 +548,8 @@ mod tests {
             &theme,
             &node(400.0, 300.0),
             &GroupPresentation {
+                badge_top_anchor: false,
                 collapsed: false,
-                badge_scale: 1.,
-                badge_resizable: false,
                 action_bar: false,
                 title: String::new(),
                 member_count: 1,
@@ -633,9 +591,8 @@ mod tests {
 
     fn panel_presentation(drop_target: bool) -> GroupPresentation {
         GroupPresentation {
+            badge_top_anchor: false,
             collapsed: false,
-            badge_scale: 1.,
-            badge_resizable: false,
             action_bar: false,
             title: String::new(),
             member_count: 1,
@@ -735,13 +692,11 @@ mod tests {
         );
     }
 
+    /// 徽标就是模型本体：选中组不再绘制徽标线框或右下角缩放手柄。
     #[test]
-    fn selected_resizable_badge_draws_light_bounding_frame() {
+    fn selected_model_group_draws_no_badge_frame_or_resize_handle() {
         let mut node = model_group(500., 300.);
-        node.group.as_mut().unwrap().badge_scale = 2.;
-        node.group.as_mut().unwrap().badge_resizable = true;
-        let badge = crate::canvas_query::group_model::badge_rect(&node);
-
+        node.resizable = true;
         let mut geometry = Geometry::default();
         draw_group(
             &mut geometry,
@@ -751,52 +706,17 @@ mod tests {
             true,
             GROUP_Z,
         );
-        let (_, blend) = geometry.into_layers();
-        let Some(VertexAttributeValues::Float32x4(colors)) = blend.attribute(Mesh::ATTRIBUTE_COLOR)
-        else {
-            panic!("badge frame must be translucent");
-        };
-        // 线框只有浅色细线，不铺底：全部顶点都是同一个 alpha。
-        assert!(
-            colors
-                .iter()
-                .all(|color| (color[3] - BADGE_FRAME_ALPHA).abs() < 1e-6)
-        );
-        let Some(VertexAttributeValues::Float32x3(points)) =
-            blend.attribute(Mesh::ATTRIBUTE_POSITION)
-        else {
-            panic!("badge frame needs positions");
-        };
-        // 线框贴合徽标包围盒（含 1.5 单位线宽），不是组矩形。
-        let min_x = points.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
-        let max_x = points.iter().map(|p| p[0]).fold(f32::MIN, f32::max);
-        let min_y = points.iter().map(|p| -p[1]).fold(f32::MAX, f32::min);
-        let max_y = points.iter().map(|p| -p[1]).fold(f32::MIN, f32::max);
-        assert!((min_x - badge.x).abs() < 0.85);
-        assert!((max_x - (badge.x + badge.z)).abs() < 0.85);
-        assert!((min_y - badge.y).abs() < 0.85);
-        assert!((max_y - (badge.y + badge.w)).abs() < 0.85);
-    }
-
-    #[test]
-    fn unresizable_badge_has_no_scale_frame() {
-        let node = model_group(500., 300.);
-        let mut geometry = Geometry::default();
-        draw_group(
-            &mut geometry,
-            &ThemeResource::default(),
-            &node,
-            node.group.as_ref().unwrap(),
-            true,
-            GROUP_Z,
-        );
+        draw_group_selection(&mut geometry, &ThemeResource::default(), &node, GROUP_Z);
         let (_, blend) = geometry.into_layers();
         let Some(VertexAttributeValues::Float32x3(points)) =
             blend.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
             panic!("blend fallback");
         };
-        assert!(points.iter().all(|point| point[0] < -100000.));
+        assert!(
+            points.iter().all(|point| point[0] < -100000.),
+            "徽标区域没有线框或手柄，只剩组结构描边"
+        );
     }
 
     #[test]
@@ -835,18 +755,25 @@ mod tests {
                 else {
                     panic!("positions");
                 };
-                let layout = crate::canvas_query::group_model::for_node(&node).unwrap();
-                let badge = crate::canvas_query::group_model::badge_rect(&node);
-                assert!(points.iter().all(|p| -p[1] <= badge.y + badge.w + 1.));
+                // 组框只有一条闭合结构外周：不再绕徽标描边、不再有气泡尖尾，也不会
+                // 从组底继续向下伸出。
+                let bottom = node.y + node.height;
                 assert!(
-                    !points
-                        .iter()
-                        .any(|p| p[0] > layout.center.x - layout.radii.x + 2.
-                            && p[0] < layout.center.x + layout.radii.x - 2.
-                            && -p[1] > layout.center.y - layout.radii.y + 2.
-                            && -p[1] < layout.center.y + layout.radii.y - 2.),
-                    "unexpected stroke through footer model in selected={selected} running={running}"
+                    points.iter().all(|p| -p[1] <= bottom + 8.),
+                    "group outline must stop at the structural bottom (corner handles may extend a few units; selected={selected} running={running})"
                 );
+                let frame = crate::canvas_query::group_model::frame_path(&node);
+                assert!(frame.len() > 4 && frame.first() == frame.last());
+                // 空闲且未选中的组不画外框（change: canvas-grouping-redesign），只有选中或
+                // 运行中才有外周可断言。
+                if selected || running {
+                    assert!(
+                        points.iter().any(|p| p[0] >= node.x
+                            && p[0] <= node.x + node.width
+                            && (bottom + p[1]).abs() < 2.),
+                        "closed outline must include the structural bottom edge"
+                    );
+                }
                 // 组底现在由每组独立的透明 panel 实体绘制；共享 overlay 不得再携带覆盖模型的填充。
                 // `Geometry::into_layers` 对空 blend 仍产出不可见兜底三角形（顶点在 -1e6），
                 // 因此这里断言的是「没有真实填充」而不是属性缺失。

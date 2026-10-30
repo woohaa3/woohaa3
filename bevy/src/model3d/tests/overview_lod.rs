@@ -1196,7 +1196,7 @@ fn group_film_set_fixture(declared: bool, zoom: f32) -> (Scene, ModelAssets) {
     }))
     .unwrap();
     let mut group = serde_json::json!({
-        "title": "", "memberCount": 1, "outputCapableLeafCount": 0, "badgeScale": 3
+        "title": "", "memberCount": 1, "outputCapableLeafCount": 0
     });
     if declared {
         group["geometryQuality"] = serde_json::json!("overview-primitives-v1");
@@ -1206,7 +1206,7 @@ fn group_film_set_fixture(declared: bool, zoom: f32) -> (Scene, ModelAssets) {
         "group": group
     }))
     .unwrap();
-    node.model = Some(reference_for(&snapshot, ModelPlacement::default()));
+    node.model = Some(reference_for(&snapshot, ModelPlacement { scale: 3.0, ..Default::default() }));
     let reference = node.model.as_ref().unwrap();
     let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
     let mut scene = scene_with(&node, node.model.clone());
@@ -1264,11 +1264,11 @@ fn group_badge_batch_fixture(parts: usize, binding_x: f32) -> (Scene, ModelAsset
     .unwrap();
     let mut node: GraphNode = serde_json::from_value(serde_json::json!({
         "id": "film", "type": "group", "x": 0, "y": 0, "width": 400, "height": 300,
-        "group": {"title":"","memberCount":1,"outputCapableLeafCount":0,"badgeScale":3,
+        "group": {"title":"","memberCount":1,"outputCapableLeafCount":0,
                   "geometryQuality":"overview-primitives-v1"}
     }))
     .unwrap();
-    node.model = Some(reference_for(&snapshot, ModelPlacement::default()));
+    node.model = Some(reference_for(&snapshot, ModelPlacement { scale: 3.0, ..Default::default() }));
     let reference = node.model.as_ref().unwrap().clone();
     let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
     let mut scene = scene_with(&node, Some(reference));
@@ -1313,11 +1313,11 @@ fn group_badge_multi_binding_fixture(bindings: &[&str], parts: usize) -> (Scene,
     .unwrap();
     let mut node: GraphNode = serde_json::from_value(serde_json::json!({
         "id": "film", "type": "group", "x": 0, "y": 0, "width": 400, "height": 300,
-        "group": {"title":"","memberCount":1,"outputCapableLeafCount":0,"badgeScale":3,
+        "group": {"title":"","memberCount":1,"outputCapableLeafCount":0,
                   "geometryQuality":"overview-primitives-v1"}
     }))
     .unwrap();
-    node.model = Some(reference_for(&snapshot, ModelPlacement::default()));
+    node.model = Some(reference_for(&snapshot, ModelPlacement { scale: 3.0, ..Default::default() }));
     let reference = node.model.as_ref().unwrap().clone();
     let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
     let mut scene = scene_with(&node, Some(reference));
@@ -1522,11 +1522,11 @@ fn group_part_motion_playback_unbatches_binding_hierarchy() {
     .unwrap();
     let mut node: GraphNode = serde_json::from_value(serde_json::json!({
         "id":"film", "type":"group", "x":0, "y":0, "width":400, "height":300,
-        "group": {"title":"", "memberCount":1, "outputCapableLeafCount":0, "badgeScale":3,
+        "group": {"title":"", "memberCount":1, "outputCapableLeafCount":0,
                   "geometryQuality":"overview-primitives-v1"}
     }))
     .unwrap();
-    node.model = Some(reference_for(&snapshot, ModelPlacement::default()));
+    node.model = Some(reference_for(&snapshot, ModelPlacement { scale: 3.0, ..Default::default() }));
     let reference = node.model.as_ref().unwrap().clone();
     let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
     let mut scene = scene_with(&node, Some(reference));

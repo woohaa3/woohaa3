@@ -21,7 +21,7 @@ function setup(actionId: string, data: unknown) {
   const core = {
     focusInputBlocked: () => false,
     canvas: { getBoundingClientRect: () => ({ left: 0, top: 0 }) },
-    options: { onModelFocusIntent: enter },
+    options: { onModelFocusIntent: enter, getRuntime: () => null },
     model: {},
     setSelection: select,
     activeViewport: () => ({ x: 0, y: 0, zoom: 1 }),
@@ -47,10 +47,9 @@ it("普通 group 徽标双击不进入聚焦", () => {
   expect(f.select).not.toHaveBeenCalled();
 });
 
-it("徽标缩放把手不触发聚焦", () => {
-  const f = setup("group-resize-badge", { filmSetGroup: createFilmSetGroupMarker() });
+it("组操作双击不进入聚焦", () => {
+  const f = setup("group-collapse", { filmSetGroup: createFilmSetGroupMarker() });
   f.fire();
   expect(f.enter).not.toHaveBeenCalled();
   expect(f.select).not.toHaveBeenCalled();
-  expect(f.preventDefault).toHaveBeenCalled();
 });

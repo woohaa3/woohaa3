@@ -1,4 +1,4 @@
-import { sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
+import { sceneDiagnostics, noteFrameStep } from "../canvas-runtime/scene-diagnostics.js";
 /**
  * 浏览器画布交互控制器：共享输入路由、瞬时态、渲染调度和生命周期。
  * 连续手势只更新本地预览，完成后经服务端命令提交；普通模型视角不持久化。
@@ -77,7 +77,8 @@ export function installInteractionController(options: InteractionControllerOptio
   const frameLoop = createInteractionFrameLoop({ target,
     advance: () => model.advanceModelFly(), render: () => runFrame(false),
     report: reportFrameIssue,
-    recovered: operation => options.getRuntime()?.clearRuntimeIssue?.(`frame:${operation}`)
+    recovered: operation => options.getRuntime()?.clearRuntimeIssue?.(`frame:${operation}`),
+    measure: noteFrameStep
   });
   const localViewport = createLocalViewportStore(options.canvasId ?? "default");
   const viewportListeners = new Set<() => void>();
@@ -130,7 +131,6 @@ export function installInteractionController(options: InteractionControllerOptio
   /** 一帧的瞬时态快照（供场景构建读取）。 */
   const frameState = () => ({
     selected: state.selected,
-    badgeResize: state.gesture.kind === "group-badge-resize" ? state.gesture : null,
     draft: state.draft,
     marquee: marqueeRect(),
     localPositions: state.localPositions,

@@ -21,11 +21,12 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button } from "@woohaa3/ui/primitives";
 import { SegmentedControl } from "@woohaa3/ui/primitives";
-import { ActivityIcon, ChatIcon, PluginIcon, SettingsIcon, SunIcon } from "@woohaa3/ui/icons";
+import { ActivityIcon, ChatIcon, PluginIcon, SettingsIcon, SparklesIcon, SunIcon } from "@woohaa3/ui/icons";
 import type { ThemeService } from "../../../contract/platform.js";
 import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
 import { RuntimeComponentsSection } from "../runtime-components-section.js";
 import { BackendSettingsSection } from "../backend-settings-section.js";
+import { AboutSection } from "../about-section.js";
 import { PluginSettingsSection, type ManagedExtensionsSource } from "../plugin-settings-section.js";
 import { indexPlugins } from "../plugin-groups.js";
 import { EMPTY_SETTINGS_PANELS, settingsPanelIds, type SettingsPanelSource } from "../plugin-panels.js";
@@ -42,14 +43,15 @@ import { SettingsBreadcrumb } from "./settings-breadcrumb.js";
 import { PluginListRail, PluginPageRail, SectionRailNav } from "./rail-navigation.js";
 import { SettingsDialogChrome } from "./settings-dialog-chrome.js";
 
-export type SettingsSectionId = "backend" | "plugins" | "appearance" | "notifications" | "runtimes";
+export type SettingsSectionId = "backend" | "plugins" | "appearance" | "notifications" | "runtimes" | "about";
 
 const SECTION_LABEL: Record<SettingsSectionId, string> = {
   backend: "核心服务",
   plugins: "插件配置",
   appearance: "外观",
   runtimes: "运行时组件",
-  notifications: "通知"
+  notifications: "通知",
+  about: "关于"
 };
 
 const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
@@ -57,7 +59,8 @@ const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
   { id: "plugins", label: SECTION_LABEL.plugins },
   { id: "appearance", label: SECTION_LABEL.appearance },
   { id: "runtimes", label: SECTION_LABEL.runtimes },
-  { id: "notifications", label: SECTION_LABEL.notifications }
+  { id: "notifications", label: SECTION_LABEL.notifications },
+  { id: "about", label: SECTION_LABEL.about }
 ];
 
 const SECTION_ICONS: Record<SettingsSectionId, ReactNode> = {
@@ -65,7 +68,8 @@ const SECTION_ICONS: Record<SettingsSectionId, ReactNode> = {
   plugins: <PluginIcon size={16} />,
   appearance: <SunIcon size={16} />,
   runtimes: <ActivityIcon size={16} />,
-  notifications: <ChatIcon size={16} />
+  notifications: <ChatIcon size={16} />,
+  about: <SparklesIcon size={16} />
 };
 
 const THEME_LABELS: Record<string, string> = { default: "浅色", dark: "暗色" };
@@ -443,6 +447,13 @@ export function SettingsWorkspace({
         ) : view.section === "appearance" ? (
           <Panel title="外观" hint="主题只保存在此浏览器。">
             <ThemeSection theme={theme} />
+          </Panel>
+        ) : view.section === "about" ? (
+          <Panel
+            title="关于"
+            hint="当前应用与宿主环境的事实；只展示运行时能判定的信息，不推测版本或环境。"
+          >
+            <AboutSection snapshot={snapshot} />
           </Panel>
         ) : (
           <Panel title="通知" hint="任务结果提醒。开关是本地偏好，立即生效，不需要保存。">

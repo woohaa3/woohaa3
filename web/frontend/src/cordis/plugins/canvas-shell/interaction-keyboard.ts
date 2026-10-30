@@ -240,7 +240,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (event.key === "Escape") {
       // 拖动粘连手势：Escape 取消整次手势（清 held/preview 且不提交），
       // change: add-drag-touch-connections，design D6。
-      if (core.attachActive() || state.gesture.kind === "group-badge-resize") {
+      if (core.attachActive()) {
         event.preventDefault();
         core.cancelDragGesture();
         return;

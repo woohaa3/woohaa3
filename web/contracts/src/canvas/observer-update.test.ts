@@ -45,7 +45,7 @@ describe("observer update wire", () => {
 
   it("只改匹配节点的 modelFocus 与 modelPreview", () => {
     const scene = {
-      version: CANVAS_RENDER_SCENE_VERSION, revision: 1, nodes: [
+      version: CANVAS_RENDER_SCENE_VERSION, canvasId: "canvas-test", revision: 1, nodes: [
         { id: "a", type: "model", x: 0, y: 0, width: 1, height: 1, body: "", title: "", typeLabel: "", progress: 0, busy: false, texture: false, resizable: false, modelPreview: { azimuth: 0, elevation: 0, distanceScale: 1, targetOffset: [0, 0, 0] } },
         { id: "b", type: "image", x: 0, y: 0, width: 1, height: 1, body: "", title: "", typeLabel: "", progress: 0, busy: false, texture: false, resizable: false }
       ],

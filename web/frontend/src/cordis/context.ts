@@ -142,6 +142,14 @@ declare module "@deepseek-ai/cordis" {
      */
     generationModelsStatus: import("./services/generation-models-status.js").GenerationModelsStatusService;
     /**
+     * 宿主统一配置 remote（Canvas page scope / 画布壳 scope 提供）
+     * （change: 2026-10-17-move-settings-into-canvas-dialog）。
+     *
+     * `/api/settings` 的唯一读取出口；设置页、助手生成服务与画布引导都复用同一实例，
+     * 不各自新建 fetch 或轮询。
+     */
+    settingsRemote: import("./services/settings-remote.js").SettingsRemote;
+    /**
      * 宿主 Agent 会话 service（Canvas page scope 提供）
      * （change: 2026-10-12-add-agent-conversation-panel）。生成面板提交首轮与详情读模型共用；
      * 业务生成扩展只消费它，不自行持久化会话。

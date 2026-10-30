@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  AUDIO_CARDS,
   BUILTIN_PRESET_CARDS,
   IMAGE_CARDS,
   MB,
@@ -141,6 +142,69 @@ describe("家族优先于类型预设", () => {
   });
 });
 
+describe("音频卡片", () => {
+  it("TTS 把音色 / 格式 / 语速收窄到官方值域", () => {
+    const { model, dropped } = composePresetCard(cardById("tts-1"));
+    const properties = propertiesOf(model);
+
+    expect(dropped).toEqual([]);
+    expect(Object.keys(properties).sort()).toEqual(["outputFormat", "prompt", "speed", "voice"]);
+
+    const voice = properties.voice as { enum: Array<{ value: string }>; default?: string };
+    expect(voice.default).toBe("alloy");
+    expect(voice.enum.map((entry) => entry.value)).toHaveLength(9);
+    expect(voice.enum.map((entry) => entry.value)).toContain("alloy");
+
+    const format = properties.outputFormat as { enum: Array<{ value: string }> };
+    expect(format.enum.map((entry) => entry.value)).toEqual([
+      "mp3",
+      "opus",
+      "aac",
+      "flac",
+      "wav",
+      "pcm"
+    ]);
+
+    // 语速是连续数值，不是枚举：滑块的步长来自类型预设，区间也写在预设里。
+    expect(properties.speed).toMatchObject({ minimum: 0.25, maximum: 4, default: 1, step: 0.05 });
+    expect(presetLimitsOf(model)?.promptMaxChars).toBe(4096);
+    // 约束经 capabilityFacts 往返后仍然可读（前端只拿目录模型也能读到）。
+    expect(canvasModelCapabilities(model).limits?.promptMaxChars).toBe(4096);
+  });
+
+  it("MiniMax 收窄语速与格式，并列出常用系统音色", () => {
+    const { model } = composePresetCard(cardById("minimax-speech-2.8-hd"));
+    const properties = propertiesOf(model);
+
+    expect(properties.speed).toMatchObject({ minimum: 0.5, maximum: 2, default: 1 });
+    const format = properties.outputFormat as { enum: Array<{ value: string }> };
+    expect(format.enum.map((entry) => entry.value)).toEqual(["mp3", "pcm", "flac", "wav", "opus"]);
+
+    // 音色是上游闭集：值用系统音色 id，label 用人读名称，默认取官方示例音色。
+    const voice = properties.voice as {
+      default?: string;
+      "x-pptask-control"?: string;
+      enum: Array<{ value: string; label: string }>;
+    };
+    expect(voice.default).toBe("male-qn-qingse");
+    expect(voice.enum).toHaveLength(22);
+    expect(voice.enum.find((entry) => entry.value === "male-qn-qingse")?.label).toContain("青涩");
+    expect(voice.enum.some((entry) => entry.value === "English_expressive_narrator")).toBe(true);
+    expect(voice["x-pptask-control"]).toBe("voice");
+  });
+
+  it("通用音频没有家族也没有约束：音色自由文本、格式只有服务端那三档", () => {
+    const { model } = composePresetCard(cardById("audio-generic"));
+    const properties = propertiesOf(model);
+
+    const voice = properties.voice as { enum?: unknown };
+    expect(voice.enum).toBeUndefined();
+    const format = properties.outputFormat as { enum: Array<{ value: string }> };
+    expect(format.enum.map((entry) => entry.value)).toEqual(["mp3", "wav", "opus"]);
+    expect(presetLimitsOf(model)).toBeUndefined();
+  });
+});
+
 describe("剪枝", () => {
   it("Seedance 1.0 只保留图 / 时长 / 比例 / 分辨率", () => {
     const { model, dropped } = composePresetCard(cardById("seedance-1.0"));
@@ -210,16 +274,25 @@ describe("约束", () => {
 });
 
 describe("卡片表", () => {
-  it("modelKey 唯一，图片与视频各有卡片", () => {
+  it("modelKey 唯一，图片 / 视频 / 音频各有卡片", () => {
     const keys = BUILTIN_PRESET_CARDS.map((card) => card.providerId + ":" + card.id);
     expect(new Set(keys).size).toBe(keys.length);
     expect(IMAGE_CARDS.length).toBeGreaterThan(0);
     expect(VIDEO_CARDS.length).toBeGreaterThan(0);
+    expect(AUDIO_CARDS.length).toBeGreaterThan(0);
   });
 
   it("按类型筛选与总表一致", () => {
     expect(presetCardsOf(BUILTIN_PRESET_CARDS, "image")).toEqual(IMAGE_CARDS);
     expect(presetCardsOf(BUILTIN_PRESET_CARDS, "video")).toEqual(VIDEO_CARDS);
+    expect(presetCardsOf(BUILTIN_PRESET_CARDS, "audio")).toEqual(AUDIO_CARDS);
+  });
+
+  it("覆盖网关目录里常见的音频模型", () => {
+    const ids = AUDIO_CARDS.map((card) => card.providerModelId.toLowerCase());
+    expect(ids).toContain("tts-1");
+    expect(ids.some((id) => id.includes("minimax-speech"))).toBe(true);
+    expect(ids.some((id) => id.includes("audio-generic"))).toBe(true);
   });
 
   it("覆盖网关目录里常见的视频家族", () => {

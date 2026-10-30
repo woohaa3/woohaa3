@@ -216,7 +216,9 @@ mod tests {
     fn overlapping_group_bodies_do_not_imply_overlapping_3d_subjects() {
         let node = |id: &str, x: f32| serde_json::from_value::<crate::protocol::GraphNode>(serde_json::json!({
             "id": id, "type": "group", "x": x, "y": 0, "width": 400, "height": 200,
-            "group": { "title": "set", "memberCount": 1, "overviewCache": "transparent-world-v1" }
+            "group": { "title": "set", "memberCount": 1, "overviewCache": "transparent-world-v1",
+                "modelBounds": { "aabb": { "min": [-1., -1., -1.], "max": [1., 1., 1.] }, "extent": 8. } },
+            "model": { "resourceKey": "test:set", "signature": "set" }
         })).unwrap();
         let a = node("a", 0.);
         let b = node("b", 200.);

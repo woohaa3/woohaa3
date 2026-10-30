@@ -36,6 +36,25 @@ function fixture(kind: "static" | "dynamic"): ServerCanvas {
 }
 
 describe("managed shot media render pipeline", () => {
+  it("reuses the idle projection and refreshes it after a canonical snapshot change", () => {
+    const canvas = fixture("static");
+    const id = shotPreviewNodeId("film", "clip-1");
+    const registry = new CompositeAssetRegistry();
+    registry.register(createFilmSetModelAdapter());
+    const projected = registry.projectCanvas(canvas)!;
+    expect(projected.nodeData[id].shotPreview).toMatchObject({ filmSetNodeId: "film", clipId: "clip-1" });
+    // Idle reads must preserve identity: residency otherwise sees a new document
+    // every frame and rebuilds candidates even after the film set is offscreen.
+    for (let i = 0; i < 120; i++) expect(registry.projectCanvas(canvas)).toBe(projected);
+    const updated = applyCanvasCommands(canvas, [{ type: "canvas.setTitle", title: "Updated" }]);
+    if (!updated.ok) throw Error(updated.rejection.message);
+    const next = registry.projectCanvas(updated.canvas)!;
+    expect(next).not.toBe(projected);
+    expect(next.title).toBe("Updated");
+    expect(next.nodeData[id].shotPreview).toEqual(projected.nodeData[id].shotPreview);
+    expect(registry.projectCanvas(updated.canvas)).toBe(next);
+    expect(canvas.nodeData[id].shotPreview).toBeUndefined();
+  });
   it.each(["static", "dynamic"] as const)("excludes its own %s media from conversion while preserving ordinary sources", kind => {
     const canvas = fixture(kind), id = shotPreviewNodeId("film", "clip-1"), type = kind === "static" ? "image" : "video";
     expect(ownsShotMedia(canvas, id)).toBe(true);

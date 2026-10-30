@@ -44,7 +44,7 @@ export type EditNodeField = (typeof EDIT_NODE_FIELDS)[number];
  * **新增可写字段必须登记到这里**，否则 `nodeData.patch` 能写进去、但编辑规划阶段
  * 看不到差异，撤销记录建不起来，调用方收到「操作没有产生净变化」（便签 `note` 踩过）。
  */
-export const EDIT_NODE_DATA_FIELDS = ["title", "projectStorageKey", "inputHash", "activeBuildId", "filmSetObjectContainersHidden", "groupAppearance", "groupCollapsed", "groupBadgeScale", "filmSetGroup", "note"] as const;
+export const EDIT_NODE_DATA_FIELDS = ["title", "projectStorageKey", "inputHash", "activeBuildId", "filmSetObjectContainersHidden", "groupAppearance", "groupCollapsed", "filmSetGroup", "note"] as const;
 export type EditNodeDataField = (typeof EDIT_NODE_DATA_FIELDS)[number];
 
 /** 字段快照：明确区分「不存在」与「null」。 */

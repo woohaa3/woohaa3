@@ -23,6 +23,12 @@ use crate::protocol::{GraphNode, Scene};
 pub(crate) struct CanvasProjectionState {
     /// 最近一次成功投影的 accepted revision。
     pub(crate) applied_revision: Option<u32>,
+    /// 最近一次成功投影的文档身份（画布 id）。
+    ///
+    /// `revision` 属于单个文档：身份变化时必须丢弃旧基线，否则切到 revision 更小的画布
+    /// （新建画布）会把每一帧都判成「代数倒退」，卡片实体停在上一张画布的状态
+    /// （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs）。
+    pub(crate) applied_canvas_id: Option<String>,
     /// 最近一次成功投影的节点实体数（每个可呈现节点恰好一个）。
     pub(crate) nodes: usize,
     /// 成功投影次数（`0 → 1 → 0 → 1` 生命周期断言用）。
@@ -55,10 +61,20 @@ pub(crate) fn project_canvas_nodes(
     let projected = &overlay;
     state.structure_changed = false;
     state.rejected = None;
-    if let Some(last) = state.applied_revision {
-        if projected.revision < last {
-            state.rejected = Some("scene generation regressed");
-            return;
+    // 代数单调保护只在**同一份文档**内有意义：`revision` 是每张画布各自累加的版本号，
+    // 切画布（桌面端整页重载但原生渲染进程不重启）后新画布的 revision 往往更小。
+    // 身份变化即丢弃旧基线；身份缺失（旧客户端/测试）沿用进程内单调语义。
+    let identity = (!source.canvas_id.is_empty()).then_some(source.canvas_id.as_str());
+    let same_document = match (&state.applied_canvas_id, identity) {
+        (Some(applied), Some(current)) => applied == current,
+        _ => true,
+    };
+    if same_document {
+        if let Some(last) = state.applied_revision {
+            if projected.revision < last {
+                state.rejected = Some("scene generation regressed");
+                return;
+            }
         }
     }
     if let Some(reason) = validate(projected) {
@@ -116,6 +132,9 @@ pub(crate) fn project_canvas_nodes(
         commands.entity(entity).despawn();
     }
     state.applied_revision = Some(projected.revision);
+    if let Some(identity) = identity {
+        state.applied_canvas_id = Some(identity.to_owned());
+    }
     state.nodes = projected.nodes.len();
     state.generation = state.generation.wrapping_add(1);
 }
@@ -207,8 +226,6 @@ fn apply_presentation(
         commands.entity(entity).insert(GroupPresentation {
             drop_target: presentation.drop_target,
             collapsed: presentation.collapsed,
-            badge: crate::canvas_query::group_model::has_badge(node),
-            badge_scale: presentation.badge_scale,
             member_count: presentation.member_count.max(0) as u32,
             running: crate::canvas2d::group_is_running(node),
             resizable: node.resizable,
@@ -486,5 +503,41 @@ mod tests {
             world.resource::<CanvasProjectionState>().rejected,
             Some("scene generation regressed")
         );
+    }
+
+    /// 切画布（桌面端整页重载、原生渲染进程不重启）时新画布的 revision 更小，
+    /// 必须按文档身份重置基线而不是判成倒退（回归：新建画布后卡片整帧不更新）。
+    #[test]
+    fn lower_revision_of_another_document_is_accepted() {
+        let mut world = world();
+        let mut first = scene(&[("a", 0., 0.)]);
+        first.canvas_id = "canvas-a".to_owned();
+        first.revision = 7;
+        project(&mut world, first, true);
+        assert_eq!(nodes(&mut world).len(), 1);
+
+        let mut second = scene(&[("b", 0., 0.), ("c", 10., 0.)]);
+        second.canvas_id = "canvas-b".to_owned();
+        second.revision = 3;
+        project(&mut world, second, true);
+        assert_eq!(nodes(&mut world).len(), 2);
+        assert_eq!(
+            world.resource::<CanvasProjectionState>().rejected,
+            None::<&'static str>
+        );
+        let state = world.resource::<CanvasProjectionState>();
+        assert_eq!(state.applied_revision, Some(3));
+        assert_eq!(state.applied_canvas_id.as_deref(), Some("canvas-b"));
+
+        // 新文档内仍然保持代数单调。
+        let mut regressed = scene(&[("d", 0., 0.)]);
+        regressed.canvas_id = "canvas-b".to_owned();
+        regressed.revision = 2;
+        project(&mut world, regressed, true);
+        assert_eq!(
+            world.resource::<CanvasProjectionState>().rejected,
+            Some("scene generation regressed")
+        );
+        assert_eq!(nodes(&mut world).len(), 2);
     }
 }

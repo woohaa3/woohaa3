@@ -82,6 +82,17 @@ describe("配置解析", () => {
     expect(shared.ok && shared.config.credentialSource).toBe("shared");
   });
 
+  it("storage.cos 的共享凭据可显式传入，标为 shared", () => {
+    const resolved = resolvePublicBucketConfig({
+      ...FIXTURE_DEFAULTS,
+      sharedSecretId: "s-id",
+      sharedSecretKey: "s-key",
+      env: {}
+    });
+    expect(resolved.ok && resolved.config.secretId).toBe("s-id");
+    expect(resolved.ok && resolved.config.credentialSource).toBe("shared");
+  });
+
   it("配置里给了凭据时不看环境变量，并标注来源为 own", () => {
     const resolved = resolvePublicBucketConfig({
       secretId: "id",

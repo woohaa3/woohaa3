@@ -228,8 +228,6 @@ pub(crate) struct CardPresentation {
 pub(crate) struct GroupPresentation {
     pub(crate) drop_target: bool,
     pub(crate) collapsed: bool,
-    pub(crate) badge: bool,
-    pub(crate) badge_scale: f32,
     pub(crate) member_count: u32,
     pub(crate) running: bool,
     pub(crate) resizable: bool,
@@ -298,12 +296,6 @@ pub(crate) struct CanvasTextureSprite {
     /// 贴图原始像素尺寸。Sprite 每帧跟随节点几何重算尺寸时需要它，
     /// 而像素尺寸只在贴图批次里出现一次，所以随 Sprite 一起记住。
     pub(crate) texture_px: [u32; 2],
-}
-
-/// group 3D 气泡尾巴/连续底面的 owner（节点实体）。
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct GroupSurfaceOwner {
-    pub(crate) owner: Entity,
 }
 
 /// 复合面板缩略图归属与槽位。

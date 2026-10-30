@@ -6,7 +6,7 @@ it("retains composite scope offsets across 200 moves, return and full replacemen
   const node = { id:"film", type:"model" as const, x:10,y:20,width:100,height:100,
     title:"",typeLabel:"",body:"",progress:0,busy:false,texture:false,resizable:false,
     compositeAsset:{x:12.5,y:25.25,width:80,height:80,scopeGround:{cx:60,cy:90,hx:40,hz:40}} };
-  const original: CanvasRenderScene = { version:CANVAS_RENDER_SCENE_VERSION,revision:1,
+  const original: CanvasRenderScene = { version:CANVAS_RENDER_SCENE_VERSION,canvasId:"canvas-mirror",revision:1,
     nodes:[node],edges:[],selection:{nodes:[],edge:null},viewport:{x:0,y:0,zoom:1},
     draft:null,surface:null,theme:defaultAppTheme() };
   const mirror = new PositionSceneMirror();

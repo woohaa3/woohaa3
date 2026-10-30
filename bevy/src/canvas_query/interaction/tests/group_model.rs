@@ -80,12 +80,23 @@ fn group_badge_is_a_drop_target_and_exposes_drop_scope_geometry() {
         .expect("group badge scope");
     assert_eq!(entry.shape, "rect");
     assert!(entry.aabb[2] > 0. && entry.aabb[3] > 0.);
-    assert!(
-        entry
-            .vertices
-            .iter()
-            .all(|vertex| vertex[1] > group.y + group.height)
-    );
+    // 拖放范围就是模型投影派生的徽标矩形，且确实延伸到组结构底边之外。
+    let badge = group_model::badge_rect(&group).expect("badge rect");
+    let expected = [
+        [badge.x, badge.y],
+        [badge.x + badge.z, badge.y],
+        [badge.x + badge.z, badge.y + badge.w],
+        [badge.x, badge.y + badge.w],
+    ];
+    for (actual, expected) in entry.vertices.iter().zip(expected) {
+        assert!((actual[0] - expected[0]).abs() < 0.001);
+        assert!((actual[1] - expected[1]).abs() < 0.001);
+    }
+    assert!(badge.y + badge.w > group.y + group.height);
+    assert!((entry.aabb[0] - badge.x).abs() < 0.001);
+    assert!((entry.aabb[1] - badge.y).abs() < 0.001);
+    assert!((entry.aabb[2] - badge.z).abs() < 0.001);
+    assert!((entry.aabb[3] - badge.w).abs() < 0.001);
 }
 
 #[test]
@@ -129,8 +140,8 @@ fn collapsed_group_has_no_structural_hit_area_but_badge_remains_selectable() {
                 generation,
                 group.x + dx,
                 group.y + dy,
-                group.width,
-                group.height
+                100.,
+                200.
             )
             .node_ids
             .is_empty()
@@ -334,8 +345,10 @@ fn badge_lip_hits_group_but_does_not_expand_marquee_or_resize_bounds() {
     s.selection.nodes = vec!["g".into()];
     let g = accept_scene(&s);
     let x = group.x + group.width / 2.;
-    let badge = group_model::badge_rect(&group);
-    let y = badge.y + 2.;
+    let badge = group_model::badge_rect(&group).unwrap();
+    // 徽标下唇：结构底边之下、模型包围盒之内。
+    let y = group.y + group.height + 2.;
+    assert!(y <= badge.y + badge.w);
     assert_eq!(
         point_query(g, x, y, 1., None).hit,
         Some(PointHit::NodeAction {
@@ -368,35 +381,26 @@ fn badge_lip_hits_group_but_does_not_expand_marquee_or_resize_bounds() {
 }
 
 #[test]
-fn independent_badge_resize_handle_and_scaled_lip_follow_position_increments() {
-    let mut group = appearance_group();
-    group.group.as_mut().unwrap().badge_scale = 2.;
-    group.group.as_mut().unwrap().badge_resizable = true;
-    let handle = group_model::resize_center(&group).unwrap();
-    let badge = group_model::badge_rect(&group);
-    let lip = Vec2::new(group.x + group.width / 2., badge.y + badge.w - 2.);
+fn model_derived_badge_hit_follows_position_increments() {
+    let group = appearance_group();
+    let badge = group_model::badge_rect(&group).unwrap();
+    let point = Vec2::new(badge.x + badge.z / 2., badge.y + badge.w - 2.);
     let generation = accept_scene(&scene(vec![group.clone()], vec![]));
     assert_eq!(
-        point_query(generation, handle.x, handle.y, 1., None).hit,
-        Some(PointHit::NodeAction {
-            node_id: "g".into(),
-            action_id: "group-resize-badge".into(),
-            menu: false
-        })
-    );
-    assert_eq!(
-        point_query(generation, lip.x, lip.y, 1., None).hit,
+        point_query(generation, point.x, point.y, 1., None).hit,
         Some(PointHit::NodeAction {
             node_id: "g".into(),
             action_id: "group-badge-select".into(),
             menu: false
         })
     );
+    // 徽标底部远在组框之外，框选不得把它当作成员或组结构范围。
     assert!(
-        marquee_query(generation, lip.x - 2., lip.y - 2., 4., 4.)
+        marquee_query(generation, point.x - 2., point.y - 2., 4., 4.)
             .node_ids
             .is_empty()
     );
+    // 位置增量只平移已接受的模型投影；徽标范围随组一起移动。
     let (generation, _) = accept_positions(&crate::protocol::PositionUpdateRequest {
         version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.into(),
         base_scene_generation: generation,
@@ -409,30 +413,34 @@ fn independent_badge_resize_handle_and_scaled_lip_follow_position_increments() {
     })
     .unwrap();
     assert_eq!(
-        point_query(generation, handle.x + 1000., handle.y + 600., 1., None).hit,
+        point_query(generation, point.x + 1000., point.y + 600., 1., None).hit,
         Some(PointHit::NodeAction {
             node_id: "g".into(),
-            action_id: "group-resize-badge".into(),
+            action_id: "group-badge-select".into(),
             menu: false
         })
     );
-    group.group.as_mut().unwrap().badge_resizable = false;
-    let generation = accept_scene(&scene(vec![group], vec![]));
-    assert!(
-        !matches!(point_query(generation, handle.x, handle.y, 1., None).hit,
-        Some(PointHit::NodeAction {action_id, ..}) if action_id == "group-resize-badge")
-    );
+    assert_eq!(point_query(generation, point.x, point.y, 1., None).hit, None);
 }
 
 #[test]
-fn scaled_badge_lower_half_remains_a_spatial_hit_candidate() {
-    // The external badge can be much taller than the group card. Its lower cells must stay in
-    // the broad-phase index so the exact rounded-path test can receive the pointer event.
+fn tall_model_badge_lower_half_remains_a_spatial_hit_candidate() {
+    // 模具很高的组徽标远高于组卡片本身。下半部必须留在广相索引中，精确命中的
+    // 模型包围盒判定才能收到指针事件。
     let mut group = appearance_group();
-    group.group.as_mut().unwrap().badge_scale = 12.;
-    let badge = group_model::badge_rect(&group);
+    group
+        .group
+        .as_mut()
+        .unwrap()
+        .model_bounds
+        .as_mut()
+        .unwrap()
+        .aabb
+        .max = [4., 100., -3.];
+    let badge = group_model::badge_rect(&group).unwrap();
     let generation = accept_scene(&scene(vec![group], vec![]));
     let point = Vec2::new(badge.x + badge.z / 2., badge.y + badge.w - 2.);
+    assert!(point.y > badge.y + badge.w / 2.);
     assert_eq!(
         point_query(generation, point.x, point.y, 1., None).hit,
         Some(PointHit::NodeAction {

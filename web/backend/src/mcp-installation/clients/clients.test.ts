@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -371,6 +371,38 @@ describe("DeepSeek Harness profile 级安装", () => {
 
   it("profile 缺少插件时拒绝写入且文件字节不变", async () => {
     const dir = await profileWith("web", false);
+    const file = path.join(dir, "cordis.patch.yml");
+    const original = await readFile(file);
+    await expect(installer({ env }).install("deepseek-harness", url, "web")).rejects.toThrow("dsh plugin --profile web add");
+    expect(await readFile(file)).toEqual(original);
+  });
+
+  /** 复刻全局安装形态：PATH 里的 dsh 软链到 <prefix>/lib/node_modules/@deepseek-ai/dsh/lib/bin.js。 */
+  async function harnessInstall(plugin: boolean) {
+    const root = path.join(home, "npm/lib/node_modules/@deepseek-ai/dsh");
+    await mkdir(path.join(root, "lib"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.2.1" }));
+    const entry = path.join(root, "lib/bin.js");
+    await writeFile(entry, "#!/usr/bin/env node\n", { mode: 0o700 });
+    await symlink(entry, path.join(env.PATH!, "dsh"));
+    if (plugin) {
+      const dependency = path.join(root, "node_modules/@deepseek-ai/dsh-mcp-client");
+      await mkdir(dependency, { recursive: true });
+      await writeFile(path.join(dependency, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh-mcp-client" }));
+    }
+  }
+
+  it("profile 未声明但 DSH 安装自带插件时照常写入", async () => {
+    const dir = await profileWith("web", false);
+    await harnessInstall(true);
+    const result = await installer({ env }).install("deepseek-harness", url, "web");
+    expect(result.changed).toBe(true);
+    expect(await readFile(path.join(dir, "cordis.patch.yml"), "utf8")).toContain(url);
+  });
+
+  it("profile 与 DSH 安装都未提供插件时仍拒绝且文件不变", async () => {
+    const dir = await profileWith("web", false);
+    await harnessInstall(false);
     const file = path.join(dir, "cordis.patch.yml");
     const original = await readFile(file);
     await expect(installer({ env }).install("deepseek-harness", url, "web")).rejects.toThrow("dsh plugin --profile web add");

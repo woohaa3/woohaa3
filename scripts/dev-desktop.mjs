@@ -95,7 +95,10 @@ async function main() {
   }
   const deadline = Date.now() + 120_000;
   while (!stopping) {
-    try { const response = await fetch(url, { signal: AbortSignal.timeout(2000) }); if (response.ok) break; }
+    // 探针超时必须大于 Vite 的扩展发布指针重试窗口（scripts/lib/extension-release-pointer.mjs 的
+    // retryWindowMs = 3s）：本机宿主由下面的桌面进程启动，首次 HTML 一定落在「宿主还没起来」的窗口里，
+    // HTML 要等满 3s 才回落。2s 探针会把每次请求都 abort，永远等不到共享前端。
+    try { const response = await fetch(url, { signal: AbortSignal.timeout(8000) }); if (response.ok) break; }
     catch { /* Vite or the backend build may still be starting. */ }
     if (Date.now() > deadline) throw new Error(`等待共享前端超时：${url}`);
     await new Promise(resolve => setTimeout(resolve, 250));
