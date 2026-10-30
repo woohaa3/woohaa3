@@ -409,7 +409,20 @@ export function refitWoohaa3CanvasGroups(
   const nextNodes = nodes.map((node) => {
     const ownFit = fits.get(node.id);
     if (ownFit) {
-      return applyNodeDimensions({ ...node, position: { x: ownFit.x, y: ownFit.y } }, ownFit.width, ownFit.height);
+      // `fits` 是绝对坐标；有父组时 `position` 是相对父级的，必须换算回去，否则嵌套组
+      // 会被写成「绝对值当相对值」，整棵子树的世界坐标一起漂移。
+      const parentFit = node.parentId ? fits.get(node.parentId) : undefined;
+      const parent = node.parentId ? nodeById.get(node.parentId) : undefined;
+      const parentOrigin = parentFit
+        ? { x: parentFit.x, y: parentFit.y }
+        : parent
+          ? getWoohaa3CanvasNodeAbsolutePosition(parent, nodeById)
+          : { x: 0, y: 0 };
+      return applyNodeDimensions(
+        { ...node, position: { x: ownFit.x - parentOrigin.x, y: ownFit.y - parentOrigin.y } },
+        ownFit.width,
+        ownFit.height
+      );
     }
     if (node.parentId && fits.has(node.parentId)) {
       const fit = fits.get(node.parentId)!;

@@ -36,7 +36,9 @@ describe("frozen group drop geometry", () => {
     expect(result.ok).toBe(true);
     const next = result.nodes.find((node) => node.id === "n")!;
     expect(next.parentId).toBe("g");
-    expect(next.position).toEqual({ x: 80, y: 76 });
+    // 内矩形边距随 groupPadding/groupBottomPadding（现为 12/12）变化；旧值 {80,76} 是 40/80 时代的
+    // 结果（change: canvas-grouping-redesign）。数值取实际钳制结果，不在注释里重复推导。
+    expect(next.position).toEqual({ x: 108, y: 120 });
     expect(result.nodes.find((node) => node.id === "g")).toMatchObject({ width: 300, height: 220 });
   });
 
@@ -73,7 +75,7 @@ describe("frozen group drop geometry", () => {
     const a = projectDropPointOutside({ x: 100, y: 100 }, { width: 40, height: 40 }, { x: 0, y: 0, width: 200, height: 200 });
     const b = projectDropPointOutside({ x: 100, y: 100 }, { width: 40, height: 40 }, { x: 0, y: 0, width: 200, height: 200 });
     expect(a).toEqual(b);
-    expect(clampDropPointToGroup({ x: 30, y: 30 }, { width: 40, height: 40 }, { x: 0, y: 0, width: 300, height: 240 })).toEqual({ x: 40, y: 40 });
+    expect(clampDropPointToGroup({ x: 30, y: 30 }, { width: 40, height: 40 }, { x: 0, y: 0, width: 300, height: 240 })).toEqual({ x: 30, y: 30 });
   });
 
   it("resolves transient targets with the same deepest and stable ordering rule", () => {

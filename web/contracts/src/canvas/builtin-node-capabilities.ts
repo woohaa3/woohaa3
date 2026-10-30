@@ -104,6 +104,7 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
   });
   entries.set('group', {
     appearance: { palette: 'group', defaultSize: compact },
+    modelPreparation: groupAppearancePreparation,
     container: { project: ({ data }, counts) => ({ title: typeof data?.title === 'string' ? data.title : '', ...counts }) },
     // 组保留结构容器身份，其自身展示模型与普通模型共用 payload lease；模型直接绘制在画布
     // 世界，不创建离屏预览相机，因此只占模型 payload、不占预览槽。

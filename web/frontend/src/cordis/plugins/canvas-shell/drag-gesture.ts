@@ -190,11 +190,15 @@ export function createDragGestureFamily(
     // 成员移动后让父组贴合（change: canvas-grouping-redesign）。
     // 释放结算只保证成员不越界，不以 refit 为副作用，所以把成员拖近时框不会缩小；
     // 这里对受影响的组补一次贴合。移动的是组本身时不 refit —— 组不该因搬动而改尺寸。
-    const affectedGroupIds = new Set(
-      draggedNonGroup
-        .map((id) => settled.find((node) => node.id === id)?.parentId)
-        .filter((parentId): parentId is string => !!parentId),
-    );
+    // 受影响的组 = 成员**落入后**的父组 + 它**离开前**的父组：只 refit 新父组会让旧父组
+    // 留着一圈空壳，只 refit 旧父组则新父组不会撑开去包住刚拖入的成员。
+    const affectedGroupIds = new Set<string>();
+    for (const id of draggedNonGroup) {
+      const next = settled.find((node) => node.id === id)?.parentId;
+      const previous = original.find((node) => node.id === id)?.parentId;
+      if (next) affectedGroupIds.add(next);
+      if (previous) affectedGroupIds.add(previous);
+    }
     if (affectedGroupIds.size > 0) {
       settled = refitWoohaa3CanvasGroups([...settled], affectedGroupIds).nodes;
     }
