@@ -4,8 +4,8 @@ import {
   createModelSnapshot, createMotionSnapshot, defaultInitialShotCamera, decodeFilmSetNodeData,
   hashModelScript, hashMotionScript,
 } from "@woohaa3/contracts";
-import { convertLegacyFilmSetHistoryEntry, legacyFilmSetHistoryInput } from "./legacy-film-set-history.js";
-import { planLegacyFilmSetItemIdentities } from "./legacy-film-set-identities.js";
+import { convertLegacyFilmSetHistoryEntry, legacyFilmSetHistoryInput } from "../src/authoring/backend/legacy/legacy-film-set-history.js";
+import { planLegacyFilmSetItemIdentities } from "../src/authoring/backend/legacy/legacy-film-set-identities.js";
 
 const now = "2026-10-11T00:00:00.000Z";
 const options = { title: "片场", topModelItemId: "migrated-model-stable" };

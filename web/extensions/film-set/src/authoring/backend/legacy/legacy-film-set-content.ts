@@ -6,9 +6,7 @@
  * 校验并规范化不受信任的 `filmSetContent`；纯函数、无副作用、JSON-only。前端、Canvas Service、
  * MCP 与测试共用同一份校验。
  */
-import { decodeModelDefinition, type ModelDefinition } from "../../../../contracts/src/canvas/model-definition.js";
-import { decodeMotionDefinition } from "../../../../contracts/src/canvas/motion-script.js";
-import { isBoundedId, isFiniteNumber, isJsonObject, isNonNegativeInteger } from "../../../../contracts/src/validation.js";
+import { decodeModelDefinition, decodeMotionDefinition, isBoundedId, isFiniteNumber, isJsonObject, isNonNegativeInteger, type ModelDefinition } from "@woohaa3/contracts";
 import {
   DEFAULT_FILM_SET_LOCAL_TRANSFORM,
   FILM_SET_CONTENT_FIELD,
@@ -24,8 +22,8 @@ import {
   type FilmSetMotion,
   type FilmSetOrigin,
   type FilmSetPlayback
-} from "../../../../extensions/film-set/src/state/shared/content/types.js";
-import { validateItemBudget } from "../../../../extensions/film-set/src/state/shared/content/motion.js";
+} from "../../../state/shared/content/types.js";
+import { validateItemBudget } from "../../../state/shared/content/motion.js";
 
 export type FilmSetContentDecodeResult =
   | { ok: true; value: FilmSetContent }

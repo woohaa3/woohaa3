@@ -65,3 +65,10 @@ export { createFilmSetCanvasContentRuntime };
 export { compileMotionTracks, previewAnimationMetadata, previewIdentityMatches } from "./preview/backend/preview-identity.js";
 
 export { prepareFilmSetPreviewFrame } from "./preview/backend/preview-frame.js";
+
+/** 显式离线迁移工具；生产入口不得 import（change: 2026-10-28-generic-extension-content-ownership 任务 4.5）。 */
+export * from "./authoring/backend/legacy/legacy-film-set-reader.js";
+export * from "./authoring/backend/legacy/legacy-film-set-history.js";
+export * from "./authoring/backend/legacy/legacy-film-set-identities.js";
+export * from "./authoring/backend/legacy/legacy-film-set-animations.js";
+export * from "./authoring/backend/legacy/legacy-film-set-content.js";

@@ -43,36 +43,6 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
 
   {
-    file: "web/services/canvas-service/src/animation/legacy-film-set-animations.ts",
-    literals: ["filmSetContent"],
-    stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
-  },
-  {
-    file: "web/services/canvas-service/src/animation/legacy-film-set-content.ts",
-    literals: ["film-set","filmSetContent"],
-    stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
-  },
-  {
-    file: "web/services/canvas-service/src/animation/legacy-film-set-history.ts",
-    literals: ["filmSetAnimations","filmSetContent","scenePlacement"],
-    stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
-  },
-  {
-    file: "web/services/canvas-service/src/animation/legacy-film-set-identities.ts",
-    literals: ["filmSetContent"],
-    stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
-  },
-  {
-    file: "web/services/canvas-service/src/animation/legacy-film-set-reader.ts",
-    literals: ["filmSetAnimations","filmSetContent","scenePlacement"],
-    stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
-  },
-  {
     file: "web/services/canvas-service/src/storage/core/compat-inventory.ts",
     literals: ["filmSetContent"],
     stage: "identity",

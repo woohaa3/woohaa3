@@ -38,6 +38,8 @@ export const filmSetCanvasContentRuntime: CanvasContentRuntime = {
     ...filmSetContentContribution,
     interaction: filmSetInteractionPolicy,
     ownerLocators: filmSetOwnerLocators,
+    targetModes: ["film-set"],
+    eventOwners: ["film-set"],
     agentTargets: [filmSetAgentTarget],
     agentTargetVersion: filmSetAgentTargetVersion,
     mcpTools: filmSetMcpTools

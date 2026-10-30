@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createFilmSetSnapshot, createMotionSnapshot, createFilmSetItemMotion } from "@woohaa3/contracts";
-import { legacyFilmSetAnimations } from "./legacy-film-set-animations.js";
+import { legacyFilmSetAnimations } from "../src/authoring/backend/legacy/legacy-film-set-animations.js";
 const ITEM_ID = "model";
 const CAMERA = { azimuth: 0, elevation: Math.PI / 4, distance: 8, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } } as const;
 function cameraMotion() { return createMotionSnapshot({ motionScript: `motion.camera.tween({ id: "orbit", property: "azimuth", startTime: 0, endTime: 5, from: 0, to: 1 });`, basedOnModelVersion: { revision: 1, sourceHash: "camera", contentHash: "camera" } }); }

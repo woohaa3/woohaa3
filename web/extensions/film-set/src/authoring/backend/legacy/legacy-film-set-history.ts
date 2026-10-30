@@ -10,6 +10,7 @@ import {
   MOTION_SCRIPT_LANGUAGE,
   MOTION_SCRIPT_VERSION,
   animationDefinitionSnapshotHash,
+  fnv1a64Hex,
   canonicalFilmSetFields,
   createModelSnapshot,
   decodeAnimationPayload,
@@ -23,8 +24,14 @@ import {
   type NodeGenerationHistoryEntry,
   type NodeHistoryModelPayload,
 } from "@woohaa3/contracts";
-import { animationDefinitionIdentityFromPayload } from "../storage/core/node-history-service/current-state.js";
 import { readLegacyFilmSetNodeData } from "./legacy-film-set-reader.js";
+
+
+function animationDefinitionIdentityFromPayload(animation: import("@woohaa3/contracts").NodeHistoryAnimationPayload): string {
+  if (animation.schemaVersion === 4) return `film-set-group:${fnv1a64Hex(JSON.stringify(animation.filmSetGroup))}`;
+  if (animation.schemaVersion !== 3) throw new Error("历史片场必须先完成离线迁移");
+  return `animation:${animationDefinitionSnapshotHash({ scenePlacement: animation.scenePlacement, sceneCamera: animation.sceneCamera, filmSetContent: animation.filmSetContent, filmSetAnimations: animation.filmSetAnimations })}`;
+}
 
 type Failure = { ok: false; reason: string };
 export type LegacyFilmSetHistoryOptions = { title: string; topModelItemId: string };
