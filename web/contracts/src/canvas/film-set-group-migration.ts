@@ -42,7 +42,13 @@ export function migrateLegacyFilmSetToGroup(canvas: ServerCanvas, legacyNodeId: 
   const rawContent = legacyData?.filmSetContent;
   if (!object(rawContent) || !Array.isArray(rawContent.items)) return { ok: false, reason: "旧片场内容缺失，迁移未修改画布", diagnostics: [] };
   const items = rawContent.items;
-  const idFactory = options.idFactory ?? ((kind, sourceId, index) => `${sourceId}-${kind}-${index + 1}`);
+  const idFactory = options.idFactory ?? ((kind, sourceId, index) => {
+    const base = `${sourceId}-${kind}-${index + 1}`;
+    let candidate = base;
+    let suffix = 2;
+    while (nodes.some(node => node.id === candidate && node.type !== kind)) candidate = `${base}-${suffix++}`;
+    return candidate;
+  });
   const nodes = canvas.document.nodes.map(node => ({ ...node, position: { ...node.position } }));
   const nodeData: Record<string, CanvasNodeData> = { ...canvas.nodeData };
   const bindings: FilmSetGroupSceneBinding[] = [];
