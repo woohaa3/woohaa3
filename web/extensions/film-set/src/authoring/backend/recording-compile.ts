@@ -40,6 +40,7 @@ import {
   filmSetMediaPlanesForNode,
   decodeFilmSetNodeData,
   executeMotionScript,
+  mediaPublicUrlFor,
   filmSetAnimationsOf,
   filmSetContentHash,
   resolveFilmSetClip,
@@ -475,6 +476,9 @@ export function planFilmSetRecordingCommit(input: {
     source: "generated",
     status: "ready",
     createdAt: input.now(),
+    // 与浏览器录制一致：资产必须带同源读取路径，卡片首帧/下载/预览才能解析来源。
+    // 缺 url 的镜头参考只有实时取景可用（真实缺陷：缩略图一直是灰的）。
+    url: mediaPublicUrlFor(request.artifact.storageKey),
     metadata: {
       storageKey: request.artifact.storageKey,
       checksum: request.artifact.checksum,

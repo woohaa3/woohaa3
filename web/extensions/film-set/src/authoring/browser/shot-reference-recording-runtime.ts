@@ -252,7 +252,8 @@ export function createShotReferenceRecordDeps(input: {
       const result = await ctx.mediaRemote.upload({ file, signal, canvasId: ctx.canvasScope.canvasId() });
       if (timing) timing.uploadMs += clock() - startedAt;
       if (!result.ok) return { ok: false as const, error: result.error };
-      return { ok: true as const, asset: { storageKey: result.media.storageKey, checksum: result.media.checksum, mediaType: result.media.contentType, size: result.media.size } };
+      // 同源读取路径必须随资产一起登记：镜头卡片首帧与下载都按 `asset.url` 解析来源。
+      return { ok: true as const, asset: { storageKey: result.media.storageKey, checksum: result.media.checksum, mediaType: result.media.contentType, size: result.media.size, url: result.media.url } };
     },
     onProgress: (progress) => {
       if (timing) timing.frames = progress.completed;

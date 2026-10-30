@@ -83,13 +83,29 @@ export function isAllowedNodeHistoryPreviewUrl(url: string): boolean {
  *
  * `canvasId` 由调用方在已知画布上下文时传入：只影响本次渲染出口的 `?canvas=` 提示，
  * 不写回资产，也不改变持久化格式。
+ *
+ * 资产**没有登记** `url` 时按 `metadata.storageKey` 派生（存量镜头参考视频就是这种形态：
+ * 旧写入路径只登记了存储身份，卡片首帧因此一直缺失）。派生同样过一遍受控校验，并拒绝
+ * 路径回溯；显式登记了不可控地址的资产不受此回退影响，仍然返回 null。
  */
 export function resolveCanonicalMediaUrl(asset: unknown, canvasId?: string | null): string | null {
   if (typeof asset !== "object" || asset === null) return null;
   const record = asset as Record<string, unknown>;
-  const url = record.url;
-  if (typeof url !== "string" || !isAllowedMediaUrl(url)) return null;
+  const url = typeof record.url === "string" && record.url !== "" ? record.url : derivedMediaUrl(record);
+  if (!url || !isAllowedMediaUrl(url)) return null;
   return appPublicUrl(withMediaCanvasHint(url, canvasId));
+}
+
+/** 由资产登记的存储身份派生逻辑读取地址；身份非法时返回 null。 */
+function derivedMediaUrl(asset: Record<string, unknown>): string | null {
+  const metadata = asset.metadata;
+  if (typeof metadata !== "object" || metadata === null) return null;
+  const storageKey = (metadata as Record<string, unknown>).storageKey;
+  if (typeof storageKey !== "string" || storageKey === "") return null;
+  if (storageKey.startsWith("/") || storageKey.includes("\\") || storageKey.includes("..")) return null;
+  // 存储身份是单条逻辑路径，不允许自带查询/片段语法（画布提示由本函数追加）。
+  if (storageKey.includes("?") || storageKey.includes("#")) return null;
+  return mediaUrlFor(storageKey);
 }
 
 /** Read original bytes; HTTP failures must never become saved error pages. */

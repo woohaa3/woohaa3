@@ -15,13 +15,20 @@ import { readAnimation } from "../../state/browser/animation-projection.js";
  *
  * 纯函数：只读画布、返回命令，不提交、不联网。
  */
-import { DEFAULT_SHOT_REFERENCE_RECORD_PROFILE, filmSetAnimationsOf, shotReferenceAssetMetadata, shotReferenceContentIdentity, shotReferenceOwnershipOf, shotReferenceProfileKey, SHOT_REFERENCE_ROLE, type CanvasCommand, type CanvasNodeData, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+import { DEFAULT_SHOT_REFERENCE_RECORD_PROFILE, filmSetAnimationsOf, mediaPublicUrlFor, shotReferenceAssetMetadata, shotReferenceContentIdentity, shotReferenceOwnershipOf, shotReferenceProfileKey, SHOT_REFERENCE_ROLE, type CanvasCommand, type CanvasNodeData, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
 
 /** 默认录制 profile key；与录制能力保持一致（内容身份也按默认 profile 计算）。 */
 const DEFAULT_SHOT_REFERENCE_PROFILE_KEY = shotReferenceProfileKey(DEFAULT_SHOT_REFERENCE_RECORD_PROFILE);
 
 /** 与录制缓存一致的资产投影。 */
-export type ShotReferenceReadyAsset = { storageKey: string; checksum: string; mediaType: string; size: number };
+export type ShotReferenceReadyAsset = {
+  storageKey: string;
+  checksum: string;
+  mediaType: string;
+  size: number;
+  /** 上传服务给出的同源读取路径；缺失时按 storageKey 派生（见 `buildShotReferenceAsset`）。 */
+  url?: string;
+};
 
 export type ShotReferenceFreezeRequest = {
   canvasId: string;
@@ -61,6 +68,10 @@ export function buildShotReferenceAsset(
     source: "generated",
     status: "ready",
     createdAt,
+    // 画布媒体读取（卡片首帧、下载、预览）都要求资产带同源逻辑路径；只登记 storageKey
+    // 会让镜头视频永远无法解析成可播放来源（真实缺陷：镜头卡片缩略图一直是灰的，只有
+    // hover 实时取景才有画面）。
+    url: ready.url ?? mediaPublicUrlFor(ready.storageKey),
     metadata: {
       storageKey: ready.storageKey,
       // 服务端 `validateAssetReferences` 要求 checksum 为 64 位 hex 且与 storageKey 内嵌哈希一致；
