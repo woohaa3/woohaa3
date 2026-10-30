@@ -56,6 +56,13 @@ export type StorageExposer = {
   readonly label?: string;
   /** 提供这个提供者的插件 id（设置页据此跳转到它的配置）。 */
   readonly ownerExtensionId?: string;
+  /**
+   * 未显式配置 `exposer.primary`、画布也没有 exposure 覆盖时，是否直接用它。
+   *
+   * 内置的「公开临时桶」用它实现「打开开关就生效」：不需要用户再去找设置项填 id。
+   * 多个默认项同时注册时按注册顺序取第一个（与 `canvasScoped` 同一取舍）。
+   */
+  readonly default?: boolean;
   readonly requiresReplica: boolean;
   /** `requiresReplica` 为 true 时要复制到哪个后端；缺省与 `exposerId` 同名。 */
   readonly targetBackendId?: string;

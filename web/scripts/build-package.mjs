@@ -90,6 +90,28 @@ if (undeclared.length > 0) {
   process.exit(1);
 }
 
+/**
+ * 构建期常量注入（`WOOHAA3_DEFINES`，JSON 对象）。
+ *
+ * 存在的理由：有些值不该进公开仓库，但需要在构建时固定下来（例如内置公开桶的域名）。
+ * 公开仓库只保留这条机制，具体值由构建环境提供；未提供时源码里的标识符保持为
+ * `undefined`，对应功能要求运行期配置齐全才启用。
+ */
+const buildDefines = (() => {
+  const raw = process.env.WOOHAA3_DEFINES;
+  if (!raw) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.error("[build-package] WOOHAA3_DEFINES 不是合法 JSON，已忽略。");
+    return {};
+  }
+  if (parsed === null || typeof parsed !== "object") return {};
+  // esbuild 的 define 值必须是 JS 表达式文本：这里统一用 JSON 字面量。
+  return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, JSON.stringify(value)]));
+})();
+
 const options = {
   entryPoints: [path.join(packageDir, entry)],
   outdir: path.join(packageDir, outdir),
@@ -104,6 +126,7 @@ const options = {
   sourcemap: true,
   external,
   loader: { ".css": "copy" },
+  define: buildDefines,
   logLevel: "info",
 };
 

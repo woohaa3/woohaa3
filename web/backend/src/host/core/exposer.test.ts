@@ -251,6 +251,35 @@ describe("注册的提供者", () => {
   });
 });
 
+describe("内置默认提供者", () => {
+  it("没有显式配置时用注册方声明的 default（开启开关即生效）", async () => {
+    const local = memoryBackend("local");
+    const { storage, exposer } = setup({ primary: "local" }, [local]);
+    await storage.bucket("media").put("a.png", Uint8Array.of(1), "image/png");
+    exposer.register({
+      exposerId: "cos-public",
+      requiresReplica: true,
+      targetBackendId: "local",
+      default: true,
+      async expose(input) {
+        return "https://public.invalid/" + input.namespace + "/" + input.key;
+      }
+    });
+
+    expect(exposer.selectedId()).toBe("cos-public");
+    expect(exposer.available("media")).toBe(true);
+    expect(await exposer.expose({ namespace: "media", key: "a.png" })).toBe(
+      "https://public.invalid/media/a.png"
+    );
+  });
+
+  it("显式配置优先于 default", () => {
+    const { exposer } = setup({ expose: "cos" }, [memoryBackend("cos", { presign: true })]);
+    exposer.register({ exposerId: "cos-public", requiresReplica: false, default: true, expose: async () => "u" });
+    expect(exposer.selectedId()).toBe("cos");
+  });
+});
+
 describe("注册表", () => {
   it("重复 exposerId 抛错；注销后不再可选；隐式提供者按 backendId 暴露", () => {
     const cos = memoryBackend("cos", { presign: true });

@@ -42,6 +42,14 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
   const storage = options.storage;
   const registered = new Map<string, StorageExposer>();
 
+  /** 未显式选择时的兜底：注册方声明 `default: true` 的提供者（按注册顺序取第一个）。 */
+  const defaultIdOf = (): string | undefined => {
+    for (const exposer of registered.values()) {
+      if (exposer.default === true) return exposer.exposerId;
+    }
+    return undefined;
+  };
+
   const selectedIdOf = (): string | undefined => {
     const value = options.settings.expose()?.trim();
     return value ? value : undefined;
@@ -105,7 +113,7 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
       return out;
     },
     resolve,
-    selectedId: selectedIdOf,
+    selectedId: () => selectedIdOf() ?? defaultIdOf(),
     available(namespace, scope) {
       const current = storage.current(namespace, scope);
       // 画布级覆盖优先：空串 = 这张画布明确不对外。
@@ -114,7 +122,7 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
         return override === "" ? false : resolve(override) !== undefined;
       }
       if (current.presign) return true;
-      const id = selectedIdOf();
+      const id = selectedIdOf() ?? defaultIdOf();
       if (!id) return false;
       return resolve(id) !== undefined;
     },
@@ -136,8 +144,8 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
         );
       }
 
-      // ② 画布覆盖 / 部署默认选中的提供者。
-      const id = override !== undefined ? override.trim() : selectedIdOf();
+      // ② 画布覆盖 / 部署默认选中的提供者 / 注册方声明的内置默认。
+      const id = override !== undefined ? override.trim() : (selectedIdOf() ?? defaultIdOf());
       if (!id) throw new StorageExposeUnavailableError();
 
       const exposer = resolve(id);
