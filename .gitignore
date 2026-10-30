@@ -20,6 +20,8 @@ desktop/build/
 web/frontend/src/bevy-wasm/*.js
 web/frontend/src/bevy-wasm/*.wasm
 web/frontend/src/bevy-wasm/*.wasm.d.ts
+# photocraft 编辑器（client/photocraft）的 wasm-bindgen 产物，同样是纯构建输出，不入库。
+web/frontend/src/photocraft-wasm/
 # 字体由构建脚本从 bevy/assets/fonts/ 复制到 public/，不入库（源文件在 bevy/ 下）。
 web/frontend/public/assets/
 
