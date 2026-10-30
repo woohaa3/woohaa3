@@ -341,7 +341,11 @@ export function reparentDraggedNodes(
 }
 
 /**
- * 让 group 根据子节点绝对位置自适应扩展。
+ * 让 group 贴合其成员：成员撑开时扩大，成员挪近时**收缩**。
+ *
+ * 语义变化（change: canvas-grouping-redesign）：旧实现只扩不缩 —— 没有 `floors` 时用
+ * group 当前尺寸兜底，用户把成员拖到一起后框仍停在原处。现在默认按成员重新贴合；
+ * 需要「只扩不缩」的调用方（例如 resize 预览的下限保护）显式传 `floors`。
  */
 export function refitWoohaa3CanvasGroups(
   nodes: Woohaa3CanvasNode[],
@@ -370,11 +374,17 @@ export function refitWoohaa3CanvasGroups(
       };
     });
 
+    // 没有 `floors` 时**只按成员贴合**（会缩）；有 `floors` 时把它当作「不得小于」的下限
+    // （resize 预览等需要保住用户手动放大的尺寸）。
     const floor = floors?.get(groupId);
-    const left = Math.min(...bounds.map((item) => item.x), floor?.x ?? group.position.x);
-    const top = Math.min(...bounds.map((item) => item.y), floor?.y ?? group.position.y);
-    const right = Math.max(...bounds.map((item) => item.x + item.width), floor ? floor.x + floor.width : group.position.x + readNodeWidth(group));
-    const bottom = Math.max(...bounds.map((item) => item.y + item.height), floor ? floor.y + floor.height : group.position.y + readNodeHeight(group));
+    const left = floor ? Math.min(Math.min(...bounds.map((item) => item.x)), floor.x) : Math.min(...bounds.map((item) => item.x));
+    const top = floor ? Math.min(Math.min(...bounds.map((item) => item.y)), floor.y) : Math.min(...bounds.map((item) => item.y));
+    const right = floor
+      ? Math.max(Math.max(...bounds.map((item) => item.x + item.width)), floor.x + floor.width)
+      : Math.max(...bounds.map((item) => item.x + item.width));
+    const bottom = floor
+      ? Math.max(Math.max(...bounds.map((item) => item.y + item.height)), floor.y + floor.height)
+      : Math.max(...bounds.map((item) => item.y + item.height));
     const fit = {
       x: left,
       y: top,

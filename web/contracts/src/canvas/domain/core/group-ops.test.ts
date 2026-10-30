@@ -218,15 +218,28 @@ describe("reparentDraggedNodes", () => {
 });
 
 describe("refitWoohaa3CanvasGroups", () => {
-  it("成员外移时扩展容器并保持成员绝对位置", () => {
+  it("成员移动后容器贴合成员并保持成员绝对位置", () => {
     const group = node("g", { x: 0, y: 0 }, { type: "group", width: 300, height: 300 });
     const member = node("m", { x: 500, y: 10 }, { parentId: "g" });
     const result = refitWoohaa3CanvasGroups([group, member], ["g"]);
     expect(result.changed).toBe(true);
     const g = result.nodes.find((entry) => entry.id === "g")!;
-    expect(g.width).toBeGreaterThan(300);
+    // 成员 (500,10)–(700,110) + 四周 12 → 框贴到 (488,-2)；
+    // 尺寸下限沿用 `DEFAULT_NODE_DIMS`（260×195），所以不会缩到 224×124。
+    expect(g.position).toEqual({ x: 488, y: -2 });
+    expect(g.width).toBe(260);
+    expect(g.height).toBe(195);
     const m = result.nodes.find((entry) => entry.id === "m")!;
     expect(getWoohaa3CanvasNodeAbsolutePosition(m, byId(result.nodes))).toEqual({ x: 500, y: 10 });
+  });
+
+  it("成员挪近时容器收缩", () => {
+    const group = node("g", { x: 0, y: 0 }, { type: "group", width: 900, height: 800 });
+    const member = node("m", { x: 20, y: 20 }, { parentId: "g" });
+    const result = refitWoohaa3CanvasGroups([group, member], ["g"]);
+    const g = result.nodes.find((entry) => entry.id === "g")!;
+    expect(g.width).toBeLessThan(900);
+    expect(g.height).toBeLessThan(800);
   });
 
   it("无子节点或几何未变时不改动", () => {

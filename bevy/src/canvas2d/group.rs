@@ -153,10 +153,10 @@ pub(crate) fn draw_group(
     } else {
         format!("{} · {} 项", title, presentation.member_count)
     };
-    const PILL_FONT: f32 = 14.;
-    const PILL_PAD_X: f32 = 12.;
-    const PILL_HEIGHT: f32 = 32.;
-    const PILL_RADIUS: f32 = 10.;
+    const PILL_FONT: f32 = 16.;
+    const PILL_PAD_X: f32 = 14.;
+    const PILL_HEIGHT: f32 = 36.;
+    const PILL_RADIUS: f32 = 12.;
     /// 标签底边到组框顶边的间隙。
     const PILL_GAP: f32 = 8.;
     let max_label_width = (width - PILL_PAD_X * 2.).max(48.);
@@ -337,8 +337,9 @@ mod tests {
         assert!(positions.len() > 8);
         assert_eq!(label, "镜头发散 · 3 项");
         // 胶囊内文字位置：距组左上各 10，再加 8 的左右内边距 / 垂直居中。
-        assert_eq!(position, Vec2::new(18.0, 16.0));
-        assert_eq!(size, 12.0);
+        // 标签浮在框顶上方：x 为左内边距，y 为「框顶 - 间隙 - 标签高 + 垂直居中偏移」。
+        assert_eq!(position, Vec2::new(14.0, -34.0));
+        assert_eq!(size, 16.0);
     }
 
     #[test]

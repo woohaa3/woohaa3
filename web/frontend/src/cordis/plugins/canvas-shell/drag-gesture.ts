@@ -14,6 +14,7 @@ import {
   isMergeEligibleNode,
   readNodeHeight,
   readNodeWidth,
+  refitWoohaa3CanvasGroups,
   resolveDraggedNodeDropTargets,
   resolveMergeTarget,
   settleDraggedGroups,
@@ -181,6 +182,17 @@ export function createDragGestureFamily(
         return [];
       }
       settled = nodeResult.nodes;
+    }
+    // 成员移动后让父组贴合（change: canvas-grouping-redesign）。
+    // 释放结算只保证成员不越界，不以 refit 为副作用，所以把成员拖近时框不会缩小；
+    // 这里对受影响的组补一次贴合。移动的是组本身时不 refit —— 组不该因搬动而改尺寸。
+    const affectedGroupIds = new Set(
+      draggedNonGroup
+        .map((id) => settled.find((node) => node.id === id)?.parentId)
+        .filter((parentId): parentId is string => !!parentId),
+    );
+    if (affectedGroupIds.size > 0) {
+      settled = refitWoohaa3CanvasGroups([...settled], affectedGroupIds).nodes;
     }
     const changedCommands = planGroupStructureChange(original, settled);
     // Both pure moves and structural drops use the same atomic diff planner.
