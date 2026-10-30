@@ -236,7 +236,7 @@ export type NodeHistoryPreview =
   | { kind: "video"; href: string; posterHref: string | null; durationSeconds: number | null }
   | { kind: "audio"; href: string; durationSeconds: number | null }
   | { kind: "model"; thumbnailHref: string | null; entry: NodeHistoryPreviewEntry }
-  | { kind: "failure"; outcome: NodeHistoryOutcome; message: string };
+  | { kind: "failure"; outcome: Exclude<NodeHistoryOutcome, "succeeded">; message: string };
 
 /** 模型预览的条目身份：渲染器按它读取权威脚本并缓存结果。 */
 export type NodeHistoryPreviewEntry = {

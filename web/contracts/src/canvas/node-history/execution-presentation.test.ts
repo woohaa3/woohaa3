@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
 import { mergeNodeExecutionPresentation, nodeExecutionWindow, showNodeExecutionDots } from "./execution-presentation.js";
+import { toNodeHistoryListItem } from "./projection.js";
 import type { CanvasOperationRecord } from "../run-state/types.js";
-import type { NodeGenerationHistoryListItem } from "./types.js";
+import type { NodeGenerationHistoryEntry, NodeGenerationHistoryListItem } from "./types.js";
 const operation = (state: CanvasOperationRecord["state"], id = "run-1"): CanvasOperationRecord => ({
   operationId: id, canvasId: "canvas", nodeId: "node", kind: "image", owner: "server", state,
   createdAt: "2026-10-20T00:00:00Z", updatedAt: "2026-10-20T00:00:01Z"
@@ -49,6 +50,17 @@ it("rejected submissions are page-only facts with no archive identity", () => {
   expect(rejected[0]).toMatchObject({ localFailure: true, recoverable: false, error: "Denied" });
   expect(rejected[0]?.entryId).toBeUndefined();
   expect(mergeNodeExecutionPresentation([], [])).toEqual([]);
+});
+
+it("derives a failure outcome from the failure payload when the top-level outcome is missing", () => {
+  const entry: NodeGenerationHistoryEntry = {
+    version: "woohaa-node-generation-history-v1", entryId: "failed-entry", canvasId: "canvas", nodeId: "node",
+    kind: "video", createdAt: "2026-10-20T00:00:02Z", sourceIdentity: "failure", currentIdentity: "baseline",
+    recoverable: false, previewable: false, source: { label: "视频生成", runId: "run-failed" },
+    payload: { kind: "failure", outcome: "failed", failureKind: "video", message: "provider 超时", baseline: null, inputSummary: "" }
+  };
+  const item = toNodeHistoryListItem(entry, { current: false, previewHref: () => "/preview" });
+  expect(item).toMatchObject({ outcome: "failed", current: false, recoverable: false });
 });
 
 it("hands a text assistant activity to its durable version as one logical operation", () => {

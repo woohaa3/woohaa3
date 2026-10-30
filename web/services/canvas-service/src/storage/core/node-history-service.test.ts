@@ -732,6 +732,24 @@ describe("SqliteNodeHistoryRepository", () => {
     expect((await repository.canvasStats(CANVAS)).count).toBe(3);
     repository.close();
   });
+
+  it("失败归档经 SQLite 往返后仍保留 outcome，不会被读成成功", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "woohaa3-ngh-"));
+    const repository = new SqliteNodeHistoryRepository({ path: path.join(dir, "history.db") });
+    const room = fakeRoom(canvasWithNode("video"));
+    const service = new NodeHistoryApplicationService({ repository, resolveRoom: async () => room });
+    const failure = await service.registerTaskFailure({
+      canvasId: CANVAS, nodeId: "node-1", runId: "run-bad", kind: "video", outcome: "failed",
+      message: "provider 超时", createdAt: NOW, inputSummary: "海边日落"
+    });
+    const entry = await repository.get(CANVAS, "node-1", failure.entryId);
+    expect(entry?.outcome).toBe("failed");
+    const page = await service.list({ canvasId: CANVAS, nodeId: "node-1" });
+    expect(page.items[0]).toMatchObject({ outcome: "failed", recoverable: false, current: false });
+    const summary = await service.listCanvas({ canvasId: CANVAS, summary: true, summaryNodeId: "node-1" });
+    expect(summary.items[0]).toMatchObject({ outcome: "failed", preview: { kind: "failure", message: "provider 超时" } });
+    repository.close();
+  });
 });
 
 /** 构造一条可直接入库的画布历史条目（画布级查询测试用）。 */

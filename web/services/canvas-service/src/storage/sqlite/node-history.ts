@@ -412,6 +412,7 @@ export class SqliteNodeHistoryRepository implements NodeHistoryRepository {
 }
 
 function rowToEntry(row: Row): NodeGenerationHistoryEntry {
+  const payload = JSON.parse(row.payload_json) as NodeGenerationHistoryEntry["payload"];
   return {
     version: "woohaa-node-generation-history-v1",
     entryId: row.entry_id,
@@ -419,12 +420,15 @@ function rowToEntry(row: Row): NodeGenerationHistoryEntry {
     nodeId: row.node_id,
     kind: row.kind as NodeGenerationHistoryEntry["kind"],
     createdAt: row.created_at,
+    // outcome 不在独立列中：失败归档的权威 outcome 只存在于 failure payload。缺失会把
+    // 失败/取消记录读成 `succeeded`，历史条变绿且无法切出可看记录。
+    ...(payload.kind === "failure" ? { outcome: payload.outcome } : {}),
     sourceIdentity: row.source_identity,
     currentIdentity: row.current_identity,
     recoverable: row.recoverable === 1,
     previewable: row.previewable === 1,
     source: JSON.parse(row.source_json) as NodeGenerationHistoryEntry["source"],
-    payload: JSON.parse(row.payload_json) as NodeGenerationHistoryEntry["payload"]
+    payload
   };
 }
 

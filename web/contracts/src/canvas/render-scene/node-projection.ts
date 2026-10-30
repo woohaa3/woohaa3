@@ -8,12 +8,25 @@
 import type { CanvasNodeData, StoredAsset } from "../domain/index.js";
 import type { BevyModelPlacement } from "./wire-model.js";
 
+const FAILURE_BODY_LABELS = {
+  failed: "失败",
+  cancelled: "已取消",
+  interrupted: "已中断",
+  partial: "部分成功"
+} as const;
+
 /**
  * 正文摘要（不含作品名称，名称由 `title` 单独承载）。文本结果只读就绪文本资产；缺失/未就绪的
  * `outputAssetId` **不回落** prompt。
  */
 export function readBody(type: string, data: CanvasNodeData | undefined, assets: Map<string, StoredAsset>): string {
   if (!data) return "";
+  // 浏览器本地历史预览选中失败/取消归档时，卡片正文显示安全原因，而不是上一个成功输出。
+  const failure = data.historyPreviewFailure;
+  if (failure && typeof failure.message === "string" && failure.message.trim() !== "") {
+    const label = FAILURE_BODY_LABELS[failure.outcome] ?? FAILURE_BODY_LABELS.failed;
+    return truncate(`${label}：${failure.message}`, 240);
+  }
   const outputId = typeof data.outputAssetId === "string" ? data.outputAssetId : "";
   if (outputId !== "") {
     const asset = assets.get(outputId);

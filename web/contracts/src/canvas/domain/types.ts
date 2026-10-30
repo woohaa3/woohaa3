@@ -62,6 +62,16 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
   durationSeconds?: number;
   mediaContent?: import("../media-content.js").MediaContentRef;
   outputAssetId?: string;
+  /**
+   * 浏览器本地历史预览的失败信息。
+   *
+   * 只在 node-history 的 `ExecutionPreview` 渲染投影中写入：选中失败/取消归档时，卡片正文
+   * 用它替代上一个成功输出显示安全原因。**不进入** Y.Doc、ServerCanvas 或任何权威写入。
+   */
+  historyPreviewFailure?: {
+    outcome: "failed" | "cancelled" | "interrupted" | "partial";
+    message: string;
+  };
   /** 视频结果的可选海报资产引用（稳定 asset ID）。 */
   posterAssetId?: string;
   resourceKind?: string;
