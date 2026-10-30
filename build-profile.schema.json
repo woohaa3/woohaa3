@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://woohaa.local/schemas/build-profile.schema.json",
+  "title": "Woohaa build profile",
+  "description": "构建期配置画像：私有仓提供值与 build-profile.json，公开仓 loader（client/scripts/lib/build-profile.mjs）校验并消费。禁止承载密钥。定义见 docs/design/build-profile.md。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "profileId"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": 1,
+      "description": "结构版本；不匹配时 loader 直接失败。"
+    },
+    "profileId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$",
+      "description": "构建日志与产物标注用的画像标识。"
+    },
+    "publicBucket": {
+      "description": "派生 __WOOHAA3_PUBLIC_BUCKET__；三者都必需。",
+      "$ref": "#/$defs/publicBucket"
+    },
+    "desktop": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "update": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "publicKeys"
+          ],
+          "properties": {
+            "publicKeys": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/base64"
+              },
+              "description": "更新签名公钥；轮换期允许多个并存，顺序即优先级。"
+            }
+          },
+          "$comment": "两个字段都必需：没有公钥的更新源等于没有信任根。",
+          "description": "更新信任根；地址由 cdn.updatePath 派生，不重复存一份 URL。"
+        },
+        "allowUnconfiguredUpdate": {
+          "type": "boolean",
+          "default": false,
+          "description": "为 true 时允许 desktop:bundle 不带更新源打包，产物标注 updater: unconfigured。"
+        }
+      }
+    },
+    "dev": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remoteServerUrl": {
+          "$ref": "#/$defs/devUrl"
+        }
+      }
+    },
+    "extensionTrust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "officialKeys"
+      ],
+      "properties": {
+        "officialKeys": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "keyId",
+              "publicKey"
+            ],
+            "properties": {
+              "keyId": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{16}$",
+                "$comment": "必须等于 sha256(SPKI DER) 的前 16 个 hex 字符；schema 无法表达该关系，由 loader 校验。"
+              },
+              "publicKey": {
+                "$ref": "#/$defs/ed25519Spki"
+              }
+            }
+          },
+          "description": "官方发布公钥；覆盖源码内 official-trust.ts 的缺省信任根。"
+        }
+      }
+    },
+    "frontendBuild": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._+/-]*$"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]*$"
+        }
+      },
+      "description": "仅作覆盖；缺省按 git 现场取值。"
+    },
+    "cdn": {
+      "description": "runtime 与更新的共同基址：同一个桶/CDN，两个前缀分开。改动域名只改一处。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseUrl",
+        "runtimePath",
+        "updatePath"
+      ],
+      "properties": {
+        "baseUrl": {
+          "type": "string",
+          "pattern": "^https://[^/@\\s]+/([^\\s]*/)?$",
+          "$comment": "必须以 / 结尾，避免拼接时出现双斜杠或缺斜杠。"
+        },
+        "runtimePath": {
+          "type": "string",
+          "pattern": "^[^/][^\\s]*/$",
+          "$comment": "相对 baseUrl，例如 runtimes/。"
+        },
+        "updatePath": {
+          "type": "string",
+          "pattern": "^[^/][^\\s]*\\{platformKey\\}[^\\s]*$",
+          "$comment": "相对 baseUrl，必须含 {platformKey}；按平台替换后拼成完整 feed URL。"
+        }
+      }
+    },
+    "extensions": {
+      "description": "扩展的发布默认启停。分两套（契约禁止混用）：browser-local 用 defaultEnabled（写 release catalog metadata），站点级用 siteDefaultEnabled（写打包内 extension.json）。",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultEnabled": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "extensionId → 是否默认启用。发布装配时写入 release catalog 的 metadata。"
+        },
+        "siteDefaultEnabled": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "站点级扩展首次安装的启停；发布装配时改写打包内 extension.json 的 site.defaultEnabled。"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "httpsUrl": {
+      "type": "string",
+      "pattern": "^https://[^/@\\s]+(/[^\\s]*)?$",
+      "$comment": "强制 https，且拒绝 userinfo（user:pass@）。"
+    },
+    "devUrl": {
+      "type": "string",
+      "pattern": "^https?://[^/@\\s]+(/[^\\s]*)?$",
+      "$comment": "仅 dev.remoteServerUrl 允许 http。"
+    },
+    "base64": {
+      "type": "string",
+      "minLength": 16,
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+    },
+    "ed25519Spki": {
+      "type": "string",
+      "pattern": "^MCowBQYDK2Vw[A-Za-z0-9+/]*={0,2}$",
+      "$comment": "Ed25519 SPKI DER 的 base64（DER 前缀 MCowBQYDK2Vw）。"
+    },
+    "publicBucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bucketName",
+        "bucketUrl",
+        "prefix"
+      ],
+      "properties": {
+        "bucketName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bucketUrl": {
+          "$ref": "#/$defs/httpsUrl"
+        },
+        "prefix": {
+          "type": "string",
+          "pattern": "^[^/][^\\s]*$"
+        }
+      }
+    }
+  }
+}

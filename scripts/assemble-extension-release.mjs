@@ -27,6 +27,8 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { browserExtensions, scanExtensions } from "./lib/extension-scan.mjs";
+import { loadBuildProfile } from "./lib/build-profile.mjs";
+import { applyExtensionDefaults } from "./lib/extension-release-defaults.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -233,6 +235,18 @@ async function main() {
     });
   }
 
+  // 发版期的内置扩展启停：profile 的 extensions.defaultEnabled 覆盖 artifact metadata。
+  // 只改「首次安装的默认值」；运行期仍由站点控制面的 desiredEnabled 优先。
+  const buildProfile = loadBuildProfile({ repoRoot: path.dirname(REPO_ROOT), env: process.env });
+  if (!buildProfile.ok) {
+    const detail = buildProfile.errors.map((error) => `  ${error.path}: ${error.message}`).join("\n");
+    throw new Error(`build profile 校验失败（${buildProfile.path ?? "未知路径"}）：\n${detail}`);
+  }
+  const appliedDefaults = applyExtensionDefaults(entries, buildProfile.resolved.extensionDefaults, {
+    allowMissing,
+    onSkip: (extensionId, available) => process.stderr.write(`[assemble] 跳过未发布的扩展启停：${extensionId}（可用：${available}）\n`)
+  });
+
   // releaseId：基于排序后的 canonical entries 计算。
   const canonicalEntries = [...entries].sort((a, b) => (a.metadata.extensionId < b.metadata.extensionId ? -1 : 1));
   const catalog = {
@@ -262,6 +276,7 @@ async function main() {
         releaseId,
         hostDist: path.relative(REPO_ROOT, hostDist),
         entries: entries.map((entry) => entry.metadata.extensionId),
+        extensionDefaults: appliedDefaults,
         missing,
         catalog: path.relative(REPO_ROOT, catalogPath)
       },

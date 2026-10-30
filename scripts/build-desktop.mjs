@@ -46,6 +46,7 @@ import {
   tauriFrontendDist,
   validateIconSource
 } from "./lib/desktop-release.mjs";
+import { loadBuildProfile, updateEndpointFor, updaterPlatformKey } from "./lib/build-profile.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -261,12 +262,24 @@ async function runBuild(options) {
     frontendDist: options.frontend ? tauriFrontendDist(frontendDist, desktopDir) : null,
     defaultsPath
   });
+  // 更新源与信任根来自 build profile；env 只在 loader 内作为加载期覆盖。
+  const buildProfile = loadBuildProfile({ repoRoot: path.dirname(root), env: process.env });
+  if (!buildProfile.ok) {
+    const detail = buildProfile.errors.map((error) => `  ${error.path}: ${error.message}`).join("\n");
+    throw new Error(`build profile 校验失败（${buildProfile.path ?? "未知路径"}）：\n${detail}`);
+  }
+  const platformKey = updaterPlatformKey({ platform, arch });
+  const updateEndpoint = updateEndpointFor(buildProfile.resolved, platformKey) || null;
+  const updatePublicKey = buildProfile.resolved.updatePublicKeys[0] ?? null;
+  if (!options.dryRun && !options.debug && !options.uiUrl && !buildProfile.resolved.allowUnconfiguredUpdate && (!updateEndpoint || !updatePublicKey)) {
+    throw new Error("缺少桌面更新源或公钥：在 build-profile.json 配 cdn.updatePath 与 desktop.update.publicKeys，或设 desktop.allowUnconfiguredUpdate=true 明确承认不带自动更新。");
+  }
   let hostPackage = null;
   if (!options.dryRun && !options.uiUrl) {
     buildNativeTools();
     const prepared = await prepareDesktopHost({ frontend: frontendDist, build: resolvedReleaseId, runtimeReleaseVersion: options.debug ? undefined : (options.version ?? config.version), ...(process.env.WOOHAA_DESKTOP_HOST_STAGING ? { output: path.resolve(process.env.WOOHAA_DESKTOP_HOST_STAGING) } : {}) });
-    const endpoint = process.env.WOOHAA_DESKTOP_UPDATE_ENDPOINT ?? null;
-    const publicKey = process.env.WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY ?? null;
+    const endpoint = updateEndpoint;
+    const publicKey = updatePublicKey;
     const standalone = standaloneBundleConfig({ ...prepared, endpoint, publicKey });
     const startupFrontend = prepareStartupFrontend(frontendDist, path.join(path.dirname(defaultsPath), "startup-frontend"));
     override.build = { ...override.build, frontendDist: tauriFrontendDist(startupFrontend, desktopDir) };

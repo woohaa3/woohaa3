@@ -33,7 +33,7 @@ export function checkPublicBoundary(root,{files=sourceFiles(root)}={}){
   const content=bytes.toString('utf8');
   // The policy definition itself contains the patterns it rejects elsewhere.
   if(file!=='scripts/check-public-boundary.mjs'){
-   if(/https?:\/\/[^\s'"<>]*(?:\.woa\.com|mirrors\.tencent\.com|zaohuacdn\.com|\.forgeax\.com|\.internal)(?=[:/\s'"<>]|$)/i.test(content))errors.push(`${file}: private deployment endpoint`);
+   if(/https?:\/\/[^\s'"<>]*(?:\.woa\.com|mirrors\.tencent\.com|zaohuacdn\.com|woohaa3-\d+\.cos\.[a-z0-9-]+\.myqcloud\.com|\.forgeax\.com|\.internal)(?=[:/\s'"<>]|$)/i.test(content))errors.push(`${file}: private deployment endpoint`);
    if(/x-tai-identity|x-rio-seq|x-ext-data|SmartGate|太湖/.test(content))errors.push(`${file}: corporate integration details`);
    if(/asset_canvas_dzs|infinspire-(?:api|contracts)|InfinspireCanvas|resolveInfinspire/.test(content))errors.push(`${file}: private source reference`);
    if(/-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/.test(content))errors.push(`${file}: private key material`);
