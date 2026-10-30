@@ -345,6 +345,9 @@ describe("buildCanvasRenderScene", () => {
       selection: { nodes: ["n1"], edge: "e1" }
     });
     expect(scene.version).toBe(CANVAS_RENDER_SCENE_VERSION);
+    // 文档身份必须随协议下发：渲染器据此重置「同文档代数单调」基线（v33）。
+    expect(scene.canvasId).toBe("c1");
+    expect(scene.revision).toBe(3);
     expect(scene.nodes).toHaveLength(2);
     expect(scene.nodes[0]).toMatchObject({ id: "n1", type: "image" });
     expect(scene.edges[0]).toMatchObject({ id: "e1", label: "输入" });
@@ -998,7 +1001,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v32");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v33");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));

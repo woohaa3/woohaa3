@@ -674,6 +674,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
 
   return {
     version: CANVAS_RENDER_SCENE_VERSION,
+    canvasId: canvas.id,
     revision: canvas.revision,
     nodes,
     edges,

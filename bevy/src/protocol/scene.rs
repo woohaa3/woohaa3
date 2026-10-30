@@ -751,6 +751,15 @@ pub(crate) struct Scene {
     /// （change: optimize-model-scene-snapshot-hot-path）。
     #[serde(default)]
     pub(crate) version: String,
+    /// 文档身份（画布 id，v33 起由客户端必传）。
+    ///
+    /// `revision` 是**单个文档**的版本号，跨画布没有可比性：投影的单调保护必须按身份重置，
+    /// 否则切到 revision 更小的画布时整帧都会被判「代数倒退」而丢弃
+    /// （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs 的投影保护）。
+    ///
+    /// 缺失或为空表示来源未提供身份：此时维持进程内单调语义（旧客户端/测试）。
+    #[serde(default, rename = "canvasId")]
+    pub(crate) canvas_id: String,
     pub(crate) nodes: Vec<GraphNode>,
     #[serde(default, rename = "modelFocusContext")]
     pub(crate) model_focus_context: Vec<FocusContextNode>,

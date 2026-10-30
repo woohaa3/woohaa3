@@ -77,7 +77,10 @@ export * from "./wire-shot-preview.js";
 // v32: group presentations may carry the trusted transparent overview cache declaration;
 //      older renderers would ignore it and keep drawing the whole subject every frame,
 //      so reject mixed combinations instead of silently dropping the capability.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v32" as const;
+// v33: scenes carry the document identity (`canvasId`). `revision` is per-document, so a renderer
+//      must reset its monotonic revision baseline when the identity changes; older renderers
+//      would reject every scene of a canvas whose revision is lower than the previous one's.
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v33" as const;
 
 /** Group-owned scene primitives. Kept separate from the legacy composite wire during migration. */
 export const FILM_SET_GROUP_RENDER_SCHEMA_VERSION = "woohaa-film-set-group-render-v1" as const;
@@ -487,6 +490,14 @@ export type GhostRenderNode = {
 /** 与 Rust `Scene` 对应；这是发给 Bevy `set_scene` 的唯一快照。 */
 export type CanvasRenderScene = {
   version: typeof CANVAS_RENDER_SCENE_VERSION;
+  /**
+   * 文档身份（画布 id）。
+   *
+   * `revision` 是**每张画布各自**的版本号，跨画布没有可比性：渲染器必须按身份重置单调基线，
+   * 否则「切到 revision 更小的画布」会被误判为代数倒退而整帧丢弃
+   * （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs 的投影保护）。
+   */
+  canvasId: string;
   revision: number;
   nodes: BevyRenderNode[];
   edges: BevyRenderEdge[];

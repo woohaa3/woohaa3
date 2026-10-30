@@ -119,6 +119,10 @@ pub(crate) fn overlay(scene: &Scene) -> Cow<'_, Scene> {
         return Cow::Owned(overlay);
     }
     let mut overlay = Scene::default();
+    // 聚焦投影仍是同一份文档快照：身份与代数必须保留，否则投影的「同文档代数单调」
+    // 保护会把聚焦帧判成倒退（revision 归零）。
+    overlay.canvas_id = scene.canvas_id.clone();
+    overlay.revision = scene.revision;
     overlay.theme = scene.theme.clone();
     overlay.surface = scene.surface.clone();
     overlay.viewport.zoom = 1.;
