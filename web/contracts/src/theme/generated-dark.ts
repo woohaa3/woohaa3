@@ -65,6 +65,10 @@ export const APP_THEME_DARK_TOKENS = {
   canvasProgressFill: "#2fb99b",
   canvasCloseIcon: "#93a69b",
   canvasBodyText: "#c3d2c9",
+  canvasStickySurface: "#4a4220",
+  canvasStickyBorder: "#5d5228",
+  canvasStickyText: "#f3eac6",
+  canvasStickyShadow: "#00000040",
   // nodeKind
   nodeTextForeground: "#7fb9e8",
   nodeTextTint: "#162b3b",
@@ -97,11 +101,11 @@ export const APP_THEME_DARK_TOKENS = {
 } as const satisfies AppThemeTokens;
 
 export const APP_THEME_DARK_ID = "dark";
-export const APP_THEME_DARK_FINGERPRINT = "aefa774c482fd851";
+export const APP_THEME_DARK_FINGERPRINT = "918bfe5d7ce5b151";
 
 /** 暗色 preset（生成物）；结构与 `app-theme.dark.json` 一致。 */
 export const APP_THEME_DARK_PRESET = {
   id: APP_THEME_DARK_ID,
-  version: "woohaa-app-theme-v2" as const,
+  version: "woohaa-app-theme-v3" as const,
   tokens: APP_THEME_DARK_TOKENS
 } as const;

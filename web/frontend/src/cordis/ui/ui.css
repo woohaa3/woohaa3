@@ -3346,3 +3346,65 @@
 .authoring-generate-placeholder__prompt { height: 104px; }
 .authoring-generate-placeholder__footer > span { width: 64px; height: 36px; }
 .authoring-generate-placeholder__footer > span:last-child { margin-left: auto; }
+
+/*
+ * 便签正文编辑浮层。
+ * 与 `.node-rename` 同一套外观（描边 + 面板底），因为它们是同一类"就地改一点点内容"
+ * 的浮层；差别只有：多行输入、以及贴在便签旁边而不是屏幕正中。
+ */
+.sticky-note-editor {
+	position: fixed;
+	z-index: 40;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: min(360px, calc(100vw - 40px));
+	padding: 14px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 12px;
+	background: var(--app-web-panel);
+	box-shadow: 0 16px 40px var(--app-web-shadow);
+}
+
+.sticky-note-editor__label {
+	color: var(--app-web-text-muted);
+	font-size: 12px;
+}
+
+.sticky-note-editor__input {
+	min-height: 120px;
+	padding: 8px 10px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 8px;
+	background: var(--app-web-surface);
+	color: var(--app-web-text-primary);
+	font-size: 14px;
+	font-family: inherit;
+	line-height: 1.5;
+	resize: vertical;
+}
+
+.sticky-note-editor__input:focus {
+	outline: none;
+	border-color: var(--app-interaction-accent);
+	box-shadow: 0 0 0 2px var(--app-interaction-accent-soft);
+}
+
+.sticky-note-editor__error {
+	margin: 0;
+	color: var(--app-status-danger);
+	font-size: 12px;
+}
+
+.sticky-note-editor__actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.sticky-note-editor__hint {
+	margin-right: auto;
+	color: var(--app-web-text-muted);
+	font-size: 12px;
+}

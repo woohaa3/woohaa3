@@ -195,6 +195,7 @@ pub(crate) fn draw_group_selection(
     let color = theme.token_u32("canvasNodeBorderSelected");
     let path = super::group_outline::path(node);
     if is_running(node) {
+        // 运行中：实线描边（沿轮廓流动的效果由 `group_motion` 叠加）。
         super::group_outline::stroke(
             geometry,
             &path,
@@ -205,15 +206,9 @@ pub(crate) fn draw_group_selection(
             color,
         );
     } else {
-        super::group_outline::stroke(
-            geometry,
-            &path,
-            0.,
-            super::group_outline::length(&path),
-            2.,
-            z + 0.001,
-            color,
-        );
+        // 空闲选中：虚线描边。两态必须画出不同的几何 —— 都画实线的话，
+        // "运行中"在选中态下就没有任何视觉区分（这里两个分支曾经逐字节相同，踩过）。
+        super::dash::dashed_polygon(geometry, &path, 2., z + 0.001, color);
     }
     if node.resizable {
         let corner = Vec2::new(node.x + node.width - 4., node.y + node.height - 4.);

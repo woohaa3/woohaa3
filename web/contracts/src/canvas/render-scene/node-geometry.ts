@@ -11,7 +11,7 @@ import { estimateNodeActionTextWidth } from "./node-action-toolbar.js";
 export { effectiveCanvasNodeSize, minimumNodeSizeFor } from "../node-dimensions.js";
 
 /** 参考实现的 palette kind（决定 Bevy 中的配色与图标）。 */
-export type BevyNodeKind = "text" | "image" | "model" | "audio" | "video" | "node" | "group";
+export type BevyNodeKind = "text" | "image" | "model" | "audio" | "video" | "sticky" | "node" | "group";
 
 /** Static model3d cards own a local orbit preview; animation3d remains a film set.
  * 已下线的 generate/edit/shot 不在此列，保持未知节点行为（change: 2026-10-08-integrate-render-performance-and-model-preview）。 */
@@ -32,13 +32,15 @@ export function bevyKindForNodeType(type: string): BevyNodeKind {
     case COMPOSITE_ASSET_NODE_TYPE: return "model";
     case "audio": return "audio";
     case "video": return "video";
+    case "sticky-note": return "sticky";
     case "group": return "group";
     default: return "node";
   }
 }
 
-/** 参考 `nodeSize`：富内容节点 248x232，其余 196x64；group 尺寸由文档给出。 */
+/** 参考 `nodeSize`：富内容节点 248x232，便签 220x180，其余 196x64；group 尺寸由文档给出。 */
 export function bevyNodeSize(kind: BevyNodeKind): { width: number; height: number } {
+  if (kind === "sticky") return { width: 220, height: 180 };
   return kind === "text" || kind === "image" || kind === "audio" || kind === "video"
     ? { width: 248, height: 232 }
     : { width: 196, height: 64 };
@@ -57,14 +59,14 @@ export function isModelNodeType(type: string): boolean {
   return (MODEL_NODE_TYPES as readonly string[]).includes(type);
 }
 
-/** 具备输出端点（可作为连线起点）的视觉种类；group 的聚合输出单独处理。 */
+/** 具备输出端点（可作为连线起点）的视觉种类；group 的聚合输出单独处理。便签只是批注，不连线。 */
 export function bevyKindHasOutput(kind: BevyNodeKind): boolean {
-  return kind !== "group";
+  return kind !== "group" && kind !== "sticky";
 }
 
-/** 具备输入端点（可作为连线终点）的视觉种类；group 没有输入端点。 */
+/** 具备输入端点（可作为连线终点）的视觉种类；group 与便签都没有输入端点。 */
 export function bevyKindHasInput(kind: BevyNodeKind): boolean {
-  return kind !== "group";
+  return kind !== "group" && kind !== "sticky";
 }
 
 

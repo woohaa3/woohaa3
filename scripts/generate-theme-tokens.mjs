@@ -33,7 +33,7 @@ const OUT_TS_DARK = join(root, "web", "contracts", "src", "theme", "generated-da
 const OUT_CSS = join(root, "web", "ui", "src", "styles", "generated-theme.css");
 const OUT_RS = join(root, "bevy", "src", "theme_generated.rs");
 
-const SCHEMA_VERSION = "woohaa-app-theme-v2";
+const SCHEMA_VERSION = "woohaa-app-theme-v3";
 const MAX_ID_LENGTH = 80;
 const MAX_JSON_BYTES = 16 * 1024;
 const HEX_PATTERN = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
@@ -61,7 +61,8 @@ const TOKEN_GROUPS = {
     "canvasEdgeDefault", "canvasEdgeSelected",
     "canvasEdgeDraft", "canvasEdgeLabelBackground", "canvasEdgeLabelText", "canvasPortDefault",
     "canvasPortFill", "canvasResizeHandle", "canvasResizeHandleStripe", "canvasProgressTrack",
-    "canvasProgressFill", "canvasCloseIcon", "canvasBodyText"
+    "canvasProgressFill", "canvasCloseIcon", "canvasBodyText",
+    "canvasStickySurface", "canvasStickyBorder", "canvasStickyText", "canvasStickyShadow"
   ],
   nodeKind: [
     "nodeTextForeground", "nodeTextTint", "nodeImageForeground", "nodeImageTint",

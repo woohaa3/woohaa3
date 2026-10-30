@@ -80,6 +80,12 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
     actions: nodeActionContributions, connections: { endpoints: context => isPureModelNodeType(context.node.type, context.data as Record<string, unknown>) ? 'none' : 'ordinary' },
     resize: { ...rectangularNodeResize, mode: 'scope', minimum: context => minimumNodeSizeFor(context.node.type) }
   });
+  // 便签：纯批注卡片，不连线、不执行、不可聚焦。尺寸与 Bevy 共用 `bevyNodeSize`。
+  entries.set('sticky-note', {
+    appearance: { palette: 'sticky', defaultSize: { width: 220, height: 180 }, cardLabel: '便签' },
+    connections: { endpoints: () => 'none' },
+    resize: { mode: 'rect', minimum: () => ({ width: 140, height: 96 }) }
+  });
   entries.set('group', {
     appearance: { palette: 'group', defaultSize: compact },
     container: { project: ({ data }, counts) => ({ title: typeof data?.title === 'string' ? data.title : '', ...counts }) },

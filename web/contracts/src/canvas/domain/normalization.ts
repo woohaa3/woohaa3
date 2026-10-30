@@ -12,6 +12,7 @@ import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeFilmSetContent, FILM_SET_CONTENT_FIELD } from "../film-set-content.js";
 import { isPureModelNodeType } from "./core/input-role.js";
 import { FILM_SET_SHOT_PREVIEW_NODE_TYPE, isShotPreviewNode } from "./core/shot-preview-node.js";
+import { STICKY_NOTE_NODE_TYPE } from "./core/sticky-note-node.js";
 import { isSupportedShotReferenceEdgeData, resolveShotReferenceSource, shotReferenceRoleForKind, SHOT_IMAGE_REFERENCE_EDGE_KIND, SHOT_REFERENCE_EDGE_KIND } from "./core/shot-reference.js";
 import { shotReferenceDecision } from "./core/connection-rules.js";
 import { isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "./core/composite-asset-identity.js";
@@ -46,8 +47,12 @@ export type NormalizeCanvasOptions = {
  * 前端的 `CanvasNodeKind` 用同一集合。这些是**应用节点**，不属于「未知类型」，因此规范化
  * 必须保留它们。已下线的旧类型（`generate`/`edit`/`shot`/`start`）不再兼容，会被收敛为
  * `custom` 并剪除 nodeData（change: 2026-10-07-remove-legacy-node-type-compat）。
+ *
+ * **新增节点类型必须同步加到这里**，否则会被当成未知类型收敛为 `custom`，
+ * 连带 nodeData 一起被剪掉（便签正是踩了这个：类型变 `custom`、正文 `note` 丢失，
+ * 画出来就是一张没有内容的普通卡片）。
  */
-export const WOOHAA3_APP_NODE_TYPES = ["text", "image", "video", "audio", "model3d", "composite-asset", FILM_SET_SHOT_PREVIEW_NODE_TYPE] as const;
+export const WOOHAA3_APP_NODE_TYPES = ["text", "image", "video", "audio", "model3d", "composite-asset", FILM_SET_SHOT_PREVIEW_NODE_TYPE, STICKY_NOTE_NODE_TYPE] as const;
 
 export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOptions): ServerCanvas {
   observeContentResolver(options?.content);

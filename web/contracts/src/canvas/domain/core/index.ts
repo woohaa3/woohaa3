@@ -26,6 +26,7 @@ export * from "./input-role-contract";
 export * from "./input-slots";
 export * from "./mention-token";
 export * from "./shot-reference";
+export * from "./sticky-note-node";
 
 export * from "./node-factory";
 export * from "./node-removal";

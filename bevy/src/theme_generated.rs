@@ -5,9 +5,9 @@
 //! 不再作为 scene 缺失 theme 的回退（scene 必须携带完整合法 theme）。
 //! 任何 token 与 canonical preset 不一致都会让 `--check` 失败。
 
-pub(crate) const APP_THEME_SCHEMA_VERSION: &str = "woohaa-app-theme-v2";
+pub(crate) const APP_THEME_SCHEMA_VERSION: &str = "woohaa-app-theme-v3";
 pub(crate) const APP_THEME_DEFAULT_ID: &str = "default";
-pub(crate) const APP_THEME_DEFAULT_FINGERPRINT: &str = "3253bfff9ca766a2";
+pub(crate) const APP_THEME_DEFAULT_FINGERPRINT: &str = "d88ec5c5e3727c6f";
 
 /// `(token 名, 规范 hex)`；顺序与 canonical preset 一致。
 pub(crate) const APP_THEME_DEFAULT_TOKENS: &[(&str, &str)] = &[
@@ -68,6 +68,10 @@ pub(crate) const APP_THEME_DEFAULT_TOKENS: &[(&str, &str)] = &[
     ("canvasProgressFill", "#16846c"),
     ("canvasCloseIcon", "#8a9a91"),
     ("canvasBodyText", "#526b65"),
+    ("canvasStickySurface", "#fdf6c4"),
+    ("canvasStickyBorder", "#f6ecb0"),
+    ("canvasStickyText", "#3f3611"),
+    ("canvasStickyShadow", "#00000018"),
     ("nodeTextForeground", "#3b7299"),
     ("nodeTextTint", "#eaf3fa"),
     ("nodeImageForeground", "#a45378"),

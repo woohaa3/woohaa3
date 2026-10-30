@@ -9,9 +9,9 @@ mod third_party;
 use crate::app::{CurrentScene, FrameFlags};
 use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole, CanvasNodeId};
 use crate::canvas2d::{
-    begin_selection_outlines, produce_card_geometry, produce_card_hover, produce_card_selection,
-    produce_container_geometry, produce_edges, produce_film_set_selection, produce_group_selection,
-    sync_canvas_labels, sync_canvas_overlay,
+    begin_selection_outlines, card_meta, produce_card_geometry, produce_card_hover,
+    produce_card_selection, produce_container_geometry, produce_edges, produce_film_set_selection,
+    produce_group_selection, sync_canvas_labels, sync_canvas_overlay,
 };
 use crate::canvas_ecs::{
     flush_selection_outlines, project_canvas_nodes, sync_group_panels, CanvasProjectionState,
@@ -145,6 +145,20 @@ fn labels_with_role(world: &mut World, role: CanvasLabelRole) -> Vec<Entity> {
         .iter(world)
         .filter(|(_, label)| label.role == role)
         .map(|(entity, _)| entity)
+        .collect()
+}
+
+/// 驱动卡片上方名称/尺寸行的 producer（它不进卡片块缓存，需要单独运行）。
+fn run_card_meta(world: &mut World) {
+    world.run_system_once(card_meta::produce_card_meta).unwrap();
+    world.run_system_once(sync_canvas_labels).unwrap();
+}
+
+/// 当前卡片上方名称/尺寸行的文案。
+fn card_meta_texts(world: &mut World) -> Vec<String> {
+    labels_with_role(world, CanvasLabelRole::CardMeta)
+        .into_iter()
+        .filter_map(|label| world.get::<Text2d>(label).map(|text| text.0.clone()))
         .collect()
 }
 
@@ -326,8 +340,11 @@ fn block_partition_keeps_exact_vertex_positions_colors_and_document_z() {
 #[test]
 fn media_focus_keeps_background_cards_and_restores_current_card() {
     let mut world = world();
+    // 名称与尺寸已移出卡片（只在选中/悬停时画在卡片上方），所以聚焦前后都要额外驱动
+    // `produce_card_meta`，才能观察到背景卡片的名称没被聚焦态吞掉。
     world.resource_mut::<CurrentScene>().0.selection.nodes = vec!["0".into()];
     render(&mut world);
+    world.run_system_once(card_meta::produce_card_meta).unwrap();
     let initial = handles(&world);
     world.resource_mut::<CurrentScene>().0.image_focus = Some(
         serde_json::from_value(
@@ -340,14 +357,19 @@ fn media_focus_keeps_background_cards_and_restores_current_card() {
     assert_eq!(handles(&world).len(), initial.len());
     assert_eq!(changed(&initial, &handles(&world)), [0]);
     assert!(!world.resource::<Assets<Mesh>>().contains(initial[0]));
-    assert!(!has_labels(&mut world, "0"));
-    assert!(has_labels(&mut world, "17"));
+    // 名称与尺寸画在卡片外侧（仅选中/悬停时），需要单独驱动该 producer 才能观察到。
+    world.resource_mut::<CurrentScene>().0.selection.nodes = vec!["17".into()];
+    // 选择投影在 ECS 组件上，改完 scene 要先投影一帧才能被 producer 读到。
+    render(&mut world);
+    run_card_meta(&mut world);
+    assert!(card_meta_texts(&mut world).iter().any(|text| text.starts_with("Card")));
     world.resource_mut::<CurrentScene>().0.nodes[17].title = "Remote change while focused".into();
     assert_eq!(render(&mut world), 1);
     world.resource_mut::<CurrentScene>().0.image_focus = None;
     assert_eq!(render(&mut world), 1);
-    let label = labels_of(&mut world, "17")[0];
-    assert!(world.get::<Text2d>(label).unwrap().0.starts_with("Remote"));
+    run_card_meta(&mut world);
+    let texts = card_meta_texts(&mut world);
+    assert!(texts.iter().any(|text| text.starts_with("Remote")), "背景卡片名称应跟随内容更新，实际 {texts:?}");
 }
 
 /// 纯视口跨档只更新文字呈现：不重建静态 2D mesh（change: 2026-10-22-improve-canvas-text-clarity，

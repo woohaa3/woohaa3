@@ -108,19 +108,19 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
     let baseline_fingerprint = geometry_fingerprint(&mut world);
 
     // 任务 1.1 记录的基线（33 张 text 卡片夹具）：
-    //   节点实体 33、标签实体 231、卡片块 3、容器块 3、mesh 资产 6、image 资产 0。
+    //   节点实体 33、标签实体 198、卡片块 3、容器块 3、mesh 资产 6、image 资产 0。
     // fingerprint 覆盖所有块引用的顶点位置与颜色。
     //
-    // 2026-10-29 更新指纹：卡片改成「预览在上、名称在下」，上/左/右内边距 16 → 6，
-    // 底部由 16 改为标题行 28（文字与下边框留出间距，无历史圆点时不预留圆点带），标题前不再画种类图标。
-    // 这些都会改变卡片几何，指纹变化是预期的；实体与资产计数未变。
+    // 2026-10-30 更新：卡片改为「四边等窄边 + 内容铺满」，名称与尺寸移到卡片**外侧上方**
+    // （仅选中/悬停时显示，由 `card_meta` 单独产出，不计入卡片角色）。
+    // 因此卡片角色标签少掉每张卡的标题（33 条），几何内缩量也随之改变，指纹变化是预期的。
     assert_eq!(
         baseline_counts,
-        (33, 231, 3, 3, 0, 3, 0, 6, 0),
+        (33, 198, 3, 3, 0, 3, 0, 6, 0),
         "投影/producer 的实体与资产基线漂移"
     );
     assert_eq!(
-        baseline_fingerprint, 0x08e8_5778_8415_fa3c,
+        baseline_fingerprint, 0xd1e7_8ab4_5809_fa3c,
         "卡片/容器几何指纹不得漂移"
     );
 

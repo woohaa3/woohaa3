@@ -13,7 +13,9 @@
   },
   "woohaa": {
     "build": {
-      "nodePaths": ["../../../../../node_modules"],
+      "nodePaths": [
+        "../../../../../node_modules"
+      ],
       "define": {
         "import.meta.env.DEV": "false",
         "import.meta.env.MODE": "\"production\"",
@@ -29,7 +31,12 @@
         "import.meta.env.VITE_MODELING_TEST_URL": "\"\"",
         "import.meta.env.VITE_TENANT_ID": "\"\""
       },
-      "plugins": ["./build/sixi-plugins.mjs"]
+      "plugins": [
+        "./build/sixi-plugins.mjs"
+      ],
+      "loader": {
+        ".png": "dataurl"
+      }
     }
   }
 }

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { ServerCanvas } from "@woohaa3/contracts";
 import { fitImageCardSize, planImageCardFit } from "./media-card-fit.js";
 
-/** 卡片内容区比例（与 Bevy 布局一致：上左右 6，底部标题行 28）。 */
-const contentRatio = (size: { width: number; height: number }) => (size.width - 12) / (size.height - 34);
+/** 卡片内容区比例（与 Bevy 布局一致：四边各 6 的窄边）。 */
+const contentRatio = (size: { width: number; height: number }) => (size.width - 12) / (size.height - 12);
 
 function canvasWith(node: { id: string; type: string; width?: number; height?: number }): ServerCanvas {
   return {

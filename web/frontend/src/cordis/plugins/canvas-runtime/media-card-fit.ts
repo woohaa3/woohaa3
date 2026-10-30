@@ -5,15 +5,14 @@
  * 若卡片仍是默认尺寸（没被手动拉过），就把卡片改成「内容区与图片同比例、面积与默认内容区相近」
  * 的尺寸。已经被调过的卡片不动，所以只会适配一次。
  *
- * 卡片几何与 Bevy `canvas_query/layout.rs` 保持一致：上、左、右各 `CARD_CONTENT_PAD`，
- * 底部留标题行 `CARD_TITLE_ROW_HEIGHT`（无历史圆点时）。
+ * 卡片几何与 Bevy `canvas_query/layout.rs` 保持一致：四边等宽的窄边 `CARD_CONTENT_PAD`，
+ * 名称与尺寸画在卡片上方外侧，不占卡片内部高度。
  */
 import { bevyNodeSize, DEFAULT_NODE_DIMS, type CanvasCommand, type ServerCanvas } from "@woohaa3/contracts";
 
 const RICH_CONTENT_NODE_SIZE = bevyNodeSize("image");
 
 const CARD_CONTENT_PAD = 6;
-const CARD_TITLE_ROW_HEIGHT = 28;
 /** 宽度低于 196 时 Bevy 会切到紧凑卡片布局，因此下限取它而不是节点最小宽度 180。 */
 const MIN_CARD_WIDTH = 196;
 const MAX_CARD_WIDTH = 360;
@@ -26,13 +25,13 @@ function contentWidthOf(cardWidth: number): number {
   return cardWidth - CARD_CONTENT_PAD * 2;
 }
 
-function cardHeightFor(contentHeight: number): number {
-  return contentHeight + CARD_CONTENT_PAD + CARD_TITLE_ROW_HEIGHT;
+function contentHeightOf(cardHeight: number): number {
+  return cardHeight - CARD_CONTENT_PAD * 2;
 }
 
 /** 默认卡片内容区面积：适配后的卡片保持大致相同的视觉分量。 */
 const TARGET_CONTENT_AREA =
-  contentWidthOf(RICH_CONTENT_NODE_SIZE.width) * (RICH_CONTENT_NODE_SIZE.height - CARD_CONTENT_PAD - CARD_TITLE_ROW_HEIGHT);
+  contentWidthOf(RICH_CONTENT_NODE_SIZE.width) * contentHeightOf(RICH_CONTENT_NODE_SIZE.height);
 
 /** 按图片宽高比算卡片尺寸；图片尺寸非法时返回 null。 */
 export function fitImageCardSize(media: { width: number; height: number }): { width: number; height: number } | null {
@@ -41,11 +40,11 @@ export function fitImageCardSize(media: { width: number; height: number }): { wi
   let contentWidth = Math.sqrt(TARGET_CONTENT_AREA * ratio);
   contentWidth = Math.min(Math.max(contentWidth, contentWidthOf(MIN_CARD_WIDTH)), contentWidthOf(MAX_CARD_WIDTH));
   let contentHeight = contentWidth / ratio;
-  const maxContentHeight = MAX_CARD_HEIGHT - CARD_CONTENT_PAD - CARD_TITLE_ROW_HEIGHT;
+  const maxContentHeight = contentHeightOf(MAX_CARD_HEIGHT);
   if (contentHeight > maxContentHeight) contentHeight = maxContentHeight;
   return {
     width: Math.round(contentWidth + CARD_CONTENT_PAD * 2),
-    height: Math.round(cardHeightFor(contentHeight))
+    height: Math.round(contentHeight + CARD_CONTENT_PAD * 2)
   };
 }
 

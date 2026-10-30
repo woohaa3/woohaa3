@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn content_rect_matches_media_card_insets() {
-        // 与普通卡片同一套边距：上/左/右小边距，底部留标题行与历史圆点。
+        // 与普通卡片同一套边距：四边等宽的窄边，名称/尺寸画在卡片外侧，不占卡片内部。
         let rect = content_rect(10.0, 20.0, 240.0, 167.0);
         assert_eq!(
             rect,
@@ -226,7 +226,7 @@ mod tests {
                 20.0 + crate::canvas_query::layout::CARD_CONTENT_PAD,
                 240.0 - crate::canvas_query::layout::CARD_CONTENT_PAD * 2.0,
                 167.0
-                    - crate::canvas_query::layout::CARD_CONTENT_PAD
+                    - crate::canvas_query::layout::CARD_CONTENT_PAD * 2.0
                     - crate::canvas_query::layout::CARD_FOOTER_HEIGHT,
             )
         );

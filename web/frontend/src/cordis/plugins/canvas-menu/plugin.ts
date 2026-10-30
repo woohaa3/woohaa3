@@ -19,6 +19,9 @@ import {
 } from "../../domain/node-catalog.js";
 import { planGroupNodes, planInsertNode, planUngroupNodes } from "../../../extension-api/command-planner.js";
 import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, partitionManagedNodeDeletion, resolveShotReferenceSource } from "@woohaa3/contracts";
+
+/** 便签的规范节点类型（与 `node-catalog.ts` 的模板 nodeType 一致）。 */
+const STICKY_NOTE_NODE_TYPE = "sticky-note";
 import { shotReferenceTemplateItems } from "./shot-reference-menu.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
@@ -27,6 +30,8 @@ import { definePlugin } from "../../plugin.js";
 import { CANVAS_CONTEXT_MENU_TYPE } from "../canvas-runtime/plugin.js";
 import { nodeRenameStore } from "./rename-store.js";
 import { NodeRenameOverlay } from "./rename-dialog.js";
+import { stickyNoteStore } from "./sticky-note-store.js";
+import { StickyNoteOverlay } from "./sticky-note-dialog.js";
 import {
   GROUP_STRUCTURE_ACTION_IDS,
   GROUP_STRUCTURE_ACTION_LABELS,
@@ -273,6 +278,9 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
         }
         // 拉线创建只列出合法可连接节点（创作工具类节点不作为连线目标）
         // （change: 2026-10-10-add-game-furnace-extension，任务 2.4/2.6）。
+        // 注意这里**只**过滤复合资产：便签虽然也不能连线，但它在空白右键菜单里必须出现，
+        // 所以便签的排除要放到下面的拉线分支里做，不能写在这个共用变量上（写在这里会把
+        // 空白右键的入口一起吃掉 —— 踩过，菜单里根本看不到便签）。
         const baseTemplates = NODE_TEMPLATES.filter((template) => template.nodeType !== COMPOSITE_ASSET_NODE_TYPE);
         // 从拍摄镜头预览拉线：只提供视频生成节点（专用镜头参考，D9 / 任务 8.2）。其余项显式禁用并
         // 给出原因，避免「点击后静默失败」。
@@ -281,11 +289,23 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
           const source = resolveShotReferenceSource(connectFrom.nodeId, canvas?.nodeData[connectFrom.nodeId], id => canvas?.nodeData[id]);
           return shotReferenceTemplateItems(baseTemplates, writable, connectFrom, source?.kind ?? null);
         }
+        // 便签归「创作工具」而不是「基础素材」：它是批注，不是可生成/可连线的素材。
+        // 拉线创建（`connectFrom`）时排除 —— 便签没有端点，作为连线目标会被规则拒绝。
+        const materialTemplates = baseTemplates.filter((template) => template.nodeType !== STICKY_NOTE_NODE_TYPE);
+        const stickyTemplates = connectFrom
+          ? []
+          : baseTemplates.filter((template) => template.nodeType === STICKY_NOTE_NODE_TYPE);
         return [
-          ...baseTemplates.map((template) => ({
+          ...materialTemplates.map((template) => ({
             id: `insert:${template.id}`,
             label: template.label,
             section: CANVAS_MENU_SECTION.basicMaterial,
+            disabled: !writable
+          })),
+          ...stickyTemplates.map((template) => ({
+            id: `insert:${template.id}`,
+            label: template.label,
+            section: CANVAS_MENU_SECTION.creationTools,
             disabled: !writable
           })),
           // 扩展贡献的通用节点模板（change: 2026-10-10-add-game-furnace-extension，任务 2.4）。
@@ -369,6 +389,33 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
     });
     ctx.effect(() => () => offRenameRequest(), "canvas-menu-rename-request");
 
+    // 便签正文浮层。与重命名同一套模式：只读时能看不能存，切换画布/dispose 清空。
+    // 浮层位置在 render 时按便签的当前屏幕矩形解析 —— store 里不存几何，免得拖动后位置过期。
+    const removeStickyNoteOverlay = ctx.slots.register("canvas.overlay", {
+      id: "sticky-note-editor",
+      owner: CANVAS_MENU_PLUGIN_ID,
+      priority: 30,
+      render: () =>
+        StickyNoteOverlay({
+          store: stickyNoteStore,
+          edit: ctx.canvasEdit,
+          writable: ctx.canvasSession.isWritable(),
+          resolveAnchor: resolveStickyNoteAnchor
+        })
+    });
+    ctx.effect(() => () => {
+      removeStickyNoteOverlay();
+      stickyNoteStore.close();
+    }, "canvas-menu-sticky-note-overlay");
+
+    // 双击便签 → 打开正文浮层（事件由 canvas-runtime 转发）。
+    const offStickyNoteRequest = ctx.on("ui.sticky-note.edit-requested", ({ nodeId }) => {
+      const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+      const data = canvas?.nodeData[nodeId] as { note?: string } | undefined;
+      stickyNoteStore.open(nodeId, typeof data?.note === "string" ? data.note : "");
+    });
+    ctx.effect(() => () => offStickyNoteRequest(), "canvas-menu-sticky-note-request");
+
     ctx.effect(() => () => {
       for (const remove of removeGroupStructureActions) remove();
     }, "canvas-menu-group-structure-actions");
@@ -381,6 +428,17 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
       const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
       const data = canvas?.nodeData[nodeId] as { title?: string } | undefined;
       nodeRenameStore.open(nodeId, typeof data?.title === "string" ? data.title : "");
+    }
+
+    /**
+     * 便签浮层的屏幕锚点。
+     *
+     * 用 runtime 的 `nodeScreenRect`（同一套本地视口 + 拖动预览），而不是自己换算坐标 ——
+     * 拖动中的便签也能拿到正确位置，且不会因为缩放/平移而与画布错位。
+     */
+    function resolveStickyNoteAnchor(nodeId: string): { left: number; top: number; width: number } | null {
+      const rect = ctx.canvasRuntime.nodeScreenRect(nodeId);
+      return rect ? { left: rect.left, top: rect.top + rect.height, width: rect.width } : null;
     }
   },
   { name: CANVAS_MENU_PLUGIN_ID, inject: ["slots", "canvasSession", "canvasNavigation", "canvasEdit", "canvasRuntime"] }

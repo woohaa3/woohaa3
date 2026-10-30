@@ -37,6 +37,7 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
   audio: "音频",
   model3d: "3D 模型",
   "composite-asset": "复合资产",
+  "sticky-note": "便签",
   group: "分组",
   custom: "自定义"
 };
@@ -48,6 +49,7 @@ const DEFAULT_NAMES: Record<string, string> = {
   audio: "未命名音频",
   model3d: "未命名模型",
   "composite-asset": "未命名复合资产",
+  "sticky-note": "便签",
   group: "未命名分组"
 };
 

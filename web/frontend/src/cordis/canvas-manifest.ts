@@ -54,6 +54,8 @@ import {
   PROVIDER_CREDENTIALS_PLUGIN_ID
 } from "./plugins/provider-credentials/plugin.js";
 import { settingsEntryExtension, SETTINGS_ENTRY_PLUGIN_ID } from "./plugins/settings/entry.js";
+// 开发期报错助手：只在 `import.meta.env.DEV` 时进入目录，生产构建整段摇掉。
+import { devErrorAssistantExtension, DEV_ERROR_ASSISTANT_PLUGIN_ID } from "./plugins/dev-error-assistant/plugin.js";
 import { settingsPlugin, SETTINGS_PLUGIN_ID, type ExtensionSettingsAssembly } from "./plugins/settings/plugin.js";
 import type { CanvasExtensionMetadata } from "./plugins/extension-manager/contract.js";
 
@@ -325,7 +327,22 @@ export const CANVAS_PLUGIN_CATALOG: readonly CanvasExtensionCatalogEntry[] = [
     required: true,
     configurable: false,
     create: () => settingsEntryExtension()
-  }
+  },
+  // **仅开发构建**：左下角的报错助手（捕获 window.onerror / unhandledrejection /
+  // console.error 与渲染器 iframe 转发的错误）。生产构建里 `import.meta.env.DEV` 是字面量
+  // false，整段被摇掉，插件与它的 CSS 都不进产物 —— 与四喜「开发助手」同一思路。
+  ...(import.meta.env.DEV
+    ? [
+        {
+          id: DEV_ERROR_ASSISTANT_PLUGIN_ID,
+          name: "报错助手",
+          description: "开发期捕获画布与页面的报错，左下角浮标查看。",
+          required: false,
+          configurable: false,
+          create: () => devErrorAssistantExtension()
+        } satisfies CanvasExtensionCatalogEntry
+      ]
+    : [])
 ];
 
 // 内置目录跨 ID 唯一（任何业务装配前稳定失败）。

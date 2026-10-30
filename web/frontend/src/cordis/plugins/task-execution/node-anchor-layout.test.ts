@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutNodePanel, usableCanvasArea } from "./node-anchor-layout.js";
+import { layoutDockedPanel, layoutNodePanel, usableCanvasArea, DOCK_BOTTOM_MARGIN, DOCK_MAX_HEIGHT_RATIO, DOCK_SIDE_MARGIN } from "./node-anchor-layout.js";
 
 const area = { left: 100, top: 50, width: 900, height: 700 };
 
@@ -54,5 +54,22 @@ describe("layoutNodePanel", () => {
     expect(panel?.left).toBeGreaterThanOrEqual(area.left + 16);
     expect(panel!.left + panel!.width).toBeLessThanOrEqual(area.left + area.width - 16);
     expect(panel?.maxHeight).toBeLessThan(520);
+  });
+});
+
+describe("layoutDockedPanel", () => {
+  it("docks centred at the bottom of the canvas area", () => {
+    const panel = layoutDockedPanel(area, { width: 600, height: 240 })!;
+    expect(panel.left + panel.width / 2).toBeCloseTo(area.left + area.width / 2);
+    expect(panel.top + panel.maxHeight).toBeCloseTo(area.top + area.height - DOCK_BOTTOM_MARGIN);
+    expect(panel.placement).toBe("edge");
+  });
+
+  it("clamps width to the canvas and height to a share of it", () => {
+    const narrow = layoutDockedPanel({ left: 0, top: 0, width: 500, height: 600 }, { width: 760, height: 240 })!;
+    expect(narrow.width).toBe(500 - DOCK_SIDE_MARGIN * 2);
+    const tall = layoutDockedPanel(area, { width: 600, height: 900 })!;
+    expect(tall.maxHeight).toBeCloseTo(area.height * DOCK_MAX_HEIGHT_RATIO);
+    expect(layoutDockedPanel({ left: 0, top: 0, width: 0, height: 0 }, { width: 600, height: 240 })).toBeNull();
   });
 });

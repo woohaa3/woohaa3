@@ -99,6 +99,13 @@ export type InteractionControllerOptions = {
   /** 双击文本节点时请求宿主按当前 canonical 内容打开 Markdown 预览。 */
   onTextPreviewIntent?: (request: { nodeId: string }) => void;
   /**
+   * 双击便签时请求编辑正文。
+   *
+   * 只传 canonical nodeId；输入框、长度上限与提交由 canvas-menu 的便签编辑流程负责。
+   * 便签没有聚焦工作区也没有预览，双击的唯一语义就是「写字」。
+   */
+  onStickyNoteEditIntent?: (request: { nodeId: string }) => void;
+  /**
    * 双击卡片底部标题行时请求重命名该节点。
    *
    * 只传 canonical nodeId；输入框、校验与提交由 canvas-menu 的重命名流程负责。

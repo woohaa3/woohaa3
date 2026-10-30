@@ -65,6 +65,10 @@ export const APP_THEME_DEFAULT_TOKENS = {
   canvasProgressFill: "#16846c",
   canvasCloseIcon: "#8a9a91",
   canvasBodyText: "#526b65",
+  canvasStickySurface: "#fdf6c4",
+  canvasStickyBorder: "#f6ecb0",
+  canvasStickyText: "#3f3611",
+  canvasStickyShadow: "#00000018",
   // nodeKind
   nodeTextForeground: "#3b7299",
   nodeTextTint: "#eaf3fa",
@@ -97,12 +101,12 @@ export const APP_THEME_DEFAULT_TOKENS = {
 } as const satisfies AppThemeTokens;
 
 export const APP_THEME_DEFAULT_ID = "default";
-export const APP_THEME_DEFAULT_FINGERPRINT = "3253bfff9ca766a2";
+export const APP_THEME_DEFAULT_FINGERPRINT = "d88ec5c5e3727c6f";
 
 /** 默认 preset（生成物）；结构与 `app-theme.default.json` 一致。 */
 export const APP_THEME_DEFAULT_PRESET = {
   id: APP_THEME_DEFAULT_ID,
-  version: "woohaa-app-theme-v2" as const,
+  version: "woohaa-app-theme-v3" as const,
   tokens: APP_THEME_DEFAULT_TOKENS
 } as const;
 
@@ -165,6 +169,10 @@ export const APP_THEME_CSS_VARIABLES: Record<AppThemeTokenName, string> = {
   canvasProgressFill: "--app-canvas-progress-fill",
   canvasCloseIcon: "--app-canvas-close-icon",
   canvasBodyText: "--app-canvas-body-text",
+  canvasStickySurface: "--app-canvas-sticky-surface",
+  canvasStickyBorder: "--app-canvas-sticky-border",
+  canvasStickyText: "--app-canvas-sticky-text",
+  canvasStickyShadow: "--app-canvas-sticky-shadow",
   nodeTextForeground: "--app-node-text-foreground",
   nodeTextTint: "--app-node-text-tint",
   nodeImageForeground: "--app-node-image-foreground",

@@ -18,6 +18,7 @@ mod aggregate;
 mod attach;
 mod camera;
 mod card_cache;
+mod card_meta;
 mod cards;
 mod compact_card;
 mod focus_reference;
@@ -48,6 +49,7 @@ mod render_edges;
 mod ownership_links;
 mod shared_key;
 pub(crate) mod scope_panel;
+mod sticky_note;
 pub(crate) mod text_presentation;
 mod textures;
 mod texture_store;
@@ -93,6 +95,7 @@ pub(crate) use render::{
     produce_group_selection, sync_canvas_overlay,
 };
 pub(crate) use labels::{sync_canvas_labels, LabelRequests};
+pub(crate) use card_meta::produce_card_meta;
 pub(crate) use textures::sync_textures;
 
 /// 2D 渲染的共享资源与生命周期状态：共享几何 mesh/material、font handle、纹理内容表与

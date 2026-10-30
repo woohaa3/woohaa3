@@ -55,10 +55,15 @@ pub(super) fn draw_static(
     if node.kind.starts_with("focus-reference") {
         return super::focus_reference::draw(geometry, theme, node, index);
     }
+    // 便签整体换一套画法：没有内容区/种类符号/标题行，只画一张纸和正文。
+    // 必须先于 `compact_card` 判断 —— 便签缩到很小时也该保持便签的样子，不能退化成小卡片。
+    if node.kind == "sticky" {
+        return super::sticky_note::draw(geometry, theme, node, index);
+    }
     if super::layout::compact_card(node) {
         return super::compact_card::draw(geometry, theme, node, index);
     }
-    let (_, _tint, category) = theme.node_palette(&node.kind);
+    let (_, _tint, _category) = theme.node_palette(&node.kind);
     let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     let (width, height) = (node.width, node.height);
     let show_content = shows_content(node);
@@ -104,28 +109,9 @@ pub(super) fn draw_static(
         // 运行中节点的进度环由 `generation::sync_generation` 每帧绘制在内容面上；
         // 这里不再画底部状态行、进度条或静态进度环。
     }
-    // 底部标题行：预览在上、名称在下（参考四喜卡片的形态）。
-    // 种类用**符号标识**排在名称前方（不再写「图片」「视频」这类文字），
-    // 名称用正文色，种类符号用弱化色 —— 名称是主体，符号只是标记。
-    // 左上角的 28×28 图标也因此移除，不再占用标题可用宽度。
-    let fallback_label = node
-        .card_label
-        .clone()
-        .unwrap_or_else(|| category.to_owned());
-    let title_text = if node.title.is_empty() {
-        fallback_label.clone()
-    } else {
-        node.title.clone()
-    };
-    let title_top = super::layout::card_title_row_top(y, height, super::layout::card_footer_height(node));
-    let text_left = x + super::layout::CARD_CONTENT_PAD;
-    let text_width = (width - super::layout::CARD_CONTENT_PAD * 2.).max(48.);
-    let mut labels = vec![(
-        shortened(&title_text, text_width.max(32.), super::layout::CARD_TITLE_FONT),
-        Vec2::new(text_left, title_top),
-        super::layout::CARD_TITLE_FONT,
-        theme.token_u32("canvasBodyText"),
-    )];
+    // 名称与尺寸不再画在卡片内部：选中/悬停时画在卡片上方外侧（见 `card_meta`）。
+    // 卡片本身只留四边等宽窄边 + 内容，图片因此能铺满整张卡。
+    let mut labels: Vec<Label> = Vec::new();
     if super::shot_preview::is_shot_preview_node(node) {
         labels.extend(draw_shot_preview(geometry, theme, node, index));
         return labels;
@@ -160,6 +146,11 @@ pub(super) fn draw_hover_ports(
     hover: Option<&NodeHover>,
     index: usize,
 ) {
+    // 便签不连线，悬停时也不该冒出接线端点 —— 那是"可以拉线"的暗示，会误导用户去拖。
+    // 与 `bevyKindHasInput/HasOutput` 对 sticky 返回 false 是同一条规则的两层落点。
+    if node.kind == "sticky" {
+        return;
+    }
     let (accent, _, _) = theme.node_palette(&node.kind);
     let (_, _, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     // 端点：静止时 MUST NOT 绘制常驻图形；仅指针悬停该节点时在左右中点显示「+」圆钮

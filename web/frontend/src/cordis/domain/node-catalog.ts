@@ -25,7 +25,7 @@ import {
 export { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
 
 /** 前端菜单项 id：共享语义 kind 加上扩展注册的自包含 3D 节点。 */
-export type CanvasNodeTemplateId = AgentSemanticKind | "model3d" | "composite-asset";
+export type CanvasNodeTemplateId = AgentSemanticKind | "model3d" | "composite-asset" | "sticky-note";
 
 export type CanvasNodeTemplate = {
   id: CanvasNodeTemplateId;
@@ -49,7 +49,9 @@ export const NODE_TEMPLATES: readonly CanvasNodeTemplate[] = [
   // 模型定义，不从来源节点读取；模型内容再由聚焦编辑器或 MCP 编辑/导入。
   // 复合资产节点（change: 2026-10-11-extract-film-set-extension，D1）：每类业务一个菜单项，
   // 片场 defaultNodeData 带 extensionId="film-set"；炉体模板由其 extension 注册。
-  { id: "composite-asset", label: "导演场", nodeType: "composite-asset", taskKind: false }
+  { id: "composite-asset", label: "导演场", nodeType: "composite-asset", taskKind: false },
+  // 便签：纯批注卡片，不连线、不执行。排在最后，不与"素材"类节点抢位置。
+  { id: "sticky-note", label: "便签", nodeType: "sticky-note", taskKind: false }
 ];
 
 /** model 语义别名与 model3d 菜单项返回同一份模板。 */
@@ -80,6 +82,9 @@ export function connectLabelFor(sourceNodeType: string, targetNodeType: string):
  * 不预填任何任务字段。
  */
 export function defaultNodeDataForType(nodeType: string): CanvasNodeData | undefined {
+  // 便签不是 Agent 语义节点，没有描述符；它的 nodeData 只有正文一个字段。
+  // 空串而不是缺省：空便签在画布上显示"双击写点什么…"占位，用户能看出这是可写的。
+  if (nodeType === "sticky-note") return { note: "" };
   const selfContained = defaultSelfContained3DNodeData(nodeType);
   if (selfContained) return selfContained;
   const descriptor = findAgentNodeDescriptor(nodeType);

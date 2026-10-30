@@ -11,7 +11,7 @@
  */
 
 /** Theme schema 版本；新增/删除 token 必须提升它，并同步三端消费者。 */
-export const APP_THEME_SCHEMA_VERSION = "woohaa-app-theme-v2" as const;
+export const APP_THEME_SCHEMA_VERSION = "woohaa-app-theme-v3" as const;
 export type AppThemeSchemaVersion = typeof APP_THEME_SCHEMA_VERSION;
 
 /** 允许的最大 preset JSON 字节数（防御任意大输入）。 */
@@ -92,7 +92,11 @@ export const APP_THEME_TOKEN_GROUPS = {
     "canvasProgressTrack",
     "canvasProgressFill",
     "canvasCloseIcon",
-    "canvasBodyText"
+    "canvasBodyText",
+    "canvasStickySurface",
+    "canvasStickyBorder",
+    "canvasStickyText",
+    "canvasStickyShadow"
   ],
   nodeKind: [
     "nodeTextForeground",

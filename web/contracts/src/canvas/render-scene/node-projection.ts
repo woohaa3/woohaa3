@@ -27,6 +27,10 @@ export function readBody(type: string, data: CanvasNodeData | undefined, assets:
     const result = typeof data.result?.text === "string" ? data.result.text : "";
     return truncate(result || prompt, 240);
   }
+  // 便签没有生成产物：正文就是用户写的字，直接读 `note`。
+  if (type === "sticky-note") {
+    return truncate(typeof data.note === "string" ? data.note : "", 240);
+  }
   return "";
 }
 

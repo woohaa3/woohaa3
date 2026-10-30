@@ -65,6 +65,10 @@
   --app-canvas-progress-fill: #16846c;
   --app-canvas-close-icon: #8a9a91;
   --app-canvas-body-text: #526b65;
+  --app-canvas-sticky-surface: #fdf6c4;
+  --app-canvas-sticky-border: #f6ecb0;
+  --app-canvas-sticky-text: #3f3611;
+  --app-canvas-sticky-shadow: #00000018;
   /* nodeKind */
   --app-node-text-foreground: #3b7299;
   --app-node-text-tint: #eaf3fa;
@@ -159,6 +163,10 @@
   --app-canvas-progress-fill: #2fb99b;
   --app-canvas-close-icon: #93a69b;
   --app-canvas-body-text: #c3d2c9;
+  --app-canvas-sticky-surface: #4a4220;
+  --app-canvas-sticky-border: #5d5228;
+  --app-canvas-sticky-text: #f3eac6;
+  --app-canvas-sticky-shadow: #00000040;
   /* nodeKind */
   --app-node-text-foreground: #7fb9e8;
   --app-node-text-tint: #162b3b;

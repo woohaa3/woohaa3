@@ -133,6 +133,8 @@ pub(crate) struct CustomPresentation {
 pub(crate) enum CanvasLabelRole {
     /// 普通卡片文字（owner 为卡片节点实体）。
     Card,
+    /// 卡片上方外侧的名称与尺寸行（仅选中/悬停时）。
+    CardMeta,
     /// group 标题、片场标题与面板文字（owner 为容器节点实体）。
     Container,
     /// 连线标签（owner 为边批次实体）。

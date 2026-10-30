@@ -107,43 +107,35 @@ pub(crate) fn shows_content(node: &GraphNode) -> bool {
         && (node.kind != "model" || node.model_preview.is_some())
 }
 
-/// 卡片内容区四周的内边距：上、左、右都是小边距，让预览尽量铺满卡片。
-/// 底部另由 [`CARD_FOOTER_HEIGHT`] 留出标题行与历史圆点的位置。
+/// 卡片内容区四周的内边距：**四边等宽**的窄边，预览铺满整张卡。
+///
+/// 标题与尺寸不再占用卡片内部，改画在卡片上方外侧（选中/悬停时），见 [`card_meta_top`]。
 pub(crate) const CARD_CONTENT_PAD: f32 = 6.0;
 
-/// 卡片底部标题行的高度。
-///
-/// 12px 的字在这一行里上下居中，文字与卡片下边框之间留 (行高 - 字号) / 2 的距离。
+/// 紧凑卡片底部标题行的高度（紧凑卡仍把标题画在卡内底部）。
 pub(crate) const CARD_TITLE_ROW_HEIGHT: f32 = 28.0;
 
 /// 标题行与历史圆点之间的竖直间隙。
 pub(crate) const CARD_TITLE_GAP: f32 = 0.0;
 
-/// 卡片底部为标题行与历史圆点预留的总高度（**无历史圆点时**的保守值）。
-///
-/// 真实节点用 [`card_footer_height`]：没有版本历史的卡片不该为圆点空着一段。
-/// 这个常量只给拿不到 `GraphNode` 的路径（拖动预览的命中矩形）用，
-/// 那里按「可能有圆点」预留，命中只会偏保守、不会点不到。
-pub(crate) const CARD_FOOTER_HEIGHT: f32 =
-    CARD_TITLE_ROW_HEIGHT + CARD_TITLE_GAP + NODE_HISTORY_STRIP_GAP + NODE_HISTORY_STRIP_HEIGHT;
+/// 卡片上方标题/尺寸与卡片顶边的间隙。
+pub(crate) const CARD_META_GAP: f32 = 6.0;
 
-/// 该节点底部需要预留的高度：标题行 +（有历史圆点时）圆点带。
+/// 卡片底部为圆点预留的保守高度（拿不到 `GraphNode` 的路径用）。
+pub(crate) const CARD_FOOTER_HEIGHT: f32 = CARD_TITLE_GAP + NODE_HISTORY_STRIP_GAP + NODE_HISTORY_STRIP_HEIGHT;
+
+/// 该节点底部需要预留的高度：有历史圆点时留圆点带，否则 0。
 ///
-/// 没有版本历史的卡片不预留圆点带，标题行因此贴近卡片下缘 —— 否则每张新卡底部都会
-/// 挂着一段没有任何内容的空白。
+/// 圆点画在卡片**内部**底缘，因此内容区要相应收窄，避免图片压在圆点上。
 pub(crate) fn card_footer_height(node: &GraphNode) -> f32 {
-    let strip = if has_history_strip(node) {
+    if has_history_strip(node) {
         NODE_HISTORY_STRIP_GAP + NODE_HISTORY_STRIP_HEIGHT
     } else {
         0.0
-    };
-    CARD_TITLE_ROW_HEIGHT + CARD_TITLE_GAP + strip
+    }
 }
 
-/// 节点内容区矩形 `(x, y, width, height)`。
-///
-/// 上、左、右各 [`CARD_CONTENT_PAD`]；底部留给标题行与（有历史时的）圆点带。
-/// 标题在图片下方（参考四喜卡片的形态），因此底部边距大于其余三边。
+/// 节点内容区矩形 `(x, y, width, height)`：四边等宽窄边，底部在无圆点时也是同样的窄边。
 pub(crate) fn content_rect(node: &GraphNode) -> (f32, f32, f32, f32) {
     if compact_card(node) {
         let padding = CARD_CONTENT_PAD.min(node.width / 8.).min(node.height / 8.);
@@ -160,7 +152,7 @@ pub(crate) fn content_rect(node: &GraphNode) -> (f32, f32, f32, f32) {
         node.x + CARD_CONTENT_PAD,
         node.y + CARD_CONTENT_PAD,
         (node.width - CARD_CONTENT_PAD * 2.).max(1.),
-        (node.height - CARD_CONTENT_PAD - footer).max(24.),
+        (node.height - CARD_CONTENT_PAD * 2. - footer).max(24.),
     )
 }
 
@@ -170,18 +162,17 @@ pub(crate) fn content_rect_for_bounds(x: f32, y: f32, width: f32, height: f32) -
         x + CARD_CONTENT_PAD,
         y + CARD_CONTENT_PAD,
         (width - CARD_CONTENT_PAD * 2.).max(1.),
-        (height - CARD_CONTENT_PAD - CARD_FOOTER_HEIGHT).max(24.),
+        (height - CARD_CONTENT_PAD * 2. - CARD_FOOTER_HEIGHT).max(24.),
     )
 }
 
-/// 卡片底部标题行的顶部 y。
-///
-/// 标签用 `Anchor::TOP_LEFT`（见 `labels.rs`），所以这里给的是文字**顶部**而不是基线；
-/// 12px 的字在 [`CARD_TITLE_ROW_HEIGHT`] 高的一行里上下居中。
-pub(crate) fn card_title_row_top(y: f32, height: f32, footer: f32) -> f32 {
-    let row_top = y + height - footer;
-    row_top + (CARD_TITLE_ROW_HEIGHT - CARD_TITLE_FONT) / 2.0
+/// 卡片上方标题/尺寸行的顶部 y（文字顶部，锚点为 `TOP_LEFT`）。
+pub(crate) fn card_meta_top(y: f32) -> f32 {
+    y - CARD_META_GAP - CARD_TITLE_FONT
 }
+
+/// 卡片上方标题行占用的竖直高度（含间隙），供命中与避让使用。
+pub(crate) const CARD_META_HEIGHT: f32 = CARD_META_GAP + CARD_TITLE_FONT;
 
 /// 卡片标题字号。
 pub(crate) const CARD_TITLE_FONT: f32 = 12.0;
@@ -706,21 +697,21 @@ mod tests {
     }
 
     #[test]
-    fn content_rect_reserves_a_footer_only_as_tall_as_the_card_needs() {
-        // 没有版本历史的卡片：底部只留标题行，不留圆点带 —— 否则新卡下面会挂一段空白。
+    fn content_rect_insets_all_four_sides_equally() {
+        // 四边等宽窄边：无历史圆点时上下左右都是 CARD_CONTENT_PAD。
         let plain = node(224.0, 300.0);
         let (x, y, w, h) = content_rect(&plain);
         assert_eq!((x, y), (10.0 + CARD_CONTENT_PAD, 20.0 + CARD_CONTENT_PAD));
         assert_eq!(w, 224.0 - CARD_CONTENT_PAD * 2.0);
-        assert_eq!(h, 300.0 - CARD_CONTENT_PAD - card_footer_height(&plain));
-        assert_eq!(card_footer_height(&plain), CARD_TITLE_ROW_HEIGHT + CARD_TITLE_GAP);
-        // 上边距必须明显小于底部预留，标题才有位置。
-        assert!(CARD_CONTENT_PAD < card_footer_height(&plain));
+        assert_eq!(h, 300.0 - CARD_CONTENT_PAD * 2.0);
+        assert_eq!(card_footer_height(&plain), 0.0);
+        // 内容区底边与卡片底边只差同样的窄边。
+        assert!((y + h - (20.0 + 300.0 - CARD_CONTENT_PAD)).abs() < 1e-4);
     }
 
     #[test]
-    fn cards_with_history_reserve_the_dot_strip_and_never_overlap_it() {
-        // 有版本历史：底部多留一段圆点带，标题行落在圆点之上。
+    fn cards_with_history_reserve_only_the_dot_strip() {
+        // 有版本历史：底部只让出圆点带（圆点画在卡片内部底缘），不再为标题行预留。
         let mut with_history = node(224.0, 300.0);
         with_history.history_strip = Some(crate::protocol::HistoryStripPresentation {
             // 两个已完成版本 —— 达到「绘制圆点」的门槛。
@@ -741,14 +732,21 @@ mod tests {
         });
         assert!(has_history_strip(&with_history));
         let (_, y, _, h) = content_rect(&with_history);
-        assert_eq!(h, 300.0 - CARD_CONTENT_PAD - card_footer_height(&with_history));
-        // 标题行底边不压到圆点带。
+        assert_eq!(h, 300.0 - CARD_CONTENT_PAD * 2.0 - card_footer_height(&with_history));
+        // 内容区底边不压到圆点带。
         let strip_top = 20.0 + 300.0 - NODE_HISTORY_STRIP_GAP - NODE_HISTORY_STRIP_HEIGHT;
         assert!(y + h <= strip_top);
-        let title_top = card_title_row_top(20.0, 300.0, card_footer_height(&with_history));
-        assert!(title_top + CARD_TITLE_FONT <= strip_top + 0.001);
         // 有圆点时底部预留确实更大。
         assert!(card_footer_height(&with_history) > card_footer_height(&node(224.0, 300.0)));
+    }
+
+    #[test]
+    fn card_meta_row_sits_above_the_card() {
+        // 名称/尺寸行画在卡片上方外侧，不占卡片内部高度。
+        let top = card_meta_top(20.0);
+        assert!(top + CARD_TITLE_FONT <= 20.0 - 1.0);
+        assert!((top + CARD_TITLE_FONT - (20.0 - CARD_META_GAP)).abs() < 1e-4);
+        assert!((CARD_META_HEIGHT - (CARD_META_GAP + CARD_TITLE_FONT)).abs() < 1e-4);
     }
 
     #[test]

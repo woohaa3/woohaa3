@@ -19,7 +19,8 @@ describe("node-catalog", () => {
       "film-set",
       "video",
       "audio",
-      "composite-asset"
+      "composite-asset",
+      "sticky-note"
     ]);
     expect(NODE_TEMPLATES.map((entry) => entry.label)).toEqual([
       "文本",
@@ -28,7 +29,8 @@ describe("node-catalog", () => {
       "片场",
       "视频",
       "音频",
-      "导演场"
+      "导演场",
+      "便签"
     ]);
     expect(findNodeTemplate("model")?.nodeType).toBe("model3d");
     expect(findNodeTemplate("model3d")?.nodeType).toBe("model3d");
@@ -45,7 +47,9 @@ describe("node-catalog", () => {
       "film-set",
       "video",
       "audio",
-      "composite-asset"
+      "composite-asset",
+      // 便签：纯批注卡片，排在最后，不与素材类节点抢位置。
+      "sticky-note"
     ]);
     expect(findNodeTemplate("shot")).toBeNull();
     expect(findNodeTemplate("generate")).toBeNull();

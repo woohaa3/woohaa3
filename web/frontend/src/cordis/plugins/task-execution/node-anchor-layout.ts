@@ -20,8 +20,7 @@ export function usableCanvasArea(area: Rect, occlusions: readonly Rect[]): Rect 
   return usable;
 }
 
-export function layoutNodePanel(node: Rect, area: Rect, panel: { width: number; height: number }, previous?: AnchoredPanel["placement"], policy: "auto" | "below" = "auto"): AnchoredPanel | null {
-  const right = node.left + node.width;
+export function layoutNodePanel(node: Rect, area: Rect, panel: { width: number; height: number }, previous?: AnchoredPanel["placement"], policy: "auto" | "below" = "auto"): AnchoredPanel | null {  const right = node.left + node.width;
   const bottom = node.top + node.height;
   const areaRight = area.left + area.width;
   const areaBottom = area.top + area.height;
@@ -42,3 +41,26 @@ export function layoutNodePanel(node: Rect, area: Rect, panel: { width: number; 
   const top = placement === "below" ? bottom + 12 : placement === "above" ? node.top - 12 - Math.min(panel.height, maxHeight) : below >= above ? areaBottom - Math.min(panel.height, maxHeight) : area.top;
   return { left, top, width, maxHeight, placement };
 }
+
+/**
+ * 底部停靠：面板固定在画布底部中间，不跟随节点。
+ *
+ * 节点只在打开面板时决定「这一份面板属于谁」（内容跟随节点），位置与卡片无关：
+ * 拖动、缩放、平移画布都不再移动面板。高度取面板自身高度，但不超过
+ * `area` 的上半部的上限，避免高面板盖住整个画布。
+ */
+export function layoutDockedPanel(area: Rect, panel: { width: number; height: number }): AnchoredPanel | null {
+  if (area.width <= 0 || area.height <= 0) return null;
+  const width = Math.max(0, Math.min(DOCK_MAX_WIDTH, area.width - DOCK_SIDE_MARGIN * 2, panel.width));
+  const maxHeight = Math.max(0, Math.min(panel.height, area.height * DOCK_MAX_HEIGHT_RATIO));
+  const left = area.left + (area.width - width) / 2;
+  const top = area.top + area.height - maxHeight - DOCK_BOTTOM_MARGIN;
+  return { left, top, width, maxHeight, placement: "edge" };
+}
+
+/** 底部停靠面板的最大宽度（与锚定面板一致，避免左右过宽）。 */
+export const DOCK_MAX_WIDTH = 760;
+/** 底部停靠面板占画布高度的上限：剩余部分留给画布本身。 */
+export const DOCK_MAX_HEIGHT_RATIO = 0.55;
+export const DOCK_SIDE_MARGIN = 16;
+export const DOCK_BOTTOM_MARGIN = 16;

@@ -33,6 +33,7 @@ import { resolveSelectionContext } from "./selection-context.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";
 import { createGroupRunService } from "./group-run-service.js";
 import { GROUP_BULK_ACTION_ID, GroupRunSummaryStore, resolveGroupBulkDescriptor } from "./group-run-actions.js";
+import { ADD_TO_COMPOSER_ACTION_ID, resolveAddToComposerDescriptor } from "./add-to-composer-action.js";
 import { nodeDraftStore } from "./drafts.js";
 import { registerGenerationTraceMenu } from "./generation-trace.js";
 import { GENERATION_TRACE_DIALOG_ID, registerGenerationTraceDialog } from "./generation-trace-dialog.js";
@@ -43,6 +44,7 @@ import {
   panelTypeForNodeType,
   type PanelPresentationIntent
 } from "./node-panel-directives.js";
+import { panelKindForNodeType } from "./node-panel-registry.js";
 import {
   normalizeCanvasPanelRoute,
   type CanvasPanelDefinition,
@@ -383,6 +385,21 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         }
       });
 
+      // 卡片悬浮条「添加到对话框」：选中该节点，底部停靠的节点面板随后切到它。
+      // 只对带生成面板的节点类型呈现（图片/视频/音频/文本）；分组与模型卡片没有该面板。
+      const removeAddToComposerAction = ctx.slots.register("canvas.node-action", {
+        id: ADD_TO_COMPOSER_ACTION_ID,
+        owner: TASK_EXECUTION_PLUGIN_ID,
+        order: -30,
+        available: ({ nodeType }) => panelKindForNodeType(nodeType) !== null,
+        describe: ({ writable }) => resolveAddToComposerDescriptor({ writable }),
+        activate: ({ nodeId, writable }) => {
+          if (!writable) return;
+          // 与画布选中同一条路径：面板内容跟随 selection，避免这里再写一份打开逻辑。
+          ctx.canvasRuntime.controller()?.selectNode(nodeId);
+        }
+      });
+
       // 分组提交摘要 overlay（change: 2026-10-16-add-group-selection-toolbar，任务 4.1）：
       // 非模态、可关闭、绑定 canvasId；复用 canvas overlay 与共享 chrome。
       const removeGroupSummaryOverlay = ctx.slots.register("canvas.overlay", {
@@ -479,6 +496,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           removeGenerationTraceMenu();
           removeGenerationTraceDialog();
           removeGroupBulkAction();
+          removeAddToComposerAction();
           removeGroupSummaryOverlay();
           offGroupRun();
           offDrafts();

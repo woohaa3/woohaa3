@@ -242,6 +242,7 @@ fn configure_canvas(app: &mut App) {
                             .in_set(crate::canvas_ecs::CanvasRenderSet::Selection)
                             .run_if(canvas2d::canvas_render_requested),
                         (
+                            canvas2d::produce_card_meta,
                             canvas2d::sync_canvas_labels,
                             canvas2d::focus_details::sync,
                         )

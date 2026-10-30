@@ -12,10 +12,9 @@
  * 现在表面只在这里描述，加载骨架与真实面板共用同一份判断与同一套 DOM 结构。
  */
 import { useEffect, useRef, type ReactNode } from "react";
-import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { AuthoringGeneratePlaceholder } from "../../host.js";
 import type { CanvasRuntimeService } from "../../contracts.js";
-import { layoutNodePanel, usableCanvasArea, type AnchoredPanel } from "./node-anchor-layout.js";
+import { layoutDockedPanel, usableCanvasArea } from "./node-anchor-layout.js";
 import { FullscreenPanelHost } from "./execution-panel/fullscreen-panel-host.js";
 import { panelKindForNodeType } from "./node-panel-registry.js";
 import type { ExecutionPanelPresentation } from "../../navigation/contracts.js";
@@ -53,7 +52,6 @@ export function ExecutionPanelSurface({ nodeId, presentation, runtime, children 
 
 function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?: CanvasRuntimeService; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  const lastPlacement = useRef<AnchoredPanel["placement"] | undefined>(undefined);
   useEffect(() => {
     if (!runtime || !ref.current) return;
     let frame = 0;
@@ -62,11 +60,7 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       const canvas = document.getElementById("bevy-canvas");
       const fixtureArea = dock?.closest<HTMLElement>("[data-node-anchor-area]") ?? null;
       const areaElement = fixtureArea ?? canvas;
-      const state = woohaa3CanvasStore.getState();
-      const badge = workingCanvasOf(state)?.document.nodes.find(node => node.id === nodeId)?.type === "group"
-        ? runtime.nodePresentationScreenRect?.(nodeId) : null;
-      const node = badge ?? runtime.nodePresentationScreenRect?.(nodeId) ?? runtime.nodeScreenRect(nodeId);
-      if (!dock || !areaElement || !node) {
+      if (!dock || !areaElement) {
         if (dock) {
           dock.style.visibility = "hidden";
           dock.removeAttribute("data-placement");
@@ -75,13 +69,13 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       }
       const bounds = areaElement.getBoundingClientRect();
       const area = usableCanvasArea({ left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, fixtureArea ? [] : visibleOcclusions());
-      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, "auto");
+      // 底部停靠：位置只跟画布区域走，不跟节点走 —— 拖动/缩放/平移画布都不会再移动面板。
+      const next = layoutDockedPanel(area, { width: dock.offsetWidth, height: dock.offsetHeight });
       if (!next) {
         dock.style.visibility = "hidden";
         dock.removeAttribute("data-placement");
         return;
       }
-      lastPlacement.current = next.placement;
       const layout = fixtureArea ? { ...next, left: next.left - bounds.left, top: next.top - bounds.top } : next;
       dock.style.position = fixtureArea ? "absolute" : "fixed";
       dock.style.left = `${layout.left}px`;

@@ -48,6 +48,14 @@ export function createDoubleClickHandler(core: InteractionCore) {
       ? canvasState.document.nodes.find((candidate) => candidate.id === cardNodeId)
       : undefined;
 
+    // 便签：双击就是编辑正文。必须排在标题行重命名与预览分派之前 ——
+    // 便签没有底部标题行、也没有可预览的产物，后面那些分支对它都不成立。
+    if (cardEntry?.type === "sticky-note") {
+      event.preventDefault();
+      options.onStickyNoteEditIntent?.({ nodeId: cardEntry.id });
+      return;
+    }
+
     // 拍摄镜头预览卡片：双击进入所属片场聚焦并选择该镜头（零点暂停）
     // （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4 / design D8）。
     // 归属由 nodeData 严格解码得到；缺失/非法即不派发（保留节点与归属保护，不猜默认镜头）。
@@ -73,12 +81,24 @@ export function createDoubleClickHandler(core: InteractionCore) {
       return;
     }
 
-    // 双击卡片底部标题行 → 重命名（不进入聚焦/预览）。
-    if (cardEntry && hit?.kind === "node") {
+    // 双击卡片上方的名称行 → 重命名（不进入聚焦/预览）。
+    // 名称行画在卡片外侧，Rust 的卡片命中矩形不覆盖它，因此这里对**已选中**的卡片
+    // 额外按几何判断一次。
+    if (hit?.kind === "node" && cardEntry) {
       const byId = new Map(canvasState.document.nodes.map(node => [node.id, node]));
       if (hitsCardTitleRow(world, cardEntry, nodeWorldRect(cardEntry, byId))) {
         event.preventDefault();
         options.onNodeRenameIntent?.({ nodeId: cardEntry.id });
+        return;
+      }
+    } else if (!cardEntry) {
+      const byId = new Map(canvasState.document.nodes.map(node => [node.id, node]));
+      const selected = (core.state.selected as readonly string[])
+        .map((id: string) => byId.get(id))
+        .find(node => node && hitsCardTitleRow(world, node, nodeWorldRect(node, byId)));
+      if (selected) {
+        event.preventDefault();
+        options.onNodeRenameIntent?.({ nodeId: selected.id });
         return;
       }
     }
