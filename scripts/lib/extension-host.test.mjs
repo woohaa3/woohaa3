@@ -996,3 +996,19 @@ test("受管 storage 插件被拒绝（声明层闸门，与进程边界无关�
   assert.equal(host.managedRejected[0].code, "EXTENSION_MANAGED_FORBIDDEN_DECLARATION");
   assert.equal(host.managedRejected[0].field, "hostPlugin.features");
 });
+test("开发者目录装载的扩展同步进入配置安装清单", async (t) => {
+  const repoRoot = makeRepo();
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+  const directory = writeExtension(repoRoot, "authoring", "sample", {
+    descriptor: { schemaVersion: 1, extensionId: "sample", site: siteBlock("sample", 1) },
+    browserArtifact: true
+  });
+  const host = await loadExtensionHost({ repoRoot, env: {
+    WOOHAA3_EXTENSION_DEV_MODE: "1", WOOHAA3_EXTENSION_DEV_DIRS: directory
+  } });
+  t.after(() => host.closeDevReload());
+  const row = host.directoryControl.list().find((entry) => entry.id === "sample");
+  assert.ok(row, "已装载的开发者扩展必须能在插件配置中找到");
+  assert.equal(row.directory, directory);
+  assert.equal(row.writable, false);
+});

@@ -891,6 +891,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
   // 改名写入必须落在配置声明的可写根内，否则管理员能把受版本控制的目录改走。
   const directoryControl = createExtensionDirectoryControl({
     roots: scan.roots,
+    devExtensions: scan.extensions.filter((record) => record.dev),
     writableRoots: scan.writableRoots ?? [],
     metadata,
     onRename(from, to) {

@@ -28,45 +28,47 @@ function firstVersion(...candidates) {
   return undefined;
 }
 
-export function createExtensionDirectoryControl({ roots, writableRoots = [], metadata = [], onRename = () => {} }) {
+export function createExtensionDirectoryControl({ roots, writableRoots = [], metadata = [], devExtensions = [], onRename = () => {} }) {
   const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
   const inventory = () => {
     const rows = [];
-    for (const root of roots) {
-      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-        if (!entry.isDirectory() || entry.name === 'node_modules') continue;
-        const directory = path.join(root, entry.name);
-        const pkg = readJson(path.join(directory, 'package.json'));
-        if (typeof pkg?.name !== 'string' || !pkg.name.startsWith(EXTENSION_PACKAGE_PREFIX)) continue;
-        const descriptor = readJson(path.join(directory, 'extension.json'));
-        const browser = readJson(path.join(directory, 'browser-dist/artifact-manifest.json'))?.metadata;
-        // 共享库（runtime-foundation）与测试 fixture（sample-site-extension）既没有 extension.json
-        // 也没有 browser 产物，不是插件；browser-only 扩展（dev-performance 等）只有 browser metadata，
-        // 仍必须出现在清单里。
-        if (!descriptor && !browser) continue;
-        const id = descriptor?.extensionId ?? browser?.extensionId ?? pkg.name.slice(EXTENSION_PACKAGE_PREFIX.length);
-        if (typeof id !== 'string' || !/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(id)) continue;
-        const known = metadata.find((item) => item.extensionId === id);
-        // 图标优先级：已声明 metadata / browser metadata → 品牌图形约定路径 → 后端语义 glyph。
-        // 品牌图形先于 glyph（两者都给时品牌图形更具体），未知 glyph 由前端回退通用图标。
-        const glyph = typeof descriptor?.icon?.glyph === 'string' ? descriptor.icon.glyph : undefined;
-        const brand = descriptor ? extensionIconPublicPath(descriptor, id) : null;
-        const icon = known?.icon ?? browser?.icon ?? brand ?? glyph;
-        // 版本只取声明值，不从文件名或发布时间猜。优先级即部署口径：
-        // 1) extension.json 的 site.version —— 站点控制面与站点目录用的同一份声明；
-        // 2) 已加载的可信元数据（provider metadata 导出，没有 site 段的 Provider 走这里）；
-        // 3) 浏览器产物的 artifact metadata；4) package.json 兜底。都没有就不展示。
-        const version = firstVersion(descriptor?.site?.version, known?.version, browser?.version, pkg.version);
-        rows.push({ id, directory, root, name: entry.name,
-          label: known?.name ?? descriptor?.site?.name ?? browser?.label ?? id,
-          description: known?.description ?? descriptor?.site?.description ?? browser?.description ?? '',
-          ...(icon ? { icon } : {}),
-          ...(version ? { version } : {}),
-          installed: !entry.name.startsWith('.'),
-          writable: writableRoots.includes(root),
-          bootstrap: Boolean(descriptor?.bootstrap),
-          dependencies: Array.isArray(descriptor?.site?.dependencies) ? descriptor.site.dependencies.filter((value) => typeof value === 'string') : [] });
-      }
+    const devIds = new Set(devExtensions.map((record) => record.extensionId));
+    const candidates = roots.flatMap((root) => fs.readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== 'node_modules')
+      .map((entry) => ({ root, name: entry.name, directory: path.join(root, entry.name), dev: false })));
+    candidates.push(...devExtensions.map((record) => ({ root: path.dirname(record.dir), name: path.basename(record.dir), directory: record.dir, dev: true })));
+    for (const { root, name, directory, dev } of candidates) {
+      const pkg = readJson(path.join(directory, 'package.json'));
+      if (!dev && (typeof pkg?.name !== 'string' || !pkg.name.startsWith(EXTENSION_PACKAGE_PREFIX))) continue;
+      const descriptor = readJson(path.join(directory, 'extension.json'));
+      const browser = readJson(path.join(directory, 'browser-dist/artifact-manifest.json'))?.metadata;
+      // 共享库（runtime-foundation）与测试 fixture（sample-site-extension）既没有 extension.json
+      // 也没有 browser 产物，不是插件；browser-only 扩展（dev-performance 等）只有 browser metadata，
+      // 仍必须出现在清单里。
+      if (!descriptor && !browser) continue;
+      const id = descriptor?.extensionId ?? browser?.extensionId ?? pkg?.name?.slice(EXTENSION_PACKAGE_PREFIX.length);
+      if (typeof id !== 'string' || !/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(id)) continue;
+      if (!dev && devIds.has(id)) continue;
+      const known = metadata.find((item) => item.extensionId === id);
+      // 图标优先级：已声明 metadata / browser metadata → 品牌图形约定路径 → 后端语义 glyph。
+      // 品牌图形先于 glyph（两者都给时品牌图形更具体），未知 glyph 由前端回退通用图标。
+      const glyph = typeof descriptor?.icon?.glyph === 'string' ? descriptor.icon.glyph : undefined;
+      const brand = descriptor ? extensionIconPublicPath(descriptor, id) : null;
+      const icon = known?.icon ?? browser?.icon ?? brand ?? glyph;
+      // 版本只取声明值，不从文件名或发布时间猜。优先级即部署口径：
+      // 1) extension.json 的 site.version —— 站点控制面与站点目录用的同一份声明；
+      // 2) 已加载的可信元数据（provider metadata 导出，没有 site 段的 Provider 走这里）；
+      // 3) 浏览器产物的 artifact metadata；4) package.json 兜底。都没有就不展示。
+      const version = firstVersion(descriptor?.site?.version, known?.version, browser?.version, descriptor?.version, pkg?.version);
+      rows.push({ id, directory, root, name,
+        label: known?.name ?? descriptor?.site?.name ?? browser?.label ?? id,
+        description: known?.description ?? descriptor?.site?.description ?? browser?.description ?? '',
+        ...(icon ? { icon } : {}),
+        ...(version ? { version } : {}),
+        installed: dev || !name.startsWith('.'),
+        writable: !dev && writableRoots.includes(root),
+        bootstrap: Boolean(descriptor?.bootstrap),
+        dependencies: Array.isArray(descriptor?.site?.dependencies) ? descriptor.site.dependencies.filter((value) => typeof value === 'string') : [] });
     }
     return rows.sort((a, b) => a.id.localeCompare(b.id) || a.directory.localeCompare(b.directory));
   };

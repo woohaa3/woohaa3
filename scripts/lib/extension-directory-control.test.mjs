@@ -176,3 +176,19 @@ test('改名通知让当前进程能继续托管已发布资源', (t) => {
   control.setInstalled('one', false);
   assert.deepEqual(calls, [[dir, path.join(f.root, '.one')]]);
 });
+
+test('开发者扩展进入安装清单并覆盖同名安装目录，禁止改名源码', (t) => {
+  const f = fixture(t);
+  f.add('sample');
+  const dev = fs.mkdtempSync(path.join(os.tmpdir(), 'extension-dev-'));
+  t.after(() => fs.rmSync(dev, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dev, 'extension.json'), JSON.stringify({ extensionId: 'sample', version: '2.0.0', site: { name: '开发样例', description: '开发目录' } }));
+  const control = f.control({ devExtensions: [{ extensionId: 'sample', dir: dev }] });
+  assert.deepEqual(control.list().map(({ id, directory, label, version, writable }) => ({ id, directory, label, version, writable })), [
+    { id: 'sample', directory: dev, label: '开发样例', version: '2.0.0', writable: false }
+  ]);
+  assert.throws(() => control.setInstalled('sample', false), { code: 'EXTENSION_DIRECTORY_READONLY' });
+  assert.ok(fs.existsSync(dev));
+  fs.rmSync(path.join(f.root, 'sample'), { recursive: true });
+  assert.equal(control.list()[0].id, 'sample', '没有常规安装目录也必须展示');
+});
