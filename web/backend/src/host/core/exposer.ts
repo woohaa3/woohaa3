@@ -188,7 +188,20 @@ export const exposerPlugin: HostPlugin = {
           // 新键优先；`storage.expose` 是升级前的旧键，留着读一版，避免已配的部署升级后
           // 突然「没有对外地址」。
           const next = ctx.config.get("exposer.primary");
-          if (typeof next === "string" && next.trim() !== "") return next;
+          if (typeof next === "string" && next.trim() !== "") {
+            // 历史遗留：这个键在拆分前存的是存储后端 id，部署里可能还留着 `local`——
+            // 它永远签不出地址。按「未设置」处理，让内置默认提供者接管；配置本身不改。
+            const backend = ctx.storage.resolve(next.trim());
+            if (backend && !backend.presign) {
+              ctx.log.scope("exposer")({
+                event: "exposer-primary-ignored",
+                value: next.trim(),
+                reason: "backend-cannot-sign"
+              });
+              return undefined;
+            }
+            return next;
+          }
           const legacy = ctx.config.get("storage.expose");
           return typeof legacy === "string" && legacy.trim() !== "" ? legacy : undefined;
         }

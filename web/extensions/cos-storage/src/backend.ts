@@ -382,7 +382,12 @@ export function createCosStoragePlugin(): ExtensionPlugin<typeof COS_STORAGE_CON
       });
       ctx.effect(() => ctx.storage.register(publicBackend));
       ctx.effect(() =>
-        ctx.exposer.register({ ...createCosPublicExposer(publicConfig), default: true })
+        ctx.exposer.register({
+          ...createCosPublicExposer(publicConfig),
+          // 设置页据此把「打开该提供者的配置」链到本插件，而不是显示「未找到提供者」。
+          ownerExtensionId: COS_STORAGE_PLUGIN_ID,
+          default: true
+        })
       );
       log({
         event: "cos-public-activated",

@@ -251,6 +251,37 @@ describe("注册的提供者", () => {
   });
 });
 
+describe("无效的历史配置", () => {
+  it("exposer.primary 指向不能签名的后端时按未设置处理，由内置默认提供者接管", async () => {
+    // 拆分前这个键存的是存储后端 id，部署里可能还留着 `local`：它永远签不出地址。
+    const values: Record<string, string> = { "exposer.primary": "local" };
+    const provided: Record<string, unknown> = {};
+    const logs: Array<Record<string, unknown>> = [];
+    const storage = createStorageRegistry({ settings: { primary: () => "local" } });
+    storage.register(memoryBackend("local"));
+    const ctx = {
+      config: { get: (key: string) => values[key] },
+      log: { scope: () => (event: Record<string, unknown>) => logs.push(event) },
+      storage,
+      provide: (name: string, value: unknown) => {
+        provided[name] = value;
+      },
+      effect: (callback: () => () => void) => {
+        callback();
+      }
+    } as never;
+
+    exposerPlugin.apply(ctx, undefined as never);
+    const exposer = provided.exposer as ReturnType<typeof createExposerRegistry>;
+    expect(exposer.selectedId()).toBeUndefined();
+    expect(logs.some((event) => event.event === "exposer-primary-ignored" && event.value === "local")).toBe(true);
+
+    // 默认提供者仍然可用：坏值不再挡住「打开开关就生效」。
+    exposer.register({ exposerId: "cos-public", requiresReplica: false, default: true, expose: async () => "https://u" });
+    expect(exposer.selectedId()).toBe("cos-public");
+  });
+});
+
 describe("内置默认提供者", () => {
   it("没有显式配置时用注册方声明的 default（开启开关即生效）", async () => {
     const local = memoryBackend("local");

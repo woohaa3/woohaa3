@@ -97,7 +97,9 @@ export function storageSettingOptions(
     // 主存储尚未选择时给一个占位项：原生 select 的 value 必须能匹配到 option。
     options.unshift({ value: "", label: "请选择后端" });
   }
-  if (currentValue && !options.some((option) => option.value === currentValue)) {
+  // 地址提供者的旧值（拆分前存的是存储后端 id，例如 `local`）永远出不了地址：
+  // 运行时按未设置处理，这里也就不再把它当成一个可选项显示出来。
+  if (key !== "exposer.primary" && currentValue && !options.some((option) => option.value === currentValue)) {
     options.push({ value: currentValue, label: currentValue + "（未注册）" });
   }
   return options;

@@ -202,3 +202,15 @@ describe("对外地址提供者（exposer 扩展点）", () => {
     expect(providersForSettingKey("storage.primary", backends, addressProviders)).toBe(backends);
   });
 });
+
+describe("exposer.primary 的无效旧值", () => {
+  it("不再作为选项显示，也不再标注「未注册」", () => {
+    const providers = [
+      { id: "cos-public", label: "COS 公开临时桶", ownerExtensionId: "cos-storage", registered: true }
+    ];
+    const options = storageSettingOptions("exposer.primary", providers, "local");
+    // 只剩空值与真正可用的提供者；运行时已把 `local` 按未设置处理。
+    expect(options.map((option) => option.value)).toEqual(["", "cos-public"]);
+    expect(options.some((option) => option.label.includes("未注册"))).toBe(false);
+  });
+});
