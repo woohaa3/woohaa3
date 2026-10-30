@@ -2,7 +2,7 @@
   "version": "woohaa-app-theme-v2",
   "id": "default",
   "tokens": {
-    "webBackdrop": "#f8faf9",
+    "webBackdrop": "#f8f9f7",
     "webSurface": "#ffffff",
     "webPanel": "#ffffff",
     "webElevated": "#ffffff",

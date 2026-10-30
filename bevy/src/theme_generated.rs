@@ -7,11 +7,11 @@
 
 pub(crate) const APP_THEME_SCHEMA_VERSION: &str = "woohaa-app-theme-v2";
 pub(crate) const APP_THEME_DEFAULT_ID: &str = "default";
-pub(crate) const APP_THEME_DEFAULT_FINGERPRINT: &str = "067deae4f2041f31";
+pub(crate) const APP_THEME_DEFAULT_FINGERPRINT: &str = "b58cab437039ba3b";
 
 /// `(token 名, 规范 hex)`；顺序与 canonical preset 一致。
 pub(crate) const APP_THEME_DEFAULT_TOKENS: &[(&str, &str)] = &[
-    ("webBackdrop", "#f8faf9"),
+    ("webBackdrop", "#f8f9f7"),
     ("webSurface", "#ffffff"),
     ("webPanel", "#ffffff"),
     ("webElevated", "#ffffff"),

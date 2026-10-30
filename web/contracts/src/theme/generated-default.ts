@@ -5,7 +5,7 @@ import type { AppThemeTokenName, AppThemeTokens } from "./schema.js";
 /** 默认 preset token（规范小写 hex）。 */
 export const APP_THEME_DEFAULT_TOKENS = {
   // web
-  webBackdrop: "#f8faf9",
+  webBackdrop: "#f8f9f7",
   webSurface: "#ffffff",
   webPanel: "#ffffff",
   webElevated: "#ffffff",
@@ -94,7 +94,7 @@ export const APP_THEME_DEFAULT_TOKENS = {
 } as const satisfies AppThemeTokens;
 
 export const APP_THEME_DEFAULT_ID = "default";
-export const APP_THEME_DEFAULT_FINGERPRINT = "067deae4f2041f31";
+export const APP_THEME_DEFAULT_FINGERPRINT = "b58cab437039ba3b";
 
 /** 默认 preset（生成物）；结构与 `app-theme.default.json` 一致。 */
 export const APP_THEME_DEFAULT_PRESET = {

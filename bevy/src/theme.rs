@@ -111,7 +111,7 @@ mod tests {
     fn backdrop_color_follows_web_backdrop_token() {
         assert_eq!(
             ThemeResource::default().backdrop_color(),
-            Color::srgba_u8(0xf8, 0xfa, 0xf9, 255)
+            Color::srgba_u8(0xf8, 0xf9, 0xf7, 255)
         );
         let mut next = ThemeResource::default().0.clone();
         next.tokens
