@@ -119,18 +119,18 @@ function HostThemeSync({ theme }: { theme: ThemeService }) {
  *
  * 点项目卡打开**另一张**画布是一次整页跳转（见 `HostProjectSource`），外壳会在新页面上重新挂载，
  * MemoryRouter 回到初始位置（首页）。用户点的是"进这张画布"，落回首页就等于没反应。
- * 所以跳转前记一笔，新外壳挂载时读走。
+ * 所以跳转前记一笔，新外壳挂载时读走 —— 这一笔必须跨整页跳转，用 sessionStorage。
  *
- * 同一原因也适用于 sixi shell 因宿主画布进入 node-focus 工作区而被卸载、退出后重挂的情况：
- * 重挂时也要落回原来那个路由（通常是 ROUTES.create），不能落回首页弹出四喜界面。
- * 这里同时维护两个 key：
- * - PENDING_ENTRY_KEY：整页跳转前写入，挂载后清除（一次性）
- * - CURRENT_ROUTE_KEY：路由变化时持续同步，供 remount 时读取；挂载后**不清除**
- *
- * 用 sessionStorage：整页跳转后模块变量不在了；只活在这个标签页里，换标签或关掉就丢，正合适。
+ * 另一件事：宿主进入 node-focus 工作区时 `canvas.overlay` 的贡献会被重建，外壳随之重挂，
+ * MemoryRouter 又回到初始位置，于是四喜界面弹出来盖住模型编辑器。这时要恢复离开前的路由。
+ * **这条只在同一次页面生命周期内有效**：记在模块变量里，不要写进 sessionStorage ——
+ * 写进去会跨刷新保留，第二天打开应用就直接进画布态，看起来像"四喜扩展没启动"
+ *（踩过：`sixi-spike.current-route` 残留导致每次启动都停在 `/create`）。
  */
 const PENDING_ENTRY_KEY = 'sixi-spike.entry';
-const CURRENT_ROUTE_KEY = 'sixi-spike.current-route';
+
+/** 同一次页面里最后一次路由；整页刷新时模块重新求值，自然归零。 */
+let currentRoute: string | null = null;
 
 function readPendingEntry(): string | null {
   try {
@@ -150,19 +150,11 @@ function writePendingEntry(entry: string | null): void {
 }
 
 function readCurrentRoute(): string | null {
-  try {
-    return sessionStorage.getItem(CURRENT_ROUTE_KEY);
-  } catch {
-    return null;
-  }
+  return currentRoute;
 }
 
 function writeCurrentRoute(route: string): void {
-  try {
-    sessionStorage.setItem(CURRENT_ROUTE_KEY, route);
-  } catch {
-    /* 存储不可用：忽略 */
-  }
+  currentRoute = route;
 }
 
 export function SixiShell({
