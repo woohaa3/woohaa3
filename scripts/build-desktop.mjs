@@ -46,7 +46,7 @@ import {
   tauriFrontendDist,
   validateIconSource
 } from "./lib/desktop-release.mjs";
-import { loadBuildProfile, updateEndpointFor, updaterPlatformKey } from "./lib/build-profile.mjs";
+import { buildDefines, describeBuildProfile, loadBuildProfile, updateEndpointFor, updaterPlatformKey } from "./lib/build-profile.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -243,6 +243,19 @@ async function runBuild(options) {
   const targetError = nativeTargetError({ platform, arch, target: options.target });
   if (targetError) throw new Error(targetError);
   assertPlatformAndIcons({ platform });
+  // 更新源、信任根与构建期常量都来自 build profile；env 只在 loader 内作为加载期覆盖。
+  // 必须在 buildFrontend 之前加载：公开桶与官方信任根要通过 WOOHAA3_DEFINES 进入前端/后端产物。
+  const buildProfile = loadBuildProfile({ repoRoot: path.dirname(root), env: process.env });
+  if (!buildProfile.ok) {
+    const detail = buildProfile.errors.map((error) => `  ${error.path}: ${error.message}`).join("\n");
+    throw new Error(`build profile 校验失败（${buildProfile.path ?? "未知路径"}）：\n${detail}`);
+  }
+  console.log(`[desktop] ${describeBuildProfile(buildProfile)}`);
+  const defines = buildDefines(buildProfile.resolved);
+  if (defines && !process.env.WOOHAA3_DEFINES?.trim()) {
+    process.env.WOOHAA3_DEFINES = JSON.stringify(defines);
+  }
+  if (defines) console.log(`[desktop] build-profile defines: ${Object.keys(defines).join(", ")}`);
   if (options.buildFrontend && !options.dryRun) {
     // 发布产物自报发布版本：桌面端没有部署脚本，按 git 现场取值只能得到 `<sha>-dirty`
     // （构建过程会写入生成资源，工作区必然是脏的），管理端「上报端版本」因此看不出是哪个版本。
@@ -262,12 +275,6 @@ async function runBuild(options) {
     frontendDist: options.frontend ? tauriFrontendDist(frontendDist, desktopDir) : null,
     defaultsPath
   });
-  // 更新源与信任根来自 build profile；env 只在 loader 内作为加载期覆盖。
-  const buildProfile = loadBuildProfile({ repoRoot: path.dirname(root), env: process.env });
-  if (!buildProfile.ok) {
-    const detail = buildProfile.errors.map((error) => `  ${error.path}: ${error.message}`).join("\n");
-    throw new Error(`build profile 校验失败（${buildProfile.path ?? "未知路径"}）：\n${detail}`);
-  }
   const platformKey = updaterPlatformKey({ platform, arch });
   const updateEndpoint = updateEndpointFor(buildProfile.resolved, platformKey) || null;
   const updatePublicKey = buildProfile.resolved.updatePublicKeys[0] ?? null;
