@@ -160,6 +160,16 @@ test("buildDefines 合并公开桶与官方信任根；都没有时为 null", ()
   assert.equal(buildDefines(empty.resolved), null);
 });
 
+test("settings 默认值解码并进入 buildDefines；非法键与密钥字段被拒", () => {
+  const settings = { "exposer.primary": "local-public", "storage.local.publicEnabled": true };
+  const loaded = loadBuildProfile({ repoRoot: sandbox(validProfile({ settings })) });
+  assert.deepEqual(loaded.resolved.settingDefaults, settings);
+  assert.deepEqual(buildDefines(loaded.resolved).__WOOHAA3_SETTING_DEFAULTS__, settings);
+  assert.equal(decodeBuildProfile(validProfile({ settings: { "bad key": true } })).ok, false);
+  assert.equal(decodeBuildProfile(validProfile({ settings: { "a.b": [] } })).ok, false);
+  assert.equal(decodeBuildProfile(validProfile({ settings: { "provider.token": "x" } })).ok, false);
+});
+
 test("publicBucket 派生构建期常量", () => {
   const loaded = loadBuildProfile({
     repoRoot: sandbox(validProfile({ publicBucket: { bucketName: "b", bucketUrl: "https://b.example.com", prefix: "p" } }))

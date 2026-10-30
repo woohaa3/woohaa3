@@ -17,13 +17,14 @@ function tempFiles() {
   return { configFile: path.join(dir, "woohaa.config.yml"), secretsFile: path.join(dir, "woohaa.secrets.yml") };
 }
 
-async function start(files: ReturnType<typeof tempFiles>, options: { env?: Record<string, string>; watch?: boolean } = {}) {
+async function start(files: ReturnType<typeof tempFiles>, options: { env?: Record<string, string>; watch?: boolean; settingDefaults?: Record<string, string | number | boolean> } = {}) {
   const events: Array<Record<string, unknown>> = [];
   const service = await createSettingsService({
     ...files,
     env: options.env ?? {},
     watch: options.watch ?? false,
     debounceMs: 20,
+    ...(options.settingDefaults ? { settingDefaults: options.settingDefaults } : {}),
     logger: (event) => events.push(event)
   });
   services.push(service);
@@ -65,6 +66,24 @@ describe("createSettingsService", () => {
     expect(service.get("storage.primary")).toBe("local");
     expect(resolveSettingsFiles({}, "/repo").configFile).toBe("/repo/web/woohaa.config.yml");
     expect(resolveSettingsFiles({ WOOHAA3_SECRETS_FILE: "/etc/woohaa/secrets.yml" }, "/repo").secretsFile).toBe("/etc/woohaa/secrets.yml");
+  });
+
+  it("构建期默认值覆盖静态项与插件配置项，用户文件仍然优先", async () => {
+    const files = tempFiles();
+    const { service } = await start(files, {
+      settingDefaults: { "exposer.primary": "local-public", "storage.local.publicEnabled": true }
+    });
+    expect(service.get("exposer.primary")).toBe("local-public");
+
+    service.register("storage.local", {
+      publicEnabled: { kind: "boolean", default: false, reload: "hot", label: "公开桶", description: "" }
+    }, "本地存储");
+    expect(service.describe().find((entry) => entry.key === "storage.local.publicEnabled")?.value).toBe(true);
+
+    fs.writeFileSync(files.configFile, "exposer:\n  primary: cos\nstorage:\n  local:\n    publicEnabled: false\n", "utf8");
+    await service.reload();
+    expect(service.get("exposer.primary")).toBe("cos");
+    expect(service.describe().find((entry) => entry.key === "storage.local.publicEnabled")?.value).toBe(false);
   });
 
   it("默认位置不随 cwd 漂移：从子包目录启动也落在仓库根的 web/ 下", async () => {

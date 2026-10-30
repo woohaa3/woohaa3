@@ -112,6 +112,16 @@
       },
       "description": "仅作覆盖；缺省按 git 现场取值。"
     },
+    "settings": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+      },
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      },
+      "description": "部署设置项的默认值（用户配置文件优先）；不得承载密钥。"
+    },
     "cdn": {
       "description": "runtime 与更新的共同基址：同一个桶/CDN，两个前缀分开。改动域名只改一处。",
       "type": "object",

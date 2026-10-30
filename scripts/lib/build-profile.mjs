@@ -16,7 +16,7 @@ export const BUILD_PROFILE_SCHEMA_VERSION = 1;
 const PROFILE_FILE = "build-profile.json";
 const LOCAL_PROFILE_FILE = "build-profile.local.json";
 const ALLOWED_ROOT_FIELDS = new Set([
-  "$schema", "schemaVersion", "profileId", "publicBucket", "cdn", "desktop", "dev", "extensionTrust", "extensions", "frontendBuild"
+  "$schema", "schemaVersion", "profileId", "publicBucket", "cdn", "desktop", "dev", "extensionTrust", "extensions", "frontendBuild", "settings"
 ]);
 const SECRET_KEY = /secret|token|password|private_?key|api_?key/i;
 const PEM_PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
@@ -219,6 +219,20 @@ export function decodeBuildProfile(raw) {
     }
   }
 
+  // 设置项默认值：只放「部署想改的默认」，真正的值仍以用户配置文件为准。
+  const settings = raw.settings;
+  if (settings !== undefined) {
+    if (!isObject(settings)) push("$.settings", "必须是对象");
+    else {
+      for (const [key, value] of Object.entries(settings)) {
+        const at = "$.settings." + key;
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(key)) push(at, "键名只允许字母数字与 ._-");
+        if (SECRET_KEY.test(key)) push(at, "profile 不得承载密钥（命中密钥字段名）");
+        if (!["string", "number", "boolean"].includes(typeof value)) push(at, "只允许 string / number / boolean");
+      }
+    }
+  }
+
   return errors.length === 0 ? { ok: true, profile: raw } : { ok: false, errors };
 }
 
@@ -285,7 +299,8 @@ export function loadBuildProfile({ repoRoot, clientRoot, env = {} } = {}) {
     extensionDefaults: profile.extensions?.defaultEnabled ? { ...profile.extensions.defaultEnabled } : {},
     siteExtensionDefaults: profile.extensions?.siteDefaultEnabled ? { ...profile.extensions.siteDefaultEnabled } : {},
     devRemoteServerUrl: profile.dev?.remoteServerUrl ?? "",
-    frontendBuild: profile.frontendBuild ? { ...profile.frontendBuild } : null
+    frontendBuild: profile.frontendBuild ? { ...profile.frontendBuild } : null,
+    settingDefaults: profile.settings ? { ...profile.settings } : {}
   };
 
   const applyEnv = (name, field, assign) => {
@@ -327,8 +342,17 @@ export function officialTrustDefines(resolved) {
 }
 
 /** 所有构建期常量合并成一个对象，交给 build-package 的 esbuild define。 */
+export function settingDefaultDefines(resolved) {
+  const values = resolved.settingDefaults ?? {};
+  return Object.keys(values).length > 0 ? { __WOOHAA3_SETTING_DEFAULTS__: { ...values } } : null;
+}
+
 export function buildDefines(resolved) {
-  const merged = { ...(publicBucketDefines(resolved) ?? {}), ...(officialTrustDefines(resolved) ?? {}) };
+  const merged = {
+    ...(publicBucketDefines(resolved) ?? {}),
+    ...(officialTrustDefines(resolved) ?? {}),
+    ...(settingDefaultDefines(resolved) ?? {})
+  };
   return Object.keys(merged).length > 0 ? merged : null;
 }
 
