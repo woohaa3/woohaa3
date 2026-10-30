@@ -31,7 +31,12 @@ type RouteRuntime = {
 
 export type RegisterPpserverProxyOptions = {
   baseUrl: string;
-  accessToken: () => string;
+  /**
+   * 取当前可用的令牌。**是函数不是字符串**，且可以是异步的 ——
+   * 令牌会在运行时被续期替换，构造时拿一份的话续期后仍在用旧值。
+   * 异步是因为续期要在请求前真发一次刷新请求。
+   */
+  accessToken: () => string | Promise<string>;
   tenantId?: () => string;
   order?: number;
   fetchImpl?: typeof globalThis.fetch;
@@ -100,7 +105,7 @@ export function registerPpserverProxy(ctx: HostExtensionContext, options: Regist
           req,
           fetchImpl,
           origin,
-          accessToken: options.accessToken(),
+          accessToken: await options.accessToken(),
           ...(options.tenantId?.() ? { tenantId: options.tenantId() } : {})
         });
         if ("message" in result) {
@@ -122,6 +127,15 @@ export function registerPpserverProxy(ctx: HostExtensionContext, options: Regist
         }
         res.end();
       } catch (error) {
+        /*
+         * 头已经发出去了（流式转发开始后上游断开）就**不能再 writeHead** ——
+         * 那会抛 `ERR_HTTP_HEADERS_SENT`，而它在 catch 里没人接，响应永远不 end，
+         * 前端表现为请求挂死而不是报错。这种情况只能直接断开连接。
+         */
+        if (res.headersSent) {
+          res.destroy();
+          return true;
+        }
         writeJson(res, 502, { message: error instanceof Error ? error.message : String(error) });
       }
       return true;

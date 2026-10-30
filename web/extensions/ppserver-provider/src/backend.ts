@@ -104,6 +104,13 @@ export const PPSERVER_CONFIG = defineConfigSchema({
 export type PpserverRegistrationInput = {
   accessToken?: string;
   /**
+   * 配置里手填的 refresh_token。
+   *
+   * 只配它也能用：首次请求时用它换一次令牌并把轮换后的新值落盘，
+   * 之后一直靠落盘的那份续期。**不是 `accessToken` 的附属品** —— 两者任一存在即可。
+   */
+  refreshToken?: string;
+  /**
    * 取当前可用的令牌（含自动续期）。给了就用它代替 `accessToken`，
    * 每次请求现取 —— 续期会换掉令牌，构造时固定的话续期后仍用旧值。
    */
@@ -136,9 +143,19 @@ export function createPpserverRegistration(input: PpserverRegistrationInput): {
   catalog: PpserverCatalog;
 } {
   const accessToken = (input.accessToken ?? "").trim();
+  const refreshToken = (input.refreshToken ?? "").trim();
   const baseUrl = (input.baseUrl ?? DEFAULT_PPSERVER_BASE_URL).trim();
   const tenantId = (input.tenantId ?? "").trim();
-  const available = accessToken !== "" && baseUrl !== "" && (input.supabaseUrl ?? "").trim() !== "";
+  /*
+   * **两种令牌任一存在即可用**。以前只认 `accessToken`，但配了 refreshToken、
+   * 没填 accessToken 的用户会拿到一个 `provider: undefined` 的空注册 ——
+   * 一个模型都注册不上，而设置页恰恰把 refreshToken 标成「推荐」。
+   * `resolveAccessToken` 存在时也一样：它本身就是令牌来源。
+   */
+  const available =
+    (accessToken !== "" || refreshToken !== "" || input.resolveAccessToken !== undefined) &&
+    baseUrl !== "" &&
+    (input.supabaseUrl ?? "").trim() !== "";
 
   const catalog: PpserverCatalog = { templates: [...(input.discovered ?? [])] };
 
@@ -202,13 +219,15 @@ export function createPpserverProviderPlugin(
     Config: PPSERVER_CONFIG,
     health: (config) => {
       // 只查令牌：地址与 anon key 由远程配置提供，启动后才知道拉没拉到（拉不到会记日志）。
+      // **两种令牌都算**：refreshToken 能自己换出访问令牌，只填它也是可用状态。
       const accessToken = (config.accessToken ?? "").trim();
-      if (accessToken !== "") return undefined;
+      const refreshToken = (config.refreshToken ?? "").trim();
+      if (accessToken !== "" || refreshToken !== "") return undefined;
       return {
         state: "degraded" as const,
         diagnostics: [{
           code: "provider-credentials-missing",
-          message: "未填写访问令牌（登录后拿到的 Supabase access_token）。地址与 anon key 会自动从公开配置读取，不用手填。"
+          message: "未填写令牌：填「刷新令牌」可在过期时自动续期，只填「访问令牌」则约一小时后需要重新获取。地址与 anon key 会自动从公开配置读取，不用手填。"
         }]
       };
     },
@@ -228,13 +247,6 @@ export function createPpserverProviderPlugin(
       });
       if (remote.warning) log({ event: "ppserver-remote-config-failed", message: remote.warning });
       const baseUrl = config.baseUrl?.trim() || remote.config.taskrouterBaseUrl || DEFAULT_PPSERVER_BASE_URL;
-      /*
-       * Supabase 地址与 anon key：配置项 > 远程配置 > **内置默认值**。
-       *
-       * 内置默认值不是冗余 —— `banners/sixi/config.json` 里的那组指向另一个项目
-       * （`sdpppx.zombee.tech/supabase/…`），拿它查模板表会一直报「令牌无效」。
-       * PS 插件本身也是用打包进去的 `sdpppX.js` 覆盖掉远程值的，这里与它保持一致。
-       */
       /*
        * **不用 `config.json` 里的 Supabase 值**。
        *
@@ -285,6 +297,7 @@ export function createPpserverProviderPlugin(
         ...deps,
         fetchImpl: createProviderLifecycleFetch(ctx, deps.fetchImpl),
         ...(accessToken ? { accessToken } : {}),
+        ...(refreshToken ? { refreshToken } : {}),
         resolveAccessToken,
         baseUrl,
         ...(supabaseUrl ? { supabaseUrl } : {}),
@@ -294,10 +307,11 @@ export function createPpserverProviderPlugin(
 
       const refresh = async (): Promise<{ ok: true; modelCount: number; message?: string } | { ok: false; message: string }> => {
         // 目录读表（与 PS 插件同一张 tasks_template），参数表单仍问 describe。
+        // 令牌**每次现取**：刷新模型常在「令牌正好过期」时点，用配置里的旧值必然失败。
         const listed = await fetchTemplateCatalog({
           supabaseUrl,
           anonKey,
-          accessToken,
+          accessToken: await resolveAccessToken(),
           ...(tenantId ? { tenantId } : {}),
           ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {})
         });
@@ -337,9 +351,11 @@ export function createPpserverProviderPlugin(
       ctx.effect(() => ctx.generation.register(registration));
       registerModelRefreshRoute(ctx, { path: REFRESH_PATH, refresh });
       // 同源转发：四喜前端没有令牌，只能经这条路由借宿主的凭据调 ppserver。
+      // **必须用续期后的令牌**：四喜前端走的正是这条路径，固定成配置里的旧值会让
+      // 「自动续期」在最需要它的地方失效（一小时后必然 401，要重启宿主才恢复）。
       registerPpserverProxy(ctx, {
         baseUrl,
-        accessToken: () => accessToken,
+        accessToken: resolveAccessToken,
         tenantId: () => tenantId
       });
       log({
