@@ -208,12 +208,20 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
     }
   };
 
+  const content = deps.canvas.content;
   const grants = deps.toolGrantRegistry ?? createToolGrantRegistry();
   const tools: ApplicationToolDelegationFacade = {
     async issue(request): Promise<ApplicationToolGrant> {
       delegateOrThrow(request.delegation, log);
-      if (request.mode !== undefined && !["model3d", "film-set", "camera", "canvas-group"].includes(request.mode)) throw new Error("unsupported-target-mode");
-      if (request.mode === "camera") throw new Error("camera-mode-deprecated");
+      if (request.mode !== undefined) {
+        if (request.mode === "camera") throw new Error("camera-mode-deprecated");
+        if (request.mode !== "model3d" && request.mode !== "canvas-group") {
+          const target = content?.agentTargets?.().find((entry) => entry.mode === request.mode);
+          if (!target) throw new Error("unsupported-target-mode");
+          const allowed = new Set([...target.readTools, ...target.writeTools]);
+          if (request.tools?.some((tool) => !allowed.has(tool))) throw new Error("target-tool-not-supported");
+        }
+      }
       if (request.mode === "canvas-group") {
         if (!request.tools?.length) throw new Error("group-tools-required");
         if (request.tools.some(tool => !(CANVAS_GROUP_TOOLS as readonly string[]).includes(tool))) throw new Error("group-tool-not-supported");
@@ -259,7 +267,6 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
     }
   };
 
-  const content = deps.canvas.content;
   return {
     authoring,
     references,

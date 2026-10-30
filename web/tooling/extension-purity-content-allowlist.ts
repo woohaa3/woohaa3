@@ -157,12 +157,6 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
   {
-    file: "web/backend/src/ports/authoring-adapters.ts",
-    literals: ["film-set"],
-    stage: "node-data",
-    reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
-  },
-  {
     file: "web/contracts/src/backend/chatgpt-dto.ts",
     literals: ["film-set"],
     stage: "node-data",

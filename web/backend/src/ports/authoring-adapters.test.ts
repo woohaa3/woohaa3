@@ -189,6 +189,22 @@ describe("进程内 authoring 适配器", () => {
     for (let index = 0; index < 60; index += 1) expect(registry.authorize(call)).toEqual({ ok: true });
   });
 
+  it("业务目标授权要求活跃描述符，且工具不能超出声明的读写集合", async () => {
+    const content = new ContentContributionRegistry();
+    const services = createInProcessAuthoringServices({ canvas: fakeCanvas({ content }) });
+    const release = content.register({
+      extensionId: "npc-production",
+      targetModes: ["npc-production"],
+      eventOwners: ["npc-production"],
+      agentTargets: [{ mode: "npc-production", readTools: ["get_canvas_graph"], writeTools: ["create_canvas_node"], events: ["npc-production"] }]
+    });
+    const base = { delegation: DELEGATION, workId: "target-work", canvasId: "cv", nodeId: "n", mode: "npc-production" };
+    await expect(services.tools.issue({ ...base, tools: ["get_canvas_graph", "create_canvas_node"] })).resolves.toMatchObject({ tools: ["get_canvas_graph", "create_canvas_node"] });
+    await expect(services.tools.issue({ ...base, tools: ["delete_canvas_entities"] })).rejects.toThrow("target-tool-not-supported");
+    release();
+    await expect(services.tools.issue({ ...base, tools: ["get_canvas_graph"] })).rejects.toThrow("unsupported-target-mode");
+  });
+
   it("camera 模式已停用，不再签发新的目标授权", async () => {
     await expect(createInProcessAuthoringServices({ canvas: fakeCanvas() }).tools.issue({
       delegation: DELEGATION,
