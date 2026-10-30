@@ -38,6 +38,10 @@ export function AboutSection({ snapshot }: { snapshot: SettingsSnapshot | null }
   const storageProviders = snapshot?.extensionPoints?.storage;
   const exposerProviders = snapshot?.extensionPoints?.exposer;
   const publicRegistered = exposerProviders?.some((provider) => provider.id === "local-public") ?? false;
+  const exposerRegistered = exposerPrimary !== "" && (exposerProviders?.some((provider) => provider.id === exposerPrimary) ?? false);
+  const publicCredentialConfigured = ["storage.local.publicSecretId", "storage.cos.secretId"].some(
+    (key) => snapshot?.settings.find((item) => item.key === key)?.configured === true
+  );
   const platform = typeof navigator === "undefined" ? "未知" : navigator.platform || navigator.userAgent;
   const language = typeof navigator === "undefined" ? "" : navigator.language;
 
@@ -57,7 +61,10 @@ export function AboutSection({ snapshot }: { snapshot: SettingsSnapshot | null }
       </Row>
       <Row label="对外地址提供者" testId="settings-about-exposer">
         {exposerPrimary !== "" ? (
-          <code>{exposerPrimary}</code>
+          <>
+            <code>{exposerPrimary}</code>
+            {!exposerRegistered ? <span className="settings-page__badge is-warning">已选择但未注册</span> : null}
+          </>
         ) : (
           <>
             <span className="settings-page__badge is-warning">未选择</span>
@@ -69,8 +76,14 @@ export function AboutSection({ snapshot }: { snapshot: SettingsSnapshot | null }
       <Row label="公开临时桶" testId="settings-about-public-bucket">
         {publicRegistered ? (
           <>
-            <span className="settings-page__badge">已注册 local-public</span>
-            <span className="settings-page__hint"> 素材会推到公开只读桶，内容由运维定期清理。</span>
+            <span className={publicCredentialConfigured ? "settings-page__badge" : "settings-page__badge is-warning"}>
+              {publicCredentialConfigured ? "已注册 local-public" : "已注册，凭据未配置"}
+            </span>
+            <span className="settings-page__hint">
+              {publicCredentialConfigured
+                ? " 素材会推到公开只读桶，内容由运维定期清理。"
+                : " 请在「插件配置 → 本地存储」填公开桶凭据，或先配置 COS 对象存储复用其凭据。"}
+            </span>
           </>
         ) : publicEnabled ? (
           <>
