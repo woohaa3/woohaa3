@@ -312,6 +312,9 @@ pub(crate) fn sync(
         )
     });
     let mut start_budget = startup::StartBudget::new();
+    // 这一帧真正走到准入判断的节点。资源还没到、bounds 退化、离屏且没有卡片都会在此之前
+    // `continue`，那些节点处理不了也不会分配，也就不能继续占着延迟队列（见循环后的 retain）。
+    let mut considered: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for (index, node) in order {
         let (Some(view), Some(reference)) = (&node.model_preview, &node.model) else {
             continue;
@@ -352,8 +355,11 @@ pub(crate) fn sync(
                 31,
                 rig.focus_node.as_deref() == Some(node.id.as_str()),
             );
+            // 离屏且**没有卡片**的节点这一帧不会做任何分配，它的延迟项必须就地作废：
+            // 留着就是「排过队、后来离开画面」的孤儿，`has_pending()` 会一直为真。
             continue;
         }
+        considered.insert(node.id.as_str());
         let size = preview_target_size(
             width,
             height,
@@ -644,6 +650,14 @@ pub(crate) fn sync(
             state.latency.admitted(&node.id, generation);
         }
     }
+    // 延迟队列只保留这一帧真正走到准入判断的节点。上面的 `continue`（资源缺失、bounds
+    // 退化）不会清理旧条目，而 `retain(alive)` 只看节点是否还带 model/modelPreview，
+    // 于是「曾经排队、后来处理不了」的节点会永久留在队列里：`has_pending()` 恒为真，
+    // `pacing` 卡在 `active:previews`，画布再也回不到静止降频。节点恢复可处理后，
+    // 正常准入路径会按签名变化重新入队，因此这里丢弃不会漏掉刷新。
+    state
+        .deferred
+        .retain(|id, _| considered.contains(id.as_str()));
     schedule(&mut commands, &mut state, &mut images, &ready, &mut cameras);
     let mut layers = RenderLayers::from_layers(&[0, model3d::capture::CAPTURE_LAYER]);
     for card in state.cards.values() {

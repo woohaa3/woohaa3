@@ -10,10 +10,42 @@
  * 帧，先开窗会让第一条 `perf.frame` 的分母包含"等 React 提交"的时间，fps 因此偏低。
  */
 import { createPerfFrameWindow, type PerfFrameCounters, type PerfFrameWindow } from "../../services/telemetry-performance.js";
-import { sceneDiagnostics } from "./scene-diagnostics.js";
+import { sceneDiagnostics, frameStepMs } from "./scene-diagnostics.js";
 
 /** 运行时渲染计数（累计）；只有 dev 构建的 `getFrameCounters` 提供，读不到就不写 drawCalls。 */
-type RenderCounters = { readonly renders?: number; readonly drawCalls3d?: number };
+type RenderCounters = {
+  readonly renders?: number;
+  readonly drawCalls3d?: number;
+  readonly stageQueueMs?: number;
+  readonly stageQueueFrames?: number;
+  readonly stagePrepareMs?: number;
+  readonly stagePrepareFrames?: number;
+  readonly stageRenderMs?: number;
+  readonly stageRenderFrames?: number;
+  readonly drawnInstances?: number;
+  readonly stageMainMs?: number;
+  readonly stageMainFrames?: number;
+  readonly stageModelMs?: number;
+  readonly stageModelFrames?: number;
+  readonly pacing?: string;
+  /** 预览卡片规模（`d`=延迟队列、`v`=可见、`l`=在途、`r`=就绪、`b`=纹理 MB）。 */
+  readonly previews?: string;
+};
+
+/** 渲染三阶段/实例数的累计字段；逐项校验，缺项不补 0。 */
+const STAGE_COUNTER_KEYS = [
+  "stageQueueMs",
+  "stageQueueFrames",
+  "stagePrepareMs",
+  "stagePrepareFrames",
+  "stageRenderMs",
+  "stageRenderFrames",
+  "drawnInstances",
+  "stageMainMs",
+  "stageMainFrames",
+  "stageModelMs",
+  "stageModelFrames"
+] as const;
 
 /** 计数快照：字段名与 `scene-diagnostics` 一致，避免两套口径各自解释同一个数字。 */
 function readFrameCounters(): PerfFrameCounters {
@@ -27,15 +59,31 @@ function readFrameCounters(): PerfFrameCounters {
     stringifyMs: sceneDiagnostics.stringifyMs,
     wasmAcceptMs: sceneDiagnostics.wasmAcceptMs,
     frameExecutions: sceneDiagnostics.frameExecutions,
-    frameExecutionMs: sceneDiagnostics.frameExecutionMs
+    frameExecutionMs: sceneDiagnostics.frameExecutionMs,
+    // 复制一份：窗口基线要留住开窗那一刻的值，不能跟随后续累加。
+    stepMs: { ...frameStepMs }
   };
+}
+
+/** 运行时计数 → 帧窗口字段；缺项不补 0（读不到就整段省略）。 */
+function runtimeCounters(render: RenderCounters): Partial<PerfFrameCounters> {
+  const counters: { -readonly [K in keyof PerfFrameCounters]?: PerfFrameCounters[K] } = {};
+  if (typeof render.renders === "number") counters.renderFrames = render.renders;
+  if (typeof render.drawCalls3d === "number") counters.drawCalls = render.drawCalls3d;
+  for (const key of STAGE_COUNTER_KEYS) {
+    const value = render[key];
+    if (typeof value === "number" && Number.isFinite(value)) counters[key] = value;
+  }
+  if (render.pacing !== undefined) counters.pacing = render.pacing;
+  if (render.previews !== undefined) counters.previews = render.previews;
+  return counters;
 }
 
 /**
  * 创建画布页的帧窗口，并把页面可见性接到"丢半窗"。
  *
- * 返回的 `dispose` 关闭窗口、计时器与监听；不写最后一段半窗（页面离开时的半窗与切后台
- * 同义，spec: 隐藏时丢弃半窗）。
+ * 返回的 `dispose` 关闭窗口、计时器与监听。整窗 60 秒到点前的可见片段（≥10 秒）会在
+ * 卸载时补写，否则短会话在遥测里完全消失；隐藏的半窗照旧丢弃（spec: 隐藏时丢弃半窗）。
  */
 export function installPerfFrameWindow(
   readRenderCounters?: () => RenderCounters | null | undefined
@@ -55,9 +103,7 @@ export function installPerfFrameWindow(
     } catch {
       render = undefined;
     }
-    return typeof render?.renders === "number" && typeof render?.drawCalls3d === "number"
-      ? { ...counters, renderFrames: render.renders, drawCalls: render.drawCalls3d }
-      : counters;
+    return { ...counters, ...(render ? runtimeCounters(render) : {}) };
   };
   const window = createPerfFrameWindow({ read, isHidden });
   const onVisibilityChange = (): void => window.visibilityChanged(isHidden());

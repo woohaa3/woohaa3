@@ -84,7 +84,12 @@ export const TELEMETRY_ATTRIBUTE_KEYS = [
   "mode",
   "kind",
   "stage",
+  // JS 帧循环执行次数/秒（`perf.frame`）：含输入触发的强制 flush，不是画布出帧率。
   "fps",
+  // 画布实际出帧率（`perf.frame`，仅 dev 能读到渲染器计数时携带）：与开发期 FPS 徽标同源，
+  // 是 Bevy Render PostCleanup 的完成帧率（不代表 GPU present）。`fps` 高而 `renderFps` 低，
+  // 说明瓶颈在渲染侧；两者都低才是更新循环被按住。
+  "renderFps",
   "sceneBuilds",
   "sceneSubmits",
   "sceneDedupes",
@@ -97,6 +102,28 @@ export const TELEMETRY_ATTRIBUTE_KEYS = [
   // 每帧 3D 主 pass 的 draw call 记录数（`perf.frame`，仅 dev 可读时携带）：
   // 5 秒级回归里 `fps` 看不出的"画得太多"由这条回答（2026-10-28 片场总览 LOD 修复）。
   "drawCalls",
+  // 每帧提交的模型实例数（`perf.frame`，仅 dev）：draw call 少不等于画得少，
+  // 一次 instanced draw 可以带上万个实例。AABB 失效/批级剔除漏掉时，`drawCalls`
+  // 仍在个位数而这里会顶到几千上万。
+  "drawnInstances",
+  // 主世界（Update 图）每帧墙钟与其中模型同步系统的每帧墙钟（`perf.frame`，仅 dev）。
+  // `frameExecMs` 只覆盖 JS 帧循环、渲染三阶段只覆盖 render sub-app，两者之间的缺口
+  // （模型同步、预览准入、LOD、块布局）只有这两项能回答。
+  "mainMs",
+  "modelMs",
+  // 渲染三阶段的每帧平均墙钟（`perf.frame`，仅 dev）：Queue / Prepare / Render。
+  // `fps` 掉下来而 `frameExecMs`（JS 帧循环）没涨时，就靠这三个数回答"多出来的时间
+  // 花在渲染提交、资源准备，还是根本不在本进程的渲染阶段里"。
+  "queueMs",
+  "prepareMs",
+  "renderMs",
+  // 模型卡片预览的规模快照（`perf.frame`，仅 dev）：`d`=延迟队列、`v`=可见、`l`=在途、
+  // `r`=就绪、`b`=纹理 MB。`pacing` 只说"还有子系统要连续帧"，这条说"是哪一种、多大"。
+  "previews",
+  // 帧内最贵的几步（`perf.frame`，仅 dev）：`<步骤>:<每帧 ms>`，按每帧耗时取前三。
+  // `frameExecMs` 只说"这一帧花了多少"，这条回答"花在 viewport-notify、image-sync、
+  // video-sync 还是 composite-media-sync"——片场相关的逐帧会话同步就在这里露头。
+  "steps",
   // 总览 LOD 采样（`perf.lod`）的分布计数：实际已发布档位、准备中数量与最大投影占比。
   // 只做聚合，不引入节点维度；`maxAttributes` 仍能装下一条样本。
   "low",
@@ -219,6 +246,7 @@ export const TELEMETRY_PERF_ATTRIBUTE_KEYS: Readonly<
   "perf.frame": [
     "mode",
     "fps",
+    "renderFps",
     "sceneBuilds",
     "sceneSubmits",
     "sceneDedupes",
@@ -228,7 +256,18 @@ export const TELEMETRY_PERF_ATTRIBUTE_KEYS: Readonly<
     "wasmAcceptMs",
     "frameExecMs",
     "frameExecutions",
-    "drawCalls"
+    "drawCalls",
+    "drawnInstances",
+    "queueMs",
+    "prepareMs",
+    "renderMs",
+    "steps",
+    "previews",
+    "mainMs",
+    "modelMs",
+    // 帧节奏标签（仅 dev）：`idle` / `dwell` / `active:<忙碌项>`。帧率掉下来时，
+    // 先看它是不是有一项一直要求连续帧，再决定查渲染耗时还是查"谁在叫醒循环"。
+    "pacing"
   ],
   // 只记分布、准备状态与原因分布；`owners`/`pins` 仅 dev 构建携带，且只放节点 id 的末 12 字符摘要。
   "perf.lod": [
@@ -290,9 +329,17 @@ export const TELEMETRY_LIMITS = {
    * 单条事件最多属性对。
    *
    * 从 8 提到 12：`perf.frame` 要一条装下窗口内的十项计数 + `mode`（design D2/D4）。
+   * 从 12 提到 13：`perf.frame` 再带一条 `renderFps`（画布实际出帧率），否则它会被挤掉，
+   * 而"画布掉帧"正是 `fps`（JS 帧循环次数）回答不了的那个问题。
+   * 从 13 提到 18：帧率掉下来时要能定位到"时间花在哪"——`drawnInstances`（实例数）
+   * 把「画得少」与「draw call 少但实例多」分开，`queueMs`/`prepareMs`/`renderMs`
+   * 把渲染三阶段拆开，`pacing` 指出还有没有子系统在要求连续帧。
+   * 再提到 19：`steps` 直接把帧内最贵的三步写进同一条事实。
+   * 再提到 20：`previews` 把预览延迟队列与纹理占用写进同一条事实。
+   * 再提到 22：`mainMs`/`modelMs` 补上主世界那一层（JS 与渲染三阶段都没覆盖）。
    * 上限仍在，属性键集合也仍是封闭枚举，所以基数与长度都有界。
    */
-  maxAttributes: 12,
+  maxAttributes: 22,
   /** 属性值单行最大字符数（按码点截断，中文不会被切坏）。 */
   maxAttributeValueLength: 128,
   /** 属性序列化后最大字节数；超预算按排序确定性丢弃。 */

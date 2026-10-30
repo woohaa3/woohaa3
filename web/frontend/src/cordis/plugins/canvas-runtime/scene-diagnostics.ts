@@ -162,6 +162,21 @@ const state: SceneDiagnostics = {
 export const sceneDiagnostics: SceneDiagnostics = state;
 
 /**
+ * 帧内每个步骤的累计墙钟（ms），按 `frameLoop.step` 的操作名分组。
+ *
+ * `frameExecMs` 只回答"这一帧花了多少"，不回答"花在哪一步"：片场卡片的会话同步、
+ * 纹理上传、投影通知都在同一个帧结算里，只有拆到步骤名才能看出是谁把 120Hz 的
+ * 8.33ms 预算吃穿。只累加数字，不改返回值或异常。
+ */
+export const frameStepMs: Record<string, number> = {};
+
+/** 记一次步骤耗时（非有限值或非正值直接丢弃）。 */
+export function noteFrameStep(operation: string, ms: number): void {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  frameStepMs[operation] = (frameStepMs[operation] ?? 0) + ms;
+}
+
+/**
  * v4: time wire encoding and synchronous acceptance, including rejected calls.
  *
  * 计时在所有构建里都做（change: 2026-10-25-enhance-telemetry-performance-collection，D4）：

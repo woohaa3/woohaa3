@@ -199,7 +199,25 @@ export type BevyRuntime = {
   overviewCacheSnapshot?(): string;
   overviewCacheCommand?(json: string): void;
   /** 开发面板读取的累计帧计数；render 完成表示调度完成，不表示 GPU 呈现确认。 */
-  getFrameCounters?(): { generation: number; renders: number; updates: number; drawCalls3d?: number } | undefined;
+  getFrameCounters?(): {
+    generation: number;
+    renders: number;
+    updates: number;
+    drawCalls3d?: number;
+    stageQueueMs?: number;
+    stageQueueFrames?: number;
+    stagePrepareMs?: number;
+    stagePrepareFrames?: number;
+    stageRenderMs?: number;
+    stageRenderFrames?: number;
+    drawnInstances?: number;
+    stageMainMs?: number;
+    stageMainFrames?: number;
+    stageModelMs?: number;
+    stageModelFrames?: number;
+    pacing?: string;
+    previews?: string;
+  } | undefined;
   getRuntimeIssues?(): readonly import("./runtime-issues.js").RuntimeIssue[];
   subscribeRuntimeIssues?(listener: () => void): () => void;
   reportRuntimeIssue?(issue: import("./runtime-issues.js").RuntimeIssue): void;
