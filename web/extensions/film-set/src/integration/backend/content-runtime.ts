@@ -17,6 +17,7 @@ import { filmSetManagedMediaMigration } from "../../state/shared/managed-shot-me
 import { filmSetContentContribution } from "../../state/shared/content/contribution.js";
 import { filmSetInteractionPolicy } from "../../state/shared/content/interaction.js";
 import { filmSetOwnerLocators } from "../../state/shared/content/locators.js";
+import { filmSetMcpTools } from "./mcp-tools.js";
 
 const conversionRuntime: ContentConversionRuntime = {
   createService: (deps) => new FilmSetConversionService(deps),
@@ -32,7 +33,7 @@ const conversionRuntime: ContentConversionRuntime = {
 const recordingRuntime = createFilmSetRecordingRuntime();
 
 export const filmSetCanvasContentRuntime: CanvasContentRuntime = {
-  content: [{ ...filmSetContentContribution, interaction: filmSetInteractionPolicy, ownerLocators: filmSetOwnerLocators }],
+  content: [{ ...filmSetContentContribution, interaction: filmSetInteractionPolicy, ownerLocators: filmSetOwnerLocators, mcpTools: filmSetMcpTools }],
   managedLifecycles: [filmSetManagedLifecycle],
   managedMigrations: [filmSetManagedMediaMigration],
   frames: filmSetFrameRuntime,

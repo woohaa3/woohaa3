@@ -252,6 +252,8 @@ export type ApplicationExtensionMcpTool = {
   route: string;
   permission: "read" | "write";
   newWork?: boolean;
+  /** 完整 schema（例如 owner 自己构造的 zod 对象）；缺省时宿主按 `parameters` 生成。 */
+  inputSchema?: unknown;
   parameters?: Record<string, { type: "string" | "strings" | "object"; optional?: boolean; maxLength?: number; description?: string }>;
 };
 

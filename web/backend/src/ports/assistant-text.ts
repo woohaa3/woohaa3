@@ -18,6 +18,7 @@ export function createAssistantTextPort(
           .agent?.authorizeCanvas({ principalId: owner, canvasId, permission })
       )?.ok === true,
     media,
+    content: canvas.content,
     history: canvas.nodeHistory?.service,
   });
 }

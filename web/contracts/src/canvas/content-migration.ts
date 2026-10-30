@@ -6,7 +6,7 @@
  * 不推进版本，也不允许半迁移写回。迁移是纯数据变换，宿主决定何时持久化。
  */
 import type { ContentContribution, ContentContributionResolver, ContentMigration } from "./content-contribution.js";
-import { isCompositeAssetNodeType, readCompositeAssetExtensionId } from "./domain/core/composite-asset-identity.js";
+import { locateContentNode } from "./content-location.js";
 import type { CanvasNodeData, ServerCanvas } from "./domain/index.js";
 
 export type ContentMigrationFailure = {
@@ -85,9 +85,15 @@ export function migrateCanvasContent(canvas: ServerCanvas, content: ContentContr
   const failures: ContentMigrationFailure[] = [];
   const readonlyNodeIds = new Set<string>();
   for (const [nodeId, data] of Object.entries(canvas.nodeData)) {
-    if (!data || !isCompositeAssetNodeType(nodeTypes.get(nodeId))) continue;
-    const extensionId = readCompositeAssetExtensionId(data);
-    if (!extensionId) continue;
+    const type = nodeTypes.get(nodeId);
+    if (!type || !data) continue;
+    const located = locateContentNode(content, type, data);
+    if (!located.ok) {
+      failures.push({ nodeId, extensionId: "unknown", code: "content-migration-invalid" });
+      continue;
+    }
+    if (!located.location) continue;
+    const extensionId = located.location.extensionId;
     const owner = content.resolve(extensionId);
     if (!owner?.migrations?.length || !owner.version) continue;
     const result = migrateOne(nodeId, extensionId, data, owner);

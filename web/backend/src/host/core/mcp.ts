@@ -116,6 +116,23 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
         const agent = ctx.canvas.mcpServices().agent;
         if (!agent) return false;
         return (await agent.authorizeCanvas({ principalId: subject, canvasId, permission }))?.ok === true;
+      },
+      authority: {
+        resolveRoom: async (canvasId) => (await ctx.canvas.sync?.registry.resolve(canvasId)) ?? null,
+        readNode: async (input) => {
+          const service = ctx.canvas.mcpServices().modelMcp;
+          return service
+            ? (await service.getModelNode(input)) as import("@woohaa3/contracts").McpGetNodeResult
+            : { ok: false, code: "unavailable", message: "模型 MCP 能力未装配" };
+        },
+        applyCommands: async (input) => {
+          const service = ctx.canvas.mcpServices().modelMcp;
+          return service
+            ? service.applyCommands(input)
+            : { ok: false, code: "unavailable", message: "模型 MCP 写入能力未装配" };
+        },
+        ...(ctx.canvas.mcpAuthority?.().recording ? { recording: ctx.canvas.mcpAuthority().recording } : {}),
+        ...(ctx.canvas.mcpAuthority?.().themeBackdrop ? { themeBackdrop: ctx.canvas.mcpAuthority().themeBackdrop } : {})
       }
     });
     const mcp = createMcpService({

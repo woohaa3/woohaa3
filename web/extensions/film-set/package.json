@@ -33,7 +33,8 @@
     "@woohaa3/frontend": "workspace:*",
     "react": "^18.3.1",
     "mediabunny": "^1.61.3",
-    "@woohaa3/ui": "workspace:*"
+    "@woohaa3/ui": "workspace:*",
+    "zod": "4.6.5"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.5"

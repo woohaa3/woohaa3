@@ -85,10 +85,15 @@ export function createModelMcpHttpHandler(options: ModelMcpHttpOptions): ModelMc
       }
       const listed = await post({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
       const result = listed.body.result as { tools?: Array<{ name: string; title?: string; description?: string }> } | undefined;
+      const extensionWriteTools = new Set(
+        (options.extensionTools?.list() ?? [])
+          .filter((tool) => tool.permission !== "read")
+          .map((tool) => tool.name)
+      );
       const tools = (result?.tools ?? [])
         .map((tool): McpToolDescriptor => ({
           name: tool.name,
-          access: GRANTED_TOOLS.has(tool.name) ? "write" : "read",
+          access: GRANTED_TOOLS.has(tool.name) || extensionWriteTools.has(tool.name) ? "write" : "read",
           ...(tool.title ? { title: tool.title } : {}),
           ...(tool.description ? { description: tool.description } : {})
         }))
@@ -158,8 +163,12 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
   // tools. Individual model registrars must not consume that budget a second time.
   const register = server.registerTool.bind(server);
   const allowed = bearerToken ? options.toolGrant?.allowedTools?.(bearerToken) : undefined;
+  // 内容 owner 已声明的同名工具优先；内置副本在迁移窗口自动让位，不再按业务名单硬编码跳过。
+  const extensionToolNames = new Set((options.extensionTools?.list() ?? []).map((tool) => tool.name));
+  let registeringExtensionTools = false;
   server.registerTool = ((name: string, config: unknown, callback: (...args: unknown[]) => unknown) => {
     if (allowed && !allowed.includes(name)) return undefined;
+    if (!registeringExtensionTools && extensionToolNames.has(name)) return undefined;
     return register(name, config as never, (async (...args: unknown[]) => {
       const denied = grantDenied(name, (args[0] ?? {}) as Parameters<typeof grantDenied>[1]);
       if (denied) return toolError(denied, "unauthorized");
@@ -176,13 +185,17 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
   registerModelTools(reg, options);
   registerModelBatchTools(reg, options);
   registerCameraTools(reg, options);
+  // 迁移窗口：内容 owner 已通过贡献面提供同名工具时，上面的 wrapper 会让内置副本让位。
+  // 全部片场工具迁出后删除这些 registrar 与 GRANTED_TOOLS 中的业务名称（任务 7.1）。
   registerAnimationTools(reg, options);
   registerFilmSetItemTool(reg, options);
   registerFilmSetClipTools(reg, options);
   registerFilmSetExportTools(reg, options);
 
   if (options.agentAuthoring) registerAgentAuthoringTools(server, options.agentAuthoring);
+  registeringExtensionTools = true;
   registerExtensionTools(server, options, { bearerToken, loopback });
+  registeringExtensionTools = false;
   options.registerTools?.(server);
   return server;
 }

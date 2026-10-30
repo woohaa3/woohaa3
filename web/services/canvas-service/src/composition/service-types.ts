@@ -305,6 +305,11 @@ export type CanvasService = {
   nodeHistory: NodeHistoryComposition | null;  writerLock: CanvasWriterLock | null;
   /** 在线迁移：导入编排服务（无来源端口时为 null）。 */
   importService: CanvasImportService | null;
+  /** 通用内容 MCP 权威端口；宿主据此把录制/主题能力传给 owner，不暴露业务服务名。 */
+  mcpAuthority: () => {
+    recording?: () => import("@woohaa3/contracts").CanvasRecordingPort | undefined;
+    themeBackdrop?: () => string;
+  };
   mcpServices: () => {
     modelMcp: ModelMcpService | null;
     agent: AgentCanvasInternalService | null;

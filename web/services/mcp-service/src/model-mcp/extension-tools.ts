@@ -16,7 +16,11 @@ export function registerExtensionTools(server: McpServer, options: ModelMcpHttpO
       if (field.description) schema = schema.describe(field.description);
       shape[name] = field.optional ? schema.optional() : schema;
     }
-    server.registerTool(tool.name, { description: tool.description, inputSchema: z.object(shape).strict() }, async args => {
+    const inputSchema = tool.inputSchema !== undefined
+      ? tool.inputSchema as import("@modelcontextprotocol/server").StandardSchemaWithJSON
+      : z.object(shape).strict();
+    server.registerTool(tool.name, { description: tool.description, inputSchema }, async rawArgs => {
+      const args = rawArgs as Record<string, unknown>;
       try {
         const result = await options.extensionTools!.call({ name: tool.name, args, ...context });
         return result.ok === false ? toolError(String(result.message ?? "扩展操作失败"), String(result.code ?? "extension-failed")) : jsonResult(result);

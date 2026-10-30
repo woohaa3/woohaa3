@@ -1,4 +1,4 @@
-import { readFilmSetAnimationProjection } from "@woohaa3/contracts";
+import { ContentContributionRegistry, readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { filmSetTestMigrations } from "../../../../../test-support/managed-shot-commands.js";
 const migrateSqliteCanvasBeforeStartup = (filename: string) => migrateBeforeStartup(filename, { managedMigrations: filmSetTestMigrations });
 import { afterEach, expect, it } from "vitest";
@@ -16,7 +16,7 @@ import { createCanvasService } from "../../composition.js";
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) fs.rmSync(directory, { recursive: true, force: true }); });
 
-function fixture(options: { staleFilmSetContent?: boolean } = {}) {
+function fixture(options: { staleFilmSetContent?: boolean; ownedVersion?: number } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-auto-migration-"));
   directories.push(directory);
   const filename = path.join(directory, "custom-canvas.sqlite");
@@ -42,6 +42,10 @@ function fixture(options: { staleFilmSetContent?: boolean } = {}) {
       filmSetObject: { schemaVersion: 1, filmSetNodeId: "film", itemId: "item-1" },
       filmSetContent: { schemaVersion: 3, items: [] }
     } as never;
+  }
+  if (options.ownedVersion !== undefined) {
+    canvas.document.nodes.push({ id: "owned", type: "composite-asset", position: { x: 0, y: 0 }, width: 100, height: 100 });
+    canvas.nodeData.owned = { extensionId: "test-migrate", version: options.ownedVersion, value: "old" } as never;
   }
   const doc = serverCanvasToYDoc(canvas);
   const decoded = yDocToServerCanvas(doc, { now });
@@ -76,6 +80,32 @@ it("backs up committed WAL, converts previews and animation, then skips repeat s
     expect(migrateSqliteCanvasBeforeStartup(filename)).toEqual({ changed: false });
     expect(db.prepare("SELECT room_epoch FROM canvas_yjs_documents").get()!.room_epoch).toBe(row.room_epoch);
   } finally { db.close(); }
+});
+
+it("runs owner migration chains during startup and leaves too-new content read-only", () => {
+  const registry = new ContentContributionRegistry();
+  registry.register({
+    extensionId: "test-migrate",
+    version: {
+      read: (data) => typeof (data as { version?: unknown }).version === "number" ? (data as { version: number }).version : null,
+      write: (data, version) => ({ ...(data as Record<string, unknown>), version })
+    },
+    migrations: [{ extensionId: "test-migrate", from: 1, to: 2, migrate: (data) => ({ ...(data as object), value: "new" }) }]
+  });
+  const migratedFixture = fixture({ ownedVersion: 1 });
+  try {
+    const result = migrateBeforeStartup(migratedFixture.filename, { managedMigrations: filmSetTestMigrations, content: registry });
+    expect(result.changed).toBe(true);
+    const canvas = JSON.parse(String(migratedFixture.db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
+    expect(canvas.nodeData.owned).toMatchObject({ extensionId: "test-migrate", version: 2, value: "new" });
+  } finally { migratedFixture.db.close(); }
+
+  const tooNewFixture = fixture({ ownedVersion: 9 });
+  try {
+    expect(() => migrateBeforeStartup(tooNewFixture.filename, { managedMigrations: filmSetTestMigrations, content: registry })).not.toThrow();
+    const canvas = JSON.parse(String(tooNewFixture.db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
+    expect(canvas.nodeData.owned).toMatchObject({ extensionId: "test-migrate", version: 9, value: "old" });
+  } finally { tooNewFixture.db.close(); }
 });
 
 it("codec normalization of unrelated nodeData does not block startup", () => {

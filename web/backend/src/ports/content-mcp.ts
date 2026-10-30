@@ -4,8 +4,7 @@
  * 目录直接来自 `ContentContributionRegistry`；停用/重载即从目录消失。工具名、参数、权限与
  * handler 都由 owner 声明，宿主只做认证、授权与路由/处理器转发，不认识业务名称。
  */
-import type { ApplicationExtensionMcpTool } from "@woohaa3/contracts";
-import type { ContentContributionResolver } from "@woohaa3/contracts";
+import type { ApplicationExtensionMcpTool, CanvasAuthority, ContentContributionResolver, ContentMcpToolContext } from "@woohaa3/contracts";
 import { dispatchContentRoute } from "@woohaa3/contracts";
 import type { ModelMcpHttpOptions } from "@woohaa3/mcp-service";
 import type { ToolGrantRegistry } from "./authoring-adapters.js";
@@ -18,6 +17,13 @@ export function createContentMcpBridge(options: {
   developmentPrincipal?: string;
   loopbackDevelopment: boolean;
   authorizeCanvas?: (input: { subject: string; canvasId: string; permission: "read" | "write" }) => Promise<boolean>;
+  authority?: {
+    resolveRoom: (canvasId: string) => Promise<CanvasAuthority | null>;
+    readNode?: ContentMcpToolContext["readNode"];
+    applyCommands?: ContentMcpToolContext["applyCommands"];
+    recording?: ContentMcpToolContext["recording"];
+    themeBackdrop?: ContentMcpToolContext["themeBackdrop"];
+  };
 }): NonNullable<ModelMcpHttpOptions["extensionTools"]> {
   const entries = (): ToolEntry[] => options.content().implementations().flatMap((contribution) =>
     (contribution.mcpTools ?? []).map((tool) => ({ extensionId: contribution.extensionId, tool }))
@@ -28,6 +34,7 @@ export function createContentMcpBridge(options: {
       description: tool.description,
       route: `content/${extensionId}/${tool.route?.path.join("/") ?? tool.name}`,
       permission: tool.permission ?? "write",
+      ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
       parameters: tool.parameters ?? {}
     })),
     async call(input) {
@@ -35,10 +42,18 @@ export function createContentMcpBridge(options: {
       if (!entry) return { ok: false, code: "not-found", message: "工具未注册" };
       let subject: string | undefined;
       if (input.bearerToken) {
+        const args = input.args as { canvasId?: unknown; nodeId?: unknown; clipId?: unknown; itemId?: unknown; cameraId?: unknown };
         const decision = options.grants.authorize({
           token: input.bearerToken,
           tool: input.name,
-          canvasId: String(input.args.canvasId ?? "")
+          canvasId: String(args.canvasId ?? ""),
+          ...(typeof args.nodeId === "string" ? { nodeId: args.nodeId } : {}),
+          ...(typeof args.clipId === "string" ? { clipId: args.clipId } : {}),
+          ...(typeof args.itemId === "string" ? { itemId: args.itemId } : {}),
+          ...(typeof args.cameraId === "string" ? { cameraId: args.cameraId } : {}),
+          ...(typeof (args as { op?: { newClipId?: unknown } }).op?.newClipId === "string"
+            ? { clipId: String((args as { op: { newClipId: string } }).op.newClipId) }
+            : {})
         });
         if (!decision.ok) return { ok: false, code: "unauthorized", message: decision.reason };
         subject = options.grants.subject(input.bearerToken);
@@ -59,8 +74,43 @@ export function createContentMcpBridge(options: {
           if (!routed.ok) return { ok: false, code: routed.code, message: routed.code };
           return { ok: routed.result.status < 400, status: routed.result.status, body: routed.result.body };
         }
-        const result = await entry.tool.handle(input.args);
-        return { ok: result.ok, ...(result.text ? { text: result.text } : {}), ...(result.structured !== undefined ? { structured: result.structured } : {}) };
+        if (input.bearerToken && entry.tool.grantArgs) {
+          const extra = entry.tool.grantArgs(input.args);
+          if (extra) {
+            const args = input.args as { canvasId?: unknown; nodeId?: unknown };
+            const denied = options.grants.authorize({
+              token: input.bearerToken,
+              tool: entry.tool.name,
+              ...(typeof args.canvasId === "string" ? { canvasId: args.canvasId } : {}),
+              ...(typeof args.nodeId === "string" ? { nodeId: args.nodeId } : {}),
+              ...extra
+            });
+            if (!denied.ok) return { ok: false, code: "unauthorized", message: denied.reason };
+          }
+        }
+        const authority = options.authority;
+        if (!authority) return { ok: false, code: "unavailable", message: "内容权威端口未装配" };
+        const context: ContentMcpToolContext = {
+          extensionId: entry.extensionId,
+          ...(subject ? { subject } : {}),
+          ...(subject ? { actorId: subject } : {}),
+          permission: entry.tool.permission ?? "write",
+          resolveRoom: authority.resolveRoom,
+          ...(authority.readNode ? { readNode: authority.readNode } : {}),
+          ...(authority.applyCommands ? { applyCommands: authority.applyCommands } : {}),
+          ...(authority.recording ? { recording: authority.recording } : {}),
+          ...(authority.themeBackdrop ? { themeBackdrop: authority.themeBackdrop } : {})
+        };
+        const result = await entry.tool.handle(input.args, context);
+        if (!result.ok) {
+          const structured = typeof result.structured === "object" && result.structured !== null ? result.structured as { code?: unknown; message?: unknown } : null;
+          return {
+            ok: false,
+            code: typeof structured?.code === "string" ? structured.code : "extension-failed",
+            message: typeof structured?.message === "string" ? structured.message : result.text ?? "内容工具执行失败"
+          };
+        }
+        return { ok: true, ...(result.text ? { text: result.text } : {}), ...(result.structured !== undefined ? { structured: result.structured } : {}) };
       } catch {
         return { ok: false, code: "extension-failed", message: "内容工具执行失败" };
       }

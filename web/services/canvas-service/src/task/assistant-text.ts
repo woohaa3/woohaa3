@@ -7,6 +7,8 @@ import {
   canvasGroupMembers,
   hasExternalCanvasReference,
   canvasGroupAssetIds,
+  locateContentNode,
+  type ContentContributionResolver,
 } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import {
@@ -52,6 +54,7 @@ export function createCanvasAssistantTextPort(deps: {
     permission: "read" | "write",
   ): Promise<boolean>;
   media: CanvasMediaClient;
+  content?: ContentContributionResolver;
   history?: NodeHistoryApplicationService;
 }): AssistantTextPort {
   const roomFor = async (
@@ -513,7 +516,8 @@ export function createCanvasAssistantTextPort(deps: {
       });
     },
     async readImages({ owner, prepared }) {
-      await roomFor(owner, prepared.canvasId);
+      const room = await roomFor(owner, prepared.canvasId);
+      const canvas = snapshot(room);
       return Promise.all(
         prepared.inputs.map(async (input) => {
           if (input.mediaKind !== "image" || !deps.media.read)
@@ -528,10 +532,24 @@ export function createCanvasAssistantTextPort(deps: {
           );
           if (!verified.exists || !verified.matches)
             fail("reference-stale", "冻结参考素材不可取得");
+          // owner 只能来自权威画布上的节点定位，不能由调用参数自报；普通生成资产没有
+          // owner，显式传 undefined（历史稳定资产不要求激活扩展）。
+          const sourceNodeId = asset.nodeId;
+          const sourceNode = sourceNodeId
+            ? canvas.document.nodes.find((node) => node.id === sourceNodeId)
+            : undefined;
+          const located = sourceNode
+            ? locateContentNode(
+                deps.content,
+                sourceNode.type,
+                canvas.nodeData[sourceNode.id],
+              )
+            : undefined;
+          const mediaOwner = located?.ok ? located.location?.extensionId : undefined;
           const image = await deps.media.read(
             input.storageKey,
             prepared.canvasId,
-            "assistant-text",
+            mediaOwner,
           );
           if (
             !image.bytes.length ||

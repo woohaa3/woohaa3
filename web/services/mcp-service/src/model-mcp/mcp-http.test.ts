@@ -1,5 +1,6 @@
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { FILM_SET_CONTENT_PREVIOUS_VERSION, FILM_SET_CONTENT_VERSION, MODEL_RENDER_BUDGET, type McpGetNodeResult } from "@woohaa3/contracts";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH } from "./mcp-http.js";
 import type { ModelMcpToolService } from "./mcp-http.js";
@@ -82,6 +83,30 @@ describe("Model Canvas Streamable HTTP MCP", () => {
     // 工具清单按名称稳定排序。
     const names = discovery.tools.map((tool) => tool.name);
     expect([...names].sort()).toEqual(names);
+  });
+
+  it("扩展贡献工具进入同一目录，写工具按 owner 声明分类且不重复注册", async () => {
+    const handler = createModelMcpHttpHandler({
+      logger: (event) => console.log("MCP LOG", event),
+      extensionTools: {
+        list: (): readonly import("@woohaa3/contracts").ApplicationExtensionMcpTool[] => [
+          { name: "submit_film_set", description: "owner write", route: "content/film-set/submit", permission: "write", inputSchema: z.object({ canvasId: z.string() }), parameters: {} },
+          { name: "get_film_set_clips", description: "owner read", route: "content/film-set/clips", permission: "read", parameters: { canvasId: { type: "string" } } },
+          { name: "mutate_film_set_clip", description: "owner clip write", route: "content/film-set/clip", permission: "write", parameters: { canvasId: { type: "string" }, clipId: { type: "string" } } }
+        ],
+        call: async () => ({ ok: true })
+      }
+    });
+    closers.push(() => handler.close());
+    const discovery = await handler.discover();
+    if (!discovery.ready) throw new Error(`expected ready: ${JSON.stringify(discovery)}`);
+    const names = discovery.tools.map((tool) => tool.name);
+    expect(names.filter((name) => name === "submit_film_set")).toHaveLength(1);
+    expect(names.filter((name) => name === "get_film_set_clips")).toHaveLength(1);
+    expect(names.filter((name) => name === "mutate_film_set_clip")).toHaveLength(1);
+    const byName = new Map(discovery.tools.map((tool) => [tool.name, tool]));
+    expect(byName.get("submit_film_set")?.access).toBe("write");
+    expect(byName.get("get_film_set_clips")?.access).toBe("read");
   });
 
   it("discover() 在无工具注册时返回 no-tools（不伪造 ready）", async () => {

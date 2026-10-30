@@ -147,7 +147,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     const resolved = resolveStorageConfig();
     if (resolved.ok && resolved.config.backend === "sqlite") {
       const { migrateSqliteCanvasBeforeStartup } = await import("./storage/migrations/startup.js");
-      const result = migrateSqliteCanvasBeforeStartup(resolved.config.sqlitePath as string, { managedMigrations: options.contentRuntime?.managedMigrations });
+      const result = migrateSqliteCanvasBeforeStartup(resolved.config.sqlitePath as string, { managedMigrations: options.contentRuntime?.managedMigrations, content: contentContributions });
       if (result.changed) log({ event: "canvas-startup-migrated", ...result });
     }
   }
@@ -834,6 +834,10 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     nodeHistory,
     writerLock,
     importService,
+    mcpAuthority: () => ({
+      ...(options.recording ? { recording: () => options.recording } : {}),
+      ...(options.themeBackdrop ? { themeBackdrop: options.themeBackdrop } : {})
+    }),
     mcpServices: () =>
       buildMcpServicesProjection({
         filmSetNodeService,

@@ -18,7 +18,7 @@ function assertNoWriter(db: DatabaseSync): void {
 }
 
 /** Runs before repositories or rooms open. Only this SQLite file is modified. */
-export function migrateSqliteCanvasBeforeStartup(databasePath: string, options: Pick<import("./film-set-shooting-shots.js").MigrationOptions, "managedMigrations"> = {}): { changed: boolean; backup?: string } {
+export function migrateSqliteCanvasBeforeStartup(databasePath: string, options: Pick<import("./film-set-shooting-shots.js").MigrationOptions, "managedMigrations" | "content"> = {}): { changed: boolean; backup?: string } {
   if (databasePath === ":memory:" || !fs.existsSync(databasePath)) return { changed: false };
   const filename = fs.realpathSync(databasePath);
   const { DatabaseSync } = loadNodeSqlite();

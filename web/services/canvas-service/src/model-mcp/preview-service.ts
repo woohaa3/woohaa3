@@ -1,6 +1,6 @@
 import { isFilmSetGroupNode } from "@woohaa3/contracts";
 /** Authority lookup and generic native rendering orchestration. 内容扩展的规则经端口注入，宿主不 import 其实现。 */
-import { compositeAssetSceneOps, v2SceneExtent, decodeModelPlacement, hashModelScript, isFilmSetNode, isModelAuthoringNodeType, type CanvasNodeData } from "@woohaa3/contracts";
+import { compositeAssetSceneOps, v2SceneExtent, decodeModelPlacement, hashModelScript, isFilmSetNode, isModelAuthoringNodeType, locateContentNode, type CanvasNodeData } from "@woohaa3/contracts";
 import { modelPreviewIdentityMatches } from "./content-identity.js";
 import { RENDER_VERSION, renderCacheKey, type RendererSceneRequest } from "../model-renderer/index.js";
 import { executeSceneIr, normalizeCaptureOptions } from "./script-executor.js";
@@ -39,7 +39,10 @@ export async function renderPreview(
     // 把本次预览的画布 id 绑定进读取端口：素材读取必须落在该画布的存储作用域，否则远端画布
     // 的素材会去主存储找而不存在（内容扩展只按 storageKey 调 `read`）。
     const readMedia = deps.readMedia;
-    const prepared = await contentAdapter.preparePreviewFrame({ nodeId, node, data, canvas: exported.canvas, assets: exported.canvas.assets, ...(input.clipId !== undefined ? { clipId: input.clipId } : {}), timeSeconds, ...(readMedia ? { read: (storageKey: string) => readMedia(storageKey, canvasId) } : {}) });
+    // owner 从权威节点定位解析；扩展读取端口不接收调用方自报的 extensionId。
+    const located = locateContentNode(deps.content, node.type, data);
+    const mediaOwner = located.ok ? located.location?.extensionId : undefined;
+    const prepared = await contentAdapter.preparePreviewFrame({ nodeId, node, data, canvas: exported.canvas, assets: exported.canvas.assets, ...(input.clipId !== undefined ? { clipId: input.clipId } : {}), timeSeconds, ...(readMedia ? { read: (storageKey: string) => readMedia(storageKey, canvasId, mediaOwner) } : {}) });
     if (!prepared.ok) return prepared;
     sourceHash = prepared.sourceHash; cacheSourceHash = sourceHash; animationIdentity = prepared.animationIdentity; actualClipId = prepared.clipId;
     animationMetadata = prepared.metadata; scene = prepared.scene;

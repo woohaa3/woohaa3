@@ -15,6 +15,7 @@ import * as Y from "yjs";
 import {
   FILM_SET_SHOT_PREVIEW_NODE_TYPE,
   canonicalFilmSetFields,
+  migrateCanvasContent,
   parseCanvasAggregate,
   readNodeWidth,
   readNodeHeight,
@@ -39,7 +40,11 @@ const stable = (value: unknown): string =>
 const digest = (value: unknown) => createHash("sha256").update(stable(value)).digest("hex");
 function fail(message: string): never { throw new Error(message); }
 
-export type MigrationOptions = { transaction?: boolean; managedMigrations?: readonly import("@woohaa3/contracts").ManagedNodeMigrationAdapter[] };
+export type MigrationOptions = {
+  transaction?: boolean;
+  managedMigrations?: readonly import("@woohaa3/contracts").ManagedNodeMigrationAdapter[];
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
+};
 
 /** 画布内全部片场节点（composite-asset + film-set 身份）。 */
 function filmSetNodeIds(canvas: ServerCanvas): string[] {
@@ -194,6 +199,7 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
       changed: false,
       conflicts,
       snapshot: new Uint8Array(),
+      contentMigrated: [],
       roomEpoch: String(source.report.roomEpoch),
       snapshotSeq: source.report.storageSeq,
       beforeHash: digest(source.canvas),
@@ -211,6 +217,14 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
     const migrated = migration.migrate(canvas);
     canvas = migrated.canvas; changed = migrated.changed || changed;
   }
+  // owner 版本化迁移链：在结构化 film-set 迁移之后、写回 checkpoint 之前执行一次。
+  // 过新版本保留原数据（命令事务继续按只读拒绝），其它失败阻断启动并保留备份。
+  const content = migrateCanvasContent(canvas, options.content);
+  if (content.failures.some((failure) => failure.code !== "content-migration-too-new")) {
+    fail(`owner 内容迁移失败：${canvas.id}/${content.failures.map((failure) => `${failure.nodeId}:${failure.code}`).join(",")}`);
+  }
+  canvas = content.canvas;
+  changed = content.changed || changed;
 
   // 预览应为派生新节点：节点顺序按 zIndex 排序（与 mapping 一致）。
   canvas.document.nodes = [...canvas.document.nodes].sort(compareByZIndexThenId);
@@ -233,6 +247,7 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
       changed,
       conflicts,
       snapshot: Y.encodeStateAsUpdate(doc),
+      contentMigrated: content.migrated,
       roomEpoch: changed ? `film-set-shooting-shots-${randomUUID()}` : String(source.report.roomEpoch),
       snapshotSeq: source.report.storageSeq,
       beforeHash: digest(source.canvas),
@@ -330,6 +345,7 @@ export function planMigration(db: unknown, _options: MigrationOptions = {}) {
       sceneSpaceConflicts: conflicts,
       /** 每个片场的坐标来源分类（dry-run 概览；不含用户内容）。 */
       sceneSpaceSources,
+      ownerContent: documents.flatMap((document) => document.contentMigrated ?? []),
       canvases: documents.map(({ canvas, sourceReport, beforeHash, afterHash, changed: documentChanged }) => ({
         canvasId: canvas.id,
         revision: canvas.revision,

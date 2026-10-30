@@ -39,7 +39,12 @@ function bridge() {
       authorize: () => ({ ok: true })
     },
     developmentPrincipal: "dev",
-    loopbackDevelopment: true
+    loopbackDevelopment: true,
+    authority: {
+      resolveRoom: async () => null,
+      readNode: async () => ({ ok: false, code: "unused", message: "unused" }),
+      applyCommands: async () => ({ ok: false, code: "unused", message: "unused" })
+    }
   });
 }
 
@@ -57,6 +62,33 @@ describe("content MCP bridge", () => {
   it("rejects calls without a trusted principal", async () => {
     await expect(bridge().call({ name: "create_test_content", args: { canvasId: "c" }, bearerToken: null, loopback: false }))
       .resolves.toEqual({ ok: false, code: "unauthorized", message: "缺少已认证 principal" });
+  });
+
+  it("passes trusted authority context to the owner handler", async () => {
+    const target = new ContentContributionRegistry();
+    target.register({
+      extensionId: "test-tool",
+      mcpTools: [{
+        name: "context_tool",
+        title: "context",
+        description: "context",
+        inputSchema: {},
+        handle: (_input, context) => ({ ok: true, structured: { permission: context.permission, subject: context.subject, extensionId: context.extensionId } })
+      }]
+    });
+    const live = createContentMcpBridge({
+      content: () => target,
+      grants: { issue: () => {}, subject: () => "user-1", verify: () => null, revoke: () => {}, authorize: () => ({ ok: true }) },
+      developmentPrincipal: "dev",
+      loopbackDevelopment: true,
+      authority: {
+        resolveRoom: async () => null,
+        readNode: async () => ({ ok: false, code: "unused", message: "unused" }),
+        applyCommands: async () => ({ ok: false, code: "unused", message: "unused" })
+      }
+    });
+    await expect(live.call({ name: "context_tool", args: { canvasId: "c" }, bearerToken: null, loopback: true }))
+      .resolves.toEqual({ ok: true, structured: { permission: "write", subject: "dev", extensionId: "test-tool" } });
   });
 
   it("drops tools when the owner is disposed", () => {

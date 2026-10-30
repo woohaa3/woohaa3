@@ -4,6 +4,8 @@
  * 注册表实例就是页面或站点作用域，不使用模块级单例。内核函数只接收只读 resolver；
  * 写入、命令、编辑、复制、迁移、交互与路由都按 owner 分派，缺省空解析器保持既有只读行为。
  */
+import type { CanvasAuthority } from "../backend/canvas-authority.js";
+import type { McpApplyCommandsResult, McpGetNodeResult } from "./mcp-internal.js";
 import type { ServerCanvas } from "./domain/index.js";
 import type { EditOperation, EditPrecondition } from "./edit-command.js";
 
@@ -159,6 +161,25 @@ export type ContentRoute = {
   handle(request: { readonly body: unknown }): ContentRouteResult | Promise<ContentRouteResult>;
 };
 
+/**
+ * 内容 owner MCP 工具的可信调用上下文。
+ *
+ * owner 只拿通用权威端口：读节点、提交命令、解析房间。canvasId/subject/permission 由宿主认证
+ * 与画布授权链给出，工具参数不得自报这些身份。
+ */
+export type ContentMcpToolContext = {
+  readonly extensionId: string;
+  readonly subject?: string;
+  readonly actorId?: string;
+  readonly permission: "read" | "write";
+  resolveRoom(canvasId: string): Promise<CanvasAuthority | null>;
+  readNode?(input: { canvasId: string; nodeId: string; resource?: "group-appearance"; includeStatistics?: boolean }): Promise<McpGetNodeResult>;
+  applyCommands?(input: { canvasId: string; commandId: string; baseRevision: number; commands: import("./commands.js").CanvasCommand[] }): Promise<McpApplyCommandsResult>;
+  /** 宿主原生录制端口；缺失表示纯浏览器宿主。 */
+  recording?(): import("./content-recording-port.js").CanvasRecordingPort | undefined;
+  themeBackdrop?(): string;
+};
+
 export type ContentMcpTool = {
   readonly name: string;
   readonly title: string;
@@ -171,7 +192,12 @@ export type ContentMcpTool = {
   /** 可选：转发到 owner 内容路由而不是直接调用 `handle`。 */
   readonly route?: { readonly method: string; readonly path: readonly string[] };
   authorize?(input: unknown): ContentDiagnostic | null;
-  handle(input: unknown): { ok: boolean; text?: string; structured?: unknown } | Promise<{ ok: boolean; text?: string; structured?: unknown }>;
+  /**
+   * 额外授权范围：工具参数里出现基础授权未覆盖的资源 id 时（例如 duplicate 的目标 clip），
+   * owner 返回它，宿主会用同一 grant 再做一次范围校验。
+   */
+  grantArgs?(input: unknown): { canvasId?: string; nodeId?: string; clipId?: string; itemId?: string; cameraId?: string } | null;
+  handle(input: unknown, context: ContentMcpToolContext): { ok: boolean; text?: string; structured?: unknown } | Promise<{ ok: boolean; text?: string; structured?: unknown }>;
 };
 
 /**
