@@ -2,7 +2,7 @@
  * 任务详情侧栏渲染测试（change: l0-generation-provenance + 详情面板信息层级重构）。
  *
  * 覆盖：请求摘要/技术信息默认展开（仍可折叠）、摘要与耗时降噪（缺失项整格不渲染）、
- * 「返回画布」主按钮的出现条件、上游任务号与产物存储键、结果缩略图放大、错误 status/code。
+ * 「返回画布」主按钮的出现条件、上游任务号与产物定位符、结果缩略图放大、错误 status/code。
  *
  * @vitest-environment jsdom
  */
@@ -141,7 +141,7 @@ describe("DetailPanel 信息层级", () => {
     expect(withoutUpstream.textContent).not.toContain("上游任务号");
   });
 
-  it("技术信息展示产物存储键与大小/校验和摘要", () => {
+  it("技术信息展示产物定位符与大小/校验和摘要", () => {
     const container = renderPanel(
       item({
         result: {
@@ -152,11 +152,11 @@ describe("DetailPanel 信息层级", () => {
         }
       })
     );
-    expect(container.textContent).toContain("产物存储键");
+    expect(container.textContent).toContain("产物定位符");
     expect(container.textContent).toContain("media/out-42.png");
     expect(container.textContent).toContain("大小 2.0KB");
     expect(container.textContent).toContain("校验和 0123456789ab…89abcdef");
-    expect(container.querySelector("[aria-label='复制产物存储键']")).not.toBeNull();
+    expect(container.querySelector("[aria-label='复制产物定位符']")).not.toBeNull();
   });
 
   it("顶部摘要降噪：actor/尝试缺失不渲染，单元格不超过 3 列 × 3 行", () => {

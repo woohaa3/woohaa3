@@ -4,7 +4,7 @@ Woohaa combines media generation, assets and 3D scene authoring in a canvas. Thi
 
 ## Development
 
-Use Node.js 24 or newer, pnpm 11.17.0 and Rust 1.97.1 (pinned in `rust-toolchain.toml`) with `wasm32-unknown-unknown`. Install `wasm-bindgen-cli` 0.2.128 (`cargo install wasm-bindgen-cli --version 0.2.128 --locked`) and Binaryen’s `wasm-opt` on PATH. Bevy’s C++ dependencies require LLVM clang/clang++ with WebAssembly target support (Apple’s system clang does not include it). Install LLVM through Homebrew, your Linux package manager, or the Windows LLVM installer. The build probes PATH and standard LLVM locations; override with `CC_wasm32_unknown_unknown` and `CXX_wasm32_unknown_unknown` when needed. Desktop builds also need the platform prerequisites for Tauri 2.
+Use Node.js 24 or newer, pnpm 11.17.0 and Rust 1.97.1 (pinned in `rust-toolchain.toml`) with `wasm32-unknown-unknown`. Install `wasm-bindgen-cli` 0.2.128 (`cargo install wasm-bindgen-cli --version 0.2.128 --locked`) and Binaryen’s `wasm-opt` on PATH. Bevy’s C++ dependencies require LLVM clang/clang++ with WebAssembly target support (Apple’s system clang does not include it). Install LLVM through Homebrew, your Linux package manager, or the Windows LLVM installer. The build probes PATH and standard LLVM locations and selects `clang`, `clang++`, `llvm-ar`, and `llvm-ranlib` from that LLVM. Apple's `ar` writes an empty archive for WebAssembly objects, which drops meshopt symbols at link time. Override with `CC_wasm32_unknown_unknown`, `CXX_wasm32_unknown_unknown`, `AR_wasm32_unknown_unknown`, and `RANLIB_wasm32_unknown_unknown` when needed. Desktop builds also need the platform prerequisites for Tauri 2.
 
 ```sh
 pnpm install

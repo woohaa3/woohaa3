@@ -15,7 +15,6 @@ import { COS_ENV_KEYS,
   resolveCosConfig,
   resolveCosRegion,
   type CosConfig } from "../src/backend.js";
-
 const CONFIG: CosConfig = {
   secretId: "secret-id",
   secretKey: "secret-key",
@@ -107,10 +106,12 @@ function fakeCos(options: {
 function fakeCtx(): {
   ctx: HostExtensionContext;
   registered: StorageBackend[];
+  exposers: Array<{ exposerId: string }>;
   logs: Array<Record<string, unknown>>;
   disposers: Array<() => void>;
 } {
   const registered: StorageBackend[] = [];
+  const exposers: Array<{ exposerId: string }> = [];
   const logs: Array<Record<string, unknown>> = [];
   const disposers: Array<() => void> = [];
   const ctx = {
@@ -128,11 +129,21 @@ function fakeCtx(): {
         logs.push(event);
       }
     },
+    // 公开临时桶与私有桶并列注册：这里也收集 address 提供者，便于断言「配了才注册」。
+    exposer: {
+      register: (item: { exposerId: string }) => {
+        exposers.push(item);
+        return () => {
+          const index = exposers.indexOf(item);
+          if (index >= 0) exposers.splice(index, 1);
+        };
+      }
+    },
     effect: (callback: () => () => void) => {
       disposers.push(callback());
     }
   } as unknown as HostExtensionContext;
-  return { ctx, registered, logs, disposers };
+  return { ctx, registered, exposers, logs, disposers };
 }
 
 describe("region 解析", () => {
@@ -184,18 +195,19 @@ describe("配置归一化（缺项不再抛错）", () => {
     expect(resolved.missing).toEqual(["secretId"]);
   });
 
-  it("缺配置时 apply 记结构化日志且不注册后端", async () => {
-    const { ctx, registered, logs } = fakeCtx();
+  it("缺配置时 apply 记结构化日志、不注册任何后端", async () => {
+    const { ctx, registered, exposers, logs } = fakeCtx();
     await createCosStoragePlugin().apply(ctx, {});
 
     expect(registered).toEqual([]);
+    expect(exposers).toEqual([]);
     expect(logs).toEqual([
       { event: "cos-storage-unconfigured", missing: ["secretId", "secretKey", "bucketName", "bucketUrl", "prefix"] }
     ]);
   });
 
-  it("配置齐备时 apply 经 ctx.effect 注册 backendId=cos", async () => {
-    const { ctx, registered, logs, disposers } = fakeCtx();
+  it("配置齐备时只注册 cos 后端；公开桶归 local-storage，不再由本插件提供", async () => {
+    const { ctx, registered, exposers, logs, disposers } = fakeCtx();
     await createCosStoragePlugin().apply(ctx, {
       secretId: "id",
       secretKey: "key",
@@ -206,7 +218,10 @@ describe("配置归一化（缺项不再抛错）", () => {
 
     expect(registered.map((backend) => backend.backendId)).toEqual(["cos"]);
     expect(registered[0]?.label).toBe("COS / S3 对象存储");
-    expect(logs[0]).toMatchObject({ event: "cos-storage-activated", backendId: "cos" });
+    // 私有桶自带 presign，因此它同时是一个隐式地址提供者（不需要注册 exposer）。
+    expect(registered[0]?.presign).toBeTypeOf("function");
+    expect(exposers).toEqual([]);
+    expect(logs).toEqual([{ event: "cos-storage-activated", backendId: "cos" }]);
 
     disposers.forEach((dispose) => dispose());
     expect(registered).toEqual([]);

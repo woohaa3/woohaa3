@@ -9,7 +9,9 @@ import type {
 } from "@woohaa3/contracts";
 import type { ExtensionSiteRow } from "../extension-manager/contract.js";
 import {
+  exposerProviders,
   isStorageSettingKey,
+  providersForSettingKey,
   relatedProviderPlugin,
   storageBackendIdOf,
   storageProviders,
@@ -30,11 +32,14 @@ const plugin = (id: string, overrides: Partial<SettingPluginView> = {}): Setting
 const snapshot = (input: {
   plugins?: SettingPluginView[];
   storage?: SettingExtensionPointProvider[];
+  exposer?: SettingExtensionPointProvider[];
   installed?: SettingsSnapshot["installedExtensions"];
 }): SettingsSnapshot => ({
   settings: [],
   plugins: input.plugins ?? [],
-  ...(input.storage ? { extensionPoints: { storage: input.storage } } : {}),
+  ...(input.storage || input.exposer
+    ? { extensionPoints: { ...(input.storage ? { storage: input.storage } : {}), ...(input.exposer ? { exposer: input.exposer } : {}) } }
+    : {}),
   ...(input.installed ? { installedExtensions: input.installed } : {}),
   files: { config: "/tmp/a.yml", secrets: "/tmp/b.yml" }
 });
@@ -93,7 +98,7 @@ describe("storageSettingOptions", () => {
 
   it("对外后端带空选项，保留未注册的当前值并标注", () => {
     const options = storageSettingOptions("storage.expose", providers, "legacy");
-    expect(options[0]).toEqual({ value: "", label: "未选择（只用主存储的签名能力）" });
+    expect(options[0]).toEqual({ value: "", label: "未选择（不指定提供者）" });
     expect(options.at(-1)).toEqual({ value: "legacy", label: "legacy（未注册）" });
   });
 });
@@ -160,5 +165,52 @@ describe("isStorageSettingKey", () => {
     expect(isStorageSettingKey("storage.primary")).toBe(true);
     expect(isStorageSettingKey("storage.expose")).toBe(true);
     expect(isStorageSettingKey("storage.local.root")).toBe(false);
+  });
+});
+
+describe("对外地址提供者（exposer 扩展点）", () => {
+  it("exposer.primary 是独立的设置键，且选项为空值保留一个「未选择」", () => {
+    expect(isStorageSettingKey("exposer.primary")).toBe(true);
+    const options = storageSettingOptions(
+      "exposer.primary",
+      [{ id: "edge", label: "边缘节点", ownerExtensionId: "remote-server", registered: true }],
+      ""
+    );
+    expect(options[0]).toEqual({ value: "", label: "未选择（不指定提供者）" });
+    expect(options.map((option) => option.value)).toContain("edge");
+  });
+
+  it("地址提供者列表来自 extensionPoints.exposer，并补齐可能提供地址的存储插件", () => {
+    const view = snapshot({
+      plugins: [{ ...plugin("local-storage", { label: "本地存储" }), configPrefix: "storage.local" }],
+      exposer: [{ id: "edge", label: "边缘节点", ownerExtensionId: "remote-server" }]
+    });
+    // 只列真正注册过的提供者：不能把「能存字节」当成「能出地址」（local 没有 presign）。
+    expect(exposerProviders(view).map((item) => item.id)).toEqual(["edge"]);
+    // 键决定用哪一组：exposer.primary 用地址提供者，storage.primary 用后端。
+    expect(providersForSettingKey("exposer.primary", [], exposerProviders(view)).map((item) => item.id)).toEqual(["edge"]);
+    const backends = [{ id: "local", label: "local", ownerExtensionId: null, registered: true }];
+    expect(providersForSettingKey("storage.primary", backends, exposerProviders(view)).map((item) => item.id)).toEqual(["local"]);
+  });
+
+  it("storage.expose 与 exposer.primary 共用地址提供者列表；storage.primary 用后端列表", () => {
+    const backends = [{ id: "cos", label: "COS", ownerExtensionId: null, registered: true }];
+    const addressProviders = [{ id: "edge", label: "边缘节点", ownerExtensionId: null, registered: true }];
+    // 两个「谁来出地址」的键共用一份列表：旧键的历史值（后端 id）也在这份列表里。
+    expect(providersForSettingKey("storage.expose", backends, addressProviders)).toBe(addressProviders);
+    expect(providersForSettingKey("exposer.primary", backends, addressProviders)).toBe(addressProviders);
+    expect(providersForSettingKey("storage.primary", backends, addressProviders)).toBe(backends);
+  });
+});
+
+describe("exposer.primary 的无效旧值", () => {
+  it("不再作为选项显示，也不再标注「未注册」", () => {
+    const providers = [
+      { id: "local-public", label: "公开临时桶", ownerExtensionId: "local-storage", registered: true }
+    ];
+    const options = storageSettingOptions("exposer.primary", providers, "local");
+    // 只剩空值与真正可用的提供者；运行时已把 `local` 按未设置处理。
+    expect(options.map((option) => option.value)).toEqual(["", "local-public"]);
+    expect(options.some((option) => option.label.includes("未注册"))).toBe(false);
   });
 });

@@ -94,6 +94,8 @@ export type SettingExtensionPointProvider = {
 
 /** 宿主扩展点的可用提供者；按扩展点分组，新增扩展点时在这里加一段。 */
 export type SettingsExtensionPoints = {
-  /** 存储后端（`storage.primary` / `storage.expose` 的可选值）。 */
+  /** 存储后端（`storage.primary` 的可选值）。 */
   storage?: SettingExtensionPointProvider[];
+  /** 对外地址提供者（`exposer.primary` 的可选值）。 */
+  exposer?: SettingExtensionPointProvider[];
 };

@@ -36,6 +36,11 @@ export const HOST_SERVICES: readonly HostServiceDefinition[] = [
     description: "媒体与任务读写字节都经存储扩展点；这里选宿主用哪个后端，每个选择旁边可以直达该后端的配置。"
   },
   {
+    id: "exposer",
+    label: "对外地址",
+    description: "把存储里的对象变成外部可访问 URL 的提供者；未被选中时只用当前后端自己的签名能力。"
+  },
+  {
     id: "task",
     label: "任务",
     description: "任务目录、worker、租约与历史；调度归属任务服务。"

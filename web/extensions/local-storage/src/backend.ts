@@ -3,8 +3,11 @@
  *
  * 向 `ctx.storage` 注册 `backendId = "local"` 的本地文件系统后端：core 传进来的 key 已带
  * namespace（形如 `media/sha256-xxx.png`），落到磁盘就是 `${root}/${key}`。这是「完全本地」
- * 的缺省后端 —— 没有 `presign`，因此不宣称任何对外暴露能力（需要外部地址时由 core 用
- * `storage.expose` 指定的可签名后端解决）。
+ * 的缺省后端 —— 没有 `presign`：本地没有公网身份，字节放在哪它说了算，出不出地址它说了不算。
+ *
+ * 对外地址的补丁也在这里：本插件可选地注册一个**公开临时桶**提供者（见 `public-bucket.ts`），
+ * 把本地字节推到公开只读的对象存储，供第三方 API 直接拉取。它默认关闭、也不是默认提供者
+ * （`exposer.primary` 未选就不生效），所以「完全本地」的默认行为不变。
  *
  * contentType 用 sidecar 文件 `${root}/${key}.meta.json` 保存（内容 `{"contentType":"..."}`）：
  * 媒体 verify 会比对 contentType，所以 `put` 必须写 sidecar；读不到 sidecar 时按扩展名推断。
@@ -23,9 +26,16 @@ import {
   StorageObjectNotFoundError,
   type ExtensionPlugin,
   type StorageBackend,
+  type MediaLocator,
   type StorageObject,
   type StorageObjectStat
 } from "@woohaa3/contracts";
+import {
+  LOCAL_PUBLIC_EXPOSER_ID,
+  createCosPublicBucketWriter,
+  createPublicBucketExposer,
+  resolvePublicBucketConfig
+} from "./public-bucket.js";
 
 export const LOCAL_STORAGE_PLUGIN_ID = "local-storage";
 export const LOCAL_STORAGE_BACKEND_ID = "local";
@@ -34,6 +44,9 @@ export const LOCAL_STORAGE_CONFIG_PREFIX = "storage.local";
 
 /** 缺省存储根目录；相对路径按进程 cwd 解析。 */
 export const DEFAULT_LOCAL_STORAGE_ROOT = ".woohaa3/storage";
+
+/** locator 前缀：`media://<backendId>/<key>` 里的 backendId 固定是 `local`。 */
+export const LOCAL_STORAGE_LOCATOR_PREFIX = `media://local/`;
 
 /** sidecar 后缀；与对象同目录，删除对象时一并删除。 */
 const META_SUFFIX = ".meta.json";
@@ -45,6 +58,50 @@ export const LOCAL_STORAGE_CONFIG = defineConfigSchema({
     reload: "hot",
     label: "存储根目录",
     description: "本地对象存储根目录；相对路径按进程 cwd 解析"
+  },
+  // 公开临时桶：本地部署唯一能拿到「第三方自己拉得动」的地址的方式。地址不签名，
+  // 桶内内容由运维侧定期清理；开启后也**不会**自动成为部署默认提供者。
+  // 桶名 / 域名 / 前缀由构建期注入（WOOHAA3_DEFINES），仓库里不带任何具体桶。
+  publicEnabled: {
+    kind: "boolean",
+    reload: "hot",
+    legacyEnv: "COS_PUBLIC_ENABLED",
+    default: false,
+    label: "启用公开临时桶",
+    description: "开启后可用「公开临时桶」把素材推到公开只读存储，拿到可直接拉取的地址；内容会被定期清理"
+  },
+  publicBucketName: {
+    kind: "string",
+    reload: "hot",
+    label: "公开桶名称",
+    description: "公开临时桶名（含 APPID 后缀）；留空用构建期注入值"
+  },
+  publicBucketUrl: {
+    kind: "url",
+    protocols: ["https:", "http:"],
+    reload: "hot",
+    label: "公开桶地址",
+    description: "公开临时桶访问域名；留空用构建期注入值，region 由它解析"
+  },
+  publicPrefix: {
+    kind: "string",
+    reload: "hot",
+    label: "公开桶前缀",
+    description: "公开桶内的对象前缀；留空用构建期注入值，最终键为 <prefix>/<namespace>/<key>"
+  },
+  publicSecretId: {
+    kind: "string",
+    secret: true,
+    reload: "hot",
+    label: "公开桶 SecretId",
+    description: "公开临时桶凭据；留空时依次读环境变量 COS_PUBLIC_SECRET_ID、COS_SECRET_ID"
+  },
+  publicSecretKey: {
+    kind: "string",
+    secret: true,
+    reload: "hot",
+    label: "公开桶 SecretKey",
+    description: "公开临时桶凭据；留空时依次读环境变量 COS_PUBLIC_SECRET_KEY、COS_SECRET_KEY"
   }
 });
 
@@ -123,6 +180,19 @@ export function createLocalBackend(config: LocalStorageConfig = {}): StorageBack
   const root = resolveLocalStorageRoot(config);
   const paths = (key: string) => resolveLocalObjectPaths(root, key);
 
+  /** 读一个对象（get 与 readLocator 共用，授权与错误翻译只有一份）。 */
+  const readObject = async (key: string): Promise<StorageObject> => {
+    const { objectPath, metaPath } = paths(key);
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(objectPath);
+    } catch (error) {
+      if (isEnoent(error)) throw new StorageObjectNotFoundError(key);
+      throw error;
+    }
+    return { bytes, contentType: (await readSidecarContentType(metaPath)) ?? inferContentType(key) };
+  };
+
   return {
     backendId: LOCAL_STORAGE_BACKEND_ID,
     label: LOCAL_STORAGE_LABEL,
@@ -139,15 +209,7 @@ export function createLocalBackend(config: LocalStorageConfig = {}): StorageBack
       }
     },
     async get(key): Promise<StorageObject> {
-      const { objectPath, metaPath } = paths(key);
-      let bytes: Buffer;
-      try {
-        bytes = await readFile(objectPath);
-      } catch (error) {
-        if (isEnoent(error)) throw new StorageObjectNotFoundError(key);
-        throw error;
-      }
-      return { bytes, contentType: (await readSidecarContentType(metaPath)) ?? inferContentType(key) };
+      return readObject(key);
     },
     async openRead(key, range) {
       const { objectPath } = paths(key);
@@ -179,6 +241,22 @@ export function createLocalBackend(config: LocalStorageConfig = {}): StorageBack
       // 媒体 verify 比对 contentType：sidecar 必须随对象一起写。
       await writeFile(metaPath, JSON.stringify({ contentType }), "utf8");
     },
+    /**
+     * 稳定键对应的定位符：`media://local/<key>`。
+     *
+     * 与 server 后端同一形状。有了它，同一个「位置」既能展示也能被 {@link readLocator} 解析，
+     * 不会出现「面板上给了一个地址、粘回去却读不到」的情况。
+     */
+    async locatorOf(key): Promise<MediaLocator | undefined> {
+      return LOCAL_STORAGE_LOCATOR_PREFIX + key;
+    },
+    /** 按 locator 读字节：只认本后端的 locator，其余交给存储层报错。 */
+    async readLocator(locator): Promise<StorageObject> {
+      if (!locator.startsWith(LOCAL_STORAGE_LOCATOR_PREFIX)) {
+        throw new Error("不是本地存储的 locator");
+      }
+      return readObject(locator.slice(LOCAL_STORAGE_LOCATOR_PREFIX.length));
+    },
     async delete(key): Promise<void> {
       const { objectPath, metaPath } = paths(key);
       await rm(objectPath, { force: true });
@@ -193,12 +271,50 @@ export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE
     label: LOCAL_STORAGE_LABEL,
     icon: "storage",
     configPrefix: LOCAL_STORAGE_CONFIG_PREFIX,
-    inject: ["log", "storage"],
+    inject: ["log", "storage", "exposer"],
     Config: LOCAL_STORAGE_CONFIG,
     apply(ctx, config) {
+      const log = ctx.log.scope(LOCAL_STORAGE_PLUGIN_ID);
       const backend = createLocalBackend({ root: config.root });
       ctx.effect(() => ctx.storage.register(backend));
-      ctx.log.scope(LOCAL_STORAGE_PLUGIN_ID)({ event: "local-storage-activated", backendId: backend.backendId });
+      log({ event: "local-storage-activated", backendId: backend.backendId });
+
+      // 公开临时桶：默认关闭；开启后只注册提供者，**不**声明默认，仍要显式选
+      // `exposer.primary = local-public` 才生效——推素材上公网不该是隐式后果。
+      if (config.publicEnabled !== true) {
+        log({ event: "local-public-disabled" });
+        return;
+      }
+      const resolved = resolvePublicBucketConfig({
+        ...(config.publicSecretId ? { secretId: config.publicSecretId } : {}),
+        ...(config.publicSecretKey ? { secretKey: config.publicSecretKey } : {}),
+        ...(config.publicBucketName ? { bucketName: config.publicBucketName } : {}),
+        ...(config.publicBucketUrl ? { bucketUrl: config.publicBucketUrl } : {}),
+        ...(config.publicPrefix ? { prefix: config.publicPrefix } : {}),
+        env: process.env
+      });
+      if (!resolved.ok) {
+        // 缺项就整块跳过：注册一个推不上去的提供者只会把错误推迟到调用期。
+        log({ event: "local-public-unconfigured", missing: [...resolved.missing] });
+        return;
+      }
+      const publicConfig = resolved.config;
+      const writer = createCosPublicBucketWriter(publicConfig);
+      ctx.effect(() =>
+        ctx.exposer.register({
+          ...createPublicBucketExposer({ config: publicConfig, writer, storage: ctx.storage }),
+          // 设置页据此把「打开该提供者的配置」链回本插件。
+          ownerExtensionId: LOCAL_STORAGE_PLUGIN_ID
+        })
+      );
+      log({
+        event: "local-public-activated",
+        exposerId: LOCAL_PUBLIC_EXPOSER_ID,
+        bucketName: publicConfig.bucketName,
+        bucketUrl: publicConfig.bucketUrl,
+        prefix: publicConfig.prefix,
+        credentialSource: publicConfig.credentialSource
+      });
     }
   };
 }

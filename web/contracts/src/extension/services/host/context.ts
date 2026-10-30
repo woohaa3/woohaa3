@@ -26,6 +26,7 @@ import type { HostGenerationService } from "./generation.js";
 import type { HostLogService } from "./log.js";
 import type { HostMarketplaceService } from "./marketplace.js";
 import type { HostMediaFormatService } from "./media-formats.js";
+import type { HostExposerService } from "./exposer.js";
 import type { HostStorageService } from "./storage.js";
 import type { HostTelemetryService } from "./telemetry.js";
 import type { HostWebServerService } from "./web-server.js";
@@ -34,6 +35,13 @@ export type HostExtensionContext = Context & {
   readonly log: HostLogService;
   readonly generation: HostGenerationService;
   readonly storage: HostStorageService;
+  /**
+   * 对外地址提供者注册面（`ctx.exposer`）。
+   *
+   * 与 `storage` 分开是两个生命周期的结果：存储缺失宿主不可用；对外地址缺失只影响
+   * 「把 URL 交给远端」的任务，所以它不参与启动就绪。
+   */
+  readonly exposer: HostExposerService;
   /**
    * 扩展市场来源注册面（change: 2026-10-21-add-extension-marketplace-point，D1/D3）。
    * 只有内置根扩展可以注册来源；受管根 / 可写根扩展调用 `register` 会被宿主拒绝。

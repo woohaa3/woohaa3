@@ -5,9 +5,18 @@ import { createTaskInspectionApi } from "./task-inspection-api.js";
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closers.splice(0)) await close(); });
 
-async function boot(options: { authenticated?: boolean; denied?: boolean; unavailable?: boolean; disabled?: boolean } = {}) {
+async function boot(options: {
+  authenticated?: boolean;
+  denied?: boolean;
+  unavailable?: boolean;
+  disabled?: boolean;
+  /** 详情返回的内容（缺省 null = 任务不存在）。 */
+  detailResult?: unknown;
+  /** 产物定位：返回 null 表示「不知道」，抛错表示定位失败。 */
+  locate?: (input: { storageKey: string; canvasId?: string }) => Promise<{ backendId: string; key: string; locator: string } | null>;
+} = {}) {
   const snapshot = vi.fn(async (input: { query?: unknown }) => ({ observedAt: "2026-10-17T00:00:00Z", stateCounts: {}, items: [], nextCursor: null, query: input.query }));
-  const detail = vi.fn(async () => null);
+  const detail = vi.fn(async () => options.detailResult ?? null);
   const assertAction = vi.fn(async () => {
     if (options.denied) throw Object.assign(new Error("denied"), { code: "forbidden" });
     if (options.unavailable) throw Object.assign(new Error("unavailable"), { code: "access-provider-unavailable" });
@@ -16,7 +25,8 @@ async function boot(options: { authenticated?: boolean; denied?: boolean; unavai
     ...(options.disabled ? { accessRuntime: { enabled: false as const, instance: { kind: "instance" as const, id: "instance:t", ownerId: "dev-admin", credentialOwnerId: "principal:dev-admin" } } } : {}),
     authenticator: async () => options.authenticated === false ? null : { subject: "alice", identityProvider: "test" },
     accessEnforcer: { assertAction } as never,
-    inspection: { snapshot, detail } as never
+    inspection: { snapshot, detail } as never,
+    ...(options.locate ? { locate: options.locate } : {})
   });
   const server = http.createServer((req, res) => void handler(req, res).then((handled) => {
     if (!handled) { res.writeHead(404); res.end(); }
@@ -72,5 +82,45 @@ describe("内置任务监控 API", () => {
     const app = await boot();
     expect((await app.request("detail", { taskKey: " missing " })).status).toBe(404);
     expect(app.detail).toHaveBeenCalledWith({ principal: { subject: "alice", identityProvider: "test" }, taskKey: "missing" });
+  });
+});
+
+describe("产物位置（读取时解析）", () => {
+  const found = {
+    taskKey: "task-1",
+    canvasId: "canvas-1",
+    state: "succeeded",
+    result: { mediaKind: "image", storageKey: "generation-outputs/a.png", size: 3, checksum: "abc" }
+  };
+
+  it("详情返回前补上所在后端与实际键（带 locator 时一并给出）", async () => {
+    const locate = vi.fn(async () => ({ backendId: "server", key: "media/generation-outputs/a.png", locator: "media://server/media/generation-outputs/a.png" }));
+    const app = await boot({ detailResult: found, locate });
+    const response = await app.request("detail", { taskKey: "task-1" });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { result: { location: unknown } };
+    expect(locate).toHaveBeenCalledWith({ storageKey: "generation-outputs/a.png", canvasId: "canvas-1" });
+    expect(body.result.location).toEqual({
+      backendId: "server",
+      key: "media/generation-outputs/a.png",
+      locator: "media://server/media/generation-outputs/a.png"
+    });
+  });
+
+  it("定位失败或定位不到时详情照常返回，不把排障面板打成错误", async () => {
+    const failing = await boot({
+      detailResult: found,
+      locate: async () => {
+        throw new Error("storage down");
+      }
+    });
+    const failedResponse = await failing.request("detail", { taskKey: "task-1" });
+    expect(failedResponse.status).toBe(200);
+    expect(((await failedResponse.json()) as { result: { location?: unknown } }).result.location).toBeUndefined();
+
+    const missing = await boot({ detailResult: found, locate: async () => null });
+    const missingResponse = await missing.request("detail", { taskKey: "task-1" });
+    expect(missingResponse.status).toBe(200);
+    expect(((await missingResponse.json()) as { result: { location?: unknown } }).result.location).toBeUndefined();
   });
 });

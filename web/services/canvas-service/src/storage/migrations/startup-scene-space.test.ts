@@ -211,6 +211,26 @@ describe("片场坐标契约迁移（启动前）", () => {
     }
   });
 
+  it("旧 schema3 reader 省略 schema4 内容后仍从 raw 完整迁移", () => {
+    const now = "2026-10-23T00:00:00.000Z";
+    const data = legacyNodeData();
+    data.filmSetContent = { ...(data.filmSetContent as object), schemaVersion: 4 };
+    const { db, filename } = writeProfile(data, now);
+    try {
+      const stored = JSON.parse(String(db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
+      delete stored.nodeData.film.filmSetContent;
+      const validProjection = JSON.stringify(stored);
+      stored.nodeData.film.title = "unexpected cache change";
+      db.prepare("UPDATE canvas_yjs_documents SET projection_json = ?").run(JSON.stringify(stored));
+      expect(() => migrateSqliteCanvasBeforeStartup(filename)).toThrow(/projection-mismatch/);
+      db.prepare("UPDATE canvas_yjs_documents SET projection_json = ?").run(validProjection);
+      expect(migrateSqliteCanvasBeforeStartup(filename).changed).toBe(true);
+      const migrated = JSON.parse(String(db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
+      expect(readFilmSetAnimationProjection(migrated, "film")!.filmSetContent.items).toEqual((data.filmSetContent as { items: unknown[] }).items);
+      expect(migrateSqliteCanvasBeforeStartup(filename)).toEqual({ changed: false });
+    } finally { db.close(); }
+  });
+
   it("派生视图也不匹配时仍然拒绝（不放过陈旧/半写 projection）", () => {
     const now = "2026-10-23T00:00:00.000Z";
     const { db, filename } = writeProfile(legacyNodeData(), now, "derived");

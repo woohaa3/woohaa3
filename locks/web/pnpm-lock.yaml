@@ -324,6 +324,9 @@ importers:
       '@woohaa3/contracts':
         specifier: workspace:*
         version: link:../../contracts
+      cos-nodejs-sdk-v5:
+        specifier: ^3.0.0
+        version: 3.0.0
     devDependencies:
       '@types/node':
         specifier: ^22.15.3

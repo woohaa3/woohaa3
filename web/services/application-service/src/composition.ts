@@ -170,6 +170,11 @@ export type ApplicationServiceOptions = {
    */
   storage?: { register: (backend: import("@woohaa3/contracts").StorageBackend) => void; unregister: (backendId: string) => void };
   /**
+   * 对外地址提供者注册面（可选）。与 `storage` 分开：地址能力可以独立于字节驻留存在
+   * （例如 CDN 回源签名），缺少它不影响存储注册。
+   */
+  exposer?: { register: (exposer: import("@woohaa3/contracts").StorageExposer) => void; unregister: (exposerId: string) => void };
+  /**
    * 遥测出口注册面（可选）。缺省时不提供：站点插件拿不到 `host.registerTelemetryExport`，
    * 记日志跳过自己的上报能力。core 只持有注册表与总开关，不持有任何目的地配置。
    */

@@ -246,19 +246,27 @@ GitHub 仓库的 Release 即可被发现。适合开源 / 跨团队的分发现�
 `<extensionId>-<version>.wxt` 约定，不要重命名）。本机管理员照旧把签名公钥写入本机
 `extensions.marketplace.trustedKeys`——GitHub 不发布公钥，信任判定完全在本机。
 
-**安装侧**：本机配置（`web/woohaa.config.yml`）：
+**安装侧**：开箱可用。缺省 `enabled: true`、`repos: woohaa3/woohaa3-marketplace`，
+设置「插件配置 → 从市场安装」里直接就有 `GitHub Release` 来源。要换成自己的仓库就覆盖本机配置
+（`web/woohaa.config.yml`）：
 
 ```yaml
 extensions:
   marketplace:
     github:
-      enabled: true
-      repos: "my-org/my-extension, my-org/another-extension"
+      enabled: true          # 缺省就是 true；置 false 可整体关掉这个来源
+      repos: "my-org/my-extension, my-org/another-extension"   # 缺省是官方市场仓库
       # GitHub Enterprise Server 才需要：
       # apiBase: "https://github.example.com/api/v3"
 ```
 
-令牌（访问私有仓库或提高限流，缺省匿名 60 次/小时）写在密钥文件 `web/woohaa.secrets.yml`：
+**发现路径**：没有令牌时走 `github.com` 的网页端点（`/{repo}/releases` 与
+`/{repo}/releases/expanded_assets/{tag}`）——**不消耗 REST API 限额**（匿名只有 60 次/小时，
+很容易被限频），资产页上同样有 `sha256:<hex>` 摘要，下载走 `releases/download/**` 的 CDN 直链。
+配了令牌、或把 `apiBase` 换成自建实例时才走 REST API（私有仓库只能这样）。发现结果在本进程缓存
+60 秒（`search` / `resolve` / `download` 连续读同一批 Release）。
+
+令牌（访问私有仓库；也可用来提高 API 限额）写在密钥文件 `web/woohaa.secrets.yml`：
 
 ```yaml
 extensions:
@@ -267,11 +275,11 @@ extensions:
       token: "ghp_xxx"
 ```
 
-也可用环境变量 `WOOHAA3_GITHUB_TOKEN` 兜底。之后设置「插件配置 → 从市场安装」会出现
-`GitHub Release` 来源；安装仍走同一条校验链（摘要、签名、预检）。
+也可用环境变量 `WOOHAA3_GITHUB_TOKEN` 兜底。安装仍走同一条校验链（摘要、签名、预检）。
 
-注意：GitHub API 需为资产提供 `digest`（`sha256:...`）才能安装——未返回 digest 的资产会被
-跳过（来源宁可失败也不安装无法复核摘要的包）。
+注意：来源必须能拿到资产的 `sha256:...` 摘要才能安装——拿不到的资产会被跳过（来源宁可失败
+也不安装无法复核摘要的包）。网页路径的包大小是页面显示值反算的近似值（偏差 < 0.1%），只用
+于展示与进度，硬上限按实际字节判定。
 
 ## 示例
 

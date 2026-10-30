@@ -33,7 +33,14 @@ export const DEFAULT_CANVAS_OWNERSHIP_PATH = ".woohaa3/canvas-storage-ownership.
 const MAX_ENTRIES = 2_000;
 
 /** 文件布局版本；读不懂的版本按空处理（不阻塞启动，下次解析会重新写回）。 */
-const FILE_VERSION = 1;
+const FILE_VERSION = 2;
+/**
+ * 旧版本（只有 `canvasIds`）。
+ *
+ * 仍然读：升级前写下的归属记录必须继续生效，否则重启后已同步的画布会被当成纯本地，
+ * 媒体读写回落到主存储，把托管存储里确实存在的对象报成不存在。
+ */
+const LEGACY_FILE_VERSION = 1;
 
 /**
  * 落点优先级：显式环境变量 → 宿主其它持久状态所在目录 → cwd 下的 .woohaa3/。
@@ -69,11 +76,14 @@ export function createCanvasStorageOwnership(options: {
   const log = options.logger ?? (() => undefined);
   const maxEntries = options.maxEntries ?? MAX_ENTRIES;
   /** 插入顺序即「最近一次确认」顺序：命中已有条目时移到末尾。 */
-  const owned = new Map<string, true>(readInitial());
+  const initial = readInitial();
+  const owned = new Map<string, true>(initial.ids);
+  /** 画布级地址覆盖（id → 地址提供者 id）；没有条目表示继承部署默认。 */
+  const exposures = new Map<string, string>(initial.exposures);
   /** 串行写队列：并发 remember 不会互相覆盖临时文件。 */
   let queued: Promise<void> = Promise.resolve();
 
-  function readInitial(): Array<[string, true]> {
+  function readInitial(): { ids: Array<[string, true]>; exposures: Array<[string, string]> } {
     let raw: string;
     try {
       raw = readFileSync(options.filePath, "utf8");
@@ -81,13 +91,13 @@ export function createCanvasStorageOwnership(options: {
       if ((error as { code?: unknown }).code !== "ENOENT") {
         log({ event: "canvas-ownership-read-failed", reason: error instanceof Error ? error.name : "unknown" });
       }
-      return [];
+      return { ids: [], exposures: [] };
     }
     try {
-      const parsed = JSON.parse(raw) as { version?: unknown; canvasIds?: unknown };
-      if (parsed.version !== FILE_VERSION || !Array.isArray(parsed.canvasIds)) {
+      const parsed = JSON.parse(raw) as { version?: unknown; canvasIds?: unknown; exposures?: unknown };
+      if ((parsed.version !== FILE_VERSION && parsed.version !== LEGACY_FILE_VERSION) || !Array.isArray(parsed.canvasIds)) {
         log({ event: "canvas-ownership-read-failed", reason: "unsupported-format" });
-        return [];
+        return { ids: [], exposures: [] };
       }
       const entries: Array<[string, true]> = [];
       const seen = new Set<string>();
@@ -98,10 +108,21 @@ export function createCanvasStorageOwnership(options: {
         seen.add(canvasId);
         entries.push([canvasId, true]);
       }
-      return entries.slice(-maxEntries);
+      const kept = entries.slice(-maxEntries);
+      const keptIds = new Set(kept.map(([canvasId]) => canvasId));
+      const exposureEntries: Array<[string, string]> = [];
+      const rawExposures = parsed.exposures;
+      if (rawExposures !== null && typeof rawExposures === "object" && !Array.isArray(rawExposures)) {
+        for (const [canvasId, value] of Object.entries(rawExposures as Record<string, unknown>)) {
+          // 只保留仍然归属远端的画布：孤立覆盖条目没有意义，删画布时也会一起清掉。
+          if (!keptIds.has(canvasId) || typeof value !== "string") continue;
+          exposureEntries.push([canvasId, value]);
+        }
+      }
+      return { ids: kept, exposures: exposureEntries };
     } catch (error) {
       log({ event: "canvas-ownership-read-failed", reason: error instanceof Error ? error.name : "unknown" });
-      return [];
+      return { ids: [], exposures: [] };
     }
   }
 
@@ -116,7 +137,11 @@ export function createCanvasStorageOwnership(options: {
       if (oldest.done) break;
       owned.delete(oldest.value);
     }
-    const payload = JSON.stringify({ version: FILE_VERSION, canvasIds: [...owned.keys()] }, null, 2);
+    const payload = JSON.stringify(
+      { version: FILE_VERSION, canvasIds: [...owned.keys()], exposures: Object.fromEntries(exposures) },
+      null,
+      2
+    );
     const tmp = `${options.filePath}.${process.pid}.tmp`;
     try {
       await mkdir(path.dirname(options.filePath), { recursive: true });
@@ -140,7 +165,20 @@ export function createCanvasStorageOwnership(options: {
       schedule();
     },
     forget(canvasId) {
-      if (!owned.delete(canvasId.trim())) return;
+      const trimmed = canvasId.trim();
+      const removedExposure = exposures.delete(trimmed);
+      if (!owned.delete(trimmed)) {
+        if (removedExposure) schedule();
+        return;
+      }
+      schedule();
+    },
+    exposures: () => Object.fromEntries(exposures),
+    rememberExposure(canvasId, exposure) {
+      const trimmed = canvasId.trim();
+      if (trimmed === "" || !owned.has(trimmed)) return;
+      if (exposures.get(trimmed) === exposure) return;
+      exposures.set(trimmed, exposure);
       schedule();
     }
   };

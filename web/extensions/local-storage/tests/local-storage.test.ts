@@ -8,7 +8,12 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { StorageObjectNotFoundError, type HostExtensionContext, type StorageBackend } from "@woohaa3/contracts";
+import {
+  StorageObjectNotFoundError,
+  type HostExtensionContext,
+  type StorageBackend,
+  type StorageExposer
+} from "@woohaa3/contracts";
 import { createLocalBackend, createLocalStoragePlugin } from "../src/backend.js";
 
 let root: string;
@@ -70,6 +75,28 @@ describe("put / head / get 往返", () => {
     await backend.put("media/a.bin", Uint8Array.of(1, 2), "video/mp4");
 
     expect(await backend.head("media/a.bin")).toEqual({ size: 2, contentType: "video/mp4" });
+  });
+});
+
+describe("locator", () => {
+  it("给出 media://local/<key>，并能按它读回同一份字节", async () => {
+    await backend.put("media/a.png", Uint8Array.of(1, 2, 3), "image/png");
+    const locator = await backend.locatorOf!("media/a.png");
+    expect(locator).toBe("media://local/media/a.png");
+
+    const object = await backend.readLocator!(locator!);
+    expect(Array.from(object.bytes)).toEqual([1, 2, 3]);
+    expect(object.contentType).toBe("image/png");
+  });
+
+  it("外来的 locator 明确拒绝，不跨后端猜", async () => {
+    await expect(backend.readLocator!("media://cos/media/a.png")).rejects.toThrow(/不是本地存储的 locator/);
+  });
+
+  it("locator 指向不存在的对象时抛存储 not-found", async () => {
+    await expect(backend.readLocator!("media://local/media/gone.png")).rejects.toBeInstanceOf(
+      StorageObjectNotFoundError
+    );
   });
 });
 
@@ -144,17 +171,10 @@ describe("delete", () => {
     await backend.delete!("media/gone.png");
   });
 });
-
 describe("插件形状", () => {
-  it("元数据与 litellm-provider 同形，apply 经 ctx.effect 注册并可在卸载时注销", async () => {
-    const plugin = createLocalStoragePlugin();
-    expect(plugin.name).toBe("local-storage");
-    expect(plugin.label).toBe("本地存储");
-    expect(plugin.configPrefix).toBe("storage.local");
-    expect(plugin.inject).toEqual(["log", "storage"]);
-    expect(plugin.Config.fields.root.default).toBe(".woohaa3/storage");
-
+  const createCtx = () => {
     const registered: StorageBackend[] = [];
+    const exposers: StorageExposer[] = [];
     const logs: Array<Record<string, unknown>> = [];
     const disposers: Array<() => void> = [];
     const ctx = {
@@ -167,6 +187,15 @@ describe("插件形状", () => {
           };
         }
       },
+      exposer: {
+        register(exposer: StorageExposer) {
+          exposers.push(exposer);
+          return () => {
+            const index = exposers.indexOf(exposer);
+            if (index >= 0) exposers.splice(index, 1);
+          };
+        }
+      },
       log: {
         scope: () => (event: Record<string, unknown>) => {
           logs.push(event);
@@ -176,16 +205,66 @@ describe("插件形状", () => {
         disposers.push(callback());
       }
     } as unknown as HostExtensionContext;
+    return { ctx, registered, exposers, logs, disposers };
+  };
 
-    await plugin.apply(ctx, { root });
+  it("元数据与 litellm-provider 同形，apply 经 ctx.effect 注册并可在卸载时注销", async () => {
+    const plugin = createLocalStoragePlugin();
+    expect(plugin.name).toBe("local-storage");
+    expect(plugin.label).toBe("本地存储");
+    expect(plugin.configPrefix).toBe("storage.local");
+    expect(plugin.inject).toEqual(["log", "storage", "exposer"]);
+    expect(plugin.Config.fields.root.default).toBe(".woohaa3/storage");
+    // 公开临时桶默认关闭：完全本地的部署不会因为装了插件就把素材推上公网。
+    expect(plugin.Config.fields.publicEnabled.default).toBe(false);
+
+    const { ctx, registered, exposers, logs, disposers } = createCtx();
+    await plugin.apply(ctx, { root, publicEnabled: false });
 
     expect(registered.map((item) => item.backendId)).toEqual(["local"]);
     // 「完全本地」的能力边界：没有 presign。
     expect(registered[0]?.presign).toBeUndefined();
     expect(registered[0]?.label).toBe("本地存储");
     expect(logs[0]).toMatchObject({ event: "local-storage-activated", backendId: "local" });
+    expect(logs.some((event) => event.event === "local-public-disabled")).toBe(true);
+    expect(exposers).toEqual([]);
 
     disposers.forEach((dispose) => dispose());
     expect(registered).toEqual([]);
+  });
+
+  it("开启公开临时桶后注册 local-public 提供者，但不声明默认", async () => {
+    const plugin = createLocalStoragePlugin();
+    const { ctx, registered, exposers, logs } = createCtx();
+    await plugin.apply(ctx, {
+      root,
+      publicEnabled: true,
+      publicSecretId: "id",
+      publicSecretKey: "key",
+      publicBucketName: "fixture-bucket-1234567890",
+      publicBucketUrl: "https://fixture-bucket-1234567890.cos.ap-guangzhou.myqcloud.com",
+      publicPrefix: "fixture-prefix"
+    });
+
+    // 公开桶不是存储后端：它不出现在「主存储」下拉里。
+    expect(registered.map((item) => item.backendId)).toEqual(["local"]);
+    expect(exposers.map((item) => item.exposerId)).toEqual(["local-public"]);
+    expect(exposers[0]).toMatchObject({ ownerExtensionId: "local-storage", requiresReplica: false });
+    expect("default" in (exposers[0] as object)).toBe(false);
+    expect(logs).toContainEqual(
+      expect.objectContaining({ event: "local-public-activated", exposerId: "local-public", credentialSource: "own" })
+    );
+  });
+
+  it("缺桶信息时只记日志、不注册提供者（缺项不猜）", async () => {
+    const plugin = createLocalStoragePlugin();
+    const { ctx, exposers, logs } = createCtx();
+    await plugin.apply(ctx, { root, publicEnabled: true, publicSecretId: "id", publicSecretKey: "key" });
+
+    expect(exposers).toEqual([]);
+    expect(logs).toContainEqual({
+      event: "local-public-unconfigured",
+      missing: ["publicBucketName", "publicBucketUrl", "publicPrefix"]
+    });
   });
 });

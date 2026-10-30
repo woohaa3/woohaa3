@@ -80,6 +80,41 @@ describe("TaskTraceBody", () => {
     expect(container.querySelector(".task-trace__ref")!.getAttribute("title")).toBe("asset-1");
   });
 
+  it("产物显示所在后端与定位符；没有 locator 的后端退回实际键", () => {
+    const located = renderBody({
+      detail: detail({
+        state: "succeeded",
+        result: {
+          mediaKind: "image",
+          storageKey: "generation-outputs/a.png",
+          size: 3,
+          checksum: "abc",
+          location: {
+            backendId: "server",
+            key: "media/generation-outputs/a.png",
+            locator: "media://server/media/generation-outputs/a.png"
+          }
+        }
+      })
+    });
+    // 一行定位符就够了：它同时表达「哪个后端 + 什么键」。
+    expect(located.textContent).toContain("产物定位符");
+    expect(located.textContent).toContain("media://server/media/generation-outputs/a.png");
+    // 不再单独列后端 / 实际键 / 存储键，避免同一个事实说三遍。
+    expect(located.textContent).not.toContain("实际键");
+    expect(located.textContent).not.toContain("所在后端");
+
+    // 旧宿主没有 location：退回存储键，面板不出现空白。
+    const plain = renderBody({
+      detail: detail({
+        state: "succeeded",
+        result: { mediaKind: "image", storageKey: "generation-outputs/a.png", size: 3, checksum: "abc" }
+      })
+    });
+    expect(plain.textContent).toContain("产物定位符");
+    expect(plain.textContent).toContain("generation-outputs/a.png");
+  });
+
   it("技术信息把编号翻译成人话：同值的任务/运行合并，画布与节点带可读标题", () => {
     const container = renderBody({
       detail: detail({
@@ -123,7 +158,7 @@ describe("TaskTraceBody", () => {
     expect(writes[0]).toContain("上游任务号: upstream-42");
     expect(writes[0]).toContain("任务 / 运行: task-1");
     expect(writes[0]).toContain("画布 ID: canvas-1");
-    expect(writes[0]).toContain("产物存储键: generation-outputs/a.png");
+    expect(writes[0]).toContain("产物定位符: generation-outputs/a.png");
   });
 
   it("参考输入有媒体地址时出缩略图，没地址时退化为文本", () => {

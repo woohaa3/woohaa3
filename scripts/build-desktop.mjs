@@ -30,6 +30,7 @@ import {
   FRONTEND_BUILD_STEPS,
   buildDefaultsDocument,
   buildDesktopManifest,
+  clearBundleOutputDirs,
   collectBundleArtifacts,
   formatCommand,
   hashPath,
@@ -295,6 +296,9 @@ async function runBuild(options) {
   }
 
   writeDefaults(options.uiUrl);
+  // 先清空本次要产出的 bundle 目录：tauri 不清理旧版本，残留会让 manifest 混进上一版安装包
+  // （发布索引要求恰好一个 updater archive，直接失败），也会被 --copy 复制进上传目录。
+  clearBundleOutputDirs({ desktopDir, target: options.target, debug: options.debug, kinds: kindList });
   run(process.execPath, [cli.entry, ...args], { cwd: desktopDir });
 
   const outDir = outDirPath(resolved);

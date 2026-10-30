@@ -22,7 +22,7 @@ import { beginSwap, endSwap } from "./swap-registry.js";
 import { createReloadingHandler } from "./swap-reloading-route.js";
 import { loadPackageToolkit } from "./toolkit.js";
 import { createVersionStatusCache, managedVersionStatus, marketplaceExtensionDetail } from "./marketplace-detail.js";
-import { createGithubReleaseSource, GITHUB_RELEASE_SOURCE_ID, parseRepoList } from "./github-source.js";
+import { createGithubReleaseSource, DEFAULT_GITHUB_API_BASE, GITHUB_RELEASE_SOURCE_ID, parseRepoList } from "./github-source.js";
 import { OFFICIAL_MARKETPLACE_TRUSTED_KEYS } from "./official-trust.js";
 import type { ExtensionRuntimePort } from "./manager-types.js";
 import type { ExtensionPackageToolkit, InstallationsHandle, TrustedKey } from "./types.js";
@@ -124,14 +124,16 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
       (host.builtinExtensions ?? []).map((entry) => [entry.extensionId, entry] as const)
     );
 
-    // GitHub Release 来源（核心自带第二个来源，与 local-file 同级）：配置按调用现取（热重载即刻生效）；
-    // enabled 缺省 false——出网行为必须显式开启，未开启时 available() 不可用且绝不发请求。
+    // GitHub Release 来源（核心自带第二个来源，与 local-file 同级）：配置按调用现取（热重载即刻生效）。
+    // enabled / repos 都带缺省值（官方市场仓库），开箱即可搜索安装；关掉后 available() 不可用且绝不发请求。
+    // 没有令牌时走网页端点（不吃 REST API 限额），有令牌或自建实例才走 API；判定在来源内部。
     // 令牌优先取密钥文件里的 extensions.marketplace.github.token，环境变量 WOOHAA3_GITHUB_TOKEN 兜底。
     const githubSource = createGithubReleaseSource({
       config: () => ({
         enabled: settings.get("extensions.marketplace.github.enabled" as never) === true,
         repos: parseRepoList(settings.get("extensions.marketplace.github.repos" as never)),
-        apiBase: (settings.get("extensions.marketplace.github.apiBase" as never) as string | undefined) ?? "https://api.github.com",
+        apiBase:
+          (settings.get("extensions.marketplace.github.apiBase" as never) as string | undefined) ?? DEFAULT_GITHUB_API_BASE,
         token: (settings.get("extensions.marketplace.github.token" as never) as string | undefined) ?? config.env.WOOHAA3_GITHUB_TOKEN ?? ""
       })
     });

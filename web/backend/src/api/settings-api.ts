@@ -30,6 +30,13 @@ export type SettingsApiDependencies = {
    * 缺省时不提供可选后端，设置页保持纯文本编辑（独立入口与测试）。
    */
   storageBackends?: () => readonly { backendId: string; label?: string; ownerExtensionId?: string }[] | undefined;
+  /**
+   * 对外地址提供者；同样按请求现查。
+   *
+   * 与 storageBackends 分开是因为它们是两个扩展点：地址提供者可以是一个与存储无关的实现
+   * （例如 CDN 回源、第三方签名服务），设置页也要按各自的 owner 跳转。
+   */
+  exposers?: () => readonly { exposerId: string; label?: string; ownerExtensionId?: string }[] | undefined;
   /** 宿主安全模式（D7）；按请求现取（application 在核心层，比 config 晚装载）。 */
   safeMode?: () => HostSafeModeView | null | undefined;
   /**
@@ -48,6 +55,7 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
   const log = deps.logger ?? (() => undefined);
   const snapshot = (): SettingsSnapshot => {
     const backends = deps.storageBackends?.() ?? [];
+    const exposers = deps.exposers?.() ?? [];
     const manager = deps.extensionManager?.();
     return {
       safeMode: deps.safeMode?.() ?? null,
@@ -60,6 +68,11 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
           id: backend.backendId,
           label: backend.label ?? backend.backendId,
           ownerExtensionId: backend.ownerExtensionId ?? null
+        })),
+        exposer: exposers.map((exposer) => ({
+          id: exposer.exposerId,
+          label: exposer.label ?? exposer.exposerId,
+          ownerExtensionId: exposer.ownerExtensionId ?? null
         }))
       },
       // browser-local 插件的启停目标状态：来自配置文件，前端只投影、不自持存储。

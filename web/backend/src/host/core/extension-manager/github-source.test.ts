@@ -1,7 +1,22 @@
 /** GitHub Release 市场来源：文件名解析 / semver 选择 / digest 缺失 / 分页 / 下载（mock fetch，不打真实 GitHub）。 */
 import { describe, expect, it } from "vitest";
 import type { MarketplaceSearchPage } from "@woohaa3/contracts";
-import { createGithubReleaseSource, GITHUB_RELEASE_SOURCE_ID, githubSourceHostEngines, parseAssetName, parseGithubCatalog, parseRepoList, type GithubSourceConfig } from "./github-source.js";
+import {
+  createGithubReleaseSource,
+  DEFAULT_GITHUB_MARKETPLACE_REPOS,
+  GITHUB_RELEASE_SOURCE_ID,
+  githubSourceHostEngines,
+  parseAssetName,
+  parseAssetUploadedAt,
+  parseExpandedAssets,
+  parseGithubCatalog,
+  parseReleasesPage,
+  parseRepoList,
+  parseSizeText,
+  resolveDiscovery,
+  webBaseOf,
+  type GithubSourceConfig
+} from "./github-source.js";
 
 const signal = new AbortController().signal;
 const sha = (n: number) => `sha256:${String(n).padStart(64, "0")}`;
@@ -83,6 +98,8 @@ const config = (overrides: Partial<GithubSourceConfig> = {}): GithubSourceConfig
   repos: ["acme/extensions"],
   apiBase: "https://api.github.com",
   token: "",
+  // 这些用例断言 REST 路径；网页路径单列一组（避免同一条断言在两套实现间漂移）。
+  discovery: "api",
   ...overrides
 });
 
@@ -418,5 +435,153 @@ describe("网络失败与限流", () => {
     const source = createGithubReleaseSource({ config: () => config({ apiBase: "https://github.example.com/api/v3" }), fetchImpl });
     await source.search({}, signal);
     expect(log[0]!.url.startsWith("https://github.example.com/api/v3/repos/acme/extensions/releases")).toBe(true);
+  });
+});
+
+describe("发现路径选择", () => {
+  it("公共 GitHub 无令牌走网页端点；令牌或自建基址走 REST", () => {
+    expect(resolveDiscovery({ apiBase: "https://api.github.com", token: "" })).toBe("web");
+    expect(resolveDiscovery({ apiBase: "https://api.github.com/", token: "" })).toBe("web");
+    expect(resolveDiscovery({ apiBase: "https://api.github.com", token: "ghp_x" })).toBe("api");
+    expect(resolveDiscovery({ apiBase: "https://github.example.com/api/v3", token: "" })).toBe("api");
+  });
+
+  it("网页基址由 API 基址推导", () => {
+    expect(webBaseOf("https://api.github.com")).toBe("https://github.com");
+    expect(webBaseOf("https://api.github.com/")).toBe("https://github.com");
+    expect(webBaseOf("https://github.example.com/api/v3")).toBe("https://github.example.com");
+  });
+
+  it("缺省市场仓库指向官方公开仓", () => {
+    expect(DEFAULT_GITHUB_MARKETPLACE_REPOS).toBe("woohaa3/woohaa3-marketplace");
+  });
+});
+
+describe("网页解析", () => {
+  it("releases 页：按标题块取 tag 与标题，跳过没有 tag 的块", () => {
+    const html =
+      '<h2 class="sr-only" id="hd-a">Demo 0.1.1</h2>' +
+      '<span><a href="/acme/extensions/releases/tag/demo-v0.1.1" class="Link--primary Link">Demo 0.1.1</a></span>' +
+      '<h2 class="sr-only" id="hd-b">&lt;script&gt; 不转义会出事</h2>' +
+      '<a href="/acme/extensions/releases/tag/v0.2.0" class="Link--primary Link">v0.2.0</a>' +
+      '<h2 class="sr-only" id="hd-c">没有 tag 的块</h2>';
+    expect(parseReleasesPage(html)).toEqual([
+      { tag: "demo-v0.1.1", name: "Demo 0.1.1" },
+      { tag: "v0.2.0", name: "<script> 不转义会出事" }
+    ]);
+  });
+
+  it("标题块结构变了也能从资产片段链接还原 tag", () => {
+    const html =
+      '<div><include-fragment loading="lazy" src="https://github.com/acme/extensions/releases/expanded_assets/v1.0.0"></include-fragment></div>' +
+      '<div><include-fragment loading="lazy" src="https://github.com/acme/extensions/releases/expanded_assets/v1.1.0"></include-fragment></div>' +
+      '<div><include-fragment loading="lazy" src="https://github.com/acme/extensions/releases/expanded_assets/v1.1.0"></include-fragment></div>';
+    expect(parseReleasesPage(html)).toEqual([{ tag: "v1.0.0" }, { tag: "v1.1.0" }]);
+  });
+
+  it("expanded_assets：取资产名 / sha256 / 大小 / 直链，跳过源码包", () => {
+    const html =
+      '<ul><li class="Box-row d-flex">' +
+      '<a href="/acme/extensions/releases/download/v1.0.0/demo-1.0.0.wxt" rel="nofollow">' +
+      '<span class="text-bold">demo-1.0.0.wxt</span></a>' +
+      '<span class="Truncate-text">sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</span>' +
+      '<span style="white-space: nowrap;">18.4 MB</span></li>' +
+      '<li class="Box-row d-flex"><a href="/acme/extensions/archive/refs/tags/v1.0.0.zip">Source code (zip)</a>' +
+      '<span>2026-10-28T08:26:01Z</span></li></ul>';
+    expect(parseExpandedAssets(html, { webBase: "https://github.com", repo: "acme/extensions", tag: "v1.0.0" })).toEqual([
+      {
+        name: "demo-1.0.0.wxt",
+        size: 19293798,
+        digest: "sha256:" + "a".repeat(64),
+        browser_download_url: "https://github.com/acme/extensions/releases/download/v1.0.0/demo-1.0.0.wxt"
+      }
+    ]);
+  });
+
+  it("资产页上传时间：ISO 直接用，UTC 文本归一化，缺失返回 undefined", () => {
+    expect(parseAssetUploadedAt('<relative-time datetime="2026-10-28T08:26:36Z">')).toBe("2026-10-28T08:26:36Z");
+    expect(parseAssetUploadedAt('<relative-time datetime="2026-10-28 07:03:27 UTC">')).toBe("2026-10-28T07:03:27Z");
+    expect(parseAssetUploadedAt("<div>没有时间</div>")).toBeUndefined();
+    expect(parseAssetUploadedAt('<relative-time datetime="不是时间">')).toBeUndefined();
+  });
+
+  it("parseSizeText 只认带单位的大小文本", () => {
+    expect(parseSizeText("512 B")).toBe(512);
+    expect(parseSizeText(" 1 KB ")).toBe(1024);
+    expect(parseSizeText("18.4 MB")).toBe(19293798);
+    expect(parseSizeText("1.5 GB")).toBe(1610612736);
+    expect(parseSizeText("18.4")).toBeUndefined();
+    expect(parseSizeText("unknown")).toBeUndefined();
+  });
+});
+
+describe("网页发现（不消耗 REST API 限额）", () => {
+  const digest = "sha256:" + "b".repeat(64);
+  const releasesHtml =
+    '<h2 class="sr-only" id="hd-1">Demo 0.1.0</h2>' +
+    '<a href="/acme/extensions/releases/tag/v1.0.0" class="Link--primary Link">Demo 0.1.0</a>' +
+    '<h2 class="sr-only" id="hd-2">Other 1.1.0</h2>' +
+    '<a href="/acme/extensions/releases/tag/v1.1.0" class="Link--primary Link">Other 1.1.0</a>';
+  const assetsHtml = (name: string, hash: string) =>
+    '<ul><li class="Box-row"><a href="/acme/extensions/releases/download/v1.0.0/' + name + '">' + name + "</a>" +
+    '<span>sha256:' + hash + "</span><span>18.4 MB</span>" +
+    '<relative-time datetime="2026-10-28T08:26:36Z"></relative-time></li></ul>';
+
+  const webRoutes = () => [
+    { match: (url: string) => url.includes("/releases?page=1"), respond: () => new Response(releasesHtml, { status: 200 }) },
+    { match: (url: string) => url.includes("expanded_assets/v1.0.0"), respond: () => new Response(assetsHtml("demo-1.0.0.wxt", "b".repeat(64)), { status: 200 }) },
+    { match: (url: string) => url.includes("expanded_assets/v1.1.0"), respond: () => new Response(assetsHtml("other-1.1.0.wxt", "c".repeat(64)), { status: 200 }) },
+    { match: (url: string) => url.includes("/raw/HEAD/catalog.json"), respond: () => ({ status: 200, body: { extensions: { demo: { name: "Demo 扩展" } } } }) },
+    { match: (url: string) => url.startsWith("https://github.com/acme/extensions/releases/download/"), respond: () => new Response("wxt-bytes", { status: 200 }) }
+  ];
+
+  it("search / resolve / download 全程只打 github.com", async () => {
+    const { fetchImpl, log } = mockFetch(webRoutes());
+    const source = createGithubReleaseSource({ config: () => config({ discovery: "web" }), fetchImpl });
+    const page = await source.search({}, signal);
+    expect(page.items.map((item) => [item.extensionId, item.latest])).toEqual([
+      ["demo", "1.0.0"],
+      ["other", "1.1.0"]
+    ]);
+    expect(page.items[0]).toMatchObject({ label: "Demo 扩展", size: 19293798, publishedAt: "2026-10-28T08:26:36Z" });
+    const ref = await source.resolve("demo", "*", signal);
+    expect(ref).toMatchObject({ version: "1.0.0", packageDigest: digest, size: 19293798 });
+    const download = await source.download(ref!, signal);
+    expect(download.size).toBe(19293798);
+    expect(log.every((entry) => entry.url.startsWith("https://github.com/"))).toBe(true);
+  });
+
+  it("发现结果在 TTL 内复用：解析与下载不再重复抓 Release", async () => {
+    const { fetchImpl, log } = mockFetch(webRoutes());
+    const source = createGithubReleaseSource({ config: () => config({ discovery: "web" }), fetchImpl });
+    await source.search({}, signal);
+    const afterSearch = log.length;
+    const ref = await source.resolve("demo", "*", signal);
+    await source.download(ref!, signal);
+    expect(log.slice(afterSearch).map((entry) => entry.url)).toEqual([
+      "https://github.com/acme/extensions/releases/download/v1.0.0/demo-1.0.0.wxt"
+    ]);
+  });
+
+  it("cacheTtlMs=0 关闭缓存：每次调用都重新抓", async () => {
+    const { fetchImpl, log } = mockFetch(webRoutes());
+    const source = createGithubReleaseSource({ config: () => config({ discovery: "web" }), fetchImpl, cacheTtlMs: 0 });
+    await source.resolve("demo", "*", signal);
+    const first = log.length;
+    await source.resolve("demo", "*", signal);
+    expect(log.length).toBe(first * 2);
+  });
+
+  it("网页 404 / 限流给出可照做的中文原因", async () => {
+    const notFound = createGithubReleaseSource({
+      config: () => config({ discovery: "web" }),
+      fetchImpl: mockFetch([{ match: () => true, respond: () => new Response("nope", { status: 404 }) }]).fetchImpl
+    });
+    await expect(notFound.search({}, signal)).rejects.toMatchObject({ code: "MARKETPLACE_SOURCE_UNAVAILABLE", message: expect.stringContaining("仓库不存在") });
+    const limited = createGithubReleaseSource({
+      config: () => config({ discovery: "web" }),
+      fetchImpl: mockFetch([{ match: () => true, respond: () => new Response("slow down", { status: 429 }) }]).fetchImpl
+    });
+    await expect(limited.search({}, signal)).rejects.toMatchObject({ message: expect.stringContaining("被限流") });
   });
 });

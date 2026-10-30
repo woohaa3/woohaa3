@@ -222,10 +222,17 @@ export function TaskTraceBody({
                     <CopyField value={detail.upstreamTaskId} label="上游任务号" />
                   </div>
                 ) : null}
-                {detail.result?.storageKey ? (
+                {/*
+                  一行定位符就够了：它同时表达「哪个后端 + 什么键」。旧宿主没有 location 时
+                  退回存储键，排障面板不出现空白。
+                */}
+                {detail.result ? (
                   <div>
-                    <span className="task-monitor__label">产物存储键</span>
-                    <CopyField value={detail.result.storageKey} label="产物存储键" />
+                    <span className="task-monitor__label">产物定位符</span>
+                    <CopyField
+                      value={detail.result.location?.locator ?? detail.result.storageKey ?? ""}
+                      label="产物定位符"
+                    />
                     {detail.result.size !== undefined || detail.result.checksum ? (
                       <p className="task-monitor__muted">
                         {detail.result.size !== undefined ? `大小 ${formatFileSize(detail.result.size)}` : null}
@@ -431,7 +438,8 @@ function technicalCopyLines(detail: TaskExecutionDetail, identities: readonly Te
   const lines: string[] = [];
   if (detail.upstreamTaskId) lines.push(`上游任务号: ${detail.upstreamTaskId}`);
   for (const identity of identities) lines.push(`${identity.label}: ${identity.value}`);
-  if (detail.result?.storageKey) lines.push(`产物存储键: ${detail.result.storageKey}`);
+  const locator = detail.result?.location?.locator ?? detail.result?.storageKey;
+  if (locator) lines.push(`产物定位符: ${locator}`);
   return lines;
 }
 

@@ -127,6 +127,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     startedResources: [],
     generationProviderIds: [],
     storageBackendIds: [],
+    exposerIds: [],
     telemetryExportIds: [],
     marketplaceSourceIds: [],
     order: 0
@@ -343,6 +344,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       startedResources: [],
       generationProviderIds: [],
       storageBackendIds: [],
+      exposerIds: [],
       telemetryExportIds: [],
       marketplaceSourceIds: [],
       order: ++orderCounter

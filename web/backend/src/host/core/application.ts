@@ -363,6 +363,13 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         },
         unregister: (backendId) => storage.unregister(backendId)
       },
+      // 对外地址提供者：独立的注册面，站点插件可以只提供地址（例如 CDN 回源签名）而不提供后端。
+      exposer: {
+        register: (item) => {
+          ctx.exposer.register(item);
+        },
+        unregister: (exposerId) => ctx.exposer.unregister(exposerId)
+      },
       // 遥测出口：与存储同形，但语义是"注册即参与投递"。core 不知道目的地，
       // 只按 `telemetry.export.enabled` 决定发不发（见 design D8）。
       telemetry: {

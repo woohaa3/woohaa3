@@ -124,7 +124,7 @@ function assertProjectionShape(projection, id) {
  * 启动迁移会永久拒绝开放画布（`projection-mismatch` → "画布尚未开放"）。
  *
  * 因此调用方可注入 `expectProjection(canvas, id)`（`canvas` 是从 raw 重建的规范聚合）：
- * 返回"当前 codec 从同一份 raw 会写出的 projection"。只要 stored projection 与之完全
+ * 返回"当前或明确支持的历史 codec 从同一份 raw 会写出的 projection"（可为候选数组）。只要 stored projection 与之完全
  * 相等，就认为缓存是新鲜的；否则仍按不一致拒绝（保持对陈旧/半写 projection 的检测能力）。
  */
 function assertProjection(raw, projection, id, expectProjection, canvas) {
@@ -134,7 +134,8 @@ function assertProjection(raw, projection, id, expectProjection, canvas) {
   } catch (error) {
     if (!expectProjection || !(error instanceof OfflineCanvasSourceError)) throw error;
     const derived = expectProjection(canvas, id);
-    if (!object(derived) || !same(derived, projection)) throw error;
+    const candidates = Array.isArray(derived) ? derived : [derived];
+    if (!candidates.some(candidate => object(candidate) && same(candidate, projection))) throw error;
     if (!Array.isArray(projection.document.edges)) fail("projection-mismatch", id, { path: "edges" });
     return omittedPureModelEdges(raw, projection.document.edges);
   }

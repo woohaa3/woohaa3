@@ -160,7 +160,14 @@ export function createCosBackend(
   cos: CosLike = new COS({
     SecretId: config.secretId,
     SecretKey: config.secretKey
-  }) as unknown as CosLike
+  }) as unknown as CosLike,
+  /**
+   * 后端身份与能力覆盖。
+   *
+   * 公开临时桶复用同一套 COS 调用，只是 id / 名称不同、并且**不暴露 `presign`**：
+   * 它的地址不签名，签名会给出一条带时效的私有地址，语义完全相反。
+   */
+  options: { backendId?: string; label?: string; signing?: boolean } = {}
 ): StorageBackend {
   const base = () => ({ Bucket: config.bucketName, Region: config.region });
   const prefix = config.prefix.replace(/^\/+|\/+$/g, "");
@@ -169,8 +176,8 @@ export function createCosBackend(
   const keyFor = (key: string) => (prefix ? `${prefix}/${key}` : key);
 
   const backend: StorageBackend = {
-    backendId: COS_STORAGE_BACKEND_ID,
-    label: COS_STORAGE_LABEL,
+    backendId: options.backendId ?? COS_STORAGE_BACKEND_ID,
+    label: options.label ?? COS_STORAGE_LABEL,
     ownerExtensionId: COS_STORAGE_PLUGIN_ID,
     async putStream(key, bytes, contentType, options) {
       options.signal?.throwIfAborted();
@@ -238,7 +245,7 @@ export function createCosBackend(
         throw error;
       }
     },
-    async presign(key, options) {
+    ...(options.signing === false ? {} : { async presign(key, options) {
       const data = await runCos<{ Url: string }>((callback) =>
         cos.getObjectUrl(
           {
@@ -252,7 +259,7 @@ export function createCosBackend(
       );
       if (!data.Url?.trim()) throw new Error(`无法生成 COS 访问地址：${key}`);
       return data.Url.replace(/^http:\/\//i, "https://");
-    }
+    } })
   };
 
   const removeObject = cos.deleteObject;
@@ -276,14 +283,15 @@ export function createCosStoragePlugin(): ExtensionPlugin<typeof COS_STORAGE_CON
     apply(ctx, config) {
       const log = ctx.log.scope(COS_STORAGE_PLUGIN_ID);
       const resolved = resolveCosConfig(config);
-      if (!resolved.ok) {
-        // 缺配置不是致命错误：不注册后端，由 core 的就绪检查决定主存储是否可用。
+
+      // 私有桶：缺配置只记日志，由 core 的就绪检查决定主存储是否可用。
+      if (resolved.ok) {
+        const backend = createCosBackend(resolved.config);
+        ctx.effect(() => ctx.storage.register(backend));
+        log({ event: "cos-storage-activated", backendId: backend.backendId });
+      } else {
         log({ event: "cos-storage-unconfigured", missing: [...resolved.missing] });
-        return;
       }
-      const backend = createCosBackend(resolved.config);
-      ctx.effect(() => ctx.storage.register(backend));
-      log({ event: "cos-storage-activated", backendId: backend.backendId });
     }
   };
 }

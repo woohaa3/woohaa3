@@ -24,8 +24,36 @@ export type TaskModelType = "language" | "image" | "video" | "audio";
 export const ACTIVE_TASK_STATES: readonly TaskExecutionState[] = ["queued", "pending", "running"];
 
 /** 列表/详情共用的安全结果摘要。 */
+/**
+ * 产物字节的当前位置：哪个后端、什么键、能否给出 locator。
+ *
+ * **读取时现算，不落库**：产物采纳后按内容寻址写进 `media` 命名空间，位置会随画布归属
+ * （本地 / 托管）与主存储切换变化；持久化一个 locator 只会得到陈旧答案。
+ */
+export type TaskResultLocation = {
+  /** 此刻承载字节的后端 id（`local` / `cos` / `server` …）。 */
+  backendId: string;
+  /** 后端实际使用的键（已含 namespace）。 */
+  key: string;
+  /**
+   * 定位符 `media://<backendId>/<key>`：展示与粘贴回存储层都用它。
+   *
+   * 后端实现 `locatorOf` 时用后端给的值；没实现时由宿主按同一形状派生。派生值对
+   * 「展示与排障」是准确的（如实表达了后端与键），但只有实现了 `readLocator` 的后端
+   * 才能反过来解析它。
+   */
+  locator: string;
+};
+
 export type TaskResultSummary = {
   mediaKind: "text" | "image" | "video" | "audio";
+  /**
+   * 字节当前位置（宿主在读取详情时补全）。
+   *
+   * 与 `storageKey` 的区别：`storageKey` 是使用方给的稳定逻辑键，位置是「现在真的落在哪」——
+   * 排障时判断「为什么签不出地址 / 为什么读不到」看的正是后者。
+   */
+  location?: TaskResultLocation;
   /** 文本结果的安全摘要（绝不包含完整 provider 响应）。 */
   text?: string;
   /** 文本摘要是否被截断（缺失表示未截断或未知）。 */
