@@ -59,6 +59,11 @@ pub(crate) fn sync_textures(
         };
         let texture_px = Vec2::new(width as f32, height as f32);
         let content = content.as_deref();
+        // 独占上传（无内容身份，典型是视频实时帧）绝不能写进**别的节点共享**的纹理：
+        // 共享内容按「像素不变」前提复用，原地覆盖会同时改掉其他绑定节点的画面
+        // （例如两个节点共用同一张封面，其中一个开始播放后另一个也跟着变帧）。
+        // 节点当前绑在共享内容上时改为新开一份私有纹理，旧共享引用由 `bind` 结算。
+        let private_upload = content.is_none() && texture_store.is_shared(&id);
         // 同内容同尺寸已有共享纹理：只把该节点绑过去，不重复建 GPU 资源。
         let existing = sprites
             .iter()
@@ -80,7 +85,7 @@ pub(crate) fn sync_textures(
                     TextureFormat::Rgba8UnormSrgb,
                     RenderAssetUsages::default(),
                 );
-                match existing.clone() {
+                match existing.clone().filter(|_| !private_upload) {
                     // 同尺寸的既有纹理：原地覆盖，保留 handle 与 Sprite。
                     Some((entity, _, _)) => {
                         let previous = sprites
@@ -299,5 +304,73 @@ mod tests {
             world.get::<Sprite>(sprite).unwrap().custom_size,
             size_before
         );
+    }
+
+    fn two_card_scene() -> crate::protocol::Scene {
+        crate::protocol::Scene {
+            nodes: serde_json::from_value(serde_json::json!([
+                {"id":"a","type":"image","x":0,"y":0,"width":200,"height":100,"texture":true},
+                {"id":"b","type":"image","x":300,"y":0,"width":200,"height":100,"texture":true}
+            ]))
+            .unwrap(),
+            ..default()
+        }
+    }
+
+    fn sprite_image(world: &mut World, node_id: &str) -> Handle<Image> {
+        let mut query = world.query::<(&CanvasTextureSprite, &Sprite)>();
+        query
+            .iter(world)
+            .find(|(sprite, _)| sprite.node_id == node_id)
+            .map(|(_, sprite)| sprite.image.clone())
+            .unwrap_or_else(|| panic!("node {node_id} sprite missing"))
+    }
+
+    /// 独占上传（视频实时帧）不得原地覆盖别的节点共享的纹理。
+    ///
+    /// 共享纹理按「同内容像素不变」复用；实时帧内容身份为空，若仍写入共享 handle，
+    /// 另一个绑定同一封面的节点会一起变帧。此时该节点必须换成自己的私有纹理。
+    #[test]
+    fn exclusive_upload_replaces_shared_binding_with_private_image() {
+        let mut world = World::new();
+        let scene = two_card_scene();
+        world.insert_resource(CurrentScene(scene.clone()));
+        world.insert_resource(NodeIndex::default());
+        world.resource_mut::<NodeIndex>().rebuild(&scene);
+        world.insert_resource(TextureStore::default());
+        world.insert_resource(TextureBatch::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.spawn(CanvasNodeId("a".into()));
+        world.spawn(CanvasNodeId("b".into()));
+        let poster = vec![255u8, 0, 0, 255, 255, 0, 0, 255];
+        {
+            let mut batch = world.resource_mut::<TextureBatch>();
+            batch
+                .0
+                .insert("a".into(), (2, 1, poster.clone(), Some("poster".into())));
+            batch
+                .0
+                .insert("b".into(), (2, 1, poster.clone(), Some("poster".into())));
+        }
+        world.run_system_once(sync_textures).unwrap();
+        world.flush();
+        let shared = sprite_image(&mut world, "a");
+        assert_eq!(sprite_image(&mut world, "b"), shared);
+
+        // a 上传独占实时帧：只替换 a 的纹理，b 仍指向共享封面。
+        world.resource_mut::<TextureBatch>().0.insert(
+            "a".into(),
+            (2, 1, vec![0u8, 255, 0, 255, 0, 255, 0, 255], None),
+        );
+        world.run_system_once(sync_textures).unwrap();
+        world.flush();
+        let private = sprite_image(&mut world, "a");
+        assert_ne!(private, shared);
+        assert_eq!(sprite_image(&mut world, "b"), shared);
+        let images = world.resource::<Assets<Image>>();
+        let poster_pixels = images.get(&shared).unwrap().data.clone().unwrap();
+        assert_eq!(poster_pixels, poster);
+        let frame_pixels = images.get(&private).unwrap().data.clone().unwrap();
+        assert_eq!(frame_pixels, vec![0u8, 255, 0, 255, 0, 255, 0, 255]);
     }
 }

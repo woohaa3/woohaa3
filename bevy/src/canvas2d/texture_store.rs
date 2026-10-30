@@ -80,6 +80,13 @@ impl TextureStore {
         }
     }
 
+    /// 节点当前是否绑在共享内容上（独占上传不得原地覆盖共享纹理）。
+    pub(crate) fn is_shared(&self, node_id: &str) -> bool {
+        self.nodes
+            .get(node_id)
+            .is_some_and(|binding| binding.shared.is_some())
+    }
+
     /// 绑定节点到（可选的）内容身份；返回因换绑而失去最后引用、需要移除的旧 handle。
     pub(crate) fn bind(
         &mut self,
