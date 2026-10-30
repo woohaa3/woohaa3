@@ -82,7 +82,9 @@ mod tests {
                 run_status: None,
                 geometry_quality: None,
                 drop_target: false,
-            }),
+            
+                overview_cache: None,
+        }),
             model: None,
             composite_asset: None,
             history_strip: None,

@@ -223,6 +223,7 @@ export function createResidencyProjector(input: ResidencyProjectorInput): () => 
       canvasKey(canvas),
       // 异步内容就绪（模型/片场 prepared resource）不替换画布对象，必须单独进签名。
       String(input.contentVersion?.() ?? 0),
+      String(coordinator.derivedGpuRevision()),
       validSurface ? `${surface.width}x${surface.height}@${surface.pixelRatio}` : "no-surface",
       `${viewport.x},${viewport.y},${viewport.zoom}`,
       interactive.join(","),

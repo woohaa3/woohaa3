@@ -250,6 +250,7 @@ fn start(
             generation: request.generation,
             meshes: root.meshes.clone(),
             materials: root.materials.clone(),
+            images: Vec::new(),
             rooted: true,
         },
     ));

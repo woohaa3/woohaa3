@@ -145,6 +145,14 @@ export type CanvasRenderSceneInput = {
    */
   geometryQualities?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetGeometryQuality>;
   /**
+   * 每节点总览纹理缓存声明（change: 2026-10-29-cache-film-set-overview-textures）。
+   *
+   * 由宿主按可信 adapter 严格身份解析后注入；存在即写入 group 的 `overviewCache`，渲染器据此
+   * 把稳定主体替换为缓存纹理。缺省不写入即逐帧实时绘制。只承载派生呈现声明，不进入 canonical
+   * 内容 hash、脚本执行 key 或持久 DTO。
+   */
+  overviewCaches?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetOverviewCache>;
+  /**
    * 每复合资产节点的**业务类型显示名**（如「片场」「游戏炼丹炉」）
    * （change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
    *
@@ -454,6 +462,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           actionBar: true,
           // 可信 adapter 的声明同时覆盖 group 徽标的场景组合（片场迁移后不再有 compositeAsset）。
           ...(input.geometryQualities?.get(node.id) ? { geometryQuality: input.geometryQualities.get(node.id) } : {}),
+          // 总览纹理缓存同样是 group 级声明；缺省保持逐帧实时。
+          ...(input.overviewCaches?.get(node.id) ? { overviewCache: input.overviewCaches.get(node.id) } : {}),
           ...(resource?.aabb ? { modelBounds: { aabb: resource.aabb, extent: resource.extent } } : {})
         } : {})
       };

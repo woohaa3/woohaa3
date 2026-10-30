@@ -132,6 +132,8 @@ pub(crate) struct ShotPreviewCards {
     /// 并被当作新代确认发布，卡片永久变灰。失效规则与 `model_preview::apply_preview_layer` 一致
     /// （design D7）。
     pub(crate) applied_layers: HashMap<String, (String, Vec<usize>)>,
+    pub(crate) applied_overview_cached: HashMap<String, bool>,
+    pub(crate) desired_layers: HashMap<String, Vec<usize>>,
     /// 上一次写入方向光的卡片层并集（未变则跳过世界查询）。
     pub(crate) applied_light_layers: Vec<usize>,
     pub(crate) next_generation: u64,
@@ -186,7 +188,8 @@ pub(crate) struct ShotNodePreviewPlugin;
 
 impl Plugin for ShotNodePreviewPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ShotPreviewCards>();
+        app.init_resource::<ShotPreviewCards>()
+            .init_resource::<crate::canvas_ecs::overview_cache::OverviewSourceLayers>();
     }
 }
 
@@ -252,20 +255,35 @@ pub(crate) fn apply_owner_layers(
     models: &model3d::ModelVisuals,
     media: &mut model3d::film_set_media::FilmSetMediaVisuals,
     desired: &HashMap<String, Vec<usize>>,
+    overview: &crate::canvas_ecs::overview_cache::OverviewSourceLayers,
 ) {
     let mut next: HashMap<String, (String, Vec<usize>)> = HashMap::new();
-    for (owner, layers) in desired {
-        let mut sorted = layers.clone();
+    let mut next_cached = HashMap::new();
+    let owners: std::collections::HashSet<_> = desired.keys()
+        .chain(overview.owners.keys())
+        .chain(cards.applied_layers.keys())
+        .cloned().collect();
+    for owner in owners {
+        let mut sorted = desired.get(&owner).cloned().unwrap_or_default();
+        let request = overview.owners.get(&owner).copied().unwrap_or_default();
+        if let Some(layer) = request.layer { sorted.push(layer); }
         sorted.sort_unstable();
         sorted.dedup();
         // 根重建后旧缓存不作数：表示身份变化即重写（与 `model_preview` 同一失效规则，design D7）。
-        let identity = models.quality_identity(owner);
-        if policy::owner_layers_stale(cards.applied_layers.get(owner), &identity, &sorted) {
-            model3d::apply_preview_layers(models, media, commands, owner, &sorted);
+        let identity = models.quality_identity(&owner);
+        if policy::owner_layers_stale(cards.applied_layers.get(&owner), &identity, &sorted)
+            || cards.applied_overview_cached.get(&owner).copied().unwrap_or(false) != request.cached {
+            model3d::apply_overview_source_layers(models, media, commands, &owner, &sorted, request.cached);
         }
-        next.insert(owner.clone(), (identity, sorted));
+        if desired.contains_key(&owner) || overview.owners.contains_key(&owner) {
+            next_cached.insert(owner.clone(), request.cached);
+            next.insert(owner, (identity, sorted));
+        } else {
+            media.forget_overview_layers(&owner);
+        }
     }
     cards.applied_layers = next;
+    cards.applied_overview_cached = next_cached;
 }
 
 /// 让场景方向光同时覆盖全部卡片层，使卡片相机也能被照亮
@@ -332,6 +350,36 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
+
+    #[test]
+    fn overview_and_shot_layers_are_merged_and_removed_together() {
+        use crate::canvas_ecs::overview_cache::{OverviewSourceLayer, OverviewSourceLayers};
+        let mut world = World::new();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let mut cards = ShotPreviewCards::default();
+        let models = model3d::ModelVisuals::default();
+        let mut media = model3d::film_set_media::FilmSetMediaVisuals::default();
+        let desired = HashMap::from([("film".to_owned(), vec![33, 34])]);
+        let mut overview = OverviewSourceLayers::default();
+        overview.owners.insert("film".into(), OverviewSourceLayer { layer: Some(32), cached: true });
+        apply_owner_layers(&mut Commands::new(&mut queue, &world), &mut cards, &models, &mut media, &desired, &overview);
+        queue.apply(&mut world);
+        assert_eq!(cards.applied_layers["film"].1, vec![32, 33, 34]);
+        assert!(cards.applied_overview_cached["film"]);
+        let mask = model3d::overview_source_mask(&cards.applied_layers["film"].1, true);
+        assert!(!mask.intersects(&bevy::camera::visibility::RenderLayers::layer(0)));
+        for layer in [model3d::capture::CAPTURE_LAYER, 32, 33, 34] {
+            assert!(mask.intersects(&bevy::camera::visibility::RenderLayers::layer(layer)));
+        }
+        overview.owners.clear();
+        apply_owner_layers(&mut Commands::new(&mut queue, &world), &mut cards, &models, &mut media, &desired, &overview);
+        queue.apply(&mut world);
+        assert_eq!(cards.applied_layers["film"].1, vec![33, 34]);
+        assert!(!cards.applied_overview_cached["film"]);
+        apply_owner_layers(&mut Commands::new(&mut queue, &world), &mut cards, &models, &mut media, &HashMap::new(), &overview);
+        queue.apply(&mut world);
+        assert!(cards.applied_layers.is_empty());
+    }
 
     #[test]
     fn preview_layers_stay_finite_and_inside_engine_capacity() {

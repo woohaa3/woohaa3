@@ -16,6 +16,12 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
     managedLifecycle: filmSetManagedLifecycle,
     /** Group-owned badges use the same trusted overview primitive LOD declaration as the old composite node. */
     geometryQuality: "overview-primitives-v1",
+    /**
+     * 总览纹理缓存：片场组把稳定画面缓存为透明纹理，其他 group 缺省不声明即逐帧实时。
+     * 声明只承载呈现策略，不进入 executionKey、内容 hash 或持久 DTO
+     * （change: 2026-10-29-cache-film-set-overview-textures）。
+     */
+    overviewCache: "transparent-world-v1",
     matchesNode: (node, data) => isFilmSetGroupNode(node, data),
     children(current, ownerNodeId) {
       const owner = current.document.nodes.find(node => node.id === ownerNodeId);

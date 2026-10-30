@@ -166,6 +166,34 @@ pub(crate) fn add_preview_layers(
     Some(root.entities.len() as u64)
 }
 
+/// Apply a cached owner's source mask after preview consumers have selected their layers.
+/// Capture remains available while layer 0 is removed from the overview main camera.
+#[cfg(feature = "canvas-core")]
+pub(crate) fn overview_source_mask(layers: &[usize], cached: bool) -> RenderLayers {
+    let mut mask = model_render_layers();
+    if cached { mask = mask.without(0); }
+    for layer in layers { mask = mask.with(*layer); }
+    mask
+}
+
+#[cfg(feature = "canvas-core")]
+pub(crate) fn apply_overview_source_layers(
+    models: &ModelVisuals,
+    media: &mut film_set_media::FilmSetMediaVisuals,
+    commands: &mut bevy::prelude::Commands,
+    node_id: &str,
+    layers: &[usize],
+    cached: bool,
+) -> u64 {
+    let mask = overview_source_mask(layers, cached);
+    let mut written = 0;
+    if let Some(root) = models.roots.get(node_id) {
+        for entity in &root.entities { commands.entity(*entity).insert(mask.clone()); }
+        written += root.entities.len() as u64;
+    }
+    written + media.apply_overview_layers(commands, node_id, &mask)
+}
+
 /// 把某片场的卡片预览层并集写入其模型根与全部媒体平面
 /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
 ///

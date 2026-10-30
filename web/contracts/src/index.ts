@@ -69,6 +69,7 @@ export * from "./canvas/motion-executor.js";
 export * from "./canvas/model-api-descriptor-motion.js";
 export * from "./canvas/mcp-internal.js";
 export * from "./canvas/render-scene.js";
+export * from "./canvas/render-scene/overview-cache.js";
 export * from "./canvas/viewport-update.js";
 export * from "./canvas/observer-update.js";
 export * from "./canvas/position-update.js";

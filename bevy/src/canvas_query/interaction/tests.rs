@@ -72,6 +72,8 @@ fn group(id: &str, x: f32, y: f32, w: f32, h: f32, leaves: u32) -> GraphNode {
             run_status: None,
             geometry_quality: None,
             drop_target: false,
+        
+            overview_cache: None,
         }),
         ..node(id, x, y, w, h)
     }

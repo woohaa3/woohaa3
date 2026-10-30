@@ -25,6 +25,8 @@ import { MediaResourceStore } from "./media-resource-store.js";
 import { hoverNodeStore } from "../../services/hover-store.js";
 import { createDefaultMediaDecoder } from "./media-decoder.js";
 import { VideoLeaseRegistry } from "./video-lease-registry.js";
+import { OverviewCacheCoordinator } from "./overview-cache.js";
+import { OverviewCacheBridge } from "./overview-cache-bridge.js";
 
 const defaultMediaDecoder = createDefaultMediaDecoder();
 import { applyFocusTargetTransition } from "./focus-target-transition.js";
@@ -430,7 +432,15 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private compositeAssetMediaSessionsInstance: import("./composite-asset-media-session.js").CompositeAssetMediaSessions | null = null;
   /** 当前 attach 的页面级资源需求 owner（change: 2026-10-23-scale-canvas-media-residency）。 */
   private residencyInstance: import("./residency/index.js").CanvasResourceCoordinator | null = null;
+  private overviewCacheInstance: OverviewCacheCoordinator | null = null;
   /** 当前资源协调器（诊断/测试；未挂载返回 null）。 */
+  resourceResidencyDiagnostics = (): unknown => this.residencyInstance?.diagnostics() ?? null;
+  overviewCacheDiagnostics = (): unknown => this.overviewCacheInstance?.diagnostics() ?? null;
+  setOverviewCacheBenchmarkDisabled = (disabled: boolean): void => {
+    this.overviewCacheInstance?.setBenchmarkDisabled(disabled);
+    this.controllerInstance?.invalidate("overview-cache-benchmark");
+  };
+  syncOverviewCache = (inputs: readonly import("./overview-cache.js").OverviewCacheInput[]): void => { this.overviewCacheInstance?.sync(inputs); };
   residency = (): import("./residency/index.js").CanvasResourceCoordinator | null => this.residencyInstance;
 
   /**
@@ -677,6 +687,12 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       getModelContentVersion: () => this.modelContentVersion
     });
     this.residencyInstance = residency;
+    const overviewBridge = new OverviewCacheBridge(runtime, residency, owner => {
+      const playback = this.animationPlaybackStore.current();
+      return playback?.nodeId === owner && playback.playing;
+    });
+    this.overviewCacheInstance = new OverviewCacheCoordinator(residency, undefined, overviewBridge.render, overviewBridge.release);
+    overviewBridge.connect(this.overviewCacheInstance);
     this.compositeAssetMediaSessionsInstance = compositeAssetMediaSessions;
     // E2E/排障镜像：观察视频会话/模型聚焦/图片聚焦/放置预览（生产无副作用）。
     installCanvasRuntimeMirrors({
@@ -686,7 +702,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       imageFocus: () => this.imageFocusStore.get(),
       videoFocus: () => this.videoFocusStore.get(),
       videoFocusTargetId: () => this.videoFocusStore.getTargetId(),
-      residency
+      residency,
+      overviewCache: { diagnostics: this.overviewCacheDiagnostics, setBenchmarkDisabled: this.setOverviewCacheBenchmarkDisabled }
     });
     const controller = installInteractionController(
       buildAttachInteractionOptions({
@@ -744,6 +761,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
           this.options.onViewportChange?.(this.controllerInstance?.viewport() ?? { x: 0, y: 0, zoom: 1 });
         },
         onFrame: () => {
+          overviewBridge.frame();
           for (const listener of this.frameListeners) listener();
         }
       })
@@ -792,6 +810,9 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       textureSync.dispose();
       videoSessions.dispose();
       compositeAssetMediaSessions.dispose();
+      this.overviewCacheInstance?.dispose();
+      this.overviewCacheInstance = null;
+      overviewBridge.dispose();
       residency.dispose();
       this.compositeAssetMediaSessionsInstance = null;
       this.residencyInstance = null;

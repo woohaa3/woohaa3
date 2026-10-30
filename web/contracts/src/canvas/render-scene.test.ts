@@ -690,6 +690,25 @@ describe("buildCanvasRenderScene", () => {
     expect(renderSceneFingerprint(declared)).not.toBe(renderSceneFingerprint(fallback));
   });
 
+  it("总览纹理缓存声明注入 group.overviewCache 并进入 fingerprint，缺省不写入", () => {
+    // change: 2026-10-29-cache-film-set-overview-textures：只由可信 adapter 声明注入；
+    // 片场迁移为 group 后，旧的 compositeAsset 不承载该能力。
+    const current = canvas({document:{schemaVersion:"asset-canvas-v1",nodes:[
+      {id:"film",type:"group",position:{x:0,y:0},width:400,height:300}
+    ],edges:[],updatedAt:"2026-10-12T00:00:00Z"},nodeData:{film:{}}});
+    const fallback = buildCanvasRenderScene({ canvas: current });
+    expect(fallback.nodes[0]!.group).not.toHaveProperty("overviewCache");
+    const declared = buildCanvasRenderScene({
+      canvas: current,
+      overviewCaches: new Map([["film", "transparent-world-v1"]])
+    });
+    expect(declared.nodes[0]!.group?.overviewCache).toBe("transparent-world-v1");
+    expect(renderSceneEquals(declared, fallback)).toBe(false);
+    expect(renderSceneFingerprint(declared)).not.toBe(renderSceneFingerprint(fallback));
+    // 声明不进入模型内容 identity：resourceKey/signature 不因缓存策略改变。
+    expect(declared.nodes[0]!.model?.resourceKey).toBe(fallback.nodes[0]!.model?.resourceKey);
+  });
+
   it("preserves rich model card dimensions", () => {
     const scene = buildCanvasRenderScene({
       canvas: canvas({
@@ -979,7 +998,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v31");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v32");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));

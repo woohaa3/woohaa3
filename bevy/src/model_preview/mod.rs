@@ -45,6 +45,7 @@ pub(crate) struct PreviewView {
     pub(crate) generation: u64,
     pub(crate) meshes: Vec<bevy::asset::AssetId<Mesh>>,
     pub(crate) materials: Vec<bevy::asset::AssetId<StandardMaterial>>,
+    pub(crate) images: Vec<bevy::asset::AssetId<Image>>,
     /// 卡片对应的模型根此刻是否存在。
     ///
     /// 与「根存在但没有 mesh」区分开：缺失时空画面只表示还没 spawn，不能当作已绘制；
@@ -62,6 +63,11 @@ impl Ready {
     /// 卡片视图由 `remove_card` 清理；一次性视图没有卡片生命周期，必须自己归还。
     pub(crate) fn forget(&self, camera: Entity) {
         self.0.lock().unwrap().remove(&camera);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_for_test(&self, camera: Entity, generation: u64) {
+        self.0.lock().unwrap().insert(camera, generation);
     }
 }
 #[derive(Resource, Default)]
@@ -623,6 +629,7 @@ pub(crate) fn sync(
                     generation: card.generation,
                     meshes: models.preview_meshes(&node.id),
                     materials: models.preview_materials(&node.id),
+                    images: Vec::new(),
                     rooted: models.has_root(&node.id),
                 },
             ));

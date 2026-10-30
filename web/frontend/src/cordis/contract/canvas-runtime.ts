@@ -28,6 +28,9 @@ export interface CanvasRuntimeService {
   controller(): InteractionController | null;
   runtime(): BevyRuntime | null;
   resourceResidencyDiagnostics?(): unknown;
+  overviewCacheDiagnostics?(): unknown;
+  setOverviewCacheBenchmarkDisabled?(disabled: boolean): void;
+  syncOverviewCache?(inputs: readonly import("../plugins/canvas-runtime/overview-cache.js").OverviewCacheInput[]): void;
   cancelTransientGesture(): void;
   /**
    * 最近一次有效画布指针的世界坐标（change: add-paste-import-workflows，design D6）。

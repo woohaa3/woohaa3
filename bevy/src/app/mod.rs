@@ -147,6 +147,11 @@ fn configure_canvas(app: &mut App) {
         .add_plugins(crate::runtime_health::RuntimeHealthPlugin)
         .add_plugins(crate::shot_camera::ShotCameraPlugin)
         .add_plugins(crate::model_preview::ModelPreviewPlugin)
+        .init_resource::<crate::canvas_ecs::overview_cache::gpu::OverviewTargets>()
+        .init_resource::<crate::canvas_ecs::overview_cache::gpu::OverviewDisplayed>()
+        .init_resource::<crate::canvas_ecs::overview_cache::dispatch::OverviewDispatch>()
+        .init_resource::<crate::canvas_ecs::overview_cache::OverviewCacheRegistry>()
+        .init_resource::<crate::canvas_ecs::overview_cache::OverviewSourceLayers>()
         .add_plugins(crate::history_preview::HistoryThumbnailPlugin)
         .add_plugins(model3d::run_effect::RunEffectPlugin)
         .add_plugins(crate::shot_node_preview::ShotNodePreviewPlugin)
@@ -209,6 +214,12 @@ fn configure_canvas(app: &mut App) {
                         // 卡片预览：消费同一帧的采样镜头/播放投影，并在模型落位后并入卡片渲染层
                         // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
                         crate::shot_node_preview::sync,
+                        (
+                            crate::canvas_ecs::overview_cache::input::sync_overview_inputs,
+                            crate::canvas_ecs::overview_cache::eligibility::sync_overview_eligibility,
+                            crate::canvas_ecs::overview_cache::dispatch::sync,
+                            crate::shot_node_preview::sync_source_layers,
+                        ).chain(),
                         scene3d::sync_editor_gizmo,
                         scene3d::sync_shot_adapter,
                         scene3d::reclaim_extra_shot_rigs,

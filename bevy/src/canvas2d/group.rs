@@ -392,7 +392,9 @@ mod tests {
                 run_status: None,
                 geometry_quality: None,
                 drop_target: false,
-            },
+            
+                overview_cache: None,
+        },
             false,
             GROUP_Z,
         );
@@ -424,7 +426,9 @@ mod tests {
                 run_status: None,
                 geometry_quality: None,
                 drop_target: false,
-            },
+            
+                overview_cache: None,
+        },
             false,
             GROUP_Z,
         );
@@ -454,7 +458,9 @@ mod tests {
                 run_status: None,
                 geometry_quality: None,
                 drop_target: false,
-            },
+            
+                overview_cache: None,
+        },
         );
         assert_eq!(panel.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len(), 3);
     }
@@ -531,7 +537,9 @@ mod tests {
                 run_status: None,
                 geometry_quality: None,
                 drop_target: false,
-            },
+            
+                overview_cache: None,
+        },
             false,
             GROUP_Z,
         );
@@ -565,7 +573,9 @@ mod tests {
                 run_status: None,
                 geometry_quality: None,
                 drop_target: false,
-            },
+            
+                overview_cache: None,
+        },
             false,
             GROUP_Z,
         );
@@ -593,7 +603,9 @@ mod tests {
                 run_status: None,
                 geometry_quality: None,
                 drop_target: false,
-            },
+            
+                overview_cache: None,
+        },
         );
         let Some(VertexAttributeValues::Float32x3(points)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)
@@ -630,6 +642,9 @@ mod tests {
             run_status: None,
             geometry_quality: None,
             drop_target,
+        
+     
+            overview_cache: None,
         }
     }
 

@@ -14,7 +14,7 @@ import { filmSetLayoutBounds } from "../film-set-layout.js";
 import { MODEL_SCRIPT_SCENE_IR_V2_VERSION } from "../model-script.js";
 import type { PreparedModelResource } from "../prepared-model.js";
 import type { SceneV2Op } from "../scene-ir-v2.js";
-import type { BevyModelMediaPlane, BevyCompositeAssetPresentation, CompositeAssetGeometryQuality, CompositeAssetScopeShape } from "./wire-scene.js";
+import type { BevyModelMediaPlane, BevyCompositeAssetPresentation, CompositeAssetOverviewCache, CompositeAssetGeometryQuality, CompositeAssetScopeShape } from "./wire-scene.js";
 import type { BevyModelPlacement } from "./wire-model.js";
 import { COMPOSITE_ASSET_SCOPE_AXIS_X, COMPOSITE_ASSET_SCOPE_AXIS_Y, COMPOSITE_ASSET_SCOPE_MARGIN, type ScopeGround, type ScopePoint } from "./composite-asset-scope.js";
 
@@ -123,6 +123,7 @@ export function compositeAssetScopeForNode(input: {
   scopeShape?: CompositeAssetScopeShape;
   emptyPlaceholder?: import("./wire-scene.js").CompositeAssetEmptyPlaceholder;
   geometryQuality?: CompositeAssetGeometryQuality;
+  overviewCache?: CompositeAssetOverviewCache;
   mediaPlanes?: readonly BevyModelMediaPlane[];
   itemRoots?: Record<string, string>;
   itemPlacements?: Record<string, BevyModelPlacement>;
@@ -155,6 +156,7 @@ export function compositeAssetScopeForNode(input: {
     // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
     ...(input.emptyPlaceholder === "brand-plinth-v1" ? { emptyPlaceholder: input.emptyPlaceholder } : {}),
     ...(input.geometryQuality ? { geometryQuality: input.geometryQuality } : {}),
+    ...(input.overviewCache ? { overviewCache: input.overviewCache } : {}),
     ...(scopeGround ? { scopeGround } : {}),
     ...(input.mediaPlanes && input.mediaPlanes.length > 0 ? { media: [...input.mediaPlanes] } : {}),
     ...(input.rootPlacement ? { rootPlacement: input.rootPlacement } : {}),

@@ -56,7 +56,8 @@ pub(crate) use position::{
 pub(crate) use prepared::{PreparedModelMetadata, PreparedModelRequest};
 #[allow(unused_imports)]
 pub(crate) use scene::{
-    AggregateRunPresentation, CompositeAssetGeometryQuality, CompositeAssetPresentation,
+    AggregateRunPresentation, CompositeAssetGeometryQuality, CompositeAssetOverviewCache,
+    CompositeAssetPresentation,
     CompositeAssetScopeShape, Edge, FilmSetGroupBinding, FilmSetGroupGround,
     FilmSetGroupPreparation, FilmSetGroupTransform, FilmSetRunFeedback, GraphNode,
     GroupPresentation, GroupRunStatus, HistoryStripDot, HistoryStripPresentation, ModelMediaPlane,

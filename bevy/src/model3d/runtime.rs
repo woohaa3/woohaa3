@@ -578,6 +578,15 @@ impl ModelVisuals {
             || !self.capture_retention.is_empty()
     }
 
+    pub(crate) fn is_active_model(&self, id: &str) -> bool {
+        self.active_model.as_deref() == Some(id)
+    }
+
+    pub(crate) fn is_active_animated_model(&self, id: &str) -> bool {
+        self.is_active_model(id)
+            && self.roots.get(id).is_some_and(|root| !root.animation_entities.is_empty())
+    }
+
     /// 是否仍有排队/运行中/待装配的准备任务（静止降频据此判定需要连续帧）。
     pub(crate) fn has_in_flight_preparation(&self) -> bool {
         self.preparation.has_in_flight()

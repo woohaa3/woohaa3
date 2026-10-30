@@ -510,6 +510,12 @@ pub(crate) struct CompositeAssetPresentation {
     pub(crate) item_placements: std::collections::HashMap<String, super::ModelPlacement>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+pub(crate) enum CompositeAssetOverviewCache {
+    #[serde(rename = "transparent-world-v1")]
+    TransparentWorldV1,
+}
+
 /// Trusted, derived ownership presentation, independent of editable edges.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -666,6 +672,10 @@ pub(crate) struct GroupPresentation {
     /// Render-only emphasis while a node is being released into this group.
     #[serde(default, rename = "dropTarget")]
     pub(crate) drop_target: bool,
+    /// 可信 adapter 声明的通用总览纹理缓存；缺失即逐帧实时绘制
+    /// （change: 2026-10-29-cache-film-set-overview-textures）。
+    #[serde(default, rename = "overviewCache")]
+    pub(crate) overview_cache: Option<CompositeAssetOverviewCache>,
 }
 
 fn default_badge_scale() -> f32 {

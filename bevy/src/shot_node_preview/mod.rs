@@ -31,4 +31,4 @@ mod sync;
 #[cfg(feature = "canvas-core")]
 pub(crate) use state::{ShotNodePreviewPlugin, ShotPreviewCards, ShotPreviewRig};
 #[cfg(feature = "canvas-core")]
-pub(crate) use sync::sync;
+pub(crate) use sync::{sync, sync_source_layers};

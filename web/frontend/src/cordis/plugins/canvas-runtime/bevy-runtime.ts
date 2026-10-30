@@ -648,6 +648,11 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         return empty;
       }
     },
+    overviewCacheSnapshot: () => module.overview_cache_snapshot?.() ?? '{"candidates":[],"results":[],"releases":[]}',
+    overviewCacheCommand: (json) => {
+      if (!module.overview_cache_command) throw new Error("overview-cache-renderer-bridge-unavailable");
+      module.overview_cache_command(json);
+    },
     /**
      * 页面内模型历史缩略图（change: 2026-10-26-move-generation-history-to-ai-center，D6）。
      *

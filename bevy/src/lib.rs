@@ -824,6 +824,21 @@ pub fn poll_history_thumbnail(request_id: f64, generation: f64) -> Vec<u8> {
     history_preview::wire::poll(request_id, generation)
 }
 
+/// Control messages and status for GPU-resident overview caches; no pixels cross the bridge.
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn overview_cache_command(json: &str) -> Result<(), BoundaryError> {
+    canvas_ecs::overview_cache::wire::enqueue(json).map_err(BoundaryError::from_str)?;
+    wake_canvas();
+    Ok(())
+}
+
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn overview_cache_snapshot() -> String {
+    canvas_ecs::overview_cache::wire::snapshot()
+}
+
 /// 启动 Bevy App（幂等）。
 /// 浏览器入口：初始化并进入 winit 事件循环。
 ///

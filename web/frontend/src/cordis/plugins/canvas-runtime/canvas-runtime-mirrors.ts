@@ -21,6 +21,7 @@ export function installCanvasRuntimeMirrors(input: {
    * 保守估算，不是驱动实测显存。
    */
   residency?: { diagnostics?: () => unknown } | null;
+  overviewCache?: { diagnostics: () => unknown; setBenchmarkDisabled: (disabled: boolean) => void } | null;
 }): void {
   const target = globalThis as unknown as {
     __canvasVideoSessions?: unknown;
@@ -30,8 +31,13 @@ export function installCanvasRuntimeMirrors(input: {
     __canvasImageFocus?: unknown;
     __canvasVideoFocus?: unknown;
     __canvasResidency?: unknown;
+    __canvasOverviewCache?: unknown;
   };
   target.__canvasResidency = { snapshot: () => input.residency?.diagnostics?.() ?? null };
+  target.__canvasOverviewCache = {
+    snapshot: () => input.overviewCache?.diagnostics() ?? null,
+    setBenchmarkDisabled: (disabled: boolean) => input.overviewCache?.setBenchmarkDisabled(disabled === true)
+  };
   target.__compositeAssetMedia = { snapshot: () => input.compositeAssetMediaSessions?.diagnostics?.() ?? [] };
   target.__canvasVideoSessions = {
     active: () => input.videoSessions.activeNodeIds(),

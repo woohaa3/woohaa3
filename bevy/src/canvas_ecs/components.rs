@@ -245,6 +245,16 @@ pub(crate) struct FilmSetPresentation {
     pub(crate) diamond: bool,
 }
 
+/// Per-node cache owner projection. The cache resource owns pixels and reservations; this
+/// component only mirrors the accepted capability and the latest input fingerprint.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct OverviewCacheOwner {
+    pub(crate) enabled: bool,
+    pub(crate) input_fingerprint: u64,
+    pub(crate) tier: Option<super::overview_cache::geometry::OverviewTier>,
+    pub(crate) fallback: Option<super::overview_cache::eligibility::Fallback>,
+}
+
 /// 未识别的第三方展示类型：节点仍被投影，只是没有内置 producer。
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CustomPresentation {

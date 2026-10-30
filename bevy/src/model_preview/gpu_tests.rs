@@ -212,6 +212,7 @@ fn focus_pixels(
         generation,
         meshes,
         materials,
+        images: Vec::new(),
     });
     let deadline = Instant::now() + Duration::from_secs(45);
     while !app.world().resource::<Ready>().matches(camera, generation) {

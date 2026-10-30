@@ -313,6 +313,8 @@ fn group_anchor_centers_model_inside_bottom_footer() {
             run_status: None,
             geometry_quality: None,
             drop_target: false,
+        
+            overview_cache: None,
         }),
         model: None,
         composite_asset: None,

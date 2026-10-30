@@ -675,6 +675,8 @@ mod tests {
             run_status: None,
             geometry_quality: None,
             drop_target: false,
+        
+            overview_cache: None,
         });
         assert!(!shows_generation_ring(&group));
     }

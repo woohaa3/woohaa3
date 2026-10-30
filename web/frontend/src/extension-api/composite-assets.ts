@@ -1,5 +1,5 @@
 /** Trusted, scope-owned composite asset adapters. Business identity is never inferred from content. */
-import type { CanvasNodeData, FilmSetLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetScopeShape, CompositeChildRelation, CompositeContainerPanel, CanvasRenderScene, ManagedNodeLifecycleAdapter } from "@woohaa3/contracts";
+import type { CanvasNodeData, FilmSetLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetOverviewCache, CompositeAssetScopeShape, CompositeChildRelation, CompositeContainerPanel, CanvasRenderScene, ManagedNodeLifecycleAdapter } from "@woohaa3/contracts";
 import { ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
 export type CompositeAssetMediaSource = { planeId: string; nodeId: string; assetId: string; kind: "image" | "video"; playback?: ModelMediaTimeMap; sourceIdentity: string };
 /** A valid content projection may have no 3D resource; null prepare means unavailable. */
@@ -54,6 +54,8 @@ export type CompositeAssetAdapter = {
    * 不从 nodeData 标题/items/动画或历史类型推断。
    */
   geometryQuality?: CompositeAssetGeometryQuality;
+  /** Optional transparent whole-scene overview cache capability. */
+  overviewCache?: CompositeAssetOverviewCache;
   /** Hosts pass nodeId; optional for existing callers that only have node data. */
   executionKey(data: CanvasNodeData, nodeId?: string): string;
   prepare(nodeId: string, data: CanvasNodeData): CompositeAssetProjection | null;
@@ -103,6 +105,9 @@ export class CompositeAssetRegistry {
     // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
     if (adapter.geometryQuality !== undefined && adapter.geometryQuality !== "overview-primitives-v1") {
       throw new Error(`复合资产几何质量策略未知：${String(adapter.geometryQuality)}`);
+    }
+    if (adapter.overviewCache !== undefined && adapter.overviewCache !== "transparent-world-v1") {
+      throw new Error(`复合资产总览缓存能力未知：${String(adapter.overviewCache)}`);
     }
     if (adapter.emptyPlaceholder !== undefined && adapter.emptyPlaceholder !== "brand-plinth-v1") throw new Error(`未知复合资产占位：${String(adapter.emptyPlaceholder)}`);
     if (adapter.managedLifecycle && adapter.managedLifecycle.extensionId !== adapter.extensionId) throw Error("托管生命周期与注册扩展身份不一致");
@@ -193,6 +198,15 @@ export class CompositeAssetRegistry {
       if (adapter?.geometryQuality) qualities.set(node.id, adapter.geometryQuality);
     }
     return qualities;
+  }
+  overviewCaches(canvas: ServerCanvas | null): ReadonlyMap<string, CompositeAssetOverviewCache> {
+    const capabilities = new Map<string, CompositeAssetOverviewCache>();
+    if (!canvas) return capabilities;
+    for (const node of canvas.document.nodes) {
+      const adapter = this.resolveNode(canvas, node);
+      if (adapter?.overviewCache) capabilities.set(node.id, adapter.overviewCache);
+    }
+    return capabilities;
   }
   /**
    * 按严格身份解析每个复合资产节点的**业务类型显示名**（如「片场」或第三方业务类型）。
