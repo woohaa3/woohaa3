@@ -470,6 +470,10 @@ export function createAgentConversationService(options: AgentConversationService
     if (turn.action !== "discuss" && outcome.status === "succeeded" && outcome.receipt === undefined && !outcome.runId && !outcome.taskId) {
       outcome = { ...outcome, status: "failed", error: { code: UNCONFIRMED_WRITE_ERROR_CODE, message: UNCONFIRMED_WRITE_MESSAGE } };
     }
+    // Serialized model tool syntax is plain text, never evidence of an executed tool.
+    if (turn.action === "discuss" && outcome.status === "succeeded" && /<｜{1,2}DSML｜{1,2}\s*(?:calls|invoke)\b/.test(outcome.assistantText ?? "")) {
+      outcome = { ...outcome, status: "failed", error: { code: "tool-call-not-executed", message: "助手返回了未执行的工具调用文本，本轮没有修改作品。请在当前作品侧栏重新发送修改要求。" } };
+    }
     const status = outcome.status;
     store.updateTurn(
       turn.turnId,

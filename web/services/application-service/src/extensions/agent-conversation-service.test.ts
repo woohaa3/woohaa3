@@ -772,3 +772,13 @@ it("discovers every group turn from the owner ledger across pages, archived conv
   expect(controls.seen).toEqual([]); expect(controls.queries).toEqual([]);
   expect(service.clearContext({ owner: "owner", canvasId: "canvas", nodeId: "manual" })).toMatchObject({ ok: false });
 });
+
+it("DSML 工具文本不能把无工具的讨论结算为成功", async () => {
+  const { service } = setup({ outcomes: [{ status: "succeeded", assistantText: '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="woohaa_get_film_set_clips">' }] });
+  const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+  if (!created.ok) throw new Error("create failed");
+  const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "dsml", entry: entry() });
+  if (!accepted.ok) throw new Error("accept failed");
+  await service.dispatchTurn(accepted.turn.turnId);
+  expect(service.queryTurn({ owner: "user-a", requestId: "dsml" })).toMatchObject({ ok: true, turn: { status: "failed", error: { code: "tool-call-not-executed" } } });
+});
