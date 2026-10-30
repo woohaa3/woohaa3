@@ -4,12 +4,19 @@ import {
 } from "@woohaa3/contracts";
 import { FILM_SET_EXTENSION_ID } from "../../state/shared/identity.js";
 
+// Canonical/working canvases are immutable snapshots. Preserve the projected identity
+// across idle frames so downstream residency and media caches can reuse their work.
+// History/capture overlays replace the input snapshot when their content changes.
+const projections = new WeakMap<ServerCanvas, ServerCanvas>();
+
 /**
  * Bridge canonical managed media to the existing ShotCamera render input.
  * This is a transient adapter projection, never a command or persisted copy
  * of the source. A ready PNG/video is not a prerequisite for live view/capture.
  */
 export function projectManagedShotMediaCanvas(canvas: ServerCanvas): ServerCanvas {
+  const cached = projections.get(canvas);
+  if (cached) return cached;
   let nodeData: ServerCanvas["nodeData"] | undefined;
   for (const node of canvas.document.nodes) {
     if (node.type !== "image" && node.type !== "video") continue;
@@ -38,5 +45,7 @@ export function projectManagedShotMediaCanvas(canvas: ServerCanvas): ServerCanva
       shotPreview: { schemaVersion: 1, filmSetNodeId: owner.id, clipId: clip.id },
     } as CanvasNodeData;
   }
-  return nodeData ? { ...canvas, nodeData } : canvas;
+  const projected = nodeData ? { ...canvas, nodeData } : canvas;
+  projections.set(canvas, projected);
+  return projected;
 }
