@@ -21,6 +21,12 @@ export type PpserverTemplate = {
   templateId: string;
   kind: PpserverKind;
   title: string;
+  /** 运营分类（`image` / `image-g` / `image-s` / 视频类…），来自模板表。 */
+  category?: string;
+  /** 单价（积分）。来自 `cost_coins`，**下单前**给用户看。 */
+  cost?: number;
+  /** 模板表的 `display_meta` 原样保留（图标、成功率等）。 */
+  displayMeta?: Record<string, unknown>;
   /** describe 原样返回的参数表单与默认值，交给 catalog 做参数面板。 */
   inputSchema?: Record<string, unknown>;
   defaultInput?: Record<string, unknown>;

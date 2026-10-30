@@ -29,7 +29,10 @@
         "import.meta.env.VITE_AGENT_TEST_HANDLER": "\"\"",
         "import.meta.env.VITE_MODELING_BACKEND": "\"mock\"",
         "import.meta.env.VITE_MODELING_TEST_URL": "\"\"",
-        "import.meta.env.VITE_TENANT_ID": "\"\""
+        "import.meta.env.VITE_TENANT_ID": "\"\"",
+        "import.meta.env.VITE_MEDIA_BACKEND": "\"ppserver\"",
+        "import.meta.env.VITE_PPSERVER_BASE_PATH": "\"/api/ppserver\"",
+        "import.meta.env.VITE_PPSERVER_TEMPLATES": "\"\""
       },
       "plugins": [
         "./build/sixi-plugins.mjs"

@@ -19,6 +19,24 @@ export const PPSERVER_PROVIDER_ID = "ppserver";
 /** 线上任务路由器。权威取值来自 `banners/sixi/config.json` 的 `taskrouterBaseUrl`，这里只是缺省。 */
 export const DEFAULT_PPSERVER_BASE_URL = "https://sdpppx.zombee.tech/ppserver";
 
+/**
+ * Supabase 项目的真实地址与 anon key。
+ *
+ * **不能照抄 `banners/sixi/config.json`** —— 那里写的是
+ * `https://sdpppx.zombee.tech/supabase/scehmsoyamzjjwzbnqxu`，但 PS 插件启动时会用自己
+ * 打包进去的 `sdpppX.js` 覆盖掉它（`tsx/index.tsx` 的 `overrideSupabaseUrl`），实际用的是下面这个库。
+ *
+ * 拿 config.json 里那组去查模板表会得到
+ * 「invalid JWT: signature is invalid」/「None of the keys was able to decode the JWT」，
+ * 表现为「令牌无效」，但真正的错因是**连错了项目**（踩过）。
+ *
+ * 两者都是公开值（anon key 按设计可公开），不是秘密。
+ */
+export const DEFAULT_SUPABASE_URL = "https://ra-8gwswn1ua0767t0-pb.rds.apsaradb.com";
+
+export const DEFAULT_SUPABASE_ANON_KEY =
+  "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzg2MzQ1MTYyLCJleHAiOjEzMjk2OTg1MTYyfQ.b4LT37J87nAtp9jT9L2OVlaiSSKHylQ1XrEFuQjbTrs";
+
 /** 模板参数表单（GET，query 带 `templateId`）。 */
 export const PPSERVER_DESCRIBE_PATH = "/tasks/describe";
 /** 创建任务并流式接收状态（POST，SSE）。当前部署只有这一个创建入口。 */

@@ -83,6 +83,46 @@ export function readTaskError(payload: unknown): string {
   return "ppserver 任务失败，未返回原因";
 }
 
+/**
+ * 失败原因归类。
+ *
+ * 余额不足是**用户能自己解决**的一类，必须和「服务挂了」分开说：
+ * 前者引导去充值，后者让人以为产品坏了。判定规则与 PS 插件一致
+ * （`sdpppx-services/src/store.ts`）：HTTP 402、`INSUFFICIENT_BALANCE`、
+ * 报文里的「余额不足 / 积分不足 / insufficient balance」任一命中即可。
+ */
+export type FailureKind = "insufficient-balance" | "unauthorized" | "rate-limited" | "other";
+
+export function classifyFailure(status: number, message: string): FailureKind {
+  const text = message.toLowerCase();
+  if (
+    status === 402 ||
+    text.includes("insufficient_balance") ||
+    text.includes("insufficient balance") ||
+    message.includes("余额不足") ||
+    message.includes("积分不足")
+  ) {
+    return "insufficient-balance";
+  }
+  if (status === 401 || status === 403) return "unauthorized";
+  if (status === 429) return "rate-limited";
+  return "other";
+}
+
+/** 给用户看的一句话。`insufficient-balance` 明确说「去充值」而不是「重试」。 */
+export function failureMessage(kind: FailureKind, detail: string): string {
+  switch (kind) {
+    case "insufficient-balance":
+      return "积分不足，请先充值后再生成";
+    case "unauthorized":
+      return "访问令牌无效或已过期，请在设置里重新填写";
+    case "rate-limited":
+      return "请求过于频繁，请稍后再试";
+    case "other":
+      return detail;
+  }
+}
+
 /** 进度：0–1 或 0–100 都收，统一成 0–100 的整数。取不到就不给。 */
 export function readProgress(payload: unknown): number | undefined {
   const record = isRecord(payload) ? payload : {};

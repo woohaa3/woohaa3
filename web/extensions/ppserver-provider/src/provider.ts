@@ -18,7 +18,9 @@ import {
 import {
   buildCreateStreamBody,
   buildTaskBody,
+  classifyFailure,
   collectResultUrls,
+  failureMessage,
   parseSseBuffer,
   readCost,
   readJobId,
@@ -39,8 +41,13 @@ import {
 export type PpserverCatalog = { templates: PpserverTemplate[] };
 
 export type PpserverProviderOptions = {
-  /** ppserver 的 Bearer 令牌（Supabase access_token）。 */
-  accessToken: string;
+  /**
+   * 取当前可用的令牌（含自动续期）。
+   *
+   * **是函数不是字符串**：令牌会在运行时被刷新替换，构造时拿一份注册进去，
+   * 续期后仍在用旧值 —— 表现为「明明续期成功，请求还是 401」。
+   */
+  accessToken: string | (() => Promise<string> | string);
   baseUrl: string;
   catalog: PpserverCatalog;
   /** 租户：服务端按它计费与筛选模板。 */
@@ -58,17 +65,29 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
   const config = normalizeProviderConfig(
     PPSERVER_PROVIDER_ID,
     {
-      apiKey: options.accessToken,
+      // 令牌在请求头里由 auth() 现取，这里不交给 pptask 的配置层。
+      ...(typeof options.accessToken === "string" ? { apiKey: options.accessToken } : {}),
       baseURL: options.baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.jobRepository ? { jobRepository: options.jobRepository as never } : {}),
       ...(options.pollIntervalMs !== undefined ? { pollIntervalMs: options.pollIntervalMs } : {})
     },
-    ""
+    "",
+    /*
+     * `requireApiKey: false`。
+     *
+     * 令牌改成「每次请求现取」之后，构造期传进来的是函数而不是字符串，这时 apiKey 为空 ——
+     * 默认的必填校验会在**扩展启动时**抛 `ppserver apiKey is required`，表现为插件直接加载失败、
+     * 一个模型都注册不上（踩过）。令牌是否可用由请求期的 401/403 判定，不在这里拦。
+     */
+    false
   );
   if (!config.baseURL) throw new Error("ppserver 需要 baseURL");
   const origin = ppserverOrigin(config.baseURL);
-  const auth = () => mergeHeaders({ authorization: `Bearer ${config.apiKey ?? ""}` });
+  // 每次请求现取：续期会换掉令牌，构造时固定的话续期后仍用旧值。
+  const resolveToken = async (): Promise<string> =>
+    typeof options.accessToken === "function" ? (await options.accessToken()).trim() : options.accessToken.trim();
+  const auth = async () => mergeHeaders({ authorization: `Bearer ${await resolveToken()}` });
 
   const protocol: HttpProviderProtocol = {
     providerId: PPSERVER_PROVIDER_ID,
@@ -91,7 +110,7 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
       const jobId = await openStreamAndReadJobId({
         fetchImpl: config.fetch,
         url: `${origin}${PPSERVER_CREATE_STREAM_PATH}`,
-        headers: mergeHeaders(auth(), context.headers),
+        headers: mergeHeaders(await auth(), context.headers),
         body,
         ...(context.signal ? { signal: context.signal } : {}),
         timeoutMs: options.createTimeoutMs ?? DEFAULT_CREATE_TIMEOUT_MS
@@ -105,7 +124,7 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
       const statusPayload = await postJson({
         fetchImpl: config.fetch,
         url: `${origin}${PPSERVER_STATUS_PATH}`,
-        headers: mergeHeaders(auth(), context.headers),
+        headers: mergeHeaders(await auth(), context.headers),
         body: buildTaskBody({ taskId }),
         ...(context.signal ? { signal: context.signal } : {})
       });
@@ -125,7 +144,7 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
       const resultPayload = await postJson({
         fetchImpl: config.fetch,
         url: `${origin}${PPSERVER_RESULT_PATH}`,
-        headers: mergeHeaders(auth(), context.headers),
+        headers: mergeHeaders(await auth(), context.headers),
         body: buildTaskBody({ taskId }),
         ...(context.signal ? { signal: context.signal } : {})
       });
@@ -136,7 +155,9 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
       const cost = readCost(resultPayload);
       return {
         state: "completed",
-        output: { urls, raw: resultPayload },
+        // 形状必须能被 `extractOutputValues` 走通：它只认 `data` / `result` / `url` 等键，
+        // `urls` 不在其中（踩过：直接回 `{ urls }` 会报 "returned no image output"）。
+        output: { data: urls.map((url) => ({ url })), raw: resultPayload },
         ...(cost !== undefined ? { metadata: { cost } } : {})
       };
     },
@@ -146,7 +167,7 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
       await postJson({
         fetchImpl: config.fetch,
         url: `${origin}${PPSERVER_CANCEL_PATH}`,
-        headers: mergeHeaders(auth(), context.headers),
+        headers: mergeHeaders(await auth(), context.headers),
         body: buildTaskBody({ taskId }),
         ...(context.signal ? { signal: context.signal } : {})
       });
@@ -175,6 +196,28 @@ export function describeTemplate(template: PpserverTemplate, modelType: PptaskMo
   };
 }
 
+/** 失败响应里能读到的说明；读不出来就空串（由 `failureMessage` 兜底）。 */
+async function readFailureDetail(response: Response): Promise<string> {
+  const text = await response.text().catch(() => "");
+  if (!text) return "";
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const record = parsed as Record<string, unknown>;
+      for (const key of ["error", "message", "msg"]) {
+        const value = record[key];
+        if (typeof value === "string" && value.trim()) return value.trim().slice(0, 400);
+        if (value && typeof value === "object" && typeof (value as Record<string, unknown>).message === "string") {
+          return String((value as Record<string, unknown>).message).trim().slice(0, 400);
+        }
+      }
+    }
+  } catch {
+    // 不是 JSON：原样截一段，至少能看出服务端说了什么。
+  }
+  return text.trim().slice(0, 400);
+}
+
 /**
  * 发创建请求，读到 `created` 事件就断开。
  *
@@ -201,7 +244,10 @@ async function openStreamAndReadJobId(input: {
       signal: controller.signal
     });
     if (!response.ok) {
-      throw new Error(`ppserver 创建任务失败（HTTP ${response.status}）`);
+      // 402 / 令牌问题要给用户能照做的提示，而不是裸状态码。
+      const detail = await readFailureDetail(response);
+      const kind = classifyFailure(response.status, detail);
+      throw new Error(failureMessage(kind, detail || `ppserver 创建任务失败（HTTP ${response.status}）`));
     }
     if (!response.body) {
       // 有的部署直接回 JSON 而不是流。
