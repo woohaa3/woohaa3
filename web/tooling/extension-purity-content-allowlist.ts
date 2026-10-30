@@ -409,18 +409,6 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "历史债：内核仍写死扩展路由、工具或媒体作用域。去向：第 4 组改为内容路由。"
   },
   {
-    file: "web/services/agent-connections/src/target-prompt.ts",
-    literals: ["film-set","filmSetAnimations","filmSetContent"],
-    stage: "route",
-    reason: "历史债：内核仍写死扩展路由、工具或媒体作用域。去向：第 4 组改为内容路由。"
-  },
-  {
-    file: "web/services/agent-connections/src/target-tools.ts",
-    literals: ["film-set"],
-    stage: "route",
-    reason: "历史债：内核仍写死扩展路由、工具或媒体作用域。去向：第 4 组改为内容路由。"
-  },
-  {
     file: "web/services/canvas-service/src/api/canvas-api.ts",
     literals: ["film-set"],
     stage: "route",

@@ -20,7 +20,8 @@ import type {
   AgentCatalogSnapshot,
   AgentModelView,
   AgentConnectionCapabilities,
-  AgentConversationAdapter
+  AgentConversationAdapter,
+  ApplicationContentTargetCatalog
 } from "@woohaa3/contracts";
 import { ASSISTANT_CANDIDATE_CAPABILITIES, createTurnObserver, createTurnOutcomeJournal, preflightInput, type ConnectionDescriptor, type ConnectionService } from "@woohaa3/agent-connections";
 import type { ApplicationToolDelegationFacade } from "@woohaa3/contracts";
@@ -28,7 +29,7 @@ import { LOCAL_AGENT_ADAPTERS, LOCAL_AGENT_PLUGIN_ID, localAgentConnectionName, 
 import type { ProcessManager } from "./process-manager.js";
 import type { LocalAgentTransport } from "./transports/transport.js";
 import { buildTargetPrompt } from "./target-prompt.js";
-import { localAgentToolsForMode } from "./tool-scope.js";
+import { localAgentReadToolsForMode, localAgentToolsForMode } from "./tool-scope.js";
 
 export type LocalAgentRuntimeOptions = {
   service: ConnectionService;
@@ -42,12 +43,28 @@ export type LocalAgentRuntimeOptions = {
   /** 进程启动参数（按 adapter；不含任意 shell 串）。 */
   argsFor: (adapterId: string) => readonly string[];
   tools?: ApplicationToolDelegationFacade;
+  /** 当前活跃内容扩展的 Agent 目标目录；缺失时只公布通用目标。 */
+  contentTargets?: ApplicationContentTargetCatalog;
   logger?: (event: Record<string, unknown>) => void;
 };
 
 /** 本机来源能力：需要工具的执行由宿主 grant 门禁；讨论只读。 */
 function capabilitiesFor(): AgentConnectionCapabilities {
   return { textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true };
+}
+
+function targetModesFor(catalog: ApplicationContentTargetCatalog | undefined, options?: { canvasGroup?: boolean }): readonly string[] {
+  const modes = ["model3d", ...(catalog?.targets().map((target) => target.mode) ?? []), ...(options?.canvasGroup ? ["canvas-group"] : [])];
+  return [...new Set(modes)];
+}
+
+function adapterCapabilities(options: LocalAgentRuntimeOptions): AgentAdapterCapabilities {
+  return {
+    discussion: true,
+    targets: targetModesFor(options.contentTargets, { canvasGroup: Boolean(options.tools && options.mcpEndpoint) }),
+    tools: true,
+    models: "remote"
+  };
 }
 
 /** 原生线程不可恢复时，仍把宿主账本中的合法历史交给讨论回合。 */
@@ -94,15 +111,13 @@ async function issueToolGrant(
   }
 }
 
-const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d", "film-set"], tools: true, models: "remote" };
-
-export function createLocalAgentDescriptors(): Record<string, ConnectionDescriptor> {
+export function createLocalAgentDescriptors(contentTargets?: ApplicationContentTargetCatalog): Record<string, ConnectionDescriptor> {
   const descriptors: Record<string, ConnectionDescriptor> = {};
   for (const adapter of LOCAL_AGENT_ADAPTERS) {
     descriptors[adapter.adapterId] = {
       describe: ({ record }) => ({
         name: localAgentConnectionName(adapter.adapterId, record.name),
-        capabilities: capabilitiesFor(),
+        capabilities: { ...capabilitiesFor(), targets: targetModesFor(contentTargets) },
         // 不在连接描述里伪造 `app-server-default`：它不是 App Server 的真实模型 id，提交后会被
         // 上游拒绝。用户手填过的模型作为 user-provided 保留；没有时交给 adapter 读取真实目录。
         models:
@@ -231,7 +246,13 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
       }
     }
     if (input.intent.reasoningEffort && adapter.adapterId !== "codex-appserver") return { status: "failed", error: { code: "capability-unsupported", message: "此本机工具未开放思考强度配置，请使用默认设置" } };
-    const toolNames = discussion ? [] : localAgentToolsForMode(input.intent.mode ?? "model3d");
+    const mode = input.intent.mode ?? "model3d";
+    const targets = options.contentTargets?.targets() ?? [];
+    const genericMode = mode === "model3d" || mode === "canvas-group" || mode === "camera" || mode === "text";
+    if (!discussion && !genericMode && !targets.some((target) => target.mode === mode)) {
+      return { status: "failed", error: { code: "capability-unsupported", message: "目标 mode 未被任何激活扩展公布，或对应扩展已停用" } };
+    }
+    const toolNames = discussion ? [] : localAgentToolsForMode(mode, targets);
     const toolToken = await issueToolGrant(options.tools, input, toolNames);
     if (!discussion && !toolToken) {
       return { status: "failed", error: { code: "capability-unsupported", message: "本轮未取得画布工具授权，不能执行目标动作" } };
@@ -240,7 +261,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     const toolCalls: string[] = [];
     let successfulWrite = false;
     let toolFailure: string | undefined;
-    const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_film_set_clips", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output", "wait_for_skill_step", "get_latest_skill_step_output"]);
+    const readTools = new Set(localAgentReadToolsForMode(mode, targets));
 
     const context = nativeContextFor(input, `${adapter.adapterId}:1`);
     const resourceKey = nativeContextKey(input.owner, connectionId, context);
@@ -264,7 +285,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}),
         prompt: discussion
           ? (binding ? input.intent.prompt : buildDiscussionPrompt(input.history, input.intent.prompt))
-          : buildTargetPrompt(input.intent, input.requestId),
+          : buildTargetPrompt(input.intent, input.requestId, targets),
         ...(input.candidate ? { images: input.candidate.images, outputSchema: input.candidate.outputSchema } : {}),
         allowedTools: toolNames,
         toolToken,
@@ -339,7 +360,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
 
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ ...ADAPTER_CAPS, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: [...ADAPTER_CAPS.targets, ...(options.tools && options.mcpEndpoint ? ["canvas-group" as const] : [])] }),
+    capabilities: () => ({ ...adapterCapabilities(options), textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES }),
     authorization,
     models,
     run,

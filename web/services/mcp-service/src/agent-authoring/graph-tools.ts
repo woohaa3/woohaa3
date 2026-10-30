@@ -236,6 +236,20 @@ export function buildCapabilities(deps: AgentAuthoringToolDeps): AgentCanvasCapa
     continuation: continuationAvailable
       ? { available: true, tools: [...SKILL_CONTINUATION_TOOLS], followLatest: true, maxWaitMs: 30_000 }
       : { available: false, ...(continuation.reason !== undefined ? { reason: continuation.reason } : {}) },
+    ...(deps.content
+      ? {
+          content: {
+            targets: (deps.content.agentTargets?.() ?? []).map((target) => ({
+              extensionId: target.extensionId,
+              mode: target.mode,
+              readTools: target.readTools,
+              writeTools: target.writeTools,
+              events: target.events
+            })),
+            eventOwners: deps.content.eventOwners?.() ?? []
+          }
+        }
+      : {}),
     script: {
       available: script.available,
       ...(script.available

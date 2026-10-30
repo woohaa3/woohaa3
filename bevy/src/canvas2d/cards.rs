@@ -84,7 +84,7 @@ pub(super) fn draw_static(
     );
     geometry.rounded_rect(x + 14., y + 12., 28., 28., 6., z + 0.004, tint);
     // 镜头预览节点底层是 image/video 媒体，但类型图标应读作「镜头」，与普通图片/视频区分。
-    let icon_kind = if node.shot_preview.is_some() {
+    let icon_kind = if node.preview_card.is_some() {
         "shot"
     } else {
         node.kind.as_str()

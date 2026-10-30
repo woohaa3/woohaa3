@@ -13,6 +13,7 @@ import type {
 } from "../../canvas/canvas-node-model.js";
 import type { ModelCamera, ModelCameraMutation } from "../../canvas/model-cameras.js";
 import type { ModelContentVersion } from "../../canvas/model-definition.js";
+import type { ContentAgentTarget, ContentAgentTargetVersionContext } from "../../canvas/content-contribution.js";
 import type { ApplicationUserDelegation } from "../host/principal.js";
 
 /** 权威节点上下文读取结果。 */
@@ -140,10 +141,23 @@ export type ApplicationPersonalGenerationFacade = {
   executable(input: { delegation: ApplicationUserDelegation }): Promise<boolean>;
 };
 
+/**
+ * Agent 内容目标目录（change: 2026-10-28-generic-extension-content-ownership，任务 6.3）。
+ *
+ * 只投影当前活跃内容贡献的只读描述符；能力发现不因此获得写授权，实际工具仍逐次经 grant 校验。
+ */
+export type ApplicationContentTargetCatalog = {
+  targets(): readonly ContentAgentTarget[];
+  eventOwners(): readonly string[];
+  version(mode: string, input: ContentAgentTargetVersionContext): string | null;
+};
+
 /** Context 暴露给插件的 authoring/工具/个人生成端口集合。 */
 export type ApplicationAuthoringServices = {
   authoring: ApplicationCanvasAuthoringFacade;
   references: ApplicationMediaReferenceFacade;
   tools: ApplicationToolDelegationFacade;
   personalGeneration: ApplicationPersonalGenerationFacade;
+  /** 缺失表示宿主未装配内容目录；Agent 目标按通用模式 fail closed。 */
+  contentTargets?: ApplicationContentTargetCatalog;
 };

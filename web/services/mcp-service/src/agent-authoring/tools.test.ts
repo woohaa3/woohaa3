@@ -9,7 +9,8 @@ import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH } from "../model-mcp/mcp-http.js";
 import type { AgentCanvasClient, AgentApplyClientInput } from "../downstream/agent-canvas-client.js";
-import type { AgentCanvasGraph, CanvasCommand } from "@woohaa3/contracts";
+import { ContentContributionRegistry, type AgentCanvasGraph, type CanvasCommand } from "@woohaa3/contracts";
+import { buildCapabilities } from "./graph-tools.js";
 
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -144,6 +145,24 @@ describe("读取工具 structuredContent（任务 5.1 / 5.2）", () => {
     expect(result.structuredContent?.nodeKinds).toBeDefined();
     expect(result.structuredContent?.limits).toBeDefined();
     expect(result.structuredContent?.run).toMatchObject({ available: false });
+  });
+
+  it("capabilities 消费激活内容目标与事件目录，停用后不再公布", () => {
+    const content = new ContentContributionRegistry();
+    const deps = { client: fakeAgentClient(sampleGraph(), { applies: [] }), content };
+    expect(buildCapabilities(deps).content).toEqual({ targets: [], eventOwners: [] });
+    const release = content.register({
+      extensionId: "npc-production",
+      targetModes: ["npc-production"],
+      eventOwners: ["npc-production"],
+      agentTargets: [{ mode: "npc-production", readTools: ["get_canvas_graph"], writeTools: ["create_canvas_node"], events: ["npc-production"] }]
+    });
+    expect(buildCapabilities(deps).content).toEqual({
+      targets: [{ extensionId: "npc-production", mode: "npc-production", readTools: ["get_canvas_graph"], writeTools: ["create_canvas_node"], events: ["npc-production"] }],
+      eventOwners: ["npc-production"]
+    });
+    release();
+    expect(buildCapabilities(deps).content).toEqual({ targets: [], eventOwners: [] });
   });
 
   it("graph 返回 structuredContent 与简短 text 摘要", async () => {

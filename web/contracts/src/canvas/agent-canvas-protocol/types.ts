@@ -324,6 +324,22 @@ export type AgentCanvasCapabilities = {
   grouping?: { available: boolean; operations: string[] };
   layout?: { available: boolean; modes: string[]; coordinateSpace: "world" };
   models?: { available: boolean; reason?: string; items: unknown[] };
+  /**
+   * 当前激活内容扩展的 Agent 目标目录
+   * （change: 2026-10-28-generic-extension-content-ownership，任务 6.3）。
+   *
+   * 只描述可用 mode、工具与事件归属；不表示任何写授权，实际工具仍逐次经 grant 校验。
+   */
+  content?: {
+    targets: Array<{
+      extensionId: string;
+      mode: string;
+      readTools: readonly string[];
+      writeTools: readonly string[];
+      events: readonly string[];
+    }>;
+    eventOwners: readonly string[];
+  };
 };
 
 // ---------------------------------------------------------------------------

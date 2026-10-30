@@ -344,7 +344,14 @@ it("转片场列出统一目录的全部助手，支持本机默认模型与 API
   }); };
   const choose = async (label: string) => { const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(item => item.textContent === label)!; expect(item).toBeTruthy(); await act(async () => item.click()); };
   // 模型与 Variant 的横向选项面板（同一面板内的两组 chip）。
-  const chooseChip = async (label: string) => { const item = document.querySelector<HTMLElement>(`.assistant-model-panel__option[aria-label="${label}"]`)!; expect(item).toBeTruthy(); await act(async () => item.click()); };
+  const chooseChip = async (label: string) => {
+    let item: HTMLElement | null = null;
+    await vi.waitFor(() => {
+      item = document.querySelector<HTMLElement>(`.assistant-model-panel__option[aria-label="${label}"]`);
+      expect(item).toBeTruthy();
+    });
+    await act(async () => item!.click());
+  };
   await open("选择助手");
   expect([...document.querySelectorAll('[role="menuitemradio"]')].map(item => item.textContent)).toEqual(connections.map(c => c.name));
   expect(document.querySelector('.dlg[role="dialog"]')!.contains(document.querySelector('[role="menu"]'))).toBe(true);

@@ -454,10 +454,10 @@ pub(crate) fn sync(
     // preparation, so this stays a presentation projection instead of guessing from business ids.
     let empty_film_sets: HashSet<&str> = scene
         .0
-        .film_set_groups
+        .managed_item_groups
         .iter()
-        .filter(|group| group.bindings.is_empty() && group.ground.is_none())
-        .map(|group| group.owner_id.as_str())
+        .filter(|group| group.items.is_empty() && group.ground.is_none())
+        .map(|group| group.owner_node_id.as_str())
         .collect();
     let targets: Vec<(&crate::protocol::GraphNode, bool)> = if hidden {
         Vec::new()

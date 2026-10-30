@@ -117,6 +117,7 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
         ...(agentSdkDirs ? { agentSdkDirs } : {}),
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         ...(host.services.authoring?.tools ? { tools: host.services.authoring.tools } : {}),
+        ...(host.services.authoring?.contentTargets ? { contentTargets: host.services.authoring.contentTargets } : {}),
         logger: (event: Record<string, unknown>) => host.logger(redactEvent(event))
       };
 

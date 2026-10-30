@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { CanvasService } from "@woohaa3/canvas-service";
-import type { ApplicationUserDelegation } from "@woohaa3/contracts";
+import { ContentContributionRegistry, type ApplicationUserDelegation } from "@woohaa3/contracts";
 import { catalogToolsForGrant, createInProcessAuthoringServices, createToolGrantRegistry } from "./authoring-adapters.js";
 
 const DELEGATION: ApplicationUserDelegation = { subject: "user-a", authLevel: "authenticated" };
@@ -26,7 +26,7 @@ it("does not revoke another owner's group grant with a colliding request identit
   expect(registry.verify("a")).toBeNull(); expect(registry.verify("b")).not.toBeNull();
 });
 
-function fakeCanvas(options: { modelMcp?: unknown } = {}): CanvasService {
+function fakeCanvas(options: { modelMcp?: unknown; content?: ContentContributionRegistry } = {}): CanvasService {
   const submitted: unknown[] = [];
   const modelMcp = {
     getModelNode: vi.fn(async () => ({
@@ -46,6 +46,7 @@ function fakeCanvas(options: { modelMcp?: unknown } = {}): CanvasService {
     mutateCamerasBatch: vi.fn(async () => ({ ok: true as const, canvasId: "cv", nodeId: "n", commandId: "cmd-cam", duplicate: false, noop: false }))
   };
   const canvas = {
+    ...(options.content ? { content: options.content } : {}),
     mcpServices: () => ({
       modelMcp: options.modelMcp === null ? null : modelMcp,
       agent: null,
@@ -61,6 +62,24 @@ function fakeCanvas(options: { modelMcp?: unknown } = {}): CanvasService {
 }
 
 describe("进程内 authoring 适配器", () => {
+  it("向 Agent 暴露活跃内容目标目录，停用后立即消失", () => {
+    const content = new ContentContributionRegistry();
+    const services = createInProcessAuthoringServices({ canvas: fakeCanvas({ content }) });
+    const release = content.register({
+      extensionId: "npc-production",
+      targetModes: ["npc-production"],
+      eventOwners: ["npc-production"],
+      agentTargets: [{ mode: "npc-production", readTools: ["get_canvas_graph"], writeTools: ["create_canvas_node"], prompt: ["先读取。"], events: ["npc-production"] }],
+      agentTargetVersion: () => "content-hash"
+    });
+    expect(services.contentTargets?.targets()).toMatchObject([{ extensionId: "npc-production", mode: "npc-production" }]);
+    expect(services.contentTargets?.eventOwners()).toEqual(["npc-production"]);
+    expect(services.contentTargets?.version("npc-production", { target: {} })).toBe("content-hash");
+    release();
+    expect(services.contentTargets?.targets()).toEqual([]);
+    expect(services.contentTargets?.version("npc-production", { target: {} })).toBeNull();
+  });
+
   it("读取权威节点上下文，保留既有脚本", async () => {
     const services = createInProcessAuthoringServices({ canvas: fakeCanvas() });
     const read = await services.authoring.readNode({ delegation: DELEGATION, canvasId: "cv", nodeId: "n" });

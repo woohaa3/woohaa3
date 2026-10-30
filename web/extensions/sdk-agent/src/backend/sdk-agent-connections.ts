@@ -1,10 +1,9 @@
 import { sdkSourceFor, sdkSourceProtocol } from "./service-source.js";
-import { filmSetAnimationsOf, filmSetClipHash } from "@woohaa3/contracts";
 /** Fixed framework dispatch. The host ledger owns idempotency; frameworks own inference loops. */
 import type {
   AgentConnectionCapabilities, AgentConnectionModel, AgentConversationAdapter, AgentAdapterRunInput,
   AgentAdapterRunOutcome, AgentConnectionRuntime, AgentEngineId, ApplicationToolDelegationFacade,
-  ApplicationCanvasAuthoringFacade, ApplicationUserDelegation
+  ApplicationCanvasAuthoringFacade, ApplicationUserDelegation, ApplicationContentTargetCatalog
 } from "@woohaa3/contracts";
 import {
   createEndpointPolicy, createModelTransport, nativeContextFor, nativeContextKey, preflightInput,
@@ -32,9 +31,19 @@ export type SdkAgentRuntimeOptions = {
   runtime?: FixedEngineRuntime;
   tools?: ApplicationToolDelegationFacade;
   authoring?: ApplicationCanvasAuthoringFacade;
+  /** 当前活跃内容扩展的 Agent 目标目录；缺失时只公布通用目标。 */
+  contentTargets?: ApplicationContentTargetCatalog;
   ownerDelegation?: (owner: string) => ApplicationUserDelegation;
   logger?: (event: Record<string, unknown>) => void;
 };
+
+function targetModesFor(options: SdkAgentRuntimeOptions): readonly string[] {
+  return [...new Set([
+    "model3d",
+    ...(options.contentTargets?.targets().map((target) => target.mode) ?? []),
+    ...(options.tools && options.authoring && options.mcpServerUrl ? ["canvas-group"] : [])
+  ])];
+}
 
 /** 仅声明固定引擎已接线且模型家族明确支持的设置。兼容服务未知时沿用默认。 */
 export function sdkReasoningEfforts(adapterId: string, model: string): readonly import("@woohaa3/contracts").AgentReasoningEffort[] {
@@ -134,18 +143,24 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     try {
       relay = await createModelTransport({ apiType: engine.apiType, upstream: baseUrl, apiKey: credential.secret,
         policy: endpointPolicy, valid, signal: controller.signal });
+      const targets = options.contentTargets?.targets() ?? [];
       if (input.intent.action !== "discuss") {
         if (!options.tools || !options.mcpServerUrl || !input.intent.nodeId || !options.authoring) return fail("capability-unsupported", "目标执行需要受控工具、权威目标及内容版本");
-        const targetHash = (target: Awaited<ReturnType<ApplicationCanvasAuthoringFacade["readNode"]>>) => {
+        const mode = input.intent.mode ?? "model3d";
+        const genericMode = mode === "model3d" || mode === "canvas-group" || mode === "camera" || mode === "text";
+        if (!genericMode && !targets.some((target) => target.mode === mode)) return fail("capability-unsupported", "目标 mode 未被任何激活扩展公布，或对应扩展已停用");
+        const hashOfTarget = (target: Awaited<ReturnType<ApplicationCanvasAuthoringFacade["readNode"]>>): string | undefined => {
           if (!target.ok) return undefined;
-          if (input.intent.mode === "film-set" && input.intent.clipId && target.animation) {
-            const clip = filmSetAnimationsOf(target.animation).clips.find((entry) => entry.id === input.intent.clipId);
-            return clip ? filmSetClipHash(clip) : undefined;
-          }
-          return target.modelContentVersion?.contentHash ?? target.snapshotHash;
+          return options.contentTargets?.version(mode, {
+            ...(input.intent.clipId ? { clipId: input.intent.clipId } : {}),
+            ...(input.intent.itemId ? { itemId: input.intent.itemId } : {}),
+            ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
+            ...(input.intent.expectedContentHash ? { expectedContentHash: input.intent.expectedContentHash } : {}),
+            target
+          }) ?? target.modelContentVersion?.contentHash ?? target.snapshotHash;
         };
         const target = await options.authoring.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId });
-        const frozenHash = targetHash(target);
+        const frozenHash = hashOfTarget(target);
         if (!target.ok || !frozenHash || (input.intent.expectedContentHash && input.intent.expectedContentHash !== frozenHash)) return fail("version-conflict", "目标内容已变化或不可读取，请重新打开作品");
         const frozenInput = { ...input, intent: { ...input.intent, expectedContentHash: frozenHash } };
         options.tools.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" });
@@ -153,11 +168,13 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
           workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
           ...(input.intent.mode === "canvas-group" ? { expectedScopeEpoch: Number(frozenHash.slice("group-epoch:".length)) } : {}),
           ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
-      ...(input.intent.clipId ? { clipId: input.intent.clipId } : {}), ...(input.intent.itemId ? { itemId: input.intent.itemId } : {}), tools: localAgentToolsForMode(input.intent.mode) });
+      ...(input.intent.clipId ? { clipId: input.intent.clipId } : {}), ...(input.intent.itemId ? { itemId: input.intent.itemId } : {}), tools: localAgentToolsForMode(mode, targets) });
         gateway = await createMcpTurnGateway({ input: { ...frozenInput, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
+          targets,
+          hashArgs: targets.find((target) => target.mode === mode)?.hashArgs ?? [],
           validateTarget: async () => {
-            const target = await options.authoring!.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId! });
-            return targetHash(target) === frozenHash;
+            const current = await options.authoring!.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId! });
+            return hashOfTarget(current) === frozenHash;
           } });
       }
       const native = input.candidate ? null : await options.service.resolveNativeBinding({ owner: input.owner, connectionId: record.connectionId, context });
@@ -166,7 +183,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
         probeRuntime: async () => ({ ok: true }) });
       // Legal host history is replayable when an engine cannot resume or the process restarted.
       const history = (native && input.intent.action !== "discuss" ? [] : input.history).map((message) => `${message.role}: ${message.content}`).join("\n");
-      const prompt = (history ? `会话历史：\n${history}\n\n` : "") + (input.intent.action === "discuss" ? input.intent.prompt : buildTargetPrompt(input.intent, input.requestId));
+      const prompt = (history ? `会话历史：\n${history}\n\n` : "") + (input.intent.action === "discuss" ? input.intent.prompt : buildTargetPrompt(input.intent, input.requestId, targets));
       const result = await sdk.run({ model, prompt, ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}), signal: controller.signal, tools: gateway?.tools ?? [],
         ...(input.candidate ? { images: input.candidate.images, outputSchema: input.candidate.outputSchema } : {}),
         ...(gateway ? { toolToken: gateway.token, mcpEndpoint: { name: "woohaa", url: gateway.url } } : {}),
@@ -203,7 +220,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
   };
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "film-set", "camera", ...(options.tools && options.authoring && options.mcpServerUrl ? ["canvas-group" as const] : [])], tools: true, models: "remote" }),
+    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: targetModesFor(options), tools: true, models: "remote" }),
     authorization: async ({ owner }) => {
       const records = (await options.service.list(owner)).filter((record) => record.adapterId === adapter.adapterId);
       for (const record of records) if (await options.service.credentialConfigured({ owner, connectionId: record.connectionId, purpose: "model-api-key" })) return "ready";

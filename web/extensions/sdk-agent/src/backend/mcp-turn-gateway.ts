@@ -2,7 +2,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import type { AgentAdapterRunInput } from "@woohaa3/contracts";
+import type { AgentAdapterRunInput, ContentAgentTarget } from "@woohaa3/contracts";
 import { createEndpointPolicy, localAgentToolsForMode } from "@woohaa3/agent-connections";
 import type { ModelToolDefinition } from "./protocol/model-turn.js";
 
@@ -17,10 +17,13 @@ export async function createMcpTurnGateway(options: {
   input: AgentAdapterRunInput; upstream: string; grant: string;
   valid: () => boolean | Promise<boolean>;
   validateTarget?: () => Promise<boolean>;
+  targets?: readonly ContentAgentTarget[];
+  /** owner 描述符声明的冻结哈希参数名；只写工具 schema 真正接受的参数。 */
+  hashArgs?: readonly string[];
 }) {
   const checked = createEndpointPolicy({ allowedHosts: ["127.0.0.1", "localhost", "::1", "[::1]"], allowHttp: true }).check(options.upstream);
   if (!checked.ok) throw new Error("MCP endpoint must be host loopback");
-  const allowed = localAgentToolsForMode(options.input.intent.mode);
+  const allowed = localAgentToolsForMode(options.input.intent.mode, options.targets);
   let sequence = 0;
   let closed = false;
   let firstWrite = true;
@@ -93,7 +96,11 @@ export async function createMcpTurnGateway(options: {
           if (!Array.isArray(args.items) || args.items.some((item: Json) => item.nodeId !== target.nodeId)) throw new Error("target-mismatch");
           for (const item of args.items) if (target.expectedContentHash) item.expectedModelContentHash = target.expectedContentHash;
         }
-        if (target.expectedContentHash && target.mode === "film-set" && properties?.expectedClipHash) args.expectedClipHash = target.expectedContentHash;
+        if (target.expectedContentHash) {
+          for (const name of options.hashArgs ?? []) {
+            if (properties?.[name]) args[name] = target.expectedContentHash;
+          }
+        }
         if (name === "submit_model_script" && target.expectedContentHash) args.expectedModelContentHash = target.expectedContentHash;
         // Each SDK call gets a stable operation identity; transport retries cannot create another write.
         const callId = String(message.id);

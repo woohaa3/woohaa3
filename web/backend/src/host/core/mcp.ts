@@ -171,6 +171,7 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       }), ctx.canvas),
       // 只共享显式配置的 Canvas 身份；缺省/空值不得凭空造身份。
       agentClient: groupScopedClient(agentCanvasServiceToClient(services.agent, { principalId: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "" }), ctx.canvas),
+      content: ctx.canvas.content,
       toolGrant: { allowedTools: token => catalogToolsForGrant(toolGrants.verify(token)), authorize: (input) => toolGrants.authorize(input) },
       logger: ctx.log.scope("mcp")
     });

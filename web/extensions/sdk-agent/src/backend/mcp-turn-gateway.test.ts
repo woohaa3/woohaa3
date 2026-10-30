@@ -1,11 +1,17 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentAdapterRunInput } from "@woohaa3/contracts";
+import type { AgentAdapterRunInput, ContentAgentTarget } from "@woohaa3/contracts";
 import { createMcpTurnGateway } from "./mcp-turn-gateway.js";
 
-async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: () => void, group = false) {
+async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: () => void, group = false, target?: ContentAgentTarget) {
   const received: Array<{ method: string; params?: any; authorization?: string }> = [];
+  const businessTools = target
+    ? [...target.readTools, ...target.writeTools].map((name) => ({
+        name,
+        inputSchema: { type: "object", properties: Object.fromEntries([["canvasId", {}], ["nodeId", {}], ["requestId", {}], ["clipId", {}], ...target.hashArgs.map((arg) => [arg, {}])]) }
+      }))
+    : [];
   const upstream = createServer(async (req, res) => {
     let text = ""; for await (const chunk of req) text += chunk;
     const message = JSON.parse(text);
@@ -13,6 +19,7 @@ async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: 
     const result = message.method === "tools/list" ? { tools: [
       { name: "get_model_node", inputSchema: { type: "object" } },
       { name: "submit_model_script", inputSchema: { type: "object", properties: { canvasId: {}, nodeId: {}, requestId: {}, expectedModelContentHash: {} } } },
+      ...businessTools,
       { name: "shell", inputSchema: { type: "object" } }
     ] } : { content: [{ type: "text", text: "done" }], structuredContent: { ok: true, commandId: "cmd-1", canvasId: "canvas", nodeId: "node", revision: 2 } };
     if (message.method === "tools/call") { onWrite?.(); await writeBarrier; }
@@ -23,9 +30,10 @@ async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: 
   const controller = new AbortController(); let valid = true;
   const emit = vi.fn();
   const input = { owner: "owner", requestId: "request", canvasId: "canvas", conversationId: "conversation", turnId: "turn", history: [], signal: controller.signal, emit,
-    intent: { action: "modify", canvasId: "canvas", nodeId: "node", mode: group ? "canvas-group" : "model3d", prompt: "update", expectedContentHash: group ? "group-epoch:7" : "hash" } } as AgentAdapterRunInput;
+    intent: { action: "modify", canvasId: "canvas", nodeId: "node", mode: target?.mode ?? (group ? "canvas-group" : "model3d"), prompt: "update", expectedContentHash: group ? "group-epoch:7" : "hash", ...(target ? { clipId: "clip-1" } : {}) } } as AgentAdapterRunInput;
   const validateTarget = vi.fn(async () => validate);
-  const gateway = await createMcpTurnGateway({ input, upstream: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/mcp`, grant: "real-grant", valid: () => valid, validateTarget });
+  const gateway = await createMcpTurnGateway({ input, upstream: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/mcp`, grant: "real-grant", valid: () => valid, validateTarget,
+    ...(target ? { targets: [target], hashArgs: target.hashArgs } : {}) });
   const call = async (name: string, args: Record<string, unknown> = {}, id = 1, token = gateway.token) => {
     const response = await fetch(gateway.url, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }) });
     return { status: response.status, body: await response.json() };
@@ -33,6 +41,25 @@ async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: 
   return { gateway, received, call, validateTarget, emit, controller, invalidate: () => { valid = false; }, close: async () => { await gateway.close(); upstream.closeAllConnections(); await new Promise<void>((resolve) => upstream.close(() => resolve())); } };
 }
 describe("每轮 MCP 授权与权威回执", () => {
+  it("业务目标只发布描述符工具，并把冻结哈希写入 owner 声明的参数", async () => {
+    const target: ContentAgentTarget = {
+      extensionId: "npc-production",
+      mode: "npc-production",
+      readTools: ["get_npc_node"],
+      writeTools: ["mutate_npc_clip"],
+      prompt: [],
+      events: ["npc-production"],
+      hashArgs: ["expectedClipHash"]
+    };
+    const f = await fixture(true, undefined, undefined, false, target);
+    try {
+      expect(f.gateway.tools.map((tool) => tool.name)).toEqual(["get_npc_node", "mutate_npc_clip"]);
+      expect((await f.call("mutate_npc_clip", { clipId: "clip-1" })).body).toHaveProperty("result");
+      const write = f.received.find((entry) => entry.method === "tools/call");
+      expect(write?.params.arguments).toMatchObject({ canvasId: "canvas", nodeId: "node", clipId: "clip-1", expectedClipHash: "hash" });
+    } finally { await f.close(); }
+  });
+
   it("forwards a group descendant without replacing it with the root and checks the frozen epoch", async () => {
     const f = await fixture(true, undefined, undefined, true);
     try {

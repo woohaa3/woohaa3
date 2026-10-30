@@ -63,19 +63,6 @@ impl DrawKey {
             preview_card: node.preview_card.clone(),
         }
     }
-    fn matches(&self, node: &GraphNode, attach_owner: Option<&str>) -> bool {
-        self.id == node.id
-            && self.kind == node.kind
-            && self.rect == [node.x, node.y, node.width, node.height]
-            && self.title == node.title
-            && self.type_label == node.type_label
-            && self.body == node.body
-            && self.card_label == node.card_label
-            && self.flags == Self::flags(node)
-            && self.history == Self::history(node)
-            && self.hide_history == (attach_owner == Some(node.id.as_str()))
-            && self.preview_card == node.preview_card
-    }
 }
 
 #[derive(Default)]

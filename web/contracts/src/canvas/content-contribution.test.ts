@@ -100,4 +100,70 @@ describe("content declaration catalog", () => {
     expect(registry.targetModes()).toEqual(["canvas-group", "npc-production"]);
     expect(registry.eventOwners()).toEqual(["furnace", "npc-production"]);
   });
+
+  it("projects active agent targets with owner identity and removes them on release", () => {
+    const registry = new ContentContributionRegistry();
+    const contribution: ContentContribution = {
+      extensionId: "npc-production",
+      targetModes: ["npc-production"],
+      eventOwners: ["npc-production"],
+      agentTargets: [{
+        mode: "npc-production",
+        readTools: ["get_canvas_graph"],
+        writeTools: ["create_canvas_node"],
+        prompt: ["先读取权威节点。"],
+        events: ["npc-production"],
+        hashArgs: ["expectedSnapshotHash"]
+      }],
+      agentTargetVersion: () => "hash-1"
+    };
+    const release = registry.register(contribution);
+    expect(registry.agentTargets()).toEqual([{
+      extensionId: "npc-production",
+      mode: "npc-production",
+      readTools: ["get_canvas_graph"],
+      writeTools: ["create_canvas_node"],
+      prompt: ["先读取权威节点。"],
+      events: ["npc-production"],
+      hashArgs: ["expectedSnapshotHash"]
+    }]);
+    expect(registry.agentTargetVersion("npc-production", { target: {} })).toBe("hash-1");
+    release();
+    expect(registry.agentTargets()).toEqual([]);
+    expect(registry.agentTargetVersion("npc-production", { target: {} })).toBeNull();
+  });
+
+  it("rejects descriptors that expand modes, events or tool names beyond the declaration", () => {
+    const registry = new ContentContributionRegistry();
+    expect(() => registry.register({
+      extensionId: "npc-production",
+      targetModes: ["npc-production"],
+      agentTargets: [{ mode: "film-set" }]
+    })).toThrow(/content-registration-invalid/);
+    expect(() => registry.register({
+      extensionId: "npc-production",
+      targetModes: ["npc-production"],
+      eventOwners: ["npc-production"],
+      agentTargets: [{ mode: "npc-production", events: ["other"] }]
+    })).toThrow(/content-registration-invalid/);
+    expect(() => registry.register({
+      extensionId: "npc-production",
+      targetModes: ["npc-production"],
+      agentTargets: [{ mode: "npc-production", readTools: ["Bad-Tool"] }]
+    })).toThrow(/content-registration-invalid/);
+  });
+
+  it("rejects two active owners claiming the same agent target mode", () => {
+    const registry = new ContentContributionRegistry();
+    registry.register({
+      extensionId: "npc-production",
+      targetModes: ["npc-production"],
+      agentTargets: [{ mode: "npc-production" }]
+    });
+    expect(() => registry.register({
+      extensionId: "game-furnace",
+      targetModes: ["npc-production"],
+      agentTargets: [{ mode: "npc-production" }]
+    })).toThrow(/content-target-conflict/);
+  });
 });

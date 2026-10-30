@@ -77,6 +77,8 @@ export type McpServiceOptions = {
    * 由统一后端注入 ChatGPT 插件使用的同一 grant registry。
    */
   toolGrant?: ModelMcpHttpOptions["toolGrant"];
+  /** 当前内容 owner 目录；只用于 Agent 能力发现。 */
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   logger?: (event: Record<string, unknown>) => void;
 };
 
@@ -141,6 +143,7 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
                   runAvailability: { available: true },
                   ...(options.skillClient ? { skillClient: options.skillClient } : {}),
                   ...(options.skillAvailability ? { skillAvailability: options.skillAvailability } : {}),
+                  ...(options.content ? { content: options.content } : {}),
                   ...(developmentPrincipalId ? { principalId: developmentPrincipalId } : {}),
                   audit: (event) =>
                     log({

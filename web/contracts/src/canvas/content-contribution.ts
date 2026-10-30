@@ -10,6 +10,9 @@ import type { ServerCanvas } from "./domain/index.js";
 import type { EditOperation, EditPrecondition } from "./edit-command.js";
 
 const EXTENSION_ID = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
+const AGENT_TARGET_MODE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const AGENT_TOOL_NAME = /^[a-z][a-z0-9_]*$/;
+const AGENT_ARG_NAME = /^[A-Za-z][A-Za-z0-9]*$/;
 
 export type ContentDiagnostic = { readonly code: string; readonly reason: string };
 
@@ -219,12 +222,60 @@ export type ContentVersionAccessor = {
   write(data: unknown, version: number): unknown;
 };
 
+/**
+ * Agent 目标描述符的可信上下文。
+ *
+ * `target` 是宿主已按授权读取的结果；owner 只解析自己需要的字段，不获得画布写权限。
+ * `clipId` / `itemId` / `cameraId` 来自冻结的 entry intent，不能被模型在工具参数里改写。
+ */
+export type ContentAgentTargetVersionContext = {
+  readonly clipId?: string;
+  readonly itemId?: string;
+  readonly cameraId?: string;
+  readonly expectedContentHash?: string;
+  readonly target: unknown;
+};
+
+/**
+ * 扩展贡献的 Agent 目标声明（change: 2026-10-28-generic-extension-content-ownership，任务 6.3）。
+ *
+ * `targetModes` 仍由扩展元数据声明并校验唯一性；本描述符把该 mode 的真实读写工具、
+ * 业务提示词与事件归属交给目录消费者。验证失败时不得扩大授权范围。
+ */
+export type ContentAgentTargetDeclaration = {
+  readonly mode: string;
+  readonly readTools?: readonly string[];
+  readonly writeTools?: readonly string[];
+  readonly prompt?: readonly string[];
+  readonly events?: readonly string[];
+  /** 工具 schema 中应接收冻结内容哈希的参数名（例如片场的 expectedClipHash）。 */
+  readonly hashArgs?: readonly string[];
+};
+
+/** 目录投影：在声明上补 owner，调用方不需要另行猜测归属。 */
+export type ContentAgentTarget = {
+  readonly extensionId: string;
+  readonly mode: string;
+  readonly readTools: readonly string[];
+  readonly writeTools: readonly string[];
+  readonly prompt: readonly string[];
+  readonly events: readonly string[];
+  readonly hashArgs: readonly string[];
+};
+
 export type ContentContribution = {
   readonly extensionId: string;
   /** 扩展声明、由宿主校验唯一性的 Agent 目标 mode（业务白名单不进入内核）。 */
   readonly targetModes?: readonly string[];
   /** 扩展声明、由宿主校验唯一性的领域事件 owner id。 */
   readonly eventOwners?: readonly string[];
+  /** 运行时 Agent 目标描述符；mode 必须已被 `targetModes` 声明。 */
+  readonly agentTargets?: readonly ContentAgentTargetDeclaration[];
+  /**
+   * 按冻结目标计算内容身份；覆盖默认 `modelContentVersion.contentHash ?? snapshotHash`。
+   * 用于目标身份不是整个节点快照的 owner（例如只授权一个子对象）。
+   */
+  readonly agentTargetVersion?: (input: ContentAgentTargetVersionContext) => string | null;
   /** 序列化的节点定位声明；停用后可由持久元数据继续识别已有内容。 */
   readonly ownerLocators?: readonly ContentNodeLocator[];
   readonly nodeData?: ContentNodeDataCodec;
@@ -244,6 +295,10 @@ export type ContentContributionResolver = {
   implementations(): readonly ContentContribution[];
   targetModes?(): readonly string[];
   eventOwners?(): readonly string[];
+  /** 当前活跃 owner 的完整 Agent 目标目录（含读写工具、提示词与事件）。 */
+  agentTargets?(): readonly ContentAgentTarget[];
+  /** 按 mode 调用 owner 的内容身份计算；没有覆盖时返回 null。 */
+  agentTargetVersion?(mode: string, input: ContentAgentTargetVersionContext): string | null;
   /** 最近已验证的定位声明；贡献停用后仍保留，供只读识别已有内容。 */
   locators?(): readonly { readonly extensionId: string; readonly ownerLocators: readonly ContentNodeLocator[] }[];
 };
@@ -342,6 +397,36 @@ function assertContribution(contribution: ContentContribution): void {
       if (typeof contribution.commands[name] !== "function") throw fail("content-registration-invalid");
     }
   }
+  if (contribution.agentTargetVersion !== undefined && typeof contribution.agentTargetVersion !== "function") {
+    throw fail("content-registration-invalid");
+  }
+  const declaredModes = new Set(contribution.targetModes ?? []);
+  const declaredEvents = new Set(contribution.eventOwners ?? []);
+  const agentModes = new Set<string>();
+  for (const target of contribution.agentTargets ?? []) {
+    if (typeof target.mode !== "string" || !AGENT_TARGET_MODE.test(target.mode) || target.mode.length > 64 || agentModes.has(target.mode)) {
+      throw fail("content-registration-invalid");
+    }
+    if (!declaredModes.has(target.mode)) throw fail("content-registration-invalid");
+    agentModes.add(target.mode);
+    for (const key of ["readTools", "writeTools"] as const) {
+      const tools = target[key];
+      if (tools !== undefined && (!Array.isArray(tools) || tools.some((tool) => typeof tool !== "string" || !AGENT_TOOL_NAME.test(tool)) || new Set(tools).size !== tools.length)) {
+        throw fail("content-registration-invalid");
+      }
+    }
+    if (target.prompt !== undefined && (!Array.isArray(target.prompt) || target.prompt.length > 64 || target.prompt.some((line) => typeof line !== "string" || line.trim().length === 0 || line.length > 12_000))) {
+      throw fail("content-registration-invalid");
+    }
+    if (target.events !== undefined) {
+      if (!Array.isArray(target.events) || target.events.some((event) => typeof event !== "string" || !declaredEvents.has(event)) || new Set(target.events).size !== target.events.length) {
+        throw fail("content-registration-invalid");
+      }
+    }
+    if (target.hashArgs !== undefined && (!Array.isArray(target.hashArgs) || target.hashArgs.some((name) => typeof name !== "string" || !AGENT_ARG_NAME.test(name)) || new Set(target.hashArgs).size !== target.hashArgs.length)) {
+      throw fail("content-registration-invalid");
+    }
+  }
   if (contribution.migrations && contribution.migrations.length > 0) {
     if (!contribution.version || typeof contribution.version.read !== "function" || typeof contribution.version.write !== "function") {
       throw fail("content-registration-invalid");
@@ -379,6 +464,11 @@ export class ContentContributionRegistry implements ContentContributionResolver 
     if (this.entries.has(contribution.extensionId)) throw fail("content-registration-conflict");
     for (const tool of contribution.mcpTools ?? []) {
       if (this.tools.has(tool.name)) throw fail("content-tool-conflict");
+    }
+    for (const target of contribution.agentTargets ?? []) {
+      for (const existing of this.entries.values()) {
+        if (existing.agentTargets?.some((entry) => entry.mode === target.mode)) throw fail("content-target-conflict");
+      }
     }
     this.entries.set(contribution.extensionId, contribution);
     if (contribution.ownerLocators?.length) this.retainedLocators.set(contribution.extensionId, contribution.ownerLocators);
@@ -448,6 +538,31 @@ export class ContentContributionRegistry implements ContentContributionResolver 
   /** 当前 scope 活跃 owner 声明的领域事件 owner 目录（去重、稳定排序）。 */
   eventOwners(): readonly string[] {
     return [...new Set(this.implementations().flatMap((contribution) => contribution.eventOwners ?? []))].sort();
+  }
+
+  /** 当前 scope 活跃 owner 的 Agent 目标目录；描述符停用后立即消失。 */
+  agentTargets(): readonly ContentAgentTarget[] {
+    return this.implementations()
+      .flatMap((contribution) =>
+        (contribution.agentTargets ?? []).map((target) => ({
+          extensionId: contribution.extensionId,
+          mode: target.mode,
+          readTools: [...(target.readTools ?? [])],
+          writeTools: [...(target.writeTools ?? [])],
+          prompt: [...(target.prompt ?? [])],
+          events: [...(target.events ?? [])],
+          hashArgs: [...(target.hashArgs ?? [])]
+        }))
+      )
+      .sort((left, right) => left.mode.localeCompare(right.mode) || left.extensionId.localeCompare(right.extensionId));
+  }
+
+  agentTargetVersion(mode: string, input: ContentAgentTargetVersionContext): string | null {
+    for (const contribution of this.implementations()) {
+      if (!contribution.agentTargets?.some((target) => target.mode === mode)) continue;
+      return contribution.agentTargetVersion?.(input) ?? null;
+    }
+    return null;
   }
 
   resolve(extensionId: string): ContentContribution | null {

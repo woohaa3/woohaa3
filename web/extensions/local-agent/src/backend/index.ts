@@ -194,6 +194,9 @@ export function createLocalAgentExtension(
         ...(host.services.authoring?.tools
           ? { tools: host.services.authoring.tools }
           : {}),
+        ...(host.services.authoring?.contentTargets
+          ? { contentTargets: host.services.authoring.contentTargets }
+          : {}),
         logger: (event) => host.logger(redactEvent(event)),
       };
 
@@ -201,7 +204,7 @@ export function createLocalAgentExtension(
         id: LOCAL_AGENT_PLUGIN_ID,
         extensionId: LOCAL_AGENT_PLUGIN_ID,
         service,
-        descriptors: createLocalAgentDescriptors(),
+        descriptors: createLocalAgentDescriptors(host.services.authoring?.contentTargets),
       });
       host.registerCapability({
         id: agentConnectionProviderCapabilityId(LOCAL_AGENT_PLUGIN_ID),

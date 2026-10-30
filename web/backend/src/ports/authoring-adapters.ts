@@ -259,7 +259,18 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
     }
   };
 
-  return { authoring, references, tools, personalGeneration };
+  const content = deps.canvas.content;
+  return {
+    authoring,
+    references,
+    tools,
+    personalGeneration,
+    contentTargets: {
+      targets: () => content?.agentTargets?.() ?? [],
+      eventOwners: () => content?.eventOwners?.() ?? [],
+      version: (mode, input) => content?.agentTargetVersion?.(mode, input) ?? null
+    }
+  };
 }
 
 export type { MediaService };

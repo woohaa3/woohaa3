@@ -4,7 +4,7 @@
  *  change: 2026-10-22-remove-agent-execution-limits，任务 3.4 / 4.2 —— 删除固定窗口频率与
  *  响应字符总量拒绝）。
  */
-import type { AgentCanvasError } from "@woohaa3/contracts";
+import type { AgentCanvasError, ContentContributionResolver } from "@woohaa3/contracts";
 import type { AgentCanvasClient } from "../downstream/agent-canvas-client.js";
 import type { SkillStepClient } from "../downstream/skill-step-client.js";
 
@@ -26,6 +26,8 @@ export type AgentAuthoringToolDeps = {
   scriptAvailability?: { available: boolean; reason?: string };
   /** 任务模型能力（媒体节点预检）；由同一能力探测注入。 */
   modelsAvailability?: { available: boolean; reason?: string; items: unknown[] };
+  /** 当前内容 owner 目录；只用于能力发现，不扩大工具 grant。 */
+  content?: ContentContributionResolver;
   now?: () => number;
   audit?: (event: AgentAuditEvent) => void;
   auditTool?: string;

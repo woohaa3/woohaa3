@@ -11,14 +11,13 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-use crate::protocol::MediaPlane;
 use super::media_geometry::plane_transform;
-use crate::protocol::ModelMediaPlane;
+use crate::protocol::MediaPlane;
 
 /// 片场媒体平面资源表：平面 id → entity + 材质句柄。
 #[derive(Resource, Default)]
 pub(crate) struct FilmSetMediaVisuals {
-    planes: HashMap<String, MediaPlane>,
+    planes: HashMap<String, MediaPlaneVisual>,
     /// 归属片场 → 拍摄镜头卡片预览层
     /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
     ///
@@ -27,7 +26,7 @@ pub(crate) struct FilmSetMediaVisuals {
     pub(crate) preview_layers: HashMap<String, Vec<usize>>,
 }
 
-struct MediaPlane {
+struct MediaPlaneVisual {
     entity: Entity,
     material: Handle<StandardMaterial>,
 }
@@ -171,7 +170,7 @@ pub(crate) fn sync_film_set_planes(
                 .id();
             visuals
                 .planes
-                .insert(plane.id.clone(), MediaPlane { entity, material });
+                .insert(plane.id.clone(), MediaPlaneVisual { entity, material });
         }
     }
 }
@@ -266,7 +265,7 @@ mod tests {
         let mut visuals = FilmSetMediaVisuals::default();
         visuals.planes.insert(
             "video".into(),
-            MediaPlane {
+            MediaPlaneVisual {
                 entity,
                 material: material.clone(),
             },
