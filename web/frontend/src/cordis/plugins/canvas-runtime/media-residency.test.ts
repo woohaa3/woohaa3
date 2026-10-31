@@ -229,6 +229,66 @@ describe("千卡片媒体准入", () => {
     sync.dispose();
     coordinator.dispose();
   });
+
+  /**
+   * 历史圆点连续切换的回归（真实缺陷：切过版本后图片偶发不变，进聚焦再切才恢复）。
+   *
+   * 内容被释放（切走）时它的解码可能仍在本页 image 通道内。若切回同一版本时按**内容身份**
+   * 合并，新需求会挂到那个已经作废的任务上：旧任务完成时 `contents.get(key) !== target`
+   * 直接丢弃结果，新目标永远不 ready，卡片停在上一张图。用户看到的就是「点了没反应」，
+   * 进聚焦（走的另一条纹理通道）再切才恢复。
+   */
+  it("历史圆点切走再切回同一版本时不被在途解码合并卡住", async () => {
+    const version = (url: string): ServerCanvas => {
+      const base = fixture("image", 1, 1);
+      return {
+        ...base,
+        assets: base.assets.map((asset) => ({ ...asset, url }))
+      };
+    };
+    let current = version("/api/media/version-a");
+    const pending: Array<{ url: string; resolve: () => void }> = [];
+    const uploaded: string[] = [];
+    const coordinator = new CanvasResourceCoordinator();
+    const sync = createTextureSync({
+      runtime: {
+        setTexture: (_id: string, _w: number, _h: number, _p: Uint8Array, source?: { sourceKey?: string }) => {
+          uploaded.push(source?.sourceKey ?? "");
+          return true;
+        }
+      } as unknown as BevyRuntime,
+      getCanvas: () => current,
+      residency: coordinator,
+      admissionOf: admissionFor(coordinator),
+      createCanvas: fakeRaster,
+      loadImage: (url) => new Promise<HTMLImageElement>((resolve) => {
+        pending.push({ url, resolve: () => resolve(fakeImage(64, 64)) });
+      })
+    });
+    projectAll(coordinator, current, 1);
+    sync.sync();
+    expect(pending.map((entry) => entry.url)).toEqual(["/api/media/version-a?canvas=capacity-audit"]);
+
+    // 切到另一版本：版本 A 的内容引用被释放，但它的解码仍在通道里。
+    current = version("/api/media/version-b");
+    projectAll(coordinator, current, 1);
+    sync.sync();
+    // 立刻切回 A（用户连点圆点）：新需求不得复用已作废的 A 解码任务。
+    current = version("/api/media/version-a");
+    projectAll(coordinator, current, 1);
+    sync.sync();
+    const returned = pending.filter((entry) => entry.url === "/api/media/version-a?canvas=capacity-audit");
+    expect(returned.length).toBe(2);
+
+    for (const entry of pending) entry.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (let frame = 0; frame < 10; frame += 1) { coordinator.beginFrame(); sync.sync(); }
+    // 最终卡片显示的是切回的 A，而不是停在 B（或停在旧图）。
+    expect(uploaded.at(-1)).toBe("/api/media/version-a?canvas=capacity-audit");
+    expect(sync.isLoading?.("n0")).toBe(false);
+    sync.dispose();
+    coordinator.dispose();
+  });
 });
 
 describe("千视频卡片准入", () => {
