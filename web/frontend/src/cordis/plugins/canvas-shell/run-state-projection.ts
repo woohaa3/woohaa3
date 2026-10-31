@@ -86,6 +86,11 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
     if (selectedId || items.length) {
       node.busy = selected?.state === "running" || selected?.state === "queued";
       node.progress = node.busy ? selected?.progress ?? 0 : 0;
+      // 节点进度环的估算起点与活动面板同一条记录：都用该 run 被观察到的创建时刻
+      // （change: 2026-10-31-unify-node-and-activity-progress，design D2）。
+      const startedAt = node.busy ? operationStartOf(selected, records) : undefined;
+      if (startedAt !== undefined) node.progressStartedAt = startedAt;
+      else delete node.progressStartedAt;
     } else if (summary?.active) node.busy = true;
     const visible = nodeExecutionWindow(items, 24, selectedId);
     if (!showNodeExecutionDots(visible)) { delete node.historyStrip; continue; }
@@ -96,6 +101,25 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
       truncated: items.length - visible.length
     };
   }
+}
+
+/**
+ * 该运行被观察到的开始时刻（epoch 毫秒）；无法确定时返回 `undefined`。
+ *
+ * 取活动记录（与活动面板同一条）的 `createdAt`，它是两端唯一共享的时间锚点。**不**用
+ * `updatedAt`：进度更新会推进它，起点一旦漂移节点进度就会回退。
+ */
+function operationStartOf(
+  selected: { operationId?: string; createdAt: string } | undefined,
+  records: readonly CanvasOperationRecord[]
+): number | undefined {
+  const record = selected?.operationId === undefined
+    ? undefined
+    : records.find((entry) => entry.operationId === selected.operationId);
+  const createdAt = record?.createdAt ?? selected?.createdAt;
+  if (createdAt === undefined) return undefined;
+  const parsed = Date.parse(createdAt);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 /** 统一操作状态 → 历史条圆点状态。 */

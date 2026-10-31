@@ -489,6 +489,7 @@ export type InteractionController = {
    * （change: add-canvas-node-generation-history，任务 4.3）。
    */
   reframeModelFocus(nodeId: string): void;
+  setFocusedModelView(view: "perspective" | "front" | "top" | "right"): void;
   zoomFocusedModel(factor: number): void;
   /**
    * 注入/替换镜头 pose 手势处理器（change: add-model-editor-gizmo-shot-capture）。

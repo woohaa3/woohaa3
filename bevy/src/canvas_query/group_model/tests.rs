@@ -133,9 +133,9 @@ fn group_model_unit_is_the_shared_canvas_model_unit() {
                     .extent = extent;
                 n.model.as_mut().unwrap().placement.scale = scale;
                 let layout = for_node(&n).unwrap();
-                // 与 model3d 的 `model_unit` 完全相同：`placement.scale * 64 * 3 / extent`。
-                // 没有 film-set fit、没有 `min(1)`、没有 56×44 钳制。
-                assert!((layout.unit - scale * 64. * 3. / extent).abs() < 0.001);
+                // 与 model3d 的 `model_unit` 完全相同：`placement.scale * CANVAS_UNITS_PER_METER`
+                // （绝对米制，不除以 extent）。没有 film-set fit、没有 `min(1)`、没有 56×44 钳制。
+                assert!((layout.unit - scale * crate::model3d::CANVAS_UNITS_PER_METER).abs() < 0.001);
             }
         }
     }

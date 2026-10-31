@@ -20,11 +20,10 @@ import type { BevyModelPlacement } from "../render-scene/wire-model.js";
 import { axisQ, quatMulLocal } from "./math.js";
 import { canvasPointToWorld, viewRotation } from "./canvas-projection.js";
 import { GROUP_BADGE_ANCHOR_OFFSET, groupBadgeRect, type GroupBadgeProjection } from "../group-badge.js";
-import { DEFAULT_MODEL_PLACEMENT } from "../model-definition.js";
 import { clampDistance } from "./clamp.js";
 import {
+  CANVAS_UNITS_PER_METER,
   FILM_SET_FIT_MARGIN,
-  FILM_SET_GROUP_WIDTH_MARGIN,
   FRAME_PADDING,
   MODEL_CARD_GAP,
   MODEL_FOCUS_FOV,
@@ -33,14 +32,19 @@ import {
 } from "./types.js";
 
 /**
- * 模型根单位缩放（与 Rust `model_unit` 一致：`placement.scale * 64 * 3 / extent`）。
+ * 模型根单位缩放（与 Rust `model_unit` 一致）：`placement.scale × CANVAS_UNITS_PER_METER`。
+ *
+ * 场景单位（= 1 米）固定映射到 `CANVAS_UNITS_PER_METER` 画布单位，**不再除以 `extent`**
+ * （change: 2026-10-31-render-models-at-absolute-metric-scale）。因此 1.7 m 的人在任何节点里
+ * 都是约 109 画布单位高，20 m 的楼约 1280，跨节点真实可比；模型在世界原点多远也不再影响尺寸。
  *
  * viewport/surface **不**参与：模型世界由内容与 canonical/preview placement 决定。
+ * `extent` 参数保留在签名里只为无破坏地迁移既有调用点，不再参与计算。
  */
-export function modelUnit(placement: BevyModelPlacement | null, extent: number): number {
-  const scale = placement?.scale ?? 1;
-  const safeExtent = extent > 0 && Number.isFinite(extent) ? extent : 1;
-  return (scale * 64 * 3) / safeExtent;
+export function modelUnit(placement: BevyModelPlacement | null, _extent?: number): number {
+  const scale = placement?.scale;
+  const safeScale = Number.isFinite(scale) && (scale as number) > 0 ? (scale as number) : 1;
+  return safeScale * CANVAS_UNITS_PER_METER;
 }
 
 export function unionAabb(a: Aabb, b: Aabb): Aabb {
@@ -83,7 +87,7 @@ function modelScaledAabb(input: ModelSceneInput, isometric: boolean): Aabb | nul
 }
 
 /**
- * 解析模型单位：普通模型用自然单位；片场按 `filmSetFit` 节点矩形等比适配。
+ * 解析模型单位：普通模型用绝对米制单位；片场按 `filmSetFit` 节点矩形等比适配缩小。
  */
 function resolvedUnit(input: ModelSceneInput): number {
   if (!input.filmSetFit) return modelUnit(input.placement ?? null, input.extent);
@@ -94,7 +98,8 @@ function resolvedUnit(input: ModelSceneInput): number {
 /**
  * 片场等比适配系数（与 Rust `film_set_fit` 一致）：让模型等距投影 AABB（含边距）落入节点矩形。
  *
- * 基于**自然单位**（不含 `placement.scale`）计算，与 Rust 相同。无几何或非法数值时返回 `1`。
+ * 基准是**绝对米制单位**（`CANVAS_UNITS_PER_METER`，不含 `placement.scale`）投影的真实几何，
+ * 与 Rust 相同。无几何或非法数值时返回 `1`。
  */
 export function filmSetFitFactor(
   input: ModelSceneInput,
@@ -102,8 +107,7 @@ export function filmSetFitFactor(
 ): number {
   const local = input.aabb !== undefined ? input.aabb : modelLocalAabb(input);
   if (!local) return 1;
-  const safeExtent = input.extent > 0 && Number.isFinite(input.extent) ? input.extent : 1;
-  const naturalUnit = (64 * 3) / safeExtent;
+  const naturalUnit = CANVAS_UNITS_PER_METER;
   const yaw = ((input.placement?.yaw ?? 0) * Math.PI) / 180;
   const layoutRotation = quatMulLocal(viewRotation(), axisQ([0, 1, 0], yaw));
   const projected = transformAabb(
@@ -172,38 +176,14 @@ export function modelAnchor(input: {
 /**
  * 组模型在当前呈现下的投影包围盒（画布单位，屏幕轴对齐）。
  *
- * 与 Rust `group_model::derive` 同源：`model_local_aabb × viewRotation × yaw × unit`，
- * 其中 `unit` 是画布共享模型单位 `placement.scale × 64 × 3 / extent`；片场组的
- * `placement.scale` 可先经 `filmSetGroupBadgePlacement` 按组宽放大。无几何或非法数值时
- * 返回 `null`（不产生徽标范围，也不用固定框占位）。
+ * 与 Rust `group_model::derive` 同源：`model_local_aabb × viewRotation × yaw × unit`，其中
+ * `unit` 就是画布共享模型单位 `placement.scale × 64 × 3 / extent`。普通组与片场组完全同一口径：
+ * 徽标尺寸只由模型自身几何与 placement 决定，**不读组框或徽标矩形**，也不做按组宽取景
+ * （change: 2026-10-31-render-film-set-badge-at-model-units）。无几何或非法数值时返回 `null`
+ * （不产生徽标范围，也不用固定框占位）。
  */
 export function groupModelProjection(input: ModelSceneInput): GroupBadgeProjection | null {
   return projectionOf(input, modelLocalAabb(input));
-}
-
-/**
- * 片场组的展示 placement：整场模型按组内容宽度（左右各留 `FILM_SET_GROUP_WIDTH_MARGIN`）等比取景。
- *
- * 片场是场景容器，不是身份徽标：如果沿用单个模型卡片的 192px 自然单位，8 个建筑组成的
- * 街景会只剩几十像素。这里只放大展示倍率，不写回 canonical placement，也不恢复可编辑倍率；
- * 普通组不调用。组宽或模型几何不可用时按传入 placement（缺省为单位缩放）返回，由调用方回退
- * 到共享单位；缺省 placement 不能被解释成“没有徽标”，否则镜头归属线会退回未取景的旧中心。
- */
-export function filmSetGroupBadgePlacement(
-  input: ModelSceneInput,
-  groupWidth: number,
-): BevyModelPlacement {
-  const placement = input.placement ?? DEFAULT_MODEL_PLACEMENT;
-  const available = groupWidth - FILM_SET_GROUP_WIDTH_MARGIN * 2;
-  const scale = placement.scale ?? 1;
-  if (!(Number.isFinite(available) && available > 0 && Number.isFinite(scale) && scale > 0)) {
-    return placement;
-  }
-  const projection = groupModelProjection(input);
-  if (!projection || !(projection.width > 0)) return placement;
-  const fit = available / projection.width;
-  if (!(Number.isFinite(fit) && fit > 0)) return placement;
-  return { ...placement, scale: scale * fit };
 }
 
 function projectionOf(input: ModelSceneInput, local: Aabb | null): GroupBadgeProjection | null {
@@ -235,7 +215,7 @@ function projectionOf(input: ModelSceneInput, local: Aabb | null): GroupBadgePro
  * 普通组的单位与普通 `model3d` 卡片完全一致（`placement.scale × 64 × 3 / extent`），模型多大
  * 就多大：没有固定徽标框、没有 56×44 适配上限、也没有可编辑展示倍率。锚点固定为组底边中点
  * 向下 `GROUP_BADGE_ANCHOR_OFFSET` 画布单位，普通组把模型投影中心对齐该点；片场组
- * （`badgeTopAnchored`）把模型顶边对齐该点并向下展开，配合按组宽取景避免盖住成员卡片。
+ * （`badgeTopAnchored`）把模型顶边对齐该点并向下展开，同样按模型自身单位呈现。
  */
 export function groupModelLayout(input: ModelSceneInput & {
   node: { x: number; y: number; width: number; height: number };

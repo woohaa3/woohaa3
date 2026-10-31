@@ -36,6 +36,7 @@ import { isTerminalTurnStatus } from "../repository/agent-conversation-repositor
 export function toSummary(binding: ConversationAdapterBinding): ConversationSummary {
   return {
     conversationId: binding.conversationId,
+    ...(binding.contextKey ? { contextKey: binding.contextKey } : {}),
     canvasId: binding.canvasId,
     adapterId: binding.adapterId,
     ...(binding.connectionId ? { connectionId: binding.connectionId } : {}),

@@ -1,0 +1,419 @@
+{
+  "capturedAt": "2026-10-31",
+  "fieldContract": "字段名与官方 model-registry.public.json 的 models[] 完全一致（endpoint / output_type / name_cn / params[fieldKey,type,required,defaultValue,options,accept,maxSize,maxLength]），因此可直接与本地上游快照拼接后交给 scripts/generate-models.mjs。",
+  "source": {
+    "stableSunburstTextToImage": "https://www.runninghub.ai/call-api/api-detail/2133100000000800375",
+    "stableSunburstImageToImage": "https://www.runninghub.ai/call-api/api-detail/2133100000000800376",
+    "stableFlareTextToImage": "https://www.runninghub.ai/call-api/api-detail/2133100000000800377",
+    "stableFlareImageToImage": "https://www.runninghub.ai/call-api/api-detail/2133100000000800378",
+    "economyFlareTextToImage": "https://www.runninghub.ai/call-api/api-detail/2133100000000800381",
+    "economyFlareImageToImage": "https://www.runninghub.ai/call-api/api-detail/2133100000000800382",
+    "economySunburstTextToImage": "https://www.runninghub.ai/call-api/api-detail/2133100000000800383",
+    "economySunburstImageToImage": "https://www.runninghub.ai/call-api/api-detail/2133100000000800384",
+    "catalog": "https://www.runninghub.ai/zh-cn/call-api/search-api/standard-model"
+  },
+  "models": [
+    {
+      "endpoint": "rhart-image-g-2.5-official-token/sunburst/text-to-image",
+      "output_type": "image",
+      "name_cn": "GPT Image 2.5 Sunburst 稳定版",
+      "params": [
+        { "fieldKey": "prompt", "type": "STRING", "required": true, "maxLength": 32000 },
+        {
+          "fieldKey": "aspectRatio",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "16:9",
+          "options": [
+            { "value": "1:1" },
+            { "value": "1:2" },
+            { "value": "2:1" },
+            { "value": "1:3" },
+            { "value": "3:1" },
+            { "value": "2:3" },
+            { "value": "3:2" },
+            { "value": "3:4" },
+            { "value": "4:3" },
+            { "value": "4:5" },
+            { "value": "5:4" },
+            { "value": "9:16" },
+            { "value": "21:9" },
+            { "value": "9:21" },
+            { "value": "16:9" }
+          ]
+        },
+        {
+          "fieldKey": "resolution",
+          "type": "LIST",
+          "required": true,
+          "defaultValue": "2k",
+          "options": [{ "value": "1k" }, { "value": "2k" }, { "value": "4k" }]
+        },
+        {
+          "fieldKey": "background",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "auto",
+          "options": [{ "value": "auto" }, { "value": "transparent" }, { "value": "opaque" }]
+        },
+        {
+          "fieldKey": "quality",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "high",
+          "options": [
+            { "value": "auto" },
+            { "value": "low" },
+            { "value": "medium" },
+            { "value": "high" },
+            { "value": "xhigh" },
+            { "value": "max" }
+          ]
+        },
+        {
+          "fieldKey": "outputFormat",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "png",
+          "options": [{ "value": "jpeg" }, { "value": "png" }, { "value": "webp" }]
+        }
+      ]
+    },
+    {
+      "endpoint": "rhart-image-g-2.5-official-token/sunburst/edit",
+      "output_type": "image",
+      "name_cn": "GPT Image 2.5 Sunburst 稳定版",
+      "params": [
+        { "fieldKey": "prompt", "type": "STRING", "required": true, "maxLength": 32000 },
+        { "fieldKey": "imageUrls", "type": "IMAGE", "required": true, "accept": "[\"JPG\",\"JPEG\",\"PNG\",\"WEBP\"]", "maxSize": 50 },
+        { "fieldKey": "maskUrl", "type": "IMAGE", "required": false, "accept": "[\"PNG\"]", "maxSize": 4 },
+        {
+          "fieldKey": "aspectRatio",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "16:9",
+          "options": [
+            { "value": "1:1" },
+            { "value": "1:2" },
+            { "value": "2:1" },
+            { "value": "1:3" },
+            { "value": "3:1" },
+            { "value": "2:3" },
+            { "value": "3:2" },
+            { "value": "3:4" },
+            { "value": "4:3" },
+            { "value": "4:5" },
+            { "value": "5:4" },
+            { "value": "9:16" },
+            { "value": "21:9" },
+            { "value": "9:21" },
+            { "value": "16:9" }
+          ]
+        },
+        {
+          "fieldKey": "resolution",
+          "type": "LIST",
+          "required": true,
+          "defaultValue": "2k",
+          "options": [{ "value": "1k" }, { "value": "2k" }, { "value": "4k" }]
+        },
+        {
+          "fieldKey": "background",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "auto",
+          "options": [{ "value": "auto" }, { "value": "transparent" }, { "value": "opaque" }]
+        },
+        {
+          "fieldKey": "quality",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "high",
+          "options": [
+            { "value": "auto" },
+            { "value": "low" },
+            { "value": "medium" },
+            { "value": "high" },
+            { "value": "xhigh" },
+            { "value": "max" }
+          ]
+        },
+        {
+          "fieldKey": "outputFormat",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "png",
+          "options": [{ "value": "jpeg" }, { "value": "png" }, { "value": "webp" }]
+        }
+      ]
+    },
+    {
+      "endpoint": "rhart-image-g-2.5-official-token/flare/text-to-image",
+      "output_type": "image",
+      "name_cn": "GPT Image 2.5 Flare 稳定版",
+      "params": [
+        { "fieldKey": "prompt", "type": "STRING", "required": true, "maxLength": 32000 },
+        {
+          "fieldKey": "aspectRatio",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "16:9",
+          "options": [
+            { "value": "1:1" },
+            { "value": "1:2" },
+            { "value": "2:1" },
+            { "value": "1:3" },
+            { "value": "3:1" },
+            { "value": "2:3" },
+            { "value": "3:2" },
+            { "value": "3:4" },
+            { "value": "4:3" },
+            { "value": "4:5" },
+            { "value": "5:4" },
+            { "value": "9:16" },
+            { "value": "21:9" },
+            { "value": "9:21" },
+            { "value": "16:9" }
+          ]
+        },
+        {
+          "fieldKey": "resolution",
+          "type": "LIST",
+          "required": true,
+          "defaultValue": "2k",
+          "options": [{ "value": "1k" }, { "value": "2k" }, { "value": "4k" }]
+        },
+        {
+          "fieldKey": "background",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "auto",
+          "options": [{ "value": "auto" }, { "value": "transparent" }, { "value": "opaque" }]
+        },
+        {
+          "fieldKey": "quality",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "high",
+          "options": [
+            { "value": "auto" },
+            { "value": "low" },
+            { "value": "medium" },
+            { "value": "high" },
+            { "value": "xhigh" },
+            { "value": "max" }
+          ]
+        },
+        {
+          "fieldKey": "outputFormat",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "png",
+          "options": [{ "value": "jpeg" }, { "value": "png" }, { "value": "webp" }]
+        }
+      ]
+    },
+    {
+      "endpoint": "rhart-image-g-2.5-official-token/flare/edit",
+      "output_type": "image",
+      "name_cn": "GPT Image 2.5 Flare 稳定版",
+      "params": [
+        { "fieldKey": "prompt", "type": "STRING", "required": true, "maxLength": 32000 },
+        { "fieldKey": "imageUrls", "type": "IMAGE", "required": true, "accept": "[\"JPG\",\"JPEG\",\"PNG\",\"WEBP\"]", "maxSize": 50 },
+        { "fieldKey": "maskUrl", "type": "IMAGE", "required": false, "accept": "[\"PNG\"]", "maxSize": 4 },
+        {
+          "fieldKey": "aspectRatio",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "16:9",
+          "options": [
+            { "value": "1:1" },
+            { "value": "1:2" },
+            { "value": "2:1" },
+            { "value": "1:3" },
+            { "value": "3:1" },
+            { "value": "2:3" },
+            { "value": "3:2" },
+            { "value": "3:4" },
+            { "value": "4:3" },
+            { "value": "4:5" },
+            { "value": "5:4" },
+            { "value": "9:16" },
+            { "value": "21:9" },
+            { "value": "9:21" },
+            { "value": "16:9" }
+          ]
+        },
+        {
+          "fieldKey": "resolution",
+          "type": "LIST",
+          "required": true,
+          "defaultValue": "2k",
+          "options": [{ "value": "1k" }, { "value": "2k" }, { "value": "4k" }]
+        },
+        {
+          "fieldKey": "background",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "auto",
+          "options": [{ "value": "auto" }, { "value": "transparent" }, { "value": "opaque" }]
+        },
+        {
+          "fieldKey": "quality",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "high",
+          "options": [
+            { "value": "auto" },
+            { "value": "low" },
+            { "value": "medium" },
+            { "value": "high" },
+            { "value": "xhigh" },
+            { "value": "max" }
+          ]
+        },
+        {
+          "fieldKey": "outputFormat",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "png",
+          "options": [{ "value": "jpeg" }, { "value": "png" }, { "value": "webp" }]
+        }
+      ]
+    },
+    {
+      "endpoint": "rhart-image-g-2.5/sunburst/text-to-image",
+      "output_type": "image",
+      "name_cn": "GPT Image 2.5 Sunburst 低价渠道版",
+      "params": [
+        { "fieldKey": "prompt", "type": "STRING", "required": true, "maxLength": 20000 },
+        {
+          "fieldKey": "aspectRatio",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "16:9",
+          "options": [
+            { "value": "1:1" },
+            { "value": "3:2" },
+            { "value": "2:3" },
+            { "value": "5:4" },
+            { "value": "4:5" },
+            { "value": "16:9" },
+            { "value": "9:16" },
+            { "value": "21:9" },
+            { "value": "3:4" },
+            { "value": "4:3" }
+          ]
+        },
+        {
+          "fieldKey": "resolution",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "1k",
+          "options": [{ "value": "1k" }, { "value": "2k" }, { "value": "4k" }]
+        }
+      ]
+    },
+    {
+      "endpoint": "rhart-image-g-2.5/sunburst/image-to-image",
+      "output_type": "image",
+      "name_cn": "GPT Image 2.5 Sunburst 低价渠道版",
+      "params": [
+        { "fieldKey": "prompt", "type": "STRING", "required": true, "maxLength": 20000 },
+        { "fieldKey": "imageUrls", "type": "IMAGE", "required": true, "accept": "[\"JPG\",\"PNG\"]", "maxSize": 50 },
+        {
+          "fieldKey": "aspectRatio",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "16:9",
+          "options": [
+            { "value": "1:1" },
+            { "value": "3:2" },
+            { "value": "2:3" },
+            { "value": "5:4" },
+            { "value": "4:5" },
+            { "value": "16:9" },
+            { "value": "9:16" },
+            { "value": "21:9" },
+            { "value": "3:4" },
+            { "value": "4:3" }
+          ]
+        },
+        {
+          "fieldKey": "resolution",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "1k",
+          "options": [{ "value": "1k" }, { "value": "2k" }, { "value": "4k" }]
+        }
+      ]
+    },
+    {
+      "endpoint": "rhart-image-g-2.5/flare/text-to-image",
+      "output_type": "image",
+      "name_cn": "GPT Image 2.5 Flare 低价渠道版",
+      "params": [
+        { "fieldKey": "prompt", "type": "STRING", "required": true, "maxLength": 20000 },
+        {
+          "fieldKey": "aspectRatio",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "16:9",
+          "options": [
+            { "value": "1:1" },
+            { "value": "3:2" },
+            { "value": "2:3" },
+            { "value": "5:4" },
+            { "value": "4:5" },
+            { "value": "16:9" },
+            { "value": "9:16" },
+            { "value": "21:9" },
+            { "value": "3:4" },
+            { "value": "4:3" }
+          ]
+        },
+        {
+          "fieldKey": "resolution",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "1k",
+          "options": [{ "value": "1k" }, { "value": "2k" }, { "value": "4k" }]
+        }
+      ]
+    },
+    {
+      "endpoint": "rhart-image-g-2.5/flare/image-to-image",
+      "output_type": "image",
+      "name_cn": "GPT Image 2.5 Flare 低价渠道版",
+      "params": [
+        { "fieldKey": "prompt", "type": "STRING", "required": true, "maxLength": 20000 },
+        { "fieldKey": "imageUrls", "type": "IMAGE", "required": true, "accept": "[\"JPG\",\"PNG\"]", "maxSize": 50 },
+        {
+          "fieldKey": "aspectRatio",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "16:9",
+          "options": [
+            { "value": "1:1" },
+            { "value": "3:2" },
+            { "value": "2:3" },
+            { "value": "5:4" },
+            { "value": "4:5" },
+            { "value": "16:9" },
+            { "value": "9:16" },
+            { "value": "21:9" },
+            { "value": "3:4" },
+            { "value": "4:3" }
+          ]
+        },
+        {
+          "fieldKey": "resolution",
+          "type": "LIST",
+          "required": false,
+          "defaultValue": "1k",
+          "options": [{ "value": "1k" }, { "value": "2k" }, { "value": "4k" }]
+        }
+      ]
+    }
+  ]
+}

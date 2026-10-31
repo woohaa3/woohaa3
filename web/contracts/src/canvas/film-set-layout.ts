@@ -13,6 +13,7 @@
  */
 import { encodeFilmSetPartId, type FilmSetContent } from "./film-set-content.js";
 import { v2SceneExtent, v2SceneAabb, type SceneV2Op } from "./scene-ir-v2.js";
+import { CANVAS_UNITS_PER_METER } from "./model-focus/types.js";
 import type { Aabb } from "./model-transform.js";
 
 const cache = new WeakMap<readonly SceneV2Op[], { key: string; bounds: Aabb | null }>();
@@ -35,7 +36,8 @@ export function filmSetLayoutBounds(ops: readonly SceneV2Op[], content: FilmSetC
   const yaw = (scene?.rotation?.[1] ?? 0) * Math.PI / 180, cos = Math.cos(yaw), sin = Math.sin(yaw);
   for (const item of media) {
     // 基准高度不含 `localTransform.scale`：对象缩放不参与 fit 基准，保持可见。
-    const height = 48 * contentExtent / 192 * (includeMediaScale ? item.localTransform.scale : 1), width = height * ((item as { aspectRatio?: number }).aspectRatio ?? 1);
+    // 48 画布单位按绝对米制折算为内容单位（1 米 = CANVAS_UNITS_PER_METER 画布单位）。
+    const height = 48 / CANVAS_UNITS_PER_METER * (includeMediaScale ? item.localTransform.scale : 1), width = height * ((item as { aspectRatio?: number }).aspectRatio ?? 1);
     const itemCos = Math.cos(item.localTransform.yaw), itemSin = Math.sin(item.localTransform.yaw);
     for (const x of [-width / 2, width / 2]) for (const y of [0, height]) {
       const ix = item.localTransform.offset.x + x * itemCos;

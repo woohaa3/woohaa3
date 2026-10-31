@@ -73,7 +73,7 @@ function canvasWith(animations: FilmSetAnimations): ServerCanvas {
   } as unknown as ServerCanvas;
 }
 
-function render(animations: FilmSetAnimations, options: { writable?: boolean; camera?: ModelCamera } = {}) {
+function render(animations: FilmSetAnimations, options: { writable?: boolean; camera?: ModelCamera; properties?: boolean } = {}) {
   const canvas = canvasWith(animations);
   store.getState().applyRemoteCanvas(canvas as never);
   const submitted: Array<{ type: string; clipId: string; op: { kind: string; clip?: unknown; confirmClearContent?: boolean; duration?: number } }> = [];
@@ -103,7 +103,7 @@ function render(animations: FilmSetAnimations, options: { writable?: boolean; ca
   document.body.appendChild(element);
   root = createRoot(element);
   const writable = options.writable ?? true;
-  act(() => root!.render(<FilmSetAnimationControls ctx={ctx} nodeId="film" writable={writable} />));
+  act(() => root!.render(<FilmSetAnimationControls ctx={ctx} nodeId="film" writable={writable} presentation={options.properties ? "properties" : undefined} />));
   const button = (name: string) => [...document.querySelectorAll("button")].find(entry => entry.textContent === name || entry.getAttribute("aria-label") === name);
   return { submitted, playback, button, writable, session };
 }
@@ -214,4 +214,27 @@ it.each([
   expect(h.button("关闭容器")).toBeUndefined();
   expect(h.button("显示容器")).toBeUndefined();
   expect(h.submitted).toEqual([]);
+});
+
+
+it("demo property cards preserve camera identity and route background/loop through protected patches", async () => {
+  const clip = dynamicClip("s1", "日光漫游", "");
+  const h = render({ schemaVersion: 3, defaultClipId: "s1", clips: [clip] }, { properties: true, camera: { ...clip.initialCamera, id: "clip:s1", name: clip.name, order: 0 } });
+  expect(document.querySelector(".film-set-property-identity h3")?.textContent).toBe("日光漫游");
+  expect(document.querySelectorAll(".film-set-aspect-cards button")).toHaveLength(4);
+  expect(document.querySelector('.film-set-aspect-cards [data-active="true"]')?.textContent).toBe("16:9");
+  act(() => h.button("画幅 4:3")!.click());
+  expect(h.session.selectedCamera()).toMatchObject({ id: "clip:s1", aspect: "4:3", distance: 6 });
+  await act(async () => h.button("背景 #b8c8b9")!.click());
+  expect(h.submitted).toEqual([expect.objectContaining({ type: "filmSet.clipPatch", clipId: "s1", expectedHash: expect.any(String), op: { kind: "backdrop", backdrop: "#b8c8b9" } })]);
+  await act(async () => document.querySelector<HTMLInputElement>('input[aria-label="循环播放"]')!.click());
+  expect(h.submitted[1]).toMatchObject({ type: "filmSet.clipPatch", clipId: "s1", op: { kind: "timeline", timeline: { duration: 4, loop: false } } });
+});
+it("demo property controls remain disabled in a read-only shot", () => {
+  const clip = dynamicClip("s1", "日光漫游", "");
+  const h = render({ schemaVersion: 3, defaultClipId: "s1", clips: [clip] }, { properties: true, writable: false });
+  expect([...document.querySelectorAll<HTMLButtonElement | HTMLInputElement>(".film-set-property-section button, .film-set-property-section input")].every(field => field.disabled)).toBe(true);
+  act(() => h.button("画幅 4:3")!.click());
+  act(() => h.button("背景 #b8c8b9")!.click());
+  expect(h.submitted).toHaveLength(0);
 });

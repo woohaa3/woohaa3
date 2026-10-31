@@ -21,6 +21,11 @@ import {
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
   Move,
+  MousePointer2,
+  RotateCcw,
+  Scaling,
+  Orbit,
+  MoveVertical,
   LockKeyhole,
   Crop,
   Eye,
@@ -300,6 +305,11 @@ export const EllipseMarqueeIcon = withDefaults(CircleDashed);
 export const TypeIcon = withDefaults(Type);
 
 export const MoveIcon = withDefaults(Move);
+export const PointerIcon = withDefaults(MousePointer2);
+export const RotateIcon = withDefaults(RotateCcw);
+export const ScaleIcon = withDefaults(Scaling);
+export const OrbitIcon = withDefaults(Orbit);
+export const ElevationIcon = withDefaults(MoveVertical);
 export const LockIcon = withDefaults(LockKeyhole);
 
 // 对象对齐

@@ -37,6 +37,8 @@ pub struct TransformGizmoSelection {
     pub hover: Option<String>,
     pub active: Option<String>,
     pub entities: Vec<Entity>,
+    pub grid: Option<(Vec3, f32)>,
+    pub grid_entities: Vec<Entity>,
 }
 #[derive(Component, Clone)]
 pub struct TransformGizmoHandle;
@@ -64,6 +66,30 @@ pub(crate) fn sync_transform_gizmo(
     mut selection: ResMut<TransformGizmoSelection>,
 ) {
     assets.sync_palette(&mut materials, &style.palette);
+    let grid_lines = selection
+        .grid
+        .zip(selection.view)
+        .map(|((origin, spacing), _)| reference_grid(origin, spacing))
+        .unwrap_or_default();
+    if let Some(view) = selection.view {
+        sync_lines(
+            &mut commands,
+            &mut assets,
+            &mut meshes,
+            &mut selection.grid_entities,
+            TransformGizmoHandle,
+            &grid_lines,
+            &view,
+            style.layers.clone(),
+            None,
+            None,
+        );
+    } else {
+        for entity in selection.grid_entities.drain(..) {
+            commands.entity(entity).try_despawn();
+        }
+    }
+
     let layout = selection
         .mode
         .zip(selection.target)
@@ -97,4 +123,38 @@ pub(crate) fn sync_transform_gizmo(
             commands.entity(entity).try_despawn();
         }
     }
+}
+
+/// The editor grid is display-only and excluded from picking and capture layers.
+fn reference_grid(origin: Vec3, spacing: f32) -> Vec<crate::gizmo_layout::GizmoLine> {
+    if !origin.is_finite() || !spacing.is_finite() || spacing <= 0.0 {
+        return Vec::new();
+    }
+    let mut lines = Vec::with_capacity(42);
+    let extent = spacing * 10.0;
+    for index in -10..=10 {
+        let offset = index as f32 * spacing;
+        for (start, end) in [
+            (
+                origin + Vec3::new(-extent, 0.0, offset),
+                origin + Vec3::new(extent, 0.0, offset),
+            ),
+            (
+                origin + Vec3::new(offset, 0.0, -extent),
+                origin + Vec3::new(offset, 0.0, extent),
+            ),
+        ] {
+            lines.push(crate::gizmo_layout::GizmoLine {
+                shape: crate::gizmo_layout::GizmoShape::Stroke,
+                start,
+                end,
+                width_css: if index == 0 { 1.0 } else { 0.6 },
+                handle: "",
+                secondary: true,
+                rear: false,
+                visible: true,
+            });
+        }
+    }
+    lines
 }

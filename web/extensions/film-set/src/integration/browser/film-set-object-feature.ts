@@ -31,10 +31,14 @@ export function installFilmSetObjectFeature(
 ): FilmSetObjectFeature {
   const objectSession = new FilmSetObjectSession({
     readContent: (nodeId) => {
-      const canvas = ctx.compositeAssets.projectCanvas(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas());
+      // Editing reads confirmed/working content, never our own render preview.
+      // Feeding preview back into selectedItem invalidates a continuous gesture
+      // and makes endEdit mistake a moved object for an external conflict.
+      const current = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
+      const canvas = isHistoryMode() ? ctx.compositeAssets.projectCanvas(current) : current;
       return readFilmSetContentForSession(canvas, nodeId);
     },
-    isWritable: () => ctx.canvasSession.isWritable() && !isHistoryMode(),
+    isWritable: () => ctx.canvasSession.isWritable() && !isHistoryMode() && !ctx.compositeAssets.blocksFocusInput(),
     pausePlayback: () => ctx.canvasRuntime.pauseAnimation?.(),
     // 对象 transform/delete 经现有页面 CanvasEditService 的受保护操作记录（可撤销），
     // 不建独立对象 undo 栈（change: 2026-10-10-improve-film-set-editing-and-inspector，任务 4.4）。
@@ -110,13 +114,13 @@ export function installFilmSetObjectFeature(
     nodeId: () => objectSession.getState().nodeId,
     invalidationKey: () => JSON.stringify([ctx.canvasRuntime.runtime()?.generation(), ctx.canvasRuntime.modelFocusMode(), objectSession.selectedItem(),
       (ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[objectSession.getState().nodeId ?? ""]]),
-    blocked: () => isHistoryMode() || !ctx.canvasSession.isWritable() || ctx.canvasRuntime.animationPlaybackState()?.viewMode === "focus-preview"
+    blocked: () => isHistoryMode() || !ctx.canvasSession.isWritable() || ctx.compositeAssets.blocksFocusInput() || ctx.canvasRuntime.animationPlaybackState()?.viewMode === "focus-preview"
   });
   ctx.canvasRuntime.setFilmSetObjectGesture?.(objectGesture.handler);
   // 片场对象局部 keyboard action（change: 2026-10-10-improve-film-set-editing-and-inspector，
   // 任务 4.1）：与删除按钮共用 session action；读取时按当前状态判断，不持久保存 item 快照。
   const objectAction: FilmSetObjectAction = {
-    active: () => objectSession.getState().nodeId !== null && !isHistoryMode() && ctx.canvasSession.isWritable(),
+    active: () => objectSession.getState().nodeId !== null && !isHistoryMode() && ctx.canvasSession.isWritable() && !ctx.compositeAssets.blocksFocusInput(),
     hasSelection: () => objectSession.getState().selectedItemId !== null,
     pending: () => objectSession.getState().pendingItemId !== null,
     deleteSelected: () => {
@@ -202,7 +206,7 @@ export function installFilmSetObjectFeature(
  * forward/inverse 受保护编辑并提交，committed 后才入页面 journal（任务 4.4 / design D6）。
  * 返回带 `settled` 的回执，供会话区分 pending/committed/rejected。
  */
-function submitProtectedItemOp(
+export function submitProtectedItemOp(
   ctx: Context,
   nodeId: string,
   itemId: string,

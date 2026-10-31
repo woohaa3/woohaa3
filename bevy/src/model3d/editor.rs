@@ -80,6 +80,10 @@ pub(crate) fn sync_editor_gizmo(
     editor: Option<&ModelEditor>,
     theme: &crate::theme::ThemeResource,
 ) {
+    selection.grid = editor
+        .filter(|editor| !editor.shot_preview)
+        .and_then(|editor| editor.grid.as_ref())
+        .map(|grid| (Vec3::from_array(grid.origin), grid.spacing));
     style.palette = gizmo_palette(theme);
     style.layers = editor_render_layers();
     selection.hover = editor
@@ -96,6 +100,10 @@ pub(crate) fn sync_editor_gizmo(
         selection.set(None, None);
         return;
     };
+    if editor.shot_preview {
+        selection.set(None, None);
+        return;
+    }
     let mode = if editor.tool_mode == "object" {
         Some(match editor.object_tool {
             crate::gizmo_layout::ObjectTool::Move => TransformGizmoMode::FocusAxes,
@@ -134,6 +142,8 @@ mod tests {
 
     fn editor(tool: &str) -> ModelEditor {
         ModelEditor {
+            shot_preview: false,
+            grid: None,
             version: crate::protocol::MODEL_EDITOR_VERSION.to_owned(),
             node_id: "m1".to_owned(),
             tool_mode: tool.to_owned(),
@@ -202,6 +212,11 @@ mod tests {
         focus_editor.camera_tool = Some("focus".into());
         sync_editor_gizmo(&mut selection, &mut style, Some(&focus_editor), &theme);
         assert_eq!(selection.mode, Some(TransformGizmoMode::FocusAxes));
+
+        focus_editor.shot_preview = true;
+        sync_editor_gizmo(&mut selection, &mut style, Some(&focus_editor), &theme);
+        assert_eq!(selection.mode, None);
+        assert!(selection.grid.is_none());
 
         sync_editor_gizmo(&mut selection, &mut style, None, &theme);
         assert_eq!(selection.mode, None);

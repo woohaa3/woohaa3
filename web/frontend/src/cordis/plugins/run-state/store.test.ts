@@ -53,7 +53,9 @@ describe("RunStateStore", () => {
     expect(summary?.active).toMatchObject({ operationId: "run-1", state: "running", owner: "server" });
     // 不是新增第二条，而是接管同一条。
     expect(s.getSnapshot().records).toHaveLength(1);
-    expect(summary?.active?.progress).toBe(0.4);
+    // 活动面按 0..1 承载进度，节点读模型要 0..100：0.4 必须是 40，而不是 0.4
+    // （change: 2026-10-31-unify-node-and-activity-progress）。
+    expect(summary?.active?.progress).toBe(40);
   });
 
   it("本地拒绝映射为 failed(localFailure) 且不伪造 canonical", () => {
@@ -172,5 +174,32 @@ describe("RunStateStore", () => {
     s.applyEvent({ name: "task.activity.started", payload: { runId: "late", jobId: "j", nodeId: "n1", state: "queued", createdAt: "2026-10-12T00:00:00.000Z" } });
     s.applyEvent({ name: "task.activity.updated", payload: { source: "live", cursor: 3, activity: serverActivity({ runId: "late", taskKey: "late", state: "running" }) as never } });
     expect(s.getSnapshot().records.find(r => r.operationId === "late")?.state).toBe("failed");
+  });
+
+  it("活动快照把 canonical 占位的开始时刻拉回真实创建时间", () => {
+    // canonical 在 run 开始 30s 后才回流：此时只能拿本地时间占位。
+    const now = NOW + 30_000;
+    const s = new RunStateStore({ canvasId: CANVAS, now: () => now, nodeTypeOf: () => "image" });
+    s.reconcileCanonical({
+      document: { nodes: [{ id: "n1" }] },
+      nodeData: { n1: { activeRunId: "r1", taskStatus: "processing" } }
+    });
+    expect(s.getSnapshot().records.find((r) => r.operationId === "r1")?.createdAt)
+      .toBe(new Date(now).toISOString());
+
+    // 活动快照到达后必须回到该 run 的真实创建时刻 —— 节点进度环与活动面板都以它为估算起点。
+    // 这里的 `updatedAt` 早于 canonical 占位的本地时间：不能被乱序保护丢弃。
+    s.applyEvent(updatedEvent(serverActivity({
+      runId: "r1",
+      taskKey: "r1",
+      state: "running",
+      createdAt: "2026-10-12T00:00:00.000Z",
+      updatedAt: "2026-10-12T00:00:20.000Z",
+      progress: 0.42
+    })));
+    const merged = s.getSnapshot().records.find((r) => r.operationId === "r1");
+    expect(merged?.createdAt).toBe("2026-10-12T00:00:00.000Z");
+    // 活动面 0..1 → 节点读模型 0..100。
+    expect(merged?.progress).toBeCloseTo(42, 10);
   });
 });

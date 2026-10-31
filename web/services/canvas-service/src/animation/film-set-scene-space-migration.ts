@@ -24,16 +24,17 @@ import {
   decodeFilmSetNodeData,
   executeMotionScript,
   filmSetAnimationsOf,
-  filmSetFitFactor,
   filmSetLayoutBounds,
-  filmSetNaturalScale,
   hashMotionScript,
   prepareModelResource,
   serializeCameraMotionTracks,
+  transformAabb,
+  viewRotation,
+  axisQ,
+  quatMulLocal,
   type CameraTrack,
   type FilmSetNodeData,
   type InitialShotCamera,
-  type ModelPlacement
 } from "@woohaa3/contracts";
 
 /** 迁移单一节点的冲突类型（稳定、可读）。 */
@@ -53,6 +54,11 @@ export type LegacyDisplay = { scale: number; yaw: number };
 /**
  * 由节点矩形与内容资源重建旧显示映射（`scale = model_unit`）。
  *
+ * **冻结历史公式**：这里刻意不调用共享的 `filmSetNaturalScale` / `filmSetFitFactor`，因为
+ * 那些在 change: 2026-10-31-render-models-at-absolute-metric-scale 之后改成了绝对米制，
+ * 而 schema 3 的数据是用 `min(placement.scale,1) × 192/extent × filmSetFit(nodeRect)` 写下的。
+ * 迁移必须复现当时的公式，否则反解出的场景单位会整体偏移。
+ *
  * 无节点尺寸时返回 `null`：不能用默认尺寸假造倍率（旧记录的构图与之绑定）。
  */
 export function legacyDisplayMapping(input: {
@@ -69,21 +75,40 @@ export function legacyDisplayMapping(input: {
   if (projection.diagnostics.length > 0) return null;
   const resource = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: projection.ops });
   const layout = filmSetLayoutBounds(resource.ops, input.animation.filmSetContent, resource.extent);
-  // schema 3 片场没有独立根 placement：旧公式的 yaw/scale 都来自单位根。
-  const placement: ModelPlacement | null = null;
-  const fit = filmSetFitFactor(
-    {
-      sceneVersion: "woohaa-model-scene-ir-v2",
-      ops: resource.ops,
-      extent: resource.extent,
-      aabb: layout,
-      placement
-    },
-    { width: width as number, height: height as number }
-  );
-  const scale = filmSetNaturalScale(placement, resource.extent) * fit;
+  const natural = (LEGACY_MODEL_SIZE_BASE * 3) / Math.max(0.001, resource.extent);
+  if (!layout) return null;
+  const fit = legacyFilmSetFit(layout, natural, { width: width as number, height: height as number });
+  const scale = natural * fit;
   if (!Number.isFinite(scale) || scale <= 0) return null;
   return { scale, yaw: 0 };
+}
+
+/** 旧公式里的模型单位基准（绝对米制之前的 `64`）。 */
+const LEGACY_MODEL_SIZE_BASE = 64;
+/** 旧公式里片场紧贴节点矩形时预留的边距。 */
+const LEGACY_FILM_SET_FIT_MARGIN = 16;
+
+/**
+ * 旧公式的片场适配系数：等距投影 AABB（含边距）等比落入节点矩形。
+ *
+ * 与随 `extent` 归一化的自然单位一起使用；只在历史迁移里存在一份（见 [`legacyDisplayMapping`]）。
+ */
+function legacyFilmSetFit(
+  local: { min: [number, number, number]; max: [number, number, number] },
+  naturalUnit: number,
+  size: { width: number; height: number }
+): number {
+  const projected = { min: [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY], max: [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY] };
+  const rotation = quatMulLocal(viewRotation(), axisQ([0, 1, 0], 0));
+  const box = transformAabb({ translation: [0, 0, 0], rotation, scale: [naturalUnit, naturalUnit, naturalUnit] }, local);
+  projected.min = [box.min[0], box.min[1]];
+  projected.max = [box.max[0], box.max[1]];
+  const projectedWidth = Math.max(1e-3, projected.max[0] - projected.min[0]);
+  const projectedHeight = Math.max(1e-3, projected.max[1] - projected.min[1]);
+  const availWidth = Math.max(1, size.width - LEGACY_FILM_SET_FIT_MARGIN * 2);
+  const availHeight = Math.max(1, size.height - LEGACY_FILM_SET_FIT_MARGIN * 2);
+  const fit = Math.min(availWidth / projectedWidth, availHeight / projectedHeight);
+  return Number.isFinite(fit) && fit > 0 ? fit : 1;
 }
 
 /** 世界距离 → 场景距离。 */

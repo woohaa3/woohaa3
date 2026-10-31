@@ -40,6 +40,7 @@ export function createModelFocusFacade(
     },
     setContentRect: model.setContentRect,
     reframeModelFocus: (nodeId: string) => model.reframeModelFocus(nodeId),
+    setFocusedModelView: model.setFocusedModelView,
     zoomFocusedModel: (factor: number) => model.zoomFocusedModel(factor),
     setShotGesture: (handler: Parameters<ModelGestureFamily["setShotGesture"]>[0]) =>
       model.setShotGesture(handler),

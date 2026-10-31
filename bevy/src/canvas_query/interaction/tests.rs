@@ -43,6 +43,7 @@ fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         title: String::new(),
         type_label: String::new(),
         progress: 0.0,
+        progress_started_at: None,
         busy: false,
         texture: false,
         media_loading: false,

@@ -111,6 +111,8 @@ mod tests_object_motion;
 mod tests_run_effect;
 #[cfg(test)]
 mod tests_shot_preview;
+#[cfg(test)]
+mod tests_progress;
 
 mod composite_panel;
 pub(crate) use composite_panel::CompositeContainerPanel;

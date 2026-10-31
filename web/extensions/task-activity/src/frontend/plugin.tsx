@@ -38,6 +38,7 @@ import { TaskActivityStore } from "./store.js";
 import { createTaskActivityEventBridge } from "./bridge.js";
 import { TaskActivityFeed } from "./feed.js";
 import type { TaskActivityFeedProps } from "./feed.js";
+import type { ActivityRowCapabilities } from "./rows.js";
 import { resolveTaskActivityDisplay } from "./display.js";
 
 export { TASK_ACTIVITY_PLUGIN_ID } from "../shared.js";
@@ -82,7 +83,7 @@ export function taskActivityExtension(): Plugin.Function<void> {
       const groupRuns = ctx.canvasGroupRuns;
 
       // 2) 行能力：装配时构造一次（design D6）。记录只携带这里构造的动作函数引用。
-      store.configure({
+      const capabilities: ActivityRowCapabilities = {
         locateNode: (nodeId) => {
           const result = ctx.canvasLocate.locateNodes([nodeId]);
           if (!result.ok) ctx.canvasRuntime.controller()?.selectNode(nodeId);
@@ -99,6 +100,9 @@ export function taskActivityExtension(): Plugin.Function<void> {
             catalog
           });
         },
+        // 任务记录缺 `modelType` 时按节点类型查估算时长，使面板与节点用同一个种类
+        // （change: 2026-10-31-unify-node-and-activity-progress）。
+        resolveNodeType: (nodeId) => ctx.canvasState.getWorkingCanvas()?.document.nodes.find((entry) => entry.id === nodeId)?.type,
         // 活动中的 Agent 记录：按确切 runId 定位同一详情；无关联（普通 Task）返回 false，
         // 由适配器退回作品生成历史，不伪造对话（change: 2026-10-12-add-agent-conversation-panel，任务 5.7）。
         openTaskDetail: async (item) => {
@@ -153,7 +157,8 @@ export function taskActivityExtension(): Plugin.Function<void> {
             store.applySkillStep(result.value.step);
           }
         }
-      });
+      };
+      store.configure(capabilities);
 
       const syncGroups = () => store.replaceGroupRuns(groupRuns.getSnapshot());
       const disposeGroups = groupRuns.subscribe(syncGroups);
@@ -232,6 +237,8 @@ export function taskActivityExtension(): Plugin.Function<void> {
         // 活动面板只属于当前画布 scope：媒体读请求带上画布，同步到远端的画布会路由到托管存储。
         store,
         resolveMediaUrl: (storageKey) => ctx.mediaRemote.urlFor(storageKey, ctx.canvasScope.canvasId()),
+        // 与 store 装配同一份行能力：面板估算进度时据此解析节点类型。
+        capabilities,
         // 受控直达能力中心的生成历史页，沿用聚焦编辑退出门禁。
         onOpenHistory: () => {
           store.markRead();

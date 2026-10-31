@@ -5,9 +5,9 @@
  * 连接由槽位（宿主）持有，画布领域服务只借句柄：`canvasStorageOptions` 必须透传配置与
  * 写锁，并且**屏蔽**仓库的 `close`，避免画布服务的 close 把宿主还要用的连接关掉。
  */
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import path from "node:path";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { bootstrapProviders } from "@woohaa3/application-service";
 import {
@@ -139,15 +139,16 @@ describe("storage 槽位 → 画布服务（端到端）", () => {
 
   it("bootstrapProviders 装配的画布单元可直接启动画布服务并在其上创建画布", async () => {
     const repository = new InMemoryCanvasRepository();
+    // 画布文档走注入仓库，但片场包存储（scene packages）按 sqlite 配置真实打开，
+    // 因此这里给一个可写的临时路径而不是占位路径。
+    const dir = mkdtempSync(join(tmpdir(), "woohaa3-slot-contract-"));
     const provider: RuntimeStorageProvider = {
       providerId: "sqlite-storage",
       canvas: {
         repository,
         yjsRepository: new InMemoryYjsDocumentRepository(),
         writerLock: createInMemoryWriterLock(),
-        // 画布服务的场景包存储会真的打开这个路径：写死 POSIX 绝对路径在 Windows 上
-        // 是 `C:\unused\...`，目录不存在会直接 "unable to open database file"。
-        storageConfig: { backend: "sqlite", sqlitePath: path.join(mkdtempSync(path.join(tmpdir(), "woohaa-slot-")), "unused.sqlite"), limits: {} }
+        storageConfig: { backend: "sqlite", sqlitePath: join(dir, "slot.sqlite"), limits: {} }
       },
       documents: {} as RuntimeStorageProvider["documents"],
       readExtensionConfig: () => ({}),
@@ -176,6 +177,7 @@ describe("storage 槽位 → 画布服务（端到端）", () => {
       // 画布服务借用槽位连接：它的 close 不得释放宿主资源，宿主仍可继续使用。
       expect(await repository.getCanvas("missing")).toBeNull();
       await runtime.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

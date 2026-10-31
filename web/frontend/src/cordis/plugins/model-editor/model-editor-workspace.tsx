@@ -48,7 +48,7 @@ export function ModelEditorWorkspace({
     () => ctx.compositeAssets.blocksFocusInput(),
     () => false
   );
-  // 普通模型仍需要右侧检查器（AI 修改 + 信息）；片场由扩展检查器承载，可经「镜头工具」收起。
+  // 普通模型仍需要右侧检查器（AI 修改 + 信息）；片场由扩展检查器承载，可经「属性」收起。
   const panel = filmSet ? toolsOpen : nodeId !== null;
   const extensionLayoutKey = useSyncExternalStore(ctx.compositeAssets.subscribe, () => {
     const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
@@ -69,10 +69,10 @@ export function ModelEditorWorkspace({
             {filmSet ? (
               <Button size="sm" aria-pressed={toolsOpen} disabled={!nodeId} onClick={() => {
                 if (historyOpen) void ctx.canvasNavigation.requestCloseNodeHistory();
-                else setToolsOpen((value) => !value);
-              }}>镜头工具</Button>
+                else { ctx.canvasRuntime.controller()?.cancelTransientGesture(); setToolsOpen((value) => !value); }
+              }}>属性</Button>
             ) : null}
-            {nodeId ? <ModelViewControls nodeId={nodeId} /> : null}
+            {nodeId && !filmSet ? <ModelViewControls nodeId={nodeId} /> : null}
           </>
         }
       />

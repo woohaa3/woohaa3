@@ -26,7 +26,7 @@ export function ModelCameraPreview({ session, readOnly = false }: { session: Mod
       const maxWidth = Math.min(340, Math.max(workspace ? 1 : 180, (contentWidth - 32) * 0.32));
       const maxHeight = Math.min(220, Math.max(workspace ? 1 : 120, (content.height - (workspace ? 56 : 32)) * 0.30));
       const height = Math.min(maxWidth / aspect, maxHeight);
-      setRect({ left: bounds.left + content.x + 16, top: bounds.top + content.y + Math.max(0, content.height - height - 16), width: height * aspect, height });
+      setRect({ left: bounds.left + content.x + 16, top: bounds.top + content.y + Math.max(0, content.height - height - (workspace ? 64 : 16)), width: height * aspect, height });
     };
     update();
     const observer = new ResizeObserver(update);

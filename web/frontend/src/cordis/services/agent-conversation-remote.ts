@@ -33,13 +33,13 @@ export type AgentConversationRemote = {
   /** 内置 MCP 真实发现 + 外部连接指引（宿主投影；复制不等于外部已连接）。 */
   mcpStatus: () => Promise<AgentConversationResult<AgentMcpStatusResponse>>;
   list: (canvasId: string) => Promise<AgentConversationResult<{ conversations: ConversationSummary[] }>>;
-  create: (input: { canvasId: string; adapterId?: string; title?: string; nodeId?: string; connectionId?: string }) => Promise<AgentConversationResult<{ conversation: ConversationSummary }>>;
+  create: (input: { contextKey?: string; canvasId: string; adapterId?: string; title?: string; nodeId?: string; connectionId?: string }) => Promise<AgentConversationResult<{ conversation: ConversationSummary }>>;
   /**
    * 该节点当前会话（一个节点复用一条；design D8）。无则 `conversation: null`（调用方据此新建）。
    *
    * `connectionId` 提供时只返回该来源连接下的会话（change: 2026-10-16-...，任务 2.3）。
    */
-  findForTarget: (canvasId: string, nodeId: string, connectionId?: string) => Promise<AgentConversationResult<{ conversation: ConversationSummary | null }>>;
+  findForTarget: (canvasId: string, nodeId: string, connectionId?: string, contextKey?: string) => Promise<AgentConversationResult<{ conversation: ConversationSummary | null }>>;
   /** 清空节点上下文：解除关联、归档旧会话（不删除历史）。 */
   clearContext: (canvasId: string, nodeId: string) => Promise<AgentConversationResult<{ ok: true; cleared: number }>>;
   /**
@@ -125,8 +125,8 @@ export function createAgentConversationRemote(options: AgentConversationRemoteOp
     async create(input) {
       return unwrap(await transport.request({ path: path("conversations"), method: "POST", body: input }));
     },
-    async findForTarget(canvasId, nodeId, connectionId) {
-      const query = `canvasId=${encodeURIComponent(canvasId)}&nodeId=${encodeURIComponent(nodeId)}${connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : ""}`;
+    async findForTarget(canvasId, nodeId, connectionId, contextKey) {
+      const query = `canvasId=${encodeURIComponent(canvasId)}&nodeId=${encodeURIComponent(nodeId)}${contextKey ? `&contextKey=${encodeURIComponent(contextKey)}` : ""}${connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : ""}`;
       return unwrap(await transport.request({ path: path(`target?${query}`), method: "GET" }));
     },
     async clearContext(canvasId, nodeId) {

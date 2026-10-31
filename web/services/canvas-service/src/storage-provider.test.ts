@@ -6,10 +6,10 @@
  * 这里验证：只给 `storageConfig` + 注入仓库（环境里没有 `WOOHAA3_CANVAS_STORAGE_BACKEND`）
  * 时画布服务仍进入 ready，且用的是注入的仓库实例。
  */
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryCanvasRepository } from "./storage/core/index.js";
 import { InMemoryYjsDocumentRepository, createInMemoryWriterLock } from "./sync/index.js";
 import { createCanvasService } from "./composition.js";
@@ -42,15 +42,20 @@ const fakeTaskClient = {
   }
 };
 
+const dirs: string[] = [];
+afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
 describe("storage 槽位注入画布存储", () => {
   it("只有 storageConfig + 注入仓库（无同名环境变量）时进入 ready 并使用注入仓库", async () => {
     const repository = new InMemoryCanvasRepository();
+    // 画布存储用注入仓库；但片场包存储（scene packages）仍按 sqlite 配置真实打开，
+    // 因此这里给一个可写的临时路径，而不是用占位路径替身。
+    const dir = mkdtempSync(join(tmpdir(), "woohaa3-canvas-storage-"));
+    dirs.push(dir);
     const service = await createCanvasService({
       // 环境里没有任何画布存储变量：配置只来自槽位。
       env: {},
-      // 路径必须落在真实可写的目录：画布服务的场景包存储会真的打开它，
-      // 写死 `/unused/...` 在 Windows 上是 `C:\unused\...`，目录不存在直接打不开。
-      storageConfig: { backend: "sqlite", sqlitePath: path.join(mkdtempSync(path.join(tmpdir(), "woohaa-slot-")), "never-used.sqlite"), limits: {} },
+      storageConfig: { backend: "sqlite", sqlitePath: join(dir, "unused.sqlite"), limits: {} },
       repository,
       yjsRepository: new InMemoryYjsDocumentRepository(),
       writerLock: createInMemoryWriterLock(),

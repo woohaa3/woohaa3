@@ -32,6 +32,7 @@ fn transform_signature_tracks_position_and_placement() {
         title: String::new(),
         type_label: String::new(),
         progress: 0.0,
+        progress_started_at: None,
         busy: false,
         texture: false,
         media_loading: false,
@@ -108,6 +109,7 @@ fn content_and_transform_identity_are_independent() {
         title: String::new(),
         type_label: String::new(),
         progress: 0.0,
+        progress_started_at: None,
         busy: false,
         texture: false,
         media_loading: false,
@@ -178,6 +180,7 @@ fn model_anchor_keeps_card_above_model_top() {
         title: String::new(),
         type_label: String::new(),
         progress: 0.0,
+        progress_started_at: None,
         busy: false,
         texture: false,
         media_loading: false,
@@ -251,6 +254,7 @@ fn model_anchor_falls_back_for_empty_model() {
         title: String::new(),
         type_label: String::new(),
         progress: 0.0,
+        progress_started_at: None,
         busy: false,
         texture: false,
         media_loading: false,
@@ -295,6 +299,7 @@ fn group_anchor_centers_model_inside_bottom_footer() {
         title: String::new(),
         type_label: String::new(),
         progress: 0.0,
+        progress_started_at: None,
         busy: false,
         texture: false,
         media_loading: false,
@@ -348,8 +353,8 @@ fn group_anchor_centers_model_inside_bottom_footer() {
     let local = scene::model_world_aabb(&model, rotation, unit).expect("group model bounds");
     let center_y = -(anchor_canvas.y + (local.min[1] + local.max[1]) / 2.);
     let center_x = anchor_canvas.x + (local.min[0] + local.max[0]) / 2.0;
-    // 组模型与普通模型共用 `placement.scale * 64 * 3 / extent`，没有 56×44 适配钳制。
-    assert!((unit - 64.0 * 3.0 / model.extent).abs() < 0.001);
+    // 组模型与普通模型共用绝对米制单位 `placement.scale * CANVAS_UNITS_PER_METER`，没有 56×44 适配钳制。
+    assert!((unit - crate::model3d::CANVAS_UNITS_PER_METER).abs() < 0.001);
     // 投影中心固定在组结构底边中点向下 40（80 单位页脚的中点），不随模型尺寸移动。
     assert!((center_y - (node.y + node.height + 40.)).abs() < 0.5);
     assert!((center_x - (node.x + node.width / 2.0)).abs() < 0.5);
@@ -373,6 +378,7 @@ fn film_set_anchor_centers_model_within_node() {
         title: String::new(),
         type_label: String::new(),
         progress: 0.0,
+        progress_started_at: None,
         busy: false,
         texture: false,
         media_loading: false,
@@ -465,6 +471,7 @@ fn model_world_is_stable_and_scale_sensitive() {
         title: String::new(),
         type_label: String::new(),
         progress: 0.0,
+        progress_started_at: None,
         busy: false,
         texture: false,
         media_loading: false,

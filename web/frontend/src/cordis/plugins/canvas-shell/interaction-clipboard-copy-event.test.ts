@@ -1,4 +1,5 @@
 import { applyCanvasCommands } from "../../../../../test-support/managed-shot-commands.js";
+import { migrateFilmSetFixture } from "../../../../../test-support/film-set-groups.js";
 /**
  * 桌面原生 Edit 菜单下的画布复制（change: fix-desktop-native-menu-clipboard-shortcuts）。
  *
@@ -120,7 +121,9 @@ describe("画布 Mod+C（change: fix-desktop-native-menu-clipboard-shortcuts）"
     canvas.nodeData.n1 = canonicalFilmSetFields(createFilmSetSnapshot({ title: "Film", model: { modelScript: 'scene.box({id:"body"});', modelScriptVersion: "woohaa-model-js-v2" }, motionScript: 'motion.model.rotate("body", {speed:1});', timeline: { duration: 4, loop: false } })) as never;
     const result = applyCanvasCommands(canvas, [{ type: "canvas.setTitle", title: "Film" }]);
     if (!result.ok) throw Error(result.rejection.message);
-    canvas = result.canvas;
+    // 片场自 2026-10-28 起是 group 身份（filmSetGroup 标记）；旧 composite-asset 只作为迁移输入，
+    // 复制闭包不再识别它，所以先走与生产一致的迁移再取载荷。
+    canvas = migrateFilmSetFixture(result.canvas, "n1");
     // No media service: owner closure copying must not need materialization.
     const { dom, controller } = mountCopyTarget(canvas);
     const data = clipboardData();

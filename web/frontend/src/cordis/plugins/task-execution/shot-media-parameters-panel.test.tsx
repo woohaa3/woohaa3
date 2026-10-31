@@ -32,11 +32,11 @@ describe("镜头参数面板", () => {
     expect(html).toContain("视频");
     expect(html).toContain("720 × 1280");
     expect(html).toContain("9:16");
-    expect(html).toContain("3 秒");
+    expect(html).toContain('value="3"');
     expect(html).toContain("30 fps");
     expect(html).toContain("循环");
     expect(html).toContain("关闭执行面板");
-    expect(html).toContain("由所属片场镜头托管");
+    expect(html).toContain("disabled");
   });
 
   it("静态图片不显示时长、帧率与播放状态", () => {

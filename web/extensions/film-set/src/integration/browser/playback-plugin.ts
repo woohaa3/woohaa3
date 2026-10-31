@@ -120,9 +120,14 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
           if (focused && explicit.preview && explicit.nodeId === focusId) {
             const animation = readAnimation(canvas, focusId!);
             const resolved = animation ? resolveFilmSetClip(animation, explicit.clipId) : null;
-            if (!resolved || resolved.clip.kind !== "dynamic") {
+            if (!resolved || ctx.canvasRuntime.modelFocusMode() === "history") {
               controller.select(null);
               ctx.filmSetPlayback.update({ preview: false, playing: false, error: resolved ? null : "动画片段不存在，请选择其他片段" });
+              return;
+            }
+            if (resolved.clip.kind === "static") {
+              controller.select(null);
+              ctx.filmSetPlayback.update({ preview: true, playing: false, time: 0, duration: 0, error: null });
               return;
             }
             controller.select(focusId!, undefined, { clipId: explicit.clipId ?? undefined, paused: true, viewMode: "focus-preview" });
@@ -166,15 +171,16 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
       };
 
       const disconnectPlayback = ctx.filmSetPlayback.connect(controller, reconcile);
-      // 双击拍摄镜头预览卡片 → 进入所属片场并选择对应镜头、显式预览零点暂停
+      // 双击拍摄镜头预览卡片 → 进入所属片场并编辑对应镜头
       // （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4 / design D8）。
       //
       // 宿主在进入片场聚焦成功后发布事件；本扩展按请求中的**显式 clipId** 选择镜头（不猜默认
-      // 镜头），随即进入预览并停在 T=0。`reconcile` 据此建立 focus-preview 会话（paused）。
+      // 镜头），并保持编辑状态。
       // 归属与聚焦门禁由宿主输入层/reconcile 校验，这里不重复读取业务数据。
       const offShotPreviewEnter = ctx.on("ui.shot-preview.enter-requested", (request) => {
         ctx.filmSetPlayback.select(request.filmSetNodeId, request.clipId);
-        ctx.filmSetPlayback.preview();
+        ctx.filmSetPlayback.edit();
+        ctx.modelWorkspace.session.setToolMode("camera");
       });
       const onVisibility = () => {
         visible = !document.hidden;
@@ -224,7 +230,7 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
         ctx.canvasRuntime.setAnimationPlayback(null);
       };
     },
-    { name: ANIMATION_PLAYBACK_PLUGIN_ID, inject: ["canvasRuntime", "canvasState", "compositeAssets", "hoverState", "filmSetPlayback", "canvasNavigation"] }
+    { name: ANIMATION_PLAYBACK_PLUGIN_ID, inject: ["canvasRuntime", "canvasState", "compositeAssets", "hoverState", "filmSetPlayback", "canvasNavigation", "modelWorkspace"] }
   );
 }
 

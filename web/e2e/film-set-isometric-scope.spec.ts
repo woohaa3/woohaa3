@@ -8,7 +8,7 @@
  * - hover/select/double-click：范围内命中、范围顶部之上的模型身体命中、AABB 空白角不命中、
  *   双击整体聚焦；
  * - 框选：与平行四边形正面积相交才选中，只碰 AABB 空白角不选中；
- * - drop：真实鼠标把合法 model3d 拖入范围可导入、源节点回位；图片拖入不显示提示且被拒绝；
+ * - drop：片场不接收拖动（无提示浮层、无导入），拖到徽标上的节点按普通移动落位；
  *   空白角不命中；上层普通卡片先于业务过滤；所有 composite-asset（含炉体）默认等距范围；
  * - resize：从任意抓手起拖对角锁定等比调整规范 width/height（含中心回算），释放经 Yjs 回流；
  * - pan/zoom、DPR、嵌套 group 下的范围与提示对齐。
@@ -299,7 +299,7 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
     expect(await selection()).toContain("film");
   });
 
-  test("真实鼠标把 model3d 拖入范围并原子回位", async ({ page }, info) => {
+  test("真实鼠标把 model3d 拖到片场徽标：无提示浮层，按普通移动落位", async ({ page }, info) => {
     test.setTimeout(180_000);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -327,6 +327,7 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
     // 目标：范围中心（地面占地内部）。
     const accepted = (await acceptedScope(page, "film"))!;
     const dropWorld = { x: accepted.aabb[0] + accepted.aabb[2] / 2, y: accepted.aabb[1] + accepted.aabb[3] / 2 };
+    // 通用查询仍能命中片场（宿主能力），但片场不注册 node-drop 接收方。
     const dropTarget = await page.evaluate((point) => {
       const r = (window as any).__bevyRuntime?.queryDropTarget?.(point, []);
       return r?.ok ? r.value : { unavailable: r?.reason };
@@ -338,8 +339,9 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
     await page.mouse.move(srcClient.x, srcClient.y);
     await page.mouse.down();
     await page.mouse.move(dropClient.x, dropClient.y, { steps: 16 });
-    // 拖动期间 DOM 提示应出现且为 SVG polygon（accepted 顶点）。
-    await expect(page.locator(".node-drop-overlay polygon").first()).toBeAttached({ timeout: 10_000 });
+    // 拖动期间不出现任何接收提示浮层。
+    await page.waitForTimeout(300);
+    expect(await page.locator(".node-drop-overlay").count()).toBe(0);
     await page.screenshot({ path: info.outputPath("film-ground-drop-hover.png") });
     await page.mouse.up();
     await waitForCommandsSettled(page);
@@ -347,18 +349,18 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
 
     const after = await readStoredCanvas(page);
     const itemsAfter = (after!.nodeData.film.filmSetContent as { items: FilmSetItem[] }).items;
-    // 片场多了一个导入对象，来源节点回位、未移动、未被删除。
-    expect(itemsAfter.length).toBe(itemsBefore + 1);
-    expect(after!.document.nodes.find((n) => n.id === "src")).toBeTruthy();
-    expect(after!.document.nodes.find((n) => n.id === "src")!.position).toEqual(srcBefore);
-    // 导入对象带来源身份。
-    expect(itemsAfter.some((item) => (item as any).origin?.sourceNodeId === "src")).toBe(true);
+    // 未导入任何对象；来源节点按普通移动落位。
+    expect(itemsAfter.length).toBe(itemsBefore);
+    const srcAfter = after!.document.nodes.find((n) => n.id === "src")!.position;
+    expect(srcAfter).not.toEqual(srcBefore);
+    // 释放后也没有拒绝反馈。
+    expect(await page.locator("#film-set-drop-feedback").count()).toBe(0);
 
     expect(errors).toEqual([]);
     await page.screenshot({ path: info.outputPath("film-ground-drop-done.png") });
   });
 
-  test("图片拖到片场：不显示接收提示，释放后提示不支持且源节点回位", async ({ page }) => {
+  test("图片拖到片场：无提示浮层、不导入，按普通移动落位", async ({ page }) => {
     test.setTimeout(180_000);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -368,7 +370,7 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
     await waitForCanvasSession(page);
     await seedFilmSet(page, "film", { x: 640, y: 200 }, 360, 260);
 
-    // 一张普通图片节点（不要求 ready 资产：拖动提示与释放判定只看节点类型）。
+    // 一张普通图片节点。
     expect((await sendCommands(page, [
       { type: "node.add", node: { id: "pic", type: "image", position: { x: 80, y: 600 } } }
     ], "ground-drop-image")).ok).toBe(true);
@@ -381,19 +383,13 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
 
     const accepted = (await acceptedScope(page, "film"))!;
     const dropWorld = { x: accepted.aabb[0] + accepted.aabb[2] / 2, y: accepted.aabb[1] + accepted.aabb[3] / 2 };
-    // 目标查询仍会固定片场 identity（提示由接收方谓词决定，而不是查询失败）。
-    const dropTarget = await page.evaluate((point) => {
-      const r = (window as any).__bevyRuntime?.queryDropTarget?.(point, []);
-      return r?.ok ? r.value : { unavailable: r?.reason };
-    }, dropWorld);
-    expect(dropTarget).toBe("film");
 
     const srcClient = await toClient(page, { x: 80 + 130, y: 600 + 100 });
     const dropClient = await toClient(page, dropWorld);
     await page.mouse.move(srcClient.x, srcClient.y);
     await page.mouse.down();
     await page.mouse.move(dropClient.x, dropClient.y, { steps: 16 });
-    // 拖动期间片场不显示接收提示（change: 2026-10-18-restrict-film-set-drop-to-models）。
+    // 拖动期间不显示接收提示。
     await page.waitForTimeout(300);
     expect(await page.locator(".node-drop-overlay").count()).toBe(0);
     await page.mouse.up();
@@ -401,12 +397,11 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
     await page.waitForTimeout(300);
 
     const after = await readStoredCanvas(page);
-    // 未导入；来源回位（消费为明确失败，不回退成普通移动）。
+    // 未导入；来源按普通移动落位。
     expect((after!.nodeData.film.filmSetContent as { items: FilmSetItem[] }).items.length).toBe(itemsBefore);
-    expect(after!.document.nodes.find((n) => n.id === "pic")!.position).toEqual(srcBefore);
-    // 释放后给出不受支持的说明。
-    await expect.poll(async () => page.evaluate(() => document.getElementById("film-set-drop-feedback")?.textContent ?? ""))
-      .toContain("仅普通模型可以拖入片场");
+    expect(after!.document.nodes.find((n) => n.id === "pic")!.position).not.toEqual(srcBefore);
+    // 不再有“仅普通模型可以拖入片场”之类的拒绝反馈。
+    expect(await page.locator("#film-set-drop-feedback").count()).toBe(0);
 
     expect(errors).toEqual([]);
   });

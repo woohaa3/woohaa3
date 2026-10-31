@@ -42,8 +42,14 @@ describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
   });
 
   it("active 任务同时显示阶段、实际百分比，保持单行", () => {
+    // 面板与画布节点共用「按种类的经过时间估算」：这里让记录刚开始 10s，估算 22%，
+    // 上报 42% 更高，因此显示上报值（change: 2026-10-31-unify-node-and-activity-progress）。
+    const startedAt = new Date(Date.now() - 10_000).toISOString();
     const store = storeWith([
-      record({ taskKey: "t1", runId: "r1", nodeId: "n1", state: "running", modelKey: "gpt-image-2", progress: 0.42 })
+      record({
+        taskKey: "t1", runId: "r1", nodeId: "n1", state: "running", modelType: "image",
+        modelKey: "gpt-image-2", progress: 0.42, createdAt: startedAt, updatedAt: startedAt
+      })
     ]);
     const markup = renderToStaticMarkup(
       <TaskActivityFeed store={store} resolveMediaUrl={media} />
@@ -52,6 +58,19 @@ describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
     expect(markup).toContain("运行中");
     expect(markup).toContain("运行中 · 42%");
     expect(markup).not.toContain("task-activity-feed__progress");
+    store.dispose();
+  });
+
+  it("没有上报进度时按经过时间估算，与节点进度环同一个数字", () => {
+    // 图片节点估算时长 45s：开始 22.5s 前 ≈ 50%。
+    const startedAt = new Date(Date.now() - 22_500).toISOString();
+    const store = storeWith([
+      record({ taskKey: "t1", runId: "r1", nodeId: "n1", state: "running", modelType: "image", createdAt: startedAt, updatedAt: startedAt })
+    ]);
+    const markup = renderToStaticMarkup(
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
+    );
+    expect(markup).toMatch(/运行中 · (49|50|51)%/);
     store.dispose();
   });
 

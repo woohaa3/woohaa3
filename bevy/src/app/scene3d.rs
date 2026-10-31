@@ -292,6 +292,11 @@ pub(super) fn sync_shot_main_view(
     let aspect = animation_preview
         .map(|p| shot_aspect_ratio(&p.initial_camera.aspect))
         .unwrap_or(aspect);
+    let still_preview = scene
+        .0
+        .model_editor
+        .as_ref()
+        .is_some_and(|editor| editor.shot_preview && editor.shot.is_some());
     let has_shot = animation_preview.is_some()
         || scene
             .0
@@ -300,7 +305,7 @@ pub(super) fn sync_shot_main_view(
             .is_some_and(|editor| editor.tool_mode == "camera" && editor.shot.is_some());
     viewport.hold = rig.animating();
     viewport.rect = if has_shot && width > 0.0 && height > 0.0 {
-        Some(if animation_preview.is_some() {
+        Some(if animation_preview.is_some() || still_preview {
             let rect = surface.and_then(|s| s.content_rect.as_ref());
             let x = rect.map(|r| r.x).unwrap_or(0.0);
             let y = rect.map(|r| r.y).unwrap_or(0.0);
@@ -319,7 +324,7 @@ pub(super) fn sync_shot_main_view(
             let h = (max_w / aspect).min(max_h);
             Vec4::new(
                 rect.x + 16.0,
-                rect.y + (rect.height - h - 16.0).max(0.0),
+                rect.y + (rect.height - h - 64.0).max(0.0),
                 h * aspect,
                 h,
             )
@@ -372,9 +377,14 @@ pub(super) fn drive_observer_from_shot(
     for (mut camera, mut layers) in &mut observer {
         camera.is_active = !scene
             .0
-            .animation_playback
+            .model_editor
             .as_ref()
-            .is_some_and(|p| p.view_mode == "focus-preview");
+            .is_some_and(|editor| editor.shot_preview && editor.shot.is_some())
+            && !scene
+                .0
+                .animation_playback
+                .as_ref()
+                .is_some_and(|p| p.view_mode == "focus-preview");
         camera.order = 0;
         camera.viewport = None;
         *layers = model3d::empty_placeholder::overview_layers(
@@ -391,9 +401,14 @@ pub(super) fn hide_shot_gizmos_during_transition(
 ) {
     let hidden = scene
         .0
-        .animation_playback
+        .model_editor
         .as_ref()
-        .is_some_and(|p| p.view_mode == "focus-preview")
+        .is_some_and(|editor| editor.shot_preview)
+        || scene
+            .0
+            .animation_playback
+            .as_ref()
+            .is_some_and(|p| p.view_mode == "focus-preview")
         || viewport.rect.is_none()
         || viewport.hold;
     // The layout refresh restores each part every frame. Only suppress it here:

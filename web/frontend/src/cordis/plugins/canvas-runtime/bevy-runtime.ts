@@ -8,7 +8,7 @@ import { ModelResourceFailures } from "./model-resource-failures.js";
 import { ModelPayloadScheduler } from "./model-payload-scheduler.js";
 import { createModelResourceRegistrar } from "./model-resource-registrar.js";
 import { PositionSceneMirror } from "./position-scene-mirror.js";
-import { createRuntimeRealm, type RuntimeRealm } from "./runtime-realm.js";
+import { createRuntimeRealm, hasNativeBootstrap, type RuntimeRealm } from "./runtime-realm.js";
 import { RuntimeSupervisor, readRuntimeHealth } from "./runtime-supervisor.js";
 /**
  * Bevy WASM 运行时宿主
@@ -272,9 +272,28 @@ export function loadBevyRuntime(options: BevyLoaderOptions = {}): Promise<BevyRu
   return createBevyRuntime(options);
 }
 
+/**
+ * 帧计数读数（FPS / DC）是否开放
+ * （fix: 打包的桌面分发版也要显示 FPS/DC）。
+ *
+ * 原来只看 `import.meta.env.DEV`：Vite 生产构建里它是 false，于是打包桌面版的
+ * `getFrameCounters` 根本不存在，性能扩展读不到任何计数，只能显示 `—`。
+ * 桌面壳按 `--mode desktop` 生产构建，但 FPS/DC 是它要长期显示的读数，因此改成
+ * 「开发构建 **或** 桌面壳（注入了 `__WOOHAA_NATIVE__`）」；浏览器生产与 preview 构建
+ * 仍然不暴露计数。判定与原生 realm 选择共用同一份引导探测，不另写协议字符串。
+ */
+export function frameCountersReadable(dev: boolean, target: typeof globalThis): boolean {
+  return dev || hasNativeBootstrap(target);
+}
+
 async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntime> {
   const target = options.target ?? (globalThis as typeof globalThis);
   options.signal?.throwIfAborted();
+  /**
+   * 帧计数读数（FPS / DC）的开放条件：开发构建或桌面壳
+   * （fix: 打包的桌面分发版也要显示 FPS/DC）。规则与理由见 `frameCountersReadable`。
+   */
+  const frameCountersEnabled = frameCountersReadable(import.meta.env.DEV, target);
   // 启动阶段埋点（change: 2026-10-25-enhance-telemetry-performance-collection，task 3.4）。
   // `bevy-runtime` 是整段创建，`wasm-module` 只包模块装载与初始化：两者分开是因为前者含
   // realm/iframe、supervisor 与镜像安装，后者是下载+实例化+首次 start，慢在哪一段必须能分开看。
@@ -291,6 +310,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     realmFault = reason; supervisor?.fail(reason);
   };
   const disposeRealm = () => realm?.dispose();
+  const revealRealm = () => realm?.reveal();
   const callsAllowed = () => !supervisor || supervisor.phase === "running";
   const loadModule = async (candidate = false) => {
     if (options.importModule) return protectWasmModule(await options.importModule(), issues);
@@ -509,14 +529,16 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
   const now = () => target.performance?.now() ?? performance.now();
 
   const runtime: BevyRuntime = {
-    ...(import.meta.env.DEV ? { getFrameCounters: () => {
+    ...(frameCountersEnabled ? { getFrameCounters: () => {
       if (disposed || !module.runtime_health || (supervisor && supervisor.phase !== "running")) return undefined;
       try {
         const health = readRuntimeHealth(module.runtime_health());
         const drawCalls3d = health.drawCalls3d;
         return { generation, renders: health.renders, updates: health.updates,
           ...(typeof drawCalls3d === "number" && Number.isSafeInteger(drawCalls3d) && drawCalls3d >= 0 ? { drawCalls3d } : {}),
-          ...readRenderStageCounters(module) };
+          // 渲染三阶段/实例数属于开发期归因：打包桌面版只要 FPS/DC，不把额外分段计数
+          // 带进生产遥测（口径与 `telemetry-performance` 的 dev 归因一致）。
+          ...(import.meta.env.DEV ? readRenderStageCounters(module) : {}) };
       } catch { return undefined; }
     } } : {}),
     getRuntimeIssues: issues.getSnapshot,
@@ -834,7 +856,12 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
           if (realmFault) throw new Error(realmFault);
           const health = readRuntimeHealth(replacement.runtime_health());
           if (replacement.is_ready() && health.renders > 0 && (!lastScene || (health.appliedGeneration! >= recoveredInteraction && health.renderedGeneration! >= recoveredInteraction))) {
-            module = protectWasmModule(replacement, issues, callsAllowed); interactionGeneration = recoveredInteraction; baseSceneGeneration = recoveredInteraction; textures.reset(); return;
+            module = protectWasmModule(replacement, issues, callsAllowed); interactionGeneration = recoveredInteraction; baseSceneGeneration = recoveredInteraction; textures.reset();
+            // A replacement realm starts transparent with the startup curtain restored.
+            // Its replayed themed scene has now rendered; reveal this realm as well.
+            revealScheduled = false;
+            if (lastScene) { revealRealm(); revealScheduled = true; }
+            return;
           }
           await new Promise(resolve => target.setTimeout(resolve, 50));
         }

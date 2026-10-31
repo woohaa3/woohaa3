@@ -12,7 +12,7 @@
 import { createPerfFrameWindow, type PerfFrameCounters, type PerfFrameWindow } from "../../services/telemetry-performance.js";
 import { sceneDiagnostics, frameStepMs } from "./scene-diagnostics.js";
 
-/** 运行时渲染计数（累计）；只有 dev 构建的 `getFrameCounters` 提供，读不到就不写 drawCalls。 */
+/** 运行时渲染计数（累计）；开发构建与桌面壳的 `getFrameCounters` 提供，读不到就不写 drawCalls。 */
 type RenderCounters = {
   readonly renders?: number;
   readonly drawCalls3d?: number;

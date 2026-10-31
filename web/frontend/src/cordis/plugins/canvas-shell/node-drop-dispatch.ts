@@ -4,8 +4,8 @@
  *  change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D5：目标由 accepted
  *  Rust 查询固定，宿主不再用规范矩形自行复判）。
  *
- * 与「片场 drop」共用同一 `filmSetDrop` 分派点：拖动一批来源节点落在**通用纯模型扩展节点**
- * 范围内并释放时，把释放委托给该节点类型对应的 `canvas.node-drop` contribution。宿主只做
+ * 拖动一批来源节点落在**通用纯模型扩展节点**范围内并释放时，把释放委托给该节点类型对应的
+ * `canvas.node-drop` contribution。宿主只做
  * 通用目标裁决与 slot 分派，不 import 任何业务收集/项目实现；命令提交与幂等由 extension 自持。
  *
  * 目标 identity 由调用方先用 accepted `queryDropTarget` 固定（最上层实际节点、来源排除），本模块
@@ -65,7 +65,7 @@ function matchingTargets(targets: readonly NodeDropTarget[], canvas: ServerCanva
 
 /**
  * 目标 identity 固定的是最上层实际节点；若该节点本身没有接收方，则沿它的 parent 链寻找
- * 可接收的容器祖先。这样拖到片场 group 内的资源卡片（或裁剪在本体内的成员）仍会落到片场，
+ * 可接收的容器祖先。这样拖到扩展容器 group 内的成员卡片（或裁剪在本体内的成员）仍会落到容器，
  * 而不会被成员卡片吞成一次普通移动。只遍历**命中节点自己的**祖先，不会穿透上层节点去命中
  * 它背后的其它容器。
  */
@@ -124,8 +124,8 @@ function resolveTarget(targets: readonly NodeDropTarget[], canvas: ServerCanvas,
   try {
     const resolved = matchingHit(targets, canvas, hit);
     if (resolved) {
-      // 来源已经在目标 group 里：这是一次组内移动，不是「拖入复制」。否则片场成员卡片
-      // 在自己的气泡/徽标上松手会被当成再次导入，卡片反而不动。
+      // 来源已经在目标 group 里：这是一次组内移动，不是「拖入复制」。否则成员卡片
+      // 在自己的容器气泡/徽标上松手会被当成再次导入，卡片反而不动。
       if (resolved.hit.type === "group" && sourceNodeIds.length > 0
         && sourceNodeIds.every((id) => isDescendantOf(canvas, id, resolved.hit.id))) return null;
       return { failed: false as const, hit: resolved.hit, owners: resolved.owners };

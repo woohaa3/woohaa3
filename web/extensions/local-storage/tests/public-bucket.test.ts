@@ -7,10 +7,11 @@
  *
  * 夹具用不可达的假桶名，**不**引用任何真实桶：真实桶由构建环境注入。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { HostStorageService } from "@woohaa3/contracts";
 import {
   LOCAL_PUBLIC_EXPOSER_ID,
+  createAnonymousPublicBucketWriter,
   createPublicBucketExposer,
   publicBucketDefaults,
   publicObjectKey,
@@ -104,11 +105,12 @@ describe("配置解析", () => {
     expect(resolved.ok && resolved.config.credentialSource).toBe("own");
   });
 
-  it("两处都没有凭据时返回缺项，不抛错", () => {
+  it("两处都没有凭据时按匿名写解析，不把凭据当缺项", () => {
     const resolved = resolvePublicBucketConfig({ ...FIXTURE_DEFAULTS, env: {} });
-    expect(resolved.ok).toBe(false);
-    if (resolved.ok) return;
-    expect(resolved.missing).toEqual(["publicSecretId", "publicSecretKey"]);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.config.credentialSource).toBe("anonymous");
+    expect(resolved.config.secretId).toBeUndefined();
   });
 
   it("前缀两端的斜杠被归一化", () => {
@@ -116,6 +118,28 @@ describe("配置解析", () => {
     expect(resolved.ok).toBe(true);
     if (!resolved.ok) return;
     expect(resolved.config.prefix).toBe("p");
+  });
+});
+
+describe("匿名写入", () => {
+  it("无凭据时用 HTTP HEAD/PUT，不携带任何认证头", async () => {
+    const calls: Array<{ method: string; url: string; headers: Record<string, string> }> = [];
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const headers = Object.fromEntries(new Headers(init?.headers).entries());
+      calls.push({ method: init?.method ?? "GET", url, headers });
+      return new Response(null, { status: init?.method === "HEAD" ? 404 : 200 });
+    });
+    try {
+      const writer = createAnonymousPublicBucketWriter({ bucketUrl: FIXTURE_DEFAULTS.bucketUrl });
+      expect(await writer.stat("fixture-prefix/media/a.png")).toBeNull();
+      await writer.put("fixture-prefix/media/a.png", Uint8Array.of(1, 2), "image/png");
+      expect(calls.map((call) => call.method)).toEqual(["HEAD", "PUT"]);
+      expect(calls[0]!.url).toBe(FIXTURE_DEFAULTS.bucketUrl + "/fixture-prefix/media/a.png");
+      expect(calls.some((call) => "authorization" in call.headers)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

@@ -68,6 +68,10 @@ export type CompositeAssetAdapter = {
   projectPresentation?(node: BevyRenderNode, data: CanvasNodeData, resource?: PreparedModelResource): void;
   objectPreview?(nodeId: string): { itemId: string; transform: FilmSetLocalTransform } | null;
   gizmo?(nodeId: string): BevyModelEditor | null;
+  /** Show the selected saved camera at full size, without a playback session. */
+  readonlyShotPreview?(nodeId: string): boolean;
+  /** Local editor grid; absent by default on other focus surfaces. */
+  showFocusGrid?(nodeId: string): boolean;
   readCameras?(nodeId: string, data: CanvasNodeData): ModelCamera[];
   writeCameras?(nodeId: string, cameras: readonly ModelCamera[]): boolean | Promise<boolean>;
   captureOrigin?(nodeId: string, cameraId: string): import("./model-workspace.js").ModelCaptureOrigin | null;

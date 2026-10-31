@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { TaskResultSummary } from "@woohaa3/contracts";
-import { SKILL_STATE_LABELS, type ActivityRow, type ActivityRowActions } from "./rows.js";
+import { SKILL_STATE_LABELS, displayedProgressPercent, type ActivityRow, type ActivityRowActions, type ActivityRowCapabilities } from "./rows.js";
 import { ACTIVITY_EXIT_DURATION_MS, type TaskActivityStore } from "./store.js";
 import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger, ScrollArea, Button, IconButton, Tooltip, Popover } from "@woohaa3/ui/primitives";
 import { ChevronDownIcon, CloseIcon, MenuListIcon } from "@woohaa3/ui/icons";
@@ -30,12 +30,24 @@ export type TaskActivityFeedProps = {
   resolveMediaUrl: (storageKey: string) => string;
   /** 打开宿主已有的作品生成历史弹窗，绝不导航至全局监控页。 */
   onOpenHistory?: () => void;
+  /**
+   * 行能力（与 store 装配一致）：面板渲染时要用它解析节点类型来估算进度时长
+   * （change: 2026-10-31-unify-node-and-activity-progress）。
+   */
+  capabilities?: ActivityRowCapabilities;
 };
 
-export function TaskActivityFeed({ store, resolveMediaUrl, onOpenHistory }: TaskActivityFeedProps) {
+export function TaskActivityFeed({ store, resolveMediaUrl, onOpenHistory, capabilities }: TaskActivityFeedProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const rows = snapshot.rows;
   const total = rows.length;
+  /**
+   * 进度文案的刷新时钟（change: 2026-10-31-unify-node-and-activity-progress）。
+   *
+   * 面板与画布节点用同一套「按种类的经过时间估算」，因此需要像渲染器那样逐秒推进。整块面板
+   * 共用一个时钟，只在存在进行中的生成任务时挂定时器；终态/无记录时不空转。
+   */
+  const now = useProgressClock(needsProgressClock(rows));
 
   // 初始展开状态取决于启动时是否已有记录；后续新项由 effect 自动展开（SSR/静态渲染
   // 不执行 effect，因此这里必须按首帧快照决定）。只有已结算的组/Skill 记录不抢开面板。
@@ -127,6 +139,8 @@ export function TaskActivityFeed({ store, resolveMediaUrl, onOpenHistory }: Task
                   openRevision={snapshot.openRevision}
                   store={store}
                   resolveMediaUrl={resolveMediaUrl}
+                  now={now}
+                  capabilities={capabilities}
                 />
               ))}
             </ul>
@@ -158,6 +172,36 @@ export function TaskActivityFeed({ store, resolveMediaUrl, onOpenHistory }: Task
 const GROUP_PREVIEW_CLOSE_DELAY_MS = 150;
 
 /**
+ * 进度文案刷新间隔（毫秒），与渲染器逐帧取整的可见变化节奏一致。
+ *
+ * 估算按「经过秒数 × 100 / 种类时长」推进，1s 步进对 45s/180s 这类时长已是 1–2 个百分点的
+ * 粒度；更快的 tick 只会产生同样的整数结果。
+ */
+const PROGRESS_TICK_MS = 1_000;
+
+/**
+ * 仅在需要时逐秒推进的时钟；`enabled` 为 false 时不挂定时器、返回首帧时间。
+ *
+ * 服务端渲染（无 effect）下退化为渲染时刻，不引入额外状态。面板整体只有一个时钟，
+ * 行只读取它的值，避免每条记录各挂一个定时器。
+ */
+function useProgressClock(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), PROGRESS_TICK_MS);
+    return () => clearInterval(timer);
+  }, [enabled]);
+  return now;
+}
+
+/** 面板内是否有任何需要逐秒推进进度的记录（进行中的生成任务）。 */
+function needsProgressClock(rows: readonly ActivityRow[]): boolean {
+  return rows.some((row) => row.active && row.kind === "task");
+}
+
+/**
  * 单行渲染器：主行结构（状态灯、主行文案、状态文案、关闭按钮）对全部来源共用，
  * 差异只有两处——`ActivityRow.actions` 决定可点动作，`ActivityRow.source` 决定详情内容。
  */
@@ -167,8 +211,12 @@ function ActivityListRow(props: {
   openRevision: number;
   store: TaskActivityStore;
   resolveMediaUrl: (storageKey: string) => string;
+  /** 面板共享的进度时钟（毫秒时间戳）；行本身不挂定时器。 */
+  now: number;
+  /** 行能力：解析节点类型以估算进度时长。 */
+  capabilities?: ActivityRowCapabilities;
 }) {
-  const { row, store, resolveMediaUrl } = props;
+  const { row, store, resolveMediaUrl, now, capabilities } = props;
   const actions = row.actions;
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState("");
@@ -236,9 +284,8 @@ function ActivityListRow(props: {
     }
   }, [actions, busy]);
 
-  const progressText = row.progress !== undefined
-    ? ` · ${Math.round(row.progress * 100)}%`
-    : "";
+  const progressPercent = displayedProgressPercent(row, now, capabilities);
+  const progressText = progressPercent !== undefined ? ` · ${progressPercent}%` : "";
   const stateText = `${row.status}${progressText}`;
 
   /** 主行点击：组记录锁定详情；有详情能力时打开详情；否则退回节点定位（后台活动）。 */

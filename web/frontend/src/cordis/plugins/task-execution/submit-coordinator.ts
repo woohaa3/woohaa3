@@ -44,6 +44,18 @@ export type SubmitCanvasReader = Pick<Woohaa3CanvasStoreState, "canvas"> & {
   getState: () => Pick<Woohaa3CanvasStoreState, "canvas">;
 };
 
+/**
+ * 同一节点连续提交的前沿防抖窗口。
+ *
+ * 只吸收「手还没离开键」级别的连按（Enter 重复、双击），远小于有意的再次生成间隔，
+ * 因此不会阻止用户重新发一个独立 run。作用域与既有的镜头参考提交门禁一致：
+ * 只有会冻结静态镜头版本、可能进入等图或真正发请求的节点才需要它。
+ */
+export const RAPID_SUBMIT_WINDOW_MS = 100;
+
+/** 连按被防抖吸收时的提示文案（同一句也用于图片参考提交在飞时的手动重入）。 */
+export const RAPID_SUBMIT_MESSAGE = "提交速度过快 请慢一点";
+
 export type SubmitCoordinatorOptions = {
   store: { getState: () => Pick<Woohaa3CanvasStoreState, "canvas"> };
   client: CanvasRunClient;
@@ -54,6 +66,8 @@ export type SubmitCoordinatorOptions = {
   imageReferenceBackground?: () => string;
   isWritable?: () => boolean;
   now?: () => string;
+  /** 防抖窗口的单调时钟（毫秒）；测试注入，缺省 `Date.now`。 */
+  nowMs?: () => number;
   createRunId?: () => string;
 };
 
@@ -88,9 +102,12 @@ export type SubmitCoordinator = {
 
 export function createSubmitCoordinator(options: SubmitCoordinatorOptions): SubmitCoordinator {
   const createRunId = options.createRunId ?? defaultRunId;
+  const nowMs = options.nowMs ?? (() => Date.now());
   type PendingInput = SubmitInput & { imageReferences?: FrozenShotImageReference[]; canvasId?: string };
   const waiting = new Map<string, PendingInput>();
   const submitting = new Set<string>();
+  /** 每个节点最近一次**通过防抖**的提交时刻，用于吸收窗口内的连按。 */
+  const lastSubmitAt = new Map<string, number>();
   const waitingMessages = new Map<string, string | null>();
   const waitingListeners = new Set<() => void>();
   const message = (nodeId: string, value: string | null) => {
@@ -98,10 +115,30 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
     waitingMessages.set(nodeId, value); waitingListeners.forEach(listener => listener());
   };
 
+  /**
+   * 连按防抖的时间戳归属：「真正要发请求」的那一次才推进，预检拒绝不推进。
+   *
+   * 这样提示词为空、模型不匹配这类可反复触发的拒绝不会被误判成连按，
+   * 只有已经受理（或进入等图）的提交才会开启 100ms 窗口。
+   */
+  const armRapidWindow = (nodeId: string) => { lastSubmitAt.set(nodeId, nowMs()); };
+  const insideRapidWindow = (nodeId: string) => {
+    const previous = lastSubmitAt.get(nodeId);
+    return previous !== undefined && nowMs() - previous < RAPID_SUBMIT_WINDOW_MS;
+  };
+  /** 连按命中的统一出口：返回值给 generic 面板，同时写 waiting 通道给宿主面板。 */
+  const rapidRejection = (nodeId: string): SubmitOutcome => {
+    message(nodeId, RAPID_SUBMIT_MESSAGE);
+    return { ok: false, error: RAPID_SUBMIT_MESSAGE };
+  };
+
   const attempt = async (input: PendingInput): Promise<SubmitOutcome> => {
     const canvas = options.store.getState().canvas;
     if (!canvas) return { ok: false, error: "画布尚未加载，无法提交任务" };
     if (options.isWritable?.() === false) return { ok: false, error: "shot-image-permission-denied: 画布当前不可写，请恢复连接后重新执行" };
+
+    // 连按防抖只服务会冻结静态镜头版本的那一类节点；普通节点仍可获得连续独立 run。
+    const rapidGuarded = canvas.nodeData[input.nodeId]?.inputMapping?.some(mapping => mapping.role === "shot_image_reference") === true;
 
     if (!input.catalog.available) {
       return { ok: false, error: input.catalog.reason ?? "任务目录不可用" };
@@ -142,6 +179,11 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
         return { ok: false, error: "等待镜头参考图片准备完成", waiting: true };
       }
     }
+
+    // 真正要发请求前才判定连按：预检拒绝（空提示词、版本失效）与进入等图都不占用窗口，
+    // 因此它们仍返回自己的原因，不会被“提交速度过快”盖掉。
+    if (rapidGuarded && insideRapidWindow(input.nodeId)) return rapidRejection(input.nodeId);
+    if (rapidGuarded) armRapidWindow(input.nodeId);
 
     const runId = createRunId();
     message(input.nodeId, null);
@@ -197,7 +239,7 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
   return {
     async submit(input) {
       const imageInput = options.store.getState().canvas?.nodeData[input.nodeId]?.inputMapping?.some(mapping => mapping.role === "shot_image_reference");
-      if (imageInput && submitting.has(input.nodeId)) return { ok: false, error: "任务正在提交" };
+      if (imageInput && submitting.has(input.nodeId)) return rapidRejection(input.nodeId);
       if (imageInput) submitting.add(input.nodeId);
       waiting.delete(input.nodeId);
       try {
@@ -210,6 +252,8 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
       const outcomes: SubmitOutcome[] = [];
       for (const [nodeId, input] of [...waiting.entries()]) {
         if (submitting.has(nodeId)) continue;
+        // 自动续交不经过预检里的连按窗口：它由画布更新驱动，本身已按节点去重。
+        lastSubmitAt.delete(nodeId);
         submitting.add(nodeId);
         try {
           const outcome = await attempt(input);

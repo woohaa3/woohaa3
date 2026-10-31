@@ -1,7 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { applyCanvasCommands, findGroupContainingCenter, getWoohaa3CanvasNodeAbsolutePosition,
-  refitWoohaa3CanvasGroups, reparentDraggedNodes, type Woohaa3CanvasNode } from "@woohaa3/contracts";
-import { planGroupStructureChange } from "../src/extension-api/command-planner.js";
+import { applyCanvasCommands, getWoohaa3CanvasNodeAbsolutePosition,
+  type Woohaa3CanvasNode } from "@woohaa3/contracts";
 import { createDragGestureFamily } from "../src/cordis/plugins/canvas-shell/drag-gesture.js";
 import { woohaa3CanvasStore } from "../src/cordis/services/canvas-state/index.js";
 import { canvasWith } from "../src/cordis/plugins/canvas-shell/test-support/controller-harness.js";
@@ -13,20 +12,21 @@ function family() {
 
 afterEach(() => woohaa3CanvasStore.getState().applyWorkingCanvas(null));
 it.each([
-  { name: "nested local move", at: { x: 160, y: 180 }, parent: "inner", remote: false },
-  { name: "leave nested groups", at: { x: 900, y: 600 }, parent: undefined, remote: false },
-  { name: "enter target and refit", at: { x: 920, y: 20 }, parent: "target", remote: false },
-  { name: "latest working ancestor coordinates", at: { x: 380, y: 290 }, parent: "inner", remote: true }
-])("$name matches the complete parenting planner and preserves world placement", ({ at, parent, remote }) => {
+  // 释放结算（change: 2026-10-26-settle-group-boundaries-on-drop，design D2）把普通节点夹进
+  // 目标组冻结的内框（左右/顶部 40、底部 80），不扩大组、不按中心自由重父化。
+  // inner 绝对位置 (130,140)、300×260 → 内框允许 x∈[170,290]、y∈[180,240]。
+  { name: "nested local move clamps into the frozen inner frame", at: { x: 160, y: 180 }, parent: "inner", remote: false, world: { x: 170, y: 180 } },
+  { name: "leave nested groups preserves world placement", at: { x: 900, y: 600 }, parent: undefined, remote: false, world: { x: 900, y: 600 } },
+  // remote：working 里 g 已挪到 (300,200)，inner 绝对位置随之变为 (330,240)。
+  { name: "latest working ancestor coordinates preserve world placement", at: { x: 380, y: 290 }, parent: "inner", remote: true, world: { x: 380, y: 290 } }
+])("$name", ({ at, parent, remote, world }) => {
   const canonical = canvasWith([]);
   canonical.document.nodes = [
     // Document order intentionally follows the existing nested-group targeting contract.
     { id: "inner", type: "group", parentId: "g", position: { x: 30, y: 40 }, width: 300, height: 260 },
     { id: "g", type: "group", position: { x: 100, y: 100 }, width: 600, height: 500 },
     { id: "leaf", type: "image", parentId: "inner", position: { x: 10, y: 20 }, width: 100, height: 80 },
-    // target 必须装得下 leaf（100×80）加两侧内边距，否则释放会被判定为「装不下」而投到组外；
-    // 本用例要守的是「落入 → 组撑开」，不是「装不下」。
-    { id: "target", type: "group", position: { x: 900, y: 0 }, width: 220, height: 200 },
+    { id: "target", type: "group", position: { x: 900, y: 0 }, width: 100, height: 100 },
     { id: "unrelated", type: "image", position: { x: 1500, y: 900 }, width: 100, height: 80 }
   ];
   canonical.nodeData = { unrelated: { prompt: "keep" } };
@@ -40,63 +40,66 @@ it.each([
         n.id === "g" ? { ...n, position: { x: 300, y: 200 } } : n) } });
   }
   const latest = woohaa3CanvasStore.getState().working!, before = structuredClone(latest);
-  const previews = new Map([["leaf", at]]);
-  const commands = family.dragDropCommands(origins, previews);
-  // Independent full-array oracle: canonical contracts targeting/reparenting plus structural diff.
-  const nodes = latest.document.nodes.map(n => ({ ...n, data: {} })) as Woohaa3CanvasNode[];
-  const byId = new Map(nodes.map(n => [n.id, n]));
-  const parentPosition = getWoohaa3CanvasNodeAbsolutePosition(byId.get("inner")!, byId);
-  const projected = nodes.map(n => n.id === "leaf" ? { ...n,
-    position: { x: at.x - parentPosition.x, y: at.y - parentPosition.y } } : n);
-  const target = findGroupContainingCenter(projected, "leaf");
-  const reparented = reparentDraggedNodes(projected, ["leaf"], target).nodes;
-  // 手势在释放结算后会让被拖成员的父组贴合成员（change: canvas-grouping-redesign）。
-  const leafParent = reparented.find(n => n.id === "leaf")?.parentId;
-  const after = leafParent ? refitWoohaa3CanvasGroups([...reparented], new Set([leafParent])).nodes : reparented;
-  expect(commands).toEqual(planGroupStructureChange(nodes, after));
+  const commands = family.dragDropCommands(origins, new Map([["leaf", at]]));
   const applied = applyCanvasCommands(latest, commands, { now: "2026-10-13T00:00:00.000Z" });
   expect(applied.ok).toBe(true); if (!applied.ok) return;
   const resulting = applied.canvas.document.nodes.map(n => ({ ...n, data: {} })) as Woohaa3CanvasNode[];
   const resultById = new Map(resulting.map(n => [n.id, n])), leaf = resultById.get("leaf")!;
   expect(leaf.parentId).toBe(parent);
-  expect(getWoohaa3CanvasNodeAbsolutePosition(leaf, resultById)).toEqual(at);
+  expect(getWoohaa3CanvasNodeAbsolutePosition(leaf, resultById)).toEqual(world);
   expect(applied.canvas.nodeData).toEqual(latest.nodeData);
   expect(applied.canvas.document.nodes.find(n => n.id === "unrelated")).toEqual(latest.document.nodes.find(n => n.id === "unrelated"));
   expect(latest).toEqual(before); expect(woohaa3CanvasStore.getState().canvas).toEqual(canonical);
-  if (parent === "target") {
-    const targetNode = resultById.get("target")!;
-    // 组贴合成员（会缩也会撑，change: canvas-grouping-redesign）：目标组必须包住落入的 leaf。
-    expect(targetNode.position.x).toBeLessThanOrEqual(at.x); expect(targetNode.position.y).toBeLessThanOrEqual(at.y);
-    expect(targetNode.position.x + targetNode.width).toBeGreaterThanOrEqual(at.x + 100);
-  }
 });
 
-it("mixed group/non-group drag keeps the full structural fallback and descendant world coordinates", () => {
+it("refuses a target group that cannot hold the node instead of growing it", () => {
+  const canonical = canvasWith([]);
+  canonical.document.nodes = [
+    { id: "inner", type: "group", parentId: "g", position: { x: 30, y: 40 }, width: 300, height: 260 },
+    { id: "g", type: "group", position: { x: 100, y: 100 }, width: 600, height: 500 },
+    { id: "leaf", type: "image", parentId: "inner", position: { x: 10, y: 20 }, width: 100, height: 80 },
+    { id: "target", type: "group", position: { x: 900, y: 0 }, width: 100, height: 100 }
+  ];
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canonical);
+  // 释放点让 leaf 中心落进 target（900..1000, 0..100），但 100×80 放不进 100×100 组的内框。
+  const commands = family().dragDropCommands(new Map([["leaf", { x: 140, y: 160 }]]),
+    new Map([["leaf", { x: 880, y: -10 }]]));
+  const applied = applyCanvasCommands(canonical, commands, { now: "2026-10-13T00:00:00.000Z" });
+  expect(applied.ok).toBe(true); if (!applied.ok) return;
+  const byId = new Map(applied.canvas.document.nodes.map(n => [n.id, n]));
+  expect(byId.get("leaf")!.parentId).not.toBe("target");
+  // 组尺寸冻结：拒绝接收时不改写目标组几何。
+  expect(byId.get("target")).toEqual(canonical.document.nodes.find(n => n.id === "target"));
+  // 节点沿合法外侧弹出，与目标组不产生正面积重叠。
+  const leafAt = getWoohaa3CanvasNodeAbsolutePosition(byId.get("leaf")!, byId);
+  const target = byId.get("target")!;
+  const overlapX = Math.min(leafAt.x + 100, target.position.x + target.width!) - Math.max(leafAt.x, target.position.x);
+  const overlapY = Math.min(leafAt.y + 80, target.position.y + target.height!) - Math.max(leafAt.y, target.position.y);
+  expect(overlapX <= 0 || overlapY <= 0).toBe(true);
+});
+
+it("mixed group/non-group drag keeps descendant world coordinates and never refits the target", () => {
   const canonical = canvasWith([]);
   canonical.document.nodes = [
     { id: "g", type: "group", position: { x: 100, y: 100 }, width: 300, height: 260 },
     { id: "child", type: "image", parentId: "g", position: { x: 20, y: 30 }, width: 100, height: 80 },
     { id: "free", type: "image", position: { x: 600, y: 500 }, width: 100, height: 80 },
-    { id: "target", type: "group", position: { x: 900, y: 0 }, width: 220, height: 200 }
+    { id: "target", type: "group", position: { x: 900, y: 0 }, width: 160, height: 180 }
   ];
   woohaa3CanvasStore.getState().applyRemoteCanvas(canonical);
   const commands = family().dragDropCommands(new Map([["g", { x: 100, y: 100 }], ["free", { x: 600, y: 500 }]]),
-    new Map([["g", { x: 130, y: 140 }], ["free", { x: 920, y: 20 }]]));
-  const nodes = canonical.document.nodes.map(n => ({ ...n, data: {} })) as Woohaa3CanvasNode[];
-  const projected = nodes.map(n => n.id === "g" ? { ...n, position: { x: 130, y: 140 } }
-    : n.id === "free" ? { ...n, position: { x: 920, y: 20 } } : n);
-  const reparented = reparentDraggedNodes(projected, ["free"], findGroupContainingCenter(projected, "free")).nodes;
-  const freeParent = reparented.find(n => n.id === "free")?.parentId;
-  const after = freeParent ? refitWoohaa3CanvasGroups([...reparented], new Set([freeParent])).nodes : reparented;
-  expect(commands).toEqual(planGroupStructureChange(nodes, after));
+    new Map([["g", { x: 130, y: 140 }], ["free", { x: 920, y: 10 }]]));
   const applied = applyCanvasCommands(canonical, commands, { now: "2026-10-13T00:00:00.000Z" });
   expect(applied.ok).toBe(true); if (!applied.ok) return;
   const resulting = applied.canvas.document.nodes.map(n => ({ ...n, data: {} })) as Woohaa3CanvasNode[];
   const byId = new Map(resulting.map(n => [n.id, n]));
+  // 组的成员保持相对坐标，世界坐标跟随主动组的位移。
   expect(getWoohaa3CanvasNodeAbsolutePosition(byId.get("child")!, byId)).toEqual({ x: 150, y: 170 });
   expect(byId.get("child")!.position).toEqual({ x: 20, y: 30 });
-  expect(byId.get("free")!.parentId).toBe("target");
-  expect(getWoohaa3CanvasNodeAbsolutePosition(byId.get("free")!, byId)).toEqual({ x: 920, y: 20 });
+  // 160×180 的组内框放不下 100×80 的节点：拒绝接收，目标组几何不变。
+  expect(byId.get("free")!.parentId).not.toBe("target");
+  expect({ position: byId.get("target")!.position, width: byId.get("target")!.width, height: byId.get("target")!.height })
+    .toEqual({ position: { x: 900, y: 0 }, width: 160, height: 180 });
 });
 
 it("warm no-structure release uses the shared index without copying or iterating the full node array", () => {

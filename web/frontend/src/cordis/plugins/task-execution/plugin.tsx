@@ -213,6 +213,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
               session={ctx.canvasSession}
               runClient={ctx.canvasRemote}
               writable={writable}
+              recordShotCommands={(commands, label) => ctx.canvasEdit.record(commands, label)}
               dialogs={ctx.dialogs}
               catalog={ctx.taskCatalog}
               registry={ctx.modelInteractions}

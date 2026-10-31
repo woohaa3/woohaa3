@@ -54,10 +54,7 @@ describe("group authority queue", () => {
     // 扩组不改变既有内容的世界坐标。
     expect(original.position.y + root.position.y).toBe(40);
   });
-  // 嵌套 group 已不是合法结构（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D7）：
-  // 遗留嵌套在读取时被拆成顶层组，绝对位置烘焙进节点。这里断言的是"拆分后成员关系不变、
-  // 在 root 内新建内容仍然落在 root 下"，而不是旧的"保持挂在 manager 下面"。
-  it("splits a legacy nested root group but keeps its members under it", async () => {
+  it("splits legacy nested groups on load, then scopes the promoted root as a top-level group", async () => {
     const room = new CanvasRoom({ canvasId: "nested-scope", repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
     const canvas = createEmptyWoohaa3ServerCanvas("nested-scope", new Date().toISOString());
     canvas.document.nodes = [
@@ -67,6 +64,13 @@ describe("group authority queue", () => {
     ];
     canvas.nodeData = { manager: { retainWhenEmpty: true }, root: { retainWhenEmpty: true }, a: { prompt: "old" } };
     await room.initialize({ canvas, roomEpoch: "epoch" });
+    // 嵌套 group 已被禁止（change: 2026-10-28-order-canvas-layers-by-ground-anchor）：
+    // 旧文档加载时把子组提升为顶层并烘焙绝对坐标，房间导出结果里 root 不再挂在 manager 下。
+    const loaded = room.exportCanvas();
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.canvas.document.nodes.find(n => n.id === "root")?.parentId).toBeUndefined();
+    expect(loaded.canvas.document.nodes.find(n => n.id === "a")?.parentId).toBe("root");
     const service = new CanvasScriptService({ resolveRoom: async () => room, authorizer: { authorize: async () => ({ allowed: true }) } });
     const scope = { owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvas.id, "root"), valid: () => true };
     const input = { principalId: "u", canvasId: canvas.id, version: "woohaa-canvas-js-v1" as const };
@@ -78,10 +82,7 @@ describe("group authority queue", () => {
     const exported = room.exportCanvas();
     expect(exported.ok).toBe(true);
     if (!exported.ok) return;
-    const rootNode = exported.canvas.document.nodes.find(n => n.id === "root");
-    expect(rootNode?.parentId).toBeUndefined();
-    // 拆分只改父级与坐标：root 相对 manager 的 (20,20) 被烘焙成绝对坐标。
-    expect(rootNode?.position).toEqual({ x: 20, y: 20 });
+    expect(exported.canvas.document.nodes.find(n => n.id === "root")?.parentId).toBeUndefined();
     expect(exported.canvas.document.nodes.find(n => n.id === "a")?.parentId).toBe("root");
     expect(exported.canvas.document.nodes.some(n => n.type === "image" && n.parentId === "root")).toBe(true);
   });

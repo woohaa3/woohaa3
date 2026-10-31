@@ -32,8 +32,8 @@ describe("设置 · 关于", () => {
     expect(container.querySelector('[data-testid="settings-about-version"]')?.textContent).toContain("未注入");
     expect(container.querySelector('[data-testid="settings-about-storage"]')?.textContent).toContain("local");
     expect(container.querySelector('[data-testid="settings-about-exposer"]')?.textContent).toContain("未选择");
-    expect(container.querySelector('[data-testid="settings-about-exposer"]')?.textContent).toContain("local-public");
-    expect(container.querySelector('[data-testid="settings-about-public-bucket"]')?.textContent).toContain("已注册");
+    expect(container.querySelector('[data-testid="settings-about-exposer"]')?.textContent).toContain("公开临时桶");
+    expect(container.querySelector('[data-testid="settings-about-public-bucket"]')).toBeNull();
     expect(container.querySelector('[data-testid="settings-about-files"]')?.textContent).toContain("woohaa.config.yml");
 
     await act(async () => root.unmount());

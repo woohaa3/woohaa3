@@ -17,7 +17,6 @@ import { FilmSetPlaybackService } from "../../preview/browser/playback-service.j
 import { animationPlaybackExtension } from "./playback-plugin.js";
 import { installFilmSetObjectFeature } from "./film-set-object-feature.js";
 import { FilmSetInspector } from "../../authoring/browser/inspector.js";
-import { extendFilmSetDrop } from "./drop.js";
 import { installFilmSetConversionEntries } from "./film-set-conversion/registration.js";
 import type { FilmSetContext } from "./context.js";
 import { filmSetEditorCameras, sceneCameraWriter } from "../../authoring/browser/scene-camera.js";
@@ -35,6 +34,13 @@ export function filmSetExtension() {
     try {
       const history = new HistoryFilmSetSnapshots();
       const preview = new Map<string, { itemId: string; transform: import("@woohaa3/contracts").FilmSetLocalTransform }>();
+      const workspaceLayouts = new Map<string, { navigationWidth: number; bottomBar: number; gridVisible: boolean }>();
+      const updateWorkspaceLayout = (nodeId: string, layout: { navigationWidth: number; bottomBar: number; gridVisible: boolean }) => {
+        if (JSON.stringify(workspaceLayouts.get(nodeId)) === JSON.stringify(layout)) return;
+        workspaceLayouts.set(nodeId, layout);
+        ctx.compositeAssets.invalidate();
+      };
+      lifetime.own(() => workspaceLayouts.clear());
       const playback = new FilmSetPlaybackService();
       ctx.provide("filmSetPlayback" as never, playback as never);
       const feature = installFilmSetObjectFeature(ctx, () => ctx.canvasRuntime.modelFocusMode() === "history", preview);
@@ -104,9 +110,15 @@ export function filmSetExtension() {
         focusLayout(nodeId) {
           const panel = ctx.canvasNavigation.getSnapshot().panel;
           return { desktop: true, panelMaxWidth: panel?.type === "node-history" && panel.nodeId === nodeId ? 740 : 320,
-            toolbar: 48, player: playback.getSnapshot().preview ? 80 : 260, animationPreview: false };
+            toolbar: 48, navigationWidth: 224, bottomBar: 56, ...workspaceLayouts.get(nodeId), animationPreview: false };
         },
         blocksFocusInput: () => playback.getSnapshot().preview,
+        showFocusGrid: nodeId => !playback.getSnapshot().preview && (workspaceLayouts.get(nodeId)?.gridVisible ?? true),
+        readonlyShotPreview(nodeId) {
+          const selected = playback.getSnapshot();
+          const animation = readFilmSetAnimationProjection(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), nodeId);
+          return selected.preview && selected.nodeId === nodeId && !!animation && filmSetAnimationsOf(animation).clips.some(clip => clip.id === selected.clipId && clip.kind === "static");
+        },
         keydown(event) {
           const state = playback.getSnapshot();
           if (!state.preview) return false;
@@ -145,7 +157,6 @@ export function filmSetExtension() {
         icon: ClapperboardIcon,
         createNodeData: () => createFilmSetNodeData() as never
       }));
-      lifetime.own(extendFilmSetDrop(ctx));
       // 直接传递 Cordis `ctx`：它已注入 canvasScope/canvasRemote/canvasLocate/canvasRuntime。
       // MUST NOT 展开（`{ ...ctx }`）——展开只复制自有可枚举属性，会丢掉 ctx 的 service 访问器，
       // 使注册模块读到 undefined 的 canvasScope（此前导致 required film-set 启动失败 → 白屏）。
@@ -176,17 +187,17 @@ export function filmSetExtension() {
         },
         onSelect: (id, { nodeId }) => { const owner = nodeId && imageOwner(nodeId); if (id === "film-set-image-download" && owner) void images.download(owner.filmSetNodeId, owner.clipId); }
       }));
-      lifetime.own(ctx.slots.register("canvas.overlay", {
-        id: "film-set-inspector", owner: FILM_SET_EXTENSION_ID, priority: 20,
-        render: ({ writable }) => createElement(FilmSetInspector, { ctx, session: ctx.modelWorkspace.session, captureSession: ctx.modelWorkspace.captureSession,
-          objectSession: feature.session, objectAction: feature.action, images, writable, canvasId: ctx.canvasState.getCanvas()?.id ?? "" })
-      }));
       ctx.plugin(animationPlaybackExtension());
       // 镜头参考录制调度（任务 8.3）：只维护 dirty 集与触发边界；真实录制由 8.4 注入。
       // 播放时钟显式传入：本插件未声明 `filmSetPlayback` 的 inject，走服务解析会在装配时抛错。
       const shotReferenceRecording = installShotReferenceRecording(ctx, { playback });
       lifetime.own(() => shotReferenceRecording.dispose());
       lifetime.own(ctx.mediaContent.register(createShotMediaProvider(ctx, images, shotReferenceRecording)));
+      lifetime.own(ctx.slots.register("canvas.overlay", {
+        id: "film-set-inspector", owner: FILM_SET_EXTENSION_ID, priority: 20,
+        render: ({ writable }) => createElement(FilmSetInspector, { ctx, session: ctx.modelWorkspace.session, captureSession: ctx.modelWorkspace.captureSession,
+          objectSession: feature.session, objectAction: feature.action, images, recording: shotReferenceRecording, writable, onLayoutChange: updateWorkspaceLayout, canvasId: ctx.canvasState.getCanvas()?.id ?? "" })
+      }));
       // 原生录制任务 → 活动浮层（任务 5.5）。宿主只提供权威状态；事件属于页面 scope，
       // 因此由前端轮询并投影。断开只停止观察，不取消原生任务。
       const recordingActivity = nativeRecordingAvailable()

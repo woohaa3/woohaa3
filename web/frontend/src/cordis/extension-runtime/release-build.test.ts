@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,7 +9,9 @@ const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "woohaa-release-build-"));
+  // macOS 的 `tmpdir()` 是 `/var/folders/…`，而 Vite 会把 root 解析成 `/private/var/…`；
+  // 两个路径不一致时 Rollup 会把 index.html 当成相对输出的 `../../..` 路径报错。
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "woohaa-release-build-")));
   roots.push(root);
   const dist = join(root, "dist");
   mkdirSync(join(dist, "assets"), { recursive: true });

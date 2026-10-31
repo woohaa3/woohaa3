@@ -482,3 +482,19 @@ describe("模型聚焦相机与失效（change: add-model-focus-viewing）", () 
     h.controller.dispose();
   });
 });
+
+it("观察预设保持观察目标和距离，俯视从场景上方观察且不改保存镜头", () => {
+  const h = focusHarness({ getModelEditor: () => shotEditor });
+  const point = modelCenter(h.target);
+  domFire(h.dom, "dblclick", { clientX: point.x, clientY: point.y });
+  const before = h.controller.focusProjection()!;
+  h.controller.setFocusedModelView("top");
+  expect(h.controller.focusProjection()).toMatchObject({ target: before.target, distance: before.distance, yaw: 0 });
+  expect(h.controller.focusProjection()!.pitch).toBeLessThan(-1.5);
+  h.controller.setFocusedModelView("perspective");
+  expect(h.controller.focusProjection()!.pitch).toBeLessThan(0);
+  h.controller.setFocusedModelView("right");
+  expect(h.controller.focusProjection()).toMatchObject({ yaw: Math.PI / 2, pitch: 0 });
+  expect(shotEditor.shot!.distance).toBe(4);
+  h.controller.dispose();
+});

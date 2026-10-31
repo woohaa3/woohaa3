@@ -160,7 +160,7 @@ export type AgentConversationService = {
   reconcileDeliveryTurn(input: { owner: string; requestId: string; canvasId: string;
     delivery: NonNullable<AgentTargetSnapshot["delivery"]>; outcome: AgentAdapterRunOutcome }): void;
   recordGroupAction(input: { owner: string; requestId: string; action: import("@woohaa3/contracts").CanvasGroupAction }): void;
-  createConversation(input: { owner: string; canvasId: string; adapterId?: string; title?: string; nodeId?: string; connectionId?: string }):
+  createConversation(input: { contextKey?: string; owner: string; canvasId: string; adapterId?: string; title?: string; nodeId?: string; connectionId?: string }):
     | { ok: true; conversation: ConversationSummary }
     | { ok: false; error: AgentConversationServiceError };
   listConversations(input: { owner: string; canvasId: string; limit?: number }): ConversationSummary[];
@@ -171,7 +171,7 @@ export type AgentConversationService = {
    * 只读：只返回仍与节点关联的会话；`connectionId` 提供时只返回该来源连接下的会话
    * （change: 2026-10-16-...，任务 2.3）。无则 `conversation: null`（调用方据此新建）。
    */
-  findConversationForTarget(input: { owner: string; canvasId: string; nodeId: string; connectionId?: string }):
+  findConversationForTarget(input: { contextKey?: string; owner: string; canvasId: string; nodeId: string; connectionId?: string }):
     { ok: true; conversation: ConversationSummary | null };
   /**
    * 清空节点上下文：解除该节点与当前会话的关联（归档旧会话，**不**删除历史；design D8）。
@@ -535,6 +535,7 @@ export function createAgentConversationService(options: AgentConversationService
         connectionId: input.connectionId ?? null,
         title: input.title?.trim() || "新对话",
         nodeId: input.nodeId ?? null,
+        ...(input.contextKey ? { contextKey: input.contextKey } : {}),
         now: timestamp
       });
       return { ok: true, conversation: toSummary(binding) };
@@ -563,6 +564,7 @@ export function createAgentConversationService(options: AgentConversationService
         owner: input.owner,
         canvasId: input.canvasId,
         nodeId: input.nodeId,
+        ...(input.contextKey ? { contextKey: input.contextKey } : {}),
         ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId })
       });
       return { ok: true, conversation: binding ? toSummary(binding) : null };

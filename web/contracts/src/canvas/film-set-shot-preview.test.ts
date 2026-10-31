@@ -16,6 +16,7 @@ import {
   isShotPreviewNodeId,
   planShotPreviewLayout,
   shotAspectValue,
+  shotCoverCamera,
   shotPreviewCardSize,
   shotPreviewContentHeight,
   shotPreviewNodeId,
@@ -123,6 +124,27 @@ describe("从源镜头派生预览目标", () => {
     expect(targets[0]!.nodeId).toBe(shotPreviewNodeId("film", "a"));
     expect(targets[1]!.nodeId).toBe(shotPreviewNodeId("film", "b"));
     expect(shotPreviewTargetsOf("film", {})).toEqual([]);
+  });
+
+  it("封面相机保留 ±90° 端点，只收回越界与非法值", () => {
+    const atLimit = shotCoverCamera({ initialCamera: { ...camera, elevation: -Math.PI / 2, distance: 0 } });
+    expect(atLimit.elevation).toBeCloseTo(-Math.PI / 2, 9);
+    expect(atLimit.distance).toBeGreaterThan(0);
+    expect(Number.isFinite(atLimit.azimuth)).toBe(true);
+
+    const beyond = shotCoverCamera({ initialCamera: { ...camera, elevation: Math.PI } });
+    expect(beyond.elevation).toBeCloseTo(Math.PI / 2, 9);
+    const nonFinite = shotCoverCamera({ initialCamera: { ...camera, elevation: Number.NaN, azimuth: Number.NaN } });
+    expect(Number.isFinite(nonFinite.elevation)).toBe(true);
+    expect(nonFinite.azimuth).toBe(0);
+
+    const targets = shotPreviewTargetsOf("film", {
+      filmSetAnimations: {
+        ...animation.filmSetAnimations,
+        clips: [{ ...animation.filmSetAnimations.clips[0]!, initialCamera: { ...camera, elevation: Math.PI / 2 } }]
+      }
+    });
+    expect(targets[0]!.coverCamera.elevation).toBeCloseTo(Math.PI / 2, 9);
   });
 });
 

@@ -8,7 +8,7 @@
 import type { CanvasNodeData } from "../domain/index.js";
 import { compositeAssetNodeBoxSize as nodeBoxSize } from "../node-dimensions.js";
 import { decodeFilmSetLocalTransform, readFilmSetContent } from "../film-set-content.js";
-import { filmSetFitFactor, modelAnchor, modelLayoutAabbRelative, modelWorldAabbRelative, worldToCanvasPoint, type ModelSceneInput } from "../model-focus.js";
+import { CANVAS_UNITS_PER_METER, filmSetFitFactor, modelAnchor, modelLayoutAabbRelative, modelWorldAabbRelative, worldToCanvasPoint, type ModelSceneInput } from "../model-focus.js";
 import type { Aabb } from "../model-transform.js";
 import { filmSetLayoutBounds } from "../film-set-layout.js";
 import { MODEL_SCRIPT_SCENE_IR_V2_VERSION } from "../model-script.js";
@@ -228,16 +228,15 @@ export function filmSetMediaPlanesForNode(input: {
   data: CanvasNodeData | undefined;
   readyPlaneIds: ReadonlySet<string>;
   /**
-   * 片场组合资源的规范 extent（`PreparedModelResource.extent`）。用于把「48 世界单位」的默认
-   * 平面高度折算为内容单位：`contentHeight = 48 × extent / 192`，再由 Rust 的 `unit`（含
-   * `192/extent` 自然单位）还原为原屏幕尺寸。缺省 2（空/单内容场景）。
+   * 片场组合资源的规范 extent（`PreparedModelResource.extent`）。绝对米制下**不再参与**平面尺寸
+   * 折算（`contentHeight = 48 / CANVAS_UNITS_PER_METER`），仅保留在签名里供既有调用方与
+   * `contentExtent` 呈现字段继续传递（change: 2026-10-31-render-models-at-absolute-metric-scale）。
    */
   contentExtent?: number;
 }): BevyModelMediaPlane[] {
   const content = readFilmSetContent(input.data);
   const scenePlacement = decodeFilmSetLocalTransform((input.data as { scenePlacement?: unknown } | undefined)?.scenePlacement);
   const scene = scenePlacement.ok ? scenePlacement.value : { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 };
-  const extent = Number.isFinite(input.contentExtent) && (input.contentExtent as number) > 0 ? (input.contentExtent as number) : 2;
   const cos = Math.cos(scene.yaw);
   const sin = Math.sin(scene.yaw);
   const planes: BevyModelMediaPlane[] = [];
@@ -245,8 +244,8 @@ export function filmSetMediaPlanesForNode(input: {
     if (item.kind !== "image" && item.kind !== "video") continue;
     const id = `${input.nodeId}::${item.id}`;
     const ratio = Number.isFinite(item.aspectRatio) && item.aspectRatio > 0 ? item.aspectRatio : 1;
-    // 内容单位平面高度（未含共同根 scale）：48 世界单位 ÷ 自然单位（192/extent）。
-    const itemHeight = (FILM_SET_MEDIA_PLANE_HEIGHT * item.localTransform.scale * extent) / 192;
+    // 内容单位平面高度（未含共同根 scale）：48 画布单位 ÷ 每米画布单位。
+    const itemHeight = (FILM_SET_MEDIA_PLANE_HEIGHT * item.localTransform.scale) / CANVAS_UNITS_PER_METER;
     // 共同根 scale 作用于整场（含 item 位置与尺寸）；每层只应用一次。
     const contentHeight = itemHeight * scene.scale;
     const contentWidth = contentHeight * ratio;

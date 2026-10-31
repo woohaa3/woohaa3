@@ -60,7 +60,7 @@ function fixture() {
   const ctx = {
     canvasState,
     filmSetPlayback: { subscribe: () => () => undefined, getSnapshot: () => ({preview:false}) },
-    compositeAssets: { projectCanvas },
+    compositeAssets: { projectCanvas, blocksFocusInput: () => false },
     canvasSession: { subscribe: () => () => undefined, isWritable: () => true },
     canvasEdit: { record: async () => ({ ok: true }) },
     canvasRuntime: {

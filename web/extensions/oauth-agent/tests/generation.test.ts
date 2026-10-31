@@ -618,3 +618,26 @@ it("真实 SDK 事件边界保留消息与工具顺序，工具事件不消耗�
   expect(progress[1]?.tool?.callId).toBe("call-1");
   expect(progress[2]?.tool?.callId).toBe("call-1");
 });
+
+it.each([false, true])("whole-set motion keeps the snapshot precondition and reports a real conflict: %s", async conflict => {
+  const animation = createFilmSetSnapshot({ title: "整体", model: { modelScript: VALID_SCRIPT, modelScriptVersion: PREFERRED_MODEL_SCRIPT_VERSION }, modelItemId: "model", motionScript: 'motion.model.rotate("box", { speed: 1 });', timeline: { duration: 4, loop: false } });
+  const writes: Parameters<ChatGptCanvasPorts["commitAnimation"]>[0][] = [];
+  const service = createChatGptGenerationService({ ports: ports({
+    readNode: async () => ({ ok: true, nodeType: "group", title: "整体", prompt: "", references: [], animation, snapshotHash: "latest", cameras: [] }),
+    commitAnimation: async input => {
+      writes.push(input);
+      return conflict ? { ok: false, code: "stale-snapshot", message: "片场内容已更改" } : { ok: true, canvasId: "cv", nodeId: "n", commandId: "whole", duplicate: false, noop: false };
+    }
+  }), codex: adapt(() => fakeCodex({ motionScript: 'motion.model.rotate("box", { speed: 2 });', timeline: { duration: 4, loop: false } })) });
+  const input = { ownerId: "o", requestId: "whole", canvasId: "cv", nodeId: "n", mode: "film-set" as const, model: "gpt-5", prompt: "修改整体动作", expectedContentHash: "captured-snapshot" };
+  const result = await service.generate(input);
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toMatchObject({ expectedSnapshotHash: "captured-snapshot" });
+  expect(writes[0]!.clipId).toBeUndefined();
+  expect(writes[0]!.expectedClipHash).toBeUndefined();
+  if (conflict) expect(result).toMatchObject({ ok: false, code: "stale-snapshot", status: 409 });
+  else expect(result.ok).toBe(true);
+  await service.generate(input);
+  expect(writes).toHaveLength(1);
+  service.dispose();
+});

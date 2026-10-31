@@ -15,7 +15,6 @@
  */
 import {
   checkAnimationMotion,
-  filmSetGroupBadgePlacement,
   getGroupLayoutSizes,
   getWoohaa3CanvasNodeAbsolutePosition,
   groupBadgeRect,
@@ -34,6 +33,7 @@ import {
   type ServerCanvas
 } from "@woohaa3/contracts";
 import { modelBounds, type FocusTargetInput } from "./model-focus-session.js";
+import type { MediaContentService } from "../../../extension-api/media-content.js";
 
 /** 单张预览卡片的本地呈现输入（render scene `shotPreviews` 条目）。 */
 export type ShotPreviewLocalState = {
@@ -60,6 +60,7 @@ export type ShotPreviewSceneInputSource = {
   playback: BevyAnimationPlayback | null;
   /** 已解析的模型聚焦目标集合（片场世界包围球与徽标投影的共享事实源）。 */
   targets: readonly FocusTargetInput[];
+  mediaContent?: MediaContentService;
 };
 
 /**
@@ -113,6 +114,18 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
     const local: ShotPreviewLocalState = gate.canPreview
       ? { state: "ready" }
       : { state: "error", ...(gate.reason ? { diagnostic: gate.reason } : {}) };
+    // A valid script does not mean the cached media belongs to this revision.
+    // Compare synchronously as the provider reconciliation runs in a microtask.
+    const ref = canvas.nodeData[node.id]?.mediaContent;
+    if (gate.canPreview && managedShotPreviewOwnershipOf(nodeData[node.id]) && ref) {
+      const media = source.mediaContent?.state(node.id);
+      let current = false;
+      try {
+        current = !!source.mediaContent && (node.type === "image" || node.type === "video")
+          && source.mediaContent.describe(canvas, ref, node.type).sourceIdentity === media?.sourceIdentity;
+      } catch { /* Live preview remains available while the provider resolves. */ }
+      if (!current || media?.status !== "ready" || !media.asset) local.state = "stale";
+    }
     // 活动动态卡片承载本地播放进度（不进入 canonical）；命中身份须同时匹配片场/镜头/卡片。
     if (
       playback &&
@@ -132,8 +145,9 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
   /**
    * 片场 3D 徽标在画布坐标系里的矩形。
    *
-   * 与 Bevy 绘制同源：徽标 = 该组模型投影包围盒，以组结构底边中点向下 40 画的锚点居中。
-   * 投影复用聚焦目标里同一份已 prepared 模型几何（`groupModelProjection`）。
+   * 与 Bevy 绘制同源：徽标 = 该组模型投影包围盒（共享画布模型单位），以组结构底边中点向下 40
+   * 画的锚点顶边对齐、只向下展开。投影复用聚焦目标里同一份已 prepared 模型几何
+   * （`groupModelProjection`），不按组宽取景（change: 2026-10-31-render-film-set-badge-at-model-units）。
    */
   const badgeRectOf = (filmSetNodeId: string): { x: number; y: number; width: number; height: number; center: { x: number; y: number } } | null => {
     const node = canvas.document.nodes.find((entry) => entry.id === filmSetNodeId);
@@ -141,20 +155,13 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
     const target = targets.get(filmSetNodeId);
     const world = getWoohaa3CanvasNodeAbsolutePosition(node, new Map(canvas.document.nodes.map((entry) => [entry.id, entry])));
     const layout = getGroupLayoutSizes(canvas.document.nodes).get(filmSetNodeId);
-    const width = layout?.width ?? node.width ?? 180;
     const projection = target
       ? groupModelProjection({
         sceneVersion: target.sceneVersion,
         ops: target.ops as never,
         extent: target.extent,
         aabb: target.aabb ?? undefined,
-        placement: filmSetGroupBadgePlacement({
-          sceneVersion: target.sceneVersion,
-          ops: target.ops as never,
-          extent: target.extent,
-          aabb: target.aabb ?? undefined,
-          placement: target.placement
-        }, width),
+        placement: target.placement,
         badgeTopAnchored: true
       })
       : null;
@@ -162,7 +169,7 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
     const rect = {
       x: world.x,
       y: world.y,
-      width,
+      width: layout?.width ?? node.width ?? 180,
       height: layout?.height ?? node.height ?? 112
     };
     return groupBadgeRect(rect, projection);

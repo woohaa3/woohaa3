@@ -72,44 +72,44 @@ export const LOCAL_STORAGE_CONFIG = defineConfigSchema({
     reload: "hot",
     legacyEnv: "COS_PUBLIC_ENABLED",
     default: false,
-    label: "启用公开临时桶",
-    description: "开启后可用「公开临时桶」把素材推到公开只读存储，拿到可直接拉取的地址；内容会被定期清理"
+    label: "启用外链地址",
+    description: "开启后可用外链地址把素材推到公开只读存储，拿到可直接拉取的地址；内容会被定期清理"
   },
   publicBucketName: {
     kind: "string",
     ...(PUBLIC_BUCKET_DEFAULTS.bucketName ? { default: PUBLIC_BUCKET_DEFAULTS.bucketName } : {}),
     reload: "hot",
-    label: "公开桶名称",
-    description: "公开临时桶名（含 APPID 后缀）；留空用构建期注入值"
+    label: "外链桶名称",
+    description: "外链存储桶名（含 APPID 后缀）；留空用构建期注入值"
   },
   publicBucketUrl: {
     kind: "url",
     protocols: ["https:", "http:"],
     ...(PUBLIC_BUCKET_DEFAULTS.bucketUrl ? { default: PUBLIC_BUCKET_DEFAULTS.bucketUrl } : {}),
     reload: "hot",
-    label: "公开桶地址",
-    description: "公开临时桶访问域名；留空用构建期注入值，region 由它解析"
+    label: "外链地址",
+    description: "外链存储访问域名；留空用构建期注入值，region 由它解析"
   },
   publicPrefix: {
     kind: "string",
     ...(PUBLIC_BUCKET_DEFAULTS.prefix ? { default: PUBLIC_BUCKET_DEFAULTS.prefix } : {}),
     reload: "hot",
-    label: "公开桶前缀",
-    description: "公开桶内的对象前缀；留空用构建期注入值，最终键为 <prefix>/<namespace>/<key>"
+    label: "外链前缀",
+    description: "外链存储内的对象前缀；留空用构建期注入值，最终键为 <prefix>/<namespace>/<key>"
   },
   publicSecretId: {
     kind: "string",
     secret: true,
     reload: "hot",
-    label: "公开桶 SecretId",
-    description: "公开临时桶凭据；留空时依次读环境变量 COS_PUBLIC_SECRET_ID、COS_SECRET_ID，或复用「COS / S3 对象存储」的凭据"
+    label: "外链 SecretId",
+    description: "公开读写的桶可留空（匿名写入）；否则依次读 COS_PUBLIC_SECRET_ID、COS_SECRET_ID，或复用「COS / S3 对象存储」的凭据"
   },
   publicSecretKey: {
     kind: "string",
     secret: true,
     reload: "hot",
-    label: "公开桶 SecretKey",
-    description: "公开临时桶凭据；留空时依次读环境变量 COS_PUBLIC_SECRET_KEY、COS_SECRET_KEY，或复用「COS / S3 对象存储」的凭据"
+    label: "外链 SecretKey",
+    description: "公开读写的桶可留空（匿名写入）；否则依次读 COS_PUBLIC_SECRET_KEY、COS_SECRET_KEY，或复用「COS / S3 对象存储」的凭据"
   }
 });
 

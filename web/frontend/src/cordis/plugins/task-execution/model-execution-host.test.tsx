@@ -336,7 +336,9 @@ describe("ModelExecutionHost 片场外显镜头", () => {
     expect(container.querySelector('[aria-label="镜头视频参数"]')).not.toBeNull();
     expect(container.textContent).toContain("推镜");
     expect(container.textContent).toContain("1280 × 720");
-    expect(container.textContent).toContain("2.5 秒");
+    // 时长在可写面板里是数值输入（change: 可写镜头参数），不再渲染成「2.5 秒」文本。
+    expect(container.textContent).toContain("时长（秒）");
+    expect(container.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe("2.5");
     expect(container.querySelector('[data-testid="video-panel"]')).toBeNull();
   });
 });

@@ -75,6 +75,8 @@ describe("场景构建保留 Agent 回合运行态", () => {
     expect(running).not.toBeNull();
     // canonical 上没有 taskStatus，运行态只能来自统一运行状态投影。
     expect(running!.busy).toBe(true);
+    // 进度环估算起点来自该操作的记录创建时刻（与活动面板同一条记录）。
+    expect(running!.progressStartedAt).toBe(Date.parse("2026-10-18T00:00:00.000Z"));
 
     const idle = sceneWith({ summaries: [{ ...summary, active: null }], records: [] });
     expect(idle!.busy).toBe(false);

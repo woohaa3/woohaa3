@@ -1,4 +1,6 @@
 import { planCompositeChildLayout } from "./composite-children.js";
+import { SHOT_CAMERA_ABSOLUTE_MIN_DISTANCE } from "./shot-camera.js";
+import { clampCameraElevation } from "./model-cameras.js";
 /**
  * 拍摄镜头预览节点契约
  * （change: 2026-10-15-add-film-set-shooting-shot-previews，D2/D4）。
@@ -193,11 +195,19 @@ export type ShotCoverCamera = {
 
 export function shotCoverCamera(clip: Pick<FilmSetAnimationClip, "initialCamera">): ShotCoverCamera {
   const camera = clip.initialCamera;
+  const finite = (value: number, fallback: number) => (Number.isFinite(value) ? value : fallback);
+  const distance = finite(camera.distance, 4);
   return {
-    azimuth: camera.azimuth,
-    elevation: camera.elevation,
-    distance: camera.distance,
-    focusOffset: [camera.focusOffset.x, camera.focusOffset.y, camera.focusOffset.z]
+    azimuth: finite(camera.azimuth, 0),
+    // 规范半圆包含 ±90° 端点；这里只把越界/非有限值收回规范范围。与世界上方向共线的
+    // 实际姿态由渲染器派生层钳到 ±89°，整帧不因端点值被拒绝。
+    elevation: clampCameraElevation(camera.elevation),
+    distance: Math.max(SHOT_CAMERA_ABSOLUTE_MIN_DISTANCE, distance),
+    focusOffset: [
+      finite(camera.focusOffset.x, 0),
+      finite(camera.focusOffset.y, 0),
+      finite(camera.focusOffset.z, 0)
+    ]
   };
 }
 

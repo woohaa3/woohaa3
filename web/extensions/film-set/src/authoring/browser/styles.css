@@ -1,9 +1,30 @@
+/* 片场工作区只有三档字号：16 标题 / 13 正文与控件 / 12 元信息。
+   导航、观察栏、视口工具、底部栏与检查器是公共 focus 的并列表面，各自声明一次基础字号；
+   否则未单独声明的文字会从 body 继承 16px，和 13px 的共享控件混排。
+   元信息靠颜色与字重降级，不再新增 14/11 等中间档。 */
+.film-set-navigation,
+.film-set-view-bar,
+.film-set-viewport-tools,
+.film-set-generate-dock,
+.film-set-output-menu,
+.film-set-bottom,
+.model-editor-dock[data-film-set] {
+  --film-set-font-title: 16px;
+  --film-set-font-body: 13px;
+  --film-set-font-meta: 12px;
+  --film-set-leading-title: 24px;
+  --film-set-leading-body: 20px;
+  --film-set-leading-meta: 18px;
+  font-size: var(--film-set-font-body);
+  line-height: var(--film-set-leading-body);
+}
+
 .film-set-object-dock { padding: 12px; border-bottom: 1px solid var(--app-web-border); }
 .film-set-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; min-height: 24px; }
-.film-set-section-heading h3 { margin: 0; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.film-set-count { margin-left: 5px; font-size: 12px; font-weight: 500; color: var(--app-web-text-muted); font-variant-numeric: tabular-nums; }
+.film-set-section-heading h3 { margin: 0; min-width: 0; font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-set-count { margin-left: 5px; font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); font-weight: 500; color: var(--app-web-text-muted); font-variant-numeric: tabular-nums; }
 .film-set-object-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; }
-.film-set-object-list__empty { padding: 18px 12px; border: 1px dashed var(--app-web-border); border-radius: 8px; font-size: 12px; line-height: 1.6; color: var(--app-web-text-muted); }
+.film-set-object-list__empty { padding: 18px 12px; border: 1px dashed var(--app-web-border); border-radius: 8px; font-size: var(--film-set-font-meta); line-height: 1.6; color: var(--app-web-text-muted); }
 .film-set-object-row {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 5px 8px;
   border: 1px solid transparent; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; text-align: left;
@@ -12,48 +33,49 @@
 .film-set-object-row[aria-selected="true"] { border-color: var(--app-interaction-accent); background: var(--app-interaction-accent-soft); }
 .film-set-object-row__icon { display: flex; flex-shrink: 0; color: var(--app-web-text-muted); }
 .film-set-object-row[aria-selected="true"] .film-set-object-row__icon { color: var(--app-interaction-accent); }
-.film-set-object-row__name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 20px; }
-.film-set-object-row__kind { font-size: 12px; color: var(--app-web-text-muted); flex-shrink: 0; }
+.film-set-object-row__name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); }
+.film-set-object-row__kind { font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); color: var(--app-web-text-muted); flex-shrink: 0; }
 .film-set-object-fields { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--app-web-border); }
-.film-set-selection-heading > span { font-size: 12px; color: var(--app-web-text-muted); flex-shrink: 0; }
+.film-set-selection-heading > span { font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); color: var(--app-web-text-muted); flex-shrink: 0; }
 .film-set-transform { display: grid; gap: 8px; }
-.film-set-transform__label { font-size: 13px; color: var(--app-web-text-muted); }
+.film-set-transform__label { font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); color: var(--app-web-text-muted); }
 .film-set-transform__axes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .film-set-transform__pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
-.film-set-number { display: grid; gap: 6px; min-width: 0; font-size: 13px; color: var(--app-web-text-muted); }
+.film-set-number { display: grid; gap: 6px; min-width: 0; font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); color: var(--app-web-text-muted); }
 .film-set-number[data-axis] { position: relative; }
-.film-set-number[data-axis] > span { position: absolute; left: 8px; top: 9px; z-index: 1; font-size: 12px; font-weight: 650; pointer-events: none; }
+.film-set-number[data-axis] > span { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); z-index: 1; font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); font-weight: 650; pointer-events: none; }
 .film-set-number[data-axis="x"] > span { color: var(--app-gizmo-axis-x); }
 .film-set-number[data-axis="y"] > span { color: var(--app-gizmo-axis-y); }
 .film-set-number[data-axis="z"] > span { color: var(--app-gizmo-axis-z); }
 .film-set-number__input { display: flex; align-items: center; min-width: 0; border: 1px solid var(--app-web-border); background: var(--app-web-subtle); border-radius: 6px; }
 .film-set-number__input:focus-within { border-color: var(--app-interaction-accent); box-shadow: 0 0 0 2px var(--app-interaction-accent-soft); }
-.film-set-number__input input { width: 100%; min-width: 0; padding: 8px; border: 0; background: transparent; color: var(--app-web-text-primary); font: inherit; font-size: 13px; line-height: 20px; height: 30px; box-sizing: border-box; font-variant-numeric: tabular-nums; outline: none; appearance: textfield; }
+.film-set-number__input input { width: 100%; min-width: 0; padding: 8px; border: 0; background: transparent; color: var(--app-web-text-primary); font: inherit; font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); height: 34px; box-sizing: border-box; font-variant-numeric: tabular-nums; outline: none; appearance: textfield; }
 .film-set-number[data-axis] input { padding-left: 23px; }
 .film-set-number input::-webkit-inner-spin-button { appearance: none; }
 .film-set-number input:disabled { opacity: 0.5; cursor: not-allowed; }
 .film-set-number input[aria-invalid="true"] { color: var(--app-status-danger); }
-.film-set-number__input > span { padding-right: 8px; font-size: 12px; }
+.film-set-number__input > span { padding-right: 8px; font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); }
 .film-set-object-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
 .film-set-object-delete.ui-button { color: var(--app-web-text-muted); }
 .film-set-object-delete.ui-button:hover { color: var(--app-status-danger); }
-.film-set-object-hint { margin: 12px 0 0; color: var(--app-web-text-muted); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
-.film-set-object-error { margin-top: 10px; padding: 8px; border-radius: 6px; background: var(--app-web-subtle); color: var(--app-status-danger); font-size: 12px; line-height: 1.5; }
+.film-set-object-hint { margin: 12px 0 0; color: var(--app-web-text-muted); font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); overflow-wrap: anywhere; }
+.film-set-object-error { margin-top: 10px; padding: 8px; border-radius: 6px; background: var(--app-web-subtle); color: var(--app-status-danger); font-size: var(--film-set-font-meta); line-height: 1.5; }
 
 .film-set-object-row:focus-visible { outline: 2px solid var(--app-interaction-accent); outline-offset: 2px; }
 
 .film-set-animation-controls { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; max-width: 100%; box-sizing: border-box; gap: 8px; padding: 12px; border-bottom: 1px solid var(--app-web-border); }
 .film-set-animation-controls label { min-width: 0; max-width: 100%; display: flex; gap: 8px; align-items: center; }
-.film-set-animation-controls input:not([type="checkbox"]):not([type="color"]), .film-set-animation-controls select { width: 0; max-width: 100%; min-width: 0; flex: 1 1 0; text-overflow: ellipsis; }
+/* 基础输入样式放进 :where()，让构图滑杆/数值框等组件规则按自身尺寸生效。 */
+.film-set-animation-controls :where(input:not([type="checkbox"]):not([type="color"])), .film-set-animation-controls select { width: 0; max-width: 100%; min-width: 0; flex: 1 1 0; text-overflow: ellipsis; }
 .film-set-animation-modes, .film-set-animation-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .film-set-animation-modes [aria-pressed="true"] { font-weight: 700; }
 .film-set-animation-player { display: grid; gap: 10px; }
-.film-set-animation-player p { font-size: 12px; opacity: .7; }
+.film-set-animation-player p { font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); opacity: .7; }
 .film-set-animation-player { position: absolute; z-index: 30; left: var(--focus-content-x, 16px); bottom: var(--focus-player-bottom, 12px); width: var(--focus-content-width, calc(100% - 32px)); box-sizing: border-box; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 8px; border-radius: 8px; background: var(--mc-panel); pointer-events: auto; }
 .film-set-animation-player input[type="range"] { flex: 1; min-width: 90px; }
-.film-set-animation-player output { font-variant-numeric: tabular-nums; font-size: 12px; }
+.film-set-animation-player output { font-variant-numeric: tabular-nums; font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); }
 .film-set-animation-player p { flex-basis: 100%; margin: 0; }
-@media (max-width: 640px) { .film-set-animation-player { font-size: 12px; gap: 5px; padding: 6px; } }
+@media (max-width: 640px) { .film-set-animation-player { font-size: var(--film-set-font-meta); gap: 5px; padding: 6px; } }
 
 /* 创建弹窗与每目标节点内部的转换反馈。 */
 .film-set-creation-dialog { display: grid; gap: 16px; }
@@ -88,17 +110,6 @@
 }
 .video-focus-workspace__playback { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-width: 0; }
 
-
-/* 片场拖入反馈：图片/视频等不被接收的来源释放后在此说明原因（change: 2026-10-18）。 */
-.film-set-drop-feedback {
-  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30;
-  max-width: min(420px, calc(100vw - 48px)); padding: 8px 14px; border: 1px solid var(--app-web-border);
-  border-radius: 8px; background: var(--app-web-panel); color: var(--app-web-text-primary);
-  box-shadow: 0 8px 24px var(--app-web-shadow); font-size: 12px; line-height: 1.6;
-  pointer-events: none;
-}
-.film-set-drop-feedback[hidden] { display: none; }
-
 /* 单栏按拍摄任务组织；低频操作与构图参数渐进展开。 */
 .film-set-shot-tools, .film-set-shot-picker, .film-set-shot-timing, .film-set-shot-backdrop { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .film-set-animation-controls .film-set-section-heading { margin-bottom: 0; }
@@ -111,7 +122,7 @@
 .film-set-shot-menu { display: grid; gap: 4px; padding: 6px; min-width: 160px; }
 .film-set-shot-menu > .ui-button { justify-content: flex-start; }
 .film-set-composition { padding-top: 4px; }
-.film-set-composition summary, .film-set-transform__more summary { cursor: pointer; font-size: 13px; color: var(--app-web-text-primary); padding-block: 6px; }
+.film-set-composition summary, .film-set-transform__more summary { cursor: pointer; font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); color: var(--app-web-text-primary); padding-block: 6px; }
 .film-set-composition summary > span { float: right; color: var(--app-web-text-muted); font-variant-numeric: tabular-nums; }
 .model-editor-dock[data-inspector] .film-set-composition .model-editor { height: auto; padding: 12px 0; }
 .film-set-composition .model-editor__body { padding: 0; }
@@ -119,43 +130,35 @@
 .film-set-object-binding, .model-inspector-scroll > .film-set-adaptation { padding: 0 16px 16px; }
 .film-set-transform__more { margin-top: 4px; }
 
-/* 复用概览态生成 UI，位置跟随公共 contentRect；收起不卸载宿主。 */
-.film-set-generate-dock {
-  position: absolute; z-index: 25;
-  left: calc(var(--focus-content-x, 0px) + var(--focus-content-width, 100%) / 2);
-  bottom: calc(var(--focus-player-bottom, 44px) + 12px);
-  transform: translateX(-50%); width: min(760px, calc(var(--focus-content-width, 100%) - 32px));
-  display: flex; flex-direction: column; align-items: center; pointer-events: none;
-}
+/* AI 浮块复用真实生成 UI；收起不卸载宿主。 */
+/* 宿主 composer 自带边框与投影；在片场浮块里它只会沿外缘多出一圈白边，去掉这层壳。 */
+.film-set-generate-dock .mc-panel.authoring-generate[data-presentation="dock"] { padding: 8px; gap: 6px; border: 0; box-shadow: none; }
+.film-set-generate-dock .authoring-generate__composer > .mention-editor .mention-editor__input { padding: 6px 8px; }
+.film-set-generate-dock .authoring-generate-placeholder { padding: 8px; }
+.film-set-generate-dock { display: flex; flex-direction: column; width: min(560px, 100%); min-height: 0; color: var(--app-web-text-primary); pointer-events: auto; }
 .film-set-generate-dock > * { pointer-events: auto; }
 .film-set-generate-dock[hidden], .film-set-generate-dock__expanded[hidden] { display: none; }
-.film-set-generate-dock__expanded { width: 100%; min-width: 0; max-height: calc(var(--focus-content-height, 100vh) - 24px); overflow-y: auto; }
-.film-set-generate-dock__heading { display: flex; align-items: center; gap: 8px; padding: 0 4px 4px; font-size: 12px; color: var(--app-web-text-primary); }
-.film-set-generate-dock__title { flex-shrink: 0; font-weight: 600; }
-.film-set-generate-dock__shot { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.film-set-generate-dock__target { max-width: 38%; min-width: 0; margin-left: auto; padding: 4px 8px; border: 1px solid var(--app-web-border); border-radius: 6px; background: var(--app-web-panel); color: inherit; font: inherit; text-overflow: ellipsis; }
-.film-set-generate-dock__scope { margin-left: auto; color: var(--app-web-text-muted); white-space: nowrap; }
-.film-set-generate-restore { box-shadow: 0 4px 16px var(--app-web-shadow); }
+.film-set-generate-dock__expanded { width: 100%; min-width: 0; min-height: 0; max-height: 260px; overflow-y: auto; overscroll-behavior: contain; }
+.film-set-generate-dock textarea { max-height: 84px; }
 
 .film-set-object-tools { display: flex; gap: 4px; margin: 8px 0 12px; }
 .film-set-object-tools > button { flex: 1; min-width: 0; }
 .film-set-gizmo-readout { position: fixed; z-index: 30; pointer-events: none; padding: 6px 9px; border: 1px solid var(--app-web-border); border-radius: 6px; background: var(--app-web-elevated); color: var(--app-web-text-primary); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.model-editor-dock[data-film-set] { font-size: 13px; line-height: 20px; }
-.model-editor-dock[data-film-set] .model-inspector-header h2 { font-size: 16px; line-height: 24px; }
-.model-editor-dock[data-film-set] .model-inspector-header p { font-size: 12px; line-height: 18px; }
+.model-editor-dock[data-film-set] .model-inspector-header h2 { font-size: var(--film-set-font-title); line-height: var(--film-set-leading-title); }
+.model-editor-dock[data-film-set] .model-inspector-header p { font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); }
 .model-editor-dock[data-film-set] input, .model-editor-dock[data-film-set] select, .model-editor-dock[data-film-set] button { font-family: inherit; }
-.film-set-animation-controls input:not([type="checkbox"]):not([type="color"]), .film-set-animation-controls select {
+.film-set-animation-controls :where(input:not([type="checkbox"]):not([type="color"])), .film-set-animation-controls select {
   height: 32px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--app-web-border); border-radius: 6px;
   background: var(--app-web-panel); color: var(--app-web-text-primary); font: inherit; font-variant-numeric: tabular-nums;
 }
 .film-set-shot-picker > .ui-select-input { flex: 1; min-width: 0; }
 .model-editor-dock[data-film-set] .ui-select-input.ui-button,
 .model-editor-dock[data-film-set] .ui-text-input { height: 32px; min-height: 32px; padding: 4px 8px; }
-.film-set-shot-kind, .film-set-image-reference p { margin: 0; font-size: 12px; line-height: 18px; color: var(--app-web-text-muted); overflow-wrap: anywhere; }
+.film-set-shot-kind, .film-set-image-reference p { margin: 0; font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); color: var(--app-web-text-muted); overflow-wrap: anywhere; }
 .film-set-image-reference { display: grid; gap: 8px; }
-.model-editor-dock[data-film-set] .model-editor { font-size: 13px; line-height: 20px; }
+.model-editor-dock[data-film-set] .model-editor { font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); }
 .model-editor-dock[data-film-set] .model-editor input, .model-editor-dock[data-film-set] .model-editor select { height: 32px; box-sizing: border-box; font: inherit; }
-.model-editor-dock[data-film-set] .model-editor label, .model-editor-dock[data-film-set] .model-editor__focus-title { font-size: 13px; }
+.model-editor-dock[data-film-set] .model-editor label, .model-editor-dock[data-film-set] .model-editor__focus-title { font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); }
 @media (max-height: 850px) { .film-set-object-list { max-height: 160px; } }
 
 
@@ -163,27 +166,22 @@
 .film-set-object-list__item > .film-set-object-row { flex: 1; min-width: 0; }
 .film-set-object-list__item > .ui-button { flex-shrink: 0; }
 
-/* Lists and properties share the host inspector bounds, never its scroll position. */
-/* Playback/AI reserve the viewport bottom, while the inspector fills its own column. */
-.app[data-focus-kind] .model-editor-dock[data-film-set] { bottom: 0; height: auto; }
+/* Properties scroll independently inside the shared inspector bounds. */
 .model-editor-dock[data-film-set] { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .film-set-current-shot { padding: 4px 12px; flex: none; }
 .film-set-current-shot > button { display: flex; width: 100%; justify-content: space-between; gap: 12px; }
-.film-set-current-shot > button > span:last-child { flex: none; color: var(--app-web-text-muted); font-size: 12px; }
-.film-set-inspector-list { flex: 0 1 auto; min-height: 80px; max-height: 35%; overflow: auto; overscroll-behavior: contain; }
+.film-set-current-shot > button > span:last-child { flex: none; color: var(--app-web-text-muted); font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); }
 .film-set-shot-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.film-set-inspector-list .film-set-object-list { max-height: none; overflow: visible; }
-.film-set-inspector-divider { height: 9px; flex: none; cursor: row-resize; border-block: 1px solid var(--app-web-border); touch-action: none; }
-.film-set-inspector-divider:hover { background: var(--app-web-hover); }
 .film-set-inspector-properties { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.film-set-inspecting { margin: 8px 12px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-set-inspecting { margin: 8px 12px; font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .film-set-output { display: grid; gap: 6px; padding: 12px; }
-.film-set-output h3, .film-set-image-reference h3 { margin: 0; font-size: 13px; }
-.film-set-viewport-tools { position: absolute; z-index: 25; left: calc(var(--focus-content-x, 0px) + 12px); top: calc(var(--focus-header, 100px) + 8px); max-width: calc(var(--focus-content-width, 100%) - 24px); display: flex; gap: 2px; padding: 4px; border-radius: 6px; background: var(--app-web-panel); color: var(--app-web-text-primary); pointer-events: auto; }
+.film-set-output h3, .film-set-image-reference h3 { margin: 0; font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); }
+.film-set-output > p[role] { margin: 0; color: var(--app-web-text-muted); font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); overflow-wrap: anywhere; }
+.film-set-output > p[role="alert"] { color: var(--app-status-danger); }
+.film-set-viewport-overlay { position: absolute; z-index: 26; left: calc(var(--focus-content-x) + 12px); bottom: calc(var(--focus-footer) + 12px); width: calc(var(--focus-content-width) - 24px); max-height: calc(var(--focus-content-height) - 72px); display: flex; flex-direction: column; align-items: center; gap: 12px; pointer-events: none; }
+.film-set-viewport-tools { display: flex; flex: none; align-items: center; gap: 4px; padding: 6px; border-radius: 10px; background: var(--app-web-elevated); color: var(--app-web-text-primary); box-shadow: 0 5px 18px var(--app-web-shadow); pointer-events: auto; }
 .film-set-viewport-tools[hidden] { display: none; }
 .film-set-viewport-tools > div { display: flex; gap: 2px; }
-.film-set-generate-dock { bottom: calc(var(--focus-player-bottom, 44px) + 76px); }
-.film-set-generate-dock__target { max-width: 65%; }
 
 .model-editor-dock[data-film-set] .model-inspector-header > div { min-width: 0; }
 .model-editor-dock[data-film-set] .model-inspector-header h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -191,8 +189,120 @@
 
 .film-set-create-shot { margin-left: auto; }
 
-.film-set-inspector-list > .film-set-object-dock { border-bottom: 0; }
 
 .model-editor-dock[data-film-set] .model-inspector-header { padding: 10px 12px; }
 .film-set-viewport-tools button { min-height: 30px; padding: 4px 8px; }
-.film-set-animation-player__transport, .film-set-animation-player__actions { display: flex; align-items: center; gap: 4px; }
+
+/* Film-set workspace: every reserved edge is supplied by the public focus layout. */
+.film-set-navigation { position: absolute; z-index: 25; left: 0; top: var(--focus-header); bottom: 0; width: var(--focus-navigation-width); display: flex; flex-direction: column; min-height: 0; background: var(--app-web-panel); color: var(--app-web-text-primary); border-right: 1px solid var(--app-web-border); pointer-events: auto; box-sizing: border-box; }
+.film-set-navigation__heading { display: flex; justify-content: flex-end; padding: 6px; flex: none; }
+.film-set-navigation[data-collapsed="true"] .film-set-navigation__heading { padding: 4px 0; }
+.film-set-navigation[data-collapsed="true"] button { padding-inline: 4px; }
+.film-set-navigation__body { display: grid; grid-template-rows: minmax(80px, 1fr) minmax(120px, 1fr); flex: 1; min-height: 0; }
+.film-set-navigation__body[hidden], .film-set-navigation [hidden] { display: none; }
+.film-set-navigation__objects { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.film-set-navigation__objects .film-set-object-list { max-height: none; overflow: visible; }
+.film-set-navigation__shots { display: flex; flex-direction: column; min-height: 0; padding: 12px; border-top: 1px solid var(--app-web-border); }
+.film-set-shot-cards { display: grid; gap: 8px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.film-set-shot-card { display: grid; grid-template-columns: 64px minmax(0, 1fr); grid-template-rows: auto auto; gap: 2px 8px; padding: 6px; width: 100%; text-align: left; border: 1px solid var(--app-web-border); border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.film-set-shot-card:hover { background: var(--app-web-subtle); }
+.film-set-shot-card[aria-selected="true"] { border-color: var(--app-interaction-accent); background: var(--app-interaction-accent-soft); }
+.film-set-shot-card__image { grid-row: 1 / 3; display: grid; place-items: center; aspect-ratio: 16 / 9; overflow: hidden; background: var(--app-web-subtle); color: var(--app-web-text-muted); }
+.film-set-shot-card__image img { width: 100%; height: 100%; object-fit: contain; }
+.film-set-shot-card__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); }
+.film-set-shot-card__state { font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); color: var(--app-web-text-muted); }
+.app[data-focus-kind] .model-editor-dock[data-film-set] { bottom: 0; }
+.film-set-bottom { position: absolute; z-index: 26; left: var(--focus-content-x); bottom: 0; width: var(--focus-content-width); height: var(--focus-footer); background: var(--app-web-panel); color: var(--app-web-text-primary); border-top: 1px solid var(--app-web-border); pointer-events: auto; box-sizing: border-box; }
+.film-set-bottom__output { height: 100%; box-sizing: border-box; display: flex; align-items: center; min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 12px; }
+.film-set-bottom .film-set-animation-player { position: static; display: flex; flex-wrap: nowrap; gap: 12px; width: 100%; padding: 0; background: transparent; }
+.film-set-bottom .film-set-animation-player > button, .film-set-bottom .film-set-animation-player > output { flex: none; white-space: nowrap; }
+.film-set-static-output { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; width: 100%; color: var(--app-web-text-muted); }
+.film-set-bottom .film-set-animation-player input[type="range"] { flex: 1; width: 0; min-width: 60px; margin: 0; }
+.film-set-output-menu { width: 280px; max-height: var(--radix-popover-content-available-height); overflow-y: auto; }
+.film-set-output-menu[hidden] { display: none; }
+.film-set-output-menu > div, .film-set-output-menu .film-set-output, .film-set-output-menu .film-set-image-reference { display: grid; gap: 12px; padding: 0; }
+.film-set-output-menu h3 { margin: 0; font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); font-weight: 600; }
+.film-set-output-menu p { margin: 0; font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); }
+.film-set-output-menu p[role="alert"] { color: var(--app-status-danger); }
+
+.film-set-view-bar { position: absolute; z-index: 25; left: var(--focus-content-x); top: var(--focus-header); width: var(--focus-content-width); height: var(--focus-toolbar); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; box-sizing: border-box; background: var(--app-web-panel); border-bottom: 1px solid var(--app-web-border); color: var(--app-web-text-primary); pointer-events: auto; }
+.film-set-view-bar__modes, .film-set-view-bar__observe { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.film-set-view-bar__modes { flex-shrink: 0; }
+.film-set-view-bar .film-set-observe-select { flex: none; width: auto; min-width: 100px; min-height: 30px; height: 30px; padding: 4px 8px; }
+.film-set-view-bar__status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); color: var(--app-web-text-muted); }
+.film-set-view-bar button { white-space: nowrap; padding-inline: 6px; }
+.film-set-export-profile { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--app-web-text-muted); }
+.film-set-export-profile > span { flex: none; }
+.film-set-export-profile .ui-select-input { flex: 1; width: auto; min-width: 0; min-height: 30px; height: 30px; padding: 4px 8px; }
+@media (max-width: 1100px) {
+  .film-set-view-bar { gap: 4px; padding-inline: 6px; }
+  .film-set-view-bar .film-set-observe-select { min-width: 92px; }
+}
+.film-set-shot-card__image video { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.film-set-shot-card-entry { min-width: 0; }
+.film-set-shot-card-entry > .ui-button { margin-top: 4px; }
+
+.film-set-viewport-tools .ui-button { width: 36px; height: 36px; min-height: 36px; padding: 8px; border-radius: 6px; color: var(--app-web-text-muted); }
+.film-set-viewport-tools .ui-button[data-active="true"] { color: var(--app-interaction-accent); background: var(--app-interaction-accent-soft); }
+.film-set-viewport-tools .ui-button:hover:not(:disabled) { color: var(--app-web-text-primary); background: var(--app-web-subtle); }
+.film-set-viewport-tools__divider { width: 1px; height: 22px; margin-inline: 2px; background: var(--app-web-border); }
+
+/* Demo property hierarchy: identity, composition, frame/background, playback. */
+.film-set-property-identity { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; padding-block: 4px 16px; }
+.film-set-property-identity__icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 8px; background: var(--app-interaction-accent-soft); color: var(--app-interaction-accent); }
+.film-set-property-identity__icon svg { width: 18px; height: 18px; }
+.film-set-property-identity > div { min-width: 0; flex: 1; }
+.film-set-property-identity h3 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--film-set-font-body); line-height: var(--film-set-leading-body); font-weight: 600; }
+.film-set-property-identity p { margin: 3px 0 0; color: var(--app-web-text-muted); font-size: var(--film-set-font-meta); line-height: var(--film-set-leading-meta); }
+.film-set-default-badge { flex: none; padding: 2px 6px; border-radius: 4px; color: var(--app-interaction-accent); background: var(--app-interaction-accent-soft); font-size: var(--film-set-font-meta); }
+.film-set-property-section, .film-set-camera-properties { border-top: 1px solid var(--app-web-border); padding-top: 18px; margin-top: 8px; min-width: 0; }
+.film-set-property-heading { display: flex; align-items: center; justify-content: space-between; min-height: 24px; margin-bottom: 16px; font-size: var(--film-set-font-body); font-weight: 600; }
+.film-set-property-heading > span { display: flex; align-items: center; gap: 7px; }
+.film-set-property-heading > span > svg { color: var(--app-web-text-muted); }
+.film-set-property-heading .ui-button { width: 26px; height: 26px; min-height: 26px; padding: 5px; color: var(--app-web-text-muted); }
+.film-set-camera-slider { margin-bottom: 20px; }
+.film-set-camera-slider__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: var(--film-set-font-body); }
+.film-set-camera-slider__value { display: flex; align-items: center; width: 96px; min-height: 34px; border: 1px solid var(--app-web-border); border-radius: 6px; background: var(--app-web-subtle); color: var(--app-web-text-muted); }
+.film-set-animation-controls .film-set-camera-slider__value input[type="number"] { width: 100%; min-width: 0; height: 32px; padding: 4px 4px 4px 10px; border: 0; background: transparent; text-align: right; font-size: var(--film-set-font-body); font-variant-numeric: tabular-nums; appearance: textfield; }
+.film-set-animation-controls .film-set-camera-slider__value input::-webkit-inner-spin-button,
+.film-set-animation-controls .film-set-camera-slider__value input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.film-set-camera-slider__value > span { padding-right: 10px; font-size: var(--film-set-font-meta); }
+/* 轨道 6px、滑块 16px；input 本身留 20px 高用于点按，避免细线难以抓取。 */
+.film-set-animation-controls input.film-set-camera-slider__range[type="range"] { appearance: none; display: block; width: 100%; height: 20px; padding: 0; margin: 4px 0 6px; border: 0; background: transparent; cursor: pointer; }
+.film-set-camera-slider__range::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--app-web-border); }
+.film-set-camera-slider__range::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; margin-top: -5px; border-radius: 50%; background: var(--app-interaction-accent); }
+.film-set-camera-slider__range::-moz-range-track { height: 6px; border-radius: 3px; background: var(--app-web-border); }
+.film-set-camera-slider__range::-moz-range-thumb { width: 16px; height: 16px; border: 0; border-radius: 50%; background: var(--app-interaction-accent); }
+.film-set-camera-slider__range:focus-visible { outline: 2px solid var(--app-interaction-accent); outline-offset: 3px; border-radius: 3px; }
+.film-set-property-label { margin-bottom: 10px; font-size: var(--film-set-font-body); }
+.film-set-camera-focus { margin-bottom: 8px; }
+.film-set-aspect-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.film-set-aspect-cards > button { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8px; height: 70px; padding: 10px 4px 8px; border: 1px solid var(--app-web-border); border-radius: 6px; background: transparent; color: var(--app-web-text-muted); font: inherit; font-size: var(--film-set-font-meta); cursor: pointer; }
+.film-set-aspect-cards > button > span:first-child { display: block; width: 27px; max-height: 30px; max-width: 32px; border: 1.5px solid currentColor; border-radius: 2px; box-sizing: border-box; }
+.film-set-aspect-cards > button:nth-child(2) > span:first-child { width: 16px; }
+.film-set-aspect-cards > button[data-active="true"] { border-color: var(--app-interaction-accent); background: var(--app-interaction-accent-soft); color: var(--app-interaction-accent); }
+.film-set-aspect-more { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; color: var(--app-web-text-muted); font-size: var(--film-set-font-meta); }
+.film-set-aspect-more > .ui-select-input { flex: none; width: 82px; }
+.film-set-backdrop-heading { display: flex; justify-content: space-between; gap: 8px; margin: 20px 0 12px; font-size: var(--film-set-font-body); }
+.film-set-backdrop-heading > span:last-child { color: var(--app-web-text-muted); font-size: var(--film-set-font-meta); }
+.film-set-backdrop-swatches { display: flex; align-items: center; gap: 8px; }
+.film-set-backdrop-swatches > .ui-button { padding-inline: 7px; gap: 4px; }
+.film-set-backdrop-swatches > .ui-button[data-active="true"] { color: var(--app-interaction-accent); background: var(--app-interaction-accent-soft); }
+.film-set-backdrop-swatch, .film-set-backdrop-custom { flex: none; position: relative; width: 23px; height: 23px; border: 1px solid var(--app-web-border); border-radius: 50%; cursor: pointer; box-sizing: border-box; }
+.film-set-backdrop-swatch[data-active="true"] { outline: 2px solid var(--app-interaction-accent); outline-offset: 2px; }
+.film-set-backdrop-custom { display: grid; place-items: center; background: var(--app-web-subtle); color: var(--app-web-text-muted); overflow: hidden; }
+.film-set-backdrop-custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.film-set-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 34px; font-size: var(--film-set-font-body); }
+.film-set-playback-settings { display: grid; gap: 12px; }
+.film-set-duration-input { display: flex; align-items: center; gap: 8px; color: var(--app-web-text-muted); font-size: var(--film-set-font-meta); }
+.film-set-duration-input input { width: 70px; text-align: right; }
+.film-set-loop-switch { appearance: none; position: relative; width: 30px; height: 17px; margin: 0; border-radius: 10px; background: var(--app-web-border); cursor: pointer; }
+.film-set-loop-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 11px; height: 11px; border-radius: 50%; background: var(--app-web-text-primary); }
+.film-set-loop-switch:checked { background: var(--app-interaction-accent); }
+.film-set-loop-switch:checked::after { left: 16px; background: var(--app-web-panel); }
+.film-set-camera-properties input:disabled, .film-set-aspect-cards button:disabled, .film-set-backdrop-swatches :disabled, .film-set-loop-switch:disabled { opacity: .45; cursor: default; }
+.film-set-aspect-cards > button:hover:not(:disabled) { border-color: var(--app-interaction-accent); }
+
+.film-set-animation-controls .film-set-duration-input input { flex: none; width: 70px; }
+.film-set-animation-controls .film-set-camera-focus input[type="number"] { width: 100%; height: 34px; border: 0; padding-left: 23px; background: transparent; }
+.film-set-object-dock:has(> .film-set-object-fields:first-child) > .film-set-object-fields { margin-top: 0; padding-top: 4px; border-top: 0; }

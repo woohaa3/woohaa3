@@ -127,6 +127,15 @@ type ContentEntry = {
   retryTimer?: ReturnType<typeof setTimeout>;
   /** 已用掉的自动重试次数；达到 `IMAGE_RETRY_MAX_ATTEMPTS` 后转为显式重试。 */
   retryAttempts?: number;
+  /**
+   * 本份内容的解码准入身份（`内容身份#代次`）。
+   *
+   * 通道合并的 key 不能只用内容身份：内容被释放后（历史圆点切走）同一 URL 可能在**旧解码
+   * 仍在本页通道内**时被重新绑定，此时用内容身份合并会把新需求挂到那个已经作废的解码任务上。
+   * 旧任务完成时 `contents.get(key) !== target` 直接丢弃结果，新目标因此永远不 ready，
+   * 卡片停在上一张图。代次让每一份新建内容拥有独立任务，同内容仍按 `key` 共享像素。
+   */
+  decodeKey: string;
 };
 
 type NodeEntry = {
@@ -152,6 +161,8 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
   let runtimeGeneration = options.runtime.generation?.() ?? 0;
   let retryVersion = options.runtime.retryVersion?.() ?? 0;
   let disposed = false;
+  /** 解码尝试序号：让「同一内容被重新绑定」得到独立的通道 key（见 `ContentEntry.decodeKey`）。 */
+  let decodeAttempts = 0;
   let overrideUploaded = false;
   let previousOverride: ReturnType<NonNullable<TextureSyncOptions["getFocusTexture"]>> = null;
   let previousDetails:import("./focus-details.js").ImageFocusDetails|null|undefined;
@@ -223,6 +234,9 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       globalThis.clearTimeout(content.retryTimer);
       content.retryTimer = undefined;
     }
+    // 撤销这份内容在通道里的在途解码：它已经没有被任何节点引用，留着只会占名额，
+    // 并可能延迟同内容的新需求（历史圆点连续切换）。
+    residency?.cancel(content.decodeKey);
     contents.delete(key);
   };
 
@@ -262,6 +276,10 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
    *
    * 从 `bindNode` 抽出，使「上传完成后释放 CPU 像素」之后仍能按需重读同一内容
    * （任务 4.5）：重读走同一条 image 通道预算，不会绕过并发上限。
+   *
+   * 通道合并 key 用「内容身份 + 本次尝试序号」：内容实例可能在旧解码仍在通道内时被重新
+   * 绑定（历史圆点连续切换），只用内容身份会把新需求合并到已作废的任务上，新目标永远不
+   * ready（卡片停在上一个版本）。
    */
   const startDecode = (target: ContentEntry, url: string, tier: ThumbnailTier, purpose: ResidencyPurpose, key: string): void => {
     target.released = false;
@@ -269,6 +287,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       globalThis.clearTimeout(target.retryTimer);
       target.retryTimer = undefined;
     }
+    target.decodeKey = `${key}#${++decodeAttempts}`;
     const decode = async (): Promise<void> => {
       const image = await loadImage(url);
       if (disposed || contents.get(key) !== target) return;
@@ -285,10 +304,11 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         options.onImageSize?.(nodeId, { width: image.width, height: image.height });
       }
     };
+    const attemptKey = target.decodeKey;
     const run = residency
       ? residency.admit<void>({
           channel: "image",
-          key,
+          key: attemptKey,
           purpose,
           bytes: tier * tier * 4,
           run: decode
@@ -366,7 +386,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     };
     entries.set(nodeId, entry);
     loading.setLoading(entry.load, true);
-    const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]) };
+    const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]), decodeKey: key };
     contents.set(key, target);
     // 先准入再创建：解码本身也经 image 通道（并发 + 真实在途计数）。
     startDecode(target, url, tier, admissionOf(nodeId).purpose, key);
@@ -544,7 +564,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       previousDetails=null;
       uploads.retainNodes(new Set());
       for (const id of entries.keys()) options.runtime.clearRuntimeIssue?.(`decode:image:${id}`);
-      for (const key of contents.keys()) residency?.cancel(key);
+      for (const content of contents.values()) residency?.cancel(content.decodeKey);
       for (const content of contents.values()) {
         if (content.retryTimer === undefined) continue;
         globalThis.clearTimeout(content.retryTimer);

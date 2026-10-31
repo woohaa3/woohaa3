@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, createMotionSnapshot, canonicalFilmSetFields, canonicalShotPreviewFields, shotPreviewNodeId, freezeShotImageReferences, shotImageReferenceAssetId, type CanvasTaskCatalog, type ServerCanvas, type FrozenShotImageReference } from "@woohaa3/contracts";
 import { createSubmitCoordinator, type SubmitInput } from "./submit-coordinator.js";
 
-function fixture() {
+function fixture(clock: { now?: () => number } = {}) {
   let canvas = createEmptyWoohaa3ServerCanvas("image-waiting");
   const snapshot = createFilmSetSnapshot({ title: "Film", model: { modelScript: 'scene.box({id:"body"});', modelScriptVersion: "woohaa-model-js-v2" }, motionScript: 'motion.model.rotate("body", {speed:1});', timeline: { duration: 4, loop: false } });
   snapshot.filmSetAnimations!.clips[0] = { ...snapshot.filmSetAnimations!.clips[0]!, kind: "static", timeline: { duration: 0, loop: false }, bindings: [], cameraMotion: createMotionSnapshot({ motionScript: "", basedOnModelVersion: { revision: 1, sourceHash: "camera", contentHash: "camera" } }) };
@@ -18,7 +18,7 @@ function fixture() {
     bindings: [{ field: "images", semantic: "reference-image", valueFormat: "reference", roles: ["reference_image"], mediaKinds: ["image"], mediaTypes: ["image/png"], maxItems: 8 }] as never }] };
   const run = vi.fn(async (_request: unknown) => ({ ok: true as const, runId: "run", jobId: "job" })), cancel = vi.fn(async () => ({ ok: true as const }));
   let writable = true;
-  const coordinator = createSubmitCoordinator({ store: { getState: () => ({ canvas }) }, client: { run, cancel }, imageReferenceBackground: () => "#ffffff", isWritable: () => writable });
+  const coordinator = createSubmitCoordinator({ store: { getState: () => ({ canvas }) }, client: { run, cancel }, imageReferenceBackground: () => "#ffffff", isWritable: () => writable, ...(clock.now ? { nowMs: clock.now } : {}) });
   const input = (nodeId = "image-a"): SubmitInput => ({ nodeId, modelKey: "image-model", prompt: "A", parameters: { strength: 1 }, catalog, expectedModelType: "image" });
   const freeze = (nodeId = "image-a") => freezeShotImageReferences(canvas, nodeId, "#ffffff") as FrozenShotImageReference[];
   const ready = (ref: FrozenShotImageReference) => canvas.assets.push({ id: shotImageReferenceAssetId(ref), title: "Still", mediaKind: "image", source: "generated", status: "ready", createdAt: "2026-10-23T00:00:00Z", metadata: { storageKey: "images/a.png", checksum: "a".repeat(64), contentType: "image/png", width: 1280, height: 720, background: "#ffffff", shotImageReference: ref } });
@@ -26,6 +26,41 @@ function fixture() {
 }
 
 describe("static image frozen submissions", () => {
+  it("absorbs Enter repeats inside the 100ms window instead of starting a second run", async () => {
+    let clock = 0;
+    const h = fixture({ now: () => clock }), frozen = h.freeze();
+    h.ready(frozen[0]!);
+    expect((await h.coordinator.submit(h.input())).ok).toBe(true);
+    clock = 50;
+    expect(await h.coordinator.submit(h.input())).toMatchObject({ ok: false, error: "提交速度过快 请慢一点" });
+    expect(h.run).toHaveBeenCalledOnce();
+    // 越过 100ms 窗口后仍可发新的独立 run。
+    clock = 150;
+    expect((await h.coordinator.submit(h.input())).ok).toBe(true);
+    expect(h.run).toHaveBeenCalledTimes(2);
+  });
+  it("keeps preflight reasons ahead of the rapid-submit hint", async () => {
+    let clock = 0;
+    const h = fixture({ now: () => clock }), frozen = h.freeze();
+    h.ready(frozen[0]!);
+    expect((await h.coordinator.submit(h.input())).ok).toBe(true);
+    clock = 50;
+    expect(await h.coordinator.submit(h.input())).toMatchObject({ ok: false, error: "提交速度过快 请慢一点" });
+    expect(h.run).toHaveBeenCalledOnce();
+    // 窗口内也要先报真正的阻止原因，不能被“太快”掩盖。
+    const empty = h.input(); empty.prompt = "";
+    expect(await h.coordinator.submit(empty)).toMatchObject({ ok: false, error: "请先输入提示词" });
+  });
+  it("automatic continuation is not throttled by the manual debounce window", async () => {
+    let clock = 0;
+    const h = fixture({ now: () => clock }), frozen = h.freeze();
+    expect(await h.coordinator.submit(h.input())).toMatchObject({ ok: false, waiting: true });
+    clock = 10;
+    h.ready(frozen[0]!);
+    // 画布更新触发的续交紧随手动提交之后，仍必须恰好续交一次。
+    expect(await h.coordinator.retryWaiting()).toMatchObject([{ ok: true }]);
+    expect(h.run).toHaveBeenCalledOnce();
+  });
   it("permission loss or disconnect cancels waiting even if A has become ready", async () => {
     const h = fixture(), frozen = h.freeze();
     const notified = vi.fn(); h.coordinator.subscribeWaiting!(notified);

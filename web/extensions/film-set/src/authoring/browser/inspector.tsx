@@ -7,24 +7,30 @@ import { prepareFilmSetGroup } from "@woohaa3/contracts";
  * 右侧 dock 与共享历史 drawer 使用同一 inspector：历史打开时工具栏收起，使「左右圆点」「模型工具」
  * 「历史」三者同时可达且互不遮挡。只读 Navigation panel route 决定偏移；不写规范状态。
  */
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
-import { readFilmSetAnimationProjection, isFilmSetGroupNode, filmSetAnimationsOf, filmSetClipHash, resolveNodeDisplayName, COMPOSITE_ASSET_NODE_TYPE, isFilmSetNode } from "@woohaa3/contracts";
+import { readFilmSetAnimationProjection, isFilmSetGroupNode, filmSetAnimationsOf, animationSnapshotHash, isFilmSetNode } from "@woohaa3/contracts";
 import type { ModelEditorSession, ModelCaptureSession as ModelShotCaptureSession, AuthoringGenerationProps } from "@woohaa3/frontend/extension-api";
 import type { FilmSetObjectSession } from "./object-session.js";
 import type { FilmSetObjectAction } from "./object-action.js";
+import { FilmSetViewportTools } from "./workspace-viewport-tools.js";
+import { FilmSetCameraProperties } from "./workspace-camera-properties.js";
 import { GizmoReadout } from "./gizmo-readout.js";
 import { FilmSetObjectToolbar } from "./film-set-object-toolbar.js";
 import { Button, IconButton } from "@woohaa3/ui/primitives";
-import { CloseIcon, FilmIcon } from "@woohaa3/ui/icons";
+import { SelectInput } from "@woohaa3/ui/forms";
+import { CloseIcon } from "@woohaa3/ui/icons";
+import { FilmSetNavigation, FilmSetStillOutput } from "./workspace-navigation.js";
 import { FilmSetGenerateDock } from "./film-set-generate-dock.js";
 import { FilmSetObjectBinding } from "./film-set-object-binding.js";
 import { FilmSetAnimationPlayer } from "./film-set-animation-player.js";
+import { FilmSetOutputMenu } from "./workspace-output-menu.js";
 import { FilmSetAnimationControls } from "./film-set-animation-controls.js";
 import { FilmSetAdaptationConfirm } from "./film-set-adaptation.js";
 import { FilmSetVideoExportControl } from "./film-set-video-export-control.js";
 import { NativeVideoExportControl } from "./native-video-export-control.js";
 import { nativeRecordingAvailable } from "./native-recording-availability.js";
+import type { ShotReferenceRecordingController } from "./shot-reference-recording-controller.js";
 import type { ShotImageReferences } from "./shot-image-reference.js";
 
 /** 读取聚焦节点是否为片场业务（composite-asset + extensionId="film-set"）。 */
@@ -34,12 +40,15 @@ function focusedIsFilmSet(ctx: Context, nodeId: string): boolean {
   return isFilmSetGroupNode(node, canvas?.nodeData?.[nodeId]) || isFilmSetNode(node?.type, canvas?.nodeData?.[nodeId]);
 }
 
-/** 真实片场名称（共享解析规则；不读未提交草稿）。 */
-function resolveFilmSetName(ctx: Context, nodeId: string): string {
-  const canvas = ctx.compositeAssets.projectCanvas(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas());
-  const data = canvas?.nodeData?.[nodeId] as { title?: unknown; prompt?: unknown } | undefined;
-  return resolveNodeDisplayName({ type: COMPOSITE_ASSET_NODE_TYPE, explicitName: data?.title, prompt: data?.prompt }).displayName;
-}
+/** 自由观察方向；与 Bevy 相机模式一一对应，选择只影响编辑态观察。 */
+const OBSERVE_VIEWS = [
+  { value: "perspective", label: "自由观察" },
+  { value: "front", label: "正面" },
+  { value: "top", label: "俯视" },
+  { value: "right", label: "右侧" }
+] as const;
+
+type ObserveView = (typeof OBSERVE_VIEWS)[number]["value"];
 
 export function FilmSetInspector({
   ctx,
@@ -49,7 +58,9 @@ export function FilmSetInspector({
   captureSession,
   writable,
   canvasId,
-  images
+  images,
+  recording,
+  onLayoutChange
 }: {
   ctx: Context;
   session: ModelEditorSession;
@@ -59,6 +70,8 @@ export function FilmSetInspector({
   writable: boolean;
   canvasId?: string;
   images?: ShotImageReferences;
+  recording?: ShotReferenceRecordingController;
+  onLayoutChange?: (nodeId: string, layout: { navigationWidth: number; bottomBar: number; gridVisible: boolean }) => void;
 }) {
   useSyncExternalStore(ctx.canvasState.subscribe, ctx.canvasState.getWorkingCanvas, ctx.canvasState.getWorkingCanvas);
   useSyncExternalStore(ctx.compositeAssets.subscribe, ctx.compositeAssets.getRevision, ctx.compositeAssets.getRevision);
@@ -73,13 +86,12 @@ export function FilmSetInspector({
   const objectState = useSyncExternalStore(objectSession.subscribe, objectSession.getState, objectSession.getState);
   const nodeId = state.nodeId ?? "";
   const [aiCollapsed, setAiCollapsed] = useState(false);
-  const [compositionOpen, setCompositionOpen] = useState(false);
-  const [listHeight, setListHeight] = useState(180);
-  const divider = useRef<{ y: number; height: number } | null>(null);
-  const [aiTarget, setAiTarget] = useState<{ clipId: string | null; itemId: string | null } | null>(null);
-  const followedSelection = useRef("");
-  const [draftLocked, setDraftLocked] = useState(false);
-  const onDraftStateChange = useCallback((value: { hasDraft: boolean; busy: boolean }) => setDraftLocked(value.hasDraft || value.busy), []);
+  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
+  const [gridVisible, setGridVisible] = useState(true);
+  const [observeView, setObserveView] = useState<ObserveView>("perspective");
+  useLayoutEffect(() => {
+    if (nodeId) onLayoutChange?.(nodeId, { navigationWidth: navigationCollapsed ? 40 : 224, bottomBar: 56, gridVisible });
+  }, [nodeId, navigationCollapsed, gridVisible, onLayoutChange]);
   const onNativeBusyChange = useCallback(() => {}, []);
   const [exportBusy, setExportBusy] = useState(false);
   const cancelGestures = () => {
@@ -102,9 +114,6 @@ export function FilmSetInspector({
   };
   useEffect(() => {
     setAiCollapsed(false);
-    setCompositionOpen(false);
-    setAiTarget(null);
-    setDraftLocked(false);
     if (nodeId && focusedIsFilmSet(ctx, nodeId)) session.setToolMode("model");
   }, [nodeId, session, ctx]);
   const isFilmSet = !!nodeId && focusedIsFilmSet(ctx, nodeId);
@@ -120,23 +129,11 @@ export function FilmSetInspector({
     : collection?.clips.find(clip => clip.id === collection.defaultClipId) ?? collection?.clips[0];
   const selectedItem = objectsReady ? objectSession.selectedItem() : null;
   const inspectingShot = state.toolMode === "camera";
-  const followingTarget = { clipId: activeClip?.id ?? null, itemId: inspectingShot ? null : selectedItem?.id ?? null };
-  const target = aiTarget ?? followingTarget;
-  // Only empty controllers follow inspection. Nonempty drafts and accepted rounds keep their identity.
-  useEffect(() => {
-    const key = JSON.stringify(followingTarget);
-    if (followedSelection.current === key) return;
-    followedSelection.current = key;
-    if (!draftLocked) setAiTarget(previous => previous?.clipId === followingTarget.clipId && previous?.itemId === followingTarget.itemId ? previous : followingTarget);
-  }, [draftLocked, followingTarget.clipId, followingTarget.itemId]);
-  const targetClip = collection?.clips.find(clip => clip.id === target.clipId);
-  const targetItem = objectSession.objects().find(item => item.itemId === target.itemId);
-  const contentHash = targetClip ? filmSetClipHash(targetClip) : undefined;
-  const generateBlockedReason = !targetClip
-    ? "原目标镜头不可用，请选择一个拍摄镜头。"
-    : target.itemId && !targetItem ? "原目标对象已移除，草稿保留。"
-    : target.itemId && (targetClip.kind === "static" || !targetClip.bindings.some(binding => binding.itemId === target.itemId))
-      ? "此对象尚未启用该动态镜头的动作；请显式启用动作或切换 AI 目标。" : null;
+  // The workspace owns one whole-set draft. Explicit legacy clip/item entry
+  // points keep their original controllers and limited grants elsewhere.
+  const authoritativeAnimation = readFilmSetAnimationProjection(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), nodeId);
+  const contentHash = authoritativeAnimation ? animationSnapshotHash(authoritativeAnimation) : undefined;
+  const generateBlockedReason = !authoritativeAnimation ? "原片场不可用，草稿保留。" : null;
   const hasGenerate = ctx.slots.list("authoring.generate").length > 0;
   // 生成入口经宿主的 `renderGenerate` 渲染（design D6/D8）：宿主包裹 `authoring.generate`
   // 贡献并注入 MCP 指引与 Agent 会话能力（重开复用同一会话、按状态显示详情入口）。扩展不直接
@@ -150,27 +147,29 @@ export function FilmSetInspector({
     writable: generateWritable,
     disabledReason: generateWritable ? null : generateBlockedReason ?? "当前会话不可写，无法直接生成。",
     ...(contentHash ? { expectedContentHash: contentHash } : {}),
-    clipId: target.clipId,
-    itemId: target.itemId,
-    onDraftStateChange,
+    clipId: null,
+    itemId: null,
     selectedCameraId: null,
     onAuthorize: () => ctx.canvasNavigation.openDialog({ dialogId: "provider-credentials", payload: {} })
+  };
+  const previewBlockedReason = !activeClip ? "尚无镜头，请先从左侧新建。" : !rendererReady ? "渲染器尚未就绪。" : readOnly ? "历史版本不提供镜头输出预览。" : null;
+  const enterPreview = () => {
+    if (previewBlockedReason || !activeClip || exportBusy) return;
+    cancelGestures();
+    ctx.filmSetPlayback.select(nodeId, activeClip.id);
+    session.selectCamera(`clip:${activeClip.id}`);
+    ctx.filmSetPlayback.preview();
   };
   const renderGenerate = () => (hasGenerate ? ctx.modelWorkspace.renderGenerate(generateInput) : null);
 
   if (!nodeId || !isFilmSet) return null;
 
-  const cameraPanel = ctx.modelWorkspace.renderCameraPanel({
-    presentation: "composition", cameraCollectionMutable: false,
-    captureEnabled: false,
-    writable: writable && rendererReady && !readOnly && !playback.preview, readOnly,
-    ...(canvasId ? { canvasId } : {}), onActivateCamera: () => activeClip && inspectShot(activeClip.id)
-  });
+  const cameraPanel = <FilmSetCameraProperties session={session} disabled={!writable || !rendererReady || readOnly || playback.preview || exportBusy} />;
 
   const header = (
     <header className="model-inspector-header">
       <div>
-        <h2 title={resolveFilmSetName(ctx, nodeId)}>{resolveFilmSetName(ctx, nodeId)}</h2>
+        <h2>{inspectingShot ? "镜头属性" : "对象属性"}</h2>
         {readOnly ? <p>历史版本 · 只读</p> : null}
       </div>
       <IconButton label="退出片场编辑" onClick={() => ctx.canvasRuntime.exitModelFocus()}><CloseIcon /></IconButton>
@@ -182,63 +181,57 @@ export function FilmSetInspector({
     {!readOnly && !playback.preview && objectState.pointer && objectSession.dragReadout() ? (
       <GizmoReadout point={objectState.pointer}>{objectSession.dragReadout()!}</GizmoReadout>
     ) : null}
-    <div className="model-editor-dock" data-inspector="true" data-history-open={historyOpen ? "true" : undefined} data-film-set="true">
+    <div className="film-set-view-bar" data-canvas-scrollable="true" onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
+      <div className="film-set-view-bar__modes">
+        <Button size="sm" tone={!playback.preview ? "primary" : "ghost"} disabled={exportBusy} onClick={() => { cancelGestures(); ctx.filmSetPlayback.edit(); }}>场景编辑</Button>
+        <Button size="sm" tone={playback.preview ? "primary" : "ghost"} title={previewBlockedReason ?? "查看当前镜头的正式构图"} disabled={!!previewBlockedReason || exportBusy} onClick={enterPreview}>镜头预览</Button>
+      </div>
+      {!playback.preview ? <div className="film-set-view-bar__observe">
+        <SelectInput className="film-set-observe-select" label="自由观察方式" value={observeView} options={OBSERVE_VIEWS}
+          onValueChange={value => { cancelGestures(); setObserveView(value as ObserveView); ctx.canvasRuntime.controller()?.setFocusedModelView(value as ObserveView); }} />
+      </div> : <span className="film-set-view-bar__status" title={activeClip?.name}>{activeClip?.name ?? "镜头不可用"} · 只读预览</span>}
+    </div>
+    <FilmSetNavigation ctx={ctx} nodeId={nodeId} objectSession={objectSession} objectAction={objectAction}
+      collection={collection} activeClipId={activeClip?.id} inspectingShot={inspectingShot} images={images} recording={recording}
+      writable={writable && !readOnly && !playback.preview && !exportBusy} readOnly={readOnly}
+      collapsed={navigationCollapsed} onCollapsedChange={value => { cancelGestures(); setNavigationCollapsed(value); }}
+      onSelectObject={inspectObject} onSelectShot={inspectShot} />
+    <div className="model-editor-dock" data-canvas-scrollable="true" data-inspector="true" data-history-open={historyOpen ? "true" : undefined} data-film-set="true">
       {header}
-      <div className="film-set-current-shot">
-        <Button size="sm" tone="ghost" aria-label="检查当前镜头" title="检查当前镜头" disabled={!activeClip || exportBusy} onClick={() => activeClip && inspectShot(activeClip.id)}>
-          <span className="film-set-shot-name">{activeClip?.name ?? "尚无镜头"}</span>
-          {activeClip ? <span>{activeClip.kind === "static" ? "静态" : `动态 · ${activeClip.timeline.duration} 秒`}</span> : null}
-        </Button>
-      </div>
-      <div className="film-set-inspector-list" style={{ height: listHeight }} onWheel={event => event.stopPropagation()}>
-        <FilmSetObjectToolbar section="list" onSelect={inspectObject} session={objectSession} writable={writable && !playback.preview} readOnly={readOnly} nodeId={nodeId} onDelete={() => objectSession.deleteSelected()} action={objectAction}
-          objectSelectionActive={!inspectingShot}
-          listHeader={<div className="film-set-section-heading">
-            <h3>片场内容</h3>
-            <FilmSetAnimationControls presentation="create" ctx={ctx} nodeId={nodeId} writable={writable && !readOnly && !playback.preview && !exportBusy} onSelectShot={inspectShot} />
-          </div>}
-          listItems={collection?.clips.length ? collection.clips.map(clip => <li key={`shot:${clip.id}`} className="film-set-object-list__item">
-            <button type="button" className="film-set-object-row" aria-label={`镜头 · ${clip.name}`} aria-selected={clip.id === activeClip?.id && inspectingShot} disabled={exportBusy} title={`${clip.name}${clip.id === collection.defaultClipId ? " · 默认" : ""}`} onClick={() => inspectShot(clip.id)}>
-              <span className="film-set-object-row__icon"><FilmIcon /></span>
-              <span className="film-set-object-row__name">{clip.name}{clip.id === collection.defaultClipId ? " · 默认" : ""}</span>
-              <span className="film-set-object-row__kind">{clip.kind === "static" ? "静态镜头" : `动态镜头 · ${clip.timeline.duration} 秒`}</span>
-            </button>
-          </li>) : null} />
-      </div>
-      <div className="film-set-inspector-divider" title="拖动调整列表高度" onPointerDown={event => { divider.current = { y: event.clientY, height: listHeight }; event.currentTarget.setPointerCapture(event.pointerId); }}
-        onPointerMove={event => { if (divider.current) setListHeight(Math.max(80, Math.min(280, divider.current.height + event.clientY - divider.current.y))); }}
-        onPointerUp={() => { divider.current = null; }} onPointerCancel={() => { divider.current = null; }} />
       <div className="model-inspector-scroll film-set-inspector-properties" onWheel={event => event.stopPropagation()}>
-        {inspectingShot ? <h3 className="film-set-inspecting" title={activeClip?.name}>{activeClip?.name ?? "镜头已移除"}</h3> : null}
         {state.cameraWriteError ? <p className="film-set-object-error">{state.cameraWriteError}</p> : state.cameraWritePending ? <p className="film-set-object-hint">正在确认构图修改…</p> : null}
         {readOnly ? <p className="film-set-object-hint">历史版本只读，不能修改或输出。</p> : !writable ? <p className="film-set-object-hint">当前会话不可写。</p> : !rendererReady ? <p className="film-set-object-hint">渲染器尚未就绪，暂不能操作视口工具。</p> : null}
         {currentCanvas ? prepareFilmSetGroup(currentCanvas, nodeId)?.diagnostics.map(diagnostic => <p key={diagnostic.bindingId} className="film-set-object-feedback">{diagnostic.bindingId}：{diagnostic.message}</p>) : null}
         {!inspectingShot ? <FilmSetObjectToolbar section="properties" session={objectSession} writable={writable && rendererReady && !playback.preview} readOnly={readOnly} nodeId={nodeId} onDelete={() => objectSession.deleteSelected()} action={objectAction}>
           {selectedItem && activeClip ? <>
             <FilmSetObjectBinding key={`${activeClip.id}:${selectedItem.id}`} ctx={ctx} nodeId={nodeId} item={selectedItem} clip={activeClip} collection={collection!} writable={writable && !readOnly && !playback.preview} />
-            {activeClip.kind === "dynamic" ? <FilmSetAdaptationConfirm key={`${activeClip.id}:${selectedItem.id}`} ctx={ctx} nodeId={nodeId} itemId={selectedItem.id} clipId={activeClip.id} writable={writable && !readOnly && !playback.preview} /> : null}
+            {activeClip.kind === "dynamic" ? <FilmSetAdaptationConfirm key={`${activeClip.id}:${selectedItem.id}:adaptation`} ctx={ctx} nodeId={nodeId} itemId={selectedItem.id} clipId={activeClip.id} writable={writable && !readOnly && !playback.preview} /> : null}
           </> : selectedItem ? <p className="film-set-object-hint">尚无镜头；场景摆放可用，新建镜头后再配置动作。</p> : null}
         </FilmSetObjectToolbar> : null}
         <div hidden={!inspectingShot && !!collection?.clips.length}>
-          <FilmSetAnimationControls presentation="properties" key={nodeId} ctx={ctx} nodeId={nodeId} writable={writable && !readOnly && !playback.preview && !exportBusy} composition={cameraPanel} images={images} compositionOpen={compositionOpen} onCompositionOpenChange={setCompositionOpen} onSelectShot={inspectShot} />
+          <FilmSetAnimationControls showOutput={false} presentation="properties" key={nodeId} ctx={ctx} nodeId={nodeId} writable={writable && !readOnly && !playback.preview && !exportBusy} composition={cameraPanel} images={images} onSelectShot={inspectShot} />
         </div>
-        {inspectingShot && activeClip?.kind === "dynamic" ? <section className="film-set-output"><h3>输出 · {activeClip.name}</h3>
-          {nativeRecordingAvailable() ? <NativeVideoExportControl key={`${nodeId}:${activeClip.id}`} ctx={ctx} disabled={!writable || readOnly} target={{ nodeId, clipId: activeClip.id, title: activeClip.name }} onBusyChange={onNativeBusyChange} /> : <FilmSetVideoExportControl ctx={ctx} disabled={!writable || readOnly || !rendererReady} onBusyChange={setExportBusy} />}
-        </section> : null}
       </div>
     </div>
-    <div className="film-set-viewport-tools" title={inspectingShot ? `自由观察 · 编辑镜头 ${activeClip?.name ?? "不可用"}` : "自由观察 · 场景摆放"} hidden={playback.preview} onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
-      {activeClip && (inspectingShot || !selectedItem) ? <div>{([ ["orbit", "方位旋转", "方位"], ["elevation", "仰角", "仰角"], ["distance", "推拉", "推拉"], ["focus", "移动注视点", "注视点"] ] as const).map(([tool, label, text]) => <Button key={tool} aria-label={label} title={label} size="sm" tone={inspectingShot && state.cameraTool === tool ? "primary" : "ghost"} disabled={!writable || readOnly || !rendererReady || exportBusy || state.cameraWritePending} onClick={() => { inspectShot(activeClip.id); session.setCameraTool(tool); }}>{text}</Button>)}</div> : null}
-      {selectedItem && !inspectingShot ? <div>{([ ["move", "移动对象", "移动"], ["yaw", "Y 旋转", "旋转"], ["scale", "等比缩放", "缩放"] ] as const).map(([tool, label, text]) => <Button key={tool} aria-label={label} title={label} size="sm" tone={!inspectingShot && objectState.tool === tool ? "primary" : "ghost"} disabled={!writable || readOnly || !rendererReady || exportBusy || state.cameraWritePending} onClick={() => { inspectObject(selectedItem.id); objectSession.setTool(tool); }}>{text}</Button>)}</div> : null}
+    <div className="film-set-viewport-overlay">
+    <FilmSetViewportTools session={session} objects={objectSession} camera={inspectingShot} selectedItemId={selectedItem?.id ?? null}
+      clipId={activeClip?.id} disabled={!writable || readOnly || !rendererReady || exportBusy || state.cameraWritePending}
+      hidden={playback.preview} grid={gridVisible} onGrid={() => setGridVisible(!gridVisible)}
+      aiVisible={hasGenerate && !readOnly} aiExpanded={!aiCollapsed} onAiToggle={() => { cancelGestures(); setAiCollapsed(!aiCollapsed); }}
+      onObject={inspectObject} onShot={inspectShot} cancel={cancelGestures} />
+    {hasGenerate ? <FilmSetGenerateDock key={nodeId} hidden={readOnly || playback.preview} collapsed={aiCollapsed}>{renderGenerate()}</FilmSetGenerateDock> : null}
     </div>
-    {hasGenerate ? <FilmSetGenerateDock key={nodeId} hidden={readOnly || playback.preview} collapsed={aiCollapsed} onCollapsedChange={setAiCollapsed}
-      shotName={targetClip?.name ?? "原镜头不可用"} selectedItem={targetItem ? { id: targetItem.itemId, name: targetItem.name } : null}
-      targetItemId={target.itemId} onTargetChange={itemId => { setDraftLocked(true); setAiTarget({ clipId: target.clipId, itemId }); }}
-      targetKey={JSON.stringify([target.clipId, target.itemId])}
-      targets={collection?.clips.flatMap(clip => [{ value: JSON.stringify([clip.id, null]), label: `${clip.name} › 整个镜头` }, ...objectSession.objects().map(item => ({ value: JSON.stringify([clip.id, item.itemId]), label: `${clip.name} › ${item.name}` }))]) ?? []}
-      onSelectTarget={value => { if (!value) return; const [clipId, itemId] = JSON.parse(value); setDraftLocked(true); setAiTarget({ clipId, itemId }); }}
-    >{renderGenerate()}</FilmSetGenerateDock> : null}
-    {activeClip?.kind === "dynamic" ? <FilmSetAnimationPlayer ctx={ctx} captureSession={captureSession} writable={writable && !readOnly && rendererReady && !exportBusy} duration={activeClip.timeline.duration} onPreview={cancelGestures} /> : null}
+    <div className="film-set-bottom" data-canvas-scrollable="true" onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
+      <section className="film-set-bottom__output">
+        {activeClip?.kind === "dynamic" ? <FilmSetAnimationPlayer ctx={ctx} captureSession={captureSession} writable={writable && !readOnly && rendererReady && !exportBusy} duration={activeClip.timeline.duration} onPreview={cancelGestures}
+          output={<section className="film-set-output">
+          {nativeRecordingAvailable() ? <NativeVideoExportControl key={`${nodeId}:${activeClip.id}`} ctx={ctx} disabled={!writable || readOnly} target={{ nodeId, clipId: activeClip.id, title: activeClip.name }} onBusyChange={onNativeBusyChange} /> : <FilmSetVideoExportControl ctx={ctx} disabled={!writable || readOnly || !rendererReady} onBusyChange={setExportBusy} />}
+        </section>} /> : <div className="film-set-static-output">
+          <span>{activeClip ? "静态镜头" : "从左侧新建镜头"}</span>
+          {activeClip ? <FilmSetOutputMenu><FilmSetStillOutput images={images} nodeId={nodeId} clipId={activeClip.id} writable={writable && !readOnly} /></FilmSetOutputMenu> : null}
+        </div>}
+      </section>
+    </div>
     {!playback.preview && inspectingShot ? ctx.modelWorkspace.renderCameraPreview(readOnly) : null}
     </>
   );

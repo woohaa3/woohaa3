@@ -124,7 +124,8 @@ export function buildSceneWithResources(
   const shotPreviews = buildShotPreviewSceneInput({
     canvas: canvasState,
     playback: options.getAnimationPlayback?.() ?? null,
-    targets: options.getModelFocusTargets?.() ?? []
+    targets: options.getModelFocusTargets?.() ?? [],
+    ...(options.mediaContent ? { mediaContent: options.mediaContent } : {})
   });
   const scene = buildCanvasRenderScene({
     canvas: canvasState,

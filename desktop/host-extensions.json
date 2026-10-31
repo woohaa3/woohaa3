@@ -15,6 +15,7 @@
     "oauth-agent",
     "sdk-agent",
     "remote-server",
-    "task-activity"
+    "task-activity",
+    "dev-performance"
   ]
 }

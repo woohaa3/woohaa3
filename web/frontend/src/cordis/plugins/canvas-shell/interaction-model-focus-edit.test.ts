@@ -450,3 +450,19 @@ describe("模型聚焦编辑（change: add-model-focus-viewing / editing）", ()
   });
 
 });
+
+it.each(["pointercancel", "lostpointercapture", "blur"])("%s cancels the installed object gesture and late release cannot commit", interrupted => {
+  const events: string[] = [];
+  const h = focusHarness({ getModelEditor: () => ({ version: "woohaa-model-editor-v2", nodeId: "m1", toolMode: "object", itemId: "binding", focus: [0, 0, 0], radius: 2 }) });
+  h.controller.setFilmSetObjectGesture({ active: () => true, select: () => false,
+    begin: () => { events.push("begin"); return true; }, move: () => { events.push("move"); },
+    end: () => { events.push("end"); }, cancel: () => { events.push("cancel"); } });
+  const point = modelCenter(h.target);
+  domFire(h.dom, "dblclick", { clientX: point.x, clientY: point.y });
+  domFire(h.dom, "pointerdown", { button: 0, clientX: 400, clientY: 300 });
+  domFire(h.dom, "pointermove", { clientX: 440, clientY: 300 });
+  domFire(h.dom, interrupted, { pointerId: 1 });
+  domFire(h.dom, "pointerup", { button: 0, clientX: 440, clientY: 300 });
+  expect(events).toEqual(["begin", "move", "cancel"]);
+  h.controller.dispose();
+});

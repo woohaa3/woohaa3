@@ -36,10 +36,21 @@ export const FRAME_PADDING = 1.12;
 export const MODEL_CARD_GAP = 40.0;
 /** 模型单位基准（与 Rust `model_anchor` / `model_unit` 的 `64.0` 一致）。 */
 export const MODEL_SIZE_BASE = 64.0;
+/**
+ * 场景单位 → 画布世界单位的**绝对**换算：1 场景单位（= 1 米，见 `MODEL_API_AXIS_CONVENTIONS`）
+ * 固定等于 64 画布单位（change: 2026-10-31-render-models-at-absolute-metric-scale）。
+ *
+ * 此前单位是 `placement.scale × 192 / extent` 的归一化值，会把每个模型压进约 192 画布单位的
+ * 参考框，于是 1.7 m 的人与 20 m 的楼在画布上看起来一样大，且"模型写在世界原点多远"都会
+ * 改变显示尺寸。改为绝对米制后：人物约 109 画布单位、2 m 门约 128、20 m 楼约 1280，
+ * 跨节点真实可比，也不再受包围盒与原点位置影响。
+ *
+ * 与 Rust `model3d::CANVAS_UNITS_PER_METER` 同值；改这一处即可整体缩放画布上的真实尺度
+ * （默认卡片 248×232 约合 3.9 m × 3.6 m）。
+ */
+export const CANVAS_UNITS_PER_METER = MODEL_SIZE_BASE;
 /** 片场模型适配节点矩形时四周保留的边距（与 Rust `FILM_SET_FIT_MARGIN` 一致）。 */
 export const FILM_SET_FIT_MARGIN = 16.0;
-/** 片场组按组内容宽度取景时左右保留的边距（与 group 布局的 `groupPadding` 一致）。 */
-export const FILM_SET_GROUP_WIDTH_MARGIN = 40.0;
 
 /**
  * 聚焦缩小的最近距离：允许相机进入包围球内部以贴近观察细节。
