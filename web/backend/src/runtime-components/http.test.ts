@@ -57,3 +57,19 @@ it("honors the desktop development origin allowlist without allowing arbitrary s
   expect(response.status).toBe(200);
   expect(configure).toHaveBeenCalledTimes(1);
 });
+
+it("explains an unusable selected path while still listing working candidates", async () => {
+  const diagnose = vi.fn(async () => ({ error: "env: node: No such file or directory" }));
+  const discoverLocal = vi.fn(async () => [{ entry: "/opt/codex", version: "0.163.0", source: "local", kind: "executable" }]);
+  const url = await serve({ inspect: vi.fn(), diagnose, discoverLocal });
+  const response = await fetch(`${url}/codex/discover`, { method: "POST", body: JSON.stringify({ path: "/Users/me/bin/codex" }) });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    candidates: [{ entry: "/opt/codex" }],
+    selected: { path: "/Users/me/bin/codex", error: expect.stringContaining("node") }
+  });
+  expect(diagnose).toHaveBeenCalledWith("codex", "/Users/me/bin/codex");
+  // A working path needs no explanation, and an empty body must not be rejected as over-sized.
+  diagnose.mockResolvedValueOnce({ entry: "/opt/codex", version: "0.163.0", source: "local", kind: "executable" } as never);
+  expect(await (await fetch(`${url}/codex/discover`, { method: "POST" })).json()).toEqual({ candidates: [{ entry: "/opt/codex", version: "0.163.0", source: "local", kind: "executable" }] });
+});

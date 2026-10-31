@@ -53,8 +53,43 @@ test('Codex local programs accept any reported version except a blocklist', { sk
   assert.equal((await f.manager.inspect('codex')).status, 'incompatible');
   await assert.rejects(f.manager.configure('codex', { source: 'local', path: 'relative' }), { code: 'INVALID_CONFIG' });
 });
-test('Codex accepts a ChatGPT app bundle without an exact version allowlist', { skip: process.platform === 'win32' }, async t => {
+test('npm shim selection resolves the vendored native Codex instead of failing on a missing node', { skip: process.platform === 'win32' }, async t => {
   const f = await fixture(t);
+  const modules = path.join(f.root, 'lib/node_modules');
+  const entry = path.join(modules, '@openai/codex/bin/codex.js');
+  await fs.mkdir(path.dirname(entry), { recursive: true });
+  await fs.writeFile(entry, '#!/usr/bin/env node\nconsole.log("codex-cli 1.2.3");\n', { mode: 0o755 });
+  const native = path.join(modules, '@openai/codex-darwin-arm64/vendor/darwin-arm64/bin/codex');
+  await fs.mkdir(path.dirname(native), { recursive: true });
+  await fs.writeFile(native, '#!/bin/sh\necho codex 1.2.3\n', { mode: 0o755 });
+  // A packaged App lacks `node` on PATH, so the shim must never be the resolved entry.
+  const state = await f.manager.configure('codex', { source: 'local', path: entry });
+  assert.equal(state.status, 'ready');
+  assert.equal(state.entry, await fs.realpath(native));
+  // Without the vendored package the shim is kept (never silently swapped for another install).
+  await fs.rm(path.join(modules, '@openai/codex-darwin-arm64'), { recursive: true, force: true });
+  const kept = await f.manager.configure('codex', { source: 'local', path: entry });
+  assert.equal(kept.entry, entry);
+});
+
+test('discovery searches user-level install locations and reports an unusable selection', { skip: process.platform !== 'darwin' }, async t => {
+  const f = await fixture(t);
+  const home = path.join(f.root, 'home');
+  const bin = path.join(home, '.local/bin/codex');
+  await fs.mkdir(path.dirname(bin), { recursive: true });
+  await fs.writeFile(bin, '#!/bin/sh\necho codex 1.2.3\n', { mode: 0o755 });
+  const saved = { PATH: process.env.PATH, HOME: process.env.HOME };
+  t.after(() => { process.env.PATH = saved.PATH; process.env.HOME = saved.HOME; });
+  // launchd gives a packaged App only this PATH; `~/.local/bin` must still be discovered.
+  process.env.PATH = '/usr/bin:/bin'; process.env.HOME = home;
+  const candidates = (await f.manager.discoverLocal('codex')).map(x => x.entry);
+  assert.equal(candidates[0], bin);
+  // Every reported candidate must be a usable program, never a `#!/usr/bin/env node` shim.
+  for (const candidate of candidates) assert.doesNotMatch(await fs.readFile(candidate, 'utf8').catch(() => ''), /^#!.*\bnode\b/);
+  assert.match((await f.manager.diagnose('codex', path.join(f.root, 'missing'))).error, /ENOENT|no such file/i);
+});
+
+test('Codex accepts a ChatGPT app bundle without an exact version allowlist', { skip: process.platform === 'win32' }, async t => {  const f = await fixture(t);
   const app = path.join(f.root, 'ChatGPT.app');
   const cli = path.join(app, 'Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex');
   await fs.mkdir(path.dirname(cli), { recursive: true });

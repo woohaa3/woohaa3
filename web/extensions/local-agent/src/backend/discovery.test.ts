@@ -1,4 +1,5 @@
-import { mkdtemp, writeFile, chmod, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, chmod, mkdir, rm, realpath, symlink } from "node:fs/promises";
+import { cpSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect, it, vi } from "vitest";
@@ -8,6 +9,7 @@ import {
 } from "./discovery.js";
 import { LOCAL_AGENT_ADAPTERS } from "../shared.js";
 const [codex, opencode, codebuddy] = LOCAL_AGENT_ADAPTERS;
+const executable = process.platform === "win32" ? process.execPath : "/bin/sh";
 it("从 PATH 找到可执行文件，无需手填部署路径", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "agent-discovery-"));
   try {
@@ -21,6 +23,36 @@ it("从 PATH 找到可执行文件，无需手填部署路径", async () => {
     ).toBeNull();
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("npm 安装的 Node 脚本入口换成同包原生 Codex，避免包内没有 node 时无法启动", async () => {
+  // 打包 App 只继承 `/usr/bin:/bin:...`，PATH 里没有 node：`#!/usr/bin/env node` 的 shim
+  // 必然以 `env: node: No such file or directory` 失败，必须回落到 vendor 里的架构二进制。
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "agent-discovery-shim-")));
+  try {
+    const modules = path.join(root, "lib", "node_modules");
+    const entry = path.join(modules, "@openai", "codex", "bin", "codex.js");
+    await mkdir(path.dirname(entry), { recursive: true });
+    await writeFile(entry, "#!/usr/bin/env node\nconsole.log('codex');\n", { mode: 0o755 });
+    const native = path.join(modules, "@openai", "codex-darwin-arm64", "vendor", `${process.platform}-${process.arch}`, "bin", process.platform === "win32" ? "codex.exe" : "codex");
+    await mkdir(path.dirname(native), { recursive: true });
+    await cpSync(executable, native);
+    await chmod(native, 0o755);
+    // fnm/nvm 的 `bin/<name>` 是指向包内入口的软链；npm 前缀布局则是 bin 与 lib 平级。
+    const linkDir = path.join(root, "bin");
+    await mkdir(linkDir);
+    const shim = path.join(linkDir, "codex");
+    await symlink(path.relative(linkDir, entry), shim);
+    expect(resolveLocalExecutable(null, "codex", { PATH: linkDir })).toBe(native);
+    expect(resolveLocalExecutable(entry, "codex", { PATH: "" })).toBe(native);
+    // 只对 codex 生效：其他工具的同名脚本入口原样返回，不做跨包猜测。
+    expect(resolveLocalExecutable(entry, "opencode", { PATH: "" })).toBe(entry);
+    // 没有可回落的原生包时保留 shim 本身，让后续 `--version` 探测给出明确失败原因。
+    await rm(path.join(modules, "@openai", "codex-darwin-arm64"), { recursive: true, force: true });
+    expect(resolveLocalExecutable(entry, "codex", { PATH: "" })).toBe(entry);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

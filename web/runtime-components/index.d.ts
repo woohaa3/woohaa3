@@ -15,6 +15,8 @@ export interface RuntimeComponentManager {
   resolve(id: string): Promise<RuntimeHandle>;
   remove(id: string): Promise<RuntimeComponentState>;
   discoverLocal(id: string): Promise<Omit<RuntimeHandle, 'release'>[]>;
+  /** Inspect an explicitly chosen local path without installing or configuring it. */
+  diagnose(id: string, executable: string): Promise<Omit<RuntimeHandle, 'release'> | { error: string }>;
 }
 export class RuntimeComponentError extends Error { code: string; constructor(code: string, message: string) }
 export function createRuntimeComponentManager(options: { dataDir: string; defaultsPath: string; lockPath: string; platform?: string; arch?: string; fetchImpl?: typeof fetch }): RuntimeComponentManager;
