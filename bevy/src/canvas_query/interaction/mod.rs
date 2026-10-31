@@ -470,6 +470,10 @@ pub(crate) fn point_hit_golden(
             "node-action:{node_id}:{action_id}{}",
             if menu { ":menu" } else { "" }
         ),
+        results::PointHit::SelectionAction { action_id, menu } => format!(
+            "selection-action:{action_id}{}",
+            if menu { ":menu" } else { "" }
+        ),
     }))
 }
 
