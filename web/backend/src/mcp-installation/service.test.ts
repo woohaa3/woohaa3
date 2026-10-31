@@ -8,10 +8,12 @@ let home: string;
 let env: NodeJS.ProcessEnv;
 const url = "http://localhost:5173/workspace/mcp/model-canvas";
 const name = "woohaa3-model-canvas";
-beforeEach(async () => { home = await mkdtemp(path.join(os.tmpdir(), "woohaa-mcp-")); env = { HOME: home, PATH: path.join(home, "bin") }; await mkdir(env.PATH!); });
+// 固定配置根：Windows 下 `configRoot` 会走 %APPDATA%，而 fixture 按 ~/.config 布局。
+beforeEach(async () => { home = await mkdtemp(path.join(os.tmpdir(), "woohaa-mcp-")); env = { HOME: home, PATH: path.join(home, "bin"), XDG_CONFIG_HOME: path.join(home, ".config") }; await mkdir(env.PATH!); });
 const createMcpInstaller = (options: Parameters<typeof create>[0] = {}) => create({ applicationsDir: path.join(home, "Applications"), ...options });
 afterEach(async () => { await rm(home, { recursive: true, force: true }); });
-async function installed(id: string) { const exe = path.join(env.PATH!, id); await writeFile(exe, "#!/bin/sh\nexit 0\n", { mode: 0o700 }); return exe; }
+// Windows 上 `executable()` 先找 `<name>.exe` / `<name>.cmd`，无后缀的脚本不会被认成可执行。
+async function installed(id: string) { const exe = path.join(env.PATH!, process.platform === "win32" ? `${id}.cmd` : id); await writeFile(exe, "#!/bin/sh\nexit 0\n", { mode: 0o700 }); return exe; }
 async function config(text: string, file = path.join(home, ".config/opencode/opencode.jsonc")) { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, text); return file; }
 it("只列出实际发现的客户端；检测不创建配置", async () => {
   const service = createMcpInstaller({ env });
@@ -89,14 +91,16 @@ it("Codex 已安装状态来自 TOML，不误用其他 MCP 或 disabled 状态",
   await expect(service.install("codex", url)).rejects.toThrow("格式有误");
   expect(runCodex).not.toHaveBeenCalled();
 });
-it.skipIf(process.getuid?.() === 0)("不可写目录返回失败并保留原文件", async () => {
+// NTFS 没有 POSIX 权限位，`chmod 0o500` 不生效；只有非 Windows、非 root 才能构造"不可写"。
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("不可写目录返回失败并保留原文件", async () => {
   const file = await config('{}');
   await chmod(path.dirname(file), 0o500);
   try { await expect(createMcpInstaller({ env }).install("opencode", url)).rejects.toThrow(); expect(await readFile(file, "utf8")).toBe('{}'); }
   finally { await chmod(path.dirname(file), 0o700); }
 });
 
-it("符号链接配置写到原目标，不替换用户的链接", async () => {
+// Windows 建文件软链要开发者模式/管理员权限，fixture 搭不出来。
+it.skipIf(process.platform === "win32")("符号链接配置写到原目标，不替换用户的链接", async () => {
   const destination = await config('{/* linked */ "model":"keep"}', path.join(home, "linked.jsonc"));
   const file = path.join(home, ".config/opencode/opencode.jsonc");
   await mkdir(path.dirname(file), { recursive: true }); await symlink(destination, file);

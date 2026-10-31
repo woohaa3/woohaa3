@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Tauri 桌面发行打包入口
  * （change: 2026-10-14-migrate-canvas-to-tauri-native-bevy，任务 6.7 / 6.9）。

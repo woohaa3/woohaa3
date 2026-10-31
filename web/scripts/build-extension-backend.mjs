@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * 扩展后端单文件构建 build:backend
  * （change: 2026-10-21-add-extension-marketplace-point，任务 3.1 / design D4）。

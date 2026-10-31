@@ -127,7 +127,10 @@ describe("Provider 密钥在自己的配置段里", () => {
       expect(written).not.toContain("rh-secret");
       expect(JSON.parse(written).settings.find((entry: { key: string }) => entry.key === "providers.runninghub.apiKey")).toMatchObject({ configured: true });
       expect(readFileSync(app.secretsFile, "utf8")).toContain("rh-secret");
-      expect(statSync(app.secretsFile).mode & 0o777).toBe(0o600);
+      // Windows 的 NTFS 没有 POSIX 权限位，chmod 不生效。
+      if (process.platform !== "win32") {
+        expect(statSync(app.secretsFile).mode & 0o777).toBe(0o600);
+      }
 
       await waitFor(async () => (await catalogModelKeys(app.base)).includes("runninghub:api/seedream-v5-pro"));
       const keys = await catalogModelKeys(app.base);

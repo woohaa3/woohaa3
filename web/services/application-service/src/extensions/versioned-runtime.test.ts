@@ -21,13 +21,19 @@ import { createExtensionTaskRecovery } from "./task-recovery.js";
 import type { ApplicationBackendExtensionDefinition } from "./contract.js";
 
 const dirs: string[] = [];
+/** 用例建出来的 SQLite 端口：先关再删目录（Windows 上不关就 EBUSY）。 */
+const stores: Array<{ close(): void }> = [];
 function tempDb(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "woohaa3-app-version-"));
   dirs.push(dir);
   return path.join(dir, "plugin.sqlite");
 }
 afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  // 有用例已经手动关过，这里再关一次会抛 "database is not open"；关闭本身是幂等语义。
+  for (const store of stores.splice(0)) {
+    try { store.close(); } catch { /* 已经关过 */ }
+  }
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 const METADATA: ApplicationExtensionMetadata = {
@@ -50,6 +56,7 @@ describe("配置版本历史与多版本实例（任务 4.3 / design D6）", () 
   it("保留不可变配置版本快照，旧版本工作不覆盖新版本依赖", async () => {
     const store = createSqliteSiteExtensionConfigStore({ path: tempDb() });
     const work = createSqliteExtensionWorkRepository({ path: tempDb() });
+    stores.push(store, work);
     const host = createApplicationExtensionHost();
     const plane = createSiteExtensionControlPlane({
       host,
@@ -88,6 +95,7 @@ describe("配置版本历史与多版本实例（任务 4.3 / design D6）", () 
   it("旧版本实例不作为公共 handler 入口", async () => {
     const store = createSqliteSiteExtensionConfigStore({ path: tempDb() });
     const work = createSqliteExtensionWorkRepository({ path: tempDb() });
+    stores.push(store, work);
     const host = createApplicationExtensionHost();
     const definition: ApplicationBackendExtensionDefinition = {
       extensionId: METADATA.extensionId,
@@ -113,7 +121,10 @@ describe("跨进程提交意图（任务 4.2 / design D5）", () => {
   function harness() {
     const store = createSqliteSiteExtensionConfigStore({ path: tempDb() });
     const work = createSqliteExtensionWorkRepository({ path: tempDb() });
+    stores.push(store, work);
     const intents = createExtensionTaskIntentRepository({ path: tempDb() });
+    // 意图仓库同样打开一个 SQLite 文件，不关就删不掉目录。
+    stores.push(intents);
     const host = createApplicationExtensionHost();
     const plane = createSiteExtensionControlPlane({
       host,

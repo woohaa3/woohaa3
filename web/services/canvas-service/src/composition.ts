@@ -253,6 +253,8 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   let writerLock: CanvasWriterLock | null = null;
   let writerLockReason: string | null = null;
   let releaseWriterLock: (() => Promise<void>) | null = null;
+  // writer lock 用的仓库也是同一个 SQLite 文件，进程退出时要一起关（见 close 段）。
+  let writerLockRepository: { close?: () => void } | null = null;
   if (syncEnabled) {
     try {
       if (options.writerLock) {
@@ -263,6 +265,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
           if (resolved.config.backend === "sqlite") {
             const { SqliteYjsRepository, createSqliteWriterLockStore } = await import("./storage/sqlite/index.js");
             const repository = new SqliteYjsRepository({ path: resolved.config.sqlitePath as string });
+            writerLockRepository = repository;
             writerLock = createDurableWriterLock(createSqliteWriterLockStore(repository));
           } else {
             throw new Error("Mongo writer lock 尚未实现 durable store");
@@ -928,6 +931,13 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       if (releaseWriterLock) await releaseWriterLock().catch(() => undefined);
       await snippets?.close().catch(() => undefined);
       await composition?.close();
+      // 惰性解析出来的 Yjs 仓库同样持有 SQLite 连接；不关的话 Windows 上会留下
+      // EBUSY，临时目录删不掉（测试里表现为 EPERM）。只关我们自己建的，注入的不动。
+      if (!options.yjsRepository && yjsRepositoryPromise) {
+        const repository = await yjsRepositoryPromise.catch(() => null);
+        await (repository as { close?: () => void } | null)?.close?.();
+      }
+      writerLockRepository?.close?.();
       importStore?.close();
       scenePackages?.close();
     }

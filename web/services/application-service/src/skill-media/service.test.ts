@@ -8,8 +8,11 @@ import { createSkillMediaService } from "./service.js";
 import type { SkillMediaCanvasPort } from "./ports.js";
 
 const dirs: string[] = [];
+const stores: Array<{ close(): void }> = [];
 afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  // 先关 SQLite 再删目录：Windows 上句柄没关会 EBUSY，删目录就报 EPERM。
+  for (const store of stores.splice(0)) store.close();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 type CanvasState = { view?: AgentRunView; output?: AgentNodeOutputView };
@@ -18,6 +21,7 @@ function harness() {
   dirs.push(dir);
   const path = join(dir, "application.sqlite");
   const store = new SqliteSkillMediaStore({ path });
+  stores.push(store);
   const calls: string[] = [];
   const states = new Map<string, CanvasState>();
   let cancelResult: Awaited<ReturnType<SkillMediaCanvasPort["cancel"]>> = {

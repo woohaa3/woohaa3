@@ -1,6 +1,6 @@
 import http from "node:http";
 import { expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, modelSourceHash } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, migrateLegacyFilmSetToGroup, modelSourceHash } from "@woohaa3/contracts";
 import { CanvasRoom, InMemoryYjsDocumentRepository, ModelMcpService } from "@woohaa3/canvas-service";
 import { createModelMcpHttpHandler } from "@woohaa3/mcp-service";
 import { modelMcpServiceToClient } from "./mcp-adapters.js";
@@ -14,8 +14,12 @@ it("真实 MCP 在只有地面的片场生成独立模型；原子拒绝非法�
   canvas.document.nodes = [{ id: "scene", type: "composite-asset", position: { x: 0, y: 0 } }];
   const initial = createFilmSetSnapshot({ title: "测试场景", timeline: { duration: 0, loop: false }, initialCamera: { azimuth: 0.3, elevation: 0.5, distance: 7, aspect: "4:3", focusOffset: { x: 1, y: 0, z: 0 } }, filmSetContent: explicitGroundContent() });
   canvas.nodeData.scene = filmSetNodeDataFields(initial) as never;
+  // 旧片场已只读（change: 2026-10-27-...）：写入前必须按正式路径迁移成群组，
+  // 否则 submit_film_set 一律回 migration-required。
+  const migrated = migrateLegacyFilmSetToGroup(canvas, "scene", { commandId: "test-migration", groupId: "scene" });
+  if (!migrated.ok) throw new Error(migrated.reason);
   const room = new CanvasRoom({ canvasId, repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
-  await room.initialize({ canvas, roomEpoch: "epoch" });
+  await room.initialize({ canvas: migrated.canvas, roomEpoch: "epoch" });
   const model = new ModelMcpService({ resolveRoom: async () => room });
   const filmSet = filmSetMcpRuntime.createNodeService({ resolveRoom: async () => room });
   const grants = createToolGrantRegistry();

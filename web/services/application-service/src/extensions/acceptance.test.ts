@@ -29,9 +29,12 @@ import { createApplicationBackendExtensionManifest } from "./manifest.js";
 
 const dirs: string[] = [];
 const servers: http.Server[] = [];
+/** harness 建出来的 SQLite 端口：先关再删目录（Windows 上不关就 EBUSY）。 */
+const stores: Array<{ close(): void }> = [];
 afterEach(async () => {
   for (const server of servers.splice(0)) await new Promise<void>((resolve) => server.close(() => resolve()));
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const store of stores.splice(0)) store.close();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 function tempDb(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "woohaa3-plugin-accept-"));
@@ -65,6 +68,7 @@ function acceptanceSitePolicy(): SiteAccessPolicy {
 async function startHarness(): Promise<Harness> {
   const store = createSqliteSiteExtensionConfigStore({ path: tempDb() });
   const work = createSqliteExtensionWorkRepository({ path: tempDb() });
+  stores.push(store, work);
   const host = createApplicationExtensionHost();
   const probe: SampleExtensionProbe = { started: false, stopped: 0, admitted: 0 };
   // 先提供样例依赖 runtime，再注册插件（依赖满足）。
@@ -198,6 +202,7 @@ describe("样例站点插件独立验收（任务 5.1）", () => {
   it("activation 失败无遗留注册并可诊断", async () => {
     const store = createSqliteSiteExtensionConfigStore({ path: tempDb() });
     const work = createSqliteExtensionWorkRepository({ path: tempDb() });
+    stores.push(store, work);
     const host = createApplicationExtensionHost();
     const plane = createSiteExtensionControlPlane({
       host,

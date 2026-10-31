@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * 单 extension 独立 browser build（change: 2026-10-12-build-and-load-extensions-independently，
  * 任务 3.1–3.5、3.8 / design D1/D3/D5）。

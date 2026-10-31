@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * 拍摄镜头 schema2 → schema3 + 预览闭包的**一次性离线迁移**命令
  * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 3.1/3.2 / design D9）。

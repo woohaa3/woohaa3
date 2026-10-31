@@ -72,7 +72,10 @@ it("backs up committed WAL, converts previews and animation, then skips repeat s
       expect(original.nodeData.film.filmSetAnimations.schemaVersion).toBe(2);
       expect(backup.prepare("SELECT * FROM canvas_yjs_updates").all()).toHaveLength(1);
     } finally { backup.close(); }
-    expect(fs.statSync(result.backup!).mode & 0o777).toBe(0o600);
+    // Windows 的 NTFS 没有 POSIX 权限位，chmod 不生效（读回是 0o666）。
+    if (process.platform !== "win32") {
+      expect(fs.statSync(result.backup!).mode & 0o777).toBe(0o600);
+    }
     expect(migrateSqliteCanvasBeforeStartup(filename)).toEqual({ changed: false });
     expect(db.prepare("SELECT room_epoch FROM canvas_yjs_documents").get()!.room_epoch).toBe(row.room_epoch);
   } finally { db.close(); }

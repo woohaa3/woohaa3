@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /** Build signed updater artifacts and an isolated CDN upload tree. */
 import fs from 'node:fs';
 import path from 'node:path';

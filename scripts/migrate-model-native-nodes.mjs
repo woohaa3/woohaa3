@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /** One-time offline profile cutover. No production compatibility reader is installed. */
 import fs from "node:fs";
 import os from "node:os";

@@ -653,6 +653,9 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
       if (runtimePromise) await (await runtimePromise).close();
       history.close();
       taskStore.close();
+      // `submitKeys` 打开的是同一个 `storePath`：漏关会在 Windows 上留下 EBUSY，
+      // 连临时目录都删不掉（测试里表现为 EPERM）。
+      submitKeys.close();
       extensionTaskAssociations.close();
     }
   };

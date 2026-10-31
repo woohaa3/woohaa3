@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // 生产/预览入口（change: 2026-10-06-unify-backend-runtime-with-cordis，任务 4.1）。
 //
 // 在**同一进程**内组合前端静态资源与统一后端运行单元：

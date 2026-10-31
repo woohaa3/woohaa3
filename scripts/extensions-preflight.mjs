@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * 扩展静态预检
  * （change: 2026-10-15-add-scannable-extension-directories，任务 3.4 / design D7）。

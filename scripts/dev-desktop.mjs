@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // One application: shared Vite/Node UI plus a Tauri-owned native Bevy surface.
 import { prepareDevelopmentHost } from "./prepare-desktop-host.mjs";
 import { stageDevelopmentExecutable } from "./lib/desktop-dev-app.mjs";

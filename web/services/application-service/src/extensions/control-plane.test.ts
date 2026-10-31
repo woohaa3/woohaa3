@@ -16,13 +16,22 @@ import { createSiteExtensionControlPlane, type ExtensionToggleStore, type SiteEx
 import type { ApplicationBackendExtensionDefinition } from "./contract.js";
 
 const dirs: string[] = [];
+/** 本文件打开的 SQLite 端口：`afterAll` 里先关再删目录（Windows 上不关就 EBUSY）。 */
+const opened: Array<{ close(): void }> = [];
+function owned<T extends { close(): void }>(resource: T): T {
+  opened.push(resource);
+  return resource;
+}
 function tempDb(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "woohaa3-site-plugin-"));
   dirs.push(dir);
   return path.join(dir, "plugin.sqlite");
 }
 afterAll(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const resource of opened.splice(0)) {
+    try { resource.close(); } catch { /* 用例可能已经手动关过 */ }
+  }
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 const METADATA: ApplicationExtensionMetadata = {
@@ -55,8 +64,8 @@ function makePlane(overrides: {
   suspended?: ReadonlySet<string>;
   toggles?: ExtensionToggleStore;
 } = {}): { plane: SiteExtensionControlPlane; store: ReturnType<typeof createSqliteSiteExtensionConfigStore>; work: ReturnType<typeof createSqliteExtensionWorkRepository>; host: ReturnType<typeof createApplicationExtensionHost> } {
-  const store = createSqliteSiteExtensionConfigStore({ path: tempDb() });
-  const work = createSqliteExtensionWorkRepository({ path: tempDb() });
+  const store = owned(createSqliteSiteExtensionConfigStore({ path: tempDb() }));
+  const work = owned(createSqliteExtensionWorkRepository({ path: tempDb() }));
   const host = createApplicationExtensionHost();
   const definitions =
     overrides.definitions ??
@@ -243,14 +252,14 @@ describe("commit 后崩溃与 reconcile（任务 3.1）", () => {
   it("提交后进程重启：reconcile 依据已提交版本重建实际状态", async () => {
     const dbPath = tempDb();
     const workPath = tempDb();
-    const store = createSqliteSiteExtensionConfigStore({ path: dbPath });
+    const store = owned(createSqliteSiteExtensionConfigStore({ path: dbPath }));
     // 直接持久化一次「已提交但 activation 尚未完成」的配置（模拟 commit 后崩溃）。
     store.commit({ expectedRevision: 0, extensionId: "sample-site-extension", enabled: true, values: { v: 1 }, secretRefs: [], actor: "a", now: "2026-10-04T00:00:00.000Z" });
     store.close();
 
     // 重启：重新打开 store，reconcile 应把配置激活为 active。
-    const reopened = createSqliteSiteExtensionConfigStore({ path: dbPath });
-    const work = createSqliteExtensionWorkRepository({ path: workPath });
+    const reopened = owned(createSqliteSiteExtensionConfigStore({ path: dbPath }));
+    const work = owned(createSqliteExtensionWorkRepository({ path: workPath }));
     const host = createApplicationExtensionHost();
     const plane = createSiteExtensionControlPlane({
       host,
@@ -531,8 +540,8 @@ describe("崩溃熔断 quarantined（change: 2026-10-21-isolate-extension-host-p
     const definitions = countingDefinitions({ activations: 0, disposals: 0 });
     const first = createSiteExtensionControlPlane({
       host: createApplicationExtensionHost(),
-      store: createSqliteSiteExtensionConfigStore({ path: dbPath }),
-      workStore: createSqliteExtensionWorkRepository({ path: workPath }),
+      store: owned(createSqliteSiteExtensionConfigStore({ path: dbPath })),
+      workStore: owned(createSqliteExtensionWorkRepository({ path: workPath })),
       metadata: metadataSource(),
       definitions
     });
@@ -540,11 +549,11 @@ describe("崩溃熔断 quarantined（change: 2026-10-21-isolate-extension-host-p
     await first.quarantine("sample-site-extension");
 
     // 重启进入安全模式：扩展被暂停，投影 suspended（安全模式下根本不装配，不会再崩溃）。
-    const safeStore = createSqliteSiteExtensionConfigStore({ path: dbPath });
+    const safeStore = owned(createSqliteSiteExtensionConfigStore({ path: dbPath }));
     const safe = createSiteExtensionControlPlane({
       host: createApplicationExtensionHost(),
       store: safeStore,
-      workStore: createSqliteExtensionWorkRepository({ path: workPath }),
+      workStore: owned(createSqliteExtensionWorkRepository({ path: workPath })),
       metadata: metadataSource(),
       definitions,
       suspended: new Set(["sample-site-extension"])
@@ -553,12 +562,12 @@ describe("崩溃熔断 quarantined（change: 2026-10-21-isolate-extension-host-p
     expect(safe.status("sample-site-extension")!.actualState).toBe("suspended");
 
     // 再次正常重启：隔离从审计恢复，不自动激活。
-    const normalStore = createSqliteSiteExtensionConfigStore({ path: dbPath });
+    const normalStore = owned(createSqliteSiteExtensionConfigStore({ path: dbPath }));
     const counter = { activations: 0, disposals: 0 };
     const normal = createSiteExtensionControlPlane({
       host: createApplicationExtensionHost(),
       store: normalStore,
-      workStore: createSqliteExtensionWorkRepository({ path: workPath }),
+      workStore: owned(createSqliteExtensionWorkRepository({ path: workPath })),
       metadata: metadataSource(),
       definitions: countingDefinitions(counter)
     });

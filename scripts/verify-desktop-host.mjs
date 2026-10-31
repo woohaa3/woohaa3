@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /** Real isolated bundle smoke. No source imports, no system Node in child PATH. */
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawn,execFileSync} from 'node:child_process';import {createInterface} from 'node:readline';import assert from 'node:assert/strict';
 import {systemTar,installedHostLayout,isolatedHostEnvironment} from './lib/desktop-platform-commands.mjs';

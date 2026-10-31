@@ -10,9 +10,12 @@ import { createSkillMediaService, type SkillMediaCanvasPort } from "../skill-med
 
 const servers: http.Server[] = [];
 const dirs: string[] = [];
+const stores: Array<{ close(): void }> = [];
 afterEach(async () => {
   for (const server of servers.splice(0)) await new Promise<void>((resolve) => server.close(() => resolve()));
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  // 先关 SQLite 再删目录：Windows 上句柄没关会 EBUSY，删目录就报 EPERM。
+  for (const store of stores.splice(0)) store.close();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 function serviceStub(): AgentConversationService {
@@ -33,6 +36,7 @@ async function boot(options: {
   const dir = mkdtempSync(join(tmpdir(), "woohaa-skill-api-"));
   dirs.push(dir);
   const store = new SqliteSkillMediaStore({ path: join(dir, "application.sqlite") });
+  stores.push(store);
   const canvas: SkillMediaCanvasPort = options.canvas ?? {
     async run(input) { return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, runId: input.runId, jobId: "job", state: "accepted" }; },
     async cancel(input) { return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, runId: input.runId, state: "cancel-requested" }; },

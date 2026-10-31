@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * 同步 Bevy 运行时静态资源到 Vite public 目录。
  *

@@ -13,6 +13,7 @@ import {
   createFilmSetSnapshot,
   createModel3DNodeData,
   getGroupLayoutSizes,
+  groupPadding,
   model3DNodeDataFields,
   readFilmSetGroupMarker,
   type ServerCanvas
@@ -174,8 +175,9 @@ describe("planFilmSetImportCommand", () => {
     if (sourceUpdate?.type !== "node.update") throw new Error("missing source update");
     expect(sourceUpdate.position).toBeDefined();
     // 成员坐标是 group 局部坐标；不能继承来源卡片拖动前的绝对位置把气泡撑大。
-    expect(sourceUpdate.position!.x).toBeGreaterThanOrEqual(40);
-    expect(sourceUpdate.position!.y).toBeGreaterThanOrEqual(40);
+    // 成员落在组框内边距以内即算组局部坐标，别写死具体像素。
+    expect(sourceUpdate.position!.x).toBeGreaterThanOrEqual(groupPadding);
+    expect(sourceUpdate.position!.y).toBeGreaterThanOrEqual(groupPadding);
     expect(patch).not.toHaveProperty("position");
     const applied = applyCanvasCommands(canvas, plan.commands);
     expect(applied.ok).toBe(true);
@@ -218,8 +220,8 @@ describe("planFilmSetImportCommand", () => {
     const members = appliedSecond.canvas.document.nodes.filter((node) => node.parentId === "film");
     expect(members.map((node) => node.id).sort()).toEqual(["model", "model2"]);
     for (const member of members) {
-      expect(member.position.x).toBeGreaterThanOrEqual(40);
-      expect(member.position.y).toBeGreaterThanOrEqual(40);
+      expect(member.position.x).toBeGreaterThanOrEqual(groupPadding);
+      expect(member.position.y).toBeGreaterThanOrEqual(groupPadding);
     }
   });
 

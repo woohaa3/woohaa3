@@ -23,6 +23,8 @@ function setup(actionId: string, data: unknown) {
     canvas: { getBoundingClientRect: () => ({ left: 0, top: 0 }) },
     options: { onModelFocusIntent: enter, getRuntime: () => null },
     model: {},
+    // 双击分派会读 `core.state.selected` 做"名称行重命名"兜底判断（change: canvas sticky note）。
+    state: { selected: [] },
     setSelection: select,
     activeViewport: () => ({ x: 0, y: 0, zoom: 1 }),
     surfaceSize: () => ({ width: 1000, height: 800 }),

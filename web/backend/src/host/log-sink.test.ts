@@ -166,7 +166,9 @@ describe("宿主日志 sink", () => {
     const linked = tempDir();
     const target = tempDir();
     const link = path.join(linked, "logs");
-    fs.symlinkSync(target, link);
+    // Windows 建符号链接要开发者模式或管理员权限；目录链接用 junction（不需要权限），
+    // 对"该路径是链接、不是真目录"这条被测逻辑等价。
+    fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
     const { lines, stderr } = capture();
     const linkSink = createHostLogSink({ env: { WOOHAA3_LOG_DIR: link }, stderr, now });
 

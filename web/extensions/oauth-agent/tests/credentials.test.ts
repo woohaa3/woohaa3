@@ -56,7 +56,10 @@ describe("ChatGPT 凭据仓库", () => {
     const envelope = readFileSync(file, "utf8");
     expect(envelope).not.toContain("plaintext-access-token");
     expect(envelope).not.toContain("refresh-secret");
-    expect((statSync(file).mode & 0o777)).toBe(0o600);
+    // Windows 的 NTFS 没有 POSIX 权限位，chmod 不生效。
+    if (process.platform !== "win32") {
+      expect((statSync(file).mode & 0o777)).toBe(0o600);
+    }
   });
 
   it("不同 owner 不能用彼此密文解封（AAD 绑定）", () => {

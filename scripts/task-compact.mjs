@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * `pnpm task:compact` —— 清理 task_records 里的存量二进制负载。
  *

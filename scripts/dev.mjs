@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import http from "node:http";

@@ -17,7 +17,9 @@ let env: NodeJS.ProcessEnv;
 
 beforeEach(async () => {
   home = await mkdtemp(path.join(os.tmpdir(), "woohaa-clients-"));
-  env = { HOME: home, PATH: path.join(home, "bin") };
+  // 固定配置根：Windows 下 `configRoot` 会走 %APPDATA%，而这里的 fixture 按 ~/.config 布局。
+  // 钉住 XDG_CONFIG_HOME 让三个平台解析到同一个目录，测的还是安装逻辑本身。
+  env = { HOME: home, PATH: path.join(home, "bin"), XDG_CONFIG_HOME: path.join(home, ".config") };
   await mkdir(env.PATH!);
 });
 afterEach(async () => { await rm(home, { recursive: true, force: true }); });
@@ -392,7 +394,9 @@ describe("DeepSeek Harness profile 级安装", () => {
     }
   }
 
-  it("profile 未声明但 DSH 安装自带插件时照常写入", async () => {
+  // Windows 建文件软链要开发者模式/管理员权限，fixture 搭不出来。这两条测的是
+  // "从 PATH 里的 dsh 反查全局安装目录"，软链是前提，Windows 上跳过。
+  it.skipIf(process.platform === "win32")("profile 未声明但 DSH 安装自带插件时照常写入", async () => {
     const dir = await profileWith("web", false);
     await harnessInstall(true);
     const result = await installer({ env }).install("deepseek-harness", url, "web");
@@ -400,7 +404,7 @@ describe("DeepSeek Harness profile 级安装", () => {
     expect(await readFile(path.join(dir, "cordis.patch.yml"), "utf8")).toContain(url);
   });
 
-  it("profile 与 DSH 安装都未提供插件时仍拒绝且文件不变", async () => {
+  it.skipIf(process.platform === "win32")("profile 与 DSH 安装都未提供插件时仍拒绝且文件不变", async () => {
     const dir = await profileWith("web", false);
     await harnessInstall(false);
     const file = path.join(dir, "cordis.patch.yml");
@@ -440,7 +444,9 @@ describe("共享安全机制", () => {
     expect((await first).client.configured).toBe(true);
   });
 
-  it.skipIf(process.getuid?.() === 0)("不可写目录报错且原文件不变", async () => {
+  // NTFS 没有 POSIX 权限位，`chmod 0o500` 不生效，目录照样可写；只有非 Windows、
+  // 非 root 才能构造"不可写"。
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("不可写目录报错且原文件不变", async () => {
     await app("Cursor");
     const target = await file(path.join(home, ".cursor/mcp.json"), "{}");
     await chmod(path.dirname(target), 0o500);

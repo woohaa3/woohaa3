@@ -186,21 +186,24 @@ describe("归属文件位置", () => {
   it("显式变量优先，其次跟着宿主其它 store，最后落 cwd 下的 .woohaa3/", () => {
     const fallback = resolveCanvasOwnershipPath({});
     expect(fallback.endsWith(path.join(".woohaa3", "canvas-storage-ownership.json"))).toBe(true);
-    expect(resolveCanvasOwnershipPath({ WOOHAA3_CANVAS_OWNERSHIP_PATH: "/tmp/x/ownership.json" })).toBe("/tmp/x/ownership.json");
+    // 期望值用 path.resolve 拼：Windows 上分隔符是反斜杠。
+    // 期望值按实现的同一套 path 语义拼：Windows 上分隔符是反斜杠。
+    // 实现里是 `path.resolve(cwd, configured)`，期望值必须用同一套语义（Windows 上会带盘符）。
+    expect(resolveCanvasOwnershipPath({ WOOHAA3_CANVAS_OWNERSHIP_PATH: "/tmp/x/ownership.json" })).toBe(path.resolve("/tmp/x/ownership.json"));
     expect(resolveCanvasOwnershipPath({ WOOHAA3_CANVAS_OWNERSHIP_PATH: "  " })).toBe(fallback);
     // 桌面包 / 发布包 / 测试都通过 APPLICATION_STORE_PATH 或 TASK_STORE_PATH 指定数据目录：
     // 归属记录跟着它走，不写进仓库 cwd。
     expect(
       resolveCanvasOwnershipPath({ WOOHAA3_APPLICATION_STORE_PATH: "/tmp/data/application.sqlite" })
-    ).toBe(path.join("/tmp/data", "canvas-storage-ownership.json"));
+    ).toBe(path.join(path.dirname(path.resolve("/tmp/data/application.sqlite")), "canvas-storage-ownership.json"));
     expect(
       resolveCanvasOwnershipPath({
         WOOHAA3_APPLICATION_STORE_PATH: "/tmp/app/application.sqlite",
         WOOHAA3_TASK_STORE_PATH: "/tmp/task/task.sqlite"
       })
-    ).toBe(path.join("/tmp/app", "canvas-storage-ownership.json"));
+    ).toBe(path.join(path.dirname(path.resolve("/tmp/app/application.sqlite")), "canvas-storage-ownership.json"));
     expect(
       resolveCanvasOwnershipPath({ WOOHAA3_TASK_STORE_PATH: "/tmp/task/task.sqlite" })
-    ).toBe(path.join("/tmp/task", "canvas-storage-ownership.json"));
+    ).toBe(path.join(path.dirname(path.resolve("/tmp/task/task.sqlite")), "canvas-storage-ownership.json"));
   });
 });

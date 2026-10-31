@@ -64,8 +64,9 @@ describe("createSettingsService", () => {
   it("文件不存在时取默认值；默认位置在 web/ 下，可由环境变量指定", async () => {
     const { service } = await start(tempFiles());
     expect(service.get("storage.primary")).toBe("local");
-    expect(resolveSettingsFiles({}, "/repo").configFile).toBe("/repo/web/woohaa.config.yml");
-    expect(resolveSettingsFiles({ WOOHAA3_SECRETS_FILE: "/etc/woohaa/secrets.yml" }, "/repo").secretsFile).toBe("/etc/woohaa/secrets.yml");
+    // 期望值用 path.join 拼：Windows 上分隔符是反斜杠，写死 POSIX 路径必挂。
+    expect(resolveSettingsFiles({}, "/repo").configFile).toBe(path.resolve("/repo", "web", "woohaa.config.yml"));
+    expect(resolveSettingsFiles({ WOOHAA3_SECRETS_FILE: "/etc/woohaa/secrets.yml" }, "/repo").secretsFile).toBe(path.resolve("/etc/woohaa/secrets.yml"));
   });
 
   it("构建期默认值覆盖静态项与插件配置项，用户文件仍然优先", async () => {
@@ -99,7 +100,7 @@ describe("createSettingsService", () => {
     expect(resolveSettingsFiles({}, subpackage).configFile).toBe(path.join(repoRoot, "web", "woohaa.config.yml"));
     expect(resolveSettingsFiles({}, path.join(repoRoot, "web")).configFile).toBe(path.join(repoRoot, "web", "woohaa.config.yml"));
     // 显式环境变量仍优先于任何推导。
-    expect(resolveSettingsFiles({ WOOHAA3_CONFIG_FILE: "/etc/custom.yml" }, subpackage).configFile).toBe("/etc/custom.yml");
+    expect(resolveSettingsFiles({ WOOHAA3_CONFIG_FILE: "/etc/custom.yml" }, subpackage).configFile).toBe(path.resolve("/etc/custom.yml"));
   });
 
   it("启动时配置非法直接失败", async () => {
@@ -155,7 +156,10 @@ describe("createSettingsService", () => {
     expect(written).toContain("wss://new");
     expect(written).not.toContain("alice");
     expect(fs.readFileSync(files.secretsFile, "utf8")).toContain("alice");
-    expect(fs.statSync(files.secretsFile).mode & 0o777).toBe(0o600);
+    // Windows 的 NTFS 没有 POSIX 权限位，chmod 不生效。
+    if (process.platform !== "win32") {
+      expect(fs.statSync(files.secretsFile).mode & 0o777).toBe(0o600);
+    }
 
     const described = service.describe().find((entry) => entry.key === tokenKey);
     expect(described).toMatchObject({ value: null, configured: true });
@@ -189,7 +193,10 @@ describe("createSettingsService", () => {
     expect(await service.update({ "providers.demo.apiKey": "sk-demo" })).toMatchObject({ ok: true });
     expect(service.section("providers.demo").apiKey).toBe("sk-demo");
     expect(fs.readFileSync(files.secretsFile, "utf8")).toContain("sk-demo");
-    expect(fs.statSync(files.secretsFile).mode & 0o777).toBe(0o600);
+    // Windows 的 NTFS 没有 POSIX 权限位，chmod 不生效。
+    if (process.platform !== "win32") {
+      expect(fs.statSync(files.secretsFile).mode & 0o777).toBe(0o600);
+    }
     expect(fs.readFileSync(files.configFile, "utf8")).not.toContain("sk-demo");
     expect(service.describe().find((entry) => entry.key === "providers.demo.apiKey")).toMatchObject({ value: null, configured: true });
 

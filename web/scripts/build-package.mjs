@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Bundle one workspace package's public entry into `dist/` with esbuild.
  *

@@ -21,9 +21,16 @@ import { ROUTE_ORDER, READINESS_ORDER } from "../order.js";
 import { telemetryPlugin, telemetryStorePath } from "./telemetry.js";
 
 const temps: string[] = [];
+/** 用例建出来的 harness：teardown 时必须先跑 disposer 关掉 SQLite，再删目录。 */
+const harnesses: Array<{ disposers: Array<() => void> }> = [];
 
 afterEach(() => {
-  for (const directory of temps.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
+  // Windows 上 SQLite 句柄没关就删不掉临时目录（EPERM，重试也无效）。
+  // `applyPlugin` 把 close 注册在 `ctx.effect` 的 disposer 里，这里要先执行它们。
+  for (const harness of harnesses.splice(0)) {
+    for (const dispose of harness.disposers.splice(0)) dispose();
+  }
+  for (const directory of temps.splice(0)) fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 function tempStore(): string {
@@ -110,6 +117,7 @@ function applyPlugin(options: HarnessOptions = {}) {
   } as unknown as HostContext;
 
   telemetryPlugin.apply(ctx, { env: { WOOHAA3_TASK_STORE_PATH: path.join(optionsPath(options), "task.sqlite") } });
+  harnesses.push({ disposers });
   return { provided, routes, readiness, disposers };
 }
 
@@ -127,7 +135,9 @@ async function getRoute(routes: Array<{ order: number; handle: (req: IncomingMes
 
 describe("telemetryStorePath", () => {
   it("与任务库同目录，文件名固定 telemetry.sqlite", () => {
-    expect(telemetryStorePath({ WOOHAA3_TASK_STORE_PATH: "/var/data/task.sqlite" })).toBe("/var/data/telemetry.sqlite");
+    // 期望值用 path.resolve 拼：Windows 上分隔符是反斜杠。
+    // 期望值按实现的同一套 path 语义拼：Windows 上分隔符是反斜杠，且这里不加盘符。
+    expect(telemetryStorePath({ WOOHAA3_TASK_STORE_PATH: "/var/data/task.sqlite" })).toBe(path.join(path.dirname("/var/data/task.sqlite"), "telemetry.sqlite"));
   });
 
   it("未配置存储路径时按 cwd 推导（readStorePath 的空串 → '.'）", () => {

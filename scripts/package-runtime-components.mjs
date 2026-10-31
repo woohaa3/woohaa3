@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /** Build immutable, signed self-hosted component artifacts. Never installs dependencies. */
 import fs from 'node:fs';
 import { runtimeReleaseLayout } from './lib/runtime-release-layout.mjs';

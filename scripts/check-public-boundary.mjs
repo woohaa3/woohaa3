@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /** Verify the public checkout never needs a private parent to resolve source inputs. */
 import fs from 'node:fs';
 import path from 'node:path';

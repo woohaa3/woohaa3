@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * 打包扩展为 .wxt：pnpm pack:extension <extensionDir> [--key <ed25519.pem>] [--out <file.wxt>] [--skip-build]
  *                  pnpm pack:extension --genkey <prefix>

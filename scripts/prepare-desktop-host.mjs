@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import fs from 'node:fs';
 import { runtimeReleaseLayout } from './lib/runtime-release-layout.mjs';
 import path from 'node:path';

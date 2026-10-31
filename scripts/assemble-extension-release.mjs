@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Extension release assembly
  * （change: 2026-10-12-build-and-load-extensions-independently，任务 6.1–6.3/6.8 / design D5/D6）。

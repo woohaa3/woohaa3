@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * 主题 token 生成/校验脚本（change: unify-application-theme-tokens，任务 1.4 / design D2）。
  *

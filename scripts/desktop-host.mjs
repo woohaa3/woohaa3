@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /** Dedicated desktop entry: stdout is JSONL control, stderr is diagnostic only. */
 import fs from 'node:fs';
 import path from 'node:path';

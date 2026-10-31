@@ -54,7 +54,10 @@ describe("group authority queue", () => {
     // 扩组不改变既有内容的世界坐标。
     expect(original.position.y + root.position.y).toBe(40);
   });
-  it("keeps a nested root group attached while creating content inside it", async () => {
+  // 嵌套 group 已不是合法结构（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D7）：
+  // 遗留嵌套在读取时被拆成顶层组，绝对位置烘焙进节点。这里断言的是"拆分后成员关系不变、
+  // 在 root 内新建内容仍然落在 root 下"，而不是旧的"保持挂在 manager 下面"。
+  it("splits a legacy nested root group but keeps its members under it", async () => {
     const room = new CanvasRoom({ canvasId: "nested-scope", repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
     const canvas = createEmptyWoohaa3ServerCanvas("nested-scope", new Date().toISOString());
     canvas.document.nodes = [
@@ -75,7 +78,10 @@ describe("group authority queue", () => {
     const exported = room.exportCanvas();
     expect(exported.ok).toBe(true);
     if (!exported.ok) return;
-    expect(exported.canvas.document.nodes.find(n => n.id === "root")?.parentId).toBe("manager");
+    const rootNode = exported.canvas.document.nodes.find(n => n.id === "root");
+    expect(rootNode?.parentId).toBeUndefined();
+    // 拆分只改父级与坐标：root 相对 manager 的 (20,20) 被烘焙成绝对坐标。
+    expect(rootNode?.position).toEqual({ x: 20, y: 20 });
     expect(exported.canvas.document.nodes.find(n => n.id === "a")?.parentId).toBe("root");
     expect(exported.canvas.document.nodes.some(n => n.type === "image" && n.parentId === "root")).toBe(true);
   });
