@@ -155,6 +155,8 @@
 .settings-page__hint { margin: 0 0 12px; font-size: 12px; color: var(--mc-text-muted); line-height: 1.6; }
 .settings-page__hint code,
 .settings-page__item-key { font-size: 11px; padding: 1px 4px; border-radius: 4px; background: var(--app-web-subtle); }
+.settings-about__path { display: block; margin: 2px 0; overflow-wrap: anywhere; line-height: 1.6; }
+.settings-about__path-label { display: block; margin-top: 8px; font-size: 11px; color: var(--mc-text-muted); }
 .settings-page__error { margin: 6px 0 0; font-size: 12px; color: var(--app-status-danger); }
 
 /* Provider 凭据弹窗的紧凑卡片（画布 scope）；设置页不再用这套，见 .settings-plugin。 */

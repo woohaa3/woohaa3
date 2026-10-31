@@ -16,7 +16,7 @@ function settingValue(snapshot: SettingsSnapshot | null, key: string): string {
 
 function providersText(providers: ReadonlyArray<{ id: string; label: string }> | undefined): string {
   if (providers === undefined || providers.length === 0) return "无";
-  return providers.map((provider) => provider.id === provider.label ? provider.id : `${provider.label}（${provider.id}）`).join("、");
+  return providers.map((provider) => provider.label).join("、");
 }
 
 function Row({ label, children, testId }: { label: string; children: ReactNode; testId: string }) {
@@ -34,14 +34,10 @@ export function AboutSection({ snapshot }: { snapshot: SettingsSnapshot | null }
   const version = appBuildVersion();
   const storagePrimary = settingValue(snapshot, "storage.primary");
   const exposerPrimary = settingValue(snapshot, "exposer.primary");
-  const publicEnabled = settingValue(snapshot, "storage.local.publicEnabled") === "true";
   const storageProviders = snapshot?.extensionPoints?.storage;
   const exposerProviders = snapshot?.extensionPoints?.exposer;
-  const publicRegistered = exposerProviders?.some((provider) => provider.id === "local-public") ?? false;
-  const exposerRegistered = exposerPrimary !== "" && (exposerProviders?.some((provider) => provider.id === exposerPrimary) ?? false);
-  const publicCredentialConfigured = ["storage.local.publicSecretId", "storage.cos.secretId"].some(
-    (key) => snapshot?.settings.find((item) => item.key === key)?.configured === true
-  );
+  const exposerProvider = exposerProviders?.find((provider) => provider.id === exposerPrimary);
+  const exposerRegistered = exposerPrimary !== "" && exposerProvider !== undefined;
   const platform = typeof navigator === "undefined" ? "未知" : navigator.platform || navigator.userAgent;
   const language = typeof navigator === "undefined" ? "" : navigator.language;
 
@@ -62,7 +58,7 @@ export function AboutSection({ snapshot }: { snapshot: SettingsSnapshot | null }
       <Row label="对外地址提供者" testId="settings-about-exposer">
         {exposerPrimary !== "" ? (
           <>
-            <code>{exposerPrimary}</code>
+            <code>{exposerProvider?.label ?? exposerPrimary}</code>
             {!exposerRegistered ? <span className="settings-page__badge is-warning">已选择但未注册</span> : null}
           </>
         ) : (
@@ -73,34 +69,10 @@ export function AboutSection({ snapshot }: { snapshot: SettingsSnapshot | null }
         )}
         <span className="settings-page__hint"> · 已注册：{providersText(exposerProviders)}</span>
       </Row>
-      <Row label="公开临时桶" testId="settings-about-public-bucket">
-        {publicRegistered ? (
-          <>
-            <span className={publicCredentialConfigured ? "settings-page__badge" : "settings-page__badge is-warning"}>
-              {publicCredentialConfigured ? "已注册 local-public" : "已注册，凭据未配置"}
-            </span>
-            <span className="settings-page__hint">
-              {publicCredentialConfigured
-                ? " 素材会推到公开只读桶，内容由运维定期清理。"
-                : " 请在「插件配置 → 本地存储」填公开桶凭据，或先配置 COS 对象存储复用其凭据。"}
-            </span>
-          </>
-        ) : publicEnabled ? (
-          <>
-            <span className="settings-page__badge is-warning">已启用但未注册</span>
-            <span className="settings-page__hint"> 检查公开桶地址 / 前缀 / 凭据是否齐全。</span>
-          </>
-        ) : (
-          <>
-            <span className="settings-page__badge is-muted">未启用</span>
-            <span className="settings-page__hint"> 在「插件配置 → 本地存储」打开公开临时桶并填全地址与凭据后，才会注册 local-public。</span>
-          </>
-        )}
-      </Row>
       <Row label="配置文件" testId="settings-about-files">
-        <code>{snapshot?.files.config ?? "—"}</code>
-        <span className="settings-page__hint"> · 密钥：</span>
-        <code>{snapshot?.files.secrets ?? "—"}</code>
+        <code className="settings-about__path">{snapshot?.files.config ?? "—"}</code>
+        <span className="settings-about__path-label">密钥文件</span>
+        <code className="settings-about__path">{snapshot?.files.secrets ?? "—"}</code>
       </Row>
       <Row label="已安装扩展" testId="settings-about-extensions">
         {snapshot?.installedExtensions?.length ?? 0} 个
