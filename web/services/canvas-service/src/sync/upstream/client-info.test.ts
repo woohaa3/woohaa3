@@ -1,4 +1,3 @@
-import test from "vitest";
 import { afterEach, describe, expect, it } from "vitest";
 import pkg from "../../../package.json";
 import { defaultUpstreamClientInfo, UPSTREAM_CLIENT_NAME, upstreamUserAgent } from "./client-info.js";
