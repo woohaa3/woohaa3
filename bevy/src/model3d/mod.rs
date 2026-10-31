@@ -55,6 +55,7 @@ pub mod lod_benchmark;
 pub mod preview;
 
 mod layout;
+pub(crate) use layout::CANVAS_UNITS_PER_METER;
 pub(crate) use layout::film_set_content_bounds;
 mod batch_cache;
 mod batch_strategy;

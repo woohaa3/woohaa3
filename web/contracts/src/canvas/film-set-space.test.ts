@@ -21,6 +21,7 @@ import {
   unmapFilmSetSceneDistance,
   unmapFilmSetSceneVector
 } from "./film-set-space.js";
+import { CANVAS_UNITS_PER_METER } from "./model-focus/types.js";
 import { shotCameraPosition } from "./shot-camera.js";
 import type { Vec3 } from "./model-transform.js";
 
@@ -195,8 +196,11 @@ describe("相似变换保持构图不变", () => {
   it("场景 AABB 只做有限性校验，不乘呈现倍率", () => {
     expect(filmSetSceneAabb({ min: [0, 0, 0], max: [1, 2, 3] })).toEqual({ min: [0, 0, 0], max: [1, 2, 3] });
     expect(filmSetSceneAabb({ min: [0, Number.NaN, 0], max: [1, 1, 1] })).toBeNull();
-    expect(filmSetNaturalScale(null, 2)).toBeCloseTo(96, 9);
-    expect(filmSetNaturalScale({ offset: { x: 0, y: 0, z: 0 }, scale: 0.5, yaw: 0 }, 2)).toBeCloseTo(48, 9);
+    // 绝对米制：1 场景单位 = CANVAS_UNITS_PER_METER 画布单位，且与 extent 无关。
+    expect(filmSetNaturalScale(null, 2)).toBeCloseTo(CANVAS_UNITS_PER_METER, 9);
+    expect(filmSetNaturalScale(null, 40)).toBeCloseTo(CANVAS_UNITS_PER_METER, 9);
+    expect(filmSetNaturalScale({ offset: { x: 0, y: 0, z: 0 }, scale: 0.5, yaw: 0 }, 2))
+      .toBeCloseTo(CANVAS_UNITS_PER_METER / 2, 9);
   });
 });
 

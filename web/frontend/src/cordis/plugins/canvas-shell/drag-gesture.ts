@@ -148,8 +148,7 @@ export function createDragGestureFamily(
     const groupSizes = new Map(index.groupBounds.map(group => [group.id, {width: group.width, height: group.height}]));
     const groupBadgeProjections = groupBadgeProjectionsOf(
       index.source,
-      index.groups.map(group => group.id),
-      groupSizes
+      index.groups.map(group => group.id)
     );
     const movingGroups = [...roots.keys()].filter(id => index.byId.get(id)?.type === "group");
     let settled = original;

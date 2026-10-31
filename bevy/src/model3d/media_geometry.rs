@@ -8,17 +8,20 @@
 use crate::protocol::{GraphNode, ModelMediaPlane, ModelSnapshot};
 use bevy::prelude::*;
 
+/// 片场媒体平面的画布高度（画布单位），与 Web `FILM_SET_MEDIA_PLANE_HEIGHT` 同值。
+pub(crate) const MEDIA_PLANE_CANVAS_HEIGHT: f32 = 48.0;
+
 /// Match the scene-unit plane size used by the recording compiler.
+///
+/// 高度在**内容单位**里表达，再乘共同根 `unit` 得到画布尺寸。绝对米制下要让平面恒为
+/// 48 画布单位，内容高度就是 `48 / CANVAS_UNITS_PER_METER`（change:
+/// 2026-10-31-render-models-at-absolute-metric-scale），不再随场景 `extent` 变化。
 pub(super) fn group_media_plane(
     owner: &str,
     binding: &crate::protocol::FilmSetGroupBinding,
-    model: Option<&ModelSnapshot>,
+    _model: Option<&ModelSnapshot>,
 ) -> ModelMediaPlane {
-    let extent = model
-        .map(|model| model.extent)
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(2.0);
-    let height = extent / 4.0;
+    let height = MEDIA_PLANE_CANVAS_HEIGHT / crate::model3d::CANVAS_UNITS_PER_METER;
     ModelMediaPlane {
         item_id: binding.binding_id.clone(),
         unit: 1.0,

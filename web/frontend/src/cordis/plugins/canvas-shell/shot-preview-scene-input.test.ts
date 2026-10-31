@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   createFilmSetGroupMarker,
-  filmSetGroupBadgePlacement,
   groupBadgeRect,
   groupModelProjection,
   shotPreviewNodeId,
@@ -82,21 +81,33 @@ describe("buildShotPreviewSceneInput 归属线起点", () => {
     return input.shotPreviewCameraProjection(groupId, clipId);
   };
 
-  it("线头固定在徽标中心：片场按组宽取景且顶边锚定，模型倍率不影响锚点", () => {
+  it("镜头来源变化时立即显示实时预览，直到对应版本媒体就绪", () => {
+    let sourceIdentity = "before";
+    let status: "ready" | "pending" = "ready";
+    let cachedIdentity = "before";
+    const mediaContent = {
+      describe: () => ({ sourceIdentity, mediaKind: "video", dependencyNodeIds: [] }),
+      state: () => ({ status, sourceIdentity: cachedIdentity, asset: { id: "asset", status: "ready" } })
+    } as unknown as import("../../../extension-api/media-content.js").MediaContentService;
+    const state = () => buildShotPreviewSceneInput({ canvas, playback: null, targets: [], mediaContent }).shotPreviews.get(previewId)?.state;
+    expect(state()).toBe("ready");
+    sourceIdentity = "after";
+    expect(state()).toBe("stale");
+    cachedIdentity = "after";
+    status = "pending";
+    expect(state()).toBe("stale");
+    status = "ready";
+    expect(state()).toBe("ready");
+  });
+
+  it("线头固定在徽标中心：片场组与普通组同一单位，越大倍率越高", () => {
     const target = targetOf(1);
-    const placement = filmSetGroupBadgePlacement({
-      sceneVersion: target.sceneVersion,
-      ops: target.ops as never,
-      extent: target.extent,
-      aabb: target.aabb ?? undefined,
-      placement: target.placement
-    }, 320);
     const projection = groupModelProjection({
       sceneVersion: target.sceneVersion,
       ops: target.ops as never,
       extent: target.extent,
       aabb: target.aabb ?? undefined,
-      placement,
+      placement: target.placement,
       badgeTopAnchored: true
     })!;
     const expected = groupBadgeRect({ x: 100, y: 60, width: 320, height: 240 }, projection)!;
@@ -106,24 +117,29 @@ describe("buildShotPreviewSceneInput 归属线起点", () => {
     expect(expected.y).toBeCloseTo(60 + 240 + 40, 5);
     expect(base.x).toBeCloseTo(expected.center.x, 5);
     expect(base.y).toBeCloseTo(expected.center.y, 5);
-    expect(scaled).toEqual(base);
+    // 不再按组宽取景：placement.scale 直接参与徽标尺寸，倍率 3 的徽标高 3 倍、锚点随之下移。
+    const triple = groupBadgeRect({ x: 100, y: 60, width: 320, height: 240 },
+      groupModelProjection({
+        sceneVersion: target.sceneVersion,
+        ops: target.ops as never,
+        extent: target.extent,
+        aabb: target.aabb ?? undefined,
+        placement: { ...target.placement!, scale: 3 },
+        badgeTopAnchored: true
+      })!)!;
+    expect(triple.height).toBeCloseTo(projection.height * 3, 5);
+    expect(scaled.x).toBeCloseTo(base.x, 5);
+    expect(scaled.y).toBeCloseTo(triple.center.y, 5);
   });
 
-  it("聚焦目标 placement 缺省时仍按组宽取景，不退回共享单位", () => {
+  it("聚焦目标 placement 缺省时仍按共享单位，不虚构取景", () => {
     const target = { ...targetOf(1), placement: null };
-    const placement = filmSetGroupBadgePlacement({
-      sceneVersion: target.sceneVersion,
-      ops: target.ops as never,
-      extent: target.extent,
-      aabb: target.aabb ?? undefined,
-      placement: null
-    }, 320);
     const projection = groupModelProjection({
       sceneVersion: target.sceneVersion,
       ops: target.ops as never,
       extent: target.extent,
       aabb: target.aabb ?? undefined,
-      placement,
+      placement: null,
       badgeTopAnchored: true
     })!;
     const expected = groupBadgeRect({ x: 100, y: 60, width: 320, height: 240 }, projection)!;

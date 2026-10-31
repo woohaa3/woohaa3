@@ -626,7 +626,8 @@ mod focus_offset_tests {
             &super::super::media_geometry::film_set_root(&scene.nodes[0], None),
         );
         assert!(bounds.center.abs_diff_eq(expected.translation, 1e-4));
-        assert!(bounds.radius > 80.0);
+        // 平面 1.6×0.9 内容单位 × 64 画布单位/米 → 半对角线约 59。
+        assert!(bounds.radius > 40.0);
     }
 
     fn bounds(center: Vec3, radius: f32) -> ModelBounds {

@@ -74,7 +74,7 @@ export function collectResidencyCandidates(
     return { x, y };
   };
   const groupSizes = getGroupLayoutSizes(canvas.document.nodes);
-  const badgeProjections = groupBadgeProjectionsForCanvas(canvas, groupSizes);
+  const badgeProjections = groupBadgeProjectionsForCanvas(canvas);
   const hidden = hiddenByCollapsedGroups(canvas);
   const candidates: ResidencyCandidate[] = [];
   for (const node of canvas.document.nodes) {

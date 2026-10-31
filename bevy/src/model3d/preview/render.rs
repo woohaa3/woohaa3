@@ -29,6 +29,18 @@ pub fn detected_adapter() -> Option<crate::recording_prepare::GpuAdapterInfo> {
 
 const PREVIEW_DEPTH: f32 = 40.0;
 
+/// 离屏预览相机到模型包围球中心的距离系数。
+///
+/// 旧公式 `distance = extent × 2.2`；对居中模型 `extent = 2 × max|coord|`，而包围球半径是
+/// AABB 半对角线（`半径 = max|coord| × √3`），故等价于 `半径 × 4.4/√3 ≈ 2.54`。改用真实包围球
+/// 后保留同一系数，卡片构图不变（change: 2026-10-31-render-models-at-absolute-metric-scale）。
+const PREVIEW_FRAME_DISTANCE_FACTOR: f32 = 4.4 / 1.732_050_8;
+
+/// 正交预览视口边长相对包围球半径的系数。
+///
+/// 旧公式视口边长 `extent × 1.6 = 半径 × 3.2/√3 ≈ 1.85 半径`，同样按真实包围球等价换算。
+const PREVIEW_ORTHO_ASPECT: f32 = 1.6 / 1.732_050_8;
+
 /// 固定预览灯光：一个环境光 + 一个方向光，脚本不可修改。
 fn setup_lights(commands: &mut Commands) {
     commands.insert_resource(GlobalAmbientLight {
@@ -174,20 +186,26 @@ fn apply_preview_opacity(
     commands.entity(entity).insert(MeshMaterial3d(handle));
 }
 
-/// 受控 dimetric 相机 + 按 extent 自动取景，渲染到离屏 image。
+/// 受控 dimetric 相机 + 按模型真实包围球自动取景，渲染到离屏 image。
+///
+/// 取景只依赖模型自身的世界包围球（场景单位 × `CANVAS_UNITS_PER_METER`），不再按 `extent`
+/// 估算（change: 2026-10-31-render-models-at-absolute-metric-scale）：模型真实多大，离屏预览的
+/// 相机就退多远，与它在画布其他节点里的相对大小一致。
 fn setup_camera(
     commands: &mut Commands,
     image: Handle<Image>,
-    extent: f32,
+    radius: f32,
     depth: f32,
     background: Color,
 ) {
-    let extent = if extent.is_finite() && extent > 0.0 {
-        extent
+    let radius = if radius.is_finite() && radius > 1e-4 {
+        radius
     } else {
-        2.0
+        1.0
     };
-    let distance = extent * 2.2;
+    // 与既有构图保持同一比例：旧公式 `distance = extent × 2.2`，而对居中模型
+    // `extent ≈ 2 × radius / √3`，等价于 `radius × 2.54`。
+    let distance = radius * PREVIEW_FRAME_DISTANCE_FACTOR;
     let rotation = Quat::from_euler(
         EulerRot::YXZ,
         -45.0_f32.to_radians(),
@@ -204,8 +222,8 @@ fn setup_camera(
         RenderTarget::Image(image.into()),
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: bevy::camera::ScalingMode::Fixed {
-                width: extent * 1.6,
-                height: extent * 1.6,
+                width: radius * 2.0 * PREVIEW_ORTHO_ASPECT,
+                height: radius * 2.0 * PREVIEW_ORTHO_ASPECT,
             },
             near: 0.1,
             far: depth * 4.0,
@@ -521,7 +539,7 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                 None => setup_camera(
                     &mut commands,
                     image.clone(),
-                    model.extent,
+                    reference_radius,
                     PREVIEW_DEPTH,
                     background,
                 ),

@@ -13,6 +13,13 @@ use super::scene::{self, ModelAabb};
 /// 卡片由 2D camera（更高的 camera order）绘制，永远盖在 3D 模型之上；因此模型必须整体
 /// 位于卡片**下方**，否则高模型的顶部会被卡片遮挡（change: 卡片与模型不重叠）。
 pub(crate) const MODEL_CARD_GAP: f32 = 40.0;
+
+/// 场景单位（= 1 米）→ 画布世界单位的固定换算（change:
+/// 2026-10-31-render-models-at-absolute-metric-scale）。
+///
+/// 与 TS `CANVAS_UNITS_PER_METER` 同值。模型尺寸不再按自身包围盒归一化：1.7 m 的人恒为约
+/// 109 画布单位高，20 m 的楼恒为约 1280，且与模型在世界原点附近的位置无关。
+pub(crate) const CANVAS_UNITS_PER_METER: f32 = 64.0;
 /// 由已注册资源与节点派生模型**世界** AABB（含 view rotation/unit/anchor）
 /// （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 5.2；
 ///  change: make-shot-framing-zoom-invariant，任务 2.1 / 3.1：固定世界，不读取 viewport/surface）。
@@ -164,17 +171,19 @@ fn film_set_anchor_canvas(
 
 /// 模型根单位缩放。
 ///
-/// 普通 `model3d`：`placement.scale * 64 * 3 / extent`（既有语义）。
-/// 片场：在既有自然单位上再乘适配系数，使整体倍率至多为 1（完整适配尺寸），模型投影 AABB 等比适配
-/// 节点矩形；更小的 `placement.scale` 仍可缩小内容，超出适配尺寸的倍率被限制（change: 2026-10-08-make-film-set-model-only
+/// 绝对米制：`placement.scale * CANVAS_UNITS_PER_METER`，**不除以 `extent`**
+/// （change: 2026-10-31-render-models-at-absolute-metric-scale）。1 场景单位 = 1 米 = 64 画布单位，
+/// 因此 1.7 m 的人与 20 m 的楼在所有节点里都保持真实比例，也不再受"模型离世界原点多远"影响。
+///
+/// 片场（`composite-asset`）：在绝对单位上再乘节点矩形适配系数，使整场等比落入节点矩形；更小的
+/// `placement.scale` 仍可缩小内容，超出适配尺寸的倍率被限制（change: 2026-10-08-make-film-set-model-only
 /// 修订）。拖动线框角落改变节点矩形即等比缩放整套内容，媒体平面在映射层用同一适配因子。
 pub(crate) fn model_unit(
     node: &GraphNode,
     model: &ModelSnapshot,
     placement: &ModelPlacement,
 ) -> f32 {
-    let size = 64.0;
-    let natural = size * 3.0 / model.extent.max(0.001);
+    let natural = CANVAS_UNITS_PER_METER;
     let base = placement.scale * natural;
     // 组徽标与普通模型卡片共用同一单位：没有固定框，也没有 56×44 适配上限。
     if node.composite_asset.is_some() {
@@ -232,11 +241,7 @@ pub(crate) fn film_set_content_bounds(node: &GraphNode) -> Option<(f32, f32, f32
         .or(film.root_placement.as_ref())
         .cloned()
         .unwrap_or_default();
-    let extent = film
-        .content_extent
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(2.0);
-    let natural = 64.0 * 3.0 / extent.max(0.001);
+    let natural = CANVAS_UNITS_PER_METER;
     let rotation = grid::view_rotation() * Quat::from_rotation_y(placement.yaw.to_radians());
     let projected = local.transformed(&Transform {
         rotation,

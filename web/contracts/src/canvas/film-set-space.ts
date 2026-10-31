@@ -7,16 +7,18 @@
  *
  * ```
  * world = anchor + s * R(yaw) * scene
- * s     = min(placement.scale, 1) * 192 / extent * filmSetFit   （= Rust `model_unit`）
+ * s     = min(placement.scale, 1) * CANVAS_UNITS_PER_METER * filmSetFit   （= Rust `model_unit`）
  * ```
  *
+ * 场景单位就是米：`CANVAS_UNITS_PER_METER` 固定为 64，不再除以 `extent`
+ * （change: 2026-10-31-render-models-at-absolute-metric-scale）。
  * 因此透视除法中的 x/z、y/z 不变，屏幕构图不随呈现倍率变化；FOV/aspect/镜头角度留在场景空间。
  * 任何非有限值或非正倍率都显式失败，不构造可产生 NaN 的镜头。
  *
  * 纯函数、无副作用：前端适配、Bevy wire 投影、原生 renderer 与测试共用。Rust 同一公式在
  * `client/bevy/src/model3d/shot_adapter.rs::DisplayUnit` 与 `sample_camera_pose`，共享 fixture 对齐。
  */
-import { MODEL_SIZE_BASE } from "./model-focus/types.js";
+import { CANVAS_UNITS_PER_METER } from "./model-focus/types.js";
 import { quatRotate, type Vec3 } from "./model-transform.js";
 import type { BevyModelPlacement } from "./render-scene/wire-model.js";
 
@@ -51,15 +53,16 @@ export type FilmSetWorldCamera = {
 /**
  * 场景单位 → 画布世界的自然倍率（**不含**节点矩形容器适配，与 Rust `model_unit` 同式）。
  *
- * 片场内容脚本按真实尺度建模（站立人物约 1.7 场景单位），自然倍率把场景单位换算成画布世界
- * 单位：`min(placement.scale,1) × 192/extent`。节点矩形适配（`filmSetFit`）与画布 zoom 不
- * 在这里，因此离屏生产输出可以直接使用它而与呈现无关（design D1/D4）。
+ * 绝对米制：`min(placement.scale,1) × CANVAS_UNITS_PER_METER`，不除以 `extent`
+ * （change: 2026-10-31-render-models-at-absolute-metric-scale）。片场内容脚本按真实尺度建模
+ * （站立人物约 1.7 场景单位），因此片场整场的真实大小直接决定它在画布上的大小。节点矩形适配
+ * （`filmSetFit`）与画布 zoom 不在这里，因此离屏生产输出可以直接使用它而与呈现无关
+ * （design D1/D4）。
  */
-export function filmSetNaturalScale(placement: BevyModelPlacement | null, extent: number): number {
-  const safeExtent = Number.isFinite(extent) && extent > 0 ? extent : 1;
+export function filmSetNaturalScale(placement: BevyModelPlacement | null, _extent?: number): number {
   const raw = placement?.scale ?? 1;
   const placementScale = Number.isFinite(raw) && raw > 0 ? raw : 1;
-  return (Math.min(placementScale, 1) * MODEL_SIZE_BASE * 3) / safeExtent;
+  return Math.min(placementScale, 1) * CANVAS_UNITS_PER_METER;
 }
 
 /** 显示容器绕 Y 轴旋转（弧度）。 */

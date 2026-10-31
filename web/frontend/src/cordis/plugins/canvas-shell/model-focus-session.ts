@@ -15,7 +15,6 @@ import {
   beginGesture,
   beginModelGesture,
   filmSetFitFactor,
-  filmSetGroupBadgePlacement,
   filmSetLayoutBounds,
   filmSetNaturalScale,
   filmSetSceneAabb,
@@ -92,22 +91,13 @@ function sceneInput(input: FocusTargetInput) {
   const groupSize = isGroup && node ? getGroupLayoutSizes(input.canvas.document.nodes).get(node.id) : null;
   const groupWidth = groupSize?.width ?? node?.width;
   const groupHeight = groupSize?.height ?? node?.height;
-  const groupPlacement = isGroup && groupWidth !== undefined
-    ? filmSetGroupBadgePlacement({
-      sceneVersion: input.sceneVersion,
-      ops: input.ops as never,
-      extent: input.extent,
-      aabb: input.aabb ?? undefined,
-      placement: input.placement
-    }, groupWidth)
-    : input.placement;
   const groupLayout = isGroup && node && position && groupWidth !== undefined
     ? groupModelLayout({
       sceneVersion: input.sceneVersion,
       ops: input.ops as never,
       extent: input.extent,
       aabb: input.aabb ?? undefined,
-      placement: groupPlacement,
+      placement: input.placement,
       badgeTopAnchored: true,
       node: { x: position.x, y: position.y, width: groupWidth, height: groupHeight ?? node.height ?? 112 }
     })

@@ -11,6 +11,20 @@ import { targetFor } from "./test-support/model-focus-harness.js";
 installSharedSession();
 const disposers: (() => void)[] = [];
 afterEach(() => { disposers.splice(0).forEach(fn => fn()); nodeSelectionStore.reset(); });
+it("double clicking a managed shot requests its owning film set and clip", () => {
+  const { canvas } = fixture();
+  canvas.document.nodes.find(node => node.id === "shot")!.type = "image";
+  canvas.nodeData.shot = { managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: "m1", entityId: "clip-a", lifecycle: "owner-managed" },
+    mediaContent: { providerId: "film-set.shot", schemaVersion: 1, payload: { filmSetNodeId: "m1", clipId: "clip-a" } } } as never;
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  const dom = harness(), capture = runtimeCapturing({ pointHit: () => ({ kind: "node", nodeId: "shot" }) });
+  const enter = vi.fn();
+  const controller = installInteractionController({ canvas: dom.canvas, target: dom.target as never, getRuntime: () => capture.runtime,
+    getSession: () => getSession() as never, onShotPreviewEnterIntent: enter });
+  disposers.push(() => controller.dispose());
+  dom.fire("dblclick", { clientX: 100, clientY: 100 });
+  expect(enter).toHaveBeenCalledWith({ previewNodeId: "shot", filmSetNodeId: "m1", clipId: "clip-a" });
+});
 const focus: ModelFocusProjection = { version: "woohaa-model-focus-v1", nodeId: "m1", target: [0, 0, 0], yaw: 0, pitch: 0, distance: 5, radius: 1, fov: 0.87 };
 function fixture() {
   const canvas = canvasWith([{ id: "m1", x: 200, y: 100 }, { id: "container", x: 200, y: -200 }, { id: "card", x: 12, y: 12 }, { id: "shot", x: 800, y: 100 }, { id: "other", x: 900, y: 100 }]);

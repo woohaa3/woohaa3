@@ -22,6 +22,8 @@ import {
   filmSetBackdropIsCustom,
   filmSetClipPrecondition,
   isFilmSetShotKind,
+  MODEL_CAMERA_ASPECTS,
+  type ModelCameraAspect,
   readFilmSetBackdrop,
   shotPreviewNodeId,
   type FilmSetAnimationClip,
@@ -173,6 +175,7 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
       {shot?.kind === "dynamic" ? <Button size="sm" aria-pressed={playback.preview} onClick={() => playback.preview ? ctx.filmSetPlayback.edit() : ctx.filmSetPlayback.preview()}>{playback.preview ? "返回编辑" : "动画预览"}</Button> : null}
     </div> : null}
     {shot ? <>
+      {presentation === "properties" ? <label>画幅<SelectInput label="镜头画幅" value={shot.initialCamera.aspect} disabled={!writable} onValueChange={value => void mutate({ kind: "camera", initialCamera: { ...shot.initialCamera, aspect: value as ModelCameraAspect } })} options={MODEL_CAMERA_ASPECTS.map(aspect => ({ value: aspect, label: aspect }))} /></label> : null}
       {presentation !== "properties" ? <p className="film-set-shot-kind">{kindLabel(shot.kind)} · {shot.kind === "static" ? "图片参考" : "视频参考"}</p> : null}
       {renaming ? <label>名称<TextInput aria-label="拍摄镜头名称" key={shot.id + shot.name} defaultValue={shot.name} maxLength={80} disabled={!writable} onBlur={event => { if (event.target.value.trim() !== shot.name) void mutate({ kind: "rename", name: event.target.value }).then(ok => { if (ok) setRenaming(false); }); else setRenaming(false); }} /></label> : null}
       {shot.kind === "dynamic" ? <>

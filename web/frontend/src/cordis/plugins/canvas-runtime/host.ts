@@ -594,7 +594,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         node,
         layout,
         collapsed: data?.groupCollapsed === true,
-        projection: groupBadgeProjectionOf(canvas, nodeId, layout)
+        projection: groupBadgeProjectionOf(canvas, nodeId)
       }) ?? card;
     }
     const scopes = this.controllerInstance?.queryCompositeAssetScopes();
