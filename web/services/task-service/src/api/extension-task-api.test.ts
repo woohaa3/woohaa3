@@ -15,17 +15,23 @@ import { createSqliteExtensionTaskAssociationRepository } from "../repository/ex
 import { createTaskExtensionTaskApiHandler } from "./extension-task-api.js";
 
 const dirs: string[] = [];
+/** harness 打开的 SQLite 端口：先关再删目录（Windows 上不关就 EBUSY）。 */
+const repositories: Array<{ close(): void }> = [];
 function tempDb(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "woohaa3-task-plugin-task-"));
   dirs.push(dir);
   return path.join(dir, "task.sqlite");
 }
 afterAll(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const repository of repositories.splice(0)) {
+    try { repository.close(); } catch { /* 已关过 */ }
+  }
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 function makeHarness(resultText?: string) {
   const associations = createSqliteExtensionTaskAssociationRepository({ path: tempDb() });
+  repositories.push(associations);
   const submitted: Array<{ extensionId: string; configVersion: number }> = [];
   const handler = createTaskExtensionTaskApiHandler({
     resolveCatalog: async () => ({

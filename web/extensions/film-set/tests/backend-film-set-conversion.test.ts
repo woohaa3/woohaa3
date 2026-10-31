@@ -18,6 +18,7 @@ import {
   decodeFilmSetNodeData,
   filmSetConversionInputHash,
   readFilmSetConversionNodeStatus,
+  groupPadding,
   type CanvasNodeData,
   type FilmSetConversionAdapterCapabilities,
   type FilmSetConversionRepair,
@@ -231,9 +232,10 @@ describe("FilmSetConversionService：3D 原地包组（任务 1.4 / D3）", () =
     const sourceNode = filmSetNode(room, "model-src")!;
     expect(sourceNode.node.type).toBe("model3d");
     // 来源成为片场 group 的成员，且 group 贴合来源卡片的原位置。
+    // 偏移取组内边距常量（canvas-grouping-redesign 之后是 12），不要写死旧值 40。
     expect(sourceNode.node.parentId).toBe("film-target");
-    expect(sourceNode.node.position).toEqual({ x: 40, y: 40 });
-    expect(target!.node.position).toEqual({ x: -40, y: -40 });
+    expect(sourceNode.node.position).toEqual({ x: groupPadding, y: groupPadding });
+    expect(target!.node.position).toEqual({ x: -groupPadding, y: -groupPadding });
     expect(target!.node.width).toBeGreaterThan(sourceNode.node.width ?? 0);
     expect(target!.node.height).toBeGreaterThan(sourceNode.node.height ?? 0);
     expect(target!.data?.origin).toMatchObject({ conversion: { requestId: "req-1", sourceKind: "model3d" } });
