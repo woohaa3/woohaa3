@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION, MODEL_FOCUS_VERSION, DEFAULT_MODEL_PREVIEW, prepareModelResource, type CanvasRenderScene } from "@woohaa3/contracts";
-import { loadBevyRuntime } from "./bevy-runtime.js";
+import { loadBevyRuntime, frameCountersReadable } from "./bevy-runtime.js";
 import { resetSceneDiagnostics, sceneDiagnostics } from "./scene-diagnostics.js";
 import { mockModule, sceneWith, v2Ops, type Calls } from "./test-support/runtime-harness.js";
 
@@ -37,6 +37,18 @@ it("开发帧计数读取 Bevy render 完成数，旧模块与销毁实例不伪
   expect(runtime.getFrameCounters!()).toBeUndefined();
   runtime.dispose();
   expect(runtime.getFrameCounters!()).toBeUndefined();
+});
+
+it("帧计数门禁：开发构建与桌面壳开放，浏览器生产构建不开放", () => {
+  const desktop = { __WOOHAA_NATIVE__: { protocol: "woohaa-native-v1", token: "t" } } as unknown as typeof globalThis;
+  // 打包桌面版按 `--mode desktop` 生产构建（dev=false），仍要能读 FPS/DC。
+  expect(frameCountersReadable(false, desktop)).toBe(true);
+  expect(frameCountersReadable(true, desktop)).toBe(true);
+  // 浏览器生产 / preview 构建：不暴露帧计数。
+  expect(frameCountersReadable(false, {} as typeof globalThis)).toBe(false);
+  expect(frameCountersReadable(true, {} as typeof globalThis)).toBe(true);
+  // 判定与原生 realm 选择同口径：只看宿主是否注入了 `__WOOHAA_NATIVE__`。
+  expect(frameCountersReadable(false, { __WOOHAA_NATIVE__: undefined } as never)).toBe(false);
 });
 
 it("页面切换创建独立的模块与问题状态，旧 renderer 的故障不会带入新画布", async () => {

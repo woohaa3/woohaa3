@@ -198,7 +198,7 @@ export type QueryResult<T> =
 export type BevyRuntime = {
   overviewCacheSnapshot?(): string;
   overviewCacheCommand?(json: string): void;
-  /** 开发面板读取的累计帧计数；render 完成表示调度完成，不表示 GPU 呈现确认。 */
+  /** 性能读数读取的累计帧计数；render 完成表示调度完成，不表示 GPU 呈现确认。开发构建与桌面壳提供。 */
   getFrameCounters?(): {
     generation: number;
     renders: number;
