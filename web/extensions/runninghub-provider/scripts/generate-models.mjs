@@ -1,8 +1,26 @@
 #!/usr/bin/env node
 /**
- * 从参考 catalog-data 的 models_registry.json 派生本插件的 RunningHub API 逻辑模型清单。
+ * 从上游端点定义派生本插件的 RunningHub API 逻辑模型清单。
  *
- *   node scripts/generate-models.mjs <models_registry.json> > data/models.json
+ * ```sh
+ * node scripts/generate-models.mjs [--prune] [--base <path>] <input.json>... > data/models.json
+ * ```
+ *
+ * 输入可以是数组，也可以是官方 `model-registry.public.json` 的 `{ version, models: [...] }`
+ * 形状；多个文件按 `endpoint` 合并，靠后的覆盖靠前的。`scripts/upstream/*.json` 与我们手工
+ * 记录的端点级条目字段名与官方 registry 一致，因此可以直接拼在一起传进来
+ * （`scripts/upstream/runninghub-gpt-image-2-5.json` 抓取于 2026-10-31，来源 URL 逐条记在其
+ * 头部 `source` 字段）。
+ *
+ * 复现当前清单：
+ * ```sh
+ * node scripts/generate-models.mjs \
+ *   <model-registry.public.json> scripts/upstream/runninghub-gpt-image-2-5.json > data/models.json
+ * ```
+ *
+ * 默认**只增不删**：已入库但上游输入里缺失的逻辑模型会被保留（并把 id 打到 stderr），
+ * 避免上游快照缩水时静默删掉线上仍在的模型。要真的丢弃它们必须显式 `--prune`。
+ * `--base` 指定保留基底（缺省为同包 `data/models.json`）。
  *
  * 规则（change: 2026-10-06-add-runninghub-api-models-and-provider-credentials, design D1/D1b/D4）：
  * - 只纳管四个族：GPT Image(rhart-image-g-*)、Nano Banana(rhart-image-n-*)、
@@ -16,14 +34,75 @@
  * - schema = 各操作 params 的并集；required 取各操作 required 的交集，且排除媒体字段
  *   （媒体字段由路由决定，不作为无条件必填）。
  * - 清掉上游示例 `prompt.default`（示例文案不是默认值）与 LIST 的 `empty` 占位。
+ * - 忽略 `IGNORED_MEDIA_FIELDS`：只有单值落点、本仓库又没有对应输入通道的可选修饰媒体
+ *   （如 `maskUrl`）既不是参考图输入，也不进路由落点，否则会变成「面板能填、请求永不发送」。
+ *
+ * 输入缺失、JSON 非法或合并后为空 → 非零退出且不写任何输出。
  */
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const src = process.argv[2];
-if (!src) { console.error("usage: node generate-models.mjs <models_registry.json>"); process.exit(2); }
-const raw = JSON.parse(readFileSync(src, "utf8"));
+const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const DEFAULT_BASE = resolve(PACKAGE_DIR, "data/models.json");
 
 const MEDIA = new Set(["IMAGE", "VIDEO", "AUDIO"]);
+
+/** 上游可选修饰媒体：无输入通道、也无单值落点，不能冒充参考图输入。 */
+const IGNORED_MEDIA_FIELDS = new Set(["maskUrl"]);
+
+function usage(message) {
+  if (message) console.error(message);
+  console.error("usage: node generate-models.mjs [--prune] [--base <path>] <input.json>... > data/models.json");
+  process.exit(2);
+}
+
+function parseArgs(argv) {
+  const inputs = [];
+  let prune = false;
+  let base = DEFAULT_BASE;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--prune") prune = true;
+    else if (arg === "--base") {
+      const value = argv[i + 1];
+      if (!value) usage("--base 缺少路径");
+      base = resolve(value);
+      i += 1;
+    } else if (arg.startsWith("-")) usage(`未知参数 ${arg}`);
+    else inputs.push(resolve(arg));
+  }
+  if (inputs.length === 0) usage();
+  return { inputs, prune, base };
+}
+
+/** 读取一个输入文件，返回端点级条目数组。数组与 `{ models: [...] }` 两种形状都认。 */
+function readEntries(path) {
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    usage(`无法读取 ${path}: ${error.message}`);
+  }
+  const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.models) ? parsed.models : null;
+  if (list === null) usage(`${path} 既不是数组，也不是 { models: [...] }`);
+  return list;
+}
+
+/** 按 endpoint 合并多个来源；靠后的覆盖靠前的。 */
+function mergeEntries(files) {
+  const byEndpoint = new Map();
+  for (const path of files) {
+    for (const entry of readEntries(path)) {
+      if (typeof entry?.endpoint !== "string" || entry.endpoint === "") {
+        usage(`${path} 中存在缺少 endpoint 的条目`);
+      }
+      byEndpoint.set(entry.endpoint, entry);
+    }
+  }
+  return [...byEndpoint.values()];
+}
+
 const familyOf = (e) => {
   if (/^rhart-image-g-/.test(e)) return "GPT Image";
   if (/^rhart-image-n-/.test(e)) return "Nano Banana";
@@ -34,8 +113,9 @@ const familyOf = (e) => {
 const opOf = (e) => e.slice(e.lastIndexOf("/") + 1);
 const logicalIdOf = (e) => e.slice(0, e.lastIndexOf("/"));
 
-/** 属性 schema 由 params 映射（prompt 的 default 是上游示例文案，忽略）。 */
+/** 属性 schema 由 params 映射（prompt 的 default 是上游示例文案，忽略）；被忽略的媒体字段返回 null。 */
 function paramToSchema(p) {
+  if (IGNORED_MEDIA_FIELDS.has(p.fieldKey)) return null;
   const s = {};
   switch (p.type) {
     case "STRING":
@@ -81,7 +161,9 @@ function paramToSchema(p) {
 
 /** 每个操作声明的媒体字段（用于路由 collect）。 */
 function mediaFields(op) {
-  return op.params.filter((p) => MEDIA.has(p.type)).map((p) => p.fieldKey);
+  return op.params
+    .filter((p) => MEDIA.has(p.type) && !IGNORED_MEDIA_FIELDS.has(p.fieldKey))
+    .map((p) => p.fieldKey);
 }
 
 /** 选择路由 collect：给动作类型挑选正确的媒体字段，避免首尾帧/多图混用。 */
@@ -128,7 +210,12 @@ function unionProperties(g) {
   const requiredCount = new Map();
   for (const o of g.ops) {
     for (const p of o.params) {
-      if (!props[p.fieldKey]) props[p.fieldKey] = paramToSchema(p);
+      if (IGNORED_MEDIA_FIELDS.has(p.fieldKey)) continue;
+      if (!props[p.fieldKey]) {
+        const schema = paramToSchema(p);
+        if (schema === null) continue;
+        props[p.fieldKey] = schema;
+      }
       if (p.required && !MEDIA.has(p.type)) requiredCount.set(p.fieldKey, (requiredCount.get(p.fieldKey) || 0) + 1);
     }
   }
@@ -152,24 +239,6 @@ function defaultInput(schema) {
   return out;
 }
 
-const models = [...groupsOf(raw).values()]
-  .sort((a, b) => a.id.localeCompare(b.id))
-  .map((g) => {
-    const inputSchema = unionProperties(g);
-    const promptRequired = g.ops.every((o) => (o.params.find((p) => p.fieldKey === "prompt") || {}).required === true);
-    return {
-      id: g.id,
-      family: g.family,
-      outputType: g.outputType,
-      label: g.label,
-      promptRequirement: promptRequired ? "required" : "optional",
-      cancel: "unsupported",
-      routes: buildRoutes(g),
-      inputSchema,
-      defaultInput: defaultInput(inputSchema)
-    };
-  });
-
 function groupsOf(entries) {
   const groups = new Map();
   for (const m of entries) {
@@ -184,4 +253,45 @@ function groupsOf(entries) {
   return groups;
 }
 
+function toLogicalModel(g) {
+  const inputSchema = unionProperties(g);
+  const promptRequired = g.ops.every((o) => (o.params.find((p) => p.fieldKey === "prompt") || {}).required === true);
+  return {
+    id: g.id,
+    family: g.family,
+    outputType: g.outputType,
+    label: g.label,
+    promptRequirement: promptRequired ? "required" : "optional",
+    cancel: "unsupported",
+    routes: buildRoutes(g),
+    inputSchema,
+    defaultInput: defaultInput(inputSchema)
+  };
+}
+
+/** 读取保留基底；不存在或不可解析时视作没有基底（不是错误）。 */
+function readBase(path) {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    return Array.isArray(parsed?.models) ? parsed.models : [];
+  } catch {
+    return [];
+  }
+}
+
+const { inputs, prune, base } = parseArgs(process.argv.slice(2));
+const models = [...groupsOf(mergeEntries(inputs)).values()].map(toLogicalModel);
+
+if (models.length === 0) usage("输入没有产生任何逻辑模型");
+
+if (!prune) {
+  const generated = new Set(models.map((m) => m.id));
+  const preserved = readBase(base).filter((m) => typeof m?.id === "string" && m.id !== "" && !generated.has(m.id));
+  if (preserved.length > 0) {
+    console.error(`preserved upstream-missing models (${preserved.length}): ${preserved.map((m) => m.id).join(", ")}`);
+    models.push(...preserved);
+  }
+}
+
+models.sort((a, b) => a.id.localeCompare(b.id));
 process.stdout.write(JSON.stringify({ provider: "runninghub", generatedFrom: "models_registry.json", models }, null, 2) + "\n");
