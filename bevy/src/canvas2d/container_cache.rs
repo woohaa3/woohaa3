@@ -25,6 +25,7 @@ struct Key {
     has_model: bool,
     group: Option<GroupPresentation>,
     group_model_layout: Option<crate::canvas_query::group_model::GroupModelLayout>,
+    group_badge_bottom: Option<[Vec2; 5]>,
     selected: bool,
     resizable: bool,
     hovered: bool,
@@ -57,6 +58,7 @@ impl Key {
             // Group title is label input; keep the geometry key independent of it.
             group: n.group.clone().map(|mut group| { group.title.clear(); group }),
             group_model_layout: crate::canvas_query::group_model::for_node(n),
+            group_badge_bottom: crate::canvas_query::group_model::badge_bottom_polygon(n),
             selected: scene.selection.nodes.contains(&n.id),
             resizable: n.resizable,
             hovered: n.composite_asset.is_some()

@@ -169,3 +169,75 @@ fn mixed_selection_concatenates_each_type_without_overwriting() {
         "三个 producer 必须向同一批次追加，而不是互相覆盖"
     );
 }
+
+#[test]
+fn scene_group_selection_highlights_only_four_badge_bottom_edges() {
+    let mut world = world();
+    let mut node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({
+        "id":"scene", "type":"group", "x":50, "y":30, "width":400, "height":200,
+        "model":{"resourceKey":"scene:model"},
+        "group":{"badgeTopAnchor":true,
+            "modelBounds":{"aabb":{"min":[-2,0,-1],"max":[2,3,1]},"extent":4}}
+    }))
+    .unwrap();
+    let theme = ThemeResource::default();
+    let mut normal = crate::canvas2d::geometry::Geometry::default();
+    crate::canvas2d::group::draw_group(
+        &mut normal,
+        &theme,
+        &node,
+        node.group.as_ref().unwrap(),
+        false,
+        1.,
+    );
+    let (normal_frame, bottom) = normal.into_layers();
+    assert_eq!(bottom.count_vertices(), 16);
+    let Some(VertexAttributeValues::Float32x4(colors)) = bottom.attribute(Mesh::ATTRIBUTE_COLOR)
+    else {
+        panic!("floor outline must carry its pale alpha");
+    };
+    assert!(colors.iter().all(|rgba| (rgba[3] - 0.55).abs() < 0.001));
+    let mut selected = crate::canvas2d::geometry::Geometry::default();
+    crate::canvas2d::group::draw_group(
+        &mut selected,
+        &theme,
+        &node,
+        node.group.as_ref().unwrap(),
+        true,
+        1.,
+    );
+    let (selected_frame, selected_bottom) = selected.into_layers();
+    assert_eq!(
+        selected_bottom.count_vertices(), 3,
+        "selection producer owns the bright floor outline"
+    );
+    assert_eq!(
+        normal_frame.attribute(Mesh::ATTRIBUTE_POSITION),
+        selected_frame.attribute(Mesh::ATTRIBUTE_POSITION),
+        "selection keeps the normal group frame"
+    );
+    for collapsed in [false, true] {
+        node.group.as_mut().unwrap().collapsed = collapsed;
+        world.resource_mut::<CurrentScene>().0 = Scene {
+            nodes: vec![node.clone()],
+            ..default()
+        };
+        assert!(draw(&mut world, &[]).is_empty());
+        let selected = draw(&mut world, &["scene"]);
+        assert_eq!(
+            selected.len(),
+            16,
+            "four solid edges, no highlighted group frame"
+        );
+        assert!(selected.iter().all(|p| p.y > node.y + node.height));
+        assert!(
+            draw(&mut world, &[]).is_empty(),
+            "deselection clears the highlight"
+        );
+    }
+    // Ordinary groups keep their structural selection, including before model readiness.
+    node.group.as_mut().unwrap().collapsed = false;
+    node.group.as_mut().unwrap().badge_top_anchor = false;
+    world.resource_mut::<CurrentScene>().0.nodes = vec![node];
+    assert!(draw(&mut world, &["scene"]).iter().any(|p| p.y < 231.));
+}

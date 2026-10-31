@@ -72,8 +72,7 @@ pub(crate) fn derive(
         .is_some_and(|group| group.badge_top_anchor);
     let center = Vec2::new(
         node.x + node.width / 2.,
-        node.y + node.height + GROUP_BADGE_ANCHOR_OFFSET
-            + if top_anchored { radii.y } else { 0. },
+        node.y + node.height + GROUP_BADGE_ANCHOR_OFFSET + if top_anchored { radii.y } else { 0. },
     );
     let c = projected.center();
     let anchor = center - Vec2::new(c.x, -c.y);
@@ -127,6 +126,34 @@ pub(crate) fn badge_polygon(node: &GraphNode) -> Vec<Vec2> {
         Vec2::new(rect.x, rect.y + rect.w),
         Vec2::new(rect.x, rect.y),
     ]
+}
+
+/// Top-anchored scene badges show the four bottom edges of their local model bounds.
+/// Project the actual bottom face, rather than the rectangular screen-space badge range.
+pub(crate) fn badge_bottom_polygon(node: &GraphNode) -> Option<[Vec2; 5]> {
+    let group = node.group.as_ref()?;
+    if !group.badge_top_anchor {
+        return None;
+    }
+    let bounds = &group.model_bounds.as_ref()?.aabb;
+    let layout = for_node(node)?;
+    let rotation = grid::view_rotation()
+        * Quat::from_rotation_y(node.model.as_ref()?.placement.yaw.to_radians());
+    let [x0, y, z0] = bounds.min;
+    let [x1, _, z1] = bounds.max;
+    Some(
+        [
+            Vec3::new(x0, y, z0),
+            Vec3::new(x1, y, z0),
+            Vec3::new(x1, y, z1),
+            Vec3::new(x0, y, z1),
+            Vec3::new(x0, y, z0),
+        ]
+        .map(|corner| {
+            let p = rotation * (corner * layout.unit);
+            layout.anchor + Vec2::new(p.x, -p.y)
+        }),
+    )
 }
 
 /// 组结构缩放的四个抓手位置，顺序与 [`crate::canvas_query::scope::CORNER_NAMES`] 一致
