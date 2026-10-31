@@ -88,17 +88,6 @@
 }
 .video-focus-workspace__playback { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-width: 0; }
 
-
-/* 片场拖入反馈：图片/视频等不被接收的来源释放后在此说明原因（change: 2026-10-18）。 */
-.film-set-drop-feedback {
-  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30;
-  max-width: min(420px, calc(100vw - 48px)); padding: 8px 14px; border: 1px solid var(--app-web-border);
-  border-radius: 8px; background: var(--app-web-panel); color: var(--app-web-text-primary);
-  box-shadow: 0 8px 24px var(--app-web-shadow); font-size: 12px; line-height: 1.6;
-  pointer-events: none;
-}
-.film-set-drop-feedback[hidden] { display: none; }
-
 /* 单栏按拍摄任务组织；低频操作与构图参数渐进展开。 */
 .film-set-shot-tools, .film-set-shot-picker, .film-set-shot-timing, .film-set-shot-backdrop { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .film-set-animation-controls .film-set-section-heading { margin-bottom: 0; }

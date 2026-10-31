@@ -7,7 +7,7 @@
  * `worldToClient` 转换），其它复合资产（含炉体）的平行四边形同样来自同一公式。展开 group 的
  * 徽标也作为 accepted 范围条目；命中最上层成员卡片时点亮它的容器。目标 identity 由 accepted
  * `queryDropTarget` 固定；查询不可用时隐藏全部提示，**不**回退 TS 矩形几何或猜测目标。接收方
- * 声明 `acceptsSources` 且这批来源不被接收时，该目标不绘制提示（例如片场不再接收图片/视频）。
+ * 声明 `acceptsSources` 且这批来源不被接收时，该目标不绘制提示。
  *
  * 反馈状态（active/reject/unavailable）与文案保持既有语义；本模块不拦截指针输入。
  */
@@ -63,7 +63,7 @@ export function createNodeDropOverlay(deps: NodeDropOverlayDeps) {
         // 没有接收方的复合节点不是素材容器，不展示接收提示。
         if (!owners.length) continue;
         const owner = owners.length === 1 ? owners[0] : undefined;
-        // 该接收方不接受这批来源（如片场收到图片/视频）时不点亮目标、不显示接收提示
+        // 该接收方不接受这批来源时不点亮目标、不显示接收提示
         // （change: 2026-10-18-restrict-film-set-drop-to-models）。
         if (owner && !ownerAcceptsSources(owner, canvas, node.id, drag.sourceNodeIds)) continue;
         // 四顶点统一 world→client；任一转换失败（未挂载控制器）跳过该提示。
@@ -97,7 +97,7 @@ export function createNodeDropOverlay(deps: NodeDropOverlayDeps) {
         for (const key of ["left", "top", "width", "height"] as const) {
           if (element.container.style[key] !== style[key]) element.container.style[key] = style[key];
         }
-        // 命中成员卡片时，接收方实际上是它的容器（如片场 group）：提示应点亮容器范围，
+        // 命中成员卡片时，接收方实际上是它的容器 group：提示应点亮容器范围，
         // 而不是因为最上层 identity 是成员就熄灭。
         const active = activeId !== null && (activeId === scope.nodeId
           || isDescendantOf(byId, activeId, scope.nodeId));

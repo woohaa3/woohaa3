@@ -4,7 +4,7 @@
  *
  * 用产品镜像断言：
  * - 空顶层源码的片场仍组合内部模型与地面（`filmSet.itemRoots` 非空、model 资源注册）；
- * - 拖入 model3d 复制导入到片场后，片场出现导入对象且源节点回位；
+ * - 拖到片场区域不会导入任何对象（片场不再接收拖动），来源按普通组行为落位；
  * - 聚焦对象模式可点击选择、拖动移动（一次 itemId 提交）、Shift 旋转、删除；
  * - 固定 T 截图包含内容（前景像素）。
  */
@@ -212,7 +212,7 @@ test.describe("片场对象动作与对象编辑（change: 2026-10-09）", () =>
     await page.screenshot({ path: info.outputPath("film-set-empty-top.png") });
   });
 
-  test("拖入 model3d：复制导入片场可见，源节点回位", async ({ page }, info) => {
+  test("拖到片场：不导入对象、不显示提示浮层", async ({ page }, info) => {
     test.setTimeout(120_000);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -247,11 +247,12 @@ test.describe("片场对象动作与对象编辑（change: 2026-10-09）", () =>
     // 真实鼠标把 model3d 拖到片场中心。
     const film = await page.evaluate(() => {
       const node = (window as any).__bevyRuntime.lastScene().nodes.find((n: any) => n.id === "filmset");
+      const box = node.compositeAsset ?? { x: node.x, y: node.y, width: node.width, height: node.height };
       const viewport = (window as any).__canvasViewport?.() ?? { x: 0, y: 0, zoom: 1 };
       const rect = document.querySelector("#bevy-canvas")!.getBoundingClientRect();
       return {
-        filmX: rect.left + (node.compositeAsset.x + node.compositeAsset.width / 2) * viewport.zoom + viewport.x,
-        filmY: rect.top + (node.compositeAsset.y + node.compositeAsset.height / 2) * viewport.zoom + viewport.y,
+        filmX: rect.left + (box.x + box.width / 2) * viewport.zoom + viewport.x,
+        filmY: rect.top + (box.y + box.height / 2) * viewport.zoom + viewport.y,
       };
     });
     const src = await page.evaluate(() => {
@@ -267,22 +268,23 @@ test.describe("片场对象动作与对象编辑（change: 2026-10-09）", () =>
     await page.mouse.move(src.x, src.y);
     await page.mouse.down();
     await page.mouse.move(film.filmX, film.filmY, { steps: 12 });
+    // 片场不注册 node-drop 接收方，拖动期间没有任何接收提示浮层。
+    await page.waitForTimeout(300);
+    expect(await page.locator(".node-drop-overlay").count()).toBe(0);
     await page.mouse.up();
 
-    // 权威内容出现导入对象（kind=model），源节点位置不变。
-    await expect
-      .poll(async () => {
-        const content = await readFilmSetContent(page, "filmset");
-        return content?.items.some((item) => item.kind === "model") ?? false;
-      }, { timeout: 30_000 })
-      .toBe(true);
+    // 不产生任何导入对象：片场内容保持为空。
+    await page.waitForTimeout(800);
+    const content = await readFilmSetContent(page, "filmset");
+    expect(content?.items.length ?? 0).toBe(0);
+
     const canvas = await readStoredCanvas(page);
     const source = canvas!.document.nodes.find((entry) => entry.id === "src");
-    expect(source?.position).toEqual({ x: 640, y: 430 });
+    // 来源节点保留，释放按普通移动/通用组行为结算。
+    expect(source).toBeTruthy();
+    expect(source?.position).not.toEqual({ x: 640, y: 430 });
 
-    // 导入后片场渲染出现对象根。
-    await waitForFilmSetRoots(page, "filmset", 1);
     expect(errors).toEqual([]);
-    await page.screenshot({ path: info.outputPath("film-set-drag-import.png") });
+    await page.screenshot({ path: info.outputPath("film-set-drag-no-import.png") });
   });
 });

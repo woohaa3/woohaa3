@@ -73,7 +73,7 @@ export function createDragGestureFamily(
    * 被拖动的选择集是否**全部**是受保护的拍摄镜头预览。
    *
    * 预览由源镜头生命周期维护，拖动只是移动纯 2D 卡片；它既不能被其它节点「复制导入」，也不能
-   * 被片场当作可接收素材。因此这时完全跳过 `nodeDrop` 分派：既不显示「放到此处加入片场」提示，
+   * 被其它节点「复制导入」。因此这时完全跳过 `nodeDrop` 分派：既不显示接收提示，
    * 也不消费释放（保持一次纯移动，change: 2026-10-15-add-film-set-shooting-shot-previews，D2/D8）。
    */
   const previewOnlyDrag = (origins: Map<string, { x: number; y: number }>): boolean => {
@@ -203,14 +203,14 @@ export function createDragGestureFamily(
     const gesture = state.gesture;
     let dropChanged = false;
     if(gesture.kind==='drag' && gesture.moved){
-      // 合并候选优先于片场复制导入：命中时只显示「松手合并」，不点亮接收方
+      // 合并候选优先于接收方预览：命中时只显示「松手合并」，不点亮接收方
       // （change: 2026-10-27-merge-same-type-node-history，任务 2.2 / design D3）。
       const mergeCandidate = resolveMergeCandidate(gesture);
       nodeMerge.preview(mergeCandidate);
       if (mergeCandidate) {
         nodeDrop.clear();
       } else if (!previewOnlyDrag(gesture.origins)) {
-        // 片场复制导入。受保护预览的拖动只移动卡片，不做接收方预览（不显示导入提示）。
+        // 接收方预览。受保护预览的拖动只移动卡片，不做接收方预览（不显示接收提示）。
         nodeDrop.preview([...gesture.origins.keys()],state.lastPointerWorld);
       } else {
         nodeDrop.clear();
@@ -256,8 +256,7 @@ export function createDragGestureFamily(
     gesture: Extract<Gesture, { kind: "drag" }>,
     previews: Map<string, { x: number; y: number }>
   ): void => {
-    // 合并先于片场 drop 裁决：`dropNodeDrop` 对复合资产目标在 onDrop 返回 false 时仍会消费释放，
-    // 顺序反了会把合并吞掉（design D3）。命中即消费释放，源节点不提交位置命令，等确认框结果。
+    // 合并先于接收方 drop 裁决：命中即消费释放，源节点不提交位置命令，等确认框结果。
     const mergeCandidate = resolveMergeCandidate(gesture);
     if (mergeCandidate && nodeMerge.drop(mergeCandidate)) {
       nodeMerge.clear();

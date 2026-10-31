@@ -17,7 +17,6 @@ import { FilmSetPlaybackService } from "../../preview/browser/playback-service.j
 import { animationPlaybackExtension } from "./playback-plugin.js";
 import { installFilmSetObjectFeature } from "./film-set-object-feature.js";
 import { FilmSetInspector } from "../../authoring/browser/inspector.js";
-import { extendFilmSetDrop } from "./drop.js";
 import { installFilmSetConversionEntries } from "./film-set-conversion/registration.js";
 import type { FilmSetContext } from "./context.js";
 import { filmSetEditorCameras, sceneCameraWriter } from "../../authoring/browser/scene-camera.js";
@@ -145,7 +144,6 @@ export function filmSetExtension() {
         icon: ClapperboardIcon,
         createNodeData: () => createFilmSetNodeData() as never
       }));
-      lifetime.own(extendFilmSetDrop(ctx));
       // 直接传递 Cordis `ctx`：它已注入 canvasScope/canvasRemote/canvasLocate/canvasRuntime。
       // MUST NOT 展开（`{ ...ctx }`）——展开只复制自有可枚举属性，会丢掉 ctx 的 service 访问器，
       // 使注册模块读到 undefined 的 canvasScope（此前导致 required film-set 启动失败 → 白屏）。
