@@ -925,6 +925,20 @@ describe("片场媒体导入与原生导出 MCP（change: 2026-10-19-extend-film
     expect(pollResult.structuredContent).toMatchObject({ ok: true, state: "succeeded", nodeId: "video-1", assetId: "asset-1" });
   });
 
+  it("get_model_api 指南声明现实尺度基准，避免片场大小错配", async () => {
+    const { base } = await start();
+    const guide = await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 46,
+      method: "tools/call",
+      params: { name: "get_model_api", arguments: {} }
+    });
+    const text = ((guide.body.result as { content: Array<{ text: string }> }).content[0]?.text) ?? "";
+    expect(text).toContain("1 单位 ≈ 1 米");
+    expect(text).toContain("站立人物约 1.7 单位高");
+    expect(text).toContain("卡片按模型 extent 归一化显示");
+  });
+
   it("导出工具清单与指南覆盖透明度、新缓动、材质、媒体、镜头背景与导出 profile", async () => {
     const { base } = await start();
     const listed = await mcpPost(base, { jsonrpc: "2.0", id: 44, method: "tools/list", params: {} });

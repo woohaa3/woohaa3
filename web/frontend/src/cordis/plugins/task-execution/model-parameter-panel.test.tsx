@@ -43,10 +43,11 @@ describe("ModelParameterPanel MCP 指引", () => {
     }
   });
 
-  it("提示词明确要求先读取再提交", () => {
+  it("提示词明确要求先读取 API 与尺度、再读取节点、再提交", () => {
     expect(modelPromptGuide("canvas-1", "model-7")).toContain(
-      "先调用 get_model_node，再调用 submit_model_script"
+      "先调用 get_model_api 读取脚本 API 与尺度约定，再调用 get_model_node，然后调用 submit_model_script"
     );
+    expect(modelPromptGuide("canvas-1", "model-7")).toContain("站立人物约 1.7 单位高");
     // 统计口径由工具给出，提示词禁止手算（change: 2026-10-18-align-model-statistics-with-agent）。
     expect(modelPromptGuide("canvas-1", "model-7")).toContain("get_model_statistics");
     expect(modelPromptGuide("canvas-1", "model-7")).toContain("不要自己按成本表推算");

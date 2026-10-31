@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FilmSetNodeData, ModelCamera } from "@woohaa3/contracts";
 import { CHATGPT_REASONING_EFFORTS, decodeChatGptGenerateRequest, PREFERRED_MODEL_SCRIPT_VERSION, createFilmSetSnapshot, createMotionSnapshot, filmSetClipHash } from "@woohaa3/contracts";
-import { createChatGptGenerationService, parseCandidateText, modelSchema, animationSchema, cameraSchema, normalizeCameraMutations, overwriteGuard, buildPrompt } from "../src/backend/generation.js";
+import { createChatGptGenerationService, parseCandidateText, modelSchema, animationSchema, cameraSchema, normalizeCameraMutations, overwriteGuard, buildPrompt, buildToolsPrompt } from "../src/backend/generation.js";
 import { createChatGptWorkJournal } from "../src/backend/work-journal.js";
 import type { ChatGptCanvasPorts } from "../src/backend/ports.js";
 import { assertNoToolExecution, buildChatGptProviderConfig, CHATGPT_ACCESS_TOKEN_ENV, createCodexAdapter, type CodexFactoryOptions, type CodexLike } from "../src/backend/codex-adapter.js";
@@ -352,6 +352,19 @@ describe("ChatGPT 生成编排", () => {
     );
     expect(prompt).toContain(base);
     expect(prompt).toContain("KEEP");
+  });
+
+  it("模型生成提示词（结构化与工具模式）都带现实尺度基准", () => {
+    const read = { ok: true as const, nodeType: "model3d" as const, title: "t", prompt: "", source: "scene.box({ id: 'keep' });", references: [], cameras: [] };
+    for (const prompt of [
+      buildPrompt({ ownerId: "o", requestId: "r", canvasId: "cv", nodeId: "n", mode: "model3d", model: "m", prompt: "椅子" }, read),
+      buildPrompt({ ownerId: "o", requestId: "r", canvasId: "cv", nodeId: "n", mode: "film-set", model: "m", prompt: "椅子" }, read),
+      buildToolsPrompt({ ownerId: "o", requestId: "r", canvasId: "cv", nodeId: "n", mode: "model3d", model: "m", prompt: "椅子" }, read)
+    ]) {
+      expect(prompt).toContain("1 unit ≈ 1 meter");
+      expect(prompt).toContain("standing person ≈ 1.7 units");
+      expect(prompt).toMatch(/ground contact/);
+    }
   });
 
   it("结构化输出 schema 严格合规（每个 properties 键都在 required）", () => {

@@ -115,6 +115,7 @@ export function registerModelTools(reg: ToolRegistration, options: ModelMcpHttpO
       description:
         "校验并把版本化 JavaScript 写入 model3d 节点的权威 modelScript。片场不支持顶层模型脚本：生成片场对象用 submit_film_set，替换已有对象用 import_model_snapshot（指定 itemId）。" +
         "model3d 编辑必须提供 requestId，并可用 expectedModelContentHash 做并发 precondition；省略 version 时使用首选版本。" +
+        "模型按真实尺度建模：1 场景单位 ≈ 1 米，站立人物约 1.7 单位高；完整约定以 get_model_api 返回的尺度说明为准。" +
         "成功回执包含该脚本的对象数/点数/面数（与模型聚焦面板同源），回复用户时应直接引用，不要自行估算。",
       inputSchema: z.object({
         canvasId: z.string().min(1).describe("画布 ID"),

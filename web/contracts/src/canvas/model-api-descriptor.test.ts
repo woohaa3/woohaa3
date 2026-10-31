@@ -13,7 +13,9 @@ import {
   modelApiGuide,
   modelApiMethodNames,
   modelPrimitiveConstraintsText,
-  modelRenderBudgetText
+  modelRenderBudgetText,
+  modelScaleGuidanceText,
+  modelScaleGuidanceTextZh
 } from "./model-api-descriptor.js";
 import { QUALITY_VERTEX_COUNTS } from "./scene-ir-v2/types.js";
 import { MODEL_SCRIPT_V2_VERSION, PREFERRED_MODEL_SCRIPT_VERSION } from "./model-script.js";
@@ -47,6 +49,27 @@ describe("model API guide", () => {
   it("V2 method names include the V2-only primitives", () => {
     const names = modelApiMethodNames(MODEL_SCRIPT_V2_VERSION);
     expect(names).toEqual(expect.arrayContaining(["material", "sphere", "capsule", "segment", "mesh"]));
+  });
+});
+
+describe("scene scale guidance", () => {
+  it("声明 1 单位 ≈ 1 米的现实基准与人物/门/椅子的尺寸锚点", () => {
+    const text = modelScaleGuidanceText();
+    expect(text).toContain("1 unit ≈ 1 meter");
+    expect(text).toContain("standing person ≈ 1.7 units");
+    expect(text).toContain("door ≈ 2 units");
+    expect(text).toContain("chair seat ≈ 0.45 units");
+    expect(text).toMatch(/ground contact/);
+  });
+
+  it("中文版与英文版来自同一组常量，数值不会漂移", () => {
+    const zh = modelScaleGuidanceTextZh();
+    expect(zh).toContain("1 单位 ≈ 1 米");
+    expect(zh).toContain("站立人物约 1.7 单位高");
+    expect(zh).toContain("门约 2 单位");
+    expect(zh).toContain("椅子座高约 0.45 单位");
+    expect(modelApiGuide().conventions.unitMeters).toBe(1);
+    expect(modelApiGuide().conventions.lengthUnit).toBe("meters");
   });
 });
 

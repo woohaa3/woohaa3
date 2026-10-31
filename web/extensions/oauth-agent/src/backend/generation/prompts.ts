@@ -2,7 +2,7 @@
  * ChatGPT 生成编排：提示词构造
  * （自 `generation.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R09）。
  */
-import { filmSetAnimationsOf, modelApiGuide, modelPrimitiveConstraintsText, modelRenderBudgetText, motionApiGuide, motionApiGuideText } from "@woohaa3/contracts";
+import { filmSetAnimationsOf, modelApiGuide, modelPrimitiveConstraintsText, modelRenderBudgetText, modelScaleGuidanceText, motionApiGuide, motionApiGuideText } from "@woohaa3/contracts";
 import type { ChatGptCanvasPorts } from "../ports.js";
 import type { GenerateRequest } from "./types.js";
 
@@ -25,6 +25,7 @@ export function buildPrompt(input: GenerateRequest, read: ReadOk): string {
       "The node ALREADY has a model authored by the user. By default you MUST KEEP it and make only the requested change (add/remove/modify specific parts).",
       "Only replace the whole model when the user explicitly asks to rebuild/rewrite it from scratch.",
       `API guide (methods: ${model.methods.map((m) => m.name).join(", ")}).`,
+      modelScaleGuidanceText(),
       `Reference example:\n${model.example}`,
       modelRenderBudgetText(),
       modelPrimitiveConstraintsText()
@@ -42,6 +43,7 @@ export function buildPrompt(input: GenerateRequest, read: ReadOk): string {
       "If you return `motionScript`, it becomes the binding motion of the captured target object in the captured clip; it may only reference that object's stable part ids.",
       `motionScript uses ${motion.version}.`,
       `Model API methods: ${model.methods.map((m) => m.name).join(", ")}.`,
+      modelScaleGuidanceText(),
       `Motion API methods: ${motion.methods.map((m) => m.name).join(", ")}.`,
       `Model example:\n${model.example}`,
       modelRenderBudgetText(),
@@ -87,6 +89,7 @@ export function buildToolsPrompt(input: GenerateRequest, read: ReadOk): string {
     input.mode === "film-set"
       ? "Call get_model_api and get_model_node first. For a whole film-set target, generate objects with submit_film_set using the current snapshotHash as expectedSnapshotHash and preserving all untouched animation fields. Empty or ground-only film-sets support new model items; their model has modelScript/modelScriptLanguage/modelScriptVersion and the host derives hashes. Never submit a top-level model script. For a captured clip/item target only use mutate_film_set_clip; for an existing model item use import_model_snapshot with itemId."
       : "Suggested flow: call get_model_api for the script API, get_model_node to read the current modelScript/state, then submit_model_script (with a stable requestId and expectedModelContentHash from the read) for incremental edits; use the camera tools for framing. Prefer small targeted edits over rewriting the whole script.",
+    modelScaleGuidanceText(),
     "Only quote vertex/triangle counts returned by get_model_statistics, get_model_node(includeStatistics=true) or submit_model_script; NEVER recompute them from the per-primitive cost table. A segment without shape is a capsule, so hand arithmetic underestimates by tens of times.",
     `User request: ${input.prompt}`,
     ...(input.itemId ? [`Captured actor itemId: ${input.itemId}; change only its binding in clip ${input.clipId}. Do not replace the clip or shared geometry.`] : [])
