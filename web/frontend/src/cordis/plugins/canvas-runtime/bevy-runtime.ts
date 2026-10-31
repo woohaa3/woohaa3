@@ -310,6 +310,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     realmFault = reason; supervisor?.fail(reason);
   };
   const disposeRealm = () => realm?.dispose();
+  const revealRealm = () => realm?.reveal();
   const callsAllowed = () => !supervisor || supervisor.phase === "running";
   const loadModule = async (candidate = false) => {
     if (options.importModule) return protectWasmModule(await options.importModule(), issues);
@@ -855,7 +856,12 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
           if (realmFault) throw new Error(realmFault);
           const health = readRuntimeHealth(replacement.runtime_health());
           if (replacement.is_ready() && health.renders > 0 && (!lastScene || (health.appliedGeneration! >= recoveredInteraction && health.renderedGeneration! >= recoveredInteraction))) {
-            module = protectWasmModule(replacement, issues, callsAllowed); interactionGeneration = recoveredInteraction; baseSceneGeneration = recoveredInteraction; textures.reset(); return;
+            module = protectWasmModule(replacement, issues, callsAllowed); interactionGeneration = recoveredInteraction; baseSceneGeneration = recoveredInteraction; textures.reset();
+            // A replacement realm starts transparent with the startup curtain restored.
+            // Its replayed themed scene has now rendered; reveal this realm as well.
+            revealScheduled = false;
+            if (lastScene) { revealRealm(); revealScheduled = true; }
+            return;
           }
           await new Promise(resolve => target.setTimeout(resolve, 50));
         }

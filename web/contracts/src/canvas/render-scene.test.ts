@@ -1844,6 +1844,19 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
     expect(node).not.toHaveProperty("outputAssetId");
   });
 
+  it("封面相机保留规范 ±90° 仰角端点，实际姿态由渲染器钳制", () => {
+    const source = filmSetCanvas();
+    const data = source.nodeData.film as unknown as {
+      filmSetAnimations: { clips: { initialCamera: { elevation: number; distance: number } }[] };
+    };
+    data.filmSetAnimations.clips[0]!.initialCamera.elevation = -Math.PI / 2;
+    data.filmSetAnimations.clips[0]!.initialCamera.distance = 0.1;
+    const scene = buildCanvasRenderScene({ canvas: source, theme: defaultAppTheme() });
+    const card = scene.nodes.find(node => node.id === shotNodeId)!.shotPreview!;
+    expect(card.coverCamera.elevation).toBeCloseTo(-Math.PI / 2, 9);
+    expect(card.coverCamera.distance).toBeCloseTo(0.1, 9);
+  });
+
   it("迁移后的 owner-managed 预览节点仍投影镜头卡片与归属线", () => {
     const groupId = "film-group";
     const clipId = "clip-1";

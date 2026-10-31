@@ -239,7 +239,13 @@ export type AgentCatalogResponse = {
 };
 
 /** 会话摘要（列表用；不含消息正文）。 */
+/** Separates new whole-set conversations from historical local authoring context. */
+export function authoringConversationContext(entry: { mode?: string; clipId?: string | null; itemId?: string | null; cameraId?: string | null }): string | undefined {
+  return entry.mode === "film-set" && !entry.clipId && !entry.itemId && !entry.cameraId ? "film-set:whole" : undefined;
+}
+
 export type ConversationSummary = {
+  contextKey?: string;
   conversationId: string;
   canvasId: string;
   adapterId: string;

@@ -40,3 +40,15 @@ it("自绘 chrome 的窄屏仍由底部 sheet 占位，内容矩形相应收缩"
   expect(layout.insets).toEqual({ left: 0, top: 0, right: 0, bottom: 280 });
   expect(layout.contentRect).toEqual({ x: 0, y: 0, width: 700, height: 620 });
 });
+
+it.each([{ width: 1024, height: 768 }, { width: 1280, height: 800 }, { width: 1920, height: 1080 }])("三栏与全宽底栏共用唯一内容矩形：$width×$height", ({ width, height }) => {
+  const input = { desktop: true, width, height, navigationWidth: 224, bottomBar: 240, toolbar: 48, panel: true, panelMaxWidth: 320 };
+  const layout = focusLayout(input);
+  expect(layout.narrow).toBe(false);
+  expect(layout.insets).toEqual({ left: 224, right: Math.min(320, width * 0.3), top: 104, bottom: 240 });
+  expect(layout.contentRect.width + layout.insets.left + layout.insets.right).toBe(width);
+  expect(layout.contentRect.height + layout.insets.top + layout.insets.bottom).toBe(height);
+  const collapsed = focusLayout({ ...input, navigationWidth: 40, bottomBar: 144 });
+  expect(collapsed.contentRect.width - layout.contentRect.width).toBeCloseTo(184);
+  expect(collapsed.contentRect.height - layout.contentRect.height).toBe(96);
+});

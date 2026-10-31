@@ -782,3 +782,20 @@ it("DSML 工具文本不能把无工具的讨论结算为成功", async () => {
   await service.dispatchTurn(accepted.turn.turnId);
   expect(service.queryTurn({ owner: "user-a", requestId: "dsml" })).toMatchObject({ ok: true, turn: { status: "failed", error: { code: "tool-call-not-executed" } } });
 });
+
+it("whole-set context persists separately from legacy local conversations without rewriting old turns", () => {
+  const { service, store } = setup();
+  const scope = { owner: "user-a", canvasId: "canvas-1", nodeId: "film" };
+  const legacy = service.createConversation(scope);
+  const whole = service.createConversation({ ...scope, contextKey: "film-set:whole" });
+  if (!legacy.ok || !whole.ok) throw Error("create failed");
+  expect(service.findConversationForTarget(scope).conversation?.conversationId).toBe(legacy.conversation.conversationId);
+  expect(service.findConversationForTarget({ ...scope, contextKey: "film-set:whole" }).conversation?.conversationId).toBe(whole.conversation.conversationId);
+  expect(store.getConversation(whole.conversation.conversationId)?.contextKey).toBe("film-set:whole");
+  expect(store.getConversation(legacy.conversation.conversationId)?.contextKey).toBeNull();
+  expect(service.findConversationForTarget({ ...scope, owner: "other", contextKey: "film-set:whole" }).conversation).toBeNull();
+  expect(service.findConversationForTarget({ ...scope, nodeId: "other", contextKey: "film-set:whole" }).conversation).toBeNull();
+  expect(service.findConversationForTarget({ ...scope, connectionId: "other", contextKey: "film-set:whole" }).conversation).toBeNull();
+  const read = service.readConversation({ owner: scope.owner, conversationId: legacy.conversation.conversationId });
+  expect(read.ok).toBe(true);
+});

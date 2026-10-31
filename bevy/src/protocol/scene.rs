@@ -250,14 +250,15 @@ pub(crate) struct ShotCoverCamera {
 }
 
 impl ShotCoverCamera {
-    /// 有限输入、正距离与合法仰角；错误整体拒绝，不部分降级。
+    /// 有限输入、正距离与竖直半圆内的仰角；`±90°` 端点本身合法，实际姿态由派生层
+    /// 钳到 ±89° 以避免 look-at 奇点。错误整体拒绝，不部分降级。
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
         if ![self.azimuth, self.elevation, self.distance]
             .iter()
             .chain(self.focus_offset.iter())
             .all(|value| value.is_finite())
             || self.distance <= 0.0
-            || self.elevation.abs() >= std::f32::consts::FRAC_PI_2
+            || self.elevation.abs() > std::f32::consts::FRAC_PI_2
         {
             return Err("Invalid shot cover camera");
         }

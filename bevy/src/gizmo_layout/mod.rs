@@ -9,8 +9,16 @@ pub use view::*;
 
 use bevy::math::{Vec2, Vec3};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GizmoShape {
+    Stroke,
+    Cone,
+    Cube,
+}
+
 #[derive(Clone, Debug)]
 pub struct GizmoLine {
+    pub shape: GizmoShape,
     pub start: Vec3,
     pub end: Vec3,
     pub width_css: f32,

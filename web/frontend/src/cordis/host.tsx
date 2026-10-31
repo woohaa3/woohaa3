@@ -1,3 +1,4 @@
+import { authoringConversationContext } from "@woohaa3/contracts";
 /**
  * React Host slot 渲染（change: adopt-frontend-cordis-plugin-runtime，design D6/D8）。
  *
@@ -161,7 +162,8 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
   useSyncExternalStore(listener => canvasState?.subscribe(listener) ?? (() => undefined), () => canvasState?.getWorkingCanvas() ?? null, () => null);
   const conversation = useService("agentConversationService");
   // 来源选择（change: 2026-10-16-...，任务 2.4）：宿主决定当前来源，而不是由首个贡献隐式决定。
-  const selectionKey = `${props.canvasId}:${props.nodeId}`;
+  const contextKey = authoringConversationContext({ mode: props.mode, cameraId: props.selectedCameraId, clipId: props.clipId, itemId: props.itemId });
+  const selectionKey = `${props.canvasId}:${props.nodeId}:${contextKey ?? ""}`;
   const selectionMemory = assistantSelectionMemory(conversation, conversation.getDataScopeId?.() ?? "page");
   const targetRememberedSelection = selectionMemory.get(selectionKey);
   const rememberedSelection = targetRememberedSelection ?? readAssistantPreference(conversation.getDataScopeId?.() ?? "page") ?? selectionMemory.get("last-explicit");
@@ -207,12 +209,12 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
     if (props.sourceSelection) return;
     let cancelled = false;
     const revision = explicitSelectionRevision.current;
-    void conversation.findConversationForTarget({ canvasId: props.canvasId, nodeId: props.nodeId }).then((result) => {
+    void conversation.findConversationForTarget({ canvasId: props.canvasId, nodeId: props.nodeId, ...(contextKey ? { contextKey } : {}) }).then((result) => {
       if (!cancelled && revision === explicitSelectionRevision.current && result.ok && result.value.conversation?.connectionId) setSelectedConnectionId(result.value.conversation.connectionId);
     });
     return () => { cancelled = true; };
-  }, [conversation, props.canvasId, props.nodeId]);
-  const targetKey = `${props.canvasId}:${props.nodeId}:${effectiveConnectionId ?? ""}`;
+  }, [conversation, props.canvasId, props.nodeId, contextKey]);
+  const targetKey = `${props.canvasId}:${props.nodeId}:${effectiveConnectionId ?? ""}:${contextKey ?? ""}`;
   const resolvedTarget = useRef<string | null>(null);
 
   useEffect(() => {
@@ -221,6 +223,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
     void conversation.findConversationForTarget({
       canvasId: props.canvasId,
       nodeId: props.nodeId,
+      ...(contextKey ? { contextKey } : {}),
       ...(effectiveConnectionId ? { connectionId: effectiveConnectionId } : {})
     }).then((result) => {
       if (cancelled) return;
@@ -235,7 +238,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
     return () => {
       cancelled = true;
     };
-  }, [conversation, props.canvasId, props.nodeId, effectiveConnectionId, targetKey, conversationSnapshot.contextRevision, connectionRevision]);
+  }, [conversation, props.canvasId, props.nodeId, effectiveConnectionId, contextKey, targetKey, conversationSnapshot.contextRevision, connectionRevision]);
 
   // 解析当前来源的可见连接（不含秘密）；失败不自动换来源，保留原选择。
   useEffect(() => {
@@ -349,7 +352,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
   const delivery = deliveries.map(contribution => contribution.resolve({ canvasId: props.canvasId, nodeId: props.nodeId, data })).find(Boolean);
   // 面板 UI 由宿主内置渲染；来源扩展只声明来源（design D10）。无来源时仍渲染面板并提示配置。
   if (withConversation.mode === "model3d") return <Suspense fallback={<AuthoringGeneratePlaceholder />}><AuthoringModelGeneratePanel key={generationKey} {...withConversation} /></Suspense>;
-  return <Suspense fallback={<AuthoringGeneratePlaceholder />}><AuthoringGeneratePanel key={generationKey} {...withConversation} writable={canvasSession?.isWritable() ?? props.writable} deliveryHistory={delivery ?? undefined} /></Suspense>;
+  return <Suspense fallback={<AuthoringGeneratePlaceholder />}><AuthoringGeneratePanel key={generationKey} {...withConversation} writable={props.writable && (canvasSession?.isWritable() ?? true)} deliveryHistory={delivery ?? undefined} /></Suspense>;
 }
 
 /** 生成面板常驻 MCP 文字入口的派生（外部连接指引；不表示外部客户端已连接）。 */

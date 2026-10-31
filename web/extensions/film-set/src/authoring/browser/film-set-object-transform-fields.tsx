@@ -21,12 +21,12 @@ export function FilmSetObjectTransformFields({ session, transform, disabled }: P
             onPreview={value => edit(current => ({ ...current, offset: { ...current.offset, [axis]: value } }))} />
         ))}
       </div>
-      <details className="film-set-transform__more"><summary>旋转与缩放</summary><div className="film-set-transform__pair">
+      <div className="film-set-transform__pair">
         <NumberField {...common} label="Y 旋转" ariaLabel="对象 Y 旋转" value={transform.yaw * 180 / Math.PI} step={1} suffix="°"
           onPreview={value => edit(current => ({ ...current, yaw: value * Math.PI / 180 }))} />
         <NumberField {...common} label="等比缩放" ariaLabel="等比缩放" value={transform.scale} min={0.01} step={0.05} suffix="×"
           onPreview={value => edit(current => ({ ...current, scale: value }))} />
-      </div></details>
+      </div>
     </div>
   );
 }

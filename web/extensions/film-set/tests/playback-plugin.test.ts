@@ -12,6 +12,7 @@ import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Context } from "@deepseek-ai/cordis";
 import {
+  staticShotCameraMotion,
   filmSetNodeDataFields,
   createFilmSetSnapshot,
   filmSetAnimationsOf,
@@ -69,7 +70,7 @@ function withStaticClip(source: FilmSetNodeData): FilmSetNodeData {
     filmSetAnimations: {
       schemaVersion: 3,
       defaultClipId: "static-1",
-      clips: [{ ...structuredClone(first), id: "static-1", kind: "static", timeline: { duration: 0, loop: false }, bindings: [] }]
+      clips: [{ ...structuredClone(first), id: "static-1", kind: "static", cameraMotion: staticShotCameraMotion(), timeline: { duration: 0, loop: false }, bindings: [] }]
     }
   };
 }
@@ -139,6 +140,7 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
       setAnimationPlayback: (playback: BevyAnimationPlayback | null) => published.push(playback),
       isFocused: () => focused && rendererFocused,
       controller: () => null,
+      modelFocusMode: () => "edit",
       modelFocusProjection: () => focused && rendererFocused ? { nodeId: FILM_SET } : null,
       subscribeModelFocus: (listener: () => void) => {
         focusListeners.push(listener);
@@ -439,6 +441,19 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
       mode: "edit"
     });
     expect(runtime.modelWorkspaceCalls).toEqual(["camera"]);
+  });
+
+  it("静态正式构图预览保持明确镜头且不创建动画会话", () => {
+    canvasWith(withStaticClip(filmSetData("")), ["static-1"]);
+    const runtime = makeRuntime();
+    runtime.setFocused(true);
+    playbackService.select(FILM_SET, "static-1");
+    playbackService.preview();
+    expect(playbackService.getSnapshot()).toMatchObject({ nodeId: FILM_SET, clipId: "static-1", preview: true, playing: false, time: 0, duration: 0, error: null });
+    expect(latest()).toBeNull();
+    expect((globalThis as any).__animationPlayback.compilations()).toBe(0);
+    runtime.setFocused(false);
+    expect(playbackService.getSnapshot().preview).toBe(false);
   });
 
   it("普通节点 hover 不建立会话", () => {

@@ -17,6 +17,7 @@ import {
   shotPreviewContentHeight,
   shotPreviewNodeId,
   shotAspectValue,
+  shotCoverCamera,
   shotPreviewTargetsForFilmSet
 } from "../film-set-shot-preview.js";
 import type { FilmSetShotPreviewData } from "../film-set-shot-preview.js";
@@ -173,14 +174,21 @@ export function shotPreviewCardPresentationForFilmSetGroup(input: {
   const clip = marker?.clips?.find(entry => entry.id === input.clipId);
   if (!clip) return null;
   const camera = marker?.cameras?.find(entry => entry.id === clip.cameraId);
+  const initialCamera = {
+    azimuth: camera?.azimuth ?? 0,
+    elevation: camera?.elevation ?? 0.35,
+    distance: camera?.distance ?? 4,
+    focusOffset: camera?.focusOffset ?? { x: 0, y: 0, z: 0 },
+    aspect: MODEL_CAMERA_ASPECTS.find(aspect => aspect === camera?.aspect) ?? "16:9"
+  };
   return {
     filmSetNodeId: input.groupNodeId,
     clipId: clip.id,
     kind: (clip.duration ?? 0) > 0 ? "dynamic" : "static",
     name: clip.name ?? clip.id,
-    aspect: shotAspectValue({ initialCamera: { azimuth: camera?.azimuth ?? 0, elevation: camera?.elevation ?? 0.35, distance: camera?.distance ?? 4, focusOffset: camera?.focusOffset ?? { x: 0, y: 0, z: 0 }, aspect: MODEL_CAMERA_ASPECTS.find(aspect => aspect === camera?.aspect) ?? "16:9" } }),
+    aspect: shotAspectValue({ initialCamera }),
     duration: clip.duration ?? 0,
-    coverCamera: { azimuth: camera?.azimuth ?? 0, elevation: camera?.elevation ?? 0.35, distance: camera?.distance ?? 4, focusOffset: camera ? [camera.focusOffset.x, camera.focusOffset.y, camera.focusOffset.z] : [0, 0, 0] },
+    coverCamera: shotCoverCamera({ initialCamera }),
     ...(clip.backdrop ? { backdrop: clip.backdrop } : {}),
     state: input.state ?? "ready",
     ...((clip.duration ?? 0) > 0 && typeof input.progress === "number" && Number.isFinite(input.progress) ? { progress: Math.min(1, Math.max(0, input.progress)) } : {}),

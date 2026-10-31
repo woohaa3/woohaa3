@@ -120,9 +120,14 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
           if (focused && explicit.preview && explicit.nodeId === focusId) {
             const animation = readAnimation(canvas, focusId!);
             const resolved = animation ? resolveFilmSetClip(animation, explicit.clipId) : null;
-            if (!resolved || resolved.clip.kind !== "dynamic") {
+            if (!resolved || ctx.canvasRuntime.modelFocusMode() === "history") {
               controller.select(null);
               ctx.filmSetPlayback.update({ preview: false, playing: false, error: resolved ? null : "动画片段不存在，请选择其他片段" });
+              return;
+            }
+            if (resolved.clip.kind === "static") {
+              controller.select(null);
+              ctx.filmSetPlayback.update({ preview: true, playing: false, time: 0, duration: 0, error: null });
               return;
             }
             controller.select(focusId!, undefined, { clipId: explicit.clipId ?? undefined, paused: true, viewMode: "focus-preview" });

@@ -35,6 +35,7 @@ export * from "./agent-conversation-records.js";
 
 export type AgentConversationStore = {
   createConversation(input: {
+    contextKey?: string;
     conversationId: string;
     owner: string;
     canvasId: string;
@@ -56,7 +57,7 @@ export type AgentConversationStore = {
    *
    * 只返回仍与节点关联的会话；被「清空上下文」归档的不再返回。
    */
-  findConversationByTarget(scope: { owner: string; canvasId: string; nodeId: string; connectionId?: string | null }): ConversationAdapterBinding | undefined;
+  findConversationByTarget(scope: { owner: string; canvasId: string; nodeId: string; connectionId?: string | null; contextKey?: string }): ConversationAdapterBinding | undefined;
   /** 清空节点上下文：解除目标关联（归档旧会话，不删除；design D8）。返回解除数量。 */
   clearTarget(scope: { owner: string; canvasId: string; nodeId: string }): number;
   /** 显式切换来源连接：解除该节点与当前会话的关联（归档旧会话，不删除历史）。返回解除数量。 */
@@ -212,6 +213,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     this.ensureColumn("agent_conversations", "node_id", "TEXT");
     // 来源连接身份增量列（change: 2026-10-16-...，任务 2.2）：旧数据保持 NULL，读取时映射兼容默认连接。
     this.ensureColumn("agent_conversations", "connection_id", "TEXT");
+    this.ensureColumn("agent_conversations", "context_key", "TEXT");
     this.ensureColumn("agent_conversation_turns", "connection_id", "TEXT");
     this.ensureColumn("agent_conversation_turns", "connection_adapter_id", "TEXT");
     this.ensureColumn("agent_conversation_turns", "connection_config_revision", "INTEGER");
@@ -232,14 +234,14 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
   }
 
-  createConversation(input: { conversationId: string; owner: string; canvasId: string; adapterId: string; connectionId?: string | null; title: string; nodeId?: string | null; now: string }): ConversationAdapterBinding {
+  createConversation(input: { contextKey?: string; conversationId: string; owner: string; canvasId: string; adapterId: string; connectionId?: string | null; title: string; nodeId?: string | null; now: string }): ConversationAdapterBinding {
     this.db
       .prepare(
         `INSERT INTO agent_conversations
-           (conversation_id, owner, canvas_id, adapter_id, connection_id, title, status, latest_request_id, node_id, turn_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'idle', NULL, ?, 0, ?, ?)`
+           (conversation_id, owner, canvas_id, adapter_id, connection_id, context_key, title, status, latest_request_id, node_id, turn_count, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', NULL, ?, 0, ?, ?)`
       )
-      .run(input.conversationId, input.owner, input.canvasId, input.adapterId, input.connectionId ?? null, input.title, input.nodeId ?? null, input.now, input.now);
+      .run(input.conversationId, input.owner, input.canvasId, input.adapterId, input.connectionId ?? null, input.contextKey ?? null, input.title, input.nodeId ?? null, input.now, input.now);
     const created = this.getConversation(input.conversationId);
     if (!created) throw new Error("会话写入失败");
     return created;
@@ -276,14 +278,12 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     return rows.map(turnFromRow);
   }
 
-  findConversationByTarget(scope: { owner: string; canvasId: string; nodeId: string; connectionId?: string | null }): ConversationAdapterBinding | undefined {
-    const row = scope.connectionId === undefined
-      ? (this.db
-          .prepare("SELECT * FROM agent_conversations WHERE owner = ? AND canvas_id = ? AND node_id = ? ORDER BY updated_at DESC LIMIT 1")
-          .get(scope.owner, scope.canvasId, scope.nodeId) as ConversationRow | undefined)
-      : (this.db
-          .prepare("SELECT * FROM agent_conversations WHERE owner = ? AND canvas_id = ? AND node_id = ? AND connection_id IS ? ORDER BY updated_at DESC LIMIT 1")
-          .get(scope.owner, scope.canvasId, scope.nodeId, scope.connectionId) as ConversationRow | undefined);
+  findConversationByTarget(scope: { owner: string; canvasId: string; nodeId: string; connectionId?: string | null; contextKey?: string }): ConversationAdapterBinding | undefined {
+    const row = this.db.prepare(`SELECT * FROM agent_conversations
+      WHERE owner = ? AND canvas_id = ? AND node_id = ? AND context_key IS ?
+      AND (? = 0 OR connection_id IS ?) ORDER BY updated_at DESC LIMIT 1`)
+      .get(scope.owner, scope.canvasId, scope.nodeId, scope.contextKey ?? null,
+        scope.connectionId === undefined ? 0 : 1, scope.connectionId ?? null) as ConversationRow | undefined;
     return row ? conversationFromRow(row) : undefined;
   }
 

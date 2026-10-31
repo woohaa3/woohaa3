@@ -1,4 +1,5 @@
 import { Button } from "@woohaa3/ui/primitives";
+import { SelectInput } from "@woohaa3/ui/forms";
 import { useEffect, useMemo, useState } from "react";
 import { filmSetExportProfileLabel, type FilmSetExportProfile } from "@woohaa3/contracts";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
@@ -46,17 +47,16 @@ export function FilmSetVideoExportControl({ ctx, disabled, onBusyChange }: { ctx
   };
   const percent = progress ? Math.floor(100 * progress.completed / Math.max(1, progress.total)) : 0;
   return <>
-    <label className="film-set-export-profile">
-      规格
-      <select
-        aria-label="导出规格"
+    <div className="film-set-export-profile">
+      <span>规格</span>
+      <SelectInput
+        label="导出规格"
         disabled={!!progress}
         value={profile}
-        onChange={event => setProfile(writeExportProfilePreference(event.target.value as FilmSetExportProfile))}
-      >
-        {EXPORT_PROFILE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
-    </label>
+        options={EXPORT_PROFILE_OPTIONS}
+        onValueChange={value => setProfile(writeExportProfilePreference(value as FilmSetExportProfile))}
+      />
+    </div>
     <Button size="sm" disabled={disabled || !!progress} onClick={() => void run()} title={`将当前片段从头到尾生成视频（${filmSetExportProfileLabel(profile)}；背景按该镜头设置：跟随主题时为 ${recordingThemeBackdrop(ctx)}，自定义时用镜头颜色），并添加到片场右侧`}>
       {progress ? progress.phase === "rendering" ? `生成视频 ${percent}%` : progress.phase === "uploading" ? "上传视频中…" : "保存视频中…" : "导出视频"}
     </Button>

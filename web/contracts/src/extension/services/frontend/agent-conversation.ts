@@ -115,7 +115,7 @@ export type AgentConversationService = AgentConversationView & {
    * 无则 `conversation: null`（调用方据此新建）；不改变导航或读模型。
    * `connectionId` 提供时只返回该来源连接下的会话（change: 2026-10-16-...，任务 2.3）。
    */
-  findConversationForTarget: (input: { canvasId: string; nodeId: string; connectionId?: string }) => Promise<AgentConversationResult<{ conversation: ConversationSummary | null }>>;
+  findConversationForTarget: (input: { contextKey?: string; canvasId: string; nodeId: string; connectionId?: string }) => Promise<AgentConversationResult<{ conversation: ConversationSummary | null }>>;
   /**
    * 清空节点上下文：解除该节点与当前会话的关联（归档旧会话，**不**删除历史；design D8）。
    *

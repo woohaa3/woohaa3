@@ -919,3 +919,26 @@ fn scene_v34_drops_badge_scaling_fields_and_rejects_previous_version() {
     old["version"] = serde_json::json!("woohaa-canvas-render-scene-v33");
     assert!(parse(&old.to_string()).validate().is_err());
 }
+
+#[test]
+fn editor_grid_is_optional_and_validates_finite_geometry() {
+    let base = serde_json::json!({"version":"woohaa-model-editor-v2", "nodeId":"film", "toolMode":"object", "itemId":"item", "focus":[0,0,0], "radius":2});
+    let legacy: ModelEditor = serde_json::from_value(base.clone()).unwrap();
+    assert!(!legacy.shot_preview);
+    assert!(legacy.grid.is_none());
+    assert!(legacy.validate().is_ok());
+    let mut value = base;
+    value["shotPreview"] = serde_json::json!(true);
+    value["grid"] = serde_json::json!({"origin":[0,0,0],"spacing":2});
+    let editor: ModelEditor = serde_json::from_value(value.clone()).unwrap();
+    assert!(editor.shot_preview);
+    assert!(editor.validate().is_ok());
+    for spacing in [0.0, -1.0, f32::INFINITY] {
+        let mut editor: ModelEditor = serde_json::from_value(value.clone()).unwrap();
+        editor.grid.as_mut().unwrap().spacing = spacing;
+        assert!(editor.validate().is_err());
+    }
+    let mut editor: ModelEditor = serde_json::from_value(value).unwrap();
+    editor.grid.as_mut().unwrap().origin[0] = f32::NAN;
+    assert!(editor.validate().is_err());
+}

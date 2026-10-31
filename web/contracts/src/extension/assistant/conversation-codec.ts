@@ -29,13 +29,14 @@ function readId(value: unknown, key: string): string | { error: string } {
 }
 
 /** 解码创建会话请求。`nodeId` 关联生成目标节点（一个节点复用一条会话；design D8）。 */
-export type CreateConversationRequest = { canvasId: string; adapterId?: string; title?: string; nodeId?: string; connectionId?: string };
+export type CreateConversationRequest = { contextKey?: string; canvasId: string; adapterId?: string; title?: string; nodeId?: string; connectionId?: string };
 
 export function decodeCreateConversationRequest(body: unknown): AgentConversationDecodeResult<CreateConversationRequest> {
   if (!isJsonObject(body)) return fail("malformed-request", "请求体必须是对象");
   const canvasId = readId(body.canvasId, "canvasId");
   if (typeof canvasId === "object") return fail("malformed-request", canvasId.error);
   if (body.adapterId !== undefined && !isBoundedId(body.adapterId)) return fail("malformed-request", "adapterId 非法");
+  if (body.contextKey !== undefined && !isBoundedId(body.contextKey)) return fail("malformed-request", "contextKey 非法");
   if (body.title !== undefined && (typeof body.title !== "string" || body.title.length > 200)) return fail("malformed-request", "title 非法");
   if (body.nodeId !== undefined && !isBoundedId(body.nodeId)) return fail("malformed-request", "nodeId 非法");
   if (body.connectionId !== undefined && !isBoundedId(body.connectionId)) return fail("malformed-request", "connectionId 非法");
@@ -43,6 +44,7 @@ export function decodeCreateConversationRequest(body: unknown): AgentConversatio
     ok: true,
     value: {
       canvasId,
+      ...(body.contextKey === undefined ? {} : { contextKey: body.contextKey as string }),
       ...(body.adapterId === undefined ? {} : { adapterId: body.adapterId as string }),
       ...(body.title === undefined ? {} : { title: body.title as string }),
       ...(body.nodeId === undefined ? {} : { nodeId: body.nodeId as string }),

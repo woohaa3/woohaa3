@@ -7,7 +7,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
+import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Popover } from "./Popover.js";
 import { CursorMenu, DropdownMenu } from "./Menu.js";
@@ -44,6 +44,34 @@ function key(target: Element, value: string) {
 }
 
 describe("Popover（任务 2.3）", () => {
+  it("keepMounted hides closed content without resetting input or disposing an operation", () => {
+    const disposeOperation = vi.fn();
+    function Operation() {
+      useEffect(() => disposeOperation, []);
+      return <input defaultValue="standard" />;
+    }
+    const view = (open: boolean) => <UiProvider>
+      <Popover open={open} onOpenChange={() => {}} keepMounted trigger={<button>输出</button>}>
+        <Operation />
+      </Popover>
+    </UiProvider>;
+    const { container, root } = render(view(false));
+    const input = container.querySelector("input")!;
+    expect(container.querySelector<HTMLElement>(".ui-popover")!.hidden).toBe(true);
+    act(() => root.render(view(true)));
+    input.value = "high-quality";
+    expect(container.querySelector<HTMLElement>(".ui-popover")!.hidden).toBe(false);
+    act(() => root.render(view(false)));
+    expect(container.querySelector<HTMLElement>(".ui-popover")!.hidden).toBe(true);
+    expect(disposeOperation).not.toHaveBeenCalled();
+    act(() => root.render(view(true)));
+    expect(container.querySelector("input")).toBe(input);
+    expect(input.value).toBe("high-quality");
+    act(() => root.unmount());
+    roots.delete(root);
+    expect(disposeOperation).toHaveBeenCalledOnce();
+  });
+
   it("受控 open 渲染到 portal，Escape 请求关闭一次", () => {
     const onOpenChange = vi.fn();
     const { container } = render(

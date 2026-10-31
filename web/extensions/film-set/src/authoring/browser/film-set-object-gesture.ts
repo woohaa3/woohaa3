@@ -197,7 +197,10 @@ export function createFilmSetObjectGesture(deps: FilmSetObjectGestureDeps): {
 
   const end = (): void => {
     if (!drag) return;
-    const valid = !deps.blocked() && deps.session.getState().tool === drag.tool && deps.session.getState().selectedItemId === drag.itemId && deps.session.getState().nodeId === drag.nodeId;
+    const valid = !deps.blocked() && deps.session.getState().tool === drag.tool && deps.session.getState().selectedItemId === drag.itemId && deps.session.getState().nodeId === drag.nodeId
+      && JSON.stringify(deps.projection()) === JSON.stringify(drag.camera)
+      && JSON.stringify(deps.surface()) === JSON.stringify(drag.surface)
+      && drag.invalidationKey === deps.invalidationKey?.();
     drag = null;
     if (valid) deps.session.endEdit(); else deps.session.cancelEdit();
   };

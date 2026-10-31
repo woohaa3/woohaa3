@@ -66,31 +66,47 @@ impl ObjectGizmoLayout {
                     result.axes[index] =
                         Some((delta.normalize(), scale * AXIS_CSS / delta.length()));
                     let handle = ["x", "y", "z"][index];
-                    let end = tip - axis * scale * 9.0;
-                    result.line(origin + axis * scale * 7.0, end, 1.75, handle);
-                    let side = axis
-                        .cross(view.forward)
-                        .try_normalize()
-                        .unwrap_or(view.right)
-                        * scale
-                        * 3.0;
-                    result.line(end + side, tip, 1.75, handle);
-                    result.line(end - side, tip, 1.75, handle);
+                    let end = tip - axis * scale * 15.0;
+                    result.line(origin + axis * scale * 10.0, end, 2.5, handle);
+                    result.solid(end, tip, 11.0, handle, super::GizmoShape::Cone);
                 }
-                result.square(view, origin, 5.0, "center");
+                result.solid(
+                    origin - view.forward * scale * 5.0,
+                    origin + view.forward * scale * 5.0,
+                    10.0,
+                    "center",
+                    super::GizmoShape::Cube,
+                );
             }
             ObjectTool::Yaw => {
                 for i in 0..RING_SEGMENTS {
                     let a = i as f32 / RING_SEGMENTS as f32 * std::f32::consts::TAU;
                     let b = (i + 1) as f32 / RING_SEGMENTS as f32 * std::f32::consts::TAU;
-                    result.line(result.ring_point(a), result.ring_point(b), 1.75, "yaw-ring");
+                    result.line(result.ring_point(a), result.ring_point(b), 3.0, "yaw-ring");
+                    let rear = ((result.ring_point(a) + result.ring_point(b)) * 0.5 - origin)
+                        .dot(view.position - origin)
+                        < 0.0;
+                    result.lines.last_mut().unwrap().rear = rear;
                 }
             }
             ObjectTool::Scale => {
                 let tip = origin + (view.right + view.up).normalize() * scale * 64.0;
                 if view.project(tip).is_some() {
-                    result.line(origin, tip, 1.25, "");
-                    result.square(view, tip, 5.0, "scale");
+                    result.line(origin, tip, 2.5, "scale");
+                    result.solid(
+                        tip - view.forward * scale * 5.0,
+                        tip + view.forward * scale * 5.0,
+                        10.0,
+                        "scale",
+                        super::GizmoShape::Cube,
+                    );
+                    result.solid(
+                        origin - view.forward * scale * 3.0,
+                        origin + view.forward * scale * 3.0,
+                        6.0,
+                        "scale",
+                        super::GizmoShape::Cube,
+                    );
                     result.scale_point = Some(tip);
                 }
             }
@@ -99,6 +115,7 @@ impl ObjectGizmoLayout {
     }
     fn line(&mut self, start: Vec3, end: Vec3, width_css: f32, handle: &'static str) {
         self.lines.push(GizmoLine {
+            shape: super::GizmoShape::Stroke,
             start,
             end,
             width_css,
@@ -108,18 +125,16 @@ impl ObjectGizmoLayout {
             visible: true,
         });
     }
-    fn square(&mut self, view: &GizmoView, center: Vec3, half: f32, handle: &'static str) {
-        let r = view.right * self.scale * half;
-        let u = view.up * self.scale * half;
-        let p = [
-            center - r - u,
-            center + r - u,
-            center + r + u,
-            center - r + u,
-        ];
-        for i in 0..4 {
-            self.line(p[i], p[(i + 1) % 4], 1.75, handle);
-        }
+    fn solid(
+        &mut self,
+        start: Vec3,
+        end: Vec3,
+        width_css: f32,
+        handle: &'static str,
+        shape: super::GizmoShape,
+    ) {
+        self.line(start, end, width_css, handle);
+        self.lines.last_mut().unwrap().shape = shape;
     }
     pub fn ring_point(&self, angle: f32) -> Vec3 {
         self.origin + self.ring_u * angle.cos() + self.ring_v * angle.sin()
@@ -216,7 +231,14 @@ mod tests {
             assert!(g.axes[2].is_none());
             assert_eq!(g.hit(&view, Vec2::new(644.0, 400.0)), Some("x"));
             assert_eq!(g.hit(&view, Vec2::new(600.0, 400.0)), Some("center"));
-            assert_eq!(g.lines.len(), 10);
+            assert_eq!(g.lines.len(), 5);
+            assert_eq!(
+                g.lines
+                    .iter()
+                    .filter(|line| line.shape == super::super::GizmoShape::Cone)
+                    .count(),
+                2
+            );
         }
     }
     #[test]

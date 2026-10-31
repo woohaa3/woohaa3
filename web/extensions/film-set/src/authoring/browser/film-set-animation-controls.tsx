@@ -8,8 +8,9 @@
  *
  * 机器协议沿用 `clip`（clipId/clipPatch），产品文案统一称「拍摄镜头」。
  */
+import { FilmSetAspectCards } from "./workspace-camera-properties.js";
 import { Button, IconButton, Popover } from "@woohaa3/ui/primitives";
-import { PlusIcon, EllipsisIcon } from "@woohaa3/ui/icons";
+import { PlusIcon, EllipsisIcon, FilmIcon, LayoutGridIcon, PlayIcon, SunIcon } from "@woohaa3/ui/icons";
 import { TextInput, SelectInput } from "@woohaa3/ui/forms";
 import type { ShotImageReferences } from "./shot-image-reference.js";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -43,12 +44,13 @@ function kindLabel(kind: FilmSetShotKind): string {
   return kind === "static" ? "静态镜头" : "动态镜头";
 }
 
-export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, compositionOpen, onCompositionOpenChange, images, onSelectShot, presentation }: {
+export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, compositionOpen, onCompositionOpenChange, images, onSelectShot, presentation, showOutput = true }: {
   ctx: Context; nodeId: string; writable: boolean; composition?: ReactNode;
   compositionOpen?: boolean; onCompositionOpenChange?: (open: boolean) => void;
   images?: ShotImageReferences;
   onSelectShot?: (id: string) => void;
   presentation?: "create" | "properties";
+  showOutput?: boolean;
 }) {
   const [menu, setMenu] = useState<"create" | "more" | null>(null);
   useSyncExternalStore(ctx.compositeAssets.subscribe, ctx.compositeAssets.getRevision, ctx.compositeAssets.getRevision);
@@ -156,7 +158,7 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
 
   return <section className="film-set-animation-controls" aria-label="拍摄镜头管理">
     <div className="film-set-section-heading">
-      <h3>{presentation === "properties" ? "镜头属性" : <>拍摄镜头<span className="film-set-count">{collection.clips.length}</span></>}</h3>
+      {presentation === "properties" ? <div className="film-set-property-identity"><span className="film-set-property-identity__icon"><FilmIcon /></span><div><h3 title={shot?.name}>{shot?.name ?? "尚无镜头"}</h3><p>{shot ? `${kindLabel(shot.kind)}${shot.kind === "dynamic" ? ` · ${shot.timeline.duration} 秒` : ""}` : "从左侧新建镜头"}</p></div>{shot?.id === collection.defaultClipId ? <span className="film-set-default-badge">默认</span> : null}</div> : <h3>拍摄镜头<span className="film-set-count">{collection.clips.length}</span></h3>}
       <div className="film-set-shot-tools">
         {presentation !== "properties" ? createMenu : null}
         <Popover open={menu === "more"} onOpenChange={open => setMenu(open ? "more" : null)} align="end" className="film-set-shot-menu"
@@ -178,6 +180,24 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
       {presentation === "properties" ? <label>画幅<SelectInput label="镜头画幅" value={shot.initialCamera.aspect} disabled={!writable} onValueChange={value => void mutate({ kind: "camera", initialCamera: { ...shot.initialCamera, aspect: value as ModelCameraAspect } })} options={MODEL_CAMERA_ASPECTS.map(aspect => ({ value: aspect, label: aspect }))} /></label> : null}
       {presentation !== "properties" ? <p className="film-set-shot-kind">{kindLabel(shot.kind)} · {shot.kind === "static" ? "图片参考" : "视频参考"}</p> : null}
       {renaming ? <label>名称<TextInput aria-label="拍摄镜头名称" key={shot.id + shot.name} defaultValue={shot.name} maxLength={80} disabled={!writable} onBlur={event => { if (event.target.value.trim() !== shot.name) void mutate({ kind: "rename", name: event.target.value }).then(ok => { if (ok) setRenaming(false); }); else setRenaming(false); }} /></label> : null}
+      {presentation === "properties" ? <>
+        {composition}
+        <section className="film-set-property-section"><div className="film-set-property-heading"><span><LayoutGridIcon size={14} />画幅与背景</span></div>
+          <FilmSetAspectCards value={shot.initialCamera.aspect} disabled={!writable} onChange={aspect => ctx.modelWorkspace.session.commitAspect(aspect)} />
+          <div className="film-set-backdrop-heading"><span>镜头背景</span><span>{filmSetBackdropIsCustom(shot) ? "自定义颜色" : "跟随应用主题"}</span></div>
+          <div className="film-set-backdrop-swatches">
+            <Button size="sm" tone="ghost" data-active={!filmSetBackdropIsCustom(shot)} disabled={!writable} onClick={() => void mutate({ kind: "backdrop", backdrop: "theme" })}><SunIcon size={14} />主题</Button>
+            {["#c8c5ba", "#eee6d4", "#24262b", "#b8c8b9"].map(color => <button key={color} type="button" aria-label={`背景 ${color}`} title={color} className="film-set-backdrop-swatch" data-active={shot.backdrop === color} style={{ backgroundColor: color }} disabled={!writable} onClick={() => { setCustomBackdrop(color); void mutate({ kind: "backdrop", backdrop: color }); }} />)}
+            <label className="film-set-backdrop-custom" title="自定义背景颜色"><PlusIcon size={13} /><input type="color" aria-label="镜头背景颜色" value={customBackdropValid(filmSetBackdropIsCustom(shot) ? shot.backdrop ?? customBackdrop : customBackdrop)} disabled={!writable} onChange={event => { setCustomBackdrop(event.target.value); if (readFilmSetBackdrop(event.target.value).ok) void mutate({ kind: "backdrop", backdrop: event.target.value }); }} /></label>
+          </div>
+        </section>
+        <section className="film-set-property-section"><div className="film-set-property-heading"><span><PlayIcon size={14} />播放设置</span></div>
+          {shot.kind === "dynamic" ? <div className="film-set-playback-settings">
+            <label className="film-set-setting-row"><span>镜头时长</span><div className="film-set-duration-input"><TextInput aria-label="镜头时长" key={shot.id + shot.timeline.duration} type="number" min={0.1} max={3600} step={0.1} defaultValue={shot.timeline.duration} disabled={!writable} onBlur={event => { const duration = Number(event.target.value); if (duration > 0 && duration !== shot.timeline.duration) void mutate({ kind: "timeline", timeline: { ...shot.timeline, duration } }); }} /><span>秒</span></div></label>
+            <label className="film-set-setting-row"><span>循环播放</span><input className="film-set-loop-switch" aria-label="循环播放" type="checkbox" checked={shot.timeline.loop} disabled={!writable} onChange={event => void mutate({ kind: "timeline", timeline: { ...shot.timeline, loop: event.target.checked } })} /></label>
+          </div> : <p className="film-set-object-hint">静态镜头 · 固定构图</p>}
+        </section>
+      </> : <>
       {shot.kind === "dynamic" ? <>
         <div className="film-set-shot-timing"><label>时长（秒）<TextInput key={shot.id + shot.timeline.duration} type="number" min={0} max={3600} step={0.1} defaultValue={shot.timeline.duration} disabled={!writable} onBlur={event => { const duration = Number(event.target.value); if (duration !== shot.timeline.duration) void mutate({ kind: "timeline", timeline: { ...shot.timeline, duration } }); }} /></label>
         <label><input type="checkbox" checked={shot.timeline.loop} disabled={!writable} onChange={event => void mutate({ kind: "timeline", timeline: { ...shot.timeline, loop: event.target.checked } })} />循环</label></div>
@@ -207,7 +227,8 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
         {presentation !== "properties" ? <p className="film-set-object-hint">修改构图后自动保存，画布预览卡同步更新。</p> : null}
         {composition}
       </details>
-      {shot.kind === "static" ? <div className="film-set-image-reference"><h3>输出 · {shot.name}</h3>
+      </>}
+      {showOutput && shot.kind === "static" ? <div className="film-set-image-reference"><h3>输出 · {shot.name}</h3>
         <p>{imageState?.status === "ready" ? "图片参考已更新" : imageState?.status === "failed" ? `图片参考更新失败：${imageState.error}` : "图片参考准备中 · 退出片场后自动更新"}</p>
         {imageState?.status === "ready" && imageState.error ? <p className="film-set-object-hint">{imageState.error}</p> : null}
         {imageState?.status === "failed" ? <Button size="sm" disabled={!writable} onClick={() => images?.retry(nodeId, shot.id)}>重试</Button> : null}

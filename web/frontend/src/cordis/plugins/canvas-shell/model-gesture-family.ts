@@ -444,6 +444,13 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
     enterFromModelHit,
     setContentRect,
     reframeModelFocus,
+    setFocusedModelView: (view: "perspective" | "front" | "top" | "right") => {
+      const camera = focus.cameraSnapshot();
+      if (!camera) return;
+      clearHeldKeys();
+      const angles = { perspective: [Math.PI / 4, -Math.PI / 6], front: [0, 0], top: [0, -Math.PI / 2 + 0.01], right: [Math.PI / 2, 0] }[view];
+      if (focus.restoreCamera({ ...camera, yaw: angles[0]!, pitch: angles[1]! })) emitModelFocus();
+    },
     zoomFocusedModel: (factor: number) => { if (focus.zoomBy(factor)) emitModelFocus(); },
     clearHeldKeys,
     syncModelFocusValid,

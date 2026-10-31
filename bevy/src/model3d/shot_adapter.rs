@@ -456,10 +456,15 @@ pub(crate) fn sync_shot_adapter(
         state.rig
     };
 
-    let animation_preview = scene
-        .animation_playback
+    let still_preview = scene
+        .model_editor
         .as_ref()
-        .is_some_and(|p| p.view_mode == "focus-preview");
+        .is_some_and(|editor| editor.shot_preview);
+    let animation_preview = still_preview
+        || scene
+            .animation_playback
+            .as_ref()
+            .is_some_and(|p| p.view_mode == "focus-preview");
     let lens = ShotCameraLens::from_aspect(aspect);
     // 窗口相机的矩形由 `sync_shot_main_view` 写成左下角预览框；这里的尺寸只参与预览预算。
     let preview = ShotCameraPreview::new(320, 180)

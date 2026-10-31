@@ -27,6 +27,7 @@ export function installCanvasListeners(
   canvas.addEventListener("pointermove", input.onPointerMove);
   canvas.addEventListener("pointerup", input.onPointerUp);
   canvas.addEventListener("pointercancel", input.onPointerCancel);
+  canvas.addEventListener("lostpointercapture", input.onPointerCancel);
   canvas.addEventListener("pointerleave", input.onPointerLeave);
   canvas.addEventListener("wheel", input.onWheel, { passive: false });
   // 聚焦缩放在 document capture 阶段：覆盖层上的滚轮/捏合也必须只调相机、取消默认缩放。
@@ -68,6 +69,7 @@ export function removeCanvasListeners(
   canvas.removeEventListener("pointermove", input.onPointerMove);
   canvas.removeEventListener("pointerup", input.onPointerUp);
   canvas.removeEventListener("pointercancel", input.onPointerCancel);
+  canvas.removeEventListener("lostpointercapture", input.onPointerCancel);
   canvas.removeEventListener("pointerleave", input.onPointerLeave);
   canvas.removeEventListener("wheel", input.onWheel);
   target.document?.removeEventListener?.("wheel", handlers.onDocumentWheel, { capture: true });

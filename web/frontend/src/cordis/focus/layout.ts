@@ -17,6 +17,10 @@ import type { FocusContentRect, FocusInsets } from "./types.js";
 export type FocusLayoutConfig = {
   /** 固定桌面工具布局，不随窗口宽度将工具列与检查器移到上下。 */
   desktop?: boolean;
+  /** Independent left navigation width (CSS px). */
+  navigationWidth?: number;
+  /** Bottom operation area height; replaces the default footer/player reserve. */
+  bottomBar?: number;
   /** 是否呈现右侧（桌面）/底部（窄屏）检查面板（工具或历史）。 */
   panel?: boolean;
   /** 动画预览占位（模型编辑器子模式）。 */
@@ -95,6 +99,7 @@ export type FocusLayout = {
   toolbar: number;
   /** 底部播放器占位高度。 */
   player: number;
+  navigationWidth: number;
   panelWidth: number;
   panelHeight: number;
   insets: FocusInsets;
@@ -127,7 +132,8 @@ export function focusLayout(input: FocusLayoutInput): FocusLayout {
   const workspaceChrome = input.chromeOwner === "workspace";
   const header = workspaceChrome ? 0 : narrow ? 100 : FOCUS_HEADER;
   const player = workspaceChrome ? 0 : resolvePlayer(input.player, width);
-  const footer = workspaceChrome ? 0 : FOCUS_FOOTER_BASE + player + (input.animationPreview ? (narrow ? 160 : 100) : 0);
+  const footer = workspaceChrome ? 0 : input.bottomBar !== undefined ? Math.max(0, input.bottomBar) : FOCUS_FOOTER_BASE + player + (input.animationPreview ? (narrow ? 160 : 100) : 0);
+  const navigationWidth = Math.max(0, input.navigationWidth ?? 0);
   const tools = Math.max(0, input.toolColumn ?? 0);
   const toolbar = Math.max(0, input.toolbar ?? 0);
   const panelMaxWidth = Math.max(0, input.panelMaxWidth ?? 320);
@@ -138,13 +144,13 @@ export function focusLayout(input: FocusLayoutInput): FocusLayout {
     ? Math.min(panelMaxHeight, Math.max(120, height * 0.34), Math.max(0, height - header - footer - tools - 96))
     : 0;
   const insets: FocusInsets = {
-    left: rail + (narrow ? 0 : tools),
+    left: rail + navigationWidth + (narrow ? 0 : tools),
     right: rail + panelWidth,
     top: header + toolbar + (narrow ? tools : 0),
     bottom: footer + panelHeight
   };
   return {
-    narrow, rail, header, footer, tools, toolbar, player, panelWidth, panelHeight, insets,
+    narrow, rail, header, footer, tools, toolbar, player, navigationWidth, panelWidth, panelHeight, insets,
     contentRect: {
       x: insets.left, y: insets.top,
       width: Math.max(1, width - insets.left - insets.right),

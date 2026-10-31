@@ -449,3 +449,19 @@ describe("agent conversation service · 节点会话复用与清空（design D8�
     expect(failing.getSnapshot().contextRevision).toBe(0);
   });
 });
+
+it("whole-set submission resolves its own context while explicit legacy requests retain their original conversation", async () => {
+  const legacy = summary({ conversationId: "legacy" });
+  const whole = summary({ conversationId: "whole", contextKey: "film-set:whole" });
+  const findForTarget = vi.fn(async (_canvasId: string, _nodeId: string, _connectionId?: string, contextKey?: string) => ({ ok: true as const, value: { conversation: contextKey ? whole : legacy } }));
+  const accept = vi.fn(async (conversationId: string) => ({ ok: true as const, value: { conversation: conversationId === "whole" ? whole : legacy, turn: turn(), reused: false } }));
+  const create = vi.fn();
+  const service = createAgentConversationService({ remote: fakeRemote({ findForTarget, accept, create }) });
+  const entry = { canvasId: "cv", nodeId: "film", mode: "film-set" as const, action: "generate" as const, prompt: "创建镜头" };
+  await service.submitTurn({ canvasId: "cv", requestId: "whole-request", connectionId: "connection", entry });
+  expect(findForTarget).toHaveBeenCalledWith("cv", "film", "connection", "film-set:whole");
+  expect(accept.mock.calls[0][0]).toBe("whole");
+  await service.submitTurn({ canvasId: "cv", conversationId: "legacy", requestId: "legacy-request", entry: { ...entry, clipId: "old-clip", itemId: "old-item" } });
+  expect(accept.mock.calls[1][0]).toBe("legacy");
+  expect(create).not.toHaveBeenCalled();
+});

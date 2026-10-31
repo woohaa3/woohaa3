@@ -49,9 +49,10 @@ pub fn shot_gizmo_layout(
                 tool != "elevation"
             };
             lines.push(GizmoLine {
+                shape: super::GizmoShape::Stroke,
                 start,
                 end,
-                width_css: if secondary { 1.25 } else { 1.75 },
+                width_css: if secondary { 1.0 } else { 3.0 },
                 handle,
                 secondary,
                 rear,
@@ -64,9 +65,10 @@ pub fn shot_gizmo_layout(
     let up = right.cross(forward).normalize();
     let mut line = |start, end, handle, secondary| {
         lines.push(GizmoLine {
+            shape: super::GizmoShape::Stroke,
             start,
             end,
-            width_css: if secondary { 1.25 } else { 1.75 },
+            width_css: if secondary { 1.0 } else { 3.0 },
             handle,
             secondary,
             rear: false,
@@ -129,6 +131,18 @@ pub fn shot_gizmo_layout(
                 tool != "distance",
             );
         }
+    }
+    if let Some(scale) = view.world_per_css(position) {
+        lines.push(GizmoLine {
+            shape: super::GizmoShape::Cone,
+            start: position + forward * scale * 6.0,
+            end: position + forward * scale * 14.0,
+            width_css: 7.0,
+            handle: "shot-origin",
+            secondary: tool != "distance",
+            rear: false,
+            visible: true,
+        });
     }
     lines
 }

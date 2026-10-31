@@ -1,6 +1,10 @@
 # Client code map
 
-片场聚焦检查器（2026-10-30）：`web/extensions/film-set/src/authoring/browser/inspector.tsx` 分离固定镜头、列表与属性滚动，构图折叠不再控制工具；动态播放条在编辑态可达，输出按镜头类型组织。扩展经公共 `CompositeAssetAdapter.focusLayout` 声明 chrome 占位，经异步 `writeCameras` 使用同一个 `canvasEdit` journal，经 authoring `onDraftStateChange` 固定非空 AI 草稿目标；宿主不读取片场私有字段。
+片场聚焦检查器（2026-10-30）：`web/extensions/film-set/src/authoring/browser/inspector.tsx` 的旧折叠构图已由下节 2026-10-31 的分区属性替代；动态播放条在编辑态可达，输出按镜头类型组织。扩展经公共 `CompositeAssetAdapter.focusLayout` 声明 chrome 占位，经异步 `writeCameras` 使用同一个 `canvasEdit` journal，经 authoring `onDraftStateChange` 固定非空 AI 草稿目标；宿主不读取片场私有字段。
+
+## Film-set workspace (2026-10-31)
+
+`web/extensions/film-set/src/authoring/browser/inspector.tsx` assembles the left object/material navigation and shot cards (`workspace-navigation.tsx`), bottom-centered icon tools (`workspace-viewport-tools.tsx`), right composition sliders/focus fields/aspect cards (`workspace-camera-properties.tsx`) and background/playback sections, plus full-width bottom output/whole-set assistant. Existing sessions, reference producers, output controllers and protected journal remain the only owners. Neutral focus config adds optional `navigationWidth`/`bottomBar`; adapter `readonlyShotPreview`/`showFocusGrid` drive transient editor `shotPreview`/`grid` fields. Rust accepted gizmo queries resolve actual group bindings/source kinds and ground as well as legacy composites, while readonly previews suppress handles. `bevy/src/gizmo_layout` shares cylinder shafts, solid cone heads, cubes and rotation-ring geometry between rendering and picking; three unit mesh assets are cached, and reused entities replace their mesh when switching tools. Assistant conversation creation/target lookup accepts optional `contextKey`, persisted in application-service SQLite, to separate `film-set:whole` from legacy local contexts without rewriting old requests.
 
 ## Shared presentation package
 
