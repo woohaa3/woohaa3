@@ -35,6 +35,14 @@ export function createRuntimeComponentsHandler(options: { getManager?: () => Man
       const [, id, action] = match as unknown as [string, string, string];
       // Validate id against the lock before creating background state.
       await manager.inspect(id);
+      const readBody = async (): Promise<string | null> => {
+        let value = "";
+        for await (const chunk of req) {
+          value += String(chunk);
+          if (Buffer.byteLength(value) > 8192) return null;
+        }
+        return value;
+      };
       if (action === "install") {
         if (!installs.has(id)) {
           const controller = new AbortController();
@@ -46,12 +54,9 @@ export function createRuntimeComponentsHandler(options: { getManager?: () => Man
         installs.get(id)?.abort();
         send(200, { ok: true });
       } else if (action === "configure") {
-        let body = "";
-        for await (const chunk of req) {
-          body += String(chunk);
-          if (Buffer.byteLength(body) > 8192) { send(413, { message: "配置内容过大" }); return true; }
-        }
-        const value = JSON.parse(body) as { source?: unknown; path?: unknown };
+        const configured = await readBody();
+        if (configured === null) { send(413, { message: "配置内容过大" }); return true; }
+        const value = JSON.parse(configured) as { source?: unknown; path?: unknown };
         if ((value.source !== "managed" && value.source !== "local") || (value.path !== undefined && typeof value.path !== "string")) {
           send(400, { message: "请选择托管下载或本机程序" }); return true;
         }
@@ -60,8 +65,14 @@ export function createRuntimeComponentsHandler(options: { getManager?: () => Man
       } else if (action === "remove") {
         await manager.remove(id);
         send(200, { ok: true });
-      } else {
-        send(200, { candidates: await manager.discoverLocal(id) });
+      } else if (action === "discover") {
+        // `selected` explains why an explicitly requested path is unusable (for example an npm shim
+        // while PATH has no `node`); discovery alone only reports working candidates.
+        const requested = await readBody();
+        if (requested === null) { send(413, { message: "配置内容过大" }); return true; }
+        const path = requested.trim() ? (JSON.parse(requested) as { path?: unknown }).path : undefined;
+        const state = typeof path === "string" && path.trim() ? await manager.diagnose(id, path.trim()) : undefined;
+        send(200, { candidates: await manager.discoverLocal(id), ...(state && "error" in state ? { selected: { path, error: state.error } } : {}) });
       }
     } catch (error) {
       const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";

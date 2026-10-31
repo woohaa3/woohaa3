@@ -130,6 +130,15 @@ export function createOpenCodeTransport(options: HttpTransportOptions = {}): Loc
       }
       const slash = input.model.indexOf("/");
       if (input.model && slash < 1) return { ok: false, code: "model-access-denied", message: "OpenCode 模型请使用 providerID/modelID 格式" };
+      // 模型引用带 Variant 时才是「显式指定思考强度」；省略 Variant 由上游沿用模型默认
+      // （实测 Session.model.variant 会落成 `default`），所以不传等于不覆盖。
+      const modelRef = input.model
+        ? {
+            providerID: input.model.slice(0, slash),
+            id: input.model.slice(slash + 1),
+            ...(input.reasoningEffort ? { variant: input.reasoningEffort } : {})
+          }
+        : null;
       const permissions = [
         { action: "*", resource: "*", effect: "deny" },
         ...input.allowedTools.map(tool => ({ action: `${input.mcpEndpoint?.name}_${tool}`, resource: "*", effect: "allow" }))
@@ -140,13 +149,15 @@ export function createOpenCodeTransport(options: HttpTransportOptions = {}): Loc
         : await http.json("/api/session", "POST", {
         location: { directory: input.workDir },
         title: "WooHaa canvas",
-        ...(input.model ? { model: { providerID: input.model.slice(0, slash), id: input.model.slice(slash + 1) } } : {}),
+        ...(modelRef ? { model: modelRef } : {}),
         permissions
       });
       sessionId = session.data?.id;
       if (!sessionId) throw new Error("OpenCode 未返回会话 id");
       if (input.resumeNativeId) await http.json(`/api/session/${encodeURIComponent(sessionId)}`, "PATCH", { permissions });
-      if (input.resumeNativeId && input.model) await http.json(`/api/session/${encodeURIComponent(sessionId)}/model`, "POST", { model: { providerID: input.model.slice(0, slash), id: input.model.slice(slash + 1) } });
+      // 续轮要把本回合冻结的模型与 Variant 重新写回会话：模型由本回合输入决定，
+      // 省略 Variant 会重置为模型默认，因此两次都按同一个 `modelRef` 提交。
+      if (input.resumeNativeId && modelRef) await http.json(`/api/session/${encodeURIComponent(sessionId)}/model`, "POST", { model: modelRef });
       input.onEvidence?.({ transport: "ready" });
       const sessionPath = `/api/session/${encodeURIComponent(sessionId)}`;
       // change: 2026-10-22-remove-agent-execution-limits，任务 4.1：原「最近 100 条 assistant

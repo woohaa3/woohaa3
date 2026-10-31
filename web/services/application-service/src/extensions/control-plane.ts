@@ -227,6 +227,9 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
   const releaseUnreferencedVersions = async (extensionId: string): Promise<void> => {
     const lease = leaseFor(extensionId);
     for (const version of options.host.activeVersions(extensionId)) {
+      // 文件/manifest 启用且尚无 SQLite 配置时，当前 public 实例使用基线版本 0。
+      // 它仍是公共入口，不能因为没有持久版本记录而被当作历史实例回收。
+      if (version === publicVersion.get(extensionId)) continue;
       const current = options.store.get(extensionId)?.configVersion;
       if (version === current) continue;
       if (lease.activeWorkCountForVersion(version) > 0) continue;

@@ -14,7 +14,12 @@ import {
 } from "./model-script.js";
 import { QUALITY_VERTEX_COUNTS } from "./scene-ir-v2/types.js";
 
-/** 坐标 / 旋转单位与朝向约定。 */
+/**
+ * 坐标 / 旋转单位、朝向与**长度基准**约定。
+ *
+ * `lengthUnit` / `unitMeters` 让模型脚本的绝对尺寸有统一口径：模型卡片按自身 extent 归一化显示，
+ * 只看卡片无法发现「人物 1.7、椅子 100」，因此必须把现实尺度写进指南与生成提示词，而不是留空。
+ */
 export const MODEL_API_AXIS_CONVENTIONS = {
   up: "+Y",
   front: "+Z",
@@ -22,8 +27,39 @@ export const MODEL_API_AXIS_CONVENTIONS = {
   rotationUnit: "degrees",
   rotationOrder: "local Y-X-Z (intrinsic)",
   positionSpace: "parent local space",
-  timeUnit: "seconds"
+  timeUnit: "seconds",
+  lengthUnit: "meters",
+  unitMeters: 1,
+  /** 站立人物的基准身高（场景单位）；允许风格化夸张，但不应偏离数量级。 */
+  standingPersonHeightUnits: 1.7,
+  doorHeightUnits: 2,
+  chairSeatHeightUnits: 0.45
 } as const;
+
+/**
+ * 供生成提示词使用的**现实尺度基准**说明（English，稳定输出）。
+ *
+ * 与 `modelRenderBudgetText()` / `modelPrimitiveConstraintsText()` 同一定位：生成提示词与 MCP 指南
+ * 共享同一份常量，避免 agent 按任意单位建模型后在片场里大小错配。
+ */
+export function modelScaleGuidanceText(): string {
+  const { unitMeters, standingPersonHeightUnits, doorHeightUnits, chairSeatHeightUnits } = MODEL_API_AXIS_CONVENTIONS;
+  return [
+    `Scene scale is life-like: 1 unit ≈ ${unitMeters} meter.`,
+    `Build every object at its real-world size (a standing person ≈ ${standingPersonHeightUnits} units tall, a door ≈ ${doorHeightUnits} units, a chair seat ≈ ${chairSeatHeightUnits} units).`,
+    "For objects that stand on the ground, place the model origin at its ground contact and center it horizontally; do not arbitrarily enlarge the whole model."
+  ].join(" ");
+}
+
+/** 同一尺度基准的中文版（MCP 指南与中文提示词共用）。 */
+export function modelScaleGuidanceTextZh(): string {
+  const { unitMeters, standingPersonHeightUnits, doorHeightUnits, chairSeatHeightUnits } = MODEL_API_AXIS_CONVENTIONS;
+  return [
+    `1 单位 ≈ ${unitMeters} 米，按真实尺寸建模`,
+    `（站立人物约 ${standingPersonHeightUnits} 单位高，门约 ${doorHeightUnits} 单位，椅子座高约 ${chairSeatHeightUnits} 单位）；`,
+    "站在地面上的对象，让模型原点落在其地面接触点并水平居中；不要把整体模型任意放大。"
+  ].join("");
+}
 
 /** 一个 SceneBuilder 方法签名（供指南与一致性测试共用）。 */
 export type ModelApiMethod = {

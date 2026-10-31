@@ -3,7 +3,7 @@
  * （自 `mcp-http.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R11）。
  */
 import type { ToolCallback, ToolAnnotations, RegisteredTool, StandardSchemaWithJSON } from "@modelcontextprotocol/server";
-import { MODEL_CAMERA_ASPECTS, modelApiGuide, modelPrimitiveConstraintsText, modelRenderBudgetText, motionApiGuideText } from "@woohaa3/contracts";
+import { MODEL_CAMERA_ASPECTS, modelApiGuide, modelPrimitiveConstraintsText, modelRenderBudgetText, modelScaleGuidanceTextZh, motionApiGuideText } from "@woohaa3/contracts";
 import { toolError } from "./tool-results.js";
 import type { ToolRegistration } from "./http-types.js";
 
@@ -45,6 +45,11 @@ ${methods}
 - position/rotation/scale 相对 parent 的局部空间；父 group 的变换与动画会作用到全部后代；
 - 画布使用 dimetric 等距视图：local +Z（正面）投影到屏幕“左下方、面向观察者”，
   local +X（左侧）投影到“右下方”；请把正面放在 +Z 一侧，背面放在 -Z。
+
+尺度约定（模型卡片与片场共用同一现实基准）：
+- ${modelScaleGuidanceTextZh()}
+- 这条基准只描述模型自身的绝对尺寸；卡片按模型 extent 归一化显示，卡片里看起来一样大不代表
+  实际尺寸一致。不要用卡片取景、节点矩形或画布 zoom 反推单位。
 
 选择建议：
 - 关节/球状部件用 scene.sphere；圆润肢体用 scene.capsule；方块肢体用 box segment；

@@ -141,7 +141,7 @@ export function modelPromptGuide(canvasId: string | undefined, nodeId: string, f
   if (filmSet) {
     return `使用 Woohaa3 Model Canvas MCP 修改${target}片场；先调用 get_model_api 和 get_model_node 读取脚本 API、完整 animation 与 snapshotHash。生成或增添对象用 submit_film_set（带稳定 requestId 与 expectedSnapshotHash），在现有片场保存完整对象集合和片段；空片场或只有地面也可生成。保留未修改的对象、片段、运动和镜头。修改指定已有模型用 import_model_snapshot（必须指定 itemId），片段动作用 mutate_film_set_clip。片场不保存顶层模型脚本；创建另一片场才用 create_film_set_node。修改后检查运动适配状态。`;
   }
-  return `使用 Woohaa3 Model Canvas MCP 生成或修改${target}；先调用 get_model_node，再调用 submit_model_script（带稳定 requestId 与 expectedModelContentHash）。点数/面数引用 get_model_statistics 或提交回执，不要自己按成本表推算（segment 缺省是 capsule）。`;
+  return `使用 Woohaa3 Model Canvas MCP 生成或修改${target}；先调用 get_model_api 读取脚本 API 与尺度约定，再调用 get_model_node，然后调用 submit_model_script（带稳定 requestId 与 expectedModelContentHash）。模型按真实尺度建模（1 单位 ≈ 1 米，站立人物约 1.7 单位高）。点数/面数引用 get_model_statistics 或提交回执，不要自己按成本表推算（segment 缺省是 capsule）。`;
 }
 
 /** 具备 MCP 模型生成面板的节点类型（两类自包含 3D 节点）。 */

@@ -23,6 +23,11 @@ export function RuntimeComponentsSection({ source = runtimeComponents, fetcher =
     if (!response.ok) throw new Error(value.message ?? "组件服务请求失败");
     return value;
   };
+  const runtimePath = (id: string) => {
+    const component = snapshot?.components.find((item) => item.id === id);
+    return component?.path ?? (component?.source === "local" ? component.entry : undefined);
+  };
+  const candidatePath = (id: string) => paths[id] ?? runtimePath(id);
   const act = async (id: string, action: string, body: unknown = {}) => {
     setPending(id); setError("");
     try {
@@ -30,6 +35,9 @@ export function RuntimeComponentsSection({ source = runtimeComponents, fetcher =
       if (action === "discover") {
         const first = value.candidates?.[0];
         if (first) setPaths((previous) => ({ ...previous, [id]: typeof first === "string" ? first : first.entry }));
+        // A path that was typed but cannot run (for example an npm shim while the packaged App has
+        // no `node` on PATH) would otherwise look identical to "nothing found".
+        else if (value.selected?.error) setError(`该路径不可用：${value.selected.error}`);
         else setError("未找到本机程序，请填写绝对路径。");
       }
       await source.refresh();
@@ -58,9 +66,9 @@ export function RuntimeComponentsSection({ source = runtimeComponents, fetcher =
           </>}
         </div>
         {!busy && (component.id === "codex" || component.id === "claude") ? <div className="settings-runtime__local">
-            <input className="settings-page__input" placeholder="本机程序的绝对路径" value={paths[component.id] ?? component.path ?? (component.source === "local" ? component.entry : "") ?? ""} onChange={(event) => setPaths({ ...paths, [component.id]: event.target.value })} />
-            <Button size="sm" disabled={disabled} onClick={() => void act(component.id, "discover")}>探测本机程序</Button>
-            <Button size="sm" disabled={disabled || !(paths[component.id] ?? component.path ?? (component.source === "local" ? component.entry : undefined))} onClick={() => void act(component.id, "configure", { source: "local", path: paths[component.id] ?? component.path ?? component.entry })}>使用此程序</Button>
+            <input className="settings-page__input" placeholder="本机程序的绝对路径" value={candidatePath(component.id) ?? ""} onChange={(event) => setPaths({ ...paths, [component.id]: event.target.value })} />
+            <Button size="sm" disabled={disabled} onClick={() => void act(component.id, "discover", { path: candidatePath(component.id) ?? "" })}>探测本机程序</Button>
+            <Button size="sm" disabled={disabled || !candidatePath(component.id)} onClick={() => void act(component.id, "configure", { source: "local", path: candidatePath(component.id) })}>使用此程序</Button>
           </div> : null}
       </section>;
     })}

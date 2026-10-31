@@ -37,6 +37,8 @@
 
 Claude 本机程序按锁文件 `localVersions` 精确校验，CLI 版本与 SDK/npm 版本分开。Codex 接受能自报版本的本机程序，只拒绝锁文件 `blockedVersions` 中的版本；macOS 上可以把 `ChatGPT.app` 作为路径，探测时会解析到包内的 Codex 可执行文件。Windows 需要原生 `.exe`，不把 npm `.cmd` shim 当成原生程序。仅复用程序，不导入全局账号和技能。
 
+打包 App 由 Finder 启动，PATH 只有 launchd 的最小值（`/usr/bin:/bin:/usr/sbin:/sbin`），里面既没有版本管理器的目录也没有 `node`。因此探测会额外搜索 `~/.local/bin`、`~/.bun/bin`、`~/.opencode/bin`、`~/Library/pnpm`、fnm/nvm 的 `aliases/default/bin`、`/opt/homebrew/bin`、`/usr/local/bin` 和 `ChatGPT.app`；选中的入口若是 `#!/usr/bin/env node` 脚本，会就地解析到同一个 npm 包 `@openai/codex-<平台>-<架构>/vendor/<triple>/bin/codex` 的原生二进制，解析不到时保留原路径并由 `--version` 探测给出明确失败原因，不会改成别的安装。设置 → 运行时组件里「探测本机程序」会把已填路径一并回传，因此路径不可用时能显示具体原因，而不是只报「未找到」。
+
 ## 构建和上传 CDN
 
 先完成客户端依赖安装与对应平台的 release 工具构建，保留锁定版本。原生录制、模型渲染与图片编辑组件版本从实际二进制/WASM 的 SHA-256 派生；组件构建与 App 打包必须使用同一组二进制。构建脚本不会替用户安装 npm 依赖，也不会上传文件。

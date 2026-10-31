@@ -230,7 +230,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         return { status: "failed", error: { code: "capability-unsupported", message: "未配置受控 MCP 工具入口，不能执行目标动作" } };
       }
     }
-    if (input.intent.reasoningEffort && adapter.adapterId !== "codex-appserver") return { status: "failed", error: { code: "capability-unsupported", message: "此本机工具未开放思考强度配置，请使用默认设置" } };
+    if (input.intent.reasoningEffort && !adapter.supportsReasoningEffort) return { status: "failed", error: { code: "capability-unsupported", message: "此本机工具未开放思考强度配置，请使用默认设置" } };
     const toolNames = discussion ? [] : localAgentToolsForMode(input.intent.mode ?? "model3d");
     const toolToken = await issueToolGrant(options.tools, input, toolNames);
     if (!discussion && !toolToken) {

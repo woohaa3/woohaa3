@@ -100,6 +100,56 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
   function reportedCodexVersion(output) {
     return output.match(/codex(?:-cli)?\s+v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.]+)?)/i)?.[1];
   }
+  const codexExecutableName = platform === 'win32' ? 'codex.exe' : 'codex';
+  // npm/pnpm/nvm/fnm global installs put a `#!/usr/bin/env node` shim on PATH and the real
+  // architecture binary in the optional `@openai/codex-<platform>-<arch>` package. A packaged
+  // App inherits only the launchd PATH (`/usr/bin:/bin:...`), which has no node, so the shim
+  // always fails with `env: node: No such file or directory`. Resolve the vendored binary instead.
+  async function isNodeShim(file) {
+    const handle = await fs.open(file, 'r');
+    try {
+      const buffer = Buffer.alloc(256);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const first = buffer.subarray(0, bytesRead).toString('utf8').split('\n', 1)[0];
+      return /^#!/.test(first) && /(?:^|[\s/\\])(?:node|nodejs)(?:\.exe)?(?:$|\s)/.test(first);
+    } finally { await handle.close(); }
+  }
+  async function vendoredCodexNative(executable) {
+    const real = await fs.realpath(executable).catch(() => executable);
+    let directory = path.dirname(real);
+    // npm global layout is `<prefix>/bin/<name>` next to `<prefix>/lib/node_modules`;
+    // version managers (fnm/nvm) symlink `bin/<name>` into the package itself.
+    const moduleRoots = base => path.basename(base) === 'node_modules' ? [base] : [path.join(base, 'node_modules'), path.join(base, 'lib', 'node_modules')];
+    for (let depth = 0; depth < 10; depth += 1) {
+      for (const modules of moduleRoots(directory)) {
+        let packages = [];
+        try { packages = await fs.readdir(path.join(modules, '@openai')); } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+        for (const name of packages) {
+          if (!/^codex-[a-z0-9-]+$/.test(name)) continue;
+          const vendor = path.join(modules, '@openai', name, 'vendor');
+          let targets = [];
+          try { targets = await fs.readdir(vendor); } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+          for (const target of targets) {
+            const candidate = path.join(vendor, target, 'bin', codexExecutableName);
+            try {
+              if (!(await fs.stat(candidate)).isFile()) continue;
+              if (await isNodeShim(candidate)) continue;
+              return candidate;
+            } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+          }
+        }
+      }
+      const parent = path.dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+  }
+  // Shebang shims cannot run without `node` on the launchd PATH; a resolved vendored binary keeps
+  // the selection usable without asking the user to know their package manager's internal layout.
+  async function nativeCodex(executable) {
+    if (!(await isNodeShim(executable))) return executable;
+    return (await vendoredCodexNative(executable)) ?? executable;
+  }
   async function resolveCodexExecutable(executable) {
     const info = await fs.stat(executable);
     if (info.isFile()) return executable;
@@ -116,11 +166,18 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
     const compatible = localVersions ?? (id === 'claude' ? [] : [version]);
     if (id !== 'codex' && (!Array.isArray(compatible) || compatible.some(value => !segment(value)) || !compatible.length)) fail('INCOMPATIBLE_COMPONENT', `No compatible local CLI versions are declared for ${id}`);
     if (!path.isAbsolute(executable) || /\.(cmd|bat)$/i.test(executable)) fail('INCOMPATIBLE_COMPONENT', 'Choose an absolute native executable (Windows .cmd/.bat launchers are not supported)');
-    if (id === 'codex') executable = await resolveCodexExecutable(executable);
+    if (id === 'codex') executable = await nativeCodex(await resolveCodexExecutable(executable));
     else { const info = await fs.stat(executable); if (!info.isFile()) fail('INCOMPATIBLE_COMPONENT', 'Selected runtime is not a file'); }
     const cwd = path.join(dataDir, 'runtime-probes', id); await fs.mkdir(cwd, { recursive: true });
     const env = { PATH: process.env.PATH, HOME: cwd, USERPROFILE: cwd, TMPDIR: cwd, TEMP: cwd, SystemRoot: process.env.SystemRoot };
-    const { stdout, stderr } = await exec(executable, ['--version'], { cwd, env, timeout: 5000, maxBuffer: 16384, windowsHide: true });
+    let stdout, stderr;
+    try { ({ stdout, stderr } = await exec(executable, ['--version'], { cwd, env, timeout: 5000, maxBuffer: 16384, windowsHide: true })); }
+    catch (error) {
+      // A shebang launcher whose vendored binary is missing fails with `env: node: No such file or
+      // directory`, which says nothing about what the user should do.
+      if (/env: node|node: No such file|ENOENT/i.test(String(error?.message ?? ''))) fail('INCOMPATIBLE_COMPONENT', `Selected ${id} cannot run without \`node\` on this App's PATH; choose the native ${id} binary or the ChatGPT app instead`);
+      throw error;
+    }
     const output = `${stdout}\n${stderr}`;
     if (['codex', 'claude'].includes(id) && !new RegExp(id, 'i').test(output)) fail('INCOMPATIBLE_COMPONENT', `Selected program does not identify as ${id}`);
     if (id === 'codex') {
@@ -154,7 +211,7 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
     } catch (e) { if (e.code === 'ENOENT') return; throw e; }
   }
   async function inspect(id) {
-    const s = await settings(id); const base = { id, version: s.item.version, source: s.config.source, status: 'missing', configured: Boolean(s.baseUrl), ...states.get(id) };
+    const s = await settings(id); const base = { id, version: s.item.version, source: s.config.source, status: 'missing', configured: Boolean(s.baseUrl), ...(s.config.source === 'local' && s.config.path ? { path: s.config.path } : {}), ...states.get(id) };
     if (jobs.has(id)) return base;
     try {
       const found = s.config.source === 'local' ? await local(id, s.config.path, s.item.version, s.item.localVersions, s.item.blockedVersions) : await installed(id, s);
@@ -313,8 +370,66 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
       job.promise.then(() => inspect(id).then(value => finish(resolvePromise, value), e => finish(reject, e)), e => finish(reject, e));
     });
   }
+  // A packaged App inherits the launchd PATH only, so PATH alone never finds user installs.
+  // These are the conventional locations of Node version managers and package managers on macOS,
+  // plus the ChatGPT desktop app, which ships a native Codex. Discovery is read-only.
+  function searchDirectories() {
+    const seen = new Set(), add = value => { if (typeof value === 'string' && value.trim() && path.isAbsolute(value)) seen.add(path.resolve(value)); };
+    for (const directory of (process.env.PATH || '').split(path.delimiter)) add(directory);
+    const home = process.env.HOME || process.env.USERPROFILE;
+    if (home) for (const relative of [
+      ['bin'],
+      ['.local', 'bin'],
+      ['.bun', 'bin'],
+      ['.opencode', 'bin'],
+      ['.cargo', 'bin'],
+      ['.npm-global', 'bin'],
+      ['.volta', 'bin'],
+      ['Library', 'pnpm'],
+      ['Library', 'Application Support', 'fnm', 'aliases', 'default', 'bin'],
+      ['.local', 'share', 'fnm', 'aliases', 'default', 'bin'],
+      ['.nvm', 'current', 'bin'],
+    ]) add(path.join(home, ...relative));
+    if (platform === 'darwin') {
+      add('/opt/homebrew/bin'); add('/usr/local/bin');
+      add('/Applications/ChatGPT.app');
+      if (home) add(path.join(home, 'Applications', 'ChatGPT.app'));
+    }
+    if (platform === 'win32') for (const name of ['LOCALAPPDATA', 'ProgramFiles', 'APPDATA']) {
+      const root = process.env[name];
+      if (!root) continue;
+      add(path.join(root, 'Programs', 'codex'));
+      add(path.join(root, 'Codex'));
+    }
+    return [...seen];
+  }
+  const isChatGptApp = candidate => platform === 'darwin' && candidate.toLowerCase().endsWith('.app');
+  async function discovered(id, candidate, version, localVersions, blockedVersions) {
+    try { return await local(id, candidate, version, localVersions, blockedVersions); }
+    catch (error) { if (isChatGptApp(candidate)) return undefined; throw error; }
+  }
+  // Resolves to a ready state for a selected program, or explains why it cannot run.
+  async function diagnose(id, executable) {
+    const s = await settings(id);
+    try { return await local(id, executable, s.item.version, s.item.localVersions, s.item.blockedVersions); }
+    catch (error) { return { error: error.message }; }
+  }
+  async function discoverLocal(id) {
+    const s = await settings(id); const found = [];
+    for (const directory of searchDirectories()) {
+      // `.app` bundles are directories, so they cannot match a file name and are probed directly.
+      const candidates = isChatGptApp(directory) ? [directory] : (platform === 'win32' ? [`${id}.exe`] : [id]).map(name => path.join(directory, name));
+      for (const candidate of candidates) {
+        try {
+          const result = await discovered(id, candidate, s.item.version, s.item.localVersions, s.item.blockedVersions);
+          if (result && !found.some(x => x.entry === result.entry)) found.push(result);
+        } catch { /* discovery only returns compatible candidates */ }
+      }
+    }
+    return found;
+  }
   return {
-    configPath: configFile, inspect, resolve, install,
+    configPath: configFile, inspect, resolve, install, diagnose,
     async list() { const s = await settings(); return Promise.all(Object.keys(s.lock.components).map(inspect)); },
     async configure(id, config) { if (jobs.has(id)) fail('COMPONENT_IN_USE', `${id} is installing; cancel or wait before changing its source`); await settings(id); validateConfig({ components: { [id]: config } }, true); const user = await json(configFile, true); validateConfig(user, true); user.schemaVersion = 1; user.components = { ...user.components, [id]: config }; await fs.mkdir(path.dirname(configFile), { recursive: true }); const temporary = `${configFile}.${randomUUID()}.tmp`; await fs.writeFile(temporary, JSON.stringify(user, null, 2)); await fs.rename(temporary, configFile); states.delete(id); return inspect(id); },
     async remove(id) { const s = await settings(id); if (jobs.has(id) || leases.get(`${id}/${s.item.version}`)) fail('COMPONENT_IN_USE', `${id} is in use`); const root = directory(id, s.item.version);
@@ -332,7 +447,7 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
       } catch (e) { await fs.rename(tombstone, root); throw e; }
       states.delete(id); return inspect(id);
       } finally { await fs.rm(path.join(root, '.release-requested'), { force: true }); await fs.rm(mutationLock, { recursive: true, force: true }); } },
-    async discoverLocal(id) { const s = await settings(id); const found = []; for (const dir of (process.env.PATH || '').split(path.delimiter)) { if (!path.isAbsolute(dir)) continue; for (const name of platform === 'win32' ? [`${id}.exe`] : [id]) { try { const result = await local(id, path.join(dir, name), s.item.version, s.item.localVersions, s.item.blockedVersions); if (!found.some(x => x.entry === result.entry)) found.push(result); } catch { /* discovery only returns compatible candidates */ } } } return found; },
+    discoverLocal,
   };
 }
 let singleton, singletonKey;
