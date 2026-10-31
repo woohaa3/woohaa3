@@ -139,6 +139,9 @@ async function main() {
       await finish(launch(executable, remote ? ["--ui-url", url] : [], nativeRoot, ["ignore", logDescriptor, logDescriptor]));
     } finally { closeSync(logDescriptor); }
   } else {
+    // 非 remote 时**不能**传 `--ui-url`：`host.rs` 用它判断 `managed`，
+    // 一旦存在就跳过本机后端（`managed = ui_url_override.is_none()`），只开一个空壳 WebView。
+    // 本机模式靠环境变量 `WOOHAA_DESKTOP_UI_URL` 导航到 `--frontend-port` 指定的地址。
     await finish(launch(nativeBinary, remote ? ["--ui-url", url] : [], nativeRoot));
   }
   stop();
