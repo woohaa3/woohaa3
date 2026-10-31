@@ -11,7 +11,7 @@ import type { CanvasGroupRun } from "@woohaa3/frontend/extension-api";
 import { adaptTaskRow } from "../src/frontend/adapt-task-row.js";
 import { adaptJobRow, jobRowKey } from "../src/frontend/adapt-job-row.js";
 import { adaptGroupRow, canRetryGroupRun, canStopGroupRun, groupRowKey } from "../src/frontend/adapt-group-row.js";
-import { compareRows, groupRunTone } from "../src/frontend/rows.js";
+import { compareRows, displayedProgressPercent, groupRunTone } from "../src/frontend/rows.js";
 import type { ActivityFeedItem, BackgroundFeedJob } from "../src/frontend/store.js";
 
 function task(patch: Partial<CanvasTaskActivity> & { taskKey: string; runId: string; nodeId: string }): ActivityFeedItem {
@@ -96,6 +96,51 @@ describe("任务记录适配器", () => {
     const located = adaptTaskRow(task({ taskKey: "t", runId: "r", nodeId: "n" }), { locateNode: locate });
     located.actions.locate?.();
     expect(locate).toHaveBeenCalledWith("n");
+  });
+});
+
+describe("面板显示的进度（与节点进度环同一公式）", () => {
+  const startedAt = "2026-01-01T00:00:00Z";
+  const at = (seconds: number) => Date.parse(startedAt) + seconds * 1000;
+
+  it("有上报值时不低于估算，且按百分比理解 0..1 分数", () => {
+    const row = adaptTaskRow(task({ taskKey: "t", runId: "r", nodeId: "n", modelType: "image", progress: 0.42 }));
+    expect(displayedProgressPercent(row, at(1))).toBe(42);
+  });
+
+  it("没有上报值时按节点种类估算经过时间", () => {
+    const row = adaptTaskRow(task({ taskKey: "t", runId: "r", nodeId: "n", modelType: "image" }));
+    // 图片 45s：22.5s ≈ 50%。
+    expect(displayedProgressPercent(row, at(22.5))).toBe(50);
+    // 视频 180s：同样的 22.5s 只有 12.5%。
+    const video = adaptTaskRow(task({ taskKey: "t", runId: "r", nodeId: "n", modelType: "video" }));
+    expect(displayedProgressPercent(video, at(22.5))).toBe(13);
+  });
+
+  it("缺 modelType 时用节点类型兜底，与节点估算同一个时长", () => {
+    const row = adaptTaskRow(task({ taskKey: "t", runId: "r", nodeId: "n" }));
+    const capabilities = { resolveNodeType: () => "video" };
+    expect(displayedProgressPercent(row, at(22.5), capabilities)).toBe(13);
+    expect(displayedProgressPercent(row, at(22.5))).toBe(50);
+  });
+
+  it("终态不显示进度；非任务来源只用上报值", () => {
+    const done = adaptTaskRow(task({ taskKey: "t", runId: "r", nodeId: "n", state: "succeeded" }));
+    expect(displayedProgressPercent(done, at(10))).toBeUndefined();
+    expect(displayedProgressPercent(adaptJobRow(job({ status: "running", progress: 0.4 })), at(1_000))).toBe(40);
+  });
+
+  it("运行中封顶 95%，不显示 100%", () => {
+    const row = adaptTaskRow(task({ taskKey: "t", runId: "r", nodeId: "n", modelType: "image", progress: 1 }));
+    expect(displayedProgressPercent(row, at(10_000))).toBe(95);
+  });
+
+  it("上报值是 0..100 百分比时按百分比理解，不夹成 100%", () => {
+    // 部分 Provider 直接回 0..100；先夹到 0..1 会把 42 变成 1（100% → 封顶 95%），
+    // 与节点读模型的 42% 对不上。
+    const row = adaptTaskRow(task({ taskKey: "t", runId: "r", nodeId: "n", modelType: "image", progress: 42 }));
+    expect(row.progress).toBeCloseTo(0.42, 10);
+    expect(displayedProgressPercent(row, at(1))).toBe(42);
   });
 });
 

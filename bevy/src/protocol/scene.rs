@@ -37,6 +37,12 @@ pub(crate) struct GraphNode {
     pub(crate) type_label: String,
     #[serde(default)]
     pub(crate) progress: f32,
+    /// 该运行开始的 Unix epoch 毫秒（change: 2026-10-31-unify-node-and-activity-progress）。
+    ///
+    /// 由运行状态投影从该 run 记录的 `createdAt` 派生，节点进度环据此按经过时间估算，因此与
+    /// 活动面板共用同一个起点。缺失时退回本渲染器内「首次进入运行态」的本地时钟。
+    #[serde(default, rename = "progressStartedAt")]
+    pub(crate) progress_started_at: Option<f64>,
     #[serde(default)]
     pub(crate) busy: bool,
     #[serde(default, rename = "mediaLoading")]
@@ -871,6 +877,12 @@ impl Scene {
             }
         }
         for node in &self.nodes {
+            if node
+                .progress_started_at
+                .is_some_and(|started| !started.is_finite() || started < 0.0)
+            {
+                return Err("Invalid node progress start");
+            }
             if node.resizable
                 && (self.selection.nodes.len() != 1 || self.selection.nodes[0] != node.id)
             {

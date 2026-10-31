@@ -10,7 +10,7 @@ import {
   BACKGROUND_KIND_LABELS,
   BACKGROUND_STATUS_LABELS,
   BACKGROUND_STATUS_TONES,
-  clampProgress,
+  fractionProgress,
   type ActivityRow,
   type ActivityRowCapabilities
 } from "./rows.js";
@@ -38,7 +38,7 @@ export function adaptJobRow(job: BackgroundFeedJob, capabilities: ActivityRowCap
     status: BACKGROUND_STATUS_LABELS[job.status],
     state: job.status,
     tone: BACKGROUND_STATUS_TONES[job.status],
-    ...(active && clampProgress(job.progress) !== undefined ? { progress: clampProgress(job.progress) } : {}),
+    ...(active && fractionProgress(job.progress) !== undefined ? { progress: fractionProgress(job.progress) } : {}),
     ...(job.nodeId ? { nodeId: job.nodeId } : {}),
     ...(detail ? { detail } : {}),
     createdAt: job.createdAt,

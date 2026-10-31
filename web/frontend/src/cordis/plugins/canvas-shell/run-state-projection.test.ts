@@ -65,6 +65,34 @@ describe("applyRunStateProjection", () => {
     applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true })], records: [] });
     expect(nodes[0].aggregateRun).toEqual({ active: false });
   });
+  it("运行中的节点携带与活动记录同一个进度起点", () => {
+    const startedAt = "2026-10-31T00:00:00.000Z";
+    const nodes = [node("n1")];
+    applyRunStateProjection(nodes, {
+      summaries: [summary("n1", { active: op("r1", "running", startedAt) })],
+      records: [op("r1", "running", startedAt)]
+    });
+    expect(nodes[0].busy).toBe(true);
+    // 与活动面板同一条记录、同一个 createdAt：两端估算经过时间的起点一致
+    // （change: 2026-10-31-unify-node-and-activity-progress）。
+    expect(nodes[0].progressStartedAt).toBe(Date.parse(startedAt));
+  });
+
+  it("节点结束运行或记录清空后不再携带进度起点", () => {
+    const startedAt = "2026-10-31T00:00:00.000Z";
+    const running = [node("n1")];
+    applyRunStateProjection(running, {
+      summaries: [summary("n1", { active: op("r1", "running", startedAt) })],
+      records: [op("r1", "running", startedAt)]
+    });
+    expect(running[0].progressStartedAt).toBeDefined();
+    // 场景每帧重建节点，因此用同一份输入重投影后的新节点验证。
+    const idle = [node("n1")];
+    applyRunStateProjection(idle, { summaries: [], records: [] });
+    expect(idle[0].busy).toBe(false);
+    expect(idle[0].progressStartedAt).toBeUndefined();
+  });
+
   it("组节点只投影运行标识，不携带 ledger 身份；记录清空后移除标识", () => {
     const nodes = [node("g", { type: "group", group: { title: "组", memberCount: 0, outputCapableLeafCount: 0 } })];
     applyRunStateProjection(nodes, { summaries: [], records: [], groupStatuses: new Map([["g", { state: "running", label: "创作中" }]]) });

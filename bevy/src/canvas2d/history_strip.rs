@@ -138,6 +138,7 @@ mod tests {
             title: String::new(),
             type_label: String::new(),
             progress: 0.0,
+            progress_started_at: None,
             busy: false,
             texture: false,
             resizable: false,

@@ -117,7 +117,21 @@ pub(crate) fn sync_generation(
             );
             ("加载中…".to_owned(), center + Vec2::Y * (radius + 8.))
         } else {
-            let estimated = estimate_percent(now - clock.started[&node.id], &node.kind);
+            // 运行已持续的秒数优先取投影下发的权威起点（与活动面板同一始点，change:
+            // 2026-10-31-unify-node-and-activity-progress）；缺失时退回本渲染器记录的首次
+            // 进入运行态时刻。
+            let elapsed = match node.progress_started_at {
+                Some(started) => {
+                    let current = crate::clock::epoch_millis();
+                    if current > 0.0 {
+                        ((current - started) / 1000.0) as f32
+                    } else {
+                        now - clock.started[&node.id]
+                    }
+                }
+                None => now - clock.started[&node.id],
+            };
+            let estimated = estimate_percent(elapsed, &node.kind);
             let percent = display_percent(estimated, node.progress);
             geometry.progress_ring(
                 center,
