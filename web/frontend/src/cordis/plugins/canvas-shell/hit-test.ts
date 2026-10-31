@@ -29,6 +29,21 @@ export function worldToScreen(point: Point, viewport: { x: number; y: number; zo
   return { x: point.x * viewport.zoom + viewport.x, y: point.y * viewport.zoom + viewport.y };
 }
 
+/**
+ * 卡片级命中的节点身份（`node` / `model-preview` / `film-scope` / `shot-preview`）。
+ *
+ * 这几个命中共有的语义是「指针落在该节点本体上」，因此选择、拖动、双击与连线落点都必须
+ * 按同一节点身份分派。拍摄镜头预览的**内容区**在 Rust 侧是 `shot-preview`（为拍摄播放入口
+ * 单独分类），但它仍是卡片主体：缩略图占卡片绝大部分面积，若宿主只认 `node`，点击缩略图就
+ * 会穿透到画布空白——变成清空选择 + 框选（拖不动）与空白双击菜单（进不了片场聚焦）。
+ */
+export function cardHitNodeId(hit: HitTarget | null): string | null {
+  if (!hit) return null;
+  return hit.kind === "node" || hit.kind === "model-preview" || hit.kind === "film-scope" || hit.kind === "shot-preview"
+    ? hit.nodeId
+    : null;
+}
+
 /** 取节点实际尺寸（优先快照携带的 width/height）。 */
 export function nodeSize(node: { type: BevyNodeKind; width?: number; height?: number }): { width: number; height: number } {
   const fallback = bevyNodeSize(node.type);

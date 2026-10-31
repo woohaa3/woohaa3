@@ -11,7 +11,7 @@ import { createGroupBadgeClick } from "./input/group-badge-click.js";
  */
 import { modelPreviewPointerDown, modelPreviewPointerMove } from "./input/model-preview.js";
 import { bevyKindForNodeType, builtinNodeCapabilityResolver, explainWoohaa3CanvasConnectionBlock, isFilmSetObjectModelNode, normalizeWoohaa3CanvasGroupSelection } from "@woohaa3/contracts";
-import { nodeSize, type Point } from "./hit-test.js";
+import { nodeSize, cardHitNodeId, type Point } from "./hit-test.js";
 import { planAggregateConnect, planConnectEdge, planResizeNode } from "../../../extension-api/command-planner.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { createWheelViewport } from "./interaction-viewport.js";
@@ -266,23 +266,26 @@ export function create2dInputFamily(core: InteractionCore) {
 
     // 未选中的模型预览与普通卡片一样，先选择并拖动节点；Shift 保留选择操作。
     // 片场范围命中同样选择并整体拖动（change: 2026-10-08-make-film-set-model-only）。
-    if (hit && (hit.kind === "node" || hit.kind === "model-preview" || hit.kind === "film-scope")) {
+    // 拍摄镜头预览内容区（`shot-preview`）同样是卡片本体，否则缩略图上的按下会穿透成
+    // 空白框选，卡片拖不动（change: 2026-10-15-add-film-set-shooting-shot-previews，D2/D8）。
+    if (hit && cardHitNodeId(hit) !== null) {
+      const hitNodeId = cardHitNodeId(hit) as string;
       const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
       if (event.shiftKey) {
         setSelection(
-          state.selected.includes(hit.nodeId)
-            ? state.selected.filter((id) => id !== hit.nodeId)
-            : [...state.selected, hit.nodeId]
+          state.selected.includes(hitNodeId)
+            ? state.selected.filter((id) => id !== hitNodeId)
+            : [...state.selected, hitNodeId]
         );
-      } else if (!state.selected.includes(hit.nodeId)) {
-        setSelection([hit.nodeId]);
+      } else if (!state.selected.includes(hitNodeId)) {
+        setSelection([hitNodeId]);
       }
       // 结构/位置索引按 working 身份缓存（design D5）：selection/pan 不失效，pending/远端
       // 结构与位置变化会产生新对象并重建。避免每次按下复制带 data 的整表节点数组。
       const index = sharedCanvasNodeIndex(canvasState);
       // Selection stays on the real model card for copying. Drag its outer container
       // instead, so the child follows through parentId with its local offset unchanged.
-      const selected = state.selected.includes(hit.nodeId) ? state.selected : [hit.nodeId];
+      const selected = state.selected.includes(hitNodeId) ? state.selected : [hitNodeId];
       const active = [...new Set(selected.map(id => {
         const node = index?.byId.get(id);
         return isFilmSetObjectModelNode(node, canvasState?.nodeData[id]) && node?.parentId
@@ -546,9 +549,11 @@ export function create2dInputFamily(core: InteractionCore) {
       const hitResult = core.queryPoint(world, core.activeViewport().zoom);
       const hit = hitResult.ok ? hitResult.value : null;
       const connectSourceId = state.gesture.source;
-      if (hit && (hit.kind === "node" || hit.kind === "model-preview") && hit.nodeId !== connectSourceId) {
-        const source = state.gesture.side === "output" ? connectSourceId : hit.nodeId;
-        const target = state.gesture.side === "output" ? hit.nodeId : connectSourceId;
+      // 连线落点同样按「卡片本体」判定：拍摄镜头预览内容区是真实媒体卡片，不能被当成空白。
+      const connectTargetId = cardHitNodeId(hit);
+      if (connectTargetId !== null && connectTargetId !== connectSourceId) {
+        const source = state.gesture.side === "output" ? connectSourceId : connectTargetId;
+        const target = state.gesture.side === "output" ? connectTargetId : connectSourceId;
         // group 聚合输出：从 group 拉线时展开为每个可连接叶子成员的真实边
         // （change: add-canvas-node-grouping，design D5）。空批次不提交。
         const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
