@@ -73,6 +73,7 @@ const VALUE_ARGS = new Set([
 
 const FLAG_ARGS = new Set([
   "--build-frontend",
+  "--no-build-frontend",
   "--debug",
   "--no-bundle",
   "--copy",
@@ -123,7 +124,10 @@ export function parseDesktopArgs(argv) {
     identifier: raw["--identifier"] ?? null,
     version: raw["--version"] ?? null,
     iconSource: raw["--icon-source"] ?? null,
-    buildFrontend: flags.has("--build-frontend"),
+    // 默认构建：打包读的是 `web/frontend/dist` 里的**现成产物**，过期了也不报错，
+    // 只会打出一个跟源码对不上的包（踩过：修好的扩展没重新组装，exe 里跑的还是旧代码）。
+    // 所以默认就重建；`--no-build-frontend` 用于「我刚 pnpm build 过，别再花几分钟」。
+    buildFrontend: !flags.has("--no-build-frontend"),
     debug: flags.has("--debug"),
     bundle: !flags.has("--no-bundle"),
     copy: flags.has("--copy"),

@@ -46,6 +46,7 @@ import {
   validateIconSource
 } from "./lib/desktop-release.mjs";
 import { buildDefines, describeBuildProfile, loadBuildProfile, updateEndpointFor, updaterPlatformKey } from "./lib/build-profile.mjs";
+import { findStaleFrontend, formatStaleFrontend } from "./lib/frontend-freshness.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -69,7 +70,8 @@ const usage = `Tauri 桌面发行打包（未签名）
   --debug              用 debug profile（复用已有调试产物，用于验证打包链路）
   --target <triple>    指定本机 target；不支持跨平台或跨架构装配
   --frontend <dir>     前端 dist 目录（默认 web/frontend/dist）
-  --build-frontend     先构建前端与扩展发布产物（包含前端所需的两套 WASM 绑定）
+  --build-frontend     构建前端与扩展发布产物（包含前端所需的两套 WASM 绑定）。**默认已开启**
+  --no-build-frontend  跳过上面的构建，直接使用现有 dist；产物比源码旧时直接报错
   --identifier <id>    覆盖 bundle identifier
   --version <semver>   覆盖应用版本
   --out <dir>          manifest（及 --copy 时的产物副本）输出目录
@@ -172,7 +174,16 @@ function assertFrontend(frontendDist) {
   if (!fs.existsSync(path.join(frontendDist, "index.html"))) {
     throw new Error(
       `前端产物缺失：${path.join(frontendDist, "index.html")}。` +
-        " 先执行 `pnpm build`，或加 `--build-frontend` 由本脚本构建。"
+        " 先执行 `pnpm build`，或去掉 `--no-build-frontend` 由本脚本构建。"
+    );
+  }
+  // 「产物在」不等于「产物新」：扩展重建了却没重新组装，打的包还是旧代码。
+  // 默认构建后不该再过期；只有 `--no-build-frontend` 直接吃现成产物时会撞上。
+  const stale = findStaleFrontend(root, { frontendDist });
+  if (stale.length > 0) {
+    throw new Error(
+      `前端产物比源码旧：${formatStaleFrontend(stale)}。` +
+        " 去掉 `--no-build-frontend` 让本脚本重新构建，或先执行 `pnpm build`。"
     );
   }
 }

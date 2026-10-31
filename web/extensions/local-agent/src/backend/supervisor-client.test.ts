@@ -19,7 +19,9 @@ afterEach(() => {
 });
 
 describe("Agent Supervisor 客户端", () => {
-  it("ensure 先建好 workDir/config，再向 supervisor 发请求", async () => {
+  // 用 Unix domain socket 起一个假 supervisor；Windows 的 Node 不支持监听文件 socket
+  // （listen 直接 EACCES），这条只能在 POSIX 上跑。
+  it.skipIf(process.platform === "win32")("ensure 先建好 workDir/config，再向 supervisor 发请求", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "woohaa3-supervisor-"));
     cleanups.push(() => rmSync(root, { recursive: true, force: true }));
     const socketPath = path.join(root, "supervisor.sock");

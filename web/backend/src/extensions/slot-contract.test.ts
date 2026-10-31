@@ -5,6 +5,9 @@
  * 连接由槽位（宿主）持有，画布领域服务只借句柄：`canvasStorageOptions` 必须透传配置与
  * 写锁，并且**屏蔽**仓库的 `close`，避免画布服务的 close 把宿主还要用的连接关掉。
  */
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { bootstrapProviders } from "@woohaa3/application-service";
 import {
@@ -142,7 +145,9 @@ describe("storage 槽位 → 画布服务（端到端）", () => {
         repository,
         yjsRepository: new InMemoryYjsDocumentRepository(),
         writerLock: createInMemoryWriterLock(),
-        storageConfig: { backend: "sqlite", sqlitePath: "/unused/slot.sqlite", limits: {} }
+        // 画布服务的场景包存储会真的打开这个路径：写死 POSIX 绝对路径在 Windows 上
+        // 是 `C:\unused\...`，目录不存在会直接 "unable to open database file"。
+        storageConfig: { backend: "sqlite", sqlitePath: path.join(mkdtempSync(path.join(tmpdir(), "woohaa-slot-")), "unused.sqlite"), limits: {} }
       },
       documents: {} as RuntimeStorageProvider["documents"],
       readExtensionConfig: () => ({}),

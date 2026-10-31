@@ -17,11 +17,12 @@ The default development command starts the local host and frontend, then opens t
 
 ## Packaging and updates
 
-For a fresh checkout, build the frontend as part of packaging:
+`pnpm desktop:bundle` rebuilds the frontend and extension release as part of packaging, so the installer always matches the sources. Rebuilding `web/extensions/*/browser-dist` without re-running `assemble:extensions` used to ship stale extension code silently; packaging now fails with "前端产物比源码旧" instead.
 
 ```sh
-pnpm desktop:bundle --build-frontend
-pnpm desktop:bundle --build-frontend --bundles app # macOS application bundle
+pnpm desktop:bundle                       # 构建前端 → 装配宿主 → 打包
+pnpm desktop:bundle --bundles app         # macOS application bundle
+pnpm desktop:bundle --no-build-frontend   # 刚跑过 pnpm build，直接吃现有产物（过期会报错）
 pnpm desktop:bundle --dry-run
 ```
 

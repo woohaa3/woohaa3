@@ -26,7 +26,8 @@ it("从 PATH 找到可执行文件，无需手填部署路径", async () => {
   }
 });
 
-it("npm 安装的 Node 脚本入口换成同包原生 Codex，避免包内没有 node 时无法启动", async () => {
+// 依赖 PATH 里指向包内入口的软链；Windows 无权限建文件软链。
+it.skipIf(process.platform === "win32")("npm 安装的 Node 脚本入口换成同包原生 Codex，避免包内没有 node 时无法启动", async () => {
   // 打包 App 只继承 `/usr/bin:/bin:...`，PATH 里没有 node：`#!/usr/bin/env node` 的 shim
   // 必然以 `env: node: No such file or directory` 失败，必须回落到 vendor 里的架构二进制。
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "agent-discovery-shim-")));

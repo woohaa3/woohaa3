@@ -37,7 +37,9 @@ describe("Codex 本机配置复用", () => {
     expect(resolveCodexHome({ HOME: path.join(root, "missing"), CODEX_HOME: "" })).toBeNull();
   });
 
-  it("为连接创建只读配置链接，不覆盖已存在的专用配置", () => {
+  // Windows 建文件软链要开发者模式/管理员权限；生产代码在链接失败时会优雅降级，
+  // 但这几条用例断言的是"链接建成了"，fixture 在 Windows 上搭不出来。
+  it.skipIf(process.platform === "win32")("为连接创建只读配置链接，不覆盖已存在的专用配置", () => {
     const root = tempRoot();
     const source = path.join(root, "source");
     const configDir = path.join(root, "connection", "config");

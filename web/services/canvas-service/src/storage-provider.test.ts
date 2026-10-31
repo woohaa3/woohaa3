@@ -6,6 +6,9 @@
  * 这里验证：只给 `storageConfig` + 注入仓库（环境里没有 `WOOHAA3_CANVAS_STORAGE_BACKEND`）
  * 时画布服务仍进入 ready，且用的是注入的仓库实例。
  */
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { InMemoryCanvasRepository } from "./storage/core/index.js";
 import { InMemoryYjsDocumentRepository, createInMemoryWriterLock } from "./sync/index.js";
@@ -45,7 +48,9 @@ describe("storage 槽位注入画布存储", () => {
     const service = await createCanvasService({
       // 环境里没有任何画布存储变量：配置只来自槽位。
       env: {},
-      storageConfig: { backend: "sqlite", sqlitePath: "/unused/never-opened.sqlite", limits: {} },
+      // 路径必须落在真实可写的目录：画布服务的场景包存储会真的打开它，
+      // 写死 `/unused/...` 在 Windows 上是 `C:\unused\...`，目录不存在直接打不开。
+      storageConfig: { backend: "sqlite", sqlitePath: path.join(mkdtempSync(path.join(tmpdir(), "woohaa-slot-")), "never-used.sqlite"), limits: {} },
       repository,
       yjsRepository: new InMemoryYjsDocumentRepository(),
       writerLock: createInMemoryWriterLock(),

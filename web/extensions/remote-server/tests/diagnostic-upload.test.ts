@@ -62,7 +62,8 @@ describe("desktop diagnostic upload spool", () => {
     await createDiagnosticUploader({ root, session: async () => current, fetchImpl }).tick();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
-  it("does not upload oversized files or follow archive symlinks", async () => {
+  // 用文件软链构造"归档是链接"的场景；Windows 无权限建文件软链。
+  it.skipIf(process.platform === "win32")("does not upload oversized files or follow archive symlinks", async () => {
     const { root, dir } = await fixture();
     const { symlink, unlink, open } = await import("node:fs/promises");
     await unlink(path.join(dir, "archive.tar.gz"));
