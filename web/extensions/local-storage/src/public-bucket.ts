@@ -23,7 +23,7 @@ import type { HostStorageService, StorageExposer } from "@woohaa3/contracts";
 /** 地址提供者 id：`exposer.primary=local-public` 或画布 exposure 覆盖才会启用。 */
 export const LOCAL_PUBLIC_EXPOSER_ID = "local-public";
 /** 设置页与日志里的显示名。 */
-export const LOCAL_PUBLIC_LABEL = "公开临时桶";
+export const LOCAL_PUBLIC_LABEL = "外链地址";
 
 /**
  * 构建期注入的桶信息（构建脚本用 esbuild `define` 替换）。
@@ -53,14 +53,15 @@ export function publicBucketDefaults(): PublicBucketDefaults {
 }
 
 export type PublicBucketConfig = {
-  secretId: string;
-  secretKey: string;
+  /** 公开读写的桶不需要凭据；此时走匿名 HTTP PUT/HEAD。 */
+  secretId?: string;
+  secretKey?: string;
   bucketName: string;
   bucketUrl: string;
   region: string;
   prefix: string;
   /** 凭据来源：诊断用，不影响行为。 */
-  credentialSource: "own" | "shared";
+  credentialSource: "own" | "shared" | "anonymous";
 };
 
 export type PublicBucketResolution =
@@ -126,6 +127,8 @@ export function resolvePublicBucketConfig(input: PublicBucketInput): PublicBucke
   const sharedKey = (input.sharedSecretKey ?? "").trim() || envValue("COS_SECRET_KEY");
   const secretId = dedicated ? dedicatedId : sharedId;
   const secretKey = dedicated ? dedicatedKey : sharedKey;
+  // 公开读写的桶不需要凭据：没有凭据就匿名写，不再把 secretId/secretKey 当缺项。
+  const credentialSource = dedicated ? "own" : secretId && secretKey ? "shared" : "anonymous";
 
   const defaults = input.defaults ?? publicBucketDefaults();
   const bucketName = (input.bucketName ?? "").trim() || (defaults.bucketName ?? "").trim();
@@ -133,8 +136,6 @@ export function resolvePublicBucketConfig(input: PublicBucketInput): PublicBucke
   const prefix = normalizePrefix((input.prefix ?? "").trim() || (defaults.prefix ?? "").trim());
 
   const missing: string[] = [];
-  if (!secretId) missing.push("publicSecretId");
-  if (!secretKey) missing.push("publicSecretKey");
   if (!bucketName) missing.push("publicBucketName");
   if (!bucketUrl) missing.push("publicBucketUrl");
   if (!prefix) missing.push("publicPrefix");
@@ -143,13 +144,12 @@ export function resolvePublicBucketConfig(input: PublicBucketInput): PublicBucke
   return {
     ok: true,
     config: {
-      secretId,
-      secretKey,
+      ...(secretId && secretKey ? { secretId, secretKey } : {}),
       bucketName,
       bucketUrl,
       region: resolveRegion(bucketUrl),
       prefix,
-      credentialSource: dedicated ? "own" : "shared"
+      credentialSource
     }
   };
 }
@@ -188,8 +188,39 @@ type CosError = { statusCode?: number; code?: string };
 /** SDK 的回调签名在各方法间不一致，这里只关心「有没有 error」，故按 unknown 收。 */
 type CosCallback<T> = (error: unknown, data: T) => void;
 
+/** 公开读写的桶：不签名，直接 HTTP PUT/HEAD；不需要也不应该带任何凭据。 */
+export function createAnonymousPublicBucketWriter(
+  config: Pick<PublicBucketConfig, "bucketUrl">
+): PublicBucketWriter {
+  const url = (objectKey: string) => config.bucketUrl.replace(/\/+$/, "") + "/" + encodeURI(objectKey);
+  return {
+    async stat(objectKey) {
+      const response = await fetch(url(objectKey), { method: "HEAD" });
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error(`公开桶 HEAD 失败：HTTP ${response.status}`);
+      const size = Number(response.headers.get("content-length"));
+      return Number.isFinite(size) && size >= 0 ? size : null;
+    },
+    async put(objectKey, bytes, contentType) {
+      const response = await fetch(url(objectKey), {
+        method: "PUT",
+        headers: { "content-type": contentType },
+        body: new Uint8Array(bytes).buffer
+      });
+      if (!response.ok) throw new Error(`公开桶 PUT 失败：HTTP ${response.status}`);
+    }
+  };
+}
+
+/** 有凭据走 COS SDK，没有凭据走匿名 HTTP（公开读写的桶）。 */
+export function createPublicBucketWriter(config: PublicBucketConfig): PublicBucketWriter {
+  if (config.secretId && config.secretKey) return createCosPublicBucketWriter(config);
+  return createAnonymousPublicBucketWriter(config);
+}
+
 /** COS 实现：只用 headObject / putObject，地址由本模块自己拼，不用 SDK 的签名地址。 */
 export function createCosPublicBucketWriter(config: PublicBucketConfig): PublicBucketWriter {
+  if (!config.secretId || !config.secretKey) throw new Error("COS 公开桶缺少凭据");
   const cos = new COS({ SecretId: config.secretId, SecretKey: config.secretKey });
   const base = () => ({ Bucket: config.bucketName, Region: config.region });
   return {
@@ -235,7 +266,7 @@ export function createPublicBucketExposer(options: {
     if (options.config && options.writer) return { config: options.config, writer: options.writer };
     if (!options.resolveConfig) throw new Error("公开临时桶缺少配置解析器");
     const config = options.resolveConfig();
-    return { config, writer: createCosPublicBucketWriter(config) };
+    return { config, writer: createPublicBucketWriter(config) };
   };
   return {
     exposerId: LOCAL_PUBLIC_EXPOSER_ID,

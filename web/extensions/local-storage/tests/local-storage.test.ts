@@ -259,9 +259,9 @@ describe("插件形状", () => {
     );
   });
 
-  it("桶信息齐全但凭据缺失时仍注册提供者，调用时给出明确缺项", async () => {
+  it("桶信息齐全但凭据缺失时按公开读写匿名注册", async () => {
     const plugin = createLocalStoragePlugin();
-    const { ctx, exposers } = createCtx();
+    const { ctx, exposers, logs } = createCtx();
     await plugin.apply(ctx, {
       root,
       publicEnabled: true,
@@ -271,7 +271,7 @@ describe("插件形状", () => {
     });
 
     expect(exposers.map((item) => item.exposerId)).toEqual(["local-public"]);
-    await expect(exposers[0]!.expose({ namespace: "media", key: "a.png" })).rejects.toThrow("公开临时桶未配置");
+    expect(logs.some((event) => event.event === "local-public-activated")).toBe(true);
   });
 
   it("公开桶没配凭据时回落到 storage.cos 的共享凭据", async () => {
