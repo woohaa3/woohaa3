@@ -240,6 +240,33 @@ describe("OpenCode v2 remote MCP", () => {
     expect(mock.requests.filter(request => request.method === "PUT").map(request => request.body.config.headers.Authorization)).toEqual(["Bearer turn-1", "Bearer turn-3"]);
   });
 
+  it("把本回合的 Variant 写进会话模型引用，续轮重新提交以覆盖上一次的档位", async () => {
+    const mock = openCodeMock();
+    const transport = createOpenCodeTransport({ ...mock, catalogSettleMs: 0 });
+    // 新建会话：Variant 与模型同一次提交，避免先建默认档位再切换造成一回合跑在错误档位。
+    expect(await transport.run(input({ model: "anthropic/claude-sonnet", reasoningEffort: "high" }))).toMatchObject({ ok: true });
+    expect(mock.requests.find(request => request.path === "/api/session")!.body.model).toEqual({ providerID: "anthropic", id: "claude-sonnet", variant: "high" });
+    // 未显式指定档位时不传 variant：上游沿用模型默认，不覆盖用户配置。
+    expect(await transport.run(input({ toolToken: "turn-2", model: "anthropic/claude-sonnet" }))).toMatchObject({ ok: true });
+    const created = mock.requests.filter(request => request.path === "/api/session");
+    expect(created[1]!.body.model).toEqual({ providerID: "anthropic", id: "claude-sonnet" });
+    expect(created[1]!.body.model).not.toHaveProperty("variant");
+  });
+
+  it("续轮把冻结的模型与 Variant 重新写回会话", async () => {
+    const mock = openCodeMock();
+    const original = mock.fetchImpl.getMockImplementation()!;
+    mock.fetchImpl.mockImplementation(async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/model")) return new Response(null, { status: 204 });
+      if (path === "/api/session/session-1" && init?.method === "GET") return json({ data: { id: "session-1", outcome: "succeeded" } });
+      return original(url, init);
+    });
+    expect(await createOpenCodeTransport({ ...mock, catalogSettleMs: 0 }).run(input({ resumeNativeId: "session-1", model: "anthropic/claude-sonnet", reasoningEffort: "xhigh" }))).toMatchObject({ ok: true });
+    const sessionModel = mock.fetchImpl.mock.calls.find(([url]) => new URL(String(url)).pathname === "/api/session/session-1/model")!;
+    expect(JSON.parse(String(sessionModel[1]!.body))).toEqual({ model: { providerID: "anthropic", id: "claude-sonnet", variant: "xhigh" } });
+  });
+
   it("updates resumed session permissions and excludes earlier assistant failures from this turn", async () => {
     const mock = openCodeMock();
     const original = mock.fetchImpl.getMockImplementation()!;

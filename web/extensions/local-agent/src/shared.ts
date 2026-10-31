@@ -35,6 +35,14 @@ export type LocalAgentAdapterDescriptor = {
   supportedVersions: string;
   /** 默认回环端口范围（专用进程；不占用共享 daemon）。 */
   defaultPort: number;
+  /**
+   * 传输层是否真的能把思考强度传到上游。
+   *
+   * 与「模型目录是否列出 Variant」是两件事：目录能列出只说明上游声明了档位，
+   * 不在运行期转发就只是没有生效的选项。未支持的工具必须在推理前明确拒绝，
+   * 不能接受选项后静默忽略——那会让用户以为档位起作用了。
+   */
+  supportsReasoningEffort: boolean;
 };
 
 export const LOCAL_AGENT_ADAPTERS: readonly LocalAgentAdapterDescriptor[] = [
@@ -46,7 +54,9 @@ export const LOCAL_AGENT_ADAPTERS: readonly LocalAgentAdapterDescriptor[] = [
     transport: "stdio-jsonrpc",
     requiresLocalLogin: true,
     supportedVersions: "0.162.x",
-    defaultPort: 0
+    defaultPort: 0,
+    // `turn/start` 的 `effort` 字段（codex-appserver-transport.ts）。
+    supportsReasoningEffort: true
   },
   {
     adapterId: "opencode-server",
@@ -56,7 +66,9 @@ export const LOCAL_AGENT_ADAPTERS: readonly LocalAgentAdapterDescriptor[] = [
     transport: "http-sse",
     requiresLocalLogin: false,
     supportedVersions: "v2",
-    defaultPort: 4096
+    defaultPort: 4096,
+    // 会话 `Model.Ref.variant`（创建时携带，续轮 POST /api/session/{id}/model）。
+    supportsReasoningEffort: true
   },
   {
     adapterId: "codebuddy-server",
@@ -66,7 +78,9 @@ export const LOCAL_AGENT_ADAPTERS: readonly LocalAgentAdapterDescriptor[] = [
     transport: "http-acp",
     requiresLocalLogin: true,
     supportedVersions: "beta",
-    defaultPort: 4100
+    defaultPort: 4100,
+    // ACP 的 `session/prompt` 没有思考强度字段，不声明该能力。
+    supportsReasoningEffort: false
   }
 ] as const;
 

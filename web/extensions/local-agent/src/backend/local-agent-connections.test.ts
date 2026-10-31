@@ -317,6 +317,59 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     expect(emitted).toContainEqual(expect.objectContaining({ type: "tool-started", tool: "submit_model_script", callId: "t2" }));
   });
 
+  it("思考强度按适配器真实能力放行：OpenCode 传下去，CodeBuddy 明确拒绝", async () => {
+    const opencodeRun = async (reasoningEffort: "high" | undefined) => {
+      const { service } = fakeService([record({ adapterId: "opencode-server", connectionId: "c2" })]);
+      const { manager } = fakeProcessManager({ executable: "/usr/bin/opencode" });
+      const { transport, inputs } = fakeTransport((input) => {
+        input.onEvent({ type: "tool-started", tool: "submit_model_script", callId: "t1" });
+        input.onEvent({ type: "tool-completed", tool: "submit_model_script", callId: "t1", ok: true });
+        return { ok: true, outcome: { status: "succeeded" } };
+      });
+      const adapter = createLocalAgentConversationAdapter(opencodeAdapter, {
+        service,
+        processManager: manager,
+        transports: { "opencode-server": transport },
+        argsFor: () => ["serve"],
+        tools: fakeToolFacade().facade,
+        mcpEndpoint: MCP_ENDPOINT
+      });
+      const outcome = await adapter.run(runInput({
+        connection: { connectionId: "c2", adapterId: "opencode-server", configRevision: 1, credentialEpoch: 1 },
+        intent: { action: "generate", canvasId: "canvas-1", nodeId: "n1", mode: "model3d", prompt: "场景", ...(reasoningEffort ? { reasoningEffort } : {}) }
+      }));
+      return { outcome, inputs };
+    };
+    const passed = await opencodeRun("high");
+    expect(passed.outcome.status).toBe("succeeded");
+    expect(passed.inputs[0]!.reasoningEffort).toBe("high");
+    // 默认档位不进传输层：省略即沿用模型默认，不冒充显式选择。
+    const plain = await opencodeRun(undefined);
+    expect(plain.outcome.status).toBe("succeeded");
+    expect(plain.inputs[0]!.reasoningEffort).toBeUndefined();
+
+    const codebuddy = LOCAL_AGENT_ADAPTERS.find((entry) => entry.adapterId === "codebuddy-server")!;
+    const { service } = fakeService([record({ adapterId: "codebuddy-server", connectionId: "c3" })]);
+    const { manager, ensureCalls } = fakeProcessManager({ executable: "/usr/bin/codebuddy" });
+    const { transport, inputs } = fakeTransport({ ok: true, outcome: { status: "succeeded" } });
+    const adapter = createLocalAgentConversationAdapter(codebuddy, {
+      service,
+      processManager: manager,
+      transports: { "codebuddy-server": transport },
+      argsFor: () => ["--serve"],
+      tools: fakeToolFacade().facade,
+      mcpEndpoint: MCP_ENDPOINT
+    });
+    const rejected = await adapter.run(runInput({
+      connection: { connectionId: "c3", adapterId: "codebuddy-server", configRevision: 1, credentialEpoch: 1 },
+      intent: { action: "generate", canvasId: "canvas-1", nodeId: "n1", mode: "model3d", prompt: "场景", reasoningEffort: "high" }
+    }));
+    expect(rejected).toMatchObject({ status: "failed", error: { code: "capability-unsupported" } });
+    // 拒绝发生在推理前：不启动专用进程，也不进入传输层。
+    expect(ensureCalls).toHaveLength(0);
+    expect(inputs).toHaveLength(0);
+  });
+
   it("未知工具通知不消耗 grant，且没有写入回执时不能报告成功", async () => {
     const { service } = fakeService([record()]);
     const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
