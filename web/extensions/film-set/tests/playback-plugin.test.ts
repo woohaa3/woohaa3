@@ -122,6 +122,13 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
     // 与生产相同：播放发布会同步触发资产投影重新协调。
     playbackService.subscribe(registry.invalidate);
     ctx.provide("filmSetPlayback" as never, playbackService as never);
+    // 进入片场聚焦时播放插件会把模型工作区切到相机工具；与生产一致由宿主提供。
+    const modelWorkspaceCalls: string[] = [];
+    ctx.provide("modelWorkspace" as never, {
+      session: {
+        setToolMode: (mode: string) => { modelWorkspaceCalls.push(mode); }
+      }
+    } as never);
     ctx.provide("canvasNavigation" as never, {
       getSnapshot: () => ({ mode: focused ? { type: "node-focus", kind: "model", nodeId: FILM_SET, owner: "direct" } : { type: "overview" }, panel: null, menu: null }),
       subscribe: () => () => undefined
@@ -147,6 +154,7 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
     return {
       ctx,
       dispose,
+      modelWorkspaceCalls,
       replaceRenderer: () => { rendererGeneration++; for (const listener of focusListeners) listener(); },
       setFocused: (value: boolean) => {
         focused = value;
@@ -410,7 +418,7 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
     expect(playbackService.getSnapshot().preview).toBe(false);
   });
 
-  it("双击进入事件按显式 clipId 选择镜头并停在零点预览", () => {
+  it("双击进入事件按显式 clipId 选择镜头并切到相机编辑", () => {
     canvasWith(withSecondClip(filmSetData(`motion.model.rotate("torso", { speed: 1 });`)), ["clip-1", "clip-2"]);
     const runtime = makeRuntime();
     // 宿主只在进入片场聚焦**成功**后发布事件（design D8）。
@@ -420,11 +428,17 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
       filmSetNodeId: FILM_SET,
       clipId: "clip-2"
     } as never);
-    const snapshot = playbackService.getSnapshot();
-    expect(snapshot.preview).toBe(true);
-    expect(snapshot.playing).toBe(false);
-    expect(snapshot.time).toBe(0);
-    expect(snapshot.clipId).toBe("clip-2");
+    // change: render-models-at-absolute-metric-scale —— 进入片场后不再立刻播放零点预览，
+    // 而是选中该镜头、保持编辑状态并把模型工作区切到相机工具。
+    expect(playbackService.getSnapshot()).toMatchObject({
+      nodeId: FILM_SET,
+      clipId: "clip-2",
+      preview: false,
+      playing: false,
+      time: 0,
+      mode: "edit"
+    });
+    expect(runtime.modelWorkspaceCalls).toEqual(["camera"]);
   });
 
   it("普通节点 hover 不建立会话", () => {

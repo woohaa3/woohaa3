@@ -58,7 +58,9 @@ describe("片场检查面板 Showcase（任务 7.1）", () => {
     ]);
     expect(options().find((o) => o.getAttribute("aria-label") === "模型 · 角色 A")?.getAttribute("aria-selected")).toBe("true");
     expect(document.querySelector(".film-set-object-fields")).not.toBeNull();
-    expect(document.querySelector(".film-set-object-delete")?.textContent).toContain("删除对象");
+    // 片场对象是 group 的成员（change: 2026-10-28-migrate-film-set-to-groups）：按钮只把对象
+    // 从片场移除，不再暗示删除节点本身。
+    expect(document.querySelector(".film-set-object-delete")?.textContent).toContain("从片场移除");
     expect(commandCount()).toBe(0);
   });
 
@@ -93,7 +95,7 @@ describe("片场检查面板 Showcase（任务 7.1）", () => {
     const { canvas } = filmSetInspectorCanvas("adaptation");
     expect(decodeFilmSetNodeData(canvas.nodeData.film)).toMatchObject({ ok: true });
     await mount(<FilmSetAdaptationStage />);
-    const confirm = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("确认动作适配"));
+    const confirm = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("确认适配关联"));
     expect(confirm).toBeTruthy();
     await act(async () => { (confirm as HTMLButtonElement).click(); await Promise.resolve(); });
     expect(commandCount()).toBe(1);

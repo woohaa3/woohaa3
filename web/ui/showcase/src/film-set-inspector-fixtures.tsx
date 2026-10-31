@@ -123,6 +123,13 @@ function fakeContext(submitted: CanvasCommand[], writable: boolean, readOnly: bo
         submitted.push(...commands);
         return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } };
       }
+    },
+    // 片场适配/镜头编辑经 `canvasEdit.record`（单一条件编辑入口）提交，不再走 `submitCommands`。
+    canvasEdit: {
+      record: async (commands: CanvasCommand[]) => {
+        submitted.push(...commands);
+        return { ok: true as const };
+      }
     }
   } as unknown as Context;
 }
@@ -204,6 +211,7 @@ export function FilmSetAdaptationStage({ width = 380 }: { width?: number }) {
   const [submitted, setSubmitted] = useState<CanvasCommand[]>([]);
   const ctx = fakeContext([], true, false, canvas);
   ctx.canvasSession.submitCommands = ((commands: CanvasCommand[]) => { setSubmitted(c => [...c, ...commands]); return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } }; }) as never;
+  ctx.canvasEdit.record = (async (commands: CanvasCommand[]) => { setSubmitted(c => [...c, ...commands]); return { ok: true as const }; }) as never;
   return (
     <div className="showcase__stage">
       <div className="showcase__frame" style={{ width, maxWidth: "100%" }}>
