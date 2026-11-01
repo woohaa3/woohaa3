@@ -38,10 +38,32 @@ it("selects each new task, keeps every active dot, and returns to the old image 
   expect(selection.selected.get("n")).toBe("operation:old");
   expect(selection.project(original)!.nodeData.n.outputAssetId).toBe("history-preview:old");
   selection.observe([...records, operation("c", "queued", "3")]);
-  expect(selection.selected.get("n")).toBe("operation:c");
+  // 显式选中的旧版本不会被新运行任务抢走；只有没有选择时才自动跟随新任务。
+  expect(selection.selected.get("n")).toBe("operation:old");
   selection.dispose();
 });
 
+it("holding canonical current keeps a running task from stealing the view", () => {
+  const history = new Map([["n", [version("old", true)]]]);
+  const selection = new ExecutionPreview(() => history, vi.fn());
+  selection.select("n", "operation:old");
+  selection.hold("n");
+  expect(selection.selected.get("n")).toBeUndefined();
+  selection.observe([operation("running-task")]);
+  expect(selection.selected.get("n")).toBeUndefined();
+  selection.dispose();
+});
+
+it("renders a selected operation failure before its archive arrives", () => {
+  const history = new Map([["n", [version("old", true)]]]);
+  const selection = new ExecutionPreview(() => history, vi.fn());
+  selection.select("n", "operation:run");
+  selection.setOperationFailure("n", "run", "failed", "模型调用失败");
+  const projected = selection.project(canvas())!.nodeData.n as Record<string, unknown>;
+  expect(projected.historyPreviewFailure).toEqual({ outcome: "failed", message: "模型调用失败" });
+  expect(projected.outputAssetId).toBeUndefined();
+  selection.dispose();
+});
 it("preserves selected operation identity as a non-current result archives after a newer task", async () => {
   const history = new Map<string, NodeGenerationHistoryListItem[]>();
   const detail = vi.fn(async () => ({ ok: true as const, detail: {entryId:"a",kind:"image" as const,storageKey:"key-a",checksum:"checksum",contentType:"image/png",size:4} }));
@@ -73,6 +95,7 @@ it("isolates late detail, failed detail and disposal, and maps a proxy preview o
     const selection = new ExecutionPreview(() => history, changed, {detail} as never, "c", report);
     selection.select("n", "operation:old");
     expect(selection.project(canvas())!.assets.at(-1)?.url).toBe("/api/canvas-node-history/c/n/old/preview");
+    selection.clear("n");
     selection.observe([operation("new")]);
     release({ok:true,detail:{entryId:"old",kind:"text",text:"late"}});await flush();
     expect(selection.project(canvas())!.nodeData.n.outputAssetId).toBe("canonical");

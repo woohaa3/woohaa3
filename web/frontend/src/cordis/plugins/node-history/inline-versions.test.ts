@@ -73,19 +73,31 @@ it("explicit steps follow local selection and stop at bounds without writes",asy
   service.select({nodeId:"n",step:1});await flush();
   expect(client.apply).not.toHaveBeenCalled();expect(service.preview.selected.get("n")).toBe("entry:c");service.dispose();
 });
-it("direct dot activation applies the archived version without entering preview",async()=>{
+it("direct dot activation shows the target immediately and applies it",async()=>{
   const {service,client}=setup();await service.refresh();
   service.activate({nodeId:"n",entryId:"a"});await flush();
   expect(client.apply).toHaveBeenCalledWith({canvasId:"canvas",nodeId:"n",entryId:"a"});
-  expect(service.preview.selected.get("n")).toBeUndefined();
+  expect(service.preview.selected.get("n")).toBe("entry:a");
   service.dispose();
 });
-it("direct activation clears a previous read-only preview override",async()=>{
+it("direct activation switches an existing read-only preview to the target",async()=>{
   const {service}=setup();await service.refresh();
   service.select({nodeId:"n",entryId:"a"});await flush();
   expect(service.preview.selected.get("n")).toBe("entry:a");
   service.activate({nodeId:"n",entryId:"c"});await flush();
-  expect(service.preview.selected.get("n")).toBeUndefined();
+  expect(service.preview.selected.get("n")).toBe("entry:c");
+  service.dispose();
+});
+it("keeps the applied entry visible after it is confirmed current",async()=>{
+  const items=[item("a",true),item("c")];
+  const {service,client}=setup(items);await service.refresh();
+  client.apply.mockImplementationOnce(async()=>{
+    items[0]={...items[0],current:false};
+    items[1]={...items[1],current:true};
+    return {ok:true as const};
+  });
+  service.activate({nodeId:"n",entryId:"c"});await flush();
+  expect(service.preview.selected.get("n")).toBe("entry:c");
   service.dispose();
 });
 it("current and unrecoverable dots never apply",async()=>{
@@ -151,16 +163,17 @@ it("does not mark failed or other red terminal versions unseen",async()=>{
   expect(service.unseenSnapshot().size).toBe(0);
   service.dispose();
 });
-it("clears a previewed running version when it settles and treats its archive as seen",async()=>{
+it("keeps a previewed running version selected when it settles and treats its archive as seen",async()=>{
   const items=[item("a")];
   const {service}=setup(items);await service.refresh();
   const record=(state:"running"|"succeeded")=>({operationId:"run",canvasId:"canvas",nodeId:"n",kind:"image",state,owner:"server",createdAt:"r",updatedAt:"r"}) as never;
   service.observeRunState([record("running")]);
   expect(service.preview.selected.get("n")).toBe("operation:run");
   service.observeRunState([record("succeeded")]);
-  expect(service.preview.selected.get("n")).toBeUndefined();
+  expect(service.preview.selected.get("n")).toBe("operation:run");
   items.push({...item("z"), source:{label:"z",runId:"run"}, createdAt:"z"});
   await service.refreshNode("n");
+  expect(service.preview.selected.get("n")).toBe("operation:run");
   expect(service.unseenSnapshot().size).toBe(0);
   service.dispose();
 });

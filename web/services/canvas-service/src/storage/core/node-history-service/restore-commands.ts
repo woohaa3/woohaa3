@@ -28,7 +28,7 @@ export function buildRestoreCommands(
     if (payload.animation?.schemaVersion === 4) {
       return { ok: true, commands: [{ type: "nodeData.patch", nodeId, value: {
         filmSetGroup: payload.animation.filmSetGroup,
-        activeRunId: `history:${entry.entryId}`,
+        activeRunId: "",
         taskStatus: "successed",
         progress: 100,
         error: null,
@@ -52,7 +52,7 @@ export function buildRestoreCommands(
             modelScriptVersion: payload.version,
             modelScriptStatus: "ok",
             modelScriptError: null,
-            activeRunId: `history:${entry.entryId}`,
+            activeRunId: "",
             taskStatus: "successed",
             progress: 100,
             error: null,
@@ -79,7 +79,7 @@ export function buildRestoreCommands(
           value: {
             outputAssetId: asset.id,
             resourceKind: "text",
-            activeRunId: `history:${entry.entryId}`,
+            activeRunId: "",
             taskStatus: "successed",
             progress: 100,
             error: null,
@@ -117,7 +117,7 @@ export function buildRestoreCommands(
         value: {
           outputAssetId: asset.id,
           resourceKind: payload.kind,
-          activeRunId: `history:${entry.entryId}`,
+          activeRunId: "",
           taskStatus: "successed",
           progress: 100,
           error: null,

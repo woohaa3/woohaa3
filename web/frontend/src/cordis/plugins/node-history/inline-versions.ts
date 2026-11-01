@@ -50,6 +50,7 @@ export class InlineVersions {
   private unseen = new Map<string, ReadonlySet<string>>();
   private baseline = new Set<string>();
   private applying = new Map<string, string>();
+  private pendingApply = new Map<string, string>();
   private runRecords = new Map<string, CanvasOperationRecord>();
   private runningSelections = new Map<string, Set<string>>();
   private settledSeen = new Map<string, Set<string>>();
@@ -198,8 +199,15 @@ export class InlineVersions {
       if (!presentationId.startsWith("operation:")) continue;
       const operationId = presentationId.slice("operation:".length);
       const record = this.runRecords.get(operationId);
-      if (record?.nodeId === nodeId && (record.state === "running" || record.state === "queued")) {
+      if (!record || record.nodeId !== nodeId) continue;
+      if (record.state === "running" || record.state === "queued") {
         this.trackRunningSelection(nodeId, operationId);
+      } else if (record.state === "failed" || record.state === "cancelled") {
+        // 失败归档可能晚于运行态；先用运行态错误替换内容，避免仍显示当前成功图。
+        this.preview.setOperationFailure(nodeId, operationId, record.state,
+          record.error?.trim() || (record.state === "cancelled" ? "任务已取消" : "任务失败"));
+      } else {
+        this.preview.clearOperationFailure(nodeId, operationId);
       }
     }
     for (const [nodeId, ops] of [...this.runningSelections]) {
@@ -209,7 +217,6 @@ export class InlineVersions {
         ops.delete(operationId);
         if (!ops.size) this.runningSelections.delete(nodeId);
         if (this.preview.selected.get(nodeId) === `operation:${operationId}`) {
-          this.preview.clear(nodeId);
           this.trackSettledSeen(nodeId, operationId);
         }
       }
@@ -289,7 +296,7 @@ export class InlineVersions {
       const item = this.itemByPresentation(request.nodeId, identity);
       if (item?.entryId) this.markSeenEntry(request.nodeId, item.entryId);
       // 当前版本本来就是可见内容，不再用本地预览覆盖 canonical。
-      if (item?.current) { this.preview.clear(request.nodeId); return; }
+      if (item?.current) { this.preview.select(request.nodeId, identity); return; }
       this.preview.select(request.nodeId, identity);
       this.trackIfRunning(request.nodeId, identity);
       return;
@@ -297,7 +304,7 @@ export class InlineVersions {
     const item = this.resolveItem(request);
     if (!item) return;
     if (item.entryId) this.markSeenEntry(request.nodeId, item.entryId);
-    if (item.current) { this.preview.clear(request.nodeId); return; }
+    if (item.current) { this.preview.select(request.nodeId, this.presentationOf(item)); return; }
     this.preview.select(request.nodeId, this.presentationOf(item));
     this.trackIfRunning(request.nodeId, this.presentationOf(item));
   }
@@ -310,40 +317,60 @@ export class InlineVersions {
     if (this.disposed) return;
     const item = this.resolveItem(request);
     if (!item?.entryId) { this.select(request); return; }
-    if (item.current) { this.preview.clear(request.nodeId); this.markSeenEntry(request.nodeId, item.entryId); return; }
+    // 任何状态点击都先显示该版本内容：绿点显示目标图，红点显示失败原因，黄点保持运行态。
+    if (item.current) {
+      this.preview.select(request.nodeId, this.presentationOf(item));
+      this.markSeenEntry(request.nodeId, item.entryId);
+      return;
+    }
     if ((item.outcome ?? "succeeded") !== "succeeded" || item.recoverable === false) {
       this.select(request);
       return;
     }
     const guard = this.canActivate?.(request.nodeId, item);
     if (guard && !guard.ok) {
+      // 仍先显示用户点中的版本内容；只拒绝把它写成当前版本。
+      this.select(request);
       this.onApplyError?.({ nodeId: request.nodeId, error: guard.reason });
       return;
     }
-    if (this.applying.has(request.nodeId)) return;
-    // 先撤掉旧预览，避免 apply 完成前/失败时卡片仍显示上一次只读选择。
-    this.preview.clear(request.nodeId);
-    this.applying.set(request.nodeId, item.entryId);
-    this.emit();
-    void (async () => {
-      try {
-        const result = await this.client.apply({ canvasId: this.canvasId, nodeId: request.nodeId, entryId: item.entryId! });
-        if (this.disposed) return;
-        if (!result.ok) {
-          this.onApplyError?.({ nodeId: request.nodeId, error: result.error });
-          return;
-        }
-        this.markSeenEntry(request.nodeId, item.entryId);
-        await this.refreshNode(request.nodeId);
-      } catch (error) {
-        if (!this.disposed) this.onApplyError?.({ nodeId: request.nodeId, error: error instanceof Error ? error.message : String(error) });
-      } finally {
-        this.applying.delete(request.nodeId);
-        if (!this.disposed) this.emit();
-      }
-    })();
+    const target = this.presentationOf(item);
+    this.preview.select(request.nodeId, target);
+    this.markSeenEntry(request.nodeId, item.entryId);
+    if (this.applying.has(request.nodeId)) {
+      // 已有 apply 在途时也立即显示新目标，完成后接着应用最新一次点击。
+      this.pendingApply.set(request.nodeId, item.entryId);
+      return;
+    }
+    void this.runApply(request.nodeId, item);
   }
-  dispose() { this.disposed = true; this.preview.dispose(); this.listeners.clear(); this.applying.clear(); this.seenAt.clear(); this.unseen.clear(); this.baseline.clear(); this.runRecords.clear(); this.runningSelections.clear(); this.settledSeen.clear(); }
+  private async runApply(nodeId: string, item: NodeGenerationHistoryListItem) {
+    if (this.disposed || !item.entryId) return;
+    this.applying.set(nodeId, item.entryId);
+    this.emit();
+    try {
+      const result = await this.client.apply({ canvasId: this.canvasId, nodeId, entryId: item.entryId });
+      if (this.disposed) return;
+      if (!result.ok) {
+        this.onApplyError?.({ nodeId, error: result.error });
+        return;
+      }
+      this.markSeenEntry(nodeId, item.entryId);
+      await this.refreshNode(nodeId);
+    } catch (error) {
+      if (!this.disposed) this.onApplyError?.({ nodeId, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      this.applying.delete(nodeId);
+      const pending = this.pendingApply.get(nodeId);
+      this.pendingApply.delete(nodeId);
+      if (!this.disposed && pending && pending !== item.entryId) {
+        const next = this.versions.get(nodeId)?.find(entry => entry.entryId === pending);
+        if (next) void this.runApply(nodeId, next);
+      }
+      if (!this.disposed) this.emit();
+    }
+  }
+  dispose() { this.disposed = true; this.preview.dispose(); this.listeners.clear(); this.applying.clear(); this.pendingApply.clear(); this.seenAt.clear(); this.unseen.clear(); this.baseline.clear(); this.runRecords.clear(); this.runningSelections.clear(); this.settledSeen.clear(); }
 }
 
 export function installInlineVersions(ctx: Context, canvasId: string, client: NodeHistoryClient & Partial<CanvasHistoryClient>, options: InlineVersionOptions = {}) {
@@ -375,8 +402,32 @@ export function installInlineVersions(ctx: Context, canvasId: string, client: No
     if (phase === "synced" && syncPhase !== phase) void service.refresh();
     syncPhase = phase;
   });
-  const retries = new Set<ReturnType<typeof setTimeout>>();
+  const historyRetries = new Map<string, ReturnType<typeof setTimeout>>();
   const observed = new Map<string, string>();
+  /**
+   * 终态归档可能晚于运行态；失败尤其不会改变 outputAssetId，不能依赖画布 identity 触发刷新。
+   * 对每个终态 operation 做有界退避补查，直到摘要里出现同 runId 的归档条目。
+   */
+  const ensureHistoryEntry = (record: { nodeId: string; operationId: string }) => {
+    const key = `${record.nodeId}:${record.operationId}`;
+    const hasEntry = () => service.snapshot().get(record.nodeId)?.some(item => item.source.runId === record.operationId) === true;
+    if (hasEntry() || historyRetries.has(key)) return;
+    let attempt = 0;
+    const schedule = () => {
+      const delay = attempt === 0 ? 0 : Math.min(400 * 2 ** (attempt - 1), 15_000);
+      const timer = setTimeout(() => {
+        if (hasEntry()) { historyRetries.delete(key); return; }
+        void service.refreshNode(record.nodeId).then(() => {
+          if (hasEntry()) { historyRetries.delete(key); return; }
+          if (attempt >= 7) { historyRetries.delete(key); return; }
+          attempt += 1;
+          schedule();
+        });
+      }, delay);
+      historyRetries.set(key, timer);
+    };
+    schedule();
+  };
   // 运行态由 **run-state 插件**提供（兄弟插件），apply 窗口内还没 active：装配期 `ctx.get` 只会拿到
   // undefined，订阅与首次 observe 都不会发生（版本预览因此看不到运行态进度）。声明式等待：
   // 服务就绪才订阅并补一次 observe，服务撤销随 fiber 释放。
@@ -388,14 +439,7 @@ export function installInlineVersions(ctx: Context, canvasId: string, client: No
         const previous = observed.get(record.operationId);
         observed.set(record.operationId, record.state);
         if (previous === record.state || record.state === "running" || record.state === "queued" || record.localFailure) continue;
-        // Bounded compensation for an activity event arriving before history registration.
-        for (const delay of [0, 400, 1500]) {
-          const retry = setTimeout(() => {
-            retries.delete(retry);
-            if (!service.snapshot().get(record.nodeId)?.some(item => item.source.runId === record.operationId)) void service.refreshNode(record.nodeId);
-          }, delay);
-          retries.add(retry);
-        }
+        ensureHistoryEntry(record);
       }
     });
     service.observeRunState(runState.snapshot().records);
@@ -406,5 +450,5 @@ export function installInlineVersions(ctx: Context, canvasId: string, client: No
     else service.select(request);
   });
   sync();
-  return () => { if (timer) clearTimeout(timer); for (const retry of retries) clearTimeout(retry); offSession?.(); unsubscribe(); off(); service.dispose(); };
+  return () => { if (timer) clearTimeout(timer); for (const retry of historyRetries.values()) clearTimeout(retry); historyRetries.clear(); offSession?.(); unsubscribe(); off(); service.dispose(); };
 }

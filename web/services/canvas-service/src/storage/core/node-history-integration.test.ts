@@ -151,7 +151,7 @@ describe("节点生成历史集成验收（任务 5.1）", () => {
     const outcome = await service.restore({ canvasId: CANVAS, nodeId: "node-1", entryId });
     expect(outcome.ok).toBe(true);
     expect(room.canvas.revision).toBeGreaterThan(before);
-    expect(room.canvas.nodeData["node-1"]).toMatchObject({ activeRunId: `history:${entryId}`, taskStatus: "successed" });
+    expect(room.canvas.nodeData["node-1"]).toMatchObject({ activeRunId: "", taskStatus: "successed" });
   });
 
   it("容量清理保留当前版本", async () => {

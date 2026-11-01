@@ -7,6 +7,8 @@ import { mediaUrlFor } from "../../services/paths.js";
 /** Page-owned dot selection. Never changes canonical output, task identity or inputs. */
 export class ExecutionPreview {
   readonly selected = new Map<string, string>();
+  private explicit = new Set<string>();
+  private operationFailures = new Map<string, { operationId: string; outcome: "failed" | "cancelled"; message: string }>();
   private observed = new Set<string>();
   private details = new Map<string, NodeGenerationHistoryDetail>();
   private loading = new Map<string, string>();
@@ -60,7 +62,9 @@ export class ExecutionPreview {
     for (const record of [...records].sort((a,b) => a.createdAt.localeCompare(b.createdAt) || a.operationId.localeCompare(b.operationId))) {
       const fresh = !this.observed.has(record.operationId);
       this.observed.add(record.operationId);
-      if (fresh && (record.state === "queued" || record.state === "running")) {
+      // 用户已经点了某个圆点时，新的运行中记录不能把选择抢回黄点；显式选择优先。
+      if (fresh && !this.explicit.has(record.nodeId)
+        && (record.state === "queued" || record.state === "running")) {
         this.selected.set(record.nodeId, `operation:${record.operationId}`);
         this.details.delete(record.nodeId); this.models.delete(record.nodeId); changed = true;
       }
@@ -68,14 +72,40 @@ export class ExecutionPreview {
     if (changed) this.publish();
   }
   select(nodeId: string, presentationId: string) {
-    if (this.selected.get(nodeId) === presentationId) return;
-    this.selected.set(nodeId, presentationId); this.details.delete(nodeId); this.models.delete(nodeId);
+    if (this.selected.get(nodeId) === presentationId) { this.explicit.add(nodeId); return; }
+    this.selected.set(nodeId, presentationId); this.explicit.add(nodeId);
+    this.details.delete(nodeId); this.models.delete(nodeId);
     this.refresh(); this.publish();
   }
   /** 直接应用版本或回到 canonical 当前内容时，清除该节点的本地预览覆盖。 */
   clear(nodeId: string) {
+    this.explicit.delete(nodeId);
     if (!this.selected.delete(nodeId)) return;
     this.details.delete(nodeId); this.models.delete(nodeId);
+    this.publish();
+  }
+  /**
+   * 回到 canonical 当前内容，但保留“用户已显式选择”状态。
+   *
+   * 用于点击当前绿点或 apply 确认当前后：清掉预览覆盖，同时阻止仍在运行的新任务
+   * 自动把选择抢回黄点。
+   */
+  hold(nodeId: string) {
+    this.explicit.add(nodeId);
+    if (!this.selected.delete(nodeId)) return;
+    this.details.delete(nodeId); this.models.delete(nodeId);
+    this.publish();
+  }
+  /** 运行中的任务已经失败/取消、但失败归档尚未到达时，先用运行态错误渲染。 */
+  setOperationFailure(nodeId: string, operationId: string, outcome: "failed" | "cancelled", message: string) {
+    const previous = this.operationFailures.get(nodeId);
+    if (previous?.operationId === operationId && previous.outcome === outcome && previous.message === message) return;
+    this.operationFailures.set(nodeId, { operationId, outcome, message });
+    this.publish();
+  }
+  clearOperationFailure(nodeId: string, operationId: string) {
+    if (this.operationFailures.get(nodeId)?.operationId !== operationId) return;
+    this.operationFailures.delete(nodeId);
     this.publish();
   }
   project = (canvas: ServerCanvas | null): ServerCanvas | null => {
@@ -86,6 +116,21 @@ export class ExecutionPreview {
     let changed = false;
     for (const nodeId of this.selected.keys()) {
       if (!canvas.document.nodes.some(node => node.id === nodeId)) continue;
+      const operationFailure = this.operationFailures.get(nodeId);
+      if (operationFailure && this.selected.get(nodeId) === `operation:${operationFailure.operationId}`) {
+        const data = { ...nodeData[nodeId] };
+        data.historyPreviewFailure = { outcome: operationFailure.outcome, message: operationFailure.message };
+        delete data.outputAssetId;
+        delete data.posterAssetId;
+        delete data.result;
+        delete data.resultPreview;
+        delete data.modelScript;
+        delete data.modelAssetId;
+        delete data.modelPlacement;
+        nodeData[nodeId] = data;
+        changed = true;
+        continue;
+      }
       const item = this.item(nodeId);
       if (!item) continue;
       const preview = item.preview;
@@ -138,5 +183,5 @@ export class ExecutionPreview {
     this.cached = { canvas, history, revision: this.revision, value };
     return value;
   };
-  dispose() { this.disposed = true; this.selected.clear(); this.observed.clear(); this.details.clear(); this.models.clear(); this.loading.clear(); this.cached = null; }
+  dispose() { this.disposed = true; this.selected.clear(); this.explicit.clear(); this.operationFailures.clear(); this.observed.clear(); this.details.clear(); this.models.clear(); this.loading.clear(); this.cached = null; }
 }

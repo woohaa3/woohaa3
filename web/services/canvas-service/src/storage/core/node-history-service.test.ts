@@ -318,7 +318,7 @@ describe("节点历史 repository / 应用服务", () => {
     const asset = room.canvas.assets.find((candidate) => candidate.id === data.outputAssetId);
     expect((asset?.metadata as { storageKey?: string }).storageKey).toBe(key);
     expect(data.prompt).toBe("p");
-    expect(data.activeRunId).toBe(`history:${entryId}`);
+    expect(data.activeRunId).toBe("");
     expect(data.taskStatus).toBe("successed");
   });
 
@@ -635,7 +635,7 @@ describe("节点历史 repository / 应用服务", () => {
     const outcome = await service.restore({ canvasId: CANVAS, nodeId: "node-1", entryId });
     expect(outcome.ok).toBe(true);
     expect(room.canvas.nodeData["node-1"]).toMatchObject({
-      activeRunId: `history:${entryId}`,
+      activeRunId: "",
       taskStatus: "successed"
     });
   });
