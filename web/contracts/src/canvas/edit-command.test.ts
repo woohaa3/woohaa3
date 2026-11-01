@@ -12,6 +12,16 @@ import { createEmptyWoohaa3ServerCanvas, type ServerCanvas, type StoredAsset } f
 import { isCanvasCommandSatisfied } from "./command-satisfaction.js";
 import { isEditApplyCommand } from "./edit-command.js";
 import { computeCommandPayloadHash } from "./yjs/commands.js";
+import { matchNodeDataField } from "./command-reducer/edit-command.js";
+
+it("compares structured world instance preconditions by JSON value", () => {
+  const value = { kind: "world-instance", version: "v1", instanceId: "i", transform: { position: [1, 2, 3] } };
+  const data = { sharedWorldInstance: value } as never;
+  expect(matchNodeDataField(data, "sharedWorldInstance", { present: true, value: JSON.parse(JSON.stringify(value)) })).toBe(true);
+  expect(matchNodeDataField(data, "sharedWorldInstance", { present: true, value: { ...value, instanceId: "other" } })).toBe(false);
+  expect(matchNodeDataField(data, "sharedWorldInstance", { present: false })).toBe(false);
+  expect(matchNodeDataField(undefined, "sharedWorldInstance", { present: true, value: null })).toBe(false);
+});
 
 const NOW = "2026-10-09T00:00:00.000Z";
 

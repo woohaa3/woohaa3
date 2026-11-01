@@ -169,6 +169,28 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         return true;
       }
 
+      if (segments.length === 2 && segments[1] === "world-conversion-commit") {
+        if (req.method !== "POST") { sendError(res, 405, "INVALID_COMMAND_BATCH", "方法不允许"); return true; }
+        const canvasId = segments[0];
+        const gate = options.importGuard?.state(canvasId);
+        if (gate?.kind === "deleted" || gate?.kind === "preparing") { sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用"); return true; }
+        if (await authorizeImported(canvasId, "write") === "deny") return denyImported("write");
+        const access = await requireCanvasAccess({ req, res, canvasId, permission: "write", options, log });
+        if (!access.ok) return true;
+        if (!options.worldConversion) { sendError(res, 503, "NOT_READY", "转换服务不可用"); return true; }
+        const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
+        if ("canvasId" in body) { sendError(res, 400, "INVALID_COMMAND_BATCH", "请求包含非法字段"); return true; }
+        const authorize = async () => (await authorizeImported(canvasId, "write")) !== "deny" && (!options.authenticate || !!access.principal && !!options.access && (await options.access.authorize({ principal: access.principal, canvasId, permission: "write" })).allowed);
+        const controller = new AbortController();
+        const onClose = () => { if (!res.writableFinished) controller.abort(); };
+        res.once("close", onClose);
+        if (res.destroyed) controller.abort();
+        try {
+          const result = await options.worldConversion.commit({ ...body, canvasId } as import("@woohaa3/contracts").WorldConversionCommitInput, { authorize, signal: controller.signal });
+          if (!controller.signal.aborted) sendJson(res, result.ok ? 200 : result.code === "malformed-request" ? 400 : result.code === "canvas-not-found" ? 404 : 409, result);
+        } finally { res.removeListener("close", onClose); }
+        return true;
+      }
       if (segments.length === 2 && segments[1] === "world-conversion-prepare") {
         if (req.method !== "POST") { sendError(res, 405, "INVALID_COMMAND_BATCH", "方法不允许"); return true; }
         const canvasId = segments[0];

@@ -5,6 +5,9 @@ import type { Aabb } from "./model-transform.js";
 import { rendererToWorldPosition, SHARED_WORLD_VERSION, type WorldTransform } from "./shared-world.js";
 
 export type WorldConversionPrepareInput = { canvasId: string; nodeIds: string[] };
+export type WorldConversionCommitInput = { canvasId: string; operationId: string; sourceVersion: string; targets: import("./shared-world.js").LegacyWorldConversionTarget[] };
+export type WorldConversionReceipt = { targets: Array<import("./shared-world.js").LegacyWorldConversionTarget & { transform: WorldTransform }>; forward: import("./edit-plan.js").EditPlan["forward"]; inverse: import("./edit-plan.js").EditPlan["inverse"] };
+export type WorldConversionCommitOutcome = { ok: true; canvasId: string; commandId: string; revision: number; duplicate: boolean; receipt: WorldConversionReceipt } | { ok: false; code: string; message: string };
 export type WorldConversionPrepareOutcome =
   | { ok: true; canvasId: string; sourceVersion: string; nodes: Array<{ nodeId: string; nodeVersion: string; bounds: Aabb; transform: WorldTransform }> }
   | { ok: false; code: string; message: string };

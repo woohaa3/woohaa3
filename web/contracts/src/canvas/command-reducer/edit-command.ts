@@ -197,7 +197,15 @@ export function matchNodeDataField(
   const raw: unknown = data?.[field];
   const present = raw !== undefined;
   if (!snapshot.present) return !present;
-  return present && raw === snapshot.value;
+  if (!present) return false;
+  if (field !== "sharedWorldInstance") return raw === snapshot.value;
+  const equalJson = (a: unknown, b: unknown): boolean => {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;
+    const ak = Object.keys(a), bk = Object.keys(b);
+    return ak.length === bk.length && ak.every(key => Object.prototype.hasOwnProperty.call(b, key) && equalJson((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
+  };
+  return equalJson(raw, snapshot.value);
 }
 
 /**

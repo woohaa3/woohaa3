@@ -60,6 +60,7 @@ export type ModelBatchNodeSummary = {
 /** Stored with the command in the same transaction, without source text. */
 export type ModelScriptBatchMeta = {
   submissionHash: string;
+  worldConversion?: import("./world-conversion.js").WorldConversionReceipt;
   statistics?: import("./scene-ir-v2/stats.js").ModelSceneStatistics;
   breakdown?: import("./scene-ir-v2/stats.js").ModelSceneStatisticsBreakdown;
   nodes: ModelBatchNodeSummary[];

@@ -12,6 +12,7 @@ import type { ModelScriptBatchMeta, CanvasScriptSubmissionMeta } from "@woohaa3/
 
 /** 一次命令提交要原子写入的全部内容（design D6/D7）。 */
 export type YjsCommandCommit = {
+  signal?: AbortSignal;
   canvasId: string;
   /** 期望的存储 sequence；不匹配即拒绝（防止与其它 writer 交错）。 */
   expectedStorageSeq: number;

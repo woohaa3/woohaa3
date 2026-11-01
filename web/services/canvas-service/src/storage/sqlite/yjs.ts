@@ -129,6 +129,8 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
     // 而 Web Crypto 是异步的。checksum 用于恢复校验（任务 3.5）。
     const sha256 = await computeUpdateSha256(commit.update);
 
+    if (commit.signal?.aborted) throw new DOMException("Commit cancelled", "AbortError");
+
     return inImmediateTransaction(this.db, () => {
       const document = this.db
         .prepare("SELECT snapshot_seq FROM canvas_yjs_documents WHERE canvas_id = ?")

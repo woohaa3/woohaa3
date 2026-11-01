@@ -1,6 +1,6 @@
 # Client code map
 
-Shared world conversion preparation: `web/services/canvas-service/src/world-authoring/conversion-service.ts` reads published rooms, executes authoritative model scripts and returns versioned bounds and ground projections via `CanvasService.worldConversion` and `POST /api/canvases/:id/world-conversion-prepare`. Preparation is read-only; durable conversion and edit history belong to later stages.
+Shared world conversion: `web/services/canvas-service/src/world-authoring/conversion-service.ts` prepares authoritative bounds and commits explicit conversions through the room queue via `CanvasService.worldConversion` and the `world-conversion-prepare` / `world-conversion-commit` HTTP routes. The durable command receipt freezes forward and inverse edits; frontend history integration belongs to a later stage.
 
 片场聚焦检查器（2026-10-30）：`web/extensions/film-set/src/authoring/browser/inspector.tsx` 的旧折叠构图已由下节 2026-10-31 的分区属性替代；动态播放条在编辑态可达，输出按镜头类型组织。扩展经公共 `CompositeAssetAdapter.focusLayout` 声明 chrome 占位，经异步 `writeCameras` 使用同一个 `canvasEdit` journal，经 authoring `onDraftStateChange` 固定非空 AI 草稿目标；宿主不读取片场私有字段。
 

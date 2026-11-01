@@ -8,6 +8,7 @@ import type { MediaStorage } from "@woohaa3/contracts";
 import type { YjsDocumentRepository } from "./yjs-repository.js";
 
 export type RoomSubmitOptions = {
+  signal?: AbortSignal;
   /**
    * 每画布访问屏障的 write 复核（change: 2026-10-13-add-enterprise-access-and-production-deployment，
    * 任务 4.5/6.2/6.3）。

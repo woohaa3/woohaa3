@@ -195,7 +195,9 @@ export async function executeCommand(
 
   // 无净变化：仍持久化幂等记录，但 update 为空、revision 不变（design D5）。
   const updateForStorage = outcome.update ?? new Uint8Array(0);
+  if (options?.signal?.aborted) return { ok: false, status: "rejected", commandId: batch.commandId, code: "cancelled", message: "提交已取消" };
   const commit = await host.repository.commitYjsCommand({
+    signal: options?.signal,
     canvasId: host.canvasId,
     expectedStorageSeq: host.storageSeq,
     update: updateForStorage,
@@ -204,6 +206,9 @@ export async function executeCommand(
     projection: outcome.canvas,
     command: record
   }).catch((error: unknown) => {
+    if (options?.signal?.aborted && error instanceof Error && error.name === "AbortError") {
+      return { ok: false as const, code: "cancelled" as const };
+    }
     // 暂时存储失败：不广播、不确认成功（design D6 步骤 5）。
     return { ok: false as const, code: "storage-failed" as const, message: message(error) };
   });
@@ -300,6 +305,7 @@ function commitFailure(
   commit: { ok: false; code: string; message?: string },
   commandId: string
 ): RoomCommandResult {
+  if (commit.code === "cancelled") return { ok: false, status: "rejected", commandId, code: "cancelled", message: "提交已取消" };
   if (commit.code === "storage-seq-conflict") {
     // room 已在本层之上自动重载并重试（见 `CanvasRoom.withStorageSeqRecovery`）；走到这里
     // 说明重试上限用尽（仍在与别的 writer 竞争），因此这里的失败确实可以再试一次。

@@ -21,6 +21,7 @@ import type { MediaMetadata } from "../media/protocol.js";
 import type { MediaStorageScope } from "../media/storage.js";
 
 export type BackendWorldConversionPort = {
+  commit(input: import("../canvas/world-conversion.js").WorldConversionCommitInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<import("../canvas/world-conversion.js").WorldConversionCommitOutcome>;
   prepare(input: import("../canvas/world-conversion.js").WorldConversionPrepareInput, options?: { signal?: AbortSignal }): Promise<import("../canvas/world-conversion.js").WorldConversionPrepareOutcome>;
 };
 
