@@ -65,9 +65,7 @@ pub(crate) fn sync_generation(
             // - 生成任务：`shows_generation_ring` 覆盖紧凑与纯模型节点
             //   （change: 2026-10-12-unify-generation-history-strip）；
             // - 媒体解码/缓冲：`media_loading`（change: 2026-10-12-unify-node-editors-and-focus-transitions）。
-            // 聚合节点（复合资产）用运行遮罩、group 用容器呈现，都不走此覆盖层。
-            let plain = node.group.is_none() && node.composite_asset.is_none();
-            (plain && (shows_generation_ring(&node) || (node.media_loading && !node.busy)))
+            (shows_generation_ring(&node) || (node.media_loading && !node.busy))
                 .then_some((entity, depth.render, node))
         })
         .collect();

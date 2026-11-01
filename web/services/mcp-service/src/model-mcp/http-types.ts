@@ -8,9 +8,7 @@ import type {
   CanvasCommand,
   McpApplyCommandsResult,
   McpCameraMutation,
-  McpCreateFilmSetNodeRequest,
   McpGetNodeResult,
-  McpImportModelSnapshotRequest,
   McpListNodesResult,
   McpModelStatisticsResult,
   McpMutateCamerasResult,
@@ -19,9 +17,6 @@ import type {
   SupportedModelScriptVersion
 } from "@woohaa3/contracts";
 import type { AgentAuthoringToolDeps } from "../agent-authoring/tools.js";
-import type { McpCreateFilmSetNodeOutcome, McpMutateFilmSetItemResult } from "../downstream/canvas-client.js";
-
-export type { McpCreateFilmSetNodeRequest, McpImportModelSnapshotRequest };
 
 export const MODEL_MCP_HTTP_PATH = "/mcp/model-canvas";
 
@@ -34,7 +29,7 @@ export type ModelMcpToolService = {
   validateScripts?: (input: import("@woohaa3/contracts").ModelScriptBatchRequest) => Promise<import("@woohaa3/contracts").ModelScriptBatchOutcome>;
   submitScripts?: (input: import("@woohaa3/contracts").ModelScriptBatchRequest) => Promise<import("@woohaa3/contracts").ModelScriptBatchOutcome>;
 
-  getModelNode: (input: { canvasId: string; nodeId: string; resource?: "group-appearance"; includeStatistics?: boolean }) => Promise<McpGetNodeResult>;
+  getModelNode: (input: { canvasId: string; nodeId: string; includeStatistics?: boolean }) => Promise<McpGetNodeResult>;
   /** 当前或候选脚本的模型规模（与聚焦信息面板同源）。 */
   getModelStatistics?: (input: { canvasId: string; nodeId: string; source?: string }) => Promise<McpModelStatisticsResult>;
   submitScript: (input: {
@@ -44,8 +39,6 @@ export type ModelMcpToolService = {
     version?: SupportedModelScriptVersion;
     requestId: string;
     expectedModelContentHash?: string;
-  resource?: "group-appearance";
-  expectedContentHash?: string;
   }) => Promise<McpSubmitScriptResult>;
   listModelNodes?: (input: { canvasId?: string }) => Promise<McpListNodesResult>;
   renderPreview?: (input: {
@@ -70,21 +63,6 @@ export type ModelMcpToolService = {
     requestId: string;
     mutation: McpCameraMutation;
   }) => Promise<McpMutateCamerasResult>;
-  createFilmSetNode?: (input: McpCreateFilmSetNodeRequest & { canvasId: string }) => Promise<McpCreateFilmSetNodeOutcome>;
-  commitAnimation?: (input: import("@woohaa3/contracts").McpCommitAnimationRequest) => Promise<McpCreateFilmSetNodeOutcome>;
-  importModelSnapshot?: (input: McpImportModelSnapshotRequest & { canvasId: string }) => Promise<McpCreateFilmSetNodeOutcome>;
-  mutateFilmSetItem?: (input: {
-    canvasId: string;
-    nodeId: string;
-    itemId: string;
-    requestId: string;
-    op: import("@woohaa3/contracts").FilmSetItemPatchOp;
-  }) => Promise<McpMutateFilmSetItemResult>;
-  /** 片场媒体条目受控导入（D5）；省略时工具明确不可用。 */
-  addFilmSetMedia?: (input: import("@woohaa3/contracts").McpAddFilmSetMediaRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>;
-  /** agent 发起显式导出（D8）；省略时工具返回 `recording-unavailable`。 */
-  exportFilmSetClip?: (input: import("@woohaa3/contracts").McpExportFilmSetClipRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>;
-  getFilmSetExport?: (input: import("@woohaa3/contracts").McpGetFilmSetExportRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>;
 };
 
 export type ModelMcpHttpHandler = {
@@ -137,5 +115,5 @@ export type ToolRegistration = {
   /** 需经 grant 校验的写工具集合。 */
   grantedTools: ReadonlySet<string>;
   /** 用 bearer/toolGrant 校验写工具；返回拒绝原因或 null。 */
-  grantDenied: (tool: string, args: { canvasId?: unknown; nodeId?: unknown; nodeIds?: unknown; cameraId?: unknown; clipId?: unknown; itemId?: unknown; op?: unknown }) => string | null;
+  grantDenied: (tool: string, args: { canvasId?: unknown; nodeId?: unknown; nodeIds?: unknown; cameraId?: unknown }) => string | null;
 };

@@ -17,19 +17,12 @@ import type {
   ApplicationBackendHost,
   ApplicationExtensionRequestContext,
   ApplicationExtensionRawRequest,
-  ApplicationExtensionRawResponse,
-  FilmSetConversionMediaReader,
-  FilmSetConversionModelCandidate,
-  FilmSetConversionProvider
+  ApplicationExtensionRawResponse
 } from "@woohaa3/contracts";
-import { filmSetConversionCapabilityId } from "@woohaa3/contracts";
 import { AGENT_CONVERSATION_IDENTITY_CAPABILITY_ID, agentConversationAdapterCapabilityId } from "@woohaa3/contracts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { OAUTH_AGENT_PLUGIN_ID, OAUTH_AGENT_PROVIDERS, type OAuthAgentProvider } from "../shared.js";
-import { CHATGPT_PROVIDER_ID } from "./config.js";
 import { createChatGptService, type ChatGptService, type ChatGptServiceOptions } from "./service.js";
-import { CHATGPT_CONVERSION_CAPABILITIES } from "./conversion.js";
-import { CHATGPT_ALLOWED_MODEL_IDS } from "./models.js";
 import { createChatGptConversationAdapter, CHATGPT_CONVERSATION_ADAPTER_ID } from "./conversation-adapter.js";
 import type { ChatGptCanvasPorts } from "./ports.js";
 
@@ -150,16 +143,6 @@ export function createOAuthAgentExtension(options: OAuthAgentExtensionOptions = 
         }
       }
 
-      // 「转为片场」转换提供方（change: 2026-10-13-add-node-to-film-set-shortcut，任务 2.1）：
-      // 通过公共 capability 暴露本插件的视觉模型与生成端口（用宿主注入的媒体读取构造），
-      // 由统一后端按 capability 组合；本插件不 import film-set，也不写画布。
-      if (service.enabled) {
-        host.registerCapability({
-          id: filmSetConversionCapabilityId(CHATGPT_PROVIDER_ID),
-          value: createChatGptConversionProvider(service)
-        });
-      }
-
       return {
         dispose: async () => {
           releaseSource?.();
@@ -199,37 +182,6 @@ export function oauthProviderRouteRegistrations(provider: OAuthAgentProvider): O
   ];
 }
 
-/**
- * 构造 ChatGPT 的转换提供方 capability：把已授权服务暴露为「转为片场」生成端口（媒体读取由
- * 宿主注入）。只声明 allowlist 内的视觉模型；未启用服务时不提供候选（失败不静默换 Provider）。
- */
-function createChatGptConversionProvider(service: ChatGptService): FilmSetConversionProvider {
-  const models: FilmSetConversionModelCandidate[] = CHATGPT_ALLOWED_MODEL_IDS.map((id) => ({
-    modelKey: `${CHATGPT_PROVIDER_ID}:${id}`,
-    assistant: { adapterId: CHATGPT_CONVERSATION_ADAPTER_ID, model: id },
-    label: id,
-    capabilities: CHATGPT_CONVERSION_CAPABILITIES,
-    supports: ["image", "video"]
-  }));
-  return {
-    providerId: CHATGPT_PROVIDER_ID,
-    assistantAdapterId: CHATGPT_CONVERSATION_ADAPTER_ID,
-    listModels: () => models,
-    resolveCapabilities: ({ modelKey, sourceKind }) => {
-      const match = modelKey ? models.find((model) => model.modelKey === modelKey) : models[0];
-      if (!match || !match.supports.includes(sourceKind)) return null;
-      return { modelKey: match.modelKey, capabilities: match.capabilities };
-    },
-    createGenerator: ({ media }: { media: FilmSetConversionMediaReader }) =>
-      service.filmSetConversionGenerator(media),
-    /**
-     * 在宿主 HTTP 边界解析转换 owner（与 `/api/oauth-agent/*` 同源）：生产 `principal:<subject>`，
-     * 本地开发受控本地会话 `local:<id>`（可能需下发新会话 cookie），公网缺认证返回 `null`。
-     */
-    resolveOwner: (input) => service.resolveConversionOwner(input)
-  };
-}
-
 /** 把宿主 authoring 端口适配成生成层需要的 Canvas 端口（每次写入携带可信用户委托）。 */
 export function createChatGptAuthoringPorts(host: ApplicationBackendHost): ChatGptCanvasPorts {
   const authoring = host.services.authoring;
@@ -258,18 +210,6 @@ export function createChatGptAuthoringPorts(host: ApplicationBackendHost): ChatG
         ...(input.expectedModelContentHash ? { expectedModelContentHash: input.expectedModelContentHash } : {})
       });
       return result;
-    },
-    commitAnimation: async (input) => {
-      return authoring!.authoring.commitAnimation({
-        delegation: delegateFor(input.ownerId),
-        operationId: input.requestId,
-        canvasId: input.canvasId,
-        nodeId: input.nodeId,
-        animation: input.animation,
-        ...(input.clipId ? { clipId: input.clipId } : {}),
-        ...(input.expectedClipHash ? { expectedClipHash: input.expectedClipHash } : {}),
-        ...(input.expectedSnapshotHash ? { expectedSnapshotHash: input.expectedSnapshotHash } : {})
-      });
     },
     mutateCamerasBatch: async (input) => {
       return authoring!.authoring.mutateCamerasBatch({

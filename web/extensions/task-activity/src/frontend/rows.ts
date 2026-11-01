@@ -2,24 +2,21 @@
  * 统一活动记录模型（change: 2026-10-22-unify-task-activity-rows，任务 1.1 / design D1 / D3）。
  *
  * 面板只消费 `ActivityRow`：`kind` 只决定**数据来源**与可用动作，不决定寿命、排序、关闭方式
- * 或清理规则。三个接入适配器（`adapt-task-row` / `adapt-job-row` / `adapt-group-row`）把各自
+ * 或清理规则。两个接入适配器（`adapt-task-row` / `adapt-job-row`）把各自
  * 来源的载荷转成这一种记录，「是否进行中」的判定留在适配器里，因为那是来源语义而不是面板语义。
  *
  * 移除后的「不复活」同样按来源分工（design D2）：
  *
  * - 任务 / 后台活动：store 写 `expired` 键集合，事件或轮询重放时丢弃；
- * - 组创作：来源是宿主的整表轮询，没有增量事件可丢；移除写 `dismissedGroups`，由
- *   `replaceGroupRuns` 在记录重新 active 时清除，并由组节点入口显式重开。
  *
  * 面板自身只认 `active` 与 `key`：`key` 是稳定身份（`task:<runId>` / `job:<id>` /
- * `group:<requestId>`），`exitingKeys` 也以它为键（design D3）。
+ * `skill:<nodeId>:<attempt>`），`exitingKeys` 也以它为键（design D3）。
  */
 import type { BackgroundActivityJob, CanvasTaskActivity, SkillMediaStepView } from "@woohaa3/contracts";
 import { reportedProgressPercent, roundedGenerationPercent } from "@woohaa3/contracts";
-import type { CanvasGroupRun } from "@woohaa3/frontend/extension-api";
 import type { ActivityFeedItem, BackgroundFeedJob } from "./store.js";
 
-export type ActivityRowKind = "task" | "job" | "group" | "skill";
+export type ActivityRowKind = "task" | "job" | "skill";
 
 /** 状态语义色，仅用于行内状态灯与状态文案，不承载来源判别。 */
 export type ActivityRowTone = "active" | "success" | "danger" | "muted";
@@ -28,14 +25,11 @@ export type ActivityRowTone = "active" | "success" | "danger" | "muted";
 export type ActivityRowSource =
   | { kind: "task"; item: ActivityFeedItem }
   | { kind: "job"; job: BackgroundFeedJob }
-  | { kind: "group"; run: CanvasGroupRun }
   | { kind: "skill"; step: SkillMediaStepView };
 
 /**
  * 记录声明的可用动作。字段存在即表示该动作可用，因此 renderer 不需要按来源分支。
  *
- * 组创作额外声明两个交互能力（design D4 的「保留风险」）：点击锁定预览（`pinOnOpen`）与
- * 被组节点选中时自动展开并滚动到可视区（`autoOpenOnSelect`）。
  */
 export type ActivityRowActions = {
   /** 终态记录可关闭；进行中记录不可关闭。 */
@@ -44,20 +38,12 @@ export type ActivityRowActions = {
   locate?: () => void;
   /** 主行标题可打开详情（作品生成历史或确切 Agent 详情）。 */
   openDetail?: () => void;
-  /** 组创作的停止 / 重试原请求；只有写权限与来源可用时才存在。 */
-  stop?: () => Promise<void>;
-  retry?: () => Promise<void>;
-  openConversation?: () => Promise<void>;
-  /** 组记录详情中的写操作需要画布可写。 */
-  writable?: boolean;
-  /** 点击主行锁定详情（组记录）；缺省时悬停即预览。 */
+  /** 点击主行锁定详情（Skill 详情）；缺省时悬停即预览。 */
   pinOnOpen?: boolean;
-  /** 被组节点选中时自动展开详情并滚动到可视区。 */
-  autoOpenOnSelect?: boolean;
 };
 
 export type ActivityRow = {
-  /** 稳定身份：`task:<runId>` | `job:<id>` | `group:<requestId>`。 */
+  /** 稳定身份：`task:<runId>` | `job:<id>` | `skill:<nodeId>:<attempt>`。 */
   key: string;
   kind: ActivityRowKind;
   /** 主行文案（已解析）。 */
@@ -78,8 +64,6 @@ export type ActivityRow = {
   updatedAt: string;
   /** 是否进行中：面板唯一的寿命判定。 */
   active: boolean;
-  /** 被组节点入口选中（只对组记录有意义）。 */
-  selected?: boolean;
   actions: ActivityRowActions;
   source: ActivityRowSource;
 };
@@ -101,7 +85,6 @@ export type ActivityRowCapabilities = {
    * 因为一个缺字段而落到不同估算时长（change: 2026-10-31-unify-node-and-activity-progress）。
    */
   resolveNodeType?: (nodeId: string) => string | undefined;
-  group?: ActivityRowGroupCapabilities;
   /** Skill 媒体步骤（change: 2026-10-28-add-agent-skill-media-regeneration，任务 5.2）。 */
   skill?: ActivityRowSkillCapabilities;
 };
@@ -115,13 +98,6 @@ export type ActivityRowCapabilities = {
  */
 export type ActivityRowSkillCapabilities = {
   refresh?: (step: SkillMediaStepView) => Promise<void>;
-  resolveTitle?: (nodeId: string) => string;
-};
-
-export type ActivityRowGroupCapabilities = {
-  action?: (run: CanvasGroupRun, action: "stop" | "retry") => Promise<void>;
-  openConversation?: (run: CanvasGroupRun) => void | Promise<void>;
-  writable?: () => boolean;
   resolveTitle?: (nodeId: string) => string;
 };
 
@@ -167,19 +143,6 @@ export const BACKGROUND_STATUS_TONES: Record<BackgroundActivityJob["status"], Ac
   failed: "danger",
   cancelled: "muted"
 };
-
-/**
- * 组创作状态 → 语义色。失败与部分完成都按终态显示，不保留「待核对」阶段。
- */
-export function groupRunTone(status: string): ActivityRowTone {
-  if (status === "succeeded") return "success";
-  if (status === "failed" || status === "partial") return "danger";
-  if (status === "cancelled") return "muted";
-  return "active";
-}
-
-/** 组记录仍可停止的运行状态（宿主侧语义）。 */
-export const GROUP_STOPPABLE_STATUSES = ["queued", "running", "committing"] as const;
 
 /** Skill 尝试状态文案（活动面板；`superseded` 是宿主语义，不等于 Provider 已取消）。 */
 export const SKILL_STATE_LABELS: Record<SkillMediaStepView["attempts"][number]["state"], string> = {

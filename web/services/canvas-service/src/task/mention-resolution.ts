@@ -14,8 +14,6 @@ import {
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   renderWoohaa3CanvasMentionProviderText,
-  SHOT_REFERENCE_ROLE,
-  SHOT_IMAGE_REFERENCE_ROLE,
   sortWoohaa3CanvasInputMappings,
   type Woohaa3CanvasMentionType,
   type CanvasNodeData,
@@ -281,10 +279,6 @@ function collectDirectMappings(canvas: ServerCanvas, nodeId: string): CanvasNode
 /** mapping → mention 类型（文字角色为 input_text，其余按 role 判定媒体类型）。 */
 function mentionTypeForMapping(mapping: CanvasNodeInputMapping): Woohaa3CanvasMentionType {
   if (mapping.role === "text_prompt") return "input_text";
-  // 镜头参考是视频语义（与前端 @ 候选、provider 角色 reference_video 一致）；
-  // 角色名不含 "video"，不显式映射会误判为图片，导致合法的视频 mention 被判类型不匹配。
-  if (mapping.role === SHOT_REFERENCE_ROLE) return "input_video";
-  if (mapping.role === SHOT_IMAGE_REFERENCE_ROLE) return "input_image";
   const role = mapping.role;
   if (role.includes("video")) return "input_video";
   if (role.includes("audio") || role.includes("voice") || role.includes("music")) return "input_audio";

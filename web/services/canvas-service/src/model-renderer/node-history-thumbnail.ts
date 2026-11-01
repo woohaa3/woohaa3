@@ -10,7 +10,6 @@
  */
 import { hashModelScript, v2SceneExtent } from "@woohaa3/contracts";
 import type { NodeHistoryModelPayload } from "@woohaa3/contracts";
-import type { RendererSceneRequest } from "./client.js";
 import type { NodeHistoryApplicationService } from "../storage/core/node-history-service.js";
 import { createRenderCache, renderCacheKey, RENDER_VERSION, type RenderCache, type RendererClient } from "./index.js";
 import { executeSceneIr, normalizeCaptureOptions, type ScriptExecutorOptions } from "../model-mcp/script-executor.js";
@@ -21,7 +20,6 @@ export type NodeHistoryThumbnailOptions = {
   capture?: { width?: number; height?: number; background?: string; cameraPreset?: string };
   cache?: RenderCache;
   scriptExecutor?: ScriptExecutorOptions;
-  prepareCompositeHistory?: (input: { canvasId: string; nodeId: string; payload: NodeHistoryModelPayload }) => Promise<(Omit<RendererSceneRequest, "requestId" | "capture"> & { identity: string })>;
 };
 
 export type NodeHistoryThumbnailResult =
@@ -29,7 +27,6 @@ export type NodeHistoryThumbnailResult =
   | { ok: false; code: string; message: string };
 
 export class NodeHistoryThumbnailJob {
-  private readonly prepareCompositeHistory: NodeHistoryThumbnailOptions["prepareCompositeHistory"];
   private readonly service: NodeHistoryApplicationService;
   private readonly renderer: RendererClient;
   private readonly cache: RenderCache;
@@ -38,7 +35,6 @@ export class NodeHistoryThumbnailJob {
   private readonly scriptExecutor: ScriptExecutorOptions;
 
   constructor(options: NodeHistoryThumbnailOptions) {
-    this.prepareCompositeHistory = options.prepareCompositeHistory;
     this.service = options.service;
     this.renderer = options.rendererClient;
     this.cache = options.cache ?? createRenderCache();
@@ -58,24 +54,6 @@ export class NodeHistoryThumbnailJob {
     const entry = await this.service.getEntry({ canvasId: input.canvasId, nodeId: input.nodeId, entryId: input.entryId });
     if (entry.kind !== "model") return { ok: false, code: "not-a-model-entry", message: "历史条目不是模型版本" };
     const payload = entry.payload as NodeHistoryModelPayload;
-    if (payload.animation) {
-      if (payload.animation.schemaVersion !== 3 && payload.animation.schemaVersion !== 4) return { ok: false, code: "invalid-history-definition", message: "历史片场尚未完成迁移" };
-      if (!this.prepareCompositeHistory) return { ok: false, code: "composite-history-unavailable", message: "复合资产历史渲染不可用" };
-      try {
-        const prepared = await this.prepareCompositeHistory({ canvasId: input.canvasId, nodeId: input.nodeId, payload });
-        const capture = { ...this.capture, cameraPreset: "initial" };
-        const cacheKey = renderCacheKey({ sourceHash: prepared.identity, sceneVersion: prepared.sceneVersion, renderVersion: RENDER_VERSION, capture });
-        const cached = this.cache.get(cacheKey);
-        if (cached) return { ok: true, png: cached.png, cached: true };
-        const { identity, ...scene } = prepared;
-        const rendered = await this.renderer.render({ ...scene, requestId: `${input.entryId}:${identity}`, capture });
-        if (!rendered.ok) return rendered;
-        this.cache.set(cacheKey, { png: rendered.png, width: capture.width, height: capture.height, sceneSignature: scene.signature, renderVersion: rendered.renderVersion });
-        return { ok: true, png: rendered.png, cached: false };
-      } catch (cause) {
-        return { ok: false, code: "composite-history-render-failed", message: cause instanceof Error ? cause.message : "历史复合资产渲染失败" };
-      }
-    }
     if (payload.modelScript.trim() === "") {
       return { ok: false, code: "no-source", message: "历史模型脚本为空" };
     }

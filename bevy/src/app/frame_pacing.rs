@@ -21,7 +21,7 @@ use bevy::{
     winit::{EventLoopProxy, EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent},
 };
 
-use crate::{history_preview, model_preview, model3d, shot_node_preview};
+use crate::{history_preview, model_preview, model3d};
 
 use super::state::FrameFlags;
 
@@ -45,12 +45,10 @@ const STARTUP_HOLD_SECS: f64 = 3.0;
 pub(super) fn busy(
     flags: &FrameFlags,
     visuals: &model3d::ModelVisuals,
-    shot: &shot_node_preview::ShotPreviewCards,
     previews: &model_preview::Previews,
     history: &history_preview::ActiveThumbnail,
-    overview: &crate::canvas_ecs::overview_cache::OverviewCacheRegistry,
 ) -> bool {
-    busy_reasons(flags, visuals, shot, previews, history, overview) != 0
+    busy_reasons(flags, visuals, previews, history) != 0
 }
 
 /// 逐项忙碌位图；`0` 表示可以停帧。
@@ -60,10 +58,8 @@ pub(super) fn busy(
 fn busy_reasons(
     flags: &FrameFlags,
     visuals: &model3d::ModelVisuals,
-    shot: &shot_node_preview::ShotPreviewCards,
     previews: &model_preview::Previews,
     history: &history_preview::ActiveThumbnail,
-    overview: &crate::canvas_ecs::overview_cache::OverviewCacheRegistry,
 ) -> u16 {
     let mut bits = 0u16;
     for (bit, value) in [
@@ -71,15 +67,12 @@ fn busy_reasons(
         (1 << 1, flags.positions_received),
         (1 << 2, flags.viewport_only),
         (1 << 3, flags.observer_changed),
-        (1 << 4, flags.film_set_media_changed),
+        (1 << 4, flags.model_textures_changed),
         (1 << 5, flags.surface_changed),
         (1 << 6, flags.changed),
         (1 << 7, visuals.has_hot_activity()),
-        (1 << 8, visuals.has_in_flight_preparation()),
-        (1 << 9, shot.has_pending()),
-        (1 << 10, previews.has_pending()),
-        (1 << 11, history.has_pending()),
-        (1 << 12, overview.has_pending()),
+        (1 << 8, previews.has_pending()),
+        (1 << 9, history.has_pending()),
     ] {
         if value {
             bits |= bit;
@@ -89,20 +82,17 @@ fn busy_reasons(
 }
 
 /// 忙碌位图的固定词表（诊断口径，长度有界）。
-const BUSY_LABELS: [&str; 13] = [
+const BUSY_LABELS: [&str; 10] = [
     "scene",
     "positions",
     "viewport",
     "observer",
-    "film-set-media",
+    "model-textures",
     "surface",
     "changed",
     "hot",
-    "preparing",
-    "shot",
     "previews",
     "history",
-    "overview-cache",
 ];
 
 fn busy_label(bits: u16) -> String {
@@ -160,11 +150,8 @@ pub(super) fn sync_pacing(
     time: Res<Time<Real>>,
     flags: Res<FrameFlags>,
     visuals: Res<model3d::ModelVisuals>,
-    shot: Res<shot_node_preview::ShotPreviewCards>,
     previews: Res<model_preview::Previews>,
     history: Res<history_preview::ActiveThumbnail>,
-    overview: Res<crate::canvas_ecs::overview_cache::OverviewCacheRegistry>,
-    overview_dispatch: Res<crate::canvas_ecs::overview_cache::dispatch::OverviewDispatch>,
     mut state: ResMut<PacingState>,
     mut settings: ResMut<WinitSettings>,
 ) {
@@ -173,8 +160,7 @@ pub(super) fn sync_pacing(
         state.started = true;
         state.active_until = now + STARTUP_HOLD_SECS;
     }
-    let bits = busy_reasons(&flags, &visuals, &shot, &previews, &history, &overview)
-        | if overview_dispatch.has_pending() { 1 << 12 } else { 0 };
+    let bits = busy_reasons(&flags, &visuals, &previews, &history);
     if bits != 0 {
         state.active_until = now + DWELL_SECS;
     }
@@ -253,49 +239,27 @@ mod tests {
     fn plain_canvas_frames_stay_still() {
         let flags = FrameFlags::default();
         let visuals = model3d::ModelVisuals::default();
-        let shot = shot_node_preview::ShotPreviewCards::default();
         let previews = model_preview::Previews::default();
         let history = history_preview::ActiveThumbnail::default();
-        let overview = crate::canvas_ecs::overview_cache::OverviewCacheRegistry::default();
-        assert!(!busy(&flags, &visuals, &shot, &previews, &history, &overview));
+        assert!(!busy(&flags, &visuals, &previews, &history));
     }
 
     #[test]
     fn input_frames_are_busy() {
         let visuals = model3d::ModelVisuals::default();
-        let shot = shot_node_preview::ShotPreviewCards::default();
         let previews = model_preview::Previews::default();
         let history = history_preview::ActiveThumbnail::default();
-        let overview = crate::canvas_ecs::overview_cache::OverviewCacheRegistry::default();
         for mutate in [
             |flags: &mut FrameFlags| flags.scene_received = true,
             |flags: &mut FrameFlags| flags.viewport_only = true,
             |flags: &mut FrameFlags| flags.positions_received = true,
-            |flags: &mut FrameFlags| flags.film_set_media_changed = true,
+            |flags: &mut FrameFlags| flags.model_textures_changed = true,
             |flags: &mut FrameFlags| flags.changed = true,
         ] {
             let mut flags = FrameFlags::default();
             mutate(&mut flags);
-            assert!(busy(&flags, &visuals, &shot, &previews, &history, &overview));
+            assert!(busy(&flags, &visuals, &previews, &history));
         }
     }
 
-    #[test]
-    fn pending_overview_work_wakes_but_cached_texture_does_not() {
-        use crate::canvas_ecs::overview_cache::{OverviewBudget, OverviewCacheInput, OverviewCacheRegistry, OverviewCacheToken, OverviewReservation};
-        let flags = FrameFlags::default();
-        let visuals = model3d::ModelVisuals::default();
-        let shot = shot_node_preview::ShotPreviewCards::default();
-        let previews = model_preview::Previews::default();
-        let history = history_preview::ActiveThumbnail::default();
-        let mut overview = OverviewCacheRegistry::default();
-        overview.budget = OverviewBudget { byte_limit: 1000, slot_limit: 1, ..Default::default() };
-        let input = OverviewCacheInput { local_placement: [0; 7], media_revision: 1, geometry_revision: 1, layout_revision: 1, theme_revision: 1, quality: 1, tier: 128 };
-        let token = OverviewCacheToken { epoch: 1, owner: 1, generation: 1, slot_generation: 1 };
-        assert!(overview.request(1, token, &input, OverviewReservation::new(100, 50, 1)));
-        assert!(busy(&flags, &visuals, &shot, &previews, &history, &overview));
-        assert!(overview.begin(1, token));
-        assert!(overview.complete(1, token, &input));
-        assert!(!busy(&flags, &visuals, &shot, &previews, &history, &overview));
-    }
 }

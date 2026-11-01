@@ -63,18 +63,13 @@ pub(super) fn quality_key(base: &str, geometry: &ModelGeometry, quality: Quality
 ///
 /// spawn、runtime quality、playback_prepare、资源 lookup、batch/引用和诊断都经此解析，避免只改
 /// mesh cache key 或让诊断按根 Low 漏计实际 High handle。
-pub(super) fn effective_quality(
-    geometry: &ModelGeometry,
-    requested: Quality,
-    overview: bool,
-) -> Quality {
+pub(super) fn effective_quality(geometry: &ModelGeometry, requested: Quality) -> Quality {
     match geometry {
         ModelGeometry::Box { .. } => Quality::High,
         // 带顶点属性（GLB 文件模型）的网格不做简化：简化会丢弃法线/UV/顶点色，改变外观。
         ModelGeometry::Mesh { normals: Some(_), .. }
         | ModelGeometry::Mesh { uvs: Some(_), .. }
         | ModelGeometry::Mesh { colors: Some(_), .. } => Quality::High,
-        ModelGeometry::Mesh { .. } if overview => Quality::High,
         _ => requested,
     }
 }
@@ -224,7 +219,7 @@ mod tests {
         assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
         // 简化会丢弃法线/UV/顶点色，带属性的文件网格固定 High。
-        assert_eq!(effective_quality(&geometry, Quality::Low, false), Quality::High);
+        assert_eq!(effective_quality(&geometry, Quality::Low), Quality::High);
         // 属性参与 mesh 身份：同位置/面的无属性网格不得共享缓存。
         let plain = ModelGeometry::Mesh {
             vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],

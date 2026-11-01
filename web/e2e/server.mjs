@@ -3,6 +3,9 @@
 //
 //   node e2e/server.mjs [--dist frontend/dist] [--port 4273]
 //
+// 监听地址默认 127.0.0.1；容器 / WSL 里让宿主浏览器访问时用 `HOST=0.0.0.0`（或经
+// `ssh -L` 转发本地端口），并配合配置里的 `E2E_BASE_URL` 指向宿主可达地址。
+//
 // 与生产（`scripts/serve-web.mjs` / `scripts/dev-orchestrator.mjs`）共用**同一个 ingress**：
 //   /api/canvases/*  + WS  -> Canvas Service
 //   /api/media/*           -> Media Service

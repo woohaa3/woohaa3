@@ -1,4 +1,3 @@
-import { CompositeAssetRegistry } from "../../../extension-api/composite-assets.js";
 /**
  * Node History Plugin 生命周期与面板测试
  * （change: add-canvas-node-generation-history，任务 3.1–3.4 / 4.1–4.4）。
@@ -85,7 +84,6 @@ async function makeHarness(input: {
   const fakeRuntime = (input.includeRuntime ?? true) ? fakeCanvasRuntime(focusCalls) : null;
   const instance = await startFrontendRuntime({
     installPlatform: (ctx: Context) => {
-      ctx.provide("compositeAssets" as never, new CompositeAssetRegistry() as never);
       ctx.provide("canvasState" as never, { getCanvas: () => woohaa3CanvasStore.getState().canvas, getWorkingCanvas: () => woohaa3CanvasStore.getState().canvas, subscribe: woohaa3CanvasStore.subscribe } as never);
       ctx.provide("slots" as never, slots as never);
       ctx.provide("inputScopes" as never, inputScopes as never);
@@ -511,7 +509,6 @@ describe("Node History Plugin", () => {
     const slots = new SlotRegistry();
     const instance = await startFrontendRuntime({
       installPlatform: (ctx: Context) => {
-      ctx.provide("compositeAssets" as never, new CompositeAssetRegistry() as never);
       ctx.provide("canvasState" as never, { getCanvas: () => woohaa3CanvasStore.getState().canvas, getWorkingCanvas: () => woohaa3CanvasStore.getState().canvas, subscribe: woohaa3CanvasStore.subscribe } as never);
         ctx.provide("slots" as never, slots as never);
         ctx.provide("dialogs" as never, new DialogService() as never);

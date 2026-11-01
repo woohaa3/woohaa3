@@ -5,7 +5,6 @@
  * 辅助身份读取只复刻契约层内容身份公式，不复制 history 规则。
  */
 import {
-  fnv1a64Hex,
   decodeImageEditDocument,
   decodeModelCameras,
   decodeModelPlacement,
@@ -15,9 +14,6 @@ import {
   modelContentIdentity,
   modelPlacementSnapshotKey,
   nodeHistoryEntryId,
-  animationDefinitionSnapshotHash,
-  MODEL_SCRIPT_LANGUAGE,
-  MODEL_SCRIPT_V2_VERSION,
   type CanvasCommand,
   type ImageEditCompleteRequest,
   type ModelCamera,
@@ -27,8 +23,6 @@ import {
 } from "@woohaa3/contracts";
 import type { EditCompletionRecord } from "../edit-completion-contracts.js";
 import type { EditCompletionResult } from "./types.js";
-import { animationDefinitionIdentity, animationDefinitionIdentityFromPayload } from "../node-history-service/current-state.js";
-import { readAnimationHistoryPayload } from "../node-history-service/registration.js";
 
 export function kindForNodeType(type: string): "image" | "model" | null {
   if (type === "image") return "image";
@@ -46,10 +40,6 @@ export function currentIdentityOfNode(canvas: ServerCanvas, nodeId: string, kind
   const data = canvas.nodeData[nodeId] as Record<string, unknown> | undefined;
   if (!data) return null;
   if (kind === "model") {
-    // 自包含片场（items-only）当前身份覆盖完整片场定义（独立根 + items + 全部片段），与顶层
-    // 作者模型字段无关；必须先于顶层脚本读取判断，否则合法片场的 begin/complete 恒视为无内容。
-    const animationIdentity = animationDefinitionIdentity(data);
-    if (animationIdentity) return animationIdentity;
     const source = typeof data.modelScript === "string" ? data.modelScript : "";
     if (source === "") return null;
     const placement = data.modelPlacement === undefined || data.modelPlacement === null
@@ -186,25 +176,19 @@ export function imageEditContentIdentityOf(request: ImageEditCompleteRequest): s
   });
 }
 
-/** 从当前权威模型/片场内容构造编辑版本条目（complete 只归档，不额外推进 revision）。 */
+/** 从当前权威模型内容构造编辑版本条目（complete 只归档，不额外推进 revision）。 */
 export function buildModelEditEntryFromCanvas(canvas: ServerCanvas, nodeId: string, createdAt: string): NodeGenerationHistoryEntry | null {
   const data = canvas.nodeData[nodeId] as Record<string, unknown> | undefined;
-  // items-only 片场没有顶层模型脚本；其完整当前版本由片段/内容定义身份留档（D8/D10）。
-  // 因此先读动画 payload，再决定是否需要顶层脚本字段；模型脚本取内部首个 model item。
-  const animation = readAnimationHistoryPayload(data);
-  const modelScript = animation ? "" : (typeof data?.modelScript === "string" ? data.modelScript : "");
-  if (!animation && modelScript.trim() === "") return null;
-  const language = animation ? MODEL_SCRIPT_LANGUAGE : (typeof data?.modelScriptLanguage === "string" ? data.modelScriptLanguage : "");
-  const version = animation ? MODEL_SCRIPT_V2_VERSION : (typeof data?.modelScriptVersion === "string" ? data.modelScriptVersion : "");
+  const modelScript = typeof data?.modelScript === "string" ? data.modelScript : "";
+  if (modelScript.trim() === "") return null;
+  const language = typeof data?.modelScriptLanguage === "string" ? data.modelScriptLanguage : "";
+  const version = typeof data?.modelScriptVersion === "string" ? data.modelScriptVersion : "";
   if (language === "" || version === "") return null;
   const placement = decodeModelPlacement(data?.modelPlacement) ?? { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 };
   const modelCameras = readCameras(data);
-  const sourceHash = animation?.schemaVersion === 4 ? fnv1a64Hex(JSON.stringify(animation.filmSetGroup)) : animation?.schemaVersion === 3 ? animationDefinitionSnapshotHash(animation) : hashModelScript(modelScript);
-  // 片场用完整定义身份去重；普通模型保留规范镜头感知的摆放快照键（不改变既有身份语义）。
-  const animationIdentity = animation ? animationDefinitionIdentityFromPayload(animation) : null;
-  const identity = animationIdentity
-    ? { kind: "model-edit" as const, sourceHash, snapshotKey: animationIdentity }
-    : { kind: "model-edit" as const, sourceHash, snapshotKey: modelCameraSnapshotKey(placement, modelCameras) };
+  const sourceHash = hashModelScript(modelScript);
+  // 保留规范镜头感知的摆放快照键（不改变既有身份语义）。
+  const identity = { kind: "model-edit" as const, sourceHash, snapshotKey: modelCameraSnapshotKey(placement, modelCameras) };
   return {
     version: "woohaa-node-generation-history-v1",
     entryId: nodeHistoryEntryId({ canvasId: canvas.id, nodeId, identity }),
@@ -213,7 +197,7 @@ export function buildModelEditEntryFromCanvas(canvas: ServerCanvas, nodeId: stri
     kind: "model",
     createdAt,
     sourceIdentity: encodeNodeGenerationIdentity(identity),
-    currentIdentity: animationIdentity ?? modelContentIdentity(sourceHash, placement),
+    currentIdentity: modelContentIdentity(sourceHash, placement),
     recoverable: true,
     previewable: true,
     source: { label: "模型编辑", sourceHash },
@@ -223,9 +207,8 @@ export function buildModelEditEntryFromCanvas(canvas: ServerCanvas, nodeId: stri
       language,
       version,
       sourceHash,
-      ...(!animation ? { placement } : {}),
-      ...(modelCameras ? { modelCameras } : {}),
-      ...(animation ? { animation } : {})
+      placement,
+      ...(modelCameras ? { modelCameras } : {})
     }
   };
 }

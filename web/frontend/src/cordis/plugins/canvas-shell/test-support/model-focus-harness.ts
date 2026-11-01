@@ -21,8 +21,6 @@ import {
   MODEL_CAMERA_Z,
   MODEL_CAMERA_FAR,
   MODEL_FOCUS_FOV,
-  COMPOSITE_ASSET_NODE_TYPE,
-  FILM_SET_EXTENSION_ID,
   type ModelFocusProjection,
   type SceneV2Op,
   type ServerCanvas
@@ -53,7 +51,7 @@ export function unitBox(): SceneV2Op {
   } as SceneV2Op;
 }
 
-/** 单个 3D 片场节点（196x64）位于 (200,100)。 */
+/** 单个 3D 模型节点位于 (200,100)。 */
 export function modelCanvas(): ServerCanvas {
   const base = createEmptyWoohaa3ServerCanvas("c1");
   return {
@@ -61,9 +59,9 @@ export function modelCanvas(): ServerCanvas {
     revision: 1,
     document: {
       ...base.document,
-      nodes: [{ id: "m1", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 200, y: 100 }, width: 196, height: 64 }]
+      nodes: [{ id: "m1", type: "model3d", position: { x: 200, y: 100 }, width: 196, height: 64 }]
     },
-    nodeData: { m1: { extensionId: FILM_SET_EXTENSION_ID } } as never
+    nodeData: { m1: { modelScript: "", modelScriptVersion: "woohaa-model-js-v2" } } as never
   } as ServerCanvas;
 }
 
@@ -228,7 +226,6 @@ export function focusHarness(options: {
   shotGesture?: import("../interaction-controller.js").InteractionControllerOptions["shotGesture"];
   shotWheel?: import("../interaction-controller.js").InteractionControllerOptions["shotWheel"];
   focusGesture?: import("../interaction-controller.js").InteractionControllerOptions["focusGesture"];
-  filmSetObjectAction?: import("../interaction-controller.js").InteractionControllerOptions["filmSetObjectAction"];
   onModelFocusInvalid?: (reason: string) => void;
   onModelFocusIntent?: import("../interaction-controller.js").InteractionControllerOptions["onModelFocusIntent"];
   isModalActive?: () => boolean;
@@ -257,7 +254,6 @@ export function focusHarness(options: {
     ...(options.shotGesture ? { shotGesture: options.shotGesture } : {}),
     ...(options.shotWheel ? { shotWheel: options.shotWheel } : {}),
     ...(options.focusGesture ? { focusGesture: options.focusGesture } : {}),
-    ...(options.filmSetObjectAction ? { filmSetObjectAction: options.filmSetObjectAction } : {}),
     ...(options.onModelFocusInvalid ? { onModelFocusInvalid: options.onModelFocusInvalid } : {}),
     ...(options.onModelFocusIntent ? { onModelFocusIntent: options.onModelFocusIntent } : {}),
     ...(options.isModalActive ? { isModalActive: options.isModalActive } : {}),

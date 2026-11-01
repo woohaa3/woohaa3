@@ -54,14 +54,12 @@ async function boot(options: {
   authenticator?: ApplicationRequestAuthenticator;
   connections?: AgentConnectionRegistry;
   assistantText?: import("../extensions/assistant-text-service.js").AssistantTextService;
-  canvasCreations?: import("../extensions/canvas-creation-service.js").CanvasCreationService;
   access?: import("@woohaa3/contracts").ApplicationExtensionCanvasAccessFacade;
 } = {}) {
   const handler = createAgentConversationApiHandler({
     service: options.service ?? serviceStub(),
     serviceConnections: options.serviceConnections,
     serviceConnectionProviders: options.serviceConnectionProviders,
-    canvasCreations: options.canvasCreations,
     assistantText: options.assistantText,
     ...(options.basePath ? { basePath: options.basePath } : {}),
     ...(options.discovery ? { mcpDiscovery: options.discovery } : {}),
@@ -97,39 +95,6 @@ const READY: McpBuiltinDiscoveryView = {
   ],
   checkedAt: "2026-10-13T00:00:00.000Z"
 };
-
-describe("canvas creation API authority", () => {
-  const input = { requestId: "request", canvasId: "canvas", position: { x: 1, y: 2 }, prompt: "create", connection: { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 } };
-  function creations() {
-    const view = { ...input, rootGroupId: "root", stage: "accepted", turnRequestId: "first" };
-    return { accept: vi.fn(async () => view), peek: vi.fn((owner: string) => owner === "user-a" ? view : null), query: vi.fn(async () => view), retry: vi.fn(async () => view), list: vi.fn(async () => [view]) };
-  }
-  it("uses the trusted principal and original request for reads and explicit retries", async () => {
-    const s = creations();
-    const access = { authorize: vi.fn(async () => ({ ok: true as const })) };
-    const { base } = await boot({ basePath: "/studio/", canvasCreations: s as never, access });
-    const post = await fetch(`${base}/api/agent-conversations/canvas-creations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
-    expect(post.status).toBe(200); expect(s.accept).toHaveBeenCalledWith("user-a", input);
-    expect((await fetch(`${base}/api/agent-conversations/canvas-creations/request`)).status).toBe(200);
-    expect(s.query).toHaveBeenCalledWith("user-a", "request");
-    expect((await fetch(`${base}/api/agent-conversations/canvas-creations/request/retry`, { method: "POST" })).status).toBe(200);
-    expect(s.retry).toHaveBeenCalledWith("user-a", "request");
-    expect(access.authorize).toHaveBeenCalledWith({ subject: "user-a", canvasId: "canvas", permission: "write" });
-    expect(s.accept).toHaveBeenCalledTimes(1);
-  });
-  it("rejects unauthenticated, read-only, cross-owner and forged scope input before effects", async () => {
-    const s = creations();
-    const anonymous = await boot({ canvasCreations: s as never, authenticator: async () => null });
-    expect((await fetch(`${anonymous.base}/api/agent-conversations/canvas-creations/request`)).status).toBe(401);
-    const denied = await boot({ canvasCreations: s as never, access: { authorize: async () => ({ ok: false, code: "forbidden", message: "read only" }) } as never });
-    expect((await fetch(`${denied.base}/api/agent-conversations/canvas-creations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) })).status).toBe(401);
-    const other = await boot({ canvasCreations: s as never, authenticator: async () => ({ subject: "other", sessionId: "s", identityProvider: "test" }) });
-    expect((await fetch(`${other.base}/api/agent-conversations/canvas-creations/request`)).status).toBe(404);
-    const own = await boot({ canvasCreations: s as never });
-    expect((await fetch(`${own.base}/api/agent-conversations/canvas-creations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...input, owner: "other", scope: { rootGroupId: "anything" } }) })).status).toBe(400);
-    expect(s.accept).not.toHaveBeenCalled(); expect(s.query).not.toHaveBeenCalled();
-  });
-});
 
 describe("Agent 会话 API · MCP 真实发现", () => {
   it("返回注入的真实发现与当前 origin 的外部指引", async () => {

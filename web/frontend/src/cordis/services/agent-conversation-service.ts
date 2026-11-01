@@ -1,4 +1,3 @@
-import { authoringConversationContext } from "@woohaa3/contracts";
 /**
  * 宿主 Agent 会话前端 service（Canvas page scope 唯一 owner）
  * （change: 2026-10-12-add-agent-conversation-panel，任务 5.2/5.4/5.6 / design D1/D6a）。
@@ -167,7 +166,7 @@ export function createAgentConversationService(
     // 一个节点复用一条会话（design D8）：先按目标查找现有会话，未命中再新建。宿主未注入
     // conversationId（如重开面板）时也据此复用，避免每次生成都新会话。
     const nodeId = input.entry.nodeId;
-    const contextKey = authoringConversationContext(input.entry);
+    const contextKey = undefined;
     if (nodeId) {
       const found = contextKey ? await remote.findForTarget(input.canvasId, nodeId, input.connectionId, contextKey) : input.connectionId
         ? await remote.findForTarget(input.canvasId, nodeId, input.connectionId)

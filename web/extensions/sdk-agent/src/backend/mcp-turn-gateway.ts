@@ -76,11 +76,11 @@ export async function createMcpTurnGateway(options: {
         const schema = tools.find((tool) => tool.name === name)?.parameters;
         const properties = schema?.properties as Record<string, unknown> | undefined;
         if (properties?.canvasId) args.canvasId = options.input.canvasId;
-        if (target.nodeId && target.mode !== "canvas-group") {
+        if (target.nodeId) {
           if (args.nodeId !== undefined && args.nodeId !== target.nodeId) throw new Error("target-mismatch");
           if (properties?.nodeId) args.nodeId = target.nodeId;
         }
-        for (const field of ["clipId", "itemId", "cameraId"] as const) {
+        for (const field of ["cameraId"] as const) {
           if (target[field] && args[field] !== undefined && args[field] !== target[field]) throw new Error("target-mismatch");
           if (target[field] && properties?.[field]) args[field] = target[field];
         }
@@ -93,7 +93,6 @@ export async function createMcpTurnGateway(options: {
           if (!Array.isArray(args.items) || args.items.some((item: Json) => item.nodeId !== target.nodeId)) throw new Error("target-mismatch");
           for (const item of args.items) if (target.expectedContentHash) item.expectedModelContentHash = target.expectedContentHash;
         }
-        if (target.expectedContentHash && target.mode === "film-set" && properties?.expectedClipHash) args.expectedClipHash = target.expectedContentHash;
         if (name === "submit_model_script" && target.expectedContentHash) args.expectedModelContentHash = target.expectedContentHash;
         // Each SDK call gets a stable operation identity; transport retries cannot create another write.
         const callId = String(message.id);

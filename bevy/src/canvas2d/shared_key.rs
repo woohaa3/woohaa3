@@ -1,4 +1,4 @@
-//! Exact draw-only invalidation for the retained shared group/overlay buffers.
+//! Exact draw-only invalidation for the retained shared overlay buffers.
 //! No model/media/vertex payloads, viewport or unrelated ordinary-card content is copied.
 use crate::{
     protocol::{AggregateConnect, Draft, DragAttach, Marquee, Scene},
@@ -10,12 +10,9 @@ struct Reference {
     id: String,
     rect: [f32; 4],
     ports: [[f32; 2]; 2],
-    composite: bool,
 }
 #[derive(PartialEq)]
 pub(super) struct SharedKey {
-    pub(super) focus_ownership_links: bool,
-    pub(super) ownership_links: Vec<([f32; 2], [f32; 2])>,
     theme: String,
     references: Vec<Reference>,
     draft: Option<Draft>,
@@ -24,9 +21,6 @@ pub(super) struct SharedKey {
     aggregate: Option<AggregateConnect>,
     selection: Vec<String>,
     overlay_count: Option<usize>,
-    /// 拍摄镜头归属线（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）：
-    /// 派生呈现，起点随相机姿态变更。参与 key 使线随起点/目标增量重绘。
-    shot_preview_links: Vec<crate::protocol::ShotPreviewLink>,
 }
 impl SharedKey {
     pub(super) fn new(scene: &Scene, theme: &ThemeResource) -> Self {
@@ -61,12 +55,9 @@ impl SharedKey {
                     super::layout::port(n, false).to_array(),
                     super::layout::port(n, true).to_array(),
                 ],
-                composite: n.composite_asset.is_some(),
             })
             .collect();
         Self {
-            focus_ownership_links: false,
-            ownership_links: Vec::new(),
             theme: theme.fingerprint().to_owned(),
             references,
             draft: scene.draft.clone(),
@@ -80,7 +71,6 @@ impl SharedKey {
             },
             overlay_count: (scene.drag_attach.is_some() || scene.aggregate_connect.is_some())
                 .then_some(scene.nodes.len()),
-            shot_preview_links: scene.shot_preview_links.clone(),
         }
     }
 }

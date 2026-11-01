@@ -20,11 +20,9 @@ import {
   nodeHistoryContentIdentity,
   nodeHistoryEntryId,
   nodeTypesForHistoryKind,
-  readFilmSetContent,
   YJS_SYNC_PROTOCOL_VERSION,
   type NodeGenerationHistoryEntry,
   type NodeHistoryMediaPayload,
-  type NodeHistoryModelPayload,
   type ServerCanvas
 } from "@woohaa3/contracts";
 import { CanvasStorageError } from "../errors.js";
@@ -43,7 +41,7 @@ import {
   readAssetMetaNumber,
   readAssetStorageKey
 } from "./assets.js";
-import { readAnimationHistoryPayload, readModelCamerasSnapshot } from "./registration.js";
+import { readModelCamerasSnapshot } from "./registration.js";
 import type {
   NodeHistoryRestoreOutcome,
   NodeHistoryServiceContext,
@@ -128,9 +126,6 @@ export async function restoreNodeHistory(
     }
   }
 
-  if (entry.kind === "model" && (entry.payload as NodeHistoryModelPayload).animation?.schemaVersion === 3) {
-    return { ok: false, code: "unrecoverable", message: "旧片场历史须先完成离线迁移" };
-  }
   const alreadyCurrent = currentNode.identity !== null && entryMatchesCurrentIdentity(entry, currentNode);
   if (alreadyCurrent) {
     return { ok: true, revision: canvas.revision, entryId: entry.entryId, alreadyCurrent: true };
@@ -181,23 +176,11 @@ export async function snapshotCurrentModelEdit(
   nodeId: string,
   data: Record<string, unknown> | undefined
 ): Promise<{ status: "inserted" | "duplicate"; entryId: string } | null> {
-  // items-only 片场没有顶层模型脚本；其完整当前版本由片段/内容定义身份留档（D8/D10）。
-  // 因此先读动画 payload，再决定是否需要顶层脚本字段。
-  const animation = readAnimationHistoryPayload(data);
-  const modelItem = data?.filmSetContent !== undefined && data.filmSetContent !== null
-    ? readFilmSetContent(data).items.find((item) => item.kind === "model")
-    : undefined;
-  const modelScript = animation !== null
-    ? (modelItem?.model.modelScript ?? "")
-    : (typeof data?.modelScript === "string" ? data.modelScript : "");
-  if (animation === null && modelScript.trim() === "") return null;
-  const language = animation !== null
-    ? (modelItem?.model.modelScriptLanguage ?? "")
-    : (typeof data?.modelScriptLanguage === "string" ? data.modelScriptLanguage : "");
-  const version = animation !== null
-    ? (modelItem?.model.modelScriptVersion ?? "")
-    : (typeof data?.modelScriptVersion === "string" ? data.modelScriptVersion : "");
-  if (animation === null && (language === "" || version === "")) return null;
+  const modelScript = typeof data?.modelScript === "string" ? data.modelScript : "";
+  if (modelScript.trim() === "") return null;
+  const language = typeof data?.modelScriptLanguage === "string" ? data.modelScriptLanguage : "";
+  const version = typeof data?.modelScriptVersion === "string" ? data.modelScriptVersion : "";
+  if (language === "" || version === "") return null;
   const placement = decodeModelPlacement(data?.modelPlacement) ?? { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 };
   const modelCameras = readModelCamerasSnapshot(data);
   try {
@@ -210,7 +193,6 @@ export async function snapshotCurrentModelEdit(
       version,
       placement,
       ...(modelCameras ? { modelCameras } : {}),
-      ...(animation ? { animation } : {}),
       createdAt: deps.context.now()
     });
   } catch {

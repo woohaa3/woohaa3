@@ -8,16 +8,16 @@ use std::collections::HashMap;
 
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
-use crate::app::{CurrentScene, FrameFlags, ModelAssetTable, NodeIndex, SurfaceState};
+use crate::app::{CurrentScene, FrameFlags, NodeIndex, SurfaceState};
 use crate::canvas_ecs::components::{
     CanvasDepth, CanvasLabelRole, CanvasLayout, CanvasNodeId, CanvasSelection, CardPresentation,
-    CardVisual, ContainerVisual, EdgeVisual, FilmSetPresentation, GroupPresentation,
+    CardVisual, EdgeVisual,
 };
 use crate::canvas_ecs::{CanvasBatchWriter, SelectionOutlineBatch};
 use crate::protocol::GraphNode;
 use crate::theme::ThemeResource;
 
-use super::{CardBlockCache, CardDecorationCache, ContainerBlockCache, EdgeBlockCache, CanvasOverlayCache};
+use super::{CardBlockCache, CardDecorationCache, EdgeBlockCache, CanvasOverlayCache};
 use super::geometry::Geometry;
 use super::labels::{LabelRequests, LabelStyle};
 
@@ -25,7 +25,6 @@ use super::labels::{LabelRequests, LabelStyle};
 pub(crate) fn canvas_render_requested(
     flags: Res<FrameFlags>,
     card_visuals: Query<(), Changed<CardVisual>>,
-    container_visuals: Query<(), Changed<ContainerVisual>>,
     edge_visuals: Query<(), Changed<EdgeVisual>>,
     theme: Res<ThemeResource>,
     surface: Res<SurfaceState>,
@@ -35,7 +34,6 @@ pub(crate) fn canvas_render_requested(
         || flags.surface_changed
         || flags.theme_changed
         || !card_visuals.is_empty()
-        || !container_visuals.is_empty()
         || !edge_visuals.is_empty()
         || theme.is_changed()
         || surface.is_changed()
@@ -161,53 +159,6 @@ pub(crate) fn produce_card_hover(
     );
 }
 
-/// group 与片场容器几何。
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn produce_container_geometry(
-    mut commands: Commands,
-    scene: Res<CurrentScene>,
-    index: Res<NodeIndex>,
-    theme: Res<ThemeResource>,
-    mut visuals: ResMut<ContainerBlockCache>,
-    materials: Res<super::CanvasMaterials>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut requests: ResMut<LabelRequests>,
-    mut flags: ResMut<FrameFlags>,
-    nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
-) {
-    let mut containers = Vec::new();
-    for (entity, id, depth) in &nodes {
-        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
-            continue;
-        };
-        if node.group.is_none() && node.composite_asset.is_none() {
-            continue;
-        }
-        containers.push((
-            depth.index,
-            super::container_cache::ContainerInput {
-                index: depth.index,
-                render: depth.render,
-                entity,
-                node,
-            },
-        ));
-    }
-    containers.sort_by_key(|(index, _)| *index);
-    let containers: Vec<_> = containers.into_iter().map(|(_, input)| input).collect();
-    flags.container_blocks_rebuilt = super::container_cache::sync(
-        &mut commands,
-        &mut meshes,
-        &mut visuals,
-        &mut requests,
-        &containers,
-        scene.0.nodes.len(),
-        &scene.0,
-        &theme,
-        &materials,
-    );
-}
-
 /// 边、边标签、删除按钮与草稿线（端点读取 ECS 布局）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn produce_edges(
@@ -262,58 +213,11 @@ pub(crate) fn produce_card_selection(
         let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
             continue;
         };
-        if node.group.is_some() || node.composite_asset.is_some() {
-            continue;
-        }
         super::cards::draw_selection_outline(writer, &theme, &node, depth.render);
     }
 }
 
-/// Group 持久选中描边 producer。
-pub(crate) fn produce_group_selection(
-    scene: Res<CurrentScene>,
-    index: Res<NodeIndex>,
-    theme: Res<ThemeResource>,
-    mut batch: ResMut<SelectionOutlineBatch>,
-    nodes: Query<(&CanvasNodeId, &CanvasDepth, &CanvasSelection, &GroupPresentation)>,
-) {
-    let writer = batch.writer();
-    for (id, depth, selection, _) in &nodes {
-        if !selection.selected {
-            continue;
-        }
-        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
-            continue;
-        };
-        super::group::draw_group_selection(writer, &theme, &node, depth.z);
-    }
-}
-
-/// FilmSet 持久选中描边 producer（面板范围框与纯模型范围框共用同一批次）。
-pub(crate) fn produce_film_set_selection(
-    scene: Res<CurrentScene>,
-    index: Res<NodeIndex>,
-    theme: Res<ThemeResource>,
-    mut batch: ResMut<SelectionOutlineBatch>,
-    nodes: Query<(&CanvasNodeId, &CanvasDepth, &CanvasSelection, &FilmSetPresentation)>,
-) {
-    let writer = batch.writer();
-    for (id, depth, selection, presentation) in &nodes {
-        if !selection.selected {
-            continue;
-        }
-        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
-            continue;
-        };
-        if presentation.panel {
-            super::scope_panel::draw_selection(writer, &theme, &node, depth.z);
-        } else {
-            super::film_set::draw_film_set_selection(writer, &theme, &node, depth.z);
-        }
-    }
-}
-
-/// 共享 overlay 几何：归属线、草稿线、拍摄归属、粘连操作条、聚合把手与框选。
+/// 共享 overlay 几何：草稿线、粘连操作条、聚合把手与框选。
 ///
 /// 只读取公共节点组件与瞬时 scene state；`shared_key` 未变化时跳过重建，但卡片/容器
 /// 几何与选中描边批次仍按各自 cache 独立提交。
@@ -322,7 +226,6 @@ pub(crate) fn sync_canvas_overlay(
     mut commands: Commands,
     scene: Res<CurrentScene>,
     index: Res<NodeIndex>,
-    model_assets: Res<ModelAssetTable>,
     theme: Res<ThemeResource>,
     mut visuals: ResMut<CanvasOverlayCache>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -333,10 +236,7 @@ pub(crate) fn sync_canvas_overlay(
     let source = &scene.0;
     let overlay = crate::canvas_query::focus_context::overlay(source);
     let scene = overlay.as_ref();
-    let ownership_links = super::ownership_links::segments(source, &model_assets.0);
     let mut shared_key = super::shared_key::SharedKey::new(scene, &theme);
-    shared_key.ownership_links = ownership_links.clone();
-    shared_key.focus_ownership_links = source.model_focus.is_some();
     if visuals.shared_key.as_ref() == Some(&shared_key) {
         flags.canvas_committed = true;
         return;
@@ -369,18 +269,20 @@ pub(crate) fn sync_canvas_overlay(
     requests.begin(CanvasLabelRole::Attach);
     let attach_base_z = overlay_z + 1.0;
     let mut geometry = Geometry::default();
-    super::ownership_links::draw(
-        &mut geometry,
-        &ownership_links,
-        &theme,
-        if source.model_focus.is_some() {
-            super::ownership_links::FOCUS_LINK_OPACITY
-        } else {
-            1.
-        },
-    );
     super::render_edges::draw_draft(&mut geometry, scene, &theme, &layouts);
-    super::render_edges::draw_shot_preview_links(&mut geometry, scene, &theme, &layouts, overlay_z);
+    // 多选选区背景带：低 z 的临时容器感，绘制在成员卡片之下。
+    if scene.aggregate_connect.is_some()
+        && crate::canvas_query::aggregate::selection_bounds(&scene.nodes, &scene.selection.nodes)
+            .is_some()
+    {
+        super::aggregate::draw_aggregate_selection_band(
+            &mut geometry,
+            &theme,
+            &nodes,
+            &scene.selection.nodes,
+            super::aggregate::SELECTION_BAND_Z,
+        );
+    }
 
     // 单节点拖动粘连 overlay（change: add-drag-touch-connections）：绘制在普通边与节点之后、
     // 框选之前；只被动消费语义投影，不执行碰撞或创建命令。

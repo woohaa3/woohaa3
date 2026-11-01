@@ -1,7 +1,3 @@
-import { decodeFilmSetGroupMarker } from "../film-set-group.js";
-import { decodeFilmSetAnimations } from "../film-set-animations.js";
-import { decodeFilmSetLocalTransform } from "../film-set-content.js";
-import { decodeInitialShotCamera } from "../canvas-node-model.js";
 /**
  * 节点生成历史：条目与 payload 的反序列化/校验
  * （自 `node-history.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R06）。
@@ -18,12 +14,10 @@ import {
 } from "../../validation.js";
 import { decodeModelCameras, type ModelCamera } from "../model-cameras.js";
 import { decodeImageEditDocument, decodeImageEditProjectObjectRef, isImageProjectDocument } from "../image-edit.js";
-import { decodeFilmSetContent } from "../film-set-content.js";
 import {
   NODE_GENERATION_HISTORY_VERSION,
   type NodeGenerationHistoryEntry,
   type NodeGenerationKind,
-  type NodeHistoryAnimationPayload,
   type NodeHistoryErrorCode,
   type NodeHistoryFailurePayload,
   type NodeHistoryImageEditBaseMetadata,
@@ -134,7 +128,7 @@ function decodeSourceSummary(input: unknown): NodeHistoryDecodeResult<NodeHistor
 function decodePayload(
   kind: NodeGenerationKind,
   input: unknown,
-  options: { acceptedContentVersions?: readonly number[] } = {}
+  _options: { acceptedContentVersions?: readonly number[] } = {}
 ): NodeHistoryDecodeResult<NodeHistoryPayload> {
   if (!isJsonObject(input)) return invalid("payload 必须是对象");
   if (input.kind === "failure") return decodeFailurePayload(kind, input);
@@ -148,13 +142,7 @@ function decodePayload(
     const language = input.language;
     const version = input.version;
     const sourceHash = input.sourceHash;
-    const animation = decodeAnimationPayload(input.animation, options);
-    if (input.animation !== undefined && animation === null) return invalid("模型 payload animation 非法");
-    // items-only 片场历史（schema 3）没有顶层 authored 模型：`modelScript` 允许为空，身份由完整
-    // 片场定义承担（D8/D10）。这只放宽 schema-3 片场分支，普通 model3d 仍必须带真实脚本，
-    // 也绝不造 placeholder 脚本冒充（change 2026-10-11-extract-film-set-extension）。
-    const filmSetAnimation = animation !== null && (animation.schemaVersion === 3 || animation.schemaVersion === 4);
-    if (typeof modelScript !== "string" || (!filmSetAnimation && modelScript.length === 0)) return invalid("模型 payload 缺少脚本");
+    if (typeof modelScript !== "string" || modelScript.length === 0) return invalid("模型 payload 缺少脚本");
     if (typeof language !== "string" || typeof version !== "string") return invalid("模型 payload descriptor 非法");
     if (typeof sourceHash !== "string" || sourceHash.length === 0) return invalid("模型 payload 缺少 sourceHash");
     const placement = decodeModelPlacement(input.placement);
@@ -174,8 +162,7 @@ function decodePayload(
         version,
         sourceHash,
         ...(placement ? { placement } : {}),
-        ...(modelCameras ? { modelCameras } : {}),
-        ...(animation ? { animation } : {})
+        ...(modelCameras ? { modelCameras } : {})
       }
     };
   }
@@ -236,56 +223,6 @@ function decodeFailureBaseline(input: unknown): NodeHistoryFailurePayload["basel
     baseline.outputAssetId = input.outputAssetId;
   }
   return baseline;
-}
-
-/**
- * 校验并归一化动画版本 payload（不受信任输入）；非法返回 null。
- *
- * `options.acceptedContentVersions` 只供**离线迁移**读取上一代坐标语义的片场内容；生产入口
- * 不传，因此在线读取仍严格拒绝旧坐标版本（change: 2026-10-23-isolate-film-set-camera-space，D5）。
- */
-export function decodeAnimationPayload(
-  input: unknown,
-  options: { acceptedContentVersions?: readonly number[] } = {}
-): NodeHistoryAnimationPayload | null {
-  if (!isJsonObject(input)) return null;
-  if (input.schemaVersion === 4) {
-    if (Object.keys(input).some(key => key !== "schemaVersion" && key !== "filmSetGroup")) return null;
-    const marker = decodeFilmSetGroupMarker(input.filmSetGroup);
-    return marker.ok ? { schemaVersion: 4, filmSetGroup: marker.value } : null;
-  }
-  // 片场 items-only payload（布局版本 3）：独立根 + 共享 items + 全部 clips；不另存顶层模型。
-  // 内部 `filmSetContent` 必须是当前 schema（场景单位）；旧坐标语义只由离线迁移转换
-  // （change: 2026-10-23-isolate-film-set-camera-space，design D5）。
-  if (input.schemaVersion === 3) {
-    if (["motionScript", "motionScriptVersion", "motionRevision", "motionSourceHash", "motionBasedOnModelVersion", "initialCamera", "timeline", "modelContentVersion", "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelContentVersion", "modelPlacement"].some(key => input[key] !== undefined)) return null;
-    const scenePlacement = decodeFilmSetLocalTransform(input.scenePlacement);
-    if (!scenePlacement.ok) return null;
-    const sceneCamera = decodeInitialShotCamera(input.sceneCamera);
-    if (!sceneCamera.ok) return null;
-    const content = decodeFilmSetContent(
-      input.filmSetContent,
-      options.acceptedContentVersions ? { acceptedVersions: options.acceptedContentVersions } : {}
-    );
-    if (!content.ok) return null;
-    const animations = decodeFilmSetAnimations(input.filmSetAnimations, content.value);
-    if (!animations.ok) return null;
-    const origin = decodeOrigin(input.origin);
-    return { schemaVersion: 3, scenePlacement: scenePlacement.value, sceneCamera: sceneCamera.value, filmSetContent: content.value, filmSetAnimations: animations.value, ...(origin ? { origin } : {}) };
-  }
-  return null;
-}
-
-function decodeOrigin(input: unknown): NodeHistoryAnimationPayload["origin"] | null {
-  if (!isJsonObject(input)) return null;
-  if (typeof input.importedModelContentHash !== "string" || input.importedModelContentHash.length === 0) return null;
-  if (typeof input.importedAt !== "string" || input.importedAt.length === 0) return null;
-  return {
-    ...(typeof input.sourceNodeId === "string" && input.sourceNodeId.length > 0 ? { sourceNodeId: input.sourceNodeId } : {}),
-    ...(typeof input.sourceCanvasId === "string" && input.sourceCanvasId.length > 0 ? { sourceCanvasId: input.sourceCanvasId } : {}),
-    importedModelContentHash: input.importedModelContentHash,
-    importedAt: input.importedAt
-  };
 }
 
 /** 校验并归一化模型摆放（不受信任输入）；非法返回 null。 */

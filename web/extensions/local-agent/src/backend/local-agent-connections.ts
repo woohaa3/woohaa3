@@ -82,10 +82,7 @@ async function issueToolGrant(
       canvasId: input.canvasId,
       nodeId: input.intent.nodeId ?? "",
       mode: input.intent.mode,
-      ...(input.intent.mode === "canvas-group" ? { expectedScopeEpoch: Number(input.intent.expectedContentHash?.slice("group-epoch:".length)) } : {}),
       ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
-      ...(input.intent.clipId ? { clipId: input.intent.clipId } : {}),
-      ...(input.intent.itemId ? { itemId: input.intent.itemId } : {}),
       tools
     });
     return grant.token;
@@ -94,7 +91,7 @@ async function issueToolGrant(
   }
 }
 
-const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d", "film-set"], tools: true, models: "remote" };
+const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d"], tools: true, models: "remote" };
 
 export function createLocalAgentDescriptors(): Record<string, ConnectionDescriptor> {
   const descriptors: Record<string, ConnectionDescriptor> = {};
@@ -240,7 +237,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     const toolCalls: string[] = [];
     let successfulWrite = false;
     let toolFailure: string | undefined;
-    const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_film_set_clips", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output", "wait_for_skill_step", "get_latest_skill_step_output"]);
+    const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output", "wait_for_skill_step", "get_latest_skill_step_output"]);
 
     const context = nativeContextFor(input, `${adapter.adapterId}:1`);
     const resourceKey = nativeContextKey(input.owner, connectionId, context);
@@ -339,7 +336,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
 
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ ...ADAPTER_CAPS, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: [...ADAPTER_CAPS.targets, ...(options.tools && options.mcpEndpoint ? ["canvas-group" as const] : [])] }),
+    capabilities: () => ({ ...ADAPTER_CAPS, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES }),
     authorization,
     models,
     run,

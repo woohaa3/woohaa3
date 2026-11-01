@@ -19,11 +19,6 @@ pub(crate) struct AnimationPlayback {
     pub(crate) generation: u32,
     #[serde(default)]
     pub(crate) view_mode: String,
-    /// `shot-node-preview` 模式的目标预览卡片 canonical 节点 id
-    /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D6）。
-    /// 缺失即无指定卡片。
-    #[serde(default, rename = "targetPreviewNodeId")]
-    pub(crate) target_preview_node_id: Option<String>,
 
     /// 活动动画节点 canonical id。
     pub(crate) node_id: String,
@@ -53,10 +48,6 @@ pub(crate) struct AnimationPlayback {
     pub(crate) camera_motion: Vec<crate::motion::RawCameraTrack>,
     #[serde(default)]
     pub(crate) model_motion: Vec<crate::motion::RawModelTrack>,
-    /// 片场内部对象的 child 运动（change: 2026-10-09-add-film-set-object-motion-and-editing）。
-    /// 按片场统一播放头 `time` 映射对象局部时间后求值；目标为组合作用域编码 id。
-    #[serde(default)]
-    pub(crate) objects: Vec<crate::protocol::FilmSetObjectMotion>,
 }
 
 /// 动画节点的初始镜头（与 `motion::InitialCameraState` 同构）。

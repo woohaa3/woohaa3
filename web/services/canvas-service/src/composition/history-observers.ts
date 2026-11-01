@@ -6,7 +6,6 @@
  */
 import { nodeHistoryKindForNodeType, type ServerCanvas } from "@woohaa3/contracts";
 import { NodeHistoryThumbnailJob } from "../model-renderer/index.js";
-import type { NodeHistoryThumbnailOptions } from "../model-renderer/node-history-thumbnail.js";
 import type { RendererClient } from "../model-renderer/index.js";
 import type { NodeHistoryApplicationService } from "../storage/core/node-history-service.js";
 import type { PptaskExecutionRecord } from "../sync/index.js";
@@ -127,7 +126,7 @@ export async function recordModelPlacementHistory(
     const record = command as { type?: unknown; nodeId?: unknown; value?: unknown };
     if (record.type !== "nodeData.patch" || typeof record.nodeId !== "string") continue;
     const value = record.value as Record<string, unknown> | undefined;
-    if (!value || (value.modelPlacement === undefined && value.filmSetGroup === undefined)) continue;
+    if (!value || value.modelPlacement === undefined) continue;
     const node = input.canvas.document.nodes.find((candidate) => candidate.id === record.nodeId);
     if (!node || nodeHistoryKindForNodeType(node.type, input.canvas.nodeData[node.id]) !== "model") continue;
     targets.add(record.nodeId);
@@ -149,9 +148,8 @@ export async function recordModelPlacementHistory(
  */
 export function createThumbnailPort(
   rendererClient: RendererClient,
-  service: NodeHistoryApplicationService,
-  prepareCompositeHistory?: NodeHistoryThumbnailOptions["prepareCompositeHistory"]
+  service: NodeHistoryApplicationService
 ): { render(input: { canvasId: string; nodeId: string; entryId: string }): Promise<{ ok: true; png: Buffer; cached: boolean } | { ok: false; code: string; message: string }> } {
-  const job = new NodeHistoryThumbnailJob({ service, rendererClient, prepareCompositeHistory });
+  const job = new NodeHistoryThumbnailJob({ service, rendererClient });
   return { render: (input) => job.render(input) };
 }

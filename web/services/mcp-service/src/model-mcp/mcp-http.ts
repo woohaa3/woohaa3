@@ -1,8 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { registerModelBatchTools } from "./batch-tools.js";
 import { registerExtensionTools } from "./extension-tools.js";
-import { registerFilmSetClipTools } from "./film-set-clip-tools.js";
-import { registerFilmSetExportTools } from "./film-set-export-tools.js";
 /**
  * Model Canvas MCP 的 Streamable HTTP 入口公共入口
  * （change: 2026-10-09-refactor-large-source-files-and-remove-compatibility R11 —— 拆分为
@@ -16,8 +14,6 @@ import { toNodeHandler } from "@modelcontextprotocol/node";
 import { registerAgentAuthoringTools } from "../agent-authoring/tools.js";
 import { registerModelTools } from "./model-tools.js";
 import { registerCameraTools } from "./camera-tools.js";
-import { registerAnimationTools } from "./animation-tools.js";
-import { registerFilmSetItemTool } from "./film-set-item-tools.js";
 import { normalizePath, toolError } from "./tool-results.js";
 import {
   MODEL_MCP_HTTP_PATH,
@@ -137,7 +133,7 @@ function extractBearer(request: Request | undefined): string | null {
 
 function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string | null, loopback: boolean): McpServer {
   const server = new McpServer({ name: "woohaa3-model-canvas", version: "1.0.0" });
-  const grantDenied = (tool: string, args: { canvasId?: unknown; nodeId?: unknown; nodeIds?: unknown; items?: unknown; cameraId?: unknown; clipId?: unknown; op?: unknown; itemId?: unknown }): string | null => {
+  const grantDenied = (tool: string, args: { canvasId?: unknown; nodeId?: unknown; nodeIds?: unknown; items?: unknown; cameraId?: unknown }): string | null => {
     if (!bearerToken) return null;
     if (!options.toolGrant) return "工具授权校验未装配";
     const result = options.toolGrant.authorize({
@@ -147,9 +143,7 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
       ...(typeof args.nodeId === "string" ? { nodeId: args.nodeId } : {}),
       ...(Array.isArray(args.nodeIds) ? { nodeIds: args.nodeIds.filter((id): id is string => typeof id === "string") } : {}),
       ...(Array.isArray(args.items) ? { nodeIds: args.items.flatMap(item => item && typeof item.nodeId === "string" ? [item.nodeId] : []) } : {}),
-      ...(typeof args.cameraId === "string" ? { cameraId: args.cameraId } : {}),
-      ...(typeof args.clipId === "string" ? { clipId: args.clipId } : {}),
-      ...(typeof args.op === "object" && args.op !== null && ["binding", "confirm-adaptation"].includes((args.op as { kind: string }).kind) && typeof (args.op as { itemId?: unknown }).itemId === "string" ? { itemId: (args.op as { itemId: string }).itemId } : typeof args.itemId === "string" ? { itemId: args.itemId } : {})
+      ...(typeof args.cameraId === "string" ? { cameraId: args.cameraId } : {})
     });
     return result.ok ? null : `工具授权校验失败：${result.reason}`;
   };
@@ -176,10 +170,6 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
   registerModelTools(reg, options);
   registerModelBatchTools(reg, options);
   registerCameraTools(reg, options);
-  registerAnimationTools(reg, options);
-  registerFilmSetItemTool(reg, options);
-  registerFilmSetClipTools(reg, options);
-  registerFilmSetExportTools(reg, options);
 
   if (options.agentAuthoring) registerAgentAuthoringTools(server, options.agentAuthoring);
   registerExtensionTools(server, options, { bearerToken, loopback });
@@ -189,10 +179,6 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
 
 /** 需经 grant 校验的写工具集合（读工具不需要预算）。 */
 const GRANTED_TOOLS = new Set([
-  "submit_film_set",
-  "mutate_film_set_clip",
-  "add_film_set_media",
-  "export_film_set_clip",
   "submit_model_script",
   "submit_model_scripts",
   "validate_model_scripts",
@@ -203,8 +189,6 @@ const GRANTED_TOOLS = new Set([
   "delete_model_camera",
   "rename_model_camera",
   "reset_model_camera",
-  "create_film_set_node",
-  "import_model_snapshot",
   "mutate_model_cameras",
   "mutate_model_cameras_batch"
 ]);

@@ -16,7 +16,7 @@ vi.mock("../../host.js", () => ({
 }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-it("shows materials and the AI creation entry synchronously without loading assistant data", async () => {
+it("shows materials synchronously without loading assistant data", async () => {
   const menu = { type: "canvas-context" as const, nodeId: null, screen: { x: 100, y: 100 }, world: { x: 40, y: 50 } };
   const listConnections = vi.fn();
   mocks.services = {
@@ -31,7 +31,6 @@ it("shows materials and the AI creation entry synchronously without loading assi
     act(() => root.render(<UiProvider><ContextMenuHost menu={menu} writable /></UiProvider>));
     const popover = document.querySelector('[data-testid="canvas-creation-popover"]')!;
     expect(popover.querySelector("textarea")!.placeholder).toBe("搜索素材…");
-    expect(popover.querySelector(".canvas-create__ai-entry")!.textContent).toContain("用 AI 创作");
     const material = popover.querySelector<HTMLButtonElement>(".canvas-create__grid button")!;
     act(() => material.click());
     expect(mocks.select).toHaveBeenCalledWith("insert:text", expect.anything());

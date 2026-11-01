@@ -14,17 +14,13 @@
  * 纯函数：只读取传入画布并用共享 reducer 模拟；不访问 DOM/网络/Yjs。
  */
 import { type ContentContributionResolver } from "./content-contribution.js";
-import { filmSetObjectOwnershipOf, isFilmSetObjectModelNode } from "./film-set-object-container.js";
 import { planPositionEdit } from "./edit-plan-position.js";
 import type { CanvasCommand } from "./commands.js";
 import { applyCanvasCommands } from "./command-reducer.js";
-import { isShotPreviewNodeType } from "./domain/core/shot-preview-node.js";
 import { managedNodeRelationOf } from "./managed-node.js";
 import type { EditOperation, EditPrecondition, EditFieldSnapshot, EditNodeField, EditNodeFieldSnapshot } from "./edit-command.js";
 import { decodeEditApplyCommand, EDIT_NODE_FIELDS, EDIT_NODE_DATA_FIELDS } from "./edit-command.js";
 import { planNodeDataFieldDiffs } from "./edit-plan-node-data.js";
-import { planFilmSetItemDiffs } from "./edit-plan-film-set.js";
-import { planFilmSetClipDiffs } from "./edit-plan-film-set-clip.js";
 import type { CanvasNodeData, ServerCanvas, Woohaa3CanvasSerializedNode } from "./domain/index.js";
 
 export type EditPlan = {
@@ -37,7 +33,7 @@ export type EditPlanFailure = { ok: false; reason: string };
 
 export type EditPlanResult = ({ ok: true } & EditPlan) | EditPlanFailure;
 
-const TEXTUAL_FIELDS: readonly EditNodeField[] = ["position", "width", "height", "parentId", "zIndex"];
+const TEXTUAL_FIELDS: readonly EditNodeField[] = ["position", "width", "height", "zIndex"];
 
 function isPlannable(command: CanvasCommand): boolean {
   switch (command.type) {
@@ -49,10 +45,6 @@ function isPlannable(command: CanvasCommand): boolean {
     case "edge.remove":
     case "nodeData.patch":
     case "canvas.setTitle":
-    case "filmSet.itemPatch":
-    case "filmSet.clipPatch":
-    case "filmSetGroup.bindingPatch":
-    case "filmSetGroup.ungroup":
       return true;
     default:
       return false;
@@ -127,12 +119,9 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   // Default object containers are also derived; recording their automatic creation would
   // make redo fail after reconciliation restores them during undo of a legacy scene edit.
   // Explicit removals remain in history so hide/delete undo restores the original layout.
-  const addedNodes = [...afterNodes.values()].filter((node) => !beforeNodes.has(node.id) && !isShotPreviewNodeType(node.type) && !managedNodeRelationOf(after.nodeData[node.id]) && !filmSetObjectOwnershipOf(after.nodeData[node.id]));
-  const removedNodes = [...beforeNodes.values()].filter((node) => !afterNodes.has(node.id) && !isShotPreviewNodeType(node.type) && !managedNodeRelationOf(before.nodeData[node.id]));
-  // Embedded model layout/content is derived from the container and film set. Do not
-  // replay its reconciliation as an independent move during resize or legacy hydration.
-  const commonNodes = [...afterNodes.values()].filter((node) => beforeNodes.has(node.id)
-    && !isFilmSetObjectModelNode(node, after.nodeData[node.id]));
+  const addedNodes = [...afterNodes.values()].filter((node) => !beforeNodes.has(node.id) && !managedNodeRelationOf(after.nodeData[node.id]));
+  const removedNodes = [...beforeNodes.values()].filter((node) => !afterNodes.has(node.id) && !managedNodeRelationOf(before.nodeData[node.id]));
+  const commonNodes = [...afterNodes.values()].filter((node) => beforeNodes.has(node.id));
   const addedEdges = [...afterEdges.values()].filter((edge) => !beforeEdges.has(edge.id));
   const removedEdges = [...beforeEdges.values()].filter((edge) => !afterEdges.has(edge.id));
 
@@ -169,26 +158,6 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   forwardPre.push(...dataPlan.forwardPre);
   inversePre.push(...dataPlan.inversePre);
 
-  // ---- 片场对象净差异：transform / remove / restore（change:
-  //      2026-10-10-improve-film-set-editing-and-inspector，任务 3.3 / design D6）。
-  //      只规划受支持的 item 级操作；遇到无法表达的对象内容/绑定变化则整批拒绝，
-  //      绝不筛掉不支持命令后提交部分成功。 ----
-  const filmSetPlan = planFilmSetItemDiffs(before, after, commonNodes);
-  if (!filmSetPlan.ok) return filmSetPlan;
-  forwardOps.push(...filmSetPlan.forwardOps);
-  inverseOps.push(...filmSetPlan.inverseOps);
-  forwardPre.push(...filmSetPlan.forwardPre);
-  inversePre.push(...filmSetPlan.inversePre);
-
-  // ---- 拍摄镜头定义与预览布局闭包（change: 2026-10-15，任务 2.5 / design D3）：
-  //      源镜头定义（含类型转换、删除恢复、默认切换）与受影响预览的完整布局进入受保护编辑。
-  //      正向/逆向都排在对象级操作**之后**：对象恢复需先建立 item，镜头定义才能引用它。 ----
-  const clipPlan = planFilmSetClipDiffs(before, after, commonNodes);
-  forwardOps.push(...clipPlan.forwardOps);
-  inverseOps.push(...clipPlan.inverseOps);
-  forwardPre.push(...clipPlan.forwardPre);
-  inversePre.push(...clipPlan.inversePre);
-
   const removedNodesOrdered = orderChildrenFirst(removedNodes);
   for (const edge of addedEdges) {
     forwardOps.push(edgeAddOperation(edge));
@@ -211,7 +180,6 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   for (const node of inverseRemoveAdded) {
     inverseOps.push({ kind: "node-remove", nodeIds: [node.id] });
     inversePre.push({ kind: "no-active-run", nodeIds: [node.id] });
-    inversePre.push({ kind: "child-ids", nodeId: node.id, childIds: childrenIn(after, node.id) });
     inversePre.push({
       kind: "incident-edge-ids",
       nodeId: node.id,
@@ -260,7 +228,6 @@ function nodeAddOperation(node: Woohaa3CanvasSerializedNode, source: ServerCanva
       position: { ...node.position },
       ...(node.width !== undefined ? { width: node.width } : {}),
       ...(node.height !== undefined ? { height: node.height } : {}),
-      ...(node.parentId !== undefined ? { parentId: node.parentId } : {}),
       ...(node.zIndex !== undefined ? { zIndex: node.zIndex } : {})
     },
     ...(data && Object.keys(data).length > 0 ? { nodeData: data } : {})
@@ -293,7 +260,6 @@ function updateOperationFor(
       case "width": operation.width = source.width; break;
       case "height": operation.height = source.height; break;
       case "zIndex": operation.zIndex = source.zIndex; break;
-      case "parentId": operation.parentId = source.parentId ?? null; break;
     }
   }
   return operation;
@@ -302,7 +268,6 @@ function updateOperationFor(
 function nodeFieldChanged(prev: Woohaa3CanvasSerializedNode, next: Woohaa3CanvasSerializedNode, field: EditNodeField): boolean {
   switch (field) {
     case "position": return prev.position.x !== next.position.x || prev.position.y !== next.position.y;
-    case "parentId": return (prev.parentId ?? null) !== (next.parentId ?? null);
     default: return prev[field] !== next[field];
   }
 }
@@ -315,10 +280,6 @@ function fieldPrecondition(canvas: ServerCanvas, nodeId: string, fields: readonl
     return raw === undefined ? { field, present: false } : { field, present: true, value: raw };
   });
   return { kind: "node-fields", nodeId, fields: snapshots };
-}
-
-function childrenIn(canvas: ServerCanvas, nodeId: string): string[] {
-  return canvas.document.nodes.filter((node) => node.parentId === nodeId).map((node) => node.id).sort();
 }
 
 function incidentEdgeIds(canvas: ServerCanvas, nodeId: string): string[] {

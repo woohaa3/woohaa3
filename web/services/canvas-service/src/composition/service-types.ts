@@ -1,4 +1,3 @@
-import type { FilmSetNodeOutcome, ReadFilmSetOutcome, ImportFilmSetContentOutcome } from "@woohaa3/contracts";
 /**
  * Canvas Service composition：公共装配类型
  * （change: split-web-runtime-services，任务 5.1–5.6；
@@ -26,17 +25,8 @@ import type { SnippetRepository } from "../storage/core/snippet-contracts.js";
 import type { NodeHistoryComposition } from "../storage/node-history-composition.js";
 import type { NodeHistoryRepository } from "../storage/core/node-history-contracts.js";
 import type { RendererClient } from "../model-renderer/index.js";
-import type { ModelMcpService, CreateFilmSetNodeOutcome } from "../model-mcp/index.js";
+import type { ModelMcpService } from "../model-mcp/index.js";
 import type { AgentCanvasInternalService } from "../agent-authoring/index.js";
-import type { MutateFilmSetItemOutcome } from "../model-mcp/internal-api.js";
-import type {
-  McpCreateFilmSetNodeRequest,
-  McpImportModelSnapshotRequest,
-  McpImportFilmSetContentRequest,
-  McpCommitAnimationRequest,
-  McpConfirmAdaptationRequest,
-  McpMutateFilmSetItemRequest
-} from "@woohaa3/contracts";
 import type { CanvasSourcePort } from "../import/contracts.js";
 import type { CanvasImportService } from "../import/service.js";
 import type { SqliteCanvasImportStore } from "../storage/sqlite/canvas-import.js";
@@ -60,17 +50,6 @@ export type CanvasServiceOptions = {
    * 注入后 canvas-service 不再 import 任何扩展实现；缺失的组在宿主侧明确不可用。
    */
   contentRuntime?: import("@woohaa3/contracts").CanvasContentRuntime;
-  /**
-   * 原生录制 submit/cancel/status（change: 2026-10-17-add-native-offscreen-film-set-recording）。
-   *
-   * 未注入时录制路由返回 503 `recording-unavailable`，前端据此显示具体原因。
-   */
-  recording?: import("@woohaa3/contracts").CanvasRecordingPort;
-  /**
-   * 当前主题的镜头预览清屏色（`#rrggbb`）；镜头背景为 `theme` 且 agent 经 MCP 导出时使用
-   * （change: 2026-10-19-extend-film-set-for-motion-graphics，D6）。
-   */
-  themeBackdrop?: () => string;
   /**
    * 资源/身份运行时开关（change: 2026-10-13-add-enterprise-access-and-production-deployment）。
    *
@@ -196,40 +175,6 @@ export type CanvasServiceOptions = {
    * change: 2026-10-13-...：统一认证器异步，返回 Promise（企业 identity provider 是异步解析）。
    */
   canvasSubjectResolver?: (req: IncomingMessage) => Promise<string | null>;
-  /**
-   * 单节点快捷「转为片场」的生成端口（Section 2 的公开 adapter；测试可注入）。
-   * 省略时图片/视频转换返回 `model-not-configured`，3D 直接复制仍可用
-   * （change: 2026-10-13-add-node-to-film-set-shortcut）。
-   */
-  filmSetConversionGenerator?: import("@woohaa3/contracts").FilmSetConversionGenerator;
-  filmSetConversionExecution?: import("@woohaa3/contracts").ContentConversionExecutionPort;
-  /**
-   * 转换模型提供方 capability 集合（宿主按扩展激活结果注入）。
-   * 提供时服务端在调用上游之前解析实际模型并强制能力门禁（design D6）；
-   * 省略时按注入的 `filmSetConversionGenerator` 自身边界处理（测试/无宿主路径）。
-   */
-  filmSetConversionProviders?: readonly import("@woohaa3/contracts").FilmSetConversionProvider[]
-    | (() => readonly import("@woohaa3/contracts").FilmSetConversionProvider[]);
-  /**
-   * 「转为片场」的 owner 解析（宿主按扩展提供方的 `resolveOwner` 注入）。
-   * 提供时转换路由在 HTTP 边界解析 owner（生产 `principal:`、本地开发受控会话 `local:`，
-   * 可能附带 `Set-Cookie`）并冻结进记录；省略时生成端按自身边界处理。
-   */
-  filmSetConversionOwnerResolver?: (input: {
-    subject?: string;
-    cookie?: string;
-  }) => import("@woohaa3/contracts").FilmSetConversionOwner | null;
-  /** 媒体读取/抽帧端口（宿主注入 Media 能力）；提供方生成器据此读取真实内容。 */
-  filmSetConversionMediaReader?: import("@woohaa3/contracts").FilmSetConversionMediaReader;
-  /**
-   * 稳定媒体字节来源（宿主 Media 能力的 `read`）；由 canvas 侧组合成
-   * `FilmSetConversionMediaReader`（含 film-set 的有界 CPU 抽帧）。
-   * 与 `filmSetConversionMediaReader` 二选一，后者优先。
-   *
-   * `canvasId` 可选：远端画布的素材只在服务端托管存储里（键 `<canvasId>/media/<key>`），
-   * 转片场调用时用记录里的 `record.canvasId` 透传；省略表示与画布无关（保持旧行为）。
-   */
-  filmSetConversionMediaRead?: (storageKey: string, canvasId?: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
 };
 
 /** 画布媒体字节的远端同步状态（宿主维护）。 */
@@ -301,8 +246,6 @@ export type CanvasService = {
   reconcileProvisioningReservations: (input?: { reservedBefore?: string }) => Promise<{ finalized: string[]; cleaned: string[]; failed: string[] } | null>;
   runService: CanvasRunService | null;
   consumer: TaskResultConsumer | null;
-  /** 单节点快捷「转为片场」（change: 2026-10-13-add-node-to-film-set-shortcut）。 */
-  filmSetConversionService: import("@woohaa3/contracts").FilmSetConversionServicePort | null;
   composition: CanvasStorageComposition | null;
   snippets: SnippetComposition | null;
   nodeHistory: NodeHistoryComposition | null;  writerLock: CanvasWriterLock | null;
@@ -311,15 +254,5 @@ export type CanvasService = {
   mcpServices: () => {
     modelMcp: ModelMcpService | null;
     agent: AgentCanvasInternalService | null;
-    createFilmSetNode: ((input: McpCreateFilmSetNodeRequest & { canvasId: string }) => Promise<CreateFilmSetNodeOutcome>) | null;
-    importModelSnapshot: ((input: McpImportModelSnapshotRequest & { canvasId: string }) => Promise<CreateFilmSetNodeOutcome>) | null;
-    importFilmSetContent: ((input: McpImportFilmSetContentRequest & { canvasId: string }) => Promise<ImportFilmSetContentOutcome>) | null;
-    commitAnimation: ((input: McpCommitAnimationRequest & { canvasId: string; nodeId: string; requestId: string }) => Promise<FilmSetNodeOutcome>) | null;
-    confirmAdaptation: ((input: McpConfirmAdaptationRequest & { canvasId: string; nodeId: string; requestId: string }) => Promise<FilmSetNodeOutcome>) | null;
-    readAnimation: ((input: { canvasId: string; nodeId: string }) => Promise<ReadFilmSetOutcome>) | null;
-    mutateFilmSetItem: ((input: McpMutateFilmSetItemRequest & { canvasId: string }) => Promise<MutateFilmSetItemOutcome>) | null;
-    addFilmSetMedia?: ((input: import("@woohaa3/contracts").McpAddFilmSetMediaRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>) | null;
-    exportFilmSetClip?: ((input: import("@woohaa3/contracts").McpExportFilmSetClipRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>) | null;
-    getFilmSetExport?: ((input: import("@woohaa3/contracts").McpGetFilmSetExportRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>) | null;
   };
 };

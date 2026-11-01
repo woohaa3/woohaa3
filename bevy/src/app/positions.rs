@@ -1,46 +1,27 @@
-//! Stable full-scene slots and scope offsets; position frames touch moved IDs only.
+//! Stable full-scene slots; position frames touch moved IDs only.
 use crate::protocol::{NodePosition, Scene};
 use bevy::prelude::*;
 use std::collections::HashMap;
 
 #[derive(Resource, Default)]
-pub(crate) struct PositionIndex(HashMap<String, (usize, Option<Vec2>)>);
+pub(crate) struct PositionIndex(HashMap<String, usize>);
 impl PositionIndex {
     pub(super) fn reset(&mut self, scene: &Scene) {
         self.0 = scene
             .nodes
             .iter()
             .enumerate()
-            .map(|(i, n)| {
-                (
-                    n.id.clone(),
-                    (
-                        i,
-                        n.composite_asset
-                            .as_ref()
-                            .map(|s| Vec2::new(s.x - n.x, s.y - n.y)),
-                    ),
-                )
-            })
+            .map(|(i, n)| (n.id.clone(), i))
             .collect();
     }
     pub(super) fn apply(&self, scene: &mut Scene, positions: HashMap<String, NodePosition>) {
         for (id, p) in positions {
-            let Some(&(index, offset)) = self.0.get(&id) else {
+            let Some(&index) = self.0.get(&id) else {
                 continue;
             };
             let node = &mut scene.nodes[index];
-            let delta = Vec2::new(p.x - node.x, p.y - node.y);
             node.x = p.x;
             node.y = p.y;
-            if let (Some(scope), Some(offset)) = (&mut node.composite_asset, offset) {
-                scope.x = p.x + offset.x;
-                scope.y = p.y + offset.y;
-                if let Some(ground) = &mut scope.scope_ground {
-                    ground.cx += delta.x;
-                    ground.cy += delta.y;
-                }
-            }
         }
     }
 }
@@ -48,100 +29,31 @@ impl PositionIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        app::{CurrentScene, FilmSetTextureBatch, FrameFlags, ModelAssetTable, TextureBatch},
-        bridge,
-        theme::ThemeResource,
-    };
-    use bevy::ecs::system::RunSystemOnce;
 
-    fn scene() -> Scene {
-        Scene {
-            nodes: serde_json::from_value(serde_json::json!([
-                {"id":"a","type":"text","x":0,"y":0},
-                {"id":"film","type":"model","x":100,"y":200,
-                    "compositeAsset":{"x":120,"y":240,"width":300,"height":200,
-                        "scopeGround":{"cx":250,"cy":340,"hx":100,"hz":100}}}
-            ]))
+    #[test]
+    fn positions_move_body_and_ignore_unknown_ids() {
+        let mut scene = Scene::default();
+        scene.nodes.push(
+            serde_json::from_value(serde_json::json!({
+                "id":"a","type":"text","x":10,"y":20,"width":100,"height":50
+            }))
             .unwrap(),
-            ..default()
-        }
-    }
-    fn row(id: &str, x: f32, y: f32) -> NodePosition {
-        NodePosition {
-            id: id.into(),
-            x,
-            y,
-        }
-    }
-    #[test]
-    fn merged_positions_and_viewport_apply_after_pending_full_scene() {
-        let mut world = World::new();
-        world.insert_resource(CurrentScene::default());
-        // `ingest_bridge` 在读入完整场景后重建同代节点索引（design D7 / 任务 7.2）。
-        world.insert_resource(crate::app::NodeIndex::default());
-        world.insert_resource(PositionIndex::default());
-        world.insert_resource(FrameFlags::default());
-        world.insert_resource(ModelAssetTable::default());
-        world.insert_resource(TextureBatch::default());
-        world.insert_resource(FilmSetTextureBatch::default());
-        world.insert_resource(ThemeResource::default());
-        world.insert_resource(ClearColor::default());
-        // `ingest_bridge` 每帧消费图片聚焦细节批次；缺该资源会让系统参数校验失败
-        // （既有测试缺口，change: 2026-10-23-scale-canvas-media-residency 任务 10.2 修正）。
-        world.insert_resource(crate::canvas2d::focus_details::FocusDetailBatch::default());
-        bridge::queue_scene(scene());
-        bridge::queue_positions(vec![row("a", 40., 50.), row("film", 200., 300.)], None);
-        bridge::queue_viewport(crate::protocol::Viewport {
-            x: 20.,
-            y: 30.,
-            zoom: 0.5,
-        });
-        bridge::queue_positions(vec![row("a", 70., 80.)], None);
-        world
-            .run_system_once(crate::app::input::ingest_bridge)
-            .unwrap();
-        let current = &world.resource::<CurrentScene>().0;
-        assert_eq!((current.nodes[0].x, current.nodes[0].y), (70., 80.));
-        assert_eq!((current.nodes[1].x, current.nodes[1].y), (200., 300.));
-        let scope = current.nodes[1].composite_asset.as_ref().unwrap();
-        assert_eq!((scope.x, scope.y), (220., 340.));
-        assert_eq!(
-            (
-                current.viewport.x,
-                current.viewport.y,
-                current.viewport.zoom
-            ),
-            (20., 30., 0.5)
         );
-        let flags = world.resource::<FrameFlags>();
-        assert!(flags.scene_received && flags.positions_received);
-        assert!(!flags.viewport_only);
-        bridge::queue_positions(vec![row("a", 300., 400.)], None);
-        bridge::queue_scene(scene()); // later full replaces every preceding increment
-        world
-            .run_system_once(crate::app::input::ingest_bridge)
-            .unwrap();
-        assert_eq!(world.resource::<CurrentScene>().0.nodes[0].x, 0.);
-        assert!(!world.resource::<FrameFlags>().positions_received);
-    }
-    #[test]
-    fn scope_translation_uses_full_baseline_offset_without_accumulating_drift() {
-        let mut scene = scene();
         let mut index = PositionIndex::default();
         index.reset(&scene);
-        for i in 0..200 {
-            let x = i as f32 * 0.13;
-            let y = i as f32 * 0.17;
-            index.apply(
-                &mut scene,
-                HashMap::from([("film".into(), row("film", x, y))]),
-            );
-            let scope = scene.nodes[1].composite_asset.as_ref().unwrap();
-            assert_eq!((scope.x, scope.y), (x + 20., y + 40.));
-            let ground = scope.scope_ground.as_ref().unwrap();
-            assert!((ground.cx - (x + 150.)).abs() < 0.001);
-            assert!((ground.cy - (y + 140.)).abs() < 0.001);
-        }
+        index.apply(
+            &mut scene,
+            [(
+                "a".to_owned(),
+                NodePosition {
+                    id: "a".into(),
+                    x: 40.0,
+                    y: 60.0,
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!((scene.nodes[0].x, scene.nodes[0].y), (40.0, 60.0));
     }
 }

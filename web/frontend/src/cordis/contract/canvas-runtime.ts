@@ -28,9 +28,6 @@ export interface CanvasRuntimeService {
   controller(): InteractionController | null;
   runtime(): BevyRuntime | null;
   resourceResidencyDiagnostics?(): unknown;
-  overviewCacheDiagnostics?(): unknown;
-  setOverviewCacheBenchmarkDisabled?(disabled: boolean): void;
-  syncOverviewCache?(inputs: readonly import("../plugins/canvas-runtime/overview-cache.js").OverviewCacheInput[]): void;
   cancelTransientGesture(): void;
   /**
    * 最近一次有效画布指针的世界坐标（change: add-paste-import-workflows，design D6）。
@@ -53,8 +50,6 @@ export interface CanvasRuntimeService {
    * 未挂载控制器时返回 `unavailable`；调用方 MUST NOT 回退 TS 矩形几何。
    */
   queryDropTarget(point: { x: number; y: number }, excludedIds?: readonly string[]): import("../plugins/canvas-shell/interaction-core.js").InteractionQuery<string | null>;
-  /** 复合资产范围几何读取（拖动提示消费，按 accepted generation）。 */
-  queryCompositeAssetScopes(): import("../plugins/canvas-shell/interaction-core.js").InteractionQuery<import("../plugins/canvas-runtime/bevy-runtime.js").CompositeAssetScopeGeometryEntry[]>;
   /** 本地视口版本号；随 pan/zoom 递增（供 overlay 用 useSyncExternalStore 重排）。 */
   viewportVersion(): number;
   subscribeViewport(listener: () => void): () => void;
@@ -231,12 +226,6 @@ export interface CanvasRuntimeService {
    */
   notifyAnimationTime?(input: { nodeId: string | null; time: number; playing: boolean }): void;
   /**
-   * 当前片场媒体会话（change: 2026-10-08-make-film-set-model-only）。
-   *
-   * 供截图路径在离屏绘制前等待视频目标帧就绪；未挂载时为 null。
-   */
-  compositeAssetMediaSessions?(): import("../plugins/canvas-runtime/composite-asset-media-session.js").CompositeAssetMediaSessions | null;
-  /**
    * 模型编辑 gizmo 命中与轴拖动约束（Bevy WASM 相机/bounds 事实源）
    * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 5.4）。
    */
@@ -263,39 +252,6 @@ export interface CanvasRuntimeService {
   setShotWheel(
     handler: import("../plugins/canvas-shell/interaction-controller.js").InteractionControllerOptions["shotWheel"] | null
   ): void;
-  /**
-   * 注入/替换片场对象模式手势处理器
-   * （change: 2026-10-09-add-film-set-object-motion-and-editing）。
-   */
-  setFilmSetObjectGesture(
-    handler: import("../plugins/canvas-shell/interaction-controller.js").InteractionControllerOptions["filmSetObjectGesture"] | null
-  ): void;
-  /**
-   * 注入/替换片场对象局部键盘 action
-   * （change: 2026-10-10-improve-film-set-editing-and-inspector）。
-   */
-  setFilmSetObjectAction(
-    handler: import("../plugins/canvas-shell/interaction-controller.js").InteractionControllerOptions["filmSetObjectAction"] | null
-  ): void;
-  /** 当前已接受的 interaction generation（供对象 picking 的 generation 守卫）。 */
-  interactionGeneration(): number;
-  /**
-   * 片场对象 picking（聚焦透视相机 + 同帧组合几何）
-   * （change: 2026-10-09-add-film-set-object-motion-and-editing）。
-   */
-  queryCompositeAssetItemPick(input: {
-    nodeId: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    projection: { target: [number, number, number]; yaw: number; pitch: number; distance: number };
-  }): { nodeId: string; itemId: string } | null;
-  /**
-   * 片场对象世界包围盒（选中反馈/gizmo 定位）
-   * （change: 2026-10-09-add-film-set-object-motion-and-editing）。
-   */
-  queryCompositeAssetItemBounds(nodeId: string): Array<{ itemId: string; center: [number, number, number]; radius: number; unit: number; yaw: number; worldToLocal?: number[] }>;
   /**
    * 暂停活动动画播放头（编辑对象前调用；change: 2026-10-09-add-film-set-object-motion-and-editing）。
    * 无活动播放或未接线时为 no-op。

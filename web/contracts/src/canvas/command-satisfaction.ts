@@ -1,4 +1,3 @@
-import { establishItemMotionAdapter } from "./film-set-content.js";
 /**
  * 命令后置条件判定（change: add-frontend-speculative-canvas-state，任务 1.3）。
  *
@@ -14,10 +13,6 @@ import type { EditOperation } from "./edit-command.js";
 import { decodeEditApplyCommand } from "./edit-command.js";
 import type { ServerCanvas } from "./domain/index.js";
 import { snapGraphPosition } from "./domain/core/serialization.js";
-import { decodeFilmSetNodeData } from "./canvas-node-model.js";
-import { filmSetAnimationsOf } from "./film-set-clip-view.js";
-import { readFilmSetContent } from "./film-set-content.js";
-import { readFilmSetGroupMarker } from "./film-set-group.js";
 
 /** 读取节点（缺失返回 undefined）。 */
 function findNode(canvas: ServerCanvas, nodeId: string) {
@@ -71,10 +66,6 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
       if (command.width !== undefined && node.width !== command.width) return false;
       if (command.height !== undefined && node.height !== command.height) return false;
       if (command.zIndex !== undefined && node.zIndex !== command.zIndex) return false;
-      if (command.parentId !== undefined) {
-        const expected = command.parentId === null ? undefined : command.parentId;
-        if (node.parentId !== expected) return false;
-      }
       return true;
     }
     case "node.remove":
@@ -85,45 +76,6 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
       if (!data) return false;
       return Object.entries(command.value).every(([key, value]) => shallowEqual(data[key], value));
     }
-    case "filmSet.clipPatch": {
-      const decoded = decodeFilmSetNodeData(canvas.nodeData[command.nodeId]);
-      if (!decoded.ok) return false;
-      const collection = filmSetAnimationsOf(decoded.value);
-      const clip = collection.clips.find(clip => clip.id === command.clipId);
-      const op = command.op;
-      if (op.kind === "delete") return !clip;
-      if (op.kind === "set-default") return collection.defaultClipId === command.clipId;
-      if (op.kind === "duplicate") return collection.clips.some(clip => clip.id === op.newClipId);
-      if (!clip) return false;
-      if (op.kind === "create" || op.kind === "replace") return shallowEqual(clip, op.clip);
-      if (op.kind === "rename") return clip.name === op.name.trim();
-      if (op.kind === "timeline") return shallowEqual(clip.timeline, op.timeline);
-      if (op.kind === "camera") return shallowEqual(clip.initialCamera, op.initialCamera);
-      if (op.kind === "camera-motion") return shallowEqual(clip.cameraMotion, op.cameraMotion);
-      if (op.kind === "binding") return shallowEqual(clip.bindings.find(binding => binding.itemId === op.itemId) ?? null, op.binding);
-      if (op.kind === "confirm-adaptation") {
-        const item = decoded.value.filmSetContent.items.find(item => item.id === op.itemId);
-        const motion = clip.bindings.find(binding => binding.itemId === op.itemId)?.motion;
-        return !!item && !!motion && motion.basedOnModelVersion.contentHash === establishItemMotionAdapter(item).contentHash;
-      }
-      return false;
-    }
-    case "filmSet.itemPatch":
-      // 对象级操作的后置条件：按稳定 itemId 观察结果，不做数组序号比较。
-      // 具体内容由服务端 reducer 派生，这里只要求目标 item 的期望状态成立。
-      return filmSetItemSatisfied(canvas, command);
-    case "filmSetGroup.bindingPatch": {
-      const marker = readFilmSetGroupMarker(canvas.nodeData[command.groupId]);
-      const binding = marker?.sceneBindings.find(entry => entry.bindingId === command.bindingId);
-      if (!binding) return false;
-      if (command.patch.animation !== undefined && JSON.stringify(binding.animation) !== JSON.stringify(command.patch.animation)) return false;
-      if (command.patch.contentKey !== undefined && binding.contentKey !== command.patch.contentKey) return false;
-      if (command.patch.visibility !== undefined && binding.visibility !== command.patch.visibility) return false;
-      if (command.patch.transform !== undefined && !shallowEqual(binding.transform, command.patch.transform)) return false;
-      return true;
-    }
-    case "filmSetGroup.ungroup":
-      return !findNode(canvas, command.groupId) && !readFilmSetGroupMarker(canvas.nodeData[command.groupId]);
     case "extension.command": {
       const owner = content?.resolve(command.extensionId)?.commands;
       if (!owner || !owner.kinds.includes(command.kind)) return false;
@@ -177,10 +129,6 @@ function isEditOperationSatisfied(canvas: ServerCanvas, operation: EditOperation
       if (operation.width !== undefined && node.width !== operation.width) return false;
       if (operation.height !== undefined && node.height !== operation.height) return false;
       if (operation.zIndex !== undefined && node.zIndex !== operation.zIndex) return false;
-      if (operation.parentId !== undefined) {
-        const expected = operation.parentId === null ? undefined : operation.parentId;
-        if (node.parentId !== expected) return false;
-      }
       return true;
     }
     case "node-remove":
@@ -201,46 +149,6 @@ function isEditOperationSatisfied(canvas: ServerCanvas, operation: EditOperation
     }
     case "canvas-title-set":
       return (canvas.title ?? "") === operation.title;
-    case "film-set-item-set": {
-      const animation = decodeFilmSetNodeData(canvas.nodeData[operation.nodeId]);
-      return animation.ok && shallowEqual(animation.value.filmSetContent.items.find(item => item.id === operation.item.id), operation.item);
-    }
-    case "film-set-item-transform": {
-      const animation = decodeFilmSetNodeData(canvas.nodeData[operation.nodeId]);
-      if (!animation.ok) return false;
-      const item = animation.value.filmSetContent.items.find((entry) => entry.id === operation.itemId);
-      return !!item && shallowEqual(item.localTransform, operation.localTransform);
-    }
-    case "film-set-item-remove": {
-      const animation = decodeFilmSetNodeData(canvas.nodeData[operation.nodeId]);
-      if (!animation.ok) return false;
-      return !animation.value.filmSetContent.items.some((entry) => entry.id === operation.itemId);
-    }
-    case "film-set-item-restore": {
-      const animation = decodeFilmSetNodeData(canvas.nodeData[operation.nodeId]);
-      if (!animation.ok) return false;
-      const item = animation.value.filmSetContent.items.find((entry) => entry.id === operation.item.id);
-      if (!item) return false;
-      const content = filmSetAnimationsOf(animation.value);
-      return operation.bindings.every((restore) => {
-        const binding = content.clips.find((clip) => clip.id === restore.clipId)?.bindings.find((entry) => entry.itemId === operation.item.id);
-        return shallowEqual(binding ?? null, restore.binding);
-      });
-    }
-    case "film-set-clip-set": {
-      const animation = decodeFilmSetNodeData(canvas.nodeData[operation.nodeId]);
-      if (!animation.ok) return false;
-      const content = filmSetAnimationsOf(animation.value);
-      const clip = content.clips.find((entry) => entry.id === operation.clipId);
-      return !!clip && shallowEqual(clip, operation.clip) && content.defaultClipId === operation.defaultClipId;
-    }
-    case "film-set-clip-remove": {
-      const animation = decodeFilmSetNodeData(canvas.nodeData[operation.nodeId]);
-      if (!animation.ok) return false;
-      const content = filmSetAnimationsOf(animation.value);
-      return !content.clips.some((entry) => entry.id === operation.clipId)
-        && content.defaultClipId === operation.defaultClipId;
-    }
   }
 }
 
@@ -250,29 +158,6 @@ function positionSatisfied(
 ): boolean {
   return actual.x === snapGraphPosition(requested.x)
     && actual.y === snapGraphPosition(requested.y);
-}
-
-/**
- * 片场对象级命令后置条件（change: 2026-10-09-add-film-set-object-motion-and-editing，任务 2.3）。
- *
- * 按稳定 itemId 观察：删除要求对象消失；transform/motion/playback 要求对象存在且新值成立。
- * 只读取命令声明的字段，不做数组序号比较。
- */
-function filmSetItemSatisfied(
-  canvas: ServerCanvas,
-  command: Extract<CanvasCommand, { type: "filmSet.itemPatch" }>
-): boolean {
-  const content = readFilmSetContent(canvas.nodeData[command.nodeId]);
-  const item = content.items.find((entry) => entry.id === command.itemId);
-  if (command.op.kind === "delete") return item === undefined;
-  if (!item) return false;
-  switch (command.op.kind) {
-    case "transform":
-      return shallowEqual(item.localTransform, command.op.localTransform);
-    case "replace-model":
-      return item.kind === "model" && item.model.contentVersion.sourceHash === command.op.expectedSourceHash && item.model.contentVersion.contentHash === command.op.expectedModelHash
-        && item.origin?.sourceNodeId === command.op.sourceNodeId && item.origin.importedAt === command.op.importedAt;
-  }
 }
 
 function shallowEqual(left: unknown, right: unknown): boolean {

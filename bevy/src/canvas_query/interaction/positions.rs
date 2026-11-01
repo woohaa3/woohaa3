@@ -1,8 +1,7 @@
 //! Plan every affected node/edge before mutating the current query snapshot.
 use super::snapshot::{InteractionSnapshot, SnapshotEdge, SnapshotNode};
-use crate::canvas_query::scope::{ScopeGrip, ScopeRect};
 use crate::{
-    canvas_query::{aggregate::aggregate_handle, curve, layout, scope},
+    canvas_query::{aggregate::aggregate_handle, curve, grip::ResizeGrip, layout},
     protocol::NodePosition,
 };
 use bevy::prelude::*;
@@ -47,11 +46,7 @@ pub(super) fn edge_geometry(
 }
 
 fn port(node: &SnapshotNode, output: bool) -> Vec2 {
-    let (x, y, w, h) = if node.group_collapsed {
-        node.bounds
-    } else {
-        node.layout_bounds
-    };
+    let (x, y, w, h) = node.layout_bounds;
     layout::port_for_bounds(x, y, w, h, output)
 }
 fn rect_finite(rect: (f32, f32, f32, f32)) -> bool {
@@ -71,77 +66,30 @@ fn relocate(node: &SnapshotNode, p: &NodePosition) -> Result<SnapshotNode, &'sta
     let (_, _, w, h) = node.layout_bounds;
     next.layout_bounds = (p.x, p.y, w, h);
     let delta = Vec2::new(p.x - node.layout_bounds.0, p.y - node.layout_bounds.1);
-    for point in &mut next.group_outline {
-        *point += delta;
-    }
-    for point in &mut next.group_badge {
-        *point += delta;
-    }
-    // 复合资产范围几何是基准矩形/形状/地面的仿射派生，对平移封闭：整体位移即可与
-    // 全量 `build_snapshot` 一致（无需重跑 `node_scope`）。
-    next.scope = node.scope.map(|scope| {
-        scope::translate(
-            &scope,
-            Vec2::new(p.x - node.layout_bounds.0, p.y - node.layout_bounds.1),
-        )
-    });
-    next.bounds = match &next.scope {
-        Some(scope) => (
-            scope.aabb.x,
-            scope.aabb.y,
-            scope.aabb.width,
-            scope.aabb.height,
-        ),
-        None => (
-            node.bounds.0 + delta.x,
-            node.bounds.1 + delta.y,
-            node.bounds.2,
-            node.bounds.3,
-        ),
-    };
+    next.bounds = (
+        node.bounds.0 + delta.x,
+        node.bounds.1 + delta.y,
+        node.bounds.2,
+        node.bounds.3,
+    );
     next.center = node.center + delta;
     next.input_port = node.input_port.map(|_| port(&next, false));
     next.output_port = node.output_port.map(|_| port(&next, true));
     next.history_strip = node
         .history_strip
         .map(|_| layout::history_strip_rect(p.x, p.y, w, h));
-    next.group_status = node.group_status.map(|r| {
-        (
-            r.0 + p.x - node.layout_bounds.0,
-            r.1 + p.y - node.layout_bounds.1,
-            r.2,
-            r.3,
-        )
-    });
     // 横条不对平移封闭（边缘避让、上下回退）；commit 后按当前视口重算。
     next.node_actions = None;
     next.preview = node
         .preview
         .map(|_| layout::content_rect_for_bounds(p.x, p.y, w, h));
-    next.resize = node.resize.and_then(|grip| {
-        next.scope.as_ref().map(scope::grip).or_else(|| {
-            Some(match grip {
-                ScopeGrip::Corners(_) => scope::corners_grip(layout::resize_corner_rects(
-                    next.bounds.0,
-                    next.bounds.1,
-                    next.bounds.2,
-                    next.bounds.3,
-                )),
-                _ => ScopeGrip::Rect(ScopeRect {
-                    x: next.bounds.0 + next.bounds.2 - layout::RESIZE_HANDLE_SIZE,
-                    y: next.bounds.1 + next.bounds.3 - layout::RESIZE_HANDLE_SIZE,
-                    width: layout::RESIZE_HANDLE_SIZE,
-                    height: layout::RESIZE_HANDLE_SIZE,
-                }),
-            })
-        })
+    next.resize = node.resize.map(|_| {
+        ResizeGrip::for_bounds(next.bounds.0, next.bounds.1, next.bounds.2, next.bounds.3)
     });
     if !rect_finite(next.layout_bounds)
         || !rect_finite(next.bounds)
         || !next.center.is_finite()
-        || next.group_outline.iter().any(|p| !p.is_finite())
-        || next.group_badge.iter().any(|p| !p.is_finite())
-        || [next.history_strip, next.group_status, next.preview]
+        || [next.history_strip, next.preview]
             .into_iter()
             .flatten()
             .any(|r| !rect_finite(r))
@@ -160,16 +108,9 @@ fn relocate(node: &SnapshotNode, p: &NodePosition) -> Result<SnapshotNode, &'sta
     Ok(next)
 }
 
-/// 抓手几何有限性：矩形直接判矩形；8 抓手判全部中心点。
-fn grip_finite(grip: Option<&ScopeGrip>) -> bool {
-    match grip {
-        None => true,
-        Some(ScopeGrip::Rect(rect)) => rect_finite((rect.x, rect.y, rect.width, rect.height)),
-        Some(ScopeGrip::Corners(rects)) => rects
-            .iter()
-            .all(|rect| rect_finite((rect.x, rect.y, rect.width, rect.height))),
-        Some(ScopeGrip::Handles(handles)) => handles.iter().all(|handle| handle.is_finite()),
-    }
+/// 抓手几何有限性。
+fn grip_finite(grip: Option<&ResizeGrip>) -> bool {
+    grip.is_none_or(|rect| rect_finite((rect.x, rect.y, rect.width, rect.height)))
 }
 
 pub(super) fn plan(
@@ -228,11 +169,7 @@ pub(super) fn plan(
         let mut hi = Vec2::splat(f32::NEG_INFINITY);
         for &index in &snapshot.aggregate_selection {
             let node = node_at(index);
-            let (x, y, w, h) = if node.group_collapsed {
-                node.bounds
-            } else {
-                node.layout_bounds
-            };
+            let (x, y, w, h) = node.layout_bounds;
             lo = lo.min(Vec2::new(x, y));
             hi = hi.max(Vec2::new(x + w, y + h));
         }

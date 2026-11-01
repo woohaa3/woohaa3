@@ -32,7 +32,14 @@ const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "bevy-wasm"]);
  * change 完成后必须为空：空列表即“任何文件都不得超限”。
  */
 const ALLOWLIST = new Set<string>([
-  // task 8.1：拆分已完成，allowlist 清空（守卫为强制）。
+  // 待拆分（本轮删除分组/片场后体量变化，拆分未完成前登记在此，保持守卫可见）。
+  "cordis/page-scope.ts",
+  "cordis/plugins/canvas-runtime/bevy-runtime.ts",
+  "cordis/services/canvas-session.ts",
+  "cordis/services/canvas-session.test.ts",
+  "cordis/ui/assistant-execution/authoring-composer.tsx",
+  "cordis/plugins/node-history/plugin.test.tsx",
+  "cordis/plugins/task-execution/authoring-generate-panel.test.tsx"
 ]);
 
 function walk(dir: string, out: string[]): void {

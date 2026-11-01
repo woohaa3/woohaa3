@@ -1,6 +1,6 @@
 /** Shared canvas children of a composite asset. Business identity stays with its extension. */
 import type { CanvasCommand } from "./commands.js";
-import { getWoohaa3CanvasNodeAbsolutePosition, nextWoohaa3CanvasNodeZIndex, type CanvasNodeData, type Woohaa3CanvasNode, type ServerCanvas } from "./domain/index.js";
+import { nextWoohaa3CanvasNodeZIndex, type CanvasNodeData, type Woohaa3CanvasNode, type ServerCanvas } from "./domain/index.js";
 
 export type CompositeChildKind = "container" | "entity";
 export type CompositeChildRelation = {
@@ -77,18 +77,14 @@ export function followCompositeChildOwner(
   before: readonly Woohaa3CanvasNode[], current: readonly Woohaa3CanvasNode[], explicit: boolean,
   context = compositeChildMovementContext(before, current)
 ): void {
-  const oldMap = context.before, map = context.current;
+  const oldMap = context.before;
   const oldChild = oldMap.get(child.id), oldOwner = oldMap.get(owner.id);
-  const oldAbsolute = oldChild ? getWoohaa3CanvasNodeAbsolutePosition(oldChild, oldMap) : null;
-  const currentAbsolute = getWoohaa3CanvasNodeAbsolutePosition(child, map);
-  const parentAbsolute = owner.parentId ? getWoohaa3CanvasNodeAbsolutePosition(map.get(owner.parentId)!, map) : { x: 0, y: 0 };
-  let absolute = currentAbsolute;
+  const oldAbsolute = oldChild ? { ...oldChild.position } : null;
+  let absolute = { ...child.position };
   if (!explicit && oldAbsolute && oldOwner) {
-    const from = getWoohaa3CanvasNodeAbsolutePosition(oldOwner, oldMap), to = getWoohaa3CanvasNodeAbsolutePosition(owner, map);
-    absolute = { x: oldAbsolute.x + to.x - from.x, y: oldAbsolute.y + to.y - from.y };
+    absolute = { x: oldAbsolute.x + owner.position.x - oldOwner.position.x, y: oldAbsolute.y + owner.position.y - oldOwner.position.y };
   }
-  child.parentId = owner.parentId;
-  child.position = { x: absolute.x - parentAbsolute.x, y: absolute.y - parentAbsolute.y };
+  child.position = absolute;
 }
 
 /** Construct a sibling in the owner's group from an absolute canvas placement. */
@@ -96,9 +92,7 @@ export function createCompositeChildNode(input: {
   nodes: readonly Woohaa3CanvasNode[]; owner: Woohaa3CanvasNode; id: string;
   type: Woohaa3CanvasNode["type"]; bounds: CompositeChildBounds;
 }): Woohaa3CanvasNode {
-  const map = new Map(input.nodes.map(node => [node.id, node]));
-  const parent = input.owner.parentId ? getWoohaa3CanvasNodeAbsolutePosition(map.get(input.owner.parentId)!, map) : { x: 0, y: 0 };
-  return { id: input.id, type: input.type, data: {}, position: { x: input.bounds.x - parent.x, y: input.bounds.y - parent.y }, width: input.bounds.width, height: input.bounds.height, ...(input.owner.parentId ? { parentId: input.owner.parentId } : {}), zIndex: nextWoohaa3CanvasNodeZIndex(input.nodes) };
+  return { id: input.id, type: input.type, data: {}, position: { x: input.bounds.x, y: input.bounds.y }, width: input.bounds.width, height: input.bounds.height, zIndex: nextWoohaa3CanvasNodeZIndex(input.nodes) };
 }
 
 export function removeCompositeChildNodes<T extends { nodes: Woohaa3CanvasNode[]; edges: ServerCanvas["document"]["edges"]; nodeData: ServerCanvas["nodeData"] }>(work: T, ids: ReadonlySet<string>): void {
@@ -128,10 +122,10 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-/** Membership is solely the canonical parent graph; adapters cannot grant membership or write scope. */
+/** Containers no longer exist; adapters cannot grant membership. */
 export function canvasContainerRelations(canvas: ServerCanvas): Array<{ role: "member"; nodeId: string; ownerNodeId: string }> {
-  const groups = new Set(canvas.document.nodes.filter(n => n.type === "group").map(n => n.id));
-  return canvas.document.nodes.flatMap(n => n.parentId && groups.has(n.parentId) ? [{ role: "member" as const, nodeId: n.id, ownerNodeId: n.parentId }] : []);
+  void canvas;
+  return [];
 }
 export function compositeChildPolicy(relation: CompositeChildRelation): { movement: "follow-owner" | "independent"; copy: "owner-closure"; removal: "close-presentation" | "source-only"; navigation: "owner-object" | "owner-preview" } {
   if (relation.role !== "object-entry" && relation.role !== "preview") throw Error("unknown-composite-child-relation");

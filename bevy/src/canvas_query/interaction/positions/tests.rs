@@ -11,16 +11,13 @@ fn scene() -> Scene {
             {"id":"a","type":"image","x":0,"y":0,"width":240,"height":180},
             {"id":"b","type":"text","x":400,"y":0,"width":240,"height":180},
             {"id":"c","type":"text","x":0,"y":500},
-            {"id":"d","type":"text","x":400,"y":500},
-            {"id":"g","type":"group","x":-20,"y":-20,"width":700,"height":230,"group":{"memberCount":2}},
-            {"id":"film","type":"model","x":1000,"y":0,"width":300,"height":200,
-                "compositeAsset":{"x":1010,"y":15,"width":280,"height":170}}
+            {"id":"d","type":"text","x":400,"y":500}
         ])).unwrap(),
         edges: serde_json::from_value(serde_json::json!([
             {"id":"ab","source":"a","target":"b","label":"link"},
             {"id":"cd","source":"c","target":"d"}
         ])).unwrap(),
-        selection: serde_json::from_value(serde_json::json!({"nodes":["a","film"]})).unwrap(),
+        selection: serde_json::from_value(serde_json::json!({"nodes":["a","b"]})).unwrap(),
         aggregate_connect: Some(serde_json::from_value(serde_json::json!({})).unwrap()),
         ..Default::default()
     }
@@ -42,60 +39,17 @@ fn request(base: u32, rows: &[(&str, f32, f32)]) -> PositionUpdateRequest {
 }
 
 #[test]
-fn repeated_diamond_positions_match_full_scope_without_accumulating_delta() {
-    let mut scene = scene();
-    scene.nodes[5].composite_asset = Some(
-        serde_json::from_value(serde_json::json!({
-            "x":1010,"y":15,"width":280,"height":170,"scopeShape":"isometric-diamond",
-            "scopeGround":{"cx":1150,"cy":120,"hx":100,"hz":100}
-        }))
-        .unwrap(),
-    );
-    let mut snapshot = build_snapshot(&scene, 1);
-    for i in [1, 2, 3, 4, 5, 4, 3, 2, 1, 0] {
-        let p = NodePosition {
-            id: "film".into(),
-            x: 1000. + i as f32 * 8.,
-            y: i as f32 * 6.,
-        };
-        apply(&mut snapshot, &[p.clone()]).unwrap();
-        let node = &mut scene.nodes[5];
-        let (dx, dy) = (p.x - node.x, p.y - node.y);
-        let scope = node.composite_asset.as_mut().unwrap();
-        scope.x += dx;
-        scope.y += dy;
-        let ground = scope.scope_ground.as_mut().unwrap();
-        ground.cx += dx;
-        ground.cy += dy;
-        node.x = p.x;
-        node.y = p.y;
-        let expected = build_snapshot(&scene, 1);
-        assert_eq!(snapshot.nodes[5].bounds, expected.nodes[5].bounds);
-        assert_eq!(snapshot.nodes[5].scope, expected.nodes[5].scope);
-        assert_eq!(snapshot.nodes[5].resize, expected.nodes[5].resize);
-    }
-}
-
-#[test]
 fn local_snapshot_matches_full_projection_and_retains_unrelated_edge_buffers() {
     let mut scene = scene();
     let mut snapshot = build_snapshot(&scene, 1);
     apply_selection(&mut snapshot, &scene.selection.nodes);
     let untouched = snapshot.edges[1].points.as_ptr();
     let untouched_node = snapshot.nodes[2].id.as_ptr();
-    let updates = request(
-        1,
-        &[("a", 35., 70.), ("b", 450., 25.), ("film", 1100., 50.)],
-    )
-    .positions;
+    let updates = request(1, &[("a", 35., 70.), ("b", 450., 25.)]).positions;
     let deltas = apply(&mut snapshot, &updates).unwrap();
-    assert_eq!(deltas.len(), 3);
+    assert_eq!(deltas.len(), 2);
     for p in &updates {
         let node = scene.nodes.iter_mut().find(|n| n.id == p.id).unwrap();
-        if let Some(scope) = &mut node.composite_asset {
-            scope.x += p.x - node.x;
-            scope.y += p.y - node.y;
-        }
         node.x = p.x;
         node.y = p.y;
     }

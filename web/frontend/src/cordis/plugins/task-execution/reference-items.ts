@@ -9,9 +9,6 @@
 import {
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
-  providerReferenceRole,
-  SHOT_REFERENCE_ROLE,
-  SHOT_IMAGE_REFERENCE_ROLE,
   sortWoohaa3CanvasInputMappings,
   type CanvasNodeData,
   type CanvasNodeInputMapping,
@@ -22,9 +19,6 @@ import {
   type Woohaa3CanvasMentionType
 } from "@woohaa3/contracts";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
-
-/** Provider 侧角色：镜头参考按视频参考参与绑定校验与展示（映射定义在 contracts，前后端共用）。 */
-export { providerReferenceRole };
 
 export type ReferenceItemStatus = "ready" | "waiting" | "invalid";
 
@@ -92,19 +86,17 @@ export function resolveReferenceItems(options: {
         role: mapping.role,
         mentionType,
         label,
-        mediaKind: mapping.role === SHOT_REFERENCE_ROLE ? "video" : mapping.role === SHOT_IMAGE_REFERENCE_ROLE ? "image" : null,
+        mediaKind: null,
         previewUrl: null,
         assetId: null,
         status: "waiting",
-        blockingReason: mapping.role === SHOT_IMAGE_REFERENCE_ROLE ? "等待镜头参考图片准备完成" : mapping.role === SHOT_REFERENCE_ROLE
-          ? "等待镜头参考录制完成"
-          : `上游节点 ${mapping.sourceNodeId} 还没有可用输出`
+        blockingReason: `上游节点 ${mapping.sourceNodeId} 还没有可用输出`
       });
       continue;
     }
     const binding = bindings?.find(
       (entry) =>
-        entry.roles.includes(providerReferenceRole(mapping.role)) &&
+        entry.roles.includes(mapping.role) &&
         entry.mediaKinds.includes(resolved.mediaKind) &&
         entry.mediaTypes.includes(resolved.mediaType)
     );
@@ -119,7 +111,7 @@ export function resolveReferenceItems(options: {
       previewUrl: resolved.previewUrl,
       assetId: resolved.assetId,
       status: resolved.ready && acceptable ? "ready" : resolved.ready ? "invalid" : "waiting",
-      blockingReason: acceptable ? null : `所选模型不接受参考角色「${providerReferenceRole(mapping.role)}」或媒体类型「${resolved.mediaType}」`
+      blockingReason: acceptable ? null : `所选模型不接受参考角色「${mapping.role}」或媒体类型「${resolved.mediaType}」`
     };
     items.push(item);
     if (item.blockingReason) blockingReasons.push(item.blockingReason);
@@ -237,8 +229,6 @@ export function collectDirectMappings(canvas: ServerCanvas, nodeId: string): Can
 
 function mentionTypeForMapping(mapping: CanvasNodeInputMapping): Woohaa3CanvasMentionType {
   if (mapping.role === "text_prompt") return "input_text";
-  if (mapping.role === SHOT_REFERENCE_ROLE) return "input_video";
-  if (mapping.role === SHOT_IMAGE_REFERENCE_ROLE) return "input_image";
   if (mapping.role.includes("video")) return "input_video";
   if (mapping.role.includes("audio") || mapping.role.includes("voice") || mapping.role.includes("music")) {
     return "input_audio";

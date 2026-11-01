@@ -1,22 +1,18 @@
-import { isFilmSetGroupNode } from "@woohaa3/contracts";
 /**
  * 模型 MCP 服务：脚本提交与通用命令
  * （自 `service.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R03）。
  *
  * 权威 room 写入方；不改动外部状态。历史登记失败不阻断权威写入（由 reconciliation 补齐）。
  */
-import { submitGroupAppearance } from "./group-appearance-submission.js";
 import type { CanvasRoom } from "../sync/index.js";
 import type { CanvasNodeData } from "@woohaa3/contracts";
 import {
   hashModelScript,
   isSupportedModelScriptVersion,
-  isFilmSetNode,
   isCompositeAssetNodeType,
   isModelAuthoringNodeType,
   MODEL_SCRIPT_LANGUAGE,
   PREFERRED_MODEL_SCRIPT_VERSION,
-  decodeAnimationPayload,
   decodeModelPlacement,
   isGlbModelNodeData
 } from "@woohaa3/contracts";
@@ -44,7 +40,6 @@ export async function submitScript(
   actorId: string,
   input: SubmitScriptInput
 ): Promise<SubmitScriptOutcome> {
-  if (input.resource === "group-appearance") return submitGroupAppearance(deps, actorId, input);
   const canvasId = input.canvasId?.trim() ?? "";
   const nodeId = input.nodeId?.trim() ?? "";
   if (canvasId === "") return { ok: false, code: "malformed-request", message: "canvasId 不能为空" };
@@ -61,13 +56,8 @@ export async function submitScript(
   if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
   const node = exported.canvas.document.nodes.find((entry) => entry.id === nodeId);
   if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
-  if (isFilmSetGroupNode(node, exported.canvas.nodeData[nodeId])) return { ok: false, code: "film-set-top-level-model", message: "请编辑片场引用的模型资源卡片" };
   if (!isModelAuthoringNodeType(node.type)) {
     return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是可提交模型脚本的节点` };
-  }
-  // D8：片场不保存顶层 authored 模型；节点级脚本提交必须拒绝（几何经 item / 导入路径写入）。
-  if (isFilmSetNode(node.type, exported.canvas.nodeData[nodeId] as CanvasNodeData | undefined)) {
-    return { ok: false, code: "film-set-top-level-model", message: "片场节点不保存顶层模型，请提交到指定 model item" };
   }
   // 文件模型（GLB）以原始文件为唯一权威内容，不接受脚本写入
   // （change: 2026-10-28-support-glb-model-nodes）：混源会让展示内容不再对应原文件。
@@ -221,7 +211,6 @@ export async function registerModelHistorySafely(
     const node = exported?.ok ? exported.canvas.document.nodes.find((entry) => entry.id === input.nodeId) : undefined;
     const data = exported?.ok ? exported.canvas.nodeData[input.nodeId] as CanvasNodeData | undefined : undefined;
     const placement = decodeModelPlacement(data?.modelPlacement);
-    const animation = isFilmSetNode(node?.type, data) ? decodeAnimationPayload(data) : null;
     await register({
       ...input,
       ...(node && (node.type === "model3d" || isCompositeAssetNodeType(node.type)) && data ? {
@@ -231,8 +220,7 @@ export async function registerModelHistorySafely(
         version: data.modelScriptVersion as string
       } : {}),
       ...(node ? { nodeType: node.type } : {}),
-      ...(placement ? { placement } : {}),
-      ...(animation ? { animation } : {})
+      ...(placement ? { placement } : {})
     });
     return true;
   } catch {

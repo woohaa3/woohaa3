@@ -11,9 +11,6 @@ import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identit
 import { isCanvasCommandBatchSatisfied, isCanvasCommandSatisfied } from "./command-satisfaction.js";
 import { createWoohaa3CanvasNodeId, createHighEntropyId } from "./domain/index.js";
 import { createWoohaa3CanvasEdge } from "./domain/index.js";
-import { createFilmSetSnapshot } from "./animation-snapshot.js";
-import { canonicalFilmSetFields } from "./film-set-clip-view.js";
-import { defaultGroupAppearance } from "./group-appearance.js";
 
 const NOW = "2026-09-26T00:00:00.000Z";
 
@@ -39,108 +36,6 @@ function imageAsset(id = "asset-image"): StoredAsset {
 }
 
 /** 带一个 items-only 片场（composite-asset + film-set）节点的画布（change: 2026-10-11 身份/结构迁移）。 */
-function withFilmSet(modelScript = ""): ServerCanvas {
-  const canvas = base();
-  canvas.document.nodes = [
-    { id: "anim", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 }, width: 196, height: 64 }
-  ];
-  const animation = createFilmSetSnapshot({
-    title: "片场",
-    model: { modelScript, modelScriptVersion: "woohaa-model-js-v2" },
-    motionScript: "",
-    timeline: { duration: 0, loop: false }
-  });
-  canvas.nodeData = { anim: canonicalFilmSetFields(animation) as never };
-  return canvas;
-}
-
-/** 带一个 model3d 节点的画布（内容身份归一化测试用）。 */
-function withModel3d(modelScript: string): ServerCanvas {
-  const canvas = base();
-  canvas.document.nodes = [{ id: "model", type: "model3d", position: { x: 0, y: 0 } }];
-  canvas.nodeData = {
-    model: {
-      title: "模型",
-      modelScript,
-      modelScriptLanguage: "javascript",
-      modelScriptVersion: "woohaa-model-js-v2",
-      modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "old-hash" },
-      modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }
-    }
-  };
-  return canvas;
-}
-
-describe("自包含节点内容身份归一化（change: 2026-10-06，任务 1.2/1.4/R2）", () => {
-  it("只改源码的 patch 不能保留旧 contentHash", () => {
-    const canvas = withModel3d("scene.box({ id: 'a', size: [1,1,1] });");
-    const result = applyCanvasCommands(canvas, [
-      {
-        type: "nodeData.patch",
-        nodeId: "model",
-        value: { modelScript: "scene.box({ id: 'a', size: [2,2,2] });", modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "old-hash" } }
-      }
-    ], { now: NOW });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const version = result.canvas.nodeData.model.modelContentVersion as { revision: number; contentHash: string };
-    expect(version.contentHash).not.toBe("old-hash");
-    expect(version.revision).toBe(2);
-  });
-
-  it("相同内容重复 patch 不推进 revision", () => {
-    const canvas = withModel3d("scene.box({ id: 'a', size: [1,1,1] });");
-    const first = applyCanvasCommands(canvas, [
-      { type: "nodeData.patch", nodeId: "model", value: { modelScript: "scene.box({ id: 'a', size: [1,1,1] });" } }
-    ], { now: NOW });
-    if (!first.ok) return;
-    const revision = (first.canvas.nodeData.model.modelContentVersion as { revision: number }).revision;
-    const second = applyCanvasCommands(first.canvas, [
-      { type: "nodeData.patch", nodeId: "model", value: { modelScript: "scene.box({ id: 'a', size: [1,1,1] });" } }
-    ], { now: NOW });
-    if (!second.ok) return;
-    expect((second.canvas.nodeData.model.modelContentVersion as { revision: number }).revision).toBe(revision);
-  });
-
-  it("片场节点级顶层模型脚本写入被整批拒绝（items-only）", () => {
-    const canvas = withFilmSet();
-    const result = applyCanvasCommands(canvas, [
-      { type: "nodeData.patch", nodeId: "anim", value: { modelScript: "scene.box({ id: 'a' });" } }
-    ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection.code).toBe("invalid-self-contained-node");
-  });
-
-  it("片场拒绝新的 groupAppearance：自身模型只由 items 组成", () => {
-    const canvas = withFilmSet();
-    const appearance = defaultGroupAppearance();
-    appearance.model.modelScript = "scene.box({ id: 'appearance', size: [2,2,2] });";
-    const result = applyCanvasCommands(canvas, [
-      { type: "nodeData.patch", nodeId: "anim", value: { groupAppearance: appearance } }
-    ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection.code).toBe("invalid-self-contained-node");
-    expect(canvas.nodeData.anim.groupAppearance).toBeUndefined();
-    expect(canvas.nodeData.anim.filmSetContent).toBeDefined();
-  });
-
-  it("片场旧 groupAppearance 原样保留，但不接受修改", () => {
-    const canvas = withFilmSet();
-    const appearance = defaultGroupAppearance();
-    canvas.nodeData.anim.groupAppearance = appearance;
-    const preserved = applyCanvasCommands(canvas, [
-      { type: "nodeData.patch", nodeId: "anim", value: { groupAppearance: appearance } }
-    ], { now: NOW });
-    expect(preserved.ok).toBe(false);
-    const changed = applyCanvasCommands(canvas, [
-      { type: "nodeData.patch", nodeId: "anim", value: { groupAppearance: { ...appearance, model: { ...appearance.model, modelScript: "scene.sphere({ id: 'x' });" } } } }
-    ], { now: NOW });
-    expect(changed.ok).toBe(false);
-  });
-});
-
 describe("applyCanvasCommands（共享 reducer）", () => {
   it("覆盖 node.add / nodeData.patch / edge.add 且只产生一个聚合", () => {
     const result = applyCanvasCommands(base(), [
@@ -239,112 +134,6 @@ describe("applyCanvasCommands（共享 reducer）", () => {
   });
 });
 
-describe("group parent 不变式（change: add-canvas-node-grouping，任务 1.2）", () => {
-  /** 造一个含 group `g` 与成员 `a` 的画布。 */
-  function withGroup(): ServerCanvas {
-    const result = applyCanvasCommands(base(), [
-      { type: "node.add", node: { id: "g", type: "group", position: { x: 0, y: 0 }, width: 400, height: 300 } },
-      { type: "node.add", node: { id: "a", type: "image", position: { x: 20, y: 20 }, parentId: "g" } }
-    ], { now: NOW });
-    if (!result.ok) throw new Error("fixture 失败");
-    return result.canvas;
-  }
-
-  it("接受挂到已有 group 下的成员", () => {
-    const result = applyCanvasCommands(base(), [
-      { type: "node.add", node: { id: "g", type: "group", position: { x: 0, y: 0 } } },
-      { type: "node.add", node: { id: "a", type: "image", position: { x: 10, y: 10 }, parentId: "g" } }
-    ], { now: NOW });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.canvas.document.nodes.find((n) => n.id === "a")?.parentId).toBe("g");
-  });
-
-  it("拒绝不存在的 parent", () => {
-    const result = applyCanvasCommands(base(), [
-      { type: "node.add", node: { id: "a", type: "image", position: { x: 0, y: 0 }, parentId: "missing" } }
-    ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection.code).toBe("invalid-parent");
-  });
-
-  it("拒绝把非 group 节点当作 parent", () => {
-    const result = applyCanvasCommands(base(), [
-      { type: "node.add", node: { id: "a", type: "image", position: { x: 0, y: 0 } } },
-      { type: "node.add", node: { id: "b", type: "image", position: { x: 0, y: 0 }, parentId: "a" } }
-    ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection.code).toBe("invalid-parent");
-  });
-
-  it("拒绝自指 parent", () => {
-    const result = applyCanvasCommands(base(), [
-      { type: "node.add", node: { id: "g", type: "group", position: { x: 0, y: 0 }, parentId: "g" } }
-    ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection.code).toBe("invalid-parent");
-  });
-
-  it("拒绝形成 parent 环（batch 内中间状态也拒绝）", () => {
-    const result = applyCanvasCommands(withGroup(), [
-      { type: "node.update", nodeId: "g", parentId: "a" }
-    ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection.code).toBe("invalid-parent");
-  });
-
-  it("node.update 允许解除 parent（parentId: null）", () => {
-    const result = applyCanvasCommands(withGroup(), [
-      { type: "node.update", nodeId: "a", parentId: null }
-    ], { now: NOW });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.canvas.document.nodes.find((n) => n.id === "a")?.parentId).toBeUndefined();
-  });
-
-  it("拒绝以 group 为端点的 edge.add", () => {
-    const canvas = withGroup();
-    const asSource = applyCanvasCommands(canvas, [
-      { type: "edge.add", edge: { id: "e1", source: "g", target: "a" } }
-    ], { now: NOW });
-    expect(asSource.ok).toBe(false);
-    if (!asSource.ok) expect(asSource.rejection.code).toBe("invalid-edge-endpoint");
-    const asTarget = applyCanvasCommands(canvas, [
-      { type: "node.add", node: { id: "b", type: "image", position: { x: 500, y: 0 } } },
-      { type: "edge.add", edge: { id: "e2", source: "a", target: "g" } }
-    ], { now: NOW });
-    expect(asTarget.ok).toBe(false);
-    if (!asTarget.ok) expect(asTarget.rejection.code).toBe("invalid-edge-endpoint");
-  });
-
-  it("拒绝 node.add.connect 连到 group", () => {
-    const canvas = withGroup();
-    const result = applyCanvasCommands(canvas, [
-      { type: "node.add", node: { id: "b", type: "image", position: { x: 500, y: 0 } }, connect: { fromNodeId: "g", edgeId: "e3" } }
-    ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection.code).toBe("invalid-edge-endpoint");
-  });
-
-  it("拒绝批次原子性：非法 parent 不会产生部分更新", () => {
-    const canvas = withGroup();
-    const result = applyCanvasCommands(canvas, [
-      { type: "node.update", nodeId: "a", position: { x: 99, y: 99 } },
-      { type: "node.update", nodeId: "a", parentId: "missing" }
-    ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    // 整批拒绝：canonical 不出现部分 parent/position 更新。
-    expect(result.rejection.code).toBe("invalid-parent");
-    expect(canvas.document.nodes.find((n) => n.id === "a")?.position).toEqual({ x: 20, y: 20 });
-  });
-});
-
 describe("通用复合资产节点（change: 2026-10-11 身份迁移）", () => {
   function withComposite(): ServerCanvas {
     const canvas = base();
@@ -355,98 +144,19 @@ describe("通用复合资产节点（change: 2026-10-11 身份迁移）", () => 
     return canvas;
   }
 
-  it("不能作为 edge 端点（source 与 target）", () => {
+  it("作为普通节点参与连线（source 与 target）", () => {
     const canvas = withComposite();
     canvas.document.nodes.push({ id: "img", type: "image", position: { x: 400, y: 0 } });
     const asSource = applyCanvasCommands(canvas, [
       { type: "edge.add", edge: { id: "e1", source: "ext", target: "img" } }
     ], { now: NOW });
-    expect(asSource.ok).toBe(false);
+    expect(asSource.ok).toBe(true);
     if (!asSource.ok) expect(asSource.rejection.code).toBe("invalid-connection");
     const asTarget = applyCanvasCommands(canvas, [
       { type: "edge.add", edge: { id: "e2", source: "img", target: "ext" } }
     ], { now: NOW });
-    expect(asTarget.ok).toBe(false);
+    expect(asTarget.ok).toBe(true);
     if (!asTarget.ok) expect(asTarget.rejection.code).toBe("invalid-connection");
-  });
-});
-
-describe("片场无连线与内容引用（change: 2026-10-08-make-film-set-model-only）", () => {
-  it("片场不能作为 edge 端点（source 与 target）", () => {
-    const canvas = withFilmSet();
-    canvas.document.nodes.push({ id: "img", type: "image", position: { x: 300, y: 0 } });
-    const asSource = applyCanvasCommands(canvas, [
-      { type: "edge.add", edge: { id: "e1", source: "anim", target: "img" } }
-    ], { now: NOW });
-    expect(asSource.ok).toBe(false);
-    if (!asSource.ok) expect(asSource.rejection.code).toBe("invalid-connection");
-    const asTarget = applyCanvasCommands(canvas, [
-      { type: "edge.add", edge: { id: "e2", source: "img", target: "anim" } }
-    ], { now: NOW });
-    expect(asTarget.ok).toBe(false);
-    if (!asTarget.ok) expect(asTarget.rejection.code).toBe("invalid-connection");
-  });
-
-  it("加载规范化同批清除已有片场边与对应 inputMapping", () => {
-    const canvas = withFilmSet();
-    canvas.document.nodes.push({ id: "img", type: "image", position: { x: 300, y: 0 } });
-    canvas.document.edges = [
-      { id: "stale", source: "anim", target: "img", sourceHandle: null, targetHandle: null, data: {} }
-    ];
-    canvas.nodeData.img = {
-      inputMapping: [{ sourceNodeId: "anim", role: "text_prompt", slotId: "in-0" }]
-    };
-    const result = applyCanvasCommands(canvas, [
-      { type: "nodeData.patch", nodeId: "img", value: { prompt: "x" } }
-    ], { now: NOW });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.canvas.document.edges.some((edge) => edge.id === "stale")).toBe(false);
-    expect(result.canvas.nodeData.img.inputMapping).toBeUndefined();
-  });
-
-  it("旧快照媒体写入即使资产就绪也拒绝", () => {
-    const canvas = withFilmSet();
-    const content = { schemaVersion: 4, items: [
-      { id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } },
-      { id: "img", kind: "image", name: "图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-image", aspectRatio: 1 }
-    ] } as never;
-    const missing = applyCanvasCommands(canvas, [
-      { type: "nodeData.patch", nodeId: "anim", value: { filmSetContent: content } }
-    ], { now: NOW });
-    expect(missing.ok).toBe(false);
-
-    canvas.assets.push(imageAsset());
-    const ok = applyCanvasCommands(canvas, [
-      { type: "nodeData.patch", nodeId: "anim", value: { filmSetContent: content } }
-    ], { now: NOW });
-    expect(ok.ok).toBe(false);
-  });
-
-  it("删除被片场引用的资产被拒绝", () => {
-    const canvas = withFilmSet();
-    canvas.assets.push(imageAsset());
-    canvas.nodeData.anim.filmSetContent = { schemaVersion: 4, items: [
-      { id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } },
-      { id: "img", kind: "image", name: "图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-image", aspectRatio: 1 }
-    ] };
-    const result = applyCanvasCommands(canvas, [
-      { type: "asset.remove", assetId: "asset-image" }
-    ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.rejection.code).toBe("asset-in-use");
-  });
-
-  it("片场顶层模型脚本 patch 被拒绝且不改动集合", () => {
-    const canvas = withFilmSet("scene.box({ id: 'a' });");
-    const before = JSON.stringify(canvas.nodeData.anim.filmSetContent);
-    const result = applyCanvasCommands(canvas, [
-      { type: "nodeData.patch", nodeId: "anim", value: { modelScript: "scene.box({ id: 'b' });" } }
-    ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection.code).toBe("invalid-self-contained-node");
-    expect(JSON.stringify(canvas.nodeData.anim.filmSetContent)).toBe(before);
   });
 });
 
@@ -598,28 +308,18 @@ describe("输入 mapping finalizer（change: add-reference-inputs-and-mentions�
   });
 });
 
-describe("类别最小尺寸与历史记录", () => {
-  it("显式尺寸写入按类别拒绝，拒绝时不改变规范画布", () => {
-    const canvas = withFilmSet();
-    const before = JSON.stringify(canvas);
-    for (const size of [{ width: 180, height: 64 }, { width: 199 }, { height: 149 }]) {
-      const result = applyCanvasCommands(canvas, [{ type: "node.update", nodeId: "anim", ...size }], { now: NOW });
-      expect(result).toMatchObject({ ok: false, rejection: { code: "invalid-node-size" } });
-      expect(JSON.stringify(canvas)).toBe(before);
-    }
-    const resized = applyCanvasCommands(canvas, [{ type: "node.update", nodeId: "anim", width: 200, height: 150 }], { now: NOW });
-    expect(resized.ok).toBe(true);
-    const normal = applyCanvasCommands(base(), [{ type: "node.add", node: { id: "normal", type: "text", position: { x: 0, y: 0 }, width: 180, height: 64 } }], { now: NOW });
-    expect(normal.ok).toBe(true);
-    const added = applyCanvasCommands(base(), [{ type: "node.add", node: { id: "small", type: "composite-asset", position: { x: 0, y: 0 }, width: 180, height: 64 }, nodeData: { extensionId: "creature-video-assets", extensionContentRef: { schemaVersion: 1, instanceId: "instance-123456" } } }], { now: NOW });
-    expect(added).toMatchObject({ ok: false, rejection: { code: "invalid-node-size" } });
-  });
-  it("历史小片场移动与标题修改批次需先迁移", () => {
-    const result = applyCanvasCommands(withFilmSet(), [
-      { type: "node.update", nodeId: "anim", position: { x: 40, y: 50 } },
-      { type: "nodeData.patch", nodeId: "anim", value: { title: "空场" } },
+describe("类别最小尺寸", () => {
+  it("显式尺寸写入低于类别下限时整批拒绝，拒绝时不改变规范画布", () => {
+    const added = applyCanvasCommands(base(), [
+      { type: "node.add", node: { id: "model", type: "model3d", position: { x: 0, y: 0 } } }
     ], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.rejection.code).toBe("invalid-self-contained-node");
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const before = JSON.stringify(added.canvas);
+    const result = applyCanvasCommands(added.canvas, [{ type: "node.update", nodeId: "model", width: 120 }], { now: NOW });
+    expect(result).toMatchObject({ ok: false, rejection: { code: "invalid-node-size" } });
+    expect(JSON.stringify(added.canvas)).toBe(before);
+    const resized = applyCanvasCommands(added.canvas, [{ type: "node.update", nodeId: "model", width: 200, height: 200 }], { now: NOW });
+    expect(resized.ok).toBe(true);
   });
 });

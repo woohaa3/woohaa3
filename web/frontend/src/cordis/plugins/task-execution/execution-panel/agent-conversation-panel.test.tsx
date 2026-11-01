@@ -126,7 +126,7 @@ describe("AgentConversationPanel · 卸载清理", () => {
     const data = {
       ...snapshot(),
       turns: [
-        { ...turn(), target: { canvasId: "cv", delivery: { purpose: "film-set-conversion" as const, domainRequestId: "domain", attemptId: "1" } } },
+        { ...turn(), target: { canvasId: "cv", delivery: { purpose: "text-generation" as const, domainRequestId: "domain", attemptId: "1" } } },
         { ...turn(), turnId: "discussion", requestId: "discussion", action: "discuss" as const }
       ],
       messages: [
@@ -139,7 +139,7 @@ describe("AgentConversationPanel · 卸载清理", () => {
     const { el, root, act } = await mount(<AgentConversationPanel conversationId="conv-1" requestId="req-1" service={service} onClose={() => undefined} />);
     const details = el.querySelector("details.agent-detail__receipt") as HTMLDetailsElement;
     expect(details.open).toBe(false);
-    expect(el.textContent).toContain("片场生成数据");
+    expect(el.textContent).toContain("结构化生成数据");
     expect(el.textContent).not.toContain("scene.box");
     expect(el.textContent).toContain("普通讨论");
     await act(async () => { details.open = true; details.dispatchEvent(new Event("toggle")); });
@@ -296,7 +296,7 @@ describe("AgentConversationPanel · 运行中刷新", () => {
     } finally { await act(async () => root.unmount()); }
   });
 
-  it("重启后无法确认的组回合按失败结算，保留回执证据且不再提供待核对动作", async () => {
+  it("重启后无法确认的回合按失败结算，保留回执证据且不再提供待核对动作", async () => {
     const remote = fakeRemote();
     remote.read = async () => ({ ok: true, value: {
       ...snapshot(),
@@ -305,9 +305,9 @@ describe("AgentConversationPanel · 运行中刷新", () => {
         ...turn(),
         status: "failed",
         stage: "failed",
-        target: { canvasId: "cv", nodeId: "n1", mode: "canvas-group" },
+        target: { canvasId: "cv", nodeId: "n1", mode: "model3d" },
         tools: [{ tool: "validate_canvas_script", status: "started" }],
-        receipt: { kind: "canvas-group", actions: [] },
+        receipt: { commandId: "cmd" },
         error: { code: "result-unconfirmed", message: "本机宿主重启后未取得完整执行回执。" },
       }],
       events: [{ sequence: 99, conversationId: "conv-1", turnId: "turn-1", requestId: "req-1", type: "receipt", payload: { status: "failed", reconciled: true }, createdAt: "2026-10-13T00:01:00Z" }]
@@ -502,7 +502,7 @@ describe("AgentConversationPanel · 收起动作语义", () => {
     remote.read = async () => ({ ok: true, value: {
       ...snapshot(),
       conversation: { ...snapshot().conversation, nodeId: "n1" },
-      turns: [{ ...turn(), status: "failed", stage: "failed", target: { canvasId: "cv", nodeId: "n1", mode: "canvas-group" }, error: { code: "result-unconfirmed", message: "未收到执行完成回执，结果按失败结算。" } }]
+      turns: [{ ...turn(), status: "failed", stage: "failed", target: { canvasId: "cv", nodeId: "n1", mode: "model3d" }, error: { code: "result-unconfirmed", message: "未收到执行完成回执，结果按失败结算。" } }]
     } });
     const { navigation } = navStub(DETAIL);
     const service = createAgentConversationService({ remote, navigation });
@@ -578,36 +578,6 @@ describe("AgentConversationPanel · 清空上下文（design D8）", () => {
   });
 });
 
-it("右侧续聊沿用片场会话、模型与子目标，点击时读取新版本，始终继续修改且不显示模式选项", async () => {
-  const remote = fakeRemote();
-  remote.listConnections = async () => ({ ok: true, value: { connections: [{ connectionId: "c1", adapterId: "chatgpt", extensionId: "oauth-agent", name: "Assistant", runCategory: "http-sdk", authMode: "api-key", configRevision: 1, credentialEpoch: 1,
-    ready: true, credentialConfigured: true, status: { transport: { state: "ready" }, credential: { state: "ready" }, modelAccess: { state: "ready" }, tools: { state: "ready" } },
-    capabilities: { discussion: true, tools: true, imageInput: true, structuredResult: true, cancel: true, resume: true },
-    models: [{ id: "gpt-5", label: "GPT", source: "remote-catalog", accountAuthorized: true, reasoningEfforts: ["high"] }] }] } });
-  remote.read = async () => ({ ok: true, value: { ...snapshot(), conversation: { ...snapshot().conversation, nodeId: "n1", connectionId: "c1" }, turns: [{ ...turn(), status: "succeeded", target: { ...turn().target, mode: "film-set", clipId: "clip-1", itemId: "actor-1", model: "gpt-5", reasoningEffort: "high" } }] } });
-  const accept = vi.fn<AgentConversationRemote["accept"]>(async () => ({ ok: false, code: "conflict", error: "fixture rejected" }));
-  remote.accept = accept;
-  let contentHash = "old-hash";
-  const targetExecution = vi.fn(() => ({ action: "modify" as const, canvasId: "cv", nodeId: "n1", mode: "film-set" as const, clipId: "clip-1", itemId: "actor-1", expectedContentHash: contentHash, prompt: "" }));
-  const { navigation } = navStub(DETAIL);
-  const service = createAgentConversationService({ remote, navigation });
-  const { el, root, act } = await mount(<AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} targetExecution={targetExecution} onClose={() => undefined} />);
-  const { Simulate } = await import("react-dom/test-utils");
-  try {
-    const textarea = el.querySelector("textarea")!;
-    await act(async () => { Simulate.change(textarea, { target: { value: "请修改作品" } } as never); });
-    expect(el.querySelector('button[type="submit"]')?.textContent).toContain("发送");
-    contentHash = "new-hash";
-    await act(async () => { el.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
-    expect(accept.mock.calls[0]![0]).toBe("conv-1");
-    expect(accept.mock.calls[0]![1].entry).toMatchObject({ action: "modify", mode: "film-set", clipId: "clip-1", itemId: "actor-1", nodeId: "n1", model: "gpt-5", reasoningEffort: "high", expectedContentHash: "new-hash", prompt: "请修改作品" });
-    expect([...el.querySelectorAll("button")].some(button => ["继续修改", "仅讨论"].includes(button.textContent ?? ""))).toBe(false);
-    expect(accept).toHaveBeenCalledTimes(1);
-    expect(textarea.value).toBe("请修改作品");
-    expect(targetExecution).toHaveBeenCalledTimes(1);
-  } finally { await act(async () => root.unmount()); el.remove(); }
-});
-
 it("旧的 DSML 回复明确说明未确认执行，并折叠原始文本", async () => {
   const remote = fakeRemote();
   remote.read = async () => ({ ok: true, value: { ...snapshot(), turns: [{ ...turn(), status: "succeeded" }], messages: [{ messageId: "raw", conversationId: "conv-1", turnId: "turn-1", requestId: "req-1", role: "assistant", content: '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="woohaa_get_film_set_clips">', truncated: false, sequence: 1, createdAt: turn().createdAt }] } });
@@ -616,43 +586,5 @@ it("旧的 DSML 回复明确说明未确认执行，并折叠原始文本", asyn
   try {
     expect(el.textContent).toContain("不是执行回执");
     expect(el.querySelector(".agent-detail__message details")?.hasAttribute("open")).toBe(false);
-  } finally { await act(async () => root.unmount()); el.remove(); }
-});
-
-it.each(["film-set", "canvas-group"] as const)("%s 从右侧栏连续两轮续聊，展示执行结果并保留同一会话", async mode => {
-  let data: ConversationSnapshot = { ...snapshot(), conversation: { ...snapshot().conversation, nodeId: "n1" }, turns: [{ ...turn(), status: "succeeded", target: { canvasId: "cv", nodeId: "n1", mode } }] };
-  const remote = fakeRemote();
-  remote.read = async () => ({ ok: true, value: data });
-  const accept = vi.fn<AgentConversationRemote["accept"]>(async (conversationId, input) => {
-    const next: ConversationTurn = { ...turn(), conversationId, requestId: input.requestId, turnId: input.requestId, action: input.entry.action, status: "succeeded", stage: "succeeded", target: { canvasId: "cv", nodeId: "n1", mode }, receipt: { commandId: `command-${input.requestId}` } };
-    data = { ...data, turns: [...data.turns, next], cursor: data.cursor + 1, messages: [...data.messages, { messageId: input.requestId, conversationId, turnId: next.turnId, requestId: input.requestId, role: "assistant", content: `已调整：${input.entry.prompt}`, truncated: false, sequence: data.messages.length + 1, createdAt: next.createdAt }] };
-    return { ok: true, value: { conversation: data.conversation, turn: next, reused: false } };
-  });
-  remote.accept = accept;
-  let writable = true;
-  const targetExecution = () => writable ? { action: "modify" as const, canvasId: "cv", nodeId: "n1", mode, prompt: "" } : null;
-  const service = createAgentConversationService({ remote, navigation: navStub(DETAIL).navigation });
-  const { el, root, act } = await mount(<AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} targetExecution={targetExecution} onClose={() => undefined} />);
-  const { Simulate } = await import("react-dom/test-utils");
-  try {
-    for (const prompt of ["还是不够前倾", "再前倾一点"]) {
-      await act(async () => { Simulate.change(el.querySelector("textarea")!, { target: { value: prompt } } as never); });
-      await act(async () => { el.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
-      expect(el.textContent).toContain(`已调整：${prompt}`);
-      expect(el.textContent).toContain("作品已更新");
-      expect(el.querySelector("textarea")!.value).toBe("");
-    }
-    expect(accept).toHaveBeenCalledTimes(2);
-    expect(new Set(accept.mock.calls.map(call => call[1].requestId)).size).toBe(2);
-    for (const call of accept.mock.calls) {
-      expect(call[0]).toBe("conv-1");
-      expect(call[1].entry).toMatchObject({ action: "modify", mode, nodeId: "n1" });
-    }
-    writable = false;
-    await act(async () => { Simulate.change(el.querySelector("textarea")!, { target: { value: "保留这条草稿" } } as never); });
-    await act(async () => { el.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
-    expect(accept).toHaveBeenCalledTimes(2);
-    expect(el.textContent).toContain("当前作品不可修改");
-    expect(el.querySelector("textarea")!.value).toBe("保留这条草稿");
   } finally { await act(async () => root.unmount()); el.remove(); }
 });

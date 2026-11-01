@@ -1,8 +1,7 @@
 //! 画布级 3D 根的地面排序与整对象深度分离
 //! （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D3/D4）。
 //!
-//! 2D 与 3D 共用**可见地面底边**作为锚点：group/普通节点取节点矩形底边，片场/复合资产取
-//! 地面范围外包框底边（与范围绘制、命中同一 `canvas_query::scope` 几何）。片场的节点矩形
+//! 2D 与 3D 共用**可见地面底边**作为锚点：所有节点取节点矩形底边。
 //! 只是内容适配框，用它的底边会把可见地面更靠下的小片场排到后面。
 //!
 //! 3D 遮挡分两层：
@@ -101,35 +100,18 @@ thread_local! {
 }
 
 /// 节点的可见地面底边（画布 y 向下，值越大越靠前）。
-///
-/// 复合资产（片场、第三方）复用绘制/命中的范围几何：地面矩形时取外包框底边，
-/// `rect` 形状时即基准矩形底边（含最小值归一化）。普通节点与组取节点矩形底边。
 pub(crate) fn ground_anchor(node: &GraphNode) -> f32 {
-    if node.composite_asset.is_some() {
-        let scope = crate::canvas_query::scope::node_scope(node);
-        return scope.aabb.y + scope.aabb.height;
-    }
     node.y + node.height
 }
 
-/// 节点的可见外包框：复合资产把地面范围并入节点矩形（高模型/范围可能互不完全包含）。
+/// 节点的可见外包框。
 pub(crate) fn screen_bounds(node: &GraphNode) -> ScreenBounds {
-    let rect = ScreenBounds {
+    ScreenBounds {
         x: node.x,
         y: node.y,
         width: node.width.max(0.0),
         height: node.height.max(0.0),
-    };
-    if node.composite_asset.is_some() {
-        let scope = crate::canvas_query::scope::node_scope(node);
-        return rect.union(ScreenBounds {
-            x: scope.aabb.x,
-            y: scope.aabb.y,
-            width: scope.aabb.width,
-            height: scope.aabb.height,
-        });
     }
-    rect
 }
 
 /// 接受完整场景：重建 3D 根表并发布深度带。
@@ -398,8 +380,7 @@ mod tests {
         declare_test_descriptor();
         let node = |id: &str, y: f32| {
             format!(
-                r#"{{"id":"{id}","type":"group","x":0,"y":{y},"width":400,"height":300,
-                "group":{{"modelBounds":{{"aabb":{{"min":[-1,-1,-1],"max":[1,1,1]}},"extent":2}}}},
+                r#"{{"id":"{id}","type":"model","x":0,"y":{y},"width":400,"height":300,
                 "model":{{"resourceKey":"test:box","signature":"box"}}}}"#
             )
         };
@@ -419,37 +400,6 @@ mod tests {
         };
         crate::canvas_query::interaction::accept_positions(&request).expect("position accepted");
         assert!(depth_of("b") < depth_of("a"));
-    }
-
-    /// 片场锚点取**可见地面**底边：片场矩形底边更低时仍按地面菱形底角排序。
-    ///
-    /// 几何取自用户画布里的重叠对（映射层真实派生的 `scopeGround`）：
-    /// 导演场矩形底边 3227.25、地面底角约 3059.39；小复合资产矩形底边 3110.75、
-    /// 地面底角约 3098.81。按矩形会把导演场排在前面，按可见地面则小复合资产在前。
-    #[cfg(feature = "canvas-core")]
-    #[test]
-    fn composite_asset_anchor_follows_visible_ground_not_content_rect() {
-        declare_test_descriptor();
-        let stage = r#"{"id":"stage","type":"composite-asset","x":-1479,"y":2286.25,
-            "width":1254,"height":941,
-            "compositeAsset":{"x":-852,"y":2744.00,"width":1254,"height":941,
-              "scopeShape":"isometric-diamond",
-              "scopeGround":{"cx":-852,"cy":2744.00,"hx":510.61,"hz":381.43}},
-            "model":{"resourceKey":"test:box","signature":"box"}}"#
-            .to_owned();
-        let prop = r#"{"id":"prop","type":"composite-asset","x":-739.25,"y":2915.75,
-            "width":260,"height":195,
-            "compositeAsset":{"x":-609.25,"y":3038.47,"width":260,"height":195,
-              "scopeShape":"isometric-diamond",
-              "scopeGround":{"cx":-609.25,"cy":3038.47,"hx":95.47,"hz":75.20}},
-            "model":{"resourceKey":"test:box","signature":"box"}}"#
-            .to_owned();
-        // 先确认矩形底边顺序确实与可见地面顺序相反，测试才有意义。
-        assert!(2286.25 + 941.0 > 2915.75 + 195.0);
-        assert!(3038.47 + 0.35355339 * (95.47 + 75.20) > 2744.00 + 0.35355339 * (510.61 + 381.43));
-        crate::set_scene(&test_scene_json(&[stage, prop])).expect("scene accepted");
-        // 可见地面更靠下的小复合资产必须获得更大的观察深度（更靠近相机）。
-        assert!(depth_of("prop") > depth_of("stage"));
     }
 
     #[cfg(feature = "canvas-core")]

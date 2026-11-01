@@ -16,9 +16,7 @@ import type {
   NodeActionContext,
   NodeActionContribution,
   NodeActionDescriptor,
-  NodeActionSettingsProps,
-  SelectionActionContext,
-  SelectionActionContribution
+  NodeActionSettingsProps
 } from "../../contract/platform.js";
 
 /** 设置弹窗的打开状态（宿主管理开关与锚点；内容由贡献提供）。 */
@@ -36,7 +34,7 @@ export type NodeActionDescription = {
   owners: Map<string, NodeActionContribution>;
 };
 
-/** 供 `describeActions` 复用的最小贡献形状（单节点横条与多选横条同构）。 */
+/** 供 `describeActions` 复用的最小贡献形状。 */
 export type ActionContributionLike<C> = {
   id: string;
   order: number;
@@ -51,9 +49,7 @@ export type ActionDescription<C, T extends ActionContributionLike<C>> = {
 };
 
 /**
- * 收集一组动作贡献的描述（按 `order` 从左到右）
- * （change: 2026-10-13-add-node-to-film-set-shortcut；
- *  change: 2026-10-16-add-group-selection-toolbar：抽成通用，供多选横条复用）。
+ * 收集一组动作贡献的描述（按 `order` 从左到右）。
  *
  * 只有**可用**（`available`）的贡献参与；其 `describe` 返回 null 表示当前目标不呈现。无动作时
  * 返回 null（不绘制横条）。`describe`/`available` 抛错视为该贡献不可用，不中断整条横条。
@@ -77,13 +73,7 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
     }
     if (!descriptor) continue;
     const menu = descriptor.menu === true;
-    const icon = descriptor.icon === "download" || descriptor.icon === "edit"
-      || descriptor.icon === "arrange-horizontal" || descriptor.icon === "arrange-vertical"
-      || descriptor.icon === "arrange-grid" || descriptor.icon === "arrange-diagonal-up"
-      || descriptor.icon === "arrange-diagonal-down"
-      || descriptor.icon === "collapse-groups" || descriptor.icon === "expand-groups"
-      ? descriptor.icon
-      : undefined;
+    const icon = descriptor.icon === "download" || descriptor.icon === "edit" ? descriptor.icon : undefined;
     actions.push({
       id: contribution.id,
       label: descriptor.label,
@@ -94,8 +84,8 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
       ...(menu ? { menu: true } : {})
     });
     owners.set(contribution.id, contribution);
-    // 摘要是目标身份（组名/节点数），由排序最靠前的贡献拥有；后续动作的状态原因
-    // 仍保留在 descriptor.reason 中，不能覆盖左侧身份摘要。
+    // 摘要是目标身份，由排序最靠前的贡献拥有；后续动作的状态原因仍保留在
+    // descriptor.reason 中，不能覆盖左侧身份摘要。
     if (descriptor.summary && !summary) summary = descriptor.summary;
   }
   if (actions.length === 0) return null;
@@ -110,17 +100,6 @@ export function describeNodeActions(input: {
   context: NodeActionContext;
 }): NodeActionDescription | null {
   return describeActions<NodeActionContext, NodeActionContribution>(input);
-}
-
-/**
- * 收集当前选区的多选横条动作描述（按 `order` 从左到右）
- * （change: 2026-10-16-add-group-selection-toolbar）。
- */
-export function describeSelectionActions(input: {
-  contributions: ReadonlyArray<SelectionActionContribution>;
-  context: SelectionActionContext;
-}): ActionDescription<SelectionActionContext, SelectionActionContribution> | null {
-  return describeActions<SelectionActionContext, SelectionActionContribution>(input);
 }
 
 /** 贡献可用性谓词失败视为不可用（不中断整条横条）。 */
@@ -172,26 +151,6 @@ export function routeNodeActionHit(input: {
   };
   try {
     contribution.activate(activation);
-  } catch {
-    // 动作自身失败不污染画布输入；错误由贡献内部诊断。
-  }
-}
-
-/**
- * 多选横条命中派发器：按 `actionId` 路由到 `canvas.selection-action` 贡献
- * （change: 2026-10-16-add-group-selection-toolbar）。
- *
- * 选区横条当前无设置箭头贡献，因此只派发 `activate`。找不到贡献（例如贡献被撤销）时静默忽略。
- */
-export function routeSelectionActionHit(input: {
-  hit: { actionId: string; menu: boolean };
-  context: SelectionActionContext;
-  contributions: ReadonlyArray<SelectionActionContribution>;
-}): void {
-  const contribution = input.contributions.find((entry) => entry.id === input.hit.actionId);
-  if (!contribution) return;
-  try {
-    contribution.activate({ ...input.context, menu: input.hit.menu });
   } catch {
     // 动作自身失败不污染画布输入；错误由贡献内部诊断。
   }

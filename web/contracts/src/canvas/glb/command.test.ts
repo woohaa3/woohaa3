@@ -8,10 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { applyCanvasCommands } from "../../../../test-support/managed-shot-commands.js";
 import { createEmptyWoohaa3ServerCanvas, type CanvasNodeData, type ServerCanvas, type StoredAsset } from "../domain/index.js";
-import { COMPOSITE_ASSET_NODE_TYPE } from "../domain/core/composite-asset-identity.js";
 import { glbModelSourceHash, normalizeGlbModelReference } from "../model-definition.js";
-import { createFilmSetSnapshot } from "../animation-snapshot.js";
-import { canonicalFilmSetFields } from "../film-set-clip-view.js";
 
 const NOW = "2026-10-28T00:00:00.000Z";
 const ASSET_ID = `asset-upload-${"c".repeat(64)}`;
@@ -159,23 +156,4 @@ describe("文件模型节点写入", () => {
     expect(removed.canvas.nodeData.script).toBeUndefined();
   });
 
-  it("片场拒绝顶层文件模型字段", () => {
-    const canvas = base();
-    canvas.document.nodes = [
-      { id: "film", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 }, width: 196, height: 64 }
-    ];
-    const snapshot = createFilmSetSnapshot({
-      title: "片场",
-      model: { modelScript: "", modelScriptVersion: "woohaa-model-js-v2" },
-      motionScript: "",
-      timeline: { duration: 0, loop: false }
-    });
-    canvas.nodeData = { film: canonicalFilmSetFields(snapshot) as never };
-    for (const field of ["modelSourceKind", "modelAssetId"] as const) {
-      const result = applyCanvasCommands(canvas, [
-        { type: "nodeData.patch", nodeId: "film", value: { [field]: field === "modelSourceKind" ? "glb" : ASSET_ID } }
-      ], { now: NOW });
-      expect(result.ok).toBe(false);
-    }
-  });
 });

@@ -16,30 +16,11 @@ describe("本机 Agent 工具面", () => {
     expect(localAgentToolsForMode("camera")).toEqual([]);
   });
 
-  it("film-set 授予片段与模型写工具，不授予镜头写工具", () => {
-    const tools = localAgentToolsForMode("film-set");
-    expect(tools).toEqual(expect.arrayContaining(["get_model_api", "get_film_set_clips", "mutate_film_set_clip", "submit_film_set", "import_model_snapshot"]));
-    expect(tools).not.toContain("submit_model_script");
-    expect(tools).not.toContain("submit_model_scripts");
-    expect(tools).toEqual(expect.arrayContaining(["add_film_set_media", "export_film_set_clip", "get_film_set_export"]));
-    expect(tools).not.toContain("update_model_camera");
-  });
 
-  it("只有 film-set 模式可导出成片", () => {
-    expect(localAgentToolsForMode("model3d")).not.toContain("export_film_set_clip");
-    expect(localAgentToolsForMode("camera")).not.toContain("add_film_set_media");
-  });
-
-  it("canvas-group 包含通用六类节点创建与片场编辑工具", () => {
-    const tools = localAgentToolsForMode("canvas-group");
-    expect(tools).toEqual(expect.arrayContaining([
-      "create_canvas_node",
-      "submit_canvas_script",
-      "submit_model_script",
-      "submit_film_set",
-      "add_film_set_media",
-      "mutate_film_set_item",
-      "mutate_film_set_clip"
-    ]));
+  it("模型目标不授予片场专属工具", () => {
+    const tools = localAgentToolsForMode("model3d");
+    for (const removed of ["submit_film_set", "add_film_set_media", "export_film_set_clip", "mutate_film_set_clip", "get_film_set_clips"]) {
+      expect(tools).not.toContain(removed);
+    }
   });
 });

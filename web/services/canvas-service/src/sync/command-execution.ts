@@ -1,4 +1,3 @@
-import { validateGroupAppearanceCommands } from "./group-appearance-validation.js";
 /**
  * 服务端 canvas room：命令验证、事务与持久化管线
  * （自 `room.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R27）。
@@ -15,8 +14,6 @@ import type { YjsCommandRecord, YjsDocumentRepository } from "./yjs-repository.j
 import { applyCommandTransaction } from "./command-transaction.js";
 import { computeCommandPayloadHash, type CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
 import type { CanvasRoomState, RoomCommandResult, RoomSubmitOptions } from "./room-types.js";
-import { currentCanvasGroupScope, invalidateRemovedCanvasGroups } from "../agent-authoring/group-scope.js";
-import { validateCanvasGroupChange } from "@woohaa3/contracts";
 
 /** room 命令管线所需的最小受控上下文；由 `CanvasRoom` 提供（唯一 doc/revision owner）。 */
 export type RoomExecutionHost = {
@@ -165,16 +162,6 @@ export async function executeCommand(
   // 每个命令从 published 重建 authoring：保证「下一命令基于最后 durable 状态」，
   // 也保证提交失败时不需要回滚 published。
   const authoring = cloneDoc(host.publishedDoc);
-  const before = host.exportCanvas();
-  const scope = currentCanvasGroupScope();
-  if (scope && (!scope.valid() || scope.canvasId !== host.canvasId)) return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-revoked", message: "组创作授权已失效" };
-  if (scope?.authorize && !await scope.authorize("write")) return { ok: false, status: "rejected", commandId: batch.commandId, code: "write-forbidden", message: "画布写入权限已撤销" };
-
-  if (before.ok) {
-    const appearanceError = await validateGroupAppearanceCommands(before.canvas, batch.commands);
-    if (appearanceError) return { ok: false, status: "rejected", commandId: batch.commandId, code: "invalid-group-appearance", message: appearanceError };
-  }
-  if (scope && !scope.valid()) return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-revoked", message: "组创作授权已失效" };
   const outcome = await applyCommandTransaction({
     doc: authoring,
     batch,
@@ -194,10 +181,6 @@ export async function executeCommand(
     };
   }
 
-  if (scope) {
-    const reason = before.ok ? validateCanvasGroupChange(before.canvas, outcome.canvas, scope.rootGroupId) : "画布不可读";
-    if (reason || !scope.valid()) return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-forbidden", message: reason ?? "组创作授权已撤销" };
-  }
   const record: YjsCommandRecord = {
     commandId: batch.commandId,
     payloadHash,
@@ -231,7 +214,6 @@ export async function executeCommand(
 
   // durable 成功 → 前进 published → 广播 → 才返回 accepted（design D6 步骤 4）。
   const acceptedUpdate = outcome.changed ? outcome.update : null;
-  if (before.ok) invalidateRemovedCanvasGroups(before.canvas, outcome.canvas);
   host.finalizeAccepted({
     storageSeq: commit.storageSeq,
     update: acceptedUpdate,
@@ -239,7 +221,6 @@ export async function executeCommand(
     canvas: outcome.canvas,
     commands: batch.commands
   });
-  scope?.onAction?.({ canvasId: host.canvasId, commandId: batch.commandId, revision: outcome.revision });
 
   return {
     ok: true,

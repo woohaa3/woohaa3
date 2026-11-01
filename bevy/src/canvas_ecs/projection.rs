@@ -12,8 +12,7 @@ use bevy::prelude::*;
 
 use super::components::{
     CanvasDepth, CanvasHover, CanvasLayout, CanvasNodeId, CanvasSelection, CanvasVisibility,
-    CardPresentation, CardVisual, ContainerVisual, CustomPresentation, FilmSetPresentation,
-    GroupPresentation, NodeActionBar, OverviewCacheOwner,
+    CardPresentation, CardVisual, CustomPresentation, NodeActionBar,
 };
 use crate::app::{CurrentScene, FrameFlags};
 use crate::protocol::{GraphNode, Scene};
@@ -49,12 +48,8 @@ pub(crate) fn project_canvas_nodes(
     mut commands: Commands,
     scene: Res<CurrentScene>,
     mut state: ResMut<CanvasProjectionState>,
-    existing: Query<(Entity, &CanvasNodeId, Option<&OverviewCacheOwner>)>,
-    mut render_inputs: Query<(
-        Option<&mut CardVisual>,
-        Option<&mut ContainerVisual>,
-        Option<&mut NodeActionBar>,
-    )>,
+    existing: Query<(Entity, &CanvasNodeId)>,
+    mut render_inputs: Query<(Option<&mut CardVisual>, Option<&mut NodeActionBar>)>,
 ) {
     let source = &scene.0;
     let overlay = crate::canvas_query::focus_context::overlay(source);
@@ -82,9 +77,9 @@ pub(crate) fn project_canvas_nodes(
         return;
     }
 
-    let mut live: std::collections::HashMap<&str, (Entity, Option<OverviewCacheOwner>)> = existing
+    let mut live: std::collections::HashMap<&str, Entity> = existing
         .iter()
-        .map(|(entity, id, owner)| (id.0.as_str(), (entity, owner.copied())))
+        .map(|(entity, id)| (id.0.as_str(), entity))
         .collect();
     for (node_index, node) in projected.nodes.iter().enumerate() {
         let render_index = crate::canvas2d::draw_order::render_index(&projected.nodes, node_index);
@@ -97,16 +92,16 @@ pub(crate) fn project_canvas_nodes(
         let selection = selection_of(projected, node);
         let hover = hover_of(projected, node);
         let visibility = CanvasVisibility { hidden: false };
-        let (entity, previous_owner) = match live.remove(node.id.as_str()) {
-            Some((entity, previous_owner)) => {
+        let entity = match live.remove(node.id.as_str()) {
+            Some(entity) => {
                 commands
                     .entity(entity)
                     .insert((layout, depth, selection, hover, visibility));
-                (entity, previous_owner)
+                entity
             }
             None => {
                 state.structure_changed = true;
-                let entity = commands
+                commands
                     .spawn((
                         CanvasNodeId(node.id.clone()),
                         layout,
@@ -119,15 +114,14 @@ pub(crate) fn project_canvas_nodes(
                         Visibility::Inherited,
                         Name::new(format!("canvas-node:{}", node.id)),
                     ))
-                    .id();
-                (entity, None)
+                    .id()
             }
         };
-        apply_presentation(&mut commands, entity, projected, node, previous_owner);
+        apply_presentation(&mut commands, entity, node);
         apply_render_inputs(&mut commands, &mut render_inputs, entity, projected, node);
     }
     // 不再可呈现的节点连同派生子实体（标签/纹理/面板/细节）一起回收。
-    for (_, (entity, _)) in live {
+    for (_, entity) in live {
         state.structure_changed = true;
         commands.entity(entity).despawn();
     }
@@ -141,43 +135,26 @@ pub(crate) fn project_canvas_nodes(
 
 fn apply_render_inputs(
     commands: &mut Commands,
-    render_inputs: &mut Query<(
-        Option<&mut CardVisual>,
-        Option<&mut ContainerVisual>,
-        Option<&mut NodeActionBar>,
-    )>,
+    render_inputs: &mut Query<(Option<&mut CardVisual>, Option<&mut NodeActionBar>)>,
     entity: Entity,
     scene: &Scene,
     node: &GraphNode,
 ) {
-    let desired_card = ContainerVisual::from_node(node).is_none().then(|| CardVisual::from_node(node));
-    let desired_container = ContainerVisual::from_node(node);
+    let desired_card = CardVisual::from_node(node);
     let desired_action = crate::canvas_query::action_bar_visible(scene, node)
         .then(|| scene.node_actions.get(&node.id).cloned())
         .flatten()
-        .map(|actions| NodeActionBar { summary: actions.summary.clone(), actions });
-    if let Ok((mut card, mut container, mut action)) = render_inputs.get_mut(entity) {
-        if let Some(desired) = desired_card {
-            if let Some(current) = card.as_deref_mut() {
-                if *current != desired {
-                    *current = desired;
-                }
-            } else {
-                commands.entity(entity).insert(desired);
+        .map(|actions| NodeActionBar {
+            summary: actions.summary.clone(),
+            actions,
+        });
+    if let Ok((mut card, mut action)) = render_inputs.get_mut(entity) {
+        if let Some(current) = card.as_deref_mut() {
+            if *current != desired_card {
+                *current = desired_card;
             }
-        } else if card.is_some() {
-            commands.entity(entity).remove::<CardVisual>();
-        }
-        if let Some(desired) = desired_container {
-            if let Some(current) = container.as_deref_mut() {
-                if *current != desired {
-                    *current = desired;
-                }
-            } else {
-                commands.entity(entity).insert(desired);
-            }
-        } else if container.is_some() {
-            commands.entity(entity).remove::<ContainerVisual>();
+        } else {
+            commands.entity(entity).insert(desired_card);
         }
         if let Some(desired) = desired_action {
             if let Some(current) = action.as_deref_mut() {
@@ -192,108 +169,39 @@ fn apply_render_inputs(
         }
         return;
     }
-    if let Some(container) = ContainerVisual::from_node(node) {
-        commands.entity(entity).insert(container);
-        commands.entity(entity).remove::<CardVisual>();
-    } else {
-        commands.entity(entity).insert(CardVisual::from_node(node));
-        commands.entity(entity).remove::<ContainerVisual>();
-    }
-    if crate::canvas_query::action_bar_visible(scene, node) {
-        if let Some(actions) = scene.node_actions.get(&node.id) {
-            commands.entity(entity).insert(NodeActionBar {
-                actions: actions.clone(),
-                summary: actions.summary.clone(),
-            });
-        }
+    commands.entity(entity).insert(desired_card);
+    if let Some(actions) = desired_action {
+        commands.entity(entity).insert(actions);
     } else {
         commands.entity(entity).remove::<NodeActionBar>();
     }
 }
 
-fn apply_presentation(
-    commands: &mut Commands,
-    entity: Entity,
-    scene: &Scene,
-    node: &GraphNode,
-    previous: Option<OverviewCacheOwner>,
-) {
-    if node.group.is_some() {
-        let presentation = node.group.as_ref().expect("group presentation");
-        commands
-            .entity(entity)
-            .remove::<(CardPresentation, FilmSetPresentation, CustomPresentation)>();
-        commands.entity(entity).insert(GroupPresentation {
-            drop_target: presentation.drop_target,
-            collapsed: presentation.collapsed,
-            member_count: presentation.member_count.max(0) as u32,
-            running: crate::canvas2d::group_is_running(node),
-            resizable: node.resizable,
+fn apply_presentation(commands: &mut Commands, entity: Entity, node: &GraphNode) {
+    commands.entity(entity).insert(CardPresentation {
+        resizable: node.resizable,
+        texture: node.texture,
+        busy: node.busy,
+        media_loading: node.media_loading,
+        ghost: node.ghost,
+        model: node.model.is_some(),
+        model_preview: node.model_preview.is_some(),
+        history: crate::canvas_query::layout::has_history_strip(node),
+    });
+    if node.kind.is_empty() {
+        commands.entity(entity).insert(CustomPresentation {
+            kind: node.kind.clone(),
         });
-        let declared = presentation.overview_cache.is_some();
-        let carried = previous.filter(|owner| owner.enabled);
-        commands.entity(entity).insert(OverviewCacheOwner {
-            enabled: declared,
-            input_fingerprint: declared
-                .then(|| {
-                    crate::canvas_ecs::overview_cache::subject::presentation_fingerprint(
-                        node,
-                        crate::canvas_ecs::overview_cache::subject::preparation(scene, &node.id),
-                    )
-                })
-                .unwrap_or(0),
-            tier: carried.and_then(|owner| owner.tier),
-            fallback: carried.and_then(|owner| owner.fallback),
-        });
-    } else if node.composite_asset.is_some() {
-        let asset = node.composite_asset.as_ref().expect("composite asset");
-        commands
-            .entity(entity)
-            .remove::<(CardPresentation, GroupPresentation, CustomPresentation)>();
-        commands.entity(entity).insert(FilmSetPresentation {
-            panel: asset.panel.is_some(),
-            has_model: node.model.is_some(),
-            diamond: crate::canvas_query::scope::is_diamond(
-                crate::canvas_query::scope::node_scope(node).shape,
-            ),
-        });
-        commands.entity(entity).insert(OverviewCacheOwner::default());
     } else {
-        commands
-            .entity(entity)
-            .remove::<(GroupPresentation, FilmSetPresentation, CustomPresentation)>();
-        commands.entity(entity).insert(CardPresentation {
-            resizable: node.resizable,
-            texture: node.texture,
-            busy: node.busy,
-            media_loading: node.media_loading,
-            ghost: node.ghost,
-            model: node.model.is_some(),
-            model_preview: node.model_preview.is_some(),
-            history: crate::canvas_query::layout::has_history_strip(node),
-            shot_preview: crate::canvas_query::shot_preview::is_shot_preview_node(node),
-        });
-        commands.entity(entity).insert(OverviewCacheOwner::default());
-        if node.kind.is_empty() {
-            commands.entity(entity).insert(CustomPresentation {
-                kind: node.kind.clone(),
-            });
-        }
+        commands.entity(entity).remove::<CustomPresentation>();
     }
 }
 
 fn selection_of(scene: &Scene, node: &GraphNode) -> CanvasSelection {
     CanvasSelection {
         selected: scene.selection.nodes.iter().any(|id| id == &node.id),
-        running: node.busy
-            || node
-                .group
-                .as_ref()
-                .is_some_and(|_| crate::canvas2d::group_is_running(node)),
-        drop_target: node
-            .group
-            .as_ref()
-            .is_some_and(|presentation| presentation.drop_target),
+        running: node.busy,
+        drop_target: false,
     }
 }
 
@@ -440,52 +348,6 @@ mod tests {
         project(&mut world, scene(&[("a", 0., 0.), ("b", 1., 1.)]), true);
         assert_eq!(nodes(&mut world).len(), 2);
         assert!(world.resource::<CanvasProjectionState>().rejected.is_none());
-    }
-
-    #[test]
-    fn presentations_replace_on_kind_change_and_unknown_kinds_keep_node_entity() {
-        let mut world = world();
-        let group: GraphNode = serde_json::from_value(serde_json::json!({
-            "id":"g","type":"group","x":0,"y":0,"width":100,"height":100,
-            "group":{"title":"g","memberCount":1}
-        }))
-        .unwrap();
-        let mut current = Scene {
-            nodes: vec![group],
-            ..Scene::default()
-        };
-        project(&mut world, current.clone(), true);
-        assert!(
-            world
-                .query::<&GroupPresentation>()
-                .iter(&world)
-                .next()
-                .is_some()
-        );
-        current.nodes[0].group = None;
-        current.nodes[0].kind = String::new();
-        project(&mut world, current, true);
-        assert!(
-            world
-                .query::<&GroupPresentation>()
-                .iter(&world)
-                .next()
-                .is_none()
-        );
-        assert!(
-            world
-                .query::<&CustomPresentation>()
-                .iter(&world)
-                .next()
-                .is_some()
-        );
-        assert!(
-            world
-                .query::<&CardPresentation>()
-                .iter(&world)
-                .next()
-                .is_some()
-        );
     }
 
     #[test]

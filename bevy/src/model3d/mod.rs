@@ -19,28 +19,17 @@
 //! - [`runtime`]：按 signature 同步、根 transform 应用、清理与聚焦可见性；
 //! - [`editor`]：模型 placement gizmo 与镜头 shot gizmo 绘制；
 //! - [`capture`]：镜头离屏截图目标与 WASM readback；
-//! - [`pick`]：普通模型 picking 候选世界 AABB（排除 composite presentation）；
-//! - [`filmset_camera`]：片场 overview 播放的临时小相机辅助实体（独立辅助层）。
+//! - [`pick`]：普通模型 picking 候选世界 AABB。
 #![cfg_attr(not(feature = "canvas-core"), allow(dead_code, unused_imports))]
 
 pub(crate) mod animation;
 #[cfg(feature = "canvas-core")]
 pub(crate) mod capture;
 pub(crate) mod editor;
-#[cfg(feature = "canvas-core")]
-pub(crate) mod empty_placeholder;
-#[cfg(feature = "canvas-core")]
-pub(crate) mod film_set_media;
-pub(crate) mod film_set_pick;
-pub(crate) mod filmset_camera;
 pub(crate) mod focus;
 pub(crate) mod focus_transition;
 pub(crate) mod grid;
-mod group_runtime;
-pub(crate) mod media_geometry;
 pub(crate) mod pick;
-#[cfg(feature = "canvas-core")]
-pub(crate) mod run_effect;
 pub(crate) mod scene;
 pub(crate) mod shot_adapter;
 // 跨后端容差比较：不依赖 Bevy，可在 CI 上单测；真实取图由带 GPU 的环境提供。
@@ -56,7 +45,6 @@ pub mod preview;
 
 mod layout;
 pub(crate) use layout::CANVAS_UNITS_PER_METER;
-pub(crate) use layout::film_set_content_bounds;
 mod batch_cache;
 mod batch_strategy;
 mod batching;
@@ -64,15 +52,12 @@ pub(crate) mod demand;
 mod diagnostics;
 #[cfg(feature = "explicit-instancing")]
 pub(crate) mod instancing;
-mod item_placement;
 mod mesh;
 pub(crate) mod model_textures;
 mod motion_plan;
 mod motion_reset;
 mod opacity;
-mod part_id;
 mod playback_prepare;
-mod preparation;
 pub(crate) mod quality;
 mod resource_ownership;
 mod resource_work;
@@ -86,7 +71,6 @@ mod spawn;
 pub(crate) use spawn::{PreviewRoot, spawn_preview_root};
 
 pub(crate) use animation::TransformAnimationSet;
-pub(crate) use layout::film_set_root_transform;
 
 #[cfg(feature = "canvas-core")]
 pub(crate) use grid::{setup as setup_grid, setup_camera};
@@ -95,11 +79,6 @@ pub(crate) use runtime::{
     FocusVisuals, ModelAssets, ModelVisuals, apply_animation_playback, apply_motion_playback,
     sync_models, sync_quality, sync_quality_with_demand,
 };
-
-/// Native 片场准备管线：只对 native-canvas 的显式总览策略根生效。
-/// Native 片场准备：每帧推进一次；`RootState` 供消费者区分 Pending 与合法空场。
-#[cfg_attr(not(feature = "canvas-core"), allow(unused_imports))]
-pub(crate) use preparation::{RootState, advance as advance_preparation};
 
 /// `compose_delta` 仅 native renderer 的离屏预览复用；wasm 侧走 `runtime` 内部调用。
 #[cfg(feature = "native-renderer")]
@@ -120,16 +99,10 @@ pub(crate) use scene::{derive_aabb, derive_extent, prepare_snapshot, preview_foc
 #[cfg(feature = "canvas-core")]
 pub(crate) use layout::model_bounds_for_node;
 
-/// 片场对象世界 AABB 与单位（对象 picking；change: 2026-10-09-add-film-set-object-motion-and-editing）。
-pub(crate) use layout::{film_set_item_world_aabbs_counted, model_unit};
-
-/// 聚焦片场内部对象候选的唯一派生（change: 2026-10-14-scope-film-set-object-picking-to-focus）。
-pub(crate) use film_set_pick::FilmSetItemPreparation;
+/// 模型单位（自然单位 × 节点矩形容器适配）。
+pub(crate) use layout::model_unit;
 
 use bevy::camera::visibility::RenderLayers;
-pub(crate) const RUN_EFFECT_LAYER: usize = 3;
-/// Reserved overview chrome layer, excluded from all model/capture masks.
-pub(crate) const FILM_SET_PLACEHOLDER_LAYER: usize = 4;
 
 /// 模型实体渲染层：主画布层（0）+ 截图层，使截图像机只看到模型，不含网格/gizmo/2D chrome
 /// （change: add-model-editor-gizmo-shot-capture，任务 3.3）。
@@ -165,53 +138,6 @@ pub(crate) fn add_preview_layers(
         commands.entity(*entity).insert(combined.clone());
     }
     Some(root.entities.len() as u64)
-}
-
-/// Apply a cached owner's source mask after preview consumers have selected their layers.
-/// Capture remains available while layer 0 is removed from the overview main camera.
-#[cfg(feature = "canvas-core")]
-pub(crate) fn overview_source_mask(layers: &[usize], cached: bool) -> RenderLayers {
-    let mut mask = model_render_layers();
-    if cached { mask = mask.without(0); }
-    for layer in layers { mask = mask.with(*layer); }
-    mask
-}
-
-#[cfg(feature = "canvas-core")]
-pub(crate) fn apply_overview_source_layers(
-    models: &ModelVisuals,
-    media: &mut film_set_media::FilmSetMediaVisuals,
-    commands: &mut bevy::prelude::Commands,
-    node_id: &str,
-    layers: &[usize],
-    cached: bool,
-) -> u64 {
-    let mask = overview_source_mask(layers, cached);
-    let mut written = 0;
-    if let Some(root) = models.roots.get(node_id) {
-        for entity in &root.entities { commands.entity(*entity).insert(mask.clone()); }
-        written += root.entities.len() as u64;
-    }
-    written + media.apply_overview_layers(commands, node_id, &mask)
-}
-
-/// 把某片场的卡片预览层并集写入其模型根与全部媒体平面
-/// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
-///
-/// 卡片相机只看所属片场那一层；模型根与媒体平面必须同时加入同一组层，否则卡片画面里缺对象
-/// 或缺图片/视频。返回写入的实体数（模型根实体 + 媒体平面），供诊断。
-#[cfg(feature = "canvas-core")]
-pub(crate) fn apply_preview_layers(
-    models: &ModelVisuals,
-    media: &mut film_set_media::FilmSetMediaVisuals,
-    commands: &mut bevy::prelude::Commands,
-    owner_id: &str,
-    layers: &[usize],
-) -> u64 {
-    let roots = add_preview_layers(models, commands, owner_id, layers).unwrap_or(0);
-    // 把层写进媒体资源表：既回写已存在平面，也让本帧稍后新建的平面直接带上层。
-    let planes = media.refresh_preview_layers(commands, owner_id, layers);
-    roots + planes
 }
 
 #[cfg(test)]

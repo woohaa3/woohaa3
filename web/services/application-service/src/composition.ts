@@ -3,8 +3,6 @@ import { AssistantTextService } from "./extensions/assistant-text-service.js";
 import { createSqliteExtensionDocumentStore } from "./repository/extension-document-store.js";
 import { createServiceConnectionRegistry, type ServiceConnectionRegistryOptions, type ServiceConnectionRegistry } from "./service-connections/registry.js";
 import { createExtensionAssistants } from "./extensions/extension-assistants.js";
-import { CanvasCreationStore } from "./repository/canvas-creation-store.js";
-import { CanvasCreationService } from "./extensions/canvas-creation-service.js";
 /**
  * Application Service composition root
  * （change: 2026-10-05-extract-application-plugin-host，任务 2.1–2.3 / 3.2 / design D1；
@@ -53,8 +51,7 @@ import {
 import { createExtensionTaskIntentRepository } from "./repository/extension-task-intent-repository.js";
 import { createExtensionTaskRecovery } from "./extensions/task-recovery.js";
 import { createSqliteAgentConversationStore } from "./repository/agent-conversation-repository.js";
-import { createAgentAdapterRegistry } from "./extensions/agent-adapter-registry.js";
-import { candidateAssistantDirectory } from "./extensions/agent-candidate-directory.js";
+import { createAgentAdapterRegistry, type AgentAdapterRegistryHost } from "./extensions/agent-adapter-registry.js";
 import { createAgentConnectionRegistry, type AgentConnectionRegistry } from "./extensions/agent-connection-registry.js";
 import { createAgentConversationService, type AgentConversationService } from "./extensions/agent-conversation-service.js";
 import { createAgentConversationApiHandler, type AgentConversationApiHandler } from "./api/agent-conversation-api.js";
@@ -71,7 +68,6 @@ export type ApplicationServiceOptions = {
   serviceConnectionSources?: Omit<ServiceConnectionRegistryOptions, "documents"> & { documents?: ServiceConnectionRegistryOptions["documents"] };
 
   mediaFormats?: import("@woohaa3/contracts").MediaFormatRegistry;
-  candidateAssistantProviders?: () => readonly import("@woohaa3/contracts").FilmSetConversionProvider[];
   env?: Record<string, string | undefined>;
   storePath?: string;
   serviceToken?: string;
@@ -210,9 +206,7 @@ export type ApplicationServiceOptions = {
    * Agent 会话 API 的受控画布授权 facade（owner+canvas 隔离）
    * （change: 2026-10-12-add-agent-conversation-panel，任务 1.3）。缺省时会话 API 全部拒绝。
    */
-  groupEffects?: import("./extensions/agent-conversation-service.js").AgentConversationServiceOptions["groupEffects"];
   assistantText?: import("@woohaa3/contracts").AssistantTextPort;
-  canvasCreation?: import("@woohaa3/contracts").CanvasCreationPort;
   conversationCanvasAccess?: import("@woohaa3/contracts").ApplicationExtensionCanvasAccessFacade;
   /**
    * 内置 MCP 真实发现（change: 2026-10-12-add-agent-conversation-panel，任务 3.1）。
@@ -422,20 +416,18 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
   });
 
   // 宿主 Agent 会话：adapter 注册表（版本绑定）+ 会话服务（accept-before-dispatch、去重、恢复）。
-  const assistantRegistryHost = candidateAssistantDirectory({
+  const assistantRegistryHost: AgentAdapterRegistryHost = {
     hasCapability: (id) => extensionHost.hasCapability(id),
     resolveCapability: (id) => extensionHost.resolveCapability(id),
     resolveCapabilityOwner: (id) => extensionHost.resolveCapabilityOwner(id),
     snapshot: () => extensionHost.snapshot()
-  }, options.candidateAssistantProviders ?? (() => []));
+  };
   const agentAdapterRegistry = createAgentAdapterRegistry(assistantRegistryHost);
   // 来源连接发现注册表（change: 2026-10-16-add-agent-appserver-and-sdk-connections，任务 2.1）：
   // 连接来自已激活扩展的 owner-scoped provider；核心不 import 厂商实现。
   const agentConnections = createAgentConnectionRegistry(assistantRegistryHost);
   const agentConversations = createAgentConversationService({
     store: conversationStore,
-    groupEffects: options.groupEffects,
-    groupScopeEpoch: (canvasId, rootGroupId) => canvasCreationStore.epoch(canvasId, rootGroupId),
     registry: agentAdapterRegistry,
     connections: agentConnections,
     ...(options.preserveUnreconciledOnRestart ? { preserveUnreconciledOnRestart: true } : {}),
@@ -471,11 +463,6 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
    *
    * 不再支持插件自报的本地会话端口：认证只经 `authenticator` 一次解析，插件不能另建 owner。
    */
-  const canvasCreationStore = new CanvasCreationStore(config.storePath);
-  const unbindCreationEpochs = options.canvasCreation?.bindScopeEpochStore?.({ read: (canvasId, rootGroupId) => canvasCreationStore.epoch(canvasId, rootGroupId), advance: (canvasId, rootGroupId) => canvasCreationStore.invalidate(canvasId, rootGroupId) });
-  const canvasCreations = new CanvasCreationService({ store: canvasCreationStore, conversations: agentConversations, connections: agentConnections, canvas: options.canvasCreation,
-    discoverTools: options.mcpDiscovery,
-    preflight: async (owner, canvasId) => (await options.conversationCanvasAccess?.authorize({ subject: owner, canvasId, permission: "write" }))?.ok === true });
   const assistantTextStore = new AssistantTextStore(config.storePath);
   const assistantText = new AssistantTextService({ store: assistantTextStore, conversations: agentConversations, connections: agentConnections, registry: agentAdapterRegistry, canvas: options.assistantText });
   const agentConversationApi: AgentConversationApiHandler = createAgentConversationApiHandler({
@@ -484,7 +471,6 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     accessEnforcer,
     service: agentConversations,
     ...(skillMedia ? { skillMedia } : {}),
-    canvasCreations,
     assistantText,
     connections: agentConnections,
     authenticator,
@@ -579,8 +565,6 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
       taskIntentStore.close();
       extensionConfigStore.close();
       extensionWorkStore.close();
-      unbindCreationEpochs?.();
-      canvasCreationStore.close();
       assistantTextStore.close();
       conversationStore.close();
       skillMediaStore?.close();

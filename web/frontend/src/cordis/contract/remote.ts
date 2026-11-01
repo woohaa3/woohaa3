@@ -17,10 +17,6 @@ import type {
   EditSessionCompleteRequest,
   EditSessionCompletionReceipt,
   EditSessionStatusRequest,
-  FilmSetConversionModelCandidate,
-  FilmSetConversionReceipt,
-  FilmSetConversionRequest,
-  FilmSetConversionStatus,
   MergeNodeHistoryReceipt,
   NodeGenerationHistoryDetail,
   NodeGenerationHistoryListPage,
@@ -29,8 +25,6 @@ import type {
   PromptSnippetListQuery,
   PromptSnippetListResult,
   PromptSnippetTag,
-  RecordingStatusView,
-  RecordingSubmitRequest,
   RenamePromptSnippetTagInput,
   UpdatePromptSnippetInput
 } from "@woohaa3/contracts";
@@ -44,7 +38,6 @@ import type { TaskHistoryReader } from "../../shared/task-history/client.js";
 export type CanvasActivityChangesQuery = { canvasId: string; after: number; limit?: number };
 
 export type CanvasRunRequest = {
-  shotImageReferences?: import("@woohaa3/contracts").FrozenShotImageReference[];
   nodeId: string;
   runId: string;
   jobId: string;
@@ -179,55 +172,6 @@ export interface CanvasRemoteService {
   /** 目录素材 resolver：确认稳定 storageKey 可解析（不返回任何 URL）。 */
   resolveSnippetMaterial(storageKey: string): Promise<SnippetResult<{ storageKey: string; resolvable: boolean }>>;
 
-  // --- 单节点快捷「转为片场」（change: 2026-10-13-add-node-to-film-set-shortcut） ----------
-  /**
-   * 当前可用转换模型候选（提供方集合的只读投影）；无候选时返回空数组。
-   * 前端据此展示真实模型名并在无配置时给出「连接 ChatGPT / 配置语言模型」入口。
-   */
-  filmSetConversionModels(): Promise<NodeHistoryResult<{ models: FilmSetConversionModelCandidate[] }>>;
-  /** 提交一次转换；`unknown` 由状态查询回答（不自动重跑）。 */
-  filmSetConversionSubmit(
-    request: FilmSetConversionRequest
-  ): Promise<NodeHistoryResult<{ receipt: FilmSetConversionReceipt & { ok: true }; status: FilmSetConversionStatus }>>;
-  /** 查询转换状态；`null` 表示无该请求。 */
-  filmSetConversionStatus(input: {
-    canvasId: string;
-    requestId: string;
-  }): Promise<NodeHistoryResult<{ status: FilmSetConversionStatus | null }>>;
-  /** 取消未提交工作；已提交返回实际结果（不掩盖）。 */
-  filmSetConversionCancel(input: {
-    canvasId: string;
-    requestId: string;
-  }): Promise<NodeHistoryResult<{ status: FilmSetConversionStatus }>>;
-  /** 显式重试：合法候选复用提交；无候选产生新的尝试身份。 */
-  filmSetConversionRetry(input: {
-    canvasId: string;
-    requestId: string;
-  }): Promise<NodeHistoryResult<{ receipt: FilmSetConversionReceipt & { ok: true }; status: FilmSetConversionStatus }>>;
-
-  // --- 原生离屏录制（change: 2026-10-17-add-native-offscreen-film-set-recording） ---------------
-  /**
-   * 提交一次原生录制（参考或显式导出）。
-   *
-   * 前端只提交意图：不传像素、不驱动录制时钟。任务由本机宿主执行，
-   * 切换片段/重载页面/最小化不会取消已接受的任务。
-   */
-  recordingSubmit(input: {
-    canvasId: string;
-    request: RecordingSubmitRequest;
-  }): Promise<NodeHistoryResult<{ jobId: string; state: RecordingStatusView["state"]; duplicate: boolean }>>;
-  /** 查询任务状态（页面重连后可继续观察/取消）。 */
-  recordingStatus(input: {
-    canvasId: string;
-    jobId: string;
-  }): Promise<NodeHistoryResult<{ status: RecordingStatusView }>>;
-  /** 当前画布仍在跟踪的任务；不回填活动历史。 */
-  recordingList(input: { canvasId: string }): Promise<NodeHistoryResult<{ jobs: RecordingStatusView[] }>>;
-  /** 取消；已进入保存返回 `recording-too-late`，不谎称取消成功。 */
-  recordingCancel(input: {
-    canvasId: string;
-    jobId: string;
-  }): Promise<NodeHistoryResult<{ cancelled: true }>>;
 }
 
 /** 片段目录协议结果；失败携带稳定错误码（跨进程按字符串判定）。 */

@@ -14,7 +14,6 @@
  * 因此「持久化先于确认和广播」是结构性的：published 只在 durable 之后前进。
  */
 import * as Y from "yjs";
-import { invalidateRemovedCanvasGroups } from "../agent-authoring/group-scope.js";
 import type { ServerCanvas } from "@woohaa3/contracts";
 import { computeUpdateSha256, type YjsCommandRecord, type YjsDocumentRepository } from "./yjs-repository.js";
 import { recoverYjsDocument, compactYjsCheckpoint } from "./recovery.js";
@@ -571,8 +570,6 @@ export class CanvasRoom {
       return { ok: false, code: commit.code, message: "message" in commit ? commit.message : commit.code };
     }
 
-    const before = this.exportCanvas();
-    if (before.ok) invalidateRemovedCanvasGroups(before.canvas, canvas);
     this.storageSeq = commit.storageSeq;
     Y.applyUpdate(this.published, netUpdate);
     this.revision = canvas.revision;

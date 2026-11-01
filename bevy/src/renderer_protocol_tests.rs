@@ -17,7 +17,6 @@ fn request(version: &str) -> RenderRequest {
         capture: CaptureOptions::default(),
         placement: None,
         motion: None,
-        composite_asset_frame: None,
     }
 }
 
@@ -106,7 +105,6 @@ fn rejects_out_of_range_time() {
     let mut req = request("woohaa-model-scene-ir-v2");
     req.capture.camera_preset = "initial".to_owned();
     req.motion = Some(MotionRequest {
-        objects: Vec::new(),
         duration: 4.0,
         looped: false,
         camera_motion: vec![],

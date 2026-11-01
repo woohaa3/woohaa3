@@ -26,7 +26,7 @@ pub(crate) use input::{
     ingest_bridge, publish_rendered_revision, publish_shot_diagnostics, sync_ready, sync_surface,
 };
 pub(crate) use state::{
-    AnimationCameraState, CurrentScene, FilmSetTextureBatch, FocusRig, FrameFlags, ModelAssetTable,
+    AnimationCameraState, CurrentScene, FocusRig, FrameFlags, ModelAssetTable, ModelTextureBatch,
     NodeIndex, PreviewLayerPool, SurfaceState, TextureBatch,
 };
 
@@ -121,14 +121,11 @@ fn configure_canvas(app: &mut App) {
         .add_systems(Last, startup_timing::end)
         .insert_resource(ClearColor(ThemeResource::default().backdrop_color()))
         .init_resource::<CurrentScene>()
-        .init_resource::<model3d::empty_placeholder::Placeholders>()
         .init_resource::<positions::PositionIndex>()
         .init_resource::<TextureBatch>()
+        .init_resource::<ModelTextureBatch>()
         .init_resource::<canvas2d::focus_details::FocusDetailBatch>()
         .init_resource::<canvas2d::focus_details::FocusDetailVisuals>()
-        .init_resource::<FilmSetTextureBatch>()
-        .init_resource::<canvas2d::scope_panel::PanelImages>()
-        .init_resource::<model3d::film_set_media::FilmSetMediaVisuals>()
         .init_resource::<ModelAssetTable>()
         .init_resource::<NodeIndex>()
         .init_resource::<crate::canvas_ecs::CanvasProjectionState>()
@@ -140,21 +137,13 @@ fn configure_canvas(app: &mut App) {
         .init_resource::<FrameFlags>()
         .init_resource::<FocusRig>()
         .init_resource::<AnimationCameraState>()
-        .init_resource::<model3d::filmset_camera::FilmSetCameraAssets>()
         .init_resource::<ThemeResource>()
         .init_resource::<canvas2d::GenerationClock>()
         .init_resource::<canvas2d::text_presentation::PresentationCache>()
         .add_plugins(crate::runtime_health::RuntimeHealthPlugin)
         .add_plugins(crate::shot_camera::ShotCameraPlugin)
         .add_plugins(crate::model_preview::ModelPreviewPlugin)
-        .init_resource::<crate::canvas_ecs::overview_cache::gpu::OverviewTargets>()
-        .init_resource::<crate::canvas_ecs::overview_cache::gpu::OverviewDisplayed>()
-        .init_resource::<crate::canvas_ecs::overview_cache::dispatch::OverviewDispatch>()
-        .init_resource::<crate::canvas_ecs::overview_cache::OverviewCacheRegistry>()
-        .init_resource::<crate::canvas_ecs::overview_cache::OverviewSourceLayers>()
         .add_plugins(crate::history_preview::HistoryThumbnailPlugin)
-        .add_plugins(model3d::run_effect::RunEffectPlugin)
-        .add_plugins(crate::shot_node_preview::ShotNodePreviewPlugin)
         .add_plugins(crate::isometric_grid::IsometricGridPlugin)
         .add_plugins(crate::orbit_camera::OrbitCameraPlugin)
         .add_plugins(crate::transform_gizmo::TransformGizmoPlugin)
@@ -185,14 +174,8 @@ fn configure_canvas(app: &mut App) {
                         sync_surface,
                         sync_ready,
                         canvas2d::sync_textures,
-                        (
-                            model3d::film_set_media::sync_film_set_planes,
-                            canvas2d::scope_panel::sync_images,
-                            // GLB 内嵌纹理 → 共享 Image（先于片场批次 drain 与模型 spawn）。
-                            model3d::model_textures::sync_model_textures,
-                            model3d::film_set_media::sync_film_set_textures,
-                        )
-                            .chain(),
+                        // GLB 内嵌纹理 → 共享 Image（先于模型 spawn）。
+                        model3d::model_textures::sync_model_textures,
                         canvas2d::sync_camera,
                         focus::sync_focus,
                         scene3d::sync_grid.before(crate::isometric_grid::IsometricGridSet::Style),
@@ -202,27 +185,8 @@ fn configure_canvas(app: &mut App) {
                         // 页面内历史缩略图：同一 App 内一次性离屏渲染，排在模型根同步之后
                         // （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
                         crate::history_preview::sync,
-                        // Native 片场后台准备：非阻塞 poll + 全局预算装配，排在消费者之前
-                        // （change: 2026-10-18-prepare-native-film-sets-in-background，design D4/D5）。
-                        (
-                            scene3d::advance_preparation,
-                            model3d::run_effect::sync,
-                            model3d::empty_placeholder::sync,
-                        )
-                            .chain(),
                         crate::model_preview::sync,
-                        // 卡片预览：消费同一帧的采样镜头/播放投影，并在模型落位后并入卡片渲染层
-                        // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
-                        crate::shot_node_preview::sync,
-                        (
-                            crate::canvas_ecs::overview_cache::input::sync_overview_inputs,
-                            crate::canvas_ecs::overview_cache::eligibility::sync_overview_eligibility,
-                            crate::canvas_ecs::overview_cache::dispatch::sync,
-                            crate::shot_node_preview::sync_source_layers,
-                        ).chain(),
                         scene3d::sync_editor_gizmo,
-                        scene3d::sync_shot_adapter,
-                        scene3d::reclaim_extra_shot_rigs,
                         scene3d::sync_shot_main_view,
                     )
                         .chain(),
@@ -230,12 +194,9 @@ fn configure_canvas(app: &mut App) {
                     // presentation → 分类型几何 → 选中描边批次 → 标签/文字。每个 set 边界都会
                     // 应用 deferred，producer 当帧即可读到投影实体与展示子实体。
                     (
-                        crate::canvas_ecs::sync_group_panels
-                            .in_set(crate::canvas_ecs::CanvasRenderSet::Presentation),
                         (
                             canvas2d::produce_card_geometry,
                             canvas2d::produce_card_hover,
-                            canvas2d::produce_container_geometry,
                             canvas2d::produce_edges,
                             canvas2d::sync_canvas_overlay,
                         )
@@ -244,8 +205,6 @@ fn configure_canvas(app: &mut App) {
                         (
                             canvas2d::begin_selection_outlines,
                             canvas2d::produce_card_selection,
-                            canvas2d::produce_group_selection,
-                            canvas2d::produce_film_set_selection,
                             crate::canvas_ecs::flush_selection_outlines,
                         )
                             .chain()
@@ -274,7 +233,6 @@ fn configure_canvas(app: &mut App) {
             (
                 canvas2d::sync_node_action_bars,
                 canvas2d::sync_focus_backdrop,
-                canvas2d::sync_group_motion,
             )
                 .after(crate::canvas_ecs::CanvasRenderSet::Geometry),
         )
@@ -307,10 +265,6 @@ fn configure_canvas(app: &mut App) {
                 animation_preview::apply_sampled_camera
                     .after(crate::shot_camera::ShotCameraSet::Derive)
                     .before(crate::shot_camera::ShotCameraSet::Preview),
-                // 片场 overview 播放小相机：消费同一采样镜头，独立辅助层，不影响成片输出
-                // （change: 2026-10-13-add-film-set-hover-camera-entity，任务 2.2）。
-                animation_preview::sync_film_set_camera
-                    .after(animation_preview::apply_sampled_camera),
                 // 路由排在 capture 提交前：同一帧里把请求送进队列并建立离屏相机，
                 // 否则每帧截图都要多等一帧（change: 2026-10-15，任务 8.10）。
                 model3d::capture::route_capture_request

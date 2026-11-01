@@ -66,7 +66,7 @@ export function createCanvasMediaClient(options: CanvasMediaClientOptions): Canv
       const response = await withTimeout(signal => fetchImpl(`${baseUrl}/internal/v1/media/extension-read`, {
         method: "POST", headers: buildInternalHeaders({ serviceToken: options.serviceToken, correlationId: createCorrelationId() }),
         // 有画布就带上作用域：body.canvasId 由 media-service 用 canvasScopeOf 校验后交给存储路由。
-        body: JSON.stringify({ extensionId: "film-set", storageKey, ...(canvasId !== undefined ? { canvasId } : {}) }), signal
+        body: JSON.stringify({ extensionId: "canvas-service", storageKey, ...(canvasId !== undefined ? { canvasId } : {}) }), signal
       }), options.timeoutMs);
       if (!response.ok) throw new CanvasMediaClientError("media-read-failed", "稳定媒体资源读取失败", response.status);
       const result = await response.json() as { bytesBase64?: string; contentType?: string };

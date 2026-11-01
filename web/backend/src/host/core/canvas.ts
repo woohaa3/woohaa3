@@ -9,8 +9,7 @@ import { mergeCanvasContentRuntimes } from "../../extensions/canvas-content.js";
  * application 在 canvas 之后装载，而 canvas 要读它的来源注册表与「转为片场」转换能力，
  * 所以这两处在调用时经 `ctx.get("application")` 懒取，不进 `inject`。
  */
-import type { CanvasContentRuntime, FilmSetConversionProvider } from "@woohaa3/contracts";
-import { isFilmSetConversionCapabilityId, isFilmSetConversionProviderShape } from "@woohaa3/contracts";
+import type { CanvasContentRuntime } from "@woohaa3/contracts";
 import {
   isCanvasUpstreamCapabilityId,
   isCanvasUpstreamProviderShape,
@@ -18,10 +17,8 @@ import {
 } from "@woohaa3/contracts";
 import { createCanvasService } from "@woohaa3/canvas-service";
 import type { CanvasMediaAssetSyncPort } from "@woohaa3/canvas-service";
-import { currentCanvasGroupScope } from "@woohaa3/canvas-service";
 import { createCanvasMediaBackfill } from "./canvas-media-backfill.js";
 import { createCanvasStorageOwnership, resolveCanvasOwnershipPath } from "./canvas-storage-ownership.js";
-import { createHostRecordingService } from "../../recording-executor/assembly.js";
 import type { HostContext, HostPlugin } from "../context.js";
 import type { LoadedExtensionHost } from "../../extensions/manifest.js";
 import { READINESS_ORDER, ROUTE_ORDER } from "../order.js";
@@ -30,35 +27,6 @@ import { parseAllowedOrigins } from "../../composition/config.js";
 import { mediaPortToCanvasMediaClient, taskPortToCanvasTaskClient } from "../../ports/adapters.js";
 import { createCanvasSourceBridge } from "../../ports/canvas-sources.js";
 import { createCanvasSubjectResolver } from "../../ports/canvas-subject.js";
-import { createAssistantDeliveryPort } from "../../ports/assistant-delivery.js";
-
-/**
- * 「转为片场」转换提供方：扩展层经 `ctx.generation.registerConversion` 注册的，加上站点插件宿主上
- * 以 capability 声明的；同一 providerId 只取先出现的那个。宿主不按业务 ID 分支。
- */
-function filmSetConversionProviders(ctx: HostContext): readonly FilmSetConversionProvider[] {
-  const providers: FilmSetConversionProvider[] = [];
-  const seen = new Set<string>();
-  const add = (provider: FilmSetConversionProvider) => {
-    if (seen.has(provider.providerId)) return;
-    seen.add(provider.providerId);
-    providers.push(provider);
-  };
-  for (const provider of ctx.generation.conversions()) add(provider);
-  const host = ctx.get("application")?.service.host();
-  if (host) {
-    const capabilities = new Set<string>();
-    for (const registration of host.snapshot()) {
-      for (const id of registration.capabilities) {
-        if (!isFilmSetConversionCapabilityId(id) || capabilities.has(id)) continue;
-        capabilities.add(id);
-        const value = host.resolveCapability(id);
-        if (isFilmSetConversionProviderShape(value)) add(value);
-      }
-    }
-  }
-  return providers;
-}
 
 /**
  * 解析同步上游凭据提供者（`canvas-upstream:<id>` capability）。
@@ -211,16 +179,12 @@ export const canvasPlugin: HostPlugin<{
     const contentRuntime: CanvasContentRuntime | undefined = extensionHost?.createCanvasContent
       ? mergeCanvasContentRuntimes(await extensionHost.createCanvasContent({}))
       : undefined;
-    const mediaRead = ctx.media.port().resources?.read;
     // bootstrap `storage` 槽位（扩展目录的存储实现）已装配时，画布存储**只借**它持有的连接与
     // 已解析配置；未装配时传 undefined，画布服务按本进程环境变量自行解析（独立入口行为不变）。
     const foundationStorage = ctx.access.foundationStorage;
     // 资源授权运行时只在**访问控制已启用**且装配了 ResourceAccessPolicy 时接管入口：
     // 本地单实例（accessRuntime.enabled=false）保持历史 loopback 边界，不把「未配置 ACL」解释成 503。
     const accessBoundary = ctx.access.runtime.enabled && ctx.access.providers.resourceAccessPolicy() !== null;
-    // 原生录制服务：无执行器通道或扩展未声明 recording 端口时为 null（路由给 503）。
-    // 它需要 canvas-service 的权威房间，因此在 createCanvasService 之后装配。
-    let recordingService: Awaited<ReturnType<typeof createHostRecordingService>> = null;
     // 「画布归属远端存储」的持久记录：存储路由在画布服务之外按它选后端，所以必须在这里
     // 落盘，进程重启后仍能回答「这张画布的字节在托管存储里」——否则重启到房间 attach 之间
     // 的读取会回落本地，把远端生成成功的产物固化成失败终态。
@@ -252,7 +216,7 @@ export const canvasPlugin: HostPlugin<{
             skill: import("@woohaa3/contracts").SkillMediaRunRef;
           }) =>
             media.assertCurrent({
-              owner: input.owner ?? currentCanvasGroupScope()?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "",
+              owner: input.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "",
               canvasId: input.canvasId,
               nodeId: input.nodeId,
               runId: input.runId,
@@ -323,37 +287,9 @@ export const canvasPlugin: HostPlugin<{
       // 远端删除：属于远端的画布先在服务端删掉，否则本机删完又会被目录拉回来。
       deleteRemote: resolveRemoteDelete(ctx),
       ...(contentRuntime ? { contentRuntime } : {}),
-      filmSetConversionProviders: () => filmSetConversionProviders(ctx),
-      filmSetConversionExecution: createAssistantDeliveryPort(() => {
-        const service = ctx.get("application")?.service.agentConversations();
-        if (!service) throw new Error("助手会话服务尚未就绪");
-        return service;
-      }, () => filmSetConversionProviders(ctx)),
-      // owner 规则归提供方：宿主只把可信主体与本次 Cookie 转交，第一个给出结果的提供方生效。
-      filmSetConversionOwnerResolver: (input: { principal?: unknown; cookie?: string }) => {
-        for (const provider of filmSetConversionProviders(ctx)) {
-          const resolved = provider.resolveOwner?.(input);
-          if (resolved) return resolved;
-        }
-        return null;
-      },
-      ...(mediaRead ? { filmSetConversionMediaRead: mediaRead } : {}),
       ...(enableYjsSync !== undefined ? { enableYjsSync } : {}),
-      logger: ctx.log.scope("canvas"),
-      // 录制端口先占位：服务实例在 canvas 创建后装配（需要房间），用 getter 延迟读取。
-      get recording() {
-        return recordingService ?? undefined;
-      }
+      logger: ctx.log.scope("canvas")
     } as never);
-    recordingService = await createHostRecordingService({
-      contentRuntime,
-      canvas,
-      media: ctx.media.port(),
-      executor: ctx.get("recordingExecutor") ?? null,
-      logger: ctx.log.scope("recording")
-      // 活动浮层由**前端**从状态查询派生并发 `extension.activity.updated`
-      // （该事件属于 UI scope；宿主进程没有这条总线）。
-    });
     assetSync = createCanvasMediaBackfill(ctx, async (canvasId) => {
       const service = canvas.composition?.service;
       if (!service) throw new Error("画布存储未启用");

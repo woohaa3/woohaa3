@@ -19,8 +19,8 @@ import type { CanvasNodeData } from "./types";
 import type { Woohaa3CanvasJsonObject } from "./core";
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeModelCameras } from "../model-cameras.js";
-import { decodeFilmSetNodeData, decodeModel3DNodeData } from "../canvas-node-model.js";
-import { filmSetNodeDataFields, model3DNodeDataFields } from "../animation-snapshot.js";
+import { decodeModel3DNodeData } from "../canvas-node-model.js";
+import { model3DNodeDataFields } from "../animation-snapshot.js";
 
 /** 首版允许运行时持久化的 nodeData 顶层字段。 */
 export const RUNTIME_NODE_CONFIG_FIELDS = [
@@ -183,21 +183,12 @@ export function sanitizeNodeDataForClipboard(input: unknown, context?: { content
       }
       continue;
     }
-    // 自包含 3D 节点：复制时携带完整自身定义（模型 + 运动 + 镜头 + 时间线 + 片场内容），
-    // 不依赖来源节点（change: 2026-10-05-bind-model-animation-to-shots）。
-    if (!owned && (key === "modelContentVersion" || key === "motionBasedOnModelVersion" || key === "initialCamera" || key === "timeline" || key === "origin" || key === "filmSetContent")) {
-      const animation = decodeFilmSetNodeData(source);
-      if (animation.ok) {
-        const fields = filmSetNodeDataFields(animation.value);
-        for (const [field, fieldValue] of Object.entries(fields)) {
+    // 自包含 3D 节点：复制时携带完整自身定义，不依赖来源节点。
+    if (!owned && key === "modelContentVersion") {
+      const model = decodeModel3DNodeData(source);
+      if (model.ok) {
+        for (const [field, fieldValue] of Object.entries(model3DNodeDataFields(model.value))) {
           if (isFiniteJsonValue(fieldValue)) value[field] = fieldValue as Woohaa3CanvasJsonObject[string];
-        }
-      } else {
-        const model = decodeModel3DNodeData(source);
-        if (model.ok) {
-          for (const [field, fieldValue] of Object.entries(model3DNodeDataFields(model.value))) {
-            if (isFiniteJsonValue(fieldValue)) value[field] = fieldValue as Woohaa3CanvasJsonObject[string];
-          }
         }
       }
       continue;

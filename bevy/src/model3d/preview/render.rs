@@ -374,7 +374,7 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
         placement,
     });
     let (root_transform, reference_center, reference_radius) =
-        super::framing::reference_frame(&model, request.composite_asset_frame.as_ref());
+        super::framing::reference_frame(&model);
     // 动画采样：在同一时刻求值模型部件增量与镜头状态（任务 4.2）。
     let sampled = request
         .motion
@@ -393,11 +393,6 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
         }),
         _ => None,
     };
-    let native_media = request
-        .composite_asset_frame
-        .as_ref()
-        .map(|frame| frame.media.clone())
-        .unwrap_or_default();
     let background = background_color(&capture.background);
     let pixels_setup = pixels.clone();
     let capture_setup = capture.clone();
@@ -432,14 +427,6 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                 &model,
                 root_transform,
             );
-            let media_planes = super::media::spawn_media(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut images,
-                &native_media,
-                &root_transform,
-            );
             // 应用部件增量（旋转乘基础旋转，平移/缩放叠加）与透明度。
             // 透明度规则与可见播放同源：1 = 原透明模式、<1 = 专属材质 Blend、0 = 隐藏。
             if let Some((_, deltas)) = &sampled {
@@ -456,21 +443,6 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                         continue;
                     }
                     let opacity = delta.opacity.max(0.0);
-                    if let Some(item_root) = super::super::part_id::decode_part_id(part_id)
-                        .filter(|decoded| decoded.part_id.is_empty())
-                    {
-                        // 对象根：该对象名下全部块一起变透明（不拆块）。
-                        for (candidate, _) in &part_materials {
-                            if !super::super::part_id::belongs_to_item(candidate, item_root.item_id)
-                            {
-                                continue;
-                            }
-                            if let Some(target) = entities.get(candidate).copied() {
-                                *opacities.entry(target).or_insert(1.0) *= opacity;
-                            }
-                        }
-                        continue;
-                    }
                     if part_materials.contains_key(part_id) {
                         *opacities.entry(*entity).or_insert(1.0) *= opacity;
                     }
@@ -484,32 +456,6 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                         continue;
                     };
                     apply_preview_opacity(&mut commands, &mut materials, entity, &material, value);
-                }
-                // 媒体平面：本身就有专属材质，直接写它的 alpha（对象根透明度同样生效）。
-                for plane in &media_planes {
-                    let Some(item_root) = deltas
-                        .iter()
-                        .find(|(part_id, _)| {
-                            super::super::part_id::decode_part_id(part_id).is_some_and(|decoded| {
-                                decoded.part_id.is_empty()
-                                    && super::super::part_id::belongs_to_item(
-                                        &plane.item_id,
-                                        decoded.item_id,
-                                    )
-                            })
-                        })
-                        .map(|(_, delta)| delta.opacity)
-                    else {
-                        continue;
-                    };
-                    if let Some(mut material) = materials.get_mut(&plane.material) {
-                        if item_root <= 0.0 {
-                            commands.entity(plane.entity).insert(Visibility::Hidden);
-                        } else if item_root < 1.0 {
-                            material.alpha_mode = bevy::material::AlphaMode::Blend;
-                            material.base_color.set_alpha(item_root.clamp(0.0, 1.0));
-                        }
-                    }
                 }
             }
             match &animation_camera {

@@ -49,7 +49,6 @@ export function installInteractionController(options: InteractionControllerOptio
    */
   const focusInputBlocked = options.isFocusInputBlocked ?? modalActive;
   const textureSync: TextureUploader | null = options.textureSync ?? null;
-  let compositeAssetMediaReady: ReadonlySet<string> | null = null;
   let disposed = false;
   /**
    * 场景失效信号（change: optimize-model-scene-snapshot-hot-path，design D3；
@@ -95,7 +94,6 @@ export function installInteractionController(options: InteractionControllerOptio
     hoveredPort: null,
     hoveredEdgeId: null,
     hoveredVideoNode: null,
-    dropTargetGroupIds: [],
     wheelSource: INITIAL_WHEEL_SOURCE,
     viewportCommitTimer: null,
     lastNotifiedViewport: null
@@ -142,10 +140,8 @@ export function installInteractionController(options: InteractionControllerOptio
     hoveredEdgeId: state.hoveredEdgeId,
     hoveredHistory: state.hoveredHistory,
     pressedHistory: state.gesture.kind === "history-press" ? state.gesture : null,
-    dropTargetGroupIds: state.dropTargetGroupIds,
     dragAttach: attachProjectionRef.current?.() ?? null,
-    aggregateConnect: aggregateProjectionRef.current?.() ?? null,
-    compositeAssetReadyPlanes: compositeAssetMediaReady
+    aggregateConnect: aggregateProjectionRef.current?.() ?? null
   });
   /**
    * 首个完整场景构建是否已计时。
@@ -189,7 +185,7 @@ export function installInteractionController(options: InteractionControllerOptio
   });
 
   /**
-   * 当前框选选区矩形（世界坐标，change: fix-group-and-marquee-preview）。
+   * 当前框选选区矩形（世界坐标）。
    * 只在 marquee 手势进行中返回；拖拽中每帧随 `state.gesture.current` 更新。
    */
   const marqueeRect = (): { x: number; y: number; width: number; height: number } | null => {
@@ -297,8 +293,7 @@ export function installInteractionController(options: InteractionControllerOptio
     schedule: (reason?: string) => schedule(reason ?? "input"),
     nextSeq: () => seq++,
     queryGizmo: queries.queryGizmo,
-    queryPoint: queries.queryPoint,
-    focusContextContains: frameSubmission.focusContextContains
+    queryPoint: queries.queryPoint
   });
   const clearHeldKeys = () => {
     // Space 临时平移也是 held input：与聚焦飞行键/粘连键一起复位，避免失焦、modal 或
@@ -326,8 +321,8 @@ export function installInteractionController(options: InteractionControllerOptio
     frameLoop.step("projection-notify", notifyProjection, undefined);
     // 瞬时 DOM overlay 需要和画布刷新保持同一帧节奏；它们自行读取当前 accepted/working 几何。
     frameLoop.step("frame-notify", () => options.onFrame?.(), undefined);
-    // 推进与场景无关的逐帧工作（瞬时态/会话/失效清理）；返回就绪片场媒体平面集合。
-    compositeAssetMediaReady = advanceTransientState({
+    // 推进与场景无关的逐帧工作（瞬时态/会话/失效清理）。
+    advanceTransientState({
       focusInputBlocked,
       clearHeldKeys,
       syncModelFocusValid: () => frameLoop.step("focus-valid", () => model.syncModelFocusValid(), undefined),
@@ -339,7 +334,6 @@ export function installInteractionController(options: InteractionControllerOptio
       }, undefined),
       syncTexture: () => frameLoop.step("image-sync", () => textureSync?.sync(), undefined),
       syncVideoSessions: () => frameLoop.step("video-sync", () => options.videoSessions?.sync(), undefined),
-      syncCompositeAssetMedia: () => frameLoop.step("composite-media-sync", () => options.compositeAssetMediaSessions?.sync() ?? null, compositeAssetMediaReady),
       state,
       isFocused: () => !!(options.getModelFocus?.() || options.getImageFocus?.() || options.getVideoFocus?.()),
       setSelection,
@@ -361,7 +355,7 @@ export function installInteractionController(options: InteractionControllerOptio
     }
     const refreshGround = () => hover.refreshGround(point => queries.queryPoint({
       x: (point.x - activeViewport().x) / activeViewport().zoom,
-      y: (point.y - activeViewport().y) / activeViewport().zoom }, activeViewport().zoom));
+      y: (point.y - activeViewport().y) / activeViewport().zoom }, activeViewport().zoom, state.hoveredEdgeId));
     // 无失效且非强制：跳过全部场景构建/序列化/跨边界（静止画布热路径）。
     if (!force && !sceneInvalidated) { if (ownerChanged || hover.needsRefresh()) refreshGround(); return; }
     sceneInvalidated = false;
@@ -418,7 +412,6 @@ export function installInteractionController(options: InteractionControllerOptio
 
   /** 指针 hover 与视频播放跟踪（实现见 `interaction-hover.ts`）。 */
   const hover = createHoverTracker({
-    projectCanvas: canvas => options.compositeAssets?.projectCanvas(canvas) ?? canvas,
     nodeCapabilities: options.nodeCapabilities,
     state,
     historyAt: nodeId => {
@@ -496,8 +489,7 @@ export function installInteractionController(options: InteractionControllerOptio
     pruneAttach: () => input.pruneAttach(),
     aggregateProjection: () => aggregateProjectionRef.current?.() ?? null,
     aggregateActive: () => state.gesture.kind === "aggregate-connect",
-    cancelAggregateConnect: () => input.cancelAggregateConnect(),
-    filmSetObjectAction: () => model.filmSetObjectAction()
+    cancelAggregateConnect: () => input.cancelAggregateConnect()
   };
 
   const input = create2dInputFamily(core);
@@ -603,7 +595,6 @@ export function installInteractionController(options: InteractionControllerOptio
       return { ...point, generation: options.getRuntime()?.generation?.() ?? 0 };
     },
     queryDropTarget: (point, excludedIds) => queries.queryDropTarget(point, excludedIds),
-    queryCompositeAssetScopes: () => queries.queryCompositeAssetScopes(),
     cancelTransientGesture,
     ...modelFocus,
     selectNode: (nodeId) => {

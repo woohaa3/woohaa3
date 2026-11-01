@@ -102,8 +102,6 @@ pub(crate) fn compact_card(node: &GraphNode) -> bool {
 /// 该门禁（change: add-node-running-progress）：只有会显示内容区的节点才用进度环替代它。
 pub(crate) fn shows_content(node: &GraphNode) -> bool {
     (node.height > RICH_NODE_HEIGHT || compact_card(node))
-        && node.composite_asset.is_none()
-        && node.group.is_none()
         && (node.kind != "model" || node.model_preview.is_some())
 }
 
@@ -205,11 +203,9 @@ pub(crate) fn history_strip_dot(
     Vec2::new(cx, sy + sh / 2.0)
 }
 
-/// 普通节点有至少两个版本时绘制内部圆点：非 group、非复合资产、非 ghost。
+/// 普通节点有至少两个版本时绘制内部圆点：非 ghost。
 pub(crate) fn has_history_strip(node: &GraphNode) -> bool {
     !node.ghost
-        && node.group.is_none()
-        && node.composite_asset.is_none()
         && node.history_strip.as_ref().is_some_and(|strip| {
             strip.dots.len() > 1
                 || strip
@@ -222,10 +218,9 @@ pub(crate) fn has_history_strip(node: &GraphNode) -> bool {
 /// 运行中节点是否应显示逐帧进度环。
 ///
 /// 覆盖所有普通运行节点（含紧凑节点与纯模型预览节点）：`shows_content` 只描述富内容卡片，
-/// 会漏掉 196x64 的紧凑模型/纯模型节点。聚合节点（复合资产）用运行遮罩、group 用容器呈现，
-/// 都不走进度环（change: 2026-10-12-unify-generation-history-strip）。
+/// 会漏掉 196x64 的紧凑模型/纯模型节点。
 pub(crate) fn shows_generation_ring(node: &GraphNode) -> bool {
-    node.busy && node.group.is_none() && node.composite_asset.is_none()
+    node.busy
 }
 
 /// 运行进度环承载矩形：富内容节点用内容区；紧凑节点用卡片内缩矩形。
@@ -404,9 +399,7 @@ pub(crate) const NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH: f32 = 280.0;
 /// 顶部碰撞回退判定所用的视口安全边距（屏幕像素）。
 pub(crate) const NODE_ACTION_TOOLBAR_VIEWPORT_MARGIN: f32 = 8.0;
 
-mod group_run_status;
 mod node_action_toolbar;
-pub(crate) use group_run_status::group_run_status_rect;
 
 pub(crate) use node_action_toolbar::{
     NodeActionLayout, NodeActionSlot, node_action_toolbar, node_action_toolbar_for_bounds,
@@ -415,10 +408,6 @@ pub(crate) use node_action_toolbar::{
 
 /// 连接端口：输入在左中、输出在右中。
 pub(crate) fn port(node: &GraphNode, output: bool) -> Vec2 {
-    if node.group.as_ref().is_some_and(|group| group.collapsed) {
-        let rect = crate::canvas_query::group_model::presentation_rect(node);
-        return port_for_bounds(rect.x, rect.y, rect.z, rect.w, output);
-    }
     port_for_bounds(node.x, node.y, node.width, node.height, output)
 }
 
@@ -440,99 +429,6 @@ pub(crate) fn estimated_char_width(c: char, size: f32) -> f32 {
 /// 逐字估算整段文本宽度（与 [`shortened`] 同一启发式，供标题底衬等需要实际宽度的场景复用）。
 pub(crate) fn estimated_text_width(text: &str, size: f32) -> f32 {
     text.chars().map(|c| estimated_char_width(c, size)).sum()
-}
-
-/// 片场标题字号。
-pub(crate) const FILM_TITLE_FONT: f32 = 32.0;
-/// 片场标题面板内类型标记（聚合节点业务类型名）字号。
-pub(crate) const FILM_TITLE_TYPE_FONT: f32 = 20.0;
-/// 片场标题面板左右内边距（文字与面板边缘的间隙）。
-pub(crate) const FILM_TITLE_CHIP_PAD: f32 = 24.0;
-/// 片场标题面板上下内边距。
-pub(crate) const FILM_TITLE_VPAD: f32 = 12.0;
-/// 标题行与类型标记行之间的竖直间隙。
-pub(crate) const FILM_TITLE_LINE_GAP: f32 = 6.0;
-/// 片场标题面板与范围顶部之间的竖直间隙。
-pub(crate) const FILM_TITLE_GAP: f32 = 20.0;
-/// 片场标题面板最小宽度。
-pub(crate) const FILM_TITLE_MIN_WIDTH: f32 = 64.0;
-/// 片场标题/类型名可读的最小文案宽度（约 6 个中文字符，含 `shortened` 预留的省略号宽度）。
-///
-/// 地面范围可能远窄于模型（小地面、较高的模型），若文案可用宽度严格跟随范围/内容宽度，标题会
-/// 退化为单个字加省略号。面板浮在**范围与模型内容包围盒之上**、不侵占两者内部，因此允许它宽于
-/// 内容以保住可读性。
-pub(crate) const FILM_TITLE_MIN_TEXT_WIDTH: f32 = 224.0;
-
-/// 片场标题面板高度：上下内边距 + 标题行（+ 可选类型标记行）。
-pub(crate) fn film_title_chip_height(has_type: bool) -> f32 {
-    FILM_TITLE_VPAD * 2.0
-        + FILM_TITLE_FONT
-        + if has_type {
-            FILM_TITLE_LINE_GAP + FILM_TITLE_TYPE_FONT
-        } else {
-            0.0
-        }
-}
-
-/// 片场标题面板的纯布局：面板矩形、标题行与类型标记行的文案与落点。
-///
-/// 面板浮在范围顶部与**模型内容包围盒**顶部较高者之上、水平居中于内容包围盒（不落在平行
-/// 四边形内部，也不遮住模型身体）；文案优先按内容宽度有界省略，但保留可读下限（面板可宽于很
-/// 小的地面范围）。第二行是节点业务类型名
-/// （`GraphNode.type_label`，如「片场」「游戏炼丹炉」，由映射层按可信 adapter 身份派生），
-/// 缺失时只画标题行。绘制（`canvas2d::film_set`）与测试共用本函数；显隐仍由 hover/选中决定
-/// （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D7 修订）。
-pub(crate) struct FilmTitleLayout {
-    /// 截断后的标题文案。
-    pub(crate) title: String,
-    /// 截断后的业务类型名（空即不绘制第二行）。
-    pub(crate) type_label: String,
-    /// 面板矩形 `(x, y, width, height)`。
-    pub(crate) chip: (f32, f32, f32, f32),
-    /// 标题行左上落点。
-    pub(crate) title_pos: Vec2,
-    /// 类型标记行左上落点。
-    pub(crate) type_pos: Vec2,
-}
-
-pub(crate) fn film_title_layout(node: &GraphNode) -> FilmTitleLayout {
-    let scope = super::scope::node_scope(node);
-    let aabb = scope.aabb;
-    // 文案可用宽度：优先与模型内容包围盒等宽（减去左右内边距），无内容时回落到范围宽度；
-    // 不低于可读下限，避免小地面把标题压成「…」。
-    let content = scope.content;
-    let available_width = content.map(|bounds| bounds.width).unwrap_or(aabb.width);
-    let max_text = (available_width - FILM_TITLE_CHIP_PAD * 2.0).max(FILM_TITLE_MIN_TEXT_WIDTH);
-    let title = shortened(&node.title, max_text, FILM_TITLE_FONT);
-    let raw_type = node.type_label.trim();
-    let type_label = shortened(raw_type, max_text, FILM_TITLE_TYPE_FONT);
-    let has_type = !type_label.is_empty();
-    let chip_width = (estimated_text_width(&title, FILM_TITLE_FONT)
-        .max(estimated_text_width(&type_label, FILM_TITLE_TYPE_FONT))
-        + FILM_TITLE_CHIP_PAD * 2.0)
-        .max(FILM_TITLE_MIN_WIDTH);
-    let chip_height = film_title_chip_height(has_type);
-    // 浮在范围顶部与模型内容包围盒顶部**较高者**之上：小地面 + 高模型时标题不再压住模型
-    // 身体；平铺内容时仍保持在范围顶部之上。水平居中于内容包围盒（无内容时居中于范围）。
-    let anchor_top = content.map(|bounds| bounds.y).unwrap_or(aabb.y).min(aabb.y);
-    let chip_bottom = anchor_top - FILM_TITLE_GAP;
-    let chip_top = chip_bottom - chip_height;
-    let center_x = content
-        .map(|bounds| bounds.x + bounds.width / 2.0)
-        .unwrap_or(aabb.x + aabb.width / 2.0);
-    let chip_left = center_x - chip_width / 2.0;
-    let title_pos = Vec2::new(chip_left + FILM_TITLE_CHIP_PAD, chip_top + FILM_TITLE_VPAD);
-    let type_pos = Vec2::new(
-        title_pos.x,
-        title_pos.y + FILM_TITLE_FONT + FILM_TITLE_LINE_GAP,
-    );
-    FilmTitleLayout {
-        title,
-        type_label,
-        chip: (chip_left, chip_top, chip_width, chip_height),
-        title_pos,
-        type_pos,
-    }
 }
 
 /// 主 2D 覆盖层相机在聚焦/预览时是否可见。
@@ -580,7 +476,6 @@ pub(crate) fn shortened(text: &str, max_width: f32, size: f32) -> String {
 mod tests {
     use super::*;
 
-    mod film_title;
 
     fn node(width: f32, height: f32) -> GraphNode {
         GraphNode {
@@ -602,12 +497,8 @@ mod tests {
             resizable: false,
             ghost: false,
             card_label: None,
-            group: None,
             model: None,
-            composite_asset: None,
             history_strip: None,
-            aggregate_run: None,
-            shot_preview: None,
         }
     }
 
@@ -640,45 +531,11 @@ mod tests {
     }
 
     #[test]
-    fn ring_gate_excludes_aggregate_and_group() {
-        // 复合资产（片场）用运行遮罩而非进度环。
-        let mut film = kind_node("model", 260.0, 195.0, true);
-        film.composite_asset = Some(crate::protocol::CompositeAssetPresentation {
-            empty_placeholder: None,
-            panel: None,
-            ownership_links: None,
-            root_placement: None,
-            content_extent: None,
-            layout_aabb: None,
-            geometry_quality: None,
-            scope_shape: crate::protocol::CompositeAssetScopeShape::Rect,
-            scope_ground: None,
-            x: 0.0,
-            y: 0.0,
-            width: 260.0,
-            height: 195.0,
-            media: Vec::new(),
-            item_roots: std::collections::HashMap::new(),
-            item_placements: std::collections::HashMap::new(),
-        });
-        assert!(!shows_generation_ring(&film));
-        // group 无进度环。
-        let mut group = kind_node("group", 400.0, 300.0, true);
-        group.group = Some(crate::protocol::GroupPresentation {
-            badge_top_anchor: false,
-            collapsed: false,
-            action_bar: false,
-            title: String::new(),
-            member_count: 1,
-            output_capable_leaf_count: 1,
-            model_bounds: None,
-            run_status: None,
-            geometry_quality: None,
-            drop_target: false,
-        
-            overview_cache: None,
-        });
-        assert!(!shows_generation_ring(&group));
+    fn generation_ring_follows_busy_state() {
+        let mut node = kind_node("model", 260.0, 195.0, false);
+        assert!(!shows_generation_ring(&node));
+        node.busy = true;
+        assert!(shows_generation_ring(&node));
     }
 
     #[test]
@@ -801,12 +658,8 @@ mod tests {
             resizable: false,
             ghost: false,
             card_label: None,
-            group: None,
             model: None,
-            composite_asset: None,
             history_strip: None,
-            aggregate_run: None,
-            shot_preview: None,
         }
     }
 

@@ -132,30 +132,6 @@ describe("失效参考输入形成阻止原因", () => {
     expect(resolution.blockingReasons[0]).toContain("还没有可用输出");
   });
 
-  it("镜头参考尚未冻结时说明等待录制，不报「上游没有输出」", () => {
-    // 镜头参考的资产由「录制完成 → 冻结登记」写入 sourceAssetIds，预览节点本身不承载
-    // outputAssetId；等待期间必须给出等待说法（任务 8.6，与服务端/参考 chips 一致）。
-    const canvas = canvasFixture({
-      nodes: [
-        { id: "shot-preview:x", type: "film-set-shot-preview" },
-        {
-          id: "target",
-          type: "video",
-          data: {
-            inputMapping: [
-              { slotId: "slot-shot-ref", sourceNodeId: "shot-preview:x", role: "shot_reference", sortKey: "0" }
-            ] as never
-          }
-        }
-      ],
-      edges: [{ id: "e1", source: "shot-preview:x", target: "target" }],
-      assets: []
-    });
-    const resolution = resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: [] });
-    expect(resolution.blockingReasons).toEqual(["等待镜头参考录制完成"]);
-    expect(resolution.inputs).toEqual([]);
-  });
-
   it("引用的资产不在当前画布中", () => {
     const canvas = upstreamCanvas({ outputAssetId: "asset-missing" });
     const resolution = resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: IMAGE_CAPABILITY });
@@ -259,83 +235,6 @@ describe("失效参考输入形成阻止原因", () => {
     });
     const resolution = resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: IMAGE_CAPABILITY });
     expect(resolution.blockingReasons[0]).toContain("不接受参考类型");
-  });
-});
-
-describe("镜头参考按 provider 的 reference_video 角色校验", () => {
-  const VIDEO_REFERENCE_CAPABILITY: CanvasTaskInputBinding[] = [
-    {
-      field: "referenceVideos",
-      semantic: "reference-video",
-      roles: ["reference_video"],
-      mediaKinds: ["video"],
-      mediaTypes: ["video/mp4", "video/webm"],
-      maxItems: 3,
-      valueFormat: "url"
-    }
-  ];
-
-  function shotReferenceCanvas() {
-    return canvasFixture({
-      nodes: [
-        { id: "shot-preview:x", type: "film-set-shot-preview" },
-        {
-          id: "target",
-          type: "video",
-          data: {
-            inputMapping: [
-              {
-                slotId: "slot-shot-ref",
-                sourceNodeId: "shot-preview:x",
-                role: "shot_reference",
-                sortKey: "0",
-                sourceAssetIds: ["asset-shot"]
-              }
-            ] as never
-          }
-        }
-      ],
-      edges: [{ id: "e1", source: "shot-preview:x", target: "target" }],
-      assets: [
-        imageAsset({
-          id: "asset-shot",
-          mediaKind: "video",
-          metadata: { storageKey: "media/shot-ref.mp4", contentType: "video/mp4", size: 10, checksum: "e".repeat(64) }
-        })
-      ]
-    });
-  }
-
-  it("模型有 reference_video 绑定时不阻止，并以 reference_video 提交", () => {
-    const resolution = resolveNodeReferenceInputs({
-      canvas: shotReferenceCanvas(),
-      nodeId: "target",
-      bindings: VIDEO_REFERENCE_CAPABILITY
-    });
-    expect(resolution.blockingReasons).toEqual([]);
-    expect(resolution.references[0].role).toBe("reference_video");
-    expect(resolution.inputs).toEqual([
-      {
-        assetId: "asset-shot",
-        role: "reference_video",
-        storageKey: "media/shot-ref.mp4",
-        mediaType: "video/mp4",
-        mediaKind: "video"
-      }
-    ]);
-  });
-
-  it("模型没有视频参考绑定时给出 reference_video 原因，不回显画布内部角色", () => {
-    const resolution = resolveNodeReferenceInputs({
-      canvas: shotReferenceCanvas(),
-      nodeId: "target",
-      bindings: IMAGE_CAPABILITY
-    });
-    expect(resolution.inputs).toEqual([]);
-    expect(resolution.blockingReasons).toEqual([
-      "所选模型不接受参考角色「reference_video」或媒体类型「video」"
-    ]);
-    expect(resolution.blockingReasons.join(" ")).not.toContain("shot_reference");
   });
 });
 

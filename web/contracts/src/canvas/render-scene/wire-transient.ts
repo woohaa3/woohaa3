@@ -340,7 +340,6 @@ export type BevyAnimationPlayback = {
    * design D4）。按片场统一播放头 T 在 Rust 侧映射对象局部时间后求值；目标 id 为组合作用域
    * 编码（`itemId:partId`），对象根 group 以空 partId 表示。缺省即无对象动作。
    */
-  objects?: BevyFilmSetObjectMotion[];
 };
 
 /**
@@ -350,14 +349,6 @@ export type BevyAnimationPlayback = {
  * （目标为对象内作者语义 partId，空串/`root` 即对象根）；`partIds` 为作者语义 partId → 组合
  * 作用域编码 id，供 Rust 直接定位实体。对象基础局部变换已烘焙进组合 group，不在此重复。
  */
-export type BevyFilmSetObjectMotion = {
-  itemId: string;
-  playback: { startTime: number; duration: number; timeScale: number; loop: boolean };
-  /** 已校验的对象动作轨道（目标为对象内 partId）。 */
-  modelMotion: MotionIr["modelMotion"];
-  /** 作者语义 partId → 组合作用域编码 id。 */
-  partIds: Record<string, string>;
-};
 
 /** 序列化给 Rust 的 theme 形状（与 `AppThemeSnapshot` 同构，显式声明以防漂移）。 */
 export type CanvasRenderSceneTheme = AppThemeSnapshot;

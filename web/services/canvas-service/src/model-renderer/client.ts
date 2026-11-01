@@ -19,15 +19,16 @@ export const RENDER_VERSION = "woohaa-model-render-v4";
 export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 export const MAX_PREVIEW_EDGE = 2048;
 
-import type { ContentMotionRequest, ContentSceneFrame } from "@woohaa3/contracts";
-
-/** 渲染器协议里的动画采样载荷（契约层 `ContentMotionRequest` 的别名）。 */
-export type RendererMotionRequest = ContentMotionRequest;
-
-/** 渲染器请求：场景帧（`ContentSceneFrame`）+ 请求标识与截图参数。 */
-export type RendererSceneRequest = ContentSceneFrame & {
+/** 渲染器请求：已编译的场景帧 + 请求标识与截图参数。 */
+export type RendererSceneRequest = {
   requestId: string;
+  sceneVersion: string;
+  signature: string;
+  extent: number;
+  ops: unknown[];
   capture: { width: number; height: number; background: string; cameraPreset: string };
+  /** 模型节点自身的摆放（模型坐标系 → 画布单位）。 */
+  placement?: { offset: [number, number, number]; scale: number; yaw: number };
 };
 
 export type RendererResult =
@@ -211,9 +212,7 @@ export function createRendererClient(options: RendererClientOptions = {}): Rende
       extent: pending.request.extent,
       ops: pending.request.ops,
       capture: pending.request.capture,
-      ...(pending.request.placement ? { placement: pending.request.placement } : {}),
-      ...(pending.request.motion ? { motion: pending.request.motion } : {}),
-      ...(pending.request.compositeAssetFrame ? { compositeAssetFrame: pending.request.compositeAssetFrame } : {})
+      ...(pending.request.placement ? { placement: pending.request.placement } : {})
     });
     const payload = Buffer.from(body, "utf8");
     const header = Buffer.alloc(4);
@@ -282,19 +281,15 @@ export function createRendererClient(options: RendererClientOptions = {}): Rende
   };
 }
 
-/** 缓存键：`sourceHash + sceneVersion + renderVersion + normalizedCaptureOptions`（+动画身份/时刻）。 */
+/** 缓存键：`sourceHash + sceneVersion + renderVersion + normalizedCaptureOptions`。 */
 export function renderCacheKey(input: {
   sourceHash: string;
   sceneVersion: string;
   renderVersion: string;
   capture: { width: number; height: number; background: string; cameraPreset: string };
-  /** 动画完整快照身份；静态模型省略（change: 2026-10-06-fix-model-media...，D6）。 */
-  animationIdentity?: string;
-  timeSeconds?: number;
 }): string {
   const capture = `${input.capture.width}x${input.capture.height}:${input.capture.background}:${input.capture.cameraPreset}`;
-  const animation = input.animationIdentity ? `${input.animationIdentity}\u0000${input.timeSeconds ?? 0}` : "";
   return createHash("sha1")
-    .update(`${input.sourceHash}\u0000${input.sceneVersion}\u0000${input.renderVersion}\u0000${capture}\u0000${animation}`)
+    .update(`${input.sourceHash}\u0000${input.sceneVersion}\u0000${input.renderVersion}\u0000${capture}`)
     .digest("hex");
 }

@@ -100,8 +100,13 @@ export function isAgentEntryAction(value: unknown): value is AgentEntryAction {
   return typeof value === "string" && (AGENT_ENTRY_ACTIONS as readonly string[]).includes(value);
 }
 
-/** 目标创作模式；`camera` 仅为旧会话兼容值，新的片场镜头统一使用 `film-set`。 */
-export const AGENT_TARGET_MODES = ["model3d", "film-set", "camera", "canvas-group", "text"] as const;
+/**
+ * 目标创作模式（change: remove-canvas-groups-and-film-set）。
+ *
+ * 片场（`film-set`）与画布组（`canvas-group`）已下线，不再接受新的目标回合。
+ * `camera` 指模型自身的镜头预设，仍属 model3d 节点的子资源。
+ */
+export const AGENT_TARGET_MODES = ["model3d", "camera", "text"] as const;
 export type AgentTargetMode = (typeof AGENT_TARGET_MODES)[number];
 
 export function isAgentTargetMode(value: unknown): value is AgentTargetMode {
@@ -149,7 +154,7 @@ export type AgentTargetSnapshot = {
   /** Trusted structured runner identity; ordinary dispatch must never execute this turn. */
   structuredInputHash?: string;
   /** Trusted host delivery association; never accepted from a browser entry intent. */
-  delivery?: { purpose: "film-set-conversion" | "text-generation"; domainRequestId: string; attemptId: string };
+  delivery?: { purpose: "text-generation"; domainRequestId: string; attemptId: string };
   canvasId: string;
   nodeId?: string;
   mode?: AgentTargetMode;
@@ -240,10 +245,6 @@ export type AgentCatalogResponse = {
 
 /** 会话摘要（列表用；不含消息正文）。 */
 /** Separates new whole-set conversations from historical local authoring context. */
-export function authoringConversationContext(entry: { mode?: string; clipId?: string | null; itemId?: string | null; cameraId?: string | null }): string | undefined {
-  return entry.mode === "film-set" && !entry.clipId && !entry.itemId && !entry.cameraId ? "film-set:whole" : undefined;
-}
-
 export type ConversationSummary = {
   contextKey?: string;
   conversationId: string;

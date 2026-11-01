@@ -1,5 +1,3 @@
-import { isFilmSetGroupNode } from "@woohaa3/contracts";
-import { resolveTextSubmission } from "../../services/assistant-execution/text-submission.js";
 /**
  * Task Execution Plugin（change: adopt-frontend-cordis-plugin-runtime，design D5/D6；
  *   change: unify-canvas-presentation-navigation，task 5.2）。
@@ -14,14 +12,12 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { lazy, Suspense, useSyncExternalStore, type ReactNode } from "react";
 import type { ExecutionLaunchFeedback } from "./execution-launch.js";
-import { resolveFilmSetClipHash, resolveFilmSetTargetClip } from "./film-set-target.js";
 import { AuthoringGenerateHost } from "../../host.js";
 import { ExecutionPanelPending, ExecutionPanelSkeleton, ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
 import { resolveModelMcpServerUrl } from "../../mcp-endpoint.js";
 import {
   PROMPT_SNIPPET_SOURCE,
-  GROUP_RUN_SERVICE,
   RUN_STATE_SERVICE,
   type PromptSnippetSource,
   type RunStateService
@@ -32,13 +28,11 @@ import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state
 import type { TaskActivityEventSink } from "./submit-coordinator.js";
 import { resolveSelectionContext } from "./selection-context.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";
-import { createGroupRunService } from "./group-run-service.js";
-import { GROUP_BULK_ACTION_ID, GroupRunSummaryStore, resolveGroupBulkDescriptor } from "./group-run-actions.js";
 import { nodeDraftStore } from "./drafts.js";
 import { registerGenerationTraceMenu } from "./generation-trace.js";
 import { GENERATION_TRACE_DIALOG_ID, registerGenerationTraceDialog } from "./generation-trace-dialog.js";
 import { createTaskMonitorRemote } from "../../../shared/task-trace/remote.js";
-import { defaultAppTheme, isFilmSetNode, isGlbModelNodeData, OPEN_TASK_INSPECTION_ACTION, TASKS_INSPECT_ACTION } from "@woohaa3/contracts";
+import { isGlbModelNodeData, isModelNodeType, OPEN_TASK_INSPECTION_ACTION, TASKS_INSPECT_ACTION } from "@woohaa3/contracts";
 import {
   panelRouteForIntent,
   panelTypeForNodeType,
@@ -56,11 +50,6 @@ import { AgentConversationPanel } from "./execution-panel/agent-conversation-pan
 import { TextExecutionHost } from "./text-execution-host.js";
 const ModelExecutionHost = lazy(() => import("./model-execution-host.js").then((module) => ({ default: module.ModelExecutionHost })));
 const ModelParameterPanel = lazy(() => import("./model-parameter-panel.js").then((module) => ({ default: module.ModelParameterPanel })));
-const GroupRunSummaryOverlay = lazy(() => import("./group-run-summary-overlay.js").then(module => ({ default: module.GroupRunSummaryOverlay })));
-function GroupRunSummary({ store }: { store: GroupRunSummaryStore }) {
-  const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
-  return state ? <Suspense fallback={null}><GroupRunSummaryOverlay store={store} /></Suspense> : null;
-}
 
 export const TASK_EXECUTION_PLUGIN_ID = "task-execution";
 export const NODE_EXECUTION_PANEL_TYPE = "node-execution";
@@ -91,16 +80,6 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         launchDisposed = true; launchFeedback?.dispose();
         if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onLaunchVisibility);
       }, "execution-launch-feedback");
-      /**
-       * 当前 scope 的稳定画布身份（change: 2026-10-16-add-group-selection-toolbar）。
-       *
-       * 优先用 Canvas Scope 服务（extension 语义）；缺失时回落到装配时的 canvasId。批量执行用它
-       * 给提交锁/预占分区并绑定结果摘要，页面切换后旧回调不再写新页面。
-       */
-      const resolveScopeCanvasId = (): string => ctx.get("canvasScope")?.canvasId() ?? canvasId;
-      // 分组提交摘要：绑定 canvasId/groupId 的有界 overlay 状态（每页一个）。
-      const groupSummaryStore = new GroupRunSummaryStore();
-
       // 任务监控入口门控（change: 2026-10-13-...，任务 8.6/9.1）：由宿主内置任务监控入口注册的
       // `openTaskInspection` 页面动作承担导航；其可用性来自 `tasks.inspect` 站点策略。
       // 普通用户（无该 action）不显示入口，保留画布活动/节点历史，不引导进入全局管理数据。
@@ -119,7 +98,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
       };
 
       // 任务活动 typed 事件出口（change: formalize-frontend-event-bus，design D6）：
-      // 单节点与 group 共用同一 sink；optional task-activity 缺失时无 listener，行为不变。
+      // optional task-activity 缺失时无 listener，行为不变。
       const activitySink: TaskActivityEventSink = {
         launch: event => {
           const started = Date.now();
@@ -211,7 +190,6 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
               session={ctx.canvasSession}
               runClient={ctx.canvasRemote}
               writable={writable}
-              recordShotCommands={(commands, label) => ctx.canvasEdit.record(commands, label)}
               dialogs={ctx.dialogs}
               catalog={ctx.taskCatalog}
               registry={ctx.modelInteractions}
@@ -248,7 +226,6 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         owner: TASK_EXECUTION_PLUGIN_ID,
         render: ({ route, writable }) => {
           if (route.type !== MODEL_NODE_EDITOR_PANEL_TYPE) return null;
-          // 交付完成后重新解析片段与写权限，避免沿用占位节点时期的空 clipId。
           useSyncExternalStore(ctx.canvasState.subscribe, ctx.canvasState.getWorkingCanvas, ctx.canvasState.getWorkingCanvas);
           if (!resolveSelectionContext(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), route.nodeId)) return null;
           return (
@@ -257,7 +234,6 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
                 canvasId={canvasId}
                 nodeId={route.nodeId}
                 nodeType={resolveModelPanelNodeType(route.nodeId)}
-                isFilmSet={resolveIsFilmSetNode(route.nodeId)}
                 mcpServerUrl={resolveModelMcpServerUrl()}
                 disabledReason={null}
                 renderGenerate={buildModelRenderGenerate(ctx, route.nodeId, writable)}
@@ -308,16 +284,8 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
                 const nodeId = target?.nodeId;
                 const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
                 if (!nodeId || !target || !ctx.canvasSession.isWritable() || !canvas?.document.nodes.some((node) => node.id === nodeId)) return null;
-                if (target.mode === "canvas-group") return canvas.document.nodes.some(node => node.id === nodeId && node.type === "group") ? { ...target, action: "modify", prompt: "", expectedContentHash: undefined } : null;
-                const hash = target.mode === "film-set" ? resolveFilmSetClipHash(nodeId, target.clipId) : (canvas.nodeData[nodeId]?.modelContentVersion as { contentHash?: string } | undefined)?.contentHash;
+                const hash = (canvas.nodeData[nodeId]?.modelContentVersion as { contentHash?: string } | undefined)?.contentHash;
                 return { ...target, action: "modify", prompt: "", ...(hash ? { expectedContentHash: hash } : {}) };
-              }}
-              onContinueGroup={() => {
-                const target = agentConversations.getDetail()?.turns.find(turn => turn.requestId === route.requestId)?.target;
-                const canvas = ctx.canvasState.getCanvas();
-                if (target?.mode !== "canvas-group" || !target.nodeId || !ctx.canvasSession.isWritable() || !canvas?.document.nodes.some(node => node.id === target.nodeId && node.type === "group")) return;
-                ctx.canvasRuntime.controller()?.selectNode(target.nodeId);
-                ctx.canvasNavigation.openPanel({ type: MODEL_NODE_EDITOR_PANEL_TYPE, nodeId: target.nodeId });
               }}
               // 概览态让 runtime 视口避让侧栏宽度；卸载时释放（0）。聚焦态宽度由
               // FocusWorkspace 统一计算（不重复占位）。
@@ -332,90 +300,21 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
       };
       const disposeAgentConversation = ctx.canvasNavigation.registerPanel(agentConversationPanel);
 
-      // group 批量执行 capability（change: add-canvas-node-grouping，任务 3.4b；
-      // change: 2026-10-16-add-group-selection-toolbar，任务 1.1-1.4/2.2/2.3/4.1）：
-      // 横条与右键共用同一 service：只读预览（N）、提交锁/预占、请求前复核、结果摘要。
-      // 提交仍逐个走既有单节点 coordinator，失败不回滚已受理项，不写分组任务状态。
       const coordinator = createSubmitCoordinator({
         store: woohaa3CanvasStore,
         client: ctx.canvasRemote,
         activity: activitySink,
-        // 镜头参考：录制完成并冻结后（画布更新）自动续交一次（任务 8.6）。
-        isWaiting: (error) => error.includes("等待镜头参考"),
-        isWritable: () => ctx.canvasSession.isWritable(),
-        imageReferenceBackground: () => (ctx.get("theme") as { getSnapshot?: () => { tokens?: { webSubtle?: string } } } | undefined)?.getSnapshot?.().tokens?.webSubtle ?? defaultAppTheme().tokens.webSubtle
-      });
-      // 统一运行状态：活动状态优先于滞后的 canonical taskStatus（不依赖鼠标移动刷新）。
-      const runStateService = (): RunStateService | undefined => ctx.get(RUN_STATE_SERVICE) as RunStateService | undefined;
-      const groupRun = createGroupRunService({
-        canvasId: () => resolveScopeCanvasId(),
-        getCanvas: () => workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas ?? null,
-        catalogState: () => ctx.taskCatalog.getState(),
-        isWritable: () => ctx.canvasSession.isWritable(),
-        readDraft: (nodeId, modelKey) => nodeDraftStore.get(nodeId, modelKey),
-        // 统一运行状态按 `(canvasId, nodeId)` 查询；缺失时视为空闲（由提交自身门禁兜底）。
-        isBusy: (nodeId) => runStateService()?.isBusy(resolveScopeCanvasId(), nodeId) ?? false,
-        submit: (input) => coordinator.submit(input),
-        textPrecheck: (canvas, nodeId) => resolveTextSubmission(ctx.agentConversationService, canvas, nodeId, () => invalidateToolbar()),
-        submitText: async input => { const result = await ctx.agentConversationService.submitTurn({ ...input, requestId: `assistant:${crypto.randomUUID()}` }); return result.ok ? { ok: true } : { ok: false, error: result.error }; },
-        onSummary: (summary) => {
-          groupSummaryStore.show({ canvasId: resolveScopeCanvasId(), summary });
-        }
-      });
-      ctx.provide(GROUP_RUN_SERVICE as never, groupRun as never);
-
-      // 分组「批量执行 · N」横条贡献（change: 2026-10-16-add-group-selection-toolbar，任务 2.2）：
-      // 宿主横条是唯一渲染者，这里只提供**纯数据描述**与命中派发；N、原因与提交态来自同一
-      // service 与预览，与右键共享门禁。仅对 group 节点呈现，不参与其它节点类型。
-      const removeGroupBulkAction = ctx.slots.register("canvas.node-action", {
-        id: GROUP_BULK_ACTION_ID,
-        owner: TASK_EXECUTION_PLUGIN_ID,
-        order: -20,
-        available: ({ nodeId, nodeType }) => {
-          if (nodeType !== "group") return false;
-          const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
-          const node = canvas?.document.nodes.find(entry => entry.id === nodeId);
-          return !!node && !isFilmSetGroupNode(node, canvas?.nodeData?.[nodeId]);
-        },
-        describe: ({ nodeId }) => resolveGroupBulkDescriptor({
-          preview: groupRun.preview(nodeId),
-          submitting: groupRun.isSubmitting(nodeId)
-        }),
-        activate: ({ nodeId, writable }) => {
-          if (!writable) return;
-          if (groupRun.isSubmitting(nodeId)) return;
-          const pointer = ctx.canvasRuntime.lastPointerWorld();
-          const point = pointer ? ctx.canvasRuntime.worldToClient(pointer) : null;
-          void groupRun.runGroup(nodeId, point ? { ...point, token: crypto.randomUUID() } : undefined);
-        }
-      });
-
-      // 分组提交摘要 overlay（change: 2026-10-16-add-group-selection-toolbar，任务 4.1）：
-      // 非模态、可关闭、绑定 canvasId；复用 canvas overlay 与共享 chrome。
-      const removeGroupSummaryOverlay = ctx.slots.register("canvas.overlay", {
-        id: "group-run-summary",
-        owner: TASK_EXECUTION_PLUGIN_ID,
-        priority: 27,
-        render: () => <GroupRunSummary store={groupSummaryStore} />
+        isWritable: () => ctx.canvasSession.isWritable()
       });
 
       /**
-       * 描述失效（任务 2.3）：N、禁用原因与「提交中」文案在**静止鼠标**下也随数据变化更新。
-       *
-       * 数据源变化（草稿、目录、working/canonical 画布、统一运行状态、本页提交编排）任一到达时
-       * 请求一帧重建横条描述；**不逐帧扫描全画布**。目录/运行态订阅可能晚于本插件装配，因此在
-       * effect 内建立并在释放时撤销。
+       * 描述失效：草稿、目录、working/canonical 画布、统一运行状态任一到达时请求一帧重建
+       * 节点操作横条描述；**不逐帧扫描全画布**。
        */
       const invalidateToolbar = () => ctx.canvasRuntime.controller()?.invalidate("node-action-description");
-      const offGroupRun = groupRun.subscribe(invalidateToolbar);
       const offDrafts = nodeDraftStore.subscribe(invalidateToolbar);
       const offCatalog = ctx.taskCatalog.subscribe(invalidateToolbar);
-      const offCanvas = woohaa3CanvasStore.subscribe(() => {
-        groupSummaryStore.syncCanvas(resolveScopeCanvasId());
-        invalidateToolbar();
-        // 权威画布更新后重试等待中的镜头参考提交（每个节点至多续交一次）。
-        void coordinator.retryWaiting();
-      });
+      const offCanvas = woohaa3CanvasStore.subscribe(invalidateToolbar);
       // 运行态服务由 run-state 插件提供（兄弟插件），装配期它的 fiber 还没 active：在这里
       // `ctx.get` 只会拿到 undefined，订阅永远建不起来，横条的 N/禁用原因就不再随运行态失效。
       // 声明式等待：服务就绪才订阅，服务撤销随 fiber 一起释放。
@@ -432,7 +331,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         const context = resolveSelectionContext(canvas, nodeId);
         if (!context) return null;
         if (context.panelKind) return { type: NODE_EXECUTION_PANEL_TYPE, nodeId };
-        if (isModelEditorNodeType(context.nodeType, context.nodeData)) return { type: MODEL_NODE_EDITOR_PANEL_TYPE, nodeId };
+        if (isModelEditorNodeType(context.nodeType)) return { type: MODEL_NODE_EDITOR_PANEL_TYPE, nodeId };
         return null;
       };
 
@@ -485,14 +384,9 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           if (traceRetryTimer !== null) clearTimeout(traceRetryTimer);
           removeGenerationTraceMenu();
           removeGenerationTraceDialog();
-          removeGroupBulkAction();
-          removeGroupSummaryOverlay();
-          offGroupRun();
           offDrafts();
           offCatalog();
           offCanvas();
-          groupRun.dispose();
-          groupSummaryStore.dispose();
           unsubscribeSelection();
           unsubscribeNavigation();
           unsubscribeCanvas();
@@ -507,9 +401,9 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
   );
 }
 
-function isModelEditorNodeType(nodeType: string, nodeData?: unknown): boolean {
-  // 宿主模型编辑器只服务 model3d 与片场业务；炉体等其它复合资产业务聚焦到自己的 extension 工作区。
-  return nodeType === "model3d" || nodeType === "group" || isFilmSetNode(nodeType, nodeData);
+function isModelEditorNodeType(nodeType: string): boolean {
+  // 宿主模型编辑器服务 3D 内容节点（model3d / 复合资产卡片）。
+  return isModelNodeType(nodeType);
 }
 
 /** 读取选中模型节点的真实类型，供模型面板渲染 MCP 指引。 */
@@ -523,15 +417,6 @@ function resolvePanelNodeType(nodeId: string): string | null {
   return canvas?.document.nodes.find((entry) => entry.id === nodeId)?.type ?? null;
 }
 
-/** 选中节点是否为片场业务（composite-asset + extensionId="film-set"）。 */
-function resolveIsFilmSetNode(nodeId: string): boolean {
-  const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
-  const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-  return isFilmSetGroupNode(node, canvas?.nodeData?.[nodeId]);
-}
-
-
-
 /**
  * 由 `authoring.generate` slot 组装模型面板生成入口
  * （change: 2026-10-08-unlock-plugin-contracts-and-extensionize-chatgpt，任务 6.4 / design D9）。
@@ -544,13 +429,8 @@ function buildModelRenderGenerate(
   nodeId: string,
   writable: boolean
 ): (() => ReactNode) | undefined {
-  const isFilmSet = resolveIsFilmSetNode(nodeId);
-  const isGroup = resolvePanelNodeType(nodeId) === "group";
-  const mode = isFilmSet ? "film-set" : isGroup ? "canvas-group" : "model3d";
-  // 片场面板无显式片段选择：解析默认片段并带上，否则后端不签发片段写权限（动作写入必带 clipId）。
-  const clipId = isFilmSet ? resolveFilmSetTargetClip(nodeId) : undefined;
-  const expectedContentHash = isFilmSet ? resolveFilmSetClipHash(nodeId) : isGroup ? resolveExpectedGroupAppearanceHash(nodeId) : resolveExpectedModelContentHash(nodeId);
-  const blockedReason = isFilmSet && !clipId ? "该片场节点还没有可写入的动画片段，请先创建动画片段。" : null;
+  const mode = "model3d" as const;
+  const expectedContentHash = resolveExpectedModelContentHash(nodeId);
   // 文件模型以原始 GLB 为唯一权威内容：脚本/部件生成入口按来源禁用并说明原因
   // （change: 2026-10-28-support-glb-model-nodes，spec「文件模型仅提供可用操作」）。
   const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
@@ -561,20 +441,12 @@ function buildModelRenderGenerate(
       canvasId={resolveCanvasId()}
       nodeId={nodeId}
       mode={mode}
-      writable={writable && blockedReason === null && !fileModel}
-      disabledReason={fileModelReason ?? (!writable ? "当前会话不可写，无法直接生成。" : blockedReason)}
+      writable={writable && !fileModel}
+      disabledReason={fileModelReason ?? (!writable ? "当前会话不可写，无法直接生成。" : null)}
       {...(expectedContentHash ? { expectedContentHash } : {})}
-      clipId={clipId ?? null}
       onAuthorize={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: {} })}
     />
   );
-}
-
-function resolveExpectedGroupAppearanceHash(nodeId: string): string | undefined {
-  const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
-  const data = canvas?.nodeData?.[nodeId] as { groupAppearance?: { model?: { contentVersion?: { contentHash?: unknown } } } } | undefined;
-  const hash = data?.groupAppearance?.model?.contentVersion?.contentHash;
-  return typeof hash === "string" && hash !== "" ? hash : undefined;
 }
 
 /** 当前画布 id（宿主注入目标身份用）。 */

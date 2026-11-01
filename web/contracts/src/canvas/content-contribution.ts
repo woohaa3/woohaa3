@@ -57,7 +57,7 @@ export type ContentPresentationAdapter = {
 
 export type ContentInteractionPolicy = {
   isManagedNode(type: string, data: unknown): boolean;
-  selectionActions(action: "delete" | "copy" | "cut" | "rename" | "group" | "download" | "convert", type: string, data: unknown): { allowed: true } | { allowed: false; reason: string };
+  selectionActions(action: "delete" | "copy" | "cut" | "rename" | "download", type: string, data: unknown): { allowed: true } | { allowed: false; reason: string };
   hoverPlaybackTarget(type: string, data: unknown): { ownerNodeId: string; entityId: string } | null;
   doubleClickTarget(type: string, data: unknown): { kind: string; nodeId: string; entityId?: string } | null;
 };

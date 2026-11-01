@@ -4,7 +4,7 @@
  *
  * 视口是本地状态：预览写入 `state.viewportPreview`，提交写 localStorage，不发服务端命令。
  */
-import { clampWoohaa3CanvasZoom, compositeAssetScopeGeometry } from "@woohaa3/contracts";
+import { clampWoohaa3CanvasZoom } from "@woohaa3/contracts";
 import { nodeSize } from "./hit-test.js";
 import { applyWheelToViewport, classifyWheelEvent, type NormalizedWheel } from "./input/wheel-gesture.js";
 import { createPerfInputRecorder } from "./input/perf-interaction.js";
@@ -134,22 +134,11 @@ export function createWheelViewport(core: InteractionCore) {
     let maxX = -Infinity;
     let maxY = -Infinity;
     for (const node of scene.nodes) {
-      // 复合资产地面范围只在其基准矩形之外扩张；取景必须完整包住可见范围（scope AABB），
-      // 否则新的范围边缘会被裁掉（change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D4）。
-      const ground = node.compositeAsset?.scopeGround;
-      const scope = node.compositeAsset && node.compositeAsset.scopeShape === "isometric-diamond" && ground
-        ? compositeAssetScopeGeometry(
-            { x: node.x, y: node.y, width: node.compositeAsset.width, height: node.compositeAsset.height },
-            "isometric-diamond",
-            32,
-            ground
-          ).aabb
-        : null;
       const { width, height } = nodeSize(node);
-      const left = scope ? scope.x : node.x;
-      const top = scope ? scope.y : node.y;
-      const right = scope ? scope.x + scope.width : node.x + width;
-      const bottom = scope ? scope.y + scope.height : node.y + height;
+      const left = node.x;
+      const top = node.y;
+      const right = node.x + width;
+      const bottom = node.y + height;
       minX = Math.min(minX, left);
       minY = Math.min(minY, top);
       maxX = Math.max(maxX, right);

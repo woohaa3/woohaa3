@@ -166,25 +166,6 @@ it("历史只读观察不覆盖普通模型的卡片视角", () => {
   }
 });
 
-it("片场的聚焦初始取景保持原逻辑，不使用卡片视角", () => {
-  const target = targetFor(modelCanvas()),
-    bounds = modelBounds(target)!;
-  modelPreviewStore.set("m1", cardView);
-  const focus = new ModelFocusSession();
-  focus.enter({
-    nodeId: "m1",
-    target: bounds.center,
-    radius: bounds.radius,
-    distance: 10,
-    saved: {},
-  });
-  const before = focus.cameraSnapshot();
-  restorePreviewObserver(focus, [target]);
-  expect(focus.cameraSnapshot()).toEqual(before);
-  syncPreviewObserver(focus, [target]);
-  expect(modelPreviewStore.get("m1")).toEqual(cardView);
-});
-
 it.each([1e-12, 1e12])(
   "卡片极限缩放进入聚焦时距离不跳变（scale=%s）",
   (scale) => {

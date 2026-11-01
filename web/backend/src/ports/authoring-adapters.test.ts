@@ -16,14 +16,13 @@ it("MCP 目录在有 grant 时按 tools 收窄，无 grant 才保持全量发现
   expect(catalogToolsForGrant({ tools: [] })).toEqual([]);
 });
 
-it("does not revoke another owner's group grant with a colliding request identity", () => {
+it("revokes grants by work identity without touching another owner's grant", () => {
   const registry = createToolGrantRegistry();
-  const grant = { token: "a", workId: "same-request", canvasIds: ["canvas"], nodeIds: [], tools: ["get_canvas_graph"], groupScope: { canvasId: "canvas", rootGroupId: "root", scopeEpoch: 0 } };
+  const grant = { token: "a", workId: "same-request", canvasIds: ["canvas"], nodeIds: [], tools: ["get_canvas_graph"] };
   registry.issue(grant, "user-a"); registry.issue({ ...grant, token: "b" }, "user-b");
-  registry.revoke("same-request");
-  expect(registry.verify("a")).not.toBeNull();
   registry.revoke("same-request", "user-a");
-  expect(registry.verify("a")).toBeNull(); expect(registry.verify("b")).not.toBeNull();
+  expect(registry.verify("a")).toBeNull();
+  expect(registry.verify("b")).not.toBeNull();
 });
 
 function fakeCanvas(options: { modelMcp?: unknown } = {}): CanvasService {
@@ -170,15 +169,16 @@ describe("进程内 authoring 适配器", () => {
     for (let index = 0; index < 60; index += 1) expect(registry.authorize(call)).toEqual({ ok: true });
   });
 
-  it("camera 模式已停用，不再签发新的目标授权", async () => {
+  it("已下线的 film-set 模式不再签发目标授权", async () => {
     await expect(createInProcessAuthoringServices({ canvas: fakeCanvas() }).tools.issue({
       delegation: DELEGATION,
-      workId: "camera-deprecated",
+      workId: "deprecated-film-set",
       canvasId: "cv",
       nodeId: "n",
-      mode: "camera",
-      tools: ["get_film_set_clips"]
-    })).rejects.toThrow("camera-mode-deprecated");
+      // 旧会话里仍可能出现的已下线模式（协议已收窄，这里模拟历史输入）。
+      mode: "film-set" as never,
+      tools: ["get_canvas_graph"]
+    })).rejects.toThrow("unsupported-target-mode");
   });
 
 });

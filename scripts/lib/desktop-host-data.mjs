@@ -33,7 +33,7 @@ export function desktopEnvironment({ dataDir, resourceRoot, baseEnv = {}, platfo
  if(development)for(const key of ['WOOHAA3_RUNTIME_DATA_DIR','WOOHAA3_RUNTIME_DEFAULTS_FILE','WOOHAA3_RUNTIME_LOCK_FILE'])delete env[key];
  const master=path.join(dataDir,'secrets/master.key');
  if(fs.existsSync(master))env.WOOHAA3_PLUGIN_SECRET_MASTER_KEY=fs.readFileSync(master,'utf8').trim();
- for(const [file,key] of [['model-renderer','WOOHAA3_MODEL_RENDERER_CMD'],['shot-recorder','WOOHAA3_SHOT_RECORDER_CMD']]) {
+ for(const [file,key] of [['model-renderer','WOOHAA3_MODEL_RENDERER_CMD']]) {
   const candidate=path.join(resourceRoot,'tools',file+(platform==='win32'?'.exe':''));if(fs.existsSync(candidate))env[key]=candidate;
  }
  return env;

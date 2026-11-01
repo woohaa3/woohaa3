@@ -13,7 +13,6 @@ export type CanvasRuntimeOptions = {
   canvasId: string;
   nodeCapabilities?: import("../../../extension-api/node-implementations.js").NodeImplementationRegistry;
   mediaContent?: import("../../../extension-api/media-content.js").MediaContentService;
-  compositeAssets?: import("../../../extension-api/composite-assets.js").CompositeAssetRegistry;
   getSession: () => import("../../contracts.js").CanvasSession | null;
   /** 每节点不可变 prepared model resource（change: optimize-model-scene-snapshot-hot-path）。 */
   getModelResources?: () => ReadonlyMap<string, import("@woohaa3/contracts").PreparedModelResource>;
@@ -57,13 +56,6 @@ export type CanvasRuntimeOptions = {
   getNodeActionToolbars?: () => ReadonlyMap<string, import("@woohaa3/contracts").BevyNodeActionsPresentation>;
   /** 顶部操作横条命中回传（`actionId` = 贡献 id；`menu` 为独立设置箭头）。 */
   onNodeAction?: (hit: { nodeId: string; actionId: string; menu: boolean }) => void;
-  /**
-   * 每帧多选动作横条描述（change: 2026-10-16-add-group-selection-toolbar）。
-   * 由宿主从 `canvas.selection-action` 贡献聚合；缺省/空则不绘制横条。
-   */
-  getSelectionActionToolbar?: () => import("@woohaa3/contracts").BevyNodeActionsPresentation | null;
-  /** 多选动作横条命中回传（无单一节点身份；`actionId` = 贡献 id）。 */
-  onSelectionAction?: (hit: { actionId: string; menu: boolean }) => void;
   /** 本地视口变化（pan/zoom）；供瞬时 overlay 重排。 */
   onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
   /**
@@ -91,11 +83,6 @@ export type CanvasRuntimeOptions = {
    * （change: 2026-10-10-add-video-node-focus-workspace）。
    */
   onVideoFocusIntent?: (request: { nodeId: string }) => void;
-  /**
-   * 双击拍摄镜头预览卡片 → 进入所属片场并选择该镜头
-   * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4）。
-   */
-  onShotPreviewEnterIntent?: (request: { previewNodeId: string; filmSetNodeId: string; clipId: string }) => void;
   /** typed event 出口（Cordis `ctx.emit`）。 */
   emit: (
     name:
@@ -103,16 +90,13 @@ export type CanvasRuntimeOptions = {
       | "ui.text-preview.open-requested"
       | "ui.video-frame-capture.open-requested"
       | "ui.node-history.open-requested"
-      | "ui.node-history.switch-requested"
-      | "ui.shot-preview.enter-requested",
+      | "ui.node-history.switch-requested",
     payload: unknown
   ) => void;
   /** 用户是否偏好减少动态效果（change: enable-video-node-live-preview）。 */
   prefersReducedMotion?: () => boolean;
   /** 视频帧会话（测试可注入）。 */
   createVideoSessions?: (runtime: BevyRuntime) => import("./video-frame-session.js").VideoFrameSessions;
-  /** 复合资产媒体会话（测试可注入；change: 2026-10-08-make-film-set-model-only）。 */
-  createCompositeAssetMediaSessions?: (runtime: BevyRuntime) => import("./composite-asset-media-session.js").CompositeAssetMediaSessions;
   /**
    * 媒体解码实现（测试可注入；change: 2026-10-12-unify-node-editors-and-focus-transitions）。
    * 缺省按来源 key（受控同源 URL）解码原图；供有界媒体资源 store 共享 CPU 位图。

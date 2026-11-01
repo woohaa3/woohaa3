@@ -45,8 +45,6 @@ export type InteractionState = {
   hoveredEdgeId: string | null;
   hoveredVideoNode: string | null;
   hoveredHistory?: { nodeId: string; presentationId: string } | null;
-  /** Groups whose frozen frame currently contains a dragged node center. */
-  dropTargetGroupIds: string[];
   wheelSource: WheelSourceState;
   viewportCommitTimer: number | null;
   lastNotifiedViewport: Viewport | null;
@@ -102,11 +100,6 @@ export type InteractionCore = {
   queryMarquee: (rect: { x: number; y: number; width: number; height: number }) => InteractionQuery<string[]>;
   queryProbe: (source: string, direction: "prev" | "next") => InteractionQuery<ProbeCandidate[]>;
   /**
-   * 复合资产范围几何读取（拖动提示/resize 抓手消费，按 accepted generation）
-   * （change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
-   */
-  queryCompositeAssetScopes: () => InteractionQuery<import("../canvas-runtime/bevy-runtime.js").CompositeAssetScopeGeometryEntry[]>;
-  /**
    * 模型网格命中（change: play-model-animations-on-hover）。
    * `point` 为 canvas 内 CSS 坐标；返回命中的模型节点 identity 或 `null`。
    */
@@ -160,9 +153,4 @@ export type InteractionCore = {
   aggregateActive: () => boolean;
   /** 取消聚合拉线手势并清空预览（不提交命令）。 */
   cancelAggregateConnect: () => void;
-  /**
-   * 片场对象局部键盘 action 读取（change: 2026-10-10-improve-film-set-editing-and-inspector）。
-   * 由 gesture family 持有，支持运行时注入；缺省回落 options。
-   */
-  filmSetObjectAction?: () => InteractionControllerOptions["filmSetObjectAction"] | null;
 };

@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { webTarget } from "./e2e/target";
 
 /**
  * Yjs 协作同步的专用 E2E 配置（change: add-yjs-canvas-sync，任务 9.1–9.3）。
@@ -9,6 +10,17 @@ import { defineConfig, devices } from "@playwright/test";
  *   pnpm exec playwright test -c playwright.yjs.config.ts
  */
 const PORT = Number(process.env.E2E_YJS_PORT ?? 4373);
+const target = webTarget({
+	port: PORT,
+	server: {
+		command: `node e2e/server.mjs --port ${PORT}`,
+		url: `http://127.0.0.1:${PORT}/`,
+		reuseExistingServer: !process.env.CI,
+		timeout: 60_000,
+		stdout: "pipe",
+		stderr: "pipe"
+	}
+});
 
 export default defineConfig({
   testDir: "./e2e",

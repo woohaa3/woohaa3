@@ -6,8 +6,7 @@
  *
  * 模型聚焦编辑期间常驻画布右侧的非模态工具栏：
  * - 互斥工具模式（模型 / 镜头）；
- * - 镜头列表、添加、选择、删除与 pose 文本（方位角、固定仰角 45°、距离）；
- * - 「截图」动作。选中镜头的取景就是主画面，不再另开角落预览。
+ * - 镜头列表、添加、选择、删除与 pose 文本（方位角、固定仰角 45°、距离）。
  *
  * 纯展示：所有状态来自 `ModelEditorSession`，动作回调由宿主注入；不直接读写 canonical
  * 状态，也不创建第二个 canvas。
@@ -44,13 +43,8 @@ export type ModelEditorToolbarProps = {
   /** 添加一个镜头（默认 auto-fit pose 由宿主按当前模型 AABB 计算）。 */
   onAddCamera: () => void;
   cameraCollectionMutable?: boolean;
-  captureEnabled?: boolean;
-  /** 嵌入拍摄构图区域时，只展示视角参数和截图，省略镜头集合及生成入口。 */
+  /** 嵌入拍摄构图区域时，只展示视角参数，省略镜头集合及生成入口。 */
   presentation?: "composition";
-  /** 截图当前选中镜头。 */
-  onCapture: () => void;
-  /** 重试失败截图。 */
-  onRetryCapture?: () => void;
   /** 重置镜头使用的默认自动取景距离（由宿主按当前模型 AABB 计算）。 */
   defaultDistance?: number;
   /** 当前画布 id（供镜头 MCP 指引带出操作对象）。 */
@@ -83,7 +77,6 @@ export function ModelEditorToolbar(props: ModelEditorToolbarProps) {
   const pose = selected ? props.session.effectivePose(selected) : null;
   const readOnly = props.readOnly === true;
   const disabled = readOnly || !props.writable || props.rendererReady === false || state.cameraWritePending;
-  const busy = props.session.captureBusy;
   const composition = props.presentation === "composition";
 
   const cameraControls = (<>
@@ -214,26 +207,6 @@ export function ModelEditorToolbar(props: ModelEditorToolbarProps) {
           <div className="model-editor__focus" data-model-editor-focus="true">
             <span className="model-editor__focus-title">注视点偏移</span>
             <FocusOffsetFields session={props.session} disabled={disabled} camera={selected} />
-          </div>
-        ) : null}
-
-        {selected && props.captureEnabled !== false ? (
-          <div className="model-editor__capture">
-            <Button
-              className="model-editor__capture-button"
-              tone="primary"
-              size="sm"
-              loading={busy}
-              disabled={disabled}
-              onClick={state.capturePhase === "failed" && props.onRetryCapture ? props.onRetryCapture : props.onCapture}
-            >
-              {busy ? "处理中…" : "截图"}
-            </Button>
-            {state.captureError ? (
-              <p className="model-editor__error" role="alert">
-                {state.captureError}
-              </p>
-            ) : null}
           </div>
         ) : null}
 

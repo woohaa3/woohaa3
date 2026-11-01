@@ -77,11 +77,7 @@ pub(super) fn sync(
         let keys: Vec<_> = projected
             .iter()
             .filter(|input| range.contains(&input.index))
-            .filter(|input| {
-                input.node.group.is_none()
-                    && input.node.composite_asset.is_none()
-                    && focused_id != Some(input.node.id.as_str())
-            })
+            .filter(|input| focused_id != Some(input.node.id.as_str()))
             .filter_map(|input| {
                 let node = input.node.as_ref();
                 let hover = scene

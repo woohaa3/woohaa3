@@ -80,7 +80,6 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
     });
     const outcome = await coordinator.submit({ nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "image", origin: { x: 0, y: 0, token: "manual" } });
     expect(outcome.ok).toBe(false); expect(rejections).toHaveLength(1); expect(phases).toEqual(["started", "rejected"]);
-    expect(coordinator.pendingWaiting()).toEqual([]);
   });
   it("提交时抛 started 事件，网关拒绝时抛 local-rejection finished", async () => {
     const started: Array<{ runId: string; nodeId: string; modelKey?: string }> = [];
@@ -203,65 +202,6 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
     });
     expect(wrongType.ok).toBe(false);
     expect(called).toBe(false);
-  });
-});
-
-describe("等待镜头参考的自动续交（任务 8.6）", () => {
-  const input = { nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "image" as const };
-
-  it("等待态入队，画布更新后恰好续交一次并出队", async () => {
-    let ready = false;
-    const calls: string[] = [];
-    const coordinator = createSubmitCoordinator({
-      store: { getState: () => ({ canvas: canvasWithNode() }) },
-      client: {
-        run: async (request) => {
-          calls.push(request.runId);
-          return ready ? { ok: true, runId: request.runId, jobId: request.jobId } : { ok: false, error: "等待镜头参考录制完成" };
-        },
-        cancel: async () => ({ ok: true })
-      },
-      isWaiting: (error) => error.includes("等待镜头参考"),
-      createRunId: () => "run-fixed"
-    });
-    const first = await coordinator.submit(input);
-    expect(first).toMatchObject({ ok: false, waiting: true });
-    expect(coordinator.pendingWaiting()).toEqual(["text-1"]);
-
-    ready = true;
-    const outcomes = await coordinator.retryWaiting();
-    expect(outcomes).toEqual([{ ok: true, runId: "run-fixed", jobId: "job-run-fixed" }]);
-    expect(coordinator.pendingWaiting()).toEqual([]);
-    expect(calls).toHaveLength(2);
-
-    // 已出队：再次重试不再发起提交。
-    expect(await coordinator.retryWaiting()).toEqual([]);
-    expect(calls).toHaveLength(2);
-  });
-
-  it("仍然等待时保留在队列，可取消", async () => {
-    const coordinator = createSubmitCoordinator({
-      store: { getState: () => ({ canvas: canvasWithNode() }) },
-      client: { run: async () => ({ ok: false, error: "等待镜头参考录制完成" }), cancel: async () => ({ ok: true }) },
-      isWaiting: (error) => error.includes("等待镜头参考"),
-      createRunId: () => "run-fixed"
-    });
-    await coordinator.submit(input);
-    await coordinator.retryWaiting();
-    expect(coordinator.pendingWaiting()).toEqual(["text-1"]);
-    await coordinator.cancel({ nodeId: "text-1", runId: "run-fixed" });
-    expect(coordinator.pendingWaiting()).toEqual([]);
-  });
-
-  it("非等待态失败不入队", async () => {
-    const coordinator = createSubmitCoordinator({
-      store: { getState: () => ({ canvas: canvasWithNode() }) },
-      client: { run: async () => ({ ok: false, error: "网关拒绝" }), cancel: async () => ({ ok: true }) },
-      isWaiting: (error) => error.includes("等待镜头参考")
-    });
-    const outcome = await coordinator.submit(input);
-    expect(outcome).toMatchObject({ ok: false, error: "网关拒绝" });
-    expect(coordinator.pendingWaiting()).toEqual([]);
   });
 });
 

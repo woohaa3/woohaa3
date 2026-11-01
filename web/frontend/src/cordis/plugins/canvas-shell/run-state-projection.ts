@@ -1,13 +1,12 @@
 /**
- * 运行状态 → Bevy 节点历史条/聚合遮罩投影
- * （change: 2026-10-12-unify-generation-history-strip，design D4/D5）。
+ * 运行状态 → Bevy 节点历史条投影
+ * （change: 2026-10-12-unify-generation-history-strip，design D4）。
  *
- * 纯函数：把有界的统一运行状态摘要与操作记录投影为节点上的 `historyStrip`/`aggregateRun`
+ * 纯函数：把有界的统一运行状态摘要与操作记录投影为节点上的 `historyStrip`
  * 呈现。不读取完整历史、不写 canonical、不进入 Y.Doc。
  */
 import {
-  FILM_SET_RUN_LABELS, mergeNodeExecutionPresentation, nodeExecutionWindow, showNodeExecutionDots,
-  type FilmSetRunPhase,
+  mergeNodeExecutionPresentation, nodeExecutionWindow, showNodeExecutionDots,
   type NodeGenerationHistoryListItem,
   type BevyHistoryDotState,
   type BevyRenderNode,
@@ -18,7 +17,6 @@ import {
 
 /** 投影输入（有界）：每个节点一条摘要 + 每个操作一条记录 + 当前版本操作身份。 */
 export type NodeRunStateProjection = {
-  groupStatuses?: ReadonlyMap<string, { label: string; state: string }>;
   summaries: readonly CanvasNodeRunSummary[];
   records: readonly CanvasOperationRecord[];
   currentOperationByNode?: ReadonlyMap<string, string>;
@@ -27,25 +25,9 @@ export type NodeRunStateProjection = {
 };
 
 /**
- * 片场反馈阶段 → group 运行状态。
- *
- * 迁移后的片场是带 `filmSetGroup` marker 的 group，运行中的气泡边缘动效与状态标识由
- * `group.runStatus` 驱动。`submitting` 在 group 词汇里对应准备阶段，其余阶段同名复用。
- */
-const FILM_SET_GROUP_STATE: Record<FilmSetRunPhase, string> = {
-  submitting: "preparing",
-  queued: "queued",
-  running: "running",
-  committing: "committing",
-  failed: "failed"
-};
-
-/**
  * 就地投影运行状态到 render scene。
  *
- * - 聚合节点：写 `aggregateRun.active`（运行遮罩），不加历史条。
- * - 普通节点：按 createdAt 升序生成有界圆点；当前生效版本用独立装饰（不挤占状态颜色）。
- * - group 与片场不写历史条；片场执行反馈并入 `group.runStatus`，与普通组共用气泡边缘动效。
+ * 每个节点按 createdAt 升序生成有界圆点；当前生效版本用独立装饰（不挤占状态颜色）。
  */
 export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input: NodeRunStateProjection): void {
   const summaries = new Map(input.summaries.map((entry) => [entry.nodeId, entry]));
@@ -57,24 +39,6 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
   }
   for (const node of nodes) {
     const summary = summaries.get(node.id);
-    if (node.group) {
-      const filmSet = summary?.filmSetFeedback;
-      const status = input.groupStatuses?.get(node.id)
-        ?? (filmSet ? { label: FILM_SET_RUN_LABELS[filmSet.labelCode], state: FILM_SET_GROUP_STATE[filmSet.phase] } : undefined);
-      if (status) node.group.runStatus = status;
-      else delete node.group.runStatus;
-      continue;
-    }
-    if (summary && "filmSetFeedback" in summary) {
-      node.aggregateRun = { active: summary.filmSetFeedback != null && summary.filmSetFeedback.phase !== "failed", filmSet: summary.filmSetFeedback ?? undefined };
-      delete node.historyStrip;
-      continue;
-    }
-    if (summary?.isAggregate || (node.compositeAsset && node.busy)) {
-      // 部分内容交付任务以规范节点 busy 回流，和 Agent operation 共用聚合运行遮罩。
-      node.aggregateRun = { active: Boolean(summary?.aggregateRunning || node.busy) };
-      continue;
-    }
     // 运行态呈现以统一运行状态为准（change: show-agent-turn-running-state-on-node）：
     // Task 链路在 canonical `taskStatus` 回流前、Agent 回合全程都只有本读模型有运行态，
     // 因此这里直接点亮 `busy`，让节点与图片/视频节点一致显示进度环（无百分比时按节点种类估算）。

@@ -17,7 +17,7 @@ use bevy::{
 };
 
 #[cfg(feature = "canvas-core")]
-use crate::app::FilmSetTextureBatch;
+use crate::app::ModelTextureBatch;
 
 /// 模型纹理 id 前缀（前端上传时加在内容 id 前，避免与片场媒体平面 id 冲突）。
 pub(crate) const MODEL_TEXTURE_ID_PREFIX: &str = "modeltex:";
@@ -69,7 +69,7 @@ pub(crate) fn revision() -> u64 {
 #[cfg(feature = "canvas-core")]
 pub(crate) fn sync_model_textures(
     mut images: ResMut<Assets<Image>>,
-    mut batch: ResMut<FilmSetTextureBatch>,
+    mut batch: ResMut<ModelTextureBatch>,
 ) {
     let ids: Vec<String> = batch
         .0

@@ -29,12 +29,8 @@ fn model_node() -> GraphNode {
         resizable: false,
         ghost: false,
         card_label: None,
-        group: None,
         model: None,
-        composite_asset: None,
         history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
     }
 }
 

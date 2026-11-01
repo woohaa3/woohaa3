@@ -66,57 +66,12 @@ mod model_preview;
 mod pick_index;
 #[cfg(feature = "canvas-core")]
 mod shot_capture_wire;
-/// 拍摄镜头卡片 GPU 预览（change: 2026-10-15-add-film-set-shooting-shot-previews）。
-/// 纯判定（`policy`/`plan`）在任何 feature 下编译并可单测；ECS 装配只在 `canvas-core` 下编译。
-mod shot_node_preview;
 
 #[cfg(feature = "native-renderer")]
 pub mod renderer_protocol;
 
-/// 录制帧屏障：applied → media → pipeline → rendered → readback 的身份与阶段状态机。
-/// 纯状态机，不含 Bevy/GPU 依赖。
-pub mod recording_barrier;
-/// 原生编码：RGBA→YUV420、有界写入、MP4/H.264 结构自校验与临时产物管理。
-/// 不依赖用户 PATH，也不含 Bevy 依赖。
-pub mod recording_encode;
-/// 录制任务执行编排：时间表 → 帧屏障 → 编码 → 成片事实。
-/// 取帧通过 `FrameProbe` 注入，因此可无 GPU 测试。
-pub mod recording_job;
-/// 原生媒体解码与按 PTS 选帧（图片保留 alpha；视频按冻结映射取覆盖目标时刻的帧）。
-pub mod recording_media;
-/// 真实解码实现（`recording-media` feature）：图片用 `image`，视频用 OpenH264 + 自有 MP4 索引。
-#[cfg(feature = "recording-media")]
-pub mod recording_media_native;
-/// 最小 MP4 封装器（H.264 video-only、Fast Start）。纯字节操作，不含 Bevy 依赖。
-pub mod recording_mux;
-/// OpenH264 软件编码后端与成片收尾（`recording-codec` feature）。
-/// 需要 C++ 工具链，但**不需要 GPU**：无 GPU 环境可跑真实编码回归。
-#[cfg(feature = "recording-codec")]
-pub mod recording_openh264;
-/// 冻结 IR → 渲染计划的装配与 GPU 适配器探测（`recording-gpu` feature）。
-#[cfg(feature = "recording-gpu")]
-pub mod recording_prepare;
-/// 真实 GPU 取帧探针（`recording-gpu` feature）：复用预览渲染入口。
-#[cfg(feature = "recording-gpu")]
-pub mod recording_probe_gpu;
-/// 本机录制执行器控制协议的 Rust 投影（change: 2026-10-17-add-native-offscreen-film-set-recording）。
-/// 契约的生成绑定是 `api/gen/es/woohaa/recording/v1alpha1/recording_pb.ts`；本模块不含 Bevy 依赖，任何 feature 下可编译。
-pub mod recording_protocol;
-/// 录制输入资源的有界分块接收、checksum 校验与私有文件管理。
-pub mod recording_resources;
-/// `submitJob` payload → 可执行任务的装配（`recording-worker` feature）。
-#[cfg(feature = "recording-worker")]
-pub mod recording_session;
-/// 录制时间表：有理数采样时钟、末帧终点规则与帧数预算。
-/// 纯函数，不含 Bevy 依赖。
-pub mod recording_timeline;
-/// worker 控制帧写出与 `submitJob` 执行（`recording-worker` feature）。
-#[cfg(feature = "recording-worker")]
-pub mod recording_wire;
 
 // `model3d` 的网格/相机依赖 bevy_render；其纯场景构建在 native-renderer 下也可复用。
-/// 片场场景空间 ↔ 画布呈现空间的纯数学（change: 2026-10-23-isolate-film-set-camera-space）。
-pub mod film_set_space;
 pub mod model3d;
 /// 可复用 shot camera ECS 模块（change: add-reusable-bevy-shot-camera）。
 pub mod shot_camera;
@@ -171,118 +126,6 @@ pub mod golden_api {
         zoom: f32,
     ) -> Result<Option<String>, String> {
         crate::canvas_query::interaction::point_hit_golden(nodes_json, x, y, zoom)
-    }
-
-    /// 复合资产范围几何 golden（change: 2026-10-12-align-film-set-scope-with-isometric-grid）：
-    /// 由基准矩形、形状与地面矩形派生中心/半径/AABB/顶点/抓手 JSON。
-    pub fn scope_geometry_json(
-        base: [f32; 4],
-        shape: &str,
-        ground: [f32; 4],
-        min_half: f32,
-    ) -> Result<String, String> {
-        let geometry = scope_geometry(base, shape, ground, min_half)?;
-        Ok(format!(
-            r#"{{"center":[{},{}],"radius":[{},{}],"aabb":[{},{},{},{}],"vertices":[[{},{}],[{},{}],[{},{}],[{},{}]],"handles":[[{},{}],[{},{}],[{},{}],[{},{}],[{},{}],[{},{}],[{},{}],[{},{}]]}}"#,
-            geometry.center.x,
-            geometry.center.y,
-            geometry.radius_x,
-            geometry.radius_y,
-            geometry.aabb.x,
-            geometry.aabb.y,
-            geometry.aabb.width,
-            geometry.aabb.height,
-            geometry.vertices[0].x,
-            geometry.vertices[0].y,
-            geometry.vertices[1].x,
-            geometry.vertices[1].y,
-            geometry.vertices[2].x,
-            geometry.vertices[2].y,
-            geometry.vertices[3].x,
-            geometry.vertices[3].y,
-            geometry.handles[0].x,
-            geometry.handles[0].y,
-            geometry.handles[1].x,
-            geometry.handles[1].y,
-            geometry.handles[2].x,
-            geometry.handles[2].y,
-            geometry.handles[3].x,
-            geometry.handles[3].y,
-            geometry.handles[4].x,
-            geometry.handles[4].y,
-            geometry.handles[5].x,
-            geometry.handles[5].y,
-            geometry.handles[6].x,
-            geometry.handles[6].y,
-            geometry.handles[7].x,
-            geometry.handles[7].y,
-        ))
-    }
-
-    /// 范围点包含 golden。
-    pub fn scope_contains(
-        base: [f32; 4],
-        shape: &str,
-        ground: [f32; 4],
-        min_half: f32,
-        x: f32,
-        y: f32,
-    ) -> Result<bool, String> {
-        let geometry = scope_geometry(base, shape, ground, min_half)?;
-        Ok(crate::canvas_query::scope::contains(
-            &geometry,
-            bevy::prelude::Vec2::new(x, y),
-        ))
-    }
-
-    /// 范围正面积框选相交 golden。
-    pub fn scope_intersects_rect(
-        base: [f32; 4],
-        shape: &str,
-        ground: [f32; 4],
-        min_half: f32,
-        rect: [f32; 4],
-    ) -> Result<bool, String> {
-        let geometry = scope_geometry(base, shape, ground, min_half)?;
-        Ok(crate::canvas_query::scope::intersects_rect(
-            &geometry,
-            crate::canvas_query::scope::ScopeRect {
-                x: rect[0],
-                y: rect[1],
-                width: rect[2],
-                height: rect[3],
-            },
-        ))
-    }
-
-    fn scope_geometry(
-        base: [f32; 4],
-        shape: &str,
-        ground: [f32; 4],
-        min_half: f32,
-    ) -> Result<crate::canvas_query::scope::ScopeGeometry, String> {
-        let shape = match shape {
-            "rect" => crate::protocol::CompositeAssetScopeShape::Rect,
-            "isometric-diamond" => crate::protocol::CompositeAssetScopeShape::IsometricDiamond,
-            other => return Err(format!("unknown scope shape {other}")),
-        };
-        let ground = crate::canvas_query::scope::ScopeGround {
-            cx: ground[0],
-            cy: ground[1],
-            hx: ground[2],
-            hz: ground[3],
-        };
-        Ok(crate::canvas_query::scope::geometry(
-            crate::canvas_query::scope::ScopeRect {
-                x: base[0],
-                y: base[1],
-                width: base[2],
-                height: base[3],
-            },
-            shape,
-            Some(ground),
-            min_half,
-        ))
     }
 }
 
@@ -362,15 +205,6 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
         pick_index::model_candidates(&scene),
         generation,
         model_pick_camera(&scene),
-    );
-    // 片场内部对象候选只在聚焦目标存在时准备：先按 accepted `modelFocus` 定位唯一 composite
-    // 节点，无目标/总览/非片场聚焦提前关闭（不做部件或媒体准备）
-    // （change: 2026-10-14-scope-film-set-object-picking-to-focus，design D1/D2/D5）。
-    let items = pick_index::film_set_items(&scene);
-    canvas_query::film_set_pick::accept_items(
-        items.owner,
-        items.candidates,
-        items.part_bounds_evaluations,
     );
     canvas_query::gizmo::accept_gizmo_scene(&scene);
     bridge::queue_scene(scene);
@@ -507,22 +341,6 @@ fn model_pick_camera(scene: &protocol::Scene) -> canvas_query::model_pick::Model
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn query_model_pick(json: &str) -> String {
     canvas_query::model_pick::pick_query_json(json)
-}
-
-/// 片场对象 picking：在聚焦透视相机下按 CSS 点返回 `nodeId` 下最近的稳定 itemId
-/// （change: 2026-10-09-add-film-set-object-motion-and-editing，任务 4.1 / design D5）。
-#[cfg(feature = "canvas-core")]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn query_composite_asset_item_pick(json: &str) -> String {
-    canvas_query::film_set_pick::item_pick_query_json(json)
-}
-
-/// 片场对象世界包围盒（对象选中反馈/gizmo 定位）
-/// （change: 2026-10-09-add-film-set-object-motion-and-editing）。
-#[cfg(feature = "canvas-core")]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn query_composite_asset_item_bounds(json: &str) -> String {
-    canvas_query::film_set_pick::item_bounds_query_json(json)
 }
 
 /// 模型编辑 gizmo（focus 三轴 / shot 镜头 / placement）命中与轴拖动约束
@@ -749,14 +567,6 @@ pub fn query_drop_target(json: &str) -> String {
     canvas_query::interaction::drop_target_query_json(json)
 }
 
-/// 复合资产范围几何读取：拖动提示消费的轻量顶点/AABB/基准矩形
-/// （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D5）。
-#[cfg(feature = "canvas-core")]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn query_composite_asset_scopes(json: &str) -> String {
-    canvas_query::interaction::scope_geometry_query_json(json)
-}
-
 /// 最近一次已渲染的 2D revision。
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
@@ -822,21 +632,6 @@ pub fn request_history_thumbnail(json: &str) -> Result<(), BoundaryError> {
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn poll_history_thumbnail(request_id: f64, generation: f64) -> Vec<u8> {
     history_preview::wire::poll(request_id, generation)
-}
-
-/// Control messages and status for GPU-resident overview caches; no pixels cross the bridge.
-#[cfg(feature = "canvas-core")]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn overview_cache_command(json: &str) -> Result<(), BoundaryError> {
-    canvas_ecs::overview_cache::wire::enqueue(json).map_err(BoundaryError::from_str)?;
-    wake_canvas();
-    Ok(())
-}
-
-#[cfg(feature = "canvas-core")]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn overview_cache_snapshot() -> String {
-    canvas_ecs::overview_cache::wire::snapshot()
 }
 
 /// 启动 Bevy App（幂等）。

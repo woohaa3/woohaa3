@@ -13,11 +13,7 @@
 import type { ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition, Woohaa3CanvasSerializedNode } from "@woohaa3/contracts";
 import {
   decodeImageEditDocument,
-  filmSetObjectOwnershipOf,
-  isFilmSetNode,
-  filmSetAssetReferences,
   isImageProjectDocument,
-  readFilmSetContent,
   sanitizeNodeDataForClipboard,
   type ImageEditProjectObjectRef,
   type StoredAsset
@@ -104,8 +100,6 @@ export function buildCanvasCopyPayload(
     }
   }
 
-  // Legacy object shells are read-only migration inputs, never clipboard resources.
-  for (const id of included) if (filmSetObjectOwnershipOf(canvas.nodeData[id]) || isFilmSetNode(byId.get(id)?.type, canvas.nodeData[id])) return null;
   const previewOwnerByNode = new Map<string, string>();
   for (const node of nodes) {
     const managed = managedNodeRelationOf(canvas.nodeData[node.id]);
@@ -154,11 +148,11 @@ export function buildCanvasCopyPayload(
     if (Object.keys(cleaned).length > 0) nodeData[id] = cleaned;
   }
 
-  // 引用收集：片场内部对象引用（既有）之外，媒体节点的稳定内容引用也必须一并携带。
+  // 引用收集：媒体节点的稳定内容引用必须一并携带。
   // 上传的图片/视频/音频节点把内容存在 `outputAssetId`（清理器已按内容语义保留），
   // 若只把指针留在 nodeData 而不带资产，粘贴到别的画布就会得到「有引用、没有图」的节点
   // （change: fix-copy-keeps-node-media）。
-  const referencedAssetIds = new Set<string>(filmSetReferenceIdsOf(nodeData));
+  const referencedAssetIds = new Set<string>();
   const projectObjects = new Map<string, ImageEditProjectObjectRef>();
   for (const node of copyNodes) {
     const data = nodeData[node.id];
@@ -234,13 +228,6 @@ function restoreContentReferences(
   if (cleaned.resourceKind === undefined && typeof raw?.resourceKind === "string") {
     cleaned.resourceKind = raw.resourceKind;
   }
-}
-
-function filmSetReferenceIdsOf(nodeData: Record<string, Woohaa3CanvasJsonObject>): string[] {  const ids = new Set<string>();
-  for (const data of Object.values(nodeData)) {
-    for (const assetId of filmSetAssetReferences(readFilmSetContent(data))) ids.add(assetId);
-  }
-  return [...ids];
 }
 
 /** 图片编辑定义引用的稳定资产 id（工程分支含全部来源资产）。 */

@@ -32,19 +32,7 @@ afterEach(async () => { await act(async () => root.unmount()); el.remove(); });
 async function render(writable = true, items = [{ id: "insert:text", label: "文本", section: "basic-material" }]) {
   await act(async () => root.render(<UiProvider><CanvasCreationPopover menuIdentity={menu} screen={{ x: 100, y: 100 }} world={{ x: 40, y: 50 }} items={items} writable={writable} onSelect={selectItem} onClose={close} /></UiProvider>));
 }
-function entry() { return document.querySelector<HTMLButtonElement>(".canvas-create__ai-entry")!; }
 describe("blank canvas creation menu", () => {
-  it("creates and selects a group at the context position without an assistant input step", async () => {
-    await render();
-    expect(mocks.services.canvasEdit.record).not.toHaveBeenCalled();
-    await act(async () => entry().click());
-    const commands = mocks.services.canvasEdit.record.mock.calls[0][0];
-    expect(commands).toEqual([{ type: "node.add", node: { id: expect.any(String), type: "group", position: { x: 40, y: 50 } }, nodeData: {} }]);
-    expect(select).toHaveBeenCalledWith(commands[0].node.id);
-    expect(mocks.services.canvasNavigation.openPanel).toHaveBeenCalledWith({ type: "model-node-editor", nodeId: commands[0].node.id });
-    expect(close).toHaveBeenCalledOnce();
-    expect(document.querySelector(".canvas-create__composer")).toBeNull();
-  });
   it("把上传放到基础素材行末尾，并用浅色分隔与音频隔开", async () => {
     await render(true, [
       { id: "insert:text", label: "文本", section: "basic-material" },
@@ -95,38 +83,11 @@ describe("blank canvas creation menu", () => {
       field.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(document.querySelector(".canvas-create__grid")).toBeNull();
-    expect(entry().textContent).toContain("用 AI 创作");
     await act(async () => field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true })));
     expect(mocks.services.canvasEdit.record).not.toHaveBeenCalled();
   });
-  it("disables creation for read-only menus and rechecks write permission on click", async () => {
-    await render(false);
-    expect(entry().disabled).toBe(true);
+  it("no longer offers the group creation entry", async () => {
     await render();
-    mocks.services.canvasSession.isWritable.mockReturnValue(false);
-    await act(async () => entry().click());
-    expect(mocks.services.canvasEdit.record).not.toHaveBeenCalled();
-  });
-  it("prevents repeated creation and preserves the menu on a rejected edit", async () => {
-    let resolve!: (result: unknown) => void;
-    mocks.services.canvasEdit.record.mockReturnValue(new Promise(r => { resolve = r; }));
-    await render();
-    act(() => { entry().click(); entry().click(); });
-    expect(mocks.services.canvasEdit.record).toHaveBeenCalledOnce();
-    await act(async () => resolve({ ok: false, reason: "画布已断开连接" }));
-    expect(document.body.textContent).toContain("画布已断开连接");
-    expect(select).not.toHaveBeenCalled();
-    expect(close).not.toHaveBeenCalled();
-    expect(entry().disabled).toBe(false);
-  });
-  it.each(["canvas", "menu"])("does not select a late result after switching %s", async target => {
-    let resolve!: (result: unknown) => void;
-    mocks.services.canvasEdit.record.mockReturnValue(new Promise(r => { resolve = r; }));
-    await render();
-    act(() => entry().click());
-    if (target === "canvas") canvasId = "other"; else currentMenu = {};
-    await act(async () => resolve({ ok: true }));
-    expect(select).not.toHaveBeenCalled();
-    expect(close).not.toHaveBeenCalled();
+    expect(document.querySelector(".canvas-create__ai-entry")).toBeNull();
   });
 });

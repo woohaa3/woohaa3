@@ -46,7 +46,7 @@ ${methods}
 - 画布使用 dimetric 等距视图：local +Z（正面）投影到屏幕“左下方、面向观察者”，
   local +X（左侧）投影到“右下方”；请把正面放在 +Z 一侧，背面放在 -Z。
 
-尺度约定（模型卡片与片场共用同一现实基准）：
+尺度约定（模型卡片与渲染共用同一现实基准）：
 - ${modelScaleGuidanceTextZh()}
 - 这条基准只描述模型自身的绝对尺寸；卡片按模型 extent 归一化显示，卡片里看起来一样大不代表
   实际尺寸一致。不要用卡片取景、节点矩形或画布 zoom 反推单位。
@@ -82,24 +82,6 @@ ${methods}
 连续人物示例（共享肘关节，上臂与前臂连接在同一点）：
 ${guide.example}
 
-片场拍摄镜头（共享模型只注册一次；机器协议沿用 clip 名）：
-- sceneCamera 只是无任何拍摄镜头时的回退构图，不是镜头，也不会出现在 clips 中。用户要求镜头/机位/拍摄时，必须创建至少一个 clip；静态构图也要创建 static 镜头。新片场 clips 为空，get_film_set_clips 会返回 clipTemplate：把 id/name/initialCamera 改为目标值，作为 mutate_film_set_clip({clipId:模板 id,expectedHash:missingClipHash,op:{kind:"create",clip:修改后的模板}}) 的 clip 创建第一个镜头，并确认 clips 非空后才能报告完成。
-- 先 get_film_set_clips，读取完整 clips、字段 expectedHash 和 items 的 adapterHash。
-- 修改动作必须 mutate_film_set_clip({canvasId,nodeId,clipId,requestId,expectedHash,op})。
-- 每个镜头有必需 kind（static 或 dynamic）：static 为零时长、非循环、无镜头/对象动作、无时序媒体；dynamic 为正时长（(0,3600] 秒）并承载动作，固定机位拍运动对象也是 dynamic。不要凭 cameraMotionScript 是否为空推断类型。
-- 整体镜头动作 op={kind:"camera-motion",cameraMotion:<完整 MotionDefinition>}；从所选镜头复制 motion，修改 motionScript，保留语言/版本/适配关系，服务端重算 sourceHash。
-- 类型转换用 op={kind:"set-kind",toKind:"static"|"dynamic"}：static→dynamic 可用 duration 指定正时长；dynamic→static 且有动作/时序时必须带 confirmClearContent:true 明确确认原子清除，否则拒绝。使用 identities 里的 kind 字段身份。
-- 人物 op={kind:"binding",itemId,expectedAdapterHash:adapterHash,binding:{itemId,playback:{startTime:0,duration:8,timeScale:1,loop:false},motion:<完整 MotionDefinition>}}。使用对应 binding hash，无绑定用 missingBindingHash；静态镜头加对象动作会拒绝，先转 dynamic。
-- 修改 timeline/camera/name 分别使用同名字段 hash。create 用 missingClipHash；duplicate/delete/replace 用 clipHash，create/replace 的 clip 必须含合法 kind。
-- 背景用 op={kind:"backdrop",backdrop:"theme"|"#rrggbb"}（用 backgrounds 里的 hash）。theme 表示跟随主题并删除自定义值；只写 6 位颜色。背景属于该镜头，只影响它的预览/拍摄/导出，不影响工作区的主题背景；新建与复制镜头继承当前所选镜头的背景，「使用选中镜头构图」不改背景。
-- 图片/视频/文字图用 add_film_set_media({canvasId,nodeId,requestId,sourceNodeId,expectedContentHash?,transform?}) 从同一画布 ready 的 image/video 节点复制导入；拖放仍只接受模型。导入后用 mutate_film_set_item 摆位、用 binding 绑定 opacity/scale 等动作。
-- 传视频用 export_film_set_clip({canvasId,nodeId,clipId,requestId,profile,expectedContentHash?}) 提交本机宿主原生录制任务，再以 get_film_set_export({canvasId,jobId}) 轮询；成功只在视频节点原子提交后返回其 id。profile 取 standard（720p30，缺省）/ hd（1080p30）/ hd60（1080p60）。原生录制不可用时返回 recording-unavailable 与具体原因，此时让用户点界面上的「生成视频」走浏览器导出，不要假装已经导出。
-- 人物移动用 binding.motion 中的 root 位置关键帧；每个模型保留一个 itemId，不能按帧复制模型或用显隐模拟运动。
-- 跟拍镜头的 focusOffset/distance 是渲染世界单位，focusOffset 相对片场静态包围盒中心；不能直接复制人物局部位置关键帧作为镜头偏移，必须转换片场适配缩放与 placement。
-- 背后过肩镜头：模型正面 +Z，镜头 azimuth=人物世界 yaw±PI；注视上身并略偏肩侧，位置和转身都须连续跟随。不要用固定 azimuth 冒充跟拍，也不要调用尚不存在的 motion.camera.follow。
-- 修改镜头后用 render_model_preview 核对起点、跳跃、转弯和终点，确认人物在画面内；镜头轨道最多 256 条，使用有误差上限的路径简化，不要逐帧复制几何。
-- 多片段 render_model_preview 必须提供 clipId 和 timeSeconds；更换片段不会更改共享模型。
-
 ${motionApiGuideText()}`;
 }
 
@@ -123,7 +105,7 @@ export function createToolRegistrar(reg: ToolRegistration) {
   ): RegisteredTool {
     if (!reg.grantedTools.has(name)) return reg.server.registerTool(name, config, cb);
     const wrapped = ((args: Record<string, unknown>, extra: unknown) => {
-      const denied = reg.grantDenied(name, { canvasId: args?.canvasId, nodeId: args?.nodeId, nodeIds: Array.isArray(args?.items) ? args.items.map((item: { nodeId: string }) => item.nodeId) : args?.nodeIds, cameraId: args?.cameraId, clipId: args?.clipId, itemId: args?.itemId, op: args?.op });
+      const denied = reg.grantDenied(name, { canvasId: args?.canvasId, nodeId: args?.nodeId, nodeIds: Array.isArray(args?.items) ? args.items.map((item: { nodeId: string }) => item.nodeId) : args?.nodeIds, cameraId: args?.cameraId });
       if (denied) return toolError(denied, "unauthorized");
       return (cb as (a: Record<string, unknown>, e: unknown) => unknown)(args, extra);
     }) as ToolCallback<InputArgs>;

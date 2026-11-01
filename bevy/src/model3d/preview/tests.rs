@@ -18,7 +18,6 @@ fn request(ops: Vec<ModelOp>, extent: f32, capture: CaptureOptions) -> RenderReq
         capture,
         placement: None,
         motion: None,
-        composite_asset_frame: None,
     }
 }
 

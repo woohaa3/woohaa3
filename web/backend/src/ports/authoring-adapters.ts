@@ -22,8 +22,6 @@ import type {
 } from "@woohaa3/contracts";
 import type { CanvasService } from "@woohaa3/canvas-service";
 import { randomUUID } from "node:crypto";
-import { CANVAS_GROUP_TOOLS } from "@woohaa3/contracts";
-import { canvasGroupEpoch } from "@woohaa3/canvas-service";
 import type { MediaService } from "@woohaa3/media-service";
 
 export type AuthoringAdapterDeps = {
@@ -71,18 +69,17 @@ export function createToolGrantRegistry(): ToolGrantRegistry {
     },
     revoke(workId, subject) {
       for (const [token, grant] of grants) {
-        if (grant.workId === workId && (subject === undefined ? !grant.groupScope : subject === grant.subject)) grants.delete(token);
+        if (grant.workId === workId && (subject === undefined || subject === grant.subject)) grants.delete(token);
       }
     },
     authorize(input) {
       const grant = grants.get(input.token);
       if (!grant) return { ok: false, reason: "unknown-grant" };
-      if ((grant.groupScope || grant.tools.length > 0) && !grant.tools.includes(input.tool)) return { ok: false, reason: "tool-not-allowed" };
-      if (grant.groupScope && canvasGroupEpoch(grant.groupScope.canvasId, grant.groupScope.rootGroupId) !== grant.groupScope.scopeEpoch) return { ok: false, reason: "group-scope-revoked" };
+      if (grant.tools.length > 0 && !grant.tools.includes(input.tool)) return { ok: false, reason: "tool-not-allowed" };
       if (input.canvasId !== undefined && grant.canvasIds.length > 0 && !grant.canvasIds.includes(input.canvasId)) {
         return { ok: false, reason: "canvas-not-allowed" };
       }
-      if (!grant.groupScope && input.nodeId !== undefined && grant.nodeIds.length > 0 && !grant.nodeIds.includes(input.nodeId)) {
+      if (input.nodeId !== undefined && grant.nodeIds.length > 0 && !grant.nodeIds.includes(input.nodeId)) {
         return { ok: false, reason: "node-not-allowed" };
       }
       if (grant.cameraId && !input.tool.startsWith("get_") && input.cameraId !== grant.cameraId) return { ok: false, reason: "camera-not-allowed" };
@@ -108,24 +105,11 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
   const authoring: ApplicationCanvasAuthoringFacade = {
     async readNode(input): Promise<ApplicationAuthoringNodeRead> {
       delegateOrThrow(input.delegation, log);
-      const rootRoom = await deps.canvas.sync?.registry.resolve(input.canvasId);
-      const rootSnapshot = rootRoom?.exportCanvas();
-      const root = rootSnapshot?.ok ? rootSnapshot.canvas.document.nodes.find(n => n.id === input.nodeId) : undefined;
-      if (root?.type === "group") {
-        const access = await deps.canvas.mcpServices().agent?.authorizeCanvas({ principalId: input.delegation.subject, canvasId: input.canvasId, permission: "read" });
-        if (!access?.ok) return { ok: false, code: "unauthorized", message: "无权读取目标画布" };
-        return { ok: true, nodeType: "group", title: String(rootSnapshot!.ok && rootSnapshot!.canvas.nodeData[input.nodeId]?.title || "创作组"), prompt: "", references: [], cameras: [], snapshotHash: `group-epoch:${canvasGroupEpoch(input.canvasId, input.nodeId)}` };
-      }
       const services = deps.canvas.mcpServices();
       const modelMcp = services.modelMcp;
       if (!modelMcp) return { ok: false, code: "unavailable", message: "模型 MCP 当前不可用" };
       const node = await modelMcp.getModelNode({ canvasId: input.canvasId, nodeId: input.nodeId });
       if (!node.ok) return { ok: false, code: node.code, message: node.message };
-      let animation: unknown;
-      if (services.readAnimation) {
-        const read = await services.readAnimation({ canvasId: input.canvasId, nodeId: input.nodeId });
-        if (read.ok) animation = read.animation;
-      }
       return {
         ok: true,
         nodeType: node.nodeType ?? "model3d",
@@ -139,7 +123,6 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
           ...(reference.asset ? { url: reference.asset.url, mediaKind: reference.asset.mediaKind, mediaType: reference.asset.mediaType } : {})
         })),
         ...(node.modelContentVersion ? { modelContentVersion: node.modelContentVersion } : {}),
-        ...(animation ? { animation } : {}),
         ...(node.snapshotHash ? { snapshotHash: node.snapshotHash } : {}),
         cameras: node.cameras
       } as ApplicationAuthoringNodeRead;
@@ -157,22 +140,6 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
       });
       if (!outcome.ok) return { ok: false, code: outcome.code, message: outcome.message };
       return { ok: true, canvasId: outcome.canvasId, nodeId: outcome.nodeId, commandId: outcome.commandId, duplicate: outcome.idempotent, noop: outcome.idempotent };
-    },
-    async commitAnimation(input): Promise<ApplicationAuthoringWriteOutcome> {
-      delegateOrThrow(input.delegation, log);
-      const services = deps.canvas.mcpServices();
-      if (!services.commitAnimation) return { ok: false, code: "unavailable", message: "动画提交端口当前不可用" };
-      const outcome = await services.commitAnimation({
-        canvasId: input.canvasId,
-        nodeId: input.nodeId,
-        requestId: input.operationId,
-        animation: input.animation,
-        ...(input.clipId ? { clipId: input.clipId } : {}),
-        ...(input.expectedClipHash ? { expectedClipHash: input.expectedClipHash } : {}),
-        ...(input.expectedSnapshotHash ? { expectedSnapshotHash: input.expectedSnapshotHash } : {})
-      });
-      if (!outcome.ok) return { ok: false, code: outcome.code, message: outcome.message };
-      return { ok: true, canvasId: outcome.canvasId, nodeId: outcome.nodeId, commandId: outcome.commandId, duplicate: outcome.duplicate, noop: outcome.noop };
     },
     async mutateCamerasBatch(input): Promise<ApplicationAuthoringWriteOutcome> {
       delegateOrThrow(input.delegation, log);
@@ -212,20 +179,8 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
   const tools: ApplicationToolDelegationFacade = {
     async issue(request): Promise<ApplicationToolGrant> {
       delegateOrThrow(request.delegation, log);
-      if (request.mode !== undefined && !["model3d", "film-set", "camera", "canvas-group"].includes(request.mode)) throw new Error("unsupported-target-mode");
-      if (request.mode === "camera") throw new Error("camera-mode-deprecated");
-      if (request.mode === "canvas-group") {
-        if (!request.tools?.length) throw new Error("group-tools-required");
-        if (request.tools.some(tool => !(CANVAS_GROUP_TOOLS as readonly string[]).includes(tool))) throw new Error("group-tool-not-supported");
-        const access = await deps.canvas.mcpServices().agent?.authorizeCanvas({ principalId: request.delegation.subject, canvasId: request.canvasId, permission: "write" });
-        if (!access?.ok) throw new Error("write-forbidden");
-        const room = await deps.canvas.sync?.registry.resolve(request.canvasId);
-        const exported = room?.exportCanvas();
-        if (!exported?.ok || !exported.canvas.document.nodes.some(n => n.id === request.nodeId && n.type === "group")) throw new Error("group-target-missing");
-        if (request.expectedScopeEpoch === undefined || request.expectedScopeEpoch !== canvasGroupEpoch(request.canvasId, request.nodeId)) throw new Error("group-scope-revoked");
-      }
+      if (request.mode !== undefined && !["model3d", "text"].includes(request.mode)) throw new Error("unsupported-target-mode");
       const grant: ApplicationToolGrant = {
-        ...(request.mode === "canvas-group" ? { groupScope: { canvasId: request.canvasId, rootGroupId: request.nodeId, scopeEpoch: canvasGroupEpoch(request.canvasId, request.nodeId) } } : {}),
         token: `grant-${randomUUID()}`,
         canvasIds: [request.canvasId],
         nodeIds: [request.nodeId],

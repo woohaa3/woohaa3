@@ -101,7 +101,6 @@ export function mockModule(calls: Calls, opts: { failRegister?: boolean; prepare
     query_probe: () => JSON.stringify({ available: false, reason: "unavailable", generation: 0, candidates: [] }),
     // 片场菱形范围的 drop/scope 查询（change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
     query_drop_target: () => JSON.stringify({ available: false, reason: "unavailable", generation: 0, targetNodeId: null }),
-    query_composite_asset_scopes: () => JSON.stringify({ available: false, reason: "unavailable", generation: 0, scopes: [] })
   };
   if (opts.prepare !== false) {
     module.prepare_and_register_model_resource = (json: string) => {

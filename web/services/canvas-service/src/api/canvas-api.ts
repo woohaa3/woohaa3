@@ -1,7 +1,7 @@
 /**
  * 画布存储 HTTP API（任务 4.2–4.8 / design D9、D14；
  *  change: 2026-10-09-refactor-large-source-files-and-remove-compatibility R23 —— 抽出类型、
- *  HTTP codec、lifecycle 与 run/film-set 路由，本文件保留顶层路由 dispatch）。
+ *  HTTP codec、lifecycle 与 run 路由，本文件保留顶层路由 dispatch）。
  *
  * 与框架解耦（只依赖 Node 的 `IncomingMessage` / `ServerResponse`）。
  *
@@ -28,13 +28,7 @@ import {
 } from "./canvas-api/types.js";
 import { checkServiceToken, decodeSegment, isLoopbackRequest, respondError, sendError, sendJson } from "./canvas-api/http-codec.js";
 import { handleCreate, handleDelete, handleGet, handleHealth, handleList, loadCanvasListPage } from "./canvas-api/lifecycle-routes.js";
-import { handleCancel, handleFilmSetConversionCancel, handleFilmSetConversionModels, handleFilmSetConversionRetry, handleFilmSetConversionStatus, handleFilmSetConversionSubmit, handleFilmSetImport, handleRun } from "./canvas-api/run-routes.js";
-import {
-  handleRecordingCancel,
-  handleRecordingList,
-  handleRecordingStatus,
-  handleRecordingSubmit
-} from "./canvas-api/recording-routes.js";
+import { handleCancel, handleRun } from "./canvas-api/run-routes.js";
 
 export {
   DEFAULT_CANVAS_API_BASE_PATH,
@@ -44,8 +38,6 @@ export {
 export type {
   CanvasRequestHandler,
   CanvasRequestHandlerOptions,
-  CanvasFilmSetImportPort,
-  CanvasFilmSetConversionPort,
   CanvasRunPort,
   CanvasReadiness
 } from "./canvas-api/types.js";
@@ -186,74 +178,10 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         if (decision === "deny") return denyImported("write");
         return await handleCancel(req, res, segments[0], options, log);
       }
-      // 原生录制 submit/cancel/status（change: 2026-10-17-add-native-offscreen-film-set-recording）。
-      if (segments.length === 2 && segments[1] === "recording" && req.method === "POST") {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleRecordingSubmit(req, res, segments[0], options, log);
-      }
-      if (segments.length === 2 && segments[1] === "recording" && req.method === "GET") {
-        const decision = await authorizeImported(segments[0], "read");
-        if (decision === "deny") return denyImported("read");
-        return await handleRecordingList(req, res, segments[0], options, log);
-      }
-      if (segments.length === 3 && segments[1] === "recording" && req.method === "GET") {
-        const decision = await authorizeImported(segments[0], "read");
-        if (decision === "deny") return denyImported("read");
-        return await handleRecordingStatus(req, res, segments[0], segments[2]!, options, log);
-      }
-      if (segments.length === 4 && segments[1] === "recording" && segments[3] === "cancel" && req.method === "POST") {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleRecordingCancel(req, res, segments[0], segments[2]!, options, log);
-      }
-      if (segments.length === 3 && segments[1] === "film-set" && segments[2] === "import" && req.method === "POST") {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleFilmSetImport(req, res, segments[0], options, log);
-      }
-      // 单节点快捷「转为片场」（change: 2026-10-13-add-node-to-film-set-shortcut）。
-      if (segments.length === 3 && segments[1] === "film-set" && segments[2] === "conversion-models" && req.method === "GET") {
-        const decision = await authorizeImported(segments[0], "read");
-        if (decision === "deny") return denyImported("read");
-        return await handleFilmSetConversionModels(req, res, segments[0], options, log);
-      }
-      if (segments.length === 3 && segments[1] === "film-set" && segments[2] === "conversion" && req.method === "POST") {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleFilmSetConversionSubmit(req, res, segments[0], options, log);
-      }
-      if (segments.length === 4 && segments[1] === "film-set" && segments[2] === "conversion" && req.method === "GET") {
-        const decision = await authorizeImported(segments[0], "read");
-        if (decision === "deny") return denyImported("read");
-        return await handleFilmSetConversionStatus(req, res, segments[0], segments[3], options, log);
-      }
-      if (
-        segments.length === 5
-        && segments[1] === "film-set"
-        && segments[2] === "conversion"
-        && segments[4] === "cancel"
-        && req.method === "POST"
-      ) {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleFilmSetConversionCancel(req, res, segments[0], segments[3], options, log);
-      }
-      if (
-        segments.length === 5
-        && segments[1] === "film-set"
-        && segments[2] === "conversion"
-        && segments[4] === "retry"
-        && req.method === "POST"
-      ) {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleFilmSetConversionRetry(req, res, segments[0], segments[3], options, log);
-      }
-
       sendError(res, 404, "CANVAS_NOT_FOUND", "未知的画布路由");
       return true;
     } catch (error) {
+      console.error("DEBUG_RUN_THROW", error);
       respondError(res, error, log);
       return true;
     }

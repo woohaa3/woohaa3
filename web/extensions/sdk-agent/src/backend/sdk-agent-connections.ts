@@ -1,5 +1,4 @@
 import { sdkSourceFor, sdkSourceProtocol } from "./service-source.js";
-import { filmSetAnimationsOf, filmSetClipHash } from "@woohaa3/contracts";
 /** Fixed framework dispatch. The host ledger owns idempotency; frameworks own inference loops. */
 import type {
   AgentConnectionCapabilities, AgentConnectionModel, AgentConversationAdapter, AgentAdapterRunInput,
@@ -136,14 +135,8 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
         policy: endpointPolicy, valid, signal: controller.signal });
       if (input.intent.action !== "discuss") {
         if (!options.tools || !options.mcpServerUrl || !input.intent.nodeId || !options.authoring) return fail("capability-unsupported", "目标执行需要受控工具、权威目标及内容版本");
-        const targetHash = (target: Awaited<ReturnType<ApplicationCanvasAuthoringFacade["readNode"]>>) => {
-          if (!target.ok) return undefined;
-          if (input.intent.mode === "film-set" && input.intent.clipId && target.animation) {
-            const clip = filmSetAnimationsOf(target.animation).clips.find((entry) => entry.id === input.intent.clipId);
-            return clip ? filmSetClipHash(clip) : undefined;
-          }
-          return target.modelContentVersion?.contentHash ?? target.snapshotHash;
-        };
+        const targetHash = (target: Awaited<ReturnType<ApplicationCanvasAuthoringFacade["readNode"]>>) =>
+          target.ok ? target.modelContentVersion?.contentHash ?? target.snapshotHash : undefined;
         const target = await options.authoring.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId });
         const frozenHash = targetHash(target);
         if (!target.ok || !frozenHash || (input.intent.expectedContentHash && input.intent.expectedContentHash !== frozenHash)) return fail("version-conflict", "目标内容已变化或不可读取，请重新打开作品");
@@ -151,9 +144,8 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
         options.tools.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" });
         const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" },
           workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
-          ...(input.intent.mode === "canvas-group" ? { expectedScopeEpoch: Number(frozenHash.slice("group-epoch:".length)) } : {}),
           ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
-      ...(input.intent.clipId ? { clipId: input.intent.clipId } : {}), ...(input.intent.itemId ? { itemId: input.intent.itemId } : {}), tools: localAgentToolsForMode(input.intent.mode) });
+          tools: localAgentToolsForMode(input.intent.mode) });
         gateway = await createMcpTurnGateway({ input: { ...frozenInput, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
           validateTarget: async () => {
             const target = await options.authoring!.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId! });
@@ -187,9 +179,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       if (result.nativeId && !input.candidate && await valid()) await options.service.setNativeBinding({ owner: input.owner, connectionId: record.connectionId, context, native: { nativeId: result.nativeId, credentialEpoch: record.credentialEpoch, conversationId: input.conversationId, updatedAt: new Date().toISOString() } });
       await options.service.setStatus({ owner: input.owner, connectionId: record.connectionId, patch: { transport: { state: "ready", checkedAt: new Date().toISOString() }, modelAccess: { state: "ready", checkedAt: new Date().toISOString() }, ...(receipts.length ? { tools: { state: "ready" as const, checkedAt: new Date().toISOString() } } : {}) } });
       if (input.intent.action === "discuss") return { status: "succeeded", assistantText: result.outcome.assistantText };
-      // Group runs have authoritative child-run evidence in the host ledger even
-      // when no structural command was needed. The host settles their real outputs.
-      return receipts.length || input.intent.mode === "canvas-group" ? { status: "succeeded", assistantText: result.outcome.assistantText, receipt } :
+      return receipts.length ? { status: "succeeded", assistantText: result.outcome.assistantText, receipt } :
         { status: "failed", assistantText: result.outcome.assistantText, error: { code: "write-unconfirmed", message: "回复完成，作品更新未确认；请核对原请求" } };
     } catch {
       await gateway?.drain();
@@ -203,7 +193,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
   };
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "film-set", "camera", ...(options.tools && options.authoring && options.mcpServerUrl ? ["canvas-group" as const] : [])], tools: true, models: "remote" }),
+    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "camera"], tools: true, models: "remote" }),
     authorization: async ({ owner }) => {
       const records = (await options.service.list(owner)).filter((record) => record.adapterId === adapter.adapterId);
       for (const record of records) if (await options.service.credentialConfigured({ owner, connectionId: record.connectionId, purpose: "model-api-key" })) return "ready";

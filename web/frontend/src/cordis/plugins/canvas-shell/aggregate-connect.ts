@@ -10,13 +10,11 @@ import {
   bevySelectionBounds,
   createHighEntropyId,
   isValidWoohaa3CanvasConnection,
-  sortNodesParentsFirst,
   type AggregateConnectDirection,
   type BevyAggregateConnect,
   type CanvasCommand,
   type CanvasRenderScene,
   type ServerCanvas,
-  type Woohaa3CanvasNode,
 } from "@woohaa3/contracts";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { InteractionCore } from "./interaction-core.js";
@@ -32,39 +30,16 @@ export function aggregateHitRadius(zoom: number): number {
 }
 
 /**
- * 选中节点递归展开为可连接叶子（change: add-multi-select-aggregate-connect，design D3）。
+ * 选中节点展开为可连接成员（change: add-multi-select-aggregate-connect，design D3）。
  *
- * group 展开为其非 group 叶子成员（稳定视觉顺序，与 `aggregateOutputLeaves` 一致）；
- * 普通节点保留自身。group 自身不作为持久化边端点。
+ * 画布没有容器：成员即仍存在的选中节点，按文档顺序输出。
  */
 export function expandSelectionMembers(
   canvas: ServerCanvas,
   ids: readonly string[]
-): Woohaa3CanvasNode[] {
-  const nodes = canvas.document.nodes.map((node) => ({
-    ...node,
-    position: { ...node.position },
-    data: (canvas.nodeData?.[node.id] as Woohaa3CanvasNode["data"]) ?? {},
-  })) as Woohaa3CanvasNode[];
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const ordered = sortNodesParentsFirst([...nodes]);
-  const members = new Map<string, Woohaa3CanvasNode>();
-  const visit = (id: string, guard: Set<string>) => {
-    if (guard.has(id)) return;
-    guard.add(id);
-    const node = byId.get(id);
-    if (!node) return;
-    if (node.type !== "group") {
-      members.set(node.id, node);
-      return;
-    }
-    for (const child of ordered) {
-      if (child.parentId === id) visit(child.id, guard);
-    }
-  };
-  for (const id of ids) visit(id, new Set());
-  // 稳定顺序：按 sortNodesParentsFirst 的顺序输出。
-  return ordered.filter((node) => members.has(node.id));
+): ServerCanvas["document"]["nodes"] {
+  const selected = new Set(ids);
+  return canvas.document.nodes.filter((node) => selected.has(node.id));
 }
 
 /**
@@ -83,7 +58,7 @@ function sceneSelectionRects(
 /**
  * 聚合把手投影（纯 scene 版，change: add-multi-select-aggregate-connect，design D1/D2/D5）。
  *
- * 显示条件：活动选择 ≥ 2 个节点；单个 group（已自带输出端点）或单个普通节点不显示聚合把手。
+ * 显示条件：活动选择 ≥ 2 个节点。
  * 空选区返回 `null`。选区展开为成员与批量规划由 `expandSelectionMembers` 处理。
  */
 export function sceneAggregateHandleGeometry(
@@ -128,7 +103,7 @@ export function hitAggregateHandle(
  * 规划聚合批量边（change: add-multi-select-aggregate-connect，design D3）。
  *
  * - 输出：每个成员 `成员 -> 目标`；输入：`目标 -> 成员`；
- * - 逐条经 `isValidWoohaa3CanvasConnection` 过滤（自身、非法 handle、纯备注、group 目标、重复边）；
+ * - 逐条经 `isValidWoohaa3CanvasConnection` 过滤（自身、非法 handle、纯备注、重复边）；
  * - 使用稳定 edge ID；全部无效时返回空数组（调用方不提交空批次）。
  */
 export function planAggregateBatchConnect(
@@ -137,11 +112,7 @@ export function planAggregateBatchConnect(
   targetId: string,
   direction: AggregateConnectDirection
 ): CanvasCommand[] {
-  const nodes = canvas.document.nodes.map((node) => ({
-    ...node,
-    position: { ...node.position },
-    data: (canvas.nodeData?.[node.id] as Woohaa3CanvasNode["data"]) ?? {},
-  })) as Woohaa3CanvasNode[];
+  const nodes = canvas.document.nodes;
   const data = { get: (id: string) => canvas.nodeData?.[id] as Record<string, unknown> | undefined };
   const commands: CanvasCommand[] = [];
   for (const memberId of memberIds) {
@@ -185,7 +156,7 @@ export function aggregatePreviewEdges(
 }
 
 /**
- * 指针下的合法目标节点（视觉层级从高到低、非成员、非 group、非 ghost）
+ * 指针下的合法目标节点（视觉层级从高到低、非成员、非 ghost）
  * change: add-multi-select-aggregate-connect。
  */
 export function aggregateTargetAt(
@@ -199,7 +170,6 @@ export function aggregateTargetAt(
     .find(
       (node) =>
         !memberSet.has(node.id)
-        && node.type !== "group"
         && node.ghost !== true
         && world.x >= node.x
         && world.x <= node.x + node.width
@@ -253,16 +223,11 @@ export function createAggregateConnectFamily(
   const { state, submit, writable, schedule, buildScene } = core;
 
   const currentMembers = (): string[] | null => {
-    // A single group already owns its speech-bubble frame and output semantics. Returning an
-    // aggregate projection here would make the renderer add a second rounded selection band on
-    // top of the group's pointed frame.
     if (state.selected.length < 2) return null;
     const canvas = workingCanvas();
     if (!canvas) return null;
     const members = expandSelectionMembers(canvas, state.selected);
-    if (members.length === 0) return null;
-    if (members.length === 1 && state.selected.length === 1) return null;
-    return members.map((node) => node.id);
+    return members.length > 0 ? members.map((node) => node.id) : null;
   };
 
   return {

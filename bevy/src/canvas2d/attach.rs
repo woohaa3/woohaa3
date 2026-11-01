@@ -70,7 +70,6 @@ pub(crate) fn draw_drag_attach(
     attach: &DragAttach,
     base_z: f32,
 ) -> Vec<AttachLabel> {
-    if owner.composite_asset.is_some() { return Vec::new(); }
     let mode = attach.mode.as_deref();
     let accent = theme.token_u32("interactionAccent");
     let border = theme.token_u32("canvasNodeBorder");
@@ -345,8 +344,6 @@ mod tests {
             model_preview: None,
             ghost: false,
             card_label: None,
-            shot_preview: None,
-
             id: id.into(),
             kind: "text".into(),
             x,
@@ -362,11 +359,8 @@ mod tests {
             texture: false,
             media_loading: false,
             resizable: false,
-            group: None,
             model: None,
-            composite_asset: None,
             history_strip: None,
-            aggregate_run: None,
         }
     }
 

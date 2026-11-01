@@ -101,7 +101,7 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
   const entryRaw = body.entry;
   if (!isJsonObject(entryRaw)) return fail("malformed-request", "entry 必须是对象");
   if (Object.keys(entryRaw).some(key => !["action", "canvasId", "nodeId", "mode", "cameraId", "clipId", "itemId", "model", "reasoningEffort", "connectionId", "connection", "expectedContentHash", "prompt", "references"].includes(key))) return fail("malformed-request", "entry 包含私有或未知字段");
-  if (entryRaw.mode === "text" && ["cameraId", "clipId", "itemId"].some(key => entryRaw[key] !== undefined)) return fail("malformed-request", "文本目标不能带片场或镜头身份");
+  if (entryRaw.mode === "text" && ["cameraId", "clipId", "itemId"].some(key => entryRaw[key] !== undefined)) return fail("malformed-request", "文本目标不能带镜头身份");
   const binding = entryRaw.connection;
   if (binding !== undefined && (!isJsonObject(binding) || Object.keys(binding).some(key => !["connectionId", "adapterId", "configRevision", "credentialEpoch"].includes(key)) || !isBoundedId(binding.connectionId) || !isBoundedId(binding.adapterId) || ![binding.configRevision, binding.credentialEpoch].every(n => Number.isSafeInteger(n) && (n as number) >= 0))) return fail("malformed-request", "connection 非法");
   const action = entryRaw.action;
@@ -143,11 +143,7 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
     ...(references === undefined ? {} : { references })
   };
 
-  // 对象类目标动作缺少片段身份：拒绝并说明，MUST NOT 扩大成整体片场修改（design D3/任务 4.2）。
-  if ((action === "modify" || (action === "generate" && entry.mode === "film-set")) && entry.itemId !== undefined && entry.clipId === undefined) {
-    return fail("malformed-request", "对象动作缺少 clipId，拒绝退化成整体片场修改");
-  }
-  if ((entry.mode === "camera" || entry.mode === "canvas-group") && entry.nodeId === undefined) {
+  if (entry.mode === "camera" && entry.nodeId === undefined) {
     return fail("malformed-request", "camera 目标必须带 nodeId");
   }
   return { ok: true, value: { requestId, entry } };

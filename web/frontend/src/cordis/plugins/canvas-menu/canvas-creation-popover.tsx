@@ -1,11 +1,9 @@
-import { useRef, useState } from "react";
-import { useService } from "../../react.js";
+import { useState } from "react";
 import { Popover } from "@woohaa3/ui/primitives";
 import { AssistantComposer } from "@woohaa3/ui/assistant";
-import { TypeIcon, ImageIcon, FilmIcon, MusicIcon, BoxIcon, PluginIcon, PlusIcon, SparklesIcon, SearchIcon, ChevronRightIcon, UploadIcon } from "@woohaa3/ui/icons";
+import { TypeIcon, ImageIcon, FilmIcon, MusicIcon, BoxIcon, PluginIcon, PlusIcon, SearchIcon, UploadIcon } from "@woohaa3/ui/icons";
 import type { CanvasContextMenuItem } from "./canvas-context-menu.js";
-import { planInsertNode } from "../../../extension-api/command-planner.js";
-import { CANVAS_MENU_SECTION, createWoohaa3CanvasNodeId } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION } from "@woohaa3/contracts";
 import "./canvas-creation-popover.css";
 
 
@@ -14,36 +12,7 @@ const sectionLabels: Record<string, string> = { "basic-material": "基础素材"
 
 /** Only mounted for an ordinary blank context menu; no conversation is created by opening. */
 export default function CanvasCreationPopover(props: { menuIdentity?: object; screen: { x: number; y: number }; world: { x: number; y: number }; items: readonly CanvasContextMenuItem[]; writable: boolean; onSelect(id: string): void; onClose(): void }) {
-  const edit = useService("canvasEdit");
-  const session = useService("canvasSession");
-  const runtime = useService("canvasRuntime");
-  const navigation = useService("canvasNavigation");
-  const scope = useService("canvasScope");
   const [search, setSearch] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [notice, setNotice] = useState("");
-  const pending = useRef(false);
-  const createGroup = async () => {
-    if (pending.current || !props.writable || !session.isWritable()) return;
-    pending.current = true;
-    setCreating(true);
-    setNotice("");
-    const canvasId = scope.canvasId();
-    const nodeId = createWoohaa3CanvasNodeId("group");
-    try {
-      const result = await edit.record(planInsertNode({ nodeId, nodeType: "group", position: props.world, nodeData: {} }), "创建组");
-      if (scope.canvasId() !== canvasId || navigation.getSnapshot().menu !== props.menuIdentity) return;
-      if (!result.ok) { setNotice(result.reason ?? "创建组失败，请重试"); return; }
-      runtime.controller()?.selectNode(nodeId);
-      navigation.openPanel({ type: "model-node-editor", nodeId });
-      props.onClose();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "创建组失败，请重试");
-    } finally {
-      pending.current = false;
-      setCreating(false);
-    }
-  };
   const groups = new Map<string, CanvasContextMenuItem[]>();
   // 「其他」操作（上传等）不单独成段：并入最后一个素材 section，作为该行最右列的图标按钮。
   const actions: CanvasContextMenuItem[] = [];
@@ -81,10 +50,6 @@ export default function CanvasCreationPopover(props: { menuIdentity?: object; sc
       {sectionEntries.length > 0 ? <div className="canvas-create__materials">{sectionEntries.map(([section, items]) => <section key={section} data-section={section}>
         <h3>{sectionLabels[section] ?? section}</h3><div className="canvas-create__grid">{items.map(renderItem)}</div>
       </section>)}</div> : null}
-      <button type="button" className="canvas-create__ai-entry" disabled={!props.writable || creating} onClick={() => { void createGroup(); }}>
-        <SparklesIcon /><span><strong>用 AI 创作</strong><small>创建组并开始创作</small></span><ChevronRightIcon className="canvas-create__entry-arrow" />
-      </button>
-      {notice ? <p className="canvas-create__notice">{notice}</p> : null}
     </div>
   </Popover>;
 }

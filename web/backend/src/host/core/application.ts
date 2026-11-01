@@ -1,8 +1,6 @@
 import { createSiteProviderSource } from "./service-connection-sources.js";
 import { createAssistantTextPort } from "../../ports/assistant-text.js";
-import { createCanvasCreationPort } from "../../ports/canvas-creation.js";
-import { createGroupEffects } from "../../ports/group-effects.js";
-import { canvasGroupEpoch, currentCanvasGroupScope, deriveRunIdentity } from "@woohaa3/canvas-service";
+import { deriveRunIdentity } from "@woohaa3/canvas-service";
 /**
  * 核心层 · application：站点插件宿主（控制面、站点配置 facade、工作 lease、公开路由分派）。
  *
@@ -189,25 +187,8 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         owner: string;
         canvasId: string;
         permission: "read" | "write";
-        rootGroupId?: string;
-        scopeEpoch?: number;
         nodeId?: string;
       }) => {
-        const scope = currentCanvasGroupScope();
-        if (scope) {
-          if (!scope.valid()) return { ok: false as const, code: "group-scope-revoked" as const, message: "组创作授权已撤销" };
-          if (scope.canvasId !== input.canvasId) return { ok: false as const, code: "forbidden" as const, message: "画布不在当前组作用域" };
-          if (input.rootGroupId !== undefined && input.rootGroupId !== scope.rootGroupId) {
-            return { ok: false as const, code: "forbidden" as const, message: "步骤不属于当前组" };
-          }
-          if (input.scopeEpoch !== undefined && canvasGroupEpoch(input.canvasId, scope.rootGroupId) !== input.scopeEpoch) {
-            return { ok: false as const, code: "group-scope-revoked" as const, message: "组作用域已失效" };
-          }
-          if (scope.authorize && !(await scope.authorize(input.permission))) {
-            return { ok: false as const, code: "forbidden" as const, message: "画布权限已撤销" };
-          }
-          return { ok: true as const };
-        }
         const agent = canvasAgent();
         const decision = await agent?.authorizeCanvas({ principalId: input.owner, canvasId: input.canvasId, permission: input.permission });
         if (decision && !decision.ok) return { ok: false as const, code: decision.code, message: decision.message };
@@ -398,9 +379,6 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         const result = await ctx.media.port().resources!.read!(storageKey, canvasId);
         return result;
       } }),
-      canvasCreation: createCanvasCreationPort(ctx.canvas),
-      candidateAssistantProviders: () => ctx.generation.conversions(),
-      groupEffects: createGroupEffects(ctx.canvas, ctx.toolGrants),
       conversationCanvasAccess: createExtensionCanvasAccessFacade(ctx.canvas),
       // 内置 MCP 的真实发现结果；缺工具/不可达/协议错误分别带原因，不伪造 ready。
       mcpDiscovery: async () => projectMcpDiscovery(await mcp.discoverTools()),

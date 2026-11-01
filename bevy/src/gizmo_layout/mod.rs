@@ -1,13 +1,13 @@
 //! Disposable screen geometry shared by drawing and picking. No document or host dependencies.
-mod object;
 pub mod render;
 mod shot;
 mod view;
-pub use object::*;
 pub use shot::*;
 pub use view::*;
 
 use bevy::math::{Vec2, Vec3};
+
+pub const RING_SEGMENTS: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GizmoShape {

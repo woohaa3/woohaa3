@@ -50,7 +50,7 @@ type FakeAdapterControls = {
 function fakeAdapter(controls: FakeAdapterControls): AgentConversationAdapter {
   return {
     id: "fake",
-    capabilities: () => ({ candidateGeneration:{imageInput:true,maxImages:8}, discussion: true, targets: ["model3d", "film-set", "camera", "canvas-group"], tools: true, models: "remote" }),
+    capabilities: () => ({ candidateGeneration:{imageInput:true,maxImages:8}, discussion: true, targets: ["model3d", "camera"], tools: true, models: "remote" }),
     authorization: async () => "ready",
     models: async () => ({ models: [{ id: "gpt-6.1-sol", label: "GPT 6.1 Sol" }] }),
     async run(input) {
@@ -77,35 +77,6 @@ function fakeRegistry(adapter: AgentConversationAdapter) {
     snapshot: () => [{ extensionId: "fake-ext", capabilities: ["agent-conversation-adapter:fake"] }]
   });
 }
-
-describe("group ledger recovery", () => {
-  it("freezes the host epoch, links child runs by exact owner and reconciles without inference", async () => {
-    const controls: FakeAdapterControls = { seen: [], outcomes: [], queries: [], pending: [] };
-    const adapter = fakeAdapter(controls);
-    adapter.capabilities = () => ({ discussion: true, targets: ["canvas-group"], tools: true, models: "remote" });
-    const store = createSqliteAgentConversationStore({ path: path.join(tempDir(), "group.sqlite") });
-    const settle = vi.fn(async (input) => ({ status: "failed" as const, receipt: { kind: "canvas-group", actions: input.actions, outcomes: [{ runId: "child", state: "running" }] } }));
-    const cancel = vi.fn();
-    const service = createAgentConversationService({ store, registry: fakeRegistry(adapter), groupScopeEpoch: () => 7, groupEffects: { settle, cancel } });
-    const created = service.createConversation({ owner: "owner", canvasId: "canvas", nodeId: "root", adapterId: "fake" });
-    expect(created.ok).toBe(true); if (!created.ok) return;
-    const accepted = service.acceptTurn({ owner: "owner", conversationId: created.conversation.conversationId, requestId: "request", entry: { action: "generate", canvasId: "canvas", nodeId: "root", mode: "canvas-group", prompt: "create" } });
-    expect(accepted.ok).toBe(true); if (!accepted.ok) return;
-    expect(accepted.turn.target.expectedContentHash).toBe("group-epoch:7");
-    service.recordGroupAction({ owner: "owner", requestId: "request", action: { canvasId: "canvas", nodeId: "n", runId: "child" } });
-    service.recordGroupAction({ owner: "other", requestId: "request", action: { canvasId: "canvas", nodeId: "n", runId: "forged" } });
-    expect(service.locateTurnByRun({ owner: "owner", runId: "child" }).ok).toBe(true);
-    expect(service.locateTurnByRun({ owner: "other", runId: "child" }).ok).toBe(false);
-    expect(service.locateTurnByRun({ owner: "owner", runId: "forged" }).ok).toBe(false);
-    await service.reconcileUnknown();
-    expect(controls.seen).toEqual([]); expect(controls.queries).toEqual([]);
-    expect(settle).toHaveBeenCalledWith(expect.objectContaining({ recovery: true }));
-    expect(service.queryTurn({ owner: "owner", requestId: "request" })).toMatchObject({ ok: true, turn: { status: "failed", receipt: { outcomes: [{ runId: "child", state: "running" }] } } });
-    service.cancelTurn({ owner: "owner", requestId: "request" });
-    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ owner: "owner", actions: [{ canvasId: "canvas", nodeId: "n", runId: "child" }] }));
-    expect(service.queryTurn({ owner: "owner", requestId: "request" })).toMatchObject({ ok: true, turn: { status: "failed" } });
-  });
-});
 
 function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageChars?: number) {
   const controls: FakeAdapterControls = {
@@ -373,7 +344,7 @@ describe("agent conversation service", () => {
       expect(created.ok).toBe(true);
       if (!created.ok) throw new Error("conversation not created");
       const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId,
-        requestId: `request-${n}`, entry: entry({ nodeId: `group-${n}`, mode: "canvas-group" }) });
+        requestId: `request-${n}`, entry: entry({ nodeId: `group-${n}`, mode: "model3d" }) });
       // 原 owner/global 各 8 的门禁已删除：全部独立受理为 queued。
       expect(accepted).toMatchObject({ ok: true, turn: { status: "queued" } });
     }
@@ -746,32 +717,6 @@ describe("trusted structured assistant execution", () => {
   });
 });
 
-it("discovers every group turn from the owner ledger across pages, archived conversations and restart, without dispatch", () => {
-  const { store, controls } = setup();
-  const service = createAgentConversationService({ store, registry: fakeRegistry(fakeAdapter(controls)), groupScopeEpoch: () => 7 });
-  const accepted: string[] = [];
-  for (const nodeId of ["manual", "manual", "other", "manual", "manual"]) {
-    const created = service.createConversation({ owner: "owner", canvasId: "canvas", nodeId, adapterId: "fake" });
-    if (!created.ok) throw Error(created.error.message);
-    const requestId = `ledger-${accepted.length}`;
-    const result = service.acceptTurn({ owner: "owner", conversationId: created.conversation.conversationId, requestId,
-      entry: { action: "generate", mode: "canvas-group", canvasId: "canvas", nodeId, prompt: "test" } });
-    if (!result.ok) throw Error(result.error.message);
-    accepted.push(requestId);
-    // Archiving the conversation must not hide its outstanding execution.
-    store.clearTarget({ owner: "owner", canvasId: "canvas", nodeId });
-  }
-  const requests: string[] = []; let cursor: string | undefined;
-  do {
-    const page = service.listGroupExecutions({ owner: "owner", canvasId: "canvas", nodeId: "manual", limit: 2, cursor });
-    requests.push(...page.turns.map(t => t.requestId)); cursor = page.nextCursor;
-  } while (cursor);
-  expect(new Set(requests).size).toBe(4);
-  expect(service.listGroupExecutions({ owner: "other", canvasId: "canvas" }).turns).toEqual([]);
-  expect(service.listGroupExecutions({ owner: "owner", canvasId: "other" }).turns).toEqual([]);
-  expect(controls.seen).toEqual([]); expect(controls.queries).toEqual([]);
-  expect(service.clearContext({ owner: "owner", canvasId: "canvas", nodeId: "manual" })).toMatchObject({ ok: false });
-});
 
 it("DSML 工具文本不能把无工具的讨论结算为成功", async () => {
   const { service } = setup({ outcomes: [{ status: "succeeded", assistantText: '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="woohaa_get_film_set_clips">' }] });

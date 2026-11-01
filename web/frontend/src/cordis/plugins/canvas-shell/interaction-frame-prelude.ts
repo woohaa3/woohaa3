@@ -3,9 +3,9 @@
  * （change: 2026-10-10-optimize-canvas-interaction-hot-path，从 `interaction-controller` 拆出以
  * 保持业务单文件 ≤500 行的体积守卫）。
  *
- * 先推进与场景无关的逐帧工作（modal held input 清理、聚焦有效性、纹理与视频/片场媒体会话、
- * 失效 selection/draft/粘连/聚合成员清理），再返回就绪的片场媒体平面集合。是否构建/提交
- * 场景由调用方（唯一帧结算点）依据失效账本决定。
+ * 先推进与场景无关的逐帧工作（modal held input 清理、聚焦有效性、纹理与视频会话、
+ * 失效 selection/draft/粘连/聚合成员清理）。是否构建/提交场景由调用方（唯一帧结算点）
+ * 依据失效账本决定。
  */
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { modelPreviewStore } from "../../services/model-preview-store.js";
@@ -21,14 +21,12 @@ export type TransientFrameDeps = {
   /**
    * 本帧资源需求投影（先准入再创建）。
    *
-   * 必须在 `syncTexture` / `syncVideoSessions` / `syncCompositeAssetMedia` 之前调用：
-   * 未准入的节点不得创建解码器、纹理或片场会话（design D1/D2）。缺省跳过（旧测试路径）。
+   * 必须在 `syncTexture` / `syncVideoSessions` 之前调用：未准入的节点不得创建解码器
+   * 或纹理（design D1/D2）。缺省跳过（旧测试路径）。
    */
   projectResidency?: () => void;
   syncTexture: () => void;
   syncVideoSessions: () => void;
-  /** 同步片场媒体会话并返回就绪平面集合。 */
-  syncCompositeAssetMedia: () => ReadonlySet<string> | null;
   state: InteractionState;
   isFocused: () => boolean;
   setSelection: (ids: string[]) => void;
@@ -41,11 +39,8 @@ export type TransientFrameDeps = {
   writable: () => boolean;
 };
 
-/**
- * 推进一帧的瞬时态工作，返回就绪片场媒体平面集合（或 null）。
- * 纯副作用函数：不构建场景、不跨 WASM 边界。
- */
-export function advanceTransientState(deps: TransientFrameDeps): ReadonlySet<string> | null {
+/** 推进一帧的瞬时态工作。纯副作用函数：不构建场景、不跨 WASM 边界。 */
+export function advanceTransientState(deps: TransientFrameDeps): void {
   const { state } = deps;
   // modal 打开时清理 focus held input；非模态 panel 不打断 focus 飞行（D6）。
   if (deps.focusInputBlocked()) deps.clearHeldKeys();
@@ -56,8 +51,6 @@ export function advanceTransientState(deps: TransientFrameDeps): ReadonlySet<str
   deps.syncTexture();
   // 视频会话按当前 canonical/working 画布同步（新增/换源/删除），并推进 hover 播放。
   deps.syncVideoSessions();
-  // 片场媒体会话按当前画布同步（图片/视频平面纹理）；返回就绪平面集合。
-  const compositeAssetMediaReady = deps.syncCompositeAssetMedia();
   // 被拒绝/重基 blocked 导致 working 中消失的节点：清理失效 selection 与连线草稿（任务 4.6）。
   const working = workingCanvasOf(woohaa3CanvasStore.getState());
   if (working) {
@@ -88,5 +81,4 @@ export function advanceTransientState(deps: TransientFrameDeps): ReadonlySet<str
       if (liveMembers.length === 0 || !deps.writable()) deps.cancelAggregateConnect();
     }
   }
-  return compositeAssetMediaReady;
 }

@@ -9,8 +9,6 @@
  * change: replace-model-node-focus-interactions —— 模型本体拖动已被移除：聚焦编辑只允许镜头
  * gizmo 与焦点三轴 gizmo 写入，`modelPlacement` 不再由直接拖动产生。
  */
-import { CLOSE_FOCUS_REFERENCE_ACTION } from "./composite-focus-context.js";
-import { workingCanvasOf } from "../../services/canvas-state/index.js";
 import type { InteractionQueries } from "./interaction-queries.js";
 import type { ModelFocusProjection } from "@woohaa3/contracts";
 import { focusedTarget, ModelFocusSession } from "./model-focus-session.js";
@@ -25,7 +23,6 @@ import type { InteractionControllerOptions } from "./interaction-types.js";
 /** 模型 family 依赖的共享能力（由 controller 注入；不含事件监听所有权）。 */
 export type ModelGestureContext = {
   canvas: HTMLCanvasElement;
-  focusContextContains?: (point: { x: number; y: number }) => boolean;
   options: InteractionControllerOptions;
   writable: () => boolean;
   localViewportSet: (viewport: { x: number; y: number; zoom: number }) => void;
@@ -60,19 +57,6 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
   let activeFocusAxis: "x" | "y" | "z" | "center" | null = null;
   /** 焦点位移手势处理器（可运行时注入/替换）。 */
   let focusGesture = options.focusGesture ?? null;
-  /** 片场对象模式手势（change: 2026-10-09-add-film-set-object-motion-and-editing）。 */
-  let objectGesture = options.filmSetObjectGesture ?? null;
-  /** 是否正在拖动片场对象。 */
-  let activeObjectDrag = false;
-  let focusCloseHovered = false;
-  let previousCursor = "", previousTitle = "";
-  const setCloseHover = (hovered: boolean) => {
-    if (hovered === focusCloseHovered) return;
-    focusCloseHovered = hovered;
-    if (hovered) { previousCursor = canvas.style?.cursor ?? ""; previousTitle = canvas.title; }
-    if (canvas.style) canvas.style.cursor = hovered ? "pointer" : previousCursor;
-    canvas.title = hovered ? "关闭容器" : previousTitle;
-  };
   let feedbackEpoch = 0;
   let cameraDragKey: string | null = null;
   const feedback = (handle: import("@woohaa3/contracts").GizmoHandleName | null, active = false) => {
@@ -86,8 +70,6 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
     return JSON.stringify([focus.projection(), surfaceSize(), options.getRuntime()?.generation(), options.getModelFocusMode?.(),
       editor?.nodeId, editor?.toolMode, editor?.cameraId, editor?.cameraTool, canonical?.nodeData?.[focus.nodeId ?? ""]]);
   };
-  /** 片场对象局部键盘 action（change: 2026-10-10-improve-film-set-editing-and-inspector）。 */
-  let objectAction = options.filmSetObjectAction ?? null;
   /** 上报聚焦投影变化；宿主据此把投影合并进下一份渲染快照并 flush。 */
   const emitModelFocus = () => {
     if (options.getModelFocusMode?.() !== "history") syncPreviewObserver(focus, options.getModelFocusTargets?.() ?? []);
@@ -212,7 +194,6 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
   const reframeModelFocus = (nodeId: string): void => lifecycle.reframe(nodeId);
 
   const clearHeldKeys = () => {
-    setCloseHover(false);
     navigation.resetHeld();
     // 活动镜头 pose 手势被取消：只清理 preview，不提交（任务 3.2 / 4.4）。
     if (activeShotHandle && shotGesture) {
@@ -224,12 +205,6 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
       focusGesture.cancel();
     }
     activeFocusAxis = null;
-    // 活动对象拖动被取消：只清理 preview，不提交（change: 2026-10-09 片场对象编辑）。
-    if (activeObjectDrag && objectGesture) {
-      objectGesture.cancel();
-    }
-    activeObjectDrag = false;
-    objectGesture?.hover?.(null);
     cameraDragKey = null;
     feedback(null);
     focus.clearHeld();
@@ -251,24 +226,7 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
    * RMB 或 Alt/Option + 左键旋转观察相机，MMB 平移观察相机。
    * 不选中节点、不开始 drag/marquee/connect/right-press/resize，也不打开上下文菜单。
    */
-  const isFocusReferenceEvent = (event: { clientX: number; clientY: number }) => {
-    const rect = canvas.getBoundingClientRect();
-    return ctx.focusContextContains?.({ x: event.clientX - rect.left, y: event.clientY - rect.top }) ?? false;
-  };
   const beginFocusPointer = (event: PointerEvent) => {
-    if (isFocusReferenceEvent(event)) {
-      event.preventDefault();
-      if (event.button === 0 && !event.altKey && writable() && options.getModelFocusMode?.() !== "history") {
-        const rect = canvas.getBoundingClientRect();
-        const hit = ctx.queryPoint?.({ x: event.clientX - rect.left, y: event.clientY - rect.top }, 1);
-        if (hit?.ok && hit.value?.kind === "node-action" && hit.value.actionId === CLOSE_FOCUS_REFERENCE_ACTION) {
-          const current = workingCanvasOf(woohaa3CanvasStore.getState());
-          const child = options.compositeAssets?.children(current).get(hit.value.nodeId);
-          if (current && child?.ownerNodeId === focus.nodeId) options.compositeAssets?.closeChild(current, hit.value.nodeId);
-        }
-      }
-      return;
-    }
     // Alt/Option 主按钮为触摸板提供无需按住右键的旋转入口，优先于 gizmo 编辑。
     const button = event.button === 0 && event.altKey ? 2 : event.button ?? 0;
     if (button === 0) {
@@ -295,23 +253,6 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
           activeFocusAxis = focusAxis;
           cameraDragKey = dragKey();
           feedback(focusAxis, true);
-          canvas.setPointerCapture?.(event.pointerId);
-          event.preventDefault();
-          return;
-        }
-      }
-      // 片场对象模式：单击选择命中对象；拖动移动/Shift 旋转（change: 2026-10-09 片场对象编辑）。
-      // 在 gizmo 之后、整体拖动之前裁决，保持整体模式与镜头工具优先。
-      if (objectGesture?.active() && placementEditable()) {
-        const cameraMode = options.getModelEditor?.()?.toolMode === "camera";
-        if (!cameraMode && objectGesture.begin(point, event.shiftKey)) {
-          activeObjectDrag = true;
-          canvas.setPointerCapture?.(event.pointerId);
-          event.preventDefault();
-          return;
-        }
-        // 未命中已选中对象：单击只更新选择，不开始拖动，也不落到相机手势。
-        if (objectGesture.select(point, { preserveOnMiss: cameraMode }) || !cameraMode) {
           canvas.setPointerCapture?.(event.pointerId);
           event.preventDefault();
           return;
@@ -377,11 +318,6 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
     const rect = canvas.getBoundingClientRect();
     const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     if (cameraDragKey && (!placementEditable() || cameraDragKey !== dragKey())) { clearHeldKeys(); return true; }
-    // 片场对象拖动优先（change: 2026-10-09 片场对象编辑）。
-    if (activeObjectDrag && objectGesture) {
-      objectGesture!.move(point);
-      return true;
-    }
     // 镜头 pose 手势优先（design D6）。
     if (activeShotHandle && shotGesture) {
       shotGesture.move(activeShotHandle, point);
@@ -392,13 +328,6 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
       focusGesture.move(activeFocusAxis, point);
       return true;
     }
-    if (ctx.focusContextContains?.(point) && !cameraDragKey) {
-      const hit = writable() && options.getModelFocusMode?.() !== "history" ? ctx.queryPoint?.(point, 1) : null;
-      setCloseHover(!!(hit?.ok && hit.value?.kind === "node-action" && hit.value.actionId === CLOSE_FOCUS_REFERENCE_ACTION));
-      objectGesture?.hover?.(null); feedback(null); return true;
-    }
-    setCloseHover(false);
-    objectGesture?.hover?.(placementEditable() ? point : null);
     if (options.getModelEditor?.()?.toolMode === "camera") {
       const handle = placementEditable() ? resolveFocusGizmoAxis(point) ?? resolveShotGizmoHandle(point) : null;
       feedback(handle);
@@ -413,11 +342,7 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
     if (cameraDragKey && (!placementEditable() || cameraDragKey !== dragKey())) { clearHeldKeys(); return; }
     const rect = canvas.getBoundingClientRect();
     const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    if (activeObjectDrag && objectGesture) {
-      objectGesture.move(point);
-      objectGesture.end();
-      activeObjectDrag = false;
-    } else if (activeShotHandle && shotGesture) {
+    if (activeShotHandle && shotGesture) {
       shotGesture.move(activeShotHandle, point);
       shotGesture.end();
       activeShotHandle = null;
@@ -456,24 +381,12 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
     syncModelFocusValid,
     advanceModelFly,
     beginFocusPointer,
-    isFocusReferenceEvent,
     moveFocusPointer,
     endFocusPointer,
     flyKeyName: navigation.flyKeyName,
     applyFlyKey: navigation.applyFlyKey,
-    onDocumentWheel: (event: WheelEvent, modalActive: boolean) => {
-      if (focus.active && isFocusReferenceEvent(event)) { event.preventDefault(); return true; }
-      return navigation.onDocumentWheel(event, modalActive);
-    },
-    onGestureStart: (event: Event, modalActive: boolean) => {
-      const pointer = event as Event & { clientX?: number; clientY?: number };
-      if (focus.active && typeof pointer.clientX === "number" && typeof pointer.clientY === "number"
-        && isFocusReferenceEvent({ clientX: pointer.clientX, clientY: pointer.clientY })) {
-        navigation.onGestureEnd(event);
-        return;
-      }
-      navigation.onGestureStart(event, modalActive);
-    },
+    onDocumentWheel: (event: WheelEvent, modalActive: boolean) => navigation.onDocumentWheel(event, modalActive),
+    onGestureStart: (event: Event, modalActive: boolean) => navigation.onGestureStart(event, modalActive),
     onGestureChange: navigation.onGestureChange,
     onGestureEnd: navigation.onGestureEnd,
     setShotGesture: (handler: InteractionControllerOptions["shotGesture"] | null) => {
@@ -481,13 +394,6 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
     },
     setFocusGesture: (handler: InteractionControllerOptions["focusGesture"] | null) => {
       focusGesture = handler ?? null;
-    },
-    setFilmSetObjectGesture: (handler: InteractionControllerOptions["filmSetObjectGesture"] | null) => {
-      objectGesture = handler ?? null;
-    },
-    filmSetObjectAction: () => objectAction,
-    setFilmSetObjectAction: (handler: InteractionControllerOptions["filmSetObjectAction"] | null) => {
-      objectAction = handler ?? null;
     },
     setShotWheel: (handler: InteractionControllerOptions["shotWheel"] | null) => {
       // 保留宿主注入接口兼容性；主画布滚轮始终由观察相机消费。

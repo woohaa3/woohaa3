@@ -60,7 +60,6 @@ impl ModelVisuals {
                 super::quality::Quality::Low => 0,
                 super::quality::Quality::Medium => 1,
                 super::quality::Quality::High => 2,
-                _ => unreachable!("tier returns a base quality"),
             }] += 1;
             for (_entity, base, geometry) in &root.geometries {
                 let count = 1;
@@ -72,7 +71,7 @@ impl ModelVisuals {
                 // 每几何有效档位：总览根的自定义 Mesh / Box 恒 High，按实际 handle 计数，
                 // 不按根 desired 枚举漏计（change: 2026-10-15-add-film-set-overview-lod，design D3/D6）。
                 let effective =
-                    super::mesh::effective_quality(geometry, root.quality, root.overview_lod);
+                    super::mesh::effective_quality(geometry, root.quality);
                 if let Some(handle) = self.shared.lookup(base, geometry, effective) {
                     unique.insert(handle.id());
                     if let Some(mesh) = meshes.get(handle) {
@@ -150,99 +149,6 @@ impl ModelVisuals {
             "previewPoseInserts": self.hot_path.preview_pose_inserts,
             "previewPoseSkips": self.hot_path.preview_pose_skips
         });
-        // 总览 LOD 有界诊断：投影占可视窗口高度比例、期望/已发布档位、原因、准备/待发布状态、
-        // 代数与实际 handle 预算；最多 64 条根状态，超出记录总数/截断数
-        // （change: 2026-10-15-add-film-set-overview-lod，design D6）。
-        let mut overview_roots: Vec<_> = self
-            .roots
-            .iter()
-            .filter(|(_, root)| root.overview_lod)
-            .map(|(id, root)| {
-                serde_json::json!({
-                    "nodeId": id,
-                    "viewportFraction": root.overview_fraction,
-                    "desired": format!("{:?}", root.overview_desired.tier()),
-                    "published": format!("{:?}", root.quality.tier()),
-                    "subdivisions": root.quality.subdivisions(),
-                    "reason": root.overview_reason,
-                    "preparing": self.pending.as_ref().is_some_and(|p| p.is_for(id)),
-                    "representationGeneration": root.representation_generation,
-                    "activeMeshes": root.active_mesh_handles.len(),
-                    // 合批结果：staticBatches 是实际提交的批次实体数，batchedParts 是被收进
-                    // 批次的部件数，unbatchedParts 是仍逐实体提交的部件数。三者合起来可作为
-                    // 真实 GPU 上 draw call 变化的 CPU 代理（片场组徽标按 binding 合批）。
-                    "batches": root.batches.len(),
-                    "batchedParts": root.part_batches.len(),
-                    "unbatchedParts": root.geometries.len()
-                })
-            })
-            .collect();
-        overview_roots.sort_by(|a, b| a["nodeId"].as_str().cmp(&b["nodeId"].as_str()));
-        let overview_total = overview_roots.len();
-        overview_roots.truncate(64);
-        // 当前截图 pin 的节点 id（有界、排序）：把"谁把它按在 High"从原因再落到具体请求目标。
-        // 只进诊断快照；遥测侧仍只取末 12 字符摘要（dev 构建）。
-        let mut overview_pins: Vec<&str> = self.capture_pins().iter().map(String::as_str).collect();
-        overview_pins.sort_unstable();
-        overview_pins.truncate(8);
-        let capture_requests: Vec<_> = capture_requests
-            .iter()
-            .take(8)
-            .map(|(node, source)| {
-                serde_json::json!({
-                    "nodeId": node,
-                    "source": if source.is_empty() { "unknown" } else { source.as_str() },
-                })
-            })
-            .collect();
-        let pending = self.pending.as_ref().map(|pending| pending.diagnostics());
-        value["overviewLod"] = serde_json::json!({
-            "scope": "bounded per-root declared overview LOD state; actual active handles, not desired-times-theoretical ratios",
-            "roots": overview_roots,
-            "pins": overview_pins,
-            "captureRequests": capture_requests,
-            "total": overview_total,
-            "truncated": overview_total.saturating_sub(64),
-            "pending": pending,
-            "work": &self.overview_work,
-            "staged": self.pending.as_ref().map_or_else(
-                || serde_json::json!({"meshes": 0, "bytes": 0, "scope": "no in-flight overview preparation"}),
-                |pending| serde_json::json!({
-                    "meshes": pending.staged_meshes().len(),
-                    "bytes": pending.staged_bytes(),
-                    "scope": "in-flight replacement ownership; not a hard active/pinned memory cap"
-                })
-            )
-        });
-        // Native 后台准备有界诊断（change: 2026-10-18-prepare-native-film-sets-in-background，
-        // design D7）：只读取已记录计数与 staging 进度，不遍历几何、不逐帧写日志。
-        let mut staging_roots: Vec<_> = self
-            .staging
-            .iter()
-            .map(|(node, staging)| {
-                let (done, total) = staging.progress();
-                serde_json::json!({
-                    "nodeId": node,
-                    "assemblySteps": done,
-                    "assemblyTotal": total
-                })
-            })
-            .collect();
-        staging_roots.sort_by(|a, b| a["nodeId"].as_str().cmp(&b["nodeId"].as_str()));
-        let staging_total = staging_roots.len();
-        staging_roots.truncate(64);
-        let mut preparation = self.preparation.work.diagnostics();
-        preparation["stagingRoots"] = serde_json::json!(staging_roots);
-        preparation["stagingTotal"] = serde_json::json!(staging_total);
-        preparation["retiringEntities"] = serde_json::json!(self.retiring.len());
-        preparation["publishedRoots"] = serde_json::json!(self.roots.len());
-        preparation["budgets"] = serde_json::json!({
-            "unitsPerFrame": super::preparation::MAX_UNITS_PER_FRAME,
-            "newMeshBytesPerFrame": super::preparation::MAX_NEW_MESH_BYTES,
-            "softStopMs": super::preparation::SOFT_STOP_MS,
-            "scope": "global per-frame host assembly budget; not a GPU upload or frame-time guarantee"
-        });
-        value["nativePreparation"] = preparation;
         #[cfg(feature = "explicit-instancing")]
         let value = {
             let mut value = value;

@@ -45,17 +45,11 @@ pub(crate) fn render_z(nodes: &[GraphNode], index: usize) -> f32 {
 mod tests {
     use super::*;
 
-    fn graph_node(id: &str, group: bool) -> GraphNode {
+    fn graph_node(id: &str, _group: bool) -> GraphNode {
         GraphNode {
             model_preview: None,
-            shot_preview: None,
-
             id: id.into(),
-            kind: if group {
-                "group".into()
-            } else {
-                "image".into()
-            },
+            kind: "image".into(),
             x: 0.0,
             y: 0.0,
             width: 100.0,
@@ -71,24 +65,8 @@ mod tests {
             resizable: false,
             ghost: false,
             card_label: None,
-            group: group.then(|| crate::protocol::GroupPresentation {
-                badge_top_anchor: false,
-                collapsed: false,
-                action_bar: false,
-                title: String::new(),
-                member_count: 1,
-                output_capable_leaf_count: 0,
-                model_bounds: None,
-                run_status: None,
-                geometry_quality: None,
-                drop_target: false,
-            
-                overview_cache: None,
-        }),
             model: None,
-            composite_asset: None,
             history_strip: None,
-            aggregate_run: None,
         }
     }
 

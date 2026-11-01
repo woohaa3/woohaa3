@@ -30,7 +30,6 @@ export function createFrameSubmission(deps: {
   const indexNow = () => sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
   const transientNow = () => JSON.stringify({
     ...deps.transient(), selected:deps.state.selected, draft:deps.state.draft,
-    dropTargetGroupIds: deps.state.dropTargetGroupIds,
     hover:[deps.state.hoveredNodeId,deps.state.hoveredPort,deps.state.hoveredEdgeId]
   });
   const baselineBlock = (runtime: BevyRuntime, index: CanvasNodeIndex | null): string | null => {
@@ -182,7 +181,5 @@ export function createFrameSubmission(deps: {
       || baseline.base !== (runtime?.baseSceneGeneration?.() ?? 0)) return undefined;
     return mirror.node(baseline.scene, nodeId);
   };
-  const focusContextContains = (point: { x: number; y: number }): boolean => !!baseline?.scene.modelFocus
-    && (baseline.scene.modelFocusContext ?? []).some(rect => point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height);
-  return {run,dragScene,renderedNode,focusContextContains};
+  return {run,dragScene,renderedNode};
 }

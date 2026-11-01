@@ -47,7 +47,7 @@ export function compositeAssetNodeBoxSize(node: NodeDimensions): {
 /**
  * Visible card/base rectangle in canvas world units. Reading never rewrites stored geometry.
  * Old model3d cards expand to the preview default; explicit resize previews bypass that expansion.
- * Group rectangles retain their stored size. Transient controls outside the card are excluded.
+ * Transient controls outside the card are excluded.
  */
 export function effectiveCanvasNodeSize(
   node: NodeDimensions & { type: string },
@@ -59,13 +59,12 @@ export function effectiveCanvasNodeSize(
   const legacyPreview = capabilities.resize?.legacyPreviewHeight !== undefined
     && (node.height ?? COMPACT_NODE_SIZE.height) <= capabilities.resize.legacyPreviewHeight;
   const base = override ?? (legacyPreview ? fallback : node);
-  const group = !!capabilities.container;
   return {
-    width: dimension(base.width, fallback.width, group ? 0 : minimumNodeSizeFor(node.type).width),
+    width: dimension(base.width, fallback.width, minimumNodeSizeFor(node.type).width),
     height: dimension(
       base.height,
       fallback.height,
-      group ? 0 : preview ? MODEL_PREVIEW_MIN_HEIGHT : minimumNodeSizeFor(node.type).height,
+      preview ? MODEL_PREVIEW_MIN_HEIGHT : minimumNodeSizeFor(node.type).height,
     ),
   };
 }

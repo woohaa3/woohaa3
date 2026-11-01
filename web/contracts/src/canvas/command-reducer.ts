@@ -19,9 +19,6 @@ import { stableStringify } from "./canvas-script/planner/hash.js";
 import type { CanvasCommand } from "./commands.js";
 import type { ServerCanvas } from "./domain/index.js";
 import { applyEditCommand } from "./command-reducer/edit-command.js";
-import { patchFilmSetClip } from "./command-reducer/film-set-clip-commands.js";
-import { patchFilmSetItem } from "./command-reducer/film-set-item-commands.js";
-import { patchFilmSetGroupBinding, ungroupFilmSetGroup } from "./command-reducer/film-set-group-commands.js";
 import {
   addNode,
   patchNodeData,
@@ -34,7 +31,6 @@ import { observeContentResolver, type ContentContributionResolver } from "./cont
 import { ManagedNodeLifecycleRegistry, planManagedNodeLifecycles, type ManagedNodeLifecycleResolver } from "./managed-node-lifecycle.js";
 import { isCanvasCommandShape, toWorkingState } from "./command-reducer/working-state.js";
 import { OK, reject, type ApplyCanvasCommandsResult, type CommandApplyResult, type WorkingState } from "./command-reducer/types.js";
-import { readFilmSetGroupMarker, validateFilmSetGroupBindings } from "./film-set-group.js";
 
 export type {
   ApplyCanvasCommandsResult,
@@ -65,22 +61,6 @@ export function applyCanvasCommands(
     }
     const result = applyCommand(work, command, canvas, options.content);
     if (!result.ok) return result;
-  }
-
-  // Validate group membership after every command in the batch has run. This is
-  // what permits an atomic node.add + node.update(parentId) migration while
-  // still rejecting forged cross-group bindings before lifecycle/finalize work.
-  for (const node of work.nodes) {
-    if (node.type !== "group") continue;
-    const marker = readFilmSetGroupMarker(work.nodeData[node.id]);
-    if (!marker) continue;
-    const previous = readFilmSetGroupMarker(canvas.nodeData[node.id]);
-    const missingSourceIds = new Set((previous?.sceneBindings ?? [])
-      .filter(binding => !work.nodes.some(source => source.id === binding.sourceNodeId)
-        && marker.sceneBindings.some(current => current.bindingId === binding.bindingId && current.sourceNodeId === binding.sourceNodeId))
-      .map(binding => binding.sourceNodeId));
-    const validation = validateFilmSetGroupBindings(snapshot(canvas, work), node.id, marker, missingSourceIds, previous?.sceneBindings ?? []);
-    if (validation) return reject("invalid-film-set-group", validation);
   }
 
   // 可信扩展生命周期规划与通用校验：与源写入处于同一批次、
@@ -173,14 +153,6 @@ function applyCommand(work: WorkingState, command: CanvasCommand, canvas: Server
         return reject("invalid-connection", "输入连接已变化，请重新执行");
       }
       return patchNodeData(work, command.nodeId, command.value);
-    case "filmSet.clipPatch":
-      return patchFilmSetClip(work, command);
-    case "filmSet.itemPatch":
-      return patchFilmSetItem(work, command);
-    case "filmSetGroup.bindingPatch":
-      return patchFilmSetGroupBinding(work, command);
-    case "filmSetGroup.ungroup":
-      return ungroupFilmSetGroup(work, command);
     case "extension.command":
       return applyExtensionCommand(work, command, canvas, content);
     case "edge.add":

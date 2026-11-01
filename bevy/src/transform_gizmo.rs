@@ -1,6 +1,6 @@
 //! Reusable disposable handles. The host owns tools, permissions, previews and commits.
 use crate::gizmo_layout::render::{GizmoPalette, GizmoRenderAssets, sync_lines};
-use crate::gizmo_layout::{GizmoView, ObjectGizmoLayout, ObjectTool};
+use crate::gizmo_layout::{GizmoLine, GizmoShape, GizmoView};
 use bevy::{camera::visibility::RenderLayers, prelude::*};
 pub const TRANSFORM_GIZMO_LAYER: usize = 1;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,15 +95,10 @@ pub(crate) fn sync_transform_gizmo(
         .zip(selection.target)
         .zip(selection.view)
         .and_then(|((mode, target), view)| {
-            let tool = match mode {
-                TransformGizmoMode::Yaw => ObjectTool::Yaw,
-                TransformGizmoMode::Scale => ObjectTool::Scale,
-                _ => ObjectTool::Move,
-            };
-            ObjectGizmoLayout::new(&view, target.focus, tool, selection.basis)
-                .map(|layout| (view, layout))
+            transform_handles(&view, target.focus, mode, selection.basis)
+                .map(|lines| (view, lines))
         });
-    if let Some((view, layout)) = layout {
+    if let Some((view, lines)) = layout {
         let hover = selection.hover.clone();
         let active = selection.active.clone();
         sync_lines(
@@ -112,7 +107,7 @@ pub(crate) fn sync_transform_gizmo(
             &mut meshes,
             &mut selection.entities,
             TransformGizmoHandle,
-            &layout.lines,
+            &lines,
             &view,
             style.layers.clone(),
             hover.as_deref(),
@@ -123,6 +118,105 @@ pub(crate) fn sync_transform_gizmo(
             commands.entity(entity).try_despawn();
         }
     }
+}
+
+/// 编辑器手柄几何：三轴平移、绕 Y 旋转环或对角缩放。只用于屏幕绘制与命中。
+pub(crate) fn transform_handles(
+    view: &GizmoView,
+    origin: Vec3,
+    mode: TransformGizmoMode,
+    basis: Mat3,
+) -> Option<Vec<GizmoLine>> {
+    const AXIS_CSS: f32 = 88.0;
+    const YAW_RADIUS_CSS: f32 = 64.0;
+    let scale = view.world_per_css(origin)?;
+    view.project(origin)?;
+    let mut lines = Vec::new();
+    fn push(
+        lines: &mut Vec<GizmoLine>,
+        shape: GizmoShape,
+        start: Vec3,
+        end: Vec3,
+        width_css: f32,
+        handle: &'static str,
+    ) {
+        lines.push(GizmoLine {
+            shape,
+            start,
+            end,
+            width_css,
+            handle,
+            secondary: false,
+            rear: false,
+            visible: true,
+        });
+    }
+    match mode {
+        TransformGizmoMode::Yaw => {
+            let u = basis * Vec3::X;
+            let v = basis * Vec3::NEG_Z;
+            let size = u.length().max(v.length());
+            if !u.is_finite() || !v.is_finite() || size <= 1e-8 {
+                return None;
+            }
+            let u = u * scale * YAW_RADIUS_CSS / size;
+            let v = v * scale * YAW_RADIUS_CSS / size;
+            let point = |angle: f32| origin + u * angle.cos() + v * angle.sin();
+            for i in 0..crate::gizmo_layout::RING_SEGMENTS {
+                let a = i as f32 / crate::gizmo_layout::RING_SEGMENTS as f32
+                    * std::f32::consts::TAU;
+                let b = (i + 1) as f32 / crate::gizmo_layout::RING_SEGMENTS as f32
+                    * std::f32::consts::TAU;
+                push(&mut lines, GizmoShape::Stroke, point(a), point(b), 3.0, "yaw-ring");
+                let rear = (((point(a) + point(b)) * 0.5) - origin)
+                    .dot(view.position - origin)
+                    < 0.0;
+                if let Some(line) = lines.last_mut() {
+                    line.rear = rear;
+                }
+            }
+        }
+        TransformGizmoMode::Scale => {
+            let tip = origin + (view.right + view.up).normalize() * scale * 64.0;
+            if view.project(tip).is_some() {
+                push(&mut lines, GizmoShape::Stroke, origin, tip, 2.5, "scale");
+                push(
+                    &mut lines,
+                    GizmoShape::Cube,
+                    tip - view.forward * scale * 5.0,
+                    tip + view.forward * scale * 5.0,
+                    10.0,
+                    "scale",
+                );
+            }
+        }
+        TransformGizmoMode::Placement | TransformGizmoMode::FocusAxes => {
+            let screen = view.project(origin)?;
+            for (index, axis) in [Vec3::X, Vec3::Y, Vec3::Z].into_iter().enumerate() {
+                let tip = origin + axis * (scale * AXIS_CSS);
+                let Some(projected) = view.project(tip) else {
+                    continue;
+                };
+                let delta = projected - screen;
+                if delta.length() < 12.0 {
+                    continue;
+                }
+                let handle = ["x", "y", "z"][index];
+                let end = tip - axis * scale * 15.0;
+                push(&mut lines, GizmoShape::Stroke, origin + axis * scale * 10.0, end, 2.5, handle);
+                push(&mut lines, GizmoShape::Cone, end, tip, 11.0, handle);
+            }
+            push(
+                &mut lines,
+                GizmoShape::Cube,
+                origin - view.forward * scale * 5.0,
+                origin + view.forward * scale * 5.0,
+                10.0,
+                "center",
+            );
+        }
+    }
+    Some(lines)
 }
 
 /// The editor grid is display-only and excluded from picking and capture layers.

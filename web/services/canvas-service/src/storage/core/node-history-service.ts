@@ -91,8 +91,7 @@ export type {
 export {
   entryMatchesCurrent,
   currentNodeStateOf,
-  currentIdentityOf,
-  animationDefinitionIdentity
+  currentIdentityOf
 } from "./node-history-service/current-state.js";
 export {
   mediaAssetIdFor,
@@ -498,5 +497,5 @@ export class NodeHistoryApplicationService {
 
 // 保持外部可能引用的工具可用（供上层 composition/测试）。
 export { currentStatesFor } from "./node-history-service/current-state.js";
-export { readAnimationHistoryPayload, readModelCamerasSnapshot } from "./node-history-service/registration.js";
+export { readModelCamerasSnapshot } from "./node-history-service/registration.js";
 export { snapshotCurrentImageEdit, snapshotCurrentModelEdit } from "./node-history-service/restore.js";

@@ -13,35 +13,6 @@ export const DEFAULT_CANVAS_MAX_BODY_BYTES = 12 * 1024 * 1024;
 
 export type CanvasRequestHandler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
 
-/** 片场导入端口（由 FilmSetImportService 实现）。 */
-export type CanvasFilmSetImportPort = {
-  import(request: {
-    canvasId: string;
-    nodeId: string;
-    requestId: string;
-    items: readonly import("@woohaa3/contracts").McpFilmSetImportItem[];
-  }): Promise<
-    | { ok: true; nodeId: string; commandId: string; duplicate: boolean; noop: boolean; itemCount: number }
-    | { ok: false; code: string; message: string }
-  >;
-};
-
-/**
- * 单节点快捷「转为片场」端口
- * （change: 2026-10-13-add-node-to-film-set-shortcut）。
- *
- * 由 film-set 扩展的 `FilmSetConversionService` 实现；HTTP 边界只做可信主体/画布写权限门禁后转发。
- */
-export type CanvasFilmSetConversionPort = import("@woohaa3/contracts").FilmSetConversionServicePort;
-
-/**
- * 原生录制端口（change: 2026-10-17-add-native-offscreen-film-set-recording，任务 7.1）。
- *
- * 未注入时相关路由返回 503 `recording-unavailable`，前端据此显示具体原因，
- * 不静默回退到浏览器录制。
- */
-export type CanvasRecordingPort = import("./recording-port.js").CanvasRecordingPort;
-
 /** run/cancel 应用服务的最小接口（由 CanvasRunService 实现；测试可注入假实现）。 */
 export type CanvasRunPort = {
   run(request: {
@@ -100,22 +71,6 @@ export type CanvasRequestHandlerOptions = {
   logger?: (event: { event: string; status: number; code?: string; actorId?: string }) => void;
   readiness?: () => Promise<CanvasReadiness>;
   runService?: CanvasRunPort;
-  filmSetImport?: CanvasFilmSetImportPort;
-  /** 单节点快捷「转为片场」（change: 2026-10-13-add-node-to-film-set-shortcut）。 */
-  filmSetConversion?: CanvasFilmSetConversionPort;
-  /** 原生录制 submit/cancel/status（缺省时录制路由返回 503）。 */
-  recording?: CanvasRecordingPort;
-  /**
-   * 「转为片场」的 owner 解析（宿主在 HTTP 边界调用提供方的 `resolveOwner`）。
-   *
-   * 提供时，路由把可信主体 + 本次 Cookie 交给解析器，产出**已解析 owner**（含提供方前缀，如
-   * `principal:` / `local:`）与可选的 `Set-Cookie`；解析结果作为 `ownerId` 传给转换服务并冻结在
-   * 记录里。省略时转换生成端按自身边界处理（测试/无宿主路径）。
-   */
-  filmSetConversionOwnerResolver?: (input: {
-    subject?: string;
-    cookie?: string;
-  }) => import("@woohaa3/contracts").FilmSetConversionOwner | null;
   /** 在线迁移访问门（省略时不启用迁移态判定与导入 ACL 判定）。 */
   importGuard?: CanvasImportGuard;
   /**

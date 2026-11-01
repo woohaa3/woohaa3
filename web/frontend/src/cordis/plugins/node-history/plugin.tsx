@@ -297,7 +297,6 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
       let overrideNodeId: string | null = null;
       const clearOverride = () => {
         if (overrideNodeId !== null) {
-          ctx.compositeAssets.resolve(ctx.canvasState.getCanvas(), overrideNodeId)?.history?.(overrideNodeId, null);
           ctx.canvasRuntime.setModelSceneOverride({ nodeId: overrideNodeId, override: null });
           overrideNodeId = null;
         }
@@ -524,7 +523,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
     },
     {
       name: NODE_HISTORY_PLUGIN_ID,
-      inject: ["canvasState", "compositeAssets", "slots", "canvasRuntime", "canvasRemote", "canvasSession", "dialogs", "canvasNavigation"]
+      inject: ["canvasState", "slots", "canvasRuntime", "canvasRemote", "canvasSession", "dialogs", "canvasNavigation"]
     }
   );
 }

@@ -59,11 +59,6 @@ import { createStreamAccumulator } from "./agent-conversation-stream.js";
 export { hashIntent } from "./agent-conversation-projection.js";
 
 export type AgentConversationServiceOptions = {
-  groupScopeEpoch?: (canvasId: string, rootGroupId: string) => number;
-  groupEffects?: {
-    settle(input: { owner: string; requestId: string; actions: import("@woohaa3/contracts").CanvasGroupAction[]; outcome: AgentAdapterRunOutcome; signal: AbortSignal; recovery?: boolean }): Promise<AgentAdapterRunOutcome>;
-    cancel(input: { owner: string; requestId: string; actions: import("@woohaa3/contracts").CanvasGroupAction[] }): void;
-  };
   store: AgentConversationStore;
   registry: AgentAdapterRegistry;
   /**
@@ -159,12 +154,10 @@ export type AgentConversationService = {
   }) => Promise<AgentAdapterRunOutcome>): Promise<void>;
   reconcileDeliveryTurn(input: { owner: string; requestId: string; canvasId: string;
     delivery: NonNullable<AgentTargetSnapshot["delivery"]>; outcome: AgentAdapterRunOutcome }): void;
-  recordGroupAction(input: { owner: string; requestId: string; action: import("@woohaa3/contracts").CanvasGroupAction }): void;
   createConversation(input: { contextKey?: string; owner: string; canvasId: string; adapterId?: string; title?: string; nodeId?: string; connectionId?: string }):
     | { ok: true; conversation: ConversationSummary }
     | { ok: false; error: AgentConversationServiceError };
   listConversations(input: { owner: string; canvasId: string; limit?: number }): ConversationSummary[];
-  listGroupExecutions(input: { owner: string; canvasId: string; nodeId?: string; cursor?: string; limit?: number }): { turns: ConversationTurn[]; nextCursor?: string };
   /**
    * 按生成目标节点查找该节点当前会话（一个节点复用一条；design D8）。
    *
@@ -428,14 +421,8 @@ export function createAgentConversationService(options: AgentConversationService
         signal: controller.signal,
         emit
       });
-      if (entry.mode === "canvas-group" && entry.action !== "discuss" && options.groupEffects) {
-        const latest = store.getTurn(turn.turnId);
-        const actions = groupActions(latest?.receiptJson);
-        outcome = await options.groupEffects.settle({ owner: turn.owner, requestId: turn.requestId, actions, outcome, signal: controller.signal });
-      }
     } catch (error) {
-      const actions = groupActions(store.getTurn(turn.turnId)?.receiptJson);
-      outcome = { status: controller.signal.aborted ? "cancelled" : actions.length ? "partial" : "failed", ...(actions.length ? { receipt: { kind: "canvas-group", actions } } : {}), error: { code: controller.signal.aborted ? "cancelled" : "adapter-error", message: error instanceof Error ? error.message : String(error) } };
+      outcome = { status: controller.signal.aborted ? "cancelled" : "failed", error: { code: controller.signal.aborted ? "cancelled" : "adapter-error", message: error instanceof Error ? error.message : String(error) } };
     } finally {
       acceptingEvents = false;
       controllers.delete(turn.turnId);
@@ -545,20 +532,6 @@ export function createAgentConversationService(options: AgentConversationService
       return store.listConversations({ owner: input.owner, canvasId: input.canvasId }, input.limit ?? 50).map(toSummary);
     },
 
-    listGroupExecutions(input) {
-      const limit = Math.min(200, Math.max(1, Math.floor(input.limit ?? 50)));
-      let cursor: { createdAt: string; turnId: string } | undefined;
-      if (input.cursor) {
-        const parsed = JSON.parse(input.cursor);
-        if (typeof parsed?.createdAt !== "string" || typeof parsed?.turnId !== "string") throw new Error("无效组执行分页游标");
-        cursor = parsed;
-      }
-      const rows = store.listGroupTurns({ owner: input.owner, canvasId: input.canvasId, nodeId: input.nodeId, cursor }, limit + 1);
-      const page = rows.slice(0, limit);
-      const last = page.at(-1);
-      return { turns: page.map(toTurn), ...(rows.length > limit && last ? { nextCursor: JSON.stringify({ createdAt: last.createdAt, turnId: last.turnId }) } : {}) };
-    },
-
     findConversationForTarget(input) {
       const binding = store.findConversationByTarget({
         owner: input.owner,
@@ -571,7 +544,6 @@ export function createAgentConversationService(options: AgentConversationService
     },
 
     clearContext(input) {
-      if (store.activeGroupTurnCount(input) > 0) return fail("active-turn", "组仍有活动回合，请先停止");
       if (!input.owner) return fail("unauthorized", "缺少可信用户主体");
       // change: 2026-10-22-remove-agent-execution-limits，任务 3.1/3.2 / design D3：
       // 删除「活动回合阻止清空」。清空只解除目标关联（归档会话），不删除回合/消息/回执，
@@ -581,7 +553,6 @@ export function createAgentConversationService(options: AgentConversationService
     },
 
     async switchConnection(input) {
-      if (store.activeGroupTurnCount(input) > 0) return fail("active-turn", "组仍有活动回合，请先停止");
       if (!input.owner) return fail("unauthorized", "缺少可信用户主体");
       // 先核对目标连接属于该 owner（跨 owner/未知连接拒绝，不静默降级）。
       if (connections) {
@@ -735,10 +706,6 @@ export function createAgentConversationService(options: AgentConversationService
         ...(connection ? { connectionId: connection.connectionId } : {}),
         ...(input.entry.expectedContentHash !== undefined ? { expectedContentHash: input.entry.expectedContentHash } : {})
       };
-      if (input.entry.mode === "canvas-group" && input.entry.action !== "discuss") {
-        if (!options.groupScopeEpoch) return fail("capability-unsupported", "组范围代次端口未装配");
-        target.expectedContentHash = `group-epoch:${options.groupScopeEpoch(binding.canvasId, input.entry.nodeId!)}`;
-      }
       store.createTurn({
         turnId,
         conversationId: binding.conversationId,
@@ -812,21 +779,9 @@ export function createAgentConversationService(options: AgentConversationService
       return { ok: true, conversation: toSummary(binding), turn: toTurn(record), snapshot: buildSnapshot(binding, 0) };
     },
 
-    recordGroupAction(input) {
-      const turn = store.findTurnByRequest(input.owner, input.requestId);
-      if (!turn || turn.canvasId !== input.action.canvasId || JSON.parse(turn.targetJson).mode !== "canvas-group" || turn.action === "discuss") return;
-      const actions = groupActions(turn.receiptJson);
-      if (!input.action.commandId && !input.action.runId) return;
-      if (actions.some(a => input.action.commandId ? a.commandId === input.action.commandId : a.runId === input.action.runId)) return;
-      if (actions.length >= 1024) throw new Error("组创作回执超过预算");
-      actions.push(input.action);
-      store.updateTurn(turn.turnId, { receiptJson: safeJson({ kind: "canvas-group", actions }) }, now());
-      appendEvent(turn.conversationId, turn.turnId, turn.requestId, "task-linked", input.action);
-    },
     cancelTurn(input) {
       const record = store.findTurnByRequest(input.owner, input.requestId);
       if (!record) return fail("not-found", "未找到该请求");
-      options.groupEffects?.cancel({ owner: input.owner, requestId: input.requestId, actions: groupActions(record.receiptJson) });
       const controller = controllers.get(record.turnId);
       const binding = store.getConversation(record.conversationId);
       if (binding && !JSON.parse(record.targetJson).delivery) {
@@ -886,24 +841,7 @@ export function createAgentConversationService(options: AgentConversationService
         // Candidate delivery 的权威回执在领域侧：文本/片场等 reconciliator 会按原请求结算父回合。
         if (JSON.parse(turn.targetJson).delivery) continue;
         // 组创作只读一次子 run 证据；仍活动/不可读时撤销匹配子 run 后按失败结算。
-        if (JSON.parse(turn.targetJson).mode === "canvas-group") {
-          if (options.groupEffects) {
-            try {
-              const outcome = await options.groupEffects.settle({
-                owner: turn.owner, requestId: turn.requestId, actions: groupActions(turn.receiptJson),
-                outcome: { status: "failed", error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: UNCONFIRMED_RESULT_MESSAGE } },
-                signal: new AbortController().signal, recovery: true
-              });
-              finishTurn(turn, outcome);
-            } catch (error) {
-              log({ event: "agent-group-reconcile-failed", turnId: turn.turnId, message: String(error) });
-              settleFailed(turn, "group-reconcile-failed");
-            }
-          } else {
-            settleFailed(turn, "group-reconcile-unavailable");
-          }
-          continue;
-        }
+
         const resolved = registry.resolve(undefined);
         const binding = store.getConversation(turn.conversationId);
         const bound = binding ? registry.resolve(binding.adapterId) : resolved;
@@ -937,6 +875,3 @@ export function createAgentConversationService(options: AgentConversationService
   return service;
 }
 
-function groupActions(json: string | null | undefined): import("@woohaa3/contracts").CanvasGroupAction[] {
-  try { const value = JSON.parse(json ?? "{}"); return value.kind === "canvas-group" && Array.isArray(value.actions) ? value.actions : []; } catch { return []; }
-}

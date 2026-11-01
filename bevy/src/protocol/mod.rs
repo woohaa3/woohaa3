@@ -14,7 +14,6 @@
 #![cfg_attr(not(feature = "canvas-core"), allow(dead_code))]
 
 mod animation_playback;
-mod film_set_object;
 pub(crate) mod focus_details;
 mod focus_transition;
 mod image_focus;
@@ -32,8 +31,6 @@ mod viewport;
 //
 // 部分 DTO 只在 WASM 或 native-renderer 其中之一（或只在测试中）被引用，因此某个
 // feature 组合下个别再导出会看似“未被使用”。这些 path 必须稳定存在，故显式放行。
-#[allow(unused_imports)]
-pub(crate) use film_set_object::{FilmSetObjectMotion, FilmSetObjectPlayback};
 #[allow(unused_imports)]
 pub(crate) use focus_transition::{FOCUS_TRANSITION_VERSION, FocusTransitionProgress};
 #[allow(unused_imports)]
@@ -56,13 +53,7 @@ pub(crate) use position::{
 pub(crate) use prepared::{PreparedModelMetadata, PreparedModelRequest};
 #[allow(unused_imports)]
 pub(crate) use scene::{
-    AggregateRunPresentation, CompositeAssetGeometryQuality, CompositeAssetOverviewCache,
-    CompositeAssetPresentation,
-    CompositeAssetScopeShape, Edge, FilmSetGroupBinding, FilmSetGroupGround,
-    FilmSetGroupPreparation, FilmSetGroupTransform, FilmSetRunFeedback, GraphNode,
-    GroupPresentation, GroupRunStatus, HistoryStripDot, HistoryStripPresentation, ModelMediaPlane,
-    Scene, ScopeGroundDto, Selection, ShotCoverCamera, ShotPreviewLink, ShotPreviewPresentation,
-    Viewport,
+    Edge, GraphNode, HistoryStripDot, HistoryStripPresentation, Scene, Selection, Viewport,
 };
 #[allow(unused_imports)]
 pub(crate) use scene_instant::{
@@ -103,13 +94,5 @@ mod tests;
 #[cfg(test)]
 mod tests_instant;
 #[cfg(test)]
-mod tests_object_motion;
-#[cfg(test)]
-mod tests_run_effect;
-#[cfg(test)]
-mod tests_shot_preview;
-#[cfg(test)]
 mod tests_progress;
 
-mod composite_panel;
-pub(crate) use composite_panel::CompositeContainerPanel;

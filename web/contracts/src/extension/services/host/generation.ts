@@ -8,7 +8,6 @@
  * 这里同时是服务的**定义处**：注册面（`HostGenerationService`）与 Provider 契约同属
  * `ctx.generation`，宿主只实现它，不再反向定义。
  */
-import type { FilmSetConversionProvider } from "../../../canvas/film-set-conversion/provider.js";
 import { isMediaLocator, type MediaLocator } from "../../../media/storage.js";
 import type { CanvasTaskModelType } from "../../../task/dto.js";
 import type { ModelInteractionDescriptor } from "../../../task/model-identity.js";
@@ -308,8 +307,6 @@ export type HostGenerationService = {
   register(provider: GenerationProvider): () => void;
   unregister(providerId: string): void;
   /** 注册「转为片场」转换提供方；返回注销函数。 */
-  registerConversion(provider: FilmSetConversionProvider): () => void;
   list(): readonly GenerationProvider[];
   resolve(providerId: string): GenerationProvider | undefined;
-  conversions(): readonly FilmSetConversionProvider[];
 };

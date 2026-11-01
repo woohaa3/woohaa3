@@ -69,36 +69,9 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
   const place = (
     placement: import("../../agent-canvas-protocol.js").AgentCreatePlacement | undefined,
     size: { width: number; height: number },
-    groupId?: string,
   ) => {
-    const root = input.snapshot.rootGroupId ? geometry.require(input.snapshot.rootGroupId) : undefined;
-    if (root && !groupId && (!placement || placement.mode === "auto")) {
-      const children = geometry.children(root.id);
-      return { x: children.length ? Math.max(...children.map(n => n.position.x + n.width)) + AGENT_CANVAS_LIMITS.layoutGap : root.position.x + 40, y: root.position.y + 40 };
-    }
-    if (root && !groupId && placement?.mode === "absolute") return { x: root.position.x + placement.position.x, y: root.position.y + placement.position.y };
-    if (groupId && placement && placement.mode !== "auto") {
-      if (placement.mode === "absolute") return { ...placement.position };
-      const anchorId = resolve(placement.anchor);
-      planAssert(
-        anchorId !== groupId && !geometry.isAncestor(groupId, anchorId) && !geometry.isAncestor(anchorId, groupId),
-        "unsupported-placement",
-        "组不能相对自身、祖先或后代定位",
-        "placement.anchor",
-      );
-      const anchor = geometry.require(anchorId),
-        a = { ...anchor, ...effectiveCanvasNodeSize(anchor) },
-        gap = placement.gap ?? AGENT_CANVAS_LIMITS.layoutGap;
-      return placement.mode === "before"
-        ? { x: a.position.x - size.width - gap, y: a.position.y }
-        : placement.mode === "after"
-          ? { x: a.position.x + a.width + gap, y: a.position.y }
-          : { x: a.position.x, y: a.position.y + a.height + gap };
-    }
     if (placement && "anchor" in placement) resolve(placement.anchor);
-    const nodes = [...geometry.nodes.values()]
-      .filter((n) => n.id !== groupId)
-      .map((n) => ({ ...n, parentId: undefined }));
+    const nodes = [...geometry.nodes.values()];
     const state: PlacementState = {
       snapshot: indexSnapshot({ ...input.snapshot, nodes, edges }),
       declaredRefs,
@@ -146,80 +119,16 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
             position,
             ...descriptor.defaultSize,
             title: operation.title,
-            parentId: input.snapshot.rootGroupId,
           });
           geometry.touch(id);
-          if (input.snapshot.rootGroupId) geometry.refit([input.snapshot.rootGroupId]);
           commands.push({
             type: "node.add",
-            node: { id, type: descriptor.canonicalType, position: input.snapshot.rootGroupId ? { x: position.x - geometry.require(input.snapshot.rootGroupId).position.x, y: position.y - geometry.require(input.snapshot.rootGroupId).position.y } : position, parentId: input.snapshot.rootGroupId, ...descriptor.defaultSize },
+            node: { id, type: descriptor.canonicalType, position, ...descriptor.defaultSize },
             nodeData: {
               ...defaultAgentNodeData(operation.kind),
               ...(operation.title !== undefined ? { title: operation.title } : {}),
               ...(operation.prompt !== undefined ? { prompt: operation.prompt } : {}),
             } as CanvasNodeData,
-          });
-          normalized.push({ ...operation, resolvedId: id });
-          break;
-        }
-        case "create_group": {
-          const members = operation.members.map((r) => resolve(r, "members")),
-            selected = geometry.roots(members, true);
-          // 不支持嵌套 group（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）：
-          // group 不能成为另一个 group 的成员，也不能在 group 内新建 group。命令层同样整批拒绝，
-          // 这里提前给出可诊断的计划错误，避免生成必然被拒绝的批次。
-          planAssert(
-            selected.every((n) => n.type !== "group"),
-            "invalid-parent",
-            "不支持嵌套 group：成员不能是 group，请先 ungroup 或直接纳入其成员",
-          );
-          planAssert(
-            !selected[0].parentId || geometry.require(selected[0].parentId).type !== "group",
-            "invalid-parent",
-            "不支持嵌套 group：不能在 group 内再创建 group",
-          );
-          planAssert(
-            operation.title.trim() && operation.title.length <= AGENT_CANVAS_LIMITS.titleMaxChars,
-            "malformed-request",
-            "group 需要 1..200 字符标题",
-            "title",
-          );
-          const id = deriveEntityId("group", [...identity, operation.ref, "node"]);
-          declare(operation.ref, id, "group");
-          const parentId = selected[0].parentId;
-          geometry.nodes.set(id, {
-            id,
-            type: "group",
-            parentId,
-            position: { ...selected[0].position },
-            width: 248,
-            height: 232,
-            title: operation.title,
-          });
-          geometry.touch(id);
-          for (const n of selected) {
-            geometry.touch(n.id);
-            n.parentId = id;
-          }
-          geometry.refit([id]);
-          if (operation.layout) geometry.grid(members, operation.layout);
-          const group = geometry.require(id);
-          if (operation.placement) {
-            geometry.move(id, place(operation.placement, effectiveCanvasNodeSize(group), id));
-            geometry.refit([parentId]);
-          }
-          const final = geometry.canonical().find((n) => n.id === id)!;
-          commands.push({
-            type: "node.add",
-            node: {
-              id,
-              type: "group",
-              parentId: final.parentId,
-              position: final.position,
-              width: final.width,
-              height: final.height,
-            },
-            nodeData: { title: operation.title },
           });
           normalized.push({ ...operation, resolvedId: id });
           break;
@@ -230,9 +139,9 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
           if (geometry.originalIds.has(from)) readReferences.add(from);
           if (geometry.originalIds.has(to)) readReferences.add(to);
           planAssert(
-            from !== to && geometry.require(from).type !== "group" && geometry.require(to).type !== "group",
+            from !== to,
             "invalid-connection",
-            "不能连接自身或 group",
+            "不能连接自身",
           );
           planAssert(!edges.some((e) => e.source === from && e.target === to), "duplicate-edge", "连线已存在");
           const id = deriveEntityId("edge", [...identity, operation.ref, "edge"]);
@@ -272,32 +181,11 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
           break;
         }
         case "move_node": {
-          const id = resolve(operation.target),
-            node = geometry.require(id),
-            parent = node.parentId ? geometry.require(node.parentId) : undefined;
-          const position =
-            operation.coordinateSpace === "world"
-              ? operation.position
-              : {
-                  x: operation.position.x + (parent?.position.x ?? 0),
-                  y: operation.position.y + (parent?.position.y ?? 0),
-                };
-          geometry.move(id, position);
-          geometry.refit([node.parentId]);
+          const id = resolve(operation.target);
+          geometry.move(id, operation.position);
           normalized.push(operation);
           break;
         }
-        case "reparent":
-          geometry.reparent(
-            operation.targets.map((r) => resolve(r, "targets")),
-            operation.parent === null ? null : resolve(operation.parent),
-          );
-          normalized.push(operation);
-          break;
-        case "ungroup":
-          geometry.ungroup(resolve(operation.target));
-          normalized.push(operation);
-          break;
         case "layout":
           geometry.grid(
             operation.targets.map((r) => resolve(r, "targets")),
@@ -341,7 +229,7 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
       payloadHash: "",
       predicted,
       finalNodes,
-      organization: projectCanvasOrganization(finalNodes, [...geometry.affected], edges),
+      organization: projectCanvasOrganization(finalNodes, [...geometry.affected]),
       touchedExistingNodeIds: [
         ...new Set([...readReferences, ...[...geometry.affected].filter((id) => geometry.originalIds.has(id))]),
       ],

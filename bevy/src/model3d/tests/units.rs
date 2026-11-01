@@ -39,12 +39,8 @@ fn transform_signature_tracks_position_and_placement() {
         resizable: false,
         ghost: false,
         card_label: None,
-        group: None,
         model: None,
-        composite_asset: None,
         history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
     };
     let a = model_transform_signature(&model, &ModelPlacement::default(), &node);
     let placed = ModelPlacement {
@@ -116,12 +112,8 @@ fn content_and_transform_identity_are_independent() {
         resizable: false,
         ghost: false,
         card_label: None,
-        group: None,
         model: None,
-        composite_asset: None,
         history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
     };
     let v2_before = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
@@ -187,12 +179,8 @@ fn model_anchor_keeps_card_above_model_top() {
         resizable: false,
         ghost: false,
         card_label: None,
-        group: None,
         model: None,
-        composite_asset: None,
         history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
     };
     // 高模型：0..4 单位的 box（unit 缩放到世界）。
     let model = ModelSnapshot {
@@ -261,12 +249,8 @@ fn model_anchor_falls_back_for_empty_model() {
         resizable: false,
         ghost: false,
         card_label: None,
-        group: None,
         model: None,
-        composite_asset: None,
         history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
     };
     let model = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
@@ -285,175 +269,9 @@ fn model_anchor_falls_back_for_empty_model() {
 }
 
 /// 组形象锚定在组结构底边中点向下 40 的固定徽标锚点上，模型尺寸不移动锚点。
-#[test]
-fn group_anchor_centers_model_inside_bottom_footer() {
-    let node = GraphNode {
-        model_preview: None,
-        id: "group".into(),
-        kind: "group".into(),
-        x: 100.0,
-        y: 200.0,
-        width: 500.0,
-        height: 400.0,
-        body: String::new(),
-        title: String::new(),
-        type_label: String::new(),
-        progress: 0.0,
-        progress_started_at: None,
-        busy: false,
-        texture: false,
-        media_loading: false,
-        resizable: false,
-        ghost: false,
-        card_label: None,
-        group: Some(crate::protocol::GroupPresentation {
-            badge_top_anchor: false,
-            collapsed: false,
-            action_bar: false,
-            title: String::new(),
-            member_count: 0,
-            output_capable_leaf_count: 0,
-            model_bounds: None,
-            run_status: None,
-            geometry_quality: None,
-            drop_target: false,
-        
-            overview_cache: None,
-        }),
-        model: None,
-        composite_asset: None,
-        history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
-    };
-    let model = ModelSnapshot {
-        scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
-        ops: vec![ModelOp::Box {
-            id: "body".into(),
-            parent: None,
-            position: [3.0, 1.0, -2.0],
-            rotation: [0.0; 3],
-            scale: [1.0; 3],
-            color: Some("#ffffff".into()),
-            material: None,
-            size: [1.0, 2.0, 1.0],
-        }],
-        signature: "group-default".into(),
-        extent: 2.0,
-        aabb: None,
-        geometry_keys: None,
-        prepared_bounds: None,
-        placement: ModelPlacement::default(),
-    };
-    let placement = ModelPlacement::default();
-    let unit = model_unit(&node, &model, &placement);
-    let anchor = model_anchor(&node, &model, &placement, unit);
-    let rotation = grid::view_rotation();
-    let anchor_canvas = rotation * anchor;
-    let local = scene::model_world_aabb(&model, rotation, unit).expect("group model bounds");
-    let center_y = -(anchor_canvas.y + (local.min[1] + local.max[1]) / 2.);
-    let center_x = anchor_canvas.x + (local.min[0] + local.max[0]) / 2.0;
-    // 组模型与普通模型共用绝对米制单位 `placement.scale * CANVAS_UNITS_PER_METER`，没有 56×44 适配钳制。
-    assert!((unit - crate::model3d::CANVAS_UNITS_PER_METER).abs() < 0.001);
-    // 投影中心固定在组结构底边中点向下 40（80 单位页脚的中点），不随模型尺寸移动。
-    assert!((center_y - (node.y + node.height + 40.)).abs() < 0.5);
-    assert!((center_x - (node.x + node.width / 2.0)).abs() < 0.5);
-    // 徽标范围就是模型投影尺寸，可以超出组结构矩形（不再被钳制到框内）。
-    assert!(local.max[0] - local.min[0] > 0.0);
-}
 
 /// 片场（composite-asset）：没有卡片，模型锚定在节点矩形**中心**（无朝下偏移），且模型投影
 /// 高度不超过节点矩形（范围框罩住模型）。change: 2026-10-08-make-film-set-model-only 修订。
-#[test]
-fn film_set_anchor_centers_model_within_node() {
-    let node = GraphNode {
-        model_preview: None,
-        id: "film".into(),
-        kind: "model".into(),
-        x: 100.0,
-        y: 200.0,
-        width: 260.0,
-        height: 195.0,
-        body: String::new(),
-        title: String::new(),
-        type_label: String::new(),
-        progress: 0.0,
-        progress_started_at: None,
-        busy: false,
-        texture: false,
-        media_loading: false,
-        resizable: false,
-        ghost: false,
-        card_label: None,
-        group: None,
-        model: None,
-        composite_asset: Some(crate::protocol::CompositeAssetPresentation {
-            panel: None,
-            ownership_links: None,
-            root_placement: None,
-            content_extent: None,
-            layout_aabb: None,
-            empty_placeholder: None,
-            geometry_quality: None,
-            scope_shape: crate::protocol::CompositeAssetScopeShape::Rect,
-            scope_ground: None,
-            x: 100.0,
-            y: 200.0,
-            width: 260.0,
-            height: 195.0,
-            media: Vec::new(),
-            item_roots: std::collections::HashMap::new(),
-            item_placements: std::collections::HashMap::new(),
-        }),
-        history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
-    };
-    // 高模型：0..4 单位的 box（unit 缩放到世界）。
-    let model = ModelSnapshot {
-        scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
-        ops: vec![ModelOp::Box {
-            id: "body".into(),
-            parent: None,
-            position: [0.0, 2.0, 0.0],
-            rotation: [0.0; 3],
-            scale: [1.0; 3],
-            color: Some("#ffffff".into()),
-            material: None,
-            size: [1.0, 4.0, 1.0],
-        }],
-        signature: "sig".into(),
-        extent: 4.0,
-        aabb: None,
-        geometry_keys: None,
-        prepared_bounds: None,
-        placement: ModelPlacement::default(),
-    };
-    let placement = ModelPlacement::default();
-    let unit = model_unit(&node, &model, &placement);
-    let anchor = model_anchor(&node, &model, &placement, unit);
-    let layout_rotation = grid::view_rotation();
-    // `model_world_aabb` 的 AABB 已在屏幕对齐坐标系（layout_rotation 已应用，y 向上）。
-    let aabb = scene::model_world_aabb(&model, layout_rotation, unit).unwrap();
-    let center = aabb.center();
-    // 锚点画布坐标（y 向下）。
-    let anchor_q = layout_rotation * anchor;
-    let anchor_canvas = Vec2::new(anchor_q.x, -anchor_q.y);
-    // 模型中心画布坐标：屏幕对齐中心偏移 (center.x, -center.y) 加锚点。
-    let screen_center = Vec2::new(anchor_canvas.x + center.x, anchor_canvas.y - center.y);
-    let node_center = Vec2::new(node.x + node.width / 2.0, node.y + node.height / 2.0);
-    assert!(
-        (screen_center - node_center).length() < 0.5,
-        "片场模型中心 {screen_center:?} 应对齐节点中心 {node_center:?}"
-    );
-    // 模型投影尺寸不超过节点矩形（去掉固定边距后有富余）。
-    let projected_h = aabb.max[1] - aabb.min[1];
-    assert!(
-        projected_h <= node.height,
-        "模型投影高度 {projected_h} 不应超过节点高度 {}",
-        node.height
-    );
-}
 
 /// 固定世界不变式：同一内容/placement 派生稳定 unit/anchor/AABB；真实 scale 改变才改变 bounds
 /// （change: make-shot-framing-zoom-invariant，任务 5.1）。
@@ -478,12 +296,8 @@ fn model_world_is_stable_and_scale_sensitive() {
         resizable: false,
         ghost: false,
         card_label: None,
-        group: None,
         model: None,
-        composite_asset: None,
         history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
     };
     let model = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),

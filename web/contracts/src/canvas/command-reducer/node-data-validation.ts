@@ -1,31 +1,19 @@
 import { decodeMediaContentRef } from "../media-content.js";
-import { filmSetCompiledBudget } from "../film-set-clip-compilation.js";
+import { CREATURE_VIDEO_ASSETS_EXTENSION_ID, isCompositeAssetNodeType, readCompositeAssetExtensionId } from "../domain/core/composite-asset-identity.js";
 /**
  * 命令 reducer 的 nodeData 字段校验与自包含 3D 内容归一化。
  *
  * 自 `command-reducer.ts` 拆出（change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，
- * R12）。按字段 owner 分离：视频编辑意图、镜头集合、图片编辑、自包含模型/动画节点与片场内容。
+ * R12）。按字段 owner 分离：视频编辑意图、镜头集合、图片编辑与自包含模型节点。
  * 校验通过时就地写回**归一化**值，失败时返回稳定拒绝（整批命令失败）。
  */
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
+import { decodeModel3DNodeData } from "../canvas-node-model.js";
 import { decodeModelCameras } from "../model-cameras.js";
 import { decodeImageEditDocument } from "../image-edit.js";
-import { decodeFilmSetNodeData, decodeModel3DNodeData, scriptModel3DNodeData, type FilmSetNodeData } from "../canvas-node-model.js";
-import { filmSetObjectOwnershipOf } from "../film-set-object-container.js";
-import { CREATURE_VIDEO_ASSETS_EXTENSION_ID, isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "../domain/core/composite-asset-identity.js";
-import { decodeModelContentVersion, GLB_MODEL_SOURCE_KIND, isGlbModelNodeData, modelSourceHash, normalizeGlbModelReference, normalizeModelDefinition } from "../model-definition.js";
-import { animationSnapshotHash } from "../animation-snapshot.js";
-import { readFilmSetContent } from "../film-set-content.js";
-import { isFilmSetModelItem } from "../film-set-content.js";
-import { decodeGroupAppearance, readGroupAppearanceForNode } from "../group-appearance.js";
+import { decodeModelContentVersion, GLB_MODEL_SOURCE_KIND, isGlbModelNodeData, normalizeGlbModelReference, normalizeModelDefinition } from "../model-definition.js";
 import type { CanvasNodeData } from "../domain/index.js";
 import { reject, type CommandApplyResult, type WorkingState } from "./types.js";
-
-/** 片场首个 model item 的模型脚本（items-only 下片场不再有顶层模型；无 model item 返回 null）。 */
-function filmSetFirstModelScript(animation: FilmSetNodeData): string | null {
-  const item = animation.filmSetContent.items.find(isFilmSetModelItem);
-  return item ? item.model.modelScript : null;
-}
 
 /**
  * 在命令应用器的 canonical 边界校验 `videoEditIntents`
@@ -79,46 +67,11 @@ export function validateImageEditPatch(value: CanvasNodeData): CommandApplyResul
 }
 
 /**
- * 普通组自身展示模型的严格边界；缺失字段不写回，非法字段整批拒绝。
- *
- * `groupAppearance` 只属于普通组。片场节点的自身模型是整场 items，不读取该字段；
- * 旧文档中已存在的片场外观仅原样保留，不允许新增或修改。
- */
-export function validateGroupAppearancePatch(
-  work: WorkingState,
-  nodeId: string,
-  value: CanvasNodeData,
-): CommandApplyResult | null {
-  if (value.groupAppearance === undefined) return null;
-  const node = work.nodes.find((entry) => entry.id === nodeId);
-  const merged = { ...(work.nodeData[nodeId] ?? {}), ...value } as CanvasNodeData;
-  if (node?.type !== "group") {
-    const preservedFilmSetAppearance = isFilmSetNode(node?.type, merged)
-      && JSON.stringify(value.groupAppearance) === JSON.stringify(work.nodeData[nodeId]?.groupAppearance);
-    if (preservedFilmSetAppearance) return null;
-    return reject("invalid-group-appearance", "groupAppearance 只属于普通组节点");
-  }
-  const decoded = decodeGroupAppearance(value.groupAppearance);
-  if (!decoded.ok) {
-    // A whole group rewrite must retain an unsupported saved appearance verbatim.
-    if (JSON.stringify(value.groupAppearance) === JSON.stringify(work.nodeData[nodeId]?.groupAppearance)) return null;
-    return reject("invalid-group-appearance", decoded.reason);
-  }
-  const normalized = normalizeModelDefinition({ ...decoded.value.model,
-    placement: decoded.value.model.placement,
-    previous: readGroupAppearanceForNode(work.nodeData[nodeId]).value.model.contentVersion });
-  if (!normalized.ok) return reject("invalid-group-appearance", normalized.reason);
-  value.groupAppearance = { schemaVersion: 1, model: normalized.value };
-  return null;
-}
-
-/**
  * 在命令应用器的 canonical 边界校验 `model3d` / `composite-asset` 节点数据
  * （change: 2026-10-05-bind-model-animation-to-shots，任务 2.3；
  *  change: 2026-10-11-extract-film-set-extension D1/D11/D12）。
  *
  * 复合资产节点必须按 `(type, extensionId)` **完整判别**：
- * - 片场业务（`extensionId="film-set"`）按 items-only 片场契约严格校验；
  * - 生物视频资产（`extensionId="creature-video-assets"`）只保存内容引用；
  * - 缺失/未知 `extensionId` 的复合资产**不授予任何业务写权限**：静态展示不等于授权，一律拒绝。
  *
@@ -132,19 +85,6 @@ export function validateSelfContained3DNodePatch(
   const node = work.nodes.find((entry) => entry.id === nodeId);
   if (!node) return null;
   const mergedData = { ...(work.nodeData[nodeId] ?? {}), ...value } as CanvasNodeData;
-  if (filmSetObjectOwnershipOf(mergedData)) return null; // full ownership/field validation runs once per batch
-  if (isFilmSetNode(node.type, mergedData)) {
-    const previous = work.nodeData[nodeId] ?? {};
-    const decoded = decodeFilmSetNodeData(mergedData);
-    if (!decoded.ok) return reject("invalid-self-contained-node", decoded.reason);
-    if (decoded.value.filmSetAnimations && value.filmSetAnimations) {
-      const budget = filmSetCompiledBudget(decoded.value);
-      if (budget) return reject("invalid-self-contained-node", budget);
-    }
-    const importRejection = validateFilmSetContentPatch(work, nodeId, previous, decoded.value);
-    if (importRejection) return importRejection;
-    return null;
-  }
   if (isCompositeAssetNodeType(node.type)) {
     // 缺失/未知业务身份：静态展示可保留数据，但不得执行任何业务写入（D5/D11/D12）。
     const extensionId = readCompositeAssetExtensionId(mergedData);
@@ -190,20 +130,7 @@ export function normalizeSelfContained3D(
   merged: CanvasNodeData
 ): CommandApplyResult | null {
   const targetNode = work.nodes.find((entry) => entry.id === nodeId);
-  if (filmSetObjectOwnershipOf(merged)) return null;
   if (isCompositeAssetNodeType(targetNode?.type) && readCompositeAssetExtensionId(merged) === CREATURE_VIDEO_ASSETS_EXTENSION_ID) return null;
-  if (isFilmSetNode(targetNode?.type, merged)) {
-    // items-only 片场：不得归一化/写入任何顶层 authored 模型字段（D8）。
-    // 完整内容标识只覆盖独立根 + items + 全部片段（不含顶层模型）。
-    const animation = decodeFilmSetNodeData(merged);
-    if (!animation.ok) return reject("invalid-self-contained-node", animation.reason);
-    value.filmSetContent = animation.value.filmSetContent;
-    value.scenePlacement = animation.value.scenePlacement;
-    value.sceneCamera = animation.value.sceneCamera;
-    if (animation.value.filmSetAnimations) value.filmSetAnimations = animation.value.filmSetAnimations;
-    value.animationSnapshotHash = animationSnapshotHash(animation.value);
-    return null;
-  }
   const previous = readPreviousModelContentVersion(work, nodeId);
   if (isGlbModelNodeData(merged)) {
     // 文件模型：只归一化资产引用与 placement；不得写回任何脚本字段。
@@ -239,63 +166,6 @@ export function normalizeSelfContained3D(
 export function readPreviousModelContentVersion(work: WorkingState, nodeId: string) {
   const decoded = decodeModelContentVersion(work.nodeData[nodeId]?.modelContentVersion);
   return decoded.ok ? decoded.value : null;
-}
-
-/**
- * 校验片场内部内容 patch（change: 2026-10-08-make-film-set-model-only，任务 1.4/2.3）。
- *
- * - 新增媒体对象必须引用当前画布中 **ready 且种类匹配** 的稳定资产；
- * - 新增对象若携带 `origin.sourceNodeId` 且来源节点仍存在，则来源必须与内容身份一致
- *   （复制导入的权威 precondition）：模型源码哈希 / 媒体 outputAssetId 不得已被并发改写；
- * - 来源节点已删除时跳过（删除来源后内容仍可恢复，符合 spec）。
- *
- * 仅校验**本次新增**的对象（ID 不在旧集合中的），因此后续编辑片场不会因来源变化被误拒。
- */
-export function validateFilmSetContentPatch(
-  work: WorkingState,
-  nodeId: string,
-  previous: CanvasNodeData,
-  next: FilmSetNodeData
-): CommandApplyResult | null {
-  void nodeId;
-  const previousIds = new Set(readFilmSetContent(previous).items.map((item) => item.id));
-  for (const item of next.filmSetContent.items) {
-    if (item.kind === "ground") continue;
-    if (item.kind === "image" || item.kind === "video") {
-      const asset = work.assets.find((candidate) => candidate.id === item.assetId);
-      if (!asset) return reject("asset-in-use", `片场媒体资产 ${item.assetId} 尚未保存`);
-      if (asset.status !== "ready") return reject("invalid-self-contained-node", `片场媒体资产 ${item.assetId} 未就绪`);
-      if (asset.mediaKind !== item.kind) {
-        return reject("invalid-self-contained-node", `片场媒体资产 ${item.assetId} 类型不匹配`);
-      }
-    }
-    // 仅校验本次**新增**对象；编辑既有片场不因来源变化被误拒。
-    if (previousIds.has(item.id)) continue;
-    const sourceNodeId = item.origin?.sourceNodeId;
-    if (!sourceNodeId) continue;
-    const source = work.nodes.find((entry) => entry.id === sourceNodeId);
-    if (!source) continue;
-    if (item.kind === "model") {
-      const sourceData = work.nodeData[sourceNodeId];
-      let sourceModelScript: string | null = null;
-      if (source.type === "model3d") {
-        const script = scriptModel3DNodeData(sourceData);
-        sourceModelScript = script ? script.model.modelScript : null;
-      } else if (isFilmSetNode(source.type, sourceData)) {
-        const filmSet = decodeFilmSetNodeData(sourceData);
-        sourceModelScript = filmSet.ok ? filmSetFirstModelScript(filmSet.value) : null;
-      }
-      if (sourceModelScript === null || modelSourceHash(sourceModelScript) !== modelSourceHash(item.model.modelScript)) {
-        return reject("invalid-self-contained-node", "来源模型已变化，请重新导入");
-      }
-      continue;
-    }
-    const sourceData = work.nodeData[sourceNodeId];
-    if (sourceData?.outputAssetId !== item.assetId) {
-      return reject("invalid-self-contained-node", "来源资产已变化，请重新导入");
-    }
-  }
-  return null;
 }
 
 /** Unknown provider references survive reads; explicit writes validate only the open envelope. */

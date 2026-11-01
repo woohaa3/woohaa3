@@ -43,12 +43,6 @@ export function applyModelOverride(input: {
   detail: NodeGenerationHistoryDetail;
 }): boolean {
   if (input.detail.kind !== "model") return false;
-  const adapter = input.ctx.compositeAssets.resolve(input.ctx.canvasState.getCanvas(), input.nodeId);
-  if (adapter?.history?.(input.nodeId, input.detail)) {
-    input.ctx.canvasRuntime.setModelSceneOverride({ nodeId: input.nodeId, override: null });
-    return true;
-  }
-  if (adapter) return false;
   const version = input.detail.version;
   if (!isSupportedModelScriptVersion(version)) {
     input.ctx.canvasRuntime.setModelSceneOverride({ nodeId: input.nodeId, override: null });

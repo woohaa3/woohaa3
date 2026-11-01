@@ -130,7 +130,6 @@ export function toNodeHistoryDetail(entry: NodeGenerationHistoryEntry): NodeGene
         sourceHash: payload.sourceHash,
         ...(payload.placement ? { placement: payload.placement } : {}),
         ...(payload.modelCameras ? { modelCameras: payload.modelCameras } : {}),
-        ...(payload.animation ? { animation: payload.animation } : {})
       };
     }
     default: {

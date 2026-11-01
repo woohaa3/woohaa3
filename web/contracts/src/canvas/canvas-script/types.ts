@@ -22,9 +22,6 @@ export const CANVAS_SCRIPT_API_NAMES = [
   "move",
   "setPrompt",
   "remove",
-  "group",
-  "reparent",
-  "ungroup",
   "setTitle",
   "layout"
 ] as const;

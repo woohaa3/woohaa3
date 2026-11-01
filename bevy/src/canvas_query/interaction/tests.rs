@@ -3,7 +3,7 @@
 //! 源码保持在业务 500 行上限内；断言不变）。
 
 use super::*;
-use crate::protocol::{Edge, GraphNode, GroupPresentation, Selection};
+use crate::protocol::{Edge, GraphNode, Selection};
 
 #[test]
 fn replacement_generation_never_reuses_old_query_identity() {
@@ -25,8 +25,6 @@ fn scene(nodes: Vec<GraphNode>, edges: Vec<Edge>) -> Scene {
     }
 }
 
-mod film_set;
-mod group_model;
 mod node_action;
 mod spatial;
 
@@ -50,130 +48,9 @@ fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         resizable: true,
         ghost: false,
         card_label: None,
-        group: None,
         model: None,
-        composite_asset: None,
         history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
     }
-}
-
-fn group(id: &str, x: f32, y: f32, w: f32, h: f32, leaves: u32) -> GraphNode {
-    GraphNode {
-        group: Some(GroupPresentation {
-            badge_top_anchor: false,
-            collapsed: false,
-            action_bar: false,
-            title: String::new(),
-            member_count: 1,
-            output_capable_leaf_count: leaves,
-            model_bounds: None,
-            run_status: None,
-            geometry_quality: None,
-            drop_target: false,
-        
-            overview_cache: None,
-        }),
-        ..node(id, x, y, w, h)
-    }
-}
-
-fn film_set(
-    id: &str,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    scope: Option<(f32, f32, f32, f32)>,
-) -> GraphNode {
-    GraphNode {
-        kind: "model".into(),
-        composite_asset: Some(match scope {
-            Some((sx, sy, sw, sh)) => crate::protocol::CompositeAssetPresentation {
-                panel: None,
-                ownership_links: None,
-                root_placement: None,
-                content_extent: None,
-                layout_aabb: None,
-                empty_placeholder: None,
-                geometry_quality: None,
-                scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond,
-                scope_ground: Some(crate::protocol::ScopeGroundDto {
-                    cx: sx + sw / 2.0,
-                    cy: sy + sh / 2.0,
-                    hx: 80.0,
-                    hz: 80.0,
-                }),
-                x: sx,
-                y: sy,
-                width: sw,
-                height: sh,
-                media: Vec::new(),
-                item_roots: std::collections::HashMap::new(),
-                item_placements: std::collections::HashMap::new(),
-            },
-            None => crate::protocol::CompositeAssetPresentation {
-                panel: None,
-                ownership_links: None,
-                root_placement: None,
-                content_extent: None,
-                layout_aabb: None,
-                empty_placeholder: None,
-                geometry_quality: None,
-                scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond,
-                scope_ground: Some(crate::protocol::ScopeGroundDto {
-                    cx: x + w / 2.0,
-                    cy: y + h / 2.0,
-                    hx: 80.0,
-                    hz: 80.0,
-                }),
-                x: 0.0,
-                y: 0.0,
-                width: w,
-                height: h,
-                media: Vec::new(),
-                item_roots: std::collections::HashMap::new(),
-                item_placements: std::collections::HashMap::new(),
-            },
-        }),
-        ..node(id, x, y, w, h)
-    }
-}
-
-/// 轴对齐 `Rect` 范围的片场（可信矩形覆盖，无地面菱形）。
-fn rect_film_set(id: &str, x: f32, y: f32, w: f32, h: f32) -> GraphNode {
-    GraphNode {
-        kind: "model".into(),
-        composite_asset: Some(crate::protocol::CompositeAssetPresentation {
-            panel: None,
-            ownership_links: None,
-            root_placement: None,
-            content_extent: None,
-            layout_aabb: None,
-            empty_placeholder: None,
-            geometry_quality: None,
-            scope_shape: crate::protocol::CompositeAssetScopeShape::Rect,
-            scope_ground: None,
-            x,
-            y,
-            width: w,
-            height: h,
-            media: Vec::new(),
-            item_roots: std::collections::HashMap::new(),
-            item_placements: std::collections::HashMap::new(),
-        }),
-        ..node(id, x, y, w, h)
-    }
-}
-
-/// 由地面矩形（hx=hz，即菱形）派生范围的 right 顶点与 AABB 左上角，供命中测试使用。
-fn rhombus_marks(cx: f32, cy: f32, half: f32) -> ((f32, f32), (f32, f32)) {
-    let ax = crate::isometric_grid::plan::scope_axis_x();
-    let ay = crate::isometric_grid::plan::scope_axis_y();
-    let rx = ax * 2.0 * half;
-    let ry = ay * 2.0 * half;
-    ((cx + rx, cy), (cx - rx, cy - ry))
 }
 
 #[test]
@@ -259,30 +136,6 @@ fn resize_only_hits_selected_node() {
     );
 }
 
-#[test]
-fn group_background_does_not_block_member() {
-    clear_snapshot();
-    let s = scene(
-        vec![
-            group("g", 0.0, 0.0, 400.0, 300.0, 1),
-            node("c", 50.0, 50.0, 100.0, 60.0),
-        ],
-        vec![],
-    );
-    let g = accept_scene(&s);
-    assert_eq!(
-        point_query(g, 70.0, 80.0, 1.0, None).hit,
-        Some(PointHit::Node {
-            node_id: "c".into()
-        })
-    );
-    assert_eq!(
-        point_query(g, 350.0, 250.0, 1.0, None).hit,
-        Some(PointHit::Node {
-            node_id: "g".into()
-        })
-    );
-}
 
 #[test]
 fn edge_hit_uses_broad_phase() {
@@ -408,95 +261,8 @@ fn json_entrypoint_round_trips() {
     assert!(bad.contains("unavailable"));
 }
 
-#[test]
-fn drop_target_uses_real_scope_and_excludes_sources() {
-    clear_snapshot();
-    // 地面矩形 hx=hz=80 → 菱形，中心 (130,97.5)。
-    let g = accept_scene(&scene(
-        vec![film_set(
-            "fs",
-            0.0,
-            0.0,
-            260.0,
-            195.0,
-            Some((0.0, 0.0, 260.0, 195.0)),
-        )],
-        vec![],
-    ));
-    let ((right_x, right_y), (blank_x, blank_y)) = rhombus_marks(130.0, 97.5, 80.0);
-    // 右顶点附近在范围内。
-    assert_eq!(
-        drop_target_query(g, right_x, right_y, &[]).target_node_id,
-        Some("fs".into())
-    );
-    // AABB 空白角在菱形外：不命中。
-    assert_eq!(
-        drop_target_query(g, blank_x + 2.0, blank_y + 2.0, &[]).target_node_id,
-        None
-    );
-    // 来源排除：范围内但被排除时不命中。
-    assert_eq!(
-        drop_target_query(g, 130.0, 97.5, &["fs".to_owned()]).target_node_id,
-        None
-    );
-    // 过期 generation 稳定 stale，不返回目标。
-    let stale = drop_target_query(g.wrapping_add(99), 130.0, 97.5, &[]);
-    assert!(!stale.available);
-    assert!(stale.target_node_id.is_none());
-}
 
-#[test]
-fn drop_target_fixes_topmost_node_before_business_filter() {
-    clear_snapshot();
-    // 上层普通卡片（文档顺序靠后）压住片场菱形中心：先固定实际最上层卡片。
-    let g = accept_scene(&scene(
-        vec![
-            film_set("fs", 0.0, 0.0, 260.0, 195.0, Some((0.0, 0.0, 260.0, 195.0))),
-            node("card", 60.0, 40.0, 120.0, 80.0),
-        ],
-        vec![],
-    ));
-    assert_eq!(
-        drop_target_query(g, 130.0, 97.5, &[]).target_node_id,
-        Some("card".into())
-    );
-}
 
-#[test]
-fn scope_geometry_query_returns_parallelogram_vertices_and_base() {
-    clear_snapshot();
-    let g = accept_scene(&scene(
-        vec![film_set(
-            "fs",
-            0.0,
-            0.0,
-            260.0,
-            195.0,
-            Some((0.0, 0.0, 260.0, 195.0)),
-        )],
-        vec![],
-    ));
-    let result = scope_geometry_query(g);
-    assert!(result.available);
-    assert_eq!(result.scopes.len(), 1);
-    let entry = &result.scopes[0];
-    assert_eq!(entry.node_id, "fs");
-    assert_eq!(entry.shape, "isometric-diamond");
-    // 地面 hx=hz=80 → 菱形顶点在投影轴上。
-    let ((right_x, right_y), (blank_x, blank_y)) = rhombus_marks(130.0, 97.5, 80.0);
-    assert!((entry.vertices[1][0] - right_x).abs() < 1e-3);
-    assert!((entry.vertices[1][1] - right_y).abs() < 1e-3);
-    assert!((entry.aabb[0] - blank_x).abs() < 1e-3);
-    let axis_ratio =
-        crate::isometric_grid::plan::scope_axis_x() / crate::isometric_grid::plan::scope_axis_y();
-    assert!((entry.aabb[2] / entry.aabb[3] - axis_ratio).abs() < 1e-3);
-    // 基准矩形是内容 fit 矩形，不是 AABB。
-    assert_eq!(entry.base, [0.0, 0.0, 260.0, 195.0]);
-    // JSON 入口 round-trip（camelCase）。
-    let json = scope_geometry_query_json(&format!("{{\"generation\":{g}}}"));
-    assert!(json.contains("\"nodeId\":\"fs\""));
-    assert!(json.contains("\"shape\":\"isometric-diamond\""));
-}
 
 #[test]
 fn accept_viewport_reuses_world_index_and_bumps_generation() {
@@ -681,72 +447,6 @@ fn visible_aggregate_handles_are_queryable_and_removed_with_projection() {
     assert!(!point_query(generation, 418.0, 210.0, 1.0, None).available);
 }
 
-/// 拍摄镜头预览卡片节点（最小合法 `shotPreview` 呈现）。
-fn shot_preview_node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
-    GraphNode {
-        shot_preview: Some(
-            serde_json::from_str(
-                r#"{"filmSetNodeId":"film","clipId":"clip-1","kind":"dynamic","name":"镜头",
-                    "aspect":1.7777778,"duration":5,"state":"ready",
-                    "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}"#,
-            )
-            .unwrap(),
-        ),
-        ..node(id, x, y, width, height)
-    }
-}
-
-#[test]
-fn shot_preview_hits_content_region_only() {
-    clear_snapshot();
-    // 卡片 (100,200,240,167)：内容区 (116,252,208,99)，与媒体卡片内边距一致。
-    let g = accept_scene(&scene(
-        vec![shot_preview_node(
-            "shot-preview:p",
-            100.0,
-            200.0,
-            240.0,
-            167.0,
-        )],
-        vec![],
-    ));
-    // 内容区中心 → 拍摄播放入口。
-    assert_eq!(
-        point_query(g, 220.0, 300.0, 1.0, None).hit,
-        Some(PointHit::ShotPreview {
-            node_id: "shot-preview:p".into()
-        })
-    );
-    // 标题区（含名称与类型标记）不建立开播候选，回落普通 Node。
-    assert_eq!(
-        point_query(g, 220.0, 216.0, 1.0, None).hit,
-        Some(PointHit::Node {
-            node_id: "shot-preview:p".into()
-        })
-    );
-    // 标题下半行、左右与底部留白都不能触发播放。
-    for (x, y) in [
-        (220.0, 240.0),
-        (108.0, 300.0),
-        (332.0, 300.0),
-        (220.0, 358.0),
-    ] {
-        assert_eq!(
-            point_query(g, x, y, 1.0, None).hit,
-            Some(PointHit::Node {
-                node_id: "shot-preview:p".into()
-            })
-        );
-    }
-    // 普通节点不产生拍摄命中。
-    let plain = accept_scene(&scene(vec![node("n", 100.0, 200.0, 240.0, 167.0)], vec![]));
-    assert_eq!(
-        point_query(plain, 220.0, 300.0, 1.0, None).hit,
-        Some(PointHit::Node {
-            node_id: "n".into()
-        })
-    );
-}
 
 #[test]
 fn history_dots_hit_inside_node_and_single_version_does_not_capture() {
@@ -802,38 +502,3 @@ fn history_dots_hit_inside_node_and_single_version_does_not_capture() {
     );
 }
 
-#[test]
-fn group_resize_uses_accepted_capability_and_shared_rect_through_selection_and_positions() {
-    use super::snapshot::{apply_selection, build_snapshot};
-    let mut group = group("g", 0., 0., 400., 300., 0);
-    group.resizable = false;
-    let mut input = scene(vec![group], vec![]);
-    input.selection.nodes = vec!["g".into()];
-    let mut snapshot = build_snapshot(&input, 1);
-    apply_selection(&mut snapshot, &input.selection.nodes);
-    assert!(snapshot.nodes[0].resize.is_none());
-    input.nodes[0].resizable = true;
-    let mut snapshot = build_snapshot(&input, 2);
-    apply_selection(&mut snapshot, &input.selection.nodes);
-    let corners = crate::canvas_query::layout::resize_corner_rects(0., 0., 400., 300.);
-    assert_eq!(
-        snapshot.nodes[0].resize,
-        Some(crate::canvas_query::scope::corners_grip(corners))
-    );
-    let generation = accept_scene(&input);
-    assert!(matches!(
-        point_query(generation, 390., 290., 1., None).hit,
-        Some(PointHit::Resize { .. })
-    ));
-    apply_selection(&mut snapshot, &["g".into(), "other".into()]);
-    assert!(snapshot.nodes[0].resize.is_none());
-    apply_selection(&mut snapshot, &["g".into()]);
-    assert!(snapshot.nodes[0].resize.is_some());
-    input.nodes[0].x = 100.;
-    input.nodes[0].y = 50.;
-    let generation = accept_scene(&input);
-    assert!(matches!(
-        point_query(generation, 490., 340., 1., None).hit,
-        Some(PointHit::Resize { .. })
-    ));
-}

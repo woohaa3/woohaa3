@@ -151,7 +151,7 @@ bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
 3. **宿主不认识业务 ID**。按扩展 ID、Provider 名或片场字段做 `if` 的代码属于放错位置；改成公共端口、slot 或 contracts 声明。
 4. **扩展只走公共入口**，具名导入。新增扩展不改框架源码；声明写在自己的 `extension.json`。
 5. **界面面向电脑与平板**，不为手机或极窄窗口做专用布局。无障碍不是默认验收项，除非明确要求。
-6. **渲染结论必须来自真实 GPU**。macOS 用 `/usr/sbin/system_profiler SPDisplaysDataType`（出现 Apple M* / AMD / Intel 即真实 GPU）；Linux 看 `/dev/dri/renderD*`。macOS 没有 `/dev/dri` 是正常现象。禁止用 SwiftShader / lavapipe 或估算冒充硬件结论。
+6. **渲染结论必须来自真实 GPU**。macOS 用 `/usr/sbin/system_profiler SPDisplaysDataType`（出现 Apple M* / AMD / Intel 即真实 GPU）；Linux 看 `/dev/dri/renderD*`，WSL2 看 `/dev/dxg` 与 `/usr/lib/wsl/lib/libcuda.so.1`（WSL 不产生 `renderD*`）。macOS 没有 `/dev/dri` 是正常现象。容器 / WSL 里没有本机 GPU 时用宿主浏览器 CDP（`WOOHAA_E2E_CDP` + `E2E_BASE_URL`，实现见 [web/e2e/base-test.ts](web/e2e/base-test.ts)）取证，不 launch 本地软件渲染浏览器。禁止用 SwiftShader / lavapipe 或估算冒充硬件结论。
 7. **凭据、本机配置、用户数据、构建产物、签名密钥不进 Git**。许可证与第三方归属文件必须保留。未获版权方指示不得选定项目许可证。
 
 ## 常用检查

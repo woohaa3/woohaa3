@@ -356,10 +356,7 @@ mod tests {
     fn node(id: &str, x: f32, y: f32) -> GraphNode {
         GraphNode {
             model_preview: None,
-            aggregate_run: None,
             history_strip: None,
-            shot_preview: None,
-
             id: id.into(),
             kind: "image".into(),
             x,
@@ -377,9 +374,7 @@ mod tests {
             resizable: false,
             ghost: false,
             card_label: None,
-            group: None,
             model: None,
-            composite_asset: None,
         }
     }
 

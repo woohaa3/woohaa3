@@ -14,7 +14,6 @@
 
 mod animation_sample;
 mod framing;
-mod media;
 mod readiness;
 pub(crate) mod render;
 mod stdio;

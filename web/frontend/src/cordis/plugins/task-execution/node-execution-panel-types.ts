@@ -35,7 +35,6 @@ export type ModelExecutionHostProps = {
   submitCoordinator?: SubmitCoordinator;
   /** 画布是否可写（断线只读时禁用）。 */
   writable: boolean;
-  recordShotCommands?: (commands: import("@woohaa3/contracts").CanvasCommand[], label: string) => Promise<{ ok: boolean; reason?: string }>;
   /** Dialog 能力（Alert 等通用对话框）。 */
   dialogs: DialogsService;
   /** 只读任务目录。 */

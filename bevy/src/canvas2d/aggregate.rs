@@ -22,6 +22,9 @@ use super::layout::{hex, port};
 use crate::canvas_query::aggregate::AGGREGATE_HANDLE_GAP;
 use crate::canvas_query::aggregate::{AGGREGATE_HANDLE_RADIUS, aggregate_handle, selection_bounds_iter};
 
+/// 多选选区背景带的 z：低于所有卡片（卡片 z = 10.0 + index*0.1），高于边。
+pub(crate) const SELECTION_BAND_Z: f32 = 1.0;
+
 /// 待提交连线预览线宽。
 const PENDING_EDGE_WIDTH: f32 = 2.0;
 /// 拖拽中「把手 → 指针」草稿线线宽。
@@ -158,8 +161,6 @@ mod tests {
             model_preview: None,
             ghost: false,
             card_label: None,
-            shot_preview: None,
-
             id: id.into(),
             kind: "image".into(),
             x,
@@ -175,11 +176,8 @@ mod tests {
             texture: false,
             media_loading: false,
             resizable: false,
-            group: None,
             model: None,
-            composite_asset: None,
             history_strip: None,
-            aggregate_run: None,
         }
     }
 

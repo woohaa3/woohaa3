@@ -83,7 +83,7 @@ describe("真实画布形状下的准入", () => {
     coordinator.dispose();
   });
 
-  it("片场资源异步就绪后立即进入准入并交出模型 lease", () => {
+  it("模型资源异步就绪后立即进入准入并交出模型 lease", () => {
     const canvas = realisticCanvas();
     const resources = new Map<string, string>();
     let version = 0;
@@ -116,11 +116,10 @@ describe("真实画布形状下的准入", () => {
 
     const keys = coordinator.admittedContentKeys().filter(key => key.startsWith("rk-"));
     expect(keys.length).toBeGreaterThan(0);
-    // 片场（composite-asset）的模型 key 必须在内，否则 Rust 侧无法保护其 payload。
-    const compositeIds = canvas.document.nodes
-      .filter(node => node.type === "composite-asset")
+    const modelIds = canvas.document.nodes
+      .filter(node => node.type === "model3d")
       .map(node => node.id);
-    for (const id of compositeIds) expect(keys).toContain(`rk-${id}`);
+    for (const id of modelIds) expect(keys).toContain(`rk-${id}`);
     coordinator.dispose();
   });
 });

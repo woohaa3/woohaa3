@@ -81,7 +81,6 @@ pub(crate) fn sync_editor_gizmo(
     theme: &crate::theme::ThemeResource,
 ) {
     selection.grid = editor
-        .filter(|editor| !editor.shot_preview)
         .and_then(|editor| editor.grid.as_ref())
         .map(|grid| (Vec3::from_array(grid.origin), grid.spacing));
     style.palette = gizmo_palette(theme);
@@ -92,25 +91,12 @@ pub(crate) fn sync_editor_gizmo(
     selection.active = editor
         .and_then(|e| e.feedback.as_ref())
         .and_then(|f| f.active.clone());
-    selection.basis = editor
-        .and_then(|e| e.parent_basis)
-        .map(|b| Mat3::from_cols_array(&b))
-        .unwrap_or(Mat3::IDENTITY);
+    selection.basis = Mat3::IDENTITY;
     let Some(editor) = editor else {
         selection.set(None, None);
         return;
     };
-    if editor.shot_preview {
-        selection.set(None, None);
-        return;
-    }
-    let mode = if editor.tool_mode == "object" {
-        Some(match editor.object_tool {
-            crate::gizmo_layout::ObjectTool::Move => TransformGizmoMode::FocusAxes,
-            crate::gizmo_layout::ObjectTool::Yaw => TransformGizmoMode::Yaw,
-            crate::gizmo_layout::ObjectTool::Scale => TransformGizmoMode::Scale,
-        })
-    } else if editor.tool_mode == "camera"
+    let mode = if editor.tool_mode == "camera"
         && editor.camera_tool.as_deref() == Some("focus")
         && editor.shot.is_some()
     {
@@ -142,14 +128,10 @@ mod tests {
 
     fn editor(tool: &str) -> ModelEditor {
         ModelEditor {
-            shot_preview: false,
             grid: None,
             version: crate::protocol::MODEL_EDITOR_VERSION.to_owned(),
             node_id: "m1".to_owned(),
             tool_mode: tool.to_owned(),
-            object_tool: Default::default(),
-            item_id: None,
-            parent_basis: None,
             feedback: None,
             camera_tool: Some("orbit".to_owned()),
             camera_id: Some("cam-a".to_owned()),
@@ -212,11 +194,6 @@ mod tests {
         focus_editor.camera_tool = Some("focus".into());
         sync_editor_gizmo(&mut selection, &mut style, Some(&focus_editor), &theme);
         assert_eq!(selection.mode, Some(TransformGizmoMode::FocusAxes));
-
-        focus_editor.shot_preview = true;
-        sync_editor_gizmo(&mut selection, &mut style, Some(&focus_editor), &theme);
-        assert_eq!(selection.mode, None);
-        assert!(selection.grid.is_none());
 
         sync_editor_gizmo(&mut selection, &mut style, None, &theme);
         assert_eq!(selection.mode, None);

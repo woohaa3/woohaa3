@@ -129,33 +129,4 @@ test.describe("多选聚合拉线（change: add-multi-select-aggregate-connect�
 		expect((canonical?.document.edges ?? []).filter((edge) => edge.source === "t")).toHaveLength(0);
 	});
 
-	test("选中 group 与普通节点时展开成员叶子批量连接", async ({ page }) => {
-		await installPageHelpers(page);
-		await resetCanvasStorage(page);
-		await waitForCanvasSession(page);
-		await sendCommands(page, [
-			{ type: "node.add", node: { id: "g", type: "group", position: { x: 0, y: 0 }, width: 500, height: 400 } },
-			{ type: "node.add", node: { id: "m1", type: "image", position: { x: 40, y: 40 }, width: 200, height: 120, parentId: "g" } },
-			{ type: "node.add", node: { id: "m2", type: "image", position: { x: 40, y: 220 }, width: 200, height: 120, parentId: "g" } },
-			{ type: "node.add", node: { id: "x", type: "image", position: { x: 0, y: 600 }, width: 200, height: 120 } },
-			{ type: "node.add", node: { id: "t", type: "image", position: { x: 800, y: 0 }, width: 200, height: 120 } }
-		] as never, "aggregate-group-setup");
-		await page.waitForTimeout(500);
-		// 选中 group 与普通节点 x（目标 t 不选中，避免成为成员）。
-		await selectAll(page, ["g", "x"]);
-		await page.waitForTimeout(200);
-
-		// 选区包围盒 x 0..500 y 0..720 → 输出把手 (518, 360)；拖到 t。
-		const handle = await handleClient(page, "output");
-		const target = await nodeClient(page, "t");
-		await page.mouse.move(handle.x, handle.y);
-		await page.mouse.down();
-		await page.mouse.move(target.x, target.y, { steps: 6 });
-		await page.mouse.up();
-		await page.waitForTimeout(600);
-
-		const canonical = await readStoredCanvas(page);
-		const edges = (canonical?.document.edges ?? []).filter((edge) => edge.target === "t");
-		expect(edges.map((edge) => edge.source).sort()).toEqual(["m1", "m2", "x"]);
-	});
 });

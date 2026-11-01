@@ -188,7 +188,7 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     expect(await adapter.run(runInput())).toMatchObject({ status: "failed", error: { code: "canvas-not-modified" } });
     expect(authorize).not.toHaveBeenCalled();
   });
-  it("freezes group epoch, exposes real scoped tools and revokes only this owner", async () => {
+  it("exposes real model-scoped tools and revokes only this owner", async () => {
     const { service } = fakeService([record()]);
     const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
     const { transport, inputs } = fakeTransport({ ok: true, outcome: { status: "succeeded" } });
@@ -196,9 +196,9 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     const issue = vi.spyOn(facade, "issue");
     const revoke = vi.spyOn(facade, "revoke");
     const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => [], tools: facade, mcpEndpoint: MCP_ENDPOINT });
-    const input = runInput({ intent: { action: "generate", canvasId: "canvas-1", nodeId: "root", mode: "canvas-group", expectedContentHash: "group-epoch:7", prompt: "scene" } });
+    const input = runInput({ intent: { action: "generate", canvasId: "canvas-1", nodeId: "root", mode: "model3d", expectedContentHash: "hash-7", prompt: "scene" } });
     expect((await adapter.run(input)).status).toBe("succeeded");
-    expect(issue).toHaveBeenCalledWith(expect.objectContaining({ mode: "canvas-group", expectedScopeEpoch: 7, nodeId: "root", tools: expect.arrayContaining(["get_canvas_graph", "submit_canvas_script", "run_canvas_node"]) }));
+    expect(issue).toHaveBeenCalledWith(expect.objectContaining({ mode: "model3d", nodeId: "root", tools: expect.arrayContaining(["get_model_node", "submit_model_script"]) }));
     expect(inputs[0]!.prompt).toContain("root");
     expect(revoke).toHaveBeenLastCalledWith("req-1", { subject: "u1", authLevel: "authenticated" });
     issue.mockClear();

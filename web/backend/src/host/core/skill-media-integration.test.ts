@@ -162,8 +162,7 @@ async function createHarness(): Promise<Harness> {
     baseRevision: 0,
     actorId: "test",
     commands: [
-      { type: "node.add", node: { id: GROUP, type: "group", position: { x: 0, y: 0 } } },
-      { type: "node.add", node: { id: IMAGE, type: "image", position: { x: 0, y: 0 }, parentId: GROUP } },
+      { type: "node.add", node: { id: IMAGE, type: "image", position: { x: 0, y: 0 } } },
       {
         type: "nodeData.patch",
         nodeId: IMAGE,
@@ -324,7 +323,7 @@ describe("Skill 媒体续接端到端（任务 6.1 / 6.2）", () => {
         baseRevision: canvas.revision,
         actorId: "agent",
         commands: [
-          { type: "node.add", node: { id: VIDEO, type: "video", position: { x: 240, y: 0 }, parentId: GROUP } },
+          { type: "node.add", node: { id: VIDEO, type: "video", position: { x: 240, y: 0 } } },
           { type: "edge.add", edge: { id: "edge-image-video", source: IMAGE, target: VIDEO } },
           {
             type: "nodeData.patch",
@@ -391,7 +390,7 @@ describe("Skill 媒体续接端到端（任务 6.1 / 6.2）", () => {
         commandId: "add-video",
         baseRevision: (await exported(h)).revision,
         actorId: "agent",
-        commands: [{ type: "node.add", node: { id: VIDEO, type: "video", position: { x: 240, y: 0 }, parentId: GROUP } }, { type: "nodeData.patch", nodeId: VIDEO, value: { prompt: "旧视频", panelPrompt: "旧视频", modelKey: "video-model" } }]
+        commands: [{ type: "node.add", node: { id: VIDEO, type: "video", position: { x: 240, y: 0 } } }, { type: "nodeData.patch", nodeId: VIDEO, value: { prompt: "旧视频", panelPrompt: "旧视频", modelKey: "video-model" } }]
       });
       expect(await h.skillMedia.begin({ ...VIDEO_STEP, nodeId: VIDEO, requestId: "video-req-1", runId: run1, jobId: job1, prompt: "旧视频", modelKey: "video-model" }))
         .toMatchObject({ ok: true });

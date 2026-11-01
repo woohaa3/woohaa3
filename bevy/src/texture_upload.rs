@@ -65,8 +65,9 @@ pub fn set_image_focus_details(manifest:&str,rgba:&[u8])->Result<(),BoundaryErro
     bridge::queue_focus_details(Some(frame),rgba).map_err(BoundaryError::from_str)
 }
 
-/// 上传/更新一张片场媒体平面 RGBA 纹理（键为全局唯一 `planeId`，latest-wins）
-/// （change: 2026-10-08-make-film-set-model-only，design D5）。
+/// 上传/更新一张模型自带 RGBA 纹理（点击值 id，latest-wins）。
+///
+/// `model3d::model_textures` 只消费 `modeltex:` 前缀的内容；其它 id 被忽略。
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_model_media_texture(
@@ -77,11 +78,11 @@ pub fn set_model_media_texture(
 ) -> Result<(), BoundaryError> {
     crate::wake_canvas();
     protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
-    bridge::queue_film_set_texture(id, width, height, rgba);
+    bridge::queue_model_texture(id, width, height, rgba);
     Ok(())
 }
 
-/// Native counterpart of the borrowed media-plane upload entry point.
+/// Native counterpart of the owned model-texture upload entry point.
 #[cfg(all(feature = "canvas-core", not(feature = "wasm")))]
 pub fn set_model_media_texture_owned(
     id: &str,
@@ -90,6 +91,6 @@ pub fn set_model_media_texture_owned(
     rgba: Vec<u8>,
 ) -> Result<(), BoundaryError> {
     protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
-    bridge::queue_film_set_texture_owned(id, width, height, rgba);
+    bridge::queue_model_texture_owned(id, width, height, rgba);
     Ok(())
 }

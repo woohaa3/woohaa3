@@ -28,13 +28,13 @@ describe("CanvasMediaClient.read 画布作用域", () => {
     const client = createCanvasMediaClient({ baseUrl: "http://media.local", serviceToken: "token", fetchImpl });
     const media = await client.read!(STORAGE_KEY, "canvas-a");
     expect(Array.from(media.bytes)).toEqual([1, 2, 3]);
-    expect(bodies).toEqual([{ extensionId: "film-set", storageKey: STORAGE_KEY, canvasId: "canvas-a" }]);
+    expect(bodies).toEqual([{ extensionId: "canvas-service", storageKey: STORAGE_KEY, canvasId: "canvas-a" }]);
   });
 
   it("调用方没有画布时不添加 canvasId（保持旧行为）", async () => {
     const { bodies, fetchImpl } = recordingFetch();
     const client = createCanvasMediaClient({ baseUrl: "http://media.local", serviceToken: "token", fetchImpl });
     await client.read!(STORAGE_KEY);
-    expect(bodies).toEqual([{ extensionId: "film-set", storageKey: STORAGE_KEY }]);
+    expect(bodies).toEqual([{ extensionId: "canvas-service", storageKey: STORAGE_KEY }]);
   });
 });

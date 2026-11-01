@@ -22,9 +22,6 @@ import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";
 import { derivePanelDraft, derivePanelTaskState } from "./panel-state.js";
 import { ModelParameterPanel } from "./model-parameter-panel.js";
-import { ShotMediaParametersPanel } from "./shot-media-parameters-panel.js";
-import { readShotMediaParameters } from "./shot-media-parameters.js";
-import { filmSetAnimationsOf, filmSetClipPrecondition, managedShotPreviewOwnershipOf, readFilmSetAnimationProjection, type FilmSetClipPatchOp } from "@woohaa3/contracts";
 import {
   EMPTY_UPSTREAM_TEXT_MESSAGE,
   upstreamTextIsEmpty
@@ -165,12 +162,6 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const pendingSelection = Boolean(context && !canonicalNodeIds.has(context.nodeId));
 
   const panelKind = context?.panelKind ?? null;
-  // 片场组外显的镜头节点是 owner-managed 的标准 image/video：没有可提交的生成配置，
-  // 选中时只展示镜头输出参数，不沿用图片/视频生成面板。
-  const shotMediaParameters = useMemo(
-    () => readShotMediaParameters(workingCanvas, context?.nodeId ?? null),
-    [workingCanvas, context]
-  );
   const modelType = panelKind ? modelTypeForPanelKind(panelKind) : null;
   const typedModels = useMemo(
     () => (catalog && panelKind ? allModelsForPanel(catalog, panelKind) : []),
@@ -262,9 +253,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         : null,
     [canvasId, runClient, activity, props.submitCoordinator]
   );
-  const waitingMessage = useSyncExternalStore(submitCoordinator?.subscribeWaiting ?? (() => () => {}),
-    () => submitCoordinator?.waitingMessage?.(selectedNodeId ?? ""), () => undefined);
-  const executionMessage = submitError ?? waitingMessage;
+  const executionMessage = submitError;
 
   const references = useMemo<ModelReferenceItem[]>(() => {
     if (!canvas || !context || !panelKind || !catalog || !targetModelKey) return [];
@@ -381,7 +370,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       if (!outcome.ok) {
         draftStore.patch(nodeId, targetModelKey, { prompt: input.prompt });
         if (outcome.error === EMPTY_UPSTREAM_TEXT_MESSAGE) showEmptyUpstreamAlert();
-        else if (!submitCoordinator.waitingMessage) setSubmitError(outcome.error);
+        else setSubmitError(outcome.error);
         return { ok: false, error: outcome.error };
       }
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
@@ -417,34 +406,6 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   });
 
   if (!context) return null;
-
-  if (shotMediaParameters) {
-    const shotExpanded = resolveExecutionPanelSurface(presentation, context.nodeType) === "expanded";
-    return (
-      <ExecutionPanelSurface nodeId={context.nodeId} presentation={shotExpanded ? "expanded" : "compact"} runtime={runtime}>
-        <ShotMediaParametersPanel
-          nodeId={context.nodeId}
-          parameters={shotMediaParameters}
-          writable={writable && !!props.recordShotCommands}
-          onChange={async (change) => {
-            const current = woohaa3CanvasStore.getState();
-            const source = current.working ?? current.canvas;
-            const owner = source && managedShotPreviewOwnershipOf(source.nodeData[context.nodeId]);
-            const animation = owner && readFilmSetAnimationProjection(source, owner.filmSetNodeId);
-            const collection = animation && filmSetAnimationsOf(animation);
-            const clip = collection?.clips.find(entry => entry.id === owner?.clipId);
-            if (!owner || !collection || !clip || !props.recordShotCommands) return "镜头已不可用";
-            const op: FilmSetClipPatchOp = change.kind === "aspect"
-              ? { kind: "camera", initialCamera: { ...clip.initialCamera, aspect: change.aspect } }
-              : { kind: "timeline", timeline: { ...clip.timeline, ...change.timeline } };
-            const result = await props.recordShotCommands([{ type: "filmSet.clipPatch", nodeId: owner.filmSetNodeId, clipId: owner.clipId, op, expectedHash: filmSetClipPrecondition(collection, owner.clipId, op) }], "修改拍摄镜头");
-            return result.ok ? null : result.reason ?? "镜头修改失败";
-          }}
-          onClose={() => submitIntent({ kind: "close" })}
-        />
-      </ExecutionPanelSurface>
-    );
-  }
 
   if (!panelKind) {
     return (

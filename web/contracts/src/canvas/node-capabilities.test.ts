@@ -3,15 +3,16 @@ import { createEmptyWoohaa3ServerCanvas } from './domain/index.js';
 import { buildCanvasRenderScene, renderSceneFingerprint, stablePresentationStringify } from './render-scene/scene-builder.js';
 import { prepareModelResource } from './prepared-model.js';
 
-it('complete lightweight projection fingerprints group additions, updates, deletions and future fields', () => {
+it('lightweight projection fingerprints node additions and future fields', () => {
   const canvas = createEmptyWoohaa3ServerCanvas('fingerprint');
-  canvas.document.nodes.push({ id: 'g', type: 'group', position: { x: 0, y: 0 }, width: 500, height: 400 });
+  canvas.document.nodes.push({ id: 'n1', type: 'text', position: { x: 0, y: 0 }, width: 500, height: 400 });
   const scene = buildCanvasRenderScene({ canvas });
   const initial = renderSceneFingerprint(scene);
-  scene.nodes[0].group!.runStatus = { label: '开始', state: 'running' };
-  const running = renderSceneFingerprint(scene); expect(running).not.toBe(initial);
-  scene.nodes[0].group!.runStatus!.label = '提交'; expect(renderSceneFingerprint(scene)).not.toBe(running);
-  delete scene.nodes[0].group!.runStatus; expect(renderSceneFingerprint(scene)).toBe(initial);
+  scene.nodes[0]!.title = '更新标题';
+  const updated = renderSceneFingerprint(scene);
+  expect(updated).not.toBe(initial);
+  scene.nodes[0]!.title = '新节点';
+  expect(renderSceneFingerprint(scene)).not.toBe(updated);
   const extended = scene.nodes[0] as typeof scene.nodes[0] & { future?: { a: number; b?: number } };
   extended.future = { a: 1, b: 2 }; const future = renderSceneFingerprint(scene); expect(future).not.toBe(initial);
   extended.future = { b: 2, a: 1 }; expect(renderSceneFingerprint(scene)).toBe(future);

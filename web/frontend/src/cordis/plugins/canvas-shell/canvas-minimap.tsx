@@ -276,7 +276,6 @@ function MinimapNodeShape({
     <rect
       className="canvas-minimap__node"
       data-kind={node.kind}
-      data-group={node.group ? "true" : undefined}
       data-selected={selected ? "true" : undefined}
       x={rect.x}
       y={rect.y}

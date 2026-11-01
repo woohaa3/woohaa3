@@ -21,4 +21,3 @@ export * from "./contract-suite.js";
 export * from "./node-history-contracts.js";
 export * from "./in-memory-node-history-repository.js";
 export * from "./node-history-service.js";
-export * from "./compat-inventory.js";

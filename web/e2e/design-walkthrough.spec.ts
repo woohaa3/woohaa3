@@ -1,6 +1,4 @@
 import { designEvidence as evidence } from "./design-evidence.js";
-import { canonicalFilmSetFields } from "@woohaa3/contracts";
-import { base, clip } from "./fixtures/film-set-animation-clips.js";
 import { expect, test, type Page } from '@playwright/test';
 import { installPageHelpers, resetCanvasStorage, waitForCanvasSession, readStoredCanvas, sendCommands } from './helpers.js';
 
@@ -55,26 +53,6 @@ test.describe('design walkthrough regressions', () => {
     await page.getByRole('button',{name:'打开快捷改写',exact:true}).click();
     await expect(page.getByRole('button',{name:'打开快捷改写',exact:true})).toHaveAttribute('aria-expanded','true');
     await evidence(page, `final-rewrite-${width}`, `点击快捷改写后弹层保持打开，${width}px`);
-  });
-  for (const width of [360, 390]) test(`film playback actions stay usable at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 844 });
-    await installPageHelpers(page); await resetCanvasStorage(page); await waitForCanvasSession(page);
-    const fields = canonicalFilmSetFields({ ...base, filmSetAnimations: { schemaVersion: 3, defaultClipId: "parkour", clips: [clip("parkour", "16:9", true)] } });
-    expect((await sendCommands(page, [{ type: "node.add", node: { id: "design-film", type: "composite-asset", position: { x: 20, y: 100 }, width: 260, height: 195 }, nodeData: fields as never }])).ok).toBe(true);
-    await expect.poll(() => page.evaluate(() => (window as any).__bevyRuntime.lastScene()?.nodes.find((n: any) => n.id === "design-film")?.model?.resourceKey)).toBeTruthy();
-    const point = await page.evaluate(() => { const s = (window as any).__bevyRuntime.lastScene(), n = s.nodes.find((n: any) => n.id === "design-film"), r = document.querySelector("#bevy-canvas")!.getBoundingClientRect(); return { x: r.x + (n.x + n.width / 2) * s.viewport.zoom + s.viewport.x, y: r.y + (n.y + n.height / 2) * s.viewport.zoom + s.viewport.y }; });
-    await page.mouse.dblclick(point.x, point.y);
-    await page.getByRole("tab", { name: "动画", exact: true }).click();
-    await page.getByRole("button", { name: "动画预览", exact: true }).click();
-    await expect(page.locator(".film-set-animation-player")).toBeVisible();
-    await controlsAreSeparate(page, ".film-set-animation-player button");
-    const player = await page.locator(".film-set-animation-player").boundingBox();
-    const inspector = await page.locator(".model-editor-dock").boundingBox();
-    expect(player).not.toBeNull(); expect(inspector).not.toBeNull();
-    expect(player!.y + player!.height).toBeLessThanOrEqual(inspector!.y + 1);
-    await evidence(page, `final-film-${width}`, `片场动画播放器动作完整可命中，${width}px 触控模拟`);
-    await page.getByRole("button", { name: "返回编辑", exact: true }).click();
-    await expect(page.getByLabel("拍摄镜头")).toBeVisible();
   });
   test('empty-state import uploads a real image and survives reload',async({page})=>{
     await installPageHelpers(page);await resetCanvasStorage(page);await waitForCanvasSession(page);

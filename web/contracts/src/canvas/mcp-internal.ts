@@ -19,5 +19,3 @@ export * from "./mcp-internal/types.js";
 export * from "./mcp-internal/common-codec.js";
 export * from "./mcp-internal/model-codec.js";
 export * from "./mcp-internal/camera-codec.js";
-export * from "./mcp-internal/animation-codec.js";
-export * from "./mcp-internal/film-set-codec.js";

@@ -49,7 +49,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     const copyable = copyableSelection();
     if (!copyable) return null;
     // Payload includes the generic owner closure; standalone media is frozen below.
-    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others, { content: options.compositeAssets?.getContent() });
+    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others, );
     if (!payload) return null;
     const text = serializeCanvasCopyPayload(payload);
     (target as unknown as Record<string, unknown>)[MEMORY_CLIPBOARD_KEY] = text;
@@ -59,7 +59,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
   const freezeClipboardText = async (): Promise<string | null> => {
     const copyable = copyableSelection();
     if (!copyable) return null;
-    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others, { content: options.compositeAssets?.getContent() });
+    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others, );
     if (!payload) return null;
     const included = new Set(payload.nodes.map(n => n.id));
     const liveIds = payload.nodes.filter(n => {
@@ -70,7 +70,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (!liveIds.length) return buildClipboardText();
     if (!options.mediaContent) throw Error("媒体内容 provider 未就绪，无法复制");
     const frozen = await options.mediaContent.freeze(copyable.canvasState, liveIds, crypto.randomUUID());
-    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others, { content: options.compositeAssets?.getContent() });
+    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others, );
     if (!frozenPayload) return null;
     const text = serializeCanvasCopyPayload(frozenPayload);
     (target as unknown as Record<string, unknown>)[MEMORY_CLIPBOARD_KEY] = text;
@@ -121,7 +121,6 @@ export function createKeyboardShortcuts(core: InteractionCore) {
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.defaultPrevented || core.modalActive()) return;
-    if (model.active && !isEditableElement(event.target) && options.compositeAssets?.keydown(event, woohaa3CanvasStore.getState().working ?? woohaa3CanvasStore.getState().canvas, options.getModelFocus?.()?.nodeId ?? null)) return;
     // 画布快捷键在 modal/panel 打开时不参与；但聚焦相机的飞行/退出只被真正 modal 阻断
     // （change: fix-model-focus-navigation-and-camera-parity，design D6）。
     const imageFocused = options.isImageFocused?.() ?? !!options.getImageFocus?.();
@@ -152,33 +151,6 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     }
     // 聚焦查看：W/A/S/D/Q/E 飞行、Escape 退出；DOM 编辑面优先（design D4/D5）。
     if (model.active && !isEditableElement(event.target)) {
-      // 片场对象局部 action 优先（change: 2026-10-10-improve-film-set-editing-and-inspector，
-      // 任务 5.1/5.4 / design D3）：Delete/Backspace 删除选中对象（无选中时消费为无动作，
-      // 绝不回退删除整个片场）；Escape 分层取消手势/选择，高于退出。输入/IME/菜单/Dialog
-      // 已由 `isEditableElement` 排除。
-      const objectAction = core.filmSetObjectAction?.() ?? options.filmSetObjectAction;
-      if (objectAction?.active()) {
-        if (
-          (event.key === "Delete" || event.key === "Backspace") &&
-          !event.metaKey && !event.ctrlKey && !event.altKey
-        ) {
-          // 无选中也消费该键（preventDefault），避免回退到普通节点删除或浏览器后退。
-          event.preventDefault();
-          if (!event.repeat && !objectAction.pending() && objectAction.hasSelection()) objectAction.deleteSelected();
-          return;
-        }
-        if (event.key === "Escape") {
-          // 分层只处理最高优先的一层：取消活动手势 → 清对象选择 → 回落退出聚焦。
-          // repeat 只消费不推进层级（任务 5.3 去重），避免长按 Escape 一次按键连续退层。
-          event.preventDefault();
-          if (event.repeat) return;
-          if (objectAction.cancelGesture()) return;
-          if (objectAction.clearSelection()) return;
-          if (core.options.onModelFocusIntent) core.options.onModelFocusIntent({ type: "exit" });
-          else model.exitModelFocus();
-          return;
-        }
-      }
       if (event.key === "Escape") {
         event.preventDefault();
         if (core.options.onModelFocusIntent) core.options.onModelFocusIntent({ type: "exit" });
@@ -291,7 +263,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (isEditableElement(event.target) || hasSelectedText(target)) return;
     const copyable = copyableSelection();
     if (!copyable) return;
-    const closure = buildCanvasCopyPayload(copyable.canvasState, copyable.others, { content: options.compositeAssets?.getContent() });
+    const closure = buildCanvasCopyPayload(copyable.canvasState, copyable.others, );
     const included = new Set(closure?.nodes.map(n => n.id));
     if (closure?.nodes.some(n => {
       const data = copyable.canvasState.nodeData[n.id];

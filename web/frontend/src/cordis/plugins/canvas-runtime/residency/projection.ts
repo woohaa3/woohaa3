@@ -1,4 +1,4 @@
-import { activeFilmSetSceneBindings, readFilmSetGroupMarker, contentKeyForFilmSetGroupSource, builtinNodeCapabilityResolver, effectiveCanvasNodeSize, type NodeCapabilityResolver } from "@woohaa3/contracts";
+import { builtinNodeCapabilityResolver, effectiveCanvasNodeSize, type NodeCapabilityResolver } from "@woohaa3/contracts";
 /**
  * 从 working 画布投影页面资源需求
  * （change: 2026-10-23-scale-canvas-media-residency，design D1/D7）。
@@ -10,20 +10,9 @@ import { activeFilmSetSceneBindings, readFilmSetGroupMarker, contentKeyForFilmSe
  * 静止热路径（design D7 / 任务 7.1）：候选表按 working canvas 对象身份 memo；视口/选择/hover
  * 变化只重算需求分类，不重新解析资产 URL 或模型身份。文档变化（新对象）才重建候选表。
  */
-import {
-  getGroupLayoutSizes,
-  hiddenByCollapsedGroups,
-  groupBadgeBounds,
-  groupBadgeRect
-} from "@woohaa3/contracts";
-import { groupBadgeProjectionsForCanvas } from "../../canvas-shell/group-badge-projection.js";
 import type { ServerCanvas } from "@woohaa3/contracts";
 import type { ContentKeyOf } from "./content-identity.js";
 import type { CanvasResourceCoordinator } from "./coordinator.js";
-
-/** 画布节点（渲染中立）：只依赖几何与父子关系，不读取 `data`。 */
-type CanvasNode = ServerCanvas["document"]["nodes"][number];
-
 
 export type ResidencyCandidate = {
   nodeId: string;
@@ -34,8 +23,6 @@ export type ResidencyCandidate = {
   width: number;
   height: number;
   eligible: boolean;
-  /** 总览中被收起组隐藏，聚焦/捕获 pin 可临时恢复内容需求。 */
-  hiddenByGroup?: boolean;
   /**
    * 是否消耗「预览渲染槽」（离屏相机 + 渲染目标）。
    *
@@ -47,7 +34,7 @@ export type ResidencyCandidate = {
 };
 
 /**
- * 从画布派生候选表（媒体、模型、组展示模型及复合资产节点）。
+ * 从画布派生候选表（媒体与模型）。
  *
  * `contentKeyOf` 提供稳定内容身份；返回 `null` 表示该节点目前没有可驻留内容（例如资产未
  * ready），此时 `eligible: false`，但节点仍留在表里，避免每帧重建候选结构。
@@ -57,69 +44,23 @@ export function collectResidencyCandidates(
   contentKeyOf: ContentKeyOf,
   resolver: NodeCapabilityResolver = builtinNodeCapabilityResolver
 ): ResidencyCandidate[] {
-  const byId = new Map<string, CanvasNode>(canvas.document.nodes.map((node) => [node.id, node]));
-  const absolute = (node: CanvasNode): { x: number; y: number } => {
-    let x = node.position.x;
-    let y = node.position.y;
-    let parentId = node.parentId;
-    const guard = new Set<string>([node.id]);
-    while (parentId && !guard.has(parentId)) {
-      guard.add(parentId);
-      const parent = byId.get(parentId);
-      if (!parent) break;
-      x += parent.position.x;
-      y += parent.position.y;
-      parentId = parent.parentId;
-    }
-    return { x, y };
-  };
-  const groupSizes = getGroupLayoutSizes(canvas.document.nodes);
-  const badgeProjections = groupBadgeProjectionsForCanvas(canvas);
-  const hidden = hiddenByCollapsedGroups(canvas);
   const candidates: ResidencyCandidate[] = [];
   for (const node of canvas.document.nodes) {
     const capabilities = resolver.resolve({ canvas, node, data: canvas.nodeData[node.id] });
     if (!capabilities.resources) continue;
-    const size = groupSizes.get(node.id) ?? effectiveCanvasNodeSize(node, undefined, capabilities);
+    const size = effectiveCanvasNodeSize(node, undefined, capabilities);
     const key = contentKeyOf(node);
-    const frame = { ...absolute(node), ...size };
-    const projection = node.type === "group" ? badgeProjections.get(node.id) : undefined;
-    const badge = node.type === "group" ? groupBadgeRect(frame, projection) : null;
-    const collapsed = canvas.nodeData[node.id]?.groupCollapsed === true;
-    const rect = badge && collapsed ? badge : groupBadgeBounds(frame, projection);
     candidates.push({
       nodeId: node.id,
       contentKey: key ?? "",
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: rect.height,
-      eligible: !hidden.has(node.id) && key !== null,
-      hiddenByGroup: hidden.has(node.id),
-      // 离屏预览相机只为模型/复合资产创建；图片与视频走卡片贴图，不占预览渲染槽。
-      // 组模型直接绘制在画布世界（capability 声明 previewSlot: false）。
+      x: node.position.x,
+      y: node.position.y,
+      width: size.width,
+      height: size.height,
+      eligible: key !== null,
+      // 离屏预览相机只为模型创建；图片与视频走卡片贴图，不占预览渲染槽。
       previewSlot: capabilities.resources.previewSlot
     });
-    // A film-set group owns scene entities whose residency identity follows
-    // the source card. Keep one demand per binding so replacing a card version
-    // cannot reuse the previous `(sourceNodeId, contentKey)` resource.
-    const marker = node.type === "group" ? readFilmSetGroupMarker(canvas.nodeData[node.id]) : null;
-    if (marker) {
-      for (const binding of activeFilmSetSceneBindings(marker)) {
-        const key = contentKeyForFilmSetGroupSource(canvas, binding.sourceNodeId);
-        candidates.push({
-          nodeId: `${node.id}:${binding.bindingId}`,
-          contentKey: key ?? binding.contentKey,
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-          eligible: !hidden.has(node.id) && key !== null,
-          hiddenByGroup: hidden.has(node.id),
-          previewSlot: false
-        });
-      }
-    }
   }
   return candidates;
 }
@@ -162,7 +103,7 @@ export type ResidencyProjectorInput = {
   getCanvas: () => ServerCanvas | null;
   candidatesFor: (canvas: ServerCanvas | null) => readonly ResidencyCandidate[];
   /**
-   * 内容身份版本（模型/片场 prepared resource 就绪数等）。
+   * 内容身份版本（模型 prepared resource 就绪数等）。
    *
    * 异步资源就绪不会替换画布对象，但会把候选从「不可准入」变成「可准入」；版本进签名，
    * 静止帧才不会被误判为「投影未变」而永久跳过。
@@ -220,7 +161,7 @@ export function createResidencyProjector(input: ResidencyProjectorInput): () => 
       canvas?.id ?? "",
       // 画布对象身份即 revision/epoch 的直接体现：结构或内容变化才会替换对象。
       canvasKey(canvas),
-      // 异步内容就绪（模型/片场 prepared resource）不替换画布对象，必须单独进签名。
+      // 异步内容就绪（模型 prepared resource）不替换画布对象，必须单独进签名。
       String(input.contentVersion?.() ?? 0),
       String(coordinator.derivedGpuRevision()),
       validSurface ? `${surface.width}x${surface.height}@${surface.pixelRatio}` : "no-surface",
@@ -242,10 +183,7 @@ export function createResidencyProjector(input: ResidencyProjectorInput): () => 
       pageVisible: visible,
       interactive,
       pins,
-      // 聚焦继续访问原内容；退出聚焦后重新服从组的折叠呈现。
-      candidates: pins.length ? input.candidatesFor(canvas).map(candidate => candidate.hiddenByGroup
-        && candidate.contentKey && (pins.includes(candidate.nodeId) || interactive.includes(candidate.nodeId))
-        ? { ...candidate, eligible: true } : candidate) : input.candidatesFor(canvas)
+      candidates: input.candidatesFor(canvas)
     });
     coordinator.beginFrame();
     submitLeases();

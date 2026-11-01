@@ -11,5 +11,4 @@ export * from "./agent-connection.js";
 export * from "./agent-connection-codec.js";
 export * from "./assistant-execution.js";
 export * from "./assistant-text.js";
-export * from "./canvas-creation.js";
 export * from "./authoring.js";

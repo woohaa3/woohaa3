@@ -51,7 +51,7 @@ function render(ui: React.ReactElement) {
 const media = (key: string) => `/api/media/${key}`;
 
 describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
-  it("进行中的组记录自动展开面板，单纯的后台录制不抢开", () => {
+  it("单纯的后台录制不抢开面板", () => {
     const store = new TaskActivityStore();
     try {
       const container = render(<UiProvider><TaskActivityFeed store={store} resolveMediaUrl={media} /></UiProvider>);
@@ -63,20 +63,6 @@ describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
       }));
       expect(container.querySelector(".task-activity-feed")).toBeNull();
       expect(container.querySelector(".task-activity-feed__entry")).not.toBeNull();
-      // 新的进行中组记录：自动展开。
-      act(() => store.replaceGroupRuns({
-        rows: [{
-          rootGroupId: "g1",
-          creation: {
-            requestId: "creation-g1", canvasId: "c", rootGroupId: "g1", commandId: "cmd",
-            turnRequestId: "request-g1", scopeEpoch: 1, stage: "accepted"
-          },
-          requestId: "request-g1", status: "running", label: "创作中", active: true,
-          createdAt: "2026-01-01T00:00:01Z"
-        }],
-        error: ""
-      }));
-      expect(container.querySelector(".task-activity-feed")).not.toBeNull();
     } finally { store.dispose(); }
   });
 

@@ -5,9 +5,7 @@ import type { AgentConversationDecodeResult, ConversationTurnStatus } from "./co
 export type AssistantTarget = { canvasId: string; nodeId: string } & (
   | { purpose: "text" }
   | { purpose: "model3d"; expectedContentHash?: string }
-  | { purpose: "film-set"; clipId: string; itemId?: string; expectedContentHash?: string }
   | { purpose: "camera"; cameraId?: string; clipId?: string; expectedContentHash?: string }
-  | { purpose: "canvas-group"; scopeEpoch: number }
   | { purpose: "conversion"; sourceNodeId: string; sourceKind: "image" | "video" }
 );
 

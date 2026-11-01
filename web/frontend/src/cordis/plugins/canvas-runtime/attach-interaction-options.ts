@@ -5,7 +5,6 @@
  * 只读取宿主回调，返回可由 `installInteractionController` 消费的 options。
  */
 import type { InteractionControllerOptions } from "../canvas-shell/interaction-controller.js";
-import type { CompositeAssetMediaSessions } from "./composite-asset-media-session.js";
 import type { VideoFrameSessions } from "./video-frame-session.js";
 import type { TextureUploader } from "./texture-sync.js";
 import type { ModelEditorGestureRefs } from "./model-editor-gestures.js";
@@ -17,15 +16,12 @@ export type AttachAssemblyDeps = {
   options: CanvasRuntimeOptions;
   textureSync: TextureUploader;
   videoSessions: VideoFrameSessions;
-  compositeAssetMediaSessions: CompositeAssetMediaSessions;
   getRuntime: InteractionControllerOptions["getRuntime"];
   getModelResources: InteractionControllerOptions["getModelResources"];
   theme: InteractionControllerOptions["getTheme"];
   getGhostNodes: () => readonly import("@woohaa3/contracts").GhostRenderNode[];
   getNodeActionToolbars?: NonNullable<InteractionControllerOptions["getNodeActionToolbars"]>;
   onNodeAction?: NonNullable<InteractionControllerOptions["onNodeAction"]>;
-  getSelectionActionToolbar?: NonNullable<InteractionControllerOptions["getSelectionActionToolbar"]>;
-  onSelectionAction?: NonNullable<InteractionControllerOptions["onSelectionAction"]>;
   modelFocus: () => import("@woohaa3/contracts").ModelFocusProjection | null;
   modelFocusMode: InteractionControllerOptions["getModelFocusMode"];
   focusTargets: () => readonly FocusTargetInput[];
@@ -61,7 +57,6 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     nodeCapabilities: options.nodeCapabilities,
     onSceneSubmitted: deps.onSceneSubmitted,
     ...(options.mediaContent ? { mediaContent: options.mediaContent } : {}),
-    ...(options.compositeAssets ? { compositeAssets: options.compositeAssets } : {}),
     ...(options.canvasId ? { canvasId: options.canvasId } : {}),
     getRuntime: deps.getRuntime,
     getSession: () => options.getSession(),
@@ -71,7 +66,6 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     getTheme: deps.theme,
     textureSync: deps.textureSync,
     videoSessions: deps.videoSessions,
-    compositeAssetMediaSessions: deps.compositeAssetMediaSessions,
     ...(options.isModalActive ? { isModalActive: options.isModalActive } : {}),
     ...(options.isFocusInputBlocked ? { isFocusInputBlocked: options.isFocusInputBlocked } : {}),
     ...(options.onFindRequest ? { onFindRequest: options.onFindRequest } : {}),
@@ -82,8 +76,6 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     getGhostNodes: deps.getGhostNodes,
     ...(deps.getNodeActionToolbars ? { getNodeActionToolbars: deps.getNodeActionToolbars } : {}),
     ...(deps.onNodeAction ? { onNodeAction: deps.onNodeAction } : {}),
-    ...(deps.getSelectionActionToolbar ? { getSelectionActionToolbar: deps.getSelectionActionToolbar } : {}),
-    ...(deps.onSelectionAction ? { onSelectionAction: deps.onSelectionAction } : {}),
     getModelFocusTargets: deps.focusTargets,
     hasModelFocusTarget: deps.hasFocusTarget,
     getModelFocus: deps.modelFocus,
@@ -106,10 +98,6 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     ...(deps.gestures.shot ? { shotGesture: deps.gestures.shot } : {}),
     ...(deps.gestures.focus ? { focusGesture: deps.gestures.focus } : {}),
     ...(deps.gestures.shotWheel ? { shotWheel: deps.gestures.shotWheel } : {}),
-    ...(deps.gestures.object ? { filmSetObjectGesture: deps.gestures.object } : {}),
-    // 片场对象局部键盘 action（Delete/Backspace/分层 Escape）随 controller 构造注入；
-    // 缺省会丢失已注册的 action，导致真实浏览器按键路由失效（change: 2026-10-10 任务 4.1/5.1）。
-    ...(deps.gestures.objectAction ? { filmSetObjectAction: deps.gestures.objectAction } : {}),
     onModelFocusChange: deps.onModelFocusChange,
     onViewportChange: deps.onViewportChange,
     ...(deps.onFrame ? { onFrame: deps.onFrame } : {}),
@@ -135,7 +123,6 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
       });
     },
     ...(options.onModelFocusIntent ? { onModelFocusIntent: options.onModelFocusIntent } : {}),
-    ...(options.onShotPreviewEnterIntent ? { onShotPreviewEnterIntent: options.onShotPreviewEnterIntent } : {}),
     ...(options.onModelFocusInvalid ? { onModelFocusInvalid: options.onModelFocusInvalid } : {})
   };
 }

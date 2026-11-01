@@ -1,10 +1,9 @@
-/** Mutable plan-local geometry. World positions keep refits from moving unrelated siblings. */
+/** Mutable plan-local geometry. */
 import { effectiveCanvasNodeSize } from "../../node-dimensions.js";
 import { AGENT_CANVAS_LIMITS, type AgentGridLayout } from "../../agent-canvas-protocol.js";
 import type { CanvasCommand } from "../../commands.js";
 import { collectWoohaa3CanvasRemovalIds } from "../../domain/core/node-removal.js";
-import { groupPadding, groupBottomPadding } from "../../domain/core/group-geometry.js";
-import { organizationWorldBounds, type OrganizationNode } from "../organization.js";
+import type { OrganizationNode } from "../organization.js";
 import type { PlannerSnapshot } from "./types.js";
 
 export class PlanGeometryError extends Error {
@@ -26,11 +25,10 @@ export class PlanGeometry {
   readonly affected = new Set<string>();
   readonly originalIds: Set<string>;
   constructor(readonly snapshot: PlannerSnapshot) {
-    const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
     for (const n of snapshot.nodes)
       this.nodes.set(n.id, {
         ...n,
-        position: (({ x, y }) => ({ x, y }))(organizationWorldBounds(n, byId)),
+        position: { x: n.position.x, y: n.position.y },
         width: n.width ?? effectiveCanvasNodeSize(n).width,
         height: n.height ?? effectiveCanvasNodeSize(n).height,
       });
@@ -41,100 +39,20 @@ export class PlanGeometry {
     planAssert(n, "unknown-node", `节点 ${id} 不存在或已删除`);
     return n;
   }
-  children(id: string) {
-    return [...this.nodes.values()].filter((n) => n.parentId === id);
-  }
-  isAncestor(ancestor: string, id: string): boolean {
-    let p = this.require(id).parentId;
-    const seen = new Set<string>();
-    while (p && !seen.has(p)) {
-      if (p === ancestor) return true;
-      seen.add(p);
-      p = this.nodes.get(p)?.parentId;
-    }
-    return false;
-  }
-  roots(ids: string[], sameParent: boolean) {
-    planAssert(ids.length && new Set(ids).size === ids.length, "invalid-ref", "选择必须非空且不重复");
-    const selected = ids.map((id) => this.require(id));
-    for (const a of ids)
-      for (const b of ids) if (a !== b) planAssert(!this.isAncestor(a, b), "invalid-parent", "不能混选祖先与后代");
-    if (sameParent)
-      planAssert(
-        selected.every((n) => n.parentId === selected[0].parentId),
-        "invalid-parent",
-        "成员必须共享直属 parent；请先 reparent",
-      );
-    return selected;
-  }
   touch(id: string) {
     // change: 2026-10-22-remove-agent-execution-limits，任务 5.1：影响节点数不再是额度；
     // 完整派生集合由同一 planner 原子处理。
     this.affected.add(id);
   }
   move(id: string, target: { x: number; y: number }) {
-    const n = this.require(id),
-      dx = target.x - n.position.x,
-      dy = target.y - n.position.y;
-    if (!dx && !dy) {
-      this.touch(id);
-      return;
-    }
-    for (const child of this.nodes.values())
-      if (child.id === id || this.isAncestor(id, child.id)) {
-        this.touch(child.id);
-        child.position = { x: child.position.x + dx, y: child.position.y + dy };
-      }
-  }
-  /** Tight refit, inner to outer; world positions of every child stay fixed. */
-  refit(ids: Iterable<string | undefined>) {
-    const queue = new Set<string>();
-    for (const id of ids) {
-      let cursor = id;
-      while (cursor && !queue.has(cursor)) {
-        queue.add(cursor);
-        cursor = this.nodes.get(cursor)?.parentId;
-      }
-    }
-    const depth = (id: string) => {
-      let d = 0,
-        p = this.nodes.get(id)?.parentId;
-      while (p) {
-        d++;
-        p = this.nodes.get(p)?.parentId;
-      }
-      return d;
-    };
-    for (const id of [...queue].sort((a, b) => depth(b) - depth(a))) {
-      const n = this.nodes.get(id);
-      if (!n || n.type !== "group") continue;
-      const children = this.children(id);
-      if (!children.length && n.retainWhenEmpty === true) continue;
-      if (!children.length) {
-        this.touch(id);
-        this.nodes.delete(id);
-        continue;
-      }
-      const x = this.snapshot.rootGroupId === id
-        ? Math.min(n.position.x, Math.min(...children.map((c) => c.position.x)) - groupPadding)
-        : Math.min(...children.map((c) => c.position.x)) - groupPadding;
-      const y = this.snapshot.rootGroupId === id
-        ? Math.min(n.position.y, Math.min(...children.map((c) => c.position.y)) - groupPadding)
-        : Math.min(...children.map((c) => c.position.y)) - groupPadding;
-      const right = Math.max(...children.map((c) => c.position.x + effectiveCanvasNodeSize(c).width)) + groupPadding;
-      const bottom = Math.max(...children.map((c) => c.position.y + effectiveCanvasNodeSize(c).height)) + groupBottomPadding;
-      const root = this.snapshot.rootGroupId === id;
-      // 根组向外扩展时保留原来的右/下边界；否则上/左移动会把另一侧缩小。
-      const rightEdge = root ? Math.max(right, n.position.x + n.width) : right;
-      const bottomEdge = root ? Math.max(bottom, n.position.y + n.height) : bottom;
-      this.touch(id);
-      n.position = { x, y };
-      n.width = root ? rightEdge - x : Math.max(248, rightEdge - x);
-      n.height = root ? bottomEdge - y : Math.max(232, bottomEdge - y);
-    }
+    const n = this.require(id);
+    if (!n.position.x && !n.position.y && !target.x && !target.y) return;
+    this.touch(id);
+    n.position = { x: target.x, y: target.y };
   }
   grid(ids: string[], grid: AgentGridLayout) {
-    const selected = this.roots(ids, true);
+    planAssert(ids.length && new Set(ids).size === ids.length, "invalid-ref", "选择必须非空且不重复");
+    const selected = ids.map((id) => this.require(id));
     planAssert(
       grid.mode === "grid" && Number.isInteger(grid.columns) && grid.columns >= 1,
       "malformed-request",
@@ -151,8 +69,8 @@ export class PlanGeometry {
     const widths = Array(columns).fill(0),
       heights = Array(Math.ceil(selected.length / columns)).fill(0);
     selected.forEach((n, i) => {
-      widths[i % columns] = Math.max(widths[i % columns], effectiveCanvasNodeSize(n).width);
-      heights[Math.floor(i / columns)] = Math.max(heights[Math.floor(i / columns)], effectiveCanvasNodeSize(n).height);
+      widths[i % columns] = Math.max(widths[i % columns]!, n.width);
+      heights[Math.floor(i / columns)] = Math.max(heights[Math.floor(i / columns)]!, n.height);
     });
     const origin = grid.origin ?? {
       x: Math.min(...selected.map((n) => n.position.x)),
@@ -165,60 +83,19 @@ export class PlanGeometry {
         y: origin.y + offset(heights, Math.floor(i / columns), gapY),
       }),
     );
-    this.refit(selected.map((n) => n.parentId));
-  }
-  reparent(ids: string[], parent: string | null) {
-    const selected = this.roots(ids, false);
-    if (parent !== null) {
-      planAssert(this.require(parent).type === "group", "invalid-parent", "parent 必须是 group");
-      // 不支持嵌套 group（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）。
-      planAssert(
-        selected.every((n) => n.type !== "group"),
-        "invalid-parent",
-        "不支持嵌套 group：group 不能成为另一个 group 的成员",
-      );
-      for (const id of ids)
-        planAssert(id !== parent && !this.isAncestor(id, parent), "invalid-parent", "成员关系不能成环");
-    }
-    const ancestors = selected.map((n) => n.parentId);
-    for (const n of selected) {
-      this.touch(n.id);
-      n.parentId = parent ?? undefined;
-    }
-    this.refit([...ancestors, parent ?? undefined]);
-  }
-  ungroup(id: string) {
-    const group = this.require(id);
-    planAssert(group.type === "group", "invalid-parent", "ungroup 需要 group");
-    for (const child of this.children(id)) {
-      this.touch(child.id);
-      child.parentId = group.parentId;
-    }
-    this.touch(id);
-    this.nodes.delete(id);
-    this.refit([group.parentId]);
   }
   remove(ids: string[]) {
     ids.forEach((id) => this.require(id));
-    const removed = collectWoohaa3CanvasRemovalIds(this.canonical(), ids, Object.fromEntries([...this.nodes].map(([id, n]) => [id, { retainWhenEmpty: n.retainWhenEmpty }])));
-    const parents = [...removed].map((id) => this.nodes.get(id)?.parentId);
+    const removed = collectWoohaa3CanvasRemovalIds(this.canonical(), ids, Object.fromEntries([...this.nodes].map(([id]) => [id, {}])));
     for (const id of removed) {
       this.touch(id);
       this.nodes.delete(id);
     }
-    this.refit(parents);
     return removed;
   }
   canonical(): GeometryNode[] {
-    return [...this.nodes.values()].map((n) => {
-      const parent = n.parentId ? this.nodes.get(n.parentId) : undefined;
-      return {
-        ...n,
-        position: { x: n.position.x - (parent?.position.x ?? 0), y: n.position.y - (parent?.position.y ?? 0) },
-      };
-    });
+    return [...this.nodes.values()].map((n) => ({ ...n, position: { ...n.position } }));
   }
-  /** Emit reparent/geometry updates before removals, so ungroup cannot cascade into members. */
   diff(before: GeometryNode[]): CanvasCommand[] {
     const old = new Map(before.map((n) => [n.id, n]));
     const commands: CanvasCommand[] = [];
@@ -226,7 +103,6 @@ export class PlanGeometry {
       const prev = old.get(n.id);
       if (!prev) continue;
       if (
-        prev.parentId !== n.parentId ||
         prev.position.x !== n.position.x ||
         prev.position.y !== n.position.y ||
         prev.width !== n.width ||
@@ -236,7 +112,6 @@ export class PlanGeometry {
         commands.push({
           type: "node.update",
           nodeId: n.id,
-          parentId: n.parentId ?? null,
           position: n.position,
           width: n.width,
           height: n.height,
@@ -244,10 +119,7 @@ export class PlanGeometry {
       }
     }
     const removed = before.filter((n) => !this.nodes.has(n.id));
-    // Deepest first: all surviving descendants have already been detached above.
-    const removedIds = new Set(removed.map((n) => n.id));
-    const roots = removed.filter((n) => !n.parentId || !removedIds.has(n.parentId));
-    if (roots.length) commands.push({ type: "node.remove", nodeIds: roots.map((n) => n.id) });
+    if (removed.length) commands.push({ type: "node.remove", nodeIds: removed.map((n) => n.id) });
     for (const n of this.nodes.values())
       planAssert(
         Number.isFinite(n.position.x) &&

@@ -10,8 +10,6 @@ import { startApp, type AppRuntime } from "./page-scope.js";
 import { resolvePageLocation, locationToPath } from "./navigation/app-router-store.js";
 import { createFakeCanvasCatalogRemote, makeSummary } from "./test-support/canvas-catalog.js";
 import { createSourceExtensionRuntimeService } from "./test-support/source-extensions.js";
-import { routeNodeActionHit } from "./plugins/canvas-shell/node-action-host.js";
-import type { TaskActivityStore } from "@woohaa3/extension-task-activity/frontend";
 
 let app: AppRuntime | null = null;
 
@@ -162,14 +160,6 @@ describe("Page scope 生命周期", () => {
     expect(diagnostics.plugins.find((plugin) => plugin.id === "model-editor")?.status).toBe("active");
     expect(diagnostics.plugins.find((plugin) => plugin.id === "task-activity")?.status).toBe("active");
     expect(page.ctx.slots.list("canvas.overlay").some(entry => entry.id === "task-activity-feed")).toBe(true);
-    const activity = page.ctx.get("taskActivityStore" as never) as unknown as { store: TaskActivityStore };
-    routeNodeActionHit({
-      hit: { nodeId: "creation-group", actionId: "group-run-status", menu: false },
-      context: { nodeId: "creation-group", nodeType: "group", writable: false },
-      contributions: page.ctx.slots.list("canvas.node-action"),
-      openSettings: () => { throw new Error("状态入口不应打开节点设置"); }
-    });
-    expect(activity.store.getSnapshot()).toMatchObject({ selectedGroupId: "creation-group", openRevision: 1 });
     expect(page.ctx.slots.list("canvas.toolbar-action").some((entry) => entry.id === "node-history-all")).toBe(false);
   });
 

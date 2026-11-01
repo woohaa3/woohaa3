@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { executeMotionScript } from "./motion-executor.js";
-import { evaluateMotionIr, MOTION_IR_VERSION } from "./motion-ir.js";
+import { evaluateMotionIr } from "./motion-ir.js";
 import { PARKOUR_MOTION_SCRIPT } from "./model-api-descriptor-motion.js";
-import { buildFilmSetObjectMotions, composeFilmSetPreviewAtTime } from "./film-set-composition.js";
-import { createModelSnapshot } from "./animation-snapshot.js";
-import { createFilmSetItemMotion, encodeFilmSetPartId, type FilmSetContent, type FilmSetItem } from "./film-set-content.js";
-import { prepareModelResource } from "./prepared-model.js";
-import { executeModelScriptVersioned } from "./model-executor-v2.js";
 import { quatFromEulerYXZDegrees } from "./model-transform.js";
 
 const context = { duration: 12, partIds: new Set(["root"]), initialCamera: { azimuth: 0, elevation: 0, distance: 8, focusOffset: { x: 0, y: 0, z: 0 } } };
@@ -72,30 +67,4 @@ describe("连续单人物运动", () => {
     if (!result.ok) expect(result.message.length).toBeGreaterThan(0);
   });
 
-  it("对象 root 始终映射 itemId；几何不随动作增长；原生烘焙与实时轨道一致", () => {
-    // 作者模型也叫 root，不能覆盖整个人物的保留别名。
-    const model = createModelSnapshot({ modelScript: 'scene.group({id:"root",rotation:[10,20,30]});scene.box({id:"body",parent:"root"});', modelScriptVersion: "woohaa-model-js-v2" });
-    const base: FilmSetItem = { id: "hero", kind: "model", name: "人物", model, localTransform: { offset: { x: 10, y: 2, z: 3 }, scale: 0.5, yaw: 0.3 } };
-    const motion = createFilmSetItemMotion({ item: base, motionScript: PARKOUR_MOTION_SCRIPT });
-    const playback = { startTime: 2, duration: 8, timeScale: 1, loop: false };
-    const filmSetContent: FilmSetContent = { schemaVersion: 4, items: [base] };
-    const bindings = [{ itemId: "hero", motion, playback }];
-    const projection = buildFilmSetObjectMotions({ filmSetContent, bindings });
-    expect(projection.diagnostics).toEqual([]);
-    expect(projection.motions[0]!.partIds.root).toBe(encodeFilmSetPartId("hero", ""));
-    expect(projection.motions[0]!.modelMotion).toHaveLength(2);
-    const atEnd = composeFilmSetPreviewAtTime({ scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, filmSetContent, bindings }, 10);
-    const later = composeFilmSetPreviewAtTime({ scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, filmSetContent, bindings }, 12);
-    expect(later.ops).toEqual(atEnd.ops);
-    const root = atEnd.ops.find(op => op.t === "group" && op.id === encodeFilmSetPartId("hero", ""));
-    expect(root && "position" in root && root.position).toEqual([26, 5, 3]);
-    const staticOps = executeModelScriptVersioned(model.modelScript, model.modelScriptVersion);
-    if (!staticOps.ok) throw new Error(staticOps.message);
-    const geometry = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: staticOps.scene.ops });
-    expect(geometry.ops).toHaveLength(2);
-    expect(JSON.stringify(projection.motions).length).toBeLessThan(2000);
-    expect(projection.motions[0]!.playback.loop).toBe(false);
-    expect(projection.motions[0]!.modelMotion[0]!.motion.kind).toBe("keyframes");
-    expect(MOTION_IR_VERSION).toBe("woohaa-motion-ir-v1");
-  });
 });

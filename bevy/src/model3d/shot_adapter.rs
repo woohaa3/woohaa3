@@ -22,13 +22,6 @@ use super::layout::{model_anchor, model_unit, model_view_rotation};
 use super::runtime::{ModelAssets, ModelVisuals};
 use super::scene::{self, ModelAabb};
 
-/// 片场场景单位 → 画布世界单位的显示变换
-/// （change: 2026-10-23-isolate-film-set-camera-space，design D2）。
-///
-/// 内容几何与完整相机姿态必须共用它：`scale` 是 `model_unit`（自然单位 × 节点矩形容器适配），
-/// `yaw` 是 placement 的绕 Y 轴旋转。只用它做**呈现**映射，绝不写回作品参数。
-pub(crate) type DisplayUnit = crate::film_set_space::DisplayUnit;
-
 /// adapter 当前持有的 rig 与来源 identity。
 #[derive(Resource, Default)]
 pub(crate) struct ShotAdapterState {
@@ -94,182 +87,24 @@ pub(crate) fn model_bounds_for_node(
     node_id: &str,
 ) -> Option<ModelBounds> {
     let node = scene.nodes.iter().find(|node| node.id == node_id)?;
-    if scene
-        .film_set_groups
-        .iter()
-        .any(|group| group.owner_id == node_id)
-    {
-        let candidates = super::film_set_pick::group_candidates(scene, node_id, |key| {
-            resources.get(key).cloned()
-        });
-        let mut min = Vec3::splat(f32::INFINITY);
-        let mut max = Vec3::splat(f32::NEG_INFINITY);
-        for candidate in &candidates.candidates {
-            min = min.min(Vec3::from_array(candidate.min));
-            max = max.max(Vec3::from_array(candidate.max));
-        }
-        if !candidates.candidates.is_empty() {
-            return Some(ModelBounds {
-                center: (min + max) * 0.5,
-                radius: (max - min).length() * 0.5,
-            });
-        }
-    }
-    // The editor resolves its saved camera against the canonical layout box, including
-    // media at their base size. Re-unioning rendered geometry (or spheres) here changes
-    // its center/radius and clamps the same saved distance differently in a card.
-    if let Some(bounds) = node
-        .composite_asset
-        .as_ref()
-        .and_then(|asset| asset.layout_aabb)
-    {
-        let model = node
-            .model
-            .as_ref()
-            .and_then(|reference| resources.get(&reference.resource_key))
-            .map(|model| model.as_ref())
-            .or_else(|| models.roots.get(node_id).map(|root| root.resource.as_ref()));
-        let root = super::media_geometry::film_set_root(node, model);
-        let world = ModelAabb::new(bounds.min, bounds.max).transformed(&root);
-        return Some(ModelBounds {
-            center: world.center(),
-            radius: world.radius(),
-        });
-    }
-    let model_bounds = (|| {
-        let reference = node.model.as_ref()?;
-        let root = models.roots.get(node_id)?;
-        let model = resources
-            .get(&reference.resource_key)
-            .map(|arc| arc.as_ref())
-            .unwrap_or(root.resource.as_ref());
-        let placement = &reference.placement;
-        let unit = model_unit(node, model, placement);
-        let root_rotation = model_view_rotation(placement);
-        let local = scene::placed_local_aabb(
-            model,
-            node.composite_asset
-                .as_ref()
-                .map(|asset| &asset.item_placements),
-        )?
-        .transformed(&Transform {
-            rotation: root_rotation,
-            scale: Vec3::splat(unit),
-            ..default()
-        });
-        Some(ModelBounds::from_local_aabb(
-            &local,
-            model_anchor(node, model, placement, unit),
-        ))
-    })();
-    let media = node
-        .composite_asset
-        .as_ref()
-        .map(|scope| scope.media.as_slice())
-        .unwrap_or(&[]);
-    if media.is_empty() {
-        return model_bounds;
-    }
-    let model = node
-        .model
-        .as_ref()
-        .and_then(|reference| resources.get(&reference.resource_key))
-        .map(|arc| arc.as_ref());
-    let mut min = Vec3::splat(f32::INFINITY);
-    let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for plane in media {
-        let candidate = super::media_geometry::item_candidate(node, model, plane);
-        min = min.min(Vec3::from_array(candidate.min));
-        max = max.max(Vec3::from_array(candidate.max));
-    }
-    if let Some(bounds) = model_bounds {
-        // Union both visible content kinds. Never ignore media when model geometry exists.
-        min = min.min(bounds.center - Vec3::splat(bounds.radius));
-        max = max.max(bounds.center + Vec3::splat(bounds.radius));
-    }
-    Some(ModelBounds {
-        center: (min + max) * 0.5,
-        radius: (max - min).length() * 0.5,
-    })
-}
-
-/// 由显式 nodeId 派生片场的显示变换（场景 → 画布世界）。
-///
-/// 与内容根 transform 同源：倍率就是 `model_unit`（自然单位 × 节点矩形容器适配），旋转是
-/// placement 的 yaw。非法/缺失节点返回 `None`，调用方不得猜测镜头。
-pub(crate) fn display_unit_for_node(
-    scene: &Scene,
-    resources: &ModelAssets,
-    node_id: &str,
-) -> Option<DisplayUnit> {
-    let node = scene.nodes.iter().find(|node| node.id == node_id)?;
-    if node.composite_asset.is_none()
-        && !scene
-            .film_set_groups
-            .iter()
-            .any(|group| group.owner_id == node_id)
-    {
-        return None;
-    }
-    let placement = node
-        .model
-        .as_ref()
-        .map(|reference| reference.placement.clone())
-        .or_else(|| {
-            node.composite_asset
-                .as_ref()
-                .and_then(|asset| asset.root_placement.clone())
-        })
-        .unwrap_or_default();
-    let fallback;
-    let snapshot: &crate::protocol::ModelSnapshot = match node
-        .model
-        .as_ref()
-        .and_then(|reference| resources.get(&reference.resource_key))
-    {
-        Some(model) => model.as_ref(),
-        None => {
-            fallback = crate::protocol::ModelSnapshot {
-                extent: node
-                    .composite_asset
-                    .as_ref()
-                    .and_then(|asset| asset.content_extent)
-                    .unwrap_or(2.0)
-                    .max(0.001),
-                ..Default::default()
-            };
-            &fallback
-        }
-    };
-    DisplayUnit::validated(
-        model_unit(node, snapshot, &placement),
-        placement.yaw.to_radians(),
-    )
-}
-
-/// 场景镜头状态 → 画布显示镜头状态（距离、focusOffset 与方位角按同一相似变换）
-/// （change: 2026-10-23-isolate-film-set-camera-space，design D2）。
-///
-/// 公式唯一来源在 [`crate::film_set_space::display_camera`]；这里只做 `CameraState` 适配。
-pub(crate) fn display_camera_state(
-    display: Option<DisplayUnit>,
-    camera: &crate::motion::CameraState,
-) -> Option<crate::motion::CameraState> {
-    let mapped = crate::film_set_space::display_camera(
-        display,
-        &crate::film_set_space::SceneCamera {
-            azimuth: camera.azimuth,
-            elevation: camera.elevation,
-            distance: camera.distance,
-            focus_offset: camera.focus_offset,
-        },
-    )?;
-    Some(crate::motion::CameraState {
-        azimuth: mapped.azimuth,
-        elevation: mapped.elevation,
-        distance: mapped.distance,
-        focus_offset: mapped.focus_offset,
-    })
+    let reference = node.model.as_ref()?;
+    let root = models.roots.get(node_id)?;
+    let model = resources
+        .get(&reference.resource_key)
+        .map(|arc| arc.as_ref())
+        .unwrap_or(root.resource.as_ref());
+    let placement = &reference.placement;
+    let unit = model_unit(node, model, placement);
+    let root_rotation = model_view_rotation(placement);
+    let local = scene::placed_local_aabb(model, None)?.transformed(&Transform {
+        rotation: root_rotation,
+        scale: Vec3::splat(unit),
+        ..default()
+    });
+    Some(ModelBounds::from_local_aabb(
+        &local,
+        model_anchor(node, model, placement, unit),
+    ))
 }
 
 /// 由共享目标包围球与采样镜头状态派生世界姿态（focus + position）
@@ -277,24 +112,21 @@ pub(crate) fn display_camera_state(
 ///  change: 2026-10-23-isolate-film-set-camera-space，任务 2.2 / design D2：完整相机经同一显示
 ///  变换映射，构图与节点矩形无关）。
 ///
-/// `bounds.center` 已是画布世界的包围球中心（`D(sceneCenter)`）；`camera` 的 distance 与
-/// focus_offset 仍是**场景单位**，必须按 `display` 映射到世界。非有限输入返回 `None`
-/// （不伪造位置）。
+/// `bounds.center` 已是画布世界的包围球中心；`camera` 的 distance 与 focus_offset 是世界
+/// 单位。非有限输入返回 `None`（不伪造位置）。
 pub(crate) fn sampled_camera_pose(
     bounds: ModelBounds,
-    display: Option<DisplayUnit>,
     camera: &crate::motion::CameraState,
 ) -> Option<(Vec3, Vec3)> {
     if !bounds.center.is_finite() || !bounds.radius.is_finite() {
         return None;
     }
-    let mapped = display_camera_state(display, camera)?;
-    let focus = bounds.center + mapped.focus_offset;
+    let focus = bounds.center + camera.focus_offset;
     let position = crate::shot_camera::shot_camera_position(
         focus,
-        mapped.azimuth,
-        mapped.distance,
-        mapped.elevation,
+        camera.azimuth,
+        camera.distance,
+        camera.elevation,
     );
     Some((focus, position))
 }
@@ -325,24 +157,6 @@ fn surface_vec(scene: &Scene) -> Vec2 {
 ///   变换映射；
 /// - `modelEditor.shot` 是前端已映射好的**画布世界**姿态（gizmo、命中与截图共用同一坐标）。
 fn desired_shot(scene: &Scene) -> Option<(String, Option<String>, f32, ShotCameraPose, bool)> {
-    if let Some(playback) = scene
-        .animation_playback
-        .as_ref()
-        .filter(|p| p.view_mode == "focus-preview")
-    {
-        return Some((
-            playback.node_id.clone(),
-            Some(format!("clip:{}", playback.clip_id)),
-            aspect_ratio(&playback.initial_camera.aspect),
-            ShotCameraPose {
-                azimuth: playback.initial_camera.azimuth,
-                elevation: playback.initial_camera.elevation,
-                distance: playback.initial_camera.distance,
-                focus_offset: Vec3::from_array(playback.initial_camera.focus_offset),
-            },
-            true,
-        ));
-    }
     let editor = scene.model_editor.as_ref()?;
     if editor.tool_mode != "camera" {
         return None;
@@ -405,42 +219,8 @@ pub(crate) fn sync_shot_adapter(
     };
 
     let bounds = focused_model_bounds(scene, models, resources);
-    // 场景单位姿态（活动播放）必须经同一显示变换映射到画布世界；前端已映射过的
-    // `modelEditor.shot` 直接使用，绝不二次缩放（change: 2026-10-23-isolate-film-set-camera-space，D2）。
-    let display = scene_units
-        .then(|| display_unit_for_node(scene, resources, &node_id))
-        .flatten();
-    if scene_units && display.is_none() {
-        // 场景单位姿态缺少合法显示变换：不构造猜测镜头（也不保留旧 rig）。
-        if let Some(rig) = state.rig.take() {
-            commands.entity(rig).try_despawn();
-        }
-        selection.entities.clear();
-        return;
-    }
-    let pose = if scene_units {
-        let state_for_mapping = crate::motion::CameraState {
-            azimuth: scene_pose.azimuth,
-            elevation: scene_pose.elevation,
-            distance: scene_pose.distance,
-            focus_offset: scene_pose.focus_offset,
-        };
-        let Some(mapped) = display_camera_state(display, &state_for_mapping) else {
-            if let Some(rig) = state.rig.take() {
-                commands.entity(rig).try_despawn();
-            }
-            selection.entities.clear();
-            return;
-        };
-        ShotCameraPose {
-            azimuth: mapped.azimuth,
-            elevation: mapped.elevation,
-            distance: mapped.distance,
-            focus_offset: mapped.focus_offset,
-        }
-    } else {
-        scene_pose
-    };
+    let _ = scene_units;
+    let pose = scene_pose;
 
     let identity_changed = state.node_id.as_deref() != Some(node_id.as_str())
         || state.camera_id != camera_id
@@ -456,15 +236,10 @@ pub(crate) fn sync_shot_adapter(
         state.rig
     };
 
-    let still_preview = scene
-        .model_editor
+    let animation_preview = scene
+        .animation_playback
         .as_ref()
-        .is_some_and(|editor| editor.shot_preview);
-    let animation_preview = still_preview
-        || scene
-            .animation_playback
-            .as_ref()
-            .is_some_and(|p| p.view_mode == "focus-preview");
+        .is_some_and(|p| p.view_mode == "focus-preview");
     let lens = ShotCameraLens::from_aspect(aspect);
     // 窗口相机的矩形由 `sync_shot_main_view` 写成左下角预览框；这里的尺寸只参与预览预算。
     let preview = ShotCameraPreview::new(320, 180)
@@ -530,65 +305,8 @@ fn is_hex_color(value: &str) -> bool {
 }
 
 #[cfg(test)]
-mod focus_offset_tests {
+mod tests {
     use super::*;
-
-    #[test]
-    fn saved_composition_uses_layout_bounds_instead_of_scaled_media_geometry() {
-        let mut scene = Scene::default();
-        scene.nodes.push(serde_json::from_value(serde_json::json!({
-            "id":"film", "type":"model", "x":200,"y":180,"width":400,"height":300,
-            "compositeAsset":{"x":200,"y":180,"width":400,"height":300,
-                "contentExtent":2,
-                "layoutAabb":{"min":[-3,-1,-2],"max":[7,4,3]},
-                "rootPlacement":{"offset":{"x":0,"y":0,"z":0},"scale":1,"yaw":37},
-                "media":[{"id":"photo","kind":"image","x":10,"y":8,"z":0,"width":20,"height":16,"yaw":0.3}]}
-        })).unwrap());
-        let models = ModelVisuals::default();
-        let resources = ModelAssets::new();
-        let first = model_bounds_for_node(&scene, &models, &resources, "film").unwrap();
-        // Same canonical layout as Web's editor. A rendered plane's current size is
-        // deliberately different from its base size and cannot redefine the shot.
-        let root = super::super::media_geometry::film_set_root(&scene.nodes[0], None);
-        let expected = ModelAabb::new([-3.0, -1.0, -2.0], [7.0, 4.0, 3.0]).transformed(&root);
-        assert!(first.center.abs_diff_eq(expected.center(), 1e-4));
-        assert!((first.radius - expected.radius()).abs() < 1e-4);
-        // Independent Web modelBounds/resolveShotCamera values for this rotated,
-        // media-containing layout; exercise the distance-clamp boundary as well.
-        assert!(
-            first
-                .center
-                .abs_diff_eq(Vec3::new(429.70516, -261.13849, -135.98026), 1e-3)
-        );
-        assert!((first.radius - 272.36445).abs() < 1e-3);
-        let shot = crate::shot_camera::resolve_from_center_radius(
-            first.center,
-            first.radius,
-            0.6,
-            0.4,
-            0.1,
-            16.0 / 9.0,
-            Vec3::new(4.0, 3.0, -2.0),
-        );
-        assert!(
-            shot.position
-                .abs_diff_eq(Vec3::new(441.21295, -252.51680, -127.00615), 1e-3)
-        );
-        assert!((shot.distance - 14.43611).abs() < 1e-4);
-        scene.nodes[0].composite_asset.as_mut().unwrap().media[0].width *= 5.0;
-        let second = model_bounds_for_node(&scene, &models, &resources, "film").unwrap();
-        assert_eq!(first.center, second.center);
-        assert_eq!(first.radius, second.radius);
-        scene.model_focus = Some(
-            serde_json::from_value(serde_json::json!({
-                "nodeId":"film","target":[0,0,0],"yaw":0,"pitch":0,"distance":100,"fov":0.87
-            }))
-            .unwrap(),
-        );
-        let focused = focused_model_bounds(&scene, &models, &resources).unwrap();
-        assert_eq!(focused.center, first.center);
-        assert_eq!(focused.radius, first.radius);
-    }
 
     #[test]
     fn desired_shot_preserves_focus_offset() {
@@ -605,181 +323,24 @@ mod focus_offset_tests {
             }))
             .unwrap(),
         );
-        let (_, _, _, pose, _) = desired_shot(&scene).unwrap();
+        let (_, _, _, pose, scene_units) = desired_shot(&scene).unwrap();
         assert_eq!(pose.focus_offset, Vec3::new(10.0, -5.0, 3.0));
+        assert!(!scene_units);
     }
 
     #[test]
-    fn media_only_preview_targets_its_plane_in_world_coordinates() {
-        let mut scene = Scene::default();
-        scene.model_focus = Some(
-            serde_json::from_value(serde_json::json!({
-                "nodeId":"film", "target":[0,0,0], "yaw":0,"pitch":0,"distance":100,"fov":0.87
-            }))
-            .unwrap(),
-        );
-        scene.nodes.push(serde_json::from_value(serde_json::json!({
-            "id":"film", "type":"model", "x":200, "y":180, "width":400, "height":300,
-            "compositeAsset":{"x":200,"y":180,"width":400,"height":300,"media":[
-                {"id":"film::video","kind":"video","x":0,"y":0.5,"z":0,"width":1.6,"height":0.9,"yaw":0}
-            ]}
-        })).unwrap());
-        let bounds =
-            focused_model_bounds(&scene, &ModelVisuals::default(), &ModelAssets::new()).unwrap();
-        let expected = super::super::media_geometry::plane_transform(
-            &scene.nodes[0].composite_asset.as_ref().unwrap().media[0],
-            &super::super::media_geometry::film_set_root(&scene.nodes[0], None),
-        );
-        assert!(bounds.center.abs_diff_eq(expected.translation, 1e-4));
-        // 平面 1.6×0.9 内容单位 × 64 画布单位/米 → 半对角线约 59。
-        assert!(bounds.radius > 40.0);
-    }
-
-    fn bounds(center: Vec3, radius: f32) -> ModelBounds {
-        ModelBounds { center, radius }
-    }
-
-    fn camera(
-        azimuth: f32,
-        elevation: f32,
-        distance: f32,
-        focus_offset: Vec3,
-    ) -> crate::motion::CameraState {
-        crate::motion::CameraState {
-            azimuth,
-            elevation,
+    fn sampled_pose_rejects_non_finite_inputs() {
+        let camera = |distance: f32| crate::motion::CameraState {
+            azimuth: 0.0,
+            elevation: 0.4,
             distance,
-            focus_offset,
-        }
-    }
-
-    /// overview 辅助实体与 focus-preview 共用同一 pose 派生
-    /// （change: 2026-10-13-add-film-set-hover-camera-entity，任务 2.1）：同一 bounds + 采样
-    /// 镜头必须得到唯一 (focus, position)，且与直接调用 shot 轨道公式逐位一致。
-    #[test]
-    fn sampled_camera_pose_matches_shot_orbit_formula_bit_for_bit() {
-        let b = bounds(Vec3::new(12.0, -4.0, 7.5), 9.25);
-        for (azimuth, elevation, distance, offset) in [
-            (0.0, 0.785398, 20.0, Vec3::ZERO),
-            (1.234, -0.4, 55.0, Vec3::new(3.0, -2.0, 1.0)),
-            (-2.7, 1.4, 4.0, Vec3::new(-1.5, 0.25, 8.0)),
-            (std::f32::consts::PI, 0.0, 100.0, Vec3::splat(0.5)),
-        ] {
-            let state = camera(azimuth, elevation, distance, offset);
-            let (focus, position) = sampled_camera_pose(b, None, &state).unwrap();
-            assert_eq!(
-                focus,
-                b.center + offset,
-                "focus = bounds.center + focusOffset"
-            );
-            let expected =
-                crate::shot_camera::shot_camera_position(focus, azimuth, distance, elevation);
-            assert_eq!(position, expected, "position 必须与 shot 轨道公式逐位一致");
-        }
-    }
-
-    /// 仰角极值与推拉不产生 NaN/退化位置；focusOffset 只平移注视点与机位，不改变相对轨道。
-    #[test]
-    fn sampled_camera_pose_handles_elevation_extremes_and_dolly() {
-        let b = bounds(Vec3::new(0.0, 3.0, 0.0), 5.0);
-        for elevation in [
-            -std::f32::consts::FRAC_PI_2,
-            -1.2,
-            0.0,
-            1.2,
-            std::f32::consts::FRAC_PI_2,
-        ] {
-            let (focus, position) =
-                sampled_camera_pose(b, None, &camera(0.6, elevation, 18.0, Vec3::ZERO)).unwrap();
-            assert!(focus.is_finite() && position.is_finite(), "极值仰角仍有限");
-        }
-        // 近距推拉保持有限；相对向量等于无偏移情形。
-        let near = sampled_camera_pose(b, None, &camera(0.6, 0.4, 0.75, Vec3::ZERO)).unwrap();
-        assert!(near.1.is_finite());
-        let shifted =
-            sampled_camera_pose(b, None, &camera(0.6, 0.4, 0.75, Vec3::new(2.0, 1.0, -3.0)))
-                .unwrap();
-        assert!(
-            (shifted.1 - near.1 - Vec3::new(2.0, 1.0, -3.0)).length() < 1e-4,
-            "focusOffset 只整体平移"
-        );
-        assert!((shifted.0 - near.0 - Vec3::new(2.0, 1.0, -3.0)).length() < 1e-4);
-    }
-
-    /// 非有限 bounds 或镜头输入返回 None（不伪造位置）。
-    #[test]
-    fn sampled_camera_pose_rejects_non_finite_inputs() {
-        assert!(
-            sampled_camera_pose(
-                bounds(Vec3::NAN, 5.0),
-                None,
-                &camera(0.0, 0.4, 10.0, Vec3::ZERO)
-            )
-            .is_none()
-        );
-        assert!(
-            sampled_camera_pose(
-                bounds(Vec3::ZERO, 5.0),
-                None,
-                &camera(f32::NAN, 0.4, 10.0, Vec3::ZERO)
-            )
-            .is_none()
-        );
-        assert!(
-            sampled_camera_pose(
-                bounds(Vec3::ZERO, 5.0),
-                None,
-                &camera(0.0, f32::INFINITY, 10.0, Vec3::ZERO)
-            )
-            .is_none()
-        );
-        assert!(
-            sampled_camera_pose(
-                bounds(Vec3::ZERO, 5.0),
-                None,
-                &camera(0.0, 0.4, 10.0, Vec3::splat(f32::NAN))
-            )
-            .is_none()
-        );
-    }
-
-    /// 按显式 nodeId 的 bounds 与 focus/editor 入口对同一节点一致
-    /// （任务 2.1：消除 focused_model_bounds 只能从 editor/focus 找目标的限制）。
-    #[test]
-    fn model_bounds_for_node_matches_focused_bounds_for_same_target() {
-        let mut scene = Scene::default();
-        scene.nodes.push(serde_json::from_value(serde_json::json!({
-            "id":"film", "type":"model", "x":200, "y":180, "width":400, "height":300,
-            "compositeAsset":{"x":200,"y":180,"width":400,"height":300,"media":[
-                {"id":"film::video","kind":"video","x":0,"y":0.5,"z":0,"width":1.6,"height":0.9,"yaw":0}
-            ]}
-        })).unwrap());
-        scene.model_focus = Some(
-            serde_json::from_value(serde_json::json!({
-                "nodeId":"film", "target":[0,0,0], "yaw":0,"pitch":0,"distance":100,"fov":0.87
-            }))
-            .unwrap(),
-        );
-        let default_bounds =
-            focused_model_bounds(&scene, &ModelVisuals::default(), &ModelAssets::new()).unwrap();
-        let by_id = model_bounds_for_node(
-            &scene,
-            &ModelVisuals::default(),
-            &ModelAssets::new(),
-            "film",
-        )
-        .unwrap();
-        assert_eq!(by_id.center, default_bounds.center);
-        assert_eq!(by_id.radius, default_bounds.radius);
-        // 未知 nodeId 返回 None，不伪造其它目标的 bounds。
-        assert!(
-            model_bounds_for_node(
-                &scene,
-                &ModelVisuals::default(),
-                &ModelAssets::new(),
-                "missing"
-            )
-            .is_none()
-        );
+            focus_offset: Vec3::ZERO,
+        };
+        let bounds = ModelBounds {
+            center: Vec3::ZERO,
+            radius: 5.0,
+        };
+        assert!(sampled_camera_pose(bounds, &camera(10.0)).is_some());
+        assert!(sampled_camera_pose(bounds, &camera(f32::NAN)).is_none());
     }
 }

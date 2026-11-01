@@ -9,7 +9,6 @@
 import {
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
-  isShotReferenceRole, providerReferenceRole,
   sortWoohaa3CanvasInputMappings,
   type CanvasNodeData,
   type CanvasNodeInputMapping,
@@ -18,7 +17,6 @@ import {
   type ServerCanvas,
   type StoredAsset } from "@woohaa3/contracts";
 import type { CanvasTaskInput } from "@woohaa3/contracts";
-import { resolveShotReferenceAsset } from "./shot-reference-resolution.js";
 
 export type ResolvedReference = {
   slotId: string;
@@ -35,7 +33,6 @@ export type InputResolution = {
 };
 
 export type ResolveNodeInputsOptions = {
-  frozenShotImages?: import("@woohaa3/contracts").FrozenShotImageReference[];
   canvas: ServerCanvas;
   nodeId: string;
   /** 模型参考输入 bindings（由 catalog 模型解析）。 */
@@ -74,11 +71,6 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
   for (const mapping of mappings) {
     // 文字角色是 prompt 来源，不是媒体参考资产。它的内容由 prompt-resolution 解析。
     if (mapping.role === "text_prompt") continue;
-    if (isShotReferenceRole(mapping.role)) {
-      resolveShotReferenceMapping({ canvas, nodeData, mapping, bindings, counts, references, blockingReasons,
-        frozen: options.frozenShotImages?.find(ref => ref.slotId === mapping.slotId && ref.sourceNodeId === mapping.sourceNodeId) });
-      continue;
-    }
     const explicit = (mapping.sourceAssetIds ?? []).filter(
       (id): id is string => typeof id === "string" && id !== ""
     );
@@ -138,62 +130,6 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
     inputs: references.map((reference) => reference.input),
     blockingReasons
   };
-}
-
-function resolveShotReferenceMapping(input: {
-  frozen?: import("@woohaa3/contracts").FrozenShotImageReference;
-  canvas: ServerCanvas;
-  nodeData: Record<string, CanvasNodeData | undefined>;
-  mapping: CanvasNodeInputMapping;
-  bindings: CanvasTaskInputBinding[];
-  counts: Map<string, number>;
-  references: ResolvedReference[];
-  blockingReasons: string[];
-}): void {
-  const { canvas, nodeData, mapping, bindings, counts, references, blockingReasons } = input;
-  const role = providerReferenceRole(mapping.role);
-  const resolution = resolveShotReferenceAsset({ canvas, nodeData, mapping, ...(input.frozen ? { frozen: input.frozen } : {}) });
-  if (!resolution.ok) {
-    blockingReasons.push(resolution.reason);
-    return;
-  }
-  const asset = resolution.asset;
-  const storageKey = readStorageKey(asset);
-  if (!storageKey) {
-    blockingReasons.push(`镜头参考资产「${asset.title || asset.id}」缺少稳定 storageKey`);
-    return;
-  }
-  const mediaType = readMediaType(asset, storageKey);
-  const mediaKind = asset.mediaKind as CanvasReferenceMediaKind;
-  const binding = bindings.find(
-    (entry) =>
-      entry.roles.includes(role) &&
-      entry.mediaKinds.includes(mediaKind) &&
-      entry.mediaTypes.includes(mediaType)
-  );
-  if (!binding) {
-    blockingReasons.push(`所选模型不接受${role === "reference_image" ? "图片" : "视频"}参考角色「${role}」或类型「${mediaType}」`);
-    return;
-  }
-  const used = (counts.get(binding.field) ?? 0) + 1;
-  if (used > binding.maxItems) {
-    blockingReasons.push(`参考输入数量 ${used} 超过模型对 ${binding.field} 的上限 ${binding.maxItems}`);
-    return;
-  }
-  counts.set(binding.field, used);
-  references.push({
-    slotId: mapping.slotId ?? "",
-    role,
-    sortKey: mapping.sortKey,
-    sourceNodeId: mapping.sourceNodeId,
-    input: {
-      assetId: asset.id,
-      role,
-      storageKey,
-      mediaType,
-      mediaKind
-    }
-  });
 }
 
 function collectInputMappings(

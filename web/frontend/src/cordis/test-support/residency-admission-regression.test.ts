@@ -100,8 +100,7 @@ describe("预览槽只约束离屏预览需求", () => {
 describe("异步模型资源就绪后候选表失效", () => {
   it("资源在首次投影后才就绪时，模型进入需求并提交 payload lease", () => {
     const canvas = canvasWith([
-      { id: "m1", type: "model3d", x: 0, y: 0 },
-      { id: "composite-1", type: "composite-asset", x: 400, y: 0 }
+      { id: "m1", type: "model3d", x: 0, y: 0 }
     ]);
     const resources = new Map<string, { resourceKey: string }>();
     let version = 0;
@@ -114,29 +113,18 @@ describe("异步模型资源就绪后候选表失效", () => {
     );
     const projectOnce = project({ canvas, coordinator, candidatesFor, contentVersion: () => version });
 
-    // 首次投影：`model3d` 的 prepared resource 还没派生出来，因此没有可准入内容；
-    // 复合资产此时只有画布合成身份（合法但会被 Rust 过滤为「不是模型」）。
+    // 首次投影：`model3d` 的 prepared resource 还没派生出来，因此没有可准入内容。
     projectOnce();
-    expect(coordinator.admittedNodeIds()).toEqual(["composite-1"]);
-    expect(coordinator.admittedContentKeys()).toEqual([`${canvas.id}:composite:composite-1`]);
+    expect(coordinator.admittedNodeIds()).toEqual([]);
 
     // 资源异步就绪（画布对象不变，只有内容版本推进）。
     resources.set("m1", { resourceKey: "rk-m1" });
-    resources.set("composite-1", { resourceKey: "rk-composite-1" });
     version += 1;
     projectOnce();
 
-    expect(coordinator.admittedNodeIds().sort()).toEqual(["composite-1", "m1"]);
-    expect(coordinator.admittedContentKeys().sort()).toEqual(["rk-composite-1", "rk-m1"]);
+    expect(coordinator.admittedNodeIds()).toEqual(["m1"]);
+    expect(coordinator.admittedContentKeys()).toEqual(["rk-m1"]);
     coordinator.dispose();
   });
 
-  it("复合资产用模型 resourceKey 作为内容身份，而不是画布合成身份", () => {
-    const keyOfOf = createContentIdentity({ modelResourceKey: () => "rk-film-set" });
-    const canvas = canvasWith([{ id: "film", type: "composite-asset", x: 0, y: 0 }]);
-    const keyOf = keyOfOf(canvas);
-    const node = canvas.document.nodes[0]!;
-    // 片场模型 payload lease 只认模型 key；合成身份会被 Rust 过滤掉。
-    expect(keyOf(node)).toBe("rk-film-set");
-  });
 });

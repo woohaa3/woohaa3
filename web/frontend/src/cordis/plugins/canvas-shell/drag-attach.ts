@@ -10,7 +10,7 @@ import {
   bevyDragAttachProbe,
   createHighEntropyId,
   dragAttachProbeIntersects,
-  isPureModelNodeType,
+  isModelNodeType,
   isValidWoohaa3CanvasConnection,
   type BevyDragAttach,
   type CanvasRenderScene,
@@ -83,17 +83,16 @@ export function clearDragAttachKeys(state: DragAttachState): void {
 }
 
 /**
- * 节点是否可作为粘连 owner / target：非 group、非 container、非片场、非 ghost、非纯备注。
+ * 节点是否可作为粘连 owner / target：非纯模型、非 ghost、非纯备注。
  *
- * 与连接领域规则（`isValidWoohaa3CanvasConnection`）保持一致：group 不能作为持久化边端点，
- * 纯备注不参与连线；ghost 只渲染不可交互。
+ * 与连接领域规则（`isValidWoohaa3CanvasConnection`）保持一致：纯备注不参与连线；
+ * ghost 只渲染不可交互。
  */
 export function isDragAttachConnectable(node: {
   type?: string;
   ghost?: boolean;
-  compositeAsset?: unknown;
 }): boolean {
-  return node.type !== "group" && !isPureModelNodeType(node.type) && !node.compositeAsset && node.ghost !== true;
+  return !isModelNodeType(node.type ?? "") && node.ghost !== true;
 }
 
 /** working canvas 节点 + nodeData 读取器（供连接规则判定纯备注）。 */
@@ -126,7 +125,7 @@ function pendingEdges(state: DragAttachState) {
  * 基于当前 working scene 求值触须接触并锁定合法待提交边（design D3）。
  *
  * - 候选按视觉层级从高到低（scene 后绘制者优先）遍历，只取**最高层的合法**节点；
- * - 自身、group、ghost、纯备注、已有同向边与本手势 pending 边都被排除；
+ * - 自身、ghost、纯备注、已有同向边与本手势 pending 边都被排除；
  * - 前序映射 `candidate -> owner`、后序映射 `owner -> candidate`；
  * - 首次锁定即分配稳定 edge id；触须离开只清除 contact，pending 保留。
  *

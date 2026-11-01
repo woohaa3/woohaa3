@@ -58,7 +58,6 @@ pub(crate) fn setup(
     commands.insert_resource(super::TextureStore::default());
     commands.insert_resource(super::CardDecorationCache::default());
     commands.insert_resource(super::CardBlockCache::default());
-    commands.insert_resource(super::ContainerBlockCache::default());
     commands.insert_resource(super::EdgeBlockCache::default());
 }
 

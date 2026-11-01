@@ -13,9 +13,8 @@ import type { ComponentType } from "react";
 import type { AgentConversationService } from "./agent-conversation.js";
 import type { PanelPresentationIntent } from "./model-interaction.js";
 
-/** 生成目标模式；`camera` 仅为旧入口兼容值，新的片场镜头统一使用 `film-set`。 */
-export type AuthoringGenerateMode =
-  "model3d" | "canvas-group" | "film-set" | "camera" | "text";
+/** 生成目标模式。 */
+export type AuthoringGenerateMode = "model3d" | "text";
 
 /** A finite domain delivery adapter. Conversation data and presentation remain host owned. */
 export type AssistantDeliveryTarget = {
@@ -47,7 +46,6 @@ export type AuthoringGenerationProps = {
   /** Domain delivery uses the same authoring panel; unfinished delivery locks ordinary edits. */
   initialPrompt?: string;
   deliveryHistory?: AssistantDeliveryTarget;
-  groupRuns?: import("./canvas-group-runs.js").CanvasGroupRunsService;
   canvasId: string;
   nodeId: string;
   mode: AuthoringGenerateMode;
@@ -59,10 +57,6 @@ export type AuthoringGenerationProps = {
   disabledReason?: string | null;
   /** 模型内容哈希等并发 precondition（可选）。 */
   expectedContentHash?: string;
-  /** 当前选中镜头 id（camera 模式，可选）。 */
-  selectedCameraId?: string | null;
-  clipId?: string | null;
-  itemId?: string | null;
   /** 打开授权入口（如 Provider 凭据弹窗）；由宿主注入，贡献方只调用。 */
   onAuthorize?: () => void;
   /** 宿主拥有的参考素材 UI，贡献方只决定在生成面板中的呈现位置。 */

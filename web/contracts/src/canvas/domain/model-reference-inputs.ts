@@ -1,5 +1,5 @@
 /**
- * 3D 模型节点（model3d/animation3d）前序参考输入解析
+ * 3D 模型节点（model3d）前序参考输入解析
  * （change: add-model-mcp-reference-inputs）。
  *
  * 3D 模型节点不参与任务执行，因此不走 `resolveNodeReferenceInputs`/mention 编译。

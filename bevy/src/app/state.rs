@@ -57,10 +57,9 @@ impl NodeIndex {
 #[derive(Resource, Default)]
 pub(crate) struct TextureBatch(pub(crate) HashMap<String, (u32, u32, Vec<u8>, Option<String>)>);
 
-/// 片场媒体平面纹理 inbox 的一次性批次（键为全局唯一 `planeId`；
-/// change: 2026-10-08-make-film-set-model-only）。
+/// 模型自带纹理（如 GLB 内嵌贴图）的一次性上传批次，键为内容 id。
 #[derive(Resource, Default)]
-pub(crate) struct FilmSetTextureBatch(pub(crate) HashMap<String, (u32, u32, Vec<u8>)>);
+pub(crate) struct ModelTextureBatch(pub(crate) HashMap<String, (u32, u32, Vec<u8>)>);
 
 /// 已注册不可变模型资源表的只读快照。
 #[derive(Resource, Default)]
@@ -207,7 +206,7 @@ impl FocusRig {
 /// 显式帧标记，避免用不透明 run condition 猜测前置系统是否运行。
 #[derive(Resource, Default)]
 pub(crate) struct FrameFlags {
-    pub(crate) film_set_media_changed: bool,
+    pub(crate) model_textures_changed: bool,
     pub(crate) scene_received: bool,
     pub(crate) positions_received: bool,
     pub(crate) surface_changed: bool,
@@ -228,7 +227,6 @@ pub(crate) struct FrameFlags {
     pub(crate) card_blocks_rebuilt: u64,
     pub(crate) card_decorations_rebuilt: u64,
     pub(crate) edge_blocks_rebuilt: u64,
-    pub(crate) container_blocks_rebuilt: u64,
     pub(crate) canvas_committed: bool,
 }
 

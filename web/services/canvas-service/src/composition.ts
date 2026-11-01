@@ -1,7 +1,5 @@
 import { ContentContributionRegistry, ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
-import type { FilmSetConversionRegistry, MediaStorageScope, ServerCanvas } from "@woohaa3/contracts";
-import { MCP_INTERNAL_ACTOR_ID } from "@woohaa3/contracts";
-import { createFilmSetConversionProviderSet } from "@woohaa3/contracts";
+import type { MediaStorageScope, ServerCanvas } from "@woohaa3/contracts";
 import type { IncomingMessage } from "node:http";
 /**
  * Canvas Service composition root（change: split-web-runtime-services，任务 5.1–5.6；
@@ -83,25 +81,6 @@ export type { AgentDeploymentProfile } from "./composition/deployment.js";
 export { recordModelPlacementHistory } from "./composition/history-observers.js";
 
 /**
- * 转换幂等登记仓库工厂：注入的 SQLite 提供 durable 回执；无 backend 时用内容扩展提供的内存实现
- * （测试/单实例）。登记仓属于宿主持久化选择，领域对象由扩展端口构造。
- */
-async function createFilmSetConversionRegistry(
-  env: Record<string, string | undefined>,
-  conversion: import("@woohaa3/contracts").ContentConversionRuntime
-): Promise<FilmSetConversionRegistry & { close?: () => void }> {
-  const backend = env[CANVAS_STORAGE_BACKEND_ENV];
-  if (backend === undefined) return conversion.createInMemoryRegistry();
-  const resolved = resolveCanvasStorageConfig(env);
-  if (!resolved.ok) throw new Error(`转片场登记配置无效：${resolved.reason}`);
-  if (resolved.config.backend === "sqlite") {
-    const { SqliteFilmSetConversionRegistry } = await import("./storage/sqlite/film-set-conversion.js");
-    return new SqliteFilmSetConversionRegistry({ path: resolved.config.sqlitePath as string });
-  }
-  throw new Error("Mongo 转片场登记 adapter 尚未实现（拒绝回退到内存）");
-}
-
-/**
  * 合并「文档同步」与「媒体字节同步」两个状态。
  *
  * 文档链路 `synced` 不等于整张画布可用：字节还在补传时目录必须显示 `syncing`，失败则 `failed`。
@@ -139,17 +118,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
    */
   const resolveStorageConfig = (): CanvasStorageConfigResult =>
     options.storageConfig ? { ok: true, config: options.storageConfig } : resolveCanvasStorageConfig(env);
-
-  // Run before any repository/room opens, outside the degraded-storage catch:
-  // a failed migration must prevent startup rather than expose old data.
-  if (canvasEnabled && !options.repository && !options.yjsRepository) {
-    const resolved = resolveStorageConfig();
-    if (resolved.ok && resolved.config.backend === "sqlite") {
-      const { migrateSqliteCanvasBeforeStartup } = await import("./storage/migrations/startup.js");
-      const result = migrateSqliteCanvasBeforeStartup(resolved.config.sqlitePath as string, { managedMigrations: options.contentRuntime?.managedMigrations });
-      if (result.changed) log({ event: "canvas-startup-migrated", ...result });
-    }
-  }
 
   // Media client 必须先于存储组合解析（资产校验 port 的生产实现就是 Media client）。
   const mediaClient =
@@ -558,15 +526,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
           assistantTextRuns: options.assistantTextRuns,
           ...(options.skillAttempts ? { skillAttempts: options.skillAttempts } : {}),
           modelRenderer,
-          mediaClient: mediaClient ?? null,
-          ...(options.contentRuntime ? { contentRuntime: options.contentRuntime } : {}),
-          // agent 导出（D8）：端口延迟读取（录制服务在画布创建后才装配）。
-          ...(options.recording
-            ? {
-                recording: () => options.recording,
-                ...(options.themeBackdrop ? { themeBackdrop: options.themeBackdrop } : {})
-              }
-            : {}),
           agentDeltaJournal,
           modelMcpEnabled,
           env,
@@ -580,20 +539,12 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         })
       : null;
   const {
-    filmSetNodeService,
-    filmSetImportService,
-    filmSetItemService,
-    filmSetExportService,
     modelMcpInternalService,
     agentAuthoringService,
     modelMcpHandler,
     modelMcpInternalHandler,
     agentInternalHandler
   } = mcpRuntime ?? {
-    filmSetNodeService: undefined,
-    filmSetImportService: undefined,
-    filmSetItemService: undefined,
-    filmSetExportService: undefined,
     modelMcpInternalService: undefined,
     agentAuthoringService: undefined,
     modelMcpHandler: null,
@@ -715,68 +666,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     return merged;
   };
 
-  // 单节点快捷「转为片场」（change: 2026-10-13-add-node-to-film-set-shortcut）：
-  // 幂等登记由 durable 仓库提供（SQLite）；缺失持久 backend 时内存实现。生成端口由宿主
-  // （Section 2 的公开 adapter）注入；此处不装配任何 provider 或 LLM 实现 —— 宿主按扩展
-  // 激活结果给出提供方 capability 集合与媒体读取端口，这里只做**选择/路由**与门禁注入。
-  let filmSetConversion: import("@woohaa3/contracts").FilmSetConversionServicePort | null = null;
-  let filmSetConversionRegistry: (FilmSetConversionRegistry & { close?: () => void }) | null = null;
-  const conversionRuntime = options.contentRuntime?.conversion;
-  if (sync && conversionRuntime) {
-    try {
-      const providerSource = options.filmSetConversionProviders;
-      const conversionMediaReader =
-        options.filmSetConversionMediaReader
-        ?? (options.filmSetConversionMediaRead
-          ? conversionRuntime.createMediaReader({ read: options.filmSetConversionMediaRead })
-          : undefined);
-      const providerSet = providerSource !== undefined
-        ? createFilmSetConversionProviderSet(providerSource)
-        : null;
-      const conversionGenerator =
-        providerSet && conversionMediaReader
-          ? providerSet.createGenerator({ media: conversionMediaReader }) ?? undefined
-          : options.filmSetConversionGenerator;
-      const resolveModelCapabilities = providerSet
-        ? async (input: { canvasId: string; sourceKind: import("@woohaa3/contracts").FilmSetConversionSourceKind; modelKey?: string }) =>
-            providerSet.resolveCapabilities(input) ?? undefined
-        : undefined;
-      filmSetConversionRegistry = await createFilmSetConversionRegistry(env, conversionRuntime);
-      filmSetConversion = conversionRuntime.createService({
-        authorize: async record => options.accessRuntime?.enabled === false || (Boolean(record.subject) && await authorizeWs({ canvasId: record.canvasId,
-          principal: { subject: record.subject!, identityProvider: "host-conversion-delegation" }, permission: "write" })),
-        ...(options.filmSetConversionExecution ? { execution: options.filmSetConversionExecution } : {}),
-        resolveRoom: async (canvasId) => sync.registry.resolve(canvasId),
-        registry: filmSetConversionRegistry,
-        actorId: MCP_INTERNAL_ACTOR_ID,
-        ...(conversionGenerator ? { generator: conversionGenerator } : {}),
-        ...(resolveModelCapabilities ? { resolveModelCapabilities } : {}),
-        ...(providerSet ? { models: () => providerSet.listModels() } : {}),
-        ...(options.now ? { now: options.now } : {})
-      });
-    } catch (error) {
-      log({ event: "film-set-conversion-compose-failed", message: error instanceof Error ? error.message : "unknown" });
-      filmSetConversion = null;
-      filmSetConversionRegistry = null;
-    }
-  } else if (sync && !conversionRuntime) {
-    log({ event: "film-set-conversion-unavailable", message: "未装配内容扩展的转换端口；转片场功能不可用" });
-  }
-
   const composedHandler = composeRequestHandler({
-    prepareCompositeHistory: async ({ canvasId, nodeId, payload }) => {
-      if (payload.animation?.schemaVersion !== 3 && payload.animation?.schemaVersion !== 4) throw new Error("历史复合资产定义非法");
-      const room = await activeSync?.registry.resolve(canvasId);
-      const exported = room?.exportCanvas();
-      const canvas = exported?.ok ? exported.canvas : await composition?.service.getCanvas(canvasId);
-      if (!canvas) throw new Error("历史媒体资产所属画布不可用");
-      const contentFrames = options.contentRuntime?.frames;
-      if (!contentFrames) throw new Error("复合内容历史渲染能力不可用（未装配内容扩展）");
-      // 历史帧素材属于**这张画布**：分立部署下 read 走内部 HTTP，必须带 canvasId 让服务端按
-      // 画布作用域路由；远端画布的素材只在托管存储里。
-      const mediaRead = mediaClient?.read;
-      return contentFrames.prepareHistoryFrame({ nodeId, payload: payload.animation, canvas, assets: canvas.assets, ...(mediaRead ? { read: (storageKey: string) => mediaRead(storageKey, canvasId) } : {}) });
-    },
     env,
     canvasEnabled,
     unavailableReason,
@@ -784,12 +674,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     runService,
     snippets,
     nodeHistory,
-    filmSetImportService,
-    filmSetConversionService: filmSetConversion,
-    get recording() { return options.recording; },
-    ...(options.filmSetConversionOwnerResolver
-      ? { filmSetConversionOwnerResolver: options.filmSetConversionOwnerResolver }
-      : {}),
     modelRenderer,
     modelMcpHandler,
     modelMcpInternalHandler,
@@ -826,7 +710,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     sync,
     runService,
     consumer,
-    filmSetConversionService: filmSetConversion,
     composition,
     snippets,
     nodeHistory,
@@ -834,10 +717,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     importService,
     mcpServices: () =>
       buildMcpServicesProjection({
-        filmSetNodeService,
-        filmSetImportService,
-        filmSetItemService,
-        filmSetExportService,
         internalModelMcp: modelMcpInternalService ?? null,
         agent: agentAuthoringService ?? null
       }) as ReturnType<CanvasService["mcpServices"]>,
@@ -878,7 +757,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     },
     close: async () => {
       consumer?.stop();
-      filmSetConversionRegistry?.close?.();
       if (options.modelRenderer === undefined) await modelRenderer?.close().catch(() => undefined);
       await nodeHistory?.close().catch(() => undefined);
 

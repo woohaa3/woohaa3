@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createEmptyWoohaa3ServerCanvas, hashModelScript, nodeHistoryContentIdentity, NODE_GENERATION_HISTORY_VERSION, filmSetNodeDataFields, createFilmSetSnapshot, filmSetAnimationsOf, type MediaStorageScope, type NodeGenerationHistoryEntry, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, hashModelScript, nodeHistoryContentIdentity, NODE_GENERATION_HISTORY_VERSION, type MediaStorageScope, type NodeGenerationHistoryEntry, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
 import { InMemoryNodeHistoryRepository } from "./in-memory-node-history-repository.js";
 import { NodeHistoryApplicationService, snapshotCurrentImageEdit } from "./node-history-service.js";
 import { SqliteNodeHistoryRepository } from "../sqlite/node-history.js";
@@ -427,77 +427,6 @@ describe("节点历史 repository / 应用服务", () => {
     expect(data.modelPlacement).toEqual(placement);
     expect(data.prompt).toBe("p");
     expect(data.parameters).toEqual({ m: 1 });
-  });
-
-  it("片场历史保存并原子恢复完整 items-only 内容（change: 2026-10-11 D7/D8/D10）", async () => {
-    const animation = createFilmSetSnapshot({
-      title: "片场",
-      model: { modelScript: "build(default)", modelScriptVersion: "woohaa-model-js-v2" },
-      motionScript: "",
-      timeline: { duration: 0, loop: false },
-      scenePlacement: { offset: { x: 2, y: 0, z: 0 }, scale: 1.5, yaw: 0.3 },
-      filmSetContent: {
-        schemaVersion: 4,
-        items: [{ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }]
-      }
-    });
-    const filmSet = animation.filmSetContent;
-    const { service, room } = setup(canvasWithNode("composite-asset", filmSetNodeDataFields(animation)));
-    const { entryId } = await service.registerModelEdit({
-      canvasId: CANVAS,
-      nodeId: "node-1",
-      sourceHash: hashModelScript("build(default)"),
-      modelScript: "build(default)",
-      language: "javascript",
-      version: "woohaa-model-js-v2",
-      placement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
-      animation: {
-        schemaVersion: 3,
-        scenePlacement: animation.scenePlacement,
-        sceneCamera: animation.sceneCamera,
-        filmSetContent: filmSet,
-        filmSetAnimations: filmSetAnimationsOf(animation)
-      },
-      createdAt: NOW
-    });
-    const detail = await service.getDetail({ canvasId: CANVAS, nodeId: "node-1", entryId });
-    expect(detail.kind).toBe("model");
-    if (detail.kind === "model") {
-      expect(detail.animation?.schemaVersion === 3 ? detail.animation.filmSetContent : undefined).toEqual(filmSet);
-    }
-    const outcome = await service.restore({ canvasId: CANVAS, nodeId: "node-1", entryId });
-    expect(outcome.ok).toBe(false);
-    expect(room.canvas.nodeData["node-1"]?.filmSetContent).toEqual(filmSet);
-  });
-
-  it("恢复旧片场历史 payload（schema 1/2）明确拒绝且不改当前内容", async () => {
-    const { service, room } = setup(canvasWithNode("composite-asset", filmSetNodeDataFields(createFilmSetSnapshot({
-      title: "片场",
-      timeline: { duration: 0, loop: false },
-      filmSetContent: { schemaVersion: 4, items: [{ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }] }
-    }))));
-    const before = JSON.stringify(room.canvas.nodeData["node-1"]);
-    // 手工注册一条旧格式条目（顶层模型 + 节点级运动；无既有集合）。
-    const legacy = {
-      version: NODE_GENERATION_HISTORY_VERSION, entryId: "legacy-entry", canvasId: CANVAS, nodeId: "node-1",
-      kind: "model" as const, createdAt: NOW, sourceIdentity: "model-edit:legacy", currentIdentity: "legacy",
-      recoverable: true, previewable: true, source: { label: "模型编辑", sourceHash: hashModelScript("build(default)") },
-      payload: {
-        kind: "model" as const, modelScript: "build(default)", language: "javascript", version: "woohaa-model-js-v2", sourceHash: hashModelScript("build(default)"),
-        animation: {
-          modelContentVersion: { revision: 1, sourceHash: hashModelScript("build(default)"), contentHash: "base-content" },
-          motionScript: "", motionScriptVersion: "woohaa-motion-js-v1", motionRevision: 1, motionSourceHash: "motion-hash",
-          motionBasedOnModelVersion: { revision: 1, contentHash: "base-content" },
-          initialCamera: { azimuth: 0, elevation: 0.5, distance: 4, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } },
-          timeline: { duration: 0, loop: false }
-        }
-      }
-    };
-    const accessible = service as unknown as { repository: { insert(entry: NodeGenerationHistoryEntry): Promise<{ status: string; entryId: string }> } };
-    await accessible.repository.insert(legacy as NodeGenerationHistoryEntry);
-    const outcome = await service.restore({ canvasId: CANVAS, nodeId: "node-1", entryId: "legacy-entry" });
-    expect(outcome.ok).toBe(false);
-    expect(JSON.stringify(room.canvas.nodeData["node-1"])).toBe(before);
   });
 
   it("模型回退先把当前状态留档为编辑版本（含摆放），随后切换到目标版本", async () => {

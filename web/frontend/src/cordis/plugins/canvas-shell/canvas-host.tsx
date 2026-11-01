@@ -7,7 +7,6 @@ import { SceneExperienceBar } from "../scene-experience/experience-bar.js";
  */
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { CanvasRenderWarnings } from "./canvas-render-warnings.js";
-import { FocusRunStrip } from "./focus-run-strip.js";
 import { Button } from "@woohaa3/ui/primitives";
 import { mountBevyCanvas, unmountBevyCanvas } from "./bevy-canvas-element.js";
 import { useService } from "../../react.js";
@@ -155,7 +154,6 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
   const overlays = (
     <>
       <CanvasOverlayHost {...slotProps} />
-      {snapshotFocus && presentation.mode.type === "node-focus" && presentation.mode.owner !== "history" ? <FocusRunStrip canvasId={canvasId} nodeId={snapshotFocus.nodeId} /> : null}
       {contextMenu}
     </>
   );

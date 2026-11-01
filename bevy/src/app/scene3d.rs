@@ -6,18 +6,6 @@ use super::{
     AnimationCameraState, CurrentScene, FocusRig, FrameFlags, ModelAssetTable, SurfaceState,
 };
 
-/// Native 片场后台准备推进（独占系统）：非阻塞 poll + 分帧装配
-/// （change: 2026-10-18-prepare-native-film-sets-in-background，design D4/D5）。
-///
-/// 独立成独占系统是为了**直接写 World** 并让真实装配/命令应用进入计时，而不是把重活推成
-/// 帧尾无界 drain。它排在 `sync_models` 之后、预览/捕获之前，因此同一帧的消费者能看到
-/// 本次新发布的根或 Pending 状态。
-pub(super) fn advance_preparation(world: &mut World) {
-    let scene = world.resource::<CurrentScene>().0.clone();
-    let resources = world.resource::<ModelAssetTable>().0.clone();
-    model3d::advance_preparation(world, &scene, &resources);
-}
-
 /// 网格 adapter：把 scene viewport/surface/theme 投影为通用网格插件的 config/target/style。
 ///
 /// 网格 mesh/material 本身由 `IsometricGridPlugin` 拥有与回收；本系统只做领域适配与相机复位。
@@ -89,8 +77,7 @@ pub(super) fn sync_models(
     // 不构成高优先消费者——卡片内容已固化时没必要把整场按 High 加载
     // （2026-10-28 总览缩放时可见卡片把片场按在 High 的修复）。
     let capture_pins = capture.pins(&scene.0);
-    let mut pins = capture_pins.clone();
-    crate::shot_node_preview::pin_visible_owners(&scene.0, &mut pins);
+    let pins = capture_pins.clone();
     let now = time.elapsed_secs_f64();
     let demand_changed = model3d::demand::update(
         models,
@@ -147,7 +134,7 @@ pub(super) fn sync_models(
         models.trim_resources(&mut meshes, &mut materials);
     }
     // 准备管线的发布/取消/退役同样推进诊断快照；只在有变更时发布一次，不逐帧输出。
-    let preparation_changed = models.take_preparation_changed();
+    let preparation_changed = false;
     if flags.changed || demand_changed || quality_changed || preparation_changed {
         // 诊断里把两种 pin 分开：真实截图请求带来源标签，可见卡片标 visible-card。
         let mut capture_requests = capture.requests();
@@ -239,19 +226,10 @@ pub(super) fn sync_shot_adapter(
 }
 
 /// 只保留 adapter 当前记录的那一台 rig。丢失跟踪的旧 rig 会继续占着窗口相机。
-///
-/// 拍摄镜头卡片预览的 rig 也带 `ShotCameraPose`，但不是 adapter 的窗口 rig，因此按
-/// `ShotPreviewRig` 显式排除（change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
 pub(super) fn reclaim_extra_shot_rigs(
     mut commands: Commands,
     adapter: Res<model3d::shot_adapter::ShotAdapterState>,
-    rigs: Query<
-        Entity,
-        (
-            With<crate::shot_camera::ShotCameraPose>,
-            Without<crate::shot_node_preview::ShotPreviewRig>,
-        ),
-    >,
+    rigs: Query<Entity, With<crate::shot_camera::ShotCameraPose>>,
 ) {
     for entity in &rigs {
         if adapter.rig != Some(entity) {
@@ -292,11 +270,6 @@ pub(super) fn sync_shot_main_view(
     let aspect = animation_preview
         .map(|p| shot_aspect_ratio(&p.initial_camera.aspect))
         .unwrap_or(aspect);
-    let still_preview = scene
-        .0
-        .model_editor
-        .as_ref()
-        .is_some_and(|editor| editor.shot_preview && editor.shot.is_some());
     let has_shot = animation_preview.is_some()
         || scene
             .0
@@ -305,7 +278,7 @@ pub(super) fn sync_shot_main_view(
             .is_some_and(|editor| editor.tool_mode == "camera" && editor.shot.is_some());
     viewport.hold = rig.animating();
     viewport.rect = if has_shot && width > 0.0 && height > 0.0 {
-        Some(if animation_preview.is_some() || still_preview {
+        Some(if animation_preview.is_some() {
             let rect = surface.and_then(|s| s.content_rect.as_ref());
             let x = rect.map(|r| r.x).unwrap_or(0.0);
             let y = rect.map(|r| r.y).unwrap_or(0.0);
@@ -376,20 +349,13 @@ pub(super) fn drive_observer_from_shot(
 ) {
     for (mut camera, mut layers) in &mut observer {
         camera.is_active = !scene
-            .0
-            .model_editor
-            .as_ref()
-            .is_some_and(|editor| editor.shot_preview && editor.shot.is_some())
-            && !scene
                 .0
                 .animation_playback
                 .as_ref()
                 .is_some_and(|p| p.view_mode == "focus-preview");
         camera.order = 0;
         camera.viewport = None;
-        *layers = model3d::empty_placeholder::overview_layers(
-            model3d::empty_placeholder::is_overview(&scene.0, rig.focus_node.is_some()),
-        );
+        *layers = bevy::camera::visibility::RenderLayers::layer(0);
     }
 }
 
@@ -401,12 +367,7 @@ pub(super) fn hide_shot_gizmos_during_transition(
 ) {
     let hidden = scene
         .0
-        .model_editor
-        .as_ref()
-        .is_some_and(|editor| editor.shot_preview)
-        || scene
-            .0
-            .animation_playback
+        .animation_playback
             .as_ref()
             .is_some_and(|p| p.view_mode == "focus-preview")
         || viewport.rect.is_none()

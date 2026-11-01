@@ -32,9 +32,6 @@ import type {
   CreatePromptSnippetTagInput,
   CanvasGenerationHistoryListPage,
   ImageProjectReferencesResult,
-  FilmSetConversionModelCandidate,
-  FilmSetConversionReceipt,
-  FilmSetConversionStatus,
   CanvasTaskActivityEventBatch,
   CanvasTaskActivitySnapshot,
   EditSessionBeginResponse,
@@ -47,7 +44,6 @@ import type {
   PromptSnippetListQuery,
   PromptSnippetListResult,
   PromptSnippetTag,
-  RecordingStatusView,
   RenamePromptSnippetTagInput,
   UpdatePromptSnippetInput
 } from "@woohaa3/contracts";
@@ -203,25 +199,6 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
   }
 
   /** 片场转换 JSON 请求：经同一 Canvas Service 出口，返回稳定错误码。 */
-  async function conversionRequest<T>(method: string, suffix: string, body?: unknown): Promise<NodeHistoryResult<T>> {
-    const base = `${basePath}/${encodeURIComponent(options.canvasId)}/film-set/conversion`;
-    let response: Response;
-    try {
-      response = await fetchImpl(`${base}${suffix}`, {
-        method,
-        ...(body !== undefined ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {})
-      });
-    } catch {
-      return { ok: false, code: "unavailable", error: "无法连接画布服务" };
-    }
-    const parsed = (await response.json().catch(() => null)) as { code?: unknown; message?: unknown } | null;
-    if (!response.ok) {
-      const code = typeof parsed?.code === "string" ? parsed.code : `http-${response.status}`;
-      const error = typeof parsed?.message === "string" && parsed.message !== "" ? parsed.message : "片场转换请求失败";
-      return { ok: false, code, error };
-    }
-    return { ok: true, value: parsed as T };
-  }
 
   /**
    * 原生录制 JSON 请求（change: 2026-10-17-add-native-offscreen-film-set-recording）。
@@ -229,25 +206,6 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
    * 与转换同一出口；`503` 带具体能力码（`recording-unavailable` / `recording-executor-unavailable`），
    * 前端据此显示可恢复原因，不静默回退到浏览器录制。
    */
-  async function recordingRequest<T>(method: string, suffix: string, body?: unknown): Promise<NodeHistoryResult<T>> {
-    const base = `${basePath}/${encodeURIComponent(options.canvasId)}/recording`;
-    let response: Response;
-    try {
-      response = await fetchImpl(`${base}${suffix}`, {
-        method,
-        ...(body !== undefined ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {})
-      });
-    } catch {
-      return { ok: false, code: "unavailable", error: "无法连接画布服务" };
-    }
-    const parsed = (await response.json().catch(() => null)) as { code?: unknown; message?: unknown } | null;
-    if (!response.ok) {
-      const code = typeof parsed?.code === "string" ? parsed.code : `http-${response.status}`;
-      const error = typeof parsed?.message === "string" && parsed.message !== "" ? parsed.message : "录制请求失败";
-      return { ok: false, code, error };
-    }
-    return { ok: true, value: parsed as T };
-  }
 
   return {
     openCanvasSession(canvasId, roomEpoch) {
@@ -545,59 +503,6 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
         "GET",
         `/material?storageKey=${encodeURIComponent(storageKey)}`
       );
-    },
-
-    async filmSetConversionModels(): Promise<NodeHistoryResult<{ models: FilmSetConversionModelCandidate[] }>> {
-      return conversionRequest<{ models: FilmSetConversionModelCandidate[] }>("GET", "-models");
-    },
-
-    async filmSetConversionSubmit(request) {
-      return conversionRequest<{ receipt: FilmSetConversionReceipt & { ok: true }; status: FilmSetConversionStatus }>(
-        "POST",
-        "",
-        request
-      );
-    },
-
-    async filmSetConversionStatus(input) {
-      return conversionRequest<{ status: FilmSetConversionStatus | null }>(
-        "GET",
-        `/${encodeURIComponent(input.requestId)}`
-      );
-    },
-
-    async filmSetConversionCancel(input) {
-      return conversionRequest<{ status: FilmSetConversionStatus }>(
-        "POST",
-        `/${encodeURIComponent(input.requestId)}/cancel`
-      );
-    },
-
-    async filmSetConversionRetry(input) {
-      return conversionRequest<{ receipt: FilmSetConversionReceipt & { ok: true }; status: FilmSetConversionStatus }>(
-        "POST",
-        `/${encodeURIComponent(input.requestId)}/retry`
-      );
-    },
-
-    async recordingSubmit({ request }) {
-      return recordingRequest<{ jobId: string; state: RecordingStatusView["state"]; duplicate: boolean }>(
-        "POST",
-        "",
-        request
-      );
-    },
-
-    async recordingStatus({ jobId }) {
-      return recordingRequest<{ status: RecordingStatusView }>("GET", `/${encodeURIComponent(jobId)}`);
-    },
-
-    async recordingList() {
-      return recordingRequest<{ jobs: RecordingStatusView[] }>("GET", "");
-    },
-
-    async recordingCancel({ jobId }) {
-      return recordingRequest<{ cancelled: true }>("POST", `/${encodeURIComponent(jobId)}/cancel`);
     }
   };
 }

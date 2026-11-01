@@ -43,28 +43,6 @@ function summary(nodeId: string, extra: Partial<CanvasNodeRunSummary> = {}): Can
 }
 
 describe("applyRunStateProjection", () => {
-  it("explicit film feedback controls decoration even when compatibility busy remains true", () => {
-    const nodes = [node("film", { type: "model", busy: true, compositeAsset: { x: 0, y: 0, width: 100, height: 100 } })];
-    applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true, aggregateRunning: true,
-      filmSetFeedback: { operationKey: "attempt", phase: "running", source: "conversion", labelCode: "generating" } })], records: [] });
-    expect(nodes[0].aggregateRun).toMatchObject({ active: true, filmSet: { phase: "running" } });
-    // failed 是静态终态：保留失败摘要，但不再显示运行中遮罩。
-    applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true, aggregateRunning: true,
-      filmSetFeedback: { operationKey: "attempt", phase: "failed", source: "conversion", labelCode: "failed" } })], records: [] });
-    expect(nodes[0].aggregateRun).toMatchObject({ active: false, filmSet: { phase: "failed" } });
-    applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true, aggregateRunning: true, filmSetFeedback: null })], records: [] });
-    expect(nodes[0].aggregateRun?.active).toBe(false);
-    expect(nodes[0].busy).toBe(true);
-  });
-  it("规范节点 busy 的内容交付复用聚合执行遮罩，不依赖 Agent 操作记录", () => {
-    const nodes = [node("film", { type: "model", busy: true, compositeAsset: { x: 0, y: 0, width: 100, height: 100 } })];
-    applyRunStateProjection(nodes, { summaries: [], records: [] });
-    expect(nodes[0].aggregateRun).toEqual({ active: true });
-    expect(nodes[0].historyStrip).toBeUndefined();
-    nodes[0].busy = false;
-    applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true })], records: [] });
-    expect(nodes[0].aggregateRun).toEqual({ active: false });
-  });
   it("运行中的节点携带与活动记录同一个进度起点", () => {
     const startedAt = "2026-10-31T00:00:00.000Z";
     const nodes = [node("n1")];
@@ -93,49 +71,6 @@ describe("applyRunStateProjection", () => {
     expect(idle[0].progressStartedAt).toBeUndefined();
   });
 
-  it("组节点只投影运行标识，不携带 ledger 身份；记录清空后移除标识", () => {
-    const nodes = [node("g", { type: "group", group: { title: "组", memberCount: 0, outputCapableLeafCount: 0 } })];
-    applyRunStateProjection(nodes, { summaries: [], records: [], groupStatuses: new Map([["g", { state: "running", label: "创作中" }]]) });
-    expect(nodes[0].group?.runStatus).toEqual({ state: "running", label: "创作中" });
-    expect(nodes[0].historyStrip).toBeUndefined();
-    applyRunStateProjection(nodes, { summaries: [], records: [] });
-    expect(nodes[0].group?.runStatus).toBeUndefined();
-  });
-  it("片场 group 的执行反馈驱动与普通组相同的气泡运行态", () => {
-    const nodes = [node("film", { type: "group", group: { title: "片场", memberCount: 2, outputCapableLeafCount: 0 } })];
-    const phases = [
-      ["submitting", "preparing", "提交中"],
-      ["queued", "queued", "排队中"],
-      ["running", "running", "生成中"],
-      ["committing", "committing", "保存中"],
-      ["failed", "failed", "失败"]
-    ] as const;
-    for (const [phase, state, label] of phases) {
-      applyRunStateProjection(nodes, {
-        summaries: [summary("film", { isAggregate: true, filmSetFeedback: {
-          operationKey: "attempt", phase, source: "conversion", labelCode: phase === "committing" ? "saving" : phase === "running" ? "generating" : phase
-        } })],
-        records: []
-      });
-      // 片场迁移为 group 后 MUST 走 group 通路；`aggregateRun.filmSet` 会被 renderer 拒绝。
-      expect(nodes[0].group?.runStatus).toEqual({ state, label });
-      expect(nodes[0].aggregateRun).toBeUndefined();
-      expect(nodes[0].historyStrip).toBeUndefined();
-    }
-    applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true, filmSetFeedback: null })], records: [] });
-    expect(nodes[0].group?.runStatus).toBeUndefined();
-  });
-  it("显式组执行状态优先于片场反馈", () => {
-    const nodes = [node("film", { type: "group", group: { title: "片场", memberCount: 1, outputCapableLeafCount: 0 } })];
-    applyRunStateProjection(nodes, {
-      summaries: [summary("film", { isAggregate: true, filmSetFeedback: {
-        operationKey: "attempt", phase: "running", source: "conversion", labelCode: "generating"
-      } })],
-      records: [],
-      groupStatuses: new Map([["film", { state: "queued", label: "等待助手" }]])
-    });
-    expect(nodes[0].group?.runStatus).toEqual({ state: "queued", label: "等待助手" });
-  });
   it("普通节点投影有界圆点，当前版本用装饰且不挤占状态颜色", () => {
     const nodes = [node("n1")];
     applyRunStateProjection(nodes, {
@@ -163,16 +98,6 @@ describe("applyRunStateProjection", () => {
     expect(nodes[0]?.historyStrip?.truncated).toBe(6);
   });
 
-  it("聚合节点只写运行遮罩，不写历史条", () => {
-    const nodes = [node("film", { type: "model", compositeAsset: { x: 0, y: 0, width: 100, height: 100 } })];
-    applyRunStateProjection(nodes, {
-      summaries: [summary("film", { isAggregate: true, aggregateRunning: true, active: op("r", "running", "2026-10-12T00:00:00.000Z", "film") })],
-      records: [op("r", "running", "2026-10-12T00:00:00.000Z", "film")]
-    });
-    expect(nodes[0]?.aggregateRun).toEqual({ active: true });
-    expect(nodes[0]?.historyStrip).toBeUndefined();
-  });
-
   it("有运行中操作即点亮 busy，与图片/视频节点的执行中呈现一致", () => {
     const nodes = [node("n1", { type: "model" })];
     applyRunStateProjection(nodes, {
@@ -189,15 +114,6 @@ describe("applyRunStateProjection", () => {
       records: [op("a", "succeeded", "2026-10-12T00:00:00.000Z")]
     });
     expect(nodes[0]?.busy).toBe(false);
-  });
-
-  it("group 节点不写历史条", () => {
-    const nodes = [node("g", { type: "group", group: { title: "", memberCount: 1, outputCapableLeafCount: 1 } })];
-    applyRunStateProjection(nodes, {
-      summaries: [summary("g")],
-      records: [op("a", "succeeded", "2026-10-12T00:00:00.000Z", "g")]
-    });
-    expect(nodes[0]?.historyStrip).toBeUndefined();
   });
 
   it("失败/取消圆点状态映射且无当前装饰", () => {
