@@ -212,10 +212,10 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   }
   const newNodeIds: string[] = [];
 
-  // 3. 节点：parent 重写为新 ID；只有**顶层节点**承载整体平移，成员保持相对坐标。
-  //    父节点先于子节点输出（拓扑排序），保证服务端 applyCommand 时 parent 存在。
+  // 3. node.add creates root nodes, so flatten the accepted source parent chain
+  //    into canvas coordinates before applying the shared translation.
   //    扩展重映射的数据随 node.add 一起提交，可信生命周期复核完整闭包。
-  for (const { node, isTopLevel, absolute } of placed) {
+  for (const { node, absolute } of placed) {
     const newId = idMap.get(node.id);
     if (newId === undefined) continue;
     newNodeIds.push(newId);
@@ -225,14 +225,9 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
       node: {
         id: newId,
         type: node.type,
-        position: isTopLevel
-          ? { x: absolute.x + dx, y: absolute.y + dy }
-          : { ...node.position },
+        position: { x: absolute.x + dx, y: absolute.y + dy },
         ...(node.width !== undefined ? { width: node.width } : {}),
         ...(node.height !== undefined ? { height: node.height } : {}),
-        ...(node.parentId !== undefined && idMap.has(node.parentId)
-          ? { parentId: idMap.get(node.parentId) }
-          : {}),
         ...(node.zIndex !== undefined ? { zIndex: node.zIndex } : {})
       },
       ...(mappedData ? { nodeData: mappedData } : {})

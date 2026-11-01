@@ -284,7 +284,7 @@ describe("粘贴规划", () => {
     expect(planCanvasPaste({ viewport: { x: 0, y: 0, zoom: 1 }, canvas, payload: empty, anchor: null })).toBeNull();
   });
 
-  it("粘贴 group 子树只平移顶层，成员保持相对坐标（change: add-canvas-node-grouping）", () => {
+  it("粘贴父子树时扁平化坐标并保留相对布局", () => {
     const base = createEmptyWoohaa3ServerCanvas("canvas-group", NOW);
     const canvas: ServerCanvas = {
       ...base,
@@ -312,18 +312,15 @@ describe("粘贴规划", () => {
     const adds = plan.commands.filter((command) => command.type === "node.add") as Array<{
       node: { id: string; type: string; position: { x: number; y: number }; width?: number; height?: number; parentId?: string };
     }>;
-    const groupAdd = adds.find((command) => command.node.type === "group" && command.node.parentId === undefined)!;
-    const innerAdd = adds.find((command) => command.node.type === "group" && command.node.parentId !== undefined)!;
+    const [groupAdd, innerAdd] = adds.filter((command) => command.node.type === "group");
     const childAdd = adds.find((command) => command.node.type === "image")!;
     const grandchildAdd = adds.find((command) => command.node.type === "text")!;
     // 顶层 group 的中心落在锚点上（原 group 中心 (2200,1650)，尺寸 400×300）。
     expect(groupAdd.node.position).toEqual({ x: anchor.x - 200, y: anchor.y - 150 });
-    // 成员保持相对坐标（未被二次偏移），嵌套 group 的局部坐标同样不变。
-    expect(childAdd.node.position).toEqual({ x: 20, y: 30 });
-    expect(innerAdd.node.position).toEqual({ x: 40, y: 60 });
-    expect(grandchildAdd.node.position).toEqual({ x: 10, y: 20 });
-    expect(childAdd.node.parentId).toBeDefined();
-    expect(grandchildAdd.node.parentId).toBeDefined();
+    expect(childAdd.node.position).toEqual({ x: 320, y: 380 });
+    expect(innerAdd.node.position).toEqual({ x: 340, y: 410 });
+    expect(grandchildAdd.node.position).toEqual({ x: 350, y: 430 });
+    expect(adds.every(({ node }) => node.parentId === undefined)).toBe(true);
   });
 
   it("单独复制组内成员：以鼠标为中心，且丢弃已不存在的父级", () => {
