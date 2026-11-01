@@ -33,24 +33,12 @@ export { woohaa3CanvasStore } from "./canvas-state/index.js";
 /** 第一阶段只维护一个画布，ID 固定；多画布切换属于后续能力。 */
 export const DEFAULT_CANVAS_ID = "woohaa3-default-canvas";
 
-/**
- * 一次画布会话的关联标识：32 位小写十六进制，与 trace_id 同形状。
- *
- * 不用 crypto.randomUUID()：它在非安全上下文（局域网 http）里不可用，而画布
- * 完全可能通过这种地址打开。getRandomValues 没有这个限制。
- */
-function createTelemetrySessionId(): string {
-  const bytes = new Uint8Array(16);
-  const webCrypto = globalThis.crypto;
-  if (webCrypto && typeof webCrypto.getRandomValues === "function") webCrypto.getRandomValues(bytes);
-  else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
+// 会话标识与断网判定在 `canvas-session-env.ts`（file-budget 拆分）。
+import { createTelemetrySessionId, isBrowserOffline } from "./canvas-session-env.js";
 
 // 页面级 E2E 钩子已拆到 `canvas-session-test-hooks.ts`（file-budget）。这里转出去保持
 // `install-services.ts` 与测试既有的 import 路径不变。
 export { installCanvasEditTestHooks, installCanvasSessionTestHooks } from "./canvas-session-test-hooks.js";
-
 
 /** 同步尚未建立时的 Yjs 状态（正在连接远程）。 */
 const IDLE_REMOTE: CanvasSyncStatus = {
@@ -60,18 +48,6 @@ const IDLE_REMOTE: CanvasSyncStatus = {
   pendingCount: 0,
   error: null
 };
-
-/**
- * 浏览器是否处于系统级断网。
- *
- * Chromium 的 `page.context().setOffline(true)` 不会关闭已建立的 WebSocket，因此仅靠
- * socket 的 close 事件无法感知断网。这里读 `navigator.onLine`——它是产品语义（断线只读）
- * 的正确来源，E2E 与真实用户断网都会置为 false。
- */
-function isBrowserOffline(): boolean {
-  const online = (globalThis as unknown as { navigator?: { onLine?: boolean } }).navigator?.onLine;
-  return online === false;
-}
 
 export type CreateCanvasSessionOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;

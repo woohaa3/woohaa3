@@ -27,7 +27,10 @@ export const FIRST_WAVE_SURFACES: Record<string, string[]> = {
   // model-focus-back 已由公共 `cordis/focus/header`（返回/历史/标题）与各 editor 工作区取代
   // （change: 2026-10-12-unify-node-editors-and-focus-transitions，design D1/D2），不再登记独立 surface。
   "canvas-context-menu": ["cordis/plugins/canvas-menu/canvas-context-menu.tsx"],
-  "canvas-switcher": ["cordis/plugins/canvas-switcher/chrome.tsx"],
+  "canvas-switcher": [
+    "cordis/plugins/canvas-switcher/trigger.tsx",
+    "cordis/plugins/canvas-switcher/chrome.tsx",
+  ],
   // task-activity 浮层已迁至独立 extension 包
   // （change: 2026-10-10-extract-optional-feature-extensions），宿主不再持有该 surface 实现。
   "dialog-surface": ["cordis/services/dialogs/DialogHost.tsx"],

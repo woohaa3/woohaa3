@@ -85,7 +85,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       purpose: props.mode,
       cameraId: props.selectedCameraId,
       clipId: props.clipId,
-      itemId: props.itemId ?? undefined,
+      itemId: props.itemId,
     },
     { prompt: props.mode === "text" ? "" : (props.initialPrompt ?? "") },
   );

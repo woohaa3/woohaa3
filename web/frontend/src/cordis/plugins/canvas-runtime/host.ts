@@ -44,6 +44,7 @@ import {
   installOverviewLodTelemetry,
   type OverviewLodTelemetryHandle
 } from "./overview-lod-telemetry.js";
+import { groupBadgeProjectionOf } from "../canvas-shell/group-badge-projection.js";
 import { presentationScreenRect } from "./presentation-screen-rect.js";
 import {
   applyFilmSetObjectAction,
@@ -531,14 +532,15 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     this.controllerInstance?.nodeScreenRect(nodeId) ?? null;
   /** 呈现矩形投影的几何规则在 `presentation-screen-rect.ts`（file-budget 拆分）。 */
   nodePresentationScreenRect = (nodeId: string): import("@woohaa3/contracts").ScreenRect | null => {
-    const controller = this.controllerInstance;
+    const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
     return presentationScreenRect({
       nodeId,
       card: this.nodeScreenRect(nodeId),
-      canvas: workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas,
-      zoom: controller?.viewport().zoom ?? 1,
-      queryCompositeAssetScopes: controller ? () => controller.queryCompositeAssetScopes() : () => null,
-      worldToClient: (point) => this.worldToClient(point)
+      canvas,
+      runtime: this.controllerInstance,
+      // 组的模型徽标投影来自 canvas-shell 的共享资源表：依赖仍留在本文件（已评审），
+      // 不在 presentation-screen-rect.ts 里再 import 一次。
+      groupBadgeProjection: groupBadgeProjectionOf(canvas, nodeId)
     });
   };
 

@@ -163,7 +163,8 @@ describe("业务 Dialog 迁移（任务 6.5）", () => {
       "cordis/plugins/paste-import/replace-dialog.tsx",
       "cordis/plugins/video-capture/frame-capture-dialog.tsx",
       "cordis/plugins/video-capture/video-edit-dialog.tsx",
-      "cordis/plugins/canvas-switcher/chrome.tsx"
+      "cordis/plugins/canvas-switcher/chrome.tsx",
+      "cordis/plugins/canvas-switcher/trigger.tsx"
     ];
     // 片段 dialog renderer 已迁至独立 extension 包
     // （change: 2026-10-10-extract-optional-feature-extensions）：宿主 firewall 不再覆盖它们，

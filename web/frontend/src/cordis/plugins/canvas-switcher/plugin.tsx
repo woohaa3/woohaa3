@@ -17,12 +17,12 @@ import type { CanvasSummary } from "../../contract/canvas-catalog.js";
 import type { CanvasSessionStatus } from "../../contract/session.js";
 import {
   CANVAS_SWITCHER_DIALOG_ID,
-  CanvasSwitcherTrigger,
   canvasSwitcherDefinition,
   createCanvasSwitcherRenderer
 } from "./chrome.js";
+import { CanvasSwitcherTrigger } from "./trigger.js";
 import type { CanvasCreateOptionContribution } from "../../contracts.js";
-import type { CanvasLiveSync } from "./chrome.js";
+import type { CanvasLiveSync } from "./sync-labels.js";
 
 export const CANVAS_SWITCHER_PLUGIN_ID = "canvas-switcher";
 

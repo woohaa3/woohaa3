@@ -27,10 +27,9 @@ import type { CanvasSession } from "../../contract/session.js";
 import type { CanvasCreateOptionContribution, SlotsService } from "../../contracts.js";
 import { ContributionBoundary } from "../../contribution-boundary.js";
 
-// 触发器的实现已拆到 `trigger.tsx`（file-budget），这里转出去保持既有 import 路径不变：
-// 测试与 `plugin.tsx` 都从 `chrome.js` 取它。文案与实时态类型同理，来自 `sync-labels.ts`。
-export { CanvasSwitcherTrigger } from "./trigger.js";
-export type { CanvasLiveSync } from "./sync-labels.js";
+// 触发器的实现与同步文案已拆到 `trigger.tsx` / `sync-labels.ts`（file-budget）。调用方
+// 直接从那两个文件 import，本文件不再转发 —— 转发会让「按 chrome.tsx 找触发器」扑空，
+// 也让 Radix 防火墙等按文件名审计的清单扫错目标。
 
 export const CANVAS_SWITCHER_DIALOG_ID = "canvas-switcher";
 

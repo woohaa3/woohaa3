@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CanvasSwitcherTrigger } from "./chrome.js";
+import { CanvasSwitcherTrigger } from "./trigger.js";
 import type { CanvasSummary } from "../../contract/canvas-catalog.js";
 import type { CanvasNavigationService } from "../../navigation/index.js";
 

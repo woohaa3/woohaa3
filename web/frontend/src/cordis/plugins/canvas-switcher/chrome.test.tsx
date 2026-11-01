@@ -16,7 +16,8 @@ import { CANVAS_SWITCHER_DIALOG_ID, canvasSwitcherDefinition } from "./chrome.js
 import { renderToStaticMarkup } from "react-dom/server";
 import { CanvasCatalogStore } from "../../services/canvas-catalog-store.js";
 import { createFakeCanvasCatalogRemote, makeSummary } from "../../test-support/canvas-catalog.js";
-import { CanvasSwitcherTrigger, createCanvasSwitcherRenderer } from "./chrome.js";
+import { createCanvasSwitcherRenderer } from "./chrome.js";
+import { CanvasSwitcherTrigger } from "./trigger.js";
 import type { CanvasSwitcherDeps } from "./chrome.js";
 import type { CanvasSummary } from "../../contract/canvas-catalog.js";
 import type { CanvasSession } from "../../contract/session.js";
