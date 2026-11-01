@@ -134,6 +134,19 @@ afterEach(async () => {
 });
 
 describe("Paste Import Plugin", () => {
+  it("reports an unavailable world binding through the real paste and duplicate handlers", async () => {
+    const harness = await makeHarness(); runtime = harness.runtime;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());
+    const open = vi.spyOn(harness.dialogs, "open");
+    const payload = { format: "infinspire-canvas-copy-v1", nodes: [{ id: "c", type: "world-camera", position: { x: 0, y: 0 } }], edges: [], incomingEdges: [], nodeData: { c: { worldCamera: { kind: "world-camera", version: "shared-world-v1", cameraId: "c", settingsVersion: "1", position: { u: 1, v: 2, h: 4 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: "missing" } } } };
+    const text = JSON.stringify(payload);
+    const event = { clipboardData: { files: [], items: [], types: [], getData: () => text } } as unknown as ClipboardEvent;
+    expect(harness.slots.list("input.paste")[0]!.handle(event)).toBe(true);
+    window.dispatchEvent(new CustomEvent("woohaa3-canvas-duplicate", { detail: text }));
+    expect(harness.record).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open.mock.calls[0]![0]).toMatchObject({ payload: { description: expect.stringContaining("目标模型一起复制") } });
+  });
   it("uses the completed in-page snapshot when a native copy leaves empty clipboard text", async () => {
     const harness = await makeHarness(); runtime = harness.runtime;
     woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());

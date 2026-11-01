@@ -19,6 +19,7 @@ import { managedNodeRelationOf, partitionManagedNodeDeletion } from "@woohaa3/co
 
 /** 页内剪贴板 fallback 的全局键。 */
 export const MEMORY_CLIPBOARD_KEY = "__canvasMemoryClipboard";
+export const DUPLICATE_CANVAS_EVENT = "woohaa3-canvas-duplicate";
 
 /** 有真实文本选区时，Mod+C 应由浏览器复制选中文本，而不是复制画布节点。 */
 function hasSelectedText(target: { getSelection?: () => Selection | null }): boolean {
@@ -77,7 +78,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     return text;
   };
 
-  const runClipboardShortcut = async (action: "copy" | "delete") => {
+  const runClipboardShortcut = async (action: "copy" | "duplicate" | "delete") => {
     if (core.modalActive()) return;
     const canvasState = woohaa3CanvasStore.getState().canvas;
     const session = options.getSession();
@@ -86,10 +87,16 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     const clip = target as unknown as {
       navigator?: { clipboard?: { writeText?: (text: string) => Promise<void> } };
     };
-    if (action === "copy") {
+    if (action === "copy" || action === "duplicate") {
+      if (action === "duplicate" && !writable()) return;
       let text: string | null;
       try { text = await freezeClipboardText(); } catch (error) { options.onInteractionError?.(error); return; }
       if (text === null) return;
+      if (action === "duplicate") {
+        if (!writable() || core.modalActive() || nodeSelectionStore.getSnapshot().editingFocus || isEditableElement(target.document.activeElement) || woohaa3CanvasStore.getState().canvas?.id !== canvasState.id) return;
+        target.dispatchEvent(new CustomEvent(DUPLICATE_CANVAS_EVENT, { detail: text }));
+        return;
+      }
       try {
         await clip.navigator?.clipboard?.writeText?.(text);
       } catch {

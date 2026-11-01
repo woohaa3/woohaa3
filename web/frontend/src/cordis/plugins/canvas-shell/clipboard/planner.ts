@@ -48,6 +48,7 @@ export type PlanPasteOptions = {
    * 未授权/对象缺失的跨画布复制必须在这里显式列出：命中即拒绝整次粘贴，不写悬空引用。
    */
   unverifiedProjectObjects?: readonly string[];
+  onRefusal?: (message: string) => void;
 };
 
 /** 粘贴拒绝原因（供 UI 显示明确原因，而不是静默无操作）。 */
@@ -121,7 +122,7 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
     payload,
     ...(options.unverifiedProjectObjects ? { unverifiedProjectObjects: options.unverifiedProjectObjects } : {})
   });
-  if (refusal) return null;
+  if (refusal) { options.onRefusal?.(refusal.message); return null; }
 
   const makeId = options.createId ?? defaultPasteId;
 
@@ -170,7 +171,12 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
     nodes: payload.nodes.map(node => ({ nodeId: node.id, nodeData: remappedData.get(node.id) ?? payload.nodeData[node.id] })),
     ids: { nodeIds: idMap, instanceIds, groupIds, areaIds, cameraIds }
   });
-  if (!world.ok) return null;
+  if (!world.ok) {
+    options.onRefusal?.(world.code === "binding-unavailable"
+      ? "绑定的模型不在复制集合中，请将目标模型一起复制后重试。"
+      : "复制内容无效，无法粘贴。请检查选择后重试。");
+    return null;
+  }
   for (const [index, entry] of world.nodes.entries()) {
     if (!entry.worldKind) continue;
     const data = entry.nodeData;
