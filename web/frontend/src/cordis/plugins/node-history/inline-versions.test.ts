@@ -143,6 +143,27 @@ it("baselines an empty-history node so its first completed version is unseen",as
   expect(service.unseenSnapshot().get("n")?.has("d")).toBe(true);
   service.dispose();
 });
+it("does not mark failed or other red terminal versions unseen",async()=>{
+  const items=[item("a")];
+  const {service}=setup(items);await service.refresh();
+  items.push({...item("f"), outcome:"failed" as const, recoverable:false, createdAt:"z"});
+  await service.refreshNode("n");
+  expect(service.unseenSnapshot().size).toBe(0);
+  service.dispose();
+});
+it("clears a previewed running version when it settles and treats its archive as seen",async()=>{
+  const items=[item("a")];
+  const {service}=setup(items);await service.refresh();
+  const record=(state:"running"|"succeeded")=>({operationId:"run",canvasId:"canvas",nodeId:"n",kind:"image",state,owner:"server",createdAt:"r",updatedAt:"r"}) as never;
+  service.observeRunState([record("running")]);
+  expect(service.preview.selected.get("n")).toBe("operation:run");
+  service.observeRunState([record("succeeded")]);
+  expect(service.preview.selected.get("n")).toBeUndefined();
+  items.push({...item("z"), source:{label:"z",runId:"run"}, createdAt:"z"});
+  await service.refreshNode("n");
+  expect(service.unseenSnapshot().size).toBe(0);
+  service.dispose();
+});
 
 it("late metadata does not publish after page disposal",async()=>{
   const {service,client}=setup();let release!:(value:any)=>void;

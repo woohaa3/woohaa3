@@ -1,5 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
-import { visibleNodeHistoryVersions, type NodeGenerationHistoryListItem } from "@woohaa3/contracts";
+import { visibleNodeHistoryVersions, type CanvasOperationRecord, type NodeGenerationHistoryListItem } from "@woohaa3/contracts";
 import type { NodeHistoryClient } from "./controller.js";
 import type { CanvasHistoryClient } from "./canvas-history-controller.js";
 import { ExecutionPreview } from "./execution-preview.js";
@@ -50,6 +50,9 @@ export class InlineVersions {
   private unseen = new Map<string, ReadonlySet<string>>();
   private baseline = new Set<string>();
   private applying = new Map<string, string>();
+  private runRecords = new Map<string, CanvasOperationRecord>();
+  private runningSelections = new Map<string, Set<string>>();
+  private settledSeen = new Map<string, Set<string>>();
   private readonly openedAt = new Date().toISOString();
   private storage: Pick<Storage, "getItem" | "setItem"> | null;
   constructor(private client: NodeHistoryClient & Partial<CanvasHistoryClient>, private canvasId: string,
@@ -89,6 +92,43 @@ export class InlineVersions {
     this.seenAt.set(nodeId, newest);
     this.persistSeen();
   }
+  private trackRunningSelection(nodeId: string, operationId: string) {
+    const ops = this.runningSelections.get(nodeId) ?? new Set<string>();
+    ops.add(operationId);
+    this.runningSelections.set(nodeId, ops);
+  }
+  private trackIfRunning(nodeId: string, presentationId: string) {
+    if (!presentationId.startsWith("operation:")) return;
+    const operationId = presentationId.slice("operation:".length);
+    const record = this.runRecords.get(operationId);
+    if (record?.nodeId === nodeId && (record.state === "running" || record.state === "queued")) {
+      this.trackRunningSelection(nodeId, operationId);
+    }
+  }
+  private trackSettledSeen(nodeId: string, operationId: string) {
+    const ops = this.settledSeen.get(nodeId) ?? new Set<string>();
+    ops.add(operationId);
+    this.settledSeen.set(nodeId, ops);
+  }
+  /** 已结算的操作等到历史条目到达后再标记已读；返回是否更新了 seenAt。 */
+  private applySettledSeen(): void {
+    let changed = false;
+    for (const [nodeId, ops] of [...this.settledSeen]) {
+      const items = this.versions.get(nodeId) ?? [];
+      for (const operationId of [...ops]) {
+        const item = items.find(entry => entry.source.runId === operationId);
+        if (!item) continue;
+        ops.delete(operationId);
+        const previous = this.seenAt.get(nodeId);
+        if (!previous || item.createdAt > previous) {
+          this.seenAt.set(nodeId, item.createdAt);
+          changed = true;
+        }
+      }
+      if (!ops.size) this.settledSeen.delete(nodeId);
+    }
+    if (changed) this.persistSeen();
+  }
   private recomputeUnseen() {
     const next = new Map<string, ReadonlySet<string>>();
     for (const [nodeId, items] of this.versions) {
@@ -96,7 +136,12 @@ export class InlineVersions {
       const seen = this.seenAt.get(nodeId);
       if (!seen) continue;
       const unseen = new Set<string>();
-      for (const item of items) if (item.entryId && item.createdAt > seen) unseen.add(item.entryId);
+      for (const item of items) {
+        // 只有成功（绿点）才需要未读提醒；失败/取消/中断等红点不标。
+        if (!item.entryId || item.createdAt <= seen) continue;
+        if ((item.outcome ?? "succeeded") !== "succeeded") continue;
+        unseen.add(item.entryId);
+      }
       if (unseen.size) next.set(nodeId, unseen);
     }
     this.unseen = next;
@@ -138,6 +183,38 @@ export class InlineVersions {
     this.emit();
   }
   unseenSnapshot = (): ReadonlyMap<string, ReadonlySet<string>> => this.unseen;
+  /**
+   * 运行态观察：预览中的黄点结算后撤销本地预览。
+   *
+   * 任务成功时节点 canonical 已由投影器写入新 outputAssetId（若用户没有切走，activeRunId
+   * 仍是该 run）；撤销预览让新结果直接显示。失败/取消同样撤销，保留此前当前版本。
+   * 若用户在完成前切到绿点，apply 已改写 activeRunId，投影器会按 latest-run-wins 跳过，
+   * 不会覆盖用户刚选的版本。
+   */
+  observeRunState(records: readonly CanvasOperationRecord[]) {
+    this.runRecords = new Map(records.map(record => [record.operationId, record]));
+    this.preview.observe(records);
+    for (const [nodeId, presentationId] of this.preview.selected) {
+      if (!presentationId.startsWith("operation:")) continue;
+      const operationId = presentationId.slice("operation:".length);
+      const record = this.runRecords.get(operationId);
+      if (record?.nodeId === nodeId && (record.state === "running" || record.state === "queued")) {
+        this.trackRunningSelection(nodeId, operationId);
+      }
+    }
+    for (const [nodeId, ops] of [...this.runningSelections]) {
+      for (const operationId of [...ops]) {
+        const record = this.runRecords.get(operationId);
+        if (!record || record.state === "running" || record.state === "queued") continue;
+        ops.delete(operationId);
+        if (!ops.size) this.runningSelections.delete(nodeId);
+        if (this.preview.selected.get(nodeId) === `operation:${operationId}`) {
+          this.preview.clear(nodeId);
+          this.trackSettledSeen(nodeId, operationId);
+        }
+      }
+    }
+  }
   snapshot = () => this.versions;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   async refreshNode(nodeId: string) {
@@ -153,6 +230,7 @@ export class InlineVersions {
       const next = new Map(this.versions).set(nodeId, [...result.items].sort((a,b) => a.createdAt.localeCompare(b.createdAt) || a.entryId.localeCompare(b.entryId)));
       this.preview.retain(next);
       this.versions = next;
+      this.applySettledSeen();
       this.recomputeUnseen();
       this.preview.refresh();
       this.emit();
@@ -178,6 +256,7 @@ export class InlineVersions {
       }
       this.preview.retain(next);
       this.versions = next;
+      this.applySettledSeen();
       this.recomputeUnseen();
       this.preview.refresh();
       this.emit();
@@ -212,6 +291,7 @@ export class InlineVersions {
       // 当前版本本来就是可见内容，不再用本地预览覆盖 canonical。
       if (item?.current) { this.preview.clear(request.nodeId); return; }
       this.preview.select(request.nodeId, identity);
+      this.trackIfRunning(request.nodeId, identity);
       return;
     }
     const item = this.resolveItem(request);
@@ -219,6 +299,7 @@ export class InlineVersions {
     if (item.entryId) this.markSeenEntry(request.nodeId, item.entryId);
     if (item.current) { this.preview.clear(request.nodeId); return; }
     this.preview.select(request.nodeId, this.presentationOf(item));
+    this.trackIfRunning(request.nodeId, this.presentationOf(item));
   }
   /**
    * 圆点直接切换：已完成的非当前版本调用受控历史 apply；其余保持只读预览。
@@ -262,7 +343,7 @@ export class InlineVersions {
       }
     })();
   }
-  dispose() { this.disposed = true; this.preview.dispose(); this.listeners.clear(); this.applying.clear(); this.seenAt.clear(); this.unseen.clear(); this.baseline.clear(); }
+  dispose() { this.disposed = true; this.preview.dispose(); this.listeners.clear(); this.applying.clear(); this.seenAt.clear(); this.unseen.clear(); this.baseline.clear(); this.runRecords.clear(); this.runningSelections.clear(); this.settledSeen.clear(); }
 }
 
 export function installInlineVersions(ctx: Context, canvasId: string, client: NodeHistoryClient & Partial<CanvasHistoryClient>, options: InlineVersionOptions = {}) {
@@ -302,7 +383,7 @@ export function installInlineVersions(ctx: Context, canvasId: string, client: No
   ctx.inject([RUN_STATE_SERVICE], (scoped) => {
     const runState = scoped.get(RUN_STATE_SERVICE as never) as unknown as RunStateService;
     const offRuns = runState.subscribe(() => {
-      service.preview.observe(runState.snapshot().records);
+      service.observeRunState(runState.snapshot().records);
       for (const record of runState.snapshot().records) {
         const previous = observed.get(record.operationId);
         observed.set(record.operationId, record.state);
@@ -317,7 +398,7 @@ export function installInlineVersions(ctx: Context, canvasId: string, client: No
         }
       }
     });
-    service.preview.observe(runState.snapshot().records);
+    service.observeRunState(runState.snapshot().records);
     scoped.effect(() => () => offRuns(), "node-history:inline-run-state");
   });
   const off = ctx.on("ui.node-history.switch-requested", request => {

@@ -169,7 +169,7 @@ export function NodeHistoryPanel({ controller, writable, variant, onWidthChange,
                 item={record.history}
                 selected={state.selectedEntryId === record.entryId || state.selectedEntryId === record.presentationId}
                 applying={state.applyingEntryId === record.entryId || state.pendingCurrentEntryId === record.entryId}
-                writable={writable && !state.operations.some(item => item.state === "queued" || item.state === "running") && state.current.draftState === "saved"}
+                writable={writable && state.current.draftState === "saved"}
                 controller={controller}
                 {...(renderModelThumbnail ? { renderModelThumbnail } : {})}
               />

@@ -62,10 +62,6 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
       const disposeInlineVersions = installInlineVersions(ctx, canvasId, client, {
         canActivate: (nodeId) => {
           if (!ctx.canvasSession.isWritable()) return { ok: false as const, reason: "当前会话不可写，无法切换版本" };
-          const runs = ctx.get(RUN_STATE_SERVICE as never) as RunStateService | undefined;
-          if (runs?.snapshot().records.some(record => record.nodeId === nodeId && (record.state === "queued" || record.state === "running"))) {
-            return { ok: false as const, reason: "任务进行中，暂时无法切换版本" };
-          }
           const imageEdit = resolveImagePreviewOwner(ctx);
           if (imageEdit?.isActive?.() === true && imageEdit.nodeId?.() === nodeId && imageEdit.draftState?.() !== "saved") {
             return { ok: false as const, reason: "请先保存当前草稿" };

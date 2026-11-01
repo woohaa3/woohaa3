@@ -30,7 +30,6 @@ import {
 import { CanvasStorageError } from "../errors.js";
 import {
   currentNodeStateOf,
-  isActiveGeneration,
   type CurrentNodeState
 } from "./current-state.js";
 import {
@@ -86,9 +85,6 @@ export async function restoreNodeHistory(
     return { ok: false, code: "invalid-node-type", message: `节点 ${input.nodeId} 与历史种类不兼容` };
   }
   const data = canvas.nodeData[input.nodeId] as Record<string, unknown> | undefined;
-  if (isActiveGeneration(data)) {
-    return { ok: false, code: "conflict", message: "节点存在进行中的生成，无法恢复历史版本" };
-  }
 
   // 并发保护：调用方认为的当前身份与服务端权威状态不一致时拒绝（不覆盖他人写入）。
   const currentNode = currentNodeStateOf(canvas, input.nodeId, entry.kind);
