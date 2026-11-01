@@ -2,18 +2,279 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>WooHaa3 · 启动</title>
+  <title>四喜 AI · 启动</title>
   <style>
-    :root { color-scheme: dark; }
-    body { margin: 0; padding: 40px; background: #202124; color: #eee; font: 15px/1.6 system-ui, sans-serif; }
-    h2 { margin: 0 0 16px; font-size: 24px; font-weight: 600; }
-    p { white-space: pre-wrap; overflow-wrap: anywhere; }
-    button { padding: 8px 24px; border: 1px solid #555; border-radius: 6px; background: #333; color: inherit; font: inherit; cursor: pointer; }
+    /*
+     * 启动页：原生窗口在宿主就绪前先显示这一屏。
+     *
+     * 动效照 Uiverse「Generating」loader（dexter-st）的节奏重做：
+     *   1) 字形逐个亮起再熄灭（0→1→0.2→0），错峰约 0.105s；
+     *   2) 一层竖条纹 mask 的彩色光带左右扫过。
+     * 原版是彩色渐变 + 文字，这里换成四喜品牌紫，字形直接用品牌 logo 的矢量路径。
+     *
+     * 配色取自四喜暗色主题（src/app/theme.ts 的 MIORA_DARK）：页面底 #0c0c0c。
+     * 这里是独立 HTML，拿不到 CSS 变量，所以数值写死；改主题色时记得同步这一份。
+     */
+    :root {
+      color-scheme: dark;
+      --page: #0c0c0c;
+      --ink: #ffffff;
+      --muted: rgba(255, 255, 255, 0.45);
+      --accent: #8a3ffc;
+      --accent-soft: #a05cff;
+      --border: rgba(255, 255, 255, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background: var(--page);
+      color: var(--ink);
+      font: 14px/1.6 "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+
+    /* 极淡的紫色光晕，纯黑底不至于死板；固定不参与动画。 */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: -20%;
+      background: radial-gradient(circle at 50% 45%, rgba(138, 63, 252, 0.18), transparent 55%);
+      pointer-events: none;
+    }
+
+    main {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 44px;
+    }
+
+    /* ---------- 字标 + 条纹扫光 ---------- */
+    .loader-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      /*
+       * 光带必须**明显高过字标**：参考里条纹上下各冒出一大截，光柱才是「落下来」的，
+       * 贴着字形裁齐会变成盖在字上的条形码。这里字标约 88px，上下各留 78px。
+       */
+      padding-block: 78px;
+      padding-inline: 34px;
+    }
+
+    .wordmark {
+      display: block;
+      /* 字标原生比例 398.73 : 79.69 ≈ 5:1 */
+      width: min(440px, 60vw);
+      height: auto;
+      overflow: visible;
+      position: relative;
+      z-index: 2;
+    }
+
+    /*
+     * 竖条纹遮罩层：只让窄竖线透出来，扫过去时像光柱。
+     * 原版 8px 一档；这里按字标宽度等比缩到 7px，条纹数才和参考接近。
+     *
+     * 两层 mask 相乘（用 mask-composite: intersect）：
+     * - 竖向条纹：决定每一列透不透光；
+     * - 纵向渐变：光柱上下两端渐隐，参考里条纹不是齐头硬切的。
+     */
+    .loader {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      background-color: transparent;
+      mask:
+        repeating-linear-gradient(90deg, transparent 0, transparent 5px, #000 6px, #000 7px),
+        linear-gradient(180deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+      mask-composite: intersect;
+      -webkit-mask:
+        repeating-linear-gradient(90deg, transparent 0, transparent 5px, #000 6px, #000 7px),
+        linear-gradient(180deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+      -webkit-mask-composite: source-in;
+    }
+
+    .loader::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      /*
+       * 照参考稿的五色径向渐变：黄 → 红 → 青 → 绿 → 蓝。
+       * 这是刻意保留的彩虹光谱 —— 它和品牌紫不是一套配色，但正是参考稿
+       * 「彩色光柱扫过」的观感来源；换成单色紫会塌成一片灰紫。
+       */
+      background-image:
+        radial-gradient(circle at 50% 50%, #ff0 0%, transparent 50%),
+        radial-gradient(circle at 45% 45%, #f00 0%, transparent 45%),
+        radial-gradient(circle at 55% 55%, #0ff 0%, transparent 45%),
+        radial-gradient(circle at 45% 55%, #0f0 0%, transparent 45%),
+        radial-gradient(circle at 55% 45%, #00f 0%, transparent 45%);
+      /* 中心挖空：光柱两侧最亮，扫过时中间不会糊成一坨白 */
+      mask: radial-gradient(
+        circle at 50% 50%,
+        transparent 0%,
+        transparent 9%,
+        #000 26%
+      );
+      -webkit-mask: radial-gradient(
+        circle at 50% 50%,
+        transparent 0%,
+        transparent 9%,
+        #000 26%
+      );
+      animation:
+        transform-animation 2s infinite alternate,
+        opacity-animation 4s infinite;
+      animation-timing-function: cubic-bezier(0.6, 0.8, 0.5, 1);
+    }
+
+    @keyframes transform-animation {
+      0%   { transform: translate(-55%); }
+      100% { transform: translate(55%); }
+    }
+
+    @keyframes opacity-animation {
+      0%, 100% { opacity: 0; }
+      15%      { opacity: 1; }
+      65%      { opacity: 0; }
+    }
+
+    /* ---------- 字形逐个闪动 ---------- */
+    .loader-letter {
+      /* SVG 的 fill 默认是黑色，不跟 color 走 —— 必须显式指定。 */
+      fill: currentColor;
+      color: var(--ink);
+      opacity: 0;
+      z-index: 2;
+      /* CSS 变换作用在 <g> 上需要显式指定参考框，否则 scale 会以整个 SVG 为原点 */
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: loader-letter-anim 4s infinite linear;
+    }
+
+    /* 最后两个字形是 AI，用品牌紫区分层级 */
+    .loader-letter.ai { color: var(--accent-soft); }
+
+    /* 错峰：原版 0.1 / 0.205 / 0.31 …，这里六个字形 */
+    .loader-letter:nth-child(1) { animation-delay: 0.1s; }
+    .loader-letter:nth-child(2) { animation-delay: 0.205s; }
+    .loader-letter:nth-child(3) { animation-delay: 0.31s; }
+    .loader-letter:nth-child(4) { animation-delay: 0.415s; }
+    .loader-letter:nth-child(5) { animation-delay: 0.521s; }
+    .loader-letter:nth-child(6) { animation-delay: 0.626s; }
+
+    @keyframes loader-letter-anim {
+      0%   { opacity: 0; }
+      5%   { opacity: 1; transform: scale(1.08) translateY(-2%); filter: drop-shadow(0 0 8px rgba(138, 63, 252, 0.9)); }
+      20%  { opacity: 0.2; transform: none; filter: none; }
+      100% { opacity: 0; }
+    }
+
+    /* ---------- 状态 ---------- */
+    #message {
+      margin: 0;
+      min-height: 1.6em;
+      text-align: center;
+      max-width: 460px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      transition: color 160ms ease;
+      animation: rise 520ms cubic-bezier(0.22, 1, 0.36, 1) 160ms both;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: none; }
+    }
+
+    /* ---------- 重试 ---------- */
+    #retry {
+      padding: 8px 26px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--ink);
+      font: inherit;
+      cursor: pointer;
+      transition: background 160ms ease, border-color 160ms ease;
+    }
+
+    #retry:hover { background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.16); }
+    #retry:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    #retry[hidden] { display: none; }
+
+    /* ---------- 失败态：字形常亮、停掉扫光，避免「还在加载」的错觉 ---------- */
+    .failed .loader { display: none; }
+    .failed .loader-letter {
+      animation: none;
+      opacity: 0.5;
+      filter: none;
+      transform: none;
+    }
+    .failed #message { color: rgba(255, 255, 255, 0.78); }
+
+    /* ---------- 尊重系统的「减少动态效果」 ---------- */
+    @media (prefers-reduced-motion: reduce) {
+      .loader { display: none; }
+      .loader-letter { animation: none; opacity: 1; }
+      #message { animation: none; }
+    }
   </style>
 </head>
 <body>
-  <h2>WooHaa3</h2>
-  <p id="message">正在启动…</p>
-  <button id="retry" hidden onclick="location.href='https://woohaa-startup.invalid/retry'">重试</button>
+  <main id="root">
+    <div class="loader-wrapper">
+      <!--
+        读屏只念一次。六个字形按字母分组，路径取自品牌字标，坐标系保持不变。
+        S = p0 / I = p1 / X = p3+p2 / I = p4 / A = p6 / I = p5
+      -->
+      <svg class="wordmark" viewBox="666.89 427.49 398.73 79.69" role="img" aria-label="四喜 AI">
+        <!-- S -->
+        <g class="loader-letter">
+          <path d="M732.48717,468.29891c3.78859.835,6.85827,2.3876,9.20805,4.66108,2.34846,2.27381,3.99676,4.85117,4.94523,7.73043.94682,2.88124,1.23096,5.87429.85276,8.98113-.38017,3.10848-1.36416,5.96834-2.95589,8.58287-1.5914,2.61485-3.77083,4.75678-6.53663,6.42317-2.76745,1.66803-6.04464,2.50106-9.83356,2.50106h-61.27517v-39.67528h18.07572l3.58305.03397c-5.60955-1.06061-13.60669-4.08763-16.82699-7.42336-3.22227-3.33409-4.83177-7.61697-4.83177-12.84634,0-2.57571.51172-5.05869,1.53484-7.44629,1.02312-2.38727,2.44417-4.4904,4.26315-6.30938,1.81898-1.81865,3.92211-3.2772,6.30938-4.37661,2.38727-1.09777,4.94523-1.6483,7.67354-1.6483l60.9823.02723v40.01632l-18.75226.24445,3.58426.52385Z"/>
+        </g>
+        <!-- I -->
+        <g class="loader-letter">
+          <path d="M794.65613,427.54395v38.1977c0,22.8536-18.5265,41.3801-41.3801,41.3801h-.00004v-38.1977c0-22.8536,18.5265-41.3801,41.3801-41.3801h.00004Z"/>
+        </g>
+        <!-- X：外框 + 中间的三角镂空 -->
+        <g class="loader-letter">
+          <path d="M842.87337,507.1216h-42.17634l22.28197-39.78808-22.28197-39.7894h84.35268l-42.17634,79.57748Z"/>
+          <path d="M865.72156,470.73852l19.32815,36.38323h-38.6563l19.32815-36.38323Z"/>
+        </g>
+        <!-- I -->
+        <g class="loader-letter">
+          <path d="M890.73687,427.54398v79.57781h41.38014v-30.67806c0-22.8536-18.5265-48.89974-41.3801-48.89974h-.00004Z"/>
+        </g>
+        <!-- A -->
+        <g class="loader-letter ai">
+          <path d="M1017.48224,468.9831v38.19556h-26.32313v-28.70573c0-13.64751-6.0543-18.70965-13.51927-18.70965v-.02702c-7.20852,0-13.10084,4.73142-13.48557,17.3733h13.27634v12.39211h-13.29656v17.64997h-26.32989v-38.19551c0-.71545.02023-1.42414.05401-2.13287.05397-1.0259.13496-2.04508.24973-3.05076v-.00676c2.46355-20.45104,19.21587-36.27867,39.53195-36.27867v.02698c21.32171,0,38.722,17.42051,39.79515,39.33623.03374.70869.04725,1.41738.04725,2.13283Z"/>
+        </g>
+        <!-- I -->
+        <g class="loader-letter ai">
+          <path d="M1024.24234,427.544v38.19771c0,22.8536,18.5265,41.3801,41.3801,41.3801h.00004v-30.67806c0-22.8536-18.5265-48.89974-41.3801-48.89974h-.00004Z"/>
+        </g>
+      </svg>
+      <div class="loader" aria-hidden="true"></div>
+    </div>
+
+    <p id="message" role="status" aria-live="polite">正在启动…</p>
+    <button id="retry" type="button" hidden onclick="location.href='https://woohaa-startup.invalid/retry'">重试</button>
+  </main>
 </body>
 </html>

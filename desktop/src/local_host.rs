@@ -278,9 +278,10 @@ struct Managed {
 fn status(app: &tauri::AppHandle, message: &str, failed: bool) {
     if let Some(window) = app.get_webview_window("startup") {
         let script = format!(
-            "(function(){{function apply(){{document.getElementById('message').textContent={};document.getElementById('retry').hidden={};}}if(document.getElementById('message'))apply();else addEventListener('DOMContentLoaded',apply,{{once:true}});}})();",
+            "(function(){{function apply(){{document.getElementById('message').textContent={};document.getElementById('retry').hidden={};document.body.classList.toggle('failed',{});}}if(document.getElementById('message'))apply();else addEventListener('DOMContentLoaded',apply,{{once:true}});}})();",
             serde_json::to_string(message).unwrap(),
-            !failed
+            !failed,
+            failed
         );
         let _ = window.eval(&script);
         let _ = window.show();

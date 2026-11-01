@@ -33,7 +33,7 @@ impl HostConfig {
     pub fn overlay() -> Self {
         Self {
             mode: CompositionMode::Overlay,
-            title: "WooHaa3".into(),
+            title: "四喜 AI".into(),
             width: 1280,
             height: 720,
         }
