@@ -57,13 +57,13 @@ async function start(canvas=fixture()){
  let command=0;
  const submit=async(commands:any[])=>{const current=await published();return (await room()).submit({protocolVersion:YJS_SYNC_PROTOCOL_VERSION,canvasId:canvas.id,commandId:'main-probe-'+(++command),actorId:'main-review',baseRevision:current.revision,commands});};
  const page=async(options:any={})=>{
-  const {beforeFetch,afterFetch,...sessionOptions}=options;
+  const {beforeFetch,afterFetch,token,...sessionOptions}=options;
   const requests:Array<{url:string;body:any}>=[];
   Object.defineProperty(globalThis,'indexedDB',{value:new IDBFactory(),configurable:true,writable:true});
   class AuthenticatedWebSocket extends WebSocket{constructor(url:string){super(url,{headers:{'x-woohaa3-service-token':TOKEN}});}}
   const remote=createCanvasRemote({canvasId:canvas.id,location:{protocol:'http:',host:'127.0.0.1:'+port},webSocketImpl:AuthenticatedWebSocket as any,fetchImpl:async(input:any,init?:RequestInit)=>{
    const url=String(input);requests.push({url,body:typeof init?.body==='string'?JSON.parse(init.body):null});
-   const headers=new Headers(init?.headers);headers.set('x-woohaa3-service-token',TOKEN);
+   const headers=new Headers(init?.headers);headers.set('x-woohaa3-service-token',token?.(url) ?? TOKEN);
    await beforeFetch?.(url,init);
    const response=await fetch(url.startsWith('/')?'http://127.0.0.1:'+port+url:url,{...init,headers});
    await afterFetch?.(url,response.clone());return response;
@@ -171,9 +171,11 @@ describe('independent real frontend transport and edit journal',()=>{
   pause.release();expect((await converting).ok).toBe(false);expect(page.edit.getSnapshot().size).toBe(0);expect(replacement.edit.getSnapshot().size).toBe(0);expect(replacement.canonical()).toEqual(before);expect(await other.published()).toEqual(before);
  });
  it('recovers a genuinely persisted conversion after an injected lost HTTP response without running prepare or forward twice',async()=>{
-  const f=await start();let lost=false;const page=await f.page({afterFetch:async(url:string)=>{if(url.endsWith('world-conversion-commit')&&!lost){lost=true;throw Error('main probe injected response loss after actual durable HTTP success');}}});
+  const f=await start();let lost=false,deny=false,deniedStatus=0;const page=await f.page({token:(url:string)=>deny&&url.endsWith('world-conversion-commit')?'invalid-token':TOKEN,afterFetch:async(url:string,response:Response)=>{if(url.endsWith('world-conversion-commit')&&deny)deniedStatus=response.status;if(url.endsWith('world-conversion-commit')&&!lost){lost=true;throw Error('main probe injected response loss after actual durable HTTP success');}}});
   const first=await convert(page,['a','b'],'lost-response');expect(first.ok).toBe(false);const persisted=await f.published();expect(persisted.nodeData.a.sharedWorldInstance).toBeTruthy();expect(page.edit.getSnapshot().size).toBe(0);await expect.poll(()=>page.canonical()?.revision).toBe(persisted.revision);
+  deny=true;expect((await convert(page,['a','b'],'lost-response')).ok).toBe(false);deny=false;expect(deniedStatus).toBe(401);
   const retry=await convert(page,['a','b'],'lost-response');expect(retry.ok,JSON.stringify(retry)).toBe(true);expect(await f.published()).toEqual(persisted);expect(page.edit.getSnapshot().size).toBe(1);expect(page.requests.filter((r:any)=>r.url.endsWith('world-conversion-prepare'))).toHaveLength(1);
+  const commits=page.requests.filter((r:any)=>r.url.endsWith('world-conversion-commit'));expect(commits).toHaveLength(3);expect(commits[1].body).toEqual(commits[0].body);expect(commits[2].body).toEqual(commits[0].body);
  });
  it('does not adopt a receipt after the actual canonical instance has already changed',async()=>{
   const f=await start();let changed=false;const page=await f.page({afterFetch:async(url:string)=>{if(url.endsWith('world-conversion-commit')&&!changed){changed=true;const current=await f.published(),instance=structuredClone(current.nodeData.a.sharedWorldInstance) as any;instance.transform.position.h+=10;expect((await f.submit([{type:'nodeData.patch',nodeId:'a',value:{sharedWorldInstance:instance}}])).ok).toBe(true);const after=await f.published();await expect.poll(()=>page.canonical()?.revision).toBe(after.revision);}}});

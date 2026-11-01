@@ -39,18 +39,37 @@ describe("world conversion journal", () => {
       commitWorldConversion: async (intent: unknown) => {
         intents.push(intent);
         if (intents.length === 1) return { ok: false, code: "unavailable", message: "lost" };
+        if (intents.length === 2) return { ok: false, code: "forbidden", message: "temporarily forbidden" };
         return { ok: true, canvasId: "c", commandId: "world-conversion:op", revision: 1, duplicate: true, receipt: { targets: [{ nodeId: "n", instanceId: "i", transform }], forward: edit, inverse: edit } };
       }
     } as unknown as CanvasRemoteService;
     const service = createCanvasEditService({ session: { isWritable: () => true } as CanvasSession, getCanvas: () => canvas });
     const input = { remote, canvasId: "c", operationId: "op", targets: [{ nodeId: "n", instanceId: "i" }] };
     expect((await service.convertWorld(input)).ok).toBe(false);
+    expect((await service.convertWorld(input)).ok).toBe(false);
     canvas.revision = 1;
     canvas.nodeData.n = { sharedWorldInstance: { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform } } as never;
     expect((await service.convertWorld(input)).ok).toBe(true);
     expect(prepares).toBe(1);
     expect(intents[1]).toEqual(intents[0]);
+    expect(intents[2]).toEqual(intents[0]);
     expect(service.getSnapshot().size).toBe(1);
+  });
+  it("releases a confirmed intent when the canonical result no longer matches", async () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("c");
+    canvas.revision = 1;
+    let prepares = 0;
+    const edit = { preconditions: [], operations: [] };
+    const remote = {
+      prepareWorldConversion: async () => { prepares++; return { ok: true, canvasId: "c", sourceVersion: "0", nodes: [{ nodeId: "n", nodeVersion: "v" }] }; },
+      commitWorldConversion: async () => ({ ok: true, canvasId: "c", commandId: "world-conversion:op", revision: 1, duplicate: prepares > 1, receipt: { targets: [{ nodeId: "n", instanceId: "i" }], forward: edit, inverse: edit } })
+    } as unknown as CanvasRemoteService;
+    const service = createCanvasEditService({ session: { isWritable: () => true } as CanvasSession, getCanvas: () => canvas });
+    const input = { remote, canvasId: "c", operationId: "op", targets: [{ nodeId: "n", instanceId: "i" }] };
+    expect((await service.convertWorld(input)).ok).toBe(false);
+    expect((await service.convertWorld(input)).ok).toBe(false);
+    expect(prepares).toBe(2);
+    expect(service.getSnapshot().size).toBe(0);
   });
   it("does not exhaust a session after definite rejections", async () => {
     const canvas = createEmptyWoohaa3ServerCanvas("c");

@@ -236,7 +236,7 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
           const result = await input.remote.commitWorldConversion(cached.intent, controller.signal);
           if (controller.signal.aborted) return { ok: false, reason: "页面已切换" };
           if (!result.ok) {
-            if (!cached.settled && result.code !== "unavailable" && result.code !== "aborted") conversionIntents.delete(input.operationId);
+            if (!recovering && !cached.settled && result.code !== "unavailable" && result.code !== "aborted") conversionIntents.delete(input.operationId);
             return { ok: false, reason: result.message };
           }
           if (result.canvasId !== input.canvasId || result.commandId !== `world-conversion:${input.operationId}`) return { ok: false, reason: "转换回执不匹配" };
@@ -244,6 +244,7 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
             conversionIntents.delete(input.operationId);
             return { ok: false, reason: "该操作已不在撤销历史中" };
           }
+          cached.settled = true;
           while (!controller.signal.aborted && options.session.isWritable()) {
             const canvas = options.getCanvas();
             if (!canvas || canvas.id !== input.canvasId) break;
