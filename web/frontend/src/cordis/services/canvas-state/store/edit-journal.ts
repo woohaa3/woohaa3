@@ -60,7 +60,6 @@ export type JournalEntry = CanvasJournalEntry | ParameterJournalEntry;
 export const EDIT_JOURNAL_MAX_BYTES = 16 * 1024 * 1024;
 /** 最多记录 100 条（design D5.1）。 */
 export const EDIT_JOURNAL_MAX_ENTRIES = 100;
-export const EDIT_JOURNAL_MAX_ADOPTED_IDS = 1000;
 
 export type EditJournalDependencies = {
   /** 提交一个受保护编辑批次；返回 settled promise。 */
@@ -96,16 +95,15 @@ export class EditJournal {
   private currentBytes = 0;
   private busy = false;
   private generation = 0;
-  private readonly adopted = new Set<string>();
 
   constructor(deps: EditJournalDependencies) {
     this.deps = deps;
   }
 
-  async adoptExternal(id: string, run: () => Promise<{ ok: true; label: string; forward: JournalPlannedEdit; inverse: JournalPlannedEdit } | { ok: false; reason: string }>): Promise<{ ok: true; entry: CanvasJournalEntry } | { ok: false; reason: string }> {
+  async adoptExternal(id: string, run: () => Promise<{ ok: true; label: string; forward: JournalPlannedEdit; inverse: JournalPlannedEdit; allowNew?: boolean } | { ok: false; reason: string }>): Promise<{ ok: true; entry: CanvasJournalEntry } | { ok: false; reason: string }> {
     if (this.busy) return { ok: false, reason: "正在结算上一次操作，请稍候" };
     if (!this.deps.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };
-    if (id.length > 256 || (!this.adopted.has(id) && this.adopted.size >= EDIT_JOURNAL_MAX_ADOPTED_IDS)) return { ok: false, reason: "操作历史身份已达上限，请重新打开画布" };
+    if (id.length > 256) return { ok: false, reason: "操作身份过长" };
     const generation = this.generation;
     this.busy = true;
     try {
@@ -113,14 +111,12 @@ export class EditJournal {
       if (generation !== this.generation) return { ok: false, reason: "页面已切换" };
       if (!result.ok) return result;
       if (!this.deps.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };
-      if (this.adopted.has(id)) {
-        const existing = this.entries.find((entry): entry is CanvasJournalEntry => entry.kind === "canvas" && entry.id === id);
-        return existing ? { ok: true, entry: existing } : { ok: false, reason: "该操作已不在撤销历史中" };
-      }
+      const existing = this.entries.find((entry): entry is CanvasJournalEntry => entry.kind === "canvas" && entry.id === id);
+      if (existing) return { ok: true, entry: existing };
+      if (result.allowNew === false) return { ok: false, reason: "该操作已不在撤销历史中" };
       if (estimateBytes(result.forward) + estimateBytes(result.inverse) > EDIT_JOURNAL_MAX_BYTES) return { ok: false, reason: "操作内容过多，请分批处理" };
       const entry: CanvasJournalEntry = { kind: "canvas", id, label: result.label, forward: result.forward, inverse: result.inverse, state: "committed" };
       this.pushCommitted(entry);
-      this.adopted.add(id);
       return { ok: true, entry };
     } catch (error) {
       return { ok: false, reason: error instanceof Error ? error.message : "操作失败" };
@@ -297,7 +293,6 @@ export class EditJournal {
   /** 清空（切画布 / 刷新 / page dispose）。 */
   clear(): void {
     this.generation += 1;
-    this.adopted.clear();
     this.entries.length = 0;
     this.undoCursor = -1;
     this.currentBytes = 0;

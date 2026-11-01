@@ -80,8 +80,7 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
   const listeners = new Set<(snapshot: CanvasEditSnapshot) => void>();
   let busy = false;
   let conversionAbort: AbortController | null = null;
-  const conversionIntents = new Map<string, { targets: string; intent: import("@woohaa3/contracts").WorldConversionCommitInput }>();
-  let conversionIntentBytes = 0;
+  const conversionIntents = new Map<string, { targets: string; intent: import("@woohaa3/contracts").WorldConversionCommitInput; settled: boolean }>();
 
   const journal = new EditJournal({
     isWritable: () => options.session.isWritable(),
@@ -150,6 +149,10 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
   };
 
   const publish = () => {
+    const retained = new Set(journal.snapshot().entries.map(entry => entry.id));
+    for (const [id, cached] of conversionIntents) {
+      if (cached.settled && !retained.has(`world-conversion:${id}`)) conversionIntents.delete(id);
+    }
     invalidate();
     const value = snapshot();
     for (const listener of listeners) listener(value);
@@ -216,26 +219,31 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
       busy = true;
       publish();
       try {
-        return await journal.adoptExternal(`world-conversion:${input.operationId}`, async () => {
+        const adopted = await journal.adoptExternal(`world-conversion:${input.operationId}`, async () => {
           const targetKey = JSON.stringify([...input.targets].sort((a, b) => a.nodeId.localeCompare(b.nodeId)));
           let cached = conversionIntents.get(input.operationId);
+          const recovering = !!cached && !cached.settled;
           if (cached && cached.targets !== targetKey) return { ok: false, reason: "操作身份已用于其他目标" };
           if (!cached) {
-            if (conversionIntents.size >= 1000) return { ok: false, reason: "转换重试记录已达上限，请重新打开画布" };
             const prepared = await input.remote.prepareWorldConversion({ canvasId: input.canvasId, nodeIds: input.targets.map(target => target.nodeId) }, controller.signal);
             if (!prepared.ok) return { ok: false, reason: prepared.message };
             if (controller.signal.aborted || prepared.canvasId !== input.canvasId || !options.session.isWritable() || options.getCanvas()?.id !== input.canvasId) return { ok: false, reason: "页面已切换或当前不可写" };
             const versions = new Map(prepared.nodes.map(node => [node.nodeId, node.nodeVersion]));
             if (versions.size !== input.targets.length || input.targets.some(target => !versions.has(target.nodeId))) return { ok: false, reason: "转换准备结果不匹配" };
-            cached = { targets: targetKey, intent: { canvasId: input.canvasId, operationId: input.operationId, sourceVersion: prepared.sourceVersion, targets: input.targets.map(target => ({ ...target, nodeVersion: versions.get(target.nodeId)! })) } };
-            const bytes = new TextEncoder().encode(JSON.stringify(cached)).length;
-            if (conversionIntentBytes + bytes > 16 * 1024 * 1024) return { ok: false, reason: "转换重试记录已达上限，请重新打开画布" };
+            cached = { targets: targetKey, intent: { canvasId: input.canvasId, operationId: input.operationId, sourceVersion: prepared.sourceVersion, targets: input.targets.map(target => ({ ...target, nodeVersion: versions.get(target.nodeId)! })) }, settled: false };
             conversionIntents.set(input.operationId, cached);
-            conversionIntentBytes += bytes;
           }
           const result = await input.remote.commitWorldConversion(cached.intent, controller.signal);
-          if (!result.ok) return { ok: false, reason: result.message };
+          if (controller.signal.aborted) return { ok: false, reason: "页面已切换" };
+          if (!result.ok) {
+            if (!cached.settled && result.code !== "unavailable" && result.code !== "aborted") conversionIntents.delete(input.operationId);
+            return { ok: false, reason: result.message };
+          }
           if (result.canvasId !== input.canvasId || result.commandId !== `world-conversion:${input.operationId}`) return { ok: false, reason: "转换回执不匹配" };
+          if (result.duplicate && !recovering && !cached.settled) {
+            conversionIntents.delete(input.operationId);
+            return { ok: false, reason: "该操作已不在撤销历史中" };
+          }
           while (!controller.signal.aborted && options.session.isWritable()) {
             const canvas = options.getCanvas();
             if (!canvas || canvas.id !== input.canvasId) break;
@@ -246,12 +254,19 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
                 return !!expected && equalJson(value, { kind: "world-instance", version: target.transform.version, instanceId: target.instanceId, transform: target.transform });
               });
               if (!matches) return { ok: false, reason: "规范画布与转换回执不匹配" };
-              return { ok: true, label: "转换到共享世界", forward: result.receipt.forward, inverse: result.receipt.inverse };
+              return { ok: true, label: "转换到共享世界", forward: result.receipt.forward, inverse: result.receipt.inverse, allowNew: !result.duplicate || recovering };
             }
             await new Promise<void>(resolve => setTimeout(resolve, 50));
           }
           return { ok: false, reason: "页面已切换或当前不可写" };
         });
+        if (adopted.ok) {
+          const cached = conversionIntents.get(input.operationId);
+          if (cached) cached.settled = true;
+        } else if (adopted.reason === "该操作已不在撤销历史中") {
+          conversionIntents.delete(input.operationId);
+        }
+        return adopted;
       } finally {
         if (conversionAbort === controller) { conversionAbort = null; busy = false; publish(); }
       }
@@ -321,7 +336,6 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
       conversionAbort?.abort();
       conversionAbort = null;
       conversionIntents.clear();
-      conversionIntentBytes = 0;
       busy = false;
       journal.clear();
       parameterAppliers.clear();
