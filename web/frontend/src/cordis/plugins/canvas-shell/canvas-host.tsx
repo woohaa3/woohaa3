@@ -1,4 +1,5 @@
 import { SceneExperienceBar } from "../scene-experience/experience-bar.js";
+import { CanvasAssetRail } from "./canvas-asset-rail.js";
 /**
  * Canvas React Host（change: adopt-frontend-cordis-plugin-runtime，design D2/D8）。
  *
@@ -168,6 +169,8 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
           表面，避免新建 iframe/原生 surface 的默认浅色清屏在暗色切换时露白。 */}
       <div className="bevy-canvas-curtain" aria-hidden="true" data-testid="bevy-canvas-curtain" />
       <SceneExperienceBar key={canvasId} canvasId={canvasId} surfaceRef={surfaceRef} ready={ready} hidden={focused} />
+      {/* 左侧资源轨：概览态才有位置，聚焦 / 文档工作区里由各自的工作区界面接管 */}
+      <CanvasAssetRail hidden={focused} />
       <CanvasTopBarHost {...slotProps} overview={presentation.mode.type === "overview"} />
       {diagnostic && ready ? <aside className="canvas-render-warnings" role="alert" aria-label="工作区提示">{diagnostic}</aside> : null}
 
