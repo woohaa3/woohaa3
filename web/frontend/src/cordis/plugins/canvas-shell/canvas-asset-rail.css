@@ -2,10 +2,10 @@
  * 画布左侧资源栏。
  *
  * **是一条通高的侧边栏，不是浮动小卡片**：贴住窗口左缘、从顶到底，
- * 左边一窄列放图标与名称（照参考稿），右边是选中项的内容列表。
- * 两栏合起来才是一条完整的栏 —— 第一版把它们做成了 64px 处的小卡片，与参考差距很大。
+ * 图标在左、文字在右，与四喜侧栏（`src/layouts/Sidebar.tsx`）同一套尺寸与排版。
  *
- * 画布表面跟着让出栏的宽度（见文件末尾的 `:has()` 规则），否则卡片会被压在栏底下。
+ * 画布表面跟着让出栏的宽度（见文件末尾的 `:has()` 规则）—— 栏是贴边的实体，
+ * 不像浮动卡片那样可以盖在内容上，否则卡片会被压住、点不到。
  *
  * 颜色全部取 `--app-*` 语义 token，跟随宿主主题，不在样式里写色值。
  */
@@ -23,6 +23,12 @@
 	--rail-collapsed-width: 64px;
 
 	position: absolute;
+	/*
+	 * **z-index 必须低于左上角那条 `.canvas-topbar`（44）**：那是浮动在画布上的
+	 * 画布切换器，位置在 left/top 16。栏若压到它上面，切换器就点不到了。
+	 * 左上角那一块的重叠由六喜的画布态顶栏（z 55，占住顶部 52px）在桌面端挡住，
+	 * 浏览器宿主里两条都可见时以顶栏为准 —— 不要让这条栏去争。
+	 */
 	z-index: 20;
 	left: 0;
 	top: 0;
@@ -200,74 +206,6 @@
 /* 收起时角标藏起来：64px 宽只剩图标 */
 .canvas-asset-rail.is-collapsed .canvas-asset-rail__soon {
 	display: none;
-}
-
-/* ───────── 右侧内容栏 ───────── */
-
-.canvas-asset-rail__panel {
-	position: absolute;
-	z-index: 19;
-	left: var(--rail-width, 248px);
-	top: 0;
-	bottom: 0;
-	width: 264px;
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-	padding: 14px 12px;
-	border-right: 1px solid var(--app-web-border);
-	background: var(--app-web-panel);
-	color: var(--app-web-text-primary);
-	font-size: 12px;
-	overflow: hidden auto;
-	user-select: none;
-}
-
-.canvas-asset-rail__panel-title {
-	margin: 0;
-	font-size: 12px;
-	font-weight: 600;
-}
-
-.canvas-asset-rail__hint,
-.canvas-asset-rail__note {
-	margin: 0;
-	font-size: 11px;
-	line-height: 16px;
-	color: var(--app-web-text-muted);
-}
-
-/* 说明推到内容栏底部：上面是列表，下面是"这些是示例"的注解 */
-.canvas-asset-rail__note {
-	margin-top: auto;
-	padding-top: 8px;
-	border-top: 1px dashed var(--app-web-border);
-}
-
-.canvas-asset-rail__list {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-	margin: 0;
-	padding: 0;
-	list-style: none;
-}
-
-.canvas-asset-rail__list-item {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	padding: 7px 6px;
-	border-radius: 8px;
-	font-size: 11px;
-	color: var(--app-web-text-primary);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.canvas-asset-rail__list-item:hover {
-	background: var(--app-web-subtle);
 }
 
 /* ───────── 画布让位 ─────────

@@ -1,18 +1,17 @@
 /**
- * 画布左侧资源轨。
+ * 画布左侧资源栏。
  *
- * 参考稿是一条窄的竖排轨道：顶部是品牌/工作区入口，下面四个分组入口（图层 / 产品 /
- * 项目商品 / 图片），再往下是外部来源（Drive、Pinterest，带 `SOON` 角标）。
- * 选中项用浅底方块 + 文字常显，未选中的只有图标 + 小字。
+ * 一条通高的侧边栏，贴住窗口左缘，条目为「图标在左、文字在右」的横向排列，
+ * 尺寸与排版对齐四喜侧栏（`src/layouts/Sidebar.tsx`）。
  *
  * **第一版只做壳与交互**（与产品侧确认过）：
- * - 「图层」是静态列表，不接画布节点。接真数据要等节点目录定稿
- *   （见 四喜仓库 CLAUDE.md「技能是画布的模板」一条：`steps[].node` 引用的目录未定稿，不要编造 id）；
- * - 其余各项点开是空态。数据源（产品库 = 嵌 Furnipedia 官网、素材库仍是占位、Drive / Pinterest
- *   没有授权通路）都还没有，做出来只会是四个点不动的按钮。
+ * - 各项只表达选中态，点开不展示内容。数据源都还没有：产品库 = 嵌 Furnipedia 官网、
+ *   素材库仍是占位、Drive / Pinterest 没有授权通路；「图层」要等画布节点目录定稿
+ *   （见四喜仓库 CLAUDE.md「技能是画布的模板」一条：`steps[].node` 引用的目录未定稿，不要编造 id）。
+ * - 因此**不要在这里补「内容面板」**：参考稿没有那一栏，各项内容将来各自决定，
+ *   不该在这一层先定死一种形状。
  *
- * 收起时只留图标列，画布区域右侧不变 —— 这条轨是 `position: absolute` 的浮层，
- * 不参与画布尺寸计算，与 `.canvas-control-panel` 同一策略。
+ * 它占住画布左缘，画布表面随之让出栏宽（见 CSS 末尾的 `:has()` 规则）。
  */
 import { useState } from "react";
 import type { ComponentType } from "react";
@@ -107,7 +106,9 @@ export function CanvasAssetRail({ hidden = false }: { hidden?: boolean }) {
                 title={collapsed ? item.label : undefined}
               >
                 <span className="canvas-asset-rail__icon">
-                  <Icon size={18} />
+                  {/* 16 与四喜菜单图标同尺寸，也与 `.__icon` 的 16×16 盒子一致。
+                      传 18 会溢出盒子（实心 SVG 被裁或有视觉偏移）。 */}
+                  <Icon size={16} />
                   {item.soon && !collapsed && <span className="canvas-asset-rail__soon">SOON</span>}
                 </span>
                 {!collapsed && <span className="canvas-asset-rail__label">{item.label}</span>}
