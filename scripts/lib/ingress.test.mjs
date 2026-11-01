@@ -61,6 +61,23 @@ test("本机遥测入口路由到 Application Service（宿主 core 承载）", 
   }
 });
 
+test("ppserver 转发前缀路由到 Application Service", () => {
+  // 未登记时整条链路 404：令牌拿到了、目录拉到了，前端生成却永远成功不了。
+  for (const path of [
+    "/api/ppserver",
+    "/api/ppserver/tasks/create_stream",
+    "/api/ppserver/tasks/status",
+    "/api/ppserver/tasks/result",
+    "/api/ppserver/auth/session"
+  ]) {
+    assert.equal(routeFor(path), "application", path);
+  }
+  // 相似前缀不被吞掉。
+  for (const path of ["/api/ppserverish", "/api/ppserver-tasks/status"]) {
+    assert.equal(routeFor(path), "none", path);
+  }
+});
+
 test("站点 API 命名空间下的未知路径返回 404，不落 SPA", async () => {
   const ingress = createIngress({ targets: {}, basePath: "/dev/test/" });
   let body = "";
