@@ -61,6 +61,17 @@
 html[data-sixi-canvas] .desktop-canvas-bar {
 	display: none;
 }
+/*
+ * 浏览器宿主里没有窗口横栏，但左上角还有一条**浮动的** `.canvas-topbar`
+ * （z 44、left/top 16，里面是宿主的画布切换器）。四喜的画布态顶栏占住顶部 52px，
+ * 两条会叠在同一块地方：切换器被压在下面点不到，视觉上也是两层栏。
+ *
+ * 画布态把它藏掉 —— 切换器在四喜顶栏里已经有一个（`CanvasTopBar` 的显示画布名的按钮），
+ * 功能不丢。它不占布局（`position: fixed`），藏掉不影响画布尺寸。
+ */
+html[data-sixi-canvas] .canvas-topbar {
+	display: none;
+}
 html[data-sixi-canvas] .app {
 	--canvas-chrome-height: 0px;
 	top: var(--sixi-topbar-height, 52px);
