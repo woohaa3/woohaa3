@@ -142,3 +142,17 @@ export {
   encodeWorkflowGroupData,
   type CreationScopeNodeData
 } from "./canvas/creation-scope-codec.js";
+export {
+  remapWorldCopyReferences,
+  type WorldCopyIdTable,
+  type WorldCopySourceNode,
+  type WorldReferenceRemapEntry,
+  type WorldReferenceRemapFailure,
+  type WorldReferenceRemapFailureCode,
+  type WorldReferenceRemapIdMap,
+  type WorldReferenceRemapInput,
+  type WorldReferenceRemapResult,
+  type WorldReferenceRemapWorldKind,
+  type WorldReferenceRelation,
+  type WorldReferenceUnavailable
+} from "./canvas/world-reference-remap.js";
