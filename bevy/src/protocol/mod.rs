@@ -64,6 +64,11 @@ pub(crate) use scene_instant::{
     parse_shot_aspect_ratio,
 };
 #[allow(unused_imports)]
+pub(crate) use shared_world::{
+    UNITS_PER_METER, renderer_rotation_to_world, renderer_to_world, world_rotation_to_renderer,
+    world_to_renderer,
+};
+#[allow(unused_imports)]
 pub(crate) use theme::{Theme, is_known_theme_token, parse_theme_hex};
 #[allow(unused_imports)]
 pub(crate) use video_focus::{VIDEO_FOCUS_VERSION, VideoFocus};

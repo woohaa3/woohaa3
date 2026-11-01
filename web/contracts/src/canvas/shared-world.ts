@@ -112,21 +112,34 @@ export interface SceneFootprintFunctions {
   classifyCameraPoint(input: SceneCameraPointQuery): SceneContainment;
 }
 
-export interface WorldObjectVersion { instanceId: WorldId; version: WorldVersion }
-export interface SpatialLeaseIdentity { canvasId: WorldId; runId: WorldId; epoch: number; instanceId: WorldId }
+/** Lock keys are (canvasId, kind, id): camera and instance IDs have separate namespaces. */
+export type WorldObjectIdentity =
+  | { kind: "instance"; instanceId: WorldId }
+  | { kind: "camera"; cameraId: WorldId };
+export type WorldObjectVersion = WorldObjectIdentity & { version: WorldVersion };
+export interface SpatialLeaseIdentity { canvasId: WorldId; runId: WorldId; epoch: number; target: WorldObjectIdentity }
 export interface SpatialLeaseRequest { requestId: WorldId; canvasId: WorldId; runId: WorldId; epoch: number; scopeId: WorldId; scopeVersion: WorldVersion; targets: WorldObjectVersion[] }
-export interface SpatialLeaseConflict { instanceId: WorldId; runId: WorldId; epoch: number }
+export interface SpatialLeaseConflict { target: WorldObjectIdentity; runId: WorldId; epoch: number }
 export type SpatialLeaseResult = { ok: true; leases: SpatialLeaseIdentity[] } | { ok: false; code: SharedWorldFailureCode; conflicts?: SpatialLeaseConflict[] };
 export interface WorldCompletion { canvasId: WorldId; runId: WorldId; completionId: WorldId; cameraId: WorldId; settingsVersion: WorldVersion }
 export interface WorldCaptureVersionKey { canvasId: WorldId; cameraId: WorldId; worldContentVersion: WorldVersion; cameraSettingsVersion: WorldVersion; bindingVersion: WorldVersion; outputVersion: WorldVersion }
 export interface WorldCaptureInput { key: WorldCaptureVersionKey; mediaId: WorldId; checksum: string }
 export type SharedWorldFailureCode = "unsupported-version" | "invalid-data" | "not-ready" | "version-conflict" | "lease-conflict" | "stale-epoch" | "outside-scope" | "target-unavailable" | "capture-stale" | "cancelled";
 
-/** Commands describe atomic intent; implementation, authorization and undo are downstream. */
+/** Each legacy model node maps to a caller-assigned new instance ID. Node and instance
+ * IDs must each be unique in the batch; instance IDs must not already be in use.
+ * The node version and document sourceVersion are checked before any writes. A retry
+ * with the same operationId must carry the same sourceVersion and mappings and return
+ * the original result; reuse with different intent is rejected. Conversion retains the
+ * node identity and attaches its new instance identity atomically. */
+export interface LegacyWorldConversionTarget { nodeId: WorldId; nodeVersion: WorldVersion; instanceId: WorldId }
+
+/** Commands describe atomic intent; implementation, authorization and undo are downstream.
+ * For single-object writes the lease target must equal the command target. */
 export type SharedWorldCommand =
-  | { kind: "convert-to-shared-world"; operationId: WorldId; sourceVersion: WorldVersion; targets: WorldObjectVersion[] }
-  | { kind: "set-world-transform"; operationId: WorldId; target: WorldObjectVersion; transform: WorldTransform; lease: SpatialLeaseIdentity }
+  | { kind: "convert-to-shared-world"; operationId: WorldId; sourceVersion: WorldVersion; targets: LegacyWorldConversionTarget[] }
+  | { kind: "set-world-transform"; operationId: WorldId; target: Extract<WorldObjectVersion, { kind: "instance" }>; transform: WorldTransform; lease: SpatialLeaseIdentity }
   | { kind: "move-scene-area"; operationId: WorldId; areaId: WorldId; scopeVersion: WorldVersion; targets: WorldObjectVersion[]; delta: GroundPoint }
   | { kind: "resize-scene-area"; operationId: WorldId; areaId: WorldId; scopeVersion: WorldVersion; bounds: GroundAabb }
   | { kind: "delete-scene-area"; operationId: WorldId; areaId: WorldId; scopeVersion: WorldVersion; targets: WorldObjectVersion[] }
-  | { kind: "set-world-camera"; operationId: WorldId; target: WorldObjectVersion; camera: WorldCameraData; lease: SpatialLeaseIdentity };
+  | { kind: "set-world-camera"; operationId: WorldId; target: Extract<WorldObjectVersion, { kind: "camera" }>; camera: WorldCameraData; lease: SpatialLeaseIdentity };

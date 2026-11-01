@@ -16,7 +16,7 @@ pub(crate) fn renderer_rotation_to_world(q: [f64; 4]) -> [f64; 4] {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::protocol::{UNITS_PER_METER, renderer_rotation_to_world, renderer_to_world, world_rotation_to_renderer, world_to_renderer};
     use serde::Deserialize;
     #[derive(Deserialize)]
     struct Fixture { cases: Vec<Case> }
