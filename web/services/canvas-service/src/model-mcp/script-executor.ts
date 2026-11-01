@@ -61,6 +61,9 @@ export async function executeSceneIr(
   version: unknown,
   options: ScriptExecutorOptions = {}
 ): Promise<ExecuteSceneResult> {
+  if (options.signal?.aborted) {
+    return { ok: false, stage: "execute", code: "cancelled", message: "脚本执行已被用户停止" };
+  }
   if (!isSupportedModelScriptVersion(version)) {
     return {
       ok: false,
@@ -117,6 +120,7 @@ function runIsolated(
       resolve({ ok: false, stage: "execute", code: "cancelled", message: "脚本执行已被用户停止" });
     };
     signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
 
     worker.on("message", (message: { kind?: string; result?: ExecuteSceneResult } | null) => {
       // Node --watch uses this channel for watch:import/watch:require notifications.

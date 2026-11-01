@@ -61,6 +61,7 @@ import { composeImportedFirstCanvasAccess, importedPermissionFor, type ImportedC
 import type { CanvasAccessPort, CanvasLifecyclePort } from "./access/resolve-access.js";
 import type { PrincipalContext } from "@woohaa3/contracts";
 import type { CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
+import { createWorldConversionService } from "./world-authoring/conversion-service.js";
 
 export type { CanvasMediaAssetSyncPort, CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
 
@@ -666,7 +667,10 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     return merged;
   };
 
+  const worldConversion = sync ? createWorldConversionService(async (id) =>
+    await canvasContentExists(id) ? sync.registry.resolve(id) : null) : null;
   const composedHandler = composeRequestHandler({
+    worldConversion,
     env,
     canvasEnabled,
     unavailableReason,
@@ -706,6 +710,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   });
 
   return {
+    worldConversion,
     scenePackages,
     sync,
     runService,

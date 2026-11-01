@@ -20,6 +20,10 @@ import type { TaskSubmitRequest, TaskSubmitResponse } from "../task/protocol.js"
 import type { MediaMetadata } from "../media/protocol.js";
 import type { MediaStorageScope } from "../media/storage.js";
 
+export type BackendWorldConversionPort = {
+  prepare(input: import("../canvas/world-conversion.js").WorldConversionPrepareInput, options?: { signal?: AbortSignal }): Promise<import("../canvas/world-conversion.js").WorldConversionPrepareOutcome>;
+};
+
 /** Canvas -> Task 进程内契约（替代 CanvasTaskClient 的网络实现）。 */
 export type BackendTaskPort = {
   /** 按可信扩展及不可变配置版本裁剪的非画布任务端口。 */

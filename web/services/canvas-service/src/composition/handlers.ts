@@ -21,6 +21,7 @@ import { isCanvasPath, safePathname, sendJson } from "./deployment.js";
 import { authorizeCanvasRequest, httpStatusForCanvasAccess } from "../access/resolve-access.js";
 
 export type ComposedHandlerDeps = {
+  worldConversion: import("@woohaa3/contracts").BackendWorldConversionPort | null;
   env: Record<string, string | undefined>;
   canvasEnabled: boolean;
   unavailableReason: string | null;
@@ -80,6 +81,7 @@ export function composeRequestHandler(deps: ComposedHandlerDeps): (req: Incoming
           return true;
         }
       : createCanvasRequestHandler({
+          ...(deps.worldConversion ? { worldConversion: deps.worldConversion } : {}),
           service: composition.service,
           ...(composition.catalog ? { catalog: composition.catalog } : {}),
           ...(deps.importGuard ? { importGuard: deps.importGuard } : {}),

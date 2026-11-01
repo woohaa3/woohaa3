@@ -4,6 +4,11 @@ import { CANVAS_UNITS_PER_METER, MODEL_CARD_GAP } from "./model-focus/types.js";
 import type { Aabb } from "./model-transform.js";
 import { rendererToWorldPosition, SHARED_WORLD_VERSION, type WorldTransform } from "./shared-world.js";
 
+export type WorldConversionPrepareInput = { canvasId: string; nodeIds: string[] };
+export type WorldConversionPrepareOutcome =
+  | { ok: true; canvasId: string; sourceVersion: string; nodes: Array<{ nodeId: string; nodeVersion: string; bounds: Aabb; transform: WorldTransform }> }
+  | { ok: false; code: string; message: string };
+
 /** Project the legacy card anchor onto the renderer ground plane. */
 export function legacyModelGroundTransform(input: {
   x: number; y: number; width: number; height: number;

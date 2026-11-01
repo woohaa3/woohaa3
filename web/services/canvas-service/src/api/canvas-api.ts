@@ -26,8 +26,9 @@ import {
   type CanvasRequestHandler,
   type CanvasRequestHandlerOptions
 } from "./canvas-api/types.js";
-import { checkServiceToken, decodeSegment, isLoopbackRequest, respondError, sendError, sendJson } from "./canvas-api/http-codec.js";
-import { handleCreate, handleDelete, handleGet, handleHealth, handleList, loadCanvasListPage } from "./canvas-api/lifecycle-routes.js";
+import { checkServiceToken, decodeSegment, isLoopbackRequest, readJsonBody, respondError, sendError, sendJson } from "./canvas-api/http-codec.js";
+import { handleCreate, handleDelete, handleGet, handleHealth, handleList, loadCanvasListPage, requireCanvasAccess } from "./canvas-api/lifecycle-routes.js";
+import { DEFAULT_CANVAS_MAX_BODY_BYTES } from "./canvas-api/types.js";
 import { handleCancel, handleRun } from "./canvas-api/run-routes.js";
 
 export {
@@ -168,6 +169,32 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         return true;
       }
 
+      if (segments.length === 2 && segments[1] === "world-conversion-prepare") {
+        if (req.method !== "POST") { sendError(res, 405, "INVALID_COMMAND_BATCH", "方法不允许"); return true; }
+        const canvasId = segments[0];
+        const gate = options.importGuard?.state(canvasId);
+        if (gate?.kind === "deleted" || gate?.kind === "preparing") {
+          sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用"); return true;
+        }
+        if (await authorizeImported(canvasId, "read") === "deny") return denyImported("read");
+        if (!(await requireCanvasAccess({ req, res, canvasId, permission: "read", options, log })).ok) return true;
+        if (!options.worldConversion) { sendError(res, 503, "NOT_READY", "准备服务不可用"); return true; }
+        const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
+        if (Object.keys(body).length !== 1 || !Array.isArray(body.nodeIds)) {
+          sendError(res, 400, "INVALID_COMMAND_BATCH", "请求必须只包含 nodeIds"); return true;
+        }
+        const controller = new AbortController();
+        const onClose = () => { if (!res.writableFinished) controller.abort(); };
+        res.once("close", onClose);
+        if (res.destroyed) controller.abort();
+        try {
+          const result = await options.worldConversion.prepare({ canvasId, nodeIds: body.nodeIds as string[] }, { signal: controller.signal });
+          if (!controller.signal.aborted) sendJson(res, result.ok ? 200 : result.code === "malformed-request" ? 400 : result.code === "canvas-not-found" ? 404 : 409, result);
+        } finally {
+          res.removeListener("close", onClose);
+        }
+        return true;
+      }
       if (segments.length === 2 && segments[1] === "runs" && req.method === "POST") {
         const decision = await authorizeImported(segments[0], "write");
         if (decision === "deny") return denyImported("write");

@@ -198,6 +198,7 @@ export type CanvasMediaAssetSyncPort = {
 };
 
 export type CanvasService = {
+  worldConversion: import("@woohaa3/contracts").BackendWorldConversionPort | null;
   /** 本地场景包独立事务/收据；不复用在线来源权限。 */
   scenePackages: import("../storage/sqlite/scene-package.js").SqliteScenePackageStore | null;
   handle: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
