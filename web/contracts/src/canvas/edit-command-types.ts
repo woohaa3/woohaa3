@@ -39,6 +39,8 @@ export type EditNodeField = (typeof EDIT_NODE_FIELDS)[number];
  */
 export const EDIT_NODE_DATA_FIELDS = ["title", "projectStorageKey", "inputHash", "activeBuildId", "sharedWorldInstance"] as const;
 export type EditNodeDataField = (typeof EDIT_NODE_DATA_FIELDS)[number];
+export const EDIT_NODE_DATA_GUARD_FIELDS = [...EDIT_NODE_DATA_FIELDS, "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelSourceKind", "modelAssetId", "modelPlacement"] as const;
+export type EditNodeDataGuardField = (typeof EDIT_NODE_DATA_GUARD_FIELDS)[number];
 
 /** 字段快照：明确区分「不存在」与「null」。 */
 export type EditFieldSnapshot =
@@ -46,7 +48,7 @@ export type EditFieldSnapshot =
   | { present: true; value: unknown };
 
 export type EditNodeFieldSnapshot = { field: EditNodeField } & EditFieldSnapshot;
-export type EditNodeDataFieldSnapshot = { field: EditNodeDataField } & EditFieldSnapshot;
+export type EditNodeDataFieldSnapshot = { field: EditNodeDataGuardField } & EditFieldSnapshot;
 
 /**
  * 结构化前置条件联合。所有条件都针对受保护编辑开始前的规范状态判定。

@@ -9,7 +9,7 @@
  */
 import type { CanvasCommand, ServerCanvas } from "@woohaa3/contracts";
 import { planCanvasEdit, type EditPlan } from "@woohaa3/contracts";
-import type { CanvasSession } from "../../../contracts.js";
+import type { CanvasRemoteService, CanvasSession } from "../../../contracts.js";
 import { EditJournal, type EditJournalSnapshot, type JournalEntry, type JournalPlannedEdit } from "./edit-journal.js";
 
 export type CanvasEditServiceOptions = {
@@ -44,11 +44,19 @@ export type CanvasEditRecordResult =
   | { ok: true; entry: JournalEntry }
   | { ok: false; reason: string };
 
+function equalJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every(key => Object.prototype.hasOwnProperty.call(b, key) && equalJson((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
+}
+
 /**
  * 记录一个结构动作并提交受保护前向编辑。`commands` 是 planner 产出的结构命令批；
  * 若无法规划 forward/inverse（无净变化/不支持记录）则不入栈。
  */
 export interface CanvasEditService {
+  convertWorld(input: { remote: CanvasRemoteService; canvasId: string; operationId: string; targets: Array<{ nodeId: string; instanceId: string }> }): Promise<CanvasEditRecordResult>;
   record(commands: readonly CanvasCommand[], label: string): Promise<CanvasEditRecordResult>;
   recordParameter(input: {
     label: string;
@@ -71,6 +79,9 @@ export interface CanvasEditService {
 export function createCanvasEditService(options: CanvasEditServiceOptions): CanvasEditService {
   const listeners = new Set<(snapshot: CanvasEditSnapshot) => void>();
   let busy = false;
+  let conversionAbort: AbortController | null = null;
+  const conversionIntents = new Map<string, { targets: string; intent: import("@woohaa3/contracts").WorldConversionCommitInput }>();
+  let conversionIntentBytes = 0;
 
   const journal = new EditJournal({
     isWritable: () => options.session.isWritable(),
@@ -183,6 +194,7 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
         journal.markConflict(entry.id);
         return { ok: false, reason: result.reason };
       }
+      if (!result.committed) return { ok: false, reason: "操作尚未结算" };
       return { ok: true };
     }
   };
@@ -194,7 +206,58 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
   };
 
   return {
+    async convertWorld(input) {
+      if (busy) return { ok: false, reason: "正在结算上一次操作，请稍候" };
+      if (!options.session.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };
+      if (options.getCanvas()?.id !== input.canvasId) return { ok: false, reason: "画布不匹配" };
+      if (!input.operationId || !input.targets.length || new Set(input.targets.map(target => target.nodeId)).size !== input.targets.length || new Set(input.targets.map(target => target.instanceId)).size !== input.targets.length) return { ok: false, reason: "转换目标无效" };
+      const controller = new AbortController();
+      conversionAbort = controller;
+      busy = true;
+      publish();
+      try {
+        return await journal.adoptExternal(`world-conversion:${input.operationId}`, async () => {
+          const targetKey = JSON.stringify([...input.targets].sort((a, b) => a.nodeId.localeCompare(b.nodeId)));
+          let cached = conversionIntents.get(input.operationId);
+          if (cached && cached.targets !== targetKey) return { ok: false, reason: "操作身份已用于其他目标" };
+          if (!cached) {
+            if (conversionIntents.size >= 1000) return { ok: false, reason: "转换重试记录已达上限，请重新打开画布" };
+            const prepared = await input.remote.prepareWorldConversion({ canvasId: input.canvasId, nodeIds: input.targets.map(target => target.nodeId) }, controller.signal);
+            if (!prepared.ok) return { ok: false, reason: prepared.message };
+            if (controller.signal.aborted || prepared.canvasId !== input.canvasId || !options.session.isWritable() || options.getCanvas()?.id !== input.canvasId) return { ok: false, reason: "页面已切换或当前不可写" };
+            const versions = new Map(prepared.nodes.map(node => [node.nodeId, node.nodeVersion]));
+            if (versions.size !== input.targets.length || input.targets.some(target => !versions.has(target.nodeId))) return { ok: false, reason: "转换准备结果不匹配" };
+            cached = { targets: targetKey, intent: { canvasId: input.canvasId, operationId: input.operationId, sourceVersion: prepared.sourceVersion, targets: input.targets.map(target => ({ ...target, nodeVersion: versions.get(target.nodeId)! })) } };
+            const bytes = new TextEncoder().encode(JSON.stringify(cached)).length;
+            if (conversionIntentBytes + bytes > 16 * 1024 * 1024) return { ok: false, reason: "转换重试记录已达上限，请重新打开画布" };
+            conversionIntents.set(input.operationId, cached);
+            conversionIntentBytes += bytes;
+          }
+          const result = await input.remote.commitWorldConversion(cached.intent, controller.signal);
+          if (!result.ok) return { ok: false, reason: result.message };
+          if (result.canvasId !== input.canvasId || result.commandId !== `world-conversion:${input.operationId}`) return { ok: false, reason: "转换回执不匹配" };
+          while (!controller.signal.aborted && options.session.isWritable()) {
+            const canvas = options.getCanvas();
+            if (!canvas || canvas.id !== input.canvasId) break;
+            if (canvas.revision >= result.revision) {
+              const matches = result.receipt.targets.length === input.targets.length && new Set(result.receipt.targets.map(target => target.nodeId)).size === input.targets.length && result.receipt.targets.every(target => {
+                const expected = input.targets.find(item => item.nodeId === target.nodeId && item.instanceId === target.instanceId);
+                const value = canvas.nodeData[target.nodeId]?.sharedWorldInstance;
+                return !!expected && equalJson(value, { kind: "world-instance", version: target.transform.version, instanceId: target.instanceId, transform: target.transform });
+              });
+              if (!matches) return { ok: false, reason: "规范画布与转换回执不匹配" };
+              return { ok: true, label: "转换到共享世界", forward: result.receipt.forward, inverse: result.receipt.inverse };
+            }
+            await new Promise<void>(resolve => setTimeout(resolve, 50));
+          }
+          return { ok: false, reason: "页面已切换或当前不可写" };
+        });
+      } finally {
+        if (conversionAbort === controller) { conversionAbort = null; busy = false; publish(); }
+      }
+    },
     async record(commands, label) {
+      if (busy) return { ok: false, reason: "正在结算上一次操作，请稍候" };
       if (!options.session.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };
       const planned = plan(commands);
       if (!planned.ok) return { ok: false, reason: planned.reason };
@@ -215,6 +278,7 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
     },
 
     recordParameter(input) {
+      if (busy) return;
       journal.recordParameter({
         label: input.label,
         nodeId: input.nodeId,
@@ -254,6 +318,11 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
       return () => listeners.delete(listener);
     },
     clear() {
+      conversionAbort?.abort();
+      conversionAbort = null;
+      conversionIntents.clear();
+      conversionIntentBytes = 0;
+      busy = false;
       journal.clear();
       parameterAppliers.clear();
       publish();

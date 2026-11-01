@@ -42,6 +42,14 @@ export function createWorldConversionService(resolveRoom: (id: string) => Promis
       const commands = frozen.map(target => ({ type: "nodeData.patch" as const, nodeId: target.nodeId, value: { sharedWorldInstance: JSON.parse(JSON.stringify({ kind: "world-instance", version: SHARED_WORLD_VERSION, instanceId: target.instanceId, transform: target.transform })) } }));
       const plan = planCanvasEdit(canvas, commands);
       if (!plan.ok) return failure("invalid-edit", plan.reason);
+      const sourceFields = ["modelScript", "modelScriptLanguage", "modelScriptVersion", "modelSourceKind", "modelAssetId", "modelPlacement"] as const;
+      for (const target of targets) {
+        const data = canvas.nodeData[target.nodeId]!;
+        const fields = sourceFields.map(field => data[field] === undefined
+          ? { field, present: false as const }
+          : { field, present: true as const, value: structuredClone(data[field]) });
+        for (const side of [plan.forward, plan.inverse]) side.preconditions.push({ kind: "node-data-fields", nodeId: target.nodeId, fields });
+      }
       const receipt = { targets: frozen, forward: plan.forward, inverse: plan.inverse };
       return { ok: true as const, batch: { protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: input.canvasId, commandId, actorId: "world-conversion", baseRevision: canvas.revision, commands: [{ type: "edit.apply" as const, ...plan.forward }] }, modelBatch: { submissionHash: hash, nodes: [], worldConversion: receipt } };
     } }, options);

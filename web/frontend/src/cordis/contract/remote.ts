@@ -61,6 +61,8 @@ export type ModelScriptReport = {
  * 提示词片段目录的唯一浏览器出口。所有最终进入 Canvas Service 的协议都在这里。
  */
 export interface CanvasRemoteService {
+  prepareWorldConversion(input: import("@woohaa3/contracts").WorldConversionPrepareInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome>;
+  commitWorldConversion(input: import("@woohaa3/contracts").WorldConversionCommitInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionCommitOutcome>;
   /**
    * 打开当前 Canvas page 的 `canvas-yjs` 逻辑通道
    * （change: unify-canvas-session-websocket，design D2）。

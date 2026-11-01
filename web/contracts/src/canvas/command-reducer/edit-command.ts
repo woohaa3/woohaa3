@@ -9,7 +9,7 @@
  * 4. 删除（含级联）额外保护 active run：涉及 queued/pending/running 任务的目标拒绝，
  *    不隐式取消任务（与 run-service / task-projector 的 latest-run-wins 一致）。
  */
-import type { EditApplyCommand, EditOperation, EditPrecondition, EditNodeDataField } from "../edit-command.js";
+import type { EditApplyCommand, EditOperation, EditPrecondition, EditNodeDataGuardField } from "../edit-command.js";
 import { decodeEditApplyCommand } from "../edit-command.js";
 import { collectWoohaa3CanvasRemovalIds, type CanvasNodeData, type Woohaa3CanvasNode } from "../domain/index.js";
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
@@ -191,14 +191,14 @@ export function matchNodeField(
 
 export function matchNodeDataField(
   data: CanvasNodeData | undefined,
-  field: EditNodeDataField,
+  field: EditNodeDataGuardField,
   snapshot: { present: boolean; value?: unknown }
 ): boolean {
   const raw: unknown = data?.[field];
   const present = raw !== undefined;
   if (!snapshot.present) return !present;
   if (!present) return false;
-  if (field !== "sharedWorldInstance") return raw === snapshot.value;
+  if (field !== "sharedWorldInstance" && field !== "modelPlacement") return raw === snapshot.value;
   const equalJson = (a: unknown, b: unknown): boolean => {
     if (a === b) return true;
     if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;

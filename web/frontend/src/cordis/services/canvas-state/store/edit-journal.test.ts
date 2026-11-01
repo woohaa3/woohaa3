@@ -2,7 +2,7 @@
  * Edit Journal 测试（change: 2026-10-09-improve-canvas-workflow，任务 1.5）。
  */
 import { describe, expect, it, vi } from "vitest";
-import { EditJournal, EDIT_JOURNAL_MAX_ENTRIES, type JournalPlannedEdit } from "./edit-journal.js";
+import { EditJournal, EDIT_JOURNAL_MAX_ADOPTED_IDS, EDIT_JOURNAL_MAX_ENTRIES, type JournalPlannedEdit } from "./edit-journal.js";
 
 const NOOP_EDIT: JournalPlannedEdit = { preconditions: [], operations: [] };
 
@@ -133,6 +133,31 @@ describe("Edit Journal 撤销/重做与 redo 语义", () => {
 });
 
 describe("Edit Journal 容量与超大动作", () => {
+  it("releases trimmed adopted plans while retaining bounded retry identities", async () => {
+    const { journal } = makeJournal();
+    const run = async () => ({ ok: true as const, label: "conversion", forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    await journal.adoptExternal("old", run);
+    for (let i = 0; i < EDIT_JOURNAL_MAX_ENTRIES; i++) await journal.recordAndSubmit({ label: `${i}`, forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    expect(journal.snapshot().entries.some(entry => entry.id === "old")).toBe(false);
+    expect((await journal.adoptExternal("old", run)).ok).toBe(false);
+    await journal.adoptExternal("redo", run);
+    await journal.undo({ apply: async () => ({ ok: true }) });
+    await journal.recordAndSubmit({ label: "new", forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    expect((await journal.adoptExternal("redo", run)).ok).toBe(false);
+    const identities = (journal as unknown as { adopted: Set<string> }).adopted;
+    expect([...identities]).toEqual(["old", "redo"]);
+    expect(journal.snapshot().entries.some(entry => entry.id === "redo")).toBe(false);
+  });
+
+  it("rejects new identities before running external work at the identity limit", async () => {
+    const { journal } = makeJournal();
+    const run = vi.fn(async () => ({ ok: true as const, label: "conversion", forward: NOOP_EDIT, inverse: NOOP_EDIT }));
+    for (let i = 0; i < EDIT_JOURNAL_MAX_ADOPTED_IDS; i++) await journal.adoptExternal(`op-${i}`, run);
+    expect((await journal.adoptExternal("overflow", run)).ok).toBe(false);
+    expect(run).toHaveBeenCalledTimes(EDIT_JOURNAL_MAX_ADOPTED_IDS);
+    journal.clear();
+    expect((await journal.adoptExternal("overflow", run)).ok).toBe(true);
+  });
   it("超过 100 条移除最旧已结算记录", async () => {
     const { journal } = makeJournal();
     for (let i = 0; i < EDIT_JOURNAL_MAX_ENTRIES + 5; i += 1) {

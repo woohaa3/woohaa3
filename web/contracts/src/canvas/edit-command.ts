@@ -13,10 +13,12 @@ import type { CanvasNodeData, Woohaa3CanvasJsonObject } from "./domain/index.js"
 import {
   EDIT_APPLY_LIMITS,
   EDIT_NODE_DATA_FIELDS,
+  EDIT_NODE_DATA_GUARD_FIELDS,
   EDIT_NODE_FIELDS,
   type EditApplyCommand,
   type EditFieldSnapshot,
   type EditNodeDataField,
+  type EditNodeDataGuardField,
   type EditNodeDataFieldSnapshot,
   type EditNodeField,
   type EditNodeFieldSnapshot,
@@ -30,6 +32,7 @@ export {
   EDIT_NODE_DATA_FIELDS,
   type EditNodeField,
   type EditNodeDataField,
+  type EditNodeDataGuardField,
   type EditFieldSnapshot,
   type EditNodeFieldSnapshot,
   type EditNodeDataFieldSnapshot,
@@ -86,9 +89,9 @@ function decodeNodeFieldSnapshot(value: unknown): EditNodeFieldSnapshot | null {
 }
 
 function decodeNodeDataFieldSnapshot(value: unknown): EditNodeDataFieldSnapshot | null {
-  if (!isRecord(value) || !isEditNodeDataField(value.field)) return null;
+  if (!isRecord(value) || typeof value.field !== "string" || !(EDIT_NODE_DATA_GUARD_FIELDS as readonly string[]).includes(value.field)) return null;
   const snapshot = decodeFieldSnapshot(value);
-  return snapshot ? { field: value.field, ...snapshot } : null;
+  return snapshot ? { field: value.field as EditNodeDataGuardField, ...snapshot } : null;
 }
 
 function decodePrecondition(value: unknown): EditPrecondition | null {
