@@ -108,7 +108,7 @@ export function validateWorldIdentities(nodes: readonly { id: string; type: stri
       for (const key of TEXT_FIELDS) {
         if (fields[key] !== undefined && typeof fields[key] !== "string") return `Invalid ${key} on ${node.id}`;
       }
-      if (containsLocalState(fields)) return `Transient state on ${node.id}`;
+      if (Object.entries(fields).some(([key, value]) => key !== "parameters" && (LOCAL_FIELDS.has(key) || /^gpu/i.test(key) || containsLocalState(value)))) return `Transient state on ${node.id}`;
       if (node.type === "model3d") {
         const invalid = validModelFields(fields);
         if (invalid) return `Invalid ${invalid} on ${node.id}`;

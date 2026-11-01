@@ -1,4 +1,5 @@
 import { applyContentNodeDataPatch, replaceContentNodeData } from "../content-node-data.js";
+import { validateWorldIdentities } from "../domain/world-identities.js";
 /**
  * 命令 reducer 的节点类命令（add/update/remove/nodeData.patch）。
  *
@@ -252,6 +253,11 @@ export function patchNodeData(
   }
   if (!work.nodes.some((node) => node.id === nodeId)) {
     return reject("node-data-orphan", `节点业务数据指向不存在的节点 ${nodeId}`);
+  }
+  const candidate = { ...(work.nodeData[nodeId] ?? {}), ...value };
+  if (node?.type === "model3d" && candidate.sharedWorldInstance !== undefined) {
+    const error = validateWorldIdentities([node], { [nodeId]: candidate });
+    if (error) return reject("invalid-command", error);
   }
   const intentRejection = validateVideoEditIntentsPatch(value);
   if (intentRejection) return intentRejection;

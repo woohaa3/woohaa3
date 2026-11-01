@@ -78,13 +78,15 @@ describe("world identities", () => {
   it("rejects malformed and transient nested model configuration on add, patch and parse", () => {
     const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } };
     const base = createEmptyWoohaa3ServerCanvas("x", now);
-    const added = applyCanvasCommands(base, [{ type: "node.add", node: node("model", "model3d"), nodeData: { sharedWorldInstance: instance, shotPose: { distance: 2 } } }], { now });
+    const modelDefinition = { modelScript: "scene.box({ id: 'body' });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "source", contentHash: "content" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } };
+    const added = applyCanvasCommands(base, [{ type: "node.add", node: node("model", "model3d"), nodeData: { ...modelDefinition, sharedWorldInstance: instance, shotPose: { distance: 2 } } }], { now });
     expect(added.ok).toBe(true);
     if (!added.ok) return;
     for (const config of [
       { shotPose: { distance: "bad" } },
       { shotPose: { distance: 2, gpuTexture: { id: 1 } } },
-      { parameters: { gpuTexture: { id: 1 } } },
+      { parameters: { invalid: Infinity } },
+      { parameters: { invalid: new Date() } },
       ...["status", "progress", "activeRunId", "modelScriptError"].map(key => ({ [key]: { entityHandle: { id: 42 } } })),
       { progress: "invalid-number" },
       { modelPlacement: { offset: { x: 1 }, entityHandle: { id: 42 } } },
@@ -95,16 +97,29 @@ describe("world identities", () => {
     ]) {
       expect(parseCanvasAggregate({ ...added.canvas, nodeData: { model: { sharedWorldInstance: instance, ...config } } }).ok).toBe(false);
       expect(applyCanvasCommands(base, [{ type: "node.add", node: node("model", "model3d"), nodeData: { sharedWorldInstance: instance, ...config } as never }], { now }).ok).toBe(false);
-      expect(applyCanvasCommands(added.canvas, [{ type: "nodeData.patch", nodeId: "model", value: config as never }], { now }).ok).toBe(false);
+      const patched = applyCanvasCommands(added.canvas, [{ type: "nodeData.patch", nodeId: "model", value: config as never }], { now });
+      expect(patched.ok, JSON.stringify(config)).toBe(false);
       expect(added.canvas.nodeData.model.shotPose).toEqual({ distance: 2 });
     }
   });
 
   it("accepts valid model task state and provider parameters", () => {
     const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } };
-    const data = { sharedWorldInstance: instance, status: "running", taskStatus: "processing", progress: 0.5, activeRunId: "run", modelScriptError: null, parameters: { nested: { count: 2, enabled: true } } };
+    const parameters = { matrix: [[1, 0], [0, 1]], lease: "commercial", gpuCount: 2, nested: { writeLease: null, values: [true, "text", 3, { gpuResource: "ordinary" }] } };
+    const data = { sharedWorldInstance: instance, modelScript: "scene.box({ id: 'body' });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "source", contentHash: "content" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, status: "running", taskStatus: "processing", progress: 0.5, activeRunId: "run", modelScriptError: null, parameters };
     const result = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("x", now), [{ type: "node.add", node: node("model", "model3d"), nodeData: data as never }], { now });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(parseCanvasAggregate(result.canvas).ok).toBe(true);
+    if (result.ok) {
+      const parsed = parseCanvasAggregate(result.canvas);
+      expect(parsed.ok && parsed.canvas.nodeData.model.parameters).toEqual(parameters);
+      const patched = applyCanvasCommands(result.canvas, [{ type: "nodeData.patch", nodeId: "model", value: { parameters } }], { now });
+      expect(patched.ok, JSON.stringify(patched)).toBe(true);
+      if (patched.ok) {
+        const doc = new Y.Doc();
+        Y.applyUpdate(doc, Y.encodeStateAsUpdate(serverCanvasToYDoc(patched.canvas)));
+        const reloaded = yDocToServerCanvas(doc, { now });
+        expect(reloaded.ok && reloaded.canvas.nodeData.model.parameters).toEqual(parameters);
+      }
+    }
   });
 });

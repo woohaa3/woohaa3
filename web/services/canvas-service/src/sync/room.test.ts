@@ -76,6 +76,7 @@ describe("串行命令与并行 room（任务 4.1）", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "world-room-"));
     const file = path.join(dir, "canvas.sqlite");
     const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 1, v: 2, h: 3 }, rotation: [0, 0, 0, 1], scale: 1 } };
+    const parameters = { matrix: [[1, 0], [0, 1]], lease: "commercial", gpuCount: 2, nested: [null, true, { writeLease: "parameter" }] };
     const group = { kind: "workflow-group-2d", version: "shared-world-v1", groupId: "g", scopeVersion: "1", memberNodeIds: ["model"] };
     const area = { kind: "scene-area", version: "shared-world-v1", areaId: "a", scopeVersion: "1", bounds: { min: { u: 0, v: 0 }, max: { u: 2, v: 2 } } };
     const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "c", settingsVersion: "1", position: { u: 0, v: 0, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: "missing" };
@@ -84,7 +85,7 @@ describe("串行命令与并行 room（任务 4.1）", () => {
       const room = new CanvasRoom({ canvasId: CANVAS, repository, now: () => NOW });
       await room.initialize({ canvas: createEmptyWoohaa3ServerCanvas(CANVAS, NOW), roomEpoch: "epoch-1", createdAt: NOW });
       const result = await room.submit(batch({ commands: [
-        { ...addModel3dCommand("model"), nodeData: { ...MODEL3D_NODE_DATA, sharedWorldInstance: instance } },
+        { ...addModel3dCommand("model"), nodeData: { ...MODEL3D_NODE_DATA, sharedWorldInstance: instance, parameters } },
         addModel3dCommand("legacy-model"),
         { type: "node.add", node: { id: "group", type: "workflow-group-2d", position: { x: 0, y: 0 } }, nodeData: { workflowGroup2d: group } },
         { type: "node.add", node: { id: "area", type: "scene-area", position: { x: 0, y: 0 } }, nodeData: { sceneArea: area } },
@@ -100,6 +101,7 @@ describe("串行命令与并行 room（任务 4.1）", () => {
         expect(exported.ok).toBe(true);
         if (exported.ok) {
           expect(exported.canvas.nodeData.model.sharedWorldInstance).toEqual(instance);
+          expect(exported.canvas.nodeData.model.parameters).toEqual(parameters);
           expect(exported.canvas.nodeData["legacy-model"]).toEqual(MODEL3D_NODE_DATA);
           expect(exported.canvas.nodeData["legacy-model"].sharedWorldInstance).toBeUndefined();
           expect(exported.canvas.nodeData.group.workflowGroup2d).toEqual(group);
