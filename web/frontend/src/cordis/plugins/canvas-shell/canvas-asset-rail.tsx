@@ -17,11 +17,12 @@
 import { useState } from "react";
 import type { ComponentType } from "react";
 import {
-  BoxIcon,
-  FileImageIcon,
-  FolderPlusIcon,
-  ImageIcon,
-  LayersIcon,
+  CubeSolidIcon,
+  FolderPlusSolidIcon,
+  GoogleDriveSolidIcon,
+  ImageSolidIcon,
+  LayerGroupSolidIcon,
+  PinterestSolidIcon,
   SidebarIcon
 } from "@woohaa3/ui/icons";
 import "./canvas-asset-rail.css";
@@ -39,17 +40,18 @@ type RailEntry = {
 /**
  * 轨道条目。顺序即视觉顺序，与参考稿一致。
  *
- * 图标选择受 `@woohaa3/ui/icons` 的 allowlist 约束（不允许直接 import lucide-react）：
- * 图层 `LayersIcon`、产品 `BoxIcon`、项目商品 `FolderPlusIcon`、图片 `ImageIcon`；
- * Drive / Pinterest 没有等价图标，用 `FileImageIcon` / `MediaIcon` 占位并靠文字区分。
+ * **图标必须是实心的**：四喜的图标来自 Font Awesome 6 Solid（`src/components/icons.tsx`），
+ * 宿主默认的 Lucide 是线条。线条与实心并排一眼就能看出不是一套 —— 只调字号与颜色没用，
+ * 图形语言本身不同。所以这里一律用 `*SolidIcon`（路径为构建期从 FA 取的常量，
+ * 运行时不依赖 FA 包）。Drive / Pinterest 用的是 FA 的品牌图标。
  */
 const ENTRIES: readonly RailEntry[] = [
-  { id: "layers", label: "图层", icon: LayersIcon },
-  { id: "products", label: "产品", icon: BoxIcon },
-  { id: "project-items", label: "项目商品", icon: FolderPlusIcon },
-  { id: "images", label: "图片", icon: ImageIcon },
-  { id: "drive", label: "Drive", icon: FileImageIcon, soon: true },
-  { id: "pinterest", label: "Pinterest", icon: ImageIcon, soon: true }
+  { id: "layers", label: "图层", icon: LayerGroupSolidIcon },
+  { id: "products", label: "产品", icon: CubeSolidIcon },
+  { id: "project-items", label: "项目商品", icon: FolderPlusSolidIcon },
+  { id: "images", label: "图片", icon: ImageSolidIcon },
+  { id: "drive", label: "Drive", icon: GoogleDriveSolidIcon, soon: true },
+  { id: "pinterest", label: "Pinterest", icon: PinterestSolidIcon, soon: true }
 ];
 
 export function CanvasAssetRail({ hidden = false }: { hidden?: boolean }) {

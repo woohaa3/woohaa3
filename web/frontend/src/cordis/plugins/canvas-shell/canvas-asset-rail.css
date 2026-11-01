@@ -81,10 +81,19 @@
 
 /* ───────── 条目列表 ───────── */
 
+/*
+ * 条目样式对齐四喜的侧栏导航（`src/layouts/Sidebar.tsx` 的 `menuTheme` 覆盖）：
+ * - 项高 32、圆角 8（四喜 `itemHeight` / `itemBorderRadius`）；
+ * - 文字 14px（四喜 `FONT.body`）—— 原先是 11px，比四喜小两档，看着像另一套；
+ * - 选中底 `colorFillSecondary`、悬停底 `colorFillTertiary`、文字用主文字色。
+ *
+ * **不要用 `--app-interaction-accent-soft` 做悬停底色**：那是宿主的绿色强调色，
+ * 四喜侧栏是纯中性灰。悬停时泛一层绿，是这条栏看起来"不属于四喜"的主要原因。
+ */
 .canvas-asset-rail__items {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 2px;
 }
 
 .canvas-asset-rail__item {
@@ -92,25 +101,42 @@
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 6px;
+	gap: 5px;
 	width: 100%;
-	padding: 12px 4px;
+	min-height: 56px;
+	padding: 8px 4px;
 	border: 0;
-	border-radius: 12px;
+	border-radius: 8px;
 	background: transparent;
-	color: var(--app-web-text-muted);
+	color: var(--app-web-text-primary);
 	font: inherit;
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 1.45;
 	cursor: pointer;
+	transition: background 0.15s ease;
 }
 
-/* 选中：整块实底方块（参考稿里「图层」那一格）；未选中的只有图标和暗字 */
+/*
+ * 选中 / 悬停底色在四喜里是 antd 的 `colorFillSecondary` 与 `colorFillTertiary`：
+ * 亮色是 8% 与 4% 的黑，暗色是 8% 与 6% 的白。
+ *
+ * 宿主没有这两档语义 token（`--app-web-subtle` 是 tertiary 那一档，`--app-web-border`
+ * 是描边色，比 secondary 还深），所以用 `color-mix` 按主文字色现算 —— 两套主题都跟着走，
+ * 也不会像之前那样把「选中」和「悬停」的深浅用反（选中要比悬停更明显）。
+ */
+.canvas-asset-rail__item {
+	--rail-fill-hover: color-mix(in srgb, var(--app-web-text-primary) 4%, transparent);
+	--rail-fill-selected: color-mix(in srgb, var(--app-web-text-primary) 8%, transparent);
+}
+
 .canvas-asset-rail__item.is-selected {
-	background: var(--app-web-subtle);
+	background: var(--rail-fill-selected);
 	color: var(--app-web-text-primary);
 }
 
 .canvas-asset-rail__item:hover {
-	background: var(--app-interaction-accent-soft);
+	background: var(--rail-fill-hover);
 	color: var(--app-web-text-primary);
 }
 
@@ -125,21 +151,23 @@
 
 .canvas-asset-rail__label {
 	max-width: 100%;
-	font-size: 11px;
-	line-height: 15px;
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 1.45;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
 
-/* `SOON` 角标：压在图标的右上方，不占布局高度 */
+/* `SOON` 角标：压在图标的右上方，不占布局高度。
+ * 底色同样用中性填充，不用绿色强调色 —— 与条目悬停同一理由。 */
 .canvas-asset-rail__soon {
 	position: absolute;
 	top: -8px;
 	right: -2px;
 	padding: 0 4px;
 	border-radius: 4px;
-	background: var(--app-interaction-accent-soft);
+	background: var(--app-web-border);
 	color: var(--app-web-text-muted);
 	font-size: 9px;
 	line-height: 13px;
@@ -216,7 +244,7 @@
 }
 
 .canvas-asset-rail__list-item:hover {
-	background: var(--app-interaction-accent-soft);
+	background: var(--app-web-subtle);
 }
 
 /* ───────── 画布让位 ─────────
