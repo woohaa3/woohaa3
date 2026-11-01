@@ -365,6 +365,8 @@ export type BevyHistoryStripDot = {
   selected?: boolean;
   hovered?: boolean;
   pressed?: boolean;
+  /** New terminal version the user has not inspected yet; drawn as a small corner badge. */
+  unseen?: boolean;
   presentationId?: string;
   operationId?: string;
   recoverable?: boolean;

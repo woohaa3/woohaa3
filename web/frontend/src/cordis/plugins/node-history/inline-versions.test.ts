@@ -3,13 +3,14 @@ import { InlineVersions, installInlineVersions } from "./inline-versions.js";
 import { RUN_STATE_SERVICE } from "../service-keys.js";
 import type { NodeGenerationHistoryListItem } from "@woohaa3/contracts";
 const item = (id: string, current=false) => ({entryId:id,nodeId:"n",nodeTitle:"test",kind:"image",createdAt:id,current,recoverable:true,outcome:"succeeded",previewable:true,source:{label:id},preview:{}} as unknown as NodeGenerationHistoryListItem & {nodeId:string;nodeTitle:string});
-function setup(items=[item("a"),item("b",true),item("c")]) {
+function setup(items=[item("a"),item("b",true),item("c")], storage?: Pick<Storage,"getItem"|"setItem">|null) {
   const apply=vi.fn(async (_input: unknown) => ({ok:true as const}));
   const client={listCanvas:vi.fn(async()=>({ok:true as const,items,nextCursor:null,total:items.length,kindCounts:{image:items.length,text:0,video:0,audio:0,model:0}})),apply,
     list:vi.fn(),detail:vi.fn(async()=>({ok:false as const,code:"missing",error:"missing"})),previewUrl:vi.fn()};
   const report=vi.fn();
-  const service=new InlineVersions(client,"canvas",report);
-  return {client,service,report};
+  const onApplyError=vi.fn();
+  const service=new InlineVersions(client,"canvas",report,onApplyError,undefined,storage);
+  return {client,service,report,onApplyError};
 }
 const flush=async()=>{for(let i=0;i<12;i++) await Promise.resolve();};
 it("bounds terminal compensation, deduplicates events, refreshes on reconnect and stops on disposal",async()=>{
@@ -72,6 +73,77 @@ it("explicit steps follow local selection and stop at bounds without writes",asy
   service.select({nodeId:"n",step:1});await flush();
   expect(client.apply).not.toHaveBeenCalled();expect(service.preview.selected.get("n")).toBe("entry:c");service.dispose();
 });
+it("direct dot activation applies the archived version without entering preview",async()=>{
+  const {service,client}=setup();await service.refresh();
+  service.activate({nodeId:"n",entryId:"a"});await flush();
+  expect(client.apply).toHaveBeenCalledWith({canvasId:"canvas",nodeId:"n",entryId:"a"});
+  expect(service.preview.selected.get("n")).toBeUndefined();
+  service.dispose();
+});
+it("direct activation clears a previous read-only preview override",async()=>{
+  const {service}=setup();await service.refresh();
+  service.select({nodeId:"n",entryId:"a"});await flush();
+  expect(service.preview.selected.get("n")).toBe("entry:a");
+  service.activate({nodeId:"n",entryId:"c"});await flush();
+  expect(service.preview.selected.get("n")).toBeUndefined();
+  service.dispose();
+});
+it("current and unrecoverable dots never apply",async()=>{
+  const failed={...item("failure"),outcome:"failed" as const,recoverable:false};
+  const {service,client}=setup([item("a",true),failed]);
+  await service.refresh();
+  service.activate({nodeId:"n",entryId:"a"});await flush();
+  service.activate({nodeId:"n",entryId:"failure"});await flush();
+  expect(client.apply).not.toHaveBeenCalled();
+  expect(service.preview.selected.get("n")).toBe("entry:failure");
+  service.dispose();
+});
+it("blocks direct activation when the host reports an unsaved draft or running task",async()=>{
+  const {service,client,onApplyError}=setup();
+  const guarded=new InlineVersions(client,"canvas",vi.fn(),onApplyError,()=>({ok:false,reason:"请先保存当前草稿"}));
+  try {
+    await guarded.refresh();
+    guarded.activate({nodeId:"n",entryId:"a"});await flush();
+    expect(client.apply).not.toHaveBeenCalled();
+    expect(onApplyError).toHaveBeenCalledWith({nodeId:"n",error:"请先保存当前草稿"});
+  } finally { guarded.dispose(); }
+  service.dispose();
+});
+it("marks newly archived versions unseen until the dot or panel is seen",async()=>{
+  const items=[item("a"),item("b",true)];
+  const {service}=setup(items);await service.refresh();
+  expect(service.unseenSnapshot().size).toBe(0);
+  items.push(item("d"));
+  await service.refreshNode("n");
+  expect(service.unseenSnapshot().get("n")?.has("d")).toBe(true);
+  service.activate({nodeId:"n",entryId:"d"});await flush();
+  expect(service.unseenSnapshot().size).toBe(0);
+  items.push(item("e"));
+  await service.refreshNode("n");
+  expect(service.unseenSnapshot().get("n")?.has("e")).toBe(true);
+  service.markSeenNode("n");
+  expect(service.unseenSnapshot().size).toBe(0);
+  service.dispose();
+});
+it("persists the per-node seen baseline across service instances",async()=>{
+  const data=new Map<string,string>();
+  const storage={getItem:(key:string)=>data.get(key)??null,setItem:(key:string,value:string)=>{data.set(key,value);}};
+  const items=[item("a"),item("b",true)];
+  const first=setup(items,storage);await first.service.refresh();first.service.dispose();
+  items.push(item("d"));
+  const second=setup(items,storage);await second.service.refresh();
+  expect(second.service.unseenSnapshot().get("n")?.has("d")).toBe(true);
+  second.service.dispose();
+});
+it("baselines an empty-history node so its first completed version is unseen",async()=>{
+  const items: ReturnType<typeof item>[] = [];
+  const {service}=setup(items);service.baselineNodes(["n"]);
+  items.push(item("d"));
+  await service.refreshNode("n");
+  expect(service.unseenSnapshot().get("n")?.has("d")).toBe(true);
+  service.dispose();
+});
+
 it("late metadata does not publish after page disposal",async()=>{
   const {service,client}=setup();let release!:(value:any)=>void;
   client.listCanvas.mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));

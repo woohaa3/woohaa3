@@ -50,8 +50,11 @@ export function createHistoryClick(core: InteractionCore) {
       const dots = core.renderedNode?.(gesture.nodeId)?.historyStrip?.dots ?? [];
       const dot = dots.find(item => item.presentationId === gesture.presentationId);
       if (!dot) return true;
+      // 已完成的非当前版本直接切换；失败/运行中/当前版本仍只做只读查看。
+      // 真正的写面由 InlineVersions.activate 调用受控历史 apply 完成，不进入聚焦或面板。
+      const applyable = dot.state === "succeeded" && dot.recoverable !== false && !!dot.entryId && !dot.current;
       core.options.onNodeHistorySelect?.({ nodeId: gesture.nodeId, presentationId: gesture.presentationId,
-        entryId: dot.entryId, operationId: dot.operationId, viewOnly: true });
+        entryId: dot.entryId, operationId: dot.operationId, viewOnly: !applyable });
     }
     return true;
   };

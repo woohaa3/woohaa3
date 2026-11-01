@@ -153,6 +153,32 @@ describe("applyRunStateProjection", () => {
     expect(nodes[0]?.historyStrip?.truncated).toBe(0);
   });
 
+  it("未查看的历史条目投影为圆点角标，不改变状态颜色或当前装饰", () => {
+    const nodes = [node("n1")];
+    const history = [{ entryId: "a", nodeId: "n1", nodeTitle: "test", kind: "image", createdAt: "2026-10-12T00:00:01.000Z", current: false,
+      recoverable: true, outcome: "succeeded", previewable: true, source: { label: "a" }, preview: { kind: "text", excerpt: "a" } },
+    { entryId: "b", nodeId: "n1", nodeTitle: "test", kind: "image", createdAt: "2026-10-12T00:00:02.000Z", current: true,
+      recoverable: true, outcome: "succeeded", previewable: true, source: { label: "b" }, preview: { kind: "text", excerpt: "b" } }] as never;
+    applyRunStateProjection(nodes, {
+      summaries: [summary("n1")],
+      records: [],
+      versionsByNode: new Map([["n1", history]]),
+      unseenByNode: new Map([["n1", new Set(["a"])]])
+    });
+    expect(nodes[0]?.historyStrip?.dots[0]).toMatchObject({ state: "succeeded", current: false, unseen: true });
+  });
+  it("单个新完成版本带未读时仍显示圆点", () => {
+    const nodes = [node("n1")];
+    const history = [{ entryId: "a", nodeId: "n1", nodeTitle: "test", kind: "image", createdAt: "2026-10-12T00:00:01.000Z", current: true,
+      recoverable: true, outcome: "succeeded", previewable: true, source: { label: "a" }, preview: { kind: "text", excerpt: "a" } }] as never;
+    applyRunStateProjection(nodes, {
+      summaries: [summary("n1")],
+      records: [],
+      versionsByNode: new Map([["n1", history]]),
+      unseenByNode: new Map([["n1", new Set(["a"])]])
+    });
+    expect(nodes[0]?.historyStrip?.dots[0]).toMatchObject({ state: "succeeded", current: true, unseen: true });
+  });
   it("历史过多折叠较早记录", () => {
     const records = Array.from({ length: 30 }, (_, index) =>
       op(`o${index}`, "succeeded", `2026-10-12T00:00:${String(index).padStart(2, "0")}.000Z`)

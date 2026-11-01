@@ -215,7 +215,7 @@ pub(crate) fn has_history_strip(node: &GraphNode) -> bool {
                 || strip
                     .dots
                     .iter()
-                    .any(|dot| dot.state != "succeeded" || dot.recoverable == Some(false))
+                    .any(|dot| dot.state != "succeeded" || dot.recoverable == Some(false) || dot.unseen)
         })
 }
 

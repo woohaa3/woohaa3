@@ -72,6 +72,12 @@ export class ExecutionPreview {
     this.selected.set(nodeId, presentationId); this.details.delete(nodeId); this.models.delete(nodeId);
     this.refresh(); this.publish();
   }
+  /** 直接应用版本或回到 canonical 当前内容时，清除该节点的本地预览覆盖。 */
+  clear(nodeId: string) {
+    if (!this.selected.delete(nodeId)) return;
+    this.details.delete(nodeId); this.models.delete(nodeId);
+    this.publish();
+  }
   project = (canvas: ServerCanvas | null): ServerCanvas | null => {
     if (!canvas || !this.selected.size) return canvas;
     const history = this.history();

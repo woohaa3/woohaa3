@@ -24,6 +24,8 @@ export type NodeRunStateProjection = {
   currentOperationByNode?: ReadonlyMap<string, string>;
   versionsByNode?: ReadonlyMap<string, readonly NodeGenerationHistoryListItem[]>;
   selectedByNode?: ReadonlyMap<string, string>;
+  /** nodeId → 尚未查看的历史 entryId；只作为圆点角标提示，不改变选中/当前语义。 */
+  unseenByNode?: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
 /**
@@ -93,11 +95,15 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
       else delete node.progressStartedAt;
     } else if (summary?.active) node.busy = true;
     const visible = nodeExecutionWindow(items, 24, selectedId);
-    if (!showNodeExecutionDots(visible)) { delete node.historyStrip; continue; }
+    const unseen = input.unseenByNode?.get(node.id);
+    // 单个新完成版本默认被折叠；有未读提醒时仍显示圆点，否则首个版本的未读提示永远不可见。
+    const hasUnseen = visible.some(item => item.entryId && unseen?.has(item.entryId));
+    if (!showNodeExecutionDots(visible) && !hasUnseen) { delete node.historyStrip; continue; }
     node.historyStrip = {
       dots: visible.map(item => ({ state: item.state, current: item.current, selected: item === selected,
         presentationId: item.presentationId, entryId: item.entryId, operationId: item.operationId,
-        recoverable: item.recoverable })),
+        recoverable: item.recoverable,
+        ...(item.entryId && unseen?.has(item.entryId) ? { unseen: true } : {}) })),
       truncated: items.length - visible.length
     };
   }
