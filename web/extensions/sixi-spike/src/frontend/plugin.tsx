@@ -9,6 +9,7 @@ import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
 import type {
   CanvasCatalogService,
+  CanvasNavigationService,
   CanvasScopeService,
   SlotsService,
   ThemeService
@@ -17,6 +18,24 @@ import { SIXI_SPIKE_ID } from "../shared.js";
 import { SixiShell } from "../app/SixiShell.js";
 
 type ExtensionContext = Context & { slots: SlotsService; theme: ThemeService };
+
+/**
+ * 取画布页作用域的服务，拿不到就返回 undefined。
+ *
+ * `ctx.get(name, false)` 是非严格读：不抛、没有就是 undefined。这些服务（`canvasNavigation` /
+ * `canvasScope` / `canvasCatalog`）由画布页作用域提供，本插件的 context 是 App 作用域，
+ * 严格读会抛 `cannot get property …`，把整个 `canvas.overlay` 贡献一起带下去。
+ */
+function safeGet<T>(ctx: Context, name: string): T | undefined {
+  try {
+    return ctx.get(name as never, false) as T | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const safeCanvasNavigation = (ctx: Context): CanvasNavigationService | undefined =>
+  safeGet<CanvasNavigationService>(ctx, "canvasNavigation");
 
 export function sixiSpikeExtension(): Plugin.Function<void> {
   return defineExtensionPlugin<ExtensionContext>(
@@ -44,6 +63,17 @@ export function sixiSpikeExtension(): Plugin.Function<void> {
             <SixiShell
               theme={ctx.theme}
               canvasCatalog={ctx.get("canvasCatalog" as never) as CanvasCatalogService | undefined}
+              /*
+               * 画布态顶栏的切换器直接唤起宿主那个弹窗（见 app/hostCanvasBridge.ts）。
+               *
+               * **必须用 `get(…, false)` 且包 try**：`canvasNavigation` 是**画布页作用域**的服务，
+               * 而本插件的 context 是 App 作用域、`inject` 里也没有它 —— cordis 对未注入的服务
+               * 读 `ctx.get(name)` 会直接抛。抛在这里等于整个 `canvas.overlay` 贡献渲染失败，
+               * 宿主的错误边界按 `fallback="hidden"` 把四喜整个藏掉（实测：连遮罩属性都没挂上）。
+               * `get(name, false)` 不抛、拿不到就返回 undefined，切换器退化成不响应点击，
+               * 但外壳照常显示 —— 宁可少一个按钮，不能让整个四喜消失。
+               */
+              canvasNavigation={safeCanvasNavigation(ctx)}
               currentCanvasId={() =>
                 (ctx.get("canvasScope" as never) as CanvasScopeService | undefined)?.canvasId() ?? null
               }

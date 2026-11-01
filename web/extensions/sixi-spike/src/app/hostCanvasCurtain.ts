@@ -18,8 +18,7 @@ const SHELL_ATTR = "sixiShell";
  */
 const CURTAIN_CSS = `
 html[data-sixi-shell="1"] .app { visibility: hidden; }
-html[data-sixi-shell="1"] .sixi-host-root,
-html[data-sixi-shell="1"] .sixi-host-back { visibility: visible; }
+html[data-sixi-shell="1"] .sixi-host-root { visibility: visible; }
 `.trim();
 
 function ensureCurtainStyle(): void {

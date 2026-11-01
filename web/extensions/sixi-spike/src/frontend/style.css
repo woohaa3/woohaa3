@@ -39,23 +39,53 @@
 	background: var(--sixi-bg, #fff);
 }
 
-/* 画布态：四喜外壳全部撤走，只留这一个返回入口（避开宿主左上角的画布切换器）。 */
-.sixi-host-back {
+/*
+ * 画布态：顶上那条栏由四喜自己画，宿主的窗口横栏让位。
+ *
+ * 宿主横栏（`.desktop-canvas-bar`，26px）是它自己的窗口装饰：左边 `WooHaa3` 字标、
+ * 右边 FPS / DC 开发读数。它和四喜页面态那条 52px 的栏并排放，就是两个产品。
+ *
+ * 三件事必须一起做，少一件就错位：
+ * 1. **隐藏宿主横栏**，连它给 `.app` 留的 26px 占位一起去掉 —— 那段由
+ *    `canvas-window-controls.css` 的 `--canvas-chrome-height` 控制；
+ * 2. **画布整体下移 52px**，把位置让给四喜顶栏（`.app` 是 `position: fixed; inset: 0`）；
+ * 3. **四喜顶栏自己占住顶部 52px**，不透明，盖在画布之上。
+ *
+ * `--sixi-topbar-height` 由四喜的 TopBarFrame 写入，不在两份 CSS 里各写一个 52。
+ *
+ * **不要用 `:has(> .desktop-canvas-bar)` 做前提**。宿主只在 Tauri 桌面壳里才渲染那条横栏
+ * （`DesktopCanvasBar` 里先判 `desktopBootstrap`），浏览器打开宿主时它根本不存在 ——
+ * 写成 `:has(…)` 的话规则在浏览器里永远不匹配，画布不会下移，四喜顶栏直接压住画布顶部。
+ * 这里按 `.app` 本身命中，两种环境一致；横栏存在时再单独隐藏它。
+ */
+html[data-sixi-canvas] .desktop-canvas-bar {
+	display: none;
+}
+html[data-sixi-canvas] .app {
+	--canvas-chrome-height: 0px;
+	top: var(--sixi-topbar-height, 52px);
+}
+/* 画布上这几个 fixed 浮层原本按 `--canvas-chrome-height` 让位，现在要让四喜顶栏的高度 */
+html[data-sixi-canvas] .app .agent-detail {
+	top: var(--sixi-topbar-height, 52px);
+}
+html[data-sixi-canvas] .app .canvas-search {
+	top: calc(var(--sixi-topbar-height, 52px) + 16px);
+}
+
+/* 画布态的四喜顶栏。撑满窗口顶部，位置与颜色跟页面态那条完全一致。 */
+.sixi-canvas-chrome {
 	position: fixed;
 	z-index: 55;
-	top: 12px;
-	right: 16px;
-	display: inline-flex;
-	align-items: center;
-	height: 32px;
-	padding: 0 14px;
-	border: 1px solid var(--sixi-border, #ececea);
-	border-radius: 999px;
-	background: var(--sixi-panel, #fff);
-	color: var(--sixi-text, #1a1a1a);
-	font-size: 13px;
-	cursor: pointer;
-	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+	inset: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	background: var(--sixi-bg, #fff);
+	color: var(--sixi-text, #0f0f0f);
+	font-family: var(--sixi-font-family, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif);
+}
+.sixi-canvas-chrome .ant-layout-header {
+	background: transparent;
 }
 
 /*
@@ -74,7 +104,6 @@ html[data-sixi-shell] .app {
  * 外壳自己是 `.app` 的后代：`visibility: hidden` 会被继承，所以必须显式打回来。
  * 这正是选 visibility 而不是 display/opacity 的原因之一——子元素可以重新可见。
  */
-html[data-sixi-shell] .sixi-host-root,
-html[data-sixi-shell] .sixi-host-back {
+html[data-sixi-shell] .sixi-host-root {
 	visibility: visible;
 }

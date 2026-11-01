@@ -16,22 +16,50 @@ import { setHostCanvasHidden } from './hostCanvasCurtain';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { resolvePublicUrl } from '@woohaa3/frontend/extension-api';
-import type { CanvasCatalogService, ThemeService } from '@woohaa3/frontend/extension-api';
+import type {
+  CanvasCatalogService,
+  CanvasNavigationService,
+  ThemeService,
+} from '@woohaa3/frontend/extension-api';
 import { SixiProviders, SixiRoutes } from '@/app/App';
 import { setProjectSource } from '@/api/projectSource';
+import { setHostCanvas } from '@/app/hostCanvas';
+import { CanvasTopBar } from '@/layouts/CanvasTopBar';
 import { ROUTES } from '@/app/paths';
 import { useUiStore } from '@/stores/uiStore';
 import { HOST_PRESET_ID, modeOfHostPreset, sixiHostPreset } from './hostTheme';
 import { createHostProjectSource } from './hostProjectSource';
+import { createHostCanvasBridge } from './hostCanvasBridge';
 
-/** 画布态：四喜外壳不渲染，窗口就是宿主画布。 */
+/**
+ * 画布态：四喜外壳不渲染，窗口就是宿主画布 —— 但顶上那条栏仍然是四喜的。
+ *
+ * 曾经这里只有一颗悬浮的「← 返回四喜」。那时顶部是宿主自己的 26px 窗口横栏
+ * （`WooHaa3` 字标 + FPS 读数 + 窗口按钮），和四喜页面态那条 52px 的栏并排，
+ * 看着像两个产品。现在换成四喜自己的 `CanvasTopBar`：返回、画布切换器、升级 / 主题 / 通知
+ * 都在同一条栏里，宿主的横栏由 `html[data-sixi-canvas]` 隐藏，画布整体让出这 52px。
+ */
 function CanvasMode() {
-  const navigate = useNavigate();
   return (
-    <button type="button" className="sixi-host-back" onClick={() => navigate(ROUTES.home)}>
-      ← 返回四喜
-    </button>
+    <>
+      <div className="sixi-canvas-chrome">
+        <CanvasTopBar />
+      </div>
+      <CanvasModeMarker />
+    </>
   );
+}
+
+/** 画布态期间给 `<html>` 加标记，让宿主横栏让位（样式见 frontend/style.css）。 */
+function CanvasModeMarker() {
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.sixiCanvas = "1";
+    return () => {
+      delete root.dataset.sixiCanvas;
+    };
+  }, []);
+  return null;
 }
 
 /**
@@ -187,11 +215,14 @@ function writeCurrentRoute(route: string): void {
 export function SixiShell({
   theme,
   canvasCatalog,
+  canvasNavigation,
   currentCanvasId,
 }: {
   theme: ThemeService;
   /** 宿主画布目录；四喜的「项目」就是它（见 app/hostProjectSource.ts）。 */
   canvasCatalog?: CanvasCatalogService;
+  /** 画布导航；画布态顶栏的切换器直接唤起宿主那个弹窗（见 app/hostCanvasBridge.ts）。 */
+  canvasNavigation?: CanvasNavigationService;
   /** 当前打开的画布 id；点的就是它时不必切 scope，直接进画布态。 */
   currentCanvasId: () => string | null;
 }) {
@@ -209,6 +240,8 @@ export function SixiShell({
       <MemoryRouter initialEntries={[initialEntry]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         {/* 放在 Router 里：打开当前画布时要用四喜自己的 navigate 切到画布态 */}
         <HostProjectSource catalog={canvasCatalog} currentCanvasId={currentCanvasId} />
+        {/* 画布态顶栏要读宿主画布名、唤起宿主切换器（见 app/hostCanvasBridge.ts） */}
+        <HostCanvasBridgeRef catalog={canvasCatalog} navigation={canvasNavigation} currentCanvasId={currentCanvasId} />
         <HostCanvasCurtain />
         {/* 持续同步当前路由，供 shell 被卸载后 remount 时恢复位置（如 node-focus 卸载场景）。 */}
         <RouteSync />
@@ -258,6 +291,28 @@ function HostProjectSource({
     const reset = setProjectSource(createHostProjectSource(catalog, open));
     return reset;
   }, [catalog, currentCanvasId, navigate]);
+  return null;
+}
+
+/**
+ * 把宿主画布接进四喜的 `app/hostCanvas.ts` 注入点，供画布态顶栏使用。
+ *
+ * 与 `HostProjectSource` 同一套生命周期：effect 里设置、卸载时复位。热重载后
+ * 留着上一份已经失效的 catalog，顶栏会一直显示旧标题、切换器点了没反应。
+ */
+function HostCanvasBridgeRef({
+  catalog,
+  navigation,
+  currentCanvasId,
+}: {
+  catalog?: CanvasCatalogService;
+  navigation?: CanvasNavigationService;
+  currentCanvasId: () => string | null;
+}) {
+  useEffect(
+    () => setHostCanvas(createHostCanvasBridge(catalog, navigation, currentCanvasId)),
+    [catalog, navigation, currentCanvasId],
+  );
   return null;
 }
 
