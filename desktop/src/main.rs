@@ -66,7 +66,7 @@ fn show_windows_error(message: &str) {
             .collect()
     }
     let text = wide(message);
-    let title = wide("WooHaa3");
+    let title = wide("四喜 AI");
     // SAFETY: 两个指针都指向调用期内保持存活的以 NUL 结尾的 UTF-16 缓冲。
     unsafe {
         MessageBoxW(
@@ -85,7 +85,7 @@ fn install_panic_hook() {
         let log = startup_log_path()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "（数据目录不可写）".to_owned());
-        let message = format!("WooHaa3 启动失败（未捕获的错误）：{info}\n日志：{log}");
+        let message = format!("四喜 AI 启动失败（未捕获的错误）：{info}\n日志：{log}");
         report_fatal(&message);
         default_hook(info);
     }));

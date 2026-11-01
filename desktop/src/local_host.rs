@@ -401,7 +401,7 @@ pub fn install(
         "startup",
         tauri::WebviewUrl::External(startup_webview_url(app)),
     )
-    .title("WooHaa3 启动")
+    .title("四喜 AI 启动")
     .inner_size(560., 260.)
     .on_navigation(move |url| {
         if url.host_str() == Some("woohaa-startup.invalid") {
@@ -561,7 +561,7 @@ pub fn handle_exit(app: &tauri::AppHandle, event: &tauri::RunEvent) -> bool {
             && !handle
                 .dialog()
                 .message("退出应用将停止正在进行的本机任务。是否继续？")
-                .title("退出 WooHaa3")
+                .title("退出 四喜 AI")
                 .buttons(MessageDialogButtons::OkCancelCustom(
                     "停止任务并退出".into(),
                     "继续使用".into(),

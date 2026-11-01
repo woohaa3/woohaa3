@@ -87,7 +87,22 @@ export function sendJson(req, res, body, { immutable = false, status = 200 } = {
  */
 export function serveFile(req, res, filePath, options = {}) {
 	const type = MIME[path.extname(filePath)] || "application/octet-stream";
-	const size = fs.statSync(filePath).size;
+	/*
+	 * **文件可能在路由判定之后、读盘之前消失**：`browser-dist/` 是整目录替换的，
+	 * 宿主启动时按当时的目录建了映射，重建扩展之后旧入口就没了。
+	 * 这里必须兜住：`statSync` 抛出的 ENOENT 没有被接住的话会一路冒到
+	 * `uncaughtException`，**把整个宿主进程打死**（实测两次：桌面端卡在启动页、
+	 * 5174/5181 一起消失，日志里只有一条 ENOENT）。
+	 * 缺一个静态资源只该是 404，不该是服务退出。
+	 */
+	let size;
+	try {
+		size = fs.statSync(filePath).size;
+	} catch (error) {
+		if (!res.headersSent) send(res, 404, "not found");
+		else if (!res.destroyed) res.destroy();
+		return;
+	}
 	const compressible = /\.(?:html|js|mjs|css|json|svg|wasm)$/.test(filePath);
 	const gzip = compressible && size >= 1024 && acceptsGzip(req.headers["accept-encoding"]);
 	const normalizedPath = filePath.replaceAll(path.sep, "/");
