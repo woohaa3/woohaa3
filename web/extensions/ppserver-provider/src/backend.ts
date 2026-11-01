@@ -366,6 +366,15 @@ export function createPpserverProviderPlugin(
        */
       registerPpserverAuthSessionRoute(ctx, {
         filePath: sessionFile,
+        // 传函数而不是快照：目录在登录后会被 refresh() 重填，快照会一直返回空。
+        templates: () =>
+          catalog.templates.map((template) => ({
+            templateId: template.templateId,
+            title: template.title,
+            kind: template.kind,
+            ...(template.category ? { category: template.category } : {}),
+            ...(template.cost === undefined ? {} : { cost: template.cost })
+          })),
         onSessionWritten: (info) => {
           log({
             event: "ppserver-session-received",

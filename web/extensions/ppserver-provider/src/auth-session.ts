@@ -21,6 +21,25 @@ import { readExpiry, saveSession, type StoredSession } from "./session.js";
 /** 前缀与任务转发共用 `/api/ppserver/` 这一层，只是挂在 `auth/` 下面。 */
 export const AUTH_SESSION_PATH = "/api/ppserver/auth/session";
 
+/**
+ * 模板目录（只读）。
+ *
+ * 为什么不让前端去读宿主的 `/api/generation-models`：那张表是全宿主的模型目录，
+ * 里面有十几个 Provider，前端要自己筛，而且路径在 `/api/ppserver/` 之外 ——
+ * 扩展部署在别的 basePath 下时拼不出来。这里直接给「本 Provider 能跑的模板」，
+ * 前端不用知道宿主的目录结构。
+ */
+export const TEMPLATES_PATH = "/api/ppserver/templates";
+
+export type TemplateSummary = {
+  templateId: string;
+  title: string;
+  kind: string;
+  category?: string;
+  /** 模板表里的 `cost_coins`。**未必是真实扣费**：实测有的模板标 0、实际扣 32。 */
+  cost?: number;
+};
+
 /** 访问令牌的上限。JWT 通常 1~2 KB，留足余量但不接受任意大字符串。 */
 const MAX_TOKEN_LENGTH = 8192;
 
@@ -80,12 +99,18 @@ export type RegisterAuthSessionRouteOptions = {
   /** 落盘失败 / 成功都经过它记日志，不记录令牌内容。 */
   onSessionWritten?: (info: { hasRefreshToken: boolean; expiresAt: number }) => void;
   onError?: (message: string) => void;
+  /**
+   * 当前可跑的模板。**是函数不是数组**：目录在登录后会被异步刷新，
+   * 构造时传一份副本的话，刷新完这条路由返回的还是旧目录（甚至空目录）。
+   */
+  templates?: () => TemplateSummary[];
 };
 
 /**
- * 注册 `POST /api/ppserver/auth/session`（写入）与 `GET`（查询是否已有会话）。
- *
- * 写成功返回 `{ ok: true, expiresAt }`；**不回显任何令牌**，避免它出现在日志或调试面板里。
+ * 注册两条只读/写入路由：
+ * - `POST /api/ppserver/auth/session`：写入登录会话。成功返回 `{ ok: true, expiresAt }`，
+ *   **不回显任何令牌**，避免它出现在日志或调试面板里；
+ * - `GET /api/ppserver/templates`：本 Provider 当前能跑的模板（调试台用它选模板）。
  */
 export function registerPpserverAuthSessionRoute(
   ctx: HostExtensionContext,
@@ -97,7 +122,8 @@ export function registerPpserverAuthSessionRoute(
   ctx.effect(() =>
     runtime.gateway.route(options.order ?? 23, async (req, res) => {
       const pathname = new URL(req.url ?? "/", "http://local").pathname;
-      if (pathname !== AUTH_SESSION_PATH) return false;
+      // 两条路由挂在同一个 handler 上：会话写入与模板目录。都不是本前缀就交回去。
+      if (pathname !== AUTH_SESSION_PATH && pathname !== TEMPLATES_PATH) return false;
 
       if (runtime.access?.authenticator) {
         const principal = await runtime.access.authenticator(req, "http").catch(() => null);
@@ -105,6 +131,15 @@ export function registerPpserverAuthSessionRoute(
           writeJson(res, 401, { ok: false, message: "需要登录" });
           return true;
         }
+      }
+
+      if (pathname === TEMPLATES_PATH) {
+        if (req.method !== "GET") {
+          writeJson(res, 405, { ok: false, message: "只支持 GET" });
+          return true;
+        }
+        writeJson(res, 200, { templates: options.templates?.() ?? [] });
+        return true;
       }
 
       if (req.method === "POST") {
