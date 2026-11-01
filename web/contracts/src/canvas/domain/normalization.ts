@@ -44,10 +44,12 @@ export type NormalizeCanvasOptions = {
  */
 export const WOOHAA3_APP_NODE_TYPES = ["text", "image", "video", "audio", "model3d", "composite-asset", "workflow-group-2d", "scene-area", "world-camera"] as const;
 
+export class InvalidWorldIdentitiesError extends Error {}
+
 export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOptions): ServerCanvas {
   observeContentResolver(options?.content);
   const worldError = validateWorldIdentities(input.document.nodes, input.nodeData);
-  if (worldError) throw new Error(worldError);
+  if (worldError) throw new InvalidWorldIdentitiesError(worldError);
   const assets = Array.isArray(input.assets) ? input.assets.map(normalizeAsset) : [];
   const sanitizedNodeData = sanitizeWoohaa3CanvasNodeData(input.nodeData) as Woohaa3CanvasNodeDataMap<CanvasNodeData>;
   const rawDocument: Woohaa3CanvasDocument = {
@@ -60,7 +62,7 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   const document = migrated.document;
   const migratedNodeData = migrated.nodeData;
   const migratedWorldError = validateWorldIdentities(document.nodes, migratedNodeData);
-  if (migratedWorldError) throw new Error(migratedWorldError);
+  if (migratedWorldError) throw new InvalidWorldIdentitiesError(migratedWorldError);
 
   const nodeIdsAfterSanitize = new Set(document.nodes.map((node) => node.id));
   document.edges = document.edges.filter(

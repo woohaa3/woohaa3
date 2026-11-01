@@ -17,6 +17,7 @@
  */
 import { stableStringify } from "./canvas-script/planner/hash.js";
 import { validateWorldIdentities } from "./domain/world-identities.js";
+import { InvalidWorldIdentitiesError } from "./domain/normalization.js";
 import type { CanvasCommand } from "./commands.js";
 import type { ServerCanvas } from "./domain/index.js";
 import { applyEditCommand } from "./command-reducer/edit-command.js";
@@ -75,7 +76,13 @@ export function applyCanvasCommands(
 
   const worldError = validateWorldIdentities(work.nodes, work.nodeData);
   if (worldError) return reject("invalid-command", worldError);
-  const result = finalize(canvas, work, now);
+  let result: ApplyCanvasCommandsResult;
+  try {
+    result = finalize(canvas, work, now);
+  } catch (error) {
+    if (error instanceof InvalidWorldIdentitiesError) return reject("invalid-command", error.message);
+    throw error;
+  }
   if (!result.ok) return result;
   const finalWorldError = validateWorldIdentities(result.canvas.document.nodes, result.canvas.nodeData);
   return finalWorldError ? reject("invalid-command", finalWorldError) : result;

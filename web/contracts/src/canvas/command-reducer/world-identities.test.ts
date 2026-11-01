@@ -88,6 +88,14 @@ describe("world identities", () => {
     expect(parseCanvasAggregate(legacy).ok).toBe(false);
     const composite = { ...legacy, document: { ...legacy.document, nodes: [node("old", "composite-asset"), node("new", "workflow-group-2d")] }, nodeData: { ...legacy.nodeData, old: { extensionId: "film-set" } } };
     expect(parseCanvasAggregate(composite).ok).toBe(false);
+    const before = structuredClone(base);
+    const rejected = applyCanvasCommands(base, [
+      { type: "node.add", node: node("old", "composite-asset"), nodeData: { extensionId: "film-set" } },
+      { type: "node.add", node: node("new", "workflow-group-2d"), nodeData: { workflowGroup2d: { ...group, memberNodeIds: ["old"] } } }
+    ], { now });
+    expect(rejected).toMatchObject({ ok: false, rejection: { code: "invalid-command" } });
+    expect(base).toEqual(before);
+    expect(applyCanvasCommands(base, [{ type: "node.add", node: node("next", "text") }], { now }).ok).toBe(true);
   });
 
   it("preserves existing shot pose on a world model", () => {
