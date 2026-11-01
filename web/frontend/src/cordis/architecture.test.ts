@@ -340,6 +340,9 @@ describe("前端协议边界审计", () => {
       "cordis/plugins/canvas-runtime/project-focus-content-rect.ts -> canvas-shell",
       "cordis/plugins/canvas-runtime/focus-target-transition.ts -> canvas-shell",
       "cordis/plugins/canvas-runtime/model-editor-gestures.ts -> canvas-shell",
+      // 呈现矩形投影从 host 拆出后仍读共享组徽标投影（与 canvas-node-index / dock-reveal 同一
+      // 几何口径；change: 2026-10-30-remove-group-badge-scaling 的既有依赖，仅换了文件位置）。
+      "cordis/plugins/canvas-runtime/presentation-screen-rect.ts -> canvas-shell",
       // model-editor ↔ model-scene：对象编辑安装从组合 store 读取身份映射。
       // model-editor ↔ canvas-shell：对象模式手势复用聚焦输入与手势类型。
       // model-editor ↔ canvas-shell：对象局部键盘 action 复用交互契约类型

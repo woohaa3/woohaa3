@@ -51,11 +51,11 @@ import { attachOpenedNodeTarget } from "./navigation/node-target.js";
 import type { AppPageLocation, AppPageScopeStatus } from "./navigation/app-router.js";
 import type { CanvasCatalogRemote, CanvasCatalogService, CanvasSelectionService } from "./contract/canvas-catalog.js";
 import type { CanvasPreparationRemote, CanvasPreparationService } from "./contract/canvas-preparation.js";
-import type { CanvasExtensionMetadata } from "./plugins/extension-manager/contract.js";
+
 import { createExtensionRuntimeService, type ExtensionRuntimeService } from "./extension-runtime/service.js";
 import { extensionDefaultPreferences, resolveExtensionStartupSelection } from "./extension-runtime/selection.js";
 import { installAppHostConnectivity, type AppConnectivityOptions, type AppConnectivityRuntime } from "./app-host-connectivity.js";
-import { browserHistory, subscribePreparationReady } from "./page-scope-helpers.js";
+import { browserHistory, extensionCatalogMetadata, subscribePreparationReady } from "./page-scope-helpers.js";
 import { createSettingsRemote, type SettingsRemote } from "./services/settings-remote.js";
 
 /** App 运行时快照：页面、location 与兼容设置意图的诊断必须原子发布。 */
@@ -138,20 +138,6 @@ type ResolvedPage =
   | { kind: "ready"; canvasId: string }
   | { kind: "preparing"; canvasId: string; jobId: string | null }
   | { kind: "unresolved"; code: string; error: string };
-
-/** 业务 extension 的展示元数据投影（纯数据；不含实现）。 */
-function extensionCatalogMetadata(metadata: readonly import("@woohaa3/contracts").ExtensionFrontendMetadata[]): CanvasExtensionMetadata[] {
-  return metadata.map((entry) => ({
-    id: entry.extensionId,
-    name: entry.label,
-    description: entry.description,
-    ...(entry.directory ? { directory: entry.directory } : {}),
-    required: entry.required,
-    configurable: entry.configScope === "browser-local" && !entry.required,
-    ...(entry.defaultEnabled !== undefined ? { defaultEnabled: entry.defaultEnabled } : {}),
-    ...(entry.icon ? { icon: entry.icon } : {})
-  }));
-}
 
 /**
  * 启动 App scope 与当前页面 scope。

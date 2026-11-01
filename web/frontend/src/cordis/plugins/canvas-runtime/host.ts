@@ -30,6 +30,7 @@ import { OverviewCacheBridge } from "./overview-cache-bridge.js";
 
 const defaultMediaDecoder = createDefaultMediaDecoder();
 import { applyFocusTargetTransition } from "./focus-target-transition.js";
+import { driveModelFocusTransition, focusTransitionHost } from "./focus-transition-drive.js";
 import { isDocumentFocusTarget } from "../../navigation/contracts.js";
 import { buildAttachInteractionOptions } from "./attach-interaction-options.js";
 import { AnimationPlaybackStore } from "./animation-playback-store.js";
@@ -37,14 +38,13 @@ import { readNodeActionToolbars, activateNodeAction, readSelectionActionToolbar,
 import { ImageFocusStore } from "./image-focus-store.js";
 import { VideoFocusStore } from "./video-focus-store.js";
 import { ModelSceneOverrideStore } from "./model-scene-override-store.js";
+import { residencyInteractiveNodeIds as residencyInteractiveNodeIdsAt, residencyPinnedNodeIds as residencyPinnedNodeIdsAt } from "./residency-focus-ids.js";
 import { installPerfFrameWindow } from "./perf-frame-window.js";
 import {
   installOverviewLodTelemetry,
   type OverviewLodTelemetryHandle
 } from "./overview-lod-telemetry.js";
-import { getGroupLayoutSizes } from "@woohaa3/contracts";
-import { groupBadgePresentationScreenRect } from "./group-badge-screen-rect.js";
-import { groupBadgeProjectionOf } from "../canvas-shell/group-badge-projection.js";
+import { presentationScreenRect } from "./presentation-screen-rect.js";
 import {
   applyFilmSetObjectAction,
   applyFilmSetObjectGesture,
@@ -294,7 +294,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         : { ok: false, reason: "renderer-unavailable" };
     }
     const result = applyFocusTargetTransition({
-      host: {
+      host: focusTransitionHost({
         setImageFocusTargetId: (nodeId) => this.imageFocusStore.setTargetId(nodeId),
         setVideoFocusTargetId: (nodeId) => this.videoFocusStore.setTargetId(nodeId),
         hasModelFocus: () => this.modelFocus !== null,
@@ -305,7 +305,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         setHistoryFocus: (nodeId) => {
           this.historyFocus = nodeId ? { nodeId } : null;
         }
-      },
+      }),
       controller,
       target,
       transition
@@ -316,52 +316,17 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     return result;
   }
 
-  /**
-   * 驱动三维聚焦公共进度（design D6/D7）。
-   *
-   * 进入/切换 model/extension：起跑唯一进度，Rust 按进度求值，不再独立计时；退出（target 为
-   * null）时保留刚聚焦的实体节点身份继续推进到终点。目标不可用或切换为非三维聚焦时取消在途进度
-   * （旧请求不悬挂），交由底层内部计时/二维 adapter 处理。
-   */
+  /** 驱动三维聚焦公共进度；规则在 `focus-transition-drive.ts`（file-budget 拆分）。 */
   private driveModelTransition(
     target: import("../../navigation/contracts.js").CanvasFocusTarget | null,
     ok: boolean
   ): void {
-    if (!ok) {
-      if (this.focusTransition.hasModelProgress()) this.focusTransition.cancel();
-      return;
-    }
-    // 独立文件文档不是三维聚焦：取消任何在途三维进度（不为文件文档伪造节点相机）。
-    if (target && "documentId" in target) {
-      if (this.focusTransition.hasModelProgress()) this.focusTransition.cancel();
-      return;
-    }
-    const modelKind = target?.kind === "model" || target?.kind === "extension";
-    if (target && modelKind) {
-      void this.focusTransition.runModel({
-        nodeId: target.nodeId,
-        kind: target.kind === "extension" ? "extension" : "model",
-        onProgress: () => this.controllerInstance?.invalidate("focus-transition")
-      });
-      this.controllerInstance?.invalidate("focus-transition");
-      return;
-    }
-    const inFlightModel = this.focusTransition.hasModelProgress();
-    if (!target && inFlightModel) {
-      // 退出：`model_focus` 已清空，但 Rust `rig.focus_node` 仍保留退出中的实体节点，沿用同一身份。
-      const nodeId = this.focusTransition.currentModelNodeId();
-      if (nodeId !== null) {
-        void this.focusTransition.runModel({
-          nodeId,
-          kind: this.focusTransition.currentModelKind(),
-          onProgress: () => this.controllerInstance?.invalidate("focus-transition")
-        });
-        this.controllerInstance?.invalidate("focus-transition");
-      }
-      return;
-    }
-    // 切到二维媒体聚焦或非三维目标：取消任何在途三维进度，避免两个驱动并存。
-    if (inFlightModel) this.focusTransition.cancel();
+    driveModelFocusTransition({
+      ok,
+      target,
+      focusTransition: this.focusTransition,
+      invalidate: () => this.controllerInstance?.invalidate("focus-transition")
+    });
   }
 
   // ── 模型历史聚焦 owner / content rect / 本地快照覆盖 ─────────────────────────
@@ -444,42 +409,32 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   syncOverviewCache = (inputs: readonly import("./overview-cache.js").OverviewCacheInput[]): void => { this.overviewCacheInstance?.sync(inputs); };
   residency = (): import("./residency/index.js").CanvasResourceCoordinator | null => this.residencyInstance;
 
-  /**
-   * 当前必须优先驻留的节点（interactive 用途）。
-   *
-   * 只含聚焦/播放/捕获目标：选中上千节点只提升优先级，不把全部选中项变成不可淘汰 pin
-   * （change: 2026-10-23 design D1/D3）。
-   */
   private residencyInteractiveNodeIds(): readonly string[] {
-    const ids = new Set<string>();
-    const add = (nodeId: string | null | undefined) => { if (nodeId) ids.add(nodeId); };
-    add(this.modelFocus?.nodeId);
+    // 集合推导本身在 `residency-focus-ids.ts`（file-budget）；这里只收集当前实例的目标。
+    let compositeFocusIds: readonly string[] = [];
     if (this.modelFocus) {
       const working = workingCanvasOf(woohaa3CanvasStore.getState());
       const projected = this.options.compositeAssets?.projectCanvas(this.options.projectHistoryCanvas?.(working) ?? working) ?? working;
-      for (const id of compositeFocusContextIds(projected, this.options.compositeAssets, this.modelFocus.nodeId)) add(id);
+      compositeFocusIds = [...compositeFocusContextIds(projected, this.options.compositeAssets, this.modelFocus.nodeId)];
     }
-    add(this.imageFocusStore.getTargetId());
-    add(this.videoFocusStore.getTargetId());
-    add(this.animationPlaybackStore.current()?.nodeId);
-    add(hoverNodeStore.getNodeId());
-    add(this.videoFocusStore.getTexture()?.nodeId);
-    add(this.imageFocusStore.getTexture()?.nodeId);
-    return [...ids];
+    return residencyInteractiveNodeIdsAt({
+      modelFocusNodeId: this.modelFocus?.nodeId ?? null,
+      imageFocusTargetId: this.imageFocusStore.getTargetId(),
+      videoFocusTargetId: this.videoFocusStore.getTargetId(),
+      animationNodeId: this.animationPlaybackStore.current()?.nodeId ?? null,
+      hoverNodeId: hoverNodeStore.getNodeId(),
+      videoTextureNodeId: this.videoFocusStore.getTexture()?.nodeId ?? null,
+      imageTextureNodeId: this.imageFocusStore.getTexture()?.nodeId ?? null,
+      compositeFocusIds
+    });
   }
 
-  /**
-   * 显式 pin（聚焦/捕获过渡期间保留目标卡片与过渡表示）。
-   *
-   * 有界：只包含当前聚焦目标，不随选择集增长；退出聚焦即自动释放。
-   */
   private residencyPinnedNodeIds(): readonly string[] {
-    const ids = new Set<string>();
-    const add = (nodeId: string | null | undefined) => { if (nodeId) ids.add(nodeId); };
-    add(this.modelFocus?.nodeId);
-    add(this.imageFocusStore.getTargetId());
-    add(this.videoFocusStore.getTargetId());
-    return [...ids];
+    return residencyPinnedNodeIdsAt({
+      modelFocusNodeId: this.modelFocus?.nodeId ?? null,
+      imageFocusTargetId: this.imageFocusStore.getTargetId(),
+      videoFocusTargetId: this.videoFocusStore.getTargetId()
+    });
   }
   /** 宿主推入活动动画节点播放投影；传 null 清除。变化立即 flush 一次 scene。 */
   setAnimationPlayback = (playback: import("@woohaa3/contracts").BevyAnimationPlayback | null): void => {
@@ -574,44 +529,17 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
    */
   nodeScreenRect = (nodeId: string): import("@woohaa3/contracts").ScreenRect | null =>
     this.controllerInstance?.nodeScreenRect(nodeId) ?? null;
+  /** 呈现矩形投影的几何规则在 `presentation-screen-rect.ts`（file-budget 拆分）。 */
   nodePresentationScreenRect = (nodeId: string): import("@woohaa3/contracts").ScreenRect | null => {
-    const card = this.nodeScreenRect(nodeId);
-    const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
-    const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-    // 普通 group 的执行面板跟随外部 3D 徽标，而不是跟随气泡主体。使用当前 screen rect
-    // 保留拖动/缩放预览，再把同一份徽标几何投影到屏幕。
-    //
-    // 基准必须是**渲染矩形**而不是节点自身尺寸：Rust 把徽标画在渲染场景节点矩形的下缘，
-    // 而 group 的渲染矩形是成员包围后的布局尺寸（`getGroupLayoutSizes`，可比节点自身高得多）。
-    // 用节点尺寸推导会把徽标算高一整段，面板随之压回场景上。
-    if (card && node?.type === "group" && this.controllerInstance) {
-      const controller = this.controllerInstance;
-      const data = canvas?.nodeData[nodeId];
-      const layout = canvas ? getGroupLayoutSizes(canvas.document.nodes).get(nodeId) ?? null : null;
-      return groupBadgePresentationScreenRect({
-        card,
-        zoom: controller.viewport().zoom,
-        node,
-        layout,
-        collapsed: data?.groupCollapsed === true,
-        projection: groupBadgeProjectionOf(canvas, nodeId)
-      }) ?? card;
-    }
-    const scopes = this.controllerInstance?.queryCompositeAssetScopes();
-    if (!scopes?.ok) return card;
-    const scope = scopes.value.find((entry) => entry.nodeId === nodeId);
-    if (!scope) return card;
-    const [worldLeft, worldTop, width, height] = scope.aabb;
-    const start = this.worldToClient({ x: worldLeft, y: worldTop });
-    const end = this.worldToClient({ x: worldLeft + width, y: worldTop + height });
-    if (!start || !end) return card;
-    const left = Math.min(start.x, end.x);
-    const top = Math.min(start.y, end.y);
-    const right = Math.max(start.x, end.x);
-    const bottom = Math.max(start.y, end.y);
-    const x = Math.min(card?.left ?? left, left);
-    const y = Math.min(card?.top ?? top, top);
-    return { left: x, top: y, width: right - x, height: bottom - y };
+    const controller = this.controllerInstance;
+    return presentationScreenRect({
+      nodeId,
+      card: this.nodeScreenRect(nodeId),
+      canvas: workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas,
+      zoom: controller?.viewport().zoom ?? 1,
+      queryCompositeAssetScopes: controller ? () => controller.queryCompositeAssetScopes() : () => null,
+      worldToClient: (point) => this.worldToClient(point)
+    });
   };
 
   /** 上传中的幽灵节点（只渲染、不进规范状态）。 */

@@ -1,4 +1,9 @@
 import { readSceneWorkDiagnostics } from "./diagnostics-reader.js";
+import { readRenderStageCounters } from "./render-stage-counters.js";
+
+// 计数读取已拆到 `render-stage-counters.ts`（file-budget）；这里转出保持既有调用方不变。
+export { readRenderStageCounters } from "./render-stage-counters.js";
+export type { RenderStageCounters } from "./render-stage-counters.js";
 /// <reference types="vite/client" />
 import { hoverNodeStore } from "../../services/hover-store.js";
 import { RuntimeIssues } from "./runtime-issues.js";
@@ -25,7 +30,7 @@ import type {
   CanvasRenderScene,
   PreparedModelResource
 } from "@woohaa3/contracts";
-import { canvasPositionUpdateRequest, modelDescriptorOf, modelDescriptorPayload, modelPayloadLeaseRequest, modelPrepareRequest, CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_POSITION_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION } from "@woohaa3/contracts";
+import { canvasPositionUpdateRequest, modelDescriptorOf, modelDescriptorPayload, modelPayloadLeaseRequest, modelPrepareRequest } from "@woohaa3/contracts";
 
 import { sceneDiagnostics, measureSceneWork } from "./scene-diagnostics.js";
 import { beginStartupSpan } from "../../services/telemetry-primitives.js";
@@ -58,6 +63,17 @@ import type {
   BevyModule,
   BevyRuntime
 } from "./bevy-runtime-types.js";
+
+// 能力校验已拆到 `bevy-capabilities.ts`（file-budget）；转出保持既有调用方不变。
+import { assertRequiredCapabilities } from "./bevy-capabilities.js";
+export { assertRequiredCapabilities } from "./bevy-capabilities.js";
+
+/** 两个 key 集合是否完全相同（幂等短路用）。 */
+function sameKeySet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const key of a) if (!b.has(key)) return false;
+  return true;
+}
 
 export type {
   AxisDragConstraint,
@@ -92,67 +108,6 @@ function nextThumbnailRequestId(): number {
 /** 稳定模块诊断标识；实际 glue 在 runtime-realm-entry 通过字面量 import 打包。 */
 export const BEVY_WASM_MODULE = "../bevy-wasm/woohaa_bevy_canvas.js";
 
-/** 两个 key 集合是否完全相同（幂等短路用）。 */
-function sameKeySet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
-  if (a.size !== b.size) return false;
-  for (const key of a) if (!b.has(key)) return false;
-  return true;
-}
-
-/**
- * 初始化时校验当前必需 WASM 能力（change: 2026-10-07-remove-residual-compatibility）。
- *
- * 缺失当前资源注册或 Shot Camera capture 导出时抛稳定错误，使宿主呈现明确的版本/能力不匹配，
- * 而不是把能力缺失伪装成截图超时或回退旧边界。
- */
-export function assertRequiredCapabilities(module: BevyModule): void {
-  const missing: string[] = [];
-  if (!module.prepare_and_register_model_resource) missing.push("prepare_and_register_model_resource");
-  // change: 2026-10-23-scale-canvas-media-residency —— descriptor 声明与 payload lease 是模型
-  // 驻留的必需通道；缺失时明确能力不匹配，不静默回退「引用即常驻整场 IR」。
-  if (!module.declare_model_resource) missing.push("declare_model_resource");
-  if (!module.set_model_payload_leases) missing.push("set_model_payload_leases");
-  if (!module.request_shot_capture) missing.push("request_shot_capture");
-  if (!module.poll_shot_capture) missing.push("poll_shot_capture");
-  // change: 2026-10-10-optimize-canvas-interaction-hot-path —— 新 Frontend 必须有视口增量
-  // 边界；缺失时明确能力不匹配，不静默回退旧 full-scene 接口（design D3 / spec）。
-  if (!module.set_viewport) missing.push("set_viewport");
-  if (!module.base_scene_generation) missing.push("base_scene_generation");
-  if (!module.viewport_capability) missing.push("viewport_capability");
-  if (!module.set_positions) missing.push("set_positions");
-  if (!module.position_capability) missing.push("position_capability");
-  // change: 2026-10-12-align-film-set-scope-with-isometric-grid —— 片场菱形范围要求 drop
-  // 目标查询与范围几何读取；缺失时明确能力不匹配，不静默回退 TS 矩形几何（design D5/D8）。
-  if (!module.query_drop_target) missing.push("query_drop_target");
-  if (!module.query_composite_asset_scopes) missing.push("query_composite_asset_scopes");
-  // change: 2026-10-15-add-film-set-overview-lod —— 片场总览 LOD 要求 scene wire 版本同步；
-  // 缺失 scene 能力字符串时明确能力不匹配，不静默忽略新增 `compositeAsset.geometryQuality`。
-  if (!module.scene_capability) missing.push("scene_capability");
-  if (missing.length > 0) {
-    throw new Error(`Bevy WASM 缺少必需能力：${missing.join(", ")}`);
-  }
-  // 场景 wire 版本必须逐字节一致：结构变化时必须同步升级，旧 WASM 明确拒绝。
-  const scene = module.scene_capability!();
-  if (scene !== CANVAS_RENDER_SCENE_VERSION) {
-    throw new Error(`Bevy WASM 场景能力不匹配：${scene || "(空)"} != ${CANVAS_RENDER_SCENE_VERSION}`);
-  }
-  // 视口 wire 版本必须逐字节一致：结构变化时必须同步升级，旧 WASM 明确拒绝。
-  const capability = module.viewport_capability!();
-  if (capability !== CANVAS_VIEWPORT_UPDATE_VERSION) {
-    throw new Error(`Bevy WASM 视口能力不匹配：${capability || "(空)"} != ${CANVAS_VIEWPORT_UPDATE_VERSION}`);
-  }
-  const positions = module.position_capability!();
-  if (positions !== CANVAS_POSITION_UPDATE_VERSION) {
-    throw new Error(`Bevy WASM 位置能力不匹配：${positions || "(空)"} != ${CANVAS_POSITION_UPDATE_VERSION}`);
-  }
-  // 观察镜头增量是可选能力：旧 WASM 缺导出时调度器回退 full，不阻断装载。
-  if (module.observer_capability) {
-    const observer = module.observer_capability();
-    if (observer !== CANVAS_OBSERVER_UPDATE_VERSION) {
-      throw new Error(`Bevy WASM 观察镜头能力不匹配：${observer || "(空)"} != ${CANVAS_OBSERVER_UPDATE_VERSION}`);
-    }
-  }
-}
 
 export type BevyLoaderOptions = {
   /** 动态 import 实现；测试可注入。 */
@@ -169,102 +124,6 @@ let runtimeGeneration = 0;
 function nextRuntimeGeneration(): number {
   runtimeGeneration += 1;
   return runtimeGeneration;
-}
-
-/** 渲染三阶段与实例数的累计计数（`perf.frame` 差分后求每帧均值）。 */
-export type RenderStageCounters = {
-  readonly stageQueueMs?: number;
-  readonly stageQueueFrames?: number;
-  readonly stagePrepareMs?: number;
-  readonly stagePrepareFrames?: number;
-  readonly stageRenderMs?: number;
-  readonly stageRenderFrames?: number;
-  readonly drawnInstances?: number;
-  /** 主世界（Update 图）每帧墙钟累计：JS 帧循环与渲染三阶段之间的缺口只有它能回答。 */
-  readonly stageMainMs?: number;
-  readonly stageMainFrames?: number;
-  /** 主世界里模型同步系统的每帧墙钟累计。 */
-  readonly stageModelMs?: number;
-  readonly stageModelFrames?: number;
-  /** 预览卡片规模（`d`=延迟队列、`v`=可见、`l`=在途、`r`=就绪、`b`=纹理 MB）。 */
-  readonly previews?: string;
-};
-
-/**
- * 从运行侧工作诊断里取渲染三阶段的累计墙钟与提交实例数（仅 dev 提供）。
- *
- * `perf.frame` 的 `fps`/`frameExecMs` 只覆盖 JS 帧循环：画布掉帧而这两个数没动时，
- * 只能靠这里的 Queue/Prepare/Render 分段回答「多出来的时间花在渲染提交、资源准备，
- * 还是根本不在本进程的渲染阶段里」。`drawnInstances` 与 `drawCalls` 配对，用来分辨
- * 「draw call 少」与「一次 instanced draw 带上万个实例」。
- *
- * 读不到（生产构建、原生 realm、诊断缺失）就返回空对象，绝不补 0 冒充"没花时间"。
- */
-export function readRenderStageCounters(source: {
-  canvas_work_diagnostics?: () => string;
-}): RenderStageCounters & { readonly pacing?: string } {
-  try {
-    if (!source.canvas_work_diagnostics) return {};
-    const diagnostics = JSON.parse(source.canvas_work_diagnostics()) as {
-      renderStages?: { work?: Record<string, unknown>; draws?: Record<string, unknown> };
-      previews?: Record<string, unknown>;
-      pacing?: unknown;
-    };
-    const work = diagnostics.renderStages?.work ?? {};
-    const draws = diagnostics.renderStages?.draws ?? {};
-    const count = (value: unknown): number | undefined =>
-      typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
-    const queueMs = count(work.queueMs);
-    const queueFrames = count(work.queueFrames);
-    const prepareMs = count(work.prepareMs);
-    const prepareFrames = count(work.prepareFrames);
-    const renderMs = count(work.renderMs);
-    const renderFrames = count(work.renderFrames);
-    const drawnInstances = count(draws.directInstances);
-    const mainMs = count(work.mainMs);
-    const mainFrames = count(work.mainFrames);
-    const modelMs = count(work.modelMs);
-    const modelFrames = count(work.modelFrames);
-    const pacing =
-      typeof diagnostics.pacing === "string" && diagnostics.pacing.length > 0
-        ? diagnostics.pacing
-        : undefined;
-    // 模型卡片预览的排队/常驻规模。`pacing` 只说"还有子系统要帧"，这一条说"是哪一种、
-    // 有多少"：`d`（deferred）常驻非零＝延迟队列没排空，`b`（纹理 MB）暴涨＝预算被吃满。
-    const previews = previewGauges(diagnostics.previews);
-    return {
-      ...(queueMs === undefined ? {} : { stageQueueMs: queueMs }),
-      ...(queueFrames === undefined ? {} : { stageQueueFrames: queueFrames }),
-      ...(prepareMs === undefined ? {} : { stagePrepareMs: prepareMs }),
-      ...(prepareFrames === undefined ? {} : { stagePrepareFrames: prepareFrames }),
-      ...(renderMs === undefined ? {} : { stageRenderMs: renderMs }),
-      ...(renderFrames === undefined ? {} : { stageRenderFrames: renderFrames }),
-      ...(drawnInstances === undefined ? {} : { drawnInstances }),
-      ...(mainMs === undefined ? {} : { stageMainMs: mainMs }),
-      ...(mainFrames === undefined ? {} : { stageMainFrames: mainFrames }),
-      ...(modelMs === undefined ? {} : { stageModelMs: modelMs }),
-      ...(modelFrames === undefined ? {} : { stageModelFrames: modelFrames }),
-      ...(pacing === undefined ? {} : { pacing }),
-      ...(previews === undefined ? {} : { previews })
-    };
-  } catch {
-    return {};
-  }
-}
-
-/** 预览卡片规模压缩成一条短事实：`d`=延迟队列、`v`=可见、`l`=在途、`r`=就绪、`b`=纹理 MB。 */
-function previewGauges(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const gauges = value as Record<string, unknown>;
-  const read = (key: string): number | undefined => {
-    const raw = gauges[key];
-    return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? raw : undefined;
-  };
-  const deferred = read("deferred");
-  const visible = read("visible");
-  if (deferred === undefined && visible === undefined) return undefined;
-  const megabytes = Math.round((read("textureBytes") ?? 0) / (1024 * 1024));
-  return `d${deferred ?? 0},v${visible ?? 0},l${read("live") ?? 0},r${read("ready") ?? 0},b${megabytes}`;
 }
 
 /** 创建当前页面独占的运行时；同页重复装载由 CanvasRuntimeHost 合并。 */

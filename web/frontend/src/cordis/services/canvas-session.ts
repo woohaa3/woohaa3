@@ -28,7 +28,6 @@ export type { CanvasSession, CanvasSessionStatus } from "../contracts.js";
 // （change: 2026-10-09-improve-canvas-workflow，任务 1.5）。
 export { createCanvasEditService } from "./canvas-state/index.js";
 export type { CanvasEditService, CanvasEditSnapshot } from "./canvas-state/index.js";
-import type { CanvasEditService } from "./canvas-state/index.js";
 export { woohaa3CanvasStore } from "./canvas-state/index.js";
 
 /** 第一阶段只维护一个画布，ID 固定；多画布切换属于后续能力。 */
@@ -48,80 +47,9 @@ function createTelemetrySessionId(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/**
- * 页面级调试/test 钩子：把会话命令出口挂到 `window.__canvasSubmitCommands`，供 E2E 直接
- * 提交语义命令（等价于交互控制器完成一次手势）。生产无副作用。
- */
-export function installCanvasSessionTestHooks(session: CanvasSession): void {
-  const target = globalThis as unknown as {
-    __canvasSubmitCommands?: (commands: CanvasCommand[], commandId?: string) => { ok: boolean; reason?: string };
-    __canvasIsWritable?: () => boolean;
-  };
-  target.__canvasSubmitCommands = (commands, commandId) => {
-    const id = commandId ?? `e2e-${Date.now().toString(36)}-${testSeq++}`;
-    const result = session.submitCommands(commands, id);
-    return result.ok ? { ok: true } : { ok: false, reason: result.reason };
-  };
-  target.__canvasIsWritable = () => session.isWritable();
-  // E2E 观察同步状态（含断线只读相位）。
-  const mirror = (status: CanvasSessionStatus) => {
-    (globalThis as unknown as { __canvasSessionStatus?: unknown }).__canvasSessionStatus = status;
-  };
-  mirror(session.getStatus());
-  session.subscribe(mirror);
-  // 供 E2E 断言 working projection 与 canonical 的分离（生产无副作用）。
-  (globalThis as unknown as { __canvasStoreState?: unknown }).__canvasStoreState = () =>
-    woohaa3CanvasStore.getState();
-}
-
-/**
- * 页面级调试/test 钩子：暴露编辑历史（撤销/重做、记录、冲突跳过）供 E2E 驱动
- * （change: 2026-10-09-improve-canvas-workflow，任务 7.1）。生产无副作用。
- */
-export function installCanvasEditTestHooks(edit: CanvasEditService): void {
-  const target = globalThis as unknown as {
-    __canvasEdit?: {
-      record: (commands: readonly CanvasCommand[], label: string) => Promise<{ ok: boolean; reason?: string }>;
-      recordParameter: (input: { nodeId: string; modelKey: string; before: Record<string, unknown>; after: Record<string, unknown>; label: string }) => void;
-      undo: () => Promise<{ ok: boolean; reason?: string }>;
-      redo: () => Promise<{ ok: boolean; reason?: string }>;
-      snapshot: () => unknown;
-      skipConflict: (entryId: string) => boolean;
-    };
-  };
-  target.__canvasEdit = {
-    async record(commands, label) {
-      const result = await edit.record(commands, label);
-      return result.ok ? { ok: true } : { ok: false, reason: result.reason };
-    },
-    recordParameter(input) {
-      edit.recordParameter({
-        label: input.label,
-        nodeId: input.nodeId,
-        modelKey: input.modelKey,
-        before: input.before,
-        after: input.after,
-        apply: () => undefined
-      });
-    },
-    undo: () => edit.undo(),
-    redo: () => edit.redo(),
-    snapshot: () => {
-      const snapshot = edit.getSnapshot();
-      return {
-        canUndo: snapshot.canUndo,
-        canRedo: snapshot.canRedo,
-        size: snapshot.size,
-        undoLabel: snapshot.undoLabel,
-        redoLabel: snapshot.redoLabel,
-        lastAction: snapshot.lastAction
-      };
-    },
-    skipConflict: (entryId) => edit.skipConflict(entryId)
-  };
-}
-
-let testSeq = 0;
+// 页面级 E2E 钩子已拆到 `canvas-session-test-hooks.ts`（file-budget）。这里转出去保持
+// `install-services.ts` 与测试既有的 import 路径不变。
+export { installCanvasEditTestHooks, installCanvasSessionTestHooks } from "./canvas-session-test-hooks.js";
 
 
 /** 同步尚未建立时的 Yjs 状态（正在连接远程）。 */

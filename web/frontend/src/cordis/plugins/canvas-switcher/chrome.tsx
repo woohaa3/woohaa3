@@ -16,16 +16,21 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Dialog } from "@woohaa3/ui/dialogs";
 import { Button } from "@woohaa3/ui/primitives";
 import { ScrollArea } from "@woohaa3/ui/primitives";
-import { Tooltip } from "@woohaa3/ui/primitives";
-import { CanvasSwitcherIcon, ChevronDownIcon, CloseIcon, SearchIcon } from "@woohaa3/ui/icons";
+
+import { CanvasSwitcherIcon, CloseIcon, SearchIcon } from "@woohaa3/ui/icons";
 import { CanvasDeleteButton, CanvasDeleteConfirm } from "./delete-control.js";
+import { SYNC_LABELS } from "./sync-labels.js";
 import type { DialogDefinition } from "../../services/dialogs/types.js";
 import type { DialogRenderer, DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import type { CanvasCatalogService, CanvasSelectionService, CanvasSummary } from "../../contract/canvas-catalog.js";
 import type { CanvasSession } from "../../contract/session.js";
-import type { CanvasNavigationService } from "../../navigation/index.js";
 import type { CanvasCreateOptionContribution, SlotsService } from "../../contracts.js";
 import { ContributionBoundary } from "../../contribution-boundary.js";
+
+// 触发器的实现已拆到 `trigger.tsx`（file-budget），这里转出去保持既有 import 路径不变：
+// 测试与 `plugin.tsx` 都从 `chrome.js` 取它。文案与实时态类型同理，来自 `sync-labels.ts`。
+export { CanvasSwitcherTrigger } from "./trigger.js";
+export type { CanvasLiveSync } from "./sync-labels.js";
 
 export const CANVAS_SWITCHER_DIALOG_ID = "canvas-switcher";
 
@@ -74,117 +79,6 @@ function itemMeta(entry: CanvasSummary): string {
     entry.assetCount > 0 ? `${entry.assetCount} 个素材` : null
   ].filter((part): part is string => part !== null);
   return [updated, ...scale].filter((part) => part !== "").join(" · ") || "暂无内容";
-}
-
-/** 目录同步状态的展示文案（触发器与条目徽标共用）。 */
-const SYNC_LABELS: Record<NonNullable<CanvasSummary["sync"]>, string> = {
-  "local-only": "仅本机",
-  synced: "已同步",
-  syncing: "同步中",
-  offline: "离线",
-  failed: "同步失败",
-  "remote-only": "仅远端",
-  // 属于远端、但本机还没有上游链路：改动只落在本机，必须显式说出来。
-  unlinked: "未连接"
-};
-
-/**
- * 顶栏胶囊的**实时**连接态，来自当前画布会话而不是目录快照。
- *
- * 目录快照（`CanvasSummary.sync`）回答「本机↔远端存储同步到哪一步」，可能已经过期；
- * 断线时它仍会写着「已同步」，与右下角同步气泡的「只读」互相矛盾。因此胶囊以会话为准：
- * - `offline`：画布连接已断开，页面只读（文案「离线只读」）；
- * - `connecting`：会话仍在建连、尚未 ready（文案「连接中」）；
- * - `ready`：连接正常，胶囊回落目录同步标签（已同步/同步中/仅本机/…）。
- */
-export type CanvasLiveSync = "offline" | "connecting" | "ready";
-
-/** 实时态在胶囊里的短文案。 */
-const LIVE_SYNC_LABELS: Record<Exclude<CanvasLiveSync, "ready">, string> = {
-  offline: "离线只读",
-  connecting: "连接中"
-};
-
-/** 实时态的详细说明（Tooltip 与 aria-label 用）：与右下角气泡回答同一件事。 */
-const LIVE_SYNC_DETAILS: Record<Exclude<CanvasLiveSync, "ready">, string> = {
-  offline: "画布连接已断开，只读，可在右下角重新连接",
-  connecting: "正在连接画布服务"
-};
-
-/**
- * 实时态对应的 `data-sync` 相位：离线沿用离线色，连接中沿用同步中色，
- * 复用既有样式分支，不为实时态新增一套配色。
- */
-const LIVE_SYNC_PHASES: Record<Exclude<CanvasLiveSync, "ready">, NonNullable<CanvasSummary["sync"]>> = {
-  offline: "offline",
-  connecting: "syncing"
-};
-
-/** 未注入实时态时的稳定空实现（useSyncExternalStore 需要稳定的 getSnapshot）。 */
-const NO_LIVE_SYNC = () => undefined;
-
-/** 顶层触发器：显示当前画布标题与同步状态，点击打开切换器。模型聚焦时隐藏。 */
-export function CanvasSwitcherTrigger({
-  getTitle,
-  getSync,
-  getLiveSync = NO_LIVE_SYNC,
-  subscribeTitle,
-  onOpen,
-  onRefreshCatalog,
-  navigation
-}: {
-  getTitle: () => string;
-  getSync: () => CanvasSummary["sync"] | undefined;
-  /**
-   * 实时连接态（可选）。未注入时只看目录快照：断线/建连期间必须以它为准，
-   * 否则胶囊会和右下角气泡说两套话。
-   */
-  getLiveSync?: () => CanvasLiveSync | undefined;
-  subscribeTitle: (listener: () => void) => () => void;
-  onOpen: () => void;
-  onRefreshCatalog?: () => void;
-  navigation: CanvasNavigationService;
-}) {
-  const title = useSyncExternalStore(subscribeTitle, getTitle, getTitle);
-  const sync = useSyncExternalStore(subscribeTitle, getSync, getSync);
-  const liveSync = useSyncExternalStore(subscribeTitle, getLiveSync, getLiveSync);
-  const presentation = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot);
-  // 媒体补传期间目录不会自己刷新：触发器可见时短轮询，直到状态离开「同步中」。
-  useEffect(() => {
-    if (sync !== "syncing" || !onRefreshCatalog) return;
-    const timer = setInterval(onRefreshCatalog, 1500);
-    return () => clearInterval(timer);
-  }, [sync, onRefreshCatalog]);
-  if (presentation.mode.type === "node-focus") return null;
-  const label = title.trim() || "未命名画布";
-  // 实时态优先：断线/建连时不再显示目录快照的「已同步」，胶囊只表达一个事实。
-  const livePhase = liveSync === "offline" || liveSync === "connecting" ? liveSync : null;
-  const pillLabel = livePhase ? LIVE_SYNC_LABELS[livePhase] : sync ? SYNC_LABELS[sync] : null;
-  const pillPhase: CanvasSummary["sync"] | undefined = livePhase ? LIVE_SYNC_PHASES[livePhase] : sync;
-  const statusText = livePhase ? LIVE_SYNC_DETAILS[livePhase] : sync ? SYNC_LABELS[sync] : null;
-  return (
-    <Tooltip content={`当前画布：${label}${statusText ? ` · ${statusText}` : ""}`}>
-      <Button
-        className="canvas-switcher-trigger"
-        tone="neutral"
-        size="sm"
-        aria-label={`当前画布：${label}${statusText ? `，${statusText}` : ""}，打开画布切换器`}
-        data-testid="canvas-switcher-trigger"
-        icon={<CanvasSwitcherIcon className="canvas-switcher-trigger__icon" />}
-        onClick={onOpen}
-      >
-        <span className="canvas-switcher-trigger__title">{label}</span>
-        {pillLabel && pillPhase ? (
-          <span className="canvas-switcher-trigger__sync" data-sync={pillPhase} data-testid="canvas-switcher-sync">
-            {pillLabel}
-          </span>
-        ) : null}
-        <span className="canvas-switcher-trigger__caret" aria-hidden="true">
-          <ChevronDownIcon />
-        </span>
-      </Button>
-    </Tooltip>
-  );
 }
 
 export type CanvasSwitcherDeps = {

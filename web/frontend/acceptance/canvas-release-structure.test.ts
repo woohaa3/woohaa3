@@ -13,9 +13,12 @@ function family() {
 afterEach(() => woohaa3CanvasStore.getState().applyWorkingCanvas(null));
 it.each([
   // 释放结算（change: 2026-10-26-settle-group-boundaries-on-drop，design D2）把普通节点夹进
-  // 目标组冻结的内框（左右/顶部 40、底部 80），不扩大组、不按中心自由重父化。
-  // inner 绝对位置 (130,140)、300×260 → 内框允许 x∈[170,290]、y∈[180,240]。
-  { name: "nested local move clamps into the frozen inner frame", at: { x: 160, y: 180 }, parent: "inner", remote: false, world: { x: 170, y: 180 } },
+  // 目标组冻结的内框，不扩大组、不按中心自由重父化。
+  // 内边距已是 12/12（change: 998b86ef 组框贴合成员，旧的 40/80 已作废）：
+  // inner 绝对位置 (130,140)、300×260 → 内框 x∈[142,418]、y∈[152,388]，
+  // 减去 leaf 的 100×80 后落点允许 x∈[142,318]、y∈[152,308]。
+  // at 取到内框左上方向外，两轴都要被夹回来。
+  { name: "nested local move clamps into the frozen inner frame", at: { x: 120, y: 340 }, parent: "inner", remote: false, world: { x: 142, y: 308 } },
   { name: "leave nested groups preserves world placement", at: { x: 900, y: 600 }, parent: undefined, remote: false, world: { x: 900, y: 600 } },
   // remote：working 里 g 已挪到 (300,200)，inner 绝对位置随之变为 (330,240)。
   { name: "latest working ancestor coordinates preserve world placement", at: { x: 380, y: 290 }, parent: "inner", remote: true, world: { x: 380, y: 290 } }

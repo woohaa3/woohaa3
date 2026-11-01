@@ -110,7 +110,9 @@ describe("组展示模型从资源准入到 WASM payload", () => {
     const coordinator = new CanvasResourceCoordinator();
     try {
       const candidate = candidatesFor(canvas)[0]!;
-      expect(candidate.y + candidate.height).toBe(4);
+      // 候选高度由模型投影派生，反向推算出的 y 带浮点误差（实测 3.9999999999998863）。
+      // 这里守的是「下缘刚好压在视口顶 4px」，不是精确位模式，用容差比较。
+      expect(candidate.y + candidate.height).toBeCloseTo(4, 6);
       createResidencyProjector({
         coordinator, getCanvas: () => canvas, candidatesFor,
         viewport: () => ({ x: 0, y: 0, zoom: 1 }),

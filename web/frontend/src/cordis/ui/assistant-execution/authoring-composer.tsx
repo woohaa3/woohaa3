@@ -3,7 +3,6 @@ import { AssistantTextInput } from "./text-input.js";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantComposer } from "@woohaa3/ui/assistant";
 import {
-  AssistantModelSelector,
   AssistantConnectionSelector,
   ASSISTANT_SETUP_HINT,
 } from "@woohaa3/ui/assistant";
@@ -12,7 +11,6 @@ import { useAssistantDeliveryInput } from "./delivery-input.js";
 import {
   agentModelSelection,
   agentDirectoryModels,
-  readAgentCatalog,
 } from "../../plugins/task-execution/agent-model-selection.js";
 import {
   readAssistantPreference,
@@ -27,6 +25,9 @@ import type { AgentConversationSnapshotView } from "../../contract/agent-convers
 import type { AuthoringGenerationProps } from "../../contract/authoring.js";
 import { assistantInputController } from "../../services/assistant-execution/controller.js";
 import { assistantConversationPort } from "../../services/assistant-execution/conversation-port.js";
+import { authoringComposerCopy } from "./authoring-composer-copy.js";
+import { AuthoringModelSelector } from "./authoring-model-selector.js";
+import { useAuthoringCatalog } from "./use-authoring-catalog.js";
 import type {
   AgentConversationSubmitInput,
   AgentConversationSubmitResult,
@@ -84,7 +85,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       purpose: props.mode,
       cameraId: props.selectedCameraId,
       clipId: props.clipId,
-      itemId: props.itemId,
+      itemId: props.itemId ?? undefined,
     },
     { prompt: props.mode === "text" ? "" : (props.initialPrompt ?? "") },
   );
@@ -265,7 +266,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
   const ambiguousObjectAction = Boolean(props.itemId) && !props.clipId;
 
   const connectionModels = selectedConnection?.models;
-  const connectionModelsKey = JSON.stringify(connectionModels ?? null);
   // 连接自带的模型列表优先；空列表表示该来源尚未内联目录，继续读 adapter 的真实目录
   // （本机 App Server 的模型来自 `model/list`，不能在连接描述里伪造默认模型）。
   const modelOptions = agentDirectoryModels(
@@ -303,116 +303,26 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     status: delivery?.status ?? turn?.turn.status ?? "idle",
     hasConversation: Boolean(detailConversation && detailRequest),
   });
-  const target =
-    props.mode === "camera"
-      ? {
-          title: "调整镜头",
-          placeholder:
-            "描述构图、视角或镜头运动，例如：缓慢环绕主体，保持低机位…",
-          action: "调整镜头",
-        }
-      : props.mode === "film-set"
-        ? {
-            title: props.itemId ? "生成对象动作" : "生成片场",
-            placeholder:
-              "描述场景、对象和动作，例如：让主体沿小路前进，镜头缓慢跟随…",
-            action: "生成",
-          }
-        : props.mode === "canvas-group"
-          ? {
-              title: "生成组",
-              placeholder:
-                "描述组内要搭建或调整的内容，例如：生成分镜、补齐图片和视频，保留已完成结果…",
-              action: "生成",
-            }
-          : props.mode === "text"
-            ? {
-                title: "生成文本",
-                placeholder: "描述要生成的文字，或引用上游内容…",
-                action: "生成",
-              }
-            : {
-                title: inspector ? "AI 修改" : "生成 3D 模型",
-                placeholder: inspector
-                  ? "描述想修改的部分，例如：把灯罩改成磨砂金属，保留支架造型…"
-                  : "描述形状、材质和细节，例如：一盏磨砂金属台灯，圆形灯罩，细长支架…",
-                action: inspector ? "修改模型" : "生成",
-              };
+  // 文案表在 `authoring-composer-copy.ts`（file-budget 拆分）。
+  const target = authoringComposerCopy(props.mode, {
+    inspector,
+    itemId: props.itemId,
+  });
 
   // 连接或来源变化时收起选择器；目录重读（catalogAttempt）不打断已展开的面板。
   useEffect(() => {
     setOpenSelector(null);
   }, [modelKey]);
 
-  useEffect(() => {
-    if (
-      (connectionModels?.length ?? 0) > 0 ||
-      !service?.catalog ||
-      !sourceId ||
-      !connectionId
-    )
-      return;
-    let cancelled = false;
-    // 重读期间保留已加载的目录：瞬时失败或空响应不应把已经可用的大列表变成空列表，
-    // 否则用户会看到「模型突然全部消失」，且同一次失败还会把当前选择判成已失效。
-    setCatalog((current) =>
-      current.key === modelKey
-        ? { ...current, loading: true }
-        : { key: modelKey, models: [], loading: true },
-    );
-    void readAgentCatalog(service, sourceId)
-      .then((result) => {
-        if (cancelled) return;
-        setCatalog((current) => {
-          const previous =
-            current.key === modelKey ? current.models : [];
-          const error = result.ok
-            ? result.value.error
-            : result.error;
-          if (result.ok && result.value.models.length > 0)
-            return {
-              key: modelKey,
-              models: result.value.models,
-              loading: false,
-              ...(error ? { error } : {}),
-            };
-          if (previous.length > 0)
-            return {
-              key: modelKey,
-              models: previous,
-              loading: false,
-              ...(error ? { error } : {}),
-            };
-          return {
-            key: modelKey,
-            models: result.ok ? result.value.models : [],
-            loading: false,
-            ...(error ? { error } : {}),
-          };
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setCatalog((current) =>
-          current.key === modelKey && current.models.length > 0
-            ? {
-                ...current,
-                loading: false,
-                error: "模型目录读取失败，请刷新连接。",
-              }
-            : {
-                key: modelKey,
-                models: [],
-                loading: false,
-                error: "模型目录读取失败，请刷新连接。",
-              },
-        );
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [service, sourceId, connectionId, modelKey, connectionModelsKey, catalogAttempt]);
-
+  useAuthoringCatalog({
+    service,
+    sourceId,
+    connectionId,
+    modelKey,
+    connectionModels,
+    attempt: catalogAttempt,
+    setCatalog,
+  });
   // 重开面板时补读一次当前回合（不重复提交）；进行中的持续刷新由页面级 run-state 统一负责，
   // 避免面板与页面各挂一条轮询（节点执行中状态在面板关闭后仍需收敛）。
   useEffect(() => {
@@ -586,40 +496,19 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
         }
         model={
           delivery || !noConnection ? (
-            <AssistantModelSelector
-              label="模型"
+            <AuthoringModelSelector
               model={model}
-              placeholder={delivery ? "本次模型" : undefined}
-              keepOpenOnModelSelect
-              options={[
-                {
-                  value: "",
-                  label: toolDefault
-                    ? "跟随工具设置"
-                    : modelOptions.length
-                      ? "选择模型"
-                      : catalog.key === modelKey && catalog.loading
-                        ? "正在读取模型…"
-                        : modelError
-                          ? "模型读取失败"
-                          : "暂无可用模型",
-                  disabled: !toolDefault && !modelOptions.length,
-                },
-                ...(invalidModel
-                  ? [
-                      {
-                        value: model,
-                        label: delivery ? model : `${model}（已不可用）`,
-                        disabled: true,
-                      },
-                    ]
-                  : []),
-                ...modelOptions.map((entry) => ({
-                  value: entry.id,
-                  label: entry.label,
-                })),
-              ]}
+              delivery={Boolean(delivery)}
+              toolDefault={toolDefault}
+              modelOptions={modelOptions}
+              invalidModel={invalidModel}
+              loading={catalog.key === modelKey && catalog.loading}
+              modelError={modelError}
               open={openSelector === "model"}
+              disabled={locked}
+              effort={effort}
+              supportedEfforts={supportedEfforts}
+              invalidEffort={invalidEffort}
               onOpenChange={(open) => {
                 setOpenSelector(open ? "model" : null);
                 if (
@@ -630,8 +519,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                 )
                   setCatalogAttempt((attempt) => attempt + 1);
               }}
-              disabled={locked}
-              onChange={(value) => {
+              onSelectModel={(value) => {
                 setModels((current) => ({ ...current, [modelKey]: value }));
                 setEfforts((current) => ({
                   ...current,
@@ -639,38 +527,13 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                 }));
                 remember(value);
               }}
-              variant={
-                supportedEfforts.length || invalidEffort
-                  ? {
-                      value: effort,
-                      options: [
-                        { value: "", label: "默认" },
-                        ...(invalidEffort
-                          ? [
-                              {
-                                value: effort,
-                                label: delivery
-                                  ? effort
-                                  : `${effort}（已不可用）`,
-                                disabled: true,
-                              },
-                            ]
-                          : []),
-                        ...supportedEfforts.map((value) => ({
-                          value,
-                          label: value,
-                        })),
-                      ],
-                      onChange: (value) => {
-                        setEfforts((current) => ({
-                          ...current,
-                          [effortKey]: value as AgentReasoningEffort | "",
-                        }));
-                        remember(model, value as AgentReasoningEffort | "");
-                      },
-                    }
-                  : undefined
-              }
+              onSelectEffort={(value) => {
+                setEfforts((current) => ({
+                  ...current,
+                  [effortKey]: value as AgentReasoningEffort | "",
+                }));
+                remember(model, value as AgentReasoningEffort | "");
+              }}
             />
           ) : null
         }
