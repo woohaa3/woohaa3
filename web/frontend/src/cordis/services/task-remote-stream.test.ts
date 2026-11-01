@@ -102,6 +102,28 @@ describe("Task Remote 真实流式消费", () => {
     unsubscribe();
   });
 
+  it("流正常结束且轮询可用时保持实时状态，不闪重连中", async () => {
+    const statuses: string[] = [];
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).includes("/events")) {
+        const { stream, close } = controllableStream();
+        queueMicrotask(() => close());
+        return ndjsonResponse(stream);
+      }
+      return jsonResponse({ messages: [], cursor: 0, hasMore: false });
+    });
+    const remote = createTaskRemote({ fetchImpl: fetchImpl as unknown as typeof fetch, pollIntervalMs: 5 });
+    const unsubscribe = remote.createHistory().subscribe({
+      cursor: 0,
+      onRecord: () => undefined,
+      onStatus: status => statuses.push(status.state)
+    });
+    await wait(40);
+    unsubscribe();
+    expect(statuses).toContain("live");
+    expect(statuses).not.toContain("reconnecting");
+  });
+
   it("流不可用时轮询 /changes 实际交付变更", async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (String(url).includes("/events")) return new Response(null, { status: 204 });

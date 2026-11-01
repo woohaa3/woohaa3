@@ -12,6 +12,11 @@ export function createMediaContentService(options: {
   const providerSubscriptions = new Map<string, () => void>();
   const states = new Map<string, MediaContentState>();
   const attempts = new Map<string, string>();
+  /** 已 ready 但规范 outputAssetId 尚未写回时的去重键（nodeId → sourceIdentity:assetId）。 */
+  const repairs = new Map<string, string>();
+  /** 写回失败后的有界重试（nodeId → 计时器/连续失败次数）。 */
+  const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const retryFailures = new Map<string, number>();
   const controllers = new Map<AbortController, { nodeId: string; current(): boolean }>();
   const receipts = new Map<string, Promise<StoredAsset | null>>();
   const requests = new Map<string, string>();
@@ -62,13 +67,65 @@ export function createMediaContentService(options: {
     void task.catch(() => { if (receipts.get(key) === task) receipts.delete(key); });
     return task;
   };
+  const clearRetry = (nodeId: string): void => {
+    const timer = retryTimers.get(nodeId);
+    if (timer !== undefined) clearTimeout(timer);
+    retryTimers.delete(nodeId);
+    retryFailures.delete(nodeId);
+  };
+
+  /** 写回失败后按有界退避重试；宿主重连结束后不必等到下一次画布编辑。 */
+  const scheduleRetry = (nodeId: string): void => {
+    if (disposed || retryTimers.has(nodeId)) return;
+    const attempt = retryFailures.get(nodeId) ?? 0;
+    retryFailures.set(nodeId, attempt + 1);
+    const delay = Math.min(1_000 * 2 ** Math.min(attempt, 3), 8_000);
+    const timer = setTimeout(() => {
+      retryTimers.delete(nodeId);
+      schedule();
+    }, delay);
+    retryTimers.set(nodeId, timer);
+  };
+
+  /**
+   * 补写已 ready 但未落到 canonical 的结果。
+   *
+   * provider 在上传成功后先发布 ready 状态，随后的 `nodeData.patch` 可能因为同时发生的
+   * 画布写入（镜头冻结、任务投影）或宿主短暂重连而失败。失败后 `attempts` 会阻止同一
+   * 内容身份再次物化，而 provider 也不会再发通知，于是镜头卡片一直显示旧图。这里在每次
+   * reconcile 时对比 ready asset 与 `outputAssetId`，缺失就补一次；按内容身份去重，
+   * 失败后允许下一轮重新提交。
+   */
+  const repairWriteBack = (
+    canvas: ServerCanvas,
+    nodeId: string,
+    source: MediaContentSource,
+    asset: StoredAsset
+  ): void => {
+    const key = `${source.sourceIdentity}:${asset.id}`;
+    if (repairs.get(nodeId) === key) return;
+    repairs.set(nodeId, key);
+    const expectedNodeData = Object.fromEntries([...new Set([nodeId, ...source.dependencyNodeIds])].map(id => [id, canvas.nodeData[id] ?? null]));
+    void options.submit([{ type: "nodeData.patch", nodeId, expectedNodeData,
+      value: { outputAssetId: asset.id, status: "ready" } }], `media-content-repair:${nodeId}:${crypto.randomUUID()}`).then(
+      () => {
+        if (repairs.get(nodeId) === key) repairs.delete(nodeId);
+        clearRetry(nodeId);
+      },
+      () => {
+        if (repairs.get(nodeId) === key) repairs.delete(nodeId);
+        scheduleRetry(nodeId);
+      }
+    );
+  };
+
   const reconcile = () => {
     scheduled = false;
     if (disposed) return;
     const canvas = options.canvas();
     const ids = new Set(canvas?.document.nodes.map(n => n.id));
     for (const [controller, request] of controllers) if (!request.current()) controller.abort();
-    for (const id of states.keys()) if (!ids.has(id) || !canvas?.nodeData[id]?.mediaContent) { states.delete(id); attempts.delete(id); }
+    for (const id of states.keys()) if (!ids.has(id) || !canvas?.nodeData[id]?.mediaContent) { states.delete(id); attempts.delete(id); repairs.delete(id); clearRetry(id); }
     for (const node of canvas?.document.nodes ?? []) {
       const ref = canvas!.nodeData[node.id]?.mediaContent;
       if (!ref || (node.type !== "image" && node.type !== "video")) continue;
@@ -78,6 +135,14 @@ export function createMediaContentService(options: {
         states.set(node.id, { ...states.get(node.id), status: "unavailable", diagnostic: String(error) }); continue;
       }
       const writable = options.writable();
+      // 已 ready 但规范 outputAssetId 仍是旧图：补写结果。若只依赖物化 promise 的
+      // 一次写回，任何并发写入/短暂重连都会让镜头卡片永久停在旧内容。
+      const current = states.get(node.id);
+      if (writable && current?.status === "ready" && current.asset
+        && current.sourceIdentity === source.sourceIdentity
+        && canvas!.nodeData[node.id]?.outputAssetId !== current.asset.id) {
+        repairWriteBack(canvas!, node.id, source, current.asset);
+      }
       const fingerprint = identity([generation, ref, source.sourceIdentity, writable]);
       if (attempts.get(node.id) === fingerprint) continue;
       attempts.set(node.id, fingerprint);
@@ -103,9 +168,16 @@ export function createMediaContentService(options: {
           if (describe(latest, ref, node.type as MediaContentKind).sourceIdentity !== source.sourceIdentity) return;
           await options.submit([{ type: "nodeData.patch", nodeId: node.id, expectedNodeData,
             value: { outputAssetId: asset.id, status: "ready" } }, { type: "asset.upsert", asset }], `media-content:${node.id}:${crypto.randomUUID()}`);
-          if (!disposed && attempts.get(node.id) === fingerprint) { states.set(node.id, { status: "ready", asset, sourceIdentity: source.sourceIdentity }); notify(); }
+          if (!disposed && attempts.get(node.id) === fingerprint) { states.set(node.id, { status: "ready", asset, sourceIdentity: source.sourceIdentity }); clearRetry(node.id); notify(); }
         } catch (error) {
-          if (!disposed && attempts.get(node.id) === fingerprint) { states.set(node.id, { ...old, status: "failed", diagnostic: String(error), sourceIdentity: source.sourceIdentity }); notify(); }
+          // 失败可能来自宿主重连或并发写回冲突；清掉本次指纹，下一轮画布变化/provider
+          // 通知仍可重试，而不是把同一内容身份永久判为失败。
+          if (!disposed && attempts.get(node.id) === fingerprint) {
+            attempts.delete(node.id);
+            states.set(node.id, { ...old, status: "failed", diagnostic: String(error), sourceIdentity: source.sourceIdentity });
+            scheduleRetry(node.id);
+            notify();
+          }
         }
       })();
     }
@@ -157,7 +229,7 @@ export function createMediaContentService(options: {
     register, describe, resolve,
     subscribe(fn) { listeners.add(fn); return () => { listeners.delete(fn); }; },
     state: id => states.get(id),
-    retry(id) { attempts.delete(id); schedule(); },
+    retry(id) { attempts.delete(id); repairs.delete(id); clearRetry(id); schedule(); },
     async freeze(canvas, nodeIds, requestId) {
       const frozen = structuredClone(canvas);
       const identities = new Map(nodeIds.filter(id => canvas.nodeData[id]?.mediaContent).map(id => {
@@ -186,6 +258,6 @@ export function createMediaContentService(options: {
       }
       return frozen;
     },
-    dispose() { if (disposed) return; disposed = true; unsubscribe(); for (const stop of providerSubscriptions.values()) stop(); providerSubscriptions.clear(); for (const c of controllers.keys()) c.abort(); for (const p of providers.values()) p.dispose?.(); providers.clear(); receipts.clear(); requests.clear(); states.clear(); attempts.clear(); listeners.clear(); },
+    dispose() { if (disposed) return; disposed = true; unsubscribe(); for (const stop of providerSubscriptions.values()) stop(); providerSubscriptions.clear(); for (const c of controllers.keys()) c.abort(); for (const p of providers.values()) p.dispose?.(); providers.clear(); receipts.clear(); requests.clear(); states.clear(); attempts.clear(); repairs.clear(); for (const timer of retryTimers.values()) clearTimeout(timer); retryTimers.clear(); retryFailures.clear(); listeners.clear(); },
   };
 }

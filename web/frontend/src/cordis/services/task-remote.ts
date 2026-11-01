@@ -125,6 +125,7 @@ export function createTaskRemote(options: TaskRemoteOptions = {}): TaskRemoteSer
         let confirmed = input.cursor;
         let lastSyncedAt: string | undefined;
         let attempts = 0;
+        let connectedOnce = false;
         let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
         let activeAbort: AbortController | undefined;
         const pollInterval = pollIntervalMs;
@@ -175,6 +176,7 @@ export function createTaskRemote(options: TaskRemoteOptions = {}): TaskRemoteSer
             return controller.signal.aborted ? "aborted" : "unavailable";
           }
           if (!response.ok || !response.body) return "unavailable";
+          connectedOnce = true;
           setStatus("live");
           const stream = response.body.getReader();
           const decoder = new TextDecoder();
@@ -236,7 +238,8 @@ export function createTaskRemote(options: TaskRemoteOptions = {}): TaskRemoteSer
 
         const cycle = async (): Promise<void> => {
           if (stopped) return;
-          setStatus(attempts === 0 ? "connecting" : "reconnecting");
+          // 已建立过实时流后，短暂重连不再把界面打回「连接中」；只有真正失败才降级。
+          if (!connectedOnce) setStatus(attempts === 0 ? "connecting" : "reconnecting");
           const outcome = await runStream();
           if (stopped) return;
           if (outcome === "aborted") return;
@@ -247,12 +250,20 @@ export function createTaskRemote(options: TaskRemoteOptions = {}): TaskRemoteSer
             return;
           }
           // 流结束或不可用：先用有界轮询补齐已错过变更，再退避重连。
-          setStatus("polling");
-          await pollOnce();
+          const polled = await pollOnce();
           if (stopped) return;
+          if (outcome === "ended" && polled) {
+            // 服务端正常结束（空闲超时/网关回收）不是故障：保持已展示状态并静默续订，
+            // 避免每轮空闲回收都闪一次「重连中」。
+            attempts = 0;
+            reconnectTimer = setTimeout(() => { void cycle(); }, pollInterval);
+            return;
+          }
           attempts += 1;
           const delay = Math.min(pollInterval * Math.min(attempts, 3), 15_000);
-          setStatus("reconnecting");
+          // 轮询补偿仍在工作说明只是事件流不可用，降级为「轮询中」；两者都失败才显示重连。
+          if (polled) setStatus("polling");
+          else setStatus("reconnecting", "事件流与轮询均不可用，正在重连");
           reconnectTimer = setTimeout(() => {
             void cycle();
           }, delay);
