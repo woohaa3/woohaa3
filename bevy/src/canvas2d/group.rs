@@ -115,8 +115,10 @@ pub(crate) fn draw_group(
     selected: bool,
     z: f32,
 ) -> (String, Vec2, f32, u32) {
-    let (x, y, width, height) = (node.x, node.y, node.width, node.height);
-    let _ = selected;
+    let (x, y, width) = (node.x, node.y, node.width);
+    if !selected {
+        super::film_set::draw_group_badge_bottom(geometry, theme, node, false, z);
+    }
     // 收起组只保留徽标卡片（由卡片通路绘制），气泡背板/尾巴一律不画
     // （change: 2026-10-28-migrate-film-set-to-groups）。
     if presentation.collapsed {
@@ -127,13 +129,20 @@ pub(crate) fn draw_group(
             theme.token_u32("canvasBodyText"),
         );
     }
-    // 选中抓手不再走卡片态的右下角三角+条纹：组的四个角统一由 `draw_group_selection`
-    // 画同一套角标，否则右下角会多出一个形状不同的旧抓手。
-    // 选中态边框由 `draw_group_selection` 独立生产：这里跳过，避免同一位置重复几何。
-    // 运行中时画动态描边；选中态描边由 draw_group_selection 独立生产。
-    // 空闲且未选中的组不画外框：组的身份只由左上角标签卡表达
-    // （change: canvas-grouping-redesign，参考稿即如此）。
-    if !selected && is_running(node) {
+    // 四角抓手统一由 `draw_group_selection` 绘制；这里只负责常态外周。
+    //
+    // 什么时候画：
+    // - 普通组：只在运行中画（动态描边）。空闲且未选中的组不画外框 —— 组的身份只由
+    //   左上角/上方的标签卡表达（change: canvas-grouping-redesign，参考稿即如此）。
+    // - 场景组（`badge_top_anchor`）：常态结构框始终保留，因为它的选中强调落在
+    //   包围盒底边上，不能靠 selection producer 的虚线框代替
+    //   （change: 2026-10-31 片场徽标包围盒底边）。
+    if presentation.badge_top_anchor || (!selected && is_running(node)) {
+        let border = if presentation.drop_target {
+            theme.token_u32("interactionAccent")
+        } else {
+            theme.token_u32("canvasNodeBorder")
+        };
         let path = super::group_outline::path(node);
         super::group_outline::stroke(
             geometry,
@@ -204,9 +213,7 @@ pub(crate) fn draw_group(
     )
 }
 
-/// group 持久选中描边 producer：选中边框（虚线/运行描边）与选中 resize 抓手。
-///
-/// 与基础 group 几何互斥，同一位置不会产生两份描边。
+/// group 选中 producer：普通组强调结构边框，场景组强调徽标包围盒底边；保留 resize 抓手。
 pub(crate) fn draw_group_selection(
     geometry: &mut Geometry,
     theme: &ThemeResource,
@@ -214,7 +221,13 @@ pub(crate) fn draw_group_selection(
     z: f32,
 ) {
     let color = theme.token_u32("canvasNodeBorderSelected");
-    if node.group.as_ref().is_some_and(|group| group.collapsed) {
+    if node
+        .group
+        .as_ref()
+        .is_some_and(|group| group.badge_top_anchor)
+    {
+        super::film_set::draw_group_badge_bottom(geometry, theme, node, true, z);
+    } else if node.group.as_ref().is_some_and(|group| group.collapsed) {
         // 收起组只呈现徽标：选中描边贴在模型投影范围上；没有可呈现模型时保留结构矩形，
         // 不虚构空徽标范围。
         let badge = crate::canvas_query::group_model::badge_polygon(node);

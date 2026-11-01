@@ -20,6 +20,64 @@ use crate::theme::ThemeResource;
 use super::geometry::Geometry;
 use super::labels::Label;
 
+/// Scene badge bounds stay readable at rest and carry selection independently of the group frame.
+///
+/// Film sets are authored at absolute metric scale, so the badge can range from a few hundred to
+/// several thousand canvas pixels wide. A fixed hairline disappears on a large set (a 150 m street
+/// filmset is ~9 000 px across, so 1 canvas unit is well below a pixel at the zoom used to frame
+/// it) and looks coarse on a small one. The floor outline therefore scales its stroke with the
+/// projected size of the model box, clamped so ordinary sets keep the structural-frame weight and
+/// huge sets stay readable.
+pub(crate) fn draw_group_badge_bottom(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    node: &GraphNode,
+    selected: bool,
+    z: f32,
+) {
+    let Some(path) = crate::canvas_query::group_model::badge_bottom_polygon(node) else {
+        return;
+    };
+    let (color, alpha, width) = if selected {
+        (
+            theme.token_u32("canvasNodeBorderSelected"),
+            1.,
+            (floor_stroke_width(&path) + 1.).min(BADGE_FLOOR_STROKE_MAX + 2.),
+        )
+    } else {
+        (
+            theme.token_u32("canvasBodyText"),
+            0.55,
+            floor_stroke_width(&path),
+        )
+    };
+    for pair in path.windows(2) {
+        geometry.line_alpha(pair[0], pair[1], width, z + 0.001, color, alpha);
+    }
+}
+
+/// Stroke weight for the projected floor outline, proportional to the model box footprint.
+///
+/// The ratio is chosen so a badge that fills the viewport keeps a ~1 px line; the clamp keeps a
+/// normal film set at the structural-frame weight and stops an interior close-up from turning the
+/// outline into a slab.
+const BADGE_FLOOR_STROKE_RATIO: f32 = 0.0015;
+const BADGE_FLOOR_STROKE_MIN: f32 = 1.5;
+const BADGE_FLOOR_STROKE_MAX: f32 = 7.0;
+
+fn floor_stroke_width(path: &[Vec2; 5]) -> f32 {
+    let (mut min, mut max) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+    for point in path {
+        min = min.min(*point);
+        max = max.max(*point);
+    }
+    let span = (max.x - min.x).max(max.y - min.y);
+    if !span.is_finite() {
+        return BADGE_FLOOR_STROKE_MIN;
+    }
+    (span * BADGE_FLOOR_STROKE_RATIO).clamp(BADGE_FLOOR_STROKE_MIN, BADGE_FLOOR_STROKE_MAX)
+}
+
 /// Persistent running backdrop, clipped to the same scope polygon used by drawing and picking.
 pub(crate) fn draw_film_set_run_mask(
     geometry: &mut Geometry,
@@ -195,5 +253,36 @@ pub(super) fn draw_scope_grip(
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Projected footprint of a model box, as `badge_bottom_polygon` emits it.
+    fn floor(span: f32) -> [Vec2; 5] {
+        [
+            Vec2::ZERO,
+            Vec2::new(span, 0.),
+            Vec2::new(span, span * 0.4),
+            Vec2::new(0., span * 0.4),
+            Vec2::ZERO,
+        ]
+    }
+
+    #[test]
+    fn floor_outline_stroke_scales_with_the_model_box_and_stays_bounded() {
+        // A few-metre film set keeps the structural-frame hairline weight.
+        assert_eq!(floor_stroke_width(&floor(300.)), BADGE_FLOOR_STROKE_MIN);
+        // A migrated ~150 m street set (~9 000 canvas px) grows with the box instead of vanishing.
+        assert!(floor_stroke_width(&floor(9_000.)) >= 6.);
+        // Interior close-ups never turn the outline into a slab.
+        assert_eq!(
+            floor_stroke_width(&floor(1_000_000.)),
+            BADGE_FLOOR_STROKE_MAX
+        );
+        // Between the bounds the width is proportional to the footprint.
+        assert!((floor_stroke_width(&floor(2_000.)) - 3.0).abs() < 0.001);
     }
 }

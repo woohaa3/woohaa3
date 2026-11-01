@@ -1,9 +1,9 @@
 /**
- * 片场默认目标片段解析
- * （change: 2026-10-12-add-agent-conversation-panel，design D3 / `openspec/specs/model-authoring`）。
+ * 片场场景 AI 目标版本解析
+ * （change: 2026-10-31-redesign-film-set-workspace / `openspec/specs/model-authoring`）。
  *
- * 动作写入必须携带 clipId；没有显式片段选择的片场生成面板用默认片段作为目标，否则工具授权
- * 拒绝片段写工具（`tool-not-allowed`），回合无写入。
+ * 片场场景 AI 固定整个片场目标：不带 clipId 时使用完整快照哈希；只有历史局部回合显式带
+ * `clipId` 时才沿用该镜头的哈希，避免把旧局部授权扩大成整场。
  *
  * @vitest-environment jsdom
  */
@@ -13,11 +13,14 @@ import {
   createEmptyWoohaa3ServerCanvas,
   createFilmSetSnapshot,
   createModelSnapshot,
+  filmSetAnimationsOf,
+  filmSetClipHash,
+  readFilmSetAnimationProjection,
   type FilmSetContent,
   type ServerCanvas
 } from "@woohaa3/contracts";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
-import { resolveFilmSetClipHash, resolveFilmSetTargetClip } from "./film-set-target.js";
+import { resolveFilmSetTargetHash } from "./film-set-target.js";
 
 const CONTENT: FilmSetContent = {
   schemaVersion: 4,
@@ -62,22 +65,36 @@ function modelCanvas(): ServerCanvas {
 
 afterEach(() => woohaa3CanvasStore.getState().applyRemoteCanvas(null as never));
 
-describe("片场默认目标片段解析（design D3）", () => {
-  it("解析片场节点的默认片段与内容哈希", () => {
+describe("片场场景 AI 目标版本", () => {
+  it("不带 clipId 时使用完整快照哈希，且随整个片场内容变化", () => {
     woohaa3CanvasStore.getState().applyRemoteCanvas(filmSetCanvas(true) as never);
-    expect(resolveFilmSetTargetClip("film")).toBe("clip-1");
-    expect(resolveFilmSetClipHash("film")).toMatch(/^[0-9a-f]+$/);
-  });
+    const whole = resolveFilmSetTargetHash("film");
+    expect(whole).toMatch(/^[0-9a-z]+$/);
 
-  it("没有动画片段时返回 undefined（面板据此禁用生成）", () => {
+    const animation = readFilmSetAnimationProjection(woohaa3CanvasStore.getState().canvas, "film")!;
+    const clipHash = filmSetClipHash(filmSetAnimationsOf(animation).clips[0]!);
+    // 整场身份不能退化成单个镜头身份。
+    expect(whole).not.toBe(clipHash);
+
     woohaa3CanvasStore.getState().applyRemoteCanvas(filmSetCanvas(false) as never);
-    expect(resolveFilmSetTargetClip("film")).toBeUndefined();
-    expect(resolveFilmSetClipHash("film")).toBeUndefined();
+    expect(resolveFilmSetTargetHash("film")).not.toBe(whole);
   });
 
-  it("非片场节点不解析出片段", () => {
+  it("没有动画镜头的片场仍可解析整场目标（用于新增对象和创建镜头）", () => {
+    woohaa3CanvasStore.getState().applyRemoteCanvas(filmSetCanvas(false) as never);
+    expect(resolveFilmSetTargetHash("film")).toMatch(/^[0-9a-z]+$/);
+  });
+
+  it("历史局部回合显式带 clipId 时仍使用该镜头哈希", () => {
+    woohaa3CanvasStore.getState().applyRemoteCanvas(filmSetCanvas(true) as never);
+    const animation = readFilmSetAnimationProjection(woohaa3CanvasStore.getState().canvas, "film")!;
+    const clipHash = filmSetClipHash(filmSetAnimationsOf(animation).clips[0]!);
+    expect(resolveFilmSetTargetHash("film", "clip-1")).toBe(clipHash);
+    expect(resolveFilmSetTargetHash("film", "missing-clip")).toBeUndefined();
+  });
+
+  it("非片场节点不解析目标哈希", () => {
     woohaa3CanvasStore.getState().applyRemoteCanvas(modelCanvas() as never);
-    expect(resolveFilmSetTargetClip("m")).toBeUndefined();
-    expect(resolveFilmSetClipHash("m")).toBeUndefined();
+    expect(resolveFilmSetTargetHash("m")).toBeUndefined();
   });
 });

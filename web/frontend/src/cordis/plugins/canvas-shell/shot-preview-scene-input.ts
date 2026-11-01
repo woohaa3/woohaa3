@@ -4,22 +4,26 @@
  *
  * 渲染层只消费**只读派生**，因此这里把两件事投影成 `buildCanvasRenderScene` 的输入：
  *
- * 1. `shotPreviews`：每张预览卡片的本地状态与播放进度。进度/播放只承载浏览器本地播放投影，
+ * 1. `shotPreviews`：每张预览卡片的本地状态与播放进度。进度/播放只承载本地播放投影，
  *    不是 canonical；失败状态来自共享动作校验门禁（不伪造画布/GPU 就绪）。
- * 2. `shotPreviewCameraProjection`：归属线的画布 2D 起点。片场 group 固定取**徽标中心**
- *    （徽标即场景入口，与 Bevy 绘制同一几何派生）；只有没有外部徽标的复合资产片场才把镜头
- *    当前相机世界姿态投影为起点——静态与非活动动态镜头用 `initialCamera`，活动动态镜头用
- *    **同一 T** 的采样相机（与 Rust `AnimationCameraState` 同一公式）。
+ * 2. `shotPreviewCameraProjection`：归属线的画布 2D 起点。起点取**该镜头相机标记（小相机）**
+ *    的投影：静态与非活动动态镜头用 `initialCamera`，活动动态镜头用**同一 T** 的采样相机
+ *    （与 Rust `AnimationCameraState` 同一公式），再经与 Rust `sampled_camera_pose` 相同的
+ *    场景→显示变换映射，因此虚线接在小模型本体上而不是片场徽标（整个场景模型）的中心。
+ *    相机标记/包围球不可用时退回徽标中心，仍保留「拍摄归属」可读。
  *
  * 本模块纯函数、无副作用：不写 ServerCanvas / CanvasCommand / Y.Doc，也不创建第二份权威数据。
  */
 import {
+  addVec3,
   checkAnimationMotion,
+  filmSetDisplayTransform,
   getGroupLayoutSizes,
   getWoohaa3CanvasNodeAbsolutePosition,
   groupBadgeRect,
   groupModelProjection,
   managedShotPreviewOwnershipOf,
+  mapFilmSetSceneCamera,
   readFilmSetAnimationProjection,
   evaluateMotionIr,
   MOTION_IR_VERSION,
@@ -32,7 +36,12 @@ import {
   type FilmSetNodeData,
   type ServerCanvas
 } from "@woohaa3/contracts";
-import { modelBounds, type FocusTargetInput } from "./model-focus-session.js";
+import {
+  filmSetDisplayRotation,
+  filmSetDisplayScale,
+  modelBounds,
+  type FocusTargetInput
+} from "./model-focus-session.js";
 import type { MediaContentService } from "../../../extension-api/media-content.js";
 
 /** 单张预览卡片的本地呈现输入（render scene `shotPreviews` 条目）。 */
@@ -66,16 +75,16 @@ export type ShotPreviewSceneInputSource = {
 /**
  * 归属线起点。
  *
- * 片场 group 固定从**徽标中心**（场景入口）出发：镜头相机悬在场景上方，它的世界姿态
- * 投影落在徽标外面（徽标上方的组气泡里），画出来就像「从组气泡中间随便拉一条线」。
- * 只有没有外部徽标的复合资产片场才退回相机姿态投影。
+ * 优先取**镜头相机标记（小相机）**的投影：虚线要接到该镜头自己的小模型上，而不是所有镜头
+ * 都汇到片场徽标（整个场景模型）的中心。相机标记或包围球不可用（资源未就绪、几何非法）时
+ * 退回徽标中心，仍然保留「拍摄归属」可读，不伪造相机姿态。
  */
 export function shotPreviewLinkOrigin(
   badge: { center: { x: number; y: number } } | null,
   cameraProjection: { x: number; y: number } | null
 ): { x: number; y: number } | null {
-  if (badge) return { x: badge.center.x, y: badge.center.y };
-  return cameraProjection;
+  if (cameraProjection) return cameraProjection;
+  return badge ? { x: badge.center.x, y: badge.center.y } : null;
 }
 
 /** 由权威画布 + 播放投影派生宿主 scene 输入（纯函数）。 */
@@ -180,28 +189,39 @@ export function buildShotPreviewSceneInput(source: ShotPreviewSceneInputSource):
     if (!data) return null;
     const resolved = resolveFilmSetClip(data, clipId);
     if (!resolved) return null;
-    // 片场 group 的归属线固定从徽标中心（场景入口）出发，不跟随相机姿态；
-    // 相机悬在场景上方时其投影会落在徽标外的组气泡里，看着像随机点。
+    // 起点 = 该镜头相机标记（小相机）的画布投影：与 Bevy `filmset_camera` 的
+    // `sampled_camera_pose` 共用「场景→显示」相似变换，虚线端头因此落在小模型本体上，
+    // 而不是汇到片场徽标（整个场景模型）的中心。
     const badge = badgeRectOf(filmSetNodeId);
-    if (badge) return shotPreviewLinkOrigin(badge, null);
-    const bounds = boundsOf(filmSetNodeId);
-    if (!bounds) return null;
+    const target = targets.get(filmSetNodeId);
+    const bounds = target ? boundsOf(filmSetNodeId) : null;
+    if (!target || !bounds) return shotPreviewLinkOrigin(badge, null);
     const live = playback
       ? playback.viewMode === "shot-node-preview" &&
         playback.nodeId === filmSetNodeId &&
         playback.clipId === clipId
       : false;
-    const camera = live && playback ? sampledCamera(playback) ?? resolved.initialCamera : resolved.initialCamera;
-    const focus: [number, number, number] = [
-      bounds.center[0] + camera.focusOffset.x,
-      bounds.center[1] + camera.focusOffset.y,
-      bounds.center[2] + camera.focusOffset.z
-    ];
-    const position = shotCameraPosition(focus, camera.azimuth, camera.distance, camera.elevation);
-    if (!position.every((value) => Number.isFinite(value))) return null;
+    // 活动动态镜头与 Rust `marker_targets` 同门禁：采样失败时标记不绘制，线也不伪造相机姿态。
+    const sampled = live && playback ? sampledCamera(playback) : null;
+    if (live && !sampled) return shotPreviewLinkOrigin(badge, null);
+    const camera = sampled ?? resolved.initialCamera;
+    const transform = filmSetDisplayTransform({
+      scale: filmSetDisplayScale(target),
+      yaw: filmSetDisplayRotation(target)
+    });
+    if (!transform.ok) return shotPreviewLinkOrigin(badge, null);
+    const mapped = mapFilmSetSceneCamera(transform.value, bounds.center, camera);
+    if (!mapped) return shotPreviewLinkOrigin(badge, null);
+    const focus = addVec3(bounds.center, mapped.focusOffset);
+    const position = shotCameraPosition(focus, mapped.azimuth, mapped.distance, camera.elevation);
+    if (![...focus, ...position].every((value) => Number.isFinite(value))) {
+      return shotPreviewLinkOrigin(badge, null);
+    }
     const projected = worldToCanvasPoint(position);
-    if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y)) return null;
-    return shotPreviewLinkOrigin(null, { x: projected.x, y: projected.y });
+    if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y)) {
+      return shotPreviewLinkOrigin(badge, null);
+    }
+    return shotPreviewLinkOrigin(badge, { x: projected.x, y: projected.y });
   };
 
   return { shotPreviews, shotPreviewCameraProjection };
