@@ -87,9 +87,10 @@ describe("串行命令与并行 room（任务 4.1）", () => {
       const result = await room.submit(batch({ commands: [
         { ...addModel3dCommand("model"), nodeData: { ...MODEL3D_NODE_DATA, sharedWorldInstance: instance, parameters } },
         addModel3dCommand("legacy-model"),
-        { type: "node.add", node: { id: "group", type: "workflow-group-2d", position: { x: 0, y: 0 } }, nodeData: { workflowGroup2d: group } },
-        { type: "node.add", node: { id: "area", type: "scene-area", position: { x: 0, y: 0 } }, nodeData: { sceneArea: area } },
-        { type: "node.add", node: { id: "camera", type: "world-camera", position: { x: 0, y: 0 } }, nodeData: { worldCamera: camera } }
+        { type: "node.add", node: { id: "image", type: "image", position: { x: 0, y: 0 } } },
+        { type: "node.add", node: { id: "group", type: "workflow-group-2d", position: { x: 0, y: 0 } }, nodeData: { workflowGroup2d: group }, connect: { fromNodeId: "image", edgeId: "e-group" } },
+        { type: "node.add", node: { id: "area", type: "scene-area", position: { x: 0, y: 0 } }, nodeData: { sceneArea: area }, connect: { fromNodeId: "image", edgeId: "e-area" } },
+        { type: "node.add", node: { id: "camera", type: "world-camera", position: { x: 0, y: 0 } }, nodeData: { worldCamera: camera }, connect: { fromNodeId: "image", edgeId: "e-camera" } }
       ] }));
       expect(result.ok).toBe(true);
       repository.close();
@@ -107,7 +108,9 @@ describe("串行命令与并行 room（任务 4.1）", () => {
           expect(exported.canvas.nodeData.group.workflowGroup2d).toEqual(group);
           expect(exported.canvas.nodeData.area.sceneArea).toEqual(area);
           expect(exported.canvas.nodeData.camera.worldCamera).toEqual(camera);
+          for (const id of ["group", "area", "camera"]) expect(exported.canvas.nodeData[id].inputMapping).toHaveLength(1);
         }
+        expect((await restored.submit(batch({ commandId: "after-reload", baseRevision: 1, commands: [{ type: "node.update", nodeId: "camera", position: { x: 10, y: 20 } }] }))).ok).toBe(true);
       } finally { reopened.close(); }
     } finally { repository.close(); rmSync(dir, { recursive: true, force: true }); }
   });

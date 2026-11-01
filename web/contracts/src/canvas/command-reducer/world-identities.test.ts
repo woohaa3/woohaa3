@@ -11,6 +11,29 @@ const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "c"
 const node = (id: string, type: string) => ({ id, type, position: { x: 0, y: 0 } });
 
 describe("world identities", () => {
+  it("keeps connected structural nodes valid through reconciliation and reload", () => {
+    const base = createEmptyWoohaa3ServerCanvas("x", now);
+    for (const [type, data] of [
+      ["workflow-group-2d", { workflowGroup2d: { ...group, memberNodeIds: [] } }],
+      ["scene-area", { sceneArea: area }],
+      ["world-camera", { worldCamera: camera }]
+    ] as const) {
+      const result = applyCanvasCommands(base, [
+        { type: "node.add", node: node("image", "image") },
+        { type: "node.add", node: node("target", type), nodeData: data as never, connect: { fromNodeId: "image", edgeId: "edge" } }
+      ], { now });
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      if (!result.ok) continue;
+      expect(result.canvas.nodeData.target.inputMapping).toHaveLength(1);
+      expect(parseCanvasAggregate(result.canvas).ok).toBe(true);
+      const doc = new Y.Doc();
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(serverCanvasToYDoc(result.canvas)));
+      expect(yDocToServerCanvas(doc, { now }).ok).toBe(true);
+      expect(applyCanvasCommands(result.canvas, [{ type: "node.update", nodeId: "target", position: { x: 10, y: 20 } }], { now }).ok).toBe(true);
+      expect(applyCanvasCommands(result.canvas, [{ type: "nodeData.patch", nodeId: "target", value: { inputMapping: [{ sourceNodeId: "image", role: "input", gpuResource: {} }] } as never }], { now }).ok).toBe(false);
+    }
+  });
+
   it("survives reducer, aggregate parsing and encoded Yjs reload", () => {
     const result = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("x", now), [
       { type: "node.add", node: node("model", "model3d") },

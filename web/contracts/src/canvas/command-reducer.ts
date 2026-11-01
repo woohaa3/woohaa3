@@ -75,7 +75,10 @@ export function applyCanvasCommands(
 
   const worldError = validateWorldIdentities(work.nodes, work.nodeData);
   if (worldError) return reject("invalid-command", worldError);
-  return finalize(canvas, work, now);
+  const result = finalize(canvas, work, now);
+  if (!result.ok) return result;
+  const finalWorldError = validateWorldIdentities(result.canvas.document.nodes, result.canvas.nodeData);
+  return finalWorldError ? reject("invalid-command", finalWorldError) : result;
 }
 
 /**

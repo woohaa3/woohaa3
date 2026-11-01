@@ -6,7 +6,7 @@ import { decodeManagedNodeRelation } from "../managed-node.js";
 import { decodeMediaContentRef } from "../media-content.js";
 import { decodeModelContentVersion } from "../model-definition.js";
 
-const WORLD_NODE_FIELDS = new Set(["title", "prompt", "panelPrompt", "agentId", "sceneId", "workflowGroup2d", "sceneArea", "worldCamera"]);
+const WORLD_NODE_FIELDS = new Set(["title", "prompt", "panelPrompt", "agentId", "sceneId", "inputMapping", "workflowGroup2d", "sceneArea", "worldCamera"]);
 const MODEL_FIELDS = new Set([...WORLD_NODE_FIELDS, "sharedWorldInstance", "managedBy", "taskKind", "inputMapping", "status", "taskStatus", "activeRunId", "modelKey", "progress", "error", "errorMessage", "result", "resultPreview", "providerTaskId", "durationSeconds", "mediaContent", "outputAssetId", "posterAssetId", "resourceKind", "frozenPreview", "parameters", "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelScriptStatus", "modelScriptError", "modelSourceKind", "modelAssetId", "modelContentVersion", "modelPlacement", "shotPose", "modelCameras"]);
 const TEXT_FIELDS = ["title", "prompt", "panelPrompt", "agentId", "sceneId"];
 const LOCAL_FIELDS = new Set(["writeLease", "lease", "toolContext", "gpuResource", "gpuHandle", "runtimeHandle", "matrix"]);
@@ -108,6 +108,7 @@ export function validateWorldIdentities(nodes: readonly { id: string; type: stri
       for (const key of TEXT_FIELDS) {
         if (fields[key] !== undefined && typeof fields[key] !== "string") return `Invalid ${key} on ${node.id}`;
       }
+      if (fields.inputMapping !== undefined && !validInputMapping(fields.inputMapping)) return `Invalid inputMapping on ${node.id}`;
       if (Object.entries(fields).some(([key, value]) => key !== "parameters" && (LOCAL_FIELDS.has(key) || /^gpu/i.test(key) || containsLocalState(value)))) return `Transient state on ${node.id}`;
       if (node.type === "model3d") {
         const invalid = validModelFields(fields);
