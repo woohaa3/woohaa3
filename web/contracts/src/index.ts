@@ -117,3 +117,28 @@ export * from "./canvas/ground-anchor.js";
 export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService } from "./extension/services/host/media-formats.js";
 export * from "./canvas/scene-package.js";
 export * from "./canvas/shared-world.js";
+export {
+  SharedWorldCodecError,
+  decodeWorldInstanceData,
+  decodeWorldPoint,
+  decodeWorldRotation,
+  decodeWorldTransform,
+  encodeWorldInstanceData,
+  encodeWorldPoint,
+  encodeWorldRotation,
+  encodeWorldTransform,
+  type SharedWorldCodecFailureCode
+} from "./canvas/shared-world-codec.js";
+export {
+  decodeCreationScopeData,
+  decodeGroundAabb,
+  decodeGroundPoint,
+  decodeSceneAreaData,
+  decodeWorkflowGroupData,
+  encodeCreationScopeData,
+  encodeGroundAabb,
+  encodeGroundPoint,
+  encodeSceneAreaData,
+  encodeWorkflowGroupData,
+  type CreationScopeNodeData
+} from "./canvas/creation-scope-codec.js";
