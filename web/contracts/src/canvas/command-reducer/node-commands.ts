@@ -148,6 +148,10 @@ export function addNode(
   }
   if (command.nodeData) {
     const value = { ...command.nodeData };
+    if (nextNode.type === "model3d" && value.sharedWorldInstance !== undefined) {
+      const error = validateWorldIdentities([nextNode], { [nextNode.id]: value });
+      if (error) return reject("invalid-command", error);
+    }
     work.nodeData[nextNode.id] = value;
     // 文件模型（GLB）在创建时就要走与 patch 相同的权威校验与内容身份归一化：导入/粘贴/恢复
     // 都不能依赖客户端声明的 hash，也不能绕过来源互斥与资产存在性校验。脚本模型的创建语义

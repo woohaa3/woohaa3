@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyCanvasCommands } from "../command-reducer.js";
 import { createEmptyWoohaa3ServerCanvas } from "../domain/index.js";
+import { normalizeGlbModelReference } from "../model-definition.js";
 
 const now = "2026-11-01T00:00:00.000Z";
 const instance = {
@@ -9,6 +10,34 @@ const instance = {
 };
 
 describe("world instance command boundary", () => {
+  it("validates GLB placement before normalization and rejects the whole batch", () => {
+    const assetId = `asset-upload-${"c".repeat(64)}`;
+    const reference = normalizeGlbModelReference({ assetId });
+    if (!reference.ok) throw new Error("invalid fixture");
+    const asset = {
+      id: assetId, title: "model.glb", mediaKind: "file" as const, source: "uploaded" as const,
+      status: "ready" as const, createdAt: now, url: `/api/media/sha256-${"c".repeat(64)}`,
+      metadata: { storageKey: `sha256-${"c".repeat(64)}`, checksum: "c".repeat(64), contentType: "model/gltf-binary", size: 1024, modelFormat: "glb" }
+    };
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas", now);
+    const data = { sharedWorldInstance: instance, modelSourceKind: "glb" as const, modelAssetId: assetId,
+      modelContentVersion: reference.value.contentVersion, modelPlacement: reference.value.placement };
+    const add = (nodeData: typeof data) => applyCanvasCommands(canvas, [
+      { type: "asset.upsert", asset },
+      { type: "node.add", node: { id: "model", type: "model3d", position: { x: 0, y: 0 } }, nodeData }
+    ], { now });
+    expect(add(data).ok).toBe(true);
+    for (const modelPlacement of [
+      { ...data.modelPlacement, entityHandle: { id: 42 } },
+      { ...data.modelPlacement, offset: { ...data.modelPlacement.offset, extra: 1 } }
+    ]) {
+      const result = add({ ...data, modelPlacement });
+      expect(result.ok).toBe(false);
+      expect(canvas.document.nodes).toEqual([]);
+      expect(canvas.assets).toEqual([]);
+    }
+  });
+
   it("retains the world transform when the card moves", () => {
     const created = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("canvas", now), [{
       type: "node.add", node: { id: "model", type: "model3d", position: { x: 0, y: 0 } },
