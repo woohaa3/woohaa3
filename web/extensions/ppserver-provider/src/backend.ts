@@ -25,6 +25,7 @@ import { createPpserverProvider, type PpserverCatalog } from "./provider.js";
 import { fetchRemoteSixiConfig } from "./remote-config.js";
 import { ensureSession, sessionFilePath } from "./session.js";
 import { registerPpserverProxy } from "./routes.js";
+import { registerPpserverAuthSessionRoute } from "./auth-session.js";
 import {
   DEFAULT_PPSERVER_BASE_URL,
   DEFAULT_SUPABASE_ANON_KEY,
@@ -357,6 +358,33 @@ export function createPpserverProviderPlugin(
         baseUrl,
         accessToken: resolveAccessToken,
         tenantId: () => tenantId
+      });
+      /*
+       * 登录后的会话投递：前端（四喜界面）调完 Authing + authing-bridge3 拿到
+       * Supabase 会话后 POST 到这里，由宿主落盘。**有了它，上面的 `resolveAccessToken`
+       * 就完全不需要用户手填令牌** —— 首次登录即写入，之后靠 refresh_token 续期。
+       */
+      registerPpserverAuthSessionRoute(ctx, {
+        filePath: sessionFile,
+        onSessionWritten: (info) => {
+          log({
+            event: "ppserver-session-received",
+            hasRefreshToken: info.hasRefreshToken,
+            expiresAt: new Date(info.expiresAt).toISOString()
+          });
+          /*
+           * 启动时没有会话，`refresh()` 在上面那次调用里必然 401、目录是空的。
+           * 用户刚登录完就手点「刷新模型」才看到模板，体验上说不通 —— 这里补一次。
+           *
+           * **不 await**：这是写会话的响应路径，刷新要发好几个上游请求，
+           * 等它会让登录卡住十几秒。失败了下次手动刷新也还能救。
+           */
+          if (!registration.available || catalog.templates.length > 0) return;
+          void refresh().catch((error: unknown) =>
+            log({ event: "ppserver-catalog-after-login-failed", message: String(error) })
+          );
+        },
+        onError: (message) => log({ event: "ppserver-session-write-failed", message })
       });
       log({
         event: "ppserver-plugin-activated",

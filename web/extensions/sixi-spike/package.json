@@ -32,7 +32,10 @@
         "import.meta.env.VITE_TENANT_ID": "\"\"",
         "import.meta.env.VITE_MEDIA_BACKEND": "\"ppserver\"",
         "import.meta.env.VITE_PPSERVER_BASE_PATH": "\"/api/ppserver\"",
-        "import.meta.env.VITE_PPSERVER_TEMPLATES": "\"\""
+        "import.meta.env.VITE_PPSERVER_TEMPLATES": "\"\"",
+        "import.meta.env.VITE_AUTHING_APP_ID": "\"\"",
+        "import.meta.env.VITE_AUTHING_APP_HOST": "\"\"",
+        "import.meta.env.VITE_LOGIN_BACKEND": "\"authing\""
       },
       "plugins": [
         "./build/sixi-plugins.mjs"
