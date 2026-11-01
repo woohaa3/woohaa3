@@ -15,7 +15,7 @@
  * 不参与画布尺寸计算，与 `.canvas-control-panel` 同一策略。
  */
 import { useState } from "react";
-import type { ComponentType, ReactNode } from "react";
+import type { ComponentType } from "react";
 import {
   BackIcon,
   BoxIcon,
@@ -34,10 +34,8 @@ type RailEntry = {
   id: string;
   label: string;
   icon: RailIcon;
-  /** 还没接通的来源：显示 `SOON` 角标，点开只给说明，不做成静默失败的按钮。 */
+  /** 还没接通的来源：显示 `SOON` 角标。 */
   soon?: boolean;
-  /** 内容面板标题下的说明。 */
-  hint: string;
 };
 
 /**
@@ -48,39 +46,31 @@ type RailEntry = {
  * Drive / Pinterest 没有等价图标，用 `FileImageIcon` / `MediaIcon` 占位并靠文字区分。
  */
 const ENTRIES: readonly RailEntry[] = [
-  { id: "layers", label: "图层", icon: LayersIcon, hint: "画布里正在编辑的内容会出现在这里。" },
-  { id: "products", label: "产品", icon: BoxIcon, hint: "产品库尚未接入画布。" },
-  { id: "project-items", label: "项目商品", icon: FolderPlusIcon, hint: "项目里的商品清单尚未接入画布。" },
-  { id: "images", label: "图片", icon: ImageIcon, hint: "图片素材库尚未接入画布。" },
-  { id: "drive", label: "Drive", icon: FileImageIcon, soon: true, hint: "Google Drive 导入尚未开放。" },
-  { id: "pinterest", label: "Pinterest", icon: ImageIcon, soon: true, hint: "Pinterest 导入尚未开放。" }
+  { id: "layers", label: "图层", icon: LayersIcon },
+  { id: "products", label: "产品", icon: BoxIcon },
+  { id: "project-items", label: "项目商品", icon: FolderPlusIcon },
+  { id: "images", label: "图片", icon: ImageIcon },
+  { id: "drive", label: "Drive", icon: FileImageIcon, soon: true },
+  { id: "pinterest", label: "Pinterest", icon: ImageIcon, soon: true }
 ];
-
-type PanelKey = string;
-
-/**
- * 「图层」占位列表。
- *
- * 明确写的是**示例**：不能让它看起来像画布里真实存在的三张卡 —— 用户会点它、在画布上找不到。
- * 接真节点时把这里换成读 `canvasState` 的节点列表，其余结构不用动。
- */
-const LAYER_EXAMPLES = ["示例 · 客厅立面", "示例 · 沙发体块", "示例 · 材质参考"];
 
 export function CanvasAssetRail({ hidden = false }: { hidden?: boolean }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [active, setActive] = useState<PanelKey | null>("layers");
+  // 同一时刻只有一个条目处于选中态；再点一次取消选中
+  const [active, setActive] = useState<string | null>("layers");
 
   if (hidden) return null;
-  const entry = ENTRIES.find((item) => item.id === active) ?? null;
 
   return (
     /*
-     * 轨道与内容面板是**两个独立的定位元素**，不嵌套：
-     * 轨道只有 132px 宽（图标 + 名称，照参考稿），
-     * 面板贴在它右侧展开 —— 挤在轨道里的话，中文会被压成一行两个字。
+     * 一条通高的侧边栏，贴住窗口左缘，只有图标列 —— 与参考稿一致。
+     *
+     * **不要加第二栏内容面板**：参考稿里没有，而且这是照抄的稿子，
+     * 加一栏"更合理"的列表会变成另一个设计。选中项目前只表达选中态，
+     * 各项的内容将来各自决定（图层 = 节点列表、产品 = 产品库…），
+     * 不该在这一层先定死一种形状。
      */
-    <>
-      <div className={`canvas-asset-rail${collapsed ? " is-collapsed" : ""}`} data-testid="canvas-asset-rail">
+    <div className={`canvas-asset-rail${collapsed ? " is-collapsed" : ""}`} data-testid="canvas-asset-rail">
         <div className="canvas-asset-rail__head">
           <button
             type="button"
@@ -132,39 +122,5 @@ export function CanvasAssetRail({ hidden = false }: { hidden?: boolean }) {
           })}
         </nav>
       </div>
-
-      {/* 面板在轨道右侧展开；`left` 由 CSS 按轨道宽度偏移，收起时不渲染 */}
-      {!collapsed && entry && <RailPanel entry={entry} />}
-    </>
-  );
-}
-
-/**
- * 选中条目的内容区。
- *
- * 全部是空态，但**说清楚为什么空**：接不上的写"尚未接入"，没开放的写"尚未开放"。
- * 一个演示列表会被当成真数据，所以图层那三条显式标了「示例」。
- */
-function RailPanel({ entry }: { entry: RailEntry }): ReactNode {
-  return (
-    <section className="canvas-asset-rail__panel" aria-label={`${entry.label}内容`}>
-      <h2 className="canvas-asset-rail__panel-title">{entry.label}</h2>
-      {entry.id === "layers" ? (
-        <>
-          <p className="canvas-asset-rail__hint">{entry.hint}</p>
-          <ul className="canvas-asset-rail__list">
-            {LAYER_EXAMPLES.map((name) => (
-              <li key={name} className="canvas-asset-rail__list-item">
-                <LayersIcon size={14} />
-                <span>{name}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="canvas-asset-rail__note">以上为示例条目，画布节点接入后替换。</p>
-        </>
-      ) : (
-        <p className="canvas-asset-rail__hint">{entry.hint}</p>
-      )}
-    </section>
   );
 }

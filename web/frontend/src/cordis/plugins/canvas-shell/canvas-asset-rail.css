@@ -1,38 +1,42 @@
 /*
- * 画布左侧资源轨。
+ * 画布左侧资源栏。
  *
- * 固定宽度的一列竖条，`position: absolute` 浮在画布上（与 `.canvas-control-panel` 同一策略）：
- * 它不参与画布尺寸计算，收起后画布内容不会重排。
+ * **是一条通高的侧边栏，不是浮动小卡片**：贴住窗口左缘、从顶到底，
+ * 左边一窄列放图标与名称（照参考稿），右边是选中项的内容列表。
+ * 两栏合起来才是一条完整的栏 —— 第一版把它们做成了 64px 处的小卡片，与参考差距很大。
+ *
+ * 画布表面跟着让出栏的宽度（见文件末尾的 `:has()` 规则），否则卡片会被压在栏底下。
+ *
  * 颜色全部取 `--app-*` 语义 token，跟随宿主主题，不在样式里写色值。
  */
 
+/* ───────── 侧边栏本体 ───────── */
+
 .canvas-asset-rail {
-	/* 轨道宽度与「轨道↔面板」间距：轨道和面板两处引用同一份，改一处两边都跟 */
-	--rail-width: 132px;
-	--rail-gap: 8px;
-	--rail-collapsed-width: 52px;
+	/* 栏宽与画布让位两处共用 */
+	--rail-width: 104px;
+	--rail-collapsed-width: 56px;
 
 	position: absolute;
 	z-index: 20;
-	left: 16px;
-	top: 64px;
+	left: 0;
+	top: 0;
+	bottom: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
-	width: var(--rail-width);
-	padding: 8px;
-	border: 1px solid var(--app-web-border);
-	border-radius: 14px;
+	width: var(--rail-width, 104px);
+	padding: 10px 8px;
+	border-right: 1px solid var(--app-web-border);
 	background: var(--app-web-panel);
 	color: var(--app-web-text-primary);
 	font-size: 12px;
+	overflow: hidden auto;
 	user-select: none;
 }
 
-/* 收起：只留图标列，宽度收到一颗按钮的量 */
 .canvas-asset-rail.is-collapsed {
-	width: var(--rail-collapsed-width);
-	overflow: hidden;
+	width: var(--rail-collapsed-width, 56px);
+	padding: 10px 6px;
 }
 
 /* ───────── 顶部：工作区入口 + 收起 ───────── */
@@ -41,28 +45,48 @@
 	display: flex;
 	align-items: center;
 	gap: 4px;
-	padding-bottom: 8px;
-	margin-bottom: 4px;
-	border-bottom: 1px solid var(--app-web-border);
+	flex-shrink: 0;
+	margin-bottom: 14px;
 }
 
 .canvas-asset-rail.is-collapsed .canvas-asset-rail__head {
-	justify-content: center;
+	flex-direction: column;
 }
 
+/* 参考稿里是一枚反色方块（深底浅图），旁边一个下拉箭头 */
 .canvas-asset-rail__workspace {
-	display: flex;
+	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 4px;
+	gap: 3px;
 	flex: 1;
 	min-width: 0;
-	height: 30px;
+	height: 36px;
+	padding: 0 4px;
 	border: 0;
-	border-radius: 8px;
+	border-radius: 10px;
 	background: var(--app-web-text-primary);
 	color: var(--app-web-panel);
 	cursor: pointer;
+}
+
+.canvas-asset-rail__collapse {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 22px;
+	height: 22px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--app-web-text-muted);
+	cursor: pointer;
+}
+
+.canvas-asset-rail__collapse:hover {
+	background: var(--app-interaction-accent-soft);
+	color: var(--app-web-text-primary);
 }
 
 /* ───────── 条目列表 ───────── */
@@ -70,7 +94,7 @@
 .canvas-asset-rail__items {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	gap: 4px;
 }
 
 .canvas-asset-rail__item {
@@ -78,19 +102,18 @@
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 4px;
+	gap: 6px;
 	width: 100%;
-	min-height: 52px;
-	padding: 6px 4px;
+	padding: 12px 4px;
 	border: 0;
-	border-radius: 10px;
+	border-radius: 12px;
 	background: transparent;
 	color: var(--app-web-text-muted);
 	font: inherit;
 	cursor: pointer;
 }
 
-/* 选中：浅底方块 + 文字提亮。与参考稿一致 —— 未选中也显示文字，只是更暗 */
+/* 选中：整块实底方块（参考稿里「图层」那一格）；未选中的只有图标和暗字 */
 .canvas-asset-rail__item.is-selected {
 	background: var(--app-web-subtle);
 	color: var(--app-web-text-primary);
@@ -98,6 +121,7 @@
 
 .canvas-asset-rail__item:hover {
 	background: var(--app-interaction-accent-soft);
+	color: var(--app-web-text-primary);
 }
 
 .canvas-asset-rail__icon {
@@ -111,8 +135,8 @@
 
 .canvas-asset-rail__label {
 	max-width: 100%;
-	font-size: 12px;
-	line-height: 16px;
+	font-size: 11px;
+	line-height: 15px;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -121,36 +145,36 @@
 /* `SOON` 角标：压在图标的右上方，不占布局高度 */
 .canvas-asset-rail__soon {
 	position: absolute;
-	top: -6px;
-	right: 2px;
+	top: -8px;
+	right: -2px;
 	padding: 0 4px;
 	border-radius: 4px;
 	background: var(--app-interaction-accent-soft);
 	color: var(--app-web-text-muted);
 	font-size: 9px;
-	line-height: 12px;
+	line-height: 13px;
 	letter-spacing: 0.02em;
 }
 
-/* ───────── 内容面板 ─────────
- * 贴在轨道右侧的独立浮层，**不在轨道内部**：轨道只有 132px 宽，
- * 中文说明塞进去会被压成一行两三个字（实测过）。
- * `--rail-width` / `--rail-gap` 由 `.canvas-asset-rail` 定义在同一份文件里，
- * 但面板不是它的子元素，读不到它的自定义属性 —— 所以这里重复声明一次宽度来源。 */
+/* 收起时角标藏起来：56px 宽放不下 */
+.canvas-asset-rail.is-collapsed .canvas-asset-rail__soon {
+	display: none;
+}
+
+/* ───────── 右侧内容栏 ───────── */
 
 .canvas-asset-rail__panel {
 	position: absolute;
-	z-index: 20;
-	left: calc(16px + 132px + 8px); /* 轨道 left + 轨道宽 + 间距 */
-	top: 64px;
-	width: 260px;
-	max-height: 60vh;
+	z-index: 19;
+	left: var(--rail-width, 104px);
+	top: 0;
+	bottom: 0;
+	width: 264px;
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
-	padding: 12px;
-	border: 1px solid var(--app-web-border);
-	border-radius: 14px;
+	padding: 14px 12px;
+	border-right: 1px solid var(--app-web-border);
 	background: var(--app-web-panel);
 	color: var(--app-web-text-primary);
 	font-size: 12px;
@@ -172,8 +196,10 @@
 	color: var(--app-web-text-muted);
 }
 
+/* 说明推到内容栏底部：上面是列表，下面是"这些是示例"的注解 */
 .canvas-asset-rail__note {
-	padding-top: 4px;
+	margin-top: auto;
+	padding-top: 8px;
 	border-top: 1px dashed var(--app-web-border);
 }
 
@@ -190,7 +216,7 @@
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	padding: 5px 6px;
+	padding: 7px 6px;
 	border-radius: 8px;
 	font-size: 11px;
 	color: var(--app-web-text-primary);
@@ -201,4 +227,20 @@
 
 .canvas-asset-rail__list-item:hover {
 	background: var(--app-interaction-accent-soft);
+}
+
+/* ───────── 画布让位 ─────────
+ * 栏占住了左缘，画布表面（以及盖在它上面的 curtain）要从栏右缘开始，
+ * 否则卡片会被压在栏底下、点也点不到。
+ * 用 `:has()` 按「这条栏渲染了多宽」决定偏移：聚焦 / 文档工作区里栏整个不渲染，
+ * 画布自动回到满宽，不需要额外的状态同步。 */
+
+.app:has(> .canvas-asset-rail) > .bevy-canvas-surface,
+.app:has(> .canvas-asset-rail) > .bevy-canvas-curtain {
+	left: 104px;
+}
+
+.app:has(> .canvas-asset-rail.is-collapsed) > .bevy-canvas-surface,
+.app:has(> .canvas-asset-rail.is-collapsed) > .bevy-canvas-curtain {
+	left: 56px;
 }
