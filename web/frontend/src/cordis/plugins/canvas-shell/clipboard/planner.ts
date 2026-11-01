@@ -11,7 +11,7 @@
  * 本地 Store/Y.Doc 更新，也不做 optimistic 状态。
  */
 import type { CanvasCommand, ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition } from "@woohaa3/contracts";
-import { createHighEntropyId, managedNodeRelationOf, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
+import { createHighEntropyId, managedNodeRelationOf, remapWorldCopyReferences, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
 import type { CanvasCopyPayload, CopyNode } from "./payload.js";
 import { imageEditAssetIdsOf, imageEditProjectObjectOf } from "./payload.js";
 
@@ -148,6 +148,40 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
     if (relation && (!idMap.has(relation.ownerNodeId) || !remappedData.has(node.id))) return null;
   }
   if (new Set(idMap.values()).size !== idMap.size) return null;
+
+  const instanceIds = new Map<string, string>();
+  const groupIds = new Map<string, string>();
+  const areaIds = new Map<string, string>();
+  const cameraIds = new Map<string, string>();
+  for (const [index, node] of payload.nodes.entries()) {
+    const data = remappedData.get(node.id) ?? payload.nodeData[node.id];
+    for (const [key, field, table] of [
+      ["sharedWorldInstance", "instanceId", instanceIds], ["workflowGroup2d", "groupId", groupIds],
+      ["sceneArea", "areaId", areaIds], ["worldCamera", "cameraId", cameraIds]
+    ] as const) {
+      const value = data?.[key];
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const id = (value as Record<string, unknown>)[field];
+        if (typeof id === "string") table.set(id, makeId(field, index));
+      }
+    }
+  }
+  const world = remapWorldCopyReferences({
+    nodes: payload.nodes.map(node => ({ nodeId: node.id, nodeData: remappedData.get(node.id) ?? payload.nodeData[node.id] })),
+    ids: { nodeIds: idMap, instanceIds, groupIds, areaIds, cameraIds }
+  });
+  if (!world.ok) return null;
+  for (const [index, entry] of world.nodes.entries()) {
+    if (!entry.worldKind) continue;
+    const data = entry.nodeData;
+    for (const key of ["workflowGroup2d", "sceneArea"] as const) {
+      const value = data[key];
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        (value as Record<string, unknown>).scopeVersion = makeId("scopeVersion", index);
+      }
+    }
+    remappedData.set(entry.sourceNodeId, data as import("@woohaa3/contracts").CanvasNodeData);
+  }
 
   // 2. 计算包围盒中心，用于对齐锚点。
   //    包围盒与偏移都必须在**绝对坐标**下计算：成员节点保存的是相对父级的局部坐标，

@@ -279,6 +279,7 @@ export function isCanvasCopyPayload(input: unknown): input is CanvasCopyPayload 
     if (!isRecord(node) || typeof node.id !== "string" || node.id === "") return false;
     if (typeof node.type !== "string" || node.type === "") return false;
     if (!isPosition(node.position)) return false;
+    if (nodeIds.has(node.id)) return false;
     nodeIds.add(node.id);
   }
   for (const edge of input.edges) {
@@ -335,7 +336,7 @@ function toCopyEdge(edge: ServerCanvas["document"]["edges"][number]): CopyEdge {
 }
 
 function isPosition(input: unknown): input is Woohaa3CanvasPosition {
-  return isRecord(input) && typeof input.x === "number" && typeof input.y === "number";
+  return isRecord(input) && typeof input.x === "number" && Number.isFinite(input.x) && typeof input.y === "number" && Number.isFinite(input.y);
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {

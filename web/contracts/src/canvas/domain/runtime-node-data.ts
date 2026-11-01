@@ -168,6 +168,9 @@ export function sanitizeRuntimeNodeConfigPatch(input: unknown, context?: { conte
 export function sanitizeNodeDataForClipboard(input: unknown, context?: { content?: ContentContributionResolver }): CanvasNodeData {
   observeContentResolver(context?.content);
   const original = isRecord(input) ? input : {};
+  for (const [key, decode] of Object.entries({ sharedWorldInstance: decodeWorldInstanceData, workflowGroup2d: decodeWorkflowGroupData, sceneArea: decodeSceneAreaData, worldCamera: decodeWorldCamera })) {
+    if (key in original && !decode(original[key]).ok) throw new Error(`Invalid ${key}`);
+  }
   const owned = context?.content && Object.prototype.hasOwnProperty.call(original, "extensionId");
   const source = owned ? sanitizeContentNodeData(original as CanvasNodeData, context!.content!) : original;
   const value: Woohaa3CanvasJsonObject = {};

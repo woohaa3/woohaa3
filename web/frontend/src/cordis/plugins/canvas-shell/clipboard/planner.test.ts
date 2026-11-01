@@ -19,6 +19,35 @@ const planCanvasPaste = (options: Parameters<typeof planPaste>[0]) => planPaste(
 
 const NOW = "2026-09-24T00:00:00.000Z";
 
+it("remaps a world collection in the actual paste batch", () => {
+  const base = createEmptyWoohaa3ServerCanvas("world", NOW);
+  const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 1, v: 2, h: 3 }, rotation: [0, 0, 0, 1], scale: 2 } };
+  const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "c", settingsVersion: "1", position: { u: 1, v: 2, h: 4 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: "i" };
+  const original = applyCanvasCommands(base, [
+    { type: "node.add", node: { id: "m", type: "model3d", position: { x: 0, y: 0 } }, nodeData: { sharedWorldInstance: instance } },
+    { type: "node.add", node: { id: "g", type: "workflow-group-2d", position: { x: 10, y: 0 } }, nodeData: { workflowGroup2d: { kind: "workflow-group-2d", version: "shared-world-v1", groupId: "g", scopeVersion: "1", memberNodeIds: ["m"] } } },
+    { type: "node.add", node: { id: "a", type: "scene-area", position: { x: 20, y: 0 } }, nodeData: { sceneArea: { kind: "scene-area", version: "shared-world-v1", areaId: "a", scopeVersion: "1", bounds: { min: { u: 0, v: 0 }, max: { u: 2, v: 2 } } } } },
+    { type: "node.add", node: { id: "c", type: "world-camera", position: { x: 30, y: 0 } }, nodeData: { worldCamera: camera } }
+  ] as never, { now: NOW });
+  expect(original.ok).toBe(true);
+  if (!original.ok) return;
+  const payload = buildCanvasCopyPayload(original.canvas, ["m", "g", "a", "c"])!;
+  const plan = planCanvasPaste({ canvas: original.canvas, payload, viewport: { x: 0, y: 0, zoom: 1 }, anchor: { kind: "point", position: { x: 500, y: 500 } }, createId: (prefix, index) => `new-${prefix}-${index}` })!;
+  const result = applyCanvasCommands(original.canvas, plan.commands, { now: NOW });
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  if (!result.ok) return;
+  const model = result.canvas.nodeData["new-model3d-0"].sharedWorldInstance as typeof instance;
+  const copiedCamera = result.canvas.nodeData["new-world-camera-3"].worldCamera!;
+  expect(model.instanceId).toBe("new-instanceId-0");
+  expect(model.transform).toEqual(instance.transform);
+  expect(copiedCamera).toEqual({ ...camera, cameraId: "new-cameraId-3", boundInstanceId: model.instanceId });
+  expect(result.canvas.nodeData["new-workflow-group-2d-1"].workflowGroup2d).toMatchObject({ groupId: "new-groupId-1", scopeVersion: "new-scopeVersion-1", memberNodeIds: ["new-model3d-0"] });
+  expect(result.canvas.nodeData["new-scene-area-2"].sceneArea).toMatchObject({ areaId: "new-areaId-2", scopeVersion: "new-scopeVersion-2" });
+  expect(result.canvas.nodeData.m.sharedWorldInstance).toEqual(instance);
+  const missing = buildCanvasCopyPayload(original.canvas, ["c"])!;
+  expect(planCanvasPaste({ canvas: original.canvas, payload: missing, viewport: { x: 0, y: 0, zoom: 1 }, anchor: null })).toBeNull();
+});
+
 function canvasFixture(): ServerCanvas {
   const base = createEmptyWoohaa3ServerCanvas("canvas-1", NOW);
   const nodes = [
