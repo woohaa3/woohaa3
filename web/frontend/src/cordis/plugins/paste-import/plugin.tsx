@@ -70,6 +70,7 @@ export function pasteImportExtension(): Plugin.Function<void> {
         const canonical = woohaa3CanvasStore.getState().canvas;
         const session = ctx.canvasSession;
         if (!canonical || !session) return true;
+        const currentTarget = () => !disposed && ctx.canvasSession === session && woohaa3CanvasStore.getState().canvas?.id === canonical.id;
         const controller = ctx.canvasRuntime.controller();
         if (!controller) return true;
         const pointer = ctx.canvasRuntime.lastPointerWorld();
@@ -85,12 +86,19 @@ export function pasteImportExtension(): Plugin.Function<void> {
           if (!current || current.id !== canonical.id) return;
           let reported = false;
           const report = (description: string) => {
+            if (!currentTarget()) return;
             reported = true;
             ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴作品", description } });
           };
-          const plan = planCanvasPaste({ lifecycle: ctx.get("compositeAssets")?.managedLifecycles, canvas: current, payload: verified, anchor, viewport: controller.viewport(), onRefusal: report });
-          if (plan) void ctx.canvasEdit.record(plan.commands, plan.newNodeIds.length > 1 ? `粘贴 ${plan.newNodeIds.length} 个作品` : "粘贴作品");
-          else if (!reported) report("复制内容无效或引用不可用，请重新选择作品后复制。");
+          try {
+            const plan = planCanvasPaste({ lifecycle: ctx.get("compositeAssets")?.managedLifecycles, canvas: current, payload: verified, anchor, viewport: controller.viewport(), onRefusal: report });
+            if (plan) void Promise.resolve(ctx.canvasEdit.record(plan.commands, plan.newNodeIds.length > 1 ? `粘贴 ${plan.newNodeIds.length} 个作品` : "粘贴作品"))
+              .then((result) => { if (!result.ok) report(`粘贴失败：${result.reason}`); })
+              .catch((error: unknown) => report(`粘贴失败：${error instanceof Error ? error.message : "请稍后重试"}`));
+            else if (!reported) report("复制内容无效或引用不可用，请重新选择作品后复制。");
+          } catch {
+            report("复制内容无效或无法提交，请重新选择作品后重试。");
+          }
         };
         const projects = payload.nodes.flatMap((node) => {
           const project = imageEditProjectObjectOf(payload.nodeData[node.id]);
@@ -108,8 +116,8 @@ export function pasteImportExtension(): Plugin.Function<void> {
             sourceCanvasId: payload.sourceCanvasId ?? canonical.id, nodeIds: payload.nodes.map((node) => node.id),
             assetIds: [...assetIds], projects }).then((result) => {
               if (result.ok) apply({ ...payload, assets: [ ...(payload.assets ?? []).filter((asset) => !assetIds.has(asset.id)), ...result.value.assets ] });
-              else if (!disposed) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴图片工程", description: result.error } });
-            }).catch(() => { if (!disposed) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴图片工程", description: "无法核验工程与来源素材，请稍后重试" } }); });
+              else if (currentTarget()) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴图片工程", description: result.error } });
+            }).catch(() => { if (currentTarget()) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴图片工程", description: "无法核验工程与来源素材，请稍后重试" } }); });
         }
         return true;
       };

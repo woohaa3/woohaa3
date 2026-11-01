@@ -110,7 +110,11 @@ export function buildCanvasCopyPayload(
     if (owner && included.has(owner)) included.add(node.id);
   }
   if (included.size === 0) return null;
-  const copyNodes: CopyNode[] = nodes.filter(node => included.has(node.id)).map(toCopyNode);
+  const copyNodes: CopyNode[] = nodes.filter(node => included.has(node.id)).map((node) => {
+    const copy = toCopyNode(node);
+    if (copy.parentId && !included.has(copy.parentId)) delete copy.parentId;
+    return copy;
+  });
 
   const copyEdges: CopyEdge[] = [];
   const incomingEdges: CopyIncomingEdge[] = [];
@@ -261,14 +265,15 @@ export function parseCanvasCopyPayload(input: string | null | undefined): Canvas
   let raw: unknown;
   try {
     raw = JSON.parse(input);
+    return isCanvasCopyPayload(raw) ? raw : null;
   } catch {
     return null;
   }
-  return isCanvasCopyPayload(raw) ? raw : null;
 }
 
 export function isCanvasCopyPayload(input: unknown): input is CanvasCopyPayload {
   if (!isRecord(input)) return false;
+  if (!isJsonValue(input)) return false;
   if (input.format !== CANVAS_COPY_FORMAT) return false;
   if (!Array.isArray(input.nodes) || !Array.isArray(input.edges) || !Array.isArray(input.incomingEdges)) {
     return false;
@@ -284,6 +289,16 @@ export function isCanvasCopyPayload(input: unknown): input is CanvasCopyPayload 
           !["image", "video", "audio", "text", "storyboard", "file"].includes(asset.mediaKind as string) ||
           !["generated", "uploaded", "external"].includes(asset.source as string) ||
           !["ready", "generating", "needs-review", "missing", "failed"].includes(asset.status as string)) return false;
+      for (const key of ["url", "posterUrl", "text", "prompt", "error", "nodeId", "providerTaskId", "historyTitle"]) if (asset[key] !== undefined && typeof asset[key] !== "string") return false;
+      for (const key of ["durationSeconds", "progress"]) if (asset[key] !== undefined && (typeof asset[key] !== "number" || !Number.isFinite(asset[key]))) return false;
+      if (asset.isFavorite !== undefined && typeof asset.isFavorite !== "boolean") return false;
+      if (asset.tags !== undefined && (!Array.isArray(asset.tags) || asset.tags.some((tag) => typeof tag !== "string"))) return false;
+      if (asset.metadata !== undefined && !isRecord(asset.metadata)) return false;
+      if (asset.provenance !== undefined) {
+        if (!isRecord(asset.provenance)) return false;
+        for (const key of ["taskNodeId", "taskKind", "runId"]) if (asset.provenance[key] !== undefined && typeof asset.provenance[key] !== "string") return false;
+        if (asset.provenance.outputIndex !== undefined && (typeof asset.provenance.outputIndex !== "number" || !Number.isInteger(asset.provenance.outputIndex) || asset.provenance.outputIndex < 0)) return false;
+      }
       ids.add(asset.id);
     }
   }
@@ -292,18 +307,36 @@ export function isCanvasCopyPayload(input: unknown): input is CanvasCopyPayload 
     if (!isRecord(node) || typeof node.id !== "string" || node.id === "") return false;
     if (typeof node.type !== "string" || node.type === "") return false;
     if (!isPosition(node.position)) return false;
+    for (const key of ["width", "height"]) if (node[key] !== undefined && (typeof node[key] !== "number" || !Number.isFinite(node[key]) || node[key] <= 0)) return false;
+    if (node.zIndex !== undefined && (typeof node.zIndex !== "number" || !Number.isFinite(node.zIndex))) return false;
+    if (node.parentId !== undefined && (typeof node.parentId !== "string" || !node.parentId)) return false;
     if (nodeIds.has(node.id)) return false;
     nodeIds.add(node.id);
   }
+  for (const node of input.nodes) if (node.parentId !== undefined && (!nodeIds.has(node.parentId) || node.parentId === node.id)) return false;
+  const parents = new Map(input.nodes.map((node) => [node.id, node.parentId]));
+  for (const node of input.nodes) {
+    const seen = new Set<string>();
+    let id: string | undefined = node.id;
+    while (id !== undefined) {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      id = parents.get(id);
+    }
+  }
+  const edgeIds = new Set<string>();
   for (const edge of input.edges) {
     if (!isRecord(edge) || typeof edge.id !== "string" || edge.id === "") return false;
     if (typeof edge.source !== "string" || typeof edge.target !== "string") return false;
     if (!isRecord(edge.data)) return false;
+    if (!validHandles(edge) || edgeIds.has(edge.id)) return false;
+    edgeIds.add(edge.id);
     if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) return false;
   }
   for (const edge of input.incomingEdges) {
     if (!isRecord(edge) || typeof edge.source !== "string" || typeof edge.target !== "string") return false;
     if (!isRecord(edge.data)) return false;
+    if (!edge.source || !validHandles(edge)) return false;
     if (!nodeIds.has(edge.target)) return false;
   }
   // 工程对象引用可选（旧载荷没有）；存在时逐字段校验，不接受的形状整条拒绝。
@@ -315,6 +348,17 @@ export function isCanvasCopyPayload(input: unknown): input is CanvasCopyPayload 
     }
   }
   return true;
+}
+
+function validHandles(edge: Record<string, unknown>): boolean {
+  return [edge.sourceHandle, edge.targetHandle].every((handle) => handle === undefined || handle === null || typeof handle === "string");
+}
+
+function isJsonValue(value: unknown): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isRecord(value) && Object.values(value).every(isJsonValue);
 }
 
 function isProjectObjectRef(input: unknown): boolean {
