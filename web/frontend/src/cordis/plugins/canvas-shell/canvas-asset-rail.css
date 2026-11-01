@@ -13,9 +13,9 @@
 /* ───────── 侧边栏本体 ───────── */
 
 .canvas-asset-rail {
-	/* 栏宽与画布让位两处共用 */
-	--rail-width: 104px;
-	--rail-collapsed-width: 56px;
+	/* 栏宽与画布让位两处共用。80px 刚好放下两字中文与图标，再窄就得截断「项目商品」 */
+	--rail-width: 80px;
+	--rail-collapsed-width: 48px;
 
 	position: absolute;
 	z-index: 20;
@@ -24,8 +24,9 @@
 	bottom: 0;
 	display: flex;
 	flex-direction: column;
-	width: var(--rail-width, 104px);
-	padding: 10px 8px;
+	width: var(--rail-width, 80px);
+	/* 左右只留 4px：80px 里再扣 16px 内边距，「项目商品」就只剩 40px 放不下 */
+	padding: 10px 4px;
 	border-right: 1px solid var(--app-web-border);
 	background: var(--app-web-panel);
 	color: var(--app-web-text-primary);
@@ -35,8 +36,8 @@
 }
 
 .canvas-asset-rail.is-collapsed {
-	width: var(--rail-collapsed-width, 56px);
-	padding: 10px 6px;
+	width: var(--rail-collapsed-width, 48px);
+	padding: 10px 4px;
 }
 
 /* ───────── 顶部：工作区入口 + 收起 ───────── */
@@ -156,7 +157,7 @@
 	letter-spacing: 0.02em;
 }
 
-/* 收起时角标藏起来：56px 宽放不下 */
+/* 收起时角标藏起来：48px 宽放不下 */
 .canvas-asset-rail.is-collapsed .canvas-asset-rail__soon {
 	display: none;
 }
@@ -166,7 +167,7 @@
 .canvas-asset-rail__panel {
 	position: absolute;
 	z-index: 19;
-	left: var(--rail-width, 104px);
+	left: var(--rail-width, 80px);
 	top: 0;
 	bottom: 0;
 	width: 264px;
@@ -237,10 +238,10 @@
 
 .app:has(> .canvas-asset-rail) > .bevy-canvas-surface,
 .app:has(> .canvas-asset-rail) > .bevy-canvas-curtain {
-	left: 104px;
+	left: 80px;
 }
 
 .app:has(> .canvas-asset-rail.is-collapsed) > .bevy-canvas-surface,
 .app:has(> .canvas-asset-rail.is-collapsed) > .bevy-canvas-curtain {
-	left: 56px;
+	left: 48px;
 }
