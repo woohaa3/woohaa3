@@ -16,6 +16,7 @@ import { sanitizeWoohaa3CanvasDocument,
   type Woohaa3CanvasDocument,
   type Woohaa3CanvasNodeDataMap } from "./core";
 import { normalizeCanvas, type NormalizeCanvasOptions } from "./normalization";
+import { validateWorldIdentities } from "./world-identities.js";
 import { DEFAULT_CANVAS_TITLE,
   type CanvasAssetSource,
   type CanvasAssetStatus,
@@ -51,6 +52,7 @@ export type CanvasAggregateIssueCode =
 export type CanvasAggregateFailureCode =
   | "not-an-object"
   | "missing-schema-version"
+  | "invalid-world-identities"
   | "unsupported-schema-version";
 
 export type CanvasAggregateFailure = {
@@ -117,6 +119,8 @@ export function parseCanvasAggregate(
 
   // rawDocument 已是不受信任输入；`sanitizeWoohaa3CanvasDocument` 做结构规范化。
   const document: Woohaa3CanvasDocument = sanitizeWoohaa3CanvasDocument(rawDocument, now);
+  const worldError = validateWorldIdentities(document.nodes, isRecord(input.nodeData) ? input.nodeData : {});
+  if (worldError) return { ok: false, issues, failure: { code: "invalid-world-identities", message: worldError, schemaVersion: declared } };
   const nodeData = sanitizeWoohaa3CanvasNodeData(input.nodeData);
   const assets = sanitizeStoredAssets(input.assets, now, issues);
   const jobs = sanitizeStoredJobs(input.jobs, now, issues);
@@ -144,7 +148,12 @@ export function parseCanvasAggregate(
     updatedAt: readIsoString(input.updatedAt) ?? document.updatedAt
   };
 
-  const canvas = normalizeCanvas(provisional, options);
+  let canvas: ServerCanvas;
+  try {
+    canvas = normalizeCanvas(provisional, options);
+  } catch (error) {
+    return { ok: false, issues, failure: { code: "invalid-world-identities", message: error instanceof Error ? error.message : String(error), schemaVersion: declared } };
+  }
   collectStructuralIssues(rawDocument, canvas, nodeData, issues);
   collectNodeDataPruning(document, nodeData, canvas, issues);
   return { ok: true, canvas, issues };

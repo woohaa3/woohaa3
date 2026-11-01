@@ -19,6 +19,7 @@ import {
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
 import { findActiveRunNode, isModelDefinitionNode } from "./working-state.js";
 import { decodeManagedNodeRelation, managedNodeRelationOf } from "../managed-node.js";
+import { decodeWorldInstanceData } from "../shared-world-codec.js";
 import {
   normalizeSelfContained3D,
   validateMediaContentPatch,
@@ -67,6 +68,8 @@ export function addNode(
   command: Extract<CanvasCommand, { type: "node.add" }>
 ): CommandApplyResult {
   const { node } = command;
+  const worldRejection = validateWorldInstance(node.type, command.nodeData);
+  if (worldRejection) return worldRejection;
   const managed = command.nodeData?.managedBy;
   if (managed !== undefined) {
     const decoded = decodeManagedNodeRelation(managed);
@@ -228,6 +231,8 @@ export function patchNodeData(
   value: CanvasNodeData | null
 ): CommandApplyResult {
   const node = work.nodes.find((entry) => entry.id === nodeId);
+  const worldRejection = validateWorldInstance(node?.type, value);
+  if (worldRejection) return worldRejection;
   const currentManaged = managedNodeRelationOf(work.nodeData[nodeId]);
   const hasManagedField = !!work.nodeData[nodeId] && Object.prototype.hasOwnProperty.call(work.nodeData[nodeId], "managedBy");
   if (value && Object.prototype.hasOwnProperty.call(value, "managedBy")) {
@@ -275,6 +280,13 @@ export function patchNodeData(
   }
   work.nodeData[nodeId] = { ...(work.nodeData[nodeId] ?? {}), ...value };
   return OK;
+}
+
+function validateWorldInstance(type: string | undefined, data: CanvasNodeData | null | undefined): CommandApplyResult | null {
+  if (!data || !Object.prototype.hasOwnProperty.call(data, "sharedWorldInstance")) return null;
+  if (type !== "model3d") return reject("invalid-command", "sharedWorldInstance 仅允许模型节点");
+  const result = decodeWorldInstanceData(data.sharedWorldInstance);
+  return result.ok ? null : reject("invalid-command", `sharedWorldInstance: ${result.code}`);
 }
 
 /**

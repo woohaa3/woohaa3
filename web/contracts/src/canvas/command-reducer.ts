@@ -16,6 +16,7 @@
  * 规范化写回；输入 mapping reconciliation 与 revision/no-op 判定保持同一原子批次。
  */
 import { stableStringify } from "./canvas-script/planner/hash.js";
+import { validateWorldIdentities } from "./domain/world-identities.js";
 import type { CanvasCommand } from "./commands.js";
 import type { ServerCanvas } from "./domain/index.js";
 import { applyEditCommand } from "./command-reducer/edit-command.js";
@@ -72,6 +73,8 @@ export function applyCanvasCommands(
     } catch (error) { return reject("invalid-command", String(error)); }
   }
 
+  const worldError = validateWorldIdentities(work.nodes, work.nodeData);
+  if (worldError) return reject("invalid-command", worldError);
   return finalize(canvas, work, now);
 }
 

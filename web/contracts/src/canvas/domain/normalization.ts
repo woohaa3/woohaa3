@@ -11,6 +11,7 @@ import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { isCompositeAssetNodeType } from "./core/composite-asset-identity.js";
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { migrateLegacyContainerNodes } from "./core/legacy-containers.js";
+import { validateWorldIdentities } from "./world-identities.js";
 
 export type UploadFileDescriptor = {
   name: string;
@@ -41,10 +42,12 @@ export type NormalizeCanvasOptions = {
  * 必须保留它们。已下线的旧类型（`generate`/`edit`/`shot`/`start`/`group`）不再兼容，都会被
  * 读取期迁移去掉或收敛为 `custom`（change: remove-canvas-groups-and-film-set）。
  */
-export const WOOHAA3_APP_NODE_TYPES = ["text", "image", "video", "audio", "model3d", "composite-asset"] as const;
+export const WOOHAA3_APP_NODE_TYPES = ["text", "image", "video", "audio", "model3d", "composite-asset", "workflow-group-2d", "scene-area", "world-camera"] as const;
 
 export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOptions): ServerCanvas {
   observeContentResolver(options?.content);
+  const worldError = validateWorldIdentities(input.document.nodes, input.nodeData);
+  if (worldError) throw new Error(worldError);
   const assets = Array.isArray(input.assets) ? input.assets.map(normalizeAsset) : [];
   const sanitizedNodeData = sanitizeWoohaa3CanvasNodeData(input.nodeData) as Woohaa3CanvasNodeDataMap<CanvasNodeData>;
   const rawDocument: Woohaa3CanvasDocument = {
@@ -56,6 +59,8 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   const migrated = migrateLegacyContainerNodes(rawDocument, sanitizedNodeData);
   const document = migrated.document;
   const migratedNodeData = migrated.nodeData;
+  const migratedWorldError = validateWorldIdentities(document.nodes, migratedNodeData);
+  if (migratedWorldError) throw new Error(migratedWorldError);
 
   const nodeIdsAfterSanitize = new Set(document.nodes.map((node) => node.id));
   document.edges = document.edges.filter(

@@ -1,0 +1,110 @@
+import { describe, expect, it } from "vitest";
+import * as Y from "yjs";
+import { applyCanvasCommands } from "../command-reducer.js";
+import { createEmptyWoohaa3ServerCanvas, parseCanvasAggregate } from "../domain/index.js";
+import { serverCanvasToYDoc, yDocToServerCanvas } from "../yjs/mapping.js";
+
+const now = "2026-11-01T00:00:00.000Z";
+const group = { kind: "workflow-group-2d", version: "shared-world-v1", groupId: "g", scopeVersion: "1", memberNodeIds: ["model"] };
+const area = { kind: "scene-area", version: "shared-world-v1", areaId: "a", scopeVersion: "1", bounds: { min: { u: 0, v: 0 }, max: { u: 2, v: 2 } } };
+const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "c", settingsVersion: "1", position: { u: 0, v: 0, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: "missing" };
+const node = (id: string, type: string) => ({ id, type, position: { x: 0, y: 0 } });
+
+describe("world identities", () => {
+  it("survives reducer, aggregate parsing and encoded Yjs reload", () => {
+    const result = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("x", now), [
+      { type: "node.add", node: node("model", "model3d") },
+      { type: "node.add", node: node("group", "workflow-group-2d"), nodeData: { workflowGroup2d: group } },
+      { type: "node.add", node: node("area", "scene-area"), nodeData: { sceneArea: area } },
+      { type: "node.add", node: node("camera", "world-camera"), nodeData: { worldCamera: camera } }
+    ], { now });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(parseCanvasAggregate(result.canvas).ok).toBe(true);
+    const doc = new Y.Doc();
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(serverCanvasToYDoc(result.canvas)));
+    const reloaded = yDocToServerCanvas(doc, { now });
+    expect(reloaded.ok).toBe(true);
+    if (reloaded.ok) expect(reloaded.canvas.nodeData.camera.worldCamera).toEqual(camera);
+    const moved = applyCanvasCommands(result.canvas, [{ type: "node.update", nodeId: "camera", position: { x: 100, y: 50 } }], { now });
+    expect(moved.ok && moved.canvas.nodeData.camera.worldCamera).toEqual(camera);
+    expect(parseCanvasAggregate({ ...result.canvas, nodeData: { ...result.canvas.nodeData, area: { sceneArea: { ...area, version: "future" } } } }).ok).toBe(false);
+    const duplicate = applyCanvasCommands(result.canvas, [{ type: "node.add", node: node("other", "scene-area"), nodeData: { sceneArea: area } }], { now });
+    expect(duplicate.ok).toBe(false);
+    expect(result.canvas.document.nodes).toHaveLength(4);
+  });
+
+  it("rejects invalid, mixed and dangling identities without modifying the input", () => {
+    const base = createEmptyWoohaa3ServerCanvas("x", now);
+    for (const [type, data] of [
+      ["scene-area", { sceneArea: { ...area, version: "future" } }],
+      ["scene-area", { worldCamera: camera }],
+      ["workflow-group-2d", { workflowGroup2d: group }],
+      ["world-camera", { worldCamera: { ...camera, gpuHandle: 1 } }]
+    ] as const) {
+      expect(applyCanvasCommands(base, [{ type: "node.add", node: node("n", type), nodeData: data }], { now }).ok).toBe(false);
+      expect(base.document.nodes).toEqual([]);
+    }
+  });
+
+  it("rejects unknown top-level runtime fields and references to dissolved containers", () => {
+    const base = createEmptyWoohaa3ServerCanvas("x", now);
+    for (const field of ["writeLease", "gpuResource"]) {
+      const result = applyCanvasCommands(base, [{ type: "node.add", node: node("camera", "world-camera"), nodeData: { worldCamera: camera, [field]: { id: 1 } } }], { now });
+      expect(result.ok).toBe(false);
+      expect(base.document.nodes).toEqual([]);
+    }
+    const added = applyCanvasCommands(base, [{ type: "node.add", node: node("camera", "world-camera"), nodeData: { worldCamera: camera } }], { now });
+    expect(added.ok).toBe(true);
+    if (added.ok) {
+      expect(applyCanvasCommands(added.canvas, [{ type: "nodeData.patch", nodeId: "camera", value: { writeLease: { owner: "run" } } }], { now }).ok).toBe(false);
+      expect(applyCanvasCommands(added.canvas, [{ type: "nodeData.patch", nodeId: "camera", value: { title: { writeLease: { owner: "run" } } as unknown as string } }], { now }).ok).toBe(false);
+      expect(added.canvas.nodeData.camera.worldCamera).toEqual(camera);
+    }
+    const legacy = { ...base, document: { ...base.document, nodes: [node("old", "group"), node("new", "workflow-group-2d")] }, nodeData: { new: { workflowGroup2d: { ...group, memberNodeIds: ["old"] } } } };
+    expect(parseCanvasAggregate(legacy).ok).toBe(false);
+    const composite = { ...legacy, document: { ...legacy.document, nodes: [node("old", "composite-asset"), node("new", "workflow-group-2d")] }, nodeData: { ...legacy.nodeData, old: { extensionId: "film-set" } } };
+    expect(parseCanvasAggregate(composite).ok).toBe(false);
+  });
+
+  it("preserves existing shot pose on a world model", () => {
+    const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } };
+    const shotPose = { azimuth: 1, distance: 2, target: [0, 0, 0] };
+    const result = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("x", now), [{ type: "node.add", node: node("model", "model3d"), nodeData: { shotPose, sharedWorldInstance: instance } }], { now });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(parseCanvasAggregate(result.canvas).ok).toBe(true);
+  });
+
+  it("rejects malformed and transient nested model configuration on add, patch and parse", () => {
+    const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } };
+    const base = createEmptyWoohaa3ServerCanvas("x", now);
+    const added = applyCanvasCommands(base, [{ type: "node.add", node: node("model", "model3d"), nodeData: { sharedWorldInstance: instance, shotPose: { distance: 2 } } }], { now });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    for (const config of [
+      { shotPose: { distance: "bad" } },
+      { shotPose: { distance: 2, gpuTexture: { id: 1 } } },
+      { parameters: { gpuTexture: { id: 1 } } },
+      ...["status", "progress", "activeRunId", "modelScriptError"].map(key => ({ [key]: { entityHandle: { id: 42 } } })),
+      { progress: "invalid-number" },
+      { modelPlacement: { offset: { x: 1 }, entityHandle: { id: 42 } } },
+      { result: { kind: "image", url: "asset", entityHandle: {} } },
+      { inputMapping: [{ sourceNodeId: "x", role: "input", entityHandle: {} }] },
+      { modelPlacement: { offset: { x: 1, runtime: {} } } },
+      { modelCameras: [{ id: "c", name: "C", order: 0, azimuth: 0, elevation: 0, distance: 2, aspect: "16:9", gpuTexture: {} }] }
+    ]) {
+      expect(parseCanvasAggregate({ ...added.canvas, nodeData: { model: { sharedWorldInstance: instance, ...config } } }).ok).toBe(false);
+      expect(applyCanvasCommands(base, [{ type: "node.add", node: node("model", "model3d"), nodeData: { sharedWorldInstance: instance, ...config } as never }], { now }).ok).toBe(false);
+      expect(applyCanvasCommands(added.canvas, [{ type: "nodeData.patch", nodeId: "model", value: config as never }], { now }).ok).toBe(false);
+      expect(added.canvas.nodeData.model.shotPose).toEqual({ distance: 2 });
+    }
+  });
+
+  it("accepts valid model task state and provider parameters", () => {
+    const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } };
+    const data = { sharedWorldInstance: instance, status: "running", taskStatus: "processing", progress: 0.5, activeRunId: "run", modelScriptError: null, parameters: { nested: { count: 2, enabled: true } } };
+    const result = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("x", now), [{ type: "node.add", node: node("model", "model3d"), nodeData: data as never }], { now });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(parseCanvasAggregate(result.canvas).ok).toBe(true);
+  });
+});

@@ -13,7 +13,7 @@
  * 用 `(canvas_id, operation_id)` 主键去重。任何失败都 `ROLLBACK`，不留下部分写入。
  */
 import type { DatabaseSync } from "node:sqlite";
-import type { ServerCanvas } from "@woohaa3/contracts";
+import { parseCanvasAggregate, type ServerCanvas } from "@woohaa3/contracts";
 import { loadNodeSqlite } from "./sqlite-loader.js";
 import { normalizeCanvasListQuery, CanvasStorageError, runCanvasMigrationsSync, type CanvasCommandCommitResult, type CanvasListQuery, type CanvasListResult, type CanvasOperationRecord, type CanvasRepository, type CanvasRepositoryHealth, type CanvasSummary, type CommitCanvasInput } from "../core/index.js";
 
@@ -505,7 +505,10 @@ function rowToOperation(row: OperationRow): CanvasOperationRecord {
 }
 
 function deserialize(json: string): ServerCanvas {
-  return JSON.parse(json) as ServerCanvas;
+  const input: unknown = JSON.parse(json);
+  const parsed = parseCanvasAggregate(input);
+  if (!parsed.ok) throw new Error(`Invalid stored canvas: ${parsed.failure.message}`);
+  return parsed.canvas;
 }
 
 function toSummary(row: CanvasRow): CanvasSummary {

@@ -1,6 +1,9 @@
 /** Shared-world v1 is independent of card layout and legacy modelPlacement. */
 export const SHARED_WORLD_VERSION = "shared-world-v1" as const;
 export const SHARED_WORLD_UNITS_PER_METER = 64;
+export const WORKFLOW_GROUP_2D_NODE_TYPE = "workflow-group-2d" as const;
+export const SCENE_AREA_NODE_TYPE = "scene-area" as const;
+export const WORLD_CAMERA_NODE_TYPE = "world-camera" as const;
 export const SCENE_FOOTPRINT_TOLERANCE_METERS = 1e-6;
 export const WORLD_ROTATION_UNIT_TOLERANCE = 1e-6;
 /** Reserved nodeData keys for T03 registration; no legacy key is reinterpreted. */

@@ -21,6 +21,9 @@ import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeModelCameras } from "../model-cameras.js";
 import { decodeModel3DNodeData } from "../canvas-node-model.js";
 import { model3DNodeDataFields } from "../animation-snapshot.js";
+import { decodeWorldInstanceData } from "../shared-world-codec.js";
+import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
+import { decodeWorldCamera } from "../world-camera-codec.js";
 
 /** 首版允许运行时持久化的 nodeData 顶层字段。 */
 export const RUNTIME_NODE_CONFIG_FIELDS = [
@@ -111,6 +114,13 @@ export function sanitizeRuntimeNodeConfigPatch(input: unknown, context?: { conte
   if (!isRecord(input)) return { ok: false, reason: "nodeData patch 必须是对象" };
 
   const value: Woohaa3CanvasJsonObject = {};
+
+  for (const [key, decode] of Object.entries({ sharedWorldInstance: decodeWorldInstanceData, workflowGroup2d: decodeWorkflowGroupData, sceneArea: decodeSceneAreaData, worldCamera: decodeWorldCamera })) {
+    if (!(key in input)) continue;
+    const result = decode(input[key]);
+    if (!result.ok) return { ok: false, reason: `Invalid ${key}: ${result.code}` };
+    value[key] = result.value as unknown as Woohaa3CanvasJsonObject[string];
+  }
 
   for (const field of RUNTIME_NODE_CONFIG_FIELDS) {
     if (!(field in input)) continue;
