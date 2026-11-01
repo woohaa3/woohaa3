@@ -156,3 +156,12 @@ export {
   type WorldReferenceRelation,
   type WorldReferenceUnavailable
 } from "./canvas/world-reference-remap.js";
+export {
+  WORLD_CAMERA_HISTORY_VERSION,
+  decodeWorldCamera,
+  decodeWorldCameraHistorySnapshot,
+  encodeWorldCamera,
+  encodeWorldCameraHistorySnapshot,
+  worldCameraCompletionKey,
+  type WorldCameraHistorySnapshot
+} from "./canvas/world-camera-codec.js";
