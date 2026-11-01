@@ -17,13 +17,12 @@
 import { useState } from "react";
 import type { ComponentType } from "react";
 import {
-  BackIcon,
   BoxIcon,
-  ChevronRightIcon,
   FileImageIcon,
   FolderPlusIcon,
   ImageIcon,
-  LayersIcon
+  LayersIcon,
+  SidebarIcon
 } from "@woohaa3/ui/icons";
 import "./canvas-asset-rail.css";
 
@@ -71,6 +70,10 @@ export function CanvasAssetRail({ hidden = false }: { hidden?: boolean }) {
      */
     <div className={`canvas-asset-rail${collapsed ? " is-collapsed" : ""}`} data-testid="canvas-asset-rail">
         <div className="canvas-asset-rail__head">
+          {/*
+            照参考稿：一个圆角方块，里面是侧栏图标（矩形 + 左侧竖线）。
+            不用左右箭头 —— 参考稿要的是「这就是一条侧栏」的形状，不是方向指示。
+          */}
           <button
             type="button"
             className="canvas-asset-rail__collapse"
@@ -79,8 +82,7 @@ export function CanvasAssetRail({ hidden = false }: { hidden?: boolean }) {
             aria-expanded={!collapsed}
             title={collapsed ? "展开资源轨" : "收起资源轨"}
           >
-            {/* 收起时箭头朝右（展开），展开时朝左（收起） —— 方向即动作 */}
-            {collapsed ? <ChevronRightIcon size={14} /> : <BackIcon size={14} />}
+            <SidebarIcon size={16} />
           </button>
         </div>
 

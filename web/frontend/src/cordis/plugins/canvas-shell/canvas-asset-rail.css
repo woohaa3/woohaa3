@@ -47,7 +47,7 @@
 .canvas-asset-rail__head {
 	display: flex;
 	align-items: center;
-	justify-content: flex-end;
+	justify-content: flex-start;
 	flex-shrink: 0;
 	margin-bottom: 14px;
 }
@@ -56,18 +56,22 @@
 	justify-content: center;
 }
 
+/* 照参考稿：一枚方正的圆角块（不是贴边的小图标按钮），
+ * 里面是侧栏图形。悬停时整块提亮，与条目的反馈一致。 */
 .canvas-asset-rail__collapse {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	flex-shrink: 0;
-	width: 22px;
-	height: 22px;
+	width: 34px;
+	height: 30px;
+	padding: 0;
 	border: 1px solid var(--app-web-border);
-	border-radius: 6px;
-	background: transparent;
-	color: var(--app-web-text-muted);
+	border-radius: 10px;
+	background: var(--app-web-subtle);
+	color: var(--app-web-text-primary);
 	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease;
 }
 
 .canvas-asset-rail__collapse:hover {

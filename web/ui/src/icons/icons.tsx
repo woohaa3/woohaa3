@@ -90,6 +90,7 @@ import {
   Music,
   Network,
   PanelTop,
+  PanelLeft,
   Pause,
   PenLine,
   Play,
@@ -168,6 +169,8 @@ export const TrashIcon = withDefaults(Trash);
 
 // 画布 chrome
 export const CanvasSwitcherIcon = withDefaults(PanelTop);
+/** 侧栏：一个长方形，左侧一条竖线 —— 收起/展开侧边栏用 */
+export const SidebarIcon = withDefaults(PanelLeft);
 export const ChevronDownIcon = withDefaults(ChevronDown);
 export const ChevronRightIcon = withDefaults(ChevronRight);
 export const MenuIcon = withDefaults(Menu);
