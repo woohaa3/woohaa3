@@ -50,7 +50,12 @@ export interface GroundAabb { min: GroundPoint; max: GroundPoint }
  * Structural node layout remains separate. Never infer these from legacy group/shot.
  */
 export interface WorldInstanceData { kind: "world-instance"; version: typeof SHARED_WORLD_VERSION; instanceId: WorldId; transform: WorldTransform }
-export interface WorkflowGroupData { kind: "workflow-group-2d"; version: typeof SHARED_WORLD_VERSION; groupId: WorldId; memberNodeIds: WorldId[] }
+/** Membership or group identity changes replace scopeVersion; card layout, viewport and
+ * hover changes do not. Membership is an organizational context, not 3D write access. */
+export interface WorkflowGroupData { kind: "workflow-group-2d"; version: typeof SHARED_WORLD_VERSION; groupId: WorldId; scopeVersion: WorldVersion; memberNodeIds: WorldId[] }
+/** Bounds or area identity changes replace scopeVersion. Object pose, footprint and
+ * content changes require fresh eligibility against object/content versions even when
+ * this scopeVersion is unchanged. */
 export interface SceneAreaData { kind: "scene-area"; version: typeof SHARED_WORLD_VERSION; areaId: WorldId; scopeVersion: WorldVersion; bounds: GroundAabb }
 export type WorldCameraProjection =
   | { kind: "isometric"; verticalSizeMeters: number; nearMeters: number; farMeters: number }
@@ -117,8 +122,16 @@ export type WorldObjectIdentity =
   | { kind: "instance"; instanceId: WorldId }
   | { kind: "camera"; cameraId: WorldId };
 export type WorldObjectVersion = WorldObjectIdentity & { version: WorldVersion };
+/** Scope IDs are namespaced by kind; a group and area may have the same ID. */
+export type WorldScopeIdentity =
+  | { kind: "workflow-group-2d"; groupId: WorldId }
+  | { kind: "scene-area"; areaId: WorldId };
+export interface WorldScopeVersion { scope: WorldScopeIdentity; scopeVersion: WorldVersion }
+/** Host-derived eligibility and corresponding leases are required for world writes,
+ * including writes initiated from a 2D group context. Membership alone grants none. */
+export interface WorldToolContext { canvasId: WorldId; scope: WorldScopeVersion }
 export interface SpatialLeaseIdentity { canvasId: WorldId; runId: WorldId; epoch: number; target: WorldObjectIdentity }
-export interface SpatialLeaseRequest { requestId: WorldId; canvasId: WorldId; runId: WorldId; epoch: number; scopeId: WorldId; scopeVersion: WorldVersion; targets: WorldObjectVersion[] }
+export interface SpatialLeaseRequest { requestId: WorldId; canvasId: WorldId; runId: WorldId; epoch: number; scope: WorldScopeVersion; targets: WorldObjectVersion[] }
 export interface SpatialLeaseConflict { target: WorldObjectIdentity; runId: WorldId; epoch: number }
 export type SpatialLeaseResult = { ok: true; leases: SpatialLeaseIdentity[] } | { ok: false; code: SharedWorldFailureCode; conflicts?: SpatialLeaseConflict[] };
 export interface WorldCompletion { canvasId: WorldId; runId: WorldId; completionId: WorldId; cameraId: WorldId; settingsVersion: WorldVersion }
