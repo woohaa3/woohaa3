@@ -40,35 +40,20 @@
 	padding: 10px 4px;
 }
 
-/* ───────── 顶部：工作区入口 + 收起 ───────── */
+/* ───────── 顶部：收起 / 展开 ─────────
+ * 参考稿这里还有一枚「工作区切换器」（反色方块 + 下拉箭头）。**没有搬过来**：
+ * 四喜的项目就是宿主的画布，没有工作区分层这回事，搬过来会是个点了没反应的假按钮。 */
 
 .canvas-asset-rail__head {
 	display: flex;
 	align-items: center;
-	gap: 4px;
+	justify-content: flex-end;
 	flex-shrink: 0;
 	margin-bottom: 14px;
 }
 
 .canvas-asset-rail.is-collapsed .canvas-asset-rail__head {
-	flex-direction: column;
-}
-
-/* 参考稿里是一枚反色方块（深底浅图），旁边一个下拉箭头 */
-.canvas-asset-rail__workspace {
-	display: inline-flex;
-	align-items: center;
 	justify-content: center;
-	gap: 3px;
-	flex: 1;
-	min-width: 0;
-	height: 36px;
-	padding: 0 4px;
-	border: 0;
-	border-radius: 10px;
-	background: var(--app-web-text-primary);
-	color: var(--app-web-panel);
-	cursor: pointer;
 }
 
 .canvas-asset-rail__collapse {

@@ -19,7 +19,6 @@ import type { ComponentType } from "react";
 import {
   BackIcon,
   BoxIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   FileImageIcon,
   FolderPlusIcon,
@@ -72,15 +71,6 @@ export function CanvasAssetRail({ hidden = false }: { hidden?: boolean }) {
      */
     <div className={`canvas-asset-rail${collapsed ? " is-collapsed" : ""}`} data-testid="canvas-asset-rail">
         <div className="canvas-asset-rail__head">
-          <button
-            type="button"
-            className="canvas-asset-rail__workspace"
-            aria-label="切换工作区（未接入）"
-            title="切换工作区（未接入）"
-          >
-            <LayersIcon size={16} />
-            {!collapsed && <ChevronDownIcon size={12} />}
-          </button>
           <button
             type="button"
             className="canvas-asset-rail__collapse"
