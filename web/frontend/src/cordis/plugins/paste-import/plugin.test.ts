@@ -134,6 +134,20 @@ afterEach(async () => {
 });
 
 describe("Paste Import Plugin", () => {
+  it("reports missing group members and rejects malformed assets at the real paste entry", async () => {
+    const harness = await makeHarness(); runtime = harness.runtime;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());
+    const open = vi.spyOn(harness.dialogs, "open");
+    const base = { format: "infinspire-canvas-copy-v1", nodes: [{ id: "g", type: "workflow-group-2d", position: { x: 0, y: 0 } }], edges: [], incomingEdges: [], nodeData: { g: { workflowGroup2d: { kind: "workflow-group-2d", version: "shared-world-v1", groupId: "g", scopeVersion: "1", memberNodeIds: ["missing"] } } } };
+    const paste = (value: unknown) => harness.slots.list("input.paste")[0]!.handle({ clipboardData: { files: [], items: [], types: [], getData: () => JSON.stringify(value) } } as unknown as ClipboardEvent);
+    expect(paste(base)).toBe(true);
+    expect(open.mock.calls[0]![0]).toMatchObject({ payload: { description: expect.stringContaining("缺失成员一起复制") } });
+    window.dispatchEvent(new CustomEvent("woohaa3-canvas-duplicate", { detail: JSON.stringify(base) }));
+    expect(open.mock.calls[1]![0]).toMatchObject({ payload: { description: expect.stringContaining("缺失成员一起复制") } });
+    for (const assets of [{}, [null], [{ id: "bad" }]]) expect(paste({ ...base, assets })).toBe(true);
+    expect(open).toHaveBeenCalledTimes(5);
+    expect(harness.record).not.toHaveBeenCalled();
+  });
   it("reports an unavailable world binding through the real paste and duplicate handlers", async () => {
     const harness = await makeHarness(); runtime = harness.runtime;
     woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());

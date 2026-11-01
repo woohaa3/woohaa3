@@ -173,7 +173,9 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   });
   if (!world.ok) {
     options.onRefusal?.(world.code === "binding-unavailable"
-      ? "绑定的模型不在复制集合中，请将目标模型一起复制后重试。"
+      ? world.field === "memberNodeIds"
+        ? `组成员 ${world.reference?.id ?? ""} 不在复制集合中，请将缺失成员一起复制后重试。`
+        : "绑定的模型不在复制集合中，请将目标模型一起复制后重试。"
       : "复制内容无效，无法粘贴。请检查选择后重试。");
     return null;
   }

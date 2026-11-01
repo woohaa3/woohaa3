@@ -274,6 +274,19 @@ export function isCanvasCopyPayload(input: unknown): input is CanvasCopyPayload 
     return false;
   }
   if (!isRecord(input.nodeData)) return false;
+  if (Object.values(input.nodeData).some((value) => !isRecord(value))) return false;
+  if (input.assets !== undefined) {
+    if (!Array.isArray(input.assets)) return false;
+    const ids = new Set<string>();
+    for (const asset of input.assets) {
+      if (!isRecord(asset) || typeof asset.id !== "string" || !asset.id || ids.has(asset.id) ||
+          typeof asset.title !== "string" || typeof asset.createdAt !== "string" || !asset.createdAt ||
+          !["image", "video", "audio", "text", "storyboard", "file"].includes(asset.mediaKind as string) ||
+          !["generated", "uploaded", "external"].includes(asset.source as string) ||
+          !["ready", "generating", "needs-review", "missing", "failed"].includes(asset.status as string)) return false;
+      ids.add(asset.id);
+    }
+  }
   const nodeIds = new Set<string>();
   for (const node of input.nodes) {
     if (!isRecord(node) || typeof node.id !== "string" || node.id === "") return false;

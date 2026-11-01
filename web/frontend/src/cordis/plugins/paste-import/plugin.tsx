@@ -205,6 +205,14 @@ export function pasteImportExtension(): Plugin.Function<void> {
           // 页内 fallback：浏览器未派发可用文本时使用复制时的内存载荷。
           const fallbackText = text || readMemoryClipboard();
           const resolvedInternal = internal ?? parseCanvasCopyPayload(fallbackText);
+          if (!resolvedInternal && fallbackText) {
+            try {
+              if (JSON.parse(fallbackText)?.format === "infinspire-canvas-copy-v1") {
+                if (writable()) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴作品", description: "复制内容无效，请重新选择作品后复制。" } });
+                return true;
+              }
+            } catch { /* Ordinary clipboard text. */ }
+          }
           const { files } = classifyTransferFiles(data);
           const intent = resolvePasteIntent({
             text,
