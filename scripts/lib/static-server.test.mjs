@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
-import { createStaticHandler } from './static-server.mjs';
+import { createStaticHandler, serveFile } from './static-server.mjs';
 let dir, server, base;
 const payload = Buffer.from('wasm fixture '.repeat(1000));
 before(async () => {
@@ -89,5 +89,50 @@ test('HTML 响应按启动标题注入，保留 gzip、HEAD 与原文件字节',
   } finally {
     await new Promise(resolve => titled.close(resolve));
     await fs.rm(titleDir, { recursive: true, force: true });
+  }
+});
+
+// 回归：缺文件必须 404，**绝不能把宿主进程打死**。
+//
+// 现场：`browser-dist/` 是整目录替换的，宿主按启动时的目录建了映射，之后重建扩展，
+// 旧入口文件就没了；请求仍然带着旧路径。`statSync` 抛出的 ENOENT 一度没被接住，
+// 一路冒到 `uncaughtException`，整个宿主进程退出 —— 桌面端表现是一直卡在启动页，
+// 5174/5181 一起消失，日志里只有一条 ENOENT。发生过两次。
+//
+// 这条用例直接调 `serveFile`（绕开静态处理器里先做存在性判断的那条路径），
+// 才能命中"路由判定时还在、读盘时已消失"的真实条件。
+test('serveFile 对缺失文件返回 404 而不是抛异常', async () => {
+  const server = http.createServer((req, res) => {
+    serveFile(req, res, path.join(dir, 'gone', 'entry-vanished-ABCDEFGH.js'), { immutable: true });
+  });
+  const crashes = [];
+  // 漏出去的异常会在这里被捕获；不装的话 node 会按 uncaughtException 记一条
+  const onUncaught = (error) => crashes.push(error);
+  process.on('uncaughtException', onUncaught);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${server.address().port}/extensions/x/gone.js`;
+  // `agent: false` 让每个请求用完即关：Node 19+ 的 globalAgent 默认 keepAlive，
+  // 留着空闲连接时 `server.close()` 会一直等下去（这条用例最早就是卡在这里）。
+  const call = (method) => new Promise((resolve, reject) => {
+    const req = http.request(url, { method, agent: false }, (r) => {
+      const chunks = [];
+      r.on('data', (c) => chunks.push(c));
+      r.on('end', () => resolve({ status: r.statusCode, body: Buffer.concat(chunks).toString() }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  try {
+    const res = await call('GET');
+    assert.equal(res.status, 404);
+    assert.equal(res.body, 'not found');
+    // 服务仍然活着：同一个端口再请求一次照样有响应
+    assert.equal(server.listening, true);
+    assert.equal((await call('HEAD')).status, 404);
+    assert.deepEqual(crashes, [], '缺失文件不应产生未捕获异常');
+  } finally {
+    process.off('uncaughtException', onUncaught);
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
   }
 });

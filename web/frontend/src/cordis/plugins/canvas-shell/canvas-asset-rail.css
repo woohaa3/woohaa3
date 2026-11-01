@@ -26,8 +26,8 @@
 	/*
 	 * **z-index 必须低于左上角那条 `.canvas-topbar`（44）**：那是浮动在画布上的
 	 * 画布切换器，位置在 left/top 16。栏若压到它上面，切换器就点不到了。
-	 * 左上角那一块的重叠由六喜的画布态顶栏（z 55，占住顶部 52px）在桌面端挡住，
-	 * 浏览器宿主里两条都可见时以顶栏为准 —— 不要让这条栏去争。
+	 * 两者在左上角的重叠由下面「画布让位」一节处理 —— 把切换器**让到栏右边**，
+	 * 而不是把栏提到它上面（那样切换器就点不到了）。
 	 */
 	z-index: 20;
 	left: 0;
@@ -222,4 +222,22 @@
 .app:has(> .canvas-asset-rail.is-collapsed) > .bevy-canvas-surface,
 .app:has(> .canvas-asset-rail.is-collapsed) > .bevy-canvas-curtain {
 	left: 64px;
+}
+
+/*
+ * 左上角那条浮动的 `.canvas-topbar`（宿主的画布切换器，`position: fixed`、left 16、top 16、
+ * z 44）也要让到栏右边 —— 否则它正好压在栏顶部的收起按钮上（实测按钮 x 12–46、y 7–37，
+ * 切换器 x 16–151、y 16–42，`elementFromPoint` 命中的是切换器，按钮点不到）。
+ *
+ * 它是 `position: fixed`，不受 `.app` 的定位影响，必须单独给左偏移。
+ * 两种宽度各写一条，与画布表面保持一致。
+ */
+.app:has(> .canvas-asset-rail) > .canvas-topbar {
+	left: calc(248px + 16px);
+	max-width: calc(100vw - 248px - 32px);
+}
+
+.app:has(> .canvas-asset-rail.is-collapsed) > .canvas-topbar {
+	left: calc(64px + 16px);
+	max-width: calc(100vw - 64px - 32px);
 }
