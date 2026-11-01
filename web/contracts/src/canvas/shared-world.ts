@@ -1,0 +1,132 @@
+/** Shared-world v1 is independent of card layout and legacy modelPlacement. */
+export const SHARED_WORLD_VERSION = "shared-world-v1" as const;
+export const SHARED_WORLD_UNITS_PER_METER = 64;
+export const SCENE_FOOTPRINT_TOLERANCE_METERS = 1e-6;
+export const WORLD_ROTATION_UNIT_TOLERANCE = 1e-6;
+/** Reserved nodeData keys for T03 registration; no legacy key is reinterpreted. */
+export const SHARED_WORLD_NODE_DATA_KEYS = {
+  instance: "sharedWorldInstance", group: "workflowGroup2d", area: "sceneArea", camera: "worldCamera"
+} as const;
+
+export type WorldPoint = { u: number; v: number; h: number };
+/** Right-handed quaternion [u, v, h, w], unit length. */
+export type WorldRotation = readonly [number, number, number, number];
+export type RendererVector = readonly [number, number, number];
+export type RendererRotation = readonly [number, number, number, number];
+
+/** Position in meters; uniform positive scale. Rotation acts after asset-local transforms.
+ * Quaternion composition is parent * child (child applied first). Asset local coordinates
+ * remain Y-up; conjugate a world rotation by the basis change before applying it in Bevy.
+ */
+export interface WorldTransform {
+  version: typeof SHARED_WORLD_VERSION;
+  position: WorldPoint;
+  rotation: WorldRotation;
+  scale: number;
+}
+
+/** These adapters operate on already validated finite values; codecs own rejection. */
+export function worldToRendererPosition(p: WorldPoint): RendererVector {
+  return [p.u * SHARED_WORLD_UNITS_PER_METER, p.h * SHARED_WORLD_UNITS_PER_METER, -p.v * SHARED_WORLD_UNITS_PER_METER];
+}
+export function rendererToWorldPosition(p: RendererVector): WorldPoint {
+  return { u: p[0] / SHARED_WORLD_UNITS_PER_METER, v: -p[2] / SHARED_WORLD_UNITS_PER_METER, h: p[1] / SHARED_WORLD_UNITS_PER_METER };
+}
+export function worldToRendererRotation(q: WorldRotation): RendererRotation {
+  return [q[0], q[2], -q[1], q[3]];
+}
+export function rendererToWorldRotation(q: RendererRotation): WorldRotation {
+  return [q[0], -q[2], q[1], q[3]];
+}
+
+/** Stable IDs are nonempty strings; versions are opaque nonempty strings, not counters. */
+export type WorldId = string;
+export type WorldVersion = string;
+export interface GroundPoint { u: number; v: number }
+/** Finite ordered endpoints, in meters. Zero width/height is valid, not empty. */
+export interface GroundAabb { min: GroundPoint; max: GroundPoint }
+
+/** New nodeData fields; keys here are the complete v1 allowlist for each payload.
+ * Structural node layout remains separate. Never infer these from legacy group/shot.
+ */
+export interface WorldInstanceData { kind: "world-instance"; version: typeof SHARED_WORLD_VERSION; instanceId: WorldId; transform: WorldTransform }
+export interface WorkflowGroupData { kind: "workflow-group-2d"; version: typeof SHARED_WORLD_VERSION; groupId: WorldId; memberNodeIds: WorldId[] }
+export interface SceneAreaData { kind: "scene-area"; version: typeof SHARED_WORLD_VERSION; areaId: WorldId; scopeVersion: WorldVersion; bounds: GroundAabb }
+export type WorldCameraProjection =
+  | { kind: "isometric"; verticalSizeMeters: number; nearMeters: number; farMeters: number }
+  | { kind: "perspective"; verticalFovRadians: number; nearMeters: number; farMeters: number };
+/** Dynamic sampling semantics are specified by the later animation contract. */
+export type WorldCameraCaptureMode = { kind: "static" } | { kind: "dynamic" };
+export interface WorldCameraData {
+  kind: "world-camera"; version: typeof SHARED_WORLD_VERSION; cameraId: WorldId;
+  settingsVersion: WorldVersion; position: WorldPoint; rotation: WorldRotation;
+  projection: WorldCameraProjection; captureMode: WorldCameraCaptureMode; aspect: { width: number; height: number };
+  /** null means unbound; a missing bound target must never be treated as null. */
+  boundInstanceId: WorldId | null;
+}
+/** Camera local -Z is forward and +Y is up in the Y-up renderer. Isometric uses
+ * orthographic projection with its normalized forward direction having equal absolute
+ * components on all renderer axes (within WORLD_ROTATION_UNIT_TOLERANCE).
+ * The pose selects the viewing octant and roll; arbitrary orthographic poses are not isometric.
+ */
+export type SharedWorldNodeData = WorldInstanceData | WorkflowGroupData | SceneAreaData | WorldCameraData;
+
+/** OC01 implements these; unknown versions, extra fields, non-finite numbers, non-unit
+ * rotations (absolute difference of squared norm from 1 greater than
+ * WORLD_ROTATION_UNIT_TOLERANCE), non-positive scale/aspect and invalid projection
+ * ranges reject atomically. Projection requires 0 < near < far; perspective FOV is
+ * strictly between 0 and pi; isometric vertical size is positive and its pose follows the
+ * direction rule above. IDs and versions must be nonempty; group members must be unique.
+ * A document-context validator must reject group members that resolve to groups; the
+ * pure codec cannot determine member types from IDs alone.
+ * A failed decode preserves the caller's previous state and the original input.
+ */
+export type SharedWorldDecodeResult<T> = { ok: true; value: T } | { ok: false; code: "unsupported-version" | "invalid-data"; input: unknown };
+export interface SharedWorldCodec {
+  decodeTransform(input: unknown): SharedWorldDecodeResult<WorldTransform>;
+  decodeNodeData(input: unknown): SharedWorldDecodeResult<SharedWorldNodeData>;
+  encodeTransform(value: WorldTransform): unknown;
+  encodeNodeData(value: SharedWorldNodeData): unknown;
+}
+
+/** Authority supplies a conservative world-space ground AABB, not a screen bbox.
+ * Versions identify the exact content and pose used to compute it. Stale, missing,
+ * non-finite, unordered or unready data is unknown and never grants write access.
+ */
+export type SceneFootprintInput =
+  | { status: "ready"; bounds: GroundAabb; contentVersion: WorldVersion; transformVersion: WorldVersion }
+  | { status: "missing" | "stale" | "unready" };
+export type SceneContainment = "complete" | "partial" | "outside" | "unknown";
+export interface SceneFootprintQuery { area: GroundAabb; footprint: SceneFootprintInput; contentVersion: WorldVersion; transformVersion: WorldVersion }
+export interface SceneCameraPointQuery { area: GroundAabb; position: WorldPoint }
+/** T02 implements these. Complete includes boundary contact within the fixed tolerance;
+ * Specifically complete means footprint.min >= area.min - tolerance and
+ * footprint.max <= area.max + tolerance on both axes. Otherwise partial means
+ * footprint.max >= area.min - tolerance and footprint.min <= area.max + tolerance
+ * on both axes; otherwise outside.
+ * A degenerate AABB is still a point/line. Invalid area or point yields unknown.
+ * Camera point returns complete or outside (or unknown), ignoring height and card layout.
+ */
+export interface SceneFootprintFunctions {
+  classifyFootprint(input: SceneFootprintQuery): SceneContainment;
+  classifyCameraPoint(input: SceneCameraPointQuery): SceneContainment;
+}
+
+export interface WorldObjectVersion { instanceId: WorldId; version: WorldVersion }
+export interface SpatialLeaseIdentity { canvasId: WorldId; runId: WorldId; epoch: number; instanceId: WorldId }
+export interface SpatialLeaseRequest { requestId: WorldId; canvasId: WorldId; runId: WorldId; epoch: number; scopeId: WorldId; scopeVersion: WorldVersion; targets: WorldObjectVersion[] }
+export interface SpatialLeaseConflict { instanceId: WorldId; runId: WorldId; epoch: number }
+export type SpatialLeaseResult = { ok: true; leases: SpatialLeaseIdentity[] } | { ok: false; code: SharedWorldFailureCode; conflicts?: SpatialLeaseConflict[] };
+export interface WorldCompletion { canvasId: WorldId; runId: WorldId; completionId: WorldId; cameraId: WorldId; settingsVersion: WorldVersion }
+export interface WorldCaptureVersionKey { canvasId: WorldId; cameraId: WorldId; worldContentVersion: WorldVersion; cameraSettingsVersion: WorldVersion; bindingVersion: WorldVersion; outputVersion: WorldVersion }
+export interface WorldCaptureInput { key: WorldCaptureVersionKey; mediaId: WorldId; checksum: string }
+export type SharedWorldFailureCode = "unsupported-version" | "invalid-data" | "not-ready" | "version-conflict" | "lease-conflict" | "stale-epoch" | "outside-scope" | "target-unavailable" | "capture-stale" | "cancelled";
+
+/** Commands describe atomic intent; implementation, authorization and undo are downstream. */
+export type SharedWorldCommand =
+  | { kind: "convert-to-shared-world"; operationId: WorldId; sourceVersion: WorldVersion; targets: WorldObjectVersion[] }
+  | { kind: "set-world-transform"; operationId: WorldId; target: WorldObjectVersion; transform: WorldTransform; lease: SpatialLeaseIdentity }
+  | { kind: "move-scene-area"; operationId: WorldId; areaId: WorldId; scopeVersion: WorldVersion; targets: WorldObjectVersion[]; delta: GroundPoint }
+  | { kind: "resize-scene-area"; operationId: WorldId; areaId: WorldId; scopeVersion: WorldVersion; bounds: GroundAabb }
+  | { kind: "delete-scene-area"; operationId: WorldId; areaId: WorldId; scopeVersion: WorldVersion; targets: WorldObjectVersion[] }
+  | { kind: "set-world-camera"; operationId: WorldId; target: WorldObjectVersion; camera: WorldCameraData; lease: SpatialLeaseIdentity };

@@ -111,8 +111,9 @@ fn rejects_unsupported_canvas_scene_version() {
         Err("Unsupported canvas render scene version")
     );
     // A composite-asset node is now an ordinary card: its former presentation field is ignored.
-    let plain = parse(&scene_json(
-        r#","nodes":[{"id":"c","type":"composite-asset","x":0,"y":0,"width":200,"height":150,"compositeAsset":{"x":0,"y":0,"width":200,"height":150}}]"#,
+    let plain = parse(&scene_json("").replace(
+        r#""nodes":[]"#,
+        r#""nodes":[{"id":"c","type":"composite-asset","x":0,"y":0,"width":200,"height":150,"compositeAsset":{"x":0,"y":0,"width":200,"height":150}}]"#,
     ));
     assert!(plain.validate().is_ok());
 }

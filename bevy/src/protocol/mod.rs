@@ -23,6 +23,7 @@ mod position;
 mod prepared;
 mod scene;
 mod scene_instant;
+mod shared_world;
 mod theme;
 mod video_focus;
 mod viewport;
