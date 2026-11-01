@@ -240,6 +240,7 @@ export function pasteImportExtension(): Plugin.Function<void> {
         const detail = (event as CustomEvent<unknown>).detail;
         const payload = typeof detail === "string" ? parseCanvasCopyPayload(detail) : null;
         if (payload) pasteInternal(payload);
+        else if (writable()) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法重复作品", description: "复制内容无效，请重新选择作品后重试。" } });
       };
       window.addEventListener(DUPLICATE_CANVAS_EVENT, onDuplicate);
       disposers.push(() => window.removeEventListener(DUPLICATE_CANVAS_EVENT, onDuplicate));

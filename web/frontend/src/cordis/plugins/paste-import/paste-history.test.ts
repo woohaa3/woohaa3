@@ -14,8 +14,13 @@ import { buildCanvasCopyPayload } from "../canvas-shell/clipboard/payload.js";
 import { pasteImportExtension } from "./plugin.js";
 import { createKeyboardShortcuts } from "../canvas-shell/interaction-keyboard.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { SqliteCanvasRepository } from "../../../../../services/canvas-service/src/storage/sqlite/index.js";
+import { CanvasApplicationService } from "../../../../../services/canvas-service/src/storage/core/index.js";
 
-it("duplicates a world collection through the page journal and replays the same identities", async () => {
+it.each(["duplicate", "paste"])("%s a world collection through the page journal and SQLite restarts", async (entry) => {
   const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 1, v: 2, h: 3 }, rotation: [0, 0, 0, 1], scale: 2 } };
   const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "c", settingsVersion: "1", position: { u: 1, v: 2, h: 4 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: "i" };
   const created = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("world"), [
@@ -26,15 +31,26 @@ it("duplicates a world collection through the page journal and replays the same 
   ] as never);
   if (!created.ok) throw Error("invalid fixture");
   let canonical = created.canvas;
-  const session = { isWritable: () => true, commandLifecycle: () => null, submitCommands(commands: readonly CanvasCommand[]) {
-    const result = applyCanvasCommands(canonical, commands);
-    if (!result.ok) throw Error(JSON.stringify(result));
-    canonical = result.canvas; woohaa3CanvasStore.getState().applyRemoteCanvas(canonical);
-    return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } };
+  const dir = mkdtempSync(path.join(tmpdir(), "world-copy-"));
+  const db = path.join(dir, "canvas.sqlite");
+  let repository = new SqliteCanvasRepository({ path: db });
+  await repository.createCanvas(canonical);
+  canonical = (await repository.getCanvas(canonical.id))!;
+  const slots = new SlotRegistry();
+  const session = { isWritable: () => true, commandLifecycle: () => null, submitCommands(commands: readonly CanvasCommand[], operationId: string) {
+    const settled = (async () => {
+      await new CanvasApplicationService({ repository }).commitCommands({ canvasId: canonical.id, expectedRevision: canonical.revision, operationId, actorId: "copy-test", commands });
+      repository.close();
+      repository = new SqliteCanvasRepository({ path: db });
+      canonical = (await repository.getCanvas(canonical.id))!;
+      woohaa3CanvasStore.getState().applyRemoteCanvas(canonical);
+      return { state: "committed", error: null };
+    })();
+    return { ok: true, handle: { settled } };
   } } as unknown as CanvasSession;
   const edit = createCanvasEditService({ session, getCanvas: () => canonical });
   const runtime = await startFrontendRuntime({ installPlatform(ctx) {
-    ctx.provide("slots", new SlotRegistry()); ctx.provide("inputScopes", new InputScopeService()); ctx.provide("dialogs", new DialogService());
+    ctx.provide("slots", slots); ctx.provide("inputScopes", new InputScopeService()); ctx.provide("dialogs", new DialogService());
     ctx.provide("canvasSession", session); ctx.provide("canvasRemote", {} as never); ctx.provide("canvasEdit", edit as never);
     ctx.provide("selection", { getSnapshot: () => ({ nodeIds: [], primaryNodeId: null, editingFocus: false, keyboardActive: true }) } as never);
     ctx.provide("canvasRuntime", { lastPointerWorld: () => ({ x: 500, y: 500 }), controller: () => ({ viewport: () => ({ x: 0, y: 0, zoom: 1 }) }) } as never);
@@ -44,13 +60,22 @@ it("duplicates a world collection through the page journal and replays the same 
     nodeSelectionStore.setFromRuntime({ nodeIds: ["m", "g", "a", "c"], primaryNodeId: "m", editingFocus: false }, new Set(["m", "g", "a", "c"]));
     const keyboard = createKeyboardShortcuts({ options: { getSession: () => session }, target: window, writable: () => true,
       state: {}, model: { active: false }, schedule: () => {}, modalActive: () => false, attachActive: () => false } as never);
-    keyboard.onKeyDown(new KeyboardEvent("keydown", { key: "d", ctrlKey: true, bubbles: true, cancelable: true }));
+    if (entry === "duplicate") keyboard.onKeyDown(new KeyboardEvent("keydown", { key: "d", ctrlKey: true, bubbles: true, cancelable: true }));
+    else {
+      keyboard.onKeyDown(new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true }));
+      await expect.poll(() => (window as unknown as Record<string, unknown>).__canvasMemoryClipboard).toBeTruthy();
+      const text = (window as unknown as Record<string, string>).__canvasMemoryClipboard;
+      expect(slots.list("input.paste")[0]!.handle({ clipboardData: { files: [], items: [], types: [], getData: () => text } } as unknown as ClipboardEvent)).toBe(true);
+    }
     await expect.poll(() => canonical.document.nodes.length).toBe(8);
+    await expect.poll(() => edit.getSnapshot().canUndo).toBe(true);
     const copyIds = canonical.document.nodes.map(n => n.id).filter(id => !["m", "g", "a", "c"].includes(id));
     const copied = structuredClone(copyIds.map(id => canonical.nodeData[id]));
     const copiedCamera = copied.find(data => data.worldCamera)?.worldCamera as typeof camera;
     const copiedInstance = copied.find(data => data.sharedWorldInstance)?.sharedWorldInstance as typeof instance;
     expect(copiedCamera.boundInstanceId).toBe(copiedInstance.instanceId);
+    expect(copiedInstance.instanceId).not.toBe(instance.instanceId);
+    expect(copiedCamera.cameraId).not.toBe(camera.cameraId);
     expect(copiedInstance.transform).toEqual(instance.transform);
     expect(copiedCamera.position).toEqual(camera.position);
     const copiedGroup = copied.find(data => data.workflowGroup2d)!.workflowGroup2d as { groupId: string; scopeVersion: string; memberNodeIds: string[] };
@@ -66,9 +91,13 @@ it("duplicates a world collection through the page journal and replays the same 
     expect(canonical.nodeData.m.sharedWorldInstance).toEqual(instance);
     expect(await edit.undo()).toEqual({ ok: true });
     expect(canonical.document.nodes).toHaveLength(4);
+    const undone = yDocToServerCanvas(serverCanvasToYDoc(canonical));
+    expect(undone.ok && undone.canvas.nodeData).toEqual(canonical.nodeData);
     expect(await edit.redo()).toEqual({ ok: true });
     expect(copyIds.map(id => canonical.nodeData[id])).toEqual(copied);
-  } finally { nodeSelectionStore.reset(); await runtime.dispose(); woohaa3CanvasStore.getState().applyRemoteCanvas(null as never); }
+    const redone = yDocToServerCanvas(serverCanvasToYDoc(canonical));
+    expect(redone.ok && redone.canvas.nodeData).toEqual(canonical.nodeData);
+  } finally { delete (window as unknown as Record<string, unknown>).__canvasMemoryClipboard; nodeSelectionStore.reset(); await runtime.dispose(); woohaa3CanvasStore.getState().applyRemoteCanvas(null as never); repository.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
 it("real paste contribution/journal undo removes only the copy and redo preserves original project references", async () => {

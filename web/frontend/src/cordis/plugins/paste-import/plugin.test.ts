@@ -148,6 +148,24 @@ describe("Paste Import Plugin", () => {
     expect(open).toHaveBeenCalledTimes(5);
     expect(harness.record).not.toHaveBeenCalled();
   });
+  it("rejects malformed edge data at paste and duplicate without committing", async () => {
+    const harness = await makeHarness(); runtime = harness.runtime;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());
+    const open = vi.spyOn(harness.dialogs, "open");
+    const base = { format: "infinspire-canvas-copy-v1", nodes: [{ id: "a", type: "text", position: { x: 0, y: 0 } }, { id: "b", type: "text", position: { x: 1, y: 0 } }], edges: [], incomingEdges: [], nodeData: {} };
+    for (const key of ["edges", "incomingEdges"]) {
+      for (const data of [undefined, null, [], "invalid"]) {
+        const payload = { ...base, [key]: [{ id: "e", source: "a", target: "b", data }] };
+        const text = JSON.stringify(payload);
+        expect(harness.slots.list("input.paste")[0]!.handle({ clipboardData: { files: [], items: [], types: [], getData: () => text } } as unknown as ClipboardEvent)).toBe(true);
+        harness.dialogs.close();
+        window.dispatchEvent(new CustomEvent("woohaa3-canvas-duplicate", { detail: text }));
+        harness.dialogs.close();
+      }
+    }
+    expect(open).toHaveBeenCalledTimes(16);
+    expect(harness.record).not.toHaveBeenCalled();
+  });
   it("reports an unavailable world binding through the real paste and duplicate handlers", async () => {
     const harness = await makeHarness(); runtime = harness.runtime;
     woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());

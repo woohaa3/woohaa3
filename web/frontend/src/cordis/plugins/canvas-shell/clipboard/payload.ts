@@ -298,10 +298,12 @@ export function isCanvasCopyPayload(input: unknown): input is CanvasCopyPayload 
   for (const edge of input.edges) {
     if (!isRecord(edge) || typeof edge.id !== "string" || edge.id === "") return false;
     if (typeof edge.source !== "string" || typeof edge.target !== "string") return false;
+    if (!isRecord(edge.data)) return false;
     if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) return false;
   }
   for (const edge of input.incomingEdges) {
     if (!isRecord(edge) || typeof edge.source !== "string" || typeof edge.target !== "string") return false;
+    if (!isRecord(edge.data)) return false;
     if (!nodeIds.has(edge.target)) return false;
   }
   // 工程对象引用可选（旧载荷没有）；存在时逐字段校验，不接受的形状整条拒绝。
