@@ -127,13 +127,31 @@ export type WorldScopeIdentity =
   | { kind: "workflow-group-2d"; groupId: WorldId }
   | { kind: "scene-area"; areaId: WorldId };
 export interface WorldScopeVersion { scope: WorldScopeIdentity; scopeVersion: WorldVersion }
-/** Host-derived eligibility and corresponding leases are required for world writes,
- * including writes initiated from a 2D group context. Membership alone grants none. */
-export interface WorldToolContext { canvasId: WorldId; scope: WorldScopeVersion }
 export interface SpatialLeaseIdentity { canvasId: WorldId; runId: WorldId; epoch: number; target: WorldObjectIdentity }
 export interface SpatialLeaseRequest { requestId: WorldId; canvasId: WorldId; runId: WorldId; epoch: number; scope: WorldScopeVersion; targets: WorldObjectVersion[] }
 export interface SpatialLeaseConflict { target: WorldObjectIdentity; runId: WorldId; epoch: number }
 export type SpatialLeaseResult = { ok: true; leases: SpatialLeaseIdentity[] } | { ok: false; code: SharedWorldFailureCode; conflicts?: SpatialLeaseConflict[] };
+export interface WorldToolWritableTarget { target: WorldObjectVersion; lease: SpatialLeaseIdentity }
+/** Issued by the host after eligibility and atomic lease acquisition, never trusted from
+ * assistant input. Each writable target has exactly one matching lease with this context's
+ * canvasId, runId, epoch and typed target identity. Targets are unique and the writable
+ * and read-only sets are disjoint; read-only references acquire no write lease. Partial
+ * containment is read-only. A 2D group's membership alone grants no world write access.
+ * Each submission revalidates the scope, target versions, current spatial eligibility and
+ * leases. Scope, object, content or pose changes invalidate affected eligibility; an old
+ * context cannot implicitly expand its grant. New objects or expanded grants require a
+ * fresh eligibility check and atomic lease acquisition. Cancellation invalidates the grant;
+ * locks remain until execution is confirmed stopped, even if a target leaves the scope.
+ */
+export interface WorldToolContext {
+  contextId: WorldId;
+  canvasId: WorldId;
+  runId: WorldId;
+  epoch: number;
+  scope: WorldScopeVersion;
+  writableTargets: WorldToolWritableTarget[];
+  readOnlyReferences: WorldObjectVersion[];
+}
 export interface WorldCompletion { canvasId: WorldId; runId: WorldId; completionId: WorldId; cameraId: WorldId; settingsVersion: WorldVersion }
 export interface WorldCaptureVersionKey { canvasId: WorldId; cameraId: WorldId; worldContentVersion: WorldVersion; cameraSettingsVersion: WorldVersion; bindingVersion: WorldVersion; outputVersion: WorldVersion }
 export interface WorldCaptureInput { key: WorldCaptureVersionKey; mediaId: WorldId; checksum: string }
