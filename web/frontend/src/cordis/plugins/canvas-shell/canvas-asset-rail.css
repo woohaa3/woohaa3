@@ -12,10 +12,15 @@
 
 /* ───────── 侧边栏本体 ───────── */
 
+/*
+ * 宽度与内边距**与四喜侧栏同值**（实测 `src/layouts/Sidebar.tsx`）：
+ * 展开 248、收起 64；容器内边距上下 6，条目自身 margin 横向 12。
+ * 横向排列时「项目商品」四个字需要约 56px + 图标 16 + 间距 10 + 两侧内边距，
+ * 80px 那种窄条是容不下的 —— 要两端完全一致，就得用四喜的宽度。
+ */
 .canvas-asset-rail {
-	/* 栏宽与画布让位两处共用。80px 刚好放下两字中文与图标，再窄就得截断「项目商品」 */
-	--rail-width: 80px;
-	--rail-collapsed-width: 48px;
+	--rail-width: 248px;
+	--rail-collapsed-width: 64px;
 
 	position: absolute;
 	z-index: 20;
@@ -24,20 +29,18 @@
 	bottom: 0;
 	display: flex;
 	flex-direction: column;
-	width: var(--rail-width, 80px);
-	/* 左右只留 4px：80px 里再扣 16px 内边距，「项目商品」就只剩 40px 放不下 */
-	padding: 10px 4px;
+	width: var(--rail-width, 248px);
+	padding: 6px 0;
 	border-right: 1px solid var(--app-web-border);
 	background: var(--app-web-panel);
 	color: var(--app-web-text-primary);
-	font-size: 12px;
+	font-size: 14px;
 	overflow: hidden auto;
 	user-select: none;
 }
 
 .canvas-asset-rail.is-collapsed {
-	width: var(--rail-collapsed-width, 48px);
-	padding: 10px 4px;
+	width: var(--rail-collapsed-width, 64px);
 }
 
 /* ───────── 顶部：收起 / 展开 ─────────
@@ -49,7 +52,9 @@
 	align-items: center;
 	justify-content: flex-start;
 	flex-shrink: 0;
-	margin-bottom: 14px;
+	/* 与条目左右留白对齐（条目 margin 横向 12） */
+	margin: 0 12px 10px;
+	min-height: 32px;
 }
 
 .canvas-asset-rail.is-collapsed .canvas-asset-rail__head {
@@ -75,7 +80,8 @@
 }
 
 .canvas-asset-rail__collapse:hover {
-	background: var(--app-interaction-accent-soft);
+	/* 中性灰，与条目悬停同档；不用宿主的绿色强调色（见下方条目注释） */
+	background: color-mix(in srgb, var(--app-web-text-primary) 8%, transparent);
 	color: var(--app-web-text-primary);
 }
 
@@ -96,15 +102,25 @@
 	gap: 2px;
 }
 
+/*
+ * 与四喜 `.ant-menu-item` 实测值逐项对齐：
+ * 高 32、圆角 8、margin 2px 12px（横向外边距 12 就是条目的左右留白）、
+ * padding 左 10 右 16、图标 16、图标与文字间距 10、字号 14、字重 500、行高 1.45。
+ * 横向排列 —— 图标在左、文字在右，与四喜侧栏一致（之前是竖排，因为栏只有 80px 宽）。
+ */
 .canvas-asset-rail__item {
+	--rail-fill-hover: color-mix(in srgb, var(--app-web-text-primary) 4%, transparent);
+	--rail-fill-selected: color-mix(in srgb, var(--app-web-text-primary) 8%, transparent);
+
 	display: flex;
-	flex-direction: column;
+	flex-direction: row;
 	align-items: center;
-	justify-content: center;
-	gap: 5px;
-	width: 100%;
-	min-height: 56px;
-	padding: 8px 4px;
+	justify-content: flex-start;
+	gap: 10px;
+	width: calc(100% - 24px);
+	height: 32px;
+	margin: 2px 12px;
+	padding: 0 16px 0 10px;
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
@@ -113,8 +129,17 @@
 	font-size: 14px;
 	font-weight: 500;
 	line-height: 1.45;
+	text-align: left;
 	cursor: pointer;
 	transition: background 0.15s ease;
+}
+
+/* 收起态：只剩图标，居中；文字与 SOON 角标都不渲染 */
+.canvas-asset-rail.is-collapsed .canvas-asset-rail__item {
+	width: calc(100% - 12px);
+	margin: 2px 6px;
+	padding: 0;
+	justify-content: center;
 }
 
 /*
@@ -123,13 +148,8 @@
  *
  * 宿主没有这两档语义 token（`--app-web-subtle` 是 tertiary 那一档，`--app-web-border`
  * 是描边色，比 secondary 还深），所以用 `color-mix` 按主文字色现算 —— 两套主题都跟着走，
- * 也不会像之前那样把「选中」和「悬停」的深浅用反（选中要比悬停更明显）。
+ * 也不会把「选中」和「悬停」的深浅用反（选中要比悬停更明显）。
  */
-.canvas-asset-rail__item {
-	--rail-fill-hover: color-mix(in srgb, var(--app-web-text-primary) 4%, transparent);
-	--rail-fill-selected: color-mix(in srgb, var(--app-web-text-primary) 8%, transparent);
-}
-
 .canvas-asset-rail__item.is-selected {
 	background: var(--rail-fill-selected);
 	color: var(--app-web-text-primary);
@@ -140,17 +160,20 @@
 	color: var(--app-web-text-primary);
 }
 
+/* 图标：16px 固定方盒，与四喜菜单项图标同尺寸 */
 .canvas-asset-rail__icon {
 	position: relative;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 100%;
-	height: 20px;
+	flex-shrink: 0;
+	width: 16px;
+	height: 16px;
 }
 
 .canvas-asset-rail__label {
-	max-width: 100%;
+	flex: 1;
+	min-width: 0;
 	font-size: 14px;
 	font-weight: 500;
 	line-height: 1.45;
@@ -159,22 +182,22 @@
 	text-overflow: ellipsis;
 }
 
-/* `SOON` 角标：压在图标的右上方，不占布局高度。
- * 底色同样用中性填充，不用绿色强调色 —— 与条目悬停同一理由。 */
+/* `SOON` 角标：压在图标右上方，不占布局空间。
+ * 横向布局里图标只有 16px，角标要收窄，否则会压到文字上。 */
 .canvas-asset-rail__soon {
 	position: absolute;
-	top: -8px;
-	right: -2px;
-	padding: 0 4px;
-	border-radius: 4px;
-	background: var(--app-web-border);
+	top: -7px;
+	right: -10px;
+	padding: 0 3px;
+	border-radius: 3px;
+	background: var(--app-web-subtle);
 	color: var(--app-web-text-muted);
-	font-size: 9px;
-	line-height: 13px;
+	font-size: 8px;
+	line-height: 11px;
 	letter-spacing: 0.02em;
 }
 
-/* 收起时角标藏起来：48px 宽放不下 */
+/* 收起时角标藏起来：64px 宽只剩图标 */
 .canvas-asset-rail.is-collapsed .canvas-asset-rail__soon {
 	display: none;
 }
@@ -184,7 +207,7 @@
 .canvas-asset-rail__panel {
 	position: absolute;
 	z-index: 19;
-	left: var(--rail-width, 80px);
+	left: var(--rail-width, 248px);
 	top: 0;
 	bottom: 0;
 	width: 264px;
@@ -255,10 +278,10 @@
 
 .app:has(> .canvas-asset-rail) > .bevy-canvas-surface,
 .app:has(> .canvas-asset-rail) > .bevy-canvas-curtain {
-	left: 80px;
+	left: 248px;
 }
 
 .app:has(> .canvas-asset-rail.is-collapsed) > .bevy-canvas-surface,
 .app:has(> .canvas-asset-rail.is-collapsed) > .bevy-canvas-curtain {
-	left: 48px;
+	left: 64px;
 }
