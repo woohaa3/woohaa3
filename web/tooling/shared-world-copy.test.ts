@@ -107,6 +107,59 @@ it.each(["duplicate", "paste"])("%s a world collection through the page journal 
   } finally { delete (window as unknown as Record<string, unknown>).__canvasMemoryClipboard; nodeSelectionStore.reset(); await runtime.dispose(); woohaa3CanvasStore.getState().applyRemoteCanvas(null as never); repository.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+it.each(["duplicate", "paste"])("%s preserves layout across unselected parent chains", async (entry) => {
+  let canonical = createEmptyWoohaa3ServerCanvas("mixed-parents");
+  canonical.document.nodes = [
+    { id: "outer", type: "group", position: { x: 100, y: 200 }, width: 400, height: 300 },
+    { id: "left", type: "group", parentId: "outer", position: { x: 10, y: 20 }, width: 400, height: 300 },
+    { id: "right", type: "group", position: { x: 1000, y: 300 }, width: 400, height: 300 },
+    { id: "a", type: "text", parentId: "left", position: { x: 20, y: 30 }, width: 200, height: 150 },
+    { id: "b", type: "text", parentId: "right", position: { x: 20, y: 30 }, width: 200, height: 150 },
+    { id: "c", type: "text", position: { x: 500, y: 600 }, width: 200, height: 150 }
+  ];
+  const original = structuredClone(canonical.document.nodes);
+  const session = { isWritable: () => true, commandLifecycle: () => null, submitCommands(commands: readonly CanvasCommand[]) {
+    const result = applyCanvasCommands(canonical, commands);
+    if (!result.ok) throw Error(JSON.stringify(result));
+    canonical = result.canvas;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canonical);
+    return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } };
+  } } as unknown as CanvasSession;
+  let submitted: readonly CanvasCommand[] | undefined;
+  const mixedEdit = { async record(commands: readonly CanvasCommand[]) {
+    submitted = commands;
+    return { ok: true };
+  } };
+  const slots = new SlotRegistry();
+  const runtime = await startFrontendRuntime({ installPlatform(ctx) {
+    ctx.provide("slots", slots); ctx.provide("inputScopes", new InputScopeService()); ctx.provide("dialogs", new DialogService());
+    ctx.provide("canvasSession", session); ctx.provide("canvasRemote", {} as never); ctx.provide("canvasEdit", mixedEdit as never);
+    ctx.provide("selection", { getSnapshot: () => ({ nodeIds: [], primaryNodeId: null, editingFocus: false, keyboardActive: true }) } as never);
+    ctx.provide("canvasRuntime", { lastPointerWorld: () => ({ x: 1500, y: 1500 }), controller: () => ({ viewport: () => ({ x: 0, y: 0, zoom: 1 }) }) } as never);
+  }, plugins: [{ id: "paste-import", required: false, plugin: pasteImportExtension() }] });
+  try {
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canonical);
+    nodeSelectionStore.setFromRuntime({ nodeIds: ["a", "b", "c"], primaryNodeId: "a", editingFocus: false }, new Set(["a", "b", "c"]));
+    const keyboard = createKeyboardShortcuts({ options: { getSession: () => session }, target: window, writable: () => true,
+      state: {}, model: { active: false }, schedule: () => {}, modalActive: () => false, attachActive: () => false } as never);
+    keyboard.onKeyDown(new KeyboardEvent("keydown", { key: entry === "paste" ? "c" : "d", ctrlKey: true, bubbles: true, cancelable: true }));
+    if (entry === "paste") {
+      await expect.poll(() => (window as unknown as Record<string, unknown>).__canvasMemoryClipboard).toBeTruthy();
+      const text = (window as unknown as Record<string, string>).__canvasMemoryClipboard;
+      slots.list("input.paste")[0]!.handle({ clipboardData: { files: [], items: [], types: [], getData: () => text } } as unknown as ClipboardEvent);
+    }
+    await expect.poll(() => submitted).toBeDefined();
+    const copies = submitted!.filter(command => command.type === "node.add").map(command => (command as Extract<CanvasCommand, { type: "node.add" }>).node);
+    expect(copies).toHaveLength(3);
+    expect(copies.every(node => !node.parentId)).toBe(true);
+    expect(copies[1].position.x - copies[0].position.x).toBe(890);
+    expect(copies[1].position.y - copies[0].position.y).toBe(80);
+    expect(copies[2].position.x - copies[0].position.x).toBe(370);
+    expect(copies[2].position.y - copies[0].position.y).toBe(350);
+    expect(canonical.document.nodes).toEqual(original);
+  } finally { delete (window as unknown as Record<string, unknown>).__canvasMemoryClipboard; nodeSelectionStore.reset(); await runtime.dispose(); woohaa3CanvasStore.getState().applyRemoteCanvas(null as never); }
+});
+
 it("real paste contribution/journal undo removes only the copy and redo preserves original project references", async () => {
   const created = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("c", "2026-10-11T00:00:00Z"), [{
     type: "node.add", node: { id: "original", type: "extension3d", position: { x: 1, y: 2 } },

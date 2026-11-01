@@ -110,11 +110,26 @@ export function buildCanvasCopyPayload(
     if (owner && included.has(owner)) included.add(node.id);
   }
   if (included.size === 0) return null;
-  const copyNodes: CopyNode[] = nodes.filter(node => included.has(node.id)).map((node) => {
+  const copyNodes = nodes.filter(node => included.has(node.id)).map((node) => {
     const copy = toCopyNode(node);
-    if (copy.parentId && !included.has(copy.parentId)) delete copy.parentId;
+    if (copy.parentId && !included.has(copy.parentId)) {
+      const visited = new Set([node.id]);
+      let parentId: string | undefined = copy.parentId;
+      while (parentId) {
+        if (visited.has(parentId)) return null;
+        visited.add(parentId);
+        const parent = byId.get(parentId);
+        if (!parent) return null;
+        copy.position.x += parent.position.x;
+        copy.position.y += parent.position.y;
+        parentId = parent.parentId;
+      }
+      delete copy.parentId;
+    }
     return copy;
   });
+  if (copyNodes.some((node) => node === null)) return null;
+  const portableNodes = copyNodes as CopyNode[];
 
   const copyEdges: CopyEdge[] = [];
   const incomingEdges: CopyIncomingEdge[] = [];
@@ -158,7 +173,7 @@ export function buildCanvasCopyPayload(
   // （change: fix-copy-keeps-node-media）。
   const referencedAssetIds = new Set<string>();
   const projectObjects = new Map<string, ImageEditProjectObjectRef>();
-  for (const node of copyNodes) {
+  for (const node of portableNodes) {
     const data = nodeData[node.id];
     if (!data) continue;
     for (const assetId of imageEditAssetIdsOf(data)) referencedAssetIds.add(assetId);
@@ -176,7 +191,7 @@ export function buildCanvasCopyPayload(
     ...(projectObjects.size > 0 ? { sourceCanvasId: canvas.id } : {}),
     assets: canvas.assets.filter(asset => referencedAssetIds.has(asset.id)),
     ...(projectObjects.size > 0 ? { projectObjects: [...projectObjects.values()] } : {}),
-    nodes: copyNodes,
+    nodes: portableNodes,
     edges: copyEdges,
     incomingEdges,
     nodeData
