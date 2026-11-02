@@ -114,4 +114,33 @@ describe("durable spatial leases", () => {
     b.exec("ROLLBACK");
     a.close(); b.close();
   });
+  it("advances versions with canonical writes and rolls both back together", () => {
+    const { file, a, b } = fixture();
+    a.exec("CREATE TABLE canonical (version TEXT NOT NULL); INSERT INTO canonical VALUES ('v1')");
+    const current: SpatialLeaseAuthority = {
+      eligible: (_intent, targets) => targets.every(t => t.version === (a.prepare("SELECT version FROM canonical").get() as { version: string }).version),
+      stopped: () => false,
+    };
+    const store = new SqliteSpatialLeaseStore(a, current);
+    const first = intent("one"); const v1 = instance("a"), v2 = { ...v1, version: "v2" }, v3 = { ...v1, version: "v3" };
+    store.acquire(first);
+    a.exec("BEGIN IMMEDIATE");
+    store.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [v1]);
+    a.exec("UPDATE canonical SET version = 'v2'");
+    store.advanceVersionsForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [v1], [v2]);
+    a.exec("COMMIT");
+    a.exec("BEGIN IMMEDIATE");
+    expect(() => store.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [v1])).toThrow("version-conflict");
+    store.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [v2]);
+    a.exec("UPDATE canonical SET version = 'v3'");
+    store.advanceVersionsForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [v2], [v3]);
+    a.exec("ROLLBACK");
+    expect((a.prepare("SELECT version FROM canonical").get() as { version: string }).version).toBe("v2");
+    expect(store.lookup("canvas", "one")?.intent.writable).toEqual([v2]);
+    a.close(); b.close();
+    const reopened = new DatabaseSync(file); const recovered = new SqliteSpatialLeaseStore(reopened);
+    expect(recovered.lookup("canvas", "one")?.intent.writable).toEqual([v2]);
+    expect(recovered.acquire(first).intent.runId).toBe("one");
+    reopened.close();
+  });
 });

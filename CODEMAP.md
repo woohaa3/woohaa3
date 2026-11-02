@@ -1,5 +1,7 @@
 # Client code map
 
+Spatial lease storage: `web/services/canvas-service/src/storage/sqlite/spatial-leases.ts` persists typed locks and execution identities. Canonical writers must call `validateForCommit` before their write and `advanceVersionsForCommit` after it in the same SQLite transaction; host eligibility and stop evidence are supplied by the authority port. Production wiring remains with T05b/T06.
+
 Spatial lease storage: `web/services/canvas-service/src/storage/sqlite/spatial-leases.ts` provides durable atomic acquisition, expansion, cancellation, exact execution stop confirmation and recovery reads. Its synchronous `validateForCommit` and `validateUnoccupied` are intended for the caller's canonical SQLite transaction; host-owned eligibility and stop evidence adapters are required. T05b owns production commit integration and T06 owns production eligibility resolution.
 
 Spatial lease foundation: `web/services/canvas-service/src/storage/sqlite/spatial-leases.ts` persists typed object locks, original request intent and cancellation/stop state; `world-authoring/spatial-leases.ts` defines the host-owned eligibility and stop-evidence port. Its synchronous `validateForCommit` and `validateUnoccupied` must be called inside the canonical SQLite transaction by T05b. T06 supplies production eligibility; absent authority fails closed. This store does not yet connect the Canvas command path.

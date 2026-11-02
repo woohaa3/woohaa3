@@ -122,4 +122,24 @@ export class SqliteSpatialLeaseStore {
     }
     this.eligible(record.intent, normalized);
   }
+  /** After the canonical write, advance its versions in the same caller-owned transaction.
+   * The caller must first validateForCommit with previous versions before writing. */
+  advanceVersionsForCommit(canvasId: string, requestId: string, runId: string, epoch: number, executionId: string, scope: WorldScopeVersion, previous: WorldObjectVersion[], next: WorldObjectVersion[]): void {
+    const record = this.lookup(canvasId, requestId);
+    if (!record || record.intent.runId !== runId || record.intent.epoch !== epoch || record.intent.executionId !== executionId) throw new SpatialLeaseError("stale-epoch");
+    if (record.state !== "active") throw new SpatialLeaseError("cancelled");
+    if (JSON.stringify(normalize({ ...record.intent, scope }).scope) !== JSON.stringify(record.intent.scope)) throw new SpatialLeaseError("version-conflict");
+    const before = normalizeTargets(previous), after = normalizeTargets(next);
+    if (before.length !== after.length || before.some((t, i) => objectKey(t) !== objectKey(after[i]!))) throw new SpatialLeaseError("invalid-data");
+    const granted = new Map(record.intent.writable.map(t => [objectKey(t), t.version]));
+    for (const target of before) {
+      if (granted.get(objectKey(target)) !== target.version) throw new SpatialLeaseError("version-conflict");
+      const lock = this.db.prepare("SELECT run_id, epoch FROM spatial_lease_locks WHERE canvas_id = ? AND kind = ? AND object_id = ?").get(canvasId, target.kind, id(target)) as { run_id: string; epoch: number } | undefined;
+      if (!lock || lock.run_id !== runId || lock.epoch !== epoch) throw new SpatialLeaseError("lease-conflict");
+    }
+    this.eligible(record.intent, after);
+    const updates = new Map(after.map(t => [objectKey(t), t]));
+    record.intent.writable = record.intent.writable.map(t => updates.get(objectKey(t)) ?? t);
+    this.db.prepare("UPDATE spatial_lease_runs SET intent_json = ? WHERE canvas_id = ? AND request_id = ?").run(JSON.stringify(record.intent), canvasId, requestId);
+  }
 }
