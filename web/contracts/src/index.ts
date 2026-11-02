@@ -205,3 +205,5 @@ export {
   worldCaptureInputMetadataEqual,
   type WorldCaptureVersionComparison
 } from "./canvas/world-capture-codec.js";
+export * from "./canvas/scene-area-plan-contract.js";
+export * from "./canvas/scene-area-operation-plan.js";
