@@ -147,10 +147,30 @@ describe("applyRunStateProjection", () => {
       currentOperationByNode: new Map([["n1", "a"]])
     });
     expect(nodes[0]?.historyStrip?.dots).toMatchObject([
-      { state: "succeeded", current: false, recoverable: false },
+      { state: "succeeded", current: true, recoverable: false },
       { state: "running", current: false }
     ]);
     expect(nodes[0]?.historyStrip?.truncated).toBe(0);
+  });
+
+  it("当前操作映射优先于滞后的历史 current，黄点转绿后外圈立即移动", () => {
+    const nodes = [node("n1")];
+    const history = [
+      { entryId: "old", nodeId: "n1", nodeTitle: "test", kind: "image", createdAt: "2026-10-12T00:00:01.000Z", current: true,
+        recoverable: true, outcome: "succeeded", previewable: true, source: { runId: "old", label: "old" }, preview: { kind: "text", excerpt: "old" } },
+      { entryId: "run", nodeId: "n1", nodeTitle: "test", kind: "image", createdAt: "2026-10-12T00:00:02.000Z", current: false,
+        recoverable: true, outcome: "succeeded", previewable: true, source: { runId: "run", label: "run" }, preview: { kind: "text", excerpt: "run" } }
+    ] as never;
+    applyRunStateProjection(nodes, {
+      summaries: [summary("n1")],
+      records: [op("run", "succeeded", "2026-10-12T00:00:02.000Z")],
+      versionsByNode: new Map([["n1", history]]),
+      currentOperationByNode: new Map([["n1", "run"]])
+    });
+    expect(nodes[0]?.historyStrip?.dots).toMatchObject([
+      { state: "succeeded", current: false },
+      { state: "succeeded", current: true }
+    ]);
   });
 
   it("未查看的历史条目投影为圆点角标，不改变状态颜色或当前装饰", () => {

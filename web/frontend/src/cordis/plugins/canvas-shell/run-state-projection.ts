@@ -81,7 +81,19 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
     // Task 链路在 canonical `taskStatus` 回流前、Agent 回合全程都只有本读模型有运行态，
     // 因此这里直接点亮 `busy`，让节点与图片/视频节点一致显示进度环（无百分比时按节点种类估算）。
     const records = recordsByNode.get(node.id) ?? (summary?.active ? [summary.active] : []);
-    const items = mergeNodeExecutionPresentation(records, input.versionsByNode?.get(node.id) ?? []);
+    const merged = mergeNodeExecutionPresentation(records, input.versionsByNode?.get(node.id) ?? []);
+    // 历史摘要的 current 可能晚于 canonical 回流：activeRunId + 已成功操作是更即时的
+    // 当前身份。它只覆盖同一节点的 current 标记，不改变状态颜色或选择。
+    const currentOperationId = input.currentOperationByNode?.get(node.id);
+    const forcedCurrent = currentOperationId
+      ? merged.find(item => item.operationId === currentOperationId && item.state === "succeeded")
+      : undefined;
+    const items = currentOperationId
+      ? merged.map(item => {
+          const current = item.presentationId === forcedCurrent?.presentationId;
+          return current === item.current ? item : { ...item, current };
+        })
+      : merged;
     const selectedId = input.selectedByNode?.get(node.id);
     const selected = items.find(item => item.presentationId === selectedId)
       ?? (selectedId ? undefined : [...items].reverse().find(item => item.state === "running" || item.state === "queued") ?? items.find(item => item.current));

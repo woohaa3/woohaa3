@@ -53,7 +53,7 @@ it("contains transport failures and permits an explicit retry",async()=>{
 it("previews the only archived success when mixed activity made its dot visible",async()=>{
   const {service,client}=setup([item("old")]);await service.refresh();
   service.select({nodeId:"n",entryId:"old"});await flush();
-  expect(client.apply).not.toHaveBeenCalled();expect(service.preview.selected.get("n")).toBe("entry:old");service.dispose();
+  expect(client.apply).not.toHaveBeenCalled();expect(service.selectedByNode().get("n")).toBe("entry:old");service.dispose();
 });
 it("keeps mixed metadata but never restores failed records",async()=>{
   const failed={...item("failure"),outcome:"failed" as const,recoverable:false};
@@ -65,27 +65,27 @@ it("rapid scrubs keep the latest local selection without any persistent apply",a
   const {service,client}=setup();await service.refresh();
   service.select({nodeId:"n",index:0});service.select({nodeId:"n",index:1});service.select({nodeId:"n",index:2});
   await flush();expect(client.apply).not.toHaveBeenCalled();
-  expect(service.preview.selected.get("n")).toBe("entry:c");service.dispose();
+  expect(service.selectedByNode().get("n")).toBe("entry:c");service.dispose();
 });
 it("explicit steps follow local selection and stop at bounds without writes",async()=>{
   const {service,client}=setup();await service.refresh();
   service.select({nodeId:"n",step:1});expect(client.apply).not.toHaveBeenCalled();
   service.select({nodeId:"n",step:1});await flush();
-  expect(client.apply).not.toHaveBeenCalled();expect(service.preview.selected.get("n")).toBe("entry:c");service.dispose();
+  expect(client.apply).not.toHaveBeenCalled();expect(service.selectedByNode().get("n")).toBe("entry:c");service.dispose();
 });
 it("direct dot activation shows the target immediately and applies it",async()=>{
   const {service,client}=setup();await service.refresh();
   service.activate({nodeId:"n",entryId:"a"});await flush();
   expect(client.apply).toHaveBeenCalledWith({canvasId:"canvas",nodeId:"n",entryId:"a"});
-  expect(service.preview.selected.get("n")).toBe("entry:a");
+  expect(service.selectedByNode().get("n")).toBe("entry:a");
   service.dispose();
 });
 it("direct activation switches an existing read-only preview to the target",async()=>{
   const {service}=setup();await service.refresh();
   service.select({nodeId:"n",entryId:"a"});await flush();
-  expect(service.preview.selected.get("n")).toBe("entry:a");
+  expect(service.selectedByNode().get("n")).toBe("entry:a");
   service.activate({nodeId:"n",entryId:"c"});await flush();
-  expect(service.preview.selected.get("n")).toBe("entry:c");
+  expect(service.selectedByNode().get("n")).toBe("entry:c");
   service.dispose();
 });
 it("keeps the applied entry visible after it is confirmed current",async()=>{
@@ -97,7 +97,7 @@ it("keeps the applied entry visible after it is confirmed current",async()=>{
     return {ok:true as const};
   });
   service.activate({nodeId:"n",entryId:"c"});await flush();
-  expect(service.preview.selected.get("n")).toBe("entry:c");
+  expect(service.selectedByNode().get("n")).toBe("entry:c");
   service.dispose();
 });
 it("current and unrecoverable dots never apply",async()=>{
@@ -107,7 +107,7 @@ it("current and unrecoverable dots never apply",async()=>{
   service.activate({nodeId:"n",entryId:"a"});await flush();
   service.activate({nodeId:"n",entryId:"failure"});await flush();
   expect(client.apply).not.toHaveBeenCalled();
-  expect(service.preview.selected.get("n")).toBe("entry:failure");
+  expect(service.selectedByNode().get("n")).toBe("entry:failure");
   service.dispose();
 });
 it("blocks direct activation when the host reports an unsaved draft or running task",async()=>{
@@ -163,17 +163,28 @@ it("does not mark failed or other red terminal versions unseen",async()=>{
   expect(service.unseenSnapshot().size).toBe(0);
   service.dispose();
 });
+it("keeps an unarchived running dot selectable after a green dot was activated",async()=>{
+  const items=[item("a",true),item("b")];
+  const {service,client}=setup(items);await service.refresh();
+  service.observeRunState([{operationId:"run",canvasId:"canvas",nodeId:"n",kind:"image",state:"running",owner:"server",createdAt:"r",updatedAt:"r"} as never]);
+  service.activate({nodeId:"n",entryId:"b",presentationId:"entry:b"});await flush();
+  expect(client.apply).toHaveBeenCalledTimes(1);
+  service.activate({nodeId:"n",presentationId:"operation:run",operationId:"run"});await flush();
+  expect(client.apply).toHaveBeenCalledTimes(1);
+  expect(service.selectedByNode().get("n")).toBe("operation:run");
+  service.dispose();
+});
 it("keeps a previewed running version selected when it settles and treats its archive as seen",async()=>{
   const items=[item("a")];
   const {service}=setup(items);await service.refresh();
   const record=(state:"running"|"succeeded")=>({operationId:"run",canvasId:"canvas",nodeId:"n",kind:"image",state,owner:"server",createdAt:"r",updatedAt:"r"}) as never;
   service.observeRunState([record("running")]);
-  expect(service.preview.selected.get("n")).toBe("operation:run");
+  expect(service.selectedByNode().get("n")).toBe("operation:run");
   service.observeRunState([record("succeeded")]);
-  expect(service.preview.selected.get("n")).toBe("operation:run");
+  expect(service.selectedByNode().get("n")).toBe("operation:run");
   items.push({...item("z"), source:{label:"z",runId:"run"}, createdAt:"z"});
   await service.refreshNode("n");
-  expect(service.preview.selected.get("n")).toBe("operation:run");
+  expect(service.selectedByNode().get("n")).toBe("operation:run");
   expect(service.unseenSnapshot().size).toBe(0);
   service.dispose();
 });
@@ -191,5 +202,5 @@ it("does not drop a new selection while metadata refresh is in flight",async()=>
   const refresh=service.refresh();service.select({nodeId:"n",index:0});await flush();
   service.select({nodeId:"n",index:2});
   release({ok:true,items:[item("a",true),item("b"),item("c")],nextCursor:null});await refresh;await flush();
-  expect(client.apply).not.toHaveBeenCalled();expect(service.preview.selected.get("n")).toBe("entry:c");service.dispose();
+  expect(client.apply).not.toHaveBeenCalled();expect(service.selectedByNode().get("n")).toBe("entry:c");service.dispose();
 });
