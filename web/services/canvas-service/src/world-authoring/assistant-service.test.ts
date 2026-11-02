@@ -70,7 +70,7 @@ function canvasFixture(): ServerCanvas {
 function harness(overrides: {
   context?: WorldToolContext;
   pending?: Array<{ intent: Record<string, unknown>; state: "active" | "cancelled" | "stopped" }>;
-  confirmStopped?: () => Promise<void>;
+  confirmStopped?: (input: unknown) => Promise<void>;
 } = {}) {
   const context = overrides.context ?? contextFor();
   const revoked: string[] = [];
@@ -134,8 +134,7 @@ function harness(overrides: {
     },
     async resolveRoom() { return room; },
     async cancel() { revoked.push("lease-cancelled"); },
-    confirmStopped: overrides.confirmStopped ?? (async () => undefined),
-    async pending() {
+    confirmStopped: overrides.confirmStopped ?? (async () => undefined),    async pending() {
       return (overrides.pending ?? []).map(entry => ({
         intent: {
           requestId: "req-1",
@@ -242,7 +241,7 @@ describe("assistant world authority", () => {
     expect(completed).toHaveLength(0);
   });
 
-  it("records completion once and refuses a forged completion identity", async () => {
+  it("records completion once only after the host records a successful terminal turn", async () => {
     const { service, completed } = harness();
     const issued = await service.issue({
       canvasId: "canvas-1",
@@ -282,6 +281,7 @@ describe("assistant world authority", () => {
       }
     });
     expect(forged).toMatchObject({ ok: false, code: "unverified-run" });
+
     const completion = {
       canvasId: "canvas-1",
       runId: "run-1",
@@ -289,11 +289,116 @@ describe("assistant world authority", () => {
       cameraId: "camera-1",
       settingsVersion: "cv-2"
     };
+    // An active/adapter-failed turn and a bare `completed` claim are not host
+    // completion evidence: no history may be written yet.
+    expect(service.verifyCompletion(completion, undefined)).toBe(false);
+    const early = await service.complete({
+      contextId: issued.context.contextId,
+      completion,
+      evidence: { turnStatus: "running", failure: "adapter aborted", completed: true }
+    });
+    expect(early).toMatchObject({ ok: false, code: "unverified-run" });
+    expect(completed).toHaveLength(0);
+
+    const settled = await service.settleRun({
+      canvasId: "canvas-1",
+      runId: "run-1",
+      status: "succeeded",
+      evidence: { owner: "owner-1", requestId: "req-1" }
+    });
+    expect(settled).toEqual({ ok: true });
+    expect(completed).toHaveLength(1);
+    expect(service.verifyCompletion(completion, undefined)).toBe(true);
+
     const first = await service.complete({ contextId: issued.context.contextId, completion });
-    expect(first).toMatchObject({ ok: true, duplicate: false });
+    expect(first).toMatchObject({ ok: true, duplicate: true });
     const second = await service.complete({ contextId: issued.context.contextId, completion });
     expect(second).toMatchObject({ ok: true, duplicate: true });
-    expect(completed).toHaveLength(2);
+    expect(completed).toHaveLength(1);
+  });
+
+  it("never records camera history for a failed terminal turn", async () => {
+    const { service, completed } = harness();
+    const issued = await service.issue({
+      canvasId: "canvas-1",
+      requestId: "req-1",
+      runId: "run-1",
+      epoch: 0,
+      executionId: "exec-1",
+      scope: { kind: "scene-area", areaId: "area-1" }
+    });
+    if (!issued.ok) throw new Error(issued.message);
+    await service.write({
+      contextId: issued.context.contextId,
+      operation: {
+        kind: "set-world-camera",
+        operationId: "camera-1",
+        cameraId: "camera-1",
+        expectedSettingsVersion: "cv-1",
+        settings: {
+          position: { u: 0, v: 0, h: 1 },
+          rotation: [0, 0, 0, 1],
+          projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+          captureMode: { kind: "static" },
+          aspect: { width: 16, height: 9 },
+          boundInstanceId: null
+        }
+      }
+    });
+    const settled = await service.settleRun({
+      canvasId: "canvas-1",
+      runId: "run-1",
+      status: "failed",
+      evidence: { owner: "owner-1", requestId: "req-1" }
+    });
+    expect(settled).toEqual({ ok: true });
+    expect(completed).toHaveLength(0);
+    const completion = await service.complete({
+      contextId: issued.context.contextId,
+      completion: {
+        canvasId: "canvas-1",
+        runId: "run-1",
+        completionId: issued.completionId,
+        cameraId: "camera-1",
+        settingsVersion: "cv-2"
+      }
+    });
+    expect(completion).toMatchObject({ ok: false });
+  });
+
+  it("releases a reopened pending run only after exact host stop evidence", async () => {
+    const pending = [{ intent: { requestId: "req-1", runId: "run-1", epoch: 0, executionId: "exec-1" }, state: "active" as const }];
+    const confirmed: Array<Record<string, unknown>> = [];
+    const { service } = harness({
+      pending,
+      confirmStopped: async (input) => { confirmed.push(input as Record<string, unknown>); }
+    });
+    const settled = await service.settleRun({
+      canvasId: "canvas-1",
+      runId: "run-1",
+      status: "succeeded",
+      evidence: { owner: "owner-1", requestId: "req-1" }
+    });
+    expect(settled).toEqual({ ok: true });
+    expect(confirmed).toHaveLength(1);
+    expect(confirmed[0]).toMatchObject({ requestId: "req-1", runId: "run-1", epoch: 0, executionId: "exec-1" });
+  });
+
+  it("keeps a reopened pending run when the host cannot verify the stop", async () => {
+    const pending = [{ intent: { requestId: "req-1", runId: "run-1", epoch: 0, executionId: "exec-1" }, state: "active" as const }];
+    const { service } = harness({
+      pending,
+      confirmStopped: async () => {
+        throw Object.assign(new Error("not verified"), { code: "unverified-stop" });
+      }
+    });
+    const unverified = await service.settleRun({
+      canvasId: "canvas-1",
+      runId: "run-1",
+      status: "succeeded",
+      evidence: { unverified: true }
+    });
+    expect(unverified).toMatchObject({ ok: false, code: "unverified-stop" });
   });
 
   it("invalidates the grant on cancel and keeps occupancy until exact stop", async () => {

@@ -17,6 +17,7 @@ import {
   type WorldTransform
 } from "@woohaa3/contracts";
 import { auditWrap, errorResult, structured, type AgentAuthoringToolDeps } from "./tool-policy.js";
+import { hashText } from "./planner-hash.js";
 
 export type AssistantWorldToolClient = {
   read(input: { canvasId: string; contextId: string }): { ok: true; view: AssistantWorldContextView } | AssistantWorldFailure;
@@ -112,7 +113,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
         if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
         const operation = {
           kind: "create-model" as const,
-          operationId: `${deps.grant!.workId}:create:${nodeId}`,
+          operationId: `${deps.grant!.workId}:create:${nodeId}:${hashText(JSON.stringify({ instanceId: instanceId ?? null, modelScript, modelScriptVersion: modelScriptVersion ?? null, cardPosition: cardPosition ?? null, transform: pose }))}`,
           nodeId,
           ...(instanceId ? { instanceId } : {}),
           content: { modelScript, ...(modelScriptVersion ? { modelScriptVersion } : {}), ...(cardPosition ? { cardPosition } : {}) },
@@ -152,7 +153,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
           contextId: bound.world.contextId,
           operation: {
             kind: "replace-model-content",
-            operationId: `${deps.grant!.workId}:replace:${instanceId}`,
+            operationId: `${deps.grant!.workId}:replace:${instanceId}:${hashText(JSON.stringify({ expectedVersion, modelScript, modelScriptVersion: modelScriptVersion ?? null, cardPosition: cardPosition ?? null, transform: pose ?? null }))}`,
             instanceId,
             expectedVersion,
             content: { modelScript, ...(modelScriptVersion ? { modelScriptVersion } : {}), ...(cardPosition ? { cardPosition } : {}) },
@@ -186,7 +187,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
           contextId: bound.world.contextId,
           operation: {
             kind: "set-model-transform",
-            operationId: `${deps.grant!.workId}:move:${instanceId}`,
+            operationId: `${deps.grant!.workId}:move:${instanceId}:${hashText(JSON.stringify({ expectedVersion, transform: pose }))}`,
             instanceId,
             expectedVersion,
             transform: pose as WorldTransform
@@ -219,7 +220,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
           contextId: bound.world.contextId,
           operation: {
             kind: "set-world-camera",
-            operationId: `${deps.grant!.workId}:camera:${cameraId}:${expectedSettingsVersion}`,
+            operationId: `${deps.grant!.workId}:camera:${cameraId}:${hashText(JSON.stringify({ expectedSettingsVersion, settings }))}`,
             cameraId,
             expectedSettingsVersion,
             settings
@@ -235,7 +236,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     {
       title: "登记场景区镜头完成",
       description:
-        "只登记本轮真实写入过的镜头完成，供 T08 幂等镜头历史留档。完成身份来自宿主 grant，客户端不能自报 settingsVersion 或伪造完成。",
+        "登记本轮真实写入过的镜头完成。宿主只在本轮对应应用回合到达成功终态后记录一次稳定 completionId 与镜头版本并留档；活动/失败/取消的运行以及客户端自报的 completed 都会被拒绝。重复登记同一完成身份幂等。",
       inputSchema: z.strictObject({
         cameraId: z.string().min(1),
         settingsVersion: z.string().min(1)

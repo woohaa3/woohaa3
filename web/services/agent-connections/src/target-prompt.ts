@@ -50,7 +50,7 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
       "先调用 get_world_context 读取本轮上下文。只修改 writable 中的对象；read-only、部分包含、unknown 或区外对象只能参考，不能写入。",
       "创建新模型用 create_world_model，替换内容用 replace_world_model_content，移动/改高度用 move_world_model，修改镜头用 set_world_camera。",
       "所有写入必须携带从 get_world_context 读取到的真实版本；工具拒绝时如实说明，不要改用别的对象或伪造版本。",
-      "完成镜头修改后调用 complete_world_camera，参数只使用工具返回的真实 settingsVersion；取景刷新和后续生成都不是完成证据。",
+      "镜头修改是否留档由宿主在本轮成功结束后按真实写入与版本确认一次，模型自报或取景刷新都不是完成证据；complete_world_camera 只用于按宿主已签发的完成身份重试确认，宿主尚未确认时会返回未核实。",
       intent.worldScope?.kind === "workflow-group-2d"
         ? "本轮是 2D 组：只有只读参考，没有世界写工具。不得因为镜头卡片是该组成员而尝试修改世界。"
         : "本轮是场景区：只有完整包含且未被其他运行占用的对象可写。"

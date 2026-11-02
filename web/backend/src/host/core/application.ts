@@ -260,15 +260,19 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       // unresolved turns while the backend reconnects instead of converting a
       // lost in-process receipt into a terminal failure.
       ...(env.WOOHAA3_AGENT_RUNTIME_SOCKET ? { preserveUnreconciledOnRestart: true } : {}),
-      // T11a: after the turn's durable terminal status, let the canvas authority
-      // release a scoped world run only against that real application ledger.
-      onTurnSettled: ({ turn }) => {
+      // T11a: the durable application turn status is the trusted host completion
+      // fact. A successful terminal turn first records one camera completion for
+      // the exact camera/version this run wrote, then the scoped world run is
+      // released against that same application ledger. Failed/cancelled turns
+      // never create completion history.
+      onTurnSettled: ({ turn, status }) => {
         const assistantWorld = ctx.canvas.assistantWorld;
         if (!assistantWorld) return;
         void assistantWorld.settleRun({
           canvasId: turn.canvasId,
           runId: turn.requestId,
-          evidence: { owner: turn.owner, requestId: turn.requestId }
+          status,
+          evidence: { owner: turn.owner, requestId: turn.requestId, turnId: turn.turnId }
         }).catch(() => undefined);
       },
       serviceConnectionProviders: () => generation.list(),

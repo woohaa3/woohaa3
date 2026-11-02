@@ -81,7 +81,35 @@ type RunLedger = {
   completionId: string;
   writes: Map<string, { identity: WorldObjectIdentity; version: string }>;
   cancelled: boolean;
+  /**
+   * Set only after the host confirmed the exact execution stopped. A settled
+   * run keeps its identity for idempotent completion/stop retries but never
+   * accepts another write.
+   */
+  settled: boolean;
 };
+
+/**
+ * Trusted host completion fact.
+ *
+ * It is recorded only from the durable application turn status after the turn
+ * reached a successful terminal state, together with the camera/version this
+ * run actually wrote. Transport evidence, prompts, capture refreshes and later
+ * generations can never insert a row here.
+ */
+type HostCompletion = {
+  canvasId: string;
+  requestId: string;
+  runId: string;
+  completionId: string;
+  cameraId: string;
+  settingsVersion: string;
+  status: "succeeded" | "partial";
+};
+
+function completionKey(input: { canvasId: string; runId: string; completionId: string; cameraId: string }): string {
+  return JSON.stringify([input.canvasId, input.runId, input.completionId, input.cameraId]);
+}
 
 export type AssistantWorldService = {
   issue(input: AssistantWorldRunRequest): Promise<AssistantWorldIssueOutcome>;
@@ -92,11 +120,18 @@ export type AssistantWorldService = {
   cancel(input: AssistantWorldCancelInput): Promise<void>;
   confirmStopped(input: AssistantWorldStopInput): Promise<{ ok: true } | AssistantWorldFailure>;
   /**
-   * Host turn-settled hook: release the matching run only after the application
-   * ledger recorded a terminal status. Evidence carries the owner/request the
-   * canvas authority re-checks; an unverified call leaves occupancy in place.
+   * Host turn-settled hook. The application ledger supplies the durable terminal
+   * status and owner; a successful turn first records one host completion fact,
+   * then the exact run is confirmed stopped and its occupancy released.
+   * Reopened processes resolve the persistent pending record instead of relying
+   * on the in-process ledger.
    */
-  settleRun(input: { canvasId: string; runId: string; evidence: unknown }): Promise<{ ok: true } | AssistantWorldFailure>;
+  settleRun(input: {
+    canvasId: string;
+    runId: string;
+    status?: "queued" | "running" | "committing" | "succeeded" | "partial" | "failed" | "cancelled";
+    evidence: unknown;
+  }): Promise<{ ok: true } | AssistantWorldFailure>;
   recover(input: { canvasId: string }): Promise<AssistantWorldRecoveryOutcome>;
   /** Host-internal camera completion verifier. The canvas composition wires it to T08. */
   verifyCompletion(completion: AssistantWorldCompletionInput["completion"], evidence: unknown): boolean;
@@ -195,6 +230,19 @@ function findWritable(context: WorldToolContext, identity: WorldObjectIdentity):
   return context.writableTargets.find(entry => sameIdentity(entry.target, identity))?.target ?? null;
 }
 
+/**
+ * Key the derived command by the *semantic intent*, not only the caller's
+ * operation id. The MCP tool keeps a stable operation id per work/target so a
+ * transport retry stays idempotent, while a genuinely different move/replace/
+ * camera intent must produce a different command id. Without this, the room's
+ * idempotency precheck would return the first receipt and silently discard the
+ * second change.
+ */
+function intentCommandId(tag: string, operation: AssistantWorldWriteOperation): string {
+  const { operationId, ...intent } = operation;
+  return `${tag}:${operationId}:${stableAuthorityVersion("assistant-world-intent", intent)}`;
+}
+
 function findInstanceNode(canvas: ServerCanvas, instanceId: string): { nodeId: string; fields: Record<string, unknown> } | null {
   for (const node of canvas.document.nodes) {
     const fields = canvas.nodeData[node.id];
@@ -211,6 +259,7 @@ function hasNode(canvas: ServerCanvas, nodeId: string): boolean {
 
 export function createAssistantWorldService(deps: AssistantWorldServiceDeps): AssistantWorldService {
   const ledgers = new Map<string, RunLedger>();
+  const hostCompletions = new Map<string, HostCompletion>();
 
   async function inspect(canvasId: string): Promise<{ ok: true; room: CanvasRoom; canvas: ServerCanvas } | AssistantWorldFailure> {
     const room = await deps.resolveRoom(canvasId);
@@ -224,6 +273,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     const ledger = ledgers.get(contextId);
     if (!ledger) return failure("not-issued", "工具运行不是宿主签发的");
     if (ledger.cancelled) return failure("cancelled", "工具运行已取消");
+    if (ledger.settled) return failure("not-issued", "工具运行已结束");
     return ledger;
   }
 
@@ -275,7 +325,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
             writable: issued.context.writableTargets.map(entry => entry.target),
             readOnly: issued.context.readOnlyReferences
           },
-          state: existing.cancelled ? "cancelled" : "active"
+          state: existing.cancelled ? "cancelled" : existing.settled ? "stopped" : "active"
         }),
         context: issued.context,
         completionId: existing.completionId,
@@ -291,7 +341,8 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       executionId: issued.run.executionId,
       completionId,
       writes: new Map(),
-      cancelled: false
+      cancelled: false,
+      settled: false
     };
     ledgers.set(issued.context.contextId, ledger);
     const run: AssistantWorldRunView = {
@@ -390,7 +441,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     const prepared = await deps.authority.prepareContent(fields);
     if (!prepared) return failure("not-ready", "无法确定新模型的权威占地");
     const cardPosition = operation.content.cardPosition ?? { x: 0, y: 0 };
-    const commandId = `assistant-world-create:${operation.operationId}`;
+    const commandId = intentCommandId("assistant-world-create", operation);
     const result = await inspected.room.submitDerived({
       commandId,
       async derive(canvas) {
@@ -479,7 +530,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     const fields = instanceFields(patch, operation.instanceId, operation.transform ?? decodedCurrent.value.transform);
     const prepared = await deps.authority.prepareContent({ ...current.fields, ...fields });
     if (!prepared) return failure("not-ready", "无法确定替换后模型的权威占地");
-    const commandId = `assistant-world-replace:${operation.operationId}`;
+    const commandId = intentCommandId("assistant-world-replace", operation);
     const result = await inspected.room.submitDerived({
       commandId,
       async derive(canvas) {
@@ -539,7 +590,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     const fields = { sharedWorldInstance: { ...currentInstance, transform: operation.transform } };
     const prepared = await deps.authority.prepareContent({ ...current.fields, ...fields });
     if (!prepared) return failure("not-ready", "无法确定移动后模型的权威占地");
-    const commandId = `assistant-world-move:${operation.operationId}`;
+    const commandId = intentCommandId("assistant-world-move", operation);
     const result = await inspected.room.submitDerived({
       commandId,
       async derive(canvas) {
@@ -595,7 +646,10 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       settings: operation.settings,
       contextId: ledger.contextId,
       actorId: `assistant-world:${context.runId}`,
-      operationId: operation.operationId
+      operationId: `${operation.operationId}:${stableAuthorityVersion("assistant-world-camera-intent", {
+        expectedSettingsVersion: operation.expectedSettingsVersion,
+        settings: operation.settings
+      })}`
     });
     if (!saved.ok) return saved;
     ledger.writes.set(objectKey(identity), { identity, version: saved.settingsVersion });
@@ -618,8 +672,17 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
   }
 
   function verifyCompletion(completion: AssistantWorldCompletionInput["completion"], _evidence: unknown): boolean {
+    // Completion is trusted only after the host recorded the durable terminal
+    // turn fact plus the exact camera/version this run wrote. A model reply,
+    // transport boolean, capture refresh or later generation never inserts it.
+    const host = hostCompletions.get(completionKey(completion));
+    if (!host) return false;
+    if (host.settingsVersion !== completion.settingsVersion || host.cameraId !== completion.cameraId) return false;
     const ledger = [...ledgers.values()].find(entry => entry.runId === completion.runId && entry.canvasId === completion.canvasId);
-    if (!ledger || ledger.cancelled) return false;
+    // Grant revocation at the natural end of a turn is not a failed execution;
+    // the durable terminal status supplied to settleRun decides whether a
+    // completion fact may exist at all.
+    if (!ledger) return false;
     if (ledger.completionId !== completion.completionId) return false;
     const identity: WorldObjectIdentity = { kind: "camera", cameraId: completion.cameraId };
     const write = ledger.writes.get(objectKey(identity));
@@ -628,6 +691,23 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
   }
 
   async function complete(input: AssistantWorldCompletionInput): Promise<AssistantWorldCompletionOutcome> {
+    if (!input || !input.completion || !nonEmpty(input.contextId)) {
+      return failure("invalid-data", "镜头完成身份无效");
+    }
+    // Retried completion of an already host-recorded run stays idempotent even
+    // after the process marked the run settled.
+    const recorded = hostCompletions.get(completionKey(input.completion));
+    if (recorded) {
+      if (recorded.settingsVersion !== input.completion.settingsVersion) {
+        return failure("operation-conflict", "相同完成身份携带了不同镜头版本");
+      }
+      return {
+        ok: true,
+        duplicate: true,
+        settingsVersion: recorded.settingsVersion,
+        completionId: recorded.completionId
+      };
+    }
     const resolved = resolve(input.contextId);
     if ("ok" in resolved) return resolved;
     const { ledger, context } = resolved;
@@ -637,7 +717,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     if (input.completion.completionId !== ledger.completionId) return failure("unverified-run", "完成身份不是宿主签发");
     const camera = context.writableTargets.find(entry => entry.target.kind === "camera" && entry.target.cameraId === input.completion.cameraId);
     if (!camera) return failure("outside-scope", "镜头不在本次可写集合");
-    if (!verifyCompletion(input.completion, input.evidence)) return failure("unverified-run", "本轮没有对应镜头的可信写入");
+    if (!verifyCompletion(input.completion, input.evidence)) return failure("unverified-run", "宿主尚未确认本轮完成");
     const completed = await deps.cameraSettings.complete({ completion: input.completion, evidence: input.evidence });
     if (!completed.ok) return completed;
     return {
@@ -648,10 +728,70 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     };
   }
 
+  function stopFailure(error: unknown): AssistantWorldFailure {
+    const code = error instanceof Error && "code" in error ? String((error as { code: unknown }).code) : "";
+    if (code === "unverified-stop") return failure("unverified-stop", "停止证据未通过宿主核对");
+    if (code === "stale-epoch") return failure("stale-epoch", "停止身份与原运行不一致");
+    if (code === "cancelled") return failure("cancelled", "运行已取消但无法确认停止");
+    return failure("cancelled", error instanceof Error ? error.message : "确认停止失败");
+  }
+
+  /**
+   * Record the single trusted completion fact for a successful terminal turn.
+   * The camera/version comes from the writes this run actually committed; the
+   * host turn status comes from the durable application ledger, never from the
+   * model or a browser request.
+   */
+  async function recordHostCompletion(
+    ledger: RunLedger,
+    status: "succeeded" | "partial",
+    evidence: unknown
+  ): Promise<{ ok: true } | AssistantWorldFailure> {
+    const cameraWrites = [...ledger.writes.values()].filter(
+      (entry): entry is { identity: Extract<WorldObjectIdentity, { kind: "camera" }>; version: string } =>
+        entry.identity.kind === "camera"
+    );
+    if (cameraWrites.length === 0) return { ok: true };
+    let firstFailure: AssistantWorldFailure | null = null;
+    for (const cameraWrite of cameraWrites) {
+      const completion = {
+        canvasId: ledger.canvasId,
+        runId: ledger.runId,
+        completionId: ledger.completionId,
+        cameraId: cameraWrite.identity.cameraId,
+        settingsVersion: cameraWrite.version
+      };
+      const key = completionKey(completion);
+      if (hostCompletions.has(key)) continue;
+      hostCompletions.set(key, {
+        canvasId: ledger.canvasId,
+        requestId: ledger.requestId,
+        runId: ledger.runId,
+        completionId: ledger.completionId,
+        cameraId: cameraWrite.identity.cameraId,
+        settingsVersion: cameraWrite.version,
+        status
+      });
+      let completed: Awaited<ReturnType<typeof deps.cameraSettings.complete>>;
+      try {
+        completed = await deps.cameraSettings.complete({ completion, evidence });
+      } catch (error) {
+        hostCompletions.delete(key);
+        firstFailure ??= failure("not-ready", error instanceof Error ? error.message : "镜头完成留档失败");
+        continue;
+      }
+      if (!completed.ok) {
+        hostCompletions.delete(key);
+        firstFailure ??= completed;
+      }
+    }
+    return firstFailure ?? { ok: true };
+  }
+
   async function cancel(input: AssistantWorldCancelInput): Promise<void> {
     const ledger = ledgers.get(input.contextId);
     if (!ledger || ledger.canvasId !== input.canvasId) return;
-    ledger.cancelled = true;
+    if (!ledger.settled) ledger.cancelled = true;
     // Grant first, then stop: the context resolution necessarily fails immediately,
     // while the lease store keeps occupancy until exact stop is confirmed.
     await deps.worldAuthoring.revokeContext({ canvasId: input.canvasId, contextId: input.contextId });
@@ -663,29 +803,60 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     if (ledger.runId !== input.runId || ledger.epoch !== input.epoch || ledger.executionId !== input.executionId) {
       return failure("stale-epoch", "停止身份与原运行不一致");
     }
+    if (ledger.settled) return { ok: true };
     try {
       await deps.confirmStopped({ ...input, requestId: ledger.requestId });
-      ledgers.delete(input.contextId);
+      ledger.settled = true;
       return { ok: true };
     } catch (error) {
-      const code = error instanceof Error && "code" in error ? String((error as { code: unknown }).code) : "";
-      if (code === "unverified-stop") return failure("unverified-stop", "停止证据未通过宿主核对");
-      if (code === "stale-epoch") return failure("stale-epoch", "停止身份与原运行不一致");
-      return failure("cancelled", error instanceof Error ? error.message : "确认停止失败");
+      return stopFailure(error);
     }
   }
 
-  async function settleRun(input: { canvasId: string; runId: string; evidence: unknown }): Promise<{ ok: true } | AssistantWorldFailure> {
+  async function settleRun(input: {
+    canvasId: string;
+    runId: string;
+    status?: "queued" | "running" | "committing" | "succeeded" | "partial" | "failed" | "cancelled";
+    evidence: unknown;
+  }): Promise<{ ok: true } | AssistantWorldFailure> {
     const ledger = [...ledgers.values()].find(entry => entry.canvasId === input.canvasId && entry.runId === input.runId);
-    if (!ledger) return { ok: true };
-    return confirmStopped({
-      canvasId: ledger.canvasId,
-      contextId: ledger.contextId,
-      runId: ledger.runId,
-      epoch: ledger.epoch,
-      executionId: ledger.executionId,
-      evidence: input.evidence
-    });
+    if (ledger) {
+      if (ledger.settled) return { ok: true };
+      let completionFailure: AssistantWorldFailure | null = null;
+      if (input.status === "succeeded" || input.status === "partial") {
+        const completed = await recordHostCompletion(ledger, input.status, input.evidence);
+        if (!completed.ok) completionFailure = completed;
+      }
+      const stopped = await confirmStopped({
+        canvasId: ledger.canvasId,
+        contextId: ledger.contextId,
+        runId: ledger.runId,
+        epoch: ledger.epoch,
+        executionId: ledger.executionId,
+        evidence: input.evidence
+      });
+      if (!stopped.ok) return stopped;
+      return completionFailure ?? { ok: true };
+    }
+    // Reopened process: the in-process ledger is gone, but the durable lease
+    // record carries the original request/run/epoch/execution identity. Releasing
+    // it still requires the host's exact-stop evidence; unknown state stays.
+    const pending = await deps.pending();
+    const record = pending.find(entry => entry.intent.canvasId === input.canvasId && entry.intent.runId === input.runId);
+    if (!record) return { ok: true };
+    try {
+      await deps.confirmStopped({
+        canvasId: record.intent.canvasId,
+        requestId: record.intent.requestId,
+        runId: record.intent.runId,
+        epoch: record.intent.epoch,
+        executionId: record.intent.executionId,
+        evidence: input.evidence
+      });
+      return { ok: true };
+    } catch (error) {
+      return stopFailure(error);
+    }
   }
 
   async function recover(input: { canvasId: string }): Promise<AssistantWorldRecoveryOutcome> {
@@ -709,6 +880,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     verifyCompletion,
     close() {
       ledgers.clear();
+      hostCompletions.clear();
     }
   };
 }
