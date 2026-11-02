@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Context } from "@deepseek-ai/cordis";
 import { MediaImportService } from "./service.js";
 import type { CanvasCommand } from "@woohaa3/contracts";
+import { canvasPointToGround } from "@woohaa3/contracts";
 
 vi.mock("@woohaa3/contracts", async (importOriginal) => ({
   ...await importOriginal<typeof import("@woohaa3/contracts")>(),
@@ -82,7 +83,7 @@ describe("MediaImportService.importBatch", () => {
     expect(submitted).toHaveLength(1);
     const add = submitted[0]!.commands.find(command => command.type === "node.add");
     expect(add?.type).toBe("node.add");
-    if (add?.type === "node.add") expect(add.nodeData?.sharedWorldInstance).toMatchObject({ instanceId: expect.any(String), transform: { position: { h: 0 } } });
+    if (add?.type === "node.add") expect(add.nodeData?.sharedWorldInstance).toMatchObject({ instanceId: expect.any(String), transform: { position: { ...canvasPointToGround({ x: 128, y: 64 }), h: 0 } } });
     service.dispose();
   });
   it("每个文件独立原子提交 asset.upsert + node.add", async () => {

@@ -7,6 +7,7 @@ import { applyCanvasCommands } from "../../../../../../test-support/managed-shot
 import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
+  canvasPointToGround,
   createWoohaa3CanvasNode,
   toWoohaa3CanvasDocument,
   managedNodeRelationOf,
@@ -41,7 +42,8 @@ it("remaps a world collection in the actual paste batch", () => {
   expect(model.instanceId).toBe("new-instanceId-0");
   expect(model.transform.rotation).toEqual(instance.transform.rotation);
   expect(model.transform.scale).toEqual(instance.transform.scale);
-  expect(model.transform.position.h).toBe(0);
+  const pastedNode = result.canvas.document.nodes.find(node => node.id === "new-model3d-0")!;
+  expect(model.transform.position).toEqual({ ...canvasPointToGround(pastedNode.position), h: 0 });
   expect(copiedCamera).toEqual({ ...camera, cameraId: "new-cameraId-3", boundInstanceId: model.instanceId });
   expect(result.canvas.nodeData["new-workflow-group-2d-1"].workflowGroup2d).toMatchObject({ groupId: "new-groupId-1", scopeVersion: "new-scopeVersion-1", memberNodeIds: ["new-model3d-0"] });
   expect(result.canvas.nodeData["new-scene-area-2"].sceneArea).toMatchObject({ areaId: "new-areaId-2", scopeVersion: "new-scopeVersion-2" });
