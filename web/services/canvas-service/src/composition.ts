@@ -62,6 +62,8 @@ import type { CanvasAccessPort, CanvasLifecyclePort } from "./access/resolve-acc
 import type { PrincipalContext } from "@woohaa3/contracts";
 import type { CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
 import { createWorldConversionService } from "./world-authoring/conversion-service.js";
+import { createWorldAuthoringAuthority } from "./world-authoring/authority.js";
+import { createWorldAuthoringService } from "./world-authoring/scene-area-service.js";
 
 export type { CanvasMediaAssetSyncPort, CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
 
@@ -132,6 +134,15 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       : undefined);
 
   let yjsRepositoryPromise: Promise<YjsDocumentRepository> | null = null;
+  /**
+   * T06 production authority. It is the same instance handed to the SQLite
+   * repository and to the semantic scene-area service, so acquire and commit use
+   * one footprint cache. Test-injected repositories may omit it.
+   */
+  const spatialAuthority = options.spatialAuthority ?? createWorldAuthoringAuthority();
+  const worldAuthoringAuthority = "prepareCanvas" in spatialAuthority
+    ? spatialAuthority as import("./world-authoring/authority.js").WorldAuthoringAuthority
+    : null;
   const resolveYjsRepository = (): Promise<YjsDocumentRepository> => {
     if (options.yjsRepository) return Promise.resolve(options.yjsRepository);
     yjsRepositoryPromise ??= (async () => {
@@ -139,7 +150,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       if (!resolved.ok) throw new Error(`画布存储配置无效：${resolved.reason}`);
       if (resolved.config.backend === "sqlite") {
         const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
-        return new SqliteYjsRepository({ path: resolved.config.sqlitePath as string, spatialAuthority: options.spatialAuthority });
+        return new SqliteYjsRepository({ path: resolved.config.sqlitePath as string, spatialAuthority });
       }
       const { MongoYjsRepository } = await import("./storage/mongo/index.js");
       return MongoYjsRepository.connect({
@@ -670,7 +681,22 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   const worldConversion = sync ? createWorldConversionService(async (id) =>
     await canvasContentExists(id) ? sync.registry.resolve(id) : null) : null;
   const spatialWrites: CanvasService["spatialWrites"] = sync ? {
-    acquire: async (intent) => (await spatialRepository()).acquireSpatialRun(intent),
+    acquire: async (intent) => {
+      // Refresh the authority's exact-revision footprint cache before the lease is
+      // checked. The repository still validates every target inside its transaction.
+      const room = await sync.registry.resolve(intent.canvasId);
+      if (room && worldAuthoringAuthority && (!options.yjsRepository || options.spatialAuthority)) {
+        const inspected = await room.inspectPublished(value => value);
+        if (inspected.ok) {
+          if (intent.scope.scope.kind === "scene-area") {
+            await worldAuthoringAuthority.prepareCanvas(inspected.canvas, { kind: "scene-area", areaId: intent.scope.scope.areaId });
+          } else {
+            await worldAuthoringAuthority.prepareGroup(inspected.canvas, intent.scope.scope.groupId);
+          }
+        }
+      }
+      return (await spatialRepository()).acquireSpatialRun(intent);
+    },
     cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
     confirmStopped: async (canvasId, requestId, runId, epoch, executionId, evidence) => (await spatialRepository()).confirmSpatialStopped(canvasId, requestId, runId, epoch, executionId, evidence),
     pending: async () => (await spatialRepository()).pendingSpatialRuns(),
@@ -681,6 +707,16 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       return room.submit(batch, { spatialContext: context });
     }
   } : null;
+  const worldAuthoring = sync && worldAuthoringAuthority && (!options.yjsRepository || options.spatialAuthority) ? createWorldAuthoringService({
+    authority: worldAuthoringAuthority,
+    resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
+    acquire: async (intent) => (await spatialRepository()).acquireSpatialRun(intent),
+    cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
+    findLatest: async (canvasId, operationId) => {
+      const repository = await spatialRepository();
+      return repository.findLatestWorldAuthoringCommand(canvasId, operationId);
+    }
+  }) : null;
   async function spatialRepository() {
     const repository = await resolveYjsRepository();
     const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
@@ -689,6 +725,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   }
   const composedHandler = composeRequestHandler({
     worldConversion,
+    worldAuthoring,
     env,
     canvasEnabled,
     unavailableReason,
@@ -730,6 +767,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   return {
     spatialWrites,
     worldConversion,
+    worldAuthoring,
     scenePackages,
     sync,
     runService,

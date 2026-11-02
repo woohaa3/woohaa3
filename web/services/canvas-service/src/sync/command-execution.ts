@@ -61,11 +61,13 @@ export async function executeDerived(
     /** 脚本请求 hash；提供时用于区分「重试已成功请求」与「复用身份改内容」。 */
     expectedPayloadHash?: string;
     expectedModelBatchHash?: string;
+    /** T06: same operationId must carry the same frozen scene-area intent. */
+    expectedWorldAuthoringHash?: string;
     derive: (canvas: ServerCanvas) =>
-      | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta }
+      | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta; worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt }
       | { ok: false; code: string; message: string }
       | Promise<
-          | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta }
+          | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta; worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt }
           | { ok: false; code: string; message: string }
         >;
   },
@@ -80,6 +82,9 @@ export async function executeDerived(
   // 幂等预检在派生之前：命中同 commandId 的回执直接返回首次结果，不重新读取/应用变更。
   const existing = input.commandId.trim() === "" ? null : await host.repository.getCommandRecord(host.canvasId, input.commandId);
   if (existing) {
+    if (input.expectedWorldAuthoringHash !== undefined && existing.worldAuthoring?.intentHash !== input.expectedWorldAuthoringHash) return {
+      ok: false, status: "rejected", commandId: input.commandId, code: "request-id-reused", message: "相同 operationId 使用了不同场景意图"
+    };
     if (input.expectedModelBatchHash !== undefined && existing.modelBatch?.submissionHash !== input.expectedModelBatchHash) return {
       ok: false, status: "rejected", commandId: input.commandId, code: "request-id-reused", message: "相同 requestId 使用了不同模型批次"
     };
@@ -102,6 +107,7 @@ export async function executeDerived(
       update: null,
       ...(existing.script ? { script: existing.script } : {}),
       ...(existing.modelBatch ? { modelBatch: existing.modelBatch } : {}),
+      ...(existing.worldAuthoring ? { worldAuthoring: existing.worldAuthoring } : {}),
       duplicate: true
     };
   }
@@ -113,7 +119,7 @@ export async function executeDerived(
   if (!derived.ok) {
     return { ok: false, status: "rejected", commandId: input.commandId, code: derived.code, message: derived.message };
   }
-  return executeCommand(host, derived.batch, { ...options, ...(derived.script ? { script: derived.script } : {}), ...(derived.modelBatch ? { modelBatch: derived.modelBatch } : {}) });
+  return executeCommand(host, derived.batch, { ...options, ...(derived.script ? { script: derived.script } : {}), ...(derived.modelBatch ? { modelBatch: derived.modelBatch } : {}), ...(derived.worldAuthoring ? { worldAuthoring: derived.worldAuthoring } : {}) });
 }
 
 export async function executeCommand(
@@ -190,7 +196,8 @@ export async function executeCommand(
     createdAt: host.nowIso(),
     // noop 也保存首次回执（spec）；元数据在首次提交时冻结。
     ...(options?.script ? { script: options.script } : {}),
-    ...(options?.modelBatch ? { modelBatch: options.modelBatch } : {})
+    ...(options?.modelBatch ? { modelBatch: options.modelBatch } : {}),
+    ...(options?.worldAuthoring ? { worldAuthoring: options.worldAuthoring } : {})
   };
 
   // 无净变化：仍持久化幂等记录，但 update 为空、revision 不变（design D5）。
@@ -236,7 +243,8 @@ export async function executeCommand(
     noop: !outcome.changed,
     update: acceptedUpdate,
     ...(options?.script ? { script: options.script } : {}),
-    ...(options?.modelBatch ? { modelBatch: options.modelBatch } : {})
+    ...(options?.modelBatch ? { modelBatch: options.modelBatch } : {}),
+    ...(options?.worldAuthoring ? { worldAuthoring: options.worldAuthoring } : {})
   };
 }
 
@@ -297,6 +305,7 @@ function duplicateResult(
     update: null,
     ...(existing.script ? { script: existing.script } : {}),
       ...(existing.modelBatch ? { modelBatch: existing.modelBatch } : {}),
+      ...(existing.worldAuthoring ? { worldAuthoring: existing.worldAuthoring } : {}),
     duplicate: true
   };
 }

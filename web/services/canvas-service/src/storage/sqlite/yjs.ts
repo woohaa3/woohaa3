@@ -217,10 +217,20 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
         const current = this.spatialLeases.lookup(intent.canvasId, intent.requestId);
         if (!current) throw new SpatialLeaseError("stale-epoch");
         const granted = new Set(current.intent.writable.map(objectKey));
-        const additions = resolved.previous.filter(target => !granted.has(objectKey(target)));
+        const nextByKey = new Map(resolved.next.map(target => [objectKey(target), target]));
+        // A target that did not exist in the source is a new object: its grant is
+        // the validated post-state version, and the lock is acquired atomically
+        // with this commit. Existing targets keep their source version.
+        const additions = resolved.previous
+          .filter(target => !granted.has(objectKey(target)))
+          .map(target => ({ ...target, version: nextByKey.get(objectKey(target))?.version ?? target.version }));
         if (additions.length) this.spatialLeases.extendForCommit(intent.canvasId, intent.requestId, additions);
-        this.spatialLeases.validateForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, resolved.previous);
-        advance = () => this.spatialLeases.advanceVersionsForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, resolved.previous, resolved.next);
+        const expected = resolved.previous.map(target => {
+          const next = nextByKey.get(objectKey(target));
+          return target.version === "absent" && next ? { ...target, version: next.version } : target;
+        });
+        this.spatialLeases.validateForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, expected);
+        advance = () => this.spatialLeases.advanceVersionsForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, expected, resolved.next);
       } else {
         this.spatialLeases.validateUnoccupied(commit.canvasId, targets);
       }
@@ -244,8 +254,8 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
       this.db
         .prepare(
           `INSERT INTO canvas_yjs_commands
-             (canvas_id, command_id, payload_hash, revision, changed, actor_id, created_at, script_meta_json, model_batch_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             (canvas_id, command_id, payload_hash, revision, changed, actor_id, created_at, script_meta_json, model_batch_json, world_authoring_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           commit.canvasId,
@@ -256,7 +266,8 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
           commit.command.actorId,
           commit.command.createdAt,
           commit.command.script ? JSON.stringify(commit.command.script) : null,
-          commit.command.modelBatch ? JSON.stringify(commit.command.modelBatch) : null
+          commit.command.modelBatch ? JSON.stringify(commit.command.modelBatch) : null,
+          commit.command.worldAuthoring ? JSON.stringify(commit.command.worldAuthoring) : null
         );
 
       return { ok: true, storageSeq: nextSeq, revision: commit.revision, duplicate: false } satisfies YjsCommitResult;
@@ -275,6 +286,23 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
       .get(canvasId, commandId) as CommandRow | undefined;
     if (!row) return null;
     return decodeCommandRow(row);
+  }
+
+  async findLatestWorldAuthoringCommand(canvasId: string, operationId: string): Promise<YjsCommandRecord | null> {
+    const escaped = JSON.stringify(operationId).replace(/[\\%_]/g, character => `\\${character}`);
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM canvas_yjs_commands
+         WHERE canvas_id = ? AND world_authoring_json IS NOT NULL
+           AND world_authoring_json LIKE ? ESCAPE '\\'
+         ORDER BY rowid DESC`
+      )
+      .all(canvasId, `%"operationId":${escaped}%`) as CommandRow[];
+    for (const row of rows) {
+      const record = decodeCommandRow(row);
+      if (record.worldAuthoring?.operationId === operationId) return record;
+    }
+    return null;
   }
 
   async replaceCheckpoint(input: {
