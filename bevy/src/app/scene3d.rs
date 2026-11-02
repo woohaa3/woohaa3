@@ -439,6 +439,27 @@ mod grid_tests {
     use super::*;
     use bevy::mesh::VertexAttributeValues;
 
+    #[test]
+    fn scene_area_outlines_preserve_overlapping_ground_bounds() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<CurrentScene>()
+            .insert_resource(FrameFlags { scene_received: true, ..default() })
+            .add_systems(Update, sync_scene_areas);
+        app.world_mut().resource_mut::<CurrentScene>().0.scene_areas = serde_json::from_value(serde_json::json!([
+            {"nodeId":"a", "bounds":{"min":{"u":0,"v":0},"max":{"u":3,"v":3}}},
+            {"nodeId":"b", "bounds":{"min":{"u":2,"v":2},"max":{"u":4,"v":4}}}
+        ])).unwrap();
+        app.update();
+        let world = app.world_mut();
+        let lines: Vec<_> = world.query_filtered::<&Transform, With<SceneAreaLine>>().iter(world).copied().collect();
+        assert_eq!(lines.len(), 8);
+        assert!(lines.iter().all(|line| line.translation.y == 0.0));
+        assert!(lines.iter().any(|line| line.translation == Vec3::new(96.0, 0.0, 0.0) && line.scale.x == 192.0));
+        assert!(lines.iter().any(|line| line.translation == Vec3::new(192.0, 0.0, -128.0) && line.scale.x == 128.0));
+    }
+
     fn model_test_app() -> App {
         let mut app = App::new();
         app.init_resource::<Assets<Mesh>>()

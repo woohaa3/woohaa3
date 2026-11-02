@@ -21,9 +21,17 @@ it("projects canonical bounds and cycles overlapping ground selections independe
   controller.flush();
   expect((scenes.at(-1) as unknown as { sceneAreas: unknown[] }).sceneAreas).toHaveLength(2);
   dom.fire("pointerdown", { clientX: 10, clientY: 10, button: 0 });
+  dom.fire("pointerup", { clientX: 10, clientY: 10, button: 0 });
   expect(nodeSelectionStore.getPrimaryNodeId()).toBe("a");
   controller.flush();
   dom.fire("pointerdown", { clientX: 10, clientY: 10, button: 0 });
+  dom.fire("pointerup", { clientX: 10, clientY: 10, button: 0 });
   expect(nodeSelectionStore.getPrimaryNodeId()).toBe("b");
+  dom.fire("pointerdown", { clientX: 10, clientY: 10, button: 0 });
+  dom.fire("pointermove", { clientX: 40, clientY: 40, button: 0 });
+  controller.flush();
+  expect((scenes.at(-1) as unknown as { marquee: unknown }).marquee).toBeTruthy();
+  dom.fire("pointerup", { clientX: 40, clientY: 40, button: 0 });
+  expect(nodeSelectionStore.getPrimaryNodeId()).not.toBe("a");
   controller.dispose();
 });

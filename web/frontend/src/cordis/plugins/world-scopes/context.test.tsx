@@ -32,3 +32,23 @@ it("discards late prepare failures on selection change and unmount", async () =>
   expect(host.textContent).toBe("");
   nodeSelectionStore.reset();
 });
+
+it("ignores a late success after the canvas page changes", async () => {
+  const base = createEmptyWoohaa3ServerCanvas("c1");
+  const area = { kind: "scene-area", version: "shared-world-v1", areaId: "a", scopeVersion: "v1", bounds: { min: { u: 0, v: 0 }, max: { u: 1, v: 1 } } };
+  woohaa3CanvasStore.getState().applyRemoteCanvas({ ...base, revision: 1, document: { ...base.document, nodes: [{ id: "a", type: "group", position: { x: 0, y: 0 } }] }, nodeData: { a: { sceneArea: area } } } as ServerCanvas);
+  const pending: Array<{ signal: AbortSignal; resolve: (value: unknown) => void }> = [];
+  const ctx = { canvasRemote: { prepareSceneArea: vi.fn((_input, signal: AbortSignal) => new Promise(resolve => pending.push({ signal, resolve }))) } };
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  await act(async () => {
+    nodeSelectionStore.setFromRuntime({ nodeIds: ["a"], primaryNodeId: "a", editingFocus: false }, new Set(["a"]));
+    root.render(<ScopeContext ctx={ctx as never} canvasId="c1" />);
+  });
+  await act(async () => { root.render(<ScopeContext ctx={ctx as never} canvasId="c2" />); });
+  expect(pending[0]!.signal.aborted).toBe(true);
+  await act(async () => { pending[0]!.resolve({ ok: true, snapshot: { canvasId: "c1", areaNodeId: "a", area, objects: [{ containment: "writable", identity: { kind: "instance", instanceId: "old-object" } }] } }); });
+  expect(host.textContent).not.toContain("old-object");
+  await act(async () => { root.unmount(); });
+  nodeSelectionStore.reset();
+});

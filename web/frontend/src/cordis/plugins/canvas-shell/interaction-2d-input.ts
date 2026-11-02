@@ -32,6 +32,7 @@ export function create2dInputFamily(core: InteractionCore) {
   const viewport = createWheelViewport(core);
   const aggregate = createAggregateConnectFamily(core);
   const history = createHistoryClick(core);
+  let groundClick: { pointerId: number; x: number; y: number; candidates: string[] } | null = null;
 
   const drag = createDragGestureFamily(core);
   /**
@@ -72,6 +73,7 @@ export function create2dInputFamily(core: InteractionCore) {
   };
 
   const onPointerDown = (event: PointerEvent) => {
+    groundClick = null;
     // 计时起点在最外层：命中查询也要算进这次输入的耗时（spec: 被拒绝的输入不发事件，
     // 但它的时间仍然值得记下来——只是不产生 `perf.interaction`）。
     pointerMoment = perf.enter();
@@ -148,13 +150,7 @@ export function create2dInputFamily(core: InteractionCore) {
           const { min, max } = area.value.bounds;
           return ground.u >= min.u && ground.u <= max.u && ground.v >= min.v && ground.v <= max.v ? [node.id] : [];
         }).sort();
-        if (candidates.length) {
-          const next = (candidates.indexOf(state.selected.length === 1 ? state.selected[0]! : "") + 1) % candidates.length;
-          setSelection([candidates[next]!]);
-          event.preventDefault();
-          schedule();
-          return;
-        }
+        if (candidates.length) groundClick = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, candidates };
       }
     }
 
@@ -300,7 +296,7 @@ export function create2dInputFamily(core: InteractionCore) {
       return;
     }
 
-    if (!event.shiftKey) setSelection([]);
+    if (!event.shiftKey && !groundClick) setSelection([]);
     beginGesture();
     beginPerfGesture("marquee");
     state.gesture = { kind: "marquee", pointerId: event.pointerId, start: world, current: world };
@@ -477,14 +473,19 @@ export function create2dInputFamily(core: InteractionCore) {
       }
       state.draft = null;
     } else if (state.gesture.kind === "marquee") {
-      const marqueeResult = core.queryMarquee({
-        x: state.gesture.start.x,
-        y: state.gesture.start.y,
-        width: state.gesture.current.x - state.gesture.start.x,
-        height: state.gesture.current.y - state.gesture.start.y
-      });
-      if (marqueeResult.ok) {
-        setSelection(marqueeResult.value);
+      const click = groundClick;
+      groundClick = null;
+      if (click && click.pointerId === event.pointerId && Math.hypot(event.clientX - click.x, event.clientY - click.y) < 5) {
+        const next = (click.candidates.indexOf(state.selected.length === 1 ? state.selected[0]! : "") + 1) % click.candidates.length;
+        setSelection([click.candidates[next]!]);
+      } else {
+        const marqueeResult = core.queryMarquee({
+          x: state.gesture.start.x,
+          y: state.gesture.start.y,
+          width: world.x - state.gesture.start.x,
+          height: world.y - state.gesture.start.y
+        });
+        if (marqueeResult.ok) setSelection(marqueeResult.value);
       }
     } else if (state.gesture.kind === "right-press") {
       // 短按右键不是平移：到这里才确定它是菜单（spec: kind 取 `context-menu`）。
