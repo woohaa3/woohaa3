@@ -93,7 +93,32 @@ const point = (v: any) => record(v) && number(v.u) && number(v.v);
 const bounds = (v: any) => record(v) && point(v.min) && point(v.max) && v.min.u <= v.max.u && v.min.v <= v.max.v;
 const area = (v: any) => record(v) && id(v.areaId) && id(v.scopeVersion) && bounds(v.bounds);
 const members = (v: any) => record(v) && list(v.instances, x => record(x) && identity(x.identity) && id(x.version) && record(x.transform) && id(x.transform.version) && record(x.transform.position) && number(x.transform.position.u) && number(x.transform.position.v) && number(x.transform.position.h) && Array.isArray(x.transform.rotation) && x.transform.rotation.length === 4 && x.transform.rotation.every(number) && number(x.transform.scale)) && list(v.cameras, x => record(x) && identity(x.identity) && id(x.version) && decodeWorldCamera(x.camera).ok);
-const plan = (v: any) => record(v) && v.contractVersion === "scene-area-plan-v1" && id(v.canvasId) && id(v.operationId) && ["move", "resize", "delete-area", "delete-area-with-contents"].includes(v.intent) && record(v.source) && area(v.source.area) && members(v.source.members) && list(v.commands, x => record(x) && id(x.kind)) && list(v.inverse, x => record(x) && id(x.kind));
+const transform = (v: any) => record(v) && v.version === "shared-world-v1" && record(v.position) && number(v.position.u) && number(v.position.v) && number(v.position.h) && rotation(v.rotation) && number(v.scale) && v.scale > 0;
+const rotation = (v: any) => Array.isArray(v) && v.length === 4 && v.every(number);
+const target = (v: any, kind: "instance" | "camera") => identity(v) && v.kind === kind;
+const planCommand = (v: any) => {
+  if (!record(v)) return false;
+  switch (v.kind) {
+    case "set-scene-area-bounds": return id(v.areaId) && id(v.expectedScopeVersion) && bounds(v.bounds);
+    case "delete-scene-area": return id(v.areaId) && id(v.expectedScopeVersion);
+    case "set-instance-transform": return target(v.target, "instance") && id(v.expectedVersion) && transform(v.transform);
+    case "set-world-camera-pose": return target(v.target, "camera") && id(v.expectedVersion) && record(v.position) && number(v.position.u) && number(v.position.v) && number(v.position.h) && rotation(v.rotation);
+    case "delete-instance": return target(v.target, "instance") && id(v.expectedVersion);
+    case "delete-world-camera": return target(v.target, "camera") && id(v.expectedVersion);
+    default: return false;
+  }
+};
+const inverseCommand = (v: any) => {
+  if (!record(v)) return false;
+  switch (v.kind) {
+    case "restore-scene-area-bounds":
+    case "restore-scene-area": return id(v.areaId) && id(v.scopeVersion) && bounds(v.bounds);
+    case "restore-instance": return target(v.target, "instance") && id(v.version) && transform(v.transform);
+    case "restore-world-camera": return target(v.target, "camera") && id(v.version) && decodeWorldCamera(v.camera).ok;
+    default: return false;
+  }
+};
+const plan = (v: any) => record(v) && v.contractVersion === "scene-area-plan-v1" && id(v.canvasId) && id(v.operationId) && ["move", "resize", "delete-area", "delete-area-with-contents"].includes(v.intent) && record(v.source) && area(v.source.area) && members(v.source.members) && list(v.commands, planCommand) && list(v.inverse, inverseCommand);
 const node = (v: any) => record(v) && id(v.nodeId) && "node" in v && "nodeData" in v;
 const receipt = (v: any) => record(v) && v.version === "world-authoring-receipt-v1" && id(v.canvasId) && id(v.operationId) && id(v.intent) && ["forward", "undo", "redo"].includes(v.direction) && id(v.intentHash) && (v.previousCommandId === null || id(v.previousCommandId)) && plan(v.plan) && record(v.source) && node(v.source.area) && list(v.source.members, x => node(x) && identity(x.identity)) && list(v.deletedNodes, node) && record(v.produced) && (v.produced.areaScopeVersion === null || id(v.produced.areaScopeVersion)) && list(v.produced.targets, version) && number(v.revision) && id(v.createdAt);
 const historyEntry = (v: any) => record(v) && [v.completionKey, v.canvasId, v.cameraId, v.runId, v.completionId, v.settingsVersion, v.createdAt].every(id) && decodeWorldCameraHistorySnapshot(v.snapshot).ok;

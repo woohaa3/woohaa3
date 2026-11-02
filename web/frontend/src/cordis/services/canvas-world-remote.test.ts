@@ -47,6 +47,12 @@ describe("world authoring remote", () => {
       if (route.startsWith("scene-area-") && route !== "scene-area-prepare") {
         payload = { ...(success as object), plan: {} };
         expect(await invoke(remote)).toMatchObject({ ok: false, code: "not-ready" });
+        for (const malformed of [{ commands: [{ kind: "delete-scene-area" }] }, { inverse: [{ kind: "restore-instance" }] }, { commands: [{ kind: "unknown" }] }]) {
+          payload = { ...(success as object), plan: { ...plan, ...malformed } };
+          expect(await invoke(remote)).toMatchObject({ ok: false, code: "not-ready" });
+          payload = { ...(success as object), receipt: { ...receipt, plan: { ...plan, ...malformed } } };
+          expect(await invoke(remote)).toMatchObject({ ok: false, code: "not-ready" });
+        }
       }
       if (route === "world-tool-context") {
         payload = { ...(success as object), run: {} };
