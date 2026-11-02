@@ -17,6 +17,7 @@ export * from "./task/activity.js";
 export * from "./task/background-activity.js";
 export * from "./task/recording-activity.js";
 export * from "./task/protocol.js";
+export * from "./task/world-capture-input.js";
 export * from "./task/schema-validation.js";
 export * from "./task/parameter-schema.js";
 export * from "./task/image-parameters.js";
@@ -117,6 +118,7 @@ export * from "./canvas/ground-anchor.js";
 export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService } from "./extension/services/host/media-formats.js";
 export * from "./canvas/scene-package.js";
 export * from "./canvas/shared-world.js";
+export * from "./canvas/scene-footprint.js";
 export * from "./canvas/world-conversion.js";
 export {
   SharedWorldCodecError,
@@ -205,5 +207,10 @@ export {
   worldCaptureInputMetadataEqual,
   type WorldCaptureVersionComparison
 } from "./canvas/world-capture-codec.js";
+export * from "./canvas/world-capture-port-contract.js";
+export * from "./canvas/world-capture-content-contract.js";
+export * from "./canvas/world-capture-pipeline-contract.js";
+export * from "./canvas/world-capture-image.js";
 export * from "./canvas/scene-area-plan-contract.js";
 export * from "./canvas/scene-area-operation-plan.js";
+export * from "./canvas/world-authoring.js";

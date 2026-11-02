@@ -13,7 +13,7 @@
  * 具体模型 React UI 由 Registry 解析出的 `definition.Panel` 直接渲染；Host 不含
  * audio/video/`edit_video` 专用布局分支，也不按 providerId 选择组件。
  */
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
 import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
 import { Button } from "@woohaa3/ui";
@@ -51,6 +51,7 @@ import {
   resolveSelectedModelKey
 } from "./node-panel-helpers.js";
 import { resolveModelExecutionContext } from "./model-execution-context.js";
+import { explicitWorldCaptureSelection } from "./capture-camera.js";
 import { createModelDraftStore } from "./model-draft.js";
 import {
   ModelInteractionDiagnosticView,
@@ -89,6 +90,11 @@ function executionButtonOrigin(button: HTMLButtonElement | null): ExecutionOrigi
 
 export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const launchSurface = useRef<HTMLDivElement>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const launchOrigin = useRef<ExecutionOrigin>();
   const captureLaunchOrigin = (event: SyntheticEvent<HTMLDivElement>) => {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
@@ -198,6 +204,14 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     () => typedModels.find((entry) => entry.modelKey === targetModelKey) ?? null,
     [typedModels, targetModelKey]
   );
+  // T10: capture framing is explicit-only. The panel never scans the canvas for a
+  // camera card, so an unrelated world camera cannot change an ordinary generation.
+  // T09/T11b supply the production UI that passes `captureCameraId`.
+  const worldCapture = useMemo(
+    () => explicitWorldCaptureSelection(props.captureCameraId),
+    [props.captureCameraId]
+  );
+
   const definition = useMemo(
     () => (model ? registry.resolve(model.interaction) : null),
     [model, registry]
@@ -248,7 +262,8 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         ? props.submitCoordinator ?? createSubmitCoordinator({
             store: woohaa3CanvasStore,
             client: runClient,
-            ...(activity ? { activity } : {})
+            ...(activity ? { activity } : {}),
+            isCurrent: () => mounted.current
           })
         : null,
     [canvasId, runClient, activity, props.submitCoordinator]
@@ -365,9 +380,14 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         prompt: input.prompt,
         parameters: input.parameters,
         catalog,
-        expectedModelType: modelTypeForPanelKind(panelKind)
+        expectedModelType: modelTypeForPanelKind(panelKind),
+        ...(worldCapture ? { worldCapture } : {})
       });
       if (!outcome.ok) {
+        // Page/panel disposal or scope change: do not paint stale failure feedback.
+        if (!mounted.current || outcome.code === "stale-scope") {
+          return { ok: false, error: outcome.error };
+        }
         draftStore.patch(nodeId, targetModelKey, { prompt: input.prompt });
         if (outcome.error === EMPTY_UPSTREAM_TEXT_MESSAGE) showEmptyUpstreamAlert();
         else setSubmitError(outcome.error);
@@ -375,7 +395,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       }
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
     },
-    [catalog, canvas, catalogState, context, disabledReason, draftStore, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey]
+    [catalog, canvas, catalogState, context, disabledReason, draftStore, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
   );
 
   const submitIntent = useCallback(

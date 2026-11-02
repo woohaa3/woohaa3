@@ -5,7 +5,7 @@
  * 重复通知与补偿扫描只投影一次、暂时失败可重试（不重跑 provider）。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, type StoredAsset, type WorldCaptureGenerationBinding } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { CanvasRoom } from "./room.js";
 import { InMemoryYjsDocumentRepository } from "./in-memory-yjs-repository.js";
@@ -97,6 +97,55 @@ describe("终态投影（任务 7.3 / 7.4）", () => {
     expect(exported.canvas.jobs[0].status).toBe("success");
     // seed(1) + projection(1) = 2。
     expect(exported.canvas.revision).toBe(2);
+  });
+
+  it("终态投影保留已受理任务的取景绑定（T10）", async () => {
+    const { room, projector } = await setupRoom();
+    const key = {
+      canvasId: CANVAS,
+      cameraId: "camera-1",
+      worldContentVersion: "world-1",
+      cameraSettingsVersion: "camera-1-v1",
+      bindingVersion: "binding-1",
+      outputVersion: "output-1"
+    };
+    const worldCapture: WorldCaptureGenerationBinding = {
+      version: "world-capture-generation-binding-v1",
+      requestId: "capture-1",
+      key,
+      contentFingerprint: "0123456789abcdef",
+      input: { key, mediaId: "generation-outputs/capture.png", checksum: CHECKSUM }
+    };
+    const seeded = room.exportCanvas();
+    if (!seeded.ok) return;
+    await room.submit({
+      protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+      canvasId: CANVAS,
+      commandId: "seed-job",
+      baseRevision: seeded.canvas.revision,
+      actorId: "web",
+      commands: [
+        {
+          type: "job.upsert",
+          job: {
+            id: "job-1",
+            nodeId: "n1",
+            taskId: "run-1",
+            runId: "run-1",
+            modelKey: "m",
+            worldCapture,
+            status: "running",
+            updatedAt: NOW
+          }
+        }
+      ]
+    });
+
+    const outcome = await projector.project(record());
+    expect(outcome.status).toBe("projected");
+    const exported = room.exportCanvas();
+    if (!exported.ok) return;
+    expect(exported.canvas.jobs[0]).toMatchObject({ status: "success", worldCapture });
   });
 
   it("job 落盘模型身份：首次投影缺省、终态投影补上 modelKey（change: l0-generation-provenance）", async () => {

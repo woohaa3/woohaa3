@@ -33,3 +33,6 @@ export * from "./node-history/projection.js";
 
 // 条目与 payload 的反序列化/校验。
 export * from "./node-history/codec.js";
+
+// 世界镜头设置保存/恢复与助手完成历史（T08）。
+export * from "./node-history/world-camera.js";

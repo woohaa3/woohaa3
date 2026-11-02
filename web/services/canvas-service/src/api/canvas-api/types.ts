@@ -23,6 +23,7 @@ export type CanvasRunPort = {
     modelKey: string;
     prompt: string;
     parameters: Record<string, unknown>;
+    worldCapture?: import("@woohaa3/contracts").WorldCaptureGenerationBinding;
   }, context?: { owner: string }): Promise<{ ok: true; runId: string; jobId: string; workerTaskKey?: string; state: "accepted" } | { ok: false; code: string; message: string }>;
   cancel(request: { canvasId: string; nodeId: string; runId: string }): Promise<
     { ok: true; state: "cancel-requested" } | { ok: false; code: string; message: string }
@@ -63,6 +64,10 @@ export type CanvasImportGuard = {
 
 export type CanvasRequestHandlerOptions = {
   worldConversion?: import("@woohaa3/contracts").BackendWorldConversionPort;
+  worldAuthoring?: import("@woohaa3/contracts").BackendWorldAuthoringPort;
+  worldCamera?: import("../../world-authoring/camera-service.js").WorldCameraSettingsService;
+  /** T10 framing refresh/freeze routes. Missing means explicit 503. */
+  worldCapture?: import("../../world-authoring/capture-service.js").WorldCaptureService;
   service: CanvasApplicationService;
   catalog?: CanvasCatalogService;
   serviceToken?: string;

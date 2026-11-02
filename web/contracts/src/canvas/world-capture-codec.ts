@@ -18,9 +18,10 @@
  *
  * Frozen input metadata is the T10 `WorldCaptureFrozenInput` shape. Decoding
  * requires the exact input/media allowlists, stable media identity, lowercase
- * SHA-256 checksum, positive safe integer byte size and a static image content
- * type. Runtime fields (request/worker/capture status, URLs, timestamps and so on)
- * are rejected as unknown keys. Successful encode/decode calls return fresh copies.
+ * SHA-256 checksum, positive safe integer byte size, exact positive safe integer
+ * pixel width/height and a static image content type. Runtime fields
+ * (request/worker/capture status, URLs, timestamps and so on) are rejected as
+ * unknown keys. Successful encode/decode calls return fresh copies.
  */
 
 import {
@@ -127,7 +128,8 @@ export function encodeWorldCaptureInputMetadata(value: WorldCaptureFrozenInput):
 
 /**
  * Exact equality of the complete frozen input, including the capture key, media
- * identity and every static media field. Invalid metadata is never equal.
+ * identity, every static media field and the independent pixel width/height.
+ * Invalid metadata is never equal.
  */
 export function worldCaptureInputMetadataEqual(
   left: WorldCaptureFrozenInput,
@@ -147,5 +149,7 @@ export function worldCaptureInputMetadataEqual(
     leftMedia.storageKey === rightMedia.storageKey &&
     leftMedia.checksum === rightMedia.checksum &&
     leftMedia.contentType === rightMedia.contentType &&
-    leftMedia.size === rightMedia.size;
+    leftMedia.size === rightMedia.size &&
+    leftMedia.width === rightMedia.width &&
+    leftMedia.height === rightMedia.height;
 }

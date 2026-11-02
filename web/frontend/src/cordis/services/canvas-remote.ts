@@ -92,6 +92,7 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
   const location =
     options.location ?? (globalThis.location as unknown as { protocol?: string; host?: string } | undefined) ?? {};
   const canvasBase = `${basePath}/${encodeURIComponent(options.canvasId)}/runs`;
+  const captureBase = `${basePath}/${encodeURIComponent(options.canvasId)}/captures`;
 
   /**
    * page-owned Canvas Session transport（唯一物理 WebSocket）。
@@ -109,7 +110,7 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
     return sessionTransport;
   };
 
-  async function post(suffix: string, body: unknown): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; error: string }> {
+  async function post(suffix: string, body: unknown): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; error: string; code?: string }> {
     let response: Response;
     try {
       response = await fetchImpl(`${canvasBase}${suffix}`, {
@@ -126,7 +127,11 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
         parsed && typeof parsed.message === "string" && parsed.message !== ""
           ? parsed.message
           : `请求失败（HTTP ${response.status}）`;
-      return { ok: false, error: message };
+      return {
+        ok: false,
+        error: message,
+        ...(parsed && typeof parsed.code === "string" ? { code: parsed.code } : {})
+      };
     }
     return { ok: true, body: parsed ?? {} };
   }
@@ -260,6 +265,39 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
       const runId = typeof result.body.runId === "string" ? result.body.runId : request.runId;
       const jobId = typeof result.body.jobId === "string" ? result.body.jobId : request.jobId;
       return { ok: true, runId, jobId };
+    },
+
+    async freezeWorldCapture(input) {
+      let response: Response;
+      try {
+        response = await fetchImpl(`${captureBase}-freeze`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cameraId: input.cameraId,
+            ...(input.requestId ? { requestId: input.requestId } : {})
+          }),
+          ...(input.signal ? { signal: input.signal } : {})
+        });
+      } catch {
+        return { ok: false, code: "capture-unavailable", error: "无法连接取景服务" };
+      }
+      const parsed = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (parsed && parsed.ok === true && parsed.binding && typeof parsed.binding === "object") {
+        return {
+          ok: true,
+          binding: parsed.binding as import("@woohaa3/contracts").WorldCaptureGenerationBinding
+        };
+      }
+      return {
+        ok: false,
+        code: typeof parsed?.code === "string" ? parsed.code : `http-${response.status}`,
+        error: typeof parsed?.message === "string" && parsed.message !== ""
+          ? parsed.message
+          : `取景冻结失败（HTTP ${response.status}）`,
+        ...(parsed?.requestedKey ? { requestedKey: parsed.requestedKey as import("@woohaa3/contracts").WorldCaptureVersionKey } : {}),
+        ...(parsed?.currentKey ? { currentKey: parsed.currentKey as import("@woohaa3/contracts").WorldCaptureVersionKey } : {})
+      };
     },
 
     async cancel(input): Promise<CanvasCancelResult> {

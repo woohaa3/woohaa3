@@ -178,6 +178,11 @@ export type StoredJob = {
   modelKey?: string;
   /** 客户端生成的任务运行 id；与 nodeData.activeRunId 对应（latest-run-wins）。 */
   runId?: string;
+  /**
+   * T10 frozen world-capture input for this run. It is written once at durable
+   * acceptance and never rewritten by later canvas changes.
+   */
+  worldCapture?: import("../world-capture-pipeline-contract.js").WorldCaptureGenerationBinding;
   status: GenerationStatus;
   error?: string;
   updatedAt: string;

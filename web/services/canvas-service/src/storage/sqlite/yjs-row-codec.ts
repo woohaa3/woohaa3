@@ -37,6 +37,7 @@ export type CommandRow = {
   /** Canvas script 首次提交元数据（源码无关 JSON）；旧记录为 null。 */
   script_meta_json?: string | null;
   model_batch_json?: string | null;
+  world_authoring_json?: string | null;
 };
 
 /** `node:sqlite` 的 BLOB 列以 Uint8Array 返回；统一成新数组避免外部持有内部视图。 */
@@ -101,6 +102,7 @@ export function decodeCommandRow(row: CommandRow): {
   createdAt: string;
   script?: import("@woohaa3/contracts").CanvasScriptSubmissionMeta;
   modelBatch?: import("@woohaa3/contracts").ModelScriptBatchMeta;
+  worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
 } {
   const record = {
     commandId: row.command_id,
@@ -113,7 +115,14 @@ export function decodeCommandRow(row: CommandRow): {
   const script = parseScriptMeta(row.script_meta_json);
   let modelBatch: import("@woohaa3/contracts").ModelScriptBatchMeta | undefined;
   if (row.model_batch_json) modelBatch = JSON.parse(row.model_batch_json);
-  return { ...record, ...(script ? { script } : {}), ...(modelBatch ? { modelBatch } : {}) };
+  let worldAuthoring: import("@woohaa3/contracts").WorldAuthoringCommandReceipt | undefined;
+  if (row.world_authoring_json) worldAuthoring = JSON.parse(row.world_authoring_json);
+  return {
+    ...record,
+    ...(script ? { script } : {}),
+    ...(modelBatch ? { modelBatch } : {}),
+    ...(worldAuthoring ? { worldAuthoring } : {})
+  };
 }
 
 function parseScriptMeta(value: unknown): import("@woohaa3/contracts").CanvasScriptSubmissionMeta | undefined {

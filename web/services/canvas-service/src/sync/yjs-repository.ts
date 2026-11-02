@@ -47,6 +47,8 @@ export type YjsCommandRecord = {
    */
   script?: CanvasScriptSubmissionMeta;
   modelBatch?: ModelScriptBatchMeta;
+  /** Immutable scene-area authority receipt (T06); written in the same transaction. */
+  worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
 };
 
 /** 从存储恢复出的完整 Yjs 状态。 */
@@ -96,6 +98,14 @@ export interface YjsDocumentRepository {
 
   /** 查询命令幂等结果。 */
   getCommandRecord(canvasId: string, commandId: string): Promise<YjsCommandRecord | null>;
+
+  /**
+   * Latest scene-area authority command for one operation (T06).
+   *
+   * Undo/redo walk this chain: forward → undo → redo. Implementations without
+   * receipts may omit it; the authority service then fails closed.
+   */
+  findLatestWorldAuthoringCommand?(canvasId: string, operationId: string): Promise<YjsCommandRecord | null>;
 
   /**
    * 在 cutoffSeq 原子替换 checkpoint：写入新 checkpoint/snapshotSeq，删除
