@@ -583,3 +583,7 @@ mod grid_tests {
         assert_eq!(handles, previous);
     }
 }
+
+#[cfg(all(test, feature = "native-canvas", feature = "native-renderer"))]
+#[path = "scene3d_hardware_tests.rs"]
+mod hardware_tests;

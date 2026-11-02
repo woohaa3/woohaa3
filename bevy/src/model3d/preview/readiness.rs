@@ -22,7 +22,7 @@ struct PendingReadback {
     ready: Arc<AtomicBool>,
 }
 
-pub(super) fn enqueue_readback(
+pub(crate) fn enqueue_readback(
     commands: &mut Commands,
     image: Handle<Image>,
     pixels: Arc<Mutex<Option<Vec<u8>>>>,
@@ -62,7 +62,7 @@ fn admit_readback(mut commands: Commands, pending: Query<(Entity, &PendingReadba
 
 /// Readback starts before material pipelines finish compiling. Only accept pixels
 /// after the render world has completed several prepared frames, with no shaders pending.
-pub(super) fn install(app: &mut App) -> Arc<AtomicBool> {
+pub(crate) fn install(app: &mut App) -> Arc<AtomicBool> {
     let ready = Arc::new(AtomicBool::new(false));
     app.add_systems(Update, admit_readback);
     if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
