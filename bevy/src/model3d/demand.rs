@@ -39,7 +39,9 @@ pub(crate) fn update(
                 .as_ref()
                 .is_some_and(|p| p.node_id == node.id)
             || scene.hover.as_ref().and_then(|h| h.node_id.as_deref()) == Some(node.id.as_str());
-        let near = near_viewport(node, scene, focus);
+        // World geometry is independent of the card rectangle. Until world-space
+        // bounds drive culling, retain these instances conservatively.
+        let near = node.shared_world_instance.is_some() || near_viewport(node, scene, focus);
         if owner || near {
             models.offscreen_since.remove(&node.id);
             desired.insert(node.id.clone());
@@ -142,5 +144,31 @@ mod tests {
         scene.nodes[0].y = -1000.;
         update(&mut models, &scene, None, &HashSet::new(), &HashSet::new(), 3.);
         assert!(!models.demand.as_ref().unwrap().contains("m"));
+    }
+
+    #[test]
+    fn shared_world_demand_ignores_card_position_and_leases_resource() {
+        let mut scene = Scene::default();
+        scene.viewport.zoom = 1.;
+        scene.surface = Some(serde_json::from_value(serde_json::json!({
+            "width": 1024., "height": 600., "pixelRatio": 1.
+        })).unwrap());
+        scene.nodes.push(serde_json::from_value(serde_json::json!({
+            "id":"m", "type":"model", "x":10000., "y":10000., "width":100., "height":50.,
+            "model":{"resourceKey":"test:box","signature":"box"},
+            "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i",
+                "transform":{"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},
+                    "rotation":[0,0,0,1],"scale":1}}
+        })).unwrap());
+        let mut models = ModelVisuals::default();
+        for now in [0., 3.] {
+            update(&mut models, &scene, None, &HashSet::new(), &HashSet::new(), now);
+            assert!(models.demand.as_ref().unwrap().contains("m"));
+            assert!(payload_lease_keys(&scene, &models).contains("test:box"));
+            scene.nodes[0].x += 10000.;
+        }
+        scene.nodes.clear();
+        update(&mut models, &scene, None, &HashSet::new(), &HashSet::new(), 4.);
+        assert!(models.demand.as_ref().unwrap().is_empty());
     }
 }

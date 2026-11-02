@@ -54,9 +54,33 @@ pub(crate) fn model_bounds_for_node(
     placement: &ModelPlacement,
     node: &GraphNode,
 ) -> Option<(ModelAabb, Vec3)> {
+    let root = model_root_transform(node, model, placement);
+    let local = layout_aabb(node, model, root.rotation, root.scale.x)?;
+    Some((local, root.translation))
+}
+
+/// The accepted world pose belongs only to the instance root; asset children stay Y-up.
+pub(super) fn model_root_transform(
+    node: &GraphNode,
+    model: &ModelSnapshot,
+    placement: &ModelPlacement,
+) -> Transform {
+    if let Some(instance) = &node.shared_world_instance {
+        let t = &instance.transform;
+        let p = crate::protocol::world_to_renderer([t.position.u, t.position.v, t.position.h]);
+        let q = crate::protocol::world_rotation_to_renderer(t.rotation);
+        return Transform {
+            translation: Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32),
+            rotation: Quat::from_xyzw(q[0] as f32, q[1] as f32, q[2] as f32, q[3] as f32),
+            scale: Vec3::splat((t.scale * crate::protocol::UNITS_PER_METER) as f32),
+        };
+    }
     let unit = model_unit(node, model, placement);
-    let local = layout_aabb(node, model, model_view_rotation(placement), unit)?;
-    Some((local, model_anchor(node, model, placement, unit)))
+    Transform {
+        translation: model_anchor(node, model, placement, unit),
+        rotation: model_view_rotation(placement),
+        scale: Vec3::splat(unit),
+    }
 }
 
 /// 模型在画布世界的根位置（world y 轴向上）——固定画布坐标，不读取 viewport/surface。
