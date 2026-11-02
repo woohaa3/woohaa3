@@ -12,12 +12,16 @@
  *
  * - T10 creates one `WorldCaptureRequest` from an immutable canonical snapshot. The
  *   request pins the complete `WorldCaptureVersionKey`, the snapshot world content
- *   and binding versions, the `WorldCameraData` settings snapshot and the exact
- *   output pixels. T09 must consume that request instead of re-reading the mutable
- *   current scene.
- * - T09 owns High-resource readiness and real GPU readback, renders the request and
- *   reports a `WorldCaptureProducerOutcome` carrying the same `requestId` and key.
- *   Its image bytes are temporary: they are not yet a valid generation input.
+ *   and binding versions, the `WorldCameraData` settings snapshot, the exact output
+ *   pixels and the immutable model content of every covered instance (see
+ *   `world-capture-content-contract.ts`). T09 must consume that request instead of
+ *   re-reading the mutable current scene.
+ * - T09 resolves the pinned model content through the trusted
+ *   `WorldCaptureContentResolutionPort` and rejects a resource whose content hash is
+ *   not the pinned one. It then renders the request and reports a
+ *   `WorldCaptureProducerOutcome` carrying the same `requestId`, key and content
+ *   fingerprint. Its image bytes are temporary: they are not yet a valid generation
+ *   input.
  * - An independent trusted media port saves those bytes. Only a verified
  *   `WorldCaptureMediaMetadata` v2 receipt (stable media id, storage key, SHA-256
  *   checksum, byte size and exact pixel width/height) can become a
@@ -64,6 +68,17 @@ import {
 } from "./shared-world.js";
 import { decodeWorldCamera } from "./world-camera-codec.js";
 import {
+  createWorldCaptureInstanceContents,
+  createWorldCaptureModelContent,
+  isWorldCaptureContentFingerprint,
+  verifyWorldCaptureContentResolution,
+  worldCaptureContentFingerprint,
+  type WorldCaptureContentResolution,
+  type WorldCaptureContentResolutionRequest,
+  type WorldCaptureInstanceContent,
+  type WorldCaptureModelContent
+} from "./world-capture-content-contract.js";
+import {
   decodeWorldCaptureMediaMetadata,
   decodeWorldCaptureVersionKey,
   freezeWorldCaptureInput,
@@ -80,21 +95,32 @@ const REQUEST_KEYS = [
   "bindingVersion",
   "camera",
   "subject",
-  "output"
+  "output",
+  "contentFingerprint"
 ] as const;
 const OUTPUT_KEYS = ["outputVersion", "width", "height", "contentType"] as const;
-const WORLD_SUBJECT_KEYS = ["kind", "instances"] as const;
-const INSTANCE_SUBJECT_KEYS = ["kind", "instanceId", "instance"] as const;
+const WORLD_SUBJECT_KEYS = ["kind", "instances", "contents"] as const;
+const INSTANCE_SUBJECT_KEYS = ["kind", "instanceId", "instance", "content"] as const;
 const MISSING_SUBJECT_KEYS = ["kind", "instanceId"] as const;
 const IMAGE_KEYS = ["bytes", "contentType", "width", "height"] as const;
-const RECEIPT_KEYS = ["requestId", "key", "media"] as const;
+const RECEIPT_KEYS = ["requestId", "key", "contentFingerprint", "media"] as const;
 const SAVED_RESULT_KEYS = ["status", "receipt"] as const;
-const SAVE_FAILURE_KEYS = ["status", "requestId", "key", "code"] as const;
-const CANCELLED_RESULT_KEYS = ["status", "requestId", "key"] as const;
+const SAVE_FAILURE_KEYS = ["status", "requestId", "key", "contentFingerprint", "code"] as const;
+const CANCELLED_RESULT_KEYS = ["status", "requestId", "key", "contentFingerprint"] as const;
 
 const WAITING_REASONS = ["resources-not-ready"] as const;
-const UNAVAILABLE_REASONS = ["bound-target-missing", "renderer-unavailable"] as const;
-const PRODUCER_FAILURE_CODES = ["render-failed", "readback-failed", "invalid-output"] as const;
+const UNAVAILABLE_REASONS = [
+  "bound-target-missing",
+  "renderer-unavailable",
+  "content-unavailable",
+  "content-replaced"
+] as const;
+const PRODUCER_FAILURE_CODES = [
+  "render-failed",
+  "readback-failed",
+  "invalid-output",
+  "content-mismatch"
+] as const;
 const MEDIA_SAVE_FAILURE_CODES = ["write-failed", "verification-failed"] as const;
 
 /** Static captures are images. Video/dynamic output types are T12 work. */
@@ -120,6 +146,8 @@ export interface WorldCaptureOutputSpec {
 export interface WorldCaptureWorldSubject {
   readonly kind: "world";
   readonly instances: readonly WorldInstanceData[];
+  /** Exactly one pinned content value per instance; never a current-scene lookup. */
+  readonly contents: readonly WorldCaptureInstanceContent[];
 }
 
 /** Bound framing: exactly one target instance and no other model. */
@@ -127,6 +155,8 @@ export interface WorldCaptureInstanceSubject {
   readonly kind: "instance";
   readonly instanceId: WorldId;
   readonly instance: WorldInstanceData;
+  /** Immutable model content of the bound instance; no other model is included. */
+  readonly content: WorldCaptureModelContent;
 }
 
 /** Bound target missing from the snapshot; no whole-world fallback is allowed. */
@@ -150,6 +180,11 @@ export type WorldCaptureSubject =
  * - `camera.settingsVersion` -> `key.cameraSettingsVersion`
  * - `output.outputVersion` -> `key.outputVersion`
  *
+ * `contentFingerprint` is derived from the immutable model content carried by
+ * `subject` during decode. It is not a free-form producer label: a mismatching value
+ * rejects the request, and a producer outcome that echoes a different fingerprint is
+ * rejected instead of being rendered/adopted.
+ *
  * `key.canvasId` remains the request's canvas identity. A successful decode returns a
  * deeply frozen copy, so neither later caller mutation nor a second consumer can
  * change the input T09 is rendering.
@@ -163,6 +198,8 @@ export interface WorldCaptureRequest {
   readonly camera: WorldCameraData;
   readonly subject: WorldCaptureSubject;
   readonly output: WorldCaptureOutputSpec;
+  /** Derived from `subject` content; distinguishes same-id/same-pose model versions. */
+  readonly contentFingerprint: string;
 }
 
 /** Temporary rendered bytes plus the exact pixel size and media type T09 produced. */
@@ -183,36 +220,42 @@ export type WorldCaptureProducerOutcome =
       readonly status: "image";
       readonly requestId: WorldId;
       readonly key: WorldCaptureVersionKey;
+      readonly contentFingerprint: string;
       readonly image: WorldCaptureImage;
     }
   | {
       readonly status: "waiting";
       readonly requestId: WorldId;
       readonly key: WorldCaptureVersionKey;
+      readonly contentFingerprint: string;
       readonly reason: WorldCaptureWaitingReason;
     }
   | {
       readonly status: "unavailable";
       readonly requestId: WorldId;
       readonly key: WorldCaptureVersionKey;
+      readonly contentFingerprint: string;
       readonly reason: WorldCaptureUnavailableReason;
     }
   | {
       readonly status: "failed";
       readonly requestId: WorldId;
       readonly key: WorldCaptureVersionKey;
+      readonly contentFingerprint: string;
       readonly code: WorldCaptureProducerFailureCode;
     }
   | {
       readonly status: "cancelled";
       readonly requestId: WorldId;
       readonly key: WorldCaptureVersionKey;
+      readonly contentFingerprint: string;
     };
 
 /** Input handed to the independent trusted media port. Bytes are transient. */
 export interface WorldCaptureMediaSaveRequest {
   readonly requestId: WorldId;
   readonly key: WorldCaptureVersionKey;
+  readonly contentFingerprint: string;
   readonly image: WorldCaptureImage;
 }
 
@@ -220,6 +263,7 @@ export interface WorldCaptureMediaSaveRequest {
 export interface WorldCaptureMediaSaveReceipt {
   readonly requestId: WorldId;
   readonly key: WorldCaptureVersionKey;
+  readonly contentFingerprint: string;
   readonly media: WorldCaptureMediaMetadata;
 }
 
@@ -229,12 +273,14 @@ export type WorldCaptureMediaSaveResult =
       readonly status: "failed";
       readonly requestId: WorldId;
       readonly key: WorldCaptureVersionKey;
+      readonly contentFingerprint: string;
       readonly code: WorldCaptureMediaSaveFailureCode;
     }
   | {
       readonly status: "cancelled";
       readonly requestId: WorldId;
       readonly key: WorldCaptureVersionKey;
+      readonly contentFingerprint: string;
     };
 
 /**
@@ -261,6 +307,7 @@ export type WorldCaptureResolutionFailureCode =
 
 export type WorldCaptureRejectionCode =
   | "request-mismatch"
+  | "content-mismatch"
   | "invalid-data"
   | "invalid-image"
   | "media-unverified"
@@ -277,6 +324,8 @@ export type WorldCaptureResolution =
       readonly status: "ready";
       readonly requestId: WorldId;
       readonly key: WorldCaptureVersionKey;
+      /** Exact model content version that produced this frozen media. */
+      readonly contentFingerprint: string;
       readonly input: WorldCaptureFrozenInput;
     }
   | {
@@ -338,6 +387,88 @@ export function createWorldCaptureRequest(input: unknown): SharedWorldDecodeResu
   return decodeWorldCaptureRequest(input);
 }
 
+/**
+ * Build the immutable content-resolution input for T09. Only the request's pinned
+ * content and derived fingerprint cross the trusted port boundary; the mutable capture
+ * key and current scene are deliberately absent.
+ */
+export function createWorldCaptureContentResolutionRequest(
+  request: WorldCaptureRequest
+): WorldCaptureContentResolutionRequest {
+  const decoded = decodeWorldCaptureRequest(request);
+  if (!decoded.ok) throw codecFailureError(decoded.code, "世界捕获请求");
+  return deepFreeze({
+    requestId: decoded.value.requestId,
+    contentFingerprint: decoded.value.contentFingerprint,
+    instances: subjectContents(decoded.value.subject)
+  });
+}
+
+/**
+ * Map a trusted content-resolution answer to the producer outcome T09 reports. `null`
+ * means the pinned resources are ready and T09 may render them. Waiting/unavailable
+ * answers preserve the explicit content reason; a resolution that does not match the
+ * pin is a failure, never a fallback to current geometry.
+ */
+export function worldCaptureContentResolutionOutcome(
+  request: WorldCaptureRequest,
+  resolution: WorldCaptureContentResolution
+): WorldCaptureProducerOutcome | null {
+  const resolutionRequest = createWorldCaptureContentResolutionRequest(request);
+  const verified = verifyWorldCaptureContentResolution(resolutionRequest, resolution);
+  if (!verified.ok) {
+    return {
+      status: "failed",
+      requestId: request.requestId,
+      key: request.key,
+      contentFingerprint: request.contentFingerprint,
+      code: "content-mismatch"
+    };
+  }
+  const value = verified.resolution;
+  switch (value.status) {
+    case "ready":
+      return null;
+    case "waiting":
+      return {
+        status: "waiting",
+        requestId: request.requestId,
+        key: request.key,
+        contentFingerprint: request.contentFingerprint,
+        reason: value.reason
+      };
+    case "unavailable":
+      return {
+        status: "unavailable",
+        requestId: request.requestId,
+        key: request.key,
+        contentFingerprint: request.contentFingerprint,
+        reason: value.reason
+      };
+    case "failed":
+      return {
+        status: "failed",
+        requestId: request.requestId,
+        key: request.key,
+        contentFingerprint: request.contentFingerprint,
+        code: value.code
+      };
+  }
+}
+
+function subjectContents(
+  subject: WorldCaptureSubject
+): readonly WorldCaptureInstanceContent[] {
+  switch (subject.kind) {
+    case "world":
+      return subject.contents;
+    case "instance":
+      return [{ instanceId: subject.instanceId, content: subject.content }];
+    case "bound-missing":
+      return [];
+  }
+}
+
 function decodeWorldCaptureRequest(input: unknown): SharedWorldDecodeResult<WorldCaptureRequest> {
   if (!isJsonRecord(input) || !hasOnlyKeys(input, REQUEST_KEYS)) {
     return decodeFailure("invalid-data", input);
@@ -381,6 +512,14 @@ function decodeWorldCaptureRequest(input: unknown): SharedWorldDecodeResult<Worl
   const subject = decodeSubject(ownField(input, "subject"), camera.value);
   if (!subject.ok) return decodeFailure(subject.code, input);
 
+  const contentFingerprint = ownField(input, "contentFingerprint");
+  if (
+    !isWorldCaptureContentFingerprint(contentFingerprint) ||
+    contentFingerprint !== worldCaptureContentFingerprint(subjectContents(subject.value))
+  ) {
+    return decodeFailure("invalid-data", input);
+  }
+
   return {
     ok: true,
     value: deepFreeze({
@@ -390,7 +529,8 @@ function decodeWorldCaptureRequest(input: unknown): SharedWorldDecodeResult<Worl
       bindingVersion,
       camera: camera.value,
       subject: subject.value,
-      output: output.value
+      output: output.value,
+      contentFingerprint
     })
   };
 }
@@ -421,6 +561,7 @@ export function createWorldCaptureMediaSaveRequest(
     value: {
       requestId: decodedRequest.value.requestId,
       key: key.value,
+      contentFingerprint: decodedRequest.value.contentFingerprint,
       image: decodedImage
     }
   };
@@ -453,13 +594,21 @@ export function verifyWorldCaptureMediaSaveReceipt(
 
   const requestId = ownField(receipt, "requestId");
   const key = decodeWorldCaptureVersionKey(ownField(receipt, "key"));
-  if (!isNonEmptyWorldId(requestId) || !key.ok) {
+  const contentFingerprint = ownField(receipt, "contentFingerprint");
+  if (
+    !isNonEmptyWorldId(requestId) ||
+    !key.ok ||
+    !isWorldCaptureContentFingerprint(contentFingerprint)
+  ) {
     return { ok: false, code: "media-unverified" };
   }
   if (
     requestId !== decodedRequest.value.requestId ||
     !worldCaptureVersionKeysEqual(key.value, decodedRequest.value.key)
   ) {
+    return { ok: false, code: "request-mismatch" };
+  }
+  if (contentFingerprint !== decodedRequest.value.contentFingerprint) {
     return { ok: false, code: "request-mismatch" };
   }
 
@@ -522,6 +671,9 @@ export function resolveWorldCaptureOutcome(input: WorldCaptureOutcomeInput): Wor
     !worldCaptureVersionKeysEqual(outcome.key, request.key)
   ) {
     return rejected(request, "request-mismatch");
+  }
+  if (outcome.contentFingerprint !== request.contentFingerprint) {
+    return rejected(request, "content-mismatch");
   }
 
   switch (outcome.status) {
@@ -609,6 +761,7 @@ export function resolveWorldCaptureOutcome(input: WorldCaptureOutcomeInput): Wor
         status: "ready",
         requestId: request.requestId,
         key: request.key,
+        contentFingerprint: request.contentFingerprint,
         input: frozen.input
       };
     }
@@ -660,7 +813,14 @@ function decodeSubject(
       seen.add(instance.value.instanceId);
       instances.push(instance.value);
     }
-    return { ok: true, value: { kind: "world", instances } };
+    const contents = createWorldCaptureInstanceContents(ownField(input, "contents"));
+    if (!contents.ok) return decodeFailure(contents.code, input);
+    if (contents.value.length !== instances.length) return decodeFailure("invalid-data", input);
+    const contentIds = new Set(contents.value.map(content => content.instanceId));
+    if (contentIds.size !== instances.length || instances.some(instance => !contentIds.has(instance.instanceId))) {
+      return decodeFailure("invalid-data", input);
+    }
+    return { ok: true, value: { kind: "world", instances, contents: contents.value } };
   }
 
   if (kind === "instance") {
@@ -672,7 +832,12 @@ function decodeSubject(
     const instance = decodeWorldInstanceData(ownField(input, "instance"));
     if (!instance.ok) return decodeFailure(instance.code, input);
     if (instance.value.instanceId !== instanceId) return decodeFailure("invalid-data", input);
-    return { ok: true, value: { kind: "instance", instanceId, instance: instance.value } };
+    const content = createWorldCaptureModelContent(ownField(input, "content"));
+    if (!content.ok) return decodeFailure(content.code, input);
+    return {
+      ok: true,
+      value: { kind: "instance", instanceId, instance: instance.value, content: content.value }
+    };
   }
 
   if (kind === "bound-missing") {
@@ -709,32 +874,69 @@ function decodeWorldCaptureProducerOutcome(
 
   switch (status) {
     case "image": {
-      if (!hasOnlyKeys(input, ["status", "requestId", "key", "image"])) return null;
+      if (!hasOnlyKeys(input, ["status", "requestId", "key", "contentFingerprint", "image"])) {
+        return null;
+      }
       const image = decodeWorldCaptureImage(ownField(input, "image"));
       if (!image) return null;
-      return { status, requestId: identity.requestId, key: identity.key, image };
+      return {
+        status,
+        requestId: identity.requestId,
+        key: identity.key,
+        contentFingerprint: identity.contentFingerprint,
+        image
+      };
     }
     case "waiting": {
-      if (!hasOnlyKeys(input, ["status", "requestId", "key", "reason"])) return null;
+      if (!hasOnlyKeys(input, ["status", "requestId", "key", "contentFingerprint", "reason"])) {
+        return null;
+      }
       const reason = ownField(input, "reason");
       if (!isOneOf(reason, WAITING_REASONS)) return null;
-      return { status, requestId: identity.requestId, key: identity.key, reason };
+      return {
+        status,
+        requestId: identity.requestId,
+        key: identity.key,
+        contentFingerprint: identity.contentFingerprint,
+        reason
+      };
     }
     case "unavailable": {
-      if (!hasOnlyKeys(input, ["status", "requestId", "key", "reason"])) return null;
+      if (!hasOnlyKeys(input, ["status", "requestId", "key", "contentFingerprint", "reason"])) {
+        return null;
+      }
       const reason = ownField(input, "reason");
       if (!isOneOf(reason, UNAVAILABLE_REASONS)) return null;
-      return { status, requestId: identity.requestId, key: identity.key, reason };
+      return {
+        status,
+        requestId: identity.requestId,
+        key: identity.key,
+        contentFingerprint: identity.contentFingerprint,
+        reason
+      };
     }
     case "failed": {
-      if (!hasOnlyKeys(input, ["status", "requestId", "key", "code"])) return null;
+      if (!hasOnlyKeys(input, ["status", "requestId", "key", "contentFingerprint", "code"])) {
+        return null;
+      }
       const code = ownField(input, "code");
       if (!isOneOf(code, PRODUCER_FAILURE_CODES)) return null;
-      return { status, requestId: identity.requestId, key: identity.key, code };
+      return {
+        status,
+        requestId: identity.requestId,
+        key: identity.key,
+        contentFingerprint: identity.contentFingerprint,
+        code
+      };
     }
     case "cancelled":
-      if (!hasOnlyKeys(input, ["status", "requestId", "key"])) return null;
-      return { status, requestId: identity.requestId, key: identity.key };
+      if (!hasOnlyKeys(input, ["status", "requestId", "key", "contentFingerprint"])) return null;
+      return {
+        status,
+        requestId: identity.requestId,
+        key: identity.key,
+        contentFingerprint: identity.contentFingerprint
+      };
     default:
       return null;
   }
@@ -759,11 +961,22 @@ function decodeWorldCaptureMediaSaveResult(
     if (!hasOnlyKeys(input, SAVE_FAILURE_KEYS)) return null;
     const code = ownField(input, "code");
     if (!isOneOf(code, MEDIA_SAVE_FAILURE_CODES)) return null;
-    return { status, requestId: identity.requestId, key: identity.key, code };
+    return {
+      status,
+      requestId: identity.requestId,
+      key: identity.key,
+      contentFingerprint: identity.contentFingerprint,
+      code
+    };
   }
   if (status === "cancelled") {
     if (!hasOnlyKeys(input, CANCELLED_RESULT_KEYS)) return null;
-    return { status, requestId: identity.requestId, key: identity.key };
+    return {
+      status,
+      requestId: identity.requestId,
+      key: identity.key,
+      contentFingerprint: identity.contentFingerprint
+    };
   }
   return null;
 }
@@ -776,17 +989,24 @@ function decodeWorldCaptureMediaSaveReceipt(
   if (!identity) return null;
   const media = decodeWorldCaptureMediaMetadata(ownField(input, "media"));
   if (!media.ok) return null;
-  return { requestId: identity.requestId, key: identity.key, media: media.value };
+  return {
+    requestId: identity.requestId,
+    key: identity.key,
+    contentFingerprint: identity.contentFingerprint,
+    media: media.value
+  };
 }
 
 function readOutcomeIdentity(
   input: Record<string, unknown>
-): { requestId: WorldId; key: WorldCaptureVersionKey } | null {
+): { requestId: WorldId; key: WorldCaptureVersionKey; contentFingerprint: string } | null {
   const requestId = ownField(input, "requestId");
   if (!isNonEmptyWorldId(requestId)) return null;
   const key = decodeWorldCaptureVersionKey(ownField(input, "key"));
   if (!key.ok) return null;
-  return { requestId, key: key.value };
+  const contentFingerprint = ownField(input, "contentFingerprint");
+  if (!isWorldCaptureContentFingerprint(contentFingerprint)) return null;
+  return { requestId, key: key.value, contentFingerprint };
 }
 
 /**
@@ -799,7 +1019,8 @@ function isImageOutcomeForRequest(input: unknown, request: WorldCaptureRequest):
   return (
     identity !== null &&
     identity.requestId === request.requestId &&
-    worldCaptureVersionKeysEqual(identity.key, request.key)
+    worldCaptureVersionKeysEqual(identity.key, request.key) &&
+    identity.contentFingerprint === request.contentFingerprint
   );
 }
 
@@ -810,7 +1031,13 @@ function saveBelongsTo(
   const requestId =
     saved.status === "saved" ? saved.receipt.requestId : saved.requestId;
   const key = saved.status === "saved" ? saved.receipt.key : saved.key;
-  return requestId === request.requestId && worldCaptureVersionKeysEqual(key, request.key);
+  const contentFingerprint =
+    saved.status === "saved" ? saved.receipt.contentFingerprint : saved.contentFingerprint;
+  return (
+    requestId === request.requestId &&
+    worldCaptureVersionKeysEqual(key, request.key) &&
+    contentFingerprint === request.contentFingerprint
+  );
 }
 
 function imageMatchesRequest(request: WorldCaptureRequest, image: WorldCaptureImage): boolean {
