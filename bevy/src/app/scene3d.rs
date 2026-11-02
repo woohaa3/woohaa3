@@ -53,6 +53,7 @@ pub(super) fn sync_models(
     mut visuals: ResMut<model3d::ModelVisuals>,
     mut focus: ResMut<model3d::FocusVisuals>,
     mut resources: ResMut<ModelAssetTable>,
+    mut previous_assets: Local<std::collections::HashMap<String, std::sync::Weak<crate::protocol::ModelSnapshot>>>,
     scene: Res<CurrentScene>,
     flags: Res<FrameFlags>,
     rig: Res<FocusRig>,
@@ -60,7 +61,7 @@ pub(super) fn sync_models(
     mut animation_camera: ResMut<AnimationCameraState>,
     time: Res<Time>,
     capture: Res<model3d::capture::ShotCaptureRouting>,
-    render_work: Res<crate::model_preview::render_work::RenderWork>,
+    (_main_thread, render_work): (bevy::ecs::system::NonSendMarker, Res<crate::model_preview::render_work::RenderWork>),
     opacity: Query<(
         Entity,
         &crate::canvas_ecs::components::OpacityMaterialInstance,
@@ -95,7 +96,11 @@ pub(super) fn sync_models(
         // 淘汰后刷新只读快照资源，使本帧所有消费者看到同一份 payload 表。
         resources.0 = crate::bridge::model_assets_snapshot();
     }
-    if flags.changed || demand_changed {
+    let assets_changed = previous_assets.len() != resources.0.len()
+        || resources.0.iter().any(|(key, value)| {
+            previous_assets.get(key).is_none_or(|old| !std::sync::Weak::ptr_eq(old, &std::sync::Arc::downgrade(value)))
+        });
+    if flags.changed || demand_changed || assets_changed {
         model3d::sync_models(
             &mut commands,
             &mut meshes,
@@ -105,6 +110,7 @@ pub(super) fn sync_models(
             &resources.0,
             &scene.0,
         );
+        *previous_assets = resources.0.iter().map(|(key, value)| (key.clone(), std::sync::Arc::downgrade(value))).collect();
     }
     model3d::apply_animation_playback(&mut commands, models, &scene.0);
     // 活动动画节点的运动求值（change: 2026-10-05-bind-model-animation-to-shots）：独立模型
@@ -135,7 +141,7 @@ pub(super) fn sync_models(
     }
     // 准备管线的发布/取消/退役同样推进诊断快照；只在有变更时发布一次，不逐帧输出。
     let preparation_changed = false;
-    if flags.changed || demand_changed || quality_changed || preparation_changed {
+    if flags.changed || demand_changed || assets_changed || quality_changed || preparation_changed {
         // 诊断里把两种 pin 分开：真实截图请求带来源标签，可见卡片标 visible-card。
         let mut capture_requests = capture.requests();
         for node in &pins {
@@ -385,6 +391,75 @@ pub(super) fn hide_shot_gizmos_during_transition(
 mod grid_tests {
     use super::*;
     use bevy::mesh::VertexAttributeValues;
+
+    #[test]
+    fn shared_world_bridge_payload_lifecycle_runs_through_frame_system() {
+        use crate::{bridge, protocol::{ModelAssetDescriptor, ModelOp, ModelPlacement, ModelReference, NodePosition}};
+        bridge::clear_model_assets();
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<model3d::ModelVisuals>()
+            .init_resource::<model3d::FocusVisuals>()
+            .init_resource::<ModelAssetTable>()
+            .init_resource::<CurrentScene>()
+            .init_resource::<FrameFlags>()
+            .init_resource::<FocusRig>()
+            .init_resource::<AnimationCameraState>()
+            .init_resource::<Time>()
+            .init_resource::<model3d::capture::ShotCaptureRouting>()
+            .init_resource::<crate::model_preview::render_work::RenderWork>()
+            .init_resource::<super::super::NodeIndex>()
+            .init_resource::<SurfaceState>()
+            .init_resource::<super::super::positions::PositionIndex>()
+            .init_resource::<ThemeResource>()
+            .init_resource::<super::super::TextureBatch>()
+            .init_resource::<super::super::ModelTextureBatch>()
+            .init_resource::<crate::canvas2d::focus_details::FocusDetailBatch>()
+            .init_resource::<ClearColor>()
+            .add_message::<bevy::window::WindowResized>()
+            .add_systems(Update, (super::super::input::ingest_bridge, super::super::input::sync_surface, sync_models).chain());
+        app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
+        let key = "world-test".to_owned();
+        let descriptor = ModelAssetDescriptor {
+            resource_version: crate::protocol::MODEL_ASSET_VERSION.into(), resource_key: key.clone(),
+            scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.into()), signature: "world-test".into(),
+            extent: 2., aabb: None, ops: vec![ModelOp::Sphere { id: "sphere".into(), parent: None,
+                position: [0.; 3], rotation: [0.; 3], scale: [1.; 3], color: None, material: None, radius: 1. }],
+        };
+        let mut node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({"id":"n", "type":"model", "x":9000,"y":0,"width":100,"height":50,
+            "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i",
+            "transform":{"version":"shared-world-v1","position":{"u":1,"v":2,"h":3},"rotation":[0,0,0,1],"scale":1}}})).unwrap();
+        node.model = Some(ModelReference { resource_key: key.clone(), scene_version: descriptor.scene_version.clone(), signature: descriptor.signature.clone(), placement: ModelPlacement::default() });
+        bridge::queue_scene(crate::protocol::Scene { nodes: vec![node.clone()], ..default() });
+        app.update();
+        assert!(app.world().resource::<model3d::ModelVisuals>().test_root("n").is_none());
+        bridge::queue_model_asset(descriptor.clone());
+        app.update();
+        let root = |app: &App| {
+            let visuals = app.world().resource::<model3d::ModelVisuals>();
+            let root = visuals.test_root("n").unwrap();
+            (root, *app.world().get::<Transform>(root).unwrap())
+        };
+        let initial = root(&app);
+        assert_eq!(initial.1.translation, Vec3::new(64., 192., -128.));
+        node.shared_world_instance.as_mut().unwrap().transform.position.u = 4.;
+        bridge::queue_scene(crate::protocol::Scene { nodes: vec![node.clone()], ..default() });
+        app.update();
+        let changed = root(&app);
+        assert_eq!(changed.0, initial.0);
+        assert_eq!(changed.1.translation, Vec3::new(256., 192., -128.));
+        bridge::queue_positions(vec![NodePosition { id: "n".into(), x: -9000., y: 3000. }], None);
+        app.update();
+        assert_eq!(root(&app), changed);
+        bridge::clear_model_assets();
+        app.update();
+        assert!(app.world().resource::<model3d::ModelVisuals>().test_root("n").is_none());
+        bridge::queue_model_asset(descriptor);
+        app.update();
+        assert_eq!(root(&app).1.translation, Vec3::new(256., 192., -128.));
+        bridge::clear_model_assets();
+    }
 
     #[test]
     fn shot_transition_preserves_layout_hidden_segments() {

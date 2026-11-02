@@ -400,6 +400,12 @@ impl ModelRoot {
 }
 
 impl ModelVisuals {
+    #[cfg(test)]
+    pub(crate) fn test_root(&self, id: &str) -> Option<Entity> {
+        self.roots.get(id).map(|model| match model.layout {
+            ModelRootLayout::V2 { root } => root,
+        })
+    }
     /// 测试替身：声明某个节点已有可用模型根（不涉及 GPU 资源）。
     #[cfg(test)]
     pub(crate) fn mark_root_ready_for_test(&mut self, id: &str) {

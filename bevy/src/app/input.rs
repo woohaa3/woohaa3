@@ -13,6 +13,7 @@ use super::{
 
 /// 重置帧标记，取走最新 scene/texture batch；检测 theme-only 变化。
 pub(crate) fn ingest_bridge(
+    _main_thread: bevy::ecs::system::NonSendMarker,
     mut flags: ResMut<FrameFlags>,
     mut scene: ResMut<CurrentScene>,
     mut index: ResMut<NodeIndex>,
