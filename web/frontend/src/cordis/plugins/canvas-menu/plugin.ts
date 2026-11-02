@@ -49,6 +49,10 @@ export type NodeContextMenuFacts = {
   activeNodeId?: string | null;
 };
 
+export function conversionFeedbackCurrent(active: boolean, disposed: boolean, expectedCanvasId: string, currentCanvasId?: string): boolean {
+  return active && !disposed && currentCanvasId === expectedCanvasId;
+}
+
 /** 节点右键菜单项：重命名、删除。 */
 export function nodeContextMenuItems(
   nodes: readonly CanvasMenuNode[],
@@ -138,13 +142,19 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
           const unregister = ctx.dialogs.registerAlertAction(actionKey, () => {
             if (pending) return pending;
             pending = (async () => {
-              const result = await ctx.canvasEdit.convertWorld({ remote: ctx.canvasRemote, canvasId, operationId, targets: [{ nodeId, instanceId }] });
-              if (!active || disposed || workingCanvasOf(woohaa3CanvasStore.getState())?.id !== canvasId) return { ok: false as const, error: "页面已切换" };
+              let result: Awaited<ReturnType<typeof ctx.canvasEdit.convertWorld>>;
+              try {
+                result = await ctx.canvasEdit.convertWorld({ remote: ctx.canvasRemote, canvasId, operationId, targets: [{ nodeId, instanceId }] });
+              } catch (error) {
+                if (!conversionFeedbackCurrent(active, disposed, canvasId, workingCanvasOf(woohaa3CanvasStore.getState())?.id)) return { ok: false as const, error: "页面已切换" };
+                return { ok: false as const, error: error instanceof Error ? error.message : "转换失败" };
+              }
+              if (!conversionFeedbackCurrent(active, disposed, canvasId, workingCanvasOf(woohaa3CanvasStore.getState())?.id)) return { ok: false as const, error: "页面已切换" };
               if (!result.ok) return { ok: false as const, error: result.reason };
               cleanup();
               if (dialogId) ctx.dialogs.close(dialogId);
               return { ok: true as const };
-            })().catch(error => ({ ok: false as const, error: error instanceof Error ? error.message : "转换失败" })).finally(() => { pending = null; });
+            })().finally(() => { pending = null; });
             return pending;
           });
           conversionCleanups.add(cleanup);

@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  conversionFeedbackCurrent,
   nodeContextMenuItems,
   type CanvasMenuNode
 } from "./plugin.js";
@@ -20,6 +21,12 @@ function ids(items: Array<{ id: string }>): string[] {
 }
 
 describe("nodeContextMenuItems", () => {
+  it("rejects conversion feedback after disposal, cancellation or canvas change", () => {
+    expect(conversionFeedbackCurrent(true, false, "a", "a")).toBe(true);
+    expect(conversionFeedbackCurrent(false, false, "a", "a")).toBe(false);
+    expect(conversionFeedbackCurrent(true, true, "a", "a")).toBe(false);
+    expect(conversionFeedbackCurrent(true, false, "a", "b")).toBe(false);
+  });
   it("offers explicit conversion only for legacy models", () => {
     const models = [{ id: "legacy", type: "model3d" }, { id: "world", type: "model3d" }];
     const nodeData = { world: { sharedWorldInstance: { instanceId: "i" } } };
