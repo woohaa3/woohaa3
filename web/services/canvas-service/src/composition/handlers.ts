@@ -23,6 +23,7 @@ import { authorizeCanvasRequest, httpStatusForCanvasAccess } from "../access/res
 export type ComposedHandlerDeps = {
   worldConversion: import("@woohaa3/contracts").BackendWorldConversionPort | null;
   worldAuthoring: import("@woohaa3/contracts").BackendWorldAuthoringPort | null;
+  worldCamera: import("../world-authoring/camera-service.js").WorldCameraSettingsService | null;
   env: Record<string, string | undefined>;
   canvasEnabled: boolean;
   unavailableReason: string | null;
@@ -84,6 +85,7 @@ export function composeRequestHandler(deps: ComposedHandlerDeps): (req: Incoming
       : createCanvasRequestHandler({
           ...(deps.worldConversion ? { worldConversion: deps.worldConversion } : {}),
           ...(deps.worldAuthoring ? { worldAuthoring: deps.worldAuthoring } : {}),
+          ...(deps.worldCamera ? { worldCamera: deps.worldCamera } : {}),
           service: composition.service,
           ...(composition.catalog ? { catalog: composition.catalog } : {}),
           ...(deps.importGuard ? { importGuard: deps.importGuard } : {}),

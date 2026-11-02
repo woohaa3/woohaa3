@@ -565,3 +565,8 @@ function safeMessage(error: unknown): string {
 
 export { SqliteYjsRepository, SQLITE_YJS_SCHEMA_VERSION, createSqliteWriterLockStore } from "./yjs.js";
 export type { SqliteYjsRepositoryOptions } from "./yjs.js";
+export {
+  SqliteWorldCameraHistoryRepository,
+  SQLITE_WORLD_CAMERA_HISTORY_SCHEMA_VERSION
+} from "./world-camera-history.js";
+export type { SqliteWorldCameraHistoryRepositoryOptions } from "./world-camera-history.js";

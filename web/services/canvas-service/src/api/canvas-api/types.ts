@@ -64,6 +64,7 @@ export type CanvasImportGuard = {
 export type CanvasRequestHandlerOptions = {
   worldConversion?: import("@woohaa3/contracts").BackendWorldConversionPort;
   worldAuthoring?: import("@woohaa3/contracts").BackendWorldAuthoringPort;
+  worldCamera?: import("../../world-authoring/camera-service.js").WorldCameraSettingsService;
   service: CanvasApplicationService;
   catalog?: CanvasCatalogService;
   serviceToken?: string;
