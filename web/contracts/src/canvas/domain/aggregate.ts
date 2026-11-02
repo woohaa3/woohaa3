@@ -17,6 +17,7 @@ import { sanitizeWoohaa3CanvasDocument,
   type Woohaa3CanvasNodeDataMap } from "./core";
 import { normalizeCanvas, type NormalizeCanvasOptions } from "./normalization";
 import { validateWorldIdentities } from "./world-identities.js";
+import { decodeWorldCaptureGenerationBinding } from "../world-capture-pipeline-contract.js";
 import { DEFAULT_CANVAS_TITLE,
   type CanvasAssetSource,
   type CanvasAssetStatus,
@@ -265,6 +266,8 @@ function sanitizeStoredJobs(
       return;
     }
     const status = isRecord(entry) ? readGenerationStatus(entry.status) : undefined;
+    const rawWorldCapture = isRecord(entry) ? entry.worldCapture : undefined;
+    const worldCapture = rawWorldCapture === undefined ? undefined : decodeWorldCaptureGenerationBinding(rawWorldCapture);
     result.push({
       id,
       nodeId,
@@ -275,6 +278,7 @@ function sanitizeStoredJobs(
       // modelKey 决定「这次用的是哪个模型」，是产物溯源的一环（change: l0-generation-provenance），
       // 必须和 runId 一样往返保留，否则导出画布就丢。
       modelKey: isRecord(entry) ? readNonEmptyString(entry.modelKey) : undefined,
+      ...(worldCapture?.ok ? { worldCapture: worldCapture.value } : {}),
       status: status ?? "idle",
       error: isRecord(entry) ? readNonEmptyString(entry.error) : undefined,
       updatedAt: (isRecord(entry) ? readIsoString(entry.updatedAt) : undefined) ?? now

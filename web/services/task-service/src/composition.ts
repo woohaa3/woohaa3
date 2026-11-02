@@ -336,7 +336,7 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
             }),
         ...(association.jobId && !extensionAssociation ? { jobId: association.jobId } : {}),
         // inputs 只带稳定引用身份（assetId/storageKey/role/mediaType），执行期签出 URL 不入库。
-        request: { prompt: request.prompt, parameters: request.parameters, inputs: request.inputs },
+        request: { prompt: request.prompt, parameters: request.parameters, inputs: request.inputs, ...(request.worldCapture ? { worldCapture: request.worldCapture } : {}) },
         source: extensionAssociation ? "extension" : "canvas",
         ...(extensionAssociation ? { extensionId: extensionAssociation.extensionId } : {}),
         error: { name: errorName, message },
@@ -405,7 +405,7 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
           }),
       ...(association.jobId && !extensionAssociation ? { jobId: association.jobId } : {}),
       // inputs 只带稳定引用身份（assetId/storageKey/role/mediaType），执行期签出 URL 不入库。
-      request: { prompt: request.prompt, parameters: request.parameters, inputs: request.inputs },
+      request: { prompt: request.prompt, parameters: request.parameters, inputs: request.inputs, ...(request.worldCapture ? { worldCapture: request.worldCapture } : {}) },
       source: extensionAssociation ? "extension" : "canvas",
       ...(extensionAssociation ? { extensionId: extensionAssociation.extensionId } : {}),
       ...(Object.keys(admission).length > 0 ? { admission } : {}),

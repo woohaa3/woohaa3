@@ -16,6 +16,7 @@ import { CANVAS_TASK_LIMITS } from "@woohaa3/contracts";
 import type { ExecutionLaunchEvent, ExecutionOrigin } from "./execution-launch.js";
 import type { Woohaa3CanvasStoreState } from "../../services/canvas-state/index.js";
 import type { CanvasRunRequest, CanvasRunResult } from "../../contracts.js";
+import type { CanvasCaptureFreezeResult } from "../../contract/remote.js";
 import type {
   TaskActivityFinishedLocalRejection,
   TaskActivityStarted
@@ -24,6 +25,12 @@ import type {
 /** run/cancel 能力（由 Canvas Remote adapter 实现）。 */
 export type CanvasRunClient = {
   run(request: CanvasRunRequest): Promise<CanvasRunResult>;
+  /** T10: optional at the type level so older adapters fail closed, never fake success. */
+  freezeWorldCapture?(input: {
+    cameraId: string;
+    requestId?: string;
+    signal?: AbortSignal;
+  }): Promise<CanvasCaptureFreezeResult>;
   cancel(input: { nodeId: string; runId: string }): Promise<{ ok: true } | { ok: false; error: string }>;
 };
 
@@ -50,6 +57,8 @@ export type SubmitCoordinatorOptions = {
   /** 任务活动 typed 事件出口（optional；缺失时行为不变）。 */
   activity?: TaskActivityEventSink;
   isWritable?: () => boolean;
+  /** False after the page/panel is disposed; stale async feedback is suppressed. */
+  isCurrent?: () => boolean;
   now?: () => string;
   createRunId?: () => string;
 };
@@ -63,11 +72,17 @@ export type SubmitInput = {
   catalog: CanvasTaskCatalog;
   /** 该节点的期望模型类型（由面板 kind 推导）。 */
   expectedModelType: CanvasTaskModelType;
+  /**
+   * T10: when the generation consumes a world camera framing, freeze that camera's
+   * exact version before durable acceptance. The camera id is only a selection; every
+   * version/media field comes from the authoritative service response.
+   */
+  worldCapture?: { cameraId: string };
 };
 
 export type SubmitOutcome =
   | { ok: true; runId: string; jobId: string }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code?: string };
 
 export type SubmitCoordinator = {
   submit(input: SubmitInput): Promise<SubmitOutcome>;
@@ -76,6 +91,7 @@ export type SubmitCoordinator = {
 
 export function createSubmitCoordinator(options: SubmitCoordinatorOptions): SubmitCoordinator {
   const createRunId = options.createRunId ?? defaultRunId;
+  const isCurrent = () => options.isCurrent?.() !== false;
 
   const attempt = async (input: SubmitInput): Promise<SubmitOutcome> => {
     const canvas = options.store.getState().canvas;
@@ -96,6 +112,21 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
     if (input.prompt.trim().length === 0) return { ok: false, error: "请先输入提示词" };
     if (input.prompt.length > CANVAS_TASK_LIMITS.promptMaxChars) {
       return { ok: false, error: `提示词超过 ${CANVAS_TASK_LIMITS.promptMaxChars} 字上限` };
+    }
+
+    // T10: freeze the exact framing before announcing acceptance. A failed, cancelled
+    // or superseded wait must not produce an "accepted" activity event or run.
+    let worldCapture: import("@woohaa3/contracts").WorldCaptureGenerationBinding | undefined;
+    if (input.worldCapture) {
+      const freeze = options.client.freezeWorldCapture;
+      if (!freeze) return { ok: false, code: "capture-unavailable", error: "当前画布未装配取景服务，任务未提交" };
+      const frozen = await freeze({ cameraId: input.worldCapture.cameraId });
+      if (!isCurrent()) return { ok: false, code: "stale-scope", error: "页面已切换，取景结果已忽略" };
+      if (!frozen.ok) {
+        // No run was created, so there is no run identity to report or settle.
+        return { ok: false, code: frozen.code, error: frozen.error };
+      }
+      worldCapture = frozen.binding;
     }
 
     const runId = createRunId();
@@ -122,8 +153,11 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
       jobId,
       modelKey: input.modelKey,
       prompt: input.prompt,
-      parameters: input.parameters
-    }).catch(() => ({ ok: false as const, error: "提交失败，请检查连接后重试" }));
+      parameters: input.parameters,
+      ...(worldCapture ? { worldCapture } : {})
+    }).catch(() => ({ ok: false as const, error: "提交失败，请检查连接后重试", code: "run-failed" }));
+    // Page switch/dispose while the request was in flight: do not emit late feedback.
+    if (!isCurrent()) return { ok: false, code: "stale-scope", error: "页面已切换，提交结果已忽略" };
     if (!result.ok) {
       launch("rejected");
       // 网关在接受前拒绝：抛出 local-rejection finished，不写 canonical 成功状态。
@@ -138,7 +172,7 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
           updatedAt: now()
         }
       });
-      return { ok: false, error: result.error };
+      return { ok: false, error: result.error, ...(result.code ? { code: result.code } : {}) };
     }
     launch("accepted");
     return { ok: true, runId: result.runId, jobId: result.jobId };

@@ -208,6 +208,8 @@ export {
 } from "./canvas/world-capture-codec.js";
 export * from "./canvas/world-capture-port-contract.js";
 export * from "./canvas/world-capture-content-contract.js";
+export * from "./canvas/world-capture-pipeline-contract.js";
+export * from "./canvas/world-capture-image.js";
 export * from "./canvas/scene-area-plan-contract.js";
 export * from "./canvas/scene-area-operation-plan.js";
 export * from "./canvas/world-authoring.js";

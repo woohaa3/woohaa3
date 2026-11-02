@@ -27,6 +27,8 @@ export * from "./world-authoring/scene-area-command-mapping.js";
 export * from "./world-authoring/scene-area-service.js";
 export * from "./world-authoring/camera-service.js";
 export * from "./world-authoring/camera-history.js";
+export * from "./world-authoring/capture-service.js";
+export * from "./world-authoring/capture-media.js";
 export * from "./import/contracts.js";
 
 export * from "./storage/provider.js";

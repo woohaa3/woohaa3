@@ -13,7 +13,7 @@
  * 具体模型 React UI 由 Registry 解析出的 `definition.Panel` 直接渲染；Host 不含
  * audio/video/`edit_video` 专用布局分支，也不按 providerId 选择组件。
  */
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
 import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
 import { Button } from "@woohaa3/ui";
@@ -89,6 +89,11 @@ function executionButtonOrigin(button: HTMLButtonElement | null): ExecutionOrigi
 
 export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const launchSurface = useRef<HTMLDivElement>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const launchOrigin = useRef<ExecutionOrigin>();
   const captureLaunchOrigin = (event: SyntheticEvent<HTMLDivElement>) => {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
@@ -248,7 +253,8 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         ? props.submitCoordinator ?? createSubmitCoordinator({
             store: woohaa3CanvasStore,
             client: runClient,
-            ...(activity ? { activity } : {})
+            ...(activity ? { activity } : {}),
+            isCurrent: () => mounted.current
           })
         : null,
     [canvasId, runClient, activity, props.submitCoordinator]
@@ -365,9 +371,14 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         prompt: input.prompt,
         parameters: input.parameters,
         catalog,
-        expectedModelType: modelTypeForPanelKind(panelKind)
+        expectedModelType: modelTypeForPanelKind(panelKind),
+        ...(props.captureCameraId ? { worldCapture: { cameraId: props.captureCameraId } } : {})
       });
       if (!outcome.ok) {
+        // Page/panel disposal or scope change: do not paint stale failure feedback.
+        if (!mounted.current || outcome.code === "stale-scope") {
+          return { ok: false, error: outcome.error };
+        }
         draftStore.patch(nodeId, targetModelKey, { prompt: input.prompt });
         if (outcome.error === EMPTY_UPSTREAM_TEXT_MESSAGE) showEmptyUpstreamAlert();
         else setSubmitError(outcome.error);

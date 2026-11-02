@@ -10,7 +10,7 @@
  */
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import type { CanvasRoom } from "../sync/index.js";
-import type { CanvasTaskCatalog, CanvasTaskModelType, CanvasRunRequest, CanvasTaskNodeType, CanvasTaskInput } from "@woohaa3/contracts";
+import type { CanvasTaskCatalog, CanvasTaskModelType, CanvasRunRequest, CanvasTaskNodeType, CanvasTaskInput, WorldCaptureGenerationBinding } from "@woohaa3/contracts";
 import { catalogModelBindings, compileVideoEditProviderPrompt, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, validateGenerationModeInputs } from "@woohaa3/contracts";
 import type { CanvasTaskClient } from "../clients/task-client.js";
 import { resolveNodeReferenceInputs } from "./input-resolution.js";
@@ -38,6 +38,8 @@ export type RunServiceDependencies = {
    * （change: 2026-10-12-unify-generation-history-strip，design D5）。
    */
   isAggregateNode?: (node: { type: string }) => boolean;
+  /** T10 trusted framing claims; absent means capture-bound runs fail closed. */
+  worldCapture?: import("../world-authoring/capture-service.js").WorldCaptureService | null;
   now?: () => string;
   logger?: (event: Record<string, unknown>) => void;
 };
@@ -70,6 +72,26 @@ export class CanvasRunService {
 
     const node = canvas.document.nodes.find((entry) => entry.id === request.nodeId);
     if (!node) return { ok: false, code: "unknown-node", message: `节点 ${request.nodeId} 不存在` };
+
+    // T10: validate the exact framing frozen at click time before anything durable is
+    // written. A later canvas change must not rewrite this binding, and a forged or
+    // expired binding is rejected instead of borrowing the current capture.
+    let worldCapture: WorldCaptureGenerationBinding | undefined;
+    if (request.worldCapture) {
+      const captureService = this.deps.worldCapture;
+      if (!captureService) {
+        return { ok: false, code: "capture-unavailable", message: "取景服务未装配，不能受理带取景的生成" };
+      }
+      const claim = captureService.claimForGeneration({
+        canvasId: request.canvasId,
+        requestId: request.worldCapture.requestId,
+        binding: request.worldCapture
+      });
+      if (!claim.ok) {
+        return { ok: false, code: claim.code, message: claim.message };
+      }
+      worldCapture = claim.binding;
+    }
 
     if (node.type === "text") return { ok: false, code: "assistant-required", message: "文本生成需要助手连接和模型，请从助手文本入口提交" };
 
@@ -222,6 +244,7 @@ export class CanvasRunService {
             // 模型身份随 begin 的 job 落盘：产物 → provenance.runId → job 即可读到当时模型
             // （change: l0-generation-provenance）。
             modelKey,
+            ...(worldCapture ? { worldCapture } : {}),
             status: "running",
             updatedAt: this.deps.now?.() ?? new Date().toISOString()
           }
@@ -258,7 +281,8 @@ export class CanvasRunService {
         ...(nodeTitle ? { nodeTitle } : {}),
         prompt: providerPrompt,
         parameters: { ...request.parameters, model: modelKey },
-        inputs: taskInputs
+        inputs: taskInputs,
+        ...(worldCapture ? { worldCapture } : {})
       });
     } catch (error) {
       // 提交失败当场说清楚：返回 ok:false 让面板立刻显示原因，并把 begin 写下的 processing

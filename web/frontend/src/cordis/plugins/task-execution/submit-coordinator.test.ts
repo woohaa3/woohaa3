@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createSubmitCoordinator, SUBMIT_COORDINATOR_FORBIDDEN_METHODS } from "./submit-coordinator.js";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
-import type { CanvasTaskCatalog } from "@woohaa3/contracts";
+import type { CanvasTaskCatalog, WorldCaptureGenerationBinding } from "@woohaa3/contracts";
 
 function catalog(): CanvasTaskCatalog {
   return {
@@ -218,4 +218,94 @@ it("rejects new text Provider submissions before calling the Task run client", a
   const coordinator = createSubmitCoordinator({ store: { getState: () => ({ canvas }) }, client: { run: async () => { calls++; return { ok: true, runId: "run", jobId: "job" }; }, cancel: async () => ({ ok: true }) } });
   expect(await coordinator.submit({ nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "generate", parameters: {}, catalog: catalog(), expectedModelType: "language" })).toMatchObject({ ok: false, error: expect.stringContaining("助手") });
   expect(calls).toBe(0);
+});
+
+
+function captureBinding(): WorldCaptureGenerationBinding {
+  const key = {
+    canvasId: "canvas-a",
+    cameraId: "camera-1",
+    worldContentVersion: "world-1",
+    cameraSettingsVersion: "camera-v1",
+    bindingVersion: "binding-1",
+    outputVersion: "output-1"
+  };
+  return {
+    version: "world-capture-generation-binding-v1",
+    requestId: "capture-request-1",
+    key,
+    contentFingerprint: "0123456789abcdef",
+    input: { key, mediaId: "sha256-capture", checksum: "a".repeat(64) }
+  };
+}
+
+describe("T10 generation input freeze at click time", () => {
+  it("freezes before acceptance and forwards the exact binding to run", async () => {
+    const phases: string[] = [];
+    const requests: Array<{ worldCapture?: WorldCaptureGenerationBinding }> = [];
+    const binding = captureBinding();
+    const coordinator = createSubmitCoordinator({
+      store: { getState: () => ({ canvas: canvasWithNode() }) },
+      client: {
+        freezeWorldCapture: async (input) => {
+          expect(input.cameraId).toBe("camera-1");
+          return { ok: true, binding };
+        },
+        run: async (request) => { requests.push(request); return { ok: true, runId: request.runId, jobId: request.jobId }; },
+        cancel: async () => ({ ok: true })
+      },
+      activity: { started: () => {}, localRejected: () => {}, launch: event => { phases.push(event.phase); } }
+    });
+    const outcome = await coordinator.submit({
+      nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {},
+      catalog: catalog(), expectedModelType: "image", worldCapture: { cameraId: "camera-1" },
+      origin: { x: 0, y: 0, token: "manual" }
+    });
+    expect(outcome.ok).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.worldCapture).toEqual(binding);
+    expect(phases).toEqual(["started", "accepted"]);
+  });
+
+  it("does not create or announce a run when freezing fails or is stale", async () => {
+    const phases: string[] = [];
+    let runs = 0;
+    const coordinator = createSubmitCoordinator({
+      store: { getState: () => ({ canvas: canvasWithNode() }) },
+      client: {
+        freezeWorldCapture: async () => ({ ok: false, code: "superseded", error: "该版本取景已被新版本替换" }),
+        run: async () => { runs += 1; return { ok: true as const, runId: "r", jobId: "j" }; },
+        cancel: async () => ({ ok: true })
+      },
+      activity: { started: () => {}, localRejected: () => {}, launch: event => { phases.push(event.phase); } }
+    });
+    const outcome = await coordinator.submit({
+      nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {},
+      catalog: catalog(), expectedModelType: "image", worldCapture: { cameraId: "camera-1" }
+    });
+    expect(outcome).toEqual({ ok: false, code: "superseded", error: "该版本取景已被新版本替换" });
+    expect(runs).toBe(0);
+    expect(phases).toEqual([]);
+  });
+
+  it("suppresses stale page feedback after freeze/run settles", async () => {
+    let live = true;
+    const phases: string[] = [];
+    const coordinator = createSubmitCoordinator({
+      store: { getState: () => ({ canvas: canvasWithNode() }) },
+      isCurrent: () => live,
+      client: {
+        freezeWorldCapture: async () => { live = false; return { ok: true, binding: captureBinding() }; },
+        run: async () => ({ ok: true as const, runId: "r", jobId: "j" }),
+        cancel: async () => ({ ok: true })
+      },
+      activity: { started: () => {}, localRejected: () => {}, launch: event => { phases.push(event.phase); } }
+    });
+    const outcome = await coordinator.submit({
+      nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {},
+      catalog: catalog(), expectedModelType: "image", worldCapture: { cameraId: "camera-1" }
+    });
+    expect(outcome).toMatchObject({ ok: false, code: "stale-scope" });
+    expect(phases).toEqual([]);
+  });
 });

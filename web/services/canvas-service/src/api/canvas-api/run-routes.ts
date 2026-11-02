@@ -65,7 +65,7 @@ export async function handleRun(
     const status =
       outcome.code === "canvas-not-found"
         ? 404
-        : outcome.code === "catalog-unavailable" || outcome.code === "task-submit-failed"
+        : outcome.code === "catalog-unavailable" || outcome.code === "task-submit-failed" || outcome.code === "capture-unavailable"
           ? 502
           : 400;
     log?.({ event: "canvas-run", status, code: outcome.code });

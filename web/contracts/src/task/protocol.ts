@@ -53,6 +53,12 @@ export type TaskSubmitRequest = {
   /** 只含稳定媒体引用；Task 通过 Media Service 校验并签出执行期 URL。 */
   inputs: CanvasTaskInput[];
   /**
+   * T10 static world framing frozen at acceptance. It is stable metadata only (no
+   * bytes/URL); it is recorded so a completed run can be traced to the exact captured
+   * media and version, independent of later canvas changes.
+   */
+  worldCapture?: import("../canvas/world-capture-pipeline-contract.js").WorldCaptureGenerationBinding;
+  /**
    * 执行时显示快照（由 Canvas 提交方从可信 catalog/画布投影；change:
    * improve-task-history-experience，任务 1.3）。缺省时旧记录降级为稳定 ID。
    */
