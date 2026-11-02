@@ -14,6 +14,7 @@ import {
   decodeTaskActivityServerMessage,
   encodeTaskActivitySubscribe
 } from "@woohaa3/contracts/canvas-yjs";
+import { decodeWorldCamera, decodeWorldCameraHistorySnapshot } from "@woohaa3/contracts";
 import { getAppPublicFetch, appPublicUrl } from "./app-base-path.js";
 import type { CanvasSessionTransport } from "./canvas-session-transport.js";
 import { canvasSessionUrl, createCanvasSessionTransport } from "./canvas-session-transport.js";
@@ -81,6 +82,22 @@ export type CanvasRemoteOptions = {
   };
 };
 
+const record = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
+const id = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+const number = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const list = (v: unknown, check: (item: any) => boolean) => Array.isArray(v) && v.every(check);
+const identity = (v: any) => record(v) && (v.kind === "instance" ? id(v.instanceId) : v.kind === "camera" && id(v.cameraId));
+const version = (v: any) => identity(v) && id(v.version);
+const scope = (v: any) => record(v) && id(v.scopeVersion) && record(v.scope) && (v.scope.kind === "scene-area" ? id(v.scope.areaId) : v.scope.kind === "workflow-group-2d" && id(v.scope.groupId));
+const point = (v: any) => record(v) && number(v.u) && number(v.v);
+const bounds = (v: any) => record(v) && point(v.min) && point(v.max) && v.min.u <= v.max.u && v.min.v <= v.max.v;
+const area = (v: any) => record(v) && id(v.areaId) && id(v.scopeVersion) && bounds(v.bounds);
+const members = (v: any) => record(v) && list(v.instances, x => record(x) && identity(x.identity) && id(x.version) && record(x.transform) && id(x.transform.version) && record(x.transform.position) && number(x.transform.position.u) && number(x.transform.position.v) && number(x.transform.position.h) && Array.isArray(x.transform.rotation) && x.transform.rotation.length === 4 && x.transform.rotation.every(number) && number(x.transform.scale)) && list(v.cameras, x => record(x) && identity(x.identity) && id(x.version) && decodeWorldCamera(x.camera).ok);
+const plan = (v: any) => record(v) && v.contractVersion === "scene-area-plan-v1" && id(v.canvasId) && id(v.operationId) && ["move", "resize", "delete-area", "delete-area-with-contents"].includes(v.intent) && record(v.source) && area(v.source.area) && members(v.source.members) && list(v.commands, x => record(x) && id(x.kind)) && list(v.inverse, x => record(x) && id(x.kind));
+const node = (v: any) => record(v) && id(v.nodeId) && "node" in v && "nodeData" in v;
+const receipt = (v: any) => record(v) && v.version === "world-authoring-receipt-v1" && id(v.canvasId) && id(v.operationId) && id(v.intent) && ["forward", "undo", "redo"].includes(v.direction) && id(v.intentHash) && (v.previousCommandId === null || id(v.previousCommandId)) && plan(v.plan) && record(v.source) && node(v.source.area) && list(v.source.members, x => node(x) && identity(x.identity)) && list(v.deletedNodes, node) && record(v.produced) && (v.produced.areaScopeVersion === null || id(v.produced.areaScopeVersion)) && list(v.produced.targets, version) && number(v.revision) && id(v.createdAt);
+const historyEntry = (v: any) => record(v) && [v.completionKey, v.canvasId, v.cameraId, v.runId, v.completionId, v.settingsVersion, v.createdAt].every(id) && decodeWorldCameraHistorySnapshot(v.snapshot).ok;
+
 function decodeWorldResponse(response: Response, value: unknown, route: string): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid response");
   const result = value as Record<string, unknown>;
@@ -93,18 +110,19 @@ function decodeWorldResponse(response: Response, value: unknown, route: string):
   }
   if (result.ok === false && typeof result.code === "string" && typeof result.message === "string") return result;
   if (!response.ok || result.ok !== true) throw new Error("invalid response");
-  const object = (key: string) => !!result[key] && typeof result[key] === "object" && !Array.isArray(result[key]);
-  const string = (key: string) => typeof result[key] === "string";
-  const command = () => string("canvasId") && string("operationId") && string("commandId") && typeof result.revision === "number" && typeof result.duplicate === "boolean" && object("plan") && object("receipt");
-  const camera = () => string("canvasId") && string("cameraId") && string("commandId") && typeof result.revision === "number" && typeof result.duplicate === "boolean" && object("camera") && string("settingsVersion");
-  const valid = route === "scene-area-prepare" ? object("snapshot")
+  const command = () => id(result.canvasId) && id(result.operationId) && id(result.commandId) && number(result.revision) && typeof result.duplicate === "boolean" && plan(result.plan) && receipt(result.receipt);
+  const camera = () => id(result.canvasId) && id(result.cameraId) && id(result.commandId) && number(result.revision) && typeof result.duplicate === "boolean" && decodeWorldCamera(result.camera).ok && id(result.settingsVersion);
+  const snapshot = result.snapshot as any;
+  const context = result.context as any;
+  const run = result.run as any;
+  const valid = route === "scene-area-prepare" ? record(snapshot) && snapshot.version === "world-authoring-v1" && id(snapshot.canvasId) && number(snapshot.revision) && scope(snapshot.scope) && id(snapshot.areaNodeId) && area(snapshot.area) && bounds(snapshot.bounds) && list(snapshot.writable, version) && list(snapshot.readOnly, version) && members(snapshot.members) && list(snapshot.objects, x => record(x) && identity(x.identity) && (x.nodeId === null || id(x.nodeId)) && id(x.version) && ["writable", "read-only", "outside", "unknown"].includes(x.containment))
     : route === "scene-area-commit" ? command()
     : route === "scene-area-undo" || route === "scene-area-redo" ? command() && result.direction === route.slice(11)
-    : route === "world-tool-context" ? object("context") && object("run") && typeof result.retry === "boolean"
+    : route === "world-tool-context" ? record(context) && id(context.contextId) && id(context.canvasId) && id(context.runId) && number(context.epoch) && scope(context.scope) && list(context.writableTargets, x => record(x) && version(x.target) && record(x.lease) && id(x.lease.canvasId) && id(x.lease.runId) && number(x.lease.epoch) && identity(x.lease.target)) && list(context.readOnlyReferences, version) && record(run) && [run.canvasId, run.requestId, run.runId, run.executionId].every(id) && number(run.epoch) && ["active", "cancelled", "stopped"].includes(run.state) && typeof result.retry === "boolean"
     : route === "world-tool-context-revoke" ? true
-    : route === "world-camera-history" ? string("canvasId") && string("cameraId") && Array.isArray(result.entries)
+    : route === "world-camera-history" ? id(result.canvasId) && id(result.cameraId) && list(result.entries, historyEntry)
     : route === "world-camera-save" ? camera()
-    : route === "world-camera-restore" ? camera() && object("history") : false;
+    : route === "world-camera-restore" ? camera() && historyEntry(result.history) : false;
   if (!valid) throw new Error("invalid response");
   return result;
 }

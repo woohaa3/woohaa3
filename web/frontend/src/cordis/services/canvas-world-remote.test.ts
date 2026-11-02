@@ -11,7 +11,7 @@ const command = { ok: true, canvasId: "c", operationId: "op", commandId: "cmd", 
 const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "cam", settingsVersion: "v2", position: { u: 0, v: 0, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: null };
 const cameraResult = { ok: true, canvasId: "c", cameraId: "cam", commandId: "cmd", revision: 2, duplicate: false, camera, settingsVersion: "v2" };
 const history = { completionKey: "key", canvasId: "c", cameraId: "cam", runId: "run", completionId: "done", settingsVersion: "v2", createdAt: "2026-01-01T00:00:00Z", snapshot: { version: "world-camera-history-v1", completion: { canvasId: "c", runId: "run", completionId: "done", cameraId: "cam", settingsVersion: "v2" }, camera } };
-const scope = { kind: "scene-area", areaId: "a", scopeVersion: "v1" };
+const scope = { scope: { kind: "scene-area", areaId: "a" }, scopeVersion: "v1" };
 const cases: Array<{ route: string; body?: unknown; success: unknown; invoke: (remote: ReturnType<typeof createCanvasRemote>, signal?: AbortSignal) => Promise<unknown> }> = [
   { route: "scene-area-prepare", body: { areaId: "a" }, success: { ok: true, snapshot: { version: "world-authoring-v1", canvasId: "c", revision: 1, scope, areaNodeId: "n", area, bounds, writable: [], readOnly: [], members, objects: [] } }, invoke: (r, s) => r.prepareSceneArea({ canvasId: "c", areaId: "a" }, s) },
   { route: "scene-area-commit", body: { request }, success: command, invoke: (r, s) => r.executeSceneArea({ canvasId: "c", request } as never, s) },
@@ -40,6 +40,19 @@ describe("world authoring remote", () => {
     expect(await invoke(remote)).toEqual(payload);
     status = 200; payload = route === "world-tool-context-revoke" ? { ok: "true" } : { ok: true };
     expect(await invoke(remote)).toMatchObject({ ok: false, code: "not-ready" });
+    if (route !== "world-tool-context-revoke") {
+      const key = route === "scene-area-prepare" ? "snapshot" : route === "world-tool-context" ? "context" : route.startsWith("scene-area-") ? "receipt" : route.startsWith("world-camera-history") ? "entries" : route === "world-camera-restore" ? "history" : "camera";
+      payload = { ...(success as object), [key]: key === "entries" ? [{}] : {} };
+      expect(await invoke(remote)).toMatchObject({ ok: false, code: "not-ready" });
+      if (route.startsWith("scene-area-") && route !== "scene-area-prepare") {
+        payload = { ...(success as object), plan: {} };
+        expect(await invoke(remote)).toMatchObject({ ok: false, code: "not-ready" });
+      }
+      if (route === "world-tool-context") {
+        payload = { ...(success as object), run: {} };
+        expect(await invoke(remote)).toMatchObject({ ok: false, code: "not-ready" });
+      }
+    }
     const controller = new AbortController(); controller.abort();
     const aborted = createCanvasRemote({ canvasId: "c", fetchImpl: (async (_url, init) => { expect(init?.signal).toBe(controller.signal); throw new Error("aborted"); }) as typeof fetch });
     expect(await invoke(aborted, controller.signal)).toMatchObject({ ok: false, code: "cancelled" });
