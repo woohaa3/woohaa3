@@ -14,7 +14,8 @@
  *
  * 需要真实 GPU；无 GPU 环境标记「待人工验证」。
  */
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { readFile } from "node:fs/promises";
 import { bevyNodeHistoryActionRect, createModel3DNodeData, model3DNodeDataFields, type CanvasCommand } from "@woohaa3/contracts";
 import { installPageHelpers, readStoredCanvas, resetCanvasStorage, sendCommands, uploadMedia, waitForCanvasSession, waitForCommandsSettled } from "./helpers.js";

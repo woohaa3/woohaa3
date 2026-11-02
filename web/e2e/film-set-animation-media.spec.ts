@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { readFileSync } from 'node:fs';
 import { canonicalFilmSetFields, createFilmSetSnapshot, createMotionSnapshot, filmSetAnimationsOf } from '@woohaa3/contracts';
 import { installPageHelpers, resetCanvasStorage, sendCommands, uploadMedia, waitForCanvasSession } from './helpers.js';

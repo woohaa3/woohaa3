@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, resetCanvasStorage, waitForCanvasSession, waitForBevyReady, sendCommands, readStoredCanvas } from "../e2e/helpers.js";
 
 async function scene(page: import("@playwright/test").Page) {

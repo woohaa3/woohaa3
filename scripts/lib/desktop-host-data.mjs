@@ -31,6 +31,9 @@ export function desktopEnvironment({ dataDir, resourceRoot, baseEnv = {}, platfo
  // Development resolves installed SDKs and local tools; never let download configuration
  // intercept dev:desktop, including inherited desktop runtime environment variables.
  if(development)for(const key of ['WOOHAA3_RUNTIME_DATA_DIR','WOOHAA3_RUNTIME_DEFAULTS_FILE','WOOHAA3_RUNTIME_LOCK_FILE'])delete env[key];
+ const trustConfig=path.join(resourceRoot,"extension-trust.json");
+ if(fs.existsSync(trustConfig))env.WOOHAA3_EXTENSION_TRUST_CONFIG=trustConfig;
+ else if(development&&baseEnv.WOOHAA3_EXTENSION_TRUST_CONFIG)env.WOOHAA3_EXTENSION_TRUST_CONFIG=path.resolve(baseEnv.WOOHAA3_EXTENSION_TRUST_CONFIG);
  const master=path.join(dataDir,'secrets/master.key');
  if(fs.existsSync(master))env.WOOHAA3_PLUGIN_SECRET_MASTER_KEY=fs.readFileSync(master,'utf8').trim();
  for(const [file,key] of [['model-renderer','WOOHAA3_MODEL_RENDERER_CMD'],['shot-recorder','WOOHAA3_SHOT_RECORDER_CMD']]) {

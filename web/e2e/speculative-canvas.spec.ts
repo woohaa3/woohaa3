@@ -9,7 +9,7 @@
  * - 断线禁止新命令；
  * - 刷新后 pending 丢弃、只从 published 恢复。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	installPageHelpers,
 	readStoredCanvas,

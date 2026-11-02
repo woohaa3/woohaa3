@@ -76,15 +76,17 @@ describe("RunningHub prepareInput（任务 1.4 / design D1b/D4）", () => {
       providerModelId: "api/seedream-v5-pro",
       modelType: "image",
       prompt: "a cat",
-      parameters: { resolution: "2k", width: 1024 },
+      parameters: { resolution: "2k", aspectRatio: "16:9" },
       references: [{ role: "reference_image", mediaKind: "image", mediaType: "image/png", url: "https://a/1.png" }]
     };
     expect(resolveProviderModel(input as never)).toBe("api/seedream-v5-pro/image-to-image");
     const prepared = prepareInput(input as never) as { providerOptions: { runninghub: { input: Record<string, unknown> } } };
+    // 面板语义（比例 + 档位）在这里翻成即梦的像素宽高；比例本身不再下发。
     expect(prepared.providerOptions.runninghub.input).toMatchObject({
       prompt: "a cat",
       resolution: "2k",
-      width: 1024,
+      width: 2848,
+      height: 1600,
       imageUrls: ["https://a/1.png"]
     });
   });
@@ -113,7 +115,10 @@ describe("RunningHub 插件装载", () => {
     const ctx = {
       log: { scope: () => () => undefined },
       generation: { register: (provider: never) => (registered.push(provider), () => undefined) },
-      effect: (execute: () => unknown) => execute()
+      effect: (execute: () => unknown) => execute(),
+      // 插件现在也注册「刷新可用模型」路由（见 refresh-route）：这两个注入在真实宿主里由网关提供。
+      gateway: { route: () => () => undefined },
+      access: {}
     } as never;
     for (const input of [{ apiKey: "secret" }, {}]) {
       const config = RUNNINGHUB_CONFIG["~standard"].validate(input);
@@ -215,11 +220,11 @@ describe("RunningHub API 模型执行（任务 4.2 / design D1b）", () => {
       modelType: "image",
       logicalId: "seedream-v5-pro",
       routeEndpoint: "seedream-v5-pro/text-to-image",
-      parameters: { model: "runninghub:api/seedream-v5-pro", resolution: "2k", width: 1024 }
+      parameters: { model: "runninghub:api/seedream-v5-pro", resolution: "2k", aspectRatio: "16:9" }
     });
-    // payload：prompt + 已声明参数；provider 从 apiBaseURL 拼接 endpoint（全球站）。
+    // payload：prompt + 上游认的字段；比例 + 档位在插件里已翻成像素，面板参数不再原样透传。
     expect(startedUrl).toBe("https://www.runninghub.ai/openapi/v2/seedream-v5-pro/text-to-image");
-    expect(startedBody).toMatchObject({ prompt: "a cat", resolution: "2k", width: 1024 });
+    expect(startedBody).toMatchObject({ prompt: "a cat", resolution: "2k", width: 2848, height: 1600 });
     expect((result as { images: Uint8Array[] }).images[0]).toEqual(new Uint8Array([9, 9]));
 
     // API 模型不支持远端取消：实现里没有 doCancel（仅 App 有）。

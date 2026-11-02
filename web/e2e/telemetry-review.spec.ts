@@ -10,8 +10,8 @@
  * - 筛选状态进 URL：`?window=1h&name=canvas.edit` 直接打开就生效，且页面不装配任何画布资源。
  */
 import fs from "node:fs";
-import { expect, test, type Page } from "@playwright/test";
-
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 type SeededEvent = {
 	name: string;
 	result: string;

@@ -627,3 +627,123 @@ describe("Extension Manager", () => {
     expect(fs.readdirSync(path.join(h.managedRoot, "installed/demo")).sort()).toEqual(["1.1.0", "1.2.0"]);
   });
 });
+
+describe("trust activation lifecycle",()=>{
+ it("quarantines a known revoked installation and attempts every cleanup even if disabling fails",async()=>{
+  await setup();const key=keys();let revoked=false;
+  const gate=vi.fn(async()=>{if(revoked)throw new Error("revoked")});
+  const remove=vi.fn(async()=>undefined),publish=vi.fn(async()=>({releaseId:"r",href:"/r",changed:true}));
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate},disableSite:async()=>{throw new Error("disable unavailable")},runtime:{available:()=>true,swap:async()=>({swapped:true}),remove},publishBrowserRelease:publish});
+  expect((await installFile(h,packTree(extensionTree(),key.privateKey).file)).status).toBe("succeeded");
+  revoked=true;await h.manager.observe();
+  expect(h.manager.installed()[0]).toMatchObject({quarantine:"revoked",restartRequired:true});
+  expect(remove).toHaveBeenCalledWith("demo");expect(publish).toHaveBeenCalledWith({remove:["demo"]});
+  await h.manager.observe();expect(remove.mock.calls.length).toBeGreaterThan(1);
+ });
+ it("manual rollback requires fresh authorization and preserves the pointer on rejection",async()=>{
+  await setup();const key=keys();let deny=false;
+  const gate=vi.fn(async(input:{dir:string;fresh?:boolean})=>{if(deny&&input.fresh)throw new Error("revoked previous version")});
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate}});
+  await installFile(h,packTree(extensionTree({version:"1.0.0"}),key.privateKey).file);
+  await installFile(h,packTree(extensionTree({version:"1.1.0"}),key.privateKey).file);
+  deny=true;const job=h.manager.rollback("demo",{actor:"tester"});const result=await h.manager.wait(job.jobId);
+  expect(result?.status).toBe("failed");expect(h.manager.installed()[0]?.version).toBe("1.1.0");
+  expect(gate.mock.calls.some(([input])=>input.fresh===true)).toBe(true);
+ });
+});
+
+describe("trust check cadence and reinstall",()=>{
+ it("re-verifies on the first observe, then throttles until the interval elapses",async()=>{
+  await setup();const key=keys();const gate=vi.fn(async()=>undefined);
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate},trustCheckMs:60_000});
+  await installFile(h,packTree(extensionTree(),key.privateKey).file);
+  const first=gate.mock.calls.length;await h.manager.observe();
+  expect(gate.mock.calls.length).toBe(first+1);
+  await h.manager.observe();
+  expect(gate.mock.calls.length).toBe(first+1);
+  h.now.value+=61_000;await h.manager.observe();
+  expect(gate.mock.calls.length).toBe(first+2);
+ });
+ it("reinstalling a quarantined version restores runtime and browser publication",async()=>{
+  await setup();const key=keys();let revoked=false;
+  const gate=vi.fn(async()=>{if(revoked)throw new Error("revoked")});
+  const swap=vi.fn(async()=>({swapped:true}));
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate},runtime:{available:()=>true,swap,remove:async()=>undefined}});
+  const packed=packTree(extensionTree({backend:true}),key.privateKey);
+  expect((await installFile(h,packed.file)).status).toBe("succeeded");
+  revoked=true;await h.manager.observe();expect(h.manager.installed()[0]?.quarantine).toBe("revoked");
+  revoked=false;swap.mockClear();h.published.length=0;
+  const job=await installFile(h,packed.file);
+  expect(job.status).toBe("succeeded");expect(job.outcome).toBe("installed");
+  expect(swap).toHaveBeenCalled();expect(h.published.some(value=>Array.isArray(value.upsert))).toBe(true);
+  expect(h.manager.installed()[0]?.quarantine).toBeUndefined();
+ });
+ it("rollback of a record without per-version evidence does not compare the old digest",async()=>{
+  await setup();const key=keys();const calls:Array<{dir:string;record?:{filesDigest?:string;trust?:string}}>=[];
+  const gate=vi.fn(async(input:{dir:string;record?:{filesDigest?:string;trust?:string}})=>{calls.push(input)});
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate}});
+  await installFile(h,packTree(extensionTree({version:"1.0.0"}),key.privateKey).file);
+  await installFile(h,packTree(extensionTree({version:"1.1.0"}),key.privateKey).file);
+  // 模拟改版前写下的记录：没有 versions 表。
+  const state=installations(h.managedRoot);delete state.extensions.demo.versions;
+  fs.writeFileSync(path.join(h.managedRoot,"installations.json"),JSON.stringify(state));
+  calls.length=0;
+  const job=h.manager.rollback("demo",{actor:"tester"});const result=await h.manager.wait(job.jobId);
+  expect(result?.status).toBe("succeeded");
+  const target=calls.find(call=>call.dir.endsWith("/1.0.0"));
+  expect(target?.record?.filesDigest).toBeUndefined();
+  expect(target?.record?.trust).toBeUndefined();
+ });
+});
+
+
+describe("evidence-free activation",()=>{
+ it("does not quarantine a pre-v2 installation when the trust layer abstains",async()=>{
+  await setup();const key=keys();
+  const gate=vi.fn(async()=>null);
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate}});
+  await installFile(h,packTree(extensionTree(),key.privateKey).file);
+  // 模拟改动之前写下的记录：没有 versions、没有 filesDigest（管理器只有 v1 结论）。
+  const state=installations(h.managedRoot);
+  delete state.extensions.demo.versions;delete state.extensions.demo.filesDigest;
+  fs.writeFileSync(path.join(h.managedRoot,"installations.json"),JSON.stringify(state));
+  await h.manager.observe();
+  expect(gate).toHaveBeenCalled();
+  expect(h.manager.installed()[0]?.quarantine).toBeUndefined();
+ });
+});
+
+describe("trust recovery regressions",()=>{
+ it("invalidates the full verification throttle when signed metadata changes",async()=>{
+  await setup();const key=keys();let generation="one",revoked=false;
+  const gate=vi.fn(async()=>{if(revoked)throw new Error("revoked")});
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate,trustStateStamp:()=>generation}});
+  await installFile(h,packTree(extensionTree(),key.privateKey).file);
+  await h.manager.observe();const calls=gate.mock.calls.length;
+  await h.manager.observe();expect(gate.mock.calls.length).toBe(calls);
+  generation="two";revoked=true;await h.manager.observe();
+  expect(h.manager.installed()[0]?.quarantine).toBe("revoked");
+ });
+ it("stops retrying quarantine cleanup after a successful retry",async()=>{
+  await setup();const key=keys();let revoked=false,fail=true;
+  const gate=vi.fn(async()=>{if(revoked)throw new Error("revoked")});
+  const remove=vi.fn(async()=>{if(fail)throw new Error("remove failed")});
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate},runtime:{available:()=>true,swap:async()=>({swapped:true}),remove}});
+  await installFile(h,packTree(extensionTree(),key.privateKey).file);revoked=true;
+  await h.manager.observe();expect(h.manager.installed()[0]?.restartRequired).toBe(true);
+  fail=false;await h.manager.observe();const calls=remove.mock.calls.length;
+  expect(installations(h.managedRoot).extensions.demo.quarantineCleanupPending).toBe(false);
+  expect(h.manager.installed()[0]?.restartRequired).toBe(false);
+  await h.manager.observe();expect(remove.mock.calls.length).toBe(calls);
+ });
+ it("does not clear quarantine when the reused installed tree is corrupt",async()=>{
+  await setup();const key=keys();let revoked=false;
+  const gate=vi.fn(async()=>{if(revoked)throw new Error("revoked")});
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate}});
+  const packed=packTree(extensionTree(),key.privateKey);await installFile(h,packed.file);
+  revoked=true;await h.manager.observe();revoked=false;
+  fs.writeFileSync(path.join(h.managedRoot,"installed/demo/1.0.0/extension.json"),"{}");
+  expect((await installFile(h,packed.file)).status).toBe("failed");
+  expect(h.manager.installed()[0]?.quarantine).toBe("revoked");
+ });
+});

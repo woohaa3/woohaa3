@@ -33,6 +33,7 @@ import { ExtensionLoadError, FALLBACK_ORDER, hasBrowserArtifact, resolveModuleFi
 import { isSafeModeEssential, suspendedRegistration } from "./extension-host-safe-mode.mjs";
 import { hostPluginOrigin, resolveIsolation, screenExtension } from "./extension-host-managed.mjs";
 import { createReleaseFacade } from "./extension-host-release.mjs";
+import { verifyManagedActivation } from "./extension-trust/runtime.mjs";
 import { startDevReload } from "./extension-host-dev.mjs";
 // 分支未搬 `extension-release.mjs`（release 布局校验依赖部署模块）；这里直接用协议模块。
 import { loadExtensionContracts } from "./extension-release-protocol.mjs";
@@ -318,6 +319,10 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
   const rejected = [];
   for (const warning of scan.warnings ?? []) logger({ event: "extension-managed-skipped", ...warning });
   for (const extension of scan.extensions) {
+    if (extension.managed) {
+      try { await verifyManagedActivation({dir:extension.dir,managedRoot:scan.managedRoot,repoRoot,env}); }
+      catch(error) { rejected.push({extensionId:extension.extensionId,directory:extension.dir,code:"MARKETPLACE_SIGNATURE_INVALID",message:error.message});logger({event:"extension-trust-rejected",extensionId:extension.extensionId,message:error.message});continue; }
+    }
     const screened = screenExtension({ extension, repoRoot, isolate, rejected, logger });
     if (!screened) continue;
     const { descriptor } = screened;

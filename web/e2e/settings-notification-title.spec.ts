@@ -7,9 +7,7 @@
  *
  * 时序关键：任务记录必须在「切走后」才送达（仅后台完成的记录才写标题）。
  */
-import { expect, test } from "@playwright/test";
-
-
+import { expect, test } from "./review-browser.js";
 function taskRecord(state: "succeeded" | "failed") {
   return {
     taskKey: `e2e-notif-${Date.now().toString(36)}`,

@@ -8,7 +8,7 @@
  * 已删除 Godot bridge 与帧缓冲：不再有投影帧、帧版本号或「已应用帧」信号；改为断言
  * `__canvasCanonical`（规范派生）与 `__bevyRuntime.renderedRevision`（渲染信号）。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	installPageHelpers,
 	readStoredCanvas,

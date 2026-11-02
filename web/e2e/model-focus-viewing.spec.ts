@@ -11,7 +11,7 @@
  *
  * 像素判定用容差，不做逐像素哈希。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { installPageHelpers, resetCanvasStorage, createNode, waitForCanvasSession } from "./helpers.js";
 

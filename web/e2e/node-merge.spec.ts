@@ -11,7 +11,8 @@
  * 交互全部走真实输入：`mouse.down` → `mouse.move` → `mouse.up` → 对话框按钮点击。
  * 需要真实 GPU；无 GPU 环境标记「待人工验证」（`waitForCanvasSession` 等待 Bevy ready）。
  */
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, resetCanvasStorage, waitForCanvasSession, createNode } from "./helpers.js";
 
 const CANVAS = "woohaa3-default-canvas";

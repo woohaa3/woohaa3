@@ -12,7 +12,7 @@
  * 像素/视觉判定用容差；不依赖固定截图哈希。
  */
 import { defaultSelfContained3DNodeData, SHOT_CAMERA_DEFAULT_ELEVATION } from "@woohaa3/contracts";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import {
   installPageHelpers,

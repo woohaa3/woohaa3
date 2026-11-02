@@ -47,6 +47,13 @@ export type GenerationModelDefinition = {
    */
   executable?: boolean;
   taskTimeoutMs?: number;
+  /**
+   * 模型行上的一枚短标签（设置页「生成的模型」列表里显示，例如「站点在售」）。
+   *
+   * 只用于「这个模型的身份/来源需要额外解释」的场景（当前只有 RunningHub 保留的
+   * 公开清单未收录模型）。缺省 = 不显示。
+   */
+  notice?: string;
   /** 参考输入声明（role/mediaKind/binding 等）；结构由生成模块校验。 */
   capabilities?: Record<string, unknown>;
   /**

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { readFileSync } from "node:fs";
 import { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
 import { installPageHelpers, resetCanvasStorage, seedYjsCanvas, uploadMedia, waitForBevyReady, waitForCanvasSession } from "./helpers.js";

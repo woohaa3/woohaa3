@@ -1,5 +1,6 @@
 /** Desktop acceptance for the production canvas activity feed and in-page DialogHost. */
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "../../../e2e/review-browser.js";
 const ACTIVITY = "画布组件--任务活动栈";
 async function openStory(page: Page, story: string) {
   await page.goto(`/?story=${encodeURIComponent(`${ACTIVITY}--${story}`)}`);

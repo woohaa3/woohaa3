@@ -14,7 +14,7 @@
  * 固定场景（PERF_NODES）、DPR（PERF_DPR）与构建产物（E2E_DIST）；`PERF_LABEL` 标注 pre/post。
  * 原始样本按 JSONL 写入 `PERF_OUT`（缺省 `artifacts/performance-canvas-hot-path/<label>`）。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";

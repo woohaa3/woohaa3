@@ -1,0 +1,13 @@
+{
+  "capturedAt": "2026-11-02",
+  "source": "https://www.runninghub.ai/call-api/standard-api",
+  "fieldContract": "id 与 data/models.json 的逻辑模型 id 一致；endpoint 记录站点目录页上看到的端点，仅作证据，不参与生成。",
+  "note": "官方公开 registry（public-2026-04-29）没有收录、但站点标准模型目录仍在售的模型。刷新时按「已确认在售」处理：不移除、也不打「站点在售」标签。新增一条前请先在站点目录页核对并更新 capturedAt。",
+  "models": [
+    {
+      "id": "dola-Seedream-5.0-pro",
+      "endpoint": "/dola-Seedream-5.0-pro/image-to-image",
+      "label": "Dola-Seedream-5.0-pro-图生图（即梦 5 Pro）"
+    }
+  ]
+}

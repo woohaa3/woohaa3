@@ -11,7 +11,7 @@
  *
  * 这些用例直接驱动**同步协议**（WebSocket），而不是 UI：协议是规范行为，UI 只是消费者。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { WebSocket } from "ws";
 import { MESSAGE_TYPE, SYNC_MESSAGE_TYPE, encodeCommandMessage, encodeStatusMessage, encodeSyncMessage, YJS_SYNC_PROTOCOL_VERSION, serverCanvasToYDoc } from "@woohaa3/contracts/canvas-yjs";
 import * as Y from "yjs";

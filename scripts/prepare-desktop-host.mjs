@@ -1,4 +1,7 @@
 import fs from 'node:fs';
+import { readTrustDocument } from './lib/extension-trust/store.mjs';
+import { exact, requireTrust } from './lib/extension-trust/encoding.mjs';
+import { rotateRoot } from './lib/extension-trust/verify.mjs';
 import { runtimeReleaseLayout } from './lib/runtime-release-layout.mjs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -31,6 +34,22 @@ export async function prepareDesktopNode(){
  const binaries=path.join(root,'desktop/build/binaries');fs.mkdirSync(binaries,{recursive:true});const binary=path.join(binaries,`woohaa-node-${artifact.triple}${process.platform==='win32'?'.exe':''}`);fs.copyFileSync(node,binary);fs.chmodSync(binary,0o755);
  return {node:binary,nodeSha256:actual};
 }
+/**
+ * 校验并返回随包固定的信任配置（release desktop 的唯一 anchor 来源）。
+ * 缺省返回 null；build 不是 development 时缺 anchor 直接失败，避免发布版静默退回
+ * v1 裸 key 行为。WOOHAA_DESKTOP_TRUST_UNAMANAGED=1 是显式的“本次不启用 v2”开关。
+ */
+export function resolveDesktopTrustConfig({env=process.env,build='development'}={}){
+ const trustConfig=env.WOOHAA3_EXTENSION_TRUST_CONFIG;
+ if(!trustConfig){
+  if(build!=='development'&&env.WOOHAA_DESKTOP_TRUST_UNAMANAGED!=='1')throw new Error("发布版桌面必须固定扩展信任根：设置 WOOHAA3_EXTENSION_TRUST_CONFIG；确认本次不启用 v2 时显式设 WOOHAA_DESKTOP_TRUST_UNAMANAGED=1");
+  return null;
+ }
+ const config=readTrustDocument(path.resolve(trustConfig));exact(config,["schemaVersion","domains"]);requireTrust(config.schemaVersion===2&&Array.isArray(config.domains)&&config.domains.length>0,"invalid-trust-config");
+ const now=Math.floor(Date.now()/1000);
+ for(const domain of config.domains){exact(domain,["root","floors","extensionIds",...['metadataUrl','bootstrap'].filter(key=>Object.hasOwn(domain,key))]);rotateRoot(domain.root,[],now);exact(domain.floors,["root","targets","snapshot","timestamp"])}
+ return config;
+}
 export async function prepareDesktopHost({output=path.join(root,'.local/desktop-host'),frontend=path.join(root,'web/frontend/dist'),build='development',runtimeReleaseVersion}={}){
  const appVersion=runtimeReleaseVersion??JSON.parse(fs.readFileSync(path.join(root,'desktop/tauri.conf.json'),'utf8')).version;
  const artifact=nodeArtifact();const suffix=process.platform==='win32'?'.exe':'';
@@ -42,6 +61,10 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  attachRuntimePackage(path.join(root,'web/backend'),path.join(output,'backend-runtime'),output,state);
  fs.mkdirSync(path.join(output,'scripts/lib'),{recursive:true});
  for(const entry of fs.readdirSync(path.join(root,'scripts/lib')))if(entry.endsWith('.mjs')&&!entry.includes('.test.'))fs.copyFileSync(path.join(root,'scripts/lib',entry),path.join(output,'scripts/lib',entry));
+ fs.mkdirSync(path.join(output,"scripts/lib/extension-trust"),{recursive:true});
+ for(const file of ["encoding.mjs","verify.mjs","store.mjs","runtime.mjs"])fs.copyFileSync(path.join(root,"scripts/lib/extension-trust",file),path.join(output,"scripts/lib/extension-trust",file));
+ const trustConfig=resolveDesktopTrustConfig({env:process.env,build});
+ if(trustConfig)fs.writeFileSync(path.join(output,"extension-trust.json"),JSON.stringify(trustConfig));
  fs.copyFileSync(path.join(root,'scripts/desktop-host.mjs'),path.join(output,'scripts/desktop-host.mjs'));
  fs.copyFileSync(path.join(root,'scripts/extensions-preflight.mjs'),path.join(output,'scripts/extensions-preflight.mjs'));
  fs.writeFileSync(path.join(output,'desktop-host.mjs'),`import './scripts/desktop-host.mjs';\n`);

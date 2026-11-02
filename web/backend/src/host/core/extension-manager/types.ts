@@ -48,6 +48,11 @@ export type InstallationRecord = {
   packageDigest?: string;
   filesDigest?: string;
   trust?: ExtensionTrust;
+  evidence?: Record<string, unknown>;
+  quarantine?: string;
+  quarantineCleanupPending?: boolean;
+  versions?: Record<string, { filesDigest?: string; packageDigest?: string; trust?: ExtensionTrust; evidence?: Record<string, unknown> }>;
+
   state?: "active" | "observing" | "uninstalling";
   observeUntil?: string | null;
   /** 含后端代码：观察期从下一次启动开始计时。 */
@@ -84,7 +89,9 @@ export type InstallationsHandle = {
 export type ExtensionPackageToolkit = {
   computePackageDigest(packagePath: string): string | Promise<string>;
   unpackExtensionPackage(input: { packagePath: string; destDir: string; limits?: Record<string, number> }): unknown;
-  verifyExtensionPackage(input: { treeDir: string; trustedKeys: readonly TrustedKey[]; allowUnsigned: boolean }): { trust: ExtensionTrust } | Promise<{ trust: ExtensionTrust }>;
+  verifyExtensionPackage(input: { treeDir: string; packageDigest?: string; trustedKeys: readonly TrustedKey[]; allowUnsigned: boolean }): { trust: ExtensionTrust; evidence?: Record<string, unknown> } | Promise<{ trust: ExtensionTrust; evidence?: Record<string, unknown> }>;
+  trustStateStamp?(): string;
+  verifyManagedActivation?(input: { dir: string; record?: InstallationRecord; fresh?: boolean }): Promise<unknown>;
   filesDigest(treeDir: string): string | Promise<string>;
   preflightDirectory(dir: string, options: { managed: true }): PreflightResult | Promise<PreflightResult>;
   openInstallations(input: { managedRoot: string; lock?: boolean }): InstallationsHandle;

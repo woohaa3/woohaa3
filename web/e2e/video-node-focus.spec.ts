@@ -14,7 +14,7 @@ import { designEvidence } from "./design-evidence.js";
  * 说明：历史中央播放/设为当前回流需要真实生成任务注册 node history（另见 change 验收记录），
  * 本 spec 覆盖双击聚焦与截帧主链路。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

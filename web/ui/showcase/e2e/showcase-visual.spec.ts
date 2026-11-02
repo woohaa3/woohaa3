@@ -9,8 +9,8 @@
  *
  * 时间由查看页固定 locale/timezone（见 `src/fixed-clock.ts`），因此截图可跨机器重复。
  */
-import { expect, test, type Page } from "@playwright/test";
-
+import { type Page } from "@playwright/test";
+import { expect, test } from "../../../e2e/review-browser.js";
 const HISTORY = "画布组件--任务历史";
 const MODEL = "画布组件--模型参数";
 

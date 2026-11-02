@@ -8,7 +8,8 @@
  * - 卡片预览使用透视投影：同一高塔的顶部明显宽于底部（正交投影下两者等宽）。
  */
 import { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
   resetCanvasStorage,
   waitForCanvasSession,

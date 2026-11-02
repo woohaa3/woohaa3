@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
 import { resetCanvasStorage, waitForCanvasSession, sendCommands } from "./helpers.js";
 

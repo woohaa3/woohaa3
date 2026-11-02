@@ -11,7 +11,7 @@
  * 帧耗时（rAF P50/P95、dropped frame）只做软记录并打印 `[perf]`，避免软件 GPU 与共享
  * CI 负载导致 flaky；确定性计数与 payload 上界作为硬断言。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { installPageHelpers, resetCanvasStorage, createNode, waitForCanvasSession } from "./helpers.js";
 

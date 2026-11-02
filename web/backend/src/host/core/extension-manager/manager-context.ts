@@ -16,6 +16,7 @@ import {
   type ExtensionManagerDeps
 } from "./manager-types.js";
 import type { ExtensionPackageToolkit, InstallationRecord, InstallationsHandle, InstallationsState } from "./types.js";
+import { withVersionEvidence } from "./version-evidence.js";
 
 export type ManagerContext = {
   deps: ExtensionManagerDeps;
@@ -112,6 +113,16 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
     hasBackend: boolean,
     options: { previousDirectory?: string | null; hotSwappable?: boolean } = {}
   ): Promise<ExtensionInstallOutcome> => {
+    if (directory && handle && path.resolve(directory).startsWith(handle.layout.installedDir + path.sep)) {
+      const record = handle.read().extensions[extensionId];
+      if (record?.quarantine) throw new ExtensionManagerError("MARKETPLACE_SIGNATURE_INVALID", record.quarantine);
+      await toolkit.verifyManagedActivation?.({dir:directory,record});
+      if (options.previousDirectory === undefined) options = {...options, previousDirectory: record?.previous ? handle.layout.versionDir(extensionId, record.previous) : null};
+      if (options.previousDirectory && path.resolve(options.previousDirectory).startsWith(handle.layout.installedDir + path.sep)) {
+        try { await toolkit.verifyManagedActivation?.({dir:options.previousDirectory,record:record?withVersionEvidence(record,path.basename(options.previousDirectory)):undefined}); }
+        catch { options={...options,previousDirectory:null}; }
+      }
+    }
     const hotSwappable = options.hotSwappable !== false;
     // 站点 backend 工厂没有运行期装配入口：即使宿主有扩展层，也只能等下一次启动。
     if (hasBackend && !hotSwappable) return "restart-required";
@@ -166,9 +177,12 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
       const backend = Boolean(record.requiresRestart);
       const hotSwappable = record.hotSwappable !== false;
       const restart = backend && (!deps.runtime?.available() || !hotSwappable);
+      // 兼容窗口：没有逐版本证据的老记录切版本时必须清掉上一版本的摘要/信任，
+      // 否则 installed() 会拿旧摘要去比新目录并把正常回滚判成内容被改（见 COMPATIBILITY.md）。
       let next: InstallationRecord = {
-        ...record,
+        ...withVersionEvidence(record, target),
         current: target,
+        quarantine: undefined,
         previous: from === target ? record.previous ?? null : from,
         state: "active",
         observeUntil: null,

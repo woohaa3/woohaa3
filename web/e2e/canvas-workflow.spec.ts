@@ -4,7 +4,7 @@
  * 覆盖桌面与 390px：命名 → 长提示词换行/生成 → 活动定位 → 历史失败重试/节点版本跳转
  * → 查找 → 整理 → 误删撤销 → 重做。用真实生产组件 + Bevy 几何 + 命令链，不做静态 mock。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	installPageHelpers,
 	readStoredCanvas,

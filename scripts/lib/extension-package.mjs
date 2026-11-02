@@ -21,11 +21,16 @@ import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, veri
 import fs from "node:fs";
 import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
+import { digest as trustDigest, exact, fingerprint, parseTrustJson, requireTrust, signEnvelope } from "./extension-trust/encoding.mjs";
+import { verifyPackageSignature } from "./extension-trust/verify.mjs";
+import { readTrustDocument } from "./extension-trust/store.mjs";
 
 export const PACKAGE_EXTENSION = ".wxt";
 export const FILES_MANIFEST_NAME = "FILES.json";
 export const SIGNATURE_NAME = "SIGNATURE";
 export const SIGNATURE_ALG = "ed25519";
+export const CERTIFICATE_CHAIN_NAME = "CERTIFICATES.json";
+export const SIGNATURE_V2_ALG = "ed25519-wxt-v2";
 const MiB = 1024 * 1024;
 export const DEFAULT_PACKAGE_LIMITS = Object.freeze({
   maxPackageBytes: 200 * MiB,
@@ -148,7 +153,7 @@ export function readPackageFiles(treeDir) {
   if (!fs.existsSync(file)) throw new ExtensionPackageError("MARKETPLACE_DIGEST_MISMATCH", "包缺少 FILES.json 文件清单");
   let parsed;
   try {
-    parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    parsed = readTrustDocument(file, 32 * MiB);
   } catch (error) {
     throw new ExtensionPackageError("MARKETPLACE_DIGEST_MISMATCH", "FILES.json 不是合法 JSON：" + error.message);
   }
@@ -204,11 +209,15 @@ function readSignature(treeDir) {
   if (!fs.existsSync(file)) return null;
   let parsed;
   try {
-    parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    parsed = readTrustDocument(file, 64 * 1024);
   } catch {
     throw new ExtensionPackageError("MARKETPLACE_SIGNATURE_INVALID", "SIGNATURE 不是合法 JSON");
   }
-  if (!parsed || typeof parsed !== "object" || parsed.alg !== SIGNATURE_ALG || typeof parsed.keyId !== "string" || typeof parsed.sig !== "string") {
+  if (parsed?.alg === SIGNATURE_V2_ALG) {
+    exact(parsed, ["alg", "envelope"]);
+    return parsed;
+  }
+  if (!parsed || typeof parsed !== "object" || parsed.alg !== SIGNATURE_ALG || typeof parsed.keyId !== "string" || typeof parsed.sig !== "string" || Object.keys(parsed).sort().join(",") !== "alg,keyId,sig") {
     throw new ExtensionPackageError("MARKETPLACE_SIGNATURE_INVALID", "SIGNATURE 格式非法（需要 { keyId, alg: \"ed25519\", sig }）");
   }
   return parsed;
@@ -221,16 +230,29 @@ function readSignature(treeDir) {
  * - allowUnsigned：是否接受**没有 SIGNATURE** 的包（调用方负责「仅 local-file + 显式开关」的判断）。
  *   有 SIGNATURE 但无效的包永远拒绝，不会因 allowUnsigned 降级为未签名。
  *
- * 返回 { trust: "signed:<keyId>" | "unsigned", keyId, files }。
+ * v2 additionally requires a verified trustContext; no source-provided key or unsigned fallback.
+ * Returns trust/keyId/files, plus structured evidence for certified packages.
  */
-export function verifyExtensionPackage({ treeDir, trustedKeys = [], allowUnsigned = false } = {}) {
+export function verifyExtensionPackage({ treeDir, trustedKeys = [], allowUnsigned = false, trustContext, now } = {}) {
   const files = readPackageFiles(treeDir);
   const signature = readSignature(treeDir);
   let trust;
   let keyId = null;
+  let evidence;
+  const chainPath = path.join(treeDir, CERTIFICATE_CHAIN_NAME);
+  if (signature?.alg !== SIGNATURE_V2_ALG && fs.existsSync(chainPath)) {
+    throw new ExtensionPackageError("MARKETPLACE_SIGNATURE_INVALID", "证书包不能降级为裸公钥或未签名包");
+  }
   if (signature === null) {
     if (!allowUnsigned) throw new ExtensionPackageError("MARKETPLACE_UNSIGNED_REJECTED", "包没有签名；本机未允许安装未签名扩展");
     trust = "unsigned";
+  } else if (signature.alg === SIGNATURE_V2_ALG) {
+    requireTrust(fs.existsSync(chainPath), "missing-chain");
+    const chain = readTrustDocument(chainPath);
+    const descriptor = readTrustDocument(path.join(treeDir, "extension.json"));
+    evidence = verifyPackageSignature({ envelope: signature.envelope, chain, context: trustContext, extensionId: descriptor.extensionId, filesDigest: trustDigest(files), now });
+    keyId = evidence.keyId;
+    trust = "certified:" + evidence.trustDomain + ":" + evidence.publisherId;
   } else {
     const candidates = [];
     for (const entry of trustedKeys) {
@@ -277,7 +299,7 @@ export function verifyExtensionPackage({ treeDir, trustedKeys = [], allowUnsigne
   if (listed.size > 0) {
     throw new ExtensionPackageError("MARKETPLACE_DIGEST_MISMATCH", "FILES.json 列出的文件缺失：" + [...listed.keys()].slice(0, 5).join("、"));
   }
-  return { trust, keyId, files };
+  return { trust, keyId, files, ...(evidence ? { evidence } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -476,14 +498,34 @@ export function unpackExtensionPackage({ packagePath, destDir, limits = {} } = {
  * 把一个已准备好的包目录（只含要分发的文件）打成 .wxt：生成 FILES.json，可选签名。
  * 返回 { outFile, packageDigest, files, signature }。准备目录（构建、改写 package.json）见 scripts/pack-extension.mjs。
  */
-export function packDirectory({ treeDir, outFile, privateKey = null, keyId } = {}) {
+export function packDirectory({ treeDir, outFile, privateKey = null, keyId, certificateChain = null } = {}) {
+  if (certificateChain) {
+    requireTrust(privateKey && !keyId, "certificate-signing-key-required");
+    certificateChain = parseTrustJson(JSON.stringify(certificateChain));
+    exact(certificateChain, ["issuer", "publisher"]);
+    const key = typeof privateKey === "string" ? createPrivateKey(privateKey) : privateKey;
+    const pub = createPublicKey(key).export({ type: "spki", format: "der" }).toString("base64");
+    requireTrust(fingerprint(pub) === fingerprint(certificateChain.publisher.signed.publicKey), "certificate-key-mismatch");
+    const descriptor = parseTrustJson(fs.readFileSync(path.join(treeDir, "extension.json"), "utf8"));
+    requireTrust(descriptor.extensionId === certificateChain.publisher.signed.extensionId, "publisher-scope");
+    fs.writeFileSync(path.join(treeDir, CERTIFICATE_CHAIN_NAME), JSON.stringify(certificateChain) + "\n");
+  } else {
+    requireTrust(!fs.existsSync(path.join(treeDir, CERTIFICATE_CHAIN_NAME)), "certificate-chain-required");
+  }
   for (const name of [FILES_MANIFEST_NAME, SIGNATURE_NAME]) fs.rmSync(path.join(treeDir, name), { force: true });
   const files = buildFilesManifest(treeDir);
   const entries = files.map((entry) => ({ path: entry.path, bytes: fs.readFileSync(path.join(treeDir, ...entry.path.split("/"))) }));
   entries.push({ path: FILES_MANIFEST_NAME, bytes: Buffer.from(JSON.stringify(files, null, 2) + "\n", "utf8") });
   let signature = null;
   if (privateKey) {
-    signature = signFilesManifest(files, privateKey, { keyId });
+    signature = certificateChain ? {
+      alg: SIGNATURE_V2_ALG,
+      envelope: signEnvelope({
+        schemaVersion: 2, kind: "package", trustDomain: certificateChain.publisher.signed.trustDomain,
+        extensionId: certificateChain.publisher.signed.extensionId, filesDigest: trustDigest(files),
+        certificateId: trustDigest(certificateChain.publisher.signed)
+      }, [privateKey])
+    } : signFilesManifest(files, privateKey, { keyId });
     entries.push({ path: SIGNATURE_NAME, bytes: Buffer.from(JSON.stringify(signature, null, 2) + "\n", "utf8") });
   }
   const archive = createTarGz(entries);

@@ -5,7 +5,7 @@
  * 只用产品镜像断言瞬时呈现态：`window.__bevyRuntime.lastScene()`。这些字段是浏览器本地
  * 呈现态，不进入规范画布——用例同时断言 revision 不被框选推进。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
   installPageHelpers,
   resetCanvasStorage,

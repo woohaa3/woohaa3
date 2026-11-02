@@ -12,7 +12,7 @@
  * Canvas Service 的历史登记由内部路径触发；这里通过受控 API（run/model-mcp）间接产生版本，
  * 或直接断言空态/边界以覆盖 UI 契约。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { bevyNodeHistoryActionRect } from "@woohaa3/contracts";
 import { designEvidence } from "./design-evidence.js";

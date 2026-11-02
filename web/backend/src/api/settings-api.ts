@@ -211,6 +211,7 @@ function mergeManaged(
     restartRequired: entry.restartRequired,
     ...(entry.previousVersion ? { previousVersion: entry.previousVersion } : {}),
     ...(entry.trust ? { trust: entry.trust } : {}),
+    ...(entry.quarantine ? { quarantine: entry.quarantine } : {}),
     ...(entry.observeUntil ? { observeUntil: entry.observeUntil } : {})
   });
   const merged = installed.map((item) => {

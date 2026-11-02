@@ -107,6 +107,7 @@ export function projectGenerationModelViews(
         ...(policy?.order !== undefined ? { order: policy.order } : {}),
         ...(policy?.taskTimeoutMs !== undefined ? { taskTimeoutMs: policy.taskTimeoutMs } : {}),
         ...(policy?.interaction ? { interaction: policy.interaction } : {}),
+        ...(model.notice ? { notice: model.notice } : {}),
         ...(tombstone ? { tombstone: true } : {}),
         executable: provider.available && model.executable !== false,
         extensionId: provider.extensionId

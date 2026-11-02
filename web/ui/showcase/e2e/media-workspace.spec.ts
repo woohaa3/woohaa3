@@ -7,8 +7,8 @@
  * - 图片缩放/重置前后 Dialog 外框与 Header/Close 位置稳定，事件不穿透背景舞台；
  * - 桌面与 390×844 下无页面级横向溢出、控件可达、关键状态生成视觉基线。
  */
-import { expect, test, type Page } from "@playwright/test";
-
+import { type Page } from "@playwright/test";
+import { expect, test } from "../../../e2e/review-browser.js";
 const IMAGE_READY = "画布组件--弹窗--媒体工作区--图片-ready";
 const IMAGE_UNAVAILABLE = "画布组件--弹窗--媒体工作区--图片-不可用";
 const VIDEO_CAPTURED = "画布组件--弹窗--视频截帧--已有帧";

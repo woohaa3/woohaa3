@@ -6,7 +6,7 @@
  * - 执行面板按节点类型显示 video-generation / audio-generation；
  * - nodeData 音视频结果（duration/posterAssetId）落盘并刷新恢复。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	createNode,
 	currentFrameRevision,

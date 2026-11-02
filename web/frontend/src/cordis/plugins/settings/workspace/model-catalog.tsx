@@ -423,6 +423,7 @@ function ModelRow({
         </div>
         <div className="plugin-config__model-meta">
           <span className={`plugin-config__model-type ${typeClass}`}>{typeLabel}</span>
+          {row.notice ? <span className="plugin-config__model-flag is-notice">{row.notice}</span> : null}
           {row.executable ? null : <span className="plugin-config__model-flag">不可执行</span>}
         </div>
       </div>

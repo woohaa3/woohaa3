@@ -114,7 +114,9 @@ describe("扩展声明流水线", () => {
     const litellm = byId.get("tokenhub-provider");
     expect(litellm?.modelRefresh?.path).toBe("/api/providers/tokenhub/refresh");
     expect(litellm?.modelRefresh?.hint).toContain("TokenHub");
-    expect(byId.get("runninghub-provider")?.modelRefresh).toBeUndefined();
+    // RunningHub 的清单来自官方公开 registry（RunningHub 没有按 key 查标准模型的接口），
+    // 刷新只做增量；入口同样由插件声明，宿主不硬编码路径。
+    expect(byId.get("runninghub-provider")?.modelRefresh?.path).toBe("/api/providers/runninghub/refresh");
   });
 
   it("声明装载的 Provider 真的注册进生成 registry", async () => {

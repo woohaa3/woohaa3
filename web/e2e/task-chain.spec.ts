@@ -9,7 +9,7 @@
  * 与 `run-cancel.spec.ts`（协议客户端）互补：这里走真实 React 面板与 Godot 投影。
  * 需要画布存储 + Yjs，跑在 `playwright.yjs.config.ts` 下。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { installPageHelpers, waitForCanvasSession, waitForBevyReady } from "./helpers.js";
 

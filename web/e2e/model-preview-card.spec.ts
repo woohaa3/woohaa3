@@ -1,5 +1,6 @@
 import { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
   resetCanvasStorage,
   waitForCanvasSession,

@@ -8,8 +8,8 @@
  * - 无横向溢出（页面级）；
  * - 桌面与 390px 两个 project 共用同一批断言。
  */
-import { expect, test, type Page } from "@playwright/test";
-
+import { type Page } from "@playwright/test";
+import { expect, test } from "../../../e2e/review-browser.js";
 const STORY = {
   image: "画布组件--执行面板--生产组合--图片-·-生产组合",
   sidebar: "画布组件--执行面板--生产组合--侧栏面",

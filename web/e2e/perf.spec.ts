@@ -8,7 +8,7 @@
  *
  * 规模阈值以输出为准（见测试日志的 `[perf]` 行）；断言只设宽松上界，避免在共享 CI 上抖动。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers,
 	readStoredCanvas,
 	readRenderedRevision,

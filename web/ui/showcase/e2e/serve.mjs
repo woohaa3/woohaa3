@@ -8,11 +8,11 @@
  *
  *   node e2e/serve.mjs --port 5199 --dist dist
  */
-import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createStaticHandler } from "../../../../scripts/lib/static-server.mjs";
+import { createReviewServer, reviewScheme } from "../../../../scripts/lib/review-tls.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const showcaseRoot = path.resolve(here, "..");
@@ -43,7 +43,7 @@ if (!fs.existsSync(dist)) {
 
 const serveStatic = createStaticHandler(dist);
 
-const server = http.createServer((req, res) => {
+const server = createReviewServer((req, res) => {
   const url = new URL(req.url || "/", "http://localhost");
   if ((url.pathname === fontUrl || url.pathname === assetFontUrl) && fs.existsSync(fontFile)) {
     const body = fs.readFileSync(fontFile);
@@ -59,5 +59,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(port, host, () => {
-  process.stderr.write(`[showcase-e2e] http://${host}:${port}（dist=${dist}）\n`);
+  process.stderr.write(`[showcase-e2e] ${reviewScheme()}://${host}:${port}（dist=${dist}）\n`);
 });

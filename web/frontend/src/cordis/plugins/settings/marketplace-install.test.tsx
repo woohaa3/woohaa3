@@ -363,3 +363,10 @@ describe("刷新骨架", () => {
     expect(container.querySelector('[data-testid="marketplace-results"]')).not.toBeNull();
   });
 });
+
+
+it("does not offer bare-key trust for certificate releases with short display fingerprints",()=>{
+ const value=detail([]);
+ const certified={...value,extension:{...value.extension,versions:[{version:"2.0.0",packageDigest:"sha256:a",size:1,keyId:"a".repeat(16),signerKeyId:"a".repeat(64),certificateId:"b".repeat(64),trustDomain:"test-only"}]}};
+ expect(versionTrusted(certified,"2.0.0")).toBe(null);
+});

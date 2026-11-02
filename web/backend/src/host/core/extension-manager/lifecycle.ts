@@ -7,6 +7,10 @@ import { MARKETPLACE_LOCAL_FILE_SOURCE_ID, type ExtensionInstallJobView } from "
 import { ExtensionManagerError } from "./errors.js";
 import { failedJob, runJob, unavailableError } from "./install-pipeline.js";
 import type { ManagerContext } from "./manager-context.js";
+import { withVersionEvidence } from "./version-evidence.js";
+
+/** 周期性信任复核的默认间隔：与签名元数据刷新周期一致（1 小时）。 */
+const DEFAULT_TRUST_CHECK_MS = 60 * 60 * 1000;
 
 /** 启动恢复：清 staging；上一进程待重启的版本已按新指针装配，观察期从现在开始。 */
 export function recoverOnStartup(ctx: ManagerContext): void {
@@ -21,7 +25,7 @@ if (handle) {
       commit((draft) => {
         for (const [id] of resumed) {
           const record = draft.extensions[id];
-          if (!record) continue;
+          if (!record || record.quarantine) continue;
           draft.extensions[id] = {
             ...record,
             restartPending: false,
@@ -135,6 +139,7 @@ export function rollback(ctx: ManagerContext, extensionId: string, options: { to
       }
       const dir = requireHandle().layout.versionDir(extensionId, target);
       if (!fs.existsSync(dir)) throw new ExtensionManagerError("MARKETPLACE_NO_PREVIOUS_VERSION", `上一版本目录已不存在：${extensionId}@${target}`);
+      await ctx.toolkit.verifyManagedActivation?.({dir,record:withVersionEvidence(latest,target),fresh:true});
       const { backend } = switchPointer(extensionId, target, "rollback", options.actor);
       board.update(job, { phase: "reload" });
       // 回滚也是一次切换：含后端且子进程托管时对上一版本目录 swap（D10 第 5 步）；失败则指针切回原版本。
@@ -153,6 +158,7 @@ export function rollback(ctx: ManagerContext, extensionId: string, options: { to
 export async function observe(ctx: ManagerContext): Promise<void> {
   const { handle, deps, board, now, failureThreshold, healthFailures, commit, history, log } = ctx;
   if (!handle || ctx.status.closed) return;
+  await enforceTrust(ctx);
   const state = handle.read();
   const at = now().getTime();
   for (const [extensionId, record] of Object.entries(state.extensions)) {
@@ -199,8 +205,11 @@ export async function autoRollback(ctx: ManagerContext, extensionId: string, rej
   const { board, handle, switchPointer, reload, log } = ctx;
   if (!handle) return;
   await board.serial(async () => {
-    const { backend } = switchPointer(extensionId, previous, "auto-rollback", "system", rejected);
     const dir = handle.layout.versionDir(extensionId, previous);
+    const record=handle.read().extensions[extensionId];
+    try { await ctx.toolkit.verifyManagedActivation?.({dir,record:record?withVersionEvidence(record,previous):undefined}); }
+    catch(error) { await quarantine(ctx,extensionId,error);return; }
+    const { backend } = switchPointer(extensionId, previous, "auto-rollback", "system", rejected);
     try {
       await reload(extensionId, dir, backend);
     } catch (error) {
@@ -247,4 +256,71 @@ export function sweep(ctx: ManagerContext): number {
     }
   }
   return removed;
+}
+
+/**
+ * 隔离一个未通过信任校验的扩展：先落状态，再尽力停用 / 撤下运行期实例 / 撤浏览器产物。
+ * 清理动作只在首次进入隔离时执行；重试只为失败的清理补一次，避免每轮观察都全量重复。
+ */
+async function quarantine(ctx:ManagerContext,extensionId:string,error:unknown):Promise<void>{
+ const record=ctx.handle?.read().extensions[extensionId];if(!record)return;
+ const message=error instanceof Error?error.message:String(error);
+ // 首次隔离：落状态并清理一次。已经隔离且清理成功（restartPending=false）：不再重复执行。
+ if(record.quarantine&&record.quarantineCleanupPending===false)return;
+ if(!record.quarantine){
+  ctx.commit(draft=>{const current=draft.extensions[extensionId];if(current&&!current.quarantine)draft.extensions[extensionId]={...current,quarantine:message,quarantineCleanupPending:true,state:"active",observeUntil:null};});
+  ctx.log({event:"extension-quarantined",extensionId,message});
+ }
+ const outcomes=await Promise.allSettled([
+  Promise.resolve().then(()=>ctx.deps.disableSite?.(extensionId,"trust-revocation")),
+  Promise.resolve().then(()=>ctx.deps.runtime?.remove(extensionId)),
+  Promise.resolve().then(()=>ctx.deps.publishBrowserRelease?.({remove:[extensionId]}))
+ ]);
+ let failed=false;
+ for(const outcome of outcomes)if(outcome.status==="rejected"){
+  failed=true;
+  ctx.log({event:"extension-quarantine-restart-required",extensionId,message:String(outcome.reason)});
+ }
+ ctx.commit(draft=>{const latest=draft.extensions[extensionId];if(latest)draft.extensions[extensionId]={...latest,quarantineCleanupPending:failed,restartPending:failed||Boolean(latest.requiresRestart&&(!ctx.deps.runtime?.available()||latest.hotSwappable===false))};});
+ ctx.log({event:"extension-quarantine-cleanup",extensionId,failed});
+}
+
+/**
+ * 周期性信任复核。完整验签会同步读取整个版本目录（含 WASM / 字体）并重算摘要，
+ * 所以每个扩展按 trustCheckMs 限流（缺省 1 小时，与信任元数据刷新周期一致）：
+ * 新出现或换了版本的记录立即检查，其余到点再查；同一时刻只跑一轮，
+ * 避免 observe 重入后并发隔离。
+ */
+type TrustSweep = { inFlight: Promise<void> | null; checked: Map<string, { stamp: string; at: number }> };
+const trustSweeps = new WeakMap<ManagerContext, TrustSweep>();
+async function enforceTrust(ctx:ManagerContext):Promise<void>{
+ const handle=ctx.handle;
+ const verify=ctx.toolkit.verifyManagedActivation;
+ if(!handle||!verify)return;
+ let book=trustSweeps.get(ctx);
+ if(!book){book={inFlight:null,checked:new Map()};trustSweeps.set(ctx,book);}
+ const current=book;
+ if(current.inFlight)return current.inFlight;
+ const interval=ctx.deps.trustCheckMs??DEFAULT_TRUST_CHECK_MS;
+ current.inFlight=(async()=>{
+  // 信任元数据每轮只算一次；读不出来说明信任配置本身坏了，按扩展逐个隔离并说明原因。
+  let trustStamp: string|null = null;
+  let stampError: unknown = null;
+  try { trustStamp=ctx.toolkit.trustStateStamp?.()??""; } catch(error) { stampError=error; }
+  const state=handle.read();
+  for(const [id,record] of Object.entries(state.extensions)){
+   if(ctx.status.closed)return;
+   if(record.quarantine){await ctx.board.serial(()=>quarantine(ctx,id,new Error(record.quarantine)));continue;}
+   if(trustStamp===null){await ctx.board.serial(()=>quarantine(ctx,id,stampError));continue;}
+   const stamp=record.current+":"+(record.filesDigest??"")+":"+trustStamp;
+   const previous=current.checked.get(id);
+   const at=ctx.now().getTime();
+   if(previous&&previous.stamp===stamp&&at-previous.at<interval)continue;
+   try{
+    await verify({dir:handle.layout.versionDir(id,record.current),record});
+    current.checked.set(id,{stamp,at});
+   }catch(error){await ctx.board.serial(()=>quarantine(ctx,id,error));}
+  }
+ })();
+ try{await current.inFlight}finally{current.inFlight=null}
 }

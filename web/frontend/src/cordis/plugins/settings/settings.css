@@ -174,6 +174,9 @@
 .settings-page__item-label { font-weight: 600; }
 .settings-page__item-description { margin: 4px 0 8px; font-size: 12px; color: var(--mc-text-muted); }
 .settings-page__item-control { display: flex; align-items: center; gap: 8px; }
+/* 刷新结果这类整句回显：按钮单独一行，结果换行落到下面，不跟按钮挤在同一行撑破容器。 */
+.settings-page__item-control.is-stacked { flex-wrap: wrap; align-items: flex-start; }
+.settings-page__item-control.is-stacked .settings-page__hint { flex-basis: 100%; margin: 0; line-height: 1.5; }
 .settings-page__badge {
 	font-size: 11px;
 	padding: 1px 8px;
@@ -722,6 +725,14 @@
 .plugin-config__model-type.is-video { color: var(--app-node-video-foreground); background: var(--app-node-video-tint); }
 .plugin-config__model-type.is-default { color: var(--app-node-default-foreground); background: var(--app-node-default-tint); }
 .plugin-config__model-flag { font-size: 10px; color: var(--app-status-warning); }
+/* 「站点在售」这类来源标签：跟「不可执行」区分开，用中性色而不是警告色。 */
+.plugin-config__model-flag.is-notice {
+	color: var(--mc-text-muted);
+	border: 1px solid var(--mc-border);
+	border-radius: 999px;
+	padding: 0 6px;
+	line-height: 16px;
+}
 
 .plugin-config__model-empty {
 	display: flex;

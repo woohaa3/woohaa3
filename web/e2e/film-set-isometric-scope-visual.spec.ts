@@ -12,7 +12,8 @@
  * 暗色 token 只覆盖亮度相关的画布/背景/文字 token；未覆盖的沿用默认，保持契约合法。
  */
 import { canonicalFilmSetFields, createFilmSetSnapshot, createModelSnapshot, type FilmSetItem } from "@woohaa3/contracts";
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, resetCanvasStorage, sendCommands, waitForCanvasSession } from "./helpers.js";
 
 /** 深色画布/背景/文字 token 覆盖（其余沿用默认，保证 preset 通过校验）。 */

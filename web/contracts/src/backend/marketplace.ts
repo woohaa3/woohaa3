@@ -96,7 +96,7 @@ export type ExtensionInstallJobView = {
 };
 
 /** 受管扩展的信任级别：`signed:<keyId>` 或 `unsigned`（仅 local-file 且本机显式允许）。 */
-export type ExtensionTrust = `signed:${string}` | "unsigned";
+export type ExtensionTrust = `signed:${string}` | `certified:${string}:${string}` | "unsigned";
 
 /** 来源侧的一个可见版本（展示用；来源返回的状态与 keyId 不参与信任判定）。 */
 export type MarketplaceVersionInfo = {
@@ -105,8 +105,13 @@ export type MarketplaceVersionInfo = {
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly packageDigest: string;
   readonly size: number;
-  /** 发布签名公钥 keyId（sha256(SPKI DER) 前 16 hex）。 */
+  /** 发布签名公钥 keyId（sha256(SPKI DER) 前 16 hex；v1 兼容展示口径）。 */
   readonly keyId?: string;
+  /** 证书包（v2）的完整公钥指纹、证书、发布者与信任域；裸 key 版本为空。 */
+  readonly signerKeyId?: string;
+  readonly certificateId?: string;
+  readonly publisherId?: string;
+  readonly trustDomain?: string;
   readonly publishedAt?: string;
   /** 来源声明的状态（如 approved / yanked）；客户端只展示。 */
   readonly state?: string;

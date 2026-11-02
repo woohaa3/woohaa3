@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { resetCanvasStorage, waitForCanvasSession, sendCommands } from "./helpers.js";
 
 async function work(page: Page) {

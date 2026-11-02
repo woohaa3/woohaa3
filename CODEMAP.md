@@ -1,5 +1,7 @@
 # Client code map
 
+Extension trust v2 (2026-11-02): [scripts/lib/extension-trust/README.md](scripts/lib/extension-trust/README.md) defines certificate-chain and metadata validation, root updates, durable trust cache, and shared public test vectors. Package tools accept explicit certificate chains; configured domains use HTTPS refresh, durable receipts, startup/rollback gates and exact v1 migration grants. Unconfigured domains retain v1 behavior and reject v2. Production roots and deployment are not provisioned by these code changes.
+
 片场聚焦检查器（2026-10-30）：`web/extensions/film-set/src/authoring/browser/inspector.tsx` 的旧折叠构图已由下节 2026-10-31 的分区属性替代；动态播放条在编辑态可达，输出按镜头类型组织。扩展经公共 `CompositeAssetAdapter.focusLayout` 声明 chrome 占位，经异步 `writeCameras` 使用同一个 `canvasEdit` journal，经 authoring `onDraftStateChange` 固定非空 AI 草稿目标；宿主不读取片场私有字段。
 
 ## Film-set workspace (2026-10-31)
@@ -107,3 +109,7 @@ The frontend's HTTP adaptation and receipt decoding live in `web/frontend/src/co
 共享 UI 的 ThemeSource 通过 `@woohaa3/contracts/theme` 读取纯主题类型，不经过 contracts 根入口的旧业务兼容导出。
 
 Content contribution rollout (2026-10-30): trusted `CanvasContentRuntime.contributions` are owner-checked by `web/backend/src/extensions/canvas-content.ts` and injected into both CAS and Yjs command paths. `CompositeAssetAdapter.content` registers the browser counterpart; sessions read `CompositeAssetRegistry.getContent()` live for speculative commands, observation and edit planning. Once enabled, owner removal keeps writes strict. `web/contracts/src/canvas/content-node-data.ts` handles registered composite codec validation/normalization and clipboard sanitation; `extension.edit` expands bounded owner operations into protected structural edits. Film-set group/history/routes/migrations remain separate unfinished migration stages; existing scopes without declarations retain staged compatibility.
+
+Extension signing integration: `scripts/lib/extension-trust/runtime.mjs` owns pinned-domain refresh, durable receipts and activation gates; `web/backend/src/host/core/extension-manager/` applies the same policy to installs, reloads, quarantine and rollback. `scripts/prepare-desktop-host.mjs` includes verifier modules and optional public `extension-trust.json`, and `desktop-host-data.mjs` selects only the bundled anchor in production. Existing v1 packages under a configured domain require exact signed migration grants.
+
+Offline extension trust: domain `metadataUrl` is optional. `bootstrap` seeds empty caches with signed metadata; `scripts/import-extension-trust.mjs` imports the same public material under pinned anchors. No server RPC or online session is required for first installation with fresh offline metadata.
