@@ -1,6 +1,7 @@
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
+import { decodeSceneAreaData } from "../creation-scope-codec.js";
 import type { NodeCapabilityResolver } from "../node-capabilities.js";
 /**
  * `CanvasRenderScene` 快照装配与呈现指纹（自 `render-scene.ts` 拆出）
@@ -261,6 +262,10 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     canvasId: canvas.id,
     revision: canvas.revision,
     nodes,
+    sceneAreas: canvas.document.nodes.flatMap(node => {
+      const area = decodeSceneAreaData(canvas.nodeData[node.id]?.sceneArea);
+      return area.ok ? [{ nodeId: node.id, bounds: area.value.bounds }] : [];
+    }),
     edges,
     selection: {
       nodes: [...(input.selection?.nodes ?? [])],
@@ -315,6 +320,7 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
     scene.version,
     `rev=${scene.revision}`,
     `sel=${scene.selection.nodes.join(",")}|${scene.selection.edge ?? ""}`,
+    JSON.stringify(scene.sceneAreas ?? []),
     `vp=${scene.viewport.x},${scene.viewport.y},${scene.viewport.zoom}`,
     `theme=${scene.theme.fingerprint}`,
     scene.draft ? `draft=${scene.draft.source},${scene.draft.side},${scene.draft.x},${scene.draft.y}` : "draft=",

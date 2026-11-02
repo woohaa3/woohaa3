@@ -190,6 +190,8 @@ impl Default for Viewport {
 /// Bevy 渲染的唯一输入快照（最新覆盖旧值）。
 #[derive(Clone, Default, Deserialize)]
 pub(crate) struct Scene {
+    #[serde(default, rename = "sceneAreas")]
+    pub(crate) scene_areas: Vec<SceneArea>,
     /// 画布快照协议版本；必须与 `CANVAS_RENDER_SCENE_VERSION` 一致，否则拒绝整帧
     /// （change: optimize-model-scene-snapshot-hot-path）。
     #[serde(default)]
@@ -274,6 +276,19 @@ pub(crate) struct Scene {
     #[serde(default, rename = "nodeActions")]
     pub(crate) node_actions: std::collections::HashMap<String, NodeActions>,
 }
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SceneArea {
+    pub(crate) node_id: String,
+    pub(crate) bounds: SceneAreaBounds,
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct SceneAreaBounds { pub(crate) min: SceneAreaPoint, pub(crate) max: SceneAreaPoint }
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct SceneAreaPoint { pub(crate) u: f64, pub(crate) v: f64 }
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

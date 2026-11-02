@@ -98,6 +98,7 @@ export type InteractionCore = {
     hoveredEdgeId?: string | null
   ) => InteractionQuery<HitTarget | null>;
   queryMarquee: (rect: { x: number; y: number; width: number; height: number }) => InteractionQuery<string[]>;
+  queryWorldGround: (point: Point) => { u: number; v: number } | null;
   queryProbe: (source: string, direction: "prev" | "next") => InteractionQuery<ProbeCandidate[]>;
   /**
    * 模型网格命中（change: play-model-animations-on-hover）。

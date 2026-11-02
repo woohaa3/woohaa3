@@ -6,6 +6,42 @@ use super::{
     AnimationCameraState, CurrentScene, FocusRig, FrameFlags, ModelAssetTable, SurfaceState,
 };
 
+#[derive(Component)]
+pub(super) struct SceneAreaLine;
+
+pub(super) fn sync_scene_areas(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    scene: Res<CurrentScene>,
+    flags: Res<FrameFlags>,
+    lines: Query<Entity, With<SceneAreaLine>>,
+    mut assets: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>, Handle<StandardMaterial>)>>,
+) {
+    if !flags.scene_received { return; }
+    for entity in &lines { commands.entity(entity).despawn(); }
+    if scene.0.model_focus.is_some() || scene.0.image_focus.is_some() || scene.0.video_focus.is_some() { return; }
+    let (mesh, normal, selected) = assets.get_or_insert_with(|| (
+        meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+        materials.add(StandardMaterial { base_color: Color::srgb(0.12, 0.65, 0.58), unlit: true, ..default() }),
+        materials.add(StandardMaterial { base_color: Color::srgb(1.0, 0.62, 0.16), unlit: true, ..default() }),
+    ));
+    for area in &scene.0.scene_areas {
+        let b = &area.bounds;
+        if ![b.min.u, b.min.v, b.max.u, b.max.v].iter().all(|v| v.is_finite()) || b.min.u > b.max.u || b.min.v > b.max.v { continue; }
+        let [x0, _, z0] = crate::protocol::world_to_renderer([b.min.u, b.min.v, 0.0]);
+        let [x1, _, z1] = crate::protocol::world_to_renderer([b.max.u, b.max.v, 0.0]);
+        let material = if scene.0.selection.nodes.contains(&area.node_id) { selected.clone() } else { normal.clone() };
+        for (x, z, sx, sz) in [
+            ((x0+x1)/2.0, z0, x1-x0, 1.0), ((x0+x1)/2.0, z1, x1-x0, 1.0),
+            (x0, (z0+z1)/2.0, 1.0, (z1-z0).abs()), (x1, (z0+z1)/2.0, 1.0, (z1-z0).abs()),
+        ] {
+            commands.spawn((SceneAreaLine, Mesh3d(mesh.clone()), MeshMaterial3d(material.clone()),
+                Transform::from_xyz(x as f32, 0.0, z as f32).with_scale(Vec3::new(sx.max(1.0) as f32, 1.0, sz.max(1.0) as f32))));
+        }
+    }
+}
+
 pub(super) fn publish_model_poses(
     models: Res<model3d::ModelVisuals>,
     transforms: Query<(&Transform, &GlobalTransform)>,

@@ -283,7 +283,7 @@ describe("Bevy runtime viewport capability（change: 2026-10-10-optimize-canvas-
     const stale = mockModule([]);
     stale.scene_capability = () => "woohaa-canvas-render-scene-v36";
     await expect(loadBevyRuntime({ importModule: async () => stale })).rejects.toThrow(
-      /场景能力不匹配：woohaa-canvas-render-scene-v36 != woohaa-canvas-render-scene-v37/
+      /场景能力不匹配：woohaa-canvas-render-scene-v36 != woohaa-canvas-render-scene-v38/
     );
   });
 

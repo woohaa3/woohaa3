@@ -42,7 +42,7 @@ use serde::Deserialize;
 /// v35 removes ordinary groups and the film-set feature: no `group`/`compositeAsset`/
 /// `aggregateRun`/`shotPreview` node presentations, no `filmSetGroups`/`shotPreviewLinks`
 /// scene collections and no per-object playback; composite-asset nodes render as plain cards.
-pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v37";
+pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v38";
 /// prepared model resource envelope 版本。
 pub(crate) const MODEL_ASSET_VERSION: &str = "woohaa-prepared-model-resource-v1";
 /// 轻量 descriptor envelope 版本（与 payload envelope 分开，二者可独立演进）。

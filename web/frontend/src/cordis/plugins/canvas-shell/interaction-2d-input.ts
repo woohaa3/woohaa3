@@ -9,7 +9,7 @@ import { createHistoryClick } from "./input/history-click.js";
  * 右键菜单、双击预览。只通过 `InteractionCore` 访问共享坐标系、调度与提交，不自建监听。
  */
 import { modelPreviewPointerDown, modelPreviewPointerMove } from "./input/model-preview.js";
-import { bevyKindForNodeType, builtinNodeCapabilityResolver, explainWoohaa3CanvasConnectionBlock } from "@woohaa3/contracts";
+import { bevyKindForNodeType, builtinNodeCapabilityResolver, decodeSceneAreaData, explainWoohaa3CanvasConnectionBlock } from "@woohaa3/contracts";
 import { nodeSize, cardHitNodeId, type Point } from "./hit-test.js";
 import { planConnectEdge, planResizeNode } from "../../../extension-api/command-planner.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -137,6 +137,26 @@ export function create2dInputFamily(core: InteractionCore) {
     }    const hit = hitResult.value;
 
     if (modelPreviewPointerDown(core, event, hit)) return;
+
+    if (!hit && !isRight && !event.shiftKey) {
+      const ground = core.queryWorldGround({ x: event.clientX, y: event.clientY });
+      const current = workingCanvasOf(woohaa3CanvasStore.getState());
+      if (ground && current) {
+        const candidates = current.document.nodes.flatMap(node => {
+          const area = decodeSceneAreaData(current.nodeData[node.id]?.sceneArea);
+          if (!area.ok) return [];
+          const { min, max } = area.value.bounds;
+          return ground.u >= min.u && ground.u <= max.u && ground.v >= min.v && ground.v <= max.v ? [node.id] : [];
+        }).sort();
+        if (candidates.length) {
+          const next = (candidates.indexOf(state.selected.length === 1 ? state.selected[0]! : "") + 1) % candidates.length;
+          setSelection([candidates[next]!]);
+          event.preventDefault();
+          schedule();
+          return;
+        }
+      }
+    }
 
     if (isRight) {
       const nodeId = hit && "nodeId" in hit ? hit.nodeId : null;

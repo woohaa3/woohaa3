@@ -80,7 +80,7 @@ import type { BevyRenderDraft, BevyRenderMarquee, BevyRenderSurface } from "./wi
 // v35: groups and film sets are removed. `group`, `compositeAsset`, `aggregateRun`,
 //      `shotPreview`, `filmSetGroups`, `shotPreviewLinks` and `selectionActions` are gone;
 //      older renderers would keep drawing containers, badges and film-set overlays.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v37" as const;
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v38" as const;
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
@@ -277,6 +277,7 @@ export type GhostRenderNode = {
 
 /** 与 Rust `Scene` 对应；这是发给 Bevy `set_scene` 的唯一快照。 */
 export type CanvasRenderScene = {
+  sceneAreas?: Array<{ nodeId: string; bounds: { min: { u: number; v: number }; max: { u: number; v: number } } }>;
   version: typeof CANVAS_RENDER_SCENE_VERSION;
   /**
    * 文档身份（画布 id）。

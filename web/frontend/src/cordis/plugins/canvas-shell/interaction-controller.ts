@@ -508,6 +508,7 @@ export function installInteractionController(options: InteractionControllerOptio
     buildDragScene: frameSubmission.dragScene,
     renderedNode: frameSubmission.renderedNode,
     ...queries,
+    queryWorldGround: groundAt,
     setSelection,
     submit,
     schedule,
