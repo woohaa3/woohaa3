@@ -59,7 +59,8 @@ import {
   hostCompletionKey,
   type AssistantHostCompletionFact,
   type AssistantHostCompletionIdentity,
-  type AssistantHostCompletionRepository
+  type AssistantHostCompletionRepository,
+  type AssistantWorldCommittedWrite
 } from "./host-completions.js";
 
 export type AssistantWorldServiceDeps = {
@@ -83,6 +84,11 @@ export type AssistantWorldServiceDeps = {
    * history write, so a transient history failure (or a restart between the
    * two writes) can retry the exact completion after the run was stopped and
    * its occupancy released. Tests may omit it; production must wire it.
+   *
+   * Implementations that persist completion facts must also persist committed
+   * camera writes via the optional outbox methods: a camera commit is durable
+   * before the write returns, so a restart before the first terminal settle can
+   * promote the exact run/completion/camera/settings pair instead of losing it.
    */
   hostCompletions?: AssistantHostCompletionRepository;
   pending(): Promise<LeaseRecord[]>;
@@ -331,6 +337,87 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       }
     }
     return [...hostCompletions.values()].filter(fact => fact.canvasId === input.canvasId && fact.runId === input.runId);
+  }
+
+  /**
+   * Persist one already-committed camera write in the durable outbox. This is
+   * required at the authoritative commit boundary and not best-effort: if the
+   * outbox write fails, the caller must not receive success (a retry with the
+   * same intent resolves the idempotent camera receipt and writes the outbox).
+   */
+  async function rememberCommittedWrite(write: AssistantWorldCommittedWrite): Promise<void> {
+    if (!deps.hostCompletions) return;
+    if (!deps.hostCompletions.putCommitted) {
+      // A durable completion store without the commit outbox would re-introduce
+      // the lost-completion window; refuse to report a durable write success.
+      throw Object.assign(new Error("助手完成事实仓库缺少世界写入 outbox"), { code: "not-ready" });
+    }
+    await deps.hostCompletions.putCommitted(write);
+  }
+
+  async function listCommittedWrites(input: { canvasId: string; runId: string }): Promise<AssistantWorldCommittedWrite[]> {
+    if (!deps.hostCompletions?.listCommitted) return [];
+    try {
+      return await deps.hostCompletions.listCommitted(input);
+    } catch {
+      // Unknown durable state stays fail-closed; the caller reports not-ready.
+      throw Object.assign(new Error("无法读取待核对的世界写入"), { code: "not-ready" });
+    }
+  }
+
+  /**
+   * A terminal failed/cancelled run can never produce a completion. Drop its
+   * outbox rows after the trusted stop was verified so they do not linger.
+   */
+  async function discardCommittedWrites(input: { canvasId: string; runId: string }): Promise<void> {
+    if (!deps.hostCompletions?.listCommitted || !deps.hostCompletions.deleteCommitted) return;
+    try {
+      const writes = await deps.hostCompletions.listCommitted(input);
+      for (const write of writes) {
+        if (write.canvasId !== input.canvasId || write.runId !== input.runId) continue;
+        await deps.hostCompletions.deleteCommitted(write);
+      }
+    } catch {
+      // The unsuccessful run must not create history; a lingering outbox row is
+      // never promoted because only succeeded/partial settle promotes.
+    }
+  }
+
+  /**
+   * Promote a durable committed write to a trusted completion fact. Only called
+   * from a host settle whose durable terminal status is succeeded/partial (and,
+   * after a reopen, after the original occupancy has been confirmed stopped).
+   */
+  async function promoteCommittedWrite(
+    write: AssistantWorldCommittedWrite,
+    status: "succeeded" | "partial",
+    evidence: unknown
+  ): Promise<{ ok: true } | AssistantWorldFailure> {
+    const fact: HostCompletion = {
+      canvasId: write.canvasId,
+      requestId: write.requestId,
+      runId: write.runId,
+      completionId: write.completionId,
+      cameraId: write.cameraId,
+      settingsVersion: write.settingsVersion,
+      status,
+      snapshot: write.snapshot
+    };
+    const key = hostCompletionKey(fact);
+    if (!recordedCompletions.has(key)) {
+      try {
+        await rememberHostCompletion(fact);
+      } catch (error) {
+        return failure("not-ready", error instanceof Error ? error.message : "助手完成事实保存失败");
+      }
+    }
+    try {
+      await deps.hostCompletions?.deleteCommitted?.(write);
+    } catch {
+      // The durable fact is authoritative; a lingering outbox row only causes an
+      // idempotent re-promotion, never a second history row.
+    }
+    return writeHostCompletion(fact, evidence);
   }
 
   /**
@@ -764,6 +851,26 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       })}`
     });
     if (!saved.ok) return saved;
+    try {
+      // Durable outbox at the authoritative commit boundary: a host restart
+      // before the first successful settle must still know this exact
+      // run/completion/camera/settings pair. A failure here is reported, never
+      // hidden behind a successful tool result.
+      await rememberCommittedWrite({
+        canvasId: ledger.canvasId,
+        requestId: ledger.requestId,
+        runId: ledger.runId,
+        epoch: ledger.epoch,
+        executionId: ledger.executionId,
+        contextId: ledger.contextId,
+        completionId: ledger.completionId,
+        cameraId: operation.cameraId,
+        settingsVersion: saved.settingsVersion,
+        snapshot: saved.camera
+      });
+    } catch (error) {
+      return failure("not-ready", error instanceof Error ? error.message : "世界写入事实保存失败");
+    }
     ledger.writes.set(objectKey(identity), {
       identity,
       version: saved.settingsVersion,
@@ -937,6 +1044,17 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         // Persist the trusted fact before the history write: a failure below
         // must leave recoverable evidence, not a settled run with no history.
         await rememberHostCompletion(fact);
+        try {
+          await deps.hostCompletions?.deleteCommitted?.({
+            canvasId: fact.canvasId,
+            runId: fact.runId,
+            completionId: fact.completionId,
+            cameraId: fact.cameraId
+          });
+        } catch {
+          // The durable fact already covers this write; a lingering outbox row
+          // is idempotent to promote again.
+        }
       } catch (error) {
         // The fact is still cached in-process; a second settle in this process
         // can retry, but missing durable evidence is reported as a failure.
@@ -988,6 +1106,20 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         // history write without re-running the assistant.
         const completed = await recordHostCompletion(ledger, input.status, input.evidence);
         if (!completed.ok) completionFailure = completed;
+        // A ledger reissued after a restart has no in-memory writes. Reconcile
+        // durable outbox rows left by the previous process for this run before
+        // releasing the lease, so a committed camera write is never lost.
+        let committed: AssistantWorldCommittedWrite[] = [];
+        try {
+          committed = await listCommittedWrites({ canvasId: input.canvasId, runId: input.runId });
+        } catch (error) {
+          completionFailure ??= failure("not-ready", error instanceof Error ? error.message : "无法读取待核对的世界写入");
+        }
+        for (const write of committed) {
+          if (write.canvasId !== input.canvasId || write.runId !== input.runId) continue;
+          const promoted = await promoteCommittedWrite(write, input.status, input.evidence);
+          if (!promoted.ok) completionFailure ??= promoted;
+        }
       }
       if (!ledger.settled) {
         const stopped = await confirmStopped({
@@ -1000,33 +1132,55 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         });
         if (!stopped.ok) return stopped;
       }
+      if (input.status === "failed" || input.status === "cancelled") {
+        await discardCommittedWrites({ canvasId: ledger.canvasId, runId: ledger.runId });
+      }
       return completionFailure ?? { ok: true };
     }
-    // Reopened process: the in-process ledger is gone, but durable host facts
-    // still carry the exact completion identity/version. Retry those first, then
-    // release the durable lease only with the host's exact-stop evidence.
+    // Reopened process: the in-process ledger is gone, but the durable outbox
+    // carries every camera write this run already committed and the durable
+    // lease carries the original run identity. Verify the exact stop first (an
+    // unverified turn keeps occupancy and the outbox), then promote committed
+    // writes to trusted completion facts and retry any facts left by a failed
+    // history write.
     let completionFailure: AssistantWorldFailure | null = null;
-    if (input.status === "succeeded" || input.status === "partial") {
+    const successStatus = input.status === "succeeded" || input.status === "partial" ? input.status : null;
+    const pending = await deps.pending();
+    const record = pending.find(entry => entry.intent.canvasId === input.canvasId && entry.intent.runId === input.runId);
+    if (record) {
+      try {
+        await deps.confirmStopped({
+          canvasId: record.intent.canvasId,
+          requestId: record.intent.requestId,
+          runId: record.intent.runId,
+          epoch: record.intent.epoch,
+          executionId: record.intent.executionId,
+          evidence: input.evidence
+        });
+      } catch (error) {
+        return stopFailure(error);
+      }
+    }
+    if (input.status === "failed" || input.status === "cancelled") {
+      await discardCommittedWrites({ canvasId: input.canvasId, runId: input.runId });
+    }
+    if (successStatus) {
       const facts = await listHostCompletions({ canvasId: input.canvasId, runId: input.runId });
       for (const fact of facts) {
         const written = await writeHostCompletion(fact, input.evidence);
         if (!written.ok) completionFailure ??= written;
       }
-    }
-    const pending = await deps.pending();
-    const record = pending.find(entry => entry.intent.canvasId === input.canvasId && entry.intent.runId === input.runId);
-    if (!record) return completionFailure ?? { ok: true };
-    try {
-      await deps.confirmStopped({
-        canvasId: record.intent.canvasId,
-        requestId: record.intent.requestId,
-        runId: record.intent.runId,
-        epoch: record.intent.epoch,
-        executionId: record.intent.executionId,
-        evidence: input.evidence
-      });
-    } catch (error) {
-      return stopFailure(error);
+      let committed: AssistantWorldCommittedWrite[] = [];
+      try {
+        committed = await listCommittedWrites({ canvasId: input.canvasId, runId: input.runId });
+      } catch (error) {
+        return failure("not-ready", error instanceof Error ? error.message : "无法读取待核对的世界写入");
+      }
+      for (const write of committed) {
+        if (write.canvasId !== input.canvasId || write.runId !== input.runId) continue;
+        const written = await promoteCommittedWrite(write, successStatus, input.evidence);
+        if (!written.ok) completionFailure ??= written;
+      }
     }
     return completionFailure ?? { ok: true };
   }

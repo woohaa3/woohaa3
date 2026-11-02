@@ -715,4 +715,165 @@ describe("assistant world authoring through the real canvas queue", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("recovers an authoritative camera write when the backend restarts before the first settle", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "assistant-world-before-settle-"));
+    const file = join(dir, "canvas.sqlite");
+    const hostFile = join(dir, "host-completions.sqlite");
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas-1", now);
+    canvas.document.nodes.push(
+      { id: "area-node", type: "scene-area", position: { x: 0, y: 0 } },
+      { id: "camera-card", type: "world-camera", position: { x: 900, y: 900 } }
+    );
+    canvas.nodeData["area-node"] = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "area-scope-1",
+        bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+      }
+    };
+    canvas.nodeData["camera-card"] = {
+      worldCamera: {
+        kind: "world-camera",
+        version: "shared-world-v1",
+        cameraId: "camera-1",
+        settingsVersion: "camera-1-v1",
+        position: { u: 5, v: 5, h: 1.5 },
+        rotation: [0, 0, 0, 1],
+        projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+        captureMode: { kind: "static" },
+        aspect: { width: 16, height: 9 },
+        boundInstanceId: null
+      }
+    };
+
+    const authority = createWorldAuthoringAuthority({
+      executeScene,
+      verifyStopped: (identity, evidence) => {
+        const value = evidence as { terminal?: unknown; runId?: unknown } | null;
+        return !!value && value.terminal === true && value.runId === identity.runId;
+      }
+    });
+    const repository = new SqliteYjsRepository({ path: file, spatialAuthority: authority });
+    const room = new CanvasRoom({ canvasId: canvas.id, repository, now: () => now });
+    await room.initialize({ canvas, roomEpoch: "initial", createdAt: now });
+    const worldAuthoring = createWorldAuthoringService({
+      authority,
+      resolveRoom: async () => room,
+      acquire: async (intent) => repository.acquireSpatialRun(intent),
+      cancel: async (canvasId, requestId) => repository.cancelSpatialRun(canvasId, requestId),
+      findLatest: async (canvasId, operationId) => repository.findLatestWorldAuthoringCommand(canvasId, operationId)
+    });
+
+    const history = new InMemoryWorldCameraHistoryRepository();
+    let hostFacts = new SqliteAssistantHostCompletionRepository({ path: hostFile });
+    let assistant: ReturnType<typeof createAssistantWorldService> | null = null;
+    const cameraSettings = createWorldCameraSettingsService({
+      resolveRoom: async () => room,
+      resolveContext: (canvasId, contextId) => worldAuthoring.resolveCapability(canvasId, contextId),
+      history,
+      verifyCompletion: (completion, evidence) => assistant ? assistant.verifyCompletion(completion, evidence) : false,
+      now: () => now
+    });
+    const deps = {
+      authority,
+      worldAuthoring,
+      cameraSettings,
+      resolveRoom: async () => room,
+      cancel: async (canvasId: string, requestId: string) => repository.cancelSpatialRun(canvasId, requestId),
+      confirmStopped: async (input: { canvasId: string; requestId: string; runId: string; epoch: number; executionId: string; evidence: unknown }) =>
+        repository.confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence),
+      hostCompletions: hostFacts,
+      pending: async () => repository.pendingSpatialRuns()
+    };
+    assistant = createAssistantWorldService(deps);
+    try {
+      const issued = await assistant.issue({
+        canvasId: canvas.id,
+        requestId: "run-1",
+        runId: "run-1",
+        epoch: 0,
+        executionId: "exec-1",
+        scope: { kind: "scene-area", areaId: "area-1" }
+      });
+      if (!issued.ok) throw new Error(issued.message);
+      const written = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "set-world-camera",
+          operationId: "camera-1",
+          cameraId: "camera-1",
+          expectedSettingsVersion: "camera-1-v1",
+          settings: {
+            position: { u: 5, v: 5, h: 2 },
+            rotation: [0, 0, 0, 1],
+            projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+            captureMode: { kind: "static" },
+            aspect: { width: 16, height: 9 },
+            boundInstanceId: null
+          }
+        }
+      });
+      expect(written.ok).toBe(true);
+      if (!written.ok) return;
+      // The supervisor can outlive this watched backend: the camera command,
+      // lease and completion candidate are durable but no terminal hook ran.
+      expect(await history.list(canvas.id, "camera-1")).toHaveLength(0);
+      expect(await repository.pendingSpatialRuns()).toHaveLength(1);
+      expect(await hostFacts.listCommitted({ canvasId: canvas.id, runId: "run-1" })).toHaveLength(1);
+
+      assistant.close();
+      await hostFacts.close();
+      hostFacts = new SqliteAssistantHostCompletionRepository({ path: hostFile });
+      assistant = createAssistantWorldService({ ...deps, hostCompletions: hostFacts });
+      const completion = {
+        canvasId: canvas.id,
+        runId: "run-1",
+        completionId: issued.completionId,
+        cameraId: "camera-1",
+        settingsVersion: written.settingsVersion!
+      };
+      // A durable committed write alone is not successful host completion proof.
+      expect(await assistant.verifyCompletion(completion, undefined)).toBe(false);
+      // Unverified stop evidence must not promote the outbox or release occupancy.
+      expect(await assistant.settleRun({
+        canvasId: canvas.id,
+        runId: "run-1",
+        status: "succeeded",
+        evidence: null
+      })).toMatchObject({ ok: false, code: "unverified-stop" });
+      expect(await history.list(canvas.id, "camera-1")).toHaveLength(0);
+      expect(await repository.pendingSpatialRuns()).toHaveLength(1);
+      expect(await hostFacts.listCommitted({ canvasId: canvas.id, runId: "run-1" })).toHaveLength(1);
+
+      const settlement = {
+        canvasId: canvas.id,
+        runId: "run-1",
+        status: "succeeded" as const,
+        evidence: { terminal: true, runId: "run-1" }
+      };
+      expect(await assistant.settleRun(settlement)).toEqual({ ok: true });
+      const entries = await history.list(canvas.id, "camera-1");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        completionId: issued.completionId,
+        settingsVersion: written.settingsVersion,
+        runId: "run-1",
+        cameraId: "camera-1",
+        snapshot: { camera: { position: { h: 2 } } }
+      });
+      expect(await hostFacts.list()).toHaveLength(0);
+      expect(await hostFacts.listCommitted({ canvasId: canvas.id, runId: "run-1" })).toHaveLength(0);
+      expect(await repository.pendingSpatialRuns()).toHaveLength(0);
+      expect(await assistant.settleRun(settlement)).toEqual({ ok: true });
+      expect(await history.list(canvas.id, "camera-1")).toHaveLength(1);
+    } finally {
+      assistant?.close();
+      await hostFacts.close();
+      repository.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

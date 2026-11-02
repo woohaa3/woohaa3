@@ -10,14 +10,18 @@ import { decodeWorldCamera } from "@woohaa3/contracts";
 import { loadNodeSqlite } from "./sqlite-loader.js";
 import { CanvasStorageError } from "../core/errors.js";
 import {
+  committedWriteKey,
   hostCompletionKey,
   type AssistantHostCompletionFact,
   type AssistantHostCompletionIdentity,
   type AssistantHostCompletionListInput,
-  type AssistantHostCompletionRepository
+  type AssistantHostCompletionRepository,
+  type AssistantWorldCommittedWrite,
+  type AssistantWorldCommittedWriteIdentity,
+  type AssistantWorldCommittedWriteListInput
 } from "../../world-authoring/host-completions.js";
 
-export const SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION = 2;
+export const SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION = 3;
 
 export type SqliteAssistantHostCompletionRepositoryOptions = {
   path: string;
@@ -34,6 +38,19 @@ type Row = {
   camera_id: string;
   settings_version: string;
   status: string;
+  camera_json: string | null;
+};
+
+type CommittedRow = {
+  canvas_id: string;
+  request_id: string;
+  run_id: string;
+  epoch: number;
+  execution_id: string;
+  context_id: string;
+  completion_id: string;
+  camera_id: string;
+  settings_version: string;
   camera_json: string | null;
 };
 
@@ -107,6 +124,28 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
       this.db.exec(
         "CREATE INDEX IF NOT EXISTS idx_ahc_run ON assistant_host_completions(canvas_id, run_id)"
       );
+      // Outbox for authoritative camera commits whose run has not yet reached a
+      // trusted successful terminal turn. Kept separate from the completion
+      // facts so it can never authorize history by itself.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS assistant_world_committed_writes (
+          write_key TEXT PRIMARY KEY,
+          canvas_id TEXT NOT NULL,
+          request_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          epoch INTEGER NOT NULL,
+          execution_id TEXT NOT NULL,
+          context_id TEXT NOT NULL,
+          completion_id TEXT NOT NULL,
+          camera_id TEXT NOT NULL,
+          settings_version TEXT NOT NULL,
+          camera_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      this.db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_awcw_run ON assistant_world_committed_writes(canvas_id, run_id)"
+      );
       this.db
         .prepare("INSERT OR IGNORE INTO assistant_host_completion_schema_migrations (version, applied_at) VALUES (?, ?)")
         .run(SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION, this.now());
@@ -170,6 +209,78 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
     this.db
       .prepare("DELETE FROM assistant_host_completions WHERE completion_key = ?")
       .run(hostCompletionKey(completion));
+  }
+
+  async putCommitted(write: AssistantWorldCommittedWrite): Promise<void> {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO assistant_world_committed_writes
+             (write_key, canvas_id, request_id, run_id, epoch, execution_id, context_id,
+              completion_id, camera_id, settings_version, camera_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(write_key) DO UPDATE SET
+             request_id = excluded.request_id,
+             epoch = excluded.epoch,
+             execution_id = excluded.execution_id,
+             context_id = excluded.context_id,
+             settings_version = excluded.settings_version,
+             camera_json = excluded.camera_json`
+        )
+        .run(
+          committedWriteKey(write),
+          write.canvasId,
+          write.requestId,
+          write.runId,
+          write.epoch,
+          write.executionId,
+          write.contextId,
+          write.completionId,
+          write.cameraId,
+          write.settingsVersion,
+          JSON.stringify(write.snapshot),
+          this.now()
+        );
+    });
+  }
+
+  async listCommitted(input: AssistantWorldCommittedWriteListInput = {}): Promise<AssistantWorldCommittedWrite[]> {
+    const clauses: string[] = [];
+    const values: string[] = [];
+    if (input.canvasId !== undefined) {
+      clauses.push("canvas_id = ?");
+      values.push(input.canvasId);
+    }
+    if (input.runId !== undefined) {
+      clauses.push("run_id = ?");
+      values.push(input.runId);
+    }
+    const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db
+      .prepare(`SELECT * FROM assistant_world_committed_writes${where} ORDER BY created_at, write_key`)
+      .all(...values) as CommittedRow[];
+    return rows.flatMap(row => {
+      const decoded = decodeSnapshot(row.camera_json);
+      if (!decoded) return [];
+      return [{
+        canvasId: row.canvas_id,
+        requestId: row.request_id,
+        runId: row.run_id,
+        epoch: row.epoch,
+        executionId: row.execution_id,
+        contextId: row.context_id,
+        completionId: row.completion_id,
+        cameraId: row.camera_id,
+        settingsVersion: row.settings_version,
+        snapshot: decoded.snapshot
+      }];
+    });
+  }
+
+  async deleteCommitted(write: AssistantWorldCommittedWriteIdentity): Promise<void> {
+    this.db
+      .prepare("DELETE FROM assistant_world_committed_writes WHERE write_key = ?")
+      .run(committedWriteKey(write));
   }
 
   async close(): Promise<void> {
