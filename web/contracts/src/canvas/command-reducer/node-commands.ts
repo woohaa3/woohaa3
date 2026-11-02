@@ -91,6 +91,7 @@ export function addNode(
     position: { ...node.position },
     width: node.width ?? DEFAULT_NODE_DIMS.width,
     height: node.height ?? DEFAULT_NODE_DIMS.height,
+    ...(typeof node.parentId === "string" && node.parentId.length > 0 ? { parentId: node.parentId } : {}),
     zIndex: typeof node.zIndex === "number" && Number.isFinite(node.zIndex)
       ? node.zIndex
       : nextWoohaa3CanvasNodeZIndex(work.nodes),

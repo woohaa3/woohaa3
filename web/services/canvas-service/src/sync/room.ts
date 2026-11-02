@@ -290,6 +290,8 @@ export class CanvasRoom {
     /** 脚本请求 hash；提供时用于区分「重试已成功请求」与「复用身份改内容」。 */
     expectedPayloadHash?: string;
     expectedModelBatchHash?: string;
+    /** T06: same operationId must carry the same frozen scene-area intent. */
+    expectedWorldAuthoringHash?: string;
     derive: (canvas: ServerCanvas) =>
       | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta }
       | { ok: false; code: string; message: string }

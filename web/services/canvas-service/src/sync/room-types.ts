@@ -27,6 +27,8 @@ export type RoomSubmitOptions = {
    */
   script?: CanvasScriptSubmissionMeta;
   modelBatch?: ModelScriptBatchMeta;
+  /** Immutable scene-area authority receipt (T06) persisted with the command. */
+  worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
 };
 
 export type RoomCommandResult =
@@ -48,6 +50,8 @@ export type RoomCommandResult =
        */
       script?: CanvasScriptSubmissionMeta;
       modelBatch?: ModelScriptBatchMeta;
+      /** Frozen scene-area authority receipt; duplicate returns the first value. */
+      worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
       /** duplicate 时标记该回执来自 durable 首次记录。 */
       duplicate?: boolean;
     }

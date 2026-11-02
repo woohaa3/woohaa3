@@ -209,6 +209,8 @@ export type CanvasService = {
     submit(canvasId: string, context: import("../world-authoring/spatial-leases.js").SpatialWriteContext | null, batch: import("@woohaa3/contracts/canvas-yjs").CanvasCommandBatch): Promise<import("../sync/room-types.js").RoomCommandResult>;
   } | null;
   worldConversion: import("@woohaa3/contracts").BackendWorldConversionPort | null;
+  /** T06 scene-area authority semantic entry (prepare/context/execute/undo/redo). */
+  worldAuthoring: import("../world-authoring/scene-area-service.js").WorldAuthoringService | null;
   /** 本地场景包独立事务/收据；不复用在线来源权限。 */
   scenePackages: import("../storage/sqlite/scene-package.js").SqliteScenePackageStore | null;
   handle: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;

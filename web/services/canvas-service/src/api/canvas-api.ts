@@ -217,6 +217,61 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         }
         return true;
       }
+      if (segments.length === 2 && (segments[1] === "scene-area-prepare"
+        || segments[1] === "scene-area-commit"
+        || segments[1] === "scene-area-undo"
+        || segments[1] === "scene-area-redo"
+        || segments[1] === "world-tool-context"
+        || segments[1] === "world-tool-context-revoke")) {
+        if (req.method !== "POST") { sendError(res, 405, "INVALID_COMMAND_BATCH", "方法不允许"); return true; }
+        const canvasId = segments[0];
+        const gate = options.importGuard?.state(canvasId);
+        if (gate?.kind === "deleted" || gate?.kind === "preparing") {
+          sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用");
+          return true;
+        }
+        const write = segments[1] !== "scene-area-prepare";
+        const permission = write ? "write" : "read";
+        if (await authorizeImported(canvasId, permission) === "deny") return denyImported(permission);
+        const access = await requireCanvasAccess({ req, res, canvasId, permission, options, log });
+        if (!access.ok) return true;
+        if (!options.worldAuthoring) { sendError(res, 503, "NOT_READY", "场景区权威服务不可用"); return true; }
+        const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
+        if ("canvasId" in body) { sendError(res, 400, "INVALID_COMMAND_BATCH", "请求包含非法字段"); return true; }
+        const authorize = async () => (await authorizeImported(canvasId, "write")) !== "deny" &&
+          (!options.authenticate || !!access.principal && !!options.access &&
+            (await options.access.authorize({ principal: access.principal, canvasId, permission: "write" })).allowed);
+        const controller = new AbortController();
+        const onClose = () => { if (!res.writableFinished) controller.abort(); };
+        res.once("close", onClose);
+        if (res.destroyed) controller.abort();
+        try {
+          const route = segments[1];
+          const outcome = route === "scene-area-prepare"
+            ? await options.worldAuthoring.prepare({ canvasId, areaId: String(body.areaId ?? "") }, { signal: controller.signal })
+            : route === "scene-area-commit"
+              ? await options.worldAuthoring.execute({ ...body, canvasId } as never, { authorize, signal: controller.signal })
+              : route === "scene-area-undo"
+                ? await options.worldAuthoring.undo({ ...body, canvasId } as never, { authorize, signal: controller.signal })
+                : route === "scene-area-redo"
+                  ? await options.worldAuthoring.redo({ ...body, canvasId } as never, { authorize, signal: controller.signal })
+                  : route === "world-tool-context"
+                    ? await options.worldAuthoring.issueContext({ ...body, canvasId } as never)
+                    : (await options.worldAuthoring.revokeContext({ ...body, canvasId } as never),
+                      { ok: true as const });
+          if (!controller.signal.aborted) {
+            const code = "code" in outcome && !outcome.ok ? outcome.code : null;
+            const status = code === "invalid-data" || code === "unsupported-version" ? 400
+              : code === "not-found" ? 404
+                : code === "write-forbidden" ? 403
+                  : code === null ? 200 : 409;
+            sendJson(res, status, outcome);
+          }
+        } finally {
+          res.removeListener("close", onClose);
+        }
+        return true;
+      }
       if (segments.length === 2 && segments[1] === "runs" && req.method === "POST") {
         const decision = await authorizeImported(segments[0], "write");
         if (decision === "deny") return denyImported("write");
