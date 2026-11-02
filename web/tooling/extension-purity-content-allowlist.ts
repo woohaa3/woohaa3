@@ -90,34 +90,34 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
   },
   {
-    file: "web/services/canvas-service/src/animation/legacy-film-set-animations.ts",
+    file: "scripts/lib/legacy-film-set/legacy-film-set-animations.ts",
     literals: ["filmSetContent"],
     stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
+    reason: "历史债：离线迁移工具仍含旧片场字段字面量。去向：第 7 组清债。"
   },
   {
-    file: "web/services/canvas-service/src/animation/legacy-film-set-content.ts",
+    file: "scripts/lib/legacy-film-set/legacy-film-set-content.ts",
     literals: ["film-set","filmSetContent"],
     stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
+    reason: "历史债：离线迁移工具仍含旧片场字段字面量。去向：第 7 组清债。"
   },
   {
-    file: "web/services/canvas-service/src/animation/legacy-film-set-history.ts",
+    file: "scripts/lib/legacy-film-set/legacy-film-set-history.ts",
     literals: ["filmSetAnimations","filmSetContent","scenePlacement"],
     stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
+    reason: "历史债：离线迁移工具仍含旧片场字段字面量。去向：第 7 组清债。"
   },
   {
-    file: "web/services/canvas-service/src/animation/legacy-film-set-identities.ts",
+    file: "scripts/lib/legacy-film-set/legacy-film-set-identities.ts",
     literals: ["filmSetContent"],
     stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
+    reason: "历史债：离线迁移工具仍含旧片场字段字面量。去向：第 7 组清债。"
   },
   {
-    file: "web/services/canvas-service/src/animation/legacy-film-set-reader.ts",
+    file: "scripts/lib/legacy-film-set/legacy-film-set-reader.ts",
     literals: ["filmSetAnimations","filmSetContent","scenePlacement"],
     stage: "identity",
-    reason: "历史债：身份白名单或旧格式 reader 仍在内核。去向：第 7 组清债。"
+    reason: "历史债：离线迁移工具仍含旧片场字段字面量。去向：第 7 组清债。"
   },
   {
     file: "web/services/canvas-service/src/storage/core/compat-inventory.ts",
@@ -715,7 +715,7 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
   {
     file: "web/contracts/src/canvas/film-set-content/contribution.ts",
-    literals: ["film-set"],
+    literals: ["film-set","filmSetNodeId"],
     stage: "node-data",
     reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
   },

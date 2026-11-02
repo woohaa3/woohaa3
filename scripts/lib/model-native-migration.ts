@@ -3,9 +3,9 @@ import { compareByZIndexThenId, YJS_CANVAS_FORMAT_VERSION, serverCanvasToYDoc, y
 import * as Y from "yjs";
 import { canonicalFilmSetFields, type ServerCanvas } from "@woohaa3/contracts";
 import { planFilmSetSceneSpaceNode } from "../../web/services/canvas-service/src/animation/film-set-scene-space-migration.js";
-import { readLegacyFilmSetNodeData } from "../../web/services/canvas-service/src/animation/legacy-film-set-reader.js";
-import { legacyFilmSetHistoryInput, convertLegacyFilmSetHistoryEntry } from "../../web/services/canvas-service/src/animation/legacy-film-set-history.js";
-import { legacyFilmSetIdentityKey, planLegacyFilmSetItemIdentities } from "../../web/services/canvas-service/src/animation/legacy-film-set-identities.js";
+import { readLegacyFilmSetNodeData } from "./legacy-film-set/legacy-film-set-reader.js";
+import { legacyFilmSetHistoryInput, convertLegacyFilmSetHistoryEntry } from "./legacy-film-set/legacy-film-set-history.js";
+import { legacyFilmSetIdentityKey, planLegacyFilmSetItemIdentities } from "./legacy-film-set/legacy-film-set-identities.js";
 import { loadOfflineYjsCanvasSources } from "./model-native-migration-source.mjs";
 import { randomUUID, createHash } from "node:crypto";
 

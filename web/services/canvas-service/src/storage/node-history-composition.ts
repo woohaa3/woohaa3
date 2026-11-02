@@ -10,7 +10,7 @@
  * repository 与 `EditCompletionService`（同一后端选择）。
  */
 import { NodeHistoryApplicationService } from "./core/node-history-service.js";
-import type { MediaStorageScope } from "@woohaa3/contracts";
+import type { ContentContributionResolver, MediaStorageScope } from "@woohaa3/contracts";
 import type { NodeHistoryRepository } from "./core/node-history-contracts.js";
 import type { NodeHistoryRoomPort } from "./core/node-history-service.js";
 import { InMemoryNodeHistoryRepository } from "./core/in-memory-node-history-repository.js";
@@ -43,6 +43,7 @@ export type ComposeNodeHistoryOptions = {
   mediaVerifier?: { exists(storageKey: string, scope?: MediaStorageScope): Promise<boolean> };
   logger?: (event: Record<string, unknown>) => void;
   now?: () => string;
+  content?: ContentContributionResolver;
 };
 
 export async function composeNodeHistory(options: ComposeNodeHistoryOptions): Promise<NodeHistoryComposition> {
@@ -60,12 +61,14 @@ export async function composeNodeHistory(options: ComposeNodeHistoryOptions): Pr
     resolveRoom: options.resolveRoom,
     ...(options.mediaVerifier ? { mediaVerifier: options.mediaVerifier } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
-    ...(options.now ? { now: options.now } : {})
+    ...(options.now ? { now: options.now } : {}),
+    ...(options.content ? { content: options.content } : {})
   });
   service = new NodeHistoryApplicationService({
     repository,
     resolveRoom: options.resolveRoom,
     ...(options.mediaVerifier ? { mediaVerifier: options.mediaVerifier } : {}),
+    ...(options.content ? { content: options.content } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
     // 清空历史必须拒绝尚未结算的编辑会话：删掉归档义务会让进行中的会话无法完成。
     hasActiveEditSession: (canvasId: string, nodeId: string) => editCompletion.hasActiveModelSession(canvasId, nodeId)

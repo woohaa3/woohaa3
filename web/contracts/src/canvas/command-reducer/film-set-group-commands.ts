@@ -101,6 +101,8 @@ export function validateFilmSetGroupDataPatch(
   if (value[FILM_SET_GROUP_FIELD] === undefined) return null;
   const node = work.nodes.find(entry => entry.id === nodeId) ?? (nodeType ? { id: nodeId, type: nodeType } : undefined);
   if (!node || node.type !== "group") return reject("invalid-film-set-group", "filmSetGroup 只允许 group 节点");
+  const ownerRejection = rejectFilmSetGroupByOwner(work, nodeId, value);
+  if (ownerRejection) return ownerRejection;
   const decoded = decodeFilmSetGroupMarker(value[FILM_SET_GROUP_FIELD]);
   if (!decoded.ok) return reject("invalid-film-set-group", decoded.reason);
   // A node.add may be followed by node.update commands that attach source cards in
@@ -111,6 +113,23 @@ export function validateFilmSetGroupDataPatch(
   const knownSources = new Set(previous.ok ? previous.value.sceneBindings.map(binding => binding.sourceNodeId) : []);
   const validation = validateFilmSetGroupBindings(canvasFromWork(work), nodeId, decoded.value, knownSources, previous.ok ? previous.value.sceneBindings : []);
   if (validation) return reject("invalid-film-set-group", validation);
+  return null;
+}
+
+/** 已注册的 owner 先判定 marker 形状。没有 resolver 时仍走下面的内核解码。 */
+function rejectFilmSetGroupByOwner(work: WorkingState, nodeId: string, value: CanvasNodeData): CommandApplyResult | null {
+  if (!work.content) return null;
+  const previous = work.nodeData[nodeId] ?? {};
+  for (const contribution of work.content.implementations()) {
+    const codec = contribution.nodeData;
+    if (!codec) continue;
+    try {
+      const diagnostic = codec.validatePatch(structuredClone(previous), structuredClone(value));
+      if (diagnostic) return reject("content-command-rejected", diagnostic.code);
+    } catch {
+      return reject("content-codec-failed", "content-codec-failed");
+    }
+  }
   return null;
 }
 

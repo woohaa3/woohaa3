@@ -23,7 +23,7 @@ import {
   type NodeGenerationHistoryEntry,
   type NodeHistoryModelPayload,
 } from "@woohaa3/contracts";
-import { animationDefinitionIdentityFromPayload } from "../storage/core/node-history-service/current-state.js";
+import { animationDefinitionIdentityFromPayload } from "../../../web/services/canvas-service/src/storage/core/node-history-service/current-state.js";
 import { readLegacyFilmSetNodeData } from "./legacy-film-set-reader.js";
 
 type Failure = { ok: false; reason: string };

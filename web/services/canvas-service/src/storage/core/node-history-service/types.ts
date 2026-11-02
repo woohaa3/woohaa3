@@ -6,6 +6,7 @@
  * `NodeHistoryServiceContext`，从而保持同一 repository/room/verifier 与唯一恢复 owner。
  */
 import type {
+  ContentContributionResolver,
   MediaStorageScope,
   ModelCamera,
   ModelScriptBatchMeta,
@@ -171,6 +172,8 @@ export type NodeHistoryServiceContext = {
   repository: NodeHistoryRepository;
   resolveRoom: (canvasId: string) => Promise<NodeHistoryRoomPort | null>;
   mediaVerifier?: { exists(storageKey: string, scope?: MediaStorageScope): Promise<boolean> };
+  /** 已激活的内容 codec。缺省时片场组历史仍走内核解码。 */
+  content?: ContentContributionResolver;
   log: (event: Record<string, unknown>) => void;
   now: () => string;
 };
@@ -183,6 +186,8 @@ export type NodeHistoryApplicationServiceOptions = {
   logger?: (event: Record<string, unknown>) => void;
   /** 时间源（测试可注入）；缺省系统时钟。 */
   now?: () => string;
+  /** 与画布命令同一份内容注册表。传入后片场组历史只信 owner codec。 */
+  content?: ContentContributionResolver;
   /**
    * 是否存在未结算的编辑会话（prepared 回执）。
    *

@@ -21,6 +21,10 @@ it("history restores orchestration while resolving the current resource card", (
   history.clear("film");
   expect(history.project(canvas)).toBe(canvas);
 });
+it("schema 4 with an illegal marker does not override history", () => {
+  expect(history.set("film", { kind: "model", animation: { schemaVersion: 4, filmSetGroup: { schemaVersion: 1, sceneBindings: "nope" } } } as unknown as NodeGenerationHistoryDetail)).toBe(false);
+  expect(history.get("film")).toBeUndefined();
+});
 it("legacy snapshots and unknown versions cannot become online history overrides", () => {
   for (const schemaVersion of [3, 99]) {
     expect(history.set("film", { kind: "model", animation: { schemaVersion } } as unknown as NodeGenerationHistoryDetail)).toBe(false);

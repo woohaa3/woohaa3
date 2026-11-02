@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canonicalFilmSetFields, createModelSnapshot, hashMotionScript } from "@woohaa3/contracts";
-import { planLegacyFilmSetItemIdentities } from "./legacy-film-set-identities.js";
-import { readLegacyFilmSetNodeData } from "./legacy-film-set-reader.js";
+import { planLegacyFilmSetItemIdentities } from "../../../../../scripts/lib/legacy-film-set/legacy-film-set-identities.js";
+import { readLegacyFilmSetNodeData } from "../../../../../scripts/lib/legacy-film-set/legacy-film-set-reader.js";
 
 const model = createModelSnapshot({ modelScript: "scene.box({ id: 'body' });", modelScriptVersion: "woohaa-model-js-v2" });
 const motion = "motion.model.rotate('body', { speed: 1 });";

@@ -35,6 +35,7 @@ import {
   handleRecordingStatus,
   handleRecordingSubmit
 } from "./canvas-api/recording-routes.js";
+import { handleContentRoute } from "./canvas-api/content-routes.js";
 
 export {
   DEFAULT_CANVAS_API_BASE_PATH,
@@ -249,6 +250,12 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         const decision = await authorizeImported(segments[0], "write");
         if (decision === "deny") return denyImported("write");
         return await handleFilmSetConversionRetry(req, res, segments[0], segments[3], options, log);
+      }
+      if (options.content && segments[1] === "content" && segments[2]) {
+        const permission = req.method === "GET" || req.method === "HEAD" ? "read" : "write";
+        const decision = await authorizeImported(segments[0], permission);
+        if (decision === "deny") return denyImported(permission);
+        return await handleContentRoute(req, res, segments[2], segments.slice(3), options, log);
       }
 
       sendError(res, 404, "CANVAS_NOT_FOUND", "未知的画布路由");

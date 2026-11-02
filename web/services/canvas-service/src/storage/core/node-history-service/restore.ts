@@ -87,7 +87,7 @@ export async function restoreNodeHistory(
   const data = canvas.nodeData[input.nodeId] as Record<string, unknown> | undefined;
 
   // 并发保护：调用方认为的当前身份与服务端权威状态不一致时拒绝（不覆盖他人写入）。
-  const currentNode = currentNodeStateOf(canvas, input.nodeId, entry.kind);
+  const currentNode = currentNodeStateOf(canvas, input.nodeId, entry.kind, context.content);
   if (input.expectedCurrentIdentity !== undefined && currentNode.identity !== input.expectedCurrentIdentity) {
     return { ok: false, code: "conflict", message: "当前内容已被其它写入改变，恢复被拒绝" };
   }
@@ -179,7 +179,7 @@ export async function snapshotCurrentModelEdit(
 ): Promise<{ status: "inserted" | "duplicate"; entryId: string } | null> {
   // items-only 片场没有顶层模型脚本；其完整当前版本由片段/内容定义身份留档（D8/D10）。
   // 因此先读动画 payload，再决定是否需要顶层脚本字段。
-  const animation = readAnimationHistoryPayload(data);
+  const animation = readAnimationHistoryPayload(data, deps.context.content);
   const modelItem = data?.filmSetContent !== undefined && data.filmSetContent !== null
     ? readFilmSetContent(data).items.find((item) => item.kind === "model")
     : undefined;

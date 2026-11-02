@@ -24,6 +24,10 @@ export type ContentNodeDataCodec = {
   diff(before: unknown, after: unknown, context: ContentCopyContext):
     | { ok: true; forward: unknown; inverse: unknown }
     | { ok: false; code: string; reason: string };
+  /** 业务内容版本。认领不了时返回 null。 */
+  schemaVersion?(data: unknown): number | null;
+  /** 旧业务形态禁止新建或普通写入。不是这种数据时返回 null。 */
+  rejectLegacy?(type: string | undefined, data: unknown): ContentDiagnostic | null;
   inspect?(data: unknown): { ok: true; report: unknown } | { ok: false; code: string; reason: string };
 };
 
@@ -88,6 +92,8 @@ export type ContentMcpTool = {
 
 export type ContentContribution = {
   readonly extensionId: string;
+  /** 该扩展当前写入的内容版本。低于它的数据按 migrations 顺序升级。 */
+  readonly contentVersion?: number;
   readonly nodeData?: ContentNodeDataCodec;
   readonly commands?: ContentCommandCodec;
   readonly edit?: ContentEditPlanner;
@@ -117,6 +123,58 @@ export type ContentWriteDecision =
   | { ok: true; extensionId: string }
   | { ok: false; extensionId: string; code: string };
 
+export type ContentMigrationResult = {
+  data: unknown;
+  /** 版本过新或缺少到达当前版本的迁移时保留原数据，调用方不得按当前 schema 覆盖。 */
+  readOnly: boolean;
+  applied: number[];
+};
+
+/**
+ * 按已注册迁移把一份 nodeData 升到扩展的 contentVersion。
+ *
+ * 已是当前版本时不改写。迁移抛错或结果版本不对时返回原数据且不记版本，下次可从同一边界重试。
+ * 没有 codec 或认领不了版本的贡献跳过。
+ */
+export function migrateContentNodeData(data: unknown, content: ContentContributionResolver): ContentMigrationResult {
+  const unchanged = { data, readOnly: false, applied: [] as number[] };
+  for (const contribution of content.implementations()) {
+    const read = contribution.nodeData?.schemaVersion;
+    const target = contribution.contentVersion;
+    if (!read || target === undefined) continue;
+    let version: number | null;
+    try {
+      version = read(data);
+    } catch {
+      return { data, readOnly: true, applied: [] };
+    }
+    if (version === null) continue;
+    if (!Number.isInteger(version) || version < 1 || version > target) return { data, readOnly: true, applied: [] };
+    if (version === target) return unchanged;
+    const steps = (contribution.migrations ?? [])
+      .filter((migration) => migration.extensionId === contribution.extensionId)
+      .sort((left, right) => left.from - right.from);
+    let next = data;
+    let cursor = version;
+    const applied: number[] = [];
+    while (cursor < target) {
+      const step = steps.find((migration) => migration.from === cursor && migration.to === cursor + 1);
+      if (!step) return { data, readOnly: true, applied: [] };
+      try {
+        const migrated = step.migrate(structuredClone(next));
+        if (read(migrated) !== step.to) return { data, readOnly: false, applied: [] };
+        next = migrated;
+        cursor = step.to;
+        applied.push(step.to);
+      } catch {
+        return { data, readOnly: false, applied: [] };
+      }
+    }
+    return { data: next, readOnly: false, applied };
+  }
+  return unchanged;
+}
+
 /**
  * 按注册表决定一次业务写入。未注册或缺少 codec 时稳定拒绝；codec 抛错不把异常文本写进结果。
  */
@@ -141,6 +199,46 @@ function fail(code: string): Error {
   return new Error(code);
 }
 
+export type ContentRouteDispatchRequest = {
+  readonly method: string;
+  readonly extensionId: string;
+  readonly path: readonly string[];
+  readonly body: unknown;
+  readonly authorized: boolean;
+};
+
+/** 按已注册路由分发。未知路径 404，未授权 401，处理失败或超时 503，不带出异常文本。 */
+export async function dispatchContentRoute(
+  content: ContentContributionResolver,
+  request: ContentRouteDispatchRequest,
+  options: { readonly timeoutMs?: number } = {}
+): Promise<ContentRouteResult> {
+  if (!request.authorized) return { status: 401, body: { code: "unauthorized" } };
+  const route = content.resolve(request.extensionId)?.routes?.find((item) =>
+    item.method.toUpperCase() === request.method.toUpperCase()
+    && item.path.length === request.path.length
+    && item.path.every((segment, index) => segment === request.path[index])
+  );
+  if (!route) return { status: 404, body: { code: "content-route-not-found" } };
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      Promise.resolve(route.handle({ body: request.body })),
+      new Promise<ContentRouteResult>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("content-route-timeout")), timeoutMs);
+      })
+    ]);
+    if (!result || typeof result.status !== "number") return { status: 503, body: { code: "content-route-failed" } };
+    return result;
+  } catch (error) {
+    const timeout = error instanceof Error && error.message === "content-route-timeout";
+    return { status: 503, body: { code: timeout ? "content-route-timeout" : "content-route-failed" } };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function routeKey(route: ContentRoute): string {
   return `${route.method.toUpperCase()} ${route.path.join("/")}`;
 }
@@ -151,6 +249,23 @@ function assertContribution(contribution: ContentContribution): void {
     for (const name of ["decode", "validatePatch", "normalize", "sanitizeRuntime", "copy", "diff"] as const) {
       if (typeof contribution.nodeData[name] !== "function") throw fail("content-registration-invalid");
     }
+    if (contribution.nodeData.schemaVersion !== undefined && typeof contribution.nodeData.schemaVersion !== "function") {
+      throw fail("content-registration-invalid");
+    }
+    if (contribution.nodeData.rejectLegacy !== undefined && typeof contribution.nodeData.rejectLegacy !== "function") {
+      throw fail("content-registration-invalid");
+    }
+  }
+  if (contribution.contentVersion !== undefined && (!Number.isInteger(contribution.contentVersion) || contribution.contentVersion < 1)) {
+    throw fail("content-registration-invalid");
+  }
+  const seenFrom = new Set<number>();
+  for (const migration of contribution.migrations ?? []) {
+    if (migration.extensionId !== contribution.extensionId || !Number.isInteger(migration.from) || !Number.isInteger(migration.to) || migration.to !== migration.from + 1 || migration.from < 1 || seenFrom.has(migration.from) || typeof migration.migrate !== "function") {
+      throw fail("content-registration-invalid");
+    }
+    if (contribution.contentVersion !== undefined && migration.to > contribution.contentVersion) throw fail("content-registration-invalid");
+    seenFrom.add(migration.from);
   }
   if (contribution.commands) {
     const kinds = contribution.commands.kinds;

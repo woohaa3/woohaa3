@@ -107,7 +107,9 @@ export function buildMcpRuntime(deps: McpRuntimeDeps): McpRuntime {
   const buildModelMcpService = (actorId: string): ModelMcpService =>
     new ModelMcpService({
       // 预览/历史帧在拿到画布 id 时由调用方传入（见 preview-service）：远端画布素材只在托管存储。
-      ...(deps.mediaClient?.read ? { readMedia: (storageKey: string, canvasId?: string) => deps.mediaClient!.read!(storageKey, canvasId) } : {}),
+      ...(deps.mediaClient?.read && deps.contentRuntime?.mediaExtensionId
+        ? { readMedia: (storageKey: string, canvasId?: string) => deps.mediaClient!.read!(storageKey, canvasId, deps.contentRuntime!.mediaExtensionId) }
+        : {}),
       resolveRoom: roomResolver,
       actorId,
       ...(deps.contentFrames ? { contentFrames: deps.contentFrames } : {}),

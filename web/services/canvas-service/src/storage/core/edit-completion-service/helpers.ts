@@ -22,6 +22,7 @@ import {
   type ImageEditCompleteRequest,
   type ModelCamera,
   type NodeGenerationHistoryEntry,
+  type ContentContributionResolver,
   type ServerCanvas,
   type StoredAsset
 } from "@woohaa3/contracts";
@@ -42,13 +43,13 @@ export function isActiveGeneration(data: Record<string, unknown> | undefined): b
 }
 
 /** 节点当前图片/模型内容身份（与 node-history-service 的 currentIdentityOf 同构）。 */
-export function currentIdentityOfNode(canvas: ServerCanvas, nodeId: string, kind: "image" | "model"): string | null {
+export function currentIdentityOfNode(canvas: ServerCanvas, nodeId: string, kind: "image" | "model", content?: ContentContributionResolver): string | null {
   const data = canvas.nodeData[nodeId] as Record<string, unknown> | undefined;
   if (!data) return null;
   if (kind === "model") {
     // 自包含片场（items-only）当前身份覆盖完整片场定义（独立根 + items + 全部片段），与顶层
     // 作者模型字段无关；必须先于顶层脚本读取判断，否则合法片场的 begin/complete 恒视为无内容。
-    const animationIdentity = animationDefinitionIdentity(data);
+    const animationIdentity = animationDefinitionIdentity(data, content);
     if (animationIdentity) return animationIdentity;
     const source = typeof data.modelScript === "string" ? data.modelScript : "";
     if (source === "") return null;
@@ -187,11 +188,11 @@ export function imageEditContentIdentityOf(request: ImageEditCompleteRequest): s
 }
 
 /** 从当前权威模型/片场内容构造编辑版本条目（complete 只归档，不额外推进 revision）。 */
-export function buildModelEditEntryFromCanvas(canvas: ServerCanvas, nodeId: string, createdAt: string): NodeGenerationHistoryEntry | null {
+export function buildModelEditEntryFromCanvas(canvas: ServerCanvas, nodeId: string, createdAt: string, content?: ContentContributionResolver): NodeGenerationHistoryEntry | null {
   const data = canvas.nodeData[nodeId] as Record<string, unknown> | undefined;
   // items-only 片场没有顶层模型脚本；其完整当前版本由片段/内容定义身份留档（D8/D10）。
   // 因此先读动画 payload，再决定是否需要顶层脚本字段；模型脚本取内部首个 model item。
-  const animation = readAnimationHistoryPayload(data);
+  const animation = readAnimationHistoryPayload(data, content);
   const modelScript = animation ? "" : (typeof data?.modelScript === "string" ? data.modelScript : "");
   if (!animation && modelScript.trim() === "") return null;
   const language = animation ? MODEL_SCRIPT_LANGUAGE : (typeof data?.modelScriptLanguage === "string" ? data.modelScriptLanguage : "");
