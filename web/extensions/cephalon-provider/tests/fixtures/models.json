@@ -1,0 +1,183 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "deepseek-v4-flash",
+      "model_type": "language",
+      "supports_vision": true,
+      "max_output_tokens": 393216
+    },
+    {
+      "id": "deepseek-v4.1-flash",
+      "model_type": "language",
+      "max_output_tokens": 348000
+    },
+    {
+      "id": "nexus-router",
+      "model_type": "language"
+    },
+    {
+      "id": "kimi-k3",
+      "model_type": "language",
+      "supports_vision": true,
+      "max_output_tokens": 1048576
+    },
+    {
+      "id": "glm-5.3",
+      "model_type": "language",
+      "max_output_tokens": 131072
+    },
+    {
+      "id": "glm-5.3-flashx",
+      "model_type": "language",
+      "max_output_tokens": 512000
+    },
+    {
+      "id": "glm-5.3-flash",
+      "model_type": "language",
+      "supports_vision": true,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "glm-5.2",
+      "model_type": "language",
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "deepseek-v4.1-flash-1017",
+      "model_type": "language"
+    },
+    {
+      "id": "seedance-2.5",
+      "model_type": "video"
+    },
+    {
+      "id": "seedance-2.0",
+      "model_type": "video"
+    },
+    {
+      "id": "minimax-h3",
+      "model_type": "video"
+    },
+    {
+      "id": "hy4-preview",
+      "model_type": "language"
+    },
+    {
+      "id": "hy3",
+      "model_type": "language"
+    },
+    {
+      "id": "kimi-k2.6",
+      "model_type": "language",
+      "supports_vision": true,
+      "max_output_tokens": 262144
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "model_type": "language",
+      "supports_vision": false,
+      "max_output_tokens": 393216
+    },
+    {
+      "id": "minimax-m3",
+      "model_type": "language",
+      "supports_vision": true,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "kimi-k2.7-code",
+      "model_type": "language",
+      "supports_vision": true,
+      "max_output_tokens": 262144
+    },
+    {
+      "id": "glm-5.1",
+      "model_type": "language",
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "minimax-m2.7",
+      "model_type": "language"
+    },
+    {
+      "id": "minimax-m2.5",
+      "model_type": "language",
+      "max_output_tokens": 8192
+    },
+    {
+      "id": "mimo-v2.5-pro",
+      "model_type": "language"
+    },
+    {
+      "id": "hy-role",
+      "model_type": "language"
+    },
+    {
+      "id": "glm-5-turbo",
+      "model_type": "language",
+      "max_output_tokens": 131072
+    },
+    {
+      "id": "glm-5v-turbo",
+      "model_type": "language",
+      "max_output_tokens": 131072
+    },
+    {
+      "id": "hy-role-latest",
+      "model_type": "language"
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "model_type": "language",
+      "supports_vision": true,
+      "max_output_tokens": 65536
+    },
+    {
+      "id": "hy3-preview",
+      "model_type": "language",
+      "max_output_tokens": 131072
+    },
+    {
+      "id": "reader",
+      "model_type": "reader"
+    },
+    {
+      "id": "glm-asr-2512",
+      "model_type": "language"
+    },
+    {
+      "id": "qwen3-embedding:latest",
+      "model_type": "language"
+    },
+    {
+      "id": "qwen3-vl:2b",
+      "model_type": "language"
+    },
+    {
+      "id": "apiSearchBrave",
+      "model_type": "search"
+    },
+    {
+      "id": "NanoBanana2",
+      "model_type": "picture"
+    },
+    {
+      "id": "glm-5",
+      "model_type": "language",
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "model_type": "language",
+      "supports_vision": true,
+      "max_output_tokens": 65536
+    },
+    {
+      "id": "kimi-k2.5",
+      "model_type": "language",
+      "supports_vision": true,
+      "max_output_tokens": 262144
+    }
+  ]
+}

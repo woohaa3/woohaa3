@@ -85,6 +85,7 @@ describe("扩展声明流水线", () => {
     // 扩展层的插件全部来自扩展目录声明（不是宿主里的手写注册表）。
     for (const id of [
       "tokenhub-provider",
+      "cephalon-provider",
       "replicate-provider",
       "fal-provider",
       "grsai-provider",
@@ -103,6 +104,7 @@ describe("扩展声明流水线", () => {
     // 配置前即可说明扩展支持的输出类型，不依赖凭据或上游发现。
     for (const [id, types] of Object.entries({
       "tokenhub-provider": ["language", "image", "video"],
+      "cephalon-provider": ["language", "image", "video"],
       "replicate-provider": ["language", "image", "video", "audio"],
       "fal-provider": ["language", "image", "video", "audio"],
       "grsai-provider": ["language", "image", "video"],
@@ -111,19 +113,21 @@ describe("扩展声明流水线", () => {
     })) expect(byId.get(id)?.modelTypes, id).toEqual(types);
 
     // 模型刷新入口由插件自己声明（宿主不再有 Provider → 刷新路径的映射表）。
-    const litellm = byId.get("tokenhub-provider");
-    expect(litellm?.modelRefresh?.path).toBe("/api/providers/tokenhub/refresh");
-    expect(litellm?.modelRefresh?.hint).toContain("TokenHub");
+    // 模型刷新入口由插件自己声明（宿主不再有 Provider → 刷新路径的映射表）。
+    const tokenhub = byId.get("tokenhub-provider");
+    expect(tokenhub?.modelRefresh?.path).toBe("/api/providers/tokenhub/refresh");
+    expect(tokenhub?.modelRefresh?.hint).toContain("TokenHub");
     // RunningHub 的清单来自官方公开 registry（RunningHub 没有按 key 查标准模型的接口），
     // 刷新只做增量；入口同样由插件声明，宿主不硬编码路径。
     expect(byId.get("runninghub-provider")?.modelRefresh?.path).toBe("/api/providers/runninghub/refresh");
+    expect(byId.get("cephalon-provider")?.modelRefresh?.path).toBe("/api/providers/cephalon/refresh");
   });
 
   it("声明装载的 Provider 真的注册进生成 registry", async () => {
     const { generation } = await boot();
     const ids = generation.list().map((provider) => provider.providerId);
     // 未配凭据的 Provider 仍要装载并注册（否则管理面看不到、也没法预填配置）；模型可用性另算。
-    for (const id of ["tokenhub", "replicate", "fal", "grsai", "runninghub", "ark"]) {
+    for (const id of ["tokenhub", "cephalon", "replicate", "fal", "grsai", "runninghub", "ark"]) {
       expect(ids).toContain(id);
     }
   });
