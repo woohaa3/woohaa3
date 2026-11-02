@@ -56,6 +56,25 @@ function instance(id: string, u: number, v: number, extra: Record<string, unknow
   };
 }
 
+function singleInstanceCanvas(): ServerCanvas {
+  const canvas = createEmptyWoohaa3ServerCanvas("canvas-single", now);
+  canvas.document.nodes.push(
+    { id: "area", type: "scene-area", position: { x: 0, y: 0 } },
+    { id: "solo", type: "model3d", position: { x: 0, y: 0 } }
+  );
+  canvas.nodeData.area = {
+    sceneArea: {
+      kind: "scene-area",
+      version: "shared-world-v1",
+      areaId: "area-main",
+      scopeVersion: "area-scope-1",
+      bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+    }
+  };
+  canvas.nodeData.solo = instance("solo-a", 1, 1);
+  return canvas;
+}
+
 function canvasFixture(): ServerCanvas {
   const canvas = createEmptyWoohaa3ServerCanvas("canvas-authority", now);
   const area = {
@@ -187,5 +206,164 @@ describe("world authoring authority", () => {
     );
     expect(bounds.min).toEqual({ u: 0, v: 1 });
     expect(bounds.max).toEqual({ u: 4, v: 5 });
+  });
+
+  it("recovers the same canonical content after one transient executor throw", async () => {
+    let calls = 0;
+    const authority = createWorldAuthoringAuthority({
+      executeScene: () => {
+        calls += 1;
+        if (calls === 1) return Promise.reject(new Error("transient model preparation"));
+        return executeScene();
+      }
+    });
+    const canvas = singleInstanceCanvas();
+    const scopeRef = { kind: "scene-area" as const, areaId: "area-main" };
+
+    const first = await authority.prepareCanvas(canvas, scopeRef);
+    expect(first).toMatchObject({ ok: false, code: "not-ready" });
+
+    // A failed preparation leaves no grant: unknown never authorizes, even when
+    // the caller supplies a plausible version.
+    expect(authority.eligible({
+      requestId: "r", canvasId: canvas.id, runId: "run", epoch: 1, executionId: "exec",
+      scope: {
+        scope: { kind: "scene-area", areaId: "area-main" },
+        scopeVersion: "area-scope-1"
+      },
+      writable: [{ kind: "instance", instanceId: "solo-a", version: "unknown" }],
+      readOnly: []
+    }, [{ kind: "instance", instanceId: "solo-a", version: "unknown" }])).toBe(false);
+
+    // The original failure also survived `invalidate(canvasId)`; clearing the
+    // canvas projections must not require rebuilding the whole authority.
+    authority.invalidate(canvas.id);
+    const second = await authority.prepareCanvas(canvas, scopeRef);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(calls).toBe(2);
+    const writable = second.snapshot.writable.filter(target => target.kind === "instance");
+    expect(writable).toHaveLength(1);
+    expect(writable[0]).toMatchObject({ instanceId: "solo-a" });
+    expect(second.snapshot.objects).toEqual([
+      expect.objectContaining({
+        identity: { kind: "instance", instanceId: "solo-a" },
+        containment: "writable",
+        version: writable[0]!.version
+      })
+    ]);
+    expect(authority.eligible({
+      requestId: "r", canvasId: canvas.id, runId: "run", epoch: 1, executionId: "exec",
+      scope: second.snapshot.scope,
+      writable,
+      readOnly: []
+    }, writable)).toBe(true);
+  });
+
+  it("recovers the same canonical content after one structured preparation failure", async () => {
+    let calls = 0;
+    const authority = createWorldAuthoringAuthority({
+      executeScene: () => {
+        calls += 1;
+        if (calls === 1) {
+          return Promise.resolve({
+            ok: false as const,
+            stage: "execute" as const,
+            code: "transient-failure",
+            message: "transient executor failure"
+          });
+        }
+        return executeScene();
+      }
+    });
+    const canvas = singleInstanceCanvas();
+    const scopeRef = { kind: "scene-area" as const, areaId: "area-main" };
+
+    expect(await authority.prepareCanvas(canvas, scopeRef)).toMatchObject({ ok: false, code: "not-ready" });
+    const prepared = await authority.prepareCanvas(canvas, scopeRef);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    expect(calls).toBe(2);
+    expect(prepared.snapshot.writable).toEqual([
+      expect.objectContaining({ kind: "instance", instanceId: "solo-a" })
+    ]);
+  });
+
+  it("reuses successful bounds and drops stale eligibility on invalidation", async () => {
+    let calls = 0;
+    const authority = createWorldAuthoringAuthority({
+      executeScene: () => {
+        calls += 1;
+        return executeScene();
+      }
+    });
+    const canvas = singleInstanceCanvas();
+    const scopeRef = { kind: "scene-area" as const, areaId: "area-main" };
+    const prepared = await authority.prepareCanvas(canvas, scopeRef);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    const target = prepared.snapshot.writable[0]!;
+
+    // Same canonical content reuses the prepared bounds instead of re-executing.
+    expect((await authority.prepareCanvas(canvas, scopeRef)).ok).toBe(true);
+    expect(calls).toBe(1);
+    const intent = {
+      requestId: "r", canvasId: canvas.id, runId: "run", epoch: 1, executionId: "exec",
+      scope: prepared.snapshot.scope,
+      writable: [target],
+      readOnly: []
+    };
+    expect(authority.eligible(intent, [target])).toBe(true);
+
+    authority.invalidate(canvas.id);
+    expect(authority.eligible(intent, [target])).toBe(false);
+
+    // A stale version cannot become eligible again through re-preparation.
+    const moved = JSON.parse(JSON.stringify(canvas)) as ServerCanvas;
+    (moved.nodeData.solo as { sharedWorldInstance: { transform: { position: { u: number } } } })
+      .sharedWorldInstance.transform.position.u = 20;
+    expect((await authority.prepareCanvas(moved, scopeRef)).ok).toBe(true);
+    expect(authority.eligible(intent, [target])).toBe(false);
+  });
+
+  it("does not resurrect an expired post-state version after invalidation", async () => {
+    const authority = createWorldAuthoringAuthority({ executeScene });
+    const canvas = singleInstanceCanvas();
+    const scopeRef = { kind: "scene-area" as const, areaId: "area-main" };
+    const prepared = await authority.prepareCanvas(canvas, scopeRef);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    const target = prepared.snapshot.writable[0]!;
+
+    // Before the atomic resolve the target is absent; the after-state is writable,
+    // so the authority records a post-state eligible version for it.
+    const before = JSON.parse(JSON.stringify(canvas)) as ServerCanvas;
+    before.document.nodes = before.document.nodes.filter(node => node.id !== "solo");
+    delete before.nodeData.solo;
+    const resolved = authority.resolve({
+      requestId: "r", canvasId: canvas.id, runId: "run", epoch: 1, executionId: "exec",
+      scope: prepared.snapshot.scope,
+      writable: [target],
+      readOnly: []
+    }, before, canvas, [{ kind: "instance", instanceId: "solo-a" }]);
+    expect(resolved?.next).toEqual([target]);
+    expect(authority.eligible({
+      requestId: "r", canvasId: canvas.id, runId: "run", epoch: 1, executionId: "exec",
+      scope: prepared.snapshot.scope,
+      writable: [target],
+      readOnly: []
+    }, [target])).toBe(true);
+
+    authority.invalidate(canvas.id);
+    const moved = JSON.parse(JSON.stringify(canvas)) as ServerCanvas;
+    (moved.nodeData.solo as { sharedWorldInstance: { transform: { position: { u: number } } } })
+      .sharedWorldInstance.transform.position.u = 20;
+    expect((await authority.prepareCanvas(moved, scopeRef)).ok).toBe(true);
+    expect(authority.eligible({
+      requestId: "r", canvasId: canvas.id, runId: "run", epoch: 1, executionId: "exec",
+      scope: prepared.snapshot.scope,
+      writable: [target],
+      readOnly: []
+    }, [target])).toBe(false);
   });
 });
