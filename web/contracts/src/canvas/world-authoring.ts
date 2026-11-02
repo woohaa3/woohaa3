@@ -23,6 +23,7 @@ import type {
   WorldToolContext
 } from "./shared-world.js";
 import type { SceneAreaPlan, SceneAreaPlanMemberSet, SceneAreaPlanRequest } from "./scene-area-plan-contract.js";
+import type { Woohaa3CanvasJsonObject } from "./domain/index.js";
 
 export const WORLD_AUTHORING_VERSION = "world-authoring-v1" as const;
 export const WORLD_AUTHORING_RECEIPT_VERSION = "world-authoring-receipt-v1" as const;
@@ -113,17 +114,36 @@ export type WorldAuthoringFailureCode =
   | "spatial-rejected"
   | "write-forbidden";
 
+/** Occupying run reported by a lease conflict; the target and run identity stay visible. */
+export interface WorldAuthoringConflict {
+  target: WorldObjectIdentity;
+  /** Current target version when the rejecting authority could read it; null if unknown. */
+  version: string | null;
+  runId: string;
+  epoch: number;
+}
+
 export interface WorldAuthoringFailure {
   ok: false;
   code: WorldAuthoringFailureCode;
   message: string;
-  conflicts?: WorldObjectVersion[];
+  conflicts?: WorldAuthoringConflict[];
   spatialReason?: string;
 }
 
 export type WorldAuthoringPrepareOutcome =
   | { ok: true; snapshot: WorldAuthoritySnapshot }
   | WorldAuthoringFailure;
+
+/** One frozen edge removed together with a node; re-added by undo after its endpoints. */
+export interface WorldAuthoringEdgeSnapshot {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle: string | null;
+  targetHandle: string | null;
+  data: Woohaa3CanvasJsonObject;
+}
 
 /** One frozen node snapshot used by undo to restore exactly what was removed. */
 export interface WorldAuthoringNodeSnapshot {
@@ -132,6 +152,11 @@ export interface WorldAuthoringNodeSnapshot {
   node: unknown;
   /** Full nodeData value at the frozen source state. */
   nodeData: unknown;
+  /**
+   * Edges incident to this node at the frozen source state. `node.remove` also
+   * removes incident edges, so undo must restore them explicitly.
+   */
+  edges?: WorldAuthoringEdgeSnapshot[];
 }
 
 export interface WorldAuthoringSourceSnapshot {

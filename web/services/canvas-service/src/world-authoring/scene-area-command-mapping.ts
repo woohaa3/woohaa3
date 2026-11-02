@@ -16,6 +16,7 @@ import {
   type SceneAreaPlanInverseCommand,
   type ServerCanvas,
   type Woohaa3CanvasSerializedNode,
+  type WorldAuthoringEdgeSnapshot,
   type WorldAuthoringNodeSnapshot,
   type WorldAuthoringSourceSnapshot,
   type WorldCameraData,
@@ -114,8 +115,27 @@ function remove(node: NodeRef): CanvasCommand {
   return { type: "node.remove", nodeIds: [node.nodeId] };
 }
 
-function snapshotOf(node: NodeRef): WorldAuthoringNodeSnapshot {
-  return { nodeId: node.nodeId, node: clone(node.node), nodeData: clone(node.data) };
+/** Incident edges are removed by `node.remove`; freeze them with the node snapshot. */
+function incidentEdges(canvas: ServerCanvas, nodeId: string): WorldAuthoringEdgeSnapshot[] {
+  return canvas.document.edges
+    .filter(edge => edge.source === nodeId || edge.target === nodeId)
+    .map(edge => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      sourceHandle: edge.sourceHandle ?? null,
+      targetHandle: edge.targetHandle ?? null,
+      data: clone(edge.data)
+    }));
+}
+
+function snapshotOf(canvas: ServerCanvas, node: NodeRef, withEdges = false): WorldAuthoringNodeSnapshot {
+  return {
+    nodeId: node.nodeId,
+    node: clone(node.node),
+    nodeData: clone(node.data),
+    ...(withEdges ? { edges: incidentEdges(canvas, node.nodeId) } : {})
+  };
 }
 
 function nodeAdd(snapshot: WorldAuthoringNodeSnapshot, created: string[]): CanvasCommand[] {
@@ -144,17 +164,17 @@ function sourceFor(canvas: ServerCanvas, plan: SceneAreaPlan): SceneAreaCommandR
   for (const member of plan.source.members.instances) {
     const ref = findInstance(canvas, member.identity.instanceId);
     if (!ref) return { ok: false, code: "not-found", message: "实例不存在" };
-    members.push({ ...snapshotOf(ref), identity: member.identity });
+    members.push({ ...snapshotOf(canvas, ref), identity: member.identity });
   }
   for (const member of plan.source.members.cameras) {
     const ref = findCamera(canvas, member.identity.cameraId);
     if (!ref) return { ok: false, code: "not-found", message: "镜头不存在" };
-    members.push({ ...snapshotOf(ref), identity: member.identity });
+    members.push({ ...snapshotOf(canvas, ref), identity: member.identity });
   }
   return {
     ok: true,
     commands: [],
-    source: { area: snapshotOf(area), members },
+    source: { area: snapshotOf(canvas, area), members },
     deleted: [],
     produced: { areaScopeVersion: plan.source.area.scopeVersion, targets: [] }
   };
@@ -238,7 +258,7 @@ export function buildForwardCommands(
         const ref = findInstance(canvas, command.target.instanceId);
         if (!ref) return { ok: false, code: "not-found", message: "实例不存在" };
         commands.push(guard(ref), remove(ref));
-        deleted.push(snapshotOf(ref));
+        deleted.push(snapshotOf(canvas, ref, true));
         produced.set(JSON.stringify(["instance", command.target.instanceId]), {
           kind: "instance",
           instanceId: command.target.instanceId,
@@ -250,7 +270,7 @@ export function buildForwardCommands(
         const ref = findCamera(canvas, command.target.cameraId);
         if (!ref) return { ok: false, code: "not-found", message: "镜头不存在" };
         commands.push(guard(ref), remove(ref));
-        deleted.push(snapshotOf(ref));
+        deleted.push(snapshotOf(canvas, ref, true));
         produced.set(JSON.stringify(["camera", command.target.cameraId]), {
           kind: "camera",
           cameraId: command.target.cameraId,
@@ -262,7 +282,7 @@ export function buildForwardCommands(
         const ref = findArea(canvas, command.areaId);
         if (!ref) return { ok: false, code: "not-found", message: "场景区不存在" };
         commands.push(guard(ref), remove(ref));
-        deleted.push(snapshotOf(ref));
+        deleted.push(snapshotOf(canvas, ref, true));
         areaScopeVersion = null;
         break;
       }
@@ -283,7 +303,7 @@ export function buildForwardCommands(
     if (!Array.isArray(memberNodeIds)) continue;
     const remaining = memberNodeIds.filter((id): id is string => typeof id === "string" && !deletedIds.has(id));
     if (remaining.length === memberNodeIds.length) continue;
-    groups.push(snapshotOf(ref));
+    groups.push(snapshotOf(canvas, ref));
     const scopeVersion = stableAuthorityVersion("workflow-group-scope", {
       groupId: group?.groupId ?? node.id,
       memberNodeIds: remaining
@@ -396,6 +416,32 @@ export function buildInverseCommands(
     const ref = nodeRef(canvas, group.nodeId);
     if (!ref) return { ok: false, code: "not-found", message: "2D 组不存在" };
     commands.push(patch(ref, clone(group.nodeData) as unknown as CanvasNodeData));
+  }
+
+  // `node.remove` also deletes every incident edge without keeping a snapshot.
+  // Restore the frozen edges after their endpoints exist so undo/redo round-trips
+  // the same object set instead of silently dropping connections.
+  const available = new Set(canvas.document.nodes.map(node => node.id));
+  for (const snapshot of deleted) available.add(snapshot.nodeId);
+  const existingEdges = new Set(canvas.document.edges.map(edge => edge.id));
+  const restoredEdges = new Map<string, WorldAuthoringEdgeSnapshot>();
+  for (const snapshot of deleted) {
+    for (const edge of snapshot.edges ?? []) restoredEdges.set(edge.id, edge);
+  }
+  for (const edge of restoredEdges.values()) {
+    if (existingEdges.has(edge.id)) continue;
+    if (!available.has(edge.source) || !available.has(edge.target)) continue;
+    commands.push({
+      type: "edge.add",
+      edge: {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+        data: clone(edge.data)
+      }
+    });
   }
 
   return {

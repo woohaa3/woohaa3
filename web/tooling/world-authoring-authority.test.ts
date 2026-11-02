@@ -384,8 +384,40 @@ describe("scene-area authority integration", () => {
       });
       if (!occupied.ok) throw new Error(occupied.message);
       const beforeOccupied = await canonical(harness);
-      expect(await harness.service.worldAuthoring!.execute({ canvasId: harness.canvas.id, request: moveRequest(occupancyPrepared, "op-occupied") }))
-        .toMatchObject({ ok: false, code: "lease-conflict" });
+      const occupiedTarget = { kind: "camera", cameraId: "camera-in" } as const;
+      const occupiedVersion = worldObjectVersion(beforeOccupied, occupiedTarget);
+      const secondContext = await harness.service.worldAuthoring!.issueContext({
+        canvasId: harness.canvas.id,
+        requestId: "request-occupied-second",
+        runId: "run-occupied-second",
+        epoch: 1,
+        executionId: "exec-occupied-second",
+        scope: { kind: "scene-area", areaId: "area-main" }
+      });
+      expect(secondContext).toMatchObject({
+        ok: false,
+        code: "lease-conflict",
+        conflicts: [{
+          target: occupiedTarget,
+          version: occupiedVersion,
+          runId: "run-occupied",
+          epoch: 2
+        }]
+      });
+      const executeConflict = await harness.service.worldAuthoring!.execute({
+        canvasId: harness.canvas.id,
+        request: moveRequest(occupancyPrepared, "op-occupied")
+      });
+      expect(executeConflict).toMatchObject({
+        ok: false,
+        code: "lease-conflict",
+        conflicts: [{
+          target: occupiedTarget,
+          version: occupiedVersion,
+          runId: "run-occupied",
+          epoch: 2
+        }]
+      });
       expect(await canonical(harness)).toEqual(beforeOccupied);
       await harness.service.worldAuthoring!.revokeContext({ canvasId: harness.canvas.id, contextId: occupied.context.contextId });
       await stopContext(harness, "request-occupied", occupied);
@@ -443,6 +475,16 @@ describe("scene-area authority integration", () => {
         .toMatchObject({ ok: true });
       expect((await canonical(harness)).document.nodes.some(node => node.id === "area")).toBe(true);
 
+      // World objects may carry connections. Add them through the real queue so the
+      // delete plan is prepared against the canonical post-reconciliation state.
+      const room = await harness.service.sync!.registry.resolve(harness.canvas.id);
+      expect(await room.submit(batch(harness.canvas.id, "add-world-edges", [
+        { type: "edge.add", edge: { id: "edge-complete-partial", source: "complete", target: "partial", data: { kind: "dependency" } } },
+        { type: "edge.add", edge: { id: "edge-complete-camera", source: "complete", target: "camera-card", data: { kind: "dependency" } } }
+      ] as never))).toMatchObject({ ok: true });
+      expect((await canonical(harness)).document.edges.map(edge => edge.id).sort())
+        .toEqual(["edge-complete-camera", "edge-complete-partial"]);
+
       const prepareAgain = await harness.service.worldAuthoring!.prepare({ canvasId: harness.canvas.id, areaId: "area-main" });
       if (!prepareAgain.ok) throw new Error(prepareAgain.message);
       const deleteContents = await harness.service.worldAuthoring!.execute({
@@ -465,6 +507,8 @@ describe("scene-area authority integration", () => {
       expect(withContents.document.nodes.some(node => node.id === "outside")).toBe(true);
       expect(withContents.assets.map(asset => asset.id)).toContain("asset-generated");
       expect(withContents.jobs.map(job => job.id)).toContain("job-1");
+      // `node.remove` also drops incident edges; the frozen source snapshot keeps them.
+      expect(withContents.document.edges).toEqual([]);
 
       expect(await harness.service.worldAuthoring!.undo({ canvasId: harness.canvas.id, operationId: "op-delete-contents" }))
         .toMatchObject({ ok: true });
@@ -472,6 +516,16 @@ describe("scene-area authority integration", () => {
       expect(restored.document.nodes.some(node => node.id === "complete")).toBe(true);
       expect(restored.document.nodes.some(node => node.id === "camera-card")).toBe(true);
       expect(restored.assets.map(asset => asset.id)).toContain("asset-generated");
+      expect(restored.document.edges.map(edge => edge.id).sort())
+        .toEqual(["edge-complete-camera", "edge-complete-partial"]);
+      expect(restored.document.edges.find(edge => edge.id === "edge-complete-partial")?.data)
+        .toEqual({ kind: "dependency" });
+
+      expect(await harness.service.worldAuthoring!.redo({ canvasId: harness.canvas.id, operationId: "op-delete-contents" }))
+        .toMatchObject({ ok: true, direction: "redo" });
+      const redoneDelete = await canonical(harness);
+      expect(redoneDelete.document.nodes.some(node => node.id === "complete")).toBe(false);
+      expect(redoneDelete.document.edges).toEqual([]);
     } finally {
       await closeHarness(harness);
     }
@@ -662,6 +716,11 @@ describe("scene-area authority integration", () => {
     const first = await openHarness({ dir });
     let removed = false;
     try {
+      const firstRoom = await first.service.sync!.registry.resolve(first.canvas.id);
+      expect(await firstRoom.submit(batch(first.canvas.id, "reload-edge", [{
+        type: "edge.add",
+        edge: { id: "edge-reload", source: "complete", target: "partial", data: { kind: "dependency" } }
+      }] as never))).toMatchObject({ ok: true });
       const prepared = await first.service.worldAuthoring!.prepare({ canvasId: first.canvas.id, areaId: "area-main" });
       if (!prepared.ok) throw new Error(prepared.message);
       expect(await first.service.worldAuthoring!.execute({
@@ -670,7 +729,7 @@ describe("scene-area authority integration", () => {
           contractVersion: SCENE_AREA_PLAN_CONTRACT_VERSION,
           canvasId: first.canvas.id,
           operationId: "op-reloaded",
-          intent: "delete-area",
+          intent: "delete-area-with-contents",
           area: prepared.snapshot.area,
           members: prepared.snapshot.members
         }
@@ -683,7 +742,11 @@ describe("scene-area authority integration", () => {
       try {
         const undone = await reopened.service.worldAuthoring!.undo({ canvasId: first.canvas.id, operationId: "op-reloaded" });
         expect(undone).toMatchObject({ ok: true, direction: "undo" });
-        expect((await canonical(reopened)).document.nodes.some(node => node.id === "area")).toBe(true);
+        const reloaded = await canonical(reopened);
+        expect(reloaded.document.nodes.some(node => node.id === "area")).toBe(true);
+        expect(reloaded.document.nodes.some(node => node.id === "complete")).toBe(true);
+        // The edge frozen in the durable receipt survives JSON storage and reopen.
+        expect(reloaded.document.edges.map(edge => edge.id)).toContain("edge-reload");
         // A second undo of the same operation is refused without a write.
         expect(await reopened.service.worldAuthoring!.undo({ canvasId: first.canvas.id, operationId: "op-reloaded" }))
           .toMatchObject({ ok: false, code: "operation-conflict" });

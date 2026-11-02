@@ -19,6 +19,7 @@ import {
   type SceneAreaPlan,
   type ServerCanvas,
   type WorldAuthoringCommandReceipt,
+  type WorldAuthoringConflict,
   type WorldAuthoringExecuteInput,
   type WorldAuthoringExecuteOutcome,
   type WorldAuthoringFailure,
@@ -43,7 +44,7 @@ import {
   type WorldAuthoringAuthority
 } from "./authority.js";
 import { buildForwardCommands, buildInverseCommands } from "./scene-area-command-mapping.js";
-import type { LeaseIntent, SpatialAcquireResult, SpatialWriteContext } from "./spatial-leases.js";
+import type { LeaseConflict, LeaseIntent, SpatialAcquireResult, SpatialWriteContext } from "./spatial-leases.js";
 
 export type WorldAuthoringServiceDeps = {
   authority: WorldAuthoringAuthority;
@@ -198,7 +199,21 @@ function matchesReceiptState(
 }
 
 
-function resultFailure(result: RoomCommandResult): WorldAuthoringFailure {
+/** Conflict target plus the run that currently occupies it; never drop the run identity. */
+function conflictsFor(
+  conflict: LeaseConflict | undefined,
+  canvas?: ServerCanvas
+): WorldAuthoringConflict[] | undefined {
+  if (!conflict) return undefined;
+  return [{
+    target: conflict.target,
+    version: canvas ? worldObjectVersion(canvas, conflict.target) : null,
+    runId: conflict.runId,
+    epoch: conflict.epoch
+  }];
+}
+
+function resultFailure(result: RoomCommandResult, canvas?: ServerCanvas): WorldAuthoringFailure {
   if (result.ok) return failure("invalid-data", "unexpected");
   const domainCodes: WorldAuthoringFailureCode[] = [
     "invalid-data", "not-ready", "outside-scope", "version-conflict", "operation-conflict",
@@ -209,11 +224,14 @@ function resultFailure(result: RoomCommandResult): WorldAuthoringFailure {
   }
   if (result.code === "lease-conflict") {
     return failure("lease-conflict", "目标正在被其他运行占用", {
-      conflicts: result.conflict ? [{ ...result.conflict.target, version: "" }] : undefined
+      conflicts: conflictsFor(result.conflict, canvas)
     });
   }
   if (result.code === "spatial-rejected") {
-    return failure("spatial-rejected", "空间写入资格无效", { spatialReason: result.spatialReason });
+    return failure("spatial-rejected", "空间写入资格无效", {
+      spatialReason: result.spatialReason,
+      conflicts: conflictsFor(result.conflict, canvas)
+    });
   }
   if (result.code === "command-id-reused" || result.code === "request-id-reused") return failure("operation-conflict", "相同 operationId 使用了不同意图");
   if (result.code === "edit-precondition-failed") return failure("version-conflict", "源对象或范围已变化");
@@ -286,7 +304,7 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
         readOnly
       });
     } catch (error) {
-      return failure(mapLeaseError(error), "无法取得范围写占用");
+      return leaseFailure(error, snapshot.canvas);
     }
     if (!acquired.capability) {
       return failure(acquired.retry ? "stale-epoch" : "not-ready", "运行尚未取得写能力，需先核对执行");
@@ -400,7 +418,7 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
       ...(options?.authorize ? { authorize: options.authorize } : {}),
       ...(options?.signal ? { signal: options.signal } : {})
     });
-    if (!derived.ok) return resultFailure(derived);
+    if (!derived.ok) return resultFailure(derived, snapshot.canvas);
     let receipt = derived.worldAuthoring;
     if (!receipt) {
       const record = await snapshot.room.lookupCommand(commandId);
@@ -512,7 +530,7 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
       ...(options?.authorize ? { authorize: options.authorize } : {}),
       ...(options?.signal ? { signal: options.signal } : {})
     });
-    if (!derived.ok) return resultFailure(derived);
+    if (!derived.ok) return resultFailure(derived, snapshot.canvas);
     let receipt = derived.worldAuthoring;
     if (!receipt) receipt = (await snapshot.room.lookupCommand(commandId))?.worldAuthoring;
     if (!receipt) return failure("not-ready", "权威回执不可用");
@@ -542,8 +560,7 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
   };
 }
 
-function mapLeaseError(error: unknown): WorldAuthoringFailureCode {
-  const code = error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "";
+function mapLeaseErrorCode(code: string): WorldAuthoringFailureCode {
   switch (code) {
     case "lease-conflict": return "lease-conflict";
     case "outside-scope": return "outside-scope";
@@ -554,4 +571,13 @@ function mapLeaseError(error: unknown): WorldAuthoringFailureCode {
     case "unavailable": return "not-ready";
     default: return "not-ready";
   }
+}
+
+/** Lease acquisition failures keep the occupying run and conflict target for the caller. */
+function leaseFailure(error: unknown, canvas?: ServerCanvas): WorldAuthoringFailure {
+  const record = error && typeof error === "object" ? error as { code?: unknown; conflict?: LeaseConflict } : {};
+  const code = mapLeaseErrorCode(typeof record.code === "string" ? record.code : "");
+  return failure(code, code === "lease-conflict" ? "目标正在被其他运行占用" : "无法取得范围写占用", {
+    conflicts: conflictsFor(record.conflict, canvas)
+  });
 }
