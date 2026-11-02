@@ -15,8 +15,9 @@ export interface SpatialLeaseAuthority {
 export type LeaseState = "active" | "cancelled" | "stopped";
 export interface LeaseRecord { intent: LeaseIntent; state: LeaseState; }
 export type LeaseErrorCode = "invalid-data" | "unavailable" | "request-conflict" | "lease-conflict" | "stale-epoch" | "cancelled" | "outside-scope" | "version-conflict" | "unverified-stop";
+export interface LeaseConflict { target: WorldObjectIdentity; runId: string; epoch: number; }
 export class SpatialLeaseError extends Error {
-  constructor(public readonly code: LeaseErrorCode) { super(code); }
+  constructor(public readonly code: LeaseErrorCode, public readonly conflict?: LeaseConflict) { super(code); }
 }
 
 export function objectKey(target: WorldObjectIdentity): string {

@@ -54,9 +54,13 @@ export class SqliteSpatialLeaseStore {
     const insert = this.db.prepare("INSERT INTO spatial_lease_locks VALUES (?, ?, ?, ?, ?)");
     for (const target of targets) {
       const existing = lookup.get(intent.canvasId, target.kind, id(target)) as { run_id: string; epoch: number } | undefined;
-      if (existing && (existing.run_id !== intent.runId || existing.epoch !== intent.epoch)) throw new SpatialLeaseError("lease-conflict");
+      if (existing && (existing.run_id !== intent.runId || existing.epoch !== intent.epoch)) throw this.conflict(target, existing);
       if (!existing) { insert.run(intent.canvasId, target.kind, id(target), intent.runId, intent.epoch); this.onWrite?.(); }
     }
+  }
+  private conflict(target: WorldObjectIdentity, lock: { run_id: string; epoch: number }): SpatialLeaseError {
+    const identity: WorldObjectIdentity = target.kind === "instance" ? { kind: "instance", instanceId: target.instanceId } : { kind: "camera", cameraId: target.cameraId };
+    return new SpatialLeaseError("lease-conflict", { target: identity, runId: lock.run_id, epoch: lock.epoch });
   }
   acquire(input: LeaseIntent): LeaseRecord {
     const intent = normalize(input);
@@ -104,8 +108,11 @@ export class SqliteSpatialLeaseStore {
   }
   /** Manual writes must call this in their canonical transaction as well. */
   validateUnoccupied(canvasId: string, targets: WorldObjectIdentity[]): void {
-    const query = this.db.prepare("SELECT 1 FROM spatial_lease_locks WHERE canvas_id = ? AND kind = ? AND object_id = ?");
-    for (const target of targets) if (query.get(canvasId, target.kind, id(target))) throw new SpatialLeaseError("lease-conflict");
+    const query = this.db.prepare("SELECT run_id, epoch FROM spatial_lease_locks WHERE canvas_id = ? AND kind = ? AND object_id = ?");
+    for (const target of targets) {
+      const lock = query.get(canvasId, target.kind, id(target)) as { run_id: string; epoch: number } | undefined;
+      if (lock) throw this.conflict(target, lock);
+    }
   }
   /** Call synchronously inside the same transaction as the canonical write. */
   validateForCommit(canvasId: string, requestId: string, runId: string, epoch: number, executionId: string, scope: WorldScopeVersion, targets: WorldObjectVersion[]): void {
@@ -118,7 +125,8 @@ export class SqliteSpatialLeaseStore {
     for (const target of normalized) {
       if (granted.get(objectKey(target)) !== target.version) throw new SpatialLeaseError("version-conflict");
       const lock = this.db.prepare("SELECT run_id, epoch FROM spatial_lease_locks WHERE canvas_id = ? AND kind = ? AND object_id = ?").get(canvasId, target.kind, id(target)) as { run_id: string; epoch: number } | undefined;
-      if (!lock || lock.run_id !== runId || lock.epoch !== epoch) throw new SpatialLeaseError("lease-conflict");
+      if (!lock) throw new SpatialLeaseError("lease-conflict");
+      if (lock.run_id !== runId || lock.epoch !== epoch) throw this.conflict(target, lock);
     }
     this.eligible(record.intent, normalized);
   }
@@ -135,7 +143,8 @@ export class SqliteSpatialLeaseStore {
     for (const target of before) {
       if (granted.get(objectKey(target)) !== target.version) throw new SpatialLeaseError("version-conflict");
       const lock = this.db.prepare("SELECT run_id, epoch FROM spatial_lease_locks WHERE canvas_id = ? AND kind = ? AND object_id = ?").get(canvasId, target.kind, id(target)) as { run_id: string; epoch: number } | undefined;
-      if (!lock || lock.run_id !== runId || lock.epoch !== epoch) throw new SpatialLeaseError("lease-conflict");
+      if (!lock) throw new SpatialLeaseError("lease-conflict");
+      if (lock.run_id !== runId || lock.epoch !== epoch) throw this.conflict(target, lock);
     }
     this.eligible(record.intent, after);
     const updates = new Map(after.map(t => [objectKey(t), t]));

@@ -29,6 +29,18 @@ describe("durable spatial leases", () => {
     expect(() => one.validateUnoccupied("canvas", [instance("a")])).toThrow("lease-conflict");
     a.close(); b.close();
   });
+  it("reports the typed target and occupying run observed in each conflict", () => {
+    const { a, b, one, two } = fixture();
+    one.acquire({ ...intent("owner", [camera("shared")]), epoch: 7 });
+    two.acquire(intent("contender", [instance("own")]));
+    const conflict = { code: "lease-conflict", conflict: { target: { kind: "camera", cameraId: "shared" }, runId: "owner", epoch: 7 } };
+    expect(() => two.acquire(intent("other", [instance("free"), camera("shared")]))).toThrow(expect.objectContaining(conflict));
+    expect(() => two.extend("canvas", "contender", [instance("free"), camera("shared")])).toThrow(expect.objectContaining(conflict));
+    expect(() => two.validateUnoccupied("canvas", [camera("shared")])).toThrow(expect.objectContaining(conflict));
+    two.validateUnoccupied("canvas", [instance("free"), instance("shared")]);
+    expect(two.lookup("canvas", "contender")?.intent.writable).toEqual([instance("own")]);
+    a.close(); b.close();
+  });
   it("does not leave a partial run when another connection holds the write transaction", () => {
     const { a, b, one, two } = fixture();
     a.exec("BEGIN IMMEDIATE");
