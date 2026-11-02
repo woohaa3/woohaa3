@@ -11,10 +11,28 @@ use bevy::{prelude::*, render::mesh::{Indices, VertexAttributeValues}};
 
 use crate::canvas_query::model_pick::ModelCandidate;
 use crate::protocol::{GraphNode, ModelSnapshot, Scene};
+use std::collections::HashMap;
+
+type PartPoses = HashMap<String, crate::motion::ModelDelta>;
 
 thread_local! {
     static SHARED_SCENE: std::cell::RefCell<Option<Scene>> = const { std::cell::RefCell::new(None) };
-    static CACHE: std::cell::RefCell<Vec<(String, Arc<ModelSnapshot>, Mat4, ModelCandidate)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static CACHE: std::cell::RefCell<Vec<(String, Arc<ModelSnapshot>, Mat4, u64, ModelCandidate)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static MOTION: std::cell::RefCell<(Option<String>, PartPoses, u64)> = std::cell::RefCell::new((None, HashMap::new(), 0));
+}
+
+pub(crate) fn publish_motion(node: Option<&str>, poses: PartPoses) {
+    MOTION.with(|slot| {
+        let mut current = slot.borrow_mut();
+        let equal = current.0.as_deref() == node && current.1.len() == poses.len()
+            && poses.iter().all(|(id, p)| current.1.get(id).is_some_and(|q|
+                p.translation == q.translation && p.rotation == q.rotation && p.scale == q.scale && p.opacity == q.opacity));
+        if !equal {
+            current.0 = node.map(str::to_owned);
+            current.1 = poses;
+            current.2 = current.2.wrapping_add(1);
+        }
+    });
 }
 
 pub(crate) fn remember_scene(scene: &Scene) {
@@ -27,14 +45,18 @@ pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSna
             CACHE.with(|cache| {
                 let mut old = std::mem::take(&mut *cache.borrow_mut());
                 let mut next = Vec::new();
+                MOTION.with(|motion| {
+                let motion = motion.borrow();
                 for node in scene.nodes.iter().filter(|n| n.shared_world_instance.is_some() && is_model_candidate(n)) {
                     let reference = node.model.as_ref().unwrap();
                     let Some(model) = lookup(&reference.resource_key) else { continue };
                     let root = super::layout::model_root_transform(node, &model, &reference.placement).to_matrix();
-                    let candidate = if let Some(index) = old.iter().position(|(id, asset, pose, _)| id == &node.id && Arc::ptr_eq(asset, &model) && *pose == root) {
-                        old.swap_remove(index).3
+                    let revision = if motion.0.as_deref() == Some(&node.id) { motion.2 } else { 0 };
+                    let candidate = if let Some(index) = old.iter().position(|(id, asset, pose, rev, _)| id == &node.id && Arc::ptr_eq(asset, &model) && *pose == root && *rev == revision) {
+                        old.swap_remove(index).4
                     } else {
-                        let triangles = world_triangles(node, &model, &reference.placement);
+                        let poses = if revision != 0 { Some(&motion.1) } else { None };
+                        let triangles = world_triangles(node, &model, &reference.placement, poses);
                         let mut min = Vec3::splat(f32::INFINITY);
                         let mut max = Vec3::splat(f32::NEG_INFINITY);
                         for vertex in triangles.iter().flat_map(|triangle| triangle.vertices) {
@@ -46,9 +68,10 @@ pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSna
                         if !min.is_finite() || !max.is_finite() { continue; }
                         ModelCandidate { node_id: node.id.clone(), shared_world: true, min: min.to_array(), max: max.to_array(), triangles: Some(Arc::new(triangles)) }
                     };
-                    next.push((node.id.clone(), model, root, candidate));
+                    next.push((node.id.clone(), model, root, revision, candidate));
                 }
-                crate::canvas_query::model_pick::replace_shared_models(next.iter().map(|entry| entry.3.clone()).collect());
+                });
+                crate::canvas_query::model_pick::replace_shared_models(next.iter().map(|entry| entry.4.clone()).collect());
                 *cache.borrow_mut() = next;
             });
         }
@@ -92,25 +115,28 @@ pub(crate) fn model_candidates(
     candidates
 }
 
-fn world_triangles(node: &GraphNode, model: &ModelSnapshot, placement: &crate::protocol::ModelPlacement) -> Vec<crate::canvas_query::model_pick::SurfaceTriangle> {
+fn world_triangles(node: &GraphNode, model: &ModelSnapshot, placement: &crate::protocol::ModelPlacement, poses: Option<&PartPoses>) -> Vec<crate::canvas_query::model_pick::SurfaceTriangle> {
     let root = super::layout::model_root_transform(node, model, placement).to_matrix();
     let specs = super::scene::build_entity_specs(model);
     let materials = super::scene::collect_materials(model);
     let indices: std::collections::HashMap<_, _> = specs.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
-    fn world(index: usize, specs: &[super::scene::ModelEntitySpec], indices: &std::collections::HashMap<&str, usize>, root: Mat4, visiting: &mut Vec<usize>) -> Option<Mat4> {
+    fn world(index: usize, specs: &[super::scene::ModelEntitySpec], indices: &std::collections::HashMap<&str, usize>, root: Mat4, poses: Option<&PartPoses>, visiting: &mut Vec<usize>) -> Option<Mat4> {
         if visiting.contains(&index) { return None; }
         visiting.push(index);
         let spec = &specs[index];
         let parent = match spec.parent.as_deref() {
-            Some(id) => world(*indices.get(id)?, specs, indices, root, visiting)?,
+            Some(id) => world(*indices.get(id)?, specs, indices, root, poses, visiting)?,
             None => root,
         };
         visiting.pop();
-        Some(parent * Transform { translation: Vec3::from_array(spec.position), rotation: super::scene::quat_from_xyz_radians(spec.rotation_radians), scale: Vec3::from_array(spec.scale) }.to_matrix())
+        let base = Transform { translation: Vec3::from_array(spec.position), rotation: super::scene::quat_from_xyz_radians(spec.rotation_radians), scale: Vec3::from_array(spec.scale) };
+        let local = poses.and_then(|p| p.get(&spec.id)).map_or(base, |delta| super::runtime::compose_delta(base, delta));
+        Some(parent * local.to_matrix())
     }
     let mut triangles = Vec::new();
     for (index, spec) in specs.iter().enumerate() {
-        let Some(world) = world(index, &specs, &indices, root, &mut Vec::new()) else { continue };
+        let Some(world) = world(index, &specs, &indices, root, poses, &mut Vec::new()) else { continue };
+        if poses.and_then(|p| p.get(&spec.id)).is_some_and(|p| p.opacity <= 0.0) { continue; }
         let material = spec.material_key.strip_prefix("material:").and_then(|id| materials.get(id));
         if material.is_some_and(|material| material.static_opacity() <= 0.0) { continue; }
         let cull_back = spec.material_key.starts_with("material:") && material.map_or(true, |material| !material.double_sided);
@@ -198,7 +224,7 @@ mod tests {
         remember_scene(&scene);
         let asset = Arc::new(snapshot());
         refresh_shared_models(|_| Some(asset.clone()));
-        let triangles = world_triangles(&scene.nodes[0], &asset, &scene.nodes[0].model.as_ref().unwrap().placement);
+        let triangles = world_triangles(&scene.nodes[0], &asset, &scene.nodes[0].model.as_ref().unwrap().placement, None);
         let mut candidates = model_candidates(&scene, |_| Some(asset.clone()));
         candidates[0].triangles = Some(Arc::new(triangles));
         assert_eq!(candidates[0].triangles.as_ref().unwrap().len(), 12);
@@ -221,9 +247,9 @@ mod tests {
         let asset = Arc::new(snapshot());
         refresh_shared_models(|_| Some(asset.clone()));
         assert_eq!(query()["nodeId"], "m");
-        let first = CACHE.with(|cache| cache.borrow()[0].3.triangles.clone().unwrap());
+        let first = CACHE.with(|cache| cache.borrow()[0].4.triangles.clone().unwrap());
         refresh_shared_models(|_| Some(asset.clone()));
-        CACHE.with(|cache| assert!(Arc::ptr_eq(&first, cache.borrow()[0].3.triangles.as_ref().unwrap())));
+        CACHE.with(|cache| assert!(Arc::ptr_eq(&first, cache.borrow()[0].4.triangles.as_ref().unwrap())));
         refresh_shared_models(|_| None);
         assert!(query()["nodeId"].is_null());
     }
@@ -241,7 +267,7 @@ mod tests {
             alpha_mode: "blend".into(), double_sided: true, unlit: false,
             opacity: Some(0.0), base_color_texture: None,
         });
-        assert!(world_triangles(&node, &model, &node.model.as_ref().unwrap().placement).is_empty());
+        assert!(world_triangles(&node, &model, &node.model.as_ref().unwrap().placement, None).is_empty());
         remember_scene(&Scene { nodes: vec![node], ..Scene::default() });
         crate::canvas_query::model_pick::accept_models(Vec::new(), 9, Default::default());
         let asset = Arc::new(model);
@@ -266,7 +292,7 @@ mod tests {
         let asset = Arc::new(snapshot());
         crate::bridge::queue_model_snapshot("v:sig".into(), asset.signature.clone(), asset.scene_version.clone(), asset);
         assert_eq!(query(7)["nodeId"], "m");
-        let first = CACHE.with(|cache| cache.borrow()[0].3.triangles.clone().unwrap());
+        let first = CACHE.with(|cache| cache.borrow()[0].4.triangles.clone().unwrap());
         crate::canvas_query::model_pick::accept_viewport_camera([0., 0., 1.], [800., 600.], 8);
         assert_eq!(query(7)["reason"], "stale");
         assert_eq!(query(8)["nodeId"], "m");
@@ -277,7 +303,34 @@ mod tests {
         let replacement = Arc::new(replacement);
         crate::bridge::queue_model_snapshot("v:sig".into(), replacement.signature.clone(), replacement.scene_version.clone(), replacement);
         assert_eq!(query(8)["nodeId"], "m");
-        CACHE.with(|cache| assert!(!Arc::ptr_eq(&first, cache.borrow()[0].3.triangles.as_ref().unwrap())));
+        CACHE.with(|cache| assert!(!Arc::ptr_eq(&first, cache.borrow()[0].4.triangles.as_ref().unwrap())));
+        crate::bridge::clear_model_assets();
+    }
+
+    #[test]
+    fn published_motion_invalidates_visible_surface_cache() {
+        crate::bridge::clear_model_assets();
+        publish_motion(None, HashMap::new());
+        let node = node(r#"{"id":"m","type":"model3d","x":0,"y":0,"width":260,"height":195,"model":{"resourceKey":"moving"},"sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i","transform":{"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1}}}"#);
+        let asset = Arc::new(snapshot());
+        crate::bridge::queue_model_snapshot("moving".into(), asset.signature.clone(), asset.scene_version.clone(), asset);
+        remember_scene(&Scene { nodes: vec![node], ..Scene::default() });
+        crate::canvas_query::model_pick::accept_models(Vec::new(), 12, Default::default());
+        let query = |point: Vec3| {
+            let screen = crate::isometric_grid::screen_point_from_world(point, &Default::default());
+            let request = format!(r#"{{"generation":12,"x":{},"y":{},"width":800,"height":600}}"#, screen.x, screen.y);
+            serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request)).unwrap()["nodeId"].clone()
+        };
+        assert_eq!(query(Vec3::new(0., 64., 0.)), "m");
+        let mut delta = crate::motion::ModelDelta::default();
+        delta.translation = Vec3::new(4., 0., 0.);
+        publish_motion(Some("m"), HashMap::from([("body".into(), delta)]));
+        assert!(query(Vec3::new(0., 64., 0.)).is_null());
+        assert_eq!(query(Vec3::new(256., 64., 0.)), "m");
+        delta.opacity = 0.;
+        publish_motion(Some("m"), HashMap::from([("body".into(), delta)]));
+        assert!(query(Vec3::new(256., 64., 0.)).is_null());
+        publish_motion(None, HashMap::new());
         crate::bridge::clear_model_assets();
     }
 
