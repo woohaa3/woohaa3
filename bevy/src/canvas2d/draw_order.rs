@@ -47,6 +47,7 @@ mod tests {
 
     fn graph_node(id: &str, _group: bool) -> GraphNode {
         GraphNode {
+            shared_world_instance: None,
             model_preview: None,
             id: id.into(),
             kind: "image".into(),

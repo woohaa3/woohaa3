@@ -281,8 +281,10 @@ describe("Bevy runtime viewport capability（change: 2026-10-10-optimize-canvas-
     delete missing.scene_capability;
     await expect(loadBevyRuntime({ importModule: async () => missing })).rejects.toThrow(/scene_capability/);
     const stale = mockModule([]);
-    stale.scene_capability = () => "woohaa-canvas-render-scene-v26";
-    await expect(loadBevyRuntime({ importModule: async () => stale })).rejects.toThrow(/场景能力不匹配/);
+    stale.scene_capability = () => "woohaa-canvas-render-scene-v35";
+    await expect(loadBevyRuntime({ importModule: async () => stale })).rejects.toThrow(
+      /场景能力不匹配：woohaa-canvas-render-scene-v35 != woohaa-canvas-render-scene-v36/
+    );
   });
 
   it("缺少 drop 目标查询时初始化明确失败", async () => {

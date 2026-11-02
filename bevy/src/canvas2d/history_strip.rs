@@ -124,6 +124,7 @@ mod tests {
 
     fn node(strip: Option<HistoryStripPresentation>) -> GraphNode {
         GraphNode {
+            shared_world_instance: None,
             model_preview: None,
             media_loading: false,
             id: "n".into(),

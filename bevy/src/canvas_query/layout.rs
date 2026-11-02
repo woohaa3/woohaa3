@@ -479,6 +479,7 @@ mod tests {
 
     fn node(width: f32, height: f32) -> GraphNode {
         GraphNode {
+            shared_world_instance: None,
             model_preview: None,
             id: "n".into(),
             kind: "text".into(),
@@ -504,6 +505,7 @@ mod tests {
 
     fn kind_node(kind: &str, width: f32, height: f32, busy: bool) -> GraphNode {
         GraphNode {
+            shared_world_instance: None,
             kind: kind.into(),
             busy,
             ..node(width, height)
@@ -640,6 +642,7 @@ mod tests {
 
     fn action_node(x: f32, y: f32) -> GraphNode {
         GraphNode {
+            shared_world_instance: None,
             model_preview: None,
             id: "n1".into(),
             kind: "image".into(),

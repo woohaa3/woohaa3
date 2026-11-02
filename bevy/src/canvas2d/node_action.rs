@@ -355,6 +355,7 @@ mod tests {
 
     fn node(id: &str, x: f32, y: f32) -> GraphNode {
         GraphNode {
+            shared_world_instance: None,
             model_preview: None,
             history_strip: None,
             id: id.into(),

@@ -341,6 +341,7 @@ mod tests {
 
     fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         GraphNode {
+            shared_world_instance: None,
             model_preview: None,
             ghost: false,
             card_label: None,

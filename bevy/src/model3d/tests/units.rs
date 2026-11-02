@@ -21,6 +21,7 @@ fn transform_signature_tracks_position_and_placement() {
         placement: ModelPlacement::default(),
     };
     let node = GraphNode {
+        shared_world_instance: None,
         model_preview: None,
         id: "n".into(),
         kind: "model".into(),
@@ -94,6 +95,7 @@ fn material_key_prefers_material_reference() {
 #[test]
 fn content_and_transform_identity_are_independent() {
     let node = |id: &str| GraphNode {
+        shared_world_instance: None,
         model_preview: None,
         id: id.into(),
         kind: "model".into(),
@@ -161,6 +163,7 @@ fn repeated_shapes_share_mesh_key() {
 #[test]
 fn model_anchor_keeps_card_above_model_top() {
     let node = GraphNode {
+        shared_world_instance: None,
         model_preview: None,
         id: "m".into(),
         kind: "model".into(),
@@ -231,6 +234,7 @@ fn model_anchor_keeps_card_above_model_top() {
 #[test]
 fn model_anchor_falls_back_for_empty_model() {
     let node = GraphNode {
+        shared_world_instance: None,
         model_preview: None,
         id: "m".into(),
         kind: "model".into(),
@@ -278,6 +282,7 @@ fn model_anchor_falls_back_for_empty_model() {
 #[test]
 fn model_world_is_stable_and_scale_sensitive() {
     let node = GraphNode {
+        shared_world_instance: None,
         model_preview: None,
         id: "m".into(),
         kind: "model".into(),
