@@ -24,12 +24,36 @@ async function readBytes(url: string, signal?: AbortSignal): Promise<Uint8Array>
 
 export function createNativeImagePort(request: (path: string, body?: Uint8Array) => unknown) {
   const generation=++nextGeneration, handles=new Set<string>(); let disposed=false;
+  const leaseWaiters=new Set<()=>void>();
+  const wakeLeaseWaiters=()=>{const pending=[...leaseWaiters];leaseWaiters.clear();for(const wake of pending)wake();};
   const call=(path: string,body?: Uint8Array): Record<string,unknown> => {
     const result=request(path,body) as { ok:boolean;value?:Record<string,unknown>;error?:string };
     if(!result.ok) throw new Error(result.error ?? 'Native image request failed');
     return result.value ?? {};
   };
-  const release=(handle:string)=>{if(handles.delete(handle))call(`image-release?handle=${encodeURIComponent(handle)}`);};
+  const release=(handle:string)=>{if(!handles.delete(handle))return;try{call(`image-release?handle=${encodeURIComponent(handle)}`);}finally{wakeLeaseWaiters();}};
+  /**
+   * 等某个 lease 释放后再注册。
+   *
+   * `media-image` 的 16 个 lease 是背压上限而不是内容错误：上层按帧上传纹理，
+   * 总览时解码完的图片会在上传队列里排队，超过上限的时间窗很常见。直接失败会把
+   * 节点永久钉成「预览加载失败」，所以这里等释放；50ms 兜底覆盖别的 port 实例或
+   * 宿主回收腾出 lease 的情况。
+   */
+  const waitForLease=(signal?:AbortSignal)=>new Promise<void>((resolve,reject)=>{
+    if(disposed||signal?.aborted){reject(new Error('image-cancelled'));return;}
+    let done=false,timer:ReturnType<typeof setTimeout>;
+    const finish=(error?:Error)=>{
+      if(done)return;
+      done=true;clearTimeout(timer);leaseWaiters.delete(wake);signal?.removeEventListener('abort',onAbort);
+      if(error)reject(error);else resolve();
+    };
+    const wake=()=>finish();
+    const onAbort=()=>finish(new Error('image-cancelled'));
+    timer=setTimeout(()=>finish(),50);
+    leaseWaiters.add(wake);
+    signal?.addEventListener('abort',onAbort,{once:true});
+  });
   const port: NativeImagePort = {
     async prepare(url,edge,signal) {
       if(disposed || signal?.aborted) throw new Error('image-cancelled');
@@ -44,11 +68,23 @@ export function createNativeImagePort(request: (path: string, body?: Uint8Array)
     release(image) {if(image.generation===generation)release(image.handle);}
   };
   /** Register bytes already read by the caller (used when the page owns the fetch quota). */
+  async function registerHandle(bytes: Uint8Array, edge: number, deadline: number, signal?: AbortSignal): Promise<string> {
+    for(;;) {
+      if(disposed || signal?.aborted) throw new Error('image-cancelled');
+      try { return String(call(`image-register?edge=${edge}`,bytes).handle); }
+      catch(error) {
+        const code=error instanceof Error?error.message:String(error);
+        if(code!=='native-image-lease-budget' && code!=='native-image-busy') throw error;
+        if(performance.now()>=deadline) throw new ImageLoadError('native-image-timeout',true);
+        await waitForLease(signal);
+      }
+    }
+  }
   async function prepareBytesImpl(bytes: Uint8Array, edge: number, signal?: AbortSignal): Promise<PreparedImageResource> {
     if(disposed || signal?.aborted) throw new Error('image-cancelled');
-    const handle=String(call(`image-register?edge=${edge}`,bytes).handle);
-    handles.add(handle);
     const deadline=performance.now()+60000;
+    const handle=await registerHandle(bytes,edge,deadline,signal);
+    handles.add(handle);
     try {
       for(;;) {
         if(disposed || signal?.aborted)throw new Error('image-cancelled');
@@ -56,7 +92,7 @@ export function createNativeImagePort(request: (path: string, body?: Uint8Array)
         if(result.status==='failed')throw new Error(String(result.error));
         if(result.status==='ready')return {width:Number(result.width),height:Number(result.height),sourceWidth:Number(result.sourceWidth),sourceHeight:Number(result.sourceHeight),
           pixels:{kind:'native-image' as const,handle,generation,width:Number(result.width),height:Number(result.height)}};
-        if(performance.now()>deadline)throw new Error('native-image-timeout');
+        if(performance.now()>deadline)throw new ImageLoadError('native-image-timeout',true);
         await new Promise(resolve=>setTimeout(resolve,16));
       }
     } catch(error) {
@@ -71,5 +107,5 @@ export function createNativeImagePort(request: (path: string, body?: Uint8Array)
       release(handle);throw error;
     }
   }
-  return { port, prepareBytes: prepareBytesImpl, dispose() { for(const handle of [...handles]) {try{release(handle);}catch{ /* Host may already be gone. */ }} disposed=true; } };
+  return { port, prepareBytes: prepareBytesImpl, dispose() { disposed=true; for(const handle of [...handles]) {try{release(handle);}catch{ /* Host may already be gone. */ }} wakeLeaseWaiters(); } };
 }
