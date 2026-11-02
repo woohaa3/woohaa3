@@ -203,6 +203,7 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
     // 接受点先结算 3D 根逐像素平局偏移：后续模型候选 AABB、徽章底座与根锚点都读同一份结果
     // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D3/D4）。
     depth_order::accept_scene(&scene);
+    model3d::pick::remember_scene(&scene);
     // 接受点同步发布 2D interaction snapshot 与 render scene
     // （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，design D2/D3）。
     let generation = canvas_query::accept_scene(&scene);
@@ -343,6 +344,8 @@ fn model_pick_camera(scene: &protocol::Scene) -> canvas_query::model_pick::Model
     canvas_query::model_pick::ModelPickCamera {
         viewport: [scene.viewport.x, scene.viewport.y, scene.viewport.zoom],
         surface,
+        ordinary: scene.model_focus.is_none() && scene.image_focus.is_none()
+            && scene.video_focus.is_none() && scene.focus_transition.is_none(),
     }
 }
 
@@ -351,6 +354,7 @@ fn model_pick_camera(scene: &protocol::Scene) -> canvas_query::model_pick::Model
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn query_model_pick(json: &str) -> String {
+    model3d::pick::refresh_shared_models(bridge::lookup_model_asset);
     canvas_query::model_pick::pick_query_json(json)
 }
 

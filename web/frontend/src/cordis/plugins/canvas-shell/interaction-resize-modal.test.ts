@@ -2,7 +2,7 @@
  * 交互控制器测试：resize 手势与 modal 输入门禁
  * （由 interaction-controller.test.ts 机械拆分，断言不变）。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
 import { installInteractionController } from "./interaction-controller.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
@@ -11,6 +11,56 @@ import {
 } from "./test-support/controller-harness.js";
 
 installSharedSession();
+
+it("world ground preview is transient and cancellation restores the accepted pose", () => {
+  const base = createEmptyWoohaa3ServerCanvas("c1");
+  const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i1",
+    transform: { version: "shared-world-v1", position: { u: 2, v: 3, h: 4 }, rotation: [0, 0, 0, 1], scale: 1 } };
+  const canvasState = { ...base, revision: 1, document: { ...base.document,
+    nodes: [{ id: "m1", type: "model3d", position: { x: 0, y: 0 } }] },
+    nodeData: { m1: { sharedWorldInstance: instance } } } as ServerCanvas;
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvasState);
+  const dom = harness();
+  const { runtime, scenes } = runtimeCapturing();
+  const controller = installInteractionController({ canvas: dom.canvas, getRuntime: () => runtime,
+    getSession: () => getSession() as never, target: dom.target as never });
+  submitted.length = 0;
+  expect(controller.setWorldGroundPreview("m1", { u: 1, v: -2 })).toBe(true);
+  controller.flush();
+  const position = () => (scenes.at(-1) as import("@woohaa3/contracts").CanvasRenderScene).nodes[0].sharedWorldInstance?.transform.position;
+  expect(position()).toEqual({ u: 3, v: 1, h: 4 });
+  controller.cancelTransientGesture();
+  controller.flush();
+  expect(position()).toEqual({ u: 2, v: 3, h: 4 });
+  expect(canvasState.nodeData.m1.sharedWorldInstance).toEqual(instance);
+  expect(submitted).toHaveLength(0);
+  controller.dispose();
+});
+
+it("rejects ground queries and gestures while focus or a focus transition is active", () => {
+  const base = createEmptyWoohaa3ServerCanvas("c1");
+  const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i1",
+    transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 1 }, rotation: [0, 0, 0, 1], scale: 1 } };
+  woohaa3CanvasStore.getState().applyRemoteCanvas({ ...base, document: { ...base.document,
+    nodes: [{ id: "m1", type: "model3d", position: { x: 0, y: 0 } }] }, nodeData: { m1: { sharedWorldInstance: instance } } } as ServerCanvas);
+  const dom = harness();
+  const { runtime } = runtimeCapturing();
+  const query = vi.fn(() => ({ ok: true as const, generation: 1, value: { u: 0, v: 0 } }));
+  runtime.queryWorldGround = query;
+  let focus = false, transition = false;
+  const controller = installInteractionController({ canvas: dom.canvas, getRuntime: () => runtime,
+    getSession: () => getSession() as never, target: dom.target as never,
+    getModelFocus: () => focus ? {} as never : null, getFocusTransition: () => transition ? {} as never : null });
+  const point = { x: 10, y: 20 };
+  expect(controller.beginWorldGroundPreview("m1", point)).toBe(true);
+  focus = true;
+  expect(controller.queryWorldGround(point)).toBeNull();
+  expect(controller.updateWorldGroundPreview(point)).toBe(false);
+  transition = true; focus = false;
+  expect(controller.beginWorldGroundPreview("m1", point)).toBe(false);
+  expect(query).toHaveBeenCalledTimes(1);
+  controller.dispose();
+});
 
 function setupResizable(
   type = "image",

@@ -84,6 +84,9 @@ thread_local! {
     static RENDER_STAGE_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
     /// 模型实例/唯一资源预算快照（JSON；scene3d 在表示变化后写入）。
     static MODEL_RENDER_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
+    static MODEL_POSE_REQUESTED: Cell<bool> = const { Cell::new(false) };
+    static MODEL_POSES: RefCell<String> = RefCell::new("{\"sequence\":0,\"focusNode\":null,\"models\":[]}".to_owned());
+    static MODEL_POSE_SEQUENCE: Cell<u64> = const { Cell::new(0) };
     /// 预览同步阶段延迟快照（JSON；变化时写入）。
     static PREVIEW_LATENCY_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
     /// 帧节奏状态标签（`idle` / `dwell` / `active:<reasons>`；变化时写入）。
@@ -141,6 +144,11 @@ pub(crate) fn note_local_block_builds(decorations: u64, edges: u64) {
 pub(crate) fn set_model_render_diagnostics(json: String) {
     MODEL_RENDER_DIAGNOSTICS.with(|v| *v.borrow_mut() = json);
 }
+pub(crate) fn take_model_pose_request() -> bool { MODEL_POSE_REQUESTED.with(|v| v.replace(false)) }
+pub(crate) fn set_model_poses(models: serde_json::Value, focus_node: Option<&str>) {
+    let sequence = MODEL_POSE_SEQUENCE.with(|v| { let next = v.get().saturating_add(1); v.set(next); next });
+    MODEL_POSES.with(|v| *v.borrow_mut() = serde_json::json!({"sequence": sequence, "focusNode": focus_node, "models": models}).to_string());
+}
 pub(crate) fn set_render_stage_diagnostics(json: String) {
     RENDER_STAGE_DIAGNOSTICS.with(|v| *v.borrow_mut() = json);
 }
@@ -156,6 +164,8 @@ pub(crate) fn set_frame_pacing_diagnostics(label: String) {
 }
 
 pub(crate) fn work_diagnostics() -> String {
+    MODEL_POSE_REQUESTED.with(|v| v.set(true));
+    let poses = MODEL_POSES.with(|v| v.borrow().clone());
     let latency = PREVIEW_LATENCY_DIAGNOSTICS.with(|slot| slot.borrow().clone());
     let render = RENDER_STAGE_DIAGNOSTICS.with(|v| v.borrow().clone());
     let model = MODEL_RENDER_DIAGNOSTICS.with(|v| v.borrow().clone());
@@ -165,7 +175,7 @@ pub(crate) fn work_diagnostics() -> String {
     let depth = crate::depth_order::diagnostics();
     let pacing = FRAME_PACING_DIAGNOSTICS.with(|v| v.borrow().clone());
     format!(
-        "{{\"snapshotBuilds\":{},\"pickCandidateBuilds\":{},\"meshBuilds\":{},\"cardBlockBuilds\":{},\"cardDecorationBuilds\":{},\"edgeBlockBuilds\":{},\"models\":{},\"renderStages\":{},\"previewLatency\":{},\"previews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"depthOrder\":{{\"roots\":{},\"clusters\":{},\"compressedClusters\":{}}},\"pacing\":\"{}\"}}",
+        "{{\"snapshotBuilds\":{},\"pickCandidateBuilds\":{},\"meshBuilds\":{},\"cardBlockBuilds\":{},\"cardDecorationBuilds\":{},\"edgeBlockBuilds\":{},\"models\":{},\"modelPoses\":{},\"renderStages\":{},\"previewLatency\":{},\"previews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"depthOrder\":{{\"roots\":{},\"clusters\":{},\"compressedClusters\":{}}},\"pacing\":\"{}\"}}",
         WORK_SNAPSHOT_BUILDS.with(Cell::get),
         WORK_PICK_CANDIDATE_BUILDS.with(Cell::get),
         WORK_MESH_BUILDS.with(Cell::get),
@@ -173,6 +183,7 @@ pub(crate) fn work_diagnostics() -> String {
         WORK_DECORATION_BUILDS.with(Cell::get),
         WORK_EDGE_BLOCK_BUILDS.with(Cell::get),
         model,
+        poses,
         render,
         latency,
         preview[0],

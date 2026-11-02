@@ -80,7 +80,7 @@ import type { BevyRenderDraft, BevyRenderMarquee, BevyRenderSurface } from "./wi
 // v35: groups and film sets are removed. `group`, `compositeAsset`, `aggregateRun`,
 //      `shotPreview`, `filmSetGroups`, `shotPreviewLinks` and `selectionActions` are gone;
 //      older renderers would keep drawing containers, badges and film-set overlays.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v36" as const;
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v37" as const;
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {

@@ -368,6 +368,13 @@ export type InteractionController = {
   exitModelFocus(): void;
   /** 是否处于模型聚焦查看。 */
   isModelFocused(): boolean;
+  /** Transient renderer-only ground displacement. Null cancels without a document write. */
+  setWorldGroundPreview(nodeId: string, delta: { u: number; v: number } | null): boolean;
+  /** Resolve a client point against the accepted renderer camera's ground plane. */
+  queryWorldGround(point: { x: number; y: number }): { u: number; v: number } | null;
+  beginWorldGroundPreview(nodeId: string, point: { x: number; y: number }): boolean;
+  updateWorldGroundPreview(point: { x: number; y: number }): boolean;
+  cancelWorldGroundPreview(): void;
   /**
    * 以 canonical nodeId 请求进入聚焦（历史 owner 用）
    * （change: add-canvas-node-generation-history，任务 4.1）。目标不合法返回 false。

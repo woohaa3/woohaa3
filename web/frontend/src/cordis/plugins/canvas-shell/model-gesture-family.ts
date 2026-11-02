@@ -361,6 +361,7 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
     get active() { return focus.active; },
     get nodeId() { return focus.nodeId; },
     projection: (): ModelFocusProjection | null => focus.projection(),
+    cameraSnapshot: () => focus.cameraSnapshot(),
     placementEditable,
     emitModelFocus,
     exitModelFocus,

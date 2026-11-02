@@ -111,6 +111,40 @@ export function installInteractionController(options: InteractionControllerOptio
   });
 
   const modelPlacements = () => collectModelPlacements();
+  const worldGroundPreviews = new Map<string, { u: number; v: number }>();
+  let worldGroundGesture: { nodeId: string; source: string; start: { u: number; v: number } } | null = null;
+  const groundAvailable = () => !disposed && !modalActive() && !options.getModelFocus?.()
+    && !options.getImageFocus?.() && !options.getVideoFocus?.() && !options.getFocusTransition?.();
+  const groundAt = (point: { x: number; y: number }) => {
+    if (!groundAvailable()) return null;
+    const runtime = options.getRuntime();
+    const bounds = readBounds();
+    const result = runtime?.queryWorldGround?.({ generation: runtime.interactionGeneration?.() ?? 0,
+      x: point.x - bounds.left, y: point.y - bounds.top, width: bounds.width, height: bounds.height });
+    return result?.ok ? result.value : null;
+  };
+  const clearWorldGroundPreviews = () => { worldGroundPreviews.clear(); worldGroundGesture = null; };
+  const beginWorldGroundPreview = (nodeId: string, point: { x: number; y: number }) => {
+    const instance = workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData[nodeId]?.sharedWorldInstance;
+    const start = groundAt(point);
+    if (!instance || !start) return false;
+    clearWorldGroundPreviews();
+    worldGroundGesture = { nodeId, source: JSON.stringify(instance), start };
+    return true;
+  };
+  const updateWorldGroundPreview = (point: { x: number; y: number }) => {
+    const gesture = worldGroundGesture;
+    if (!gesture) return false;
+    const instance = workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData[gesture.nodeId]?.sharedWorldInstance;
+    const ground = groundAt(point);
+    if (!instance || JSON.stringify(instance) !== gesture.source || !ground) {
+      clearWorldGroundPreviews(); schedule("world-ground-preview"); return false;
+    }
+    worldGroundPreviews.set(gesture.nodeId, { u: ground.u - gesture.start.u, v: ground.v - gesture.start.v });
+    schedule("world-ground-preview");
+    return true;
+  };
+  const cancelWorldGroundPreview = () => { clearWorldGroundPreviews(); schedule("world-ground-preview"); };
   /**
    * 拖动粘连瞬时投影 provider（change: add-drag-touch-connections）。
    * 由 2D input family 实现（它拥有 drag gesture），controller 只转发；闭包避免长依赖。
@@ -127,12 +161,17 @@ export function installInteractionController(options: InteractionControllerOptio
   } = { current: null };
   // 合成快照并附带本帧引用到的 prepared resources（change: optimize-model-scene-snapshot-hot-path）。
   /** 一帧的瞬时态快照（供场景构建读取）。 */
-  const frameState = () => ({
+  const frameState = () => {
+    if (!groundAvailable() || (worldGroundGesture && JSON.stringify(
+      workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData[worldGroundGesture.nodeId]?.sharedWorldInstance
+    ) !== worldGroundGesture.source)) clearWorldGroundPreviews();
+    return {
     selected: state.selected,
     draft: state.draft,
     marquee: marqueeRect(),
     localPositions: state.localPositions,
     localSizes: state.localSizes,
+    worldGroundPreviews,
     viewportPreview: state.viewportPreview,
     fallbackViewport: localViewport.get(),
     hoveredNodeId: state.hoveredNodeId,
@@ -142,7 +181,8 @@ export function installInteractionController(options: InteractionControllerOptio
     pressedHistory: state.gesture.kind === "history-press" ? state.gesture : null,
     dragAttach: attachProjectionRef.current?.() ?? null,
     aggregateConnect: aggregateProjectionRef.current?.() ?? null
-  });
+    };
+  };
   /**
    * 首个完整场景构建是否已计时。
    *
@@ -515,6 +555,7 @@ export function installInteractionController(options: InteractionControllerOptio
     suspendHoverPlayback,
     clearHover,
     clearHeldKeys,
+    clearWorldGroundPreviews,
     attach: {
       onAttachKey: (code, down) => input.onAttachKey(code, down),
       attachActive: () => input.attachActive(),
@@ -556,8 +597,27 @@ export function installInteractionController(options: InteractionControllerOptio
     state.spacePressed = false;
   });
 
-  return {
+  const controller: InteractionController = {
     start: () => schedule("start"),
+    setWorldGroundPreview: (nodeId, delta) => {
+      if (delta) {
+        if (!groundAvailable()) return false;
+        if (!Number.isFinite(delta.u) || !Number.isFinite(delta.v)) return false;
+        const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+        if (!canvas?.nodeData[nodeId]?.sharedWorldInstance) return false;
+        worldGroundPreviews.set(nodeId, { ...delta });
+      } else {
+        worldGroundPreviews.delete(nodeId);
+      }
+      schedule("world-ground-preview");
+      return true;
+    },
+    queryWorldGround: (point) => {
+      return groundAt(point);
+    },
+    beginWorldGroundPreview,
+    updateWorldGroundPreview,
+    cancelWorldGroundPreview,
     flush,
     /** 唯一失效入口（design D2）；缺省 reason 归一为 `invalidate`。 */
     invalidate: (reason) => schedule(reason ?? "invalidate"),
@@ -616,6 +676,8 @@ export function installInteractionController(options: InteractionControllerOptio
     },
     dispose() {
       disposed = true;
+      const hooks = target as unknown as { __worldGroundPreview?: InteractionController };
+      if (hooks.__worldGroundPreview === controller) delete hooks.__worldGroundPreview;
       disposeDiagnostics();
       unbindPlaybackGate();
       hover.forgetPointer();
@@ -644,4 +706,6 @@ export function installInteractionController(options: InteractionControllerOptio
       suspendHoverPlayback();
     }
   };
+  (target as unknown as { __worldGroundPreview?: InteractionController }).__worldGroundPreview = controller;
+  return controller;
 }
