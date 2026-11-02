@@ -23,6 +23,7 @@ import type { FrontendExtensionDefinition } from "./kernel.js";
 import { canvasNavigationExtension, CANVAS_NAVIGATION_PLUGIN_ID } from "./plugins/canvas-navigation/plugin.js";
 import { canvasRuntimeExtension, CANVAS_RUNTIME_PLUGIN_ID } from "./plugins/canvas-runtime/plugin.js";
 import { canvasShellExtension, CANVAS_SHELL_PLUGIN_ID } from "./plugins/canvas-shell/plugin.js";
+import { worldScopesExtension, WORLD_SCOPES_PLUGIN_ID } from "./plugins/world-scopes/plugin.js";
 import { canvasMenuExtension, CANVAS_MENU_PLUGIN_ID } from "./plugins/canvas-menu/plugin.js";
 import { mediaPreviewExtension, MEDIA_PREVIEW_PLUGIN_ID } from "./plugins/media-preview/plugin.js";
 import { mediaImportExtension, MEDIA_IMPORT_PLUGIN_ID } from "./plugins/media-import/plugin.js";
@@ -147,6 +148,7 @@ export const CANVAS_PLUGIN_CATALOG: readonly CanvasExtensionCatalogEntry[] = [
     configurable: false,
     create: () => canvasShellExtension()
   },
+  { id: WORLD_SCOPES_PLUGIN_ID, name: "场景范围", description: "场景范围和组织上下文。", required: true, configurable: false, create: (options) => worldScopesExtension(options.canvasId) },
   // required：多画布切换器 chrome（当前标题 + 分页列表 + 新建 + 重命名）。
   {
     id: CANVAS_SWITCHER_PLUGIN_ID,
