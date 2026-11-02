@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  createWorldCaptureContentResolutionRequest,
   createWorldCaptureMediaSaveRequest,
   createWorldCaptureRequest,
   resolveWorldCaptureOutcome,
   verifyWorldCaptureMediaSaveReceipt,
+  worldCaptureContentResolutionOutcome,
   type WorldCaptureImage,
   type WorldCaptureMediaSavePort,
   type WorldCaptureMediaSaveReceipt,
@@ -13,6 +15,27 @@ import {
   type WorldCaptureRequest,
   type WorldCaptureSubject
 } from "./world-capture-port-contract.js";
+import {
+  EMPTY_WORLD_CAPTURE_CONTENT_FINGERPRINT,
+  WORLD_CAPTURE_CONTENT_RESOLUTION_VERSION,
+  WORLD_CAPTURE_MODEL_CONTENT_VERSION,
+  verifyWorldCaptureContentResolution,
+  worldCaptureContentFingerprint,
+  worldCaptureModelContentHash,
+  type WorldCaptureContentResolution,
+  type WorldCaptureInstanceContent,
+  type WorldCaptureModelContent
+} from "./world-capture-content-contract.js";
+import {
+  DEFAULT_MODEL_PLACEMENT,
+  deriveModelContentVersion,
+  glbModelContentHash,
+  glbModelSourceHash,
+  type ModelPlacement
+} from "./model-definition.js";
+import { MODEL_SCRIPT_LANGUAGE, MODEL_SCRIPT_V2_VERSION } from "./model-script.js";
+import { prepareModelResource, type PreparedModelResource } from "./prepared-model.js";
+import type { SceneV2Op } from "./scene-ir-v2.js";
 import {
   WORLD_CAPTURE_INPUT_VERSION,
   WORLD_CAPTURE_MEDIA_VERSION,
@@ -87,6 +110,89 @@ const INSTANCE_B: WorldInstanceData = {
   }
 };
 
+function clonePlacement(placement: ModelPlacement = DEFAULT_MODEL_PLACEMENT): ModelPlacement {
+  return { offset: { ...placement.offset }, scale: placement.scale, yaw: placement.yaw };
+}
+
+function scriptContent(source: string): WorldCaptureModelContent {
+  const placement = clonePlacement();
+  return {
+    version: WORLD_CAPTURE_MODEL_CONTENT_VERSION,
+    kind: "script",
+    definition: {
+      modelScript: source,
+      modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
+      modelScriptVersion: MODEL_SCRIPT_V2_VERSION,
+      contentVersion: deriveModelContentVersion({
+        modelScript: source,
+        modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
+        modelScriptVersion: MODEL_SCRIPT_V2_VERSION,
+        placement,
+        revision: 1
+      }),
+      placement
+    }
+  };
+}
+
+function glbContent(assetId: string): WorldCaptureModelContent {
+  const placement = clonePlacement();
+  return {
+    version: WORLD_CAPTURE_MODEL_CONTENT_VERSION,
+    kind: "glb",
+    reference: {
+      assetId,
+      contentVersion: {
+        revision: 1,
+        sourceHash: glbModelSourceHash(assetId),
+        contentHash: glbModelContentHash({ assetId, placement })
+      },
+      placement
+    }
+  };
+}
+
+const CONTENT_A: WorldCaptureInstanceContent = {
+  instanceId: "instance-a",
+  content: scriptContent("const root = box();")
+};
+const CONTENT_B: WorldCaptureInstanceContent = {
+  instanceId: "instance-b",
+  content: glbContent("asset-instance-b")
+};
+const CONTENTS_AB = [CONTENT_A, CONTENT_B] as const;
+
+/** Same instance IDs and poses, different actual model content. */
+const CONTENT_A_CHANGED: WorldCaptureInstanceContent = {
+  instanceId: "instance-a",
+  content: scriptContent("const root = sphere();")
+};
+const CONTENT_B_CHANGED: WorldCaptureInstanceContent = {
+  instanceId: "instance-b",
+  content: glbContent("asset-instance-b-v2")
+};
+
+function boxOp(id: string): SceneV2Op {
+  return {
+    t: "box",
+    id,
+    parent: null,
+    position: [0, 0, 0],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    material: null,
+    color: "#ffffff",
+    size: [1, 1, 1]
+  };
+}
+
+function prepared(label: string): PreparedModelResource {
+  return prepareModelResource({
+    sceneVersion: "woohaa-model-scene-ir-v2",
+    ops: [boxOp(label)]
+  });
+}
+
 const OUTPUT: WorldCaptureOutputSpec = {
   outputVersion: OUTPUT_VERSION,
   width: 1920,
@@ -115,8 +221,13 @@ function rawWorldRequest(): Record<string, unknown> {
     worldContentVersion: WORLD_KEY.worldContentVersion,
     bindingVersion: WORLD_KEY.bindingVersion,
     camera: UNBOUND_CAMERA,
-    subject: { kind: "world", instances: [INSTANCE_A, INSTANCE_B] },
-    output: OUTPUT
+    subject: {
+      kind: "world",
+      instances: [INSTANCE_A, INSTANCE_B],
+      contents: CONTENTS_AB
+    },
+    output: OUTPUT,
+    contentFingerprint: worldCaptureContentFingerprint(CONTENTS_AB)
   };
 }
 
@@ -127,8 +238,14 @@ function rawBoundRequest(): Record<string, unknown> {
     worldContentVersion: BOUND_KEY.worldContentVersion,
     bindingVersion: BOUND_KEY.bindingVersion,
     camera: BOUND_CAMERA,
-    subject: { kind: "instance", instanceId: "instance-a", instance: INSTANCE_A },
-    output: OUTPUT
+    subject: {
+      kind: "instance",
+      instanceId: "instance-a",
+      instance: INSTANCE_A,
+      content: CONTENT_A.content
+    },
+    output: OUTPUT,
+    contentFingerprint: worldCaptureContentFingerprint([CONTENT_A])
   };
 }
 
@@ -136,7 +253,8 @@ function rawMissingRequest(): Record<string, unknown> {
   return {
     ...rawBoundRequest(),
     requestId: "request-missing-1",
-    subject: { kind: "bound-missing", instanceId: "instance-a" }
+    subject: { kind: "bound-missing", instanceId: "instance-a" },
+    contentFingerprint: EMPTY_WORLD_CAPTURE_CONTENT_FINGERPRINT
   };
 }
 
@@ -192,8 +310,21 @@ function receiptFor(
   return {
     requestId: request.requestId,
     key: request.key,
+    contentFingerprint: request.contentFingerprint,
     media: mediaFor(image),
     ...overrides
+  };
+}
+
+function identityOf(request: WorldCaptureRequest): {
+  requestId: string;
+  key: WorldCaptureVersionKey;
+  contentFingerprint: string;
+} {
+  return {
+    requestId: request.requestId,
+    key: request.key,
+    contentFingerprint: request.contentFingerprint
   };
 }
 
@@ -201,7 +332,7 @@ function imageOutcome(
   request: WorldCaptureRequest,
   image: WorldCaptureImage
 ): WorldCaptureProducerOutcome {
-  return { status: "image", requestId: request.requestId, key: request.key, image };
+  return { status: "image", ...identityOf(request), image };
 }
 
 function saved(receipt: WorldCaptureMediaSaveReceipt): WorldCaptureMediaSaveResult {
@@ -234,6 +365,7 @@ type T10RequestFactory = (snapshot: {
   camera: WorldCameraData;
   subject: WorldCaptureSubject;
   output: WorldCaptureOutputSpec;
+  contentFingerprint: string;
 }) => WorldCaptureRequest;
 
 const t10RequestFactory: T10RequestFactory = snapshot => {
@@ -247,8 +379,7 @@ const t09Producer = (
   bytes: Uint8Array
 ): WorldCaptureProducerOutcome => ({
   status: "image",
-  requestId: request.requestId,
-  key: request.key,
+  ...identityOf(request),
   image: {
     bytes,
     contentType: request.output.contentType,
@@ -264,6 +395,7 @@ const fakeMediaPort: WorldCaptureMediaSavePort = {
       receipt: {
         requestId: saveRequest.requestId,
         key: saveRequest.key,
+        contentFingerprint: saveRequest.contentFingerprint,
         media: mediaFor(saveRequest.image)
       }
     };
@@ -287,18 +419,28 @@ describe("world capture port request", () => {
       "instance-a",
       "instance-b"
     ]);
+    expect(request.subject.contents.map(content => content.instanceId)).toEqual([
+      "instance-a",
+      "instance-b"
+    ]);
+    expect(request.contentFingerprint).toBe(worldCaptureContentFingerprint(CONTENTS_AB));
 
     expect(Object.isFrozen(request)).toBe(true);
     expect(Object.isFrozen(request.key)).toBe(true);
     expect(Object.isFrozen(request.camera)).toBe(true);
     expect(Object.isFrozen(request.output)).toBe(true);
     expect(Object.isFrozen(request.subject.instances)).toBe(true);
+    expect(Object.isFrozen(request.subject.contents)).toBe(true);
 
     raw.requestId = "request-mutated";
     (raw.key as WorldCaptureVersionKey).worldContentVersion = "world-content-8";
     (raw.camera as WorldCameraData).position.u = 99;
     (raw.output as { width: number }).width = 1;
     (raw.subject as { instances: WorldInstanceData[] }).instances.pop();
+    (
+      (raw.subject as { contents: WorldCaptureInstanceContent[] }).contents[0]
+        .content as Extract<WorldCaptureModelContent, { kind: "script" }>
+    ).definition.modelScript = "const root = mutated();";
 
     expect(request.requestId).toBe("request-world-1");
     expect(request.key.worldContentVersion).toBe("world-content-7");
@@ -306,6 +448,7 @@ describe("world capture port request", () => {
     expect(request.output.width).toBe(1920);
     if (request.subject.kind !== "world") throw new Error("expected world subject");
     expect(request.subject.instances).toHaveLength(2);
+    expect(request.subject.contents[0].content).toEqual(CONTENT_A.content);
   });
 
   it("binds exactly one instance and never accepts a whole-world subject for a bound camera", () => {
@@ -328,25 +471,42 @@ describe("world capture port request", () => {
     expectRejectedInput(
       createWorldCaptureRequest({
         ...structuredClone(rawWorldRequest()),
-        subject: { kind: "instance", instanceId: "instance-a", instance: INSTANCE_A }
+        subject: {
+          kind: "instance",
+          instanceId: "instance-a",
+          instance: INSTANCE_A,
+          content: CONTENT_A.content
+        },
+        contentFingerprint: worldCaptureContentFingerprint([CONTENT_A])
       })
     );
     expectRejectedInput(
       createWorldCaptureRequest({
         ...structuredClone(rawBoundRequest()),
-        subject: { kind: "instance", instanceId: "instance-b", instance: INSTANCE_B }
+        subject: {
+          kind: "instance",
+          instanceId: "instance-b",
+          instance: INSTANCE_B,
+          content: CONTENT_A.content
+        }
       })
     );
     expectRejectedInput(
       createWorldCaptureRequest({
         ...structuredClone(rawBoundRequest()),
-        subject: { kind: "instance", instanceId: "instance-a", instance: INSTANCE_B }
+        subject: {
+          kind: "instance",
+          instanceId: "instance-a",
+          instance: INSTANCE_B,
+          content: CONTENT_A.content
+        }
       })
     );
     expectRejectedInput(
       createWorldCaptureRequest({
         ...structuredClone(rawBoundRequest()),
         subject: { kind: "bound-missing", instanceId: "instance-a" },
+        contentFingerprint: EMPTY_WORLD_CAPTURE_CONTENT_FINGERPRINT,
         camera: UNBOUND_CAMERA,
         key: WORLD_KEY,
         worldContentVersion: WORLD_KEY.worldContentVersion,
@@ -372,19 +532,243 @@ describe("world capture port request", () => {
     expect(
       resolve(request, {
         status: "waiting",
-        requestId: request.requestId,
-        key: request.key,
+        ...identityOf(request),
         reason: "resources-not-ready"
       })
     ).toMatchObject({ status: "unavailable", reason: "bound-target-missing" });
     expect(
       resolve(request, {
         status: "unavailable",
-        requestId: request.requestId,
-        key: request.key,
+        ...identityOf(request),
         reason: "bound-target-missing"
       })
     ).toMatchObject({ status: "unavailable", reason: "bound-target-missing" });
+  });
+
+  it("pins actual model content so same-id/same-pose script and asset versions differ", () => {
+    const request = makeWorldRequest();
+    const changedScriptRaw = structuredClone(rawWorldRequest());
+    (changedScriptRaw.subject as { contents: WorldCaptureInstanceContent[] }).contents = [
+      CONTENT_A_CHANGED,
+      CONTENT_B
+    ];
+    changedScriptRaw.contentFingerprint = worldCaptureContentFingerprint([
+      CONTENT_A_CHANGED,
+      CONTENT_B
+    ]);
+    const changedScript = expectOk(createWorldCaptureRequest(changedScriptRaw));
+
+    const changedAssetRaw = structuredClone(rawWorldRequest());
+    (changedAssetRaw.subject as { contents: WorldCaptureInstanceContent[] }).contents = [
+      CONTENT_A,
+      CONTENT_B_CHANGED
+    ];
+    changedAssetRaw.contentFingerprint = worldCaptureContentFingerprint([
+      CONTENT_A,
+      CONTENT_B_CHANGED
+    ]);
+    const changedAsset = expectOk(createWorldCaptureRequest(changedAssetRaw));
+
+    if (request.subject.kind !== "world") throw new Error("expected world subject");
+    if (changedScript.subject.kind !== "world" || changedAsset.subject.kind !== "world") {
+      throw new Error("expected world subject");
+    }
+    // Pose and instance identities are identical; only the pinned model changed.
+    expect(changedScript.subject.instances).toEqual(request.subject.instances);
+    expect(changedAsset.subject.instances).toEqual(request.subject.instances);
+    expect(new Set([
+      request.contentFingerprint,
+      changedScript.contentFingerprint,
+      changedAsset.contentFingerprint
+    ]).size).toBe(3);
+    expect(changedScript.subject.contents[0].content).toEqual(CONTENT_A_CHANGED.content);
+    expect(changedAsset.subject.contents[1].content).toEqual(CONTENT_B_CHANGED.content);
+
+    const bound = makeBoundRequest();
+    if (bound.subject.kind !== "instance") throw new Error("expected instance subject");
+    expect(bound.subject.content).toEqual(CONTENT_A.content);
+    expect(bound.contentFingerprint).not.toBe(request.contentFingerprint);
+
+    const missing = makeMissingRequest();
+    expect(missing.subject.kind).toBe("bound-missing");
+    expect(missing.contentFingerprint).toBe(EMPTY_WORLD_CAPTURE_CONTENT_FINGERPRINT);
+  });
+
+  it("rejects missing, extra, duplicated or stale content associations", () => {
+    const missingContent = structuredClone(rawWorldRequest());
+    (missingContent.subject as { contents: WorldCaptureInstanceContent[] }).contents = [CONTENT_A];
+    missingContent.contentFingerprint = worldCaptureContentFingerprint([CONTENT_A]);
+    expectRejectedInput(createWorldCaptureRequest(missingContent));
+
+    const unknownContent = structuredClone(rawWorldRequest());
+    (unknownContent.subject as { contents: WorldCaptureInstanceContent[] }).contents = [
+      CONTENT_A,
+      CONTENT_B,
+      { instanceId: "instance-c", content: scriptContent("const root = cylinder();") }
+    ];
+    unknownContent.contentFingerprint = worldCaptureContentFingerprint([
+      CONTENT_A,
+      CONTENT_B,
+      { instanceId: "instance-c", content: scriptContent("const root = cylinder();") }
+    ]);
+    expectRejectedInput(createWorldCaptureRequest(unknownContent));
+
+    const duplicateContent = structuredClone(rawWorldRequest());
+    (duplicateContent.subject as { contents: WorldCaptureInstanceContent[] }).contents = [
+      CONTENT_A,
+      CONTENT_A
+    ];
+    duplicateContent.contentFingerprint = worldCaptureContentFingerprint([CONTENT_A, CONTENT_A]);
+    expectRejectedInput(createWorldCaptureRequest(duplicateContent));
+
+    const staleFingerprint = structuredClone(rawWorldRequest());
+    staleFingerprint.contentFingerprint = worldCaptureContentFingerprint([CONTENT_A_CHANGED]);
+    expectRejectedInput(createWorldCaptureRequest(staleFingerprint));
+
+    const missingWithContent = structuredClone(rawMissingRequest());
+    (missingWithContent.subject as Record<string, unknown>).content = CONTENT_A.content;
+    expectRejectedInput(createWorldCaptureRequest(missingWithContent));
+  });
+
+  it("resolves pinned content through the trusted port and rejects current-content substitution", () => {
+    const request = makeWorldRequest();
+    const contentRequest = createWorldCaptureContentResolutionRequest(request);
+    expect(Object.keys(contentRequest).sort()).toEqual([
+      "contentFingerprint",
+      "instances",
+      "requestId"
+    ]);
+    expect(contentRequest.contentFingerprint).toBe(request.contentFingerprint);
+    expect(contentRequest.instances.map(entry => entry.instanceId)).toEqual([
+      "instance-a",
+      "instance-b"
+    ]);
+
+    const oldResources = [
+      {
+        instanceId: "instance-a",
+        contentHash: worldCaptureModelContentHash(CONTENT_A.content),
+        resource: prepared("old-a")
+      },
+      {
+        instanceId: "instance-b",
+        contentHash: worldCaptureModelContentHash(CONTENT_B.content),
+        resource: prepared("old-b")
+      }
+    ] as const;
+    const trustedReady: WorldCaptureContentResolution = {
+      version: WORLD_CAPTURE_CONTENT_RESOLUTION_VERSION,
+      status: "ready",
+      requestId: request.requestId,
+      contentFingerprint: request.contentFingerprint,
+      resources: oldResources
+    };
+    expect(verifyWorldCaptureContentResolution(contentRequest, trustedReady)).toMatchObject({
+      ok: true
+    });
+    expect(worldCaptureContentResolutionOutcome(request, trustedReady)).toBeNull();
+
+    const image = imageFor(request);
+    const savedOld = saved(receiptFor(request, image));
+    expect(resolve(request, imageOutcome(request, image), savedOld)).toMatchObject({
+      status: "ready"
+    });
+
+    // A naive resolver that reads "the current model for this instance id" returns the
+    // new content. It is rejected instead of being pasted into the old request.
+    const currentResources = [
+      {
+        instanceId: "instance-a",
+        contentHash: worldCaptureModelContentHash(CONTENT_A_CHANGED.content),
+        resource: prepared("current-a")
+      },
+      {
+        instanceId: "instance-b",
+        contentHash: worldCaptureModelContentHash(CONTENT_B_CHANGED.content),
+        resource: prepared("current-b")
+      }
+    ] as const;
+    const currentSubstitution: WorldCaptureContentResolution = {
+      ...trustedReady,
+      resources: currentResources
+    };
+    expect(verifyWorldCaptureContentResolution(contentRequest, currentSubstitution)).toMatchObject({
+      ok: false,
+      code: "content-mismatch"
+    });
+    const mismatchOutcome = worldCaptureContentResolutionOutcome(request, currentSubstitution);
+    expect(mismatchOutcome).toMatchObject({
+      status: "failed",
+      code: "content-mismatch",
+      contentFingerprint: request.contentFingerprint
+    });
+    if (!mismatchOutcome) throw new Error("expected content mismatch outcome");
+    expect(resolve(request, mismatchOutcome)).toMatchObject({
+      status: "failed",
+      code: "content-mismatch"
+    });
+
+    const evicted: WorldCaptureContentResolution = {
+      version: WORLD_CAPTURE_CONTENT_RESOLUTION_VERSION,
+      status: "unavailable",
+      requestId: request.requestId,
+      contentFingerprint: request.contentFingerprint,
+      reason: "content-unavailable"
+    };
+    const evictedOutcome = worldCaptureContentResolutionOutcome(request, evicted);
+    expect(evictedOutcome).toMatchObject({
+      status: "unavailable",
+      reason: "content-unavailable"
+    });
+    if (!evictedOutcome) throw new Error("expected unavailable outcome");
+    expect(resolve(request, evictedOutcome)).toMatchObject({
+      status: "unavailable",
+      reason: "content-unavailable"
+    });
+
+    const waiting: WorldCaptureContentResolution = {
+      version: WORLD_CAPTURE_CONTENT_RESOLUTION_VERSION,
+      status: "waiting",
+      requestId: request.requestId,
+      contentFingerprint: request.contentFingerprint,
+      reason: "resources-not-ready"
+    };
+    const waitingOutcome = worldCaptureContentResolutionOutcome(request, waiting);
+    expect(waitingOutcome).toMatchObject({ status: "waiting", reason: "resources-not-ready" });
+    if (!waitingOutcome) throw new Error("expected waiting outcome");
+    expect(resolve(request, waitingOutcome)).toMatchObject({
+      status: "waiting",
+      reason: "resources-not-ready"
+    });
+  });
+
+  it("rejects producer and media results that reflect changed content under the same key", () => {
+    const request = makeWorldRequest();
+    const changedRaw = structuredClone(rawWorldRequest());
+    (changedRaw.subject as { contents: WorldCaptureInstanceContent[] }).contents = [
+      CONTENT_A_CHANGED,
+      CONTENT_B
+    ];
+    changedRaw.contentFingerprint = worldCaptureContentFingerprint([CONTENT_A_CHANGED, CONTENT_B]);
+    const changed = expectOk(createWorldCaptureRequest(changedRaw));
+    expect(changed.key).toEqual(request.key);
+
+    const image = imageFor(request);
+    expect(
+      resolve(request, {
+        status: "image",
+        requestId: request.requestId,
+        key: request.key,
+        contentFingerprint: changed.contentFingerprint,
+        image
+      })
+    ).toMatchObject({ status: "rejected", code: "content-mismatch" });
+
+    expect(
+      resolve(request, imageOutcome(request, image), saved(receiptFor(request, image, {
+        contentFingerprint: changed.contentFingerprint
+      })))
+    ).toMatchObject({ status: "rejected", code: "media-unverified" });
   });
 
   it("rejects mismatched world, binding, camera and output version provenance", () => {
@@ -479,6 +863,7 @@ describe("world capture port request", () => {
         status: "image",
         requestId: "request-other",
         key: request.key,
+        contentFingerprint: request.contentFingerprint,
         image
       })
     ).toMatchObject({ status: "rejected", code: "request-mismatch" });
@@ -488,6 +873,7 @@ describe("world capture port request", () => {
         status: "image",
         requestId: request.requestId,
         key: { ...request.key, outputVersion: "output-other" },
+        contentFingerprint: request.contentFingerprint,
         image
       })
     ).toMatchObject({ status: "rejected", code: "request-mismatch" });
@@ -514,63 +900,56 @@ describe("world capture port request", () => {
     expect(
       resolve(request, {
         status: "cancelled",
-        requestId: request.requestId,
-        key: request.key
+        ...identityOf(request)
       })
     ).toMatchObject({ status: "cancelled" });
     expect(
       resolve(request, {
         status: "waiting",
-        requestId: request.requestId,
-        key: request.key,
+        ...identityOf(request),
         reason: "resources-not-ready"
       })
     ).toMatchObject({ status: "waiting", reason: "resources-not-ready" });
     expect(
       resolve(request, {
         status: "unavailable",
-        requestId: request.requestId,
-        key: request.key,
+        ...identityOf(request),
         reason: "renderer-unavailable"
       })
     ).toMatchObject({ status: "unavailable", reason: "renderer-unavailable" });
+    const boundRequest = makeBoundRequest();
     expect(
-      resolve(makeBoundRequest(), {
+      resolve(boundRequest, {
         status: "unavailable",
-        requestId: "request-bound-1",
-        key: BOUND_KEY,
+        ...identityOf(boundRequest),
         reason: "bound-target-missing"
       })
     ).toMatchObject({ status: "unavailable", reason: "bound-target-missing" });
     expect(
       resolve(request, {
         status: "unavailable",
-        requestId: request.requestId,
-        key: request.key,
+        ...identityOf(request),
         reason: "bound-target-missing"
       })
     ).toMatchObject({ status: "rejected", code: "invalid-data" });
     expect(
       resolve(request, {
         status: "failed",
-        requestId: request.requestId,
-        key: request.key,
+        ...identityOf(request),
         code: "render-failed"
       })
     ).toMatchObject({ status: "failed", code: "render-failed" });
     expect(
       resolve(request, {
         status: "failed",
-        requestId: request.requestId,
-        key: request.key,
+        ...identityOf(request),
         code: "readback-failed"
       })
     ).toMatchObject({ status: "failed", code: "readback-failed" });
     expect(
       resolve(request, {
         status: "failed",
-        requestId: request.requestId,
-        key: request.key,
+        ...identityOf(request),
         code: "invalid-output"
       })
     ).toMatchObject({ status: "failed", code: "invalid-output" });
@@ -609,6 +988,7 @@ describe("world capture port media boundary", () => {
 
     expect(result.status).toBe("ready");
     if (result.status !== "ready") throw new Error("expected ready");
+    expect(result.contentFingerprint).toBe(request.contentFingerprint);
     expect(result.input.version).toBe(WORLD_CAPTURE_INPUT_VERSION);
     expect(result.input.key).toEqual(request.key);
     expect(result.input.media).toEqual(mediaFor(image));
@@ -634,24 +1014,21 @@ describe("world capture port media boundary", () => {
     expect(
       resolve(request, outcome, {
         status: "failed",
-        requestId: request.requestId,
-        key: request.key,
+        ...identityOf(request),
         code: "write-failed"
       })
     ).toMatchObject({ status: "failed", code: "media-save-failed" });
     expect(
       resolve(request, outcome, {
         status: "failed",
-        requestId: request.requestId,
-        key: request.key,
+        ...identityOf(request),
         code: "verification-failed"
       })
     ).toMatchObject({ status: "failed", code: "media-verification-failed" });
     expect(
       resolve(request, outcome, {
         status: "cancelled",
-        requestId: request.requestId,
-        key: request.key
+        ...identityOf(request)
       })
     ).toMatchObject({ status: "cancelled" });
   });
@@ -752,8 +1129,9 @@ describe("world capture port media boundary", () => {
       worldContentVersion: WORLD_KEY.worldContentVersion,
       bindingVersion: WORLD_KEY.bindingVersion,
       camera: UNBOUND_CAMERA,
-      subject: { kind: "world", instances: [INSTANCE_A, INSTANCE_B] },
-      output: OUTPUT
+      subject: { kind: "world", instances: [INSTANCE_A, INSTANCE_B], contents: CONTENTS_AB },
+      output: OUTPUT,
+      contentFingerprint: worldCaptureContentFingerprint(CONTENTS_AB)
     });
     const outcome = t09Producer(request, new Uint8Array(CAPTURE_BYTES));
     const pending = resolve(request, outcome);
