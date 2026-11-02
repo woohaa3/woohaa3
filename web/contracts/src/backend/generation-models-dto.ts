@@ -31,6 +31,11 @@ export type GenerationModelPolicyView = {
    * 策略里残留的历史行（Provider 已卸载）没有这个字段。缺省 = 旧宿主 / 历史策略行。
    */
   extensionId?: string;
+  /**
+   * 模型行上的短标签（来自 Provider 的 `GenerationModelDefinition.notice`）。
+   * 缺省 = 不显示；只在「需要解释这个模型为什么还在这里/来自哪」时使用。
+   */
+  notice?: string;
 };
 
 export type GenerationModelsSnapshot = {

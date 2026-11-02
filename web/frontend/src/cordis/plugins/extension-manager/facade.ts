@@ -103,7 +103,8 @@ export function createExtensionManagerFacade(options: ExtensionManagerFacadeOpti
       executable: model.executable,
       tombstone: model.tombstone ?? false,
       // 可选字段原样透传：旧宿主没有它（缺省语义 = 只能按 providerId 归组）。
-      ...(model.extensionId !== undefined ? { extensionId: model.extensionId } : {})
+      ...(model.extensionId !== undefined ? { extensionId: model.extensionId } : {}),
+      ...(model.notice !== undefined ? { notice: model.notice } : {})
     }));
   };
   const siteRows = (): ExtensionSiteRow[] => {

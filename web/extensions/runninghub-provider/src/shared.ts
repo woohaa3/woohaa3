@@ -15,6 +15,7 @@ import modelsData from "../data/models.json";
 // 稳定 identity 移到叶子模块，使纯 metadata / 薄 activation 入口不必可达模型清单 barrel。
 export * from "./shared/identity.js";
 import { RUNNINGHUB_PLUGIN_ID, RUNNINGHUB_PROVIDER_ID } from "./shared/identity.js";
+import { runningHubCardSchema } from "./model-cards.js";
 
 /** 受控 API 地址（写死在插件内，MUST NOT 由用户输入）。全球站（CN 节点已下线）。 */
 export const DEFAULT_RUNNINGHUB_API_BASE = "https://www.runninghub.ai/openapi/v2";
@@ -58,21 +59,52 @@ export type RunningHubRegistry = {
   models: RunningHubLogicalModel[];
 };
 
-/** 解析并校验入库清单（失败即抛：构建时产物不应静默漂移）。 */
+/**
+ * 解析并校验清单（失败即抛：构建时产物不应静默漂移）。
+ *
+ * 刷新过就以运行期清单为准（见 `setRunningHubModels`），否则用入库的 `data/models.json`。
+ */
 export function runningHubRegistry(): RunningHubRegistry {
   if (cachedRegistry) return cachedRegistry;
   const raw = modelsData as unknown as RunningHubRegistry;
   if (!raw || !Array.isArray(raw.models)) throw new Error("RunningHub 模型清单缺失或非法");
-  for (const model of raw.models) {
+  const models = runtimeModels ?? raw.models;
+  for (const model of models) {
     if (typeof model.id !== "string" || model.id === "") throw new Error("RunningHub 逻辑模型缺少 id");
     if (model.outputType !== "image" && model.outputType !== "video") throw new Error(`RunningHub 模型 ${model.id} outputType 非法`);
     if (!Array.isArray(model.routes) || model.routes.length === 0) throw new Error(`RunningHub 模型 ${model.id} 缺少 routes`);
   }
-  cachedRegistry = raw;
-  return raw;
+  cachedRegistry = runtimeModels === undefined ? raw : { ...raw, models };
+  return cachedRegistry;
 }
 
 let cachedRegistry: RunningHubRegistry | undefined;
+
+/** 刷新得到的运行期清单（`undefined` = 用入库清单）。 */
+let runtimeModels: RunningHubLogicalModel[] | undefined;
+
+/**
+ * 公开清单没收录、但站点目录页仍在售的模型 id（刷新时算出）。
+ *
+ * 它们进 catalog 时带一枚「站点在售」标签：设置页要能看出「这不是 registry 里的模型」，
+ * 否则下次刷新发现它还在，用户无从判断它是被保留的还是新发现的。
+ */
+let liveOnlyIds: ReadonlySet<string> = new Set();
+
+/**
+ * 用刷新到的清单替换运行期模型。
+ *
+ * 只影响本进程：重启回到 `data/models.json`。清单由刷新算出（已下架的会被移除、
+ * 仓库登记的在售模型保留），这里只负责替换与打标签。
+ */
+export function setRunningHubModels(
+  models: readonly RunningHubLogicalModel[],
+  options: { liveOnly?: readonly string[] } = {}
+): void {
+  runtimeModels = [...models];
+  liveOnlyIds = new Set(options.liveOnly ?? []);
+  cachedRegistry = undefined;
+}
 
 /** 逻辑模型 id → catalog 身份（`api/<id>`）。执行 endpoint 由 `resolveProviderModel` 决定。 */
 export function runningHubProviderModelId(logicalId: string): string {
@@ -86,18 +118,29 @@ export function findRunningHubModel(providerModelId: string): RunningHubLogicalM
   return runningHubRegistry().models.find((model) => model.id === id);
 }
 
-/** 由入库清单构造生成模型定义（资源定义；执行目标由插件路由解析）。 */
-export function runningHubModelDefinitions(): GenerationModelDefinition[] {
-  return runningHubRegistry().models.map((model) => ({
+/**
+ * 由入库清单构造生成模型定义（资源定义；执行目标由插件路由解析）。
+ *
+ * 参数 schema 经 `model-cards` 投影：入库清单是**上游字段表**，卡片是**人类语义**
+ * （比例 / 档位 / 质量）。没有卡片映射的模型保持上游原样。
+ */
+export function runningHubModelDefinition(model: RunningHubLogicalModel): GenerationModelDefinition {
+  const schema = runningHubCardSchema(model);
+  return {
     providerId: RUNNINGHUB_PROVIDER_ID,
     providerModelId: runningHubModelProviderId(model),
     modelType: model.outputType,
     title: model.label,
     promptRequirement: model.promptRequirement,
     cancel: model.cancel,
-    inputSchema: model.inputSchema,
-    defaultInput: model.defaultInput
-  }));
+    inputSchema: schema.inputSchema,
+    defaultInput: schema.defaultInput,
+    ...(liveOnlyIds.has(model.id) ? { notice: "站点在售" } : {})
+  };
+}
+
+export function runningHubModelDefinitions(): GenerationModelDefinition[] {
+  return runningHubRegistry().models.map(runningHubModelDefinition);
 }
 
 function runningHubModelProviderId(model: RunningHubLogicalModel): string {
@@ -225,7 +268,8 @@ export const RUNNINGHUB_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: RUNNINGHUB_PLUGIN_ID,
   name: "RunningHub Provider",
   description: "RunningHub 生成 Provider：入库的 API 逻辑模型（t2i/i2i/文生视频/图生视频/多模态）。",
-  version: "2.0.0",
+  // 2.1.0：模型目录刷新（公开 registry + 站点目录）、面板卡片投影、占位标签。
+  version: "2.1.0",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "runninghub-provider-config", schemaVersion: 1 },

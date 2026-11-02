@@ -624,7 +624,7 @@ function ModelRefresh({
     }
   };
   return (
-    <div className="settings-page__item-control">
+    <div className="settings-page__item-control is-stacked">
       <Button size="sm" disabled={busy} onClick={() => void refresh()} data-testid={testId}>
         {busy ? "正在刷新…" : "刷新可用模型"}
       </Button>

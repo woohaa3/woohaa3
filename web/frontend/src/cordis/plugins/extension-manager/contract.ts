@@ -110,6 +110,8 @@ export type ExtensionModelRow = {
   tombstone: boolean;
   /** 提供该模型的宿主插件 id；旧宿主的策略历史行没有。 */
   extensionId?: string;
+  /** 行上的短标签（例如「站点在售」）；缺省不显示。 */
+  notice?: string;
 };
 
 /**
