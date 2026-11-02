@@ -8,6 +8,7 @@ import type { MediaStorage } from "@woohaa3/contracts";
 import type { YjsDocumentRepository } from "./yjs-repository.js";
 
 export type RoomSubmitOptions = {
+  spatialContext?: import("../world-authoring/spatial-leases.js").SpatialWriteContext;
   signal?: AbortSignal;
   /**
    * 每画布访问屏障的 write 复核（change: 2026-10-13-add-enterprise-access-and-production-deployment，
@@ -59,6 +60,8 @@ export type RoomCommandResult =
       retryable?: boolean;
       currentRevision?: number;
       preconditionIndex?: number;
+      conflict?: import("../world-authoring/spatial-leases.js").LeaseConflict;
+      spatialReason?: string;
     };
 
 /** published 前进的来源：本 room 执行的命令，或从远端同步上游合入的 update。 */

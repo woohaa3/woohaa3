@@ -29,6 +29,9 @@ import { CanvasStorageError } from "../core/index.js";
 import { loadNodeSqlite } from "./sqlite-loader.js";
 import { migrateYjsSchema, safe } from "./yjs-migrations.js";
 import { inImmediateTransaction, toBlob, toBytes, decodeCommandRow, type CommandRow, type DocumentRow, type UpdateRow } from "./yjs-row-codec.js";
+import { SqliteSpatialLeaseStore } from "./spatial-leases.js";
+import { affectedWorldObjects } from "../../world-authoring/affected-objects.js";
+import { objectKey, SpatialLeaseError, type LeaseIntent, type SpatialAcquireResult, type SpatialCommitAuthority, type SpatialWriteContext } from "../../world-authoring/spatial-leases.js";
 
 export { SQLITE_YJS_SCHEMA_VERSION } from "./yjs-migrations.js";
 
@@ -39,6 +42,7 @@ export type SqliteYjsRepositoryOptions = {
   now?: () => string;
   /** 注入写失败（测试用），在事务中途抛错以验证全回滚。 */
   failWrites?: () => boolean;
+  spatialAuthority?: SpatialCommitAuthority;
 };
 
 /**
@@ -51,11 +55,16 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
   private readonly db: DatabaseSync;
   private readonly now: () => string;
   private readonly failWrites: () => boolean;
+  private readonly spatialLeases: SqliteSpatialLeaseStore;
+  private readonly spatialAuthority?: SpatialCommitAuthority;
+  private readonly contexts = new WeakMap<SpatialWriteContext, LeaseIntent>();
+  private readonly issuedContexts = new Map<string, SpatialWriteContext>();
   private closed = false;
 
   constructor(options: SqliteYjsRepositoryOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.failWrites = options.failWrites ?? (() => false);
+    this.spatialAuthority = options.spatialAuthority;
     try {
       const sqlite = loadNodeSqlite();
       this.db = new sqlite.DatabaseSync(options.path, {
@@ -73,6 +82,7 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
       this.db.exec("PRAGMA foreign_keys = ON");
       this.db.exec(`PRAGMA busy_timeout = ${options.busyTimeoutMs ?? 5_000}`);
       migrateYjsSchema(this.db, () => this.now());
+      this.spatialLeases = new SqliteSpatialLeaseStore(this.db, options.spatialAuthority);
     } catch (error) {
       try {
         this.db.close();
@@ -83,6 +93,50 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
       throw new CanvasStorageError("NOT_READY", `SQLite Yjs 初始化失败：${safe(error)}`);
     }
   }
+
+  /**
+   * Public acquire port.
+   *
+   * A retry with the same `requestId` and the same semantic intent (canvas, scope,
+   * writable and read-only target sets) always returns the original durable run
+   * identity and state, including after the host reopens. A different intent is still
+   * rejected. The process-local capability is only returned while this process holds
+   * it for an active run; a recovered/retried run after reopen stays reconcile-first
+   * and cannot commit until the host has verified execution.
+   */
+  acquireSpatialRun(intent: LeaseIntent): SpatialAcquireResult {
+    if (!this.spatialAuthority) throw new SpatialLeaseError("unavailable");
+    const { record, created } = this.spatialLeases.acquireWithStatus(intent);
+    const run = {
+      canvasId: record.intent.canvasId,
+      requestId: record.intent.requestId,
+      runId: record.intent.runId,
+      epoch: record.intent.epoch,
+      executionId: record.intent.executionId,
+      state: record.state
+    };
+    const key = JSON.stringify([record.intent.canvasId, record.intent.requestId]);
+    if (!created) {
+      const issued = record.state === "active" ? this.issuedContexts.get(key) ?? null : null;
+      if (record.state !== "active") this.issuedContexts.delete(key);
+      return { run, retry: true, capability: issued };
+    }
+    if (record.state !== "active") return { run, retry: false, capability: null };
+    const context = Object.freeze({});
+    this.contexts.set(context, record.intent);
+    this.issuedContexts.set(key, context);
+    return { run, retry: false, capability: context };
+  }
+
+  cancelSpatialRun(canvasId: string, requestId: string): void {
+    this.spatialLeases.cancel(canvasId, requestId);
+    this.issuedContexts.delete(JSON.stringify([canvasId, requestId]));
+  }
+  confirmSpatialStopped(canvasId: string, requestId: string, runId: string, epoch: number, executionId: string, evidence: unknown): void {
+    this.spatialLeases.confirmStopped(canvasId, requestId, runId, epoch, executionId, evidence);
+    this.issuedContexts.delete(JSON.stringify([canvasId, requestId]));
+  }
+  pendingSpatialRuns() { return this.spatialLeases.listPending(); }
 
   async loadYjsState(canvasId: string): Promise<YjsLoadedState | null> {
     const document = this.db
@@ -131,16 +185,44 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
 
     if (commit.signal?.aborted) throw new DOMException("Commit cancelled", "AbortError");
 
-    return inImmediateTransaction(this.db, () => {
+    try { return inImmediateTransaction(this.db, () => {
+      const duplicate = this.db.prepare("SELECT * FROM canvas_yjs_commands WHERE canvas_id = ? AND command_id = ?").get(commit.canvasId, commit.command.commandId) as CommandRow | undefined;
+      if (duplicate) {
+        const prior = decodeCommandRow(duplicate);
+        if (prior.payloadHash !== commit.command.payloadHash) return { ok: false, code: "command-id-reused", existingHash: prior.payloadHash } satisfies YjsCommitResult;
+        return { ok: false, code: "storage-seq-conflict", currentSeq: this.storageSeqOf(commit.canvasId) } satisfies YjsCommitResult;
+      }
       const document = this.db
-        .prepare("SELECT snapshot_seq FROM canvas_yjs_documents WHERE canvas_id = ?")
-        .get(commit.canvasId) as { snapshot_seq: number } | undefined;
+        .prepare("SELECT snapshot_seq, projection_json FROM canvas_yjs_documents WHERE canvas_id = ?")
+        .get(commit.canvasId) as { snapshot_seq: number; projection_json: string | null } | undefined;
       if (!document) {
         throw new CanvasStorageError("CANVAS_NOT_FOUND", `Yjs 文档 ${commit.canvasId} 不存在`);
       }
       const currentSeq = this.storageSeqOf(commit.canvasId);
       if (currentSeq !== commit.expectedStorageSeq) {
         return { ok: false, code: "storage-seq-conflict", currentSeq } satisfies YjsCommitResult;
+      }
+
+      if (!document.projection_json) throw new CanvasStorageError("REPOSITORY_FAILURE", "缺少权威画布投影");
+      const before = JSON.parse(document.projection_json) as ServerCanvas;
+      const targets = affectedWorldObjects(before, commit.projection);
+      let advance: (() => void) | undefined;
+      if (commit.spatialContext !== undefined) {
+        const intent = this.contexts.get(commit.spatialContext);
+        if (!intent || intent.canvasId !== commit.canvasId || !this.spatialAuthority) throw new SpatialLeaseError("unavailable");
+        const resolved = this.spatialAuthority.resolve(intent, before, commit.projection, targets);
+        if (!resolved) throw new SpatialLeaseError("outside-scope");
+        const keys = targets.map(objectKey).sort();
+        if (JSON.stringify(resolved.previous.map(objectKey).sort()) !== JSON.stringify(keys) || JSON.stringify(resolved.next.map(objectKey).sort()) !== JSON.stringify(keys)) throw new SpatialLeaseError("invalid-data");
+        const current = this.spatialLeases.lookup(intent.canvasId, intent.requestId);
+        if (!current) throw new SpatialLeaseError("stale-epoch");
+        const granted = new Set(current.intent.writable.map(objectKey));
+        const additions = resolved.previous.filter(target => !granted.has(objectKey(target)));
+        if (additions.length) this.spatialLeases.extendForCommit(intent.canvasId, intent.requestId, additions);
+        this.spatialLeases.validateForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, resolved.previous);
+        advance = () => this.spatialLeases.advanceVersionsForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, resolved.previous, resolved.next);
+      } else {
+        this.spatialLeases.validateUnoccupied(commit.canvasId, targets);
       }
 
       if (this.failWrites()) {
@@ -158,6 +240,7 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
           "UPDATE canvas_yjs_documents SET revision = ?, projection_json = ?, updated_at = ? WHERE canvas_id = ?"
         )
         .run(commit.revision, JSON.stringify(commit.projection), commit.updatedAt, commit.canvasId);
+      advance?.();
       this.db
         .prepare(
           `INSERT INTO canvas_yjs_commands
@@ -177,7 +260,13 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
         );
 
       return { ok: true, storageSeq: nextSeq, revision: commit.revision, duplicate: false } satisfies YjsCommitResult;
-    });
+    }); } catch (error) {
+      if (error instanceof SpatialLeaseError) {
+        if (error.code === "lease-conflict") return { ok: false, code: "lease-conflict", conflict: error.conflict };
+        return { ok: false, code: "spatial-rejected", reason: error.code, conflict: error.conflict };
+      }
+      throw error;
+    }
   }
 
   async getCommandRecord(canvasId: string, commandId: string): Promise<YjsCommandRecord | null> {
@@ -238,6 +327,7 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
 
   async deleteYjsDocument(canvasId: string): Promise<void> {
     inImmediateTransaction(this.db, () => {
+      this.spatialLeases.validateCanvasUnoccupied(canvasId);
       // 外键级联删除 updates 与 commands。
       this.db.prepare("DELETE FROM canvas_yjs_documents WHERE canvas_id = ?").run(canvasId);
     });
@@ -253,6 +343,7 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
 
   async replaceArchiveState(canvasId: string, snapshot: YjsArchiveSnapshot | null): Promise<void> {
     inImmediateTransaction(this.db, () => {
+      this.spatialLeases.validateCanvasUnoccupied(canvasId);
       this.db.prepare("DELETE FROM canvas_yjs_documents WHERE canvas_id = ?").run(canvasId);
       if (!snapshot) return;
       if (this.failWrites()) throw new Error("injected archive write failure");

@@ -300,7 +300,8 @@ export class CanvasSyncSession {
       commandId: outcome.commandId,
       status: outcome.status,
       code: outcome.code,
-      error: outcome.message
+      error: outcome.message,
+      ...(outcome.conflict ? { conflict: outcome.conflict } : {})
     }));
   }
 

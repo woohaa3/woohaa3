@@ -22,6 +22,7 @@ import type {
 import { CanvasStorageError } from "../core/index.js";
 import { loadNodeSqlite } from "./sqlite-loader.js";
 import { assertImportBaseTables, migrateImportSchema } from "./canvas-import-schema.js";
+import { SqliteSpatialLeaseStore } from "./spatial-leases.js";
 import { parseArray, parseHistoryEntries, rowToJob, rowToReceipt, translate } from "./canvas-import-rows.js";
 import type {
   CanvasImportDiagnosticSummary,
@@ -71,6 +72,7 @@ export class SqliteCanvasImportStore {
   private readonly now: () => string;
   private readonly failWrites: () => boolean;
   private readonly onWritePoint: (point: string) => void;
+  private readonly spatialLeases: SqliteSpatialLeaseStore;
   private closed = false;
 
   constructor(options: SqliteCanvasImportStoreOptions) {
@@ -89,6 +91,7 @@ export class SqliteCanvasImportStore {
       this.db.exec("PRAGMA foreign_keys = ON");
       migrateImportSchema(this.db, this.now, (run) => this.inTransaction(run));
       assertImportBaseTables(this.db);
+      this.spatialLeases = new SqliteSpatialLeaseStore(this.db);
     } catch (error) {
       try { this.db.close(); } catch { /* 忽略 */ }
       if (error instanceof CanvasStorageError) throw error;
@@ -474,6 +477,7 @@ export class SqliteCanvasImportStore {
   /** 删除导入目标（含 ACL/诊断/历史/canonical/Yjs），并在**同一事务**写持久 deleted tombstone。 */
   deleteImportedCanvas(canvasId: string): void {
     this.inTransaction(() => {
+      this.spatialLeases.validateCanvasUnoccupied(canvasId);
       // 来源绑定**不**被目标级联删除：receipt 保留并标 state=deleted（权威删除记录）。
       this.db.prepare("UPDATE canvas_import_receipts SET state = 'deleted' WHERE target_canvas_id = ?").run(canvasId);
       this.db.prepare("DELETE FROM node_generation_history WHERE canvas_id = ?").run(canvasId);
