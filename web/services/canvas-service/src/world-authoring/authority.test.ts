@@ -8,7 +8,8 @@ import {
   instanceFootprint,
   nextSceneAreaScopeVersion,
   worldObjectVersion,
-  type WorldAuthoringAuthority
+  type WorldAuthoringAuthority,
+  type WorldAuthoringAuthorityOptions
 } from "./authority.js";
 
 const now = "2026-01-01T00:00:00Z";
@@ -128,6 +129,42 @@ describe("world authoring authority", () => {
     const authority = createWorldAuthoringAuthority({ executeScene });
     const prepared = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
     expect(prepared).toMatchObject({ ok: false, code: "not-ready" });
+  });
+
+  it("recovers after a transient bounds preparation failure without authorizing unknown", async () => {
+    let calls = 0;
+    const flaky: NonNullable<WorldAuthoringAuthorityOptions["executeScene"]> = async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("transient bounds preparation failure");
+      return executeScene();
+    };
+    const authority = createWorldAuthoringAuthority({ executeScene: flaky });
+    const canvas = canvasFixture();
+    const first = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
+    expect(first).toMatchObject({ ok: false, code: "not-ready" });
+    const second = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.snapshot.writable.map(target => target.kind === "instance" ? target.instanceId : target.cameraId).sort())
+      .toEqual(["camera-in", "complete-a"]);
+  });
+
+  it("keeps genuinely unknown model bounds unauthorized", async () => {
+    const unavailable: NonNullable<WorldAuthoringAuthorityOptions["executeScene"]> = async () => ({
+      ok: false,
+      code: "execution-failed",
+      message: "no bounds"
+    } as never);
+    const authority = createWorldAuthoringAuthority({ executeScene: unavailable });
+    const canvas = canvasFixture();
+    const first = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
+    const second = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
+    expect(first).toMatchObject({ ok: false, code: "not-ready" });
+    expect(second).toMatchObject({ ok: false, code: "not-ready" });
+    expect(authority.cacheFor(canvas.id, {
+      scope: { kind: "scene-area", areaId: "area-main" },
+      scopeVersion: "area-scope-1"
+    })).toBeNull();
   });
 
   it("grants no world write through 2D group membership", async () => {

@@ -408,7 +408,10 @@ export function createWorldAuthoringAuthority(
             localAabb = null;
           }
         }
-        localAabbCache.set(contentVersion, localAabb);
+        // Cache resolved geometry only. Unknown or failed preparation must stay
+        // unauthorized, but a transient executor failure must not poison the
+        // same content version forever; the next prepare retries it.
+        if (localAabb) localAabbCache.set(contentVersion, localAabb);
       }
       if (!localAabb) unknown = true;
       records.set(data.instanceId, instanceRecord(node.id, data, fields, localAabb));
