@@ -34,7 +34,8 @@ describe("version evidence", () => {
     expect(isLegacyRecord(legacy)).toBe(true);
     const next = withVersionEvidence(legacy, "1.0.0");
     expect(next.filesDigest).toBeUndefined();
-    expect(next.packageDigest).toBeUndefined();
+    // packageDigest 是归档身份，必须保留：它是 legacy 精确迁移唯一的凭据。
+    expect(next.packageDigest).toBe("sha256:new");
     expect(next.trust).toBeUndefined();
     expect(next.current).toBe("2.0.0");
     expect(versionEvidence(legacy, "1.0.0")).toBeUndefined();

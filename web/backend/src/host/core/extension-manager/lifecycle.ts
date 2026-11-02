@@ -266,9 +266,9 @@ async function quarantine(ctx:ManagerContext,extensionId:string,error:unknown):P
  const record=ctx.handle?.read().extensions[extensionId];if(!record)return;
  const message=error instanceof Error?error.message:String(error);
  // 首次隔离：落状态并清理一次。已经隔离且清理成功（restartPending=false）：不再重复执行。
- if(record.quarantine&&record.restartPending!==true)return;
+ if(record.quarantine&&record.quarantineCleanupPending===false)return;
  if(!record.quarantine){
-  ctx.commit(draft=>{const current=draft.extensions[extensionId];if(current&&!current.quarantine)draft.extensions[extensionId]={...current,quarantine:message,state:"active",observeUntil:null};});
+  ctx.commit(draft=>{const current=draft.extensions[extensionId];if(current&&!current.quarantine)draft.extensions[extensionId]={...current,quarantine:message,quarantineCleanupPending:true,state:"active",observeUntil:null};});
   ctx.log({event:"extension-quarantined",extensionId,message});
  }
  const outcomes=await Promise.allSettled([
@@ -281,7 +281,7 @@ async function quarantine(ctx:ManagerContext,extensionId:string,error:unknown):P
   failed=true;
   ctx.log({event:"extension-quarantine-restart-required",extensionId,message:String(outcome.reason)});
  }
- ctx.commit(draft=>{const latest=draft.extensions[extensionId];if(latest)draft.extensions[extensionId]={...latest,...(failed?{restartPending:true}:{})};});
+ ctx.commit(draft=>{const latest=draft.extensions[extensionId];if(latest)draft.extensions[extensionId]={...latest,quarantineCleanupPending:failed,restartPending:failed||Boolean(latest.requiresRestart&&(!ctx.deps.runtime?.available()||latest.hotSwappable===false))};});
  ctx.log({event:"extension-quarantine-cleanup",extensionId,failed});
 }
 
@@ -303,11 +303,16 @@ async function enforceTrust(ctx:ManagerContext):Promise<void>{
  if(current.inFlight)return current.inFlight;
  const interval=ctx.deps.trustCheckMs??DEFAULT_TRUST_CHECK_MS;
  current.inFlight=(async()=>{
+  // 信任元数据每轮只算一次；读不出来说明信任配置本身坏了，按扩展逐个隔离并说明原因。
+  let trustStamp: string|null = null;
+  let stampError: unknown = null;
+  try { trustStamp=ctx.toolkit.trustStateStamp?.()??""; } catch(error) { stampError=error; }
   const state=handle.read();
   for(const [id,record] of Object.entries(state.extensions)){
    if(ctx.status.closed)return;
-   if(record.quarantine){await quarantine(ctx,id,new Error(record.quarantine));continue;}
-   const stamp=record.current+":"+(record.filesDigest??"");
+   if(record.quarantine){await ctx.board.serial(()=>quarantine(ctx,id,new Error(record.quarantine)));continue;}
+   if(trustStamp===null){await ctx.board.serial(()=>quarantine(ctx,id,stampError));continue;}
+   const stamp=record.current+":"+(record.filesDigest??"")+":"+trustStamp;
    const previous=current.checked.get(id);
    const at=ctx.now().getTime();
    if(previous&&previous.stamp===stamp&&at-previous.at<interval)continue;

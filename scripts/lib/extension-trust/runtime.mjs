@@ -61,6 +61,7 @@ export function runtimeTrust({managedRoot,env=process.env}={}) {
  }
  const api={
   enabled:domains.length>0,
+  stateStamp(){return digest(domains.map(domain=>{const saved=domain.store.snapshot();return saved?{bundle:saved.bundle,rootUpdates:saved.rootUpdates}:null}))},
   importMaterial(trustDomain,document){
    const domain=domains.find(d=>d.root.trustDomain===trustDomain);
    requireTrust(domain,"untrusted-domain");
@@ -85,22 +86,23 @@ export function runtimeTrust({managedRoot,env=process.env}={}) {
    const descriptor=readTrustDocument(path.join(treeDir,"extension.json"));const domain=domains.find(d=>d.extensionIds.includes(descriptor.extensionId));
    const certified=fs.existsSync(path.join(treeDir,CERTIFICATE_CHAIN_NAME));
    if(!domain){requireTrust(!certified&&!record?.trust?.startsWith("certified:"),"missing-trust-anchor");return null}
-   // Legacy record: installed while no domain/config existed, so it has no packageDigest. Never
-   // re-verify it against a fresh context (a bare-key v1 package cannot prove a certificate);
-   // keep v1 behaviour for it. Tracked in COMPATIBILITY.md.
-   const legacyRecord=record?.packageDigest===undefined||record?.filesDigest===undefined;
-   if(fresh){requireTrust(!legacyRecord,"missing-trust-evidence");return api.install({treeDir,packageDigest:record?.packageDigest,trustedKeys:[],allowUnsigned:false});}
+   // 兼容窗口：改动之前安装的记录没有逐版本证据，无法证明某个目录属于这条记录。
+   // 这类记录不产生新的信任结论（返回 null 表示“本层不作判断”，管理器沿用它原来的
+   // v1 结果），但任何“必须新鲜授权”的路径仍然拒绝它。见 COMPATIBILITY.md 第 2 条。
+   const evidenceFree=record?.packageDigest===undefined&&record?.filesDigest===undefined;
+   if(fresh){requireTrust(!evidenceFree,"missing-trust-evidence");return api.install({treeDir,packageDigest:record?.packageDigest,trustedKeys:[],allowUnsigned:false});}
+   // 无证据的记录只能对应 v1 目录：出现证书链说明目录被换过，不能按“不作判断”放行。
+   requireTrust(!(evidenceFree&&certified),"missing-trust-evidence");
+   if(evidenceFree)return null;
    const hash=filesDigest(treeDir);
+   requireTrust(record?.filesDigest===hash,"installed-content-changed");
    const receiptFile=receiptPath(hash);
    if(!fs.existsSync(receiptFile)){
-    // Records written before v2 carry no filesDigest/packageDigest; there is nothing historical to
-    // replay, so keep the v1 behaviour instead of quarantining an installation the user already
-    // had. Records that do carry evidence must have a matching receipt. Tracked in
-    // COMPATIBILITY.md; requiresReauthorization makes fresh paths re-verify once a receipt exists.
-    requireTrust(legacyRecord,"missing-trust-receipt");
+    // Migrate v1 only with the original archive digest and an exact signed grant.
+    // A certified installation that lost its receipt must be explicitly reinstalled.
+    requireTrust(!certified,"missing-trust-receipt");
     return api.install({treeDir,packageDigest:record?.packageDigest,allowUnsigned:false});
    }
-   requireTrust(record?.filesDigest===hash,"installed-content-changed");
    const receipt=readTrustDocument(receiptFile,4<<20);
    requireTrust(receipt.filesDigest===hash&&receipt.extensionId===descriptor.extensionId&&receipt.version===descriptor.version,"receipt-mismatch");
    try{await refresh(domain)}catch{/* Existing verified installations use latest known revocations offline. */}

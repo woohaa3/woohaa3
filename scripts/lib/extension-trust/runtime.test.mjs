@@ -70,7 +70,9 @@ test("offline first install and explicit imports use pinned roots without any se
  await assert.rejects(runtime.install({treeDir}));
  Date.now=now;
  const revoked={bundle:f.bundle({...f.targets,version:2,revokedKeys:[f.keys.publisher.keyId]},2),rootUpdates:[]};
+ const oldStamp=runtime.stateStamp();
  runtime.importMaterial("test-only",revoked);
+ assert.notEqual(runtime.stateStamp(),oldStamp);
  assert.throws(()=>runtime.importMaterial("test-only",material));
  await assert.rejects(runtime.installed(treeDir,record),/revoked/);
  // Reopening with the original bundled seed must retain the newer revocation.

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { fixture } from "./fixture.mjs";
 import { runtimeTrust } from "./runtime.mjs";
 import { packDirectory, unpackExtensionPackage, filesDigest } from "../extension-package.mjs";
@@ -47,6 +47,7 @@ test("desktop packaging rejects a missing anchor for release builds and validate
   const missingFile = path.join(dir, "config.json");
   assert.throws(() => resolveDesktopTrustConfig({ env: {}, build: "release" }), /信任根/);
   assert.equal(resolveDesktopTrustConfig({ env: { WOOHAA_DESKTOP_TRUST_UNAMANAGED: "1" }, build: "release" }), null);
+  for(const value of ["0","false","yes"])assert.throws(()=>resolveDesktopTrustConfig({env:{WOOHAA_DESKTOP_TRUST_UNAMANAGED:value},build:"release"}),/信任根/);
   // 回归：rotateRoot 需要 now，缺省时任何有效根都会被判 invalid-integer。
   fs.writeFileSync(missingFile, JSON.stringify({ schemaVersion: 2, domains: [{ root: f.root, floors: f.floors, extensionIds: ["photocraft"] }] }));
   const config = resolveDesktopTrustConfig({ env: { WOOHAA3_EXTENSION_TRUST_CONFIG: missingFile }, build: "release" });
@@ -65,39 +66,46 @@ function certifiedTree(dir, f, descriptor = { extensionId: "photocraft", version
   return { archive, treeDir };
 }
 
-test("installed() keeps legacy records (no per-version evidence) instead of quarantining them", t => {
-  const f = fixture(Math.floor(Date.now() / 1000));
-  const dir = temp("legacy-record-");
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const config = path.join(dir, "config.json");
-  const domain = { root: f.root, floors: f.floors, extensionIds: ["photocraft"], bootstrap: { bundle: f.bundle(), rootUpdates: [] } };
-  fs.writeFileSync(config, JSON.stringify({ schemaVersion: 2, domains: [domain] }));
-  const runtime = runtimeTrust({ managedRoot: path.join(dir, "managed"), env: { WOOHAA3_EXTENSION_TRUST_CONFIG: config } });
-  const { treeDir } = certifiedTree(dir, f);
-  // 旧记录：本次改动之前安装的受管扩展没有 packageDigest/filesDigest/versions。
-  const record = { current: "1.0.0", sourceId: "local-file", trust: "signed:deadbeefdeadbeef" };
-  const result = runtime.installed(treeDir, record);
-  // 不抛错（会被当成吊销隔离），返回 v1 判定结果。
-  assert.ok(result === null || typeof result === "object");
+test("legacy v1 activation requires original archive evidence and an exact signed grant", async t => {
+ const f=fixture(Math.floor(Date.now()/1000));const dir=temp("legacy-evidence-");t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const src=path.join(dir,"src");fs.mkdirSync(src);fs.writeFileSync(path.join(src,"extension.json"),JSON.stringify({extensionId:"photocraft",version:"1.0.0"}));
+ const archive=path.join(dir,"v1.wxt"),treeDir=path.join(dir,"tree");
+ packDirectory({treeDir:src,outFile:archive,privateKey:f.keys.publisher.privateKey});unpackExtensionPackage({packagePath:archive,destDir:treeDir});
+ const packageDigest="sha256:"+createHash("sha256").update(fs.readFileSync(archive)).digest("hex");
+ const record={current:"1.0.0",packageDigest,filesDigest:filesDigest(treeDir),trust:"signed:old-key"};
+ const grant={extensionId:"photocraft",version:"1.0.0",archiveDigest:packageDigest.slice(7),filesDigest:record.filesDigest.slice(7),publicKey:f.keys.publisher.publicKey,publisherId:"test-publisher",expiresAt:f.now+600};
+ const config=path.join(dir,"config.json");fs.writeFileSync(config,JSON.stringify({schemaVersion:2,domains:[{root:f.root,floors:f.floors,extensionIds:["photocraft"],bootstrap:{bundle:f.bundle({...f.targets,legacy:[grant]}),rootUpdates:[]}}]}));
+ const runtime=runtimeTrust({managedRoot:path.join(dir,"managed"),env:{WOOHAA3_EXTENSION_TRUST_CONFIG:config}});
+ // 没有任何证据的记录：本层不作判断（返回 null），管理器沿用原 v1 结论，不再误隔离。
+ assert.equal(await runtime.installed(treeDir,{current:"1.0.0"}),null);
+ // 必须新鲜授权的路径仍然拒绝。
+ await assert.rejects(runtime.installed(treeDir,{current:"1.0.0"},{fresh:true}),/missing-trust-evidence/);
+ // 有证据但目录内容对不上：拒绝。
+ await assert.rejects(runtime.installed(treeDir,{...record,filesDigest:"sha256:"+"0".repeat(64)}),/installed-content-changed/);
+ // 缺归档证据时不能借 legacy 迁移通过。
+ await assert.rejects(runtime.installed(treeDir,{...record,packageDigest:undefined}),/legacy-package-not-authorized/);
+ const result=await runtime.installed(treeDir,record);assert.equal(result.evidence.legacy,true);
+ assert.equal((await runtime.installed(treeDir,record)).trust,result.trust);
 });
 
-test("installed() re-verifies a record that has evidence but lost its receipt", async t => {
-  const f = fixture(Math.floor(Date.now() / 1000));
-  const dir = temp("lost-receipt-");
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const config = path.join(dir, "config.json");
-  const domain = { root: f.root, floors: f.floors, extensionIds: ["photocraft"], bootstrap: { bundle: f.bundle(), rootUpdates: [] } };
-  fs.writeFileSync(config, JSON.stringify({ schemaVersion: 2, domains: [domain] }));
-  const runtime = runtimeTrust({ managedRoot: path.join(dir, "managed"), env: { WOOHAA3_EXTENSION_TRUST_CONFIG: config } });
-  const { treeDir } = certifiedTree(dir, f);
-  const installed = await runtime.install({ treeDir });
-  fs.rmSync(path.join(dir, "managed/trust-receipts"), { recursive: true, force: true });
-  // receipt 丢失时按新安装重新验证，而不是把已装扩展判成吊销。
-  const again = runtime.installed(treeDir, { ...installed, filesDigest: filesDigest(treeDir) });
-  if (again && typeof again.then === "function") await again;
-  // 篡改内容仍然拒绝。
-  fs.writeFileSync(path.join(treeDir, "index.js"), "export default {evil:true};");
-  await assert.rejects(async () => runtime.installed(treeDir, { ...installed, filesDigest: filesDigest(treeDir) }));
+test("an evidence-free record cannot vouch for a certified tree", async t => {
+ const f=fixture(Math.floor(Date.now()/1000));const dir=temp("evidence-free-certified-");t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const config=path.join(dir,"config.json");fs.writeFileSync(config,JSON.stringify({schemaVersion:2,domains:[{root:f.root,floors:f.floors,extensionIds:["photocraft"],bootstrap:{bundle:f.bundle(),rootUpdates:[]}}]}));
+ const runtime=runtimeTrust({managedRoot:path.join(dir,"managed"),env:{WOOHAA3_EXTENSION_TRUST_CONFIG:config}});
+ const {treeDir}=certifiedTree(dir,f);
+ await assert.rejects(runtime.installed(treeDir,{current:"1.0.0"}),/missing-trust-evidence/);
+});
+
+test("certified activation fails closed on lost receipts; explicit reinstall restores evidence", async t => {
+ const f=fixture(Math.floor(Date.now()/1000));const dir=temp("lost-receipt-");t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const config=path.join(dir,"config.json");fs.writeFileSync(config,JSON.stringify({schemaVersion:2,domains:[{root:f.root,floors:f.floors,extensionIds:["photocraft"],bootstrap:{bundle:f.bundle(),rootUpdates:[]}}]}));
+ const runtime=runtimeTrust({managedRoot:path.join(dir,"managed"),env:{WOOHAA3_EXTENSION_TRUST_CONFIG:config}});
+ const {treeDir,archive}=certifiedTree(dir,f);const packageDigest="sha256:"+createHash("sha256").update(fs.readFileSync(archive)).digest("hex");
+ const installed=await runtime.install({treeDir,packageDigest});const record={...installed,packageDigest,filesDigest:filesDigest(treeDir)};
+ fs.rmSync(path.join(dir,"managed/trust-receipts"),{recursive:true,force:true});
+ await assert.rejects(runtime.installed(treeDir,record),/missing-trust-receipt/);
+ await runtime.install({treeDir,packageDigest});assert.equal((await runtime.installed(treeDir,record)).trust,installed.trust);
+ fs.writeFileSync(path.join(treeDir,"index.js"),"tampered");await assert.rejects(runtime.installed(treeDir,record));
 });
 
 test("verifyManagedActivation still accepts the real installed record shape", async t => {

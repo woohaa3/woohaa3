@@ -19,12 +19,16 @@ export function isLegacyRecord(record: InstallationRecord | undefined): boolean 
 }
 
 /**
- * 指针切到某版本时套用的字段：有证据就用证据；没有证据时必须清掉上一版本的摘要与信任，
+ * 指针切到某版本时套用的字段：有证据就用证据；没有证据时必须清掉上一版本的内容摘要与信任，
  * 否则 `installed()` 会拿旧摘要对新目录，把正常回滚判成内容被改。
+ *
+ * `packageDigest` 刻意保留：它是归档字节的摘要、与具体版本一一对应，既不会和别的版本
+ * 混淆，又是 v1 精确迁移（legacy grant）唯一能用的凭据。清掉它会让老记录回滚后
+ * 连迁移清单都查不到。
  */
 export function withVersionEvidence(record: InstallationRecord, version: string): InstallationRecord {
   const evidence = versionEvidence(record, version);
   if (evidence) return { ...record, ...evidence };
   if (record.current === version) return { ...record };
-  return { ...record, packageDigest: undefined, filesDigest: undefined, trust: undefined, evidence: undefined };
+  return { ...record, filesDigest: undefined, trust: undefined, evidence: undefined };
 }

@@ -43,7 +43,7 @@ export async function prepareDesktopNode(){
 export function resolveDesktopTrustConfig({env=process.env,build='development'}={}){
  const trustConfig=env.WOOHAA3_EXTENSION_TRUST_CONFIG;
  if(!trustConfig){
-  if(build!=='development'&&!env.WOOHAA_DESKTOP_TRUST_UNAMANAGED)throw new Error("发布版桌面必须固定扩展信任根：设置 WOOHAA3_EXTENSION_TRUST_CONFIG；确认本次不启用 v2 时显式设 WOOHAA_DESKTOP_TRUST_UNAMANAGED=1");
+  if(build!=='development'&&env.WOOHAA_DESKTOP_TRUST_UNAMANAGED!=='1')throw new Error("发布版桌面必须固定扩展信任根：设置 WOOHAA3_EXTENSION_TRUST_CONFIG；确认本次不启用 v2 时显式设 WOOHAA_DESKTOP_TRUST_UNAMANAGED=1");
   return null;
  }
  const config=readTrustDocument(path.resolve(trustConfig));exact(config,["schemaVersion","domains"]);requireTrust(config.schemaVersion===2&&Array.isArray(config.domains)&&config.domains.length>0,"invalid-trust-config");

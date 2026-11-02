@@ -207,15 +207,8 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
     const state = h.read();
     const existing = state.extensions[extensionId];
     if (existing?.trust?.startsWith("certified:") && !trust.startsWith("certified:")) throw new ExtensionManagerError("MARKETPLACE_SIGNATURE_INVALID", "证书扩展不能降级为裸公钥信任");
-    if (existing && existing.current === version && existing.filesDigest === filesDigest && existing.state !== "uninstalling") {
-      // 同版本重装：内容一致，但隔离状态必须能被这次（重新验过的）安装清除。
-      if (existing.quarantine || existing.trust !== trust) {
-        commit((draft) => {
-          const current = draft.extensions[extensionId];
-          if (!current) return;
-          draft.extensions[extensionId] = history({ ...current, quarantine: undefined, trust, ...(evidence ? { evidence } : {}) }, { revision: draft.revision + 1, action: "reinstall-same-version", version, actor: (job as Job & { actor?: string }).actor ?? "system" });
-        });
-      }
+    if (existing && existing.current === version && existing.filesDigest === filesDigest && existing.state !== "uninstalling" && !existing.quarantine && existing.trust === trust) {
+      await toolkit.verifyExtensionPackage({treeDir:h.layout.versionDir(extensionId,version),packageDigest:digest,trustedKeys:trustConfig.trustedKeys,allowUnsigned});
       cleanupStaging(job);
       return "already-current" as const;
     }
@@ -233,6 +226,8 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
       if (present !== filesDigest) {
         throw new ExtensionManagerError("MARKETPLACE_VERSION_CONTENT_CONFLICT", `${extensionId}@${version} 已存在且内容不同；同版本号不允许不同内容`);
       }
+      // Reusing a directory must verify its actual bytes, not only its FILES manifest.
+      await toolkit.verifyExtensionPackage({treeDir:versionDir,packageDigest:digest,trustedKeys:trustConfig.trustedKeys,allowUnsigned});
     } else {
       fs.mkdirSync(path.dirname(versionDir), { recursive: true });
       fs.renameSync(tree, versionDir);
@@ -255,6 +250,7 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
         trust,
         evidence,
         quarantine: undefined,
+        quarantineCleanupPending: undefined,
         versions: {
           ...(existing?.versions ?? {}),
           ...(existing ? {[existing.current]: {filesDigest:existing.filesDigest,packageDigest:existing.packageDigest,trust:existing.trust,evidence:existing.evidence}} : {}),
@@ -299,7 +295,11 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
       return outcome;
     } catch (error) {
       const failure = toManagerError(error, "MARKETPLACE_PREFLIGHT_FAILED");
-      if (existing) switchPointer(extensionId, existing.current, "reload-failed-rollback", "system", version);
+      if (existing?.quarantine) {
+        // 已隔离的扩展重装失败：指针与版本证据回退到隔离前的状态，只额外标记“清理要再做一遍”，
+        // 避免记录停在“已提交新版本、实际没起来”的半新状态。
+        commit(draft => { draft.extensions[extensionId] = {...existing, quarantineCleanupPending:true}; });
+      } else if (existing) switchPointer(extensionId, existing.current, "reload-failed-rollback", "system", version);
       else commit((draft) => {
         delete draft.extensions[extensionId];
       });
@@ -389,7 +389,10 @@ export function installFromSource(ctx: ManagerContext, request: InstallRequest):
     if (ref.size > maxPackageBytes) throw new ExtensionManagerError("MARKETPLACE_PACKAGE_TOO_LARGE", `包大小 ${ref.size} 字节超过上限 ${maxPackageBytes}`);
     // 同一摘要已是当前版本：不下载
     const current = requireHandle().read().extensions[ref.extensionId];
-    if (current && current.current === ref.version && current.packageDigest === ref.packageDigest && current.state !== "uninstalling") return "already-current";
+    if (current && current.current === ref.version && current.packageDigest === ref.packageDigest && current.state !== "uninstalling" && !current.quarantine) {
+      await toolkit.verifyManagedActivation?.({dir:requireHandle().layout.versionDir(ref.extensionId,ref.version),record:current});
+      return "already-current";
+    }
     assertNotAborted(job);
     board.update(job, { phase: "download", progress: 0 });
     let download;

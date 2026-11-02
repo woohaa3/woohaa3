@@ -29,9 +29,10 @@ export async function loadPackageToolkit(env: ExtensionHostEnv): Promise<Extensi
     return value as T;
   };
   const managedRoot = pick<(input: {repoRoot: string; env: ExtensionHostEnv}) => string>(installations, "resolveManagedRoot")({repoRoot,env});
-  const runtime = pick<(input: {managedRoot: string;env: ExtensionHostEnv}) => {install: ExtensionPackageToolkit["verifyExtensionPackage"]}>(trustRuntime,"runtimeTrust")({managedRoot,env});
+  const runtime = pick<(input: {managedRoot: string;env: ExtensionHostEnv}) => {install: ExtensionPackageToolkit["verifyExtensionPackage"];stateStamp:()=>string}>(trustRuntime,"runtimeTrust")({managedRoot,env});
   const activate = pick<(input: {dir: string;record?: import("./types.js").InstallationRecord;fresh?: boolean;managedRoot:string;env:ExtensionHostEnv})=>Promise<unknown>>(trustRuntime,"verifyManagedActivation");
   return {
+    trustStateStamp: () => runtime.stateStamp(),
     verifyManagedActivation: (input) => activate({...input,managedRoot,env}),
     computePackageDigest: pick(pkg, "computePackageDigest"),
     unpackExtensionPackage: pick(pkg, "unpackExtensionPackage"),
