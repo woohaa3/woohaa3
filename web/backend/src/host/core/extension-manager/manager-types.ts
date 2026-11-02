@@ -88,6 +88,8 @@ export type ExtensionManagerDeps = {
   /** 卸载等待 draining 收尾的上限，缺省 5 分钟；轮询间隔缺省 1 秒。 */
   drainTimeoutMs?: number;
   drainPollMs?: number;
+  /** 观察期周期性信任复核的间隔（毫秒），缺省 1 小时；新记录或改了版本的不受它限制。 */
+  trustCheckMs?: number;
   /** 测试可注入；缺省 setTimeout 实现的 sleep。 */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 };

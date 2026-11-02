@@ -85,10 +85,23 @@ export function runtimeTrust({managedRoot,env=process.env}={}) {
    const descriptor=readTrustDocument(path.join(treeDir,"extension.json"));const domain=domains.find(d=>d.extensionIds.includes(descriptor.extensionId));
    const certified=fs.existsSync(path.join(treeDir,CERTIFICATE_CHAIN_NAME));
    if(!domain){requireTrust(!certified&&!record?.trust?.startsWith("certified:"),"missing-trust-anchor");return null}
-   if(fresh)return api.install({treeDir,packageDigest:record?.packageDigest,trustedKeys:[],allowUnsigned:false});
-   const hash=filesDigest(treeDir);requireTrust(record?.filesDigest===hash,"installed-content-changed");
-   if(!fs.existsSync(receiptPath(hash))&&!certified)return api.install({treeDir,packageDigest:record?.packageDigest,allowUnsigned:false});
-   const receipt=readTrustDocument(receiptPath(hash),4<<20);
+   // Legacy record: installed while no domain/config existed, so it has no packageDigest. Never
+   // re-verify it against a fresh context (a bare-key v1 package cannot prove a certificate);
+   // keep v1 behaviour for it. Tracked in COMPATIBILITY.md.
+   const legacyRecord=record?.packageDigest===undefined||record?.filesDigest===undefined;
+   if(fresh){requireTrust(!legacyRecord,"missing-trust-evidence");return api.install({treeDir,packageDigest:record?.packageDigest,trustedKeys:[],allowUnsigned:false});}
+   const hash=filesDigest(treeDir);
+   const receiptFile=receiptPath(hash);
+   if(!fs.existsSync(receiptFile)){
+    // Records written before v2 carry no filesDigest/packageDigest; there is nothing historical to
+    // replay, so keep the v1 behaviour instead of quarantining an installation the user already
+    // had. Records that do carry evidence must have a matching receipt. Tracked in
+    // COMPATIBILITY.md; requiresReauthorization makes fresh paths re-verify once a receipt exists.
+    requireTrust(legacyRecord,"missing-trust-receipt");
+    return api.install({treeDir,packageDigest:record?.packageDigest,allowUnsigned:false});
+   }
+   requireTrust(record?.filesDigest===hash,"installed-content-changed");
+   const receipt=readTrustDocument(receiptFile,4<<20);
    requireTrust(receipt.filesDigest===hash&&receipt.extensionId===descriptor.extensionId&&receipt.version===descriptor.version,"receipt-mismatch");
    try{await refresh(domain)}catch{/* Existing verified installations use latest known revocations offline. */}
    const latest=domain.store.lastVerified();const e=receipt.evidence;

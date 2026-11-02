@@ -105,8 +105,13 @@ export type MarketplaceVersionInfo = {
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly packageDigest: string;
   readonly size: number;
-  /** 发布签名公钥 keyId（sha256(SPKI DER) 前 16 hex）。 */
+  /** 发布签名公钥 keyId（sha256(SPKI DER) 前 16 hex；v1 兼容展示口径）。 */
   readonly keyId?: string;
+  /** 证书包（v2）的完整公钥指纹、证书、发布者与信任域；裸 key 版本为空。 */
+  readonly signerKeyId?: string;
+  readonly certificateId?: string;
+  readonly publisherId?: string;
+  readonly trustDomain?: string;
   readonly publishedAt?: string;
   /** 来源声明的状态（如 approved / yanked）；客户端只展示。 */
   readonly state?: string;

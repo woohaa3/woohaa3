@@ -96,6 +96,10 @@ type VersionJson = {
   packageDigest?: unknown;
   size?: unknown;
   keyId?: unknown;
+  signerKeyId?: unknown;
+  certificateId?: unknown;
+  publisherId?: unknown;
+  trustDomain?: unknown;
   publishedAt?: unknown;
   state?: unknown;
   yankReason?: unknown;
@@ -117,6 +121,11 @@ function toVersionInfo(entry: VersionJson): MarketplaceVersionInfo | null {
   const yankReason = toStringOrNull(entry.yankReason) ?? undefined;
   const publishedAt = toIsoTime(entry.publishedAt);
   const keyId = toStringOrNull(entry.keyId) ?? undefined;
+  // v2 证书身份只做展示；本机信任判定仍然只看固定根与证书链，不看来源声明。
+  const signerKeyId = toStringOrNull(entry.signerKeyId) ?? undefined;
+  const certificateId = toStringOrNull(entry.certificateId) ?? undefined;
+  const publisherId = toStringOrNull(entry.publisherId) ?? undefined;
+  const trustDomain = toStringOrNull(entry.trustDomain) ?? undefined;
   return {
     version,
     ...(engines
@@ -132,6 +141,10 @@ function toVersionInfo(entry: VersionJson): MarketplaceVersionInfo | null {
     packageDigest,
     size: toNumber(entry.size),
     ...(keyId ? { keyId } : {}),
+    ...(signerKeyId ? { signerKeyId } : {}),
+    ...(certificateId ? { certificateId } : {}),
+    ...(publisherId ? { publisherId } : {}),
+    ...(trustDomain ? { trustDomain } : {}),
     ...(publishedAt ? { publishedAt } : {}),
     ...(state ? { state } : {}),
     ...(yankReason ? { yankReason } : {})

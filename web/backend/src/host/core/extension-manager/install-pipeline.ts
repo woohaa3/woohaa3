@@ -206,11 +206,19 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
     job.committing = true;
     const state = h.read();
     const existing = state.extensions[extensionId];
+    if (existing?.trust?.startsWith("certified:") && !trust.startsWith("certified:")) throw new ExtensionManagerError("MARKETPLACE_SIGNATURE_INVALID", "证书扩展不能降级为裸公钥信任");
     if (existing && existing.current === version && existing.filesDigest === filesDigest && existing.state !== "uninstalling") {
+      // 同版本重装：内容一致，但隔离状态必须能被这次（重新验过的）安装清除。
+      if (existing.quarantine || existing.trust !== trust) {
+        commit((draft) => {
+          const current = draft.extensions[extensionId];
+          if (!current) return;
+          draft.extensions[extensionId] = history({ ...current, quarantine: undefined, trust, ...(evidence ? { evidence } : {}) }, { revision: draft.revision + 1, action: "reinstall-same-version", version, actor: (job as Job & { actor?: string }).actor ?? "system" });
+        });
+      }
       cleanupStaging(job);
       return "already-current" as const;
     }
-    if (existing?.trust?.startsWith("certified:") && !trust.startsWith("certified:")) throw new ExtensionManagerError("MARKETPLACE_SIGNATURE_INVALID", "证书扩展不能降级为裸公钥信任");
     if (!trust.startsWith("certified:")) assertPublisherBinding({
       extensionId,
       builtin: Boolean(ctx.deps.builtins?.().get(extensionId)),

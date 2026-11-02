@@ -72,9 +72,6 @@ export function prepareData(dataDir,version) {
  const hasData=DATA_ENTRIES.some(entry=>fs.existsSync(path.join(dataDir,entry)));
  const backup=hasData&&(!previous||previous.build!==version.build||previous.schema!==version.schema)?backupData(dataDir):null;
  for(const dir of ['stores','media','config','secrets','extension-data','extensions','logs','cache'])fs.mkdirSync(path.join(dataDir,dir),{recursive:true,mode:0o700});
- const trustConfig=path.join(resourceRoot,"extension-trust.json");
- if(fs.existsSync(trustConfig))env.WOOHAA3_EXTENSION_TRUST_CONFIG=trustConfig;
- else if(development&&baseEnv.WOOHAA3_EXTENSION_TRUST_CONFIG)env.WOOHAA3_EXTENSION_TRUST_CONFIG=path.resolve(baseEnv.WOOHAA3_EXTENSION_TRUST_CONFIG);
  const master=path.join(dataDir,'secrets/master.key');if(!fs.existsSync(master))fs.writeFileSync(master,randomBytes(32).toString('base64'),{flag:'wx',mode:0o600});
  return {previous,backup};
 }
