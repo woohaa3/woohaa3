@@ -327,6 +327,8 @@ pub(crate) struct HistoryStripDot {
     #[serde(default)]
     pub(crate) pressed: bool,
     #[serde(default)]
+    pub(crate) unseen: bool,
+    #[serde(default)]
     pub(crate) presentation_id: Option<String>,
     #[serde(default)]
     pub(crate) entry_id: Option<String>,

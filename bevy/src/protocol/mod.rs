@@ -21,6 +21,8 @@ mod image_focus;
 mod model;
 mod observer;
 mod position;
+mod resource_state;
+pub(crate) use resource_state::{NodeResourceState, ResourceStateRequest};
 mod prepared;
 mod scene;
 mod scene_instant;

@@ -138,6 +138,42 @@ export function createFrameSubmission(deps: {
         return {error:null,retry:false};
       }
     }
+    // Image readiness may share a wheel frame. Both deltas keep the same full
+    // baseline; combining them must not rebuild all nodes or hash the full scene.
+    if (runtime && index && baseline && !block && !force && reasons.size > 0
+      && reasons.has("image-resources")
+      && [...reasons].every(reason => reason === "image-resources" || reason === "viewport" || reason === "viewport-transition")
+      && runtime.setResourceStates && deps.options.textureSync?.resourceStateChanges) {
+      const rows = deps.options.textureSync.resourceStateChanges();
+      const safe = rows.every(row => {
+        const node = mirror.node(baseline!.scene, row.id);
+        return node?.type === "image" && !node.model && !node.modelPreview && !node.shotPreview && !node.compositeAsset && !node.group && !node.ghost;
+      });
+      if (safe) {
+        try {
+          const changed = rows.map(row => ({ ...row,
+            mediaLoading: !mirror.node(baseline!.scene, row.id)!.busy && row.mediaLoading }));
+          const viewport = deps.viewport(), previous = baseline.scene.viewport;
+          const viewChanged = viewport.x !== previous.x || viewport.y !== previous.y || viewport.zoom !== previous.zoom;
+          if (viewChanged) {
+            const error = commitViewportUpdate(runtime, viewport);
+            if (error) return fail(error);
+          }
+          if (changed.length) runtime.setResourceStates({ baseSceneGeneration: baseline.base, nodes: changed });
+          if (viewChanged) baseline.scene = { ...baseline.scene, viewport: { ...viewport } };
+          for (const row of changed) {
+            const node = mirror.node(baseline.scene, row.id)!;
+            node.texture = row.texture; node.mediaLoading = row.mediaLoading;
+          }
+          deps.options.textureSync.acknowledgeResourceStates?.();
+          if (changed.length) fingerprint = null;
+          noteSceneSubmitRoute("resources", reasons);
+          if (changed.length) deps.options.onScene?.(baseline.scene);
+          deps.options.onSceneSubmitted?.();
+          return {error:null,retry:false};
+        } catch (error) { return fail(error); }
+      }
+    }
     const built = deps.build();
     if (!built || !runtime) return {error:null,retry:false};
     sceneDiagnostics.fingerprintBuilds+=1;
@@ -154,6 +190,7 @@ export function createFrameSubmission(deps: {
     try {
       noteSceneSubmitRoute("full", reasons);
       runtime.setScene(built.scene,built.resources);
+      deps.options.textureSync?.acknowledgeResourceStates?.();
       fingerprint=nextFingerprint;
       const previews=index && expandPositionPreviews(index,deps.state.localPositions);
       baseline=index && previews ? {runtime,index,previews,scene:mirror.reset(built.scene),

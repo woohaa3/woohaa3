@@ -184,7 +184,7 @@ fn configure_canvas(app: &mut App) {
                             .chain(),
                         sync_surface,
                         sync_ready,
-                        canvas2d::sync_textures,
+                        canvas2d::sync_textures.run_if(canvas2d::texture_sync_requested),
                         (
                             model3d::film_set_media::sync_film_set_planes,
                             canvas2d::scope_panel::sync_images,
@@ -251,9 +251,10 @@ fn configure_canvas(app: &mut App) {
                             .chain()
                             .in_set(crate::canvas_ecs::CanvasRenderSet::Selection)
                             .run_if(canvas2d::canvas_render_requested),
+                        // `sync_canvas_labels` 已由 main 提到独立的 ApplyDeferred 块（见下方
+                        // 「画布文字栅格呈现」），这里只剩卡片元信息与聚焦细节两个生产者。
                         (
                             canvas2d::produce_card_meta,
-                            canvas2d::sync_canvas_labels,
                             canvas2d::focus_details::sync,
                         )
                             .chain()
@@ -286,6 +287,7 @@ fn configure_canvas(app: &mut App) {
         .add_systems(
             Update,
             (
+                canvas2d::sync_canvas_labels,
                 bevy::ecs::schedule::ApplyDeferred,
                 canvas2d::text_presentation::sync,
             )
@@ -332,4 +334,28 @@ fn configure_canvas(app: &mut App) {
                     .after(scene3d::hide_shot_gizmos_during_transition),
             ),
         );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::schedule::ScheduleLabel;
+
+    #[test]
+    fn canvas_schedules_initialize_without_renderer() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()));
+        configure_canvas(&mut app);
+        // Initialize real system parameters and ordering without starting a renderer or GPU.
+        for label in [
+            Startup.intern(),
+            Update.intern(),
+            PostUpdate.intern(),
+            Last.intern(),
+        ] {
+            app.world_mut().schedule_scope(label, |world, schedule| {
+                schedule.initialize(world).unwrap();
+            });
+        }
+    }
 }

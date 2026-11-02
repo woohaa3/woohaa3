@@ -278,9 +278,18 @@ describe("千卡片媒体准入", () => {
     projectAll(coordinator, current, 1);
     sync.sync();
     const returned = pending.filter((entry) => entry.url === "/api/media/version-a?canvas=capacity-audit");
+    // 旧 A 仍在通道里 draining，新的 A 必须是**独立作业**：两者同时存在，说明没有按内容身份
+    // 合并到已作废的任务上。小档允许并行多个作业，所以新 A 不必等旧 A 腾出名额。
     expect(returned.length).toBe(2);
-
-    for (const entry of pending) entry.resolve();
+    expect(pending.length).toBe(3);
+    const [stale, fresh] = returned;
+    // 旧任务先完成：它属于已释放的代，不得把新目标标成 ready。
+    stale.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sync.isLoading?.("n0")).toBe(true);
+    expect(uploaded.at(-1) ?? "").not.toBe("/api/media/version-a?canvas=capacity-audit");
+    fresh.resolve();
+    for (const entry of pending.filter((entry) => entry.url !== "/api/media/version-a?canvas=capacity-audit")) entry.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
     for (let frame = 0; frame < 10; frame += 1) { coordinator.beginFrame(); sync.sync(); }
     // 最终卡片显示的是切回的 A，而不是停在 B（或停在旧图）。

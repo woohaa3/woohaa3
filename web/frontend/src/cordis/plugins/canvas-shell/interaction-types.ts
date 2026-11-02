@@ -187,7 +187,7 @@ export type InteractionControllerOptions = {
    * 只传 canonical nodeId；打开历史面板不改变 selection、不提交 Canvas 命令。
    */
   onNodeHistory?: (request: { nodeId: string }) => void;
-  onNodeHistorySelect?: (request: { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string; viewOnly?: boolean }) => void;
+  onNodeHistorySelect?: (request: { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string }) => void;
   /**
    * 顶部操作横条动作命中（change: 2026-10-13-add-node-to-film-set-shortcut）。
    * 横条由 Bevy 绘制、Rust 命中；宿主据 `actionId`（= 贡献 id）派发，`menu` 为设置箭头。

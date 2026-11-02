@@ -17,9 +17,11 @@ use crate::canvas_ecs::{CanvasBatchWriter, SelectionOutlineBatch};
 use crate::protocol::GraphNode;
 use crate::theme::ThemeResource;
 
-use super::{CardBlockCache, CardDecorationCache, ContainerBlockCache, EdgeBlockCache, CanvasOverlayCache};
 use super::geometry::Geometry;
 use super::labels::{LabelRequests, LabelStyle};
+use super::{
+    CanvasOverlayCache, CardBlockCache, CardDecorationCache, ContainerBlockCache, EdgeBlockCache,
+};
 
 /// 静态 2D 场景只在 accepted scene/视口/主题变化时重建。
 pub(crate) fn canvas_render_requested(
@@ -81,16 +83,45 @@ pub(crate) fn produce_card_geometry(
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
     mut flags: ResMut<FrameFlags>,
-    nodes: Query<(
-        Entity,
-        &CanvasNodeId,
-        &CanvasDepth,
-        &CardPresentation,
-    )>,
+    projection: Res<crate::canvas_ecs::CanvasProjectionState>,
+    nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth, &CardPresentation)>,
 ) {
+    let full = !visuals.initialized
+        || flags.scene_received
+        || flags.positions_received
+        || flags.theme_changed
+        || theme.is_changed()
+        || (scene.is_changed() && flags.resource_nodes.is_empty());
+    if !full && flags.resource_nodes.is_empty() {
+        return;
+    }
+    let dirty: std::collections::HashSet<usize> = flags
+        .resource_nodes
+        .iter()
+        .map(|slot| slot / super::card_cache::BLOCK_SIZE)
+        .collect();
+    let candidates: Vec<_> = if full {
+        nodes.iter().collect()
+    } else {
+        // Resource deltas affect fixed document slots. Read only the affected blocks.
+        dirty
+            .iter()
+            .flat_map(|block| {
+                let start = block * super::card_cache::BLOCK_SIZE;
+                scene
+                    .0
+                    .nodes
+                    .iter()
+                    .skip(start)
+                    .take(super::card_cache::BLOCK_SIZE)
+            })
+            .filter_map(|node| projection.entity(&node.id))
+            .filter_map(|entity| nodes.get(entity).ok())
+            .collect()
+    };
     let mut cards: Vec<(usize, Entity, usize, std::borrow::Cow<'_, GraphNode>)> =
-        Vec::with_capacity(nodes.iter().len());
-    for (entity, id, depth, _) in &nodes {
+        Vec::with_capacity(candidates.len());
+    for (entity, id, depth, _) in candidates {
         let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
             continue;
         };
@@ -110,6 +141,7 @@ pub(crate) fn produce_card_geometry(
         &mut requests,
         &cards,
         scene.0.nodes.len(),
+        (!full).then_some(&dirty),
         &scene.0,
         &theme,
         &materials,
@@ -127,28 +159,27 @@ pub(crate) fn produce_card_hover(
     materials: Res<super::CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut flags: ResMut<FrameFlags>,
-    nodes: Query<(
-        Entity,
-        &CanvasNodeId,
-        &CanvasDepth,
-        &CardPresentation,
-    )>,
+    projection: Res<crate::canvas_ecs::CanvasProjectionState>,
+    nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth, &CardPresentation)>,
 ) {
-    let mut projected = Vec::with_capacity(nodes.iter().len());
-    for (_, id, depth, _) in &nodes {
-        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
-            continue;
-        };
-        projected.push((
-            depth.index,
-            super::decoration_cache::HoverInput {
-                index: depth.index,
-                node,
-            },
-        ));
-    }
-    projected.sort_by_key(|(index, _)| *index);
-    let projected: Vec<_> = projected.into_iter().map(|(_, input)| input).collect();
+    let projected: Vec<_> = scene
+        .0
+        .hover
+        .as_ref()
+        .and_then(|hover| hover.node_id.as_deref())
+        .and_then(|id| projection.entity(id))
+        .and_then(|entity| nodes.get(entity).ok())
+        .and_then(|(_, id, depth, _)| {
+            crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0).map(|node| {
+                super::decoration_cache::HoverInput {
+                    index: depth.index,
+                    render: depth.render,
+                    node,
+                }
+            })
+        })
+        .into_iter()
+        .collect();
     flags.card_decorations_rebuilt = super::decoration_cache::sync(
         &mut commands,
         &mut meshes,
@@ -173,7 +204,10 @@ pub(crate) fn produce_container_geometry(
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
     mut flags: ResMut<FrameFlags>,
-    nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
+    nodes: Query<
+        (Entity, &CanvasNodeId, &CanvasDepth),
+        Or<(With<GroupPresentation>, With<FilmSetPresentation>)>,
+    >,
 ) {
     let mut containers = Vec::new();
     for (entity, id, depth) in &nodes {
@@ -252,7 +286,12 @@ pub(crate) fn produce_card_selection(
     index: Res<NodeIndex>,
     theme: Res<ThemeResource>,
     mut batch: ResMut<SelectionOutlineBatch>,
-    nodes: Query<(&CanvasNodeId, &CanvasDepth, &CanvasSelection, &CardPresentation)>,
+    nodes: Query<(
+        &CanvasNodeId,
+        &CanvasDepth,
+        &CanvasSelection,
+        &CardPresentation,
+    )>,
 ) {
     let writer = batch.writer();
     for (id, depth, selection, _) in &nodes {
@@ -275,7 +314,12 @@ pub(crate) fn produce_group_selection(
     index: Res<NodeIndex>,
     theme: Res<ThemeResource>,
     mut batch: ResMut<SelectionOutlineBatch>,
-    nodes: Query<(&CanvasNodeId, &CanvasDepth, &CanvasSelection, &GroupPresentation)>,
+    nodes: Query<(
+        &CanvasNodeId,
+        &CanvasDepth,
+        &CanvasSelection,
+        &GroupPresentation,
+    )>,
 ) {
     let writer = batch.writer();
     for (id, depth, selection, _) in &nodes {
@@ -295,7 +339,12 @@ pub(crate) fn produce_film_set_selection(
     index: Res<NodeIndex>,
     theme: Res<ThemeResource>,
     mut batch: ResMut<SelectionOutlineBatch>,
-    nodes: Query<(&CanvasNodeId, &CanvasDepth, &CanvasSelection, &FilmSetPresentation)>,
+    nodes: Query<(
+        &CanvasNodeId,
+        &CanvasDepth,
+        &CanvasSelection,
+        &FilmSetPresentation,
+    )>,
 ) {
     let writer = batch.writer();
     for (id, depth, selection, presentation) in &nodes {

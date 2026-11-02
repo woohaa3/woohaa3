@@ -74,6 +74,7 @@ pub(crate) fn sync_film_set_textures(
                 .as_ref()
                 .is_some_and(|handle| images.contains(handle.id()))
         {
+            crate::bridge::texture_receipts::applied("plane",&plane_id,width,height,"");
             continue;
         }
         let material = entry.material.clone();
@@ -98,6 +99,7 @@ pub(crate) fn sync_film_set_textures(
             let handle = images.add(image);
             apply_texture(&mut materials, &material, handle);
         }
+        crate::bridge::texture_receipts::applied("plane",&plane_id,width,height,"");
         visuals.next_texture_revision = visuals.next_texture_revision.saturating_add(1);
         let revision = visuals.next_texture_revision;
         if let Some(entry) = visuals.planes.get_mut(&plane_id) {

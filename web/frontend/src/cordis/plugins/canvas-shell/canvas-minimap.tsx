@@ -70,7 +70,10 @@ export function CanvasMinimap({ getController, revision, onCollapse }: CanvasMin
       return undefined;
     }
     const sync = () => {
-      setViewport(controller.viewport());
+      const view = controller.viewport();
+      setViewport((previous) => previous
+        && previous.x === view.x && previous.y === view.y && previous.zoom === view.zoom
+        ? previous : view);
       const next = controller.surface();
       setSurface((previous) => previous
         && previous.width === next.width
@@ -91,10 +94,13 @@ export function CanvasMinimap({ getController, revision, onCollapse }: CanvasMin
 
   const projection = useMemo(() => projectMinimap(canvas), [canvas]);
   const viewportRect = useMemo(() => viewportWorldRect(viewport, surface), [viewport, surface]);
-  const transform = useMemo(
-    () => fitMinimapTransform(projection.bounds, viewportRect, MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_PADDING),
-    [projection.bounds, viewportRect]
+  // With content, the fitted map depends on content bounds, not the viewport.
+  // Keep its identity when the numeric mapping is unchanged so wheel events only
+  // update the viewport rectangle, without recreating all node/edge elements.
+  const { scale, offsetX, offsetY } = fitMinimapTransform(
+    projection.bounds, viewportRect, MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_PADDING
   );
+  const transform = useMemo(() => ({ scale, offsetX, offsetY }), [scale, offsetX, offsetY]);
   const selectedIds = useMemo(() => new Set(selection.nodeIds), [selection.nodeIds]);
   const nodeShapes = useMemo(
     () => projection.nodes.map((node) => (

@@ -15,6 +15,7 @@ struct DotTarget {
     state: String,
     current: bool,
     selected: bool,
+    unseen: bool,
     scale: f32,
     target_scale: f32,
     tone: f32,
@@ -101,7 +102,7 @@ pub(crate) fn sync(
                 }
                 let strip = node.history_strip.as_ref().unwrap();
                 for (dot_index, dot) in strip.dots.iter().enumerate() {
-                    if dot.selected.is_none() && dot.state != "running" {
+                    if dot.selected.is_none() && dot.state != "running" && !dot.unseen {
                         continue;
                     }
                     let center = history_strip_dot(
@@ -147,6 +148,7 @@ pub(crate) fn sync(
                             state: dot.state.clone(),
                             current: dot.current,
                             selected: dot.selected == Some(true),
+                            unseen: dot.unseen,
                             scale,
                             target_scale,
                             tone,
@@ -219,6 +221,9 @@ pub(crate) fn sync(
             super::history_strip::dot_color(&theme, &dot.state)
         };
         geometry.circle(dot.center, radius, dot.z + 0.002, shade(fill, dot.tone), 18);
+        if dot.unseen {
+            super::history_strip::draw_unseen_badge(&mut geometry, &theme, dot.center, dot.z + 0.003);
+        }
     }
     let mesh = meshes.add(geometry.build());
     if let Some(old) = layer.mesh.replace(mesh.clone()) {

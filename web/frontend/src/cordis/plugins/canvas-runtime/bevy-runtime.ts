@@ -1,9 +1,10 @@
+import { canvasResourceStateRequest } from "@woohaa3/contracts";
+import { isNativeImage, applyNativeImage } from "./image-worker/native-port.js";
 import { readSceneWorkDiagnostics } from "./diagnostics-reader.js";
 import { readRenderStageCounters } from "./render-stage-counters.js";
 
-// 计数读取已拆到 `render-stage-counters.ts`（file-budget）；这里转出保持既有调用方不变。
-export { readRenderStageCounters } from "./render-stage-counters.js";
-export type { RenderStageCounters } from "./render-stage-counters.js";
+// 计数读取已拆到 `render-stage-counters.ts`（file-budget）；转出保持既有调用方不变。
+export { readRenderStageCounters, type RenderStageCounters } from "./render-stage-counters.js";
 /// <reference types="vite/client" />
 import { hoverNodeStore } from "../../services/hover-store.js";
 import { RuntimeIssues } from "./runtime-issues.js";
@@ -12,7 +13,7 @@ import { TextureUploadBoundary } from "./texture-upload-boundary.js";
 import { ModelResourceFailures } from "./model-resource-failures.js";
 import { ModelPayloadScheduler } from "./model-payload-scheduler.js";
 import { createModelResourceRegistrar } from "./model-resource-registrar.js";
-import { PositionSceneMirror } from "./position-scene-mirror.js";
+import { PositionSceneMirror, applyResourceStates } from "./position-scene-mirror.js";
 import { createRuntimeRealm, hasNativeBootstrap, type RuntimeRealm } from "./runtime-realm.js";
 import { RuntimeSupervisor, readRuntimeHealth } from "./runtime-supervisor.js";
 /**
@@ -107,7 +108,6 @@ function nextThumbnailRequestId(): number {
 
 /** 稳定模块诊断标识；实际 glue 在 runtime-realm-entry 通过字面量 import 打包。 */
 export const BEVY_WASM_MODULE = "../bevy-wasm/woohaa_bevy_canvas.js";
-
 
 export type BevyLoaderOptions = {
   /** 动态 import 实现；测试可注入。 */
@@ -430,6 +430,13 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     runtimeHealthSnapshot: () => supervisor?.snapshot() ?? null,
     getWorkDiagnostics: () => !disposed && module.canvas_work_diagnostics ? JSON.parse(module.canvas_work_diagnostics()) as Record<string, unknown> : {},
     lastScene: () => lastScene,
+    ...(module.set_resource_states ? { setResourceStates: (input: Omit<import("@woohaa3/contracts").CanvasResourceStateUpdate, "version">) => {
+      if (disposed) throw new Error("Bevy runtime disposed");
+      const json = canvasResourceStateRequest(input), accepted = module.set_resource_states!(json);
+      if (lastScene) applyResourceStates(positionMirror, lastScene, input.nodes);
+      sceneDiagnostics.boundaryBytes += new TextEncoder().encode(json).byteLength;
+      return accepted;
+    } } : {}),
     setPositions: (input) => {
       if (disposed) throw new Error("Bevy runtime disposed");
       if (!module.set_positions) throw new Error("Bevy 运行时缺少 set_positions 边界");
@@ -452,16 +459,19 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       interactionGeneration = accepted;
       if (scene) { lastScene = scene; supervisor?.accepted(scene.revision, accepted); }
     } }),
+    flushTextureReceipts: () => { if(module.poll_texture_receipts)textures.acceptReceipts(module.poll_texture_receipts()); },
+    textureApplied: (id,width,height,content,plane=false) => !module.poll_texture_receipts || textures.applied(plane?"plane":"node",id,width,height,content),
     setTexture: (id, width, height, rgba, source) => textures.upload("node", id, width, height, rgba,
       // 稳定内容身份让 Rust 侧按内容+尺寸共享同一 GPU 纹理，nodeId 只是绑定实例
       // （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
-      () => module.set_texture(id, width, height, rgba, source?.sourceKey ?? ""), source),
+      () => isNativeImage(rgba) ? applyNativeImage(rgba,id,false,source?.sourceKey ?? "") : module.set_texture(id, width, height, rgba, source?.sourceKey ?? ""), source),
     setImageFocusDetails:frame=>{
       if(!module.set_image_focus_details) {if(frame)throw new Error("画布内核缺少图片细节纹理接口");return;}
       focusDetails.upload(frame,(manifest,pixels)=>module.set_image_focus_details!(manifest,pixels));
     },
     setModelMediaTexture: (id, width, height, rgba, source) => textures.upload("plane", id, width, height, rgba,
-      () => { if (!module.set_model_media_texture) throw new Error("缺少媒体平面纹理能力"); module.set_model_media_texture(id, width, height, rgba); }, source),
+      () => { if (!module.set_model_media_texture) throw new Error("缺少媒体平面纹理能力"); if (isNativeImage(rgba)) applyNativeImage(rgba,id,true,source?.sourceKey ?? "");
+        else module.set_model_media_texture(id, width, height, rgba); }, source),
     registerModelResource,
     prepareAndRegisterModelResource,
     setModelPayloadLeases,
@@ -750,6 +760,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     setViewport: runtime.setViewport,
     setObserver: runtime.setObserver,
     setPositions: runtime.setPositions,
+    setResourceStates: runtime.setResourceStates,
     baseSceneGeneration: runtime.baseSceneGeneration,
     modelResourceErrors: resourceFailures.getSnapshot,
     runtimeIssues: issues.getSnapshot,
@@ -760,6 +771,8 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     generation: runtime.generation,
     interactionGeneration: runtime.interactionGeneration,
     recover: runtime.recoverRuntime,
+    flushTextureReceipts: runtime.flushTextureReceipts,
+    textureApplied: runtime.textureApplied,
     setTexture: runtime.setTexture,
     queryGizmoHit: runtime.queryGizmoHit,
     queryCompositeAssetItemBounds: runtime.queryCompositeAssetItemBounds,

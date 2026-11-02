@@ -1,16 +1,4 @@
-/**
- * DOM 图片解码 + 失败分类
- * （change: 2026-10-23-scale-canvas-media-residency，design D2/D8）。
- *
- * `<img>` 的 `onerror` 不带状态码，但它掩盖了两类完全不同的失败：
- *
- * - **传输失败**：媒体服务正在重启/网关 502/网络中断。资源本身是好的，稍后重读即可。
- * - **内容失败**：字节可取但无法解码、或 4xx（已删除、失权）。必须显式重试/换素材才重试。
- *
- * 两者都记成「图片加载失败」并永久不再尝试，会让一次几秒的后端重启把健康素材永久钉成错误
- * 状态（真实运行时发现的缺陷）。因此这里在失败后补一次 `HEAD` 探测来分类：探测不是常规
- * 路径，只在失败时发生，且响应可缓存（`immutable`），不会重复下载正文。
- */
+/** Stable failure classification and bounded retry policy shared by image adapters. */
 
 /** 视为「暂时性」的 HTTP 状态：服务不可用、网关错误、限流与超时。 */
 const TRANSIENT_STATUS: ReadonlySet<number> = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -62,14 +50,4 @@ export async function classifyImageFailure(url: string): Promise<ImageLoadError>
   } catch {
     return new ImageLoadError("图片加载失败（无法连接媒体服务）。", true);
   }
-}
-
-/** 默认解码：DOM `Image` 元素；失败时分类为可重试的传输失败或内容失败。 */
-export function loadImageViaDom(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => { void classifyImageFailure(url).then(reject); };
-    image.src = url;
-  });
 }

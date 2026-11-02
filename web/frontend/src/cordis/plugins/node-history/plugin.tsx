@@ -59,7 +59,16 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
       const client = options.client ?? createRemoteClient(ctx);
       // 页面内模型缩略图：面板与能力中心共用一个渲染器（共享页面内 LRU 与单飞锁）。
       const renderModelThumbnail = options.renderModelThumbnail ?? createModelThumbnailRenderer(ctx);
-      const disposeInlineVersions = installInlineVersions(ctx, canvasId, client);
+      const disposeInlineVersions = installInlineVersions(ctx, canvasId, client, {
+        canActivate: (nodeId) => {
+          if (!ctx.canvasSession.isWritable()) return { ok: false as const, reason: "当前会话不可写，无法切换版本" };
+          const imageEdit = resolveImagePreviewOwner(ctx);
+          if (imageEdit?.isActive?.() === true && imageEdit.nodeId?.() === nodeId && imageEdit.draftState?.() !== "saved") {
+            return { ok: false as const, reason: "请先保存当前草稿" };
+          }
+          return { ok: true as const };
+        }
+      });
       const controller = new NodeHistoryController(client);
       // 运行态是**兄弟插件**（run-state）提供的服务，内联版本是**本插件自己**刚 provide 的：
       // 两者在 apply 窗口内都还不 active，`ctx.get` 一律 undefined（cordis 4 的 strict 语义）。
@@ -79,7 +88,12 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
       });
       ctx.inject([INLINE_HISTORY_SERVICE], (scoped) => {
         const service = scoped.get(INLINE_HISTORY_SERVICE) as InlineHistoryService;
-        const off = service.subscribe(() => { void controller.refresh(); });
+        const off = service.subscribe(() => {
+          // 面板打开期间新到的版本已在列表里可见，直接视为已读，避免圆点角标与面板状态不一致。
+          const panel = ctx.canvasNavigation.getSnapshot().panel;
+          if (panel?.type === NODE_HISTORY_PANEL_TYPE) service.markSeenNode(panel.nodeId);
+          void controller.refresh();
+        });
         scoped.effect(() => () => off(), "node-history:inline-refresh");
       });
       /** 总览传递的待选记录；只消费一次，不自动恢复。 */
@@ -166,12 +180,15 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
         const route = ctx.canvasNavigation.getSnapshot().panel;
         const state = controller.getState();
         if (route?.type === NODE_HISTORY_PANEL_TYPE) {
+          // 打开完整历史即视为已查看该节点已知版本，清除圆点未读提示。
+          inline()?.markSeenNode(route.nodeId);
           if (!state || state.nodeId !== route.nodeId) {
             const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
             const node = canvas?.document.nodes.find((entry) => entry.id === route.nodeId);
             const kind = node ? nodeHistoryKindForNodeType(node.type, canvas?.nodeData[node.id]) : null;
             if (kind) {
               void controller.open({ canvasId, nodeId: route.nodeId, kind, writable: ctx.canvasSession.isWritable() }).then(() => {
+                inline()?.markSeenNode(route.nodeId);
                 syncOperations();
                 // 消费总览跳转传递的待选记录（不自动恢复；仅选中）。
                 if (pendingEntryId) {

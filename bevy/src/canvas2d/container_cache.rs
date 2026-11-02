@@ -144,6 +144,7 @@ pub(super) fn sync(
     materials: &CanvasMaterials,
 ) -> u64 {
     requests.begin(CanvasLabelRole::Container);
+    let render_indices = super::draw_order::render_indices(&scene.nodes);
     let band = scene.aggregate_connect.as_ref().and_then(|_| {
         crate::canvas_query::aggregate::selection_bounds(&scene.nodes, &scene.selection.nodes)
     });
@@ -189,7 +190,7 @@ pub(super) fn sync(
                 for key in &keys {
                     let Some(input) = containers.iter().find(|input| input.index == key.index) else { continue };
                     let node = input.node.as_ref();
-                    let z = super::draw_order::render_z(&scene.nodes, key.render);
+                    let z = 10.0 + render_indices.get(key.render).copied().unwrap_or(key.render) as f32 * 0.1;
                     let labels = if let Some(group) = &node.group {
                         vec![super::group::draw_group(&mut scratch, theme, node, group, key.selected, z)]
                     } else if key.panel.is_none() {
@@ -230,7 +231,7 @@ pub(super) fn sync(
                 continue;
             };
             let node = input.node.as_ref();
-            let z = super::draw_order::render_z(&scene.nodes, key.render);
+            let z = 10.0 + render_indices.get(key.render).copied().unwrap_or(key.render) as f32 * 0.1;
             let mut labels = if let Some(group) = &node.group {
                 vec![super::group::draw_group(
                     &mut geometry,

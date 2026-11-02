@@ -3,7 +3,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import { executeModelScriptVersioned, isSupportedModelScriptVersion, sceneIrVersionFor, type NodeGenerationHistoryDetail, type NodeHistoryPreview } from "@woohaa3/contracts";
 import type { NodeHistoryClient } from "./controller.js";
 import type { CanvasHistoryClient } from "./canvas-history-controller.js";
-import { IMAGE_EDIT_SERVICE, RUN_STATE_SERVICE, type RunStateService, type ImageEditService } from "../service-keys.js";
+import { IMAGE_EDIT_SERVICE, type ImageEditService } from "../service-keys.js";
 import { appPublicUrl } from "../../services/app-base-path.js";
 
 /**
@@ -118,8 +118,6 @@ export function createRemoteClient(ctx: Context): NodeHistoryClient & CanvasHist
     },
     apply: async (input) => {
       if (!ctx.canvasSession.isWritable()) return { ok: false, code: "read-only", error: "只读会话无法恢复版本" };
-      const runs = ctx.get(RUN_STATE_SERVICE as never) as RunStateService | undefined;
-      if (runs?.isBusy(input.canvasId, input.nodeId)) return { ok: false, code: "busy", error: "任务进行中，暂时无法恢复版本" };
       const editor = ctx.get(IMAGE_EDIT_SERVICE as never) as ImageEditService | undefined;
       if (editor?.isActive() && editor.nodeId() === input.nodeId && editor.draftState() !== "saved") {
         return { ok: false, code: "unsaved-draft", error: "请先保存当前草稿，再恢复历史版本" };

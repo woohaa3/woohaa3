@@ -215,3 +215,154 @@ fn deleting_owner_reclaims_labels_and_roles_are_independent() {
     world.flush();
     assert!(world.query::<&CanvasLabel>().iter(&world).next().is_none());
 }
+
+#[test]
+fn unchanged_requests_keep_labels_without_marking_text_components_changed() {
+    let mut world = world();
+    let mut schedule = Schedule::default();
+    schedule.add_systems(sync_canvas_labels);
+    for i in 0..1000 {
+        let entity = owner(&mut world);
+        world.resource_mut::<LabelRequests>().push(
+            CanvasLabelRole::Card,
+            entity,
+            vec![(format!("label {i}"), Vec2::new(i as f32, 0.), 12., 0xffffff)],
+            5.,
+            LabelStyle::Node,
+        );
+    }
+    schedule.run(&mut world);
+    world.flush();
+    assert_eq!(world.query::<&CanvasLabel>().iter(&world).count(), 1000);
+    world.clear_trackers();
+    schedule.run(&mut world);
+    world.flush();
+    assert_eq!(world.query_filtered::<Entity, Or<(Changed<Text2d>, Changed<Transform>, Changed<TextColor>)>>()
+        .iter(&world).count(), 0);
+    // An externally removed slot must be rebuilt even if its request is unchanged.
+    let lost = world
+        .query_filtered::<Entity, With<CanvasLabel>>()
+        .iter(&world)
+        .next()
+        .unwrap();
+    world.despawn(lost);
+    schedule.run(&mut world);
+    world.flush();
+    assert_eq!(world.query::<&CanvasLabel>().iter(&world).count(), 1000);
+    world
+        .resource_mut::<LabelRequests>()
+        .begin(CanvasLabelRole::Card);
+    schedule.run(&mut world);
+    world.flush();
+    assert_eq!(world.query::<&CanvasLabel>().iter(&world).count(), 0);
+}
+
+/// CPU-only scaling probe; does not initialise the renderer or claim hardware FPS.
+#[test]
+#[ignore = "manual CPU scaling probe"]
+fn large_canvas_label_cpu_scaling() {
+    for count in [1000, 3000, 6000] {
+        let mut world = world();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(sync_canvas_labels);
+        for i in 0..count {
+            let entity = owner(&mut world);
+            world.resource_mut::<LabelRequests>().push(
+                CanvasLabelRole::Card,
+                entity,
+                vec![(format!("image {i}"), Vec2::new(i as f32, 0.), 12., 0xffffff)],
+                5.,
+                LabelStyle::Node,
+            );
+        }
+        schedule.run(&mut world);
+        world.flush();
+        let mut samples = Vec::new();
+        for _ in 0..25 {
+            let start = std::time::Instant::now();
+            schedule.run(&mut world);
+            world.flush();
+            samples.push(start.elapsed().as_secs_f64() * 1000.);
+        }
+        samples.sort_by(f64::total_cmp);
+        println!(
+            "CPU labels nodes={count} median_ms={:.3} max_ms={:.3}",
+            samples[12], samples[24]
+        );
+    }
+}
+
+#[test]
+fn one_changed_owner_keeps_other_labels_untouched_and_reparenting_repairs_slots() {
+    let mut world = world();
+    let owners: Vec<_> = (0..1000)
+        .map(|i| {
+            let entity = owner(&mut world);
+            world.resource_mut::<LabelRequests>().push(
+                CanvasLabelRole::Card,
+                entity,
+                vec![(format!("label {i}"), Vec2::ZERO, 12., 0xffffff)],
+                5.,
+                LabelStyle::Node,
+            );
+            entity
+        })
+        .collect();
+    let mut schedule = Schedule::default();
+    schedule.add_systems(sync_canvas_labels);
+    schedule.run(&mut world);
+    world.flush();
+    let original = labels_of(&mut world, owners[17])[0];
+    world.clear_trackers();
+    world.resource_mut::<LabelRequests>().push(
+        CanvasLabelRole::Card,
+        owners[17],
+        vec![("changed".into(), Vec2::ZERO, 12., 0xffffff)],
+        5.,
+        LabelStyle::Node,
+    );
+    schedule.run(&mut world);
+    world.flush();
+    assert_eq!(
+        world
+            .query_filtered::<Entity, Changed<Text2d>>()
+            .iter(&world)
+            .collect::<Vec<_>>(),
+        vec![original]
+    );
+    let other = owner(&mut world);
+    world.entity_mut(original).insert(ChildOf(other));
+    schedule.run(&mut world);
+    world.flush();
+    let repaired = labels_of(&mut world, owners[17]);
+    assert_eq!(repaired.len(), 1);
+    assert_ne!(repaired[0], original);
+    assert!(
+        world.get_entity(original).is_err(),
+        "unrequested reparented role must be reclaimed"
+    );
+    world.resource_mut::<LabelRequests>().clear();
+    schedule.run(&mut world);
+    world.flush();
+    assert_eq!(world.query::<&CanvasLabel>().iter(&world).count(), 0);
+}
+
+#[test]
+fn label_colors_keep_linear_value_across_creation_reuse_and_theme_change() {
+    let mut world = world();
+    let node = owner(&mut world);
+    for rgb in [0x84A1C3, 0x84A1C3, 0xEF6721] {
+        push(
+            &mut world,
+            node,
+            vec![("color".into(), Vec2::ZERO, 12., rgb)],
+        );
+        let entity = labels_of(&mut world, node)[0];
+        let color = world.get::<TextColor>(entity).unwrap().0;
+        assert!(matches!(color, Color::LinearRgba(_)));
+        assert_eq!(
+            color.to_linear(),
+            super::super::layout::hex(rgb).to_linear()
+        );
+    }
+}

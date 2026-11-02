@@ -29,7 +29,7 @@ export type FrontendEventPayloads = {
   "ui.sticky-note.edit-requested": { nodeId: string };
   "ui.video-frame-capture.open-requested": { nodeId: string };
   "ui.node-history.open-requested": { nodeId: string };
-  "ui.node-history.switch-requested": { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string; viewOnly?: boolean };
+  "ui.node-history.switch-requested": { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string };
   "ui.node-download.save-requested": { nodeId: string };
   /**
    * 双击拍摄镜头预览卡片 → 进入所属片场并选择该镜头

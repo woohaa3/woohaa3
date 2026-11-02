@@ -424,3 +424,64 @@ describe("聚焦观察镜头增量", () => {
     controller.dispose();
   });
 });
+
+describe("图片资源状态增量", () => {
+  it("图片完成与缩放同帧分别提交增量，保留基线且不构建指纹", () => {
+    let rows = [{id: "n1", texture: true, mediaLoading: false}];
+    const uploader = { sync() {}, textureNodeIds: () => new Set<string>(), dispose() {},
+      resourceStateChanges: () => rows, acknowledgeResourceStates: vi.fn(() => { rows = []; }) };
+    const { runtime, controller, advance, scenes, viewports, dom } = setup(uploader);
+    const setResourceStates = vi.fn(() => runtime.interactionGeneration!());
+    Object.assign(runtime, { setResourceStates });
+    controller.flush();
+    rows = [{id: "n1", texture: true, mediaLoading: false}];
+    const builds = sceneDiagnostics.fingerprintBuilds;
+    dom.fire("wheel", {deltaX: 0, deltaY: -100, deltaMode: 0, ctrlKey: true, clientX: 100, clientY: 100, timeStamp: 1});
+    controller.invalidate("image-resources");
+    advance();
+    expect(setResourceStates).toHaveBeenCalledTimes(1);
+    expect(viewports).toHaveLength(1);
+    expect(viewports[0]?.base).toBe(1);
+    expect(scenes).toHaveLength(1);
+    expect(sceneDiagnostics.fingerprintBuilds).toBe(builds);
+    expect(rows).toHaveLength(0);
+    controller.dispose();
+  });
+
+  it("只提交变化节点，不构建/指纹/提交完整场景；混合变更仍走 full", () => {
+    let rows: import("@woohaa3/contracts").CanvasNodeResourceState[] = [];
+    const uploader = { sync() {}, textureNodeIds: () => new Set<string>(), dispose() {},
+      resourceStateChanges: () => rows, acknowledgeResourceStates: vi.fn(() => { rows = []; }) };
+    const { runtime, controller, advance, scenes } = setup(uploader);
+    const setResourceStates = vi.fn(() => runtime.interactionGeneration!());
+    Object.assign(runtime, { setResourceStates });
+    controller.flush();
+    const builds = sceneDiagnostics.fingerprintBuilds;
+    rows = [{id: "n1", texture: true, mediaLoading: true}];
+    controller.invalidate("image-resources"); advance();
+    expect(setResourceStates).toHaveBeenCalledWith({baseSceneGeneration: runtime.baseSceneGeneration!(), nodes: [{id: "n1", texture: true, mediaLoading: true}]});
+    expect(sceneDiagnostics.fingerprintBuilds).toBe(builds);
+    expect(scenes).toHaveLength(1);
+    rows = [{id: "n1", texture: true, mediaLoading: false}];
+    controller.invalidate("image-resources"); advance();
+    expect(setResourceStates).toHaveBeenCalledTimes(2);
+    controller.invalidate("image-resources"); controller.invalidate("theme"); advance();
+    expect(sceneDiagnostics.fingerprintBuilds).toBeGreaterThan(builds);
+    controller.dispose();
+  });
+  it("资源增量拒绝后重建完整基线，不吞掉待应用状态", () => {
+    let pending = false;
+    const uploader = { sync() {}, textureNodeIds: () => new Set<string>(), dispose() {},
+      resourceStateChanges: () => pending ? [{id:"n1",texture:true,mediaLoading:false}] : [],
+      acknowledgeResourceStates: () => { pending = false; } };
+    const {runtime, controller, advance, scenes} = setup(uploader);
+    Object.assign(runtime, {setResourceStates: () => { throw new Error("stale-base"); }});
+    controller.flush(); pending = true;
+    controller.invalidate("image-resources"); advance();
+    expect(pending).toBe(true);
+    advance();
+    expect(scenes).toHaveLength(2);
+    expect(pending).toBe(false);
+    controller.dispose();
+  });
+});

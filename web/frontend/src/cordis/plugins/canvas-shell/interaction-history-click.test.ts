@@ -28,14 +28,21 @@ function setup(node?: {type:string;width:number;height:number}) {
     bevyNodeHistoryStripDot(scene!.nodes.find(candidate=>candidate.id==="n")!, (x-212)/12, 3));
   return {dom,controller,changed,point,runtime,versionsByNode,scene:()=>scene!};
 }
-it("圆点按下不切换，释放后只选择一次版本",()=>{
-  const {dom,point,changed}=setup();const at=point(212);
+it("圆点按下不切换，释放后请求直接切换已完成版本",()=>{
+  const {dom,point,changed}=setup();const at=point(224);
   dom.fire("pointerdown",{clientX:at.x,clientY:at.y});
   expect(changed).not.toHaveBeenCalled();
   dom.fire("pointerup",{clientX:at.x+1,clientY:at.y});
-  expect(changed.mock.calls[0]?.[0]).toMatchObject({nodeId:"n", entryId:"2", presentationId:"entry:2", viewOnly:true});
+  expect(changed.mock.calls[0]?.[0]).toMatchObject({nodeId:"n", entryId:"3", presentationId:"entry:3"});
   expect(submitted).toHaveLength(0);
   expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual([]);
+});
+it("当前版本圆点只做只读查看，不重复应用",()=>{
+  const {dom,point,changed}=setup();const at=point(212);
+  dom.fire("pointerdown",{clientX:at.x,clientY:at.y});
+  dom.fire("pointerup",{clientX:at.x,clientY:at.y});
+  expect(changed.mock.calls[0]?.[0]).toMatchObject({nodeId:"n", entryId:"2"});
+  expect(submitted).toHaveLength(0);
 });
 it("locks identity across window changes and cancels when the pressed target disappears",()=>{
   const {dom,point,changed,versionsByNode,controller}=setup();const at=point(212);
@@ -61,7 +68,7 @@ it("readonly failed dots inspect details without requesting a restore",()=>{
   const at=point(212);
   dom.fire("pointerdown",{clientX:at.x,clientY:at.y});
   dom.fire("pointerup",{clientX:at.x,clientY:at.y});
-  expect(changed).toHaveBeenCalledWith(expect.objectContaining({entryId:"2",viewOnly:true}));
+  expect(changed).toHaveBeenCalledWith(expect.objectContaining({entryId:"2"}));
   expect(submitted).toHaveLength(0);
 });
 it.each([{type:"model3d",width:196,height:64},{type:"image",width:32,height:40}])("launch anchor shares the accepted expanded geometry and follows pan/zoom: %o",node=>{
@@ -123,7 +130,7 @@ it("按下后变为只读，释放仍可只读预览",()=>{
   dom.fire("pointerdown",{clientX:at.x,clientY:at.y});
   setSession({...getSession(),isWritable:()=>false});
   dom.fire("pointerup",{clientX:at.x,clientY:at.y});
-  expect(changed).toHaveBeenCalledWith(expect.objectContaining({viewOnly:true}));
+  expect(changed).toHaveBeenCalledWith(expect.objectContaining({presentationId:"entry:2"}));
   expect(submitted).toHaveLength(0);
 });
 it("圆点内外的连续滚动均不查询历史命中",()=>{

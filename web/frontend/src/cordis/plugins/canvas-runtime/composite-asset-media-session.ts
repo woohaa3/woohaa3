@@ -1,3 +1,5 @@
+import { releaseImagePixels } from "./image-worker/native-port.js";
+import { prepareImageResource } from "./image-worker/client.js";
 import { MediaOperationBoundary } from "./media-operation-boundary.js";
 import type { CompositeAssetMediaSource } from "../../../extension-api/composite-assets.js";
 /** Scope-owned decoding and texture lifecycle for composite assets.
@@ -15,8 +17,11 @@ import {
   type RasterCanvasFactory
 } from "./media-raster.js";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
+// `TEXTURE_FALLBACK_TIER` 仍被交互预览与导出上限两条路径使用（见文件内
+// `maxTextureEdge`），main 把它从 import 里去掉是因为那边不再引用；
+// `loadImageViaDom` 只在本分支曾导入、没有调用点，故不保留。
 import { TEXTURE_FALLBACK_TIER, TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
-import { isTransientImageFailure, loadImageViaDom, IMAGE_RETRY_DELAYS_MS, IMAGE_RETRY_MAX_ATTEMPTS } from "./image-load.js";
+import { isTransientImageFailure, IMAGE_RETRY_DELAYS_MS, IMAGE_RETRY_MAX_ATTEMPTS } from "./image-load.js";
 import type { VideoElementLike } from "./video-frame-session.js";
 import type { CanvasResourceCoordinator, ResidencyPurpose } from "./residency/index.js";
 
@@ -128,6 +133,8 @@ type MediaSession = {
   uploadedTime: number | null;
   textureReady: boolean;
   image: { width: number; height: number } | null;
+  imageAbort?: AbortController;
+  imagePixels?: import("@woohaa3/contracts").ImagePixelSource;
   video: VideoElementLike | null;
   canvas: RasterCanvas | null;
   lastUploadedAt: number;
@@ -149,7 +156,7 @@ type PlaneDescriptor = CompositeAssetMediaSource & { url: string };
 
 /** Resolve only stable ready assets. Business content and clip definitions never enter this module. */
 export function resolveCompositeAssetMediaDescriptors(canvas: ServerCanvas | null, sources: readonly CompositeAssetMediaSource[]): PlaneDescriptor[] {
-  if (!canvas) return [];
+  if (!canvas || sources.length === 0) return [];
   const assets = new Map<string, StoredAsset>(canvas.assets.map(asset => [asset.id, asset]));
   return sources.flatMap(source => {
     const asset = assets.get(source.assetId);
@@ -298,13 +305,25 @@ export function createCompositeAssetMediaSessions(
 
   const ensureImage = (session: MediaSession) => {
     if (session.image) return;
-    const loadImage = options.loadImage ?? loadImageViaDom;
-    void loadImage(session.sourceUrl)
-      .then((image) => {
-        if (session.disposed || sessions.get(session.planeId) !== session) return;
-        session.image = { width: image.width, height: image.height };
-        // 图片立即上传一次；尺寸信息已在 plane 几何中，纹理只负责像素。
-        uploadFrame(session, image, { width: image.width, height: image.height });
+    session.imageAbort = new AbortController();
+    const load = options.loadImage
+      ? options.loadImage(session.sourceUrl).then(image => ({ image, raster: null }))
+      : prepareImageResource(session.sourceUrl, maxTextureEdge, session.imageAbort.signal).then(raster => ({ image: null, raster }));
+    void load
+      .then(({ image, raster }) => {
+        if (session.disposed || sessions.get(session.planeId) !== session) { if(raster)releaseImagePixels(raster.pixels); return; }
+        if (raster) {
+          session.imagePixels = raster.pixels;
+          session.image = { width: raster.width, height: raster.height };
+          session.textureReady = uploads.run(`plane:${session.planeId}`, session.sourceUrl, session.nodeId, () =>
+            options.runtime.setModelMediaTexture(session.planeId, raster.width, raster.height, raster.pixels,
+              { sourceKey: session.sourceUrl, nodeId: session.nodeId }) !== false) === true;
+          if(session.textureReady && (options.runtime.textureApplied?.(session.planeId, raster.width, raster.height, session.sourceUrl, true) ?? true)) { releaseImagePixels(session.imagePixels); session.imagePixels=undefined; }
+          options.onChange?.();
+        } else if (image) {
+          session.image = { width: image.width, height: image.height };
+          uploadFrame(session, image, { width: image.width, height: image.height });
+        }
       })
       .catch(error => {
         if (session.disposed || sessions.get(session.planeId) !== session) return;
@@ -486,6 +505,9 @@ export function createCompositeAssetMediaSessions(
 
   const disposeSession = (session: MediaSession) => {
     session.disposed = true;
+    session.imageAbort?.abort();
+    releaseImagePixels(session.imagePixels);
+    session.imagePixels = undefined;
     stopPlayback(session);
     session.timeLocked = false;
     uploads.clear(`plane:${session.planeId}`);
@@ -575,6 +597,13 @@ export function createCompositeAssetMediaSessions(
         if (descriptor.kind === "image") ensureImage(session);
         else uploads.run(`plane-session:${session.planeId}`, session.sourceUrl, session.nodeId, () => ensureVideo(session));
       }
+      options.runtime.flushTextureReceipts?.();
+      for (const session of sessions.values()) {
+        if (session.imagePixels && session.image && session.textureReady &&
+          (options.runtime.textureApplied?.(session.planeId, session.image.width, session.image.height, session.sourceUrl, true) ?? true)) {
+          releaseImagePixels(session.imagePixels); session.imagePixels = undefined;
+        }
+      }
       const ready = new Set<string>();
       for (const [planeId, session] of sessions) {
         if (session.textureReady) ready.add(planeId);
@@ -612,7 +641,9 @@ export function createCompositeAssetMediaSessions(
     hasTexture(planeId) {
       const session = sessions.get(planeId);
       if (!session) return false;
-      return session.textureReady;
+      options.runtime.flushTextureReceipts?.();
+      return session.textureReady && (session.kind !== "image" || !session.image ||
+        (options.runtime.textureApplied?.(session.planeId, session.image.width, session.image.height, session.sourceUrl, true) ?? true));
     },
 
     async waitForTime(nodeId, timeSeconds, timeoutMs = 2000, toleranceSeconds = 0.05) {
@@ -661,8 +692,9 @@ export function createCompositeAssetMediaSessions(
       }
       const identities = videoSessions.map(session => session.playbackIdentity);
       const deadline = now() + timeoutMs;
-      const settled = () =>
-        mediaSessions.every(session => !session.disposed && (session.kind !== "image" || session.textureReady)) &&
+      const settled = () => {
+        options.runtime.flushTextureReceipts?.();
+        return mediaSessions.every(session => !session.disposed && (session.kind !== "image" || (session.textureReady && (!session.image || (options.runtime.textureApplied?.(session.planeId, session.image.width, session.image.height, session.sourceUrl, true) ?? true))))) &&
         videoSessions.every((session) => {
           if (session.disposed) return false;
           if (!session.video) return false;
@@ -670,6 +702,7 @@ export function createCompositeAssetMediaSessions(
           return !session.video.seeking && Math.abs(session.video.currentTime - target) <= tolerance
             && session.uploadedTime !== null && Math.abs(session.uploadedTime - target) <= tolerance;
         });
+      };
       let outcome: boolean | null = null;
       while (now() < deadline) {
         if (videoSessions.some((session, index) => session.disposed || session.playbackIdentity !== identities[index])) { outcome = false; break; }

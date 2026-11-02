@@ -111,7 +111,7 @@ pub(crate) use render::{
 };
 pub(crate) use labels::{sync_canvas_labels, LabelRequests};
 pub(crate) use card_meta::produce_card_meta;
-pub(crate) use textures::sync_textures;
+pub(crate) use textures::{sync_textures, texture_sync_requested};
 
 /// 2D 渲染的共享材质、字体与主卡片块资源。装饰、容器、连线块和纹理内容表分别由
 /// `CardDecorationCache`、`ContainerBlockCache`、`EdgeBlockCache` 与 `TextureStore` 拥有；

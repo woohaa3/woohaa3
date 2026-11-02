@@ -13,6 +13,7 @@ struct DecorationInput {
     id: String,
     kind: String,
     index: usize,
+    render: usize,
     rect: [f32; 4],
     hover: Option<Option<String>>,
 }
@@ -27,6 +28,7 @@ pub(super) struct Block {
 #[derive(Resource, Default)]
 pub(crate) struct CardDecorationCache {
     pub(super) blocks: Vec<Block>,
+    active: Option<usize>,
 }
 impl Block {
     #[cfg(test)]
@@ -49,6 +51,7 @@ impl Block {
 /// 一个需要端点半钮的卡片投影输入。
 pub(super) struct HoverInput<'a> {
     pub(crate) index: usize,
+    pub(crate) render: usize,
     pub(crate) node: std::borrow::Cow<'a, crate::protocol::GraphNode>,
 }
 
@@ -63,6 +66,16 @@ pub(super) fn sync(
     document_len: usize,
 ) -> u64 {
     let focused_id = super::image_focus::presented_media_focus(scene).map(|focus| focus.node_id);
+    let input = projected.iter().find(|input| {
+        input.index < document_len
+            && input.node.group.is_none()
+            && input.node.composite_asset.is_none()
+            && focused_id != Some(input.node.id.as_str())
+            && scene
+                .hover
+                .as_ref()
+                .is_some_and(|hover| hover.node_id.as_deref() == Some(input.node.id.as_str()))
+    });
     let mut rebuilt = 0;
     let mut blocks = std::mem::take(&mut visuals.blocks);
     let count = document_len.div_ceil(BLOCK_SIZE);
@@ -71,77 +84,54 @@ pub(super) fn sync(
     }
     blocks.truncate(count);
     blocks.resize_with(count, Block::default);
-    for block_index in 0..count {
-        let block = &mut blocks[block_index];
-        let range = block_index * BLOCK_SIZE..((block_index + 1) * BLOCK_SIZE).min(document_len);
-        let keys: Vec<_> = projected
-            .iter()
-            .filter(|input| range.contains(&input.index))
-            .filter(|input| {
-                input.node.group.is_none()
-                    && input.node.composite_asset.is_none()
-                    && focused_id != Some(input.node.id.as_str())
-            })
-            .filter_map(|input| {
-                let node = input.node.as_ref();
-                let hover = scene
-                    .hover
-                    .as_ref()
-                    .filter(|h| h.node_id.as_deref() == Some(node.id.as_str()));
-                if hover.is_none() {
-                    return None;
-                }
-                Some(DecorationInput {
-                    id: node.id.clone(),
-                    kind: node.kind.clone(),
-                    index: input.index,
-                    rect: [node.x, node.y, node.width, node.height],
-                    hover: hover.map(|h| h.port.clone()),
-                })
-            })
-            .collect();
-        if block.keys == keys && block.theme == theme.fingerprint() {
-            continue;
-        }
-        if keys.is_empty() {
+    let next = input.map(|input| input.index / BLOCK_SIZE);
+    if let Some(old) = visuals.active.filter(|old| Some(*old) != next) {
+        if let Some(block) = blocks.get_mut(old) {
             block.clear(commands, meshes);
-            block.theme = theme.fingerprint().to_owned();
-            continue;
         }
-        let mut geometry = Geometry::default();
-        for key in &keys {
-            let input = projected
-                .iter()
-                .find(|input| input.index == key.index)
-                .expect("hover key derives from projected input");
+    }
+    visuals.active = next;
+    if let Some(input) = input {
+        let node = input.node.as_ref();
+        let block = &mut blocks[input.index / BLOCK_SIZE];
+        let keys = vec![DecorationInput {
+            id: node.id.clone(),
+            kind: node.kind.clone(),
+            index: input.index,
+            render: input.render,
+            rect: [node.x, node.y, node.width, node.height],
+            hover: scene.hover.as_ref().map(|hover| hover.port.clone()),
+        }];
+        if block.keys != keys || block.theme != theme.fingerprint() {
+            let mut geometry = Geometry::default();
             super::cards::draw_hover_ports(
                 &mut geometry,
                 theme,
-                input.node.as_ref(),
+                node,
                 scene.hover.as_ref(),
-                super::draw_order::render_index(&scene.nodes, key.index),
+                input.render,
             );
+            let handle = meshes.add(geometry.build());
+            rebuilt += 1;
+            if let Some(old) = block.mesh.replace(handle.clone()) {
+                meshes.remove(old.id());
+            }
+            if let Some(entity) = block.entity {
+                commands.entity(entity).insert(Mesh2d(handle));
+            } else {
+                block.entity = Some(
+                    commands
+                        .spawn((
+                            Mesh2d(handle),
+                            MeshMaterial2d(materials.solid.clone()),
+                            NoFrustumCulling,
+                        ))
+                        .id(),
+                );
+            }
+            block.keys = keys;
+            block.theme = theme.fingerprint().to_owned();
         }
-        let handle = meshes.add(geometry.build());
-        rebuilt += 1;
-        if let Some(old) = block.mesh.replace(handle.clone()) {
-            meshes.remove(old.id());
-        }
-        if let Some(entity) = block.entity {
-            commands.entity(entity).insert(Mesh2d(handle));
-        } else {
-            block.entity = Some(
-                commands
-                    .spawn((
-                        Mesh2d(handle),
-                        MeshMaterial2d(materials.solid.clone()),
-                        NoFrustumCulling,
-                    ))
-                    .id(),
-            );
-        }
-        block.keys = keys;
-        block.theme = theme.fingerprint().to_owned();
     }
     visuals.blocks = blocks;
     rebuilt

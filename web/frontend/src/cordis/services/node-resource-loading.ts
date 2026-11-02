@@ -9,27 +9,27 @@ export class NodeResourceLoading {
   private readonly loads = new Map<string, NodeResourceLoad>();
   private readonly listeners = new Set<() => void>();
 
-  constructor(private readonly onChange?: () => void) {}
+  constructor(private readonly onChange?: () => void, private readonly onNodeChange?: (nodeId: string) => void) {}
 
   track(nodeId: string, source: string): NodeResourceLoad {
     const previous = this.loads.get(nodeId);
     if (previous?.source === source) return previous;
     const load = { nodeId, source, loading: true };
     this.loads.set(nodeId, load);
-    this.emit();
+    this.emit(nodeId);
     return load;
   }
 
   setLoading(load: NodeResourceLoad, loading: boolean): void {
     if (this.loads.get(load.nodeId) !== load || load.loading === loading) return;
     load.loading = loading;
-    this.emit();
+    this.emit(load.nodeId);
   }
 
   remove(load: NodeResourceLoad): void {
     if (this.loads.get(load.nodeId) !== load) return;
     this.loads.delete(load.nodeId);
-    this.emit();
+    this.emit(load.nodeId);
   }
 
   retain(sources: ReadonlyMap<string, string>): void {
@@ -45,10 +45,12 @@ export class NodeResourceLoading {
   };
   clear(): void {
     if (!this.loads.size) return;
+    for (const id of this.loads.keys()) this.onNodeChange?.(id);
     this.loads.clear();
     this.emit();
   }
-  private emit(): void {
+  private emit(nodeId?: string): void {
+    if (nodeId !== undefined) this.onNodeChange?.(nodeId);
     this.onChange?.();
     for (const listener of this.listeners) listener();
   }

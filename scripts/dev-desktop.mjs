@@ -70,6 +70,8 @@ async function main() {
   if (remote) {
     server = launch(process.execPath, ["scripts/dev.mjs", "--native", "--frontend-port", front, "--backend-port", back, "--backend-url", remote, ...(args.includes("--skip-build") ? ["--skip-build"] : []), ...(args.includes("--no-watch") ? ["--no-watch"] : [])]);
   } else {
+    // Native UI still needs browser image bindings for explicit JS-derived exports.
+    await finish(launch(process.execPath, ["scripts/build-media-image.mjs"]));
     // Native UI still imports both generated browser bindings during Vite resolution.
     // change: 2026-10-23-optimize-bevy-development-build —— 与其它开发入口共用模式选择。
     await finish(launch(process.execPath, ["scripts/build-bevy-wasm.mjs", ...bevyModeArgs]));

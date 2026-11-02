@@ -1,4 +1,5 @@
 import { installDeviceRecovery } from "./device-recovery.js";
+import { installRendererFaultDetails } from "./renderer-fault-details.js";
 import { errorDetail } from "./runtime-issues.js";
 import * as module from "../../../bevy-wasm/woohaa_bevy_canvas.js";
 import type { BevyModule } from "./bevy-runtime-types.js";
@@ -8,6 +9,7 @@ export type RendererWindow = Window & {
   __rendererFault?: (reason: string) => void;
 };
 const realm = window as RendererWindow;
+const faultDetails = installRendererFaultDetails(console);
 const token = new URL(location.href).searchParams.get("realm") ?? "";
 const registry = (parent as unknown as { __rendererRealms?: Map<string, { ready(module: BevyModule): void; fault(reason: string): void }> }).__rendererRealms;
 realm.__rendererReady = module => registry?.get(token)?.ready(module);
@@ -37,10 +39,17 @@ window.addEventListener("error", event => {
   event.preventDefault();
   const message = event.message || "渲染器异步执行失败";
   const source = event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : null;
-  // Bevy/WASM 的 panic 往往只有一条 message、没有 stack，源码位置只能来自 event.filename。
-  const stack = event.error instanceof Error ? event.error.stack ?? null : null;
-  relayErrorDetail("error", message, stack, source);
-  realm.__rendererFault?.(message);
+  // 开发期报错助手要的分项细节：Bevy/WASM 的 panic 往往只有一条 message、没有 stack，
+  // 源码位置只能来自 event.filename。
+  relayErrorDetail(
+    "error",
+    message,
+    event.error instanceof Error ? event.error.stack ?? null : null,
+    source
+  );
+  // 运行时故障交给 main 的 `faultDetails`：它会把抓到的 panic 文本、message 与 stack
+  // 拼成一条完整诊断，比这里单独取 message 更完整。
+  realm.__rendererFault?.(faultDetails(event.error, message));
 });
 window.addEventListener("unhandledrejection", event => {
   event.preventDefault();
@@ -51,7 +60,7 @@ window.addEventListener("unhandledrejection", event => {
     reason instanceof Error ? reason.stack ?? null : null,
     null
   );
-  realm.__rendererFault?.(errorDetail(event.reason));
+  realm.__rendererFault?.(faultDetails(reason));
 });
 const canvas = document.querySelector("canvas")!;
 // Native winit pointer handlers focus their canvas. Input focus belongs to the parent

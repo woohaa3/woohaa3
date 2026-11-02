@@ -1,3 +1,4 @@
+import { decodeImageInWorker } from "../plugins/canvas-runtime/image-worker/client.js";
 /**
  * GLB 文件模型的渲染准备（change: 2026-10-28-support-glb-model-nodes）。
  *
@@ -65,7 +66,7 @@ export function createFileModelPreparation(deps: {
   runtime: () => FileModelRuntimePort | null;
   /** 资产字节读取（默认走既有 media-remote 同源读取）。 */
   read?: (asset: unknown, signal: AbortSignal | undefined, canvasId: string) => Promise<Blob>;
-  /** 纹理解码（默认用 createImageBitmap + 2D canvas；测试可替换）。 */
+  /** 纹理解码（默认使用 Rust 图片 Worker；测试可替换）。 */
   decodeTexture?: (texture: GlbTexture) => Promise<{ width: number; height: number; rgba: Uint8Array }>;
 }): FileModelPreparation {
   // 每节点独立的取消句柄：同一节点的新准备取消上一轮，**不同节点互不干扰**。
@@ -196,38 +197,9 @@ function safeMessage(error: unknown, fallback: string): string {
 export async function decodeGlbTexture(
   texture: GlbTexture
 ): Promise<{ width: number; height: number; rgba: Uint8Array }> {
-  if (typeof createImageBitmap !== "function") throw new Error("当前环境不支持图片解码");
-  const blob = new Blob([new Uint8Array(texture.bytes)], { type: texture.mimeType });
-  const bitmap = await createImageBitmap(blob);
+  const url = URL.createObjectURL(new Blob([new Uint8Array(texture.bytes)], { type: texture.mimeType }));
   try {
-    const scale = Math.min(1, GLB_MAX_TEXTURE_EDGE / Math.max(bitmap.width, bitmap.height));
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
-    const context = createCanvasContext(width, height);
-    context.drawImage(bitmap, 0, 0, width, height);
-    const image = context.getImageData(0, 0, width, height);
-    return {
-      width,
-      height,
-      rgba: new Uint8Array(image.data.buffer, image.data.byteOffset, image.data.byteLength)
-    };
-  } finally {
-    bitmap.close?.();
-  }
-}
-
-function createCanvasContext(width: number, height: number): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D {
-  if (typeof OffscreenCanvas === "function") {
-    const canvas = new OffscreenCanvas(width, height);
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("无法创建 2D 画布");
-    return context;
-  }
-  if (typeof document === "undefined") throw new Error("当前环境不支持图片解码");
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) throw new Error("无法创建 2D 画布");
-  return context;
+    const result = await decodeImageInWorker(url, GLB_MAX_TEXTURE_EDGE);
+    return { width: result.width, height: result.height, rgba: result.pixels };
+  } finally { URL.revokeObjectURL(url); }
 }

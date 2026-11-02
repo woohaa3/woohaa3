@@ -50,8 +50,10 @@ export function createHistoryClick(core: InteractionCore) {
       const dots = core.renderedNode?.(gesture.nodeId)?.historyStrip?.dots ?? [];
       const dot = dots.find(item => item.presentationId === gesture.presentationId);
       if (!dot) return true;
+      // 只发出“激活这个圆点”的意图；是否只预览、是否调用受控历史 apply 由 node-history
+      // 的选择控制器判断，输入层不再重复圆点状态策略。
       core.options.onNodeHistorySelect?.({ nodeId: gesture.nodeId, presentationId: gesture.presentationId,
-        entryId: dot.entryId, operationId: dot.operationId, viewOnly: true });
+        entryId: dot.entryId, operationId: dot.operationId });
     }
     return true;
   };

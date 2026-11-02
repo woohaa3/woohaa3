@@ -108,9 +108,11 @@ pub(super) fn draw_static(
         labels.extend(draw_shot_preview(geometry, theme, node, index));
         return labels;
     }
-    let body_lines: Vec<&str> = node.body.lines().collect();
     // 正文画在内容区内部（标题行已移到卡片底部，不再占用顶部）。
     let (bcx, bcy, bcw, _bch) = super::layout::content_rect(node);
+    // 换行宽度取内容区实际宽度（main 的 wrapped_lines + sixi 的窄内边距）：
+    // 先用满可用宽度换行，超过 6 行才在最后一行省略，而不是一行提前截断。
+    let body_lines = super::layout::wrapped_lines(&node.body, (bcw - 16.).max(1.), 12., 6);
     for i in 0..6 {
         labels.push((
             if show_content
@@ -118,7 +120,8 @@ pub(super) fn draw_static(
                 && !node.busy
                 && !(node.model_preview.is_some() && node.model.is_some())
             {
-                shortened(body_lines.get(i).unwrap_or(&""), (bcw - 16.).max(1.), 12.)
+                // 已在 `wrapped_lines` 里换行并截断，这里原样取用。
+                body_lines.get(i).cloned().unwrap_or_default()
             } else {
                 String::new()
             },

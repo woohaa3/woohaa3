@@ -1,3 +1,4 @@
+import { releaseImagePixels } from "./image-worker/native-port.js";
 /**
  * Canvas Runtime 的图片聚焦瞬时态持有器
  * （change: refactor-frontend-file-size；从 `host.ts` 拆出以遵守文件体积守卫）。
@@ -26,7 +27,7 @@ export class ImageFocusStore {
   isPending = (): boolean => this.pending && this.targetId !== null;
   private targets: readonly string[] = [];
   private targetId: string | null = null;
-  private texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null = null;
+  private texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null = null;
   private readonly listeners = new Set<() => void>();
 
   get(): import("@woohaa3/contracts").BevyImageFocus | null {
@@ -61,11 +62,12 @@ export class ImageFocusStore {
     };
   }
 
-  setTexture(texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null): void {
+  setTexture(texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null): void {
+    if (this.texture?.pixels !== texture?.pixels) releaseImagePixels(this.texture?.pixels);
     this.texture = texture;
   }
 
-  getTexture(): { nodeId: string; width: number; height: number; pixels: Uint8Array } | null {
+  getTexture(): { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null {
     return this.texture;
   }
 }

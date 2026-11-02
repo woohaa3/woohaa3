@@ -80,6 +80,7 @@ fn busy_reasons(
         (1 << 10, previews.has_pending()),
         (1 << 11, history.has_pending()),
         (1 << 12, overview.has_pending()),
+        (1 << 13, !flags.resource_nodes.is_empty()),
     ] {
         if value {
             bits |= bit;
@@ -89,7 +90,7 @@ fn busy_reasons(
 }
 
 /// 忙碌位图的固定词表（诊断口径，长度有界）。
-const BUSY_LABELS: [&str; 13] = [
+const BUSY_LABELS: [&str; 14] = [
     "scene",
     "positions",
     "viewport",
@@ -103,6 +104,7 @@ const BUSY_LABELS: [&str; 13] = [
     "previews",
     "history",
     "overview-cache",
+    "resources",
 ];
 
 fn busy_label(bits: u16) -> String {
@@ -273,6 +275,7 @@ mod tests {
             |flags: &mut FrameFlags| flags.positions_received = true,
             |flags: &mut FrameFlags| flags.film_set_media_changed = true,
             |flags: &mut FrameFlags| flags.changed = true,
+            |flags: &mut FrameFlags| flags.resource_nodes.push(0),
         ] {
             let mut flags = FrameFlags::default();
             mutate(&mut flags);

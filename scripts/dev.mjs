@@ -84,6 +84,9 @@ function portNumber(value, name) {
   return port;
 }
 
+const imageBuild = spawn(process.execPath, [join(root, "scripts/build-media-image.mjs")], { cwd: root, stdio: "inherit" });
+await new Promise((resolve, reject) => { imageBuild.once("error", reject); imageBuild.once("exit", code => code === 0 ? resolve() : reject(new Error(`Image WASM build failed: ${code}`))); });
+
 const children = new Set();
 let stopping = false;
 let stopPromise;

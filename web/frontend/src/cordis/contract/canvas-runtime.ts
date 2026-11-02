@@ -120,7 +120,7 @@ export interface CanvasRuntimeService {
   setImageFocus(projection: import("@woohaa3/contracts").BevyImageFocus | null): void;
   /** 把图片取景作为画布输入的当前目标；返回注销函数。 */
   registerImageViewportTarget(target: import("../focus/types.js").FocusViewportTarget): () => void;
-  setImageFocusTexture(texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null): void;
+  setImageFocusTexture(texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null): void;
   setImageFocusDetails(frame:import("../plugins/canvas-runtime/focus-details.js").ImageFocusDetails|null):void;
   /**
    * 图片聚焦已进入、但编辑器还没接管画面（引擎或首帧未就绪）。

@@ -42,3 +42,20 @@ export class PositionSceneMirror {
     return input.viewport ? { ...scene, viewport: { ...input.viewport } } : scene;
   }
 }
+
+/**
+ * 资源态（纹理已就绪 / 加载中）写回场景镜像。
+ *
+ * 与 `apply` 同一类工作：Rust 接受后，TS 侧的只读镜像要跟上，否则 `acceptedScene()`
+ * 与诊断读到的仍是旧状态。从 `bevy-runtime.ts` 移出（file-budget），行为不变。
+ */
+export function applyResourceStates(
+  mirror: PositionSceneMirror,
+  scene: CanvasRenderScene,
+  nodes: readonly { id: string; texture: boolean; mediaLoading: boolean }[]
+): void {
+  for (const row of nodes) {
+    const node = mirror.node(scene, row.id);
+    if (node) { node.texture = row.texture; node.mediaLoading = row.mediaLoading; }
+  }
+}

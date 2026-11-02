@@ -213,7 +213,6 @@ export function installInteractionController(options: InteractionControllerOptio
     hoverNodeStore.invalidatePlayback();
     state.lastNotifiedViewport = { ...viewport };
     // 本地缩放/平移变化（含不推进画布 revision 的捏合与手势）通知宿主缩放读数跟进（fix-viewport-zoom-range）。
-    for (const listener of viewportListeners) listener();
     options.onViewportChange?.(viewport);
     // 视口变化也改变节点屏幕位置：通知节点操作横条重排（design D7）。
     notifyProjection();
@@ -226,6 +225,9 @@ export function installInteractionController(options: InteractionControllerOptio
    * 拖动/改尺寸预览或节点尺寸实际变化时才通知订阅者。横条消费方按需重算唯一 runtime 投影。
    */
   let lastProjectionSignature = "";
+  let geometryIndex: ReturnType<typeof sharedCanvasNodeIndex> | undefined;
+  let geometrySignature = "";
+  let geometryVersion = 0;
   const projectionSignature = () => {
     const viewport = activeViewport();
     const parts: string[] = [`${viewport.x},${viewport.y},${viewport.zoom}`];
@@ -234,10 +236,17 @@ export function installInteractionController(options: InteractionControllerOptio
     // working 节点位置/尺寸签名（拖动提交前的规范位置变化）；selection/pan 不改变它。
     const index = sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
     // `byId` 保存的是带渲染数据的节点引用（与来源同一批对象），可直接用于几何 helper。
-    if (index) for (const node of index.byId.values()) {
-      const size = indexNodeSize(node);
-      parts.push(`n:${node.id}:${node.position.x},${node.position.y},${size.width},${size.height}`);
+    if (index !== geometryIndex) {
+      geometryIndex = index;
+      const geometry: string[] = [];
+      if (index) for (const node of index.byId.values()) {
+        const size = indexNodeSize(node);
+        geometry.push(`n:${node.id}:${node.position.x},${node.position.y},${size.width},${size.height}`);
+      }
+      const next = geometry.join("|");
+      if (next !== geometrySignature) { geometrySignature = next; geometryVersion += 1; }
     }
+    parts.push(`g:${geometryVersion}`);
     return parts.join("|");
   };
   const notifyProjection = () => {
