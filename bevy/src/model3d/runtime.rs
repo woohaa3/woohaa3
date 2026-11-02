@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use crate::protocol::{GraphNode, ModelPlacement, ModelSnapshot, Scene};
 
 use super::animation::TransformAnimationPlayback;
-use super::layout::{model_anchor, model_unit, model_view_rotation};
+use super::layout::model_root_transform;
 use super::spawn::spawn_model;
 
 /// 已注册不可变模型资源表（只读视图）；由 app 从 bridge 资源表取得。
@@ -199,16 +199,10 @@ pub(super) fn apply_root_transform(
     model: &ModelSnapshot,
     placement: &ModelPlacement,
 ) {
-    let unit = model_unit(node, model, placement);
-    let root_rotation = model_view_rotation(placement);
-    let world = model_anchor(node, model, placement, unit);
+    let transform = model_root_transform(node, model, placement);
     let ModelRootLayout::V2 { root } = layout;
     if let Ok(mut entity) = commands.get_entity(*root) {
-        entity.insert(Transform {
-            translation: world,
-            rotation: root_rotation,
-            scale: Vec3::splat(unit),
-        });
+        entity.insert(transform);
     }
 }
 
@@ -406,6 +400,12 @@ impl ModelRoot {
 }
 
 impl ModelVisuals {
+    #[cfg(test)]
+    pub(crate) fn test_root(&self, id: &str) -> Option<Entity> {
+        self.roots.get(id).map(|model| match model.layout {
+            ModelRootLayout::V2 { root } => root,
+        })
+    }
     /// 测试替身：声明某个节点已有可用模型根（不涉及 GPU 资源）。
     #[cfg(test)]
     pub(crate) fn mark_root_ready_for_test(&mut self, id: &str) {

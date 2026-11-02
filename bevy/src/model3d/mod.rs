@@ -79,6 +79,8 @@ pub(crate) use runtime::{
     FocusVisuals, ModelAssets, ModelVisuals, apply_animation_playback, apply_motion_playback,
     sync_models, sync_quality, sync_quality_with_demand,
 };
+#[cfg(test)]
+pub(crate) use runtime::ModelAnchor;
 
 /// `compose_delta` 仅 native renderer 的离屏预览复用；wasm 侧走 `runtime` 内部调用。
 #[cfg(feature = "native-renderer")]

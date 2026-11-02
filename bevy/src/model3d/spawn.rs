@@ -13,7 +13,7 @@ use crate::protocol::{GraphNode, ModelOp, ModelPlacement, ModelSnapshot};
 use super::animation::{
     self, TransformAnimation, TransformAnimationKind, TransformAnimationPlayback,
 };
-use super::layout::{model_anchor, model_unit, model_view_rotation};
+use super::layout::model_root_transform;
 use super::mesh::mesh_key;
 use super::quality::Quality;
 use super::resources::SharedResources;
@@ -34,17 +34,15 @@ pub(super) fn spawn_model(
     batched: bool,
     strategy: super::batch_strategy::BatchStrategy,
 ) -> ModelRoot {
-    let unit = model_unit(node, model, placement);
-    let root_rotation = model_view_rotation(placement);
-    let world = model_anchor(node, model, placement, unit);
+    let transform = model_root_transform(node, model, placement);
     let mut root = spawn_v2(
         commands,
         meshes,
         materials,
         model,
-        world,
-        unit,
-        root_rotation,
+        transform.translation,
+        transform.scale.x,
+        transform.rotation,
         quality,
         shared,
         batched,

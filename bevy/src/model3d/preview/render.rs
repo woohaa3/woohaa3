@@ -510,7 +510,7 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
 }
 
 /// 回读缓冲可能带行对齐填充；裁剪到 `width*height*4`。
-pub(super) fn normalize_readback(data: &[u8], width: u32, height: u32) -> Vec<u8> {
+pub(crate) fn normalize_readback(data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let expected = (width as usize) * (height as usize) * 4;
     let row = width as usize * 4;
     let stride = row.div_ceil(256) * 256;
@@ -529,7 +529,7 @@ pub(super) fn normalize_readback(data: &[u8], width: u32, height: u32) -> Vec<u8
 }
 
 /// RGBA8 → PNG（不新增纹理/外部依赖之外的编码器）。
-pub(super) fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+pub(crate) fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     let expected = (width as usize) * (height as usize) * 4;
     if pixels.len() < expected {
         return Err(format!("像素数据不足：{} < {}", pixels.len(), expected));
