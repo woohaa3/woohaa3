@@ -3,6 +3,24 @@ use super::ModelVisuals;
 use bevy::prelude::*;
 use std::collections::HashSet;
 impl ModelVisuals {
+    pub(crate) fn pose_snapshot(&self, transforms: &Query<(&Transform, &GlobalTransform)>) -> serde_json::Value {
+        fn pose(entity: Entity, transforms: &Query<(&Transform, &GlobalTransform)>) -> Option<serde_json::Value> {
+            let (local, global) = transforms.get(entity).ok()?;
+            Some(serde_json::json!({
+                "translation": local.translation.to_array(), "rotation": local.rotation.to_array(),
+                "scale": local.scale.to_array(), "globalMatrix": global.to_matrix().to_cols_array()
+            }))
+        }
+        let mut roots: Vec<_> = self.roots.iter().collect();
+        roots.sort_by_key(|(id, _)| *id);
+        serde_json::Value::Array(roots.into_iter().take(16).filter_map(|(id, root)| {
+            let super::runtime::ModelRootLayout::V2 { root: entity } = root.layout;
+            let mut parts: Vec<_> = root.part_entities.iter().collect();
+            parts.sort_by_key(|(id, _)| *id);
+            Some(serde_json::json!({ "nodeId": id, "root": pose(entity, transforms)?,
+                "parts": parts.into_iter().take(128).filter_map(|(id, entity)| pose(*entity, transforms).map(|p| (id.clone(), p))).collect::<std::collections::BTreeMap<_, _>>() }))
+        }).collect())
+    }
     pub(crate) fn budget_json(
         &self,
         meshes: &Assets<Mesh>,

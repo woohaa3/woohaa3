@@ -26,6 +26,7 @@ export type QueryEnvelope<T> = {
   nodeId?: string;
   target?: [number, number, number];
   radius?: number;
+  ground?: { u: number; v: number };
   /** 通用 drop target 查询结果。 */
   targetNodeId?: string | null;
 };

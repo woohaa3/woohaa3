@@ -406,6 +406,11 @@ impl ModelVisuals {
             ModelRootLayout::V2 { root } => root,
         })
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_part(&self, id: &str, part: &str) -> Option<Entity> {
+        self.roots.get(id)?.part_entities.get(part).copied()
+    }
     /// 测试替身：声明某个节点已有可用模型根（不涉及 GPU 资源）。
     #[cfg(test)]
     pub(crate) fn mark_root_ready_for_test(&mut self, id: &str) {

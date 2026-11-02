@@ -6,6 +6,17 @@ use super::{
     AnimationCameraState, CurrentScene, FocusRig, FrameFlags, ModelAssetTable, SurfaceState,
 };
 
+pub(super) fn publish_model_poses(
+    models: Res<model3d::ModelVisuals>,
+    transforms: Query<(&Transform, &GlobalTransform)>,
+    rig: Res<FocusRig>,
+    _main_thread: bevy::ecs::system::NonSendMarker,
+) {
+    if crate::bridge::take_model_pose_request() {
+        crate::bridge::set_model_poses(models.pose_snapshot(&transforms), rig.focus_node.as_deref());
+    }
+}
+
 /// 网格 adapter：把 scene viewport/surface/theme 投影为通用网格插件的 config/target/style。
 ///
 /// 网格 mesh/material 本身由 `IsometricGridPlugin` 拥有与回收；本系统只做领域适配与相机复位。
@@ -392,10 +403,7 @@ mod grid_tests {
     use super::*;
     use bevy::mesh::VertexAttributeValues;
 
-    #[test]
-    fn shared_world_bridge_payload_lifecycle_runs_through_frame_system() {
-        use crate::{bridge, protocol::{ModelAssetDescriptor, ModelOp, ModelPlacement, ModelReference, NodePosition}};
-        bridge::clear_model_assets();
+    fn model_test_app() -> App {
         let mut app = App::new();
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
@@ -420,6 +428,14 @@ mod grid_tests {
             .add_message::<bevy::window::WindowResized>()
             .add_systems(Update, (super::super::input::ingest_bridge, super::super::input::sync_surface, sync_models).chain());
         app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
+        app
+    }
+
+    #[test]
+    fn shared_world_bridge_payload_lifecycle_runs_through_frame_system() {
+        use crate::{bridge, protocol::{ModelAssetDescriptor, ModelOp, ModelPlacement, ModelReference, NodePosition}};
+        bridge::clear_model_assets();
+        let mut app = model_test_app();
         let key = "world-test".to_owned();
         let descriptor = ModelAssetDescriptor {
             resource_version: crate::protocol::MODEL_ASSET_VERSION.into(), resource_key: key.clone(),
@@ -459,6 +475,48 @@ mod grid_tests {
         app.update();
         assert_eq!(root(&app).1.translation, Vec3::new(256., 192., -128.));
         bridge::clear_model_assets();
+    }
+
+    #[test]
+    fn public_scene_motion_and_clear_follow_real_frame_schedule() {
+        crate::bridge::clear_model_assets();
+        let request = r##"{"resourceVersion":"woohaa-prepared-model-resource-v1","sceneVersion":"woohaa-model-scene-ir-v2","ops":[{"t":"box","id":"body","position":[0,1,0],"rotation":[0,0,0],"scale":[1,1,1],"color":"#ffffff","size":[2,2,2]}]}"##;
+        let metadata: serde_json::Value = serde_json::from_str(&crate::prepare_and_register_model_resource(request).unwrap()).unwrap();
+        let mut scene: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/shared-world/render-scene.json")).unwrap();
+        scene["nodes"][0]["model"] = serde_json::json!({"resourceKey": metadata["resourceKey"]});
+        scene["nodes"][0]["sharedWorldInstance"]["transform"] = serde_json::json!({"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1});
+        scene["animationPlayback"] = serde_json::json!({"nodeId":"model","version":"woohaa-motion-ir-v1","time":1,"duration":4,"initialCamera":{},"modelMotion":[{"targetId":"body","startTime":0,"endTime":4,"motion":{"kind":"move","axis":"x","speed":4,"range":[0,8]}}]});
+        let mut app = model_test_app();
+        let query = |generation, point: Vec3| {
+            let screen = crate::isometric_grid::screen_point_from_world(point, &Default::default());
+            let request = format!(r#"{{"generation":{generation},"x":{},"y":{},"width":800,"height":600}}"#, screen.x, screen.y);
+            serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request)).unwrap()["nodeId"].clone()
+        };
+        let generation = crate::set_scene(&scene.to_string()).unwrap();
+        app.update();
+        let part = app.world().resource::<model3d::ModelVisuals>().test_part("model", "body").unwrap();
+        assert_eq!(app.world().get::<Transform>(part).unwrap().translation.x, 4.);
+        assert_eq!(query(generation, Vec3::new(256., 64., 0.)), "model");
+        assert!(query(generation, Vec3::new(0., 64., 0.)).is_null());
+        scene["animationPlayback"]["modelMotion"] = serde_json::json!([{"targetId":"body","startTime":0,"endTime":4,"motion":{"kind":"keyframes","property":"opacity","frames":[{"time":0,"value":0,"easing":"linear"},{"time":4,"value":0,"easing":"linear"}]}}]);
+        let hidden = crate::set_scene(&scene.to_string()).unwrap();
+        app.update();
+        assert_eq!(app.world().get::<Transform>(part).unwrap().translation.x, 0.);
+        assert_eq!(app.world().get::<Visibility>(part), Some(&Visibility::Hidden));
+        assert!(query(hidden, Vec3::new(0., 64., 0.)).is_null());
+        scene.as_object_mut().unwrap().remove("animationPlayback");
+        let reset = crate::set_scene(&scene.to_string()).unwrap();
+        app.update();
+        assert_ne!(app.world().get::<Visibility>(part), Some(&Visibility::Hidden));
+        assert_eq!(app.world().get::<Transform>(part).unwrap().translation.x, 0.);
+        assert_eq!(query(reset, Vec3::new(0., 64., 0.)), "model");
+        assert!(query(reset, Vec3::new(256., 64., 0.)).is_null());
+        scene["nodes"] = serde_json::json!([]);
+        let cleared = crate::set_scene(&scene.to_string()).unwrap();
+        app.update();
+        assert!(query(cleared, Vec3::new(0., 64., 0.)).is_null());
+        assert!(app.world().resource::<model3d::ModelVisuals>().test_root("model").is_none());
+        crate::bridge::clear_model_assets();
     }
 
     #[test]
