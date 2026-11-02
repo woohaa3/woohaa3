@@ -180,6 +180,7 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
           return;
         }
         if (itemId === "upload") {
+          if (!ctx.canvasSession.isWritable()) return;
           const importService = ctx.get(IMPORT_SERVICE) as ImportService | undefined;
           importService?.requestFile({
             world: context.world,

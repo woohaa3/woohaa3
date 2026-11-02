@@ -7,6 +7,39 @@ vi.mock("../../services/canvas-state/index.js", () => ({
 }));
 import { canvasMenuExtension } from "./plugin.js";
 
+it("submits creation menu actions and routes upload through the import service", async () => {
+  let menu: any;
+  const record = vi.fn().mockResolvedValue({ ok: true });
+  const requestFile = vi.fn();
+  let writable = true;
+  canvasMenuExtension({
+    slots: { register: (slot: string, value: unknown) => { if (slot === "canvas.context-menu") menu = value; return () => {}; } },
+    canvasNavigation: { registerMenu: () => () => {} }, canvasSession: { isWritable: () => writable },
+    canvasEdit: { record }, dialogs: { open: vi.fn() }, effect: () => {}, get: (key: string) => key === "slots" ? { list: () => [] } : { requestFile }
+  } as never, undefined);
+  const context = { writable: true, world: { x: 128, y: 64 } };
+  const items = menu.items(context);
+  expect(items.map((item: any) => item.id)).toEqual(expect.arrayContaining(["insert-scope:group", "insert-scope:area", "upload"]));
+  menu.onSelect("insert-scope:group", context);
+  menu.onSelect("insert-scope:area", context);
+  const model = items.find((item: any) => /model3d/i.test(item.id));
+  expect(model).toBeDefined();
+  menu.onSelect(model.id, context);
+  menu.onSelect("upload", context);
+  await Promise.resolve();
+  expect(requestFile).toHaveBeenCalledWith({ world: context.world });
+  expect(record).toHaveBeenCalledTimes(3);
+  const commands = record.mock.calls.map(call => call[0]);
+  expect(JSON.stringify(commands[0])).toContain("workflowGroup2d");
+  expect(JSON.stringify(commands[1])).toContain("sceneArea");
+  expect(JSON.stringify(commands[2])).toContain("sharedWorldInstance");
+  writable = false;
+  menu.onSelect("insert-scope:area", context);
+  menu.onSelect("upload", context);
+  expect(record).toHaveBeenCalledTimes(3);
+  expect(requestFile).toHaveBeenCalledTimes(1);
+});
+
 it("confirms, retries and suppresses stale conversion feedback through the menu contribution", async () => {
   let menu: any;
   let action: (() => Promise<any>) | undefined;

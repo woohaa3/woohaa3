@@ -81,6 +81,34 @@ export type CanvasRemoteOptions = {
   };
 };
 
+function decodeWorldResponse(response: Response, value: unknown, route: string): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid response");
+  const result = value as Record<string, unknown>;
+  if (!response.ok && result.ok === undefined && typeof result.code === "string" && typeof result.message === "string") {
+    const codes: Record<string, string> = {
+      DELETED: "not-found", PREPARATION_REQUIRED: "not-ready", NOT_READY: "not-ready",
+      FORBIDDEN: "write-forbidden", UNAUTHORIZED: "write-forbidden", INVALID_COMMAND_BATCH: "invalid-data"
+    };
+    return { ok: false, code: codes[result.code] ?? (response.status === 401 || response.status === 403 ? "write-forbidden" : "not-ready"), message: result.message, transportCode: result.code };
+  }
+  if (result.ok === false && typeof result.code === "string" && typeof result.message === "string") return result;
+  if (!response.ok || result.ok !== true) throw new Error("invalid response");
+  const object = (key: string) => !!result[key] && typeof result[key] === "object" && !Array.isArray(result[key]);
+  const string = (key: string) => typeof result[key] === "string";
+  const command = () => string("canvasId") && string("operationId") && string("commandId") && typeof result.revision === "number" && typeof result.duplicate === "boolean" && object("plan") && object("receipt");
+  const camera = () => string("canvasId") && string("cameraId") && string("commandId") && typeof result.revision === "number" && typeof result.duplicate === "boolean" && object("camera") && string("settingsVersion");
+  const valid = route === "scene-area-prepare" ? object("snapshot")
+    : route === "scene-area-commit" ? command()
+    : route === "scene-area-undo" || route === "scene-area-redo" ? command() && result.direction === route.slice(11)
+    : route === "world-tool-context" ? object("context") && object("run") && typeof result.retry === "boolean"
+    : route === "world-tool-context-revoke" ? true
+    : route === "world-camera-history" ? string("canvasId") && string("cameraId") && Array.isArray(result.entries)
+    : route === "world-camera-save" ? camera()
+    : route === "world-camera-restore" ? camera() && object("history") : false;
+  if (!valid) throw new Error("invalid response");
+  return result;
+}
+
 export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteService {
   const basePath = (options.basePath ?? CANVAS_API_BASE_PATH).replace(/\/$/, "");
   const reportPath = options.reportPath ?? MODEL_MCP_REPORT_PATH;
@@ -208,9 +236,7 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
       const response = await fetchImpl(`${basePath}/${encodeURIComponent(options.canvasId)}/scene-area-${kind}`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal
       });
-      const result = await response.json();
-      if (!result || typeof result !== "object" || typeof result.ok !== "boolean" || (!response.ok && result.ok)) throw new Error("invalid response");
-      return result;
+      return decodeWorldResponse(response, await response.json(), `scene-area-${kind}`) as import("@woohaa3/contracts").WorldAuthoringPrepareOutcome;
     } catch {
       return { ok: false, code: signal?.aborted ? "cancelled" : "not-ready", message: signal?.aborted ? "请求已取消" : "场景区请求失败" };
     }
@@ -223,9 +249,7 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
       const response = await fetchImpl(`${basePath}/${encodeURIComponent(options.canvasId)}/${route}${query ? `?${query}` : ""}`, {
         method: query ? "GET" : "POST", ...(query ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), signal
       });
-      const result = await response.json();
-      if (!result || typeof result !== "object" || typeof result.ok !== "boolean" || (!response.ok && result.ok)) throw new Error("invalid response");
-      return result as T;
+      return decodeWorldResponse(response, await response.json(), route) as T;
     } catch {
       return { ok: false, code: signal?.aborted ? "cancelled" : "not-ready", message: signal?.aborted ? "请求已取消" : "画布请求失败" } as T;
     }
