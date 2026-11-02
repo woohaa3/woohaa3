@@ -19,7 +19,7 @@ import {
   findNodeTemplate
 } from "../../domain/node-catalog.js";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, partitionManagedNodeDeletion } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, createHighEntropyId, partitionManagedNodeDeletion } from "@woohaa3/contracts";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
 import { definePlugin } from "../../plugin.js";
@@ -30,6 +30,7 @@ import type { CanvasContextMenuItem } from "./canvas-context-menu.js";
 import type { SlotsService } from "../../contract/platform.js";
 import { reportContributionFault } from "../../contribution-guard.js";
 import type { ExtensionFaultService } from "../../extension-faults.js";
+import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 
 export const CANVAS_MENU_PLUGIN_ID = "canvas-context-menu";
 export const CANVAS_MENU_CONTRIBUTION_ID = "canvas-menu";
@@ -59,7 +60,10 @@ export function nodeContextMenuItems(
   const selected = [...selectedNodeIds];
   const deletion = partitionManagedNodeDeletion(nodes, facts.nodeData ?? {}, activeNodeId ? [activeNodeId] : selected);
   const canDelete = deletion.allowed.length > 0;
+  const active = nodes.find(node => node.id === activeNodeId);
+  const data = activeNodeId ? facts.nodeData?.[activeNodeId] as { sharedWorldInstance?: unknown } | undefined : undefined;
   return [
+    ...(active?.type === "model3d" && !data?.sharedWorldInstance ? [{ id: "convert-world", label: "转换到共享世界", disabled: !writable }] : []),
     ...(selected.length === 1 ? [{ id: "rename-node", label: "重命名作品", disabled: !writable }] : []),
     ...(canDelete ? [{ id: "delete-node", label: "删除作品", danger: true, disabled: !writable }] : [])
   ];
@@ -67,6 +71,12 @@ export function nodeContextMenuItems(
 
 export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
   (ctx: Context) => {
+    let disposed = false;
+    const conversionCleanups = new Set<() => void>();
+    ctx.effect(() => () => {
+      disposed = true;
+      for (const cleanup of conversionCleanups) cleanup();
+    }, "canvas-menu-conversion-cleanup");
     const removeEmpty = ctx.slots.register("canvas.overlay", {
       id: "empty-canvas", owner: CANVAS_MENU_PLUGIN_ID, priority: 0,
       render: (props) => createElement(EmptyCanvas, { ctx, writable: props.writable, modalActive: props.modalActive })
@@ -110,6 +120,40 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
         ];
       },
       onSelect: (itemId, context) => {
+        if (itemId === "convert-world") {
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const nodeId = context.nodeId;
+          if (!canvas || !nodeId || !ctx.canvasSession.isWritable() ||
+              !canvas.document.nodes.some(node => node.id === nodeId && node.type === "model3d") ||
+              canvas.nodeData[nodeId]?.sharedWorldInstance) return;
+          const canvasId = canvas.id;
+          const operationId = createHighEntropyId("world-conversion");
+          const instanceId = createHighEntropyId("world-instance");
+          const actionKey = `world-conversion:${operationId}`;
+          let dialogId: string | null = null;
+          let unsubscribe: (() => void) | undefined;
+          let active = true;
+          let pending: Promise<{ ok: true } | { ok: false; error: string }> | null = null;
+          const cleanup = () => { active = false; unregister(); unsubscribe?.(); conversionCleanups.delete(cleanup); };
+          const unregister = ctx.dialogs.registerAlertAction(actionKey, () => {
+            if (pending) return pending;
+            pending = (async () => {
+              const result = await ctx.canvasEdit.convertWorld({ remote: ctx.canvasRemote, canvasId, operationId, targets: [{ nodeId, instanceId }] });
+              if (!active || disposed || workingCanvasOf(woohaa3CanvasStore.getState())?.id !== canvasId) return { ok: false as const, error: "页面已切换" };
+              if (!result.ok) return { ok: false as const, error: result.reason };
+              cleanup();
+              if (dialogId) ctx.dialogs.close(dialogId);
+              return { ok: true as const };
+            })().catch(error => ({ ok: false as const, error: error instanceof Error ? error.message : "转换失败" })).finally(() => { pending = null; });
+            return pending;
+          });
+          conversionCleanups.add(cleanup);
+          const opened = ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "转换到共享世界", description: "将此旧模型转换为共享世界实例。转换可撤销。", confirmLabel: "转换", cancelLabel: "取消", actionKey } });
+          if (!opened.ok) { cleanup(); return; }
+          dialogId = opened.instance.instanceId;
+          unsubscribe = ctx.dialogs.subscribe(() => { if (dialogId && !ctx.dialogs.find(dialogId)) cleanup(); });
+          return;
+        }
         if (itemId === "delete-node") {
           if (!context.nodeId) return;
           submitDelete(ctx, context.nodeId);
@@ -163,7 +207,7 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
       nodeRenameStore.open(nodeId, typeof data?.title === "string" ? data.title : "");
     }
   },
-  { name: CANVAS_MENU_PLUGIN_ID, inject: ["slots", "canvasSession", "canvasNavigation", "canvasEdit", "canvasRuntime"] }
+  { name: CANVAS_MENU_PLUGIN_ID, inject: ["slots", "canvasSession", "canvasNavigation", "canvasEdit", "canvasRuntime", "canvasRemote", "dialogs"] }
 );
 
 function submitDelete(ctx: Context, nodeId: string): void {

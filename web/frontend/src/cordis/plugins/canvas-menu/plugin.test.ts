@@ -20,6 +20,13 @@ function ids(items: Array<{ id: string }>): string[] {
 }
 
 describe("nodeContextMenuItems", () => {
+  it("offers explicit conversion only for legacy models", () => {
+    const models = [{ id: "legacy", type: "model3d" }, { id: "world", type: "model3d" }];
+    const nodeData = { world: { sharedWorldInstance: { instanceId: "i" } } };
+    expect(ids(nodeContextMenuItems(models, ["legacy"], true, { activeNodeId: "legacy", nodeData }))).toContain("convert-world");
+    expect(ids(nodeContextMenuItems(models, ["world"], true, { activeNodeId: "world", nodeData }))).not.toContain("convert-world");
+    expect(nodeContextMenuItems(models, ["legacy"], false, { activeNodeId: "legacy", nodeData }).find(item => item.id === "convert-world")?.disabled).toBe(true);
+  });
   it("hides independent deletion for a managed node from an unrelated extension", () => {
     const nodeData = { b: { managedBy: { schemaVersion: 1, extensionId: "test.extension", ownerNodeId: "c", entityId: "entry", lifecycle: "owner-managed" } } };
     expect(ids(nodeContextMenuItems(nodes, ["b"], true, { activeNodeId: "b", nodeData }))).not.toContain("delete-node");
