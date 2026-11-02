@@ -370,6 +370,23 @@ mod tests {
         assert!(query(generation)["nodeId"].is_null());
         crate::prepare_and_register_model_resource(request).unwrap();
         assert_eq!(query(generation)["nodeId"], "model");
+        // Card movement must not move the shared-world surface or rebuild it.
+        let triangles = CACHE.with(|cache| cache.borrow()[0].4.triangles.clone().unwrap());
+        scene["nodes"][0]["x"] = serde_json::json!(9000);
+        let moved_card = crate::set_scene(&scene.to_string()).unwrap();
+        assert_eq!(query(moved_card)["nodeId"], "model");
+        CACHE.with(|cache| assert!(Arc::ptr_eq(&triangles, cache.borrow()[0].4.triangles.as_ref().unwrap())));
+        scene["nodes"][0]["sharedWorldInstance"]["transform"]["position"]["u"] = serde_json::json!(10);
+        let moved_world = crate::set_scene(&scene.to_string()).unwrap();
+        assert!(query(moved_world)["nodeId"].is_null());
+        let new_screen = crate::isometric_grid::screen_point_from_world(Vec3::new(640., 64., 64.), &view);
+        let moved_request = format!(r#"{{"generation":{moved_world},"x":{},"y":{},"width":800,"height":600}}"#, new_screen.x, new_screen.y);
+        let result: serde_json::Value = serde_json::from_str(&crate::query_model_pick(&moved_request)).unwrap();
+        assert_eq!(result["nodeId"], "model");
+        scene["nodes"] = serde_json::json!([]);
+        let cleared = crate::set_scene(&scene.to_string()).unwrap();
+        assert!(query(cleared)["nodeId"].is_null());
+        assert_eq!(query(moved_world)["reason"], "stale");
         crate::bridge::clear_model_assets();
     }
 

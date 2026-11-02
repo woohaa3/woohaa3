@@ -298,3 +298,52 @@ test("interleaved surfaces retain depth when card order changes", async ({ page 
     expect(hitsAfter[key].value).toEqual(hitsBefore[key].value);
   }
 });
+
+test("sparse child mesh picks visible pixels and leaves its gap empty", async ({ page }, info) => {
+  if (!process.env.WOOHAA_E2E_CDP || !process.env.E2E_BASE_URL) throw new Error("explicit hardware target required");
+  const node = { id: "sparse", type: "model3d", position: { x: 400, y: 300 } };
+  const now = new Date().toISOString();
+  const modelScript = `scene.group({id:"parent",position:[1,0,0],rotation:[0,20,0]});
+    scene.mesh({id:"surface",parent:"parent",vertices:[[-3,0,0],[-1,0,0],[-3,3,0],[1,0,0],[3,0,0],[3,3,0]],faces:[[0,1,2],[3,4,5]],color:"#00ff00"});`;
+  await seedYjsCanvas(page, canvasId, [node], { canvas: { id: canvasId, title: "Sparse mesh", revision: 0,
+    document: { schemaVersion: "asset-canvas-v1", nodes: [node], edges: [], updatedAt: now },
+    nodeData: { sparse: { modelScript, modelScriptVersion: "woohaa-model-js-v2", modelScriptLanguage: "javascript", modelContentVersion: { revision: 1, sourceHash: "sparse", contentHash: "sparse" } } }, assets: [], jobs: [], updatedAt: now } });
+  const wasm = page.waitForResponse(response => response.url().endsWith(".wasm") && response.ok(), { timeout: 90_000 });
+  await page.goto("/"); await waitForCanvasSession(page); await page.keyboard.press("Escape");
+  await expect.poll(() => page.evaluate(() => (window as any).__bevyRuntime.lastScene()?.nodes?.find((n: any) => n.id === "sparse")?.model), { timeout: 30_000 }).toBeTruthy();
+  const prepare = await page.request.post(`/api/canvases/${canvasId}/world-conversion-prepare`, { data: { nodeIds: [node.id] } });
+  expect(prepare.status(), await prepare.text()).toBe(200);
+  const prepared = await prepare.json();
+  const commit = await page.request.post(`/api/canvases/${canvasId}/world-conversion-commit`, { data: { operationId: "sparse-mesh", sourceVersion: prepared.sourceVersion, targets: prepared.nodes.map((n: any) => ({ nodeId: n.nodeId, nodeVersion: n.nodeVersion, instanceId: "sparse-instance" })) } });
+  expect(commit.status(), await commit.text()).toBe(200);
+  await expect.poll(() => page.evaluate(() => (window as any).__bevyRuntime.lastScene()?.nodes?.find((n: any) => n.id === "sparse")?.sharedWorldInstance)).toBeTruthy();
+  const canvas = page.frameLocator('iframe[title="画布渲染预览"]').locator("canvas");
+  const renderer = await canvas.evaluate(element => { const gl = (element as HTMLCanvasElement).getContext("webgl2"); const ext = gl?.getExtension("WEBGL_debug_renderer_info"); return ext && gl?.getParameter(ext.UNMASKED_RENDERER_WEBGL); });
+  expect(renderer).toMatch(/NVIDIA.*4060/i);
+  const downloaded = await canvas.evaluate(async (_element, url) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await (await fetch(url)).arrayBuffer())), b => b.toString(16).padStart(2, "0")).join(""), (await wasm).url());
+  const built = await readFile(new URL("../frontend/src/bevy-wasm/woohaa_bevy_canvas_bg.wasm", import.meta.url));
+  expect(downloaded).toBe(createHash("sha256").update(built).digest("hex"));
+  await page.waitForTimeout(1000);
+  const image = await pixels(page, await canvas.screenshot({ path: info.outputPath("sparse.png") }));
+  const points = await page.evaluate(rgba => {
+    const r = (window as any).__bevyRuntime, generation = r.interactionGeneration();
+    const green = (i: number) => rgba[i + 1] > 100 && rgba[i + 1] > rgba[i] * 1.5 && rgba[i + 1] > rgba[i + 2] * 1.5;
+    for (let y = 2; y < 238; y += 2) for (let x = 2; x < 398; x += 2) {
+      const i = (y * 400 + x) * 4;
+      if (!green(i)) continue;
+      for (let x2 = x + 8; x2 < Math.min(x + 180, 398); x2 += 2) {
+        if (!green((y * 400 + x2) * 4)) continue;
+        const mid = Math.floor((x + x2) / 2), mi = (y * 400 + mid) * 4;
+        if (green(mi)) continue;
+        const pick = (px: number) => r.queryModelPick({ generation, x: 250 + px, y: 450 + y, width: 1280, height: 720 });
+        return { left: { x: 250 + x, y: 450 + y, result: pick(x) }, right: { x: 250 + x2, y: 450 + y, result: pick(x2) }, gap: { x: 250 + mid, y: 450 + y, result: pick(mid) } };
+      }
+    }
+    return null;
+  }, image.rgba);
+  await writeFile(info.outputPath("sparse.json"), JSON.stringify({ renderer, wasmSha256: downloaded, prepared, points }, null, 2));
+  expect(points).toBeTruthy();
+  expect(points!.left.result?.value?.nodeId).toBe("sparse");
+  expect(points!.right.result?.value?.nodeId).toBe("sparse");
+  expect(points!.gap.result?.value).toBeNull();
+});
