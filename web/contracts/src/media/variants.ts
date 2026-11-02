@@ -37,11 +37,30 @@ export type MediaDerivativeIdentity = {
   readonly format: MediaDerivativeFormat;
 };
 
-const SOURCE_KEY_PATTERN = /^sha256-([0-9a-f]{64})$/;
+/**
+ * 可派生的原资产键：两种形态各自算哈希。
+ *
+ * - `sha256-<hash>`：上传/迁移的媒体；
+ * - `generation-outputs/<hash>.<ext>`：任务生成结果。
+ *
+ * 两者同属 `isValidStorageKey` 接受的内容寻址键，哈希都内嵌在键里，所以**同一内容**的缩略图
+ * 仍可恒等复用。早期这里只认第一种，生成图只能拉原图（实测 7.4 MB 一张）。
+ * 任意自由键、带路径的键仍然拒绝 —— 派生缓存键必须由内容决定，不能由调用方拼。
+ */
+const MULTIPART_SOURCE_KEY_PATTERN = /^sha256-([0-9a-f]{64})$/;
+const GENERATED_SOURCE_KEY_PATTERN = /^generation-outputs\/([0-9a-f]{64})\.[a-z0-9]+$/;
 
-/** 只有内容寻址的原资产可以派生；生成结果键与任意自由键一律拒绝。 */
+/** 从可派生的原资产键里取出内容哈希；不是可派生形态返回 `null`。 */
+export function derivableSourceChecksum(value: string): string | null {
+  const direct = MULTIPART_SOURCE_KEY_PATTERN.exec(value);
+  if (direct) return direct[1]!;
+  const generated = GENERATED_SOURCE_KEY_PATTERN.exec(value);
+  return generated ? generated[1]! : null;
+}
+
+/** 只有内容寻址的原资产可以派生（上传媒体与生成结果）；任意自由键一律拒绝。 */
 export function isDerivableSourceKey(value: unknown): value is string {
-  return typeof value === "string" && SOURCE_KEY_PATTERN.test(value);
+  return typeof value === "string" && derivableSourceChecksum(value) !== null;
 }
 
 export function isThumbnailVariantEdge(value: unknown): value is ThumbnailVariantEdge {
@@ -63,11 +82,14 @@ export function isMediaDerivativeFormat(value: unknown): value is MediaDerivativ
  * 非法身份返回 `null`（调用方必须在访问存储**之前**拒绝，不能拼出任意键）。
  */
 export function mediaDerivativeCacheKey(identity: MediaDerivativeIdentity): string | null {
-  if (!isDerivableSourceKey(identity.sourceKey)) return null;
+  // 两种键形态都归一到「内容哈希」，同内容的上传件与生成件共用同一份缩略图
+  const checksum = isDerivableSourceKey(identity.sourceKey)
+    ? derivableSourceChecksum(identity.sourceKey)
+    : null;
+  if (!checksum) return null;
   if (!isMediaDerivativeKind(identity.kind)) return null;
   if (!isThumbnailVariantEdge(identity.edge)) return null;
   if (!isMediaDerivativeFormat(identity.format)) return null;
-  const checksum = identity.sourceKey.slice("sha256-".length);
   return `${MEDIA_DERIVATIVE_KEY_PREFIX}/${checksum}/${identity.kind}-${identity.edge}.${identity.format}`;
 }
 
@@ -77,6 +99,7 @@ export function parseMediaDerivativeCacheKey(key: string): MediaDerivativeIdenti
     /^derivatives\/([0-9a-f]{64})\/(thumbnail|poster)-(128|256|512|1024)\.(webp|jpeg|png)$/.exec(key);
   if (!match) return null;
   const [, checksum, kind, edge, format] = match;
+  // 缓存键只留内容哈希，还原成哪种键形态都指向同一份字节；用上传件的形态表示
   return {
     sourceKey: `sha256-${checksum}`,
     kind: kind as MediaDerivativeKind,
