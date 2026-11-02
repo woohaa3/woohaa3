@@ -8,10 +8,11 @@ export function webTarget(options: { port: number; server: WebServer }) {
   if (process.env.WOOHAA_E2E_CDP && !baseURL) {
     throw new Error("WOOHAA_E2E_CDP requires an explicit E2E_BASE_URL");
   }
-  if (baseURL) {
-    const url = new URL(baseURL);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error("E2E_BASE_URL must use HTTP or HTTPS");
+  if (baseURL !== undefined) {
+    let url: URL;
+    try { url = new URL(baseURL); } catch { throw new Error("E2E_BASE_URL must be an absolute HTTP or HTTPS URL"); }
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password || url.search || url.hash) {
+      throw new Error("E2E_BASE_URL must be an HTTP or HTTPS URL without credentials, query or fragment");
     }
     return { baseURL: url.href, webServer: undefined };
   }
