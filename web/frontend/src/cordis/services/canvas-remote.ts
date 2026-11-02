@@ -203,6 +203,19 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
     return { ok: true, value: parsed as T };
   }
 
+  async function sceneAreaRequest(kind: "prepare" | "commit" | "undo" | "redo", body: unknown, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldAuthoringPrepareOutcome | import("@woohaa3/contracts").WorldAuthoringExecuteOutcome | import("@woohaa3/contracts").WorldAuthoringHistoryOutcome> {
+    try {
+      const response = await fetchImpl(`${basePath}/${encodeURIComponent(options.canvasId)}/scene-area-${kind}`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal
+      });
+      const result = await response.json();
+      if (!result || typeof result !== "object" || typeof result.ok !== "boolean" || (!response.ok && result.ok)) throw new Error("invalid response");
+      return result;
+    } catch {
+      return { ok: false, code: signal?.aborted ? "cancelled" : "not-ready", message: signal?.aborted ? "请求已取消" : "场景区请求失败" };
+    }
+  }
+
   async function worldConversionRequest(kind: "prepare", body: unknown, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome>;
   async function worldConversionRequest(kind: "commit", body: unknown, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionCommitOutcome>;
   async function worldConversionRequest(kind: "prepare" | "commit", body: unknown, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome | import("@woohaa3/contracts").WorldConversionCommitOutcome> {
@@ -227,6 +240,20 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
    */
 
   return {
+    async prepareSceneArea(input, signal) {
+      if (input.canvasId !== options.canvasId) return { ok: false, code: "invalid-data", message: "画布不匹配" };
+      return sceneAreaRequest("prepare", { areaId: input.areaId }, signal) as Promise<import("@woohaa3/contracts").WorldAuthoringPrepareOutcome>;
+    },
+    async executeSceneArea(input, signal) {
+      if (input.canvasId !== options.canvasId) return { ok: false, code: "invalid-data", message: "画布不匹配" };
+      const { canvasId: _canvasId, ...body } = input;
+      return sceneAreaRequest("commit", body, signal) as Promise<import("@woohaa3/contracts").WorldAuthoringExecuteOutcome>;
+    },
+    async historySceneArea(direction, input, signal) {
+      if (input.canvasId !== options.canvasId) return { ok: false, code: "invalid-data", message: "画布不匹配" };
+      const { canvasId: _canvasId, ...body } = input;
+      return sceneAreaRequest(direction, body, signal) as Promise<import("@woohaa3/contracts").WorldAuthoringHistoryOutcome>;
+    },
     async prepareWorldConversion(input, signal) {
       if (input.canvasId !== options.canvasId) return { ok: false, code: "canvas-mismatch", message: "画布不匹配" };
       return worldConversionRequest("prepare", { nodeIds: input.nodeIds }, signal);

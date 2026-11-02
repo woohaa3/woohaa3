@@ -51,6 +51,13 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
     connections: { endpoints: () => 'ordinary' },
     resize: { ...rectangularNodeResize, mode: 'rect' }
   });
+  entries.set('workflow-group-2d', {
+    appearance: { palette: 'node', defaultSize: { width: 260, height: 195 }, cardLabel: '2D 组' },
+    resize: rectangularNodeResize
+  });
+  entries.set('scene-area', {
+    appearance: { palette: 'node', defaultSize: { width: 260, height: 195 }, cardLabel: '场景区' }
+  });
   return entries;
 }
 const builtins = builtinNodeImplementations();

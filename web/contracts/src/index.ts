@@ -120,6 +120,7 @@ export * from "./canvas/scene-package.js";
 export * from "./canvas/shared-world.js";
 export * from "./canvas/scene-footprint.js";
 export * from "./canvas/world-conversion.js";
+export * from "./canvas/creation-scopes-ui.js";
 export {
   SharedWorldCodecError,
   decodeWorldInstanceData,

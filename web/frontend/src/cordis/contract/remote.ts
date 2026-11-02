@@ -75,6 +75,9 @@ export type ModelScriptReport = {
  * 提示词片段目录的唯一浏览器出口。所有最终进入 Canvas Service 的协议都在这里。
  */
 export interface CanvasRemoteService {
+  prepareSceneArea(input: { canvasId: string; areaId: string }, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldAuthoringPrepareOutcome>;
+  executeSceneArea(input: import("@woohaa3/contracts").WorldAuthoringExecuteInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldAuthoringExecuteOutcome>;
+  historySceneArea(direction: "undo" | "redo", input: import("@woohaa3/contracts").WorldAuthoringHistoryInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldAuthoringHistoryOutcome>;
   prepareWorldConversion(input: import("@woohaa3/contracts").WorldConversionPrepareInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome>;
   commitWorldConversion(input: import("@woohaa3/contracts").WorldConversionCommitInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionCommitOutcome>;
   /**
