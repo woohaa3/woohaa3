@@ -59,6 +59,12 @@ export type WorldAuthoringService = {
   prepare(input: { canvasId: string; areaId: string }, options?: { signal?: AbortSignal }): Promise<WorldAuthoringPrepareOutcome>;
   issueContext(input: WorldToolContextRequest): Promise<WorldToolContextOutcome>;
   revokeContext(input: WorldToolContextRevokeInput): Promise<void>;
+  /**
+   * Host-internal resolution of an issued context and its process-local write
+   * capability. It is deliberately absent from `BackendWorldAuthoringPort`, so
+   * the capability can never be requested over a transport.
+   */
+  resolveCapability(canvasId: string, contextId: string): { context: WorldToolContext; capability: SpatialWriteContext } | WorldAuthoringFailure;
   execute(input: WorldAuthoringExecuteInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringExecuteOutcome>;
   undo(input: WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringHistoryOutcome>;
   redo(input: WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringHistoryOutcome>;
@@ -551,6 +557,11 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
     prepare,
     issueContext,
     revokeContext,
+    resolveCapability(canvasId: string, contextId: string) {
+      const entry = issued.get(contextId);
+      if (!entry || entry.canvasId !== canvasId) return failure("stale-epoch", "工具上下文已失效");
+      return { context: entry.context, capability: entry.capability };
+    },
     execute: runExecute,
     undo: (input, options) => runHistory("undo", input, options),
     redo: (input, options) => runHistory("redo", input, options),

@@ -34,6 +34,7 @@ import { createRendererClient } from "./model-renderer/index.js";
 import { isAggregateRunNode } from "@woohaa3/contracts";
 import { composeSnippets, type SnippetComposition } from "./storage/snippet-composition.js";
 import { composeNodeHistory, type NodeHistoryComposition } from "./storage/node-history-composition.js";
+import { composeWorldCameraHistory, type WorldCameraHistoryComposition } from "./storage/world-camera-history-composition.js";
 import { AgentDeltaJournal } from "./agent-authoring/index.js";
 import {
   CANVAS_AGENT_DEVELOPMENT_PRINCIPAL_ENV,
@@ -64,6 +65,7 @@ import type { CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } f
 import { createWorldConversionService } from "./world-authoring/conversion-service.js";
 import { createWorldAuthoringAuthority } from "./world-authoring/authority.js";
 import { createWorldAuthoringService } from "./world-authoring/scene-area-service.js";
+import { createWorldCameraSettingsService } from "./world-authoring/camera-service.js";
 
 export type { CanvasMediaAssetSyncPort, CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
 
@@ -472,6 +474,22 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   }
   nodeHistoryRef = nodeHistory;
 
+  // 世界镜头完成历史（T08）：独立表/事务，绝不进入画布聚合或节点历史。
+  let cameraHistory: WorldCameraHistoryComposition | null = null;
+  if (options.enableWorldCameraHistory ?? true) {
+    try {
+      cameraHistory = await composeWorldCameraHistory({
+        env,
+        ...(options.storageConfig ? { storageConfig: options.storageConfig } : {}),
+        ...(options.worldCameraHistoryRepository ? { repository: options.worldCameraHistoryRepository } : {}),
+        ...(options.now ? { now: options.now } : {})
+      });
+    } catch (error) {
+      log({ event: "world-camera-history-compose-failed", message: error instanceof Error ? error.message : "unknown" });
+      cameraHistory = null;
+    }
+  }
+
   if (nodeHistory) {
     void nodeHistory.editCompletion.processPending().then(
       (result) => {
@@ -717,6 +735,15 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       return repository.findLatestWorldAuthoringCommand(canvasId, operationId);
     }
   }) : null;
+  const cameraSettings = sync && cameraHistory ? createWorldCameraSettingsService({
+    resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
+    resolveContext: (canvasId, contextId) => worldAuthoring
+      ? worldAuthoring.resolveCapability(canvasId, contextId)
+      : { ok: false, code: "not-ready", message: "世界工具上下文不可用" },
+    history: cameraHistory.repository,
+    ...(options.verifyWorldCameraCompletion ? { verifyCompletion: options.verifyWorldCameraCompletion } : {}),
+    ...(options.now ? { now: options.now } : {})
+  }) : null;
   async function spatialRepository() {
     const repository = await resolveYjsRepository();
     const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
@@ -726,6 +753,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   const composedHandler = composeRequestHandler({
     worldConversion,
     worldAuthoring,
+    worldCamera: cameraSettings,
     env,
     canvasEnabled,
     unavailableReason,
@@ -768,6 +796,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     spatialWrites,
     worldConversion,
     worldAuthoring,
+    cameraSettings,
     scenePackages,
     sync,
     runService,
@@ -821,6 +850,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       consumer?.stop();
       if (options.modelRenderer === undefined) await modelRenderer?.close().catch(() => undefined);
       await nodeHistory?.close().catch(() => undefined);
+      await cameraHistory?.close().catch(() => undefined);
 
       if (syncHandler) await syncHandler.close();
       if (releaseWriterLock) await releaseWriterLock().catch(() => undefined);
