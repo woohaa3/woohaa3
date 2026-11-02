@@ -11,7 +11,7 @@
  * 本地 Store/Y.Doc 更新，也不做 optimistic 状态。
  */
 import type { CanvasCommand, ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition } from "@woohaa3/contracts";
-import { createHighEntropyId, managedNodeRelationOf, remapWorldCopyReferences, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
+import { createHighEntropyId, managedNodeRelationOf, newWorldInstance, remapWorldCopyReferences, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
 import type { CanvasCopyPayload, CopyNode } from "./payload.js";
 import { imageEditAssetIdsOf, imageEditProjectObjectOf } from "./payload.js";
 
@@ -215,11 +215,19 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   // 3. node.add creates root nodes, so flatten the accepted source parent chain
   //    into canvas coordinates before applying the shared translation.
   //    扩展重映射的数据随 node.add 一起提交，可信生命周期复核完整闭包。
-  for (const { node, absolute } of placed) {
+  for (const [index, { node, absolute }] of placed.entries()) {
     const newId = idMap.get(node.id);
     if (newId === undefined) continue;
     newNodeIds.push(newId);
-    const mappedData = remappedData.get(node.id);
+    let mappedData = remappedData.get(node.id);
+    if (node.type === "model3d") {
+      const source = mappedData ?? payload.nodeData[node.id] ?? {};
+      const existing = source.sharedWorldInstance as ReturnType<typeof newWorldInstance> | undefined;
+      const placedInstance = newWorldInstance(existing?.instanceId ?? makeId("instanceId", index), { x: absolute.x + dx, y: absolute.y + dy });
+      if (existing) placedInstance.transform = { ...existing.transform, position: placedInstance.transform.position };
+      mappedData = { ...source, sharedWorldInstance: placedInstance };
+      remappedData.set(node.id, mappedData);
+    }
     commands.push({
       type: "node.add",
       node: {

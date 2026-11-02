@@ -1,0 +1,48 @@
+import { expect, it, vi } from "vitest";
+
+const state = vi.hoisted(() => ({ canvas: { id: "c", document: { nodes: [{ id: "m", type: "model3d" }] }, nodeData: {} } as any }));
+vi.mock("../../services/canvas-state/index.js", () => ({
+  workingCanvasOf: () => state.canvas,
+  woohaa3CanvasStore: { getState: () => ({}) }
+}));
+import { canvasMenuExtension } from "./plugin.js";
+
+it("confirms, retries and suppresses stale conversion feedback through the menu contribution", async () => {
+  let menu: any;
+  let action: (() => Promise<any>) | undefined;
+  let listener: (() => void) | undefined;
+  let open = false;
+  const convertWorld = vi.fn().mockResolvedValueOnce({ ok: false, reason: "not ready" }).mockResolvedValueOnce({ ok: true });
+  const dialogs = {
+    registerAlertAction: (_key: string, fn: typeof action) => { action = fn; return () => { action = undefined; }; },
+    open: () => { open = true; return { ok: true, instance: { instanceId: "dialog" } }; },
+    close: () => { open = false; listener?.(); },
+    find: () => open ? {} : null,
+    subscribe: (fn: () => void) => { listener = fn; return () => { listener = undefined; }; }
+  };
+  canvasMenuExtension({
+    slots: { register: (slot: string, value: unknown) => { if (slot === "canvas.context-menu") menu = value; return () => {}; } },
+    canvasNavigation: { registerMenu: () => () => {} }, canvasSession: { isWritable: () => true },
+    canvasEdit: { convertWorld }, canvasRemote: {}, dialogs, effect: () => {}, get: () => undefined
+  } as never, undefined);
+  const context = { nodeId: "m", selectedNodeIds: ["m"], writable: true, world: { x: 0, y: 0 } };
+  menu.onSelect("convert-world", context);
+  expect(convertWorld).not.toHaveBeenCalled();
+  expect(await action!()).toEqual({ ok: false, error: "not ready" });
+  const first = convertWorld.mock.calls[0][0];
+  expect(await action!()).toEqual({ ok: true });
+  expect(convertWorld.mock.calls[1][0]).toEqual(first);
+  expect(open).toBe(false);
+  menu.onSelect("convert-world", context);
+  dialogs.close();
+  expect(action).toBeUndefined();
+  expect(convertWorld).toHaveBeenCalledTimes(2);
+  menu.onSelect("convert-world", context);
+  let resolve!: (result: unknown) => void;
+  convertWorld.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+  const pending = action!();
+  state.canvas = { ...state.canvas, id: "other" };
+  resolve({ ok: true });
+  expect(await pending).toEqual({ ok: false, error: "页面已切换" });
+  state.canvas = { ...state.canvas, id: "c" };
+});

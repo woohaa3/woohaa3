@@ -216,6 +216,21 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
     }
   }
 
+  async function worldRequest<T>(route: string, input: { canvasId: string }, signal?: AbortSignal, query?: URLSearchParams): Promise<T> {
+    if (input.canvasId !== options.canvasId) return { ok: false, code: "invalid-data", message: "画布不匹配" } as T;
+    const { canvasId: _canvasId, ...body } = input;
+    try {
+      const response = await fetchImpl(`${basePath}/${encodeURIComponent(options.canvasId)}/${route}${query ? `?${query}` : ""}`, {
+        method: query ? "GET" : "POST", ...(query ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), signal
+      });
+      const result = await response.json();
+      if (!result || typeof result !== "object" || typeof result.ok !== "boolean" || (!response.ok && result.ok)) throw new Error("invalid response");
+      return result as T;
+    } catch {
+      return { ok: false, code: signal?.aborted ? "cancelled" : "not-ready", message: signal?.aborted ? "请求已取消" : "画布请求失败" } as T;
+    }
+  }
+
   async function worldConversionRequest(kind: "prepare", body: unknown, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome>;
   async function worldConversionRequest(kind: "commit", body: unknown, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionCommitOutcome>;
   async function worldConversionRequest(kind: "prepare" | "commit", body: unknown, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome | import("@woohaa3/contracts").WorldConversionCommitOutcome> {
@@ -240,6 +255,15 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
    */
 
   return {
+    issueWorldToolContext(input, signal) { return worldRequest("world-tool-context", input, signal); },
+    revokeWorldToolContext(input, signal) { return worldRequest("world-tool-context-revoke", input, signal); },
+    saveWorldCamera(input, signal) { return worldRequest("world-camera-save", input, signal); },
+    restoreWorldCamera(input, signal) { return worldRequest("world-camera-restore", input, signal); },
+    listWorldCameraHistory(input, signal) {
+      const query = new URLSearchParams({ cameraId: input.cameraId });
+      if (input.limit !== undefined) query.set("limit", String(input.limit));
+      return worldRequest("world-camera-history", input, signal, query);
+    },
     async prepareSceneArea(input, signal) {
       if (input.canvasId !== options.canvasId) return { ok: false, code: "invalid-data", message: "画布不匹配" };
       return sceneAreaRequest("prepare", { areaId: input.areaId }, signal) as Promise<import("@woohaa3/contracts").WorldAuthoringPrepareOutcome>;

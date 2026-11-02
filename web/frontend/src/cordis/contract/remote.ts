@@ -75,6 +75,11 @@ export type ModelScriptReport = {
  * 提示词片段目录的唯一浏览器出口。所有最终进入 Canvas Service 的协议都在这里。
  */
 export interface CanvasRemoteService {
+  issueWorldToolContext(input: import("@woohaa3/contracts").WorldToolContextRequest, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldToolContextOutcome>;
+  revokeWorldToolContext(input: import("@woohaa3/contracts").WorldToolContextRevokeInput, signal?: AbortSignal): Promise<{ ok: true } | import("@woohaa3/contracts").WorldAuthoringFailure>;
+  saveWorldCamera(input: import("@woohaa3/contracts").WorldCameraSettingsSaveInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldCameraSettingsSaveOutcome>;
+  restoreWorldCamera(input: import("@woohaa3/contracts").WorldCameraRestoreInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldCameraRestoreOutcome>;
+  listWorldCameraHistory(input: import("@woohaa3/contracts").WorldCameraHistoryListInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldCameraHistoryListOutcome>;
   prepareSceneArea(input: { canvasId: string; areaId: string }, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldAuthoringPrepareOutcome>;
   executeSceneArea(input: import("@woohaa3/contracts").WorldAuthoringExecuteInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldAuthoringExecuteOutcome>;
   historySceneArea(direction: "undo" | "redo", input: import("@woohaa3/contracts").WorldAuthoringHistoryInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldAuthoringHistoryOutcome>;

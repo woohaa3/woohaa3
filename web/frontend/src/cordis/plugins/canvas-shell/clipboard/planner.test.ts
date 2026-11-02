@@ -39,7 +39,9 @@ it("remaps a world collection in the actual paste batch", () => {
   const model = result.canvas.nodeData["new-model3d-0"].sharedWorldInstance as typeof instance;
   const copiedCamera = result.canvas.nodeData["new-world-camera-3"].worldCamera!;
   expect(model.instanceId).toBe("new-instanceId-0");
-  expect(model.transform).toEqual(instance.transform);
+  expect(model.transform.rotation).toEqual(instance.transform.rotation);
+  expect(model.transform.scale).toEqual(instance.transform.scale);
+  expect(model.transform.position.h).toBe(0);
   expect(copiedCamera).toEqual({ ...camera, cameraId: "new-cameraId-3", boundInstanceId: model.instanceId });
   expect(result.canvas.nodeData["new-workflow-group-2d-1"].workflowGroup2d).toMatchObject({ groupId: "new-groupId-1", scopeVersion: "new-scopeVersion-1", memberNodeIds: ["new-model3d-0"] });
   expect(result.canvas.nodeData["new-scene-area-2"].sceneArea).toMatchObject({ areaId: "new-areaId-2", scopeVersion: "new-scopeVersion-2" });
