@@ -160,3 +160,80 @@ for (const source of [
     await assert.rejects(buildExtensionBrowser({ cwd }), /UI/);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// import.meta.env 残留断言（踩过：漏 define 导致扩展整块静默不渲染）
+// ---------------------------------------------------------------------------
+
+/** 造一个最小可构建的扩展；`plugin` 是 src/frontend/plugin.ts 的源码。 */
+async function envFixture(plugin, { packageJson, publicFiles } = {}) {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "extension-env-"));
+  await mkdir(path.join(cwd, "src/frontend"), { recursive: true });
+  await writeFile(path.join(cwd, "package.json"), JSON.stringify({ type: "module", ...packageJson }));
+  await writeFile(path.join(cwd, "src/frontend/metadata.ts"), 'export const metadata = { extensionId: "fixture" };');
+  await writeFile(path.join(cwd, "src/frontend/index.ts"), 'export { descriptor } from "./plugin.js";');
+  await writeFile(path.join(cwd, "src/frontend/plugin.ts"), plugin);
+  for (const [relative, contents] of Object.entries(publicFiles ?? {})) {
+    await mkdir(path.dirname(path.join(cwd, relative)), { recursive: true });
+    await writeFile(path.join(cwd, relative), contents);
+  }
+  return cwd;
+}
+
+test("rejects esbuild output that still reads import.meta.env without a define", async () => {
+  const cwd = await envFixture('export const descriptor = { plugin: () => import.meta.env.VITE_MISSING };');
+  try {
+    await assert.rejects(buildExtensionBrowser({ cwd }), error => {
+      assert.match(error.message, /残留 import\.meta\.env/);
+      assert.match(error.message, /缺失的 define：VITE_MISSING/);
+      // 报错必须指向**本次构建**的 package.json，而不是模块级的 extensionDir。
+      assert.match(error.message, /extension-env-[^\\/]*.*package\.json|package\.json/);
+      assert.doesNotMatch(error.message, /web[\\/]scripts?[\\/]package\.json/);
+      return true;
+    });
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("accepts the same source once the key is defined", async () => {
+  const cwd = await envFixture('export const descriptor = { plugin: () => import.meta.env.VITE_PRESENT };', {
+    packageJson: { woohaa: { build: { define: { "import.meta.env.VITE_PRESENT": '"ok"' } } } }
+  });
+  try {
+    const result = await buildExtensionBrowser({ cwd });
+    assert.ok(result.entry);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("bare import.meta.env is reported as unfixable-by-define, not as a missing key", async () => {
+  const cwd = await envFixture('const env = import.meta.env; export const descriptor = { plugin: () => env };');
+  try {
+    await assert.rejects(buildExtensionBrowser({ cwd }), error => {
+      assert.match(error.message, /裸 import\.meta\.env 出现在/);
+      assert.match(error.message, /覆盖不了/);
+      assert.doesNotMatch(error.message, /缺失的 define/);
+      return true;
+    });
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("public/ assets may read import.meta.env: they are copied, not bundled", async () => {
+  const cwd = await envFixture('export const descriptor = { plugin: () => null };', {
+    publicFiles: { "public/editor.js": 'const e = import.meta.env.VITE_EDITOR;' }
+  });
+  try {
+    const result = await buildExtensionBrowser({ cwd });
+    assert.ok(result.manifest.files.some(file => file.path === "assets/editor.js"));
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("requiredNonEmpty rejects a declared key whose define is blank", async () => {
+  const cwd = await envFixture('export const descriptor = { plugin: () => import.meta.env.VITE_SUPABASE_ANON_KEY };', {
+    packageJson: { woohaa: { build: {
+      define: { "import.meta.env.VITE_SUPABASE_ANON_KEY": '""' },
+      requiredNonEmpty: ["VITE_SUPABASE_ANON_KEY"]
+    } } }
+  });
+  try {
+    await assert.rejects(buildExtensionBrowser({ cwd }), /requiredNonEmpty 声明了这些键，但 define 缺失或为空：\n {2}VITE_SUPABASE_ANON_KEY/);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});

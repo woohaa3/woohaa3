@@ -13,6 +13,11 @@
   },
   "woohaa": {
     "build": {
+      "requiredNonEmpty": [
+        "VITE_PPSERVER_BASE_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_ANON_KEY"
+      ],
       "nodePaths": [
         "../../../../../node_modules"
       ],

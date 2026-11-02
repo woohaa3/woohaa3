@@ -331,7 +331,7 @@ function classifyFile(relative, entryRelative) {
  */
 async function loadExtensionBuildConfig(dir) {
   const file = path.join(dir, "package.json");
-  if (!existsSync(file)) return { define: {}, loader: {}, plugins: [], nodePaths: [] };
+  if (!existsSync(file)) return { define: {}, loader: {}, plugins: [], nodePaths: [], requiredNonEmpty: [] };
   const config = JSON.parse(readFileSync(file, "utf8"))?.woohaa?.build ?? {};
   const nodePaths = (Array.isArray(config.nodePaths) ? config.nodePaths : []).map((entry) => {
     if (typeof entry !== "string" || entry.trim() === "") throw new Error(`woohaa.build.nodePaths 只接受非空字符串：${file}`);
@@ -358,7 +358,26 @@ async function loadExtensionBuildConfig(dir) {
     }
     plugins.push(...list);
   }
-  return { define: asRecord(config.define, "define"), loader: asRecord(config.loader, "loader"), plugins, nodePaths };
+  /*
+   * `requiredNonEmpty`：这些键的 define 值不允许是空串。
+   *
+   * 产物里没有残留不代表值是对的。把 anon key 写成 `""`、或主仓换了后端地址而这里没跟，
+   * 断言全绿，扩展却连着另一个 Supabase 项目 / 后端 —— 表现是「令牌无效」「模板与扣费对不上」，
+   * 和「漏写 define」一样难查。只对**对外服务地址与凭据**这一类声明，默认不启用。
+   */
+  const requiredNonEmpty = (Array.isArray(config.requiredNonEmpty) ? config.requiredNonEmpty : []).map((entry) => {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new Error(`woohaa.build.requiredNonEmpty 只接受非空字符串：${file}`);
+    }
+    return entry.trim();
+  });
+  return {
+    define: asRecord(config.define, "define"),
+    loader: asRecord(config.loader, "loader"),
+    plugins,
+    nodePaths,
+    requiredNonEmpty
+  };
 }
 
 /**
@@ -586,7 +605,9 @@ export async function buildExtensionBrowser(options = {}) {
       bytes: bytes.length,
       gzipBytes: gzipSync(bytes).length,
       sha256: sha256Hex(bytes),
-      kind
+      kind,
+      // JS 原文留在这里：下面的 env 断言要扫它，不必把同一批产物再读一遍（串行 60+ 次）。
+      ...(relative.endsWith(".js") ? { text: bytes.toString("utf8") } : {})
     });
   }
   // Optional package-owned iframe/WASM resources. No host-specific source paths or editor names.
@@ -658,6 +679,78 @@ export async function buildExtensionBrowser(options = {}) {
     throw new Error(
       `browser artifact 残留外部依赖（MUST 全部内联或由 shim 解析）：\n` +
         externalEdges.map((edge) => `  ${edge.from} -> ${edge.specifier}`).join("\n")
+    );
+  }
+
+  /*
+   * `import.meta.env` 必须被 `woohaa.build.define` 逐条替换干净。
+   *
+   * 扩展产物跑在宿主页面里，`import.meta.env` 是 **undefined**（不是 Vite 注入的那个对象）。
+   * 漏掉一个键，产物里就留下 `import.meta.env.VITE_X`，模块求值直接抛
+   * `Cannot read properties of undefined (reading 'VITE_X')` —— 而且是**整块静默消失**：
+   * 薄入口能 import、`loadExtension` 也导出着，只有动态 import 的实现 chunk 求值失败，
+   * 表现在页面上就是「扩展没生效」，控制台还不一定看得到（被加载器吞成诊断）。
+   *
+   * 踩过：主仓新增 VITE_PPSERVER_BASE_URL / VITE_SUPABASE_* 三项，这里没同步，四喜整个
+   * 外壳不渲染。缺失项在构建期是静默的，所以只能靠这条断言兜住。
+   *
+   * **只查 esbuild 的产物**：`public/` 下的文件是原样拷贝的（kind `asset`），不经过 esbuild，
+   * 里面出现 `import.meta.env` 是它自己的事（例如扩展自带一个 iframe 编辑器脚本），
+   * 对它套用 define 校验会把这个扩展永久挡在构建之外。
+   */
+  const unresolvedEnv = [];
+  for (const record of fileRecords) {
+    if (record.kind === "asset" || !record.text) continue;
+    for (const match of record.text.matchAll(/import\.meta\.env(?:\.[A-Za-z_$][\w$]*)?/g)) {
+      unresolvedEnv.push({ file: record.relative, expression: match[0] });
+    }
+  }
+  if (unresolvedEnv.length > 0) {
+    // 属性访问与裸对象要分开说：前者补 define 即可，后者 define 逐条列举根本覆盖不了。
+    const keyed = [...new Set(unresolvedEnv
+      .map((item) => /^import\.meta\.env\.([A-Za-z_$][\w$]*)$/.exec(item.expression)?.[1])
+      .filter(Boolean))].sort();
+    const bare = [...new Set(unresolvedEnv.filter((item) => !/^import\.meta\.env\./.test(item.expression)).map((item) => item.file))].sort();
+    const where = [...new Set(unresolvedEnv.map((item) => item.file))].sort();
+    const packageJson = path.relative(REPO_ROOT, path.join(dir, "package.json"));
+    const lines = [`browser artifact 残留 import.meta.env（浏览器里它是 undefined，求值期会抛错）：`];
+    if (keyed.length > 0) {
+      lines.push(`  缺失的 define：${keyed.join(", ")}`);
+      // 用本次构建的 `dir`：`--all` 与 watch 重建都是逐个传 cwd，模块级的 extensionDir 这时指向进程 cwd。
+      lines.push(`  修法：在 ${packageJson} 的 woohaa.build.define 里补上这些键（取值对齐主仓 src/config/env.ts 的 DEFAULT_*）。`);
+    }
+    if (bare.length > 0) {
+      lines.push(`  裸 import.meta.env 出现在：${bare.join(", ")}`);
+      lines.push(`  修法：define 只能逐键替换，裸对象 / 动态键（\`import.meta.env[key]\`）覆盖不了 —— 改成具名常量或显式注入。`);
+    }
+    lines.push(`  出现在：${where.join(", ")}`);
+    throw new Error(lines.join("\n"));
+  }
+
+  /*
+   * 值校验：`requiredNonEmpty` 声明的键必须有非空 define。
+   *
+   * 上面那条只管「有没有漏键」，管不了「值对不对」——`"VITE_SUPABASE_ANON_KEY": "\"\""` 一样
+   * 不会留下残留。这类漂移不报错，只会让扩展连错后端，排查成本和漏键一样高。
+   */
+  const blankRequired = extensionBuild.requiredNonEmpty.filter((key) => {
+    const expression = extensionBuild.define[`import.meta.env.${key}`];
+    if (typeof expression !== "string") return true;
+    // define 值是 JS 表达式字面量（`"\"\""` 就是空串），按 JSON 解一次拿到真实值。
+    try {
+      const value = JSON.parse(expression);
+      return typeof value !== "string" || value.trim() === "";
+    } catch {
+      // 非字面量表达式（如某个变量引用）无法在构建期判定，交给类型与运行时。
+      return false;
+    }
+  });
+  if (blankRequired.length > 0) {
+    throw new Error(
+      `woohaa.build.requiredNonEmpty 声明了这些键，但 define 缺失或为空：\n` +
+        `  ${blankRequired.join(", ")}\n` +
+        `  在 ${path.relative(REPO_ROOT, path.join(dir, "package.json"))} 里补上形如 "\\"https://…\\"" 的值` +
+        `（取值对齐主仓 src/config/env.ts 的 DEFAULT_*）。`
     );
   }
 
