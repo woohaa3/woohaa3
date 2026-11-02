@@ -22,9 +22,18 @@
  *   framing.
  *
  * Static media metadata freezes a stable media reference (`storageKey`), its
- * SHA-256 checksum, content type and byte size. The `WorldCaptureInput` produced
- * by `toWorldCaptureInput` remains exactly the T01 shape, so downstream tasks do
- * not need a second media contract.
+ * SHA-256 checksum, content type, byte size and the exact pixel width/height of
+ * the captured image. Byte size is stored independently and is never used as a
+ * pixel dimension. The `WorldCaptureInput` produced by `toWorldCaptureInput`
+ * remains exactly the T01 shape, so downstream tasks do not need a second media
+ * contract.
+ *
+ * Media envelope versioning: `world-capture-media-v1` recorded only byte size and
+ * therefore cannot prove the captured pixel dimensions. This contract now writes
+ * `world-capture-media-v2`, whose allowlist requires `width` and `height`. Legacy
+ * v1 metadata (and any other version) is rejected as `unsupported-version`; it is
+ * never upgraded with an assumed 1x1 or by dropping the size fields. A caller that
+ * truly has the pixels must re-capture or explicitly re-encode them as v2.
  *
  * Dynamic capture is reserved for T12. It must add its own versioned animation /
  * time-range fields and a new contract version; this module defines no dynamic
@@ -50,8 +59,11 @@ import {
 
 /** Version of the frozen capture-input envelope, not the media format. */
 export const WORLD_CAPTURE_INPUT_VERSION = "world-capture-input-v1" as const;
-/** Version of the static media metadata envelope. */
-export const WORLD_CAPTURE_MEDIA_VERSION = "world-capture-media-v1" as const;
+/**
+ * Version of the static media metadata envelope. v2 adds required pixel width and
+ * height; v1 is intentionally not decoded because it cannot represent them.
+ */
+export const WORLD_CAPTURE_MEDIA_VERSION = "world-capture-media-v2" as const;
 
 const KEY_KEYS = [
   "canvasId",
@@ -61,11 +73,25 @@ const KEY_KEYS = [
   "bindingVersion",
   "outputVersion"
 ] as const;
-const MEDIA_KEYS = ["version", "mediaId", "storageKey", "checksum", "contentType", "size"] as const;
+const MEDIA_KEYS = [
+  "version",
+  "mediaId",
+  "storageKey",
+  "checksum",
+  "contentType",
+  "size",
+  "width",
+  "height"
+] as const;
 const FROZEN_INPUT_KEYS = ["version", "key", "media"] as const;
 const CHECKSUM_PATTERN = /^[0-9a-f]{64}$/;
 /** Static captures are images; this is a media-type guard, not an output codec. */
 const CONTENT_TYPE_PATTERN = /^image\/[a-z0-9][a-z0-9.+-]{0,127}$/;
+
+/** Positive safe integer: rejects NaN, infinities, zero, negatives, fractions and overflow. */
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
 
 /** Decode an exact six-field capture version key. No field is inferred or defaulted. */
 export function decodeWorldCaptureVersionKey(
@@ -214,11 +240,15 @@ export interface WorldCaptureMediaMetadata {
   /** Lowercase SHA-256 hex of the stored bytes. */
   checksum: string;
   contentType: string;
-  /** Byte size: a finite, positive safe integer. */
+  /** Byte size: a finite, positive safe integer, independent of the pixel size. */
   size: number;
+  /** Exact pixel width of the captured image: a finite, positive safe integer. */
+  width: number;
+  /** Exact pixel height of the captured image: a finite, positive safe integer. */
+  height: number;
 }
 
-/** Decode static media metadata with an exact v1 allowlist. */
+/** Decode static media metadata with the exact v2 allowlist. */
 export function decodeWorldCaptureMediaMetadata(
   input: unknown
 ): SharedWorldDecodeResult<WorldCaptureMediaMetadata> {
@@ -234,6 +264,8 @@ export function decodeWorldCaptureMediaMetadata(
   const checksum = ownField(input, "checksum");
   const contentType = ownField(input, "contentType");
   const size = ownField(input, "size");
+  const width = ownField(input, "width");
+  const height = ownField(input, "height");
   if (!isNonEmptyWorldId(mediaId) || !isValidStorageKey(storageKey)) {
     return decodeFailure("invalid-data", input);
   }
@@ -243,12 +275,25 @@ export function decodeWorldCaptureMediaMetadata(
   if (typeof contentType !== "string" || !CONTENT_TYPE_PATTERN.test(contentType)) {
     return decodeFailure("invalid-data", input);
   }
-  if (typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0) {
+  if (
+    !isPositiveSafeInteger(size) ||
+    !isPositiveSafeInteger(width) ||
+    !isPositiveSafeInteger(height)
+  ) {
     return decodeFailure("invalid-data", input);
   }
   return {
     ok: true,
-    value: { version: WORLD_CAPTURE_MEDIA_VERSION, mediaId, storageKey, checksum, contentType, size }
+    value: {
+      version: WORLD_CAPTURE_MEDIA_VERSION,
+      mediaId,
+      storageKey,
+      checksum,
+      contentType,
+      size,
+      width,
+      height
+    }
   };
 }
 
