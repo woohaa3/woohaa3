@@ -16,6 +16,7 @@ const mocks = {
   selectNode: vi.fn(() => true),
   writable: true,
   nodeScreenRect: vi.fn(() => ({ left: 100, top: 50, width: 400, height: 300 })),
+  frameListeners: new Set<() => void>(),
   mode: { type: "overview" }
 };
 
@@ -41,6 +42,10 @@ const services = {
     controller: () => ({ selectNode: mocks.selectNode }),
     nodeScreenRect: mocks.nodeScreenRect,
     subscribeViewport: () => () => undefined,
+    subscribeFrame: (listener: () => void) => {
+      mocks.frameListeners.add(listener);
+      return () => { mocks.frameListeners.delete(listener); };
+    },
     viewportVersion: () => 0
   },
   canvasNavigation: {
@@ -76,6 +81,8 @@ afterEach(() => {
   hoverNodeStore.reset();
   mocks.selectNode.mockClear();
   mocks.writable = true;
+  mocks.nodeScreenRect.mockImplementation(() => ({ left: 100, top: 50, width: 400, height: 300 }));
+  mocks.frameListeners.clear();
   mocks.mode = { type: "overview" };
   vi.useRealTimers();
 });
@@ -131,6 +138,27 @@ describe("悬停胶囊「添加到对话框」", () => {
     act(() => { hoverNodeStore.setNodeId(null); });
     act(() => { vi.advanceTimersByTime(500); });
     expect(pill(container)).toBeNull();
+  });
+
+  it("画布外框移动而视口不变（资源栏收展）时，胶囊跟着重新定位", () => {
+    const container = render();
+    act(() => { hoverNodeStore.setNodeId("img"); });
+    expect(pill(container)!.style.left).toBe("100px");
+    // 资源栏收起：canvas 外框左移 184，nodeScreenRect 随之变化，但 subscribeViewport 不会通知。
+    mocks.nodeScreenRect.mockImplementation(() => ({ left: -84, top: 50, width: 400, height: 300 }));
+    act(() => { for (const listener of [...mocks.frameListeners]) listener(); });
+    // 左侧被钳制到 8px 边距；关键是它不再停在旧的 100。
+    expect(pill(container)!.style.left).toBe("8px");
+  });
+
+  it("矩形没变时帧回调不触发重渲染", () => {
+    const container = render();
+    act(() => { hoverNodeStore.setNodeId("img"); });
+    const calls = mocks.nodeScreenRect.mock.calls.length;
+    act(() => { for (const listener of [...mocks.frameListeners]) listener(); });
+    // 帧回调只读一次矩形做比较，不引起渲染里的第二次读取。
+    expect(mocks.nodeScreenRect.mock.calls.length).toBe(calls + 1);
+    expect(pill(container)!.style.left).toBe("100px");
   });
 
   it("分组节点不浮出，换成图片后浮出", () => {

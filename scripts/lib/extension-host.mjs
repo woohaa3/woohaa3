@@ -24,6 +24,7 @@ import {
   EXTENSION_DESCRIPTOR_NAME,
   checkRootsCoveredByWorkspace,
   formatWorkspaceCoverageHint,
+  parseExtensionAllowlist,
   scanExtensions
 } from "./extension-scan.mjs";
 import { loadExtensionDescriptor } from "./extension-descriptor.mjs";
@@ -893,6 +894,9 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     roots: scan.roots,
     devExtensions: scan.extensions.filter((record) => record.dev),
     writableRoots: scan.writableRoots ?? [],
+    // 目录控制自己遍历目录、只认 `.` 前缀，不经过 scanExtensions；白名单要在这里再认一次，
+    // 否则运行时已经不装配的扩展仍会出现在设置页「已安装」里。
+    allowlist: parseExtensionAllowlist(env),
     metadata,
     onRename(from, to) {
       release.relocate(from, to);

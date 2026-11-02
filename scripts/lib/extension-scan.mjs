@@ -36,6 +36,18 @@ export const EXTENSION_WRITABLE_DIRS_ENV = "WOOHAA3_EXTENSION_WRITABLE_DIRS";
 export const EXTENSION_DEV_DIRS_ENV = "WOOHAA3_EXTENSION_DEV_DIRS";
 
 /**
+ * 部署侧扩展白名单（逗号分隔的 extensionId）。
+ *
+ * 与 `WOOHAA3_EXTENSION_DIRS` 不同：那一项换的是**扫哪个根**，这一项是**在扫到的结果里留哪些**。
+ * 桌面发行版本来就用 `desktop/host-extensions.json` 控制拷贝哪些扩展；开发形态不拷贝目录、
+ * 直接扫仓库根，于是同一份清单在那里不生效。这项环境变量让开发形态也能对齐发行版，
+ * 免得「打包产物里没有的 Provider 在 `dev:desktop` 里照样出现」。
+ *
+ * 未设置 = 不过滤（保持历史行为）。空串也按未设置处理，避免写成空值时把扩展全关掉。
+ */
+export const EXTENSION_ALLOWLIST_ENV = "WOOHAA3_EXTENSION_ALLOWLIST";
+
+/**
  * 开发者模式是否可用（change: 2026-10-27-add-extension-dev-reload，D10）。
  *
  * 只认**显式开启**，不按 `NODE_ENV` 推断：桌面宿主无论开发还是发布都设 `NODE_ENV=production`
@@ -79,6 +91,23 @@ export const EXTENSION_PACKAGE_PREFIX = "@woohaa3/extension-";
 export const EXTENSION_DESCRIPTOR_NAME = "extension.json";
 export const DEFAULT_EXTENSION_ROOTS = ["web/extensions", "extensions"];
 export const WORKSPACE_FILE = "web/pnpm-workspace.yaml";
+
+/**
+ * 解析 `WOOHAA3_EXTENSION_ALLOWLIST`。
+ *
+ * 返回 `null` 表示不过滤（变量未设置或为空）；否则返回 id 集合。
+ * 写成 `*` 等价于不过滤，和 `WOOHAA3_SDK_AGENT_ALLOWED_HOSTS` 的约定一致，
+ * 免得部署侧想显式「全开」时还得留空变量。
+ */
+export function parseExtensionAllowlist(env = process.env) {
+  const raw = typeof env?.[EXTENSION_ALLOWLIST_ENV] === "string" ? env[EXTENSION_ALLOWLIST_ENV].trim() : "";
+  if (raw === "" || raw === "*") return null;
+  const ids = raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return ids.length > 0 ? new Set(ids) : null;
+}
 
 /**
  * 严格 semver 的核心三段比较（预发布后缀不参与；非法版本排最前）。
@@ -265,6 +294,8 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
   const skipped = [];
   const byId = new Map();
   const isWritableRoot = (root) => resolved.writableRoots.includes(root);
+  // 部署侧白名单：扫到的扩展里只留这些 id。未设置（或空串）表示不过滤。
+  const allowlist = parseExtensionAllowlist(env);
 
   for (const root of resolved.roots) {
     const entries = fs.readdirSync(root, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -332,8 +363,10 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
 
   // 内置候选在合并受管根之前固定下来：即使某个内置 id 被受管版本覆盖，宿主仍需要它的版本与目录
   // 做 semver 判断、卸载回退和「内置 vX」展示。可写根不算内置（运维手放目录，不随发布打包）。
+  // 白名单同时作用于这里：被剔除的扩展既不该有「内置版本」，否则扩展管理器会认为它装过、
+  // 只是没装配，滚回/卸载的目标就指向了一个发行版里根本没有的目录。
   const builtinExtensions = extensions
-    .filter((entry) => entry.rootWritable !== true)
+    .filter((entry) => entry.rootWritable !== true && (allowlist === null || allowlist.has(entry.extensionId)))
     .map((entry) => ({
       extensionId: entry.extensionId,
       version: entry.distributionVersion ?? "",
@@ -404,8 +437,31 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
     extensions.push(record);
   }
 
-  extensions.sort((a, b) => (a.extensionId === b.extensionId ? (a.dir < b.dir ? -1 : 1) : a.extensionId < b.extensionId ? -1 : 1));
-  return { ...resolved, devDirs, extensions, builtinExtensions, disabled, skipped, warnings };
+  // 部署侧白名单最后收口：放在 dev 合并之后，白名单对内置 / 受管 / 开发者三种来源一视同仁。
+  // 被剔除的记进 `disabled`（与 `.` 前缀同一种语义：本次不装配），设置页据此显示为未安装，
+  // 而不是凭空消失。白名单里的 id 若一个都没扫到，只记告警，不让宿主起不来。
+  let allowlisted = extensions;
+  if (allowlist) {
+    const kept = [];
+    for (const record of extensions) {
+      if (allowlist.has(record.extensionId)) kept.push(record);
+      else disabled.push({ directory: record.directory, dir: record.dir, root: record.root, rootWritable: record.rootWritable === true });
+    }
+    allowlisted = kept;
+    const present = new Set(allowlisted.map((record) => record.extensionId));
+    const missing = [...allowlist].filter((id) => !present.has(id));
+    if (missing.length > 0) {
+      warnings.push({
+        code: "EXTENSION_ALLOWLIST_UNKNOWN",
+        extensionId: null,
+        directory: null,
+        message: `白名单里的扩展没有扫描到，已忽略：${missing.sort().join("、")}（检查 ${EXTENSION_ALLOWLIST_ENV}）`
+      });
+    }
+  }
+
+  allowlisted.sort((a, b) => (a.extensionId === b.extensionId ? (a.dir < b.dir ? -1 : 1) : a.extensionId < b.extensionId ? -1 : 1));
+  return { ...resolved, devDirs, extensions: allowlisted, builtinExtensions, disabled, skipped, warnings };
 }
 
 /** 在场形态（D4）：dev > managed > builtin。可写根沿用内置口径，不单列。 */

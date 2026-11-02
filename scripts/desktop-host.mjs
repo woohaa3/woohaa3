@@ -14,6 +14,8 @@ if(arg('instance')){emit({type:'heartbeat'});setInterval(()=>emit({type:'heartbe
 // Libraries must never corrupt the control stream.
 console.log=(...args)=>console.error(...args);
 const inheritedIngress=process.env.WOOHAA3_TRUSTED_INGRESS_SECRET;
+// 下面的清理循环会删掉继承来的 WOOHAA3_*，这里先留一份，让运维启动时仍能显式放开（见 sixi-deployment-env.mjs）。
+const inheritedDeploy={...process.env};
 const dataDir=path.resolve(arg('data-dir',''));const resourceRoot=path.resolve(arg('resource-root',''));
 // Monitor preserves Node's default fatal-exception behavior (including exit status).
 process.on('uncaughtExceptionMonitor', (error, origin) => {
@@ -60,6 +62,11 @@ async function main(){
  // Local storage always belongs to this workspace, including after importing on another Mac.
  config.storage={...config.storage,primary:'local',local:{...config.storage?.local,root:path.join(dataDir,'media')}};
  fs.writeFileSync(configFile,yaml.stringify(config),{mode:0o600});
+ // 部署收口（扩展白名单 / sdk-agent 自定义 host / 官方 host）：逻辑在 sixi-deployment-env.mjs，
+ // 与浏览器开发宿主 dev.mjs 共用一份。扩展白名单只有开发形态需要——发行包只拷贝了清单内的目录。
+ const {sixiDeploymentEnv}=await import('./lib/sixi-deployment-env.mjs');
+ const deployment=sixiDeploymentEnv({repoRoot:manifest.developmentRoot??null,inherited:inheritedDeploy});
+ Object.assign(env,deployment);Object.assign(process.env,deployment);
  if(manifest.developmentRoot){
   const {resolveExtensionRoots}=await import('./lib/extension-scan.mjs');
   env.WOOHAA3_EXTENSION_DIRS=resolveExtensionRoots({repoRoot:manifest.developmentRoot,env:{}}).roots.concat(path.join(dataDir,'extensions')).join(',');

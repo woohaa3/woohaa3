@@ -28,7 +28,7 @@ function firstVersion(...candidates) {
   return undefined;
 }
 
-export function createExtensionDirectoryControl({ roots, writableRoots = [], metadata = [], devExtensions = [], onRename = () => {} }) {
+export function createExtensionDirectoryControl({ roots, writableRoots = [], metadata = [], devExtensions = [], allowlist = null, onRename = () => {} }) {
   const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
   const inventory = () => {
     const rows = [];
@@ -65,7 +65,8 @@ export function createExtensionDirectoryControl({ roots, writableRoots = [], met
         description: known?.description ?? descriptor?.site?.description ?? browser?.description ?? '',
         ...(icon ? { icon } : {}),
         ...(version ? { version } : {}),
-        installed: dev || !name.startsWith('.'),
+        // 部署白名单（WOOHAA3_EXTENSION_ALLOWLIST）之外的按未安装处理；开发者登记目录是显式意愿，不受它限制。
+        installed: dev || (!name.startsWith('.') && (allowlist === null || allowlist.has(id))),
         writable: !dev && writableRoots.includes(root),
         bootstrap: Boolean(descriptor?.bootstrap),
         dependencies: Array.isArray(descriptor?.site?.dependencies) ? descriptor.site.dependencies.filter((value) => typeof value === 'string') : [] });

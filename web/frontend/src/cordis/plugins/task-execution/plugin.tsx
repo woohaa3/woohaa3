@@ -35,6 +35,7 @@ import { createSubmitCoordinator } from "./submit-coordinator.js";
 import { createGroupRunService } from "./group-run-service.js";
 import { GROUP_BULK_ACTION_ID, GroupRunSummaryStore, resolveGroupBulkDescriptor } from "./group-run-actions.js";
 import { HoverComposerButton } from "./hover-composer-button.js";
+import { installHoverComposerProbe } from "./hover-composer-probe.js";
 import { nodeDraftStore } from "./drafts.js";
 import { registerGenerationTraceMenu } from "./generation-trace.js";
 import { GENERATION_TRACE_DIALOG_ID, registerGenerationTraceDialog } from "./generation-trace-dialog.js";
@@ -403,6 +404,9 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         priority: 24,
         render: () => <HoverComposerButton />
       });
+      // 排障探针（仅 DEV）：胶囊与卡片错位时用它分辨「组件没跟着重排」还是「矩形/原点本身不同」。
+      // 只读、不进产物（`import.meta.env.DEV` 在生产构建中被静态替换为 false 后整段消除）。
+      const disposeHoverComposerProbe = installHoverComposerProbe(ctx.canvasRuntime);
 
       // 分组提交摘要 overlay（change: 2026-10-16-add-group-selection-toolbar，任务 4.1）：
       // 非模态、可关闭、绑定 canvasId；复用 canvas overlay 与共享 chrome。
@@ -501,6 +505,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           removeGenerationTraceDialog();
           removeGroupBulkAction();
           removeHoverComposer();
+          disposeHoverComposerProbe();
           removeGroupSummaryOverlay();
           offGroupRun();
           offDrafts();

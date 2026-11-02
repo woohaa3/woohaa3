@@ -38,6 +38,13 @@ function subscribeViewportSize(listener: () => void): () => void {
   return () => window.removeEventListener("resize", listener);
 }
 
+/** 矩形的比较键：取整到 0.5px，避免亚像素抖动触发重渲染。 */
+function rectKey(rect: { left: number; top: number; width: number; height: number } | null): string {
+  if (!rect) return "";
+  const q = (value: number) => Math.round(value * 2) / 2;
+  return `${q(rect.left)}|${q(rect.top)}|${q(rect.width)}|${q(rect.height)}`;
+}
+
 export function HoverComposerButton() {
   const runtime = useService("canvasRuntime");
   const navigation = useService("canvasNavigation");
@@ -99,6 +106,34 @@ export function HoverComposerButton() {
 
   useEffect(() => cancelHide, [cancelHide]);
 
+  // 画布外框移动但视口没变（资源栏收展、窗口缩放、卡片改尺寸、图片加载）时，上面几个订阅
+  // 都不会通知，胶囊就停在旧位置。执行面板靠 scene / frame / ResizeObserver 兜住这几类变化，
+  // 这里照做：帧回调里只在「渲染过的矩形」与「此刻矩形」不同时才重渲染，静止时不产生渲染。
+  const [, setGeometryTick] = useState(0);
+  const renderedNodeId = useRef<string | null>(null);
+  const renderedRectKey = useRef("");
+  useEffect(() => {
+    const bump = () => setGeometryTick((tick) => tick + 1);
+    const recheck = () => {
+      const nodeId = renderedNodeId.current;
+      if (!nodeId) return;
+      if (rectKey(runtime.nodeScreenRect(nodeId)) !== renderedRectKey.current) bump();
+    };
+    const offScene = runtime.subscribeScene?.(recheck);
+    const offFrame = runtime.subscribeFrame?.(recheck);
+    const surface = document.getElementById("bevy-canvas");
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(recheck);
+    if (surface) observer?.observe(surface);
+    if (surface?.parentElement) observer?.observe(surface.parentElement);
+    window.addEventListener("resize", recheck);
+    return () => {
+      offScene?.();
+      offFrame?.();
+      observer?.disconnect();
+      window.removeEventListener("resize", recheck);
+    };
+  }, [runtime]);
+
   const canvas = canvasState.getWorkingCanvas() ?? canvasState.getCanvas();
   // 订阅只用来在会话状态变化时重渲染；可写性仍以 `isWritable()` 为准
   // （它还看本地离线与只读标记，不能只看订阅到的 status）。
@@ -112,9 +147,10 @@ export function HoverComposerButton() {
   });
 
   // 视口尺寸用于在卡片贴边时翻到上方/钳制进来；量不到（0）时退回纯几何。
-  const box = target
-    ? hoverComposerBox(runtime.nodeScreenRect(target.nodeId), viewport.width > 0 ? viewport : undefined)
-    : null;
+  const nodeRect = target ? runtime.nodeScreenRect(target.nodeId) : null;
+  renderedNodeId.current = target?.nodeId ?? null;
+  renderedRectKey.current = rectKey(nodeRect);
+  const box = target ? hoverComposerBox(nodeRect, viewport.width > 0 ? viewport : undefined) : null;
   if (!target || !box) return null;
 
   const style: CSSProperties = {

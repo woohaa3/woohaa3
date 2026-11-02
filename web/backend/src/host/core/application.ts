@@ -271,7 +271,9 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       }
     };
     const allowedSourceHosts = new Set([
-      "api.openai.com", "api.anthropic.com", "api.deepseek.com", "generativelanguage.googleapis.com",
+      // 四个官方 host 默认随白名单一起放行；桌面发行版设 WOOHAA3_SDK_AGENT_BUILTIN_HOSTS=0 关掉，
+      // 否则「白名单收紧为空」仍会留下这四个直连厂商的口子。
+      ...(env.WOOHAA3_SDK_AGENT_BUILTIN_HOSTS === "0" ? [] : ["api.openai.com", "api.anthropic.com", "api.deepseek.com", "generativelanguage.googleapis.com"]),
       ...(env.WOOHAA3_SDK_AGENT_ALLOWED_HOSTS ?? "").split(",").map(host => host.trim()).filter(Boolean),
     ]);
     const service = createApplicationService({

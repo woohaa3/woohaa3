@@ -17,6 +17,7 @@ import { findStaleArtifacts, formatStaleArtifacts } from "./lib/artifact-freshne
 import { syncBevyAssets } from "./sync-bevy-assets.mjs";
 import { resolveDevEntryArgs, DEV_MODE_ENV } from "./lib/bevy-build-mode.mjs";
 import { createAgentSupervisorHost } from "./lib/agent-runtime-supervisor-host.mjs";
+import { sixiDeploymentEnv } from "./lib/sixi-deployment-env.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2).filter((value) => value !== "--");
@@ -290,6 +291,9 @@ async function main() {
   // 宿主 watch 默认开启；--no-watch 回到「构建一次 + 普通 node 进程」的旧行为。
   const watch = options.watch ?? true;
   const serviceEnv = loadServiceEnv(root, process.env.WOOHAA3_SERVICE_ENV_FILE);
+  // 四喜发行形态收口（扩展白名单 / sdk-agent 自定义 host），与桌面宿主共用一份逻辑；
+  // 启动前显式设同名环境变量可放开，显式值优先（见 lib/sixi-deployment-env.mjs）。
+  const deploymentEnv = sixiDeploymentEnv({ repoRoot: root, inherited: { ...serviceEnv, ...process.env } });
   // change: 2026-10-15-support-configurable-app-base-path：启动阶段规范化挂载配置；非法配置在
   // 构建与监听前失败。前后端使用同一规范结果。
   let basePath;
@@ -431,6 +435,7 @@ async function main() {
     const child = start(process.execPath, watch ? backendWatchArgs : [backendEntry], {
       env: {
         ...serviceEnv,
+        ...deploymentEnv,
         ...devSourceEnv,
         WOOHAA3_BASE_PATH: basePath,
         PORT: String(backendPort),
