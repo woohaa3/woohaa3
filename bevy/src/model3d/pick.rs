@@ -36,6 +36,15 @@ pub(crate) fn publish_motion(node: Option<&str>, poses: PartPoses) {
 }
 
 pub(crate) fn remember_scene(scene: &Scene) {
+    MOTION.with(|slot| {
+        let clear = slot.borrow().0.as_ref().is_some_and(|node| {
+            scene.animation_playback.as_ref().is_none_or(|playback| &playback.node_id != node)
+                || !scene.nodes.iter().any(|candidate| &candidate.id == node)
+        });
+        if clear {
+            publish_motion(None, HashMap::new());
+        }
+    });
     SHARED_SCENE.with(|slot| *slot.borrow_mut() = Some(scene.clone()));
 }
 
@@ -365,6 +374,17 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request)).unwrap()
         };
         assert_eq!(query(generation)["nodeId"], "model");
+        let signature = metadata["signature"].as_str().unwrap();
+        let conflict = serde_json::json!({
+            "resourceVersion": "woohaa-model-descriptor-v1",
+            "resourceKey": key,
+            "sceneVersion": metadata["sceneVersion"],
+            "signature": &signature[signature.len() - 1..],
+            "extent": metadata["extent"],
+            "aabb": metadata["aabb"]
+        });
+        assert_eq!(crate::declare_model_resource(&conflict.to_string()).unwrap_err().0, "Model resource key conflict");
+        assert_eq!(query(generation)["nodeId"], "model");
         assert_eq!(query(generation.wrapping_sub(1))["reason"], "stale");
         crate::bridge::clear_model_assets();
         assert!(query(generation)["nodeId"].is_null());
@@ -413,6 +433,10 @@ mod tests {
         delta.opacity = 0.;
         publish_motion(Some("m"), HashMap::from([("body".into(), delta)]));
         assert!(query(Vec3::new(256., 64., 0.)).is_null());
+        // Publishing a scene without playback clears the previous node's motion immediately.
+        let current = SHARED_SCENE.with(|slot| slot.borrow().clone().unwrap());
+        remember_scene(&current);
+        assert_eq!(query(Vec3::new(0., 64., 0.)), "m");
         publish_motion(None, HashMap::new());
         crate::bridge::clear_model_assets();
     }
