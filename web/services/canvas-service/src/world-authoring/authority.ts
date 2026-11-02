@@ -366,8 +366,14 @@ export function createWorldAuthoringAuthority(
   options: WorldAuthoringAuthorityOptions = {}
 ): WorldAuthoringAuthority {
   const caches = new Map<string, AuthorityCache>();
-  /** Content-addressed local AABBs; pose changes reuse the same prepared geometry. */
-  const localAabbCache = new Map<string, Aabb | null>();
+  /**
+   * Content-addressed successful local AABBs; pose changes reuse the same
+   * prepared geometry. Preparation failures are deliberately never stored: a
+   * transient executor throw/structured failure must not poison the content, so
+   * the same authority can retry and recover while every retry still starts
+   * from `unknown` (fail closed) until real bounds exist.
+   */
+  const localAabbCache = new Map<string, Aabb>();
   /** Versions validated as the post-state of an in-flight atomic resolve. */
   const postEligible = new Set<string>();
   const postKey = (canvasId: string, scopeVersion: string, target: WorldObjectIdentity, version: string): string =>
@@ -395,23 +401,25 @@ export function createWorldAuthoringAuthority(
       }
       const data = decoded.value;
       const contentVersion = instanceContentVersion(fields);
-      let localAabb: Aabb | null;
-      if (localAabbCache.has(contentVersion)) {
-        localAabb = localAabbCache.get(contentVersion) ?? null;
-      } else {
-        localAabb = null;
+      let localAabb = localAabbCache.get(contentVersion) ?? null;
+      if (!localAabb) {
         if (fields.modelSourceKind !== "glb" && typeof fields.modelScript === "string" && fields.modelScript.trim().length > 0) {
           try {
             const execution = await (options.executeScene ?? executeSceneIr)(fields.modelScript, fields.modelScriptVersion, {});
-            if (execution.ok) localAabb = v2SceneAabb(execution.ops);
+            if (execution.ok) {
+              // Only a successful authoritative execution is cacheable. Empty or
+              // failed results stay unknown and are re-evaluated on the next
+              // explicit prepare instead of becoming a permanent failure.
+              const prepared = v2SceneAabb(execution.ops);
+              if (prepared) {
+                localAabb = prepared;
+                localAabbCache.set(contentVersion, prepared);
+              }
+            }
           } catch {
             localAabb = null;
           }
         }
-        // Cache resolved geometry only. Unknown or failed preparation must stay
-        // unauthorized, but a transient executor failure must not poison the
-        // same content version forever; the next prepare retries it.
-        if (localAabb) localAabbCache.set(contentVersion, localAabb);
       }
       if (!localAabb) unknown = true;
       records.set(data.instanceId, instanceRecord(node.id, data, fields, localAabb));
@@ -638,8 +646,15 @@ export function createWorldAuthoringAuthority(
     prepareGroup,
     cacheFor,
     invalidate(canvasId) {
+      const prefix = `${canvasId}\u0000`;
       for (const key of [...caches.keys()]) {
-        if (key.startsWith(`${canvasId}\u0000`)) caches.delete(key);
+        if (key.startsWith(prefix)) caches.delete(key);
+      }
+      // Post-state eligibility is derived from the dropped projections; keeping
+      // it would let an expired version survive invalidation and a later
+      // re-preparation. A fresh prepare must re-establish every target.
+      for (const key of [...postEligible]) {
+        if (key.startsWith(prefix)) postEligible.delete(key);
       }
     },
     eligible(intent, targets) {
