@@ -153,6 +153,8 @@ export type CanvasRequestHandlerOptions = {
    * 反序会留下"本机删了、远端还在"的半删状态。
    */
   deleteRemote?: (canvasId: string) => Promise<import("@woohaa3/contracts").CanvasUpstreamDeleteResult>;
+  /** 已注册的内容路由。缺省时 `/content/...` 不挂载。 */
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
 };
 
 export type CanvasLogger = CanvasRequestHandlerOptions["logger"];

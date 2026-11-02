@@ -21,7 +21,7 @@ export async function completeModel(ctx: EditCompletionContext, request: ModelEd
   if (!node || kindForNodeType(node.type) !== "model") {
     return recordFailure(ctx, request, fingerprint, "EDIT_SESSION_TARGET_INVALID", "目标不是模型节点");
   }
-  const currentIdentity = currentIdentityOfNode(canvas, request.nodeId, "model");
+  const currentIdentity = currentIdentityOfNode(canvas, request.nodeId, "model", ctx.content);
   if (currentIdentity === null) return recordFailure(ctx, request, fingerprint, "EDIT_SESSION_UNRECOVERABLE", "模型无可归档内容");
 
   const baseline = (await ctx.completions.get(request.canvasId, request.nodeId, `begin:${request.sessionId}`))?.baselineContentIdentity
@@ -50,7 +50,7 @@ export async function completeModel(ctx: EditCompletionContext, request: ModelEd
     return { ok: true, receipt: toReceipt(record) };
   }
 
-  const entry = buildModelEditEntryFromCanvas(canvas, request.nodeId, ctx.now());
+  const entry = buildModelEditEntryFromCanvas(canvas, request.nodeId, ctx.now(), ctx.content);
   if (!entry) return recordFailure(ctx, request, fingerprint, "EDIT_SESSION_UNRECOVERABLE", "模型无可归档内容");
   const timestamp = ctx.now();
   const pending: EditCompletionRecord = {

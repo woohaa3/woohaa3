@@ -155,11 +155,28 @@ export function sanitizeRuntimeNodeConfigPatch(input: unknown, context?: { conte
  * 的唯一内容引用，只有拿到画布资产上下文才能区分。剪贴板载荷在清理后按「资产确实存在、`ready`
  * 且 `mediaKind` 匹配」恢复内容引用（见 `canvas-shell/clipboard/payload.ts`），本函数保持保守口径。
  */
+function sanitizeClaimedContent(data: Record<string, unknown>, content: ContentContributionResolver): CanvasNodeData | null {
+  for (const contribution of content.implementations()) {
+    const codec = contribution.nodeData;
+    if (!codec?.schemaVersion || typeof codec.schemaVersion(data) !== "number") continue;
+    try {
+      const value = codec.sanitizeRuntime(structuredClone(data));
+      if (!isRecord(value)) throw new Error("content-codec-failed");
+      return value as CanvasNodeData;
+    } catch (error) {
+      if (error instanceof Error && error.message === "content-codec-failed") throw error;
+      throw new Error("content-codec-failed");
+    }
+  }
+  return null;
+}
+
 export function sanitizeNodeDataForClipboard(input: unknown, context?: { content?: ContentContributionResolver }): CanvasNodeData {
   observeContentResolver(context?.content);
   const original = isRecord(input) ? input : {};
   const owned = context?.content && Object.prototype.hasOwnProperty.call(original, "extensionId");
-  const source = owned ? sanitizeContentNodeData(original as CanvasNodeData, context!.content!) : original;
+  const claimed = !owned && context?.content ? sanitizeClaimedContent(original, context.content) : null;
+  const source = owned ? sanitizeContentNodeData(original as CanvasNodeData, context!.content!) : claimed ?? original;
   const value: Woohaa3CanvasJsonObject = {};
   for (const [key, raw] of Object.entries(source)) {
     if (NODE_DATA_TRANSIENT_SET.has(key)) continue;

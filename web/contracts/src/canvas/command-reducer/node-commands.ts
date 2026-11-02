@@ -165,9 +165,12 @@ export function addNode(
   command: Extract<CanvasCommand, { type: "node.add" }>
 ): CommandApplyResult {
   const { node } = command;
-  if (isFilmSetNode(node.type, command.nodeData) || filmSetObjectOwnershipOf(command.nodeData)) {
-    return reject("invalid-self-contained-node", "旧 composite 片场与对象容器只允许迁移读取，请创建 film-set group");
-  }
+  const legacyCreate = rejectLegacyFilmSet(work, node.type, command.nodeData, () => (
+    isFilmSetNode(node.type, command.nodeData) || filmSetObjectOwnershipOf(command.nodeData)
+      ? reject("invalid-self-contained-node", "旧 composite 片场与对象容器只允许迁移读取，请创建 film-set group")
+      : null
+  ));
+  if (legacyCreate) return legacyCreate;
   const managed = command.nodeData?.managedBy;
   if (managed !== undefined) {
     const decoded = decodeManagedNodeRelation(managed);
@@ -413,15 +416,48 @@ export function removeNodes(work: WorkingState, nodeIds: readonly string[]): Com
   return OK;
 }
 
+function rejectLegacyFilmSet(
+  work: WorkingState,
+  type: string | undefined,
+  data: unknown,
+  kernel: () => CommandApplyResult | null
+): CommandApplyResult | null {
+  if (work.content) {
+    let handled = false;
+    for (const contribution of work.content.implementations()) {
+      const rejectLegacy = contribution.nodeData?.rejectLegacy;
+      if (!rejectLegacy) continue;
+      handled = true;
+      try {
+        const diagnostic = rejectLegacy(type, data);
+        if (diagnostic) return reject("content-command-rejected", diagnostic.code);
+      } catch {
+        return reject("content-codec-failed", "content-codec-failed");
+      }
+    }
+    if (handled) return null;
+  }
+  return kernel();
+}
+
 export function patchNodeData(
   work: WorkingState,
   nodeId: string,
   value: CanvasNodeData | null
 ): CommandApplyResult {
   const node = work.nodes.find((entry) => entry.id === nodeId);
-  if (isFilmSetNode(node?.type, work.nodeData[nodeId]) || isFilmSetNode(node?.type, value)) {
-    return reject("invalid-self-contained-node", "旧 composite 片场只允许迁移读取，请编辑 film-set group");
-  }
+  const legacyCurrent = rejectLegacyFilmSet(work, node?.type, work.nodeData[nodeId], () => (
+    isFilmSetNode(node?.type, work.nodeData[nodeId])
+      ? reject("invalid-self-contained-node", "旧 composite 片场只允许迁移读取，请编辑 film-set group")
+      : null
+  ));
+  if (legacyCurrent) return legacyCurrent;
+  const legacyPatch = rejectLegacyFilmSet(work, node?.type, value, () => (
+    isFilmSetNode(node?.type, value)
+      ? reject("invalid-self-contained-node", "旧 composite 片场只允许迁移读取，请编辑 film-set group")
+      : null
+  ));
+  if (legacyPatch) return legacyPatch;
   const currentManaged = managedNodeRelationOf(work.nodeData[nodeId]);
   const hasManagedField = !!work.nodeData[nodeId] && Object.prototype.hasOwnProperty.call(work.nodeData[nodeId], "managedBy");
   if (value && Object.prototype.hasOwnProperty.call(value, "managedBy")) {

@@ -9,8 +9,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ServerCanvas } from "@woohaa3/contracts";
-import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import type { ContentNodeDataCodec, ServerCanvas } from "@woohaa3/contracts";
+import { ContentContributionRegistry, createEmptyWoohaa3ServerCanvas, filmSetContentContribution, filmSetNodeDataCodec } from "@woohaa3/contracts";
 import {
   inventoryCanvas,
   inventoryNodeHistoryPayload,
@@ -83,6 +83,19 @@ describe("inventoryCanvas", () => {
     expect(findings).toContainEqual(
       expect.objectContaining({ category: "C03", code: "film-set-missing-items", confirmedLegacy: true })
     );
+  });
+
+  it("传入片场 codec 时 C03 与内核一致，owner 失败不回退", () => {
+    const canvas = canvasWith({ id: "a", type: "animation3d" }, { filmSetContent: {} });
+    const content = new ContentContributionRegistry();
+    content.register(filmSetContentContribution);
+    expect(inventoryCanvas(canvas, content).filter((finding) => finding.category === "C03")).toEqual(
+      inventoryCanvas(canvas).filter((finding) => finding.category === "C03")
+    );
+    const rejecting = new ContentContributionRegistry();
+    const nodeData: ContentNodeDataCodec = { ...filmSetNodeDataCodec, inspect() { throw new Error("secret inventory"); } };
+    rejecting.register({ extensionId: "film-set", nodeData });
+    expect(inventoryCanvas(canvas, rejecting).some((finding) => finding.category === "C03")).toBe(false);
   });
 });
 

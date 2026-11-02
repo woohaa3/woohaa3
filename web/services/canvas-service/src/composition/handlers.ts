@@ -70,6 +70,7 @@ export type ComposedHandlerDeps = {
   /** 在线迁移访问门（GET/WS 未准备、DELETE tombstone）。 */
   importGuard?: import("../api/canvas-api/types.js").CanvasImportGuard;
   log: (event: Record<string, unknown>) => void;
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
 };
 
 /** 组装最终 `handle`（canvas → snippets → editCompletion → nodeHistory → activity → MCP 面）。 */
@@ -93,6 +94,7 @@ export function composeRequestHandler(deps: ComposedHandlerDeps): (req: Incoming
         }
       : createCanvasRequestHandler({
           get recording() { return deps.recording; },
+          ...(deps.content ? { content: deps.content } : {}),
           service: composition.service,
           ...(composition.catalog ? { catalog: composition.catalog } : {}),
           ...(deps.importGuard ? { importGuard: deps.importGuard } : {}),

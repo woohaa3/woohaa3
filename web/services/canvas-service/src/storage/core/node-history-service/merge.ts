@@ -347,7 +347,7 @@ async function planMerge(
     }
   }
 
-  const sourceIdentity = currentIdentityOf(canvas, sourceNodeId, kind);
+  const sourceIdentity = currentIdentityOf(canvas, sourceNodeId, kind, context.content);
   if (sourceIdentity === null) {
     return { ok: false, code: "no-current-version", message: "来源节点没有可合并的当前版本" };
   }
@@ -382,14 +382,14 @@ async function planMerge(
     }
   }
 
-  const targetIdentity = currentIdentityOf(canvas, targetNodeId, kind);
+  const targetIdentity = currentIdentityOf(canvas, targetNodeId, kind, context.content);
   if (input.expectedSourceCurrentIdentity !== undefined && input.expectedSourceCurrentIdentity !== sourceIdentity) {
     return { ok: false, code: "conflict", message: "来源节点当前内容已被其它写入改变，合并被拒绝" };
   }
   if (input.expectedTargetCurrentIdentity !== undefined && input.expectedTargetCurrentIdentity !== targetIdentity) {
     return { ok: false, code: "conflict", message: "目标节点当前内容已被其它写入改变，合并被拒绝" };
   }
-  const state = currentNodeStateOf(canvas, sourceNodeId, kind);
+  const state = currentNodeStateOf(canvas, sourceNodeId, kind, context.content);
   return {
     ok: true,
     plan: {
@@ -427,10 +427,10 @@ async function revalidateInQueue(
     return { ok: false, code: "conflict", message: "节点开始了新的编辑会话，合并被取消" };
   }
   const kind = historyKindForNodeType(target.type, latest.nodeData[target.id]);
-  if (!kind || currentIdentityOf(latest, input.sourceNodeId, kind) !== plan.sourceIdentity) {
+  if (!kind || currentIdentityOf(latest, input.sourceNodeId, kind, deps.context.content) !== plan.sourceIdentity) {
     return { ok: false, code: "conflict", message: "来源节点当前内容已改变，合并被拒绝" };
   }
-  if (currentIdentityOf(latest, input.targetNodeId, kind) !== plan.targetIdentity) {
+  if (currentIdentityOf(latest, input.targetNodeId, kind, deps.context.content) !== plan.targetIdentity) {
     return { ok: false, code: "conflict", message: "目标节点当前内容已改变，合并被拒绝" };
   }
   return { ok: true };

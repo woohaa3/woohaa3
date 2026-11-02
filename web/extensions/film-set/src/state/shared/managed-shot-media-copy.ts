@@ -1,42 +1,29 @@
-import { filmSetObjectOwnershipOf, isFilmSetNode, shotPreviewNodeId, managedNodeRelationOf, readFilmSetGroupMarker, type ManagedNodeCopyContext, type ManagedNodeCopyEntry, type Woohaa3CanvasJsonObject } from "@woohaa3/contracts";
+import { filmSetNodeDataCodec, filmSetObjectOwnershipOf, isFilmSetNode, shotPreviewNodeId, managedNodeRelationOf, readFilmSetGroupMarker, type ManagedNodeCopyContext, type ManagedNodeCopyEntry, type Woohaa3CanvasJsonObject } from "@woohaa3/contracts";
 
 /** Copy group orchestration and live resource identities as one closure. */
 export function remapFilmSetManagedCopy({ nodes, nodeData, nodeIds, createId }: ManagedNodeCopyContext): readonly ManagedNodeCopyEntry[] {
-  const clipIds = new Map<string, Map<string, string>>();
-  const bindingIds = new Map<string, Map<string, string>>();
+  const copiedGroups = new Map<string, { data: unknown; remap: Readonly<Record<string, string>> }>();
   for (const node of nodes) {
     const data = nodeData[node.id];
     if (filmSetObjectOwnershipOf(data) || isFilmSetNode(node.type, data)) throw Error("managed-copy-migration-required");
     const group = node.type === "group" ? readFilmSetGroupMarker(data) : null;
     if (!group) continue;
-    clipIds.set(node.id, new Map((group.clips ?? []).map((clip, index) => [clip.id, createId("clip", index)])));
-    bindingIds.set(node.id, new Map(group.sceneBindings.map((binding, index) => [binding.bindingId, createId("film-binding", index)])));
+    copiedGroups.set(node.id, filmSetNodeDataCodec.copy(data, { nodeIds, createId }));
   }
   const entries: ManagedNodeCopyEntry[] = [];
   for (const node of nodes) {
     const data = nodeData[node.id];
-    const group = node.type === "group" ? readFilmSetGroupMarker(data) : null;
-    if (group) {
+    const copied = copiedGroups.get(node.id);
+    if (copied) {
       const owner = nodeIds.get(node.id);
       if (!owner) throw Error("managed-copy-owner-missing");
-      const remapBinding = (id: string) => bindingIds.get(node.id)?.get(id) ?? (() => { throw Error("managed-copy-binding-missing"); })();
-      // Detached bindings point at cards outside this copy closure; copying them
-      // would either steal a foreign source or reference a missing node. The
-      // copied film set starts from its active scene only.
-      const detachedIds = new Set(group.sceneBindings.filter(binding => binding.detached).map(binding => binding.bindingId));
-      const sceneBindings = group.sceneBindings.filter(binding => !binding.detached).map(binding => ({ ...binding, bindingId: remapBinding(binding.bindingId),
-        sourceNodeId: nodeIds.get(binding.sourceNodeId) ?? (() => { throw Error("managed-copy-group-source-missing"); })() }));
-      const clips = (group.clips ?? []).map(clip => ({ ...clip, id: clipIds.get(node.id)!.get(clip.id)!,
-        ...(clip.bindings ? { bindings: clip.bindings.filter(binding => !detachedIds.has(binding.itemId)).map(binding => ({ ...binding, itemId: remapBinding(binding.itemId) })) } : {}) }));
-      const activeClip = group.activeClip ? clipIds.get(node.id)!.get(group.activeClip) ?? null : group.activeClip;
-      const { migration: _migration, ...orchestration } = group;
-      entries.push({ sourceNodeId: node.id, nodeId: owner, data: { ...data, filmSetGroup: { ...orchestration, sceneBindings, clips,
-        ...(activeClip === undefined ? {} : { activeClip }) } } as Woohaa3CanvasJsonObject });
+      entries.push({ sourceNodeId: node.id, nodeId: owner, data: copied.data as Woohaa3CanvasJsonObject });
       continue;
     }
     const relation = managedNodeRelationOf(data);
     if (relation?.extensionId !== "film-set") continue;
-    const owner = nodeIds.get(relation.ownerNodeId), clip = clipIds.get(relation.ownerNodeId)?.get(relation.entityId);
+    const owner = nodeIds.get(relation.ownerNodeId);
+    const clip = copiedGroups.get(relation.ownerNodeId)?.remap[`clip:${relation.entityId}`];
     if (!owner || !clip) throw Error("managed-copy-owner-missing");
     entries.push({ sourceNodeId: node.id, nodeId: shotPreviewNodeId(owner, clip), data: {
       managedBy: { ...relation, ownerNodeId: owner, entityId: clip },

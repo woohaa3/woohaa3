@@ -116,7 +116,7 @@ export async function listCanvasHistory(
   const currentIdentities: Record<string, string> = {};
   if (input.summary && canvas) for (const node of canvas.document.nodes) {
     const kind = entryKindForNode(canvas, node.id);
-    const identity = kind ? currentNodeStateOf(canvas, node.id, kind).identity : null;
+    const identity = kind ? currentNodeStateOf(canvas, node.id, kind, context.content).identity : null;
     if (identity) currentIdentities[node.id] = identity;
   }
   const [page, kindCounts] = await Promise.all([
@@ -131,7 +131,7 @@ export async function listCanvasHistory(
     }),
     context.repository.canvasKindCounts(input.canvasId)
   ]);
-  const currentByNode = currentStatesFor(canvas, page.items);
+  const currentByNode = currentStatesFor(canvas, page.items, context.content);
   const previewHref = (nodeId: string, entryId: string, suffix: string) =>
     `/api/canvas-node-history/${encodeURIComponent(input.canvasId)}/${encodeURIComponent(nodeId)}/${encodeURIComponent(entryId)}/${suffix}`;
   const items = page.items.map((entry) =>

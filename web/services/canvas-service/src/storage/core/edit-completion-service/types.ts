@@ -3,6 +3,7 @@
  * （自 `edit-completion-service.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R13）。
  */
 import type {
+  ContentContributionResolver,
   EditSessionCompleteResponse,
   MediaStorageScope,
   NodeGenerationHistoryEntry
@@ -23,6 +24,8 @@ export type EditCompletionServiceOptions = {
   mediaVerifier?: { exists(storageKey: string, scope?: MediaStorageScope): Promise<boolean> };
   logger?: (event: Record<string, unknown>) => void;
   now?: () => string;
+  /** 与画布命令同一份内容注册表。传入后片场组归档只信 owner codec。 */
+  content?: ContentContributionResolver;
 };
 
 export type EditCompletionResult = EditSessionCompleteResponse;
@@ -35,4 +38,5 @@ export type EditCompletionContext = {
   mediaVerifier?: { exists(storageKey: string, scope?: MediaStorageScope): Promise<boolean> };
   log: (event: Record<string, unknown>) => void;
   now: () => string;
+  content?: ContentContributionResolver;
 };

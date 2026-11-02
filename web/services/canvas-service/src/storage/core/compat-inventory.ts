@@ -8,7 +8,7 @@
  * 注意（inventory C 组）：无法区分「旧默认」与「人工 resize」时必须报告为未覆盖，
  * 不能凭高度阈值静默覆盖。
  */
-import type { ServerCanvas } from "@woohaa3/contracts";
+import type { ContentContributionResolver, ServerCanvas } from "@woohaa3/contracts";
 import { MODEL_CAMERA_ASPECTS } from "@woohaa3/contracts";
 
 export type CompatCategory = "C01" | "C02" | "C03";
@@ -40,8 +40,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** 盘点单个规范聚合的 C01–C03 候选（只读）。 */
-export function inventoryCanvas(canvas: ServerCanvas): CompatFinding[] {
+/** 盘点单个规范聚合的 C01–C03 候选（只读）。传入 content 时 C03 只信 owner。 */
+export function inventoryCanvas(canvas: ServerCanvas, content?: ContentContributionResolver): CompatFinding[] {
   const findings: CompatFinding[] = [];
   for (const node of canvas.document.nodes) {
     const data = (canvas.nodeData?.[node.id] ?? {}) as Record<string, unknown>;
@@ -111,38 +111,7 @@ export function inventoryCanvas(canvas: ServerCanvas): CompatFinding[] {
       });
     }
 
-    // --- C03 filmSetContent 版本/items ---
-    if (Object.prototype.hasOwnProperty.call(data, "filmSetContent")) {
-      const filmSet = data.filmSetContent;
-      if (isRecord(filmSet)) {
-        if (filmSet.schemaVersion === undefined) {
-          findings.push({
-            category: "C03",
-            location: `${location}/filmSetContent`,
-            code: "film-set-missing-schema-version",
-            confirmedLegacy: true,
-            detail: "缺 schemaVersion（按 schema 1 读取，不升级为 2）"
-          });
-        }
-        if (filmSet.items === undefined) {
-          findings.push({
-            category: "C03",
-            location: `${location}/filmSetContent`,
-            code: "film-set-missing-items",
-            confirmedLegacy: true,
-            detail: "缺 items（按空集合读取）"
-          });
-        }
-      } else if (filmSet === null) {
-        findings.push({
-          category: "C03",
-          location: `${location}/filmSetContent`,
-          code: "film-set-null",
-          confirmedLegacy: true,
-          detail: "显式 null（按空集合读取）"
-        });
-      }
-    }
+    findings.push(...contentFindings(data, content, location));
   }
   return findings;
 }
@@ -153,7 +122,7 @@ export function inventoryNodeHistoryPayload(input: {
   nodeId: string;
   entryId: string;
   payload: unknown;
-}): CompatFinding[] {
+}, content?: ContentContributionResolver): CompatFinding[] {
   const findings: CompatFinding[] = [];
   if (!isRecord(input.payload)) return findings;
   const location = `${input.canvasId}/${input.nodeId}/${input.entryId}`;
@@ -184,29 +153,7 @@ export function inventoryNodeHistoryPayload(input: {
         detail: "历史动画初始镜头缺 aspect"
       });
     }
-    if (Object.prototype.hasOwnProperty.call(animation, "filmSetContent")) {
-      const filmSet = animation.filmSetContent;
-      if (isRecord(filmSet)) {
-        if (filmSet.schemaVersion === undefined) {
-          findings.push({
-            category: "C03",
-            location: `${location}/payload.animation.filmSetContent`,
-            code: "history-film-set-missing-schema-version",
-            confirmedLegacy: true,
-            detail: "历史片场缺 schemaVersion（按 schema 1）"
-          });
-        }
-        if (filmSet.items === undefined) {
-          findings.push({
-            category: "C03",
-            location: `${location}/payload.animation.filmSetContent`,
-            code: "history-film-set-missing-items",
-            confirmedLegacy: true,
-            detail: "历史片场缺 items（按空集合）"
-          });
-        }
-      }
-    }
+    findings.push(...contentFindings(animation, content, `${location}/payload.animation`, "history-"));
   }
   return findings;
 }
@@ -225,6 +172,74 @@ export function summarizeCompatInventory(findings: readonly CompatFinding[]): Co
     else bucket.unconfirmed += 1;
   }
   return { findings: [...findings], counts };
+}
+
+function contentFindings(data: unknown, content: ContentContributionResolver | undefined, location: string, codePrefix = ""): CompatFinding[] {
+  const owned = ownedContentFindings(data, content, location, codePrefix);
+  return owned ?? kernelFilmSetContentFindings(data, location, codePrefix);
+}
+
+function ownedContentFindings(data: unknown, content: ContentContributionResolver | undefined, location: string, codePrefix: string): CompatFinding[] | null {
+  if (!content) return null;
+  for (const contribution of content.implementations()) {
+    const inspect = contribution.nodeData?.inspect;
+    if (!inspect) continue;
+    try {
+      const result = inspect(data);
+      if (!result.ok) return [];
+      if (result.report == null) continue;
+      if (!Array.isArray(result.report)) return [];
+      return result.report.flatMap((entry) => {
+        if (!isRecord(entry) || typeof entry.code !== "string" || typeof entry.confirmedLegacy !== "boolean" || typeof entry.path !== "string") return [];
+        return [{
+          category: "C03" as const,
+          location: `${location}/${entry.path}`,
+          code: `${codePrefix}${entry.code}`,
+          confirmedLegacy: entry.confirmedLegacy,
+          ...(typeof entry.detail === "string" ? { detail: entry.detail } : {})
+        }];
+      });
+    } catch {
+      return [];
+    }
+  }
+  return null;
+}
+
+function kernelFilmSetContentFindings(data: unknown, location: string, codePrefix: string): CompatFinding[] {
+  if (!isRecord(data) || !Object.prototype.hasOwnProperty.call(data, "filmSetContent")) return [];
+  const filmSet = data.filmSetContent;
+  const at = `${location}/filmSetContent`;
+  const findings: CompatFinding[] = [];
+  if (isRecord(filmSet)) {
+    if (filmSet.schemaVersion === undefined) {
+      findings.push({
+        category: "C03",
+        location: at,
+        code: `${codePrefix}film-set-missing-schema-version`,
+        confirmedLegacy: true,
+        detail: codePrefix ? "历史片场缺 schemaVersion（按 schema 1）" : "缺 schemaVersion（按 schema 1 读取，不升级为 2）"
+      });
+    }
+    if (filmSet.items === undefined) {
+      findings.push({
+        category: "C03",
+        location: at,
+        code: `${codePrefix}film-set-missing-items`,
+        confirmedLegacy: true,
+        detail: codePrefix ? "历史片场缺 items（按空集合）" : "缺 items（按空集合读取）"
+      });
+    }
+  } else if (filmSet === null && codePrefix === "") {
+    findings.push({
+      category: "C03",
+      location: at,
+      code: "film-set-null",
+      confirmedLegacy: true,
+      detail: "显式 null（按空集合读取）"
+    });
+  }
+  return findings;
 }
 
 function hasModelPreviewData(data: Record<string, unknown>): boolean {

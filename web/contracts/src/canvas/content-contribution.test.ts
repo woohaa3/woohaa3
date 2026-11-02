@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyCanvasCommands } from "./command-reducer.js";
 import {
   ContentContributionRegistry,
+  dispatchContentRoute,
   EMPTY_CONTENT_RESOLVER,
   type ContentContribution
 } from "./content-contribution.js";
@@ -73,6 +74,42 @@ describe("content contribution registry", () => {
     })).toThrow(/content-route-conflict/);
     expect(registry.resolve("game-furnace")).toBeNull();
     expect(registry.resolve("film-set")?.extensionId).toBe("film-set");
+  });
+});
+
+describe("content route dispatch", () => {
+  const registry = () => {
+    const routes = new ContentContributionRegistry();
+    routes.register({
+      extensionId: "film-set",
+      routes: [{
+        method: "POST",
+        path: ["import"],
+        handle: (request) => {
+          if (request.body && typeof request.body === "object" && "conflict" in request.body) return { status: 409, body: { code: "conflict" } };
+          if (request.body && typeof request.body === "object" && "secret" in request.body) throw new Error("secret route detail");
+          return { status: 200, body: { ok: true } };
+        }
+      }]
+    });
+    return routes;
+  };
+
+  it("未注册路径返回 404，冲突结果保持 409", async () => {
+    const routes = registry();
+    expect(await dispatchContentRoute(routes, { method: "POST", extensionId: "missing", path: ["import"], body: {}, authorized: true })).toEqual({ status: 404, body: { code: "content-route-not-found" } });
+    expect(await dispatchContentRoute(routes, { method: "POST", extensionId: "film-set", path: ["import"], body: { conflict: true }, authorized: true })).toEqual({ status: 409, body: { code: "conflict" } });
+  });
+
+  it("未授权、处理失败和超时都是稳定状态，不带出异常文本", async () => {
+    const routes = registry();
+    expect(await dispatchContentRoute(routes, { method: "POST", extensionId: "film-set", path: ["import"], body: {}, authorized: false })).toEqual({ status: 401, body: { code: "unauthorized" } });
+    const failed = await dispatchContentRoute(routes, { method: "POST", extensionId: "film-set", path: ["import"], body: { secret: true }, authorized: true });
+    expect(failed.status).toBe(503);
+    expect(JSON.stringify(failed)).not.toContain("secret");
+    const hung = new ContentContributionRegistry();
+    hung.register({ extensionId: "film-set", routes: [{ method: "POST", path: ["import"], handle: () => new Promise(() => undefined) }] });
+    expect(await dispatchContentRoute(hung, { method: "POST", extensionId: "film-set", path: ["import"], body: {}, authorized: true }, { timeoutMs: 15 })).toEqual({ status: 503, body: { code: "content-route-timeout" } });
   });
 });
 

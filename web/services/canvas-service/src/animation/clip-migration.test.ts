@@ -5,7 +5,7 @@ import { canonicalFilmSetFields, createEmptyWoohaa3ServerCanvas, filmSetClipPrec
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { CanvasRoom } from "../sync/room.js";
 import { InMemoryYjsDocumentRepository } from "../sync/in-memory-yjs-repository.js";
-import { readLegacyFilmSetNodeData } from "./legacy-film-set-reader.js";
+import { readLegacyFilmSetNodeData } from "../../../../../scripts/lib/legacy-film-set/legacy-film-set-reader.js";
 import { planFilmSetSceneSpaceNode } from "./film-set-scene-space-migration.js";
 const now = "2026-10-10T00:00:00.000Z";
 
