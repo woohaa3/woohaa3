@@ -215,3 +215,4 @@ export * from "./canvas/world-capture-image.js";
 export * from "./canvas/scene-area-plan-contract.js";
 export * from "./canvas/scene-area-operation-plan.js";
 export * from "./canvas/world-authoring.js";
+export * from "./canvas/world-authoring-response-codec.js";

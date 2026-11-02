@@ -6,12 +6,20 @@ const area = { areaId: "a", scopeVersion: "v1", bounds };
 const members = { instances: [], cameras: [] };
 const request = { contractVersion: "scene-area-plan-v1", canvasId: "c", operationId: "op", intent: "delete-area", area, members };
 const plan = { contractVersion: "scene-area-plan-v1", canvasId: "c", operationId: "op", intent: "delete-area", source: { area, members }, commands: [{ kind: "delete-scene-area", areaId: "a", expectedScopeVersion: "v1" }], inverse: [{ kind: "restore-scene-area", areaId: "a", scopeVersion: "v1", bounds }] };
-const receipt = { version: "world-authoring-receipt-v1", canvasId: "c", operationId: "op", intent: "delete-area", direction: "forward", intentHash: "hash", previousCommandId: null, plan, source: { area: { nodeId: "n", node: {}, nodeData: {} }, members: [] }, deletedNodes: [], produced: { areaScopeVersion: null, targets: [] }, revision: 2, createdAt: "2026-01-01T00:00:00Z" };
+const receipt = { version: "world-authoring-receipt-v1", canvasId: "c", operationId: "op", intent: "delete-area", direction: "forward", intentHash: "hash", previousCommandId: null, plan, source: { area: { nodeId: "n", node: { id: "n", type: "scene-area", x: 0, y: 0, width: 100, height: 100 }, nodeData: { sceneArea: { kind: "scene-area", version: "shared-world-v1", areaId: "a", scopeVersion: "v1", bounds } } }, members: [] }, deletedNodes: [], produced: { areaScopeVersion: null, targets: [] }, revision: 2, createdAt: "2026-01-01T00:00:00Z" };
 const command = { ok: true, canvasId: "c", operationId: "op", commandId: "cmd", revision: 2, duplicate: false, plan, receipt };
 const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "cam", settingsVersion: "v2", position: { u: 0, v: 0, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: null };
 const cameraResult = { ok: true, canvasId: "c", cameraId: "cam", commandId: "cmd", revision: 2, duplicate: false, camera, settingsVersion: "v2" };
 const history = { completionKey: "key", canvasId: "c", cameraId: "cam", runId: "run", completionId: "done", settingsVersion: "v2", createdAt: "2026-01-01T00:00:00Z", snapshot: { version: "world-camera-history-v1", completion: { canvasId: "c", runId: "run", completionId: "done", cameraId: "cam", settingsVersion: "v2" }, camera } };
 const scope = { scope: { kind: "scene-area", areaId: "a" }, scopeVersion: "v1" };
+const instanceTransform = { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 };
+const instanceMember = { identity: { kind: "instance", instanceId: "i1" }, version: "i1-v1", transform: instanceTransform };
+const cameraMember = { identity: { kind: "camera", cameraId: "cam" }, version: "v2", camera };
+const memberSet = { instances: [instanceMember], cameras: [cameraMember] };
+const memberPlan = { ...plan, source: { area, members: memberSet } };
+const memberReceipt = { ...receipt, plan: memberPlan };
+const memberSnapshot = { version: "world-authoring-v1", canvasId: "c", revision: 1, scope, areaNodeId: "n", area, bounds, writable: [], readOnly: [], members: memberSet, objects: [] };
+const memberCommand = { ...command, plan: memberPlan, receipt: memberReceipt };
 const cases: Array<{ route: string; body?: unknown; success: unknown; invoke: (remote: ReturnType<typeof createCanvasRemote>, signal?: AbortSignal) => Promise<unknown> }> = [
   { route: "scene-area-prepare", body: { areaId: "a" }, success: { ok: true, snapshot: { version: "world-authoring-v1", canvasId: "c", revision: 1, scope, areaNodeId: "n", area, bounds, writable: [], readOnly: [], members, objects: [] } }, invoke: (r, s) => r.prepareSceneArea({ canvasId: "c", areaId: "a" }, s) },
   { route: "scene-area-commit", body: { request }, success: command, invoke: (r, s) => r.executeSceneArea({ canvasId: "c", request } as never, s) },
@@ -117,5 +125,147 @@ describe("world authoring remote", () => {
     const cancelled = createCanvasRemote({ canvasId: "c", fetchImpl: (async () => { throw new Error("aborted"); }) as typeof fetch });
     expect(await cancelled.listWorldCameraHistory({ canvasId: "c", cameraId: "camera" }, controller.signal)).toMatchObject({ ok: false, code: "cancelled" });
     expect(await remote.revokeWorldToolContext({ canvasId: "other", contextId: "ctx" })).toMatchObject({ ok: false, code: "invalid-data" });
+  });
+
+  it("accepts fully nested authority successes without weakening the response type", async () => {
+    const payloads: Record<string, unknown> = {
+      "scene-area-prepare": { ok: true, snapshot: memberSnapshot },
+      "scene-area-commit": memberCommand,
+      "scene-area-undo": { ...memberCommand, direction: "undo", receipt: { ...memberReceipt, direction: "undo" } },
+      "scene-area-redo": { ...memberCommand, direction: "redo", receipt: { ...memberReceipt, direction: "redo" } }
+    };
+    for (const [route, payload] of Object.entries(payloads)) {
+      const remote = createCanvasRemote({ canvasId: "c", fetchImpl: (async () => new Response(JSON.stringify(payload), { status: 200 })) as typeof fetch });
+      const result = route === "scene-area-prepare"
+        ? await remote.prepareSceneArea({ canvasId: "c", areaId: "a" })
+        : route === "scene-area-commit"
+          ? await remote.executeSceneArea({ canvasId: "c", request } as never)
+          : await remote.historySceneArea(route === "scene-area-undo" ? "undo" : "redo", { canvasId: "c", operationId: "op" });
+      expect(result).toEqual(payload);
+    }
+  });
+
+  const recursiveFailures: Array<{
+    name: string;
+    payload: () => unknown;
+    invoke: (remote: ReturnType<typeof createCanvasRemote>) => Promise<unknown>;
+  }> = [
+    {
+      name: "prepare instance member carrying a camera identity",
+      payload: () => { const value: any = { ok: true, snapshot: structuredClone(memberSnapshot) }; value.snapshot.members.instances[0].identity = { kind: "camera", cameraId: "cam" }; return value; },
+      invoke: remote => remote.prepareSceneArea({ canvasId: "c", areaId: "a" })
+    },
+    {
+      name: "prepare camera member carrying an instance identity",
+      payload: () => { const value: any = { ok: true, snapshot: structuredClone(memberSnapshot) }; value.snapshot.members.cameras[0].identity = { kind: "instance", instanceId: "i1" }; return value; },
+      invoke: remote => remote.prepareSceneArea({ canvasId: "c", areaId: "a" })
+    },
+    {
+      name: "prepare unknown transform version",
+      payload: () => { const value: any = { ok: true, snapshot: structuredClone(memberSnapshot) }; value.snapshot.members.instances[0].transform.version = "shared-world-v0"; return value; },
+      invoke: remote => remote.prepareSceneArea({ canvasId: "c", areaId: "a" })
+    },
+    {
+      name: "prepare zero transform scale",
+      payload: () => { const value: any = { ok: true, snapshot: structuredClone(memberSnapshot) }; value.snapshot.members.instances[0].transform.scale = 0; return value; },
+      invoke: remote => remote.prepareSceneArea({ canvasId: "c", areaId: "a" })
+    },
+    {
+      name: "prepare empty nested area",
+      payload: () => { const value: any = { ok: true, snapshot: structuredClone(memberSnapshot) }; value.snapshot.area = {}; return value; },
+      invoke: remote => remote.prepareSceneArea({ canvasId: "c", areaId: "a" })
+    },
+    {
+      name: "commit plan instance member carrying a camera identity",
+      payload: () => { const value: any = structuredClone(memberCommand); value.plan.source.members.instances[0].identity = { kind: "camera", cameraId: "cam" }; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit plan camera member carrying an instance identity",
+      payload: () => { const value: any = structuredClone(memberCommand); value.plan.source.members.cameras[0].identity = { kind: "instance", instanceId: "i1" }; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit plan unknown transform version",
+      payload: () => { const value: any = structuredClone(memberCommand); value.plan.source.members.instances[0].transform.version = "shared-world-v0"; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit plan zero transform scale",
+      payload: () => { const value: any = structuredClone(memberCommand); value.plan.source.members.instances[0].transform.scale = 0; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit receipt plan camera member carrying an instance identity",
+      payload: () => { const value: any = structuredClone(memberCommand); value.receipt.plan.source.members.cameras[0].identity = { kind: "instance", instanceId: "i1" }; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit receipt plan unknown transform version",
+      payload: () => { const value: any = structuredClone(memberCommand); value.receipt.plan.source.members.instances[0].transform.version = "shared-world-v0"; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit receipt plan empty source member set",
+      payload: () => { const value: any = structuredClone(memberCommand); value.receipt.plan.source.members = {}; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit command with only a kind",
+      payload: () => { const value: any = structuredClone(memberCommand); value.plan.commands = [{ kind: "delete-scene-area" }]; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit inverse command with only a kind",
+      payload: () => { const value: any = structuredClone(memberCommand); value.plan.inverse = [{ kind: "restore-instance" }]; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit empty receipt source",
+      payload: () => { const value: any = structuredClone(memberCommand); value.receipt.source = {}; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit empty receipt member snapshot",
+      payload: () => { const value: any = structuredClone(memberCommand); value.receipt.source.members = [{}]; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "commit empty receipt produced targets",
+      payload: () => { const value: any = structuredClone(memberCommand); value.receipt.produced.targets = [{ kind: "camera", instanceId: "i1", version: "v" }]; return value; },
+      invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "context writable target and lease disagree",
+      payload: () => ({
+        ok: true,
+        context: {
+          contextId: "ctx", canvasId: "c", runId: "run", epoch: 1, scope,
+          writableTargets: [{ target: { kind: "instance", instanceId: "i1", version: "i1-v1" }, lease: { canvasId: "c", runId: "run", epoch: 1, target: { kind: "camera", cameraId: "cam" } } }],
+          readOnlyReferences: []
+        },
+        run: { canvasId: "c", requestId: "req", runId: "run", executionId: "exec", epoch: 1, state: "active" },
+        retry: false
+      }),
+      invoke: remote => remote.issueWorldToolContext({ canvasId: "c", requestId: "req", runId: "run", epoch: 1, executionId: "exec", scope: { kind: "scene-area", areaId: "a" } })
+    },
+    {
+      name: "camera save identity mismatch",
+      payload: () => ({ ...cameraResult, camera: { ...camera, cameraId: "other" } }),
+      invoke: remote => remote.saveWorldCamera({ canvasId: "c" } as never)
+    },
+    {
+      name: "camera history empty nested snapshot",
+      payload: () => ({ ok: true, canvasId: "c", cameraId: "cam", entries: [{ ...history, snapshot: {} }] }),
+      invoke: remote => remote.listWorldCameraHistory({ canvasId: "c", cameraId: "cam" })
+    }
+  ];
+
+  it.each(recursiveFailures)("rejects $name", async ({ payload, invoke }) => {
+    const remote = createCanvasRemote({
+      canvasId: "c",
+      fetchImpl: (async () => new Response(JSON.stringify(payload()), { status: 200 })) as typeof fetch
+    });
+    expect(await invoke(remote)).toMatchObject({ ok: false, code: "not-ready" });
   });
 });

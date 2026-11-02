@@ -8,6 +8,8 @@ Shared-world Render Scene v36 projects validated `sharedWorldInstance` data dire
 
 Shared world conversion: `web/services/canvas-service/src/world-authoring/conversion-service.ts` prepares authoritative bounds and commits explicit conversions through the room queue via `CanvasService.worldConversion` and the `world-conversion-prepare` / `world-conversion-commit` HTTP routes. The durable command receipt freezes forward and inverse edits. `canvas-remote.ts` exposes the routes and `canvas-state/store/canvas-edit-service.ts` adopts the verified canonical result into the page journal without replaying the forward edit.
 
+Authoritative world-authoring HTTP successes are decoded recursively by `web/contracts/src/canvas/world-authoring-response-codec.ts`; `canvas-remote.ts` uses it for scene-area prepare/commit/undo/redo, tool-context issue/revoke and camera save/restore/history. Kind-typed member identities, transform/camera codecs, forward/inverse commands, receipt sources and history snapshots are validated before the UI can consume them.
+
 Canvas model synchronization detects bridge payload snapshot changes independently of scene flags, so delayed or released payloads rebuild world roots. Bridge ingestion and model lease reconciliation run on the host thread; native desktop also confines its schedules there.
 
 片场聚焦检查器（2026-10-30）：`web/extensions/film-set/src/authoring/browser/inspector.tsx` 的旧折叠构图已由下节 2026-10-31 的分区属性替代；动态播放条在编辑态可达，输出按镜头类型组织。扩展经公共 `CompositeAssetAdapter.focusLayout` 声明 chrome 占位，经异步 `writeCameras` 使用同一个 `canvasEdit` journal，经 authoring `onDraftStateChange` 固定非空 AI 草稿目标；宿主不读取片场私有字段。
