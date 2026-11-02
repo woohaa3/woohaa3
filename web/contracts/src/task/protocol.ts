@@ -28,6 +28,8 @@ import {
   isModelKey,
   type ModelInteractionDescriptor
 } from "./model-identity.js";
+import { decodeWorldCaptureGenerationBinding } from "../canvas/world-capture-pipeline-contract.js";
+import { worldCaptureReferenceInput, withWorldCaptureTaskInput } from "./world-capture-input.js";
 import type { TaskExecutionDetail, TaskExecutionState, TaskHistoryQuery } from "./history.js";
 
 export const DEFAULT_TASK_INTERNAL_BASE_PATH = "/internal/v1";
@@ -190,6 +192,18 @@ export function decodeTaskSubmitRequest(
   const inputs = readInputs(body.inputs);
   if (!inputs.ok) return inputs;
 
+  const worldCapture = body.worldCapture === undefined
+    ? undefined
+    : decodeWorldCaptureGenerationBinding(body.worldCapture);
+  if (worldCapture && !worldCapture.ok) {
+    return fail("malformed-request", "worldCapture 不是可信冻结输入");
+  }
+  if (worldCapture?.ok && !worldCaptureReferenceInput(worldCapture.value).ok) {
+    // A capture binding without verified media cannot become a provider reference;
+    // accepting it would silently fall back to a text-only generation.
+    return fail("malformed-request", "worldCapture 缺少可信媒体元数据");
+  }
+
   return {
     ok: true,
     value: {
@@ -204,7 +218,8 @@ export function decodeTaskSubmitRequest(
       ...(interaction ? { interaction: interaction as ModelInteractionDescriptor } : {}),
       prompt: body.prompt,
       parameters,
-      inputs: inputs.value,
+      inputs: withWorldCaptureTaskInput(inputs.value, worldCapture?.ok ? worldCapture.value : undefined),
+      ...(worldCapture?.ok ? { worldCapture: worldCapture.value } : {}),
       ...readOptionalTitle(body.modelTitle, "modelTitle"),
       ...readOptionalTitle(body.providerName, "providerName"),
       ...readOptionalTitle(body.canvasTitle, "canvasTitle"),

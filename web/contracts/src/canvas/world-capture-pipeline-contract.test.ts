@@ -15,12 +15,24 @@ const KEY = {
   outputVersion: "output-1"
 } as const;
 
+const MEDIA = {
+  version: "world-capture-media-v2" as const,
+  mediaId: "sha256-abc",
+  storageKey: `generation-outputs/${"a".repeat(64)}.png`,
+  checksum: "a".repeat(64),
+  contentType: "image/png",
+  size: 1024,
+  width: 16,
+  height: 9
+};
+
 const BINDING: WorldCaptureGenerationBinding = {
   version: "world-capture-generation-binding-v1",
   requestId: "request-1",
   key: KEY,
   contentFingerprint: "0123456789abcdef",
-  input: { key: KEY, mediaId: "sha256-abc", checksum: "a".repeat(64) }
+  input: { key: KEY, mediaId: "sha256-abc", checksum: "a".repeat(64) },
+  media: MEDIA
 };
 
 describe("world capture generation binding", () => {
@@ -46,6 +58,13 @@ describe("world capture generation binding", () => {
       ...BINDING,
       contentFingerprint: "not-a-fingerprint"
     }).ok).toBe(false);
+    // Optional media stays exact: it cannot point at different bytes than `input`.
+    expect(decodeWorldCaptureGenerationBinding({
+      ...BINDING,
+      media: { ...MEDIA, checksum: "b".repeat(64) }
+    }).ok).toBe(false);
+    // Legacy bindings without verified media still decode as metadata-only.
+    expect(decodeWorldCaptureGenerationBinding({ ...BINDING, media: undefined }).ok).toBe(true);
   });
 
   it("accepts an optional late resource notice but never invents fields", () => {

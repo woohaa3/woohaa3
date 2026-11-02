@@ -11,7 +11,7 @@
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import type { CanvasRoom } from "../sync/index.js";
 import type { CanvasTaskCatalog, CanvasTaskModelType, CanvasRunRequest, CanvasTaskNodeType, CanvasTaskInput, WorldCaptureGenerationBinding } from "@woohaa3/contracts";
-import { catalogModelBindings, compileVideoEditProviderPrompt, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, validateGenerationModeInputs } from "@woohaa3/contracts";
+import { catalogModelBindings, checkModelCapability, compileVideoEditProviderPrompt, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, validateGenerationModeInputs, worldCaptureReferenceInput } from "@woohaa3/contracts";
 import type { CanvasTaskClient } from "../clients/task-client.js";
 import { resolveNodeReferenceInputs } from "./input-resolution.js";
 import { resolveMentionsAndCompile } from "./mention-resolution.js";
@@ -166,7 +166,33 @@ export class CanvasRunService {
     if (providerPrompt.trim().length === 0) {
       return { ok: false, code: "empty-prompt", message: "请先输入提示词" };
     }
-    const taskInputs: CanvasTaskInput[] = compiled.inputs;
+    const taskInputs: CanvasTaskInput[] = [...compiled.inputs];
+
+    // T10: a claimed framing is a real provider reference, not just job metadata.
+    // Materialize the exact verified media identity and reject models that cannot
+    // accept reference_image before any durable begin/job write happens.
+    if (worldCapture) {
+      const captureInput = worldCaptureReferenceInput(worldCapture);
+      if (!captureInput.ok) {
+        return { ok: false, code: captureInput.code, message: captureInput.message };
+      }
+      taskInputs.push(captureInput.input);
+      const capability = checkModelCapability(
+        {
+          modelKey: model.modelKey,
+          modelType: model.modelType,
+          inputs: taskInputs
+        } as never,
+        model
+      );
+      if (!capability.ok) {
+        return {
+          ok: false,
+          code: capability.code,
+          message: `模型 ${model.modelKey} 不接受该取景参考图：${capability.message}`
+        };
+      }
+    }
 
     // edit_video：再次 sanitize/validate intents，确定性地编译进 provider prompt（change:
     // port-video-editing-dialogs，design D8）。只有授权且稳定的 annotation preview 才会在
@@ -304,6 +330,7 @@ export class CanvasRunService {
         jobId: request.jobId,
         workerTaskKey,
         modelKey,
+        ...(worldCapture ? { worldCapture } : {}),
         message
       });
       return { ok: false, code: "task-submit-failed", message };
@@ -328,6 +355,7 @@ export class CanvasRunService {
     jobId: string;
     workerTaskKey: string;
     modelKey: string;
+    worldCapture?: WorldCaptureGenerationBinding;
     message: string;
   }): Promise<void> {
     try {
@@ -363,6 +391,7 @@ export class CanvasRunService {
                 taskId: input.workerTaskKey,
                 runId: input.runId,
                 modelKey: input.modelKey,
+                ...(input.worldCapture ? { worldCapture: input.worldCapture } : {}),
                 status: "failed",
                 error: input.message,
                 updatedAt: this.deps.now?.() ?? new Date().toISOString()

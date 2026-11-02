@@ -51,6 +51,7 @@ import {
   resolveSelectedModelKey
 } from "./node-panel-helpers.js";
 import { resolveModelExecutionContext } from "./model-execution-context.js";
+import { modelAcceptsWorldCaptureReference, resolveDefaultCaptureCameraId } from "./capture-camera.js";
 import { createModelDraftStore } from "./model-draft.js";
 import {
   ModelInteractionDiagnosticView,
@@ -203,6 +204,16 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     () => typedModels.find((entry) => entry.modelKey === targetModelKey) ?? null,
     [typedModels, targetModelKey]
   );
+  // T10: existing generation entry resolves the shared-world framing camera from the
+  // canonical canvas instead of relying on a prop no page passed. Only image models
+  // that actually accept a normal reference image opt in; absence fails closed in
+  // Canvas Service rather than silently generating from a stale image.
+  const captureCameraId = useMemo(() => {
+    if (props.captureCameraId) return props.captureCameraId;
+    if (modelType !== "image" || !modelAcceptsWorldCaptureReference(model)) return undefined;
+    return resolveDefaultCaptureCameraId(canvas);
+  }, [props.captureCameraId, modelType, model, canvas]);
+
   const definition = useMemo(
     () => (model ? registry.resolve(model.interaction) : null),
     [model, registry]
@@ -372,7 +383,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         parameters: input.parameters,
         catalog,
         expectedModelType: modelTypeForPanelKind(panelKind),
-        ...(props.captureCameraId ? { worldCapture: { cameraId: props.captureCameraId } } : {})
+        ...(captureCameraId ? { worldCapture: { cameraId: captureCameraId } } : {})
       });
       if (!outcome.ok) {
         // Page/panel disposal or scope change: do not paint stale failure feedback.
@@ -386,7 +397,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       }
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
     },
-    [catalog, canvas, catalogState, context, disabledReason, draftStore, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey]
+    [catalog, canvas, catalogState, captureCameraId, context, disabledReason, draftStore, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey]
   );
 
   const submitIntent = useCallback(

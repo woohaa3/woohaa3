@@ -17,6 +17,7 @@ export * from "./task/activity.js";
 export * from "./task/background-activity.js";
 export * from "./task/recording-activity.js";
 export * from "./task/protocol.js";
+export * from "./task/world-capture-input.js";
 export * from "./task/schema-validation.js";
 export * from "./task/parameter-schema.js";
 export * from "./task/image-parameters.js";

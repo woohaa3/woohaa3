@@ -196,6 +196,12 @@ export function buildProjectionCommands(input: {
     });
   }
 
+  // `job.upsert` replaces the whole job. Carry the accepted T10 framing binding
+  // forward so a terminal projection does not erase the exact media/version the run
+  // consumed (the task history keeps a copy, but the durable job must stay auditable).
+  const acceptedJob = currentCanvas.jobs.find(
+    (job) => job.id === record.jobId && job.nodeId === record.nodeId && job.runId === record.runId
+  );
   commands.push({
     type: "job.upsert",
     job: {
@@ -206,6 +212,7 @@ export function buildProjectionCommands(input: {
       // 模型身份随 job 落盘：产物 → provenance.runId → jobs[].taskId 之外还要能直接读模型
       // （change: l0-generation-provenance）。旧记录缺省即不写。
       ...(record.modelKey ? { modelKey: record.modelKey } : {}),
+      ...(acceptedJob?.worldCapture ? { worldCapture: acceptedJob.worldCapture } : {}),
       status: record.status === "succeeded" ? "success" : "failed",
       error: record.status === "succeeded" ? undefined : record.error,
       updatedAt: record.terminalAt

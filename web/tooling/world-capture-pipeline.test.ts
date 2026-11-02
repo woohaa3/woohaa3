@@ -25,6 +25,10 @@ import {
 import type { WorldCaptureService } from "../services/canvas-service/src/world-authoring/capture-service.js";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { createMediaService } from "@woohaa3/media-service";
+import { createTaskService } from "../services/task-service/src/composition.js";
+import { createCanvasTaskClient } from "../services/canvas-service/src/clients/task-client.js";
+import type { TaskService } from "../services/task-service/src/composition.js";
+import type { MediaClient } from "../services/task-service/src/clients/media-client.js";
 import { CanvasRoom } from "../services/canvas-service/src/sync/room.js";
 import { SqliteYjsRepository } from "../services/canvas-service/src/storage/sqlite/yjs.js";
 import { createCanvasService } from "../services/canvas-service/src/composition.js";
@@ -191,19 +195,27 @@ class MemoryMediaStorage implements MediaStorage {
   }
 }
 
-function catalog(): CanvasTaskCatalog {
+function catalog(modelKey = "m", acceptsCapture = true): CanvasTaskCatalog {
   return {
     available: true,
     models: [{
       providerId: "p",
-      modelKey: "m",
+      modelKey,
       providerModelId: "m",
       modelType: "image",
       title: "M",
       interaction: { id: "generic-model", version: 1 },
       inputSchema: {},
       defaultInput: {},
-      bindings: [],
+      bindings: acceptsCapture ? [{
+        field: "references",
+        semantic: "reference-image",
+        roles: ["reference_image"],
+        mediaKinds: ["image"],
+        mediaTypes: ["image/png"],
+        maxItems: 4,
+        valueFormat: "url"
+      }] : [],
       taskTimeoutMs: 1000
     }],
     defaultModels: {}
@@ -220,9 +232,15 @@ type Harness = {
   mediaSave: ReturnType<typeof createWorldCaptureMediaSavePort>;
   media: ReturnType<typeof createMediaService>;
   taskSubmits: Array<{ worldCapture?: unknown }>;
+  taskService?: TaskService;
+  providerReferences: Array<{ role: string; storageKey?: string; mediaType: string; mediaKind?: string }>;
 };
 
-async function openHarness(options: { saveDelay?: (key: string) => Promise<void> } = {}): Promise<Harness> {
+async function openHarness(options: {
+  saveDelay?: (key: string) => Promise<void>;
+  realTask?: boolean;
+  captureUnsupported?: boolean;
+} = {}): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), "world-capture-pipeline-"));
   dirs.push(dir);
   const file = join(dir, "canvas.sqlite");
@@ -245,6 +263,109 @@ async function openHarness(options: { saveDelay?: (key: string) => Promise<void>
       }
     : realSave;
   const taskSubmits: Array<{ worldCapture?: unknown }> = [];
+  const providerReferences: Harness["providerReferences"] = [];
+  let taskService: TaskService | undefined;
+  let taskClient: import("../services/canvas-service/src/clients/task-client.js").CanvasTaskClient = {
+    async submit(request: { workerTaskKey: string; canvasId: string; nodeId: string; runId: string; worldCapture?: unknown }) {
+      taskSubmits.push({ worldCapture: request.worldCapture });
+      return {
+        workerTaskKey: request.workerTaskKey,
+        state: "queued",
+        reused: false,
+        canvasId: request.canvasId,
+        nodeId: request.nodeId,
+        runId: request.runId
+      };
+    },
+    async cancel() {},
+    async status() { return null; },
+    async history() { return { items: [], cursor: 0 }; },
+    async canvasActivity() { return { items: [] }; },
+    async canvasActivitySince() { return { items: [] }; },
+    async canvasActivityChanges() { return { items: [] }; }
+  } as never;
+
+  if (options.realTask) {
+    const mediaClient: MediaClient = {
+      verify: async (storageKey, expected, scope) =>
+        media.port().verify(storageKey, expected as never, scope as never),
+      sign: async (storageKey) => `https://media.invalid/${storageKey}`,
+      importFromLocator: async () => { throw new Error("not used"); },
+      importFromUrl: async () => { throw new Error("not used"); },
+      importBytes: async () => { throw new Error("not used"); }
+    };
+    const provider = {
+      extensionId: "test",
+      providerId: "p",
+      available: true,
+      provider: {} as never,
+      models: [{
+        providerId: "p",
+        providerModelId: "m",
+        modelType: "image" as const,
+        title: "M",
+        inputSchema: {},
+        defaultInput: {},
+        capabilities: {
+          referenceInput: {
+            bindings: [{
+              field: "references",
+              semantic: "reference-image",
+              roles: ["reference_image"],
+              mediaKinds: ["image"],
+              mediaTypes: ["image/png"],
+              maxItems: 4
+            }]
+          }
+        }
+      }],
+      prepareInput: (input: import("@woohaa3/contracts").GenerationPrepareInput) => {
+        providerReferences.push(...input.references.map((reference) => ({
+          role: reference.role,
+          ...(reference.storageKey ? { storageKey: reference.storageKey } : {}),
+          mediaType: reference.mediaType,
+          ...(reference.mediaKind ? { mediaKind: reference.mediaKind } : {})
+        })));
+        return { references: input.references };
+      }
+    };
+    const stubServer = {
+      worker: {},
+      async submit() { return { created: true, record: { key: "stub", status: "queued" } }; },
+      async status() { return null; },
+      async cancel() {},
+      history: {},
+      counters: () => ({}),
+      subscribe: () => () => {},
+      stop() {},
+      abortAll() {},
+      async drained() {},
+      async close() {}
+    };
+    taskService = createTaskService({
+      env: {},
+      storePath: join(dir, "task.sqlite"),
+      serviceToken: "test-token",
+      modelsConfig: { version: 1, models: [] },
+      generationProviders: () => [provider] as never,
+      mediaClient,
+      workerServer: stubServer as never
+    });
+    const taskServer = http.createServer((req, res) => {
+      void taskService!.handle(req, res).then((handled) => {
+        if (!handled) { res.writeHead(404); res.end(); }
+      });
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address();
+    if (!address || typeof address === "string") throw new Error("task server address unavailable");
+    closers.push(() => new Promise<void>((resolve, reject) => taskServer.close((error) => error ? reject(error) : resolve())));
+    taskClient = createCanvasTaskClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      serviceToken: "test-token"
+    });
+  }
+
   const service = await createCanvasService({
     repository: catalogRepository,
     yjsRepository: repository,
@@ -261,26 +382,8 @@ async function openHarness(options: { saveDelay?: (key: string) => Promise<void>
       verify: (storageKey: string, expected?: Record<string, unknown>, scope?: { canvasId: string }) =>
         media.port().verify(storageKey, expected as never, scope)
     },
-    resolveCatalog: async () => catalog(),
-    taskClient: {
-      async submit(request: { workerTaskKey: string; canvasId: string; nodeId: string; runId: string; worldCapture?: unknown }) {
-        taskSubmits.push({ worldCapture: request.worldCapture });
-        return {
-          workerTaskKey: request.workerTaskKey,
-          state: "queued",
-          reused: false,
-          canvasId: request.canvasId,
-          nodeId: request.nodeId,
-          runId: request.runId
-        };
-      },
-      async cancel() {},
-      async status() { return null; },
-      async history() { return { items: [], cursor: 0 }; },
-      async canvasActivity() { return { items: [] }; },
-      async canvasActivitySince() { return { items: [] }; },
-      async canvasActivityChanges() { return { items: [] }; }
-    } as never,
+    resolveCatalog: async () => catalog(options.realTask ? "p:m" : "m", !options.captureUnsupported),
+    taskClient,
     now: () => NOW
   });
   closers.push(async () => {
@@ -288,6 +391,7 @@ async function openHarness(options: { saveDelay?: (key: string) => Promise<void>
     await service.close();
     try { repository.close(); } catch { /* already closed */ }
     await media.close();
+    await taskService?.close();
   });
   if (!service.worldCapture) throw new Error("world capture service not assembled");
   return {
@@ -299,7 +403,9 @@ async function openHarness(options: { saveDelay?: (key: string) => Promise<void>
     mediaStorage,
     mediaSave: realSave,
     media,
-    taskSubmits
+    taskSubmits,
+    ...(taskService ? { taskService } : {}),
+    providerReferences
   };
 }
 
@@ -557,6 +663,68 @@ describe("T10 continuous capture and generation input freeze", () => {
     expect(rejected.status).toBe(400);
     expect(harness.taskSubmits).toHaveLength(1);
     expect((await canonical(harness)).jobs.some(entry => entry.id === "job-capture-forged")).toBe(false);
+  });
+
+  it("materializes the frozen capture as a real Task reference input for the Provider", async () => {
+    const harness = await openHarness({ realTask: true });
+    registerProducer(harness.capture);
+    await harness.capture.refresh({ canvasId: CANVAS_ID, cameraId: CAMERA_ID });
+    const server = await startServer(harness);
+
+    const frozen = await post(server.base, `/api/canvases/${CANVAS_ID}/captures-freeze`, {
+      cameraId: CAMERA_ID,
+      requestId: "generation-capture-provider"
+    });
+    expect(frozen.status).toBe(200);
+    const binding = frozen.body.binding;
+
+    const run = await post(server.base, `/api/canvases/${CANVAS_ID}/runs`, {
+      nodeId: "image-node",
+      runId: "run-capture-provider",
+      jobId: "job-capture-provider",
+      modelKey: "p:m",
+      prompt: "draw",
+      parameters: {},
+      worldCapture: binding
+    });
+    expect(run.status).toBe(202);
+
+    // The real Task Service decode -> capability -> media verify -> Provider materialization
+    // path must see the exact frozen bytes, not only the worldCapture metadata.
+    expect(harness.providerReferences).toEqual([{
+      role: "reference_image",
+      storageKey: binding.media.storageKey,
+      mediaType: binding.media.contentType,
+      mediaKind: "image"
+    }]);
+    const job = (await canonical(harness)).jobs.find(entry => entry.id === "job-capture-provider")!;
+    expect(job.worldCapture).toEqual(binding);
+  });
+
+  it("rejects a model that cannot accept the framing reference before acceptance", async () => {
+    const harness = await openHarness({ captureUnsupported: true });
+    registerProducer(harness.capture);
+    await harness.capture.refresh({ canvasId: CANVAS_ID, cameraId: CAMERA_ID });
+    const server = await startServer(harness);
+    const frozen = await post(server.base, `/api/canvases/${CANVAS_ID}/captures-freeze`, {
+      cameraId: CAMERA_ID,
+      requestId: "generation-capture-unsupported"
+    });
+    expect(frozen.status).toBe(200);
+
+    const run = await post(server.base, `/api/canvases/${CANVAS_ID}/runs`, {
+      nodeId: "image-node",
+      runId: "run-capture-unsupported",
+      jobId: "job-capture-unsupported",
+      modelKey: "m",
+      prompt: "draw",
+      parameters: {},
+      worldCapture: frozen.body.binding
+    });
+    expect(run.status).toBe(400);
+    expect(harness.taskSubmits).toHaveLength(0);
+    const canvas = await canonical(harness);
+    expect(canvas.jobs.some(entry => entry.id === "job-capture-unsupported")).toBe(false);
   });
 
   it("settles superseded waits and ignores late resource notices without retargeting", async () => {

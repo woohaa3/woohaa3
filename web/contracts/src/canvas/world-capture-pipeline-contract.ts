@@ -23,9 +23,12 @@ import type { WorldCaptureInput, WorldCaptureVersionKey } from "./shared-world.j
 import { codecFailureError, decodeFailure, hasOnlyKeys, isJsonRecord, isNonEmptyWorldId, ownField } from "./shared-world-codec.js";
 import type { SharedWorldDecodeResult, WorldId } from "./shared-world.js";
 import {
+  decodeWorldCaptureMediaMetadata,
   decodeWorldCaptureVersionKey,
+  encodeWorldCaptureMediaMetadata,
   encodeWorldCaptureVersionKey,
-  worldCaptureVersionKeysEqual
+  worldCaptureVersionKeysEqual,
+  type WorldCaptureMediaMetadata
 } from "./world-capture-contract.js";
 import {
   isWorldCaptureContentFingerprint,
@@ -40,7 +43,7 @@ import type {
 export const WORLD_CAPTURE_GENERATION_BINDING_VERSION = "world-capture-generation-binding-v1" as const;
 
 const CHECKSUM_PATTERN = /^[0-9a-f]{64}$/;
-const BINDING_KEYS = ["version", "requestId", "key", "contentFingerprint", "input"] as const;
+const BINDING_KEYS = ["version", "requestId", "key", "contentFingerprint", "input", "media"] as const;
 const READY_NOTICE_KEYS = ["canvasId", "cameraId", "requestId", "contentFingerprint"] as const;
 
 /**
@@ -92,6 +95,13 @@ export interface WorldCaptureGenerationBinding {
   readonly key: WorldCaptureVersionKey;
   readonly contentFingerprint: string;
   readonly input: WorldCaptureInput;
+  /**
+   * Exact verified v2 media metadata. New claims always carry it so generation can
+   * materialize the same bytes as a reference input without reading the current
+   * camera or storage head. It stays optional for previously persisted bindings;
+   * consumers that need a reference must fail closed when it is absent.
+   */
+  readonly media?: WorldCaptureMediaMetadata;
 }
 
 export type WorldCaptureFramingPhase =
@@ -191,6 +201,16 @@ export function decodeWorldCaptureGenerationBinding(
   if (!worldCaptureVersionKeysEqual(key.value, inputValue.value.key)) {
     return decodeFailure("invalid-data", input);
   }
+  const rawMedia = ownField(input, "media");
+  const media = rawMedia === undefined ? undefined : decodeWorldCaptureMediaMetadata(rawMedia);
+  if (media && !media.ok) return decodeFailure(media.code, input);
+  if (
+    media?.ok &&
+    (media.value.mediaId !== inputValue.value.mediaId ||
+      media.value.checksum !== inputValue.value.checksum)
+  ) {
+    return decodeFailure("invalid-data", input);
+  }
   return {
     ok: true,
     value: {
@@ -198,7 +218,8 @@ export function decodeWorldCaptureGenerationBinding(
       requestId,
       key: key.value,
       contentFingerprint,
-      input: inputValue.value
+      input: inputValue.value,
+      ...(media?.ok ? { media: media.value } : {})
     }
   };
 }
@@ -218,7 +239,10 @@ export function encodeWorldCaptureGenerationBinding(
       key: encodeWorldCaptureVersionKey(decoded.value.input.key),
       mediaId: decoded.value.input.mediaId,
       checksum: decoded.value.input.checksum
-    }
+    },
+    ...(decoded.value.media
+      ? { media: encodeWorldCaptureMediaMetadata(decoded.value.media) }
+      : {})
   };
 }
 

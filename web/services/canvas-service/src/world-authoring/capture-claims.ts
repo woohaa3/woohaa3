@@ -19,6 +19,23 @@ import type {
   WorldCaptureClaimResult
 } from "./capture-service-types.js";
 
+function mediaIdentityEqual(
+  left: WorldCaptureGenerationBinding["media"],
+  right: WorldCaptureGenerationBinding["media"]
+): boolean {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return (
+    left.mediaId === right.mediaId &&
+    left.storageKey === right.storageKey &&
+    left.checksum === right.checksum &&
+    left.contentType === right.contentType &&
+    left.size === right.size &&
+    left.width === right.width &&
+    left.height === right.height
+  );
+}
+
 export type CaptureClaimLedger = {
   claim(state: FramingState, observation: Observation, requestId: string): WorldCaptureFreezeOutcome;
   claimForGeneration(input: WorldCaptureClaimInput): WorldCaptureClaimResult;
@@ -57,7 +74,8 @@ export function createCaptureClaimLedger(options: {
       requestId,
       key: observation.key,
       contentFingerprint: observation.request.contentFingerprint,
-      input: toWorldCaptureInput(state.frozen)
+      input: toWorldCaptureInput(state.frozen),
+      media: state.frozen.media
     };
     claims.set(requestId, { binding, createdAt: options.now() });
     return { ok: true, binding };
@@ -83,7 +101,8 @@ export function createCaptureClaimLedger(options: {
         !worldCaptureVersionKeysEqual(binding.input.key, existing.binding.input.key) ||
         binding.input.mediaId !== existing.binding.input.mediaId ||
         binding.input.checksum !== existing.binding.input.checksum ||
-        binding.contentFingerprint !== existing.binding.contentFingerprint
+        binding.contentFingerprint !== existing.binding.contentFingerprint ||
+        !mediaIdentityEqual(binding.media, existing.binding.media)
       ) {
         return { ok: false, code: "capture-mismatch", message: "取景冻结输入与受理记录不一致" };
       }

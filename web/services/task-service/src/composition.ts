@@ -47,7 +47,9 @@ import {
   type TaskSubmitRequest,
   type TaskSubmitResponse,
   type TaskExecutionState,
-  type TaskExecutionDetail
+  type TaskExecutionDetail,
+  withWorldCaptureTaskInput,
+  worldCaptureReferenceInput
 } from "@woohaa3/contracts";
 import { buildProviderInputForResource } from "./composition/provider-input.js";
 import { resolveReferenceUrls, type ReferenceObjectReader } from "./composition/reference-urls.js";
@@ -293,7 +295,11 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
       });
     }
     const now = new Date().toISOString();
-    const payloadHash = computeSubmitPayloadHash(request);
+    // T10: the claimed framing is carried as a stable reference input as well as
+    // metadata. Normalizing here covers in-process ports that did not come through
+    // the HTTP decoder; the helper de-duplicates an already materialized input.
+    const inputs = withWorldCaptureTaskInput(request.inputs, request.worldCapture);
+    const payloadHash = computeSubmitPayloadHash({ ...request, inputs });
     const claim = submitKeys.claim(request.workerTaskKey, payloadHash, now);
     if (claim.conflict) {
       return { reused: false, state: "queued", conflict: true };
@@ -336,7 +342,7 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
             }),
         ...(association.jobId && !extensionAssociation ? { jobId: association.jobId } : {}),
         // inputs 只带稳定引用身份（assetId/storageKey/role/mediaType），执行期签出 URL 不入库。
-        request: { prompt: request.prompt, parameters: request.parameters, inputs: request.inputs, ...(request.worldCapture ? { worldCapture: request.worldCapture } : {}) },
+        request: { prompt: request.prompt, parameters: request.parameters, inputs, ...(request.worldCapture ? { worldCapture: request.worldCapture } : {}) },
         source: extensionAssociation ? "extension" : "canvas",
         ...(extensionAssociation ? { extensionId: extensionAssociation.extensionId } : {}),
         error: { name: errorName, message },
@@ -353,6 +359,14 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
       });
     };
 
+    if (request.worldCapture) {
+      const captureReference = worldCaptureReferenceInput(request.worldCapture);
+      if (!captureReference.ok) {
+        markSubmitFailed(captureReference.message, "CaptureMediaUnavailable");
+        return { reused: false, state: "failed", mediaError: captureReference.message };
+      }
+    }
+
     if (claim.reused) {
       const scheduled = await taskStore.find(request.workerTaskKey);
       if (scheduled) {
@@ -367,9 +381,9 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
     // 不行才由存储 expose 签出执行期地址。两种结果都记下来，Provider 按能力挑一个。
     let referenceUrls: string[] = [];
     let referenceLocators: Array<string | undefined> = [];
-    if (request.inputs.length > 0) {
+    if (inputs.length > 0) {
       const resolved = await resolveReferenceUrls({
-        inputs: request.inputs,
+        inputs,
         ...(extensionAssociation ? {} : { scope: { canvasId: request.canvasId } }),
         provider: request.serviceConnection ? undefined : generationProvider,
         readReferenceObject: options.readReferenceObject,
@@ -405,7 +419,7 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
           }),
       ...(association.jobId && !extensionAssociation ? { jobId: association.jobId } : {}),
       // inputs 只带稳定引用身份（assetId/storageKey/role/mediaType），执行期签出 URL 不入库。
-      request: { prompt: request.prompt, parameters: request.parameters, inputs: request.inputs, ...(request.worldCapture ? { worldCapture: request.worldCapture } : {}) },
+      request: { prompt: request.prompt, parameters: request.parameters, inputs, ...(request.worldCapture ? { worldCapture: request.worldCapture } : {}) },
       source: extensionAssociation ? "extension" : "canvas",
       ...(extensionAssociation ? { extensionId: extensionAssociation.extensionId } : {}),
       ...(Object.keys(admission).length > 0 ? { admission } : {}),
@@ -426,7 +440,7 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
       modelType: request.modelType,
       prompt: request.prompt,
       parameters: providerParameters,
-      references: request.inputs.map((input, index) => ({
+      references: inputs.map((input, index) => ({
         role: input.role,
         ...(input.mediaKind ? { mediaKind: input.mediaKind } : {}),
         mediaType: input.mediaType,
