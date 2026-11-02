@@ -150,6 +150,14 @@ describe("SQLite room spatial gate", () => {
       const room = new CanvasRoom({ canvasId: "canvas", repository, broadcast: () => { published++; } });
       await room.initialize({ canvas, roomEpoch: "e", createdAt: now });
       leases.acquire({ canvasId: "canvas", requestId: "r", runId: "run", epoch: 1, executionId: "exec", scope: { scope: { kind: "scene-area", areaId: "a" }, scopeVersion: "s" }, writable: [{ kind: "instance", instanceId: "i", version: "v" }], readOnly: [] });
+      const replaceNode = { protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas", commandId: "replace-node", actorId: "manual", baseRevision: 0, commands: [
+        { type: "node.remove", nodeIds: ["model"] },
+        { type: "node.add", node: { id: "replacement", type: "model3d", position: { x: 0, y: 0 } }, nodeData: canvas.nodeData.model },
+      ] } as never;
+      expect(await room.submit(replaceNode)).toMatchObject({ ok: false, code: "lease-conflict" });
+      expect(await repository.getCommandRecord("canvas", "replace-node")).toBeNull();
+      expect((await repository.loadYjsState("canvas"))?.projection?.revision).toBe(0);
+      expect(published).toBe(0);
       const submit = (activeRoom: CanvasRoom, commandId: string) => activeRoom.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas", commandId, actorId: "manual", baseRevision: 0, commands: [{ type: "nodeData.patch", nodeId: "model", value: { sharedWorldInstance: { ...instance, transform: { ...instance.transform, scale: 2 } } } }] } as never);
       expect(await submit(room, "blocked")).toMatchObject({ ok: false, code: "lease-conflict", conflict: { target: { kind: "instance", instanceId: "i" }, runId: "run", epoch: 1 } });
       expect(await repository.getCommandRecord("canvas", "blocked")).toBeNull();
