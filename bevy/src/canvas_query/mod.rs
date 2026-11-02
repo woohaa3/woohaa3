@@ -30,9 +30,17 @@ pub(crate) mod shot_preview;
 /// clickable. Ordinary groups and film-set groups both opt in through the generic presentation
 /// flag; the flag still keeps the renderer from inventing a toolbar for older scenes that did not
 /// declare it.
+#[cfg(test)]
 pub(crate) fn action_bar_visible(
     scene: &crate::protocol::Scene,
     node: &crate::protocol::GraphNode,
+) -> bool {
+    action_bar_enabled(scene, node) && focus_context::overlay(scene).nodes.iter().any(|candidate| candidate.id == node.id)
+}
+
+/// The caller already owns the accepted projection and knows this node is present.
+pub(crate) fn action_bar_enabled(
+    scene: &crate::protocol::Scene, node: &crate::protocol::GraphNode,
 ) -> bool {
     if scene.image_focus.is_some() || scene.video_focus.is_some() || scene.model_focus.is_some() {
         return false;
@@ -40,15 +48,7 @@ pub(crate) fn action_bar_visible(
     if node.group.is_some() && !node.group.as_ref().is_some_and(|group| group.action_bar) {
         return false;
     }
-    let projected = focus_context::overlay(scene);
-    projected
-        .nodes
-        .iter()
-        .any(|candidate| candidate.id == node.id)
-        && scene
-            .node_actions
-            .get(&node.id)
-            .is_some_and(|actions| !actions.actions.is_empty())
+    scene.node_actions.get(&node.id).is_some_and(|actions| !actions.actions.is_empty())
 }
 
 /// 记录一次合法 `set_scene` 并在同一接受点同步发布 interaction snapshot。

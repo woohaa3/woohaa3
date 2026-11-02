@@ -1,3 +1,4 @@
+import { registerImageCoordinator } from "./image-worker/client.js";
 /** 创建一次 Canvas attach 的媒体 owner，并把唯一播放头接到片场解码器。 */
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { BevyRuntime } from "./bevy-runtime.js";
@@ -105,6 +106,7 @@ export function createAttachedMedia(input: {
   // 版本由宿主在 model-scene 通知时单调推进：O(1)，静止帧不遍历资源表。
   const contentVersion = () => (input.getModelContentVersion?.() ?? 0) + mediaContentVersion + (options.nodeCapabilities?.getRevision() ?? 0);
   const candidatesFor = createResidencyCandidateCache(contentKeyOfOf, contentVersion, options.nodeCapabilities);
+  const unregisterImageCoordinator = registerImageCoordinator(residency);
   const projectResidency = createResidencyProjector({
     coordinator: residency,
     getCanvas,
@@ -165,6 +167,6 @@ export function createAttachedMedia(input: {
   });
   return {
     textureSync, videoSessions, compositeAssetMediaSessions, residency, projectResidency,
-    dispose: () => unsubscribeMediaContent?.()
+    dispose: () => { unregisterImageCoordinator(); unsubscribeMediaContent?.(); }
   };
 }

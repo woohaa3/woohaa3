@@ -1,3 +1,5 @@
+import { canvasResourceStateRequest } from "@woohaa3/contracts";
+import { isNativeImage, applyNativeImage } from "./image-worker/native-port.js";
 import { readSceneWorkDiagnostics } from "./diagnostics-reader.js";
 /// <reference types="vite/client" />
 import { hoverNodeStore } from "../../services/hover-store.js";
@@ -571,6 +573,17 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     runtimeHealthSnapshot: () => supervisor?.snapshot() ?? null,
     getWorkDiagnostics: () => !disposed && module.canvas_work_diagnostics ? JSON.parse(module.canvas_work_diagnostics()) as Record<string, unknown> : {},
     lastScene: () => lastScene,
+    ...(module.set_resource_states ? { setResourceStates: (input: Omit<import("@woohaa3/contracts").CanvasResourceStateUpdate, "version">) => {
+      if (disposed) throw new Error("Bevy runtime disposed");
+      const json = canvasResourceStateRequest(input);
+      const accepted = module.set_resource_states!(json);
+      if (lastScene) for (const row of input.nodes) {
+        const node = positionMirror.node(lastScene, row.id);
+        if (node) { node.texture = row.texture; node.mediaLoading = row.mediaLoading; }
+      }
+      sceneDiagnostics.boundaryBytes += new TextEncoder().encode(json).byteLength;
+      return accepted;
+    } } : {}),
     setPositions: (input) => {
       if (disposed) throw new Error("Bevy runtime disposed");
       if (!module.set_positions) throw new Error("Bevy 运行时缺少 set_positions 边界");
@@ -593,16 +606,19 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       interactionGeneration = accepted;
       if (scene) { lastScene = scene; supervisor?.accepted(scene.revision, accepted); }
     } }),
+    flushTextureReceipts: () => { if(module.poll_texture_receipts)textures.acceptReceipts(module.poll_texture_receipts()); },
+    textureApplied: (id,width,height,content,plane=false) => !module.poll_texture_receipts || textures.applied(plane?"plane":"node",id,width,height,content),
     setTexture: (id, width, height, rgba, source) => textures.upload("node", id, width, height, rgba,
       // 稳定内容身份让 Rust 侧按内容+尺寸共享同一 GPU 纹理，nodeId 只是绑定实例
       // （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
-      () => module.set_texture(id, width, height, rgba, source?.sourceKey ?? ""), source),
+      () => isNativeImage(rgba) ? applyNativeImage(rgba,id,false,source?.sourceKey ?? "") : module.set_texture(id, width, height, rgba, source?.sourceKey ?? ""), source),
     setImageFocusDetails:frame=>{
       if(!module.set_image_focus_details) {if(frame)throw new Error("画布内核缺少图片细节纹理接口");return;}
       focusDetails.upload(frame,(manifest,pixels)=>module.set_image_focus_details!(manifest,pixels));
     },
     setModelMediaTexture: (id, width, height, rgba, source) => textures.upload("plane", id, width, height, rgba,
-      () => { if (!module.set_model_media_texture) throw new Error("缺少媒体平面纹理能力"); module.set_model_media_texture(id, width, height, rgba); }, source),
+      () => { if (!module.set_model_media_texture) throw new Error("缺少媒体平面纹理能力"); if (isNativeImage(rgba)) applyNativeImage(rgba,id,true,source?.sourceKey ?? "");
+        else module.set_model_media_texture(id, width, height, rgba); }, source),
     registerModelResource,
     prepareAndRegisterModelResource,
     setModelPayloadLeases,
@@ -891,6 +907,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     setViewport: runtime.setViewport,
     setObserver: runtime.setObserver,
     setPositions: runtime.setPositions,
+    setResourceStates: runtime.setResourceStates,
     baseSceneGeneration: runtime.baseSceneGeneration,
     modelResourceErrors: resourceFailures.getSnapshot,
     runtimeIssues: issues.getSnapshot,
@@ -901,6 +918,8 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     generation: runtime.generation,
     interactionGeneration: runtime.interactionGeneration,
     recover: runtime.recoverRuntime,
+    flushTextureReceipts: runtime.flushTextureReceipts,
+    textureApplied: runtime.textureApplied,
     setTexture: runtime.setTexture,
     queryGizmoHit: runtime.queryGizmoHit,
     queryCompositeAssetItemBounds: runtime.queryCompositeAssetItemBounds,

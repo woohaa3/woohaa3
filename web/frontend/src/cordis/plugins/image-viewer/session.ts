@@ -1,3 +1,4 @@
+import { releaseImagePixels } from "../canvas-runtime/image-worker/native-port.js";
 /**
  * 图片聚焦查看会话（宿主默认查看器）
  * （change: default-image-focus-viewer）。
@@ -11,7 +12,7 @@
  */
 import { buildCanvasRenderScene, type ServerCanvas } from "@woohaa3/contracts";
 import { rasterizeDrawable, defaultRasterCanvasFactory, type RasterCanvasFactory } from "../canvas-runtime/media-raster.js";
-import { loadImageViaDom } from "../canvas-runtime/image-load.js";
+import { prepareImageResource } from "../canvas-runtime/image-worker/client.js";
 import {
   nodeImageRect,
   overviewImageView,
@@ -32,7 +33,7 @@ export type ImageViewerRuntimePort = {
   /** 推入/清除图片聚焦投影。 */
   setProjection: (projection: import("@woohaa3/contracts").BevyImageFocus | null) => void;
   /** 推入/清除聚焦纹理（同源帧）。 */
-  setTexture: (texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null) => void;
+  setTexture: (texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null) => void;
   /** 编辑器尚未接管画面（加载中）：画布滚轮按普通画布处理。 */
   setPending: (pending: boolean) => void;
 };
@@ -75,24 +76,17 @@ export function clampZoom(zoom: number): number {
   return Math.min(Math.max(zoom, MIN_ZOOM), MAX_ZOOM);
 }
 
-/** 默认解码：DOM `Image`（与卡片纹理同一受控同源地址）；尺寸取真实像素。 */
-async function defaultDecode(url: string): Promise<{ width: number; height: number; drawable: CanvasImageSource }> {
-  const image = await loadImageViaDom(url);
-  const width = Number(image.naturalWidth) || 0;
-  const height = Number(image.naturalHeight) || 0;
-  if (width <= 0 || height <= 0) throw new Error("图片尺寸无效");
-  return { width, height, drawable: image as unknown as CanvasImageSource };
-}
 
 export class ImageViewerSession {
   readonly nodeId: string;
   private readonly options: ImageViewerSessionOptions;
-  private readonly decode: NonNullable<ImageViewerSessionOptions["decode"]>;
+  private readonly decode: ImageViewerSessionOptions["decode"];
   private readonly createCanvas: RasterCanvasFactory;
   private readonly listeners = new Set<() => void>();
   private revision = 0;
   private generation = 0;
   private disposed = false;
+  private decodeAbort?: AbortController;
   private width = 0;
   private height = 0;
   private viewport: FocusViewport = { x: 0, y: 0, zoom: 1 };
@@ -111,7 +105,7 @@ export class ImageViewerSession {
     this.options = options;
     this.nodeId = options.nodeId;
     this.currentTarget = options.target;
-    this.decode = options.decode ?? defaultDecode;
+    this.decode = options.decode;
     this.createCanvas = options.createCanvas ?? defaultRasterCanvasFactory;
   }
 
@@ -151,10 +145,17 @@ export class ImageViewerSession {
   /** 进入：解码原图 → 上传聚焦纹理 → 从节点卡片位置推进到适应窗口。 */
   async start(): Promise<void> {
     const generation = ++this.generation;
+    this.decodeAbort?.abort();
+    this.decodeAbort = new AbortController();
     this.options.runtime.setPending(true);
-    let decoded: Awaited<ReturnType<NonNullable<ImageViewerSessionOptions["decode"]>>>;
+    let decoded: { width: number; height: number; drawable?: CanvasImageSource };
+    let prepared: Awaited<ReturnType<typeof prepareImageResource>> | undefined;
     try {
-      decoded = await this.decode(this.currentTarget.url);
+      if (this.decode) decoded = await this.decode(this.currentTarget.url);
+      else {
+        prepared = await prepareImageResource(this.currentTarget.url, IMAGE_VIEWER_TEXTURE_MAX_DIMENSION, this.decodeAbort.signal);
+        decoded = { width: prepared.sourceWidth, height: prepared.sourceHeight };
+      }
     } catch (error) {
       if (!this.isCurrent(generation)) return;
       this.loading = false;
@@ -163,10 +164,10 @@ export class ImageViewerSession {
       this.emit();
       return;
     }
-    if (!this.isCurrent(generation)) return;
+    if (!this.isCurrent(generation)) { releaseImagePixels(prepared?.pixels); return; }
     this.width = decoded.width;
     this.height = decoded.height;
-    const raster = rasterizeDrawable(decoded.drawable, { width: this.width, height: this.height }, this.createCanvas, IMAGE_VIEWER_TEXTURE_MAX_DIMENSION);
+    const raster = prepared ?? rasterizeDrawable(decoded.drawable, { width: this.width, height: this.height }, this.createCanvas, IMAGE_VIEWER_TEXTURE_MAX_DIMENSION);
     if (raster) {
       this.options.runtime.setTexture({ nodeId: this.nodeId, width: raster.width, height: raster.height, pixels: raster.pixels });
     }
@@ -298,12 +299,19 @@ export class ImageViewerSession {
   /** 按给定地址重新解码并上传纹理；`keepViewport` 用于历史切换（保留用户当前取景）。 */
   private async loadFrom(url: string, keepViewport: boolean): Promise<void> {
     const generation = ++this.generation;
+    this.decodeAbort?.abort();
+    this.decodeAbort = new AbortController();
     this.loading = true;
     this.error = null;
     this.emit();
-    let decoded: Awaited<ReturnType<NonNullable<ImageViewerSessionOptions["decode"]>>>;
+    let decoded: { width: number; height: number; drawable?: CanvasImageSource };
+    let prepared: Awaited<ReturnType<typeof prepareImageResource>> | undefined;
     try {
-      decoded = await this.decode(url);
+      if (this.decode) decoded = await this.decode(url);
+      else {
+        prepared = await prepareImageResource(url, IMAGE_VIEWER_TEXTURE_MAX_DIMENSION, this.decodeAbort.signal);
+        decoded = { width: prepared.sourceWidth, height: prepared.sourceHeight };
+      }
     } catch (failure) {
       if (!this.isCurrent(generation)) return;
       this.loading = false;
@@ -311,10 +319,10 @@ export class ImageViewerSession {
       this.emit();
       return;
     }
-    if (!this.isCurrent(generation)) return;
+    if (!this.isCurrent(generation)) { releaseImagePixels(prepared?.pixels); return; }
     this.width = decoded.width;
     this.height = decoded.height;
-    const raster = rasterizeDrawable(decoded.drawable, { width: this.width, height: this.height }, this.createCanvas, IMAGE_VIEWER_TEXTURE_MAX_DIMENSION);
+    const raster = prepared ?? rasterizeDrawable(decoded.drawable, { width: this.width, height: this.height }, this.createCanvas, IMAGE_VIEWER_TEXTURE_MAX_DIMENSION);
     if (raster) {
       this.options.runtime.setTexture({ nodeId: this.nodeId, width: raster.width, height: raster.height, pixels: raster.pixels });
     }
@@ -351,6 +359,7 @@ export class ImageViewerSession {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.decodeAbort?.abort();
     this.generation += 1;
     this.options.transition.cancel();
     this.animationGeneration += 1;

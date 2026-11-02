@@ -113,3 +113,9 @@ config.local.json
 
 # Locally injected private provider branding
 /web/frontend/public/plugin-icons/litellm-provider.png
+
+# Standalone Rust image artifacts
+/media-image/target/
+/web/frontend/src/media-image-wasm/
+/media-image/target-threaded/
+/web/frontend/public/assets/media-image-threaded/

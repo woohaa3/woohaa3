@@ -28,6 +28,7 @@ pub(crate) fn ingest_bridge(
     flags.film_set_media_changed = !input.film_set_textures.is_empty();
     flags.scene_received = input.scene.is_some();
     flags.positions_received = !input.positions.is_empty();
+    flags.resource_nodes.clear();
     flags.changed = false;
     flags.canvas_committed = false;
     flags.theme_changed = false;
@@ -57,7 +58,21 @@ pub(crate) fn ingest_bridge(
         crate::protocol::apply_observer(&mut scene.0, &observer);
         flags.observer_changed = !flags.scene_received;
     }
-    positions.apply(&mut scene.0, input.positions);
+    // Taking a mutable scene reference marks it changed even when there is no input.
+    if !input.positions.is_empty() {
+        positions.apply(&mut scene.0, input.positions);
+    }
+    for (id, resource) in input.resource_states {
+        if let Some(slot) = index.position(&id) {
+            let node = &scene.0.nodes[slot];
+            if node.texture != resource.texture || node.media_loading != resource.media_loading {
+                let node = &mut scene.0.nodes[slot];
+                node.texture = resource.texture;
+                node.media_loading = resource.media_loading;
+                flags.resource_nodes.push(slot);
+            }
+        }
+    }
     batch.0 = input.textures;
     focus_details.0 = input.focus_details;
     film_set_batch.0 = input.film_set_textures;
@@ -135,15 +150,21 @@ pub(crate) fn sync_surface(
         Vec2::new(placed.logical_width, placed.logical_height)
     } else {
         for mut camera in &mut canvas_cameras {
-            camera.viewport = None;
+            if camera.viewport.is_some() {
+                camera.viewport = None;
+            }
         }
         Vec2::new(window.width(), window.height())
     };
     flags.surface_changed = surface.size != logical;
     // DPR-only 变化（同 CSS 尺寸）也必须进入文字呈现失效：`surface_changed` 只比较逻辑尺寸，
     // 因此单独记录目标 DPR（change: 2026-10-22-improve-canvas-text-clarity，design D4）。
-    surface.pixel_ratio = window.scale_factor();
-    surface.size = logical;
+    if surface.pixel_ratio != window.scale_factor() {
+        surface.pixel_ratio = window.scale_factor();
+    }
+    if surface.size != logical {
+        surface.size = logical;
+    }
     flags.changed = flags.scene_received
         || flags.positions_received
         || flags.surface_changed
@@ -187,4 +208,96 @@ pub(crate) fn publish_shot_diagnostics(
         value.captures_in_flight,
         value.captures_queued,
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unchanged_surface_and_camera_do_not_publish_change_ticks_but_dpr_does() {
+        let mut world = World::new();
+        let mut scene = CurrentScene::default();
+        scene.0.surface = Some(
+            serde_json::from_value(serde_json::json!({
+                "width":800,"height":600,"pixelRatio":1,
+            }))
+            .unwrap(),
+        );
+        world.insert_resource(scene);
+        world.insert_resource(FrameFlags::default());
+        world.insert_resource(SurfaceState::default());
+        world.insert_resource(Messages::<WindowResized>::default());
+        world.spawn((Window::default(), PrimaryWindow));
+        let camera = world
+            .spawn((Camera::default(), canvas2d::MainCanvasCamera))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(sync_surface);
+        schedule.run(&mut world);
+        assert!(world.resource::<FrameFlags>().surface_changed);
+        world.clear_trackers();
+        schedule.run(&mut world);
+        assert!(!world.resource::<FrameFlags>().surface_changed);
+        assert!(
+            !world
+                .get_resource_ref::<SurfaceState>()
+                .unwrap()
+                .is_changed()
+        );
+        assert_eq!(
+            world
+                .query_filtered::<Entity, Changed<Camera>>()
+                .iter(&world)
+                .count(),
+            0
+        );
+
+        world
+            .resource_mut::<CurrentScene>()
+            .0
+            .surface
+            .as_mut()
+            .unwrap()
+            .pixel_ratio = 2.;
+        schedule.run(&mut world);
+        assert_eq!(world.resource::<SurfaceState>().pixel_ratio, 2.);
+        assert_eq!(world.resource::<SurfaceState>().size, Vec2::new(800., 600.));
+        assert!(
+            !world.resource::<FrameFlags>().surface_changed,
+            "DPR keeps CSS dimensions"
+        );
+        assert!(
+            world
+                .get_resource_ref::<SurfaceState>()
+                .unwrap()
+                .is_changed(),
+            "DPR-only input still invalidates text presentation"
+        );
+
+        // The fallback window-sized surface also leaves an already-empty camera viewport alone.
+        world.resource_mut::<CurrentScene>().0.surface = None;
+        world.get_mut::<Camera>(camera).unwrap().viewport = Some(Viewport {
+            physical_position: UVec2::ZERO,
+            physical_size: UVec2::new(800, 600),
+            depth: 0.0..1.0,
+        });
+        schedule.run(&mut world);
+        assert!(world.get::<Camera>(camera).unwrap().viewport.is_none());
+        world.clear_trackers();
+        schedule.run(&mut world);
+        assert!(
+            !world
+                .get_resource_ref::<SurfaceState>()
+                .unwrap()
+                .is_changed()
+        );
+        assert_eq!(
+            world
+                .query_filtered::<Entity, Changed<Camera>>()
+                .iter(&world)
+                .count(),
+            0
+        );
+    }
 }

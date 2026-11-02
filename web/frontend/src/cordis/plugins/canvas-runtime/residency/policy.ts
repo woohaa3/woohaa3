@@ -1,3 +1,7 @@
+import {
+  IMAGE_DECODE_RESERVATION_BYTES,
+  IMAGE_FETCH_RESERVATION_BYTES
+} from "@woohaa3/contracts";
 /**
  * 页面级资源预算的集中策略
  * （change: 2026-10-23-scale-canvas-media-residency，design D3）。
@@ -26,6 +30,7 @@ export const PURPOSE_RANK: Readonly<Record<ResidencyPurpose, number>> = {
 /** 受预算约束的异步通道。 */
 export type ResidencyChannel =
   | "image"
+  | "image-fetch"
   | "video-session"
   | "video-frame"
   | "model-prepare"
@@ -33,8 +38,28 @@ export type ResidencyChannel =
   | "preview";
 
 export type ResidencyPolicy = {
-  /** 每页同时未完成的图片解码数。 */
+  /**
+   * 每页同时占用**解码插槽**的图片作业数（加权总数，不是 Worker 个数）。
+   *
+   * 解码是 CPU 计算：小缩略图档（128/256/512）按半个插槽计，允许更多作业并行；
+   * 1024 及以上档按 1 个完整插槽计。这样 3000 张卡片的小档缩略图能吃到多核，
+   * 而大图仍然只并行 2 个，不会把内存和核数一起放大。
+   */
   imageDecodeConcurrency: number;
+  /**
+   * 每页同时在飞的图片**网络读取**数。
+   *
+   * 与解码分开计费：压缩字节在飞时只是等 RTT，几乎不占 CPU。若把解码名额同时当作
+   * 读取名额，3000 张图时每个 RTT 只能推进 2 张，吞吐被延迟而不是算力卡住。
+   * 这个值只约束 fetch，不创建额外解码能力，因此不放大 WASM 线性内存。
+   */
+  imageFetchConcurrency: number;
+  /**
+   * 解码实例（Worker / 原生会话）数量硬上限。
+   *
+   * 小档按半插槽计会让并行作业数翻倍，这个值兜住 Worker 个数，避免内存无界。
+   */
+  imageDecodeMaxInstances: number;
   /** 普通卡片 + 片场 + 聚焦合计的视频 decoder 数。 */
   videoSessionLimit: number;
   /** 同时真正未完成的视频首帧取帧数。 */
@@ -45,6 +70,8 @@ export type ResidencyPolicy = {
   modelPrepareBudgetMs: number;
   /** 每帧媒体上传 staging 预算（字节）。 */
   uploadBytesPerFrame: number;
+  uploadCountPerFrame: number;
+  uploadBudgetMs: number;
   /** 每页 CPU 派生像素与 staging 预算（字节，含在途 reservation）。 */
   cpuDerivedBytes: number;
   /** 每页模型派生 CPU payload 预算（字节，含 IR/prepared/replay 可达副本）。 */
@@ -70,11 +97,15 @@ export type ResidencyPolicy = {
  */
 export const DEFAULT_RESIDENCY_POLICY: ResidencyPolicy = {
   imageDecodeConcurrency: 2,
+  imageFetchConcurrency: 6,
+  imageDecodeMaxInstances: 4,
   videoSessionLimit: 12,
   videoFirstFrameConcurrency: 2,
   modelPrepareConcurrency: 2,
   modelPrepareBudgetMs: 6,
   uploadBytesPerFrame: 8 * 1024 * 1024,
+  uploadCountPerFrame: 16,
+  uploadBudgetMs: 2,
   cpuDerivedBytes: 96 * 1024 * 1024,
   modelPayloadBytes: 64 * 1024 * 1024,
   gpuDerivedBytes: 256 * 1024 * 1024,
@@ -87,11 +118,15 @@ export const DEFAULT_RESIDENCY_POLICY: ResidencyPolicy = {
 
 const LIMITS: Readonly<Record<keyof ResidencyPolicy, number>> = {
   imageDecodeConcurrency: 64,
+  imageFetchConcurrency: 64,
+  imageDecodeMaxInstances: 16,
   videoSessionLimit: 64,
   videoFirstFrameConcurrency: 32,
   modelPrepareConcurrency: 32,
   modelPrepareBudgetMs: 100,
   uploadBytesPerFrame: 1024 * 1024 * 1024,
+  uploadCountPerFrame: 1024,
+  uploadBudgetMs: 100,
   cpuDerivedBytes: 4096 * 1024 * 1024,
   modelPayloadBytes: 4096 * 1024 * 1024,
   gpuDerivedBytes: 8192 * 1024 * 1024,
@@ -121,7 +156,10 @@ export function resolveResidencyPolicy(override: Partial<ResidencyPolicy> = {}):
 /** 某通道的并发上限；`upload` / `preview` 由字节或槽策略约束，返回 Infinity 表示无计数上限。 */
 export function concurrencyLimit(policy: ResidencyPolicy, channel: ResidencyChannel): number {
   switch (channel) {
-    case "image": return Math.floor(policy.imageDecodeConcurrency);
+    // 解码通道按**实例上限**计数；实际并行度由字节预算 + 作业档位预留决定
+    // （见 `imageDecodeReservation`），所以小档能多跑、大档仍遵守 imageDecodeConcurrency。
+    case "image": return Math.floor(Math.max(1, policy.imageDecodeMaxInstances));
+    case "image-fetch": return Math.floor(policy.imageFetchConcurrency);
     case "video-session": return Math.floor(policy.videoSessionLimit);
     case "video-frame": return Math.floor(policy.videoFirstFrameConcurrency);
     case "model-prepare": return Math.floor(policy.modelPrepareConcurrency);
@@ -133,13 +171,37 @@ export function concurrencyLimit(policy: ResidencyPolicy, channel: ResidencyChan
 /** 某通道的字节预算；`Infinity` 表示本通道只受并发约束，字节由调用方按帧预算自行结算。 */
 export function byteBudget(policy: ResidencyPolicy, channel: ResidencyChannel): number {
   switch (channel) {
-    case "image":
+    // 解码预算 = 「大档并行数 × 大档预留」：大档恰好 2 个，小档因预留减半可到 4 个。
+    case "image": return imageDecodeBudget(policy);
+    // 读取只占传输缓冲：读取并发 × 单次读取预留，不含解码 scratch。
+    case "image-fetch": return imageFetchBudget(policy);
     case "video-frame": return policy.cpuDerivedBytes;
     case "video-session": return policy.gpuDerivedBytes;
     case "model-prepare": return policy.modelPayloadBytes;
     case "upload": return policy.uploadBytesPerFrame;
     case "preview": return policy.gpuDerivedBytes;
   }
+}
+
+/**
+ * 一次解码作业的预留字节：按输出档位折算。
+ *
+ * 512 及以下档只产生 ≤512² 的 RGBA（1 MiB）与更小的 codec scratch，按半份预留计；
+ * 1024 及以上档按整份计。于是同一页面预算下**小档能并行更多**，而大图维持原有上限
+ * （2 个整份预留 = `imageDecodeConcurrency × 整份`）。
+ */
+export function imageDecodeReservation(edge: number): number {
+  return edge <= 512 ? IMAGE_DECODE_RESERVATION_BYTES / 2 : IMAGE_DECODE_RESERVATION_BYTES;
+}
+
+/** 页级解码字节预算：大档并行数 × 单份预留。小档因预留减半可在同一预算内并行更多。 */
+export function imageDecodeBudget(policy: ResidencyPolicy): number {
+  return Math.max(1, Math.floor(policy.imageDecodeConcurrency)) * IMAGE_DECODE_RESERVATION_BYTES;
+}
+
+/** 页级读取字节预算：在飞读取数 × 单次读取预留（不含解码 scratch）。 */
+export function imageFetchBudget(policy: ResidencyPolicy): number {
+  return Math.max(1, Math.floor(policy.imageFetchConcurrency)) * IMAGE_FETCH_RESERVATION_BYTES;
 }
 
 /**

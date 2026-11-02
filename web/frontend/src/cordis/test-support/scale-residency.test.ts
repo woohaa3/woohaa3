@@ -209,7 +209,7 @@ describe("千卡片图片准入", () => {
     coordinator.dispose();
   });
 
-  it("不同资产在 1000 个需求下仍有界排队（默认并发 2）", () => {
+  it("不同资产在 1000 个需求下仍有界排队（小档按实例上限，大档仍 2）", () => {
     const fixture = createScaleFixture({ count: 1000, assets: "distinct", demand: "dense" });
     const coordinator = new CanvasResourceCoordinator();
     const { project } = scope(fixture, coordinator);
@@ -232,9 +232,12 @@ describe("千卡片图片准入", () => {
     });
     sync.sync();
     const snapshot = coordinator.channelSnapshot("image");
-    expect(loads).toBe(coordinator.getPolicy().imageDecodeConcurrency);
-    expect(loads).toBe(2);
-    expect(snapshot.inFlight).toBe(2);
+    const policy = coordinator.getPolicy();
+    // `fixed`/`dense` fixture 的节点物理边长 248px → 256 档（小档），按半份解码预留计，
+    // 所以实例上限（而不是大档并行数 2）先绑定；关键不变式是「有界」而不是固定 2。
+    expect(loads).toBe(policy.imageDecodeMaxInstances);
+    expect(loads).toBeLessThan(1000);
+    expect(snapshot.inFlight).toBe(policy.imageDecodeMaxInstances);
     expect(snapshot.pending).toBeGreaterThan(0);
     sync.dispose();
     coordinator.dispose();

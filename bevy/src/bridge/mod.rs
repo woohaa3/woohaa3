@@ -11,6 +11,7 @@
 //! 不可变模型资源表见 [`assets`]。
 
 mod assets;
+pub(crate) mod texture_receipts;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -35,6 +36,7 @@ pub(crate) use assets::{
 thread_local! {
     static FOCUS_DETAILS: RefCell<crate::protocol::focus_details::FocusDetailInbox> = const {RefCell::new(crate::protocol::focus_details::FocusDetailInbox::new())};
     static SCENE: RefCell<Option<Scene>> = const { RefCell::new(None) };
+    static RESOURCE_STATES: RefCell<HashMap<String, crate::protocol::NodeResourceState>> = RefCell::new(HashMap::new());
     static POSITIONS: RefCell<HashMap<String, NodePosition>> = RefCell::new(HashMap::new());
     /// 纯视口增量 inbox（change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3）。
     /// 只携带 `{x,y,zoom}`，在 `set_viewport` 接受点写入；渲染侧 `ingest_bridge` 把它应用到
@@ -78,7 +80,7 @@ thread_local! {
     static WORK_CONTAINER_BLOCK_BUILDS: Cell<u64> = const { Cell::new(0) };
     static WORK_EDGE_BLOCK_BUILDS: Cell<u64> = const { Cell::new(0) };
     static WORK_CARD_BLOCK_BUILDS: Cell<u64> = const { Cell::new(0) };
-    /// 最近 full scene 的 surface（CSS 尺寸）；视口增量沿用该值
+/// 最近 full scene 的 surface（CSS 尺寸）；视口增量沿用该值
     /// （change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3）。
     static LAST_SURFACE: RefCell<Option<[f32; 2]>> = const { RefCell::new(None) };
     /// Render stage wall + draw recording snapshot（JSON；model_preview 每个 sync 写入）。
@@ -431,6 +433,7 @@ pub(crate) struct FrameInput {
     pub(crate) focus_details: Option<Option<crate::protocol::focus_details::FocusDetailUpload>>,
     pub(crate) scene: Option<Scene>,
     pub(crate) positions: HashMap<String, NodePosition>,
+    pub(crate) resource_states: HashMap<String, crate::protocol::NodeResourceState>,
     /// 纯视口增量（change: 2026-10-10-optimize-canvas-interaction-hot-path）：应用到最近
     /// full scene 的 viewport；与 scene 同在 latest-wins inbox，取最新值。
     pub(crate) viewport: Option<Viewport>,
@@ -459,7 +462,15 @@ pub(crate) fn queue_scene(scene: Scene) {
     VIEWPORT.with(|slot| *slot.borrow_mut() = None);
     OBSERVER.with(|slot| *slot.borrow_mut() = None);
     POSITIONS.with(|slot| slot.borrow_mut().clear());
+    RESOURCE_STATES.with(|slot| slot.borrow_mut().clear());
     SCENE.with(|slot| *slot.borrow_mut() = Some(scene));
+}
+
+pub(crate) fn queue_resource_states(nodes: Vec<crate::protocol::NodeResourceState>) {
+    RESOURCE_STATES.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        for node in nodes { slot.insert(node.id.clone(), node); }
+    });
 }
 
 /// 最近 full scene 的 surface（CSS 尺寸）；无则 `None`。
@@ -539,6 +550,7 @@ pub(crate) fn take_input() -> FrameInput {
     FrameInput {
         focus_details: FOCUS_DETAILS.with(|slot| slot.borrow_mut().take()),
         scene,
+        resource_states: RESOURCE_STATES.with(|slot| std::mem::take(&mut *slot.borrow_mut())),
         positions,
         viewport,
         observer,

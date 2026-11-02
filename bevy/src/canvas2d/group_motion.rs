@@ -119,16 +119,12 @@ pub(crate) fn sync(
     }
     state.last_frame = Some(frame);
     let mut geometry = Geometry::default();
+    let render_indices = super::draw_order::render_indices(&scene.0.nodes);
+    let slots: std::collections::HashMap<_, _> = scene.0.nodes.iter().enumerate().map(|(i,n)| (n.id.as_str(), render_indices[i])).collect();
     for node in nodes {
         // Same derived slot as the group panel and its member cards, so the travelling
         // outline stays at its own group's z slot.
-        let z = scene
-            .0
-            .nodes
-            .iter()
-            .position(|entry| entry.id == node.id)
-            .map(|index| super::draw_order::render_z(&scene.0.nodes, index))
-            .unwrap_or(group::GROUP_Z);
+        let z = slots.get(node.id.as_str()).map(|slot| 10.0 + *slot as f32 * 0.1).unwrap_or(group::GROUP_Z);
         draw(
             &mut geometry,
             &theme,

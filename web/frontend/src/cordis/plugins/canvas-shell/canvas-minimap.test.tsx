@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
 import { CanvasMinimap } from "./canvas-minimap.js";
 import { fitMinimapTransform, minimapPointToWorld, viewportCenteredOn } from "./minimap-projection.js";
+import * as minimapProjection from "./minimap-projection.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { InteractionController } from "./interaction-controller.js";
@@ -66,6 +67,32 @@ function mount(ui: React.ReactElement) {
 }
 
 describe("CanvasMinimap（2026-10-26）", () => {
+  it("3000 节点缩放时复用图形，只计算视口框；选择变化仍更新图形", () => {
+    woohaa3CanvasStore.getState().hydrate(canvas(Array.from({ length: 3000 }, (_, i) => ({
+      id: `image-${i}`, type: "image", x: i * 300, y: 0
+    }))));
+    let viewport = { x: 0, y: 0, zoom: 1 };
+    let notify = () => {};
+    const controller = makeController();
+    controller.viewport = () => viewport;
+    controller.subscribeViewport = listener => { notify = listener; return () => {}; };
+    const rect = vi.spyOn(minimapProjection, "minimapRect");
+    try {
+      const container = mount(<CanvasMinimap getController={() => controller} revision={0} />);
+      expect(container.querySelectorAll(".canvas-minimap__node")).toHaveLength(3000);
+      const before = container.querySelector(".canvas-minimap__viewport-rect")!.getAttribute("width");
+      rect.mockClear();
+      viewport = { x: 40, y: 20, zoom: 2 };
+      act(() => notify());
+      expect(rect).toHaveBeenCalledTimes(1);
+      expect(container.querySelector(".canvas-minimap__viewport-rect")!.getAttribute("width")).not.toBe(before);
+      act(() => nodeSelectionStore.setFromRuntime({
+        nodeIds: ["image-0"], primaryNodeId: "image-0", editingFocus: false
+      }, new Set(["image-0"])));
+      expect(container.querySelectorAll('.canvas-minimap__node[data-selected="true"]')).toHaveLength(1);
+    } finally { rect.mockRestore(); }
+  });
+
   it("渲染全部可见节点、连线、视口框与 3D 节点的小方块缩略图", () => {
     woohaa3CanvasStore.getState().hydrate(canvas([
       { id: "image", type: "image", x: 0, y: 0 },

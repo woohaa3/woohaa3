@@ -98,11 +98,20 @@ mod tests {
             zoom: 0.5,
         });
         bridge::queue_positions(vec![row("a", 70., 80.)], None);
+        let resource = |texture| crate::protocol::NodeResourceState {
+            id: "a".into(),
+            texture,
+            media_loading: false,
+        };
+        bridge::queue_resource_states(vec![resource(false)]);
+        bridge::queue_resource_states(vec![resource(true)]);
         world
             .run_system_once(crate::app::input::ingest_bridge)
             .unwrap();
         let current = &world.resource::<CurrentScene>().0;
         assert_eq!((current.nodes[0].x, current.nodes[0].y), (70., 80.));
+        assert!(current.nodes[0].texture);
+        assert!(!current.nodes[0].media_loading);
         assert_eq!((current.nodes[1].x, current.nodes[1].y), (200., 300.));
         let scope = current.nodes[1].composite_asset.as_ref().unwrap();
         assert_eq!((scope.x, scope.y), (220., 340.));
@@ -118,12 +127,38 @@ mod tests {
         assert!(flags.scene_received && flags.positions_received);
         assert!(!flags.viewport_only);
         bridge::queue_positions(vec![row("a", 300., 400.)], None);
+        bridge::queue_resource_states(vec![resource(true)]);
         bridge::queue_scene(scene()); // later full replaces every preceding increment
         world
             .run_system_once(crate::app::input::ingest_bridge)
             .unwrap();
         assert_eq!(world.resource::<CurrentScene>().0.nodes[0].x, 0.);
         assert!(!world.resource::<FrameFlags>().positions_received);
+        assert!(world.resource::<FrameFlags>().resource_nodes.is_empty());
+        assert!(!world.resource::<CurrentScene>().0.nodes[0].texture);
+        world.clear_trackers();
+        bridge::queue_resource_states(vec![resource(false)]);
+        world
+            .run_system_once(crate::app::input::ingest_bridge)
+            .unwrap();
+        assert!(
+            !world
+                .get_resource_ref::<CurrentScene>()
+                .unwrap()
+                .is_changed(),
+            "unchanged resources and empty positions must not dirty the scene"
+        );
+        world.clear_trackers();
+        world
+            .run_system_once(crate::app::input::ingest_bridge)
+            .unwrap();
+        assert!(
+            !world
+                .get_resource_ref::<CurrentScene>()
+                .unwrap()
+                .is_changed(),
+            "an empty bridge inbox must leave CurrentScene unchanged"
+        );
     }
     #[test]
     fn scope_translation_uses_full_baseline_offset_without_accumulating_drift() {

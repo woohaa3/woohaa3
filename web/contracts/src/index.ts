@@ -74,6 +74,7 @@ export * from "./canvas/render-scene/overview-cache.js";
 export * from "./canvas/viewport-update.js";
 export * from "./canvas/observer-update.js";
 export * from "./canvas/position-update.js";
+export * from "./canvas/resource-state-update.js";
 export * from "./canvas/prepared-model.js";
 export * from "./canvas/content-hash.js";
 export * from "./canvas/source-descriptor.js";
@@ -157,3 +158,4 @@ export * from "./canvas/film-set-group-projection.js";
 
 export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService } from "./extension/services/host/media-formats.js";
 export * from "./canvas/scene-package.js";
+export * from "./media/image-resource.js";

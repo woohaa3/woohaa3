@@ -2,7 +2,9 @@
 use super::{geometry::Geometry, labels::Label};
 use crate::{
     app::NodeIndex,
-    canvas_ecs::components::{CanvasDepth, CanvasNodeId, CompositePanelThumbnail},
+    canvas_ecs::components::{
+        CanvasDepth, CanvasNodeId, CompositePanelThumbnail, FilmSetPresentation,
+    },
     protocol::GraphNode,
     theme::ThemeResource,
 };
@@ -181,20 +183,37 @@ pub(crate) fn sync_images(
     mut batch: ResMut<crate::app::FilmSetTextureBatch>,
     mut state: ResMut<PanelImages>,
     mut images: ResMut<Assets<Image>>,
-    nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
-    mut sprites: Query<(Entity, &mut Sprite, &mut Transform, &CompositePanelThumbnail)>,
+    projection: Res<crate::canvas_ecs::CanvasProjectionState>,
+    nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth), With<FilmSetPresentation>>,
+    mut sprites: Query<(
+        Entity,
+        &mut Sprite,
+        &mut Transform,
+        &CompositePanelThumbnail,
+    )>,
 ) {
-    if !(flags.scene_received || flags.positions_received || flags.surface_changed || flags.theme_changed) && !scene.is_changed() && batch.0.is_empty() {
+    if !(flags.scene_received
+        || flags.positions_received
+        || flags.surface_changed
+        || flags.theme_changed)
+        && !scene.is_changed()
+        && batch.0.is_empty()
+    {
+        return;
+    }
+    if nodes.is_empty() && state.images.is_empty() && sprites.is_empty() {
         return;
     }
     let desired = image_slots(&scene.0, &index, &nodes);
-    let projected_ids: std::collections::HashSet<String> =
-        nodes.iter().map(|(_, id, _)| id.0.clone()).collect();
 
     // 1) 回收不再被当前投影请求的缩略图实体（图像资产按归属节点保留，供聚焦退出后重绑）。
     let stale: Vec<Entity> = sprites
         .iter()
-        .filter(|(_, _, _, thumb)| desired.get(&thumb.image_id).is_none_or(|slot| slot.0 != thumb.owner))
+        .filter(|(_, _, _, thumb)| {
+            desired
+                .get(&thumb.image_id)
+                .is_none_or(|slot| slot.0 != thumb.owner)
+        })
         .map(|(entity, _, _, _)| entity)
         .collect();
     for entity in stale {
@@ -238,8 +257,7 @@ pub(crate) fn sync_images(
             continue;
         };
         let size = fit(entry.size, Vec2::new(rect[2], rect[3]));
-        let transform =
-            Transform::from_xyz(rect[0] + rect[2] / 2., -(rect[1] + rect[3] / 2.), *z);
+        let transform = Transform::from_xyz(rect[0] + rect[2] / 2., -(rect[1] + rect[3] / 2.), *z);
         let existing = sprites
             .iter()
             .find(|(_, _, _, thumb)| thumb.owner == *owner && thumb.image_id == *id)
@@ -247,8 +265,12 @@ pub(crate) fn sync_images(
         match existing {
             Some(entity) => {
                 if let Ok((_, mut sprite, mut current, _)) = sprites.get_mut(entity) {
-                    sprite.custom_size = Some(size);
-                    current.translation = transform.translation;
+                    if sprite.custom_size != Some(size) {
+                        sprite.custom_size = Some(size);
+                    }
+                    if current.translation != transform.translation {
+                        current.translation = transform.translation;
+                    }
                 }
             }
             None => {
@@ -271,12 +293,11 @@ pub(crate) fn sync_images(
     }
 
     // 3) 释放不再被任何仍在投影中的面板引用的图像（聚焦隐藏的节点保留资产）。
-    let referenced: std::collections::HashSet<&str> =
-        desired.keys().map(String::as_str).collect();
+    let referenced: std::collections::HashSet<&str> = desired.keys().map(String::as_str).collect();
     let mut released = Vec::new();
     state.images.retain(|id, entry| {
         let alive = index.node(&scene.0, &entry.owner_node).is_some();
-        let hidden_by_focus = !projected_ids.contains(&entry.owner_node);
+        let hidden_by_focus = projection.entity(&entry.owner_node).is_none();
         let keep = alive && (hidden_by_focus || referenced.contains(id.as_str()));
         if !keep {
             released.push(entry.image.id());
@@ -291,7 +312,7 @@ pub(crate) fn sync_images(
 fn image_slots(
     scene: &crate::protocol::Scene,
     index: &NodeIndex,
-    nodes: &Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
+    nodes: &Query<(Entity, &CanvasNodeId, &CanvasDepth), With<FilmSetPresentation>>,
 ) -> HashMap<String, (Entity, u16, [f32; 4], f32, String)> {
     let mut result = HashMap::new();
     for (entity, id, depth) in nodes.iter() {
@@ -309,13 +330,7 @@ fn image_slots(
         for (slot, (image_id, rect)) in panel.image_ids.iter().zip(layout.images).enumerate() {
             result.insert(
                 image_id.clone(),
-                (
-                    entity,
-                    slot as u16,
-                    rect,
-                    depth.z + 0.01,
-                    node.id.clone(),
-                ),
+                (entity, slot as u16, rect, depth.z + 0.01, node.id.clone()),
             );
         }
     }
@@ -405,6 +420,31 @@ mod tests {
             Some(Vec2::new(61., 122.))
         );
         assert_eq!(thumbnail(app.world_mut()).1.id(), handle.id());
+        let original = app.world().resource::<crate::app::CurrentScene>().0.nodes[0].clone();
+        app.world_mut()
+            .resource_mut::<crate::app::CurrentScene>()
+            .0
+            .nodes[0]
+            .composite_asset = None;
+        app.update();
+        assert!(app.world().get_entity(entity).is_err());
+        assert!(
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(&handle)
+                .is_none(),
+            "a surviving ordinary node is not a panel hidden by focus"
+        );
+        app.world_mut()
+            .resource_mut::<crate::app::CurrentScene>()
+            .0
+            .nodes[0] = original;
+        app.world_mut()
+            .resource_mut::<crate::app::FilmSetTextureBatch>()
+            .0
+            .insert("ref".into(), (1, 2, vec![255; 8]));
+        app.update();
+        let (entity, handle) = thumbnail(app.world_mut());
         app.world_mut()
             .resource_mut::<crate::app::CurrentScene>()
             .0

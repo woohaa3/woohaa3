@@ -319,9 +319,12 @@ fn wake_canvas() {
 #[cfg(feature = "canvas-core")]
 mod texture_upload;
 #[cfg(feature = "canvas-core")]
-pub use texture_upload::{set_image_focus_details, set_model_media_texture, set_texture};
+pub use texture_upload::{
+    poll_texture_receipts, set_image_focus_details, set_model_media_texture, set_resource_states, set_texture,
+};
 #[cfg(all(feature = "canvas-core", not(feature = "wasm")))]
-pub use texture_upload::{set_model_media_texture_owned, set_texture_owned};
+pub use texture_upload::{
+    set_model_media_texture_owned, set_texture_owned};
 
 /// 提交一份完整渲染快照；通过校验后覆盖未消费的旧快照（latest-wins）。
 ///

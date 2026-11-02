@@ -160,6 +160,8 @@ pub fn control(body: &[u8]) -> Result<Value, String> {
         "observer_capability" => json!(canvas::observer_capability()),
         "scene_capability" => json!(canvas::scene_capability()),
         "position_capability" => json!(canvas::position_capability()),
+        "set_resource_states" => json!(canvas::set_resource_states(arg(&req, 0)?).map_err(|e|e.to_string())?),
+        "poll_texture_receipts" => json!(canvas::poll_texture_receipts()),
         "runtime_health" => json!(canvas::runtime_health()),
         "seed_runtime_generation" => {
             canvas::seed_runtime_generation(
@@ -370,7 +372,7 @@ pub fn install(
                 );
                 return;
             }
-            if request.body().len() > MAX_TEXTURE_BYTES {
+            if request.body().len() > if request.uri().path() == "/image-register" { woohaa_media_image::MAX_COMPRESSED_BYTES } else { MAX_TEXTURE_BYTES } {
                 respond(
                     br#"{"ok":false,"error":"Native request exceeds budget"}"#.to_vec(),
                     "application/json",
@@ -411,6 +413,36 @@ pub fn install(
                                 crate::window_controls::control(&window, request.body())
                             })
                     }
+                } else if uri.path() == "/image-register" {
+                    let edge = params.get("edge").and_then(|v|v.parse().ok()).unwrap_or(1024);
+                    woohaa_media_image::jobs::native_jobs().register(request.into_body(), edge).map(|handle| json!({"handle":handle}))
+                } else if uri.path() == "/image-poll" {
+                    let handle = params.get("handle").map(String::as_str).unwrap_or("");
+                    woohaa_media_image::jobs::native_jobs().poll(handle).map(|s| match s {
+                        woohaa_media_image::jobs::Snapshot::Pending => json!({"status":"pending"}),
+                        woohaa_media_image::jobs::Snapshot::Draining => json!({"status":"draining"}),
+                        woohaa_media_image::jobs::Snapshot::Released => json!({"status":"released"}),
+                        woohaa_media_image::jobs::Snapshot::Failed(error) => json!({"status":"failed","error":error}),
+                        woohaa_media_image::jobs::Snapshot::Ready { width,height,source_width,source_height } => json!({"status":"ready","width":width,"height":height,"sourceWidth":source_width,"sourceHeight":source_height}),
+                    })
+                } else if uri.path() == "/image-release" {
+                    let handle = params.get("handle").map(String::as_str).unwrap_or("");
+                    let draining = woohaa_media_image::jobs::native_jobs().release(handle);
+                    Ok(json!({"draining":draining}))
+                } else if uri.path() == "/image-apply" {
+                    let handle = params.get("handle").map(String::as_str).unwrap_or("");
+                    let id = params.get("id").map(String::as_str).unwrap_or("");
+                    let content = params.get("content").map(String::as_str).unwrap_or("");
+                    if id.is_empty() || id.len()>256 || content.len()>4096 {
+                        return respond(br#"{"ok":false,"error":"Invalid native image target"}"#.to_vec(), "application/json");
+                    }
+                    woohaa_media_image::jobs::native_jobs().image(handle).and_then(|image| {
+                        if params.get("plane").is_some_and(|v|v=="1") {
+                            canvas::set_model_media_texture_owned(id,image.width,image.height,image.pixels()).map_err(|e|e.to_string())
+                        } else {
+                            canvas::set_texture_owned(id,image.width,image.height,image.pixels(),content).map_err(|e|e.to_string())
+                        }
+                    }).map(|_|Value::Null)
                 } else if uri.path() == "/texture" {
                     texture(
                         params.get("meta").map(String::as_str).unwrap_or(""),

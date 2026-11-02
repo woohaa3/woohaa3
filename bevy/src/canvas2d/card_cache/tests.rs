@@ -8,17 +8,17 @@ mod selection;
 mod third_party;
 use crate::app::{CurrentScene, FrameFlags};
 use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole, CanvasNodeId};
+use crate::canvas_ecs::{
+    CanvasProjectionState, SelectionOutlineBatch, SelectionOutlineLayer, flush_selection_outlines,
+    project_canvas_nodes, sync_group_panels,
+};
+use crate::canvas2d::CanvasOverlayCache;
 use crate::canvas2d::{
     begin_selection_outlines, produce_card_geometry, produce_card_hover, produce_card_selection,
     produce_container_geometry, produce_edges, produce_film_set_selection, produce_group_selection,
     sync_canvas_labels, sync_canvas_overlay,
 };
-use crate::canvas_ecs::{
-    flush_selection_outlines, project_canvas_nodes, sync_group_panels, CanvasProjectionState,
-    SelectionOutlineBatch, SelectionOutlineLayer,
-};
 use bevy::{asset::AssetId, ecs::system::RunSystemOnce};
-use crate::canvas2d::CanvasOverlayCache;
 
 fn world() -> World {
     let mut world = World::new();
@@ -69,7 +69,9 @@ fn world() -> World {
 
 fn rebuild_index(world: &mut World) {
     let scene = world.resource::<CurrentScene>().0.clone();
-    world.resource_mut::<crate::app::NodeIndex>().rebuild(&scene);
+    world
+        .resource_mut::<crate::app::NodeIndex>()
+        .rebuild(&scene);
 }
 
 fn geometry_frame(world: &mut World) {
@@ -181,17 +183,16 @@ fn local_move_selection_hover_and_theme_rebuild_only_their_blocks() {
     assert_eq!(labels_of(&mut world, "0"), labels);
     // 选中描边走独立批次，不再混进卡片几何或装饰块。
     assert!(
-        world
-            .resource::<SelectionOutlineLayer>()
-            .entity()
-            .is_some(),
+        world.resource::<SelectionOutlineLayer>().entity().is_some(),
         "选中描边必须有独立批次实体"
     );
     world.resource_mut::<CurrentScene>().0.hover =
         Some(serde_json::from_value(serde_json::json!({"nodeId":"17", "port":"input"})).unwrap());
     assert_eq!(render(&mut world), 0);
     let hovered = handles(&world);
-    let hover_decor = world.resource::<crate::canvas2d::CardDecorationCache>().blocks[1]
+    let hover_decor = world
+        .resource::<crate::canvas2d::CardDecorationCache>()
+        .blocks[1]
         .handle()
         .unwrap();
     world
@@ -204,12 +205,16 @@ fn local_move_selection_hover_and_theme_rebuild_only_their_blocks() {
     assert_eq!(render(&mut world), 0);
     assert_eq!(handles(&world), hovered);
     assert!(
-        world.resource::<crate::canvas2d::CardDecorationCache>().blocks[1]
+        world
+            .resource::<crate::canvas2d::CardDecorationCache>()
+            .blocks[1]
             .handle()
             .is_none()
     );
     assert!(
-        world.resource::<crate::canvas2d::CardDecorationCache>().blocks[2]
+        world
+            .resource::<crate::canvas2d::CardDecorationCache>()
+            .blocks[2]
             .handle()
             .is_some()
     );
@@ -239,7 +244,11 @@ fn deletion_kind_changes_and_clear_release_buffers_without_stale_labels() {
     assert!(!world.resource::<Assets<Mesh>>().contains(initial[1]));
     assert!(!world.resource::<Assets<Mesh>>().contains(initial[2]));
     assert!(!has_labels(&mut world, "32"));
-    let mut blocks = std::mem::take(&mut world.resource_mut::<crate::canvas2d::CardBlockCache>().blocks);
+    let mut blocks = std::mem::take(
+        &mut world
+            .resource_mut::<crate::canvas2d::CardBlockCache>()
+            .blocks,
+    );
     let ids: Vec<_> = blocks.iter().map(|b| b.entity.unwrap()).collect();
     let mut meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
     clear(&mut world.commands(), &mut meshes, &mut blocks);
@@ -252,13 +261,14 @@ fn deletion_kind_changes_and_clear_release_buffers_without_stale_labels() {
     world.resource_mut::<CurrentScene>().0.nodes.clear();
     render(&mut world);
     assert!(handles(&world).is_empty());
-    assert!(world.resource::<crate::canvas2d::CardDecorationCache>().blocks.is_empty());
     assert!(
         world
-            .query::<&CanvasLabel>()
-            .iter(&world)
-            .next()
-            .is_none(),
+            .resource::<crate::canvas2d::CardDecorationCache>()
+            .blocks
+            .is_empty()
+    );
+    assert!(
+        world.query::<&CanvasLabel>().iter(&world).next().is_none(),
         "删除全部节点后不得残留标签实体"
     );
 }
@@ -429,7 +439,10 @@ fn edge_blocks_retain_unaffected_meshes_and_labels_on_local_changes() {
             .collect::<Vec<_>>()
     };
     let initial = snapshot(&world);
-    assert_eq!(labels_with_role(&mut world, CanvasLabelRole::Edge).len(), 33);
+    assert_eq!(
+        labels_with_role(&mut world, CanvasLabelRole::Edge).len(),
+        33
+    );
     render(&mut world);
     assert_eq!(snapshot(&world), initial);
     world.resource_mut::<CurrentScene>().0.nodes[17].x += 25.;
@@ -442,9 +455,11 @@ fn edge_blocks_retain_unaffected_meshes_and_labels_on_local_changes() {
     // 标签请求按 owner+role+slot 复用实体；重建块后文案仍与当前边一致。
     let edge_labels = labels_with_role(&mut world, CanvasLabelRole::Edge);
     assert_eq!(edge_labels.len(), 33);
-    assert!(edge_labels
-        .iter()
-        .any(|entity| world.get::<Text2d>(*entity).unwrap().0 == "Edge 17"));
+    assert!(
+        edge_labels
+            .iter()
+            .any(|entity| world.get::<Text2d>(*entity).unwrap().0 == "Edge 17")
+    );
     world.resource_mut::<CurrentScene>().0.nodes[0].title = "Only card text changed".into();
     world.resource_mut::<CurrentScene>().0.selection.nodes = vec!["0".into()];
     render(&mut world);
@@ -462,7 +477,12 @@ fn edge_blocks_retain_unaffected_meshes_and_labels_on_local_changes() {
     assert_ne!(hovered[2].0, selected[2].0);
     world.resource_mut::<CurrentScene>().0.edges.clear();
     render(&mut world);
-    assert!(world.resource::<crate::canvas2d::EdgeBlockCache>().blocks.is_empty());
+    assert!(
+        world
+            .resource::<crate::canvas2d::EdgeBlockCache>()
+            .blocks
+            .is_empty()
+    );
     assert!(
         labels_with_role(&mut world, CanvasLabelRole::Edge).is_empty(),
         "清空边后不得残留连线标签"
@@ -494,12 +514,18 @@ fn shared_group_and_overlay_buffers_ignore_unrelated_card_changes() {
     assert_eq!(shared(&world), initial);
     assert!(!world.resource::<FrameFlags>().mesh_rebuilt);
     assert_eq!(labels_of(&mut world, "31"), label);
-    let container = world.resource::<crate::canvas2d::ContainerBlockCache>().blocks[1].state();
+    let container = world
+        .resource::<crate::canvas2d::ContainerBlockCache>()
+        .blocks[1]
+        .state();
     world.resource_mut::<CurrentScene>().0.nodes[31].x += 25.;
     render(&mut world);
     assert_eq!(shared(&world), initial);
     assert_ne!(
-        world.resource::<crate::canvas2d::ContainerBlockCache>().blocks[1].state(),
+        world
+            .resource::<crate::canvas2d::ContainerBlockCache>()
+            .blocks[1]
+            .state(),
         container
     );
     world.resource_mut::<CurrentScene>().0.drag_attach =
@@ -546,7 +572,10 @@ fn container_blocks_update_locally_and_keep_group_fill_out_of_overlays() {
     let initial = snapshot(&world);
     assert_eq!(world.resource::<FrameFlags>().container_blocks_rebuilt, 3);
     let mut previous = -1.0;
-    for block in &world.resource::<crate::canvas2d::ContainerBlockCache>().blocks {
+    for block in &world
+        .resource::<crate::canvas2d::ContainerBlockCache>()
+        .blocks
+    {
         let entity = block.blend_entity().unwrap();
         let sort_z = world.get::<Transform>(entity).unwrap().translation.z;
         assert!(
@@ -568,7 +597,11 @@ fn container_blocks_update_locally_and_keep_group_fill_out_of_overlays() {
         assert!(positions.iter().all(|p| p[0] < -100000.));
     }
     // Container title is a label-only input and must retain every range/frame mesh.
-    world.resource_mut::<CurrentScene>().0.nodes[0].group.as_mut().unwrap().title = "Renamed".into();
+    world.resource_mut::<CurrentScene>().0.nodes[0]
+        .group
+        .as_mut()
+        .unwrap()
+        .title = "Renamed".into();
     render(&mut world);
     assert_eq!(snapshot(&world), initial);
     assert_eq!(world.resource::<FrameFlags>().container_blocks_rebuilt, 0);
@@ -586,15 +619,16 @@ fn container_blocks_update_locally_and_keep_group_fill_out_of_overlays() {
     assert_ne!(selected[2], moved[2]);
     world.resource_mut::<CurrentScene>().0.nodes.clear();
     render(&mut world);
-    assert!(world.resource::<crate::canvas2d::ContainerBlockCache>().blocks.is_empty());
+    assert!(
+        world
+            .resource::<crate::canvas2d::ContainerBlockCache>()
+            .blocks
+            .is_empty()
+    );
     for handle in selected.into_iter().flatten().flatten() {
         assert!(!world.resource::<Assets<Mesh>>().contains(handle));
     }
-    assert!(world
-        .query::<&CanvasLabel>()
-        .iter(&world)
-        .next()
-        .is_none());
+    assert!(world.query::<&CanvasLabel>().iter(&world).next().is_none());
 }
 
 #[test]
@@ -610,7 +644,11 @@ fn film_run_mask_covers_exact_scope_in_every_active_phase_and_clears_at_terminal
         crate::canvas_query::scope::node_scope(&world.resource::<CurrentScene>().0.nodes[0])
             .vertices;
     let mask_vertices = |world: &World| {
-        let id = world.resource::<crate::canvas2d::ContainerBlockCache>().blocks[0].state()[1].unwrap();
+        let id = world
+            .resource::<crate::canvas2d::ContainerBlockCache>()
+            .blocks[0]
+            .state()[1]
+            .unwrap();
         let mesh = world.resource::<Assets<Mesh>>().get(id).unwrap();
         let VertexAttributeValues::Float32x3(positions) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap()
@@ -644,10 +682,16 @@ fn film_run_mask_covers_exact_scope_in_every_active_phase_and_clears_at_terminal
             expected,
             "backdrop must stay visible in {phase}"
         );
-        let handles = world.resource::<crate::canvas2d::ContainerBlockCache>().blocks[0].state();
+        let handles = world
+            .resource::<crate::canvas2d::ContainerBlockCache>()
+            .blocks[0]
+            .state();
         render(&mut world);
         assert_eq!(
-            world.resource::<crate::canvas2d::ContainerBlockCache>().blocks[0].state(),
+            world
+                .resource::<crate::canvas2d::ContainerBlockCache>()
+                .blocks[0]
+                .state(),
             handles
         );
     }
@@ -668,4 +712,52 @@ fn film_run_mask_covers_exact_scope_in_every_active_phase_and_clears_at_terminal
     world.resource_mut::<CurrentScene>().0.nodes[0].aggregate_run = None;
     render(&mut world);
     assert!(mask_vertices(&world).is_empty());
+}
+
+#[test]
+fn resource_delta_updates_its_block_and_idle_frames_keep_requests_untouched() {
+    let mut world = world();
+    render(&mut world);
+    let mut schedule = Schedule::default();
+    schedule.add_systems(
+        (
+            project_canvas_nodes.run_if(crate::canvas_ecs::projection_requested),
+            produce_card_geometry,
+            sync_canvas_labels,
+        )
+            .chain(),
+    );
+    schedule.run(&mut world);
+    world.flush();
+    let initial = handles(&world);
+    let labels = labels_of(&mut world, "17");
+    world.clear_trackers();
+    {
+        let mut flags = world.resource_mut::<FrameFlags>();
+        flags.scene_received = false;
+        flags.positions_received = false;
+        flags.resource_nodes = vec![17];
+        flags.card_blocks_rebuilt = 0;
+    }
+    world.resource_mut::<CurrentScene>().0.nodes[17].media_loading = true;
+    schedule.run(&mut world);
+    world.flush();
+    assert_eq!(world.resource::<FrameFlags>().card_blocks_rebuilt, 1);
+    assert_eq!(changed(&initial, &handles(&world)), [1]);
+    assert_eq!(labels_of(&mut world, "17"), labels);
+    world.resource_mut::<FrameFlags>().resource_nodes.clear();
+    world.resource_mut::<FrameFlags>().card_blocks_rebuilt = 0;
+    world.clear_trackers();
+    let before = handles(&world);
+    schedule.run(&mut world);
+    world.flush();
+    assert_eq!(handles(&world), before);
+    assert_eq!(world.resource::<FrameFlags>().card_blocks_rebuilt, 0);
+    assert!(
+        !world
+            .get_resource_ref::<LabelRequests>()
+            .unwrap()
+            .is_changed(),
+        "idle card producers must leave label requests untouched"
+    );
 }

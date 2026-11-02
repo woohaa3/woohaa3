@@ -96,6 +96,9 @@ export class CompositeAssetRegistry {
   private adapterReleases = new Set<() => void>();
   /** Late activation and release stay visible to sessions created before adapters load. */
   getContent = (): import("@woohaa3/contracts").ContentContributionResolver | undefined => this.contentEnabled ? this.content : undefined;
+  // Published/working canvas projections are immutable. Extension-owned matching
+  // changes without a new projection must call invalidate(), just like preparation.
+  private mediaCandidates: { canvas: ServerCanvas; revision: number; nodes: Array<{ id: string; adapter: CompositeAssetAdapter }> } | undefined;
   private revision = 0;
   getRevision = (): number => this.revision;
   private generations = new Map<string, number>();
@@ -247,12 +250,17 @@ export class CompositeAssetRegistry {
     return labels;
   }
   mediaSources(canvas: ServerCanvas | null, playback: BevyAnimationPlayback | null): CompositeAssetMediaSource[] {
-    if (!canvas) return [];
-    return canvas.document.nodes.flatMap(node => {
-      const adapter = this.resolveNode(canvas, node);
-      if (!adapter) return [];
-      return (adapter.mediaSources?.(node.id, canvas.nodeData[node.id], playback) ?? []).filter(source => source.nodeId === node.id).map(source => ({ ...source, sourceIdentity: `${canvas.id}:${adapter.extensionId}:${this.generation(adapter.extensionId)}:${source.sourceIdentity}` }));
-    });
+    if (!canvas) { this.mediaCandidates = undefined; return []; }
+    if (this.mediaCandidates?.canvas !== canvas || this.mediaCandidates.revision !== this.revision) {
+      const nodes = canvas.document.nodes.flatMap(node => {
+        const adapter = this.resolveNode(canvas, node);
+        return adapter?.mediaSources ? [{ id: node.id, adapter }] : [];
+      });
+      this.mediaCandidates = { canvas, revision: this.revision, nodes };
+    }
+    return this.mediaCandidates.nodes.flatMap(({ id, adapter }) =>
+      (adapter.mediaSources?.(id, canvas.nodeData[id], playback) ?? []).filter(source => source.nodeId === id).map(source => ({ ...source, sourceIdentity: `${canvas.id}:${adapter.extensionId}:${this.generation(adapter.extensionId)}:${source.sourceIdentity}` }))
+    );
   }
   compositions(): ReadonlyMap<string, BevyCompositeAssetCompositionInfo> {
     return new Map([...this.projections].flatMap(([id, value]) => value.composition ? [[id, value.composition] as const] : []));
@@ -331,6 +339,6 @@ export class CompositeAssetRegistry {
   blocksFocusInput(): boolean { return [...this.adapters.values()].some(adapter => adapter.blocksFocusInput?.()); }
   keydown(event: KeyboardEvent, canvas: ServerCanvas | null, nodeId: string | null): boolean { return nodeId ? this.resolve(canvas, nodeId)?.keydown?.(event, nodeId) ?? false : false; }
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  invalidate = (): void => { this.revision += 1; for (const listener of this.listeners) listener(); };
+  invalidate = (): void => { this.mediaCandidates = undefined; this.revision += 1; for (const listener of this.listeners) listener(); };
   clear(): void { for (const release of [...this.adapterReleases]) release(); this.adapterReleases.clear(); this.content = new ContentContributionRegistry(); this.managedLifecycles.clear(); this.adapters.clear(); this.projections.clear(); this.projectionOwners.clear(); this.scopeResults.clear(); this.invalidate(); }
 }
