@@ -93,6 +93,9 @@ export function routeFor(pathname) {
   // 本机遥测（change: 2026-10-20-add-local-client-telemetry）：intake 与复盘查询由宿主 core 的
   // `ctx.telemetry` 承载。**必须登记**：未登记的新 `/api/...` 会被判 `none` 直接 404，永远到不了宿主。
   if (pathname === "/api/telemetry" || pathname.startsWith("/api/telemetry/")) return "application";
+  // 素材库（浏览器扩展「保存到四喜」保存进来的网页图片）。由宿主 core 的 library 插件承载。
+  // **必须登记**：未登记的 `/api/...` 会被判 `none` 直接 404，请求永远到不了宿主 gateway。
+  if (pathname === "/api/library" || pathname.startsWith("/api/library/")) return "application";
   return "none";
 }
 

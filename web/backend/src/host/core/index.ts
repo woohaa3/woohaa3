@@ -12,6 +12,7 @@ import { marketplacePlugin } from "./marketplace.js";
 import { extensionManagerPlugin } from "./extension-manager/index.js";
 import { mcpPlugin } from "./mcp.js";
 import { mcpInstallationPlugin } from "./mcp-installation.js";
+import { libraryPlugin } from "./library.js";
 import { mediaPlugin } from "./media.js";
 import { recordingExecutorPlugin } from "./recording-executor.js";
 import { storagePlugin } from "./storage.js";
@@ -33,7 +34,7 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
   const { env } = options;
   // 插件对象按装载顺序留一份，供设置面登记插件清单。
   // 遥测排在任务之前：任务终态经 `ctx.get("telemetry")` 写入（懒取，不影响单独装载 taskPlugin 的场景）。
-  const plugins = [storagePlugin, exposerPlugin, telemetryPlugin, mediaPlugin, generationPlugin, marketplacePlugin, adminApiPlugin, taskPlugin, recordingExecutorPlugin, canvasPlugin, mcpPlugin, mcpInstallationPlugin, applicationPlugin, extensionManagerPlugin];
+  const plugins = [storagePlugin, exposerPlugin, telemetryPlugin, mediaPlugin, libraryPlugin, generationPlugin, marketplacePlugin, adminApiPlugin, taskPlugin, recordingExecutorPlugin, canvasPlugin, mcpPlugin, mcpInstallationPlugin, applicationPlugin, extensionManagerPlugin];
   // 逐插件计时：core 层整体耗时异常时，必须能直接看出是哪个插件慢。
   const timed = async <T>(plugin: string, load: () => PromiseLike<T> | T): Promise<T> => {
     const started = Date.now();
@@ -47,6 +48,8 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
     await timed("exposer", () => ctx.plugin(exposerPlugin)),
     await timed("telemetry", () => ctx.plugin(telemetryPlugin, { env })),
     await timed("media", () => ctx.plugin(mediaPlugin, { env, ...(options.mediaStorage ? { storage: options.mediaStorage } : {}) })),
+    // 素材库要在 media 之后：它 inject media，下载与内容寻址都走那边。
+    await timed("library", () => ctx.plugin(libraryPlugin, { env })),
     await timed("generation", () => ctx.plugin(generationPlugin, { env })),
     await timed("marketplace", () => ctx.plugin(marketplacePlugin)),
     await timed("admin-api", () => ctx.plugin(adminApiPlugin)),

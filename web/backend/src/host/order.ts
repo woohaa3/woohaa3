@@ -27,6 +27,14 @@ export const ROUTE_ORDER = {
    * `scripts/lib/ingress.mjs` 的 `routeFor`（未登记会被判 `none` 直接 404）。
    */
   telemetry: 42,
+  /**
+   * `/api/library/*`：素材库（浏览器扩展保存进来的网页图片，不属于任何画布）。
+   *
+   * 自己的前缀不在 canvas / task / mcp / media 的匹配范围里，排在哪都不会被截走；
+   * 放在 media（90）之前是为了让诊断用的 `/ping` 永远不会落到更宽的处理器上。
+   * **同样要在 ingress 的 `routeFor` 登记**，否则请求到不了这里。
+   */
+  library: 89,
   mcpInstallation: 45,
   canvas: 60,
   taskInspection: 65,
