@@ -166,3 +166,42 @@ export {
   worldCameraCompletionKey,
   type WorldCameraHistorySnapshot
 } from "./canvas/world-camera-codec.js";
+export {
+  WORLD_CAPTURE_INPUT_VERSION,
+  WORLD_CAPTURE_MEDIA_VERSION,
+  WORLD_CAPTURE_NON_AUTHORING_CAUSES,
+  applyWorldCaptureChange,
+  decodeWorldCaptureFrozenInput,
+  decodeWorldCaptureMediaMetadata,
+  decodeWorldCaptureVersionKey,
+  encodeWorldCaptureFrozenInput,
+  encodeWorldCaptureMediaMetadata,
+  encodeWorldCaptureVersionKey,
+  freezeWorldCaptureInput,
+  resolveWorldCaptureWait,
+  settleWorldCaptureResult,
+  toWorldCaptureInput,
+  worldCaptureChangeInvalidates,
+  worldCaptureVersionKeysEqual,
+  worldCaptureVersionSignature,
+  type WorldCaptureAuthoringChange,
+  type WorldCaptureChange,
+  type WorldCaptureFreezeFailureCode,
+  type WorldCaptureFreezeResult,
+  type WorldCaptureFrozenInput,
+  type WorldCaptureMediaMetadata,
+  type WorldCaptureNonAuthoringCause,
+  type WorldCaptureSettlement,
+  type WorldCaptureSettlementDecision,
+  type WorldCaptureWaitRequest,
+  type WorldCaptureWaitResolution
+} from "./canvas/world-capture-contract.js";
+export {
+  compareWorldCaptureVersionKeys,
+  decodeWorldCaptureInputMetadata,
+  decodeWorldCaptureVersionKeyText,
+  encodeWorldCaptureInputMetadata,
+  encodeWorldCaptureVersionKeyText,
+  worldCaptureInputMetadataEqual,
+  type WorldCaptureVersionComparison
+} from "./canvas/world-capture-codec.js";
