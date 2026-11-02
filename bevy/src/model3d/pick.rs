@@ -124,6 +124,8 @@ fn world_triangles(node: &GraphNode, model: &ModelSnapshot, placement: &crate::p
         if visiting.contains(&index) { return None; }
         visiting.push(index);
         let spec = &specs[index];
+        // A hidden parent hides its entire Bevy entity subtree.
+        if spec.geometry.is_some() && poses.and_then(|p| p.get(&spec.id)).is_some_and(|p| p.opacity <= 0.0) { return None; }
         let parent = match spec.parent.as_deref() {
             Some(id) => world(*indices.get(id)?, specs, indices, root, poses, visiting)?,
             None => root,
@@ -136,7 +138,6 @@ fn world_triangles(node: &GraphNode, model: &ModelSnapshot, placement: &crate::p
     let mut triangles = Vec::new();
     for (index, spec) in specs.iter().enumerate() {
         let Some(world) = world(index, &specs, &indices, root, poses, &mut Vec::new()) else { continue };
-        if poses.and_then(|p| p.get(&spec.id)).is_some_and(|p| p.opacity <= 0.0) { continue; }
         let material = spec.material_key.strip_prefix("material:").and_then(|id| materials.get(id));
         if material.is_some_and(|material| material.static_opacity() <= 0.0) { continue; }
         let cull_back = spec.material_key.starts_with("material:") && material.map_or(true, |material| !material.double_sided);
@@ -279,6 +280,39 @@ mod tests {
     }
 
     #[test]
+    fn hidden_parent_removes_child_surface() {
+        let node = node(r#"{"id":"m","type":"model3d","x":0,"y":0,"width":260,"height":195,"model":{"resourceKey":"v:sig"},"sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i","transform":{"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1}}}"#);
+        let mut model = snapshot();
+        if let crate::protocol::ModelOp::Box { parent, .. } = &mut model.ops[0] {
+            *parent = Some("parent".into());
+        }
+        model.ops.push(crate::protocol::ModelOp::Box { id: "parent".into(), parent: None, position: [0.; 3], rotation: [0.; 3], scale: [1.; 3], color: Some("#ffffff".into()), material: None, size: [1.; 3] });
+        let mut delta = crate::motion::ModelDelta::default();
+        delta.opacity = 0.;
+        let poses = HashMap::from([("parent".into(), delta)]);
+        assert!(!world_triangles(&node, &model, &node.model.as_ref().unwrap().placement, None).is_empty());
+        assert!(world_triangles(&node, &model, &node.model.as_ref().unwrap().placement, Some(&poses)).is_empty());
+        crate::bridge::clear_model_assets();
+        publish_motion(None, HashMap::new());
+        let mut background = node.clone();
+        background.id = "background".into();
+        background.model.as_mut().unwrap().resource_key = "background".into();
+        let foreground = Arc::new(model);
+        let behind = Arc::new(snapshot());
+        crate::bridge::queue_model_snapshot("v:sig".into(), foreground.signature.clone(), foreground.scene_version.clone(), foreground);
+        crate::bridge::queue_model_snapshot("background".into(), behind.signature.clone(), behind.scene_version.clone(), behind);
+        remember_scene(&Scene { nodes: vec![node, background], ..Scene::default() });
+        crate::canvas_query::model_pick::accept_models(Vec::new(), 13, Default::default());
+        publish_motion(Some("m"), poses);
+        let screen = crate::isometric_grid::screen_point_from_world(Vec3::new(0., 64., 0.), &Default::default());
+        let request = format!(r#"{{"generation":13,"x":{},"y":{},"width":800,"height":600}}"#, screen.x, screen.y);
+        let result: serde_json::Value = serde_json::from_str(&crate::query_model_pick(&request)).unwrap();
+        assert_eq!(result["nodeId"], "background");
+        publish_motion(None, HashMap::new());
+        crate::bridge::clear_model_assets();
+    }
+
+    #[test]
     fn bridge_public_query_tracks_resource_and_generation() {
         crate::bridge::clear_model_assets();
         let node = node(r#"{"id":"m","type":"model3d","x":0,"y":0,"width":260,"height":195,"model":{"resourceKey":"v:sig"},"sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i","transform":{"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1}}}"#);
@@ -304,6 +338,38 @@ mod tests {
         crate::bridge::queue_model_snapshot("v:sig".into(), replacement.signature.clone(), replacement.scene_version.clone(), replacement);
         assert_eq!(query(8)["nodeId"], "m");
         CACHE.with(|cache| assert!(!Arc::ptr_eq(&first, cache.borrow()[0].4.triangles.as_ref().unwrap())));
+        crate::bridge::clear_model_assets();
+    }
+
+    #[test]
+    fn set_scene_public_query_tracks_resource_lifecycle() {
+        crate::bridge::clear_model_assets();
+        let request = r##"{"resourceVersion":"woohaa-prepared-model-resource-v1","sceneVersion":"woohaa-model-scene-ir-v2","ops":[{"t":"box","id":"body","position":[0,1,0],"rotation":[0,0,0],"scale":[1,1,1],"color":"#ffffff","size":[2,2,2]}]}"##;
+        let metadata: serde_json::Value = serde_json::from_str(&crate::prepare_and_register_model_resource(request).unwrap()).unwrap();
+        let key = metadata["resourceKey"].as_str().unwrap();
+        let mut scene: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/shared-world/render-scene.json")).unwrap();
+        scene["nodes"][0]["model"] = serde_json::json!({"resourceKey":key});
+        scene["nodes"][0]["sharedWorldInstance"]["transform"] = serde_json::json!({"version":"shared-world-v1","position":{"u":2,"v":-1,"h":0},"rotation":[0,0,0,1],"scale":1});
+        let mut legacy = scene["nodes"][0].clone();
+        legacy["id"] = serde_json::json!("legacy");
+        legacy.as_object_mut().unwrap().remove("sharedWorldInstance");
+        legacy.as_object_mut().unwrap().remove("modelPreview");
+        legacy["x"] = serde_json::json!(2000);
+        scene["nodes"].as_array_mut().unwrap().push(legacy);
+        scene["viewport"] = serde_json::json!({"x":120,"y":80,"zoom":1.5});
+        let generation = crate::set_scene(&scene.to_string()).unwrap();
+        let view = crate::isometric_grid::IsometricGridView { x: 120., y: 80., zoom: 1.5 };
+        let screen = crate::isometric_grid::screen_point_from_world(Vec3::new(128., 64., 64.), &view);
+        let query = |generation| {
+            let request = format!(r#"{{"generation":{generation},"x":{},"y":{},"width":800,"height":600}}"#, screen.x, screen.y);
+            serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request)).unwrap()
+        };
+        assert_eq!(query(generation)["nodeId"], "model");
+        assert_eq!(query(generation.wrapping_sub(1))["reason"], "stale");
+        crate::bridge::clear_model_assets();
+        assert!(query(generation)["nodeId"].is_null());
+        crate::prepare_and_register_model_resource(request).unwrap();
+        assert_eq!(query(generation)["nodeId"], "model");
         crate::bridge::clear_model_assets();
     }
 
