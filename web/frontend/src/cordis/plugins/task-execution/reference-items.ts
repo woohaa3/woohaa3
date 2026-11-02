@@ -42,6 +42,13 @@ export type ReferenceItem = {
   status: ReferenceItemStatus;
   /** 阻止执行的原因（无则为 null）。 */
   blockingReason: string | null;
+  /**
+   * 这个槽在模型表单上的显示名（如「主图像」「上传参考图像【选填】」）。
+   *
+   * 一个模型有多个同类字段时，两张缩略图长得一样，用户分不清哪张是主图。
+   * 取自绑定的 `label`（由 catalog 从表单标题带下来）；模型没有该信息时为 null。
+   */
+  fieldLabel: string | null;
 };
 
 export type ReferenceProjection = {
@@ -80,7 +87,8 @@ export function resolveReferenceItems(options: {
         previewUrl: null,
         assetId: null,
         status: text === "" ? "waiting" : "ready",
-        blockingReason: null
+        blockingReason: null,
+        fieldLabel: null
       });
       continue;
     }
@@ -98,7 +106,8 @@ export function resolveReferenceItems(options: {
         status: "waiting",
         blockingReason: mapping.role === SHOT_IMAGE_REFERENCE_ROLE ? "等待镜头参考图片准备完成" : mapping.role === SHOT_REFERENCE_ROLE
           ? "等待镜头参考录制完成"
-          : `上游节点 ${mapping.sourceNodeId} 还没有可用输出`
+          : `上游节点 ${mapping.sourceNodeId} 还没有可用输出`,
+        fieldLabel: null
       });
       continue;
     }
@@ -119,7 +128,8 @@ export function resolveReferenceItems(options: {
       previewUrl: resolved.previewUrl,
       assetId: resolved.assetId,
       status: resolved.ready && acceptable ? "ready" : resolved.ready ? "invalid" : "waiting",
-      blockingReason: acceptable ? null : `所选模型不接受参考角色「${providerReferenceRole(mapping.role)}」或媒体类型「${resolved.mediaType}」`
+      blockingReason: acceptable ? null : `所选模型不接受参考角色「${providerReferenceRole(mapping.role)}」或媒体类型「${resolved.mediaType}」`,
+      fieldLabel: binding?.label ?? null
     };
     items.push(item);
     if (item.blockingReason) blockingReasons.push(item.blockingReason);

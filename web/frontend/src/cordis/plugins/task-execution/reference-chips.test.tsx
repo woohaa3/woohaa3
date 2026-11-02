@@ -18,7 +18,8 @@ const ready: ReferenceItem = {
   previewUrl: "/api/media/x.png",
   assetId: "a1",
   status: "ready",
-  blockingReason: null
+  blockingReason: null,
+  fieldLabel: null,
 };
 
 const waiting: ReferenceItem = {
@@ -31,7 +32,8 @@ const waiting: ReferenceItem = {
   previewUrl: null,
   assetId: null,
   status: "waiting",
-  blockingReason: "上游节点 n2 还没有可用输出"
+  blockingReason: "上游节点 n2 还没有可用输出",
+  fieldLabel: null,
 };
 
 const invalid: ReferenceItem = {
@@ -44,7 +46,8 @@ const invalid: ReferenceItem = {
   previewUrl: null,
   assetId: "a3",
   status: "invalid",
-  blockingReason: "所选模型不接受参考角色"
+  blockingReason: "所选模型不接受参考角色",
+  fieldLabel: null,
 };
 
 describe("ReferenceTileStrip", () => {

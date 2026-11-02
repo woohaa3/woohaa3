@@ -9,7 +9,7 @@
 import {
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
-  isShotReferenceRole, providerReferenceRole,
+  isShotReferenceRole, pickInputBinding, providerReferenceRole,
   sortWoohaa3CanvasInputMappings,
   type CanvasNodeData,
   type CanvasNodeInputMapping,
@@ -103,12 +103,10 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
       const storageKey = readStorageKey(typedAsset) as string;
       const mediaType = readMediaType(typedAsset, storageKey);
       const mediaKind = typedAsset.mediaKind as CanvasReferenceMediaKind;
-      const binding = bindings.find(
-        (entry) =>
-          entry.roles.includes(mapping.role) &&
-          entry.mediaKinds.includes(mediaKind) &&
-          entry.mediaTypes.includes(mediaType)
-      );
+      // 按剩余容量挑字段：同类字段可能有多条（主图上限 1 + 参考图上限 9），
+      // 只取第一条会让第二张图撞上主图的上限。
+      const binding = pickInputBinding(bindings, { role: mapping.role, mediaKind, mediaType }, counts);
+      const field = binding?.field;
       if (binding) {
         const used = (counts.get(binding.field) ?? 0) + 1;
         if (used > binding.maxItems) {
@@ -127,7 +125,8 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
           role: mapping.role,
           storageKey,
           mediaType,
-          mediaKind
+          mediaKind,
+          ...(field ? { field } : {})
         }
       });
     }
@@ -165,12 +164,7 @@ function resolveShotReferenceMapping(input: {
   }
   const mediaType = readMediaType(asset, storageKey);
   const mediaKind = asset.mediaKind as CanvasReferenceMediaKind;
-  const binding = bindings.find(
-    (entry) =>
-      entry.roles.includes(role) &&
-      entry.mediaKinds.includes(mediaKind) &&
-      entry.mediaTypes.includes(mediaType)
-  );
+  const binding = pickInputBinding(bindings, { role, mediaKind, mediaType }, counts);
   if (!binding) {
     blockingReasons.push(`所选模型不接受${role === "reference_image" ? "图片" : "视频"}参考角色「${role}」或类型「${mediaType}」`);
     return;
@@ -191,7 +185,8 @@ function resolveShotReferenceMapping(input: {
       role,
       storageKey,
       mediaType,
-      mediaKind
+      mediaKind,
+      field: binding.field
     }
   });
 }
@@ -247,11 +242,15 @@ function validateReferenceAsset(
   const storageKey = readStorageKey(asset);
   if (!storageKey) return `参考资产「${label}」缺少稳定 storageKey`;
   const mediaType = readMediaType(asset, storageKey);
-  const binding = bindings.find(
+  // 这里只判断「有没有字段收得下它」，不占容量：容量由调用方按顺序累计。
+  // 分两步是为了保留两种不同原因：不接受这个角色/类别 vs. 类别可以但具体类型不行。
+  const sameKind = bindings.filter(
     (entry) => entry.roles.includes(role) && entry.mediaKinds.includes(mediaKind)
   );
-  if (!binding) return `所选模型不接受参考角色「${role}」或媒体类型「${mediaKind}」`;
-  if (!binding.mediaTypes.includes(mediaType)) return `所选模型不接受参考类型「${mediaType}」`;
+  if (sameKind.length === 0) return `所选模型不接受参考角色「${role}」或媒体类型「${mediaKind}」`;
+  if (!sameKind.some((entry) => entry.mediaTypes.includes(mediaType))) {
+    return `所选模型不接受参考类型「${mediaType}」`;
+  }
   return null;
 }
 

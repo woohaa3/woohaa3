@@ -152,7 +152,9 @@ function ReferenceTile({
         )}
       </span>
       <span className="ref-tile__role" aria-hidden="true">
-        {item.label}
+        {/* 一个模型有多个同类字段时（主图像 / 参考图），两张缩略图长得一样，标签必须说清
+            这张会进哪个槽；没有字段信息的模型仍显示素材名。 */}
+        {item.fieldLabel ?? item.label}
       </span>
       {onRemove ? (
         <button

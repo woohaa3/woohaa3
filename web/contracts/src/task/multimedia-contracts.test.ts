@@ -172,6 +172,55 @@ describe("submit 四媒体校验", () => {
     expect(checkModelCapability(over.value, model).ok).toBe(false);
   });
 
+  it("同一角色有多个字段时按输入自带的 field 计数，不把它们都算到第一个字段", () => {
+    // ppserver：主图上限 1 + 参考图上限 9，两条绑定角色/类型完全一样。
+    const model = {
+      providerId: "ppserver",
+      modelKey: "ppserver:tpl",
+      providerModelId: "tpl",
+      modelType: "image" as const,
+      title: "Banana",
+      interaction: { id: "generic-model", version: 1 },
+      inputSchema: {},
+      defaultInput: {},
+      bindings: [
+        { field: "3_image", semantic: "reference-image" as const, roles: ["reference_image"], mediaKinds: ["image" as const], mediaTypes: ["image/png"], maxItems: 1, valueFormat: "url" as const },
+        { field: "1x_image", semantic: "reference-image" as const, roles: ["reference_image"], mediaKinds: ["image" as const], mediaTypes: ["image/png"], maxItems: 9, valueFormat: "url" as const }
+      ],
+      taskTimeoutMs: 1000
+    };
+    const image = (seed: string, field?: string) => ({
+      assetId: seed,
+      role: "reference_image",
+      storageKey: "sha256-" + seed.repeat(64),
+      mediaType: "image/png",
+      mediaKind: "image" as const,
+      ...(field ? { field } : {})
+    });
+    const decode = (inputs: unknown[]) =>
+      decodeTaskSubmitRequest({ ...base, nodeType: "image", modelType: "image", modelKey: "ppserver:tpl", inputs });
+
+    // 前端/Canvas 已按容量分配：主图 1 张 + 参考图 1 张，合法。
+    const distributed = decode([image("a", "3_image"), image("b", "1x_image")]);
+    if (!distributed.ok) throw new Error("fixture invalid");
+    expect(checkModelCapability(distributed.value, model).ok).toBe(true);
+
+    // 没有 field 的旧请求保留旧行为：两张都算到第一个字段，超限。
+    const legacy = decode([image("a"), image("b")]);
+    if (!legacy.ok) throw new Error("fixture invalid");
+    expect(checkModelCapability(legacy.value, model).ok).toBe(false);
+
+    // 声称写进主图的两张仍然超限。
+    const overMain = decode([image("a", "3_image"), image("b", "3_image")]);
+    if (!overMain.ok) throw new Error("fixture invalid");
+    expect(checkModelCapability(overMain.value, model).ok).toBe(false);
+
+    // 声称的字段根本不存在 → 拒绝，而不是悄悄换一个字段。
+    const unknownField = decode([image("a", "nope")]);
+    if (!unknownField.ok) throw new Error("fixture invalid");
+    expect(checkModelCapability(unknownField.value, model).ok).toBe(false);
+  });
+
   it("mediaKind 缺失时按 mediaType 推断", () => {
     expect(inferMediaKindFromType("video/webm")).toBe("video");
     expect(inferMediaKindFromType("audio/mpeg")).toBe("audio");

@@ -70,7 +70,7 @@ describe("解析上游图片输出", () => {
     });
     expect(resolution.blockingReasons).toEqual([]);
     expect(resolution.inputs).toEqual([
-      { assetId: "asset-a", role: "reference_image", storageKey: STORAGE_KEY, mediaType: "image/png", mediaKind: "image" }
+      { assetId: "asset-a", role: "reference_image", storageKey: STORAGE_KEY, mediaType: "image/png", mediaKind: "image", field: "referenceImages" }
     ]);
   });
 
@@ -320,7 +320,8 @@ describe("镜头参考按 provider 的 reference_video 角色校验", () => {
         role: "reference_video",
         storageKey: "media/shot-ref.mp4",
         mediaType: "video/mp4",
-        mediaKind: "video"
+        mediaKind: "video",
+        field: "referenceVideos"
       }
     ]);
   });
@@ -358,7 +359,7 @@ describe("提交形态只含稳定媒体引用", () => {
     expect(serialized).not.toContain("blob:");
     expect(serialized).not.toContain("data:");
     expect(serialized).not.toContain("base64");
-    expect(Object.keys(resolution.inputs[0]).sort()).toEqual(["assetId", "mediaKind", "mediaType", "role", "storageKey"]);
+    expect(Object.keys(resolution.inputs[0]).sort()).toEqual(["assetId", "field", "mediaKind", "mediaType", "role", "storageKey"]);
   });
 });
 

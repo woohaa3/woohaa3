@@ -13,6 +13,7 @@ import {
   collectWoohaa3CanvasMentions,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
+  pickInputBinding,
   renderWoohaa3CanvasMentionProviderText,
   SHOT_REFERENCE_ROLE,
   SHOT_IMAGE_REFERENCE_ROLE,
@@ -154,9 +155,11 @@ export function resolveMentionsAndCompile(options: {
   const carried = collectCarriedInputs(canvas, nodeId);
   const merged = mergeInputs(direct, carried);
 
-  // 3) binding 校验（合并后统一校验，不静默丢弃）。
-  const bindingProblem = validateMergedInputs(merged, bindings);
-  if (bindingProblem) return { kind: "invalid-mention", message: bindingProblem };
+  // 3) binding 校验 + 字段归属（合并后统一处理，不静默丢弃）。
+  //    每条输入必须带上它要写进的字段：carried inputs 是从文字节点的 mapping 来的，那里没有
+  //    分配过字段；模型又可能有多个同类字段（主图/参考图），不补就只能落回「第一个」。
+  const assigned = assignInputFields(merged, bindings);
+  if (typeof assigned === "string") return { kind: "invalid-mention", message: assigned };
 
   // 4) Provider 文本：文字 token 原位展开，媒体 token 渲染为可读文字。
   const { text: providerText } = renderWoohaa3CanvasMentionProviderText(effective.text, {
@@ -167,7 +170,7 @@ export function resolveMentionsAndCompile(options: {
     resolveMediaLabel: (mention: Woohaa3CanvasMention) => mention.label
   });
 
-  return { kind: "ok", providerText, inputs: merged, candidates };
+  return { kind: "ok", providerText, inputs: assigned, candidates };
 }
 
 /**
@@ -216,17 +219,33 @@ export function mergeInputs(direct: readonly CanvasTaskInput[], carried: readonl
   return merged;
 }
 
-/** 合并后统一 binding 校验；返回阻止原因或 null。 */
-function validateMergedInputs(inputs: readonly CanvasTaskInput[], bindings: CanvasTaskInputBinding[]): string | null {
+/**
+ * 合并后统一校验 + 给每条输入补上它要写进的字段；返回带 `field` 的新列表，或阻止原因。
+ *
+ * 已有的 `field`（直接输入由 input-resolution 分配过）优先保留；没有的按剩余容量分配，
+ * 这样 carried inputs 也能落到「主图满了之后」的下一个同类字段上。
+ */
+function assignInputFields(
+  inputs: readonly CanvasTaskInput[],
+  bindings: CanvasTaskInputBinding[]
+): CanvasTaskInput[] | string {
   const counts = new Map<string, number>();
+  const out: CanvasTaskInput[] = [];
   for (const input of inputs) {
     const mediaKind = input.mediaKind ?? mediaKindFromType(input.mediaType);
-    const binding = bindings.find(
-      (entry) =>
-        entry.roles.includes(input.role) &&
-        entry.mediaKinds.includes(mediaKind) &&
-        entry.mediaTypes.includes(input.mediaType)
-    );
+    const declared = input.field
+      ? bindings.find(
+          (entry) =>
+            entry.field === input.field &&
+            entry.roles.includes(input.role) &&
+            entry.mediaKinds.includes(mediaKind) &&
+            entry.mediaTypes.includes(input.mediaType)
+        )
+      : undefined;
+    if (input.field && !declared) {
+      return `所选模型不接受输入角色「${input.role}」或媒体类型「${input.mediaType}」`;
+    }
+    const binding = declared ?? pickInputBinding(bindings, { role: input.role, mediaKind, mediaType: input.mediaType }, counts);
     if (!binding) {
       return `所选模型不接受输入角色「${input.role}」或媒体类型「${input.mediaType}」`;
     }
@@ -235,8 +254,9 @@ function validateMergedInputs(inputs: readonly CanvasTaskInput[], bindings: Canv
       return `输入数量 ${used} 超过模型对 ${binding.field} 的上限 ${binding.maxItems}`;
     }
     counts.set(binding.field, used);
+    out.push({ ...input, field: binding.field });
   }
-  return null;
+  return out;
 }
 
 function textNodeContent(data: CanvasNodeData | undefined, assets: readonly StoredAsset[]): string {

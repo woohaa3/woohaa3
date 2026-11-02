@@ -122,12 +122,17 @@ function readInputs(raw: unknown): DecodeResult<CanvasTaskInput[]> {
     if (mediaKind === null) {
       return fail("malformed-request", `inputs[${index}] 的 mediaKind 不合法`);
     }
+    // 字段归属由 Canvas 权威解析给出；只接受有界标识符，不接受任意字符串。
+    if (entry.field !== undefined && !isBoundedId(entry.field)) {
+      return fail("malformed-request", `inputs[${index}] 的 field 不是受控字段名`);
+    }
     inputs.push({
       assetId: entry.assetId,
       role: entry.role,
       storageKey: entry.storageKey,
       mediaType: entry.mediaType,
-      ...(mediaKind ? { mediaKind } : {})
+      ...(mediaKind ? { mediaKind } : {}),
+      ...(typeof entry.field === "string" ? { field: entry.field } : {})
     });
   }
   return { ok: true, value: inputs };
@@ -249,12 +254,34 @@ export function checkModelCapability(
   const counts = new Map<string, number>();
   for (const input of request.inputs) {
     const mediaKind = input.mediaKind ?? inferMediaKindFromType(input.mediaType);
-    const match = bindings.find(
-      (binding) =>
-        binding.roles.includes(input.role) &&
-        binding.mediaTypes.includes(input.mediaType) &&
-        (mediaKind === undefined || binding.mediaKinds.includes(mediaKind))
-    );
+    // Canvas 已按字段容量分配好 `field`：先认它，只核实「这个字段接不接这份输入」。
+    // 没有 `field` 的旧请求才退回按角色挑第一个匹配；只取第一个会让同类字段
+    // （主图上限 1 + 参考图上限 9）的第二张图被误判成超限。
+    const declared = input.field
+      ? bindings.find(
+          (binding) =>
+            binding.field === input.field &&
+            binding.roles.includes(input.role) &&
+            binding.mediaTypes.includes(input.mediaType) &&
+            (mediaKind === undefined || binding.mediaKinds.includes(mediaKind))
+        )
+      : undefined;
+    if (input.field && !declared) {
+      return capabilityFail(
+        "unsupported",
+        `模型 ${model.modelKey} 不接受参考输入（role=${input.role} type=${input.mediaType} field=${input.field}）`
+      );
+    }
+    // 没有 `field` 的旧请求保持旧计数规则（第一个匹配的绑定）：让它继续明确报「上限」，
+    // 而不是放行之后由 provider-input 发出一个服务端不认识的 `urls`，把「图没送到」藏起来。
+    const match =
+      declared ??
+      bindings.find(
+        (binding) =>
+          binding.roles.includes(input.role) &&
+          binding.mediaTypes.includes(input.mediaType) &&
+          (mediaKind === undefined || binding.mediaKinds.includes(mediaKind))
+      );
     if (!match) {
       return capabilityFail(
         "unsupported",

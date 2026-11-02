@@ -129,7 +129,8 @@ describe("resolveMentionsAndCompile", () => {
     });
     expect(result.kind).toBe("ok");
     if (result.kind !== "ok") return;
-    expect(result.inputs).toEqual(direct);
+    // 合并后会补上字段归属（这里唯一绑定是 `imageUrls`）。
+    expect(result.inputs).toEqual([{ ...direct[0]!, field: "imageUrls" }]);
   });
 
   it("直接输入与 mention 指向同一资产只提交一次", () => {

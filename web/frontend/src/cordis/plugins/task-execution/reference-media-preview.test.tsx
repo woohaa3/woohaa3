@@ -14,7 +14,8 @@ it("hover opens a bounded full-image popup without moving input focus, leaving c
   root = createRoot(container);
   await act(async () => root.render(<UiProvider><ReferenceTileStrip items={[{
     slotId: "image-1", sourceNodeId: "node-1", role: "reference_image", mentionType: "input_image",
-    label: "图片 1", mediaKind: "image", previewUrl: "/api/media/full.png", assetId: "asset-1", status: "ready", blockingReason: null
+    label: "图片 1", mediaKind: "image", previewUrl: "/api/media/full.png", assetId: "asset-1", status: "ready", blockingReason: null,
+    fieldLabel: null,
   }]} /></UiProvider>));
   const tile = container.querySelector(".ref-tile")!;
   await act(async () => tile.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));

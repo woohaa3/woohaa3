@@ -80,17 +80,78 @@ export type DescribedTemplate = {
   uploadProvider?: string;
 };
 
+/** 遮罩类上传字段：它是蒙版而不是参考图，画布上的普通图片不能连进来。 */
+function isMaskField(key: string, field: Record<string, any>): boolean {
+  if (/mask/i.test(key)) return true;
+  const title = typeof field.title === "string" ? field.title : "";
+  return /遮罩|蒙版|mask/i.test(title);
+}
+
+/**
+ * 主图字段的识别：RunningHub 表单用 `variant: deferred` + `sourceHints.content: canvas`
+ * 表示「这是一张用来改的底图」，其余图片上传字段才是参考图。
+ *
+ * 只用来补标题，不改变角色（见 `tagReferenceImageField` 的说明）。
+ */
+function isSourceImageField(field: Record<string, any>): boolean {
+  const props = isRecord(field["x-component-props"]) ? field["x-component-props"] : {};
+  if (props.variant === "deferred") return true;
+  const hints = props.sourceHints;
+  return isRecord(hints) && hints.content === "canvas";
+}
+
+/**
+ * 给「接受图片的上传字段」补上宿主认的 `x-pptask-semantic: reference-image`。
+ *
+ * 服务端表单（RunningHub 风格）只声明 `x-component: Upload` + `accept: image/*`，没有语义标记。
+ * 宿主推导输入绑定只认语义标记，没有就当「该模型不接受参考图」，于是画布上任何图片都被
+ * 参考图选择器拒绝（「当前模型不接受该媒体类型」）。
+ *
+ * 只补不改：已有语义的字段不动；遮罩字段不补；`maxCount` 带成 `maxItems` 供宿主夹上限。
+ * 返回新对象，不修改入参。
+ */
+function tagReferenceImageField(schema: Record<string, any> | undefined): Record<string, any> | undefined {
+  if (!schema || !isRecord(schema.properties)) return schema;
+  const properties: Record<string, any> = {};
+  for (const [key, field] of Object.entries(schema.properties as Record<string, unknown>)) {
+    if (!isRecord(field) || field["x-component"] !== "Upload" || "x-pptask-semantic" in field || isMaskField(key, field)) {
+      properties[key] = field;
+      continue;
+    }
+    const props = isRecord(field["x-component-props"]) ? field["x-component-props"] : {};
+    const accept = typeof props.accept === "string" ? props.accept : "";
+    // 只认明确接受图片的字段；没写 accept 的不猜（视频/音频上传也是 Upload）。
+    if (!/(^|,)\s*image\//i.test(accept)) {
+      properties[key] = field;
+      continue;
+    }
+    const maxCount = typeof props.maxCount === "number" && props.maxCount > 0 ? props.maxCount : undefined;
+    // 角色保持 `reference_image`：画布连线推出来的角色就是它，这里另起一个 role 会让主图字段
+    // 永远匹配不上（分配直接失败）。主图与参考图的区别用**标题**表达，界面按它显示标签。
+    const sourceImage = isSourceImageField(field);
+    properties[key] = {
+      ...field,
+      "x-pptask-semantic": "reference-image",
+      ...(sourceImage && !field.title ? { title: "主图像" } : {}),
+      ...(maxCount !== undefined && field.maxItems === undefined ? { maxItems: maxCount } : {})
+    };
+  }
+  return { ...schema, properties };
+}
+
 export function interpretDescribe(payload: unknown): DescribedTemplate {
   const record = isRecord(payload) ? payload : {};
   const kindRaw = typeof record.kind === "string" ? record.kind.trim().toLowerCase() : "";
   const kind: PpserverKind | undefined =
     kindRaw === "image" ? "image" : kindRaw === "video" ? "video" : undefined;
 
-  const schema = isRecord(record.formSchema)
-    ? record.formSchema
-    : isRecord(record.inputSchema)
-      ? record.inputSchema
-      : undefined;
+  const schema = tagReferenceImageField(
+    isRecord(record.formSchema)
+      ? record.formSchema
+      : isRecord(record.inputSchema)
+        ? record.inputSchema
+        : undefined
+  );
   const values = isRecord(record.formValues)
     ? record.formValues
     : isRecord(record.defaultInput)

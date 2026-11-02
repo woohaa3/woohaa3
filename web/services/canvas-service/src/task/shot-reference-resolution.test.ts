@@ -46,7 +46,8 @@ describe("authoritative static image input resolution", () => {
     const h = still();
     const result = resolveNodeReferenceInputs({ canvas: h.canvas, nodeId: "video", bindings });
     expect(result.blockingReasons).toEqual([]);
-    expect(result.inputs).toEqual([{ assetId: h.asset.id, role: "reference_image", storageKey: "images/a.png", mediaType: "image/png", mediaKind: "image" }]);
+    // 输入现在带 `field`：模型可能有多个同类字段，字段归属由解析阶段分配好随输入提交。
+    expect(result.inputs).toEqual([{ assetId: h.asset.id, role: "reference_image", storageKey: "images/a.png", mediaType: "image/png", mediaKind: "image", field: "images" }]);
   });
   it.each(["checksum", "storageKey", "width", "contentType", "mediaKind", "ownership"])("rejects invalid %s without passing a texture or preview identity", field => {
     const h = still();

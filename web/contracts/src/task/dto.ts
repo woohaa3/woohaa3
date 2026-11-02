@@ -130,6 +130,16 @@ export type CanvasTaskInput = {
   mediaType: string;
   /** 稳定媒体类别；Task Service 按 binding 校验。旧客户端可缺省（按 mediaType 推断）。 */
   mediaKind?: CanvasReferenceMediaKind;
+  /**
+   * 这张图写进模型表单的哪个字段（`CanvasTaskInputBinding.field`，如 ppserver 的 `3_image`）。
+   *
+   * 一个模型可能有多个同类字段（主图 / 参考图），角色却相同；只靠 `role + mediaKind` 会把它们
+   * 全部落到第一个字段上，于是第二张图就撞上「主图上限 1」。由 Canvas 在权威解析时按绑定容量
+   * 分配好后随输入一起提交；Task 不重新猜。
+   *
+   * 旧客户端可缺省：缺省时 Task 按 `role + mediaKind` 找第一个匹配的绑定（旧行为）。
+   */
+  field?: string;
 };
 
 /** 浏览器/Canvas 提交的任务请求体。 */
@@ -190,7 +200,42 @@ export type CanvasTaskInputBinding = {
   mediaTypes: string[];
   maxItems: number;
   valueFormat: "url" | "reference";
+  /**
+   * 字段在表单上的显示名（如「主图像」「上传参考图像」），只用于界面标签。
+   *
+   * 一个模型有多个同类字段时，光看 `field` 用户分不清哪个是主图——两张缩略图长得一样。
+   * 缺省时界面退回按角色显示，不影响校验与分配。
+   */
+  label?: string;
 };
+
+/**
+ * 按「角色 + 媒体类别 + 媒体类型」挑一个绑定，**优先挑还有剩余容量的那个**。
+ *
+ * 一个模型可以有多条同类绑定（ppserver 的「主图」`3_image` 上限 1、「参考图」`1x_image` 上限 9），
+ * 它们的 roles / mediaKinds 常常完全一样。只取第一个匹配会让第二张图撞上主图的上限 1，
+ * 于是「两张参考图」被误判成超限。这里的规则：
+ *
+ * 1. 先按匹配条件筛出候选，保持 catalog 里的声明顺序；
+ * 2. 在候选里取第一个还没满的（`used[field] < maxItems`）；
+ * 3. 全都满了才退回第一个候选 —— 让调用方报出「上限 N」那条原始错误，而不是变成「不接受」。
+ *
+ * `used` 由调用方维护（同一份解析里累计各 field 已占用的数量）。
+ */
+export function pickInputBinding(
+  bindings: readonly CanvasTaskInputBinding[],
+  input: { role: string; mediaKind?: CanvasReferenceMediaKind; mediaType: string },
+  used: ReadonlyMap<string, number> = new Map()
+): CanvasTaskInputBinding | undefined {
+  const readUsed = (field: string): number => used.get(field) ?? 0;
+  const candidates = bindings.filter(
+    (binding) =>
+      binding.roles.includes(input.role) &&
+      (input.mediaKind === undefined || binding.mediaKinds.includes(input.mediaKind)) &&
+      binding.mediaTypes.includes(input.mediaType)
+  );
+  return candidates.find((binding) => readUsed(binding.field) < binding.maxItems) ?? candidates[0];
+}
 
 /** catalog 中单个模型的可投影描述。 */
 export type CanvasTaskCatalogModel = {
@@ -333,7 +378,8 @@ export function normalizeInputBindings(input: unknown): CanvasTaskInputBinding[]
       mediaKinds: mediaKinds.length > 0 ? mediaKinds : [mediaKind],
       mediaTypes: mediaTypes.length > 0 ? mediaTypes : [...DEFAULT_BINDING_MEDIA_TYPES[mediaKind]],
       maxItems,
-      valueFormat: entry.valueFormat === "reference" ? "reference" : "url"
+      valueFormat: entry.valueFormat === "reference" ? "reference" : "url",
+      ...(typeof entry.label === "string" && entry.label.trim() !== "" ? { label: entry.label.trim() } : {})
     });
   }
   return bindings;
@@ -397,7 +443,17 @@ export function referenceInputCapabilityFromDescription(description: {
       typeof rawMax === "number" && Number.isFinite(rawMax) && rawMax > 0
         ? Math.min(Math.floor(rawMax), CANVAS_TASK_LIMITS.maxReferences)
         : CANVAS_TASK_LIMITS.maxReferences;
-    scanned.push(...normalizeInputBindings([{ field: key, semantic, maxItems }]));
+    scanned.push(
+      ...normalizeInputBindings([
+        {
+          field: key,
+          semantic,
+          maxItems,
+          // 表单标题随绑定带下去：界面靠它区分「主图像」和「参考图」。
+          ...(typeof value.title === "string" && value.title.trim() !== "" ? { label: value.title } : {})
+        }
+      ])
+    );
   }
   if (scanned.length > 0) return summarizeBindings(scanned);
 

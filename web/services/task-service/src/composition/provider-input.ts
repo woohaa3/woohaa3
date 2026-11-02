@@ -7,9 +7,52 @@ import type { MediaClient } from "../clients/media-client.js";
 import type { ArkVideoImageAsset, ArkVideoImageAssetInput, ArkVideoImageBinary } from "../providers/ark-types.js";
 
 /**
+ * 图片模型的参考输入字段。
+ *
+ * 有 `field` 时按字段写：`{ "3_image": ["url"], "1x_image": ["url", "url"] }`。ppserver 这类
+ * 多字段模型就是靠这个区分「主图」和「参考图」；只发一个 `urls`，服务端拿不到图。
+ *
+ * 没有 `field` 的输入按新旧分流：
+ * - **全部**都没有（旧客户端 / ark、grsai 这种只有一个 `urls` 字段的模型）→ 仍是 `urls: [...]`，
+ *   与改动前完全一致；
+ * - **只有一部分**没有（两端版本不一致，或某条输入漏了分配）→ 这些 URL 丢弃并记一条告警。
+ *   不能塞进 `urls`：多字段模型没有这个字段，多一个未知键会让整单被拒；
+ *   也不能悄悄丢：调用方需要知道有几张图没送出去。
+ */
+function imageReferenceFields(
+  inputs: TaskSubmitRequest["inputs"],
+  referenceUrls: readonly string[],
+  onDrop?: (dropped: number) => void
+): Record<string, string[]> {
+  const byField = new Map<string, string[]>();
+  const fieldless: string[] = [];
+  inputs.forEach((input, index) => {
+    const url = referenceUrls[index];
+    if (!url) return;
+    const field = input.field;
+    if (!field) {
+      fieldless.push(url);
+      return;
+    }
+    const bucket = byField.get(field);
+    if (bucket) bucket.push(url);
+    else byField.set(field, [url]);
+  });
+  if (byField.size === 0) {
+    return fieldless.length > 0 ? { urls: fieldless } : {};
+  }
+  if (fieldless.length > 0) onDrop?.(fieldless.length);
+  return Object.fromEntries(byField);
+}
+
+/**
  * 构造 provider 输入；参考输入由 Task 通过 Media sign 在调用前注入 URL。
  */
-export function buildInput(request: TaskSubmitRequest, referenceUrls: readonly string[] = []): Record<string, unknown> {
+export function buildInput(
+  request: TaskSubmitRequest,
+  referenceUrls: readonly string[] = [],
+  onDropFieldless?: (dropped: number) => void
+): Record<string, unknown> {
   if (request.modelType === "language") {
     return {
       prompt: [{ role: "user", content: languageContentParts(request, referenceUrls) }],
@@ -20,14 +63,16 @@ export function buildInput(request: TaskSubmitRequest, referenceUrls: readonly s
     return {
       prompt: request.prompt,
       ...request.parameters,
-      ...(referenceUrls.length > 0 ? { urls: [...referenceUrls] } : {})
+      ...imageReferenceFields(request.inputs, referenceUrls, onDropFieldless)
     };
   }
   const groups: Record<string, Array<{ url: string; role: string }>> = {};
   request.inputs.forEach((input, index) => {
     const url = referenceUrls[index];
     if (!url) return;
-    const field = inputFieldFor(input.mediaKind, input.role);
+    // 有 `field` 就按字段写（ppserver 这类多字段模型，如视频的 `3_image` / `1x_image`）。
+    // 没有才退回按角色猜字段（ark 的 videoUrls/audioUrls 等既有约定）。
+    const field = input.field ?? inputFieldFor(input.mediaKind, input.role);
     (groups[field] ??= []).push({ url, role: input.role });
   });
   return {
@@ -83,16 +128,18 @@ export async function buildProviderInputForResource(options: {
   logger?: (event: Record<string, unknown>) => void;
 }): Promise<Record<string, unknown>> {
   const { request, referenceUrls, providerId } = options;
+  const onDropFieldless = (dropped: number) =>
+    options.logger?.({ event: "reference-fields-dropped", count: dropped });
   if (providerId !== "ark" || request.modelType !== "video") {
-    return buildInput(request, referenceUrls);
+    return buildInput(request, referenceUrls, onDropFieldless);
   }
   const imageInputs = request.inputs
     .map((input, index) => ({ input, url: referenceUrls[index] }))
     .filter((entry) => entry.url && isImageInput(entry.input.mediaKind, entry.input.role));
-  if (imageInputs.length === 0) return buildInput(request, referenceUrls);
+  if (imageInputs.length === 0) return buildInput(request, referenceUrls, onDropFieldless);
   if (!options.ensureVideoImageAsset) {
     options.logger?.({ event: "seedance-image-asset-unconfigured", count: imageInputs.length });
-    return buildInput(request, referenceUrls);
+    return buildInput(request, referenceUrls, onDropFieldless);
   }
   const ensure = options.ensureVideoImageAsset;
   const materials = new Map<string, string>();
@@ -107,7 +154,7 @@ export async function buildProviderInputForResource(options: {
     materials.set(url as string, materialized.uri);
   }
   const rewritten = referenceUrls.map((url) => materials.get(url) ?? url);
-  return buildInput(request, rewritten);
+  return buildInput(request, rewritten, onDropFieldless);
 }
 
 function isImageInput(mediaKind: string | undefined, role: string): boolean {
