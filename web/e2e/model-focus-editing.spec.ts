@@ -4,7 +4,7 @@
  * 这里保留规范 placement patch、只读/pointercancel、连续手势与退出的像素检查。
  */
 import { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import {
   canvasRevision,

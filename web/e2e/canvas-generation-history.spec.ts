@@ -1,5 +1,5 @@
 /** Real GPU acceptance: AI center history at desktop and Pad sizes, never a second browser. */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, readStoredCanvas, resetCanvasStorage, waitForCanvasSession } from "./helpers.js";
 
 test("能力中心展示当前画布只读生成历史", async ({ page }) => {

@@ -8,8 +8,7 @@
  * - 开关是本地偏好，立即生效且没有保存按钮；
  * - 偏好写入独立键，不写宿主共享配置。
  */
-import { expect, test } from "@playwright/test";
-
+import { expect, test } from "./review-browser.js";
 async function openNotifications(page: import("@playwright/test").Page) {
   await page.goto("/settings");
   await expect(page.locator('[data-testid="settings-workspace"]')).toBeVisible({ timeout: 60_000 });

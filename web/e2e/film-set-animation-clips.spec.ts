@@ -1,5 +1,6 @@
 import { actor, base, clip } from "./fixtures/film-set-animation-clips.js";
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { writeFileSync } from "node:fs";
 import { createFilmSetSnapshot, createModelSnapshot, createMotionSnapshot, canonicalFilmSetFields, filmSetItemAdapterHash, filmSetClipPrecondition, type FilmSetItem, type FilmSetAnimationClip } from "@woohaa3/contracts";
 import { installPageHelpers, resetCanvasStorage, waitForCanvasSession, sendCommands, readStoredCanvas, waitForCommandsSettled } from "./helpers.js";

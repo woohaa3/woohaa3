@@ -5,7 +5,7 @@
  * 场景与 `notes/yjs-baseline.md` 的单元基线互补：那里测单机 Y.Doc 计算，这里测**真实
  * WebSocket + room + 持久化**的端到端成本。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { WebSocket } from "ws";
 import { MESSAGE_TYPE, SYNC_MESSAGE_TYPE, YJS_SYNC_PROTOCOL_VERSION, encodeCommandMessage, encodeSyncMessage } from "@woohaa3/contracts/canvas-yjs";
 import * as Y from "yjs";

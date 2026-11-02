@@ -5,8 +5,8 @@
  * 在真实 Ladle build 里验证生产 primitives 的 keyboard/focus、portal containment、
  * 无重叠与无横向 overflow；story 直接消费生产 export，fixture 只控制公开 state。
  */
-import { expect, test, type Page } from "@playwright/test";
-
+import { type Page } from "@playwright/test";
+import { expect, test } from "../../../e2e/review-browser.js";
 const PRIMITIVES = "画布组件--生产-ui-primitives";
 
 async function openStory(page: Page, story: string): Promise<void> {

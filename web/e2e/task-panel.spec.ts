@@ -9,7 +9,7 @@
  * - 参考输入不满足时显示 blocking reason 且主操作被真正禁用；
  * - 面板贴底且宽度不溢出；DOM 里不存在被删除的旧展示组件。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { currentFrameRevision,
 	createNode,
 	installPageHelpers,

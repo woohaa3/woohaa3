@@ -13,7 +13,7 @@
  * prepare/status 面。未注入时本文件全部 `test.skip`，明确记为“真实浏览器 E2E 未运行”，
  * 不冒充通过（见 change 的 implementation-verification notes）。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 
 const PORT = Number(process.env.E2E_PORT ?? 4273);

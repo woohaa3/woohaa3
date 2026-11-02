@@ -9,7 +9,7 @@
  *
  * 需要站点启用画布存储 + Yjs 同步，跑在 `playwright.yjs.config.ts` 下。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { installPageHelpers, waitForCanvasSession, waitForBevyReady } from "./helpers.js";
 import {

@@ -1,5 +1,6 @@
 import { createModel3DNodeData, model3DNodeDataFields } from "@woohaa3/contracts";
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, resetCanvasStorage, sendCommands, uploadMedia, waitForCanvasSession } from "./helpers.js";
 
 async function createTargets(page: Page) {

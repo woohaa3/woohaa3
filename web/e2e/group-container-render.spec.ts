@@ -9,7 +9,7 @@
  *
  * 只用产品镜像断言：`window.__bevyRuntime.lastScene()` 与 `window.__canvasCanonical`。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
   installPageHelpers,
   readStoredCanvas,

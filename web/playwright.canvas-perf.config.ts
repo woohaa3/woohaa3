@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { reviewBaseUrl, reviewProbeUrl, reviewUseOptions, reviewWebServerEnv, reviewWebServerIgnoreHTTPSErrors } from "./e2e/review-target.js";
 
 /**
  * 画布交互热路径的**测试专用**性能采集配置
@@ -29,14 +30,17 @@ export default defineConfig({
 	retries: 0,
 	reporter: [["list"]],
 	use: {
-		baseURL: `http://127.0.0.1:${PORT}`,
+		...reviewUseOptions,
+		baseURL: reviewBaseUrl(PORT),
 		deviceScaleFactor: dpr,
 		trace: { mode: "off", snapshots: false }
 	},
 	projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], deviceScaleFactor: dpr } }],
 	webServer: {
+		ignoreHTTPSErrors: reviewWebServerIgnoreHTTPSErrors,
 		command: `node e2e/server.mjs --port ${PORT} --dist ${dist}`,
-		url: `http://127.0.0.1:${PORT}/`,
+		url: reviewProbeUrl(PORT),
+    env: reviewWebServerEnv,
 		reuseExistingServer: false,
 		timeout: 60_000,
 		stdout: "pipe",

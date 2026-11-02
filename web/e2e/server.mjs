@@ -33,6 +33,7 @@ import { createStaticHandler, send } from "../../scripts/lib/static-server.mjs";
 import { resolveAppPageTitle } from "../../scripts/lib/app-html.mjs";
 import { resolveAppBasePath } from "../../scripts/lib/app-base-path.mjs";
 import { applyHttpMount, applyUpgradeMount, interceptHttpMount, rejectUpgradeSocket } from "../../scripts/lib/mount-adapter.mjs";
+import { createReviewServer, reviewScheme } from "../../scripts/lib/review-tls.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..", "..");
@@ -467,7 +468,7 @@ function readBody(req) {
 	});
 }
 
-const server = http.createServer((req, res) => {
+const server = createReviewServer((req, res) => {
 	// 公开挂载边界：只剥离一次前缀；前缀外/非法请求不进入业务或 SPA 回退。
 	const mountAction = applyHttpMount(basePath, req);
 	if (interceptHttpMount(req, res, mountAction)) return;
@@ -677,6 +678,6 @@ process.on("SIGINT", shutdown);
 
 server.listen(port, host, () => {
 	process.stderr.write(
-		`[e2e-server] http://${host}:${port}（真实三服务 + ingress${fault ? `，媒体故障 ${fault}` : ""}${canvasStorageEnabled ? "，画布存储开启" : "，画布存储关闭"}）\n`
+		`[e2e-server] ${reviewScheme()}://${host}:${port}（真实三服务 + ingress${fault ? `，媒体故障 ${fault}` : ""}${canvasStorageEnabled ? "，画布存储开启" : "，画布存储关闭"}）\n`
 	);
 });

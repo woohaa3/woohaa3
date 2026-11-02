@@ -13,7 +13,7 @@
  * 历史版本由测试专用端点 `/__e2e_seed_node_history__` 直接经服务端 `registerTaskResult`
  * 登记（生产由 task projector / 编辑完成 outbox 触发），与生产走同一登记服务。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

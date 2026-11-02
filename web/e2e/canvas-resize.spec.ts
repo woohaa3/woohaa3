@@ -6,7 +6,7 @@
  * 会把窗口物理尺寸强行拉回旧的 surface 尺寸，表现为「放大窗口后渲染区域不变大」。这里断言
  * 窗口放大后 `__bevyRuntime.lastScene().surface` 跟随新的画布尺寸。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { installPageHelpers, resetCanvasStorage, waitForCanvasSession } from "./helpers.js";
 

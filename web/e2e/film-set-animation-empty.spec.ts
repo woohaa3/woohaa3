@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from "./review-browser.js";
 import { canonicalFilmSetFields } from '@woohaa3/contracts';
 import { base } from './fixtures/film-set-animation-clips.js';
 import { installPageHelpers, resetCanvasStorage, waitForCanvasSession, sendCommands, readStoredCanvas, waitForCommandsSettled } from './helpers.js';

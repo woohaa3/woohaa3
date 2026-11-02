@@ -8,7 +8,7 @@
  * - 菜单「上传…」→ 真实上传到 Media Service → 提交 asset + 节点；
  * - 断线只读时插入项禁用。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	installPageHelpers,
 	readStoredCanvas,

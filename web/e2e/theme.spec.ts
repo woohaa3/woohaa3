@@ -7,7 +7,7 @@
  * - 切换不改变 canvas revision、selection、节点集合；
  * - 桌面与 390×844 视口都能无错误切换。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, resetCanvasStorage, waitForCanvasSession } from "./helpers.js";
 
 // sentinel preset 与默认高差异（与 @woohaa3/contracts fixtures 一致）。

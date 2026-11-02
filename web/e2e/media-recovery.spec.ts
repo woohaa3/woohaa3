@@ -12,7 +12,7 @@
  * 所以本用例用**直接写入 IndexedDB** 的方式种下「资产写入路径将来会写成的那种记录」，
  * 再验证恢复契约。资产写入路径本身属于后续 change。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers,
 	readStoredCanvas,
 	resetCanvasStorage,

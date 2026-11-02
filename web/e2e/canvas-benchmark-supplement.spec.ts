@@ -1,5 +1,7 @@
 // Supplemental probes use the real app and hardware runtime. No online generation.
-import {test,expect,chromium,type Browser,type Page} from '@playwright/test';
+import { chromium, type Browser, type Page } from "@playwright/test";
+import { openReviewBrowser, test, expect } from "./review-browser.js";
+import { reviewBaseHost } from "./review-target.js";
 import {mkdirSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -105,8 +107,8 @@ for(const kind of ['distance','selection','groups','residency','cache-state'])te
   }
   if(kind==='cache-state')fixture.manifest.modelCount=2;
   fixture.manifest.kind=`supplement-${kind}`;fixture.manifest.hash=digest(fixture.canvas);result.manifest=fixture.manifest;json(resolve(dir,'manifest.json'),fixture.manifest);
-  browser=await chromium.launch({headless:false,args:['--enable-unsafe-webgpu','--disable-background-timer-throttling','--disable-renderer-backgrounding']});
-  const context=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:1,baseURL:`http://127.0.0.1:${process.env.BENCH_PORT??4398}`});page=await context.newPage();
+  browser=await openReviewBrowser(chromium,{headless:false,args:['--enable-unsafe-webgpu','--disable-background-timer-throttling','--disable-renderer-backgrounding']});
+  const context=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:1,baseURL:`http://${reviewBaseHost}:${process.env.BENCH_PORT??4398}`});page=await context.newPage();
   page.on('pageerror',error=>result.errors.push(String(error)));
   await seedYjsCanvas(page,'woohaa3-default-canvas',[],{canvas:fixture.canvas});await page.goto('/');await waitForCanvasSession(page);
   await page.waitForFunction(()=>{const w=window as any;return w.__bevyRuntime?.isReady?.()&&w.__canvasLocate&&w.__canvasSubmitCommands;},null,{timeout:90000});

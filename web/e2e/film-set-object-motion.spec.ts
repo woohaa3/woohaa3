@@ -9,7 +9,8 @@
  * - 固定 T 截图包含内容（前景像素）。
  */
 import { filmSetNodeDataFields, createFilmSetSnapshot, createModelSnapshot } from "@woohaa3/contracts";
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
   installPageHelpers,
   readStoredCanvas,

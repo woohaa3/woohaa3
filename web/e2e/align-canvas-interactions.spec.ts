@@ -10,7 +10,7 @@
  * - nodeData.patch 字段级 allowlist 落盘 + 刷新恢复；
  * - 单批次提交原子推进一次 revision。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	installPageHelpers,
 	readStoredCanvas,

@@ -11,7 +11,7 @@
  * 说明：单图替换确认弹窗需要「恰好选中一个图片节点」，由选中状态驱动，这里覆盖其
  * 创建/取消分支；完整替换需要真实上传，用多文件/普通导入路径覆盖上传与命令边界。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	installPageHelpers,
 	readStoredCanvas,

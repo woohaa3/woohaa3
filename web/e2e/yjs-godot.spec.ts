@@ -10,7 +10,7 @@
  * 站点画布 ID 固定为 `woohaa3-default-canvas`（`DEFAULT_CANVAS_ID`），所以这里先把该
  * canvas 置为 yjs 模式。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { installPageHelpers,
   waitForCanvasSession,

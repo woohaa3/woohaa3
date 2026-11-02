@@ -166,3 +166,19 @@ pnpm extensions:check                                # 改了扩展声明、产�
 ```
 
 单元测试通常与源码相邻。跨包门禁在 `web/tooling`，业务 E2E 在 `web/e2e`，Rust 测试在相邻 `tests.rs` 与 `bevy/tests`。
+
+### E2E 走远端复核机
+
+`web/e2e` 与 `web/ui/showcase/e2e` 的 spec 统一从 `web/e2e/review-browser.ts` 引 `test` / `expect`：
+
+```sh
+WOOHAA_REVIEW_CDP_URL=http://<复核机>:9222 pnpm -C web run e2e
+```
+
+- 配了就连那台机器的 CDP（`connectOverCDP`），没配才本机起无头浏览器；连不上直接失败，不降级。
+- CDP 模式下 `web/e2e/server.mjs` 与 `ui/showcase/e2e/serve.mjs` 自动绑 `0.0.0.0`，并用
+  `E2E_TLS=1` 的自签 HTTPS；`baseURL` 换成 `WOOHAA_REVIEW_HOST`（默认第一个非回环 IPv4）。
+  用 `http://<内网 IP>` 会丢 `navigator.gpu` / Service Worker / `crypto.subtle`，GPU 与性能结论不可信。
+- 视觉基线按浏览器所在系统命名：复核机生成的叫 `*-chromium-cdp-win32.png`，与本机
+  `*-chromium-linux.png` 并存；改基线必须回同一台复核机重生成。
+- 新增 spec 不要写 `import { test, expect } from "@playwright/test"`，否则会绕过这套通道。
