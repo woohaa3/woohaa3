@@ -53,6 +53,12 @@ import { stableAuthorityVersion, worldObjectVersion, type WorldAuthoringAuthorit
 import type { WorldCameraSettingsService } from "./camera-service.js";
 import type { WorldAuthoringService } from "./scene-area-service.js";
 import { objectKey, type LeaseRecord, type SpatialWriteContext } from "./spatial-leases.js";
+import {
+  hostCompletionKey,
+  type AssistantHostCompletionFact,
+  type AssistantHostCompletionIdentity,
+  type AssistantHostCompletionRepository
+} from "./host-completions.js";
 
 export type AssistantWorldServiceDeps = {
   authority: Pick<WorldAuthoringAuthority, "prepareContent" | "prepareCanvas">;
@@ -70,6 +76,13 @@ export type AssistantWorldServiceDeps = {
   }): Promise<void>;
   /** Host-owned durable T08 history lookup for idempotent completion retries after reopen. */
   findRecordedCompletion?(completion: AssistantWorldCompletionInput["completion"]): boolean | Promise<boolean>;
+  /**
+   * Durable trusted completion facts. The fact is persisted before the T08
+   * history write, so a transient history failure (or a restart between the
+   * two writes) can retry the exact completion after the run was stopped and
+   * its occupancy released. Tests may omit it; production must wire it.
+   */
+  hostCompletions?: AssistantHostCompletionRepository;
   pending(): Promise<LeaseRecord[]>;
 };
 
@@ -99,19 +112,7 @@ type RunLedger = {
  * run actually wrote. Transport evidence, prompts, capture refreshes and later
  * generations can never insert a row here.
  */
-type HostCompletion = {
-  canvasId: string;
-  requestId: string;
-  runId: string;
-  completionId: string;
-  cameraId: string;
-  settingsVersion: string;
-  status: "succeeded" | "partial";
-};
-
-function completionKey(input: { canvasId: string; runId: string; completionId: string; cameraId: string }): string {
-  return JSON.stringify([input.canvasId, input.runId, input.completionId, input.cameraId]);
-}
+type HostCompletion = AssistantHostCompletionFact;
 
 export type AssistantWorldService = {
   issue(input: AssistantWorldRunRequest): Promise<AssistantWorldIssueOutcome>;
@@ -135,8 +136,17 @@ export type AssistantWorldService = {
     evidence: unknown;
   }): Promise<{ ok: true } | AssistantWorldFailure>;
   recover(input: { canvasId: string }): Promise<AssistantWorldRecoveryOutcome>;
-  /** Host-internal camera completion verifier. The canvas composition wires it to T08. */
-  verifyCompletion(completion: AssistantWorldCompletionInput["completion"], evidence: unknown): boolean;
+  /**
+   * Host-internal camera completion verifier. The canvas composition wires it to
+   * T08. It resolves durable host facts, so it may be asynchronous.
+   */
+  verifyCompletion(completion: AssistantWorldCompletionInput["completion"], evidence: unknown): boolean | Promise<boolean>;
+  /**
+   * Retry every outstanding durable host completion fact. Called at host start
+   * so a transient history failure is补记 after restart without re-running the
+   * assistant or recreating history.
+   */
+  resumePendingCompletions(): Promise<{ ok: true; attempted: number; remaining: number } | AssistantWorldFailure>;
   close(): void;
 };
 
@@ -262,6 +272,101 @@ function hasNode(canvas: ServerCanvas, nodeId: string): boolean {
 export function createAssistantWorldService(deps: AssistantWorldServiceDeps): AssistantWorldService {
   const ledgers = new Map<string, RunLedger>();
   const hostCompletions = new Map<string, HostCompletion>();
+  /**
+   * Completion keys whose T08 history row is known to exist in this process.
+   * A fact is removed from the durable pending store only after the history
+   * write returns success, so stop/release never hides a failed write.
+   */
+  const recordedCompletions = new Map<string, HostCompletion>();
+
+  function hostIdentity(completion: AssistantWorldCompletionInput["completion"]): AssistantHostCompletionIdentity {
+    return {
+      canvasId: completion.canvasId,
+      runId: completion.runId,
+      completionId: completion.completionId,
+      cameraId: completion.cameraId
+    };
+  }
+
+  async function loadHostCompletion(completion: AssistantWorldCompletionInput["completion"]): Promise<HostCompletion | null> {
+    const key = hostCompletionKey(completion);
+    const cached = hostCompletions.get(key);
+    if (cached) return cached;
+    if (!deps.hostCompletions) return null;
+    try {
+      const stored = await deps.hostCompletions.get(hostIdentity(completion));
+      if (stored) hostCompletions.set(key, stored);
+      return stored;
+    } catch {
+      // Unknown durable state stays fail-closed.
+      return null;
+    }
+  }
+
+  async function rememberHostCompletion(fact: HostCompletion): Promise<void> {
+    hostCompletions.set(hostCompletionKey(fact), fact);
+    if (deps.hostCompletions) await deps.hostCompletions.put(fact);
+  }
+
+  async function forgetHostCompletion(fact: HostCompletion): Promise<void> {
+    const key = hostCompletionKey(fact);
+    recordedCompletions.set(key, fact);
+    hostCompletions.delete(key);
+    if (deps.hostCompletions) await deps.hostCompletions.delete(fact);
+  }
+
+  async function listHostCompletions(input: { canvasId: string; runId: string }): Promise<HostCompletion[]> {
+    if (deps.hostCompletions) {
+      try {
+        const stored = await deps.hostCompletions.list(input);
+        for (const fact of stored) hostCompletions.set(hostCompletionKey(fact), fact);
+        return stored;
+      } catch {
+        return [...hostCompletions.values()].filter(fact => fact.canvasId === input.canvasId && fact.runId === input.runId);
+      }
+    }
+    return [...hostCompletions.values()].filter(fact => fact.canvasId === input.canvasId && fact.runId === input.runId);
+  }
+
+  /**
+   * Attempt the T08 history write for one trusted fact. Success removes the
+   * durable pending row; any failure keeps it for a later settle/complete/restart.
+   */
+  async function writeHostCompletion(fact: HostCompletion, evidence: unknown): Promise<{ ok: true } | AssistantWorldFailure> {
+    const completion = {
+      canvasId: fact.canvasId,
+      runId: fact.runId,
+      completionId: fact.completionId,
+      cameraId: fact.cameraId,
+      settingsVersion: fact.settingsVersion
+    };
+    const key = hostCompletionKey(fact);
+    if (recordedCompletions.has(key)) return { ok: true };
+    if (deps.findRecordedCompletion) {
+      try {
+        if (await deps.findRecordedCompletion(completion)) {
+          await forgetHostCompletion(fact);
+          return { ok: true };
+        }
+      } catch {
+        // Unknown history state is not success; continue to the write attempt.
+      }
+    }
+    let completed: Awaited<ReturnType<typeof deps.cameraSettings.complete>>;
+    try {
+      completed = await deps.cameraSettings.complete({ completion, evidence });
+    } catch (error) {
+      return failure("not-ready", error instanceof Error ? error.message : "镜头完成留档失败");
+    }
+    if (!completed.ok) return completed;
+    try {
+      await forgetHostCompletion(fact);
+    } catch {
+      // The history row already exists; a lingering pending fact only causes an
+      // idempotent duplicate retry, never a second row.
+    }
+    return { ok: true };
+  }
 
   async function inspect(canvasId: string): Promise<{ ok: true; room: CanvasRoom; canvas: ServerCanvas } | AssistantWorldFailure> {
     const room = await deps.resolveRoom(canvasId);
@@ -673,23 +778,31 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     };
   }
 
-  function verifyCompletion(completion: AssistantWorldCompletionInput["completion"], _evidence: unknown): boolean {
+  async function verifyCompletion(completion: AssistantWorldCompletionInput["completion"], _evidence: unknown): Promise<boolean> {
     // Completion is trusted only after the host recorded the durable terminal
     // turn fact plus the exact camera/version this run wrote. A model reply,
     // transport boolean, capture refresh or later generation never inserts it.
-    const host = hostCompletions.get(completionKey(completion));
+    const recorded = recordedCompletions.get(hostCompletionKey(completion));
+    if (recorded) {
+      return recorded.settingsVersion === completion.settingsVersion && recorded.cameraId === completion.cameraId;
+    }
+    const host = await loadHostCompletion(completion);
     if (!host) return false;
     if (host.settingsVersion !== completion.settingsVersion || host.cameraId !== completion.cameraId) return false;
     const ledger = [...ledgers.values()].find(entry => entry.runId === completion.runId && entry.canvasId === completion.canvasId);
-    // Grant revocation at the natural end of a turn is not a failed execution;
-    // the durable terminal status supplied to settleRun decides whether a
-    // completion fact may exist at all.
-    if (!ledger) return false;
-    if (ledger.completionId !== completion.completionId) return false;
-    const identity: WorldObjectIdentity = { kind: "camera", cameraId: completion.cameraId };
-    const write = ledger.writes.get(objectKey(identity));
-    if (!write) return false;
-    return sameIdentity(write.identity, identity) && write.version === completion.settingsVersion;
+    if (ledger) {
+      if (ledger.completionId !== completion.completionId) return false;
+      const identity: WorldObjectIdentity = { kind: "camera", cameraId: completion.cameraId };
+      const write = ledger.writes.get(objectKey(identity));
+      if (!write) return false;
+      return sameIdentity(write.identity, identity) && write.version === completion.settingsVersion;
+    }
+    // Reopened process: the durable host fact itself carries the exact issued
+    // identities (its key includes canvas/run/completion/camera) and the
+    // settingsVersion. It is only written from a successful terminal turn.
+    return host.canvasId === completion.canvasId
+      && host.runId === completion.runId
+      && host.completionId === completion.completionId;
   }
 
   async function complete(input: AssistantWorldCompletionInput): Promise<AssistantWorldCompletionOutcome> {
@@ -698,7 +811,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     }
     // Retried completion of an already host-recorded run stays idempotent even
     // after the process marked the run settled.
-    const recorded = hostCompletions.get(completionKey(input.completion));
+    const recorded = recordedCompletions.get(hostCompletionKey(input.completion));
     if (recorded) {
       if (recorded.settingsVersion !== input.completion.settingsVersion) {
         return failure("operation-conflict", "相同完成身份携带了不同镜头版本");
@@ -708,6 +821,23 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         duplicate: true,
         settingsVersion: recorded.settingsVersion,
         completionId: recorded.completionId
+      };
+    }
+    // A durable host fact without a history row is the recoverable case: the
+    // lease may already be released and the in-process ledger gone, yet the
+    // exact host-confirmed completion must still be recorded.
+    const pending = await loadHostCompletion(input.completion);
+    if (pending) {
+      if (pending.settingsVersion !== input.completion.settingsVersion || pending.cameraId !== input.completion.cameraId) {
+        return failure("operation-conflict", "相同完成身份携带了不同镜头版本");
+      }
+      const written = await writeHostCompletion(pending, input.evidence);
+      if (!written.ok) return written;
+      return {
+        ok: true,
+        duplicate: false,
+        settingsVersion: pending.settingsVersion,
+        completionId: pending.completionId
       };
     }
     // After a reopen the in-process ledger is gone, but a durable T08 row is
@@ -736,7 +866,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     if (input.completion.completionId !== ledger.completionId) return failure("unverified-run", "完成身份不是宿主签发");
     const camera = context.writableTargets.find(entry => entry.target.kind === "camera" && entry.target.cameraId === input.completion.cameraId);
     if (!camera) return failure("outside-scope", "镜头不在本次可写集合");
-    if (!verifyCompletion(input.completion, input.evidence)) return failure("unverified-run", "宿主尚未确认本轮完成");
+    if (!(await verifyCompletion(input.completion, input.evidence))) return failure("unverified-run", "宿主尚未确认本轮完成");
     const completed = await deps.cameraSettings.complete({ completion: input.completion, evidence: input.evidence });
     if (!completed.ok) return completed;
     return {
@@ -773,16 +903,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     if (cameraWrites.length === 0) return { ok: true };
     let firstFailure: AssistantWorldFailure | null = null;
     for (const cameraWrite of cameraWrites) {
-      const completion = {
-        canvasId: ledger.canvasId,
-        runId: ledger.runId,
-        completionId: ledger.completionId,
-        cameraId: cameraWrite.identity.cameraId,
-        settingsVersion: cameraWrite.version
-      };
-      const key = completionKey(completion);
-      if (hostCompletions.has(key)) continue;
-      hostCompletions.set(key, {
+      const fact: HostCompletion = {
         canvasId: ledger.canvasId,
         requestId: ledger.requestId,
         runId: ledger.runId,
@@ -790,19 +911,20 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         cameraId: cameraWrite.identity.cameraId,
         settingsVersion: cameraWrite.version,
         status
-      });
-      let completed: Awaited<ReturnType<typeof deps.cameraSettings.complete>>;
+      };
+      const key = hostCompletionKey(fact);
+      if (recordedCompletions.has(key)) continue;
       try {
-        completed = await deps.cameraSettings.complete({ completion, evidence });
+        // Persist the trusted fact before the history write: a failure below
+        // must leave recoverable evidence, not a settled run with no history.
+        await rememberHostCompletion(fact);
       } catch (error) {
-        hostCompletions.delete(key);
-        firstFailure ??= failure("not-ready", error instanceof Error ? error.message : "镜头完成留档失败");
-        continue;
+        // The fact is still cached in-process; a second settle in this process
+        // can retry, but missing durable evidence is reported as a failure.
+        firstFailure ??= failure("not-ready", error instanceof Error ? error.message : "助手完成事实保存失败");
       }
-      if (!completed.ok) {
-        hostCompletions.delete(key);
-        firstFailure ??= completed;
-      }
+      const written = await writeHostCompletion(fact, evidence);
+      if (!written.ok) firstFailure ??= written;
     }
     return firstFailure ?? { ok: true };
   }
@@ -840,29 +962,41 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
   }): Promise<{ ok: true } | AssistantWorldFailure> {
     const ledger = [...ledgers.values()].find(entry => entry.canvasId === input.canvasId && entry.runId === input.runId);
     if (ledger) {
-      if (ledger.settled) return { ok: true };
       let completionFailure: AssistantWorldFailure | null = null;
       if (input.status === "succeeded" || input.status === "partial") {
+        // Always retry outstanding host facts, including after the run was
+        // already settled. A settled run must still be able to补记 a failed
+        // history write without re-running the assistant.
         const completed = await recordHostCompletion(ledger, input.status, input.evidence);
         if (!completed.ok) completionFailure = completed;
       }
-      const stopped = await confirmStopped({
-        canvasId: ledger.canvasId,
-        contextId: ledger.contextId,
-        runId: ledger.runId,
-        epoch: ledger.epoch,
-        executionId: ledger.executionId,
-        evidence: input.evidence
-      });
-      if (!stopped.ok) return stopped;
+      if (!ledger.settled) {
+        const stopped = await confirmStopped({
+          canvasId: ledger.canvasId,
+          contextId: ledger.contextId,
+          runId: ledger.runId,
+          epoch: ledger.epoch,
+          executionId: ledger.executionId,
+          evidence: input.evidence
+        });
+        if (!stopped.ok) return stopped;
+      }
       return completionFailure ?? { ok: true };
     }
-    // Reopened process: the in-process ledger is gone, but the durable lease
-    // record carries the original request/run/epoch/execution identity. Releasing
-    // it still requires the host's exact-stop evidence; unknown state stays.
+    // Reopened process: the in-process ledger is gone, but durable host facts
+    // still carry the exact completion identity/version. Retry those first, then
+    // release the durable lease only with the host's exact-stop evidence.
+    let completionFailure: AssistantWorldFailure | null = null;
+    if (input.status === "succeeded" || input.status === "partial") {
+      const facts = await listHostCompletions({ canvasId: input.canvasId, runId: input.runId });
+      for (const fact of facts) {
+        const written = await writeHostCompletion(fact, input.evidence);
+        if (!written.ok) completionFailure ??= written;
+      }
+    }
     const pending = await deps.pending();
     const record = pending.find(entry => entry.intent.canvasId === input.canvasId && entry.intent.runId === input.runId);
-    if (!record) return { ok: true };
+    if (!record) return completionFailure ?? { ok: true };
     try {
       await deps.confirmStopped({
         canvasId: record.intent.canvasId,
@@ -872,10 +1006,32 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         executionId: record.intent.executionId,
         evidence: input.evidence
       });
-      return { ok: true };
     } catch (error) {
       return stopFailure(error);
     }
+    return completionFailure ?? { ok: true };
+  }
+
+  async function resumePendingCompletions(): Promise<{ ok: true; attempted: number; remaining: number } | AssistantWorldFailure> {
+    if (!deps.hostCompletions) return { ok: true, attempted: 0, remaining: 0 };
+    let facts: HostCompletion[];
+    try {
+      facts = await deps.hostCompletions.list();
+    } catch (error) {
+      return failure("not-ready", error instanceof Error ? error.message : "无法读取待补记完成事实");
+    }
+    let firstFailure: AssistantWorldFailure | null = null;
+    for (const fact of facts) {
+      const written = await writeHostCompletion(fact, { source: "host-startup-resume" });
+      if (!written.ok) firstFailure ??= written;
+    }
+    let remaining = 0;
+    try {
+      remaining = (await deps.hostCompletions.list()).length;
+    } catch {
+      remaining = firstFailure ? 1 : 0;
+    }
+    return firstFailure ?? { ok: true, attempted: facts.length, remaining };
   }
 
   async function recover(input: { canvasId: string }): Promise<AssistantWorldRecoveryOutcome> {
@@ -895,11 +1051,13 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     cancel,
     confirmStopped,
     settleRun,
+    resumePendingCompletions,
     recover,
     verifyCompletion,
     close() {
       ledgers.clear();
       hostCompletions.clear();
+      recordedCompletions.clear();
     }
   };
 }

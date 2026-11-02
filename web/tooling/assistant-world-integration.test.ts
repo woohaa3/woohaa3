@@ -9,7 +9,11 @@ import { createWorldAuthoringAuthority } from "../services/canvas-service/src/wo
 import { createWorldAuthoringService } from "../services/canvas-service/src/world-authoring/scene-area-service.js";
 import { createAssistantWorldService } from "../services/canvas-service/src/world-authoring/assistant-service.js";
 import { createWorldCameraSettingsService } from "../services/canvas-service/src/world-authoring/camera-service.js";
-import { InMemoryWorldCameraHistoryRepository } from "../services/canvas-service/src/world-authoring/camera-history.js";
+import {
+  InMemoryWorldCameraHistoryRepository,
+  type WorldCameraHistoryRepository
+} from "../services/canvas-service/src/world-authoring/camera-history.js";
+import { SqliteAssistantHostCompletionRepository } from "../services/canvas-service/src/storage/sqlite/host-completions.js";
 
 const now = "2026-01-01T00:00:00Z";
 const box = {
@@ -519,6 +523,170 @@ describe("assistant world authoring through the real canvas queue", () => {
       }
     } finally {
       assistant?.close();
+      repository.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a transient history failure retryable and补记 it after a real restart", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "assistant-world-history-retry-"));
+    const file = join(dir, "canvas.sqlite");
+    const hostFile = join(dir, "host-completions.sqlite");
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas-1", now);
+    canvas.document.nodes.push(
+      { id: "area-node", type: "scene-area", position: { x: 0, y: 0 } },
+      { id: "camera-card", type: "world-camera", position: { x: 900, y: 900 } }
+    );
+    canvas.nodeData["area-node"] = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "area-scope-1",
+        bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+      }
+    };
+    canvas.nodeData["camera-card"] = {
+      worldCamera: {
+        kind: "world-camera",
+        version: "shared-world-v1",
+        cameraId: "camera-1",
+        settingsVersion: "camera-1-v1",
+        position: { u: 5, v: 5, h: 1.5 },
+        rotation: [0, 0, 0, 1],
+        projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+        captureMode: { kind: "static" },
+        aspect: { width: 16, height: 9 },
+        boundInstanceId: null
+      }
+    };
+
+    const authority = createWorldAuthoringAuthority({
+      executeScene,
+      verifyStopped: (identity, evidence) => {
+        const value = evidence as { terminal?: unknown; runId?: unknown } | null;
+        return !!value && value.terminal === true && value.runId === identity.runId;
+      }
+    });
+    const repository = new SqliteYjsRepository({ path: file, spatialAuthority: authority });
+    const room = new CanvasRoom({ canvasId: canvas.id, repository, now: () => now });
+    await room.initialize({ canvas, roomEpoch: "initial", createdAt: now });
+    const worldAuthoring = createWorldAuthoringService({
+      authority,
+      resolveRoom: async () => room,
+      acquire: async (intent) => repository.acquireSpatialRun(intent),
+      cancel: async (canvasId, requestId) => repository.cancelSpatialRun(canvasId, requestId),
+      findLatest: async (canvasId, operationId) => repository.findLatestWorldAuthoringCommand(canvasId, operationId)
+    });
+
+    const inner = new InMemoryWorldCameraHistoryRepository();
+    let historyFailures = 1;
+    const history: WorldCameraHistoryRepository = {
+      async insert(entry) {
+        if (historyFailures > 0) {
+          historyFailures -= 1;
+          throw Object.assign(new Error("injected transient history failure"), { code: "not-ready" });
+        }
+        return inner.insert(entry);
+      },
+      get: (canvasId, key) => inner.get(canvasId, key),
+      list: (canvasId, cameraId, limit) => inner.list(canvasId, cameraId, limit)
+    };
+    let hostFacts = new SqliteAssistantHostCompletionRepository({ path: hostFile });
+    let assistant: ReturnType<typeof createAssistantWorldService> | null = null;
+    const cameraSettings = createWorldCameraSettingsService({
+      resolveRoom: async () => room,
+      resolveContext: (canvasId, contextId) => worldAuthoring.resolveCapability(canvasId, contextId),
+      history,
+      verifyCompletion: (completion, evidence) => assistant ? assistant.verifyCompletion(completion, evidence) : false,
+      now: () => now
+    });
+    const deps = {
+      authority,
+      worldAuthoring,
+      cameraSettings,
+      resolveRoom: async () => room,
+      cancel: async (canvasId: string, requestId: string) => repository.cancelSpatialRun(canvasId, requestId),
+      confirmStopped: async (input: { canvasId: string; requestId: string; runId: string; epoch: number; executionId: string; evidence: unknown }) =>
+        repository.confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence),
+      hostCompletions: hostFacts,
+      pending: async () => repository.pendingSpatialRuns()
+    };
+    assistant = createAssistantWorldService(deps);
+    try {
+      const issued = await assistant.issue({
+        canvasId: canvas.id,
+        requestId: "run-1",
+        runId: "run-1",
+        epoch: 0,
+        executionId: "exec-1",
+        scope: { kind: "scene-area", areaId: "area-1" }
+      });
+      if (!issued.ok) throw new Error(issued.message);
+      const written = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "set-world-camera",
+          operationId: "camera-1",
+          cameraId: "camera-1",
+          expectedSettingsVersion: "camera-1-v1",
+          settings: {
+            position: { u: 5, v: 5, h: 2 },
+            rotation: [0, 0, 0, 1],
+            projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+            captureMode: { kind: "static" },
+            aspect: { width: 16, height: 9 },
+            boundInstanceId: null
+          }
+        }
+      });
+      expect(written.ok).toBe(true);
+      if (!written.ok) return;
+      const settlement = {
+        canvasId: canvas.id,
+        runId: "run-1",
+        status: "succeeded" as const,
+        evidence: { terminal: true, runId: "run-1" }
+      };
+      const first = await assistant.settleRun(settlement);
+      expect(first).toMatchObject({ ok: false, code: "not-ready" });
+      expect(await history.list(canvas.id, "camera-1")).toHaveLength(0);
+      expect(await hostFacts.list({ canvasId: canvas.id, runId: "run-1" })).toHaveLength(1);
+
+      // Process rebuild: the in-process ledger/cache is gone, but the trusted
+      // fact and the exact lease survive. A successful terminal settle must
+      // write history once and release the original occupancy.
+      assistant.close();
+      // Reopen the durable store itself: the pending fact must survive an
+      // actual SQLite close, not only an in-process service rebuild.
+      await hostFacts.close();
+      hostFacts = new SqliteAssistantHostCompletionRepository({ path: hostFile });
+      assistant = createAssistantWorldService({ ...deps, hostCompletions: hostFacts });
+      const settled = await assistant.settleRun(settlement);
+      expect(settled).toEqual({ ok: true });
+      const entries = await history.list(canvas.id, "camera-1");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        completionId: issued.completionId,
+        settingsVersion: written.settingsVersion,
+        runId: "run-1",
+        cameraId: "camera-1"
+      });
+      expect(await hostFacts.list()).toHaveLength(0);
+      expect(await repository.pendingSpatialRuns()).toHaveLength(0);
+
+      const completion = {
+        canvasId: canvas.id,
+        runId: "run-1",
+        completionId: issued.completionId,
+        cameraId: "camera-1",
+        settingsVersion: written.settingsVersion!
+      };
+      expect(await assistant.complete({ contextId: issued.context.contextId, completion })).toMatchObject({ ok: true, duplicate: true });
+      expect(await history.list(canvas.id, "camera-1")).toHaveLength(1);
+    } finally {
+      assistant?.close();
+      await hostFacts.close();
       repository.close();
       rmSync(dir, { recursive: true, force: true });
     }

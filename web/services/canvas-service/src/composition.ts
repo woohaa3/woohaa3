@@ -35,6 +35,7 @@ import { isAggregateRunNode } from "@woohaa3/contracts";
 import { composeSnippets, type SnippetComposition } from "./storage/snippet-composition.js";
 import { composeNodeHistory, type NodeHistoryComposition } from "./storage/node-history-composition.js";
 import { composeWorldCameraHistory, type WorldCameraHistoryComposition } from "./storage/world-camera-history-composition.js";
+import { composeAssistantHostCompletions, type AssistantHostCompletionComposition } from "./storage/host-completion-composition.js";
 import { AgentDeltaJournal } from "./agent-authoring/index.js";
 import {
   CANVAS_AGENT_DEVELOPMENT_PRINCIPAL_ENV,
@@ -494,6 +495,23 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     }
   }
 
+  // T11a trusted host-completion facts: separate durable row written before the
+  // T08 history row so a transient history failure or restart can补记.
+  let hostCompletions: AssistantHostCompletionComposition | null = null;
+  if (options.enableWorldCameraHistory ?? true) {
+    try {
+      hostCompletions = await composeAssistantHostCompletions({
+        env,
+        ...(options.storageConfig ? { storageConfig: options.storageConfig } : {}),
+        ...(options.assistantHostCompletionRepository ? { repository: options.assistantHostCompletionRepository } : {}),
+        ...(options.now ? { now: options.now } : {})
+      });
+    } catch (error) {
+      log({ event: "assistant-host-completion-compose-failed", message: error instanceof Error ? error.message : "unknown" });
+      hostCompletions = null;
+    }
+  }
+
   if (nodeHistory) {
     void nodeHistory.editCompletion.processPending().then(
       (result) => {
@@ -770,7 +788,10 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         cameraSettings,
         resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
         cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
-        confirmStopped: async (input) => { (await spatialRepository()).confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence); },
+        confirmStopped: async (input) => {
+          const repository = await spatialRepository();
+          await repository.confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence);
+        },
         findRecordedCompletion: async (completion) => {
           const entry = await cameraHistory!.repository.get(completion.canvasId, worldCameraCompletionKey(completion));
           return !!entry
@@ -779,6 +800,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
             && entry.cameraId === completion.cameraId
             && entry.settingsVersion === completion.settingsVersion;
         },
+        ...(hostCompletions ? { hostCompletions: hostCompletions.repository } : {}),
         pending: async () => (await spatialRepository()).pendingSpatialRuns()
       })
     : null;
@@ -788,6 +810,15 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       if (options.verifyWorldCameraCompletion && !(await options.verifyWorldCameraCompletion(completion, evidence))) return false;
       return assistant.verifyCompletion(completion, evidence);
     };
+    // Retry trusted completion facts left by a transient history failure before
+    // the previous process stopped. This never re-runs the assistant.
+    void assistant.resumePendingCompletions().then((result) => {
+      if (!result.ok || result.remaining > 0) {
+        log({ event: "assistant-host-completion-resume-pending", result });
+      }
+    }).catch((error) => {
+      log({ event: "assistant-host-completion-resume-failed", message: error instanceof Error ? error.message : "unknown" });
+    });
   }
   async function spatialRepository() {
     const repository = await resolveYjsRepository();
@@ -900,6 +931,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       if (options.modelRenderer === undefined) await modelRenderer?.close().catch(() => undefined);
       await nodeHistory?.close().catch(() => undefined);
       await cameraHistory?.close().catch(() => undefined);
+      await hostCompletions?.close().catch(() => undefined);
 
       if (syncHandler) await syncHandler.close();
       if (releaseWriterLock) await releaseWriterLock().catch(() => undefined);

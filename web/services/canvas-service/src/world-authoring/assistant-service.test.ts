@@ -7,6 +7,7 @@ import type {
 } from "@woohaa3/contracts";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { createAssistantWorldService } from "./assistant-service.js";
+import { InMemoryAssistantHostCompletionRepository } from "./host-completions.js";
 import type { CanvasRoom } from "../sync/room.js";
 
 const now = "2026-01-01T00:00:00Z";
@@ -71,11 +72,15 @@ function harness(overrides: {
   context?: WorldToolContext;
   pending?: Array<{ intent: Record<string, unknown>; state: "active" | "cancelled" | "stopped" }>;
   confirmStopped?: (input: unknown) => Promise<void>;
+  /** Throw on this many initial history writes before succeeding. */
+  historyFailures?: number;
+  hostCompletions?: InMemoryAssistantHostCompletionRepository;
 } = {}) {
   const context = overrides.context ?? contextFor();
   const revoked: string[] = [];
   const saved: Array<Record<string, unknown>> = [];
   const completed: Array<Record<string, unknown>> = [];
+  let remainingHistoryFailures = overrides.historyFailures ?? 0;
   let current = canvasFixture();
   const room = {
     async inspectPublished<T>(select: (canvas: ServerCanvas) => T): Promise<{ ok: true; canvas: ServerCanvas; value: T }> {
@@ -115,6 +120,10 @@ function harness(overrides: {
       },
       async complete(input: never) {
         const value = input as unknown as Record<string, unknown>;
+        if (remainingHistoryFailures > 0) {
+          remainingHistoryFailures -= 1;
+          throw new Error("injected transient history failure");
+        }
         completed.push(value);
         return {
           ok: true,
@@ -134,7 +143,9 @@ function harness(overrides: {
     },
     async resolveRoom() { return room; },
     async cancel() { revoked.push("lease-cancelled"); },
-    confirmStopped: overrides.confirmStopped ?? (async () => undefined),    async pending() {
+    confirmStopped: overrides.confirmStopped ?? (async () => undefined),
+    ...(overrides.hostCompletions ? { hostCompletions: overrides.hostCompletions } : {}),
+    async pending() {
       return (overrides.pending ?? []).map(entry => ({
         intent: {
           requestId: "req-1",
@@ -291,7 +302,7 @@ describe("assistant world authority", () => {
     };
     // An active/adapter-failed turn and a bare `completed` claim are not host
     // completion evidence: no history may be written yet.
-    expect(service.verifyCompletion(completion, undefined)).toBe(false);
+    expect(await service.verifyCompletion(completion, undefined)).toBe(false);
     const early = await service.complete({
       contextId: issued.context.contextId,
       completion,
@@ -308,13 +319,168 @@ describe("assistant world authority", () => {
     });
     expect(settled).toEqual({ ok: true });
     expect(completed).toHaveLength(1);
-    expect(service.verifyCompletion(completion, undefined)).toBe(true);
+    expect(await service.verifyCompletion(completion, undefined)).toBe(true);
 
     const first = await service.complete({ contextId: issued.context.contextId, completion });
     expect(first).toMatchObject({ ok: true, duplicate: true });
     const second = await service.complete({ contextId: issued.context.contextId, completion });
     expect(second).toMatchObject({ ok: true, duplicate: true });
     expect(completed).toHaveLength(1);
+  });
+
+  it("keeps a failed history write retryable after the exact stop released the run", async () => {
+    const hostCompletions = new InMemoryAssistantHostCompletionRepository();
+    const { service, completed } = harness({ historyFailures: 1, hostCompletions });
+    const issued = await service.issue({
+      canvasId: "canvas-1",
+      requestId: "req-1",
+      runId: "run-1",
+      epoch: 0,
+      executionId: "exec-1",
+      scope: { kind: "scene-area", areaId: "area-1" }
+    });
+    if (!issued.ok) throw new Error(issued.message);
+    await service.write({
+      contextId: issued.context.contextId,
+      operation: {
+        kind: "set-world-camera",
+        operationId: "camera-1",
+        cameraId: "camera-1",
+        expectedSettingsVersion: "cv-1",
+        settings: {
+          position: { u: 0, v: 0, h: 1 },
+          rotation: [0, 0, 0, 1],
+          projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+          captureMode: { kind: "static" },
+          aspect: { width: 16, height: 9 },
+          boundInstanceId: null
+        }
+      }
+    });
+    const settlement = {
+      canvasId: "canvas-1",
+      runId: "run-1",
+      status: "succeeded" as const,
+      evidence: { owner: "owner-1", requestId: "req-1" }
+    };
+    const first = await service.settleRun(settlement);
+    expect(first).toMatchObject({ ok: false, code: "not-ready" });
+    expect(completed).toHaveLength(0);
+    expect(await hostCompletions.list({ canvasId: "canvas-1", runId: "run-1" })).toHaveLength(1);
+
+    const second = await service.settleRun(settlement);
+    expect(second).toEqual({ ok: true });
+    expect(completed).toHaveLength(1);
+    expect(await hostCompletions.list({ canvasId: "canvas-1", runId: "run-1" })).toHaveLength(0);
+  });
+
+  it("lets a complete retry补记 a pending host fact after the run was settled", async () => {
+    const hostCompletions = new InMemoryAssistantHostCompletionRepository();
+    const { service, completed } = harness({ historyFailures: 1, hostCompletions });
+    const issued = await service.issue({
+      canvasId: "canvas-1",
+      requestId: "req-1",
+      runId: "run-1",
+      epoch: 0,
+      executionId: "exec-1",
+      scope: { kind: "scene-area", areaId: "area-1" }
+    });
+    if (!issued.ok) throw new Error(issued.message);
+    await service.write({
+      contextId: issued.context.contextId,
+      operation: {
+        kind: "set-world-camera",
+        operationId: "camera-1",
+        cameraId: "camera-1",
+        expectedSettingsVersion: "cv-1",
+        settings: {
+          position: { u: 0, v: 0, h: 1 },
+          rotation: [0, 0, 0, 1],
+          projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+          captureMode: { kind: "static" },
+          aspect: { width: 16, height: 9 },
+          boundInstanceId: null
+        }
+      }
+    });
+    expect(await service.settleRun({
+      canvasId: "canvas-1",
+      runId: "run-1",
+      status: "succeeded",
+      evidence: { owner: "owner-1", requestId: "req-1" }
+    })).toMatchObject({ ok: false, code: "not-ready" });
+    const completion = {
+      canvasId: "canvas-1",
+      runId: "run-1",
+      completionId: issued.completionId,
+      cameraId: "camera-1",
+      settingsVersion: "cv-2"
+    };
+    const retried = await service.complete({ contextId: issued.context.contextId, completion });
+    expect(retried).toMatchObject({ ok: true, duplicate: false });
+    expect(completed).toHaveLength(1);
+    expect(await hostCompletions.list()).toHaveLength(0);
+  });
+
+  it("replays a durable host fact after a process rebuild instead of losing history", async () => {
+    const hostCompletions = new InMemoryAssistantHostCompletionRepository();
+    const pending = [{ intent: { requestId: "req-1", runId: "run-1", epoch: 0, executionId: "exec-1" }, state: "active" as const }];
+    const firstRun = harness({ historyFailures: 1, hostCompletions, pending });
+    const issued = await firstRun.service.issue({
+      canvasId: "canvas-1",
+      requestId: "req-1",
+      runId: "run-1",
+      epoch: 0,
+      executionId: "exec-1",
+      scope: { kind: "scene-area", areaId: "area-1" }
+    });
+    if (!issued.ok) throw new Error(issued.message);
+    await firstRun.service.write({
+      contextId: issued.context.contextId,
+      operation: {
+        kind: "set-world-camera",
+        operationId: "camera-1",
+        cameraId: "camera-1",
+        expectedSettingsVersion: "cv-1",
+        settings: {
+          position: { u: 0, v: 0, h: 1 },
+          rotation: [0, 0, 0, 1],
+          projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+          captureMode: { kind: "static" },
+          aspect: { width: 16, height: 9 },
+          boundInstanceId: null
+        }
+      }
+    });
+    expect(await firstRun.service.settleRun({
+      canvasId: "canvas-1",
+      runId: "run-1",
+      status: "succeeded",
+      evidence: { owner: "owner-1", requestId: "req-1" }
+    })).toMatchObject({ ok: false, code: "not-ready" });
+    firstRun.service.close();
+
+    const secondRun = harness({ hostCompletions, pending });
+    const settled = await secondRun.service.settleRun({
+      canvasId: "canvas-1",
+      runId: "run-1",
+      status: "succeeded",
+      evidence: { owner: "owner-1", requestId: "req-1" }
+    });
+    expect(settled).toEqual({ ok: true });
+    expect(secondRun.completed).toHaveLength(1);
+    expect(await hostCompletions.list()).toHaveLength(0);
+    const retried = await secondRun.service.complete({
+      contextId: issued.context.contextId,
+      completion: {
+        canvasId: "canvas-1",
+        runId: "run-1",
+        completionId: issued.completionId,
+        cameraId: "camera-1",
+        settingsVersion: "cv-2"
+      }
+    });
+    expect(retried).toMatchObject({ ok: true, duplicate: true });
   });
 
   it("never records camera history for a failed terminal turn", async () => {

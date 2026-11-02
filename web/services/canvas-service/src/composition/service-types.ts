@@ -94,6 +94,8 @@ export type CanvasServiceOptions = {
   nodeHistoryRepository?: NodeHistoryRepository;
   /** 测试注入：世界镜头完成历史仓库（T08）。 */
   worldCameraHistoryRepository?: import("../world-authoring/camera-history.js").WorldCameraHistoryRepository;
+  /** 测试注入：可信宿主完成事实仓库（T11a）；缺失时按存储配置组合。 */
+  assistantHostCompletionRepository?: import("../world-authoring/host-completions.js").AssistantHostCompletionRepository;
   /**
    * 可信助手完成校验（T08）。必须在宿主进程内注入；缺失时完成历史入口 fail closed，
    * 浏览器/HTTP 不能自报 completion。

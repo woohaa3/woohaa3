@@ -268,12 +268,43 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       onTurnSettled: ({ turn, status }) => {
         const assistantWorld = ctx.canvas.assistantWorld;
         if (!assistantWorld) return;
-        void assistantWorld.settleRun({
+        const input = {
           canvasId: turn.canvasId,
           runId: turn.requestId,
           status,
           evidence: { owner: turn.owner, requestId: turn.requestId, turnId: turn.turnId }
-        }).catch(() => undefined);
+        } as const;
+        // The settle hook is synchronous, but the trusted host-completion fact
+        // and the T08 history write are asynchronous. Consume a structured
+        // failure and retry with backoff; the durable fact also survives a
+        // restart and is replayed by the canvas composition.
+        const retryDelays = [250, 1_000, 4_000] as const;
+        const attempt = (remaining: number): void => {
+          void assistantWorld.settleRun(input).then((result) => {
+            if (result.ok) return;
+            ctx.log.scope("application")({
+              event: "assistant-world-settle-failed",
+              canvasId: turn.canvasId,
+              requestId: turn.requestId,
+              code: result.code,
+              remaining
+            });
+            if (remaining <= 0) return;
+            const timer = setTimeout(
+              () => attempt(remaining - 1),
+              retryDelays[retryDelays.length - remaining] ?? retryDelays[retryDelays.length - 1]
+            );
+            timer.unref?.();
+          }).catch((error) => {
+            ctx.log.scope("application")({
+              event: "assistant-world-settle-error",
+              canvasId: turn.canvasId,
+              requestId: turn.requestId,
+              message: error instanceof Error ? error.message : "unknown"
+            });
+          });
+        };
+        attempt(retryDelays.length);
       },
       serviceConnectionProviders: () => generation.list(),
       serviceConnectionSources: {
