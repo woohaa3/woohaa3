@@ -197,6 +197,7 @@ export async function executeCommand(
   const updateForStorage = outcome.update ?? new Uint8Array(0);
   if (options?.signal?.aborted) return { ok: false, status: "rejected", commandId: batch.commandId, code: "cancelled", message: "提交已取消" };
   const commit = await host.repository.commitYjsCommand({
+    spatialContext: options?.spatialContext,
     signal: options?.signal,
     canvasId: host.canvasId,
     expectedStorageSeq: host.storageSeq,
@@ -302,10 +303,12 @@ function duplicateResult(
 
 /** 持久化失败 → 稳定错误码映射。 */
 function commitFailure(
-  commit: { ok: false; code: string; message?: string },
+  commit: { ok: false; code: string; message?: string; reason?: string; conflict?: import("../world-authoring/spatial-leases.js").LeaseConflict },
   commandId: string
 ): RoomCommandResult {
   if (commit.code === "cancelled") return { ok: false, status: "rejected", commandId, code: "cancelled", message: "提交已取消" };
+  if (commit.code === "lease-conflict") return { ok: false, status: "rejected", commandId, code: "lease-conflict", message: "对象正在被其他运行占用", conflict: commit.conflict };
+  if (commit.code === "spatial-rejected") return { ok: false, status: "rejected", commandId, code: "spatial-rejected", message: "空间写入资格无效", spatialReason: commit.reason, conflict: commit.conflict };
   if (commit.code === "storage-seq-conflict") {
     // room 已在本层之上自动重载并重试（见 `CanvasRoom.withStorageSeqRecovery`）；走到这里
     // 说明重试上限用尽（仍在与别的 writer 竞争），因此这里的失败确实可以再试一次。

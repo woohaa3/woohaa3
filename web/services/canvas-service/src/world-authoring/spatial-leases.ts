@@ -1,4 +1,4 @@
-import type { WorldObjectIdentity, WorldObjectVersion, WorldScopeVersion } from "@woohaa3/contracts";
+import type { ServerCanvas, WorldObjectIdentity, WorldObjectVersion, WorldScopeVersion } from "@woohaa3/contracts";
 
 export interface LeaseIntent {
   requestId: string; canvasId: string; runId: string; epoch: number;
@@ -11,6 +11,16 @@ export interface SpatialLeaseAuthority {
   eligible(intent: LeaseIntent, targets: WorldObjectVersion[]): boolean;
   stopped(identity: { canvasId: string; runId: string; epoch: number; executionId: string }, evidence: unknown): boolean;
 }
+
+/** Host resolver must derive versions and scope from the canonical projections. */
+export interface SpatialCommitAuthority extends SpatialLeaseAuthority {
+  resolve(intent: LeaseIntent, before: ServerCanvas, after: ServerCanvas, targets: WorldObjectIdentity[]): {
+    scope: WorldScopeVersion; previous: WorldObjectVersion[]; next: WorldObjectVersion[];
+  } | null;
+}
+
+/** Opaque, process-local capability. It is never accepted from a transport payload. */
+export type SpatialWriteContext = object;
 
 export type LeaseState = "active" | "cancelled" | "stopped";
 export interface LeaseRecord { intent: LeaseIntent; state: LeaseState; }

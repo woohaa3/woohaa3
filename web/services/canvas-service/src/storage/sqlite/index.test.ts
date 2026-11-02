@@ -12,6 +12,8 @@ import { CanvasApplicationService, canvasStorageErrorCode, registerCanvasReposit
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { SQLITE_CANVAS_SCHEMA_VERSION,
   SqliteCanvasRepository } from "./index.js";
+import { loadNodeSqlite } from "./sqlite-loader.js";
+import { SqliteSpatialLeaseStore } from "./spatial-leases.js";
 
 const NOW = "2026-09-23T00:00:00.000Z";
 const tempDirs: string[] = [];
@@ -45,13 +47,13 @@ registerCanvasRepositoryContract(
 );
 
 describe("SQLite schema 与文件布局（任务 3.2 / 3.6）", () => {
-  it("只创建 canvases / canvas_operations / schema_migrations 三张表", () => {
+  it("创建画布、回执和空间占用表", () => {
     const repository = openRepository();
     const tables = repository
       .debugQuery<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .map((row) => row.name)
       .filter((name) => !name.startsWith("sqlite_"));
-    expect(tables).toEqual(["canvas_lifecycle_receipts", "canvas_operations", "canvases", "schema_migrations"]);
+    expect(tables).toEqual(["canvas_lifecycle_receipts", "canvas_operations", "canvases", "schema_migrations", "spatial_lease_locks", "spatial_lease_runs"]);
   });
 
   it("不存在任何 asset blob 表或 Blob 列", () => {
@@ -87,6 +89,19 @@ describe("SQLite schema 与文件布局（任务 3.2 / 3.6）", () => {
 });
 
 describe("SQLite 重启恢复（任务 3.4）", () => {
+  it("拒绝归档回滚覆盖已占用画布", async () => {
+    const file = path.join(tempDir(), "canvas.sqlite");
+    const repository = openRepository({ path: file });
+    const original = createEmptyWoohaa3ServerCanvas("locked", NOW);
+    await repository.createCanvas(original);
+    const db = new (loadNodeSqlite().DatabaseSync)(file);
+    try {
+      const leases = new SqliteSpatialLeaseStore(db, { eligible: () => true, stopped: () => true });
+      leases.acquire({ canvasId: "locked", requestId: "r", runId: "run", epoch: 1, executionId: "exec", scope: { scope: { kind: "scene-area", areaId: "a" }, scopeVersion: "s" }, writable: [{ kind: "instance", instanceId: "i", version: "v" }], readOnly: [] });
+      await expect(repository.restoreCanvas({ ...original, title: "stale" })).rejects.toMatchObject({ code: "lease-conflict" });
+      expect((await repository.getCanvas("locked"))?.title).toBe(original.title);
+    } finally { db.close(); }
+  });
   it("读取时返回规范化的旧容器和旧节点", async () => {
     const repository = openRepository();
     const canvas = createEmptyWoohaa3ServerCanvas("legacy", NOW);

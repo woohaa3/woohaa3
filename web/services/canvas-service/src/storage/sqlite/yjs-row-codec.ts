@@ -4,6 +4,7 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import { CanvasStorageError } from "../core/index.js";
+import { SpatialLeaseError } from "../../world-authoring/spatial-leases.js";
 
 export type DocumentRow = {
   canvas_id: string;
@@ -52,7 +53,7 @@ export function toBlob(value: Uint8Array): Uint8Array {
 }
 
 export function translate(error: unknown): unknown {
-  if (error instanceof CanvasStorageError) return error;
+  if (error instanceof CanvasStorageError || error instanceof SpatialLeaseError) return error;
   const message = error instanceof Error ? error.message : String(error);
   if (/locked|busy/i.test(message)) return new CanvasStorageError("REPOSITORY_FAILURE", "数据库被锁定");
   if (/readonly|read-only|attempt to write/i.test(message)) {

@@ -9,9 +9,11 @@
  */
 import type { ServerCanvas } from "@woohaa3/contracts";
 import type { ModelScriptBatchMeta, CanvasScriptSubmissionMeta } from "@woohaa3/contracts";
+import type { LeaseConflict } from "../world-authoring/spatial-leases.js";
 
 /** 一次命令提交要原子写入的全部内容（design D6/D7）。 */
 export type YjsCommandCommit = {
+  spatialContext?: import("../world-authoring/spatial-leases.js").SpatialWriteContext;
   signal?: AbortSignal;
   canvasId: string;
   /** 期望的存储 sequence；不匹配即拒绝（防止与其它 writer 交错）。 */
@@ -68,6 +70,8 @@ export type YjsLoadedState = {
 
 export type YjsCommitResult =
   | { ok: true; storageSeq: number; revision: number; duplicate: boolean }
+  | { ok: false; code: "lease-conflict"; conflict?: LeaseConflict }
+  | { ok: false; code: "spatial-rejected"; reason: string; conflict?: LeaseConflict }
   | { ok: false; code: "storage-seq-conflict"; currentSeq: number }
   | { ok: false; code: "command-id-reused"; existingHash: string };
 

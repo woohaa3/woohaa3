@@ -139,7 +139,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       if (!resolved.ok) throw new Error(`画布存储配置无效：${resolved.reason}`);
       if (resolved.config.backend === "sqlite") {
         const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
-        return new SqliteYjsRepository({ path: resolved.config.sqlitePath as string });
+        return new SqliteYjsRepository({ path: resolved.config.sqlitePath as string, spatialAuthority: options.spatialAuthority });
       }
       const { MongoYjsRepository } = await import("./storage/mongo/index.js");
       return MongoYjsRepository.connect({
@@ -669,6 +669,23 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
 
   const worldConversion = sync ? createWorldConversionService(async (id) =>
     await canvasContentExists(id) ? sync.registry.resolve(id) : null) : null;
+  const spatialWrites: CanvasService["spatialWrites"] = sync ? {
+    acquire: async (intent) => (await spatialRepository()).acquireSpatialContext(intent),
+    cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
+    confirmStopped: async (canvasId, requestId, runId, epoch, executionId, evidence) => (await spatialRepository()).confirmSpatialStopped(canvasId, requestId, runId, epoch, executionId, evidence),
+    pending: async () => (await spatialRepository()).pendingSpatialRuns(),
+    submit: async (canvasId, context, batch) => {
+      const room = await sync.registry.resolve(canvasId);
+      if (!room) return { ok: false, status: "failed", commandId: batch.commandId, code: "canvas-unavailable", message: "画布不可用" };
+      return room.submit(batch, { spatialContext: context });
+    }
+  } : null;
+  async function spatialRepository() {
+    const repository = await resolveYjsRepository();
+    const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
+    if (!(repository instanceof SqliteYjsRepository)) throw new Error("spatial writes unavailable");
+    return repository;
+  }
   const composedHandler = composeRequestHandler({
     worldConversion,
     env,
@@ -710,6 +727,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   });
 
   return {
+    spatialWrites,
     worldConversion,
     scenePackages,
     sync,

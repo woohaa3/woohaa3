@@ -33,6 +33,7 @@ import type { SqliteCanvasImportStore } from "../storage/sqlite/canvas-import.js
 import type { CanvasAccessPort, CanvasRequestAuthenticator } from "../access/resolve-access.js";
 
 export type CanvasServiceOptions = {
+  spatialAuthority?: import("../world-authoring/spatial-leases.js").SpatialCommitAuthority;
   assistantTextRuns?: import("@woohaa3/contracts").AssistantTextRunGateway;
   /**
    * Skill 尝试校验（change: 2026-10-28-add-agent-skill-media-regeneration）。
@@ -198,6 +199,13 @@ export type CanvasMediaAssetSyncPort = {
 };
 
 export type CanvasService = {
+  spatialWrites: {
+    acquire(intent: import("../world-authoring/spatial-leases.js").LeaseIntent): Promise<import("../world-authoring/spatial-leases.js").SpatialWriteContext>;
+    cancel(canvasId: string, requestId: string): Promise<void>;
+    confirmStopped(canvasId: string, requestId: string, runId: string, epoch: number, executionId: string, evidence: unknown): Promise<void>;
+    pending(): Promise<import("../world-authoring/spatial-leases.js").LeaseRecord[]>;
+    submit(canvasId: string, context: import("../world-authoring/spatial-leases.js").SpatialWriteContext, batch: import("@woohaa3/contracts/canvas-yjs").CanvasCommandBatch): Promise<import("../sync/room-types.js").RoomCommandResult>;
+  } | null;
   worldConversion: import("@woohaa3/contracts").BackendWorldConversionPort | null;
   /** 本地场景包独立事务/收据；不复用在线来源权限。 */
   scenePackages: import("../storage/sqlite/scene-package.js").SqliteScenePackageStore | null;

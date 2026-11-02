@@ -63,23 +63,29 @@ export class SqliteSpatialLeaseStore {
     return new SpatialLeaseError("lease-conflict", { target: identity, runId: lock.run_id, epoch: lock.epoch });
   }
   acquire(input: LeaseIntent): LeaseRecord {
+    return this.acquireWithStatus(input).record;
+  }
+  acquireWithStatus(input: LeaseIntent): { record: LeaseRecord; created: boolean } {
     const intent = normalize(input);
     return this.transaction(() => {
       const prior = this.lookup(intent.canvasId, intent.requestId);
       if (prior) {
         const row = this.db.prepare("SELECT original_intent_json FROM spatial_lease_runs WHERE canvas_id = ? AND request_id = ?").get(intent.canvasId, intent.requestId) as { original_intent_json: string };
         if (requestIntent(JSON.parse(row.original_intent_json) as LeaseIntent) !== requestIntent(intent)) throw new SpatialLeaseError("request-conflict");
-        return prior;
+        return { record: prior, created: false };
       }
       this.eligible(intent, intent.writable);
       this.db.prepare("INSERT INTO spatial_lease_runs VALUES (?, ?, ?, ?, ?, ?, ?, 'active')").run(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, JSON.stringify(intent), JSON.stringify(intent));
       this.onWrite?.();
       this.lock(intent, intent.writable);
-      return { intent, state: "active" };
+      return { record: { intent, state: "active" }, created: true };
     });
   }
   extend(canvasId: string, requestId: string, additions: WorldObjectVersion[]): LeaseRecord {
-    return this.transaction(() => {
+    return this.transaction(() => this.extendForCommit(canvasId, requestId, additions));
+  }
+  /** Caller owns the transaction, so additions roll back with the canonical write. */
+  extendForCommit(canvasId: string, requestId: string, additions: WorldObjectVersion[]): LeaseRecord {
       const record = this.lookup(canvasId, requestId);
       if (!record || record.state !== "active") throw new SpatialLeaseError("cancelled");
       const extra = normalizeTargets(additions);
@@ -90,7 +96,7 @@ export class SqliteSpatialLeaseStore {
       record.intent.writable = normalizeTargets([...record.intent.writable, ...extra]);
       this.db.prepare("UPDATE spatial_lease_runs SET intent_json = ? WHERE canvas_id = ? AND request_id = ?").run(JSON.stringify(record.intent), canvasId, requestId);
       return record;
-    });
+
   }
   cancel(canvasId: string, requestId: string): void {
     this.transaction(() => { this.db.prepare("UPDATE spatial_lease_runs SET state = 'cancelled' WHERE canvas_id = ? AND request_id = ? AND state = 'active'").run(canvasId, requestId); });
@@ -112,6 +118,14 @@ export class SqliteSpatialLeaseStore {
     for (const target of targets) {
       const lock = query.get(canvasId, target.kind, id(target)) as { run_id: string; epoch: number } | undefined;
       if (lock) throw this.conflict(target, lock);
+    }
+  }
+  /** Destructive whole-document operations must not bypass any outstanding lock. */
+  validateCanvasUnoccupied(canvasId: string): void {
+    const lock = this.db.prepare("SELECT kind, object_id, run_id, epoch FROM spatial_lease_locks WHERE canvas_id = ? LIMIT 1").get(canvasId) as { kind: string; object_id: string; run_id: string; epoch: number } | undefined;
+    if (lock) {
+      const target: WorldObjectIdentity = lock.kind === "instance" ? { kind: "instance", instanceId: lock.object_id } : { kind: "camera", cameraId: lock.object_id };
+      throw this.conflict(target, lock);
     }
   }
   /** Call synchronously inside the same transaction as the canonical write. */
