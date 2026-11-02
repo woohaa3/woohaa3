@@ -16,6 +16,8 @@
     "sdk-agent",
     "remote-server",
     "task-activity",
-    "dev-performance"
+    "dev-performance",
+    "ppserver-provider",
+    "sixi-spike"
   ]
 }
