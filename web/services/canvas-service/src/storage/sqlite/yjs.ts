@@ -31,7 +31,7 @@ import { migrateYjsSchema, safe } from "./yjs-migrations.js";
 import { inImmediateTransaction, toBlob, toBytes, decodeCommandRow, type CommandRow, type DocumentRow, type UpdateRow } from "./yjs-row-codec.js";
 import { SqliteSpatialLeaseStore } from "./spatial-leases.js";
 import { affectedWorldObjects } from "../../world-authoring/affected-objects.js";
-import { objectKey, SpatialLeaseError, type LeaseIntent, type SpatialCommitAuthority, type SpatialWriteContext } from "../../world-authoring/spatial-leases.js";
+import { objectKey, SpatialLeaseError, type LeaseIntent, type SpatialAcquireResult, type SpatialCommitAuthority, type SpatialWriteContext } from "../../world-authoring/spatial-leases.js";
 
 export { SQLITE_YJS_SCHEMA_VERSION } from "./yjs-migrations.js";
 
@@ -94,21 +94,38 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
     }
   }
 
-  acquireSpatialContext(intent: LeaseIntent): SpatialWriteContext {
+  /**
+   * Public acquire port.
+   *
+   * A retry with the same `requestId` and the same semantic intent (canvas, scope,
+   * writable and read-only target sets) always returns the original durable run
+   * identity and state, including after the host reopens. A different intent is still
+   * rejected. The process-local capability is only returned while this process holds
+   * it for an active run; a recovered/retried run after reopen stays reconcile-first
+   * and cannot commit until the host has verified execution.
+   */
+  acquireSpatialRun(intent: LeaseIntent): SpatialAcquireResult {
     if (!this.spatialAuthority) throw new SpatialLeaseError("unavailable");
     const { record, created } = this.spatialLeases.acquireWithStatus(intent);
-    if (record.state !== "active") throw new SpatialLeaseError("cancelled");
-    if (record.intent.runId !== intent.runId || record.intent.epoch !== intent.epoch || record.intent.executionId !== intent.executionId) throw new SpatialLeaseError("stale-epoch");
-    const key = JSON.stringify([intent.canvasId, intent.requestId]);
-    const issued = this.issuedContexts.get(key);
+    const run = {
+      canvasId: record.intent.canvasId,
+      requestId: record.intent.requestId,
+      runId: record.intent.runId,
+      epoch: record.intent.epoch,
+      executionId: record.intent.executionId,
+      state: record.state
+    };
+    const key = JSON.stringify([record.intent.canvasId, record.intent.requestId]);
     if (!created) {
-      if (!issued) throw new SpatialLeaseError("unavailable");
-      return issued;
+      const issued = record.state === "active" ? this.issuedContexts.get(key) ?? null : null;
+      if (record.state !== "active") this.issuedContexts.delete(key);
+      return { run, retry: true, capability: issued };
     }
+    if (record.state !== "active") return { run, retry: false, capability: null };
     const context = Object.freeze({});
     this.contexts.set(context, record.intent);
     this.issuedContexts.set(key, context);
-    return context;
+    return { run, retry: false, capability: context };
   }
 
   cancelSpatialRun(canvasId: string, requestId: string): void {

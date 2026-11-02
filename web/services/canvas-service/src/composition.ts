@@ -670,11 +670,12 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   const worldConversion = sync ? createWorldConversionService(async (id) =>
     await canvasContentExists(id) ? sync.registry.resolve(id) : null) : null;
   const spatialWrites: CanvasService["spatialWrites"] = sync ? {
-    acquire: async (intent) => (await spatialRepository()).acquireSpatialContext(intent),
+    acquire: async (intent) => (await spatialRepository()).acquireSpatialRun(intent),
     cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
     confirmStopped: async (canvasId, requestId, runId, epoch, executionId, evidence) => (await spatialRepository()).confirmSpatialStopped(canvasId, requestId, runId, epoch, executionId, evidence),
     pending: async () => (await spatialRepository()).pendingSpatialRuns(),
     submit: async (canvasId, context, batch) => {
+      if (!context) return { ok: false, status: "rejected", commandId: batch.commandId, code: "spatial-rejected", spatialReason: "unavailable", message: "运行尚未取得写能力，需先核对执行" };
       const room = await sync.registry.resolve(canvasId);
       if (!room) return { ok: false, status: "failed", commandId: batch.commandId, code: "canvas-unavailable", message: "画布不可用" };
       return room.submit(batch, { spatialContext: context });

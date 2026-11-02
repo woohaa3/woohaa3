@@ -200,11 +200,13 @@ export type CanvasMediaAssetSyncPort = {
 
 export type CanvasService = {
   spatialWrites: {
-    acquire(intent: import("../world-authoring/spatial-leases.js").LeaseIntent): Promise<import("../world-authoring/spatial-leases.js").SpatialWriteContext>;
+    /** Persistent run information plus a process-local capability when still held. */
+    acquire(intent: import("../world-authoring/spatial-leases.js").LeaseIntent): Promise<import("../world-authoring/spatial-leases.js").SpatialAcquireResult>;
     cancel(canvasId: string, requestId: string): Promise<void>;
     confirmStopped(canvasId: string, requestId: string, runId: string, epoch: number, executionId: string, evidence: unknown): Promise<void>;
     pending(): Promise<import("../world-authoring/spatial-leases.js").LeaseRecord[]>;
-    submit(canvasId: string, context: import("../world-authoring/spatial-leases.js").SpatialWriteContext, batch: import("@woohaa3/contracts/canvas-yjs").CanvasCommandBatch): Promise<import("../sync/room-types.js").RoomCommandResult>;
+    /** `null` rejects: recovering run information never re-issues write authority. */
+    submit(canvasId: string, context: import("../world-authoring/spatial-leases.js").SpatialWriteContext | null, batch: import("@woohaa3/contracts/canvas-yjs").CanvasCommandBatch): Promise<import("../sync/room-types.js").RoomCommandResult>;
   } | null;
   worldConversion: import("@woohaa3/contracts").BackendWorldConversionPort | null;
   /** 本地场景包独立事务/收据；不复用在线来源权限。 */

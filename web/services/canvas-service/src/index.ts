@@ -21,7 +21,7 @@ export * from "./clients/media-verifier.js";
 export * from "./model-mcp/index.js";
 export * from "./agent-authoring/index.js";
 export * from "./composition.js";
-export type { LeaseIntent, LeaseRecord, SpatialCommitAuthority, SpatialWriteContext } from "./world-authoring/spatial-leases.js";
+export type { LeaseIntent, LeaseRecord, LeaseState, SpatialAcquireResult, SpatialCommitAuthority, SpatialRunSnapshot, SpatialWriteContext } from "./world-authoring/spatial-leases.js";
 export * from "./import/contracts.js";
 
 export * from "./storage/provider.js";
