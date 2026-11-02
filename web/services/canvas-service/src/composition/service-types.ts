@@ -68,6 +68,12 @@ export type CanvasServiceOptions = {
   storageConfig?: CanvasStorageConfig;
   taskClient?: CanvasTaskClient;
   mediaClient?: CanvasMediaClient;
+  /** T10 trusted save port. Missing makes capture-bound generation fail closed. */
+  worldCaptureMediaSave?: import("@woohaa3/contracts").WorldCaptureMediaSavePort;
+  /** Static capture output long edge (host configuration, never browser-reported). */
+  worldCaptureOutputLongEdge?: number;
+  /** Generation wait budget for one exact capture key. */
+  worldCaptureFreezeTimeoutMs?: number;
   resolveCatalog?: () => Promise<CanvasTaskCatalog>;
   enableCanvasStorage?: boolean;
   enableYjsSync?: boolean;
@@ -222,6 +228,8 @@ export type CanvasService = {
   worldAuthoring: import("../world-authoring/scene-area-service.js").WorldAuthoringService | null;
   /** T08 world-camera settings, assistant completion history and restore. */
   cameraSettings: import("../world-authoring/camera-service.js").WorldCameraSettingsService | null;
+  /** T10 continuous framing refresh, generation freeze and producer registration. */
+  worldCapture: import("../world-authoring/capture-service.js").WorldCaptureService | null;
   /** 本地场景包独立事务/收据；不复用在线来源权限。 */
   scenePackages: import("../storage/sqlite/scene-package.js").SqliteScenePackageStore | null;
   handle: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;

@@ -66,6 +66,7 @@ import { createWorldConversionService } from "./world-authoring/conversion-servi
 import { createWorldAuthoringAuthority } from "./world-authoring/authority.js";
 import { createWorldAuthoringService } from "./world-authoring/scene-area-service.js";
 import { createWorldCameraSettingsService } from "./world-authoring/camera-service.js";
+import { createWorldCaptureService, type WorldCaptureService } from "./world-authoring/capture-service.js";
 
 export type { CanvasMediaAssetSyncPort, CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
 
@@ -362,6 +363,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   };
 
   let syncHandler: SyncUpgradeHandler | null = null;
+  let worldCapture: WorldCaptureService | null = null;
   const createSyncHandler = (): SyncUpgradeHandler => {
     const verifier = mediaClient ? createMediaVerifierStorage({ client: mediaClient }) : undefined;
     syncHandler ??= createSyncUpgradeHandler({
@@ -413,6 +415,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         log({ event: event.event, status: event.status, ...(event.code ? { code: event.code } : {}),
           ...(event.latencyMs !== undefined ? { latencyMs: event.latencyMs } : {}) }),
       onCommitted: (input) => {
+        worldCapture?.observeCanonical({ canvasId: input.canvasId, canvas: input.canvas });
         void recordModelPlacementHistory(
           nodeHistoryRef && nodeHistoryRef.editCompletion
             ? {
@@ -499,6 +502,18 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     );
   }
 
+  // T10 取景刷新/冻结：从权威 room 快照派生请求，只在创作版本变化时合并刷新。
+  worldCapture = sync
+    ? createWorldCaptureService({
+        resolveRoom: async (canvasId) => sync.registry.resolve(canvasId),
+        ...(options.worldCaptureMediaSave ? { mediaSave: options.worldCaptureMediaSave } : {}),
+        ...(options.worldCaptureOutputLongEdge ? { outputLongEdge: options.worldCaptureOutputLongEdge } : {}),
+        ...(options.worldCaptureFreezeTimeoutMs ? { freezeTimeoutMs: options.worldCaptureFreezeTimeoutMs } : {}),
+        ...(options.now ? { now: () => Date.parse(options.now!()) || Date.now() } : {}),
+        logger: log
+      })
+    : null;
+
   // run/cancel 应用服务与 task projector（唯一终态写入方）。
   let runService: CanvasRunService | null = null;
   let consumer: TaskResultConsumer | null = null;
@@ -517,7 +532,8 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       now: options.now,
       logger: log,
       // 聚合节点（片场等）同一时间只允许一个运行任务，权威入口保证（design D5）。
-      isAggregateNode: isAggregateRunNode
+      isAggregateNode: isAggregateRunNode,
+      worldCapture
     });
     consumer = createTaskResultConsumer({
       projector,
@@ -754,6 +770,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     worldConversion,
     worldAuthoring,
     worldCamera: cameraSettings,
+    worldCapture,
     env,
     canvasEnabled,
     unavailableReason,
@@ -782,6 +799,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     ...(sync
       ? {
           closeSessions: async (canvasId: string, reason: string) => {
+            worldCapture?.forgetCanvas(canvasId);
             sync.hub.closeCanvas(canvasId, reason);
             await sync.registry.destroy(canvasId);
             // 画布不存在了，远端归属随之作废：否则同一 id 重建后会被误路由到托管存储。
@@ -797,6 +815,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     worldConversion,
     worldAuthoring,
     cameraSettings,
+    worldCapture,
     scenePackages,
     sync,
     runService,

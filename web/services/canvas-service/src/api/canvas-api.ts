@@ -30,6 +30,7 @@ import { checkServiceToken, decodeSegment, isLoopbackRequest, readJsonBody, resp
 import { handleCreate, handleDelete, handleGet, handleHealth, handleList, loadCanvasListPage, requireCanvasAccess } from "./canvas-api/lifecycle-routes.js";
 import { DEFAULT_CANVAS_MAX_BODY_BYTES } from "./canvas-api/types.js";
 import { handleCancel, handleRun } from "./canvas-api/run-routes.js";
+import { handleCaptureFreeze, handleCaptureReady, handleCaptureRefresh } from "./canvas-api/capture-routes.js";
 
 export {
   DEFAULT_CANVAS_API_BASE_PATH,
@@ -325,6 +326,27 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
           res.removeListener("close", onClose);
         }
         return true;
+      }
+      if (
+        segments.length === 2 &&
+        (segments[1] === "captures-refresh" || segments[1] === "captures-freeze" || segments[1] === "captures-ready") &&
+        req.method === "POST"
+      ) {
+        const canvasId = segments[0];
+        const route = segments[1];
+        const gate = options.importGuard?.state(canvasId);
+        if (gate?.kind === "deleted" || gate?.kind === "preparing") {
+          sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用");
+          return true;
+        }
+        const permission = route === "captures-refresh" ? "read" : "write";
+        if (await authorizeImported(canvasId, permission) === "deny") return denyImported(permission);
+        if (!(await requireCanvasAccess({ req, res, canvasId, permission, options, log })).ok) return true;
+        return route === "captures-refresh"
+          ? await handleCaptureRefresh(req, res, canvasId, options, log)
+          : route === "captures-freeze"
+            ? await handleCaptureFreeze(req, res, canvasId, options, log)
+            : await handleCaptureReady(req, res, canvasId, options, log);
       }
       if (segments.length === 2 && segments[1] === "runs" && req.method === "POST") {
         const decision = await authorizeImported(segments[0], "write");

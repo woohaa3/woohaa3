@@ -44,9 +44,23 @@ export type CanvasRunRequest = {
   modelKey: string;
   prompt: string;
   parameters: Record<string, unknown>;
+  /** T10 exact capture binding frozen at click time. */
+  worldCapture?: import("@woohaa3/contracts").WorldCaptureGenerationBinding;
 };
 
-export type CanvasRunResult = { ok: true; runId: string; jobId: string } | { ok: false; error: string };
+export type CanvasRunResult =
+  | { ok: true; runId: string; jobId: string }
+  | { ok: false; error: string; code?: string };
+
+export type CanvasCaptureFreezeResult =
+  | { ok: true; binding: import("@woohaa3/contracts").WorldCaptureGenerationBinding }
+  | {
+      ok: false;
+      code: string;
+      error: string;
+      requestedKey?: import("@woohaa3/contracts").WorldCaptureVersionKey;
+      currentKey?: import("@woohaa3/contracts").WorldCaptureVersionKey;
+    };
 export type CanvasCancelResult = { ok: true } | { ok: false; error: string };
 
 export type ModelScriptReport = {
@@ -86,6 +100,16 @@ export interface CanvasRemoteService {
   reconnectCanvasSession(): void;
   /** 发起节点任务（最终由 Canvas Service 校验并提交 Task）。 */
   run(request: CanvasRunRequest): Promise<CanvasRunResult>;
+  /**
+   * T10: wait for the exact current framing and return a trusted frozen binding. A
+   * superseded/cancelled/old-version wait returns an explicit error, never another
+   * framing. Missing service/route fails closed.
+   */
+  freezeWorldCapture(input: {
+    cameraId: string;
+    requestId?: string;
+    signal?: AbortSignal;
+  }): Promise<CanvasCaptureFreezeResult>;
   cancel(input: { nodeId: string; runId: string }): Promise<CanvasCancelResult>;
   /** 上报浏览器 model script 执行结果。 */
   reportModelScript(report: ModelScriptReport): Promise<void>;

@@ -66,12 +66,14 @@ export function sanitizeRequest(request: TaskRequestSummary): TaskRequestSummary
     (request.parametersTruncated === true) ||
     serializedBytes > TASK_REQUEST_PARAMETER_BUDGET.maxBytes;
   const inputs = sanitizeRequestInputs(request.inputs);
+  const worldCapture = sanitizeWorldCapture(request.worldCapture);
   return {
     prompt,
     ...(promptRaw.length > TASK_REQUEST_PROMPT_LIMIT ? { promptTruncated: true } : {}),
     parameters,
     ...(overBudget ? { parametersTruncated: true } : {}),
-    ...(inputs.length > 0 ? { inputs } : {})
+    ...(inputs.length > 0 ? { inputs } : {}),
+    ...(worldCapture ? { worldCapture } : {})
   };
 }
 
@@ -83,6 +85,49 @@ const MAX_PERSISTED_INPUTS = 16;
  *
  * 执行期签出的 URL 会过期，绝不入库；它是「这张产物用了哪张素材」的唯一长期线索。
  */
+/** Capture binding is already an exact stable envelope; keep only allowlisted fields. */
+function sanitizeWorldCapture(
+  binding: TaskRequestSummary["worldCapture"]
+): TaskRequestSummary["worldCapture"] {
+  if (!binding || typeof binding !== "object") return undefined;
+  const input = binding.input;
+  if (!input || typeof input !== "object") return undefined;
+  if (binding.version !== "world-capture-generation-binding-v1") return undefined;
+  const key = input.key;
+  if (!key || typeof key !== "object") return undefined;
+  const fields = ["canvasId", "cameraId", "worldContentVersion", "cameraSettingsVersion", "bindingVersion", "outputVersion"] as const;
+  if (!fields.every(field => typeof key[field] === "string" && key[field]!.length > 0)) return undefined;
+  if (typeof input.mediaId !== "string" || input.mediaId.length === 0) return undefined;
+  if (typeof input.checksum !== "string" || !/^[0-9a-f]{64}$/.test(input.checksum)) return undefined;
+  if (typeof binding.requestId !== "string" || binding.requestId.length === 0) return undefined;
+  if (typeof binding.contentFingerprint !== "string" || !/^[0-9a-f]{16}$/.test(binding.contentFingerprint)) return undefined;
+  return {
+    version: binding.version,
+    requestId: binding.requestId.slice(0, 200),
+    contentFingerprint: binding.contentFingerprint,
+    key: {
+      canvasId: key.canvasId.slice(0, 200),
+      cameraId: key.cameraId.slice(0, 200),
+      worldContentVersion: key.worldContentVersion.slice(0, 400),
+      cameraSettingsVersion: key.cameraSettingsVersion.slice(0, 400),
+      bindingVersion: key.bindingVersion.slice(0, 400),
+      outputVersion: key.outputVersion.slice(0, 400)
+    },
+    input: {
+      key: {
+        canvasId: key.canvasId.slice(0, 200),
+        cameraId: key.cameraId.slice(0, 200),
+        worldContentVersion: key.worldContentVersion.slice(0, 400),
+        cameraSettingsVersion: key.cameraSettingsVersion.slice(0, 400),
+        bindingVersion: key.bindingVersion.slice(0, 400),
+        outputVersion: key.outputVersion.slice(0, 400)
+      },
+      mediaId: input.mediaId.slice(0, 400),
+      checksum: input.checksum
+    }
+  };
+}
+
 function sanitizeRequestInputs(inputs: TaskRequestSummary["inputs"]): NonNullable<TaskRequestSummary["inputs"]> {
   if (!Array.isArray(inputs)) return [];
   return inputs.slice(0, MAX_PERSISTED_INPUTS).flatMap((input) => {
