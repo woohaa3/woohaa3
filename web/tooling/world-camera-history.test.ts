@@ -285,6 +285,48 @@ describe("world camera settings and assistant history", () => {
     }
   });
 
+  it("supports an explicit null binding and rejects a new unresolvable binding", async () => {
+    const harness = await openHarness();
+    try {
+      const service = harness.service.cameraSettings!;
+      const camera = cameraOf(await canonical(harness));
+      const unbound = await service.save({
+        canvasId: CANVAS_ID,
+        cameraId: CAMERA_ID,
+        expectedSettingsVersion: camera.settingsVersion,
+        settings: {
+          position: camera.position,
+          rotation: camera.rotation,
+          projection: camera.projection,
+          captureMode: camera.captureMode,
+          aspect: camera.aspect,
+          boundInstanceId: null
+        }
+      });
+      expect(unbound).toMatchObject({ ok: true });
+      if (!unbound.ok) return;
+      expect(unbound.camera.boundInstanceId).toBeNull();
+
+      const missing = await service.save({
+        canvasId: CANVAS_ID,
+        cameraId: CAMERA_ID,
+        expectedSettingsVersion: unbound.camera.settingsVersion,
+        settings: {
+          position: camera.position,
+          rotation: camera.rotation,
+          projection: camera.projection,
+          captureMode: camera.captureMode,
+          aspect: camera.aspect,
+          boundInstanceId: "missing-instance"
+        }
+      });
+      expect(missing).toMatchObject({ ok: false, code: "target-unavailable" });
+      expect(cameraOf(await canonical(harness)).boundInstanceId).toBeNull();
+    } finally {
+      await closeHarness(harness, true);
+    }
+  });
+
   it("records exactly one trusted completion across retries and a service restart without capture-driven history", async () => {
     let harness = await openHarness();
     try {
@@ -373,6 +415,9 @@ describe("world camera settings and assistant history", () => {
       expect((await canonical(harness)).nodeData["model-node"]).toEqual(modelBefore);
       const afterRestore = await canonical(harness);
       expect(afterRestore.document.nodes.find(node => node.id === "camera-card")!.position).toEqual({ x: 900, y: 900 });
+      const roomAfterRestore = await harness.service.sync!.registry.resolve(CANVAS_ID);
+      expect(await roomAfterRestore!.lookupCommand(restored.commandId)).not.toBeNull();
+      expect(restored.commandId.startsWith("world-camera-restore:")).toBe(true);
 
       const stale = await service.restore({
         canvasId: CANVAS_ID,
