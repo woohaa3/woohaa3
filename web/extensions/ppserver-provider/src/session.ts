@@ -127,12 +127,38 @@ export type EnsureSessionOptions = {
 };
 
 /**
+ * 正在进行的续期。
+ *
+ * **为什么必须有**：Supabase 刷新是轮换的 —— 一份 refresh_token 只能用一次。
+ * 两个请求同时进入续期窗口时，各自读到同一份 refresh_token、各自发一次刷新：
+ * 先到的成功并把新值写盘，后到的拿到 `refresh_token_already_used` 失败。
+ * 后者的调用方会以为续期坏了，而实际上会话是好的。
+ * 实测在宿主里连续请求（目录刷新 + 一次生成）必然撞上这个形状。
+ *
+ * 并发合并只在这里做：并发的调用共享同一个 Promise，**只发一次刷新**。
+ * 键取会话文件路径 —— 不同文件的会话互不相干，没必要串到一条链上。
+ */
+const inFlightRefreshes = new Map<string, Promise<SupabaseSessionResult>>();
+
+/**
  * 拿到一个当前可用的会话：优先用磁盘上的 refresh_token 续期，其次用配置里的令牌。
  *
  * **不会因为刷新失败就抛错**：只要手上还有一个未过期的令牌就继续用它，
  * 让用户在过期前还有机会正常生成；真过期了再由请求本身报 401。
  */
-export async function ensureSession(options: EnsureSessionOptions): Promise<SupabaseSessionResult> {
+export function ensureSession(options: EnsureSessionOptions): Promise<SupabaseSessionResult> {
+  const key = options.filePath;
+  const running = inFlightRefreshes.get(key);
+  if (running) return running;
+  const task = runEnsureSession(options).finally(() => {
+    // 只在还是自己那一条时才删：万一期间被替换，删掉会把新的 in-flight 丢掉。
+    if (inFlightRefreshes.get(key) === task) inFlightRefreshes.delete(key);
+  });
+  inFlightRefreshes.set(key, task);
+  return task;
+}
+
+async function runEnsureSession(options: EnsureSessionOptions): Promise<SupabaseSessionResult> {
   const now = options.now ?? (() => Date.now());
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const stored = await loadSession(options.filePath);
