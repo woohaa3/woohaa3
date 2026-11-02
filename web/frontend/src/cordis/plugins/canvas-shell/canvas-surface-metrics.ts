@@ -41,21 +41,43 @@ export function createSurfaceMetrics(input: {
   canvas: HTMLCanvasElement;
   target: Window & typeof globalThis;
   activeViewport: () => Viewport;
+  /**
+   * 是否桌面原生壳。缺省视为否（浏览器 iframe）。
+   *
+   * `surfaceSize()` 在热路径上被调用十几次（含每帧的场景指纹），而「是否原生」在一次
+   * realm 生命周期内是常量 —— 不要在这里每次现读 DOM，由调用方在建立 controller 时决定：
+   * `hasNativeBootstrap(target) || document.documentElement.dataset.nativeCanvas === "true"`。
+   * 两个来源缺一不可：`importModule` 注入路径不建 realm，不会写 DOM 属性；而属性在
+   * 原生 realm 销毁时会被清掉，此时宿主仍是桌面壳。
+   */
+  native?: boolean;
 }): SurfaceMetrics {
-  const { canvas, target, activeViewport } = input;
+  const { canvas, target, activeViewport, native = false } = input;
   const surfaceSize = () => {
     const host = canvas.parentElement ?? canvas;
     const rect = host.getBoundingClientRect();
     const width = rect.width || host.clientWidth || canvas.clientWidth || 1;
     const height = rect.height || host.clientHeight || canvas.clientHeight || 1;
     const pixelRatio = Math.min(3, target.devicePixelRatio || 1);
+    /*
+     * 原点只对**桌面原生壳**有意义：那里交换链（Metal NSView）铺满整个窗口，
+     * Bevy 把窗口设成 `origin + 宽`、再用相机视口对齐到偏移后的画布洞
+     * （`place_native_surface`，见 `ac175552` / `18e36db0` 的顶栏偏移修复）。
+     *
+     * 浏览器里渲染器跑在 `.bevy-canvas-surface` 内的 iframe 中，**iframe 自己就是那个洞**，
+     * 已经被宿主布局摆在 (left, top)。这时再传原点，Bevy 会把位图撑成 `origin + 宽`，
+     * 超出 iframe 的部分被裁掉 —— 实测超出量恒等于资源轨宽度（展开 248 / 收起 64），
+     * 表现为卡片被整齐地切掉一块、整幅画面左偏。
+     */
     // 无布局时的回退尺寸没有可对齐的原点。
+    const laidOut = rect.width > 0;
+    const appliesOrigin = native && laidOut;
     return {
       width,
       height,
       pixelRatio,
-      originX: rect.width ? Math.round(rect.left) : 0,
-      originY: rect.height ? Math.round(rect.top) : 0,
+      originX: appliesOrigin ? Math.round(rect.left) : 0,
+      originY: appliesOrigin ? Math.round(rect.top) : 0,
     };
   };
   const readBounds = (): CanvasBounds => {

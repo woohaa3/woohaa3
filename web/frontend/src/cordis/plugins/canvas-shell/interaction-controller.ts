@@ -7,6 +7,7 @@ import { sceneDiagnostics, noteFrameStep } from "../canvas-runtime/scene-diagnos
  */
 import { bevyNodeHistoryStripDot, type CanvasRenderScene } from "@woohaa3/contracts";
 import { createSurfaceMetrics } from "./canvas-surface-metrics.js";
+import { hasNativeBootstrap } from "../canvas-runtime/runtime-realm.js";
 import { createModelGestureFamily } from "./model-gesture-family.js";
 import { buildSceneWithResources as buildSceneWithResourcesModule } from "./scene-builder.js";
 import { hoverNodeStore } from "../../services/hover-store.js";
@@ -109,7 +110,12 @@ export function installInteractionController(options: InteractionControllerOptio
   const { surfaceSize, readBounds, clientToWorld, pointerWorld, worldToClient } = createSurfaceMetrics({
     canvas,
     target,
-    activeViewport
+    activeViewport,
+    // 原生与否在一次 realm 生命周期内是常量，在这里定一次即可（`surfaceSize` 在热路径上）。
+    // 两个来源都要：`importModule` 注入路径不建 realm、不写 DOM 属性；属性又会在原生
+    // realm 销毁时被清掉，而那时宿主仍是桌面壳。
+    native: hasNativeBootstrap(target)
+      || target.document?.documentElement?.dataset?.nativeCanvas === "true"
   });
 
   const modelPlacements = () => collectModelPlacements();
