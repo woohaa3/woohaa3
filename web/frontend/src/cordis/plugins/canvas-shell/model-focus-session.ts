@@ -25,8 +25,14 @@ import {
   isFocused,
   keyboardFly,
   modelAnchor,
+  modelLocalAabb,
   modelLayoutAabbRelative,
   modelWorldAabbRelative,
+  decodeWorldInstanceData,
+  worldToRendererPosition,
+  worldToRendererRotation,
+  SHARED_WORLD_UNITS_PER_METER,
+  transformAabb,
   moveGesture,
   reframeFocus,
   restoreFocusCamera,
@@ -81,6 +87,19 @@ function sceneInput(input: FocusTargetInput) {
 /** 模型世界 AABB（含根锚点）；不可解析时返回 null。 */
 export function modelBounds(input: FocusTargetInput): ModelBounds | null {
   const scene = sceneInput(input);
+  const worldInput = input.canvas.nodeData?.[input.nodeId]?.sharedWorldInstance;
+  if (worldInput !== undefined) {
+    const world = decodeWorldInstanceData(worldInput);
+    const local = modelLocalAabb(scene);
+    if (!world.ok || !local) return null;
+    const transform = world.value.transform;
+    const anchor: Vec3 = [...worldToRendererPosition(transform.position)];
+    const rotation = worldToRendererRotation(transform.rotation);
+    const unit = transform.scale * SHARED_WORLD_UNITS_PER_METER;
+    const aabb = transformAabb({ translation: anchor, rotation: [...rotation], scale: [unit, unit, unit] }, local);
+    if (![...aabb.min, ...aabb.max].every(Number.isFinite)) return null;
+    return { aabb, ...aabbCenterRadius(aabb), anchor };
+  }
   const upright = modelWorldAabbRelative(scene);
   const layout = modelLayoutAabbRelative(scene);
   const node = input.canvas.document.nodes.find((entry) => entry.id === input.nodeId);

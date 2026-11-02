@@ -44,6 +44,7 @@ export type SurfaceInteractionDeps = {
   clearHover: () => void;
   /** 清除聚焦 held input。 */
   clearHeldKeys: () => void;
+  clearWorldGroundPreviews?: () => void;
   /** 拖动粘连路由（change: add-drag-touch-connections）。 */
   attach: AttachKeyboardController;
 };
@@ -90,6 +91,7 @@ export function createSurfaceInteractions(deps: SurfaceInteractionDeps): Surface
     state.draft = null;
     state.localPositions = new Map();
     state.localSizes = new Map();
+    deps.clearWorldGroundPreviews?.();
     state.viewportPreview = null;
     // modal 从空变非空时也暂停 hover 视频播放并清理聚焦 held input（design D3/D7/D5）。
     deps.suspendHoverPlayback();

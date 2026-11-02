@@ -335,6 +335,7 @@ export type BevyRuntime = {
     width: number;
     height: number;
   }): QueryResult<{ nodeId: string; target: [number, number, number]; radius: number } | null>;
+  queryWorldGround?(input: { generation: number; x: number; y: number; width: number; height: number }): QueryResult<{ u: number; v: number } | null>;
   /**
    * 模型编辑 gizmo 命中与轴拖动约束；返回稳定 handle 与（可选）屏幕轴约束
    * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 5.3/5.4）。

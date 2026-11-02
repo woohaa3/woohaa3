@@ -19,6 +19,7 @@ use crate::isometric_grid::CANVAS_CAMERA_Z;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ModelCandidate {
     pub(crate) node_id: String,
+    pub(crate) shared_world: bool,
     pub(crate) min: [f32; 3],
     pub(crate) max: [f32; 3],
 }
@@ -28,6 +29,7 @@ pub(crate) struct ModelCandidate {
 pub(crate) struct ModelPickCamera {
     pub(crate) viewport: [f32; 3],
     pub(crate) surface: [f32; 2],
+    pub(crate) ordinary: bool,
 }
 
 impl Default for ModelPickCamera {
@@ -35,6 +37,7 @@ impl Default for ModelPickCamera {
         Self {
             viewport: [0.0, 0.0, 1.0],
             surface: [1.0, 1.0],
+            ordinary: true,
         }
     }
 }
@@ -52,6 +55,7 @@ thread_local! {
     static CAMERA: RefCell<ModelPickCamera> = const { RefCell::new(ModelPickCamera {
         viewport: [0.0, 0.0, 1.0],
         surface: [1.0, 1.0],
+        ordinary: true,
     }) };
     /// 模型 pick generation（与 2D interaction generation 同步递增通过 facade）。
     static GENERATION: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -89,7 +93,9 @@ pub(crate) fn plan_positions(
     POSITION_BASIS.with(|slot| {
         slot.borrow().plan(deltas, |base, delta| {
             let mut next = base.clone();
-            (next.min, next.max) = super::position_basis::shift_bounds(base.min, base.max, delta)?;
+            if !base.shared_world {
+                (next.min, next.max) = super::position_basis::shift_bounds(base.min, base.max, delta)?;
+            }
             Ok(next)
         })
     })
@@ -104,6 +110,9 @@ pub(crate) fn retune_depth(plan: &mut [(usize, ModelCandidate)]) {
     DEPTHS.with(|slot| {
         let mut depths = slot.borrow_mut();
         for (_, candidate) in plan.iter_mut() {
+            if candidate.shared_world {
+                continue;
+            }
             let next = crate::depth_order::depth_of(&candidate.node_id);
             let previous = depths
                 .insert(candidate.node_id.clone(), next)
@@ -136,7 +145,9 @@ pub(crate) fn commit_positions(
 /// （change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3；MUST NOT 重算 bounds）。
 pub(crate) fn accept_viewport_camera(viewport: [f32; 3], surface: [f32; 2], generation: u32) {
     CAMERA.with(|slot| {
-        *slot.borrow_mut() = ModelPickCamera { viewport, surface };
+        let mut camera = slot.borrow_mut();
+        camera.viewport = viewport;
+        camera.surface = surface;
     });
     GENERATION.with(|cell| cell.set(generation));
 }
@@ -155,6 +166,8 @@ pub(crate) fn pick_query_json(json: &str) -> String {
     #[allow(dead_code)] // `width`/`height` 属查询线格式，当前实现只消费 x/y/generation。
     struct Request {
         generation: u32,
+        #[serde(default)]
+        kind: Option<String>,
         x: f32,
         y: f32,
         width: f32,
@@ -170,6 +183,22 @@ pub(crate) fn pick_query_json(json: &str) -> String {
     if request.generation != GENERATION.with(std::cell::Cell::get) {
         return stale_result("stale");
     }
+    if request.kind.as_deref() == Some("ground") {
+        if !request.x.is_finite() || !request.y.is_finite() {
+            return stale_result("unavailable");
+        }
+        let camera = CAMERA.with(|slot| *slot.borrow());
+        if !camera.ordinary { return stale_result("unavailable"); }
+        let view = crate::isometric_grid::IsometricGridView {
+            x: camera.viewport[0], y: camera.viewport[1], zoom: camera.viewport[2],
+        };
+        let p = crate::isometric_grid::screen_to_ground(&view, bevy::prelude::Vec2::new(request.x, request.y));
+        let u = p.x as f64 / crate::protocol::UNITS_PER_METER;
+        let v = -(p.y as f64) / crate::protocol::UNITS_PER_METER;
+        if !u.is_finite() || !v.is_finite() { return stale_result("unavailable"); }
+        return serde_json::json!({"available": true, "generation": request.generation, "ground": {"u": u, "v": v}}).to_string();
+    }
+    if request.kind.is_some() { return stale_result("unsupported"); }
     let candidates = CANDIDATES.with(|slot| slot.borrow().clone());
     let camera = CAMERA.with(|slot| *slot.borrow());
     let tuples = as_tuples(&candidates);

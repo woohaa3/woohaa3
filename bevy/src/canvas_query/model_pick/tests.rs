@@ -106,6 +106,7 @@ fn pick_query_respects_generation_and_emptiness() {
     );
     accept_models(
         vec![ModelCandidate {
+            shared_world: false,
             node_id: "m".into(),
             min: [center.x - 5.0, center.y - 5.0, center.z - 5.0],
             max: [center.x + 5.0, center.y + 5.0, center.z + 5.0],
@@ -114,6 +115,7 @@ fn pick_query_respects_generation_and_emptiness() {
         ModelPickCamera {
             viewport: origin_view(),
             surface: [1000.0, 800.0],
+            ordinary: true,
         },
     );
     // 命中。
