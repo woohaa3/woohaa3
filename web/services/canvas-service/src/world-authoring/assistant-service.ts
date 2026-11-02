@@ -68,6 +68,8 @@ export type AssistantWorldServiceDeps = {
     executionId: string;
     evidence: unknown;
   }): Promise<void>;
+  /** Host-owned durable T08 history lookup for idempotent completion retries after reopen. */
+  findRecordedCompletion?(completion: AssistantWorldCompletionInput["completion"]): boolean | Promise<boolean>;
   pending(): Promise<LeaseRecord[]>;
 };
 
@@ -707,6 +709,23 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         settingsVersion: recorded.settingsVersion,
         completionId: recorded.completionId
       };
+    }
+    // After a reopen the in-process ledger is gone, but a durable T08 row is
+    // itself proof that the host already accepted this exact completion. The
+    // host adapter checks every identity field before answering true.
+    if (deps.findRecordedCompletion) {
+      try {
+        if (await deps.findRecordedCompletion(input.completion)) {
+          return {
+            ok: true,
+            duplicate: true,
+            settingsVersion: input.completion.settingsVersion,
+            completionId: input.completion.completionId
+          };
+        }
+      } catch {
+        // Unknown history state stays fail-closed.
+      }
     }
     const resolved = resolve(input.contextId);
     if ("ok" in resolved) return resolved;

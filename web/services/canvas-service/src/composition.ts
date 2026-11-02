@@ -1,4 +1,4 @@
-import { ContentContributionRegistry, ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
+import { ContentContributionRegistry, ManagedNodeLifecycleRegistry, worldCameraCompletionKey } from "@woohaa3/contracts";
 import type { MediaStorageScope, ServerCanvas } from "@woohaa3/contracts";
 import type { IncomingMessage } from "node:http";
 /**
@@ -771,6 +771,14 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
         cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
         confirmStopped: async (input) => { (await spatialRepository()).confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence); },
+        findRecordedCompletion: async (completion) => {
+          const entry = await cameraHistory!.repository.get(completion.canvasId, worldCameraCompletionKey(completion));
+          return !!entry
+            && entry.runId === completion.runId
+            && entry.completionId === completion.completionId
+            && entry.cameraId === completion.cameraId
+            && entry.settingsVersion === completion.settingsVersion;
+        },
         pending: async () => (await spatialRepository()).pendingSpatialRuns()
       })
     : null;

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, deriveModelContentVersion } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, deriveModelContentVersion, worldCameraCompletionKey } from "@woohaa3/contracts";
 import { CanvasRoom } from "../services/canvas-service/src/sync/room.js";
 import { SqliteYjsRepository } from "../services/canvas-service/src/storage/sqlite/yjs.js";
 import { createWorldAuthoringAuthority } from "../services/canvas-service/src/world-authoring/authority.js";
@@ -490,6 +490,33 @@ describe("assistant world authoring through the real canvas queue", () => {
       })).toEqual({ ok: true });
       expect(await assistant.complete({ contextId: issued.context.contextId, completion })).toMatchObject({ ok: true, duplicate: true });
       expect(await history.list(canvas.id, "camera-1")).toHaveLength(1);
+
+      // A reopened process has no in-process ledger/host-completion cache, but the
+      // durable T08 row makes the same completion retry idempotent.
+      assistant.close();
+      const reopened = createAssistantWorldService({
+        authority,
+        worldAuthoring,
+        cameraSettings,
+        resolveRoom: async () => room,
+        cancel: async (canvasId, requestId) => repository.cancelSpatialRun(canvasId, requestId),
+        confirmStopped: async (input) => repository.confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence),
+        findRecordedCompletion: async (candidate) => {
+          const entry = await history.get(candidate.canvasId, worldCameraCompletionKey(candidate));
+          return !!entry
+            && entry.runId === candidate.runId
+            && entry.completionId === candidate.completionId
+            && entry.cameraId === candidate.cameraId
+            && entry.settingsVersion === candidate.settingsVersion;
+        },
+        pending: async () => repository.pendingSpatialRuns()
+      });
+      try {
+        expect(await reopened.complete({ contextId: issued.context.contextId, completion })).toMatchObject({ ok: true, duplicate: true });
+        expect(await history.list(canvas.id, "camera-1")).toHaveLength(1);
+      } finally {
+        reopened.close();
+      }
     } finally {
       assistant?.close();
       repository.close();
