@@ -240,7 +240,6 @@ export class NodeHistoryController {
     if (state.applyingEntryId !== null) return { ok: false, code: "busy", error: "正在恢复" };
     const item = state.items.find(item => item.entryId === entryId);
     if (item && (!item.recoverable || (item.outcome ?? "succeeded") !== "succeeded")) return { ok: false, code: "unrecoverable", error: "该记录没有可恢复作品" };
-    if (state.operations.some(item => item.state === "queued" || item.state === "running")) return { ok: false, code: "busy", error: "任务进行中，暂时无法恢复版本" };
     if (state.current.draftState !== "saved") return { ok: false, code: "unsaved-draft", error: "请先保存当前草稿" };
     const generation = ++this.generation;
     this.state = { ...state, applyingEntryId: entryId, pendingCurrentEntryId: entryId, applyError: null };

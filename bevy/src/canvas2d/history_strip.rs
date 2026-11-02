@@ -31,7 +31,7 @@ pub(crate) fn draw_history_strip(
             || strip
                 .dots
                 .iter()
-                .any(|dot| dot.state != "succeeded" || dot.recoverable == Some(false))
+                .any(|dot| dot.state != "succeeded" || dot.recoverable == Some(false) || dot.unseen)
     }) else {
         return;
     };
@@ -55,7 +55,29 @@ pub(crate) fn draw_history_strip(
             );
         }
         geometry.circle(center, NODE_HISTORY_STRIP_DOT_RADIUS, z + 0.005, color, 14);
+        if dot.unseen {
+            draw_unseen_badge(geometry, theme, center, z + 0.006);
+        }
     }
+}
+
+/// 未查看版本提醒：右上角小圆点 + 背景色分离环，不占用状态颜色或当前/选中外圈。
+pub(crate) fn draw_unseen_badge(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    center: Vec2,
+    z: f32,
+) {
+    let badge = center + Vec2::new(2.8, -2.8);
+    geometry.ring(
+        badge,
+        1.55,
+        0.9,
+        z,
+        theme.token_u32("canvasNodeSurface"),
+        12,
+    );
+    geometry.circle(badge, 1.35, z + 0.0005, theme.token_u32("statusWarning"), 12);
 }
 
 /// 聚合节点运行遮罩：覆盖整个节点/范围几何的半透明遮罩 + “运行中”。
@@ -119,6 +141,36 @@ mod tests {
         assert!(super::super::layout::has_history_strip(&node));
         let mut geometry = Geometry::default();
         draw_history_strip(&mut geometry, &theme, &node, 10.0);
+        assert!(positions(geometry) > 0);
+    }
+
+    #[test]
+    fn unseen_badge_adds_a_corner_marker_without_replacing_state_color() {
+        let theme = ThemeResource::default();
+        let with_unseen: HistoryStripPresentation = serde_json::from_str(
+            r#"{"dots":[{"state":"succeeded","current":false,"entryId":"e","unseen":true},{"state":"succeeded","current":true,"entryId":"f"}],"truncated":0}"#,
+        )
+        .unwrap();
+        let without: HistoryStripPresentation = serde_json::from_str(
+            r#"{"dots":[{"state":"succeeded","current":false,"entryId":"e"},{"state":"succeeded","current":true,"entryId":"f"}],"truncated":0}"#,
+        )
+        .unwrap();
+        let mut marked = Geometry::default();
+        draw_history_strip(&mut marked, &theme, &node(Some(with_unseen)), 10.0);
+        let mut plain = Geometry::default();
+        draw_history_strip(&mut plain, &theme, &node(Some(without)), 10.0);
+        assert!(positions(marked) > positions(plain));
+    }
+
+    #[test]
+    fn single_unseen_success_is_drawn() {
+        let theme = ThemeResource::default();
+        let strip: HistoryStripPresentation = serde_json::from_str(
+            r#"{"dots":[{"state":"succeeded","current":true,"entryId":"e","unseen":true}],"truncated":0}"#,
+        )
+        .unwrap();
+        let mut geometry = Geometry::default();
+        draw_history_strip(&mut geometry, &theme, &node(Some(strip)), 10.0);
         assert!(positions(geometry) > 0);
     }
 
@@ -193,6 +245,7 @@ mod tests {
                     selected: None,
                     hovered: false,
                     pressed: false,
+                    unseen: false,
                     presentation_id: None,
                     entry_id: None,
                     operation_id: None,
@@ -204,6 +257,7 @@ mod tests {
                     selected: None,
                     hovered: false,
                     pressed: false,
+                    unseen: false,
                     presentation_id: None,
                     entry_id: None,
                     operation_id: None,
@@ -230,6 +284,7 @@ mod tests {
                     selected: None,
                     hovered: false,
                     pressed: false,
+                    unseen: false,
                     presentation_id: None,
                     entry_id: None,
                     operation_id: None,
@@ -241,6 +296,7 @@ mod tests {
                     selected: None,
                     hovered: false,
                     pressed: false,
+                    unseen: false,
                     presentation_id: None,
                     entry_id: None,
                     operation_id: None,
@@ -252,6 +308,7 @@ mod tests {
                     selected: None,
                     hovered: false,
                     pressed: false,
+                    unseen: false,
                     presentation_id: None,
                     entry_id: None,
                     operation_id: None,
@@ -280,6 +337,7 @@ mod tests {
                     selected: None,
                     hovered: false,
                     pressed: false,
+                    unseen: false,
                     presentation_id: None,
                     entry_id: None,
                     operation_id: None,

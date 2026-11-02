@@ -215,7 +215,7 @@ pub(crate) fn has_history_strip(node: &GraphNode) -> bool {
                 || strip
                     .dots
                     .iter()
-                    .any(|dot| dot.state != "succeeded" || dot.recoverable == Some(false))
+                    .any(|dot| dot.state != "succeeded" || dot.recoverable == Some(false) || dot.unseen)
         })
 }
 
@@ -576,6 +576,64 @@ pub(crate) fn shortened(text: &str, max_width: f32, size: f32) -> String {
     result
 }
 
+/// 按估算宽度优先换行；超过 `max_lines` 才在最后一行追加省略号。
+///
+/// 卡片正文（尤其历史失败原因）必须先用满预览区宽度再换行，不能一行提前省略。
+/// 按字符贪心换行，保留显式换行；超过行数上限时只截断最后一行。
+pub(crate) fn wrapped_lines(
+    text: &str,
+    max_width: f32,
+    size: f32,
+    max_lines: usize,
+) -> Vec<String> {
+    let limit = max_width.max(size);
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    let mut width = 0.0;
+    for paragraph in text.split('\n') {
+        for c in paragraph.chars() {
+            let c = if c.is_control() { ' ' } else { c };
+            let char_width = estimated_char_width(c, size);
+            if width + char_width > limit && !line.is_empty() {
+                // 优先在最近的空格处换行，避免把英文单词拆开；没有空格时按字符换行。
+                if let Some(space) = line.rfind(' ') {
+                    let tail = line.split_off(space + 1);
+                    let head = line.trim_end().to_string();
+                    if !head.is_empty() {
+                        lines.push(head);
+                    }
+                    line = tail;
+                    width = estimated_text_width(&line, size);
+                    if width + char_width > limit && !line.is_empty() {
+                        lines.push(std::mem::take(&mut line));
+                        width = 0.0;
+                    }
+                } else {
+                    lines.push(std::mem::take(&mut line));
+                    width = 0.0;
+                }
+                if c == ' ' {
+                    continue;
+                }
+            }
+            line.push(c);
+            width += char_width;
+        }
+        lines.push(std::mem::take(&mut line));
+        width = 0.0;
+    }
+    while lines.len() > 1 && lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+        if let Some(last) = lines.last_mut() {
+            *last = shortened(&format!("{last}…"), limit, size);
+        }
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,6 +813,20 @@ mod tests {
         assert_eq!(shortened("abc", 100.0, 12.0), "abc");
         assert_eq!(shortened("中\u{0007}文", 100.0, 12.0), "中 文");
         assert!(shortened(&"宽".repeat(50), 40.0, 12.0).ends_with('…'));
+    }
+
+    #[test]
+    fn wrapped_lines_prefers_wrapping_before_ellipsis() {
+        let text = format!("失败：{}", "很长的错误原因".repeat(20));
+        let lines = wrapped_lines(&text, 96.0, 12.0, 6);
+        assert_eq!(lines.len(), 6);
+        assert!(lines.iter().all(|line| estimated_text_width(line, 12.0) <= 96.0));
+        assert!(lines.last().unwrap().ends_with('…'));
+
+        let short = format!("失败：{}", "原因".repeat(10));
+        let wrapped = wrapped_lines(&short, 96.0, 12.0, 6);
+        assert!(wrapped.len() > 1);
+        assert!(!wrapped.last().unwrap().ends_with('…'));
     }
 
     #[test]

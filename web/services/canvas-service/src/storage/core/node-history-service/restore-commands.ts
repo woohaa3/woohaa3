@@ -26,7 +26,14 @@ export function buildRestoreCommands(
     const payload = entry.payload as NodeHistoryModelPayload;
     // 片场 items-only 历史版本：完整恢复独立根 + 共享 items + 全部 clips；不写顶层模型字段。
     if (payload.animation?.schemaVersion === 4) {
-      return { ok: true, commands: [{ type: "nodeData.patch", nodeId, value: { filmSetGroup: payload.animation.filmSetGroup } as import("@woohaa3/contracts").CanvasNodeData }] };
+      return { ok: true, commands: [{ type: "nodeData.patch", nodeId, value: {
+        filmSetGroup: payload.animation.filmSetGroup,
+        activeRunId: "",
+        taskStatus: "successed",
+        progress: 100,
+        error: null,
+        errorMessage: null
+      } as import("@woohaa3/contracts").CanvasNodeData }] };
     }
     if (payload.animation?.schemaVersion === 3) {
       return { ok: false, code: "unrecoverable", message: "旧片场历史须先完成离线迁移" };
@@ -45,6 +52,11 @@ export function buildRestoreCommands(
             modelScriptVersion: payload.version,
             modelScriptStatus: "ok",
             modelScriptError: null,
+            activeRunId: "",
+            taskStatus: "successed",
+            progress: 100,
+            error: null,
+            errorMessage: null,
             // 编辑版本携带摆放则写回；生成版本不携带，保留当前摆放（既有语义）。
             ...(payload.placement ? { modelPlacement: payload.placement } : {}),
             // 可选规范镜头快照：携带时写回；旧条目缺省保留当前镜头，不伪造。
@@ -67,7 +79,7 @@ export function buildRestoreCommands(
           value: {
             outputAssetId: asset.id,
             resourceKind: "text",
-            activeRunId: `history:${entry.entryId}`,
+            activeRunId: "",
             taskStatus: "successed",
             progress: 100,
             error: null,
@@ -105,6 +117,7 @@ export function buildRestoreCommands(
         value: {
           outputAssetId: asset.id,
           resourceKind: payload.kind,
+          activeRunId: "",
           taskStatus: "successed",
           progress: 100,
           error: null,

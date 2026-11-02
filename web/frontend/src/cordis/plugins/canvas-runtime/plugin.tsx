@@ -125,7 +125,8 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
               currentOperationByNode: service?.currentOperationByNode(),
               versionsByNode: versions?.snapshot(),
               groupStatuses: new Map(ctx.get("canvasGroupRuns")?.getSnapshot().rows.slice().reverse().map(row => [row.rootGroupId, { label: row.label, state: row.status }]) ?? []),
-              selectedByNode: versions?.preview?.selected
+              selectedByNode: versions?.selectedByNode(),
+              unseenByNode: versions?.unseenSnapshot()
             };
           },
           projectHistoryCanvas: canvas => {
