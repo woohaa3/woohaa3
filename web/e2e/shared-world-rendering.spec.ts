@@ -289,10 +289,12 @@ test("interleaved surfaces retain depth when card order changes", async ({ page 
   const order = await page.evaluate(() => (window as any).__canvasCanonical.document.nodes.filter((n: any) => n.id.startsWith("depth-")).map((n: any) => ({ id: n.id, zIndex: n.zIndex })));
   expect(order).toEqual(expect.arrayContaining([{ id: "depth-red", zIndex: 30 }, { id: "depth-green", zIndex: -30 }]));
   const hitsAfter = await picks();
+  await writeFile(info.outputPath("depth.json"), JSON.stringify({ renderer, wasmSha256: downloaded, prepared, points, order, hitsBefore, hitsAfter }, null, 2));
   for (const key of ["red", "green"]) {
     expect(hitsBefore[key].ok).toBe(true);
     expect(hitsAfter[key].ok).toBe(true);
+    expect(hitsBefore[key].value.nodeId).toBe(`depth-${key}`);
+    expect(hitsAfter[key].value.nodeId).toBe(`depth-${key}`);
     expect(hitsAfter[key].value).toEqual(hitsBefore[key].value);
   }
-  await writeFile(info.outputPath("depth.json"), JSON.stringify({ renderer, wasmSha256: downloaded, prepared, points, order, hitsBefore, hitsAfter }, null, 2));
 });
