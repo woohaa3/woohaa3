@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import { readTrustDocument } from './lib/extension-trust/store.mjs';
+import { exact, requireTrust } from './lib/extension-trust/encoding.mjs';
+import { rotateRoot } from './lib/extension-trust/verify.mjs';
 import { runtimeReleaseLayout } from './lib/runtime-release-layout.mjs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -43,6 +46,14 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  attachRuntimePackage(path.join(root,'web/backend'),path.join(output,'backend-runtime'),output,state);
  fs.mkdirSync(path.join(output,'scripts/lib'),{recursive:true});
  for(const entry of fs.readdirSync(path.join(root,'scripts/lib')))if(entry.endsWith('.mjs')&&!entry.includes('.test.'))fs.copyFileSync(path.join(root,'scripts/lib',entry),path.join(output,'scripts/lib',entry));
+ fs.mkdirSync(path.join(output,"scripts/lib/extension-trust"),{recursive:true});
+ for(const file of ["encoding.mjs","verify.mjs","store.mjs","runtime.mjs"])fs.copyFileSync(path.join(root,"scripts/lib/extension-trust",file),path.join(output,"scripts/lib/extension-trust",file));
+ const trustConfig=process.env.WOOHAA3_EXTENSION_TRUST_CONFIG;
+ if(trustConfig){
+  const config=readTrustDocument(path.resolve(trustConfig));exact(config,["schemaVersion","domains"]);requireTrust(config.schemaVersion===2&&Array.isArray(config.domains)&&config.domains.length>0,"invalid-trust-config");
+  for(const domain of config.domains){exact(domain,["root","floors","extensionIds",...['metadataUrl','bootstrap'].filter(key=>Object.hasOwn(domain,key))]);rotateRoot(domain.root,[]);exact(domain.floors,["root","targets","snapshot","timestamp"])}
+  fs.writeFileSync(path.join(output,"extension-trust.json"),JSON.stringify(config));
+ }
  fs.copyFileSync(path.join(root,'scripts/desktop-host.mjs'),path.join(output,'scripts/desktop-host.mjs'));
  fs.copyFileSync(path.join(root,'scripts/extensions-preflight.mjs'),path.join(output,'scripts/extensions-preflight.mjs'));
  fs.writeFileSync(path.join(output,'desktop-host.mjs'),`import './scripts/desktop-host.mjs';\n`);

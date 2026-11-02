@@ -101,6 +101,7 @@ export type ManagedInstallView = {
   previousVersion?: string;
   sourceId: string;
   trust?: ExtensionTrust;
+  quarantine?: string;
   restartRequired: boolean;
   observeUntil?: string;
   directory: string;

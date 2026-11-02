@@ -627,3 +627,27 @@ describe("Extension Manager", () => {
     expect(fs.readdirSync(path.join(h.managedRoot, "installed/demo")).sort()).toEqual(["1.1.0", "1.2.0"]);
   });
 });
+
+describe("trust activation lifecycle",()=>{
+ it("quarantines a known revoked installation and attempts every cleanup even if disabling fails",async()=>{
+  await setup();const key=keys();let revoked=false;
+  const gate=vi.fn(async()=>{if(revoked)throw new Error("revoked")});
+  const remove=vi.fn(async()=>undefined),publish=vi.fn(async()=>({releaseId:"r",href:"/r",changed:true}));
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate},disableSite:async()=>{throw new Error("disable unavailable")},runtime:{available:()=>true,swap:async()=>({swapped:true}),remove},publishBrowserRelease:publish});
+  expect((await installFile(h,packTree(extensionTree(),key.privateKey).file)).status).toBe("succeeded");
+  revoked=true;await h.manager.observe();
+  expect(h.manager.installed()[0]).toMatchObject({quarantine:"revoked",restartRequired:true});
+  expect(remove).toHaveBeenCalledWith("demo");expect(publish).toHaveBeenCalledWith({remove:["demo"]});
+  await h.manager.observe();expect(remove.mock.calls.length).toBeGreaterThan(1);
+ });
+ it("manual rollback requires fresh authorization and preserves the pointer on rejection",async()=>{
+  await setup();const key=keys();let deny=false;
+  const gate=vi.fn(async(input:{dir:string;fresh?:boolean})=>{if(deny&&input.fresh)throw new Error("revoked previous version")});
+  const h=await harness({trustedKeys:[{keyId:key.keyId,publicKey:key.raw}],toolkit:{...toolkit,verifyManagedActivation:gate}});
+  await installFile(h,packTree(extensionTree({version:"1.0.0"}),key.privateKey).file);
+  await installFile(h,packTree(extensionTree({version:"1.1.0"}),key.privateKey).file);
+  deny=true;const job=h.manager.rollback("demo",{actor:"tester"});const result=await h.manager.wait(job.jobId);
+  expect(result?.status).toBe("failed");expect(h.manager.installed()[0]?.version).toBe("1.1.0");
+  expect(gate.mock.calls.some(([input])=>input.fresh===true)).toBe(true);
+ });
+});

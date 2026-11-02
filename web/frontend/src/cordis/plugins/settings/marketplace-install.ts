@@ -70,7 +70,7 @@ export type MarketplaceInstallOptions = {
 /** 版本的 keyId 是否被本机信任（以宿主投影的 `trustedKeyIds` 为准）。 */
 export function versionTrusted(detail: MarketplaceExtensionDetailView, version: string | null): boolean | null {
   const entry = detail.extension.versions.find((item) => item.version === version);
-  if (!entry?.keyId) return null;
+  if (!entry?.keyId || /^[a-f0-9]{64}$/.test(entry.keyId)) return null;
   return detail.trustedKeyIds.includes(entry.keyId);
 }
 

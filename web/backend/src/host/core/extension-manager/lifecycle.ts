@@ -21,7 +21,7 @@ if (handle) {
       commit((draft) => {
         for (const [id] of resumed) {
           const record = draft.extensions[id];
-          if (!record) continue;
+          if (!record || record.quarantine) continue;
           draft.extensions[id] = {
             ...record,
             restartPending: false,
@@ -135,6 +135,7 @@ export function rollback(ctx: ManagerContext, extensionId: string, options: { to
       }
       const dir = requireHandle().layout.versionDir(extensionId, target);
       if (!fs.existsSync(dir)) throw new ExtensionManagerError("MARKETPLACE_NO_PREVIOUS_VERSION", `上一版本目录已不存在：${extensionId}@${target}`);
+      await ctx.toolkit.verifyManagedActivation?.({dir,record:{...latest,...(latest.versions?.[target]??{})},fresh:true});
       const { backend } = switchPointer(extensionId, target, "rollback", options.actor);
       board.update(job, { phase: "reload" });
       // 回滚也是一次切换：含后端且子进程托管时对上一版本目录 swap（D10 第 5 步）；失败则指针切回原版本。
@@ -153,6 +154,7 @@ export function rollback(ctx: ManagerContext, extensionId: string, options: { to
 export async function observe(ctx: ManagerContext): Promise<void> {
   const { handle, deps, board, now, failureThreshold, healthFailures, commit, history, log } = ctx;
   if (!handle || ctx.status.closed) return;
+  await enforceTrust(ctx);
   const state = handle.read();
   const at = now().getTime();
   for (const [extensionId, record] of Object.entries(state.extensions)) {
@@ -199,8 +201,11 @@ export async function autoRollback(ctx: ManagerContext, extensionId: string, rej
   const { board, handle, switchPointer, reload, log } = ctx;
   if (!handle) return;
   await board.serial(async () => {
-    const { backend } = switchPointer(extensionId, previous, "auto-rollback", "system", rejected);
     const dir = handle.layout.versionDir(extensionId, previous);
+    const record=handle.read().extensions[extensionId];
+    try { await ctx.toolkit.verifyManagedActivation?.({dir,record:record?{...record,...(record.versions?.[previous]??{})}:undefined}); }
+    catch(error) { await quarantine(ctx,extensionId,error);return; }
+    const { backend } = switchPointer(extensionId, previous, "auto-rollback", "system", rejected);
     try {
       await reload(extensionId, dir, backend);
     } catch (error) {
@@ -247,4 +252,28 @@ export function sweep(ctx: ManagerContext): number {
     }
   }
   return removed;
+}
+
+async function quarantine(ctx:ManagerContext,extensionId:string,error:unknown):Promise<void>{
+ const record=ctx.handle?.read().extensions[extensionId];if(!record)return;
+ const message=error instanceof Error?error.message:String(error);
+ ctx.commit(draft=>{const current=draft.extensions[extensionId];if(current)draft.extensions[extensionId]={...current,quarantine:message,state:"active",observeUntil:null,restartPending:current.requiresRestart===true};});
+ const outcomes=await Promise.allSettled([
+  Promise.resolve().then(()=>ctx.deps.disableSite?.(extensionId,"trust-revocation")),
+  Promise.resolve().then(()=>ctx.deps.runtime?.remove(extensionId)),
+  Promise.resolve().then(()=>ctx.deps.publishBrowserRelease?.({remove:[extensionId]}))
+ ]);
+ for(const outcome of outcomes)if(outcome.status==="rejected"){
+  ctx.commit(draft=>{const current=draft.extensions[extensionId];if(current)current.restartPending=true;});
+  ctx.log({event:"extension-quarantine-restart-required",extensionId,message:String(outcome.reason)});
+ }
+ ctx.log({event:"extension-quarantined",extensionId,message});
+}
+async function enforceTrust(ctx:ManagerContext):Promise<void>{
+ if(!ctx.handle||!ctx.toolkit.verifyManagedActivation)return;
+ for(const [id,record] of Object.entries(ctx.handle.read().extensions)){
+  if(record.quarantine){await ctx.board.serial(()=>quarantine(ctx,id,new Error(record.quarantine)));continue;}
+  try{await ctx.toolkit.verifyManagedActivation({dir:ctx.handle.layout.versionDir(id,record.current),record});}
+  catch(error){await ctx.board.serial(()=>quarantine(ctx,id,error));}
+ }
 }

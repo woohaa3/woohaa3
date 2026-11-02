@@ -166,8 +166,9 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
   const trustConfig = deps.trust();
   const allowUnsigned = sourceId === MARKETPLACE_LOCAL_FILE_SOURCE_ID && trustConfig.allowUnsignedLocal;
   let trust: ExtensionTrust;
+  let evidence: Record<string, unknown> | undefined;
   try {
-    ({ trust } = await toolkit.verifyExtensionPackage({ treeDir: tree, trustedKeys: trustConfig.trustedKeys, allowUnsigned }));
+    ({ trust, evidence } = await toolkit.verifyExtensionPackage({ treeDir: tree, packageDigest: digest, trustedKeys: trustConfig.trustedKeys, allowUnsigned }));
   } catch (error) {
     throw toManagerError(error, "MARKETPLACE_SIGNATURE_INVALID");
   }
@@ -209,7 +210,8 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
       cleanupStaging(job);
       return "already-current" as const;
     }
-    assertPublisherBinding({
+    if (existing?.trust?.startsWith("certified:") && !trust.startsWith("certified:")) throw new ExtensionManagerError("MARKETPLACE_SIGNATURE_INVALID", "证书扩展不能降级为裸公钥信任");
+    if (!trust.startsWith("certified:")) assertPublisherBinding({
       extensionId,
       builtin: Boolean(ctx.deps.builtins?.().get(extensionId)),
       existingTrust: existing?.trust,
@@ -243,6 +245,13 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
         packageDigest: digest,
         filesDigest,
         trust,
+        evidence,
+        quarantine: undefined,
+        versions: {
+          ...(existing?.versions ?? {}),
+          ...(existing ? {[existing.current]: {filesDigest:existing.filesDigest,packageDigest:existing.packageDigest,trust:existing.trust,evidence:existing.evidence}} : {}),
+          [version]: {filesDigest,packageDigest:digest,trust,evidence}
+        },
         state: "observing",
         observeUntil,
         observeAfterRestart: requiresRestart,

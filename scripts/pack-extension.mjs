@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import { HOST_ENGINES, validateExtensionDescriptor } from "./lib/extension-descriptor.mjs";
 import { PACKAGE_EXTENSION, PACKAGE_TOP_LEVEL, keyIdOf, packDirectory } from "./lib/extension-package.mjs";
+import { readTrustDocument } from "./lib/extension-trust/store.mjs";
 import { hasBrowserEntry } from "./lib/extension-scan.mjs";
 import { preflightDirectory } from "./extensions-preflight.mjs";
 
@@ -83,7 +84,7 @@ function copyRecursive(from, to) {
  * 打包一个扩展目录。返回 { outFile, packageDigest, extensionId, version, signed, keyId, files, preflight }。
  * 预检失败抛 PackExtensionError（.issues 为预检错误列表）。
  */
-export async function packExtension({ dir, out = null, privateKey = null, skipBuild = false, repoRoot = REPO_ROOT, logger = () => undefined } = {}) {
+export async function packExtension({ dir, out = null, privateKey = null, certificateChain = null, skipBuild = false, repoRoot = REPO_ROOT, logger = () => undefined } = {}) {
   const extensionDir = path.resolve(dir);
   const descriptorFile = path.join(extensionDir, "extension.json");
   if (!fs.existsSync(descriptorFile)) throw new PackExtensionError("缺少 extension.json：" + extensionDir);
@@ -130,14 +131,14 @@ export async function packExtension({ dir, out = null, privateKey = null, skipBu
       throw new PackExtensionError("受管预检未通过：\n  " + preflight.errors.map((error) => "[" + error.code + "] " + error.message).join("\n  "), { issues: preflight.errors });
     }
     const outFile = path.resolve(out ?? path.join(repoRoot, "artifacts", "extensions", descriptor.extensionId + "-" + version + PACKAGE_EXTENSION));
-    const packed = packDirectory({ treeDir: stage, outFile, privateKey });
+    const packed = packDirectory({ treeDir: stage, outFile, privateKey, certificateChain });
     return {
       outFile: packed.outFile,
       packageDigest: packed.packageDigest,
       extensionId: descriptor.extensionId,
       version,
       signed: packed.signature !== null,
-      keyId: packed.signature?.keyId ?? null,
+      keyId: packed.signature?.keyId ?? packed.signature?.envelope?.signatures[0]?.keyId ?? null,
       files: packed.files,
       requiresRestart: preflight.requiresRestart,
       preflight
@@ -171,10 +172,10 @@ async function main() {
     process.stdout.write(JSON.stringify({ keyId: result.keyId, publicKey: result.publicKey, keyFile: result.keyFile, pubFile: result.pubFile }, null, 2) + "\n");
     return;
   }
-  const positional = process.argv.slice(2).filter((arg, index, all) => !arg.startsWith("--") && !(index > 0 && ["--key", "--out"].includes(all[index - 1])));
+  const positional = process.argv.slice(2).filter((arg, index, all) => !arg.startsWith("--") && !(index > 0 && ["--key", "--out", "--certificate-chain"].includes(all[index - 1])));
   const dir = positional[0];
   if (!dir) {
-    process.stderr.write("用法：pnpm pack:extension <extensionDir> [--key <ed25519.pem>] [--out <file.wxt>] [--skip-build]\n       pnpm pack:extension --genkey <prefix>\n");
+    process.stderr.write("用法：pnpm pack:extension <extensionDir> [--key <ed25519.pem>] [--certificate-chain <chain.json>] [--out <file.wxt>] [--skip-build]\n       pnpm pack:extension --genkey <prefix>\n");
     process.exitCode = 1;
     return;
   }
@@ -183,6 +184,7 @@ async function main() {
     dir: path.resolve(process.cwd(), dir),
     out: readArg("out") ? path.resolve(process.cwd(), readArg("out")) : null,
     privateKey: keyPath ? fs.readFileSync(path.resolve(process.cwd(), keyPath), "utf8") : null,
+    certificateChain: readArg("certificate-chain") ? readTrustDocument(path.resolve(process.cwd(), readArg("certificate-chain"))) : null,
     skipBuild: process.argv.includes("--skip-build"),
     logger: (event) => process.stderr.write("[pack-extension] " + JSON.stringify(event) + "\n")
   });

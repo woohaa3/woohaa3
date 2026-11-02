@@ -119,6 +119,7 @@ export function createExtensionManager(deps: ExtensionManagerDeps, handle: Insta
         ...(record.previous ? { previousVersion: record.previous } : {}),
         sourceId: record.sourceId,
         ...(record.trust ? { trust: record.trust } : {}),
+        ...(record.quarantine ? { quarantine: record.quarantine } : {}),
         restartRequired: record.restartPending === true,
         ...(record.observeUntil ? { observeUntil: record.observeUntil } : {}),
         directory: handle.layout.versionDir(extensionId, record.current)

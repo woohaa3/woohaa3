@@ -42,6 +42,7 @@ export type InstalledExtensionView = {
   /** 安装来源（`local-file` 或某个市场来源）。 */
   sourceId?: string;
   trust?: ExtensionTrust;
+  quarantine?: string;
   /** 含后端代码的受管扩展已提交新版本，需要受控重启后生效。 */
   restartRequired?: boolean;
   /** 观察期截止时间（ISO）；观察期内激活失败或健康连续失败会自动回滚。 */

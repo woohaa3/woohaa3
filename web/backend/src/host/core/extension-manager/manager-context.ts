@@ -112,6 +112,17 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
     hasBackend: boolean,
     options: { previousDirectory?: string | null; hotSwappable?: boolean } = {}
   ): Promise<ExtensionInstallOutcome> => {
+    if (directory && handle && path.resolve(directory).startsWith(handle.layout.installedDir + path.sep)) {
+      const record = handle.read().extensions[extensionId];
+      if (record?.quarantine) throw new ExtensionManagerError("MARKETPLACE_SIGNATURE_INVALID", record.quarantine);
+      await toolkit.verifyManagedActivation?.({dir:directory,record});
+      if (options.previousDirectory === undefined) options = {...options, previousDirectory: record?.previous ? handle.layout.versionDir(extensionId, record.previous) : null};
+      if (options.previousDirectory && path.resolve(options.previousDirectory).startsWith(handle.layout.installedDir + path.sep)) {
+        const previous=record?.versions?.[path.basename(options.previousDirectory)];
+        try { await toolkit.verifyManagedActivation?.({dir:options.previousDirectory,record:record&&previous?{...record,...previous}:record}); }
+        catch { options={...options,previousDirectory:null}; }
+      }
+    }
     const hotSwappable = options.hotSwappable !== false;
     // 站点 backend 工厂没有运行期装配入口：即使宿主有扩展层，也只能等下一次启动。
     if (hasBackend && !hotSwappable) return "restart-required";
@@ -169,6 +180,8 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
       let next: InstallationRecord = {
         ...record,
         current: target,
+        ...(record.versions?.[target] ?? {}),
+        quarantine: undefined,
         previous: from === target ? record.previous ?? null : from,
         state: "active",
         observeUntil: null,

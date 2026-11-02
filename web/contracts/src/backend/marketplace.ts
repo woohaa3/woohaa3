@@ -96,7 +96,7 @@ export type ExtensionInstallJobView = {
 };
 
 /** 受管扩展的信任级别：`signed:<keyId>` 或 `unsigned`（仅 local-file 且本机显式允许）。 */
-export type ExtensionTrust = `signed:${string}` | "unsigned";
+export type ExtensionTrust = `signed:${string}` | `certified:${string}:${string}` | "unsigned";
 
 /** 来源侧的一个可见版本（展示用；来源返回的状态与 keyId 不参与信任判定）。 */
 export type MarketplaceVersionInfo = {

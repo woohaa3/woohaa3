@@ -205,10 +205,12 @@ export function ManagedExtensionDetails({
   if (!installed || installed.managed !== true) return null;
   const id = installed.id;
   const observing = installed.observeUntil ? new Date(installed.observeUntil) : null;
-  const hasNotice = needsRestart(installed) || installed.builtinVersion || observing;
+  const hasNotice = installed.quarantine || installed.trust?.startsWith("certified:") || needsRestart(installed) || installed.builtinVersion || observing;
   if (!hasNotice) return null;
   return (
     <div className="managed-extension" data-testid={`managed-extension-${id}`}>
+      {installed.quarantine ? <p className="settings-page__error" data-testid={`managed-quarantine-${id}`}>安全校验未通过，已阻止再次激活：{installed.quarantine}。请安装未被吊销的版本；添加裸公钥不能解除隔离。</p> : null}
+      {installed.trust?.startsWith("certified:") ? <p className="managed-extension__note">信任域：{installed.trust.split(":")[1]} · 发布者：{installed.trust.split(":")[2]}</p> : null}
       {needsRestart(installed) ? (
         <p className="managed-extension__restart" data-testid={`managed-restart-required-${id}`}>新版本需重启本机服务后生效。</p>
       ) : null}
