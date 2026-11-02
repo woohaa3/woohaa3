@@ -11,7 +11,7 @@
  *
  * 跑在 `playwright.yjs.config.ts` 下。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { installPageHelpers, waitForCanvasSession } from "./helpers.js";
 import {

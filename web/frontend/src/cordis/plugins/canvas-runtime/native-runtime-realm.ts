@@ -1,3 +1,5 @@
+import { createNativeImagePort } from "./image-worker/native-client.js";
+import { registerNativeImagePort } from "./image-worker/native-port.js";
 import type { BevyModule } from "./bevy-runtime-types.js";
 import type { RuntimeRealm } from "./runtime-realm.js";
 import { createNativeAsyncRpc } from "./native-async-rpc.js";
@@ -54,6 +56,8 @@ export async function createNativeRuntimeRealm(
     if (xhr.status !== 200) throw new Error(`桌面画布通信失败 (${xhr.status})`);
     return xhr;
   };
+  const nativeImages = createNativeImagePort((path,body) => JSON.parse(request(path,body).responseText));
+  const unregisterImages = registerNativeImagePort(nativeImages.port);
   const rawRpc = (method: string, ...args: unknown[]): unknown => {
     const result = JSON.parse(request("rpc", JSON.stringify({ method, args })).responseText) as
       { ok: true; value: unknown } | { ok: false; error: string };
@@ -71,7 +75,7 @@ export async function createNativeRuntimeRealm(
   });
   const rpc = (method: string, ...args: unknown[]) => {
     if (method === "set_scene" || method === "seed_runtime_generation") viewport.cancel();
-    else if (method.startsWith("query_") || method === "set_positions" || method === "request_shot_capture") {
+    else if (method.startsWith("query_") || method === "set_positions" || method === "set_resource_states" || method === "request_shot_capture") {
       const generation = viewport.flush();
       if (generation !== null && method.startsWith("query_") && typeof args[0] === "string") {
         const input = JSON.parse(args[0]);
@@ -116,8 +120,8 @@ export async function createNativeRuntimeRealm(
   } as BevyModule;
   for (const name of [
     "is_ready", "rendered_revision", "base_scene_generation", "viewport_capability", "observer_capability", "position_capability", "scene_capability",
-    "runtime_health", "canvas_work_diagnostics", "model_asset_diagnostics", "shot_diagnostics",
-    "set_scene", "set_viewport", "set_observer", "set_positions", "prepare_and_register_model_resource",
+    "poll_texture_receipts", "runtime_health", "canvas_work_diagnostics", "model_asset_diagnostics", "shot_diagnostics",
+    "set_scene", "set_viewport", "set_observer", "set_positions", "set_resource_states", "prepare_and_register_model_resource",
     "declare_model_resource", "set_model_payload_leases", "overview_cache_snapshot", "overview_cache_command",
     "query_point_hit", "query_marquee", "query_probe", "query_drop_target", "query_composite_asset_scopes",
     "query_model_pick", "query_composite_asset_item_pick", "query_composite_asset_item_bounds", "query_gizmo_hit",
@@ -128,6 +132,8 @@ export async function createNativeRuntimeRealm(
   if (bootstrap.viewportAsync) module.set_viewport = json => viewport.commit(json);
   const dispose = () => {
     if (!active) return;
+    nativeImages.dispose();
+    unregisterImages();
     viewport.dispose();
     observer.disconnect(); target.removeEventListener("resize", layout);
     signal?.removeEventListener("abort", dispose);

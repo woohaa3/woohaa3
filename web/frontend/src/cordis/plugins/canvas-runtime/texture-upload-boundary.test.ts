@@ -3,6 +3,19 @@ import { TextureUploadBoundary } from "./texture-upload-boundary.js";
 import { RuntimeIssues } from "./runtime-issues.js";
 
 describe("纹理失败隔离", () => {
+  it("提交不是应用，换源和重建丢弃旧回执", () => {
+    const boundary = new TextureUploadBoundary(new RuntimeIssues());
+    const submit = (sourceKey: string) => boundary.upload("node", "n", 1, 1, new Uint8Array(4), () => {}, { sourceKey });
+    submit("old");
+    expect(boundary.applied("node", "n", 1, 1, "old")).toBe(false);
+    submit("new");
+    boundary.acceptReceipts(JSON.stringify([["node", "n", 1, 1, "old"]]));
+    expect(boundary.applied("node", "n", 1, 1, "new")).toBe(false);
+    boundary.acceptReceipts(JSON.stringify([["node", "n", 1, 1, "new"]]));
+    expect(boundary.applied("node", "n", 1, 1, "new")).toBe(true);
+    boundary.reset();
+    expect(boundary.applied("node", "n", 1, 1, "new")).toBe(false);
+  });
   it("失败来源只上传一次，其他来源继续；手动重试成功只清除当前问题", () => {
     const issues = new RuntimeIssues();
     const boundary = new TextureUploadBoundary(issues);

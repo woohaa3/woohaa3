@@ -21,6 +21,8 @@ mod image_focus;
 mod model;
 mod observer;
 mod position;
+mod resource_state;
+pub(crate) use resource_state::{NodeResourceState, ResourceStateRequest};
 mod prepared;
 mod scene;
 mod scene_instant;
@@ -108,6 +110,8 @@ mod tests_object_motion;
 mod tests_run_effect;
 #[cfg(test)]
 mod tests_shot_preview;
+#[cfg(test)]
+mod tests_progress;
 
 mod composite_panel;
 pub(crate) use composite_panel::CompositeContainerPanel;

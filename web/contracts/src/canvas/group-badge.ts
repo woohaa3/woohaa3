@@ -2,8 +2,9 @@
  * 组 3D 徽标几何（change: 2026-10-30-remove-group-badge-scaling）。
  *
  * 徽标就是组模型本体：不再有固定框、圆角或展示倍率，尺寸完全来自模型在当前呈现下的
- * 投影包围盒（画布单位，1 单位 = 1× 缩放下的 1 CSS px）。本模块只做纯几何派生，
- * 与 Rust `canvas_query::group_model` 同源。
+ * 投影包围盒（画布单位，1 单位 = 1× 缩放下的 1 CSS px）。普通组与片场组同一口径——徽标倍率
+ * 不读组框宽高（change: 2026-10-31-render-film-set-badge-at-model-units）。本模块只做纯几何
+ * 派生，与 Rust `canvas_query::group_model` 同源。
  */
 
 /**
@@ -41,7 +42,7 @@ const isFinitePositive = (value: number): boolean => Number.isFinite(value) && v
  * 徽标范围 = 模型投影包围盒。
  *
  * 普通组以锚点为中心；片场组（`topAnchored`）把模型顶边放在锚点上、只向下展开，
- * 这样按组宽取景的大场景不会盖住组框内的成员卡片。
+ * 这样大场景不会盖住组框内的成员卡片。
  *
  * 无模型投影（资源未就绪或几何非法）时返回 `null`：不产生徽标范围，也不得用固定框、
  * 历史倍率或上一帧模型尺寸占位。

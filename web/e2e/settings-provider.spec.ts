@@ -11,8 +11,7 @@
  *
  * 右栏正文是唯一滚动容器：Ark 有十几个配置项，滚不动就等于后面的项看不到。
  */
-import { expect, test } from "@playwright/test";
-
+import { expect, test } from "./review-browser.js";
 /** 打开画布内设置（支持从旧地址进入与从画布入口进入）。 */
 async function openSettings(page: import("@playwright/test").Page, fromLegacyPath = true) {
   await page.goto(fromLegacyPath ? "/settings" : "/");

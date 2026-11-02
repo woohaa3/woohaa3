@@ -10,7 +10,8 @@
  *
  * 只等应用 shell 就绪（`.canvas-control-panel`），不依赖 Bevy 渲染或 GPU。
  */
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { stubFrontendExtensionToggles } from "./helpers.js";
 
 /** 记录页面上对扩展发布资源的请求 URL（去重）。 */

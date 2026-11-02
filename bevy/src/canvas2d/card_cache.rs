@@ -4,7 +4,10 @@
 //!
 //! change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs —— 输入改为 ECS 节点 Query，
 //! 标签通过 `LabelRequests` 交给 `sync_canvas_labels`；块缓存仍只保存几何/资产。
-use super::{CanvasMaterials, geometry::Geometry, labels::LabelRequest, labels::LabelRequests, labels::LabelStyle};
+use super::{
+    CanvasMaterials, geometry::Geometry, labels::LabelRequest, labels::LabelRequests,
+    labels::LabelStyle,
+};
 use crate::canvas_ecs::components::{CanvasLabelRole, CardVisual};
 use crate::{
     protocol::{GraphNode, Scene},
@@ -12,7 +15,7 @@ use crate::{
 };
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
-const BLOCK_SIZE: usize = 16;
+pub(super) const BLOCK_SIZE: usize = 16;
 // Owned exact draw inputs, rather than hashes or complete model/media payloads.
 // Comparing borrows on warm frames avoids copying body strings and vertex data.
 #[derive(PartialEq)]
@@ -69,7 +72,7 @@ impl DrawKey {
 pub(super) struct Block {
     // Includes local document index: changing a group/card slot shifts z even
     // when the remaining ordinary cards have identical IDs and coordinates.
-    keys: Vec<(usize, DrawKey)>,
+    keys: Vec<(usize, usize, DrawKey)>,
     theme: String,
     entity: Option<Entity>,
     mesh: Option<Handle<Mesh>>,
@@ -82,6 +85,7 @@ pub(super) struct Block {
 #[derive(Resource, Default)]
 pub(crate) struct CardBlockCache {
     pub(super) blocks: Vec<Block>,
+    pub(super) initialized: bool,
 }
 fn ordinary(node: &GraphNode) -> bool {
     node.group.is_none() && node.composite_asset.is_none()
@@ -120,11 +124,14 @@ pub(super) fn sync(
     requests: &mut LabelRequests,
     cards: &[CardInput<'_>],
     document_len: usize,
+    dirty_blocks: Option<&std::collections::HashSet<usize>>,
     scene: &Scene,
     theme: &ThemeResource,
     materials: &CanvasMaterials,
 ) -> u64 {
-    requests.begin(CanvasLabelRole::Card);
+    if dirty_blocks.is_none() {
+        requests.begin(CanvasLabelRole::Card);
+    }
     let mut blocks = std::mem::take(&mut visuals.blocks);
     let count = document_len.div_ceil(BLOCK_SIZE);
     let focused_id = super::image_focus::presented_media_focus(scene).map(|focus| focus.node_id);
@@ -137,22 +144,48 @@ pub(super) fn sync(
     }
     blocks.truncate(count);
     blocks.resize_with(count, Block::default);
+    // Bucket once instead of scanning every card for every 16-node block.
+    let mut buckets = vec![Vec::new(); count];
+    for card in cards {
+        if card.index < document_len
+            && ordinary(card.node)
+            && focused_id != Some(card.node.id.as_str())
+        {
+            buckets[card.index / BLOCK_SIZE].push(card);
+        }
+    }
     let mut rebuilt = 0;
-    for block_index in 0..count {
+    for (block_index, block_cards) in buckets.into_iter().enumerate() {
+        if dirty_blocks.is_some_and(|dirty| !dirty.contains(&block_index)) {
+            continue;
+        }
         let block = &mut blocks[block_index];
-        let range = block_index * BLOCK_SIZE..((block_index + 1) * BLOCK_SIZE).min(document_len);
-        let block_cards: Vec<&CardInput<'_>> = cards
+        if dirty_blocks.is_some() {
+            for request in &block.labels {
+                requests.remove(CanvasLabelRole::Card, request.owner);
+            }
+        }
+        let keys: Vec<(usize, usize, DrawKey)> = block_cards
             .iter()
-            .filter(|card| range.contains(&card.index))
-            .filter(|card| ordinary(card.node) && focused_id != Some(card.node.id.as_str()))
-            .collect();
-        let keys: Vec<(usize, DrawKey)> = block_cards
-            .iter()
-            .map(|card| (card.index, DrawKey::new(card.node, attach_owner)))
+            .map(|card| {
+                (
+                    card.index,
+                    card.render,
+                    DrawKey::new(card.node, attach_owner),
+                )
+            })
             .collect();
         let label_keys: Vec<_> = block_cards
             .iter()
-            .map(|card| (card.entity, card.node.title.clone(), card.node.type_label.clone(), card.node.body.clone(), card.node.card_label.clone()))
+            .map(|card| {
+                (
+                    card.entity,
+                    card.node.title.clone(),
+                    card.node.type_label.clone(),
+                    card.node.body.clone(),
+                    card.node.card_label.clone(),
+                )
+            })
             .collect();
         if block.theme == theme.fingerprint() && block.keys == keys {
             if block.label_keys != label_keys {
@@ -227,6 +260,7 @@ pub(super) fn sync(
         rebuilt += 1;
     }
     visuals.blocks = blocks;
+    visuals.initialized = true;
     rebuilt
 }
 

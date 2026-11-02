@@ -8,7 +8,7 @@
  *
  * 需要画布存储 + Yjs + Task + Media，跑在 `playwright.yjs.config.ts` 下。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { WebSocket } from "ws";
 import {
   MESSAGE_TYPE,

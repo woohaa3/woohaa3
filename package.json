@@ -22,11 +22,12 @@
     "build:recorder": "node scripts/build-shot-recorder.mjs",
     "build:recorder:debug": "node scripts/build-shot-recorder.mjs --debug",
     "recorder:probe": "node scripts/build-shot-recorder.mjs --debug --probe",
+    "image:probe": "node scripts/image-decode-concurrency-probe.mjs",
     "theme:generate": "node scripts/generate-theme-tokens.mjs",
     "theme:check": "node scripts/generate-theme-tokens.mjs --check",
     "dev": "node scripts/dev.mjs",
-    "dev:frontend": "node scripts/build-bevy-wasm.mjs --dev && pnpm -C web --filter @woohaa3/frontend dev",
-    "build": "pnpm run build:bevy && pnpm -C web run build:units && pnpm -C web --filter @woohaa3/frontend build && pnpm run build:browser && pnpm run assemble:extensions",
+    "dev:frontend": "pnpm run build:media-image && node scripts/build-bevy-wasm.mjs --dev && pnpm -C web --filter @woohaa3/frontend dev",
+    "build": "pnpm run build:media-image && pnpm run build:bevy && pnpm -C web run build:units && pnpm -C web --filter @woohaa3/frontend build && pnpm run build:browser && pnpm run assemble:extensions",
     "preview": "pnpm run build && node scripts/serve-web.mjs",
     "dev:services": "pnpm run assets:sync && pnpm -C web run build:units && node scripts/dev-orchestrator.mjs",
     "services:build": "pnpm -C web run build:units",
@@ -48,7 +49,8 @@
     "build:wasm": "pnpm run build:bevy",
     "config:export": "node scripts/export-config.mjs",
     "task:compact": "node scripts/task-compact.mjs",
-    "desktop:runtimes": "node scripts/package-runtime-components.mjs"
+    "desktop:runtimes": "node scripts/package-runtime-components.mjs",
+    "build:media-image": "node scripts/build-media-image.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.3"

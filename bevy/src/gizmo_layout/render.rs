@@ -1,5 +1,5 @@
-//! A single unit mesh and a fixed number of material slots; transforms never allocate assets.
-use super::{GizmoLine, GizmoView};
+//! Three reusable primitive meshes and a fixed number of material slots; transforms never allocate assets.
+use super::{GizmoLine, GizmoShape, GizmoView};
 use bevy::{camera::visibility::RenderLayers, prelude::*};
 
 #[derive(Clone, Debug, Resource)]
@@ -18,7 +18,7 @@ impl Default for GizmoPalette {
 
 #[derive(Default, Resource)]
 pub struct GizmoRenderAssets {
-    mesh: Option<Handle<Mesh>>,
+    meshes: Vec<Handle<Mesh>>,
     materials: Vec<Handle<StandardMaterial>>,
 }
 impl GizmoRenderAssets {
@@ -63,10 +63,20 @@ impl GizmoRenderAssets {
             }
         }
     }
-    pub fn mesh(&mut self, meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
-        self.mesh
-            .get_or_insert_with(|| meshes.add(Cuboid::new(1.0, 1.0, 1.0)))
-            .clone()
+    pub fn mesh(&mut self, meshes: &mut Assets<Mesh>, shape: GizmoShape) -> Handle<Mesh> {
+        if self.meshes.is_empty() {
+            self.meshes
+                .push(meshes.add(Cylinder::new(0.5, 1.0).mesh().resolution(12)));
+            self.meshes
+                .push(meshes.add(Cone::new(0.5, 1.0).mesh().resolution(16)));
+            self.meshes.push(meshes.add(Cuboid::new(1.0, 1.0, 1.0)));
+        }
+        self.meshes[match shape {
+            GizmoShape::Stroke => 0,
+            GizmoShape::Cone => 1,
+            GizmoShape::Cube => 2,
+        }]
+        .clone()
     }
     pub fn material(
         &self,
@@ -81,9 +91,9 @@ impl GizmoRenderAssets {
             5
         } else {
             match line.handle {
-                "x" => 0,
-                "y" | "yaw-ring" => 1,
-                "z" => 2,
+                "x" | "elevation-ring" => 0,
+                "y" | "yaw-ring" | "orbit-ring" => 1,
+                "z" | "distance" => 2,
                 "center" | "scale" | "shot-origin" => 3,
                 _ => 4,
             }
@@ -109,11 +119,15 @@ pub fn line_transform(line: &GizmoLine, view: &GizmoView, highlighted: bool) -> 
         return None;
     }
     let width = view.world_per_css((line.start + line.end) * 0.5)?
-        * if highlighted { 2.25 } else { line.width_css };
+        * if highlighted {
+            (line.width_css * 1.25).max(3.0)
+        } else {
+            line.width_css
+        };
     Some(Transform {
         translation: (line.start + line.end) * 0.5,
-        rotation: Quat::from_rotation_arc(Vec3::Z, delta / length),
-        scale: Vec3::new(width, width, length),
+        rotation: Quat::from_rotation_arc(Vec3::Y, delta / length),
+        scale: Vec3::new(width, length, width),
     })
 }
 
@@ -129,8 +143,8 @@ pub fn sync_lines<M: Component + Clone>(
     hover: Option<&str>,
     active: Option<&str>,
 ) {
-    let mesh = assets.mesh(meshes);
     for (i, line) in lines.iter().enumerate() {
+        let mesh = assets.mesh(meshes, line.shape);
         let selected = active.or(hover);
         let highlighted = !line.handle.is_empty()
             && (selected == Some(line.handle)
@@ -146,7 +160,7 @@ pub fn sync_lines<M: Component + Clone>(
             MeshMaterial3d(assets.material(line, hover, active)),
         );
         if let Some(entity) = entities.get(i) {
-            commands.entity(*entity).insert(values);
+            commands.entity(*entity).insert((Mesh3d(mesh), values));
         } else {
             entities.push(
                 commands
@@ -157,5 +171,122 @@ pub fn sync_lines<M: Component + Clone>(
     }
     for entity in entities.drain(lines.len().min(entities.len())..) {
         commands.entity(entity).try_despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[derive(Clone, Component)]
+    struct TestHandle;
+
+    #[derive(Resource)]
+    struct TestLayout {
+        lines: Vec<GizmoLine>,
+        entities: Vec<Entity>,
+        view: GizmoView,
+    }
+
+    fn sync_test(
+        mut commands: Commands,
+        mut assets: ResMut<GizmoRenderAssets>,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut layout: ResMut<TestLayout>,
+    ) {
+        let TestLayout {
+            lines,
+            entities,
+            view,
+        } = &mut *layout;
+        sync_lines(
+            &mut commands,
+            &mut assets,
+            &mut meshes,
+            entities,
+            TestHandle,
+            lines,
+            view,
+            RenderLayers::layer(0),
+            None,
+            None,
+        );
+    }
+
+    #[test]
+    fn tool_changes_replace_reused_entity_mesh_without_allocating_more_assets() {
+        let mut world = World::new();
+        let mut assets = GizmoRenderAssets::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        assets.sync_palette(&mut materials, &GizmoPalette::default());
+        world.insert_resource(assets);
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(TestLayout {
+            lines: vec![GizmoLine {
+                shape: GizmoShape::Cone,
+                start: Vec3::ZERO,
+                end: Vec3::Y,
+                width_css: 11.0,
+                handle: "y",
+                secondary: false,
+                rear: false,
+                visible: true,
+            }],
+            entities: vec![],
+            view: GizmoView::orbit(Vec3::ZERO, 0.6, -0.4, 10.0, Vec2::new(1200.0, 800.0), 1.0)
+                .unwrap(),
+        });
+        world.run_system_once(sync_test).unwrap();
+        let entity = world.resource::<TestLayout>().entities[0];
+        let cone = world.get::<Mesh3d>(entity).unwrap().0.clone();
+        for shape in [GizmoShape::Cube, GizmoShape::Stroke, GizmoShape::Cone] {
+            world.resource_mut::<TestLayout>().lines[0].shape = shape;
+            world.run_system_once(sync_test).unwrap();
+            assert_eq!(world.resource::<TestLayout>().entities, vec![entity]);
+            assert_eq!(world.resource::<Assets<Mesh>>().len(), 3);
+            let current = &world.get::<Mesh3d>(entity).unwrap().0;
+            assert_eq!(current == &cone, shape == GizmoShape::Cone);
+        }
+    }
+
+    #[test]
+    fn solid_handles_keep_css_width_and_highlight_enlarges_rather_than_shrinks() {
+        for distance in [10.0, 100.0, 10000.0] {
+            let view = GizmoView::orbit(
+                Vec3::ZERO,
+                0.6,
+                -0.4,
+                distance,
+                Vec2::new(1200.0, 800.0),
+                1.0,
+            )
+            .unwrap();
+            let layout = super::super::ObjectGizmoLayout::new(
+                &view,
+                Vec3::ZERO,
+                super::super::ObjectTool::Move,
+                Mat3::IDENTITY,
+            )
+            .unwrap();
+            for line in layout
+                .lines
+                .iter()
+                .filter(|line| line.shape == GizmoShape::Cone)
+            {
+                let idle = line_transform(line, &view, false).unwrap();
+                let active = line_transform(line, &view, true).unwrap();
+                let per_css = view.world_per_css(idle.translation).unwrap();
+                assert!((idle.scale.x / per_css - 11.0).abs() < 1e-4);
+                assert!(active.scale.x > idle.scale.x);
+                assert_eq!(idle.scale.y, active.scale.y);
+                let axis = idle.rotation * Vec3::Y;
+                assert!(axis.dot((line.end - line.start).normalize()) > 0.999);
+                assert_eq!(
+                    layout.hit(&view, view.project(line.end).unwrap()),
+                    Some(line.handle)
+                );
+            }
+        }
     }
 }

@@ -1,3 +1,6 @@
+import { IMAGE_FETCH_RESERVATION_BYTES } from "@woohaa3/contracts";
+import { releaseImagePixels } from "./image-worker/native-port.js";
+import { prepareImageResource } from "./image-worker/client.js";
 /**
  * 节点媒体纹理同步（change: replace-godot-canvas-runtime-with-bevy）。
  *
@@ -29,8 +32,7 @@ import type { CanvasResourceCoordinator, ResidencyPurpose } from "./residency/in
 import {
   IMAGE_RETRY_DELAYS_MS,
   IMAGE_RETRY_MAX_ATTEMPTS,
-  isTransientImageFailure,
-  loadImageViaDom
+  isTransientImageFailure
 } from "./image-load.js";
 
 /**
@@ -38,6 +40,7 @@ import {
  * 因此 Bevy 侧 contain 后图片必然顶住内容框的某一轴边缘、无多余边距。
  */
 export const TEXTURE_MAX_DIMENSION = 1024;
+let nextFocusSource = 0;
 
 /** 单个节点在本帧的准入信息（由页面资源协调器提供）。 */
 export type TextureAdmission = {
@@ -58,7 +61,7 @@ export type TextureSyncOptions = {
    * 与规范资产一样走同一解码/上传路径，使 ghost 卡片内能显示本地图片。
    */
   getPreviewUrls?: () => ReadonlyMap<string, string>;
-  getFocusTexture?: () => { nodeId: string; width: number; height: number; pixels: Uint8Array } | null;
+  getFocusTexture?: () => { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null;
   getFocusDetails?:()=>import("./focus-details.js").ImageFocusDetails|null;
   /** 解码函数：URL → 图像；测试可注入。 */
   loadImage?: (url: string) => Promise<HTMLImageElement>;
@@ -83,6 +86,8 @@ export type TextureUploader = {
   /** 上传完成的节点 id 集合（用于 mapper 的 texture 标记，可选）。 */
   textureNodeIds(): ReadonlySet<string>;
   isLoading?(nodeId: string): boolean;
+  resourceStateChanges?(): readonly import("@woohaa3/contracts").CanvasNodeResourceState[];
+  acknowledgeResourceStates?(): void;
   dispose(): void;
 };
 
@@ -103,7 +108,7 @@ type ContentEntry = {
    * 不影响其他卡片。
    */
   released?: boolean;
-  pixels?: Uint8Array;
+  pixels?: import("@woohaa3/contracts").ImagePixelSource;
   width?: number;
   height?: number;
   /** 引用该内容的 nodeId 集合（最后引用结束才关闭像素）。 */
@@ -112,6 +117,15 @@ type ContentEntry = {
   retryTimer?: ReturnType<typeof setTimeout>;
   /** 已用掉的自动重试次数；达到 `IMAGE_RETRY_MAX_ATTEMPTS` 后转为显式重试。 */
   retryAttempts?: number;
+  /**
+   * 本份内容的解码准入身份（`内容身份#代次`）。
+   *
+   * 通道合并的 key 不能只用内容身份：内容被释放后（历史圆点切走）同一 URL 可能在**旧解码
+   * 仍在本页通道内**时被重新绑定，此时用内容身份合并会把新需求挂到那个已经作废的解码任务上。
+   * 旧任务完成时 `contents.get(key) !== target` 直接丢弃结果，新目标因此永远不 ready，
+   * 卡片停在上一张图。代次让每一份新建内容拥有独立任务，同内容仍按 `key` 共享像素。
+   */
+  decodeKey: string;
 };
 
 type NodeEntry = {
@@ -121,23 +135,34 @@ type NodeEntry = {
   load: NodeResourceLoad;
   /** 本节点是否已上传（nodeId 级：同内容不同节点各自需要一次 setTexture）。 */
   sent: boolean;
+  submitted?: boolean;
 };
 
 export function createTextureSync(options: TextureSyncOptions): TextureUploader {
-  const loadImage = options.loadImage ?? loadImageViaDom;
+  const loadImage = options.loadImage;
   const createCanvas = options.createCanvas ?? defaultRasterCanvasFactory;
   const residency = options.residency;
   /** nodeId → 绑定信息。 */
   const entries = new Map<string, NodeEntry>();
   /** contentKey → 共享解码内容。 */
   const contents = new Map<string, ContentEntry>();
-  const loading = new NodeResourceLoading(options.onChange);
+  const resourceDirty = new Set<string>();
+  const loading = new NodeResourceLoading(options.onChange, id => resourceDirty.add(id));
   const uploads = new MediaOperationBoundary(options.runtime);
   const uploaded = new Set<string>();
+  const setUploaded = (id: string, ready: boolean) => {
+    if (uploaded.has(id) === ready) return;
+    if (ready) uploaded.add(id); else uploaded.delete(id);
+    resourceDirty.add(id);
+  };
+  const clearUploaded = () => { for (const id of uploaded) setUploaded(id, false); };
   let runtimeGeneration = options.runtime.generation?.() ?? 0;
   let retryVersion = options.runtime.retryVersion?.() ?? 0;
   let disposed = false;
+  /** 解码尝试序号：让「同一内容被重新绑定」得到独立的通道 key（见 `ContentEntry.decodeKey`）。 */
+  let decodeAttempts = 0;
   let overrideUploaded = false;
+  let focusSource = "";
   let previousOverride: ReturnType<NonNullable<TextureSyncOptions["getFocusTexture"]>> = null;
   let previousDetails:import("./focus-details.js").ImageFocusDetails|null|undefined;
   /**
@@ -202,6 +227,10 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       globalThis.clearTimeout(content.retryTimer);
       content.retryTimer = undefined;
     }
+    // 撤销这份内容在通道里的在途解码：它已经没有被任何节点引用，留着只会占名额，
+    // 并可能延迟同内容的新需求（历史圆点连续切换）。
+    residency?.cancel(content.decodeKey);
+    releaseImagePixels(content.pixels);
     contents.delete(key);
   };
 
@@ -241,6 +270,10 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
    *
    * 从 `bindNode` 抽出，使「上传完成后释放 CPU 像素」之后仍能按需重读同一内容
    * （任务 4.5）：重读走同一条 image 通道预算，不会绕过并发上限。
+   *
+   * 通道合并 key 用「内容身份 + 本次尝试序号」：内容实例可能在旧解码仍在通道内时被重新
+   * 绑定（历史圆点连续切换），只用内容身份会把新需求合并到已作废的任务上，新目标永远不
+   * ready（卡片停在上一个版本）。
    */
   const startDecode = (target: ContentEntry, url: string, tier: ThumbnailTier, purpose: ResidencyPurpose, key: string): void => {
     target.released = false;
@@ -248,11 +281,20 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       globalThis.clearTimeout(target.retryTimer);
       target.retryTimer = undefined;
     }
-    const decode = async (): Promise<void> => {
-      const image = await loadImage(url);
-      if (disposed || contents.get(key) !== target) return;
-      const raster = rasterize(image, createCanvas, tier);
+    target.decodeKey = `${key}#${++decodeAttempts}`;
+    const attemptKey = target.decodeKey;
+    const decode = async (signal?: AbortSignal): Promise<void> => {
+      // 真实解码走两段准入：本例持有 `image-fetch`（流水线）名额并自己读取字节，
+      // `prepareImageResource` 只在字节落地后才申请 `image`（解码）名额，避免把 Worker
+      // 名额耗在等 RTT 上。注入 `loadImage`（DOM 预览路径）本身是解码，按 `image` 计入。
+      const raster = loadImage
+        ? rasterize(await loadImage(url), createCanvas, tier)
+        : await prepareImageResource(url, tier, signal, residency
+            ? { purpose, key: attemptKey, fetched: true }
+            : { purpose });
+      if (disposed || contents.get(key) !== target) { if (raster) releaseImagePixels(raster.pixels); return; }
       if (!raster) throw new Error("图片预览无法读取像素");
+      releaseImagePixels(target.pixels);
       target.pixels = raster.pixels;
       target.width = raster.width;
       target.height = raster.height;
@@ -263,11 +305,14 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     };
     const run = residency
       ? residency.admit<void>({
-          channel: "image",
-          key,
+          // 真实路径持有的是**读取**名额（宽），解码名额由 prepareImageResource 在字节落地后申请；
+          // 注入 loadImage 的 DOM 路径本身即解码，按解码名额计。
+          channel: loadImage ? "image" : "image-fetch",
+          key: attemptKey,
           purpose,
-          bytes: tier * tier * 4,
-          run: decode
+          bytes: loadImage ? tier * tier * 4 : IMAGE_FETCH_RESERVATION_BYTES,
+          abortable: false,
+          run: ({ lease }) => decode(lease.signal)
         }).then((outcome) => {
           if (outcome.status !== "settled") throw errorOf(outcome);
         })
@@ -327,6 +372,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     if (content) {
       content.nodes.add(nodeId);
       entries.set(nodeId, { url, contentKey: key, tier, load: previous?.load ?? loading.track(nodeId, url), sent: previous?.sent ?? false });
+      resourceDirty.add(nodeId);
       return;
     }
     const entry: NodeEntry = {
@@ -337,8 +383,9 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       sent: previous?.sent ?? false
     };
     entries.set(nodeId, entry);
+    resourceDirty.add(nodeId);
     loading.setLoading(entry.load, true);
-    const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]) };
+    const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]), decodeKey: key };
     contents.set(key, target);
     // 先准入再创建：解码本身也经 image 通道（并发 + 真实在途计数）。
     startDecode(target, url, tier, admissionOf(nodeId).purpose, key);
@@ -350,7 +397,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       const want = desired.get(id);
       if (want && want.url === entry.url && want.tier === entry.tier) continue;
       entries.delete(id);
-      uploaded.delete(id);
+      setUploaded(id, false);
       uploads.clear(`image:${id}`);
       loading.remove(entry.load);
       options.runtime.clearRuntimeIssue?.(`decode:image:${id}`);
@@ -367,14 +414,36 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     }
   };
 
+  const acknowledged = new Map<string, import("@woohaa3/contracts").CanvasNodeResourceState>();
+  const resourceState = (id: string) => entries.has(id)
+    ? { id, texture: uploaded.has(id), mediaLoading: loading.isLoading(id) } : undefined;
   return {
+    resourceStateChanges() {
+      const changed: import("@woohaa3/contracts").CanvasNodeResourceState[] = [];
+      for (const id of resourceDirty) {
+        const state = resourceState(id), old = acknowledged.get(id);
+        if (state) {
+          if (!old || old.texture !== state.texture || old.mediaLoading !== state.mediaLoading) changed.push(state);
+        } else if (old) changed.push({ id, texture: false, mediaLoading: false });
+      }
+      return changed;
+    },
+    acknowledgeResourceStates() {
+      for (const id of resourceDirty) {
+        const state = resourceState(id);
+        if (state) acknowledged.set(id, state); else acknowledged.delete(id);
+      }
+      resourceDirty.clear();
+    },
     sync() {
+      options.runtime.flushTextureReceipts?.();
       if (disposed) return;
       const canvas = options.getCanvas();
       if (!canvas) {
         entries.clear();
-        contents.clear();
-        uploaded.clear();
+        for (const content of contents.values()) releaseImagePixels(content.pixels);
+      contents.clear();
+        clearUploaded();
         previousOverride = null;
         loading.clear();
         boundCanvas = null;
@@ -390,8 +459,9 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       // 文档，也不会把旧绑定当成最新需求继续复用。
       const structure = canvasStructureKey(canvas);
       let desired = boundDesired;
-      if (!desired || canvas !== boundCanvas || revision !== boundRevision || previews !== boundPreviews
-        || structure !== boundStructure) {
+      const bindingsChanged = !desired || canvas !== boundCanvas || revision !== boundRevision || previews !== boundPreviews
+        || structure !== boundStructure;
+      if (bindingsChanged || !desired) {
         desired = desiredUrls(canvas);
         boundCanvas = canvas;
         boundRevision = revision;
@@ -399,18 +469,20 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         boundStructure = structure;
         boundDesired = desired;
       }
-      const desiredLoads = new Map([...desired].map(([nodeId, value]) => [nodeId, value.url]));
-      loading.retain(desiredLoads);
-      uploads.retainNodes(new Set(desired.keys()));
+      if (bindingsChanged) {
+        loading.retain(new Map([...desired].map(([nodeId, value]) => [nodeId, value.url])));
+        uploads.retainNodes(new Set(desired.keys()));
+      }
       const nextGeneration = options.runtime.generation?.() ?? 0;
       if (nextGeneration !== runtimeGeneration) {
         runtimeGeneration = nextGeneration;
-        uploaded.clear(); previousOverride = null;
+        clearUploaded(); previousOverride = null;
         previousDetails=undefined;
-        for (const entry of entries.values()) entry.sent = false;
+        for (const entry of entries.values()) { entry.sent = false; entry.submitted = false; loading.setLoading(entry.load, true); }
       }
       const retry = options.runtime.retryVersion?.() ?? 0;
-      if (retry !== retryVersion) {
+      const retryChanged = retry !== retryVersion;
+      if (retryChanged) {
         retryVersion = retry;
         for (const [key, content] of contents) {
           if (content.retryTimer !== undefined) {
@@ -423,30 +495,37 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         previousOverride = null;
         previousDetails=undefined;
       }
-      for (const id of uploaded) if (!desired.has(id)) uploaded.delete(id);
       const override = options.getFocusTexture?.() ?? null;
       if (previousOverride && previousOverride !== override) {
         uploads.clear(`focus:${previousOverride.nodeId}`);
         const original = entries.get(previousOverride.nodeId);
-        if (original) original.sent = false;
+        if (original) { original.sent = false; original.submitted = false; }
       }
       // 移除不再需要的节点纹理缓存；先算好删除，再补齐新增（共享内容保留）。
-      retainNodes(desired);
       let changed = false;
-      for (const [id, { url, tier }] of desired) {
-        const before = entries.get(id);
-        bindNode(id, url, tier);
-        if (!before || before.url !== url || before.tier !== tier) changed = true;
+      if (bindingsChanged || retryChanged) {
+        for (const id of uploaded) if (!desired.has(id)) setUploaded(id, false);
+        retainNodes(desired);
+        for (const [id, { url, tier }] of desired) {
+          const before = entries.get(id);
+          bindNode(id, url, tier);
+          if (!before || before.url !== url || before.tier !== tier) changed = true;
+        }
       }
       if (override && override !== previousOverride) {
+        focusSource = `focus:${override.nodeId}:${++nextFocusSource}`;
         const accepted = uploads.run(`focus:${override.nodeId}`, override, override.nodeId,
-          () => options.runtime.setTexture(override.nodeId, override.width, override.height, override.pixels) !== false);
+          () => options.runtime.setTexture(override.nodeId, override.width, override.height, override.pixels, { sourceKey: focusSource }) !== false);
         overrideUploaded = !!accepted;
         if (accepted) {
           const original = entries.get(override.nodeId);
-          if (original) loading.setLoading(original.load, false);
-          uploaded.add(override.nodeId); changed = true;
+          if (original && (options.runtime.textureApplied?.(override.nodeId, override.width, override.height, focusSource) ?? true)) loading.setLoading(original.load, false);
+          setUploaded(override.nodeId, true); changed = true;
         }
+      }
+      if (override && overrideUploaded && (options.runtime.textureApplied?.(override.nodeId, override.width, override.height, focusSource) ?? true)) {
+        const original = entries.get(override.nodeId);
+        if (original) loading.setLoading(original.load, false);
       }
       if (!override) overrideUploaded = false;
       const details=options.getFocusDetails?.()??null;
@@ -479,14 +558,27 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
           continue;
         }
         if (!content.ready || !content.pixels || !content.width || !content.height) continue;
+        if (entry.submitted) {
+          if (options.runtime.textureApplied?.(id,content.width,content.height,content.url) ?? true) {
+            entry.sent=true; setUploaded(id, true); loading.setLoading(entry.load,false); changed=true;
+          }
+          continue;
+        }
         // 每帧上传 staging 预算（design D3）：额度用尽就留到下一帧，不能记成失败
         // （「本帧没上传」不是资源错误，只是被延后）。
         if (!(residency?.spendUploadBytes(content.width * content.height * 4) ?? true)) continue;
         const accepted = uploads.run(`image:${id}`, content, id,
           () => options.runtime.setTexture(id, content.width!, content.height!, content.pixels!,
             { sourceKey: content.url, preserveFailure: id === override?.nodeId }) !== false);
-        loading.setLoading(entry.load, false);
-        if (accepted) { entry.sent = true; uploaded.add(id); changed = true; }
+        if (accepted) {
+          // Publish eligibility so the scene accepts the queued texture; loading waits for the owner-thread receipt.
+          entry.submitted=true; setUploaded(id, true); changed=true;
+          if(options.runtime.textureApplied?.(id,content.width,content.height,content.url) ?? true) {
+            entry.sent=true;loading.setLoading(entry.load,false);
+          }
+        } else {
+          loading.setLoading(entry.load, false);
+        }
       }
       // 逐层释放（design D4 / 任务 4.5）：所有引用者都已确认上传后，JS 侧不再保留像素副本。
       // 只做 JS 去重或只清屏幕图元都不算完成回收；Bevy 侧按内容身份共享纹理，像素可再读。
@@ -500,6 +592,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         if (!content.ready || content.released || !content.pixels) continue;
         if (hasPendingUpload(content)) continue;
         if ([...content.nodes].some(nodeId => retainedNodes.has(nodeId))) continue;
+        releaseImagePixels(content.pixels);
         content.pixels = undefined;
         content.released = true;
       }
@@ -516,16 +609,19 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       previousDetails=null;
       uploads.retainNodes(new Set());
       for (const id of entries.keys()) options.runtime.clearRuntimeIssue?.(`decode:image:${id}`);
-      for (const key of contents.keys()) residency?.cancel(key);
+      for (const content of contents.values()) residency?.cancel(content.decodeKey);
       for (const content of contents.values()) {
         if (content.retryTimer === undefined) continue;
         globalThis.clearTimeout(content.retryTimer);
         content.retryTimer = undefined;
       }
       entries.clear();
+      for (const content of contents.values()) releaseImagePixels(content.pixels);
       contents.clear();
-      uploaded.clear();
+      clearUploaded();
       loading.clear();
+      resourceDirty.clear();
+      acknowledged.clear();
     }
   };
 }
@@ -544,7 +640,7 @@ function rasterize(
   image: HTMLImageElement,
   createCanvas: RasterCanvasFactory,
   maxDimension: number = TEXTURE_MAX_DIMENSION
-): { pixels: Uint8Array; width: number; height: number } | null {
+): { pixels: import("@woohaa3/contracts").ImagePixelSource; width: number; height: number } | null {
   // 保留既有公开 helper 语义：档位不能超过 Bevy 纹理硬上限。
   const limit = Math.min(selectThumbnailTier(maxDimension), TEXTURE_MAX_DIMENSION);
   return rasterizeDrawable(image, { width: image.width, height: image.height }, createCanvas, limit);

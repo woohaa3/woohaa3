@@ -132,6 +132,38 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
     publish(ONLINE);
   };
 
+  /**
+   * HTTP 失败只说明**某个接口**失败；先探活再决定是否进入重连。
+   *
+   * 扩展/业务接口自身返回 502/503（例如未就绪的录制执行器、轮询中的 OAuth 状态）
+   * 不代表宿主不可达。此前任何同源请求失败都直接累计到重连阈值，导致这些接口轮询时
+   * 反复闪「正在重新连接本机服务…」。探活通过就清空计数，宿主真不可达时探活失败再
+   * 进入原有退避重连。
+   */
+  const verifyReachability = async () => {
+    if (disposed || probing) return;
+    probing = true;
+    const current = generation;
+    let result: HostProbeResult;
+    try {
+      result = await options.probe();
+    } catch {
+      result = { reachable: false };
+    }
+    probing = false;
+    if (disposed || current !== generation || snapshot.phase !== "online") return;
+    if (!result.reachable) {
+      consecutiveFailures = 0;
+      enterReconnecting();
+      return;
+    }
+    consecutiveFailures = 0;
+    const pinned = options.pinnedReleaseId();
+    if (pinned !== null && result.releaseId !== null && result.releaseId !== pinned) {
+      publish({ phase: "restarted", attempts: 0, nextReleaseId: result.releaseId, nextReleaseHref: result.href ?? null });
+    }
+  };
+
   const enterReconnecting = () => {
     if (disposed || snapshot.phase === "reconnecting") return;
     generation += 1;
@@ -146,12 +178,15 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
       return () => listeners.delete(listener);
     },
     reportHttp(ok) {
+      // 探活请求自身也会经过同源 fetch 观察器；不能让它反向触发新的探活。
+      if (probing) return;
       if (ok) {
         consecutiveFailures = 0;
         return;
       }
+      if (snapshot.phase !== "online") return;
       consecutiveFailures += 1;
-      if (consecutiveFailures >= threshold) enterReconnecting();
+      if (consecutiveFailures >= threshold) void verifyReachability();
     },
     reportTransport(status) {
       // transport 打开不代表 HTTP 面就绪，恢复仍以探测结果为准；断开是强信号，直接进入重连。

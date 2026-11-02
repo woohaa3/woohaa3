@@ -17,6 +17,7 @@ import { isFilmSetGroupNode } from "@woohaa3/contracts";
  */
 import {
   normalizeFilmSetRunFeedback, readFilmSetConversionNodeStatus, isFilmSetNode,
+  reportedProgressPercent,
   type ConversationTurn, type FilmSetConversionStatus,
   isActiveTaskState,
   type CanvasNodeRunSummary,
@@ -67,6 +68,15 @@ export class RunStateStore {
   private nodeTypeOf: (nodeId: string) => string | undefined;
   /** 操作记录按 opKey 索引；保持插入顺序。 */
   private readonly records = new Map<OpKey, CanvasOperationRecord>();
+  /**
+   * 每条记录**最后一次由服务端活动提供**的 `updatedAt`（opKey → ISO）。
+   *
+   * 乱序保护只能比较服务端时间：`reconcileCanonical` 会先用本地时钟造占位记录，若拿它的
+   * `updatedAt`（本地 now）去比较，第一条真正的活动更新就会被判成"迟到"而丢弃 —— 节点既拿不到
+   * 上报进度，也拿不到真实开始时刻，只能按本地时钟从 0 估算，与活动面板长期不一致
+   * （change: 2026-10-31-unify-node-and-activity-progress）。
+   */
+  private readonly serverUpdatedAt = new Map<OpKey, string>();
   /** optimistic started 的本地元数据（taskKey -> operationId 映射由 runId 承担）。 */
   private readonly listeners = new Set<() => void>();
   private snapshot: RunStateSnapshot = { canvasId: "", records: [], summaries: new Map() };
@@ -197,8 +207,16 @@ export class RunStateStore {
     const state = serverState(activity.state);
     if (existing && existing.state !== "queued" && existing.state !== "running"
       && (state === "queued" || state === "running")) return;
-    if (existing && activity.updatedAt && activity.updatedAt < existing.updatedAt) return;
+    // 只和服务端时间比较（见 `serverUpdatedAt`）：canonical 占位记录的本地 `updatedAt` 不参与。
+    const lastServerUpdate = this.serverUpdatedAt.get(key);
+    if (existing && lastServerUpdate !== undefined && activity.updatedAt && activity.updatedAt < lastServerUpdate) return;
     const kind = existing?.kind ?? operationKindForModelType(activity.modelType);
+    // 活动面按 0..1 分数承载进度，节点读模型与渲染协议要 0..100；不转换会让节点把 0.42
+    // 当成 0.42% 直接夹到下限，看起来永远停在时间估算上
+    // （change: 2026-10-31-unify-node-and-activity-progress，design D1）。
+    const progress = reportedProgressPercent(activity.progress);
+    const updatedAt = activity.updatedAt ?? new Date(this.now()).toISOString();
+    this.serverUpdatedAt.set(key, updatedAt);
     this.records.set(key, {
       operationId: activity.runId,
       canvasId: this.canvasId,
@@ -206,10 +224,10 @@ export class RunStateStore {
       kind,
       state,
       owner: "server",
-      ...(typeof activity.progress === "number" ? { progress: activity.progress } : {}),
+      ...(progress !== undefined ? { progress } : {}),
       ...(activity.error?.message ? { error: activity.error.message } : {}),
-      createdAt: existing?.createdAt ?? activity.createdAt ?? new Date(this.now()).toISOString(),
-      updatedAt: activity.updatedAt ?? new Date(this.now()).toISOString()
+      createdAt: earliestIso(existing?.createdAt, activity.createdAt) ?? new Date(this.now()).toISOString(),
+      updatedAt
     });
     this.publish();
   }
@@ -363,6 +381,7 @@ export class RunStateStore {
   dispose(): void {
     this.disposed = true;
     this.listeners.clear();
+    this.serverUpdatedAt.clear();
   }
 
   private publish(): void {
@@ -427,6 +446,25 @@ export class RunStateStore {
 
 function opKey(canvasId: string, nodeId: string, operationId: string): string {
   return `${canvasId}\u0000${nodeId}\u0000${operationId}`;
+}
+
+/**
+ * 同一 run 的「开始时刻」取两者中更早的那个（ISO 字符串）。
+ *
+ * 活动面板按活动记录自己的 `createdAt` 估算，节点进度环必须用同一时刻，否则两边从不同起点
+ * 推算，同一任务会显示两个百分比（change: 2026-10-31-unify-node-and-activity-progress）。
+ *
+ * 需要「更早」而不是直接覆盖的原因：`reconcileCanonical` 在活动快照到达前就会按 canonical
+ * 造一条记录，`createdAt` 只能是当时的本地时间，比真实开始晚；活动快照到达后必须回到活动
+ * 记录的真实创建时刻。反过来，提交时的乐观记录早于服务端 `createdAt`，保留乐观时间才能和
+ * 面板（同样保留首次提交时间）保持一致。不可解析的一律忽略。
+ */
+function earliestIso(a: string | undefined, b: string | undefined): string | undefined {
+  const aMs = a === undefined ? Number.NaN : Date.parse(a);
+  const bMs = b === undefined ? Number.NaN : Date.parse(b);
+  if (!Number.isFinite(aMs)) return Number.isFinite(bMs) ? b : undefined;
+  if (!Number.isFinite(bMs)) return a;
+  return aMs <= bMs ? a : b;
 }
 
 /** 任务模型类型 → 操作种类（缺省按 image 兜底）。 */

@@ -43,6 +43,7 @@ fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         title: String::new(),
         type_label: String::new(),
         progress: 0.0,
+        progress_started_at: None,
         busy: false,
         texture: false,
         media_loading: false,
@@ -757,6 +758,7 @@ fn history_dots_hit_inside_node_and_single_version_does_not_capture() {
                 selected: None,
                 hovered: false,
                 pressed: false,
+                unseen: false,
                 presentation_id: None,
                 entry_id: None,
                 operation_id: None,
@@ -768,6 +770,7 @@ fn history_dots_hit_inside_node_and_single_version_does_not_capture() {
                 selected: None,
                 hovered: false,
                 pressed: false,
+                unseen: false,
                 presentation_id: None,
                 entry_id: None,
                 operation_id: None,
@@ -835,4 +838,22 @@ fn group_resize_uses_accepted_capability_and_shared_rect_through_selection_and_p
         point_query(generation, 490., 340., 1., None).hit,
         Some(PointHit::Resize { .. })
     ));
+}
+
+#[test]
+fn resource_states_require_current_overview_base_and_known_ids_without_changing_queries() {
+    let node = serde_json::from_value(serde_json::json!({
+        "id":"a", "type":"image", "x":0, "y":0, "width":100, "height":100
+    })).unwrap();
+    let source = scene(vec![node], vec![]);
+    let base = accept_scene(&source);
+    let request = |generation, id| serde_json::from_value::<crate::protocol::ResourceStateRequest>(serde_json::json!({
+        "version":"woohaa-canvas-resource-state-v1", "baseSceneGeneration":generation,
+        "nodes":[{"id":id,"texture":true,"mediaLoading":false}]
+    })).unwrap();
+    assert_eq!(accept_resource_states(&request(base, "a")), Ok(base));
+    assert_eq!(current_generation(), base);
+    assert_eq!(accept_resource_states(&request(base + 1, "a")), Err("stale-base"));
+    assert_eq!(accept_resource_states(&request(base, "missing")), Err("unknown-resource-node"));
+    assert!(with_snapshot(base, |_| ()).is_ok());
 }

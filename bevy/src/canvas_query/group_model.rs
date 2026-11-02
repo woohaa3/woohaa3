@@ -1,11 +1,12 @@
 //! The group identity badge is the group's own model.
 //!
-//! There is no fixed badge frame, corner, plate or user-editable presentation multiplier. An
-//! ordinary group keeps the shared canvas model unit (`placement.scale * 64 * 3 / extent`) exactly
-//! like a `model3d` card; a film-set group arrives with a display placement already fitted to the
-//! group content width, and its badge grows downward from the fixed anchor so it cannot cover the
-//! member cards. In both cases the badge range is derived from the projected bounding box (change:
-//! 2026-10-30-remove-group-badge-scaling).
+//! There is no fixed badge frame, corner, plate or user-editable presentation multiplier. Both an
+//! ordinary group and a film-set group keep the shared canvas model unit
+//! (`placement.scale * CANVAS_UNITS_PER_METER`) exactly like a `model3d` card: the badge size comes only
+//! from the model geometry and placement, never from the group rectangle or the badge rect. A
+//! film-set group's badge grows downward from the fixed anchor so it cannot cover the member cards.
+//! In both cases the badge range is derived from the projected bounding box (changes:
+//! 2026-10-30-remove-group-badge-scaling, 2026-10-31-render-film-set-badge-at-model-units).
 use crate::{
     model3d::{grid, scene::ModelAabb},
     protocol::{GraphNode, ModelPlacement},
@@ -27,7 +28,7 @@ pub(crate) struct GroupModelLayout {
     pub(crate) radii: Vec2,
     /// 模型根锚点（画布坐标，y 向下）；模型投影中心对齐 [`Self::center`]。
     pub(crate) anchor: Vec2,
-    /// 画布共享模型单位：`placement.scale * 64 * 3 / extent`。
+    /// 画布共享模型单位：`placement.scale * CANVAS_UNITS_PER_METER`（绝对米制）。
     pub(crate) unit: f32,
 }
 
@@ -49,11 +50,10 @@ pub(crate) fn for_node(node: &GraphNode) -> Option<GroupModelLayout> {
 pub(crate) fn derive(
     node: &GraphNode,
     local: ModelAabb,
-    extent: f32,
+    _extent: f32,
     placement: &ModelPlacement,
 ) -> GroupModelLayout {
-    let natural = 192. / extent.max(0.001);
-    let unit = placement.scale.max(0.001) * natural;
+    let unit = placement.scale.max(0.001) * crate::model3d::CANVAS_UNITS_PER_METER;
     let rotation = grid::view_rotation() * Quat::from_rotation_y(placement.yaw.to_radians());
     let projected = local.transformed(&Transform {
         rotation,
@@ -65,15 +65,14 @@ pub(crate) fn derive(
     let radii = Vec2::new(size.x, size.y) * 0.5;
     // 锚点与模型尺寸无关：组结构底边中点向下固定 40 画布单位。
     // 普通组把模型投影中心对齐该点；片场组把模型顶边对齐该点并向下展开，
-    // 这样按组宽取景的大场景不会盖住组框内的成员卡片。
+    // 这样大场景不会盖住组框内的成员卡片。`unit` 只来自共享画布模型单位。
     let top_anchored = node
         .group
         .as_ref()
         .is_some_and(|group| group.badge_top_anchor);
     let center = Vec2::new(
         node.x + node.width / 2.,
-        node.y + node.height + GROUP_BADGE_ANCHOR_OFFSET
-            + if top_anchored { radii.y } else { 0. },
+        node.y + node.height + GROUP_BADGE_ANCHOR_OFFSET + if top_anchored { radii.y } else { 0. },
     );
     let c = projected.center();
     let anchor = center - Vec2::new(c.x, -c.y);
@@ -127,6 +126,34 @@ pub(crate) fn badge_polygon(node: &GraphNode) -> Vec<Vec2> {
         Vec2::new(rect.x, rect.y + rect.w),
         Vec2::new(rect.x, rect.y),
     ]
+}
+
+/// Top-anchored scene badges show the four bottom edges of their local model bounds.
+/// Project the actual bottom face, rather than the rectangular screen-space badge range.
+pub(crate) fn badge_bottom_polygon(node: &GraphNode) -> Option<[Vec2; 5]> {
+    let group = node.group.as_ref()?;
+    if !group.badge_top_anchor {
+        return None;
+    }
+    let bounds = &group.model_bounds.as_ref()?.aabb;
+    let layout = for_node(node)?;
+    let rotation = grid::view_rotation()
+        * Quat::from_rotation_y(node.model.as_ref()?.placement.yaw.to_radians());
+    let [x0, y, z0] = bounds.min;
+    let [x1, _, z1] = bounds.max;
+    Some(
+        [
+            Vec3::new(x0, y, z0),
+            Vec3::new(x1, y, z0),
+            Vec3::new(x1, y, z1),
+            Vec3::new(x0, y, z1),
+            Vec3::new(x0, y, z0),
+        ]
+        .map(|corner| {
+            let p = rotation * (corner * layout.unit);
+            layout.anchor + Vec2::new(p.x, -p.y)
+        }),
+    )
 }
 
 /// 组结构缩放的四个抓手位置，顺序与 [`crate::canvas_query::scope::CORNER_NAMES`] 一致

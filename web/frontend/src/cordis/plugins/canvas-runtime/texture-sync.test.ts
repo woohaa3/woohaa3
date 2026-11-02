@@ -51,6 +51,39 @@ function runtimeRecorder() {
 }
 
 describe("createTextureSync", () => {
+  it("同节点同尺寸的聚焦换图使用不同内容身份", () => {
+    const setTexture = vi.fn();
+    let override = { nodeId: "n1", width: 1, height: 1, pixels: new Uint8Array(4) };
+    const sync = createTextureSync({ runtime: { setTexture } as unknown as BevyRuntime,
+      getCanvas: () => canvas(false), getFocusTexture: () => override });
+    sync.sync();
+    override = { ...override, pixels: new Uint8Array([255, 0, 0, 255]) };
+    sync.sync();
+    expect(setTexture).toHaveBeenCalledTimes(2);
+    expect(setTexture.mock.calls[0][4].sourceKey).not.toBe(setTexture.mock.calls[1][4].sourceKey);
+    sync.dispose();
+  });
+  it("入队后保持加载直到应用回执，renderer 重建重新提交", async () => {
+    const { context } = fakeCanvasContext();
+    let applied = false;
+    let generation = 0;
+    const setTexture = vi.fn();
+    const sync = createTextureSync({
+      runtime: { setTexture, textureApplied: () => applied, generation: () => generation } as unknown as BevyRuntime,
+      getCanvas: () => canvas(true), loadImage: async () => fakeImage(),
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => context })
+    });
+    sync.sync(); await new Promise(resolve => setTimeout(resolve, 0)); sync.sync();
+    expect(setTexture).toHaveBeenCalledTimes(1);
+    expect(sync.textureNodeIds().has("n1")).toBe(true);
+    expect(sync.isLoading?.("n1")).toBe(true);
+    generation++; sync.sync();
+    expect(setTexture).toHaveBeenCalledTimes(2);
+    expect(sync.isLoading?.("n1")).toBe(true);
+    applied = true; sync.sync();
+    expect(sync.isLoading?.("n1")).toBe(false);
+    sync.dispose();
+  });
   it("坏图片持续失败不阻断其他资源；未上传不标记可用，手动重试可恢复", async () => {
     const { context } = fakeCanvasContext();
     const current = canvas(true);
@@ -392,4 +425,42 @@ it("退避期间删除节点不会再对该内容重试", async () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+
+it("资源增量在 ACK 前保留、合并中间状态，完整基线 ACK 无须先读取增量", async () => {
+  const { context } = fakeCanvasContext();
+  let current: ServerCanvas | null = canvas(true);
+  let applied = false;
+  let generation = 0;
+  const sync = createTextureSync({
+    runtime: { setTexture: vi.fn(), textureApplied: () => applied, generation: () => generation } as unknown as BevyRuntime,
+    getCanvas: () => current, loadImage: async () => fakeImage(),
+    createCanvas: () => ({ width: 0, height: 0, getContext: () => context })
+  });
+  sync.sync();
+  expect(sync.resourceStateChanges?.()).toEqual([{ id: "n1", texture: false, mediaLoading: true }]);
+  sync.acknowledgeResourceStates?.(); // Full scene baseline need not read a delta.
+  expect(sync.resourceStateChanges?.()).toEqual([]);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  sync.sync();
+  const pending = [{ id: "n1", texture: true, mediaLoading: true }];
+  expect(sync.resourceStateChanges?.()).toEqual(pending);
+  expect(sync.resourceStateChanges?.()).toEqual(pending); // Rejected submission does not consume changes.
+  applied = true; sync.sync();
+  expect(sync.resourceStateChanges?.()).toEqual([{ id: "n1", texture: true, mediaLoading: false }]);
+  sync.acknowledgeResourceStates?.();
+  expect(sync.resourceStateChanges?.()).toEqual([]);
+  generation++; applied = false; sync.sync();
+  expect(sync.resourceStateChanges?.()).toEqual([{ id: "n1", texture: false, mediaLoading: true }]);
+  await new Promise(resolve => setTimeout(resolve, 0)); sync.sync();
+  expect(sync.resourceStateChanges?.()).toEqual([{ id: "n1", texture: true, mediaLoading: true }]);
+  sync.acknowledgeResourceStates?.();
+  current = null; sync.sync();
+  expect(sync.resourceStateChanges?.()).toEqual([{ id: "n1", texture: false, mediaLoading: false }]);
+  sync.acknowledgeResourceStates?.();
+  expect(sync.resourceStateChanges?.()).toEqual([]);
+  current = canvas(true); sync.sync();
+  expect(sync.resourceStateChanges?.()).toEqual([{ id: "n1", texture: false, mediaLoading: true }]);
+  sync.dispose();
 });

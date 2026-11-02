@@ -5,7 +5,8 @@
  * 用产品镜像断言：`window.__bevyRuntime.lastScene()`（版本化场景投影）与
  * `window.__canvasCanonical`（服务端 Y.Doc 派生规范状态）。
  */
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	installPageHelpers,
 	readStoredCanvas,

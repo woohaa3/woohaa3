@@ -24,6 +24,8 @@ export type NodeRunStateProjection = {
   currentOperationByNode?: ReadonlyMap<string, string>;
   versionsByNode?: ReadonlyMap<string, readonly NodeGenerationHistoryListItem[]>;
   selectedByNode?: ReadonlyMap<string, string>;
+  /** nodeId → 尚未查看的历史 entryId；只作为圆点角标提示，不改变选中/当前语义。 */
+  unseenByNode?: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
 /**
@@ -79,23 +81,63 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
     // Task 链路在 canonical `taskStatus` 回流前、Agent 回合全程都只有本读模型有运行态，
     // 因此这里直接点亮 `busy`，让节点与图片/视频节点一致显示进度环（无百分比时按节点种类估算）。
     const records = recordsByNode.get(node.id) ?? (summary?.active ? [summary.active] : []);
-    const items = mergeNodeExecutionPresentation(records, input.versionsByNode?.get(node.id) ?? []);
+    const merged = mergeNodeExecutionPresentation(records, input.versionsByNode?.get(node.id) ?? []);
+    // 历史摘要的 current 可能晚于 canonical 回流：activeRunId + 已成功操作是更即时的
+    // 当前身份。它只覆盖同一节点的 current 标记，不改变状态颜色或选择。
+    const currentOperationId = input.currentOperationByNode?.get(node.id);
+    const forcedCurrent = currentOperationId
+      ? merged.find(item => item.operationId === currentOperationId && item.state === "succeeded")
+      : undefined;
+    const items = currentOperationId
+      ? merged.map(item => {
+          const current = item.presentationId === forcedCurrent?.presentationId;
+          return current === item.current ? item : { ...item, current };
+        })
+      : merged;
     const selectedId = input.selectedByNode?.get(node.id);
     const selected = items.find(item => item.presentationId === selectedId)
       ?? (selectedId ? undefined : [...items].reverse().find(item => item.state === "running" || item.state === "queued") ?? items.find(item => item.current));
     if (selectedId || items.length) {
       node.busy = selected?.state === "running" || selected?.state === "queued";
       node.progress = node.busy ? selected?.progress ?? 0 : 0;
+      // 节点进度环的估算起点与活动面板同一条记录：都用该 run 被观察到的创建时刻
+      // （change: 2026-10-31-unify-node-and-activity-progress，design D2）。
+      const startedAt = node.busy ? operationStartOf(selected, records) : undefined;
+      if (startedAt !== undefined) node.progressStartedAt = startedAt;
+      else delete node.progressStartedAt;
     } else if (summary?.active) node.busy = true;
     const visible = nodeExecutionWindow(items, 24, selectedId);
-    if (!showNodeExecutionDots(visible)) { delete node.historyStrip; continue; }
+    const unseen = input.unseenByNode?.get(node.id);
+    // 单个新完成版本默认被折叠；有未读提醒时仍显示圆点，否则首个版本的未读提示永远不可见。
+    const hasUnseen = visible.some(item => item.entryId && unseen?.has(item.entryId));
+    if (!showNodeExecutionDots(visible) && !hasUnseen) { delete node.historyStrip; continue; }
     node.historyStrip = {
       dots: visible.map(item => ({ state: item.state, current: item.current, selected: item === selected,
         presentationId: item.presentationId, entryId: item.entryId, operationId: item.operationId,
-        recoverable: item.recoverable })),
+        recoverable: item.recoverable,
+        ...(item.entryId && unseen?.has(item.entryId) ? { unseen: true } : {}) })),
       truncated: items.length - visible.length
     };
   }
+}
+
+/**
+ * 该运行被观察到的开始时刻（epoch 毫秒）；无法确定时返回 `undefined`。
+ *
+ * 取活动记录（与活动面板同一条）的 `createdAt`，它是两端唯一共享的时间锚点。**不**用
+ * `updatedAt`：进度更新会推进它，起点一旦漂移节点进度就会回退。
+ */
+function operationStartOf(
+  selected: { operationId?: string; createdAt: string } | undefined,
+  records: readonly CanvasOperationRecord[]
+): number | undefined {
+  const record = selected?.operationId === undefined
+    ? undefined
+    : records.find((entry) => entry.operationId === selected.operationId);
+  const createdAt = record?.createdAt ?? selected?.createdAt;
+  if (createdAt === undefined) return undefined;
+  const parsed = Date.parse(createdAt);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 /** 统一操作状态 → 历史条圆点状态。 */

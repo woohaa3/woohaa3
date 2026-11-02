@@ -210,6 +210,7 @@ pub(crate) struct FrameFlags {
     pub(crate) film_set_media_changed: bool,
     pub(crate) scene_received: bool,
     pub(crate) positions_received: bool,
+    pub(crate) resource_nodes: Vec<usize>,
     pub(crate) surface_changed: bool,
     pub(crate) theme_changed: bool,
     /// Derived input summary retained for animation/overlay consumers; static 2D producers use

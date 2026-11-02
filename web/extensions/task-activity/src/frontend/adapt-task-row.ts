@@ -9,7 +9,7 @@ import type { ActivityFeedItem } from "./store.js";
 import {
   TASK_STATE_LABELS,
   TASK_STATE_TONES,
-  clampProgress,
+  fractionProgress,
   type ActivityRow,
   type ActivityRowCapabilities
 } from "./rows.js";
@@ -62,7 +62,7 @@ export function adaptTaskRow(item: ActivityFeedItem, capabilities: ActivityRowCa
     status: TASK_STATE_LABELS[item.state],
     state: item.state,
     tone: TASK_STATE_TONES[item.state],
-    ...(active && clampProgress(item.progress) !== undefined ? { progress: clampProgress(item.progress) } : {}),
+    ...(active && fractionProgress(item.progress) !== undefined ? { progress: fractionProgress(item.progress) } : {}),
     nodeId: item.nodeId,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,

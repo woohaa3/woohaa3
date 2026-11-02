@@ -51,6 +51,8 @@ export function useFocusLayout(config: FocusLayoutConfig): void {
   const setConfig = useContext(FocusLayoutContext);
   const snapshot = useMemo(() => config, [
     config.desktop,
+    config.navigationWidth,
+    config.bottomBar,
     config.panel,
     config.animationPreview,
     config.toolColumn,
@@ -154,6 +156,7 @@ export function FocusWorkspace({ presentation, runtime, surfaceRef, sidePanel = 
     "--focus-player-bottom": `${44 + layout.panelHeight}px`,
     "--focus-rail": `${layout.rail}px`, "--focus-header": `${layout.header}px`,
     "--focus-toolbar": `${layout.toolbar}px`,
+    "--focus-navigation-width": `${layout.navigationWidth}px`,
     "--focus-footer": `${layout.footer}px`, "--focus-player-height": `${layout.player}px`, "--focus-panel-width": `${layout.panelWidth}px`,
     "--focus-panel-height": `${layout.panelHeight}px`, "--focus-tools": `${layout.tools}px`,
     "--focus-content-x": `${layout.contentRect.x}px`, "--focus-content-y": `${layout.contentRect.y}px`,

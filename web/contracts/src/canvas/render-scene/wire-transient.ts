@@ -248,6 +248,10 @@ export type BevyModelEditor = {
    * `object` 为片场对象模式（重心/三轴位移，change: 2026-10-09）。
    */
   toolMode: "model" | "object" | "camera";
+  /** Full-size read-only shot rig; no animation clock is created. */
+  shotPreview?: boolean;
+  /** Disposable XZ reference grid in display space. */
+  grid?: { origin: [number, number, number]; spacing: number };
   objectTool?: ObjectGizmoTool;
   itemId?: string;
   /** Parent basis before the item's base yaw and animation (column-major). */

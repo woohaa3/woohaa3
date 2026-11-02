@@ -39,7 +39,7 @@ export { PROMPT_SNIPPET_SOURCE } from "../../extension-api/capability-keys.js";
 /** 节点历史 feature capability（由 Node History Plugin 提供）。 */
 export const NODE_HISTORY_SERVICE = "nodeHistory";
 export const INLINE_HISTORY_SERVICE = "inlineHistoryVersions";
-export type InlineHistoryService = Pick<import("./node-history/inline-versions.js").InlineVersions, "snapshot" | "subscribe" | "select" | "preview" | "refreshNode">;
+export type InlineHistoryService = Pick<import("./node-history/inline-versions.js").InlineVersions, "snapshot" | "subscribe" | "select" | "activate" | "preview" | "refreshNode" | "markSeenNode" | "unseenSnapshot" | "selectedByNode">;
 
 /**
  * 模型编辑 gizmo/镜头工具栏 feature capability

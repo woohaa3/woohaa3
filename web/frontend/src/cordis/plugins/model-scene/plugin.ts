@@ -21,7 +21,10 @@ export type ModelSceneExtensionOptions = {
 export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): Plugin.Function<void> {
   return definePlugin((ctx: Context) => {
     const registry = ctx.nodeImplementations;
-    const scenes = new ModelSceneStore();
+    // 页面级共享 prepared resource 表：文档级几何消费者（组徽标投影、共享节点索引、
+    // 小地图、定位、执行面板锚点）都从 `modelSceneStore` 读取。若这里另建实例，资源只进
+    // 服务、不进共享表，组徽标投影恒为缺失，面板就退回组结构框下缘（普通组与片场组同样）。
+    const scenes = modelSceneStore;
     const applied = new Map<string, string>();
     const releases = new Map<string, () => void>();
     const loading = new NodeResourceLoading();

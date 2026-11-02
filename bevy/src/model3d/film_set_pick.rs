@@ -390,10 +390,16 @@ mod tests {
                 &binding.transform,
             ));
         let plane = super::super::media_geometry::group_media_plane("group", binding, None);
-        assert_eq!(plane.height, 0.5);
-        assert_eq!(plane.width, 1.0);
-        let expected = super::super::scene::ModelAabb::new([-0.5, 0.0, 0.0], [0.5, 0.5, 0.0])
-            .transformed(&root);
+        // 绝对米制：48 画布单位的平面高 = 48 / CANVAS_UNITS_PER_METER = 0.75 内容单位，宽 ×2。
+        let expected_height = super::super::media_geometry::MEDIA_PLANE_CANVAS_HEIGHT
+            / crate::model3d::CANVAS_UNITS_PER_METER;
+        assert_eq!(plane.height, expected_height);
+        assert_eq!(plane.width, expected_height * 2.0);
+        let expected = super::super::scene::ModelAabb::new(
+            [-expected_height, 0.0, 0.0],
+            [expected_height, expected_height, 0.0],
+        )
+        .transformed(&root);
         assert_eq!(result.candidates[0].min, expected.min);
         assert_eq!(result.candidates[0].max, expected.max);
         assert!(result.candidates[0].plane_inverse.is_some());

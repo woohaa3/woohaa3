@@ -142,7 +142,7 @@ pub(super) fn draw_static(
         labels.extend(draw_shot_preview(geometry, theme, node, index));
         return labels;
     }
-    let body_lines: Vec<&str> = node.body.lines().collect();
+    let body_lines = super::layout::wrapped_lines(&node.body, width - 48., 12., 6);
     for i in 0..6 {
         labels.push((
             if show_content
@@ -150,7 +150,7 @@ pub(super) fn draw_static(
                 && !node.busy
                 && !(node.model_preview.is_some() && node.model.is_some())
             {
-                shortened(body_lines.get(i).unwrap_or(&""), width - 48., 12.)
+                body_lines.get(i).cloned().unwrap_or_default()
             } else {
                 String::new()
             },

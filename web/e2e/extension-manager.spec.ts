@@ -8,7 +8,7 @@
  * 改动写入 browser-local 目标配置后，关闭设置并在下一次 Canvas 启动时按目标配置装配；重新启用可恢复。
  * 用例只验证 DOM chrome，不依赖 Bevy 渲染（无 GPU 环境不等待 `__bevyRuntime.isReady()`）。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, resetCanvasStorage } from "./helpers.js";
 
 const PREF_KEY = "woohaa:frontend-extensions:v1";

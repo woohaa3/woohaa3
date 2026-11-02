@@ -4,7 +4,7 @@
  * 验证：Bevy WASM 运行时就绪 → 画布会话就绪 → 浏览器命令出口已安装 →
  * 首次启动持久化了一个**空**规范画布 → 生产物不含 Godot/PCK。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, readStoredCanvas, resetCanvasStorage, waitForCanvasSession, waitForBevyReady } from "./helpers.js";
 
 test.describe("启动链路", () => {

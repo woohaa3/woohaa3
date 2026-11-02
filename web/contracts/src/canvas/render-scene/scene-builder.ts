@@ -24,7 +24,6 @@ import { prepareModelResource, type PreparedModelResource } from "../prepared-mo
 import { fnv1a64Hex } from "../content-hash.js";
 import { encodeFilmSetPartId, readFilmSetContent } from "../film-set-content.js";
 import type { ModelFocusProjection } from "../model-focus.js";
-import { filmSetGroupBadgePlacement } from "../model-focus/model-bounds.js";
 import { getGroupLayoutSizes } from "../domain/core/group-geometry.js";
 import { groupAppearanceModel } from "../group-appearance.js";
 import { hiddenByCollapsedGroups } from "../group-presentation.js";
@@ -376,19 +375,11 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           : null))
       : null;
     /**
-     * 片场是场景容器：整场模型按组内容宽度取景，避免 8 个建筑组合后被归一到单个卡片的
-     * 192px 基准。普通组仍用共享画布单位；这里只改展示 placement，不写回 canonical 数据。
+     * 片场组与普通组、`model3d` 卡片共用同一画布模型单位（`placement.scale × 64 × 3 / extent`）：
+     * 徽标按模型自身宽高渲染，不读组框或徽标矩形，也不按组宽取景
+     * （change: 2026-10-31-render-film-set-badge-at-model-units）。
      */
     const filmSetGroup = node.type === "group" && readFilmSetGroupMarker(data) !== null;
-    const displayPlacement = filmSetGroup && placement && resource
-      ? filmSetGroupBadgePlacement({
-        sceneVersion: resource.sceneVersion,
-        ops: [],
-        extent: resource.extent,
-        aabb: resource.aabb,
-        placement
-      }, width)
-      : placement;
     // 片场：模型与媒体平面共用同一等比适配因子，让范围框（节点矩形）罩住整套内容，
     // 拖动角落缩放矩形即等比缩放内容（change: 2026-10-08-make-film-set-model-only 修订）。
     const pureFit = executableComposite
@@ -475,7 +466,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           // 总览纹理缓存同样是 group 级声明；缺省保持逐帧实时。
           ...(input.overviewCaches?.get(node.id) ? { overviewCache: input.overviewCaches.get(node.id) } : {}),
           ...(resource?.aabb ? { modelBounds: { aabb: resource.aabb, extent: resource.extent } } : {}),
-          // 片场场景按组宽取景后只向下展开，顶边贴住组底边锚点，避免盖住成员卡片。
+          // 片场场景按模型自身单位呈现，只向下展开：顶边贴住组底边锚点，避免盖住成员卡片。
           ...(filmSetGroup ? { badgeTopAnchor: true } : {})
         } : {})
       };
@@ -489,7 +480,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           sceneVersion: resource.sceneVersion,
           resourceKey: resource.resourceKey,
           signature: resource.signature,
-          ...(displayPlacement ? { placement: displayPlacement } : {})
+          ...(placement ? { placement } : {})
         };
       }
     }

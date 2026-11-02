@@ -1,10 +1,11 @@
 import { Button, IconButton } from "@woohaa3/ui/primitives";
-import { PlayIcon, PauseIcon, BackIcon } from "@woohaa3/ui/icons";
-import { useState, useSyncExternalStore } from "react";
+import { PlayIcon, PauseIcon } from "@woohaa3/ui/icons";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
 import type { ModelCaptureSession } from "@woohaa3/frontend/extension-api";
+import { FilmSetOutputMenu } from "./workspace-output-menu.js";
 
-export function FilmSetAnimationPlayer({ ctx, captureSession, writable, duration, onPreview }: { ctx: Context; captureSession: ModelCaptureSession; writable: boolean; duration?: number; onPreview?: () => void }) {
+export function FilmSetAnimationPlayer({ ctx, captureSession, writable, duration, onPreview, output }: { ctx: Context; captureSession: ModelCaptureSession; writable: boolean; duration?: number; onPreview?: () => void; output: ReactNode }) {
   const playback = useSyncExternalStore(ctx.filmSetPlayback.subscribe, ctx.filmSetPlayback.getSnapshot, ctx.filmSetPlayback.getSnapshot);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29,16 +30,13 @@ export function FilmSetAnimationPlayer({ ctx, captureSession, writable, duration
     finally { setBusy(false); }
   };
   return <div className="film-set-animation-player" role="region" aria-label="动画播放控制">
-    <div className="film-set-animation-player__transport">
     <IconButton label={playback.playing ? "暂停" : "播放"} title={playback.playing ? "暂停" : "播放"} size="sm" disabled={!total || !!playback.error?.startsWith("片段无法播放")} onClick={() => { enterPreview(); playback.playing ? ctx.filmSetPlayback.pause() : ctx.filmSetPlayback.play(); }}>{playback.playing ? <PauseIcon size={16} /> : <PlayIcon size={16} />}</IconButton>
-    <IconButton label="回到开头" title="回到开头" size="sm" onClick={() => { enterPreview(); ctx.filmSetPlayback.stop(); }}><BackIcon size={16} /></IconButton>
-    <output>{playback.time.toFixed(2)} / {total.toFixed(2)} 秒</output>
-    </div>
     <input aria-label="动画进度" type="range" min={0} max={total} step={0.01} value={Math.min(playback.time, total)} disabled={!total} onChange={event => { enterPreview(); ctx.filmSetPlayback.pause(); ctx.filmSetPlayback.seek(Number(event.target.value)); }} />
-    <div className="film-set-animation-player__actions">
+    <output title={playback.error ?? undefined}>{playback.error ? "无法播放" : `${playback.time.toFixed(2)} / ${total.toFixed(2)} 秒`}</output>
+    <FilmSetOutputMenu>
     <Button size="sm" disabled={!writable || busy || !!playback.error?.startsWith("片段无法播放")} onClick={() => void capture()}>{busy ? "截图中…" : "保存当前帧"}</Button>
-    {playback.preview ? <Button size="sm" onClick={() => ctx.filmSetPlayback.edit()}>返回编辑</Button> : null}
-    </div>
+    {output}
     {error || playback.error ? <p role="alert">{error ?? playback.error}</p> : null}
+    </FilmSetOutputMenu>
   </div>;
 }

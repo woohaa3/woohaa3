@@ -13,7 +13,8 @@
  * 像素判定用容差，不做逐像素哈希。
  */
 import { filmSetNodeDataFields, createFilmSetSnapshot, createModelSnapshot, type FilmSetItem } from "@woohaa3/contracts";
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
   installPageHelpers,
   readStoredCanvas,

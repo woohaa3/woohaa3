@@ -59,7 +59,7 @@ pub(crate) fn draw(
 
     let mut out = Vec::new();
     for (entity, node) in nodes {
-        // 容器（片场）与普通节点共用同一条动作横条；是否绘制由 `action_bar_visible` 决定
+        // 容器（片场）与普通节点共用同一条动作横条；投影以 `action_bar_enabled` 决定是否绘制
         // （只有声明 `actionBar` 的容器才带 NodeActionBar 组件）。
         let Some(actions) = node_actions.get(&node.id) else {
             continue;
@@ -370,6 +370,7 @@ mod tests {
             title: String::new(),
             type_label: String::new(),
             progress: 0.0,
+            progress_started_at: None,
             busy: false,
             texture: false,
             media_loading: false,

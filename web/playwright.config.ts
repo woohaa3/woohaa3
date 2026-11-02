@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { reviewBaseUrl, reviewProbeUrl, reviewUseOptions, reviewWebServerEnv, reviewWebServerIgnoreHTTPSErrors } from "./e2e/review-target.js";
 
 /**
  * E2E 配置（任务 7.1）。
@@ -22,7 +23,8 @@ export default defineConfig({
 	retries: 0,
 	reporter: [["list"]],
 	use: {
-		baseURL: `http://127.0.0.1:${PORT}`,
+		...reviewUseOptions,
+		baseURL: reviewBaseUrl(PORT),
 		// DOM 快照对全屏 Canvas 用例的价值很低，却占每个动作的固定开销；失败时仍保留
 		// 截图 + sources + 网络，足够定位问题。
 		trace: { mode: "retain-on-failure", snapshots: false },
@@ -34,8 +36,10 @@ export default defineConfig({
 		},
 	],
 	webServer: {
+		ignoreHTTPSErrors: reviewWebServerIgnoreHTTPSErrors,
 		command: `node e2e/server.mjs --port ${PORT}`,
-		url: `http://127.0.0.1:${PORT}/`,
+		url: reviewProbeUrl(PORT),
+		env: reviewWebServerEnv,
 		reuseExistingServer: !process.env.CI,
 		timeout: 60_000,
 		stdout: "pipe",

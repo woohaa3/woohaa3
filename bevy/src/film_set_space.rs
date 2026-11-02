@@ -6,11 +6,12 @@
 //!
 //! ```text
 //! world = anchor + s * R(yaw) * scene
-//! s     = min(placement.scale, 1) * 192 / extent * filmSetFit（= model_unit）
+//! s     = min(placement.scale, 1) * CANVAS_UNITS_PER_METER * filmSetFit（= model_unit）
 //! ```
 //!
-//! 因此透视除法中的 x/z、y/z 不变，屏幕构图不随呈现倍率变化。任何非有限值或非正倍率都显式
-//! 失败，不构造可产生 NaN 的镜头。Web 侧同一公式在 `contracts/src/canvas/film-set-space.ts`，
+//! 场景单位就是米：`CANVAS_UNITS_PER_METER` 固定为 64，不再除以 `extent`
+//! （change: 2026-10-31-render-models-at-absolute-metric-scale）。因此透视除法中的 x/z、y/z
+//! 不变，屏幕构图不随呈现倍率变化。任何非有限值或非正倍率都显式失败，不构造可产生 NaN 的镜头。Web 侧同一公式在 `contracts/src/canvas/film-set-space.ts`，
 //! 共享 `web/contracts/fixtures/film-set-space.json` 对齐。
 
 use bevy::prelude::{Quat, Vec3};

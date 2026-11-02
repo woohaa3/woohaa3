@@ -15,6 +15,7 @@
  * `group:<requestId>`），`exitingKeys` 也以它为键（design D3）。
  */
 import type { BackgroundActivityJob, CanvasTaskActivity, SkillMediaStepView } from "@woohaa3/contracts";
+import { reportedProgressPercent, roundedGenerationPercent } from "@woohaa3/contracts";
 import type { CanvasGroupRun } from "@woohaa3/frontend/extension-api";
 import type { ActivityFeedItem, BackgroundFeedJob } from "./store.js";
 
@@ -93,6 +94,13 @@ export type ActivityRowCapabilities = {
   openHistory?: (item: ActivityFeedItem) => void;
   /** 主/次行文案解析；缺省按 modelKey 兜底。 */
   resolveTaskDisplay?: (item: ActivityFeedItem) => { primary: string; secondary: string };
+  /**
+   * 节点渲染类型解析（`image`/`video`/`audio`/`text`…）。
+   *
+   * 只用于估算进度时长：任务记录缺 `modelType` 时按同一节点的类型兜底，避免节点与面板
+   * 因为一个缺字段而落到不同估算时长（change: 2026-10-31-unify-node-and-activity-progress）。
+   */
+  resolveNodeType?: (nodeId: string) => string | undefined;
   group?: ActivityRowGroupCapabilities;
   /** Skill 媒体步骤（change: 2026-10-28-add-agent-skill-media-regeneration，任务 5.2）。 */
   skill?: ActivityRowSkillCapabilities;
@@ -199,6 +207,58 @@ export function skillStateActive(state: SkillMediaStepView["attempts"][number]["
 export function clampProgress(progress: number | undefined): number | undefined {
   if (progress === undefined) return undefined;
   return Math.max(0, Math.min(1, progress));
+}
+
+/**
+ * 规范上报进度 → 真正的 0..1 分数（缺失时 `undefined`，不伪造）。
+ *
+ * 契约要求 `progress` 是 0..1，但历史与部分 Provider 会夹带 0..100 的百分比。直接
+ * `clampProgress` 会把 `42` 夹成 `1`（100%），而节点读模型按 `42%` 处理 —— 同一任务在面板与
+ * 节点上就会显示 `95%` 与 `42%`。这里先按 `reportedProgressPercent` 归一，再折回分数，
+ * 与节点侧用的是同一条换算（change: 2026-10-31-unify-node-and-activity-progress）。
+ */
+export function fractionProgress(progress: number | undefined): number | undefined {
+  const percent = reportedProgressPercent(progress);
+  return percent === undefined ? undefined : percent / 100;
+}
+
+/**
+ * 行在面板上显示的整数百分比（与画布节点进度环同一个公式）
+ * （change: 2026-10-31-unify-node-and-activity-progress，design D1/D2）。
+ *
+ * 生成任务：节点与面板共享「该 run 的创建时刻」作为估算起点，再用同一套按种类的估算时长与
+ * `max(估算, 上报)` 规则取整，因此两边显示同一个数字，而不是一个显示服务端上报、另一个显示
+ * 时间推算。其他来源（扩展后台活动）没有画布进度环，只按自己的上报值显示。
+ *
+ * `now` 由调用方传入（面板每秒 tick 一次，测试注入固定值），本函数仍是纯的。
+ * 终态返回 `undefined`（终态不再展示进度）。
+ */
+export function displayedProgressPercent(
+  row: ActivityRow,
+  now: number,
+  capabilities: ActivityRowCapabilities = {}
+): number | undefined {
+  if (!row.active) return undefined;
+  if (row.kind !== "task") {
+    const percent = reportedProgressPercent(row.progress);
+    return percent === undefined ? undefined : Math.round(percent);
+  }
+  const item = row.source.kind === "task" ? row.source.item : undefined;
+  const reported = row.progress;
+  // 只有乐观记录（缺少可解析的创建时刻）时没有起点可算：退回上报值，绝不编造时间进度。
+  if (!Number.isFinite(Date.parse(row.createdAt))) {
+    const percent = reportedProgressPercent(reported);
+    return percent === undefined ? undefined : Math.round(percent);
+  }
+  // 节点侧按自身的渲染类型（text/image/video/audio）估时长；任务记录缺 `modelType` 时用
+  // 同一节点的类型兜底，避免同一任务在两端落到不同估算时长。
+  const kind = item?.modelType ?? (item?.nodeId ? capabilities.resolveNodeType?.(item.nodeId) : undefined);
+  return roundedGenerationPercent({
+    startedAt: row.createdAt,
+    ...(reported !== undefined ? { reported } : {}),
+    ...(kind !== undefined ? { kind } : {}),
+    now
+  });
 }
 
 /** 面板排序：开始时间从新到旧，同时刻用稳定 key 兜底（design D7）。 */

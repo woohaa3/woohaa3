@@ -105,7 +105,7 @@ describe("前端协议边界审计", () => {
     // 共用的只读契约与基础 UI（shared/）是显式分层，不再是 cordis 子树下的 feature。
     // change: 2026-10-10-unify-extension-frontend-entry：`extension-api/` 是对外的公共前端能力
     // 入口（leaf API），与 cordis 宿主树分层。
-    const allowedTop = new Set(["bevy-wasm", "cordis", "desktop", "pages", "shared", "extension-api", "plugin-api"]);
+    const allowedTop = new Set(["bevy-wasm", "cordis", "desktop", "pages", "shared", "extension-api", "plugin-api", "media-image-wasm"]);
     const entries = readdirSync(SRC_ROOT, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
@@ -349,7 +349,19 @@ describe("前端协议边界审计", () => {
       "cordis/plugins/canvas-shell/canvas-render-warnings.tsx -> canvas-runtime",
       // 纯视口增量路由读取 runtime 能力（base/version），不接受第二套 viewport
       // （change: 2026-10-10-optimize-canvas-interaction-hot-path，任务 3.4）。
-      "cordis/plugins/canvas-shell/interaction-frame-plan.ts -> canvas-runtime"
+      "cordis/plugins/canvas-shell/interaction-frame-plan.ts -> canvas-runtime",
+      // canvas-shell 装配画布页时挂载场景体验条；canvas-switcher 复用同一导入入口的 UI 组件。
+      // 两者都只渲染 scene-experience 的展示组件，不共享其状态机。
+      "cordis/plugins/canvas-shell/canvas-host.tsx -> scene-experience",
+      "cordis/plugins/canvas-switcher/chrome.tsx -> scene-experience",
+      // scene-experience 只读取 canvas-runtime 的只读场景诊断快照（帧健康/失败分类）。
+      "cordis/plugins/scene-experience/experience-bar.tsx -> canvas-runtime",
+      // 徽标几何与共享索引读取 model-scene 已准备资源（extent/aabb/placement）：组徽标与渲染
+      // 使用同一口径的几何事实，避免前端再算一份（change: 2026-10-30-remove-group-badge-scaling）。
+      "cordis/plugins/canvas-shell/canvas-node-index.ts -> model-scene",
+      "cordis/plugins/canvas-shell/group-badge-projection.ts -> model-scene",
+      // task-execution 的 dock 揭示读取共享组徽标投影，与画布命中/布局共用同一几何。
+      "cordis/plugins/task-execution/dock-reveal.ts -> canvas-shell"
     ]);
     const extensionsDir = path.join(CORDIS_DIR, "plugins");
     const extensionNames = readdirSync(extensionsDir, { withFileTypes: true })

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-
+import { type Page } from "@playwright/test";
+import { expect, test } from "../../../e2e/review-browser.js";
 /**
  * Showcase 响应式视觉验收（change: align-showcase-reference-ux，任务 4.2）。
  *

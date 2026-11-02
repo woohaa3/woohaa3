@@ -346,6 +346,10 @@ pub(crate) struct ModelEditor {
     #[serde(default)]
     pub(crate) object_tool: crate::gizmo_layout::ObjectTool,
     #[serde(default)]
+    pub(crate) shot_preview: bool,
+    #[serde(default)]
+    pub(crate) grid: Option<EditorGrid>,
+    #[serde(default)]
     pub(crate) item_id: Option<String>,
     #[serde(default)]
     pub(crate) parent_basis: Option<[f32; 9]>,
@@ -431,6 +435,13 @@ pub(crate) struct GizmoFeedback {
     pub(crate) epoch: u32,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct EditorGrid {
+    pub(crate) origin: [f32; 3],
+    pub(crate) spacing: f32,
+}
+
 impl ModelEditor {
     /// 边界级防御校验：版本、id、工具模式、有限几何。
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
@@ -453,6 +464,13 @@ impl ModelEditor {
             if !matrix.is_finite() || matrix.determinant().abs() < 1e-12 {
                 return Err("Invalid gizmo parent basis");
             }
+        }
+        if self.grid.as_ref().is_some_and(|grid| {
+            !grid.origin.iter().all(|v| v.is_finite())
+                || !grid.spacing.is_finite()
+                || grid.spacing <= 0.0
+        }) {
+            return Err("Invalid editor grid");
         }
         if let Some(feedback) = &self.feedback {
             for handle in [&feedback.hover, &feedback.active].into_iter().flatten() {

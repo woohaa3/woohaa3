@@ -6,12 +6,12 @@
  * - image：ready/受控同源 → media-preview；video：ready + 稳定 storageKey → 只发 nodeId 截帧；
  * - 3D 模型/片场：双击模型或卡片进入聚焦，普通模型在画布上保留内嵌预览。
  */
-import { screenToWorld, type Point } from "./hit-test.js";
+import { cardHitNodeId, screenToWorld, type Point } from "./hit-test.js";
 import { modelBounds, type FocusHitResult } from "./model-focus-session.js";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import type { InteractionCore } from "./interaction-core.js";
-import { builtinNodeCapabilityResolver, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { builtinNodeCapabilityResolver, managedShotPreviewOwnershipOf, shotPreviewOwnershipOf } from "@woohaa3/contracts";
 
 export function createDoubleClickHandler(core: InteractionCore) {
   const { options, canvas, model, setSelection, activeViewport, surfaceSize } = core;
@@ -40,7 +40,8 @@ export function createDoubleClickHandler(core: InteractionCore) {
     const hit = hitResult.ok ? hitResult.value : null;
     // 只有徽标本体（group-badge-select）是聚焦入口；其它组动作不进入容器聚焦。
     const badgeNodeId = hit?.kind === "node-action" && hit.actionId === "group-badge-select" ? hit.nodeId : null;
-    const cardNodeId = hit && (hit.kind === "node" || hit.kind === "model-preview" || hit.kind === "film-scope") ? hit.nodeId : null;
+    // 卡片命中涵盖拍摄镜头预览内容区：它承载缩略图，双击必须命中卡片，不能落到空白菜单。
+    const cardNodeId = cardHitNodeId(hit);
     const canvasState = woohaa3CanvasStore.getState().canvas;
     if (!canvasState) return;
     const resolver = options.nodeCapabilities ?? builtinNodeCapabilityResolver;
@@ -76,7 +77,7 @@ export function createDoubleClickHandler(core: InteractionCore) {
     // （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4 / design D8）。
     // 归属由 nodeData 严格解码得到；缺失/非法即不派发（保留节点与归属保护，不猜默认镜头）。
     if (cardEntry) {
-      const ownership = shotPreviewOwnershipOf(canvasState.nodeData?.[cardEntry.id]);
+      const ownership = shotPreviewOwnershipOf(canvasState.nodeData?.[cardEntry.id]) ?? managedShotPreviewOwnershipOf(canvasState.nodeData?.[cardEntry.id]);
       if (ownership) {
         event.preventDefault();
         options.onShotPreviewEnterIntent?.({

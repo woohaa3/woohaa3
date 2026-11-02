@@ -182,12 +182,12 @@ describe("Node History Plugin", () => {
     runtime = harness.runtime;
     for (const presentationId of ["operation:queued", "operation:running", "operation:failed", "entry:old"]) {
       harness.runtime.ctx.emit("ui.node-history.switch-requested", {
-        nodeId: "n1", presentationId, viewOnly: true
+        nodeId: "n1", presentationId
       } as never);
       await new Promise(resolve => setTimeout(resolve, 0));
       expect(harness.navigation.getSnapshot().panel).toBeNull();
       const inline = harness.runtime.ctx.get(INLINE_HISTORY_SERVICE as never) as unknown as InlineHistoryService;
-      expect(inline.preview.selected.get("n1")).toBe(presentationId);
+      expect(inline.selectedByNode().get("n1")).toBe(presentationId);
     }
   });
 

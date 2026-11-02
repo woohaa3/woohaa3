@@ -438,6 +438,7 @@ export default defineConfig(async ({ mode, command, isPreview }) => {
     // Public client source boundary; external extensions are served as artifacts.
     server: {
       host: true,
+      ...(process.env.WOOHAA_IMAGE_THREADS_ISOLATION === "1" ? { headers: { "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" } } : {}),
       port: 5173,
       fs: { allow: [resolve(root, "../..")] }
     },

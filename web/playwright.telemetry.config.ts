@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { reviewBaseUrl, reviewProbeUrl, reviewUseOptions, reviewWebServerEnv, reviewWebServerIgnoreHTTPSErrors } from "./e2e/review-target.js";
 
 /**
  * 本机遥测复盘页的 E2E 配置（change: 2026-10-20-add-local-client-telemetry）。
@@ -24,7 +25,8 @@ export default defineConfig({
 	retries: 0,
 	reporter: [["list"]],
 	use: {
-		baseURL: `http://127.0.0.1:${PORT}`,
+		...reviewUseOptions,
+		baseURL: reviewBaseUrl(PORT),
 		trace: { mode: "retain-on-failure", snapshots: false },
 	},
 	projects: [
@@ -34,8 +36,10 @@ export default defineConfig({
 		},
 	],
 	webServer: {
+		ignoreHTTPSErrors: reviewWebServerIgnoreHTTPSErrors,
 		command: `node e2e/server.mjs --port ${PORT}`,
-		url: `http://127.0.0.1:${PORT}/`,
+		url: reviewProbeUrl(PORT),
+    env: reviewWebServerEnv,
 		reuseExistingServer: !process.env.CI,
 		timeout: 60_000,
 		stdout: "pipe",

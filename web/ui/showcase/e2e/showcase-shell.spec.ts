@@ -9,8 +9,8 @@
  * - 生产 `.node-execution-dock` 使用虚拟节点锚点，并完全收拢在 `.showcase__panel-box` 内；
  * - 桌面与 390px 均无页面级横向溢出。
  */
-import { expect, test, type Page } from "@playwright/test";
-
+import { type Page } from "@playwright/test";
+import { expect, test } from "../../../e2e/review-browser.js";
 const IMAGE_STORY = "画布组件--执行面板--生产组合--图片-·-生产组合";
 const SIDEBAR_STORY = "画布组件--执行面板--生产组合--侧栏面";
 const NARROW_STORY = "画布组件--执行面板--生产组合--390px-窄屏";

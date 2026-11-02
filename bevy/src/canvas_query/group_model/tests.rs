@@ -133,9 +133,9 @@ fn group_model_unit_is_the_shared_canvas_model_unit() {
                     .extent = extent;
                 n.model.as_mut().unwrap().placement.scale = scale;
                 let layout = for_node(&n).unwrap();
-                // 与 model3d 的 `model_unit` 完全相同：`placement.scale * 64 * 3 / extent`。
-                // 没有 film-set fit、没有 `min(1)`、没有 56×44 钳制。
-                assert!((layout.unit - scale * 64. * 3. / extent).abs() < 0.001);
+                // 与 model3d 的 `model_unit` 完全相同：`placement.scale * CANVAS_UNITS_PER_METER`
+                // （绝对米制，不除以 extent）。没有 film-set fit、没有 `min(1)`、没有 56×44 钳制。
+                assert!((layout.unit - scale * crate::model3d::CANVAS_UNITS_PER_METER).abs() < 0.001);
             }
         }
     }
@@ -233,4 +233,56 @@ fn resize_corners_and_has_badge_follow_accepted_inputs() {
     assert!(has_badge(&n));
     n.model = None;
     assert!(!has_badge(&n));
+}
+
+#[test]
+fn badge_bottom_face_tracks_the_rendered_model_transform() {
+    let mut n = node(500., 300.);
+    assert!(
+        badge_bottom_polygon(&n).is_none(),
+        "ordinary groups have no floor outline"
+    );
+    n.group.as_mut().unwrap().badge_top_anchor = true;
+    for yaw in [0., 35., 90., 145.] {
+        for scale in [0.25, 1., 4.] {
+            n.model.as_mut().unwrap().placement.yaw = yaw;
+            n.model.as_mut().unwrap().placement.scale = scale;
+            let polygon = badge_bottom_polygon(&n).unwrap();
+            assert_eq!(polygon[0], polygon[4]);
+            let layout = for_node(&n).unwrap();
+            let bounds = n
+                .group
+                .as_ref()
+                .unwrap()
+                .model_bounds
+                .as_ref()
+                .unwrap()
+                .aabb;
+            // Undo the overview projection: every corner must be on the model's local bottom
+            // face, even with an eccentric origin, root yaw and non-unit presentation scale.
+            let inverse =
+                (grid::view_rotation() * Quat::from_rotation_y(yaw.to_radians())).inverse();
+            let rotation = grid::view_rotation() * Quat::from_rotation_y(yaw.to_radians());
+            for (i, [x, z]) in [
+                [bounds.min[0], bounds.min[2]],
+                [bounds.max[0], bounds.min[2]],
+                [bounds.max[0], bounds.max[2]],
+                [bounds.min[0], bounds.max[2]],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let expected = Vec3::new(x, bounds.min[1], z);
+                let depth = (rotation * expected * layout.unit).z;
+                let canvas = polygon[i] - layout.anchor;
+                let local = inverse * Vec3::new(canvas.x, -canvas.y, depth) / layout.unit;
+                assert!(local.distance(expected) < 0.001);
+            }
+        }
+    }
+    n.group.as_mut().unwrap().model_bounds = None;
+    assert!(
+        badge_bottom_polygon(&n).is_none(),
+        "no fabricated floor before bounds arrive"
+    );
 }

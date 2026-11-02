@@ -92,7 +92,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   };
   registerImageViewportTarget = (target: import("../../focus/types.js").FocusViewportTarget): (() => void) =>
     this.imageFocusStore.registerViewportTarget(target);
-  setImageFocusTexture = (texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null): void => {
+  setImageFocusTexture = (texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null): void => {
     this.imageFocusStore.setTexture(texture);
     this.controllerInstance?.invalidate("image-focus-texture");
   };
@@ -594,7 +594,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         node,
         layout,
         collapsed: data?.groupCollapsed === true,
-        projection: groupBadgeProjectionOf(canvas, nodeId, layout)
+        projection: groupBadgeProjectionOf(canvas, nodeId)
       }) ?? card;
     }
     const scopes = this.controllerInstance?.queryCompositeAssetScopes();

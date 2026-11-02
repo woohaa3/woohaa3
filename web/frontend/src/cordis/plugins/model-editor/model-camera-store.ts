@@ -137,11 +137,9 @@ export function pushEditor(ctx: Context, session: ModelEditorSession): void {
   }
   // 片场对象模式且已选中对象：在选中对象的世界包围球处显示模型位移/yaw gizmo
   // （change: 2026-10-09-add-film-set-object-motion-and-editing）。
-  const objectOverride = ctx.compositeAssets.resolve(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), nodeId)?.gizmo?.(nodeId);
-  if (objectOverride) {
-    ctx.canvasRuntime.setModelEditor(objectOverride);
-    return;
-  }
+  const adapter = ctx.compositeAssets.resolve(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), nodeId);
+  const shotPreview = adapter?.readonlyShotPreview?.(nodeId) === true;
+  const objectOverride = shotPreview ? null : adapter?.gizmo?.(nodeId);
   const target = resolveTargets(ctx).find((entry) => entry.nodeId === nodeId);
   if (!target) {
     ctx.canvasRuntime.setModelEditor(null);
@@ -154,15 +152,25 @@ export function pushEditor(ctx: Context, session: ModelEditorSession): void {
   }
   const aabb: Aabb = bounds.aabb;
   const radius = shotBoundingRadius(aabb);
+  const grid = adapter?.showFocusGrid?.(nodeId) ? {
+    origin: [bounds.center[0], aabb.min[1], bounds.center[2]] as Vec3,
+    spacing: filmSetDisplayScale(target)
+  } : undefined;
+  if (objectOverride) {
+    ctx.canvasRuntime.setModelEditor({ ...objectOverride, ...(grid ? { grid } : {}) });
+    return;
+  }
   const base: BevyModelEditor = {
     version: MODEL_EDITOR_VERSION,
     nodeId,
-    toolMode: state.toolMode,
+    ...(grid ? { grid } : {}),
+    toolMode: shotPreview ? "camera" : state.toolMode,
+    ...(shotPreview ? { shotPreview: true } : {}),
     cameraTool: state.cameraTool,
     focus: bounds.center,
     radius
   };
-  if (state.toolMode === "camera") {
+  if (state.toolMode === "camera" || shotPreview) {
     const selected = session.selectedCamera();
     if (selected) {
       const pose = session.effectivePose(selected);

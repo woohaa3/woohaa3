@@ -57,7 +57,10 @@ function ports(): ChatGptCanvasPorts {
   };
 }
 
-async function boot(threads: Parameters<CodexLike["startThread"]>[0][] = []) {
+async function boot(
+  threads: Parameters<CodexLike["startThread"]>[0][] = [],
+  options: { fetchImpl?: typeof globalThis.fetch } = {}
+) {
   const dir = tempDir();
   const service = createChatGptService({
     env: {
@@ -69,7 +72,8 @@ async function boot(threads: Parameters<CodexLike["startThread"]>[0][] = []) {
     },
     canvasPorts: ports(),
     authConfigured: false,
-    createCodex: fakeCodex(threads)
+    createCodex: fakeCodex(threads),
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {})
   });
   const server = http.createServer((req, res) => {
     void service.handle(req, res).then((handled) => {
@@ -140,7 +144,13 @@ describe("ChatGPT HTTP 面", () => {
   });
 
   it("授权回调在同一会话下不因 Cookie 头差异被误判为会话不匹配（回归）", async () => {
-    const app = await boot();
+    // token 交换必须在本机完成：真实请求会让断言依赖外网可达性（离线时只会拿到 `fetch failed`）。
+    const app = await boot([], {
+      fetchImpl: async () => new Response(JSON.stringify({ error: "invalid_grant" }), {
+        status: 400,
+        headers: { "content-type": "application/json" }
+      })
+    });
     const c = client(app.base);
     await c.fetch("/api/oauth-agent/status");
     const cookie = c.cookie();

@@ -9,6 +9,7 @@
  * - 进度来自宿主查询，阶段文案与活动浮层共用。
  */
 import { Button } from "@woohaa3/ui/primitives";
+import { SelectInput } from "@woohaa3/ui/forms";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readFilmSetExportProfile, type FilmSetExportProfile, type RecordingStatusView } from "@woohaa3/contracts";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
@@ -143,17 +144,16 @@ export function NativeVideoExportControl({ ctx, disabled, target, profile, onBus
   const label = status ? recordingStageLabel(status) : "生成视频";
 
   return <>
-    <label className="film-set-export-profile">
-      规格
-      <select
-        aria-label="导出规格"
+    <div className="film-set-export-profile">
+      <span>规格</span>
+      <SelectInput
+        label="导出规格"
         disabled={busy}
         value={chosenProfile}
-        onChange={event => setChosenProfile(writeExportProfilePreference(event.target.value as FilmSetExportProfile))}
-      >
-        {EXPORT_PROFILE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
-    </label>
+        options={EXPORT_PROFILE_OPTIONS}
+        onValueChange={value => setChosenProfile(writeExportProfilePreference(value as FilmSetExportProfile))}
+      />
+    </div>
     <Button
       size="sm"
       disabled={disabled || busy || !target}

@@ -9,7 +9,8 @@
  * `web/backend/src/host/core/telemetry.test.ts` 与 `telemetry-service` 的单测覆盖
  * （含"既有库文件字节级不变"）。这里是界面分支的验收。
  */
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { TelemetryStatus } from "@woohaa3/contracts";
 
 function status(overrides: Partial<TelemetryStatus> = {}): TelemetryStatus {

@@ -54,10 +54,10 @@ fn shot_preview_requires_valid_cover_camera() {
     let missing = r#"{"version":"woohaa-canvas-render-scene-v34","nodes":[{"id":"p1","type":"node","x":0,"y":0,"shotPreview":{"filmSetNodeId":"film","clipId":"c","kind":"static","name":"x","aspect":1.0,"duration":0.0,"state":"ready"}}],"edges":[]}"#;
     assert!(serde_json::from_str::<Scene>(&missing).is_err());
 
-    // 非有限/非正距离/共线仰角：整帧拒绝（保留最近合法 scene）。
+    // 非有限/非正距离/超出竖直半圆：整帧拒绝（保留最近合法 scene）。
     for camera in [
         r#""coverCamera":{"azimuth":0.0,"elevation":0.5,"distance":0.0,"focusOffset":[0,0,0]}"#,
-        r#""coverCamera":{"azimuth":0.0,"elevation":1.5707964,"distance":4.0,"focusOffset":[0,0,0]}"#,
+        r#""coverCamera":{"azimuth":0.0,"elevation":1.6,"distance":4.0,"focusOffset":[0,0,0]}"#,
         r#""coverCamera":{"azimuth":0.0,"elevation":0.5,"distance":4.0,"focusOffset":[0,0,1e40]}"#,
     ] {
         let scene = parse(&format!(
@@ -66,6 +66,17 @@ fn shot_preview_requires_valid_cover_camera() {
         assert!(
             scene.validate().is_err(),
             "非法 coverCamera 必须拒绝: {camera}"
+        );
+    }
+
+    // ±90° 是规范半圆的端点（合法输入）；实际姿态由派生层钳到 ±89°，整帧不得因此拒绝。
+    for elevation in ["-1.5707964", "1.5707964"] {
+        let scene = parse(&format!(
+            r#"{{"version":"woohaa-canvas-render-scene-v34","nodes":[{{"id":"p1","type":"node","x":0,"y":0,"shotPreview":{{"filmSetNodeId":"film","clipId":"c","kind":"static","name":"x","aspect":1.0,"duration":0.0,"coverCamera":{{"azimuth":0.0,"elevation":{elevation},"distance":4.0,"focusOffset":[0,0,0]}},"state":"ready"}}}}],"edges":[]}}"#
+        ));
+        assert!(
+            scene.validate().is_ok(),
+            "±90° 封面仰角必须合法: {elevation}"
         );
     }
 }

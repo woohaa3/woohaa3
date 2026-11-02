@@ -31,6 +31,7 @@ import { modelSceneExtension, MODEL_SCENE_PLUGIN_ID, type ModelSceneExtensionOpt
 import { CompositeAssetRegistry } from "../../../extension-api/composite-assets.js";
 import { MODEL_SCENES_SERVICE, type ModelScenesProvider } from "../service-keys.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
+import { groupBadgeProjectionsForCanvas } from "../canvas-shell/group-badge-projection.js";
 
 let runtime: FrontendRuntime | null = null;
 
@@ -130,6 +131,26 @@ describe("model-scene plugin version dispatch", () => {
     await expect.poll(() => provider.getResources().get("group-1")).toBeDefined();
     expect(provider.getResources().get("group-1")?.ops.length).toBeGreaterThan(0);
     expect(harness.reports).toEqual([]);
+  });
+
+  it("prepared 组资源进入文档级徽标投影（执行面板锚点与共享索引同源）", async () => {
+    const harness = await makeHarness();
+    runtime = harness.runtime;
+    const canvas = createEmptyWoohaa3ServerCanvas("c1");
+    canvas.document.nodes.push(
+      { id: "group-1", type: "group", position: { x: 0, y: 0 }, width: 320, height: 220 },
+      { id: "film-set-1", type: "group", position: { x: 400, y: 0 }, width: 320, height: 220 }
+    );
+    // 空片场带地面仍有可呈现几何，投影不应因空绑定而缺失。
+    canvas.nodeData["film-set-1"] = { filmSetGroup: { schemaVersion: 1, sceneBindings: [], ground: { width: 4, depth: 4 } } } as never;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+    const provider = harness.runtime.ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider;
+    await expect.poll(() => provider.getResources().get("group-1")).toBeDefined();
+    await expect.poll(() => provider.getResources().get("film-set-1")).toBeDefined();
+    const projections = groupBadgeProjectionsForCanvas(woohaa3CanvasStore.getState().canvas);
+    expect(projections.get("group-1")?.width).toBeGreaterThan(0);
+    expect(projections.get("film-set-1")?.width).toBeGreaterThan(0);
+    expect(projections.get("film-set-1")?.topAnchored).toBe(true);
   });
 
   it("group status replaces the existing badge payload and restores it when cleared", async () => {

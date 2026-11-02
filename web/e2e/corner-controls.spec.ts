@@ -3,7 +3,7 @@
  *
  * 断言缩放图标、紧凑滑杆与同步状态同处一个面板，并保留截图。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	installPageHelpers,
 	resetCanvasStorage,

@@ -1,13 +1,18 @@
 import { executeModelScriptVersioned, isSupportedModelScriptVersion, prepareModelResource, sceneIrVersionFor,
-  type PreparedModelResource, type NodeGenerationHistoryDetail, type CanvasOperationRecord, type NodeGenerationHistoryListItem, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+  type PreparedModelResource, type NodeGenerationHistoryDetail, type NodeGenerationHistoryListItem, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
 import type { NodeHistoryClient } from "./controller.js";
 import { stripAppLocationPathname } from "../../services/app-base-path.js";
 import { mediaUrlFor } from "../../services/paths.js";
 
-/** Page-owned dot selection. Never changes canonical output, task identity or inputs. */
+const EMPTY_SELECTION: ReadonlyMap<string, string> = new Map();
+
+/**
+ * 页面级预览投影：把选择控制器给出的版本引用投影成只读画布覆盖。
+ *
+ * 不拥有选择、不观察运行态、不写 canonical；选择变化由控制器显式失效后重新投影。
+ */
 export class ExecutionPreview {
-  readonly selected = new Map<string, string>();
-  private observed = new Set<string>();
+  private operationFailures = new Map<string, { operationId: string; outcome: "failed" | "cancelled"; message: string }>();
   private details = new Map<string, NodeGenerationHistoryDetail>();
   private loading = new Map<string, string>();
   readonly models = new Map<string, PreparedModelResource>();
@@ -16,16 +21,17 @@ export class ExecutionPreview {
   private cached: { canvas: ServerCanvas; history: ReturnType<ExecutionPreview["history"]>; revision: number; value: ServerCanvas } | null = null;
   constructor(private history: () => ReadonlyMap<string, readonly NodeGenerationHistoryListItem[]>,
     private changed: () => void, private client?: NodeHistoryClient, private canvasId?: string,
-    private report: (error: unknown) => void = console.error) {}
+    private report: (error: unknown) => void = console.error,
+    private selection: () => ReadonlyMap<string, string> = () => EMPTY_SELECTION) {}
   private publish() { this.revision++; this.changed(); }
 
   private item(nodeId: string) {
     return this.history().get(nodeId)?.find(item =>
-      (item.source.runId ? `operation:${item.source.runId}` : `entry:${item.entryId}`) === this.selected.get(nodeId));
+      (item.source.runId ? `operation:${item.source.runId}` : `entry:${item.entryId}`) === this.selection().get(nodeId));
   }
   /** Keep an explicitly selected old entry when the bounded recent summary rolls forward. */
   retain(history: Map<string, readonly NodeGenerationHistoryListItem[]>) {
-    for (const nodeId of this.selected.keys()) {
+    for (const nodeId of this.selection().keys()) {
       const previous = this.item(nodeId), next = history.get(nodeId);
       if (previous && next && next.length >= 24 && !next.some(item => item.entryId === previous.entryId)) {
         history.set(nodeId, [...next, previous].sort((a,b) => a.createdAt.localeCompare(b.createdAt) || a.entryId.localeCompare(b.entryId)));
@@ -34,13 +40,13 @@ export class ExecutionPreview {
   }
   refresh() {
     if (this.disposed || !this.client || !this.canvasId) return;
-    for (const [nodeId, id] of this.selected) {
+    for (const [nodeId, id] of this.selection()) {
       const item = this.item(nodeId);
       if (!item || (item.outcome ?? "succeeded") !== "succeeded" || !item.previewable
         || this.details.get(nodeId)?.entryId === item.entryId || this.loading.get(nodeId) === item.entryId) continue;
       this.loading.set(nodeId, item.entryId);
       void this.client.detail({ canvasId: this.canvasId, nodeId, entryId: item.entryId }).then(result => {
-        if (this.disposed || this.selected.get(nodeId) !== id || this.loading.get(nodeId) !== item.entryId) return;
+        if (this.disposed || this.selection().get(nodeId) !== id || this.loading.get(nodeId) !== item.entryId) return;
         if (!result.ok) throw new Error(result.error);
         if (result.detail.entryId !== item.entryId || result.detail.kind === "failure") return;
         this.details.set(nodeId, result.detail);
@@ -49,37 +55,53 @@ export class ExecutionPreview {
           if (execution.ok) this.models.set(nodeId, prepareModelResource({ sceneVersion: sceneIrVersionFor(result.detail.version), ops: execution.scene.ops }));
         }
         this.publish();
-      }).catch(error => { if (!this.disposed && this.selected.get(nodeId) === id) this.report(error); })
+      }).catch(error => { if (!this.disposed && this.selection().get(nodeId) === id) this.report(error); })
         .finally(() => { if (this.loading.get(nodeId) === item.entryId) this.loading.delete(nodeId); });
     }
   }
 
-  observe(records: readonly CanvasOperationRecord[]) {
-    let changed = false;
-    // Records can arrive as a whole snapshot; choose the newest newly observed activity per node.
-    for (const record of [...records].sort((a,b) => a.createdAt.localeCompare(b.createdAt) || a.operationId.localeCompare(b.operationId))) {
-      const fresh = !this.observed.has(record.operationId);
-      this.observed.add(record.operationId);
-      if (fresh && (record.state === "queued" || record.state === "running")) {
-        this.selected.set(record.nodeId, `operation:${record.operationId}`);
-        this.details.delete(record.nodeId); this.models.delete(record.nodeId); changed = true;
-      }
-    }
-    if (changed) this.publish();
-  }
-  select(nodeId: string, presentationId: string) {
-    if (this.selected.get(nodeId) === presentationId) return;
-    this.selected.set(nodeId, presentationId); this.details.delete(nodeId); this.models.delete(nodeId);
+  /** 选择控制器改了版本引用后，清掉该节点的旧详情并按新选择重新取数。 */
+  invalidateSelection(nodeId: string) {
+    if (this.disposed) return;
+    this.details.delete(nodeId); this.models.delete(nodeId);
     this.refresh(); this.publish();
   }
+  /** 运行中的任务已经失败/取消、但失败归档尚未到达时，先用运行态错误渲染。 */
+  setOperationFailure(nodeId: string, operationId: string, outcome: "failed" | "cancelled", message: string) {
+    const previous = this.operationFailures.get(nodeId);
+    if (previous?.operationId === operationId && previous.outcome === outcome && previous.message === message) return;
+    this.operationFailures.set(nodeId, { operationId, outcome, message });
+    this.publish();
+  }
+  clearOperationFailure(nodeId: string, operationId: string) {
+    if (this.operationFailures.get(nodeId)?.operationId !== operationId) return;
+    this.operationFailures.delete(nodeId);
+    this.publish();
+  }
   project = (canvas: ServerCanvas | null): ServerCanvas | null => {
-    if (!canvas || !this.selected.size) return canvas;
+    const selected = this.selection();
+    if (!canvas || !selected.size) return canvas;
     const history = this.history();
     if (this.cached?.canvas === canvas && this.cached.history === history && this.cached.revision === this.revision) return this.cached.value;
     const nodeData = { ...canvas.nodeData }, assets = [...canvas.assets];
     let changed = false;
-    for (const nodeId of this.selected.keys()) {
+    for (const nodeId of selected.keys()) {
       if (!canvas.document.nodes.some(node => node.id === nodeId)) continue;
+      const operationFailure = this.operationFailures.get(nodeId);
+      if (operationFailure && selected.get(nodeId) === `operation:${operationFailure.operationId}`) {
+        const data = { ...nodeData[nodeId] };
+        data.historyPreviewFailure = { outcome: operationFailure.outcome, message: operationFailure.message };
+        delete data.outputAssetId;
+        delete data.posterAssetId;
+        delete data.result;
+        delete data.resultPreview;
+        delete data.modelScript;
+        delete data.modelAssetId;
+        delete data.modelPlacement;
+        nodeData[nodeId] = data;
+        changed = true;
+        continue;
+      }
       const item = this.item(nodeId);
       if (!item) continue;
       const preview = item.preview;
@@ -132,5 +154,5 @@ export class ExecutionPreview {
     this.cached = { canvas, history, revision: this.revision, value };
     return value;
   };
-  dispose() { this.disposed = true; this.selected.clear(); this.observed.clear(); this.details.clear(); this.models.clear(); this.loading.clear(); this.cached = null; }
+  dispose() { this.disposed = true; this.operationFailures.clear(); this.details.clear(); this.models.clear(); this.loading.clear(); this.cached = null; }
 }

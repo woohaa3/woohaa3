@@ -134,7 +134,7 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     && canvas.nodeData[group.id]?.groupCollapsed !== true).map(group => group.id));
   const collapsedGroupIds = new Set(groups.filter(group => canvas.nodeData[group.id]?.groupCollapsed === true).map(group => group.id));
   const groupSizes = getGroupLayoutSizes(nodes);
-  const badgeProjections = groupBadgeProjectionsForCanvas(canvas, groupSizes);
+  const badgeProjections = groupBadgeProjectionsForCanvas(canvas);
   const groupBounds = groups.map(group => ({ id: group.id,
     ...absolutePosition(group.id)!, ...groupSizes.get(group.id)! }));
   const workingBounds = nodes.flatMap(node => {

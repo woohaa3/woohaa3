@@ -341,6 +341,9 @@ it("转片场列出统一目录的全部助手，支持本机默认模型与 API
     const button = document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
     if (button.getAttribute("aria-haspopup") === "dialog") button.click();
     else button.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    // Radix 关闭上一层的 DismissableLayer、恢复 body pointer-events 与焦点回填都在宏任务里完成；
+    // 不排空这一拍时，紧接着对下一层触发器的点击会被吞掉（连续开关菜单时最明显）。
+    await new Promise(resolve => setTimeout(resolve, 0));
   }); };
   const choose = async (label: string) => { const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(item => item.textContent === label)!; expect(item).toBeTruthy(); await act(async () => item.click()); };
   // 模型与 Variant 的横向选项面板（同一面板内的两组 chip）。

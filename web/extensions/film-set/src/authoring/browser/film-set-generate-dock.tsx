@@ -1,39 +1,13 @@
 import type { ReactNode } from "react";
-import { Button, IconButton } from "@woohaa3/ui/primitives";
-import { ChevronDownIcon } from "@woohaa3/ui/icons";
 
 /** 收起只隐藏内容，保留宿主生成面板的草稿、连接、模型选择与运行状态。 */
-export function FilmSetGenerateDock({ hidden, collapsed, onCollapsedChange, shotName, selectedItem, targetItemId, onTargetChange, targetKey, targets, onSelectTarget, children }: {
-  targetKey?: string;
-  targets?: { value: string; label: string }[];
-  onSelectTarget?: (value: string) => void;
+export function FilmSetGenerateDock({ hidden, collapsed, children }: {
   hidden: boolean;
   collapsed: boolean;
-  onCollapsedChange: (collapsed: boolean) => void;
-  shotName: string;
-  selectedItem: { id: string; name: string } | null;
-  targetItemId: string | null;
-  onTargetChange: (itemId: string | null) => void;
   children: ReactNode;
 }) {
-  return <div className="film-set-generate-dock" hidden={hidden}
+  return <section className="film-set-generate-dock" hidden={hidden || collapsed}
     onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
-    {collapsed ? <Button className="film-set-generate-restore" onClick={() => onCollapsedChange(false)}>AI 修改</Button> : null}
-    <div className="film-set-generate-dock__expanded" hidden={collapsed}>
-      <div className="film-set-generate-dock__heading">
-        <span className="film-set-generate-dock__title">AI 修改</span>
-        {!targets ? <span className="film-set-generate-dock__shot" title={shotName}>{shotName}</span> : null}
-        {targets ? <select className="film-set-generate-dock__target" aria-label="AI 修改目标" value={targetKey} onChange={event => onSelectTarget?.(event.target.value)}>
-          {!targets.some(entry => entry.value === targetKey) ? <option value={targetKey}>原目标不可用 · 草稿保留</option> : null}
-          {targets.map(entry => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
-        </select> : selectedItem ? <select className="film-set-generate-dock__target" aria-label="AI 修改目标"
-          value={targetItemId ?? ""} onChange={event => onTargetChange(event.target.value || null)}>
-          <option value="">整个镜头</option>
-          <option value={selectedItem.id}>{selectedItem.name}</option>
-        </select> : <span className="film-set-generate-dock__scope">整个镜头</span>}
-        <IconButton label="收起 AI 修改" size="sm" tone="ghost" onClick={() => onCollapsedChange(true)}><ChevronDownIcon size={16} /></IconButton>
-      </div>
-      {children}
-    </div>
-  </div>;
+    <div className="film-set-generate-dock__expanded" hidden={collapsed}>{children}</div>
+  </section>;
 }

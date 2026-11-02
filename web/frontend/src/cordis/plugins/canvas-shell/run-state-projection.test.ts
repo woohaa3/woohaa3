@@ -65,6 +65,34 @@ describe("applyRunStateProjection", () => {
     applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true })], records: [] });
     expect(nodes[0].aggregateRun).toEqual({ active: false });
   });
+  it("运行中的节点携带与活动记录同一个进度起点", () => {
+    const startedAt = "2026-10-31T00:00:00.000Z";
+    const nodes = [node("n1")];
+    applyRunStateProjection(nodes, {
+      summaries: [summary("n1", { active: op("r1", "running", startedAt) })],
+      records: [op("r1", "running", startedAt)]
+    });
+    expect(nodes[0].busy).toBe(true);
+    // 与活动面板同一条记录、同一个 createdAt：两端估算经过时间的起点一致
+    // （change: 2026-10-31-unify-node-and-activity-progress）。
+    expect(nodes[0].progressStartedAt).toBe(Date.parse(startedAt));
+  });
+
+  it("节点结束运行或记录清空后不再携带进度起点", () => {
+    const startedAt = "2026-10-31T00:00:00.000Z";
+    const running = [node("n1")];
+    applyRunStateProjection(running, {
+      summaries: [summary("n1", { active: op("r1", "running", startedAt) })],
+      records: [op("r1", "running", startedAt)]
+    });
+    expect(running[0].progressStartedAt).toBeDefined();
+    // 场景每帧重建节点，因此用同一份输入重投影后的新节点验证。
+    const idle = [node("n1")];
+    applyRunStateProjection(idle, { summaries: [], records: [] });
+    expect(idle[0].busy).toBe(false);
+    expect(idle[0].progressStartedAt).toBeUndefined();
+  });
+
   it("组节点只投影运行标识，不携带 ledger 身份；记录清空后移除标识", () => {
     const nodes = [node("g", { type: "group", group: { title: "组", memberCount: 0, outputCapableLeafCount: 0 } })];
     applyRunStateProjection(nodes, { summaries: [], records: [], groupStatuses: new Map([["g", { state: "running", label: "创作中" }]]) });
@@ -119,12 +147,58 @@ describe("applyRunStateProjection", () => {
       currentOperationByNode: new Map([["n1", "a"]])
     });
     expect(nodes[0]?.historyStrip?.dots).toMatchObject([
-      { state: "succeeded", current: false, recoverable: false },
+      { state: "succeeded", current: true, recoverable: false },
       { state: "running", current: false }
     ]);
     expect(nodes[0]?.historyStrip?.truncated).toBe(0);
   });
 
+  it("当前操作映射优先于滞后的历史 current，黄点转绿后外圈立即移动", () => {
+    const nodes = [node("n1")];
+    const history = [
+      { entryId: "old", nodeId: "n1", nodeTitle: "test", kind: "image", createdAt: "2026-10-12T00:00:01.000Z", current: true,
+        recoverable: true, outcome: "succeeded", previewable: true, source: { runId: "old", label: "old" }, preview: { kind: "text", excerpt: "old" } },
+      { entryId: "run", nodeId: "n1", nodeTitle: "test", kind: "image", createdAt: "2026-10-12T00:00:02.000Z", current: false,
+        recoverable: true, outcome: "succeeded", previewable: true, source: { runId: "run", label: "run" }, preview: { kind: "text", excerpt: "run" } }
+    ] as never;
+    applyRunStateProjection(nodes, {
+      summaries: [summary("n1")],
+      records: [op("run", "succeeded", "2026-10-12T00:00:02.000Z")],
+      versionsByNode: new Map([["n1", history]]),
+      currentOperationByNode: new Map([["n1", "run"]])
+    });
+    expect(nodes[0]?.historyStrip?.dots).toMatchObject([
+      { state: "succeeded", current: false },
+      { state: "succeeded", current: true }
+    ]);
+  });
+
+  it("未查看的历史条目投影为圆点角标，不改变状态颜色或当前装饰", () => {
+    const nodes = [node("n1")];
+    const history = [{ entryId: "a", nodeId: "n1", nodeTitle: "test", kind: "image", createdAt: "2026-10-12T00:00:01.000Z", current: false,
+      recoverable: true, outcome: "succeeded", previewable: true, source: { label: "a" }, preview: { kind: "text", excerpt: "a" } },
+    { entryId: "b", nodeId: "n1", nodeTitle: "test", kind: "image", createdAt: "2026-10-12T00:00:02.000Z", current: true,
+      recoverable: true, outcome: "succeeded", previewable: true, source: { label: "b" }, preview: { kind: "text", excerpt: "b" } }] as never;
+    applyRunStateProjection(nodes, {
+      summaries: [summary("n1")],
+      records: [],
+      versionsByNode: new Map([["n1", history]]),
+      unseenByNode: new Map([["n1", new Set(["a"])]])
+    });
+    expect(nodes[0]?.historyStrip?.dots[0]).toMatchObject({ state: "succeeded", current: false, unseen: true });
+  });
+  it("单个新完成版本带未读时仍显示圆点", () => {
+    const nodes = [node("n1")];
+    const history = [{ entryId: "a", nodeId: "n1", nodeTitle: "test", kind: "image", createdAt: "2026-10-12T00:00:01.000Z", current: true,
+      recoverable: true, outcome: "succeeded", previewable: true, source: { label: "a" }, preview: { kind: "text", excerpt: "a" } }] as never;
+    applyRunStateProjection(nodes, {
+      summaries: [summary("n1")],
+      records: [],
+      versionsByNode: new Map([["n1", history]]),
+      unseenByNode: new Map([["n1", new Set(["a"])]])
+    });
+    expect(nodes[0]?.historyStrip?.dots[0]).toMatchObject({ state: "succeeded", current: true, unseen: true });
+  });
   it("历史过多折叠较早记录", () => {
     const records = Array.from({ length: 30 }, (_, index) =>
       op(`o${index}`, "succeeded", `2026-10-12T00:00:${String(index).padStart(2, "0")}.000Z`)

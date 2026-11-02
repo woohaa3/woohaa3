@@ -132,6 +132,15 @@ export type BevyRenderNode = {
    */
   typeLabel: string;
   progress: number;
+  /**
+   * 该运行开始的时刻（Unix epoch 毫秒）；节点进度环据此按经过时间估算。
+   *
+   * 由运行状态投影从该 run 记录（活动面板同一条记录）的 `createdAt` 派生，因此节点与活动面板
+   * 用的是**同一个起点**：刷新页面、重建渲染器或换一个渲染实例后，节点进度不会从 0 重新估算。
+   * 缺失时渲染器退回「本节点首次进入运行态」的本地时钟（旧协议帧、仅 canonical `taskStatus` 的任务）。
+   * （change: 2026-10-31-unify-node-and-activity-progress，design D2）。
+   */
+  progressStartedAt?: number;
   busy: boolean;
   /** 浏览器媒体解码/缓冲中的瞬时状态；不表示生成任务正在运行。 */
   mediaLoading?: boolean;
@@ -356,6 +365,8 @@ export type BevyHistoryStripDot = {
   selected?: boolean;
   hovered?: boolean;
   pressed?: boolean;
+  /** New terminal version the user has not inspected yet; drawn as a small corner badge. */
+  unseen?: boolean;
   presentationId?: string;
   operationId?: string;
   recoverable?: boolean;

@@ -33,6 +33,8 @@ type PopoverCommonProps = {
   restoreFocus?: boolean;
   /** Hover previews must not move keyboard focus into the popup. */
   autoFocus?: boolean;
+  /** Keep child state and ongoing operations alive while the popup is closed. */
+  keepMounted?: boolean;
   /** 测试标识。 */
   testId?: string;
 };
@@ -60,6 +62,7 @@ export const Popover = forwardRef<HTMLButtonElement, PopoverProps>(function Popo
     dismissOnEscape = true,
     restoreFocus = true,
     autoFocus = true,
+    keepMounted = false,
     testId
   } = props;
   const container = usePortalContainer();
@@ -87,8 +90,10 @@ export const Popover = forwardRef<HTMLButtonElement, PopoverProps>(function Popo
           style={{ position: "fixed", left: props.anchorPoint!.x, top: props.anchorPoint!.y, width: 0, height: 0 }}
         />
       )}
-      <PopoverPrimitive.Portal container={container ?? undefined}>
+      <PopoverPrimitive.Portal container={container ?? undefined} forceMount={keepMounted ? true : undefined}>
         <PopoverPrimitive.Content
+          forceMount={keepMounted ? true : undefined}
+          hidden={keepMounted && !open}
           className={["ui-popover", className].filter(Boolean).join(" ")}
           side={side}
           align={align}

@@ -207,17 +207,31 @@ describe("CanvasResourceCoordinator", () => {
     coordinator.dispose();
   });
 
-  it("hidden page keeps interaction but stops new warm work", () => {
+  it("hidden page starts no new work but keeps what is already resident", () => {
     const coordinator = new CanvasResourceCoordinator();
+    // 可见帧先准入视口内的卡片。
     coordinator.project({
       viewport: { x: 0, y: 0, zoom: 1 },
       surface: { width: 800, height: 600, pixelRatio: 1 },
-      pageVisible: false,
-      interactive: ["near"],
+      pageVisible: true,
+      interactive: [],
       pins: [],
       candidates: nodes
     });
     expect(coordinator.admittedNodeIds()).toEqual(["near"]);
+    // 隐藏帧：既不为新候选（哪怕 interactive）开始解码，也不撤销已驻留的纹理。
+    // 撤销会让切回标签页时整屏重新 fetch + 解码（可见故障），见 visibility-freeze.test.ts。
+    const fresh = coordinator.project({
+      viewport: { x: 0, y: 0, zoom: 1 },
+      surface: { width: 800, height: 600, pixelRatio: 1 },
+      pageVisible: false,
+      interactive: ["far"],
+      pins: [],
+      candidates: nodes
+    });
+    expect(fresh).toEqual([]);
+    expect(coordinator.admittedNodeIds()).toEqual(["near"]);
+    expect(coordinator.isAdmitted("far")).toBe(false);
     coordinator.dispose();
   });
 
@@ -454,4 +468,22 @@ describe("CanvasResourceCoordinator", () => {
     expect(snapshot.policy.previewSlots).toBe(DEFAULT_RESIDENCY_POLICY.previewSlots);
     coordinator.dispose();
   });
+});
+
+it("bounds upload count and synchronous submission time without starving the first item", () => {
+  let now = 0;
+  const coordinator = new CanvasResourceCoordinator({ now: () => now,
+    policy: { uploadCountPerFrame: 2, uploadBudgetMs: 2 } });
+  coordinator.beginFrame();
+  expect(coordinator.spendUploadBytes(4)).toBe(true);
+  expect(coordinator.spendUploadBytes(4)).toBe(true);
+  expect(coordinator.spendUploadBytes(4)).toBe(false);
+  coordinator.beginFrame();
+  expect(coordinator.spendUploadBytes(4)).toBe(true);
+  now = 3;
+  expect(coordinator.spendUploadBytes(4)).toBe(false);
+  expect(coordinator.spendUploadBytes(4, true)).toBe(true);
+  coordinator.beginFrame();
+  expect(coordinator.spendUploadBytes(4)).toBe(true);
+  coordinator.dispose();
 });

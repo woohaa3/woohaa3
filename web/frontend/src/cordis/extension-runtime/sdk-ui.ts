@@ -7,7 +7,7 @@ import { AudioPlayer, MediaDialog } from "@woohaa3/ui/media";
 import { SettingsFeedback, SettingsSection } from "@woohaa3/ui/settings";
 import { ASSISTANT_SETUP_HINT, ASSISTANT_SETUP_TOOLTIP, AssistantComposer, AssistantConnectionSelector, AssistantListSelector, AssistantModelSelector, AssistantToolbar } from "@woohaa3/ui/assistant";
 import { CopyField } from "@woohaa3/ui/feedback";
-import { ActivityIcon, AdaptiveRatioIcon, AdjustmentIcon, AgentIcon, AlignBottomIcon, AlignCenterXIcon, AlignCenterYIcon, AlignLeftIcon, AlignRightIcon, AlignTopIcon, AppSettingsIcon, AppsIcon, BackIcon, BoxIcon, CUSTOM_ICON_EXCEPTIONS, CanvasSwitcherIcon, ChatIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClapperboardIcon, ClippingMaskIcon, ClockIcon, CloseIcon, CloudIcon, CollapseIcon, ConfigIcon, CopyIcon, CropIcon, DiamondIcon, DownloadIcon, EllipseMarqueeIcon, EllipsisIcon, EraserIcon, ExpandIcon, EyeIcon, EyeOffIcon, FileImageIcon, FileTextIcon, FilmIcon, FitScreenIcon, FolderPlusIcon, GameIcon, GenerationHistoryIcon, HandIcon, HistoryIcon, HourglassIcon, IdentityIcon, ImageIcon, InvalidIcon, LassoIcon, LayersIcon, LayoutGridIcon, LinkIcon, LoadingIcon, LocateIcon, LockIcon, LogsIcon, MCP_CLIENT_MARKS, MapIcon, MarqueeIcon, MaskIcon, McpClientLogo, MediaIcon, MenuIcon, MenuListIcon, MigrationIcon, MinusIcon, MoonIcon, MoveIcon, MusicIcon, MuteIcon, NetworkIcon, PauseIcon, PenIcon, PerformanceIcon, PlayIcon, PluginIcon, PlusIcon, ProviderIcon, RectangleIcon, RedoIcon, RefreshIcon, RestoreWindowIcon, SearchIcon, SendIcon, ServiceLogo, SettingsIcon, SnippetLibraryIcon, SparklesIcon, StorageIcon, SunIcon, SwapColorsIcon, TaskListIcon, ToolsIcon, TrashIcon, TypeIcon, UnavailableIcon, UndoIcon, UnlinkIcon, UploadIcon, VideoIcon, VolumeIcon, WandSparklesIcon, WarningIcon, ZoomInIcon, ZoomOutIcon } from "@woohaa3/ui/icons";
+import { ActivityIcon, AdaptiveRatioIcon, AdjustmentIcon, AgentIcon, AlignBottomIcon, AlignCenterXIcon, AlignCenterYIcon, AlignLeftIcon, AlignRightIcon, AlignTopIcon, AppSettingsIcon, AppsIcon, BackIcon, BoxIcon, CUSTOM_ICON_EXCEPTIONS, CanvasSwitcherIcon, ChatIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClapperboardIcon, ClippingMaskIcon, ClockIcon, CloseIcon, CloudIcon, CollapseIcon, ConfigIcon, CopyIcon, CropIcon, DiamondIcon, DownloadIcon, ElevationIcon, EllipseMarqueeIcon, EllipsisIcon, EraserIcon, ExpandIcon, EyeIcon, EyeOffIcon, FileImageIcon, FileTextIcon, FilmIcon, FitScreenIcon, FolderPlusIcon, GameIcon, GenerationHistoryIcon, HandIcon, HistoryIcon, HourglassIcon, IdentityIcon, ImageIcon, InvalidIcon, LassoIcon, LayersIcon, LayoutGridIcon, LinkIcon, LoadingIcon, LocateIcon, LockIcon, LogsIcon, MCP_CLIENT_MARKS, MapIcon, MarqueeIcon, MaskIcon, McpClientLogo, MediaIcon, MenuIcon, MenuListIcon, MigrationIcon, MinusIcon, MoonIcon, MoveIcon, MusicIcon, MuteIcon, NetworkIcon, OrbitIcon, PauseIcon, PenIcon, PerformanceIcon, PlayIcon, PluginIcon, PlusIcon, PointerIcon, ProviderIcon, RectangleIcon, RedoIcon, RefreshIcon, RestoreWindowIcon, RotateIcon, ScaleIcon, SearchIcon, SendIcon, ServiceLogo, SettingsIcon, SnippetLibraryIcon, SparklesIcon, StorageIcon, SunIcon, SwapColorsIcon, TaskListIcon, ToolsIcon, TrashIcon, TypeIcon, UnavailableIcon, UndoIcon, UnlinkIcon, UploadIcon, VideoIcon, VolumeIcon, WandSparklesIcon, WarningIcon, ZoomInIcon, ZoomOutIcon } from "@woohaa3/ui/icons";
 import { ThemeProvider, color, font, radius, shadow, space, theme, useAppTheme, useOptionalAppTheme, useThemeService } from "@woohaa3/ui/theme";
 export const group = "ui" as const;
 export const namedExports = {
@@ -79,6 +79,7 @@ export const namedExports = {
   DropdownMenuItem,
   DropdownMenuRoot,
   DropdownMenuTrigger,
+  ElevationIcon,
   EllipseMarqueeIcon,
   EllipsisIcon,
   EraserIcon,
@@ -128,18 +129,22 @@ export const namedExports = {
   MusicIcon,
   MuteIcon,
   NetworkIcon,
+  OrbitIcon,
   PauseIcon,
   PenIcon,
   PerformanceIcon,
   PlayIcon,
   PluginIcon,
   PlusIcon,
+  PointerIcon,
   Popover,
   ProviderIcon,
   RectangleIcon,
   RedoIcon,
   RefreshIcon,
   RestoreWindowIcon,
+  RotateIcon,
+  ScaleIcon,
   ScrollArea,
   SearchIcon,
   SegmentedControl,

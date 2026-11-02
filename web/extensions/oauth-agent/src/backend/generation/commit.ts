@@ -158,8 +158,9 @@ export async function commitAnimation(
     };
     const decoded = decodeFilmSetNodeData(toFlatAnimation(next));
     if (!decoded.ok) return ctx.fail(record, onProgress, "invalid-candidate", decoded.reason, 422);
-    // 只有真正改动片段的候选（对象动作）才走 clip precondition；纯模型编辑走完整 snapshot precondition。
-    const editedClipId = input.clipId ?? (hasMotion ? targetClip?.id : undefined);
+    // 前提跟随受理时的授权范围：整体请求即使修改默认片段，也必须校验完整 snapshot。
+    // 只有显式局部请求使用 clip hash，不能把整体 snapshot hash 当成 clip hash。
+    const editedClipId = input.clipId;
     const outcome = await ctx.ports.commitAnimation({
       ownerId: input.ownerId,
       canvasId: input.canvasId,

@@ -1,5 +1,5 @@
 import { filmSetNodeDataFields, createFilmSetSnapshot } from "@woohaa3/contracts";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, readStoredCanvas, resetCanvasStorage, sendCommands, uploadMedia, waitForCanvasSession } from "./helpers.js";
 
 test("图片直接点选、三轴实时移动、缩放和持久化，整体与对象工具同时可用", async ({ page }) => {

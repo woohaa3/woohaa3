@@ -12,7 +12,7 @@
  *
  * 像素判定用容差（前景占比/主色），不做逐像素哈希（Bevy 抗锯齿差异）。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

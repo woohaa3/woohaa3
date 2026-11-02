@@ -1,4 +1,5 @@
-import { expect, test, devices } from "@playwright/test";
+import { devices } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, resetCanvasStorage, waitForCanvasSession, waitForBevyReady, sendCommands, readStoredCanvas } from "../e2e/helpers.js";
 
 /**

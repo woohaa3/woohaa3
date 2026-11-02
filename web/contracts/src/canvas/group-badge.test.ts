@@ -8,9 +8,8 @@ import {
   groupBadgeScreenRect
 } from "./group-badge.js";
 import { createEmptyWoohaa3ServerCanvas, sanitizeWoohaa3CanvasNodeData } from "./domain/index.js";
-import { filmSetGroupBadgePlacement, groupModelProjection, modelUnit } from "./model-focus/model-bounds.js";
-import { FILM_SET_GROUP_WIDTH_MARGIN } from "./model-focus/types.js";
-import { groupPadding } from "./domain/core/group-geometry.js";
+import { groupModelProjection, modelUnit } from "./model-focus/model-bounds.js";
+import { CANVAS_UNITS_PER_METER } from "./model-focus/types.js";
 import { buildCanvasRenderScene } from "./render-scene.js";
 import type { SceneV2Op } from "./scene-ir-v2.js";
 import type { Vec3 } from "./model-transform.js";
@@ -27,16 +26,12 @@ const model = (size: Vec3, scale = 1) => ({
 });
 
 describe("组徽标几何（模型投影派生）", () => {
-  it("片场取景边距与组布局留白同源，避免两处常量漂移", () => {
-    expect(FILM_SET_GROUP_WIDTH_MARGIN).toBe(groupPadding);
-  });
-
   it("单位与普通模型卡片一致：同一模型在组徽标和卡片上的投影尺寸相同", () => {
     const input = model([2, 1, 1], 1.5);
     const projection = groupModelProjection(input)!;
     expect(projection).not.toBeNull();
-    // 卡片单位就是画布共享模型单位，组徽标不再有 fit 或展示倍率。
-    expect(modelUnit(input.placement, input.extent)).toBe((1.5 * 64 * 3) / 2);
+    // 卡片单位就是绝对米制单位（1 米 = CANVAS_UNITS_PER_METER），组徽标不再有 fit 或展示倍率。
+    expect(modelUnit(input.placement, input.extent)).toBe(1.5 * CANVAS_UNITS_PER_METER);
     const unit = modelUnit(input.placement, input.extent);
     // 徽标只由该单位派生：放大 placement.scale 时投影等比放大，没有 56×44 上限。
     const bigger = groupModelProjection(model([2, 1, 1], 3))!;
@@ -59,27 +54,28 @@ describe("组徽标几何（模型投影派生）", () => {
     }
   });
 
-  it("片场组按组内容宽度取景，普通组仍用共享单位", () => {
+  it("片场组与普通组同一单位：徽标不随组宽放大", () => {
     const input = model([2, 1, 1], 1);
     const natural = groupModelProjection(input)!;
-    const fittedPlacement = filmSetGroupBadgePlacement(input, 1000)!;
-    const fitted = groupModelProjection({ ...input, placement: fittedPlacement })!;
-    // 左右各留 groupPadding = 40；只改展示 placement，不写回原对象。
-    expect(fitted.width).toBeCloseTo(1000 - 80, 5);
-    expect(fittedPlacement.scale).toBeCloseTo((1000 - 80) / natural.width, 5);
-    expect(input.placement.scale).toBe(1);
-    expect(fittedPlacement.yaw).toBe(input.placement.yaw);
-    // 普通组不调用这个 helper，投影仍按共享单位。
-    expect(natural.width).toBeLessThan(fitted.width);
+    // 片场组只是多一个顶边锚定标记，投影尺寸与普通组的共享单位完全相同。
+    const topAnchored = groupModelProjection({ ...input, badgeTopAnchored: true })!;
+    expect(topAnchored.width).toBeCloseTo(natural.width, 6);
+    expect(topAnchored.height).toBeCloseTo(natural.height, 6);
+    expect(topAnchored.topAnchored).toBe(true);
+    // 组宽不参与：无论组多宽，投影都不变。
+    for (const groupWidth of [196, 328, 1000, 4000]) {
+      const badge = groupBadgeRect({ x: 0, y: 0, width: groupWidth, height: 400 }, topAnchored)!;
+      expect(badge.width).toBeCloseTo(natural.width, 6);
+      expect(badge.height).toBeCloseTo(natural.height, 6);
+    }
   });
 
-  it("片场组 placement 缺省时仍按组宽取景，不退回共享单位", () => {
+  it("片场组 placement 缺省时仍按共享单位，不虚构放大", () => {
     const input = { ...model([2, 1, 1], 1), placement: null };
-    const natural = groupModelProjection({ ...input, placement: null })!;
-    const fittedPlacement = filmSetGroupBadgePlacement(input, 1000);
-    const fitted = groupModelProjection({ ...input, placement: fittedPlacement })!;
-    expect(fitted.width).toBeCloseTo(1000 - 80, 5);
-    expect(fittedPlacement.scale).toBeCloseTo((1000 - 80) / natural.width, 5);
+    const natural = groupModelProjection(input)!;
+    const topAnchored = groupModelProjection({ ...input, placement: null, badgeTopAnchored: true })!;
+    expect(topAnchored.width).toBeCloseTo(natural.width, 6);
+    expect(modelUnit(null, input.extent)).toBeGreaterThan(0);
   });
 
   it("片场组徽标顶边贴住锚点向下展开，普通组保持中心对齐", () => {

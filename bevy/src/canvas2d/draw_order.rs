@@ -18,6 +18,7 @@ use crate::protocol::GraphNode;
 /// after that sequence, however, and must still remain in the lowest layer.
 /// Keeping this policy in one helper prevents a late ghost (or a malformed frame
 /// with mixed roots) from receiving a higher z than a group panel.
+#[cfg(test)]
 pub(crate) fn render_index(nodes: &[GraphNode], index: usize) -> usize {
     if index >= nodes.len() {
         return index;
@@ -29,6 +30,21 @@ pub(crate) fn render_index(nodes: &[GraphNode], index: usize) -> usize {
     ghost_count + nodes[..index].iter().filter(|node| !node.ghost).count()
 }
 
+/// Linear-time render slots for a complete projection, preserving mixed ghost order.
+pub(crate) fn render_indices(nodes: &[GraphNode]) -> Vec<usize> {
+    let mut regular = nodes.iter().filter(|node| node.ghost).count();
+    let mut ghost = 0;
+    nodes
+        .iter()
+        .map(|node| {
+            let next = if node.ghost { &mut ghost } else { &mut regular };
+            let slot = *next;
+            *next += 1;
+            slot
+        })
+        .collect()
+}
+
 /// Convert a derived slot to the actual canvas world z.
 ///
 /// Bevy's `OrthographicProjection::default_2d` swaps near/far (`proj::orthographic(.., far, near)`),
@@ -37,6 +53,7 @@ pub(crate) fn render_index(nodes: &[GraphNode], index: usize) -> usize {
 /// renders in front. This matches the rest of the canvas (cards `10.0 + i * 0.1`, overlays
 /// `+1.5`, marquee `500`). Because the projection emits ungrouped roots first and each group
 /// before its members, a group panel always lands above ungrouped cards and below its own members.
+#[cfg(test)]
 pub(crate) fn render_z(nodes: &[GraphNode], index: usize) -> f32 {
     10.0 + render_index(nodes, index) as f32 * 0.1
 }
@@ -44,6 +61,23 @@ pub(crate) fn render_z(nodes: &[GraphNode], index: usize) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bulk_slots_match_reference_for_mixed_ghosts() {
+        for mask in 0..256u32 {
+            let nodes: Vec<_> = (0..8)
+                .map(|i| {
+                    let mut node = graph_node(&i.to_string(), false);
+                    node.ghost = mask & (1 << i) != 0;
+                    node
+                })
+                .collect();
+            let slots = render_indices(&nodes);
+            for i in 0..nodes.len() {
+                assert_eq!(slots[i], render_index(&nodes, i));
+            }
+        }
+    }
 
     fn graph_node(id: &str, group: bool) -> GraphNode {
         GraphNode {
@@ -64,6 +98,7 @@ mod tests {
             title: String::new(),
             type_label: String::new(),
             progress: 0.0,
+            progress_started_at: None,
             busy: false,
             texture: false,
             media_loading: false,
@@ -81,9 +116,9 @@ mod tests {
                 run_status: None,
                 geometry_quality: None,
                 drop_target: false,
-            
+
                 overview_cache: None,
-        }),
+            }),
             model: None,
             composite_asset: None,
             history_strip: None,

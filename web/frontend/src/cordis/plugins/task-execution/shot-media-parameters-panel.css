@@ -1,86 +1,10 @@
-/**
- * 镜头参数面板（片场组外显 image/video 节点）。
- *
- * 与执行面板共用 `mc-panel` 宿主；这里只负责只读参数排布。
- */
-.shot-media-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 260px;
-}
-
-.shot-media-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.shot-media-panel__heading {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
-.shot-media-panel__title {
-  overflow: hidden;
-  color: var(--app-web-text-primary);
-  font-size: 14px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shot-media-panel__kind {
-  flex: 0 0 auto;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--app-web-subtle);
-  color: var(--app-web-text-muted);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.shot-media-panel__params {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin: 0;
-}
-
-.shot-media-panel__param {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--app-web-border);
-  border-radius: 10px;
-  background: var(--app-web-subtle);
-}
-
-.shot-media-panel__param dt {
-  color: var(--app-web-text-muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.shot-media-panel__param dd {
-  margin: 0;
-  overflow: hidden;
-  color: var(--app-web-text-primary);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shot-media-panel__hint {
-  margin: 0;
-  color: var(--app-web-text-muted);
-  font-size: 12px;
-  line-height: 17px;
-}
+.shot-media-panel { display: flex; flex-direction: column; gap: 10px; min-width: 260px; }
+.shot-media-panel__header, .shot-media-panel__heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.shot-media-panel__header { justify-content: space-between; }
+.shot-media-panel__title { overflow: hidden; color: var(--app-web-text-primary); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.shot-media-panel__kind, .shot-media-panel__output { color: var(--app-web-text-muted); font-size: 12px; }
+.shot-media-panel__params { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.shot-media-panel__params label { display: flex; flex-direction: column; gap: 4px; color: var(--app-web-text-muted); font-size: 12px; }
+.shot-media-panel__params select, .shot-media-panel__params input[type="number"] { width: 100px; height: 30px; padding: 0 8px; border: 1px solid var(--app-web-border); border-radius: 4px; background: var(--app-web-panel); color: var(--app-web-text-primary); }
+.shot-media-panel__params .shot-media-panel__loop { flex-direction: row; align-items: center; height: 30px; }
+.shot-media-panel__error { margin: 0; color: var(--app-web-danger, #c33); font-size: 12px; }

@@ -318,6 +318,8 @@ describe("节点历史 repository / 应用服务", () => {
     const asset = room.canvas.assets.find((candidate) => candidate.id === data.outputAssetId);
     expect((asset?.metadata as { storageKey?: string }).storageKey).toBe(key);
     expect(data.prompt).toBe("p");
+    expect(data.activeRunId).toBe("");
+    expect(data.taskStatus).toBe("successed");
   });
 
   it("恢复媒体：稳定资产写回 provenance.runId，溯源链不断（change: l0-generation-provenance）", async () => {
@@ -624,16 +626,18 @@ describe("节点历史 repository / 应用服务", () => {
     expect(page.items.filter((item) => item.source.label === "模型编辑")).toHaveLength(1);
   });
 
-  it("生成中请求恢复被拒绝且状态不变", async () => {
+  it("生成中请求恢复会切换当前版本，并让在途结果按 latest-run-wins 变旧", async () => {
     const { service, room } = setup(canvasWithNode("text", { taskStatus: "processing" }));
     const { entryId } = await service.registerTaskResult({
       canvasId: CANVAS, nodeId: "node-1", runId: "run-1", kind: "text", createdAt: NOW,
       output: { mediaKind: "text", text: "hello" }
     });
-    const before = room.canvas.revision;
     const outcome = await service.restore({ canvasId: CANVAS, nodeId: "node-1", entryId });
-    expect(outcome).toMatchObject({ ok: false, code: "conflict" });
-    expect(room.canvas.revision).toBe(before);
+    expect(outcome.ok).toBe(true);
+    expect(room.canvas.nodeData["node-1"]).toMatchObject({
+      activeRunId: "",
+      taskStatus: "successed"
+    });
   });
 
   it("失败/取消归档带 outcome、基线引用且不可恢复（change: 2026-10-12）", async () => {

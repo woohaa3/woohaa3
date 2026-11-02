@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { reviewBaseUrl, reviewProbeUrl, reviewUseOptions, reviewWebServerEnv, reviewWebServerIgnoreHTTPSErrors } from "../../e2e/review-target.js";
 
 /**
  * Showcase Playwright 配置（change: align-showcase-reference-ux / add-showcase-history-model-panels
@@ -27,7 +28,8 @@ export default defineConfig({
 	retries: 0,
 	reporter: [["list"]],
 	use: {
-		baseURL: `http://127.0.0.1:${PORT}`,
+		...reviewUseOptions,
+		baseURL: reviewBaseUrl(PORT),
 		trace: { mode: "retain-on-failure", snapshots: true },
 	},
 	projects: [
@@ -48,8 +50,10 @@ export default defineConfig({
 		},
 	],
 	webServer: {
+		ignoreHTTPSErrors: reviewWebServerIgnoreHTTPSErrors,
 		command: `node e2e/serve.mjs --port ${PORT}`,
-		url: `http://127.0.0.1:${PORT}/`,
+		env: reviewWebServerEnv,
+		url: reviewProbeUrl(PORT),
 		reuseExistingServer: !process.env.CI,
 		timeout: 60_000,
 		stdout: "pipe",

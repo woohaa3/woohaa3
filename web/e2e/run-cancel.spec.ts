@@ -8,7 +8,7 @@
  *
  * 前置：E2E server 启用画布存储 + Yjs 同步（playwright.yjs.config.ts）。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { WebSocket } from "ws";
 import { MESSAGE_TYPE, SYNC_MESSAGE_TYPE, encodeSyncMessage, YJS_SYNC_PROTOCOL_VERSION, yDocToServerCanvas } from "@woohaa3/contracts/canvas-yjs";
 import { decodeYjsFrame, sessionWsUrl, yjsFrame } from "./session.js";

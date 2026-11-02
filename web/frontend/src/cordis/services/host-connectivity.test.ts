@@ -42,7 +42,7 @@ function setup(results: HostProbeResult[], pinned: string | null = "r1") {
 }
 
 describe("HostConnectivity", () => {
-  it("单次 HTTP 抖动不闪遮罩；连续失败进入 reconnecting 并阻止提交", () => {
+  it("单次 HTTP 抖动不闪遮罩；连续失败且宿主探活失败才进入 reconnecting 并阻止提交", async () => {
     const { service } = setup([]);
     service.reportHttp(false);
     expect(service.getSnapshot().phase).toBe("online");
@@ -50,8 +50,20 @@ describe("HostConnectivity", () => {
     service.reportHttp(false);
     expect(service.getSnapshot().phase).toBe("online");
     service.reportHttp(false);
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
     expect(service.getSnapshot().phase).toBe("reconnecting");
     expect(service.blocksSubmissions()).toBe(true);
+  });
+
+  it("扩展接口连续返回 503、但宿主探活成功时不闪重连遮罩", async () => {
+    // 真实场景：/api/oauth-agent/status、/api/canvases/:id/recording 等扩展接口轮询失败；
+    // 它们不代表宿主不可达，不能把整页盖成「正在重新连接本机服务…」。
+    const { service } = setup([{ reachable: true, releaseId: "r1" }]);
+    service.reportHttp(false);
+    service.reportHttp(false);
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    expect(service.getSnapshot().phase).toBe("online");
+    expect(service.blocksSubmissions()).toBe(false);
   });
 
   it("transport 断开直接进入重连；恢复后 releaseId 未变 → 撤除遮罩", async () => {

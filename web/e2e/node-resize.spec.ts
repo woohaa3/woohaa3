@@ -9,7 +9,7 @@
  *
  * 抓手位置按 `RESIZE_HANDLE_SIZE` 与节点在屏幕上的位置计算，保证与 Bevy 绘制/JS 命中一致。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	installPageHelpers,
 	readStoredCanvas,

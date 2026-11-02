@@ -14,13 +14,15 @@ function fixture(handle: "x" | "y" | "z" | "center" | "scale" | "yaw-ring", yaw 
   session.enter("film"); session.select("a");
   if (handle === "scale" || handle === "yaw-ring") session.setTool(handle === "scale" ? "scale" : "yaw");
   let camera = { target: [0, 0, 0] as [number, number, number], yaw: 0, pitch: 0, distance: 20, flySpeed: 6 };
+  let surface = { width: 800, height: 600 };
+  let epoch = "initial";
   const { handler } = createFilmSetObjectGesture({
-    session, projection: () => camera, surface: () => ({ width: 800, height: 600 }),
+    session, projection: () => camera, surface: () => surface, invalidationKey: () => epoch,
     compositionBasis: () => ({ unit: 4, yaw, worldToLocal, center: [0, 0, 0] }),
     pick: () => "a", hitObjectGizmo: () => ({ handle, direction: [1, 0], worldPerPixel: handle === "scale" ? 1 / 128 : 2, yawConstraint }),
     nodeId: () => "film", blocked: () => false
   });
-  return { session, handler, submitted, changeCamera: () => { camera = { ...camera, yaw: 2, distance: 200 }; } };
+  return { session, handler, submitted, changeLayout: () => { surface = { width: 600, height: 600 }; }, changeEpoch: () => { epoch = "new"; }, changeCamera: () => { camera = { ...camera, yaw: 2, distance: 200 }; } };
 }
 
 describe("object drag", () => {
@@ -107,5 +109,25 @@ describe("explicit constrained tools", () => {
     h.handler.move({x:0,y:0});h.handler.end();expect(h.submitted).toHaveLength(0);
     h.handler.begin({x:0,y:0},false);h.handler.move({x:20,y:0});h.handler.cancel();
     expect(h.session.getState().preview).toBeNull();expect(h.submitted).toHaveLength(0);
+  });
+});
+
+describe("release validation", () => {
+  it.each(["changeCamera", "changeLayout", "changeEpoch"] as const)("%s before release cancels a pending move even without another pointermove", change => {
+    const h = fixture("x");
+    h.handler.begin({ x: 400, y: 300 }, false);
+    h.handler.move({ x: 420, y: 300 });
+    h[change]();
+    h.handler.end();
+    expect(h.submitted).toHaveLength(0);
+    expect(h.session.getState().preview).toBeNull();
+  });
+  it("an out-and-back translation has no net command", () => {
+    const h = fixture("x");
+    h.handler.begin({ x: 400, y: 300 }, false);
+    h.handler.move({ x: 420, y: 300 });
+    h.handler.move({ x: 400, y: 300 });
+    h.handler.end();
+    expect(h.submitted).toHaveLength(0);
   });
 });

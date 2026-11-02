@@ -1,4 +1,5 @@
 import { CANVAS_CAMERA_PITCH } from "./model-focus/canvas-projection.js";
+import { CANVAS_UNITS_PER_METER } from "./model-focus/types.js";
 import { groupModelProjection } from "./model-focus/model-bounds.js";
 import { filmSetMediaPlanesForNode } from "./render-scene.js";
 import { describe, expect, it } from "vitest";
@@ -297,7 +298,7 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
       .nodes.find(node => node.id === "g")!.model!.placement).toEqual(override);
   });
 
-  it("片场组按组内容宽度取景并顶边锚定，普通组保持共享单位", () => {
+  it("片场组与普通组共用画布模型单位并顶边锚定，不按组宽取景", () => {
     const marker = createFilmSetGroupMarker();
     const source = canvas({
       document: {
@@ -316,7 +317,8 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
     const node = scene.nodes.find((entry) => entry.id === "film")!;
     expect(node.group!.badgeTopAnchor).toBe(true);
     expect(node.group!.modelBounds).toEqual({ aabb: resource.aabb, extent: resource.extent });
-    expect(node.model!.placement!.scale).toBeGreaterThan(1);
+    // canonical placement 不被改写：徽标按模型自身单位渲染，组宽不参与。
+    expect(node.model!.placement!.scale).toBe(1);
     const projection = groupModelProjection({
       sceneVersion: resource.sceneVersion,
       ops: [],
@@ -326,13 +328,21 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
       badgeTopAnchored: true
     })!;
     expect(projection.topAnchored).toBe(true);
-    expect(projection.width).toBeCloseTo(500 - 80, 4);
 
-    // 普通组不设置该标志，仍按共享单位；同一份资源在普通组里不会自动放大。
+    // 同一份资源在普通组里得到完全相同的投影尺寸。
     const ordinary = buildCanvasRenderScene({ canvas: groupCanvas(), modelResources: new Map([["g", resource]]) });
     const ordinaryNode = ordinary.nodes.find((entry) => entry.id === "g")!;
     expect(ordinaryNode.group!.badgeTopAnchor).toBeUndefined();
     expect(ordinaryNode.model!.placement!.scale).toBe(1);
+    const ordinaryProjection = groupModelProjection({
+      sceneVersion: resource.sceneVersion,
+      ops: [],
+      extent: resource.extent,
+      aabb: resource.aabb,
+      placement: ordinaryNode.model!.placement
+    })!;
+    expect(projection.width).toBeCloseTo(ordinaryProjection.width, 6);
+    expect(projection.height).toBeCloseTo(ordinaryProjection.height, 6);
   });
 
   it("嵌套 group 的叶子计数是递归的", () => {
@@ -1780,8 +1790,9 @@ it("media placements emit content-local geometry that the shared root scales", (
     contentExtent: 2,
     data: { filmSetContent: { schemaVersion: 4, items: [{ id: "photo", kind: "image", name: "photo", assetId: "asset", aspectRatio: 1.5, localTransform: { offset: { x: 3, y: 4, z: 5 }, scale: 2, yaw: 0.2 } }] } } as never
   });
-  // 内容单位高度 = 48 × itemScale(2) × extent(2) / 192 = 1；宽 1.5；中心 = offset + 半高。
-  expect(plane).toMatchObject({ id: "film::photo", itemId: "photo", unit: 1, x: 3, y: 4.5, z: 5, width: 1.5, height: 1, yaw: 0.2 });
+  // 绝对米制：内容单位高度 = 48 / CANVAS_UNITS_PER_METER × itemScale(2) = 1.5；宽 2.25；中心 = offset + 半高。
+  const contentHeight = (48 / CANVAS_UNITS_PER_METER) * 2;
+  expect(plane).toMatchObject({ id: "film::photo", itemId: "photo", unit: 1, x: 3, y: 4 + contentHeight / 2, z: 5, width: contentHeight * 1.5, height: contentHeight, yaw: 0.2 });
 });
 
 describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set-shooting-shot-previews）", () => {
@@ -1831,6 +1842,19 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
     expect(node.typeLabel).toBe("动态镜头");
     // 预览节点不合成为普通内容节点：无 outputAssetId/媒体引用等字段。
     expect(node).not.toHaveProperty("outputAssetId");
+  });
+
+  it("封面相机保留规范 ±90° 仰角端点，实际姿态由渲染器钳制", () => {
+    const source = filmSetCanvas();
+    const data = source.nodeData.film as unknown as {
+      filmSetAnimations: { clips: { initialCamera: { elevation: number; distance: number } }[] };
+    };
+    data.filmSetAnimations.clips[0]!.initialCamera.elevation = -Math.PI / 2;
+    data.filmSetAnimations.clips[0]!.initialCamera.distance = 0.1;
+    const scene = buildCanvasRenderScene({ canvas: source, theme: defaultAppTheme() });
+    const card = scene.nodes.find(node => node.id === shotNodeId)!.shotPreview!;
+    expect(card.coverCamera.elevation).toBeCloseTo(-Math.PI / 2, 9);
+    expect(card.coverCamera.distance).toBeCloseTo(0.1, 9);
   });
 
   it("迁移后的 owner-managed 预览节点仍投影镜头卡片与归属线", () => {

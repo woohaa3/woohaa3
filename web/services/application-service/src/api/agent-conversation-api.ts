@@ -307,7 +307,7 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         if (!decoded.ok) return badRequest(res, decoded.message, decoded.code);
         const allowed = await authorizeCanvas(deps, owner, decoded.value.canvasId, "write");
         if (!allowed.ok) return respondError(res, allowed.error);
-        const result = deps.service.createConversation({ owner, canvasId: decoded.value.canvasId, ...(decoded.value.adapterId ? { adapterId: decoded.value.adapterId } : {}), ...(decoded.value.title ? { title: decoded.value.title } : {}), ...(decoded.value.nodeId ? { nodeId: decoded.value.nodeId } : {}), ...(decoded.value.connectionId ? { connectionId: decoded.value.connectionId } : {}) });
+        const result = deps.service.createConversation({ owner, canvasId: decoded.value.canvasId, ...(decoded.value.contextKey ? { contextKey: decoded.value.contextKey } : {}), ...(decoded.value.adapterId ? { adapterId: decoded.value.adapterId } : {}), ...(decoded.value.title ? { title: decoded.value.title } : {}), ...(decoded.value.nodeId ? { nodeId: decoded.value.nodeId } : {}), ...(decoded.value.connectionId ? { connectionId: decoded.value.connectionId } : {}) });
         if (!result.ok) return respondError(res, result.error);
         sendJson(res, 200, { conversation: result.conversation });
         return true;
@@ -330,7 +330,9 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         const allowed = await authorizeCanvas(deps, owner, canvasId, "read");
         if (!allowed.ok) return respondError(res, allowed.error);
         const connectionId = url.searchParams.get("connectionId") ?? undefined;
-        const result = deps.service.findConversationForTarget({ owner, canvasId, nodeId, ...(connectionId ? { connectionId } : {}) });
+        const contextKey = url.searchParams.get("contextKey") ?? undefined;
+        if (contextKey !== undefined && (!contextKey || contextKey.length > 128)) return badRequest(res, "contextKey 非法");
+        const result = deps.service.findConversationForTarget({ owner, canvasId, nodeId, ...(contextKey ? { contextKey } : {}), ...(connectionId ? { connectionId } : {}) });
         sendJson(res, 200, { conversation: result.conversation });
         return true;
       }

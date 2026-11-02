@@ -282,3 +282,30 @@ it("child projection keeps validation, declaration order and ownership errors", 
   mode = "container";
   expect(() => registry.children(canvas)).toThrow("容器必须");
 });
+
+
+it("媒体候选按画布和注册版本缓存，候选仍逐帧读取播放状态", () => {
+  const registry = new CompositeAssetRegistry();
+  const canvas = createEmptyWoohaa3ServerCanvas("media-cache");
+  canvas.document.nodes = Array.from({ length: 3000 }, (_, i) => ({ id: String(i), type: "image" as const, position: { x: 0, y: 0 } }));
+  let enabled = false;
+  let assetId = "first";
+  const matchesNode = vi.fn(node => enabled && node.id === "42");
+  const mediaSources = vi.fn((id: string) => [{ nodeId: id, planeId: id, assetId, kind: "image" as const, sourceIdentity: assetId }]);
+  const release = registry.register({ ...adapter("media"), matchesNode, mediaSources });
+  expect(registry.mediaSources(canvas, null)).toEqual([]);
+  expect(matchesNode).toHaveBeenCalledTimes(3000);
+  registry.mediaSources(canvas, null);
+  expect(matchesNode).toHaveBeenCalledTimes(3000);
+  enabled = true; registry.invalidate();
+  expect(registry.mediaSources(canvas, null)[0]?.assetId).toBe("first");
+  assetId = "second";
+  expect(registry.mediaSources(canvas, null)[0]?.assetId).toBe("second");
+  expect(mediaSources).toHaveBeenCalledTimes(2);
+  expect(matchesNode).toHaveBeenCalledTimes(6000);
+  const next = { ...canvas, document: { ...canvas.document, nodes: [] } };
+  expect(registry.mediaSources(next, null)).toEqual([]);
+  expect(registry.mediaSources(canvas, null)).toHaveLength(1);
+  release();
+  expect(registry.mediaSources(canvas, null)).toEqual([]);
+});

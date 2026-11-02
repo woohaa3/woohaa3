@@ -73,8 +73,28 @@ describe("page-scoped open media content", () => {
     await vi.waitFor(() => expect(f.service.state("live")).toMatchObject({ status: "unavailable", sourceIdentity: "two" }));
     expect(f.provider.materialize).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled();
   });
-  it("recovers a failed producer when readiness changes without editing its source", async () => {
+  it("retries a transient writeback failure on the next canvas change", async () => {
     const f = fixture(true);
+    // 第一次写回失败（宿主短暂重连 / 并发画布写入）；没有 provider 新状态通知时，
+    // 后续画布变化仍必须能重试，而不是把同一内容身份永久判为失败。
+    f.submit.mockImplementationOnce(async () => { throw Error("host-reconnecting"); });
+    f.service.register(f.provider);
+    await vi.waitFor(() => expect(f.service.state("live")?.status).toBe("failed"));
+    f.canvas().nodeData.source.title = "two";
+    f.changed();
+    await vi.waitFor(() => expect(f.canvas().nodeData.live.outputAssetId).toBe("one"));
+    expect(f.service.state("live")?.status).toBe("ready");
+  });
+  it("repairs a ready asset whose outputAssetId writeback was missed", async () => {
+    const f = fixture(true);
+    f.service.register(f.provider);
+    await vi.waitFor(() => expect(f.canvas().nodeData.live.outputAssetId).toBe("one"));
+    // 模拟并发写入把 outputAssetId 覆盖回旧值：provider 仍是 ready，不会再发通知。
+    f.canvas().nodeData.live.outputAssetId = "stale";
+    f.changed();
+    await vi.waitFor(() => expect(f.canvas().nodeData.live.outputAssetId).toBe("one"));
+  });
+  it("recovers a failed producer when readiness changes without editing its source", async () => {    const f = fixture(true);
     const callbacks = new Set<() => void>();
     let ready = false;
     const unsubscribe = vi.fn();

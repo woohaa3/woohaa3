@@ -6,8 +6,8 @@
  * DOM 控制状态与 canvas 像素：非空渲染、orbit/distance/focus 后 preview 变化、
  * capture 尺寸/字节、多镜头隔离、resize/DPR 与删除 rig 后资源计数回落。
  */
-import { expect, test, type Page } from "@playwright/test";
-
+import { type Page } from "@playwright/test";
+import { expect, test } from "../../../e2e/review-browser.js";
 const LAB = "画布组件--shot-camera--交互实验台";
 const MULTI = "画布组件--shot-camera--多镜头切换";
 const NARROW = "画布组件--shot-camera--窄屏与画幅";

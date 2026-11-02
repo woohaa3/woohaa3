@@ -1,5 +1,7 @@
 // Real-app, hardware-only benchmark. Raw attempts remain even when assertions fail.
-import {test,expect,chromium,type Page} from '@playwright/test';
+import { chromium, type Page } from "@playwright/test";
+import { openReviewBrowser, test, expect } from "./review-browser.js";
+import { reviewBaseHost } from "./review-target.js";
 import {mkdirSync,writeFileSync,readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import os from 'node:os';
@@ -165,8 +167,8 @@ async function locate(page:Page,id:string){
 
 for(const cell of CELLS){test(`N${cell.nodes}-V${cell.visible}-${cell.kind??'text'}-r${cell.round}`,async({},info)=>{
  if(cell.quick)test.setTimeout(85_000);else if(cell.visualProbe)test.setTimeout(360_000);
- const browser=await chromium.launch({headless:false,args:['--enable-unsafe-webgpu','--disable-background-timer-throttling','--disable-renderer-backgrounding']});
- const context=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:1,baseURL:`http://127.0.0.1:${process.env.BENCH_PORT??4397}`});
+ const browser=await openReviewBrowser(chromium,{headless:false,args:['--enable-unsafe-webgpu','--disable-background-timer-throttling','--disable-renderer-backgrounding']});
+ const context=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:1,baseURL:`http://${reviewBaseHost}:${process.env.BENCH_PORT??4397}`});
  const page=await context.newPage();
  let profileSession:any=null,profileTimer:any=null,profileData:any=null;
  if(process.env.BENCH_PROFILE==='1'){

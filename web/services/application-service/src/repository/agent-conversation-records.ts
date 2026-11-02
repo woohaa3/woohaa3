@@ -6,6 +6,7 @@
  * 纯映射/终态判定集中于此；存储实现（建表、原子写、有界读）仍由 repository 持有。
  */
 export type ConversationAdapterBinding = {
+  contextKey?: string | null;
   conversationId: string;
   owner: string;
   canvasId: string;
@@ -108,6 +109,7 @@ export type ConversationToolRecord = {
 export type OwnerCanvasScope = { owner: string; canvasId: string };
 
 export type ConversationRow = {
+  context_key?: string | null;
   conversation_id: string;
   owner: string;
   canvas_id: string;
@@ -197,6 +199,7 @@ export function conversationFromRow(row: ConversationRow): ConversationAdapterBi
     canvasId: row.canvas_id,
     adapterId: row.adapter_id,
     connectionId: row.connection_id ?? null,
+    contextKey: row.context_key ?? null,
     title: row.title,
     status: row.status,
     latestRequestId: row.latest_request_id,

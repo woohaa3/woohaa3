@@ -11,7 +11,7 @@
  *
  * 像素判定用容差（前景占比/连通区域/包围框），不以逐像素哈希相同为条件（design D13）。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
 import { installPageHelpers, resetCanvasStorage, createNode, waitForCanvasSession, sendCommands, waitForCommandsSettled } from "./helpers.js";
 

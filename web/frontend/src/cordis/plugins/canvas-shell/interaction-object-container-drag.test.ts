@@ -17,7 +17,11 @@ function setup(selected: string[] = [], kind: "node" | "model-preview" = "node")
   canvas.document.nodes = [{ id: "film", type: "composite-asset", position: { x: 0, y: 0 } }];
   canvas.nodeData.film = canonicalFilmSetFields(createFilmSetSnapshot({ title: "片场", modelItemId: "actor",
     model: { modelScript: "scene.box({id:'body',size:[1,1,1]});", modelScriptVersion: "woohaa-model-js-v2" }, timeline: { duration: 0, loop: false } })) as never;
-  const result = applyCanvasCommands(migrateFilmSetFixture(canvas, "film"), []);
+  const result = applyCanvasCommands(migrateFilmSetFixture(canvas, "film"), [
+    // 组按释放结算设计冻结自身尺寸并把成员夹在内框（左右/顶部 40、底部 80）：
+    // 迁移后组恰好贴合成员，没有可拖动余量。先把组放大到用户可调整的尺寸，再验证卡片随拖动移动。
+    { type: "node.update", nodeId: "film", width: 600, height: 500 }
+  ]);
   if (!result.ok) throw new Error(result.rejection.message);
   woohaa3CanvasStore.getState().applyRemoteCanvas(result.canvas);
   const original = result.canvas.document.nodes.find(node => node.id === modelId)!;

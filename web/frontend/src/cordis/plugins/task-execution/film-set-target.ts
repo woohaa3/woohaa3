@@ -1,12 +1,12 @@
 /**
- * 片场面板的目标片段解析
- * （change: 2026-10-12-add-agent-conversation-panel，design D3 / `openspec/specs/model-authoring`）。
+ * 片场 AI 目标的内容版本解析
+ * （change: 2026-10-12-add-agent-conversation-panel 引入片段目标；
+ *   change: 2026-10-31-redesign-film-set-workspace 改为场景 AI 固定整个片场）。
  *
- * 动作写入必须携带 `clipId`，工具 allowlist 据此捕获片段身份；无片段不签发片段写权限（调用被拒为
- * `tool-not-allowed`）。没有显式片段选择的面板（右侧模型节点编辑）用节点的默认片段作为目标，
- * 保证片场生成动作能被授权放行。
+ * 画布片场节点面板与聚焦场景 AI 都以**整个片场**为目标：版本前提使用完整快照哈希，
+ * 不再把当前镜头冻结成 clipId。只有历史局部回合显式带 `clipId` 时，续聊仍沿用该镜头的哈希。
  */
-import { readFilmSetAnimationProjection, filmSetAnimationsOf, filmSetClipHash } from "@woohaa3/contracts";
+import { animationSnapshotHash, filmSetAnimationsOf, filmSetClipHash, readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 
 function animationOf(nodeId: string) {
@@ -14,17 +14,16 @@ function animationOf(nodeId: string) {
   return readFilmSetAnimationProjection(canvas, nodeId);
 }
 
-/** 默认目标片段 id；节点不是合法片场或没有片段时返回 undefined。 */
-export function resolveFilmSetTargetClip(nodeId: string): string | undefined {
-  const animation = animationOf(nodeId);
-  return animation ? filmSetAnimationsOf(animation).defaultClipId ?? undefined : undefined;
-}
-
-/** 默认目标片段的内容哈希（并发生效 precondition）；缺失时返回 undefined。 */
-export function resolveFilmSetClipHash(nodeId: string, clipId?: string): string | undefined {
+/**
+ * 片场目标的内容哈希。
+ *
+ * - 整个片场目标（`clipId` 缺省）：完整快照哈希，与 `get_model_node` 的 `snapshotHash` 一致；
+ * - 历史局部回合（显式 `clipId`）：该镜头的内容哈希；镜头已不存在时返回 undefined（由调用方保留文本、不重跑）。
+ */
+export function resolveFilmSetTargetHash(nodeId: string, clipId?: string): string | undefined {
   const animation = animationOf(nodeId);
   if (!animation) return undefined;
-  const collection = filmSetAnimationsOf(animation);
-  const clip = collection.clips.find((entry) => entry.id === (clipId ?? collection.defaultClipId));
+  if (!clipId) return animationSnapshotHash(animation);
+  const clip = filmSetAnimationsOf(animation).clips.find((entry) => entry.id === clipId);
   return clip ? filmSetClipHash(clip) : undefined;
 }

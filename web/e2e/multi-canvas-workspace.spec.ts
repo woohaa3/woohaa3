@@ -5,7 +5,7 @@
  * 覆盖：空库启动只创建一个默认画布并写回 URL、创建多画布、切换后编辑隔离、刷新/URL 分享、
  * back/forward、重命名经 published projection 持久化。
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import {
 	installPageHelpers,
 	readStoredCanvas,

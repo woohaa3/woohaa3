@@ -3,7 +3,7 @@ import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import type { FilmSetObjectSession } from "./object-session.js";
 import type { FilmSetObjectAction } from "./object-action.js";
 import { Button } from "@woohaa3/ui/primitives";
-import { DiamondIcon, ImageIcon, VideoIcon, LayoutGridIcon, TrashIcon } from "@woohaa3/ui/icons";
+import { DiamondIcon, ImageIcon, VideoIcon, LayoutGridIcon, TrashIcon, MoveIcon } from "@woohaa3/ui/icons";
 import { FilmSetObjectTransformFields } from "./film-set-object-transform-fields.js";
 
 export type FilmSetObjectToolbarProps = {
@@ -35,6 +35,7 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
   const select = onSelect ?? ((id: string | null) => session.select(id));
   const objects = session.objects();
   const item = session.selectedItem();
+  const SelectedIcon = item ? KIND_ICON[item.kind] : DiamondIcon;
   const editable = writable && !readOnly;
   const pending = state.pendingItemId !== null;
   // 列表与场景共用同一对象 action；禁止 repeat/pending 连续误删（change:
@@ -104,8 +105,8 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
       {section !== "list" ? <>
       {item ? (
         <div className="film-set-object-fields" key={item.id}>
-          <div className="film-set-section-heading film-set-selection-heading"><h3 title={item.name}>{item.name}</h3><span>场景摆放</span></div>
-          <p className="film-set-object-hint">场景摆放 · 影响使用此对象的镜头</p>
+          <div className="film-set-property-identity"><span className="film-set-property-identity__icon"><SelectedIcon /></span><div><h3 title={item.name}>{item.name}</h3><p>{KIND_LABEL[item.kind]} · 场景摆放</p></div></div>
+          <div className="film-set-property-heading"><span><MoveIcon size={14} />变换</span></div>
           {!section ? <div className="film-set-object-tools">
             {([ ["move", "移动"], ["yaw", "Y 旋转"], ["scale", "等比缩放"] ] as const).map(([tool, label]) => (
               <Button key={tool} size="sm" tone={state.tool === tool ? "primary" : "ghost"} data-active={state.tool === tool}
@@ -119,7 +120,6 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
           </div>
         </div>
       ) : objects.length > 0 ? <p className="film-set-object-hint">在场景中点选对象，或从列表中选择。</p> : null}
-      {item ? <p className="film-set-object-hint">{state.tool === "move" ? "拖动箭头或中心框移动 · Shift 拖动对象旋转" : state.tool === "yaw" ? "拖动圆环绕对象局部 Y 轴旋转" : "拖动方块等比缩放"}</p> : null}
       </> : null}
       {state.error ? <div className="film-set-object-error" role="status">{state.error}</div> : null}
     </section>

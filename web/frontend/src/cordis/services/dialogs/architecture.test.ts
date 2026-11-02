@@ -50,7 +50,10 @@ describe("Dialog system 架构审计", () => {
     const files = productionFiles(SRC_ROOT);
     const withDocumentKeydown = files.filter((file) => {
       const source = stripComments(readFileSync(file, "utf8"));
-      return /document\.addEventListener\(\s*["']keydown["']/.test(source);
+      if (!/document\.addEventListener\(\s*["']keydown["']/.test(source)) return false;
+      // 规则只针对弹窗的 Escape/Tab 契约：真正接管这两个键的处理器必须按 key 判定。
+      // 「任意按键取消」一类非弹窗用途（例如画布操作导览的自动推进）不在此列。
+      return /["'`](Escape|Tab)["'`]|\.(key|code)\s*===?\s*["'`]/.test(source);
     });
     // change: adopt-radix-lucide-canvas-ui 任务 6.3：Escape/outside/Tab 契约改由 Radix
     // DialogSurface（DismissableLayer + FocusScope）承担；Host 不再自己 addEventListener。

@@ -24,6 +24,7 @@ gpu-debug = ["woohaa_bevy_canvas/gpu-debug"]
 native-only-entry = []
 
 [dependencies]
+woohaa-media-image = { path = "../media-image" }
 woohaa_recording_supervisor = { path = "supervisor" }
 # 与 Bevy lock 中的 raw-window-handle 0.6.2 一致（避免第二个不兼容版本）。
 raw-window-handle = "=0.6.2"

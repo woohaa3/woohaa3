@@ -5,8 +5,8 @@
  * 在真实浏览器里驱动 `ladle build` 里的 story，验证内存 client、recorder 与
  * clipboard adapter 的可观察行为。不发任何真实服务请求。
  */
-import { expect, test, type Page } from "@playwright/test";
-
+import { type Page } from "@playwright/test";
+import { expect, test } from "../../../e2e/review-browser.js";
 const HISTORY = "画布组件--任务历史";
 const MODEL = "画布组件--模型参数";
 

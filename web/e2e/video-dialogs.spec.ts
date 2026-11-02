@@ -12,8 +12,7 @@
  *
  * 复用生产 server（`e2e/server.mjs`）；`/showcase/` 静态托送 Ladle 构建产物。
  */
-import { expect, test } from "@playwright/test";
-
+import { expect, test } from "./review-browser.js";
 const STORY_EDIT = "画布组件--弹窗--视频编辑标记--已有标注";
 const STORY_CAPTURE = "画布组件--弹窗--视频截帧--已有帧";
 const STORY_CAPTURE_BUSY = "画布组件--弹窗--视频截帧--busy";

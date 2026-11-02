@@ -1,7 +1,8 @@
 import { designEvidence as evidence } from "./design-evidence.js";
 import { canonicalFilmSetFields } from "@woohaa3/contracts";
 import { base, clip } from "./fixtures/film-set-animation-clips.js";
-import { expect, test, type Page } from '@playwright/test';
+import { type Page } from "@playwright/test";
+import { expect, test } from "./review-browser.js";
 import { installPageHelpers, resetCanvasStorage, waitForCanvasSession, readStoredCanvas, sendCommands } from './helpers.js';
 
 async function controlsAreSeparate(page: Page, selector: string) {

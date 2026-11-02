@@ -1,10 +1,6 @@
 /**
- * 片场单栏检查器与独立生成面板的交互回归。
- * （change: 2026-10-10-improve-film-set-editing-and-inspector，任务 6.1–6.5 / design D7）。
- *
- * 覆盖：镜头与对象同栏、构图按需展开、独立 AI 面板保留草稿；
- * 本地选择和收起操作不写规范内容，真实片场名称进入 header。
- *
+ * 三栏片场、当前镜头输出与整个片场 AI 的交互回归。
+ * 选择、折叠、预览和历史只改变呈现，不复制草稿或写入规范内容。
  * @vitest-environment jsdom
  */
 import { act } from "react";
@@ -15,6 +11,7 @@ import {
   createFilmSetSnapshot,
   createEmptyWoohaa3ServerCanvas,
   createModelSnapshot,
+  animationSnapshotHash, readFilmSetAnimationProjection, createFilmSetGroupMarker, staticShotCameraMotion,
   type FilmSetContent,
   type ServerCanvas
 } from "@woohaa3/contracts";
@@ -114,62 +111,84 @@ function renderOverlay(canvas: ServerCanvas, initialCamera = false, options: { g
     }
   } as unknown as Context;
   const element = document.createElement("div");
+  const onLayoutChange = vi.fn();
   document.body.appendChild(element);
   root = createRoot(element);
   act(() => root!.render(
-      <FilmSetInspector ctx={ctx} session={session} objectSession={objectSession} captureSession={{} as never} writable />
+      <FilmSetInspector ctx={ctx} session={session} objectSession={objectSession} captureSession={{} as never} writable onLayoutChange={onLayoutChange} />
   ));
-  return { submitted, objectSession, session, playback: ctx.filmSetPlayback, renderGenerate };
+  return { submitted, objectSession, session, playback: ctx.filmSetPlayback, renderGenerate, onLayoutChange };
 }
 
 const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === label || b.getAttribute("aria-label") === label)!;
-const target = () => document.querySelector<HTMLSelectElement>('[aria-label="AI 修改目标"]')!;
 
-describe("FilmSetInspector single column and generation dock", () => {
+describe("FilmSetInspector three columns and whole-set generation", () => {
   it("separates lists and properties; selecting a shot activates tools without expanding composition", () => {
     const h = renderOverlay(filmSetCanvas(true), true);
-    expect(document.querySelector(".model-inspector-header h2")?.textContent).toBe("跑酷片场");
+    expect(document.querySelector(".model-inspector-header h2")?.textContent).toBe("对象属性");
     act(() => h.objectSession.select("body"));
     expect(document.querySelector(".film-set-object-fields")).not.toBeNull();
-    act(() => button("检查当前镜头").click());
-    const composition = document.querySelector<HTMLDetailsElement>(".film-set-composition")!;
-    expect(composition.open).toBe(false);
-    expect(document.querySelector(".film-set-shot-picker")).toBeNull();
+    act(() => document.querySelector<HTMLButtonElement>(".film-set-shot-card")!.click());
+    // 构图不再折叠成 details；选中镜头后属性区直接显示镜头分区。
+    expect(document.querySelector(".film-set-composition")).toBeNull();
+    expect(document.querySelector(".film-set-property-section")).not.toBeNull();
     expect(document.querySelector(".film-set-current-shot select")).toBeNull();
+    // 观察方向走共享 SelectInput，不再渲染浏览器原生下拉。
+    expect(document.querySelector(".film-set-view-bar select")).toBeNull();
+    expect(button("自由观察方式").classList.contains("ui-select-input")).toBe(true);
     expect(button("动画预览")).toBeUndefined();
     expect(h.session.getState().toolMode).toBe("camera");
     expect(h.objectSession.getState().selectedItemId).toBe("body");
     expect(document.querySelector("[data-camera-preview]")).not.toBeNull();
-    const list = document.querySelector(".film-set-inspector-list")!;
+    const list = document.querySelector(".film-set-navigation")!;
     expect(list.querySelector(".film-set-object-list")).not.toBeNull();
     expect(list.querySelectorAll("ul")).toHaveLength(1);
     expect(list.querySelector(".film-set-shot-list")).toBeNull();
     const sharedList = list.querySelector("ul")!;
     expect(sharedList.querySelector('[aria-label^="模型 ·"]')).not.toBeNull();
-    const shotRow = sharedList.querySelector<HTMLButtonElement>('[aria-label^="镜头 ·"]')!;
+    const shotRow = list.querySelector<HTMLButtonElement>('[aria-label^="镜头 ·"]')!;
     expect(shotRow).not.toBeNull();
     act(() => shotRow.click());
     expect(shotRow.getAttribute("aria-selected")).toBe("true");
-    expect(sharedList.querySelectorAll('[aria-selected="true"]')).toHaveLength(1);
+    expect(sharedList.querySelectorAll('[aria-selected="true"]')).toHaveLength(0);
+    expect(list.querySelectorAll('.film-set-shot-card[aria-selected="true"]')).toHaveLength(1);
     expect(document.querySelector(".film-set-list-tabs")).toBeNull();
     expect(h.session.getState().toolMode).toBe("camera");
-    expect(document.querySelectorAll(".film-set-viewport-tools button")).toHaveLength(4);
+    expect(document.querySelectorAll(".film-set-viewport-tools button")).toHaveLength(6);
     expect(button("移动对象")).toBeUndefined();
     act(() => sharedList.querySelector<HTMLButtonElement>('[aria-label^="模型 ·"]')!.click());
-    expect(document.querySelectorAll(".film-set-viewport-tools button")).toHaveLength(3);
+    expect(document.querySelectorAll(".film-set-viewport-tools button")).toHaveLength(5);
     act(() => button("移动对象").click());
     expect(h.session.getState().toolMode).toBe("model");
     expect(h.objectSession.selectedItem()?.id).toBe("body");
     expect(h.submitted).toHaveLength(0);
   });
 
-  it("uses the host dock outside the sidebar with the current shot precondition", () => {
+  it("floating tools cancel object drafts, select the real tool and contain canvas input", () => {
+    const h = renderOverlay(filmSetCanvas(true), true);
+    act(() => { h.objectSession.select("body"); h.objectSession.beginEdit(); h.objectSession.updatePreview({ offset: { x: 3, y: 0, z: 0 }, yaw: 0, scale: 1 }); });
+    expect(h.objectSession.getState().preview?.offset.x).toBe(3);
+    const tool = button("Y 旋转");
+    expect(tool.textContent).toBe(""); expect(tool.querySelector("svg")).not.toBeNull();
+    act(() => tool.click());
+    expect(h.objectSession.getState().preview).toBeNull(); expect(h.objectSession.getState().tool).toBe("yaw");
+    expect(tool.getAttribute("data-active")).toBe("true");
+    const leaked = vi.fn(); document.addEventListener("pointerdown", leaked); document.addEventListener("wheel", leaked);
+    act(() => { tool.dispatchEvent(new Event("pointerdown", { bubbles: true })); tool.dispatchEvent(new Event("wheel", { bubbles: true })); });
+    document.removeEventListener("pointerdown", leaked); document.removeEventListener("wheel", leaked);
+    expect(leaked).not.toHaveBeenCalled();
+    act(() => button("网格").click()); expect(button("网格").getAttribute("data-active")).toBe("false");
+    act(() => button("选择对象").click()); expect(h.objectSession.selectedItem()).toBeNull();
+    expect(button("移动对象").disabled).toBe(true); expect(h.submitted).toHaveLength(0);
+  });
+
+  it("uses the host dock outside the sidebar with the whole-set precondition", () => {
     const h = renderOverlay(filmSetCanvas(true), false, { generate: true });
     expect(document.querySelector(".model-inspector-scroll [data-host-generate]")).toBeNull();
     expect(document.querySelector(".film-set-generate-dock [data-host-generate]")).not.toBeNull();
     expect(document.querySelector("[data-raw-generate]")).toBeNull();
     expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({
-      nodeId: "film", mode: "film-set", presentation: "dock", writable: true, clipId: "clip-1", itemId: null, expectedContentHash: expect.any(String)
+      nodeId: "film", mode: "film-set", presentation: "dock", writable: true, clipId: null, itemId: null, expectedContentHash: animationSnapshotHash(readFilmSetAnimationProjection(filmSetCanvas(true), "film")!)
     }));
   });
 
@@ -179,26 +198,35 @@ describe("FilmSetInspector single column and generation dock", () => {
     composer.value = "保留这段未提交输入";
     const model = document.querySelector<HTMLSelectElement>("[data-host-generate] select")!;
     model.value = "model-a";
-    act(() => button("收起 AI 修改").click());
+    const overlay = document.querySelector(".film-set-viewport-overlay")!;
+    expect(overlay.querySelector(".film-set-generate-dock")).not.toBeNull();
+    expect(document.querySelector(".film-set-bottom .film-set-generate-dock")).toBeNull();
+    const toggle = overlay.querySelector<HTMLButtonElement>('.film-set-viewport-tools [aria-label="收起场景 AI"]')!;
+    expect(toggle.getAttribute("data-active")).toBe("true");
+    h.onLayoutChange.mockClear();
+    act(() => toggle.click());
+    expect(document.querySelector<HTMLElement>(".film-set-generate-dock")!.hidden).toBe(true);
     expect(document.querySelector<HTMLDivElement>(".film-set-generate-dock__expanded")!.hidden).toBe(true);
-    act(() => button("AI 修改").click());
+    expect(toggle.getAttribute("data-active")).toBe("false");
+    act(() => toggle.click());
+    expect(document.querySelector<HTMLElement>(".film-set-generate-dock")!.hidden).toBe(false);
+    expect(h.onLayoutChange).not.toHaveBeenCalled();
     expect(document.querySelector("[data-host-generate] textarea")).toBe(composer);
     expect(composer.value).toBe("保留这段未提交输入");
     expect(model.value).toBe("model-a");
     expect(h.submitted).toHaveLength(0);
   });
 
-  it("composition is presentation only and never collapses AI or clears selection", () => {
+  it("shot properties are presentation only and never collapse AI or clear selection", () => {
     const h = renderOverlay(filmSetCanvas(true), true, { generate: true });
     const composer = document.querySelector("[data-host-generate] textarea");
     act(() => h.objectSession.select("body"));
-    act(() => button("检查当前镜头").click());
+    act(() => document.querySelector<HTMLButtonElement>(".film-set-shot-card")!.click());
     act(() => button("推拉").click());
-    const composition = document.querySelector<HTMLDetailsElement>(".film-set-composition")!;
-    act(() => composition.querySelector("summary")!.click());
-    expect(composition.open).toBe(true);
-    act(() => composition.querySelector("summary")!.click());
-    expect(composition.open).toBe(false);
+    // 构图与画幅直接展开为属性分区；切换工具只改变呈现。
+    expect(document.querySelector(".film-set-composition")).toBeNull();
+    expect(document.querySelector(".film-set-camera-properties")).not.toBeNull();
+    expect(document.querySelector(".film-set-property-section")).not.toBeNull();
     expect(h.objectSession.getState().selectedItemId).toBe("body");
     expect(h.session.getState().toolMode).toBe("camera");
     expect(h.session.getState().cameraTool).toBe("distance");
@@ -207,15 +235,16 @@ describe("FilmSetInspector single column and generation dock", () => {
     expect(h.submitted).toHaveLength(0);
   });
 
-  it("selection targets an object; whole shot override preserves scene selection and stays read only locally", () => {
-    const h = renderOverlay(filmSetCanvas(true), false, { generate: true });
+  it("object and shot inspection keep the same whole-set target and composer", () => {
+    const h = renderOverlay(filmSetCanvas(true), true, { generate: true });
+    const composer = document.querySelector("[data-host-generate] textarea");
     act(() => h.objectSession.select("ground"));
-    expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ itemId: "ground", writable: false }));
-    act(() => { target().value = JSON.stringify(["clip-1", null]); target().dispatchEvent(new Event("change", { bubbles: true })); });
-    expect(h.objectSession.getState().selectedItemId).toBe("ground");
-    expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ itemId: null, writable: true }));
+    expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ clipId: null, itemId: null, writable: true }));
+    act(() => document.querySelector<HTMLButtonElement>(".film-set-shot-card")!.click());
     act(() => h.objectSession.select("body"));
-    expect(target().value).toBe(JSON.stringify(["clip-1", null]));
+    expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ clipId: null, itemId: null, writable: true }));
+    expect(document.querySelector('[aria-label="AI 修改目标"]')).toBeNull();
+    expect(document.querySelector("[data-host-generate] textarea")).toBe(composer);
     expect(h.submitted).toHaveLength(0);
   });
 
@@ -246,21 +275,43 @@ describe("FilmSetInspector single column and generation dock", () => {
     expect(h.submitted).toHaveLength(0);
   });
 
-  it("no shots blocks generation; no contribution does not mount a floating dock", () => {
-    const h = renderOverlay(filmSetCanvas(), false, { generate: true });
-    expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ clipId: null, writable: false, disabledReason: expect.stringContaining("拍摄镜头") }));
+  it("empty group without shots permits whole-set generation without creating content", () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("c1");
+    canvas.document.nodes.push({ id: "film", type: "group", position: { x: 0, y: 0 } });
+    canvas.nodeData.film = { title: "空片场", filmSetGroup: createFilmSetGroupMarker({ clips: [] }) };
+    const h = renderOverlay(canvas, false, { generate: true });
+    expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ clipId: null, itemId: null, writable: true }));
+    expect(button("镜头预览").disabled).toBe(true);
+    expect(h.submitted).toHaveLength(0);
   });
-  it("nonempty and busy drafts keep their exact object target while inspecting another target", () => {
+
+  it("navigation and AI collapse report occupied edges and do not change selection or draft", () => {
     const h = renderOverlay(filmSetCanvas(true), true, { generate: true });
+    const composer = document.querySelector<HTMLTextAreaElement>("[data-host-generate] textarea")!;
+    composer.value = "保持整体草稿";
     act(() => h.objectSession.select("body"));
-    const input = () => h.renderGenerate.mock.lastCall![0] as import("@woohaa3/frontend/extension-api").AuthoringGenerationProps;
-    act(() => input().onDraftStateChange?.({ hasDraft: true, busy: false }));
-    act(() => h.objectSession.select("ground"));
-    expect(input().itemId).toBe("body");
-    act(() => button("检查当前镜头").click());
-    expect(input().itemId).toBe("body");
-    act(() => { target().value = JSON.stringify(["clip-1", "ground"]); target().dispatchEvent(new Event("change", { bubbles: true })); });
-    expect(input().itemId).toBe("ground");
+    act(() => button("收起导航").click());
+    expect(document.querySelector('.film-set-navigation')?.getAttribute('data-collapsed')).toBe("true");
+    act(() => button("展开").click());
+    expect(h.objectSession.getState().selectedItemId).toBe("body");
+    expect(composer.value).toBe("保持整体草稿");
+    expect(document.querySelector("[data-host-generate] textarea")).toBe(composer);
+    expect(h.submitted).toHaveLength(0);
+  });
+
+  it("static preview uses the exact saved camera and cancels pending writes without an animation player", () => {
+    const canvas = filmSetCanvas(true);
+    const fields = canvas.nodeData.film as unknown as { filmSetAnimations: { clips: Array<{ kind: string; timeline: { duration: number; loop: boolean }; cameraMotion: ReturnType<typeof staticShotCameraMotion>; bindings: unknown[] }> } };
+    Object.assign(fields.filmSetAnimations.clips[0]!, { kind: "static", timeline: { duration: 0, loop: false }, cameraMotion: staticShotCameraMotion(), bindings: [] });
+    const h = renderOverlay(canvas, true, { generate: true });
+    act(() => { h.session.beginPose(); h.session.updatePose({ azimuth: 0.6 }); });
+    act(() => button("镜头预览").click());
+    expect(h.playback.getSnapshot().preview).toBe(true);
+    expect(h.session.getState().posePreview).toBeNull();
+    expect(document.querySelector(".film-set-animation-player")).toBeNull();
+    expect(document.querySelector<HTMLDivElement>(".film-set-generate-dock")!.hidden).toBe(true);
+    act(() => button("场景编辑").click());
+    expect(h.playback.getSnapshot().preview).toBe(false);
     expect(h.submitted).toHaveLength(0);
   });
 
@@ -272,7 +323,7 @@ describe("FilmSetInspector single column and generation dock", () => {
     expect(h.playback.getSnapshot().preview).toBe(true);
     expect(h.session.getState().posePreview).toBeNull();
     expect(document.querySelector<HTMLDivElement>(".film-set-viewport-tools")!.hidden).toBe(true);
-    act(() => document.querySelector<HTMLButtonElement>(".film-set-animation-player__actions button:last-child")!.click());
+    act(() => button("场景编辑").click());
     expect(h.playback.getSnapshot().preview).toBe(false);
     expect(h.submitted).toHaveLength(0);
   });

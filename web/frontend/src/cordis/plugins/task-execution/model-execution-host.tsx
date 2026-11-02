@@ -24,6 +24,7 @@ import { derivePanelDraft, derivePanelTaskState } from "./panel-state.js";
 import { ModelParameterPanel } from "./model-parameter-panel.js";
 import { ShotMediaParametersPanel } from "./shot-media-parameters-panel.js";
 import { readShotMediaParameters } from "./shot-media-parameters.js";
+import { filmSetAnimationsOf, filmSetClipPrecondition, managedShotPreviewOwnershipOf, readFilmSetAnimationProjection, type FilmSetClipPatchOp } from "@woohaa3/contracts";
 import {
   EMPTY_UPSTREAM_TEXT_MESSAGE,
   upstreamTextIsEmpty
@@ -424,6 +425,21 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         <ShotMediaParametersPanel
           nodeId={context.nodeId}
           parameters={shotMediaParameters}
+          writable={writable && !!props.recordShotCommands}
+          onChange={async (change) => {
+            const current = woohaa3CanvasStore.getState();
+            const source = current.working ?? current.canvas;
+            const owner = source && managedShotPreviewOwnershipOf(source.nodeData[context.nodeId]);
+            const animation = owner && readFilmSetAnimationProjection(source, owner.filmSetNodeId);
+            const collection = animation && filmSetAnimationsOf(animation);
+            const clip = collection?.clips.find(entry => entry.id === owner?.clipId);
+            if (!owner || !collection || !clip || !props.recordShotCommands) return "镜头已不可用";
+            const op: FilmSetClipPatchOp = change.kind === "aspect"
+              ? { kind: "camera", initialCamera: { ...clip.initialCamera, aspect: change.aspect } }
+              : { kind: "timeline", timeline: { ...clip.timeline, ...change.timeline } };
+            const result = await props.recordShotCommands([{ type: "filmSet.clipPatch", nodeId: owner.filmSetNodeId, clipId: owner.clipId, op, expectedHash: filmSetClipPrecondition(collection, owner.clipId, op) }], "修改拍摄镜头");
+            return result.ok ? null : result.reason ?? "镜头修改失败";
+          }}
           onClose={() => submitIntent({ kind: "close" })}
         />
       </ExecutionPanelSurface>

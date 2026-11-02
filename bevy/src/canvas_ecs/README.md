@@ -82,11 +82,17 @@ component + system，验证选中时产生几何、取消选中后同一批次�
 - 非法布局、重复/空 id 或倒退的 revision 不提交本次投影，保留上一份合法实体集合。
 ## Render invalidation inputs
 
+Projection updates existing layout, presentation and overview-owner components with value comparisons.
+Only component additions/removals use deferred structural commands; identical full snapshots preserve
+change ticks, and a position edit changes only the affected layout/visual inputs. Resource-only rows
+continue to use the node entity index without a full projection.
+
 Cards and containers carry `CardVisual` / `ContainerVisual` components. Each component keeps a
 `geometry` input separate from a `labels` input, so producers can invalidate mesh blocks only for
 size, texture, history, or run-state changes while title and type-label edits refresh text alone.
-`NodeActionBar` is the accepted toolbar input; its visibility is decided by the shared
-`canvas_query::action_bar_visible` predicate used by both drawing and interaction.
+`NodeActionBar` is the accepted toolbar input. Projection already owns node membership and uses
+`canvas_query::action_bar_enabled` for focus, actions and group opt-in; interaction applies the
+same policy to its accepted node set without scanning the scene once per node.
 
 ## 总览缓存 owner 生命周期
 

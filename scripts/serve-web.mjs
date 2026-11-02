@@ -79,6 +79,10 @@ const serveStatic = createStaticHandler(dist, {
 });
 
 const server = http.createServer((req, res) => {
+	if (serviceEnv.WOOHAA_IMAGE_THREADS_ISOLATION === "1") {
+		res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+		res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+	}
 	// 公开挂载边界：只在一个边界剥离一次前缀；前缀外请求不进入后端或 SPA 回退。
 	const action = applyHttpMount(basePath, req);
 	if (interceptHttpMount(req, res, action)) return;

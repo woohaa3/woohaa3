@@ -11,6 +11,7 @@ import {
   canvasCameraRotation,
   canvasPointToWorld,
   CANVAS_CAMERA_PITCH,
+  CANVAS_UNITS_PER_METER,
   clampDistance,
   clampFlySpeed,
   clampPitch,
@@ -90,10 +91,10 @@ describe("modelWorldAabbRelative", () => {
     const aabb = modelWorldAabbRelative(input)!;
     expect(aabb).not.toBeNull();
     expect([...aabb.min, ...aabb.max].every(Number.isFinite)).toBe(true);
-    // unit = 1*64*3/2 = 96；旋转后的轴对齐包围盒比原立方体更大。
+    // 绝对米制：unit = 1 × 64；1 m 立方体旋转后的轴对齐包围盒半径约 √3/2 × 64 ≈ 55。
     const { radius } = aabbCenterRadius(aabb);
-    expect(radius).toBeGreaterThan(60);
-    expect(radius).toBeLessThan(200);
+    expect(radius).toBeGreaterThan(40);
+    expect(radius).toBeLessThan(80);
   });
 
   it("placement scale 与 yaw 参与 world AABB", () => {
@@ -320,10 +321,12 @@ describe("filmSetFitFactor", () => {
 });
 
 describe("modelUnit", () => {
-  it("placement scale 与 extent 参与单位缩放，不读取 zoom", () => {
+  it("绝对米制：placement scale 参与单位缩放，extent 不再参与", () => {
     const placement: BevyModelPlacement = { offset: { x: 0, y: 0, z: 0 }, scale: 2, yaw: 0 };
-    expect(modelUnit(placement, 4)).toBeCloseTo((2 * 64 * 3) / 4, 6);
-    expect(modelUnit(null, 0)).toBeCloseTo(64 * 3, 6);
+    expect(modelUnit(placement, 4)).toBeCloseTo(2 * CANVAS_UNITS_PER_METER, 6);
+    // 同一个 placement 在任意 extent 下得到同一单位：不再按包围盒归一化。
+    expect(modelUnit(placement, 40)).toBeCloseTo(modelUnit(placement, 1.5), 9);
+    expect(modelUnit(null, 0)).toBeCloseTo(CANVAS_UNITS_PER_METER, 6);
   });
 });
 

@@ -140,7 +140,7 @@ describe("节点生成历史集成验收（任务 5.1）", () => {
     expect((await repository.canvasStats(CANVAS)).count).toBe(1);
   });
 
-  it("active generation conflict：恢复被拒且节点不变", async () => {
+  it("active generation 恢复会切换当前版本并让在途结果变旧", async () => {
     const room = fakeRoom(canvasWithNode("text", { taskStatus: "pending" }));
     const repository = new InMemoryNodeHistoryRepository();
     const service = new NodeHistoryApplicationService({ repository, resolveRoom: async () => room });
@@ -149,8 +149,9 @@ describe("节点生成历史集成验收（任务 5.1）", () => {
     });
     const before = room.canvas.revision;
     const outcome = await service.restore({ canvasId: CANVAS, nodeId: "node-1", entryId });
-    expect(outcome).toMatchObject({ ok: false, code: "conflict" });
-    expect(room.canvas.revision).toBe(before);
+    expect(outcome.ok).toBe(true);
+    expect(room.canvas.revision).toBeGreaterThan(before);
+    expect(room.canvas.nodeData["node-1"]).toMatchObject({ activeRunId: "", taskStatus: "successed" });
   });
 
   it("容量清理保留当前版本", async () => {

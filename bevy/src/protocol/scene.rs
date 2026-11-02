@@ -37,6 +37,12 @@ pub(crate) struct GraphNode {
     pub(crate) type_label: String,
     #[serde(default)]
     pub(crate) progress: f32,
+    /// 该运行开始的 Unix epoch 毫秒（change: 2026-10-31-unify-node-and-activity-progress）。
+    ///
+    /// 由运行状态投影从该 run 记录的 `createdAt` 派生，节点进度环据此按经过时间估算，因此与
+    /// 活动面板共用同一个起点。缺失时退回本渲染器内「首次进入运行态」的本地时钟。
+    #[serde(default, rename = "progressStartedAt")]
+    pub(crate) progress_started_at: Option<f64>,
     #[serde(default)]
     pub(crate) busy: bool,
     #[serde(default, rename = "mediaLoading")]
@@ -244,14 +250,15 @@ pub(crate) struct ShotCoverCamera {
 }
 
 impl ShotCoverCamera {
-    /// 有限输入、正距离与合法仰角；错误整体拒绝，不部分降级。
+    /// 有限输入、正距离与竖直半圆内的仰角；`±90°` 端点本身合法，实际姿态由派生层
+    /// 钳到 ±89° 以避免 look-at 奇点。错误整体拒绝，不部分降级。
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
         if ![self.azimuth, self.elevation, self.distance]
             .iter()
             .chain(self.focus_offset.iter())
             .all(|value| value.is_finite())
             || self.distance <= 0.0
-            || self.elevation.abs() >= std::f32::consts::FRAC_PI_2
+            || self.elevation.abs() > std::f32::consts::FRAC_PI_2
         {
             return Err("Invalid shot cover camera");
         }
@@ -319,6 +326,8 @@ pub(crate) struct HistoryStripDot {
     pub(crate) hovered: bool,
     #[serde(default)]
     pub(crate) pressed: bool,
+    #[serde(default)]
+    pub(crate) unseen: bool,
     #[serde(default)]
     pub(crate) presentation_id: Option<String>,
     #[serde(default)]
@@ -871,6 +880,12 @@ impl Scene {
             }
         }
         for node in &self.nodes {
+            if node
+                .progress_started_at
+                .is_some_and(|started| !started.is_finite() || started < 0.0)
+            {
+                return Err("Invalid node progress start");
+            }
             if node.resizable
                 && (self.selection.nodes.len() != 1 || self.selection.nodes[0] != node.id)
             {

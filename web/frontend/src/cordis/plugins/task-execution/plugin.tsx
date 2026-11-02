@@ -14,7 +14,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { lazy, Suspense, useSyncExternalStore, type ReactNode } from "react";
 import type { ExecutionLaunchFeedback } from "./execution-launch.js";
-import { resolveFilmSetClipHash, resolveFilmSetTargetClip } from "./film-set-target.js";
+import { resolveFilmSetTargetHash } from "./film-set-target.js";
 import { AuthoringGenerateHost } from "../../host.js";
 import { ExecutionPanelPending, ExecutionPanelSkeleton, ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
@@ -211,6 +211,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
               session={ctx.canvasSession}
               runClient={ctx.canvasRemote}
               writable={writable}
+              recordShotCommands={(commands, label) => ctx.canvasEdit.record(commands, label)}
               dialogs={ctx.dialogs}
               catalog={ctx.taskCatalog}
               registry={ctx.modelInteractions}
@@ -308,7 +309,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
                 const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
                 if (!nodeId || !target || !ctx.canvasSession.isWritable() || !canvas?.document.nodes.some((node) => node.id === nodeId)) return null;
                 if (target.mode === "canvas-group") return canvas.document.nodes.some(node => node.id === nodeId && node.type === "group") ? { ...target, action: "modify", prompt: "", expectedContentHash: undefined } : null;
-                const hash = target.mode === "film-set" ? resolveFilmSetClipHash(nodeId, target.clipId) : (canvas.nodeData[nodeId]?.modelContentVersion as { contentHash?: string } | undefined)?.contentHash;
+                const hash = target.mode === "film-set" ? resolveFilmSetTargetHash(nodeId, target.clipId) : (canvas.nodeData[nodeId]?.modelContentVersion as { contentHash?: string } | undefined)?.contentHash;
                 return { ...target, action: "modify", prompt: "", ...(hash ? { expectedContentHash: hash } : {}) };
               }}
               onContinueGroup={() => {
@@ -546,10 +547,9 @@ function buildModelRenderGenerate(
   const isFilmSet = resolveIsFilmSetNode(nodeId);
   const isGroup = resolvePanelNodeType(nodeId) === "group";
   const mode = isFilmSet ? "film-set" : isGroup ? "canvas-group" : "model3d";
-  // 片场面板无显式片段选择：解析默认片段并带上，否则后端不签发片段写权限（动作写入必带 clipId）。
-  const clipId = isFilmSet ? resolveFilmSetTargetClip(nodeId) : undefined;
-  const expectedContentHash = isFilmSet ? resolveFilmSetClipHash(nodeId) : isGroup ? resolveExpectedGroupAppearanceHash(nodeId) : resolveExpectedModelContentHash(nodeId);
-  const blockedReason = isFilmSet && !clipId ? "该片场节点还没有可写入的动画片段，请先创建动画片段。" : null;
+  // 片场场景 AI 固定整个片场目标：不冻结当前/默认镜头，否则整场写入（submit_film_set、
+  // 新增对象）会被宿主授权拒绝为 whole-film-set-not-allowed（change: 2026-10-31-redesign-film-set-workspace）。
+  const expectedContentHash = isFilmSet ? resolveFilmSetTargetHash(nodeId) : isGroup ? resolveExpectedGroupAppearanceHash(nodeId) : resolveExpectedModelContentHash(nodeId);
   // 文件模型以原始 GLB 为唯一权威内容：脚本/部件生成入口按来源禁用并说明原因
   // （change: 2026-10-28-support-glb-model-nodes，spec「文件模型仅提供可用操作」）。
   const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
@@ -560,10 +560,9 @@ function buildModelRenderGenerate(
       canvasId={resolveCanvasId()}
       nodeId={nodeId}
       mode={mode}
-      writable={writable && blockedReason === null && !fileModel}
-      disabledReason={fileModelReason ?? (!writable ? "当前会话不可写，无法直接生成。" : blockedReason)}
+      writable={writable && !fileModel}
+      disabledReason={fileModelReason ?? (!writable ? "当前会话不可写，无法直接生成。" : null)}
       {...(expectedContentHash ? { expectedContentHash } : {})}
-      clipId={clipId ?? null}
       onAuthorize={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: {} })}
     />
   );

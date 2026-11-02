@@ -18,11 +18,13 @@ import type {
 export type BevyModule = {
   default: (input?: unknown) => Promise<unknown>;
   start: () => void;
+  poll_texture_receipts?: () => string;
   runtime_health?: () => string;
   benchmark_frames?: (enabled?: boolean) => string;
   benchmark_media?: (enabled?: boolean) => string;
   seed_runtime_generation?: (previous: number) => void;
   set_scene: (json: string) => number;
+  set_resource_states?: (json: string) => number;
   set_texture: (id: string, width: number, height: number, rgba: Uint8Array, content?: string) => void;
   set_image_focus_details?: (manifest:string,pixels:Uint8Array)=>void;
   /** 上传片场媒体平面纹理（键为全局唯一 planeId；change: 2026-10-08-make-film-set-model-only）。 */
@@ -198,7 +200,7 @@ export type QueryResult<T> =
 export type BevyRuntime = {
   overviewCacheSnapshot?(): string;
   overviewCacheCommand?(json: string): void;
-  /** 开发面板读取的累计帧计数；render 完成表示调度完成，不表示 GPU 呈现确认。 */
+  /** 性能读数读取的累计帧计数；render 完成表示调度完成，不表示 GPU 呈现确认。开发构建与桌面壳提供。 */
   getFrameCounters?(): {
     generation: number;
     renders: number;
@@ -278,12 +280,15 @@ export type BevyRuntime = {
    * 缺省（旧 fake / 旧 WASM）时调度器回退完整 `setScene`。
    */
   setObserver?(input: Omit<CanvasObserverUpdate, "version">): number;
+  setResourceStates?(input: Omit<import("@woohaa3/contracts").CanvasResourceStateUpdate, "version">): number;
   setPositions?(input: Omit<CanvasPositionUpdate, "version">): number;
   /** 上传/更新一张 RGBA 纹理。 */
-  setTexture(id: string, width: number, height: number, rgba: Uint8Array, source?: import("./texture-upload-boundary.js").TextureUploadSource): boolean | void;
+  flushTextureReceipts?(): void;
+  textureApplied?(id: string, width: number, height: number, content: string, plane?: boolean): boolean;
+  setTexture(id: string, width: number, height: number, rgba: import("@woohaa3/contracts").ImagePixelSource, source?: import("./texture-upload-boundary.js").TextureUploadSource): boolean | void;
   setImageFocusDetails?(frame:import("./focus-details.js").ImageFocusDetails|null):void;
   /** 上传片场媒体平面纹理（键为全局唯一 planeId；change: 2026-10-08-make-film-set-model-only）。 */
-  setModelMediaTexture(id: string, width: number, height: number, rgba: Uint8Array, source?: import("./texture-upload-boundary.js").TextureUploadSource): boolean | void;
+  setModelMediaTexture(id: string, width: number, height: number, rgba: import("@woohaa3/contracts").ImagePixelSource, source?: import("./texture-upload-boundary.js").TextureUploadSource): boolean | void;
   /**
    * 注册/复用一份不可变模型资源；同 generation 内相同 resourceKey 只上传一次
    * （change: optimize-model-scene-snapshot-hot-path）。
