@@ -1,0 +1,303 @@
+/*
+ * 资源栏「图片」面板。颜色只取 `--app-web-*` token，跟随宿主主题；
+ * 尺寸与圆角对齐资源栏条目（8px 圆角、14px 字号）。
+ */
+
+.canvas-image-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	width: var(--rail-panel-width, 300px);
+	min-width: 0;
+	height: 100%;
+	padding: 14px 12px 8px;
+	border-left: 1px solid var(--app-web-border);
+	color: var(--app-web-text-primary);
+	font-size: 14px;
+	overflow: hidden;
+}
+
+/* 顶部两枚切换：选中为反色实底，与四喜的 Pill 一致 */
+.canvas-image-panel__tabs {
+	display: flex;
+	gap: 8px;
+	flex-shrink: 0;
+}
+
+.canvas-image-panel__tab {
+	flex: 1;
+	min-width: 0;
+	height: 34px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--app-web-text-muted);
+	font: inherit;
+	font-size: 14px;
+	font-weight: 500;
+	white-space: nowrap;
+	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.canvas-image-panel__tab:hover {
+	background: color-mix(in srgb, var(--app-web-text-primary) 6%, transparent);
+	color: var(--app-web-text-primary);
+}
+
+.canvas-image-panel__tab.is-active {
+	background: var(--app-web-text-primary);
+	color: var(--app-web-panel);
+}
+
+.canvas-image-panel__search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+	height: 36px;
+	padding: 0 12px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 999px;
+	background: var(--app-web-subtle);
+	color: var(--app-web-text-muted);
+}
+
+.canvas-image-panel__search:focus-within {
+	border-color: color-mix(in srgb, var(--app-web-text-primary) 40%, transparent);
+}
+
+.canvas-image-panel__search input {
+	flex: 1;
+	min-width: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: var(--app-web-text-primary);
+	font: inherit;
+	font-size: 14px;
+}
+
+.canvas-image-panel__search button {
+	display: inline-flex;
+	padding: 2px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+}
+
+.canvas-image-panel__chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	flex-shrink: 0;
+}
+
+.canvas-image-panel__chip {
+	height: 30px;
+	padding: 0 12px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--app-web-text-primary);
+	font: inherit;
+	font-size: 13px;
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+
+.canvas-image-panel__chip:hover {
+	background: color-mix(in srgb, var(--app-web-text-primary) 6%, transparent);
+}
+
+.canvas-image-panel__chip.is-active {
+	border-color: var(--app-web-text-primary);
+	background: color-mix(in srgb, var(--app-web-text-primary) 10%, transparent);
+	font-weight: 500;
+}
+
+.canvas-image-panel__scroll {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	/* 滚动条不挤占网格宽度 */
+	scrollbar-gutter: stable;
+}
+
+.canvas-image-panel__group + .canvas-image-panel__group {
+	margin-top: 16px;
+}
+
+.canvas-image-panel__heading {
+	margin: 0 0 8px;
+	color: var(--app-web-text-muted);
+	font-size: 13px;
+	font-weight: 500;
+}
+
+.canvas-image-panel__grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.canvas-image-panel__tile {
+	position: relative;
+	aspect-ratio: 1 / 1;
+	border: 1px solid var(--app-web-border);
+	border-radius: 8px;
+	background: var(--app-web-subtle);
+	overflow: hidden;
+}
+
+.canvas-image-panel__tile img {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.canvas-image-panel__empty,
+.canvas-image-panel__end {
+	margin: 24px 0 8px;
+	color: var(--app-web-text-muted);
+	font-size: 13px;
+	text-align: center;
+}
+
+.canvas-image-panel__scope {
+	margin: 0;
+	flex-shrink: 0;
+	color: var(--app-web-text-muted);
+	font-size: 12px;
+	text-align: center;
+}
+
+/* ───────── 图块悬浮动作（收藏 / 添加到画布） ─────────
+ * 照参考稿：图片右上角浮出两枚圆形按钮。悬停或键盘聚焦时出现；
+ * 触屏没有悬停态，`.is-active`（已收藏）始终显示，其余靠点击后的状态反馈。 */
+
+.canvas-image-panel__actions {
+	position: absolute;
+	top: 6px;
+	right: 6px;
+	display: flex;
+	gap: 4px;
+	opacity: 0;
+	transition: opacity 0.15s ease;
+}
+
+.canvas-image-panel__tile:hover .canvas-image-panel__actions,
+.canvas-image-panel__tile:focus-within .canvas-image-panel__actions,
+.canvas-image-panel__actions:has(.is-active) {
+	opacity: 1;
+}
+
+.canvas-image-panel__action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	border: 0;
+	border-radius: 999px;
+	/* 叠在图片上：用半透明深底 + 白图标，亮暗主题下都看得清 */
+	background: rgba(0, 0, 0, 0.55);
+	color: #fff;
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+
+.canvas-image-panel__action:hover {
+	background: rgba(0, 0, 0, 0.75);
+}
+
+.canvas-image-panel__action.is-active {
+	color: #f5c542;
+}
+
+.canvas-image-panel__failure {
+	margin: 0 0 4px;
+	flex-shrink: 0;
+	color: var(--app-web-danger, #d4380d);
+	font-size: 12px;
+	text-align: center;
+}
+
+/* ───────── 画布下拉（跨画布图库） ───────── */
+
+.canvas-image-panel__canvas {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+	height: 34px;
+	padding: 0 10px 0 12px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 8px;
+	background: var(--app-web-subtle);
+	color: var(--app-web-text-primary);
+	font-size: 13px;
+}
+
+.canvas-image-panel__canvas-label {
+	flex-shrink: 0;
+	color: var(--app-web-text-muted);
+}
+
+.canvas-image-panel__canvas select {
+	flex: 1;
+	min-width: 0;
+	appearance: none;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	/* 原生下拉表的可读性：用浏览器主题色，不跟深色面板走 */
+	color-scheme: light dark;
+}
+
+.canvas-image-panel__canvas svg {
+	flex-shrink: 0;
+	pointer-events: none;
+	color: var(--app-web-text-muted);
+}
+
+/* 缩略图还没生成时的占位：与卡片底色一致，避免网格在加载中跳动 */
+.canvas-image-panel__skeleton {
+	display: block;
+	width: 100%;
+	height: 100%;
+	background: linear-gradient(
+		100deg,
+		var(--app-web-subtle) 30%,
+		color-mix(in srgb, var(--app-web-text-primary) 6%, transparent) 50%,
+		var(--app-web-subtle) 70%
+	);
+	background-size: 200% 100%;
+	animation: canvas-image-panel-shimmer 1.2s linear infinite;
+}
+
+@keyframes canvas-image-panel-shimmer {
+	from {
+		background-position: 150% 0;
+	}
+	to {
+		background-position: -50% 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.canvas-image-panel__skeleton {
+		animation: none;
+	}
+}

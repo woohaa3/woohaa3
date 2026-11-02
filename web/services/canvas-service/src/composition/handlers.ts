@@ -65,6 +65,11 @@ export type ComposedHandlerDeps = {
    * 再删本机；不注入时删除只作用于本机（纯本地部署）。
    */
   deleteRemote?: (canvasId: string) => Promise<import("@woohaa3/contracts").CanvasUpstreamDeleteResult>;
+  /**
+   * 跨画布图片列表（`GET /api/canvases/images`）。由 composition 用目录 + published projection 组合。
+   * 缺省时该路由回 503。
+   */
+  imageIndex?: import("../api/canvas-api/image-index.js").CanvasImageIndexPort;
   /** 在线迁移 prepare/status/来源目录路由（change: 2026-10-12-add-extension-online-canvas-migration）。 */
   preparationHandler?: ((req: IncomingMessage, res: ServerResponse) => Promise<boolean>) | null;
   /** 在线迁移访问门（GET/WS 未准备、DELETE tombstone）。 */
@@ -109,6 +114,7 @@ export function composeRequestHandler(deps: ComposedHandlerDeps): (req: Incoming
           get recording() { return deps.recording; },
           service: composition.service,
           ...(composition.catalog ? { catalog: composition.catalog } : {}),
+          ...(deps.imageIndex ? { imageIndex: deps.imageIndex } : {}),
           ...(deps.importGuard ? { importGuard: deps.importGuard } : {}),
           runService: deps.runService ?? undefined,
           filmSetImport: {

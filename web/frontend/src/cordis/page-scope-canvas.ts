@@ -201,6 +201,7 @@ export function createCanvasPageScopeStarter(
         "canvasSession",
         "canvasScope",
         "canvasState",
+        "imageLibrary",
         "inputScopes",
         "taskCatalog",
         "selection",

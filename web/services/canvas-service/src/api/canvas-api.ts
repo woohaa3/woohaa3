@@ -27,7 +27,7 @@ import {
   type CanvasRequestHandlerOptions
 } from "./canvas-api/types.js";
 import { checkServiceToken, decodeSegment, isLoopbackRequest, respondError, sendError, sendJson } from "./canvas-api/http-codec.js";
-import { handleCreate, handleDelete, handleGet, handleHealth, handleList, loadCanvasListPage } from "./canvas-api/lifecycle-routes.js";
+import { handleCreate, handleDelete, handleGet, handleHealth, handleImageList, handleList, loadCanvasListPage } from "./canvas-api/lifecycle-routes.js";
 import { handleArchiveExport, handleArchiveImport } from "./canvas-api/archive-routes.js";
 import { handleCancel, handleFilmSetConversionCancel, handleFilmSetConversionModels, handleFilmSetConversionRetry, handleFilmSetConversionStatus, handleFilmSetConversionSubmit, handleFilmSetImport, handleRun } from "./canvas-api/run-routes.js";
 import {
@@ -144,6 +144,15 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
        */
       if (segments.length === 1 && segments[0] === "archive" && req.method === "POST") {
         return await handleArchiveImport(req, res, options, log);
+      }
+      /*
+       * 跨画布图片列表：`GET /api/canvases/images?offset=&limit=`。
+       *
+       * **排在单段分支之前**：否则 `images` 会被当成一个 canvasId 去查，返回 404。
+       * 只读、不依赖 room；权限沿用画布列表的口径（目录里能看到什么就能列出什么）。
+       */
+      if (segments.length === 1 && segments[0] === "images" && req.method === "GET") {
+        return await handleImageList(req, res, options, log);
       }
 
       if (segments.length === 1) {

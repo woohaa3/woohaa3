@@ -11,7 +11,7 @@ import { CanvasRenderWarnings } from "./canvas-render-warnings.js";
 import { FocusRunStrip } from "./focus-run-strip.js";
 import { Button } from "@woohaa3/ui/primitives";
 import { mountBevyCanvas, unmountBevyCanvas } from "./bevy-canvas-element.js";
-import { useService } from "../../react.js";
+import { useOptionalService, useService } from "../../react.js";
 import { useSyncStatusView } from "../../use-sync-status.js";
 import {
   CanvasFocusNodeHistoryHost,
@@ -33,6 +33,9 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
   const canvasSession = useService("canvasSession");
   const canvasNavigation = useService("canvasNavigation");
   const canvasState = useService("canvasState");
+  // 资源栏「图片」面板的数据源：当前画布的图片（见 image-library.ts）。
+  // 可选读取：没有它（如不带完整服务的测试宿主）时「图片」条目退化为只有选中态。
+  const imageSource = useOptionalService("imageLibrary");
   // 目录只读一次当前画布的 `sync`：它区分「属于远端且链路在」（synced）与
   // 「属于远端但本机没有上游链路」（unlinked，见 CanvasSyncState）。右下角气泡需要后者，
   // 否则宿主→远端整条断掉时气泡仍显示「已同步」。
@@ -170,7 +173,7 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
       <div className="bevy-canvas-curtain" aria-hidden="true" data-testid="bevy-canvas-curtain" />
       <SceneExperienceBar key={canvasId} canvasId={canvasId} surfaceRef={surfaceRef} ready={ready} hidden={focused} />
       {/* 左侧资源轨：概览态才有位置，聚焦 / 文档工作区里由各自的工作区界面接管 */}
-      <CanvasAssetRail hidden={focused} />
+      <CanvasAssetRail hidden={focused} imageSource={imageSource} currentCanvasId={canvasId} />
       <CanvasTopBarHost {...slotProps} overview={presentation.mode.type === "overview"} />
       {diagnostic && ready ? <aside className="canvas-render-warnings" role="alert" aria-label="工作区提示">{diagnostic}</aside> : null}
 

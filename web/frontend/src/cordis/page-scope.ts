@@ -385,6 +385,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
         "canvasSession",
         "canvasScope",
         "canvasState",
+        "imageLibrary",
         "inputScopes",
         "taskCatalog",
         "selection",

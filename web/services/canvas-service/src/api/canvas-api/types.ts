@@ -94,6 +94,11 @@ export type CanvasImportGuard = {
 export type CanvasRequestHandlerOptions = {
   service: CanvasApplicationService;
   catalog?: CanvasCatalogService;
+  /**
+   * 跨画布图片列表（`GET /api/canvases/images`，图库「全部画布」用）。
+   * 缺省时该路由回 503 —— 独立部署没有 Yjs 投影，本来就列不出来。
+   */
+  imageIndex?: import("./image-index.js").CanvasImageIndexPort;
   serviceToken?: string;
   basePath?: string;
   healthBasePath?: string;

@@ -156,6 +156,8 @@ export * from "./upload-asset.js";
 export type { InteractionController, InteractionControllerOptions } from "../cordis/plugins/canvas-shell/interaction-types.js";
 export type { CanvasEditService } from "../cordis/services/canvas-state/store/canvas-edit-service.js";
 export type { RunStateService } from "../cordis/plugins/service-keys.js";
+// 图片库：宿主在画布页作用域提供 `imageLibrary`，扩展（如四喜的资源页）只拿类型，运行时走 `ctx.get`。
+export type { ImageLibraryItem, ImageLibrarySource, ImageOrigin } from "../cordis/plugins/canvas-shell/image-library.js";
 
 export { AgentAssistantSettingsLink, openAgentAssistant } from "./agent-assistant.js";
 export * from "./assistant-execution.js";

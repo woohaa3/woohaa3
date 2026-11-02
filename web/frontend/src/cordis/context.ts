@@ -76,6 +76,11 @@ declare module "@deepseek-ai/cordis" {
     mediaContent: import("../extension-api/media-content.js").MediaContentService;
     compositeAssets: import("../extension-api/composite-assets.js").CompositeAssetRegistry;
     canvasState: import("./contract/platform.js").CanvasStoreFacade;
+    /**
+     * 当前画布的图片库（资源栏「图片」面板与扩展的资源页共用同一份数据）。
+     * 只在 Canvas page scope 提供；范围目前只有正在打开的这张画布，见 `image-library.ts`。
+     */
+    imageLibrary: import("./plugins/canvas-shell/image-library.js").ImageLibrarySource;
     dialogs: DialogsService;
     slots: SlotsService;
     /** 扩展渲染故障与会话内熔断（App scope；change: 2026-10-21-harden-extension-fault-isolation）。 */

@@ -241,3 +241,31 @@
 	left: calc(64px + 16px);
 	max-width: calc(100vw - 64px - 32px);
 }
+
+/* ───────── 图片面板（只有选中「图片」条目时才渲染） ─────────
+ * 面板是栏的同级元素，紧贴栏右缘、同样通高。宽度 300 由 `--rail-panel-width` 决定
+ * （面板组件自己也读它），画布让位按「栏宽 + 面板宽」算。
+ * 收起栏时面板不渲染（见 `canvas-asset-rail.tsx`），所以这里只有展开态一档。 */
+
+.canvas-asset-rail__panel {
+	--rail-panel-width: 300px;
+
+	position: absolute;
+	/* 与栏同层：必须低于 `.canvas-topbar`（44），道理见上面 `.canvas-asset-rail` 的 z-index 注释 */
+	z-index: 20;
+	left: 248px;
+	top: 0;
+	bottom: 0;
+	width: var(--rail-panel-width);
+	background: var(--app-web-panel);
+}
+
+.app:has(> .canvas-asset-rail.has-panel) > .bevy-canvas-surface,
+.app:has(> .canvas-asset-rail.has-panel) > .bevy-canvas-curtain {
+	left: calc(248px + 300px);
+}
+
+.app:has(> .canvas-asset-rail.has-panel) > .canvas-topbar {
+	left: calc(248px + 300px + 16px);
+	max-width: calc(100vw - 248px - 300px - 32px);
+}

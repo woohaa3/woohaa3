@@ -19,9 +19,11 @@ import { resolvePublicUrl } from '@woohaa3/frontend/extension-api';
 import type {
   CanvasCatalogService,
   CanvasNavigationService,
+  ImageLibrarySource,
   ThemeService,
 } from '@woohaa3/frontend/extension-api';
 import { SixiProviders, SixiRoutes } from '@/app/App';
+import { setAssetSource } from '@/api/assetSource';
 import { setProjectSource } from '@/api/projectSource';
 import { setHostCanvas } from '@/app/hostCanvas';
 import { CanvasTopBar } from '@/layouts/CanvasTopBar';
@@ -29,6 +31,7 @@ import { ROUTES } from '@/app/paths';
 import { useUiStore } from '@/stores/uiStore';
 import { HOST_PRESET_ID, modeOfHostPreset, sixiHostPreset } from './hostTheme';
 import { createHostProjectSource } from './hostProjectSource';
+import { createHostAssetSource } from './hostAssetSource';
 import { createHostCanvasBridge } from './hostCanvasBridge';
 
 /**
@@ -217,6 +220,7 @@ export function SixiShell({
   canvasCatalog,
   canvasNavigation,
   currentCanvasId,
+  imageLibrary,
 }: {
   theme: ThemeService;
   /** 宿主画布目录；四喜的「项目」就是它（见 app/hostProjectSource.ts）。 */
@@ -225,6 +229,8 @@ export function SixiShell({
   canvasNavigation?: CanvasNavigationService;
   /** 当前打开的画布 id；点的就是它时不必切 scope，直接进画布态。 */
   currentCanvasId: () => string | null;
+  /** 宿主的图片库（与资源栏「图片」面板同源）；四喜的「资源」页读它（见 app/hostAssetSource.ts）。 */
+  imageLibrary?: ImageLibrarySource;
 }) {
   // 只在首次渲染读一次；pending 清除放在 effect 里，避免渲染期副作用。
   // 优先 pendingEntry（整页跳转场景），其次 currentRoute（node-focus 卸载后 remount 场景），
@@ -240,6 +246,8 @@ export function SixiShell({
       <MemoryRouter initialEntries={[initialEntry]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         {/* 放在 Router 里：打开当前画布时要用四喜自己的 navigate 切到画布态 */}
         <HostProjectSource catalog={canvasCatalog} currentCanvasId={currentCanvasId} />
+        {/* 资源页的数据就是宿主侧栏「图片」面板那份 */}
+        <HostAssetSourceRef library={imageLibrary} currentCanvasId={currentCanvasId} />
         {/* 画布态顶栏要读宿主画布名、唤起宿主切换器（见 app/hostCanvasBridge.ts） */}
         <HostCanvasBridgeRef catalog={canvasCatalog} navigation={canvasNavigation} currentCanvasId={currentCanvasId} />
         <HostCanvasCurtain />
@@ -291,6 +299,27 @@ function HostProjectSource({
     const reset = setProjectSource(createHostProjectSource(catalog, open));
     return reset;
   }, [catalog, currentCanvasId, navigate]);
+  return null;
+}
+
+/**
+ * 把宿主的图片库接成四喜「资源」页的数据源。
+ *
+ * 与 `HostProjectSource` 同一套生命周期：effect 里设置、卸载时复位。
+ * 拿不到图片库（宿主版本没有、或不在画布页作用域）时不设置，资源页退回请求层的 mock ——
+ * 宁可显示示例数据，也不要显示一个永远为空、又不说明原因的列表。
+ */
+function HostAssetSourceRef({
+  library,
+  currentCanvasId
+}: {
+  library?: ImageLibrarySource;
+  currentCanvasId: () => string | null;
+}) {
+  useEffect(() => {
+    if (!library) return;
+    return setAssetSource(createHostAssetSource(library, currentCanvasId()));
+  }, [library, currentCanvasId]);
   return null;
 }
 

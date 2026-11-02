@@ -115,6 +115,80 @@ export async function loadCanvasListPage(
     : await options.service.listCanvases(query);
 }
 
+/**
+ * 跨画布图片列表：`GET /api/canvases/images?offset=&limit=`。
+ *
+ * 权限口径与画布列表一致：能列出这张画布，就能看到它的图。
+ * 未注入 `imageIndex`（独立存储部署、没有 Yjs 投影）时回 503，不假装空列表 ——
+ * 「一张都没有」和「这项能力没开」在界面上必须能区分开。
+ */
+export async function handleImageList(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: CanvasRequestHandlerOptions,
+  log: CanvasLogger
+): Promise<boolean> {
+  const index = options.imageIndex;
+  if (!index) {
+    sendError(res, 503, "NOT_READY", "跨画布图片列表未启用");
+    return true;
+  }
+  /*
+   * 权限口径**必须和画布列表一致**：注入 `authenticate` 的部署里，能看到哪些画布
+   * 就只该列出那些画布的图片。这条路由跨画布读所有投影，不走这层等于绕开资源授权
+   * （当时只写了「沿用列表口径」，实现却漏了 —— 评审抓到的）。
+   */
+  let allowedIds: readonly string[] | null = null;
+  if (options.authenticate) {
+    let principal: import("@woohaa3/contracts").PrincipalContext | null;
+    try {
+      principal = await options.authenticate(req, "http");
+    } catch {
+      sendError(res, 503, "NOT_READY", "画布认证提供者不可用");
+      return true;
+    }
+    if (!principal) {
+      sendError(res, 401, "UNAUTHORIZED", "未认证");
+      return true;
+    }
+    if (options.discoverableCanvasIds) {
+      try {
+        allowedIds = await options.discoverableCanvasIds(principal);
+      } catch {
+        log?.({ event: "canvas-image-list-access-provider-failed", status: 503 });
+        sendError(res, 503, "REPOSITORY_FAILURE", "画布授权提供者不可用");
+        return true;
+      }
+      // 空数组即 fail closed；null 交给索引按逐项判定（索引不注入 access 时不放行）
+      if (allowedIds && allowedIds.length === 0) {
+        sendJson(res, 200, { items: [], total: 0, offset: 0, limit: 0, truncated: false });
+        return true;
+      }
+    } else if (options.access) {
+      // 没有可发现集合：退化成「只给能读的画布」，与 handleList 的逐项判定同义。
+      // 这里拿不到全部 id，交给索引逐项判定（见 CanvasImageIndexDeps.isCanvasAllowed）。
+      allowedIds = null;
+    }
+  }
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const offset = Math.max(0, readInt(url.searchParams.get("offset")) ?? 0);
+  const limit = Math.min(500, Math.max(1, readInt(url.searchParams.get("limit")) ?? 200));
+  try {
+    const page = await index.list({
+      offset,
+      limit,
+      ...(allowedIds ? { canvasIds: allowedIds } : {})
+    });
+    sendJson(res, 200, page);
+    log?.({ event: "canvas-image-list", status: 200 });
+    return true;
+  } catch (error) {
+    log?.({ event: "canvas-image-list-failed", status: 500 });
+    sendError(res, 500, "REPOSITORY_FAILURE", error instanceof Error ? error.message : "读取图片列表失败");
+    return true;
+  }
+}
+
 export async function handleCreate(
   req: IncomingMessage,
   res: ServerResponse,

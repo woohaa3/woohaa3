@@ -11,6 +11,7 @@ import type {
   CanvasCatalogService,
   CanvasNavigationService,
   CanvasScopeService,
+  ImageLibrarySource,
   SlotsService,
   ThemeService
 } from "@woohaa3/frontend/extension-api";
@@ -74,6 +75,10 @@ export function sixiSpikeExtension(): Plugin.Function<void> {
                * 但外壳照常显示 —— 宁可少一个按钮，不能让整个四喜消失。
                */
               canvasNavigation={safeCanvasNavigation(ctx)}
+              /*
+               * 图片库同样是画布页作用域服务，必须非严格读（拿不到就 undefined，资源页退回 mock）。
+               */
+              imageLibrary={safeGet<ImageLibrarySource>(ctx, "imageLibrary")}
               currentCanvasId={() =>
                 (ctx.get("canvasScope" as never) as CanvasScopeService | undefined)?.canvasId() ?? null
               }

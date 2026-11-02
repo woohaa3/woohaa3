@@ -4,17 +4,20 @@
  * 一条通高的侧边栏，贴住窗口左缘，条目为「图标在左、文字在右」的横向排列，
  * 尺寸与排版对齐四喜侧栏（`src/layouts/Sidebar.tsx`）。
  *
- * **第一版只做壳与交互**（与产品侧确认过）：
- * - 各项只表达选中态，点开不展示内容。数据源都还没有：产品库 = 嵌 Furnipedia 官网、
- *   素材库仍是占位、Drive / Pinterest 没有授权通路；「图层」要等画布节点目录定稿
+ * **只有「图片」条目有内容面板**（照参考稿：所有图片 / 收藏、搜索、按来源分组的网格）：
+ * - 其余各项仍只表达选中态，点开不展示内容。数据源都还没有：产品库 = 嵌 Furnipedia 官网、
+ *   Drive / Pinterest 没有授权通路；「图层」要等画布节点目录定稿
  *   （见四喜仓库 CLAUDE.md「技能是画布的模板」一条：`steps[].node` 引用的目录未定稿，不要编造 id）。
- * - 因此**不要在这里补「内容面板」**：参考稿没有那一栏，各项内容将来各自决定，
- *   不该在这一层先定死一种形状。
+ * - **不要给其它条目顺手补面板**：它们的内容各自决定，不该在这一层先定死一种形状。
+ *   图片面板之所以有，是因为参考稿里明确画了它、数据（`canvas.assets`）也现成。
+ * - 面板的数据由 `imageSource` 注入（见 `image-library.ts`）；不传则「图片」条目退化为只有选中态。
  *
- * 它占住画布左缘，画布表面随之让出栏宽（见 CSS 末尾的 `:has()` 规则）。
+ * 它占住画布左缘，画布表面随之让出栏宽（含面板，见 CSS 末尾的 `:has()` 规则）。
  */
 import { useState } from "react";
 import type { ComponentType } from "react";
+import { CanvasImagePanel } from "./canvas-image-panel.js";
+import type { ImageLibrarySource } from "./image-library.js";
 import {
   CubeSolidIcon,
   FolderPlusSolidIcon,
@@ -53,23 +56,37 @@ const ENTRIES: readonly RailEntry[] = [
   { id: "pinterest", label: "Pinterest", icon: PinterestSolidIcon, soon: true }
 ];
 
-export function CanvasAssetRail({ hidden = false }: { hidden?: boolean }) {
+export function CanvasAssetRail({
+  hidden = false,
+  imageSource,
+  currentCanvasId
+}: {
+  hidden?: boolean;
+  /** 图片面板的数据源；不传则「图片」条目没有面板。 */
+  imageSource?: ImageLibrarySource;
+  /** 当前画布 id；面板的「画布」下拉靠它把当前画布标出来。 */
+  currentCanvasId?: string;
+}) {
   const [collapsed, setCollapsed] = useState(false);
   // 同一时刻只有一个条目处于选中态；再点一次取消选中
   const [active, setActive] = useState<string | null>("layers");
 
   if (hidden) return null;
 
+  // 收起栏时面板一起收起：64px 的窄栏旁边挂一块 300px 的面板没有意义
+  const showImagePanel = Boolean(imageSource) && active === "images" && !collapsed;
+
   return (
-    /*
-     * 一条通高的侧边栏，贴住窗口左缘，只有图标列 —— 与参考稿一致。
-     *
-     * **不要加第二栏内容面板**：参考稿里没有，而且这是照抄的稿子，
-     * 加一栏"更合理"的列表会变成另一个设计。选中项目前只表达选中态，
-     * 各项的内容将来各自决定（图层 = 节点列表、产品 = 产品库…），
-     * 不该在这一层先定死一种形状。
-     */
-    <div className={`canvas-asset-rail${collapsed ? " is-collapsed" : ""}`} data-testid="canvas-asset-rail">
+    <>
+    {/*
+     * 一条通高的侧边栏，贴住窗口左缘 —— 与参考稿一致。
+     * 面板（只有「图片」有）是它的**同级**元素而不是子元素：两者都是 `.app` 的直接子节点，
+     * 画布让位的 `:has(> .canvas-asset-rail)` 规则因此不用改写，只需要多一档 `.has-panel`。
+     */}
+    <div
+      className={`canvas-asset-rail${collapsed ? " is-collapsed" : ""}${showImagePanel ? " has-panel" : ""}`}
+      data-testid="canvas-asset-rail"
+    >
         <div className="canvas-asset-rail__head">
           {/*
             照参考稿：一个圆角方块，里面是侧栏图标（矩形 + 左侧竖线）。
@@ -117,5 +134,11 @@ export function CanvasAssetRail({ hidden = false }: { hidden?: boolean }) {
           })}
         </nav>
       </div>
+    {showImagePanel && imageSource ? (
+      <div className="canvas-asset-rail__panel" data-testid="canvas-asset-rail-panel">
+        <CanvasImagePanel source={imageSource} currentCanvasId={currentCanvasId} />
+      </div>
+    ) : null}
+    </>
   );
 }

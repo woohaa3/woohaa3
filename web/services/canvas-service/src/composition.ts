@@ -15,6 +15,7 @@ import type { IncomingMessage } from "node:http";
  * （proposal BREAKING / design D2）。首版保持单实例 writer lock。
  */
 import { CanvasTaskProjector, InMemoryProjectionReceiptStore, createPublishedReader, type YjsDocumentRepository, type CanvasWriterLock } from "./sync/index.js";
+import { createCanvasImageIndex } from "./api/canvas-api/image-index.js";
 import { createSyncUpgradeHandler, type SyncUpgradeHandler } from "./sync/upgrade.js";
 import { createSyncUpstream, resolveUpstreamConfig, syncStateOf, type SyncUpstream } from "./sync/upstream/relay-upstream.js";
 import type { SyncUpstreamCredentialSource } from "./sync/upstream/relay-upstream.js";
@@ -803,6 +804,29 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       })
     : undefined;
 
+  /*
+   * 跨画布图片列表：目录列 id → published projection 抽图片。
+   *
+   * 用 `publishedReaderRef` 而不是 `composition.service.getCanvas`：后者读结构化仓库，
+   * 本地画布的资产根本不在那（Yjs 才是权威）。没有投影读取器的部署不提供这个组合，
+   * 路由会回 503，而不是给一份永远为空的列表。
+   */
+  const imageIndex = publishedReaderRef
+    ? createCanvasImageIndex({
+        listCanvases: async ({ offset, limit }) => {
+          const page = composition
+            ? composition.catalog
+              ? await composition.catalog.listCanvases({ offset, limit })
+              : await composition.service.listCanvases({ offset, limit })
+            : { items: [], total: 0 };
+          return {
+            items: page.items.map((item) => ({ id: item.id, title: item.title })),
+            total: page.total
+          };
+        },
+        loadPublished: (canvasId) => publishedReaderRef!.loadPublished(canvasId)
+      })
+    : undefined;
   const composedHandler = composeRequestHandler({
     prepareCompositeHistory: async ({ canvasId, nodeId, payload }) => {
       if (payload.animation?.schemaVersion !== 3 && payload.animation?.schemaVersion !== 4) throw new Error("历史复合资产定义非法");
@@ -863,6 +887,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     ...(archiveDeps ? { archive: archiveDeps } : {}),
     // 归档包的媒体读写经 Media Service 内部通道，不用 verifier（它拒绝 get/put）。
     ...(archiveMediaStorage ? { archiveMedia: archiveMediaStorage } : {}),
+    ...(imageIndex ? { imageIndex } : {}),
     log
   });
 
