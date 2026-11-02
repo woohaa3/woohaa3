@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, parseCanvasAggregate } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { CanvasRoom } from "../services/canvas-service/src/sync/room.js";
 import { SqliteYjsRepository } from "../services/canvas-service/src/storage/sqlite/yjs.js";
@@ -13,6 +13,37 @@ import { InMemoryCanvasRepository } from "../services/canvas-service/src/storage
 import { createInMemoryWriterLock } from "../services/canvas-service/src/sync/index.js";
 
 describe("SQLite room spatial gate", () => {
+  it("rejects replacement of an occupied canonical camera atomically", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "spatial-camera-"));
+    const file = join(dir, "canvas.sqlite");
+    const db = new (loadNodeSqlite().DatabaseSync)(file);
+    const leases = new SqliteSpatialLeaseStore(db, { eligible: () => true, stopped: () => true });
+    const repository = new SqliteYjsRepository({ path: file });
+    const now = "2026-01-01T00:00:00Z";
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas", now);
+    const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "camera-id", settingsVersion: "1", position: { u: 0, v: 0, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: null };
+    canvas.document.nodes.push({ id: "camera", type: "world-camera", position: { x: 0, y: 0 } });
+    canvas.nodeData.camera = { worldCamera: camera };
+    expect(parseCanvasAggregate(canvas, { now }).ok).toBe(true);
+    let published = 0;
+    try {
+      const room = new CanvasRoom({ canvasId: canvas.id, repository, broadcast: () => { published++; } });
+      await room.initialize({ canvas, roomEpoch: "e", createdAt: now });
+      leases.acquire({ canvasId: canvas.id, requestId: "r", runId: "run", epoch: 1, executionId: "exec", scope: { scope: { kind: "scene-area", areaId: "a" }, scopeVersion: "s" }, writable: [{ kind: "camera", cameraId: "camera-id", version: "v" }], readOnly: [] });
+      const result = await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: canvas.id, commandId: "replace-camera", actorId: "manual", baseRevision: 0, commands: [
+        { type: "node.remove", nodeIds: ["camera"] },
+        { type: "node.add", node: { id: "replacement", type: "world-camera", position: { x: 0, y: 0 } }, nodeData: { worldCamera: camera } },
+      ] } as never);
+      expect(result).toMatchObject({ ok: false, code: "lease-conflict", conflict: { target: { kind: "camera", cameraId: "camera-id" } } });
+      expect(await repository.getCommandRecord(canvas.id, "replace-camera")).toBeNull();
+      const projection = (await repository.loadYjsState(canvas.id))!.projection!;
+      expect(projection.revision).toBe(0);
+      expect(projection.document.nodes.map(node => node.id)).toEqual(["camera"]);
+      expect(projection.nodeData.camera).toEqual(canvas.nodeData.camera);
+      expect(projection.nodeData.replacement).toBeUndefined();
+      expect(published).toBe(0);
+    } finally { repository.close(); db.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
   it("arbitrates complete sets across two service rooms and keeps capabilities local", async () => {
     const dir = mkdtempSync(join(tmpdir(), "spatial-services-"));
     const file = join(dir, "canvas.sqlite");
