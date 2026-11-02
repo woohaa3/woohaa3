@@ -45,7 +45,9 @@ const MEDIA: WorldCaptureMediaMetadata = {
   storageKey: STORAGE_KEY,
   checksum: CHECKSUM,
   contentType: "image/png",
-  size: 2048
+  size: 2048,
+  width: 1024,
+  height: 768
 };
 
 const FROZEN_INPUT: WorldCaptureFrozenInput = {
@@ -180,17 +182,24 @@ describe("创作内容失效边界", () => {
 });
 
 describe("静态媒体元数据", () => {
-  it("解码并重编码稳定引用、checksum、类型与有限大小", () => {
+  it("解码并重编码稳定引用、checksum、类型、字节数与像素宽高", () => {
     const frozenMedia = deepFreeze({ ...MEDIA });
     const decoded = expectDecoded(decodeWorldCaptureMediaMetadata(frozenMedia));
     expect(decoded).toEqual(MEDIA);
+    expect(decoded.width).toBe(1024);
+    expect(decoded.height).toBe(768);
+    expect(decoded.size).toBe(2048);
     expect(encodeWorldCaptureMediaMetadata(decoded)).toEqual(MEDIA);
     expect(frozenMedia).toEqual(MEDIA);
   });
 
-  it("未知元数据版本返回 unsupported-version", () => {
-    const input = media({ version: "world-capture-media-v2" });
-    expectRejected(decodeWorldCaptureMediaMetadata(input), "unsupported-version", input);
+  it("未知元数据版本与缺少像素尺寸的旧 v1 都返回 unsupported-version", () => {
+    for (const input of [
+      media({ version: "world-capture-media-v3" }),
+      { ...media(), version: "world-capture-media-v1" }
+    ]) {
+      expectRejected(decodeWorldCaptureMediaMetadata(input), "unsupported-version", input);
+    }
   });
 
   it("拒绝非有限、非正、小数、非安全整数大小", () => {
@@ -201,6 +210,46 @@ describe("静态媒体元数据", () => {
     expect(expectDecoded(decodeWorldCaptureMediaMetadata(media({ size: Number.MAX_SAFE_INTEGER }))).size).toBe(
       Number.MAX_SAFE_INTEGER
     );
+  });
+
+  it("宽高必须分别是有限正安全整数像素，缺失、非法或溢出均拒绝", () => {
+    const invalidValues = [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      0,
+      -1,
+      1.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      "1024",
+      null
+    ];
+    for (const width of invalidValues) {
+      const input = media({ width });
+      expectRejected(decodeWorldCaptureMediaMetadata(input), "invalid-data", input);
+    }
+    for (const height of invalidValues) {
+      const input = media({ height });
+      expectRejected(decodeWorldCaptureMediaMetadata(input), "invalid-data", input);
+    }
+    for (const field of ["width", "height"]) {
+      const input = media();
+      delete input[field];
+      expectRejected(decodeWorldCaptureMediaMetadata(input), "invalid-data", input);
+    }
+    const max = media({ width: Number.MAX_SAFE_INTEGER, height: Number.MAX_SAFE_INTEGER });
+    expect(expectDecoded(decodeWorldCaptureMediaMetadata(max))).toEqual(max);
+  });
+
+  it("字节数相同但像素尺寸不同仍是不同元数据，宽高各自独立校验", () => {
+    const base = expectDecoded(decodeWorldCaptureMediaMetadata(media()));
+    const wider = expectDecoded(decodeWorldCaptureMediaMetadata(media({ width: 1025 })));
+    const taller = expectDecoded(decodeWorldCaptureMediaMetadata(media({ height: 769 })));
+    expect(wider.size).toBe(base.size);
+    expect(taller.size).toBe(base.size);
+    expect({ ...base, width: wider.width }).not.toEqual(base);
+    expect({ ...base, height: taller.height }).not.toEqual(base);
+    expect(wider).not.toEqual(taller);
   });
 
   it("拒绝非稳定引用：URL、data/blob 与非法存储键", () => {
@@ -249,10 +298,11 @@ describe("冻结捕获输入", () => {
     expect(t01).toEqual({ key: KEY, mediaId: MEDIA.mediaId, checksum: MEDIA.checksum });
   });
 
-  it("未知输入版本与未知媒体版本返回 unsupported-version", () => {
+  it("未知输入版本、未知媒体版本与旧 v1 媒体都返回 unsupported-version", () => {
     for (const input of [
       { ...FROZEN_INPUT, version: "world-capture-input-v2" },
-      { ...FROZEN_INPUT, media: media({ version: "world-capture-media-v2" }) }
+      { ...FROZEN_INPUT, media: media({ version: "world-capture-media-v3" }) },
+      { ...FROZEN_INPUT, media: { ...media(), version: "world-capture-media-v1" } }
     ]) {
       expectRejected(decodeWorldCaptureFrozenInput(input), "unsupported-version", input);
     }
@@ -262,6 +312,8 @@ describe("冻结捕获输入", () => {
     for (const input of [
       { ...FROZEN_INPUT, key: { ...KEY, cameraId: "" } },
       { ...FROZEN_INPUT, media: media({ checksum: "short" }) },
+      { ...FROZEN_INPUT, media: media({ width: 0 }) },
+      { ...FROZEN_INPUT, media: media({ height: -1 }) },
       { ...FROZEN_INPUT, extra: "field" }
     ]) {
       expectRejected(decodeWorldCaptureFrozenInput(input), "invalid-data", input);
@@ -285,6 +337,12 @@ describe("冻结捕获输入", () => {
       ok: false,
       code: "invalid-data"
     });
+    expect(
+      freezeWorldCaptureInput(KEY, KEY, media({ width: 0 }) as unknown as WorldCaptureMediaMetadata)
+    ).toEqual({
+      ok: false,
+      code: "invalid-data"
+    });
   });
 
   it("冻结结果不受后续输入对象变化影响", () => {
@@ -296,8 +354,12 @@ describe("冻结捕获输入", () => {
     expect(frozen.input.media).not.toBe(mutableMedia);
     mutableKey.worldContentVersion = "world-content-99";
     mutableMedia.checksum = "b".repeat(64);
+    mutableMedia.width = 1;
+    mutableMedia.height = 1;
     expect(frozen.input.key.worldContentVersion).toBe("world-content-7");
     expect(frozen.input.media.checksum).toBe(CHECKSUM);
+    expect(frozen.input.media.width).toBe(1024);
+    expect(frozen.input.media.height).toBe(768);
   });
 });
 
