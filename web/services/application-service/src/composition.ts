@@ -224,6 +224,8 @@ export type ApplicationServiceOptions = {
   defaultConnectionFor?: (input: { owner: string; adapterId: string }) => Promise<import("@woohaa3/contracts").AgentConnectionView | null> | import("@woohaa3/contracts").AgentConnectionView | null;
   /** 稳定 Agent Supervisor 存在时，backend 重启后的暂时未知回合保持可恢复。 */
   preserveUnreconciledOnRestart?: boolean;
+  /** Host-only hook called after a turn's durable terminal status is written. */
+  onTurnSettled?: import("./extensions/agent-conversation-service.js").AgentConversationServiceOptions["onTurnSettled"];
   now?: () => Date;
   logger?: (event: Record<string, unknown>) => void;
 };
@@ -432,6 +434,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     connections: agentConnections,
     ...(options.preserveUnreconciledOnRestart ? { preserveUnreconciledOnRestart: true } : {}),
     ...(options.defaultConnectionFor ? { defaultConnectionFor: options.defaultConnectionFor } : {}),
+    ...(options.onTurnSettled ? { onTurnSettled: options.onTurnSettled } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
     now: () => now().toISOString()
   });

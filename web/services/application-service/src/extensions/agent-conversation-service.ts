@@ -23,6 +23,7 @@ import type {
   ConversationSnapshot,
   ConversationSummary,
   ConversationTurn,
+  ConversationTurnStatus,
   AgentCatalogSnapshot,
   AgentAdapterAuthState,
   AgentAdapterCapabilities
@@ -85,6 +86,22 @@ export type AgentConversationServiceOptions = {
   logger?: (event: Record<string, unknown>) => void;
   /** Supervisor 模式下暂时没有回执时保持活动态等待重新 attach，由重连预算结束时结算失败。 */
   preserveUnreconciledOnRestart?: boolean;
+  /**
+   * Host-only terminal hook. Called after the durable turn status is written, so
+   * the canvas authority can confirm an exact stopped execution against the real
+   * application ledger. It never re-dispatches work.
+   */
+  onTurnSettled?: (input: {
+    turn: {
+      turnId: string;
+      conversationId: string;
+      owner: string;
+      canvasId: string;
+      requestId: string;
+      action: string;
+    };
+    status: ConversationTurnStatus;
+  }) => void;
 };
 
 /**
@@ -485,6 +502,21 @@ export function createAgentConversationService(options: AgentConversationService
       store.updateConversation(turn.conversationId, { status: conversationStatusFor(store.latestTurn(turn.conversationId)), latestRequestId: turn.requestId }, now());
     }
     log({ event: "agent-conversation-turn-settled", conversationId: turn.conversationId, requestId: turn.requestId, status });
+    try {
+      options.onTurnSettled?.({
+        turn: {
+          turnId: turn.turnId,
+          conversationId: turn.conversationId,
+          owner: turn.owner,
+          canvasId: turn.canvasId,
+          requestId: turn.requestId,
+          action: turn.action
+        },
+        status
+      });
+    } catch (error) {
+      log({ event: "agent-conversation-settled-hook-failed", requestId: turn.requestId, message: error instanceof Error ? error.message : String(error) });
+    }
   };
 
   /**

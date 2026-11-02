@@ -171,9 +171,10 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
   registerModelBatchTools(reg, options);
   registerCameraTools(reg, options);
 
-  if (options.agentAuthoring) registerAgentAuthoringTools(server, options.agentAuthoring);
+  const grant = bearerToken && options.toolGrant?.resolve ? options.toolGrant.resolve(bearerToken) : null;
+  if (options.agentAuthoring) registerAgentAuthoringTools(server, { ...options.agentAuthoring, grant });
   registerExtensionTools(server, options, { bearerToken, loopback });
-  options.registerTools?.(server);
+  options.registerTools?.(server, { bearerToken, grant });
   return server;
 }
 
@@ -190,5 +191,10 @@ const GRANTED_TOOLS = new Set([
   "rename_model_camera",
   "reset_model_camera",
   "mutate_model_cameras",
-  "mutate_model_cameras_batch"
+  "mutate_model_cameras_batch",
+  "create_world_model",
+  "replace_world_model_content",
+  "move_world_model",
+  "set_world_camera",
+  "complete_world_camera"
 ]);

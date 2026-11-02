@@ -11,6 +11,7 @@
 import type { ModelCamera, ModelCameraMutation } from "../../canvas/model-cameras.js";
 import type { ModelContentVersion } from "../../canvas/model-definition.js";
 import type { ApplicationUserDelegation } from "../host/principal.js";
+import type { AssistantWorldGrantBinding } from "../../canvas/assistant-world-authority.js";
 
 /** 权威节点上下文读取结果。 */
 export type ApplicationAuthoringNodeRead =
@@ -92,6 +93,12 @@ export type ApplicationToolGrant = {
   subject?: string;
   /** 绑定的连接代次；连接重建后旧委托不可继续使用。 */
   credentialEpoch?: number;
+  /**
+   * Host-issued world run binding for scoped assistant authoring. The token is
+   * minted only after the host acquired the scope/version/lease context; tools
+   * read the context from this binding, never from model-supplied arguments.
+   */
+  world?: AssistantWorldGrantBinding;
 };
 
 export type ApplicationToolGrantRequest = {
@@ -103,6 +110,8 @@ export type ApplicationToolGrantRequest = {
   nodeId: string;
   cameraId?: string; clipId?: string; itemId?: string;
   tools?: readonly string[];
+  /** Trusted world scope selection for `mode: "world"`. */
+  worldScope?: import("../../canvas/assistant-world-authority.js").AssistantWorldScopeSelection;
   /** 绑定的连接代次（可选；变更后旧委托失效）。 */
   credentialEpoch?: number;
 };

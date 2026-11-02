@@ -83,6 +83,7 @@ async function issueToolGrant(
       nodeId: input.intent.nodeId ?? "",
       mode: input.intent.mode,
       ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
+      ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
       tools
     });
     return grant.token;
@@ -91,7 +92,7 @@ async function issueToolGrant(
   }
 }
 
-const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d"], tools: true, models: "remote" };
+const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d", "world"], tools: true, models: "remote" };
 
 export function createLocalAgentDescriptors(): Record<string, ConnectionDescriptor> {
   const descriptors: Record<string, ConnectionDescriptor> = {};
@@ -228,7 +229,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
       }
     }
     if (input.intent.reasoningEffort && !adapter.supportsReasoningEffort) return { status: "failed", error: { code: "capability-unsupported", message: "此本机工具未开放思考强度配置，请使用默认设置" } };
-    const toolNames = discussion ? [] : localAgentToolsForMode(input.intent.mode ?? "model3d");
+    const toolNames = discussion ? [] : localAgentToolsForMode(input.intent.mode ?? "model3d", input.intent.worldScope);
     const toolToken = await issueToolGrant(options.tools, input, toolNames);
     if (!discussion && !toolToken) {
       return { status: "failed", error: { code: "capability-unsupported", message: "本轮未取得画布工具授权，不能执行目标动作" } };
@@ -237,7 +238,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     const toolCalls: string[] = [];
     let successfulWrite = false;
     let toolFailure: string | undefined;
-    const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output", "wait_for_skill_step", "get_latest_skill_step_output"]);
+    const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output", "wait_for_skill_step", "get_latest_skill_step_output", "get_world_context"]);
 
     const context = nativeContextFor(input, `${adapter.adapterId}:1`);
     const resourceKey = nativeContextKey(input.owner, connectionId, context);

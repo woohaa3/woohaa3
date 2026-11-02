@@ -49,10 +49,15 @@ import type { WorldAuthoringFailure } from "@woohaa3/contracts";
 import type { SpatialWriteContext } from "./spatial-leases.js";
 import type { WorldCameraHistoryRepository } from "./camera-history.js";
 
+/** Trusted frozen camera settings returned by the host completion verifier. */
+export type WorldCameraCompletionTrust = { snapshot: WorldCameraData };
+
+export type WorldCameraCompletionVerification = boolean | WorldCameraCompletionTrust | null;
+
 export type WorldCameraCompletionVerifier = (
   completion: WorldCompletion,
   evidence: unknown
-) => boolean | Promise<boolean>;
+) => WorldCameraCompletionVerification | Promise<WorldCameraCompletionVerification>;
 
 export type WorldCameraContextResolution =
   | { context: WorldToolContext; capability: SpatialWriteContext }
@@ -109,6 +114,11 @@ function findCamera(canvas: ServerCanvas, cameraId: string): CameraNode | null {
   return null;
 }
 
+/** Exact canonical node a camera patch targets; shared with durable-intent verification. */
+export function findWorldCameraNodeId(canvas: ServerCanvas, cameraId: string): string | null {
+  return findCamera(canvas, cameraId)?.nodeId ?? null;
+}
+
 function hasInstance(canvas: ServerCanvas, instanceId: string): boolean {
   for (const data of Object.values(canvas.nodeData)) {
     if (!record(data)) continue;
@@ -118,8 +128,13 @@ function hasInstance(canvas: ServerCanvas, instanceId: string): boolean {
   return false;
 }
 
-/** Build and fully validate the next camera payload; `settingsVersion` is authority-owned. */
-function nextCamera(cameraId: string, settings: WorldCameraSettings): WorldCameraData | WorldCameraFailure {
+/**
+ * Build and fully validate the next camera payload; `settingsVersion` is
+ * authority-owned and deterministic from the settings alone. Exported so an
+ * assistant caller can persist the exact planned snapshot before the canonical
+ * commit and verify the original command receipt after a restart.
+ */
+export function planWorldCameraSettings(cameraId: string, settings: WorldCameraSettings): WorldCameraData | WorldCameraFailure {
   const base: WorldCameraData = {
     kind: "world-camera",
     version: SHARED_WORLD_VERSION,
@@ -276,6 +291,7 @@ export function createWorldCameraSettingsService(
 
     const derived = await initial.room.submitDerived({
       commandId,
+      ...(input.expectedPayloadHash ? { expectedPayloadHash: input.expectedPayloadHash } : {}),
       async derive(canvas) {
         if (options?.signal?.aborted) return { ok: false as const, code: "cancelled", message: "保存已取消" };
         const current = findCamera(canvas, input.cameraId);
@@ -293,7 +309,7 @@ export function createWorldCameraSettingsService(
             return { ok: false as const, code: "target-unavailable", message: "绑定的模型不存在或不可用" };
           }
         }
-        const next = nextCamera(input.cameraId, input.settings);
+        const next = planWorldCameraSettings(input.cameraId, input.settings);
         if ("ok" in next) return { ok: false as const, code: next.code, message: next.message };
         return {
           ok: true as const,
@@ -379,13 +395,14 @@ export function createWorldCameraSettingsService(
         return failure("invalid-data", "镜头完成身份无效");
       }
       if (!deps.verifyCompletion) return failure("write-forbidden", "助手完成校验端口不可用");
-      let trusted = false;
+      let verified: Awaited<ReturnType<WorldCameraCompletionVerifier>> = false;
       try {
-        trusted = await deps.verifyCompletion(input.completion, input.evidence);
+        verified = await deps.verifyCompletion(input.completion, input.evidence);
       } catch {
-        trusted = false;
+        verified = false;
       }
-      if (!trusted) return failure("write-forbidden", "助手完成身份未通过宿主校验");
+      if (!verified) return failure("write-forbidden", "助手完成身份未通过宿主校验");
+      const trustedSnapshot = typeof verified === "object" && verified !== null ? verified.snapshot : null;
       if (options?.signal?.aborted) return failure("cancelled", "完成登记已取消");
 
       const existing = await deps.history.get(input.completion.canvasId, key);
@@ -403,16 +420,35 @@ export function createWorldCameraSettingsService(
 
       const snapshot = await roomSnapshot(input.completion.canvasId);
       if (!("room" in snapshot)) return snapshot;
-      const cameraNode = findCamera(snapshot.canvas, input.completion.cameraId);
-      if (!cameraNode) return failure("target-unavailable", "完成对应的镜头不存在");
-      if (cameraNode.camera.settingsVersion !== input.completion.settingsVersion) {
-        return failure("version-conflict", "镜头设置版本与完成身份不一致");
+      let camera: WorldCameraData;
+      if (trustedSnapshot) {
+        // Trusted host fact: the run's frozen settings are authoritative even if
+        // the current camera was edited, deleted or replaced after the run.
+        const decoded = decodeWorldCamera(trustedSnapshot);
+        if (!decoded.ok) return failure("invalid-data", "可信镜头完成快照无效");
+        if (decoded.value.cameraId !== input.completion.cameraId) {
+          return failure("invalid-data", "可信镜头完成快照身份不一致");
+        }
+        if (decoded.value.settingsVersion !== input.completion.settingsVersion) {
+          return failure("version-conflict", "镜头设置版本与完成身份不一致");
+        }
+        camera = decoded.value;
+      } else {
+        // Untrusted/legacy retry: the current canonical camera must still match
+        // the completion identity. Never silently record a newer edit as this
+        // completion.
+        const cameraNode = findCamera(snapshot.canvas, input.completion.cameraId);
+        if (!cameraNode) return failure("target-unavailable", "完成对应的镜头不存在");
+        if (cameraNode.camera.settingsVersion !== input.completion.settingsVersion) {
+          return failure("version-conflict", "镜头设置版本与完成身份不一致");
+        }
+        camera = cameraNode.camera;
       }
 
       const snapshotValue = {
         version: WORLD_CAMERA_HISTORY_VERSION,
         completion: input.completion,
-        camera: cameraNode.camera
+        camera
       } as const;
       let canonical;
       try {

@@ -260,6 +260,52 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       // unresolved turns while the backend reconnects instead of converting a
       // lost in-process receipt into a terminal failure.
       ...(env.WOOHAA3_AGENT_RUNTIME_SOCKET ? { preserveUnreconciledOnRestart: true } : {}),
+      // T11a: the durable application turn status is the trusted host completion
+      // fact. A successful terminal turn first records one camera completion for
+      // the exact camera/version this run wrote, then the scoped world run is
+      // released against that same application ledger. Failed/cancelled turns
+      // never create completion history.
+      onTurnSettled: ({ turn, status }) => {
+        const assistantWorld = ctx.canvas.assistantWorld;
+        if (!assistantWorld) return;
+        const input = {
+          canvasId: turn.canvasId,
+          runId: turn.requestId,
+          status,
+          evidence: { owner: turn.owner, requestId: turn.requestId, turnId: turn.turnId }
+        } as const;
+        // The settle hook is synchronous, but the trusted host-completion fact
+        // and the T08 history write are asynchronous. Consume a structured
+        // failure and retry with backoff; the durable fact also survives a
+        // restart and is replayed by the canvas composition.
+        const retryDelays = [250, 1_000, 4_000] as const;
+        const attempt = (remaining: number): void => {
+          void assistantWorld.settleRun(input).then((result) => {
+            if (result.ok) return;
+            ctx.log.scope("application")({
+              event: "assistant-world-settle-failed",
+              canvasId: turn.canvasId,
+              requestId: turn.requestId,
+              code: result.code,
+              remaining
+            });
+            if (remaining <= 0) return;
+            const timer = setTimeout(
+              () => attempt(remaining - 1),
+              retryDelays[retryDelays.length - remaining] ?? retryDelays[retryDelays.length - 1]
+            );
+            timer.unref?.();
+          }).catch((error) => {
+            ctx.log.scope("application")({
+              event: "assistant-world-settle-error",
+              canvasId: turn.canvasId,
+              requestId: turn.requestId,
+              message: error instanceof Error ? error.message : "unknown"
+            });
+          });
+        };
+        attempt(retryDelays.length);
+      },
       serviceConnectionProviders: () => generation.list(),
       serviceConnectionSources: {
         ...(sourceSecrets ? { secrets: sourceSecrets.forExtension("@service-connections") } : {}),

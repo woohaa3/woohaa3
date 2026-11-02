@@ -1,4 +1,4 @@
-import { ContentContributionRegistry, ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
+import { ContentContributionRegistry, ManagedNodeLifecycleRegistry, worldCameraCompletionKey } from "@woohaa3/contracts";
 import type { MediaStorageScope, ServerCanvas } from "@woohaa3/contracts";
 import type { IncomingMessage } from "node:http";
 /**
@@ -35,6 +35,7 @@ import { isAggregateRunNode } from "@woohaa3/contracts";
 import { composeSnippets, type SnippetComposition } from "./storage/snippet-composition.js";
 import { composeNodeHistory, type NodeHistoryComposition } from "./storage/node-history-composition.js";
 import { composeWorldCameraHistory, type WorldCameraHistoryComposition } from "./storage/world-camera-history-composition.js";
+import { composeAssistantHostCompletions, type AssistantHostCompletionComposition } from "./storage/host-completion-composition.js";
 import { AgentDeltaJournal } from "./agent-authoring/index.js";
 import {
   CANVAS_AGENT_DEVELOPMENT_PRINCIPAL_ENV,
@@ -65,7 +66,8 @@ import type { CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } f
 import { createWorldConversionService } from "./world-authoring/conversion-service.js";
 import { createWorldAuthoringAuthority } from "./world-authoring/authority.js";
 import { createWorldAuthoringService } from "./world-authoring/scene-area-service.js";
-import { createWorldCameraSettingsService } from "./world-authoring/camera-service.js";
+import { createWorldCameraSettingsService, type WorldCameraCompletionVerification } from "./world-authoring/camera-service.js";
+import { createAssistantWorldService } from "./world-authoring/assistant-service.js";
 import { createWorldCaptureService, type WorldCaptureService } from "./world-authoring/capture-service.js";
 
 export type { CanvasMediaAssetSyncPort, CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
@@ -493,6 +495,23 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     }
   }
 
+  // T11a trusted host-completion facts: separate durable row written before the
+  // T08 history row so a transient history failure or restart can补记.
+  let hostCompletions: AssistantHostCompletionComposition | null = null;
+  if (options.enableWorldCameraHistory ?? true) {
+    try {
+      hostCompletions = await composeAssistantHostCompletions({
+        env,
+        ...(options.storageConfig ? { storageConfig: options.storageConfig } : {}),
+        ...(options.assistantHostCompletionRepository ? { repository: options.assistantHostCompletionRepository } : {}),
+        ...(options.now ? { now: options.now } : {})
+      });
+    } catch (error) {
+      log({ event: "assistant-host-completion-compose-failed", message: error instanceof Error ? error.message : "unknown" });
+      hostCompletions = null;
+    }
+  }
+
   if (nodeHistory) {
     void nodeHistory.editCompletion.processPending().then(
       (result) => {
@@ -751,15 +770,56 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       return repository.findLatestWorldAuthoringCommand(canvasId, operationId);
     }
   }) : null;
+  let completionVerifier: ((completion: import("@woohaa3/contracts").WorldCompletion, evidence: unknown) => WorldCameraCompletionVerification | Promise<WorldCameraCompletionVerification>) | undefined =
+    options.verifyWorldCameraCompletion;
   const cameraSettings = sync && cameraHistory ? createWorldCameraSettingsService({
     resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
     resolveContext: (canvasId, contextId) => worldAuthoring
       ? worldAuthoring.resolveCapability(canvasId, contextId)
       : { ok: false, code: "not-ready", message: "世界工具上下文不可用" },
     history: cameraHistory.repository,
-    ...(options.verifyWorldCameraCompletion ? { verifyCompletion: options.verifyWorldCameraCompletion } : {}),
+    verifyCompletion: (completion, evidence) => completionVerifier ? completionVerifier(completion, evidence) : false,
     ...(options.now ? { now: options.now } : {})
   }) : null;
+  const assistantWorld = sync && worldAuthoringAuthority && worldAuthoring && cameraSettings
+    ? createAssistantWorldService({
+        authority: worldAuthoringAuthority,
+        worldAuthoring,
+        cameraSettings,
+        resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
+        cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
+        confirmStopped: async (input) => {
+          const repository = await spatialRepository();
+          await repository.confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence);
+        },
+        findRecordedCompletion: async (completion) => {
+          const entry = await cameraHistory!.repository.get(completion.canvasId, worldCameraCompletionKey(completion));
+          return !!entry
+            && entry.runId === completion.runId
+            && entry.completionId === completion.completionId
+            && entry.cameraId === completion.cameraId
+            && entry.settingsVersion === completion.settingsVersion;
+        },
+        ...(hostCompletions ? { hostCompletions: hostCompletions.repository } : {}),
+        pending: async () => (await spatialRepository()).pendingSpatialRuns()
+      })
+    : null;
+  if (assistantWorld) {
+    const assistant = assistantWorld;
+    completionVerifier = async (completion, evidence) => {
+      if (options.verifyWorldCameraCompletion && !(await options.verifyWorldCameraCompletion(completion, evidence))) return false;
+      return assistant.verifyCompletion(completion, evidence);
+    };
+    // Retry trusted completion facts left by a transient history failure before
+    // the previous process stopped. This never re-runs the assistant.
+    void assistant.resumePendingCompletions().then((result) => {
+      if (!result.ok || result.remaining > 0) {
+        log({ event: "assistant-host-completion-resume-pending", result });
+      }
+    }).catch((error) => {
+      log({ event: "assistant-host-completion-resume-failed", message: error instanceof Error ? error.message : "unknown" });
+    });
+  }
   async function spatialRepository() {
     const repository = await resolveYjsRepository();
     const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
@@ -815,6 +875,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     worldConversion,
     worldAuthoring,
     cameraSettings,
+    assistantWorld,
     worldCapture,
     scenePackages,
     sync,
@@ -870,6 +931,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       if (options.modelRenderer === undefined) await modelRenderer?.close().catch(() => undefined);
       await nodeHistory?.close().catch(() => undefined);
       await cameraHistory?.close().catch(() => undefined);
+      await hostCompletions?.close().catch(() => undefined);
 
       if (syncHandler) await syncHandler.close();
       if (releaseWriterLock) await releaseWriterLock().catch(() => undefined);

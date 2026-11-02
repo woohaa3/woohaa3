@@ -101,12 +101,18 @@ export type ModelMcpHttpOptions = {
     list: () => readonly import("@woohaa3/contracts").ApplicationExtensionMcpTool[];
     call: (input: { name: string; args: Record<string, unknown>; bearerToken: string | null; loopback: boolean }) => Promise<Record<string, unknown>>;
   };
-  registerTools?: (server: McpServer) => void;
+  /** Host tool registration; the per-request grant is host-owned and never from the model. */
+  registerTools?: (server: McpServer, context: { bearerToken: string | null; grant: import("@woohaa3/contracts").ApplicationToolGrant | null }) => void;
   service?: ModelMcpToolService;
   path?: string;
   logger?: (event: { event: string; status: number; code?: string }) => void;
   agentAuthoring?: AgentAuthoringToolDeps;
-  toolGrant?: { allowedTools?: (token: string) => readonly string[] | undefined; authorize: (input: { token: string; tool: string; canvasId?: string; nodeId?: string; nodeIds?: string[]; cameraId?: string; clipId?: string; itemId?: string }) => { ok: true } | { ok: false; reason: string } };
+  toolGrant?: {
+    allowedTools?: (token: string) => readonly string[] | undefined;
+    /** Host-owned grant lookup used by world tools; absent means those tools stay unavailable. */
+    resolve?: (token: string) => import("@woohaa3/contracts").ApplicationToolGrant | null;
+    authorize: (input: { token: string; tool: string; canvasId?: string; nodeId?: string; nodeIds?: string[]; cameraId?: string; clipId?: string; itemId?: string }) => { ok: true } | { ok: false; reason: string };
+  };
 };
 
 /** `registerToolWithGrant` 依赖的能力面（server + 写工具白名单 + grant 校验）。 */

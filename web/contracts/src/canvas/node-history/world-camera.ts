@@ -70,6 +70,13 @@ export interface WorldCameraSettingsSaveInput {
   contextId?: WorldId;
   actorId?: string;
   operationId?: WorldId;
+  /**
+   * Optional frozen command payload hash. A caller that has already persisted a
+   * durable write intent passes the hash it derived for the exact camera patch,
+   * so an idempotent retry can only resolve the same command identity and never
+   * silently accept a different payload.
+   */
+  expectedPayloadHash?: string;
 }
 
 export type WorldCameraSettingsSaveOutcome =

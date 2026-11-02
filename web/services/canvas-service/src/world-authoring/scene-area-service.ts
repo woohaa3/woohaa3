@@ -28,6 +28,7 @@ import {
   type WorldAuthoringHistoryOutcome,
   type WorldAuthoringPrepareOutcome,
   type WorldObjectIdentity,
+  type WorldObjectVersion,
   type WorldToolContext,
   type WorldToolContextOutcome,
   type WorldToolContextRequest,
@@ -65,6 +66,12 @@ export type WorldAuthoringService = {
    * the capability can never be requested over a transport.
    */
   resolveCapability(canvasId: string, contextId: string): { context: WorldToolContext; capability: SpatialWriteContext } | WorldAuthoringFailure;
+  /**
+   * Advance the in-process context's versions after this exact run committed a
+   * write. The durable lease store already advanced in the same transaction; this
+   * keeps subsequent tool calls in the same run from using pre-write versions.
+   */
+  refreshContextVersions(input: { canvasId: string; contextId: string; targets: WorldObjectVersion[] }): void;
   execute(input: WorldAuthoringExecuteInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringExecuteOutcome>;
   undo(input: WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringHistoryOutcome>;
   redo(input: WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringHistoryOutcome>;
@@ -561,6 +568,35 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
       const entry = issued.get(contextId);
       if (!entry || entry.canvasId !== canvasId) return failure("stale-epoch", "工具上下文已失效");
       return { context: entry.context, capability: entry.capability };
+    },
+    refreshContextVersions(input) {
+      const entry = issued.get(input.contextId);
+      if (!entry || entry.canvasId !== input.canvasId) return;
+      const next = new Map(input.targets.map(target => [OBJECT_KEY(target), target.version]));
+      const known = new Set(entry.context.writableTargets.map(item => OBJECT_KEY(item.target)));
+      const additions = entry.context.scope.scope.kind === "scene-area"
+        ? input.targets
+            .filter(target => !known.has(OBJECT_KEY(target)))
+            .map(target => ({
+              target,
+              lease: {
+                canvasId: entry.context.canvasId,
+                runId: entry.context.runId,
+                epoch: entry.context.epoch,
+                target: target.kind === "instance"
+                  ? { kind: "instance" as const, instanceId: target.instanceId }
+                  : { kind: "camera" as const, cameraId: target.cameraId }
+              }
+            }))
+        : [];
+      const writableTargets = entry.context.writableTargets.map(item => {
+        const version = next.get(OBJECT_KEY(item.target));
+        return version === undefined ? item : { ...item, target: { ...item.target, version } };
+      });
+      entry.context = {
+        ...entry.context,
+        writableTargets: [...writableTargets, ...additions]
+      };
     },
     execute: runExecute,
     undo: (input, options) => runHistory("undo", input, options),

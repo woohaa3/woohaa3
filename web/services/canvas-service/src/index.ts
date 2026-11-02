@@ -26,6 +26,8 @@ export * from "./world-authoring/authority.js";
 export * from "./world-authoring/scene-area-command-mapping.js";
 export * from "./world-authoring/scene-area-service.js";
 export * from "./world-authoring/camera-service.js";
+export * from "./world-authoring/assistant-service.js";
+export * from "./world-authoring/host-completions.js";
 export * from "./world-authoring/camera-history.js";
 export * from "./world-authoring/capture-service.js";
 export * from "./world-authoring/capture-media.js";
