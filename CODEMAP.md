@@ -1,5 +1,7 @@
 # Client code map
 
+Spatial lease foundation: `web/services/canvas-service/src/storage/sqlite/spatial-leases.ts` persists typed object locks, original request intent and cancellation/stop state; `world-authoring/spatial-leases.ts` defines the host-owned eligibility and stop-evidence port. Its synchronous `validateForCommit` and `validateUnoccupied` must be called inside the canonical SQLite transaction by T05b. T06 supplies production eligibility; absent authority fails closed. This store does not yet connect the Canvas command path.
+
 Shared world conversion: `web/services/canvas-service/src/world-authoring/conversion-service.ts` prepares authoritative bounds and commits explicit conversions through the room queue via `CanvasService.worldConversion` and the `world-conversion-prepare` / `world-conversion-commit` HTTP routes. The durable command receipt freezes forward and inverse edits. `canvas-remote.ts` exposes the routes and `canvas-state/store/canvas-edit-service.ts` adopts the verified canonical result into the page journal without replaying the forward edit.
 
 片场聚焦检查器（2026-10-30）：`web/extensions/film-set/src/authoring/browser/inspector.tsx` 的旧折叠构图已由下节 2026-10-31 的分区属性替代；动态播放条在编辑态可达，输出按镜头类型组织。扩展经公共 `CompositeAssetAdapter.focusLayout` 声明 chrome 占位，经异步 `writeCameras` 使用同一个 `canvasEdit` journal，经 authoring `onDraftStateChange` 固定非空 AI 草稿目标；宿主不读取片场私有字段。
