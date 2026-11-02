@@ -3,7 +3,7 @@
  *
  * 关键断言：协调器**只提交**，没有等待终态或写结果的能力；结果只能来自服务端 Y.Doc。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createSubmitCoordinator, SUBMIT_COORDINATOR_FORBIDDEN_METHODS } from "./submit-coordinator.js";
@@ -34,6 +34,28 @@ function catalog(): CanvasTaskCatalog {
 function canvasWithNode() {
   const canvas = createEmptyWoohaa3ServerCanvas("canvas-a");
   canvas.document.nodes.push({ id: "text-1", type: "image", position: { x: 0, y: 0 } });
+  return canvas;
+}
+
+function canvasWithUnrelatedCameras(cameras: Array<{ nodeId: string; cameraId: string; bound?: string }>) {
+  const canvas = canvasWithNode();
+  for (const camera of cameras) {
+    canvas.document.nodes.push({ id: camera.nodeId, type: "world-camera", position: { x: 0, y: 0 } });
+    canvas.nodeData[camera.nodeId] = {
+      worldCamera: {
+        kind: "world-camera",
+        version: "shared-world-v1",
+        cameraId: camera.cameraId,
+        settingsVersion: `${camera.cameraId}-v1`,
+        position: { u: 0, v: 0, h: 1 },
+        rotation: [0, 0, 0, 1],
+        projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+        captureMode: { kind: "static" },
+        aspect: { width: 16, height: 9 },
+        ...(camera.bound ? { boundInstanceId: camera.bound } : {})
+      }
+    } as never;
+  }
   return canvas;
 }
 
@@ -243,12 +265,16 @@ describe("T10 generation input freeze at click time", () => {
   it("freezes before acceptance and forwards the exact binding to run", async () => {
     const phases: string[] = [];
     const requests: Array<{ worldCapture?: WorldCaptureGenerationBinding }> = [];
+    const freezeCalls: string[] = [];
     const binding = captureBinding();
     const coordinator = createSubmitCoordinator({
-      store: { getState: () => ({ canvas: canvasWithNode() }) },
+      store: { getState: () => ({ canvas: canvasWithUnrelatedCameras([
+        { nodeId: "camera-a", cameraId: "camera-1" },
+        { nodeId: "camera-b", cameraId: "camera-2", bound: "instance-2" }
+      ]) }) },
       client: {
         freezeWorldCapture: async (input) => {
-          expect(input.cameraId).toBe("camera-1");
+          freezeCalls.push(input.cameraId);
           return { ok: true, binding };
         },
         run: async (request) => { requests.push(request); return { ok: true, runId: request.runId, jobId: request.jobId }; },
@@ -262,6 +288,7 @@ describe("T10 generation input freeze at click time", () => {
       origin: { x: 0, y: 0, token: "manual" }
     });
     expect(outcome.ok).toBe(true);
+    expect(freezeCalls).toEqual(["camera-1"]);
     expect(requests).toHaveLength(1);
     expect(requests[0]!.worldCapture).toEqual(binding);
     expect(phases).toEqual(["started", "accepted"]);
@@ -307,5 +334,82 @@ describe("T10 generation input freeze at click time", () => {
     });
     expect(outcome).toMatchObject({ ok: false, code: "stale-scope" });
     expect(phases).toEqual([]);
+  });
+
+  it("submits ordinary media unchanged and never freezes an unrelated canvas camera", async () => {
+    const canvas = canvasWithUnrelatedCameras([
+      { nodeId: "camera-bound", cameraId: "camera-bound", bound: "instance-1" },
+      { nodeId: "camera-world", cameraId: "camera-world" }
+    ]);
+    const parameters = { seed: 11, referenceImages: ["existing-reference"] };
+    const requests: Array<{ parameters: Record<string, unknown>; worldCapture?: WorldCaptureGenerationBinding }> = [];
+    const freeze = vi.fn(async () => ({ ok: true as const, binding: captureBinding() }));
+    const coordinator = createSubmitCoordinator({
+      store: { getState: () => ({ canvas }) },
+      client: {
+        freezeWorldCapture: freeze,
+        run: async (request) => { requests.push(request); return { ok: true as const, runId: request.runId, jobId: request.jobId }; },
+        cancel: async () => ({ ok: true })
+      }
+    });
+    const outcome = await coordinator.submit({
+      nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "draw", parameters,
+      catalog: catalog(), expectedModelType: "image"
+    });
+    expect(outcome.ok).toBe(true);
+    expect(freeze).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.parameters).toBe(parameters);
+    expect(requests[0]!.worldCapture).toBeUndefined();
+
+    // Missing freeze service / producer is equally irrelevant when nothing was selected.
+    const withoutProducer = createSubmitCoordinator({
+      store: { getState: () => ({ canvas }) },
+      client: {
+        run: async (request) => ({ ok: true as const, runId: request.runId, jobId: request.jobId }),
+        cancel: async () => ({ ok: true })
+      }
+    });
+    expect(await withoutProducer.submit({
+      nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "draw", parameters,
+      catalog: catalog(), expectedModelType: "image"
+    })).toMatchObject({ ok: true });
+  });
+
+  it("does not fall back to another camera or a previous binding when explicit freeze fails", async () => {
+    const canvas = canvasWithUnrelatedCameras([
+      { nodeId: "camera-a", cameraId: "camera-A" },
+      { nodeId: "camera-b", cameraId: "camera-B" }
+    ]);
+    const freezeCalls: string[] = [];
+    const requests: Array<{ worldCapture?: WorldCaptureGenerationBinding }> = [];
+    const coordinator = createSubmitCoordinator({
+      store: { getState: () => ({ canvas }) },
+      client: {
+        freezeWorldCapture: async (input) => {
+          freezeCalls.push(input.cameraId);
+          return { ok: false, code: "producer-missing", error: "取景 producer 不可用" };
+        },
+        run: async (request) => { requests.push(request); return { ok: true as const, runId: request.runId, jobId: request.jobId }; },
+        cancel: async () => ({ ok: true })
+      }
+    });
+    const failed = await coordinator.submit({
+      nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "draw", parameters: {},
+      catalog: catalog(), expectedModelType: "image", worldCapture: { cameraId: "camera-A" }
+    });
+    expect(failed).toEqual({ ok: false, code: "producer-missing", error: "取景 producer 不可用" });
+    expect(freezeCalls).toEqual(["camera-A"]);
+    expect(requests).toHaveLength(0);
+
+    // A later ordinary submission must not reuse camera-B, camera-A or a cached image.
+    const plain = await coordinator.submit({
+      nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "draw again", parameters: { seed: 2 },
+      catalog: catalog(), expectedModelType: "image"
+    });
+    expect(plain.ok).toBe(true);
+    expect(freezeCalls).toEqual(["camera-A"]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.worldCapture).toBeUndefined();
   });
 });
