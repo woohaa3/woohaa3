@@ -411,6 +411,53 @@ mod tests {
     }
 
     #[test]
+    fn scheduled_motion_and_scene_reset_update_public_query() {
+        #[derive(Resource)]
+        struct TestScene(Scene);
+        fn run_motion(
+            mut commands: Commands,
+            mut models: ResMut<super::super::ModelVisuals>,
+            mut materials: ResMut<Assets<StandardMaterial>>,
+            scene: Res<TestScene>,
+            _main_thread: bevy::ecs::system::NonSendMarker,
+        ) {
+            super::super::apply_motion_playback(&mut commands, &mut models, &mut materials, &HashMap::new(), &scene.0);
+        }
+        crate::bridge::clear_model_assets();
+        let request = r##"{"resourceVersion":"woohaa-prepared-model-resource-v1","sceneVersion":"woohaa-model-scene-ir-v2","ops":[{"t":"box","id":"body","position":[0,1,0],"rotation":[0,0,0],"scale":[1,1,1],"color":"#ffffff","size":[2,2,2]}]}"##;
+        let metadata: serde_json::Value = serde_json::from_str(&crate::prepare_and_register_model_resource(request).unwrap()).unwrap();
+        let mut scene: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/shared-world/render-scene.json")).unwrap();
+        scene["nodes"][0]["model"] = serde_json::json!({"resourceKey": metadata["resourceKey"]});
+        scene["nodes"][0]["sharedWorldInstance"]["transform"] = serde_json::json!({"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1});
+        scene["animationPlayback"] = serde_json::json!({"nodeId":"model","version":"woohaa-motion-ir-v1","time":1,"duration":4,"initialCamera":{},"modelMotion":[{"targetId":"body","startTime":0,"endTime":4,"motion":{"kind":"move","axis":"x","speed":4,"range":[0,8]}}]});
+        let mut app = App::new();
+        app.init_resource::<super::super::ModelVisuals>().init_resource::<Assets<StandardMaterial>>()
+            .insert_resource(TestScene(serde_json::from_value(scene.clone()).unwrap()))
+            .add_systems(Update, run_motion);
+        let generation = crate::set_scene(&scene.to_string()).unwrap();
+        app.update();
+        let query = |generation, point: Vec3| {
+            let screen = crate::isometric_grid::screen_point_from_world(point, &Default::default());
+            let request = format!(r#"{{"generation":{generation},"x":{},"y":{},"width":800,"height":600}}"#, screen.x, screen.y);
+            serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request)).unwrap()["nodeId"].clone()
+        };
+        assert_eq!(query(generation, Vec3::new(256., 64., 0.)), "model");
+        assert!(query(generation, Vec3::new(0., 64., 0.)).is_null());
+        scene.as_object_mut().unwrap().remove("animationPlayback");
+        let reset = crate::set_scene(&scene.to_string()).unwrap();
+        app.world_mut().resource_mut::<TestScene>().0 = serde_json::from_value(scene.clone()).unwrap();
+        app.update();
+        assert_eq!(query(reset, Vec3::new(0., 64., 0.)), "model");
+        assert!(query(reset, Vec3::new(256., 64., 0.)).is_null());
+        scene["nodes"] = serde_json::json!([]);
+        let cleared = crate::set_scene(&scene.to_string()).unwrap();
+        app.world_mut().resource_mut::<TestScene>().0 = serde_json::from_value(scene).unwrap();
+        app.update();
+        assert!(query(cleared, Vec3::new(0., 64., 0.)).is_null());
+        crate::bridge::clear_model_assets();
+    }
+
+    #[test]
     fn published_motion_invalidates_visible_surface_cache() {
         crate::bridge::clear_model_assets();
         publish_motion(None, HashMap::new());
