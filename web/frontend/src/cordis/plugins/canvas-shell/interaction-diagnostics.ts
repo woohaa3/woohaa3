@@ -31,6 +31,6 @@ export function installCanvasDiagnostics(deps: {
   hooks.__canvasViewport = () => activeViewport();
   hooks.__canvasRenderError = deps.renderError;
   // 供 E2E 观察聚焦编辑门禁（change: replace-model-node-focus-interactions）。
-  hooks.__canvasModelFocusEdit = { editable: () => model.placementEditable() };
+  hooks.__canvasModelFocusEdit = { editable: () => model.placementEditable(), camera: () => model.cameraSnapshot() };
   return installInputDiagnostics(deps.core, deps.renderError, deps.queryCounters);
 }

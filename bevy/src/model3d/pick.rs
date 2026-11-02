@@ -13,7 +13,7 @@ use crate::protocol::{GraphNode, ModelSnapshot, Scene};
 
 /// 普通模型 picking 候选资格：非预览卡片、且携带模型引用。
 pub(crate) fn is_model_candidate(node: &GraphNode) -> bool {
-    node.model_preview.is_none() && node.model.is_some()
+    (node.model_preview.is_none() || node.shared_world_instance.is_some()) && node.model.is_some()
 }
 
 /// 派生普通模型候选世界 AABB；`lookup` 提供不可变资源表（`set_scene` 接受点注入 `bridge`）。
@@ -38,6 +38,7 @@ pub(crate) fn model_candidates(
             continue;
         };
         candidates.push(ModelCandidate {
+            shared_world: node.shared_world_instance.is_some(),
             node_id: node.id.clone(),
             min: world.min,
             max: world.max,
@@ -88,6 +89,14 @@ mod tests {
                 "modelPreview":{"azimuth":0.5,"elevation":0.2,"distanceScale":1.2,"targetOffset":[0,0,0]}}"#,
         );
         assert!(!is_model_candidate(&preview));
+
+        let mut world_preview = preview.clone();
+        world_preview.shared_world_instance = serde_json::from_value(serde_json::json!({
+            "kind":"world-instance", "version":"shared-world-v1", "instanceId":"instance",
+            "transform":{"version":"shared-world-v1", "position":{"u":1,"v":2,"h":3},
+                "rotation":[0,0,0,1], "scale":1}
+        })).unwrap();
+        assert!(is_model_candidate(&world_preview));
 
         let scene = Scene {
             nodes: vec![plain, preview],

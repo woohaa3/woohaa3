@@ -343,6 +343,8 @@ fn model_pick_camera(scene: &protocol::Scene) -> canvas_query::model_pick::Model
     canvas_query::model_pick::ModelPickCamera {
         viewport: [scene.viewport.x, scene.viewport.y, scene.viewport.zoom],
         surface,
+        ordinary: scene.model_focus.is_none() && scene.image_focus.is_none()
+            && scene.video_focus.is_none() && scene.focus_transition.is_none(),
     }
 }
 

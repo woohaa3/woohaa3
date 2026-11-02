@@ -29,6 +29,7 @@ export type SceneBuildInput = {
   marquee: { x: number; y: number; width: number; height: number } | null;
   localPositions: Map<string, { x: number; y: number }>;
   localSizes: Map<string, { width: number; height: number }>;
+  worldGroundPreviews?: ReadonlyMap<string, { u: number; v: number }>;
   viewportPreview: Viewport | null;
   fallbackViewport: Viewport;
   hoveredNodeId: string | null;
@@ -108,6 +109,7 @@ export function buildSceneWithResources(
     viewportOverride: viewport,
     modelResources: byNode,
     modelPlacements: modelPlacements(),
+    worldGroundPreviews: input.worldGroundPreviews,
     ghostNodes: options.getGhostNodes?.() ?? [],
     nodeActionToolbars: options.getNodeActionToolbars?.(),
     theme: options.getTheme?.() ?? defaultAppTheme(),
