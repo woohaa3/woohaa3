@@ -47,6 +47,21 @@ function expectedDistance(target: ReturnType<typeof modelTarget>) {
     (size.width - 32) / (size.height - 68),
   );
 }
+
+it("frames a world instance independently of card layout and rejects unknown versions", () => {
+  const target = modelTarget();
+  const data = target.canvas.nodeData.m1;
+  data.sharedWorldInstance = {
+    kind: "world-instance", version: "shared-world-v1", instanceId: "instance-1",
+    transform: { version: "shared-world-v1", position: { u: 2, v: 3, h: 4 }, rotation: [0, 0, 0, 1], scale: 2 }
+  };
+  const before = modelBounds(target)!;
+  expect(before.anchor).toEqual([128, 256, -192]);
+  target.canvas.document.nodes[0].position = { x: 1000, y: -900 };
+  expect(modelBounds(target)).toEqual(before);
+  data.sharedWorldInstance = { ...data.sharedWorldInstance, version: "shared-world-v2" };
+  expect(modelBounds(target)).toBeNull();
+});
 function assertView(
   camera: NonNullable<ReturnType<ModelFocusSession["cameraSnapshot"]>>,
   target: ReturnType<typeof modelTarget>,

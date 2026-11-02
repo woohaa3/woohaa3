@@ -35,6 +35,11 @@ export type ModelExecutionHostProps = {
   submitCoordinator?: SubmitCoordinator;
   /** 画布是否可写（断线只读时禁用）。 */
   writable: boolean;
+  /**
+   * T10: optional world-camera id whose framing this generation consumes. The Host
+   * freezes that exact version before submitting; all versions/media stay server-side.
+   */
+  captureCameraId?: string;
   /** Dialog 能力（Alert 等通用对话框）。 */
   dialogs: DialogsService;
   /** 只读任务目录。 */

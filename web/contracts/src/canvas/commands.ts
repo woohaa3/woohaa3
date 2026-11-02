@@ -27,7 +27,7 @@ export type CanvasCommand =
   | { type: "canvas.setTitle"; title: string }
   | {
       type: "node.add";
-      node: Pick<Woohaa3CanvasNode, "id" | "type" | "position"> & Partial<Pick<Woohaa3CanvasNode, "width" | "height" | "zIndex">>;
+      node: Pick<Woohaa3CanvasNode, "id" | "type" | "position"> & Partial<Pick<Woohaa3CanvasNode, "width" | "height" | "zIndex" | "parentId">>;
       nodeData?: CanvasNodeData;
       connect?: CanvasNodeConnectInput;
     }

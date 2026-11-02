@@ -27,6 +27,7 @@ import { parseAllowedOrigins } from "../../composition/config.js";
 import { mediaPortToCanvasMediaClient, taskPortToCanvasTaskClient } from "../../ports/adapters.js";
 import { createCanvasSourceBridge } from "../../ports/canvas-sources.js";
 import { createCanvasSubjectResolver } from "../../ports/canvas-subject.js";
+import { createCaptureMediaSavePort } from "../../ports/world-capture.js";
 
 /**
  * 解析同步上游凭据提供者（`canvas-upstream:<id>` capability）。
@@ -263,6 +264,9 @@ export const canvasPlugin: HostPlugin<{
       syncAllowedOrigins: parseAllowedOrigins(env),
       taskClient: taskPortToCanvasTaskClient(ctx.task.port()),
       mediaClient: mediaPortToCanvasMediaClient(ctx.media.port()),
+      // T10: trusted media save for static world captures. The producer itself is
+      // registered by the renderer integration; without one, capture stays unavailable.
+      worldCaptureMediaSave: createCaptureMediaSavePort(ctx.media.port()),
       resolveCatalog: () => ctx.task.catalog(),
       canvasSources: createCanvasSourceBridge({
         registry: () => ctx.get("application")?.sourceRegistry ?? null,

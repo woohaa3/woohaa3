@@ -262,6 +262,7 @@ fn configure_canvas(app: &mut App) {
         .add_systems(
             PostUpdate,
             (
+                scene3d::publish_model_poses.after(bevy::transform::TransformSystems::Propagate),
                 animation_preview::apply_sampled_camera
                     .after(crate::shot_camera::ShotCameraSet::Derive)
                     .before(crate::shot_camera::ShotCameraSet::Preview),

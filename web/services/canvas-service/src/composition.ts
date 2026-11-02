@@ -34,6 +34,7 @@ import { createRendererClient } from "./model-renderer/index.js";
 import { isAggregateRunNode } from "@woohaa3/contracts";
 import { composeSnippets, type SnippetComposition } from "./storage/snippet-composition.js";
 import { composeNodeHistory, type NodeHistoryComposition } from "./storage/node-history-composition.js";
+import { composeWorldCameraHistory, type WorldCameraHistoryComposition } from "./storage/world-camera-history-composition.js";
 import { AgentDeltaJournal } from "./agent-authoring/index.js";
 import {
   CANVAS_AGENT_DEVELOPMENT_PRINCIPAL_ENV,
@@ -62,6 +63,10 @@ import type { CanvasAccessPort, CanvasLifecyclePort } from "./access/resolve-acc
 import type { PrincipalContext } from "@woohaa3/contracts";
 import type { CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
 import { createWorldConversionService } from "./world-authoring/conversion-service.js";
+import { createWorldAuthoringAuthority } from "./world-authoring/authority.js";
+import { createWorldAuthoringService } from "./world-authoring/scene-area-service.js";
+import { createWorldCameraSettingsService } from "./world-authoring/camera-service.js";
+import { createWorldCaptureService, type WorldCaptureService } from "./world-authoring/capture-service.js";
 
 export type { CanvasMediaAssetSyncPort, CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
 
@@ -132,6 +137,15 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       : undefined);
 
   let yjsRepositoryPromise: Promise<YjsDocumentRepository> | null = null;
+  /**
+   * T06 production authority. It is the same instance handed to the SQLite
+   * repository and to the semantic scene-area service, so acquire and commit use
+   * one footprint cache. Test-injected repositories may omit it.
+   */
+  const spatialAuthority = options.spatialAuthority ?? createWorldAuthoringAuthority();
+  const worldAuthoringAuthority = "prepareCanvas" in spatialAuthority
+    ? spatialAuthority as import("./world-authoring/authority.js").WorldAuthoringAuthority
+    : null;
   const resolveYjsRepository = (): Promise<YjsDocumentRepository> => {
     if (options.yjsRepository) return Promise.resolve(options.yjsRepository);
     yjsRepositoryPromise ??= (async () => {
@@ -139,7 +153,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       if (!resolved.ok) throw new Error(`画布存储配置无效：${resolved.reason}`);
       if (resolved.config.backend === "sqlite") {
         const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
-        return new SqliteYjsRepository({ path: resolved.config.sqlitePath as string, spatialAuthority: options.spatialAuthority });
+        return new SqliteYjsRepository({ path: resolved.config.sqlitePath as string, spatialAuthority });
       }
       const { MongoYjsRepository } = await import("./storage/mongo/index.js");
       return MongoYjsRepository.connect({
@@ -349,6 +363,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   };
 
   let syncHandler: SyncUpgradeHandler | null = null;
+  let worldCapture: WorldCaptureService | null = null;
   const createSyncHandler = (): SyncUpgradeHandler => {
     const verifier = mediaClient ? createMediaVerifierStorage({ client: mediaClient }) : undefined;
     syncHandler ??= createSyncUpgradeHandler({
@@ -400,6 +415,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         log({ event: event.event, status: event.status, ...(event.code ? { code: event.code } : {}),
           ...(event.latencyMs !== undefined ? { latencyMs: event.latencyMs } : {}) }),
       onCommitted: (input) => {
+        worldCapture?.observeCanonical({ canvasId: input.canvasId, canvas: input.canvas });
         void recordModelPlacementHistory(
           nodeHistoryRef && nodeHistoryRef.editCompletion
             ? {
@@ -461,6 +477,22 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   }
   nodeHistoryRef = nodeHistory;
 
+  // 世界镜头完成历史（T08）：独立表/事务，绝不进入画布聚合或节点历史。
+  let cameraHistory: WorldCameraHistoryComposition | null = null;
+  if (options.enableWorldCameraHistory ?? true) {
+    try {
+      cameraHistory = await composeWorldCameraHistory({
+        env,
+        ...(options.storageConfig ? { storageConfig: options.storageConfig } : {}),
+        ...(options.worldCameraHistoryRepository ? { repository: options.worldCameraHistoryRepository } : {}),
+        ...(options.now ? { now: options.now } : {})
+      });
+    } catch (error) {
+      log({ event: "world-camera-history-compose-failed", message: error instanceof Error ? error.message : "unknown" });
+      cameraHistory = null;
+    }
+  }
+
   if (nodeHistory) {
     void nodeHistory.editCompletion.processPending().then(
       (result) => {
@@ -469,6 +501,18 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       (error) => log({ event: "edit-completion-compensate-failed", message: error instanceof Error ? error.message : "unknown" })
     );
   }
+
+  // T10 取景刷新/冻结：从权威 room 快照派生请求，只在创作版本变化时合并刷新。
+  worldCapture = sync
+    ? createWorldCaptureService({
+        resolveRoom: async (canvasId) => sync.registry.resolve(canvasId),
+        ...(options.worldCaptureMediaSave ? { mediaSave: options.worldCaptureMediaSave } : {}),
+        ...(options.worldCaptureOutputLongEdge ? { outputLongEdge: options.worldCaptureOutputLongEdge } : {}),
+        ...(options.worldCaptureFreezeTimeoutMs ? { freezeTimeoutMs: options.worldCaptureFreezeTimeoutMs } : {}),
+        ...(options.now ? { now: () => Date.parse(options.now!()) || Date.now() } : {}),
+        logger: log
+      })
+    : null;
 
   // run/cancel 应用服务与 task projector（唯一终态写入方）。
   let runService: CanvasRunService | null = null;
@@ -488,7 +532,8 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       now: options.now,
       logger: log,
       // 聚合节点（片场等）同一时间只允许一个运行任务，权威入口保证（design D5）。
-      isAggregateNode: isAggregateRunNode
+      isAggregateNode: isAggregateRunNode,
+      worldCapture
     });
     consumer = createTaskResultConsumer({
       projector,
@@ -670,7 +715,22 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   const worldConversion = sync ? createWorldConversionService(async (id) =>
     await canvasContentExists(id) ? sync.registry.resolve(id) : null) : null;
   const spatialWrites: CanvasService["spatialWrites"] = sync ? {
-    acquire: async (intent) => (await spatialRepository()).acquireSpatialRun(intent),
+    acquire: async (intent) => {
+      // Refresh the authority's exact-revision footprint cache before the lease is
+      // checked. The repository still validates every target inside its transaction.
+      const room = await sync.registry.resolve(intent.canvasId);
+      if (room && worldAuthoringAuthority && (!options.yjsRepository || options.spatialAuthority)) {
+        const inspected = await room.inspectPublished(value => value);
+        if (inspected.ok) {
+          if (intent.scope.scope.kind === "scene-area") {
+            await worldAuthoringAuthority.prepareCanvas(inspected.canvas, { kind: "scene-area", areaId: intent.scope.scope.areaId });
+          } else {
+            await worldAuthoringAuthority.prepareGroup(inspected.canvas, intent.scope.scope.groupId);
+          }
+        }
+      }
+      return (await spatialRepository()).acquireSpatialRun(intent);
+    },
     cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
     confirmStopped: async (canvasId, requestId, runId, epoch, executionId, evidence) => (await spatialRepository()).confirmSpatialStopped(canvasId, requestId, runId, epoch, executionId, evidence),
     pending: async () => (await spatialRepository()).pendingSpatialRuns(),
@@ -681,6 +741,25 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       return room.submit(batch, { spatialContext: context });
     }
   } : null;
+  const worldAuthoring = sync && worldAuthoringAuthority && (!options.yjsRepository || options.spatialAuthority) ? createWorldAuthoringService({
+    authority: worldAuthoringAuthority,
+    resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
+    acquire: async (intent) => (await spatialRepository()).acquireSpatialRun(intent),
+    cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
+    findLatest: async (canvasId, operationId) => {
+      const repository = await spatialRepository();
+      return repository.findLatestWorldAuthoringCommand(canvasId, operationId);
+    }
+  }) : null;
+  const cameraSettings = sync && cameraHistory ? createWorldCameraSettingsService({
+    resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
+    resolveContext: (canvasId, contextId) => worldAuthoring
+      ? worldAuthoring.resolveCapability(canvasId, contextId)
+      : { ok: false, code: "not-ready", message: "世界工具上下文不可用" },
+    history: cameraHistory.repository,
+    ...(options.verifyWorldCameraCompletion ? { verifyCompletion: options.verifyWorldCameraCompletion } : {}),
+    ...(options.now ? { now: options.now } : {})
+  }) : null;
   async function spatialRepository() {
     const repository = await resolveYjsRepository();
     const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
@@ -689,6 +768,9 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   }
   const composedHandler = composeRequestHandler({
     worldConversion,
+    worldAuthoring,
+    worldCamera: cameraSettings,
+    worldCapture,
     env,
     canvasEnabled,
     unavailableReason,
@@ -717,6 +799,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     ...(sync
       ? {
           closeSessions: async (canvasId: string, reason: string) => {
+            worldCapture?.forgetCanvas(canvasId);
             sync.hub.closeCanvas(canvasId, reason);
             await sync.registry.destroy(canvasId);
             // 画布不存在了，远端归属随之作废：否则同一 id 重建后会被误路由到托管存储。
@@ -730,6 +813,9 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   return {
     spatialWrites,
     worldConversion,
+    worldAuthoring,
+    cameraSettings,
+    worldCapture,
     scenePackages,
     sync,
     runService,
@@ -783,6 +869,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       consumer?.stop();
       if (options.modelRenderer === undefined) await modelRenderer?.close().catch(() => undefined);
       await nodeHistory?.close().catch(() => undefined);
+      await cameraHistory?.close().catch(() => undefined);
 
       if (syncHandler) await syncHandler.close();
       if (releaseWriterLock) await releaseWriterLock().catch(() => undefined);

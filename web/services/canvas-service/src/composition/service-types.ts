@@ -68,6 +68,12 @@ export type CanvasServiceOptions = {
   storageConfig?: CanvasStorageConfig;
   taskClient?: CanvasTaskClient;
   mediaClient?: CanvasMediaClient;
+  /** T10 trusted save port. Missing makes capture-bound generation fail closed. */
+  worldCaptureMediaSave?: import("@woohaa3/contracts").WorldCaptureMediaSavePort;
+  /** Static capture output long edge (host configuration, never browser-reported). */
+  worldCaptureOutputLongEdge?: number;
+  /** Generation wait budget for one exact capture key. */
+  worldCaptureFreezeTimeoutMs?: number;
   resolveCatalog?: () => Promise<CanvasTaskCatalog>;
   enableCanvasStorage?: boolean;
   enableYjsSync?: boolean;
@@ -86,6 +92,15 @@ export type CanvasServiceOptions = {
   snippetRepository?: SnippetRepository;
   /** 测试注入：节点历史仓库（change: add-canvas-node-generation-history）。 */
   nodeHistoryRepository?: NodeHistoryRepository;
+  /** 测试注入：世界镜头完成历史仓库（T08）。 */
+  worldCameraHistoryRepository?: import("../world-authoring/camera-history.js").WorldCameraHistoryRepository;
+  /**
+   * 可信助手完成校验（T08）。必须在宿主进程内注入；缺失时完成历史入口 fail closed，
+   * 浏览器/HTTP 不能自报 completion。
+   */
+  verifyWorldCameraCompletion?: import("../world-authoring/camera-service.js").WorldCameraCompletionVerifier;
+  /** 是否挂载世界镜头设置/历史面；默认挂载。 */
+  enableWorldCameraHistory?: boolean;
   /** bootstrap `storage` 槽位注入的编辑完成回执仓库（与画布存储同一 backend）。 */
   editCompletionRepository?: import("../storage/core/edit-completion-contracts.js").EditCompletionRepository;
   /** 是否挂载节点历史面（/api/canvas-node-history）；默认挂载。 */
@@ -209,6 +224,12 @@ export type CanvasService = {
     submit(canvasId: string, context: import("../world-authoring/spatial-leases.js").SpatialWriteContext | null, batch: import("@woohaa3/contracts/canvas-yjs").CanvasCommandBatch): Promise<import("../sync/room-types.js").RoomCommandResult>;
   } | null;
   worldConversion: import("@woohaa3/contracts").BackendWorldConversionPort | null;
+  /** T06 scene-area authority semantic entry (prepare/context/execute/undo/redo). */
+  worldAuthoring: import("../world-authoring/scene-area-service.js").WorldAuthoringService | null;
+  /** T08 world-camera settings, assistant completion history and restore. */
+  cameraSettings: import("../world-authoring/camera-service.js").WorldCameraSettingsService | null;
+  /** T10 continuous framing refresh, generation freeze and producer registration. */
+  worldCapture: import("../world-authoring/capture-service.js").WorldCaptureService | null;
   /** 本地场景包独立事务/收据；不复用在线来源权限。 */
   scenePackages: import("../storage/sqlite/scene-package.js").SqliteScenePackageStore | null;
   handle: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;

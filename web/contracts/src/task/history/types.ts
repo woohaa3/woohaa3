@@ -113,6 +113,8 @@ export type TaskRequestSummary = {
   parametersTruncated?: boolean;
   /** 稳定参考输入（顺序与提交一致）。 */
   inputs?: TaskRequestInput[];
+  /** Frozen static world framing used by this run (stable media/version metadata). */
+  worldCapture?: import("../../canvas/world-capture-pipeline-contract.js").WorldCaptureGenerationBinding;
 };
 
 /** 有界事件时间线项。 */
