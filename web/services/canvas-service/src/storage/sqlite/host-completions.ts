@@ -18,10 +18,11 @@ import {
   type AssistantHostCompletionRepository,
   type AssistantWorldCommittedWrite,
   type AssistantWorldCommittedWriteIdentity,
-  type AssistantWorldCommittedWriteListInput
+  type AssistantWorldCommittedWriteListInput,
+  type AssistantWorldWriteIntent
 } from "../../world-authoring/host-completions.js";
 
-export const SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION = 3;
+export const SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION = 4;
 
 export type SqliteAssistantHostCompletionRepositoryOptions = {
   path: string;
@@ -39,6 +40,23 @@ type Row = {
   settings_version: string;
   status: string;
   camera_json: string | null;
+};
+
+type IntentRow = {
+  command_id: string;
+  canvas_id: string;
+  request_id: string;
+  run_id: string;
+  epoch: number;
+  execution_id: string;
+  context_id: string;
+  completion_id: string;
+  camera_id: string;
+  expected_settings_version: string;
+  node_id: string;
+  settings_version: string;
+  camera_json: string;
+  payload_hash: string;
 };
 
 type CommittedRow = {
@@ -145,6 +163,31 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
       `);
       this.db.exec(
         "CREATE INDEX IF NOT EXISTS idx_awcw_run ON assistant_world_committed_writes(canvas_id, run_id)"
+      );
+      // Durable pre-commit write intents. An intent proves what the assistant
+      // *tried* to write; it never authorizes history on its own. Recovery must
+      // resolve the original Yjs command receipt and match payload_hash first.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS assistant_world_write_intents (
+          command_id TEXT PRIMARY KEY,
+          canvas_id TEXT NOT NULL,
+          request_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          epoch INTEGER NOT NULL,
+          execution_id TEXT NOT NULL,
+          context_id TEXT NOT NULL,
+          completion_id TEXT NOT NULL,
+          camera_id TEXT NOT NULL,
+          expected_settings_version TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          settings_version TEXT NOT NULL,
+          camera_json TEXT NOT NULL,
+          payload_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      this.db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_awwi_run ON assistant_world_write_intents(canvas_id, run_id)"
       );
       this.db
         .prepare("INSERT OR IGNORE INTO assistant_host_completion_schema_migrations (version, applied_at) VALUES (?, ?)")
@@ -283,6 +326,84 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
       .run(committedWriteKey(write));
   }
 
+  async putIntent(intent: AssistantWorldWriteIntent): Promise<void> {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO assistant_world_write_intents
+             (command_id, canvas_id, request_id, run_id, epoch, execution_id, context_id,
+              completion_id, camera_id, expected_settings_version, node_id, settings_version,
+              camera_json, payload_hash, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(command_id) DO UPDATE SET
+             canvas_id = excluded.canvas_id,
+             request_id = excluded.request_id,
+             run_id = excluded.run_id,
+             epoch = excluded.epoch,
+             execution_id = excluded.execution_id,
+             context_id = excluded.context_id,
+             completion_id = excluded.completion_id,
+             camera_id = excluded.camera_id,
+             expected_settings_version = excluded.expected_settings_version,
+             node_id = excluded.node_id,
+             settings_version = excluded.settings_version,
+             camera_json = excluded.camera_json,
+             payload_hash = excluded.payload_hash`
+        )
+        .run(
+          intent.commandId,
+          intent.canvasId,
+          intent.requestId,
+          intent.runId,
+          intent.epoch,
+          intent.executionId,
+          intent.contextId,
+          intent.completionId,
+          intent.cameraId,
+          intent.expectedSettingsVersion,
+          intent.nodeId,
+          intent.settingsVersion,
+          JSON.stringify(intent.snapshot),
+          intent.payloadHash,
+          this.now()
+        );
+    });
+  }
+
+  async getIntent(commandId: string): Promise<AssistantWorldWriteIntent | null> {
+    const row = this.db
+      .prepare("SELECT * FROM assistant_world_write_intents WHERE command_id = ?")
+      .get(commandId) as IntentRow | undefined;
+    return row ? rowToIntent(row) : null;
+  }
+
+  async listIntents(input: AssistantWorldCommittedWriteListInput = {}): Promise<AssistantWorldWriteIntent[]> {
+    const clauses: string[] = [];
+    const values: string[] = [];
+    if (input.canvasId !== undefined) {
+      clauses.push("canvas_id = ?");
+      values.push(input.canvasId);
+    }
+    if (input.runId !== undefined) {
+      clauses.push("run_id = ?");
+      values.push(input.runId);
+    }
+    const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db
+      .prepare(`SELECT * FROM assistant_world_write_intents${where} ORDER BY created_at, command_id`)
+      .all(...values) as IntentRow[];
+    return rows.flatMap(row => {
+      const intent = rowToIntent(row);
+      return intent ? [intent] : [];
+    });
+  }
+
+  async deleteIntent(commandId: string): Promise<void> {
+    this.db
+      .prepare("DELETE FROM assistant_world_write_intents WHERE command_id = ?")
+      .run(commandId);
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
@@ -312,6 +433,27 @@ function rowToFact(row: Row): AssistantHostCompletionFact {
     settingsVersion: row.settings_version,
     status: row.status === "partial" ? "partial" : "succeeded",
     ...(decodeSnapshot(row.camera_json) ?? {})
+  };
+}
+
+function rowToIntent(row: IntentRow): AssistantWorldWriteIntent | null {
+  const decoded = decodeSnapshot(row.camera_json);
+  if (!decoded) return null;
+  return {
+    canvasId: row.canvas_id,
+    requestId: row.request_id,
+    runId: row.run_id,
+    epoch: row.epoch,
+    executionId: row.execution_id,
+    contextId: row.context_id,
+    completionId: row.completion_id,
+    cameraId: row.camera_id,
+    commandId: row.command_id,
+    expectedSettingsVersion: row.expected_settings_version,
+    nodeId: row.node_id,
+    settingsVersion: row.settings_version,
+    snapshot: decoded.snapshot,
+    payloadHash: row.payload_hash
   };
 }
 

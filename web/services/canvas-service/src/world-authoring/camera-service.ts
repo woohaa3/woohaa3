@@ -114,6 +114,11 @@ function findCamera(canvas: ServerCanvas, cameraId: string): CameraNode | null {
   return null;
 }
 
+/** Exact canonical node a camera patch targets; shared with durable-intent verification. */
+export function findWorldCameraNodeId(canvas: ServerCanvas, cameraId: string): string | null {
+  return findCamera(canvas, cameraId)?.nodeId ?? null;
+}
+
 function hasInstance(canvas: ServerCanvas, instanceId: string): boolean {
   for (const data of Object.values(canvas.nodeData)) {
     if (!record(data)) continue;
@@ -123,8 +128,13 @@ function hasInstance(canvas: ServerCanvas, instanceId: string): boolean {
   return false;
 }
 
-/** Build and fully validate the next camera payload; `settingsVersion` is authority-owned. */
-function nextCamera(cameraId: string, settings: WorldCameraSettings): WorldCameraData | WorldCameraFailure {
+/**
+ * Build and fully validate the next camera payload; `settingsVersion` is
+ * authority-owned and deterministic from the settings alone. Exported so an
+ * assistant caller can persist the exact planned snapshot before the canonical
+ * commit and verify the original command receipt after a restart.
+ */
+export function planWorldCameraSettings(cameraId: string, settings: WorldCameraSettings): WorldCameraData | WorldCameraFailure {
   const base: WorldCameraData = {
     kind: "world-camera",
     version: SHARED_WORLD_VERSION,
@@ -281,6 +291,7 @@ export function createWorldCameraSettingsService(
 
     const derived = await initial.room.submitDerived({
       commandId,
+      ...(input.expectedPayloadHash ? { expectedPayloadHash: input.expectedPayloadHash } : {}),
       async derive(canvas) {
         if (options?.signal?.aborted) return { ok: false as const, code: "cancelled", message: "保存已取消" };
         const current = findCamera(canvas, input.cameraId);
@@ -298,7 +309,7 @@ export function createWorldCameraSettingsService(
             return { ok: false as const, code: "target-unavailable", message: "绑定的模型不存在或不可用" };
           }
         }
-        const next = nextCamera(input.cameraId, input.settings);
+        const next = planWorldCameraSettings(input.cameraId, input.settings);
         if ("ok" in next) return { ok: false as const, code: next.code, message: next.message };
         return {
           ok: true as const,

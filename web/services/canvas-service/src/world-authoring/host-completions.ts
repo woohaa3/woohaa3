@@ -91,6 +91,39 @@ export type AssistantHostCompletionListInput = {
   runId?: string;
 };
 
+/**
+ * Durable pre-commit write intent.
+ *
+ * It is persisted *before* the canonical camera command reaches the room, so a
+ * process that dies between the canonical commit and the independent outbox
+ * insert still has a durable record of the exact intended command, payload hash
+ * and frozen snapshot. The intent alone never proves commit: recovery must
+ * resolve the original real command receipt (`CanvasRoom.lookupCommand`) and
+ * match its payload hash before creating an outbox row.
+ */
+export type AssistantWorldWriteIntent = {
+  canvasId: string;
+  requestId: string;
+  runId: string;
+  epoch: number;
+  executionId: string;
+  contextId: string;
+  completionId: string;
+  cameraId: string;
+  /** Exact command identity this intent is allowed to prove. */
+  commandId: string;
+  /** Canonical settings version observed before the write. */
+  expectedSettingsVersion: string;
+  /** Canonical node a successful commit must have patched. */
+  nodeId: string;
+  /** Deterministic settings version of the planned snapshot. */
+  settingsVersion: string;
+  /** Exact camera payload the command patches in. */
+  snapshot: WorldCameraData;
+  /** SHA-256 of the frozen command payload (canvasId + commands). */
+  payloadHash: string;
+};
+
 export interface AssistantHostCompletionRepository {
   /** Idempotently persist one trusted fact. */
   put(fact: AssistantHostCompletionFact): Promise<void>;
@@ -108,6 +141,14 @@ export interface AssistantHostCompletionRepository {
   putCommitted?(write: AssistantWorldCommittedWrite): Promise<void>;
   listCommitted?(input?: AssistantWorldCommittedWriteListInput): Promise<AssistantWorldCommittedWrite[]>;
   deleteCommitted?(write: AssistantWorldCommittedWriteIdentity): Promise<void>;
+  /**
+   * Durable pre-commit intents. Required together with the outbox for restart
+   * recovery across the canonical-commit → outbox-insert window.
+   */
+  putIntent?(intent: AssistantWorldWriteIntent): Promise<void>;
+  getIntent?(commandId: string): Promise<AssistantWorldWriteIntent | null>;
+  listIntents?(input?: AssistantWorldCommittedWriteListInput): Promise<AssistantWorldWriteIntent[]>;
+  deleteIntent?(commandId: string): Promise<void>;
   close?(): void | Promise<void>;
 }
 
@@ -118,6 +159,7 @@ function clone(fact: AssistantHostCompletionFact): AssistantHostCompletionFact {
 export class InMemoryAssistantHostCompletionRepository implements AssistantHostCompletionRepository {
   private readonly facts = new Map<string, AssistantHostCompletionFact>();
   private readonly committed = new Map<string, AssistantWorldCommittedWrite>();
+  private readonly intents = new Map<string, AssistantWorldWriteIntent>();
 
   async put(fact: AssistantHostCompletionFact): Promise<void> {
     this.facts.set(hostCompletionKey(fact), clone(fact));
@@ -155,5 +197,25 @@ export class InMemoryAssistantHostCompletionRepository implements AssistantHostC
 
   async deleteCommitted(write: AssistantWorldCommittedWriteIdentity): Promise<void> {
     this.committed.delete(committedWriteKey(write));
+  }
+
+  async putIntent(intent: AssistantWorldWriteIntent): Promise<void> {
+    this.intents.set(intent.commandId, { ...intent, snapshot: structuredClone(intent.snapshot) });
+  }
+
+  async getIntent(commandId: string): Promise<AssistantWorldWriteIntent | null> {
+    const intent = this.intents.get(commandId);
+    return intent ? { ...intent, snapshot: structuredClone(intent.snapshot) } : null;
+  }
+
+  async listIntents(input: AssistantWorldCommittedWriteListInput = {}): Promise<AssistantWorldWriteIntent[]> {
+    return [...this.intents.values()]
+      .filter(intent => (input.canvasId === undefined || intent.canvasId === input.canvasId)
+        && (input.runId === undefined || intent.runId === input.runId))
+      .map(intent => ({ ...intent, snapshot: structuredClone(intent.snapshot) }));
+  }
+
+  async deleteIntent(commandId: string): Promise<void> {
+    this.intents.delete(commandId);
   }
 }

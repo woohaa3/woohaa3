@@ -47,11 +47,11 @@ import {
   type WorldTransform,
   type WorldToolContext
 } from "@woohaa3/contracts";
-import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
+import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash } from "@woohaa3/contracts/canvas-yjs";
 import type { CanvasRoom } from "../sync/room.js";
 import type { RoomCommandResult } from "../sync/room-types.js";
 import { stableAuthorityVersion, worldObjectVersion, type WorldAuthoringAuthority } from "./authority.js";
-import type { WorldCameraSettingsService } from "./camera-service.js";
+import { findWorldCameraNodeId, planWorldCameraSettings, type WorldCameraSettingsService } from "./camera-service.js";
 import type { WorldCameraCompletionVerification } from "./camera-service.js";
 import type { WorldAuthoringService } from "./scene-area-service.js";
 import { objectKey, type LeaseRecord, type SpatialWriteContext } from "./spatial-leases.js";
@@ -60,7 +60,8 @@ import {
   type AssistantHostCompletionFact,
   type AssistantHostCompletionIdentity,
   type AssistantHostCompletionRepository,
-  type AssistantWorldCommittedWrite
+  type AssistantWorldCommittedWrite,
+  type AssistantWorldWriteIntent
 } from "./host-completions.js";
 
 export type AssistantWorldServiceDeps = {
@@ -362,6 +363,163 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     } catch {
       // Unknown durable state stays fail-closed; the caller reports not-ready.
       throw Object.assign(new Error("无法读取待核对的世界写入"), { code: "not-ready" });
+    }
+  }
+
+  function writeFromIntent(intent: AssistantWorldWriteIntent): AssistantWorldCommittedWrite {
+    return {
+      canvasId: intent.canvasId,
+      requestId: intent.requestId,
+      runId: intent.runId,
+      epoch: intent.epoch,
+      executionId: intent.executionId,
+      contextId: intent.contextId,
+      completionId: intent.completionId,
+      cameraId: intent.cameraId,
+      settingsVersion: intent.settingsVersion,
+      snapshot: intent.snapshot
+    };
+  }
+
+  async function persistWriteIntent(intent: AssistantWorldWriteIntent): Promise<void> {
+    // No durable repository means an embedded/test service without restart
+    // recovery; it must not claim durability. Production always wires one.
+    if (!deps.hostCompletions) return;
+    if (!deps.hostCompletions.putIntent || !deps.hostCompletions.getIntent
+      || !deps.hostCompletions.listIntents || !deps.hostCompletions.deleteIntent) {
+      throw Object.assign(new Error("助手完成事实仓库缺少世界写入意图"), { code: "not-ready" });
+    }
+    await deps.hostCompletions.putIntent(intent);
+  }
+
+  async function deleteWriteIntent(commandId: string): Promise<void> {
+    if (!deps.hostCompletions?.deleteIntent) return;
+    await deps.hostCompletions.deleteIntent(commandId);
+  }
+
+  async function listWriteIntents(input: { canvasId: string; runId: string }): Promise<AssistantWorldWriteIntent[]> {
+    if (!deps.hostCompletions?.listIntents) return [];
+    return deps.hostCompletions.listIntents(input);
+  }
+
+  type IntentResolution =
+    | { status: "committed"; intent: AssistantWorldWriteIntent; revision: number; changed: boolean }
+    | { status: "uncommitted" }
+    | { status: "unknown"; failure: AssistantWorldFailure };
+
+  /**
+   * Resolve a durable intent against the *original real command receipt*. The
+   * intent itself is only a proposal: only a matching receipt (same commandId
+   * and exact payload hash) proves the canonical camera commit happened.
+   */
+  async function resolveWriteIntent(intent: AssistantWorldWriteIntent): Promise<IntentResolution> {
+    let room: CanvasRoom | null;
+    try {
+      room = await deps.resolveRoom(intent.canvasId);
+    } catch {
+      room = null;
+    }
+    if (!room) return { status: "unknown", failure: failure("not-ready", "无法读取画布以核对世界写入") };
+    // Embedded/test rooms may intentionally expose no durable command receipt
+    // store. They never claim restart recovery; the canonical save result stays
+    // authoritative in-process.
+    if (typeof room.lookupCommand !== "function") return { status: "uncommitted" };
+    let receipt: Awaited<ReturnType<CanvasRoom["lookupCommand"]>>;
+    try {
+      receipt = await room.lookupCommand(intent.commandId);
+    } catch {
+      return { status: "unknown", failure: failure("not-ready", "无法读取世界写入回执") };
+    }
+    if (!receipt) return { status: "uncommitted" };
+    if (receipt.payloadHash !== intent.payloadHash) {
+      return { status: "unknown", failure: failure("operation-conflict", "世界写入回执与持久意图不一致") };
+    }
+    return { status: "committed", intent, revision: receipt.revision, changed: receipt.changed };
+  }
+
+  /**
+   * Persist the verified commit in the outbox and drop the intent. A failure
+   * here keeps the intent so the exact commit remains recoverable.
+   */
+  async function adoptVerifiedIntent(intent: AssistantWorldWriteIntent): Promise<{ ok: true } | AssistantWorldFailure> {
+    try {
+      await rememberCommittedWrite(writeFromIntent(intent));
+    } catch (error) {
+      return failure("not-ready", error instanceof Error ? error.message : "世界写入事实保存失败");
+    }
+    try {
+      await deleteWriteIntent(intent.commandId);
+    } catch {
+      // A lingering intent only re-adopts the same outbox row idempotently.
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Reconcile every durable intent for a run before promotion/release.
+   *
+   * Committed intents become outbox rows (never completion facts); uncommitted
+   * intents are dropped; unknown receipt state keeps both the intent and the
+   * run fail-closed. Superseded writes for the same run/camera keep the highest
+   * committed revision, matching the single completion identity of a run.
+   */
+  async function reconcileRunIntents(input: { canvasId: string; runId: string }): Promise<{ ok: true } | AssistantWorldFailure> {
+    let intents: AssistantWorldWriteIntent[];
+    try {
+      intents = await listWriteIntents(input);
+    } catch (error) {
+      return failure("not-ready", error instanceof Error ? error.message : "无法读取世界写入意图");
+    }
+    const committed = new Map<string, { intent: AssistantWorldWriteIntent; revision: number }>();
+    for (const intent of intents) {
+      const resolved = await resolveWriteIntent(intent);
+      if (resolved.status === "unknown") return resolved.failure;
+      if (resolved.status === "uncommitted") {
+        try {
+          await deleteWriteIntent(intent.commandId);
+        } catch {
+          // A later attempt re-checks the same absent receipt.
+        }
+        continue;
+      }
+      const key = hostCompletionKey(intent);
+      const current = committed.get(key);
+      if (!current || resolved.revision >= current.revision) {
+        committed.set(key, { intent, revision: resolved.revision });
+      }
+    }
+    for (const { intent } of committed.values()) {
+      const adopted = await adoptVerifiedIntent(intent);
+      if (!adopted.ok) return adopted;
+    }
+    // Superseded/losing intents never authorize history.
+    for (const intent of intents) {
+      const key = hostCompletionKey(intent);
+      const winner = committed.get(key);
+      if (!winner || winner.intent.commandId !== intent.commandId) {
+        try {
+          await deleteWriteIntent(intent.commandId);
+        } catch {
+          // Idempotent later cleanup.
+        }
+      }
+    }
+    return { ok: true };
+  }
+
+  async function discardWriteIntents(input: { canvasId: string; runId: string }): Promise<void> {
+    let intents: AssistantWorldWriteIntent[];
+    try {
+      intents = await listWriteIntents(input);
+    } catch {
+      return;
+    }
+    for (const intent of intents) {
+      try {
+        await deleteWriteIntent(intent.commandId);
+      } catch {
+        // A lingering intent is still never promoted for an unsuccessful run.
+      }
     }
   }
 
@@ -828,70 +986,240 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     };
   }
 
+  function adoptIntentIntoLedger(
+    ledger: RunLedger,
+    intent: AssistantWorldWriteIntent,
+    result: { revision: number; duplicate: boolean; noop: boolean }
+  ): AssistantWorldWriteOutcome {
+    const identity: WorldObjectIdentity = { kind: "camera", cameraId: intent.cameraId };
+    ledger.writes.set(objectKey(identity), {
+      identity,
+      version: intent.settingsVersion,
+      snapshot: intent.snapshot
+    });
+    deps.worldAuthoring.refreshContextVersions({
+      canvasId: ledger.canvasId,
+      contextId: ledger.contextId,
+      targets: [{ ...identity, version: intent.settingsVersion }]
+    });
+    return {
+      ok: true,
+      canvasId: ledger.canvasId,
+      commandId: intent.commandId,
+      revision: result.revision,
+      duplicate: result.duplicate,
+      noop: result.noop,
+      cameraId: intent.cameraId,
+      settingsVersion: intent.settingsVersion,
+      version: intent.settingsVersion
+    };
+  }
+
   async function writeCamera(
     ledger: RunLedger,
     context: WorldToolContext,
     operation: Extract<AssistantWorldWriteOperation, { kind: "set-world-camera" }>,
-    _inspected: { ok: true; room: CanvasRoom; canvas: ServerCanvas }
+    inspected: { ok: true; room: CanvasRoom; canvas: ServerCanvas }
   ): Promise<AssistantWorldWriteOutcome> {
     const identity: WorldObjectIdentity = { kind: "camera", cameraId: operation.cameraId };
     const granted = findWritable(context, identity);
     if (!granted) return failure("outside-scope", "镜头不在本次可写集合");
     if (granted.version !== operation.expectedSettingsVersion) return failure("version-conflict", "镜头配置已变化");
-    const saved = await deps.cameraSettings.save({
-      canvasId: ledger.canvasId,
-      cameraId: operation.cameraId,
-      expectedSettingsVersion: operation.expectedSettingsVersion,
-      settings: operation.settings,
-      contextId: ledger.contextId,
-      actorId: `assistant-world:${context.runId}`,
-      operationId: `${operation.operationId}:${stableAuthorityVersion("assistant-world-camera-intent", {
-        expectedSettingsVersion: operation.expectedSettingsVersion,
-        settings: operation.settings
-      })}`
-    });
-    if (!saved.ok) return saved;
-    try {
-      // Durable outbox at the authoritative commit boundary: a host restart
-      // before the first successful settle must still know this exact
-      // run/completion/camera/settings pair. A failure here is reported, never
-      // hidden behind a successful tool result.
-      await rememberCommittedWrite({
+    const nodeId = findWorldCameraNodeId(inspected.canvas, operation.cameraId);
+    if (!nodeId) {
+      // No canonical camera node to bind a durable payload hash to. The
+      // authoritative save remains the only judge (it reports not-found for a
+      // real missing camera); embedded/test stores may still return a result.
+      let direct: Awaited<ReturnType<typeof deps.cameraSettings.save>>;
+      try {
+        direct = await deps.cameraSettings.save({
+          canvasId: ledger.canvasId,
+          cameraId: operation.cameraId,
+          expectedSettingsVersion: operation.expectedSettingsVersion,
+          settings: operation.settings,
+          contextId: ledger.contextId,
+          actorId: `assistant-world:${context.runId}`,
+          operationId: operation.operationId
+        });
+      } catch (error) {
+        return failure("not-ready", error instanceof Error ? error.message : "镜头保存失败");
+      }
+      if (!direct.ok) return direct;
+      try {
+        await rememberCommittedWrite({
+          canvasId: ledger.canvasId,
+          requestId: ledger.requestId,
+          runId: ledger.runId,
+          epoch: ledger.epoch,
+          executionId: ledger.executionId,
+          contextId: ledger.contextId,
+          completionId: ledger.completionId,
+          cameraId: operation.cameraId,
+          settingsVersion: direct.settingsVersion,
+          snapshot: direct.camera
+        });
+      } catch (error) {
+        return failure("not-ready", error instanceof Error ? error.message : "世界写入事实保存失败");
+      }
+      ledger.writes.set(objectKey(identity), {
+        identity,
+        version: direct.settingsVersion,
+        snapshot: direct.camera
+      });
+      deps.worldAuthoring.refreshContextVersions({
         canvasId: ledger.canvasId,
-        requestId: ledger.requestId,
-        runId: ledger.runId,
-        epoch: ledger.epoch,
-        executionId: ledger.executionId,
         contextId: ledger.contextId,
-        completionId: ledger.completionId,
+        targets: [{ ...identity, version: direct.settingsVersion }]
+      });
+      return {
+        ok: true,
+        canvasId: ledger.canvasId,
+        commandId: direct.commandId,
+        revision: direct.revision,
+        duplicate: direct.duplicate,
+        noop: false,
         cameraId: operation.cameraId,
-        settingsVersion: saved.settingsVersion,
-        snapshot: saved.camera
+        settingsVersion: direct.settingsVersion,
+        version: direct.settingsVersion
+      };
+    }
+    const planned = planWorldCameraSettings(operation.cameraId, operation.settings);
+    if ("ok" in planned) return failure(planned.code === "not-ready" ? "not-ready" : "invalid-data", planned.message);
+    const intentHash = stableAuthorityVersion("assistant-world-camera-intent", {
+      expectedSettingsVersion: operation.expectedSettingsVersion,
+      settings: operation.settings
+    });
+    // Exact command identity and frozen payload. camera-service derives the
+    // same commandId from the operation id + intent hash and is given the same
+    // expected hash, so the durable receipt can only resolve this payload.
+    const commandId = `world-camera-save:${operation.operationId}:${intentHash}`;
+    const payloadHash = await computeCommandPayloadHash({
+      canvasId: ledger.canvasId,
+      commands: [{
+        type: "nodeData.patch",
+        nodeId,
+        value: { worldCamera: planned } as unknown as CanvasNodeData
+      }]
+    });
+    const intent: AssistantWorldWriteIntent = {
+      canvasId: ledger.canvasId,
+      requestId: ledger.requestId,
+      runId: ledger.runId,
+      epoch: ledger.epoch,
+      executionId: ledger.executionId,
+      contextId: ledger.contextId,
+      completionId: ledger.completionId,
+      cameraId: operation.cameraId,
+      commandId,
+      expectedSettingsVersion: operation.expectedSettingsVersion,
+      nodeId,
+      settingsVersion: planned.settingsVersion,
+      snapshot: planned,
+      payloadHash
+    };
+    try {
+      // Durable intent *before* the canonical commit. A crash after the commit
+      // but before the independent outbox insert leaves this row; recovery can
+      // then resolve the original command receipt instead of losing history.
+      await persistWriteIntent(intent);
+    } catch (error) {
+      return failure("not-ready", error instanceof Error ? error.message : "世界写入意图保存失败");
+    }
+
+    // Same-intent retry: the previous attempt may have committed canonically
+    // while the outbox insert failed (or the process died). Resolve the real
+    // receipt first; only then adopt it. This avoids a false version-conflict
+    // from expectedSettingsVersion having already advanced.
+    const existing = await resolveWriteIntent(intent);
+    if (existing.status === "unknown") return existing.failure;
+    if (existing.status === "committed") {
+      const adopted = await adoptVerifiedIntent(intent);
+      if (!adopted.ok) return adopted;
+      return adoptIntentIntoLedger(ledger, intent, {
+        revision: existing.revision,
+        duplicate: true,
+        noop: !existing.changed
+      });
+    }
+
+    let saved: Awaited<ReturnType<typeof deps.cameraSettings.save>>;
+    try {
+      saved = await deps.cameraSettings.save({
+        canvasId: ledger.canvasId,
+        cameraId: operation.cameraId,
+        expectedSettingsVersion: operation.expectedSettingsVersion,
+        settings: operation.settings,
+        contextId: ledger.contextId,
+        actorId: `assistant-world:${context.runId}`,
+        operationId: `${operation.operationId}:${intentHash}`,
+        expectedPayloadHash: payloadHash
       });
     } catch (error) {
-      return failure("not-ready", error instanceof Error ? error.message : "世界写入事实保存失败");
+      // The commit may still have happened before an exception crossed the
+      // service boundary; never assume failure without checking the receipt.
+      const resolved = await resolveWriteIntent(intent);
+      if (resolved.status === "committed") {
+        const adopted = await adoptVerifiedIntent(intent);
+        if (!adopted.ok) return adopted;
+        return adoptIntentIntoLedger(ledger, intent, {
+          revision: resolved.revision,
+          duplicate: true,
+          noop: !resolved.changed
+        });
+      }
+      if (resolved.status === "uncommitted") {
+        try {
+          await deleteWriteIntent(intent.commandId);
+        } catch {
+          // The next recovery re-checks the same absent receipt.
+        }
+      }
+      return resolved.status === "unknown"
+        ? resolved.failure
+        : failure("not-ready", error instanceof Error ? error.message : "镜头保存失败");
     }
-    ledger.writes.set(objectKey(identity), {
-      identity,
-      version: saved.settingsVersion,
-      snapshot: saved.camera
-    });
-    deps.worldAuthoring.refreshContextVersions({
-      canvasId: ledger.canvasId,
-      contextId: ledger.contextId,
-      targets: [{ ...identity, version: saved.settingsVersion }]
-    });
-    return {
-      ok: true,
-      canvasId: ledger.canvasId,
-      commandId: saved.commandId,
+    if (!saved.ok) {
+      const resolved = await resolveWriteIntent(intent);
+      if (resolved.status === "committed") {
+        const adopted = await adoptVerifiedIntent(intent);
+        if (!adopted.ok) return adopted;
+        return adoptIntentIntoLedger(ledger, intent, {
+          revision: resolved.revision,
+          duplicate: true,
+          noop: !resolved.changed
+        });
+      }
+      if (resolved.status === "uncommitted") {
+        try {
+          await deleteWriteIntent(intent.commandId);
+        } catch {
+          // The next recovery re-checks the same absent receipt.
+        }
+        return saved;
+      }
+      return resolved.failure;
+    }
+    // The canonical save returned success. Prefer the planned snapshot when it
+    // matches the canonical result; otherwise the save result is authoritative
+    // (an embedded/test store has no receipt to cross-check). A later
+    // concurrent edit can only have happened after this commit, so it must
+    // never replace the write this run actually made.
+    const matchesPlan = saved.camera.cameraId === planned.cameraId
+      && saved.settingsVersion === planned.settingsVersion;
+    let committedIntent: AssistantWorldWriteIntent = intent;
+    if (!matchesPlan) {
+      const verified = await resolveWriteIntent(intent);
+      if (verified.status !== "committed") {
+        committedIntent = { ...intent, settingsVersion: saved.settingsVersion, snapshot: saved.camera };
+      }
+    }
+    const adopted = await adoptVerifiedIntent(committedIntent);
+    if (!adopted.ok) return adopted;
+    return adoptIntentIntoLedger(ledger, committedIntent, {
       revision: saved.revision,
       duplicate: saved.duplicate,
-      noop: false,
-      cameraId: operation.cameraId,
-      settingsVersion: saved.settingsVersion,
-      version: saved.settingsVersion
-    };
+      noop: false
+    });
   }
 
   async function verifyCompletion(
@@ -1100,7 +1428,25 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     const ledger = [...ledgers.values()].find(entry => entry.canvasId === input.canvasId && entry.runId === input.runId);
     if (ledger) {
       let completionFailure: AssistantWorldFailure | null = null;
+      // Verify the exact stop before promoting anything: an unverified host
+      // execution must leave occupancy, the outbox and history untouched.
+      if (!ledger.settled) {
+        const stopped = await confirmStopped({
+          canvasId: ledger.canvasId,
+          contextId: ledger.contextId,
+          runId: ledger.runId,
+          epoch: ledger.epoch,
+          executionId: ledger.executionId,
+          evidence: input.evidence
+        });
+        if (!stopped.ok) return stopped;
+      }
       if (input.status === "succeeded" || input.status === "partial") {
+        // Resolve intents left by a commit that outlived the outbox insert (or
+        // the previous process) against their original command receipts before
+        // promoting anything for this run.
+        const reconciled = await reconcileRunIntents({ canvasId: input.canvasId, runId: input.runId });
+        if (!reconciled.ok) completionFailure ??= reconciled;
         // Always retry outstanding host facts, including after the run was
         // already settled. A settled run must still be able to补记 a failed
         // history write without re-running the assistant.
@@ -1121,19 +1467,9 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
           if (!promoted.ok) completionFailure ??= promoted;
         }
       }
-      if (!ledger.settled) {
-        const stopped = await confirmStopped({
-          canvasId: ledger.canvasId,
-          contextId: ledger.contextId,
-          runId: ledger.runId,
-          epoch: ledger.epoch,
-          executionId: ledger.executionId,
-          evidence: input.evidence
-        });
-        if (!stopped.ok) return stopped;
-      }
       if (input.status === "failed" || input.status === "cancelled") {
         await discardCommittedWrites({ canvasId: ledger.canvasId, runId: ledger.runId });
+        await discardWriteIntents({ canvasId: ledger.canvasId, runId: ledger.runId });
       }
       return completionFailure ?? { ok: true };
     }
@@ -1163,8 +1499,14 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     }
     if (input.status === "failed" || input.status === "cancelled") {
       await discardCommittedWrites({ canvasId: input.canvasId, runId: input.runId });
+      await discardWriteIntents({ canvasId: input.canvasId, runId: input.runId });
     }
     if (successStatus) {
+      // A previous process may have committed canonically and died before the
+      // outbox insert. Resolve the durable intent against the original receipt
+      // before listing the outbox; an intent alone never promotes.
+      const reconciled = await reconcileRunIntents({ canvasId: input.canvasId, runId: input.runId });
+      if (!reconciled.ok) completionFailure ??= reconciled;
       const facts = await listHostCompletions({ canvasId: input.canvasId, runId: input.runId });
       for (const fact of facts) {
         const written = await writeHostCompletion(fact, input.evidence);
@@ -1187,6 +1529,23 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
 
   async function resumePendingCompletions(): Promise<{ ok: true; attempted: number; remaining: number } | AssistantWorldFailure> {
     if (!deps.hostCompletions) return { ok: true, attempted: 0, remaining: 0 };
+    // Reconcile orphaned pre-commit intents at host start. This only creates
+    // outbox rows from verified receipts; it never promotes history without a
+    // trusted terminal turn.
+    if (deps.hostCompletions.listIntents) {
+      let intents: AssistantWorldWriteIntent[];
+      try {
+        intents = await deps.hostCompletions.listIntents();
+      } catch (error) {
+        return failure("not-ready", error instanceof Error ? error.message : "无法读取待核对的世界写入意图");
+      }
+      const runs = new Map<string, { canvasId: string; runId: string }>();
+      for (const intent of intents) runs.set(`${intent.canvasId}\u0000${intent.runId}`, { canvasId: intent.canvasId, runId: intent.runId });
+      for (const run of runs.values()) {
+        const reconciled = await reconcileRunIntents(run);
+        if (!reconciled.ok) return reconciled;
+      }
+    }
     let facts: HostCompletion[];
     try {
       facts = await deps.hostCompletions.list();
