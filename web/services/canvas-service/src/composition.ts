@@ -66,7 +66,7 @@ import type { CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } f
 import { createWorldConversionService } from "./world-authoring/conversion-service.js";
 import { createWorldAuthoringAuthority } from "./world-authoring/authority.js";
 import { createWorldAuthoringService } from "./world-authoring/scene-area-service.js";
-import { createWorldCameraSettingsService } from "./world-authoring/camera-service.js";
+import { createWorldCameraSettingsService, type WorldCameraCompletionVerification } from "./world-authoring/camera-service.js";
 import { createAssistantWorldService } from "./world-authoring/assistant-service.js";
 import { createWorldCaptureService, type WorldCaptureService } from "./world-authoring/capture-service.js";
 
@@ -770,7 +770,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       return repository.findLatestWorldAuthoringCommand(canvasId, operationId);
     }
   }) : null;
-  let completionVerifier: ((completion: import("@woohaa3/contracts").WorldCompletion, evidence: unknown) => boolean | Promise<boolean>) | undefined =
+  let completionVerifier: ((completion: import("@woohaa3/contracts").WorldCompletion, evidence: unknown) => WorldCameraCompletionVerification | Promise<WorldCameraCompletionVerification>) | undefined =
     options.verifyWorldCameraCompletion;
   const cameraSettings = sync && cameraHistory ? createWorldCameraSettingsService({
     resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),

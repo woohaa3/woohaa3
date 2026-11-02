@@ -653,6 +653,28 @@ describe("assistant world authoring through the real canvas queue", () => {
       expect(await history.list(canvas.id, "camera-1")).toHaveLength(0);
       expect(await hostFacts.list({ canvasId: canvas.id, runId: "run-1" })).toHaveLength(1);
 
+      // A legitimate later edit changes the current camera after the failed
+      // history write. The frozen host fact must still record the completion
+      // version this run wrote, never the newer edit.
+      const later = await cameraSettings.save({
+        canvasId: canvas.id,
+        cameraId: "camera-1",
+        expectedSettingsVersion: written.settingsVersion!,
+        operationId: "later-camera-edit",
+        actorId: "integration-test",
+        settings: {
+          position: { u: 5, v: 5, h: 3.5 },
+          rotation: [0, 0, 0, 1],
+          projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+          captureMode: { kind: "static" },
+          aspect: { width: 16, height: 9 },
+          boundInstanceId: null
+        }
+      });
+      expect(later.ok).toBe(true);
+      if (!later.ok) return;
+      expect(later.settingsVersion).not.toBe(written.settingsVersion);
+
       // Process rebuild: the in-process ledger/cache is gone, but the trusted
       // fact and the exact lease survive. A successful terminal settle must
       // write history once and release the original occupancy.
@@ -672,6 +694,8 @@ describe("assistant world authoring through the real canvas queue", () => {
         runId: "run-1",
         cameraId: "camera-1"
       });
+      expect(entries[0]?.snapshot.camera.settingsVersion).toBe(written.settingsVersion);
+      expect(entries[0]?.snapshot.camera.position.h).toBe(2);
       expect(await hostFacts.list()).toHaveLength(0);
       expect(await repository.pendingSpatialRuns()).toHaveLength(0);
 

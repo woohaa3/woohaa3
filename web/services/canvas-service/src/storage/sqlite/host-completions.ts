@@ -6,6 +6,7 @@
  * restarts until the exact T08 history write succeeds.
  */
 import type { DatabaseSync } from "node:sqlite";
+import { decodeWorldCamera } from "@woohaa3/contracts";
 import { loadNodeSqlite } from "./sqlite-loader.js";
 import { CanvasStorageError } from "../core/errors.js";
 import {
@@ -16,7 +17,7 @@ import {
   type AssistantHostCompletionRepository
 } from "../../world-authoring/host-completions.js";
 
-export const SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION = 1;
+export const SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION = 2;
 
 export type SqliteAssistantHostCompletionRepositoryOptions = {
   path: string;
@@ -33,6 +34,7 @@ type Row = {
   camera_id: string;
   settings_version: string;
   status: string;
+  camera_json: string | null;
 };
 
 export class SqliteAssistantHostCompletionRepository implements AssistantHostCompletionRepository {
@@ -91,9 +93,17 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
           camera_id TEXT NOT NULL,
           settings_version TEXT NOT NULL,
           status TEXT NOT NULL,
+          camera_json TEXT,
           created_at TEXT NOT NULL
         )
       `);
+      // Migrate v1 databases in place: the frozen camera settings are required to
+      // finish a completion after the current camera changed. Existing rows stay
+      // valid with a NULL snapshot and keep the fail-closed current-camera path.
+      const columns = this.db.prepare("PRAGMA table_info(assistant_host_completions)").all() as Array<{ name: string }>;
+      if (!columns.some(column => column.name === "camera_json")) {
+        this.db.exec("ALTER TABLE assistant_host_completions ADD COLUMN camera_json TEXT");
+      }
       this.db.exec(
         "CREATE INDEX IF NOT EXISTS idx_ahc_run ON assistant_host_completions(canvas_id, run_id)"
       );
@@ -108,12 +118,13 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
       this.db
         .prepare(
           `INSERT INTO assistant_host_completions
-             (completion_key, canvas_id, request_id, run_id, completion_id, camera_id, settings_version, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             (completion_key, canvas_id, request_id, run_id, completion_id, camera_id, settings_version, status, camera_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(completion_key) DO UPDATE SET
              request_id = excluded.request_id,
              settings_version = excluded.settings_version,
-             status = excluded.status`
+             status = excluded.status,
+             camera_json = excluded.camera_json`
         )
         .run(
           hostCompletionKey(fact),
@@ -124,6 +135,7 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
           fact.cameraId,
           fact.settingsVersion,
           fact.status,
+          fact.snapshot ? JSON.stringify(fact.snapshot) : null,
           this.now()
         );
     });
@@ -187,8 +199,19 @@ function rowToFact(row: Row): AssistantHostCompletionFact {
     completionId: row.completion_id,
     cameraId: row.camera_id,
     settingsVersion: row.settings_version,
-    status: row.status === "partial" ? "partial" : "succeeded"
+    status: row.status === "partial" ? "partial" : "succeeded",
+    ...(decodeSnapshot(row.camera_json) ?? {})
   };
+}
+
+function decodeSnapshot(value: string | null): { snapshot: NonNullable<AssistantHostCompletionFact["snapshot"]> } | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  try {
+    const decoded = decodeWorldCamera(JSON.parse(value));
+    return decoded.ok ? { snapshot: decoded.value } : null;
+  } catch {
+    return null;
+  }
 }
 
 function safeMessage(error: unknown): string {

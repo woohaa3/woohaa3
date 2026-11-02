@@ -11,6 +11,8 @@
  * released and after a restart. That is what prevents "stop confirmed" from
  * being mistaken for "history recorded".
  */
+import type { WorldCameraData } from "@woohaa3/contracts";
+
 export type AssistantHostCompletionStatus = "succeeded" | "partial";
 
 export type AssistantHostCompletionFact = {
@@ -21,6 +23,13 @@ export type AssistantHostCompletionFact = {
   cameraId: string;
   settingsVersion: string;
   status: AssistantHostCompletionStatus;
+  /**
+   * Exact camera settings the run committed. It is frozen with the fact so the
+   * history row can still be written after a later legitimate edit, a delete or
+   * a restart changed the current camera. Optional only for facts persisted by
+   * an older build; those fall back to the current camera and stay fail-closed.
+   */
+  snapshot?: WorldCameraData;
 };
 
 export type AssistantHostCompletionIdentity = {
@@ -52,7 +61,7 @@ export interface AssistantHostCompletionRepository {
 }
 
 function clone(fact: AssistantHostCompletionFact): AssistantHostCompletionFact {
-  return { ...fact };
+  return { ...fact, ...(fact.snapshot ? { snapshot: structuredClone(fact.snapshot) } : {}) };
 }
 
 export class InMemoryAssistantHostCompletionRepository implements AssistantHostCompletionRepository {

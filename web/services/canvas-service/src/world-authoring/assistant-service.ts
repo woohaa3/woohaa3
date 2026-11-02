@@ -43,6 +43,7 @@ import {
   type ServerCanvas,
   type WorldObjectIdentity,
   type WorldObjectVersion,
+  type WorldCameraData,
   type WorldTransform,
   type WorldToolContext
 } from "@woohaa3/contracts";
@@ -51,6 +52,7 @@ import type { CanvasRoom } from "../sync/room.js";
 import type { RoomCommandResult } from "../sync/room-types.js";
 import { stableAuthorityVersion, worldObjectVersion, type WorldAuthoringAuthority } from "./authority.js";
 import type { WorldCameraSettingsService } from "./camera-service.js";
+import type { WorldCameraCompletionVerification } from "./camera-service.js";
 import type { WorldAuthoringService } from "./scene-area-service.js";
 import { objectKey, type LeaseRecord, type SpatialWriteContext } from "./spatial-leases.js";
 import {
@@ -94,7 +96,7 @@ type RunLedger = {
   epoch: number;
   executionId: string;
   completionId: string;
-  writes: Map<string, { identity: WorldObjectIdentity; version: string }>;
+  writes: Map<string, { identity: WorldObjectIdentity; version: string; snapshot?: WorldCameraData }>;
   cancelled: boolean;
   /**
    * Set only after the host confirmed the exact execution stopped. A settled
@@ -140,7 +142,10 @@ export type AssistantWorldService = {
    * Host-internal camera completion verifier. The canvas composition wires it to
    * T08. It resolves durable host facts, so it may be asynchronous.
    */
-  verifyCompletion(completion: AssistantWorldCompletionInput["completion"], evidence: unknown): boolean | Promise<boolean>;
+  verifyCompletion(
+    completion: AssistantWorldCompletionInput["completion"],
+    evidence: unknown
+  ): WorldCameraCompletionVerification | Promise<WorldCameraCompletionVerification>;
   /**
    * Retry every outstanding durable host completion fact. Called at host start
    * so a transient history failure is补记 after restart without re-running the
@@ -759,7 +764,11 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       })}`
     });
     if (!saved.ok) return saved;
-    ledger.writes.set(objectKey(identity), { identity, version: saved.settingsVersion });
+    ledger.writes.set(objectKey(identity), {
+      identity,
+      version: saved.settingsVersion,
+      snapshot: saved.camera
+    });
     deps.worldAuthoring.refreshContextVersions({
       canvasId: ledger.canvasId,
       contextId: ledger.contextId,
@@ -778,13 +787,19 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     };
   }
 
-  async function verifyCompletion(completion: AssistantWorldCompletionInput["completion"], _evidence: unknown): Promise<boolean> {
+  async function verifyCompletion(
+    completion: AssistantWorldCompletionInput["completion"],
+    _evidence: unknown
+  ): Promise<WorldCameraCompletionVerification> {
     // Completion is trusted only after the host recorded the durable terminal
     // turn fact plus the exact camera/version this run wrote. A model reply,
     // transport boolean, capture refresh or later generation never inserts it.
     const recorded = recordedCompletions.get(hostCompletionKey(completion));
     if (recorded) {
-      return recorded.settingsVersion === completion.settingsVersion && recorded.cameraId === completion.cameraId;
+      if (recorded.settingsVersion !== completion.settingsVersion || recorded.cameraId !== completion.cameraId) return false;
+      // The frozen settings travel with the trusted fact so the history row can
+      // still be written after a later edit, delete or restart.
+      return recorded.snapshot ? { snapshot: recorded.snapshot } : true;
     }
     const host = await loadHostCompletion(completion);
     if (!host) return false;
@@ -795,14 +810,17 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       const identity: WorldObjectIdentity = { kind: "camera", cameraId: completion.cameraId };
       const write = ledger.writes.get(objectKey(identity));
       if (!write) return false;
-      return sameIdentity(write.identity, identity) && write.version === completion.settingsVersion;
+      if (!sameIdentity(write.identity, identity) || write.version !== completion.settingsVersion) return false;
+      const snapshot = host.snapshot ?? write.snapshot;
+      return snapshot ? { snapshot } : true;
     }
     // Reopened process: the durable host fact itself carries the exact issued
-    // identities (its key includes canvas/run/completion/camera) and the
-    // settingsVersion. It is only written from a successful terminal turn.
-    return host.canvasId === completion.canvasId
-      && host.runId === completion.runId
-      && host.completionId === completion.completionId;
+    // identities (its key includes canvas/run/completion/camera), the
+    // settingsVersion and the frozen camera settings this run committed.
+    if (host.canvasId !== completion.canvasId
+      || host.runId !== completion.runId
+      || host.completionId !== completion.completionId) return false;
+    return host.snapshot ? { snapshot: host.snapshot } : true;
   }
 
   async function complete(input: AssistantWorldCompletionInput): Promise<AssistantWorldCompletionOutcome> {
@@ -897,7 +915,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     evidence: unknown
   ): Promise<{ ok: true } | AssistantWorldFailure> {
     const cameraWrites = [...ledger.writes.values()].filter(
-      (entry): entry is { identity: Extract<WorldObjectIdentity, { kind: "camera" }>; version: string } =>
+      (entry): entry is { identity: Extract<WorldObjectIdentity, { kind: "camera" }>; version: string; snapshot?: WorldCameraData } =>
         entry.identity.kind === "camera"
     );
     if (cameraWrites.length === 0) return { ok: true };
@@ -910,7 +928,8 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         completionId: ledger.completionId,
         cameraId: cameraWrite.identity.cameraId,
         settingsVersion: cameraWrite.version,
-        status
+        status,
+        ...(cameraWrite.snapshot ? { snapshot: cameraWrite.snapshot } : {})
       };
       const key = hostCompletionKey(fact);
       if (recordedCompletions.has(key)) continue;

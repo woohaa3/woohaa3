@@ -116,7 +116,20 @@ function harness(overrides: {
       async save(input: never) {
         const value = input as unknown as Record<string, unknown>;
         saved.push(value);
-        return { ok: true, canvasId: "canvas-1", cameraId: "camera-1", commandId: "camera-cmd", revision: 3, duplicate: false, camera: {}, settingsVersion: "cv-2" } as never;
+        return { ok: true, canvasId: "canvas-1", cameraId: "camera-1", commandId: "camera-cmd", revision: 3, duplicate: false,
+          camera: {
+            kind: "world-camera",
+            version: "shared-world-v1",
+            cameraId: "camera-1",
+            settingsVersion: "cv-2",
+            position: { u: 0, v: 0, h: 2 },
+            rotation: [0, 0, 0, 1],
+            projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+            captureMode: { kind: "static" },
+            aspect: { width: 16, height: 9 },
+            boundInstanceId: null
+          },
+          settingsVersion: "cv-2" } as never;
       },
       async complete(input: never) {
         const value = input as unknown as Record<string, unknown>;
@@ -319,7 +332,8 @@ describe("assistant world authority", () => {
     });
     expect(settled).toEqual({ ok: true });
     expect(completed).toHaveLength(1);
-    expect(await service.verifyCompletion(completion, undefined)).toBe(true);
+    const verified = await service.verifyCompletion(completion, undefined);
+    expect(verified).toMatchObject({ snapshot: { cameraId: "camera-1", settingsVersion: "cv-2" } });
 
     const first = await service.complete({ contextId: issued.context.contextId, completion });
     expect(first).toMatchObject({ ok: true, duplicate: true });
