@@ -21,6 +21,7 @@ import { AuthoringMcpButton } from "../../plugins/task-execution/model-parameter
 import { Button } from "@woohaa3/ui/primitives";
 import { SendIcon } from "@woohaa3/ui/icons";
 import { resolveAgentDetailAction } from "../../plugins/task-execution/execution-panel/agent-detail-action.js";
+import { usePanelCollapse } from "../../plugins/task-execution/execution-panel/collapse-context.js";
 import type { AgentConversationSnapshotView } from "../../contract/agent-conversation.js";
 import type { AuthoringGenerationProps } from "../../contract/authoring.js";
 import { assistantInputController } from "../../services/assistant-execution/controller.js";
@@ -388,6 +389,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     );
   };
 
+  const collapse = usePanelCollapse();
   const reason =
     referenceError ||
     selection?.error ||
@@ -410,11 +412,14 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       data-presentation={props.presentation ?? "dock"}
       data-mode={props.mode}
       data-source-id={sourceId}
+      data-collapsed={collapse.collapsed ? "true" : undefined}
     >
       <AuthoringGenerateLayout
         inspector={inspector}
         presentation={props.presentation === "expanded" ? "expanded" : "dock"}
         requestPresentation={props.requestPresentation}
+        collapsedValue={delivery ? (deliveryInput?.prompt ?? "") : prompt}
+        collapsedPlaceholder={target.placeholder}
         onRefresh={() => {
           // 刷新按钮同时重读连接与模型目录：模型目录不在连接目录里（本机来源按 adapter 读取），
           // 只刷新连接会让按钮看起来「点了没用」。

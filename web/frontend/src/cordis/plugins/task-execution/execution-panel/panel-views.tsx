@@ -20,7 +20,7 @@ import { promptSubmitHint } from "../prompt-keyboard.js";
 import type { ExecutionPanelData, ExecutionPanelSkill, ExecutionPanelStatus } from "./types.js";
 import type { AgentDetailAction } from "./agent-detail-action.js";
 
-const PLACEHOLDER =
+export const PLACEHOLDER =
 	"描述任何你想要生成的内容，按 @ 引用身份资产；Enter 生成，Shift+Enter 换行";
 
 const BLOCKING_REASONS_ID = "mc-panel-blocking-reasons";
@@ -34,6 +34,7 @@ export function PanelHeader({
 	expanded,
 	onExpand,
 	onCollapse,
+	onCollapseToBar,
 	onClose,
 }: {
 	referencesSlot?: React.ReactNode;
@@ -43,6 +44,8 @@ export function PanelHeader({
 	expanded: boolean;
 	onExpand: () => void;
 	onCollapse: () => void;
+	/** 收成贴底的一条输入条（由底边栏表面提供；未提供时不渲染该按钮）。 */
+	onCollapseToBar?: () => void;
 	onClose?: () => void;
 }) {
 	return (
@@ -75,6 +78,17 @@ export function PanelHeader({
 								) : (
 									<ExpandIcon className="mc-panel__icon" />
 								)}
+							</button>
+						) : null}
+						{!expanded && onCollapseToBar ? (
+							<button
+								type="button"
+								className="mc-panel__collapse-bar"
+								data-tooltip="收起成输入条"
+								aria-label="收起成底部输入条"
+								onClick={onCollapseToBar}
+							>
+								<ChevronDownIcon className="mc-panel__icon" />
 							</button>
 						) : null}
 						{onClose ? (

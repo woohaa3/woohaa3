@@ -28,6 +28,7 @@ export function TextExecutionHost(props: {
       nodeId={props.nodeId}
       presentation={props.presentation}
       runtime={props.runtime}
+      collapsible
     >
       <AuthoringGenerateHost
         canvasId={props.canvasId}

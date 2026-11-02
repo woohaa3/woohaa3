@@ -38,6 +38,7 @@ import { FormatToolbar } from "./format-toolbar.js";
 import { ModelSelector, SettingsMenu } from "./model-selector.js";
 import {
 	BlockingBlock,
+	PLACEHOLDER,
 	PanelHeader,
 	PromptBox,
 	RunActions,
@@ -45,7 +46,10 @@ import {
 	AgentDetailBlock,
 	VideoEditEntryBlock,
 } from "./panel-views.js";
+import { CollapsedBar } from "./collapsed-bar.js";
+import { usePanelCollapse } from "./collapse-context.js";
 import "./execution-panel.css";
+import "./collapsed-bar.css";
 
 export { ExecutionPanelModelNav } from "./model-nav.js";
 export type { ExecutionPanelModelNavProps } from "./model-nav.js";
@@ -151,6 +155,10 @@ export function ExecutionPanel({
 	const busyLabel = status === "pending" ? "排队中" : pendingLabel;
 	// 受控 presentation（design D5）：组件不再持有 expanded 本地权威状态。
 	const expanded = presentation === "expanded";
+	// 底边条折叠：只有贴着画布底边（dock 面）时才可折叠；全屏面与 fixture 一律完整渲染。
+	const panelCollapse = usePanelCollapse();
+	const collapsesToBar = panelCollapse.collapsible && surface === "dock" && !expanded;
+	const collapsed = collapsesToBar && panelCollapse.collapsed;
 
 	const [prompt, setPrompt] = useState(data.panelPrompt ?? "");
 	const [polishOpen, setPolishOpen] = useState(false);
@@ -282,6 +290,7 @@ export function ExecutionPanel({
 			expanded={expanded}
 			onExpand={() => onExpand?.()}
 			onCollapse={() => onCollapse?.()}
+			{...(collapsesToBar ? { onCollapseToBar: panelCollapse.collapse } : {})}
 			{...(onClose ? { onClose } : {})}
 		/>
 	);
@@ -501,7 +510,18 @@ export function ExecutionPanel({
 	// 组件本身不再自绘 overlay（design D5）。
 	return (
 		<div className="mc-panel__host" data-surface={expanded ? "canvas" : surface}>
-			{editor}
+			{collapsed ? (
+				<CollapsedBar
+					value={prompt}
+					placeholder={PLACEHOLDER}
+					status={status}
+					{...(STATUS_LABEL[status] ? { statusLabel: STATUS_LABEL[status] } : {})}
+					{...(disabledHint ? { hint: disabledHint } : {})}
+					onExpand={panelCollapse.expand}
+				/>
+			) : (
+				editor
+			)}
 		</div>
 	);
 }

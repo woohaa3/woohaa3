@@ -16,7 +16,10 @@ describe("执行面板呈现表面", () => {
     const html = renderToStaticMarkup(
       createElement(ExecutionPanelPending, { nodeId: "img-1", presentation: "compact" })
     );
-    expect(html).toMatch(/^<div class="node-execution-dock" data-node-id="img-1" data-presentation="compact">/);
+    // `node-execution-bar-dock` 是贴底常驻条的修饰类；定位仍由 `layoutDockedPanel` 写在行内。
+    // 首次渲染默认收成一条（`data-collapsed="true"`），点开后才是完整面板；
+    // 首帧先 `visibility:hidden`，量完画布区域再显示（避免闪在左上角）。
+    expect(html).toMatch(/^<div class="node-execution-dock node-execution-bar-dock" data-node-id="img-1" data-presentation="compact" data-collapsed="true" style="visibility:hidden">/);
     expect(html).toContain("authoring-generate-placeholder");
   });
 

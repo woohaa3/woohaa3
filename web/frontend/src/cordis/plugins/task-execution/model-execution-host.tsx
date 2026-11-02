@@ -583,7 +583,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   );
 
   const wrapper = (
-    <ExecutionPanelSurface nodeId={context.nodeId} presentation={expanded ? "expanded" : "compact"} runtime={runtime}>
+    <ExecutionPanelSurface nodeId={context.nodeId} presentation={expanded ? "expanded" : "compact"} runtime={runtime} collapsible>
       {body}
     </ExecutionPanelSurface>
   );

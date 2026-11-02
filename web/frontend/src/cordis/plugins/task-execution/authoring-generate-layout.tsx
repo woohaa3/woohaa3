@@ -3,11 +3,15 @@ import { AssistantToolbar } from "@woohaa3/ui/assistant";
 import type { PanelPresentationIntent } from "../../contract/model-interaction.js";
 import { IconButton } from "@woohaa3/ui/primitives";
 import {
+  ChevronDownIcon,
   CloseIcon,
   CollapseIcon,
   ExpandIcon,
 } from "@woohaa3/ui/icons";
+import { usePanelCollapse } from "./execution-panel/collapse-context.js";
+import { CollapsedBar } from "./execution-panel/collapsed-bar.js";
 import "./execution-panel/execution-panel.css";
+import "./execution-panel/collapsed-bar.css";
 import "./authoring-generate-panel.css";
 
 type AuthoringLayoutProps = {
@@ -25,6 +29,10 @@ type AuthoringLayoutProps = {
   refreshing?: boolean;
   presentation?: "dock" | "expanded";
   requestPresentation?: (intent: PanelPresentationIntent) => void;
+  /** 收起成输入条后显示的内容；不传时窄条只显示占位文案。 */
+  collapsedValue?: string;
+  /** 收起成输入条后的占位文案。 */
+  collapsedPlaceholder?: string;
 };
 
 /** 普通创作与外部任务共用完整面板布局，状态与输入由任务所有者提供。 */
@@ -68,7 +76,12 @@ export function AuthoringGenerateLayout({
   refreshing,
   presentation,
   requestPresentation,
+  collapsedValue,
+  collapsedPlaceholder = "描述你想生成的内容…",
 }: AuthoringLayoutProps) {
+  // 贴底时由表面提供折叠能力；全屏面与独立渲染（无 provider）拿到的 `collapsible` 是 false。
+  const collapse = usePanelCollapse();
+  const collapsesToBar = collapse.collapsible && presentation !== "expanded";
   const toolbar = (
     <AssistantToolbar
       assistant={assistant}
@@ -113,6 +126,16 @@ export function AuthoringGenerateLayout({
           <CloseIcon size={16} />
         </IconButton>
       ) : null}
+      {presentation !== "expanded" && collapsesToBar ? (
+        <IconButton
+          label="收起成输入条"
+          title="收起成输入条"
+          size="sm"
+          onClick={collapse.collapse}
+        >
+          <ChevronDownIcon size={16} />
+        </IconButton>
+      ) : null}
     </div>
   ) : null;
   const headerTools = (
@@ -135,6 +158,16 @@ export function AuthoringGenerateLayout({
         {toolbar}
       </>
     );
+
+  if (collapse.collapsed) {
+    return (
+      <CollapsedBar
+        value={collapsedValue ?? ""}
+        placeholder={collapsedPlaceholder}
+        onExpand={collapse.expand}
+      />
+    );
+  }
 
   return (
     <>
