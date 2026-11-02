@@ -282,7 +282,7 @@ export function MarketplaceInstallPanel({
       {entry.dependencies ? <li>依赖：{Object.entries(entry.dependencies).map(([id, range]) => `${id}@${range}`).join("、")}</li> : null}
       <li>
         签名公钥：
-        {entry.keyId ? `${entry.keyId}${trusted === true ? "（本机已信任）" : trusted === false ? "（本机未信任）" : ""}` : "来源未声明；安装时按本机信任根校验"}
+        {entry.keyId ? `${entry.keyId}${(entry.certificateId || entry.trustDomain || entry.signerKeyId || /^[a-f0-9]{64}$/.test(entry.keyId)) ? "（安装时验证证书链）" : trusted === true ? "（本机已信任）" : trusted === false ? "（本机未信任）" : ""}` : "来源未声明；安装时按本机信任根校验"}
       </li>
     </ul>
   );

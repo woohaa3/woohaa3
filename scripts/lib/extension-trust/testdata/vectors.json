@@ -1,0 +1,1234 @@
+{
+  "warning": "TEST ONLY: ephemeral public evidence; not a production root",
+  "root": {
+    "schemaVersion": 2,
+    "kind": "root",
+    "trustDomain": "test-only",
+    "version": 1,
+    "issuedAt": 1799999940,
+    "expiresAt": 1800003600,
+    "keys": {
+      "bd5e50fafa01e7ea7430676195fef6728ebb7b8fc28575fee142d63ee587954a": "MCowBQYDK2VwAyEAuamWQvz2lC7UWwV3cgE85YneGZof4sYOVIsgGt+8qz0=",
+      "913db3bc5b7dac323e53481ac58d78434744d16a7a3f28a61aeecb4d20061101": "MCowBQYDK2VwAyEArRYnvhhKOXuDdHlO1n7g8KHuPoWNpmIZTsuJ0U+XT/U=",
+      "2eacc3a67af92aba6a3da9bdc0ba4ee0c75d9f54e56fa7727b90768a8c2a0f51": "MCowBQYDK2VwAyEAlpD+TyvkbnwGmxvCYIq94dHs+II6vTu74a5Io+hImkk=",
+      "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41": "MCowBQYDK2VwAyEA8KrN94OhdAhmDz2OUz80gJRx6iOUsPxK+ruuY00hI+s=",
+      "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448": "MCowBQYDK2VwAyEARtebcWu51LXpndo6RA7oDM89BZb3RYePJDA8AgjS8wk=",
+      "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86": "MCowBQYDK2VwAyEAqSV0eX9K3L2dAQcTVGiFrNQ0LWQjiBT3z9zxJp1pR0w=",
+      "63372bcf3e1da4425cad0c0154fc087337bf4751f91c3b2375800d4644875296": "MCowBQYDK2VwAyEAb9I5MFo8a1oXnKVtz5Qm61qaxOUlNz6l9m0Cws3+7JE=",
+      "bb7a9cf45d817e8d145d8f5ac2bf8e9e3d4b255f0c11d1c7ed48ef75027c376d": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY="
+    },
+    "roles": {
+      "root": {
+        "keyIds": [
+          "bd5e50fafa01e7ea7430676195fef6728ebb7b8fc28575fee142d63ee587954a",
+          "913db3bc5b7dac323e53481ac58d78434744d16a7a3f28a61aeecb4d20061101"
+        ],
+        "threshold": 2
+      },
+      "issuer": {
+        "keyIds": [
+          "2eacc3a67af92aba6a3da9bdc0ba4ee0c75d9f54e56fa7727b90768a8c2a0f51"
+        ],
+        "threshold": 1
+      },
+      "targets": {
+        "keyIds": [
+          "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41"
+        ],
+        "threshold": 1
+      },
+      "snapshot": {
+        "keyIds": [
+          "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448"
+        ],
+        "threshold": 1
+      },
+      "timestamp": {
+        "keyIds": [
+          "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86"
+        ],
+        "threshold": 1
+      }
+    }
+  },
+  "bundle": {
+    "targets": {
+      "signed": {
+        "deniedFilesDigests": [],
+        "expiresAt": 1800003600,
+        "issuedAt": 1799999940,
+        "kind": "targets",
+        "owners": {
+          "photocraft": {
+            "generation": 1,
+            "publisherId": "test-publisher"
+          }
+        },
+        "revokedCertificates": [],
+        "revokedIssuers": [],
+        "revokedKeys": [],
+        "schemaVersion": 2,
+        "trustDomain": "test-only",
+        "version": 1
+      },
+      "signatures": [
+        {
+          "keyId": "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41",
+          "sig": "I9tFcxCnk5wYAKXp/Jv1JYgqnvxV6737pwDWKVqOjqG12kUEpwOV3lnlLpsG0fmecm768Tl1gPahPbAUtVwwCQ=="
+        }
+      ]
+    },
+    "snapshot": {
+      "signed": {
+        "expiresAt": 1800003600,
+        "issuedAt": 1799999940,
+        "kind": "snapshot",
+        "schemaVersion": 2,
+        "targetsDigest": "0be074e4b7ea84d600257e80ae423ef98a835248b507dee4f7c60874f40851d3",
+        "targetsVersion": 1,
+        "trustDomain": "test-only",
+        "version": 1
+      },
+      "signatures": [
+        {
+          "keyId": "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448",
+          "sig": "nHYIep4tWr30X7maAcz4Ckx6igkOyd03HNvs15QbpyOG1R8J19aiHcZ6v52qVfYNuIBXHvpIgv17WlEwCA2tCA=="
+        }
+      ]
+    },
+    "timestamp": {
+      "signed": {
+        "expiresAt": 1800003600,
+        "issuedAt": 1799999940,
+        "kind": "timestamp",
+        "schemaVersion": 2,
+        "snapshotDigest": "28755dca658d506db6451ec864bcf676c5c27f2c034a7b76767d1665037a1935",
+        "snapshotVersion": 1,
+        "trustDomain": "test-only",
+        "version": 1
+      },
+      "signatures": [
+        {
+          "keyId": "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86",
+          "sig": "7fB+9s4IrrxBUUi/NJFIbQZNaZt3yE7nWPcoXp3SmqwE+ArgpoAVD71ziAiw54AHVDkuodr3WLFXNXJfhm0eCg=="
+        }
+      ]
+    }
+  },
+  "chain": {
+    "issuer": {
+      "signed": {
+        "expiresAt": 1800003600,
+        "extensionIds": [
+          "photocraft"
+        ],
+        "issuedAt": 1799999940,
+        "kind": "issuer",
+        "maxLeafSeconds": 86400,
+        "pathLength": 0,
+        "publicKey": "MCowBQYDK2VwAyEAb9I5MFo8a1oXnKVtz5Qm61qaxOUlNz6l9m0Cws3+7JE=",
+        "schemaVersion": 2,
+        "trustDomain": "test-only",
+        "version": 1
+      },
+      "signatures": [
+        {
+          "keyId": "2eacc3a67af92aba6a3da9bdc0ba4ee0c75d9f54e56fa7727b90768a8c2a0f51",
+          "sig": "Rz3TaYMgbLp4dpeOJ8gsa46FBp9Po5Z6WzDec0nwUf4qA538xnECR6apUh6dHW/k9D455vKmLwgo+uY76uhnAQ=="
+        }
+      ]
+    },
+    "publisher": {
+      "signed": {
+        "expiresAt": 1800003600,
+        "extensionId": "photocraft",
+        "issuedAt": 1799999940,
+        "issuerId": "76f930cfe8620c3de9a907e448aedc403bb5ab7dd882151f4bba0497b3821be1",
+        "keyUsage": "package-signing",
+        "kind": "publisher",
+        "publicKey": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY=",
+        "publisherId": "test-publisher",
+        "schemaVersion": 2,
+        "serial": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "trustDomain": "test-only",
+        "version": 1
+      },
+      "signatures": [
+        {
+          "keyId": "63372bcf3e1da4425cad0c0154fc087337bf4751f91c3b2375800d4644875296",
+          "sig": "qIzbT8MfFfsKTsA3B02y+bfT3xZmfnTOSTsFC21aAHPx8MK4GBjbKVCBZDGeDaHMCSOin8IQZ6RNJP8lKtFCAg=="
+        }
+      ]
+    }
+  },
+  "envelope": {
+    "signed": {
+      "certificateId": "ffd82b5d96f793b1e06e5ed8df163385458829adb7e78b80db90469d948e72e8",
+      "extensionId": "photocraft",
+      "filesDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "kind": "package",
+      "schemaVersion": 2,
+      "trustDomain": "test-only"
+    },
+    "signatures": [
+      {
+        "keyId": "bb7a9cf45d817e8d145d8f5ac2bf8e9e3d4b255f0c11d1c7ed48ef75027c376d",
+        "sig": "0v/iWe3/QEPV4Cpw2iuI+jtJ99IGUwMI/zAJo09OigClF9DF2bb++NafvtzIk9ttmlsj3/GZltGPgPNrUtzyDw=="
+      }
+    ]
+  },
+  "now": 1800000000,
+  "filesDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "extensionId": "photocraft",
+  "floors": {
+    "root": 1,
+    "targets": 1,
+    "snapshot": 1,
+    "timestamp": 1
+  },
+  "cases": [
+    {
+      "name": "valid",
+      "accepted": true
+    },
+    {
+      "name": "wrong-extension",
+      "extensionId": "other",
+      "accepted": false
+    },
+    {
+      "name": "expired",
+      "now": 1800004000,
+      "accepted": false
+    },
+    {
+      "name": "wrong-domain",
+      "chain": {
+        "issuer": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionIds": [
+              "photocraft"
+            ],
+            "issuedAt": 1799999940,
+            "kind": "issuer",
+            "maxLeafSeconds": 86400,
+            "pathLength": 0,
+            "publicKey": "MCowBQYDK2VwAyEAb9I5MFo8a1oXnKVtz5Qm61qaxOUlNz6l9m0Cws3+7JE=",
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "2eacc3a67af92aba6a3da9bdc0ba4ee0c75d9f54e56fa7727b90768a8c2a0f51",
+              "sig": "Rz3TaYMgbLp4dpeOJ8gsa46FBp9Po5Z6WzDec0nwUf4qA538xnECR6apUh6dHW/k9D455vKmLwgo+uY76uhnAQ=="
+            }
+          ]
+        },
+        "publisher": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionId": "photocraft",
+            "issuedAt": 1799999940,
+            "issuerId": "76f930cfe8620c3de9a907e448aedc403bb5ab7dd882151f4bba0497b3821be1",
+            "keyUsage": "package-signing",
+            "kind": "publisher",
+            "publicKey": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY=",
+            "publisherId": "test-publisher",
+            "schemaVersion": 2,
+            "serial": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trustDomain": "another",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "63372bcf3e1da4425cad0c0154fc087337bf4751f91c3b2375800d4644875296",
+              "sig": "8ovKBl5sCvEPD9sqe4P/O7q1VxHlhZhRkMqxNjaInsur1FzP/jqJT6H/Asw89iTcih6pufmJknWJLUIDDiJ+CQ=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "wrong-owner",
+      "chain": {
+        "issuer": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionIds": [
+              "photocraft"
+            ],
+            "issuedAt": 1799999940,
+            "kind": "issuer",
+            "maxLeafSeconds": 86400,
+            "pathLength": 0,
+            "publicKey": "MCowBQYDK2VwAyEAb9I5MFo8a1oXnKVtz5Qm61qaxOUlNz6l9m0Cws3+7JE=",
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "2eacc3a67af92aba6a3da9bdc0ba4ee0c75d9f54e56fa7727b90768a8c2a0f51",
+              "sig": "Rz3TaYMgbLp4dpeOJ8gsa46FBp9Po5Z6WzDec0nwUf4qA538xnECR6apUh6dHW/k9D455vKmLwgo+uY76uhnAQ=="
+            }
+          ]
+        },
+        "publisher": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionId": "photocraft",
+            "issuedAt": 1799999940,
+            "issuerId": "76f930cfe8620c3de9a907e448aedc403bb5ab7dd882151f4bba0497b3821be1",
+            "keyUsage": "package-signing",
+            "kind": "publisher",
+            "publicKey": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY=",
+            "publisherId": "intruder",
+            "schemaVersion": 2,
+            "serial": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "63372bcf3e1da4425cad0c0154fc087337bf4751f91c3b2375800d4644875296",
+              "sig": "WIMGTvPs/O8Mwy1YVn1EuE0DykxUyo5Vj5Eihl9Nx2Zi9EEL5PJJflH1GradFgJsY0899JNcaWSR5NpnGBWkDA=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "wrong-issuer",
+      "chain": {
+        "issuer": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionIds": [
+              "photocraft"
+            ],
+            "issuedAt": 1799999940,
+            "kind": "issuer",
+            "maxLeafSeconds": 86400,
+            "pathLength": 0,
+            "publicKey": "MCowBQYDK2VwAyEAb9I5MFo8a1oXnKVtz5Qm61qaxOUlNz6l9m0Cws3+7JE=",
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "2eacc3a67af92aba6a3da9bdc0ba4ee0c75d9f54e56fa7727b90768a8c2a0f51",
+              "sig": "Rz3TaYMgbLp4dpeOJ8gsa46FBp9Po5Z6WzDec0nwUf4qA538xnECR6apUh6dHW/k9D455vKmLwgo+uY76uhnAQ=="
+            }
+          ]
+        },
+        "publisher": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionId": "photocraft",
+            "issuedAt": 1799999940,
+            "issuerId": "0000000000000000000000000000000000000000000000000000000000000000",
+            "keyUsage": "package-signing",
+            "kind": "publisher",
+            "publicKey": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY=",
+            "publisherId": "test-publisher",
+            "schemaVersion": 2,
+            "serial": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "63372bcf3e1da4425cad0c0154fc087337bf4751f91c3b2375800d4644875296",
+              "sig": "Nnb68P7QExbU9LznhkZzzDdmzQdGQWwxWdBFhKrDT1wl1TKgcZY2qI7MCwtN7zrITSmyIbd3UZp0ozFQvvYqDQ=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "overlong-leaf",
+      "chain": {
+        "issuer": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionIds": [
+              "photocraft"
+            ],
+            "issuedAt": 1799999940,
+            "kind": "issuer",
+            "maxLeafSeconds": 86400,
+            "pathLength": 0,
+            "publicKey": "MCowBQYDK2VwAyEAb9I5MFo8a1oXnKVtz5Qm61qaxOUlNz6l9m0Cws3+7JE=",
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "2eacc3a67af92aba6a3da9bdc0ba4ee0c75d9f54e56fa7727b90768a8c2a0f51",
+              "sig": "Rz3TaYMgbLp4dpeOJ8gsa46FBp9Po5Z6WzDec0nwUf4qA538xnECR6apUh6dHW/k9D455vKmLwgo+uY76uhnAQ=="
+            }
+          ]
+        },
+        "publisher": {
+          "signed": {
+            "expiresAt": 1800003700,
+            "extensionId": "photocraft",
+            "issuedAt": 1799999940,
+            "issuerId": "76f930cfe8620c3de9a907e448aedc403bb5ab7dd882151f4bba0497b3821be1",
+            "keyUsage": "package-signing",
+            "kind": "publisher",
+            "publicKey": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY=",
+            "publisherId": "test-publisher",
+            "schemaVersion": 2,
+            "serial": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "63372bcf3e1da4425cad0c0154fc087337bf4751f91c3b2375800d4644875296",
+              "sig": "LyvH32PQfdKPG1k9TcwoSq5+f//CP98ZGQPl+r0R+azkVdgNAd+QTKDEMEF6gBhn7md/ptO8IFByyaDZzf0FDg=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "null-path-length",
+      "chain": {
+        "issuer": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionIds": [
+              "photocraft"
+            ],
+            "issuedAt": 1799999940,
+            "kind": "issuer",
+            "maxLeafSeconds": 86400,
+            "pathLength": null,
+            "publicKey": "MCowBQYDK2VwAyEAb9I5MFo8a1oXnKVtz5Qm61qaxOUlNz6l9m0Cws3+7JE=",
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "2eacc3a67af92aba6a3da9bdc0ba4ee0c75d9f54e56fa7727b90768a8c2a0f51",
+              "sig": "CEorG27S2uN8F/75Fqf1NadJ4qZAp4f1PIpTyny98RJ2SAuvt/ZZNmwRp8u9+l1kNbL94mESRYKy/qkGSODpAQ=="
+            }
+          ]
+        },
+        "publisher": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionId": "photocraft",
+            "issuedAt": 1799999940,
+            "issuerId": "76f930cfe8620c3de9a907e448aedc403bb5ab7dd882151f4bba0497b3821be1",
+            "keyUsage": "package-signing",
+            "kind": "publisher",
+            "publicKey": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY=",
+            "publisherId": "test-publisher",
+            "schemaVersion": 2,
+            "serial": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "63372bcf3e1da4425cad0c0154fc087337bf4751f91c3b2375800d4644875296",
+              "sig": "qIzbT8MfFfsKTsA3B02y+bfT3xZmfnTOSTsFC21aAHPx8MK4GBjbKVCBZDGeDaHMCSOin8IQZ6RNJP8lKtFCAg=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "bad-package-binding",
+      "envelope": {
+        "signed": {
+          "certificateId": "ffd82b5d96f793b1e06e5ed8df163385458829adb7e78b80db90469d948e72e8",
+          "extensionId": "photocraft",
+          "filesDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "kind": "package",
+          "schemaVersion": 2,
+          "trustDomain": "test-only"
+        },
+        "signatures": [
+          {
+            "keyId": "bb7a9cf45d817e8d145d8f5ac2bf8e9e3d4b255f0c11d1c7ed48ef75027c376d",
+            "sig": "dpihwSD0+2OL4beq+ehoYjK7Ha3rWoegTMhq6A0vZKxe/LmSpD+XIx5YmNxBoZYGaqOSlkp4g1y21uZpYxutBw=="
+          }
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "name": "leaf-key-rotation",
+      "chain": {
+        "issuer": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionIds": [
+              "photocraft"
+            ],
+            "issuedAt": 1799999940,
+            "kind": "issuer",
+            "maxLeafSeconds": 86400,
+            "pathLength": 0,
+            "publicKey": "MCowBQYDK2VwAyEAb9I5MFo8a1oXnKVtz5Qm61qaxOUlNz6l9m0Cws3+7JE=",
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "2eacc3a67af92aba6a3da9bdc0ba4ee0c75d9f54e56fa7727b90768a8c2a0f51",
+              "sig": "Rz3TaYMgbLp4dpeOJ8gsa46FBp9Po5Z6WzDec0nwUf4qA538xnECR6apUh6dHW/k9D455vKmLwgo+uY76uhnAQ=="
+            }
+          ]
+        },
+        "publisher": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "extensionId": "photocraft",
+            "issuedAt": 1799999940,
+            "issuerId": "76f930cfe8620c3de9a907e448aedc403bb5ab7dd882151f4bba0497b3821be1",
+            "keyUsage": "package-signing",
+            "kind": "publisher",
+            "publicKey": "MCowBQYDK2VwAyEA1nyQuePNhwfuMi3tQi3/2TYGCukr/gKC6iY053w9aSc=",
+            "publisherId": "test-publisher",
+            "schemaVersion": 2,
+            "serial": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "63372bcf3e1da4425cad0c0154fc087337bf4751f91c3b2375800d4644875296",
+              "sig": "Km0IK5YT+ULGO3oOHw1esrGnYukFVA6Jd0KGl5bUHa14MRm9LlOEr4nrn6izi7Cjjqe/m8ahed0DMGwLof1pBw=="
+            }
+          ]
+        }
+      },
+      "envelope": {
+        "signed": {
+          "certificateId": "b0ae1033617d6a9cad2863a241109d6bb70f65f3d738b83c99e3ce38da7af959",
+          "extensionId": "photocraft",
+          "filesDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "kind": "package",
+          "schemaVersion": 2,
+          "trustDomain": "test-only"
+        },
+        "signatures": [
+          {
+            "keyId": "2f4e167e2c1cc4eb520571e4543483037e8f73b9b729d8b34c37fa48d927da79",
+            "sig": "aYI7yZY+udeVWYFuDWyOjJaWJzfpHbsIK8MuaOC4kr0HGO8IspuASwyBGyibCWsqtjqSLTia2N9MnwmTHf9rBA=="
+          }
+        ]
+      },
+      "accepted": true
+    },
+    {
+      "name": "revocation-revokedKeys-10",
+      "bundle": {
+        "targets": {
+          "signed": {
+            "deniedFilesDigests": [],
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "targets",
+            "owners": {
+              "photocraft": {
+                "generation": 1,
+                "publisherId": "test-publisher"
+              }
+            },
+            "revokedCertificates": [],
+            "revokedIssuers": [],
+            "revokedKeys": [
+              "bb7a9cf45d817e8d145d8f5ac2bf8e9e3d4b255f0c11d1c7ed48ef75027c376d"
+            ],
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41",
+              "sig": "FiRIiGkvlHOaO/SMrTKjhC34UMZymJwG98DHn6+/T7DPC8mE2L4pSdONcuXIIR9PV2UXv38zPo8if5esVvILCw=="
+            }
+          ]
+        },
+        "snapshot": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "snapshot",
+            "schemaVersion": 2,
+            "targetsDigest": "e52016ff3ff3c18d511a84e8b47d40ba2e272a97d963967b3564b88d9d3339e6",
+            "targetsVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448",
+              "sig": "JIZJwhFnNCSJIoC2vvOoJsvjdTySpk9EVpIXniFGBTuf9cIfOn96Aboa+ILchHs84SSef45UjdkBYd1gn5YCAg=="
+            }
+          ]
+        },
+        "timestamp": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "timestamp",
+            "schemaVersion": 2,
+            "snapshotDigest": "b8e2a9fbeb8919058a3706a5825d4c181a428fbe54f7eb8061c5bfdc0f032954",
+            "snapshotVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86",
+              "sig": "XoEmdm7HB/vUwnb0DiHsKtyMt4jvv8i2ydRjlnYdxkCzzWM1wxNMtc7TWFi1Ob+aEvQbK6eJocb7H/ulnERPBw=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "revocation-revokedKeys-11",
+      "bundle": {
+        "targets": {
+          "signed": {
+            "deniedFilesDigests": [],
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "targets",
+            "owners": {
+              "photocraft": {
+                "generation": 1,
+                "publisherId": "test-publisher"
+              }
+            },
+            "revokedCertificates": [],
+            "revokedIssuers": [],
+            "revokedKeys": [
+              "63372bcf3e1da4425cad0c0154fc087337bf4751f91c3b2375800d4644875296"
+            ],
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41",
+              "sig": "RCBzQzLghsrdNhE3Wv+o/npjC6GAMYpYlbGLKv1cEuxsljk2Np4rBbtFivARMTScDIJNQ/OE0XnDjru/aNRhBA=="
+            }
+          ]
+        },
+        "snapshot": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "snapshot",
+            "schemaVersion": 2,
+            "targetsDigest": "dbc6ce860fc502c3a7e53a6544adc0968bf335f2553270979241336d9591c4ca",
+            "targetsVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448",
+              "sig": "NBNhoFbuYRSXN2Z49xjo1dpszZQdfC86m6cQk624KcOGpyl0+zfZoX+pJW5sH6CYt3hhTCi2ATNjWYkwXu5fDA=="
+            }
+          ]
+        },
+        "timestamp": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "timestamp",
+            "schemaVersion": 2,
+            "snapshotDigest": "b25d23aa9cf78d5db9cc92283a6c0473785d624781a522ae52c7badc27f91033",
+            "snapshotVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86",
+              "sig": "R5dsbLgIHt3KKUArmdPzFkg11COvMkn1YvgeK0UKS8w0Apj49a46cKF+RfwvlZLTEDRdQc4C8KmoeQyyGX9QAw=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "revocation-revokedIssuers-12",
+      "bundle": {
+        "targets": {
+          "signed": {
+            "deniedFilesDigests": [],
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "targets",
+            "owners": {
+              "photocraft": {
+                "generation": 1,
+                "publisherId": "test-publisher"
+              }
+            },
+            "revokedCertificates": [],
+            "revokedIssuers": [
+              "76f930cfe8620c3de9a907e448aedc403bb5ab7dd882151f4bba0497b3821be1"
+            ],
+            "revokedKeys": [],
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41",
+              "sig": "qqlIYH+WYP7y4GcqWZ6PN9ocPyRYeo/IFWLQpfwzjjEHVQXdXFx6I8D8xI9qtCfcORxYLJ1jy0YPa83XON+fBA=="
+            }
+          ]
+        },
+        "snapshot": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "snapshot",
+            "schemaVersion": 2,
+            "targetsDigest": "a3ec4af1aee093e7d97e8c3392d45b52f439ed98bfd0ea318f78d4eca34e02a8",
+            "targetsVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448",
+              "sig": "AGopThXbDUM196292xrGlp1SqWiqsJ5jna9IH6qo/kYvqGtdjJS5V/p9vhRWb11PVQ9OsWvKN2N8s5P7KS1kCQ=="
+            }
+          ]
+        },
+        "timestamp": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "timestamp",
+            "schemaVersion": 2,
+            "snapshotDigest": "544a63bb0dbca2f926ec25dbb42801830404faf1d09b6bd26a698cbac4bfc1c3",
+            "snapshotVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86",
+              "sig": "g+FM/6R4clGAnGt52iexReICBRKNFbVv/mXsnPYCJ+KohPo6se1uNGIxXkacozJLy4pyMKTXEf4trScsjNf1CQ=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "revocation-revokedCertificates-13",
+      "bundle": {
+        "targets": {
+          "signed": {
+            "deniedFilesDigests": [],
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "targets",
+            "owners": {
+              "photocraft": {
+                "generation": 1,
+                "publisherId": "test-publisher"
+              }
+            },
+            "revokedCertificates": [
+              "ffd82b5d96f793b1e06e5ed8df163385458829adb7e78b80db90469d948e72e8"
+            ],
+            "revokedIssuers": [],
+            "revokedKeys": [],
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41",
+              "sig": "ZctcAuqbZgMKaJT6xn19lQImFxmEUHzNYxWUVWTsgYnRT18HnYUt87oIzCNcunHysiegR0/n/DYW24kvxV3yCw=="
+            }
+          ]
+        },
+        "snapshot": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "snapshot",
+            "schemaVersion": 2,
+            "targetsDigest": "c304aaeacae9c14f07876155e473a607894a557764dc84501c992f7bf340b6a0",
+            "targetsVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448",
+              "sig": "3fYF9htndHK4KRjWElczt7xRL7k1vK69Op/52enYqQbMXqJ1FXGWBNkbkT7vF/8PIXYICaTGQFLyjZ1dZn0gCQ=="
+            }
+          ]
+        },
+        "timestamp": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "timestamp",
+            "schemaVersion": 2,
+            "snapshotDigest": "d6445eadd61c9cc6ee1cc8f0893a9b22f1ad0f0f4f2765c7c16ed714ca2d8b88",
+            "snapshotVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86",
+              "sig": "lgPG7uO5XfacGlnR/GIizdUoEK2ST/aHsOLBFYC0/m4UT2lXo0Kp2VOEtV9LTG5JiVETvjm98R7IXBTAJipcDQ=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "revocation-deniedFilesDigests-14",
+      "bundle": {
+        "targets": {
+          "signed": {
+            "deniedFilesDigests": [
+              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            ],
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "targets",
+            "owners": {
+              "photocraft": {
+                "generation": 1,
+                "publisherId": "test-publisher"
+              }
+            },
+            "revokedCertificates": [],
+            "revokedIssuers": [],
+            "revokedKeys": [],
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41",
+              "sig": "1S/OJiSjUfn9lpOFZ9mrJodC5BHHzPlCl5aRCXV4fidP7aOb4PUEav5qqJsS+Qzx9F2wwMIXvT1lGodiwQPIDg=="
+            }
+          ]
+        },
+        "snapshot": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "snapshot",
+            "schemaVersion": 2,
+            "targetsDigest": "9bb123de2b629667b2bf266ff30dfd4b9738bcc554de7d59eaa86d1f3c446047",
+            "targetsVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448",
+              "sig": "jpocS0UEvGX/pLkYBp9rc3ESlLwLA2wfEvjoSz/psHpzIk54r/L7lozp+RXDI4UPY06zbhCMzco9B5ezO0ATCA=="
+            }
+          ]
+        },
+        "timestamp": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "timestamp",
+            "schemaVersion": 2,
+            "snapshotDigest": "4a0c5e6ee17c8b81a49083d045dfa8f560f25a178288ac81e79921e0162d6015",
+            "snapshotVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86",
+              "sig": "Cyj/j+6PD8N7+CwP60qse7Ji9yppTebavavpCByWZNzzOjDSpSFUpzgnEgRRHp5R2oK9DmBnt3PWlWAm7sVkDA=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "legacy-grant-valid",
+      "bundle": {
+        "targets": {
+          "signed": {
+            "deniedFilesDigests": [],
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "targets",
+            "legacy": [
+              {
+                "archiveDigest": "d1129f294793b796a08bc6469843d6b6a3d91ac793cecfdad1ad2ffde6796e04",
+                "expiresAt": 1800000600,
+                "extensionId": "photocraft",
+                "filesDigest": "b4a5794fad021f76cfccbde151b92dc63296a63044ca66ae55c2e7cb419e22db",
+                "publicKey": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY=",
+                "publisherId": "test-publisher",
+                "version": "0.1.2"
+              }
+            ],
+            "owners": {
+              "photocraft": {
+                "generation": 1,
+                "publisherId": "test-publisher"
+              }
+            },
+            "revokedCertificates": [],
+            "revokedIssuers": [],
+            "revokedKeys": [],
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41",
+              "sig": "QHFKsCmO1B8EWTER+DzYLuJowG6HCnTnqgs/dOzBgCVeo3zqXH2YVpq8tJ0ON6JhSFg88duRzqy3/CIuP39gCA=="
+            }
+          ]
+        },
+        "snapshot": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "snapshot",
+            "schemaVersion": 2,
+            "targetsDigest": "3469daca2862278b900b185beab14a1aa96d0163172211786626268e44d71055",
+            "targetsVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448",
+              "sig": "VJwzSGc+DUQFBTvbfDeX/+XVacw5BfRGDuzvT/cECiSED1Lf5N5ZAPUGYFEc+F1nLXqYMMX9VDQ5Z9M1/ZPHBw=="
+            }
+          ]
+        },
+        "timestamp": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "timestamp",
+            "schemaVersion": 2,
+            "snapshotDigest": "6103cc169ffd7f70a91c56fe9c48b3ba816a3117bdfbf2eb40a6d74a781f0282",
+            "snapshotVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86",
+              "sig": "SEpNZia8X0GBaHV/W5AMqFKmoZXo6ZWwFCoxE6qbX/trwAgdHSVR/qzNMyU/pnjFmMo0o70RgrtV7jfbcHUxDg=="
+            }
+          ]
+        }
+      },
+      "accepted": true
+    },
+    {
+      "name": "legacy-grant-wildcard",
+      "bundle": {
+        "targets": {
+          "signed": {
+            "deniedFilesDigests": [],
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "targets",
+            "legacy": [
+              {
+                "archiveDigest": "d1129f294793b796a08bc6469843d6b6a3d91ac793cecfdad1ad2ffde6796e04",
+                "expiresAt": 1800000600,
+                "extensionId": "photocraft",
+                "filesDigest": "b4a5794fad021f76cfccbde151b92dc63296a63044ca66ae55c2e7cb419e22db",
+                "publicKey": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY=",
+                "publisherId": "test-publisher",
+                "version": "*"
+              }
+            ],
+            "owners": {
+              "photocraft": {
+                "generation": 1,
+                "publisherId": "test-publisher"
+              }
+            },
+            "revokedCertificates": [],
+            "revokedIssuers": [],
+            "revokedKeys": [],
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41",
+              "sig": "Axcu/1qvNrKAAgetSa7vHB7NTuRgA1IX7pB90vLfWl9ifuQnyZk0bLXNS2lzxP9fstAZk9zueX9cv3BQNtOLAA=="
+            }
+          ]
+        },
+        "snapshot": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "snapshot",
+            "schemaVersion": 2,
+            "targetsDigest": "806a72ded3600a16e26c393a4a2eedb3a2a197124b985c86ae2d2a083c4213be",
+            "targetsVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448",
+              "sig": "RPD3nYVAk8/53UlUSqrFBkH4byfxaWO50stCKBT0iS333BlenwYzyRiWc7ke8hlvBDZ3h7kTasF8liIFRmZxBA=="
+            }
+          ]
+        },
+        "timestamp": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "timestamp",
+            "schemaVersion": 2,
+            "snapshotDigest": "c131e1014d14e64ce04848c825f7e721f772c31bf806d2907d423ba5809ba669",
+            "snapshotVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86",
+              "sig": "DrfNj95EWGpTPCo+0FbgG1uZtK8SiOy6cFVgKR3q+JFZIfMXapuAuHBLceh5SJaGoaEUeiePfTYyxwNeiS0XAA=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "legacy-grant-wrong-owner",
+      "bundle": {
+        "targets": {
+          "signed": {
+            "deniedFilesDigests": [],
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "targets",
+            "legacy": [
+              {
+                "archiveDigest": "d1129f294793b796a08bc6469843d6b6a3d91ac793cecfdad1ad2ffde6796e04",
+                "expiresAt": 1800000600,
+                "extensionId": "photocraft",
+                "filesDigest": "b4a5794fad021f76cfccbde151b92dc63296a63044ca66ae55c2e7cb419e22db",
+                "publicKey": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY=",
+                "publisherId": "another",
+                "version": "0.1.2"
+              }
+            ],
+            "owners": {
+              "photocraft": {
+                "generation": 1,
+                "publisherId": "test-publisher"
+              }
+            },
+            "revokedCertificates": [],
+            "revokedIssuers": [],
+            "revokedKeys": [],
+            "schemaVersion": 2,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41",
+              "sig": "aiLxIQmF86b9RMOgozOMKRYkLycYGShXLLZGtpE/ivV9NIZwLGhvOwWsfmurMAzHSb6n9TteOWX0ANGl6wo/Ag=="
+            }
+          ]
+        },
+        "snapshot": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "snapshot",
+            "schemaVersion": 2,
+            "targetsDigest": "e05837fcc12aac2ee05629d5809516c750beafd837c15cd187ccd2c4b92776c1",
+            "targetsVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448",
+              "sig": "7xxhfIU/SKfhcxkXv2R79Ms1G95Bfam7Jvl0csmxnvJ60i7RJs5AkIZzU+bAIh4bRZNFcZqVQAe0frjJluJcDg=="
+            }
+          ]
+        },
+        "timestamp": {
+          "signed": {
+            "expiresAt": 1800003600,
+            "issuedAt": 1799999940,
+            "kind": "timestamp",
+            "schemaVersion": 2,
+            "snapshotDigest": "5e85525c1b3c14e27f39af0bc73cf7a001ebfc8a05b1b1a219bfe81e00257940",
+            "snapshotVersion": 1,
+            "trustDomain": "test-only",
+            "version": 1
+          },
+          "signatures": [
+            {
+              "keyId": "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86",
+              "sig": "gieGazPZ2vgp69A+RlR5K+odw96y5UyP0K9QE4fGqJbMgHBiqF/c+vLiOKHjt5BgukRd5EAhqlJKKiw1wme/AA=="
+            }
+          ]
+        }
+      },
+      "accepted": false
+    }
+  ],
+  "invalidJSON": [
+    "{\"x\":1,\"x\":2}",
+    "{\"x\":1,\"\\u0078\":2}",
+    "{\"x\":1.5}",
+    "[1,]",
+    "{\"x\":1}false",
+    "[01]",
+    "[-0]",
+    "[9007199254740992]",
+    "\"\\ud800\"",
+    "\"\\udc00\"",
+    "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"
+  ],
+  "canonicalJSON": [
+    {
+      "text": "{\"中文\":\"😀\",\"<\":\"&\",\"z\":9007199254740991,\"a\":-1}",
+      "canonical": "{\"<\":\"&\",\"a\":-1,\"z\":9007199254740991,\"中文\":\"😀\"}"
+    },
+    {
+      "text": "{\"\":1,\"😀\":2}",
+      "canonical": "{\"😀\":2,\"\":1}"
+    },
+    {
+      "text": "{\"escaped\":\"\\ud83d\\ude00\"}",
+      "canonical": "{\"escaped\":\"😀\"}"
+    }
+  ],
+  "archiveBase64": "H4sIAAAAAAACA+1YW1MaSxD22V+xNa8hSc99hqo8IKJBNEZBE03lYa6Awi6yi4CW//3Ughg1ldQ5lXNM6hTfy+ylt7unp3v626k3jjvNnWa91mm031zkWbrx7wMAQDC2GAHg+Ugwo6vr5XMMHPhGAhsvgElemPEGvIitPxC3qJ/nkzBG1VuU97tp8OVVmI3645DXClTFqlwTKgAqKMyKkOb9LG36HFW/oFEvKzI3NrFAXytLRX7xjdQLMKigy37qUXVlpYKGZrYfTGwHl6WlFiVYqXpkit5+SLtFD1XL24kd9F0rzFEVHdSz6dbR2XaLnE5r80bN6iY/2MmUwdnntHVa3PCjocBXZnZ4MvhwIwZ6CPVpTl/JvcY7VEG564WhOQ3j0nFUJRVUjCd5sZ0NTT9FVVSEvHidpYM5qqDrlRS+qyzCYYrJOJRzvUWXYd4sZ0KCcY4aIU3UxFgjDPVGW+/AGhYCOMm9jpwFLqKRkkirQQpllCMGIsdooRlV0fEN7Zizg67dHzE/Cod7qpsbJna2Rvpjxs/Fp5vt4CCdnkR2VeNUzdJG/ViY0UlP+Pef3l7qbcb5dWu4P+1mryZnUkx6ae3o3Tt09/XuPoJ575+vLKo+XtcfLetyPRfSUkRNwcWgBAFHfdBGgwyMKRO8Y0Ct5cZK75UimOPIrDXAtLRUEWxDGZDLMD/JTTeUto27NN3wunS5n3bRQwZ9m9DP0+OgN8C24YcXs5sOu6rDzhC32XD39KL9ITbHe8edKz05vCTn7U9n79CjOC3mskiGx5a+z548jPtmgKrI/CLQr2aioFQS6yIN2BvGCHfGgwPMWXSgJKXSRiY5jho7agmVXAF4JhhTkhMtHjLxqnljO+og7sS81clrdAvI/JWNHTo7H8a0c9ju5Dt1gk3t/ceZOmix3a0L2zqtb51v74Zt8/6g3j7sp6p5dC6OP+x9VINWsVOvdZeZeLe5scafi53m/n/X+P9e/wdB2dP+D3Ld/18IXzaT5HYzSZJk0YJRNUH155QQVZYCec8QLkqRIDgVxFvivVTWUu+8ohiCUoFbwgV4jqO0PirQYIP3WBjJjVegmdLePmjs3wRUTTAmdDNJ7irfOxN8v8jGb6YmH37vhvPcM025YcqBkMRZEAyktYxR6wCUNDFqJp2wSjBrnFJCK+IktRSIjM/cYD/yYdUcfxANLJXXjAqLGcUMnOYgNIleR4UxlcoprKTnjmopgmARhHFYcg6SE+K4ee6GKP3Y/PoiG2e7ufuh1jk5bmz8tvrHmIrn9U8oWdf/i/D/zSRBZtBd1hrhHOvX01nx+posshKF9DoMslGZl7erLF1yyfv7JEEujIt+7DtThJKXJChGr4jlXosoNbU4gAg8eOUjFpQqzrhSRBtvZZDKKvBWAxPaa6aCJEHdF0SSPOWlyRNiuhKJ/UHIt/vdkBeliPCBc4UxSC8xxUw6ENSAd1ECo5Yr6rlRoDnxgjmsQtQOIGImDFDB4ZviJe9MVoz024tnnDAhD2+e8LnkEaFbCNxVvkVwReeSL/ffrqJZGl7yuwRZK412kXGvsAzK4/IqcuOIjSroQD2zhPMIDmOPnQyeqRAlByIdlcI/uLw0utjcWa9ROJa9HZ8fjj9if1Icn+7K4XzA01PX3uOvatPT7OjSbafj47myGbXt0dnl53Mt5tOthm+fpbY1fx9vjvDk0yCdgyku8sVPx72lu8X4dbGDranfn49H/fW38T8A9vz8B2Ox3v9fBP/lwq/x59f/E277m+qfi+f1L/j6/++Fzn9/cvT3cAiF4A1+Q9Ddul7WWGONNf4v+AvcU064AB4AAA==",
+  "legacy": {
+    "archiveBase64": "H4sIAAAAAAACA+2WS28aMRCA97y/wvI1iI7t8Qsph6ghgbapSBPatFUPXu8DwvIQu5CGiv9eLUhpQ3sFona/i60ZyR7J/uy56L5r3zTvi+kk2BsAAApxMwLA7gjI9NN8G9cSMCAQHIBFUbp5AAfZ6wXyNSTkR0gIIXTmygFtEZrEw3I6bz64Ykwb21QxcFyqKuljGaMV0qHxoDT3ESgEHUWIIvIARrs0tai9iozCyHljlDXcaxEJ4Dp9WnG4SmiLYEjIuvGXGr6XyaQYTiebq/lnGUyb2KJQEUPBELyVoCxPY5saxoQ23jCjY+mF1SpRmIJynmkpQUvOvXS7ZaiqjvBb+N+d/0338v3Zbf9DOzie/1yIXf8517X/h6Dyjo6Sx25caRVF2lmfoowN04mJN5pQl2fbd4FLyew2Vgw3Md+7bE8eJ8v8tencXs3tAjvF+FWnW2Qn17iw8oTn/bL/0Dtf3nt//fHT6vN4lNn8At70vohZtmLybnzWFqO0i6tenl29zf3deXZ6SsN1GNTsn98e+6P5D4DP/WfAmKr9Pwj7PPial+//s0brSP5Lteu/krL2/yD//69Wu2oB6GwwLad+7tKSNugymVcJ2qLQZE1O17UvNTU1Nf8KPwFb9QMJABQAAA==",
+    "bundle": {
+      "targets": {
+        "signed": {
+          "deniedFilesDigests": [],
+          "expiresAt": 1800003600,
+          "issuedAt": 1799999940,
+          "kind": "targets",
+          "legacy": [
+            {
+              "archiveDigest": "d1129f294793b796a08bc6469843d6b6a3d91ac793cecfdad1ad2ffde6796e04",
+              "expiresAt": 1800000600,
+              "extensionId": "photocraft",
+              "filesDigest": "b4a5794fad021f76cfccbde151b92dc63296a63044ca66ae55c2e7cb419e22db",
+              "publicKey": "MCowBQYDK2VwAyEAMhl1bEdmjxzT4qC0Fm1S4mGVjSNfIrJRTq9uOk2ZSWY=",
+              "publisherId": "test-publisher",
+              "version": "0.1.2"
+            }
+          ],
+          "owners": {
+            "photocraft": {
+              "generation": 1,
+              "publisherId": "test-publisher"
+            }
+          },
+          "revokedCertificates": [],
+          "revokedIssuers": [],
+          "revokedKeys": [],
+          "schemaVersion": 2,
+          "trustDomain": "test-only",
+          "version": 1
+        },
+        "signatures": [
+          {
+            "keyId": "a4fd9cd14e7474b0cff04f8e93fa317e34a486cb78cf0f3fc54aafb9a0cb0f41",
+            "sig": "QHFKsCmO1B8EWTER+DzYLuJowG6HCnTnqgs/dOzBgCVeo3zqXH2YVpq8tJ0ON6JhSFg88duRzqy3/CIuP39gCA=="
+          }
+        ]
+      },
+      "snapshot": {
+        "signed": {
+          "expiresAt": 1800003600,
+          "issuedAt": 1799999940,
+          "kind": "snapshot",
+          "schemaVersion": 2,
+          "targetsDigest": "3469daca2862278b900b185beab14a1aa96d0163172211786626268e44d71055",
+          "targetsVersion": 1,
+          "trustDomain": "test-only",
+          "version": 1
+        },
+        "signatures": [
+          {
+            "keyId": "5aab542d1d01de2178817a5a192a5de33029c8ff1a058dab7659d07538cc4448",
+            "sig": "VJwzSGc+DUQFBTvbfDeX/+XVacw5BfRGDuzvT/cECiSED1Lf5N5ZAPUGYFEc+F1nLXqYMMX9VDQ5Z9M1/ZPHBw=="
+          }
+        ]
+      },
+      "timestamp": {
+        "signed": {
+          "expiresAt": 1800003600,
+          "issuedAt": 1799999940,
+          "kind": "timestamp",
+          "schemaVersion": 2,
+          "snapshotDigest": "6103cc169ffd7f70a91c56fe9c48b3ba816a3117bdfbf2eb40a6d74a781f0282",
+          "snapshotVersion": 1,
+          "trustDomain": "test-only",
+          "version": 1
+        },
+        "signatures": [
+          {
+            "keyId": "7c77241fece8061ed61a8217421f71067a947dbe3e0679b73cb5c1cad9d10a86",
+            "sig": "SEpNZia8X0GBaHV/W5AMqFKmoZXo6ZWwFCoxE6qbX/trwAgdHSVR/qzNMyU/pnjFmMo0o70RgrtV7jfbcHUxDg=="
+          }
+        ]
+      }
+    }
+  }
+}

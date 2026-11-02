@@ -7,6 +7,8 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { verifyManagedActivation } from "./extension-trust/runtime.mjs";
+import { resolveManagedRoot } from "./extension-installations.mjs";
 import { pathToFileURL } from "node:url";
 
 import { EXTENSION_DESCRIPTOR_NAME } from "./extension-scan.mjs";
@@ -28,6 +30,8 @@ import { ExtensionLoadError, FALLBACK_ORDER, resolveModuleFile } from "./extensi
  * 不同 token 得到新实例——语义与换版本目录完全一致。
  */
 export async function loadRuntimePlugin({ dir, extensionId, version, token }) {
+  const managedRoot=resolveManagedRoot({repoRoot:process.env.WOOHAA3_REPO_ROOT??process.cwd()});
+  if (!token && path.resolve(dir).startsWith(path.join(managedRoot,"installed")+path.sep)) await verifyManagedActivation({dir,managedRoot});
   const extension = {
     extensionId,
     dir,
