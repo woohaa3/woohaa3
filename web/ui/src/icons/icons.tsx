@@ -107,6 +107,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Star,
   Sun,
   Trash,
   Undo2,
@@ -271,6 +272,8 @@ export const SearchIcon = withDefaults(Search);
 export const SettingsIcon = withDefaults(Settings2);
 export const AppSettingsIcon = withDefaults(Settings);
 export const SparklesIcon = withDefaults(Sparkles);
+/* 图库「收藏」开关。需要 non-default 填充由调用方传 `fill="currentColor"`（Lucide 图标默认无填充）。 */
+export const StarIcon = withDefaults(Star);
 export const ActivityIcon = withDefaults(Activity);
 export const FileImageIcon = withDefaults(FileImage);
 export const FileTextIcon = withDefaults(FileText);
