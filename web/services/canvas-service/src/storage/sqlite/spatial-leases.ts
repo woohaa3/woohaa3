@@ -26,6 +26,9 @@ function normalize(input: LeaseIntent): LeaseIntent {
   if (writable.some(t => keys.has(objectKey(t)))) throw new SpatialLeaseError("outside-scope");
   return { requestId: input.requestId, canvasId: input.canvasId, runId: input.runId, epoch: input.epoch, executionId: input.executionId, scope, writable, readOnly };
 }
+function requestIntent(intent: LeaseIntent): string {
+  return JSON.stringify({ canvasId: intent.canvasId, requestId: intent.requestId, scope: intent.scope, writable: intent.writable, readOnly: intent.readOnly });
+}
 
 /** The authority must be installed by the host. No expiry or startup reconciliation releases locks. */
 export class SqliteSpatialLeaseStore {
@@ -61,7 +64,7 @@ export class SqliteSpatialLeaseStore {
       const prior = this.lookup(intent.canvasId, intent.requestId);
       if (prior) {
         const row = this.db.prepare("SELECT original_intent_json FROM spatial_lease_runs WHERE canvas_id = ? AND request_id = ?").get(intent.canvasId, intent.requestId) as { original_intent_json: string };
-        if (row.original_intent_json !== JSON.stringify(intent)) throw new SpatialLeaseError("request-conflict");
+        if (requestIntent(JSON.parse(row.original_intent_json) as LeaseIntent) !== requestIntent(intent)) throw new SpatialLeaseError("request-conflict");
         return prior;
       }
       this.eligible(intent, intent.writable);
@@ -105,9 +108,9 @@ export class SqliteSpatialLeaseStore {
     for (const target of targets) if (query.get(canvasId, target.kind, id(target))) throw new SpatialLeaseError("lease-conflict");
   }
   /** Call synchronously inside the same transaction as the canonical write. */
-  validateForCommit(canvasId: string, requestId: string, runId: string, epoch: number, scope: WorldScopeVersion, targets: WorldObjectVersion[]): void {
+  validateForCommit(canvasId: string, requestId: string, runId: string, epoch: number, executionId: string, scope: WorldScopeVersion, targets: WorldObjectVersion[]): void {
     const record = this.lookup(canvasId, requestId);
-    if (!record || record.intent.runId !== runId || record.intent.epoch !== epoch) throw new SpatialLeaseError("stale-epoch");
+    if (!record || record.intent.runId !== runId || record.intent.epoch !== epoch || record.intent.executionId !== executionId) throw new SpatialLeaseError("stale-epoch");
     if (record.state !== "active") throw new SpatialLeaseError("cancelled");
     if (JSON.stringify(normalize({ ...record.intent, scope }).scope) !== JSON.stringify(record.intent.scope)) throw new SpatialLeaseError("version-conflict");
     const normalized = normalizeTargets(targets);

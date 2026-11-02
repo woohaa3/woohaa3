@@ -29,13 +29,26 @@ describe("durable spatial leases", () => {
     expect(() => one.validateUnoccupied("canvas", [instance("a")])).toThrow("lease-conflict");
     a.close(); b.close();
   });
+  it("does not leave a partial run when another connection holds the write transaction", () => {
+    const { a, b, one, two } = fixture();
+    a.exec("BEGIN IMMEDIATE");
+    expect(() => two.acquire(intent("contender", [instance("a"), instance("b")]))).toThrow();
+    a.exec("ROLLBACK");
+    expect(two.lookup("canvas", "contender")).toBeNull();
+    one.validateUnoccupied("canvas", [instance("a"), instance("b")]);
+    two.acquire(intent("contender", [instance("a"), instance("b")]));
+    expect(() => one.acquire(intent("other", [instance("b"), instance("c")]))).toThrow("lease-conflict");
+    one.validateUnoccupied("canvas", [instance("c")]);
+    a.close(); b.close();
+  });
   it("persists normalized intent and rolls back injected failures", () => {
     const { file, a, b, one } = fixture();
     const original = intent("one", [instance("b"), instance("a")]);
     one.acquire(original);
     one.extend("canvas", "one", [instance("c")]);
     expect(one.acquire({ ...original, writable: [...original.writable].reverse() }).intent.writable).toHaveLength(3);
-    expect(() => one.acquire({ ...original, executionId: "different" })).toThrow("request-conflict");
+    expect(one.acquire({ ...original, runId: "retry-candidate", epoch: 2, executionId: "retry-execution" }).intent.runId).toBe("one");
+    expect(() => one.acquire({ ...original, scope: { ...original.scope, scopeVersion: "different" } })).toThrow("request-conflict");
     let writes = 0;
     const faulty = new SqliteSpatialLeaseStore(b, authority, () => { if (++writes === 2) throw new Error("injected"); });
     expect(() => faulty.acquire(intent("failed", [instance("z")]))).toThrow("injected");
@@ -53,7 +66,7 @@ describe("durable spatial leases", () => {
     expect(recovery.listPending()[0]?.state).toBe("cancelled");
     expect(() => recovery.validateUnoccupied("canvas", [instance("a")])).toThrow("lease-conflict");
     reopened.close();
-    expect(() => one.validateForCommit("canvas", "one", "one", 1, first.scope, first.writable)).toThrow("cancelled");
+    expect(() => one.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, first.writable)).toThrow("cancelled");
     expect(() => two.acquire(intent("two"))).toThrow("lease-conflict");
     expect(() => one.confirmStopped("canvas", "one", "one", 1, first.executionId, true)).toThrow("unverified-stop");
     one.confirmStopped("canvas", "one", "one", 1, first.executionId, "stopped-exec-one");
@@ -73,10 +86,32 @@ describe("durable spatial leases", () => {
     expect(() => one.extend("canvas", "one", [{ ...instance("new"), version: "untrusted" }])).toThrow("outside-scope");
     one.extend("canvas", "one", [instance("new")]);
     a.exec("BEGIN IMMEDIATE");
-    one.validateForCommit("canvas", "one", "one", 1, first.scope, [instance("new")]);
-    expect(() => one.validateForCommit("canvas", "one", "one", 1, first.scope, [{ ...instance("new"), version: "v2" }])).toThrow("version-conflict");
+    one.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [instance("new")]);
+    expect(() => one.validateForCommit("canvas", "one", "one", 1, "other-execution", first.scope, [instance("new")])).toThrow("stale-epoch");
+    expect(() => one.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [{ ...instance("new"), version: "v2" }])).toThrow("version-conflict");
     a.exec("ROLLBACK");
     expect(() => new SqliteSpatialLeaseStore(b).acquire(intent("no-authority", [instance("free")]))).toThrow("unavailable");
+    a.close(); b.close();
+  });
+  it("rolls back an interrupted extension and revalidates current authority in the caller transaction", () => {
+    const { a, b, one } = fixture();
+    const first = intent("one");
+    one.acquire(first);
+    let writes = 0;
+    let allowed = true;
+    const changingAuthority: SpatialLeaseAuthority = {
+      eligible: () => allowed,
+      stopped: () => false,
+    };
+    const faulty = new SqliteSpatialLeaseStore(b, changingAuthority, () => { if (++writes === 1) throw new Error("extension failure"); });
+    expect(() => faulty.extend("canvas", "one", [instance("b"), instance("c")])).toThrow("extension failure");
+    expect(one.lookup("canvas", "one")?.intent.writable).toEqual(first.writable);
+    one.validateUnoccupied("canvas", [instance("b"), instance("c")]);
+    expect(() => one.validateUnoccupied("canvas", [instance("a")])).toThrow("lease-conflict");
+    allowed = false;
+    b.exec("BEGIN IMMEDIATE");
+    expect(() => faulty.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, first.writable)).toThrow("outside-scope");
+    b.exec("ROLLBACK");
     a.close(); b.close();
   });
 });
