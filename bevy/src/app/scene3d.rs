@@ -6,6 +6,17 @@ use super::{
     AnimationCameraState, CurrentScene, FocusRig, FrameFlags, ModelAssetTable, SurfaceState,
 };
 
+pub(super) fn publish_model_poses(
+    models: Res<model3d::ModelVisuals>,
+    transforms: Query<(&Transform, &GlobalTransform)>,
+    rig: Res<FocusRig>,
+    _main_thread: bevy::ecs::system::NonSendMarker,
+) {
+    if crate::bridge::take_model_pose_request() {
+        crate::bridge::set_model_poses(models.pose_snapshot(&transforms), rig.focus_node.as_deref());
+    }
+}
+
 /// 网格 adapter：把 scene viewport/surface/theme 投影为通用网格插件的 config/target/style。
 ///
 /// 网格 mesh/material 本身由 `IsometricGridPlugin` 拥有与回收；本系统只做领域适配与相机复位。
