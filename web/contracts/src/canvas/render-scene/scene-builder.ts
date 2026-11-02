@@ -1,5 +1,6 @@
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
+import { decodeWorldInstanceData } from "../shared-world-codec.js";
 import type { NodeCapabilityResolver } from "../node-capabilities.js";
 /**
  * `CanvasRenderScene` 快照装配与呈现指纹（自 `render-scene.ts` 拆出）
@@ -149,6 +150,9 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const size = effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id), capabilities);
     const override = input.positionOverrides?.get(node.id);
     const data = nodeData[node.id];
+    const worldInput = data?.sharedWorldInstance;
+    const world = worldInput === undefined ? undefined : decodeWorldInstanceData(worldInput);
+    if (world && !world.ok) throw new Error(`Invalid shared world instance: ${world.code}`);
     const x = override ? override.x : node.position.x;
     const y = override ? override.y : node.position.y;
     const { width, height } = size;
@@ -182,6 +186,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       texture,
       // 仅当该节点是唯一选中项时才绘制抓手，避免多选时语义歧义（design D1）。
       resizable: !!capabilities.resize && selectedIds.size === 1 && selectedIds.has(node.id),
+      ...(world?.ok ? { sharedWorldInstance: world.value } : {}),
       ...(previewCard ? { modelPreview: previewCard.project(context, input.modelPreviews?.get(node.id)) } : {}),
       ...(capabilities.appearance?.cardLabel ? { cardLabel: capabilities.appearance.cardLabel } : {})
     };

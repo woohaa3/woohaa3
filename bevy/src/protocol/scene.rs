@@ -15,6 +15,8 @@ use super::{CANVAS_RENDER_SCENE_VERSION, DEFAULT_NODE_HEIGHT, DEFAULT_NODE_WIDTH
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct GraphNode {
+    #[serde(default, rename = "sharedWorldInstance", deserialize_with = "super::shared_world::deserialize_instance")]
+    pub(crate) shared_world_instance: Option<super::shared_world::WorldInstance>,
     #[serde(default, rename = "modelPreview")]
     pub(crate) model_preview: Option<ModelPreview>,
     pub(crate) id: String,
@@ -306,6 +308,7 @@ impl Scene {
             }
         }
         for node in &self.nodes {
+            if let Some(instance) = &node.shared_world_instance { instance.validate()?; }
             if node
                 .progress_started_at
                 .is_some_and(|started| !started.is_finite() || started < 0.0)

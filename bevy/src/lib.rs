@@ -84,6 +84,17 @@ pub mod shot_camera;
 pub mod golden_api {
     use crate::protocol::{ModelSnapshot, fnv1a64_utf16 as fnv};
 
+    /// Inspect the validated shared-world input through the production coordinate adapter.
+    #[cfg(feature = "canvas-core")]
+    pub fn shared_world_projection(json: &str) -> Result<([f64; 3], [f64; 4], f64), String> {
+        let scene: crate::protocol::Scene = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        scene.validate().map_err(str::to_owned)?;
+        let instance = scene.nodes.first().and_then(|node| node.shared_world_instance.as_ref()).ok_or("Missing instance")?;
+        let t = &instance.transform;
+        Ok((crate::protocol::world_to_renderer([t.position.u, t.position.v, t.position.h]),
+            crate::protocol::world_rotation_to_renderer(t.rotation), t.scale))
+    }
+
     /// FNV-1a 64-bit（16 位小写 hex），按 JS UTF-16 code unit 计算。
     pub fn fnv1a64_utf16(text: &str) -> String {
         fnv(text)
