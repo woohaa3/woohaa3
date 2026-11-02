@@ -61,6 +61,14 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节（路径由插件自己用
 `ctx.gateway.route` 注册并鉴权）；插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
 
+**Provider 自身示例**：[tokenhub-provider](tokenhub-provider) 是模板（`discovery` / `routes` / `provider` /
+`backend` 四段）。[cephalon-provider](cephalon-provider)（端脑云）是**发现驱动 + 固定平台地址**的变体：只声明
+`providers.cephalon.apiKey`，origin `https://cephalon.cloud` 写在 `src/shared.ts` 里且**不提供 `baseUrl` 配置项**
+（避免凭据被改写到任意主机）；模型目录完全来自 `GET /user-center/v1/models`，代码里没有内置 id 清单，模态只看平台的
+`model_type`（`language` / `picture` / `video`，其余跳过），发现失败时保留上一次成功目录。视频是平台私有的异步任务协议
+（请求头 `Model-Name` + PascalCase 的 `Prompt` / `FileInfos` / `OutputConfig`），所以它在 `routes.ts` 里自己翻译，
+不走通用 OpenAI 形状；平台没有取消端点，模型定义声明 `cancel: "unsupported"`。
+
 ## 前端入口与 metadata
 
 - **唯一身份来源**是 `src/frontend/metadata.ts`：只导出 JSON 可序列化的

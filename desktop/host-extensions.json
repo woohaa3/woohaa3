@@ -10,6 +10,7 @@
     "replicate-provider",
     "runninghub-provider",
     "tokenhub-provider",
+    "cephalon-provider",
     "film-set",
     "local-agent",
     "oauth-agent",
