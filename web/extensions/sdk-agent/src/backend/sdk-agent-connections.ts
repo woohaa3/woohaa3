@@ -134,23 +134,36 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       relay = await createModelTransport({ apiType: engine.apiType, upstream: baseUrl, apiKey: credential.secret,
         policy: endpointPolicy, valid, signal: controller.signal });
       if (input.intent.action !== "discuss") {
-        if (!options.tools || !options.mcpServerUrl || !input.intent.nodeId || !options.authoring) return fail("capability-unsupported", "目标执行需要受控工具、权威目标及内容版本");
-        const targetHash = (target: Awaited<ReturnType<ApplicationCanvasAuthoringFacade["readNode"]>>) =>
-          target.ok ? target.modelContentVersion?.contentHash ?? target.snapshotHash : undefined;
-        const target = await options.authoring.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId });
-        const frozenHash = targetHash(target);
-        if (!target.ok || !frozenHash || (input.intent.expectedContentHash && input.intent.expectedContentHash !== frozenHash)) return fail("version-conflict", "目标内容已变化或不可读取，请重新打开作品");
-        const frozenInput = { ...input, intent: { ...input.intent, expectedContentHash: frozenHash } };
-        options.tools.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" });
-        const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" },
-          workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
-          ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
-          tools: localAgentToolsForMode(input.intent.mode) });
-        gateway = await createMcpTurnGateway({ input: { ...frozenInput, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
-          validateTarget: async () => {
-            const target = await options.authoring!.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId! });
-            return targetHash(target) === frozenHash;
-          } });
+        if (!options.tools || !options.mcpServerUrl || !input.intent.nodeId) return fail("capability-unsupported", "目标执行需要受控工具与权威目标");
+        if (input.intent.mode === "world") {
+          if (!input.intent.worldScope) return fail("capability-unsupported", "世界目标缺少可信范围选择");
+          options.tools.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" });
+          const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" },
+            workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
+            worldScope: input.intent.worldScope,
+            tools: localAgentToolsForMode(input.intent.mode, input.intent.worldScope) });
+          gateway = await createMcpTurnGateway({ input: { ...input, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
+            // The issued world context revalidates scope/version/leases on every write.
+            validateTarget: async () => valid() });
+        } else {
+          if (!options.authoring) return fail("capability-unsupported", "目标执行需要受控工具、权威目标及内容版本");
+          const targetHash = (target: Awaited<ReturnType<ApplicationCanvasAuthoringFacade["readNode"]>>) =>
+            target.ok ? target.modelContentVersion?.contentHash ?? target.snapshotHash : undefined;
+          const target = await options.authoring.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId });
+          const frozenHash = targetHash(target);
+          if (!target.ok || !frozenHash || (input.intent.expectedContentHash && input.intent.expectedContentHash !== frozenHash)) return fail("version-conflict", "目标内容已变化或不可读取，请重新打开作品");
+          const frozenInput = { ...input, intent: { ...input.intent, expectedContentHash: frozenHash } };
+          options.tools.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" });
+          const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" },
+            workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
+            ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
+            tools: localAgentToolsForMode(input.intent.mode, input.intent.worldScope) });
+          gateway = await createMcpTurnGateway({ input: { ...frozenInput, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
+            validateTarget: async () => {
+              const target = await options.authoring!.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId! });
+              return targetHash(target) === frozenHash;
+            } });
+        }
       }
       const native = input.candidate ? null : await options.service.resolveNativeBinding({ owner: input.owner, connectionId: record.connectionId, context });
       const sdk = createAgentSdkAdapter({ kind: engine.engine, apiKey: relay.token, modelBaseUrl: relay.baseUrl, resourceKey,
@@ -193,7 +206,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
   };
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "camera"], tools: true, models: "remote" }),
+    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "world"], tools: true, models: "remote" }),
     authorization: async ({ owner }) => {
       const records = (await options.service.list(owner)).filter((record) => record.adapterId === adapter.adapterId);
       for (const record of records) if (await options.service.credentialConfigured({ owner, connectionId: record.connectionId, purpose: "model-api-key" })) return "ready";

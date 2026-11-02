@@ -3,8 +3,11 @@ import type { CanvasServiceOptions } from "@woohaa3/canvas-service";
 import type { HostContext } from "../context.js";
 import { canvasPlugin } from "./canvas.js";
 
-const { createCanvasService } = vi.hoisted(() => ({ createCanvasService: vi.fn() }));
-vi.mock("@woohaa3/canvas-service", () => ({ createCanvasService }));
+const { createCanvasService, createWorldAuthoringAuthority } = vi.hoisted(() => ({
+  createCanvasService: vi.fn(),
+  createWorldAuthoringAuthority: vi.fn(() => ({}))
+}));
+vi.mock("@woohaa3/canvas-service", () => ({ createCanvasService, createWorldAuthoringAuthority }));
 
 // Capture the real host assembly, then run its options through the real Canvas composition.
 async function deleteRemoteWith(providers: Record<string, unknown>) {

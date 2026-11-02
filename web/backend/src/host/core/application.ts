@@ -260,6 +260,17 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       // unresolved turns while the backend reconnects instead of converting a
       // lost in-process receipt into a terminal failure.
       ...(env.WOOHAA3_AGENT_RUNTIME_SOCKET ? { preserveUnreconciledOnRestart: true } : {}),
+      // T11a: after the turn's durable terminal status, let the canvas authority
+      // release a scoped world run only against that real application ledger.
+      onTurnSettled: ({ turn }) => {
+        const assistantWorld = ctx.canvas.assistantWorld;
+        if (!assistantWorld) return;
+        void assistantWorld.settleRun({
+          canvasId: turn.canvasId,
+          runId: turn.requestId,
+          evidence: { owner: turn.owner, requestId: turn.requestId }
+        }).catch(() => undefined);
+      },
       serviceConnectionProviders: () => generation.list(),
       serviceConnectionSources: {
         ...(sourceSecrets ? { secrets: sourceSecrets.forExtension("@service-connections") } : {}),

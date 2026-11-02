@@ -14,6 +14,11 @@ function targetLine(intent: AgentEntryIntent): string {
     `canvasId="${intent.canvasId}"`,
     `nodeId="${intent.nodeId ?? ""}"`,
     `mode="${mode}"`,
+    ...(intent.worldScope
+      ? [intent.worldScope.kind === "scene-area"
+          ? `scope="scene-area:${intent.worldScope.areaId}"`
+          : `scope="workflow-group-2d:${intent.worldScope.groupId}"`]
+      : []),
     ...(intent.cameraId ? [`cameraId="${intent.cameraId}"`] : [])
   ].join(", ");
 }
@@ -38,6 +43,17 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
   if (intent.mode === "camera") {
     lines.push(
       "camera 目标模式已停用：它只保留在协议里用于解码旧会话，不再发放工具，也不应发起新的目标回合。"
+    );
+  } else if (intent.mode === "world") {
+    lines.push(
+      "这是场景区/2D 组的共享世界创作目标。宿主已经签发本轮真实范围、版本、可写模型/镜头与只读参考；你不能自行声明或扩大范围。",
+      "先调用 get_world_context 读取本轮上下文。只修改 writable 中的对象；read-only、部分包含、unknown 或区外对象只能参考，不能写入。",
+      "创建新模型用 create_world_model，替换内容用 replace_world_model_content，移动/改高度用 move_world_model，修改镜头用 set_world_camera。",
+      "所有写入必须携带从 get_world_context 读取到的真实版本；工具拒绝时如实说明，不要改用别的对象或伪造版本。",
+      "完成镜头修改后调用 complete_world_camera，参数只使用工具返回的真实 settingsVersion；取景刷新和后续生成都不是完成证据。",
+      intent.worldScope?.kind === "workflow-group-2d"
+        ? "本轮是 2D 组：只有只读参考，没有世界写工具。不得因为镜头卡片是该组成员而尝试修改世界。"
+        : "本轮是场景区：只有完整包含且未被其他运行占用的对象可写。"
     );
   } else if (intent.mode !== undefined && intent.mode !== "model3d") {
     lines.push("该目标模式已随画布组与片场功能一起停用，不再发放工具；请改用 model3d 目标。");

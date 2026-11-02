@@ -66,6 +66,7 @@ import { createWorldConversionService } from "./world-authoring/conversion-servi
 import { createWorldAuthoringAuthority } from "./world-authoring/authority.js";
 import { createWorldAuthoringService } from "./world-authoring/scene-area-service.js";
 import { createWorldCameraSettingsService } from "./world-authoring/camera-service.js";
+import { createAssistantWorldService } from "./world-authoring/assistant-service.js";
 import { createWorldCaptureService, type WorldCaptureService } from "./world-authoring/capture-service.js";
 
 export type { CanvasMediaAssetSyncPort, CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
@@ -751,15 +752,35 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       return repository.findLatestWorldAuthoringCommand(canvasId, operationId);
     }
   }) : null;
+  let completionVerifier: ((completion: import("@woohaa3/contracts").WorldCompletion, evidence: unknown) => boolean | Promise<boolean>) | undefined =
+    options.verifyWorldCameraCompletion;
   const cameraSettings = sync && cameraHistory ? createWorldCameraSettingsService({
     resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
     resolveContext: (canvasId, contextId) => worldAuthoring
       ? worldAuthoring.resolveCapability(canvasId, contextId)
       : { ok: false, code: "not-ready", message: "世界工具上下文不可用" },
     history: cameraHistory.repository,
-    ...(options.verifyWorldCameraCompletion ? { verifyCompletion: options.verifyWorldCameraCompletion } : {}),
+    verifyCompletion: (completion, evidence) => completionVerifier ? completionVerifier(completion, evidence) : false,
     ...(options.now ? { now: options.now } : {})
   }) : null;
+  const assistantWorld = sync && worldAuthoringAuthority && worldAuthoring && cameraSettings
+    ? createAssistantWorldService({
+        authority: worldAuthoringAuthority,
+        worldAuthoring,
+        cameraSettings,
+        resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
+        cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
+        confirmStopped: async (input) => { (await spatialRepository()).confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence); },
+        pending: async () => (await spatialRepository()).pendingSpatialRuns()
+      })
+    : null;
+  if (assistantWorld) {
+    const assistant = assistantWorld;
+    completionVerifier = async (completion, evidence) => {
+      if (options.verifyWorldCameraCompletion && !(await options.verifyWorldCameraCompletion(completion, evidence))) return false;
+      return assistant.verifyCompletion(completion, evidence);
+    };
+  }
   async function spatialRepository() {
     const repository = await resolveYjsRepository();
     const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
@@ -815,6 +836,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     worldConversion,
     worldAuthoring,
     cameraSettings,
+    assistantWorld,
     worldCapture,
     scenePackages,
     sync,

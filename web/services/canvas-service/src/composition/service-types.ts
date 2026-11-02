@@ -228,6 +228,8 @@ export type CanvasService = {
   worldAuthoring: import("../world-authoring/scene-area-service.js").WorldAuthoringService | null;
   /** T08 world-camera settings, assistant completion history and restore. */
   cameraSettings: import("../world-authoring/camera-service.js").WorldCameraSettingsService | null;
+  /** T11a host-issued scoped assistant world authoring; never exposed over HTTP. */
+  assistantWorld: import("../world-authoring/assistant-service.js").AssistantWorldService | null;
   /** T10 continuous framing refresh, generation freeze and producer registration. */
   worldCapture: import("../world-authoring/capture-service.js").WorldCaptureService | null;
   /** 本地场景包独立事务/收据；不复用在线来源权限。 */

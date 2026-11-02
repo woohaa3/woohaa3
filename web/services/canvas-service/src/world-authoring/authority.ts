@@ -351,6 +351,13 @@ export type WorldAuthoringAuthority = SpatialCommitAuthority & {
   prepareGroup(canvas: ServerCanvas, groupId: string): Promise<PreparedWorldGroup>;
   /** Exposed for the semantic service to reuse the prepared local AABBs. */
   cacheFor(canvasId: string, scope: WorldScopeVersion): AuthorityCache | null;
+  /**
+   * Prepare the local AABB for model content that is about to be created or
+   * replaced. New content never inherits eligibility from an existing version;
+   * the caller must prepare it before committing so containment is decided from
+   * the exact post-state content. Returns `null` when bounds remain unknown.
+   */
+  prepareContent(fields: Record<string, unknown>): Promise<{ contentVersion: string; localAabb: Aabb } | null>;
   /** Drop cached projections for one canvas. */
   invalidate(canvasId: string): void;
 };
@@ -645,6 +652,22 @@ export function createWorldAuthoringAuthority(
     prepareCanvas: prepareArea,
     prepareGroup,
     cacheFor,
+    async prepareContent(fields) {
+      const contentVersion = instanceContentVersion(fields);
+      const cached = localAabbCache.get(contentVersion);
+      if (cached) return { contentVersion, localAabb: cached };
+      if (fields.modelSourceKind === "glb" || typeof fields.modelScript !== "string" || fields.modelScript.trim().length === 0) return null;
+      try {
+        const execution = await (options.executeScene ?? executeSceneIr)(fields.modelScript, fields.modelScriptVersion, {});
+        if (!execution.ok) return null;
+        const prepared = v2SceneAabb(execution.ops);
+        if (!prepared) return null;
+        localAabbCache.set(contentVersion, prepared);
+        return { contentVersion, localAabb: prepared };
+      } catch {
+        return null;
+      }
+    },
     invalidate(canvasId) {
       const prefix = `${canvasId}\u0000`;
       for (const key of [...caches.keys()]) {

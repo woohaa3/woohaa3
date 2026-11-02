@@ -89,10 +89,28 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
         return result.ok ? { ok: true, value: result.page } : { ok: false, code: result.code, message: result.message };
       }
     };
+    const assistantWorld: import("@woohaa3/mcp-service").AssistantWorldToolClient = {
+      read: (input) => {
+        const world = ctx.canvas.assistantWorld;
+        if (!world) return { ok: false, code: "capability-unsupported", message: "世界助手权威未装配" };
+        return world.read(input);
+      },
+      write: async (input) => {
+        const world = ctx.canvas.assistantWorld;
+        if (!world) return { ok: false, code: "capability-unsupported", message: "世界助手权威未装配" };
+        return world.write(input);
+      },
+      complete: async (input) => {
+        const world = ctx.canvas.assistantWorld;
+        if (!world) return { ok: false, code: "capability-unsupported", message: "世界助手权威未装配" };
+        return world.complete(input);
+      }
+    };
     const mcp = createMcpService({
       env,
       skillClient,
       skillAvailability: { available: true },
+      assistantWorld,
       extensionTools: createExtensionMcpBridge({
         definitions: () => ctx.get("application")?.definitions ?? [],
         application,
@@ -103,7 +121,11 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       canvasClient: modelMcpServiceToClient(services.modelMcp),
       // 只共享显式配置的 Canvas 身份；缺省/空值不得凭空造身份。
       agentClient: agentCanvasServiceToClient(services.agent, { principalId: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "" }),
-      toolGrant: { allowedTools: token => catalogToolsForGrant(toolGrants.verify(token)), authorize: (input) => toolGrants.authorize(input) },
+      toolGrant: {
+        allowedTools: token => catalogToolsForGrant(toolGrants.verify(token)),
+        resolve: token => toolGrants.verify(token),
+        authorize: (input) => toolGrants.authorize(input)
+      },
       logger: ctx.log.scope("mcp")
     });
     ctx.effect(() => () => mcp.close());
