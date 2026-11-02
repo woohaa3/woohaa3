@@ -20,7 +20,8 @@ export async function createMcpTurnGateway(options: {
 }) {
   const checked = createEndpointPolicy({ allowedHosts: ["127.0.0.1", "localhost", "::1", "[::1]"], allowHttp: true }).check(options.upstream);
   if (!checked.ok) throw new Error("MCP endpoint must be host loopback");
-  const allowed = localAgentToolsForMode(options.input.intent.mode);
+  const world = options.input.intent.mode === "world";
+  const allowed = localAgentToolsForMode(options.input.intent.mode, options.input.intent.worldScope);
   let sequence = 0;
   let closed = false;
   let firstWrite = true;
@@ -76,13 +77,17 @@ export async function createMcpTurnGateway(options: {
         const schema = tools.find((tool) => tool.name === name)?.parameters;
         const properties = schema?.properties as Record<string, unknown> | undefined;
         if (properties?.canvasId) args.canvasId = options.input.canvasId;
-        if (target.nodeId) {
+        // World tools operate inside a host-issued scope; the scope/card node id is
+        // not the model operation target, so it must not be injected as nodeId.
+        if (!world && target.nodeId) {
           if (args.nodeId !== undefined && args.nodeId !== target.nodeId) throw new Error("target-mismatch");
           if (properties?.nodeId) args.nodeId = target.nodeId;
         }
-        for (const field of ["cameraId"] as const) {
-          if (target[field] && args[field] !== undefined && args[field] !== target[field]) throw new Error("target-mismatch");
-          if (target[field] && properties?.[field]) args[field] = target[field];
+        if (!world) {
+          for (const field of ["cameraId"] as const) {
+            if (target[field] && args[field] !== undefined && args[field] !== target[field]) throw new Error("target-mismatch");
+            if (target[field] && properties?.[field]) args[field] = target[field];
+          }
         }
         const write = !name.startsWith("get_");
         if (write && firstWrite) {

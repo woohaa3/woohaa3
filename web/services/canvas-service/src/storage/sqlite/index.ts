@@ -570,3 +570,8 @@ export {
   SQLITE_WORLD_CAMERA_HISTORY_SCHEMA_VERSION
 } from "./world-camera-history.js";
 export type { SqliteWorldCameraHistoryRepositoryOptions } from "./world-camera-history.js";
+export {
+  SqliteAssistantHostCompletionRepository,
+  SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION
+} from "./host-completions.js";
+export type { SqliteAssistantHostCompletionRepositoryOptions } from "./host-completions.js";

@@ -18,8 +18,10 @@ import type {
   ApplicationPersonalGenerationFacade,
   ApplicationToolDelegationFacade,
   ApplicationUserDelegation,
-  ApplicationToolGrant
+  ApplicationToolGrant,
+  AssistantWorldScopeSelection
 } from "@woohaa3/contracts";
+import { assistantWorldToolsForScope } from "@woohaa3/contracts";
 import type { CanvasService } from "@woohaa3/canvas-service";
 import { randomUUID } from "node:crypto";
 import type { MediaService } from "@woohaa3/media-service";
@@ -41,6 +43,8 @@ export type ToolGrantRegistry = {
   issue: (grant: ApplicationToolGrant, subject?: string) => void;
   subject: (token: string) => string | undefined;
   verify: (token: string) => ApplicationToolGrant | null;
+  /** Host-only snapshot used to invalidate world contexts before dropping grants. */
+  list: () => readonly ApplicationToolGrant[];
   revoke: (workId: string, subject?: string) => void;
   /**
    * 工具入口强制校验（change: 2026-10-22-remove-agent-execution-limits，任务 2.1 / design D2）。
@@ -66,6 +70,9 @@ export function createToolGrantRegistry(): ToolGrantRegistry {
     },
     verify(token) {
       return grants.get(token) ?? null;
+    },
+    list() {
+      return [...grants.values()];
     },
     revoke(workId, subject) {
       for (const [token, grant] of grants) {
@@ -179,7 +186,45 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
   const tools: ApplicationToolDelegationFacade = {
     async issue(request): Promise<ApplicationToolGrant> {
       delegateOrThrow(request.delegation, log);
-      if (request.mode !== undefined && !["model3d", "text"].includes(request.mode)) throw new Error("unsupported-target-mode");
+      if (request.mode !== undefined && !["model3d", "text", "world"].includes(request.mode)) throw new Error("unsupported-target-mode");
+      if (request.mode === "world") {
+        const scope: AssistantWorldScopeSelection | undefined = request.worldScope;
+        if (!scope) throw Object.assign(new Error("世界目标缺少可信范围选择"), { code: "malformed-request" });
+        const assistantWorld = deps.canvas.assistantWorld;
+        if (!assistantWorld) throw Object.assign(new Error("宿主未装配世界助手权威"), { code: "capability-unsupported" });
+        const issued = await assistantWorld.issue({
+          canvasId: request.canvasId,
+          requestId: request.workId,
+          runId: request.workId,
+          epoch: 0,
+          executionId: request.workId,
+          scope
+        });
+        if (!issued.ok) throw Object.assign(new Error(issued.message), { code: issued.code });
+        const tools = request.tools && request.tools.length > 0 ? request.tools : assistantWorldToolsForScope(scope);
+        const grant: ApplicationToolGrant = {
+          token: `grant-${randomUUID()}`,
+          canvasIds: [request.canvasId],
+          // World writes are scoped by the issued context, not by card node ids.
+          nodeIds: [],
+          ...(request.cameraId ? { cameraId: request.cameraId } : {}),
+          ...(request.clipId ? { clipId: request.clipId } : {}),
+          ...(request.itemId ? { itemId: request.itemId } : {}),
+          tools,
+          workId: request.workId,
+          world: {
+            contextId: issued.context.contextId,
+            completionId: issued.completionId,
+            runId: issued.run.runId,
+            epoch: issued.run.epoch,
+            executionId: issued.run.executionId,
+            scope: issued.context.scope
+          },
+          ...(request.credentialEpoch !== undefined ? { credentialEpoch: request.credentialEpoch } : {})
+        };
+        grants.issue(grant, request.delegation.subject);
+        return grant;
+      }
       const grant: ApplicationToolGrant = {
         token: `grant-${randomUUID()}`,
         canvasIds: [request.canvasId],
@@ -194,7 +239,20 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
       grants.issue(grant, request.delegation.subject);
       return grant;
     },
-    revoke: (workId, delegation) => grants.revoke(workId, delegation?.subject),
+    revoke: (workId, delegation) => {
+      // Invalidate the world grant/context before dropping the token. The lease
+      // itself stays until the host confirms the exact run stopped.
+      for (const grant of grants.list()) {
+        if (grant.workId !== workId || (delegation?.subject !== undefined && grant.subject !== delegation.subject)) continue;
+        if (grant.world) {
+          void deps.canvas.assistantWorld?.cancel({
+            canvasId: grant.canvasIds[0] ?? "",
+            contextId: grant.world.contextId
+          }).catch((error) => log({ event: "assistant-world-cancel-failed", message: error instanceof Error ? error.message : String(error) }));
+        }
+      }
+      grants.revoke(workId, delegation?.subject);
+    },
     /**
      * 工具入口强制校验（任务 2.1 / design D2）：宿主在 MCP 工具调用点用它与 bearer 令牌核对。
      * 校验只判范围、权限与撤销状态，不消耗额度。

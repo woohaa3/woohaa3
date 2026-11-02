@@ -4,4 +4,5 @@
  */
 export * from "./planner.js";
 export * from "./tools.js";
+export * from "./world-tools.js";
 export * from "./limits.js";

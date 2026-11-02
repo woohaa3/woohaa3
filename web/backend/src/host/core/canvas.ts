@@ -15,7 +15,7 @@ import {
   isCanvasUpstreamProviderShape,
   type CanvasUpstreamProvider
 } from "@woohaa3/contracts";
-import { createCanvasService } from "@woohaa3/canvas-service";
+import { createCanvasService, createWorldAuthoringAuthority } from "@woohaa3/canvas-service";
 import type { CanvasMediaAssetSyncPort } from "@woohaa3/canvas-service";
 import { createCanvasMediaBackfill } from "./canvas-media-backfill.js";
 import { createCanvasStorageOwnership, resolveCanvasOwnershipPath } from "./canvas-storage-ownership.js";
@@ -201,6 +201,22 @@ export const canvasPlugin: HostPlugin<{
       stateOf: (canvasId) => assetSync?.stateOf(canvasId)
     };
 
+    // T11a: exact-stop evidence is the real application turn ledger, never a
+    // boolean from an adapter. The application plugin loads after canvas, so the
+    // lookup stays lazy. Missing/non-terminal turns leave occupancy in place.
+    const worldAuthority = createWorldAuthoringAuthority({
+      verifyStopped: (identity, evidence) => {
+        const application = ctx.get("application")?.service;
+        if (!application || !evidence || typeof evidence !== "object") return false;
+        const value = evidence as { owner?: unknown; requestId?: unknown };
+        if (typeof value.owner !== "string" || typeof value.requestId !== "string") return false;
+        const queried = application.agentConversations().queryTurn({ owner: value.owner, requestId: value.requestId });
+        if (!queried.ok) return false;
+        if (queried.conversation.canvasId !== identity.canvasId || queried.turn.requestId !== identity.runId) return false;
+        return ["succeeded", "partial", "failed", "cancelled"].includes(queried.turn.status);
+      }
+    });
+
     const canvas = await createCanvasService({
       // Skill 媒体续接（change: 2026-10-28-add-agent-skill-media-regeneration）：
       // begin 前用 Application ledger 复核当前 attempt；任务终态只回写该 attempt 的历史。
@@ -245,6 +261,8 @@ export const canvasPlugin: HostPlugin<{
         cancel: (input: Parameters<import("@woohaa3/contracts").AssistantTextRunGateway["cancel"]>[0]) => ctx.get("application")!.service.assistantTextRuns().cancel(input),
       },
       env,
+      // Same production authority with host-owned exact-stop verification.
+      spatialAuthority: worldAuthority,
       ...(foundationStorage ? canvasStorageOptions(foundationStorage) : {}),
       ...(accessBoundary
         ? {

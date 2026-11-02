@@ -17,6 +17,7 @@
  * - 同一节点旧任务与较新会话各自保留关联，打开/关闭/查询都不创建新执行。
  */
 import { isBoolean, isBoundedId, isJsonObject, isStringArray } from "../../validation.js";
+import type { AssistantWorldScopeSelection } from "../../canvas/assistant-world-authority.js";
 
 /** Agent 会话 API 的固定同源前缀（宿主拥有）。 */
 export const AGENT_CONVERSATION_BASE_PATH = "/api/agent-conversations" as const;
@@ -106,7 +107,7 @@ export function isAgentEntryAction(value: unknown): value is AgentEntryAction {
  * 片场（`film-set`）与画布组（`canvas-group`）已下线，不再接受新的目标回合。
  * `camera` 指模型自身的镜头预设，仍属 model3d 节点的子资源。
  */
-export const AGENT_TARGET_MODES = ["model3d", "camera", "text"] as const;
+export const AGENT_TARGET_MODES = ["model3d", "camera", "text", "world"] as const;
 export type AgentTargetMode = (typeof AGENT_TARGET_MODES)[number];
 
 export function isAgentTargetMode(value: unknown): value is AgentTargetMode {
@@ -162,6 +163,11 @@ export type AgentTargetSnapshot = {
   clipId?: string;
   itemId?: string;
   /**
+   * Trusted world scope selection for `mode: "world"`. The host resolves the
+   * canonical scope/version and leases; the assistant never supplies them.
+   */
+  worldScope?: AssistantWorldScopeSelection;
+  /**
    * 冻结的账户模型 id（来自真实目录）。
    *
    * 选择失效时 MUST 要求用户处理，不自动换模型（design D5）；adapter 不得用别的模型冒充。
@@ -186,6 +192,8 @@ export type AgentEntryIntent = {
   cameraId?: string;
   clipId?: string;
   itemId?: string;
+  /** Trusted world scope selection for `mode: "world"` (see AgentTargetSnapshot). */
+  worldScope?: AssistantWorldScopeSelection;
   /** 冻结的账户模型 id（来自真实目录）；缺失时由 adapter 按当前目录处理或拒绝。 */
   model?: string;
   reasoningEffort?: AgentReasoningEffort;

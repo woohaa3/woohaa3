@@ -144,6 +144,7 @@ export function createChatGptConversationAdapter(
       return { status: "failed", error: { code: "capability-unsupported", message: "ChatGPT 生成未启用" } };
     }
     if (input.intent.mode === "text") return { status: "failed", error: { code: "capability-unsupported", message: "此连接尚不支持文本交付" } };
+    if (input.intent.mode === "world") return { status: "failed", error: { code: "capability-unsupported", message: "此连接未声明世界场景写工具，不能执行场景区创作" } };
     const mode: ChatGptGenerationMode | null = input.intent.mode ?? (input.intent.nodeId ? "model3d" : null);
     if (!mode) return { status: "failed", error: { code: "malformed-request", message: "缺少目标模式" } };
     if (!input.intent.nodeId) return { status: "failed", error: { code: "malformed-request", message: "目标动作必须带 nodeId" } };

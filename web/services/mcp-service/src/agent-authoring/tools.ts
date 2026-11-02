@@ -17,6 +17,7 @@ import { registerAgentPlanTools } from "./plan-tools.js";
 import { registerAgentRunTools } from "./run-tools.js";
 import { registerAgentScriptTools } from "./script-tools.js";
 import { registerAgentSkillTools } from "./skill-tools.js";
+import { registerAssistantWorldTools } from "./world-tools.js";
 import type { AgentAuthoringToolDeps } from "./tool-policy.js";
 
 export type { AgentAuthoringToolDeps } from "./tool-policy.js";
@@ -32,4 +33,5 @@ export function registerAgentAuthoringTools(server: McpServer, deps: AgentAuthor
   if (!deps.scriptAvailability?.available) registerAgentPlanTools(server, deps);
   registerAgentRunTools(server, deps);
   registerAgentSkillTools(server, deps);
+  if (deps.world) registerAssistantWorldTools(server, deps);
 }
