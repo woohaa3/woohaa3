@@ -13,7 +13,9 @@
  * 具体模型 React UI 由 Registry 解析出的 `definition.Panel` 直接渲染；Host 不含
  * audio/video/`edit_video` 专用布局分支，也不按 providerId 选择组件。
  */
-import { NodeTypeSwitch, retypeBlockReason, type SwitchableNodeType } from "./node-type-switch.js";
+import { NodeTypeSwitch, type SwitchableNodeType } from "./node-type-switch.js";
+import { buildLinkedNodeCommands, planNodeTypeSwitch } from "./switch-node-type.js";
+import { requestDockExpand } from "./dock-expand-request.js";
 import "./node-type-switch.css";
 import { planRetypeNode } from "../../../extension-api/command-planner.js";
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
@@ -512,11 +514,30 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const typeSwitchSlot = switchableType ? (
     <NodeTypeSwitch
       current={switchableType}
-      blockedReason={retypeBlockReason(context.nodeData, writable && !pendingSelection)}
+      plan={planNodeTypeSwitch(context.nodeData, writable && !pendingSelection)}
       onSwitch={(next) => {
-        const result = session.submitCommands(planRetypeNode(context.nodeId, next), `web-retype-${Date.now().toString(36)}`);
-        if (!result.ok) setSubmitError(result.reason ?? "切换类型失败");
-        else draftStore.setSelection(context.nodeId, "");
+        const plan = planNodeTypeSwitch(context.nodeData, writable && !pendingSelection);
+        if (plan.kind === "blocked") return;
+        if (plan.kind === "retype") {
+          // 空节点：原地改类型（权威命令）；成功后清掉本地模型选择，面板回到新类型的默认模型。
+          const result = session.submitCommands(planRetypeNode(context.nodeId, next), `web-retype-${Date.now().toString(36)}`);
+          if (!result.ok) setSubmitError(result.reason ?? "切换类型失败");
+          else draftStore.setSelection(context.nodeId, "");
+          return;
+        }
+        // 已有结果：在旁边新建另一种类型的节点，当前内容作为它的参考；原节点不动。
+        const linked = buildLinkedNodeCommands({
+          sourceNodeId: context.nodeId,
+          nextType: next,
+          nodes: (canvas?.document.nodes ?? []) as never,
+          nodeData: workingCanvas?.nodeData as never
+        });
+        if (!linked) { setSubmitError("无法新建关联节点"); return; }
+        const result = session.submitCommands(linked.commands, `web-switch-${Date.now().toString(36)}`);
+        if (!result.ok) { setSubmitError(result.reason ?? "新建关联节点失败"); return; }
+        // 新节点的底边栏默认收成一条：先发展开请求，再选中让它挂载。
+        requestDockExpand(linked.nodeId);
+        runtime?.controller()?.selectNode(linked.nodeId);
       }}
     />
   ) : null;
