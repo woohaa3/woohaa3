@@ -57,7 +57,8 @@ import { AgentConversationPanel } from "./execution-panel/agent-conversation-pan
 // 文本宿主随执行面板定义装配：它只做一次节点类型判定并转交 composer，
 // 单独成 chunk 只会让打开文本面板多一次必然请求（change: 2026-10-27-merge-nonessential-panel-chunks）。
 import { TextExecutionHost } from "./text-execution-host.js";
-const ModelExecutionHost = lazy(() => import("./model-execution-host.js").then((module) => ({ default: module.ModelExecutionHost })));
+// 执行面板 Host 连同提示词改写适配层一起懒加载：改写 slot 的订阅不进入画布启动闭包。
+const ModelExecutionHost = lazy(() => import("./prompt-skill-execution-host.js").then((module) => ({ default: module.PromptSkillExecutionHost })));
 const ModelParameterPanel = lazy(() => import("./model-parameter-panel.js").then((module) => ({ default: module.ModelParameterPanel })));
 const GroupRunSummaryOverlay = lazy(() => import("./group-run-summary-overlay.js").then(module => ({ default: module.GroupRunSummaryOverlay })));
 function GroupRunSummary({ store }: { store: GroupRunSummaryStore }) {
@@ -218,6 +219,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
               dialogs={ctx.dialogs}
               catalog={ctx.taskCatalog}
               registry={ctx.modelInteractions}
+              slots={ctx.slots}
               presentation={presentation}
               runtime={runtime}
               onPresentationIntent={submitPresentationIntent}

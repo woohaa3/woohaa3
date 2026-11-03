@@ -164,11 +164,19 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
   // verify：签名与逐文件摘要（信任根只来自本机配置；来源的任何声明都不算数）
   board.update(job, { phase: "verify" });
   const trustConfig = deps.trust();
-  const allowUnsigned = sourceId === MARKETPLACE_LOCAL_FILE_SOURCE_ID && trustConfig.allowUnsignedLocal;
+  const acceptUntrusted = job.acceptUntrusted === true;
+  const verifyTree = (treeDir: string) =>
+    toolkit.verifyExtensionPackage({
+      treeDir,
+      packageDigest: digest,
+      trustedKeys: trustConfig.trustedKeys,
+      allowUnsigned: acceptUntrusted,
+      acceptUntrusted
+    });
   let trust: ExtensionTrust;
   let evidence: Record<string, unknown> | undefined;
   try {
-    ({ trust, evidence } = await toolkit.verifyExtensionPackage({ treeDir: tree, packageDigest: digest, trustedKeys: trustConfig.trustedKeys, allowUnsigned }));
+    ({ trust, evidence } = await verifyTree(tree));
   } catch (error) {
     throw toManagerError(error, "MARKETPLACE_SIGNATURE_INVALID");
   }
@@ -208,7 +216,7 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
     const existing = state.extensions[extensionId];
     if (existing?.trust?.startsWith("certified:") && !trust.startsWith("certified:")) throw new ExtensionManagerError("MARKETPLACE_SIGNATURE_INVALID", "证书扩展不能降级为裸公钥信任");
     if (existing && existing.current === version && existing.filesDigest === filesDigest && existing.state !== "uninstalling" && !existing.quarantine && existing.trust === trust) {
-      await toolkit.verifyExtensionPackage({treeDir:h.layout.versionDir(extensionId,version),packageDigest:digest,trustedKeys:trustConfig.trustedKeys,allowUnsigned});
+      await verifyTree(h.layout.versionDir(extensionId, version));
       cleanupStaging(job);
       return "already-current" as const;
     }
@@ -227,7 +235,7 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
         throw new ExtensionManagerError("MARKETPLACE_VERSION_CONTENT_CONFLICT", `${extensionId}@${version} 已存在且内容不同；同版本号不允许不同内容`);
       }
       // Reusing a directory must verify its actual bytes, not only its FILES manifest.
-      await toolkit.verifyExtensionPackage({treeDir:versionDir,packageDigest:digest,trustedKeys:trustConfig.trustedKeys,allowUnsigned});
+      await verifyTree(versionDir);
     } else {
       fs.mkdirSync(path.dirname(versionDir), { recursive: true });
       fs.renameSync(tree, versionDir);
@@ -342,6 +350,7 @@ export async function installFromFile(ctx: ManagerContext, request: FileInstallR
   if (!handle) return failedJob(ctx, "install", MARKETPLACE_LOCAL_FILE_SOURCE_ID, unavailableError());
   const { job } = board.create({ action: "install", sourceId: MARKETPLACE_LOCAL_FILE_SOURCE_ID });
   withActor(job, request.actor);
+  job.acceptUntrusted = request.acceptUntrusted === true;
   board.update(job, { phase: "download" });
   let file: string;
   try {
@@ -367,6 +376,7 @@ export function installFromSource(ctx: ManagerContext, request: InstallRequest):
   const { job, existing } = board.create({ action: "install", sourceId: request.sourceId, dedupeKey, extensionId: request.extensionId });
   if (existing) return job.view;
   withActor(job, request.actor);
+  job.acceptUntrusted = request.acceptUntrusted === true;
   runJob(ctx, job, async () => {
     board.update(job, { phase: "resolve" });
     const availability = source.available();

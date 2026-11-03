@@ -46,8 +46,21 @@ export type ModelExecutionHostProps = {
   draftStore?: ModelDraftStore;
   /** 片段引用来源（`#` 引用）。 */
   snippetSource?: PromptSnippetSource;
-  /** 快捷改写（提示词工具）回调。 */
-  onPromptSkill?: (input: { id: string; label: string; prompt: string }) => void;
+  /**
+   * 快捷改写的执行者（宿主从 `execution.prompt-skill` slot 注入）。
+   *
+   * 与 `onPromptSkill` 的区别：这里只负责产出改写后的文本，**写回草稿由 Host 完成**；
+   * 面板的进行中/错误状态也由 Host 统一呈现。
+   */
+  promptSkill?: (input: {
+    skill: { id: string; label: string; description?: string };
+    prompt: string;
+    canvasId: string;
+    nodeId: string;
+    taskKind: string;
+  }) => Promise<{ prompt: string } | { error: string }>;
+  /** 兼容：外部直接接管快捷改写（showcase fixture 记录 action 用）。 */
+  onPromptSkill?: (input: { id: string; label: string; prompt: string }) => void | Promise<void>;
   /** 当前 panel presentation（生产由 Canvas Navigation route 提供）。 */
   presentation?: ExecutionPanelPresentation;
   /** 提交一次 panel presentation/close intent（expand / collapse / close）。 */

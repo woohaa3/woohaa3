@@ -1,4 +1,4 @@
-import { decodeFilmSetGroupMarker, type FilmSetGroupMarker, type NodeGenerationHistoryDetail, type ServerCanvas } from "@woohaa3/contracts";
+import { filmSetNodeDataCodec, type FilmSetGroupMarker, type NodeGenerationHistoryDetail, type ServerCanvas } from "@woohaa3/contracts";
 
 /** History stores orchestration only; source cards remain the content authority. */
 export class HistoryFilmSetSnapshots {
@@ -8,9 +8,9 @@ export class HistoryFilmSetSnapshots {
   get = (nodeId: string) => this.records.get(nodeId);
   set(nodeId: string, detail: NodeGenerationHistoryDetail): boolean {
     if (detail.kind !== "model" || detail.animation?.schemaVersion !== 4) { this.clear(nodeId); return false; }
-    const decoded = decodeFilmSetGroupMarker(detail.animation.filmSetGroup);
+    const decoded = filmSetNodeDataCodec.decode({ filmSetGroup: detail.animation.filmSetGroup });
     if (!decoded.ok) { this.clear(nodeId); return false; }
-    this.records.set(nodeId, decoded.value); this.emit(); return true;
+    this.records.set(nodeId, decoded.value as FilmSetGroupMarker); this.emit(); return true;
   }
   clear(nodeId: string): void { if (this.records.delete(nodeId)) this.emit(); }
   project(canvas: ServerCanvas | null): ServerCanvas | null {

@@ -113,7 +113,7 @@ describe("复合资产节点身份 no-compat 审计（任务 7.7）", () => {
   it("离线 reader 不由生产模块导入，旧 Room 迁移入口已移除", () => {
     const files: string[] = [];
     for (const root of PRODUCTION_ROOTS) collect(root, files);
-    const reader = "web/services/canvas-service/src/animation/legacy-film-set-reader.ts";
+    const reader = "scripts/lib/legacy-film-set/legacy-film-set-reader.ts";
     const offlineTool = "scripts/migrate-model-native-nodes.mjs";
     // 拍摄镜头迁移是 design D9 规划的**第二个独立离线入口**，同样复用 model-native 迁移的
     // 备份/verify/restore 模式；只由离线 CLI 打包调用，不被服务或浏览器导入。
@@ -123,9 +123,9 @@ describe("复合资产节点身份 no-compat 审计（任务 7.7）", () => {
     ]);
     const offenders = files.filter(file => {
       if (shootingShotOfflineTools.has(file)) return false;
-      if (file === reader || file === "web/services/canvas-service/src/animation/legacy-film-set-identities.ts"
-          || file === "web/services/canvas-service/src/animation/legacy-film-set-history.ts"
-          || file === "scripts/lib/model-native-migration-source.mjs" || file === "scripts/lib/model-native-migration.ts" || file === "web/services/canvas-service/src/animation/legacy-film-set-content.ts" || file === "web/services/canvas-service/src/animation/legacy-film-set-animations.ts" || file === offlineTool) return false;
+      if (file === reader || file === "scripts/lib/legacy-film-set/legacy-film-set-identities.ts"
+          || file === "scripts/lib/legacy-film-set/legacy-film-set-history.ts"
+          || file === "scripts/lib/model-native-migration-source.mjs" || file === "scripts/lib/model-native-migration.ts" || file === "scripts/lib/legacy-film-set/legacy-film-set-content.ts" || file === "scripts/lib/legacy-film-set/legacy-film-set-animations.ts" || file === offlineTool) return false;
       const source = stripComments(readFileSync(path.join(REPO_ROOT, file), "utf8"));
       return /legacy-film-set-reader|legacy-film-set-identities|legacy-film-set-history|legacy-film-set-content|legacy-film-set-animations|model-native-migration-source|migrateFilmSetClips|planFilmSetClipMigration/.test(source);
     });

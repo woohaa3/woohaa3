@@ -138,12 +138,14 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
 
       // 受管扩展（change: 2026-10-21-add-extension-marketplace-point，7.2）：任务进度与卡片操作。
       // 任务终态后重取设置与插件状态（新扩展的启停/版本以权威快照为准）。
+      let acknowledgeInstall: (input: { sourceId: string; extensionId: string; range: string }) => Promise<void> = async () => undefined;
       const managedController = createManagedExtensionsController({
         remote: createExtensionInstallRemote(),
         reload: async () => {
           await backend.load();
           await statusService?.refresh();
-        }
+        },
+        retrySource: (input) => acknowledgeInstall(input)
       });
       const unsubscribeManagedAdopt = backend.subscribe(() => {
         const state = backend.getState();
@@ -167,6 +169,7 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
       const marketplaceController = createMarketplaceInstallController({
         remote: createMarketplaceRemote(),
         onJob: (jobId, job) => managedController.track(jobId, job),
+        onAccepted: (request) => managedController.rememberInstall(request),
         readTrustedKeys: () => {
           const state = backend.getState();
           const entry = state.status === "ready" ? state.snapshot.settings.find((item) => item.key === TRUSTED_KEYS_SETTING) : undefined;
@@ -179,6 +182,7 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
           return { ok: true };
         }
       });
+      acknowledgeInstall = (input) => marketplaceController.installAcknowledged(input);
       const managed: ManagedExtensionsSource = {
         controller: managedController,
         marketplace: marketplaceController,

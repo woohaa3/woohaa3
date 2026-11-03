@@ -4,8 +4,8 @@
  * - 来源选择（只列非 local-file 来源；只有一个时直接用它）、搜索、版本详情、安装（JSON 形态）；
  * - 搜索结果按「来源 + 查询词」缓存，切回看过的来源先出内容再后台刷新；刷新时间由界面展示，
  *   缓存本身不进 UI；
- * - keyId 未被本机信任时**不拦截安装**：只提示，失败语义仍由 Manager 的 `MARKETPLACE_SIGNATURE_INVALID`
- *   给出（不在前端预判，避免两处判定不一致）；
+ * - keyId 未被本机信任时**不拦截按钮**：详情里先弹出风险确认，确认后安装请求带 `acceptUntrusted`；
+ *   列表上的直接安装仍交给任务失败码，由同一确认框重试；
  * - 「信任此公钥」把公钥追加进本机 `extensions.marketplace.trustedKeys`（`<keyId>=<公钥>`），由调用方二次确认后才写。
  * 安装进度复用 P1 的任务视图：安装受理后把任务交给受管扩展控制器跟踪。
  */
@@ -50,9 +50,11 @@ export type MarketplaceInstallController = {
   select(extensionId: string): Promise<void>;
   chooseVersion(version: string): void;
   close(): void;
-  install(): Promise<void>;
+  install(extra?: { acceptUntrusted?: boolean }): Promise<void>;
   /** 从列表直接按精确版本安装，不切换详情；失败原因与 install 相同。 */
   installListed(extensionId: string, version: string): Promise<void>;
+  /** 用户已确认风险后，按当初的来源与版本重试。 */
+  installAcknowledged(input: { sourceId: string; extensionId: string; range: string }): Promise<void>;
   /** 调用前须由 UI 二次确认。 */
   trustKey(key: MarketplaceSigningKey): Promise<void>;
 };
@@ -61,6 +63,8 @@ export type MarketplaceInstallOptions = {
   remote: MarketplaceRemote;
   /** 安装受理后交给受管扩展控制器跟踪进度。 */
   onJob: (jobId: string, job?: ExtensionInstallJobView) => void;
+  /** 受理成功后把原请求交给任务控制器，未验证失败时才能按原参数重试。 */
+  onAccepted?: (request: { jobId: string; sourceId: string; extensionId: string; range: string; acceptUntrusted?: boolean }) => void;
   /** 读取当前本机信任根原始值。 */
   readTrustedKeys: () => string;
   /** 写本机设置（成功后调用方会重取快照）。 */
@@ -187,15 +191,28 @@ export function createMarketplaceInstallController(options: MarketplaceInstallOp
   };
 
   /** 安装按精确版本受理；不经过详情也能用（列表卡片的直接安装）。 */
-  const startInstall = async (extensionId: string, version: string) => {
-    if (!state.sourceId || state.installing) return;
+  const startInstall = async (extensionId: string, version: string, extra?: { acceptUntrusted?: boolean; sourceId?: string }) => {
+    const sourceId = extra?.sourceId ?? state.sourceId;
+    if (!sourceId || state.installing) return;
     set({ installing: true, installingId: extensionId, error: null, notice: null });
-    const result = await options.remote.install({ sourceId: state.sourceId, extensionId, range: version });
+    const result = await options.remote.install({
+      sourceId,
+      extensionId,
+      range: version,
+      ...(extra?.acceptUntrusted ? { acceptUntrusted: true } : {})
+    });
     if (!result.ok) {
       set({ installing: false, installingId: null, error: result.error });
       return;
     }
     options.onJob(result.jobId, result.job);
+    options.onAccepted?.({
+      jobId: result.jobId,
+      sourceId,
+      extensionId,
+      range: version,
+      ...(extra?.acceptUntrusted ? { acceptUntrusted: true } : {})
+    });
     // 受理即交给任务列表：进度与终态都在那里，不再额外写一句会过期的「已开始安装」。
     set({ installing: false, installingId: null });
   };
@@ -246,12 +263,13 @@ export function createMarketplaceInstallController(options: MarketplaceInstallOp
     close() {
       set({ selected: null, notice: null });
     },
-    async install() {
+    async install(extra) {
       const selected = state.selected;
       if (!selected?.version) return;
-      await startInstall(selected.extensionId, selected.version);
+      await startInstall(selected.extensionId, selected.version, extra);
     },
     installListed: (extensionId, version) => startInstall(extensionId, version),
+    installAcknowledged: (input) => startInstall(input.extensionId, input.range, { acceptUntrusted: true, sourceId: input.sourceId }),
     async trustKey(key) {
       if (state.trusting) return;
       set({ trusting: key.keyId, error: null });

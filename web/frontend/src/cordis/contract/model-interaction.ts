@@ -116,7 +116,7 @@ export type ModelPanelRenderers = {
     onSubmit?: () => void;
   }) => import("react").ReactNode;
   /** 快捷改写（提示词工具）回调；可选，由 Host 注入。 */
-  promptSkill?: (input: { id: string; label: string; prompt: string }) => void;
+  promptSkill?: (input: { id: string; label: string; prompt: string }) => void | Promise<void>;
 };
 
 export type ModelPanelComponent = ComponentType<ModelPanelProps>;

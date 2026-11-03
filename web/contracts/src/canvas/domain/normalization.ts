@@ -17,7 +17,7 @@ import { STICKY_NOTE_NODE_TYPE } from "./core/sticky-note-node.js";
 import { isSupportedShotReferenceEdgeData, resolveShotReferenceSource, shotReferenceRoleForKind, SHOT_IMAGE_REFERENCE_EDGE_KIND, SHOT_REFERENCE_EDGE_KIND } from "./core/shot-reference.js";
 import { shotReferenceDecision } from "./core/connection-rules.js";
 import { isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "./core/composite-asset-identity.js";
-import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
+import { migrateContentNodeData, observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { DIRECTOR_STUDIO_DEFAULT_TITLE, LEGACY_ANIMATION_DEFAULT_TITLE } from "../director-studio-title.js";
 import { decodeFilmSetGroupMarker, FILM_SET_GROUP_FIELD, validateFilmSetGroupBindings } from "../film-set-group.js";
 
@@ -127,7 +127,7 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   // 片场内部内容收敛（change: 2026-10-08-make-film-set-model-only）：
   // 缺失字段保持缺失（旧片场为空集合，不在此补写）；非法集合按空集合丢弃，绝不写入部分内容。
   applyFilmSetContentSanitizer(nodeData, nodeTypes, options?.content);
-  applyFilmSetGroupSanitizer(nodeData, nodeTypes);
+  applyFilmSetGroupSanitizer(nodeData, nodeTypes, options?.content);
   // Missing resources remain represented by bindings and retry diagnostics.
   // Existing foreign references still cannot grant group capabilities.
   for (const node of document.nodes) {
@@ -159,14 +159,44 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
  * as a unit so a normal group can never be accidentally treated as a film set,
  * while a legacy composite remains available to the read-only migration path.
  */
+function normalizedClaimedNodeData(data: CanvasNodeData, content: ContentContributionResolver): CanvasNodeData | undefined {
+  for (const contribution of content.implementations()) {
+    const codec = contribution.nodeData;
+    if (!codec?.schemaVersion || typeof codec.schemaVersion(data) !== "number") continue;
+    try {
+      const normalized = codec.normalize(structuredClone(data));
+      if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return data;
+      return normalized as CanvasNodeData;
+    } catch {
+      return data;
+    }
+  }
+  return undefined;
+}
+
 function applyFilmSetGroupSanitizer(
   nodeData: Record<string, CanvasNodeData>,
-  nodeTypes: Map<string, string>
+  nodeTypes: Map<string, string>,
+  content?: ContentContributionResolver
 ): void {
-  for (const [nodeId, data] of Object.entries(nodeData)) {
+  for (const [nodeId, stored] of Object.entries(nodeData)) {
+    let data = stored;
+    if (content && data) {
+      const migrated = migrateContentNodeData(data, content);
+      if (migrated.readOnly) continue;
+      if (migrated.data !== data && migrated.data && typeof migrated.data === "object") {
+        data = migrated.data as CanvasNodeData;
+        nodeData[nodeId] = data;
+      }
+    }
     if (!data || data[FILM_SET_GROUP_FIELD] === undefined) continue;
     if (nodeTypes.get(nodeId) !== "group") {
       delete data[FILM_SET_GROUP_FIELD];
+      continue;
+    }
+    const owned = content ? normalizedClaimedNodeData(data, content) : undefined;
+    if (owned) {
+      nodeData[nodeId] = owned;
       continue;
     }
     const decoded = decodeFilmSetGroupMarker(data[FILM_SET_GROUP_FIELD]);

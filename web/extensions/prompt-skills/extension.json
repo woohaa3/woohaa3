@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "prompt-skills",
+  "site": {
+    "name": "提示词快捷改写",
+    "description": "把执行面板的快捷改写交给站点语言模型：通用润色、画面细节润色、中英翻译、提示词分层整理、视觉风格迁移与 Loop 动态提示词。",
+    "version": "0.1.0",
+    "configSchema": { "schemaId": "prompt-skills-config", "schemaVersion": 1 },
+    "capabilities": [
+      {
+        "id": "prompt-skills.rewrite",
+        "kind": "handler",
+        "description": "用站点语言模型改写一段提示词草稿",
+        "auth": "public"
+      }
+    ],
+    "defaultEnabled": true,
+    "order": 75
+  },
+  "backend": {
+    "module": "./backend",
+    "factory": "createPromptSkillsExtension",
+    "optionsType": "PromptSkillsExtensionOptions",
+    "order": 75
+  },
+  "publicRoutes": [
+    {
+      "publicPath": "/api/prompt-skills",
+      "route": "prompt-skills",
+      "methods": ["GET", "POST"]
+    }
+  ]
+}

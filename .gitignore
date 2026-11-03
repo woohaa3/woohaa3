@@ -61,8 +61,11 @@ core.[0-9]*
 web/extensions/*/browser-dist/
 web/extensions/*/.browser-build/
 web/extensions/*/.browser-test/
+# extension independent backend builds（scripts/build-extension-backend.mjs 的产物，不入库）
+web/extensions/*/backend-dist/
 # 第二扩展根（仓库根 extensions/）的同名生成物
 extensions/*/browser-dist/
+extensions/*/backend-dist/
 extensions/*/.browser-build/
 extensions/*/.browser-test/
 # assembled release output（host dist 内组合的扩展资源与发布目录）

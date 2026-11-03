@@ -1,3 +1,4 @@
+import type { ContentContributionResolver } from "../content-contribution.js";
 import { decodeInputSnapshot } from "../domain/input-snapshot.js";
 import { decodeFilmSetGroupMarker } from "../film-set-group.js";
 import { decodeFilmSetAnimations } from "../film-set-animations.js";
@@ -19,7 +20,7 @@ import {
 } from "../../validation.js";
 import { decodeModelCameras, type ModelCamera } from "../model-cameras.js";
 import { decodeImageEditDocument, decodeImageEditProjectObjectRef, isImageProjectDocument } from "../image-edit.js";
-import { decodeFilmSetContent } from "../film-set-content.js";
+import { decodeFilmSetContent, type FilmSetContent } from "../film-set-content.js";
 import {
   NODE_GENERATION_HISTORY_VERSION,
   type NodeGenerationHistoryEntry,
@@ -56,7 +57,7 @@ function invalid(message: string): { ok: false; code: "NODE_HISTORY_INVALID"; me
  */
 export function decodeNodeGenerationHistoryEntry(
   input: unknown,
-  options: { acceptedContentVersions?: readonly number[] } = {}
+  options: { acceptedContentVersions?: readonly number[]; content?: ContentContributionResolver } = {}
 ): NodeHistoryDecodeResult<NodeGenerationHistoryEntry> {
   if (!isJsonObject(input)) return invalid("历史条目必须是对象");
   if (input.version !== NODE_GENERATION_HISTORY_VERSION) return invalid("历史条目版本不受支持");
@@ -140,7 +141,7 @@ function decodeSourceSummary(input: unknown): NodeHistoryDecodeResult<NodeHistor
 function decodePayload(
   kind: NodeGenerationKind,
   input: unknown,
-  options: { acceptedContentVersions?: readonly number[] } = {}
+  options: { acceptedContentVersions?: readonly number[]; content?: ContentContributionResolver } = {}
 ): NodeHistoryDecodeResult<NodeHistoryPayload> {
   if (!isJsonObject(input)) return invalid("payload 必须是对象");
   if (input.kind === "failure") return decodeFailurePayload(kind, input);
@@ -252,11 +253,13 @@ function decodeFailureBaseline(input: unknown): NodeHistoryFailurePayload["basel
  */
 export function decodeAnimationPayload(
   input: unknown,
-  options: { acceptedContentVersions?: readonly number[] } = {}
+  options: { acceptedContentVersions?: readonly number[]; content?: ContentContributionResolver } = {}
 ): NodeHistoryAnimationPayload | null {
   if (!isJsonObject(input)) return null;
   if (input.schemaVersion === 4) {
     if (Object.keys(input).some(key => key !== "schemaVersion" && key !== "filmSetGroup")) return null;
+    const owned = decodeOwnedFilmSetGroupHistory(input.filmSetGroup, options.content);
+    if (owned !== undefined) return owned;
     const marker = decodeFilmSetGroupMarker(input.filmSetGroup);
     return marker.ok ? { schemaVersion: 4, filmSetGroup: marker.value } : null;
   }
@@ -269,10 +272,15 @@ export function decodeAnimationPayload(
     if (!scenePlacement.ok) return null;
     const sceneCamera = decodeInitialShotCamera(input.sceneCamera);
     if (!sceneCamera.ok) return null;
-    const content = decodeFilmSetContent(
-      input.filmSetContent,
-      options.acceptedContentVersions ? { acceptedVersions: options.acceptedContentVersions } : {}
-    );
+    const ownedContent = decodeOwnedFilmSetContentHistory(input.filmSetContent, options.content);
+    if (ownedContent === null) return null;
+    const content = ownedContent !== undefined
+      ? (isFilmSetContentShape(ownedContent) ? { ok: true as const, value: ownedContent } : null)
+      : decodeFilmSetContent(
+        input.filmSetContent,
+        options.acceptedContentVersions ? { acceptedVersions: options.acceptedContentVersions } : {}
+      );
+    if (!content) return null;
     if (!content.ok) return null;
     const animations = decodeFilmSetAnimations(input.filmSetAnimations, content.value);
     if (!animations.ok) return null;
@@ -280,6 +288,50 @@ export function decodeAnimationPayload(
     return { schemaVersion: 3, scenePlacement: scenePlacement.value, sceneCamera: sceneCamera.value, filmSetContent: content.value, filmSetAnimations: animations.value, ...(origin ? { origin } : {}) };
   }
   return null;
+}
+
+function isFilmSetContentShape(value: unknown): value is FilmSetContent {
+  return isJsonObject(value) && typeof value.schemaVersion === "number" && Array.isArray(value.items);
+}
+
+/** 有 resolver 时只信 owner。返回 undefined 表示没有 owner 接手，调用方继续用内核解码。 */
+function decodeOwnedFilmSetContentHistory(field: unknown, content: ContentContributionResolver | undefined): unknown | null | undefined {
+  if (!content) return undefined;
+  for (const contribution of content.implementations()) {
+    const codec = contribution.nodeData;
+    if (!codec?.inspect) continue;
+    try {
+      const report = codec.inspect({ filmSetContent: field });
+      if (!report.ok) return null;
+      if (report.report == null) continue;
+      const decoded = codec.decode({ filmSetContent: field });
+      if (!decoded.ok) return null;
+      return decoded.value;
+    } catch {
+      return null;
+    }
+  }
+  return undefined;
+}
+
+function decodeOwnedFilmSetGroupHistory(marker: unknown, content: ContentContributionResolver | undefined): NodeHistoryAnimationPayload | null | undefined {
+  if (!content) return undefined;
+  const data = { filmSetGroup: marker };
+  for (const contribution of content.implementations()) {
+    const codec = contribution.nodeData;
+    if (!codec) continue;
+    try {
+      const diagnostic = codec.validatePatch({}, data);
+      if (diagnostic) return null;
+      const decoded = codec.decode(data);
+      if (!decoded.ok) continue;
+      const normalized = decodeFilmSetGroupMarker(decoded.value);
+      return normalized.ok ? { schemaVersion: 4, filmSetGroup: normalized.value } : null;
+    } catch {
+      return null;
+    }
+  }
+  return undefined;
 }
 
 function decodeOrigin(input: unknown): NodeHistoryAnimationPayload["origin"] | null {

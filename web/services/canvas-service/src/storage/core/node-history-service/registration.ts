@@ -1,4 +1,4 @@
-import { readFilmSetGroupMarker, fnv1a64Hex } from "@woohaa3/contracts";
+import { readFilmSetGroupMarker, fnv1a64Hex, decodeAnimationPayload, type ContentContributionResolver } from "@woohaa3/contracts";
 import { decodeFilmSetNodeData, filmSetAnimationsOf } from "@woohaa3/contracts";
 /**
  * 节点生成历史服务：登记 payload 构造与动画读取
@@ -278,15 +278,21 @@ export function readModelCamerasSnapshot(data: Record<string, unknown> | undefin
  * （change: 2026-10-05-bind-model-animation-to-shots，任务 5.1）。
  */
 export function readAnimationHistoryPayload(
-  data: Record<string, unknown> | undefined
+  data: Record<string, unknown> | undefined,
+  content?: ContentContributionResolver
 ): NodeHistoryAnimationPayload | null {
   if (!data) return null;
+  if (content && Object.prototype.hasOwnProperty.call(data, "filmSetGroup")) {
+    return decodeAnimationPayload({ schemaVersion: 4, filmSetGroup: data.filmSetGroup }, { content });
+  }
   const marker = readFilmSetGroupMarker(data);
   if (marker) return { schemaVersion: 4, filmSetGroup: marker };
   if (data.filmSetAnimations !== undefined || data.filmSetContent !== undefined) {
     const decoded = decodeFilmSetNodeData(data);
     if (!decoded.ok) return null;
-    return { schemaVersion: 3, scenePlacement: decoded.value.scenePlacement, sceneCamera: decoded.value.sceneCamera, filmSetContent: decoded.value.filmSetContent, filmSetAnimations: filmSetAnimationsOf(decoded.value), ...(decoded.value.origin ? { origin: decoded.value.origin } : {}) };
+    const payload = { schemaVersion: 3 as const, scenePlacement: decoded.value.scenePlacement, sceneCamera: decoded.value.sceneCamera, filmSetContent: decoded.value.filmSetContent, filmSetAnimations: filmSetAnimationsOf(decoded.value), ...(decoded.value.origin ? { origin: decoded.value.origin } : {}) };
+    if (!content) return payload;
+    return decodeAnimationPayload(payload, { content });
   }
   return null;
 }

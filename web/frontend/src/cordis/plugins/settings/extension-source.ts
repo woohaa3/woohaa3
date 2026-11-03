@@ -28,12 +28,12 @@ export function extensionSource(installed?: InstalledExtensionView): ExtensionSo
 }
 
 /**
- * 签名状态徽标。`signed:<keyId>` 只证来源与完整性，不代表执行边界——
- * 扩展与宿主同进程、同权限，这句话由详情里的说明承担，不塞进徽标。
+ * 签名状态徽标。`signed` / `certified` 表示签名对上了本机信任根，显示「已验证」。
+ * 未签名或用户确认后装上的包显示「未验证」。徽标不代表执行边界。
  */
-export function extensionTrustBadge(installed?: InstalledExtensionView): { label: string; tone: "signed" | "unsigned" } | null {
+export function extensionTrustBadge(installed?: InstalledExtensionView): { label: string; tone: "verified" | "unsigned" } | null {
   if (!installed?.managed || !installed.trust) return null;
-  return installed.trust === "unsigned" ? { label: "未签名", tone: "unsigned" } : { label: "已签名", tone: "signed" };
+  return installed.trust === "unsigned" ? { label: "未验证", tone: "unsigned" } : { label: "已验证", tone: "verified" };
 }
 
 /** 观察期徽标：只在观察尚未结束时出现，截止时间进 title。 */
@@ -46,5 +46,5 @@ export function extensionObservationBadge(installed?: InstalledExtensionView, no
 
 /** 受管扩展的 keyId（`signed:<keyId>` 的后半段），用于详情展示。 */
 export function signedKeyId(trust: ExtensionTrust | undefined): string | null {
-  return trust && trust !== "unsigned" ? trust.slice("signed:".length) : null;
+  return trust?.startsWith("signed:") ? trust.slice("signed:".length) : null;
 }

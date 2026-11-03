@@ -426,9 +426,33 @@
 /* 来源徽标：内置不抢注意力，市场/本地各自可辨。 */
 .plugin-card__badge.is-source[data-tone="market"] { color: var(--mc-text); }
 .plugin-card__badge.is-source[data-tone="local"] { color: var(--app-status-warning); border-color: color-mix(in srgb, var(--app-status-warning) 40%, transparent); }
-/* 信任徽标：未签名是要看见的风险，已签名只是事实。 */
-.plugin-card__badge.is-trust[data-tone="signed"] { color: var(--app-status-success); border-color: color-mix(in srgb, var(--app-status-success) 35%, transparent); }
+/* 信任徽标：已验证是对上信任根的事实，未验证是确认后仍要看见的风险。 */
+.plugin-card__badge.is-trust[data-tone="verified"] { color: var(--app-status-success); border-color: color-mix(in srgb, var(--app-status-success) 35%, transparent); }
 .plugin-card__badge.is-trust[data-tone="unsigned"] { color: var(--app-status-danger); border-color: color-mix(in srgb, var(--app-status-danger) 40%, transparent); }
+.trust-risk {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, black 45%, transparent);
+}
+.trust-risk__panel {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--mc-border);
+  border-radius: 12px;
+  background: var(--mc-surface, var(--app-bg, #1c1c1c));
+  color: var(--mc-text);
+  box-shadow: 0 16px 48px color-mix(in srgb, black 35%, transparent);
+}
+.trust-risk__panel h3 { margin: 0; font-size: 15px; }
+.trust-risk__panel p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--mc-text-muted); }
+.trust-risk__actions { display: flex; justify-content: flex-end; gap: 8px; }
 .plugin-card__badge.is-observe { color: var(--app-status-warning); border-color: color-mix(in srgb, var(--app-status-warning) 40%, transparent); }
 .managed-extension { display: flex; flex-direction: column; gap: 6px; padding: 0 14px 10px; font-size: 11px; color: var(--mc-text-muted); }
 .managed-extension__note { margin: 0; line-height: 1.5; color: var(--mc-text-muted); }

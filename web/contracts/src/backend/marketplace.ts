@@ -30,6 +30,8 @@ export const MARKETPLACE_FAILURE_CODES = [
   "MARKETPLACE_PACKAGE_TOO_LARGE",
   "MARKETPLACE_DIGEST_MISMATCH",
   "MARKETPLACE_SIGNATURE_INVALID",
+  /** 签名格式合法，但公钥不在本机信任根。安装须经用户确认后才能继续。 */
+  "MARKETPLACE_SIGNATURE_UNTRUSTED",
   "MARKETPLACE_UNSIGNED_REJECTED",
   "MARKETPLACE_ARCHIVE_UNSAFE",
   "MARKETPLACE_PREFLIGHT_FAILED",
@@ -95,7 +97,7 @@ export type ExtensionInstallJobView = {
   readonly finishedAt?: string;
 };
 
-/** 受管扩展的信任级别：`signed:<keyId>` 或 `unsigned`（仅 local-file 且本机显式允许）。 */
+/** 受管扩展的信任级别。`signed` / `certified` 为已验证；`unsigned` 是用户确认后安装的未验证包。 */
 export type ExtensionTrust = `signed:${string}` | `certified:${string}:${string}` | "unsigned";
 
 /** 来源侧的一个可见版本（展示用；来源返回的状态与 keyId 不参与信任判定）。 */

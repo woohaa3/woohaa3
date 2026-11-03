@@ -645,6 +645,29 @@ export type SlotContributionMap = {
     sourceId?: string;
     sourceLabel?: string;
   };
+  /**
+   * 执行面板「快捷改写」的提示词技能实现
+   * （change: add-prompt-skill-extension，design D1）。
+   *
+   * 宿主把**首个可用贡献**接到节点执行面板的快捷改写菜单：用户选中一项后调用 `rewrite`，
+   * 把返回的提示词写回当前草稿。草稿所有权在宿主，扩展不得直接写画布或草稿 store。
+   * 没有可用贡献时菜单保留既有「未接入提示词工具插件」提示。
+   */
+  "execution.prompt-skill": {
+    /**
+     * 改写一次草稿。
+     *
+     * 返回 `{ prompt }` 表示成功（空串按失败处理）；返回 `{ error }` 或抛错由宿主显示为
+     * 面板错误。改写模型属于贡献方自己的配置（例如插件设置页），宿主不注入模型选择。
+     */
+    rewrite: (input: {
+      skill: { id: string; label: string; description?: string };
+      prompt: string;
+      canvasId: string;
+      nodeId: string;
+      taskKind: string;
+    }) => Promise<{ prompt: string } | { error: string }>;
+  };
   "input.paste": { handle: (event: ClipboardEvent) => boolean | void | Promise<void> };
   "input.drop": {
     handle: (event: DragEvent) => boolean | void | Promise<void>;

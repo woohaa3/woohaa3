@@ -14,7 +14,7 @@ import type { MarketplaceInstallState } from "../marketplace-install.js";
 import type { SettingsSnapshot } from "@woohaa3/contracts";
 import type { ManagedExtensionsSource } from "../plugin-settings-section.js";
 import { MarketplaceInstallPanel } from "../marketplace-install-ui.js";
-import { ManagedInstallBar } from "../managed-extensions-ui.js";
+import { ManagedInstallBar, UntrustedInstallPrompt } from "../managed-extensions-ui.js";
 import "../settings.css";
 
 export type PluginInstallMode = "market" | "file";
@@ -111,6 +111,7 @@ export function PluginInstallPage({
           当前宿主没有开启受管扩展安装：需要管理员权限，且宿主启用受管安装目录。
         </p>
       )}
+      {managed ? <UntrustedInstallPrompt controller={managed.controller} /> : null}
     </section>
   );
 }

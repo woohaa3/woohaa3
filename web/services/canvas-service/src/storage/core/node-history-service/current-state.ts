@@ -1,4 +1,4 @@
-import { readFilmSetGroupMarker, fnv1a64Hex, nodeHistoryKindForNodeType } from "@woohaa3/contracts";
+import { readFilmSetGroupMarker, fnv1a64Hex, nodeHistoryKindForNodeType, decodeAnimationPayload, type ContentContributionResolver } from "@woohaa3/contracts";
 /**
  * 节点生成历史服务：当前生效状态读取与判定
  * （自 `node-history-service.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R02）。
@@ -29,11 +29,27 @@ export type CurrentNodeState = {
  * 自包含动画节点的完整定义身份
  * （change: 2026-10-06，任务 2.1/R3）：`animation:<snapshotHash>`。非动画节点返回 null。
  */
-export function animationDefinitionIdentity(data: Record<string, unknown>): string | null {
+export function animationDefinitionIdentity(data: Record<string, unknown>, content?: ContentContributionResolver): string | null {
+  if (content && Object.prototype.hasOwnProperty.call(data, "filmSetGroup")) {
+    const owned = decodeAnimationPayload({ schemaVersion: 4, filmSetGroup: data.filmSetGroup }, { content });
+    return owned ? animationDefinitionIdentityFromPayload(owned) : null;
+  }
   const marker = readFilmSetGroupMarker(data);
   if (marker) return `film-set-group:${fnv1a64Hex(JSON.stringify(marker))}`;
   const decoded = decodeFilmSetNodeData(data);
-  return decoded.ok ? `animation:${animationSnapshotHash(decoded.value)}` : null;
+  if (!decoded.ok) return null;
+  if (content && (Object.prototype.hasOwnProperty.call(data, "filmSetContent") || Object.prototype.hasOwnProperty.call(data, "filmSetAnimations"))) {
+    const owned = decodeAnimationPayload({
+      schemaVersion: 3,
+      scenePlacement: decoded.value.scenePlacement,
+      sceneCamera: decoded.value.sceneCamera,
+      filmSetContent: decoded.value.filmSetContent,
+      filmSetAnimations: decoded.value.filmSetAnimations,
+      ...(decoded.value.origin ? { origin: decoded.value.origin } : {})
+    }, { content });
+    return owned?.schemaVersion === 3 ? animationDefinitionIdentityFromPayload(owned) : null;
+  }
+  return `animation:${animationSnapshotHash(decoded.value)}`;
 }
 
 /** 由历史动画 payload 计算同一完整定义身份（供登记去重与当前身份复用）。 */
@@ -54,21 +70,21 @@ export function entryMatchesCurrent(entry: NodeGenerationHistoryEntry, current: 
 }
 
 /** 从规范聚合读取节点当前状态（同步版；供 `restore` 使用）。 */
-export function currentNodeStateOf(canvas: ServerCanvas, nodeId: string, kind: NodeGenerationKind): CurrentNodeState {
+export function currentNodeStateOf(canvas: ServerCanvas, nodeId: string, kind: NodeGenerationKind, content?: ContentContributionResolver): CurrentNodeState {
   const data = canvas.nodeData[nodeId] as Record<string, unknown> | undefined;
   const raw = data?.modelPlacement;
   const placement = raw === undefined || raw === null ? null : decodeModelPlacement(raw);
-  return { identity: currentIdentityOf(canvas, nodeId, kind), placement };
+  return { identity: currentIdentityOf(canvas, nodeId, kind, content), placement };
 }
 
 /** 节点当前生效版本 identity；无则 null。与 `nodeHistoryContentIdentity` 同构。 */
-export function currentIdentityOf(canvas: ServerCanvas, nodeId: string, kind: NodeGenerationKind): string | null {
+export function currentIdentityOf(canvas: ServerCanvas, nodeId: string, kind: NodeGenerationKind, content?: ContentContributionResolver): string | null {
   const data = canvas.nodeData[nodeId] as Record<string, unknown> | undefined;
   if (!data) return null;
   if (kind === "model") {
     // 自包含片场（items-only）当前身份覆盖完整片场定义（独立根 + items + 全部片段），
     // 与顶层作者模型字段无关；必须先于顶层模型脚本读取判断（否则合法片场身份恒为 null）。
-    const animationIdentity = animationDefinitionIdentity(data);
+    const animationIdentity = animationDefinitionIdentity(data, content);
     if (animationIdentity) return animationIdentity;
     const source = typeof data.modelScript === "string" ? data.modelScript : "";
     if (source === "") return null;
@@ -135,7 +151,8 @@ export function isActiveGeneration(data: Record<string, unknown> | undefined): b
 /** 画布级：一页内按 nodeId 去重读取当前状态（有界）。 */
 export function currentStatesFor(
   canvas: ServerCanvas | null,
-  entries: readonly NodeGenerationHistoryEntry[]
+  entries: readonly NodeGenerationHistoryEntry[],
+  content?: ContentContributionResolver
 ): Map<string, CurrentNodeState> {
   const states = new Map<string, CurrentNodeState>();
   if (!canvas) return states;
@@ -143,7 +160,7 @@ export function currentStatesFor(
     const kind = entryKindForNode(canvas, nodeId);
     states.set(
       nodeId,
-      kind ? currentNodeStateOf(canvas, nodeId, kind) : { identity: null, placement: null }
+      kind ? currentNodeStateOf(canvas, nodeId, kind, content) : { identity: null, placement: null }
     );
   }
   return states;

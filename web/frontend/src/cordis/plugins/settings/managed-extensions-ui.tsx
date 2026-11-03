@@ -58,8 +58,7 @@ export function ManagedInstallBar({
           <span className="managed-install__drop-icon"><FileTextIcon size={21} /></span>
           <strong>拖入 .wxt 扩展包</strong>
           <p>
-            或选择本机文件。安装前会校验签名、逐文件摘要与扩展声明
-            {installations.allowUnsignedLocal ? "（本机允许未签名的本地包）" : ""}。
+            或选择本机文件。安装前会校验签名与逐文件摘要。签名对上信任根的扩展会标为已验证；未验证的包会先说明风险，确认后才安装。
           </p>
           <Button
             size="sm"
@@ -83,7 +82,7 @@ export function ManagedInstallBar({
             从文件安装
           </Button>
           <span className="settings-page__hint">
-            选择 .wxt 扩展包；安装前校验签名与声明{installations.allowUnsignedLocal ? "（本机允许未签名的本地包）" : ""}。
+            选择 .wxt 扩展包。已验证的扩展直接安装；签名不受信任时会先说明风险。
           </span>
         </div>
       )}
@@ -226,6 +225,58 @@ export function ManagedExtensionDetails({
       ) : null}
       <ManagedVersionStatusNotice installed={installed} />
     </div>
+  );
+}
+
+/** 安装未验证扩展前的风险确认。确认后由调用方带上 acceptUntrusted 重试。 */
+export function UntrustedInstallDialog({
+  name,
+  unsigned,
+  busy,
+  onCancel,
+  onConfirm,
+  testId = "untrusted-install-dialog"
+}: {
+  name: string;
+  /** 完全没有签名，而不是公钥不在信任根。 */
+  unsigned: boolean;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  testId?: string;
+}) {
+  return (
+    <div className="trust-risk">
+      <div className="trust-risk__panel" role="alertdialog" data-testid={testId}>
+        <h3>安装未验证的扩展</h3>
+        <p>
+          {unsigned
+            ? `「${name}」没有签名，无法确认发布者。`
+            : `「${name}」的签名不在本机信任根中，无法确认发布者。`}
+          它会和本机宿主在同一个进程里运行，权限相同，没有隔离。只在你确认来源可信时继续。
+        </p>
+        <div className="trust-risk__actions">
+          <Button size="sm" tone="ghost" disabled={busy} onClick={onCancel}>取消</Button>
+          <Button size="sm" tone="danger" disabled={busy} onClick={onConfirm} data-testid={`${testId}-confirm`}>仍要安装</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 任务失败码需要确认时，挂在安装页上的弹窗。 */
+export function UntrustedInstallPrompt({ controller }: { controller: ManagedExtensionsController }) {
+  const state = useController(controller);
+  const prompt = state.riskPrompt;
+  if (!prompt) return null;
+  return (
+    <UntrustedInstallDialog
+      name={prompt.name}
+      unsigned={prompt.code === "MARKETPLACE_UNSIGNED_REJECTED"}
+      busy={state.submitting}
+      onCancel={() => controller.dismissRisk()}
+      onConfirm={() => void controller.confirmRisk()}
+    />
   );
 }
 

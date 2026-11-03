@@ -24,7 +24,7 @@ export type ExtensionRestartResult = { ok: true } | ExtensionInstallRemoteError;
 export type ExtensionUnquarantineResult = { ok: true } | ExtensionInstallRemoteError;
 
 export type ExtensionInstallRemote = {
-  installFile(file: Blob & { name?: string }): Promise<ExtensionJobAccepted>;
+  installFile(file: Blob & { name?: string }, extra?: { acceptUntrusted?: boolean }): Promise<ExtensionJobAccepted>;
   job(jobId: string): Promise<ExtensionJobRead>;
   cancel(jobId: string): Promise<ExtensionJobRead>;
   uninstall(extensionId: string, options?: { purgeData?: boolean }): Promise<ExtensionJobAccepted>;
@@ -77,14 +77,15 @@ export function createExtensionInstallRemote(options: { fetchImpl?: typeof globa
   };
   const path = (extensionId: string, action: string) => `/api/extensions/${encodeURIComponent(extensionId)}/${action}`;
   return {
-    installFile: (file) =>
+    installFile: (file, extra) =>
       accepted(
         EXTENSION_INSTALL_PATH,
         {
           method: "POST",
           headers: {
             "content-type": "application/octet-stream",
-            ...(file.name ? { "x-extension-filename": encodeURIComponent(file.name) } : {})
+            ...(file.name ? { "x-extension-filename": encodeURIComponent(file.name) } : {}),
+            ...(extra?.acceptUntrusted ? { "x-accept-untrusted": "1" } : {})
           },
           body: file
         },

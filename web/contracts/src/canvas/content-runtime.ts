@@ -17,6 +17,8 @@ import type { ContentMcpRuntime } from "./film-set-mcp.js";
 import type { ContentRecordingRuntime } from "./content-recording.js";
 
 export type CanvasContentRuntime = {
+  /** 这个运行时读取稳定媒体时声明的扩展作用域。宿主不猜测身份。 */
+  mediaExtensionId?: string;
   /** Trusted content owners, aggregated before authoritative command paths open. */
   contributions?: readonly import("./content-contribution.js").ContentContribution[];
   managedLifecycles?: readonly import("./managed-node-lifecycle.js").ManagedNodeLifecycleAdapter[];

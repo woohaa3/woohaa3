@@ -14,7 +14,11 @@
     "skipLibCheck": true,
     "noEmit": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@woohaa3/contracts": ["../../contracts/src/index.ts"],
+      "@woohaa3/contracts/canvas-yjs": ["../../contracts/src/canvas/yjs/index.ts"]
+    }
   },
   "include": ["src"]
 }

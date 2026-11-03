@@ -93,6 +93,11 @@ describe("resolveSettings", () => {
     expect(diffSettings({ "demo.upstream.url": "ws://a" }, { "demo.upstream.url": "ws://b" })).toEqual(["demo.upstream.url"]);
     expect(diffSettings({}, {})).toEqual([]);
   });
+
+  it("已移除的未签名开关留在旧配置里时不报未知项", () => {
+    const resolved = resolveSettings({ file: { extensions: { marketplace: { allowUnsigned: true } } } });
+    expect(resolved.issues.filter((issue) => issue.key === "extensions.marketplace.allowUnsigned")).toEqual([]);
+  });
 });
 
 describe("providerIdFromConfigPrefix", () => {

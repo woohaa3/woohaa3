@@ -50,8 +50,8 @@ export type ExtensionManagerDeps = {
   toolkit: ExtensionPackageToolkit;
   /** 未限定的市场注册表：本地文件来源由 Manager 注册在这里。 */
   marketplace: HostMarketplaceService;
-  /** 本机信任根与未签名开关（本机配置 + 内置官方公钥，按调用现取）。 */
-  trust: () => { trustedKeys: readonly TrustedKey[]; allowUnsignedLocal: boolean };
+  /** 本机信任根（本机配置 + 内置官方公钥，按调用现取）。 */
+  trust: () => { trustedKeys: readonly TrustedKey[] };
   /**
    * 官方发布者 keyId 集合（内置官方公钥）。测试可注入；缺省取 official-trust.ts。
    * 内置扩展的受管覆盖只接受这里列出的发布者，防止其它已信任 key 用同名包顶替。
@@ -94,8 +94,8 @@ export type ExtensionManagerDeps = {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 };
 
-export type InstallRequest = { sourceId: string; extensionId: string; range: string; actor: string };
-export type FileInstallRequest = { body: Readable | AsyncIterable<Uint8Array>; filename?: string; actor: string };
+export type InstallRequest = { sourceId: string; extensionId: string; range: string; actor: string; acceptUntrusted?: boolean };
+export type FileInstallRequest = { body: Readable | AsyncIterable<Uint8Array>; filename?: string; actor: string; acceptUntrusted?: boolean };
 
 export type ManagedInstallView = {
   extensionId: string;

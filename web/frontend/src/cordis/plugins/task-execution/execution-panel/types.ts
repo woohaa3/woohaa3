@@ -200,14 +200,10 @@ export interface ExecutionPanelProps {
 	 *
 	 * 生产站点由提示词工具插件承载改写；未装配工具插件时缺省显示「未接入」提示。
 	 * 提供本回调后，面板把「所选 action + 当前草稿」交给宿主，不再显示缺省提示。
+	 *
+	 * 返回 Promise 时面板保持「改写中」直到 settle：成功关闭菜单，失败显示就地错误。
 	 */
-	onPromptSkill?: (input: { id: string; label: string; prompt: string }) => void;
-	/** 快捷改写可选模型；传入则在快捷改写菜单顶部渲染模型选择器。 */
-	promptModels?: ReadonlyArray<{ id: string; label: string }>;
-	/** 当前快捷改写模型 id。 */
-	promptModel?: string;
-	/** 切换快捷改写模型。 */
-	onPromptModelChange?: (id: string) => void;
+	onPromptSkill?: (input: { id: string; label: string; prompt: string }) => void | Promise<void>;
 	/** 顶部参考区插槽（画布参考素材 chips）。 */
 	referencesSlot?: React.ReactNode;
 	/**

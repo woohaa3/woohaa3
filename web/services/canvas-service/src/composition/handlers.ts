@@ -89,6 +89,7 @@ export type ComposedHandlerDeps = {
    */
   archiveMedia?: import("../api/canvas-api/types.js").CanvasRequestHandlerOptions["mediaStorage"];
   log: (event: Record<string, unknown>) => void;
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
 };
 
 /** 组装最终 `handle`（canvas → snippets → editCompletion → nodeHistory → activity → MCP 面）。 */
@@ -112,6 +113,7 @@ export function composeRequestHandler(deps: ComposedHandlerDeps): (req: Incoming
         }
       : createCanvasRequestHandler({
           get recording() { return deps.recording; },
+          ...(deps.content ? { content: deps.content } : {}),
           service: composition.service,
           ...(composition.catalog ? { catalog: composition.catalog } : {}),
           ...(deps.imageIndex ? { imageIndex: deps.imageIndex } : {}),

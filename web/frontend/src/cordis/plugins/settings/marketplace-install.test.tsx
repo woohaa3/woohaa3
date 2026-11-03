@@ -92,7 +92,7 @@ const snapshot = (enabled = true): SettingsSnapshot =>
     settings: [{ key: TRUSTED_KEYS_SETTING, value: "k1=PUB1" }],
     plugins: [],
     files: { config: "", secrets: "" },
-    ...(enabled ? { extensionInstallations: { revision: 0, jobs: [], restartSupported: true, allowUnsignedLocal: false } } : {})
+    ...(enabled ? { extensionInstallations: { revision: 0, jobs: [], restartSupported: true } } : {})
   }) as unknown as SettingsSnapshot;
 
 async function flush() {
@@ -229,9 +229,16 @@ describe("MarketplaceInstallPanel", () => {
     click(container.querySelector('[data-testid="marketplace-item-demo"] button'));
     await flush();
     expect(container.querySelector('[data-testid="marketplace-version-meta"]')?.textContent).toContain("4 KB");
-    expect(container.querySelector('[data-testid="marketplace-untrusted"]')?.textContent).toContain("安装会失败");
+    expect(container.querySelector('[data-testid="marketplace-untrusted"]')?.textContent).toContain("未验证");
     const submit = container.querySelector('[data-testid="marketplace-install-submit"]') as HTMLButtonElement;
     expect(submit.disabled).toBe(false);
+    click(submit);
+    expect(container.querySelector('[data-testid="untrusted-install-dialog"]')?.textContent).toContain("信任根");
+    expect(remote.calls.install).toEqual([]);
+    click(container.querySelector('[data-testid="untrusted-install-dialog-confirm"]'));
+    await flush();
+    expect(remote.calls.install).toEqual([{ sourceId: "woohaa-server", extensionId: "demo", range: "1.1.0", acceptUntrusted: true }]);
+    remote.calls.install.length = 0;
 
     click(container.querySelector('[data-testid="marketplace-trust"]'));
     expect(container.querySelector('[data-testid="marketplace-trust-confirm"]')?.textContent).toContain("k2");
@@ -241,8 +248,9 @@ describe("MarketplaceInstallPanel", () => {
     expect(writes).toEqual(["k1=PUB1,k2=PUB2"]);
 
     click(submit);
+    click(container.querySelector('[data-testid="untrusted-install-dialog-confirm"]'));
     await flush();
-    expect(remote.calls.install).toEqual([{ sourceId: "woohaa-server", extensionId: "demo", range: "1.1.0" }]);
+    expect(remote.calls.install).toEqual([{ sourceId: "woohaa-server", extensionId: "demo", range: "1.1.0", acceptUntrusted: true }]);
     // 不再写会过期的「已开始安装」提示；受理后由任务列表给出进度与终态。
     expect(container.querySelector('[data-testid="marketplace-notice"]')).toBeNull();
   });
@@ -266,7 +274,8 @@ describe("MarketplaceInstallPanel", () => {
       error: null,
       submitting: false,
       restart: { status: "idle" as const, message: null },
-      unquarantining: []
+      unquarantining: [],
+      riskPrompt: null
     };
     const cancel = vi.fn(async () => undefined);
     const jobs = { getState: () => jobsState, subscribe: () => () => undefined, cancel } as unknown as ManagedExtensionsController;

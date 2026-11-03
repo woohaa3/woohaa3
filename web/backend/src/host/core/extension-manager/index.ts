@@ -109,7 +109,6 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
     }
 
     const settings = ctx.config;
-    const envAllow = config.env.WOOHAA3_EXTENSION_ALLOW_UNSIGNED === "1";
     // 官方公钥随客户端发布内置（dev / Web release / 桌面宿主同一份后端代码）；
     // 本机配置只能追加信任根，不能移除内置 key。
     const trustedKeys = () =>
@@ -265,10 +264,7 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
         toolkit,
         ...(runtimeSwap() ? { runtime: runtimeSwap()! } : {}),
         marketplace: ctx.marketplace,
-        trust: () => ({
-          trustedKeys: trustedKeys(),
-          allowUnsignedLocal: envAllow || settings.get("extensions.marketplace.allowUnsigned" as never) === true
-        }),
+        trust: () => ({ trustedKeys: trustedKeys() }),
         builtins: () => builtins,
         installedVersions: () => {
           const versions = new Map<string, string>();

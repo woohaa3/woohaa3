@@ -110,6 +110,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     dialogs,
     catalog: catalogService,
     snippetSource,
+    promptSkill,
     onPromptSkill,
     presentation = "compact",
     runtime,
@@ -328,6 +329,31 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     },
     [context, draft, draftStore, targetModelKey, typedModels, props]
   );
+
+  /**
+   * 快捷改写：扩展产出文本，Host 负责写回草稿（change: add-prompt-skill-extension）。
+   *
+   * 失败以异常抛给面板，由面板显示为就地错误；成功时不自动提交生成。
+   */
+  const runPromptSkill = useMemo(() => {
+    if (!promptSkill || !context) return undefined;
+    return async (input: { id: string; label: string; prompt: string }): Promise<void> => {
+      const result = await promptSkill({
+        skill: { id: input.id, label: input.label },
+        prompt: input.prompt,
+        canvasId: canvasId ?? "",
+        nodeId: context.nodeId,
+        taskKind: context.nodeType
+      });
+      if ("error" in result) throw new Error(result.error);
+      const next = result.prompt.trim();
+      if (next === "") throw new Error("改写结果为空，草稿未修改");
+      patchDraft({ prompt: next });
+    };
+  }, [promptSkill, context, patchDraft, canvasId]);
+
+  /** 扩展注入的改写优先；没有时保留外部直接接管的兼容回调。 */
+  const panelPromptSkill = runPromptSkill ?? onPromptSkill;
 
   const handleSubmit = useCallback(
     async (input: { prompt: string; parameters: Record<string, unknown> }): Promise<ModelSubmitOutcome> => {
@@ -548,7 +574,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
                   {...(snippetTrigger ? { snippetTrigger } : {})}
                 />
               ),
-              ...(onPromptSkill ? { promptSkill: onPromptSkill } : {})
+              ...(panelPromptSkill ? { promptSkill: panelPromptSkill } : {})
             }}
           />
         </ModelPanelErrorBoundary>
@@ -587,7 +613,6 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       {body}
     </ExecutionPanelSurface>
   );
-  void onPromptSkill;
   return wrapper;
 }
 

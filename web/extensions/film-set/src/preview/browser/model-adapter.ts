@@ -6,6 +6,7 @@ import { HistoryFilmSetSnapshots } from "./history-preview.js";
 import { FILM_SET_EXTENSION_ID } from "../../state/shared/identity.js";
 import { projectManagedShotMediaCanvas } from "./managed-shot-media-projection.js";
 import { filmSetManagedLifecycle } from "../../state/shared/managed-shot-media-lifecycle.js";
+import { filmSetContentContribution } from "../../state/shared/content/contribution.js";
 
 /** Adapter identity contains orchestration only; geometry preparation reads the resource cards. */
 export function filmSetExecutionKey(data: CanvasNodeData): string { return JSON.stringify(readFilmSetGroupMarker(data)); }
@@ -13,6 +14,7 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
   const project = (current: ServerCanvas) => projectManagedShotMediaCanvas(captureOwner ? projectFilmSetCapture(captureOwner, history.project(current)!) : history.project(current)!);
   return {
     extensionId: FILM_SET_EXTENSION_ID, owner: FILM_SET_EXTENSION_ID,
+    content: filmSetContentContribution,
     managedLifecycle: filmSetManagedLifecycle,
     /** Group-owned badges use the same trusted overview primitive LOD declaration as the old composite node. */
     geometryQuality: "overview-primitives-v1",
