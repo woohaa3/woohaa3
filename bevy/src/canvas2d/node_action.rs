@@ -59,6 +59,10 @@ pub(crate) fn draw(
 
     let mut out = Vec::new();
     for (entity, node) in nodes {
+        // `chrome.none` 的世界对象没有卡片锚点，动作横条留在原生菜单中选择。
+        if node.chrome.is_none() {
+            continue;
+        }
         // 容器（片场）与普通节点共用同一条动作横条；是否绘制由 `action_bar_visible` 决定
         // （只有声明 `actionBar` 的容器才带 NodeActionBar 组件）。
         let Some(actions) = node_actions.get(&node.id) else {
@@ -355,6 +359,7 @@ mod tests {
 
     fn node(id: &str, x: f32, y: f32) -> GraphNode {
         GraphNode {
+            chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             model_preview: None,
             history_strip: None,

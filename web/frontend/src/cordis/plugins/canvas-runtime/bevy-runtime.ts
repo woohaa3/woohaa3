@@ -709,6 +709,13 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
           projectModelPick
         )
       ),
+    queryWorldGround: (input) =>
+      guardGeneration(input.generation, () =>
+        runQuery(
+          () => (module.query_model_pick ?? (() => ""))(JSON.stringify({ ...input, kind: "ground" })),
+          (payload) => payload.ground && Number.isFinite(payload.ground.u) && Number.isFinite(payload.ground.v) ? payload.ground : null
+        )
+      ),
     queryGizmoHit: (input) => {
       if (!module.query_gizmo_hit) return null;
       try {
@@ -874,6 +881,8 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     recover: runtime.recoverRuntime,
     setTexture: runtime.setTexture,
     queryGizmoHit: runtime.queryGizmoHit,
+    queryModelPick: runtime.queryModelPick,
+    queryWorldGround: runtime.queryWorldGround,
     // 真实 WASM 命中查询：E2E 用它验证 Rust 侧 serde 确实读到 camelCase 键。
     queryPoint: (input: { x: number; y: number; zoom: number; hoveredEdgeId?: string | null }) =>
       runtime.queryPoint?.({

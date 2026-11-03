@@ -8,6 +8,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { Context } from "@deepseek-ai/cordis";
 import { MediaImportService } from "./service.js";
 import type { CanvasCommand } from "@woohaa3/contracts";
+import { canvasPointToGround } from "@woohaa3/contracts";
+
+vi.mock("@woohaa3/contracts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@woohaa3/contracts")>(),
+  parseGlbModel: () => ({ ok: true })
+}));
 
 type SubmitCall = { commands: CanvasCommand[]; commandId: string };
 
@@ -66,6 +72,20 @@ function png(name: string, body = "x"): File {
 }
 
 describe("MediaImportService.importBatch", () => {
+  it("uploads a model and submits an independent ground-plane instance", async () => {
+    const { ctx, submitted, upload } = makeContext();
+    const service = new MediaImportService(ctx);
+    const file = new File(["glb"], "model.glb", { type: "model/gltf-binary" });
+    Object.defineProperty(file, "arrayBuffer", { value: async () => new Uint8Array([1]).buffer });
+    const result = await service.importBatch({ files: [file], anchor: { world: { x: 128, y: 64 } }, source: "picker", selectedNodeIds: [] });
+    expect(result.succeeded).toBe(1);
+    expect(upload).toHaveBeenCalledOnce();
+    expect(submitted).toHaveLength(1);
+    const add = submitted[0]!.commands.find(command => command.type === "node.add");
+    expect(add?.type).toBe("node.add");
+    if (add?.type === "node.add") expect(add.nodeData?.sharedWorldInstance).toMatchObject({ instanceId: expect.any(String), transform: { position: { ...canvasPointToGround({ x: 128, y: 64 }), h: 0 } } });
+    service.dispose();
+  });
   it("每个文件独立原子提交 asset.upsert + node.add", async () => {
     const { ctx, submitted } = makeContext();
     const service = new MediaImportService(ctx);

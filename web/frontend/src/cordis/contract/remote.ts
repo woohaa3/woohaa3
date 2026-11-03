@@ -74,7 +74,17 @@ export type ModelScriptReport = {
  * Canvas Remote：Canvas Yjs transport、语义命令 wire、run/cancel、Model MCP report、
  * 提示词片段目录的唯一浏览器出口。所有最终进入 Canvas Service 的协议都在这里。
  */
+export type WorldRemoteOutcome<T> = T & { transportCode?: string };
+
 export interface CanvasRemoteService {
+  issueWorldToolContext(input: import("@woohaa3/contracts").WorldToolContextRequest, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldToolContextOutcome>>;
+  revokeWorldToolContext(input: import("@woohaa3/contracts").WorldToolContextRevokeInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<{ ok: true } | import("@woohaa3/contracts").WorldAuthoringFailure>>;
+  saveWorldCamera(input: import("@woohaa3/contracts").WorldCameraSettingsSaveInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldCameraSettingsSaveOutcome>>;
+  restoreWorldCamera(input: import("@woohaa3/contracts").WorldCameraRestoreInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldCameraRestoreOutcome>>;
+  listWorldCameraHistory(input: import("@woohaa3/contracts").WorldCameraHistoryListInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldCameraHistoryListOutcome>>;
+  prepareSceneArea(input: { canvasId: string; areaId: string }, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringPrepareOutcome>>;
+  executeSceneArea(input: import("@woohaa3/contracts").WorldAuthoringExecuteInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringExecuteOutcome>>;
+  historySceneArea(direction: "undo" | "redo", input: import("@woohaa3/contracts").WorldAuthoringHistoryInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringHistoryOutcome>>;
   prepareWorldConversion(input: import("@woohaa3/contracts").WorldConversionPrepareInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome>;
   commitWorldConversion(input: import("@woohaa3/contracts").WorldConversionCommitInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionCommitOutcome>;
   /**

@@ -306,6 +306,13 @@ export type InteractionControllerOptions = {
     scale(scale: number): void;
     scaleEnd(): void;
   };
+  /**
+   * 场景区手势运行时（T07 scope gestures）。
+   *
+   * 缺省时读取 world-scopes 绑定的页面实例；测试与宿主可显式注入。控制器只把指针
+   * 交给它，不在这里判断场景权限或直接改共享世界。
+   */
+  sceneAreaGestures?: import("../world-scopes/gestures.js").SceneAreaGesturePort | null;
 };
 
 export type InteractionController = {
@@ -368,6 +375,13 @@ export type InteractionController = {
   exitModelFocus(): void;
   /** 是否处于模型聚焦查看。 */
   isModelFocused(): boolean;
+  /** Transient renderer-only ground displacement. Null cancels without a document write. */
+  setWorldGroundPreview(nodeId: string, delta: { u: number; v: number } | null): boolean;
+  /** Resolve a client point against the accepted renderer camera's ground plane. */
+  queryWorldGround(point: { x: number; y: number }): { u: number; v: number } | null;
+  beginWorldGroundPreview(nodeId: string, point: { x: number; y: number }): boolean;
+  updateWorldGroundPreview(point: { x: number; y: number }): boolean;
+  cancelWorldGroundPreview(): void;
   /**
    * 以 canonical nodeId 请求进入聚焦（历史 owner 用）
    * （change: add-canvas-node-generation-history，任务 4.1）。目标不合法返回 false。
@@ -375,6 +389,19 @@ export type InteractionController = {
   enterModelFocusForNode(nodeId: string): boolean;
   /** 更新右侧遮挡宽度，按未遮挡左侧区域重新取景（任务 4.2）。 */
   setContentRect(rect: { right: number; left?: number; top?: number; bottom?: number }): void;
+  /**
+   * 注入/替换场景区手势运行时（T07 scope gestures）；传 null 恢复页面绑定实例。
+   * 场景区卡片/地面边缘按下时由 2D 输入层转发，不新建指针监听。
+   */
+  setSceneAreaGestures(handler: InteractionControllerOptions["sceneAreaGestures"] | null): void;
+  /**
+   * Overlay bridge for externally started scene gestures (projected 搬场景 handle).
+   * The controller records the external owner so its frame reconciliation cannot
+   * cancel the gesture on the next animation frame.
+   */
+  beginSceneAreaGesture(input: import("../world-scopes/gestures.js").SceneAreaGestureBeginInput): import("../world-scopes/gestures.js").SceneAreaGestureStart | null;
+  endSceneAreaGesture(): Promise<import("../world-scopes/gestures.js").SceneAreaGestureResult>;
+  cancelSceneAreaGesture(): void;
   restoreViewport(viewport: { x: number; y: number; zoom: number }): void;
   /**
    * 带动画地平移到目标视口（保持传入 zoom）。尊重减少动态效果偏好；duration 为 0 时瞬时。
@@ -464,4 +491,10 @@ export type Gesture =
       /** 拖拽中命中的待提交边预览。 */
       pendingEdges: Array<{ id: string; source: string; target: string }>;
     }
-  | { kind: "marquee"; pointerId: number; start: Point; current: Point };
+  | { kind: "marquee"; pointerId: number; start: Point; current: Point }
+  | {
+      kind: "scene-area";
+      pointerId: number;
+      areaNodeId: string;
+      intent: "move" | "resize";
+    };

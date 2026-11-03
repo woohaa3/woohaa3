@@ -64,6 +64,13 @@ export type InteractionCore = {
   /** 聚焦相机输入门禁（只有 modal 阻断）；见 `InteractionControllerOptions.isFocusInputBlocked`。 */
   focusInputBlocked: () => boolean;
   state: InteractionState;
+  /** 场景区手势运行时（T07）：只转发指针，不在此判断权限或写共享世界。 */
+  sceneAreaGestures: () => import("../world-scopes/gestures.js").SceneAreaGesturePort | null;
+  /**
+   * 标记当前场景区手势的输入归属。帧结算只取消 `pointer` 路径启动的手势；
+   * `external`（overlay 搬场景手柄）由自己的 end/cancel 收尾。
+   */
+  claimSceneAreaGesture: (owner: "pointer" | "external") => void;
   localViewport: ReturnType<typeof createLocalViewportStore>;
   viewportListeners: Set<() => void>;
   model: ModelGestureFamily;
@@ -98,6 +105,7 @@ export type InteractionCore = {
     hoveredEdgeId?: string | null
   ) => InteractionQuery<HitTarget | null>;
   queryMarquee: (rect: { x: number; y: number; width: number; height: number }) => InteractionQuery<string[]>;
+  queryWorldGround: (point: Point) => { u: number; v: number } | null;
   queryProbe: (source: string, direction: "prev" | "next") => InteractionQuery<ProbeCandidate[]>;
   /**
    * 模型网格命中（change: play-model-animations-on-hover）。

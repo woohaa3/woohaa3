@@ -37,6 +37,7 @@ pub(crate) fn apply_motion_playback(
     }
     let Some(playback) = scene.animation_playback.as_ref() else {
         models.motion_targets = None;
+        super::super::pick::publish_motion(None, HashMap::new());
         return None;
     };
     let plan = super::super::motion_plan::resolve(models, playback);
@@ -44,6 +45,7 @@ pub(crate) fn apply_motion_playback(
     let mut desired: DesiredOpacity = HashMap::new();
 
     let Some(motion) = &plan.top else {
+        super::super::pick::publish_motion(None, HashMap::new());
         if let Some(root) = models.roots.get_mut(&playback.node_id) {
             root.opacity.sync_frame(materials, commands, opacity, &desired);
         }
@@ -51,6 +53,7 @@ pub(crate) fn apply_motion_playback(
     };
     let initial = playback.initial_camera_state();
     let (camera, model_deltas) = crate::motion::evaluate(&motion, playback.time, initial);
+    super::super::pick::publish_motion(Some(&playback.node_id), model_deltas.iter().cloned().collect());
 
     if let Some(root) = models.roots.get_mut(&playback.node_id) {
         for (part_id, delta) in &model_deltas {

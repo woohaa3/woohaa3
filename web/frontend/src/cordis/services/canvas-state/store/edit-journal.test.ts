@@ -211,6 +211,43 @@ describe("Edit Journal 会话清理", () => {
   });
 });
 
+describe("Edit Journal 外部权威动作", () => {
+  it("verified external entries share the same cursor and move only after confirmed replay", async () => {
+    const { journal } = makeJournal();
+    const undo = vi.fn(async () => ({ ok: true as const }));
+    const redo = vi.fn(async () => ({ ok: true as const }));
+    expect(journal.recordExternal({ id: "scene-area:op", label: "搬动场景", undo, redo }).ok).toBe(true);
+    expect(journal.recordExternal({ id: "scene-area:op", label: "搬动场景", undo, redo }).ok).toBe(true);
+    expect(journal.size).toBe(1);
+    const handlers = {
+      apply: async (entry: ReturnType<typeof journal.snapshot>["entries"][number], direction: -1 | 1) =>
+        entry.kind === "external" ? (direction === -1 ? entry.undo() : entry.redo()) : { ok: false as const, reason: "unexpected entry" }
+    };
+    expect((await journal.undo(handlers)).ok).toBe(true);
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(journal.snapshot()).toMatchObject({ canUndo: false, canRedo: true });
+    expect((await journal.redo(handlers)).ok).toBe(true);
+    expect(redo).toHaveBeenCalledTimes(1);
+    expect(journal.snapshot()).toMatchObject({ canUndo: true, canRedo: false });
+  });
+
+  it("keeps the cursor when the authority replay is version-conflicted", async () => {
+    const { journal } = makeJournal();
+    journal.recordExternal({
+      id: "world-camera:op",
+      label: "调整镜头设置",
+      undo: async () => ({ ok: false as const, reason: "版本冲突" }),
+      redo: async () => ({ ok: true as const })
+    });
+    const handlers = {
+      apply: async (entry: ReturnType<typeof journal.snapshot>["entries"][number], direction: -1 | 1) =>
+        entry.kind === "external" ? (direction === -1 ? entry.undo() : entry.redo()) : { ok: false as const, reason: "unexpected entry" }
+    };
+    expect((await journal.undo(handlers)).ok).toBe(false);
+    expect(journal.snapshot()).toMatchObject({ canUndo: true, canRedo: false });
+  });
+});
+
 describe("Edit Journal 防重入", () => {
   it("未结算时不允许继续记录", async () => {
     let resolveSettle!: (value: { ok: true; committed: boolean }) => void;

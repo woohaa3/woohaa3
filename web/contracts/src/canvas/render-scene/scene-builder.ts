@@ -1,6 +1,7 @@
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
+import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
 import type { NodeCapabilityResolver } from "../node-capabilities.js";
 /**
  * `CanvasRenderScene` 快照装配与呈现指纹（自 `render-scene.ts` 拆出）
@@ -88,6 +89,8 @@ export type CanvasRenderSceneInput = {
   modelResources?: ReadonlyMap<string, PreparedModelResource>;
   /** 模型 placement（来自 DOM 参数面板的瞬时/规范 nodeData）。 */
   modelPlacements?: ReadonlyMap<string, BevyModelPlacement>;
+  /** Transient ground displacement in meters; never applied to the canvas document. */
+  worldGroundPreviews?: ReadonlyMap<string, { u: number; v: number }>;
   /** 上传中的幽灵节点（只渲染，不进规范状态）；与真实节点同 id 时自动跳过。 */
   ghostNodes?: readonly GhostRenderNode[];
   /**
@@ -142,7 +145,10 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   const assets = new Map<string, StoredAsset>(canvas.assets.map((asset) => [asset.id, asset]));
   const selectedIds = new Set(input.selection?.nodes ?? []);
 
-  const nodes: BevyRenderNode[] = canvas.document.nodes.map((node) => {
+  // 场景区是 h=0 的地面范围，不是画布卡片：只通过 `sceneAreas` 投影，节点列表不再
+  // 生成通用卡片。2D 组保留节点身份（命中/选择/动作）但以 `frame` chrome 绘制包围框。
+  const sceneAreaNodeIds = new Set<string>();
+  const nodes: BevyRenderNode[] = canvas.document.nodes.flatMap((node) => {
     const context = { canvas, node, data: nodeData[node.id] };
     const capabilities = capabilitiesOf(node);
     const kind = capabilities.appearance?.palette ?? "node";
@@ -150,9 +156,29 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const size = effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id), capabilities);
     const override = input.positionOverrides?.get(node.id);
     const data = nodeData[node.id];
+    const area = decodeSceneAreaData(data?.sceneArea);
+    if (area.ok) {
+      sceneAreaNodeIds.add(node.id);
+      return [];
+    }
+    const workflowGroupInput = data?.workflowGroup2d;
+    const workflowGroup = workflowGroupInput === undefined ? undefined : decodeWorkflowGroupData(workflowGroupInput);
     const worldInput = data?.sharedWorldInstance;
     const world = worldInput === undefined ? undefined : decodeWorldInstanceData(worldInput);
     if (world && !world.ok) throw new Error(`Invalid shared world instance: ${world.code}`);
+    const groundPreview = input.worldGroundPreviews?.get(node.id);
+    if (groundPreview && (!Number.isFinite(groundPreview.u) || !Number.isFinite(groundPreview.v))) {
+      throw new Error("Invalid shared world ground preview");
+    }
+    const projectedWorld = world?.ok && groundPreview ? {
+      ...world.value,
+      transform: { ...world.value.transform, position: {
+        ...world.value.transform.position,
+        u: world.value.transform.position.u + groundPreview.u,
+        v: world.value.transform.position.v + groundPreview.v
+      } }
+    } : world?.ok ? world.value : undefined;
+    if (projectedWorld && !decodeWorldInstanceData(projectedWorld).ok) throw new Error("Invalid shared world ground preview");
     const x = override ? override.x : node.position.x;
     const y = override ? override.y : node.position.y;
     const { width, height } = size;
@@ -185,9 +211,21 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       busy: isBusy(data),
       texture,
       // 仅当该节点是唯一选中项时才绘制抓手，避免多选时语义歧义（design D1）。
-      resizable: !!capabilities.resize && selectedIds.size === 1 && selectedIds.has(node.id),
-      ...(world?.ok ? { sharedWorldInstance: world.value } : {}),
-      ...(previewCard ? { modelPreview: previewCard.project(context, input.modelPreviews?.get(node.id)) } : {}),
+      // 共享世界实例没有卡片尺寸抓手：模型缩放走世界变换/助手，不是卡片 resize。
+      resizable: !projectedWorld && !!capabilities.resize && selectedIds.size === 1 && selectedIds.has(node.id),
+      ...(projectedWorld ? {
+        sharedWorldInstance: projectedWorld,
+        chrome: { kind: "none" as const }
+      } : {}),
+      ...(workflowGroup?.ok ? {
+        chrome: {
+          kind: "frame" as const,
+          groupId: workflowGroup.value.groupId,
+          memberNodeIds: [...workflowGroup.value.memberNodeIds]
+        }
+      } : {}),
+      // 共享世界实例没有卡片，也不再申请卡内轨道预览；模型由世界姿态直接绘制。
+      ...(previewCard && !projectedWorld ? { modelPreview: previewCard.project(context, input.modelPreviews?.get(node.id)) } : {}),
       ...(capabilities.appearance?.cardLabel ? { cardLabel: capabilities.appearance.cardLabel } : {})
     };
     if (capabilities.modelPreparation && resource) {
@@ -198,7 +236,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         ...(placement ? { placement } : {})
       };
     }
-    return rendered;
+    return [rendered];
   });
 
   // 幽灵节点（上传中）：追加为普通 Bevy 节点，复用完全相同的卡片绘制。
@@ -232,6 +270,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   const endpointlessNodeIds = new Set(
     canvas.document.nodes.filter((node) => capabilitiesOf(node).connections?.endpoints({ canvas, node, data: nodeData[node.id] }) === "none").map((node) => node.id)
   );
+  // 场景区节点不出现在节点列表里；指向它的旧连线不能留下悬空端点。
+  for (const nodeId of sceneAreaNodeIds) endpointlessNodeIds.add(nodeId);
   const edges = canvas.document.edges
     .filter((edge) => !endpointlessNodeIds.has(edge.source) && !endpointlessNodeIds.has(edge.target))
     .map((edge) => ({
@@ -246,6 +286,10 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     canvasId: canvas.id,
     revision: canvas.revision,
     nodes,
+    sceneAreas: canvas.document.nodes.flatMap(node => {
+      const area = decodeSceneAreaData(canvas.nodeData[node.id]?.sceneArea);
+      return area.ok ? [{ nodeId: node.id, bounds: area.value.bounds }] : [];
+    }),
     edges,
     selection: {
       nodes: [...(input.selection?.nodes ?? [])],
@@ -300,6 +344,7 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
     scene.version,
     `rev=${scene.revision}`,
     `sel=${scene.selection.nodes.join(",")}|${scene.selection.edge ?? ""}`,
+    JSON.stringify(scene.sceneAreas ?? []),
     `vp=${scene.viewport.x},${scene.viewport.y},${scene.viewport.zoom}`,
     `theme=${scene.theme.fingerprint}`,
     scene.draft ? `draft=${scene.draft.source},${scene.draft.side},${scene.draft.x},${scene.draft.y}` : "draft=",

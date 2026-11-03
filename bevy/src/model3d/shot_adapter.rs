@@ -18,9 +18,9 @@ use crate::shot_camera::{
     ShotPreviewClearColor, ShotPreviewViewport,
 };
 
-use super::layout::{model_anchor, model_unit, model_view_rotation};
+use super::layout;
 use super::runtime::{ModelAssets, ModelVisuals};
-use super::scene::{self, ModelAabb};
+use super::scene::ModelAabb;
 
 /// adapter 当前持有的 rig 与来源 identity。
 #[derive(Resource, Default)]
@@ -94,17 +94,8 @@ pub(crate) fn model_bounds_for_node(
         .map(|arc| arc.as_ref())
         .unwrap_or(root.resource.as_ref());
     let placement = &reference.placement;
-    let unit = model_unit(node, model, placement);
-    let root_rotation = model_view_rotation(placement);
-    let local = scene::placed_local_aabb(model, None)?.transformed(&Transform {
-        rotation: root_rotation,
-        scale: Vec3::splat(unit),
-        ..default()
-    });
-    Some(ModelBounds::from_local_aabb(
-        &local,
-        model_anchor(node, model, placement, unit),
-    ))
+    let (local, anchor) = layout::model_bounds_for_node(model, placement, node)?;
+    Some(ModelBounds::from_local_aabb(&local, anchor))
 }
 
 /// 由共享目标包围球与采样镜头状态派生世界姿态（focus + position）

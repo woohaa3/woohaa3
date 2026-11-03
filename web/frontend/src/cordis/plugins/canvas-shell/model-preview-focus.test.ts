@@ -18,6 +18,11 @@ import {
   ModelFocusSession,
 } from "./model-focus-session.js";
 import {
+  emptyWorldModelAnchor,
+  worldInstancePresentation,
+} from "./model-world-presentation.js";
+import { worldModelSelectionFromPick } from "../canvas-runtime/model-world-presentation.js";
+import {
   clampPreviewDistanceScale,
   restorePreviewObserver,
   syncPreviewObserver,
@@ -47,6 +52,62 @@ function expectedDistance(target: ReturnType<typeof modelTarget>) {
     (size.width - 32) / (size.height - 68),
   );
 }
+
+it("frames a world instance independently of card layout and rejects unknown versions", () => {
+  const target = modelTarget();
+  const data = target.canvas.nodeData.m1;
+  data.sharedWorldInstance = {
+    kind: "world-instance", version: "shared-world-v1", instanceId: "instance-1",
+    transform: { version: "shared-world-v1", position: { u: 2, v: 3, h: 4 }, rotation: [0, 0, 0, 1], scale: 2 }
+  };
+  const before = modelBounds(target)!;
+  expect(before.anchor).toEqual([128, 256, -192]);
+  target.canvas.document.nodes[0].position = { x: 1000, y: -900 };
+  expect(modelBounds(target)).toEqual(before);
+  data.sharedWorldInstance = { ...data.sharedWorldInstance, version: "shared-world-v2" };
+  expect(modelBounds(target)).toBeNull();
+});
+it("keeps the original card-preview path for legacy unconverted models", () => {
+  const target = modelTarget();
+  // No sharedWorldInstance: the legacy model still resolves bounds and its normal
+  // card preview; the world projection must not take it over.
+  expect(target.canvas.nodeData.m1.sharedWorldInstance).toBeUndefined();
+  expect(modelBounds(target)).not.toBeNull();
+  expect(worldInstancePresentation(target.canvas, "m1")).toBeNull();
+  const view = { ...cardView };
+  modelPreviewStore.set("m1", view);
+  expect(modelPreviewStore.get("m1")).toEqual(view);
+});
+
+it("selects a world model from the renderer pick without reading card geometry", () => {
+  const target = modelTarget();
+  target.canvas.document.nodes[0].position = { x: 1200, y: -800 };
+  target.canvas.nodeData.m1.sharedWorldInstance = {
+    kind: "world-instance", version: "shared-world-v1", instanceId: "instance-1",
+    transform: { version: "shared-world-v1", position: { u: 2, v: 3, h: 4 }, rotation: [0, 0, 0, 1], scale: 2 }
+  };
+  const presentation = worldInstancePresentation(target.canvas, "m1");
+  expect(presentation?.anchor).toEqual([128, 256, -192]);
+  expect(presentation?.aabb).toBeNull();
+  expect(emptyWorldModelAnchor(target.canvas, "m1")).toEqual([128, 256, -192]);
+  expect(worldModelSelectionFromPick({
+    canvas: target.canvas,
+    pick: { ok: true, value: { nodeId: "m1" } },
+    selected: ["other"]
+  })).toEqual(["m1"]);
+  expect(worldModelSelectionFromPick({
+    canvas: target.canvas,
+    pick: { ok: true, value: { nodeId: "m1" } },
+    selected: ["other", "m1"],
+    additive: true
+  })).toEqual(["other"]);
+  expect(worldModelSelectionFromPick({
+    canvas: target.canvas,
+    pick: { ok: true, value: { nodeId: "not-world" } },
+    selected: []
+  })).toBeNull();
+});
+
 function assertView(
   camera: NonNullable<ReturnType<ModelFocusSession["cameraSnapshot"]>>,
   target: ReturnType<typeof modelTarget>,

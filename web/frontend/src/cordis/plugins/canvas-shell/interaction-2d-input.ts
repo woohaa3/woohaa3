@@ -9,7 +9,7 @@ import { createHistoryClick } from "./input/history-click.js";
  * 右键菜单、双击预览。只通过 `InteractionCore` 访问共享坐标系、调度与提交，不自建监听。
  */
 import { modelPreviewPointerDown, modelPreviewPointerMove } from "./input/model-preview.js";
-import { bevyKindForNodeType, builtinNodeCapabilityResolver, explainWoohaa3CanvasConnectionBlock } from "@woohaa3/contracts";
+import { bevyKindForNodeType, builtinNodeCapabilityResolver, decodeSceneAreaData, decodeWorkflowGroupData, explainWoohaa3CanvasConnectionBlock } from "@woohaa3/contracts";
 import { nodeSize, cardHitNodeId, type Point } from "./hit-test.js";
 import { planConnectEdge, planResizeNode } from "../../../extension-api/command-planner.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -19,6 +19,7 @@ import { createDragAttachState, isDragAttachConnectable } from "./drag-attach.js
 import { createDragGestureFamily } from "./drag-gesture.js";
 import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
 import { createAggregateConnectFamily } from "./aggregate-connect.js";
+import { shouldUseWorldModelPick, worldModelSelectionFromPick } from "../canvas-runtime/model-world-presentation.js";
 import type { InteractionCore } from "./interaction-core.js";
 import type { Gesture } from "./interaction-types.js";
 import { createWheelEntryHandler } from "./input/wheel-entry.js";
@@ -32,6 +33,7 @@ export function create2dInputFamily(core: InteractionCore) {
   const viewport = createWheelViewport(core);
   const aggregate = createAggregateConnectFamily(core);
   const history = createHistoryClick(core);
+  let groundClick: { pointerId: number; x: number; y: number; candidates: string[] } | null = null;
 
   const drag = createDragGestureFamily(core);
   /**
@@ -72,6 +74,7 @@ export function create2dInputFamily(core: InteractionCore) {
   };
 
   const onPointerDown = (event: PointerEvent) => {
+    groundClick = null;
     // 计时起点在最外层：命中查询也要算进这次输入的耗时（spec: 被拒绝的输入不发事件，
     // 但它的时间仍然值得记下来——只是不产生 `perf.interaction`）。
     pointerMoment = perf.enter();
@@ -136,7 +139,87 @@ export function create2dInputFamily(core: InteractionCore) {
       return;
     }    const hit = hitResult.value;
 
+    // 场景区手势（T07）：区域卡片默认搬场景；地面边缘 / 显式模式只改范围。
+    // 区域内空白在 `auto` 模式下返回 null，继续走既有 groundClick + 框选，不吞拖动框选。
+    const sceneAreaGesture = core.sceneAreaGestures();
+    // 显式「搬场景 / 仅调范围」是用户可见承诺：此时场景区优先于世界模型拾取，
+    // 文案里的「区域内任意位置」才成立。auto 模式保持模型拾取优先，模型交互不回退。
+    const sceneAreaFirst = !!sceneAreaGesture && sceneAreaGesture.mode() !== "auto";
+    const trySceneAreaGesture = (): boolean => {
+      // Shift 保留既有加选框选语义；场景区手势不抢占它。
+      if (!sceneAreaGesture || isRight || event.shiftKey) return false;
+      const hitNodeId = cardHitNodeId(hit);
+      const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
+      const hitNode = hitNodeId ? canvasState?.document.nodes.find(node => node.id === hitNodeId) : undefined;
+      const areaCardId = hitNode?.type === "scene-area" ? hitNode.id : null;
+      if (!areaCardId && hit) return false;
+      const started = sceneAreaGesture.begin({
+        point: { x: event.clientX, y: event.clientY },
+        areaNodeId: areaCardId,
+        card: !!areaCardId,
+        altKey: event.altKey,
+        preferredAreaNodeId: canvasState?.document.nodes.find(node => state.selected.length === 1 && node.id === state.selected[0] && node.type === "scene-area")?.id ?? null
+      });
+      if (!started) return false;
+      core.claimSceneAreaGesture("pointer");
+      beginGesture();
+      beginPerfGesture(started.intent === "move" ? "drag" : "resize");
+      // Install the scene-area state before setSelection: without rAF (tests) or in a
+      // synchronous subscriber, selection schedules a frame immediately and a "none"
+      // gesture there would cancel the gesture we just started.
+      state.gesture = {
+        kind: "scene-area",
+        pointerId: event.pointerId,
+        areaNodeId: started.areaNodeId,
+        intent: started.intent
+      };
+      if (!state.selected.includes(started.areaNodeId)) setSelection([started.areaNodeId]);
+      canvas.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+      return true;
+    };
+    if (sceneAreaFirst && trySceneAreaGesture()) return;
+
+    // 共享世界模型没有内容卡片；空白命中也必须先问渲染器的真实表面/空模型锚点，
+    // 否则 auto 模式的 scene-area 会先把世界模型点击当成搬场景。
+    if (shouldUseWorldModelPick({
+      cardHitNodeId: cardHitNodeId(hit),
+      focusActive: model.active,
+      modalActive: core.modalActive(),
+      gestureActive: state.gesture.kind !== "none"
+    }) && !isRight) {
+      const pick = core.queryModelPick({ x: event.clientX, y: event.clientY }, core.surfaceSize());
+      const picked = worldModelSelectionFromPick({
+        canvas: workingCanvasOf(woohaa3CanvasStore.getState()),
+        pick,
+        selected: state.selected,
+        additive: event.shiftKey
+      });
+      if (picked) {
+        setSelection(picked);
+        schedule();
+        event.preventDefault();
+        return;
+      }
+    }
+
+    if (trySceneAreaGesture()) return;
+
     if (modelPreviewPointerDown(core, event, hit)) return;
+
+    if (!hit && !isRight && !event.shiftKey) {
+      const ground = core.queryWorldGround({ x: event.clientX, y: event.clientY });
+      const current = workingCanvasOf(woohaa3CanvasStore.getState());
+      if (ground && current) {
+        const candidates = current.document.nodes.flatMap(node => {
+          const area = decodeSceneAreaData(current.nodeData[node.id]?.sceneArea);
+          if (!area.ok) return [];
+          const { min, max } = area.value.bounds;
+          return ground.u >= min.u && ground.u <= max.u && ground.v >= min.v && ground.v <= max.v ? [node.id] : [];
+        }).sort();
+        if (candidates.length) groundClick = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, candidates };
+      }
+    }
 
     if (isRight) {
       const nodeId = hit && "nodeId" in hit ? hit.nodeId : null;
@@ -238,6 +321,21 @@ export function create2dInputFamily(core: InteractionCore) {
         const start = index?.absolutePosition(id);
         if (start) origins.set(id, start);
       }
+      // 2D 组整体移动：活动选择中任意 2D 组卡片都把成员并入同一批 origins（T07）。
+      // 多选（组 + 其他卡片）同样按整组展开，避免拖动时把成员留在原地。
+      // 成员关系来自规范 nodeData；普通节点拖动不受影响。
+      const selectedGroupIds = active.filter(id => canvasState?.document.nodes.some(node => node.id === id && node.type === "workflow-group-2d"));
+      for (const groupId of selectedGroupIds) {
+        const group = decodeWorkflowGroupData(canvasState?.nodeData[groupId]?.workflowGroup2d);
+        if (!group.ok) continue;
+        for (const memberId of group.value.memberNodeIds) {
+          if (origins.has(memberId)) continue;
+          const member = canvasState?.document.nodes.find(node => node.id === memberId);
+          if (!member || member.type === "workflow-group-2d") continue;
+          const start = index?.absolutePosition(memberId);
+          if (start) origins.set(memberId, start);
+        }
+      }
       // 单节点拖动粘连子状态（change: add-drag-touch-connections，design D1）：只在活动选择
       // 恰为一个可连接、可写节点时创建；多选 / 只读不提供粘连。
       const singleId = active.length === 1 ? active[0]! : null;
@@ -280,7 +378,7 @@ export function create2dInputFamily(core: InteractionCore) {
       return;
     }
 
-    if (!event.shiftKey) setSelection([]);
+    if (!event.shiftKey && !groundClick) setSelection([]);
     beginGesture();
     beginPerfGesture("marquee");
     state.gesture = { kind: "marquee", pointerId: event.pointerId, start: world, current: world };
@@ -309,6 +407,12 @@ export function create2dInputFamily(core: InteractionCore) {
     if (state.gesture.kind === "none") return;
     // 移动段的计时起点：一次 pointermove 只读一次时钟，后续分支共用。
     const moveAt = telemetryNow();
+    if (state.gesture.kind === "scene-area") {
+      core.sceneAreaGestures()?.update({ x: event.clientX, y: event.clientY });
+      perf.accumulateSince("gesture-move", moveAt);
+      schedule();
+      return;
+    }
     if (state.gesture.kind === "right-press") {
       const distance = Math.hypot(event.clientX - state.gesture.startScreen.x, event.clientY - state.gesture.startScreen.y);
       if (distance >= RIGHT_CLICK_PAN_THRESHOLD_PX) {
@@ -399,7 +503,14 @@ export function create2dInputFamily(core: InteractionCore) {
     const commitAt = telemetryNow();
 
     try {
-    if (state.gesture.kind === "aggregate-connect") {
+    if (state.gesture.kind === "scene-area") {
+      // 权威 prepare/commit 是异步的：释放后让运行时完成准备与提交；失败经统一错误出口，
+      // 手势本身在 finally 复位，不会卡住输入。
+      const runtime = core.sceneAreaGestures();
+      void runtime?.end().then(result => {
+        if (!result.ok) options.onInteractionError?.(new Error(result.message));
+      }).catch(error => options.onInteractionError?.(error));
+    } else if (state.gesture.kind === "aggregate-connect") {
       // change: add-multi-select-aggregate-connect：正常释放批量提交，取消路径见 cancelAggregateConnect。
       aggregate.finish(world);
     } else if (state.gesture.kind === "drag" && state.gesture.moved && state.localPositions.size > 0) {
@@ -457,14 +568,19 @@ export function create2dInputFamily(core: InteractionCore) {
       }
       state.draft = null;
     } else if (state.gesture.kind === "marquee") {
-      const marqueeResult = core.queryMarquee({
-        x: state.gesture.start.x,
-        y: state.gesture.start.y,
-        width: state.gesture.current.x - state.gesture.start.x,
-        height: state.gesture.current.y - state.gesture.start.y
-      });
-      if (marqueeResult.ok) {
-        setSelection(marqueeResult.value);
+      const click = groundClick;
+      groundClick = null;
+      if (click && click.pointerId === event.pointerId && Math.hypot(event.clientX - click.x, event.clientY - click.y) < 5) {
+        const next = (click.candidates.indexOf(state.selected.length === 1 ? state.selected[0]! : "") + 1) % click.candidates.length;
+        setSelection([click.candidates[next]!]);
+      } else {
+        const marqueeResult = core.queryMarquee({
+          x: state.gesture.start.x,
+          y: state.gesture.start.y,
+          width: world.x - state.gesture.start.x,
+          height: world.y - state.gesture.start.y
+        });
+        if (marqueeResult.ok) setSelection(marqueeResult.value);
       }
     } else if (state.gesture.kind === "right-press") {
       // 短按右键不是平移：到这里才确定它是菜单（spec: kind 取 `context-menu`）。
@@ -500,8 +616,14 @@ export function create2dInputFamily(core: InteractionCore) {
     }
   };
 
+  const cancelSceneAreaGesture = () => {
+    const runtime = core.sceneAreaGestures();
+    if (!runtime?.active()) return;
+    runtime.cancel();
+    finishPerfGesture("cancelled");
+  };
   const { onPointerCancel, onBlur, onVisibilityChange } = createCancellationHandlers(
-    core, () => cancelDragGesture(), () => aggregate.cancel()
+    core, () => { cancelDragGesture(); cancelSceneAreaGesture(); }, () => aggregate.cancel()
   );
 
   const onPointerLeave = (event: PointerEvent) => {
@@ -520,6 +642,7 @@ export function create2dInputFamily(core: InteractionCore) {
     dispose: () => {
       drag.cancel();
       aggregate.cancel();
+      core.sceneAreaGestures()?.cancel();
       // 卸载时结算未收尾的滚轮段（不丢事实，也不让定时器活到画布之外）。
       onWheel.flushPerfBurst();
     },

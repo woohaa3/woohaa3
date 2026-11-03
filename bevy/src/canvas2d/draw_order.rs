@@ -47,6 +47,7 @@ mod tests {
 
     fn graph_node(id: &str, _group: bool) -> GraphNode {
         GraphNode {
+            chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             model_preview: None,
             id: id.into(),

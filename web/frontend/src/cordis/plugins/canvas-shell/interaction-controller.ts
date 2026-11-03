@@ -31,6 +31,7 @@ import { collectModelPlacements } from "./interaction-placements.js";
 import { INITIAL_WHEEL_SOURCE } from "./input/wheel-gesture.js";
 import type { TextureUploader } from "../canvas-runtime/texture-sync.js";
 import { createLocalViewportStore } from "../canvas-runtime/local-viewport.js";
+import { currentSceneAreaGestures } from "../world-scopes/gestures.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { modelPreviewStore } from "../../services/model-preview-store.js";
@@ -111,6 +112,40 @@ export function installInteractionController(options: InteractionControllerOptio
   });
 
   const modelPlacements = () => collectModelPlacements();
+  const worldGroundPreviews = new Map<string, { u: number; v: number }>();
+  let worldGroundGesture: { nodeId: string; source: string; start: { u: number; v: number } } | null = null;
+  const groundAvailable = () => !disposed && !modalActive() && !options.getModelFocus?.()
+    && !options.getImageFocus?.() && !options.getVideoFocus?.() && !options.getFocusTransition?.();
+  const groundAt = (point: { x: number; y: number }) => {
+    if (!groundAvailable()) return null;
+    const runtime = options.getRuntime();
+    const bounds = readBounds();
+    const result = runtime?.queryWorldGround?.({ generation: runtime.interactionGeneration?.() ?? 0,
+      x: point.x - bounds.left, y: point.y - bounds.top, width: bounds.width, height: bounds.height });
+    return result?.ok ? result.value : null;
+  };
+  const clearWorldGroundPreviews = () => { worldGroundPreviews.clear(); worldGroundGesture = null; };
+  const beginWorldGroundPreview = (nodeId: string, point: { x: number; y: number }) => {
+    const instance = workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData[nodeId]?.sharedWorldInstance;
+    const start = groundAt(point);
+    if (!instance || !start) return false;
+    clearWorldGroundPreviews();
+    worldGroundGesture = { nodeId, source: JSON.stringify(instance), start };
+    return true;
+  };
+  const updateWorldGroundPreview = (point: { x: number; y: number }) => {
+    const gesture = worldGroundGesture;
+    if (!gesture) return false;
+    const instance = workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData[gesture.nodeId]?.sharedWorldInstance;
+    const ground = groundAt(point);
+    if (!instance || JSON.stringify(instance) !== gesture.source || !ground) {
+      clearWorldGroundPreviews(); schedule("world-ground-preview"); return false;
+    }
+    worldGroundPreviews.set(gesture.nodeId, { u: ground.u - gesture.start.u, v: ground.v - gesture.start.v });
+    schedule("world-ground-preview");
+    return true;
+  };
+  const cancelWorldGroundPreview = () => { clearWorldGroundPreviews(); schedule("world-ground-preview"); };
   /**
    * 拖动粘连瞬时投影 provider（change: add-drag-touch-connections）。
    * 由 2D input family 实现（它拥有 drag gesture），controller 只转发；闭包避免长依赖。
@@ -127,12 +162,17 @@ export function installInteractionController(options: InteractionControllerOptio
   } = { current: null };
   // 合成快照并附带本帧引用到的 prepared resources（change: optimize-model-scene-snapshot-hot-path）。
   /** 一帧的瞬时态快照（供场景构建读取）。 */
-  const frameState = () => ({
+  const frameState = () => {
+    if (!groundAvailable() || (worldGroundGesture && JSON.stringify(
+      workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData[worldGroundGesture.nodeId]?.sharedWorldInstance
+    ) !== worldGroundGesture.source)) clearWorldGroundPreviews();
+    return {
     selected: state.selected,
     draft: state.draft,
     marquee: marqueeRect(),
     localPositions: state.localPositions,
     localSizes: state.localSizes,
+    worldGroundPreviews,
     viewportPreview: state.viewportPreview,
     fallbackViewport: localViewport.get(),
     hoveredNodeId: state.hoveredNodeId,
@@ -142,7 +182,8 @@ export function installInteractionController(options: InteractionControllerOptio
     pressedHistory: state.gesture.kind === "history-press" ? state.gesture : null,
     dragAttach: attachProjectionRef.current?.() ?? null,
     aggregateConnect: aggregateProjectionRef.current?.() ?? null
-  });
+    };
+  };
   /**
    * 首个完整场景构建是否已计时。
    *
@@ -193,6 +234,19 @@ export function installInteractionController(options: InteractionControllerOptio
     const { start, current } = state.gesture;
     return { x: start.x, y: start.y, width: current.x - start.x, height: current.y - start.y };
   };
+
+  /**
+   * 场景区手势运行时（T07）。显式注入优先，否则读取 world-scopes 的页面绑定；
+   * 输入层只在卡片/地面边缘按下时转发，不自建监听。
+   */
+  let sceneAreaGestures = options.sceneAreaGestures ?? null;
+  const sceneArea = () => sceneAreaGestures ?? currentSceneAreaGestures();
+  /**
+   * Who owns the active scene gesture. The frame reconciliation only cancels gestures
+   * started by this canvas pointer path; an external overlay handle (搬场景) owns its
+   * own release and must never be cancelled by a frame tick.
+   */
+  let sceneAreaOwner: "pointer" | "external" | null = null;
 
   /** 清除全部悬停态；仅在确实有悬停时触发重绘。 */
   const clearHover = () => hover.clearHover();
@@ -345,6 +399,12 @@ export function installInteractionController(options: InteractionControllerOptio
       markInvalidated,
       writable
     });
+    // Escape/焦点门禁可能直接复位 state.gesture；指针路径启动的场景区预览与准备请求
+    // 必须由同一帧结算清理。外部 overlay 手柄（搬场景）拥有自己的释放，不得被帧清掉。
+    // end() 已开始的提交由运行时自身拒绝 cancel，避免把真实写请求伪装成取消。
+    const sceneGesture = sceneArea();
+    if (!sceneGesture?.active()) sceneAreaOwner = null;
+    else if (state.gesture.kind !== "scene-area" && sceneAreaOwner === "pointer") sceneGesture.cancel();
     const runtime = options.getRuntime();
     const playbackBlocked = modalActive() || state.viewportPreview !== null || hoverNodeStore.hasPlaybackOwner() || runtime?.acceptsPlayback?.() === false;
     const ownerKey = `${state.gesture.kind}:${playbackBlocked}:${runtime?.generation?.() ?? 0}`;
@@ -454,6 +514,8 @@ export function installInteractionController(options: InteractionControllerOptio
     modalActive,
     focusInputBlocked,
     state,
+    sceneAreaGestures: sceneArea,
+    claimSceneAreaGesture: (owner) => { sceneAreaOwner = owner; },
     localViewport,
     viewportListeners,
     model,
@@ -468,6 +530,7 @@ export function installInteractionController(options: InteractionControllerOptio
     buildDragScene: frameSubmission.dragScene,
     renderedNode: frameSubmission.renderedNode,
     ...queries,
+    queryWorldGround: groundAt,
     setSelection,
     submit,
     schedule,
@@ -515,6 +578,7 @@ export function installInteractionController(options: InteractionControllerOptio
     suspendHoverPlayback,
     clearHover,
     clearHeldKeys,
+    clearWorldGroundPreviews,
     attach: {
       onAttachKey: (code, down) => input.onAttachKey(code, down),
       attachActive: () => input.attachActive(),
@@ -522,7 +586,13 @@ export function installInteractionController(options: InteractionControllerOptio
       cancelAggregateConnect: () => input.cancelAggregateConnect()
     }
   });
-  const { cancelTransientGesture, settleViewportBeforeFocus, handlers: { onDocumentWheel, onDocumentPointerDown, onDocumentFocusChange, onDocumentBlur, onDocumentVisibility, onGestureStart, onGestureChange, onGestureEnd, onWindowResize } } = surface;
+  const { cancelTransientGesture: cancelSurfaceTransientGesture, settleViewportBeforeFocus, handlers: { onDocumentWheel, onDocumentPointerDown, onDocumentFocusChange, onDocumentBlur, onDocumentVisibility, onGestureStart, onGestureChange, onGestureEnd, onWindowResize } } = surface;
+  /** modal/宿主取消路径同时清掉场景区准备请求与模型地面预览。 */
+  const cancelTransientGesture = () => {
+    sceneAreaOwner = null;
+    sceneArea()?.cancel();
+    cancelSurfaceTransientGesture();
+  };
 
   installCanvasListeners(canvas, target, input, keyboard, dblclick, {
     onDocumentWheel,
@@ -556,8 +626,55 @@ export function installInteractionController(options: InteractionControllerOptio
     state.spacePressed = false;
   });
 
-  return {
+  const controller: InteractionController = {
     start: () => schedule("start"),
+    setWorldGroundPreview: (nodeId, delta) => {
+      if (delta) {
+        if (!groundAvailable()) return false;
+        if (!Number.isFinite(delta.u) || !Number.isFinite(delta.v)) return false;
+        const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+        if (!canvas?.nodeData[nodeId]?.sharedWorldInstance) return false;
+        worldGroundPreviews.set(nodeId, { ...delta });
+      } else {
+        worldGroundPreviews.delete(nodeId);
+      }
+      schedule("world-ground-preview");
+      return true;
+    },
+    queryWorldGround: (point) => {
+      return groundAt(point);
+    },
+    beginWorldGroundPreview,
+    updateWorldGroundPreview,
+    cancelWorldGroundPreview,
+    setSceneAreaGestures: (handler) => { sceneAreaGestures = handler ?? null; },
+    /**
+     * Overlay bridge: start a scene gesture outside the canvas pointer path and mark it
+     * as externally owned, so performFrame's reconciliation never cancels it. end/cancel
+     * keep the owner until the authoritative prepare/commit settles.
+     */
+    beginSceneAreaGesture: (input) => {
+      const port = sceneArea();
+      if (!port) return null;
+      const started = port.begin(input);
+      if (!started) return null;
+      sceneAreaOwner = "external";
+      schedule("scene-area");
+      return started;
+    },
+    endSceneAreaGesture: async () => {
+      const port = sceneArea();
+      try {
+        return port ? await port.end()
+          : { ok: false as const, code: "not-ready", message: "场景手势未就绪" };
+      } finally {
+        sceneAreaOwner = null;
+      }
+    },
+    cancelSceneAreaGesture: () => {
+      sceneAreaOwner = null;
+      sceneArea()?.cancel();
+    },
     flush,
     /** 唯一失效入口（design D2）；缺省 reason 归一为 `invalidate`。 */
     invalidate: (reason) => schedule(reason ?? "invalidate"),
@@ -616,6 +733,8 @@ export function installInteractionController(options: InteractionControllerOptio
     },
     dispose() {
       disposed = true;
+      const hooks = target as unknown as { __worldGroundPreview?: InteractionController };
+      if (hooks.__worldGroundPreview === controller) delete hooks.__worldGroundPreview;
       disposeDiagnostics();
       unbindPlaybackGate();
       hover.forgetPointer();
@@ -644,4 +763,6 @@ export function installInteractionController(options: InteractionControllerOptio
       suspendHoverPlayback();
     }
   };
+  (target as unknown as { __worldGroundPreview?: InteractionController }).__worldGroundPreview = controller;
+  return controller;
 }

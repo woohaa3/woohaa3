@@ -11,6 +11,7 @@ use bevy::prelude::*;
 
 fn model_node() -> GraphNode {
     GraphNode {
+        chrome: crate::protocol::NodeChrome::Card,
         shared_world_instance: None,
         model_preview: None,
         id: "m".into(),

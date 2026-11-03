@@ -25,6 +25,7 @@ import {
   isFocused,
   keyboardFly,
   modelAnchor,
+  modelLocalAabb,
   modelLayoutAabbRelative,
   modelWorldAabbRelative,
   moveGesture,
@@ -44,6 +45,7 @@ import {
   type ServerCanvas,
   type Vec3
 } from "@woohaa3/contracts";
+import { worldInstancePresentation } from "./model-world-presentation.js";
 
 /** 聚焦目标解析输入。 */
 export type FocusTargetInput = {
@@ -81,6 +83,14 @@ function sceneInput(input: FocusTargetInput) {
 /** 模型世界 AABB（含根锚点）；不可解析时返回 null。 */
 export function modelBounds(input: FocusTargetInput): ModelBounds | null {
   const scene = sceneInput(input);
+  const local = modelLocalAabb(scene);
+  const hasWorldInstance = input.canvas.nodeData?.[input.nodeId]?.sharedWorldInstance !== undefined;
+  const world = worldInstancePresentation(input.canvas, input.nodeId, local);
+  if (hasWorldInstance) {
+    // 非法世界数据或空模型/资源未就绪都没有可聚焦几何；不能悄悄回落到旧卡片布局。
+    if (!world?.aabb) return null;
+    return { aabb: world.aabb, ...aabbCenterRadius(world.aabb), anchor: world.anchor };
+  }
   const upright = modelWorldAabbRelative(scene);
   const layout = modelLayoutAabbRelative(scene);
   const node = input.canvas.document.nodes.find((entry) => entry.id === input.nodeId);

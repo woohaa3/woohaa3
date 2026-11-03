@@ -19,7 +19,7 @@ import {
   findNodeTemplate
 } from "../../domain/node-catalog.js";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, partitionManagedNodeDeletion } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, SHARED_WORLD_VERSION, WORLD_CAMERA_CARD_SIZE, canvasPointToGround, createDefaultWorldCameraData, createHighEntropyId, newWorldInstance, partitionManagedNodeDeletion, type CanvasNodeData } from "@woohaa3/contracts";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
 import { definePlugin } from "../../plugin.js";
@@ -30,6 +30,7 @@ import type { CanvasContextMenuItem } from "./canvas-context-menu.js";
 import type { SlotsService } from "../../contract/platform.js";
 import { reportContributionFault } from "../../contribution-guard.js";
 import type { ExtensionFaultService } from "../../extension-faults.js";
+import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 
 export const CANVAS_MENU_PLUGIN_ID = "canvas-context-menu";
 export const CANVAS_MENU_CONTRIBUTION_ID = "canvas-menu";
@@ -48,6 +49,10 @@ export type NodeContextMenuFacts = {
   activeNodeId?: string | null;
 };
 
+export function conversionFeedbackCurrent(active: boolean, disposed: boolean, expectedCanvasId: string, currentCanvasId?: string): boolean {
+  return active && !disposed && currentCanvasId === expectedCanvasId;
+}
+
 /** 节点右键菜单项：重命名、删除。 */
 export function nodeContextMenuItems(
   nodes: readonly CanvasMenuNode[],
@@ -59,7 +64,10 @@ export function nodeContextMenuItems(
   const selected = [...selectedNodeIds];
   const deletion = partitionManagedNodeDeletion(nodes, facts.nodeData ?? {}, activeNodeId ? [activeNodeId] : selected);
   const canDelete = deletion.allowed.length > 0;
+  const active = nodes.find(node => node.id === activeNodeId);
+  const data = activeNodeId ? facts.nodeData?.[activeNodeId] as { sharedWorldInstance?: unknown } | undefined : undefined;
   return [
+    ...(active?.type === "model3d" && !data?.sharedWorldInstance ? [{ id: "convert-world", label: "转换到共享世界", disabled: !writable }] : []),
     ...(selected.length === 1 ? [{ id: "rename-node", label: "重命名作品", disabled: !writable }] : []),
     ...(canDelete ? [{ id: "delete-node", label: "删除作品", danger: true, disabled: !writable }] : [])
   ];
@@ -67,6 +75,12 @@ export function nodeContextMenuItems(
 
 export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
   (ctx: Context) => {
+    let disposed = false;
+    const conversionCleanups = new Set<() => void>();
+    ctx.effect(() => () => {
+      disposed = true;
+      for (const cleanup of conversionCleanups) cleanup();
+    }, "canvas-menu-conversion-cleanup");
     const removeEmpty = ctx.slots.register("canvas.overlay", {
       id: "empty-canvas", owner: CANVAS_MENU_PLUGIN_ID, priority: 0,
       render: (props) => createElement(EmptyCanvas, { ctx, writable: props.writable, modalActive: props.modalActive })
@@ -104,15 +118,60 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
             section: CANVAS_MENU_SECTION.basicMaterial,
             disabled: !writable
           })),
+          ...(connectFrom ? [] : [
+            { id: "insert-scope:group", label: "2D 组", section: CANVAS_MENU_SECTION.basicMaterial, disabled: !writable },
+            { id: "insert-scope:area", label: "场景区", section: CANVAS_MENU_SECTION.basicMaterial, disabled: !writable },
+            { id: "insert-scope:camera", label: "镜头", section: CANVAS_MENU_SECTION.basicMaterial, disabled: !writable }
+          ]),
           // 扩展贡献的通用节点模板；宿主只按通用节点契约合并菜单项，不 import 任何具体扩展内容。
           ...(connectFrom ? [] : extensionNodeTemplateItems(ctx, context)),
           { id: "upload", label: "上传…", section: CANVAS_MENU_SECTION.other, disabled: !writable }
         ];
       },
       onSelect: (itemId, context) => {
+        if (itemId === "convert-world") {
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const nodeId = context.nodeId;
+          if (!canvas || !nodeId || !ctx.canvasSession.isWritable() ||
+              !canvas.document.nodes.some(node => node.id === nodeId && node.type === "model3d") ||
+              canvas.nodeData[nodeId]?.sharedWorldInstance) return;
+          const canvasId = canvas.id;
+          const operationId = createHighEntropyId("world-conversion");
+          const instanceId = createHighEntropyId("world-instance");
+          const actionKey = `world-conversion:${operationId}`;
+          let dialogId: string | null = null;
+          let unsubscribe: (() => void) | undefined;
+          let active = true;
+          let pending: Promise<{ ok: true } | { ok: false; error: string }> | null = null;
+          const cleanup = () => { active = false; unregister(); unsubscribe?.(); conversionCleanups.delete(cleanup); };
+          const unregister = ctx.dialogs.registerAlertAction(actionKey, () => {
+            if (pending) return pending;
+            pending = (async () => {
+              let result: Awaited<ReturnType<typeof ctx.canvasEdit.convertWorld>>;
+              try {
+                result = await ctx.canvasEdit.convertWorld({ remote: ctx.canvasRemote, canvasId, operationId, targets: [{ nodeId, instanceId }] });
+              } catch (error) {
+                if (!conversionFeedbackCurrent(active, disposed, canvasId, workingCanvasOf(woohaa3CanvasStore.getState())?.id)) return { ok: false as const, error: "页面已切换" };
+                return { ok: false as const, error: error instanceof Error ? error.message : "转换失败" };
+              }
+              if (!conversionFeedbackCurrent(active, disposed, canvasId, workingCanvasOf(woohaa3CanvasStore.getState())?.id)) return { ok: false as const, error: "页面已切换" };
+              if (!result.ok) return { ok: false as const, error: result.reason };
+              cleanup();
+              if (dialogId) ctx.dialogs.close(dialogId);
+              return { ok: true as const };
+            })().finally(() => { pending = null; });
+            return pending;
+          });
+          conversionCleanups.add(cleanup);
+          const opened = ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "转换到共享世界", description: "将此旧模型转换为共享世界实例。转换可撤销。", confirmLabel: "转换", cancelLabel: "取消", actionKey } });
+          if (!opened.ok) { cleanup(); return; }
+          dialogId = opened.instance.instanceId;
+          unsubscribe = ctx.dialogs.subscribe(() => { if (dialogId && !ctx.dialogs.find(dialogId)) cleanup(); });
+          return;
+        }
         if (itemId === "delete-node") {
           if (!context.nodeId) return;
-          submitDelete(ctx, context.nodeId);
+          submitDelete(ctx, context.nodeId, () => !disposed);
           return;
         }
         if (itemId === "rename-node") {
@@ -122,6 +181,7 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
           return;
         }
         if (itemId === "upload") {
+          if (!ctx.canvasSession.isWritable()) return;
           const importService = ctx.get(IMPORT_SERVICE) as ImportService | undefined;
           importService?.requestFile({
             world: context.world,
@@ -133,8 +193,38 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
           insertExtensionTemplateNode(ctx, itemId.slice("insert-template:".length), context);
           return;
         }
+        if (itemId === "insert-scope:group" || itemId === "insert-scope:area" || itemId === "insert-scope:camera") {
+          if (!ctx.canvasSession.isWritable()) return;
+          const camera = itemId === "insert-scope:camera";
+          const group = itemId === "insert-scope:group";
+          const id = createHighEntropyId(camera ? "camera" : group ? "group" : "area");
+          const version = createHighEntropyId(camera ? "camera-settings" : "scope-version");
+          const ground = canvasPointToGround(context.world);
+          const canvasId = workingCanvasOf(woohaa3CanvasStore.getState())?.id;
+          if (!canvasId) return;
+          const nodeData: CanvasNodeData = group
+            ? { workflowGroup2d: { kind: "workflow-group-2d", version: SHARED_WORLD_VERSION, groupId: id, scopeVersion: version, memberNodeIds: [] } }
+            : camera
+              ? { worldCamera: createDefaultWorldCameraData(id, version, ground) } as unknown as CanvasNodeData
+              : { sceneArea: { kind: "scene-area", version: SHARED_WORLD_VERSION, areaId: id, scopeVersion: version, bounds: { min: { u: ground.u - 2, v: ground.v - 2 }, max: { u: ground.u + 2, v: ground.v + 2 } } } };
+          void ctx.canvasEdit.record(planInsertNode({
+            nodeType: group ? "workflow-group-2d" : camera ? "world-camera" : "scene-area",
+            position: context.world,
+            nodeData,
+            ...(camera ? { width: WORLD_CAMERA_CARD_SIZE.width, height: WORLD_CAMERA_CARD_SIZE.height } : {})
+          }), group ? "创建 2D 组" : camera ? "创建镜头" : "创建场景区").then(result => {
+            if (!result.ok && !disposed && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
+              ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "创建失败", description: result.reason } });
+            }
+          }).catch(error => {
+            if (!disposed && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
+              ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "创建失败", description: error instanceof Error ? error.message : "提交失败" } });
+            }
+          });
+          return;
+        }
         if (itemId.startsWith("insert:")) {
-          insertNode(ctx, itemId.slice("insert:".length), context);
+          insertNode(ctx, itemId.slice("insert:".length), context, () => !disposed);
         }
       }
     });
@@ -163,30 +253,47 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
       nodeRenameStore.open(nodeId, typeof data?.title === "string" ? data.title : "");
     }
   },
-  { name: CANVAS_MENU_PLUGIN_ID, inject: ["slots", "canvasSession", "canvasNavigation", "canvasEdit", "canvasRuntime"] }
+  { name: CANVAS_MENU_PLUGIN_ID, inject: ["slots", "canvasSession", "canvasNavigation", "canvasEdit", "canvasRuntime", "canvasRemote", "dialogs"] }
 );
 
-function submitDelete(ctx: Context, nodeId: string): void {
+function submitDelete(ctx: Context, nodeId: string, active: () => boolean): void {
   if (!ctx.canvasSession.isWritable()) return;
   const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
   if (!canvas || !partitionManagedNodeDeletion(canvas.document.nodes, canvas.nodeData, [nodeId]).allowed.length) return;
-  void ctx.canvasEdit.record([{ type: "node.remove", nodeIds: [nodeId] }], "删除作品");
+  const canvasId = canvas.id;
+  void ctx.canvasEdit.record([{ type: "node.remove", nodeIds: [nodeId] }], "删除作品").then(result => {
+    if (!result.ok && active() && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
+      ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "删除失败", description: result.reason } });
+    }
+  }).catch(error => {
+    if (active() && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
+      ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "删除失败", description: error instanceof Error ? error.message : "提交失败" } });
+    }
+  });
 }
 
-function insertNode(ctx: Context, templateId: string, context: ContextMenuContext): void {
+function insertNode(ctx: Context, templateId: string, context: ContextMenuContext, active: () => boolean): void {
   const template = findNodeTemplate(templateId);
   if (!template) return;
   if (!ctx.canvasSession.isWritable()) return;
+  const canvasId = workingCanvasOf(woohaa3CanvasStore.getState())?.id;
+  if (!canvasId) return;
   const world = context.world;
   // 自包含 3D 节点直接创建时携带完整本地模型定义，不从来源节点读取。
-  const nodeData = defaultNodeDataForType(template.id);
+  const defaults = defaultNodeDataForType(template.id);
+  const nodeData = defaults;
+  if (nodeData && template.nodeType === "model3d") {
+    nodeData.sharedWorldInstance = newWorldInstance(createHighEntropyId("world-instance"), world);
+  }
   if (nodeData === undefined) return;
   const label = context.connectFrom ? connectLabelFor(context.connectFrom.nodeType, template.nodeType) : "";
-  void ctx.canvasEdit.record(
+  void Promise.resolve().then(() => {
+    if (!active() || workingCanvasOf(woohaa3CanvasStore.getState())?.id !== canvasId || !ctx.canvasSession.isWritable()) return null;
+    return ctx.canvasEdit.record(
     planInsertNode({
       nodeType: template.nodeType,
       position: world,
-      nodeData: context.connectFrom
+      nodeData: context.connectFrom && template.nodeType !== "model3d"
         ? connectNodeDataFor(
             { id: context.connectFrom.nodeId, type: context.connectFrom.nodeType },
             template.id, [], workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData
@@ -195,8 +302,17 @@ function insertNode(ctx: Context, templateId: string, context: ContextMenuContex
       ...(context.connectFrom ? { connectFromNodeId: context.connectFrom.nodeId } : {}),
       ...(label ? { connectLabel: label } : {})
     }),
-    "创建作品"
-  );
+      "创建作品"
+    );
+  }).then(result => {
+    if (result && !result.ok && active() && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
+      ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "创建失败", description: result.reason } });
+    }
+  }).catch(error => {
+    if (active() && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
+      ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "创建失败", description: error instanceof Error ? error.message : "提交失败" } });
+    }
+  });
 }
 
 /** 扩展节点模板 contribution ID → 菜单项 ID 前缀（宿主通用，不感知具体扩展）。 */

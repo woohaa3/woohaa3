@@ -6,6 +6,77 @@ use super::{
     AnimationCameraState, CurrentScene, FocusRig, FrameFlags, ModelAssetTable, SurfaceState,
 };
 
+#[derive(Component)]
+pub(super) struct SceneAreaLine;
+
+pub(super) fn sync_scene_areas(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    scene: Res<CurrentScene>,
+    flags: Res<FrameFlags>,
+    lines: Query<Entity, With<SceneAreaLine>>,
+    mut assets: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>, Handle<StandardMaterial>)>>,
+) {
+    if !flags.scene_received { return; }
+    for entity in &lines { commands.entity(entity).despawn(); }
+    if scene.0.model_focus.is_some() || scene.0.image_focus.is_some() || scene.0.video_focus.is_some() { return; }
+    let (mesh, normal, selected) = assets.get_or_insert_with(|| (
+        meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+        materials.add(StandardMaterial { base_color: Color::srgb(0.12, 0.65, 0.58), unlit: true, ..default() }),
+        materials.add(StandardMaterial { base_color: Color::srgb(1.0, 0.62, 0.16), unlit: true, ..default() }),
+    ));
+    for area in &scene.0.scene_areas {
+        let b = &area.bounds;
+        if ![b.min.u, b.min.v, b.max.u, b.max.v].iter().all(|v| v.is_finite()) || b.min.u > b.max.u || b.min.v > b.max.v { continue; }
+        let [x0, _, z0] = crate::protocol::world_to_renderer([b.min.u, b.min.v, 0.0]);
+        let [x1, _, z1] = crate::protocol::world_to_renderer([b.max.u, b.max.v, 0.0]);
+        let material = if scene.0.selection.nodes.contains(&area.node_id) { selected.clone() } else { normal.clone() };
+        for (x, z, sx, sz) in [
+            ((x0+x1)/2.0, z0, x1-x0, 1.0), ((x0+x1)/2.0, z1, x1-x0, 1.0),
+            (x0, (z0+z1)/2.0, 1.0, (z1-z0).abs()), (x1, (z0+z1)/2.0, 1.0, (z1-z0).abs()),
+        ] {
+            commands.spawn((SceneAreaLine, Mesh3d(mesh.clone()), MeshMaterial3d(material.clone()),
+                Transform::from_xyz(x as f32, 0.0, z as f32).with_scale(Vec3::new(sx.max(1.0) as f32, 1.0, sz.max(1.0) as f32))));
+        }
+    }
+}
+
+/// 共享世界对象的轻量呈现：空模型锚点、世界模型选择框与聚焦可见性。
+///
+/// 与模型根同步分开：即使没有可见模型（空模型只有世界实例身份），也必须在真实
+/// world pose 处留下可辨认、可选择的指示，不能退回内容卡片。
+pub(super) fn sync_world_presence(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    scene: Res<CurrentScene>,
+    theme: Res<ThemeResource>,
+    resources: Res<ModelAssetTable>,
+    mut presence: ResMut<model3d::world_presence::WorldPresence>,
+) {
+    model3d::world_presence::sync(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &scene.0,
+        &theme,
+        &resources.0,
+        &mut presence,
+    );
+}
+
+pub(super) fn publish_model_poses(
+    models: Res<model3d::ModelVisuals>,
+    transforms: Query<(&Transform, &GlobalTransform)>,
+    rig: Res<FocusRig>,
+    _main_thread: bevy::ecs::system::NonSendMarker,
+) {
+    if crate::bridge::take_model_pose_request() {
+        crate::bridge::set_model_poses(models.pose_snapshot(&transforms), rig.focus_node.as_deref());
+    }
+}
+
 /// 网格 adapter：把 scene viewport/surface/theme 投影为通用网格插件的 config/target/style。
 ///
 /// 网格 mesh/material 本身由 `IsometricGridPlugin` 拥有与回收；本系统只做领域适配与相机复位。
@@ -393,9 +464,27 @@ mod grid_tests {
     use bevy::mesh::VertexAttributeValues;
 
     #[test]
-    fn shared_world_bridge_payload_lifecycle_runs_through_frame_system() {
-        use crate::{bridge, protocol::{ModelAssetDescriptor, ModelOp, ModelPlacement, ModelReference, NodePosition}};
-        bridge::clear_model_assets();
+    fn scene_area_outlines_preserve_overlapping_ground_bounds() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<CurrentScene>()
+            .insert_resource(FrameFlags { scene_received: true, ..default() })
+            .add_systems(Update, sync_scene_areas);
+        app.world_mut().resource_mut::<CurrentScene>().0.scene_areas = serde_json::from_value(serde_json::json!([
+            {"nodeId":"a", "bounds":{"min":{"u":0,"v":0},"max":{"u":3,"v":3}}},
+            {"nodeId":"b", "bounds":{"min":{"u":2,"v":2},"max":{"u":4,"v":4}}}
+        ])).unwrap();
+        app.update();
+        let world = app.world_mut();
+        let lines: Vec<_> = world.query_filtered::<&Transform, With<SceneAreaLine>>().iter(world).copied().collect();
+        assert_eq!(lines.len(), 8);
+        assert!(lines.iter().all(|line| line.translation.y == 0.0));
+        assert!(lines.iter().any(|line| line.translation == Vec3::new(96.0, 0.0, 0.0) && line.scale.x == 192.0));
+        assert!(lines.iter().any(|line| line.translation == Vec3::new(192.0, 0.0, -128.0) && line.scale.x == 128.0));
+    }
+
+    fn model_test_app() -> App {
         let mut app = App::new();
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
@@ -420,6 +509,14 @@ mod grid_tests {
             .add_message::<bevy::window::WindowResized>()
             .add_systems(Update, (super::super::input::ingest_bridge, super::super::input::sync_surface, sync_models).chain());
         app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
+        app
+    }
+
+    #[test]
+    fn shared_world_bridge_payload_lifecycle_runs_through_frame_system() {
+        use crate::{bridge, protocol::{ModelAssetDescriptor, ModelOp, ModelPlacement, ModelReference, NodePosition}};
+        bridge::clear_model_assets();
+        let mut app = model_test_app();
         let key = "world-test".to_owned();
         let descriptor = ModelAssetDescriptor {
             resource_version: crate::protocol::MODEL_ASSET_VERSION.into(), resource_key: key.clone(),
@@ -459,6 +556,48 @@ mod grid_tests {
         app.update();
         assert_eq!(root(&app).1.translation, Vec3::new(256., 192., -128.));
         bridge::clear_model_assets();
+    }
+
+    #[test]
+    fn public_scene_motion_and_clear_follow_real_frame_schedule() {
+        crate::bridge::clear_model_assets();
+        let request = r##"{"resourceVersion":"woohaa-prepared-model-resource-v1","sceneVersion":"woohaa-model-scene-ir-v2","ops":[{"t":"box","id":"body","position":[0,1,0],"rotation":[0,0,0],"scale":[1,1,1],"color":"#ffffff","size":[2,2,2]}]}"##;
+        let metadata: serde_json::Value = serde_json::from_str(&crate::prepare_and_register_model_resource(request).unwrap()).unwrap();
+        let mut scene: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/shared-world/render-scene.json")).unwrap();
+        scene["nodes"][0]["model"] = serde_json::json!({"resourceKey": metadata["resourceKey"]});
+        scene["nodes"][0]["sharedWorldInstance"]["transform"] = serde_json::json!({"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1});
+        scene["animationPlayback"] = serde_json::json!({"nodeId":"model","version":"woohaa-motion-ir-v1","time":1,"duration":4,"initialCamera":{},"modelMotion":[{"targetId":"body","startTime":0,"endTime":4,"motion":{"kind":"move","axis":"x","speed":4,"range":[0,8]}}]});
+        let mut app = model_test_app();
+        let query = |generation, point: Vec3| {
+            let screen = crate::isometric_grid::screen_point_from_world(point, &Default::default());
+            let request = format!(r#"{{"generation":{generation},"x":{},"y":{},"width":800,"height":600}}"#, screen.x, screen.y);
+            serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request)).unwrap()["nodeId"].clone()
+        };
+        let generation = crate::set_scene(&scene.to_string()).unwrap();
+        app.update();
+        let part = app.world().resource::<model3d::ModelVisuals>().test_part("model", "body").unwrap();
+        assert_eq!(app.world().get::<Transform>(part).unwrap().translation.x, 4.);
+        assert_eq!(query(generation, Vec3::new(256., 64., 0.)), "model");
+        assert!(query(generation, Vec3::new(0., 64., 0.)).is_null());
+        scene["animationPlayback"]["modelMotion"] = serde_json::json!([{"targetId":"body","startTime":0,"endTime":4,"motion":{"kind":"keyframes","property":"opacity","frames":[{"time":0,"value":0,"easing":"linear"},{"time":4,"value":0,"easing":"linear"}]}}]);
+        let hidden = crate::set_scene(&scene.to_string()).unwrap();
+        app.update();
+        assert_eq!(app.world().get::<Transform>(part).unwrap().translation.x, 0.);
+        assert_eq!(app.world().get::<Visibility>(part), Some(&Visibility::Hidden));
+        assert!(query(hidden, Vec3::new(0., 64., 0.)).is_null());
+        scene.as_object_mut().unwrap().remove("animationPlayback");
+        let reset = crate::set_scene(&scene.to_string()).unwrap();
+        app.update();
+        assert_ne!(app.world().get::<Visibility>(part), Some(&Visibility::Hidden));
+        assert_eq!(app.world().get::<Transform>(part).unwrap().translation.x, 0.);
+        assert_eq!(query(reset, Vec3::new(0., 64., 0.)), "model");
+        assert!(query(reset, Vec3::new(256., 64., 0.)).is_null());
+        scene["nodes"] = serde_json::json!([]);
+        let cleared = crate::set_scene(&scene.to_string()).unwrap();
+        app.update();
+        assert!(query(cleared, Vec3::new(0., 64., 0.)).is_null());
+        assert!(app.world().resource::<model3d::ModelVisuals>().test_root("model").is_none());
+        crate::bridge::clear_model_assets();
     }
 
     #[test]

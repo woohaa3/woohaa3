@@ -5,6 +5,7 @@ import { prepareModelResource } from './prepared-model.js';
 import { DEFAULT_MODEL_PREVIEW, type BevyModelPreview } from './render-scene/wire-model.js';
 import { CANVAS_CAMERA_PITCH } from './model-focus/canvas-projection.js';
 import type { NodeCapabilities, NodeCapabilityResolver, NodeModelPreparation } from './node-capabilities.js';
+import { WORLD_CAMERA_CARD_SIZE } from './world-camera-ui.js';
 
 export const scriptModelPreparation: NodeModelPreparation = {
   executionKey: ({ data }) => data?.modelScript ? `${String(data.modelScriptVersion)}:${data.modelScript}` : undefined,
@@ -50,6 +51,19 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
     actions: nodeActionContributions,
     connections: { endpoints: () => 'ordinary' },
     resize: { ...rectangularNodeResize, mode: 'rect' }
+  });
+  entries.set('workflow-group-2d', {
+    appearance: { palette: 'node', defaultSize: { width: 260, height: 195 }, cardLabel: '2D 组' },
+    resize: rectangularNodeResize
+  });
+  entries.set('scene-area', {
+    appearance: { palette: 'node', defaultSize: { width: 260, height: 195 }, cardLabel: '场景区' }
+  });
+  entries.set('world-camera', {
+    appearance: { palette: 'node', defaultSize: WORLD_CAMERA_CARD_SIZE, cardLabel: '镜头' },
+    actions: nodeActionContributions,
+    connections: { endpoints: () => 'ordinary' },
+    resize: rectangularNodeResize
   });
   return entries;
 }

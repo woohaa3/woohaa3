@@ -111,6 +111,7 @@ export * from "./canvas/composite-children.js";
 
 export * from "./canvas/node-capabilities.js";
 export * from "./canvas/builtin-node-capabilities.js";
+export * from "./canvas/world-camera-ui.js";
 
 export * from "./canvas/media-content.js";
 export * from "./canvas/ground-anchor.js";
@@ -120,6 +121,7 @@ export * from "./canvas/scene-package.js";
 export * from "./canvas/shared-world.js";
 export * from "./canvas/scene-footprint.js";
 export * from "./canvas/world-conversion.js";
+export * from "./canvas/creation-scopes-ui.js";
 export {
   SharedWorldCodecError,
   decodeWorldInstanceData,
@@ -215,3 +217,4 @@ export * from "./canvas/scene-area-plan-contract.js";
 export * from "./canvas/scene-area-operation-plan.js";
 export * from "./canvas/world-authoring.js";
 export * from "./canvas/assistant-world-authority.js";
+export * from "./canvas/world-authoring-response-codec.js";
