@@ -17,6 +17,7 @@ import {
   resolveCompositeAssetMediaDescriptors
 } from "../../../frontend/src/cordis/plugins/canvas-runtime/composite-asset-media-session.js";
 import type { RasterCanvas } from "../../../frontend/src/cordis/plugins/canvas-runtime/media-raster.js";
+import { registerNativeImagePort } from "../../../frontend/src/cordis/plugins/canvas-runtime/image-worker/native-port.js";
 
 type PlatformOptions = Parameters<typeof createPlatformMediaSessions>[0];
 type Playback = import("@woohaa3/contracts").BevyAnimationPlayback;
@@ -181,32 +182,37 @@ describe("片场媒体会话", () => {
   });
 });
 
-it("default image loader passes the decoded image itself to rasterization and uploads its pixels", async () => {
-  class DecodedImage {
-    width = 2; height = 1; naturalWidth = 2; naturalHeight = 1;
-    onload: (() => void) | null = null;
-    set src(_url: string) { queueMicrotask(() => this.onload?.()); }
-  }
-  vi.stubGlobal("Image", DecodedImage);
-  const drawImage = vi.fn((source: unknown) => {
-    if (!(source instanceof DecodedImage)) throw new TypeError("Not a drawable image");
+it("default image loader uploads the pixels returned by the decode pipeline, without a DOM pass", async () => {
+  // 解码已迁到 worker / 原生端口（change 2026-11-02）：默认路径不再经过 DOM `Image` +
+  // canvas 取读回，所以这里不再断言 `drawImage`，而是断言「管线返回的像素直接上传」。
+  const drawImage = vi.fn(() => { throw new TypeError("default path must not touch a DOM image"); });
+  const stubGlobalImage = vi.fn(() => { throw new TypeError("default path must not construct a DOM Image"); });
+  vi.stubGlobal("Image", stubGlobalImage);
+  const pixels = new Uint8Array([230, 35, 169, 255, 248, 220, 53, 255]);
+  // 端口给出的像素沿用同一份数组，断言上传的就是它（不是重新栅格化的副本）。
+  const prepared = { width: 2, height: 1, sourceWidth: 2, sourceHeight: 1, pixels };
+  const unregister = registerNativeImagePort({
+    prepare: vi.fn(async () => prepared), apply: vi.fn(), release: vi.fn()
   });
-  const pixels = new Uint8ClampedArray([230, 35, 169, 255, 248, 220, 53, 255]);
-  const setModelMediaTexture = vi.fn();
-  const changed = vi.fn();
-  const sessions = createCompositeAssetMediaSessions({
-    runtime: { setModelMediaTexture } as unknown as BevyRuntime, getCanvas: canvasWithMedia,
-    createVideo: () => new FakeVideo(), onChange: changed,
-    createCanvas: () => ({ width: 0, height: 0, getContext: () => ({ drawImage, getImageData: () => ({ data: pixels }) }) })
-  });
-  sessions.sync(); await Promise.resolve(); await Promise.resolve();
-  expect(drawImage.mock.calls[0][0]).toBeInstanceOf(DecodedImage);
-  // sourceKey 带本次渲染的画布提示：宿主按画布路由媒体读取（同步画布走远端托管存储）。
-  expect(setModelMediaTexture).toHaveBeenCalledWith("fs::img", 2, 1, new Uint8Array(pixels), { nodeId: "fs", sourceKey: "/api/media/a?canvas=c1" });
-  expect(sessions.sync().has("fs::img")).toBe(true);
-  expect(sessions.hasTexture("fs::img")).toBe(true);
-  expect(changed).toHaveBeenCalledTimes(1);
-  sessions.dispose();
+  try {
+    const setModelMediaTexture = vi.fn();
+    const changed = vi.fn();
+    const sessions = createCompositeAssetMediaSessions({
+      runtime: { setModelMediaTexture } as unknown as BevyRuntime, getCanvas: canvasWithMedia,
+      createVideo: () => new FakeVideo(), onChange: changed,
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => ({ drawImage, getImageData: () => ({ data: pixels }) }) })
+    });
+    sessions.sync();
+    await vi.waitFor(() => expect(setModelMediaTexture).toHaveBeenCalled());
+    // 上传的是解码管线的像素本身（RGBA，宽度/高度来自 prepared，不经过画布取读回）。
+    // sourceKey 带本次渲染的画布提示：宿主按画布路由媒体读取（同步画布走远端托管存储）。
+    expect(setModelMediaTexture).toHaveBeenCalledWith("fs::img", 2, 1, pixels,
+      { nodeId: "fs", sourceKey: "/api/media/a?canvas=c1" });
+    expect(drawImage).not.toHaveBeenCalled();
+    expect(stubGlobalImage).not.toHaveBeenCalled();
+    expect(sessions.sync().has("fs::img")).toBe(true);
+    sessions.dispose();
+  } finally { unregister(); }
 });
 
 it("failed rasterization does not mark an image texture ready", async () => {
