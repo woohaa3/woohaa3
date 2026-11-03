@@ -419,7 +419,7 @@ importers:
         version: link:../../contracts
       '@woohaa3/provider-sdk':
         specifier: workspace:*
-        version: link:../provider-sdk
+        version: link:../../framework/provider-sdk
     devDependencies:
       '@types/node':
         specifier: ^22.15.3
