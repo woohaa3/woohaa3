@@ -15,6 +15,7 @@ import { hoverNodeStore } from "../../services/hover-store.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { hoverComposerBox, resolveComposerAction, resolveHoverComposerTarget } from "./hover-composer.js";
 import { addReference } from "./model-execution-host-helpers.js";
+import { requestDockExpand } from "./dock-expand-request.js";
 import { createWoohaa3CanvasNodeId, getWoohaa3CanvasNodeRect } from "@woohaa3/contracts";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
 import { connectLabelFor, connectNodeDataFor } from "../../domain/node-catalog.js";
@@ -199,7 +200,7 @@ export function HoverComposerButton() {
             nodes: canvas?.document.nodes ?? []
           });
           if (action.type === "connect") {
-            addReference(session, action.panelNodeId, target.nodeId);
+            if (addReference(session, action.panelNodeId, target.nodeId)) requestDockExpand(action.panelNodeId);
             return;
           }
           // 在这张图右侧新建一个图片生成节点，连成它的参考，并打开新节点的对话框。
@@ -227,7 +228,10 @@ export function HoverComposerButton() {
             }),
             "添加到对话框"
           ).then((result) => {
-            if (result.ok) runtime.controller()?.selectNode(nodeId);
+            if (!result.ok) return;
+            // 新节点的底边栏默认收成一条：先发展开请求，再选中让它挂载。
+            requestDockExpand(nodeId);
+            runtime.controller()?.selectNode(nodeId);
           });
         }}
       >

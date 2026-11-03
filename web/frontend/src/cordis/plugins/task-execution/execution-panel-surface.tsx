@@ -16,6 +16,7 @@ import { DOCK_MAX_WIDTH, layoutDockedPanel, usableCanvasArea } from "./node-anch
 import { FullscreenPanelHost } from "./execution-panel/fullscreen-panel-host.js";
 import { PanelCollapseProvider, type PanelCollapse } from "./execution-panel/collapse-context.js";
 import { panelKindForNodeType } from "./node-panel-registry.js";
+import { consumeDockExpand, peekDockExpand, subscribeDockExpand } from "./dock-expand-request.js";
 import type { ExecutionPanelPresentation } from "../../navigation/contracts.js";
 // 骨架先于真实面板出现，窄条样式（含骨架的收起态）必须由表面自己带上。
 import "./execution-panel/collapsed-bar.css";
@@ -73,7 +74,8 @@ function visibleOcclusions() {
 function DockedBar({ nodeId, runtime, collapsible, children }: { nodeId: string; runtime?: CanvasRuntimeService; collapsible: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   // 生成面板默认收成一条输入条（参考稿的默认态）：选中节点先看到它，点一下才展开完整面板。
-  const [collapsed, setCollapsed] = useState(collapsible);
+  // 外部刚请求过展开（悬停胶囊新建节点后）：挂载时就是展开的，免得先闪一条再展开。
+  const [collapsed, setCollapsed] = useState(collapsible && !peekDockExpand(nodeId));
   // collapsible 可能在挂载之后才变成 true（面板类型后置确定）：此时同样按默认态收起，
   // 而不是停在初值 false 上。渲染期校正比 effect 少一帧闪烁。
   const [seenCollapsible, setSeenCollapsible] = useState(collapsible);
@@ -90,6 +92,16 @@ function DockedBar({ nodeId, runtime, collapsible, children }: { nodeId: string;
       })
     );
   }, []);
+  // 外部请求展开：已挂载时订阅收到；挂载前发的请求在这里取走（初始值已按它展开）。
+  useEffect(() => {
+    if (!collapsible) return;
+    if (consumeDockExpand(nodeId)) expand();
+    return subscribeDockExpand((requested) => {
+      if (requested !== nodeId) return;
+      consumeDockExpand(nodeId);
+      expand();
+    });
+  }, [collapsible, nodeId, expand]);
   const collapse = useMemo<PanelCollapse>(
     () => ({
       collapsible,
