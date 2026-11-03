@@ -4,6 +4,8 @@ import {
   SHARED_WORLD_VERSION,
   createEmptyWoohaa3ServerCanvas,
   type ServerCanvas,
+  type WorldAuthoringExecuteOutcome,
+  type WorldAuthoringPrepareOutcome,
   type WorldCameraData,
   type WorldPreparedAuthoritySnapshot
 } from "@woohaa3/contracts";
@@ -17,8 +19,10 @@ import {
   nearestSceneAreaEdge,
   resetSceneAreaGestures,
   resizeSceneAreaBounds,
+  sceneAreaGestureStore,
   sceneAreaHistoryStore,
-  type SceneAreaGestureDeps
+  type SceneAreaGestureDeps,
+  type SceneAreaGesturePort
 } from "./gestures.js";
 import {
   GROUP_DEFAULT_HEIGHT,
@@ -309,6 +313,91 @@ describe("scene-area gesture runtime", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("keeps a quick release committing while prepare is still pending", async () => {
+    let release!: (value: WorldAuthoringPrepareOutcome) => void;
+    let signal: AbortSignal | undefined;
+    const { deps, execute, prepared } = runtimeHarness({
+      prepare: (_areaId, nextSignal) => {
+        signal = nextSignal;
+        return new Promise<WorldAuthoringPrepareOutcome>(resolve => { release = resolve; });
+      }
+    });
+    const port = createSceneAreaGestures(deps);
+    port.begin({ point: { x: 500, y: 500 }, areaNodeId: "area", card: true });
+    port.update({ x: 700, y: 800 });
+    const ending = port.end();
+    // This is what the frame reconciliation used to call on the next tick after release.
+    port.cancel();
+    expect(signal?.aborted).toBe(false);
+    expect(port.ending()).toBe(true);
+    release({ ok: true, snapshot: prepared });
+    const result = await ending;
+    expect(result).toMatchObject({ ok: true, operationId: "scene-area-op" });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a new begin while the previous commit is still in flight", async () => {
+    let release!: (value: WorldAuthoringExecuteOutcome) => void;
+    const execute = vi.fn(() => new Promise<WorldAuthoringExecuteOutcome>(resolve => { release = resolve; }));
+    const { deps } = runtimeHarness({ execute: execute as never });
+    const port = createSceneAreaGestures(deps);
+    port.begin({ point: { x: 500, y: 500 }, areaNodeId: "area", card: true });
+    port.update({ x: 700, y: 800 });
+    const ending = port.end();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(port.ending()).toBe(true);
+    // The older end() must not be able to clear a newer gesture: no newer one starts.
+    expect(port.begin({ point: { x: 500, y: 500 }, areaNodeId: "area", card: true })).toBeNull();
+    expect(port.active()).toBe(true);
+    release({ ok: true, canvasId: "c1", operationId: "scene-area-op", commandId: "c", revision: 4, duplicate: false, plan: {}, receipt: {} } as unknown as WorldAuthoringExecuteOutcome);
+    expect((await ending).ok).toBe(true);
+    expect(port.active()).toBe(false);
+    // After the old commit settles the runtime accepts the next gesture normally.
+    expect(port.begin({ point: { x: 500, y: 500 }, areaNodeId: "area", card: true })).toEqual({ areaNodeId: "area", intent: "move" });
+    expect(port.update({ x: 600, y: 600 })).toBe(true);
+    const secondEnding = port.end();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    release({ ok: true, canvasId: "c1", operationId: "scene-area-op", commandId: "c", revision: 4, duplicate: false, plan: {}, receipt: {} } as unknown as WorldAuthoringExecuteOutcome);
+    expect(await secondEnding).toMatchObject({ ok: true, operationId: "scene-area-op" });
+  });
+
+  it("keeps the authoritative commit and warns when journal adoption is refused", async () => {
+    const adoptHistory = vi.fn(() => ({ ok: false as const, reason: "正在结算上一次操作，请稍候" }));
+    const { deps, execute } = runtimeHarness({ adoptHistory });
+    const port = createSceneAreaGestures(deps);
+    port.begin({ point: { x: 500, y: 500 }, areaNodeId: "area", card: true });
+    port.update({ x: 700, y: 800 });
+    const result = await port.end();
+    // The real write succeeded: never fake "not committed".
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      ok: true,
+      operationId: "scene-area-op",
+      warning: expect.stringContaining("未加入撤销历史")
+    });
+    expect(sceneAreaGestureStore.getSnapshot()).toMatchObject({
+      phase: "idle",
+      message: expect.stringContaining("未加入撤销历史")
+    });
+    // The private fallback stack is not used when the page journal refused.
+    expect(sceneAreaHistoryStore.getSnapshot().canUndo).toBe(false);
+  });
+
+  it("rejects a delete receipt for a different operation before adopting it", async () => {
+    const adoptHistory = vi.fn(() => ({ ok: true as const }));
+    const execute = vi.fn(async () => ({
+      ok: true as const, canvasId: "c1", operationId: "other", commandId: "c", revision: 4,
+      duplicate: false, plan: {}, receipt: {}
+    }));
+    const { deps } = runtimeHarness({ adoptHistory, execute: execute as never });
+    const port = createSceneAreaGestures(deps);
+    const result = await port.deleteArea("area", false);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: false, code: "version-conflict", message: "场景删除回执不匹配" });
+    expect(adoptHistory).not.toHaveBeenCalled();
+  });
+
   it("rejects stale prepare snapshots without committing", async () => {
     const { deps, execute } = runtimeHarness({
       prepare: async () => ({ ok: true as const, snapshot: preparedSnapshot({ area: { areaId: "area", scopeVersion: "area-v2", bounds: AREA_BOUNDS } }) })
@@ -533,6 +622,8 @@ describe("interaction controller wiring", () => {
     end: vi.fn(async () => ({ ok: true as const, noop: true as const })),
     cancel: vi.fn(),
     active: vi.fn(() => false),
+    ending: vi.fn(() => false),
+    mode: vi.fn((): "auto" | "move" | "resize" => "auto"),
     deleteArea: vi.fn(async () => ({ ok: false as const, code: "not-ready", message: "unused" })),
     undo: vi.fn(async () => ({ ok: false as const, code: "not-ready", message: "unused" })),
     redo: vi.fn(async () => ({ ok: false as const, code: "not-ready", message: "unused" }))
@@ -543,11 +634,15 @@ describe("interaction controller wiring", () => {
     nodeData: ServerCanvas["nodeData"];
     pointHit: (input: { x: number; y: number }) => { kind: string; nodeId?: string } | null;
     ground?: (point: { x: number; y: number }) => { u: number; v: number } | null;
-    port: ReturnType<typeof fakePort>;
+    port: SceneAreaGesturePort;
+    modelPick?: (input: { x: number; y: number; width: number; height: number }) => { nodeId: string; target: [number, number, number]; radius: number } | null;
   }) => {
     woohaa3CanvasStore.getState().applyRemoteCanvas(sceneCanvas(options.nodes, options.nodeData));
     const dom = harness();
-    const { runtime, scenes } = runtimeCapturing({ pointHit: input => options.pointHit(input) as never });
+    const { runtime, scenes } = runtimeCapturing({
+      pointHit: input => options.pointHit(input) as never,
+      ...(options.modelPick ? { modelPick: options.modelPick } : {})
+    });
     runtime.queryWorldGround = point => {
       const ground = options.ground ? options.ground(point) : { u: point.x / 100, v: point.y / 100 };
       return ground ? { ok: true, generation: 1, value: ground } : { ok: false, reason: "unavailable" as const };

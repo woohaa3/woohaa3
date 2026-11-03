@@ -59,7 +59,7 @@ const rowStyle: CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap", ali
 
 const modeLabels: Array<{ mode: SceneAreaDragMode; label: string; hint: string }> = [
   { mode: "auto", label: "跟随", hint: "自动：拖动区域边缘只调整范围；区域内空白仍可框选" },
-  { mode: "move", label: "搬场景", hint: "搬场景：在区域内任意位置拖动，搬动范围与完整包含的可写模型、区内镜头" },
+  { mode: "move", label: "搬场景", hint: "搬场景：在区域内任意位置（含模型）拖动，搬动范围与完整包含的可写模型、区内镜头" },
   { mode: "resize", label: "仅调范围", hint: "在区域内拖动只调整范围，不移动任何模型或镜头" }
 ];
 
@@ -109,17 +109,21 @@ function SceneAreaControls({ area, nodeId, edit }: { area: SceneAreaData; nodeId
   const [confirmContents, setConfirmContents] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { setConfirmContents(false); setError(null); }, [nodeId]);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => { setConfirmContents(false); setError(null); setNotice(null); }, [nodeId]);
   const gestures = currentSceneAreaGestures();
   const runDelete = async (withContents: boolean) => {
     const port = currentSceneAreaGestures();
     if (!port) return;
     setBusy(withContents ? "contents" : "area");
     setError(null);
+    setNotice(null);
     const result = await port.deleteArea(nodeId, withContents);
     setBusy(null);
     setConfirmContents(false);
+    // A refused journal adoption is a recoverable warning: the delete is real.
     if (!result.ok) setError(result.message);
+    else if ("warning" in result && result.warning) setNotice(result.warning);
   };
   const runHistory = async (direction: "undo" | "redo") => {
     setBusy(direction);
@@ -165,6 +169,7 @@ function SceneAreaControls({ area, nodeId, edit }: { area: SceneAreaData; nodeId
         )}
       </div>
       <div style={hintStyle}>连同内容删除只移除完整包含的可写模型与定位点在区内的可写镜头；部分参考、素材和任务保留，仍受运行占用约束。</div>
+      {notice ? <div style={{ ...hintStyle, color: "var(--app-status-warning, #a06a1b)" }}>{notice}</div> : null}
       {error ? <div style={{ ...hintStyle, color: "var(--app-status-danger, #bb5464)" }}>{error}</div> : null}
     </div>
   );
@@ -282,17 +287,17 @@ export function SceneAreaDragHandle({ ctx }: { ctx: Context }) {
   const nodeId = selection.nodeIds.length === 1 ? selection.primaryNodeId : null;
   const data = nodeId ? canvas?.nodeData[nodeId] : undefined;
   const area = useMemo(() => decodeSceneAreaData(data?.sceneArea), [data?.sceneArea]);
+  const areaSelected = !!nodeId && area.ok;
   useEffect(() => {
+    if (!areaSelected) return;
     const controller = ctx.canvasRuntime.controller();
+    // The controller already notifies viewport/projection changes every frame that
+    // matters (pan, zoom, node moves). No polling when no area is selected.
     const unsubscribe = controller?.subscribeViewport?.(() => setTick(value => value + 1));
-    // Pan/zoom commits may not notify every intermediate frame; keep the chip pinned
-    // without subscribing to or reading the canvas document on every pointer move.
-    const id = setInterval(() => setTick(value => value + 1), 400);
     return () => {
       unsubscribe?.();
-      clearInterval(id);
     };
-  }, [ctx]);
+  }, [ctx, areaSelected]);
   useEffect(() => { setError(null); }, [nodeId]);
   if (!nodeId || !area.ok) return null;
   const controller = ctx.canvasRuntime.controller();
@@ -311,9 +316,18 @@ export function SceneAreaDragHandle({ ctx }: { ctx: Context }) {
   });
   const top = corners.reduce((best, corner) => (corner.y < best.y ? corner : best), corners[0]!);
   const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const port = currentSceneAreaGestures();
-    if (!port) return;
-    const started = port.begin({ point: { x: event.clientX, y: event.clientY }, areaNodeId: nodeId, card: true, mode: "move" });
+    const runtime = ctx.canvasRuntime.controller();
+    const input = {
+      point: { x: event.clientX, y: event.clientY },
+      areaNodeId: nodeId,
+      card: true,
+      mode: "move" as const
+    };
+    // Route through the controller bridge when present: it records external ownership,
+    // so performFrame's scene-area reconciliation cannot cancel this gesture next tick.
+    const started = runtime?.beginSceneAreaGesture
+      ? runtime.beginSceneAreaGesture(input)
+      : currentSceneAreaGestures()?.begin(input) ?? null;
     if (!started) return;
     dragRef.current = { pointerId: event.pointerId };
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -329,8 +343,13 @@ export function SceneAreaDragHandle({ ctx }: { ctx: Context }) {
     if (!dragRef.current) return;
     dragRef.current = null;
     event.preventDefault();
-    const result = await currentSceneAreaGestures()?.end();
-    if (result && !result.ok) setError(result.message);
+    const runtime = ctx.canvasRuntime.controller();
+    const result = runtime?.endSceneAreaGesture
+      ? await runtime.endSceneAreaGesture()
+      : await currentSceneAreaGestures()?.end();
+    if (!result) return;
+    if (!result.ok) setError(result.message);
+    else if ("warning" in result && result.warning) setError(result.warning);
   };
   return (
     <button
@@ -358,7 +377,13 @@ export function SceneAreaDragHandle({ ctx }: { ctx: Context }) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={event => { void finish(event); }}
-      onPointerCancel={event => { dragRef.current = null; currentSceneAreaGestures()?.cancel(); event.preventDefault(); }}
+      onPointerCancel={event => {
+        dragRef.current = null;
+        const runtime = ctx.canvasRuntime.controller();
+        if (runtime?.cancelSceneAreaGesture) runtime.cancelSceneAreaGesture();
+        else currentSceneAreaGestures()?.cancel();
+        event.preventDefault();
+      }}
     >
       搬场景{error ? ` · ${error}` : ""}
     </button>

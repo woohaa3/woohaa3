@@ -363,7 +363,18 @@ export type SceneAreaGestureBeginInput = {
 };
 
 export type SceneAreaGestureResult =
-  | { ok: true; operationId: string; intent: SceneAreaPlanIntent; receipt: import("@woohaa3/contracts").WorldAuthoringReceipt }
+  | {
+      ok: true;
+      operationId: string;
+      intent: SceneAreaPlanIntent;
+      receipt: import("@woohaa3/contracts").WorldAuthoringReceipt;
+      /**
+       * The authoritative write succeeded, but the receipt could not be adopted into
+       * the page journal. The caller must show this recoverable warning; it is not a
+       * failed commit.
+       */
+      warning?: string;
+    }
   | { ok: true; noop: true }
   | { ok: false; code: string; message: string; conflicts?: WorldAuthoringConflict[] };
 
@@ -404,6 +415,9 @@ export type SceneAreaGesturePort = {
   end(): Promise<SceneAreaGestureResult>;
   cancel(): void;
   active(): boolean;
+  /** A release/commit is in flight; a new gesture must not overwrite it. */
+  ending(): boolean;
+  mode(): SceneAreaDragMode;
   deleteArea(areaNodeId: string, withContents: boolean): Promise<SceneAreaGestureResult>;
   undo(): Promise<SceneAreaGestureResult>;
   redo(): Promise<SceneAreaGestureResult>;
@@ -467,6 +481,7 @@ function instanceNodeIds(snapshot: WorldPreparedAuthoritySnapshot): Map<string, 
 export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGesturePort {
   let active: ActiveGesture | null = null;
   const newOperationId = (prefix: string) => deps.newOperationId?.(prefix) ?? createHighEntropyId(prefix);
+  const currentMode = (): SceneAreaDragMode => deps.mode?.() ?? sceneAreaModeStore.getSnapshot();
 
   /**
    * Replay one frozen receipt through the authoritative history route. Only an
@@ -491,19 +506,23 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
     return { ok: true };
   };
 
-  const retainHistory = (entry: Omit<SceneAreaAdoptedHistory, "undo" | "redo">): void => {
+  const retainHistory = (
+    entry: Omit<SceneAreaAdoptedHistory, "undo" | "redo">
+  ): { ok: true } | { ok: false; reason?: string } => {
     if (deps.adoptHistory) {
       // The authoritative commit already succeeded. Adoption is synchronous and only
       // stores verified callbacks; a busy/unwritable journal must not fake success.
-      deps.adoptHistory({
+      // Report the refusal so the caller can keep the real write result and warn.
+      const result = deps.adoptHistory({
         ...entry,
         undo: () => replayHistory("undo", entry),
         redo: () => replayHistory("redo", entry)
       });
-      return;
+      return result.ok ? { ok: true } : { ok: false, ...(result.reason ? { reason: result.reason } : {}) };
     }
     // Standalone/test fallback: bounded operation-id stack behind the explicit panel.
     sceneAreaHistoryStore.record(entry);
+    return { ok: true };
   };
 
   const setState = (next: Partial<SceneAreaGestureSnapshot> & Pick<SceneAreaGestureSnapshot, "phase">): void => {
@@ -580,12 +599,16 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
   };
 
   const begin = (input: SceneAreaGestureBeginInput): SceneAreaGestureStart | null => {
+    // A release is already authoritative: prepare or commit may still be pending.
+    // Refuse to start anything new until it settles, so an old end() can never clear
+    // (or overwrite) the newer gesture's state.
+    if (active?.ending) return null;
     const canvasId = deps.canvasId();
     const canvas = deps.getCanvas();
     if (!canvasId || !canvas || !deps.writable()) return null;
     const ground = deps.queryGround(input.point);
     if (!ground) return null;
-    const mode = input.mode ?? deps.mode?.() ?? sceneAreaModeStore.getSnapshot();
+    const mode = input.mode ?? currentMode();
     const candidates = containingAreas(canvas, ground);
     let areaNodeId = input.areaNodeId ?? null;
     if (!areaNodeId) {
@@ -653,7 +676,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
 
   const finish = (gesture: ActiveGesture): { ok: false; code: string; message: string } => {
     clearPreview(gesture);
-    active = null;
+    if (active === gesture) active = null;
     return { ok: false, code: "not-ready", message: gesture.prepareMessage ?? "场景操作未完成" };
   };
 
@@ -661,7 +684,10 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
     const gesture = active;
     if (!gesture || gesture.ending) return { ok: false, code: "not-ready", message: "没有进行中的场景手势" };
     gesture.ending = true;
-    const prepared = await gesture.prepared;
+    await gesture.prepared;
+    // A disposed/changed page may have moved on while prepare was pending. Never let
+    // an old completion publish over the current owner's snapshot.
+    if (active !== gesture) return { ok: false, code: "cancelled", message: "场景手势已结束" };
     if (!gesture.snapshot) {
       const failure = finish(gesture);
       setState({ phase: "failed", message: failure.message });
@@ -707,36 +733,45 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
       outcome = await deps.execute({ canvasId: gesture.canvasId, request: built.request, operationId }, gesture.abort.signal);
     } catch {
       clearPreview(gesture);
-      active = null;
-      setState({ phase: "failed", message: "场景操作提交失败" });
+      const current = active === gesture;
+      if (current) active = null;
+      if (current) setState({ phase: "failed", message: "场景操作提交失败" });
       return { ok: false, code: "not-ready", message: "场景操作提交失败" };
     }
     clearPreview(gesture);
-    active = null;
+    const current = active === gesture;
+    if (current) active = null;
     if (!outcome.ok) {
-      setState({ phase: "failed", message: outcome.message, conflicts: outcome.conflicts ?? [] });
+      if (current) setState({ phase: "failed", message: outcome.message, conflicts: outcome.conflicts ?? [] });
       return { ok: false, code: outcome.code, message: outcome.message, ...(outcome.conflicts ? { conflicts: outcome.conflicts } : {}) };
     }
     if (outcome.canvasId !== gesture.canvasId || outcome.operationId !== operationId) {
-      setState({ phase: "failed", message: "场景操作回执不匹配" });
+      if (current) setState({ phase: "failed", message: "场景操作回执不匹配" });
       return { ok: false, code: "version-conflict", message: "场景操作回执不匹配" };
     }
-    retainHistory({
+    const retained = retainHistory({
       operationId: outcome.operationId,
       canvasId: gesture.canvasId,
       intent: gesture.intent,
       label: labelFor(gesture.intent)
     });
-    setState({ phase: "idle" });
-    void prepared;
+    if (!retained.ok) {
+      // The authority really committed. Keep ok:true and warn: saying "not committed"
+      // here would be false, and silently dropping the undo entry hides a real gap.
+      const warning = `场景已提交，但未加入撤销历史（${retained.reason ?? "页面历史忙"}），可继续操作后重试`;
+      if (current) setState({ phase: "idle", message: warning });
+      return { ok: true, operationId: outcome.operationId, intent: gesture.intent, receipt: outcome.receipt, warning };
+    }
+    if (current) setState({ phase: "idle" });
     return { ok: true, operationId: outcome.operationId, intent: gesture.intent, receipt: outcome.receipt };
   };
 
   const cancel = (): void => {
     const gesture = active;
     if (!gesture) return;
-    // 已进入权威提交后不再伪装取消；仍在等待 prepare 时允许取消并释放准备请求。
-    if (gesture.ending && gesture.committing) return;
+    // 一旦 end() 开始（等待 prepare、提交或回执），取消会中断真实的权威写，并让
+    // 快速释放/逐帧结算静默丢失结果。此窗口只允许等待 end() 自己完成。
+    if (gesture.ending) return;
     gesture.abort.abort();
     clearPreview(gesture);
     active = null;
@@ -780,7 +815,17 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
       setState({ phase: "failed", message: outcome.message, conflicts: outcome.conflicts ?? [] });
       return { ok: false, code: outcome.code, message: outcome.message, ...(outcome.conflicts ? { conflicts: outcome.conflicts } : {}) };
     }
-    retainHistory({ operationId: outcome.operationId, canvasId, intent, label: labelFor(intent) });
+    // Match end(): only the receipt for this canvas and operation may enter the journal.
+    if (outcome.canvasId !== canvasId || outcome.operationId !== operationId) {
+      setState({ phase: "failed", message: "场景删除回执不匹配" });
+      return { ok: false, code: "version-conflict", message: "场景删除回执不匹配" };
+    }
+    const retained = retainHistory({ operationId: outcome.operationId, canvasId, intent, label: labelFor(intent) });
+    if (!retained.ok) {
+      const warning = `场景已删除，但未加入撤销历史（${retained.reason ?? "页面历史忙"}），可继续操作后重试`;
+      setState({ phase: "idle", message: warning });
+      return { ok: true, operationId: outcome.operationId, intent, receipt: outcome.receipt, warning };
+    }
     setState({ phase: "idle" });
     return { ok: true, operationId: outcome.operationId, intent, receipt: outcome.receipt };
   };
@@ -820,6 +865,8 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
     end,
     cancel,
     active: () => !!active,
+    ending: () => !!active?.ending,
+    mode: currentMode,
     deleteArea,
     undo: () => history("undo"),
     redo: () => history("redo")

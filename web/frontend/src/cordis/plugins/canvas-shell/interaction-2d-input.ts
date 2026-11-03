@@ -139,8 +139,49 @@ export function create2dInputFamily(core: InteractionCore) {
       return;
     }    const hit = hitResult.value;
 
+    // 场景区手势（T07）：区域卡片默认搬场景；地面边缘 / 显式模式只改范围。
+    // 区域内空白在 `auto` 模式下返回 null，继续走既有 groundClick + 框选，不吞拖动框选。
+    const sceneAreaGesture = core.sceneAreaGestures();
+    // 显式「搬场景 / 仅调范围」是用户可见承诺：此时场景区优先于世界模型拾取，
+    // 文案里的「区域内任意位置」才成立。auto 模式保持模型拾取优先，模型交互不回退。
+    const sceneAreaFirst = !!sceneAreaGesture && sceneAreaGesture.mode() !== "auto";
+    const trySceneAreaGesture = (): boolean => {
+      // Shift 保留既有加选框选语义；场景区手势不抢占它。
+      if (!sceneAreaGesture || isRight || event.shiftKey) return false;
+      const hitNodeId = cardHitNodeId(hit);
+      const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
+      const hitNode = hitNodeId ? canvasState?.document.nodes.find(node => node.id === hitNodeId) : undefined;
+      const areaCardId = hitNode?.type === "scene-area" ? hitNode.id : null;
+      if (!areaCardId && hit) return false;
+      const started = sceneAreaGesture.begin({
+        point: { x: event.clientX, y: event.clientY },
+        areaNodeId: areaCardId,
+        card: !!areaCardId,
+        altKey: event.altKey,
+        preferredAreaNodeId: canvasState?.document.nodes.find(node => state.selected.length === 1 && node.id === state.selected[0] && node.type === "scene-area")?.id ?? null
+      });
+      if (!started) return false;
+      core.claimSceneAreaGesture("pointer");
+      beginGesture();
+      beginPerfGesture(started.intent === "move" ? "drag" : "resize");
+      // Install the scene-area state before setSelection: without rAF (tests) or in a
+      // synchronous subscriber, selection schedules a frame immediately and a "none"
+      // gesture there would cancel the gesture we just started.
+      state.gesture = {
+        kind: "scene-area",
+        pointerId: event.pointerId,
+        areaNodeId: started.areaNodeId,
+        intent: started.intent
+      };
+      if (!state.selected.includes(started.areaNodeId)) setSelection([started.areaNodeId]);
+      canvas.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+      return true;
+    };
+    if (sceneAreaFirst && trySceneAreaGesture()) return;
+
     // 共享世界模型没有内容卡片；空白命中也必须先问渲染器的真实表面/空模型锚点，
-    // 否则 scene-area 的 overEmptyGround 会先把世界模型点击当成搬场景。
+    // 否则 auto 模式的 scene-area 会先把世界模型点击当成搬场景。
     if (shouldUseWorldModelPick({
       cardHitNodeId: cardHitNodeId(hit),
       focusActive: model.active,
@@ -162,40 +203,7 @@ export function create2dInputFamily(core: InteractionCore) {
       }
     }
 
-    // 场景区手势（T07）：区域卡片默认搬场景；地面边缘 / 显式模式只改范围。
-    // 区域内空白在 `auto` 模式下返回 null，继续走既有 groundClick + 框选，不吞拖动框选。
-    const sceneAreaGesture = core.sceneAreaGestures();
-    // Shift 保留既有加选框选语义；场景区手势不抢占它。
-    if (sceneAreaGesture && !isRight && !event.shiftKey) {
-      const hitNodeId = cardHitNodeId(hit);
-      const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
-      const hitNode = hitNodeId ? canvasState?.document.nodes.find(node => node.id === hitNodeId) : undefined;
-      const areaCardId = hitNode?.type === "scene-area" ? hitNode.id : null;
-      const overEmptyGround = !hit;
-      if (areaCardId || overEmptyGround) {
-        const started = sceneAreaGesture.begin({
-          point: { x: event.clientX, y: event.clientY },
-          areaNodeId: areaCardId,
-          card: !!areaCardId,
-          altKey: event.altKey,
-          preferredAreaNodeId: canvasState?.document.nodes.find(node => state.selected.length === 1 && node.id === state.selected[0] && node.type === "scene-area")?.id ?? null
-        });
-        if (started) {
-          if (!state.selected.includes(started.areaNodeId)) setSelection([started.areaNodeId]);
-          beginGesture();
-          beginPerfGesture(started.intent === "move" ? "drag" : "resize");
-          state.gesture = {
-            kind: "scene-area",
-            pointerId: event.pointerId,
-            areaNodeId: started.areaNodeId,
-            intent: started.intent
-          };
-          canvas.setPointerCapture?.(event.pointerId);
-          event.preventDefault();
-          return;
-        }
-      }
-    }
+    if (trySceneAreaGesture()) return;
 
     if (modelPreviewPointerDown(core, event, hit)) return;
 
@@ -313,20 +321,19 @@ export function create2dInputFamily(core: InteractionCore) {
         const start = index?.absolutePosition(id);
         if (start) origins.set(id, start);
       }
-      // 2D 组整体移动：拖动组卡片时把成员并入同一批 origins（T07）。
+      // 2D 组整体移动：活动选择中任意 2D 组卡片都把成员并入同一批 origins（T07）。
+      // 多选（组 + 其他卡片）同样按整组展开，避免拖动时把成员留在原地。
       // 成员关系来自规范 nodeData；普通节点拖动不受影响。
-      const soleGroupId = active.length === 1 ? active[0]! : null;
-      const groupNode = soleGroupId ? canvasState?.document.nodes.find(node => node.id === soleGroupId && node.type === "workflow-group-2d") : undefined;
-      if (groupNode) {
-        const group = decodeWorkflowGroupData(canvasState?.nodeData[groupNode.id]?.workflowGroup2d);
-        if (group.ok) {
-          for (const memberId of group.value.memberNodeIds) {
-            if (origins.has(memberId)) continue;
-            const member = canvasState?.document.nodes.find(node => node.id === memberId);
-            if (!member || member.type === "workflow-group-2d") continue;
-            const start = index?.absolutePosition(memberId);
-            if (start) origins.set(memberId, start);
-          }
+      const selectedGroupIds = active.filter(id => canvasState?.document.nodes.some(node => node.id === id && node.type === "workflow-group-2d"));
+      for (const groupId of selectedGroupIds) {
+        const group = decodeWorkflowGroupData(canvasState?.nodeData[groupId]?.workflowGroup2d);
+        if (!group.ok) continue;
+        for (const memberId of group.value.memberNodeIds) {
+          if (origins.has(memberId)) continue;
+          const member = canvasState?.document.nodes.find(node => node.id === memberId);
+          if (!member || member.type === "workflow-group-2d") continue;
+          const start = index?.absolutePosition(memberId);
+          if (start) origins.set(memberId, start);
         }
       }
       // 单节点拖动粘连子状态（change: add-drag-touch-connections，design D1）：只在活动选择

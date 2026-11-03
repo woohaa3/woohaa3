@@ -394,6 +394,14 @@ export type InteractionController = {
    * 场景区卡片/地面边缘按下时由 2D 输入层转发，不新建指针监听。
    */
   setSceneAreaGestures(handler: InteractionControllerOptions["sceneAreaGestures"] | null): void;
+  /**
+   * Overlay bridge for externally started scene gestures (projected 搬场景 handle).
+   * The controller records the external owner so its frame reconciliation cannot
+   * cancel the gesture on the next animation frame.
+   */
+  beginSceneAreaGesture(input: import("../world-scopes/gestures.js").SceneAreaGestureBeginInput): import("../world-scopes/gestures.js").SceneAreaGestureStart | null;
+  endSceneAreaGesture(): Promise<import("../world-scopes/gestures.js").SceneAreaGestureResult>;
+  cancelSceneAreaGesture(): void;
   restoreViewport(viewport: { x: number; y: number; zoom: number }): void;
   /**
    * 带动画地平移到目标视口（保持传入 zoom）。尊重减少动态效果偏好；duration 为 0 时瞬时。

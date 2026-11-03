@@ -241,6 +241,12 @@ export function installInteractionController(options: InteractionControllerOptio
    */
   let sceneAreaGestures = options.sceneAreaGestures ?? null;
   const sceneArea = () => sceneAreaGestures ?? currentSceneAreaGestures();
+  /**
+   * Who owns the active scene gesture. The frame reconciliation only cancels gestures
+   * started by this canvas pointer path; an external overlay handle (搬场景) owns its
+   * own release and must never be cancelled by a frame tick.
+   */
+  let sceneAreaOwner: "pointer" | "external" | null = null;
 
   /** 清除全部悬停态；仅在确实有悬停时触发重绘。 */
   const clearHover = () => hover.clearHover();
@@ -393,11 +399,12 @@ export function installInteractionController(options: InteractionControllerOptio
       markInvalidated,
       writable
     });
-    // Escape/焦点门禁可能直接复位 state.gesture；场景区预览与准备请求必须由同一
-    // 帧结算清理。正在提交的手势由运行时自身忽略 cancel，避免把已发出的写请求
-    // 伪装成取消。
+    // Escape/焦点门禁可能直接复位 state.gesture；指针路径启动的场景区预览与准备请求
+    // 必须由同一帧结算清理。外部 overlay 手柄（搬场景）拥有自己的释放，不得被帧清掉。
+    // end() 已开始的提交由运行时自身拒绝 cancel，避免把真实写请求伪装成取消。
     const sceneGesture = sceneArea();
-    if (state.gesture.kind !== "scene-area" && sceneGesture?.active()) sceneGesture.cancel();
+    if (!sceneGesture?.active()) sceneAreaOwner = null;
+    else if (state.gesture.kind !== "scene-area" && sceneAreaOwner === "pointer") sceneGesture.cancel();
     const runtime = options.getRuntime();
     const playbackBlocked = modalActive() || state.viewportPreview !== null || hoverNodeStore.hasPlaybackOwner() || runtime?.acceptsPlayback?.() === false;
     const ownerKey = `${state.gesture.kind}:${playbackBlocked}:${runtime?.generation?.() ?? 0}`;
@@ -508,6 +515,7 @@ export function installInteractionController(options: InteractionControllerOptio
     focusInputBlocked,
     state,
     sceneAreaGestures: sceneArea,
+    claimSceneAreaGesture: (owner) => { sceneAreaOwner = owner; },
     localViewport,
     viewportListeners,
     model,
@@ -581,6 +589,7 @@ export function installInteractionController(options: InteractionControllerOptio
   const { cancelTransientGesture: cancelSurfaceTransientGesture, settleViewportBeforeFocus, handlers: { onDocumentWheel, onDocumentPointerDown, onDocumentFocusChange, onDocumentBlur, onDocumentVisibility, onGestureStart, onGestureChange, onGestureEnd, onWindowResize } } = surface;
   /** modal/宿主取消路径同时清掉场景区准备请求与模型地面预览。 */
   const cancelTransientGesture = () => {
+    sceneAreaOwner = null;
     sceneArea()?.cancel();
     cancelSurfaceTransientGesture();
   };
@@ -639,6 +648,33 @@ export function installInteractionController(options: InteractionControllerOptio
     updateWorldGroundPreview,
     cancelWorldGroundPreview,
     setSceneAreaGestures: (handler) => { sceneAreaGestures = handler ?? null; },
+    /**
+     * Overlay bridge: start a scene gesture outside the canvas pointer path and mark it
+     * as externally owned, so performFrame's reconciliation never cancels it. end/cancel
+     * keep the owner until the authoritative prepare/commit settles.
+     */
+    beginSceneAreaGesture: (input) => {
+      const port = sceneArea();
+      if (!port) return null;
+      const started = port.begin(input);
+      if (!started) return null;
+      sceneAreaOwner = "external";
+      schedule("scene-area");
+      return started;
+    },
+    endSceneAreaGesture: async () => {
+      const port = sceneArea();
+      try {
+        return port ? await port.end()
+          : { ok: false as const, code: "not-ready", message: "场景手势未就绪" };
+      } finally {
+        sceneAreaOwner = null;
+      }
+    },
+    cancelSceneAreaGesture: () => {
+      sceneAreaOwner = null;
+      sceneArea()?.cancel();
+    },
     flush,
     /** 唯一失效入口（design D2）；缺省 reason 归一为 `invalidate`。 */
     invalidate: (reason) => schedule(reason ?? "invalidate"),
