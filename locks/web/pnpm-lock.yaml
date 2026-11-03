@@ -120,6 +120,37 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@26.6.2)(jsdom@30.1.1)(lightningcss@1.33.0)(msw@2.15.0(@types/node@26.6.2)(typescript@7.0.2))
 
+  ../../web/extensions/alignment-guides:
+    dependencies:
+      '@woohaa3/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
+      '@woohaa3/frontend':
+        specifier: workspace:*
+        version: link:../../frontend
+      '@woohaa3/ui':
+        specifier: workspace:*
+        version: link:../../ui
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: 4.0.5
+        version: 4.0.5(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)
+      '@types/node':
+        specifier: ^22.15.3
+        version: 22.20.4
+      '@types/react':
+        specifier: ^18.3.12
+        version: 18.3.31
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@22.20.4)(jsdom@30.1.1)(lightningcss@1.33.0)(msw@2.15.0(@types/node@22.20.4)(typescript@7.0.2))
+
   ../../web/extensions/ark-provider:
     dependencies:
       '@sdppp/pptask':

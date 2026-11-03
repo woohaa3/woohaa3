@@ -277,6 +277,16 @@ export interface CanvasRuntimeService {
   setFilmSetObjectAction(
     handler: import("../plugins/canvas-shell/interaction-controller.js").InteractionControllerOptions["filmSetObjectAction"] | null
   ): void;
+  /**
+   * 注入/替换拖动吸附策略（内置插件 `alignment-guides`；传 null 关闭吸附）。
+   *
+   * 策略只做几何求解，宿主负责在拖动预览里叠加位移与绘制参考线。
+   */
+  setAlignmentSnapPolicy?(policy: import("./alignment-snap.js").AlignmentSnapPolicy | null): void;
+  /** 当前拖动的辅助对齐线（世界坐标）；未挂载或不在拖动中时为空。 */
+  alignmentGuides?(): readonly import("./alignment-snap.js").AlignmentGuide[];
+  /** 参考线版本号；内容变化才递增（供覆盖层决定是否重绘）。 */
+  alignmentGuidesVersion?(): number;
   /** 当前已接受的 interaction generation（供对象 picking 的 generation 守卫）。 */
   interactionGeneration(): number;
   /**

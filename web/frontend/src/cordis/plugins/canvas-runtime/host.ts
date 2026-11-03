@@ -16,6 +16,9 @@ import { queryCompositeAssetItemPick, type CompositeAssetPickInput } from "./com
 import { compositeFocusContextIds } from "../canvas-shell/composite-focus-context.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { defaultAppTheme, type BevyModelEditor, type GhostRenderNode, type ModelFocusProjection } from "@woohaa3/contracts";
+import type { AlignmentGuide } from "../../contract/alignment-snap.js";
+import type { AlignmentSnapPolicy } from "../../contract/alignment-snap.js";
+import { applyAlignmentSnapPolicy, createAlignmentSnapRef, readAlignmentGuides, readAlignmentGuidesVersion } from "./alignment-snap-refs.js";
 import type { CanvasRuntimeService, CanvasRuntimeStatus } from "../../contracts.js";
 import { type CanvasRuntimeOptions } from "./canvas-runtime-options.js";
 import { installCanvasRuntimeMirrors } from "./canvas-runtime-mirrors.js";
@@ -185,6 +188,11 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   /** 片场总览 LOD 采样（`perf.lod`）：与帧窗口同生命周期，只在画布挂载期间记录。 */
   private lodTelemetry: OverviewLodTelemetryHandle | null = null;
   private readonly loadAbort = new AbortController();
+  /**
+   * 拖动吸附策略（内置插件 `alignment-guides` 注入）。
+   * 与手势注入同一套语义：插件可在画布挂载前后任意时刻启停，controller 每次求值都读最新值。
+   */
+  private readonly alignmentSnapRef = createAlignmentSnapRef();
 
   constructor(private readonly options: CanvasRuntimeOptions) {}
 
@@ -527,6 +535,18 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     applyFilmSetObjectGesture(this.modelEditorGestures, this.controllerInstance, handler);
   }
 
+  /**
+   * 注入/替换拖动吸附策略（内置插件 `alignment-guides`；传 null 关闭吸附）。
+   *
+   * 与手势注入同一套语义：插件在画布挂载前后任意时刻都能启停，controller 每次求值读最新值。
+   */
+  setAlignmentSnapPolicy(policy: AlignmentSnapPolicy | null): void {
+    applyAlignmentSnapPolicy(this.alignmentSnapRef, this.controllerInstance, policy);
+  }
+
+  alignmentGuides = (): readonly AlignmentGuide[] => readAlignmentGuides(this.controllerInstance);
+  alignmentGuidesVersion = (): number => readAlignmentGuidesVersion(this.controllerInstance);
+
   /** 宿主注入的片场对象局部键盘 action（change: 2026-10-10）。 */
   setFilmSetObjectAction(handler: InteractionControllerOptions["filmSetObjectAction"] | null): void {
     applyFilmSetObjectAction(this.modelEditorGestures, this.controllerInstance, handler);
@@ -749,6 +769,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         focusTransition: () => this.focusTransition.modelProgress(),
         runState: () => this.options.getRunState?.() ?? null,
         gestures: this.modelEditorGestures,
+        alignmentSnap: () => this.alignmentSnapRef.current,
         onModelFocusChange: (projection) => {
           this.modelFocus = projection;
           this.emitModelFocus();

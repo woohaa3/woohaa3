@@ -45,6 +45,11 @@ export type AttachAssemblyDeps = {
   focusTransition: () => import("@woohaa3/contracts").BevyFocusTransition | null;
   runState: () => import("../canvas-shell/interaction-types.js").RunStateProjectionInput | null;
   gestures: ModelEditorGestureRefs;
+  /**
+   * 拖动吸附策略读取器（内置插件 `alignment-guides` 注入）。
+   * 每次拖动预览都会调用；返回 null 表示完全不吸附。
+   */
+  alignmentSnap?: () => import("../canvas-shell/alignment-snap.js").AlignmentSnapPolicy | null;
   onModelFocusChange: NonNullable<InteractionControllerOptions["onModelFocusChange"]>;
   onViewportChange: (viewport: { x: number; y: number; zoom: number }) => void;
   onFrame?: () => void;
@@ -110,6 +115,7 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     // 片场对象局部键盘 action（Delete/Backspace/分层 Escape）随 controller 构造注入；
     // 缺省会丢失已注册的 action，导致真实浏览器按键路由失效（change: 2026-10-10 任务 4.1/5.1）。
     ...(deps.gestures.objectAction ? { filmSetObjectAction: deps.gestures.objectAction } : {}),
+    ...(deps.alignmentSnap ? { alignmentSnap: deps.alignmentSnap } : {}),
     onModelFocusChange: deps.onModelFocusChange,
     onViewportChange: deps.onViewportChange,
     ...(deps.onFrame ? { onFrame: deps.onFrame } : {}),

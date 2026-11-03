@@ -1,0 +1,19 @@
+/*
+ * 辅助对齐线。
+ *
+ * 用 fixed 定位按 client 坐标画线：端点由 Canvas Runtime 的 worldToClient 给出，已包含画布
+ * 外框偏移，因此不依赖任何祖先容器建立定位上下文。
+ * 线型与透明度由组件按"边线 vs 中心线"给出（都是虚线），这里只保留容器与不可交互约束。
+ */
+.alignment-guides {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.alignment-guides__line {
+  position: absolute;
+  background-repeat: repeat;
+  border-radius: 1px;
+}
