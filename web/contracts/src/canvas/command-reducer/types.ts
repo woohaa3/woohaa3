@@ -24,6 +24,8 @@ export type CanvasCommandRejectionCode =
   /** 镜头参考边携带的持久化结构版本不受支持（能力门禁，任务 8.1）。 */
   | "unsupported-shot-reference"
   | "invalid-node-size"
+  | "invalid-node-retype"
+  | "operation-in-progress"
   | "invalid-group-config"
   | "invalid-group-appearance"
   | "invalid-video-edit-intent"

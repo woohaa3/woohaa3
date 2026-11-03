@@ -151,6 +151,11 @@ export function planDeleteEdge(edgeId: string): CanvasCommand[] {
   return [{ type: "edge.remove", edgeId }];
 }
 
+/** 把空的图片/视频节点切成另一种类型（生成面板的「图片 / 视频」切换）。 */
+export function planRetypeNode(nodeId: string, nodeType: "image" | "video"): CanvasCommand[] {
+  return [{ type: "node.update", nodeId, nodeType }];
+}
+
 export function planNodeDataPatch(intent: NodeDataPatchIntent): CanvasCommand[] {
   return [{ type: "nodeData.patch", nodeId: intent.nodeId, value: intent.value }];
 }

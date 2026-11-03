@@ -313,6 +313,10 @@ export function updateNode(
 
   const parentRejection = validateGroupParent(work, command.nodeId, command.parentId);
   if (parentRejection) return parentRejection;
+  if (command.nodeType !== undefined) {
+    const retypeRejection = retypeNode(work, node, command.nodeType);
+    if (retypeRejection) return retypeRejection;
+  }
 
   if (command.position) node.position = { x: command.position.x, y: command.position.y };  // 最小尺寸下限：只校验本次提交的字段，既不改写既有记录也不受其影响（design D5）。
   const sizeRejection = validateNodeSize(command.width, command.height, node.type);
@@ -324,6 +328,43 @@ export function updateNode(
     node.parentId = command.parentId === null ? undefined : command.parentId;
   }
   return OK;
+}
+
+/** 正在执行中的任务状态：此时改类型会让回流的结果写进错误类型的节点。 */
+const IN_FLIGHT_TASK_STATUSES: ReadonlySet<unknown> = new Set(["pending", "queued", "processing", "running"]);
+
+/**
+ * 改节点类型（`image` ↔ `video`）。
+ *
+ * 只允许**还没有任何结果**的空节点：已有图/视频、有历史版本引用或任务在途时拒绝，免得把一张图
+ * 变成「视频节点」。同一次提交里同步 `taskKind`，并清掉另一种类型的模型与参数
+ * （两类模型的表单不通用）；提示词与输入映射保留，用户切过去还能接着写。
+ */
+function retypeNode(
+  work: WorkingState,
+  node: WorkingState["nodes"][number],
+  nodeType: "image" | "video"
+): CommandApplyResult | null {
+  if (node.type === nodeType) return null;
+  if (node.type !== "image" && node.type !== "video") {
+    return reject("invalid-node-retype", `只有图片和视频节点可以互相切换，当前是 ${node.type}`);
+  }
+  const data = (work.nodeData[node.id] ?? {}) as Record<string, unknown>;
+  if (typeof data.outputAssetId === "string" && data.outputAssetId !== "") {
+    return reject("invalid-node-retype", "节点已经有结果，不能切换类型；请新建节点");
+  }
+  if (data.mediaContent !== undefined && data.mediaContent !== null) {
+    return reject("invalid-node-retype", "节点已经有内容，不能切换类型；请新建节点");
+  }
+  if (IN_FLIGHT_TASK_STATUSES.has(data.taskStatus) || (typeof data.activeRunId === "string" && data.activeRunId !== "" && data.taskStatus === undefined)) {
+    return reject("operation-in-progress", "节点正在生成，不能切换类型");
+  }
+  node.type = nodeType;
+  const next: Record<string, unknown> = { ...data, taskKind: nodeType === "video" ? "video-generation" : "image-generation" };
+  delete next.modelKey;
+  delete next.parameters;
+  work.nodeData[node.id] = next as never;
+  return null;
 }
 
 export function removeNodes(work: WorkingState, nodeIds: readonly string[]): CommandApplyResult {

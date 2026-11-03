@@ -58,6 +58,11 @@ export type CanvasCommand =
       height?: number;
       parentId?: string | null;
       zIndex?: number;
+      /**
+       * 改节点类型（只在 `image` ↔ `video` 之间，且节点还没有任何结果）：生成面板里的「图片 / 视频」切换。
+       * 同一次命令里 reducer 会同步 `taskKind` 并清掉另一种类型的模型与参数，不留半成品。
+       */
+      nodeType?: "image" | "video";
     }
   | { type: "node.remove"; nodeIds: readonly string[] }
   /** `value: null` 等价于删除该 nodeData 键。 */
@@ -147,7 +152,7 @@ export function isCanvasCommand(value: unknown): value is CanvasCommand {
     case "node.add":
       return isNodeAdd(value);
     case "node.update":
-      return isNonEmptyString(value.nodeId);
+      return isNonEmptyString(value.nodeId) && (value.nodeType === undefined || value.nodeType === "image" || value.nodeType === "video");
     case "node.remove":
       return Array.isArray(value.nodeIds) && value.nodeIds.every(isNonEmptyString);
     case "nodeData.patch":

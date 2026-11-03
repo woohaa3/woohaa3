@@ -71,6 +71,7 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
       if (command.width !== undefined && node.width !== command.width) return false;
       if (command.height !== undefined && node.height !== command.height) return false;
       if (command.zIndex !== undefined && node.zIndex !== command.zIndex) return false;
+      if (command.nodeType !== undefined && node.type !== command.nodeType) return false;
       if (command.parentId !== undefined) {
         const expected = command.parentId === null ? undefined : command.parentId;
         if (node.parentId !== expected) return false;
