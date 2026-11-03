@@ -66,13 +66,19 @@ export function buildInput(
       ...imageReferenceFields(request.inputs, referenceUrls, onDropFieldless)
     };
   }
-  const groups: Record<string, Array<{ url: string; role: string }>> = {};
+  const groups: Record<string, Array<string | { url: string; role: string }>> = {};
   request.inputs.forEach((input, index) => {
     const url = referenceUrls[index];
     if (!url) return;
-    // 有 `field` 就按字段写（ppserver 这类多字段模型，如视频的 `3_image` / `1x_image`）。
-    // 没有才退回按角色猜字段（ark 的 videoUrls/audioUrls 等既有约定）。
-    const field = input.field ?? inputFieldFor(input.mediaKind, input.role);
+    // 有 `field` 就按字段写（ppserver 这类多字段模型，如视频的 `3_image` / `1x_image`），值是**纯 URL**：
+    // 服务端按「已上传的图片 URL」校验该字段（`3_image must contain uploaded image URLs`），PS 插件写的也是
+    // URL 字符串数组；对象形状会被判定为不是 URL。
+    // 没有才退回按角色猜字段（ark 的 videoUrls/audioUrls 等既有约定，值是 `{ url, role }`）。
+    if (input.field) {
+      (groups[input.field] ??= []).push(url);
+      return;
+    }
+    const field = inputFieldFor(input.mediaKind, input.role);
     (groups[field] ??= []).push({ url, role: input.role });
   });
   return {

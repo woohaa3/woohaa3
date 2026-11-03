@@ -162,9 +162,10 @@ describe("buildInput：图片模型按字段写参考图", () => {
   it("视频模型也按字段写：ppserver 的视频模板用 3_image / 1x_image", () => {
     const videoReq = { ...request([input("a", "3_image"), input("b", "1x_image")]), modelType: "video" as const };
     const body = buildInput(videoReq, ["https://cdn.example/a.png", "https://cdn.example/b.png"]);
+    // 值必须是纯 URL：ppserver 报 `3_image must contain uploaded image URLs` 就是因为收到了 { url, role } 对象。
     expect(body).toMatchObject({
-      "3_image": [{ url: "https://cdn.example/a.png", role: "reference_image" }],
-      "1x_image": [{ url: "https://cdn.example/b.png", role: "reference_image" }]
+      "3_image": ["https://cdn.example/a.png"],
+      "1x_image": ["https://cdn.example/b.png"]
     });
     // 不能落回按角色猜出来的 urls。
     expect(body.urls).toBeUndefined();
