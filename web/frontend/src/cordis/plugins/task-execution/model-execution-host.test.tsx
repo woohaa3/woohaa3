@@ -342,3 +342,33 @@ describe("ModelExecutionHost 片场外显镜头", () => {
     expect(container.querySelector('[data-testid="video-panel"]')).toBeNull();
   });
 });
+
+/**
+ * 目录里没有该节点类型的模型时的空态面板。
+ *
+ * 锁定的缺陷（截图反馈）：空态沿用 760 宽度上限，在画布上留下一条几乎空白的深色横条；
+ * 原因又落进两列栅格的右侧控件列，文字从卡片中线才开始，看起来像一条错位的提示条。
+ */
+describe("目录没有该类型模型时的空态面板", () => {
+  it("原因占整列，并由窄空态卡片承载而不是铺满面板宽度", async () => {
+    woohaa3CanvasStore.getState().hydrate(canvasFixture({ nodes: [{ id: "audio-node", type: "audio" }] }));
+    const container = await mount(
+      <ModelExecutionHost
+        canvasId="canvas-1"
+        selectedNodeId="audio-node"
+        session={{} as never}
+        runClient={{} as never}
+        writable
+        dialogs={new DialogService()}
+        // 目录可用，但只有图片模型：音频节点没有任何可执行模型。
+        catalog={new StubCatalogService(catalogFixture([{ modelKey: "image-model", modelType: "image" }]))}
+        registry={registryWithPanel()}
+        draftStore={createModelDraftStore()}
+      />
+    );
+    const panel = container.querySelector(".mc-panel--catalog-fallback");
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toContain("该节点没有可用模型");
+    expect(panel!.querySelector(".mc-panel__grid-control")!.closest(".mc-panel__grid-item--untitled")).not.toBeNull();
+  });
+});

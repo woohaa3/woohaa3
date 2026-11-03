@@ -70,6 +70,27 @@
   overflow: hidden;
 }
 
+/* 目录不可用 / 该类型没有模型时的空态面板：内容只有一行状态。按 760 的宽度上限铺满会在
+   画布上留下一条几乎空白的深色横条，因此收成内容宽度并在锚点下方居中。 */
+.mc-panel__host > .mc-panel.mc-panel--catalog-fallback {
+  width: min(420px, 100%);
+  height: auto;
+  margin-inline: auto;
+}
+
+/* 空态里没有栅格语义：行高交给内容，文字按卡片内边距垂直居中（24 列栅格的 8px 行高与
+   8px 底部内边距会把单行文字顶到上半部分）。 */
+.mc-panel--catalog-fallback .mc-panel__grid {
+  grid-auto-rows: auto;
+  row-gap: 8px;
+}
+
+.mc-panel--catalog-fallback .mc-panel__grid-item {
+  grid-row: auto;
+  align-items: center;
+  padding-bottom: 0;
+}
+
 .mc-panel__grid {
   align-items: center;
 }

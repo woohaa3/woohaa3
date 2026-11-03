@@ -442,6 +442,25 @@ pub(crate) fn estimated_text_width(text: &str, size: f32) -> f32 {
     text.chars().map(|c| estimated_char_width(c, size)).sum()
 }
 
+/// 节点动作槽里「图标 + 文案」整块的横向起点（屏幕像素，相对槽左边缘）。
+///
+/// 动作槽至少有 `NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH` 宽（保证可点区域）；短文案如果始终贴
+/// 左内边距，槽右侧会空出一大块，看起来像没对齐——「试听」这类两字动作最明显。槽有富余时把
+/// 整块内容居中，没有富余（文案把槽撑满）时退回左内边距。
+pub(crate) fn node_action_content_x(slot_width: f32, label: &str, has_icon: bool) -> f32 {
+    let icon_width = if has_icon {
+        NODE_ACTION_TOOLBAR_ICON_SIZE + NODE_ACTION_TOOLBAR_ICON_GAP
+    } else {
+        0.0
+    };
+    let spare = slot_width - icon_width - estimated_text_width(label, NODE_ACTION_TOOLBAR_FONT);
+    if spare > NODE_ACTION_TOOLBAR_ACTION_PAD * 2.0 {
+        spare / 2.0
+    } else {
+        NODE_ACTION_TOOLBAR_ACTION_PAD
+    }
+}
+
 /// 片场标题字号。
 pub(crate) const FILM_TITLE_FONT: f32 = 32.0;
 /// 片场标题面板内类型标记（聚合节点业务类型名）字号。
@@ -971,6 +990,44 @@ mod tests {
                     + NODE_ACTION_TOOLBAR_ICON_SIZE
                     + NODE_ACTION_TOOLBAR_ICON_GAP
                     + text
+        );
+    }
+
+    #[test]
+    fn node_action_content_centers_in_slot_with_spare_room() {
+        let node = action_node(500.0, 300.0);
+        let actions = crate::protocol::NodeActions {
+            actions: vec![crate::protocol::NodeAction {
+                id: "audio-preview".into(),
+                label: "试听".into(),
+                icon: None,
+                icon_only: false,
+                enabled: true,
+                menu: false,
+                tone: String::new(),
+            }],
+            summary: None,
+        };
+        let layout = node_action_toolbar(&node, &actions, None, None).expect("layout");
+        let width = layout.slots[0].rect.2;
+        let text = estimated_text_width("试听", NODE_ACTION_TOOLBAR_FONT);
+        // 两字动作被最小宽度撑宽：内容居中，不再贴着左内边距。
+        assert!(width - (NODE_ACTION_TOOLBAR_ACTION_PAD * 2.0 + text) > 1.0);
+        let x = node_action_content_x(width, "试听", false);
+        assert!((x - (width - text) / 2.0).abs() < 1e-3);
+        assert!((x - NODE_ACTION_TOOLBAR_ACTION_PAD).abs() > 1.0);
+        // 文案刚好填满槽时退回左内边距（默认行为不变）。
+        let filled = text + NODE_ACTION_TOOLBAR_ACTION_PAD * 2.0;
+        assert!(
+            (node_action_content_x(filled, "试听", false) - NODE_ACTION_TOOLBAR_ACTION_PAD).abs()
+                < 1e-3
+        );
+        // 图标 + 文案按整块居中，图标与文案之间保留固定的图标间距。
+        let icon = NODE_ACTION_TOOLBAR_ICON_SIZE + NODE_ACTION_TOOLBAR_ICON_GAP;
+        assert!(
+            (node_action_content_x(filled + icon, "试听", true) - NODE_ACTION_TOOLBAR_ACTION_PAD)
+                .abs()
+                < 1e-3
         );
     }
 
