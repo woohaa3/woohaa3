@@ -54,6 +54,28 @@ export function resolveHoverComposerTarget(input: {
 }
 
 /**
+ * 点胶囊时做什么。
+ *
+ * - 底部已经开着**另一个**节点的面板（主选中节点带生成面板、且不是被点的这张）→ 把这张图
+ *   连成那个节点的参考输入（`connect`），面板留在原处，用户接着写提示词；
+ * - 否则（没有打开的面板，或点的就是当前面板的节点）→ 只选中这张卡（`select`），
+ *   面板切到它自己的，这是原来的行为。
+ *
+ * 自己连自己没有意义，所以点的就是当前节点时一律退回 `select`。
+ */
+export function resolveComposerAction(input: {
+  targetNodeId: string;
+  primaryNodeId: string | null;
+  nodes: readonly { id: string; type: string }[];
+}): { type: "connect"; panelNodeId: string } | { type: "select" } {
+  const { primaryNodeId } = input;
+  if (!primaryNodeId || primaryNodeId === input.targetNodeId) return { type: "select" };
+  const panelNode = input.nodes.find((entry) => entry.id === primaryNodeId);
+  if (!panelNode || panelKindForNodeType(panelNode.type) === null) return { type: "select" };
+  return { type: "connect", panelNodeId: primaryNodeId };
+}
+
+/**
  * 胶囊在屏幕上的矩形：浮在卡片**下方**外侧，左右与卡片对齐。
  *
  * 不压卡片本体（见 `HOVER_COMPOSER_GAP` 的说明），因此不会抢走历史条与 resize 抓手的点击。

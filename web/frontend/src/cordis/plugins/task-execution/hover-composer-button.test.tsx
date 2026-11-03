@@ -14,6 +14,7 @@ import { createRoot, type Root } from "react-dom/client";
 
 const mocks = {
   selectNode: vi.fn(() => true),
+  submitCommands: vi.fn(() => ({ ok: true })),
   writable: true,
   nodeScreenRect: vi.fn(() => ({ left: 100, top: 50, width: 400, height: 300 })),
   frameListeners: new Set<() => void>(),
@@ -25,7 +26,7 @@ const mocks = {
  * 每次调用新建对象会让 `useSyncExternalStore` 判定「变了」而无限重渲染。
  */
 const canvasSnapshot = {
-  document: { nodes: [{ id: "img", type: "image" }, { id: "grp", type: "group" }] }
+  document: { nodes: [{ id: "img", type: "image" }, { id: "panel", type: "image" }, { id: "grp", type: "group" }] }
 };
 /** 同上：只在 `mocks.mode` 换引用时重建，其余时刻返回同一个对象。 */
 let navigationCache = { mode: mocks.mode };
@@ -59,6 +60,7 @@ const services = {
   },
   canvasSession: {
     isWritable: () => mocks.writable,
+    submitCommands: mocks.submitCommands,
     getStatus: () => sessionStatusSnapshot(),
     subscribe: () => () => undefined
   }
@@ -67,6 +69,7 @@ const services = {
 vi.mock("../../react.js", () => ({ useService: (key: string) => services[key] }));
 
 const { hoverNodeStore } = await import("../../services/hover-store.js");
+const { nodeSelectionStore } = await import("../../services/selection-store.js");
 const { HoverComposerButton } = await import("./hover-composer-button.js");
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -80,6 +83,8 @@ afterEach(() => {
   document.body.innerHTML = "";
   hoverNodeStore.reset();
   mocks.selectNode.mockClear();
+  mocks.submitCommands.mockClear();
+  nodeSelectionStore.reset();
   mocks.writable = true;
   mocks.nodeScreenRect.mockImplementation(() => ({ left: 100, top: 50, width: 400, height: 300 }));
   mocks.frameListeners.clear();
@@ -113,6 +118,16 @@ describe("悬停胶囊「添加到对话框」", () => {
     expect(element.style.top).toBe("358px");
     act(() => { element.querySelector("button")!.click(); });
     expect(mocks.selectNode).toHaveBeenCalledWith("img");
+  });
+
+  it("底部已开着另一个节点的面板时，点它是把这张图连成那个面板的参考，不切走面板", () => {
+    nodeSelectionStore.setFromRuntime({ nodeIds: ["panel"], primaryNodeId: "panel", editingFocus: false }, new Set(["img", "panel"]));
+    const container = render();
+    act(() => { hoverNodeStore.setNodeId("img"); });
+    act(() => { pill(container)!.querySelector("button")!.click(); });
+    expect(mocks.submitCommands).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(mocks.submitCommands.mock.calls[0])).toContain("panel");
+    expect(mocks.selectNode).not.toHaveBeenCalled();
   });
 
   it("指针移进胶囊（画布清空 hover）后胶囊仍在，延迟到点才收", () => {

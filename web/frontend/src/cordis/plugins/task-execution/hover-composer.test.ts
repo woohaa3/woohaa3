@@ -8,6 +8,7 @@ import {
   HOVER_COMPOSER_HEIGHT,
   HOVER_COMPOSER_MARGIN,
   hoverComposerBox,
+  resolveComposerAction,
   resolveHoverComposerTarget
 } from "./hover-composer.js";
 
@@ -100,5 +101,20 @@ describe("悬停胶囊几何", () => {
 
   it("未测量出矩形时不浮出", () => {
     expect(hoverComposerBox(null)).toBeNull();
+  });
+});
+
+describe("resolveComposerAction", () => {
+  const nodes = [{ id: "a", type: "image" }, { id: "b", type: "image" }, { id: "g", type: "group" }];
+
+  it("底部开着别的节点的面板 → 连成它的参考", () => {
+    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "b", nodes })).toEqual({ type: "connect", panelNodeId: "b" });
+  });
+
+  it("没有打开的面板、点的就是当前节点、或当前节点没有面板 → 只选中", () => {
+    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: null, nodes })).toEqual({ type: "select" });
+    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "a", nodes })).toEqual({ type: "select" });
+    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "g", nodes })).toEqual({ type: "select" });
+    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "gone", nodes })).toEqual({ type: "select" });
   });
 });

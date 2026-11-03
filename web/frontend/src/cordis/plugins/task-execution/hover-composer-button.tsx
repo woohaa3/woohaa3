@@ -12,7 +12,9 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CS
 import { PlusIcon } from "@woohaa3/ui/icons";
 import { useService } from "../../react.js";
 import { hoverNodeStore } from "../../services/hover-store.js";
-import { hoverComposerBox, resolveHoverComposerTarget } from "./hover-composer.js";
+import { nodeSelectionStore } from "../../services/selection-store.js";
+import { hoverComposerBox, resolveComposerAction, resolveHoverComposerTarget } from "./hover-composer.js";
+import { addReference } from "./model-execution-host-helpers.js";
 import "./hover-composer.css";
 
 /**
@@ -182,7 +184,19 @@ export function HoverComposerButton() {
         title={writable ? undefined : READ_ONLY_REASON}
         onClick={() => {
           if (!writable) return;
-          // 与顶部横条里的同一动作走一条路径：只选中，面板内容跟随 selection。
+          // 底部开着别的节点的面板：把这张图连成它的参考输入（面板不切走）；
+          // 否则只选中，面板内容跟随 selection。
+          // 多选时底部没有单节点面板，不算「已打开面板」。
+          const selection = nodeSelectionStore.getSnapshot();
+          const action = resolveComposerAction({
+            targetNodeId: target.nodeId,
+            primaryNodeId: selection.nodeIds.length === 1 ? selection.primaryNodeId : null,
+            nodes: canvas?.document.nodes ?? []
+          });
+          if (action.type === "connect") {
+            addReference(session, action.panelNodeId, target.nodeId);
+            return;
+          }
           runtime.controller()?.selectNode(target.nodeId);
         }}
       >
