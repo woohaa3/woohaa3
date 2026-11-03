@@ -20,12 +20,14 @@ import type {
   CanvasCatalogService,
   CanvasNavigationService,
   ImageLibrarySource,
+  MediaRemoteService,
   ThemeService,
 } from '@woohaa3/frontend/extension-api';
 import { SixiProviders, SixiRoutes } from '@/app/App';
 import { setAssetSource } from '@/api/assetSource';
 import { setProjectSource } from '@/api/projectSource';
 import { setHostCanvas } from '@/app/hostCanvas';
+import { setHostGenerate } from '@/app/hostGenerate';
 import { CanvasTopBar } from '@/layouts/CanvasTopBar';
 import { ROUTES } from '@/app/paths';
 import { useUiStore } from '@/stores/uiStore';
@@ -33,6 +35,10 @@ import { HOST_PRESET_ID, modeOfHostPreset, sixiHostPreset } from './hostTheme';
 import { createHostProjectSource } from './hostProjectSource';
 import { createHostAssetSource } from './hostAssetSource';
 import { createHostCanvasBridge } from './hostCanvasBridge';
+import { createHostGenerateBridge } from './hostGenerateBridge';
+import { HostGenerateRunner, type GenerateServices } from './hostGenerateRunner';
+import { readPendingEntry, writePendingEntry } from './pendingEntry';
+
 
 /**
  * 画布态：四喜外壳不渲染，窗口就是宿主画布 —— 但顶上那条栏仍然是四喜的。
@@ -146,66 +152,17 @@ function HostThemeSync({ theme }: { theme: ThemeService }) {
 }
 
 /**
- * 外壳重挂后要落在哪个路由。
+ * 外壳重挂后的落点优先级:整页跳转的 pendingEntry(见 pendingEntry.ts)→ 同一次页面内的最后路由 → 首页。
  *
- * 点项目卡打开**另一张**画布是一次整页跳转（见 `HostProjectSource`），外壳会在新页面上重新挂载，
- * MemoryRouter 回到初始位置（首页）。用户点的是"进这张画布"，落回首页就等于没反应。
- * 所以跳转前记一笔，新外壳挂载时读走 —— 这一笔必须跨整页跳转，用 sessionStorage。
- *
- * 另一件事：宿主进入 node-focus 工作区时 `canvas.overlay` 的贡献会被重建，外壳随之重挂，
- * MemoryRouter 又回到初始位置，于是四喜界面弹出来盖住模型编辑器。这时要恢复离开前的路由。
- * **这条只在同一次页面生命周期内有效**：记在模块变量里，不要写进 sessionStorage ——
- * 写进去会跨刷新保留，第二天打开应用就直接进画布态，看起来像"四喜扩展没启动"
- *（踩过：`sixi-spike.current-route` 残留导致每次启动都停在 `/create`）。
- *
- * `PENDING_ENTRY_KEY` 也必须有时效：它靠"外壳挂载后清掉"来收尾，而外壳一旦没挂载成功
- * （扩展加载失败、渲染抛错被错误边界隐藏），清除就永远不会执行 —— 于是这把键永久留在
- * sessionStorage 里，之后每次打开都直接落到 `/create`：`.sixi-host-root` 不渲染、画布没人盖，
- * 界面上就是"打开直接是画布，没有四喜"。所以写入时带上时间戳，超过 10 秒的落点视为过期。
+ * 宿主进入 node-focus 工作区时 `canvas.overlay` 的贡献会被重建,外壳随之重挂,
+ * MemoryRouter 又回到初始位置,于是四喜界面弹出来盖住模型编辑器。这时要恢复离开前的路由。
+ * **这条只在同一次页面生命周期内有效**:记在模块变量里,不要写进 sessionStorage ——
+ * 写进去会跨刷新保留,第二天打开应用就直接进画布态,看起来像"四喜扩展没启动"
+ *(踩过:`sixi-spike.current-route` 残留导致每次启动都停在 `/create`)。
  */
-const PENDING_ENTRY_KEY = 'sixi-spike.entry';
-
-/** 落点只在紧跟一次整页跳转时有意义；超时说明那次跳转没落成，读回首页。 */
-const PENDING_ENTRY_TTL_MS = 10_000;
 
 /** 同一次页面里最后一次路由；整页刷新时模块重新求值，自然归零。 */
 let currentRoute: string | null = null;
-
-function readPendingEntry(): string | null {
-  try {
-    const raw = sessionStorage.getItem(PENDING_ENTRY_KEY);
-    if (!raw) return null;
-    // 新格式 `{ route, at }`；旧版本直接存字符串，读到即视为过期并清掉。
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      sessionStorage.removeItem(PENDING_ENTRY_KEY);
-      return null;
-    }
-    if (typeof parsed !== "object" || parsed === null) {
-      sessionStorage.removeItem(PENDING_ENTRY_KEY);
-      return null;
-    }
-    const { route, at } = parsed as { route?: unknown; at?: unknown };
-    if (typeof route !== "string" || typeof at !== "number" || Date.now() - at > PENDING_ENTRY_TTL_MS) {
-      sessionStorage.removeItem(PENDING_ENTRY_KEY);
-      return null;
-    }
-    return route;
-  } catch {
-    return null;
-  }
-}
-
-function writePendingEntry(entry: string | null): void {
-  try {
-    if (entry) sessionStorage.setItem(PENDING_ENTRY_KEY, JSON.stringify({ route: entry, at: Date.now() }));
-    else sessionStorage.removeItem(PENDING_ENTRY_KEY);
-  } catch {
-    /* 存储不可用：落回首页，不影响跳转本身 */
-  }
-}
 
 function readCurrentRoute(): string | null {
   return currentRoute;
@@ -221,6 +178,8 @@ export function SixiShell({
   canvasNavigation,
   currentCanvasId,
   imageLibrary,
+  mediaRemote,
+  generateServices,
 }: {
   theme: ThemeService;
   /** 宿主画布目录；四喜的「项目」就是它（见 app/hostProjectSource.ts）。 */
@@ -231,6 +190,10 @@ export function SixiShell({
   currentCanvasId: () => string | null;
   /** 宿主的图片库（与资源栏「图片」面板同源）；四喜的「资源」页读它（见 app/hostAssetSource.ts）。 */
   imageLibrary?: ImageLibrarySource;
+  /** 媒体上传;首页「生成」带参考图时用(见 app/hostGenerateBridge.ts)。 */
+  mediaRemote?: MediaRemoteService;
+  /** 画布页作用域的服务,懒取;进入新画布后由 HostGenerateRunner 用(见 app/hostGenerateRunner.tsx)。 */
+  generateServices: () => GenerateServices;
 }) {
   // 只在首次渲染读一次；pending 清除放在 effect 里，避免渲染期副作用。
   // 优先 pendingEntry（整页跳转场景），其次 currentRoute（node-focus 卸载后 remount 场景），
@@ -250,6 +213,10 @@ export function SixiShell({
         <HostAssetSourceRef library={imageLibrary} currentCanvasId={currentCanvasId} />
         {/* 画布态顶栏要读宿主画布名、唤起宿主切换器（见 app/hostCanvasBridge.ts） */}
         <HostCanvasBridgeRef catalog={canvasCatalog} navigation={canvasNavigation} currentCanvasId={currentCanvasId} />
+        {/* 首页「生成」:新建画布并带着任务进入(见 app/hostGenerateBridge.ts) */}
+        <HostGenerateBridgeRef catalog={canvasCatalog} media={mediaRemote} services={generateServices} />
+        {/* 进入画布后执行上面留下的交接:放参考图、创建创作组 */}
+        <HostGenerateRunner getServices={generateServices} />
         <HostCanvasCurtain />
         {/* 持续同步当前路由，供 shell 被卸载后 remount 时恢复位置（如 node-focus 卸载场景）。 */}
         <RouteSync />
@@ -321,6 +288,28 @@ function HostAssetSourceRef({
     if (!library) return;
     return setAssetSource(createHostAssetSource(library, currentCanvasId()));
   }, [library, currentCanvasId]);
+  return null;
+}
+
+/**
+ * 把「新建画布并进入」接成首页「生成」的实现。
+ *
+ * 与 `HostProjectSource` 同一套生命周期:effect 里设置、卸载时复位。
+ * 拿不到画布目录时不设置,首页退回「交给小喜预填」,而不是点了发送毫无反应。
+ */
+function HostGenerateBridgeRef({
+  catalog,
+  media,
+  services,
+}: {
+  catalog?: CanvasCatalogService;
+  media?: MediaRemoteService;
+  services: () => GenerateServices;
+}) {
+  useEffect(() => {
+    if (!catalog) return;
+    return setHostGenerate(createHostGenerateBridge(catalog, media, { taskCatalog: () => services().catalog }));
+  }, [catalog, media, services]);
   return null;
 }
 

@@ -9,14 +9,21 @@ import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
 import type {
   CanvasCatalogService,
+  CanvasCommandsService,
+  CanvasLocateService,
   CanvasNavigationService,
+  CanvasRemoteService,
   CanvasScopeService,
+  CanvasSession,
   ImageLibrarySource,
+  MediaRemoteService,
   SlotsService,
+  TaskCatalogService,
   ThemeService
 } from "@woohaa3/frontend/extension-api";
 import { SIXI_SPIKE_ID } from "../shared.js";
 import { SixiShell } from "../app/SixiShell.js";
+import type { GenerateServices } from "../app/hostGenerateRunner.js";
 
 type ExtensionContext = Context & { slots: SlotsService; theme: ThemeService };
 
@@ -79,9 +86,22 @@ export function sixiSpikeExtension(): Plugin.Function<void> {
                * 图片库同样是画布页作用域服务，必须非严格读（拿不到就 undefined，资源页退回 mock）。
                */
               imageLibrary={safeGet<ImageLibrarySource>(ctx, "imageLibrary")}
-              currentCanvasId={() =>
-                (ctx.get("canvasScope" as never) as CanvasScopeService | undefined)?.canvasId() ?? null
-              }
+              /* 首页「生成」带参考图时先上传;应用作用域就有,拿不到则只能发纯文字 */
+              mediaRemote={safeGet<MediaRemoteService>(ctx, "mediaRemote")}
+              /*
+               * 进入新画布后执行交接要用的画布页服务,**每次调用现取**:渲染时它们可能还没起来
+               * (画布冷启动),runner 轮询到全部就绪再动手;缓存一次的话永远停在 undefined。
+               */
+              generateServices={(): GenerateServices => ({
+                scope: safeGet<CanvasScopeService>(ctx, "canvasScope"),
+                commands: safeGet<CanvasCommandsService>(ctx, "canvasCommands"),
+                locate: safeGet<CanvasLocateService>(ctx, "canvasLocate"),
+                catalog: safeGet<TaskCatalogService>(ctx, "taskCatalog"),
+                session: safeGet<CanvasSession>(ctx, "canvasSession"),
+                remote: safeGet<CanvasRemoteService>(ctx, "canvasRemote")
+              })}
+              /* 同样是非严格读:拿不到时 `null` 只让「点当前画布不跳页」与顶栏标题退化成保守行为 */
+              currentCanvasId={() => safeGet<CanvasScopeService>(ctx, "canvasScope")?.canvasId() ?? null}
             />
           )
         })
