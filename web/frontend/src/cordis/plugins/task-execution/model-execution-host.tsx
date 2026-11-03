@@ -13,6 +13,9 @@
  * 具体模型 React UI 由 Registry 解析出的 `definition.Panel` 直接渲染；Host 不含
  * audio/video/`edit_video` 专用布局分支，也不按 providerId 选择组件。
  */
+import { NodeTypeSwitch, retypeBlockReason, type SwitchableNodeType } from "./node-type-switch.js";
+import "./node-type-switch.css";
+import { planRetypeNode } from "../../../extension-api/command-planner.js";
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
 import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
@@ -504,6 +507,20 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     />
   );
 
+  // 「图片 / 视频」切换：只给图片/视频节点；一条权威命令改节点类型，成功后节点类型变了、面板换成另一类模型。
+  const switchableType: SwitchableNodeType | null = context.nodeType === "image" || context.nodeType === "video" ? context.nodeType : null;
+  const typeSwitchSlot = switchableType ? (
+    <NodeTypeSwitch
+      current={switchableType}
+      blockedReason={retypeBlockReason(context.nodeData, writable && !pendingSelection)}
+      onSwitch={(next) => {
+        const result = session.submitCommands(planRetypeNode(context.nodeId, next), `web-retype-${Date.now().toString(36)}`);
+        if (!result.ok) setSubmitError(result.reason ?? "切换类型失败");
+        else draftStore.setSelection(context.nodeId, "");
+      }}
+    />
+  ) : null;
+
   const taskState = derivePanelTaskState(context.nodeData);
   const status = taskState.taskStatus;
   // Task activity belongs to the dots. This surface always accepts another independent run.
@@ -559,6 +576,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
             {...(binding?.actions || panelActions ? { actions: { ...binding?.actions, ...panelActions } } : {})}
             renderers={{
               references: () => referencesSlot,
+              ...(typeSwitchSlot ? { typeSwitch: () => typeSwitchSlot } : {}),
               promptEditor: ({ value, onChange, disabled, placeholder, onSubmit }) => (
                 <MentionEditor
                   value={value}

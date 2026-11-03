@@ -206,6 +206,8 @@ export interface ExecutionPanelProps {
 	onPromptSkill?: (input: { id: string; label: string; prompt: string }) => void | Promise<void>;
 	/** 顶部参考区插槽（画布参考素材 chips）。 */
 	referencesSlot?: React.ReactNode;
+	/** 参数区最左边的「图片 / 视频」切换（由宿主提供，缺省不显示）。 */
+	typeSwitchSlot?: React.ReactNode;
 	/**
 	 * 内联状态槽：渲染在面板头部与提示词之间，由宿主持有运行状态（生成阶段/时长/取消）。
 	 * 与内部 `taskStatus` 失败 chip 相互独立；提供时原样插入面板网格/分区布局。

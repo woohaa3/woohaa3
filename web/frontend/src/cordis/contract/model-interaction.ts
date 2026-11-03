@@ -107,6 +107,8 @@ export type ModelPanelProps = {
 
 export type ModelPanelRenderers = {
   references?: () => import("react").ReactNode;
+  /** 「图片 / 视频」切换（仅空的图片/视频节点由 Host 提供；其它类型缺省）。 */
+  typeSwitch?: () => import("react").ReactNode;
   promptEditor?: (args: {
     value: string;
     onChange: (next: string) => void;

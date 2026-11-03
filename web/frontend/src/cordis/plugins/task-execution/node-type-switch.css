@@ -1,0 +1,39 @@
+/* 生成面板底部最左边的「图片 / 视频」切换：一对胶囊，当前项反色实底。 */
+.node-type-switch {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 2px;
+	padding: 2px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--app-web-text-primary) 6%, transparent);
+}
+
+.node-type-switch__option {
+	height: 28px;
+	padding: 0 12px;
+	border: 0;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--app-web-text-secondary);
+	font-size: 13px;
+	line-height: 1;
+	cursor: pointer;
+	transition: background 120ms ease, color 120ms ease;
+}
+
+.node-type-switch__option:hover {
+	color: var(--app-web-text-primary);
+}
+
+.node-type-switch__option[data-active="true"] {
+	background: var(--app-web-panel);
+	color: var(--app-web-text-primary);
+	font-weight: 600;
+	box-shadow: 0 1px 4px var(--app-web-shadow);
+}
+
+.node-type-switch__option[aria-disabled="true"] {
+	opacity: 0.45;
+	cursor: not-allowed;
+}

@@ -69,6 +69,7 @@ export function GenericModelPanel(props: ModelPanelProps) {
   );
 
   const referencesSlot = props.renderers?.references?.();
+  const typeSwitchSlot = props.renderers?.typeSwitch?.();
 
   return (
     <div className="model-panel">
@@ -89,6 +90,7 @@ export function GenericModelPanel(props: ModelPanelProps) {
         allowEmptySubmit={model.promptRequirement === "optional" || model.promptRequirement === "none"}
         {...(props.actions?.viewTask ? { onViewTask: () => props.actions?.viewTask?.() } : {})}
         {...(referencesSlot !== undefined ? { referencesSlot } : {})}
+        {...(typeSwitchSlot !== undefined ? { typeSwitchSlot } : {})}
         {...(props.renderers?.promptEditor ? { promptEditorSlot: props.renderers.promptEditor } : {})}
         {...(props.renderers?.promptSkill ? { onPromptSkill: props.renderers.promptSkill } : {})}
         onChange={handleChange}

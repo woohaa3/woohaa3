@@ -117,6 +117,7 @@ export function ExecutionPanel({
 	width,
 	skills = DEFAULT_SKILLS,
 	referencesSlot,
+	typeSwitchSlot,
 	statusSlot,
 	promptEditorSlot,
 	onRemoveVideoEditIntent,
@@ -320,11 +321,12 @@ export function ExecutionPanel({
 		/>
 	);
 
-	const showParameterSheet = showModelSelector || fields.length > 0;
+	const showParameterSheet = showModelSelector || fields.length > 0 || typeSwitchSlot !== undefined;
 	const showRunActions = showRun || showPolish;
 
 	const parameterSheet = (
 		<div className="mc-panel__parameters">
+			{typeSwitchSlot}
 			{showModelSelector ? (
 				<div className="mc-panel__model">
 					<ModelSelector
