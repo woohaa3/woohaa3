@@ -201,11 +201,41 @@ describe("画布左侧资源栏", () => {
     it("收起栏时面板一起收起，展开后回来", () => {
       const host = render({ imageSource: sourceOf([item("a")]) });
       act(() => buttonByLabel(host, "图片").click());
+      expect(host.querySelector(".canvas-asset-rail__panel")).not.toBeNull();
+
+      // 收起是纯视觉的：面板还挂着，只是跟着栏挪到 64px（见 CSS 的 `.is-collapsed` 一档），
+      // 展开后原样回来。所以这里断言的是「栏收起了」，不是「面板卸载了」。
       act(() => buttonByLabel(host, "收起资源轨").click());
-      expect(host.querySelector(".canvas-asset-rail__panel")).toBeNull();
+      expect(host.querySelector(".canvas-asset-rail.is-collapsed")).not.toBeNull();
+      expect(host.querySelector(".canvas-asset-rail.is-collapsed.has-panel")).not.toBeNull();
+      expect(host.querySelector(".canvas-asset-rail__panel")).not.toBeNull();
 
       act(() => buttonByLabel(host, "展开资源轨").click());
+      expect(host.querySelector(".canvas-asset-rail.is-collapsed")).toBeNull();
       expect(host.querySelector(".canvas-asset-rail__panel")).not.toBeNull();
+    });
+
+    it("收起态下点「图片」直接出面板，不先把栏展开", () => {
+      const host = render({ imageSource: sourceOf([item("a")]) });
+      act(() => buttonByLabel(host, "收起资源轨").click());
+      expect(host.querySelector(".canvas-asset-rail.is-collapsed")).not.toBeNull();
+
+      act(() => buttonByLabel(host, "图片").click());
+      // 栏保持收起，面板紧贴窄栏右缘出来 —— 早先在收起态点它只会多一个高亮
+      expect(host.querySelector(".canvas-asset-rail.is-collapsed")).not.toBeNull();
+      expect(host.querySelector(".canvas-asset-rail.has-panel")).not.toBeNull();
+      expect(host.querySelector(".canvas-asset-rail__panel")).not.toBeNull();
+      // 收起态条目只渲染图标、不渲染文字，所以按 aria-label 认它
+      expect(host.querySelector(".canvas-asset-rail__item.is-selected")?.getAttribute("aria-label")).toBe("图片");
+    });
+
+    it("收起态下点「图片」两次，面板收走", () => {
+      const host = render({ imageSource: sourceOf([item("a")]) });
+      act(() => buttonByLabel(host, "收起资源轨").click());
+      act(() => buttonByLabel(host, "图片").click());
+      act(() => buttonByLabel(host, "图片").click());
+      expect(host.querySelector(".canvas-asset-rail__panel")).toBeNull();
+      expect(host.querySelector(".canvas-asset-rail.is-collapsed")).not.toBeNull();
     });
 
     it("按来源分组并显示数量，「没有更多了」收尾", () => {

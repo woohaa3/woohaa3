@@ -83,8 +83,14 @@ export function CanvasAssetRail({
 
   if (hidden) return null;
 
-  // 收起栏时面板一起收起：64px 的窄栏旁边挂一块 300px 的面板没有意义
-  const showImagePanel = Boolean(imageSource) && active === "images" && !collapsed;
+  // 「有内容面板的条目」只有一处定义：目前只有「图片」，且必须传了数据源。
+  const hasPanel = (id: string) => id === "images" && Boolean(imageSource);
+  /*
+   * 收起态**也**出面板：面板是栏的同级元素、按「栏宽 + 面板宽」贴着栏右缘定位，
+   * 收起时它只是往左挪 184px，和窄栏之间并不会留空档（见 CSS 的 `.is-collapsed` 一档）。
+   * 早先这里带过 `!collapsed`，结果是收起后点「图片」只多一个高亮、看不到任何内容。
+   */
+  const showImagePanel = active !== null && hasPanel(active);
 
   const runAction = (action: NonNullable<RailEntry["action"]>) => {
     if (action === "open-pinterest-window") {
