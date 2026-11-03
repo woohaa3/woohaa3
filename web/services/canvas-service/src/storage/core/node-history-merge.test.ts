@@ -578,6 +578,37 @@ describe("同类型节点合并", () => {
     expect(room.canvas.revision).toBe(1);
   });
 
+  it("单节点基线：生成前登记当前图，幂等；没有输出的节点与不可解析的图都不制造版本", async () => {
+    const canvas = imageCanvas(
+      [imageNode("img", "asset-1"), imageNode("empty")],
+      [imageAsset("asset-1", "image-key-1")]
+    );
+    const { repository, room, service } = setup(canvas);
+
+    await service.ensureCurrentImageBaseline(CANVAS, "img");
+    const entries = await repository.listForNode(CANVAS, "img");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ sourceIdentity: "image-baseline:image-key-1", recoverable: true, previewable: true });
+    // 只处理指定节点，不动别的节点。
+    expect(await repository.listForNode(CANVAS, "empty")).toHaveLength(0);
+
+    await service.ensureCurrentImageBaseline(CANVAS, "img");
+    expect(await repository.listForNode(CANVAS, "img")).toHaveLength(1);
+    await service.ensureCurrentImageBaseline(CANVAS, "empty");
+    expect(await repository.listForNode(CANVAS, "empty")).toHaveLength(0);
+    expect(room.canvas.revision).toBe(1);
+
+    // 不可解析：只记日志，不抛、不制造假版本。
+    const repo2 = new InMemoryNodeHistoryRepository();
+    const broken = new NodeHistoryApplicationService({
+      repository: repo2,
+      resolveRoom: async () => fakeRoom(canvas),
+      mediaVerifier: { exists: async () => false }
+    });
+    await expect(broken.ensureCurrentImageBaseline(CANVAS, "img")).resolves.toBeUndefined();
+    expect(await repo2.listForNode(CANVAS, "img")).toHaveLength(0);
+  });
+
   it("图片补给跳过不可解析的媒体，不制造假版本", async () => {
     const canvas = imageCanvas([imageNode("img", "asset-1")], [imageAsset("asset-1", "image-key-1")]);
     const repository = new InMemoryNodeHistoryRepository();

@@ -433,6 +433,31 @@ export class NodeHistoryApplicationService {
   }
 
   /**
+   * 生成开始前把节点**当前**图片登记为历史基线（单节点版 `backfillCurrentImageHistory`）。
+   *
+   * 生成成功会把节点的 `outputAssetId` 换成新图；没有这一步，原来的图（上传的原图、没有生成历史的
+   * 已有图片）就只剩资产还在，节点里再也找不回来。已有匹配条目返回 duplicate，不重复写入；
+   * 没有输出资产或不可解析时 skipped。失败不抛出：这是旁路保护，不能挡住生成。
+   */
+  async ensureCurrentImageBaseline(canvasId: string, nodeId: string): Promise<void> {
+    try {
+      const room = await this.context.resolveRoom(canvasId);
+      if (!room) return;
+      const exported = room.exportCanvas();
+      if (!exported.ok) return;
+      const outcome = await ensureCurrentImageHistory(this.restoreDeps, exported.canvas, nodeId);
+      if (outcome.status === "inserted") await this.enforceCapacity(canvasId, nodeId);
+    } catch (error) {
+      this.context.log({
+        event: "node-history-baseline-failed",
+        canvasId,
+        nodeId,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
    * 确定性容量清理。
    */
   async enforceCapacity(canvasId: string, nodeId?: string): Promise<void> {

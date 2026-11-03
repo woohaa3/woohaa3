@@ -124,6 +124,19 @@ describe("Canvas run service（任务 5.3）", () => {
     expect(exported.canvas.nodeData["image-1"]).toMatchObject({activeRunId:"parallel-3",result:{kind:"text",text:"result-3"}});
     expect(exported.canvas.jobs.filter(job=>job.runId?.startsWith("parallel-")).map(job=>job.status)).toEqual(["success","success","success"]);
   });
+  it("图片节点运行前先登记当前图为历史基线（先于 begin 与 submit）", async () => {
+    const room = await makeRoom();
+    const order: string[] = [];
+    const taskClient = { submit: async () => { order.push("submit"); }, cancel: async () => {} } as never;
+    const request = (runId: string) => ({ canvasId: "canvas-a", nodeId: "image-1", runId, jobId: `job-${runId}`, modelKey: "litellm:gpt-image-2", prompt: "变成夜景", parameters: {} });
+
+    const service = new CanvasRunService({
+      resolveRoom: async () => room, taskClient, resolveCatalog: async () => catalog(),
+      ensureNodeBaseline: async (canvasId, nodeId) => { order.push(`baseline:${canvasId}:${nodeId}`); }
+    });
+    expect((await service.run(request("b1"))).ok).toBe(true);
+    expect(order).toEqual(["baseline:canvas-a:image-1", "submit"]);
+  });
   it("解析权威输入、事务 begin 后以稳定 workerTaskKey 异步 submit", async () => {
     const room = await makeRoom({ withUpstream: true });
     const submitted: Array<Record<string, unknown>> = [];

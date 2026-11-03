@@ -534,7 +534,8 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       now: options.now,
       logger: log,
       // 聚合节点（片场等）同一时间只允许一个运行任务，权威入口保证（design D5）。
-      isAggregateNode: isAggregateRunNode
+      isAggregateNode: isAggregateRunNode,
+      ...(nodeHistory ? { ensureNodeBaseline: (canvasId: string, nodeId: string) => nodeHistory!.service.ensureCurrentImageBaseline(canvasId, nodeId) } : {})
     });
     consumer = createTaskResultConsumer({
       projector,

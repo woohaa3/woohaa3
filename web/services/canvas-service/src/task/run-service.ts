@@ -42,6 +42,11 @@ export type RunServiceDependencies = {
    * （change: 2026-10-12-unify-generation-history-strip，design D5）。
    */
   isAggregateNode?: (node: { type: string }) => boolean;
+  /**
+   * 提交 begin 之前给图片节点留一份「当前图」的历史基线：生成成功会换掉 `outputAssetId`，
+   * 不先登记，原图就从节点里消失。旁路保护，失败不应挡住运行。
+   */
+  ensureNodeBaseline?: (canvasId: string, nodeId: string) => Promise<void>;
   now?: () => string;
   logger?: (event: Record<string, unknown>) => void;
 };
@@ -218,6 +223,9 @@ export class CanvasRunService {
     const workerTaskKey =
       this.deps.createWorkerTaskKey?.({ canvasId: request.canvasId, nodeId: request.nodeId, runId: request.runId }) ??
       request.runId;
+
+    // 0) 先给当前图留历史基线（只对图片节点；节点没有输出时它自己会跳过）。
+    if (node.type === "image") await this.deps.ensureNodeBaseline?.(request.canvasId, request.nodeId);
 
     // 1) 事务提交 begin：durable 之后才发 submit。
     // 身份写入：nodeData.modelKey 与 parameters.model 都写 modelKey（新写入只使用它）。
