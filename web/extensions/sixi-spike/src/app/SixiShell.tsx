@@ -296,7 +296,8 @@ function HostProjectSource({
       writePendingEntry(ROUTES.create);
       window.location.assign(`${resolvePublicUrl('/')}?canvasId=${encodeURIComponent(canvasId)}`);
     };
-    const reset = setProjectSource(createHostProjectSource(catalog, open));
+    // 第三个参数让封面缩略图走宿主的部署前缀（项目卡用它当封面，见 hostProjectSource）
+    const reset = setProjectSource(createHostProjectSource(catalog, open, resolvePublicUrl));
     return reset;
   }, [catalog, currentCanvasId, navigate]);
   return null;

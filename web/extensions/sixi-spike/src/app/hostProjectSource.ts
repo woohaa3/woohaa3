@@ -12,7 +12,19 @@
  * Project.createdAt ← CanvasSummary.createdAt
  * Project.updatedAt ← CanvasSummary.updatedAt
  * Project.status    ← 恒为 'active'
+ * Project.thumbnailUrl ← 该画布里最近一张图的缩略图（见下面的「封面」）
  * ```
+ *
+ * **封面不是画布快照,是画布里最近的一张图。**
+ *
+ * 宿主没有"画布截屏"接口(渲染在独立 iframe 的 Bevy wasm 里,读不出来),而画布内容的
+ * 主体就是图片。所以退一步用最近一张图当封面 —— 一屏八张「未命名画布」时,它是唯一
+ * 能区分"哪张是哪张"的信息。取的是缩略图变体(`?variant=thumbnail&edge=256`),
+ * 原图常有 2 MB 以上,一屏十几张直接铺会卡。
+ *
+ * 覆盖不全的两种情况,都如实回落到卡片自带渐变,不编造:
+ * - 画布里没有图片(纯文字/模型节点),或者图还没生成完;
+ * - 跨画布图片索引读不到(后端没起、画布内容还没发布)。
  *
  * **`status` 为什么恒为 active**：宿主没有归档概念（只有 `sync` / `access`）。四喜的
  * 「已归档」是它自己的状态，与画布的存续无关；归档导出走的是画布切换器里的那个按钮，
@@ -29,9 +41,75 @@ import type { ProjectSort } from "@/api/contract";
 import type { Project, ProjectListResult, ProjectPatch } from "@/api/contract";
 import type { NormalizedProjectListQuery } from "@/api/contract";
 import type { ProjectSource } from "@/api/projectSource";
+import { thumbnailUrlFor } from "./hostAssetSource";
 
 /** 宿主分页上限（`MAX_CANVAS_CATALOG_PAGE_SIZE`）。一次取满，四喜侧再本地分页。 */
 const HOST_PAGE_SIZE = 100;
+
+/**
+ * 跨画布图片索引：`GET /api/canvases/images`（后端从各画布的已发布投影里抽图片）。
+ *
+ * 与图片库是同一条接口（`install-image-library.ts` 的 `FOREIGN_IMAGE_LIMIT` 取 500，
+ * 后端上限也是 500）。这里只要"每张画布最新一张"，但仍然一次取满再本地归并：
+ * 没有按画布单独取图的接口，逐张画布请求是 N 次往返。
+ */
+const CANVAS_IMAGES_PATH = "/api/canvases/images";
+const CANVAS_IMAGE_LIMIT = 500;
+
+type CanvasImageEntry = {
+  canvasId: string;
+  url: string;
+  createdAt: string;
+};
+
+/**
+ * 给媒体地址补画布提示（`?canvas=<id>`）。
+ *
+ * 字节按画布分开存，少了这个提示读的是"当前画布"那一份 —— 封面来自别的画布，就会 404。
+ * 与宿主 `withMediaCanvasHint` 同口径（`services/paths.ts`），这里不 import 它：
+ * 那是宿主内部模块，扩展只依赖公开的 `@woohaa3/frontend/extension-api`。
+ */
+function withCanvasHint(url: string, canvasId: string): string {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}canvas=${encodeURIComponent(canvasId)}`;
+}
+
+/**
+ * 取"每张画布最新一张图"的缩略图地址。
+ *
+ * 失败返回空 Map 而不是抛错：封面是锦上添花，列表本身不该因为封面读不到就整页报错。
+ */
+async function loadCoverThumbnails(apiUrl: (path: string) => string): Promise<Map<string, string>> {
+  const covers = new Map<string, string>();
+  try {
+    const response = await fetch(
+      apiUrl(`${CANVAS_IMAGES_PATH}?offset=0&limit=${CANVAS_IMAGE_LIMIT}`),
+      { credentials: "same-origin" }
+    );
+    if (!response.ok) return covers;
+    const body = (await response.json()) as { items?: unknown };
+    if (!Array.isArray(body.items)) return covers;
+
+    // 后端已按 createdAt 倒序；这里再比一次，不依赖调用方顺序
+    const latest = new Map<string, string>();
+    const latestAt = new Map<string, string>();
+    for (const raw of body.items as CanvasImageEntry[]) {
+      if (typeof raw?.canvasId !== "string" || typeof raw?.url !== "string") continue;
+      const previous = latestAt.get(raw.canvasId) ?? "";
+      if (raw.createdAt <= previous) continue;
+      latest.set(raw.canvasId, raw.url);
+      latestAt.set(raw.canvasId, raw.createdAt);
+    }
+    for (const [canvasId, url] of latest) {
+      // 地址可能是外链（不是内容寻址的媒体），那样没有缩略图变体
+      const thumbnail = thumbnailUrlFor(withCanvasHint(url, canvasId));
+      if (thumbnail) covers.set(canvasId, apiUrl(thumbnail));
+    }
+  } catch {
+    /* 后端没起 / 网络中断：没有封面，卡片走渐变 */
+  }
+  return covers;
+}
 
 /**
  * 画布的辅助信息拼进 `description`。
@@ -46,7 +124,7 @@ function describe(entry: CanvasSummary): string {
   return parts.join(" · ");
 }
 
-function toProject(entry: CanvasSummary): Project {
+function toProject(entry: CanvasSummary, cover?: string): Project {
   return {
     id: entry.id,
     name: entry.title.trim() || "未命名画布",
@@ -54,7 +132,8 @@ function toProject(entry: CanvasSummary): Project {
     // 宿主没有归档概念：能出现在目录里的画布都是「进行中」。
     status: "active",
     createdAt: entry.createdAt,
-    updatedAt: entry.updatedAt
+    updatedAt: entry.updatedAt,
+    ...(cover ? { thumbnailUrl: cover } : {})
   };
 }
 
@@ -85,8 +164,18 @@ function matches(project: Project, keyword: string): boolean {
  */
 export function createHostProjectSource(
   catalog: CanvasCatalogService,
-  open: (canvasId: string) => void
+  open: (canvasId: string) => void,
+  /** 逻辑路径 → 公开 URL（宿主的部署前缀）。省略时封面不取，卡片走渐变。 */
+  apiUrl?: (path: string) => string
 ): ProjectSource {
+  /**
+   * 封面缓存在数据源里，随列表一起失效。
+   *
+   * 不缓存的话每次列表请求（切页、搜索、排序）都会再拉一次跨画布图片索引；
+   * 而"画布里多了张图"要等下一次 `load(true)` 才会反映出来，所以和目录用同一段生命周期。
+   */
+  let covers: Map<string, string> | null = null;
+
   /** 取全部画布并转成项目。目录分页上限 100，超过时分批取。 */
   const allProjects = async (): Promise<Project[]> => {
     const first = await catalog.load(true);
@@ -100,7 +189,9 @@ export function createHostProjectSource(
       if (after <= before) break;
       total = Math.max(total, catalog.getState().total);
     }
-    return catalog.getState().entries.map(toProject);
+    if (covers === null && apiUrl) covers = await loadCoverThumbnails(apiUrl);
+    const byCanvas = covers;
+    return catalog.getState().entries.map((entry) => toProject(entry, byCanvas?.get(entry.id)));
   };
 
   return {
@@ -126,9 +217,12 @@ export function createHostProjectSource(
     },
 
     async get(id: string): Promise<Project> {
+      // 封面是按画布分组的，列表已取过就直接复用；没取过（直接进详情页）时补一次。
+      if (covers === null && apiUrl) covers = await loadCoverThumbnails(apiUrl);
+      const cover = covers?.get(id);
       // 先用目录缓存；没有再单独查一次（进入详情页时可能还没加载过列表）。
       const cached = catalog.getState().entries.find((entry) => entry.id === id);
-      if (cached) return toProject(cached);
+      if (cached) return toProject(cached, cover);
       const result = await catalog.get(id);
       if (!result.ok) throw new Error(result.error);
       return toProject({

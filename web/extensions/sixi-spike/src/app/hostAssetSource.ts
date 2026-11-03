@@ -35,6 +35,10 @@ import type { AssetSource } from "@/api/assetSource";
 const THUMBNAIL_EDGE = 256;
 const DERIVABLE_PATH = /\/api\/media\/(?:sha256-[0-9a-f]{64}|generation-outputs\/[0-9a-f]{64}\.[a-z0-9]+)$/;
 
+/**
+ * 同一套缩略图口径也给「项目卡封面」用（见 `hostProjectSource.ts`）：
+ * 画布封面就是这张画布里最近的一张图,卡片上要的是同一张 256 的小图。
+ */
 export function thumbnailUrlFor(url: string, edge: number = THUMBNAIL_EDGE): string | undefined {
   let parsed: URL;
   try {
