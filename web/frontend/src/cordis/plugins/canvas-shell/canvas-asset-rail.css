@@ -269,3 +269,23 @@
 	left: calc(248px + 300px + 16px);
 	max-width: calc(100vw - 248px - 300px - 32px);
 }
+
+/* 动作条目失败时的提示（如弹不出 Pinterest 窗口）。
+ * 栏是纵向 flex，提示直接跟在条目后面；收起态不渲染，因为 64px 的窄栏放不下一句话。 */
+.canvas-asset-rail__failure {
+	margin: 8px 12px 0;
+	font-size: 12px;
+	line-height: 1.5;
+	color: #e5484d;
+	user-select: text;
+}
+
+.canvas-asset-rail.is-collapsed .canvas-asset-rail__failure {
+	display: none;
+}
+
+/* 动作条目在浏览器里不可用时：保持可见（让人知道有这个入口），但明显是灰的。 */
+.canvas-asset-rail__item:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}

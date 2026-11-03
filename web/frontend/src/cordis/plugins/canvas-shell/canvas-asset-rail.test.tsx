@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CanvasAssetRail } from "./canvas-asset-rail.js";
@@ -89,10 +89,78 @@ describe("画布左侧资源栏", () => {
   it("还没接通的来源带 SOON 角标，且角标不进可访问名称", () => {
     const host = render();
     const soon = [...host.querySelectorAll(".canvas-asset-rail__soon")].map((node) => node.textContent);
-    expect(soon).toEqual(["SOON", "SOON"]);
+    // 只剩 Drive：Pinterest 已经能用（点一下弹出桌面壳的独立窗口），不再是「尚未开放」
+    expect(soon).toEqual(["SOON"]);
 
     // 否则读屏会念成「DriveSOON」
     expect(buttonByLabel(host, "Drive（尚未开放）")).toBeTruthy();
+    // 浏览器里没有桌面壳，Pinterest 是「仅桌面端可用」而不是「尚未开放」，没有 SOON 角标
+    expect(buttonByLabel(host, "Pinterest（仅桌面端可用）")).toBeTruthy();
+  });
+
+  describe("Pinterest 条目（动作：弹出独立窗口）", () => {
+    type Globals = typeof globalThis & { __WOOHAA_DESKTOP__?: unknown };
+    const installDesktop = () => {
+      (globalThis as Globals).__WOOHAA_DESKTOP__ = { token: "t-1", protocol: "woohaa-window-v1", platform: "windows" };
+    };
+    afterEach(() => {
+      delete (globalThis as Globals).__WOOHAA_DESKTOP__;
+      vi.unstubAllGlobals();
+    });
+
+    it("不再展开面板，也不进入选中态、不让画布多让一档", () => {
+      installDesktop();
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, value: { state: "opened", created: true } }))));
+      const host = render();
+      const entry = buttonByLabel(host, "Pinterest");
+      act(() => entry.click());
+
+      expect(host.querySelector(".canvas-asset-rail__panel")).toBeNull();
+      expect(host.querySelector(".canvas-asset-rail.has-panel")).toBeNull();
+      // 动作条目不是开关：不能带 aria-pressed，否则读屏会念成「已按下」
+      expect(entry.hasAttribute("aria-pressed")).toBe(false);
+      expect(entry.classList.contains("is-selected")).toBe(false);
+    });
+
+    it("点一下向桌面壳发「打开」，请求里只有动作，没有地址和尺寸", async () => {
+      installDesktop();
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, value: { state: "opened", created: true } })));
+      vi.stubGlobal("fetch", fetchMock);
+      const host = render();
+      await act(async () => buttonByLabel(host, "Pinterest").click());
+
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe("http://woohaa-native.localhost/pinterest");
+      expect(JSON.parse(init.body as string)).toEqual({ action: "open" });
+      expect((init.headers as Record<string, string>)["X-Woohaa-Token"]).toBe("t-1");
+    });
+
+    it("点 Pinterest 不会改变原来选中的条目", async () => {
+      installDesktop();
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, value: { state: "opened", created: true } }))));
+      const host = render();
+      const selectedBefore = host.querySelector(".canvas-asset-rail__item.is-selected")?.textContent;
+      await act(async () => buttonByLabel(host, "Pinterest").click());
+      expect(host.querySelector(".canvas-asset-rail__item.is-selected")?.textContent).toBe(selectedBefore);
+    });
+
+    it("打开失败要说出来，而不是点了没反应", async () => {
+      installDesktop();
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: false, error: "窗口创建失败" }))));
+      const host = render();
+      await act(async () => buttonByLabel(host, "Pinterest").click());
+      expect(host.querySelector(".canvas-asset-rail__failure")?.textContent).toContain("窗口创建失败");
+    });
+
+    it("浏览器里没有桌面壳：条目禁用并说明原因，不发请求", () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const host = render();
+      const entry = buttonByLabel(host, "Pinterest（仅桌面端可用）");
+      expect(entry.disabled).toBe(true);
+      act(() => entry.click());
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   it("收起后只剩图标列，展开能回到原样", () => {
