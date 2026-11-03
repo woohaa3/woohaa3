@@ -109,7 +109,7 @@ export function createExtensionInstallApiHandler(deps: ExtensionInstallApiDepend
               sendJson(res, 400, { code: "malformed-request", message: "请求体必须是 { sourceId, extensionId, range? }" });
               return true;
             }
-            const job = manager.installFromSource({ sourceId, extensionId, range, actor: auth.actor });
+            const job = manager.installFromSource({ sourceId, extensionId, range, actor: auth.actor, acceptUntrusted: body?.acceptUntrusted === true });
             log({ event: "extension-install-requested", jobId: job.jobId, sourceId, extensionId, actor: auth.actor });
             sendJson(res, 202, { jobId: job.jobId, job });
             return true;
@@ -118,7 +118,8 @@ export function createExtensionInstallApiHandler(deps: ExtensionInstallApiDepend
             sendJson(res, 415, { code: "malformed-request", message: "上传 .wxt 请使用 application/octet-stream；来源安装请使用 application/json" });
             return true;
           }
-          const job = await manager.installFromFile({ body: req, actor: auth.actor });
+          const acceptUntrusted = req.headers["x-accept-untrusted"] === "1";
+          const job = await manager.installFromFile({ body: req, actor: auth.actor, acceptUntrusted });
           log({ event: "extension-install-requested", jobId: job.jobId, sourceId: job.sourceId, actor: auth.actor });
           sendJson(res, job.status === "failed" ? 422 : 202, { jobId: job.jobId, job });
           return true;

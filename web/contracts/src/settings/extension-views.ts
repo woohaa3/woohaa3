@@ -58,8 +58,6 @@ export type ExtensionInstallationsView = {
   jobs: ExtensionInstallJobView[];
   /** 本机宿主是否能受控重启（运行在受支持的拉起进程下）；false 时设置面提示「请手动重启」。 */
   restartSupported: boolean;
-  /** 本机是否允许未签名的本地文件包（`extensions.marketplace.allowUnsigned`）。 */
-  allowUnsignedLocal: boolean;
 };
 
 /**

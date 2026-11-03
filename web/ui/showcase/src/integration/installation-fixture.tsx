@@ -31,7 +31,7 @@ export function createInstallationFixture(record: (event: string) => void, scena
     async versionStatus() { return null; },
     install: accept
   }, onJob: managed.track, readTrustedKeys: () => trusted, writeSetting: async (_key, value) => { trusted = value; record("保存内存信任根"); return { ok: true }; } });
-  const snapshot: SettingsSnapshot = { settings: [], plugins: [], files: { config: "/fixture", secrets: "/fixture" }, extensionInstallations: { revision: 0, jobs: [], restartSupported: true, allowUnsignedLocal: false } };
+  const snapshot: SettingsSnapshot = { settings: [], plugins: [], files: { config: "/fixture", secrets: "/fixture" }, extensionInstallations: { revision: 0, jobs: [], restartSupported: true } };
   return { controller, managed, snapshot, failNext: () => { fail = true; }, settle: () => { hold = false; waiting.splice(0).forEach(resolve => resolve()); const pending = [...timers]; timers.clear(); pending.forEach(fn => fn()); record("推进内存安装"); } };
 }
 export function InstallationIntegration() {

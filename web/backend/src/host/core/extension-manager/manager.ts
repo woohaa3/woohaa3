@@ -136,8 +136,7 @@ export function createExtensionManager(deps: ExtensionManagerDeps, handle: Insta
       return {
         revision,
         jobs: board.list(),
-        restartSupported: deps.restart?.supported() === true,
-        allowUnsignedLocal: deps.trust().allowUnsignedLocal
+        restartSupported: deps.restart?.supported() === true
       };
     },
 

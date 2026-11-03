@@ -227,13 +227,15 @@ function readSignature(treeDir) {
  * 校验已解包的树：签名（信任根）+ 每个文件与 FILES.json 一致。
  *
  * - trustedKeys：[{ keyId?, publicKey }]，来自本机核心配置；keyId 缺省按公钥派生。
- * - allowUnsigned：是否接受**没有 SIGNATURE** 的包（调用方负责「仅 local-file + 显式开关」的判断）。
- *   有 SIGNATURE 但无效的包永远拒绝，不会因 allowUnsigned 降级为未签名。
+ * - allowUnsigned / acceptUntrusted：是否接受**没有 SIGNATURE** 的包。
+ *   acceptUntrusted 另外接受「签名格式合法，但公钥不在信任根」的包，记为 unsigned
+ *   （公钥不在本地，签名本身无法核验；逐文件摘要仍然要过）。
+ *   信任根里的公钥对不上、签名格式非法、或证书链失败，都不会因此降级。
  *
  * v2 additionally requires a verified trustContext; no source-provided key or unsigned fallback.
  * Returns trust/keyId/files, plus structured evidence for certified packages.
  */
-export function verifyExtensionPackage({ treeDir, trustedKeys = [], allowUnsigned = false, trustContext, now } = {}) {
+export function verifyExtensionPackage({ treeDir, trustedKeys = [], allowUnsigned = false, acceptUntrusted = false, trustContext, now } = {}) {
   const files = readPackageFiles(treeDir);
   const signature = readSignature(treeDir);
   let trust;
@@ -243,8 +245,9 @@ export function verifyExtensionPackage({ treeDir, trustedKeys = [], allowUnsigne
   if (signature?.alg !== SIGNATURE_V2_ALG && fs.existsSync(chainPath)) {
     throw new ExtensionPackageError("MARKETPLACE_SIGNATURE_INVALID", "证书包不能降级为裸公钥或未签名包");
   }
+  const permitUnsigned = allowUnsigned || acceptUntrusted;
   if (signature === null) {
-    if (!allowUnsigned) throw new ExtensionPackageError("MARKETPLACE_UNSIGNED_REJECTED", "包没有签名；本机未允许安装未签名扩展");
+    if (!permitUnsigned) throw new ExtensionPackageError("MARKETPLACE_UNSIGNED_REJECTED", "包没有签名");
     trust = "unsigned";
   } else if (signature.alg === SIGNATURE_V2_ALG) {
     requireTrust(fs.existsSync(chainPath), "missing-chain");
@@ -269,20 +272,25 @@ export function verifyExtensionPackage({ treeDir, trustedKeys = [], allowUnsigne
       }
     }
     if (candidates.length === 0) {
-      throw new ExtensionPackageError("MARKETPLACE_SIGNATURE_INVALID", "签名公钥 " + signature.keyId + " 不在本机信任根中", { keyId: signature.keyId });
-    }
-    const data = Buffer.from(canonicalJson(files), "utf8");
-    const sig = Buffer.from(signature.sig, "base64");
-    const match = candidates.find((candidate) => {
-      try {
-        return cryptoVerify(null, data, candidate.key, sig);
-      } catch {
-        return false;
+      if (!acceptUntrusted) {
+        throw new ExtensionPackageError("MARKETPLACE_SIGNATURE_UNTRUSTED", "签名公钥 " + signature.keyId + " 不在本机信任根中", { keyId: signature.keyId });
       }
-    });
-    if (!match) throw new ExtensionPackageError("MARKETPLACE_SIGNATURE_INVALID", "签名校验失败（keyId " + signature.keyId + "）", { keyId: signature.keyId });
-    keyId = match.id;
-    trust = "signed:" + match.id;
+      // 用户已确认风险。公钥不在本机，签名无法核验，只保留后面的逐文件摘要检查。
+      trust = "unsigned";
+    } else {
+      const data = Buffer.from(canonicalJson(files), "utf8");
+      const sig = Buffer.from(signature.sig, "base64");
+      const match = candidates.find((candidate) => {
+        try {
+          return cryptoVerify(null, data, candidate.key, sig);
+        } catch {
+          return false;
+        }
+      });
+      if (!match) throw new ExtensionPackageError("MARKETPLACE_SIGNATURE_INVALID", "签名校验失败（keyId " + signature.keyId + "）", { keyId: signature.keyId });
+      keyId = match.id;
+      trust = "signed:" + match.id;
+    }
   }
 
   const listed = new Map(files.map((entry) => [entry.path, entry]));

@@ -37,8 +37,9 @@ const FAILURE_LABELS: Record<string, string> = {
   MARKETPLACE_DOWNLOAD_FAILED: "读取安装包失败",
   MARKETPLACE_PACKAGE_TOO_LARGE: "安装包超过大小上限",
   MARKETPLACE_DIGEST_MISMATCH: "安装包内容与摘要不符",
-  MARKETPLACE_SIGNATURE_INVALID: "签名无效或不受信任",
-  MARKETPLACE_UNSIGNED_REJECTED: "未签名的安装包被拒绝（本机未允许未签名本地包）",
+  MARKETPLACE_SIGNATURE_INVALID: "签名无效",
+  MARKETPLACE_SIGNATURE_UNTRUSTED: "签名公钥不在本机信任根中",
+  MARKETPLACE_UNSIGNED_REJECTED: "扩展包没有签名",
   MARKETPLACE_ARCHIVE_UNSAFE: "安装包含不安全的条目",
   MARKETPLACE_PREFLIGHT_FAILED: "扩展声明未通过预检",
   MARKETPLACE_FORBIDDEN_DECLARATION: "扩展声明了受管扩展不允许的能力",
@@ -86,6 +87,16 @@ export function describeJob(job: ExtensionInstallJobView): { title: string; deta
   return { title, detail: failureReason(job.failure?.code ?? "", job.failure?.message), tone: "failed" };
 }
 
+/** 未验证的包：先弹窗，用户确认后才允许安装。密码学无效的签名不在这里。 */
+export const TRUST_CONFIRM_CODES = new Set(["MARKETPLACE_UNSIGNED_REJECTED", "MARKETPLACE_SIGNATURE_UNTRUSTED"]);
+
+export type UntrustedInstallPrompt = {
+  jobId: string;
+  /** 对话框里点名的包或扩展。 */
+  name: string;
+  code: string;
+};
+
 export type ManagedExtensionsState = {
   /** 本设置实例跟踪的任务（新的在前）。 */
   jobs: ExtensionInstallJobView[];
@@ -96,12 +107,20 @@ export type ManagedExtensionsState = {
   restart: { status: "idle" | "requesting" | "requested" | "unsupported" | "failed"; message: string | null };
   /** 正在解除隔离的扩展。 */
   unquarantining: readonly string[];
+  /** 需要用户确认风险后才能继续的安装。 */
+  riskPrompt: UntrustedInstallPrompt | null;
 };
 
 export type ManagedExtensionsController = {
   getState(): ManagedExtensionsState;
   subscribe(listener: () => void): () => void;
-  installFile(file: Blob & { name?: string }): Promise<void>;
+  installFile(file: Blob & { name?: string }, options?: { acceptUntrusted?: boolean }): Promise<void>;
+  /** 确认当前风险弹窗，按原安装请求重试。 */
+  confirmRisk(): Promise<void>;
+  /** 关掉风险弹窗，不安装。 */
+  dismissRisk(): void;
+  /** 市场安装受理后记下原请求，失败码需要确认时才能重试。 */
+  rememberInstall(request: { jobId: string; sourceId: string; extensionId: string; range: string; acceptUntrusted?: boolean }): void;
   uninstall(extensionId: string, options?: { purgeData?: boolean }): Promise<void>;
   rollback(extensionId: string): Promise<void>;
   cancel(jobId: string): Promise<void>;
@@ -115,10 +134,14 @@ export type ManagedExtensionsController = {
   dispose(): void;
 };
 
+export type SourceInstallRetry = { sourceId: string; extensionId: string; range: string };
+
 export type ManagedExtensionsOptions = {
   remote: ExtensionInstallRemote;
   /** 任务终态后重取权威设置快照。 */
   reload: () => Promise<void>;
+  /** 市场来源的安装在用户确认后按原参数重试。 */
+  retrySource?: (input: SourceInstallRetry) => Promise<void>;
   pollIntervalMs?: number;
   setTimer?: (callback: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
@@ -131,9 +154,11 @@ export function createManagedExtensionsController(options: ManagedExtensionsOpti
   const setTimer = options.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
   const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   const listeners = new Set<() => void>();
-  let state: ManagedExtensionsState = { jobs: [], error: null, submitting: false, restart: { status: "idle", message: null }, unquarantining: [] };
+  let state: ManagedExtensionsState = { jobs: [], error: null, submitting: false, restart: { status: "idle", message: null }, unquarantining: [], riskPrompt: null };
   const timers = new Map<string, unknown>();
+  const retries = new Map<string, { kind: "file"; file: Blob & { name?: string } } | ({ kind: "source" } & SourceInstallRetry)>();
   let disposed = false;
+  let api: ManagedExtensionsController;
 
   const set = (patch: Partial<ManagedExtensionsState>) => {
     state = { ...state, ...patch };
@@ -159,6 +184,7 @@ export function createManagedExtensionsController(options: ManagedExtensionsOpti
           return;
         }
         upsertJob(result.job);
+        considerRisk(result.job);
         if (result.job.status === "running") poll(jobId);
         else void options.reload().catch(() => undefined);
       }, pollMs)
@@ -174,7 +200,15 @@ export function createManagedExtensionsController(options: ManagedExtensionsOpti
     else void options.reload().catch(() => undefined);
   };
 
-  const start = async (request: () => Promise<{ ok: true; jobId: string; job?: ExtensionInstallJobView } | { ok: false; code: string; error: string }>, placeholder: Placeholder) => {
+  const considerRisk = (job: ExtensionInstallJobView) => {
+    if (job.status !== "failed" || !job.failure || !TRUST_CONFIRM_CODES.has(job.failure.code)) return;
+    const retry = retries.get(job.jobId);
+    if (!retry || state.riskPrompt?.jobId === job.jobId) return;
+    const name = retry.kind === "file" ? retry.file.name || "本地扩展包" : `${retry.extensionId}@${retry.range}`;
+    set({ riskPrompt: { jobId: job.jobId, name, code: job.failure.code } });
+  };
+
+  const start = async (request: () => Promise<{ ok: true; jobId: string; job?: ExtensionInstallJobView } | { ok: false; code: string; error: string }>, placeholder: Placeholder, register?: (jobId: string) => void) => {
     set({ submitting: true, error: null });
     const result = await request();
     if (disposed) return;
@@ -182,17 +216,47 @@ export function createManagedExtensionsController(options: ManagedExtensionsOpti
       set({ submitting: false, error: failureReason(result.code, result.error) });
       return;
     }
+    register?.(result.jobId);
     set({ submitting: false });
     track(result.jobId, result.job, placeholder);
+    if (result.job) considerRisk(result.job);
   };
 
-  return {
+  api = {
     getState: () => state,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    installFile: (file) => start(() => options.remote.installFile(file), { action: "install", sourceId: "local-file" }),
+    installFile: (file, extra) =>
+      start(
+        () => options.remote.installFile(file, extra?.acceptUntrusted ? { acceptUntrusted: true } : undefined),
+        { action: "install", sourceId: "local-file" },
+        (jobId) => {
+          if (!extra?.acceptUntrusted) retries.set(jobId, { kind: "file", file });
+        }
+      ),
+    async confirmRisk() {
+      const prompt = state.riskPrompt;
+      if (!prompt) return;
+      const retry = retries.get(prompt.jobId);
+      retries.delete(prompt.jobId);
+      set({ riskPrompt: null });
+      if (!retry) return;
+      if (retry.kind === "file") await api.installFile(retry.file, { acceptUntrusted: true });
+      else await options.retrySource?.({ sourceId: retry.sourceId, extensionId: retry.extensionId, range: retry.range });
+    },
+    dismissRisk() {
+      const prompt = state.riskPrompt;
+      if (prompt) retries.delete(prompt.jobId);
+      set({ riskPrompt: null });
+    },
+    rememberInstall(request) {
+      if (request.acceptUntrusted) return;
+      retries.set(request.jobId, { kind: "source", sourceId: request.sourceId, extensionId: request.extensionId, range: request.range });
+      const job = state.jobs.find((entry) => entry.jobId === request.jobId);
+      if (job) considerRisk(job);
+    },
     uninstall: (extensionId, opts) => start(() => options.remote.uninstall(extensionId, opts), { action: "uninstall", sourceId: "local-file", extensionId }),
     rollback: (extensionId) => start(() => options.remote.rollback(extensionId), { action: "rollback", sourceId: "local-file", extensionId }),
     async cancel(jobId) {
@@ -209,7 +273,10 @@ export function createManagedExtensionsController(options: ManagedExtensionsOpti
       else if (result.code === "MARKETPLACE_RESTART_UNSUPPORTED") set({ restart: { status: "unsupported", message: failureReason(result.code) } });
       else set({ restart: { status: "failed", message: failureReason(result.code, result.error) } });
     },
-    track: (jobId, job) => track(jobId, job, { action: "install", sourceId: job?.sourceId ?? "unknown" }),
+    track: (jobId, job) => {
+      track(jobId, job, { action: "install", sourceId: job?.sourceId ?? "unknown" });
+      if (job) considerRisk(job);
+    },
     adoptSnapshot(snapshot) {
       for (const job of snapshot?.extensionInstallations?.jobs ?? []) {
         const known = state.jobs.find((entry) => entry.jobId === job.jobId);
@@ -226,4 +293,5 @@ export function createManagedExtensionsController(options: ManagedExtensionsOpti
       listeners.clear();
     }
   };
+  return api;
 }

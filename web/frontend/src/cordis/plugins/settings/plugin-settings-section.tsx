@@ -352,9 +352,9 @@ function PluginRow({
                 className="plugin-card__badge is-trust"
                 data-tone={extensionTrustBadge(group.installed)!.tone}
                 data-testid={`settings-plugin-trust-${group.id}`}
-                title={signedKeyId(group.installed?.trust)
-                  ? `已签名 · ${signedKeyId(group.installed!.trust)}（与本机宿主同权限，不是沙箱）`
-                  : "未签名：仅本地开发包，与宿主同权限"}
+                title={extensionTrustBadge(group.installed)?.tone === "verified"
+                  ? `已验证${signedKeyId(group.installed?.trust) ? ` · ${signedKeyId(group.installed?.trust)}` : ""}（与本机宿主同权限，不是沙箱）`
+                  : "未验证：签名不在本机信任根中，与宿主同权限"}
               >
                 {extensionTrustBadge(group.installed)!.label}
               </span>

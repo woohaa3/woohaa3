@@ -154,15 +154,7 @@ export const SETTING_DEFINITIONS = {
     default: "",
     reload: "hot",
     label: "扩展签名信任根",
-    description: "Ed25519 公钥列表，逗号分隔，每项为 <keyId>=<base64 公钥> 或 base64 公钥；签名不在此列表中的扩展包拒绝安装"
-  },
-  /** D5：只允许 local-file 来源，且仅本机显式开启（开发用）。也可用 WOOHAA3_EXTENSION_ALLOW_UNSIGNED=1。 */
-  "extensions.marketplace.allowUnsigned": {
-    kind: "boolean",
-    default: false,
-    reload: "hot",
-    label: "允许未签名的本地扩展包",
-    description: "仅用于开发：允许从本地文件安装未签名的 .wxt；市场来源的包始终要求签名。未签名扩展与宿主同进程运行，没有隔离"
+    description: "Ed25519 公钥列表，逗号分隔，每项为 <keyId>=<base64 公钥> 或 base64 公钥。命中的扩展显示为已验证；不在列表中的包要在安装时确认风险后才能安装"
   },
   /**
    * GitHub Release 市场来源（核心自带，与 local-file 同级）。
@@ -271,6 +263,9 @@ export function isSettingKey(key: string): key is SettingKey {
   return Object.prototype.hasOwnProperty.call(SETTING_DEFINITIONS, key);
 }
 
+/** 已从设置面移除、旧配置文件里可能还在的键。读到时静默忽略，不报未知配置项。 */
+const RETIRED_SETTING_KEYS = new Set(["extensions.marketplace.allowUnsigned"]);
+
 export function resolveSettings(layers: SettingsLayers, options: ResolveSettingsOptions = {}): ResolvedSettings {
   const definitions: SettingDefinitionTable = options.definitions ?? SETTING_DEFINITIONS;
   const keys = Object.keys(definitions);
@@ -300,6 +295,7 @@ export function resolveSettings(layers: SettingsLayers, options: ResolveSettings
       // 只跳过这一种形态：`extensions.marketplace.*` 这类插件自己登记的段仍按定义表校验。
       if (isExtensionToggleKey(key)) continue;
       if (!known(key)) {
+        if (RETIRED_SETTING_KEYS.has(key)) continue;
         if (options.unknownKeys === "collect") unknown.add(key);
         else issues.push({ key, layer, message: "未知配置项" });
         continue;

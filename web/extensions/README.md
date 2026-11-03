@@ -208,7 +208,7 @@ pnpm pack:extension <扩展目录> --key ./my-signing.key       # build:browser 
 
 市场目录的展示名取 `package.json.displayName`（缺省回落 `extension.json` 的 `site.name`，再回落 extensionId），描述取 `package.json.description`（`site.description` 优先）。纯后端插件不需要为了展示名补 `site` 段。
 
-安装：设置弹窗「插件配置」→「从文件安装」，或 `POST /api/extensions/install`（`application/octet-stream`）。本机信任根是 `extensions.marketplace.trustedKeys`（`<别名>=<公钥>`，公钥可为 PEM、base64 SPKI 或 32 字节原始公钥），签名不在信任根里的包一律拒绝。未签名包只在本机显式允许（`extensions.marketplace.allowUnsigned` 或 `WOOHAA3_EXTENSION_ALLOW_UNSIGNED=1`）时、且只对本地文件生效。
+安装：设置弹窗「插件配置」→「从文件安装」，或 `POST /api/extensions/install`（`application/octet-stream`）。本机信任根是 `extensions.marketplace.trustedKeys`（`<别名>=<公钥>`，公钥可为 PEM、base64 SPKI 或 32 字节原始公钥）。签名对上信任根的扩展显示为已验证。没有签名，或公钥不在信任根里时，安装前会弹出风险说明，确认后才安装并标为未验证；请求需带 `x-accept-untrusted: 1`（JSON 安装则是 `acceptUntrusted: true`）。签名对不上已信任的公钥、摘要不符，以及已配置信任域的证书失败，仍然拒绝。
 
 | 受管扩展可以 | 受管扩展不可以（预检拒绝） |
 | --- | --- |
@@ -227,7 +227,7 @@ pnpm pack:extension <扩展目录> --key ./my-signing.key       # build:browser 
 
 change: 2026-10-21-add-server-extension-marketplace（设计见 [server-extension-marketplace.md](../../docs/design/server-extension-marketplace.md)）。同一部署内的团队不必再手工传文件：
 
-1. **打包签名**：`pnpm pack:extension <扩展目录> --key ./my-signing.key`。服务端只收已签名的包，本机的「允许未签名」开关对服务端无效；签名公钥须由服务端管理员加入 `marketplace.signing_keys`。
+1. **打包签名**：`pnpm pack:extension <扩展目录> --key ./my-signing.key`。服务端只收已签名的包；签名公钥须由服务端管理员加入 `marketplace.signing_keys`。客户端对未验证包的安装确认不能代替服务端的签名要求。
 2. **提交与审核**：上传 `.wxt` 后提交（需要 `marketplace.publish`），版本进入「待审核」；管理端「扩展市场」页由持有 `marketplace.review` 的管理员通过、拒绝（必填理由）或撤回。拒绝与撤回都是终态，同一版本号不能复用，重新发布要升版本。
 3. **客户端信任**：官方市场的发布公钥随客户端发布内置（dev / Web release / 桌面宿主同一份后端代码），因此官方包不需要再手工配置；本机 `extensions.marketplace.trustedKeys` 只能**追加**其它发布者，不能移除内置官方 key。服务端 `GetMarketplaceInfo` 下发的其它公钥仍然只展示，管理员确认后才会写入。
 4. **从市场安装**：设置「插件配置 → 从市场安装」，或 `POST /api/extensions/install` 的 `{ sourceId: "woohaa-server", extensionId, range }`。安装仍走同一条校验链（摘要、签名、预检），服务端返回的审核状态与 keyId 不参与信任判断。

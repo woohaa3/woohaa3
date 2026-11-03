@@ -89,7 +89,7 @@ export type InstallationsHandle = {
 export type ExtensionPackageToolkit = {
   computePackageDigest(packagePath: string): string | Promise<string>;
   unpackExtensionPackage(input: { packagePath: string; destDir: string; limits?: Record<string, number> }): unknown;
-  verifyExtensionPackage(input: { treeDir: string; packageDigest?: string; trustedKeys: readonly TrustedKey[]; allowUnsigned: boolean }): { trust: ExtensionTrust; evidence?: Record<string, unknown> } | Promise<{ trust: ExtensionTrust; evidence?: Record<string, unknown> }>;
+  verifyExtensionPackage(input: { treeDir: string; packageDigest?: string; trustedKeys: readonly TrustedKey[]; allowUnsigned: boolean; acceptUntrusted?: boolean }): { trust: ExtensionTrust; evidence?: Record<string, unknown> } | Promise<{ trust: ExtensionTrust; evidence?: Record<string, unknown> }>;
   trustStateStamp?(): string;
   verifyManagedActivation?(input: { dir: string; record?: InstallationRecord; fresh?: boolean }): Promise<unknown>;
   filesDigest(treeDir: string): string | Promise<string>;

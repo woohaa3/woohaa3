@@ -27,6 +27,8 @@ export type Job = {
   readonly done: Promise<ExtensionInstallJobView>;
   /** 进入提交阶段后不可取消。 */
   committing: boolean;
+  /** 用户已在弹窗里确认安装未验证的包。 */
+  acceptUntrusted?: boolean;
 };
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };

@@ -112,7 +112,7 @@ function facadeWith(view: Partial<ExtensionManagerView>) {
 
 /** 最小受管控制器：分区只有受管扩展时要靠它才不会被当成「纯信息」折叠。 */
 function stubManaged() {
-  const state = { jobs: [], error: null, submitting: false, restart: { status: "idle" as const, message: null }, unquarantining: [] };
+  const state = { jobs: [], error: null, submitting: false, restart: { status: "idle" as const, message: null }, unquarantining: [], riskPrompt: null };
   const controller = {
     getState: () => state,
     subscribe: () => () => undefined,
@@ -121,6 +121,9 @@ function stubManaged() {
     track: () => undefined,
     adoptSnapshot: () => undefined,
     installFile: async () => undefined,
+    confirmRisk: async () => undefined,
+    dismissRisk: () => undefined,
+    rememberInstall: () => undefined,
     uninstall: async () => undefined,
     rollback: async () => undefined,
     restart: async () => undefined,
@@ -301,7 +304,7 @@ describe("安装入口（悬浮 +）", () => {
     plugins: [plugin("film-set", { label: "片场" })],
     installedExtensions: [{ id: "film-set", label: "片场", description: "", directory: "/plugins/film-set", writable: false }],
     files: { config: "c", secrets: "s" },
-    extensionInstallations: { revision: 1, jobs: [], restartSupported: true, allowUnsignedLocal: false }
+    extensionInstallations: { revision: 1, jobs: [], restartSupported: true }
   });
 
   async function renderWithInstall(onRequestInstall: (mode: "market" | "file") => void, marketplace = true) {

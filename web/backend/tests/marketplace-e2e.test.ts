@@ -188,7 +188,7 @@ describe("扩展市场端到端（真实宿主 + HTTP）", () => {
 
     const other = generateKeyPairSync("ed25519").privateKey;
     const untrusted = await install(base, await packFixture("fixture-panel", "2.0.0", other));
-    expect(untrusted).toMatchObject({ status: "failed", failure: { code: "MARKETPLACE_SIGNATURE_INVALID" } });
+    expect(untrusted).toMatchObject({ status: "failed", failure: { code: "MARKETPLACE_SIGNATURE_UNTRUSTED" } });
 
     // 手工构造带 ../ 条目的 tar.gz。
     const evil = path.join(temp("mp-e2e-evil-"), "evil.wxt");

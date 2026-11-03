@@ -26,7 +26,7 @@ const snapshot = (): SettingsSnapshot => ({
   plugins: [],
   installedExtensions: [],
   files: { config: "c", secrets: "s" },
-  extensionInstallations: { revision: 1, jobs: [], restartSupported: true, allowUnsignedLocal: false }
+  extensionInstallations: { revision: 1, jobs: [], restartSupported: true }
 });
 
 /** 稳定快照：useSyncExternalStore 的 getSnapshot 每次返回新对象会无限重渲染。 */
@@ -47,7 +47,7 @@ const MARKET_STATE: MarketplaceInstallState = {
   notice: null
 };
 
-const INSTALL_STATE = { jobs: [], error: null, submitting: false, restart: { status: "idle", message: null }, unquarantining: [] };
+const INSTALL_STATE = { jobs: [], error: null, submitting: false, restart: { status: "idle", message: null }, unquarantining: [], riskPrompt: null };
 const INSTALL_CONTROLLER = {
   getState: () => INSTALL_STATE,
   subscribe: () => () => undefined,

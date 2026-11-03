@@ -5,7 +5,7 @@
  * 搜索结果按来源缓存，切回看过的来源先出内容再后台刷新；界面只显示「更新于 hh:mm」与
  * 「正在刷新…」，不解释缓存。
  *
- * keyId 未被本机信任：安装按钮仍可点，旁边提示会失败并给出「信任此公钥」（二次确认后写本机配置）。
+ * keyId 未被本机信任：安装按钮仍可点，先弹出风险确认；也可以「信任此公钥」让以后的包显示为已验证。
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { compareSemver, type MarketplaceSigningKey, type MarketplaceVersionInfo, type SettingsSnapshot } from "@woohaa3/contracts";
@@ -16,10 +16,11 @@ import { appPublicUrl } from "../../services/app-base-path.js";
 import { resolvePluginIcon } from "./plugin-icons.js";
 import { versionTrusted, type MarketplaceInstallController } from "./marketplace-install.js";
 import { describeJob, type ManagedExtensionsController, type ManagedExtensionsState } from "./managed-extensions.js";
+import { UntrustedInstallDialog } from "./managed-extensions-ui.js";
 import "./marketplace-install.css";
 
 /** 没有任务控制器时的空状态（hook 必须无条件调用，所以用稳定的兜底函数）。 */
-const NO_JOBS: ManagedExtensionsState = { jobs: [], error: null, submitting: false, restart: { status: "idle", message: null }, unquarantining: [] };
+const NO_JOBS: ManagedExtensionsState = { jobs: [], error: null, submitting: false, restart: { status: "idle", message: null }, unquarantining: [], riskPrompt: null };
 const subscribeNoJobs = () => () => undefined;
 const getNoJobs = () => NO_JOBS;
 
@@ -217,6 +218,7 @@ export function MarketplaceInstallPanel({
   const [open, setOpen] = useState(defaultOpen);
   const [text, setText] = useState("");
   const [confirmKey, setConfirmKey] = useState<MarketplaceSigningKey | null>(null);
+  const [riskInstall, setRiskInstall] = useState(false);
   const enabled = !!snapshot?.extensionInstallations && canManage;
 
   useEffect(() => {
@@ -253,13 +255,23 @@ export function MarketplaceInstallPanel({
 
   const openDetail = (extensionId: string) => {
     setConfirmKey(null);
+    setRiskInstall(false);
     void controller.select(extensionId);
   };
 
-  /** 卡片上的主操作：按精确版本直接安装，不切详情（信任与失败语义仍由宿主判定）。 */
+  /** 卡片上的主操作：按精确版本直接安装，不切详情（未验证时由任务失败码弹出确认）。 */
   const quickInstall = (extensionId: string, versionToInstall: string) => {
     setConfirmKey(null);
+    setRiskInstall(false);
     void controller.installListed(extensionId, versionToInstall);
+  };
+
+  const beginInstall = () => {
+    if (trusted === false) {
+      setRiskInstall(true);
+      return;
+    }
+    void controller.install();
   };
 
   // 骨架覆盖「首次加载 / 搜索 / 刷新」三种忙态：刷新时不再让旧卡片僵在原处。
@@ -294,7 +306,7 @@ export function MarketplaceInstallPanel({
           <Button size="sm" tone={open ? "primary" : "neutral"} onClick={() => setOpen(!open)} data-testid="marketplace-install-toggle">
             从市场安装
           </Button>
-          <span className="settings-page__hint">从服务端团队市场搜索并安装；签名公钥必须先被本机信任。</span>
+          <span className="settings-page__hint">从服务端团队市场搜索并安装。签名不在信任根时会先说明风险；对上的扩展显示为已验证。</span>
         </div>
       ) : null}
       {open ? (
@@ -369,7 +381,7 @@ export function MarketplaceInstallPanel({
                   </div>
                   {trusted === false ? (
                     <div className="marketplace-detail__warn" role="status" data-testid="marketplace-untrusted">
-                      签名公钥未被本机信任，安装会失败。
+                      签名公钥未被本机信任。继续安装前会说明风险，装上后显示为未验证。也可以先信任此公钥，之后由它签名的扩展会显示为已验证。
                       {signingKey ? (
                         <Button size="sm" tone="ghost" disabled={state.trusting !== null} onClick={() => setConfirmKey(signingKey)} data-testid="marketplace-trust">
                           信任此公钥
@@ -408,8 +420,8 @@ export function MarketplaceInstallPanel({
                       {state.installingId === selected.extensionId ? "正在安装…" : detail.installedVersion === selected.version ? `当前已安装 v${selected.version}` : `将安装 v${selected.version} · ${formatSize(version?.size ?? 0)}`}
                     </span>
                     <span className="marketplace-detail__spacer" />
-                    <Button size="sm" tone="ghost" onClick={() => { setConfirmKey(null); controller.close(); }}>取消</Button>
-                    <Button size="sm" tone="primary" disabled={!canInstall} onClick={() => void controller.install()} data-testid="marketplace-install-submit">
+                    <Button size="sm" tone="ghost" onClick={() => { setConfirmKey(null); setRiskInstall(false); controller.close(); }}>取消</Button>
+                    <Button size="sm" tone="primary" disabled={!canInstall} onClick={beginInstall} data-testid="marketplace-install-submit">
                       {state.installingId === selected.extensionId ? "安装中…" : isCurrent ? `已安装 v${selected.version}` : upgradeLabel}
                     </Button>
                   </footer>
@@ -517,6 +529,18 @@ export function MarketplaceInstallPanel({
             </ul>
           ) : null}
         </div>
+      ) : null}
+      {riskInstall && selected ? (
+        <UntrustedInstallDialog
+          name={detail?.extension.label ?? selected.extensionId}
+          unsigned={false}
+          busy={state.installing}
+          onCancel={() => setRiskInstall(false)}
+          onConfirm={() => {
+            setRiskInstall(false);
+            void controller.install({ acceptUntrusted: true });
+          }}
+        />
       ) : null}
     </div>
   );

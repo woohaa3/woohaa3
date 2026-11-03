@@ -162,7 +162,7 @@ const baseSnapshot = (installed: InstalledExtensionView[], extra: Partial<Settin
   plugins: installed.map((entry) => plugin(entry.id)),
   installedExtensions: installed,
   files: { config: "c", secrets: "s" },
-  extensionInstallations: { revision: 1, jobs: [], restartSupported: true, allowUnsignedLocal: false },
+  extensionInstallations: { revision: 1, jobs: [], restartSupported: true },
   ...extra
 });
 
@@ -172,7 +172,7 @@ describe("受管扩展设置面", () => {
     expect(container.querySelector('[data-testid="settings-plugin-source-film-set"]')).toBeNull();
     // 来源从「已安装」这种无信息量的徽标改成具体来源：内置也在行上标出来，便于按来源扫读。
     expect(container.querySelector('[data-testid="settings-plugin-source-demo"]')?.textContent).toBe("本地文件");
-    expect(container.querySelector('[data-testid="settings-plugin-trust-demo"]')?.textContent).toBe("已签名");
+    expect(container.querySelector('[data-testid="settings-plugin-trust-demo"]')?.textContent).toBe("已验证");
     // 行里不再有受管明细：卸载/回滚/同权限说明都在详情页。
     expect(container.querySelector('[data-testid="managed-extension-demo"]')).toBeNull();
     expect(container.querySelector('[data-testid="managed-uninstall-demo"]')).toBeNull();
@@ -206,8 +206,63 @@ describe("受管扩展设置面", () => {
     await act(async () => {
       await controller.installFile(new Blob(["x"]));
     });
-    expect(container.querySelector('[data-testid="managed-install-error"]')?.textContent).toBe("签名无效或不受信任");
+    expect(container.querySelector('[data-testid="managed-install-error"]')?.textContent).toBe("签名无效");
     expect(container.querySelector('[data-testid="managed-install-jobs"]')).toBeNull();
+  });
+
+  it("未验证的包先弹窗，确认后才带确认标记重试；取消则不重试", async () => {
+    const failed = {
+      ok: true as const,
+      jobId: "job-1",
+      job: job({ status: "failed", phase: "verify", failure: { code: "MARKETPLACE_UNSIGNED_REJECTED", message: "包没有签名" } })
+    };
+    const installFile = vi.fn()
+      .mockResolvedValueOnce(failed)
+      .mockResolvedValueOnce({ ...failed, jobId: "job-2", job: job({ jobId: "job-2", status: "failed", phase: "verify", failure: { code: "MARKETPLACE_UNSIGNED_REJECTED", message: "包没有签名" } }) })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        jobId: "job-3",
+        job: job({ jobId: "job-3", status: "succeeded", phase: "observe", outcome: "installed", extensionId: "demo", version: "1.0.0" })
+      });
+    const remote = remoteWith({ installFile });
+    const { container, controller } = await render(baseSnapshot([]), remote);
+    const file = Object.assign(new Blob(["x"]), { name: "demo.wxt" });
+    await act(async () => {
+      await controller.installFile(file);
+    });
+    expect(container.querySelector('[data-testid="untrusted-install-dialog"]')?.textContent).toContain("没有签名");
+    expect(container.querySelector('[data-testid="untrusted-install-dialog"]')?.textContent).toContain("没有隔离");
+    await act(async () => {
+      controller.dismissRisk();
+    });
+    expect(container.querySelector('[data-testid="untrusted-install-dialog"]')).toBeNull();
+    expect(installFile).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await controller.installFile(file);
+    });
+    expect(container.querySelector('[data-testid="untrusted-install-dialog-confirm"]')).not.toBeNull();
+    await act(async () => {
+      await controller.confirmRisk();
+    });
+    expect(installFile).toHaveBeenLastCalledWith(file, { acceptUntrusted: true });
+    expect(container.querySelector('[data-testid="untrusted-install-dialog"]')).toBeNull();
+  });
+
+  it("签名校验失败不弹安装确认", async () => {
+    const remote = remoteWith({
+      installFile: vi.fn(async () => ({
+        ok: true as const,
+        jobId: "job-1",
+        job: job({ status: "failed", phase: "verify", failure: { code: "MARKETPLACE_SIGNATURE_INVALID", message: "签名校验失败" } })
+      }))
+    });
+    const { container, controller } = await render(baseSnapshot([]), remote);
+    await act(async () => {
+      await controller.installFile(new Blob(["x"]));
+    });
+    expect(container.querySelector('[data-testid="untrusted-install-dialog"]')).toBeNull();
+    expect(container.querySelector('[data-testid="managed-job-detail-job-1"]')?.textContent).toBe("签名无效");
   });
 
   it("宿主同步失败（422 带任务）：直接显示任务失败原因，不轮询，重取设置", async () => {
@@ -260,7 +315,7 @@ describe("受管扩展设置面", () => {
 
   it("宿主不支持受控重启：直接提示手动重启，不渲染按钮", async () => {
     const snapshot = baseSnapshot([managedEntry("demo", { restartRequired: true })], {
-      extensionInstallations: { revision: 1, jobs: [], restartSupported: false, allowUnsignedLocal: false }
+      extensionInstallations: { revision: 1, jobs: [], restartSupported: false }
     });
     const { container } = await render(snapshot, remoteWith());
     expect(container.querySelector('[data-testid="managed-restart"]')?.textContent).toContain("请手动重启");
@@ -288,7 +343,7 @@ describe("受管扩展设置面", () => {
         return calls === 1 ? { ok: false as const, code: "unavailable", error: "x" } : { ok: true as const, job: job({ status: "succeeded", phase: "observe", outcome: "restart-required", extensionId: "demo" }) };
       })
     });
-    const snapshot = baseSnapshot([], { extensionInstallations: { revision: 1, jobs: [job({ extensionId: "demo" })], restartSupported: true, allowUnsignedLocal: false } });
+    const snapshot = baseSnapshot([], { extensionInstallations: { revision: 1, jobs: [job({ extensionId: "demo" })], restartSupported: true } });
     const { container, controller, timers } = await render(snapshot, remote);
     act(() => controller.adoptSnapshot(snapshot));
     await act(async () => {

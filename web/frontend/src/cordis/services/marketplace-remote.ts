@@ -26,7 +26,7 @@ export type MarketplaceInstallResult = { ok: true; jobId: string; job?: Extensio
 export type MarketplaceRemote = {
   search(input: { text?: string; sourceId?: string }): Promise<MarketplaceSearchResult>;
   extension(input: { sourceId: string; extensionId: string }): Promise<MarketplaceDetailResult>;
-  install(input: { sourceId: string; extensionId: string; range: string }): Promise<MarketplaceInstallResult>;
+  install(input: { sourceId: string; extensionId: string; range: string; acceptUntrusted?: boolean }): Promise<MarketplaceInstallResult>;
   /** 受管扩展当前版本在来源侧的状态（已撤回提示）；任何失败返回 null（不显示）。 */
   versionStatus(extensionId: string): Promise<ManagedVersionStatusView | null>;
 };

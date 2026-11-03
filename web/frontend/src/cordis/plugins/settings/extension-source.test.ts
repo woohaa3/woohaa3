@@ -40,9 +40,10 @@ describe("extensionTrustBadge", () => {
     expect(extensionTrustBadge(managed({ trust: undefined }))).toBeNull();
   });
 
-  it("已签名 / 未签名区分音色", () => {
-    expect(extensionTrustBadge(managed())).toEqual({ label: "已签名", tone: "signed" });
-    expect(extensionTrustBadge(managed({ trust: "unsigned" }))).toEqual({ label: "未签名", tone: "unsigned" });
+  it("已验证 / 未验证区分音色", () => {
+    expect(extensionTrustBadge(managed())).toEqual({ label: "已验证", tone: "verified" });
+    expect(extensionTrustBadge(managed({ trust: "unsigned" }))).toEqual({ label: "未验证", tone: "unsigned" });
+    expect(extensionTrustBadge(managed({ trust: "certified:test-only:publisher" }))).toEqual({ label: "已验证", tone: "verified" });
   });
 
   it("signedKeyId 取 signed: 之后的部分", () => {

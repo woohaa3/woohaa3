@@ -19,7 +19,7 @@ import { createBackendSettingsStore, type BackendSettingsRemote } from "../backe
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** 受管任务控制器的稳定空状态（每次新建对象会让 useSyncExternalStore 无限重渲染）。 */
-const MANAGED_STUB_STATE = { jobs: [], error: null, submitting: false, restart: { status: "idle", message: null }, unquarantining: [] };
+const MANAGED_STUB_STATE = { jobs: [], error: null, submitting: false, restart: { status: "idle", message: null }, unquarantining: [], riskPrompt: null };
 /** 同理：待重开列表也必须是稳定引用。 */
 const NO_PENDING_REOPEN: readonly string[] = [];
 
@@ -727,7 +727,7 @@ describe("添加扩展页", () => {
   const withInstall = () => {
     const snapshot = {
       ...snapshotOf([arkKey()], [plugin("ark-provider", { label: "Ark（火山方舟）", configPrefix: "providers.ark", provider: true, siteManaged: true })]),
-      extensionInstallations: { revision: 1, jobs: [], restartSupported: true, allowUnsignedLocal: false }
+      extensionInstallations: { revision: 1, jobs: [], restartSupported: true }
     };
     return { fetchSnapshot: async () => ({ ok: true as const, snapshot }), write: async () => ({ ok: true as const, snapshot }) };
   };
@@ -765,7 +765,7 @@ describe("添加扩展的详情层级", () => {
   const installSnapshot = () => {
     const snapshot = {
       ...snapshotOf([], [plugin("ark-provider", { label: "Ark（火山方舟）", configPrefix: "providers.ark", provider: true })]),
-      extensionInstallations: { revision: 1, jobs: [], restartSupported: true, allowUnsignedLocal: false }
+      extensionInstallations: { revision: 1, jobs: [], restartSupported: true }
     };
     return { fetchSnapshot: async () => ({ ok: true as const, snapshot }), write: async () => ({ ok: true as const, snapshot }) };
   };

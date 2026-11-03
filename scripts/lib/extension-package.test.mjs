@@ -124,14 +124,14 @@ test("computePackageDigest 与 packDirectory 一致，格式为 sha256:<hex>", a
   assert.equal(await computePackageDigest(packed.outFile), packed.packageDigest);
 });
 
-test("签名公钥不在信任根 / 签名被篡改：MARKETPLACE_SIGNATURE_INVALID", (t) => {
+test("签名公钥不在信任根是 UNTRUSTED；冒用信任根 keyId 仍是 SIGNATURE_INVALID", (t) => {
   const dir = tmp(t);
   const signer = keyPair();
   const other = keyPair();
   const packed = packDirectory({ treeDir: writeTree(path.join(dir, "tree")), outFile: path.join(dir, "a.wxt"), privateKey: signer.privateKey });
   const out = path.join(dir, "out");
   unpackExtensionPackage({ packagePath: packed.outFile, destDir: out });
-  assert.throws(() => verifyExtensionPackage({ treeDir: out, trustedKeys: [{ publicKey: other.publicPem }] }), (error) => error.code === "MARKETPLACE_SIGNATURE_INVALID");
+  assert.throws(() => verifyExtensionPackage({ treeDir: out, trustedKeys: [{ publicKey: other.publicPem }] }), (error) => error.code === "MARKETPLACE_SIGNATURE_UNTRUSTED");
   // 冒用信任根里的 keyId，但签名不是它签的。
   const signature = JSON.parse(fs.readFileSync(path.join(out, SIGNATURE_NAME), "utf8"));
   fs.writeFileSync(path.join(out, SIGNATURE_NAME), JSON.stringify({ ...signature, keyId: other.keyId }));
@@ -160,6 +160,7 @@ test("签名有效但树被改：多余、缺失、篡改都是 MARKETPLACE_DIGE
   // 改 FILES.json 让它与篡改后的文件一致：签名不再覆盖 → 签名失败。
   fs.writeFileSync(path.join(tampered, FILES_MANIFEST_NAME), JSON.stringify(buildFilesManifest(tampered)));
   assert.throws(() => verifyExtensionPackage({ treeDir: tampered, trustedKeys }), (error) => error.code === "MARKETPLACE_SIGNATURE_INVALID");
+  assert.throws(() => verifyExtensionPackage({ treeDir: tampered, trustedKeys, acceptUntrusted: true }), (error) => error.code === "MARKETPLACE_SIGNATURE_INVALID");
 });
 
 test("未签名包：缺省拒绝；allowUnsigned 时接受并标记 unsigned；有无效签名不会降级", (t) => {
@@ -170,7 +171,8 @@ test("未签名包：缺省拒绝；allowUnsigned 时接受并标记 unsigned；
   assert.throws(() => verifyExtensionPackage({ treeDir: out }), (error) => error.code === "MARKETPLACE_UNSIGNED_REJECTED");
   assert.equal(verifyExtensionPackage({ treeDir: out, allowUnsigned: true }).trust, "unsigned");
   fs.writeFileSync(path.join(out, SIGNATURE_NAME), JSON.stringify({ keyId: "deadbeef", alg: "ed25519", sig: "AAAA" }));
-  assert.throws(() => verifyExtensionPackage({ treeDir: out, allowUnsigned: true }), (error) => error.code === "MARKETPLACE_SIGNATURE_INVALID");
+  assert.throws(() => verifyExtensionPackage({ treeDir: out, allowUnsigned: true }), (error) => error.code === "MARKETPLACE_SIGNATURE_UNTRUSTED");
+  assert.equal(verifyExtensionPackage({ treeDir: out, acceptUntrusted: true }).trust, "unsigned");
 });
 
 test("缺少 FILES.json：MARKETPLACE_DIGEST_MISMATCH", (t) => {
