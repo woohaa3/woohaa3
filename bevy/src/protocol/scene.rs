@@ -13,10 +13,66 @@ use super::theme::Theme;
 use super::video_focus::VideoFocus;
 use super::{CANVAS_RENDER_SCENE_VERSION, DEFAULT_NODE_HEIGHT, DEFAULT_NODE_WIDTH};
 
+/// 节点画布外壳（Render Scene v38 `node.chrome`）。
+///
+/// `card` 是历史内容卡片；`frame` 是 2D 组的包围框（成员身份随字段下发）；`none`
+/// 表示该节点只作为世界对象/选择身份存在，不得绘制内容卡片、端口或纹理。
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum NodeChrome {
+    Card,
+    Frame {
+        #[serde(default, rename = "groupId")]
+        group_id: String,
+        #[serde(default, rename = "memberNodeIds")]
+        member_node_ids: Vec<String>,
+    },
+    None,
+}
+
+impl Default for NodeChrome {
+    fn default() -> Self {
+        Self::Card
+    }
+}
+
+impl NodeChrome {
+    pub(crate) fn is_card(&self) -> bool {
+        matches!(self, Self::Card)
+    }
+
+    pub(crate) fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if let Self::Frame {
+            group_id,
+            member_node_ids,
+        } = self
+        {
+            if group_id.is_empty() || group_id.len() > 256 {
+                return Err("Invalid node chrome group id");
+            }
+            if member_node_ids.len() > 512
+                || member_node_ids
+                    .iter()
+                    .any(|id| id.is_empty() || id.len() > 256)
+            {
+                return Err("Invalid node chrome members");
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Deserialize)]
 pub(crate) struct GraphNode {
     #[serde(default, rename = "sharedWorldInstance", deserialize_with = "super::shared_world::deserialize_instance")]
     pub(crate) shared_world_instance: Option<super::shared_world::WorldInstance>,
+    /// 可选画布外壳；缺省 `card` 保持旧帧兼容。
+    #[serde(default)]
+    pub(crate) chrome: NodeChrome,
     #[serde(default, rename = "modelPreview")]
     pub(crate) model_preview: Option<ModelPreview>,
     pub(crate) id: String,
@@ -324,6 +380,7 @@ impl Scene {
         }
         for node in &self.nodes {
             if let Some(instance) = &node.shared_world_instance { instance.validate()?; }
+            node.chrome.validate()?;
             if node
                 .progress_started_at
                 .is_some_and(|started| !started.is_finite() || started < 0.0)

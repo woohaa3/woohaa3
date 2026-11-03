@@ -64,6 +64,8 @@ export type InteractionCore = {
   /** 聚焦相机输入门禁（只有 modal 阻断）；见 `InteractionControllerOptions.isFocusInputBlocked`。 */
   focusInputBlocked: () => boolean;
   state: InteractionState;
+  /** 场景区手势运行时（T07）：只转发指针，不在此判断权限或写共享世界。 */
+  sceneAreaGestures: () => import("../world-scopes/gestures.js").SceneAreaGesturePort | null;
   localViewport: ReturnType<typeof createLocalViewportStore>;
   viewportListeners: Set<() => void>;
   model: ModelGestureFamily;

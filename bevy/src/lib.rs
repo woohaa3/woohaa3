@@ -346,6 +346,13 @@ fn model_pick_camera(scene: &protocol::Scene) -> canvas_query::model_pick::Model
         surface,
         ordinary: scene.model_focus.is_none() && scene.image_focus.is_none()
             && scene.video_focus.is_none() && scene.focus_transition.is_none(),
+        focus: scene.model_focus.as_ref().map(|focus| canvas_query::model_pick::ModelPickFocus {
+            target: focus.target,
+            yaw: focus.yaw,
+            pitch: focus.pitch,
+            distance: focus.distance,
+            fov: focus.fov,
+        }),
     }
 }
 

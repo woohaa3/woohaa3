@@ -63,6 +63,7 @@ mod resource_ownership;
 mod resource_work;
 mod resources;
 mod runtime;
+pub(crate) mod world_presence;
 mod simplification;
 mod simplification_allocator;
 mod simplification_jobs;

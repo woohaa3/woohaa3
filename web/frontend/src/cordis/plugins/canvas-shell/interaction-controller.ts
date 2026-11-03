@@ -31,6 +31,7 @@ import { collectModelPlacements } from "./interaction-placements.js";
 import { INITIAL_WHEEL_SOURCE } from "./input/wheel-gesture.js";
 import type { TextureUploader } from "../canvas-runtime/texture-sync.js";
 import { createLocalViewportStore } from "../canvas-runtime/local-viewport.js";
+import { currentSceneAreaGestures } from "../world-scopes/gestures.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { modelPreviewStore } from "../../services/model-preview-store.js";
@@ -234,6 +235,13 @@ export function installInteractionController(options: InteractionControllerOptio
     return { x: start.x, y: start.y, width: current.x - start.x, height: current.y - start.y };
   };
 
+  /**
+   * 场景区手势运行时（T07）。显式注入优先，否则读取 world-scopes 的页面绑定；
+   * 输入层只在卡片/地面边缘按下时转发，不自建监听。
+   */
+  let sceneAreaGestures = options.sceneAreaGestures ?? null;
+  const sceneArea = () => sceneAreaGestures ?? currentSceneAreaGestures();
+
   /** 清除全部悬停态；仅在确实有悬停时触发重绘。 */
   const clearHover = () => hover.clearHover();
   const suspendHoverPlayback = () => hover.suspendVideo();
@@ -385,6 +393,11 @@ export function installInteractionController(options: InteractionControllerOptio
       markInvalidated,
       writable
     });
+    // Escape/焦点门禁可能直接复位 state.gesture；场景区预览与准备请求必须由同一
+    // 帧结算清理。正在提交的手势由运行时自身忽略 cancel，避免把已发出的写请求
+    // 伪装成取消。
+    const sceneGesture = sceneArea();
+    if (state.gesture.kind !== "scene-area" && sceneGesture?.active()) sceneGesture.cancel();
     const runtime = options.getRuntime();
     const playbackBlocked = modalActive() || state.viewportPreview !== null || hoverNodeStore.hasPlaybackOwner() || runtime?.acceptsPlayback?.() === false;
     const ownerKey = `${state.gesture.kind}:${playbackBlocked}:${runtime?.generation?.() ?? 0}`;
@@ -494,6 +507,7 @@ export function installInteractionController(options: InteractionControllerOptio
     modalActive,
     focusInputBlocked,
     state,
+    sceneAreaGestures: sceneArea,
     localViewport,
     viewportListeners,
     model,
@@ -564,7 +578,12 @@ export function installInteractionController(options: InteractionControllerOptio
       cancelAggregateConnect: () => input.cancelAggregateConnect()
     }
   });
-  const { cancelTransientGesture, settleViewportBeforeFocus, handlers: { onDocumentWheel, onDocumentPointerDown, onDocumentFocusChange, onDocumentBlur, onDocumentVisibility, onGestureStart, onGestureChange, onGestureEnd, onWindowResize } } = surface;
+  const { cancelTransientGesture: cancelSurfaceTransientGesture, settleViewportBeforeFocus, handlers: { onDocumentWheel, onDocumentPointerDown, onDocumentFocusChange, onDocumentBlur, onDocumentVisibility, onGestureStart, onGestureChange, onGestureEnd, onWindowResize } } = surface;
+  /** modal/宿主取消路径同时清掉场景区准备请求与模型地面预览。 */
+  const cancelTransientGesture = () => {
+    sceneArea()?.cancel();
+    cancelSurfaceTransientGesture();
+  };
 
   installCanvasListeners(canvas, target, input, keyboard, dblclick, {
     onDocumentWheel,
@@ -619,6 +638,7 @@ export function installInteractionController(options: InteractionControllerOptio
     beginWorldGroundPreview,
     updateWorldGroundPreview,
     cancelWorldGroundPreview,
+    setSceneAreaGestures: (handler) => { sceneAreaGestures = handler ?? null; },
     flush,
     /** 唯一失效入口（design D2）；缺省 reason 归一为 `invalidate`。 */
     invalidate: (reason) => schedule(reason ?? "invalidate"),

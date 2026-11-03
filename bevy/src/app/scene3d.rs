@@ -42,6 +42,30 @@ pub(super) fn sync_scene_areas(
     }
 }
 
+/// 共享世界对象的轻量呈现：空模型锚点、世界模型选择框与聚焦可见性。
+///
+/// 与模型根同步分开：即使没有可见模型（空模型只有世界实例身份），也必须在真实
+/// world pose 处留下可辨认、可选择的指示，不能退回内容卡片。
+pub(super) fn sync_world_presence(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    scene: Res<CurrentScene>,
+    theme: Res<ThemeResource>,
+    resources: Res<ModelAssetTable>,
+    mut presence: ResMut<model3d::world_presence::WorldPresence>,
+) {
+    model3d::world_presence::sync(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &scene.0,
+        &theme,
+        &resources.0,
+        &mut presence,
+    );
+}
+
 pub(super) fn publish_model_poses(
     models: Res<model3d::ModelVisuals>,
     transforms: Query<(&Transform, &GlobalTransform)>,

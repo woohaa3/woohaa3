@@ -65,7 +65,8 @@ pub(crate) fn sync_generation(
             // - 生成任务：`shows_generation_ring` 覆盖紧凑与纯模型节点
             //   （change: 2026-10-12-unify-generation-history-strip）；
             // - 媒体解码/缓冲：`media_loading`（change: 2026-10-12-unify-node-editors-and-focus-transitions）。
-            (shows_generation_ring(&node) || (node.media_loading && !node.busy))
+            (node.chrome.is_card()
+                && (shows_generation_ring(&node) || (node.media_loading && !node.busy)))
                 .then_some((entity, depth.render, node))
         })
         .collect();

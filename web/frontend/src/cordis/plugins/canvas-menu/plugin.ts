@@ -19,7 +19,7 @@ import {
   findNodeTemplate
 } from "../../domain/node-catalog.js";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, SHARED_WORLD_VERSION, canvasPointToGround, createHighEntropyId, newWorldInstance, partitionManagedNodeDeletion } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, SHARED_WORLD_VERSION, WORLD_CAMERA_CARD_SIZE, canvasPointToGround, createDefaultWorldCameraData, createHighEntropyId, newWorldInstance, partitionManagedNodeDeletion, type CanvasNodeData } from "@woohaa3/contracts";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
 import { definePlugin } from "../../plugin.js";
@@ -120,7 +120,8 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
           })),
           ...(connectFrom ? [] : [
             { id: "insert-scope:group", label: "2D 组", section: CANVAS_MENU_SECTION.basicMaterial, disabled: !writable },
-            { id: "insert-scope:area", label: "场景区", section: CANVAS_MENU_SECTION.basicMaterial, disabled: !writable }
+            { id: "insert-scope:area", label: "场景区", section: CANVAS_MENU_SECTION.basicMaterial, disabled: !writable },
+            { id: "insert-scope:camera", label: "镜头", section: CANVAS_MENU_SECTION.basicMaterial, disabled: !writable }
           ]),
           // 扩展贡献的通用节点模板；宿主只按通用节点契约合并菜单项，不 import 任何具体扩展内容。
           ...(connectFrom ? [] : extensionNodeTemplateItems(ctx, context)),
@@ -192,21 +193,26 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
           insertExtensionTemplateNode(ctx, itemId.slice("insert-template:".length), context);
           return;
         }
-        if (itemId === "insert-scope:group" || itemId === "insert-scope:area") {
+        if (itemId === "insert-scope:group" || itemId === "insert-scope:area" || itemId === "insert-scope:camera") {
           if (!ctx.canvasSession.isWritable()) return;
-          const id = createHighEntropyId(itemId === "insert-scope:group" ? "group" : "area");
-          const scopeVersion = createHighEntropyId("scope-version");
-          const ground = canvasPointToGround(context.world);
+          const camera = itemId === "insert-scope:camera";
           const group = itemId === "insert-scope:group";
+          const id = createHighEntropyId(camera ? "camera" : group ? "group" : "area");
+          const version = createHighEntropyId(camera ? "camera-settings" : "scope-version");
+          const ground = canvasPointToGround(context.world);
           const canvasId = workingCanvasOf(woohaa3CanvasStore.getState())?.id;
           if (!canvasId) return;
+          const nodeData: CanvasNodeData = group
+            ? { workflowGroup2d: { kind: "workflow-group-2d", version: SHARED_WORLD_VERSION, groupId: id, scopeVersion: version, memberNodeIds: [] } }
+            : camera
+              ? { worldCamera: createDefaultWorldCameraData(id, version, ground) } as unknown as CanvasNodeData
+              : { sceneArea: { kind: "scene-area", version: SHARED_WORLD_VERSION, areaId: id, scopeVersion: version, bounds: { min: { u: ground.u - 2, v: ground.v - 2 }, max: { u: ground.u + 2, v: ground.v + 2 } } } };
           void ctx.canvasEdit.record(planInsertNode({
-            nodeType: group ? "workflow-group-2d" : "scene-area",
+            nodeType: group ? "workflow-group-2d" : camera ? "world-camera" : "scene-area",
             position: context.world,
-            nodeData: group
-              ? { workflowGroup2d: { kind: "workflow-group-2d", version: SHARED_WORLD_VERSION, groupId: id, scopeVersion, memberNodeIds: [] } }
-              : { sceneArea: { kind: "scene-area", version: SHARED_WORLD_VERSION, areaId: id, scopeVersion, bounds: { min: { u: ground.u - 2, v: ground.v - 2 }, max: { u: ground.u + 2, v: ground.v + 2 } } } }
-          }), group ? "创建 2D 组" : "创建场景区").then(result => {
+            nodeData,
+            ...(camera ? { width: WORLD_CAMERA_CARD_SIZE.width, height: WORLD_CAMERA_CARD_SIZE.height } : {})
+          }), group ? "创建 2D 组" : camera ? "创建镜头" : "创建场景区").then(result => {
             if (!result.ok && !disposed && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
               ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "创建失败", description: result.reason } });
             }

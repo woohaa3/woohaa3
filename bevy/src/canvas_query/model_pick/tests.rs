@@ -14,7 +14,7 @@ fn back_faces_only_pick_when_material_is_double_sided() {
 fn shared_pick_uses_surface_depth_and_preserves_gaps() {
     use bevy::prelude::Vec3;
     let candidate = |id: &str, z: f32| ModelCandidate {
-        node_id: id.into(), shared_world: true, min: [-2., -2., 0.], max: [2., 2., 10.],
+        node_id: id.into(), shared_world: true, empty_marker: false, min: [-2., -2., 0.], max: [2., 2., 10.],
         triangles: Some(std::sync::Arc::new(vec![SurfaceTriangle { vertices: [[-1., -1., z], [1., -1., z], [0., 1., z]], cull_back: false }])),
     };
     let candidates = vec![candidate("back", 7.), candidate("front", 3.)];
@@ -128,7 +128,7 @@ fn pick_query_respects_generation_and_emptiness() {
     );
     accept_models(
         vec![ModelCandidate {
-            shared_world: false,
+            shared_world: false, empty_marker: false,
             triangles: None,
             node_id: "m".into(),
             min: [center.x - 5.0, center.y - 5.0, center.z - 5.0],
@@ -139,6 +139,7 @@ fn pick_query_respects_generation_and_emptiness() {
             viewport: origin_view(),
             surface: [1000.0, 800.0],
             ordinary: true,
+            focus: None,
         },
     );
     // 命中。

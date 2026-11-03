@@ -27,3 +27,23 @@ fn scene_boundary_rejects_invalid_world_data_without_replacing_accepted_scene() 
     legacy["nodes"][0].as_object_mut().unwrap().remove("sharedWorldInstance");
     assert!(set_scene(&legacy.to_string()).is_ok());
 }
+
+#[test]
+fn scene_boundary_accepts_world_chrome_and_rejects_invalid_frame() {
+    let fixture = include_str!("fixtures/shared-world/render-scene.json");
+    let mut scene: serde_json::Value = serde_json::from_str(fixture).unwrap();
+
+    scene["nodes"][0]["chrome"] = serde_json::json!({"kind":"none"});
+    assert!(set_scene(&scene.to_string()).is_ok());
+
+    scene["nodes"][0]["chrome"] = serde_json::json!({
+        "kind":"frame","groupId":"group-1","memberNodeIds":["model","other"]
+    });
+    assert!(set_scene(&scene.to_string()).is_ok());
+
+    scene["nodes"][0]["chrome"] = serde_json::json!({"kind":"frame","groupId":"","memberNodeIds":[]});
+    assert!(set_scene(&scene.to_string()).is_err());
+
+    scene["nodes"][0]["chrome"] = serde_json::json!({"kind":"unknown"});
+    assert!(set_scene(&scene.to_string()).is_err());
+}

@@ -95,13 +95,14 @@ pub(crate) const RICH_NODE_HEIGHT: f32 = 116.0;
 
 /// Small display rectangles keep a single readable title and maximize preview area.
 pub(crate) fn compact_card(node: &GraphNode) -> bool {
-    node.width < 196.0 && node.height >= 64.0
+    node.chrome.is_card() && node.width < 196.0 && node.height >= 64.0
 }
 
 /// 节点是否有内容区（富内容卡片或紧凑卡片，且非 3D 模型节点/容器）。运行中进度环也复用
 /// 该门禁（change: add-node-running-progress）：只有会显示内容区的节点才用进度环替代它。
 pub(crate) fn shows_content(node: &GraphNode) -> bool {
-    (node.height > RICH_NODE_HEIGHT || compact_card(node))
+    node.chrome.is_card()
+        && (node.height > RICH_NODE_HEIGHT || compact_card(node))
         && (node.kind != "model" || node.model_preview.is_some())
 }
 
@@ -205,7 +206,8 @@ pub(crate) fn history_strip_dot(
 
 /// 普通节点有至少两个版本时绘制内部圆点：非 ghost。
 pub(crate) fn has_history_strip(node: &GraphNode) -> bool {
-    !node.ghost
+    node.chrome.is_card()
+        && !node.ghost
         && node.history_strip.as_ref().is_some_and(|strip| {
             strip.dots.len() > 1
                 || strip
@@ -220,7 +222,7 @@ pub(crate) fn has_history_strip(node: &GraphNode) -> bool {
 /// 覆盖所有普通运行节点（含紧凑节点与纯模型预览节点）：`shows_content` 只描述富内容卡片，
 /// 会漏掉 196x64 的紧凑模型/纯模型节点。
 pub(crate) fn shows_generation_ring(node: &GraphNode) -> bool {
-    node.busy
+    node.chrome.is_card() && node.busy
 }
 
 /// 运行进度环承载矩形：富内容节点用内容区；紧凑节点用卡片内缩矩形。
@@ -479,6 +481,7 @@ mod tests {
 
     fn node(width: f32, height: f32) -> GraphNode {
         GraphNode {
+            chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             model_preview: None,
             id: "n".into(),
@@ -505,6 +508,7 @@ mod tests {
 
     fn kind_node(kind: &str, width: f32, height: f32, busy: bool) -> GraphNode {
         GraphNode {
+            chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             kind: kind.into(),
             busy,
@@ -642,6 +646,7 @@ mod tests {
 
     fn action_node(x: f32, y: f32) -> GraphNode {
         GraphNode {
+            chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             model_preview: None,
             id: "n1".into(),

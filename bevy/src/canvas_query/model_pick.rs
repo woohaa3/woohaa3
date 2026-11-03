@@ -20,6 +20,8 @@ use crate::isometric_grid::CANVAS_CAMERA_Z;
 pub(crate) struct ModelCandidate {
     pub(crate) node_id: String,
     pub(crate) shared_world: bool,
+    /// 空模型/资源未就绪的世界锚点：没有可见三角面，但必须可选中。
+    pub(crate) empty_marker: bool,
     pub(crate) min: [f32; 3],
     pub(crate) max: [f32; 3],
     pub(crate) triangles: Option<std::sync::Arc<Vec<SurfaceTriangle>>>,
@@ -31,12 +33,23 @@ pub(crate) struct SurfaceTriangle {
     pub(crate) cull_back: bool,
 }
 
+/// 模型聚焦时的透视相机快照；与渲染/手势共用同一 target/yaw/pitch/fov。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ModelPickFocus {
+    pub(crate) target: [f32; 3],
+    pub(crate) yaw: f32,
+    pub(crate) pitch: f32,
+    pub(crate) distance: f32,
+    pub(crate) fov: f32,
+}
+
 /// 与候选一同发布的画布相机快照（viewport/surface）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ModelPickCamera {
     pub(crate) viewport: [f32; 3],
     pub(crate) surface: [f32; 2],
     pub(crate) ordinary: bool,
+    pub(crate) focus: Option<ModelPickFocus>,
 }
 
 impl Default for ModelPickCamera {
@@ -45,6 +58,7 @@ impl Default for ModelPickCamera {
             viewport: [0.0, 0.0, 1.0],
             surface: [1.0, 1.0],
             ordinary: true,
+            focus: None,
         }
     }
 }
@@ -64,6 +78,7 @@ thread_local! {
         viewport: [0.0, 0.0, 1.0],
         surface: [1.0, 1.0],
         ordinary: true,
+        focus: None,
     }) };
     /// 模型 pick generation（与 2D interaction generation 同步递增通过 facade）。
     static GENERATION: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -214,11 +229,46 @@ pub(crate) fn pick_query_json(json: &str) -> String {
     let mut candidates = CANDIDATES.with(|slot| slot.borrow().iter().filter(|candidate| !candidate.shared_world).cloned().collect::<Vec<_>>());
     SHARED_CURRENT.with(|slot| candidates.extend(slot.borrow().iter().cloned()));
     let camera = CAMERA.with(|slot| *slot.borrow());
-    let view = crate::isometric_grid::IsometricGridView { x: camera.viewport[0], y: camera.viewport[1], zoom: camera.viewport[2] };
-    let projection = crate::isometric_grid::canvas_camera_projection();
-    let origin = crate::isometric_grid::screen_point_to_world(bevy::prelude::Vec2::new(request.x, request.y), CANVAS_CAMERA_Z - projection.near, &view);
-    let direction = crate::isometric_grid::canvas_camera_rotation() * bevy::prelude::Vec3::NEG_Z;
-    let picked = pick_candidates(&candidates, origin, direction, projection.far - projection.near);
+    let (origin, direction, max_t) = if let Some(focus) = camera.focus {
+        let width = if camera.surface[0].is_finite() && camera.surface[0] > 1.0 {
+            camera.surface[0]
+        } else {
+            request.width.max(1.0)
+        };
+        let height = if camera.surface[1].is_finite() && camera.surface[1] > 1.0 {
+            camera.surface[1]
+        } else {
+            request.height.max(1.0)
+        };
+        let target = bevy::prelude::Vec3::from_array(focus.target);
+        let cp = focus.pitch.cos();
+        let dir = bevy::prelude::Vec3::new(
+            focus.yaw.sin() * cp,
+            -focus.pitch.sin(),
+            focus.yaw.cos() * cp,
+        );
+        let position = target + dir * focus.distance;
+        let rotation = bevy::prelude::Transform::from_translation(position)
+            .looking_at(target, bevy::prelude::Vec3::Y)
+            .rotation;
+        let ndc_x = (request.x / width) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (request.y / height) * 2.0;
+        let half = (focus.fov * 0.5).tan().max(1e-4);
+        let local = bevy::prelude::Vec3::new(
+            ndc_x * half * (width / height).max(1e-4),
+            ndc_y * half,
+            -1.0,
+        )
+        .normalize_or_zero();
+        (position, (rotation * local).normalize_or_zero(), 200_000.0)
+    } else {
+        let view = crate::isometric_grid::IsometricGridView { x: camera.viewport[0], y: camera.viewport[1], zoom: camera.viewport[2] };
+        let projection = crate::isometric_grid::canvas_camera_projection();
+        let origin = crate::isometric_grid::screen_point_to_world(bevy::prelude::Vec2::new(request.x, request.y), CANVAS_CAMERA_Z - projection.near, &view);
+        let direction = crate::isometric_grid::canvas_camera_rotation() * bevy::prelude::Vec3::NEG_Z;
+        (origin, direction, projection.far - projection.near)
+    };
+    let picked = pick_candidates(&candidates, origin, direction, max_t);
     let result = match picked {
         Some((node_id, target, radius)) => ModelPickResult {
             available: true,
@@ -247,7 +297,7 @@ pub(crate) fn pick_candidates(candidates: &[ModelCandidate], origin: bevy::prelu
         let Some(broad) = ray_hits_aabb_clipped(origin.to_array(), direction.to_array(), candidate.min, candidate.max, max_t) else { continue };
         let t = if let Some(triangles) = &candidate.triangles {
             triangles.iter().filter_map(|triangle| ray_triangle(origin, direction, triangle)).filter(|t| *t <= max_t).fold(None, |best: Option<f32>, t| Some(best.map_or(t, |b| b.min(t))))
-        } else if candidate.shared_world { None } else { Some(broad) };
+        } else if candidate.empty_marker || !candidate.shared_world { Some(broad) } else { None };
         if let Some(t) = t.filter(|t| *t < best_t) {
             best_t = t;
             let (center, radius) = center_radius(candidate.min, candidate.max);

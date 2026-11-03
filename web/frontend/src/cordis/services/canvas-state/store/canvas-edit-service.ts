@@ -58,6 +58,18 @@ function equalJson(a: unknown, b: unknown): boolean {
 export interface CanvasEditService {
   convertWorld(input: { remote: CanvasRemoteService; canvasId: string; operationId: string; targets: Array<{ nodeId: string; instanceId: string }> }): Promise<CanvasEditRecordResult>;
   record(commands: readonly CanvasCommand[], label: string): Promise<CanvasEditRecordResult>;
+  /**
+   * 把已在权威端确认的动作加入同一条撤销时间线。
+   *
+   * `undo` / `redo` 必须继续调用该动作所属的权威端口，并在回执/版本不确定时返回
+   * `ok:false`；journal 只在成功时移动指针，绝不因“请求已发出”推进历史。
+   */
+  recordExternal(input: {
+    id: string;
+    label: string;
+    undo: () => Promise<{ ok: true } | { ok: false; reason: string }>;
+    redo: () => Promise<{ ok: true } | { ok: false; reason: string }>;
+  }): CanvasEditRecordResult;
   recordParameter(input: {
     label: string;
     nodeId: string;
@@ -183,6 +195,14 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
 
   const handler = {
     apply: async (entry: JournalEntry, direction: -1 | 1): Promise<{ ok: true } | { ok: false; reason: string }> => {
+      if (entry.kind === "external") {
+        const result = direction === -1 ? await entry.undo() : await entry.redo();
+        if (!result.ok && result.reason) {
+          // Keep the cursor in place; the authority did not confirm the inverse.
+          journal.markConflict(entry.id);
+        }
+        return result;
+      }
       if (entry.kind === "parameter") {
         const applier = parameterAppliers.get(entry.id);
         if (!applier) return { ok: false, reason: "参数记录所属草稿已不可用" };
@@ -272,6 +292,12 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
         if (conversionAbort === controller) { conversionAbort = null; busy = false; publish(); }
       }
     },
+    recordExternal(input) {
+      const result = journal.recordExternal(input);
+      if (result.ok) publish();
+      return result;
+    },
+
     async record(commands, label) {
       if (busy) return { ok: false, reason: "正在结算上一次操作，请稍候" };
       if (!options.session.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };

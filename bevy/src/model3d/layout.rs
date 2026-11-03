@@ -59,21 +59,30 @@ pub(crate) fn model_bounds_for_node(
     Some((local, root.translation))
 }
 
+/// 世界实例的真实根姿态（不含任何卡片位置）。缺失时返回 `None`。
+///
+/// 世界模型、空模型指示与可见面拾取必须共用这一处变换，避免再次出现「渲染在世界、
+/// 查询读卡片」的分叉。
+pub(crate) fn world_instance_transform(node: &GraphNode) -> Option<Transform> {
+    let instance = node.shared_world_instance.as_ref()?;
+    let t = &instance.transform;
+    let p = crate::protocol::world_to_renderer([t.position.u, t.position.v, t.position.h]);
+    let q = crate::protocol::world_rotation_to_renderer(t.rotation);
+    Some(Transform {
+        translation: Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32),
+        rotation: Quat::from_xyzw(q[0] as f32, q[1] as f32, q[2] as f32, q[3] as f32),
+        scale: Vec3::splat((t.scale * crate::protocol::UNITS_PER_METER) as f32),
+    })
+}
+
 /// The accepted world pose belongs only to the instance root; asset children stay Y-up.
 pub(super) fn model_root_transform(
     node: &GraphNode,
     model: &ModelSnapshot,
     placement: &ModelPlacement,
 ) -> Transform {
-    if let Some(instance) = &node.shared_world_instance {
-        let t = &instance.transform;
-        let p = crate::protocol::world_to_renderer([t.position.u, t.position.v, t.position.h]);
-        let q = crate::protocol::world_rotation_to_renderer(t.rotation);
-        return Transform {
-            translation: Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32),
-            rotation: Quat::from_xyzw(q[0] as f32, q[1] as f32, q[2] as f32, q[3] as f32),
-            scale: Vec3::splat((t.scale * crate::protocol::UNITS_PER_METER) as f32),
-        };
+    if let Some(transform) = world_instance_transform(node) {
+        return transform;
     }
     let unit = model_unit(node, model, placement);
     Transform {
@@ -81,6 +90,21 @@ pub(super) fn model_root_transform(
         rotation: model_view_rotation(placement),
         scale: Vec3::splat(unit),
     }
+}
+
+/// 世界空模型标记的真实世界包围盒（与 `world_presence` 的地台/竖杆同一尺寸）。
+///
+/// 空模型没有 Scene IR，但仍必须有可点选的世界锚点；这里不读卡片位置。
+pub(crate) fn world_marker_bounds(node: &GraphNode) -> Option<([f32; 3], [f32; 3])> {
+    let transform = world_instance_transform(node)?;
+    let unit = transform.scale.x.abs().max(1.0);
+    let radius = unit * 0.55;
+    let height = unit * 0.9;
+    let p = transform.translation;
+    Some((
+        [p.x - radius, p.y, p.z - radius],
+        [p.x + radius, p.y + height, p.z + radius],
+    ))
 }
 
 /// 模型在画布世界的根位置（world y 轴向上）——固定画布坐标，不读取 viewport/surface。

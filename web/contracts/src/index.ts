@@ -111,6 +111,7 @@ export * from "./canvas/composite-children.js";
 
 export * from "./canvas/node-capabilities.js";
 export * from "./canvas/builtin-node-capabilities.js";
+export * from "./canvas/world-camera-ui.js";
 
 export * from "./canvas/media-content.js";
 export * from "./canvas/ground-anchor.js";

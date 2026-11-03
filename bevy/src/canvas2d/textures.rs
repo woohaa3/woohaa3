@@ -51,7 +51,10 @@ pub(crate) fn sync_textures(
         let scene = &scene.0;
         // 同代节点索引：按 id 定位，替代逐纹理全文档线性 find
         // （change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 7.2）。
-        let Some((index, node)) = index.node(scene, &id).filter(|(_, node)| node.texture) else {
+        let Some((index, node)) = index
+            .node(scene, &id)
+            .filter(|(_, node)| node.texture && node.chrome.is_card())
+        else {
             continue;
         };
         let Some(owner) = by_id.get(id.as_str()).copied() else {
@@ -164,7 +167,7 @@ pub(crate) fn sync_textures(
         let alive = by_id.contains_key(sprite.node_id.as_str())
             && index
                 .node(&scene.0, &sprite.node_id)
-                .is_some_and(|(_, node)| node.texture);
+                .is_some_and(|(_, node)| node.texture && node.chrome.is_card());
         if !alive {
             stale.push((entity, sprite.node_id.clone()));
         }

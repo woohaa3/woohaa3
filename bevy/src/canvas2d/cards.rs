@@ -2,7 +2,7 @@
 use super::layout::{port, shortened, shows_content};
 use super::{geometry::Geometry, labels::Label};
 use crate::{
-    protocol::{GraphNode, NodeHover},
+    protocol::{GraphNode, NodeChrome, NodeHover},
     theme::ThemeResource,
 };
 use bevy::prelude::*;
@@ -15,6 +15,13 @@ pub(super) fn draw_static(
 ) -> Vec<Label> {
     if node.kind.starts_with("focus-reference") {
         return super::focus_reference::draw(geometry, theme, node, index);
+    }
+    match &node.chrome {
+        NodeChrome::Card => {}
+        NodeChrome::Frame { .. } => {
+            return super::chrome::draw_frame(geometry, theme, node, index, false);
+        }
+        NodeChrome::None => return Vec::new(),
     }
     if super::layout::compact_card(node) {
         return super::compact_card::draw(geometry, theme, node, index);
@@ -146,6 +153,9 @@ pub(super) fn draw_hover_ports(
     hover: Option<&NodeHover>,
     index: usize,
 ) {
+    if !node.chrome.is_card() {
+        return;
+    }
     let (accent, _, _) = theme.node_palette(&node.kind);
     let (_, _, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     // 端点：静止时 MUST NOT 绘制常驻图形；仅指针悬停该节点时在左右中点显示「+」圆钮
@@ -179,6 +189,13 @@ pub(crate) fn draw_selection_outline(
     node: &GraphNode,
     index: usize,
 ) {
+    match &node.chrome {
+        NodeChrome::Card => {}
+        NodeChrome::Frame { .. } => {
+            return super::chrome::draw_frame_selection(geometry, theme, node, index);
+        }
+        NodeChrome::None => return,
+    }
     let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     let (width, height) = (node.width, node.height);
     geometry.rounded_rect(

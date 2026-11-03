@@ -18,6 +18,7 @@ mod attach;
 mod camera;
 mod card_cache;
 mod cards;
+mod chrome;
 mod compact_card;
 mod focus_reference;
 mod dash;

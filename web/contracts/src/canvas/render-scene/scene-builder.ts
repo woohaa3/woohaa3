@@ -1,7 +1,7 @@
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
-import { decodeSceneAreaData } from "../creation-scope-codec.js";
+import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
 import type { NodeCapabilityResolver } from "../node-capabilities.js";
 /**
  * `CanvasRenderScene` 快照装配与呈现指纹（自 `render-scene.ts` 拆出）
@@ -145,7 +145,10 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   const assets = new Map<string, StoredAsset>(canvas.assets.map((asset) => [asset.id, asset]));
   const selectedIds = new Set(input.selection?.nodes ?? []);
 
-  const nodes: BevyRenderNode[] = canvas.document.nodes.map((node) => {
+  // 场景区是 h=0 的地面范围，不是画布卡片：只通过 `sceneAreas` 投影，节点列表不再
+  // 生成通用卡片。2D 组保留节点身份（命中/选择/动作）但以 `frame` chrome 绘制包围框。
+  const sceneAreaNodeIds = new Set<string>();
+  const nodes: BevyRenderNode[] = canvas.document.nodes.flatMap((node) => {
     const context = { canvas, node, data: nodeData[node.id] };
     const capabilities = capabilitiesOf(node);
     const kind = capabilities.appearance?.palette ?? "node";
@@ -153,6 +156,13 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const size = effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id), capabilities);
     const override = input.positionOverrides?.get(node.id);
     const data = nodeData[node.id];
+    const area = decodeSceneAreaData(data?.sceneArea);
+    if (area.ok) {
+      sceneAreaNodeIds.add(node.id);
+      return [];
+    }
+    const workflowGroupInput = data?.workflowGroup2d;
+    const workflowGroup = workflowGroupInput === undefined ? undefined : decodeWorkflowGroupData(workflowGroupInput);
     const worldInput = data?.sharedWorldInstance;
     const world = worldInput === undefined ? undefined : decodeWorldInstanceData(worldInput);
     if (world && !world.ok) throw new Error(`Invalid shared world instance: ${world.code}`);
@@ -201,9 +211,21 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       busy: isBusy(data),
       texture,
       // 仅当该节点是唯一选中项时才绘制抓手，避免多选时语义歧义（design D1）。
-      resizable: !!capabilities.resize && selectedIds.size === 1 && selectedIds.has(node.id),
-      ...(projectedWorld ? { sharedWorldInstance: projectedWorld } : {}),
-      ...(previewCard ? { modelPreview: previewCard.project(context, input.modelPreviews?.get(node.id)) } : {}),
+      // 共享世界实例没有卡片尺寸抓手：模型缩放走世界变换/助手，不是卡片 resize。
+      resizable: !projectedWorld && !!capabilities.resize && selectedIds.size === 1 && selectedIds.has(node.id),
+      ...(projectedWorld ? {
+        sharedWorldInstance: projectedWorld,
+        chrome: { kind: "none" as const }
+      } : {}),
+      ...(workflowGroup?.ok ? {
+        chrome: {
+          kind: "frame" as const,
+          groupId: workflowGroup.value.groupId,
+          memberNodeIds: [...workflowGroup.value.memberNodeIds]
+        }
+      } : {}),
+      // 共享世界实例没有卡片，也不再申请卡内轨道预览；模型由世界姿态直接绘制。
+      ...(previewCard && !projectedWorld ? { modelPreview: previewCard.project(context, input.modelPreviews?.get(node.id)) } : {}),
       ...(capabilities.appearance?.cardLabel ? { cardLabel: capabilities.appearance.cardLabel } : {})
     };
     if (capabilities.modelPreparation && resource) {
@@ -214,7 +236,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         ...(placement ? { placement } : {})
       };
     }
-    return rendered;
+    return [rendered];
   });
 
   // 幽灵节点（上传中）：追加为普通 Bevy 节点，复用完全相同的卡片绘制。
@@ -248,6 +270,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   const endpointlessNodeIds = new Set(
     canvas.document.nodes.filter((node) => capabilitiesOf(node).connections?.endpoints({ canvas, node, data: nodeData[node.id] }) === "none").map((node) => node.id)
   );
+  // 场景区节点不出现在节点列表里；指向它的旧连线不能留下悬空端点。
+  for (const nodeId of sceneAreaNodeIds) endpointlessNodeIds.add(nodeId);
   const edges = canvas.document.edges
     .filter((edge) => !endpointlessNodeIds.has(edge.source) && !endpointlessNodeIds.has(edge.target))
     .map((edge) => ({

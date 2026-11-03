@@ -54,7 +54,8 @@ pub(crate) use position::{
 pub(crate) use prepared::{PreparedModelMetadata, PreparedModelRequest};
 #[allow(unused_imports)]
 pub(crate) use scene::{
-    Edge, GraphNode, HistoryStripDot, HistoryStripPresentation, Scene, Selection, Viewport,
+    Edge, GraphNode, HistoryStripDot, HistoryStripPresentation, NodeChrome, Scene, Selection,
+    Viewport,
 };
 #[allow(unused_imports)]
 pub(crate) use scene_instant::{

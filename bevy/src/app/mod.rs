@@ -127,6 +127,7 @@ fn configure_canvas(app: &mut App) {
         .init_resource::<canvas2d::focus_details::FocusDetailBatch>()
         .init_resource::<canvas2d::focus_details::FocusDetailVisuals>()
         .init_resource::<ModelAssetTable>()
+        .init_resource::<model3d::world_presence::WorldPresence>()
         .init_resource::<NodeIndex>()
         .init_resource::<crate::canvas_ecs::CanvasProjectionState>()
         .init_resource::<canvas2d::LabelRequests>()
@@ -183,6 +184,8 @@ fn configure_canvas(app: &mut App) {
                         // 门禁结算（含 hover stop/reset/start）与模型 spawn 同一系统，且在动画求值前
                         // 完成（change: play-model-animations-on-hover，design D4）。
                         scene3d::sync_models.in_set(model3d::TransformAnimationSet::Playback),
+                        // 世界对象的空模型锚点/选择指示：不依赖卡片，排在模型根同步之后。
+                        scene3d::sync_world_presence,
                         // 页面内历史缩略图：同一 App 内一次性离屏渲染，排在模型根同步之后
                         // （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
                         crate::history_preview::sync,

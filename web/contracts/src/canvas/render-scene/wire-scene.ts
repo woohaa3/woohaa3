@@ -82,9 +82,26 @@ import type { BevyRenderDraft, BevyRenderMarquee, BevyRenderSurface } from "./wi
 //      older renderers would keep drawing containers, badges and film-set overlays.
 export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v38" as const;
 
+/**
+ * 非内容节点的画布 chrome。
+ *
+ * - `card`（缺省）：普通内容卡片外壳；
+ * - `frame`：2D 组的外框，只画包围框/标签，不画内容卡片；成员身份随节点下发；
+ * - `none`：共享世界实例等只保留世界对象与选择身份，不画卡片、端口和内容底。
+ *
+ * 缺省字段保持旧 wire 兼容：旧渲染器按卡片绘制。新渲染器 MUST 在 `chrome.kind` 为
+ * `frame`/`none` 时抑制通用卡片，否则场景区/2D 组/世界模型仍会露出内容卡片。
+ */
+export type BevyNodeChrome =
+  | { kind: "card" }
+  | { kind: "frame"; groupId: string; memberNodeIds: string[] }
+  | { kind: "none" };
+
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
   sharedWorldInstance?: import("../shared-world.js").WorldInstanceData;
+  /** 可选画布 chrome；缺省为通用内容卡片。 */
+  chrome?: BevyNodeChrome;
   id: string;
   type: BevyNodeKind;
   x: number;

@@ -15,14 +15,14 @@ fn setup() -> (u32, Vec<ModelCandidate>) {
     let candidates = vec![
         ModelCandidate {
             node_id: "m".into(),
-            shared_world: false,
+            shared_world: false, empty_marker: false,
             triangles: None,
             min: [-10.; 3],
             max: [10.; 3],
         },
         ModelCandidate {
             node_id: "other".into(),
-            shared_world: false,
+            shared_world: false, empty_marker: false,
             triangles: None,
             min: [100.; 3],
             max: [120.; 3],
@@ -35,6 +35,7 @@ fn setup() -> (u32, Vec<ModelCandidate>) {
             viewport: [12., 34., 2.],
             surface: [1000., 800.],
             ordinary: true,
+            focus: None,
         },
     );
     (base, candidates)
@@ -92,8 +93,7 @@ fn combined_viewport_updates_generation_and_position_only_preserves_camera() {
             ModelPickCamera {
                 viewport: [90., 80., 0.5],
                 surface: [1000., 800.]
-                , ordinary: true
-            }
+                , ordinary: true, focus: None            }
         )
     });
     let stale = pick_query_json(&format!(
@@ -138,7 +138,7 @@ fn model_overflow_rejects_all_query_changes_before_generation_advances() {
     let (base, _) = setup();
     let extreme = vec![ModelCandidate {
         node_id: "m".into(),
-        shared_world: false,
+        shared_world: false, empty_marker: false,
         triangles: None,
         min: [f32::MAX; 3],
         max: [f32::MAX; 3],

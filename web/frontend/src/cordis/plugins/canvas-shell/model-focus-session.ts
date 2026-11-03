@@ -28,11 +28,6 @@ import {
   modelLocalAabb,
   modelLayoutAabbRelative,
   modelWorldAabbRelative,
-  decodeWorldInstanceData,
-  worldToRendererPosition,
-  worldToRendererRotation,
-  SHARED_WORLD_UNITS_PER_METER,
-  transformAabb,
   moveGesture,
   reframeFocus,
   restoreFocusCamera,
@@ -50,6 +45,7 @@ import {
   type ServerCanvas,
   type Vec3
 } from "@woohaa3/contracts";
+import { worldInstancePresentation } from "./model-world-presentation.js";
 
 /** 聚焦目标解析输入。 */
 export type FocusTargetInput = {
@@ -87,18 +83,13 @@ function sceneInput(input: FocusTargetInput) {
 /** 模型世界 AABB（含根锚点）；不可解析时返回 null。 */
 export function modelBounds(input: FocusTargetInput): ModelBounds | null {
   const scene = sceneInput(input);
-  const worldInput = input.canvas.nodeData?.[input.nodeId]?.sharedWorldInstance;
-  if (worldInput !== undefined) {
-    const world = decodeWorldInstanceData(worldInput);
-    const local = modelLocalAabb(scene);
-    if (!world.ok || !local) return null;
-    const transform = world.value.transform;
-    const anchor: Vec3 = [...worldToRendererPosition(transform.position)];
-    const rotation = worldToRendererRotation(transform.rotation);
-    const unit = transform.scale * SHARED_WORLD_UNITS_PER_METER;
-    const aabb = transformAabb({ translation: anchor, rotation: [...rotation], scale: [unit, unit, unit] }, local);
-    if (![...aabb.min, ...aabb.max].every(Number.isFinite)) return null;
-    return { aabb, ...aabbCenterRadius(aabb), anchor };
+  const local = modelLocalAabb(scene);
+  const hasWorldInstance = input.canvas.nodeData?.[input.nodeId]?.sharedWorldInstance !== undefined;
+  const world = worldInstancePresentation(input.canvas, input.nodeId, local);
+  if (hasWorldInstance) {
+    // 非法世界数据或空模型/资源未就绪都没有可聚焦几何；不能悄悄回落到旧卡片布局。
+    if (!world?.aabb) return null;
+    return { aabb: world.aabb, ...aabbCenterRadius(world.aabb), anchor: world.anchor };
   }
   const upright = modelWorldAabbRelative(scene);
   const layout = modelLayoutAabbRelative(scene);

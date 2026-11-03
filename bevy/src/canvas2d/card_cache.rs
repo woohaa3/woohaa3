@@ -24,6 +24,8 @@ struct HistoryKey {
 struct DrawKey {
     id: String,
     kind: String,
+    /// 0 card / 1 frame / 2 none；外壳变化必须重建几何分块。
+    chrome: u8,
     visual: crate::canvas_ecs::components::CardGeometryInput,
     /// 节点下方历史条呈现（change: 2026-10-12-unify-generation-history-strip）：
     /// `Some` 表示该普通节点应绘制历史条（含空圆点时仍画条与图标）；
@@ -54,6 +56,11 @@ impl DrawKey {
         Self {
             id: node.id.clone(),
             kind: node.kind.clone(),
+            chrome: match &node.chrome {
+                crate::protocol::NodeChrome::Card => 0,
+                crate::protocol::NodeChrome::Frame { .. } => 1,
+                crate::protocol::NodeChrome::None => 2,
+            },
             visual: CardVisual::from_node(node).geometry,
             history: Self::history(node),
             hide_history: attach_owner == Some(node.id.as_str()),

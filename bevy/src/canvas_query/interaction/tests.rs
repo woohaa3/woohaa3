@@ -30,6 +30,7 @@ mod spatial;
 
 fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
     GraphNode {
+        chrome: crate::protocol::NodeChrome::Card,
         shared_world_instance: None,
         model_preview: None,
         id: id.into(),

@@ -54,18 +54,33 @@ pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSna
             CACHE.with(|cache| {
                 let mut old = std::mem::take(&mut *cache.borrow_mut());
                 let mut next = Vec::new();
+                let mut published = Vec::new();
                 MOTION.with(|motion| {
                 let motion = motion.borrow();
-                for node in scene.nodes.iter().filter(|n| n.shared_world_instance.is_some() && is_model_candidate(n)) {
-                    let reference = node.model.as_ref().unwrap();
-                    let Some(model) = lookup(&reference.resource_key) else { continue };
-                    let root = super::layout::model_root_transform(node, &model, &reference.placement).to_matrix();
+                for node in scene.nodes.iter().filter(|n| n.shared_world_instance.is_some()) {
+                    let reference = node.model.as_ref();
+                    let Some(model) = reference.and_then(|reference| lookup(&reference.resource_key)) else {
+                        // 空模型/资源未就绪：以真实世界锚点作为可选中的标记候选。
+                        if let Some((min, max)) = super::layout::world_marker_bounds(node) {
+                            published.push(ModelCandidate {
+                                node_id: node.id.clone(),
+                                shared_world: true,
+                                empty_marker: true,
+                                min,
+                                max,
+                                triangles: None,
+                            });
+                        }
+                        continue;
+                    };
+                    let placement = &reference.expect("model reference").placement;
+                    let root = super::layout::model_root_transform(node, &model, placement).to_matrix();
                     let revision = if motion.0.as_deref() == Some(&node.id) { motion.2 } else { 0 };
                     let candidate = if let Some(index) = old.iter().position(|(id, asset, pose, rev, _)| id == &node.id && Arc::ptr_eq(asset, &model) && *pose == root && *rev == revision) {
                         old.swap_remove(index).4
                     } else {
                         let poses = if revision != 0 { Some(&motion.1) } else { None };
-                        let triangles = world_triangles(node, &model, &reference.placement, poses);
+                        let triangles = world_triangles(node, &model, placement, poses);
                         let mut min = Vec3::splat(f32::INFINITY);
                         let mut max = Vec3::splat(f32::NEG_INFINITY);
                         for vertex in triangles.iter().flat_map(|triangle| triangle.vertices) {
@@ -75,12 +90,13 @@ pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSna
                         }
                         if triangles.is_empty() { min = Vec3::ZERO; max = Vec3::ZERO; }
                         if !min.is_finite() || !max.is_finite() { continue; }
-                        ModelCandidate { node_id: node.id.clone(), shared_world: true, min: min.to_array(), max: max.to_array(), triangles: Some(Arc::new(triangles)) }
+                        ModelCandidate { node_id: node.id.clone(), shared_world: true, empty_marker: false, min: min.to_array(), max: max.to_array(), triangles: Some(Arc::new(triangles)) }
                     };
+                    published.push(candidate.clone());
                     next.push((node.id.clone(), model, root, revision, candidate));
                 }
                 });
-                crate::canvas_query::model_pick::replace_shared_models(next.iter().map(|entry| entry.4.clone()).collect());
+                crate::canvas_query::model_pick::replace_shared_models(published);
                 *cache.borrow_mut() = next;
             });
         }
@@ -99,6 +115,39 @@ pub(crate) fn model_candidates(
 ) -> Vec<ModelCandidate> {
     let mut candidates = Vec::new();
     for node in &scene.nodes {
+        if node.shared_world_instance.is_some() {
+            let surface = node
+                .model
+                .as_ref()
+                .and_then(|reference| lookup(&reference.resource_key))
+                .and_then(|model| {
+                    let placement = node.model.as_ref().map(|reference| &reference.placement)?;
+                    super::layout::model_world_aabb_for_node(&model, placement, node)
+                });
+            match surface {
+                Some(world) => candidates.push(ModelCandidate {
+                    shared_world: true,
+                    node_id: node.id.clone(),
+                    empty_marker: false,
+                    min: world.min,
+                    max: world.max,
+                    triangles: None,
+                }),
+                None => {
+                    if let Some((min, max)) = super::layout::world_marker_bounds(node) {
+                        candidates.push(ModelCandidate {
+                            shared_world: true,
+                            node_id: node.id.clone(),
+                            empty_marker: true,
+                            min,
+                            max,
+                            triangles: None,
+                        });
+                    }
+                }
+            }
+            continue;
+        }
         if !is_model_candidate(node) {
             continue;
         }
@@ -114,7 +163,8 @@ pub(crate) fn model_candidates(
             continue;
         };
         candidates.push(ModelCandidate {
-            shared_world: node.shared_world_instance.is_some(),
+            shared_world: false,
+            empty_marker: false,
             node_id: node.id.clone(),
             min: world.min,
             max: world.max,
@@ -249,10 +299,11 @@ mod tests {
         let scene = Scene { nodes: vec![node], ..Scene::default() };
         remember_scene(&scene);
         crate::canvas_query::model_pick::accept_models(Vec::new(), 7, Default::default());
-        let screen = crate::isometric_grid::screen_point_from_world(Vec3::new(0., 64., 0.), &Default::default());
+        let screen = crate::isometric_grid::screen_point_from_world(Vec3::new(0., 100., 0.), &Default::default());
         let request = format!(r#"{{"generation":7,"x":{},"y":{},"width":800,"height":600}}"#, screen.x, screen.y);
         let query = || serde_json::from_str::<serde_json::Value>(&crate::canvas_query::model_pick::pick_query_json(&request)).unwrap();
         refresh_shared_models(|_| None);
+        // 空模型标记只在世界锚点可命中；模型表面高度处没有陈旧三角面。
         assert!(query()["nodeId"].is_null());
         let asset = Arc::new(snapshot());
         refresh_shared_models(|_| Some(asset.clone()));
@@ -328,7 +379,7 @@ mod tests {
         let scene = Scene { nodes: vec![node], ..Scene::default() };
         remember_scene(&scene);
         crate::canvas_query::model_pick::accept_models(Vec::new(), 7, Default::default());
-        let screen = crate::isometric_grid::screen_point_from_world(Vec3::new(0., 64., 0.), &Default::default());
+        let screen = crate::isometric_grid::screen_point_from_world(Vec3::new(0., 100., 0.), &Default::default());
         let request = |generation| format!(r#"{{"generation":{generation},"x":{},"y":{},"width":800,"height":600}}"#, screen.x, screen.y);
         let query = |generation| serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request(generation))).unwrap();
         assert!(query(7)["nodeId"].is_null());
@@ -369,8 +420,13 @@ mod tests {
         let generation = crate::set_scene(&scene.to_string()).unwrap();
         let view = crate::isometric_grid::IsometricGridView { x: 120., y: 80., zoom: 1.5 };
         let screen = crate::isometric_grid::screen_point_from_world(Vec3::new(128., 64., 64.), &view);
+        let high = crate::isometric_grid::screen_point_from_world(Vec3::new(128., 110., 64.), &view);
         let query = |generation| {
             let request = format!(r#"{{"generation":{generation},"x":{},"y":{},"width":800,"height":600}}"#, screen.x, screen.y);
+            serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request)).unwrap()
+        };
+        let query_high = |generation| {
+            let request = format!(r#"{{"generation":{generation},"x":{},"y":{},"width":800,"height":600}}"#, high.x, high.y);
             serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request)).unwrap()
         };
         assert_eq!(query(generation)["nodeId"], "model");
@@ -387,7 +443,8 @@ mod tests {
         assert_eq!(query(generation)["nodeId"], "model");
         assert_eq!(query(generation.wrapping_sub(1))["reason"], "stale");
         crate::bridge::clear_model_assets();
-        assert!(query(generation)["nodeId"].is_null());
+        // 释放后只在世界锚点保留可选中的空模型标记；模型表面高度不得残留旧三角面。
+        assert!(query_high(generation)["nodeId"].is_null());
         crate::prepare_and_register_model_resource(request).unwrap();
         assert_eq!(query(generation)["nodeId"], "model");
         // Card movement must not move the shared-world surface or rebuild it.
@@ -539,6 +596,48 @@ mod tests {
         remember_scene(&scene);
         assert_eq!([query(points[0]), query(points[1])], before);
         assert_eq!(before, ["red", "green"]);
+        crate::bridge::clear_model_assets();
+    }
+
+    #[test]
+    fn empty_world_model_anchor_is_selectable_at_instance_pose() {
+        crate::bridge::clear_model_assets();
+        let node = node(r#"{"id":"empty","type":"model3d","x":9000,"y":9000,"width":260,"height":195,"chrome":{"kind":"none"},"sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i","transform":{"version":"shared-world-v1","position":{"u":2,"v":3,"h":1},"rotation":[0,0,0,1],"scale":1}}}"#);
+        remember_scene(&Scene { nodes: vec![node], ..Scene::default() });
+        crate::canvas_query::model_pick::accept_models(Vec::new(), 21, Default::default());
+        let query = |point: Vec3| {
+            let screen = crate::isometric_grid::screen_point_from_world(point, &Default::default());
+            let request = format!(r#"{{"generation":21,"x":{},"y":{},"width":800,"height":600}}"#, screen.x, screen.y);
+            serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request)).unwrap()["nodeId"].clone()
+        };
+        // 世界锚点（u=2,v=3,h=1 → renderer 128,64,-192）可选中；卡片坐标不参与。
+        assert_eq!(query(Vec3::new(128., 80., -192.)), "empty");
+        assert!(query(Vec3::new(0., 80., 0.)).is_null());
+        crate::bridge::clear_model_assets();
+    }
+
+    #[test]
+    fn focus_camera_ray_uses_perspective_projection() {
+        crate::bridge::clear_model_assets();
+        let request = r##"{"resourceVersion":"woohaa-prepared-model-resource-v1","sceneVersion":"woohaa-model-scene-ir-v2","ops":[{"t":"box","id":"body","position":[0,1,0],"rotation":[0,0,0],"scale":[1,1,1],"color":"#ffffff","size":[2,2,2]}]}"##;
+        let metadata: serde_json::Value = serde_json::from_str(&crate::prepare_and_register_model_resource(request).unwrap()).unwrap();
+        let mut scene: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/shared-world/render-scene.json")).unwrap();
+        scene["nodes"][0]["model"] = serde_json::json!({"resourceKey":metadata["resourceKey"]});
+        scene["nodes"][0]["sharedWorldInstance"]["transform"] = serde_json::json!({
+            "version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1
+        });
+        scene["surface"] = serde_json::json!({"width":800,"height":600,"pixelRatio":1});
+        scene["modelFocus"] = serde_json::json!({
+            "version":"woohaa-model-focus-v1","nodeId":"model","target":[0,64,0],
+            "yaw":0.6,"pitch":-0.3,"distance":1000,"fov":0.8,"radius":64
+        });
+        let generation = crate::set_scene(&scene.to_string()).unwrap();
+        let query = |x: f32, y: f32| {
+            let request = format!(r#"{{"generation":{generation},"x":{x},"y":{y},"width":800,"height":600}}"#);
+            serde_json::from_str::<serde_json::Value>(&crate::query_model_pick(&request)).unwrap()["nodeId"].clone()
+        };
+        assert_eq!(query(400., 300.), "model");
+        assert!(query(4., 4.).is_null());
         crate::bridge::clear_model_assets();
     }
 }
