@@ -126,6 +126,19 @@ type SourceLike = {
 };
 
 /**
+ * 素材库变更的广播。
+ *
+ * 见 `withLibrary` 里 `reload` 的说明：保存成功不会让数据源自己重读，必须有人明确通知。
+ * 放在模块级而不是实例上 —— 写素材库的地方（`pinterest-save.ts`）离图库装配很远。
+ */
+const liveSources = new Set<() => void>();
+
+/** 素材库有新内容（保存成功、扩展登记成功之后调用）。 */
+export function notifyLibraryChanged(): void {
+  for (const reload of [...liveSources]) reload();
+}
+
+/**
  * 把素材库并进一个已有的图片数据源，**不改它的合并逻辑**。
  *
  * - 条目：`getItems()` = 原条目 + 素材库条目（素材库在前，保持各自的时间顺序由面板排序）；
@@ -166,8 +179,19 @@ export function withLibrary<T extends SourceLike>(
   const unsubscribeBase = base.subscribe(notify);
 
   let loading: Promise<void> | null = null;
+  /**
+   * 在途期间又被要求重读。
+   *
+   * 只在途去重会吞掉这种请求：订阅时触发的那次拉取还在路上，紧接着保存成功又要求重读，
+   * 后者发现 `loading` 非空就复用了前一个 promise —— 拿回来的是**请求前的旧数据**，
+   * 表现为「保存了但不出现」。所以在途时只记一笔，等这次结束后再补一次。
+   */
+  let dirty = false;
   const loadLibrary = (): Promise<void> => {
-    if (loading) return loading;
+    if (loading) {
+      dirty = true;
+      return loading;
+    }
     loading = input
       .fetchLibrary()
       .then((fetched) => {
@@ -181,10 +205,28 @@ export function withLibrary<T extends SourceLike>(
         loading = null;
         lastBase = null;
         notify();
+        if (dirty) {
+          dirty = false;
+          void loadLibrary();
+        }
       });
     return loading;
   };
-  // 面板一打开就要看见素材库：默认视图包含它
+
+  /**
+   * 素材库的变更通知。
+   *
+   * 面板与数据源是分开的两条路：保存成功（Pinterest 右键、扩展）之后，后端多了一条记录，
+   * 但数据源不会自己去重读 —— 之前只有「应用刷新、组件重新装配」才会重新拉一次，
+   * 表现就是「保存了要刷新才看到」。
+   *
+   * 所以提供一个广播：谁改了素材库就 `notifyLibraryChanged()`，所有活着的素材库数据源
+   * 重新读一次并通知面板。用全局登记表而不是把引用层层传下去，是因为写素材库的地方
+   * （Pinterest 的保存流程）离图库装配很远，传引用会穿过三四层不相干的代码。
+   */
+  const reload = () => { lastBase = null; void loadLibrary(); };
+  liveSources.add(reload);
+  // 装配时就先读一次：默认视图包含素材库，面板一打开就该有内容
   void loadLibrary();
 
   const wrapped = Object.create(base) as T;
@@ -195,7 +237,15 @@ export function withLibrary<T extends SourceLike>(
     } },
     subscribe: {
       value: (listener: () => void) => {
+        /*
+         * 订阅者从 0 变 1（面板重新打开）时补一次合并：数据源在装配期就建好了，
+         * 面板关着的时候保存的图，`items` 里其实已经有了，但 `merged` 还停在旧的那份
+         * （没有订阅者就不会有人触发 rebuild）。这里只重建合并结果、重读素材库，
+         * 不改变「装配时已加载」的行为。
+         */
+        const reopening = listeners.size === 0;
         listeners.add(listener);
+        if (reopening) reload();
         return () => {
           listeners.delete(listener);
         };
@@ -226,6 +276,13 @@ export function withLibrary<T extends SourceLike>(
     dispose: {
       value: () => {
         unsubscribeBase();
+        /*
+         * **不**从广播表里移除。`dispose` 的调用方是图片面板（`canvas-image-panel.tsx`
+         * 卸载时 `source.dispose?.()`），不是数据源自己的生命周期 —— 面板一关，数据源还活着、
+         * 下次打开还要用它。真把它从广播表里删掉，之后保存就再也通知不到，表现为
+         * 「第一次关掉面板之后，保存永远要刷新才看得到」。
+         * 登记表里每条只是对同一个闭包的引用，数量与装配次数一致（每次装配一个），不会累积。
+         */
         listeners.clear();
         base.dispose?.();
       }

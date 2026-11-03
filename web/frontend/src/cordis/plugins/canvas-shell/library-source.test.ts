@@ -9,6 +9,7 @@ import {
   libraryEntryToAsset,
   libraryEntryToItem,
   matchesCanvasFilter,
+  notifyLibraryChanged,
   planPlaceLibraryItem,
   withLibrary,
   type LibraryEntry
@@ -248,4 +249,75 @@ describe("withLibrary 包装", () => {
     expect(source.loadingOthers).toBe(false);
     source.dispose?.();
   });
+});
+
+describe("素材库实时性（用户报告：保存后要刷新才看到）", () => {
+  const resolveUrl = (url: string) => url;
+  const place = () => ({ ok: true as const });
+
+  it("广播后重新读一次：面板不重建也能看到新存的图", async () => {
+    const base = baseSource([canvasItem("a")]);
+    let fetched: LibraryEntry[] = [];
+    const source = withLibrary(base, { fetchLibrary: async () => fetched, resolveUrl, placeLibraryItem: place });
+    await flush();
+    expect(source.getItems().some((item) => item.id === HASH)).toBe(false);
+
+    const listener = vi.fn();
+    source.subscribe(listener);
+
+    // 后端多了一条（模拟保存成功）
+    fetched = [ENTRY];
+    notifyLibraryChanged();
+    await flush();
+
+    expect(source.getItems().map((item) => item.id)).toEqual(["a", HASH]);
+    expect(listener).toHaveBeenCalled();
+    source.dispose?.();
+  });
+
+  it("广播后仍然返回新的数组引用（否则 useSyncExternalStore 不会重渲染）", async () => {
+    const base = baseSource([]);
+    let fetched: LibraryEntry[] = [];
+    const source = withLibrary(base, { fetchLibrary: async () => fetched, resolveUrl, placeLibraryItem: place });
+    await flush();
+    const before = source.getItems();
+    fetched = [ENTRY];
+    notifyLibraryChanged();
+    await flush();
+    expect(source.getItems()).not.toBe(before);
+    source.dispose?.();
+  });
+
+  it("dispose（面板卸载）之后仍然参与广播 —— 数据源没死，下次打开面板还要用它", async () => {
+    // `dispose` 的调用方是图片面板卸载，不是数据源销毁。如果在 dispose 里退出广播表，
+    // 关过一次面板之后保存就再也通知不到，表现是「以后每次保存都要刷新才看得到」（真机踩到过）。
+    const base = baseSource([]);
+    let fetched: LibraryEntry[] = [];
+    const source = withLibrary(base, { fetchLibrary: async () => fetched, resolveUrl, placeLibraryItem: place });
+    await flush();
+    source.dispose?.();
+
+    fetched = [ENTRY];
+    notifyLibraryChanged();
+    await flush();
+    expect(source.getItems().map((item) => item.id)).toEqual([HASH]);
+  });
+
+  it("面板关掉再打开：订阅后立刻能看到关着期间存的图", async () => {
+    const base = baseSource([]);
+    let fetched: LibraryEntry[] = [];
+    const source = withLibrary(base, { fetchLibrary: async () => fetched, resolveUrl, placeLibraryItem: place });
+    await flush();
+
+    const unsubscribe = source.subscribe(() => undefined);
+    unsubscribe();
+    fetched = [ENTRY];
+
+    const listener = vi.fn();
+    const stop = source.subscribe(listener);
+    await flush();
+    expect(source.getItems().map((item) => item.id)).toEqual([HASH]);
+    stop();
+  });
+
 });

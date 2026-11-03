@@ -25,6 +25,7 @@ import { buildUploadedAsset, planUploadedNode, type UploadedMedia } from "../../
 import { nativeProtocolUrl } from "../../../desktop/native-protocol.js";
 import { desktopBootstrap } from "../../../extension-api/host-platform.js";
 import { nextPlacement } from "./image-library.js";
+import { notifyLibraryChanged } from "./library-source.js";
 
 export type PinterestSaveMode = "library" | "canvas";
 
@@ -117,6 +118,8 @@ export async function handlePinterestSave(event: PinterestSaveEvent, deps: Pinte
   if (event.mode === "library") {
     try {
       await deps.registerLibrary({ media, title: event.title, sourceUrl: event.sourceUrl, pageUrl: event.pageUrl });
+      // 登记成功后通知素材库重读：否则面板要等应用刷新才看得到新图
+      notifyLibraryChanged();
       return { ok: true, message: "已保存到素材库" };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : "保存到素材库失败" };
