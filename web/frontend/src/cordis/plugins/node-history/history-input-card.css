@@ -1,0 +1,110 @@
+/* 版本缩略图旁的「当时的输入」卡片。位置由组件写内联 left/top；fixed 与其它画布 overlay 同一坐标系。 */
+.history-input-card {
+	position: fixed;
+	z-index: 25;
+	box-sizing: border-box;
+	width: 272px;
+	padding: 12px 14px;
+	border: 1px solid var(--app-web-border, rgba(0, 0, 0, 0.12));
+	border-radius: 14px;
+	background: var(--app-web-panel);
+	color: var(--app-web-text-primary);
+	box-shadow: 0 8px 24px var(--app-web-shadow);
+	font-size: 13px;
+	line-height: 1.5;
+	pointer-events: auto;
+}
+
+.history-input-card__close {
+	position: absolute;
+	top: 8px;
+	right: 12px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--app-web-text-secondary);
+	font-size: 12px;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.history-input-card__row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 8px;
+	padding-right: 32px;
+}
+
+.history-input-card__key {
+	flex: none;
+	width: 44px;
+	color: var(--app-web-text-secondary);
+}
+
+.history-input-card__value {
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.history-input-card__refs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.history-input-card__ref {
+	width: 32px;
+	height: 32px;
+	border-radius: 6px;
+	object-fit: cover;
+	background: var(--app-web-border, rgba(0, 0, 0, 0.08));
+}
+
+.history-input-card__ref--gone {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 10px;
+	color: var(--app-web-text-secondary);
+}
+
+.history-input-card__prompt {
+	max-height: 112px;
+	margin: 8px 0 10px;
+	padding: 8px 10px;
+	overflow: auto;
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--app-web-text-primary) 5%, transparent);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.history-input-card__empty {
+	margin: 0;
+	color: var(--app-web-text-secondary);
+}
+
+.history-input-card__actions {
+	display: flex;
+	gap: 8px;
+}
+
+.history-input-card__button {
+	flex: 1;
+	height: 32px;
+	border: 1px solid var(--app-web-border, rgba(0, 0, 0, 0.12));
+	border-radius: 8px;
+	background: transparent;
+	color: var(--app-web-text-primary);
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.history-input-card__button--primary {
+	border-color: transparent;
+	background: var(--app-web-text-primary);
+	color: var(--app-web-panel);
+}

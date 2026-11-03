@@ -21,6 +21,7 @@ import { NodeHistoryController, type NodeHistoryClient, CURRENT_PRESENTATION_ID 
 import { createModelThumbnailRenderer, type ModelThumbnailRenderer } from "./model-thumbnail-render.js";
 import type { CanvasHistoryClient } from "./canvas-history-controller.js";
 import { HistoryLayersOverlay } from "./history-layers-overlay.js";
+import { mediaUrlFor } from "../../services/paths.js";
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ComponentType } from "react";
 const NodeHistoryPanel = lazy(() => import("./panel.js").then(module => ({ default: module.NodeHistoryPanel })));
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -157,6 +158,14 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
             canvasId={() => ctx.get("canvasScope")?.canvasId() ?? canvasId}
             previewUrl={(input) => ctx.canvasRemote.nodeHistoryPreviewUrl(input)}
             onSelect={(request) => (ctx.get(INLINE_HISTORY_SERVICE as never) as InlineHistoryService | undefined)?.activate(request)}
+            getInput={(nodeId, entryId) => (ctx.get(INLINE_HISTORY_SERVICE as never) as InlineHistoryService | undefined)?.snapshot().get(nodeId)?.find((item) => item.entryId === entryId)?.source.inputSnapshot}
+            assetUrl={(assetId) => {
+              const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
+              const key = canvas?.assets.find((asset) => asset.id === assetId)?.metadata?.storageKey;
+              return typeof key === "string" && key !== "" ? mediaUrlFor(key) : null;
+            }}
+            modelLabel={(modelKey) => { const state = ctx.taskCatalog.getState(); return state.status === "ready" ? (state.catalog.models.find((model) => model.modelKey === modelKey)?.title ?? modelKey) : modelKey; }}
+            onReedit={(nodeId, snapshot) => ctx.emit("ui.node-history.reedit-requested", { nodeId, snapshot })}
           />
         )
       });
@@ -557,7 +566,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
     },
     {
       name: NODE_HISTORY_PLUGIN_ID,
-      inject: ["canvasState", "compositeAssets", "slots", "canvasRuntime", "canvasRemote", "canvasSession", "dialogs", "canvasNavigation"]
+      inject: ["canvasState", "compositeAssets", "slots", "canvasRuntime", "canvasRemote", "canvasSession", "dialogs", "canvasNavigation", "taskCatalog"]
     }
   );
 }

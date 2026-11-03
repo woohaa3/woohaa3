@@ -54,14 +54,15 @@ function publish(nodeId: string, layers: ReturnType<typeof layer>[], truncated =
   });
 }
 
-function render(onSelect = vi.fn()) {
+function render(onSelect = vi.fn(), overrides: Record<string, unknown> = {}) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   roots.add(root);
   const previewUrl = vi.fn((input: { entryId: string }) => `/thumb/${input.entryId}`);
   act(() => {
-    root.render(<HistoryLayersOverlay canvasId={() => "canvas-1"} previewUrl={previewUrl as never} onSelect={onSelect} />);
+    root.render(<HistoryLayersOverlay canvasId={() => "canvas-1"} previewUrl={previewUrl as never} onSelect={onSelect}
+      getInput={() => undefined} assetUrl={() => null} modelLabel={(key) => key} onReedit={vi.fn()} {...(overrides as object)} />);
   });
   return { container, onSelect, previewUrl };
 }
@@ -150,5 +151,55 @@ describe("缩略图变体", () => {
     publish("vid", [layer("a")], 0, "video");
     expect(container.querySelector("img")).not.toBeNull();
     expect(previewUrl).toHaveBeenCalledWith({ canvasId: "canvas-1", nodeId: "vid", entryId: "entry-a", variant: "poster" });
+  });
+});
+
+describe("当时的输入卡片", () => {
+  const snapshot = {
+    prompt: "变成夜景",
+    modelKey: "ppserver:m1",
+    references: [{ assetId: "asset-1", role: "reference_image" }, { assetId: "asset-gone", role: "reference_image" }],
+    selfReferenceAssetId: "asset-1"
+  };
+
+  it("点成功版本的缩略图展开卡片，显示提示词、模型与参考图（已删除的标出来）；再点收起", () => {
+    const { container } = render(vi.fn(), {
+      getInput: (_nodeId: string, entryId: string) => (entryId === "entry-new" ? snapshot : undefined),
+      assetUrl: (assetId: string) => (assetId === "asset-1" ? "/media/a1" : null),
+      modelLabel: () => "全能生图 Pro"
+    });
+    publish("img", [layer("old"), layer("new")]);
+    const buttons = container.querySelectorAll<HTMLElement>(".history-layer");
+    act(() => { buttons[0]!.click(); });
+    const card = container.querySelector<HTMLElement>(".history-input-card")!;
+    expect(card.textContent).toContain("变成夜景");
+    expect(card.textContent).toContain("全能生图 Pro");
+    expect(card.querySelector("img")!.getAttribute("src")).toBe("/media/a1");
+    expect(card.textContent).toContain("已删除");
+    act(() => { buttons[0]!.click(); });
+    expect(container.querySelector(".history-input-card")).toBeNull();
+  });
+
+  it("旧版本没有快照：只说明没有记录，不给重新编辑", () => {
+    const { container } = render();
+    publish("img", [layer("old")]);
+    act(() => { container.querySelector<HTMLElement>(".history-layer")!.click(); });
+    const card = container.querySelector<HTMLElement>(".history-input-card")!;
+    expect(card.textContent).toContain("没有保存当时的输入");
+    expect(card.textContent).not.toContain("重新编辑");
+  });
+
+  it("重新编辑把节点与快照交给回调并收起卡片；失败版本不展开", () => {
+    const onReedit = vi.fn();
+    const { container } = render(vi.fn(), { getInput: () => snapshot, onReedit });
+    publish("img", [layer("bad", { state: "failed", entryId: undefined }), layer("ok")]);
+    const buttons = container.querySelectorAll<HTMLElement>(".history-layer");
+    act(() => { buttons[1]!.click(); });
+    expect(container.querySelector(".history-input-card")).toBeNull();
+    act(() => { buttons[0]!.click(); });
+    const edit = [...container.querySelectorAll<HTMLElement>(".history-input-card__button")].find((b) => b.textContent === "重新编辑")!;
+    act(() => { edit.click(); });
+    expect(onReedit).toHaveBeenCalledWith("img", snapshot);
+    expect(container.querySelector(".history-input-card")).toBeNull();
   });
 });

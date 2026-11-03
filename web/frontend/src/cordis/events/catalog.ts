@@ -30,6 +30,8 @@ export type FrontendEventPayloads = {
   "ui.video-frame-capture.open-requested": { nodeId: string };
   "ui.node-history.open-requested": { nodeId: string };
   "ui.node-history.switch-requested": { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string };
+  /** 版本卡片「重新编辑」→ 请求把该版本生成时的输入载回节点的对话框（由 task-execution 消费）。 */
+  "ui.node-history.reedit-requested": { nodeId: string; snapshot: import("@woohaa3/contracts").RunInputSnapshot };
   "ui.node-download.save-requested": { nodeId: string };
   /**
    * 双击拍摄镜头预览卡片 → 进入所属片场并选择该镜头
@@ -103,6 +105,12 @@ export const frontendEventCatalog = {
     kind: "request",
     producers: ["canvas-runtime"],
     consumers: ["seedance-video-interaction"]
+  },
+  "ui.node-history.reedit-requested": {
+    scope: "canvas",
+    kind: "request",
+    producers: ["node-history"],
+    consumers: ["task-execution"]
   },
   "ui.node-history.open-requested": {
     scope: "canvas",

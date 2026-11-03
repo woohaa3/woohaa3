@@ -23,6 +23,7 @@ describe("Frontend Event Catalog（任务 2.1）", () => {
       "ui.media-preview.open-requested",
       "ui.node-download.save-requested",
       "ui.node-history.open-requested",
+      "ui.node-history.reedit-requested",
       "ui.node-history.switch-requested",
       "ui.node-rename.open-requested",
       "ui.shot-preview.enter-requested",

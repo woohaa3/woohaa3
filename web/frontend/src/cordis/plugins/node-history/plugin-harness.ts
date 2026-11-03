@@ -85,6 +85,7 @@ export async function makeHarness(input: {
       ctx.provide("inputScopes" as never, inputScopes as never);
       ctx.provide("dialogs" as never, dialogs as never);
       ctx.provide("canvasNavigation" as never, navigation as never);
+      ctx.provide("taskCatalog" as never, { getState: () => ({ status: "loading" }), subscribe: () => () => undefined } as never);
       ctx.provide("canvasSession" as never, { isWritable: () => input.writable ?? true } as never);
       ctx.provide("canvasRemote" as never, (input.canvasRemote ?? {}) as never);
       if (input.imageEdit !== undefined) ctx.provide("imageEdit" as never, input.imageEdit as never);

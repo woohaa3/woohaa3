@@ -8,10 +8,13 @@
  * 位置由 `nodeScreenRect` 投影，与「添加到对话框」胶囊同一套刷新方式：视口、场景、帧回调或外框
  * 尺寸变化时，只有渲染过的矩形与此刻不同才重渲染，静止时不产生渲染。
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { RunInputSnapshot } from "@woohaa3/contracts";
 import { useService } from "../../react.js";
 import { historyLayersStore, type HistoryLayer } from "../../services/history-layers-store.js";
+import { HistoryInputCard, INPUT_CARD_WIDTH } from "./history-input-card.js";
 import "./history-layers.css";
+import "./history-input-card.css";
 
 /** 缩略图边长与间距（CSS 里同名数值保持一致）。 */
 export const LAYER_SIZE = 40;
@@ -36,6 +39,12 @@ type Props = {
   canvasId: () => string;
   previewUrl: (input: { canvasId: string; nodeId: string; entryId: string; variant: "preview" | "poster" }) => string;
   onSelect: (request: LayerSelectRequest) => void;
+  /** 某个版本生成时的输入快照；旧版本没有则返回 undefined。 */
+  getInput: (nodeId: string, entryId: string) => RunInputSnapshot | undefined;
+  assetUrl: (assetId: string) => string | null;
+  modelLabel: (modelKey: string) => string;
+  /** 「重新编辑」：把快照载回该节点的对话框。 */
+  onReedit: (nodeId: string, snapshot: RunInputSnapshot) => void;
 };
 
 type Rect = { left: number; top: number; width: number; height: number };
@@ -75,12 +84,14 @@ function layerLabel(layer: HistoryLayer): string {
   }
 }
 
-export function HistoryLayersOverlay({ canvasId, previewUrl, onSelect }: Props) {
+export function HistoryLayersOverlay({ canvasId, previewUrl, onSelect, getInput, assetUrl, modelLabel, onReedit }: Props) {
   const runtime = useService("canvasRuntime");
   const byNode = useSyncExternalStore(historyLayersStore.subscribe, historyLayersStore.getSnapshot, historyLayersStore.getSnapshot);
   useSyncExternalStore(runtime.subscribeViewport, runtime.viewportVersion, runtime.viewportVersion);
   const viewportWidth = useSyncExternalStore(subscribeResize, readViewportWidth, readViewportWidth);
   const [, setTick] = useState(0);
+  /** 当前展开「当时的输入」卡片的版本（点缩略图切换，再点收起）。 */
+  const [openInput, setOpenInput] = useState<{ nodeId: string; entryId: string } | null>(null);
   const renderedKey = useRef("");
 
   useEffect(() => {
@@ -124,9 +135,11 @@ export function HistoryLayersOverlay({ canvasId, previewUrl, onSelect }: Props) 
     <>
       {columns.map(({ nodeId, nodeType, rect, layers, hidden }) => {
         const position = layersColumnPosition(rect, viewportWidth);
+        const flipped = position.left < rect.left;
+        const cardOpen = openInput?.nodeId === nodeId ? openInput.entryId : null;
         return (
+          <Fragment key={nodeId}>
           <div
-            key={nodeId}
             className="history-layers"
             style={{ left: `${Math.round(position.left)}px`, top: `${Math.round(position.top)}px` }}
             data-node-id={nodeId}
@@ -147,12 +160,17 @@ export function HistoryLayersOverlay({ canvasId, previewUrl, onSelect }: Props) 
                   aria-pressed={layer.selected === true}
                   aria-label={layerLabel(layer)}
                   title={layerLabel(layer)}
-                  onClick={() => onSelect({
+                  onClick={() => {
+                    setOpenInput((previous) => layer.state !== "succeeded" || !layer.entryId || (previous?.nodeId === nodeId && previous.entryId === layer.entryId)
+                      ? null
+                      : { nodeId, entryId: layer.entryId });
+                    onSelect({
                     nodeId,
                     ...(layer.presentationId ? { presentationId: layer.presentationId } : {}),
                     ...(layer.entryId ? { entryId: layer.entryId } : {}),
                     ...(layer.operationId ? { operationId: layer.operationId } : {})
-                  })}
+                  });
+                  }}
                 >
                   {showImage ? (
                     <img
@@ -170,6 +188,20 @@ export function HistoryLayersOverlay({ canvasId, previewUrl, onSelect }: Props) 
             })}
             {hidden > 0 ? <span className="history-layers__more">+{hidden}</span> : null}
           </div>
+          {cardOpen ? (
+            <HistoryInputCard
+              snapshot={getInput(nodeId, cardOpen)}
+              assetUrl={assetUrl}
+              modelLabel={modelLabel}
+              onReedit={(snapshot) => { onReedit(nodeId, snapshot); setOpenInput(null); }}
+              onClose={() => setOpenInput(null)}
+              style={{
+                left: `${Math.round(flipped ? position.left - 8 - INPUT_CARD_WIDTH : position.left + LAYER_SIZE + 8)}px`,
+                top: `${Math.round(position.top)}px`
+              }}
+            />
+          ) : null}
+          </Fragment>
         );
       })}
     </>

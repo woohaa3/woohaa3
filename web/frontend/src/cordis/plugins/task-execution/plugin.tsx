@@ -37,6 +37,7 @@ import { GROUP_BULK_ACTION_ID, GroupRunSummaryStore, resolveGroupBulkDescriptor 
 import { HoverComposerButton } from "./hover-composer-button.js";
 import { installHoverComposerProbe } from "./hover-composer-probe.js";
 import { nodeDraftStore } from "./drafts.js";
+import { reeditFromSnapshot } from "./reedit.js";
 import { registerGenerationTraceMenu } from "./generation-trace.js";
 import { GENERATION_TRACE_DIALOG_ID, registerGenerationTraceDialog } from "./generation-trace-dialog.js";
 import { createTaskMonitorRemote } from "../../../shared/task-trace/remote.js";
@@ -398,6 +399,10 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
       // 退出的原因：那条横条由 Bevy 绘制、Rust 命中，只在**单选**时出现，于是这个动作要
       // 「先点一下卡片」才看得见。悬停是瞬时呈现，不属于选中语义；放进横条就等于把参考稿
       // 的交互做反了。胶囊走 DOM overlay，位置由 `nodeScreenRect` 投影。
+      // 版本卡片「重新编辑」：把该版本生成时的输入载回对话框（node-history 只发请求，不跨插件 import）。
+      const offReedit = ctx.on("ui.node-history.reedit-requested", (payload) => {
+        reeditFromSnapshot(ctx, payload.nodeId, payload.snapshot);
+      });
       const removeHoverComposer = ctx.slots.register("canvas.overlay", {
         id: "hover-composer",
         owner: TASK_EXECUTION_PLUGIN_ID,
@@ -505,6 +510,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           removeGenerationTraceDialog();
           removeGroupBulkAction();
           removeHoverComposer();
+          offReedit();
           disposeHoverComposerProbe();
           removeGroupSummaryOverlay();
           offGroupRun();
