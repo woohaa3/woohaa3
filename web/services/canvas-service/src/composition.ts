@@ -746,6 +746,13 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
     acquire: async (intent) => (await spatialRepository()).acquireSpatialRun(intent),
     cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
+    readOccupancy: async (canvasId, targets) => {
+      try {
+        return (await spatialRepository()).readSpatialOccupancy(canvasId, targets);
+      } catch {
+        return { ok: false, reason: "store-unavailable" } as const;
+      }
+    },
     findLatest: async (canvasId, operationId) => {
       const repository = await spatialRepository();
       return repository.findLatestWorldAuthoringCommand(canvasId, operationId);

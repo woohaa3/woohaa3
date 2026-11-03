@@ -18,6 +18,7 @@ import {
   stableStringify,
   type SceneAreaPlan,
   type ServerCanvas,
+  type WorldAuthoritySnapshot,
   type WorldAuthoringCommandReceipt,
   type WorldAuthoringConflict,
   type WorldAuthoringExecuteInput,
@@ -28,6 +29,8 @@ import {
   type WorldAuthoringHistoryOutcome,
   type WorldAuthoringPrepareOutcome,
   type WorldObjectIdentity,
+  type WorldObjectVersion,
+  type WorldScopeOccupancySnapshot,
   type WorldToolContext,
   type WorldToolContextOutcome,
   type WorldToolContextRequest,
@@ -44,7 +47,7 @@ import {
   type WorldAuthoringAuthority
 } from "./authority.js";
 import { buildForwardCommands, buildInverseCommands } from "./scene-area-command-mapping.js";
-import type { LeaseConflict, LeaseIntent, SpatialAcquireResult, SpatialWriteContext } from "./spatial-leases.js";
+import type { LeaseConflict, LeaseIntent, SpatialAcquireResult, SpatialOccupancyReadResult, SpatialWriteContext } from "./spatial-leases.js";
 
 export type WorldAuthoringServiceDeps = {
   authority: WorldAuthoringAuthority;
@@ -52,6 +55,11 @@ export type WorldAuthoringServiceDeps = {
   acquire(intent: LeaseIntent): Promise<SpatialAcquireResult>;
   cancel(canvasId: string, requestId: string): Promise<void>;
   findLatest(canvasId: string, operationId: string): Promise<YjsCommandRecord | null>;
+  /**
+   * Read-only durable occupancy for the exact in-scope objects. Omitted means the
+   * host has no authoritative lease store, which must surface as `unknown`, never idle.
+   */
+  readOccupancy?(canvasId: string, targets: WorldObjectIdentity[]): Promise<SpatialOccupancyReadResult>;
   now?: () => string;
 };
 
@@ -101,7 +109,7 @@ function planFailure(code: string, operationId: string): WorldAuthoringFailure {
 
 /** Map plan members against the canonical writable set (and optional tool context). */
 function validatePlanSource(
-  snapshot: Extract<WorldAuthoringPrepareOutcome, { ok: true }>["snapshot"],
+  snapshot: WorldAuthoritySnapshot,
   plan: SceneAreaPlan,
   context: WorldToolContext | null
 ): WorldAuthoringFailure | null {
@@ -258,6 +266,30 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
     return { ok: true, room, canvas: inspected.canvas };
   }
 
+  /**
+   * Read the durable lock facts for exactly the classified in-scope objects. This is
+   * a pure read: no run/lock/capability is created and no canonical state is touched.
+   */
+  async function occupancyFor(
+    canvasId: string,
+    scope: WorldScopeOccupancySnapshot["scope"],
+    targets: WorldObjectVersion[]
+  ): Promise<WorldScopeOccupancySnapshot> {
+    const base = { version: "world-scope-occupancy-v1" as const, scope };
+    const inScope: WorldObjectIdentity[] = targets.map(target => target.kind === "instance"
+      ? { kind: "instance", instanceId: target.instanceId }
+      : { kind: "camera", cameraId: target.cameraId });
+    if (!deps.readOccupancy) return { ...base, state: "unknown", locks: [], reason: "store-unavailable" };
+    try {
+      const read = await deps.readOccupancy(canvasId, inScope);
+      if (!read.ok) return { ...base, state: "unknown", locks: [], reason: read.reason };
+      return { ...base, state: read.locks.length > 0 ? "occupied" : "idle", locks: read.locks };
+    } catch {
+      // A store failure is unknown, not an empty (idle) scope.
+      return { ...base, state: "unknown", locks: [], reason: "store-unavailable" };
+    }
+  }
+
   async function prepare(
     input: { canvasId: string; areaId: string },
     options?: { signal?: AbortSignal }
@@ -268,7 +300,11 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
     if (!("room" in snapshot)) return snapshot;
     const prepared = await deps.authority.prepareCanvas(snapshot.canvas, { kind: "scene-area", areaId: input.areaId });
     if (!prepared.ok) return failure(prepared.code, prepared.message);
-    return prepared;
+    const occupancy = await occupancyFor(snapshot.canvas.id, prepared.snapshot.scope, [
+      ...prepared.snapshot.writable,
+      ...prepared.snapshot.readOnly
+    ]);
+    return { ok: true, snapshot: { ...prepared.snapshot, occupancy } };
   }
 
   async function issueContext(input: WorldToolContextRequest): Promise<WorldToolContextOutcome> {

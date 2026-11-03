@@ -155,4 +155,40 @@ describe("durable spatial leases", () => {
     expect(recovered.acquire(first).intent.runId).toBe("one");
     reopened.close();
   });
+  it("reads current occupancy facts without touching runs, locks or other canvases", () => {
+    const { file, a, b, one, two } = fixture();
+    one.acquire(intent("instance-owner", [instance("shared")]));
+    two.acquire({ ...intent("camera-owner"), epoch: 3, writable: [camera("shared")] });
+    const other = { ...intent("other-canvas", [instance("shared"), camera("shared")]), canvasId: "canvas-other" };
+    one.acquire(other);
+
+    const read = one.readOccupancy("canvas", [instance("shared"), camera("shared"), instance("missing")]);
+    expect(read).toEqual([
+      { target: { kind: "instance", instanceId: "shared" }, runId: "instance-owner", epoch: 1, state: "active" },
+      { target: { kind: "camera", cameraId: "shared" }, runId: "camera-owner", epoch: 3, state: "active" }
+    ]);
+    expect(one.readOccupancy("canvas-other", [instance("shared"), camera("shared")]).map(lock => lock.runId))
+      .toEqual(["other-canvas", "other-canvas"]);
+    // Reading is not a write: retries keep the same runs and locks.
+    expect(one.readOccupancy("canvas", [instance("shared")])).toEqual(one.readOccupancy("canvas", [instance("shared")]));
+    expect(one.lookup("canvas", "instance-owner")?.state).toBe("active");
+
+    one.cancel("canvas", "instance-owner");
+    expect(one.readOccupancy("canvas", [instance("shared")])).toEqual([
+      { target: { kind: "instance", instanceId: "shared" }, runId: "instance-owner", epoch: 1, state: "cancelled" }
+    ]);
+    expect(() => one.validateUnoccupied("canvas", [instance("shared")])).toThrow("lease-conflict");
+
+    a.close(); b.close();
+    const reopened = new DatabaseSync(file);
+    const recovered = new SqliteSpatialLeaseStore(reopened, authority);
+    expect(recovered.readOccupancy("canvas", [instance("shared"), camera("shared")])).toEqual([
+      { target: { kind: "instance", instanceId: "shared" }, runId: "instance-owner", epoch: 1, state: "cancelled" },
+      { target: { kind: "camera", cameraId: "shared" }, runId: "camera-owner", epoch: 3, state: "active" }
+    ]);
+    recovered.confirmStopped("canvas", "instance-owner", "instance-owner", 1, "exec-instance-owner", "stopped-exec-instance-owner");
+    expect(recovered.readOccupancy("canvas", [instance("shared")])).toEqual([]);
+    expect(recovered.readOccupancy("canvas", [camera("shared")])).toHaveLength(1);
+    reopened.close();
+  });
 });

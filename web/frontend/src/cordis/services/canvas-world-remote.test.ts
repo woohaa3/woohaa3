@@ -18,10 +18,17 @@ const cameraMember = { identity: { kind: "camera", cameraId: "cam" }, version: "
 const memberSet = { instances: [instanceMember], cameras: [cameraMember] };
 const memberPlan = { ...plan, source: { area, members: memberSet } };
 const memberReceipt = { ...receipt, plan: memberPlan };
-const memberSnapshot = { version: "world-authoring-v1", canvasId: "c", revision: 1, scope, areaNodeId: "n", area, bounds, writable: [], readOnly: [], members: memberSet, objects: [] };
+const occupant = { target: { kind: "instance", instanceId: "i1" }, runId: "run", epoch: 1, state: "active" };
+const occupancy = { version: "world-scope-occupancy-v1", scope, state: "occupied", locks: [occupant] };
+const memberSnapshot = {
+  version: "world-authoring-v1", canvasId: "c", revision: 1, scope, areaNodeId: "n", area, bounds,
+  writable: [], readOnly: [], members: memberSet,
+  objects: [{ identity: { kind: "instance", instanceId: "i1" }, nodeId: "i1-node", version: "i1-v1", containment: "writable" }],
+  occupancy
+};
 const memberCommand = { ...command, plan: memberPlan, receipt: memberReceipt };
 const cases: Array<{ route: string; body?: unknown; success: unknown; invoke: (remote: ReturnType<typeof createCanvasRemote>, signal?: AbortSignal) => Promise<unknown> }> = [
-  { route: "scene-area-prepare", body: { areaId: "a" }, success: { ok: true, snapshot: { version: "world-authoring-v1", canvasId: "c", revision: 1, scope, areaNodeId: "n", area, bounds, writable: [], readOnly: [], members, objects: [] } }, invoke: (r, s) => r.prepareSceneArea({ canvasId: "c", areaId: "a" }, s) },
+  { route: "scene-area-prepare", body: { areaId: "a" }, success: { ok: true, snapshot: memberSnapshot }, invoke: (r, s) => r.prepareSceneArea({ canvasId: "c", areaId: "a" }, s) },
   { route: "scene-area-commit", body: { request }, success: command, invoke: (r, s) => r.executeSceneArea({ canvasId: "c", request } as never, s) },
   ...(["undo", "redo"] as const).map(direction => ({ route: `scene-area-${direction}`, body: { operationId: "op" }, success: { ...command, direction, receipt: { ...receipt, direction } }, invoke: (r: ReturnType<typeof createCanvasRemote>, s?: AbortSignal) => r.historySceneArea(direction, { canvasId: "c", operationId: "op" }, s) })),
   { route: "world-tool-context", body: { requestId: "req", runId: "run", epoch: 1, executionId: "exec", scope: { kind: "scene-area", areaId: "a" } }, success: { ok: true, context: { contextId: "ctx", canvasId: "c", runId: "run", epoch: 1, scope, writableTargets: [], readOnlyReferences: [] }, run: { canvasId: "c", requestId: "req", runId: "run", epoch: 1, executionId: "exec", state: "active" }, retry: false }, invoke: (r, s) => r.issueWorldToolContext({ canvasId: "c", requestId: "req", runId: "run", epoch: 1, executionId: "exec", scope: { kind: "scene-area", areaId: "a" } }, s) },
@@ -234,6 +241,21 @@ describe("world authoring remote", () => {
       name: "commit empty receipt produced targets",
       payload: () => { const value: any = structuredClone(memberCommand); value.receipt.produced.targets = [{ kind: "camera", instanceId: "i1", version: "v" }]; return value; },
       invoke: remote => remote.executeSceneArea({ canvasId: "c", request } as never)
+    },
+    {
+      name: "prepare occupancy with a fractional epoch",
+      payload: () => { const value: any = { ok: true, snapshot: structuredClone(memberSnapshot) }; value.snapshot.occupancy.locks[0].epoch = 1.5; return value; },
+      invoke: remote => remote.prepareSceneArea({ canvasId: "c", areaId: "a" })
+    },
+    {
+      name: "prepare occupancy lock outside the snapshot scope",
+      payload: () => { const value: any = { ok: true, snapshot: structuredClone(memberSnapshot) }; value.snapshot.occupancy.locks[0].target = { kind: "camera", cameraId: "cam" }; return value; },
+      invoke: remote => remote.prepareSceneArea({ canvasId: "c", areaId: "a" })
+    },
+    {
+      name: "prepare occupancy leaking an execution identity",
+      payload: () => { const value: any = { ok: true, snapshot: structuredClone(memberSnapshot) }; value.snapshot.occupancy.locks[0].executionId = "exec"; return value; },
+      invoke: remote => remote.prepareSceneArea({ canvasId: "c", areaId: "a" })
     },
     {
       name: "context writable target and lease disagree",

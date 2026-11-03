@@ -103,7 +103,13 @@ const prepare = {
       containment: "writable",
       contentVersion: "content-v1",
       transformVersion: "transform-v1"
-    }]
+    }],
+    occupancy: {
+      version: "world-scope-occupancy-v1",
+      scope: { scope: { kind: "scene-area", areaId: "area" }, scopeVersion: "area-v1" },
+      state: "occupied",
+      locks: [{ target: { kind: "instance", instanceId: "i1" }, runId: "run-1", epoch: 2, state: "active" }]
+    }
   }
 };
 const commit = {
@@ -223,6 +229,121 @@ const negativeCases: NegativeCase[] = [
     route: "scene-area-prepare",
     base: prepare,
     mutate: value => { value.snapshot.members.cameras[0].identity.cameraId = "other"; }
+  },
+  {
+    name: "prepare rejects an empty occupancy view",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy = {}; }
+  },
+  {
+    name: "prepare rejects an unknown occupancy version",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.version = "world-scope-occupancy-v0"; },
+    code: "unsupported-version"
+  },
+  {
+    name: "prepare rejects an occupancy scope that disagrees with the snapshot",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.scope.scopeVersion = "area-v2"; }
+  },
+  {
+    name: "prepare rejects an unknown occupancy state",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.state = "free"; }
+  },
+  {
+    name: "prepare rejects an unknown occupancy that still reports locks",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.state = "unknown"; value.snapshot.occupancy.reason = "store-unavailable"; }
+  },
+  {
+    name: "prepare rejects idle occupancy that still reports locks",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.state = "idle"; }
+  },
+  {
+    name: "prepare rejects occupied occupancy without a lock",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.locks = []; }
+  },
+  {
+    name: "prepare rejects a negative lock epoch",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.locks[0].epoch = -1; }
+  },
+  {
+    name: "prepare rejects a fractional lock epoch",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.locks[0].epoch = 1.5; }
+  },
+  {
+    name: "prepare rejects a string lock epoch",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.locks[0].epoch = "1"; }
+  },
+  {
+    name: "prepare rejects a lock without a run identity",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.locks[0].runId = ""; }
+  },
+  {
+    name: "prepare rejects a lock for an object outside the snapshot scope",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.locks[0].target = { kind: "camera", cameraId: "cam" }; }
+  },
+  {
+    name: "prepare rejects duplicate lock identities",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.locks.push(structuredClone(value.snapshot.occupancy.locks[0])); }
+  },
+  {
+    name: "prepare rejects a stopped lock state",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.locks[0].state = "stopped"; }
+  },
+  {
+    name: "prepare rejects a reason on a non-unknown occupancy state",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.reason = "store-unavailable"; }
+  },
+  {
+    name: "prepare rejects explicit unknown occupancy without a reason",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy = { ...value.snapshot.occupancy, state: "unknown", locks: [] }; }
+  },
+  {
+    name: "prepare rejects an unsupported occupancy reason",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy = { ...value.snapshot.occupancy, state: "unknown", locks: [], reason: "maybe" }; }
+  },
+  {
+    name: "prepare rejects extra occupancy lock fields",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.locks[0].executionId = "leak"; }
+  },
+  {
+    name: "prepare rejects a kind-mismatched lock identity",
+    route: "scene-area-prepare",
+    base: prepare,
+    mutate: value => { value.snapshot.occupancy.locks[0].target = { kind: "camera", instanceId: "i1" }; }
   },
   {
     name: "commit rejects an empty plan",
@@ -632,6 +753,33 @@ describe("world authoring response codec", () => {
     const decoded = decodeWorldAuthoringResponse(route, value);
     expect(decoded.ok).toBe(false);
     if (!decoded.ok) expect(decoded.code).toBe(code ?? "invalid-data");
+  });
+
+  it("maps a legacy prepare without occupancy to explicit unknown, never idle", () => {
+    const legacy = structuredClone(prepare) as any;
+    delete legacy.snapshot.occupancy;
+    const decoded = decodeWorldAuthoringResponse("scene-area-prepare", legacy);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    expect((decoded.value as any).snapshot.occupancy).toEqual({
+      version: "world-scope-occupancy-v1",
+      scope: legacy.snapshot.scope,
+      state: "unknown",
+      locks: [],
+      reason: "not-reported"
+    });
+  });
+
+  it("accepts explicit unknown and idle occupancy", () => {
+    for (const occupancy of [
+      { version: "world-scope-occupancy-v1", scope: (prepare.snapshot as any).scope, state: "idle", locks: [] },
+      { version: "world-scope-occupancy-v1", scope: (prepare.snapshot as any).scope, state: "unknown", locks: [], reason: "store-unavailable" }
+    ]) {
+      const value = { ok: true, snapshot: { ...(prepare.snapshot as any), occupancy } };
+      const decoded = decodeWorldAuthoringResponse("scene-area-prepare", value);
+      expect(decoded.ok).toBe(true);
+      if (decoded.ok) expect((decoded.value as any).snapshot.occupancy).toEqual(occupancy);
+    }
   });
 
   it("accepts the production plan fixture used by the authority planner tests", () => {

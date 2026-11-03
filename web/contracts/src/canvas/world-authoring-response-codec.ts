@@ -47,6 +47,9 @@ import type {
   WorldAuthoringPrepareOutcome,
   WorldAuthoringReceipt,
   WorldAuthoringSourceSnapshot,
+  WorldPreparedAuthoritySnapshot,
+  WorldScopeOccupancyLock,
+  WorldScopeOccupancySnapshot,
   WorldToolContextOutcome,
   WorldToolContextRun
 } from "./world-authoring.js";
@@ -140,11 +143,13 @@ const CAMERA_HISTORY_KEYS = ["ok", "canvasId", "cameraId", "entries"] as const;
 
 const SNAPSHOT_KEYS = [
   "version", "canvasId", "revision", "scope", "areaNodeId", "area", "bounds",
-  "writable", "readOnly", "members", "objects"
+  "writable", "readOnly", "members", "objects", "occupancy"
 ] as const;
 const OBJECT_ENTRY_KEYS = [
   "identity", "nodeId", "version", "containment", "contentVersion", "transformVersion"
 ] as const;
+const OCCUPANCY_KEYS = ["version", "scope", "state", "locks", "reason"] as const;
+const OCCUPANCY_LOCK_KEYS = ["target", "runId", "epoch", "state"] as const;
 const SCOPE_VERSION_KEYS = ["scope", "scopeVersion"] as const;
 const CONTEXT_KEYS = [
   "contextId", "canvasId", "runId", "epoch", "scope", "writableTargets", "readOnlyReferences"
@@ -168,10 +173,14 @@ const HISTORY_ENTRY_KEYS = [
 const INTENTS: readonly SceneAreaPlanIntent[] = ["move", "resize", "delete-area", "delete-area-with-contents"];
 const CONTAINMENTS = ["writable", "read-only", "outside", "unknown"] as const;
 const RUN_STATES: readonly WorldToolContextRun["state"][] = ["active", "cancelled", "stopped"];
+const OCCUPANCY_STATES: readonly WorldScopeOccupancySnapshot["state"][] = ["idle", "occupied", "unknown"];
+const OCCUPANCY_LOCK_STATES: readonly WorldScopeOccupancyLock["state"][] = ["active", "cancelled"];
+const OCCUPANCY_REASONS: readonly NonNullable<WorldScopeOccupancySnapshot["reason"]>[] = ["store-unavailable", "not-reported"];
 const DIRECTIONS = ["forward", "undo", "redo"] as const;
 
 const WORLD_AUTHORING_VERSION = "world-authoring-v1";
 const WORLD_AUTHORING_RECEIPT_VERSION = "world-authoring-receipt-v1";
+const WORLD_SCOPE_OCCUPANCY_VERSION = "world-scope-occupancy-v1";
 const SCENE_AREA_PLAN_CONTRACT_VERSION = "scene-area-plan-v1";
 
 const invalid = <T>(input: unknown): Decode<T> => decodeFailure("invalid-data", input);
@@ -581,7 +590,98 @@ function decodeObjectEntry(value: unknown): Decode<WorldAuthoritySnapshot["objec
   });
 }
 
-function decodeAuthoritySnapshot(value: unknown): Decode<WorldAuthoritySnapshot> {
+function sameScopeVersion(left: WorldScopeVersion, right: WorldScopeVersion): boolean {
+  if (left.scopeVersion !== right.scopeVersion) return false;
+  if (left.scope.kind !== right.scope.kind) return false;
+  return left.scope.kind === "scene-area"
+    ? right.scope.kind === "scene-area" && left.scope.areaId === right.scope.areaId
+    : right.scope.kind === "workflow-group-2d" && left.scope.groupId === right.scope.groupId;
+}
+
+function inScopeObject(
+  target: WorldObjectIdentity,
+  objects: WorldAuthoritySnapshot["objects"]
+): boolean {
+  return objects.some(entry =>
+    sameIdentity(entry.identity, target) &&
+    (entry.containment === "writable" || entry.containment === "read-only")
+  );
+}
+
+function decodeOccupancyLock(
+  value: unknown,
+  objects: WorldAuthoritySnapshot["objects"]
+): Decode<WorldScopeOccupancyLock> {
+  if (!recordWithKeys(value, OCCUPANCY_LOCK_KEYS)) return invalid(value);
+  const target = decodeObjectIdentity(ownField(value, "target"));
+  const runId = ownField(value, "runId");
+  const epoch = ownField(value, "epoch");
+  const state = ownField(value, "state");
+  if (!target || !isNonEmptyWorldId(runId)) return invalid(value);
+  if (typeof epoch !== "number" || !Number.isSafeInteger(epoch) || epoch < 0) return invalid(value);
+  if (typeof state !== "string" || !OCCUPANCY_LOCK_STATES.includes(state as WorldScopeOccupancyLock["state"])) {
+    return invalid(value);
+  }
+  if (!inScopeObject(target, objects)) return invalid(value);
+  return ok({ target, runId, epoch, state: state as WorldScopeOccupancyLock["state"] });
+}
+
+/** A legacy prepare response has no occupancy field; report explicit unknown, never idle. */
+function legacyOccupancy(scope: WorldScopeVersion): WorldScopeOccupancySnapshot {
+  return {
+    version: WORLD_SCOPE_OCCUPANCY_VERSION,
+    scope,
+    state: "unknown",
+    locks: [],
+    reason: "not-reported"
+  };
+}
+
+function decodeOccupancy(
+  value: unknown,
+  scope: WorldScopeVersion,
+  objects: WorldAuthoritySnapshot["objects"]
+): Decode<WorldScopeOccupancySnapshot> {
+  if (!recordWithKeys(value, OCCUPANCY_KEYS)) return invalid(value);
+  const version = ownField(value, "version");
+  if (typeof version !== "string" || version.length === 0) return invalid(value);
+  if (version !== WORLD_SCOPE_OCCUPANCY_VERSION) return unsupported(value);
+  const decodedScope = decodeScopeVersion(ownField(value, "scope"));
+  const state = ownField(value, "state");
+  if (!decodedScope || !sameScopeVersion(decodedScope, scope)) return invalid(value);
+  if (typeof state !== "string" || !OCCUPANCY_STATES.includes(state as WorldScopeOccupancySnapshot["state"])) {
+    return invalid(value);
+  }
+  const reason = ownField(value, "reason");
+  if (reason !== undefined &&
+    (typeof reason !== "string" || !OCCUPANCY_REASONS.includes(reason as NonNullable<WorldScopeOccupancySnapshot["reason"]>))) {
+    return invalid(value);
+  }
+  if (state !== "unknown" && reason !== undefined) return invalid(value);
+  if (state === "unknown" && reason === undefined) return invalid(value);
+  const locks = decodeList(ownField(value, "locks"), item => decodeOccupancyLock(item, objects));
+  if (!locks.ok) return decodeFailure(locks.code, value);
+  const seen = new Set<string>();
+  for (const lock of locks.value) {
+    const key = JSON.stringify([
+      lock.target.kind,
+      lock.target.kind === "instance" ? lock.target.instanceId : lock.target.cameraId
+    ]);
+    if (seen.has(key)) return invalid(value);
+    seen.add(key);
+  }
+  if (state === "occupied" && locks.value.length === 0) return invalid(value);
+  if (state !== "occupied" && locks.value.length !== 0) return invalid(value);
+  return ok({
+    version: WORLD_SCOPE_OCCUPANCY_VERSION,
+    scope: decodedScope,
+    state: state as WorldScopeOccupancySnapshot["state"],
+    locks: locks.value,
+    ...(reason === undefined ? {} : { reason: reason as NonNullable<WorldScopeOccupancySnapshot["reason"]> })
+  });
+}
+
+function decodeAuthoritySnapshot(value: unknown): Decode<WorldPreparedAuthoritySnapshot> {
   if (!isJsonRecord(value)) return invalid(value);
   const version = ownField(value, "version");
   if (typeof version !== "string" || version.length === 0) return invalid(value);
@@ -609,6 +709,11 @@ function decodeAuthoritySnapshot(value: unknown): Decode<WorldAuthoritySnapshot>
   if (!members.ok) return decodeFailure(members.code, value);
   const objects = decodeList(ownField(value, "objects"), decodeObjectEntry);
   if (!objects.ok) return decodeFailure(objects.code, value);
+  const occupancyValue = ownField(value, "occupancy");
+  const occupancy = occupancyValue === undefined
+    ? ok(legacyOccupancy(scope))
+    : decodeOccupancy(occupancyValue, scope, objects.value);
+  if (!occupancy.ok) return decodeFailure(occupancy.code, value);
   return ok({
     version: WORLD_AUTHORING_VERSION,
     canvasId,
@@ -620,7 +725,8 @@ function decodeAuthoritySnapshot(value: unknown): Decode<WorldAuthoritySnapshot>
     writable: writable.value,
     readOnly: readOnly.value,
     members: members.value,
-    objects: objects.value
+    objects: objects.value,
+    occupancy: occupancy.value
   });
 }
 

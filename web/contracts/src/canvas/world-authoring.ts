@@ -27,6 +27,7 @@ import type { Woohaa3CanvasJsonObject } from "./domain/index.js";
 
 export const WORLD_AUTHORING_VERSION = "world-authoring-v1" as const;
 export const WORLD_AUTHORING_RECEIPT_VERSION = "world-authoring-receipt-v1" as const;
+export const WORLD_SCOPE_OCCUPANCY_VERSION = "world-scope-occupancy-v1" as const;
 
 /** One canonical object as seen by the authority. Unknown is never writable. */
 export type WorldObjectContainment = "writable" | "read-only" | "outside" | "unknown";
@@ -40,6 +41,37 @@ export interface WorldObjectAuthorityEntry {
   containment: WorldObjectContainment;
   contentVersion?: string;
   transformVersion?: string;
+}
+
+/**
+ * One durable lease lock currently covering an object classified into the selected
+ * scope. `cancelled` still owns the lock until exact stop is confirmed; locks are
+ * never expired by time.
+ */
+export interface WorldScopeOccupancyLock {
+  target: WorldObjectIdentity;
+  runId: string;
+  epoch: number;
+  state: "active" | "cancelled";
+}
+
+/**
+ * Read-only occupancy view attached to `scene-area-prepare`.
+ *
+ * - `idle` is only valid when the durable store was read and returned no lock for any
+ *   in-scope object;
+ * - `occupied` carries every in-scope lock with its run/epoch/state;
+ * - `unknown` means the store could not be read (or a legacy response omitted the
+ *   field) and MUST NOT be treated as idle.
+ *
+ * It deliberately contains no process capability, request or execution identity.
+ */
+export interface WorldScopeOccupancySnapshot {
+  version: typeof WORLD_SCOPE_OCCUPANCY_VERSION;
+  scope: WorldScopeVersion;
+  state: "idle" | "occupied" | "unknown";
+  locks: WorldScopeOccupancyLock[];
+  reason?: "store-unavailable" | "not-reported";
 }
 
 /** Exact gesture-start snapshot. `members` is ready to feed OC04 unchanged. */
@@ -72,6 +104,15 @@ export interface WorldGroupAuthoritySnapshot {
 }
 
 export type WorldAuthorityScopeSnapshot = WorldAuthoritySnapshot | WorldGroupAuthoritySnapshot;
+
+/**
+ * Production prepare snapshot. The occupancy view is filled from the authoritative
+ * durable locks for the same scope; it is a display/preflight fact and never replaces
+ * the commit-time gate.
+ */
+export interface WorldPreparedAuthoritySnapshot extends WorldAuthoritySnapshot {
+  occupancy: WorldScopeOccupancySnapshot;
+}
 
 export type WorldToolContextRequest =
   | {
@@ -132,7 +173,7 @@ export interface WorldAuthoringFailure {
 }
 
 export type WorldAuthoringPrepareOutcome =
-  | { ok: true; snapshot: WorldAuthoritySnapshot }
+  | { ok: true; snapshot: WorldPreparedAuthoritySnapshot }
   | WorldAuthoringFailure;
 
 /** One frozen edge removed together with a node; re-added by undo after its endpoints. */
