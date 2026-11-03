@@ -261,8 +261,27 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
         new Promise<boolean>((resolve) => {
           const actionKey = `settings-discard:${instanceId}`;
           let abandon = false;
+          /*
+           * 确认弹窗自己的实例 id：注册动作时还不知道，`open` 之后才回填。
+           * 动作必须**先于** `open` 注册 —— 渲染时就会 `resolveAlertAction(actionKey)`，
+           * 晚一步注册那一次渲染拿到的就是 null。
+           */
+          let childId: string | null = null;
           const disposeAction = ctx.dialogs.registerAlertAction(actionKey, async () => {
             abandon = true;
+            /*
+             * 确认成功后**必须由这里关掉确认弹窗**。
+             *
+             * `AlertDialog` 的约定是「成功时不自己关闭，由调用方按 instanceId 关闭」
+             * （见 services/dialogs/AlertDialog.tsx 顶部注释）。漏掉这一步就是死锁:
+             * 下面的 `unsubscribe` 要等弹窗消失才 resolve，而关闭弹窗的代码又写在
+             * resolve 之后的 `.then` 里 —— 两边互相等待，用户看到的是按钮全部变灰、
+             * 弹窗再也关不掉（实测就是这么卡住的）。
+             *
+             * 用 `close()` 而不是 `requestClose()`:`requestClose` 在 busy 时会被拒绝，
+             * 而确认成功后弹窗正处在 busy。（node-merge 的合并确认也是同一个写法。）
+             */
+            if (childId) ctx.dialogs.close(childId);
             return { ok: true };
           });
           const opened = ctx.dialogs.open({
@@ -281,13 +300,14 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
             resolve(false);
             return;
           }
-          const childId = opened.instance.instanceId;
+          const openedChildId: string = opened.instance.instanceId;
+          childId = openedChildId;
           const unsubscribe = ctx.dialogs.subscribe(() => {
-            if (ctx.dialogs.find(childId)) return;
+            if (ctx.dialogs.find(openedChildId)) return;
             unsubscribe();
             disposeAction();
-            if (abandon) ctx.dialogs.find(instanceId) ? resolve(true) : resolve(false);
-            else resolve(false);
+            // 父实例已释放（页面离开等）时不算放弃：调用方拿到 false 就什么都不做。
+            resolve(abandon && ctx.dialogs.find(instanceId) !== null);
           });
         });
 
