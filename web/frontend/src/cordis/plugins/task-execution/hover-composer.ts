@@ -54,24 +54,25 @@ export function resolveHoverComposerTarget(input: {
 }
 
 /**
- * 点胶囊时做什么。
+ * 点胶囊时做什么：让这张图进入一个对话框。
  *
- * - 底部已经开着**另一个**节点的面板（主选中节点带生成面板、且不是被点的这张）→ 把这张图
- *   连成那个节点的参考输入（`connect`），面板留在原处，用户接着写提示词；
- * - 否则（没有打开的面板，或点的就是当前面板的节点）→ 只选中这张卡（`select`），
- *   面板切到它自己的，这是原来的行为。
+ * - 底部已经开着**另一个**节点的面板（主选中节点带生成面板、且不是被点的这张）→ 把这张图连成
+ *   那个节点的参考输入（`connect`），面板留在原处，用户接着写提示词；
+ * - 否则（没有打开的面板，或点的就是当前面板的节点）→ 在这张图旁边新建一个生成节点，
+ *   以它为参考并打开新节点的对话框（`create`）。只「选中」不够：被点的卡往往本来就是选中的，
+ *   那样点了没有任何可见变化。
  *
- * 自己连自己没有意义，所以点的就是当前节点时一律退回 `select`。
+ * 自己连自己没有意义，所以点的就是当前节点时一律走 `create`。
  */
 export function resolveComposerAction(input: {
   targetNodeId: string;
   primaryNodeId: string | null;
   nodes: readonly { id: string; type: string }[];
-}): { type: "connect"; panelNodeId: string } | { type: "select" } {
+}): { type: "connect"; panelNodeId: string } | { type: "create" } {
   const { primaryNodeId } = input;
-  if (!primaryNodeId || primaryNodeId === input.targetNodeId) return { type: "select" };
+  if (!primaryNodeId || primaryNodeId === input.targetNodeId) return { type: "create" };
   const panelNode = input.nodes.find((entry) => entry.id === primaryNodeId);
-  if (!panelNode || panelKindForNodeType(panelNode.type) === null) return { type: "select" };
+  if (!panelNode || panelKindForNodeType(panelNode.type) === null) return { type: "create" };
   return { type: "connect", panelNodeId: primaryNodeId };
 }
 
