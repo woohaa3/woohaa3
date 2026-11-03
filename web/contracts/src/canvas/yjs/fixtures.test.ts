@@ -70,8 +70,10 @@ describe("包依赖边界（任务 1.6；change: split-web-runtime-services 后�
     expect(bundle).not.toContain("mongodb");
     expect(bundle).not.toContain("cos-nodejs-sdk-v5");
     // 产物体积应远小于 yjs 本体（说明未内联 yjs/lib0 实现）。
-    // 阈值随包功能增长而上调；yjs + lib0 内联会是数 MB 级。
-    expect(bundle.length).toBeLessThan(200_000);
+    // 阈值随包功能增长而上调。2026-11 实测：保留 external 约 204 KB，把 yjs + lib0 内联后约
+    // 431 KB（2.1 倍）；取 350 KB —— 留出约 70% 的功能增长余量，同时仍能抓住"误内联"
+    // 这种一加就翻倍的回归。（原阈值 200 KB 是建库时估的，6 个月里功能增长已经把它顶破。）
+    expect(bundle.length).toBeLessThan(350_000);
     // 直接证据：产物里 import 了外部依赖，而不是内联。
     expect(bundle).toMatch(/from "yjs"/);
     expect(bundle).toMatch(/from "lib0\//);
