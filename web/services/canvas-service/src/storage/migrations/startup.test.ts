@@ -86,6 +86,119 @@ it("codec normalization of unrelated nodeData does not block startup", () => {
   } finally { db.close(); }
 });
 
+it("removed nodeData fields and projection collection order do not block startup", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-projection-order-"));
+  directories.push(directory);
+  const filename = path.join(directory, "custom-canvas.sqlite");
+  const { DatabaseSync } = loadNodeSqlite();
+  const db = new DatabaseSync(filename);
+  db.exec(`CREATE TABLE canvas_yjs_documents(canvas_id TEXT PRIMARY KEY,format_version TEXT,room_epoch TEXT,snapshot BLOB,snapshot_seq INTEGER,revision INTEGER,projection_json TEXT,created_at TEXT,updated_at TEXT);
+    CREATE TABLE canvas_yjs_updates(canvas_id TEXT,seq INTEGER,sha256 TEXT,update_bytes BLOB);`);
+  const now = "2026-11-03T00:00:00.000Z";
+  const canvas = createEmptyWoohaa3ServerCanvas("order", now);
+  canvas.document.nodes.push(
+    { id: "image", type: "image", position: { x: 10, y: 10 }, width: 320, height: 240 },
+    { id: "group", type: "group", position: { x: 0, y: 0 }, width: 400, height: 300 }
+  );
+  canvas.nodeData.image = { taskKind: "image-generation", taskStatus: "idle" } as never;
+  canvas.nodeData.group = { groupCollapsed: false, groupBadgeScale: 2 } as never;
+  const doc = serverCanvasToYDoc(canvas);
+  const decoded = yDocToServerCanvas(doc, { now });
+  if (!decoded.ok) throw new Error(decoded.failure.message);
+  // raw 保留已移除的 groupBadgeScale，projection 的集合顺序由 reducer 决定（与一次全新 codec
+  // 往返不同）——两者都不是"投影陈旧/半写"，启动迁移必须仍然放行。
+  expect(JSON.stringify(doc.getMap("nodeData").get("group"))).toContain("groupBadgeScale");
+  const stored = {
+    ...decoded.canvas,
+    document: { ...decoded.canvas.document, nodes: [...decoded.canvas.document.nodes].reverse() }
+  };
+  db.prepare("INSERT INTO canvas_yjs_documents VALUES(?,?,?,?,?,?,?,?,?)").run(
+    "order",
+    "woohaa3-ycanvas-v2",
+    "epoch",
+    Y.encodeStateAsUpdate(doc),
+    0,
+    canvas.revision,
+    JSON.stringify(stored),
+    now,
+    now
+  );
+  doc.destroy();
+  try {
+    expect(() => migrateSqliteCanvasBeforeStartup(filename)).not.toThrow();
+  } finally { db.close(); }
+});
+
+/**
+ * 无待迁移内容的最小库：只有一张普通画布，用来单独观察 projection 缓存修复。
+ * 与 `fixture()` 不同，这里没有任何片场，`plan.changed` 只可能来自缓存修复。
+ */
+function plainFixture(canvasId: string) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-projection-cache-"));
+  directories.push(directory);
+  const filename = path.join(directory, "custom-canvas.sqlite");
+  const { DatabaseSync } = loadNodeSqlite();
+  const db = new DatabaseSync(filename);
+  db.exec(`CREATE TABLE canvas_yjs_documents(canvas_id TEXT PRIMARY KEY,format_version TEXT,room_epoch TEXT,snapshot BLOB,snapshot_seq INTEGER,revision INTEGER,projection_json TEXT,created_at TEXT,updated_at TEXT);
+    CREATE TABLE canvas_yjs_updates(canvas_id TEXT,seq INTEGER,sha256 TEXT,update_bytes BLOB);`);
+  const now = "2026-11-03T00:00:00.000Z";
+  const canvas = createEmptyWoohaa3ServerCanvas(canvasId, now);
+  canvas.document.nodes.push({ id: "image", type: "image", position: { x: 10, y: 10 }, width: 320, height: 240 });
+  canvas.nodeData.image = { taskKind: "image-generation", taskStatus: "idle" } as never;
+  const doc = serverCanvasToYDoc(canvas);
+  const decoded = yDocToServerCanvas(doc, { now });
+  if (!decoded.ok) throw new Error(decoded.failure.message);
+  const snapshot = Y.encodeStateAsUpdate(doc);
+  doc.destroy();
+  db.prepare("INSERT INTO canvas_yjs_documents VALUES(?,?,?,?,?,?,?,?,?)").run(
+    canvasId, "woohaa3-ycanvas-v2", "epoch", snapshot, 0, canvas.revision, JSON.stringify(decoded.canvas), now, now
+  );
+  const store = (projection: unknown) => db
+    .prepare("UPDATE canvas_yjs_documents SET projection_json=? WHERE canvas_id=?")
+    .run(JSON.stringify(projection), canvasId);
+  return { db, filename, snapshot, decoded: decoded.canvas, store };
+}
+
+it("stale projection content is rewritten from raw without touching the checkpoint", () => {
+  const { db, filename, snapshot, decoded, store } = plainFixture("repair");
+  try {
+    const stale = structuredClone(decoded) as { nodeData: Record<string, Record<string, unknown>> };
+    stale.nodeData.image = { ...stale.nodeData.image, title: "stale-cache" };
+    store(stale);
+    // 缓存只是缓存：内容差异按 raw 重新派生，不阻断启动。
+    expect(migrateSqliteCanvasBeforeStartup(filename)).toMatchObject({ changed: true });
+    const row = db.prepare("SELECT * FROM canvas_yjs_documents").get()!;
+    expect(JSON.parse(String(row.projection_json)).nodeData.image).toEqual(decoded.nodeData.image);
+    // 这不是内容迁移：checkpoint、epoch、update tail 都不动。
+    expect(row.room_epoch).toBe("epoch");
+    expect(Buffer.from(row.snapshot as Uint8Array).equals(Buffer.from(snapshot))).toBe(true);
+    expect(db.prepare("SELECT * FROM canvas_yjs_updates").all()).toHaveLength(0);
+    // 修复一次后即收敛，不会每次启动都重写。
+    expect(migrateSqliteCanvasBeforeStartup(filename)).toEqual({ changed: false });
+  } finally { db.close(); }
+});
+
+it("identity mismatch is fatal and names the field", () => {
+  const { db, filename, decoded, store } = plainFixture("identity");
+  try {
+    store({ ...structuredClone(decoded), revision: decoded.revision + 1 });
+    expect(() => migrateSqliteCanvasBeforeStartup(filename)).toThrow(/projection-mismatch.*\(revision\)/);
+    expect(db.prepare("SELECT room_epoch FROM canvas_yjs_documents").get()!.room_epoch).toBe("epoch");
+  } finally { db.close(); }
+});
+
+it("entity id set mismatch is fatal and names the collection", () => {
+  const { db, filename } = fixture();
+  try {
+    const row = db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!;
+    const projection = JSON.parse(String(row.projection_json));
+    // 只删节点、保留 nodeData：按 id 比较集合可以忽略顺序，但不能把"少一个节点"当成顺序差异。
+    projection.document.nodes = projection.document.nodes.filter((node: { id: string }) => node.id !== "film");
+    db.prepare("UPDATE canvas_yjs_documents SET projection_json=?").run(JSON.stringify(projection));
+    expect(() => migrateSqliteCanvasBeforeStartup(filename)).toThrow(/projection-mismatch.*\(nodes\)/);
+  } finally { db.close(); }
+});
+
 it("refuses a live writer without changing data or making a backup", () => {
   const { db, filename, directory } = fixture();
   try {

@@ -192,6 +192,8 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
       canvas: source.canvas,
       sourceReport: source.report,
       changed: false,
+      // 有冲突的整库会在启动时阻断，不做缓存修复（保留原件便于人工处理）。
+      projectionStale: false,
       conflicts,
       snapshot: new Uint8Array(),
       roomEpoch: String(source.report.roomEpoch),
@@ -231,6 +233,8 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
       canvas: decoded.canvas,
       sourceReport: source.report,
       changed,
+      // 内容没变、只有缓存与当前规范化视图不一致：只需重写 projection_json。
+      projectionStale: !changed && source.report.projectionStale === true,
       conflicts,
       snapshot: Y.encodeStateAsUpdate(doc),
       roomEpoch: changed ? `film-set-shooting-shots-${randomUUID()}` : String(source.report.roomEpoch),
@@ -244,32 +248,20 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
 }
 
 /**
- * 当前 codec 对同一份 raw 会写出的 projection（`canvas` 是离线 reader 从 raw 重建的聚合）。
+ * 当前 codec 从同一份 raw 会写出的 projection（`canvas` 是离线 reader 从 raw 重建的聚合）。
  *
- * 为什么需要：应用每次提交都用生产 codec 重新派生 projection，而规范化会按设计剥掉当前
- * schema 无法表达的内容（例：片场 `filmSetContent` schema < 当前版本）。这样的库里 raw 保留
- * 用户数据、projection 是规范化视图，二者本就不相等。若启动迁移仍按"原样相等"判定，就会
- * 一直拒绝开放画布；用派生视图作为期望值即可区分"缓存陈旧/半写"与"规范化差异"。
+ * 它是"缓存是否新鲜"的判据，不是"内容是否合法"的判据：规范化按设计会改变表示（剥掉已移除
+ * 字段、清洗旧 schema），但语义没变。缓存与它一致就不必重写；不一致且身份/实体集合吻合时，
+ * 由 reader 标记为 `projectionStale`，迁移按这份派生结果重写缓存。
+ *
+ * 不再为某个历史 reader 手工构造"候选视图"：历史版本写下的投影只要语义可派生，就会被重写，
+ * 不需要每次 schema 演进都在这里加一个特例。
  */
-const expectDerivedProjection = (canvas: ServerCanvas) => {
+const deriveProjection = (canvas: ServerCanvas) => {
   const doc = serverCanvasToYDoc(canvas);
   try {
     const exported = yDocToServerCanvas(doc, { now: canvas.updatedAt });
-    // schema3 reader 曾在 schema4 已落盘后再次写入投影：它只省略不认识的
-    // schema4 filmSetContent，保留 schema3 内容。不能拿当前 reader 的输出
-    // 代替该历史视图，也不能忽略整个 nodeData；其余字段仍必须逐字相等。
-    const historical = structuredClone(canvas);
-    historical.document.nodes.sort(compareByZIndexThenId);
-    let omitted = false;
-    for (const nodeId of filmSetNodeIds(canvas)) {
-      const data = historical.nodeData[nodeId] as Record<string, unknown>;
-      const content = data.filmSetContent as { schemaVersion?: number } | undefined;
-      if (content?.schemaVersion === 4) {
-        delete data.filmSetContent;
-        omitted = true;
-      }
-    }
-    return [exported.ok ? exported.canvas : null, ...(omitted ? [historical] : [])];
+    return exported.ok ? exported.canvas : null;
   } finally {
     doc.destroy();
   }
@@ -279,8 +271,10 @@ const expectDerivedProjection = (canvas: ServerCanvas) => {
 export function planMigration(db: unknown, _options: MigrationOptions = {}) {
   const sources = loadOfflineYjsCanvasSources(db as never, {
     transaction: _options.transaction ?? true,
-    expectProjection: expectDerivedProjection
-  }) as Array<{ canvas: ServerCanvas; report: Record<string, unknown>; raw: { meta: { createdAt: string } } }>;
+    deriveProjection,
+    // 缓存可以重新派生：同一 revision/实体集合下的表示差异只标记 projectionStale，不拒绝启动。
+    repairProjection: true
+  }) as Array<{ canvas: ServerCanvas; report: Record<string, unknown>; projectionStale: boolean; raw: { meta: { createdAt: string } } }>;
   const documents = sources.map(source => convertCanvas(source, _options));
 
   const tables = new Set<string>(
@@ -312,7 +306,7 @@ export function planMigration(db: unknown, _options: MigrationOptions = {}) {
   }
 
   const changed =
-    documents.some((document) => document.changed) ||
+    documents.some((document) => document.changed || document.projectionStale) ||
     historyWrites.some((write) => write.changed) ||
     completionWrites.some((write) => write.changed);
   const conflicts = documents.flatMap((document) =>
@@ -340,11 +334,13 @@ export function planMigration(db: unknown, _options: MigrationOptions = {}) {
       canvasCount: documents.length,
       historyCount: historyWrites.length,
       completionCount: completionWrites.length,
+      /** 语义未变、但缓存与当前规范化视图不一致而需要重写的投影数量。 */
+      projectionsRefreshed: documents.filter((document) => document.projectionStale).length,
       /** 无法精确反解坐标单位、已保留原件的片场（具名诊断，不猜测）。 */
       sceneSpaceConflicts: conflicts,
       /** 每个片场的坐标来源分类（dry-run 概览；不含用户内容）。 */
       sceneSpaceSources,
-      canvases: documents.map(({ canvas, sourceReport, beforeHash, afterHash, changed: documentChanged }) => ({
+      canvases: documents.map(({ canvas, sourceReport, beforeHash, afterHash, changed: documentChanged, projectionStale }) => ({
         canvasId: canvas.id,
         revision: canvas.revision,
         nodeCount: canvas.document.nodes.length,
@@ -352,7 +348,8 @@ export function planMigration(db: unknown, _options: MigrationOptions = {}) {
         restoredUpdates: sourceReport.restoredUpdates,
         beforeHash,
         afterHash,
-        changed: documentChanged
+        changed: documentChanged,
+        projectionStale
       }))
     }
   };
@@ -362,7 +359,15 @@ export function planMigration(db: unknown, _options: MigrationOptions = {}) {
 export function applyMigration(db: unknown, plan: ReturnType<typeof planMigration>): void {
   const database = db as { prepare: (sql: string) => { run: (...args: unknown[]) => unknown } };
   for (const document of plan.documents) {
-    if (!document.changed) continue;
+    if (!document.changed) {
+      // 只修复缓存：语义与 raw 一致，不碰 checkpoint / update tail / room epoch。
+      if (document.projectionStale) {
+        database
+          .prepare("UPDATE canvas_yjs_documents SET projection_json=? WHERE canvas_id=? AND revision=?")
+          .run(JSON.stringify(document.canvas), document.canvas.id, document.canvas.revision);
+      }
+      continue;
+    }
     database
       .prepare("UPDATE canvas_yjs_documents SET format_version=?,room_epoch=?,snapshot=?,snapshot_seq=?,projection_json=? WHERE canvas_id=? AND revision=?")
       .run(

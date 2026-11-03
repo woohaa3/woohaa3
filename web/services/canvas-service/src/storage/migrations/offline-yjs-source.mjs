@@ -13,7 +13,9 @@ const META_KEYS = ["formatVersion", "id", "title", "documentSchemaVersion", "rev
 export class OfflineCanvasSourceError extends Error {
   constructor(code, canvasId, details = {}) {
     // Diagnostics identify records and fields, never user source or secrets.
-    super(`Offline canvas source ${code}: ${canvasId ?? "unknown"}`);
+    // 带上出错的字段路径：启动失败时运维能直接看到是 `nodeData` 还是 `edges`，不用再猜。
+    const path = typeof details?.path === "string" && details.path !== "" ? ` (${details.path})` : "";
+    super(`Offline canvas source ${code}: ${canvasId ?? "unknown"}${path}`);
     this.name = "OfflineCanvasSourceError";
     this.code = code;
     this.canvasId = canvasId;
@@ -115,64 +117,161 @@ function assertProjectionShape(projection, id) {
 }
 
 /**
- * 校验 stored projection 与 raw 一致。
+ * 判定 stored projection 是否仍可信；必要时把它降级为「可重新派生的缓存」。
  *
- * 主路径是**原样相等**：旧客户端写下的 projection 是 raw 的忠实视图。
- * 但当前应用每次提交都用生产 codec 从 raw 重新派生 projection，而规范化会按设计剥掉
- * 当前 schema 无法表达的内容（例：片场 `filmSetContent` schema < 当前版本）。这种库里
- * raw 保留用户数据、projection 是规范化视图，两者**本来就不相等**；若继续按原样相等判定，
- * 启动迁移会永久拒绝开放画布（`projection-mismatch` → "画布尚未开放"）。
+ * projection 是**派生缓存**，不是第二份权威数据。判据按优先级分三层：
+ * 1. **原样相等**：投影就是 raw 的忠实视图（旧客户端/离线工具写入），直接新鲜。
+ * 2. **当前 codec 派生视图**：规范化按设计会改变表示（剥掉已移除字段、清洗旧 schema），
+ *    但语义没变；投影与派生视图一致即视为新鲜，不必重写。
+ * 3. **缓存过期**：投影与 raw 描述同一 revision、同一文档版本、同一实体集合，只是内容表示
+ *    不同（已移除字段 / 集合顺序 / 历史 reader 写下的视图）。这类差异重算一次即可，不应
+ *    拒绝整库启动——这正是过去每次 schema 演进都要加一个候选视图的原因。
  *
- * 因此调用方可注入 `expectProjection(canvas, id)`（`canvas` 是从 raw 重建的规范聚合）：
- * 返回"当前或明确支持的历史 codec 从同一份 raw 会写出的 projection"（可为候选数组）。只要 stored projection 与之完全
- * 相等，就认为缓存是新鲜的；否则仍按不一致拒绝（保持对陈旧/半写 projection 的检测能力）。
+ * 只有身份或实体集合对不上时才拒绝：revision/updatedAt/documentSchemaVersion 不同、节点/
+ * 边/资产/任务的 id 集合不同、投影引用了 raw 没有的 nodeData。这些才可能意味着 raw 丢了数据。
+ *
+ * `repair` 只在调用方显式开启时生效（启动迁移）。离线 CLI 的只读检查保持严格，便于先看证据。
+ * v1 不参与修复：它的旧节点类型在当前规范化里会收敛成 `custom`，重写会改变语义。
  */
-function assertProjection(raw, projection, id, expectProjection, canvas) {
+function reconcileProjection(raw, projection, id, deriveProjection, repair, canvas) {
   assertProjectionShape(projection, id);
+  let strict;
   try {
-    return assertProjectionEqualsRaw(raw, projection, id);
+    return { stale: false, mismatches: [], omittedEdgeIds: assertProjectionEqualsRaw(raw, projection, id) };
   } catch (error) {
-    if (!expectProjection || !(error instanceof OfflineCanvasSourceError)) throw error;
-    const derived = expectProjection(canvas, id);
-    const candidates = Array.isArray(derived) ? derived : [derived];
-    if (!candidates.some(candidate => object(candidate) && same(candidate, projection))) throw error;
-    if (!Array.isArray(projection.document.edges)) fail("projection-mismatch", id, { path: "edges" });
-    return omittedPureModelEdges(raw, projection.document.edges);
+    if (!(error instanceof OfflineCanvasSourceError)) throw error;
+    strict = error;
   }
+  if (deriveProjection) {
+    const derived = deriveProjection(canvas, id);
+    if (object(derived) && sameProjection(projection, derived)) {
+      return {
+        stale: false,
+        mismatches: [],
+        omittedEdgeIds: Array.isArray(projection.document.edges) ? omittedPureModelEdges(raw, projection.document.edges) : []
+      };
+    }
+  }
+  const mismatches = strict.details?.path ? [strict.details.path] : [];
+  if (repair && raw.meta.formatVersion === "woohaa3-ycanvas-v2" && identityMismatchPaths(raw, projection).length === 0) {
+    return { stale: true, mismatches, omittedEdgeIds: [] };
+  }
+  throw strict;
 }
 
-function assertProjectionEqualsRaw(raw, projection, id) {
+/** 按 id 比较一组实体，忽略数组顺序（集合顺序不是画布语义的一部分）。 */
+function sameEntries(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
+  if (left.some(entry => !object(entry) || !string(entry.id))
+      || right.some(entry => !object(entry) || !string(entry.id))) return false;
+  return same(byId(left), byId(right));
+}
+
+/**
+ * **唯一**的 projection 比较逻辑：返回不一致字段的路径（顺序固定，诊断稳定）。
+ *
+ * 严格 raw 比较、回退候选比较都走这一份。此前两条路径各写一份：主路径按 id 比较集合，
+ * 回退路径按数组位置比较，同一份内容会出现"主路径通过、回退路径判 projection-mismatch"
+ * （回归：带 `groupBadgeScale` 等已移除字段 + 集合顺序不同的画布）。两份逻辑会各自演化，
+ * 所以这里不再给任何一方留私有比较分支。
+ *
+ * 字段顺序与旧实现一致（标量 → document → nodeData → 集合 → edges），避免同一次故障换了
+ * 诊断路径。`expected` 是要求的视图，`actual` 是待判定的投影。
+ */
+function projectionMismatchPaths(expected, actual) {
+  const mismatches = [];
+  for (const path of ["id", "title", "revision", "updatedAt"]) {
+    if (!same(actual?.[path], expected?.[path])) mismatches.push(path);
+  }
+  if (!object(actual?.document) || !object(expected?.document)) {
+    return [...mismatches, "document.updatedAt", "document.schemaVersion", "nodeData", "nodes", "assets", "jobs", "edges"];
+  }
+  if (!same(actual.document.updatedAt, expected.document.updatedAt)) mismatches.push("document.updatedAt");
+  if (!same(actual.document.schemaVersion, expected.document.schemaVersion)) mismatches.push("document.schemaVersion");
+  if (!same(actual.nodeData, expected.nodeData)) mismatches.push("nodeData");
+  if (!sameEntries(actual.document.nodes, expected.document.nodes)) mismatches.push("nodes");
+  if (!sameEntries(actual.assets, expected.assets)) mismatches.push("assets");
+  if (!sameEntries(actual.jobs, expected.jobs)) mismatches.push("jobs");
+  if (!sameEntries(actual.document.edges, expected.document.edges)) mismatches.push("edges");
+  return mismatches;
+}
+
+/** 两份 projection 视图语义相等；`actual` 是待判定的投影，`expected` 是要求的视图。 */
+function sameProjection(actual, expected) {
+  return projectionMismatchPaths(expected, actual).length === 0;
+}
+
+/** 只比较实体 id 集合：缓存可以重新派生，但集合增删必须能解释。 */
+function sameIdSet(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
+  if (left.some(entry => !object(entry) || !string(entry.id))
+      || right.some(entry => !object(entry) || !string(entry.id))) return false;
+  return same(left.map(entry => entry.id).sort(), right.map(entry => entry.id).sort());
+}
+
+/**
+ * 缓存可被重新派生的前提：同一版本文档、同一实体集合。
+ *
+ * `title` 不在致命项里：它来自 raw.meta，同 revision 下的差异只可能是缓存被改过，重写即可。
+ * `nodeData` 只检查「投影有、raw 没有」的方向：规范化只丢弃、不创建，反方向才是危险信号
+ * （说明 raw 可能丢了用户数据）。
+ */
+function identityMismatchPaths(raw, projection) {
+  const mismatches = [];
   for (const [path, left, right] of [
     ["id", projection.id, raw.meta.id],
-    ["title", projection.title, raw.meta.title],
     ["revision", projection.revision, raw.meta.revision],
     ["updatedAt", projection.updatedAt, raw.meta.updatedAt],
     ["document.updatedAt", projection.document.updatedAt, raw.meta.updatedAt],
     ["document.schemaVersion", projection.document.schemaVersion, raw.meta.documentSchemaVersion],
-    ["nodeData", projection.nodeData, raw.nodeData],
-  ]) if (!same(left, right)) fail("projection-mismatch", id, { path });
+  ]) if (!same(left, right)) mismatches.push(path);
   for (const name of ["nodes", "assets", "jobs"]) {
     const projected = name === "nodes" ? projection.document.nodes : projection[name];
-    if (!Array.isArray(projected) || projected.some(entry => !object(entry) || !string(entry.id))
-        || !same(byId(projected), byId(raw[name]))) {
-      fail("projection-mismatch", id, { path: name });
-    }
+    if (!sameIdSet(projected, raw[name])) mismatches.push(name);
   }
-  const projected = projection.document.edges;
-  if (!Array.isArray(projected) || projected.some(entry => !object(entry) || !string(entry.id))) {
-    fail("projection-mismatch", id, { path: "edges" });
+  if (!sameIdSet(projection.document.edges, raw.edges)) mismatches.push("edges");
+  for (const nodeId of Object.keys(object(projection.nodeData) ? projection.nodeData : {})) {
+    if (raw.nodeData[nodeId] === undefined) mismatches.push(`nodeData.${nodeId}`);
   }
-  if (same(byId(projected), byId(raw.edges))) return [];
-  // The old application omitted edges touching either old pure-model category.
-  // Allow precisely that documented difference, retaining every raw edge in the
-  // returned input. The apply planner must explicitly remove/report these IDs.
-  if (raw.meta.formatVersion !== "woohaa3-ycanvas-v1") {
-    fail("projection-mismatch", id, { path: "edges" });
+  return mismatches;
+}
+
+/** 把离线 reader 的 raw（Yjs 原样视图）铺成 projection 形状，交给唯一比较器。 */
+function rawProjectionView(raw) {
+  return {
+    id: raw.meta.id,
+    title: raw.meta.title,
+    revision: raw.meta.revision,
+    updatedAt: raw.meta.updatedAt,
+    document: {
+      schemaVersion: raw.meta.documentSchemaVersion,
+      nodes: raw.nodes,
+      edges: raw.edges,
+      updatedAt: raw.meta.updatedAt
+    },
+    nodeData: raw.nodeData,
+    assets: raw.assets,
+    jobs: raw.jobs
+  };
+}
+
+function assertProjectionEqualsRaw(raw, projection, id) {
+  const mismatches = projectionMismatchPaths(rawProjectionView(raw), projection);
+  if (mismatches.length === 0) return [];
+  // 唯一允许的差异：v1 文档里连到旧纯模型节点（animation3d / extension3d）的边被旧应用
+  // 从 projection 省略。其余任何差异（陈旧/半写/缺节点/被篡改）都按第一个差异字段拒绝。
+  // 被省略的边仍保留在返回输入里，由 apply planner 显式删除/报告。
+  //
+  // 该例外只对 raw 严格路径成立：v1 的旧类型在当前规范化里会收敛成 `custom`，当前 codec
+  // 派生不出这份历史视图，所以回退路径不会命中它（也就不在那里假装支持）。
+  if (mismatches.length !== 1 || mismatches[0] !== "edges") {
+    fail("projection-mismatch", id, { path: mismatches[0] });
   }
+  if (raw.meta.formatVersion !== "woohaa3-ycanvas-v1") fail("projection-mismatch", id, { path: "edges" });
   const endpoints = pureModelNodeIds(raw);
   const omitted = raw.edges.filter(edge => endpoints.has(edge.source) || endpoints.has(edge.target));
   const kept = raw.edges.filter(edge => !endpoints.has(edge.source) && !endpoints.has(edge.target));
-  if (!omitted.length || !same(byId(projected), byId(kept))) {
+  if (!omitted.length || !sameEntries(projection.document.edges, kept)) {
     fail("projection-mismatch", id, { path: "edges" });
   }
   return omitted.map(edge => edge.id).sort();
@@ -219,10 +318,11 @@ function observeHistoricalNodeIdentities(doc, seq, canvasId, history, active) {
 /**
  * Restore and validate one stored document plus ALL of its ordered update rows.
  *
- * `expectProjection(raw, id)` 是可选的"当前 codec 派生视图"注入：见 `assertProjection`。
- * 不注入时保持原样相等判定（离线工具沿用更严格的保证）。
+ * `deriveProjection(canvas, id)` 是可选的"当前 codec 派生视图"注入：见 `reconcileProjection`。
+ * `repairProjection` 打开时，语义相同但表示不同的缓存标记为 `projectionStale`，由调用方重写；
+ * 不注入/不开启时保持原样相等判定（只读工具沿用更严格的保证）。
  */
-export function readOfflineYjsCanvasSource({ document: row, updates, expectProjection }) {
+export function readOfflineYjsCanvasSource({ document: row, updates, deriveProjection, repairProjection = false }) {
   const id = row?.canvas_id;
   if (!object(row) || !string(id) || !FORMATS.has(row.format_version)) fail("unsupported-format", id);
   if (!(row.snapshot instanceof Uint8Array) || !integer(row.snapshot_seq)
@@ -304,9 +404,10 @@ export function readOfflineYjsCanvasSource({ document: row, updates, expectProje
       document: { schemaVersion: meta.documentSchemaVersion, nodes: byId(raw.nodes), edges: byId(raw.edges), updatedAt: meta.updatedAt },
       nodeData: raw.nodeData, assets: byId(raw.assets), jobs: byId(raw.jobs), updatedAt: meta.updatedAt,
     };
-    const omittedEdgeIds = assertProjection(raw, projection, id, expectProjection, canvas);
+    const reconciled = reconcileProjection(raw, projection, id, deriveProjection, repairProjection, canvas);
     return {
       raw, canvas, projection,
+      projectionStale: reconciled.stale,
       report: {
         canvasId: id, formatVersion: row.format_version, roomEpoch: row.room_epoch,
         revision: meta.revision, checkpointSeq: row.snapshot_seq, storageSeq: sequence,
@@ -314,7 +415,9 @@ export function readOfflineYjsCanvasSource({ document: row, updates, expectProje
         updatesSha256: hash(stable(updates.map(update => [update.seq, update.sha256]))),
         rawSha256: hash(stable(raw)), projectionSha256: hash(row.projection_json),
         nodeCount: raw.nodes.length, edgeCount: raw.edges.length, assetCount: raw.assets.length, jobCount: raw.jobs.length,
-        requiresExplicitEdgeRemoval: omittedEdgeIds,
+        requiresExplicitEdgeRemoval: reconciled.omittedEdgeIds,
+        projectionStale: reconciled.stale,
+        projectionMismatches: reconciled.mismatches,
         detachedJobIds: raw.jobs.filter(job => !nodeIds.has(job.nodeId)).map(job => job.id).sort(),
         historicalNodeIdentities: historicalNodeIdentities.sort((left, right) =>
           left.nodeId < right.nodeId ? -1 : left.nodeId > right.nodeId ? 1 : left.firstSeenSeq - right.firstSeenSeq),
@@ -328,7 +431,7 @@ export function readOfflineYjsCanvasSource({ document: row, updates, expectProje
  * opens the connection read-only; no table creation, PRAGMA mutation or writer
  * lock acquisition is performed here. Errors never produce a partial plan.
  */
-export function loadOfflineYjsCanvasSources(db, { transaction = true, expectProjection } = {}) {
+export function loadOfflineYjsCanvasSources(db, { transaction = true, deriveProjection, repairProjection = false } = {}) {
   if (transaction) db.exec("BEGIN");
   try {
     const integrity = db.prepare("PRAGMA integrity_check").all();
@@ -341,7 +444,8 @@ export function loadOfflineYjsCanvasSources(db, { transaction = true, expectProj
     return rows.map(document => readOfflineYjsCanvasSource({
       document,
       updates: db.prepare("SELECT * FROM canvas_yjs_updates WHERE canvas_id = ? ORDER BY seq").all(document.canvas_id),
-      ...(expectProjection ? { expectProjection } : {}),
+      ...(deriveProjection ? { deriveProjection } : {}),
+      repairProjection,
     }));
   } finally { if (transaction) db.exec("ROLLBACK"); }
 }
