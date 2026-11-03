@@ -16,10 +16,8 @@ import { nodeSelectionStore } from "../../services/selection-store.js";
 import { hoverComposerBox, resolveComposerAction, resolveHoverComposerTarget } from "./hover-composer.js";
 import { addReference } from "./model-execution-host-helpers.js";
 import { requestDockExpand } from "./dock-expand-request.js";
-import { createWoohaa3CanvasNodeId, getWoohaa3CanvasNodeRect } from "@woohaa3/contracts";
-import { planInsertNode } from "../../../extension-api/command-planner.js";
-import { connectLabelFor, connectNodeDataFor } from "../../domain/node-catalog.js";
-import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
+import { SELF_REFERENCE_ASSET_FIELD } from "@woohaa3/contracts";
+import { planNodeDataPatch } from "../../../extension-api/command-planner.js";
 import "./hover-composer.css";
 
 /**
@@ -57,7 +55,6 @@ export function HoverComposerButton() {
   const navigation = useService("canvasNavigation");
   const canvasState = useService("canvasState");
   const session = useService("canvasSession");
-  const edit = useService("canvasEdit");
   useSyncExternalStore(canvasState.subscribe, canvasState.getCanvas, canvasState.getCanvas);
   useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot);
   useSyncExternalStore(runtime.subscribeViewport, runtime.viewportVersion, runtime.viewportVersion);
@@ -191,7 +188,7 @@ export function HoverComposerButton() {
         onClick={() => {
           if (!writable) return;
           // 底部开着别的节点的面板：把这张图连成它的参考输入（面板不切走）；
-          // 否则在它旁边新建生成节点并以它为参考。
+          // 否则用这张图自己的节点（见下）。
           // 多选时底部没有单节点面板，不算「已打开面板」。
           const selection = nodeSelectionStore.getSnapshot();
           const action = resolveComposerAction({
@@ -203,36 +200,20 @@ export function HoverComposerButton() {
             if (addReference(session, action.panelNodeId, target.nodeId)) requestDockExpand(action.panelNodeId);
             return;
           }
-          // 在这张图右侧新建一个图片生成节点，连成它的参考，并打开新节点的对话框。
-          const nodes = canvas?.document.nodes ?? [];
-          const source = nodes.find((entry) => entry.id === target.nodeId);
+          // 没有别的面板：就用这张图自己的节点。把它当前的图记成「自带主图」，
+          // 选中并展开它的对话框；生成结果落回本节点，旧图进它的历史圆点。
+          const source = (canvas?.document.nodes ?? []).find((entry) => entry.id === target.nodeId);
           if (!source) return;
-          const rect = getWoohaa3CanvasNodeRect(source as never, new Map(nodes.map((entry) => [entry.id, entry])) as never);
-          const nodeId = createWoohaa3CanvasNodeId("image");
-          const nodeData = connectNodeDataFor(
-            { id: source.id, type: source.type },
-            "image",
-            [],
-            workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData
-          );
-          if (!nodeData) return;
-          const label = connectLabelFor(source.type, "image");
-          void edit.record(
-            planInsertNode({
-              nodeId,
-              nodeType: "image",
-              position: { x: rect.x + rect.width + 120, y: rect.y },
-              nodeData,
-              connectFromNodeId: source.id,
-              ...(label ? { connectLabel: label } : {})
-            }),
-            "添加到对话框"
-          ).then((result) => {
-            if (!result.ok) return;
-            // 新节点的底边栏默认收成一条：先发展开请求，再选中让它挂载。
-            requestDockExpand(nodeId);
-            runtime.controller()?.selectNode(nodeId);
-          });
+          const outputAssetId = (canvas?.nodeData?.[source.id] as { outputAssetId?: unknown } | undefined)?.outputAssetId;
+          const asset = typeof outputAssetId === "string" ? canvas?.assets?.find((entry) => entry.id === outputAssetId) : undefined;
+          if (source.type === "image" && asset && asset.status === "ready") {
+            session.submitCommands(
+              planNodeDataPatch({ nodeId: source.id, value: { [SELF_REFERENCE_ASSET_FIELD]: asset.id } }),
+              `web-self-ref-${Date.now().toString(36)}`
+            );
+          }
+          requestDockExpand(source.id);
+          runtime.controller()?.selectNode(source.id);
         }}
       >
         {/* ⊕ = 圆环（CSS 描边）+ 图标库的加号；审计禁止业务插件自绘通用操作 <svg>。 */}

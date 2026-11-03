@@ -169,7 +169,7 @@ describe("Canvas run service（任务 5.3）", () => {
     expect(submitted).toHaveLength(1);
     expect(submitted[0].workerTaskKey).toBe("r1");
     expect(submitted[0].inputs).toEqual([
-      { assetId: "asset-up", role: "reference_image", storageKey: STORAGE_KEY, mediaType: "image/png", mediaKind: "image" }
+      { assetId: "asset-up", role: "reference_image", storageKey: STORAGE_KEY, mediaType: "image/png", mediaKind: "image", field: "referenceImages" }
     ]);
 
     // 事务已把 activeRunId/job 写入权威 Y.Doc。
@@ -457,7 +457,7 @@ describe("Canvas run service 视频编辑意图编译（change: port-video-editi
     expect(prompt).not.toContain("http");
     // 任务输入仍只有稳定 edit_video 视频引用，没有临时 preview 输入。
     expect(submitted[0].inputs).toEqual([
-      { assetId: "asset-video", role: "edit_video", storageKey: STORAGE_KEY, mediaType: "video/mp4", mediaKind: "video" }
+      { assetId: "asset-video", role: "edit_video", storageKey: STORAGE_KEY, mediaType: "video/mp4", mediaKind: "video", field: "videoUrls" }
     ]);
   });
 

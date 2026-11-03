@@ -11,7 +11,7 @@
  *   稳定 storageKey 的资产；
  * - 只输出稳定引用与同源相对预览地址，绝不输出签名 URL、bytes 或外部地址。
  */
-import { ensureWoohaa3CanvasInputMappingSlotId, inferWoohaa3CanvasInputRole } from "./core";
+import { selfReferenceMapping, ensureWoohaa3CanvasInputMappingSlotId, inferWoohaa3CanvasInputRole } from "./core";
 import type { CanvasNodeData, CanvasNodeInputMapping } from "./types";
 import { sortWoohaa3CanvasInputMappings } from "./core";
 
@@ -149,7 +149,8 @@ export function collectDirectMappings(canvas: CanvasLike, nodeId: string): Canva
         sortKey: String(declared.length + index)
       })
     );
-  return [...sortWoohaa3CanvasInputMappings(declared), ...synthesized];
+  const self = selfReferenceMapping(nodeId, canvas.nodeData[nodeId]);
+  return [...(self ? [self] : []), ...sortWoohaa3CanvasInputMappings(declared), ...synthesized];
 }
 
 function referenceKindForMapping(mapping: CanvasNodeInputMapping, canvas: CanvasLike, sourceNodeId: string): ModelReferenceKind {

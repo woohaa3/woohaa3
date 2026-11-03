@@ -415,3 +415,36 @@ describe("画布变化后重算（不沿用旧快照）", () => {
     expect(resolution.blockingReasons).toEqual(["节点 target 不存在"]);
   });
 });
+
+describe("节点自带主图（selfReferenceAssetId）", () => {
+  it("没有任何入边也能把节点自己记录的图作为参考输入，且固定到记录的资产", () => {
+    const canvas = canvasFixture({
+      nodes: [{ id: "target", type: "image", data: { outputAssetId: "asset-new", selfReferenceAssetId: "asset-old" } }],
+      edges: [],
+      assets: [imageAsset({ id: "asset-old" }), imageAsset({ id: "asset-new" })]
+    });
+    const resolution = resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: IMAGE_CAPABILITY });
+    expect(resolution.blockingReasons).toEqual([]);
+    expect(resolution.inputs.map((input) => input.assetId)).toEqual(["asset-old"]);
+    expect(resolution.inputs[0]).toMatchObject({ role: "reference_image", field: "referenceImages" });
+  });
+
+  it("标记排在入边参考之前（先占主图字段）", () => {
+    const canvas = upstreamCanvas({
+      outputAssetId: "asset-a",
+      assets: [imageAsset({ id: "asset-a" }), imageAsset({ id: "asset-self" })]
+    });
+    canvas.nodeData.target = { ...(canvas.nodeData.target ?? {}), selfReferenceAssetId: "asset-self" };
+    const resolution = resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: IMAGE_CAPABILITY });
+    expect(resolution.inputs.map((input) => input.assetId)).toEqual(["asset-self", "asset-a"]);
+  });
+
+  it("空串表示没有（移除参考卡后不再带入）", () => {
+    const canvas = canvasFixture({
+      nodes: [{ id: "target", type: "image", data: { selfReferenceAssetId: "" } }],
+      edges: [],
+      assets: []
+    });
+    expect(resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: IMAGE_CAPABILITY }).inputs).toEqual([]);
+  });
+});

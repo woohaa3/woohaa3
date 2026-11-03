@@ -11,6 +11,7 @@
  */
 import {
   collectWoohaa3CanvasMentions,
+  selfReferenceMapping,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   pickInputBinding,
@@ -295,7 +296,8 @@ function collectDirectMappings(canvas: ServerCanvas, nodeId: string): CanvasNode
         sortKey: String(declared.length + index)
       })
     );
-  return [...sortWoohaa3CanvasInputMappings(declared), ...synthesized];
+  const self = selfReferenceMapping(nodeId, nodeData[nodeId]);
+  return [...(self ? [self] : []), ...sortWoohaa3CanvasInputMappings(declared), ...synthesized];
 }
 
 /** mapping → mention 类型（文字角色为 input_text，其余按 role 判定媒体类型）。 */

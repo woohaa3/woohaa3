@@ -15,7 +15,6 @@ import { createRoot, type Root } from "react-dom/client";
 const mocks = {
   selectNode: vi.fn(() => true),
   submitCommands: vi.fn(() => ({ ok: true })),
-  record: vi.fn(async () => ({ ok: true })),
   writable: true,
   nodeScreenRect: vi.fn(() => ({ left: 100, top: 50, width: 400, height: 300 })),
   frameListeners: new Set<() => void>(),
@@ -27,6 +26,8 @@ const mocks = {
  * 每次调用新建对象会让 `useSyncExternalStore` 判定「变了」而无限重渲染。
  */
 const canvasSnapshot = {
+  nodeData: { img: { outputAssetId: "asset-1" } } as Record<string, unknown>,
+  assets: [{ id: "asset-1", status: "ready", mediaKind: "image" }],
   document: { nodes: [{ id: "img", type: "image", position: { x: 0, y: 0 }, width: 200, height: 150 }, { id: "panel", type: "image", position: { x: 500, y: 0 }, width: 200, height: 150 }, { id: "grp", type: "group", position: { x: 0, y: 400 } }] }
 };
 /** 同上：只在 `mocks.mode` 换引用时重建，其余时刻返回同一个对象。 */
@@ -59,7 +60,6 @@ const services = {
     getWorkingCanvas: () => null,
     subscribe: () => () => undefined
   },
-  canvasEdit: { record: mocks.record },
   canvasSession: {
     isWritable: () => mocks.writable,
     submitCommands: mocks.submitCommands,
@@ -86,7 +86,6 @@ afterEach(() => {
   hoverNodeStore.reset();
   mocks.selectNode.mockClear();
   mocks.submitCommands.mockClear();
-  mocks.record.mockClear();
   nodeSelectionStore.reset();
   mocks.writable = true;
   mocks.nodeScreenRect.mockImplementation(() => ({ left: 100, top: 50, width: 400, height: 300 }));
@@ -111,7 +110,7 @@ describe("悬停胶囊「添加到对话框」", () => {
     expect(pill(render())).toBeNull();
   });
 
-  it("悬停图片时在卡片下缘浮出，点它在旁边新建生成节点并以它为参考", () => {
+  it("悬停图片时在卡片下缘浮出，点它把这张图记成自带主图并选中它自己的节点", () => {
     const container = render();
     act(() => { hoverNodeStore.setNodeId("img"); });
     const element = pill(container)!;
@@ -120,10 +119,13 @@ describe("悬停胶囊「添加到对话框」", () => {
     // 浮在卡片下方外侧：top = 50 + 300 + 8（不压卡片底部，历史条/抓手仍可点）
     expect(element.style.top).toBe("358px");
     act(() => { element.querySelector("button")!.click(); });
-    expect(mocks.record).toHaveBeenCalledTimes(1);
-    const commands = (mocks.record.mock.calls[0] as unknown as [Array<{ type: string; node: { type: string }; connect?: { fromNodeId: string } }>])[0];
-    expect(commands[0]!.node.type).toBe("image");
-    expect(commands[0]!.connect?.fromNodeId).toBe("img");
+    // 不新建节点：把这张图记成自带主图，并选中它自己的节点。
+    expect(mocks.submitCommands).toHaveBeenCalledTimes(1);
+    const commands = JSON.stringify(mocks.submitCommands.mock.calls[0]);
+    expect(commands).toContain("selfReferenceAssetId");
+    expect(commands).toContain("asset-1");
+    expect(commands).not.toContain("node.add");
+    expect(mocks.selectNode).toHaveBeenCalledWith("img");
   });
 
   it("底部已开着另一个节点的面板时，点它是把这张图连成那个面板的参考，不切走面板", () => {

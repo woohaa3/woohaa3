@@ -111,10 +111,10 @@ describe("resolveComposerAction", () => {
     expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "b", nodes })).toEqual({ type: "connect", panelNodeId: "b" });
   });
 
-  it("没有打开的面板、点的就是当前节点、或当前节点没有面板 → 新建节点", () => {
-    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: null, nodes })).toEqual({ type: "create" });
-    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "a", nodes })).toEqual({ type: "create" });
-    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "g", nodes })).toEqual({ type: "create" });
-    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "gone", nodes })).toEqual({ type: "create" });
+  it("没有打开的面板、点的就是当前节点、或当前节点没有面板 → 用自己的节点", () => {
+    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: null, nodes })).toEqual({ type: "self" });
+    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "a", nodes })).toEqual({ type: "self" });
+    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "g", nodes })).toEqual({ type: "self" });
+    expect(resolveComposerAction({ targetNodeId: "a", primaryNodeId: "gone", nodes })).toEqual({ type: "self" });
   });
 });

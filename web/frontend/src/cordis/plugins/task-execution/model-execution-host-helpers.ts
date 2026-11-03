@@ -3,8 +3,8 @@
  * （change: 2026-09-29-add-pluggable-model-interactions，任务 4.1）。
  */
 import type { CanvasSession } from "../../contracts.js";
-import { isShotReferenceRole, type CanvasTaskCatalogModel, type CanvasTaskModelType, type ServerCanvas } from "@woohaa3/contracts";
-import { planConnectEdge, planDeleteEdge } from "../../../extension-api/command-planner.js";
+import { SELF_REFERENCE_ASSET_FIELD, isShotReferenceRole, type CanvasTaskCatalogModel, type CanvasTaskModelType, type ServerCanvas } from "@woohaa3/contracts";
+import { planConnectEdge, planDeleteEdge, planNodeDataPatch } from "../../../extension-api/command-planner.js";
 import type { ModelReferenceItem } from "../../contract/model-interaction.js";
 
 /**
@@ -39,6 +39,14 @@ export function removeReference(
   source: string
 ): void {
   if (!session.isWritable() || !canvas) return;
+  // 节点自带主图没有入边：移除就是清掉记录的资产 id（合并语义，空串即没有）。
+  if (source === target) {
+    session.submitCommands(
+      planNodeDataPatch({ nodeId: target, value: { [SELF_REFERENCE_ASSET_FIELD]: "" } }),
+      `web-ref-remove-${Date.now().toString(36)}`
+    );
+    return;
+  }
   const edge = canvas.document.edges.find(
     (candidate) => candidate.target === target && candidate.source === source
   );

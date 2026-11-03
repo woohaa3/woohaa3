@@ -60,3 +60,29 @@ export function woohaa3CanvasInputMentionDisplayLabel(type: string, ordinal: num
 export function woohaa3CanvasInputMentionLabel(type: string, ordinal: number): string {
   return woohaa3CanvasInputMentionDisplayLabel(type, ordinal).slice(1);
 }
+
+/** `nodeData` 里记录「本节点自带主图」的资产 id；空串或缺失表示没有。 */
+export const SELF_REFERENCE_ASSET_FIELD = "selfReferenceAssetId";
+
+/**
+ * 「节点自带主图」映射：节点把自己当前的图当作参考输入（上传图 → 添加到对话框 → 结果回到本节点）。
+ *
+ * 为什么不用 `inputMapping`：画布规则是「映射 ⇔ 入边」，自连边会被连线规则拒绝，规范化也会清掉没有
+ * 入边的映射；所以单独用一个 `nodeData` 字段记资产 id，在读取解析时合成这条映射，排在所有入边之前。
+ * 固定到记录时的资产（`sourceAssetIds`），生成后节点显示新图也不影响这次的参考。
+ */
+export function selfReferenceMapping(
+  nodeId: string,
+  data: Record<string, unknown> | undefined,
+): { slotId: string; sourceNodeId: string; sourceAssetIds: string[]; role: string; sortKey: string; label: string } | null {
+  const assetId = data?.[SELF_REFERENCE_ASSET_FIELD];
+  if (typeof assetId !== "string" || assetId === "") return null;
+  return {
+    slotId: createWoohaa3CanvasInputSlotId(nodeId, "self"),
+    sourceNodeId: nodeId,
+    sourceAssetIds: [assetId],
+    role: "reference_image",
+    sortKey: "-1",
+    label: "主图像",
+  };
+}

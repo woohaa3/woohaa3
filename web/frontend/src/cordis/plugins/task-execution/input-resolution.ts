@@ -16,7 +16,8 @@
  *
  * 每次渲染都从当前画布重算（不缓存旧快照）。
  */
-import { ensureWoohaa3CanvasInputMappingSlotId,
+import { selfReferenceMapping,
+  ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   pickInputBinding,
   providerReferenceRole,
@@ -191,7 +192,8 @@ function collectInputMappings(
       })
     );
 
-  return [...sortWoohaa3CanvasInputMappings(declared), ...synthesized];
+  const self = selfReferenceMapping(nodeId, nodeData[nodeId]);
+  return [...(self ? [self] : []), ...sortWoohaa3CanvasInputMappings(declared), ...synthesized];
 }
 
 /** 返回阻止原因；`null` 表示该资产可以作为参考输入。 */

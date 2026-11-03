@@ -7,6 +7,7 @@
  * chips 是权威拓扑的 UI 投影；mention 候选只从**可确定类型**的 slot 构造。两者共用本投影。
  */
 import {
+  selfReferenceMapping,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   providerReferenceRole,
@@ -242,7 +243,8 @@ export function collectDirectMappings(canvas: ServerCanvas, nodeId: string): Can
         sortKey: String(declared.length + index)
       })
     );
-  return [...sortWoohaa3CanvasInputMappings(declared), ...synthesized];
+  const self = selfReferenceMapping(nodeId, canvas.nodeData[nodeId]);
+  return [...(self ? [self] : []), ...sortWoohaa3CanvasInputMappings(declared), ...synthesized];
 }
 
 function mentionTypeForMapping(mapping: CanvasNodeInputMapping): Woohaa3CanvasMentionType {

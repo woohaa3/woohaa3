@@ -7,6 +7,7 @@
  * 只输出稳定引用（assetId/role/storageKey/mediaType），绝不输出 bytes、浏览器 URL 或签名 URL。
  */
 import {
+  selfReferenceMapping,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   isShotReferenceRole, pickInputBinding, providerReferenceRole,
@@ -223,7 +224,8 @@ function collectInputMappings(
       })
     );
 
-  return [...sortWoohaa3CanvasInputMappings(declared), ...synthesized];
+  const self = selfReferenceMapping(nodeId, nodeData[nodeId]);
+  return [...(self ? [self] : []), ...sortWoohaa3CanvasInputMappings(declared), ...synthesized];
 }
 
 function validateReferenceAsset(
