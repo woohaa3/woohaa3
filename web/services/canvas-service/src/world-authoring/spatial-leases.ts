@@ -57,6 +57,22 @@ export interface SpatialAcquireResult {
 }
 export type LeaseErrorCode = "invalid-data" | "unavailable" | "request-conflict" | "lease-conflict" | "stale-epoch" | "cancelled" | "outside-scope" | "version-conflict" | "unverified-stop";
 export interface LeaseConflict { target: WorldObjectIdentity; runId: string; epoch: number; }
+
+/**
+ * Durable lock fact for one in-scope object. `cancelled` runs still own their locks
+ * until exact stop is confirmed; there is no time-based expiry.
+ */
+export interface SpatialOccupancyLock {
+  target: WorldObjectIdentity;
+  runId: string;
+  epoch: number;
+  state: "active" | "cancelled";
+}
+
+/** A missing/unreadable durable store is reported, never flattened to an empty set. */
+export type SpatialOccupancyReadResult =
+  | { ok: true; locks: SpatialOccupancyLock[] }
+  | { ok: false; reason: "store-unavailable" };
 export class SpatialLeaseError extends Error {
   constructor(public readonly code: LeaseErrorCode, public readonly conflict?: LeaseConflict) { super(code); }
 }

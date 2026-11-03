@@ -21,7 +21,7 @@
  */
 import type { YjsArchiveSnapshot } from "../../sync/archive-publication.js";
 import type { DatabaseSync } from "node:sqlite";
-import type { ServerCanvas } from "@woohaa3/contracts";
+import type { ServerCanvas, WorldObjectIdentity } from "@woohaa3/contracts";
 import { computeUpdateSha256 } from "../../sync/yjs-repository.js";
 import { writerLockHolderIsStale } from "../../sync/writer-lock.js";
 import { type YjsCommandCommit, type YjsCommandRecord, type YjsCommitResult, type YjsDocumentRepository, type YjsLoadedState, type YjsRepositoryHealth } from "../../sync/index.js";
@@ -31,7 +31,7 @@ import { migrateYjsSchema, safe } from "./yjs-migrations.js";
 import { inImmediateTransaction, toBlob, toBytes, decodeCommandRow, type CommandRow, type DocumentRow, type UpdateRow } from "./yjs-row-codec.js";
 import { SqliteSpatialLeaseStore } from "./spatial-leases.js";
 import { affectedWorldObjects } from "../../world-authoring/affected-objects.js";
-import { objectKey, SpatialLeaseError, type LeaseIntent, type SpatialAcquireResult, type SpatialCommitAuthority, type SpatialWriteContext } from "../../world-authoring/spatial-leases.js";
+import { objectKey, SpatialLeaseError, type LeaseIntent, type SpatialAcquireResult, type SpatialCommitAuthority, type SpatialOccupancyReadResult, type SpatialWriteContext } from "../../world-authoring/spatial-leases.js";
 
 export { SQLITE_YJS_SCHEMA_VERSION } from "./yjs-migrations.js";
 
@@ -137,6 +137,17 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
     this.issuedContexts.delete(JSON.stringify([canvasId, requestId]));
   }
   pendingSpatialRuns() { return this.spatialLeases.listPending(); }
+  /**
+   * Read-only occupancy probe for the selected scope's exact objects. Never creates a
+   * run, lock or capability; an unreadable store reports unavailable instead of idle.
+   */
+  readSpatialOccupancy(canvasId: string, targets: WorldObjectIdentity[]): SpatialOccupancyReadResult {
+    try {
+      return { ok: true, locks: this.spatialLeases.readOccupancy(canvasId, targets) };
+    } catch {
+      return { ok: false, reason: "store-unavailable" };
+    }
+  }
 
   async loadYjsState(canvasId: string): Promise<YjsLoadedState | null> {
     const document = this.db

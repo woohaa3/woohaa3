@@ -14,6 +14,7 @@ import {
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { CanvasRoom } from "../services/canvas-service/src/sync/room.js";
 import { SqliteYjsRepository } from "../services/canvas-service/src/storage/sqlite/yjs.js";
+import { loadNodeSqlite } from "../services/canvas-service/src/storage/sqlite/sqlite-loader.js";
 import { createCanvasService } from "../services/canvas-service/src/composition.js";
 import { InMemoryCanvasRepository } from "../services/canvas-service/src/storage/core/in-memory-repository.js";
 import { createInMemoryWriterLock } from "../services/canvas-service/src/sync/index.js";
@@ -664,6 +665,209 @@ describe("scene-area HTTP seams over real CanvasRoom, SQLite and Yjs", () => {
         contextId: context.body.context.contextId
       });
       await stopContext(harness, "http-camera", context.body.run);
+    } finally {
+      await server.close();
+      await closeHarness(harness);
+    }
+  });
+
+  it("reports durable occupancy from current locks without writing, and keeps cancelled locks until stop", async () => {
+    const harness = await openHarness();
+    const server = await startServer(harness);
+    const canvasId = harness.canvas.id;
+    const counts = () => ({
+      runs: harness.repository.debugQuery<{ count: number }>("SELECT COUNT(*) AS count FROM spatial_lease_runs")[0]!.count,
+      locks: harness.repository.debugQuery<{ count: number }>("SELECT COUNT(*) AS count FROM spatial_lease_locks")[0]!.count,
+      commands: harness.repository.debugQuery<{ count: number }>("SELECT COUNT(*) AS count FROM canvas_yjs_commands")[0]!.count
+    });
+    try {
+      const initial = await post(server.base, `/api/canvases/${canvasId}/scene-area-prepare`, { areaId: "area-main" });
+      expect(initial.status).toBe(200);
+      expect(initial.body.snapshot.occupancy).toEqual({
+        version: "world-scope-occupancy-v1",
+        scope: initial.body.snapshot.scope,
+        state: "idle",
+        locks: []
+      });
+
+      const occupied = await issueContext(server.base, canvasId, "occupancy-request", "occupancy-run", 5);
+      expect(occupied.status).toBe(200);
+      const beforeReads = await canonical(harness);
+      const beforeCounts = counts();
+      expect(beforeCounts).toEqual({ runs: 1, locks: 2, commands: 0 });
+
+      const prepared = await post(server.base, `/api/canvases/${canvasId}/scene-area-prepare`, { areaId: "area-main" });
+      expect(prepared.status).toBe(200);
+      const occupancy = prepared.body.snapshot.occupancy;
+      expect(occupancy.state).toBe("occupied");
+      expect(occupancy.scope).toEqual(prepared.body.snapshot.scope);
+      expect(occupancy.locks).toEqual([
+        { target: { kind: "instance", instanceId: "complete-a" }, runId: "occupancy-run", epoch: 5, state: "active" },
+        { target: { kind: "camera", cameraId: "camera-in" }, runId: "occupancy-run", epoch: 5, state: "active" }
+      ]);
+      // No capability or host execution identity (and no request identity) leaks.
+      expect(JSON.stringify(prepared.body)).not.toContain("capability");
+      expect(JSON.stringify(prepared.body)).not.toContain("exec-occupancy");
+      expect(JSON.stringify(prepared.body)).not.toContain("occupancy-request");
+
+      // Repeated read-only preparations do not create runs/locks/commands or move state.
+      for (let index = 0; index < 3; index += 1) {
+        const again = await post(server.base, `/api/canvases/${canvasId}/scene-area-prepare`, { areaId: "area-main" });
+        expect(again.status).toBe(200);
+        expect(again.body.snapshot).toEqual(prepared.body.snapshot);
+      }
+      expect(counts()).toEqual(beforeCounts);
+      expect(await canonical(harness)).toEqual(beforeReads);
+
+      // Cancelling without confirmed stop keeps the locks and still blocks other runs.
+      const revoke = await post(server.base, `/api/canvases/${canvasId}/world-tool-context-revoke`, {
+        contextId: occupied.body.context.contextId
+      });
+      expect(revoke.status).toBe(200);
+      const cancelledRead = await post(server.base, `/api/canvases/${canvasId}/scene-area-prepare`, { areaId: "area-main" });
+      expect(cancelledRead.status).toBe(200);
+      expect(cancelledRead.body.snapshot.occupancy.state).toBe("occupied");
+      expect(cancelledRead.body.snapshot.occupancy.locks.map((lock: any) => lock.state)).toEqual(["cancelled", "cancelled"]);
+      const contender = await issueContext(server.base, canvasId, "occupancy-contender", "contender-run");
+      expect(contender.status).toBe(409);
+      expect(contender.body).toMatchObject({ ok: false, code: "lease-conflict", conflicts: [{ runId: "occupancy-run", epoch: 5 }] });
+
+      await stopContext(harness, "occupancy-request", occupied.body.run);
+      const released = await post(server.base, `/api/canvases/${canvasId}/scene-area-prepare`, { areaId: "area-main" });
+      expect(released.status).toBe(200);
+      expect(released.body.snapshot.occupancy).toEqual({
+        version: "world-scope-occupancy-v1",
+        scope: released.body.snapshot.scope,
+        state: "idle",
+        locks: []
+      });
+      expect(counts()).toMatchObject({ runs: 1, locks: 0, commands: 0 });
+
+      // Only the durable lock fact changes eligibility; prepare itself never granted anything.
+      const next = await issueContext(server.base, canvasId, "occupancy-next", "next-run");
+      expect(next.status).toBe(200);
+      await stopContext(harness, "occupancy-next", next.body.run);
+      expect(await canonical(harness)).toEqual(beforeReads);
+    } finally {
+      await server.close();
+      await closeHarness(harness);
+    }
+  });
+
+  it("keeps kind namespaces, filters out-of-scope and other-canvas locks, and survives reopen", async () => {
+    const canvas = canvasFixture("canvas-occupancy-namespace");
+    canvas.document.nodes.push(
+      { id: "dual-instance", type: "model3d", position: { x: 0, y: 0 } },
+      { id: "dual-camera", type: "world-camera", position: { x: 900, y: 900 } },
+      { id: "outside-camera-card", type: "world-camera", position: { x: 0, y: 0 } }
+    );
+    canvas.nodeData["dual-instance"] = instanceData("dual-id", 2, 2);
+    canvas.nodeData["dual-camera"] = {
+      worldCamera: {
+        ...cameraData("dual-id", 6, 6)
+      }
+    };
+    canvas.nodeData["outside-camera-card"] = { worldCamera: cameraData("camera-out", 20, 5) };
+    const dir = mkdtempSync(join(tmpdir(), "scope-occupancy-reopen-"));
+    const file = join(dir, "canvas.sqlite");
+    let harness: Harness | null = await openHarness({ canvas, dir, file });
+    let server: Server | null = await startServer(harness);
+    let reopened: Harness | null = null;
+    let reopenedServer: Server | null = null;
+    const canvasId = canvas.id;
+    try {
+      const occupied = await issueContext(server.base, canvasId, "namespace-request", "namespace-run", 7);
+      expect(occupied.status).toBe(200);
+
+      // Locks inserted for a same-canvas out-of-scope object and another canvas must never leak.
+      const { DatabaseSync } = loadNodeSqlite();
+      const sqlite = new DatabaseSync(file);
+      const runRow = (rowCanvasId: string, requestId: string, runId: string, epoch: number, executionId: string) => {
+        const intent = JSON.stringify({
+          requestId,
+          canvasId: rowCanvasId,
+          runId,
+          epoch,
+          executionId,
+          scope: { scope: { kind: "scene-area", areaId: "area-main" }, scopeVersion: "area-scope-1" },
+          writable: [],
+          readOnly: []
+        });
+        sqlite.prepare("INSERT INTO spatial_lease_runs (canvas_id, request_id, run_id, epoch, execution_id, original_intent_json, intent_json, state) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')")
+          .run(rowCanvasId, requestId, runId, epoch, executionId, intent, intent);
+      };
+      runRow(canvasId, "intruder-request", "intruder-run", 9, "intruder-exec");
+      sqlite.prepare("INSERT INTO spatial_lease_locks (canvas_id, kind, object_id, run_id, epoch) VALUES (?, ?, ?, ?, ?)")
+        .run(canvasId, "instance", "outside-c", "intruder-run", 9);
+      runRow("canvas-other", "foreign-request", "foreign-run", 2, "foreign-exec");
+      sqlite.prepare("INSERT INTO spatial_lease_locks (canvas_id, kind, object_id, run_id, epoch) VALUES (?, ?, ?, ?, ?)")
+        .run("canvas-other", "instance", "complete-a", "foreign-run", 2);
+      sqlite.close();
+
+      const prepared = await post(server.base, `/api/canvases/${canvasId}/scene-area-prepare`, { areaId: "area-main" });
+      expect(prepared.status).toBe(200);
+      const locks = prepared.body.snapshot.occupancy.locks;
+      expect(prepared.body.snapshot.occupancy.state).toBe("occupied");
+      expect(locks.filter((lock: any) => lock.target.kind === "instance" && lock.target.instanceId === "dual-id")).toHaveLength(1);
+      expect(locks.filter((lock: any) => lock.target.kind === "camera" && lock.target.cameraId === "dual-id")).toHaveLength(1);
+      expect(locks.map((lock: any) => lock.runId)).toEqual(["namespace-run", "namespace-run", "namespace-run", "namespace-run"]);
+      expect(JSON.stringify(locks)).not.toContain("outside-c");
+      expect(JSON.stringify(locks)).not.toContain("camera-out");
+      expect(JSON.stringify(locks)).not.toContain("intruder-run");
+      expect(JSON.stringify(locks)).not.toContain("foreign-run");
+
+      await server.close();
+      server = null;
+      await harness.service.close();
+      harness.repository.close();
+      harness = null;
+
+      reopened = await openHarness({ canvas, dir, file, initialize: false });
+      reopenedServer = await startServer(reopened);
+      const recovered = await post(reopenedServer.base, `/api/canvases/${canvasId}/scene-area-prepare`, { areaId: "area-main" });
+      expect(recovered.status).toBe(200);
+      expect(recovered.body.snapshot.occupancy.state).toBe("occupied");
+      expect(recovered.body.snapshot.occupancy.locks).toEqual(locks);
+
+      await stopContext(reopened, "namespace-request", occupied.body.run);
+      const released = await post(reopenedServer.base, `/api/canvases/${canvasId}/scene-area-prepare`, { areaId: "area-main" });
+      expect(released.status).toBe(200);
+      // Out-of-scope and other-canvas locks remain durable but are never reported.
+      expect(released.body.snapshot.occupancy).toEqual({
+        version: "world-scope-occupancy-v1",
+        scope: released.body.snapshot.scope,
+        state: "idle",
+        locks: []
+      });
+      expect(reopened.repository.debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_locks WHERE canvas_id = 'canvas-other'"))
+        .toEqual([{ count: 1 }]);
+    } finally {
+      if (server) await server.close();
+      if (harness) await closeHarness(harness, false);
+      if (reopenedServer) await reopenedServer.close();
+      if (reopened) await closeHarness(reopened, false);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("denies occupancy prepare without canvas read permission and leaves no lease rows", async () => {
+    const harness = await openHarness({
+      serviceOptions: {
+        authenticate: async () => ({ subject: "scope-http-read-denied" }) as never,
+        access: {
+          async authorize() {
+            return { allowed: false, code: "forbidden", message: "读权限已撤销" };
+          }
+        }
+      }
+    });
+    const server = await startServer(harness);
+    try {
+      const prepare = await post(server.base, `/api/canvases/${harness.canvas.id}/scene-area-prepare`, { areaId: "area-main" });
+      expect(prepare.status).toBe(403);
+      expect(prepare.body).toMatchObject({ code: "FORBIDDEN" });
+      expect(harness.repository.debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_runs")).toEqual([{ count: 0 }]);
+      expect(harness.repository.debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_locks")).toEqual([{ count: 0 }]);
     } finally {
       await server.close();
       await closeHarness(harness);

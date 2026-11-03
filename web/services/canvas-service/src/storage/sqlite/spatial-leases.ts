@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { WorldObjectIdentity, WorldObjectVersion, WorldScopeVersion } from "@woohaa3/contracts";
-import { objectKey, SpatialLeaseError, type LeaseIntent, type LeaseRecord, type LeaseState, type SpatialLeaseAuthority } from "../../world-authoring/spatial-leases.js";
+import { objectKey, SpatialLeaseError, type LeaseIntent, type LeaseRecord, type LeaseState, type SpatialLeaseAuthority, type SpatialOccupancyLock } from "../../world-authoring/spatial-leases.js";
 import { migrateSpatialLeases } from "./spatial-lease-migrations.js";
 
 type Row = { intent_json: string; state: LeaseState };
@@ -48,6 +48,37 @@ export class SqliteSpatialLeaseStore {
   }
   listPending(): LeaseRecord[] {
     return (this.db.prepare("SELECT intent_json, state FROM spatial_lease_runs WHERE state != 'stopped' ORDER BY canvas_id, request_id").all() as Row[]).map(row => ({ intent: JSON.parse(row.intent_json) as LeaseIntent, state: row.state }));
+  }
+  /**
+   * Read-only occupancy for exactly the requested targets.
+   *
+   * Locks are keyed by (canvasId, kind, objectId), so an instance and a camera that
+   * share a string identity stay distinct. Cross-canvas locks can never match
+   * `canvasId`. A lock row always remains blocking: if its run row is unexpectedly
+   * missing it is reported as `active` instead of disappearing.
+   */
+  readOccupancy(canvasId: string, targets: WorldObjectIdentity[]): SpatialOccupancyLock[] {
+    const lockQuery = this.db.prepare("SELECT run_id, epoch FROM spatial_lease_locks WHERE canvas_id = ? AND kind = ? AND object_id = ?");
+    const stateQuery = this.db.prepare("SELECT state FROM spatial_lease_runs WHERE canvas_id = ? AND run_id = ? AND epoch = ?");
+    const found: SpatialOccupancyLock[] = [];
+    const seen = new Set<string>();
+    for (const target of targets) {
+      const key = objectKey(target);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const lock = lockQuery.get(canvasId, target.kind, id(target)) as { run_id: string; epoch: number } | undefined;
+      if (!lock) continue;
+      const run = stateQuery.get(canvasId, lock.run_id, lock.epoch) as { state: LeaseState } | undefined;
+      found.push({
+        target: target.kind === "instance"
+          ? { kind: "instance", instanceId: target.instanceId }
+          : { kind: "camera", cameraId: target.cameraId },
+        runId: lock.run_id,
+        epoch: lock.epoch,
+        state: run?.state === "cancelled" ? "cancelled" : "active"
+      });
+    }
+    return found;
   }
   private lock(intent: LeaseIntent, targets: WorldObjectVersion[]): void {
     const lookup = this.db.prepare("SELECT run_id, epoch FROM spatial_lease_locks WHERE canvas_id = ? AND kind = ? AND object_id = ?");
