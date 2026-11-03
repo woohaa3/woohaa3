@@ -13,6 +13,12 @@ import { createHighEntropyId } from "@woohaa3/contracts";
 import { planInsertNode } from "../extension-api/command-planner.js";
 import { planImportLayout } from "./plugins/paste-import/batch.js";
 import { crossCanvasSource, currentCanvasSource, nearbyNodeCount, type ImageLibraryWrites } from "./plugins/canvas-shell/image-library.js";
+import { planPlaceLibraryItem, withLibrary, type LibraryEntry } from "./plugins/canvas-shell/library-source.js";
+import {
+  installPinterestSave,
+  registerLibraryItem,
+  takeBlobFromDesktop
+} from "./plugins/canvas-shell/pinterest-save.js";
 import { appPublicUrl, getAppPublicFetch } from "./services/app-base-path.js";
 import { CANVAS_IMAGES_PATH, withMediaCanvasHint } from "./services/paths.js";
 
@@ -152,14 +158,75 @@ export function installImageLibrary(ctx: Context, input: { canvasId: string; can
     }
   };
 
+  /*
+   * Pinterest 窗口的右键「保存到素材库 / 发送到画布」落到这里（见 `plugins/canvas-shell/pinterest-save.ts`）。
+   *
+   * 复用上面的 `imageWrites`（可写判断、提交、视口中心）：「发送到画布」与「添加到画布」是同一套摆放。
+   * 只在桌面壳里有意义 —— 浏览器里没有 Pinterest 窗口，挂了也永远不会被调用，所以不做形态判断。
+   * 与 `ctx` 同生命周期：卸载时撤销，避免热重载后留着上一份处理者。
+   */
+  const disposePinterestSave = installPinterestSave({
+    takeBlob: takeBlobFromDesktop,
+    upload: async (file) => {
+      const media = ctx.get("mediaRemote" as never) as
+        | { upload(input: { file: File }): Promise<{ ok: true; media: import("./contract/remote.js").UploadedMedia } | { ok: false; error: string }> }
+        | undefined;
+      if (!media) return { ok: false, error: "媒体服务还没有就绪" };
+      return media.upload({ file });
+    },
+    registerLibrary: (input) => registerLibraryItem(getAppPublicFetch(), appPublicUrl, input),
+    canvas: {
+      isWritable: () => imageWrites.isWritable(),
+      hasCanvas: () => Boolean(canvasStateFacade.getCanvas()),
+      center: () => imageWrites.viewportCenter(),
+      nearby: (x, y) => nearbyNodeCount(canvasStateFacade, x, y),
+      submit: (commands, commandId) => {
+        const result = imageWrites.submit(commands, commandId);
+        return result.ok ? { ok: true } : { ok: false, reason: result.reason ?? "没有添加到画布" };
+      }
+    }
+  });
+  ctx.effect(() => disposePinterestSave);
+
+  /*
+   * 素材库（浏览器扩展 / Pinterest 窗口存进来的图）并进图库，作为虚拟画布「素材库」，
+   * 落在「外部导入」分组（见 `plugins/canvas-shell/library-source.ts`）。
+   *
+   * 包在 `crossCanvasSource` **外面**而不是改它：那个函数已经承担「当前画布实时 + 其他画布缓存」
+   * 的合并，素材库的生命周期不同（不随画布切换），塞进去会让去重键、订阅、失败状态都变复杂。
+   * 放置复用 `imageWrites`（可写判断 / 提交 / 视口中心），与「添加到画布」是同一套摆放规则。
+   */
   ctx.provide(
     "imageLibrary" as never,
-    crossCanvasSource({
-      current: currentImages,
-      currentCanvasId: canvasId,
-      fetchOthers: async () => loadForeignEntries(),
-      resolveUrl: (url, ownerCanvasId) => appPublicUrl(withMediaCanvasHint(url, ownerCanvasId)),
-      addForeignToCanvas: (item) => imageWrites.addForeignToCanvas(item.canvasId, item.id)
-    }) as never
+    withLibrary(
+      crossCanvasSource({
+        current: currentImages,
+        currentCanvasId: canvasId,
+        fetchOthers: async () => loadForeignEntries(),
+        resolveUrl: (url, ownerCanvasId) => appPublicUrl(withMediaCanvasHint(url, ownerCanvasId)),
+        addForeignToCanvas: (item) => imageWrites.addForeignToCanvas(item.canvasId, item.id)
+      }),
+      {
+        fetchLibrary: async () => {
+          const response = await getAppPublicFetch()(appPublicUrl("/api/library"), { credentials: "same-origin" });
+          if (!response.ok) throw new Error(`读取素材库失败（HTTP ${response.status}）`);
+          const body = (await response.json()) as { items?: unknown };
+          return Array.isArray(body.items) ? (body.items as LibraryEntry[]) : [];
+        },
+        // 素材库的 url 是逻辑路径（`/api/media/<key>`），这里只加部署前缀；读取不需要画布提示（不属于任何画布）
+        resolveUrl: (url) => appPublicUrl(url),
+        placeLibraryItem: (entry) => {
+          if (!imageWrites.isWritable()) return { ok: false, reason: "画布当前是只读的（未连接或同步未就绪）" };
+          const { x, y, zoom } = imageWrites.viewportCenter();
+          const commands = planPlaceLibraryItem({
+            entry,
+            center: { x, y, zoom },
+            nearby: nearbyNodeCount(canvasStateFacade, x, y)
+          });
+          const result = imageWrites.submit(commands, createHighEntropyId("library-add-to-canvas"));
+          return result.ok ? { ok: true } : { ok: false, reason: result.reason ?? "没有添加到画布" };
+        }
+      }
+    ) as never
   );
 }

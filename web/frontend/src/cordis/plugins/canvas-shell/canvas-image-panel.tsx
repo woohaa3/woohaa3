@@ -23,6 +23,7 @@ import {
   type ImageLibrarySource,
   type ImageOrigin
 } from "./image-library.js";
+import { CURRENT_AND_LIBRARY, LIBRARY_CANVAS_ID, LIBRARY_CANVAS_TITLE } from "./library-source.js";
 import type { ThumbnailLoader } from "./image-thumbnails.js";
 import { createThumbnailLoader } from "./image-thumbnails.js";
 import "./canvas-image-panel.css";
@@ -43,9 +44,12 @@ export function CanvasImagePanel({
 }) {
   const items = useSyncExternalStore(source.subscribe, source.getItems, source.getItems);
   // 默认只看当前画布（与参考稿一致）；「全部画布」是主动选择
+  // 默认视图 = 当前画布 + 素材库：用户从 Pinterest 存进素材库的图要马上看得到，
+  // 只看当前画布就等于看不到刚存的图，会以为保存失败（见 `library-source.ts`）。
   const [filter, setFilter] = useState<ImageFilter>(() => ({
     ...DEFAULT_IMAGE_FILTER,
-    canvasId: currentCanvasId ?? null
+    canvasId: currentCanvasId ? CURRENT_AND_LIBRARY : null,
+    currentCanvasId: currentCanvasId ?? null
   }));
   const [failure, setFailure] = useState<string | null>(null);
   // 缩略图加载器：整个面板共用一份缓存，图多时也只有 3 张在同时解码
@@ -91,6 +95,7 @@ export function CanvasImagePanel({
     [items, filter, currentCanvasId]
   );
   const currentCount = byCanvas.find((entry) => entry.canvasId === currentCanvasId)?.count ?? 0;
+  const libraryCount = byCanvas.find((entry) => entry.canvasId === LIBRARY_CANVAS_ID)?.count ?? 0;
   const allCount = byCanvas.reduce((sum, entry) => sum + entry.count, 0);
   const patch = (next: Partial<ImageFilter>) => setFilter((current) => ({ ...current, ...next }));
   const pickCanvas = (canvasId: string | null) => {
@@ -99,7 +104,9 @@ export function CanvasImagePanel({
      * 只有切到别的画布 / 全部画布时才需要其他画布的数据。首次切过去要拉一次
      * （数据源默认不预取，见 `crossCanvasSource`）；后端有短缓存，来回切不会连发请求。
      */
-    if (canvasId !== currentCanvasId && source.refresh) void source.refresh();
+    // 默认视图（当前画布 + 素材库）与单独看素材库都不涉及其他画布，不用拉那份大列表
+    const needsOthers = canvasId !== currentCanvasId && canvasId !== CURRENT_AND_LIBRARY && canvasId !== LIBRARY_CANVAS_ID;
+    if (needsOthers && source.refresh) void source.refresh();
   };
   // 只有真有外部来源的图时才给 chip，否则就是个永远为空的筛选
   const chips = GROUPS.filter((group) => group.origin !== "external" || counts.external > 0);
@@ -161,11 +168,18 @@ export function CanvasImagePanel({
              * 排到末尾就要滚到底才能找到。
              */}
             <option value="">全部画布（{allCount}）</option>
+            {/* 默认视图：当前画布 + 素材库。没有打开的画布时没有「当前」，这一项没有意义 */}
+            {currentCanvasId ? (
+              <option value={CURRENT_AND_LIBRARY}>当前画布 + 素材库（{currentCount + libraryCount}）</option>
+            ) : null}
             {currentCanvasId ? (
               <option value={currentCanvasId}>当前画布（{currentCount}）</option>
             ) : null}
+            {libraryCount > 0 || filter.canvasId === LIBRARY_CANVAS_ID ? (
+              <option value={LIBRARY_CANVAS_ID}>{LIBRARY_CANVAS_TITLE}（{libraryCount}）</option>
+            ) : null}
             {byCanvas
-              .filter((entry) => entry.canvasId !== currentCanvasId)
+              .filter((entry) => entry.canvasId !== currentCanvasId && entry.canvasId !== LIBRARY_CANVAS_ID)
               .map((entry) => (
                 <option key={entry.canvasId} value={entry.canvasId}>
                   {entry.canvasTitle.trim() || "未命名画布"}（{entry.count}）

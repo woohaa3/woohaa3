@@ -13,6 +13,7 @@ import { createHighEntropyId, getWoohaa3CanvasNodeRect } from "@woohaa3/contract
 import { planInsertNode } from "../../../extension-api/command-planner.js";
 import { planImportLayout } from "../paste-import/batch.js";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
+import { matchesCanvasFilter } from "./library-source.js";
 
 export type ImageOrigin = "uploaded" | "generated" | "external";
 
@@ -120,8 +121,13 @@ export type ImageFilter = {
   tab: ImageTab;
   /** `null` 表示不按来源筛。 */
   origin: ImageOrigin | null;
-  /** `null` 表示全部画布；否则只留这一张。 */
+  /**
+   * `null` 表示全部画布；否则只留这一张。
+   * 特殊值 {@link CURRENT_AND_LIBRARY} 是默认视图：当前画布 + 素材库（见 `library-source.ts`）。
+   */
   canvasId: string | null;
+  /** 当前打开的画布。只有 {@link CURRENT_AND_LIBRARY} 需要它来判断「哪张是当前画布」。 */
+  currentCanvasId?: string | null;
   query: string;
 };
 
@@ -132,7 +138,7 @@ export function filterImages(items: readonly ImageLibraryItem[], filter: ImageFi
   return items.filter((item) => {
     if (filter.tab === "favorite" && !item.isFavorite) return false;
     if (filter.origin && item.origin !== filter.origin) return false;
-    if (filter.canvasId && item.canvasId !== filter.canvasId) return false;
+    if (!matchesCanvasFilter(filter.canvasId, item, filter.currentCanvasId ?? null)) return false;
     if (needle && !item.title.toLowerCase().includes(needle)) return false;
     return true;
   });
@@ -260,8 +266,7 @@ export function currentCanvasSource(
       if (!asset) return { ok: false, reason: "找不到这张图片（可能已被删除）" };
       const { x, y, zoom } = writes!.viewportCenter();
       // 与导入计划同一套错位规则：同一位置连点两次不会叠成一个节点
-      const positions = planImportLayout({ x, y }, nearbyNodeCount(state, x, y) + 1, zoom);
-      const position = positions[positions.length - 1]!;
+      const position = nextPlacement({ x, y, zoom }, nearbyNodeCount(state, x, y));
       const nodeData: CanvasNodeData = {
         title: asset.title || "图片",
         outputAssetId: asset.id,
@@ -418,6 +423,20 @@ export function crossCanvasSource(input: {
       return input.current.addToCanvas(id);
     }
   };
+}
+
+/**
+ * 下一个节点该放在哪：视口中心起，按已有节点数错开。
+ *
+ * **同插件内唯一的摆放出口**。「添加到画布」（图库面板）、素材库放置、Pinterest 右键「发送到画布」
+ * 都走它，连续放置才不会叠在一起，规则也只有一份。
+ * 它背后的 `planImportLayout` 在 `paste-import` 插件里；跨插件依赖已在架构门禁里评审过
+ * （`canvas-shell/image-library.ts -> paste-import`），新文件不要再各自去引它 ——
+ * 经这里转一手，门禁清单就不用每多一个调用方就加一条。
+ */
+export function nextPlacement(center: { x: number; y: number; zoom: number }, nearby: number): { x: number; y: number } {
+  const positions = planImportLayout({ x: center.x, y: center.y }, nearby + 1, center.zoom);
+  return positions[positions.length - 1]!;
 }
 
 /**
