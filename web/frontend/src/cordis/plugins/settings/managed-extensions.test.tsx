@@ -380,6 +380,16 @@ describe("失败码与任务文案", () => {
     expect(failureReason("MARKETPLACE_PREFLIGHT_FAILED", "缺 entry")).toBe("扩展声明未通过预检：缺 entry");
     expect(describeJob(job({ progress: 0.42, phase: "download" })).detail).toBe("读取安装包 42%");
   });
+
+  it("下载失败显示宿主给出的具体原因（断流 / 进度 / 重试次数都能看见）", () => {
+    expect(failureReason("MARKETPLACE_DOWNLOAD_FAILED", "下载停滞：60 秒内没有收到新数据（已收到 47%）（已尝试 3 次）")).toBe(
+      "读取安装包失败：下载停滞：60 秒内没有收到新数据（已收到 47%）（已尝试 3 次）"
+    );
+    // 来源不可用同理：只给固定标签时用户看不出是超时、限流还是仓库删了。
+    expect(failureReason("MARKETPLACE_SOURCE_UNAVAILABLE", "访问 GitHub 超时（acme/extensions）")).toBe(
+      "安装来源不可用：访问 GitHub 超时（acme/extensions）"
+    );
+  });
 });
 
 describe("受管扩展任务跟踪与失败码", () => {

@@ -47,6 +47,13 @@ export const DEFAULT_GITHUB_API_BASE = "https://api.github.com";
 export { DEFAULT_GITHUB_MARKETPLACE_REPOS };
 
 const REQUEST_TIMEOUT_MS = 8_000;
+/**
+ * 下载不能用「整次请求的总时长」计时：安装包动辄十几 MB，慢一点的链路会在半途被砍断
+ * （18 MB 的包在 1 MB/s 上跑 8 秒正好停在 47%，用户看到的就是这个形态）。
+ * 拆成两段：只在等响应头时计时，之后看「两次字节之间的间隔」。
+ */
+const DOWNLOAD_HEADERS_TIMEOUT_MS = 20_000;
+const DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
 const PER_PAGE = 30;
 /** 网页每页固定条数：不足一页说明已经到底。 */
 const WEB_PAGE_SIZE = 10;
@@ -87,6 +94,10 @@ export type GithubSourceOptions = {
   timeoutMs?: number;
   /** 单个仓库的发现结果缓存时长；缺省 60s。测试可设为 0 关闭缓存。 */
   cacheTtlMs?: number;
+  /** 下载等响应头的上限（毫秒）；缺省 20s。 */
+  downloadHeadersTimeoutMs?: number;
+  /** 下载期间两次数据之间的最长间隔（毫秒）；缺省 60s。 */
+  downloadIdleTimeoutMs?: number;
 };
 
 /** 版本段：核心三段 semver，不带预发布 / 构建后缀（后缀里的连字符无法与 extensionId 无歧义拆分）。 */
@@ -299,6 +310,22 @@ const assetSize = (asset: GithubAsset, fallback: number): number =>
   typeof asset.size === "number" && Number.isFinite(asset.size) ? asset.size : fallback;
 
 /**
+ * 下载期失败归一：调用方取消 → `MARKETPLACE_CANCELLED`；断流 / 连不上 / 超时 → 可重试的
+ * `MARKETPLACE_DOWNLOAD_FAILED`。只带底层错误码（如 ECONNRESET），不带远端响应体。
+ */
+export function downloadFailureOf(error: unknown, abortedByCaller: boolean): ExtensionManagerError {
+  if (error instanceof ExtensionManagerError) return error;
+  if (abortedByCaller) return new ExtensionManagerError("MARKETPLACE_CANCELLED", "安装已取消");
+  const name = error instanceof Error ? error.name : "";
+  if (name === "AbortError" || name === "TimeoutError") {
+    return new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", "下载扩展包中断（连接被中止）", undefined, { retryable: true });
+  }
+  const cause = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+  const code = typeof cause === "string" ? cause : null;
+  return new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", "无法连接下载地址" + (code ? `（${code}）` : ""), undefined, { retryable: true });
+}
+
+/**
  * 宿主 engines 的宽松声明（scripts/lib/extension-descriptor.mjs 的 HOST_ENGINES 镜像，
  * 两侧一致性由该脚本的测试约束）。GitHub 来源拿不到包内 extension.json 的 engines 声明，
  * resolve 填它只是让流水线走到预检；包内真实声明由预检复核，宽松前置不会放行不兼容的包。
@@ -315,6 +342,8 @@ export function createGithubReleaseSource(options: GithubSourceOptions): Marketp
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const cacheTtlMs = options.cacheTtlMs ?? CACHE_TTL_MS;
+  const downloadHeadersTimeoutMs = options.downloadHeadersTimeoutMs ?? DOWNLOAD_HEADERS_TIMEOUT_MS;
+  const downloadIdleTimeoutMs = options.downloadIdleTimeoutMs ?? DOWNLOAD_IDLE_TIMEOUT_MS;
   /** 每个仓库最近一次发现结果；search / resolve / download 连续读同一批 Release。 */
   const cache = new Map<string, { at: number; releases: GithubRelease[] }>();
 
@@ -353,6 +382,71 @@ export function createGithubReleaseSource(options: GithubSourceOptions): Marketp
     }
     if (!response.ok) throw failure(repo, response.status, false, viaWeb);
     return response;
+  };
+
+  /**
+   * 响应体守卫：每收到一段字节就续期，只有「连续 downloadIdleTimeoutMs 没有新数据」才判定断流。
+   * 包体是十几 MB 的流，用总时长或「首字节之后不再计时」都不对：前者砍断慢速下载，
+   * 后者在连接静默断开时永远挂住。
+   */
+  const guardDownloadStream = (
+    body: ReadableStream<Uint8Array>,
+    guard: { signal: AbortSignal; controller: AbortController; unlisten: () => void }
+  ): ReadableStream<Uint8Array> => {
+    const reader = body.getReader();
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    let downstream: ReadableStreamDefaultController<Uint8Array> | undefined;
+    /** 只让收尾发生一次；返回是否由本次调用收尾。 */
+    const settle = () => {
+      if (settled) return false;
+      settled = true;
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+      idleTimer = undefined;
+      guard.unlisten();
+      return true;
+    };
+    const arm = () => {
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        const stalled = new ExtensionManagerError(
+          "MARKETPLACE_DOWNLOAD_FAILED",
+          "下载停滞：" + Math.round(downloadIdleTimeoutMs / 1000) + " 秒内没有收到新数据",
+          undefined,
+          { retryable: true }
+        );
+        // 先把失败交给下游，再拆连接：真实 fetch 会因 abort 让读失败，但不能只依赖它——
+        // 否则某个实现不响应 abort 时这条任务会一直挂着。
+        if (settle()) downstream?.error(stalled);
+        guard.controller.abort(stalled);
+      }, downloadIdleTimeoutMs);
+    };
+    arm();
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        downstream = controller;
+      },
+      async pull(stream) {
+        if (settled) return;
+        try {
+          const { done, value } = await reader.read();
+          if (settled) return;
+          if (done) {
+            if (settle()) stream.close();
+            return;
+          }
+          arm();
+          stream.enqueue(value);
+        } catch (error) {
+          if (settle()) stream.error(downloadFailureOf(error, guard.signal.aborted));
+        }
+      },
+      async cancel(reason) {
+        settle();
+        guard.controller.abort(reason);
+        await reader.cancel(reason).catch(() => undefined);
+      }
+    });
   };
 
   /** REST：GET {apiBase}/repos/{owner}/{repo}/releases?page=N。 */
@@ -625,18 +719,46 @@ export function createGithubReleaseSource(options: GithubSourceOptions): Marketp
       if (config.token) headers.Authorization = "Bearer " + config.token;
       // 资产 API 默认返回 JSON 元数据；只有显式声明 octet-stream 才给字节。
       if (viaApi) headers.Accept = "application/octet-stream";
+
+      // 一个本地 controller 同时承接「调用方取消」「等不到响应头」「传输停滞」三种中止。
+      // fetch 的 signal 一旦接上就会约束整个响应体，所以这里不再叠加 AbortSignal.timeout。
+      const controller = new AbortController();
+      const forwardAbort = () => controller.abort(signal.reason);
+      if (signal.aborted) forwardAbort();
+      else signal.addEventListener("abort", forwardAbort, { once: true });
+      const unlisten = () => signal.removeEventListener("abort", forwardAbort);
+      // 只约束「等到响应头」：20 秒连响应都没有才算连不上；拿到响应体后交棒给空闲判定。
+      // 计时同时 reject 本地等待：不能只靠 abort 让 fetch 失败，否则响应慢到不响应 abort 时会挂住任务。
+      let headersTimer: ReturnType<typeof setTimeout> | undefined;
+      const headersDeadline = new Promise<never>((_resolve, reject) => {
+        headersTimer = setTimeout(() => {
+          const error = new ExtensionManagerError(
+            "MARKETPLACE_DOWNLOAD_FAILED",
+            "下载扩展包超时（" + Math.round(downloadHeadersTimeoutMs / 1000) + " 秒内没有响应）",
+            undefined,
+            { retryable: true }
+          );
+          controller.abort(error);
+          reject(error);
+        }, downloadHeadersTimeoutMs);
+      });
       let response: Response;
       try {
-        response = await fetchImpl(url, { method: "GET", headers, signal: withTimeout(signal) });
+        response = await Promise.race([fetchImpl(url, { method: "GET", headers, signal: controller.signal }), headersDeadline]);
       } catch (error) {
-        const timedOut = error instanceof Error && error.name === "TimeoutError";
-        throw new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", timedOut ? "下载扩展包超时" : "下载扩展包失败");
+        unlisten();
+        throw downloadFailureOf(error, signal.aborted);
+      } finally {
+        if (headersTimer !== undefined) clearTimeout(headersTimer);
       }
       if (!response.ok || !response.body) {
         await response.body?.cancel().catch(() => undefined);
-        throw new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", "下载扩展包失败（HTTP " + response.status + "）");
+        unlisten();
+        // 4xx 是确定结论（无权限 / 已删除 / 地址失效），重试只会拖长失败；5xx 与 408/429 才是瞬时问题。
+        const retryable = response.status >= 500 || response.status === 408 || response.status === 429;
+        throw new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", "下载扩展包失败（HTTP " + response.status + "）", undefined, { retryable });
       }
-      return { stream: response.body as ReadableStream<Uint8Array>, size };
+      return { stream: guardDownloadStream(response.body, { signal, controller, unlisten }), size };
     }
   };
 }

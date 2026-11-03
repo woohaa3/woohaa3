@@ -15,6 +15,7 @@ import {
   type ExtensionInstallOutcome,
   type ExtensionTrust,
   type MarketplaceFailureCode,
+  type MarketplaceSource,
   type ReleaseRef
 } from "@woohaa3/contracts";
 import { ExtensionManagerError, toManagerError } from "./errors.js";
@@ -24,9 +25,18 @@ import type { ManagerContext } from "./manager-context.js";
 import { FAILURE_MESSAGES, type FileInstallRequest, type InstallRequest } from "./manager-types.js";
 import type { InstallationRecord } from "./types.js";
 
+/** 成功读到多少 / 目标大小 → 界面可读的进度文案；来源没声明大小时退到字节数。 */
+function receivedText(received: number, expectedSize: number | undefined): string {
+  if (expectedSize && expectedSize > 0) return `已收到 ${Math.min(100, Math.floor((received / expectedSize) * 100))}%`;
+  return `已收到 ${received} 字节`;
+}
+
+/** 本地磁盘问题不是网络问题：直接说明，且不重试。 */
+const LOCAL_WRITE_CODES = new Set(["ENOSPC", "EACCES", "EPERM", "EROFS", "EISDIR"]);
+
 /** 流式写包，限制大小，支持取消。 */
 export async function writePackage(ctx: ManagerContext, job: Job, body: Readable | AsyncIterable<Uint8Array>, expectedSize?: number): Promise<string> {
-  const { board, maxPackageBytes } = ctx;
+  const { board, maxPackageBytes, downloadIdleTimeoutMs } = ctx;
   const dir = ctx.stagingFor(job);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "package.wxt");
@@ -34,6 +44,15 @@ export async function writePackage(ctx: ManagerContext, job: Job, body: Readable
     throw new ExtensionManagerError("MARKETPLACE_PACKAGE_TOO_LARGE", `包大小 ${expectedSize} 字节超过上限 ${maxPackageBytes}`);
   }
   let received = 0;
+  // 来源自己不一定给传输设时限（本部署市场只透传会话 signal）。这里做一层与来源无关的看门狗：
+  // 连续 downloadIdleTimeoutMs 没有新字节就销毁这条流水线，交给重试，别让任务无限挂住。
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const armIdle = () => {
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      counter.destroy(new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", "下载停滞：" + Math.round(downloadIdleTimeoutMs / 1000) + " 秒内没有收到新数据", undefined, { retryable: true }));
+    }, downloadIdleTimeoutMs);
+  };
   const counter = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       received += chunk.length;
@@ -42,17 +61,33 @@ export async function writePackage(ctx: ManagerContext, job: Job, body: Readable
         return;
       }
       if (expectedSize) board.update(job, { progress: Math.min(1, received / expectedSize) });
+      armIdle();
       callback(null, chunk);
     }
   });
   const source = body instanceof Readable ? body : Readable.from(body);
+  armIdle();
   try {
     await pipeline(source, counter, fs.createWriteStream(file, { flags: "wx", mode: 0o644 }), { signal: job.controller.signal });
   } catch (error) {
     if (job.controller.signal.aborted) throw new ExtensionManagerError("MARKETPLACE_CANCELLED", "安装已取消");
-    throw toManagerError(error, "MARKETPLACE_DOWNLOAD_FAILED");
+    const localCode = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (localCode && LOCAL_WRITE_CODES.has(localCode)) {
+      throw new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", `无法写入安装包（${localCode}）`);
+    }
+    const failure = toManagerError(error, "MARKETPLACE_DOWNLOAD_FAILED", { retryable: true });
+    // 大小上限之类保留原码与原意；只有传输中断才补「读到哪里」，否则界面上只剩一句「读取安装包失败」。
+    if (failure.code !== "MARKETPLACE_DOWNLOAD_FAILED") throw failure;
+    throw new ExtensionManagerError(
+      "MARKETPLACE_DOWNLOAD_FAILED",
+      `${failure.message}（${receivedText(received, expectedSize)}）`,
+      undefined,
+      { retryable: true }
+    );
+  } finally {
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
   }
-  if (received === 0) throw new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", "包为空");
+  if (received === 0) throw new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", "包为空（没有读到任何字节）", undefined, { retryable: true });
   return file;
 }
 
@@ -365,6 +400,44 @@ export async function installFromFile(ctx: ManagerContext, request: FileInstallR
   return job.view;
 }
 
+/**
+ * 下载并落盘；瞬时失败（断流 / 网络超时 / 5xx）自动重试。
+ *
+ * 每次重试前清空 staging：`writePackage` 用 `wx` 写包，上一次的半截包残留会让下一次直接 EEXIST；
+ * 进度同时回到 0，避免界面沿用上一轮的百分比误导「已经下到一半」。
+ */
+async function downloadWithRetry(ctx: ManagerContext, job: Job, source: MarketplaceSource, ref: ReleaseRef): Promise<string> {
+  const { board, log, cleanupStaging, assertNotAborted, sleep, downloadAttempts, downloadBackoffMs } = ctx;
+  let last: ExtensionManagerError | null = null;
+  for (let attempt = 1; attempt <= downloadAttempts; attempt += 1) {
+    assertNotAborted(job);
+    if (attempt > 1) {
+      cleanupStaging(job);
+      const backoff = downloadBackoffMs[Math.min(attempt - 2, downloadBackoffMs.length - 1)] ?? 0;
+      if (backoff > 0) await sleep(backoff, job.controller.signal);
+      assertNotAborted(job);
+      log({ event: "extension-download-retry", jobId: job.id, extensionId: ref.extensionId, version: ref.version, attempt, code: last?.code });
+    }
+    board.update(job, { phase: "download", progress: 0 });
+    try {
+      const download = await source.download(ref, job.controller.signal);
+      return await writePackage(ctx, job, Readable.fromWeb(download.stream as import("node:stream/web").ReadableStream<Uint8Array>), download.size || ref.size);
+    } catch (error) {
+      const failure = toManagerError(error, "MARKETPLACE_DOWNLOAD_FAILED", { retryable: true });
+      last = failure;
+      if (job.controller.signal.aborted || !failure.retryable || attempt >= downloadAttempts) {
+        throw attempt > 1 ? noteAttempts(failure, attempt) : failure;
+      }
+    }
+  }
+  throw last ?? new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", "读取安装包失败");
+}
+
+/** 重试过之后把「试了几次」写进原因：用户据此区分「网络抖动」与「包本身有问题」。 */
+function noteAttempts(failure: ExtensionManagerError, attempts: number): ExtensionManagerError {
+  return new ExtensionManagerError(failure.code, `${failure.message}（已尝试 ${attempts} 次）`, failure.issues, { retryable: false });
+}
+
 export function installFromSource(ctx: ManagerContext, request: InstallRequest): ExtensionInstallJobView {
   const { handle, deps, board, toolkit, maxPackageBytes, requireHandle, assertNotAborted } = ctx;
   if (!handle) return failedJob(ctx, "install", request.sourceId, unavailableError());
@@ -404,14 +477,7 @@ export function installFromSource(ctx: ManagerContext, request: InstallRequest):
       return "already-current";
     }
     assertNotAborted(job);
-    board.update(job, { phase: "download", progress: 0 });
-    let download;
-    try {
-      download = await source.download(ref, job.controller.signal);
-    } catch (error) {
-      throw toManagerError(error, "MARKETPLACE_DOWNLOAD_FAILED");
-    }
-    const file = await writePackage(ctx, job, Readable.fromWeb(download.stream as import("node:stream/web").ReadableStream<Uint8Array>), download.size || ref.size);
+    const file = await downloadWithRetry(ctx, job, source, ref);
     return finishInstall(ctx, job, file, ref);
   });
   return job.view;

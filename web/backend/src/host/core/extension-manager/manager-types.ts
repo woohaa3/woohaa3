@@ -90,6 +90,12 @@ export type ExtensionManagerDeps = {
   drainPollMs?: number;
   /** 观察期周期性信任复核的间隔（毫秒），缺省 1 小时；新记录或改了版本的不受它限制。 */
   trustCheckMs?: number;
+  /**
+   * 安装包下载的重试预算：只对瞬时失败（断流、网络超时、5xx）生效。
+   * `attempts` 是总尝试次数（含首次），`backoffMs` 是第 2、3… 次尝试前的等待时间，
+   * `idleTimeoutMs` 是「连续多久没有新字节就判定断流」（与来源无关的看门狗）。
+   */
+  download?: { attempts?: number; backoffMs?: readonly number[]; idleTimeoutMs?: number };
   /** 测试可注入；缺省 setTimeout 实现的 sleep。 */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 };
@@ -143,6 +149,12 @@ export type ExtensionManager = {
 export const DEFAULT_MAX_PACKAGE_BYTES = 200 * 1024 * 1024;
 export const DEFAULT_OBSERVE_MS = 10 * 60 * 1000;
 export const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** 下载总尝试次数（含首次）：瞬时网络失败最多再试两次，网络差时不至于一次抖动就失败。 */
+export const DEFAULT_DOWNLOAD_ATTEMPTS = 3;
+/** 第 2、3 次尝试前的退避（毫秒）；超出长度时沿用最后一项。 */
+export const DEFAULT_DOWNLOAD_BACKOFF_MS: readonly number[] = [1_000, 3_000];
+/** 连续多久没有新字节算断流（毫秒）：慢速链路每段数据之间远小于这个间隔。 */
+export const DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
 
 export const FAILURE_MESSAGES: Partial<Record<MarketplaceFailureCode, string>> = {
   MARKETPLACE_UNAVAILABLE: "本机未启用扩展安装（受管根不可用）"
