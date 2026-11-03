@@ -4,9 +4,10 @@
 
 每个应用插件的前端、后端和共享定义放在 `web/extensions/<extensionId>/` 同一个目录下。
 
-> 扩展根里还可以放**非插件**的共享框架包：包名不以 `@woohaa3/extension-` 开头（扫描按此规则跳过，
-> 不会被当作扩展登记/装载），例如 Provider 插件公共能力 [provider-sdk](provider-sdk)、
-> 存储实现共享工厂 [runtime-foundation](runtime-foundation)。它们属于框架侧，仍受规模/边界/纯粹性门禁约束。
+> 扩展根里**只放插件**：`web/extensions/` 下的每个扩展目录都会进入发布装配与桌面发行包。
+> 非插件的共享框架包放在 `web/framework/`（[provider-sdk](../framework/provider-sdk)、
+> [runtime-foundation](../framework/runtime-foundation)），仅供测试的样例包放在 `web/test-fixtures/`；
+> 它们不在扩展扫描根内，不会被当作扩展登记/装载，但仍受规模/边界/纯粹性门禁约束。
 
 ```text
 web/extensions/<extensionId>/
@@ -297,8 +298,8 @@ extensions:
 `defineExtensionPlugin` 在自身 scope 注入 `slots`/`applicationRemote`、`provide` 业务 service、
 贡献 `provider-credentials.top` 授权行、`settings.plugin-config` 设置面板与 `authoring.generate` 来源（面板由宿主内置渲染），并在 dispose 时按 owner 释放。
 
-`sample-site-extension` 是仅供测试使用的样例：其前端只验证进入/释放生命周期；生产发布发现
-不登记测试 fixture（其入口不是约定 browser 入口，且无 `browser-dist` artifact）。
+`web/test-fixtures/sample-site-extension` 是仅供测试使用的样例：其前端只验证进入/释放生命周期；
+它在扩展扫描根之外，生产发布装配与桌面发行包都不会带上它。
 
 ### 公共 UI
 

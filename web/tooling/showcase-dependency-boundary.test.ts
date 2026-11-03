@@ -73,7 +73,7 @@ describe("生产 UI vendor 只能从 @woohaa3/ui 适配层引入", () => {
 
   it("frontend 业务源码不绕过 @woohaa3/ui import Radix / Lucide", () => {
     const offenders: DependencyViolation[] = [];
-    for (const file of ["frontend", "ui", "extensions"].flatMap(dir => collectSourceFiles(path.join(WEB_ROOT, dir)))) {
+    for (const file of ["frontend", "ui", "extensions", "framework", "test-fixtures"].flatMap(dir => collectSourceFiles(path.join(WEB_ROOT, dir)))) {
       offenders.push(
         ...scanUiVendorImports({ file: path.relative(WEB_ROOT, file), source: readFileSync(file, "utf8") }),
       );

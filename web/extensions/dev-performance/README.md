@@ -2,7 +2,7 @@
 
 独立可选扩展，提供画布 FPS 与 3D Draw Call 读数：36 × 26 的 SVG，两行分别为 FPS 和 DC，标签 8px、数值 10px，无独立底板和边框。位置随宿主二选一：**浏览器**通过 `canvas.toolbar-status` 进入画布右下角工具栏的原同步图标位置；**Tauri 桌面壳**注册 `canvas.topbar-status`，由宿主并入窗口横栏右侧的**合并读数**——同步/连接状态与 FPS/DC 共用同一个按钮和一个气泡（向下展开，横栏上方没有空间）。SVG 行高收到 22px 适配 26px 横栏。桌面端右下角工具栏因此不再重复显示同步状态位，只保留功能图标与视图控件；浏览器仍是工具栏状态位、气泡向上。运行宿主由扩展调用 `isDesktopHost()` 判定，宿主不按扩展 ID 分支，两侧不会同时渲染。同步图标移除，原同步状态气泡与异常常驻提示保留；未启用扩展时工具栏入口显示「状态」小字。默认启用，可在插件管理器中关闭「性能读数」。
 
-注册门禁按宿主分两种：**桌面壳无论开发还是打包发行都注册**。发行版由 `--mode desktop` 生产构建，HTML 里没有 `woohaa-development` 标记，但 FPS/DC 正是打包版要长期显示的读数。浏览器仍只认 Vite dev 注入的 `woohaa-development=true` HTML 元数据，生产与 preview 构建不注册读数或采样循环。桌面发行包把本扩展列入 [desktop/host-extensions.json](../../../desktop/host-extensions.json) 并随包带上 `browser-dist/`，否则打包版装配不到读数实现。
+注册门禁按宿主分两种：**桌面壳无论开发还是打包发行都注册**。发行版由 `--mode desktop` 生产构建，HTML 里没有 `woohaa-development` 标记，但 FPS/DC 正是打包版要长期显示的读数。浏览器仍只认 Vite dev 注入的 `woohaa-development=true` HTML 元数据，生产与 preview 构建不注册读数或采样循环。桌面发行包按目录位置装配：本扩展位于 `web/extensions/`，会随包带上 `browser-dist/`，否则打包版装配不到读数实现。
 
 读数来源同样按宿主开放：[bevy-runtime.ts](../../frontend/src/cordis/plugins/canvas-runtime/bevy-runtime.ts) 的 `frameCountersReadable(dev, target)` 在「开发构建或注入了 `__WOOHAA_NATIVE__` 的桌面壳」时挂载 `getFrameCounters`，浏览器生产与 preview 构建不暴露；渲染三阶段/实例数这类归因字段仍只在 dev 构建附加，不进打包版的读数。
 

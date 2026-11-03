@@ -36,7 +36,8 @@ Canvas          ──只读 Yjs WebSocket──►  前端
 | [web/frontend](web/frontend) | React / Cordis 界面、浏览器适配、画布运行时集成、公共 `extension-api` |
 | [web/backend](web/backend) | 本机宿主装配根、路由聚合、端口适配、扩展清单 |
 | [web/services](web/services) | 领域服务实现：canvas / task / media / application / mcp / telemetry / agent-connections |
-| [web/extensions](web/extensions) | 公开扩展源码（前端 + 后端同目录）；另有非插件框架包 `provider-sdk`、`runtime-foundation` |
+| [web/extensions](web/extensions) | 公开扩展源码（前端 + 后端同目录）；该目录下的每个扩展都进入发布装配与桌面发行包 |
+| [web/framework](web/framework) / [web/test-fixtures](web/test-fixtures) | 非插件的共享框架包（`provider-sdk`、`runtime-foundation`）与仅测试用的样例包，不在扩展扫描根内 |
 | [extensions](extensions) | 第二扩展根（预构建产物，如 PhotoCraft）。与 `web/extensions` 由同一次启动扫描读取 |
 | [bevy](bevy) | WASM / 原生渲染、空间查询、模型预览、录制 |
 | [desktop](desktop) | Tauri 壳与原生宿主集成 |

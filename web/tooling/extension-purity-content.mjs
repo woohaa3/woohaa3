@@ -73,7 +73,7 @@ export const CONTENT_SCAN_ROOTS = [
   "web/contracts/src",
   "web/frontend/src",
   "web/services",
-  "web/extensions/provider-sdk/src",
+  "web/framework/provider-sdk/src",
   "scripts",
   "web/tooling",
   "bevy/src"

@@ -28,6 +28,7 @@ const PRODUCTION_ROOTS = [
   "web/backend/src",
   "web/services",
   "web/extensions",
+  "web/framework",
   "bevy/src",
   "scripts",
   "web/scripts"
