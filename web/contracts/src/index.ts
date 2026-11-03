@@ -57,6 +57,7 @@ export * from "./canvas/content-recording-port.js";
 export * from "./canvas/film-set-export-profile.js";
 export * from "./canvas/recording-protocol.js";
 export * from "./canvas/model-definition.js";
+export * from "./canvas/humanoid-rig.js";
 export * from "./canvas/glb/parse.js";
 export * from "./canvas/glb/import.js";
 export * from "./canvas/group-appearance.js";

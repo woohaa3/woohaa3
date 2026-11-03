@@ -14,7 +14,7 @@ type DownloadOptions = {
   mediaContent?: Pick<import("../../extension-api/media-content.js").MediaContentService, "resolve">;
   /** 第三参数是画布身份：浏览器读画布媒体时带 `?canvas=` 提示。 */
   readMedia?: (asset: StoredAsset, signal: AbortSignal, canvasId?: string) => Promise<Blob>;
-  exportModel?: (source: string, version: unknown, signal: AbortSignal) => Promise<Blob>;
+  exportModel?: (source: string, version: unknown, signal: AbortSignal, modelRig?: unknown) => Promise<Blob>;
   save?: (blob: Blob, filename: string) => void;
 };
 
@@ -64,7 +64,7 @@ export class NodeDownloadService {
         } else {
           if (!data?.modelScript?.trim()) throw new Error("模型尚无可下载的内容");
           const exporter = this.options.exportModel ?? (await import("./model-download.js")).downloadModelBlob;
-          blob = await exporter(data.modelScript, data.modelScriptVersion, abort.signal);
+          blob = await exporter(data.modelScript, data.modelScriptVersion, abort.signal, data.modelRig);
         }
       } else if (node.type === "image" || node.type === "video") {
         const asset = data?.mediaContent

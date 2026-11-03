@@ -3,7 +3,7 @@
  * （自 `mcp-http.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R11）。
  */
 import type { ToolCallback, ToolAnnotations, RegisteredTool, StandardSchemaWithJSON } from "@modelcontextprotocol/server";
-import { MODEL_CAMERA_ASPECTS, modelApiGuide, modelPrimitiveConstraintsText, modelRenderBudgetText, modelScaleGuidanceTextZh, motionApiGuideText } from "@woohaa3/contracts";
+import { HUMANOID_V1_JOINT_IDS, MODEL_CAMERA_ASPECTS, modelApiGuide, modelPrimitiveConstraintsText, modelRenderBudgetText, modelScaleGuidanceTextZh, motionApiGuideText } from "@woohaa3/contracts";
 import { toolError } from "./tool-results.js";
 import type { ToolRegistration } from "./http-types.js";
 
@@ -48,6 +48,12 @@ ${methods}
 
 尺度约定（模型卡片与片场共用同一现实基准）：
 - ${modelScaleGuidanceTextZh()}
+
+人形骨架（机甲、人物；白模视频要靠这些关节动起来）：
+- 系统已经有这 ${HUMANOID_V1_JOINT_IDS.length} 个关节：${HUMANOID_V1_JOINT_IDS.join("、")}。
+- 每个可见形状用 rig.joint("LeftUpperLeg") 这类调用做 parent。不要把肢体挂到 Root，也不要自造 thigh、shin、Shoulder、Chest、Neck、Hand。
+- 手和枪用 rig.joint("LeftHand") / rig.joint("RightHand")，它们是前臂挂点，不是关节。
+- 动作的 targetId 必须是上面的关节 id。原地跑步要给左右 UpperLeg、LowerLeg、Foot 各写不同的旋转轨道。工具返回成功不等于用了关节。
 - 这条基准只描述模型自身的绝对尺寸；卡片按模型 extent 归一化显示，卡片里看起来一样大不代表
   实际尺寸一致。不要用卡片取景、节点矩形或画布 zoom 反推单位。
 

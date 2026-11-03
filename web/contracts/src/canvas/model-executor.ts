@@ -59,16 +59,24 @@ export type VersionedValidator<S> = (
  *
  * V1 与 V2 executor 共用；注入 builder 工厂与 validator（校验器拥有版本与规范化规则）。
  */
+export type ModelScriptScope = {
+  /** 只读关节句柄。仅人形执行注入；旧脚本仍是 `scene` + `rangeNum` 两个参数。 */
+  rig?: { joint: (id: string) => string };
+  /** 成功时替换作者声明的部件 id。人形动作只允许关节和手部 socket。 */
+  declaredIds?: ReadonlySet<string>;
+};
+
 export function runVersionedModelScript<S>(
   source: string,
   makeBuilder: () => VersionedSceneBuilder,
-  validate: VersionedValidator<S>
+  validate: VersionedValidator<S>,
+  scope?: ModelScriptScope
 ): { ok: true; scene: S; json: string; declaredIds: ReadonlySet<string> } | ModelScriptFailure {
-  const first = runOnceWith(source, makeBuilder, validate);
+  const first = runOnceWith(source, makeBuilder, validate, scope);
   if (!first.ok) return first;
 
   // 确定性：再次执行必须得到逐字节相同的 Scene IR。
-  const second = runOnceWith(source, makeBuilder, validate);
+  const second = runOnceWith(source, makeBuilder, validate, scope);
   if (!second.ok) return second;
   if (first.json !== second.json) {
     return {
@@ -78,21 +86,24 @@ export function runVersionedModelScript<S>(
       message: "同一脚本两次执行产生不同的 Scene IR"
     };
   }
-  return first;
+  return scope?.declaredIds ? { ...first, declaredIds: scope.declaredIds } : first;
 }
 
 function runOnceWith<S>(
   source: string,
   makeBuilder: () => VersionedSceneBuilder,
-  validate: VersionedValidator<S>
+  validate: VersionedValidator<S>,
+  scope?: ModelScriptScope
 ): { ok: true; scene: S; json: string; declaredIds: ReadonlySet<string> } | ModelScriptFailure {
-  let compiled: (scene: Record<string, unknown>, rangeNum: (a: number, b?: number, c?: number) => number[]) => unknown;
+  let compiled: (...args: unknown[]) => unknown;
   try {
     // 与 design D8 一致：等价于 new Function("scene", source)；额外注入 rangeNum。
     // 若脚本（含 GDScript 转译产物）声明了顶层 `build`，执行器调用它，与 GDScript 入口语义一致；
-    // 原生顶层脚本（直接调用 scene.*）不受影响。
+    // 原生顶层脚本（直接调用 scene.*）不受影响。有骨架时才增加第三个参数 `rig`。
     const body = `${source}\n;if (typeof build === "function") build(scene);`;
-    compiled = new Function("scene", "rangeNum", body) as typeof compiled;
+    compiled = scope?.rig
+      ? new Function("scene", "rangeNum", "rig", body) as (...args: unknown[]) => unknown
+      : new Function("scene", "rangeNum", body) as (...args: unknown[]) => unknown;
   } catch (error) {
     return {
       ok: false,
@@ -104,7 +115,8 @@ function runOnceWith<S>(
 
   const builder = makeBuilder();
   try {
-    compiled(builder as Record<string, unknown>, rangeNum);
+    if (scope?.rig) compiled(builder as Record<string, unknown>, rangeNum, scope.rig);
+    else compiled(builder as Record<string, unknown>, rangeNum);
   } catch (error) {
     return {
       ok: false,

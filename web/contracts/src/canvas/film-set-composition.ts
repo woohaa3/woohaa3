@@ -23,7 +23,7 @@ import {
   type FilmSetMotion,
   type FilmSetPlayback
 } from "./film-set-content.js";
-import type { ModelPlacement } from "./model-definition.js";
+import type { ModelDefinition, ModelPlacement } from "./model-definition.js";
 import { executeModelScriptVersioned } from "./model-executor-v2.js";
 import { executeMotionScript } from "./motion-executor.js";
 import { evaluateMotionIr, type ModelMotionDelta, type MotionIr } from "./motion-ir.js";
@@ -33,6 +33,26 @@ import type { SceneV2Op, SceneV2ShapeOp } from "./scene-ir-v2.js";
 
 /** 独立片场根保留 id（非空、不与真实 itemId 碰撞；itemId 必须非空）。 */
 export const FILM_SET_SCENE_ROOT_ID = "\u0000scene";
+
+function executeFilmSetModel(model: ModelDefinition) {
+  return executeModelScriptVersioned(model.modelScript, model.modelScriptVersion, model.rig ? { rig: model.rig.parameters } : undefined);
+}
+
+function addFilmSetModelParts(
+  partIds: Set<string>,
+  partIdMap: Record<string, string>,
+  itemId: string,
+  model: ModelDefinition,
+  execution: Extract<ReturnType<typeof executeFilmSetModel>, { ok: true }>
+): void {
+  const ids = model.rig
+    ? execution.declaredIds
+    : execution.scene.ops.filter((op) => op.t !== "material").map((op) => op.id);
+  for (const id of ids) {
+    partIds.add(id);
+    if (id !== "root") partIdMap[id] = encodeFilmSetPartId(itemId, id);
+  }
+}
 
 /** 组合输入中的一个模型对象（ops 由调用方执行该 item 的 modelScript 得到）。 */
 export type FilmSetCompositionModel = {
@@ -210,16 +230,12 @@ export function buildFilmSetObjectMotions(input: {
     const partIds = new Set<string>(["root", ""]);
     const partIdMap: Record<string, string> = { root: rootId, "": rootId };
     if (item.kind === "model") {
-      const execution = executeModelScriptVersioned(item.model.modelScript, item.model.modelScriptVersion);
+      const execution = executeFilmSetModel(item.model);
       if (!execution.ok) {
         diagnostics.push(`片场对象 ${item.id} 模型编译失败：${execution.stage}:${execution.code}`);
         continue;
       }
-      for (const op of execution.scene.ops) {
-        if (op.t === "material") continue;
-        partIds.add(op.id);
-        if (op.id !== "root") partIdMap[op.id] = encodeFilmSetPartId(item.id, op.id);
-      }
+      addFilmSetModelParts(partIds, partIdMap, item.id, item.model, execution);
     } else {
       // 媒体/地面只有对象根作为动作目标。
       partIds.add("surface");
@@ -289,7 +305,7 @@ export function composeFilmSetPreviewAtTime(
       });
       continue;
     }
-    const execution = executeModelScriptVersioned(item.model.modelScript, item.model.modelScriptVersion);
+    const execution = executeFilmSetModel(item.model);
     if (!execution.ok) {
       diagnostics.push(`片场对象 ${item.id} 模型编译失败：${execution.stage}:${execution.code}`);
       continue;
@@ -332,13 +348,9 @@ function bakeObjectMotion(
   const partIds = new Set<string>(["root", ""]);
   const targetMap: Record<string, string> = { root: rootId, "": rootId };
   if (item.kind === "model") {
-    const execution = executeModelScriptVersioned(item.model.modelScript, item.model.modelScriptVersion);
+    const execution = executeFilmSetModel(item.model);
     if (!execution.ok) return { ok: false, reason: `${execution.stage}:${execution.code}` };
-    for (const op of execution.scene.ops) {
-      if (op.t === "material") continue;
-      partIds.add(op.id);
-      if (op.id !== "root") targetMap[op.id] = encodeFilmSetPartId(item.id, op.id);
-    }
+    addFilmSetModelParts(partIds, targetMap, item.id, item.model, execution);
   }
   const resolved = playback ?? { startTime: 0, duration: 0, timeScale: 1, loop: false };
   const execution = executeMotionScript(motion.motionScript, {

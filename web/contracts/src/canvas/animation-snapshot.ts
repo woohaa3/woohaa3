@@ -18,6 +18,7 @@ import {
   type ModelContentVersion,
   type ModelPlacement
 } from "./model-definition.js";
+import type { StoredHumanoidRig } from "./humanoid-rig.js";
 import {
   MOTION_SCRIPT_LANGUAGE,
   MOTION_SCRIPT_VERSION,
@@ -59,6 +60,7 @@ export type ModelSnapshotInput = {
   modelScriptLanguage?: typeof MODEL_SCRIPT_LANGUAGE;
   modelScriptVersion: SupportedModelScriptVersion;
   placement?: ModelPlacement;
+  rig?: StoredHumanoidRig;
 };
 
 export type ModelSnapshot = {
@@ -67,6 +69,7 @@ export type ModelSnapshot = {
   modelScriptVersion: SupportedModelScriptVersion;
   contentVersion: ModelContentVersion;
   placement: ModelPlacement;
+  rig?: StoredHumanoidRig;
 };
 
 /**
@@ -81,14 +84,16 @@ export function createModelSnapshot(input: ModelSnapshotInput & { revision?: num
     modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
     modelScriptVersion: input.modelScriptVersion,
     placement,
-    revision: input.revision ?? 1
+    revision: input.revision ?? 1,
+    ...(input.rig ? { rig: input.rig } : {})
   });
   return {
     modelScript: input.modelScript,
     modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
     modelScriptVersion: input.modelScriptVersion,
     contentVersion,
-    placement
+    placement,
+    ...(input.rig ? { rig: { ...input.rig, parameters: { ...input.rig.parameters } } } : {})
   };
 }
 
@@ -290,7 +295,8 @@ export function importModelSnapshot(
     modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
     modelScriptVersion: model.modelScriptVersion,
     placement,
-    revision: 1
+    revision: 1,
+    ...(model.rig ? { rig: model.rig } : {})
   }).contentHash;
   const items = animation.filmSetContent.items.map(item => {
     if (item.id !== itemId || item.kind !== "model") return item;

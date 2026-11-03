@@ -10,6 +10,7 @@
  * 派生状态（versionMatch / validation / issues）只存在于本地会话，**不**写成规范数据。
  */
 import { executeModelScriptVersioned } from "./model-executor-v2.js";
+import type { HumanoidParameters } from "./humanoid-rig.js";
 import { executeMotionScript } from "./motion-executor.js";
 import type { MotionValidation, MotionVersionMatch } from "./motion-script.js";
 import { hashMotionScript } from "./motion-script.js";
@@ -52,8 +53,8 @@ export type ModelPartsResult =
  *
  * 模型脚本非法时返回稳定失败；调用方对应 `validation: unavailable`。
  */
-export function modelPartIds(modelScript: string, version: string): ModelPartsResult {
-  const result = executeModelScriptVersioned(modelScript, version);
+export function modelPartIds(modelScript: string, version: string, rig?: HumanoidParameters): ModelPartsResult {
+  const result = executeModelScriptVersioned(modelScript, version, rig ? { rig } : undefined);
   if (!result.ok) {
     return { ok: false, code: result.code, message: result.message };
   }
@@ -108,7 +109,7 @@ export function checkAnimationMotion(view: FilmSetClipView): AnimationValidation
     }
     if (bindingVersionMatch(item, binding) === "changed") versionMatch = "changed";
     const parts = item.kind === "model"
-      ? modelPartIds(item.model.modelScript, item.model.modelScriptVersion)
+      ? modelPartIds(item.model.modelScript, item.model.modelScriptVersion, item.model.rig?.parameters)
       : { ok: true as const, partIds: new Set<string>(["root", "", "surface"]) };
     if (!parts.ok) {
       return { versionMatch, validation: "unavailable", issues: [{ code: parts.code, targetId: binding.itemId, message: parts.message }] };

@@ -102,6 +102,33 @@ describe("自包含节点内容身份归一化（change: 2026-10-06，任务 1.2
     expect((second.canvas.nodeData.model.modelContentVersion as { revision: number }).revision).toBe(revision);
   });
 
+  it("已有骨架不能被 nodeData.patch 删掉", () => {
+    const canvas = withModel3d("scene.box({ id: 'a', size: [1,1,1] });");
+    const rig = {
+      profile: "humanoid",
+      templateId: "humanoid",
+      templateVersion: 1,
+      parameters: {
+        pelvisWidth: 0.4, shoulderWidth: 0.6, torsoHeight: 0.5, headOffset: 0.25,
+        leftUpperArm: 0.3, rightUpperArm: 0.28, leftLowerArm: 0.25, rightLowerArm: 0.24,
+        leftUpperLeg: 0.4, rightUpperLeg: 0.4, leftLowerLeg: 0.35, rightLowerLeg: 0.35,
+        leftFoot: 0.2, rightFoot: 0.2
+      }
+    };
+    const added = applyCanvasCommands(canvas, [
+      { type: "nodeData.patch", nodeId: "model", value: { modelRig: rig } }
+    ], { now: NOW });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(added.canvas.nodeData.model.modelRig).toMatchObject({ profile: "humanoid" });
+    const removed = applyCanvasCommands(added.canvas, [
+      { type: "nodeData.patch", nodeId: "model", value: { modelRig: null } }
+    ], { now: NOW });
+    expect(removed.ok).toBe(false);
+    if (removed.ok) return;
+    expect(removed.rejection.code).toBe("rig-removed");
+  });
+
   it("片场节点级顶层模型脚本写入被整批拒绝（items-only）", () => {
     const canvas = withFilmSet();
     const result = applyCanvasCommands(canvas, [

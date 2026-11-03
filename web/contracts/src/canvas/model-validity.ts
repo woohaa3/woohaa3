@@ -8,7 +8,7 @@
  *
  * 本模块无副作用、不写 store：只返回稳定失败码与可读原因，由调用方决定整批拒绝。
  */
-import { executeModelScriptVersioned } from "./model-executor-v2.js";
+import { executeModelWithStoredRig } from "./model-executor-v2.js";
 import type { SceneV2Op } from "./scene-ir-v2.js";
 
 /** Scene IR 中表示旧动画的 op 类型（应迁移到运动脚本）。 */
@@ -24,8 +24,8 @@ export type ModelValidityResult =
  * - 编译/执行/确定性/校验失败 → `model-script-<stage>`。
  * - 场景仍含旧动画 op → `legacy-animation-in-model`（引导显式迁移）。
  */
-export function validateSelfContainedModel(modelScript: string, modelScriptVersion: unknown): ModelValidityResult {
-  const execution = executeModelScriptVersioned(modelScript, modelScriptVersion);
+export function validateSelfContainedModel(modelScript: string, modelScriptVersion: unknown, modelRig?: unknown): ModelValidityResult {
+  const execution = executeModelWithStoredRig(modelScript, modelScriptVersion, modelRig);
   if (!execution.ok) {
     return { ok: false, code: `model-script-${execution.stage}:${execution.code}`, message: execution.message };
   }

@@ -10,6 +10,7 @@ import type { CanvasRoom } from "../sync/index.js";
 import type { CanvasNodeData } from "@woohaa3/contracts";
 import {
   hashModelScript,
+  humanoidRigForAuthoredScript,
   isSupportedModelScriptVersion,
   isFilmSetNode,
   isCompositeAssetNodeType,
@@ -82,7 +83,13 @@ export async function submitScript(
   if (!isSupportedModelScriptVersion(targetVersion)) {
     return { ok: false, code: "unsupported-version", message: `不支持的模型脚本版本 ${String(targetVersion)}` };
   }
-  const validation = await executeSceneIr(input.source, targetVersion, deps.scriptExecutor ?? {});
+  const nodeData = exported.canvas.nodeData[nodeId];
+  const rig = humanoidRigForAuthoredScript(input.source, undefined, nodeData?.modelRig);
+  if (!rig.ok) return { ok: false, code: rig.code, message: rig.message };
+  const validation = await executeSceneIr(input.source, targetVersion, {
+    ...(deps.scriptExecutor ?? {}),
+    ...(rig.rig ? { rig: rig.rig.parameters } : {})
+  });
   if (!validation.ok) {
     return {
       ok: false,
@@ -112,7 +119,8 @@ export async function submitScript(
       value: {
         modelScript: input.source,
         modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
-        modelScriptVersion: targetVersion
+        modelScriptVersion: targetVersion,
+        ...(rig.rig && nodeData?.modelRig == null ? { modelRig: rig.rig } : {})
       }
     }]
   };

@@ -86,6 +86,11 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
   modelScriptLanguage?: string;
   /** 脚本语言版本；写入必须为受支持的 `woohaa-model-js-v*`。 */
   modelScriptVersion?: string;
+  /**
+   * 人形骨架 descriptor（change: 2026-10-23-add-template-model-rigs）。
+   * 缺失表示旧作品。权威写入拒绝把已有骨架删掉或换成非法模板。
+   */
+  modelRig?: unknown;
   /** 模型脚本应用状态；与任务的 `taskStatus` 分离（任务终态仍由 projector 独占）。 */
   modelScriptStatus?: "ok" | "failed";
   /** 模型脚本应用失败的安全错误信息（不包含本机路径或堆栈）。 */

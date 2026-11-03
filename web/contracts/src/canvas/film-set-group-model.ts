@@ -2,6 +2,7 @@
 import { activeFilmSetSceneBindings, contentKeyForFilmSetGroupSource, prepareFilmSetGroup, readFilmSetGroupMarker } from "./film-set-group.js";
 import { composeFilmSetScene, type FilmSetCompositionModel } from "./film-set-composition.js";
 import { executeModelScriptVersioned } from "./model-executor-v2.js";
+import { humanoidRigCanonical } from "./humanoid-rig.js";
 import { decodeModelDefinition } from "./model-definition.js";
 import { prepareModelResource } from "./prepared-model.js";
 import { MODEL_SCRIPT_SCENE_IR_V2_VERSION } from "./model-script.js";
@@ -9,11 +10,11 @@ import type { NodeModelPreparation } from "./node-capabilities.js";
 
 // Geometry execution is cached per source content, independently of group membership.
 const sourceExecutions = new Map<string, ReturnType<typeof executeModelScriptVersioned>>();
-function executeSource(script: string, version: Parameters<typeof executeModelScriptVersioned>[1]) {
-  const key = JSON.stringify([version, script]);
+function executeSource(script: string, version: Parameters<typeof executeModelScriptVersioned>[1], rig?: { parameters: Parameters<typeof humanoidRigCanonical>[0] } | null) {
+  const key = JSON.stringify([version, script, rig ? humanoidRigCanonical(rig.parameters) : ""]);
   const cached = sourceExecutions.get(key);
   if (cached) return cached;
-  const result = executeModelScriptVersioned(script, version);
+  const result = executeModelScriptVersioned(script, version, rig ? { rig: rig.parameters } : undefined);
   if (sourceExecutions.size >= 128) sourceExecutions.delete(sourceExecutions.keys().next().value!);
   sourceExecutions.set(key, result);
   return result;
@@ -26,7 +27,7 @@ export const filmSetGroupModelPreparation: NodeModelPreparation = {
     if (!marker) return undefined;
     return JSON.stringify([marker.ground, activeFilmSetSceneBindings(marker).map(binding => {
       const source = canvas.nodeData[binding.sourceNodeId];
-      return [binding.bindingId, binding.sourceNodeId, binding.kind, binding.contentKey, contentKeyForFilmSetGroupSource(canvas, binding.sourceNodeId), source?.modelScript, source?.modelScriptVersion, source?.modelContentVersion, source?.modelPlacement];
+      return [binding.bindingId, binding.sourceNodeId, binding.kind, binding.contentKey, contentKeyForFilmSetGroupSource(canvas, binding.sourceNodeId), source?.modelScript, source?.modelScriptVersion, source?.modelContentVersion, source?.modelPlacement, source?.modelRig];
     })]);
   },
   prepare: ({ canvas, node }) => {
@@ -38,7 +39,7 @@ export const filmSetGroupModelPreparation: NodeModelPreparation = {
       if (binding.kind !== "model3d") continue;
       const model = decodeModelDefinition(canvas.nodeData[binding.sourceNodeId]);
       if (!model.ok) { failures.push(`${binding.bindingId}:${model.reason}`); continue; }
-      const execution = executeSource(model.value.modelScript, model.value.modelScriptVersion);
+      const execution = executeSource(model.value.modelScript, model.value.modelScriptVersion, model.value.rig);
       if (!execution.ok) { failures.push(`${binding.bindingId}:${execution.code}`); continue; }
       models.push({ itemId: binding.bindingId, ops: execution.scene.ops, placement: model.value.placement, localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } });
     }

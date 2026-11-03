@@ -59,7 +59,7 @@ export function buildFilmSetComposition(input: BuildFilmSetCompositionInput): Fi
 
   for (const item of content.items) {
     if (item.kind !== "model") continue;
-    const execution = executeModelScriptVersioned(item.model.modelScript, item.model.modelScriptVersion);
+    const execution = executeModelScriptVersioned(item.model.modelScript, item.model.modelScriptVersion, item.model.rig ? { rig: item.model.rig.parameters } : undefined);
     if (execution.ok) {
       modelOps.set(item.id, execution.scene.ops);
     } else {
