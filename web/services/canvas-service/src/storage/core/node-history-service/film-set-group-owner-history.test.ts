@@ -42,4 +42,20 @@ describe("片场组历史读取", () => {
     expect(readAnimationHistoryPayload(data, registry)).toBeNull();
     expect(animationDefinitionIdentity(data, registry)).toBeNull();
   });
+
+  it("旧片场内容在传入 resolver 时只信 owner", () => {
+    const legacy = {
+      scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
+      sceneCamera: { azimuth: 0, elevation: 0.4, distance: 4, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } },
+      filmSetContent: { schemaVersion: 4, items: [] },
+      filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] }
+    };
+    const registry = new ContentContributionRegistry();
+    registry.register(filmSetContentContribution);
+    expect(readAnimationHistoryPayload(legacy)).toMatchObject({ schemaVersion: 3 });
+    expect(readAnimationHistoryPayload(legacy, registry)).toEqual(readAnimationHistoryPayload(legacy));
+    expect(animationDefinitionIdentity(legacy, registry)).toBe(animationDefinitionIdentity(legacy));
+    expect(readAnimationHistoryPayload(legacy, rejectingRegistry())).toBeNull();
+    expect(animationDefinitionIdentity(legacy, rejectingRegistry())).toBeNull();
+  });
 });

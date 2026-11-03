@@ -37,7 +37,19 @@ export function animationDefinitionIdentity(data: Record<string, unknown>, conte
   const marker = readFilmSetGroupMarker(data);
   if (marker) return `film-set-group:${fnv1a64Hex(JSON.stringify(marker))}`;
   const decoded = decodeFilmSetNodeData(data);
-  return decoded.ok ? `animation:${animationSnapshotHash(decoded.value)}` : null;
+  if (!decoded.ok) return null;
+  if (content && (Object.prototype.hasOwnProperty.call(data, "filmSetContent") || Object.prototype.hasOwnProperty.call(data, "filmSetAnimations"))) {
+    const owned = decodeAnimationPayload({
+      schemaVersion: 3,
+      scenePlacement: decoded.value.scenePlacement,
+      sceneCamera: decoded.value.sceneCamera,
+      filmSetContent: decoded.value.filmSetContent,
+      filmSetAnimations: decoded.value.filmSetAnimations,
+      ...(decoded.value.origin ? { origin: decoded.value.origin } : {})
+    }, { content });
+    return owned?.schemaVersion === 3 ? animationDefinitionIdentityFromPayload(owned) : null;
+  }
+  return `animation:${animationSnapshotHash(decoded.value)}`;
 }
 
 /** 由历史动画 payload 计算同一完整定义身份（供登记去重与当前身份复用）。 */

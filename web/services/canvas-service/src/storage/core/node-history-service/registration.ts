@@ -286,7 +286,9 @@ export function readAnimationHistoryPayload(
   if (data.filmSetAnimations !== undefined || data.filmSetContent !== undefined) {
     const decoded = decodeFilmSetNodeData(data);
     if (!decoded.ok) return null;
-    return { schemaVersion: 3, scenePlacement: decoded.value.scenePlacement, sceneCamera: decoded.value.sceneCamera, filmSetContent: decoded.value.filmSetContent, filmSetAnimations: filmSetAnimationsOf(decoded.value), ...(decoded.value.origin ? { origin: decoded.value.origin } : {}) };
+    const payload = { schemaVersion: 3 as const, scenePlacement: decoded.value.scenePlacement, sceneCamera: decoded.value.sceneCamera, filmSetContent: decoded.value.filmSetContent, filmSetAnimations: filmSetAnimationsOf(decoded.value), ...(decoded.value.origin ? { origin: decoded.value.origin } : {}) };
+    if (!content) return payload;
+    return decodeAnimationPayload(payload, { content });
   }
   return null;
 }
