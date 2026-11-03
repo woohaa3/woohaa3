@@ -206,6 +206,27 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     expect(issue).not.toHaveBeenCalled();
     expect(inputs[1]!.toolToken).toBeNull();
   });
+  it("组内回合把点名图片的字节放进输入", async () => {
+    const { service } = fakeService([record()]);
+    const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
+    const { transport, inputs } = fakeTransport({ ok: true, outcome: { status: "succeeded" } });
+    const adapter = createLocalAgentConversationAdapter(codexAdapter, {
+      service,
+      processManager: manager,
+      transports: { "codex-appserver": transport },
+      argsFor: () => [],
+      resolveMentionedImages: async () => ({
+        images: [{ bytes: Uint8Array.from([1, 2, 3]), contentType: "image/png" }],
+        note: "Image 1：Android Compact"
+      })
+    });
+    const outcome = await adapter.run(runInput({
+      intent: { action: "discuss", canvasId: "canvas-1", nodeId: "root", mode: "canvas-group", prompt: "参考 Android Compact，图里是什么" }
+    }));
+    expect(outcome.status).toBe("succeeded");
+    expect(inputs[0]?.images).toEqual([{ bytes: Uint8Array.from([1, 2, 3]), contentType: "image/png" }]);
+    expect(inputs[0]?.prompt).toContain("Image 1：Android Compact");
+  });
   it("未冻结连接时不执行、不启动进程", async () => {
     const { service } = fakeService([record()]);
     const { manager, ensureCalls } = fakeProcessManager();

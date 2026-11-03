@@ -42,6 +42,7 @@ export * from "./canvas/agent-node-descriptors.js";
 export * from "./canvas/agent-canvas-protocol.js";
 export * from "./canvas/agent-canvas-projection.js";
 export * from "./canvas/agent-canvas-internal.js";
+export * from "./canvas/generated-image-registry.js";
 export * from "./canvas/agent-canvas-run.js";
 export * from "./canvas/agent-media-continuation.js";
 export * from "./canvas/canvas-script/index.js";

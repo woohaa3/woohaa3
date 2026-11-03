@@ -45,6 +45,8 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
       "组形象是可选的自身子资源，不是成员或输出。仅当用户要求调整识别形象时，调用 get_model_node(resource=group-appearance) 读取默认/自定义定义和 contentHash，再用 submit_model_script(resource=group-appearance, expectedContentHash=读取值) 提交，并核对真实 commandId 回执；不得借此移动根组或修改其它根组字段。",
       "保留未提及的组内内容；修改其他组或组外节点不在本轮授权范围。",
       "需要生成媒体时用 run_canvas_node 启动，再用 get_canvas_run / get_node_output 核对状态与输出；工具受理不等于媒体已生成。",
+      "Codex 内建生图可以直接生成图片。每张图生成后必须调用 import_generated_image，requestId 用本轮稳定 id，index 从 0 起表示本轮第几张；回执的 totalGenerated 是本轮总数。不要向工具提供磁盘路径。",
+      "import_generated_image 得到的是成品图片节点。不要给它写 prompt，也不要对它调用 run_canvas_node。",
       "创建普通模型用 canvas.node(\"model\")；创建片场用 canvas.node(\"film-set\")，然后读取新片场并用 submit_film_set 写入完整 filmSetContent/filmSetAnimations。不要把片场请求降级为 submit_model_script。",
       "新片场默认没有拍摄镜头：sceneCamera 只是无镜头时的回退构图，不是镜头。用户要求镜头、机位、拍摄或从某方向拍时，先 get_film_set_clips；clips 为空时把返回的 clipTemplate 改 id/name/initialCamera，作为 mutate_film_set_clip(op.kind=\"create\"，expectedHash=missingClipHash) 的 clip 创建至少一个镜头（静态构图也用 static），并确认 clips 非空后才能报告完成。",
       "3D、片场、镜头等内容先读取对应 API 和 clip/item 的稳定 id；只有工具确认成功后才报告完成。");

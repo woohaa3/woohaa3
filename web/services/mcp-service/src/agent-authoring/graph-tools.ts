@@ -211,7 +211,7 @@ export function buildCapabilities(deps: AgentAuthoringToolDeps): AgentCanvasCapa
   const scriptFlow = script.available
     ? ["get_canvas_script_api", "validate_canvas_script", "submit_canvas_script"]
     : ["get_canvas_script_api"];
-  const tail = run.available ? ["run_canvas_node", "get_canvas_run", "get_node_output"] : [];
+  const tail = ["import_generated_image", ...(run.available ? ["run_canvas_node", "get_canvas_run", "get_node_output"] : [])];
   const continuationFlow = continuationAvailable ? [...SKILL_CONTINUATION_TOOLS] : [];
   return {
     protocolVersion: agentProtocolVersion(),

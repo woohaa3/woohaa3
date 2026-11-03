@@ -83,7 +83,16 @@ export type AgentCanvasClient = {
   scriptCapability?(input: { canvasId?: string }): Promise<AgentScriptCapabilityClientResult>;
   validateScript?(input: AgentScriptClientInput): Promise<AgentScriptValidateClientResult>;
   submitScript?(input: AgentScriptClientInput): Promise<AgentScriptSubmitClientResult>;
+  importGeneratedImage?(input: { canvasId?: string; requestId: string; index?: number }): Promise<AgentImportGeneratedImageClientResult>;
 };
+
+export type AgentImportGeneratedImageClientResult =
+  | {
+      ok: true;
+      duplicate: boolean;
+      receipt: { nodeId: string; mediaRef: string; sha256: string; totalGenerated: number; importedIndex: number };
+    }
+  | { ok: false; code: string; message: string; totalGenerated?: number };
 
 export type AgentRunClientInput = {
   assistant?: import("@woohaa3/contracts").AssistantTextSelection;
@@ -219,6 +228,7 @@ export function createAgentCanvasClient(options: AgentCanvasClientOptions): Agen
       return { ok: true, delta: delta as unknown as AgentCanvasDelta };
     },
     applyPlan: (input) => call<AgentApplyClientResult>(AGENT_INTERNAL_PATHS.apply, input),
+    importGeneratedImage: (input) => call<AgentImportGeneratedImageClientResult>(AGENT_INTERNAL_PATHS.importGeneratedImage, input),
     runNode(input) {
       const { canvasId, ...rest } = input;
       return call<AgentRunClientResult>(AGENT_INTERNAL_PATHS.run, { canvasId, ...rest });

@@ -47,6 +47,7 @@ import {
   type LocalAgentRuntimeOptions,
 } from "./local-agent-connections.js";
 import { createLocalAgentHandler } from "./handler.js";
+import { loadMentionedReferenceImages } from "./reference-images.js";
 import { getRuntimeComponentManager } from "@woohaa3/runtime-components";
 import { createRuntimeExecutableResolver } from "./runtime-executable.js";
 import { resolveLocalExecutable } from "./discovery.js";
@@ -194,6 +195,13 @@ export function createLocalAgentExtension(
         ...(host.services.authoring?.tools
           ? { tools: host.services.authoring.tools }
           : {}),
+        resolveMentionedImages: async ({ owner, canvasId, rootGroupId, prompt }) => {
+          const readCanvas = host.services.extensionNodes?.read;
+          const readMedia = host.services.media.resources?.read;
+          if (!readCanvas || !readMedia) return undefined;
+          const canvas = await readCanvas({ subject: owner, canvasId, permission: "read" });
+          return loadMentionedReferenceImages(canvas, prompt, rootGroupId, (storageKey) => readMedia(storageKey, canvasId));
+        },
         logger: (event) => host.logger(redactEvent(event)),
       };
 

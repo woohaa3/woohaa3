@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  connectionCodexHome,
   inheritedMcpServerNames,
   inheritedPluginNames,
   parseMcpServerNames,
@@ -35,6 +36,14 @@ describe("Codex 本机配置复用", () => {
     mkdirSync(explicit, { recursive: true });
     expect(resolveCodexHome({ HOME: home, CODEX_HOME: explicit })).toBe(path.resolve(explicit));
     expect(resolveCodexHome({ HOME: path.join(root, "missing"), CODEX_HOME: "" })).toBeNull();
+  });
+
+  it("连接进程的 home 跟 configDir，只有子进程继承了 CODEX_HOME 才用它", () => {
+    const root = tempRoot();
+    const configDir = path.join(root, "connection", "config");
+    expect(connectionCodexHome(configDir, { CODEX_HOME: "" })).toBe(path.resolve(configDir, ".codex"));
+    const explicit = path.join(root, "explicit");
+    expect(connectionCodexHome(configDir, { CODEX_HOME: explicit })).toBe(path.resolve(explicit));
   });
 
   it("为连接创建只读配置链接，不覆盖已存在的专用配置", () => {
