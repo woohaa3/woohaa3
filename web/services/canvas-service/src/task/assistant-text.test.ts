@@ -305,7 +305,7 @@ it("transports actual supported images and detects byte checksum changes", async
   ).rejects.toMatchObject({ code: "reference-stale" });
 });
 
-it("keeps old Provider output in history and protects restored text against a late result", async () => {
+it("keeps old Provider output in history and archives a late result without overwriting restored text", async () => {
   const { buildProjectionCommands } = await import("../sync/task-projector.js");
   const { buildRestoreCommands } =
     await import("../storage/core/node-history-service/restore-commands.js");
@@ -347,6 +347,8 @@ it("keeps old Provider output in history and protects restored text against a la
   } as never);
   if (!restored.ok) throw Error(restored.message);
   await f.patch(restored.commands);
+  // 恢复历史版本会清空 activeRunId（46c886b2：「在途任务只归档不覆盖用户选择」）。之后迟到的结果
+  // 不再被判为 content-conflict 拒绝，而是正常提交并作为**非当前**资产归档；节点正文保持用户恢复的版本。
   await expect(
     f.port.commit({
       owner: "owner",
@@ -354,14 +356,15 @@ it("keeps old Provider output in history and protects restored text against a la
       run: f.run("b"),
       text: "late candidate",
     }),
-  ).rejects.toMatchObject({ code: "content-conflict" });
+  ).resolves.toBeDefined();
   expect(f.read().nodeData.text.result).toEqual({
     kind: "text",
     text: "restored",
   });
-  expect(f.read().assets.some((asset) => asset.text === "late candidate")).toBe(
-    false,
-  );
+  expect(f.read().nodeData.text.outputAssetId).not.toBe("assistant-text:b");
+  const archived = f.read().assets.find((asset) => asset.text === "late candidate");
+  expect(archived).toBeDefined();
+  expect(archived?.metadata).toMatchObject({ current: false });
 });
 
 it("a queued durable commit wins a racing stop, and revoked users leave no stranded active job", async () => {
