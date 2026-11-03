@@ -25,6 +25,8 @@ pub mod native_canvas;
 pub mod notifications;
 pub mod packaging;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+mod pinterest_window;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod transport;
 pub mod view;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]

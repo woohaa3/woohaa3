@@ -379,6 +379,36 @@ pub fn install(
                 );
                 return;
             }
+            // 资源栏「Pinterest」的内嵌页（见 pinterest_window.rs）。
+            //
+            // **必须在主线程之外处理**：它要 `add_child` 建子 webview，而 Tauri 文档明确写着
+            // Windows 上在同步命令/事件处理器（= 主线程）里创建 webview 会死锁
+            // （https://github.com/tauri-apps/wry/issues/583）。放进下面的 `run_on_main_thread`
+            // 就是这样 —— 实测表现为点开 Pinterest 后主窗口网页整个卡死，没有任何报错。
+            // 从独立线程调用时 Tauri 会自己把创建动作调度到主线程并等结果，主线程是空闲的。
+            //
+            // 协议响应器本来就是异步的，可以在任何线程应答。token 与 label 校验已经在上面做过。
+            if request.uri().path() == "/pinterest" {
+                let app = ctx.app_handle().clone();
+                let is_post = request.method() == tauri::http::Method::POST;
+                let body = request.body().to_vec();
+                std::thread::spawn(move || {
+                    let result = if is_post {
+                        crate::pinterest_window::control(&app, &body)
+                    } else {
+                        Err("Pinterest actions require POST".into())
+                    };
+                    let envelope = match result {
+                        Ok(value) => json!({"ok":true,"value":value}),
+                        Err(error) => {
+                            crate::diagnostics::event("native-bridge", "pinterest-failed", json!({"error":error}));
+                            json!({"ok":false,"error":error})
+                        }
+                    };
+                    respond(serde_json::to_vec(&envelope).expect("response JSON"), "application/json");
+                });
+                return;
+            }
             // The callback may run on a WebKit IO thread. Queue the request; never
             // touch the App, AppKit views, bridge TLS or query indexes from that thread.
             let queued = std::time::Instant::now();
