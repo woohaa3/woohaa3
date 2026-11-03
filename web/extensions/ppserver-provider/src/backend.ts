@@ -26,6 +26,7 @@ import { fetchRemoteSixiConfig } from "./remote-config.js";
 import { ensureSession, sessionFilePath } from "./session.js";
 import { registerPpserverProxy } from "./routes.js";
 import { registerPpserverAuthSessionRoute } from "./auth-session.js";
+import { uploadPpserverReference } from "./upload.js";
 import {
   DEFAULT_PPSERVER_BASE_URL,
   DEFAULT_SUPABASE_ANON_KEY,
@@ -188,6 +189,19 @@ export function createPpserverRegistration(input: PpserverRegistrationInput): {
       available,
       provider,
       models: ppserverModelDefinitions(catalog.templates),
+      // 参考图传到 ppserver 自己的 /media/upload，拿公网地址写进表单字段：
+      // 本机 /api/media/<key> 云上读不到。失败（含无令牌）返回空，由宿主回落到存储签名。
+      uploadReference: async ({ bytes, contentType }) => {
+        if (!available) return undefined;
+        const url = await uploadPpserverReference({
+          baseUrl,
+          accessToken: input.resolveAccessToken ?? accessToken,
+          bytes,
+          contentType,
+          ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
+        });
+        return url ? { url } : undefined;
+      },
       describeModel: (model) => {
         const found = catalog.templates.find((item) => item.modelId === model.providerModelId);
         if (!found) return undefined;

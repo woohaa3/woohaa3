@@ -74,6 +74,13 @@ function DockedBar({ nodeId, runtime, collapsible, children }: { nodeId: string;
   const ref = useRef<HTMLDivElement>(null);
   // 生成面板默认收成一条输入条（参考稿的默认态）：选中节点先看到它，点一下才展开完整面板。
   const [collapsed, setCollapsed] = useState(collapsible);
+  // collapsible 可能在挂载之后才变成 true（面板类型后置确定）：此时同样按默认态收起，
+  // 而不是停在初值 false 上。渲染期校正比 effect 少一帧闪烁。
+  const [seenCollapsible, setSeenCollapsible] = useState(collapsible);
+  if (seenCollapsible !== collapsible) {
+    setSeenCollapsible(collapsible);
+    if (collapsible) setCollapsed(true);
+  }
   const expand = useCallback(() => {
     setCollapsed(false);
     // 展开后的下一拍把焦点交给提示词输入：用户点这条就是想打字，不该再点一次。
