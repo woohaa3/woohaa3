@@ -61,11 +61,22 @@ const FAILURE_LABELS: Record<string, string> = {
   unavailable: "无法连接本机服务"
 };
 
+/**
+ * 这些码的宿主消息比固定标签更能说明「下一步该做什么」，因此并排显示：
+ * - 预检 / 蓝绿切换：消息点出具体声明或失败原因；
+ * - 下载 / 来源不可用：消息区分「断流、超时、HTTP 4xx、GitHub 限流」，只给固定标签时用户无从下手。
+ */
+const DETAIL_CODES = new Set([
+  "MARKETPLACE_PREFLIGHT_FAILED",
+  "MARKETPLACE_SWAP_FAILED",
+  "MARKETPLACE_DOWNLOAD_FAILED",
+  "MARKETPLACE_SOURCE_UNAVAILABLE"
+]);
+
 /** 稳定失败码 → 中文原因；未知码回落宿主的安全消息。 */
 export function failureReason(code: string, message?: string): string {
   const label = FAILURE_LABELS[code];
-  const withDetail = code === "MARKETPLACE_PREFLIGHT_FAILED" || code === "MARKETPLACE_SWAP_FAILED";
-  if (label) return message && message !== label && withDetail ? `${label}：${message}` : label;
+  if (label) return message && message !== label && DETAIL_CODES.has(code) ? `${label}：${message}` : label;
   return message || "操作失败";
 }
 

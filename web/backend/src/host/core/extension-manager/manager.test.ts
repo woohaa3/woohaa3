@@ -12,6 +12,7 @@ import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceSource, ReleaseRef } from "@woohaa3/contracts";
 import { createMarketplaceRegistry } from "../marketplace.js";
+import { ExtensionManagerError } from "./errors.js";
 import { createExtensionManager, type ExtensionManagerDeps, type ObservedHealth } from "./manager.js";
 import { loadPackageToolkit } from "./toolkit.js";
 import type { ExtensionPackageToolkit } from "./types.js";
@@ -562,6 +563,124 @@ describe("Extension Manager", () => {
     expect(page.items.map((item) => item.extensionId)).toEqual(["demo"]);
     const missing = await h.manager.wait(h.manager.installFromSource({ sourceId: "nope", extensionId: "demo", range: "*", actor: "a" }).jobId);
     expect(missing?.failure?.code).toBe("MARKETPLACE_SOURCE_UNAVAILABLE");
+  });
+
+  it("下载瞬时失败自动重试：第二次成功则照常安装", async () => {
+    await setup();
+    const h = await harness({ acceptUntrusted: true, download: { attempts: 3, backoffMs: [0, 0] } });
+    const { file, digest } = packTree(extensionTree(), null);
+    const ref: ReleaseRef = { sourceId: "corp", extensionId: "demo", version: "1.0.0", engines: ENGINES, packageDigest: digest, size: fs.statSync(file).size };
+    let attempts = 0;
+    const source: MarketplaceSource = {
+      sourceId: "corp",
+      label: "corp",
+      available: () => ({ ok: true }),
+      search: async () => ({ items: [] }),
+      resolve: async () => ref,
+      download: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", "下载停滞：60 秒内没有收到新数据", undefined, { retryable: true });
+        return { stream: Readable.toWeb(fs.createReadStream(file)) as ReadableStream<Uint8Array>, size: ref.size };
+      }
+    };
+    h.marketplace.register(source);
+    const done = await h.manager.wait(h.manager.installFromSource({ sourceId: "corp", extensionId: "demo", range: "^1.0.0", actor: "a", acceptUntrusted: true }).jobId);
+    expect(done?.status).toBe("succeeded");
+    expect(attempts).toBe(2);
+  });
+
+  it("重试耗尽：失败原因带「读到哪里」与尝试次数，暂存区清空、指针不动", async () => {
+    await setup();
+    const h = await harness({ acceptUntrusted: true, download: { attempts: 3, backoffMs: [0, 0] } });
+    const { file, digest } = packTree(extensionTree(), null);
+    const bytes = fs.readFileSync(file);
+    const ref: ReleaseRef = { sourceId: "corp", extensionId: "demo", version: "1.0.0", engines: ENGINES, packageDigest: digest, size: bytes.length };
+    let attempts = 0;
+    /** 先吐一半字节、让流水线落盘，再断开：模拟传输到一半连接被网络吞掉。 */
+    const halfThenBreak = (half: Buffer) => {
+      let sent = false;
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (!sent) {
+            sent = true;
+            controller.enqueue(new Uint8Array(half));
+            return;
+          }
+          setTimeout(() => controller.error(new Error("socket hang up")), 20);
+        }
+      });
+    };
+    const source: MarketplaceSource = {
+      sourceId: "corp",
+      label: "corp",
+      available: () => ({ ok: true }),
+      search: async () => ({ items: [] }),
+      resolve: async () => ref,
+      download: async () => {
+        attempts += 1;
+        // 每次重试都写同一个 package.wxt：能跑起来说明重试前清掉了上次的半截包（writePackage 用 wx）。
+        return { stream: halfThenBreak(bytes.subarray(0, Math.ceil(bytes.length / 2))), size: bytes.length };
+      }
+    };
+    h.marketplace.register(source);
+    const done = await h.manager.wait(h.manager.installFromSource({ sourceId: "corp", extensionId: "demo", range: "*", actor: "a" }).jobId);
+    expect(done?.status).toBe("failed");
+    expect(done?.failure?.code).toBe("MARKETPLACE_DOWNLOAD_FAILED");
+    expect(done?.failure?.message).toContain("已收到 50%");
+    expect(done?.failure?.message).toContain("已尝试 3 次");
+    expect(attempts).toBe(3);
+    expect(fs.existsSync(path.join(h.managedRoot, "installations.json"))).toBe(false);
+    expect(fs.readdirSync(path.join(h.managedRoot, "staging"))).toEqual([]);
+  });
+
+  it("来源不设时限时也有看门狗：传输停滞按断流重试，不会无限挂住", async () => {
+    await setup();
+    const h = await harness({ acceptUntrusted: true, download: { attempts: 3, backoffMs: [0, 0], idleTimeoutMs: 30 } });
+    const { file, digest } = packTree(extensionTree(), null);
+    const ref: ReleaseRef = { sourceId: "corp", extensionId: "demo", version: "1.0.0", engines: ENGINES, packageDigest: digest, size: fs.statSync(file).size };
+    let attempts = 0;
+    const source: MarketplaceSource = {
+      sourceId: "corp",
+      label: "corp",
+      available: () => ({ ok: true }),
+      search: async () => ({ items: [] }),
+      resolve: async () => ref,
+      download: async () => {
+        attempts += 1;
+        // 永远不给字节：来源没有自己的超时（本部署市场就是这样），只能靠流水线看门狗。
+        return { stream: new ReadableStream<Uint8Array>({ start: () => undefined }), size: ref.size };
+      }
+    };
+    h.marketplace.register(source);
+    const done = await h.manager.wait(h.manager.installFromSource({ sourceId: "corp", extensionId: "demo", range: "*", actor: "a", acceptUntrusted: true }).jobId);
+    expect(done?.failure?.code).toBe("MARKETPLACE_DOWNLOAD_FAILED");
+    expect(done?.failure?.message).toContain("下载停滞");
+    expect(done?.failure?.message).toContain("已尝试 3 次");
+    expect(attempts).toBe(3);
+  });
+
+  it("非瞬时失败（HTTP 4xx）不重试", async () => {
+    await setup();
+    const h = await harness({ acceptUntrusted: true, download: { attempts: 3, backoffMs: [0, 0] } });
+    const { file, digest } = packTree(extensionTree(), null);
+    const ref: ReleaseRef = { sourceId: "corp", extensionId: "demo", version: "1.0.0", engines: ENGINES, packageDigest: digest, size: fs.statSync(file).size };
+    let attempts = 0;
+    const source: MarketplaceSource = {
+      sourceId: "corp",
+      label: "corp",
+      available: () => ({ ok: true }),
+      search: async () => ({ items: [] }),
+      resolve: async () => ref,
+      download: async () => {
+        attempts += 1;
+        throw new ExtensionManagerError("MARKETPLACE_DOWNLOAD_FAILED", "下载扩展包失败（HTTP 404）");
+      }
+    };
+    h.marketplace.register(source);
+    const done = await h.manager.wait(h.manager.installFromSource({ sourceId: "corp", extensionId: "demo", range: "*", actor: "a" }).jobId);
+    expect(done?.failure?.code).toBe("MARKETPLACE_DOWNLOAD_FAILED");
+    expect(attempts).toBe(1);
+    expect(done?.failure?.message).not.toContain("已尝试");
   });
 
   it("依赖不满足 → MARKETPLACE_DEPENDENCY_UNSATISFIED", async () => {

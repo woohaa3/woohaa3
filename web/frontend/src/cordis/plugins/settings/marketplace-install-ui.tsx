@@ -519,7 +519,7 @@ export function MarketplaceInstallPanel({
                 return (
                   <li key={job.jobId} className="managed-install__job" data-tone={jobView.tone} data-testid={`marketplace-job-${job.jobId}`}>
                     <span className="managed-install__job-title">{jobView.title}</span>
-                    <span className="managed-install__job-detail" data-testid={`marketplace-job-detail-${job.jobId}`}>{jobView.detail}</span>
+                    <span className="managed-install__job-detail" title={jobView.detail} data-testid={`marketplace-job-detail-${job.jobId}`}>{jobView.detail}</span>
                     {job.status === "running" ? (
                       <Button size="sm" tone="ghost" onClick={() => void jobs?.cancel(job.jobId)}>取消</Button>
                     ) : null}
