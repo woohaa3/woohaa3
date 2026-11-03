@@ -17,6 +17,7 @@ export function relocateHistoryStrips(nodes: readonly BevyRenderNode[]): void {
   for (const node of nodes) {
     if (!LAYER_NODE_TYPES.has(node.type) || !node.historyStrip) continue;
     collected.set(node.id, {
+      nodeType: node.type,
       layers: node.historyStrip.dots.map(({ hovered: _hovered, pressed: _pressed, ...layer }) => layer),
       truncated: node.historyStrip.truncated
     });

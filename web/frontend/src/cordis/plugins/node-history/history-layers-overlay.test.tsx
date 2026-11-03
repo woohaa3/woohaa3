@@ -24,7 +24,7 @@ const services = {
 vi.mock("../../react.js", () => ({ useService: (key: string) => services[key] }));
 
 const { historyLayersStore } = await import("../../services/history-layers-store.js");
-const { HistoryLayersOverlay, layersColumnPosition, MAX_VISIBLE_LAYERS } = await import("./history-layers-overlay.js");
+const { HistoryLayersOverlay, layerVariant, layersColumnPosition, MAX_VISIBLE_LAYERS } = await import("./history-layers-overlay.js");
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -48,9 +48,9 @@ const layer = (presentationId: string, extra: Record<string, unknown> = {}) => (
   ...extra
 });
 
-function publish(nodeId: string, layers: ReturnType<typeof layer>[], truncated = 0) {
+function publish(nodeId: string, layers: ReturnType<typeof layer>[], truncated = 0, nodeType = "image") {
   act(() => {
-    historyLayersStore.replace(new Map([[nodeId, { layers, truncated }]]));
+    historyLayersStore.replace(new Map([[nodeId, { nodeType, layers, truncated }]]));
   });
 }
 
@@ -83,7 +83,7 @@ describe("版本缩略图列表", () => {
     expect(buttons[0]!.querySelector("img")!.getAttribute("src")).toBe("/thumb/entry-new");
     expect(buttons[0]!.dataset.current).toBe("true");
     expect(buttons[2]!.querySelector("img")!.getAttribute("src")).toBe("/thumb/entry-old");
-    expect(previewUrl).toHaveBeenCalledWith({ canvasId: "canvas-1", nodeId: "img", entryId: "entry-new", variant: "thumbnail" });
+    expect(previewUrl).toHaveBeenCalledWith({ canvasId: "canvas-1", nodeId: "img", entryId: "entry-new", variant: "preview" });
   });
 
   it("点击发出选择请求（presentationId / entryId / operationId）", () => {
@@ -136,5 +136,19 @@ describe("layersColumnPosition", () => {
 
   it("量不到视口宽度（0）时不翻转", () => {
     expect(layersColumnPosition(rect, 0)).toEqual({ left: 508, top: 50 });
+  });
+});
+
+describe("缩略图变体", () => {
+  it("图片取 preview（302 到原图），视频取 poster；绝不用模型专用的 thumbnail", () => {
+    expect(layerVariant("image")).toBe("preview");
+    expect(layerVariant("video")).toBe("poster");
+  });
+
+  it("视频节点的列表项按 poster 请求图片", () => {
+    const { container, previewUrl } = render();
+    publish("vid", [layer("a")], 0, "video");
+    expect(container.querySelector("img")).not.toBeNull();
+    expect(previewUrl).toHaveBeenCalledWith({ canvasId: "canvas-1", nodeId: "vid", entryId: "entry-a", variant: "poster" });
   });
 });

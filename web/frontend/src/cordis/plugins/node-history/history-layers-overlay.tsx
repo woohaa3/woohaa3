@@ -24,9 +24,17 @@ export const MIN_CARD_WIDTH = 80;
 
 export type LayerSelectRequest = { nodeId: string; presentationId?: string; entryId?: string; operationId?: string };
 
+/**
+ * 列表项的图片变体：图片用 `preview`（302 到原图，浏览器缩放显示）；视频用 `poster`（海报帧）。
+ * 不用 `thumbnail`：那是**模型**专用的受控派生 PNG 路由，图片/视频条目请求会 404。
+ */
+export function layerVariant(nodeType: string): "preview" | "poster" {
+  return nodeType === "video" ? "poster" : "preview";
+}
+
 type Props = {
   canvasId: () => string;
-  previewUrl: (input: { canvasId: string; nodeId: string; entryId: string; variant: "thumbnail" }) => string;
+  previewUrl: (input: { canvasId: string; nodeId: string; entryId: string; variant: "preview" | "poster" }) => string;
   onSelect: (request: LayerSelectRequest) => void;
 };
 
@@ -98,7 +106,7 @@ export function HistoryLayersOverlay({ canvasId, previewUrl, onSelect }: Props) 
     };
   }, [runtime]);
 
-  const columns: Array<{ nodeId: string; rect: Rect; layers: HistoryLayer[]; hidden: number }> = [];
+  const columns: Array<{ nodeId: string; nodeType: string; rect: Rect; layers: HistoryLayer[]; hidden: number }> = [];
   const keys: string[] = [];
   for (const [nodeId, value] of byNode) {
     const rect = runtime.nodeScreenRect(nodeId);
@@ -107,14 +115,14 @@ export function HistoryLayersOverlay({ canvasId, previewUrl, onSelect }: Props) 
     // PS 习惯：最新的在最上面。
     const newestFirst = [...value.layers].reverse();
     const shown = newestFirst.slice(0, MAX_VISIBLE_LAYERS);
-    columns.push({ nodeId, rect, layers: shown, hidden: newestFirst.length - shown.length + value.truncated });
+    columns.push({ nodeId, nodeType: value.nodeType, rect, layers: shown, hidden: newestFirst.length - shown.length + value.truncated });
   }
   renderedKey.current = keys.join(";");
   if (columns.length === 0) return null;
 
   return (
     <>
-      {columns.map(({ nodeId, rect, layers, hidden }) => {
+      {columns.map(({ nodeId, nodeType, rect, layers, hidden }) => {
         const position = layersColumnPosition(rect, viewportWidth);
         return (
           <div
@@ -152,7 +160,7 @@ export function HistoryLayersOverlay({ canvasId, previewUrl, onSelect }: Props) 
                       alt=""
                       draggable={false}
                       loading="lazy"
-                      src={previewUrl({ canvasId: canvasId(), nodeId, entryId: layer.entryId!, variant: "thumbnail" })}
+                      src={previewUrl({ canvasId: canvasId(), nodeId, entryId: layer.entryId!, variant: layerVariant(nodeType) })}
                     />
                   ) : (
                     <span className="history-layer__glyph" aria-hidden="true">{layer.state === "running" || layer.state === "queued" ? "" : "!"}</span>

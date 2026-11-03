@@ -34,6 +34,8 @@ describe("relocateHistoryStrips", () => {
     const snapshot = historyLayersStore.getSnapshot();
     expect([...snapshot.keys()]).toEqual(["img", "vid"]);
     expect(snapshot.get("img")?.truncated).toBe(2);
+    expect(snapshot.get("img")?.nodeType).toBe("image");
+    expect(snapshot.get("vid")?.nodeType).toBe("video");
     expect(snapshot.get("img")?.layers.map((layer) => layer.presentationId)).toEqual(["a", "b"]);
     expect(snapshot.get("img")?.layers[0]).not.toHaveProperty("hovered");
     expect(snapshot.get("img")?.layers[0]).not.toHaveProperty("pressed");

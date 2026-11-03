@@ -14,6 +14,8 @@ import type { BevyHistoryStripDot } from "@woohaa3/contracts";
 export type HistoryLayer = Omit<BevyHistoryStripDot, "hovered" | "pressed">;
 
 export type NodeHistoryLayers = {
+  /** 节点类型（`image` / `video`）：决定缩略图取原图还是视频海报。 */
+  nodeType: string;
   /** 按 createdAt 升序（最早在前）；界面按 PS 习惯把最新的放在最上面。 */
   layers: readonly HistoryLayer[];
   /** 被折叠的较早记录数。 */
