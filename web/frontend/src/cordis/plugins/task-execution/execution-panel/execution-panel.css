@@ -920,6 +920,35 @@
   }
 }
 
+/* 「提示词」入口：发送键左边那颗，形态跟快捷改写一致（同一颗 mc-panel__icon-btn）。 */
+.mc-panel__prompt-library {
+  width: 28px;
+  height: 28px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--text-primary) 78%, transparent);
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.mc-panel__prompt-library:hover,
+.mc-panel__prompt-library:focus-visible {
+  background: var(--mc-accent-soft);
+  color: var(--text-primary);
+}
+
+.mc-panel__prompt-library-icon {
+  display: block;
+  width: 17px;
+  height: 17px;
+}
+
+/* 浮层本身由 prompt-library-panel.css 负责，这里只去掉 Popover 默认的内边距。 */
+.mc-panel__prompt-library-popover {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
 .mc-panel__polish-menu {
   position: relative;
   z-index: var(--z-popover);

@@ -96,6 +96,9 @@ export function routeFor(pathname) {
   // 素材库（浏览器扩展「保存到四喜」保存进来的网页图片）。由宿主 core 的 library 插件承载。
   // **必须登记**：未登记的 `/api/...` 会被判 `none` 直接 404，请求永远到不了宿主 gateway。
   if (pathname === "/api/library" || pathname.startsWith("/api/library/")) return "application";
+  // 提示词库（生图对话框的「提示词」面板）：由宿主 core 的 prompt-library 插件代理官网预设包。
+  // 上游站点不带 CORS 头，浏览器直连会被拦，所以必须走这条同源路由。**同样必须登记。**
+  if (pathname === "/api/prompt-library" || pathname.startsWith("/api/prompt-library/")) return "application";
   return "none";
 }
 

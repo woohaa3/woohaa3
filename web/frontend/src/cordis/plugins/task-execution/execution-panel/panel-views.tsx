@@ -11,6 +11,7 @@ import {
 	ExpandIcon,
 	LoadingIcon,
 	Popover,
+	SnippetLibraryIcon,
 	WandSparklesIcon
 } from "@woohaa3/ui";
 import { SendPlaneIcon } from "./icons.js";
@@ -259,7 +260,7 @@ export function PromptBox({
 	);
 }
 
-/** 快捷改写菜单 + 主操作按钮。 */
+/** 快捷改写菜单 + 提示词库 + 主操作按钮。 */
 export function RunActions({
 	showPolish,
 	polishOpen,
@@ -267,6 +268,9 @@ export function RunActions({
 	activeSkill,	polishProcessing,
 	visibleSkills,
 	onRunSkill,
+	promptLibraryOpen,
+	onTogglePromptLibrary,
+	promptLibrary,
 	showRun,
 	busy,
 	canRun,
@@ -283,6 +287,11 @@ export function RunActions({
 	polishProcessing: boolean;
 	visibleSkills: ReadonlyArray<ExecutionPanelSkill>;
 	onRunSkill: (skill: ExecutionPanelSkill) => void;
+	/** 提示词库浮层的受控状态。 */
+	promptLibraryOpen: boolean;
+	onTogglePromptLibrary: () => void;
+	/** 提示词库浮层内容（由面板从 `promptLibrarySlot` 渲染）。未提供时不显示入口。 */
+	promptLibrary?: React.ReactNode;
 	showRun: boolean;
 	busy: boolean;
 	canRun: boolean;
@@ -353,6 +362,34 @@ export function RunActions({
 								</span>
 							</button>
 						))}
+					</Popover>
+				</div>
+			) : null}
+			{promptLibrary ? (
+				<div className="mc-panel__polish-menu-wrap">
+					<Popover
+						open={promptLibraryOpen}
+						onOpenChange={(next) => {
+							if (next !== promptLibraryOpen) onTogglePromptLibrary();
+						}}
+						side="top"
+						align="end"
+						className="mc-panel__prompt-library-popover"
+						dismissOnOutside
+						trigger={
+							<button
+								type="button"
+								className="mc-panel__icon-btn mc-panel__prompt-library"
+								data-tooltip="提示词"
+								aria-label="打开提示词库"
+								aria-haspopup="dialog"
+								aria-expanded={promptLibraryOpen}
+							>
+								<SnippetLibraryIcon className="mc-panel__prompt-library-icon" />
+							</button>
+						}
+					>
+						{promptLibrary}
 					</Popover>
 				</div>
 			) : null}

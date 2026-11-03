@@ -35,6 +35,13 @@ export const ROUTE_ORDER = {
    * **同样要在 ingress 的 `routeFor` 登记**，否则请求到不了这里。
    */
   library: 89,
+  /**
+   * `/api/prompt-library`：四喜官网提示词预设包的同源代理（生图对话框的「提示词」面板）。
+   *
+   * 前缀与 canvas / task / mcp / media 都不重叠，排在哪都不会被截走。
+   * **同样要在 ingress 的 `routeFor` 登记**，否则后端根本收不到请求。
+   */
+  promptLibrary: 88,
   mcpInstallation: 45,
   canvas: 60,
   taskInspection: 65,

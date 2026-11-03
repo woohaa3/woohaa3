@@ -47,6 +47,7 @@ import {
 	VideoEditEntryBlock,
 } from "./panel-views.js";
 import { CollapsedBar } from "./collapsed-bar.js";
+import { mergePromptText } from "../prompt-library/prompt-library.js";
 import { usePanelCollapse } from "./collapse-context.js";
 import "./execution-panel.css";
 import "./collapsed-bar.css";
@@ -118,6 +119,7 @@ export function ExecutionPanel({
 	skills = DEFAULT_SKILLS,
 	referencesSlot,
 	typeSwitchSlot,
+	promptLibrarySlot,
 	statusSlot,
 	promptEditorSlot,
 	onRemoveVideoEditIntent,
@@ -162,6 +164,7 @@ export function ExecutionPanel({
 	const [polishOpen, setPolishOpen] = useState(false);
 	const [skillError, setSkillError] = useState<string | null>(null);
 	const [activeSkill, setActiveSkill] = useState<string | null>(null);
+	const [promptLibraryOpen, setPromptLibraryOpen] = useState(false);
 	const [modelOpen, setModelOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -363,6 +366,23 @@ export function ExecutionPanel({
 			polishProcessing={polishProcessing}
 			visibleSkills={visibleSkills}
 			onRunSkill={runSkill}
+			promptLibraryOpen={promptLibraryOpen}
+			onTogglePromptLibrary={() => setPromptLibraryOpen((open) => !open)}
+			{...(promptLibrarySlot
+				? {
+						promptLibrary: promptLibrarySlot({
+							// 追加而不是覆盖：用户已经写了一半的草稿不能被一次点击清掉。
+							//
+							// **必须同时回流给父级**：只 `setPrompt` 只改本组件 state，面板一收起
+							// 或换节点（`data.panelPrompt` 一来就被 effect 覆盖）刚写的词就没了。
+							onUse: (text: string) => {
+								const next = mergePromptText(prompt, text);
+								setPrompt(next);
+								patch({ panelPrompt: next });
+							}
+						})
+					}
+				: {})}
 			showRun={showRun}
 			busy={busy}
 			canRun={canRun}

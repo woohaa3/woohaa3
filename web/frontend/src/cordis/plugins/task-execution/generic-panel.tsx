@@ -92,6 +92,7 @@ export function GenericModelPanel(props: ModelPanelProps) {
         {...(referencesSlot !== undefined ? { referencesSlot } : {})}
         {...(typeSwitchSlot !== undefined ? { typeSwitchSlot } : {})}
         {...(props.renderers?.promptEditor ? { promptEditorSlot: props.renderers.promptEditor } : {})}
+        {...(props.renderers?.promptLibrary ? { promptLibrarySlot: props.renderers.promptLibrary } : {})}
         {...(props.renderers?.promptSkill ? { onPromptSkill: props.renderers.promptSkill } : {})}
         onChange={handleChange}
         onRun={handleRun}

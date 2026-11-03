@@ -117,6 +117,13 @@ export type ModelPanelRenderers = {
     /** Enter 生成：与面板主操作共用提交门禁。 */
     onSubmit?: () => void;
   }) => import("react").ReactNode;
+  /**
+   * 提示词库浮层内容；可选，由 Host 注入。面板负责画入口按钮、控制开合并把
+   * `onUse` 收到的正文并进草稿。
+   */
+  promptLibrary?: (args: {
+    onUse: (text: string) => void;
+  }) => import("react").ReactNode;
   /** 快捷改写（提示词工具）回调；可选，由 Host 注入。 */
   promptSkill?: (input: { id: string; label: string; prompt: string }) => void | Promise<void>;
 };

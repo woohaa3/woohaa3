@@ -76,6 +76,7 @@ import {
 import type { ModelReferenceItem, ModelSubmitOutcome } from "../../contract/model-interaction.js";
 import type { ModelExecutionHostProps } from "./node-execution-panel-types.js";
 import type { ExecutionOrigin } from "./execution-launch.js";
+import { PromptLibraryPanel } from "./prompt-library/prompt-library-panel.js";
 export type { ModelExecutionHostProps } from "./node-execution-panel-types.js";
 
 const defaultDraftStore = createModelDraftStore();
@@ -622,6 +623,8 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
                   {...(snippetTrigger ? { snippetTrigger } : {})}
                 />
               ),
+              // 提示词库：一条本地+远端的只读词库，选中后由面板并进草稿。
+              promptLibrary: ({ onUse }) => <PromptLibraryPanel onUse={onUse} />,
               ...(panelPromptSkill ? { promptSkill: panelPromptSkill } : {})
             }}
           />

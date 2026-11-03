@@ -26,6 +26,7 @@ export const CORE_LAYER_INFOS: Readonly<Record<string, HostPluginInfo>> = {
   telemetry: { label: "本机遥测", description: "本机事件记录、聚合与异常复盘，数据不出本机", icon: "activity" },
   media: { label: "媒体", description: "内容寻址、导入校验与 /api/media", icon: "media" },
   library: { label: "素材库", description: "浏览器扩展保存进来的网页图片，跨画布收集，不属于任何画布", icon: "media" },
+  "prompt-library": { label: "提示词库", description: "四喜官网提示词预设包的同源代理，供生图对话框的「提示词」面板使用", icon: "prompt" },
   generation: { label: "生成", description: "生成 Provider 注册表与站点级模型策略", icon: "generation" },
   marketplace: { label: "扩展市场", description: "市场来源注册表（只接受内置根扩展注册来源）", icon: "apps" },
   extensionManager: { label: "扩展安装", description: "受管扩展的安装、校验、回滚、卸载与观察期", icon: "apps" },

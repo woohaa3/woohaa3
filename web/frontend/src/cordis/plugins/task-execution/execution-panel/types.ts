@@ -209,6 +209,13 @@ export interface ExecutionPanelProps {
 	/** 参数区最左边的「图片 / 视频」切换（由宿主提供，缺省不显示）。 */
 	typeSwitchSlot?: React.ReactNode;
 	/**
+	 * 提示词库浮层（由宿主提供，缺省不显示入口）。
+	 *
+	 * 面板只负责：画发送键左边那颗按钮、控制浮层开合、把 `onUse` 收到的正文
+	 * 写进草稿（见 `mergePromptText`）。取数、收藏、筛选全在插槽里。
+	 */
+	promptLibrarySlot?: (args: { onUse: (text: string) => void }) => React.ReactNode;
+	/**
 	 * 内联状态槽：渲染在面板头部与提示词之间，由宿主持有运行状态（生成阶段/时长/取消）。
 	 * 与内部 `taskStatus` 失败 chip 相互独立；提供时原样插入面板网格/分区布局。
 	 */
