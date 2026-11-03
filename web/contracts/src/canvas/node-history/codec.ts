@@ -1,3 +1,4 @@
+import { decodeInputSnapshot } from "../domain/input-snapshot.js";
 import { decodeFilmSetGroupMarker } from "../film-set-group.js";
 import { decodeFilmSetAnimations } from "../film-set-animations.js";
 import { decodeFilmSetLocalTransform } from "../film-set-content.js";
@@ -127,6 +128,11 @@ function decodeSourceSummary(input: unknown): NodeHistoryDecodeResult<NodeHistor
   if (input.durationSeconds !== undefined) {
     if (!isFiniteNumber(input.durationSeconds) || input.durationSeconds < 0) return invalid("source.durationSeconds 非法");
     summary.durationSeconds = input.durationSeconds;
+  }
+  if (input.inputSnapshot !== undefined) {
+    const snapshot = decodeInputSnapshot(input.inputSnapshot);
+    if (snapshot === null) return invalid("source.inputSnapshot 非法");
+    summary.inputSnapshot = snapshot;
   }
   return { ok: true, value: summary };
 }

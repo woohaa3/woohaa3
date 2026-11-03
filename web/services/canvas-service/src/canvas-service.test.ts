@@ -137,6 +137,29 @@ describe("Canvas run service（任务 5.3）", () => {
     expect((await service.run(request("b1"))).ok).toBe(true);
     expect(order).toEqual(["baseline:canvas-a:image-1", "submit"]);
   });
+  it("begin 把提示词、模型、参数与实际提交的参考资产写成 job 输入快照，终态投影保留它", async () => {
+    const room = await makeRoom({ withUpstream: true });
+    const taskClient = { submit: async () => {}, cancel: async () => {} } as never;
+    const service = new CanvasRunService({ resolveRoom: async () => room, taskClient, resolveCatalog: async () => catalog() });
+    const outcome = await service.run({ canvasId: "canvas-a", nodeId: "image-1", runId: "snap-1", jobId: "job-snap-1", modelKey: "litellm:gpt-image-2", prompt: "变成夜景", parameters: { size: "2K" } });
+    expect(outcome.ok).toBe(true);
+    const exported = room.exportCanvas();
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    const job = exported.canvas.jobs.find((entry) => entry.runId === "snap-1");
+    expect(job?.input).toMatchObject({
+      prompt: "变成夜景",
+      modelKey: "litellm:gpt-image-2",
+      parameters: { size: "2K", model: "litellm:gpt-image-2" }
+    });
+    expect(job?.input?.references.map((ref) => ref.assetId)).toEqual(["asset-up"]);
+
+    const projector = new CanvasTaskProjector({ resolveRoom: async () => room, receipts: new InMemoryProjectionReceiptStore() });
+    await projector.project({ taskKey: "snap-1", runId: "snap-1", jobId: "job-snap-1", canvasId: "canvas-a", nodeId: "image-1", status: "failed", error: "x", terminalAt: "2026-10-20T00:00:09Z" });
+    const after = room.exportCanvas();
+    if (!after.ok) return;
+    expect(after.canvas.jobs.find((entry) => entry.runId === "snap-1")?.input?.prompt).toBe("变成夜景");
+  });
   it("解析权威输入、事务 begin 后以稳定 workerTaskKey 异步 submit", async () => {
     const room = await makeRoom({ withUpstream: true });
     const submitted: Array<Record<string, unknown>> = [];

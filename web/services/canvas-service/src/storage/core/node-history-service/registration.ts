@@ -76,6 +76,7 @@ export function taskHistorySource(input: {
   taskKey?: string;
   modelId?: string;
   jobId?: string;
+  inputSnapshot?: NodeHistorySourceSummary["inputSnapshot"];
   payload: NodeHistoryTextPayload | NodeHistoryMediaPayload;
 }): NodeHistorySourceSummary {
   return {
@@ -84,6 +85,7 @@ export function taskHistorySource(input: {
     ...(input.taskKey ? { taskKey: input.taskKey } : {}),
     ...(input.modelId ? { modelId: input.modelId } : {}),
     ...(input.jobId ? { providerTaskId: input.jobId } : {}),
+    ...(input.inputSnapshot ? { inputSnapshot: input.inputSnapshot } : {}),
     ...(input.payload.kind !== "text" && input.payload.durationSeconds !== undefined
       ? { durationSeconds: input.payload.durationSeconds }
       : {})
@@ -153,6 +155,7 @@ export function buildTaskHistoryEntry(input: {
   jobId?: string;
   kind: "text" | "image" | "video" | "audio";
   createdAt: string;
+  inputSnapshot?: NodeHistorySourceSummary["inputSnapshot"];
   payload: NodeHistoryTextPayload | NodeHistoryMediaPayload;
 }): NodeGenerationHistoryEntry {
   const identity = { kind: "task-run" as const, runId: input.runId };
@@ -173,6 +176,7 @@ export function buildTaskHistoryEntry(input: {
       ...(input.taskKey ? { taskKey: input.taskKey } : {}),
       ...(input.modelKey ? { modelId: input.modelKey } : {}),
       ...(input.jobId ? { jobId: input.jobId } : {}),
+      ...(input.inputSnapshot ? { inputSnapshot: input.inputSnapshot } : {}),
       payload: input.payload
     }),
     payload: input.payload

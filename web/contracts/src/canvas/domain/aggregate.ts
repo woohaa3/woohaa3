@@ -9,6 +9,7 @@
  * 2. 聚合各部分的记录级校验（节点、边、资产、任务）
  * 3. 可诊断的 issue 列表
  */
+import { decodeInputSnapshot } from "./input-snapshot.js";
 import { sanitizeWoohaa3CanvasDocument,
   sanitizeWoohaa3CanvasNodeData,
   toWoohaa3CanvasJsonObject,
@@ -268,6 +269,8 @@ function sanitizeStoredJobs(
       modelKey: isRecord(entry) ? readNonEmptyString(entry.modelKey) : undefined,
       status: status ?? "idle",
       error: isRecord(entry) ? readNonEmptyString(entry.error) : undefined,
+      // 提交时的输入快照：「重新编辑 / 重新生成」读回当时的输入，同样必须往返保留；非法则丢弃（不拖垮整条 job）。
+      ...(isRecord(entry) && entry.input !== undefined && decodeInputSnapshot(entry.input) ? { input: decodeInputSnapshot(entry.input)! } : {}),
       updatedAt: (isRecord(entry) ? readIsoString(entry.updatedAt) : undefined) ?? now
     });
   });

@@ -196,6 +196,7 @@ export function buildProjectionCommands(input: {
     });
   }
 
+  const existingJobInput = currentCanvas.jobs.find((job) => job.id === record.jobId)?.input;
   commands.push({
     type: "job.upsert",
     job: {
@@ -206,6 +207,7 @@ export function buildProjectionCommands(input: {
       // 模型身份随 job 落盘：产物 → provenance.runId → jobs[].taskId 之外还要能直接读模型
       // （change: l0-generation-provenance）。旧记录缺省即不写。
       ...(record.modelKey ? { modelKey: record.modelKey } : {}),
+      ...(existingJobInput ? { input: existingJobInput } : {}),
       status: record.status === "succeeded" ? "success" : "failed",
       error: record.status === "succeeded" ? undefined : record.error,
       updatedAt: record.terminalAt

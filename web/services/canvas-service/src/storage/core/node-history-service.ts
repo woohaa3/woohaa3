@@ -142,6 +142,7 @@ export class NodeHistoryApplicationService {
     const payload = input.output.mediaKind === "text"
       ? { kind: "text" as const, text: input.output.text }
       : mediaPayload(input.output);
+    const inputSnapshot = await this.readRunInputSnapshot(input.canvasId, input.runId);
     const entry = buildTaskHistoryEntry({
       canvasId: input.canvasId,
       nodeId: input.nodeId,
@@ -151,10 +152,26 @@ export class NodeHistoryApplicationService {
       ...(input.jobId ? { jobId: input.jobId } : {}),
       kind: input.kind,
       createdAt: input.createdAt,
+      ...(inputSnapshot ? { inputSnapshot } : {}),
       payload
     });
     const result = await this.insertWithCapacity(entry);
     return { status: result.status, entryId: entry.entryId };
+  }
+
+  /**
+   * 读这次运行 begin 时写在 job 上的输入快照。读不到（旧运行、画布不可用）返回 undefined，
+   * 历史条目照常登记、只是没有「当时的输入」；这是旁路，绝不挡登记。
+   */
+  private async readRunInputSnapshot(canvasId: string, runId: string) {
+    try {
+      const room = await this.context.resolveRoom(canvasId);
+      const exported = room?.exportCanvas();
+      if (!exported?.ok) return undefined;
+      return exported.canvas.jobs.find((job) => job.runId === runId)?.input;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

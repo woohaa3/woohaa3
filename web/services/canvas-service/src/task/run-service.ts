@@ -17,7 +17,7 @@ import { catalogModelBindings, compileVideoEditProviderPrompt, isNodeModelTypeMa
 import type { CanvasTaskClient } from "../clients/task-client.js";
 import { resolveNodeReferenceInputs } from "./input-resolution.js";
 import { withFrozenShotImages } from "./shot-reference-resolution.js";
-import { shotImageReferenceAssetId } from "@woohaa3/contracts";
+import { shotImageReferenceAssetId, type RunInputSnapshot } from "@woohaa3/contracts";
 import { resolveMentionsAndCompile } from "./mention-resolution.js";
 import {
   EMPTY_UPSTREAM_TEXT_CODE,
@@ -227,6 +227,21 @@ export class CanvasRunService {
     // 0) 先给当前图留历史基线（只对图片节点；节点没有输出时它自己会跳过）。
     if (node.type === "image") await this.deps.ensureNodeBaseline?.(request.canvasId, request.nodeId);
 
+    // 输入快照：随 begin 的 job 落盘，成功登记历史时读回（节点自己的 prompt/parameters 只留最新一次）。
+    const selfReferenceId = (canvas.nodeData[request.nodeId] as { selfReferenceAssetId?: unknown } | undefined)?.selfReferenceAssetId;
+    const inputSnapshot: RunInputSnapshot = {
+      prompt: authored.slice(0, 8000),
+      modelKey,
+      ...(JSON.stringify(request.parameters).length <= 8192 ? { parameters: { ...request.parameters, model: modelKey } } : {}),
+      references: taskInputs.slice(0, 32).map((input) => ({
+        assetId: input.assetId,
+        role: input.role,
+        ...(input.mediaKind ? { mediaKind: input.mediaKind } : {}),
+        ...(input.field ? { field: input.field } : {})
+      })),
+      ...(typeof selfReferenceId === "string" && selfReferenceId !== "" ? { selfReferenceAssetId: selfReferenceId } : {})
+    };
+
     // 1) 事务提交 begin：durable 之后才发 submit。
     // 身份写入：nodeData.modelKey 与 parameters.model 都写 modelKey（新写入只使用它）。
     const begin = await room.submit({
@@ -262,6 +277,7 @@ export class CanvasRunService {
             // 模型身份随 begin 的 job 落盘：产物 → provenance.runId → job 即可读到当时模型
             // （change: l0-generation-provenance）。
             modelKey,
+            input: inputSnapshot,
             status: "running",
             updatedAt: this.deps.now?.() ?? new Date().toISOString()
           }

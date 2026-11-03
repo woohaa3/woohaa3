@@ -609,6 +609,30 @@ describe("同类型节点合并", () => {
     expect(await repo2.listForNode(CANVAS, "img")).toHaveLength(0);
   });
 
+  it("登记成功版本时把 begin 写在 job 上的输入快照带进条目 source（旧运行没有则不带）", async () => {
+    const snapshot = {
+      prompt: "变成夜景",
+      modelKey: "ppserver:m1",
+      parameters: { size: "2K" },
+      references: [{ assetId: "asset-1", role: "reference_image", mediaKind: "image", field: "3_image" }],
+      selfReferenceAssetId: "asset-1"
+    };
+    const canvas = {
+      ...imageCanvas([imageNode("img", "asset-1")], [imageAsset("asset-1", "image-key-1")]),
+      jobs: [{ id: "job-1", nodeId: "img", taskId: "run-1", runId: "run-1", status: "running", input: snapshot, updatedAt: NOW }]
+    } as unknown as ServerCanvas;
+    const { repository, service } = setup(canvas);
+    const output = { mediaKind: "image" as const, asset: imageAsset("asset-2", "image-key-2") as never };
+
+    await service.registerTaskResult({ canvasId: CANVAS, nodeId: "img", runId: "run-1", jobId: "job-1", kind: "image", createdAt: NOW, output });
+    await service.registerTaskResult({ canvasId: CANVAS, nodeId: "img", runId: "run-old", jobId: "job-old", kind: "image", createdAt: NOW, output: { ...output, asset: imageAsset("asset-3", "image-key-3") as never } });
+    const entries = await repository.listForNode(CANVAS, "img");
+    const withSnapshot = entries.find((entry) => entry.source.runId === "run-1");
+    const legacy = entries.find((entry) => entry.source.runId === "run-old");
+    expect(withSnapshot?.source.inputSnapshot).toEqual(snapshot);
+    expect(legacy?.source.inputSnapshot).toBeUndefined();
+  });
+
   it("图片补给跳过不可解析的媒体，不制造假版本", async () => {
     const canvas = imageCanvas([imageNode("img", "asset-1")], [imageAsset("asset-1", "image-key-1")]);
     const repository = new InMemoryNodeHistoryRepository();

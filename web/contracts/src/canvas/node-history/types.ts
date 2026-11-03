@@ -6,6 +6,7 @@
  * MUST NOT 进入 Canvas Y.Doc / `ServerCanvas`。
  */
 import type { ModelCamera } from "../model-cameras.js";
+import type { RunInputSnapshot } from "../domain/types.js";
 import type { ImageEditDocument, ImageEditProjectObjectRef } from "../image-edit.js";
 import type { FilmSetContent } from "../film-set-content.js";
 import type { InitialShotCamera } from "../canvas-node-model.js";
@@ -221,6 +222,8 @@ export type NodeHistorySourceSummary = {
   modelId?: string;
   sourceHash?: string;
   durationSeconds?: number;
+  /** 这次生成提交时的输入（提示词 / 模型 / 参数 / 参考资产），供重新编辑与重新生成读回。 */
+  inputSnapshot?: RunInputSnapshot;
 };
 
 /**

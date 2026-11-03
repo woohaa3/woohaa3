@@ -180,6 +180,23 @@ export type StoredAsset = CanvasAsset & {
   historyTitle?: string;
 };
 
+/**
+ * 一次生成运行提交时的**输入快照**：提示词、模型、参数与当时用作参考的资产。
+ *
+ * 随 begin 的 job 落盘，成功登记历史时写进条目 `source.inputSnapshot`，供「重新编辑 / 重新生成」
+ * 读回当时的输入（节点自己的 prompt / parameters 只保留最新一次）。引用的是资产 id，不含字节。
+ */
+export type RunInputSnapshot = {
+  /** 提交的原文（authored，token 化 mention），不是编译后的 provider 文本。 */
+  prompt: string;
+  modelKey?: string;
+  parameters?: Record<string, unknown>;
+  /** 当时实际提交的参考输入（资产在生成之前就存在）。 */
+  references: Array<{ assetId: string; role: string; mediaKind?: string; field?: string }>;
+  /** 当时节点「自带主图」的资产 id（上传图 → 添加到对话框 的流程）；没有则缺省。 */
+  selfReferenceAssetId?: string;
+};
+
 export type StoredJob = {
   id: string;
   nodeId: string;
@@ -190,6 +207,8 @@ export type StoredJob = {
   runId?: string;
   status: GenerationStatus;
   error?: string;
+  /** 提交时的输入快照（begin 写入，终态投影保留）。 */
+  input?: RunInputSnapshot;
   updatedAt: string;
 };
 
