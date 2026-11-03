@@ -280,6 +280,11 @@ export type InteractionControllerOptions = {
    * 聚合遮罩。全部为浏览器本地派生状态，不进入 ServerCanvas / Y.Doc。
    */
   getRunState?: () => RunStateProjectionInput | null;
+  /**
+   * 把图片/视频节点的历史圆点搬到宿主 DOM 的「版本图层」列表并从 scene 删除（Bevy 不再画）。
+   * 缺省 false：Bevy 圆点与其命中/锚点路径原样保留（交互层单测与未装配 DOM 列表的宿主都依赖它）。
+   */
+  relocateHistoryStrips?: boolean;
   projectHistoryCanvas?: (canvas: import("@woohaa3/contracts").ServerCanvas | null) => import("@woohaa3/contracts").ServerCanvas | null;
   /**
    * 模型编辑 gizmo/镜头工具瞬时态（change: add-model-editor-gizmo-shot-capture）。

@@ -15,6 +15,7 @@ import {
 } from "@woohaa3/contracts";
 import { projectCompositeFocusContext } from "./composite-focus-context.js";
 import { applyRunStateProjection } from "./run-state-projection.js";
+import { relocateHistoryStrips } from "./history-layers.js";
 import { buildShotPreviewSceneInput } from "./shot-preview-scene-input.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
@@ -209,6 +210,8 @@ export function buildSceneWithResources(
   // （change: 2026-10-12-unify-generation-history-strip，design D4/D5）。
   const runState = options.getRunState?.() ?? null;
   if (runState) applyRunStateProjection(scene.nodes, runState);
+  // 图片/视频的版本圆点改由卡片右侧的 DOM 缩略图列表呈现：搬走并从 scene 删除，Bevy 不再画。
+  if (options.relocateHistoryStrips) relocateHistoryStrips(scene.nodes);
   const reduceMotion = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   for (const node of scene.nodes) {
     if (node.aggregateRun?.filmSet) {

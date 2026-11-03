@@ -434,7 +434,7 @@ describe("节点自带主图（selfReferenceAssetId）", () => {
       outputAssetId: "asset-a",
       assets: [imageAsset({ id: "asset-a" }), imageAsset({ id: "asset-self" })]
     });
-    canvas.nodeData.target = { ...(canvas.nodeData.target ?? {}), selfReferenceAssetId: "asset-self" };
+    canvas.nodeData.target = { ...(canvas.nodeData.target ?? {}), selfReferenceAssetId: "asset-self" } as typeof canvas.nodeData.target;
     const resolution = resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: IMAGE_CAPABILITY });
     expect(resolution.inputs.map((input) => input.assetId)).toEqual(["asset-self", "asset-a"]);
   });

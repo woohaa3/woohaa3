@@ -102,6 +102,8 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     getAnimationPlayback: deps.animationPlayback,
     getFocusTransition: deps.focusTransition,
     getRunState: deps.runState,
+    // 生产装配了 node-history 的「版本图层」DOM 列表，圆点不再由 Bevy 绘制。
+    relocateHistoryStrips: true,
     projectHistoryCanvas: options.projectHistoryCanvas,
     ...(deps.gestures.shot ? { shotGesture: deps.gestures.shot } : {}),
     ...(deps.gestures.focus ? { focusGesture: deps.gestures.focus } : {}),

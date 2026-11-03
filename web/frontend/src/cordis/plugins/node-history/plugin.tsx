@@ -20,6 +20,7 @@ import {
 import { NodeHistoryController, type NodeHistoryClient, CURRENT_PRESENTATION_ID } from "./controller.js";
 import { createModelThumbnailRenderer, type ModelThumbnailRenderer } from "./model-thumbnail-render.js";
 import type { CanvasHistoryClient } from "./canvas-history-controller.js";
+import { HistoryLayersOverlay } from "./history-layers-overlay.js";
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ComponentType } from "react";
 const NodeHistoryPanel = lazy(() => import("./panel.js").then(module => ({ default: module.NodeHistoryPanel })));
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -145,6 +146,21 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
       const removeHistoryView = ctx.slots.register("ai-center.generation-history", {
         id: "node-history", owner: NODE_HISTORY_PLUGIN_ID, render: HistoryContribution
       });
+      // 版本缩略图列表：卡片右侧外面一列（类似 PS 图层面板），取代 Bevy 画在卡片底部的圆点。
+      // 点击走与圆点相同的 activate 入口（只预览还是预览并应用由选择控制器决定）。
+      const removeHistoryLayers = ctx.slots.register("canvas.overlay", {
+        id: "history-layers",
+        owner: NODE_HISTORY_PLUGIN_ID,
+        priority: 23,
+        render: () => (
+          <HistoryLayersOverlay
+            canvasId={() => ctx.get("canvasScope")?.canvasId() ?? canvasId}
+            previewUrl={(input) => ctx.canvasRemote.nodeHistoryPreviewUrl(input)}
+            onSelect={(request) => (ctx.get(INLINE_HISTORY_SERVICE as never) as InlineHistoryService | undefined)?.activate(request)}
+          />
+        )
+      });
+      ctx.effect(() => () => removeHistoryLayers(), "node-history-layers-overlay");
       const disposeCanvasHistoryDialog = ctx.dialogs.registerDialog(CANVAS_HISTORY_DIALOG_ID, { definition: canvasHistoryDefinition });
       ctx.effect(() => () => { removeHistoryView(); disposeCanvasHistoryDialog(); }, "node-history-canvas-workspace");
 

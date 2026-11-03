@@ -1,0 +1,115 @@
+/*
+ * 卡片右侧外面的版本缩略图列表（类似 PS 图层面板）。
+ *
+ * 位置由组件按 `nodeScreenRect` 写内联 left/top；这里只管外观。fixed 与其它画布 overlay 同一坐标系。
+ * 容器不挡画布：只有缩略图自己接收指针，缩略图之间的空隙仍属于画布。
+ */
+.history-layers {
+	position: fixed;
+	z-index: 23;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	pointer-events: none;
+}
+
+.history-layer {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 40px;
+	height: 40px;
+	padding: 0;
+	overflow: hidden;
+	border: 1px solid var(--app-web-border, rgba(0, 0, 0, 0.12));
+	border-radius: 8px;
+	background: var(--app-web-panel);
+	color: var(--app-web-text-secondary);
+	box-shadow: 0 2px 8px var(--app-web-shadow);
+	cursor: pointer;
+	pointer-events: auto;
+	transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.history-layer:hover {
+	transform: scale(1.06);
+}
+
+/* 当前生效版本：描边加粗，用主文字色，不占状态色。 */
+.history-layer[data-current="true"] {
+	border: 2px solid var(--app-web-text-primary);
+}
+
+/* 正在预览的版本：外圈高亮，和「当前」区分。 */
+.history-layer[data-selected="true"] {
+	box-shadow: 0 0 0 2px var(--app-web-panel), 0 0 0 4px var(--app-web-text-primary);
+}
+
+.history-layer__image {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+	pointer-events: none;
+	user-select: none;
+}
+
+.history-layer__glyph {
+	font-size: 16px;
+	font-weight: 600;
+	line-height: 1;
+}
+
+.history-layer[data-state="failed"],
+.history-layer[data-state="cancelled"],
+.history-layer[data-state="interrupted"] {
+	color: var(--app-web-danger, #d4380d);
+	border-color: currentColor;
+}
+
+/* 运行中 / 排队：转圈。 */
+.history-layer[data-state="running"] .history-layer__glyph,
+.history-layer[data-state="queued"] .history-layer__glyph {
+	width: 18px;
+	height: 18px;
+	border: 2px solid currentColor;
+	border-top-color: transparent;
+	border-radius: 50%;
+	animation: history-layer-spin 900ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.history-layer[data-state="running"] .history-layer__glyph,
+	.history-layer[data-state="queued"] .history-layer__glyph {
+		animation: none;
+	}
+}
+
+/* 有未查看的新版本：右上角小红点。 */
+.history-layer[data-unseen="true"]::after {
+	content: "";
+	position: absolute;
+	top: 3px;
+	right: 3px;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--app-web-danger, #d4380d);
+	box-shadow: 0 0 0 1.5px var(--app-web-panel);
+}
+
+.history-layers__more {
+	align-self: center;
+	font-size: 12px;
+	line-height: 1;
+	color: var(--app-web-text-secondary);
+	pointer-events: none;
+}
+
+@keyframes history-layer-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
