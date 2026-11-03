@@ -93,20 +93,37 @@ type FakeRes = ServerResponse & {
   headers: Record<string, string>;
 };
 
+/**
+ * 假的 `ServerResponse`，**行为要和真实的 Node 一致**，尤其是这一条：
+ * `writeHead` 之后头已经发出，再 `setHeader` 会抛 `ERR_HTTP_HEADERS_SENT`。
+ *
+ * 之前的替身 `setHeader` 想写就写，于是「先 writeHead 再 setHeader」的 bug 一直测不出来，
+ * 真服务器上 `/ping` 直接挂起超时 —— 测试全绿、线上不能用。替身宽松，测试就等于没测。
+ */
 function makeRes(): FakeRes {
   const res = {
     statusCode: 0,
     body: "",
     headers: {} as Record<string, string>,
+    headersSent: false,
     writableEnded: false,
-    writeHead(status: number, headers?: Record<string, string>) {
+    writeHead(status: number, headers?: Record<string, string | number>) {
+      if (this.headersSent) throw new Error("ERR_HTTP_HEADERS_SENT: writeHead called twice");
       this.statusCode = status;
-      Object.assign(this.headers, headers ?? {});
+      for (const [key, value] of Object.entries(headers ?? {})) this.headers[key] = String(value);
+      this.headersSent = true;
     },
-    setHeader(key: string, value: string) {
-      this.headers[key] = value;
+    setHeader(key: string, value: string | number) {
+      if (this.headersSent) throw new Error(`ERR_HTTP_HEADERS_SENT: setHeader(${key}) after writeHead`);
+      this.headers[key] = String(value);
     },
     end(chunk?: string) {
+      if (this.writableEnded) throw new Error("ERR_STREAM_ALREADY_FINISHED");
+      // 没写过头就 end：Node 会用默认 200 隐式写头
+      if (!this.headersSent) {
+        this.statusCode ||= 200;
+        this.headersSent = true;
+      }
       if (chunk) this.body += chunk;
       this.writableEnded = true;
     }
@@ -133,15 +150,21 @@ async function readJson(res: FakeRes): Promise<Record<string, unknown>> {
 const TOKEN = "secret-token";
 
 function mediaReturning(metadata: Partial<MediaMetadata> = {}) {
+  const full = {
+    storageKey: "ab/cd",
+    contentType: "image/png",
+    size: 42,
+    checksum: "c".repeat(64),
+    ...metadata
+  } as MediaMetadata;
   return {
     async importFromUrl() {
-      return {
-        storageKey: "ab/cd",
-        contentType: "image/png",
-        size: 42,
-        checksum: "c".repeat(64),
-        ...metadata
-      } as MediaMetadata;
+      return full;
+    },
+    async verify(storageKey: string, expected: Partial<Omit<MediaMetadata, "storageKey">> = {}) {
+      if (storageKey !== full.storageKey) return { exists: false, matches: false };
+      const matches = Object.entries(expected).every(([key, value]) => (full as Record<string, unknown>)[key] === value);
+      return { exists: true, matches, metadata: full };
     }
   };
 }
@@ -212,6 +235,9 @@ describe("素材库 HTTP", () => {
       media: {
         async importFromUrl() {
           throw new Error("connect ETIMEDOUT");
+        },
+        async verify() {
+          return { exists: false, matches: false };
         }
       }
     });
@@ -291,5 +317,172 @@ describe("素材库 HTTP", () => {
     const web = makeRes();
     await api(makeReq("GET", `${LIBRARY_BASE_PATH}/ping`, undefined, { origin: "https://evil.example" }), web);
     expect(web.headers["Access-Control-Allow-Origin"]).toBeUndefined();
+  });
+});
+
+describe("素材库 register 与同源鉴权", () => {
+  const SAME_ORIGIN = { origin: "http://127.0.0.1:5184", host: "127.0.0.1:5184" };
+
+  const register = (api: ReturnType<typeof createLibraryApi>, body: unknown, headers: Record<string, string>) => {
+    const res = makeRes();
+    return api(makeReq("POST", `${LIBRARY_BASE_PATH}/register`, JSON.stringify(body), headers), res).then(() => res);
+  };
+
+  it("应用自己的页面（同源且 Host 是回环）不需要令牌就能登记已上传的图片", async () => {
+    const { api, store } = await harness({ token: "" });
+    const res = await register(api, { storageKey: "ab/cd", title: "椅子" }, SAME_ORIGIN);
+    expect(res.statusCode).toBe(201);
+    const [saved] = await store.list();
+    expect(saved).toMatchObject({ id: "c".repeat(64), title: "椅子", url: "/api/media/ab/cd" });
+  });
+
+  it("重复登记同一个对象返回 200 且不新增", async () => {
+    const { api, store } = await harness({ token: "" });
+    await register(api, { storageKey: "ab/cd" }, SAME_ORIGIN);
+    const again = await register(api, { storageKey: "ab/cd" }, SAME_ORIGIN);
+    expect(again.statusCode).toBe(200);
+    expect(await store.list()).toHaveLength(1);
+  });
+
+  it("DNS 重绑定：攻击页的 Origin 与 Host 是同一个外部域名，即使「同源」也必须拒绝", async () => {
+    const { api } = await harness({ token: "" });
+    const res = await register(api, { storageKey: "ab/cd" }, { origin: "http://evil.example:5184", host: "evil.example:5184" });
+    // 没配置令牌又不是回环同源 → 503，而不是放行
+    expect(res.statusCode).toBe(503);
+  });
+
+  it("跨源请求（Origin 与 Host 不一致）不能靠同源通过，只能靠令牌", async () => {
+    const { api } = await harness();
+    const foreign = { origin: "https://evil.example", host: "127.0.0.1:5184" };
+    expect((await register(api, { storageKey: "ab/cd" }, foreign)).statusCode).toBe(401);
+    expect((await register(api, { storageKey: "ab/cd" }, { ...foreign, "x-save-token": TOKEN })).statusCode).toBe(201);
+  });
+
+  it("扩展来源（chrome-extension://）不同源，仍然要令牌", async () => {
+    const { api } = await harness();
+    const ext = { origin: "chrome-extension://abc", host: "127.0.0.1:5184" };
+    expect((await register(api, { storageKey: "ab/cd" }, ext)).statusCode).toBe(401);
+  });
+
+  it("没有 Origin 也没有令牌（curl / 本机其它进程）一律拒绝", async () => {
+    const { api } = await harness({ token: "" });
+    expect((await register(api, { storageKey: "ab/cd" }, {})).statusCode).toBe(503);
+  });
+
+  it("经 x-forwarded-host 转发时按转发的 Host 判同源（dev 代理 / ingress）", async () => {
+    const { api } = await harness({ token: "" });
+    const res = await register(
+      api,
+      { storageKey: "ab/cd" },
+      { origin: "http://127.0.0.1:5184", host: "127.0.0.1:5191", "x-forwarded-host": "127.0.0.1:5184" }
+    );
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("媒体对象不存在 → 404；声明与实际不一致 → 409；不是图片 → 415", async () => {
+    const { api } = await harness({ token: "" });
+    expect((await register(api, { storageKey: "no/such" }, SAME_ORIGIN)).statusCode).toBe(404);
+    expect((await register(api, { storageKey: "ab/cd", checksum: "f".repeat(64) }, SAME_ORIGIN)).statusCode).toBe(409);
+
+    const video = await harness({ token: "", media: mediaReturning({ contentType: "video/mp4" }) });
+    expect((await register(video.api, { storageKey: "ab/cd" }, SAME_ORIGIN)).statusCode).toBe(415);
+  });
+
+  it("不信任客户端自报的 contentType：以核验返回的 metadata 为准", async () => {
+    const { api, store } = await harness({ token: "" });
+    // 客户端谎称是 png 之外的类型会因不一致被 409 拦下；一致时入库的字段来自核验结果
+    const res = await register(api, { storageKey: "ab/cd", contentType: "image/png", size: 42 }, SAME_ORIGIN);
+    expect(res.statusCode).toBe(201);
+    expect((await store.list())[0]).toMatchObject({ contentType: "image/png", bytes: 42 });
+  });
+
+  it("缺 storageKey / 非法 sourceUrl：前者 400，后者被丢弃而不是存下去", async () => {
+    const { api, store } = await harness({ token: "" });
+    expect((await register(api, {}, SAME_ORIGIN)).statusCode).toBe(400);
+    await register(api, { storageKey: "ab/cd", sourceUrl: "file:///C:/Windows/win.ini" }, SAME_ORIGIN);
+    expect((await store.list())[0]?.sourceUrl).toBe("");
+  });
+
+  it("旧的 import 仍然要令牌：同源页面能走 register，但 import 的鉴权规则同样适用", async () => {
+    // import 与 register 共用 authorize：令牌或同源回环二选一
+    const { api } = await harness({ token: "" });
+    const res = makeRes();
+    await api(makeReq("POST", `${LIBRARY_BASE_PATH}/import`, JSON.stringify({ url: "https://x/a.png" }), {}), res);
+    expect(res.statusCode).toBe(503);
+  });
+});
+
+describe("真实 http.Server（替身测不出的那一类问题）", () => {
+  async function withServer<T>(token: string, run: (base: string) => Promise<T>): Promise<T> {
+    const { createServer } = await import("node:http");
+    const store = createLibraryStore(await tempFile());
+    const api = createLibraryApi({ store, media: mediaReturning(), token });
+    const server = createServer((req, res) => {
+      void api(req, res).then((handled) => {
+        if (!handled) {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      return await run(`http://127.0.0.1:${(server.address() as { port: number }).port}`);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  it("/ping 带 Content-Type 与 JSON body，而不是空响应或挂起", async () => {
+    await withServer(TOKEN, async (base) => {
+      const response = await fetch(`${base}${LIBRARY_BASE_PATH}/ping`, { signal: AbortSignal.timeout(3000) });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("application/json");
+      expect(await response.json()).toMatchObject({ app: "sixi" });
+    });
+  });
+
+  it("列表、错误响应也都是带头的 JSON", async () => {
+    await withServer(TOKEN, async (base) => {
+      const list = await fetch(`${base}${LIBRARY_BASE_PATH}`, { signal: AbortSignal.timeout(3000) });
+      expect(list.headers.get("content-type")).toContain("application/json");
+      expect(await list.json()).toEqual({ items: [], total: 0 });
+
+      const denied = await fetch(`${base}${LIBRARY_BASE_PATH}/import`, {
+        method: "POST",
+        body: "{}",
+        signal: AbortSignal.timeout(3000)
+      });
+      expect(denied.status).toBe(401);
+      expect(denied.headers.get("content-type")).toContain("application/json");
+      expect(await denied.json()).toEqual({ error: "令牌不对" });
+    });
+  });
+
+  it("CORS 预检：扩展来源拿到允许头，204 且没有 body", async () => {
+    await withServer(TOKEN, async (base) => {
+      const response = await fetch(`${base}${LIBRARY_BASE_PATH}/import`, {
+        method: "OPTIONS",
+        headers: { Origin: "chrome-extension://abc" },
+        signal: AbortSignal.timeout(3000)
+      });
+      expect(response.status).toBe(204);
+      expect(response.headers.get("access-control-allow-origin")).toBe("chrome-extension://abc");
+      expect(response.headers.get("access-control-allow-headers")).toContain("X-Save-Token");
+    });
+  });
+
+  it("同源回环登记：真实请求头（Origin 与 Host）走通 register", async () => {
+    await withServer("", async (base) => {
+      const origin = new URL(base).origin;
+      const response = await fetch(`${base}${LIBRARY_BASE_PATH}/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: origin },
+        body: JSON.stringify({ storageKey: "ab/cd", title: "椅子" }),
+        signal: AbortSignal.timeout(3000)
+      });
+      expect(response.status).toBe(201);
+      expect(((await response.json()) as { item: { title: string } }).item.title).toBe("椅子");
+    });
   });
 });
