@@ -5,6 +5,7 @@
  * 只做展示与回调转发；状态与提交语义仍由 `ExecutionPanel` 持有。拆分不改变 DOM 结构。
  */
 import {
+	ChevronDownIcon,
 	CloseIcon,
 	CollapseIcon,
 	ExpandIcon,
