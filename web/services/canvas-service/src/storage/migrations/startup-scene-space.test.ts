@@ -219,11 +219,7 @@ describe("片场坐标契约迁移（启动前）", () => {
     try {
       const stored = JSON.parse(String(db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
       delete stored.nodeData.film.filmSetContent;
-      const validProjection = JSON.stringify(stored);
-      stored.nodeData.film.title = "unexpected cache change";
       db.prepare("UPDATE canvas_yjs_documents SET projection_json = ?").run(JSON.stringify(stored));
-      expect(() => migrateSqliteCanvasBeforeStartup(filename)).toThrow(/projection-mismatch/);
-      db.prepare("UPDATE canvas_yjs_documents SET projection_json = ?").run(validProjection);
       expect(migrateSqliteCanvasBeforeStartup(filename).changed).toBe(true);
       const migrated = JSON.parse(String(db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
       expect(readFilmSetAnimationProjection(migrated, "film")!.filmSetContent.items).toEqual((data.filmSetContent as { items: unknown[] }).items);
@@ -231,15 +227,32 @@ describe("片场坐标契约迁移（启动前）", () => {
     } finally { db.close(); }
   });
 
-  it("派生视图也不匹配时仍然拒绝（不放过陈旧/半写 projection）", () => {
+  it("缓存内容被改过时按 raw 重写，不阻断启动", () => {
+    const now = "2026-10-23T00:00:00.000Z";
+    const { db, filename } = writeProfile(legacyNodeData(), now, "derived");
+    try {
+      const row = db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!;
+      const stored = JSON.parse(String(row.projection_json));
+      const authoritative = structuredClone(stored.nodeData.film);
+      // 缓存与 raw 描述同一 revision/实体集合：内容差异只说明缓存不可信，重写即可。
+      stored.nodeData.film = { ...stored.nodeData.film, title: "被改过的标题" };
+      db.prepare("UPDATE canvas_yjs_documents SET projection_json = ?").run(JSON.stringify(stored));
+      expect(migrateSqliteCanvasBeforeStartup(filename).changed).toBe(true);
+      const migrated = JSON.parse(String(db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
+      expect(migrated.nodeData.film.title).toBe(authoritative.title);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("身份不一致时仍然拒绝（缓存不能凭空换一个 revision）", () => {
     const now = "2026-10-23T00:00:00.000Z";
     const { db, filename } = writeProfile(legacyNodeData(), now, "derived");
     try {
       const stored = JSON.parse(String(db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
-      // 篡改一个 raw 不存在的 nodeData 值：既不是 raw 原样，也不是当前 codec 的派生结果。
-      stored.nodeData.film = { ...stored.nodeData.film, title: "被改过的标题" };
+      stored.revision += 1;
       db.prepare("UPDATE canvas_yjs_documents SET projection_json = ?").run(JSON.stringify(stored));
-      expect(() => migrateSqliteCanvasBeforeStartup(filename)).toThrow(/projection-mismatch/);
+      expect(() => migrateSqliteCanvasBeforeStartup(filename)).toThrow(/projection-mismatch.*\(revision\)/);
       // 拒绝时不得改动数据。
       expect(db.prepare("SELECT room_epoch FROM canvas_yjs_documents").get()!.room_epoch).toBe("epoch");
     } finally {

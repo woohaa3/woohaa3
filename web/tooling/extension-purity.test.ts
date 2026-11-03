@@ -38,9 +38,8 @@ const FRAMEWORK_ROOTS = [
   "web/contracts/src",
   "web/frontend/src",
   "web/services",
-  // 扩展根里的**共享框架包**（不是插件，扫描按包名规则跳过）：Provider 插件公共能力。
-  // 它属于框架侧，同样不得 import 具体扩展。
-  "web/extensions/provider-sdk/src",
+  // **共享框架包**（不是插件）：Provider 插件公共能力。它属于框架侧，同样不得 import 具体扩展。
+  "web/framework/provider-sdk/src",
   "scripts",
   "web/tooling"
 ];

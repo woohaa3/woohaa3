@@ -10,13 +10,14 @@ export class OfflineCanvasSourceError extends Error {
  *
  * `canvas` 是离线 reader 从 raw 重建的规范聚合；无法派生时返回 null（调用方按不一致处理）。
  */
-export type OfflineProjectionExpectation = (canvas: ServerCanvas, canvasId: string | undefined) => unknown;
+export type OfflineProjectionDerivation = (canvas: ServerCanvas, canvasId: string | undefined) => unknown;
 export function readOfflineYjsCanvasSource(input: {
   document: unknown;
   updates: readonly unknown[];
-  expectProjection?: OfflineProjectionExpectation;
+  deriveProjection?: OfflineProjectionDerivation;
+  repairProjection?: boolean;
 }): unknown;
 export function loadOfflineYjsCanvasSources(
   db: unknown,
-  options?: { transaction?: boolean; expectProjection?: OfflineProjectionExpectation }
+  options?: { transaction?: boolean; deriveProjection?: OfflineProjectionDerivation; repairProjection?: boolean }
 ): unknown;

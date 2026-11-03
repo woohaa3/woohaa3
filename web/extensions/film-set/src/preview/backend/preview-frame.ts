@@ -19,7 +19,7 @@ export async function prepareFilmSetPreviewFrame(input: {
   if (input.timeSeconds > (view?.timeline.duration ?? 0) + 1e-9) return failure("malformed-request", "timeSeconds 超出时间线时长");
   for (const item of animation.filmSetContent.items) {
     if (item.kind !== "model" || !item.model.modelScript.trim()) continue;
-    const validity = validateSelfContainedModel(item.model.modelScript, item.model.modelScriptVersion);
+    const validity = validateSelfContainedModel(item.model.modelScript, item.model.modelScriptVersion, item.model.rig);
     if (!validity.ok) return validity;
   }
   if (view) {

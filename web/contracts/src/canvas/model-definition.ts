@@ -12,6 +12,7 @@
  */
 import { hashModelScript } from "./model-executor.js";
 import { fnv1a64Hex } from "./content-hash.js";
+import { humanoidRigCanonical, storedHumanoidRig, type StoredHumanoidRig } from "./humanoid-rig.js";
 import {
   MODEL_SCRIPT_LANGUAGE,
   isWritableModelScriptLanguage,
@@ -53,6 +54,8 @@ export type ModelDefinition = {
   modelScriptVersion: SupportedModelScriptVersion;
   contentVersion: ModelContentVersion;
   placement: ModelPlacement;
+  /** 缺失表示旧作品。存在时是系统拥有的 humanoid 骨架，不由脚本改写。 */
+  rig?: StoredHumanoidRig;
 };
 
 /**
@@ -241,6 +244,8 @@ export function decodeModelDefinition(input: unknown): ModelDefinitionDecodeResu
   if (!contentVersion.ok) return contentVersion;
   const placement = decodeLocalModelPlacement(input.modelPlacement);
   if (!placement.ok) return placement;
+  const rig = readOptionalModelRig(input.modelRig);
+  if (!rig.ok) return rig;
   return {
     ok: true,
     value: {
@@ -248,9 +253,20 @@ export function decodeModelDefinition(input: unknown): ModelDefinitionDecodeResu
       modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
       modelScriptVersion: modelScriptVersion as SupportedModelScriptVersion,
       contentVersion: contentVersion.value,
-      placement: placement.value
+      placement: placement.value,
+      ...(rig.value ? { rig: rig.value } : {})
     }
   };
+}
+
+function readOptionalModelRig(input: unknown): { ok: true; value: StoredHumanoidRig | null } | { ok: false; reason: string } {
+  if (input === undefined || input === null) return { ok: true, value: null };
+  const stored = storedHumanoidRig(input);
+  if (!stored.ok) {
+    const first = stored.diagnostics[0];
+    return { ok: false, reason: first ? `modelRig ${first.code}: ${first.path}` : "modelRig 非法" };
+  }
+  return { ok: true, value: stored.value };
 }
 
 /** 模型源码内容标识：与既有模型历史共用同一算法，保证跨节点可比较。 */
@@ -269,15 +285,17 @@ export function modelContentHash(input: {
   modelScriptLanguage: string;
   modelScriptVersion: string;
   placement: ModelPlacement;
+  rig?: StoredHumanoidRig | null;
 }): string {
-  const canonical = [
+  const parts = [
     "woohaa-model-content-v1",
     input.modelScriptLanguage,
     input.modelScriptVersion,
     input.modelScript,
     placementKey(input.placement)
-  ].join("\u0000");
-  return fnv1a64Hex(canonical);
+  ];
+  if (input.rig) parts.push(humanoidRigCanonical(input.rig.parameters));
+  return fnv1a64Hex(parts.join("\u0000"));
 }
 
 /**
@@ -292,6 +310,7 @@ export function deriveModelContentVersion(input: {
   modelScriptVersion: string;
   placement: ModelPlacement;
   revision: number;
+  rig?: StoredHumanoidRig | null;
 }): ModelContentVersion {
   return {
     revision: input.revision,
@@ -324,6 +343,7 @@ export function normalizeModelDefinition(input: {
   modelScriptLanguage: unknown;
   modelScriptVersion: unknown;
   placement?: unknown;
+  rig?: unknown;
   /** 本节点当前模型内容版本（用于判断是否推进 revision）。 */
   previous?: ModelContentVersion | null;
 }): ModelDefinitionDecodeResult {
@@ -336,11 +356,14 @@ export function normalizeModelDefinition(input: {
   }
   const placement = decodeLocalModelPlacement(input.placement);
   if (!placement.ok) return placement;
+  const rig = readOptionalModelRig(input.rig);
+  if (!rig.ok) return rig;
   const contentHash = modelContentHash({
     modelScript: input.modelScript,
     modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
     modelScriptVersion: input.modelScriptVersion as string,
-    placement: placement.value
+    placement: placement.value,
+    rig: rig.value
   });
   const previous = input.previous ?? null;
   const revision = previous && previous.contentHash === contentHash ? previous.revision : (previous?.revision ?? 0) + 1;
@@ -353,7 +376,8 @@ export function normalizeModelDefinition(input: {
       sourceHash: modelSourceHash(input.modelScript),
       contentHash
     },
-    placement: placement.value
+    placement: placement.value,
+    ...(rig.value ? { rig: rig.value } : {})
   };
   return { ok: true, value };
 }

@@ -23,6 +23,17 @@ import {
   type RawSceneOp
 } from "./model-executor.js";
 import { validateModelSceneIrV2, type ModelSceneIrV2, type SceneV2Op } from "./scene-ir-v2.js";
+import {
+  compileHumanoidRig,
+  HUMANOID_REFERENCE_PARAMETERS,
+  humanoidMotionTargetIds,
+  humanoidSceneOps,
+  scriptOverridesReservedIds,
+  scriptUsesHumanoidRig,
+  storedHumanoidRig,
+  validateHumanoidScene,
+  type HumanoidParameters
+} from "./humanoid-rig.js";
 
 /** V2 recorder 记录的一个原始 op（未校验）。 */
 export type RawSceneV2Op = RawSceneOp;
@@ -148,7 +159,8 @@ export function executeModelScriptV2(source: string): ModelScriptV2Result {
  */
 export function executeModelScriptVersioned(
   source: string,
-  version: unknown
+  version: unknown,
+  options?: { rig?: HumanoidParameters }
 ): VersionedModelScriptResult {
   if (!isSupportedModelScriptVersion(version)) {
     return {
@@ -158,7 +170,60 @@ export function executeModelScriptVersioned(
       message: `不支持的 modelScriptVersion ${String(version)}`
     };
   }
-  return executeModelScriptV2(source);
+  const rig = options?.rig ?? (scriptUsesHumanoidRig(source) ? HUMANOID_REFERENCE_PARAMETERS : undefined);
+  return rig ? executeHumanoidModelScript(source, rig) : executeModelScriptV2(source);
+}
+
+/** 节点上保存的 modelRig。缺失时走普通脚本；非法骨架直接失败，不退回无骨架执行。 */
+export function executeModelWithStoredRig(source: string, version: unknown, modelRig: unknown): VersionedModelScriptResult {
+  if (modelRig == null) return executeModelScriptVersioned(source, version);
+  const stored = storedHumanoidRig(modelRig);
+  if (!stored.ok) {
+    const first = stored.diagnostics[0];
+    return {
+      ok: false,
+      stage: "validate",
+      code: first?.code ?? "invalid-rig",
+      message: first ? `${first.path}: 期望 ${first.expected}，实际 ${first.actual}` : "骨架非法"
+    };
+  }
+  return executeModelScriptVersioned(source, version, { rig: stored.value.parameters });
+}
+
+function executeHumanoidModelScript(source: string, parameters: HumanoidParameters): ModelScriptV2Result {
+  const compiled = compileHumanoidRig(parameters);
+  if (!compiled.ok) {
+    const first = compiled.diagnostics[0];
+    return {
+      ok: false,
+      stage: "validate",
+      code: first?.code ?? "invalid-rig",
+      message: first ? `${first.path}: 期望 ${first.expected}，实际 ${first.actual}` : "骨架参数非法"
+    };
+  }
+  const targets = humanoidMotionTargetIds(compiled);
+  const rig = {
+    joint(id: string) {
+      if (!targets.has(id) || id === "Root") throw new Error(`rig.joint 不可用: ${id}`);
+      return id;
+    }
+  };
+  return runVersionedModelScript(source, () => new SceneBuilderV2(), (ops) => {
+    const reserved = scriptOverridesReservedIds(ops, compiled);
+    if (!reserved.ok) {
+      const first = reserved.diagnostics[0];
+      return { ok: false, code: first?.code ?? "reserved-override", message: `脚本不能占用骨架 id ${first?.actual ?? ""}` };
+    }
+    const merged = [...humanoidSceneOps(compiled), ...ops];
+    const binding = validateHumanoidScene(compiled, merged);
+    if (!binding.ok) {
+      const first = binding.diagnostics[0];
+      return { ok: false, code: first?.code ?? "unbound-shape", message: first ? `${first.path}: 期望 ${first.expected}，实际 ${first.actual}` : "形状未绑定关节" };
+    }
+    const validation = validateModelSceneIrV2({ version: MODEL_SCRIPT_SCENE_IR_V2_VERSION, ops: merged });
+    if (!validation.ok) return { ok: false, code: validation.code, message: validation.message };
+    return { ok: true, scene: validation.scene, json: JSON.stringify(validation.scene) };
+  }, { rig, declaredIds: targets });
 }
 
 /** 脚本版本 → 该版本 Scene IR op 类型（判别用）。 */

@@ -1,7 +1,7 @@
 /** Page-owned model preparation. Providers stage results; only current identities publish. */
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import {
-  compositeAssetSceneOps, executeModelScriptVersioned, isSupportedModelScriptVersion,
+  compositeAssetSceneOps, executeModelWithStoredRig, isSupportedModelScriptVersion,
   sceneIrVersionFor,
   type CanvasNodeData, type SceneV2Op, type NodePreparationResult, type ServerCanvas,
 } from "@woohaa3/contracts";
@@ -155,7 +155,7 @@ export async function applyWithBevy(
   scenes: ModelSceneStore = modelSceneStore,
 ): Promise<string> {
   // 按节点声明的版本 dispatch；未知版本稳定失败，不回退 V1。
-  const execution = executeModelScriptVersioned(source, version);
+  const execution = executeModelWithStoredRig(source, version, data?.modelRig);
   if (!execution.ok) {
     scenes.delete(nodeId);
     return `fail:${execution.stage}:${execution.code}`;

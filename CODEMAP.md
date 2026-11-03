@@ -40,7 +40,8 @@ Film-set static image references: `web/contracts/src/canvas/film-set-shot-image-
 | `web/frontend` | React/Cordis interface, browser adapters and canvas runtime integration |
 | `web/backend` | Local host composition, routes and domain adapters |
 | `web/services` | Canvas, task, media, application, MCP and local telemetry services |
-| `web/extensions` / `extensions` | Public extension implementations and shared extension support |
+| `web/extensions` / `extensions` | Public extension implementations; every extension under `web/extensions` ships with the desktop host (no separate inventory) |
+| `web/framework` / `web/test-fixtures` | Shared extension framework packages and test-only fixtures; outside the extension scan roots |
 | `web/vendor` | Maintained third-party sources and their notices |
 | `web/tooling` / `web/e2e` / `web/ui/showcase` | Cross-package tests, browser tests and component showcase |
 | `bevy` | WASM/native renderer and recording tools |

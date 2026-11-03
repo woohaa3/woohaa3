@@ -228,7 +228,7 @@ export function freezeFilmSetRecording(input: {
   // 编译前校验：模型脚本自包含、动作轨道合法、构图可求值。
   for (const item of animation.filmSetContent.items) {
     if (item.kind !== "model" || !item.model.modelScript.trim()) continue;
-    const validity = validateSelfContainedModel(item.model.modelScript, item.model.modelScriptVersion);
+    const validity = validateSelfContainedModel(item.model.modelScript, item.model.modelScriptVersion, item.model.rig);
     if (!validity.ok) {
       return fail("recording-source-invalid", `片场对象 ${item.id} 的模型脚本不合法`);
     }

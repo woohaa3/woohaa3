@@ -58,13 +58,13 @@ describe("统一后端运行单元布局", () => {
   });
 
   it("插件包按 frontend/backend/shared 独立 exports", () => {
-    const pkg = JSON.parse(readFileSync(path.join(WEB_ROOT, "extensions", "sample-site-extension", "package.json"), "utf8"));
+    const pkg = JSON.parse(readFileSync(path.join(WEB_ROOT, "test-fixtures", "sample-site-extension", "package.json"), "utf8"));
     expect(pkg.exports["./frontend"]).toBeTruthy();
     expect(pkg.exports["./backend"]).toBeTruthy();
     expect(pkg.exports["./shared"]).toBeTruthy();
     expect(pkg.exports["."]).toBeUndefined();
-    expect(existsSync(path.join(WEB_ROOT, "extensions", "sample-site-extension", "src", "frontend.ts"))).toBe(true);
-    expect(existsSync(path.join(WEB_ROOT, "extensions", "sample-site-extension", "src", "backend.ts"))).toBe(true);
+    expect(existsSync(path.join(WEB_ROOT, "test-fixtures", "sample-site-extension", "src", "frontend.ts"))).toBe(true);
+    expect(existsSync(path.join(WEB_ROOT, "test-fixtures", "sample-site-extension", "src", "backend.ts"))).toBe(true);
   });
 
   it("pnpm 工作区登记 plugins/* 与 backend", () => {

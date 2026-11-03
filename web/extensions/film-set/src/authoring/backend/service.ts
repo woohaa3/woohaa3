@@ -2,7 +2,7 @@ import { readFilmSetGroupMarker, createFilmSetGroupMarker, migrateLegacyFilmSetT
 import { canonicalFilmSetFields, filmSetAnimationsOf, filmSetClipHash, filmSetClipPrecondition } from "@woohaa3/contracts";
 import type { CanvasAuthority } from "@woohaa3/contracts";
 import type { CanvasCommand, CanvasNodeData, ServerCanvas } from "@woohaa3/contracts";
-import { animationSnapshotHash, createFilmSetSnapshot, createModelSnapshot, decodeFilmSetNodeData, scriptModel3DNodeData, defaultInitialShotCamera, importModelSnapshot, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, modelSourceHash, normalizeModelDefinition, isJsonObject, validateSelfContainedModel, type FilmSetNodeData, type AnimationTimeline, type InitialShotCamera, type ModelImportOrigin, type ModelPlacement, type SupportedModelScriptVersion } from "@woohaa3/contracts";
+import { animationSnapshotHash, createFilmSetSnapshot, createModelSnapshot, decodeFilmSetNodeData, scriptModel3DNodeData, defaultInitialShotCamera, humanoidRigForAuthoredScript, importModelSnapshot, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, modelSourceHash, normalizeModelDefinition, isJsonObject, validateSelfContainedModel, type FilmSetNodeData, type AnimationTimeline, type InitialShotCamera, type ModelImportOrigin, type ModelPlacement, type SupportedModelScriptVersion } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, type CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
 import type { FilmSetNodeOutcome, ReadFilmSetOutcome } from "@woohaa3/contracts";
 
@@ -156,12 +156,15 @@ export class FilmSetNodeService {
         return { ok: false, code: "stale-source", message: "模型源码已被并发修改" };
       }
       // 权威可执行性/静态性校验（任务 1.3）：非法模型或含旧动画声明的脚本整批拒绝。
-      const validity = validateSelfContainedModel(input.modelScript, input.modelScriptVersion);
+      const decided = humanoidRigForAuthoredScript(input.modelScript, undefined, item.model.rig);
+      if (!decided.ok) return { ok: false, code: decided.code, message: decided.message };
+      const validity = validateSelfContainedModel(input.modelScript, input.modelScriptVersion, decided.rig);
       if (!validity.ok) return validity;
       const next = importModelSnapshot(current.value, input.itemId, {
         modelScript: input.modelScript,
         modelScriptVersion: input.modelScriptVersion,
-        ...(input.placement ? { placement: input.placement } : {})
+        ...(input.placement ? { placement: input.placement } : {}),
+        ...(decided.rig ? { rig: decided.rig } : {})
       });
       return this.patchFilmSet(canvas, input, next, input.title);
     });
@@ -237,9 +240,14 @@ export class FilmSetNodeService {
         if (!isJsonObject(item) || item.kind !== "model") { items.push(item); continue; }
         if (!isJsonObject(item.model)) return { ok: false, code: "invalid-model", message: "模型对象必须提供 model 定义" };
         const previous = current.value.filmSetContent.items.find(candidate => candidate.id === item.id);
+        const script = typeof item.model.modelScript === "string" ? item.model.modelScript : "";
+        const modelFields = item.model as { rig?: unknown; modelRig?: unknown };
+        const decided = humanoidRigForAuthoredScript(script, modelFields.rig ?? modelFields.modelRig, previous?.kind === "model" ? previous.model.rig : undefined);
+        if (!decided.ok) return { ok: false, code: decided.code, message: decided.message };
         const model = normalizeModelDefinition({
           modelScript: item.model.modelScript, modelScriptLanguage: item.model.modelScriptLanguage,
           modelScriptVersion: item.model.modelScriptVersion, placement: item.model.placement,
+          rig: decided.rig,
           previous: previous?.kind === "model" ? previous.model.contentVersion : null
         });
         if (!model.ok) return { ok: false, code: "invalid-model", message: model.reason };
@@ -255,7 +263,7 @@ export class FilmSetNodeService {
       // 完整提交校验全部 model item 可执行且静态（任务 1.3）。
       for (const item of decoded.value.filmSetContent.items) {
         if (item.kind !== "model") continue;
-        const validity = validateSelfContainedModel(item.model.modelScript, item.model.modelScriptVersion);
+        const validity = validateSelfContainedModel(item.model.modelScript, item.model.modelScriptVersion, item.model.rig);
         if (!validity.ok) return validity;
       }
       return this.patchFilmSet(canvas, input, decoded.value, input.title);

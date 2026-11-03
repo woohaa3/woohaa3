@@ -62,14 +62,16 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
       "只有明确要求在另一节点新建片场时才使用 create_film_set_node。",
       "图片/视频（含做成图片的文字）用 add_film_set_media 放入片场，画布拖放仍只接受模型；",
       "成片导出用 export_film_set_clip（standard / hd / hd60）并以 get_film_set_export 轮询；原生不可用时它会返回 recording-unavailable，请如实告知用户改用界面上的「生成视频」。",
-      "保留未提及的对象、片段、运动、镜头与时间线；修改后核对运动适配状态。"
+      "保留未提及的对象、片段、运动、镜头与时间线；修改后核对运动适配状态。",
+      "人形或机甲用 rig.joint 把每个可见形状挂到系统关节上，不要自造 thigh、shin，也不要挂到 Root。关节名单在 get_model_api。动作 targetId 必须是这些关节 id。"
     );
   } else {
     lines.push(
       "流程：先调用 get_model_api 了解当前脚本 API，再调用 get_model_node 读取权威 nodeType、当前 modelScript、modelContentVersion 与 cameras。",
       "然后只做用户要求的增量修改，保留未提及的部件、材质、尺寸与层级；除非用户明确要求重建，不要整体重写模型。",
       "用 submit_model_script 提交完整脚本，并带上稳定 requestId 与读取到的 expectedModelContentHash。",
-      "点数/面数只引用 get_model_statistics、get_model_node(includeStatistics=true) 或 submit_model_script 的返回；MUST NOT 按成本表自行推算（segment 缺省是 capsule，手算会严重低估）。"
+      "点数/面数只引用 get_model_statistics、get_model_node(includeStatistics=true) 或 submit_model_script 的返回；MUST NOT 按成本表自行推算（segment 缺省是 capsule，手算会严重低估）。",
+      "人形或机甲用 rig.joint 把每个可见形状挂到系统关节上，不要自造 thigh、shin，也不要挂到 Root。关节名单在 get_model_api。动作 targetId 必须是这些关节 id。"
     );
   }
 

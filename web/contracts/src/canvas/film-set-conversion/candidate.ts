@@ -95,7 +95,7 @@ export function validateFilmSetConversionCandidate(input: {
   // 全部 model item 必须可执行且为静态定义（复用权威写入同一校验）。
   for (const item of content.items) {
     if (item.kind !== "model") continue;
-    const validity = validateSelfContainedModel(item.model.modelScript, item.model.modelScriptVersion);
+    const validity = validateSelfContainedModel(item.model.modelScript, item.model.modelScriptVersion, item.model.rig);
     if (!validity.ok) return { ok: false, code: "candidate-invalid", message: validity.message };
   }
 

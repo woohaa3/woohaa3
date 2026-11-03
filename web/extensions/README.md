@@ -4,9 +4,10 @@
 
 每个应用插件的前端、后端和共享定义放在 `web/extensions/<extensionId>/` 同一个目录下。
 
-> 扩展根里还可以放**非插件**的共享框架包：包名不以 `@woohaa3/extension-` 开头（扫描按此规则跳过，
-> 不会被当作扩展登记/装载），例如 Provider 插件公共能力 [provider-sdk](provider-sdk)、
-> 存储实现共享工厂 [runtime-foundation](runtime-foundation)。它们属于框架侧，仍受规模/边界/纯粹性门禁约束。
+> 扩展根里**只放插件**：`web/extensions/` 下的每个扩展目录都会进入发布装配与桌面发行包。
+> 非插件的共享框架包放在 `web/framework/`（[provider-sdk](../framework/provider-sdk)、
+> [runtime-foundation](../framework/runtime-foundation)），仅供测试的样例包放在 `web/test-fixtures/`；
+> 它们不在扩展扫描根内，不会被当作扩展登记/装载，但仍受规模/边界/纯粹性门禁约束。
 
 ```text
 web/extensions/<extensionId>/
@@ -60,6 +61,14 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 
 Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节（路径由插件自己用
 `ctx.gateway.route` 注册并鉴权）；插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
+
+**Provider 自身示例**：[tokenhub-provider](tokenhub-provider) 是模板（`discovery` / `routes` / `provider` /
+`backend` 四段）。[cephalon-provider](cephalon-provider)（端脑云）是**发现驱动 + 固定平台地址**的变体：只声明
+`providers.cephalon.apiKey`，origin `https://cephalon.cloud` 写在 `src/shared.ts` 里且**不提供 `baseUrl` 配置项**
+（避免凭据被改写到任意主机）；模型目录完全来自 `GET /user-center/v1/models`，代码里没有内置 id 清单，模态只看平台的
+`model_type`（`language` / `picture` / `video`，其余跳过），发现失败时保留上一次成功目录。视频是平台私有的异步任务协议
+（请求头 `Model-Name` + PascalCase 的 `Prompt` / `FileInfos` / `OutputConfig`），所以它在 `routes.ts` 里自己翻译，
+不走通用 OpenAI 形状；平台没有取消端点，模型定义声明 `cancel: "unsupported"`。
 
 ## 前端入口与 metadata
 
@@ -289,8 +298,8 @@ extensions:
 `defineExtensionPlugin` 在自身 scope 注入 `slots`/`applicationRemote`、`provide` 业务 service、
 贡献 `provider-credentials.top` 授权行、`settings.plugin-config` 设置面板与 `authoring.generate` 来源（面板由宿主内置渲染），并在 dispose 时按 owner 释放。
 
-`sample-site-extension` 是仅供测试使用的样例：其前端只验证进入/释放生命周期；生产发布发现
-不登记测试 fixture（其入口不是约定 browser 入口，且无 `browser-dist` artifact）。
+`web/test-fixtures/sample-site-extension` 是仅供测试使用的样例：其前端只验证进入/释放生命周期；
+它在扩展扫描根之外，生产发布装配与桌面发行包都不会带上它。
 
 ### 公共 UI
 

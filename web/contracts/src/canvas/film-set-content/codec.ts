@@ -221,7 +221,8 @@ export function cloneFilmSetItem(item: FilmSetItem): FilmSetItem {
       model: {
         ...item.model,
         contentVersion: { ...item.model.contentVersion },
-        placement: { offset: { ...item.model.placement.offset }, scale: item.model.placement.scale, yaw: item.model.placement.yaw }
+        placement: { offset: { ...item.model.placement.offset }, scale: item.model.placement.scale, yaw: item.model.placement.yaw },
+        ...(item.model.rig ? { rig: { ...item.model.rig, parameters: { ...item.model.rig.parameters } } } : {})
       },
       ...(item.origin ? { origin: { ...item.origin } } : {})
     };
@@ -253,7 +254,8 @@ export function decodeFilmSetModelSnapshot(input: unknown): FilmSetModelSnapshot
     modelScriptLanguage: input.modelScriptLanguage,
     modelScriptVersion: input.modelScriptVersion,
     modelContentVersion: input.contentVersion,
-    modelPlacement: input.placement
+    modelPlacement: input.placement,
+    modelRig: input.rig
   });
 }
 

@@ -32,6 +32,8 @@ export type CanvasCommandRejectionCode =
   | "invalid-model-cameras"
   | "invalid-image-edit"
   | "invalid-self-contained-node"
+  /** 已有人形骨架被 patch 成空。骨架只能替换，不能从已保存的模型上拿掉。 */
+  | "rig-removed"
   | "invalid-film-set-group"
   | "missing-edge-id"
   | "invalid-command"

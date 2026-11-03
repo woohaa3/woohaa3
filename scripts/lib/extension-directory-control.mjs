@@ -42,9 +42,8 @@ export function createExtensionDirectoryControl({ roots, writableRoots = [], met
       if (!dev && (typeof pkg?.name !== 'string' || !pkg.name.startsWith(EXTENSION_PACKAGE_PREFIX))) continue;
       const descriptor = readJson(path.join(directory, 'extension.json'));
       const browser = readJson(path.join(directory, 'browser-dist/artifact-manifest.json'))?.metadata;
-      // 共享库（runtime-foundation）与测试 fixture（sample-site-extension）既没有 extension.json
-      // 也没有 browser 产物，不是插件；browser-only 扩展（dev-performance 等）只有 browser metadata，
-      // 仍必须出现在清单里。
+      // 只有 extension.json 或 browser 产物才算插件；browser-only 扩展（dev-performance 等）
+      // 只有 browser metadata，仍必须出现在清单里。共享框架包与测试 fixture 不在扩展扫描根内。
       if (!descriptor && !browser) continue;
       const id = descriptor?.extensionId ?? browser?.extensionId ?? pkg?.name?.slice(EXTENSION_PACKAGE_PREFIX.length);
       if (typeof id !== 'string' || !/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(id)) continue;

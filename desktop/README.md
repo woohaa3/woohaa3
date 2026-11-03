@@ -26,9 +26,11 @@ pnpm desktop:bundle --no-build-frontend   # 刚跑过 pnpm build，直接吃现�
 pnpm desktop:bundle --dry-run
 ```
 
-`host-extensions.json` is the **code inventory** bundled with the host, not the enable state. `remote-server` is listed there on purpose (desktop users may connect to a self-hosted server) but ships with `site.defaultEnabled: false`, so it stays off until someone enables it in Settings and configures a server address; a fresh install never shows a dead "server access" entry.
+The bundled extension set is **directory-authoritative**: every extension package under `web/extensions/` (a directory with a `package.json` whose name starts with `@woohaa3/extension-`) ships with the host. There is no separate inventory file. Non-plugin shared packages live in `web/framework/` and test fixtures in `web/test-fixtures/`, so they are never scanned as extensions.
 
-`dev-performance` is also in the inventory: it supplies the FPS / Draw Call readout merged into the window bar. The packaged app is a `--mode desktop` production build with no `woohaa-development` HTML marker, so the extension registers on the desktop host regardless of that marker, and `getFrameCounters` is exposed for the desktop shell as well as dev builds. Browser production and preview builds still do not register the readout or expose frame counters.
+Bundling does not decide the enable state. `remote-server` ships with `site.defaultEnabled: false`, so it stays off until someone enables it in Settings and configures a server address; a fresh install never shows a dead "server access" entry.
+
+`dev-performance` is a browser-only extension under `web/extensions/`: it supplies the FPS / Draw Call readout merged into the window bar. The packaged app is a `--mode desktop` production build with no `woohaa-development` HTML marker, so the extension registers on the desktop host regardless of that marker, and `getFrameCounters` is exposed for the desktop shell as well as dev builds. Browser production and preview builds still do not register the readout or expose frame counters.
 
 The standalone packaging paths support Apple Silicon macOS and Windows x64. They include a pinned Node runtime, local host, frontend, extensions and native tools, so installed users do not need Node or pnpm. Output manifests under `artifacts/desktop/` record hashes and sizes. An explicit `--ui-url` creates an external-host development configuration. Platform code signing and notarization require the publisher's own credentials; updater signatures are a separate requirement. See [Windows build and lifecycle checks](WINDOWS.md).
 

@@ -1,5 +1,5 @@
 import { isPureModelNodeType } from "./domain/core/input-role.js";
-import { executeModelScriptVersioned } from "./model-executor-v2.js";
+import { executeModelScriptVersioned, executeModelWithStoredRig } from "./model-executor-v2.js";
 /** The only builtin rendering implementation bindings. Domain type validation stays separate. */
 import { isSupportedModelScriptVersion, sceneIrVersionFor } from './model-script.js';
 import { prepareModelResource } from './prepared-model.js';
@@ -15,9 +15,9 @@ import { CANVAS_CAMERA_PITCH } from './model-focus/canvas-projection.js';
 import type { NodeCapabilities, NodeCapabilityResolver, NodeModelPreparation } from './node-capabilities.js';
 
 export const scriptModelPreparation: NodeModelPreparation = {
-  executionKey: ({ data }) => data?.modelScript ? `${String(data.modelScriptVersion)}:${data.modelScript}` : undefined,
+  executionKey: ({ data }) => data?.modelScript ? `${String(data.modelScriptVersion)}:${data.modelScript}:${data.modelRig == null ? "" : JSON.stringify(data.modelRig)}` : undefined,
   prepare: ({ data }) => {
-    const execution = executeModelScriptVersioned(String(data?.modelScript ?? ''), data?.modelScriptVersion);
+    const execution = executeModelWithStoredRig(String(data?.modelScript ?? ''), data?.modelScriptVersion, data?.modelRig);
     if (!execution.ok) return { status: `fail:${execution.stage}:${execution.code}` };
     if (!isSupportedModelScriptVersion(data?.modelScriptVersion)) return { status: 'fail:compile:version-mismatch' };
     return { status: 'ok', resource: prepareModelResource({ sceneVersion: sceneIrVersionFor(data.modelScriptVersion), ops: execution.scene.ops }) };
@@ -58,7 +58,7 @@ export const groupAppearancePreparation: NodeModelPreparation = {
     if (isFilmSetGroupNode(context.node, context.data)) return filmSetGroupModelPreparation.prepare(context);
     const { data } = context;
     const model = readGroupAppearanceForNode(data).value.model;
-    const execution = executeModelScriptVersioned(model.modelScript, model.modelScriptVersion);
+    const execution = executeModelScriptVersioned(model.modelScript, model.modelScriptVersion, model.rig ? { rig: model.rig.parameters } : undefined);
     if (!execution.ok) return { status: `fail:${execution.stage}:${execution.code}` };
     if (!isSupportedModelScriptVersion(model.modelScriptVersion)) return { status: 'fail:compile:version-mismatch' };
     return {

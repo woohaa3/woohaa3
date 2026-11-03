@@ -21,6 +21,7 @@ import {
   isSupportedModelScriptVersion,
   MODEL_SCRIPT_V2_VERSION,
   PREFERRED_MODEL_SCRIPT_VERSION,
+  type HumanoidParameters,
   type ModelScriptFailure,
   type SupportedModelScriptVersion
 } from "@woohaa3/contracts";
@@ -47,7 +48,9 @@ export type ScriptExecutorOptions = {
   /** 外部取消信号：用户停止时终止隔离执行并丢弃结果。 */
   signal?: AbortSignal;
   /** 测试可注入：同步执行（跳过 worker）。 */
-  executeSync?: (source: string, version: SupportedModelScriptVersion) => ExecuteSceneResult;
+  executeSync?: (source: string, version: SupportedModelScriptVersion, rig?: HumanoidParameters) => ExecuteSceneResult;
+  /** 已保存或本次解析出的人形参数。缺省时，脚本里的 rig.joint 使用参考尺寸。 */
+  rig?: HumanoidParameters;
   now?: () => number;
 };
 
@@ -71,8 +74,8 @@ export async function executeSceneIr(
   }
 
   const result = options.executeSync
-    ? options.executeSync(source, version)
-    : await runIsolated(source, version, options.timeoutMs, options.signal);
+    ? options.executeSync(source, version, options.rig)
+    : await runIsolated(source, version, options.rig, options.timeoutMs, options.signal);
   return result;
 }
 
@@ -85,6 +88,7 @@ export async function executeSceneIr(
 function runIsolated(
   source: string,
   version: SupportedModelScriptVersion,
+  rig: HumanoidParameters | undefined,
   timeoutMs: number | undefined,
   signal?: AbortSignal
 ): Promise<ExecuteSceneResult> {
@@ -92,7 +96,7 @@ function runIsolated(
     let settled = false;
     const worker = new Worker(WORKER_BOOTSTRAP, {
       eval: true,
-      workerData: { source, version, contractsUrl: contractsModuleUrl() },
+      workerData: { source, version, rig, contractsUrl: contractsModuleUrl() },
       resourceLimits: {
         maxOldGenerationSizeMb: 256,
         maxYoungGenerationSizeMb: 64,
@@ -181,8 +185,8 @@ const send = result => parentPort.postMessage({ kind: "model-script-result", res
 try {
   const contracts = await import(workerData.contractsUrl);
   const { executeModelScriptVersioned, sceneIrVersionFor } = contracts;
-  const { source, version } = workerData;
-  const result = executeModelScriptVersioned(source, version);
+  const { source, version, rig } = workerData;
+  const result = executeModelScriptVersioned(source, version, rig ? { rig } : undefined);
   if (!result.ok) {
     send(result);
   } else {

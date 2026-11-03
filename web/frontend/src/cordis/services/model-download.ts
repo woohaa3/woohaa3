@@ -1,5 +1,5 @@
 import {
-  executeModelScriptVersioned,
+  executeModelWithStoredRig,
   type SceneV2Op, type SceneV2ShapeOp, type SceneV2MaterialOp, type SceneV2SolidOp
 } from "@woohaa3/contracts";
 import {
@@ -96,9 +96,9 @@ export function disposeDownloadScene(scene: Scene): void {
 }
 
 /** Export the clicked model definition as an interoperable static GLB. */
-export async function downloadModelBlob(source: string, version: unknown, signal: AbortSignal): Promise<Blob> {
+export async function downloadModelBlob(source: string, version: unknown, signal: AbortSignal, modelRig?: unknown): Promise<Blob> {
   signal.throwIfAborted();
-  const result = executeModelScriptVersioned(source, version);
+  const result = executeModelWithStoredRig(source, version, modelRig);
   if (!result.ok) throw new Error(`模型无法导出：${result.message}`);
   if (!result.scene.ops.some(op => "parent" in op && op.t !== "group")) throw new Error("模型尚无可下载的几何内容");
   const scene = buildDownloadScene(result.scene.ops as SceneV2Op[]);

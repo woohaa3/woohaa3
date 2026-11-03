@@ -46,7 +46,7 @@ export const BACKEND_ENTRY_SUBPATH = "./backend-dist/entry";
 /** 允许按源码内联的工作区包 → 源码入口目录。 */
 const INLINE_WORKSPACE_PACKAGES = {
   "@woohaa3/contracts": path.join(WEB_DIR, "contracts"),
-  "@woohaa3/provider-sdk": path.join(WEB_DIR, "extensions", "provider-sdk"),
+  "@woohaa3/provider-sdk": path.join(WEB_DIR, "framework", "provider-sdk"),
   // pptask 是 Provider 的执行面（vendor 源码包）：受管 Provider 打包时按源码内联，扩展目录不必在工作区里。
   // 其自身依赖（ai、@ai-sdk/provider）从 pptask 目录的 node_modules 解析并一并内联。
   "@sdppp/pptask": path.join(WEB_DIR, "vendor", "pptask")

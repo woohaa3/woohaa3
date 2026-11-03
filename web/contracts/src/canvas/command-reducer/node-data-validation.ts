@@ -219,11 +219,16 @@ export function normalizeSelfContained3D(
     value.modelPlacement = normalized.value.placement;
     return null;
   }
+  const previousRig = work.nodeData[nodeId]?.modelRig;
+  if (previousRig != null && (merged.modelRig == null)) {
+    return reject("rig-removed", "不能移除已有骨架");
+  }
   const normalized = normalizeModelDefinition({
     modelScript: merged.modelScript,
     modelScriptLanguage: merged.modelScriptLanguage,
     modelScriptVersion: merged.modelScriptVersion,
     placement: merged.modelPlacement,
+    rig: merged.modelRig,
     previous
   });
   if (!normalized.ok) return reject("invalid-self-contained-node", normalized.reason);
@@ -232,6 +237,7 @@ export function normalizeSelfContained3D(
   value.modelScript = normalized.value.modelScript;
   value.modelScriptLanguage = normalized.value.modelScriptLanguage;
   value.modelScriptVersion = normalized.value.modelScriptVersion;
+  if (normalized.value.rig) value.modelRig = normalized.value.rig;
   return null;
 }
 

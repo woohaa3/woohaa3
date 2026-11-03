@@ -74,11 +74,11 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  const buildProfile=loadBuildProfile({repoRoot:path.dirname(root),env:process.env});
  const siteDefaults=buildProfile.ok?buildProfile.resolved.siteExtensionDefaults:{};
  const extensions=[];
- const inventory=JSON.parse(fs.readFileSync(path.join(root,'desktop/host-extensions.json'),'utf8')).extensions;
+ // 入包扩展以目录位置为权威：`web/extensions/` 下的每个扩展都进桌面包，不再维护单独清单。
+ const webExtensionsRoot=path.join(root,'web/extensions');
  const scanned=scanExtensions({repoRoot:root,env:{}}).extensions;
- for(const id of inventory)if(!scanned.some(extension=>extension.extensionId===id))throw new Error(`内置扩展不存在：${id}`);
  for(const extension of scanned){
-  if(!inventory.includes(extension.extensionId))continue;
+  if(extension.root!==webExtensionsRoot)continue;
   const target=copyRuntimePackage(extension.dir,output,state);const link=path.join(output,'extensions',extension.extensionId);
   copyRuntimeFiles(target,link);
   if(siteDefaults[extension.extensionId]!==undefined)applySiteDefaultEnabled({extensionDir:link,enabled:siteDefaults[extension.extensionId]});

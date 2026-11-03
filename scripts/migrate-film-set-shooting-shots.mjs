@@ -130,7 +130,7 @@ async function main() {
   try {
     plan = converter.planMigration(db);
   } catch (error) { db.close(); throw error; }
-  const planHash = hash({ report: plan.report, documents: plan.documents.map((document) => ({ id: document.canvas.id, beforeHash: document.beforeHash, afterHash: document.afterHash, changed: document.changed })),
+  const planHash = hash({ report: plan.report, documents: plan.documents.map((document) => ({ id: document.canvas.id, beforeHash: document.beforeHash, afterHash: document.afterHash, changed: document.changed, projectionStale: document.projectionStale })),
     history: plan.historyWrites.map((write) => ({ identity: [write.row.canvas_id, write.row.node_id, write.row.entry_id], changed: write.changed })),
     completions: plan.completionWrites.map((write) => ({ identity: [write.row.canvas_id, write.row.node_id, write.row.request_id], changed: write.changed })) });
   const publicReport = { ...plan.report, planHash };

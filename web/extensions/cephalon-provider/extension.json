@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "cephalon-provider",
+  "metadata": { "module": "./shared", "export": "CEPHALON_PLUGIN_METADATA", "order": 31 },
+  "hostPlugin": { "module": "./backend", "factory": "createCephalonProviderPlugin", "features": ["provider"], "order": 16 },
+  "icon": { "asset": "./assets/icon.png" }
+}
