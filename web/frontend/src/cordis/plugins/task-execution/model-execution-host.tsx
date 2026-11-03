@@ -535,9 +535,18 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         if (!linked) { setSubmitError("无法新建关联节点"); return; }
         const result = session.submitCommands(linked.commands, `web-switch-${Date.now().toString(36)}`);
         if (!result.ok) { setSubmitError(result.reason ?? "新建关联节点失败"); return; }
-        // 新节点的底边栏默认收成一条：先发展开请求，再选中让它挂载。
-        requestDockExpand(linked.nodeId);
-        runtime?.controller()?.selectNode(linked.nodeId);
+        setSubmitError(null);
+        // 等服务端确认再选中：命令刚提交时新节点只存在于本地预测里，此刻选中它，面板会去读一个
+        // 规范画布里还没有的节点，闪一下报错；被服务端拒绝时则要把原因说出来，而不是让节点凭空消失。
+        void result.handle.settled.then((settled) => {
+          if (settled.state === "rejected") {
+            setSubmitError(settled.error ?? "新建关联节点被拒绝");
+            return;
+          }
+          // 新节点的底边栏默认收成一条：先发展开请求，再选中让它挂载。
+          requestDockExpand(linked.nodeId);
+          runtime?.controller()?.selectNode(linked.nodeId);
+        });
       }}
     />
   ) : null;

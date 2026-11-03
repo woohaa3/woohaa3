@@ -19,7 +19,7 @@ import { ModelExecutionHost } from "./model-execution-host.js";
 import { createModelDraftStore } from "./model-draft.js";
 import { nodeDraftStore } from "./drafts.js";
 import type { ModelPanelProps } from "../../contract/model-interaction.js";
-import { catalogFixture, canvasFixture } from "./test-support/fixtures.js";
+import { catalogFixture, canvasFixture, imageAsset } from "./test-support/fixtures.js";
 import { ModelInteractionService } from "../../services/model-interaction-service.js";
 import { DialogService } from "../../services/dialogs/service.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
@@ -340,5 +340,71 @@ describe("ModelExecutionHost 片场外显镜头", () => {
     expect(container.textContent).toContain("时长（秒）");
     expect(container.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe("2.5");
     expect(container.querySelector('[data-testid="video-panel"]')).toBeNull();
+  });
+});
+
+describe("ModelExecutionHost 图片/视频切换（已有结果的节点新建关联节点）", () => {
+  const IMAGE_NODE = "image-node";
+
+  async function mountSwitchHost(submitCommands: ReturnType<typeof vi.fn>, selectNode: ReturnType<typeof vi.fn>) {
+    woohaa3CanvasStore.getState().hydrate(canvasFixture({
+      nodes: [{ id: IMAGE_NODE, type: "image", data: { outputAssetId: "asset-1", taskStatus: "successed" } }],
+      assets: [imageAsset({ id: "asset-1" })]
+    }));
+    const models = catalogFixture([
+      { modelKey: "image-model", modelType: "image", interaction: { id: "switch-panel", version: 1 } },
+      { modelKey: "video-model", modelType: "video", interaction: { id: "switch-panel", version: 1 } }
+    ]);
+    const registry = new ModelInteractionService();
+    registry.register({ id: "switch-panel", version: 1, owner: "test", Panel: (props) => <div>{props.renderers?.typeSwitch?.()}</div> });
+    return mount(
+      <ModelExecutionHost
+        canvasId="canvas-test"
+        selectedNodeId={IMAGE_NODE}
+        session={{ isWritable: () => true, submitCommands } as never}
+        runtime={{ controller: () => ({ selectNode }), subscribeViewport: () => () => undefined, subscribeScene: () => () => undefined } as never}
+        runClient={{} as never}
+        writable
+        dialogs={new DialogService()}
+        catalog={new StubCatalogService(models)}
+        registry={registry}
+        draftStore={createModelDraftStore()}
+      />
+    );
+  }
+
+  const clickVideo = async (container: HTMLElement) => {
+    const video = [...container.querySelectorAll<HTMLElement>(".node-type-switch__option")].find((button) => button.textContent === "视频")!;
+    await act(async () => { video.click(); });
+  };
+
+  it("等服务端确认之后才选中新节点（提前选中会让面板读到规范画布里还没有的节点而闪报错）", async () => {
+    let confirm: (value: { state: string; error: string | null }) => void = () => undefined;
+    const settled = new Promise<{ state: string; error: string | null }>((resolve) => { confirm = resolve; });
+    const submitCommands = vi.fn(() => ({ ok: true as const, handle: { settled } }));
+    const selectNode = vi.fn(() => true);
+    const container = await mountSwitchHost(submitCommands, selectNode);
+
+    await clickVideo(container);
+    expect(submitCommands).toHaveBeenCalledTimes(1);
+    const sent = JSON.stringify(submitCommands.mock.calls[0]);
+    expect(sent).toContain("node.add");
+    expect(sent).toContain(IMAGE_NODE);
+    expect(selectNode).not.toHaveBeenCalled();
+
+    await act(async () => { confirm({ state: "committed", error: null }); await settled; });
+    expect(selectNode).toHaveBeenCalledTimes(1);
+  });
+
+  it("服务端拒绝时不选中，并把原因显示出来", async () => {
+    const settled = Promise.resolve({ state: "rejected", error: "输入连接已变化" });
+    const submitCommands = vi.fn(() => ({ ok: true as const, handle: { settled } }));
+    const selectNode = vi.fn(() => true);
+    const container = await mountSwitchHost(submitCommands, selectNode);
+
+    await clickVideo(container);
+    await act(async () => { await settled; });
+    expect(selectNode).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("输入连接已变化");
   });
 });
