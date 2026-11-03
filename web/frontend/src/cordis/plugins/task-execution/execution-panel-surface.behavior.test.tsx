@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ExecutionPanelSurface } from "./execution-panel-surface.js";
+import { requestDockExpand, resetDockExpandRequests } from "./dock-expand-request.js";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -65,6 +66,17 @@ describe("贴底常驻条", () => {
     const host = renderSurface("compact", <div data-testid="full">完整面板</div>);
     expect(host.querySelector(".node-execution-bar-dock")).not.toBeNull();
     expect(host.querySelector(".node-execution-bar-dock")!.getAttribute("data-collapsed")).toBe("true");
+  });
+
+  it("外部先请求展开：骨架与真实面板先后挂载，两次都是展开态（请求不被骨架取走）", () => {
+    resetDockExpandRequests();
+    requestDockExpand("node-1");
+    const first = renderSurface("compact", <div>骨架</div>);
+    expect(first.querySelector(".node-execution-bar-dock")!.getAttribute("data-collapsed")).toBeNull();
+    act(() => root!.unmount());
+    const second = renderSurface("compact", <div>真实面板</div>);
+    expect(second.querySelector(".node-execution-bar-dock")!.getAttribute("data-collapsed")).toBeNull();
+    resetDockExpandRequests();
   });
 
   it("参数类面板（非 collapsible）始终完整显示，不会变成一条空条", () => {

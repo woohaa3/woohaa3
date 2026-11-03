@@ -92,14 +92,14 @@ function DockedBar({ nodeId, runtime, collapsible, children }: { nodeId: string;
       })
     );
   }, []);
-  // 外部请求展开：已挂载时订阅收到；挂载前发的请求在这里取走（初始值已按它展开）。
+  // 外部请求展开：已挂载时订阅收到；挂载前发的请求在这里只读不取 —— 骨架面板与真实面板是
+  // 两个先后挂载的 DockedBar，骨架若把请求取走，真实面板就读不到、停在收起态。
+  // 请求在用户手动收起或过期时才清掉。
   useEffect(() => {
     if (!collapsible) return;
-    if (consumeDockExpand(nodeId)) expand();
+    if (peekDockExpand(nodeId)) expand();
     return subscribeDockExpand((requested) => {
-      if (requested !== nodeId) return;
-      consumeDockExpand(nodeId);
-      expand();
+      if (requested === nodeId) expand();
     });
   }, [collapsible, nodeId, expand]);
   const collapse = useMemo<PanelCollapse>(
@@ -107,9 +107,12 @@ function DockedBar({ nodeId, runtime, collapsible, children }: { nodeId: string;
       collapsible,
       collapsed: collapsible && collapsed,
       expand,
-      collapse: () => setCollapsed(true),
+      collapse: () => {
+        consumeDockExpand(nodeId);
+        setCollapsed(true);
+      },
     }),
-    [collapsible, collapsed, expand]
+    [collapsible, collapsed, expand, nodeId]
   );
   const applyLayout = useCallback(() => {
     const dock = ref.current;
