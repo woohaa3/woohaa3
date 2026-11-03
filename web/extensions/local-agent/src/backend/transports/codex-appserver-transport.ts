@@ -132,7 +132,26 @@ async function ensureInitialized(
       clientVersion: options.clientVersion,
       protocolVersion: options.protocolVersion
     });
-    const initialized = await rpc.call("initialize", initialize.params, options.requestTimeoutMs ?? 20_000);
+    let initialized: Record<string, unknown>;
+    try {
+      initialized = await rpc.call("initialize", initialize.params, options.requestTimeoutMs ?? 20_000);
+    } catch (error) {
+      /*
+       * 对端说「这条连接已经握过手了」—— 对我们要的结果（连接可用）而言就是成功。
+       *
+       * 会走到这里是因为 `initializedConnections` 只活在本进程内存里，而专用 Codex 子进程由
+       * supervisor 托管、**不随后端一起重启**：后端热重载 / 崩溃重启后，新进程对这条仍然存活的
+       * 老连接再发一次 `initialize`，子进程回 JSON-RPC 错误 `Already initialized`。
+       *
+       * 只豁免这一种：超时、协议错误等其它失败仍然抛出，让用户看到真实原因。
+       *
+       * 代价：这条路径拿不到 `protocolVersion`，所以**跳过版本核对**。可接受 —— 版本在这条
+       * 连接首次握手时已经被核对过，子进程没换就不可能换版本；换了子进程就是一条新连接，
+       * 会走正常路径。
+       */
+      if (error instanceof Error && /already\s+initialized/i.test(error.message)) return { ok: true };
+      throw error;
+    }
     return checkInitializeResult(initialized, options.protocolVersion);
   })();
   initializedConnections.set(connection, promise);
