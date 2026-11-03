@@ -112,9 +112,6 @@ export function ExecutionPanel({
 	presentation = "compact",
 	width,
 	skills = DEFAULT_SKILLS,
-	promptModels,
-	promptModel,
-	onPromptModelChange,
 	referencesSlot,
 	statusSlot,
 	promptEditorSlot,
@@ -218,16 +215,23 @@ export function ExecutionPanel({
 			return;
 		}
 		// `#` 片段触发默认需工具插件；提供回调时把「所选 action + 当前草稿」交给宿主。
-		if (onPromptSkill) {
-			onPromptSkill({ id: skill.id, label: skill.label, prompt });
-			setSkillError(null);
+		if (!onPromptSkill) {
+			// 原工程在此调用宿主 prompt 工具；这里保留交互与 loading 语义，
+			// 改写结果由宿主通过 data.panelPrompt 回流。
+			setSkillError("未接入提示词工具插件");
+			setActiveSkill(skill.id);
+			setTimeout(() => setActiveSkill(null), 700);
 			return;
 		}
-		// 原工程在此调用宿主 prompt 工具；这里保留交互与 loading 语义，
-		// 改写结果由宿主通过 data.panelPrompt 回流。
-		setSkillError("未接入提示词工具插件");
+		// 选定即关闭菜单：进行中状态在触发按钮上表达，结果由宿主写回草稿。
+		setPolishOpen(false);
+		setSkillError(null);
 		setActiveSkill(skill.id);
-		setTimeout(() => setActiveSkill(null), 700);
+		Promise.resolve(onPromptSkill({ id: skill.id, label: skill.label, prompt }))
+			.catch((error: unknown) => {
+				setSkillError(error instanceof Error && error.message.trim() ? error.message : "快捷改写失败");
+			})
+			.finally(() => setActiveSkill(null));
 	}
 
 	function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -260,7 +264,8 @@ export function ExecutionPanel({
 
 	const usesSectioned = expanded || surface === "dock";
 	const isAudioTask = taskKind === "audio-generation";
-	const polishProcessing = activeSkill === "universal-polish";
+	// 任何一项改写在进行中都展示同一处理中状态（按钮禁用 + 转圈），不区分具体技能。
+	const polishProcessing = activeSkill !== null;
 	const isVideoEditMode =
 		taskKind === "video-generation" && parameters.generationMode === "edit_video";
 	const videoEditIntents = isVideoEditMode ? (data.videoEditIntents ?? []) : [];
@@ -345,9 +350,6 @@ export function ExecutionPanel({
 			onTogglePolish={() => setPolishOpen((open) => !open)}
 			activeSkill={activeSkill}
 			polishProcessing={polishProcessing}
-			{...(promptModels ? { promptModels } : {})}
-			{...(promptModel !== undefined ? { promptModel } : {})}
-			{...(onPromptModelChange ? { onPromptModelChange } : {})}
 			visibleSkills={visibleSkills}
 			onRunSkill={runSkill}
 			showRun={showRun}

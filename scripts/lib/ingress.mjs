@@ -93,7 +93,8 @@ export function routeFor(pathname) {
 
 export function createIngress(options) {
   const log = options.logger ?? (() => undefined);
-  const timeoutMs = options.timeoutMs ?? 30_000;
+  // 120s：语言模型改写等同步任务可能跑 40s 以上；30s 会让浏览器先收到 502（后端其实已成功）。
+  const timeoutMs = options.timeoutMs ?? 120_000;
   // change: 2026-10-15-support-configurable-app-base-path：dev Vite proxy 保留公开前缀转发、
   // 只在路由判定时按完整段剥离；实际剥离由下游 Backend 的挂载边界完成（避免重复剥离）。
   const basePath = options.basePath ?? "/";
@@ -116,6 +117,10 @@ export function createIngress(options) {
       // 站点 API 命名空间下的未知路径不能落到前端 SPA（例如已删除的 `/api/dev-admin`
       // 若返回 index.html 会被误认为“接口可用”）。非 API 路径仍交给静态资源/SPA。
       if (logical === "/api" || logical?.startsWith("/api/")) {
+        // 站点扩展的 publicRoutes 在运行时由各扩展声明，ingress 不枚举扩展身份；
+        // 未命中的站点 API 交给 Application 的公开路由表判定（未注册路径仍由它 404）。
+        const application = options.targets.application;
+        if (application) return proxyHttp(req, res, application, timeoutMs, log);
         log({ event: "ingress-unknown-api", status: 404, code: "not-found" });
         sendJson(res, 404, { error: "not-found" });
         return true;

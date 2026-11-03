@@ -5,7 +5,6 @@
  * 只做展示与回调转发；状态与提交语义仍由 `ExecutionPanel` 持有。拆分不改变 DOM 结构。
  */
 import {
-	ChevronDownIcon,
 	CloseIcon,
 	CollapseIcon,
 	ExpandIcon,
@@ -251,9 +250,6 @@ export function RunActions({
 	polishOpen,
 	onTogglePolish,
 	activeSkill,	polishProcessing,
-	promptModels,
-	promptModel,
-	onPromptModelChange,
 	visibleSkills,
 	onRunSkill,
 	showRun,
@@ -270,9 +266,6 @@ export function RunActions({
 	onTogglePolish: () => void;
 	activeSkill: string | null;
 	polishProcessing: boolean;
-	promptModels?: ReadonlyArray<{ id: string; label: string }>;
-	promptModel?: string;
-	onPromptModelChange?: (id: string) => void;
 	visibleSkills: ReadonlyArray<ExecutionPanelSkill>;
 	onRunSkill: (skill: ExecutionPanelSkill) => void;
 	showRun: boolean;
@@ -304,7 +297,7 @@ export function RunActions({
 							<button
 								type="button"
 								className={`mc-panel__icon-btn mc-panel__universal-polish${polishProcessing ? " is-processing" : ""}`}
-								data-tooltip={polishProcessing ? "润色中…" : "快捷改写"}
+								data-tooltip={polishProcessing ? "改写中…" : "快捷改写"}
 								aria-label={polishProcessing ? "快捷改写处理中" : "打开快捷改写"}
 								aria-haspopup="dialog"
 								aria-expanded={polishOpen}
@@ -320,26 +313,6 @@ export function RunActions({
 					>
 						<div className="mc-panel__skill-section-heading">
 							<span className="mc-panel__skill-section-title">快捷改写</span>
-							{promptModels && promptModels.length > 0 ? (
-								<label className="mc-panel__prompt-model-control">
-									<span>
-										{(promptModels.find((m) => m.id === promptModel) ??
-											promptModels[0])?.label}
-									</span>
-									<ChevronDownIcon className="mc-panel__prompt-model-chevron" />
-									<select
-										aria-label="选择快捷改写模型"
-										value={promptModel ?? promptModels[0]?.id}
-										onChange={(event) => onPromptModelChange?.(event.target.value)}
-									>
-										{promptModels.map((m) => (
-											<option key={m.id} value={m.id}>
-												{m.label}
-											</option>
-										))}
-									</select>
-								</label>
-							) : null}
 						</div>
 						<button
 							type="button"

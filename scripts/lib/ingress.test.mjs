@@ -76,6 +76,44 @@ test("站点 API 命名空间下的未知路径返回 404，不落 SPA", async (
   assert.deepEqual(JSON.parse(body), { error: "not-found" });
   assert.equal(await ingress.handle({ url: "/dev/test/canvas/1", method: "GET", headers: {} }, res), false);
 });
+test("站点扩展公开路由：未登记的 /api/* 交给 Application 公开路由表", async () => {
+  const http = await import("node:http");
+  const seen = [];
+  const application = http.createServer((req, res) => {
+    seen.push(req.url);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise((resolve) => application.listen(0, "127.0.0.1", resolve));
+  const port = application.address().port;
+  const { Writable } = await import("node:stream");
+  const ingress = createIngress({ targets: { application: `http://127.0.0.1:${port}` } });
+  let body = "";
+  const res = new Writable({ write(chunk, _encoding, callback) { body += chunk; callback(); } });
+  res.statusCode = 0;
+  res.headersSent = false;
+  res.headers = {};
+  res.setHeader = (name, value) => { res.headers[name] = value; };
+  res.writeHead = (status, headers) => {
+    res.statusCode = status;
+    Object.assign(res.headers, headers ?? {});
+    res.headersSent = true;
+  };
+  const req = {
+    url: "/api/some-site-extension/config",
+    method: "GET",
+    headers: {},
+    pipe(upstream) { upstream.end(); return upstream; },
+    on() { return this; }
+  };
+  assert.equal(await ingress.handle(req, res), true);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(seen, ["/api/some-site-extension/config"]);
+  assert.deepEqual(JSON.parse(body), { ok: true });
+  application.closeAllConnections?.();
+  await new Promise((resolve) => application.close(resolve));
+});
+
 test("上游不可达的 502 带错误码、请求与目标（启动窗口可自证原因）", async () => {
   const http = await import("node:http");
   // 先占一个端口再放掉：拿到一个几乎确定没人监听的端口，制造 ECONNREFUSED。
