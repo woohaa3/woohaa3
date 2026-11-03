@@ -409,6 +409,35 @@ pub fn install(
                 });
                 return;
             }
+            // Pinterest 窗口右键保存：主窗口来取暂存的图（**取走即删**），以及回报结果给 Pinterest 窗口弹提示。
+            // 与 `/pinterest` 同一条规则 —— 在 `run_on_main_thread` 之前、独立线程里处理；
+            // 这两个不建窗口，但不该占用主线程去拷几 MB 的图片字节。
+            // token 与 `webview_label() == "main"` 的校验已经在上面做过：Pinterest 窗口调不了这两条。
+            if request.uri().path() == "/pinterest-blob" || request.uri().path() == "/pinterest-result" {
+                let app = ctx.app_handle().clone();
+                let path = request.uri().path().to_owned();
+                let query = request.uri().query().unwrap_or("").to_owned();
+                let body = request.body().to_vec();
+                std::thread::spawn(move || {
+                    if path == "/pinterest-blob" {
+                        let id = crate::pinterest_window::query_param(&query, "id");
+                        match id.as_deref().and_then(crate::pinterest_save::take) {
+                            Some((bytes, mime)) => respond(bytes, mime),
+                            None => respond(
+                                r#"{"ok":false,"error":"图片已过期或不存在"}"#.as_bytes().to_vec(),
+                                "application/json",
+                            ),
+                        }
+                    } else {
+                        let envelope = match crate::pinterest_window::report(&app, &body) {
+                            Ok(()) => json!({"ok":true}),
+                            Err(error) => json!({"ok":false,"error":error}),
+                        };
+                        respond(serde_json::to_vec(&envelope).expect("response JSON"), "application/json");
+                    }
+                });
+                return;
+            }
             // The callback may run on a WebKit IO thread. Queue the request; never
             // touch the App, AppKit views, bridge TLS or query indexes from that thread.
             let queued = std::time::Instant::now();

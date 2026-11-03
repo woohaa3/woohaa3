@@ -60,6 +60,16 @@ tauri-plugin-notification = "2.7.0"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
+# Pinterest 窗口右键「保存 / 发送到画布」由桌面壳下载图片（src/pinterest_save.rs）。
+# 为什么不让宿主 Node 后端下：Node 的 fetch 不读系统代理，而 i.pinimg.com 在国内直连会命中被污染的 DNS。
+#
+# `system-proxy` 读 Windows 注册表里的系统代理 —— 这是这条链路能通的关键特性。
+# TLS 后端用 **native-tls** 而不是 reqwest 0.13 的默认 `rustls`：
+# 锁文件里原本（更新器依赖的）reqwest 就是 rustls + **ring**，没有 aws-lc；
+# 开启 `default-tls` 会把 rustls 的后端换成 aws-lc-rs，凭空拉进 aws-lc-sys 与 **cmake**
+# （裸 Windows 上没有 cmake/C 工具链，打包会直接失败）。native-tls 在 Windows 走 schannel，
+# 用系统信任库，不引入任何 C 构建依赖。
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "system-proxy"] }
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2]
 version = "0.6.5"
