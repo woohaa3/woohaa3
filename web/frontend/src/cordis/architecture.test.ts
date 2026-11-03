@@ -361,7 +361,10 @@ describe("前端协议边界审计", () => {
       "cordis/plugins/canvas-shell/canvas-node-index.ts -> model-scene",
       "cordis/plugins/canvas-shell/group-badge-projection.ts -> model-scene",
       // task-execution 的 dock 揭示读取共享组徽标投影，与画布命中/布局共用同一几何。
-      "cordis/plugins/task-execution/dock-reveal.ts -> canvas-shell"
+      "cordis/plugins/task-execution/dock-reveal.ts -> canvas-shell",
+      // 图库「添加到画布」复用粘贴导入的网格错位（`planImportLayout`）：同一位置连点两次不会叠成
+      // 一个节点，且与粘贴导入同一套间距，不各算一份（2026-11-02 图库跨画布放置引入）。
+      "cordis/plugins/canvas-shell/image-library.ts -> paste-import"
     ]);
     const extensionsDir = path.join(CORDIS_DIR, "plugins");
     const extensionNames = readdirSync(extensionsDir, { withFileTypes: true })

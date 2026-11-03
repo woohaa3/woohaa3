@@ -60,6 +60,14 @@ export const TELEMETRY_EVENTS_PATH = "/api/telemetry/events";
 export const MEDIA_CANVAS_QUERY_KEY = "canvas";
 
 /**
+ * 跨画布图片库（从各画布的已发布投影抽图片；由 Canvas Service 承载）。
+ *
+ * 见 canvas-service 的 `image-index.ts`。图库面板的「全部画布」与跨画布放置共用这一条路径，
+ * 只在 `cordis/install-services.ts` 里拼查询串。
+ */
+export const CANVAS_IMAGES_PATH = "/api/canvases/images";
+
+/**
  * 给已构造的媒体逻辑 URL 追加画布提示（`?canvas=<id>`）。
  *
  * 持久化引用**不含**画布提示；只有已知画布上下文的渲染/上传出口才附加，让本机宿主按画布

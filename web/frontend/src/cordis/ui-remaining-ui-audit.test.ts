@@ -149,7 +149,11 @@ describe("剩余 Canvas UI 迁移审计（任务 8.2）", () => {
       "cordis/plugins/settings/backend-settings-section.tsx",
       // 市场来源切换：逐项带「不可用」徽标与来源专属样式，SegmentedControl 无法承载
       // 逐项内容（2026-10-28 扩展层级导航引入）。
-      "cordis/plugins/settings/marketplace-install-ui.tsx"
+      "cordis/plugins/settings/marketplace-install-ui.tsx",
+      // 图库顶部两个标签（所有图片 / 收藏的图片）：手写 role=tab，尚未迁到 Tabs primitive。
+      // 这是**待迁移的登记**，不是「primitive 承载不了」的正当例外 —— 迁完要从这里删掉
+      // （2026-11-02 图库面板引入，合并时发现审计缺口）。
+      "cordis/plugins/canvas-shell/canvas-image-panel.tsx"
     ]);
     const offenders: string[] = [];
     for (const file of productionFiles(PLUGINS_DIR)) {
