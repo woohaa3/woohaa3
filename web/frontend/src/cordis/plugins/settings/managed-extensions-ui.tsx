@@ -108,7 +108,7 @@ export function ManagedInstallBar({
             return (
               <li key={job.jobId} className="managed-install__job" data-tone={view.tone} data-testid={`managed-job-${job.jobId}`}>
                 <span className="managed-install__job-title">{view.title}</span>
-                <span className="managed-install__job-detail" data-testid={`managed-job-detail-${job.jobId}`}>{view.detail}</span>
+                <span className="managed-install__job-detail" title={view.detail} data-testid={`managed-job-detail-${job.jobId}`}>{view.detail}</span>
                 {job.status === "running" && (job.phase === "queued" || job.phase === "resolve" || job.phase === "download" || job.phase === "verify" || job.phase === "stage" || job.phase === "preflight") ? (
                   <Button size="sm" tone="ghost" onClick={() => void controller.cancel(job.jobId)}>取消</Button>
                 ) : null}

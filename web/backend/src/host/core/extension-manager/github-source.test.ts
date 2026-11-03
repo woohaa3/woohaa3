@@ -401,6 +401,110 @@ describe("download", () => {
   });
 });
 
+describe("download 的时限与重试判定", () => {
+  const ref = {
+    sourceId: GITHUB_RELEASE_SOURCE_ID,
+    extensionId: "demo",
+    version: "1.0.0",
+    engines: githubSourceHostEngines(),
+    packageDigest: sha(7),
+    size: 4
+  };
+  const releases = () => ({ status: 200, body: [release("v1", [{ name: "demo-1.0.0.wxt", digest: sha(7), url: "https://github.com/acme/extensions/releases/download/v1/demo-1.0.0.wxt" }])] });
+  const readAll = async (stream: ReadableStream<Uint8Array>) => {
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return chunks;
+      chunks.push(value);
+    }
+  };
+  /** 每次 pull 间隔 delayMs 吐一段，模拟慢速但没有断的链路。 */
+  const trickle = (chunks: Uint8Array[], delayMs: number) => {
+    const queue = [...chunks];
+    return new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const next = queue.shift();
+        if (!next) {
+          controller.close();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        controller.enqueue(next);
+      }
+    });
+  };
+  /** 先吐一段，再彻底静默（不 close、不 error）：模拟连接被网络设备吞掉。 */
+  const stallAfter = (chunk: Uint8Array) => {
+    let sent = false;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!sent) {
+          sent = true;
+          controller.enqueue(chunk);
+          return;
+        }
+        return new Promise<void>(() => undefined);
+      }
+    });
+  };
+
+  it("慢速大包按「空闲」判超时：总时长超过 timeoutMs 也照常读完", async () => {
+    const chunks = [new Uint8Array([1]), new Uint8Array([2]), new Uint8Array([3]), new Uint8Array([4])];
+    const { fetchImpl } = mockFetch([
+      { match: (url) => url.includes("/repos/acme/extensions/releases"), respond: releases },
+      { match: (url) => url.startsWith("https://github.com/"), respond: () => new Response(trickle(chunks, 40), { status: 200 }) }
+    ]);
+    // 旧的固定 8 秒总时长等价于这里的 timeoutMs=20：整段传输 160ms，早就超了。
+    const source = createGithubReleaseSource({ config: () => config(), fetchImpl, timeoutMs: 20, downloadHeadersTimeoutMs: 5_000, downloadIdleTimeoutMs: 200 });
+    const download = await source.download(ref, signal);
+    const received = (await readAll(download.stream)).flatMap((chunk) => [...chunk]);
+    expect(received).toEqual([1, 2, 3, 4]);
+  });
+
+  it("传输停滞超过空闲上限 → 可重试的 MARKETPLACE_DOWNLOAD_FAILED，且说明是停滞", async () => {
+    const { fetchImpl } = mockFetch([
+      { match: (url) => url.includes("/repos/acme/extensions/releases"), respond: releases },
+      { match: (url) => url.startsWith("https://github.com/"), respond: () => new Response(stallAfter(new Uint8Array([9])), { status: 200 }) }
+    ]);
+    const source = createGithubReleaseSource({ config: () => config(), fetchImpl, downloadHeadersTimeoutMs: 5_000, downloadIdleTimeoutMs: 30 });
+    const download = await source.download(ref, signal);
+    await expect(readAll(download.stream)).rejects.toMatchObject({
+      code: "MARKETPLACE_DOWNLOAD_FAILED",
+      retryable: true,
+      message: expect.stringContaining("没有收到新数据")
+    });
+  });
+
+  it("等不到响应头 → 超时原因且可重试", async () => {
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/repos/acme/extensions/releases")) {
+        return new Response(JSON.stringify([release("v1", [{ name: "demo-1.0.0.wxt", digest: sha(7), url: "https://github.com/acme/extensions/releases/download/v1/demo-1.0.0.wxt" }])]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Promise<Response>(() => undefined);
+    }) as typeof globalThis.fetch;
+    const source = createGithubReleaseSource({ config: () => config(), fetchImpl, downloadHeadersTimeoutMs: 20, downloadIdleTimeoutMs: 5_000 });
+    await expect(source.download(ref, signal)).rejects.toMatchObject({
+      code: "MARKETPLACE_DOWNLOAD_FAILED",
+      retryable: true,
+      message: expect.stringContaining("没有响应")
+    });
+  });
+
+  it("HTTP 5xx 可重试，4xx 是确定结论（不重试）", async () => {
+    const status = (code: number) => mockFetch([
+      { match: (url) => url.includes("/repos/acme/extensions/releases"), respond: releases },
+      { match: (url) => url.startsWith("https://github.com/"), respond: () => new Response("nope", { status: code }) }
+    ]);
+    const bad = await status(502);
+    await expect(createGithubReleaseSource({ config: () => config(), fetchImpl: bad.fetchImpl }).download(ref, signal)).rejects.toMatchObject({ code: "MARKETPLACE_DOWNLOAD_FAILED", retryable: true });
+    const gone = await status(404);
+    await expect(createGithubReleaseSource({ config: () => config(), fetchImpl: gone.fetchImpl }).download(ref, signal)).rejects.toMatchObject({ code: "MARKETPLACE_DOWNLOAD_FAILED", retryable: false });
+  });
+});
+
 describe("网络失败与限流", () => {
   it("仓库 404 → 稳定中文原因", async () => {
     const { fetchImpl } = mockFetch([

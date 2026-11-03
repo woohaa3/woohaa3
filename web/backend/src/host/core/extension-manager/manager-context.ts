@@ -8,6 +8,9 @@ import type { ExtensionInstallOutcome } from "@woohaa3/contracts";
 import { ExtensionManagerError, toManagerError } from "./errors.js";
 import { createJobBoard, type Job, type JobBoard } from "./jobs.js";
 import {
+  DEFAULT_DOWNLOAD_ATTEMPTS,
+  DEFAULT_DOWNLOAD_BACKOFF_MS,
+  DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
   DEFAULT_MAX_PACKAGE_BYTES,
   DEFAULT_OBSERVE_MS,
   DEFAULT_RETENTION_MS,
@@ -26,6 +29,11 @@ export type ManagerContext = {
   log: (event: Record<string, unknown>) => void;
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   maxPackageBytes: number;
+  /** 下载总尝试次数（含首次）与每次重试前的退避。 */
+  downloadAttempts: number;
+  downloadBackoffMs: readonly number[];
+  /** 连续多久没有新字节算断流（毫秒），用于与来源无关的写包看门狗。 */
+  downloadIdleTimeoutMs: number;
   observeMs: number;
   failureThreshold: number;
   retentionMs: number;
@@ -67,6 +75,9 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
   const sleep = deps.sleep ?? sleepDefault;
   const { toolkit } = deps;
   const maxPackageBytes = deps.limits?.maxPackageBytes ?? DEFAULT_MAX_PACKAGE_BYTES;
+  const downloadAttempts = Math.max(1, Math.trunc(deps.download?.attempts ?? DEFAULT_DOWNLOAD_ATTEMPTS));
+  const downloadBackoffMs = deps.download?.backoffMs ?? DEFAULT_DOWNLOAD_BACKOFF_MS;
+  const downloadIdleTimeoutMs = Math.max(1, deps.download?.idleTimeoutMs ?? DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS);
   const observeMs = deps.observeMs ?? DEFAULT_OBSERVE_MS;
   const failureThreshold = deps.observeFailureThreshold ?? 3;
   const retentionMs = deps.retentionMs ?? DEFAULT_RETENTION_MS;
@@ -205,6 +216,9 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
     log,
     sleep,
     maxPackageBytes,
+    downloadAttempts,
+    downloadBackoffMs,
+    downloadIdleTimeoutMs,
     observeMs,
     failureThreshold,
     retentionMs,

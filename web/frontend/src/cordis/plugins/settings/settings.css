@@ -416,9 +416,10 @@
 .managed-install { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 4px; padding: 12px 14px; border: 1px solid var(--mc-border); border-radius: 10px; }
 .managed-install__row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .managed-install__jobs { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.managed-install__job { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.managed-install__job { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 12px; }
 .managed-install__job-title { font-weight: 600; }
-.managed-install__job-detail { color: var(--mc-text-muted); font-variant-numeric: tabular-nums; }
+/* 失败原因现在是具体句子（断流 / HTTP 4xx / 试了几次），要能换行且不挤掉取消按钮。 */
+.managed-install__job-detail { flex: 1 1 220px; min-width: 0; color: var(--mc-text-muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .managed-install__job[data-tone="success"] .managed-install__job-detail { color: var(--app-status-success); }
 .managed-install__job[data-tone="failed"] .managed-install__job-detail { color: var(--app-status-danger); }
 .managed-install__restart { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
