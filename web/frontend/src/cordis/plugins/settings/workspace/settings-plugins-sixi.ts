@@ -39,3 +39,18 @@ export const SIXI_HIDDEN_SETTINGS_PLUGINS: readonly string[] = [
 export function isSixiHiddenSettingsPlugin(id: string): boolean {
   return SIXI_HIDDEN_SETTINGS_PLUGINS.includes(id);
 }
+
+/**
+ * 是否允许在设置里「添加扩展」（右下角悬浮 `+` → 市场 / 文件安装）。
+ *
+ * 四喜发行版关掉：那是宿主的开发者入口，能装任意第三方插件 ——
+ * 从市场装进来的扩展落在受管目录 `.woohaa3/extensions`，与发行包无关，
+ * 但**能装**本身就会让客户以为可以自行扩展，装坏了还会污染同一份数据目录。
+ *
+ * 客户端要随包发布的扩展走另一条路：目录进 `web/extensions/<id>/`，
+ * 再把 id 加进 `scripts/lib/sixi-extension-inventory.json`，重新打包。
+ *
+ * 排查时想临时装一个，把 `WOOHAA3_DESKTOP_DEV` 之类的手段没有意义 ——
+ * 这是前端常量，改这一行重新构建即可。
+ */
+export const SIXI_ALLOW_EXTENSION_INSTALL = false;

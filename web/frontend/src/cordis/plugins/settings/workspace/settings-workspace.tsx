@@ -61,7 +61,7 @@ const SECTION_LABEL: Record<SettingsSectionId, string> = {
 // 通知 / 关于）的正文实现仍保留，供类型与 `settingsOpen` 的签名继续使用。
 import { SIXI_SETTINGS_SECTIONS, SIXI_SETTINGS_DEFAULT_SECTION } from "./settings-sections-sixi.js";
 // 插件列表里要摘掉的 id（ppserver、两个存储后端、四喜本体），见 `settings-plugins-sixi.ts`。
-import { SIXI_HIDDEN_SETTINGS_PLUGINS } from "./settings-plugins-sixi.js";
+import { SIXI_HIDDEN_SETTINGS_PLUGINS, SIXI_ALLOW_EXTENSION_INSTALL } from "./settings-plugins-sixi.js";
 
 /** 全部分区（上游的完整集合）；实际显示哪些由 `sections`（缺省 `SIXI_SETTINGS_SECTIONS`）决定。 */
 const ALL_SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
@@ -162,6 +162,11 @@ export type SettingsWorkspaceProps = {
    * （ppserver、两个存储后端、四喜本体）；传 `[]` 用于查看完整清单（内部排障、测试）。
    */
   hiddenPluginIds?: readonly string[];
+  /**
+   * 是否渲染「添加扩展」（市场 / 文件安装）入口。缺省取 `SIXI_ALLOW_EXTENSION_INSTALL`（false）；
+   * 传 true 用于内部排障与测安装流的用例。
+   */
+  allowExtensionInstall?: boolean;
 };
 
 export function SettingsWorkspace({
@@ -179,6 +184,7 @@ export function SettingsWorkspace({
   initialSection,
   sections = SIXI_SETTINGS_SECTIONS,
   hiddenPluginIds = SIXI_HIDDEN_SETTINGS_PLUGINS,
+  allowExtensionInstall = SIXI_ALLOW_EXTENSION_INSTALL,
   initialPluginId,
   onOpenTelemetry
 }: SettingsWorkspaceProps) {
@@ -472,7 +478,8 @@ export function SettingsWorkspace({
             onRequestInstall={(mode) => navigate({ kind: "install", mode })}
             {...(settingsPanels ? { settingsPanels } : {})}
             {...(managed ? { managed } : {})}
-            hiddenPluginIds={SIXI_HIDDEN_SETTINGS_PLUGINS}
+            hiddenPluginIds={hiddenPluginIds}
+            allowExtensionInstall={allowExtensionInstall}
           />
         ) : view.section === "runtimes" ? (
           <Panel title="运行时组件" hint="管理按需下载的可选功能。"><RuntimeComponentsSection /></Panel>

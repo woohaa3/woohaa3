@@ -25,7 +25,7 @@ import {
   type PluginSettingsGroup,
   type PluginViewIndex
 } from "./plugin-groups.js";
-import { SIXI_HIDDEN_SETTINGS_PLUGINS } from "./workspace/settings-plugins-sixi.js";
+import { SIXI_HIDDEN_SETTINGS_PLUGINS, SIXI_ALLOW_EXTENSION_INSTALL } from "./workspace/settings-plugins-sixi.js";
 import {
   PLUGIN_BROWSER_FILTERS,
   filterPluginGroups,
@@ -72,6 +72,11 @@ export type PluginSettingsSectionProps = {
    * 传 `[]` 用于查看完整清单（内部排障、测试）。
    */
   hiddenPluginIds?: readonly string[];
+  /**
+   * 是否渲染右下角「添加扩展」悬浮入口（市场 / 文件安装）。
+   * 缺省取四喜发行形态的 `SIXI_ALLOW_EXTENSION_INSTALL`（false）；测试与内部排障传 true。
+   */
+  allowExtensionInstall?: boolean;
 };
 
 export type ManagedExtensionsSource = {
@@ -92,7 +97,8 @@ export function PluginSettingsSection({
   onRequestInstall,
   settingsPanels,
   managed,
-  hiddenPluginIds = SIXI_HIDDEN_SETTINGS_PLUGINS
+  hiddenPluginIds = SIXI_HIDDEN_SETTINGS_PLUGINS,
+  allowExtensionInstall = SIXI_ALLOW_EXTENSION_INSTALL
 }: PluginSettingsSectionProps) {
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const pendingReopen = useSyncExternalStore(
@@ -113,10 +119,11 @@ export function PluginSettingsSection({
 
   const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view, hiddenPluginIds);
   const canInstallFile = Boolean(
-    state.status === "ready" && state.snapshot?.extensionInstallations && store.canManage()
+    allowExtensionInstall && state.status === "ready" && state.snapshot?.extensionInstallations && store.canManage()
   );
   const canUseMarket = Boolean(canInstallFile && managed?.marketplace);
   // 悬浮入口只在真的能装的时候出现；默认落到市场，没有市场时落到文件安装。
+  // 四喜发行版 `SIXI_ALLOW_EXTENSION_INSTALL = false`，两条路径都收在这里，入口不渲染。
   const installMode = canUseMarket ? "market" : canInstallFile ? "file" : null;
   const normalizedQuery = query.trim().toLowerCase();
   const groups = filterPluginGroups(index, index.groups, { query: normalizedQuery, filter, sourceFilter, panelIds });

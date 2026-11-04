@@ -257,6 +257,8 @@ async function renderWorkspace(
         sections={["backend", "plugins", "appearance", "runtimes", "notifications", "about"]}
         // 本文件测工作区自身行为，插件列表也显式打开完整清单（样例数据里有 local-storage）。
         hiddenPluginIds={[]}
+        // 安装入口在四喜发行版默认关闭；这些用例专测安装流，显式打开。
+        allowExtensionInstall
         initialSection="backend"
         {...(managedStub ? { managed: managedStub } : {})}
         {...(options.initialPluginId ? { initialPluginId: options.initialPluginId } : {})}

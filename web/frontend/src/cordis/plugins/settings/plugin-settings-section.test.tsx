@@ -329,7 +329,14 @@ describe("安装入口（悬浮 +）", () => {
     roots.add(root);
     await act(async () => {
       root.render(
-        <PluginSettingsSection store={store} manager={facade} managed={managed} onRequestInstall={onRequestInstall} />
+        <PluginSettingsSection
+          store={store}
+          manager={facade}
+          managed={managed}
+          onRequestInstall={onRequestInstall}
+          // 四喜发行版默认关掉安装入口；这个辅助函数专门测安装流，显式打开。
+          allowExtensionInstall
+        />
       );
     });
     return container;
