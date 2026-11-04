@@ -13,6 +13,7 @@
  * version algorithms.
  */
 import type {
+  GroundAabb,
   WorldCameraData,
   WorldCameraProjection,
   WorldCompletion,
@@ -26,10 +27,12 @@ import type {
   WorldTransform,
   WorldVersion
 } from "./shared-world.js";
-import type { WorldCameraSettings } from "./node-history/world-camera.js";
+import type { WorldCameraSettings, WorldCameraSettingsPatch } from "./node-history/world-camera.js";
+import type { WorldCameraView } from "./world-camera-ui.js";
 import type { WorldAnimationScript } from "./world-animation-script.js";
 import type { WorldAuthoringConflict, WorldAuthoringFailureCode } from "./world-authoring.js";
 import { isBoundedId, isJsonObject } from "../validation.js";
+import { decodeGroundAabb } from "./creation-scope-codec.js";
 
 export const ASSISTANT_WORLD_AUTHORITY_VERSION = "assistant-world-authority-v1" as const;
 
@@ -52,6 +55,7 @@ export const ASSISTANT_WORLD_TOOL = {
   replaceModel: "replace_world_model_content",
   moveModel: "move_world_model",
   setAnimation: "set_scene_animation_script",
+  resizeArea: "resize_scene_area",
   createCamera: "create_world_camera",
   setCamera: "set_world_camera",
   completeCamera: "complete_world_camera"
@@ -68,6 +72,7 @@ export const ASSISTANT_WORLD_WRITE_TOOLS = [
   ASSISTANT_WORLD_TOOL.replaceModel,
   ASSISTANT_WORLD_TOOL.moveModel,
   ASSISTANT_WORLD_TOOL.setAnimation,
+  ASSISTANT_WORLD_TOOL.resizeArea,
   ASSISTANT_WORLD_TOOL.createCamera,
   ASSISTANT_WORLD_TOOL.setCamera,
   ASSISTANT_WORLD_TOOL.completeCamera
@@ -211,11 +216,19 @@ export type AssistantWorldWriteOperation =
       loop: boolean;
     }
   | {
+      kind: "resize-scene-area";
+      operationId: WorldId;
+      /** Canonical area scope version observed in `get_world_context`. */
+      expectedScopeVersion: WorldVersion;
+      bounds: GroundAabb;
+    }
+  | {
       kind: "set-world-camera";
       operationId: WorldId;
       cameraId: WorldId;
       expectedSettingsVersion: WorldVersion;
-      settings: WorldCameraSettings;
+      /** Full settings or a patch; omitted fields keep the current canonical value. */
+      settings: WorldCameraSettingsPatch;
     }
   | {
       kind: "create-world-camera";
@@ -250,6 +263,12 @@ export type AssistantWorldWriteOutcome =
       settingsVersion?: WorldVersion;
       /** Post-commit canonical object version (model or camera) for the next tool call. */
       version?: WorldVersion;
+      /**
+       * Post-commit camera view (unit forward + ground intersection) for camera
+       * operations, so a caller can verify where the lens points instead of
+       * treating a successful write as a correct framing.
+       */
+      view?: WorldCameraView;
     }
   | AssistantWorldFailure;
 
@@ -458,11 +477,27 @@ export function decodeAssistantWorldWriteOperation(value: unknown): { ok: true; 
       value: { kind: "set-scene-animation-script", operationId: value.operationId, script: value.script, duration: value.duration, loop: value.loop }
     };
   }
+  if (value.kind === "resize-scene-area") {
+    if (!isBoundedId(value.expectedScopeVersion)) {
+      return { ok: false, code: "invalid-data", message: "导演区范围版本无效" };
+    }
+    const bounds = decodeGroundAabb(value.bounds);
+    if (!bounds) return { ok: false, code: "invalid-data", message: "导演区范围边界无效" };
+    return {
+      ok: true,
+      value: {
+        kind: "resize-scene-area",
+        operationId: value.operationId,
+        expectedScopeVersion: value.expectedScopeVersion,
+        bounds
+      }
+    };
+  }
   if (value.kind === "set-world-camera") {
     if (!isBoundedId(value.cameraId) || !isBoundedId(value.expectedSettingsVersion)) {
       return { ok: false, code: "invalid-data", message: "镜头目标或设置无效" };
     }
-    const settings = cameraOperationSettings(value.settings);
+    const settings = cameraSettingsPatch(value.settings);
     if (!settings) return { ok: false, code: "invalid-data", message: "镜头设置无效" };
     return {
       ok: true,
@@ -512,6 +547,46 @@ function cameraOperationSettings(value: unknown): WorldCameraSettings | null {
   return valid ? (settings as unknown as WorldCameraSettings) : null;
 }
 
+const CAMERA_SETTINGS_KEYS = ["position", "rotation", "projection", "captureMode", "aspect", "boundInstanceId"] as const;
+
+/**
+ * Validate a partial camera-settings patch. At least one known field must be present;
+ * omitted fields are merged with the current canonical settings by the host.
+ */
+function cameraSettingsPatch(value: unknown): WorldCameraSettingsPatch | null {
+  if (!isJsonObject(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length === 0 || keys.some(key => !(CAMERA_SETTINGS_KEYS as readonly string[]).includes(key))) return null;
+  const patch: WorldCameraSettingsPatch = {};
+  if (value.position !== undefined) {
+    if (!point(value.position)) return null;
+    patch.position = value.position;
+  }
+  if (value.rotation !== undefined) {
+    if (!rotation(value.rotation)) return null;
+    patch.rotation = value.rotation;
+  }
+  if (value.projection !== undefined) {
+    if (!projection(value.projection)) return null;
+    patch.projection = value.projection;
+  }
+  if (value.captureMode !== undefined) {
+    const mode = value.captureMode;
+    if (!isJsonObject(mode) || !["static", "dynamic"].includes(mode.kind as string)) return null;
+    patch.captureMode = { kind: mode.kind === "dynamic" ? "dynamic" : "static" };
+  }
+  if (value.aspect !== undefined) {
+    const aspect = value.aspect;
+    if (!isJsonObject(aspect) || !finite(aspect.width) || !(aspect.width > 0) || !finite(aspect.height) || !(aspect.height > 0)) return null;
+    patch.aspect = { width: aspect.width, height: aspect.height };
+  }
+  if (value.boundInstanceId !== undefined) {
+    if (value.boundInstanceId !== null && !isBoundedId(value.boundInstanceId)) return null;
+    patch.boundInstanceId = value.boundInstanceId;
+  }
+  return patch;
+}
+
 export function decodeAssistantWorldWriteInput(value: unknown): { ok: true; value: AssistantWorldWriteInput } | { ok: false; code: "invalid-data"; message: string } {
   if (!isJsonObject(value) || !isBoundedId(value.contextId)) {
     return { ok: false, code: "invalid-data", message: "缺少宿主工具上下文" };
@@ -545,7 +620,7 @@ export function decodeAssistantWorldCameraInput(value: unknown): {
   value: {
     cameraId: WorldId;
     expectedSettingsVersion: WorldVersion;
-    settings: WorldCameraSettings;
+    settings: WorldCameraSettingsPatch;
   };
 } | { ok: false; code: "invalid-data"; message: string } {
   if (!isJsonObject(value) || !isBoundedId(value.cameraId) || !isBoundedId(value.expectedSettingsVersion)) {
@@ -595,6 +670,8 @@ export type AssistantWorldContextView = {
   sceneArea?: {
     nodeId: WorldId;
     revision: number;
+    /** Canonical scope version the next range write must present. */
+    scopeVersion: WorldVersion;
     /** An explicit null means the current director area has no animation script. */
     animationScript: WorldAnimationScript | null;
   };

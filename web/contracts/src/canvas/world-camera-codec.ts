@@ -29,13 +29,15 @@
 
 import {
   SHARED_WORLD_VERSION,
+  WORLD_ROTATION_INPUT_TOLERANCE,
   WORLD_ROTATION_UNIT_TOLERANCE,
   worldToRendererRotation,
   type SharedWorldDecodeResult,
   type WorldCameraCaptureMode,
   type WorldCameraData,
   type WorldCameraProjection,
-  type WorldCompletion
+  type WorldCompletion,
+  type WorldRotation
 } from "./shared-world.js";
 import {
   codecFailureError,
@@ -124,6 +126,106 @@ export function decodeWorldCamera(input: unknown): SharedWorldDecodeResult<World
       boundInstanceId
     }
   };
+}
+
+/**
+ * Canonicalize an author-supplied rotation: exact unit quaternions pass through,
+ * a slightly off one is normalized, anything further off is rejected. Storage still
+ * validates with `WORLD_ROTATION_UNIT_TOLERANCE`; this only relaxes authoring input
+ * so a hand-written `0.7071` does not fail an otherwise valid camera write.
+ */
+export function canonicalizeWorldCameraRotation(input: unknown): WorldRotation | null {
+  const strict = decodeWorldRotation(input);
+  if (strict) return strict;
+  if (!Array.isArray(input) || input.length !== 4) return null;
+  if (!input.every(value => typeof value === "number" && Number.isFinite(value))) return null;
+  const [u, v, h, w] = input as [number, number, number, number];
+  const squaredNorm = u * u + v * v + h * h + w * w;
+  if (!(squaredNorm > 0) || Math.abs(squaredNorm - 1) > WORLD_ROTATION_INPUT_TOLERANCE) return null;
+  const scale = 1 / Math.sqrt(squaredNorm);
+  return decodeWorldRotation([u * scale, v * scale, h * scale, w * scale]);
+}
+
+/** First invalid camera-settings field, in a form an author can act on. */
+export type WorldCameraSettingsDiagnosis = {
+  field: "position" | "rotation" | "projection" | "captureMode" | "aspect" | "boundInstanceId";
+  message: string;
+};
+
+/**
+ * Explain why a settings payload would fail `decodeWorldCamera`. Returns `null` when
+ * the payload is writable (after rotation normalization). Pure; no I/O.
+ */
+export function diagnoseWorldCameraSettings(input: unknown): WorldCameraSettingsDiagnosis | null {
+  if (!isJsonRecord(input)) return { field: "position", message: "镜头设置必须是对象" };
+  const position = ownField(input, "position");
+  if (
+    !isJsonRecord(position) ||
+    !isFiniteWorldNumber(ownField(position, "u")) ||
+    !isFiniteWorldNumber(ownField(position, "v")) ||
+    !isFiniteWorldNumber(ownField(position, "h"))
+  ) {
+    return { field: "position", message: "机位必须是有限数值 { u, v, h }" };
+  }
+  const rotationInput = ownField(input, "rotation");
+  const rotation = canonicalizeWorldCameraRotation(rotationInput);
+  if (!rotation) {
+    return {
+      field: "rotation",
+      message: `旋转四元数不是单位四元数：${rotationDetail(rotationInput)}。请传全精度值（例如 0.7071067811865476），或改用 lookAt`
+    };
+  }
+  const projection = ownField(input, "projection");
+  if (!isJsonRecord(projection)) return { field: "projection", message: "镜头投影必须是对象" };
+  const kind = ownField(projection, "kind");
+  if (kind === "perspective") {
+    const fov = ownField(projection, "verticalFovRadians");
+    if (!isFiniteWorldNumber(fov) || !(fov > 0) || !(fov < Math.PI)) {
+      return { field: "projection", message: "透视垂直视野 verticalFovRadians 必须在 (0, π) 弧度内" };
+    }
+  } else if (kind === "isometric") {
+    const size = ownField(projection, "verticalSizeMeters");
+    if (!isFiniteWorldNumber(size) || size <= 0) {
+      return { field: "projection", message: "等距取景范围 verticalSizeMeters 必须大于 0" };
+    }
+    if (!isIsometricForward(rotation)) {
+      return { field: "rotation", message: "等距镜头的朝向必须是等距轴方向（等轴测八分体，或沿网格轴俯视）" };
+    }
+  } else {
+    return { field: "projection", message: "镜头投影只支持 isometric 或 perspective" };
+  }
+  const near = ownField(projection, "nearMeters");
+  const far = ownField(projection, "farMeters");
+  if (!isFiniteWorldNumber(near) || !(near > 0)) {
+    return { field: "projection", message: "nearMeters 必须大于 0" };
+  }
+  if (!isFiniteWorldNumber(far) || !(far > near)) {
+    return { field: "projection", message: "farMeters 必须大于 nearMeters" };
+  }
+  const captureMode = ownField(input, "captureMode");
+  const captureKind = isJsonRecord(captureMode) ? ownField(captureMode, "kind") : null;
+  if (captureKind !== "static" && captureKind !== "dynamic") {
+    return { field: "captureMode", message: "拍摄方式只能是 static 或 dynamic" };
+  }
+  const aspect = ownField(input, "aspect");
+  const width = isJsonRecord(aspect) ? ownField(aspect, "width") : null;
+  const height = isJsonRecord(aspect) ? ownField(aspect, "height") : null;
+  if (!isFiniteWorldNumber(width) || !(width > 0) || !isFiniteWorldNumber(height) || !(height > 0)) {
+    return { field: "aspect", message: "画幅 width/height 必须是正数" };
+  }
+  const boundInstanceId = ownField(input, "boundInstanceId");
+  if (boundInstanceId !== null && !isNonEmptyWorldId(boundInstanceId)) {
+    return { field: "boundInstanceId", message: "boundInstanceId 必须是非空字符串或 null" };
+  }
+  return null;
+}
+
+function rotationDetail(input: unknown): string {
+  if (!Array.isArray(input) || input.length !== 4) return "需要 [x, y, z, w] 四个数值";
+  if (!input.every(value => typeof value === "number" && Number.isFinite(value))) return "包含非有限数值";
+  const values = input as [number, number, number, number];
+  const squaredNorm = values.reduce((sum, value) => sum + value * value, 0);
+  return `平方和 ${String(Number(squaredNorm.toFixed(10)))}，允许偏差 ${WORLD_ROTATION_INPUT_TOLERANCE}`;
 }
 
 /** Re-validate and canonicalize a camera; throws instead of emitting invalid data. */

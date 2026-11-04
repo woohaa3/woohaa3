@@ -876,4 +876,148 @@ describe("assistant world authoring through the real canvas queue", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("resizes the director-area bounds and keeps the same run writable afterwards", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "assistant-area-"));
+    const file = join(dir, "canvas.sqlite");
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas-1", now);
+    canvas.document.nodes.push(
+      { id: "area-node", type: "scene-area", position: { x: 0, y: 0 } },
+      { id: "model-a", type: "model3d", position: { x: 0, y: 0 } }
+    );
+    canvas.nodeData["area-node"] = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "area-scope-1",
+        bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+      }
+    };
+    canvas.nodeData["model-a"] = modelData("instance-a", 1, 1);
+    const authority = createWorldAuthoringAuthority({ executeScene });
+    const repository = new SqliteYjsRepository({ path: file, spatialAuthority: authority });
+    const room = new CanvasRoom({ canvasId: canvas.id, repository, now: () => now });
+    await room.initialize({ canvas, roomEpoch: "initial", createdAt: now });
+    const worldAuthoring = createWorldAuthoringService({
+      authority,
+      resolveRoom: async () => room,
+      acquire: async (intent) => repository.acquireSpatialRun(intent),
+      cancel: async (canvasId, requestId) => repository.cancelSpatialRun(canvasId, requestId),
+      findLatest: async (canvasId, operationId) => repository.findLatestWorldAuthoringCommand(canvasId, operationId)
+    });
+    const assistant = createAssistantWorldService({
+      authority,
+      worldAuthoring,
+      cameraSettings: {
+        async save() { return { ok: false as const, code: "write-forbidden" as const, message: "camera not used" }; },
+        async complete() { return { ok: false as const, code: "write-forbidden" as const, message: "camera not used" }; }
+      },
+      resolveRoom: async () => room,
+      cancel: async (canvasId, requestId) => repository.cancelSpatialRun(canvasId, requestId),
+      confirmStopped: async (input) => repository.confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence),
+      pending: async () => repository.pendingSpatialRuns()
+    });
+    try {
+      const issued = await assistant.issue({
+        canvasId: canvas.id,
+        requestId: "run-area",
+        runId: "run-area",
+        epoch: 0,
+        executionId: "exec-area",
+        scope: { kind: "scene-area", areaId: "area-1" }
+      });
+      if (!issued.ok) throw new Error(issued.message);
+      const read = await assistant.read({ canvasId: canvas.id, contextId: issued.context.contextId });
+      if (!read.ok) throw new Error(read.message);
+      expect(read.view.sceneArea?.scopeVersion).toBe("area-scope-1");
+      const target = issued.context.writableTargets.find(entry => entry.target.kind === "instance" && entry.target.instanceId === "instance-a");
+      expect(target).toBeTruthy();
+
+      const resized = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "resize-scene-area",
+          operationId: "resize-area-1",
+          expectedScopeVersion: "area-scope-1",
+          bounds: { min: { u: -50, v: -50 }, max: { u: 190, v: 190 } }
+        }
+      });
+      expect(resized).toMatchObject({ ok: true });
+      if (!resized.ok) return;
+      expect(resized.version).not.toBe("area-scope-1");
+      let projection = (await repository.loadYjsState(canvas.id))?.projection ?? null;
+      expect(projection?.nodeData["area-node"]?.sceneArea).toMatchObject({
+        bounds: { min: { u: -50, v: -50 }, max: { u: 190, v: 190 } },
+        scopeVersion: resized.version
+      });
+
+      // The lease and in-process context adopted the new scope version, so the same
+      // run can keep writing without re-issuing its context.
+      const moved = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "set-model-transform",
+          operationId: "move-after-resize",
+          instanceId: "instance-a",
+          expectedVersion: target!.target.version,
+          transform: {
+            version: "shared-world-v1",
+            position: { u: 20, v: 20, h: 0 },
+            rotation: [0, 0, 0, 1],
+            scale: 1
+          }
+        }
+      });
+      expect(moved).toMatchObject({ ok: true });
+      if (!moved.ok) return;
+
+      // A stale scope version is rejected with the current one in the message.
+      const stale = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "resize-scene-area",
+          operationId: "resize-area-stale",
+          expectedScopeVersion: "area-scope-1",
+          bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+        }
+      });
+      expect(stale).toMatchObject({ ok: false, code: "version-conflict" });
+      expect(stale.ok ? "" : stale.message).toContain(resized.version);
+
+      // Shrinking is explicit: the model becomes read-only and the next write fails.
+      const shrunk = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "resize-scene-area",
+          operationId: "resize-area-2",
+          expectedScopeVersion: resized.version,
+          bounds: { min: { u: 100, v: 100 }, max: { u: 110, v: 110 } }
+        }
+      });
+      expect(shrunk).toMatchObject({ ok: true });
+      const blocked = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "set-model-transform",
+          operationId: "move-outside",
+          instanceId: "instance-a",
+          expectedVersion: moved.version!,
+          transform: {
+            version: "shared-world-v1",
+            position: { u: 21, v: 21, h: 0 },
+            rotation: [0, 0, 0, 1],
+            scale: 1
+          }
+        }
+      });
+      expect(blocked).toMatchObject({ ok: false, code: "outside-scope" });
+      projection = (await repository.loadYjsState(canvas.id))?.projection ?? null;
+      expect((projection?.nodeData["model-a"]?.sharedWorldInstance as { transform: { position: { u: number } } }).transform.position.u).toBe(20);
+    } finally {
+      assistant.close();
+      repository.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

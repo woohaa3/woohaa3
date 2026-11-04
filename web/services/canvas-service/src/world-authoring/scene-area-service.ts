@@ -31,6 +31,7 @@ import {
   type WorldObjectIdentity,
   type WorldObjectVersion,
   type WorldScopeOccupancySnapshot,
+  type WorldScopeVersion,
   type WorldToolContext,
   type WorldToolContextOutcome,
   type WorldToolContextRequest,
@@ -79,6 +80,11 @@ export type WorldAuthoringService = {
    * keeps subsequent tool calls in the same run from using pre-write versions.
    */
   refreshContextVersions(input: { canvasId: string; contextId: string; targets: WorldObjectVersion[] }): void;
+  /**
+   * Advance the in-process context scope after this run explicitly changed the
+   * scene-area bounds. The durable lease scope advances in the same commit.
+   */
+  refreshContextScope(input: { canvasId: string; contextId: string; scope: WorldScopeVersion }): void;
   execute(input: WorldAuthoringExecuteInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringExecuteOutcome>;
   undo(input: WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringHistoryOutcome>;
   redo(input: WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringHistoryOutcome>;
@@ -638,6 +644,11 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
         ...entry.context,
         writableTargets: [...writableTargets, ...additions]
       };
+    },
+    refreshContextScope(input) {
+      const entry = issued.get(input.contextId);
+      if (!entry || entry.canvasId !== input.canvasId) return;
+      entry.context = { ...entry.context, scope: input.scope };
     },
     execute: runExecute,
     undo: (input, options) => runHistory("undo", input, options),

@@ -165,12 +165,15 @@ export {
 } from "./canvas/world-reference-remap.js";
 export {
   WORLD_CAMERA_HISTORY_VERSION,
+  canonicalizeWorldCameraRotation,
   decodeWorldCamera,
   decodeWorldCameraHistorySnapshot,
+  diagnoseWorldCameraSettings,
   encodeWorldCamera,
   encodeWorldCameraHistorySnapshot,
   worldCameraCompletionKey,
-  type WorldCameraHistorySnapshot
+  type WorldCameraHistorySnapshot,
+  type WorldCameraSettingsDiagnosis
 } from "./canvas/world-camera-codec.js";
 export {
   WORLD_CAPTURE_INPUT_VERSION,

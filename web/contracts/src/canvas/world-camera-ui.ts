@@ -22,6 +22,7 @@ import {
   WORLD_ROTATION_UNIT_TOLERANCE,
   rendererToWorldRotation,
   worldToRendererRotation,
+  type GroundPoint,
   type RendererRotation,
   type RendererVector,
   type WorldCameraCaptureMode,
@@ -145,6 +146,63 @@ export function createDefaultWorldCameraData(
     boundInstanceId: null
   };
 }
+
+/**
+ * Rotation whose forward axis points from `from` toward `target` (world meters).
+ * Returns `null` when the points coincide or the direction is straight up/down,
+ * because the right axis would be undefined. Used by the authoring tools so callers
+ * can name a subject instead of hand-writing a quaternion.
+ */
+export function worldCameraRotationLookingAt(from: WorldPoint, target: WorldPoint): WorldRotation | null {
+  const du = target.u - from.u;
+  const dv = target.v - from.v;
+  const dh = target.h - from.h;
+  const length = Math.hypot(du, dh, dv);
+  if (!Number.isFinite(length) || length <= 1e-9) return null;
+  if (Math.hypot(du, dv) <= 1e-9) return null;
+  const forward: RendererVector = [du / length, dh / length, -dv / length];
+  return [...rendererToWorldRotation(rendererRotationFor(forward))];
+}
+
+/**
+ * Where a camera actually looks, derived from its pose (world meters).
+ *
+ * Agent tools hand this back after a camera write so the caller can check the
+ * framing instead of assuming "the write succeeded" means "it points at the
+ * subject": `forward` is the unit view direction and `groundIntersection` is
+ * where that axis meets `h = 0` (null when level or looking upward).
+ */
+export type WorldCameraView = {
+  forward: WorldPoint;
+  groundIntersection: GroundPoint | null;
+};
+
+export function worldCameraView(settings: Pick<WorldCameraUiSettings, "position" | "rotation">): WorldCameraView {
+  const renderer = rotateRenderer(worldToRendererRotation(settings.rotation), [0, 0, -1]);
+  const forward: WorldPoint = { u: renderer[0], v: -renderer[2], h: renderer[1] };
+  const groundIntersection = forward.h < -1e-9 && settings.position.h > 0
+    ? {
+        u: settings.position.u + forward.u * (settings.position.h / -forward.h),
+        v: settings.position.v + forward.v * (settings.position.h / -forward.h)
+      }
+    : null;
+  return { forward, groundIntersection };
+}
+
+/** Rotate a renderer vector by a renderer rotation `[x, y, z, w]` (Hamilton product). */
+function rotateRenderer(q: RendererRotation, v: RendererVector): RendererVector {
+  const [x, y, z, w] = q;
+  const [vx, vy, vz] = v;
+  const tx = 2 * (y * vz - z * vy);
+  const ty = 2 * (z * vx - x * vz);
+  const tz = 2 * (x * vy - y * vx);
+  return [
+    vx + w * tx + (y * tz - z * ty),
+    vy + w * ty + (z * tx - x * tz),
+    vz + w * tz + (x * ty - y * tx)
+  ];
+}
+
 
 export function worldCameraUiSettingsOf(camera: WorldCameraData): WorldCameraUiSettings {
   return {

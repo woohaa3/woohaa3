@@ -8,6 +8,12 @@ export const SCENE_AREA_NODE_TYPE = "scene-area" as const;
 export const WORLD_CAMERA_NODE_TYPE = "world-camera" as const;
 export const SCENE_FOOTPRINT_TOLERANCE_METERS = 1e-6;
 export const WORLD_ROTATION_UNIT_TOLERANCE = 1e-6;
+/**
+ * Authoring-input tolerance for a supplied rotation (squared norm). Storage stays
+ * strict (`WORLD_ROTATION_UNIT_TOLERANCE`); a slightly off unit quaternion from a
+ * human or model author is normalized before it is written instead of rejected.
+ */
+export const WORLD_ROTATION_INPUT_TOLERANCE = 1e-3;
 /** Reserved nodeData keys for T03 registration; no legacy key is reinterpreted. */
 export const SHARED_WORLD_NODE_DATA_KEYS = {
   instance: "sharedWorldInstance", group: "workflowGroup2d", area: "sceneArea", camera: "worldCamera"

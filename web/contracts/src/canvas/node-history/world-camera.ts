@@ -39,6 +39,28 @@ export interface WorldCameraSettings {
   boundInstanceId: WorldId | null;
 }
 
+/**
+ * Partial camera settings for scoped edits: omitted fields keep their current
+ * canonical value. Nested objects (`projection`, `captureMode`, `aspect`) are
+ * replaced wholesale when present; `boundInstanceId: null` is an explicit unbind.
+ */
+export type WorldCameraSettingsPatch = Partial<WorldCameraSettings>;
+
+/** Merge a patch over the current canonical settings. */
+export function mergeWorldCameraSettings(
+  current: WorldCameraSettings,
+  patch: WorldCameraSettingsPatch
+): WorldCameraSettings {
+  return {
+    position: patch.position ?? current.position,
+    rotation: patch.rotation ?? current.rotation,
+    projection: patch.projection ?? current.projection,
+    captureMode: patch.captureMode ?? current.captureMode,
+    aspect: patch.aspect ?? current.aspect,
+    boundInstanceId: patch.boundInstanceId === undefined ? current.boundInstanceId : patch.boundInstanceId
+  };
+}
+
 export type WorldCameraFailureCode =
   | "invalid-data"
   | "unsupported-version"
@@ -65,7 +87,8 @@ export interface WorldCameraSettingsSaveInput {
   cameraId: WorldId;
   /** Canonical settings version observed at gesture start. */
   expectedSettingsVersion: WorldVersion;
-  settings: WorldCameraSettings;
+  /** Full settings or a patch; omitted fields keep the current canonical value. */
+  settings: WorldCameraSettingsPatch;
   /** Optional host-issued world tool context; required for assistant-scoped writes. */
   contextId?: WorldId;
   actorId?: string;

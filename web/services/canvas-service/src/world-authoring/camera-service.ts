@@ -17,10 +17,13 @@
 import {
   SHARED_WORLD_VERSION,
   WORLD_CAMERA_HISTORY_VERSION,
+  canonicalizeWorldCameraRotation,
   decodeWorldCamera,
   decodeWorldCameraHistorySnapshot,
+  diagnoseWorldCameraSettings,
   decodeWorldInstanceData,
   encodeWorldCameraHistorySnapshot,
+  mergeWorldCameraSettings,
   worldCameraCompletionKey,
   type BackendWorldCameraPort,
   type CanvasNodeData,
@@ -89,6 +92,11 @@ function failure(code: WorldCameraFailureCode, message: string, extra: Partial<W
   return { ok: false, code, message, ...extra };
 }
 
+/** A stale write is retryable as soon as the author uses the returned version. */
+function versionConflictMessage(current: string): string {
+  return `镜头配置已变化（当前 ${current}），请使用该版本重试`;
+}
+
 function authoringFailure(value: WorldAuthoringFailure): WorldCameraFailure {
   const code: WorldCameraFailureCode = value.code === "spatial-rejected" ? "outside-scope" : value.code;
   return failure(code, value.message, value.conflicts ? { conflicts: value.conflicts } : {});
@@ -135,13 +143,20 @@ function hasInstance(canvas: ServerCanvas, instanceId: string): boolean {
  * commit and verify the original command receipt after a restart.
  */
 export function planWorldCameraSettings(cameraId: string, settings: WorldCameraSettings): WorldCameraData | WorldCameraFailure {
+  // Authoring input is diagnosed field by field, and an almost-unit rotation is
+  // normalized before the strict storage codec sees it. Without this, a hand-written
+  // `0.7071` collapses into the opaque "镜头配置无效".
+  const diagnosis = diagnoseWorldCameraSettings(settings);
+  if (diagnosis) return failure("invalid-data", diagnosis.message);
+  const rotation = canonicalizeWorldCameraRotation(settings.rotation);
+  if (!rotation) return failure("invalid-data", "旋转四元数不是单位四元数");
   const base: WorldCameraData = {
     kind: "world-camera",
     version: SHARED_WORLD_VERSION,
     cameraId,
     settingsVersion: "pending",
     position: settings.position,
-    rotation: settings.rotation,
+    rotation,
     projection: settings.projection,
     captureMode: settings.captureMode,
     aspect: settings.aspect,
@@ -210,7 +225,9 @@ function contextAllows(context: WorldToolContext, canvasId: string, cameraId: st
       ? "outside-scope"
       : "outside-scope", "工具上下文未授予该镜头");
   }
-  if (entry.target.version !== version) return failure("version-conflict", "镜头源版本或资格已变化");
+  if (entry.target.version !== version) {
+    return failure("version-conflict", `镜头源版本或资格已变化（本轮可写 ${entry.target.version}，请求 ${version}）`);
+  }
   if (
     entry.lease.canvasId !== context.canvasId ||
     entry.lease.runId !== context.runId ||
@@ -223,7 +240,8 @@ function contextAllows(context: WorldToolContext, canvasId: string, cameraId: st
   return null;
 }
 
-function settingsOf(camera: WorldCameraData): WorldCameraSettings {
+/** Extract the user-editable settings from a canonical camera payload. */
+export function worldCameraSettingsOf(camera: WorldCameraData): WorldCameraSettings {
   return {
     position: camera.position,
     rotation: camera.rotation,
@@ -269,7 +287,7 @@ export function createWorldCameraSettingsService(
     const initialCamera = findCamera(initial.canvas, input.cameraId);
     if (!initialCamera) return failure("not-found", "镜头不存在");
     if (initialCamera.camera.settingsVersion !== input.expectedSettingsVersion) {
-      return failure("version-conflict", "镜头配置已变化");
+      return failure("version-conflict", versionConflictMessage(initialCamera.camera.settingsVersion));
     }
     if (capability && input.contextId) {
       const resolved = deps.resolveContext(input.canvasId, input.contextId);
@@ -297,19 +315,22 @@ export function createWorldCameraSettingsService(
         const current = findCamera(canvas, input.cameraId);
         if (!current) return { ok: false as const, code: "not-found", message: "镜头不存在" };
         if (current.camera.settingsVersion !== input.expectedSettingsVersion) {
-          return { ok: false as const, code: "version-conflict", message: "镜头配置已变化" };
+          return { ok: false as const, code: "version-conflict", message: versionConflictMessage(current.camera.settingsVersion) };
         }
-        const changedBinding = input.settings.boundInstanceId !== null
-          && input.settings.boundInstanceId !== current.camera.boundInstanceId;
+        // A scoped edit may carry only the fields it changes; everything else keeps
+        // the current canonical value.
+        const settings = mergeWorldCameraSettings(worldCameraSettingsOf(current.camera), input.settings);
+        const changedBinding = settings.boundInstanceId !== null
+          && settings.boundInstanceId !== current.camera.boundInstanceId;
         // A missing existing binding is preserved. Only a newly assigned binding
         // (or an explicit restore) must resolve; otherwise the camera is reported
         // unavailable instead of being silently unbound or widened to the world.
-        if (input.settings.boundInstanceId !== null && (changedBinding || rule.binding === "available")) {
-          if (!hasInstance(canvas, input.settings.boundInstanceId)) {
+        if (settings.boundInstanceId !== null && (changedBinding || rule.binding === "available")) {
+          if (!hasInstance(canvas, settings.boundInstanceId)) {
             return { ok: false as const, code: "target-unavailable", message: "绑定的模型不存在或不可用" };
           }
         }
-        const next = planWorldCameraSettings(input.cameraId, input.settings);
+        const next = planWorldCameraSettings(input.cameraId, settings);
         if ("ok" in next) return { ok: false as const, code: next.code, message: next.message };
         return {
           ok: true as const,
@@ -367,7 +388,7 @@ export function createWorldCameraSettingsService(
         canvasId: input.canvasId,
         cameraId: input.cameraId,
         expectedSettingsVersion: input.expectedSettingsVersion,
-        settings: settingsOf(entry.snapshot.camera),
+        settings: worldCameraSettingsOf(entry.snapshot.camera),
         ...(input.contextId ? { contextId: input.contextId } : {}),
         ...(input.actorId ? { actorId: input.actorId } : {}),
         operationId: `restore-${stableAuthorityVersion("world-camera-restore", {

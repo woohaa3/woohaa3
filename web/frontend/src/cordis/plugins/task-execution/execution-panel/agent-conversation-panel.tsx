@@ -154,8 +154,17 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
     (!props.nodeId || turn.target.nodeId === props.nodeId) &&
     (turn.target.mode || turn.target.cameraId),
   )?.target : undefined;
+  // 续聊沿用上一轮冻结的目标身份，本机 Agent 才能命中同一原生线程。world 目标还必须
+  // 连同宿主签发的可信范围一起回传；缺范围时不宣称 world，并在提交时明确报错。
+  const continuationWorldScope = continuationTarget?.mode === "world" ? continuationTarget.worldScope : undefined;
+  const continuationMode = continuationTarget?.mode === "world" && !continuationWorldScope ? undefined : continuationTarget?.mode;
+  const continuationWorld = continuationTarget?.mode === "world" && Boolean(continuationWorldScope);
+  // world/camera/canvas-group 的续聊都是可修改回合：discuss 会被本机 Agent 当成无工具讨论，
+  // 助手于是只能吐出伪工具调用文本。只有 model3d、world 与 canvas-group 的续聊按 modify 提交。
   const modifying = Boolean(props.nodeId && snapshot.detail?.conversation.nodeId === props.nodeId &&
-    continuationTarget?.mode === "model3d");
+    (continuationTarget?.mode === "model3d" ||
+      continuationTarget?.mode === "canvas-group" ||
+      continuationWorld));
   const replyConnectionId = snapshot.detail?.conversation.connectionId;
   const replyConnection = directoryView.connections.find(connection => connection.connectionId === replyConnectionId);
   const replyModels = agentDirectoryModels(replyConnection?.models, replyConnection ? directoryView.catalogs[replyConnection.adapterId]?.models : undefined);
@@ -231,6 +240,10 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
     if (selectionReason || switchingConnection) { setReplyError(selectionReason || "正在切换助手…"); return; }
     if (!prompt || (!generateText && snapshot.detail.turns.some(turn => !isTurnSettled(turn.status)))) return;
     if (generateText && props.targetExecution?.()?.mode !== "text") return;
+    if (continuationTarget?.mode === "world" && !continuationWorldScope) {
+      setReplyError("场景范围已失效，请回到导演区或镜头面板重新打开助手。");
+      return;
+    }
     // 在点击时重读写权限、目标及内容版本；不可写时保留草稿，不降级成纯讨论。
     const execution = modifying ? props.targetExecution?.() : null;
     if (modifying && (!execution || execution.nodeId !== props.nodeId || execution.canvasId !== snapshot.detail.conversation.canvasId)) {
@@ -251,7 +264,8 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
         ...(replyBinding ? { connection: replyBinding } : {}),
         action: generateText ? "generate" : modifying ? "modify" : "discuss", canvasId: snapshot.detail.conversation.canvasId,
         ...(props.nodeId ? { nodeId: props.nodeId } : {}), prompt,
-        ...(continuationTarget?.mode ? { mode: continuationTarget.mode } : {}),
+        ...(continuationMode ? { mode: continuationMode } : {}),
+        ...(continuationWorldScope ? { worldScope: continuationWorldScope } : {}),
         ...(continuationTarget?.cameraId ? { cameraId: continuationTarget.cameraId } : {}),
         ...(execution ? { ...execution, action: "modify", prompt } : {}),
         // 用户在侧栏显式选择的模型优先于旧目标携带的模型。

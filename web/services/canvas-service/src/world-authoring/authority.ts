@@ -844,8 +844,11 @@ export function createWorldAuthoringAuthority(
         }
       }
 
+      // A bounds edit advances the scope version in the same commit; adopt the
+      // post-state scope so this run can keep writing against the new range.
+      const effectiveArea = afterArea ?? scopeArea;
       return {
-        scope: { scope: { kind: "scene-area", areaId: scopeArea.areaId }, scopeVersion: scopeArea.scopeVersion },
+        scope: { scope: { kind: "scene-area", areaId: effectiveArea.areaId }, scopeVersion: effectiveArea.scopeVersion },
         previous,
         next
       };

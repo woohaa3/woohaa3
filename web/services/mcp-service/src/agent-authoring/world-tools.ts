@@ -15,7 +15,15 @@ import {
   type AssistantWorldFailure,
   type AssistantWorldWriteOutcome,
   PREFERRED_MODEL_SCRIPT_VERSION,
-  type WorldTransform
+  type WorldCameraCaptureMode,
+  type WorldCameraProjection,
+  type WorldCameraSettings,
+  type WorldCameraSettingsPatch,
+  type WorldCameraView,
+  type WorldPoint,
+  type WorldRotation,
+  type WorldTransform,
+  worldCameraRotationLookingAt
 } from "@woohaa3/contracts";
 import { auditWrap, errorResult, structured, type AgentAuthoringToolDeps } from "./tool-policy.js";
 import { hashText } from "./planner-hash.js";
@@ -27,6 +35,8 @@ export type AssistantWorldToolClient = {
 };
 
 const point = z.strictObject({ u: z.number().finite(), v: z.number().finite(), h: z.number().finite() });
+const groundPoint = z.strictObject({ u: z.number().finite(), v: z.number().finite() });
+const groundAabb = z.strictObject({ min: groundPoint, max: groundPoint });
 const rotation = z.tuple([z.number().finite(), z.number().finite(), z.number().finite(), z.number().finite()]);
 const transform = z.strictObject({
   version: z.literal("shared-world-v1"),
@@ -48,14 +58,108 @@ const projection = z.discriminatedUnion("kind", [
     farMeters: z.number().finite().positive()
   })
 ]);
-const cameraSettings = z.strictObject({
+const captureMode = z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("static") }), z.strictObject({ kind: z.literal("dynamic") })]);
+const aspect = z.strictObject({ width: z.number().finite().positive(), height: z.number().finite().positive() });
+const boundInstanceId = z.string().min(1).nullable();
+
+/**
+ * Camera settings for creation. The orientation is supplied either as a unit
+ * quaternion (`rotation`) or as a point to look at (`lookAt`, preferred: the host
+ * derives an exact quaternion, so no hand-rounded decimals can fail the write).
+ */
+const cameraSettingsInput = z.strictObject({
   position: point,
-  rotation,
+  rotation: rotation.optional(),
+  lookAt: point.optional(),
   projection,
-  captureMode: z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("static") }), z.strictObject({ kind: z.literal("dynamic") })]),
-  aspect: z.strictObject({ width: z.number().finite().positive(), height: z.number().finite().positive() }),
-  boundInstanceId: z.string().min(1).nullable()
+  captureMode,
+  aspect,
+  boundInstanceId
 });
+
+/** Scoped adjustment: every field is optional and omitted fields keep their canonical value. */
+const cameraSettingsPatchInput = z.strictObject({
+  position: point.optional(),
+  rotation: rotation.optional(),
+  lookAt: point.optional(),
+  projection: projection.optional(),
+  captureMode: captureMode.optional(),
+  aspect: aspect.optional(),
+  boundInstanceId: boundInstanceId.optional()
+});
+
+type CameraSettingsInput = {
+  position: WorldPoint;
+  rotation?: WorldRotation;
+  lookAt?: WorldPoint;
+  projection: WorldCameraProjection;
+  captureMode: WorldCameraCaptureMode;
+  aspect: { width: number; height: number };
+  boundInstanceId: string | null;
+};
+
+type CameraSettingsPatchInput = {
+  position?: WorldPoint;
+  rotation?: WorldRotation;
+  lookAt?: WorldPoint;
+  projection?: WorldCameraProjection;
+  captureMode?: WorldCameraCaptureMode;
+  aspect?: { width: number; height: number };
+  boundInstanceId?: string | null;
+};
+
+/** `lookAt` wins over `rotation`; a returned message means no orientation could be derived. */
+function resolveCameraRotation(input: {
+  position?: WorldPoint;
+  rotation?: WorldRotation;
+  lookAt?: WorldPoint;
+}): { rotation: WorldRotation } | { message: string } {
+  if (input.lookAt) {
+    if (!input.position) return { message: "使用 lookAt 时必须同时提供 position" };
+    const rotation = worldCameraRotationLookingAt(input.position, input.lookAt);
+    if (!rotation) return { message: "lookAt 与机位重合或方向垂直，无法确定镜头朝向" };
+    return { rotation };
+  }
+  return input.rotation ? { rotation: input.rotation } : { message: "镜头设置需要 rotation 或 lookAt" };
+}
+
+function cameraSettingsPayload(input: CameraSettingsInput, rotation: WorldRotation): WorldCameraSettings {
+  return {
+    position: input.position,
+    rotation,
+    projection: input.projection,
+    captureMode: input.captureMode,
+    aspect: input.aspect,
+    boundInstanceId: input.boundInstanceId
+  };
+}
+
+function cameraSettingsPatchPayload(input: CameraSettingsPatchInput, rotation?: WorldRotation): WorldCameraSettingsPatch {
+  const patch: WorldCameraSettingsPatch = {};
+  if (input.position) patch.position = input.position;
+  if (input.projection) patch.projection = input.projection;
+  if (input.captureMode) patch.captureMode = input.captureMode;
+  if (input.aspect) patch.aspect = input.aspect;
+  if (input.boundInstanceId !== undefined) patch.boundInstanceId = input.boundInstanceId;
+  const resolved = rotation ?? input.rotation;
+  if (resolved) patch.rotation = resolved;
+  return patch;
+}
+
+/**
+ * Human-readable camera view appended to camera-write results. A successful write
+ * only proves the value was stored; handing back where the lens points lets the
+ * caller notice a backwards or rolled camera instead of claiming a framing.
+ */
+function cameraViewSuffix(view: WorldCameraView | undefined): string {
+  if (!view) return "";
+  const n = (value: number) => Number(value.toFixed(3));
+  const forward = `朝向 (u,v,h)=(${n(view.forward.u)}, ${n(view.forward.v)}, ${n(view.forward.h)})`;
+  const ground = view.groundIntersection
+    ? `地面落点 (u,v)=(${n(view.groundIntersection.u)}, ${n(view.groundIntersection.v)})`
+    : "镜头水平或朝上，没有地面落点";
+  return `；${forward}；${ground}`;
+}
 
 function worldGrant(deps: AgentAuthoringToolDeps) {
   const grant = deps.grant;
@@ -219,7 +323,9 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     {
       title: "设置导演区动画脚本",
       description:
-        "用 JS 动画脚本声明导演区内模型实例与镜头的运动。脚本通过注入的 motion 对象：motion.instance.tween(instanceId, { property: position|rotation|scale, startTime, endTime, from, to, easing }) 与 motion.camera.tween({ cameraId, property: position|rotation|zoom, startTime, endTime, from, to, easing })。只允许本轮可写的导演区内部部件；position 为世界 u/v/h，rotation 为角度制 [x,y,z]，zoom 为镜头倍率（>1 更广）。脚本编译一次后按时间确定性求值，播放不写规范文档。",
+        "用 JS 动画脚本声明导演区内模型实例与镜头的运动。脚本通过注入的 motion 对象：motion.instance.tween(instanceId, { property: position|rotation|scale, startTime, endTime, from, to, easing }) 与 motion.camera.tween({ cameraId, property: position|rotation|zoom, startTime, endTime, from, to, easing })。只允许本轮可写的导演区内部部件。\n" +
+        "坐标与轴向（务必按此约定，写错轴会得到横滚而不是想要的朝向）：position 为世界 u/v/h 米，零方位时镜头朝 +v、上方为 +h；rotation 为欧拉角 [x, y, z] 度、按 Y-X-Z 组合，其中 x 绕 u 轴俯仰（抬头/低头）、y 绕 v 轴横滚（歪地平线，一般不要用）、z 绕 h 轴偏航（左右转头）——要让镜头转向某个物体就改 z，不要改 y；zoom 为镜头倍率，1 为原始视野，>1 更广（拉远/全景），<1 更窄（推近/特写）。from/to 长度：position 为 [u,v,h]，rotation 为 [x,y,z] 度，scale 与 zoom 为单元素数组 [值]。\n" +
+        "要「从特写拉到全景」优先用 zoom，例如 motion.camera.tween({ cameraId, property: \"zoom\", startTime: 0, endTime: 4, from: [1], to: [2.2], easing: \"easeOut\" })；确实需要移动机位或转头时再加 position 与 property:\"rotation\"（只改 z）轨道。设置后请读取返回的相机朝向/地面落点，确认对准目标再结束。脚本编译一次后按时间确定性求值，播放不写规范文档。",
       inputSchema: z.strictObject({
         duration: z.number().finite().positive().max(3600),
         loop: z.boolean().optional(),
@@ -248,13 +354,50 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
   );
 
   server.registerTool(
+    "resize_scene_area",
+    {
+      title: "调整导演区范围",
+      description:
+        "显式扩大或缩小导演区的地面范围。bounds 使用世界 u/v 米，min 不能超过 max；只改范围，不移动、不缩放模型与镜头，缩小后落在范围外的对象会变成只读。expectedScopeVersion 必须来自 get_world_context.sceneArea.scopeVersion，写入成功后会推进。范围调整必须对应用户的明确要求，不能作为取得对象写权限的隐含步骤。",
+      inputSchema: z.strictObject({
+        expectedScopeVersion: z.string().min(1),
+        bounds: groundAabb
+      }),
+      outputSchema: z.looseObject({ ok: z.boolean() }),
+      annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false }
+    },
+    async ({ expectedScopeVersion, bounds }) =>
+      auditWrap(deps, "resize_scene_area", { requestId: deps.grant?.workId }, async () => {
+        const bound = worldGrant(deps);
+        if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
+        if (bounds.min.u > bounds.max.u || bounds.min.v > bounds.max.v) {
+          return {
+            result: errorResult({ code: "invalid-data", message: "bounds.min 不能超过 bounds.max" } as never),
+            code: "invalid-data"
+          };
+        }
+        const outcome = await bound.client.write({
+          contextId: bound.world.contextId,
+          operation: {
+            kind: "resize-scene-area",
+            operationId: `${deps.grant!.workId}:area-resize:${hashText(JSON.stringify({ expectedScopeVersion, bounds }))}`,
+            expectedScopeVersion,
+            bounds
+          }
+        });
+        if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
+        return { result: structured({ ...outcome, ok: true }, "已调整导演区范围"), code: undefined };
+      })
+  );
+
+  server.registerTool(
     "create_world_camera",
     {
       title: "在导演区创建镜头",
       description:
-        "在宿主签发的导演区内创建一台新的世界镜头。镜头身份（nodeId/cameraId）由宿主从内容派生，传入值会被忽略；定位点（settings.position）必须落在 get_world_context.bounds 内；若镜头机身落在导演区外，宿主会自动扩大导演区把它包含进来。height 轴朝上；projection 可选等距或透视；boundInstanceId 为 null 时看全世界。只允许导演区范围，2D 组没有此能力。",
+        "在宿主签发的导演区内创建一台新的世界镜头。镜头身份（nodeId/cameraId）由宿主从内容派生，传入值会被忽略；定位点（settings.position）必须落在 get_world_context.bounds 内；若镜头机身落在导演区外，宿主会自动扩大导演区把它包含进来。height 轴朝上；projection 可选等距或透视；boundInstanceId 为 null 时看全世界。朝向用 settings.lookAt（世界 u/v/h 的注视点，推荐）或 settings.rotation（单位四元数 [x,y,z,w]，必须是全精度值，不要传四舍五入后的 0.7071）。只允许导演区范围，2D 组没有此能力。",
       inputSchema: z.strictObject({
-        settings: cameraSettings,
+        settings: cameraSettingsInput,
         cardPosition: z.strictObject({ x: z.number().finite(), y: z.number().finite() }).optional()
       }),
       outputSchema: z.looseObject({ ok: z.boolean() }),
@@ -264,7 +407,12 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
       auditWrap(deps, "create_world_camera", { requestId: deps.grant?.workId }, async () => {
         const bound = worldGrant(deps);
         if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
-        const contentHash = hashText(JSON.stringify({ workId: deps.grant!.workId, settings, cardPosition: cardPosition ?? null }));
+        const resolved = resolveCameraRotation(settings);
+        if ("message" in resolved) {
+          return { result: errorResult({ code: "invalid-data", message: resolved.message } as never), code: "invalid-data" };
+        }
+        const payload = cameraSettingsPayload(settings, resolved.rotation);
+        const contentHash = hashText(JSON.stringify({ workId: deps.grant!.workId, settings: payload, cardPosition: cardPosition ?? null }));
         const cameraId = `asset-camera-${contentHash}`;
         const nodeId = `asset-camera-node-${contentHash}`;
         const outcome = await bound.client.write({
@@ -274,12 +422,12 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
             operationId: `${deps.grant!.workId}:camera-create:${nodeId}:${contentHash}`,
             nodeId,
             cameraId,
-            settings: settings as unknown as import("@woohaa3/contracts").WorldCameraSettings,
+            settings: payload,
             ...(cardPosition ? { cardPosition } : {})
           }
         });
         if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
-        return { result: structured({ ...outcome, ok: true }, `已创建镜头 ${outcome.cameraId ?? cameraId}`), code: undefined };
+        return { result: structured({ ...outcome, ok: true }, `已创建镜头 ${outcome.cameraId ?? cameraId}${cameraViewSuffix(outcome.view)}`), code: undefined };
       })
   );
 
@@ -288,11 +436,11 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     {
       title: "调整镜头",
       description:
-        "修改宿主可写集合中的透视镜头设置。所选镜头范围只允许调整该镜头的机位、FoV 与画幅；导演区范围按空间定位点判定资格。保留未要求变更的设置；旧 settingsVersion 会被拒绝。",
+        "修改宿主可写集合中的透视镜头设置。settings 是增量补丁：只传要改的字段，省略的字段保留当前 canonical 值。朝向用 settings.lookAt（世界 u/v/h 的注视点，推荐，且必须同时给 position）或 settings.rotation（单位四元数 [x,y,z,w]，必须是全精度值）。每次成功写入都会更新 settingsVersion；下一次写入要么先 get_world_context，要么使用上一次返回的 settingsVersion，否则会以 version-conflict 拒绝（错误信息里带当前版本）。",
       inputSchema: z.strictObject({
         cameraId: z.string().min(1),
         expectedSettingsVersion: z.string().min(1),
-        settings: cameraSettings
+        settings: cameraSettingsPatchInput
       }),
       outputSchema: z.looseObject({ ok: z.boolean() }),
       annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false }
@@ -301,18 +449,33 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
       auditWrap(deps, "set_world_camera", { requestId: deps.grant?.workId }, async () => {
         const bound = worldGrant(deps);
         if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
+        let derived: WorldRotation | undefined;
+        if (settings.lookAt || settings.rotation) {
+          const resolved = resolveCameraRotation(settings);
+          if ("message" in resolved) {
+            return { result: errorResult({ code: "invalid-data", message: resolved.message } as never), code: "invalid-data" };
+          }
+          derived = resolved.rotation;
+        }
+        const patch = cameraSettingsPatchPayload(settings, derived);
+        if (Object.keys(patch).length === 0) {
+          return {
+            result: errorResult({ code: "invalid-data", message: "镜头设置至少需要一个字段" } as never),
+            code: "invalid-data"
+          };
+        }
         const outcome = await bound.client.write({
           contextId: bound.world.contextId,
           operation: {
             kind: "set-world-camera",
-            operationId: `${deps.grant!.workId}:camera:${cameraId}:${hashText(JSON.stringify({ expectedSettingsVersion, settings }))}`,
+            operationId: `${deps.grant!.workId}:camera:${cameraId}:${hashText(JSON.stringify({ expectedSettingsVersion, settings: patch }))}`,
             cameraId,
             expectedSettingsVersion,
-            settings
+            settings: patch
           }
         });
         if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
-        return { result: structured({ ...outcome, ok: true }, `已保存镜头 ${cameraId}`), code: undefined };
+        return { result: structured({ ...outcome, ok: true }, `已保存镜头 ${cameraId}${cameraViewSuffix(outcome.view)}`), code: undefined };
       })
   );
 

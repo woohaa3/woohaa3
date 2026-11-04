@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   WORLD_CAMERA_HISTORY_VERSION,
+  canonicalizeWorldCameraRotation,
   decodeWorldCamera,
   decodeWorldCameraHistorySnapshot,
+  diagnoseWorldCameraSettings,
   encodeWorldCamera,
   encodeWorldCameraHistorySnapshot,
   worldCameraCompletionKey
@@ -398,5 +400,46 @@ describe("world camera completion key", () => {
     expect(decodeWorldCameraHistorySnapshot(historySnapshot())).not.toBeInstanceOf(Promise);
     expect(encodeWorldCameraHistorySnapshot(expectDecoded(decodeWorldCameraHistorySnapshot(historySnapshot())))).not.toBeInstanceOf(Promise);
     expect(worldCameraCompletionKey(base)).not.toBeInstanceOf(Promise);
+  });
+});
+
+describe("camera authoring input tolerance", () => {
+  it("normalizes an almost-unit rotation instead of rejecting it", () => {
+    const rounded = canonicalizeWorldCameraRotation([0, 0, -0.7071, 0.7071]);
+    expect(rounded).not.toBeNull();
+    const norm = rounded!.reduce((sum, value) => sum + value * value, 0);
+    expect(Math.abs(norm - 1)).toBeLessThan(WORLD_ROTATION_UNIT_TOLERANCE);
+    expect(rounded![2]).toBeCloseTo(-Math.SQRT1_2, 9);
+    // Exact values stay untouched.
+    expect(canonicalizeWorldCameraRotation([0, 0, -Math.SQRT1_2, Math.SQRT1_2]))
+      .toEqual([0, 0, -Math.SQRT1_2, Math.SQRT1_2]);
+    // Far outside the authoring tolerance, or not numeric at all, is still rejected.
+    expect(canonicalizeWorldCameraRotation([0, 0, 0.5, 0.5])).toBeNull();
+    expect(canonicalizeWorldCameraRotation([0, 0, 0, "1"])).toBeNull();
+  });
+
+  it("names the invalid settings field instead of returning an opaque failure", () => {
+    const camera = expectDecoded(decodeWorldCamera(perspectiveCamera()));
+    const settings = {
+      position: camera.position,
+      rotation: camera.rotation,
+      projection: camera.projection,
+      captureMode: camera.captureMode,
+      aspect: camera.aspect,
+      boundInstanceId: camera.boundInstanceId
+    };
+    expect(diagnoseWorldCameraSettings(settings)).toBeNull();
+
+    const badRotation = diagnoseWorldCameraSettings({ ...settings, rotation: [0, 0, 0.5, 0.5] });
+    expect(badRotation).toMatchObject({ field: "rotation" });
+    expect(badRotation?.message).toContain("单位四元数");
+    expect(badRotation?.message).toContain("平方和");
+
+    const badFov = diagnoseWorldCameraSettings({
+      ...settings,
+      projection: { kind: "perspective", verticalFovRadians: Math.PI, nearMeters: 0.1, farMeters: 100 }
+    });
+    expect(badFov).toMatchObject({ field: "projection" });
+    expect(badFov?.message).toContain("verticalFovRadians");
   });
 });

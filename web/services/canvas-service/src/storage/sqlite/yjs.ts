@@ -251,7 +251,12 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
           return target.version === "absent" && next ? { ...target, version: next.version } : target;
         });
         this.spatialLeases.validateForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, expected);
-        advance = () => this.spatialLeases.advanceVersionsForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, expected, resolved.next);
+        advance = () => {
+          this.spatialLeases.advanceVersionsForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, expected, resolved.next);
+          // An explicit range edit advances the scope; keep the process-local intent
+          // in sync so the next commit resolves against the new area scope.
+          intent.scope = resolved.scope;
+        };
       } else {
         this.spatialLeases.validateUnoccupied(commit.canvasId, targets);
       }

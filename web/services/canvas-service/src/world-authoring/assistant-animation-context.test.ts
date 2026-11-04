@@ -91,7 +91,8 @@ async function fixture(options: { animationScript?: WorldAnimationScript | null;
       resolveCapability() { return revoked
         ? { ok: false, code: "stale-epoch", message: "revoked" }
         : { context, capability: {} }; },
-      refreshContextVersions() {}
+      refreshContextVersions() {},
+      refreshContextScope() {}
     },
     cameraSettings: { async save() { throw new Error("not used"); }, async complete() { throw new Error("not used"); } },
     async resolveRoom() { return room; },

@@ -13,7 +13,7 @@ export const CANVAS_GROUP_TOOLS = [
   // 结构编辑（脚本与语义计划两条路，均经组作用域编译与提交校验）
   "get_canvas_script_api", "validate_canvas_script", "submit_canvas_script",
   "validate_canvas_plan", "apply_canvas_plan", "create_canvas_node", "connect_canvas_nodes",
-  "resize_canvas_node", "delete_canvas_entities",
+  "resize_canvas_node", "resize_canvas_group", "delete_canvas_entities",
   // 节点执行与结果
   "run_canvas_node", "get_canvas_run", "cancel_canvas_run", "get_node_output",
   // 组内模型的读取与脚本编辑（作用域由组投影限定）

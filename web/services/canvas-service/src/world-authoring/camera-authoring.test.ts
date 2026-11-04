@@ -110,3 +110,48 @@ it("rejects overlapping runs and writes to other cameras, models, animation, bin
   const snapshot = room.exportCanvas();
   expect(snapshot.ok && snapshot.canvas.nodeData).toEqual(baseline.nodeData);
 });
+
+it("normalizes hand-rounded rotations, applies partial patches and reports the current version", async () => {
+  const { assistant, contextId } = await fixture();
+  const first = await assistant.read({ canvasId: "canvas", contextId });
+  if (!first.ok || !first.view.camera) throw new Error("missing camera context");
+  const base = worldCameraUiSettingsOf(first.view.camera.settings);
+  const originalVersion = first.view.camera.settings.settingsVersion;
+
+  const rounded = await assistant.write({ contextId, operation: {
+    kind: "set-world-camera", operationId: "rounded-rotation", cameraId: "camera-a",
+    expectedSettingsVersion: originalVersion,
+    settings: { ...base, rotation: [0, 0, -0.7071, 0.7071] } } });
+  expect(rounded).toMatchObject({ ok: true });
+  const normalizedRead = await assistant.read({ canvasId: "canvas", contextId });
+  if (!normalizedRead.ok || !normalizedRead.view.camera) throw new Error("missing adjusted camera");
+  const normalizedRotation = normalizedRead.view.camera.settings.rotation;
+  expect(Math.abs(normalizedRotation.reduce((sum, value) => sum + value * value, 0) - 1)).toBeLessThan(1e-6);
+  expect(normalizedRotation[2]).toBeCloseTo(-Math.SQRT1_2, 9);
+
+  const partial = await assistant.write({ contextId, operation: {
+    kind: "set-world-camera", operationId: "partial-position", cameraId: "camera-a",
+    expectedSettingsVersion: normalizedRead.view.camera.settings.settingsVersion,
+    settings: { position: { u: 4, v: 6, h: 2 } } } });
+  expect(partial).toMatchObject({ ok: true });
+  const partialRead = await assistant.read({ canvasId: "canvas", contextId });
+  if (!partialRead.ok || !partialRead.view.camera) throw new Error("missing patched camera");
+  expect(partialRead.view.camera.settings.position).toEqual({ u: 4, v: 6, h: 2 });
+  expect(partialRead.view.camera.settings.projection).toEqual(base.projection);
+  expect(partialRead.view.camera.settings.rotation).toEqual(normalizedRotation);
+
+  const currentVersion = partialRead.view.camera.settings.settingsVersion;
+  const stale = await assistant.write({ contextId, operation: {
+    kind: "set-world-camera", operationId: "stale-again", cameraId: "camera-a",
+    expectedSettingsVersion: originalVersion,
+    settings: { position: { u: 1, v: 1, h: 1 } } } });
+  expect(stale).toMatchObject({ ok: false, code: "version-conflict" });
+  expect(stale.ok ? "" : stale.message).toContain(currentVersion);
+
+  const invalidRotation = await assistant.write({ contextId, operation: {
+    kind: "set-world-camera", operationId: "invalid-rotation", cameraId: "camera-a",
+    expectedSettingsVersion: currentVersion,
+    settings: { rotation: [0, 0, 0.5, 0.5] } } });
+  expect(invalidRotation).toMatchObject({ ok: false, code: "invalid-data" });
+  expect(invalidRotation.ok ? "" : invalidRotation.message).toContain("旋转四元数");
+});

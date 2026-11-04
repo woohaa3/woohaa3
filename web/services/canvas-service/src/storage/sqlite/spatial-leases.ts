@@ -171,8 +171,15 @@ export class SqliteSpatialLeaseStore {
     const record = this.lookup(canvasId, requestId);
     if (!record || record.intent.runId !== runId || record.intent.epoch !== epoch || record.intent.executionId !== executionId) throw new SpatialLeaseError("stale-epoch");
     if (record.state !== "active") throw new SpatialLeaseError("cancelled");
-    if (JSON.stringify(normalize({ ...record.intent, scope }).scope) !== JSON.stringify(record.intent.scope)) throw new SpatialLeaseError("version-conflict");
+    const nextScope = normalize({ ...record.intent, scope }).scope;
+    const scopeChanged = JSON.stringify(nextScope) !== JSON.stringify(record.intent.scope);
+    // Only an explicit scene-area bounds write may advance the scope version, and it
+    // must not carry object versions in the same commit.
+    if (scopeChanged && JSON.stringify(nextScope.scope) !== JSON.stringify(record.intent.scope.scope)) {
+      throw new SpatialLeaseError("version-conflict");
+    }
     const normalized = normalizeTargets(targets);
+    if (scopeChanged && normalized.length > 0) throw new SpatialLeaseError("version-conflict");
     const granted = new Map(record.intent.writable.map(t => [objectKey(t), t.version]));
     for (const target of normalized) {
       if (granted.get(objectKey(target)) !== target.version) throw new SpatialLeaseError("version-conflict");
@@ -188,8 +195,13 @@ export class SqliteSpatialLeaseStore {
     const record = this.lookup(canvasId, requestId);
     if (!record || record.intent.runId !== runId || record.intent.epoch !== epoch || record.intent.executionId !== executionId) throw new SpatialLeaseError("stale-epoch");
     if (record.state !== "active") throw new SpatialLeaseError("cancelled");
-    if (JSON.stringify(normalize({ ...record.intent, scope }).scope) !== JSON.stringify(record.intent.scope)) throw new SpatialLeaseError("version-conflict");
+    const nextScope = normalize({ ...record.intent, scope }).scope;
+    const scopeChanged = JSON.stringify(nextScope) !== JSON.stringify(record.intent.scope);
+    if (scopeChanged && JSON.stringify(nextScope.scope) !== JSON.stringify(record.intent.scope.scope)) {
+      throw new SpatialLeaseError("version-conflict");
+    }
     const before = normalizeTargets(previous), after = normalizeTargets(next);
+    if (scopeChanged && after.length > 0) throw new SpatialLeaseError("version-conflict");
     if (before.length !== after.length || before.some((t, i) => objectKey(t) !== objectKey(after[i]!))) throw new SpatialLeaseError("invalid-data");
     const granted = new Map(record.intent.writable.map(t => [objectKey(t), t.version]));
     for (const target of before) {
@@ -199,6 +211,7 @@ export class SqliteSpatialLeaseStore {
       if (lock.run_id !== runId || lock.epoch !== epoch) throw this.conflict(target, lock);
     }
     this.eligible(record.intent, after);
+    record.intent.scope = nextScope;
     const updates = new Map(after.map(t => [objectKey(t), t]));
     record.intent.writable = record.intent.writable.map(t => updates.get(objectKey(t)) ?? t);
     this.db.prepare("UPDATE spatial_lease_runs SET intent_json = ? WHERE canvas_id = ? AND request_id = ?").run(JSON.stringify(record.intent), canvasId, requestId);

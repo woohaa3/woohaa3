@@ -11,7 +11,8 @@ import { describe, expect, it, vi } from "vitest";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import { StrictMode } from "react";
 import type { ReactNode } from "react";
-import type { ConversationSnapshot, ConversationTurn } from "@woohaa3/contracts";
+import { decodeAcceptTurnRequest } from "@woohaa3/contracts";
+import type { AgentEntryIntent, ConversationSnapshot, ConversationTurn } from "@woohaa3/contracts";
 import { CanvasNavigationStore } from "../../../navigation/store.js";
 import type { CanvasPanelDefinition, CanvasPanelRoute } from "../../../navigation/contracts.js";
 import { createAgentConversationService } from "../../../services/agent-conversation-service.js";
@@ -638,4 +639,75 @@ it("旧的 DSML 回复明确说明未确认执行，并折叠原始文本", asyn
     expect(el.textContent).toContain("不是执行回执");
     expect(el.querySelector(".agent-detail__message details")?.hasAttribute("open")).toBe(false);
   } finally { await act(async () => root.unmount()); el.remove(); }
+});
+
+describe("AgentConversationPanel · 续聊目标身份", () => {
+  it.each([
+    ["scene-area", { kind: "scene-area", areaId: "area-1" }],
+    ["world-camera", { kind: "world-camera", cameraId: "camera-a" }]
+  ] as const)("world %s 目标续聊沿用冻结的可信范围，宿主解码通过", async (_kind, worldScope) => {
+    const data = snapshot();
+    data.conversation.nodeId = "n1";
+    data.turns = [{ ...turn(), status: "succeeded", stage: "succeeded", target: { canvasId: "cv", nodeId: "n1", mode: "world", worldScope } }];
+    const remote = fakeRemote();
+    remote.read = async () => ({ ok: true, value: data });
+    const accept = vi.fn(async (_conversationId: string, input: { requestId: string; entry: AgentEntryIntent }) => {
+      const decoded = decodeAcceptTurnRequest({ requestId: input.requestId, entry: input.entry });
+      return decoded.ok
+        ? { ok: true as const, value: { conversation: data.conversation, turn: data.turns[0]!, reused: false } }
+        : { ok: false as const, code: "malformed-request" as const, error: decoded.message };
+    });
+    remote.accept = accept;
+    const service = createAgentConversationService({ remote, navigation: navStub(DETAIL).navigation });
+    const { el, root, act } = await mount(<AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} onClose={() => undefined}
+      targetExecution={() => ({ action: "modify", canvasId: "cv", nodeId: "n1", mode: "world", worldScope, prompt: "" })} />);
+    try {
+      const field = el.querySelector<HTMLTextAreaElement>(".agent-detail__reply-input")!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "继续讨论这个场景");
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const form = el.querySelector<HTMLFormElement>(".agent-detail__reply")!;
+      await act(async () => {
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      });
+      await act(async () => undefined);
+      expect(accept).toHaveBeenCalledTimes(1);
+      expect(accept.mock.calls[0]![1].entry).toMatchObject({ action: "modify", mode: "world", worldScope });
+      expect(el.querySelector(".agent-detail__reply-error")).toBeNull();
+    } finally { await act(async () => { root.unmount(); }); el.remove(); }
+  });
+
+  it("canvas-group 续聊同样按 modify 提交，避免被当成无工具讨论", async () => {
+    const data = snapshot();
+    data.conversation.nodeId = "n1";
+    data.turns = [{ ...turn(), status: "succeeded", stage: "succeeded", target: { canvasId: "cv", nodeId: "n1", mode: "canvas-group" } }];
+    const remote = fakeRemote();
+    remote.read = async () => ({ ok: true, value: data });
+    const accept = vi.fn(async (_conversationId: string, input: { requestId: string; entry: AgentEntryIntent }) => {
+      const decoded = decodeAcceptTurnRequest({ requestId: input.requestId, entry: input.entry });
+      return decoded.ok
+        ? { ok: true as const, value: { conversation: data.conversation, turn: data.turns[0]!, reused: false } }
+        : { ok: false as const, code: "malformed-request" as const, error: decoded.message };
+    });
+    remote.accept = accept;
+    const service = createAgentConversationService({ remote, navigation: navStub(DETAIL).navigation });
+    const { el, root, act } = await mount(<AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} onClose={() => undefined}
+      targetExecution={() => ({ action: "modify", canvasId: "cv", nodeId: "n1", mode: "canvas-group", prompt: "" })} />);
+    try {
+      const field = el.querySelector<HTMLTextAreaElement>(".agent-detail__reply-input")!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "将卡车图换成飞机图");
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const form = el.querySelector<HTMLFormElement>(".agent-detail__reply")!;
+      await act(async () => {
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      });
+      await act(async () => undefined);
+      expect(accept).toHaveBeenCalledTimes(1);
+      expect(accept.mock.calls[0]![1].entry).toMatchObject({ action: "modify", mode: "canvas-group" });
+      expect(el.querySelector(".agent-detail__reply-error")).toBeNull();
+    } finally { await act(async () => { root.unmount(); }); el.remove(); }
+  });
 });

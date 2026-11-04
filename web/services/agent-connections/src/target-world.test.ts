@@ -36,6 +36,7 @@ describe("world target prompt and tools", () => {
       ASSISTANT_WORLD_TOOL.replaceModel,
       ASSISTANT_WORLD_TOOL.moveModel,
       ASSISTANT_WORLD_TOOL.setAnimation,
+      ASSISTANT_WORLD_TOOL.resizeArea,
       ASSISTANT_WORLD_TOOL.createCamera,
       ASSISTANT_WORLD_TOOL.setCamera,
       ASSISTANT_WORLD_TOOL.completeCamera

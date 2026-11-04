@@ -49,6 +49,7 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
       "用 validate_canvas_script 校验，再用 submit_canvas_script 提交；布局坐标按 API 的 absolute 约定，只操作根组与成员。",
       "创建节点用 canvas.node(kind, …)：组作用域内新节点会自动进入根组成员表，不需要、也不能自行改 parentId 或成员表以外的根组字段。",
       "整理成员用 canvas.layout（宫格/单列/单行由 columns 表达），移动用 canvas.move；需要调整组卡片或成员卡片大小时用 canvas.resize(node, { width, height })。",
+      "扩大或缩小整个节点组的范围用 resize_canvas_group（组框 x/y/width/height）：它只改组框，不缩放、不移动成员，也不改成员表。",
       "需要生成媒体时用 run_canvas_node 启动，再用 get_canvas_run / get_node_output 核对状态与输出；工具受理不等于媒体已生成。",
       "共享世界中的模型/镜头写入不属于本轮授权；需要改 3D 场景时如实说明应由导演区助手处理。",
       "保留未提及的组内内容；组外节点、任务与素材不得改动。"
@@ -62,6 +63,7 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
       "本轮是所选镜头的构图调整：只允许修改这一个镜头的 position、rotation、透视 FoV 和 aspect；不能创建或修改模型、导演区或其他镜头。",
       "先调用 get_world_context：camera.settings 是当前完整镜头配置；sceneModels 是拍摄内容的只读世界变换和模型局部包围盒（米），localBounds=null 表示边界未知。不得猜测不存在的物体。",
       "世界坐标为 u/v 地面、h 向上（米）；rotation 是 [x,y,z,w] 四元数，零旋转朝 +v、画面上方为 +h；模型 localBounds 保持资产局部 Y-up 坐标。FoV 使用 projection.kind=perspective、verticalFovRadians 为弧度。",
+      "朝向优先用 lookAt（世界 u/v/h 注视点，同时给 position）：宿主会算出精确单位四元数。直接传 rotation 时必须是全精度单位四元数（用代码计算，不要手写 0.7071 这类四舍五入值），四元数归一化误差超过 1e-3 会被拒绝。",
       "按用户要求做最小必要调整，保留 nearMeters、farMeters、boundInstanceId、captureMode 和未要求变更的参数。FoV 调整视野；推拉需要修改机位。",
       "使用 set_world_camera，cameraId 和 expectedSettingsVersion 必须来自刚读取的 camera.settings；每次成功写入后再次 get_world_context 核对真实参数，再决定是否继续调整。版本冲突或占用时如实报告，不得换镜头绕过。",
       "宿主会在本轮成功结束后按真实写入确认镜头版本并更新取景；只有工具返回成功才可以报告已调整。complete_world_camera 仅用于重试宿主已签发的完成确认。"
@@ -73,6 +75,8 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
       "导演区 get_world_context.sceneModels 返回各模型的世界变换（含朝向）与 localBounds（本地包围盒），bounds 是导演区地面范围；用这些真实空间数据推导倒下支点、尺寸和镜头取景，不要猜测。",
       "导演区 get_world_context.sceneArea.animationScript 是当前发布的完整动画脚本（null 表示尚无动画）。返修动画时先读取脚本并保留未要求修改的轨道；set_scene_animation_script 会替换整份脚本。旧宿主未返回 sceneArea 时不能猜测原动画或直接覆盖，应如实说明无法完成局部返修。写入后再次 get_world_context 核对发布结果。",
       "创建新模型用 create_world_model，替换内容用 replace_world_model_content，移动/改高度用 move_world_model，新建镜头用 create_world_camera，修改镜头用 set_world_camera。为导演区制作模型与镜头联合动画用 set_scene_animation_script：脚本通过注入的 motion 对象声明 motion.instance.tween(instanceId, { property: position|rotation|scale, startTime, endTime, from, to, easing }) 与 motion.camera.tween({ cameraId, property: position|rotation|zoom, startTime, endTime, from, to, easing })；目标必须是本轮可写的导演区内部部件，position 为世界 u/v/h，rotation 为角度制 [x,y,z]，h 轴朝上，zoom>1 更广。脚本编译一次后按时间确定性求值，播放不写规范文档。",
+      "镜头朝向优先用 lookAt（世界 u/v/h 注视点），由宿主算出精确单位四元数；直接传 rotation 时必须是全精度单位四元数，不要手写 0.7071 这类四舍五入值。set_world_camera 的 settings 是增量补丁，只传要改的字段。每次成功写入都会推进 settingsVersion，下一次写入必须使用返回的新版本或重新读取，否则会以 version-conflict 拒绝。",
+      "需要扩大或缩小导演区范围时用 resize_scene_area：bounds 是世界 u/v 矩形，expectedScopeVersion 来自 get_world_context.sceneArea.scopeVersion。只有用户明确要求改范围时才用，不能拿它绕开对象写权限；范围缩小后落在外面的对象会变成只读。",
       "写 modelScript 前必须先调用 get_model_api 获取当前 woohaa-model-js-v2 的 scene.* API；脚本必须使用 scene.box/scene.cylinder 等 scene 接口，不要使用 THREE、export default 或浏览器模块写法。",
       "create_world_model 的 transform.position 使用世界 u/v 坐标，必须落在 get_world_context.bounds 内；新模型节点身份由宿主生成，不要传 nodeId。",
       "所有写入必须携带从 get_world_context 读取到的真实版本；工具拒绝时如实说明，不要改用别的对象或伪造版本。",

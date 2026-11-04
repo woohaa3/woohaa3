@@ -6,6 +6,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
   agentProtocolVersion,
+  MIN_NODE_HEIGHT,
+  MIN_NODE_WIDTH,
   type AgentPlanOperation,
   type AgentSemanticKind
 } from "@woohaa3/contracts";
@@ -149,6 +151,36 @@ export function registerAgentPlanTools(server: McpServer, deps: AgentAuthoringTo
         size: { width, height }
       };
       return applyOperations(deps, { canvasId, requestId, operations: [operation], scope: "apply_canvas_plan" });
+    }
+  );
+
+  server.registerTool(
+    "resize_canvas_group",
+    {
+      title: "调整节点组范围",
+      description:
+        "只调整本轮 2D 组的组框矩形（x/y/width/height，世界画布坐标）。不改变成员表、不缩放也不移动成员卡片；扩大或缩小节点组范围时使用。",
+      inputSchema: z.strictObject({
+        ...CANVAS_ID_SCHEMA,
+        requestId: z.string().min(1),
+        x: z.number().finite(),
+        y: z.number().finite(),
+        width: z.number().min(MIN_NODE_WIDTH),
+        height: z.number().min(MIN_NODE_HEIGHT)
+      }),
+      outputSchema: z.looseObject({ ok: z.literal(true), canvasId: z.string(), requestId: z.string(), revision: z.number() }),
+      annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false }
+    },
+    async ({ canvasId, requestId, x, y, width, height }) => {
+      const rootGroupId = deps.grant?.groupScope?.rootGroupId;
+      if (!rootGroupId) {
+        return errorResult({ code: "capability-unsupported", message: "本轮不是 2D 组范围" } as never);
+      }
+      const operations: AgentPlanOperation[] = [
+        { op: "move_node", coordinateSpace: "world", target: { nodeId: rootGroupId }, position: { x, y } },
+        { op: "resize_node", target: { nodeId: rootGroupId }, size: { width, height } }
+      ];
+      return applyOperations(deps, { canvasId, requestId, operations, scope: "apply_canvas_plan" });
     }
   );
 

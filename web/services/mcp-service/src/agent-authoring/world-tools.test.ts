@@ -28,7 +28,7 @@ function grant(): ApplicationToolGrant {
     token: "grant-token",
     canvasIds: ["canvas-1"],
     nodeIds: [],
-    tools: ["get_world_context", "create_world_model", "set_scene_animation_script", "set_world_camera", "complete_world_camera"],
+    tools: ["get_world_context", "create_world_model", "set_scene_animation_script", "resize_scene_area", "create_world_camera", "set_world_camera", "complete_world_camera"],
     workId: "req-1",
     subject: "owner-1",
     world: {
@@ -101,7 +101,7 @@ describe("assistant world MCP tools", () => {
           version: "assistant-world-authority-v1", canvasId: "canvas-1", contextId: "ctx-1", runId: "run-1", epoch: 0,
           scope: { scope: { kind: "scene-area", areaId: "area-1" }, scopeVersion: "scope-1" },
           writable: [{ kind: "instance", instanceId: "actor-1", version: "actor-v1" }], readOnly: [], objects: [],
-          worldWritable: true, sceneArea: { nodeId: "area-node", revision: 7, animationScript }
+          worldWritable: true, sceneArea: { nodeId: "area-node", revision: 7, scopeVersion: "scope-1", animationScript }
         } };
       },
       async write() { throw new Error("Read must not write"); },
@@ -197,6 +197,99 @@ describe("assistant world MCP tools", () => {
     }, token.token);
     expect(smuggled.result?.isError).toBe(true);
     expect(calls).toHaveLength(2);
+  });
+
+  it("turns lookAt into an exact unit quaternion and forwards partial camera patches", async () => {
+    const calls: Array<import("@woohaa3/contracts").AssistantWorldWriteInput> = [];
+    const world: AssistantWorldToolClient = {
+      read: () => ({ ok: false, code: "not-issued", message: "not used" }),
+      async write(input) {
+        calls.push(input);
+        return {
+          ok: true,
+          canvasId: "canvas-1",
+          commandId: "cmd-camera",
+          revision: 3,
+          duplicate: false,
+          noop: false,
+          cameraId: "camera-1",
+          settingsVersion: "camera-v2",
+          version: "camera-v2",
+          view: { forward: { u: 0, v: 1, h: 0 }, groundIntersection: { u: 10, v: 5 } }
+        };
+      },
+      async complete() {
+        return { ok: true, duplicate: false, settingsVersion: "camera-v2", completionId: "completion-1" };
+      }
+    };
+    const token = grant();
+    const base = await start(world, token);
+    const created = await callTool(base, "create_world_camera", {
+      settings: {
+        position: { u: 10, v: 0, h: 1 },
+        lookAt: { u: 12, v: 0, h: 1 },
+        projection: { kind: "perspective", verticalFovRadians: Math.PI / 3, nearMeters: 0.1, farMeters: 500 },
+        captureMode: { kind: "static" },
+        aspect: { width: 16, height: 9 },
+        boundInstanceId: null
+      }
+    }, token.token);
+    expect(created.result?.isError).toBeFalsy();
+    const createdOperation = calls[0]?.operation;
+    if (createdOperation?.kind !== "create-world-camera") throw new Error("missing create operation");
+    expect(createdOperation.settings).not.toHaveProperty("lookAt");
+    const norm = createdOperation.settings.rotation.reduce((sum, value) => sum + value * value, 0);
+    expect(Math.abs(norm - 1)).toBeLessThan(1e-6);
+    expect(createdOperation.settings.rotation[2]).toBeCloseTo(-Math.SQRT1_2, 9);
+    expect(createdOperation.settings.rotation[3]).toBeCloseTo(Math.SQRT1_2, 9);
+    // The result hands back where the lens points so the caller can check framing.
+    expect(created.result?.content?.[0]?.text).toContain("朝向 (u,v,h)=(0, 1, 0)");
+    expect(created.result?.content?.[0]?.text).toContain("地面落点 (u,v)=(10, 5)");
+
+    const adjusted = await callTool(base, "set_world_camera", {
+      cameraId: "camera-1",
+      expectedSettingsVersion: "camera-v1",
+      settings: { position: { u: 11, v: 0, h: 0.5 } }
+    }, token.token);
+    expect(adjusted.result?.isError).toBeFalsy();
+    const adjustedOperation = calls[1]?.operation;
+    if (adjustedOperation?.kind !== "set-world-camera") throw new Error("missing set operation");
+    expect(adjustedOperation.settings).toEqual({ position: { u: 11, v: 0, h: 0.5 } });
+  });
+
+  it("resizes the director area through the dedicated range tool", async () => {
+    const calls: Array<import("@woohaa3/contracts").AssistantWorldWriteInput> = [];
+    const world: AssistantWorldToolClient = {
+      read: () => ({ ok: false, code: "not-issued", message: "not used" }),
+      async write(input) {
+        calls.push(input);
+        return {
+          ok: true,
+          canvasId: "canvas-1",
+          commandId: "cmd-area",
+          revision: 4,
+          duplicate: false,
+          noop: false,
+          version: "area-scope-2"
+        };
+      },
+      async complete() {
+        return { ok: false, code: "not-issued", message: "not used" };
+      }
+    };
+    const token = grant();
+    const base = await start(world, token);
+    const bounds = { min: { u: -50, v: -50 }, max: { u: 190, v: 190 } };
+    const result = await callTool(base, "resize_scene_area", { expectedScopeVersion: "scope-1", bounds }, token.token);
+    expect(result.result?.isError).toBeFalsy();
+    expect(calls[0]?.operation).toMatchObject({ kind: "resize-scene-area", expectedScopeVersion: "scope-1", bounds });
+
+    const unordered = await callTool(base, "resize_scene_area", {
+      expectedScopeVersion: "scope-1",
+      bounds: { min: { u: 5, v: 5 }, max: { u: 0, v: 0 } }
+    }, token.token);
+    expect(unordered.result?.isError).toBe(true);
+    expect(calls).toHaveLength(1);
   });
 
   it("does not expose or execute world writes without a host grant", async () => {

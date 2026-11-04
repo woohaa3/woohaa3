@@ -42,6 +42,7 @@ import {
   type AssistantWorldWriteOperation,
   type AssistantWorldWriteOutcome,
   type CanvasNodeData,
+  type SceneAreaData,
   type ServerCanvas,
   type WorldObjectIdentity,
   type WorldObjectVersion,
@@ -50,13 +51,15 @@ import {
   type WorldToolContext,
   WORLD_CAMERA_CARD_SIZE,
   createWorldAnimationScript,
-  executeWorldAnimationScript
+  executeWorldAnimationScript,
+  mergeWorldCameraSettings,
+  worldCameraView
 } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash } from "@woohaa3/contracts/canvas-yjs";
 import type { CanvasRoom } from "../sync/room.js";
 import type { RoomCommandResult } from "../sync/room-types.js";
-import { stableAuthorityVersion, worldObjectVersion, type WorldAuthoringAuthority } from "./authority.js";
-import { findWorldCameraNodeId, planWorldCameraSettings, type WorldCameraSettingsService } from "./camera-service.js";
+import { stableAuthorityVersion, worldObjectVersion, nextSceneAreaScopeVersion, type WorldAuthoringAuthority } from "./authority.js";
+import { findWorldCameraNodeId, planWorldCameraSettings, worldCameraSettingsOf, type WorldCameraSettingsService } from "./camera-service.js";
 import type { WorldCameraCompletionVerification } from "./camera-service.js";
 import type { WorldAuthoringService } from "./scene-area-service.js";
 import { objectKey, type LeaseRecord, type SpatialWriteContext } from "./spatial-leases.js";
@@ -71,7 +74,7 @@ import {
 
 export type AssistantWorldServiceDeps = {
   authority: Pick<WorldAuthoringAuthority, "prepareContent" | "prepareCanvas"> & Partial<Pick<WorldAuthoringAuthority, "cacheFor" | "prepareCamera">>;
-  worldAuthoring: Pick<WorldAuthoringService, "issueContext" | "revokeContext" | "resolveCapability" | "refreshContextVersions">;
+  worldAuthoring: Pick<WorldAuthoringService, "issueContext" | "revokeContext" | "resolveCapability" | "refreshContextVersions" | "refreshContextScope">;
   cameraSettings: Pick<WorldCameraSettingsService, "save" | "complete">;
   resolveRoom(canvasId: string): Promise<CanvasRoom | null>;
   cancel(canvasId: string, requestId: string): Promise<void>;
@@ -284,6 +287,16 @@ function findInstanceNode(canvas: ServerCanvas, instanceId: string): { nodeId: s
 
 function hasNode(canvas: ServerCanvas, nodeId: string): boolean {
   return canvas.document.nodes.some(node => node.id === nodeId);
+}
+
+/** Locate a scene area by its stable areaId (node id may differ). */
+function findArea(canvas: ServerCanvas, areaId: string): { node: ServerCanvas["document"]["nodes"][number]; area: SceneAreaData } | null {
+  for (const node of canvas.document.nodes) {
+    if (node.type !== "scene-area") continue;
+    const decoded = decodeSceneAreaData(canvas.nodeData[node.id]?.sceneArea);
+    if (decoded.ok && decoded.value.areaId === areaId) return { node, area: decoded.value };
+  }
+  return null;
 }
 
 export function createAssistantWorldService(deps: AssistantWorldServiceDeps): AssistantWorldService {
@@ -760,7 +773,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
           }
         }
         bounds = decoded.value.bounds;
-        sceneArea = { nodeId: node.id, revision: inspected.canvas.revision, animationScript: decoded.value.animationScript ?? null };
+        sceneArea = { nodeId: node.id, revision: inspected.canvas.revision, scopeVersion: decoded.value.scopeVersion, animationScript: decoded.value.animationScript ?? null };
         break;
       }
       if (!sceneArea) return failure("outside-scope", "导演区不存在");
@@ -854,11 +867,13 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       if (!deps.authority.prepareCamera) return failure("capability-unsupported", "宿主未装配镜头范围权威");
       const refreshed = await deps.authority.prepareCamera(inspected.canvas, context.scope.scope.cameraId);
       if (!refreshed.ok) return failure(refreshed.code, refreshed.message);
-      if (operation.kind !== "set-world-camera" || operation.settings.projection.kind !== "perspective") return failure("invalid-data", "镜头调整须使用透视投影");
+      if (operation.kind !== "set-world-camera") return failure("invalid-data", "本轮只允许调整所选镜头");
       const nodeId = findWorldCameraNodeId(inspected.canvas, operation.cameraId);
       const current = decodeWorldCamera(nodeId ? inspected.canvas.nodeData[nodeId]?.worldCamera : null);
       if (!current.ok) return failure("not-found", "镜头不存在");
-      if (operation.settings.boundInstanceId !== current.value.boundInstanceId || operation.settings.captureMode.kind !== current.value.captureMode.kind) {
+      const merged = mergeWorldCameraSettings(worldCameraSettingsOf(current.value), operation.settings);
+      if (merged.projection.kind !== "perspective") return failure("invalid-data", "镜头调整须使用透视投影");
+      if (merged.boundInstanceId !== current.value.boundInstanceId || merged.captureMode.kind !== current.value.captureMode.kind) {
         return failure("outside-scope", "本轮只调整机位、视野和画幅，请保留镜头的拍摄内容与输出方式");
       }
     }
@@ -873,6 +888,9 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     }
     if (operation.kind === "set-scene-animation-script") {
       return setSceneAnimationScript(ledger, context, operation, inspected);
+    }
+    if (operation.kind === "resize-scene-area") {
+      return resizeSceneArea(ledger, context, capability, operation, inspected);
     }
     if (operation.kind === "create-world-camera") {
       return createCamera(ledger, context, capability, operation, inspected);
@@ -891,15 +909,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       return failure("capability-unsupported", "2D 组没有导演区动画能力");
     }
     const areaId = context.scope.scope.areaId;
-    const findArea = (canvas: ServerCanvas) => {
-      for (const node of canvas.document.nodes) {
-        if (node.type !== "scene-area") continue;
-        const decoded = decodeSceneAreaData(canvas.nodeData[node.id]?.sceneArea);
-        if (decoded.ok && decoded.value.areaId === areaId) return { node, area: decoded.value };
-      }
-      return null;
-    };
-    const located = findArea(inspected.canvas);
+    const located = findArea(inspected.canvas, areaId);
     if (!located) return failure("outside-scope", "导演区不存在");
     // 脚本必须先编译成功，且目标只允许本轮可写的导演区内部部件（实例与镜头）。
     const compiled = executeWorldAnimationScript(operation.script, { duration: operation.duration, loop: operation.loop });
@@ -926,7 +936,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     const result = await inspected.room.submitDerived({
       commandId,
       async derive(canvas) {
-        const current = findArea(canvas);
+        const current = findArea(canvas, areaId);
         if (!current) return { ok: false as const, code: "outside-scope", message: "导演区不存在" };
         return {
           ok: true as const,
@@ -954,6 +964,78 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       duplicate: result.duplicate === true,
       noop: result.noop === true,
       version: located.area.scopeVersion
+    };
+  }
+
+  /**
+   * Explicit director-area range change. It only patches the area bounds (and the
+   * derived scope version); models and cameras are never moved or scaled by this
+   * operation. Shrinking may leave objects outside the range, which makes them
+   * read-only for later writes — the author asked for that range.
+   */
+  async function resizeSceneArea(
+    ledger: RunLedger,
+    context: WorldToolContext,
+    capability: SpatialWriteContext,
+    operation: Extract<AssistantWorldWriteOperation, { kind: "resize-scene-area" }>,
+    inspected: { ok: true; room: CanvasRoom; canvas: ServerCanvas }
+  ): Promise<AssistantWorldWriteOutcome> {
+    if (context.scope.scope.kind !== "scene-area") {
+      return failure("capability-unsupported", "2D 组没有导演区范围能力");
+    }
+    const areaId = context.scope.scope.areaId;
+    const located = findArea(inspected.canvas, areaId);
+    if (!located) return failure("outside-scope", "导演区不存在");
+    if (located.area.scopeVersion !== operation.expectedScopeVersion) {
+      return failure("version-conflict", `导演区范围已变化（当前 ${located.area.scopeVersion}），请使用该版本重试`);
+    }
+    const bounds = {
+      min: { u: operation.bounds.min.u, v: operation.bounds.min.v },
+      max: { u: operation.bounds.max.u, v: operation.bounds.max.v }
+    };
+    const scopeVersion = nextSceneAreaScopeVersion(areaId, bounds);
+    const commandId = intentCommandId("assistant-world-resize-area", operation);
+    const result = await inspected.room.submitDerived({
+      commandId,
+      async derive(canvas) {
+        const current = findArea(canvas, areaId);
+        if (!current) return { ok: false as const, code: "outside-scope", message: "导演区不存在" };
+        if (current.area.scopeVersion !== operation.expectedScopeVersion) {
+          return { ok: false as const, code: "version-conflict", message: "导演区范围已变化" };
+        }
+        return {
+          ok: true as const,
+          batch: {
+            protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+            canvasId: ledger.canvasId,
+            commandId,
+            actorId: `assistant-world:${context.runId}`,
+            baseRevision: canvas.revision,
+            commands: [{
+              type: "nodeData.patch" as const,
+              nodeId: current.node.id,
+              value: { sceneArea: { ...current.area, bounds, scopeVersion } } as unknown as CanvasNodeData
+            }]
+          }
+        };
+      }
+    }, { spatialContext: capability });
+    if (!result.ok) return commandFailure(result);
+    // The run's context and durable lease advanced to the new scope version inside
+    // the commit; mirror it in-process so later writes in this run keep working.
+    deps.worldAuthoring.refreshContextScope({
+      canvasId: ledger.canvasId,
+      contextId: ledger.contextId,
+      scope: { scope: { kind: "scene-area", areaId }, scopeVersion }
+    });
+    return {
+      ok: true,
+      canvasId: ledger.canvasId,
+      commandId,
+      revision: result.revision,
+      duplicate: result.duplicate === true,
+      noop: result.noop === true,
+      version: scopeVersion
     };
   }
 
@@ -1194,7 +1276,8 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       noop: result.noop,
       cameraId: intent.cameraId,
       settingsVersion: intent.settingsVersion,
-      version: intent.settingsVersion
+      version: intent.settingsVersion,
+      view: worldCameraView(intent.snapshot)
     };
   }
 
@@ -1287,6 +1370,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       cameraId: operation.cameraId,
       nodeId: operation.nodeId,
       settingsVersion: planned.settingsVersion,
+      view: worldCameraView(planned),
       ...(version ? { version } : {})
     };
   }
@@ -1300,7 +1384,9 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     const identity: WorldObjectIdentity = { kind: "camera", cameraId: operation.cameraId };
     const granted = findWritable(context, identity);
     if (!granted) return failure("outside-scope", "镜头不在本次可写集合");
-    if (granted.version !== operation.expectedSettingsVersion) return failure("version-conflict", "镜头配置已变化");
+    if (granted.version !== operation.expectedSettingsVersion) {
+      return failure("version-conflict", `镜头配置已变化（当前 ${granted.version}），请使用该版本重试`);
+    }
     const nodeId = findWorldCameraNodeId(inspected.canvas, operation.cameraId);
     if (!nodeId) {
       // No canonical camera node to bind a durable payload hash to. The
@@ -1356,14 +1442,18 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         noop: false,
         cameraId: operation.cameraId,
         settingsVersion: direct.settingsVersion,
-        version: direct.settingsVersion
+        version: direct.settingsVersion,
+        view: worldCameraView(direct.camera)
       };
     }
-    const planned = planWorldCameraSettings(operation.cameraId, operation.settings);
+    const currentCamera = decodeWorldCamera(inspected.canvas.nodeData[nodeId]?.worldCamera);
+    if (!currentCamera.ok) return failure("not-found", "镜头不存在");
+    const settings = mergeWorldCameraSettings(worldCameraSettingsOf(currentCamera.value), operation.settings);
+    const planned = planWorldCameraSettings(operation.cameraId, settings);
     if ("ok" in planned) return failure(planned.code === "not-ready" ? "not-ready" : "invalid-data", planned.message);
     const intentHash = stableAuthorityVersion("assistant-world-camera-intent", {
       expectedSettingsVersion: operation.expectedSettingsVersion,
-      settings: operation.settings
+      settings
     });
     // Exact command identity and frozen payload. camera-service derives the
     // same commandId from the operation id + intent hash and is given the same
@@ -1424,7 +1514,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         canvasId: ledger.canvasId,
         cameraId: operation.cameraId,
         expectedSettingsVersion: operation.expectedSettingsVersion,
-        settings: operation.settings,
+        settings,
         contextId: ledger.contextId,
         actorId: `assistant-world:${context.runId}`,
         operationId: `${operation.operationId}:${intentHash}`,

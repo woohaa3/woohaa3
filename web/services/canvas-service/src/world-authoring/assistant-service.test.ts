@@ -112,7 +112,8 @@ function harness(overrides: {
       resolveCapability() {
         return { context, capability: {} };
       },
-      refreshContextVersions() { /* no-op stub */ }
+      refreshContextVersions() { /* no-op stub */ },
+      refreshContextScope() { /* no-op stub */ }
     },
     cameraSettings: {
       async save(input: never) {
@@ -320,6 +321,55 @@ describe("assistant world authority", () => {
       }
     });
     expect(outside).toMatchObject({ ok: true, cameraId: "asset-camera-2", nodeId: "asset-camera-node-2" });
+  });
+
+  it("returns the camera view so a wrong framing is visible after a successful write", async () => {
+    const canvas = canvasFixture();
+    canvas.nodeData["area"] = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "scope-1",
+        bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+      }
+    } as never;
+    const { service } = harness({ canvas });
+    const issued = await service.issue({
+      canvasId: "canvas-1",
+      requestId: "req-1",
+      runId: "run-1",
+      epoch: 0,
+      executionId: "exec-1",
+      scope: { kind: "scene-area", areaId: "area-1" }
+    });
+    if (!issued.ok) throw new Error(issued.message);
+    const written = await service.write({
+      contextId: issued.context.contextId,
+      operation: {
+        kind: "create-world-camera",
+        operationId: "create-camera-view",
+        nodeId: "asset-camera-node-view",
+        cameraId: "asset-camera-view",
+        settings: {
+          // -90° pitch about u: the lens points straight down at the ground under (5, 5).
+          position: { u: 5, v: 5, h: 2 },
+          rotation: [-Math.SQRT1_2, 0, 0, Math.SQRT1_2],
+          projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+          captureMode: { kind: "static" },
+          aspect: { width: 16, height: 9 },
+          boundInstanceId: null
+        }
+      }
+    });
+    if (!written.ok) throw new Error(written.message);
+    expect(written.view).toBeDefined();
+    expect(written.view!.forward.u).toBeCloseTo(0, 6);
+    expect(written.view!.forward.v).toBeCloseTo(0, 6);
+    expect(written.view!.forward.h).toBeCloseTo(-1, 6);
+    expect(written.view!.groundIntersection).not.toBeNull();
+    expect(written.view!.groundIntersection!.u).toBeCloseTo(5, 6);
+    expect(written.view!.groundIntersection!.v).toBeCloseTo(5, 6);
   });
 
   it("records completion once only after the host records a successful terminal turn", async () => {
