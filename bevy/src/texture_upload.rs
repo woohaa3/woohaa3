@@ -23,6 +23,7 @@ pub fn set_texture(
     if content.len() > 4096 {
         return Err(BoundaryError::from_str("Texture content identity too large"));
     }
+    bridge::texture_receipts::invalidate("node",id);
     bridge::queue_texture(
         id,
         width,
@@ -47,6 +48,7 @@ pub fn set_texture_owned(
     if content.len() > 4096 {
         return Err(BoundaryError::from_str("Texture content identity too large"));
     }
+    bridge::texture_receipts::invalidate("node",id);
     bridge::queue_texture_owned(id, width, height, rgba, (!content.is_empty()).then_some(content));
     Ok(())
 }
@@ -79,6 +81,7 @@ pub fn set_model_media_texture(
     crate::wake_canvas();
     protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
     bridge::queue_model_texture(id, width, height, rgba);
+
     Ok(())
 }
 
@@ -92,5 +95,23 @@ pub fn set_model_media_texture_owned(
 ) -> Result<(), BoundaryError> {
     protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
     bridge::queue_model_texture_owned(id, width, height, rgba);
+
     Ok(())
+}
+
+/// Drains application receipts. Applying assets is distinct from GPU presentation.
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn poll_texture_receipts() -> String { bridge::texture_receipts::take() }
+
+/// Apply presentation-only resource flags without replacing the full scene/query snapshot.
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn set_resource_states(json: &str) -> Result<u32, BoundaryError> {
+    if json.len() > 1024 * 1024 { return Err(BoundaryError::from_str("Resource state payload too large")); }
+    let request: protocol::ResourceStateRequest = serde_json::from_str(json).map_err(|e| BoundaryError::from_str(&e.to_string()))?;
+    let generation = crate::canvas_query::interaction::accept_resource_states(&request).map_err(BoundaryError::from_str)?;
+    bridge::queue_resource_states(request.nodes);
+    crate::wake_canvas();
+    Ok(generation)
 }

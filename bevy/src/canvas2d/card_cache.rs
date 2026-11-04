@@ -15,7 +15,7 @@ use crate::{
 };
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
-pub(super) const BLOCK_SIZE: usize = 16;
+const BLOCK_SIZE: usize = 16;
 // Owned exact draw inputs, rather than hashes or complete model/media payloads.
 // Comparing borrows on warm frames avoids copying body strings and vertex data.
 #[derive(PartialEq)]
@@ -75,7 +75,7 @@ impl DrawKey {
 pub(super) struct Block {
     // Includes local document index: changing a group/card slot shifts z even
     // when the remaining ordinary cards have identical IDs and coordinates.
-    keys: Vec<(usize, usize, DrawKey)>,
+    keys: Vec<(usize, DrawKey)>,
     theme: String,
     entity: Option<Entity>,
     mesh: Option<Handle<Mesh>>,
@@ -88,7 +88,6 @@ pub(super) struct Block {
 #[derive(Resource, Default)]
 pub(crate) struct CardBlockCache {
     pub(super) blocks: Vec<Block>,
-    pub(super) initialized: bool,
 }
 fn ordinary(_node: &GraphNode) -> bool {
     true
@@ -127,14 +126,11 @@ pub(super) fn sync(
     requests: &mut LabelRequests,
     cards: &[CardInput<'_>],
     document_len: usize,
-    dirty_blocks: Option<&std::collections::HashSet<usize>>,
     scene: &Scene,
     theme: &ThemeResource,
     materials: &CanvasMaterials,
 ) -> u64 {
-    if dirty_blocks.is_none() {
-        requests.begin(CanvasLabelRole::Card);
-    }
+    requests.begin(CanvasLabelRole::Card);
     let mut blocks = std::mem::take(&mut visuals.blocks);
     let count = document_len.div_ceil(BLOCK_SIZE);
     let focused_id = super::image_focus::presented_media_focus(scene).map(|focus| focus.node_id);
@@ -147,36 +143,18 @@ pub(super) fn sync(
     }
     blocks.truncate(count);
     blocks.resize_with(count, Block::default);
-    // Bucket once instead of scanning every card for every 16-node block.
-    let mut buckets = vec![Vec::new(); count];
-    for card in cards {
-        if card.index < document_len
-            && ordinary(card.node)
-            && focused_id != Some(card.node.id.as_str())
-        {
-            buckets[card.index / BLOCK_SIZE].push(card);
-        }
-    }
     let mut rebuilt = 0;
-    for (block_index, block_cards) in buckets.into_iter().enumerate() {
-        if dirty_blocks.is_some_and(|dirty| !dirty.contains(&block_index)) {
-            continue;
-        }
+    for block_index in 0..count {
         let block = &mut blocks[block_index];
-        if dirty_blocks.is_some() {
-            for request in &block.labels {
-                requests.remove(CanvasLabelRole::Card, request.owner);
-            }
-        }
-        let keys: Vec<(usize, usize, DrawKey)> = block_cards
+        let range = block_index * BLOCK_SIZE..((block_index + 1) * BLOCK_SIZE).min(document_len);
+        let block_cards: Vec<&CardInput<'_>> = cards
             .iter()
-            .map(|card| {
-                (
-                    card.index,
-                    card.render,
-                    DrawKey::new(card.node, attach_owner),
-                )
-            })
+            .filter(|card| range.contains(&card.index))
+            .filter(|card| ordinary(card.node) && focused_id != Some(card.node.id.as_str()))
+            .collect();
+        let keys: Vec<(usize, DrawKey)> = block_cards
+            .iter()
+            .map(|card| (card.index, DrawKey::new(card.node, attach_owner)))
             .collect();
         let label_keys: Vec<_> = block_cards
             .iter()
@@ -263,7 +241,6 @@ pub(super) fn sync(
         rebuilt += 1;
     }
     visuals.blocks = blocks;
-    visuals.initialized = true;
     rebuilt
 }
 
