@@ -66,6 +66,8 @@ export async function restoreNodeHistory(
     nodeId: string;
     entryId: string;
     expectedCurrentIdentity?: string;
+    /** API 层要求：进行中的生成不得被恢复覆盖（服务内部调用可放行）。 */
+    rejectActiveGeneration?: boolean;
   }
 ): Promise<NodeHistoryRestoreOutcome> {
   const { context } = deps;
@@ -84,7 +86,7 @@ export async function restoreNodeHistory(
     return { ok: false, code: "invalid-node-type", message: `节点 ${input.nodeId} 与历史种类不兼容` };
   }
   const data = canvas.nodeData[input.nodeId] as Record<string, unknown> | undefined;
-  if (isActiveGeneration(data)) {
+  if (input.rejectActiveGeneration && isActiveGeneration(data)) {
     return { ok: false, code: "conflict", message: "节点存在进行中的生成，无法恢复历史版本" };
   }
 

@@ -354,6 +354,7 @@ export class NodeHistoryApplicationService {
     nodeId: string;
     entryId: string;
     expectedCurrentIdentity?: string;
+    rejectActiveGeneration?: boolean;
   }): Promise<NodeHistoryRestoreOutcome> {
     return restoreNodeHistory(this.restoreDeps, input);
   }

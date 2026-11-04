@@ -371,7 +371,7 @@ async function handleApply(
   nodeId: string,
   entryId: string
 ): Promise<boolean> {
-  const outcome = await options.service.restore({ canvasId, nodeId, entryId });
+  const outcome = await options.service.restore({ canvasId, nodeId, entryId, rejectActiveGeneration: true });
   if (!outcome.ok) {
     const status = outcome.code === "not-found" ? 404
       : outcome.code === "canvas-not-found" ? 404

@@ -310,13 +310,14 @@ export function createCanvasAssistantTextPort(deps: {
           commandId: run.commandId,
           derive: (canvas) => {
             target(canvas, prepared.nodeId);
-            const current =
-              canvas.nodeData[prepared.nodeId]?.activeRunId === run.runId;
+            const activeRunId = canvas.nodeData[prepared.nodeId]?.activeRunId;
+            const current = activeRunId === run.runId;
+            // 恢复历史或清空 activeRunId 后，节点正文不再属于任何在途 run；
+            // 此时候选不得覆盖已恢复的人工/历史正文。乱序完成（activeRunId 是另一个 run）
+            // 仍按 latest-run-wins 归档，不在此拒绝。
+            const restored = activeRunId === "" || activeRunId?.startsWith("history:");
             if (
-              (current ||
-                canvas.nodeData[prepared.nodeId]?.activeRunId?.startsWith(
-                  "history:",
-                )) &&
+              (current || restored) &&
               textContentBaseline(canvas, prepared.nodeId) !== prepared.baseline
             )
               return {
