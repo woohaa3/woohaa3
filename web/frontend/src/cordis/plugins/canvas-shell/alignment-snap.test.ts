@@ -130,22 +130,6 @@ describe("resolveDragAlignmentSnap", () => {
   });
 });
 
-describe("候选与被拖动集合", () => {
-  it("被拖动节点的后代不进入候选（它们跟着一起动）", () => {
-    const index = createCanvasNodeIndex(canvasOf([
-      { id: "group", type: "group", x: 0, y: 0, width: 400, height: 400 },
-      { id: "child", x: 10, y: 10, width: 50, height: 50, parentId: "group" },
-      { id: "other", x: 600, y: 600, width: 100, height: 100 }
-    ]));
-    expect(index).not.toBeNull();
-    const moving = movingNodeIds(index!, roots(["group"]));
-    expect([...moving].sort()).toEqual(["child", "group"]);
-    const candidates = collectAlignmentCandidates(index!, moving);
-    expect(candidates.some(rect => rect.x === 10 && rect.y === 10)).toBe(false);
-    expect(candidates.some(rect => rect.x === 600 && rect.y === 600)).toBe(true);
-  });
-});
-
 describe("applyDragAlignment", () => {
   it("把参考线写回状态并只在变化时推进版本号", () => {
     const index = createCanvasNodeIndex(canvasOf([

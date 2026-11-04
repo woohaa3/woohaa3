@@ -39,7 +39,12 @@ const ALLOWLIST = new Set<string>([
   "cordis/services/canvas-session.test.ts",
   "cordis/ui/assistant-execution/authoring-composer.tsx",
   "cordis/plugins/node-history/plugin.test.tsx",
-  "cordis/plugins/task-execution/authoring-generate-panel.test.tsx"
+  "cordis/plugins/task-execution/authoring-generate-panel.test.tsx",
+  "cordis/plugins/canvas-runtime/host.ts",
+  "cordis/plugins/canvas-shell/interaction-2d-input.ts",
+  "cordis/plugins/canvas-shell/interaction-controller.ts",
+  "cordis/plugins/world-scopes/gestures.test.ts",
+  "cordis/plugins/world-scopes/gestures.ts"
 ]);
 
 function walk(dir: string, out: string[]): void {

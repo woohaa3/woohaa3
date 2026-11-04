@@ -27,6 +27,7 @@ import {
   revalidateDragAttachEdges,
 } from "./drag-attach.js";
 import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
+import { setAlignmentGuides } from "./alignment-snap.js";
 import type { InteractionCore } from "./interaction-core.js";
 import type { Gesture } from "./interaction-types.js";
 import {nodeDrop} from '../../services/node-drop/index.js';
@@ -204,6 +205,8 @@ export function createDragGestureFamily(
     state.draft = null;
     state.localPositions = new Map();
     state.localSizes = new Map();
+    // 取消路径不经过 pointerup 收尾：同样要推进版本号，否则覆盖层留着上一次的线。
+    setAlignmentGuides(state, []);
     core.clearHeldKeys();
     schedule("position-preview");
   };

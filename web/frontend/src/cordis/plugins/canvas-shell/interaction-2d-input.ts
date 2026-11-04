@@ -17,6 +17,7 @@ import { createWheelViewport } from "./interaction-viewport.js";
 import { resizeTarget as resizeTargetHelper } from "./interaction-2d-helpers.js";
 import { createDragAttachState, isDragAttachConnectable } from "./drag-attach.js";
 import { createDragGestureFamily } from "./drag-gesture.js";
+import { applyDragAlignment, setAlignmentGuides } from "./alignment-snap.js";
 import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
 import { createAggregateConnectFamily } from "./aggregate-connect.js";
 import { shouldUseWorldModelPick, worldModelSelectionFromPick } from "../canvas-runtime/model-world-presentation.js";
@@ -92,6 +93,32 @@ export function create2dInputFamily(core: InteractionCore) {
   const worldCamera = createWorldCameraGestureFamilyFromOptions(core, options);
   /** 共享世界模型的直接地面拖动（无卡片，只写瞬时世界位移预览）。 */
   const worldGround = createWorldGroundGestureFamily(core);
+  /**
+   * 生成拖动预览位置（含辅助对齐吸附）。
+   *
+   * 原始位移 → 插件策略求吸附偏移 → 写回参考线 → 按吸附后的位移落预览。
+   * pointermove 与 release 前的最后一次重算共用它，保证"看到的位置就是提交的位置"。
+   */
+  const applyDragPreview = (
+    roots: ReadonlyMap<string, { x: number; y: number }>,
+    dx: number,
+    dy: number
+  ): void => {
+    const index = sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
+    const snapped = applyDragAlignment({
+      state,
+      policy: core.alignmentSnap(),
+      index,
+      roots,
+      dx,
+      dy,
+      zoom: core.activeViewport().zoom
+    });
+    state.localPositions = new Map();
+    for (const [id, origin] of roots) {
+      state.localPositions.set(id, { x: origin.x + snapped.dx, y: origin.y + snapped.dy });
+    }
+  };
   /**
    * 本次指针手势的性能收集器（change: 2026-10-25-enhance-telemetry-performance-collection，
    * task 3.3 / design D2）。
@@ -179,8 +206,8 @@ export function create2dInputFamily(core: InteractionCore) {
       const dy = world.y - state.gesture.start.y;
       const index = sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
       const roots = index?.dragRoots(state.gesture.origins) ?? state.gesture.origins;
-      state.localPositions = new Map();
-      for (const [id, origin] of roots) state.localPositions.set(id, { x: origin.x + dx, y: origin.y + dy });
+      // 释放点也用同一套吸附重算：否则松开瞬间会跳回未吸附坐标，提交位置与画面不一致。
+      applyDragPreview(roots, dx, dy);
     }
     if (event.button !== undefined && event.button > 1 && !isRight) return;
     // 平移手势只用视口，不依赖命中几何：在任何查询之前处理。
@@ -599,8 +626,7 @@ export function create2dInputFamily(core: InteractionCore) {
       const dx = world.x - state.gesture.start.x;
       const dy = world.y - state.gesture.start.y;
       if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) state.gesture.moved = true;
-      state.localPositions = new Map();
-      for (const [id, origin] of state.gesture.origins) state.localPositions.set(id, { x: origin.x + dx, y: origin.y + dy });
+      applyDragPreview(state.gesture.origins, dx, dy);
       // 先更新位置覆盖，再基于包含覆盖的最新轻量 scene 求值接触（design D3）。
       const changedAttach = drag.evaluate();
       perf.accumulateSince("gesture-move", moveAt);
@@ -782,6 +808,8 @@ export function create2dInputFamily(core: InteractionCore) {
       if (releasedKind !== "world-camera") state.localPositions = new Map();
       state.localSizes = new Map();
       setCursor("");
+      // 手势结束必须"推进版本号"：覆盖层只在版本变化时重渲染，仅靠访问器返回空数组会留下旧线。
+      setAlignmentGuides(state, []);
       schedule(releasedKind === "pan" ? "viewport" : "input");
       // 一次被消费的手势到此结束：未开门（被拒绝/横条动作/连线点空白）时是 no-op。
       finishPerfGesture();

@@ -140,6 +140,8 @@ export class CanvasResourceCoordinator {
   private frameIndex = 0;
   /** 本帧上传 staging 已用字节（design D3；`beginFrame` 重置）。 */
   private uploadStagingUsed = 0;
+  private uploadCount = 0;
+  private uploadStartedAt = 0;
   /** 准入集合（含档位/用途）每发生一次实质变化递增；供媒体 owner 跳过静止全量重建。 */
   private revision = 0;
   private readonly now: () => number;
@@ -218,7 +220,8 @@ export class CanvasResourceCoordinator {
    * 按最新输入重算需求投影。
    *
    * 返回本帧新准入的节点 id：调用方据此创建媒体对象；未返回的节点不得创建重资源。
-   * 无有效 surface 或页面隐藏时只保留 interactive + pins，其余需求撤销。
+   * 无有效 surface（画布未挂载/尺寸为 0）时只保留 interactive + pins，其余需求撤销；
+   * 页面隐藏时**冻结**整个准入集合（既不新建也不撤销），避免切回标签页时整屏重新加载。
    */
   project(input: ResidencyProjectionInput): string[] {
     if (this.disposed) return [];
@@ -233,6 +236,14 @@ export class CanvasResourceCoordinator {
     const pins = new Set(input.pins);
     this.pins.clear();
     for (const id of pins) this.pins.add(id);
+
+    // 页面隐藏（切走标签页/最小化）：冻结当前准入集合。
+    //
+    // 已解码像素的内存代价已经付过；隐藏时撤销也不会省下当帧算力（隐藏页面本来就不出帧），
+    // 却会让切回来时整屏重新 fetch + 解码——真实故障「切走再切回，所有图片都会重新加载」。
+    // 所以隐藏期间既不新建需求，也不撤销已驻留需求，也不推进离屏宽限；回到可见后按正常
+    // 路径重算，需求未变时 `fresh` 为空、`projectionRevision()` 不变，媒体 owner 走零重建路径。
+    if (!this.pageVisible) return [];
 
     // 视口内（不含预热余量）与预热余量（含余量、视口外）分两级：预热必须排在真正可见之后
     // （design D1「预热首先让位」），否则平移余量会和当前可见卡片抢同一批预览槽。
@@ -408,6 +419,8 @@ export class CanvasResourceCoordinator {
   beginFrame(): void {
     this.frameIndex += 1;
     this.uploadStagingUsed = 0;
+    this.uploadCount = 0;
+    this.uploadStartedAt = 0;
     for (const queue of this.queues.values()) queue.beginFrame();
   }
 
@@ -426,12 +439,17 @@ export class CanvasResourceCoordinator {
       this.uploadStagingUsed += bytes;
       return true;
     }
+    if (this.uploadCount >= this.policy.uploadCountPerFrame) return false;
+    // Bound the synchronous submission phase too; one oversized/slow item still makes progress.
+    if (this.uploadCount > 0 && this.now() - this.uploadStartedAt >= this.policy.uploadBudgetMs) return false;
     const budget = this.policy.uploadBytesPerFrame;
     if (this.uploadStagingUsed + bytes > budget) {
       // 单次上传本身超过整帧预算时仍放行一次，否则该内容永远无法上传（饿死比超预算更糟）；
       // 但只在本帧尚未用额度时放行，避免突破成无界并发。
       if (this.uploadStagingUsed > 0) return false;
     }
+    if (this.uploadCount === 0) this.uploadStartedAt = this.now();
+    this.uploadCount += 1;
     this.uploadStagingUsed += bytes;
     return true;
   }
@@ -527,7 +545,8 @@ export class CanvasResourceCoordinator {
     if (interactive.has(candidate.nodeId) || pins.has(candidate.nodeId)) return "interactive";
     // 共享世界模型没有卡片 rect：始终按可见需求保留，不受视口/无 surface 裁剪。
     if (candidate.alwaysVisible) return "visible";
-    // 无有效 surface 或页面隐藏：只保留 interactive/pin，暂停大批新预热（design D1）。
+    // 页面隐藏已在 `project` 入口冻结整集合，这里只处理无有效 surface：只保留 interactive/pin，
+    // 暂停大批新预热（design D1）。
     if (!this.surfaceValid || !this.pageVisible || !view) return null;
     const right = candidate.x + candidate.width;
     const bottom = candidate.y + candidate.height;

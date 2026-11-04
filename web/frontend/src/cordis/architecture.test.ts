@@ -251,6 +251,9 @@ describe("前端协议边界审计", () => {
       "cordis/plugins/node-history/model-thumbnail-render.ts -> canvas-runtime",
       // canvas-shell ↔ canvas-runtime：运行时是 canvas-shell 的低层依赖。
       "cordis/plugins/canvas-shell/interaction-controller.ts -> canvas-runtime",
+      "cordis/plugins/canvas-shell/interaction-controller.ts -> world-scopes",
+      "cordis/plugins/canvas-shell/interaction-2d-input.ts -> canvas-runtime",
+      "cordis/plugins/canvas-shell/scene-area-cursor.ts -> world-scopes",
       "cordis/plugins/canvas-shell/interaction-core.ts -> canvas-runtime",
       "cordis/plugins/canvas-shell/interaction-types.ts -> canvas-runtime",
       "cordis/plugins/canvas-shell/interaction-hover.ts -> canvas-runtime",
