@@ -29,6 +29,12 @@ export const ACCOUNT_ROUTE_PREFIX = "/api/ppserver/account/";
  * 用前缀匹配而不是精确匹配，因为有几条带子路径：
  * `/sixi/v1/orders/{id}`、`/sixi/v1/orders/{id}/cancel`、
  * `/sixi/v1/coupon-offers/{key}`。
+ *
+ * **按「服务归属」列，不是按对接包是否收录**：`billing`、`recharge-tiers`、`orders`
+ * 也在这台服务上，只是不在那 15 个操作里。前端那条前缀一旦放开而这里没放，
+ * 请求会拿到「未知的账户接口」，表现为前端改了却不生效。
+ *
+ * 充值相关先不放：技术方建议加固完成前隐藏充值入口。
  */
 const ALLOWED_PREFIXES = [
   // 认证：换业务会话与刷新。**这两条不带 X-Tenant-ID**（租户在 body 里）
@@ -38,6 +44,8 @@ const ALLOWED_PREFIXES = [
   "sixi/membership-levels",
   "sixi/check-in",
   "memberships/current",
+  // 用量账单
+  "billing",
   // 券与支付
   "sixi/v1/",
 ] as const;
