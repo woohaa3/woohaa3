@@ -187,6 +187,34 @@ export function readCost(payload: unknown): number | undefined {
   return undefined;
 }
 
+/**
+ * 从文本生成任务的结果里取出文本内容。
+ *
+ * language 模板的结果返回 `{ text: "..." }` 或类似结构，递归搜索 `text` / `content` / `output` 字段。
+ */
+export function readTextResult(payload: unknown): string {
+  const visit = (node: unknown, depth: number): string | undefined => {
+    if (depth > 6) return undefined;
+    if (typeof node === "string" && node.trim()) return node.trim();
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = visit(item, depth + 1);
+        if (found) return found;
+      }
+      return undefined;
+    }
+    if (!isRecord(node)) return undefined;
+    for (const key of ["text", "content", "output", "result", "data"]) {
+      if (key in node) {
+        const found = visit(node[key], depth + 1);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  };
+  return visit(payload, 0) ?? "";
+}
+
 /** 从一段 SSE 文本里取出完整事件；返回事件数组与余下的半截缓冲。 */
 export function parseSseBuffer(buffer: string): {
   events: Array<{ type: string; data: Record<string, unknown> }>;

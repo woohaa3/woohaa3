@@ -23,6 +23,7 @@ import {
   failureMessage,
   parseSseBuffer,
   readCost,
+  readTextResult,
   readJobId,
   readProgress,
   readTaskError,
@@ -92,7 +93,7 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
   const protocol: HttpProviderProtocol = {
     providerId: PPSERVER_PROVIDER_ID,
     fetch: config.fetch,
-    modelTypes: ["image", "video"],
+    modelTypes: ["image", "video", "language"],
     mode: () => "async",
     validateModel(modelId, modelType) {
       const template = requireTemplate(options.catalog, modelId);
@@ -148,6 +149,22 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
         body: buildTaskBody({ taskId }),
         ...(context.signal ? { signal: context.signal } : {})
       });
+
+      // language 模板返回文本，image/video 模板返回 URL 列表
+      const template = requireTemplate(options.catalog, context.modelId);
+      if (template.kind === "language") {
+        const text = readTextResult(resultPayload);
+        if (!text) {
+          return { state: "failed", error: readTaskError(resultPayload) };
+        }
+        const cost = readCost(resultPayload);
+        return {
+          state: "completed",
+          output: { text, raw: resultPayload },
+          ...(cost !== undefined ? { metadata: { cost } } : {})
+        };
+      }
+
       const urls = collectResultUrls(resultPayload);
       if (urls.length === 0) {
         return { state: "failed", error: readTaskError(resultPayload) };

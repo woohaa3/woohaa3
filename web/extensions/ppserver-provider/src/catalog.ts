@@ -53,17 +53,19 @@ export type CatalogResult =
  * ```
  * image / image-2 / image-21 / image-g / image-g25 / image-k / image-s / image-y / image-z
  * video-h / video-h3 / video-k / video-m / video-s / video-s25 / video-v / video-w
+ * language (文本生成，由大语言模型执行)
  * ```
  *
  * 所以按**前缀**判断，不能照 PS 插件 UI 那样只认 `image` / `image-g` / `image-s` 三个精确值 ——
  * 那样 `image-21`、`image-g25` 会被误判成视频，模型跑进错误的面板（踩过）。
  *
- * 既不是 `image` 也不是 `video` 开头的按图片处理：丢掉会让用户在界面上找不到刚上线的模板，
+ * 既不是 `image` / `video` / `language` 开头的按图片处理：丢掉会让用户在界面上找不到刚上线的模板，
  * 而放错面板的错误比分类不准更轻微。
  */
 export function templateKindFromCategory(category: string | null | undefined): PpserverKind {
   const value = (category ?? "").trim().toLowerCase();
   if (value.startsWith("video")) return "video";
+  if (value.startsWith("language")) return "language";
   return "image";
 }
 

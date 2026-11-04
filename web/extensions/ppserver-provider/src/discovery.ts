@@ -13,7 +13,7 @@
 import type { GenerationModelDefinition } from "@woohaa3/contracts";
 import { PPSERVER_PROVIDER_ID, isTemplateId, templateIdFromLocator } from "./shared.js";
 
-export type PpserverKind = "image" | "video";
+export type PpserverKind = "image" | "video" | "language";
 
 export type PpserverTemplate = {
   /** 宿主侧模型 id：直接用模板 UUID，一眼能对上服务端的 `tasks_template.id`。 */
