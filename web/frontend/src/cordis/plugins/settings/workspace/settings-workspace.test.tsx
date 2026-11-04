@@ -255,6 +255,8 @@ async function renderWorkspace(
         // 本文件测的是上游工作区行为（核心服务页签、分区切换…），显式打开全部分区。
         // 四喜发行形态只显示其中两个，那是 `settings-sections-sixi.ts` 的事，另有单独断言。
         sections={["backend", "plugins", "appearance", "runtimes", "notifications", "about"]}
+        // 本文件测工作区自身行为，插件列表也显式打开完整清单（样例数据里有 local-storage）。
+        hiddenPluginIds={[]}
         initialSection="backend"
         {...(managedStub ? { managed: managedStub } : {})}
         {...(options.initialPluginId ? { initialPluginId: options.initialPluginId } : {})}

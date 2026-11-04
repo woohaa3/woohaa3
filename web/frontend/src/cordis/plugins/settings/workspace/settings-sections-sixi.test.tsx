@@ -127,17 +127,28 @@ const emptyManagerView = (): ExtensionManagerView =>
   }) as ExtensionManagerView;
 
 describe("四喜发行形态的设置分区", () => {
-  it("ppserver-provider 不出现在插件列表里（装配与生成链路不受影响）", async () => {
-    expect([...SIXI_HIDDEN_SETTINGS_PLUGINS]).toEqual(["ppserver-provider"]);
-    expect(isSixiHiddenSettingsPlugin("ppserver-provider")).toBe(true);
+  it("隐藏清单覆盖 ppserver、两个存储后端与四喜本体", () => {
+    expect([...SIXI_HIDDEN_SETTINGS_PLUGINS]).toEqual([
+      "ppserver-provider",
+      "sqlite-storage",
+      "local-storage",
+      "sixi-spike"
+    ]);
+    for (const hidden of SIXI_HIDDEN_SETTINGS_PLUGINS) {
+      expect(isSixiHiddenSettingsPlugin(hidden), hidden).toBe(true);
+    }
     expect(isSixiHiddenSettingsPlugin("prompt-skills")).toBe(false);
+  });
 
+  it("隐藏的插件都不出现在投影结果里，其余插件照常保留", () => {
     // 直接测投影函数：列表页的分组在「非可操作」分区里默认收起，行不会渲染，
     // 用 DOM 断言只能证明「收起后看不见」，证明不了过滤本身。
-    const index = indexPlugins(SNAPSHOT_WITH_PPSERVER, emptyManagerView());
+    const index = indexPlugins(SNAPSHOT_WITH_PPSERVER, emptyManagerView(), SIXI_HIDDEN_SETTINGS_PLUGINS);
     const ids = index.groups.map((group) => group.id);
-    expect(ids).not.toContain("ppserver-provider");
-    // 同一份快照里的其他插件照常保留：过滤只针对清单内的 id，不是「有一条就全空」。
+    for (const hidden of SIXI_HIDDEN_SETTINGS_PLUGINS) {
+      expect(ids, hidden).not.toContain(hidden);
+    }
+    // 过滤只针对清单内的 id，不是「有一条就全空」。
     expect(ids).toContain("prompt-skills");
   });
 

@@ -172,6 +172,9 @@ async function renderSection(
         store={store}
         manager={facade}
         onOpenPlugin={onOpen}
+        // 本文件测的是列表本身的行为，显式打开完整清单（四喜发行形态默认藏掉几个 id，
+        // 其中 local-storage 正是这里的样例数据）。
+        hiddenPluginIds={[]}
         {...(settingsPanels ? { settingsPanels } : {})}
         {...(withManaged ? { managed: MANAGED_STUB } : {})}
       />

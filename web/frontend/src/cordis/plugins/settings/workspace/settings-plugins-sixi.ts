@@ -15,8 +15,25 @@
  * 内部要看它时，从「核心服务」的存储/生成页签与四喜的模型面板仍能看到它提供的模型。
  */
 
-/** 设置页插件列表里隐藏的扩展 id。加一行即可隐藏，不用动 `plugin-groups.ts` 的实现。 */
-export const SIXI_HIDDEN_SETTINGS_PLUGINS: readonly string[] = ["ppserver-provider"];
+/**
+ * 设置页插件列表里隐藏的扩展 id。加一行即可隐藏，不用动 `plugin-groups.ts` 的实现。
+ *
+ * - `ppserver-provider`：生图的唯一执行者，必须装配；但行上有 6 项配置（地址、令牌…）、
+ *   34 个模型和一个启停开关，客户改掉或关掉就是「生成失败 / 401」。四喜的模型选择在
+ *   自己的面板里，不需要看见这个 Provider。
+ * - `sqlite-storage` / `local-storage`：存储槽位与本地对象存储后端。它们是宿主基础设施，
+ *   对客户没有可调的意义；改坏了表现是画布/素材读写失败。
+ * - `sixi-spike`：四喜前端本体。客户看到的每一页都是它，设置里再列一条「四喜（迁移 spike）」
+ *   只会让人以为这是个能卸掉的插件 —— 卸掉等于四喜整个消失。
+ *
+ * 隐藏只作用于设置列表与详情入口：装配、`/api/settings` 快照、生成链路都不受影响。
+ */
+export const SIXI_HIDDEN_SETTINGS_PLUGINS: readonly string[] = [
+  "ppserver-provider",
+  "sqlite-storage",
+  "local-storage",
+  "sixi-spike"
+];
 
 /** 这个插件在设置列表里是否隐藏。纯函数，`indexPlugins` 每次重算都能调。 */
 export function isSixiHiddenSettingsPlugin(id: string): boolean {

@@ -25,6 +25,7 @@ import {
   type PluginSettingsGroup,
   type PluginViewIndex
 } from "./plugin-groups.js";
+import { SIXI_HIDDEN_SETTINGS_PLUGINS } from "./workspace/settings-plugins-sixi.js";
 import {
   PLUGIN_BROWSER_FILTERS,
   filterPluginGroups,
@@ -66,6 +67,11 @@ export type PluginSettingsSectionProps = {
    * `pendingReopen` 是当前页面仍在用旧版本、重开画布后生效的扩展。缺省不显示这些入口。
    */
   managed?: ManagedExtensionsSource;
+  /**
+   * 从列表里摘掉的插件 id。缺省是四喜发行形态的 `SIXI_HIDDEN_SETTINGS_PLUGINS`；
+   * 传 `[]` 用于查看完整清单（内部排障、测试）。
+   */
+  hiddenPluginIds?: readonly string[];
 };
 
 export type ManagedExtensionsSource = {
@@ -79,7 +85,15 @@ export type ManagedExtensionsSource = {
 
 const NO_PENDING: readonly string[] = [];
 
-export function PluginSettingsSection({ store, manager, onOpenPlugin, onRequestInstall, settingsPanels, managed }: PluginSettingsSectionProps) {
+export function PluginSettingsSection({
+  store,
+  manager,
+  onOpenPlugin,
+  onRequestInstall,
+  settingsPanels,
+  managed,
+  hiddenPluginIds = SIXI_HIDDEN_SETTINGS_PLUGINS
+}: PluginSettingsSectionProps) {
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const pendingReopen = useSyncExternalStore(
     managed?.pendingReopen.subscribe ?? noopSubscribe,
@@ -97,7 +111,7 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, onRequestI
   /** 来源筛选：`all` 或 `builtin`/某个 sourceId（见 extension-source.ts）。 */
   const [sourceFilter, setSourceFilter] = useState<string>("all");
 
-  const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view);
+  const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view, hiddenPluginIds);
   const canInstallFile = Boolean(
     state.status === "ready" && state.snapshot?.extensionInstallations && store.canManage()
   );

@@ -26,6 +26,7 @@ import {
   versionLabel,
   type PluginSettingsGroup
 } from "../plugin-groups.js";
+import { SIXI_HIDDEN_SETTINGS_PLUGINS } from "./settings-plugins-sixi.js";
 import { PluginStateControl } from "../plugin-state-control.js";
 import { PluginIconMark } from "../plugin-icons.js";
 import { SettingRow } from "../setting-row.js";
@@ -72,6 +73,11 @@ export type PluginConfigContentProps = {
   editSession?: SettingsEditSession;
   /** 设置专项扩展装配：打开未激活扩展详情时按需加载其设置贡献。 */
   extensionSettings?: ExtensionSettingsAssembly;
+  /**
+   * 从列表里摘掉的插件 id。缺省是四喜发行形态的 `SIXI_HIDDEN_SETTINGS_PLUGINS`；
+   * 传 `[]` 用于查看完整清单（内部排障、测试）。
+   */
+  hiddenPluginIds?: readonly string[];
 };
 
 /** 单个插件的详情内容；插件不存在或清单未读到给提示，不打开其它插件。 */
@@ -85,7 +91,8 @@ export function PluginConfigContent({
   onBack,
   onSelectPage,
   editSession,
-  extensionSettings
+  extensionSettings,
+  hiddenPluginIds = SIXI_HIDDEN_SETTINGS_PLUGINS
 }: PluginConfigContentProps & { /** 受管扩展的卸载/回滚/身份说明只在「管理」页出现。 */ managed?: ManagedExtensionsController }) {
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const view = useSyncExternalStore(manager.subscribe, manager.getSnapshot, manager.getSnapshot);
@@ -93,7 +100,7 @@ export function PluginConfigContent({
   // slot 全局版本变化即重算该插件的面板；扩展前端按需加载后也能立即出现。
   const panelsVersion = useSyncExternalStore(panels.subscribe, panels.version, panels.version);
   const pluginPanels = useMemo(() => settingsPanelsOf(panels, pluginId), [panels, pluginId, panelsVersion]);
-  const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view);
+  const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view, hiddenPluginIds);
   const panelIds = useMemo(() => settingsPanelIds(panels), [panels, panelsVersion]);
   const group = index.groups.find((candidate) => candidate.id === pluginId);
   const [panelError, setPanelError] = useState<string | null>(null);

@@ -60,6 +60,8 @@ const SECTION_LABEL: Record<SettingsSectionId, string> = {
 // 只需往 `SIXI_SETTINGS_SECTIONS` 加一行。被藏掉的分区（核心服务 / 运行时组件 /
 // 通知 / 关于）的正文实现仍保留，供类型与 `settingsOpen` 的签名继续使用。
 import { SIXI_SETTINGS_SECTIONS, SIXI_SETTINGS_DEFAULT_SECTION } from "./settings-sections-sixi.js";
+// 插件列表里要摘掉的 id（ppserver、两个存储后端、四喜本体），见 `settings-plugins-sixi.ts`。
+import { SIXI_HIDDEN_SETTINGS_PLUGINS } from "./settings-plugins-sixi.js";
 
 /** 全部分区（上游的完整集合）；实际显示哪些由 `sections`（缺省 `SIXI_SETTINGS_SECTIONS`）决定。 */
 const ALL_SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
@@ -155,6 +157,11 @@ export type SettingsWorkspaceProps = {
    * 只是初始视图提示：插件不存在时停在「插件不存在」的稳定提示，不报错也不卡在半截视图。
    */
   initialPluginId?: string;
+  /**
+   * 从插件列表里摘掉的插件 id。缺省是四喜发行形态的 `SIXI_HIDDEN_SETTINGS_PLUGINS`
+   * （ppserver、两个存储后端、四喜本体）；传 `[]` 用于查看完整清单（内部排障、测试）。
+   */
+  hiddenPluginIds?: readonly string[];
 };
 
 export function SettingsWorkspace({
@@ -171,6 +178,7 @@ export function SettingsWorkspace({
   instanceId,
   initialSection,
   sections = SIXI_SETTINGS_SECTIONS,
+  hiddenPluginIds = SIXI_HIDDEN_SETTINGS_PLUGINS,
   initialPluginId,
   onOpenTelemetry
 }: SettingsWorkspaceProps) {
@@ -198,7 +206,7 @@ export function SettingsWorkspace({
   const managerView = useSyncExternalStore(extensions.subscribe, extensions.getSnapshot, extensions.getSnapshot);
   const panels = settingsPanels ?? EMPTY_SETTINGS_PANELS;
   const panelsVersion = useSyncExternalStore(panels.subscribe, panels.version, panels.version);
-  const index = indexPlugins(settingsState.status === "ready" ? settingsState.snapshot : null, managerView);
+  const index = indexPlugins(settingsState.status === "ready" ? settingsState.snapshot : null, managerView, hiddenPluginIds);
   // 订阅 slot 版本：扩展前端按需加载、注册面板后，左栏与概览的「配置」入口立即出现。
   const panelIds = useMemo(() => settingsPanelIds(panels), [panels, panelsVersion]);
   const pluginCount = settingsState.status === "ready" ? index.groups.length : null;
@@ -421,6 +429,7 @@ export function SettingsWorkspace({
             {...(settingsPanels ? { settingsPanels } : {})}
             {...(editSession ? { editSession } : {})}
             {...(extensionSettings ? { extensionSettings } : {})}
+            hiddenPluginIds={SIXI_HIDDEN_SETTINGS_PLUGINS}
             onBack={backToSections}
             onSelectPage={openPluginPage(view.pluginId)}
           />
@@ -463,6 +472,7 @@ export function SettingsWorkspace({
             onRequestInstall={(mode) => navigate({ kind: "install", mode })}
             {...(settingsPanels ? { settingsPanels } : {})}
             {...(managed ? { managed } : {})}
+            hiddenPluginIds={SIXI_HIDDEN_SETTINGS_PLUGINS}
           />
         ) : view.section === "runtimes" ? (
           <Panel title="运行时组件" hint="管理按需下载的可选功能。"><RuntimeComponentsSection /></Panel>

@@ -10,10 +10,6 @@
  * 插件管理 facade 的行当作额外种子传进来，插件清单才是完整的。
  */
 import {
-  SIXI_HIDDEN_SETTINGS_PLUGINS,
-  isSixiHiddenSettingsPlugin
-} from "./workspace/settings-plugins-sixi.js";
-import {
   PROVIDER_SETTING_PREFIX,
   providerIdFromConfigPrefix,
   type PluginIcon,
@@ -216,7 +212,16 @@ export type PluginViewIndex = {
  *
  * 插件行与配置详情都读这一份，避免两处各自拼装「哪个插件有开关、模型归谁」。
  */
-export function indexPlugins(snapshot: SettingsSnapshot | null, view: ExtensionManagerView): PluginViewIndex {
+export function indexPlugins(
+  snapshot: SettingsSnapshot | null,
+  view: ExtensionManagerView,
+  /**
+   * 从列表里摘掉的插件 id。缺省不摘：这是纯投影函数，调用方决定发行形态要藏谁
+   * （四喜在三个设置入口都传 `SIXI_HIDDEN_SETTINGS_PLUGINS`）。放在参数上而不是写死，
+   * 是为了上游的投影测试能继续拿任意 id 当样例数据。
+   */
+  hiddenPluginIds: readonly string[] = []
+): PluginViewIndex {
   const siteRows = new Map(view.siteRows.map((row) => [row.extensionId, row]));
   const browserRows = new Map(view.rows.map((row) => [row.id, row]));
   const extras: PluginGroupSeed[] = [
@@ -265,13 +270,12 @@ export function indexPlugins(snapshot: SettingsSnapshot | null, view: ExtensionM
     if (!group.description) group.description = row.description;
     if (!group.icon && row.icon) group.icon = row.icon;
   }
-  // 四喜发行形态：把不该给客户看的插件行摘掉（清单在 `workspace/settings-plugins-sixi.ts`）。
+  // 把调用方点名要藏的插件行摘掉（四喜的清单在 `workspace/settings-plugins-sixi.ts`）。
   // 只影响设置列表与它的详情入口；装配、`/api/settings` 快照与生成链路都不经过这里。
   // 被摘掉的 Provider 的模型行随之不入索引（没有卡片可挂），四喜的模型选择读的是
   // `hostGenerateModels.ts` 那条任务目录，与本索引无关。
-  const visibleGroups = SIXI_HIDDEN_SETTINGS_PLUGINS.length === 0
-    ? groups
-    : groups.filter((group) => !isSixiHiddenSettingsPlugin(group.id));
+  const hidden = new Set(hiddenPluginIds);
+  const visibleGroups = hidden.size === 0 ? groups : groups.filter((group) => !hidden.has(group.id));
   const models = new Map<string, ExtensionModelRow[]>();
   for (const row of view.modelRows) {
     // 归属顺序：先按 Provider id（Provider 类插件照旧），再回落到「提供该模型的插件 id」。
