@@ -26,6 +26,8 @@ import type {
 import { SixiProviders, SixiRoutes } from '@/app/App';
 import { setAssetSource } from '@/api/assetSource';
 import { setProjectSource } from '@/api/projectSource';
+import { setAccountSource } from '@/api/accountSource';
+import { ppserverBasePath } from '@/config/env';
 import { setHostCanvas } from '@/app/hostCanvas';
 import { setHostGenerate } from '@/app/hostGenerate';
 import { CanvasTopBar } from '@/layouts/CanvasTopBar';
@@ -207,6 +209,8 @@ export function SixiShell({
     <SixiProviders>
       <HostThemeSync theme={theme} />
       <MemoryRouter initialEntries={[initialEntry]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        {/* 账户接口走宿主同源转发（对方只放行官网 Origin，浏览器直连必被 CORS 拦） */}
+        <HostAccountSourceRef />
         {/* 放在 Router 里：打开当前画布时要用四喜自己的 navigate 切到画布态 */}
         <HostProjectSource catalog={canvasCatalog} currentCanvasId={currentCanvasId} />
         {/* 资源页的数据就是宿主侧栏「图片」面板那份 */}
@@ -267,6 +271,26 @@ function HostProjectSource({
     const reset = setProjectSource(createHostProjectSource(catalog, open, resolvePublicUrl));
     return reset;
   }, [catalog, currentCanvasId, navigate]);
+  return null;
+}
+
+/**
+ * 账户接口走宿主同源转发。
+ *
+ * 账户服务 `api.sixiai.com.cn` 的 CORS 只回官网 Origin，浏览器直连必被拦。
+ * 宿主扩展（`ppserver-provider/src/account-routes.ts`）在 `/api/ppserver/account/*`
+ * 补 `Authorization` 与 `X-Tenant-ID` 再转发，这里只负责把地址指过去。
+ *
+ * **不能用 `isHosted()` 判断**：那个桥只有原生桌面壳注入，浏览器里的宿主没有它；
+ * 而四喜前端在这个扩展里跑，等于永远处于宿主形态，直接设置即可。
+ */
+function HostAccountSourceRef() {
+  useEffect(
+    () => setAccountSource({
+      url: (path) => `${ppserverBasePath().replace(/\/+$/, '')}/account${path}`,
+    }),
+    [],
+  );
   return null;
 }
 
