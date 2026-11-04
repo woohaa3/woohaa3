@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { createRuntimeRealm } from "./runtime-realm.js";
+import { createRuntimeRealm, relayableEvent } from "./runtime-realm.js";
 import type { BevyModule } from "./bevy-runtime-types.js";
 import { installDeviceRecovery } from "./device-recovery.js";
 
@@ -93,4 +93,16 @@ it("桌面桥接存在时选择原生入口，协议错误不回退 WASM", async
   target.__WOOHAA_NATIVE__ = { protocol: "invalid", token: "test" };
   await expect(createRuntimeRealm(target, vi.fn())).rejects.toThrow("桌面画布协议不匹配");
   expect(document.querySelector("iframe")).toBeNull();
+});
+
+it("没有 key 的键盘事件不转发，正常键盘事件照旧转发", () => {
+  const rect = new DOMRect(0, 0, 100, 100);
+  // 普通 Event 冒充 keydown：没有 `key`，转发出去会让 winit 把 undefined 传进 WASM。
+  expect(relayableEvent("keydown", new Event("keydown"), rect)).toBeNull();
+  expect(relayableEvent("keyup", new Event("keyup"), rect)).toBeNull();
+  const real = relayableEvent("keydown", new KeyboardEvent("keydown", { key: "a", code: "KeyA" }), rect);
+  expect(real).toBeInstanceOf(KeyboardEvent);
+  expect((real as KeyboardEvent).key).toBe("a");
+  // 非键盘事件照常克隆。
+  expect(relayableEvent("blur", new Event("blur"), rect)).toBeInstanceOf(Event);
 });

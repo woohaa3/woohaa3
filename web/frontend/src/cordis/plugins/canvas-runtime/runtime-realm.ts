@@ -102,11 +102,8 @@ export async function createRuntimeRealm(target: typeof globalThis, fault: (reas
       const child = iframe.contentDocument?.querySelector("canvas");
       if (!realm || !child) return;
       const rect = canvas.getBoundingClientRect();
-      let clone: Event;
-      if (event instanceof WheelEvent) clone = new WheelEvent(type, { ...mouseInit(event, rect), deltaX: event.deltaX, deltaY: event.deltaY, deltaZ: event.deltaZ, deltaMode: event.deltaMode });
-      else if (event instanceof PointerEvent) clone = new PointerEvent(type, { ...mouseInit(event, rect), pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: event.isPrimary, pressure: event.pressure });
-      else if (event instanceof KeyboardEvent) clone = new KeyboardEvent(type, { key: event.key, code: event.code, repeat: event.repeat, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey, bubbles: true });
-      else clone = new Event(type);
+      const clone = relayableEvent(type, event, rect);
+      if (!clone) return;
       (type === "blur" ? realm : child).dispatchEvent(clone);
     };
     source.addEventListener(type, listener, true);
@@ -132,4 +129,22 @@ function mouseInit(event: MouseEvent, rect: DOMRect): MouseEventInit {
   return { clientX: event.clientX - rect.left, clientY: event.clientY - rect.top,
     button: event.button, buttons: event.buttons, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
     altKey: event.altKey, metaKey: event.metaKey, bubbles: true, cancelable: true };
+}
+
+/**
+ * 把父窗口的输入事件克隆成可以派发给渲染器的事件；`null` 表示这个事件不该转发。
+ *
+ * 键盘事件单独处理：没有真实 `key` 的 keydown/keyup 一律丢弃。转发一个缺 `key` 的
+ * 普通 `Event` 会让 winit 把 `undefined` 当字符串传进 WASM，崩在 wasm-bindgen 的
+ * `passStringToWasm0`，整个渲染器 realm 判故障（见 `createRuntimeRealm` 的转发循环）。
+ */
+export function relayableEvent(type: string, event: Event, rect: DOMRect): Event | null {
+  if (type === "keydown" || type === "keyup") {
+    // 跨 realm 的事件过不了 `instanceof KeyboardEvent`，合成事件也可能没有 key。
+    if (!(event instanceof KeyboardEvent) || typeof event.key !== "string") return null;
+    return new KeyboardEvent(type, { key: event.key, code: event.code, repeat: event.repeat, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey, bubbles: true });
+  }
+  if (event instanceof WheelEvent) return new WheelEvent(type, { ...mouseInit(event, rect), deltaX: event.deltaX, deltaY: event.deltaY, deltaZ: event.deltaZ, deltaMode: event.deltaMode });
+  if (event instanceof PointerEvent) return new PointerEvent(type, { ...mouseInit(event, rect), pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: event.isPrimary, pressure: event.pressure });
+  return new Event(type);
 }
