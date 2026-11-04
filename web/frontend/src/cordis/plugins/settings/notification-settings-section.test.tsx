@@ -132,8 +132,10 @@ async function renderWorkspace(options: {
         theme={new AppThemeService({ storage: null })}
         extensions={extensions.facade}
         onRequestClose={() => undefined}
+        // 通知分区在四喜发行形态下被藏掉；这里测的是分区本身，显式打开全部分区。
+        sections={["backend", "plugins", "appearance", "runtimes", "notifications", "about"]}
+        initialSection={options.initialSection ?? "backend"}
         {...(options.notifications ? { notifications: options.notifications } : {})}
-        {...(options.initialSection ? { initialSection: options.initialSection } : {})}
       />
     );
   });

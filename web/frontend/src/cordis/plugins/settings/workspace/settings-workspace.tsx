@@ -54,7 +54,15 @@ const SECTION_LABEL: Record<SettingsSectionId, string> = {
   about: "关于"
 };
 
-const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
+// ─── 四喜发行形态：左栏只留「插件配置 + 外观」 ───
+// 分区数据在本目录的 `settings-sections-sixi.ts`，不直接改下面的常量：
+// 上游每次动 `SECTIONS` 都会和我们冲突，而这里的渲染分支一个都没删，要放开某个分区
+// 只需往 `SIXI_SETTINGS_SECTIONS` 加一行。被藏掉的分区（核心服务 / 运行时组件 /
+// 通知 / 关于）的正文实现仍保留，供类型与 `settingsOpen` 的签名继续使用。
+import { SIXI_SETTINGS_SECTIONS, SIXI_SETTINGS_DEFAULT_SECTION } from "./settings-sections-sixi.js";
+
+/** 全部分区（上游的完整集合）；实际显示哪些由 `sections`（缺省 `SIXI_SETTINGS_SECTIONS`）决定。 */
+const ALL_SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
   { id: "backend", label: SECTION_LABEL.backend },
   { id: "plugins", label: SECTION_LABEL.plugins },
   { id: "appearance", label: SECTION_LABEL.appearance },
@@ -137,6 +145,11 @@ export type SettingsWorkspaceProps = {
   onOpenTelemetry?: () => void;
   initialSection?: SettingsSectionId;
   /**
+   * 左栏显示哪些分区。缺省是四喜发行形态的 `SIXI_SETTINGS_SECTIONS`（只留插件配置 + 外观）；
+   * 传别的集合用于测试或将来放开某个分区 —— 各分区的正文实现一直都在。
+   */
+  sections?: readonly SettingsSectionId[];
+  /**
    * 初始直接打开某个插件的概览（`settingsOpen.open({ pluginId })`）。
    *
    * 只是初始视图提示：插件不存在时停在「插件不存在」的稳定提示，不报错也不卡在半截视图。
@@ -156,15 +169,24 @@ export function SettingsWorkspace({
   extensionSettings,
   notifications,
   instanceId,
-  initialSection = "backend",
+  initialSection,
+  sections = SIXI_SETTINGS_SECTIONS,
   initialPluginId,
   onOpenTelemetry
 }: SettingsWorkspaceProps) {
-  const [view, setView] = useState<SettingsView>(() =>
-    initialPluginId
-      ? { kind: "plugin", pluginId: initialPluginId, page: "overview" }
-      : { kind: "section", section: initialSection }
+  // 实际显示的分区：按传入顺序从完整集合里取，保持真正的左栏顺序。
+  const visibleSections = useMemo(
+    () => sections.map((id) => ALL_SECTIONS.find((entry) => entry.id === id)).filter((entry) => entry !== undefined),
+    [sections]
   );
+  const defaultSection: SettingsSectionId = visibleSections[0]?.id ?? SIXI_SETTINGS_DEFAULT_SECTION;
+  const [view, setView] = useState<SettingsView>(() => {
+    if (initialPluginId) return { kind: "plugin", pluginId: initialPluginId, page: "overview" };
+    // 请求的分区可能已被 `sections` 藏掉（例如 `settingsOpen.open({ section: "backend" })`）：
+    // 落到第一个可见分区，而不是打开一个左栏没有选中项、正文却是存储/遥测的孤儿视图。
+    const wanted = initialSection ?? defaultSection;
+    return { kind: "section", section: visibleSections.some((entry) => entry.id === wanted) ? wanted : defaultSection };
+  });
   /** 当前核心服务页签；缺省时由分区落到第一个有配置的服务。切换沿用 view 实例，切分区后仍保留。 */
   const [serviceId, setServiceId] = useState<string | null>(null);
   /** 本次层级平移的方向；`null` 表示没有进行中的动效。 */
@@ -308,7 +330,7 @@ export function SettingsWorkspace({
   const rail =
     view.kind === "section" ? (
       <SectionRailNav
-        entries={SECTIONS.map((entry) => ({ id: entry.id, label: entry.label, icon: SECTION_ICONS[entry.id] }))}
+        entries={visibleSections.map((entry) => ({ id: entry.id, label: entry.label, icon: SECTION_ICONS[entry.id] }))}
         activeId={view.section}
         pluginCount={pluginCount}
         onSelect={(id) => changeSection(id as SettingsSectionId)}

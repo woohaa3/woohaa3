@@ -293,7 +293,7 @@ async function main() {
   const serviceEnv = loadServiceEnv(root, process.env.WOOHAA3_SERVICE_ENV_FILE);
   // 四喜发行形态收口（扩展白名单 / sdk-agent 自定义 host），与桌面宿主共用一份逻辑；
   // 启动前显式设同名环境变量可放开，显式值优先（见 lib/sixi-deployment-env.mjs）。
-  const deploymentEnv = sixiDeploymentEnv({ repoRoot: root, inherited: { ...serviceEnv, ...process.env } });
+  const deploymentEnv = sixiDeploymentEnv({ inherited: { ...serviceEnv, ...process.env } });
   // change: 2026-10-15-support-configurable-app-base-path：启动阶段规范化挂载配置；非法配置在
   // 构建与监听前失败。前后端使用同一规范结果。
   let basePath;

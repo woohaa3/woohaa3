@@ -252,6 +252,10 @@ async function renderWorkspace(
         extensions={extensions.facade}
         onRequestClose={onRequestClose}
         onRequestNavigate={onRequestNavigate}
+        // 本文件测的是上游工作区行为（核心服务页签、分区切换…），显式打开全部分区。
+        // 四喜发行形态只显示其中两个，那是 `settings-sections-sixi.ts` 的事，另有单独断言。
+        sections={["backend", "plugins", "appearance", "runtimes", "notifications", "about"]}
+        initialSection="backend"
         {...(managedStub ? { managed: managedStub } : {})}
         {...(options.initialPluginId ? { initialPluginId: options.initialPluginId } : {})}
         {...(options.onOpenTelemetry ? { onOpenTelemetry: options.onOpenTelemetry } : {})}

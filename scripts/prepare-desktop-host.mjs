@@ -60,7 +60,8 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  const state=new Map();state.platform=process.platform;state.arch=process.arch;state.runtimeOnly=true;state.excludeDependency=isExternalDesktopDependency;state.packageExtensions=yaml.parse(fs.readFileSync(path.join(root,'web/pnpm-workspace.yaml'),'utf8')).packageExtensions??{};
  attachRuntimePackage(path.join(root,'web/backend'),path.join(output,'backend-runtime'),output,state);
  fs.mkdirSync(path.join(output,'scripts/lib'),{recursive:true});
- for(const entry of fs.readdirSync(path.join(root,'scripts/lib')))if(entry.endsWith('.mjs')&&!entry.includes('.test.'))fs.copyFileSync(path.join(root,'scripts/lib',entry),path.join(output,'scripts/lib',entry));
+ // `.json` 也要带：`sixi-extension-inventory.json` 是发行形态的扩展清单，桌面宿主启动时读它。
+ for(const entry of fs.readdirSync(path.join(root,'scripts/lib')))if(!entry.includes('.test.')&&(entry.endsWith('.mjs')||entry.endsWith('.json')))fs.copyFileSync(path.join(root,'scripts/lib',entry),path.join(output,'scripts/lib',entry));
  fs.mkdirSync(path.join(output,"scripts/lib/extension-trust"),{recursive:true});
  for(const file of ["encoding.mjs","verify.mjs","store.mjs","runtime.mjs"])fs.copyFileSync(path.join(root,"scripts/lib/extension-trust",file),path.join(output,"scripts/lib/extension-trust",file));
  const trustConfig=resolveDesktopTrustConfig({env:process.env,build});
@@ -74,11 +75,21 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  const buildProfile=loadBuildProfile({repoRoot:path.dirname(root),env:process.env});
  const siteDefaults=buildProfile.ok?buildProfile.resolved.siteExtensionDefaults:{};
  const extensions=[];
- // 入包扩展以目录位置为权威：`web/extensions/` 下的每个扩展都进桌面包，不再维护单独清单。
+ // 入包扩展以目录位置为权威：`web/extensions/` 下的每个扩展都在扫描范围内；
+ // 但**发行形态只拷贝清单内的四个**（`scripts/lib/sixi-extension-inventory.json`）。
+ // 上游 51ed5d16 把原来的 `desktop/host-extensions.json` 删了改成全量拷贝，照抄会把
+ // 六个第三方 provider 一起打进发行包，用户就能自己接 API —— 那正是收口要挡的事。
+ // 运维要放开时，启动前显式设 `WOOHAA3_EXTENSION_ALLOWLIST=*` 即可，与运行时白名单同一条口子。
+ const { readInventoryIds } = await import('./lib/sixi-deployment-env.mjs');
+ const explicitPackAllowlist=(typeof process.env.WOOHAA3_EXTENSION_ALLOWLIST==='string'?process.env.WOOHAA3_EXTENSION_ALLOWLIST.trim():'');
+ const packInventory=explicitPackAllowlist==='*'?null:(explicitPackAllowlist?explicitPackAllowlist.split(',').map(id=>id.trim()).filter(Boolean):readInventoryIds());
+ if(packInventory&&packInventory.length===0)throw new Error('四喜扩展清单为空：scripts/lib/sixi-extension-inventory.json');
  const webExtensionsRoot=path.join(root,'web/extensions');
  const scanned=scanExtensions({repoRoot:root,env:{}}).extensions;
+ for(const id of packInventory??[])if(!scanned.some(extension=>extension.extensionId===id))throw new Error(`发行清单里的扩展不存在：${id}`);
  for(const extension of scanned){
   if(extension.root!==webExtensionsRoot)continue;
+  if(packInventory&&!packInventory.includes(extension.extensionId))continue;
   const target=copyRuntimePackage(extension.dir,output,state);const link=path.join(output,'extensions',extension.extensionId);
   copyRuntimeFiles(target,link);
   if(siteDefaults[extension.extensionId]!==undefined)applySiteDefaultEnabled({extensionDir:link,enabled:siteDefaults[extension.extensionId]});

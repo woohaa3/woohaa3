@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "comment": "四喜发行形态的扩展清单（发行包拷贝 + 开发宿主白名单共用这一份）。把清单放在 scripts/lib/ 而不是引用上游文件，是因为上游随时会改结构：2026-11-03 的 51ed5d16 删掉了 desktop/host-extensions.json，改「目录即权威」，我们这边的白名单读不到文件就静默退化成不过滤，六个第三方 provider 全部回到设置页。清单跟消费它的代码放在一起，上游怎么动都不会被带走。改这里要同步 docs/woohaa-extension-migration.md 的说明。",
+  "extensions": [
+    "ppserver-provider",
+    "sixi-spike",
+    "local-storage",
+    "prompt-skills"
+  ]
+}
