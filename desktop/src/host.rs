@@ -421,6 +421,7 @@ mod platform {
                     }
                     Err(error) => {
                         // 无 GPU/会话时这里是明确失败点，不能伪装成成功。
+                        crate::shell_log::error(&format!("native canvas failed: {error}"));
                         return Err(std::io::Error::other(error).into());
                     }
                 }
@@ -472,6 +473,10 @@ mod platform {
                 if managed {
                     crate::local_host::install(app.handle(), origin.clone())?;
                 }
+                crate::shell_log::info(&format!(
+                    "shell ready mode={:?} handle={handle_kind:?} webview={webview_attached} display_link={display_link}",
+                    setup_config.mode
+                ));
                 Ok(())
             })
             .build(tauri::generate_context!())
@@ -489,6 +494,9 @@ mod platform {
                 // 属阶段 P1/P3（任务 2.5 / 4.9），需要真机才能验证；此处不伪造尺寸来源。
             }
             RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+                if matches!(event, RunEvent::Exit) {
+                    crate::shell_log::info("shell exiting");
+                }
                 stopped.store(true, Ordering::Release);
                 #[cfg(target_os = "macos")]
                 crate::macos_frame_clock::stop();

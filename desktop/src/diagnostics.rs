@@ -367,6 +367,9 @@ pub fn ingest(body: &[u8]) -> Result<(), String> {
             .filter(|s| ["debug", "info", "warn", "error"].contains(s))
             .ok_or("Invalid level")?;
         accepted.push(json!({"event":name,"level":level,"message":message,"clientTime":e["clientTime"].as_u64()}));
+        if let Some(shell_level) = crate::shell_log::webview_level(name, level) {
+            crate::shell_log::record(shell_level, &format!("webview {name}: {}", crate::shell_log::clip(message, 240)));
+        }
     }
     WEB_VISIBLE.store(value["visibility"] != "hidden", Ordering::Relaxed);
     WEB_HEARTBEAT.store(now(), Ordering::Relaxed);
