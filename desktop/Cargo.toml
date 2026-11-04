@@ -36,6 +36,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
+# 壳层日志用的 facade。`tauri-plugin-log` 是 `log` 的实现方，直接依赖它才能用 `log!` 宏
+# 与 `LevelFilter`（change: unify-host-client-logging）。
+log = "0.4"
 
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))'.dependencies]
 # 精确锁定（P0 任务 1.1）：见 notes/dependency-lock.md 与 desktop/Cargo.lock。
@@ -60,6 +63,9 @@ tauri-plugin-notification = "2.7.0"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
+# 壳层日志走官方插件（change: unify-host-client-logging，design D7）：
+# 平台日志目录、轮转与级别过滤由它提供，不再自研文件写入。
+tauri-plugin-log = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2]
 version = "0.6.5"

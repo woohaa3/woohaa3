@@ -212,6 +212,8 @@ export async function createBackendService(options: BackendServiceOptions = {}):
       await loadBaseLayer(ctx, {
         env,
         sink,
+        // 只有内置 sink 才有落盘目录；导出端点据此决定是否登记（注入 logger 时不导出）。
+        logDir: hostLog?.dir ?? null,
         directoryControl: extensionHost?.directoryControl,
         ...(options.authenticator ? { authenticator: options.authenticator } : {}),
         ...(options.seedProviders ? { seedProviders: options.seedProviders } : {}),

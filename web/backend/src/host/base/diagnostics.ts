@@ -16,7 +16,7 @@
  * 本模块不读磁盘、不跨进程、不持久化：诊断是运行期排障信息，不是审计账本。
  */
 import { randomUUID } from "node:crypto";
-import type { ApplicationBackendDiagnosticEntry } from "@woohaa3/contracts";
+import { redactLogText, type ApplicationBackendDiagnosticEntry } from "@woohaa3/contracts";
 import type { HostDiagnosticsService, HostPlugin } from "../context.js";
 
 /** 缓冲容量：够看出一次接入流程，又不至于把历史日志堆在内存里。 */
@@ -71,13 +71,10 @@ function readLevel(value: unknown): ApplicationBackendDiagnosticEntry["level"] {
  */
 export function sanitizeDiagnosticText(value: unknown, limit = MAX_DIAGNOSTIC_MESSAGE): string | undefined {
   if (typeof value !== "string" || value === "") return undefined;
-  const collapsed = value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
-  if (collapsed === "") return undefined;
-  const redacted = collapsed
-    .replace(/([?&](?:token|access_token|session_token|device_code|user_code)=)[^&\s]*/gi, "$1[redacted]")
-    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")
-    .replace(/((?:token|secret|password|authorization|device_code|user_code)\s*[:=]\s*)[^\s,;&]+/gi, "$1[redacted]");
-  return redacted.length > limit ? `${redacted.slice(0, Math.max(0, limit - 1))}…` : redacted;
+  // 脱敏规则只有一份（contracts 的 `redactLogText`）：这里不再自己维护一张正则表，
+  // 否则宿主日志出口与诊断缓冲会各写一份、逐渐漂移。上限由调用方传入。
+  const redacted = redactLogText(value, limit);
+  return redacted === "" ? undefined : redacted;
 }
 
 /** 只接受本机宿主里「对接服务端」那几条链路的日志。 */

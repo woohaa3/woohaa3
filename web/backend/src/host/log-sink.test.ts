@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createHostLogSink, DEFAULT_LOG_DIR, resolveHostLogDir, resolveHostLogLevel } from "./log-sink.js";
+import { createHostLogSink, DEFAULT_LOG_DIR, resolveHostLogDir, resolveHostLogLevel, resolveHostLogRunId } from "./log-sink.js";
 
 const created: string[] = [];
 
@@ -49,10 +49,13 @@ describe("宿主日志 sink", () => {
     sink.log({ module: "settings", event: "settings-reloaded", changed: ["a"] });
 
     expect(lines).toHaveLength(1);
+    // 归一后：标识字段留在信封上，其余字段进 attrs（非标量序列化成文本）。
     expect(payload(lines[0]!)).toMatchObject({
+      schema: 1,
+      runtime: "host",
       module: "settings",
       event: "settings-reloaded",
-      changed: ["a"],
+      attrs: { changed: '["a"]' },
       level: "info"
     });
     expect(new Date(String(payload(lines[0]!).time)).getTime()).toBe(moment.getTime());
@@ -181,5 +184,79 @@ describe("宿主日志 sink", () => {
 
     expect(() => brokenSink.log({ event: "boot" })).not.toThrow();
     expect(brokenCapture.lines.some((line) => line.includes("host-log-file-unavailable"))).toBe(true);
+  });
+});
+
+describe("日志信封", () => {
+  it("每条记录带 schema 与 runtime，并补齐 pid", () => {
+    const dir = tempDir();
+    const { lines, stderr } = capture();
+    const sink = createHostLogSink({ env: { WOOHAA3_LOG_DIR: dir }, stderr, now, pid: 4242 });
+
+    sink.log({ module: "task", event: "task-queued" });
+
+    expect(payload(lines[0]!)).toMatchObject({ schema: 1, runtime: "host", pid: 4242 });
+  });
+
+  it("runId 从 WOOHAA_DESKTOP_RUN_DIR 末段取，并写进记录", () => {
+    const dir = tempDir();
+    const { lines, stderr } = capture();
+    const sink = createHostLogSink({
+      env: { WOOHAA3_LOG_DIR: dir, WOOHAA_DESKTOP_RUN_DIR: "/tmp/runs/1700000000-abc" },
+      stderr,
+      now
+    });
+
+    sink.log({ event: "boot" });
+
+    expect(payload(lines[0]!).runId).toBe("1700000000-abc");
+  });
+
+  it("没有运行目录时不写 runId 字段", () => {
+    const dir = tempDir();
+    const { lines, stderr } = capture();
+    const sink = createHostLogSink({ env: { WOOHAA3_LOG_DIR: dir }, stderr, now });
+
+    sink.log({ event: "boot" });
+
+    expect(payload(lines[0]!)).not.toHaveProperty("runId");
+  });
+
+  it("message 与 attrs 分离，凭据被打码", () => {
+    const dir = tempDir();
+    const { lines, stderr } = capture();
+    const sink = createHostLogSink({ env: { WOOHAA3_LOG_DIR: dir }, stderr, now });
+
+    sink.log({ module: "mcp", event: "connect", message: "token=abc123", access_token: "secret-value" });
+
+    const record = payload(lines[0]!);
+    expect(record.message).toBe("token=[redacted]");
+    expect(record.attrs).toEqual({ access_token: "[redacted]" });
+  });
+
+  it("调用点传怪形状也不抛错，且仍写出可解析的一行", () => {
+    const dir = tempDir();
+    const { lines, stderr } = capture();
+    const sink = createHostLogSink({ env: { WOOHAA3_LOG_DIR: dir }, stderr, now });
+    const cyclic: Record<string, unknown> = { event: "x" };
+    cyclic.self = cyclic;
+
+    expect(() => sink.log(cyclic)).not.toThrow();
+    expect(() => payload(lines[0]!)).not.toThrow();
+  });
+});
+
+describe("resolveHostLogRunId", () => {
+  it("取末段，兼容 Windows 分隔符", () => {
+    expect(resolveHostLogRunId({ WOOHAA_DESKTOP_RUN_DIR: "C:\\runs\\run-1" })).toBe("run-1");
+  });
+
+  it("未配置时返回 undefined", () => {
+    expect(resolveHostLogRunId({})).toBeUndefined();
+  });
+
+  it("空串与只有分隔符时返回 undefined", () => {
+    expect(resolveHostLogRunId({ WOOHAA_DESKTOP_RUN_DIR: "  " })).toBeUndefined();
+    expect(resolveHostLogRunId({ WOOHAA_DESKTOP_RUN_DIR: "/" })).toBeUndefined();
   });
 });

@@ -132,6 +132,7 @@ impl LocalHost {
             "process-start",
             serde_json::json!({"pid":child.id(), "instance":instance}),
         );
+        crate::shell_log::info(&format!("host process started pid={}", child.id()));
         let stdout = child.stdout.take().ok_or("host stdout missing")?;
         let (tx, rx) = mpsc::channel();
         let host_pid=child.id();
@@ -195,6 +196,12 @@ impl LocalHost {
             .map(|status| {
                 if let Some(status) = status {
                     crate::diagnostics::event("host", "process-exit", serde_json::json!({"pid":self.child.id(),"status":status.to_string(),"code":status.code(),"success":status.success()}));
+                    let message = format!("host process exited pid={} status={status}", self.child.id());
+                    if status.success() {
+                        crate::shell_log::info(&message);
+                    } else {
+                        crate::shell_log::warn(&message);
+                    }
                 }
                 status.is_some()
             })
@@ -461,6 +468,7 @@ pub fn install(
                         .map_err(|e| e.to_string())?;
                     if main.show().is_ok() {
                         crate::diagnostics::stderr(format_args!("desktop main shown: {}", ui_url));
+                        crate::shell_log::info("desktop main shown");
                     }
                     let _ = main.set_focus();
                 }
@@ -472,6 +480,7 @@ pub fn install(
             state.busy.store(false, Ordering::Release);
             if let Err(error) = result {
                 crate::diagnostics::stderr(format_args!("desktop startup: {error}"));
+                crate::shell_log::error(&format!("desktop startup: {error}"));
                 status(
                     &handle,
                     &format!("{error}。可通过“工作区”菜单导入或从备份恢复。"),

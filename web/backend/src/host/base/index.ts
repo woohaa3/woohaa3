@@ -15,6 +15,8 @@ import { restartPlugin } from "./restart.js";
 export type BaseLayerOptions = {
   env: Record<string, string | undefined>;
   sink: HostLog;
+  /** 内置 sink 的落盘目录；调用方注入 logger 或关闭落盘时为 null（导出端点据此决定是否登记）。 */
+  logDir?: string | null;
   /** 显式注入的可信认证器（测试/受控部署）。 */
   authenticator?: ApplicationRequestAuthenticator;
   /** 显式注入的基础提供者（测试/受控部署）。 */
@@ -31,7 +33,7 @@ export async function loadBaseLayer(ctx: HostContext, options: BaseLayerOptions)
   const plugins = [diagnosticsPlugin, logPlugin, gatewayPlugin, accessPlugin, configPlugin, restartPlugin];
   const fibers = [
     await ctx.plugin(diagnosticsPlugin),
-    await ctx.plugin(logPlugin, { sink: options.sink }),
+    await ctx.plugin(logPlugin, { sink: options.sink, ...(options.logDir === undefined ? {} : { logDir: options.logDir }) }),
     await ctx.plugin(gatewayPlugin),
     await ctx.plugin(accessPlugin, {
       env: options.env,
