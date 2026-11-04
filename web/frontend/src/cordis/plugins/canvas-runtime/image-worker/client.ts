@@ -152,6 +152,15 @@ function workerDecode(url: string, edge: number, signal?: AbortSignal, encoded =
   return pool.decode(url,edge,signal,encoded,region,bytes);
 }
 
+/**
+ * Decoder output ceiling, matching Rust `media-image::MAX_EDGE` and the native job
+ * registrar. The residency tier table goes up to 4096 so textures can follow the
+ * on-screen pixel size, but preparation above 2048 is refused by the decoder
+ * (`variant-limit`) — a zoomed-in card would lose its image entirely. Clamp here
+ * instead: the texture stays at 2048 and the card keeps rendering.
+ */
+const MAX_DECODE_EDGE = 2048;
+
 /** Per-job decode reservation: small tiers cost half a full-size budget unit. */
 function decodeReservation(edge: number): number {
   return edge <= 512 ? IMAGE_DECODE_RESERVATION_BYTES / 2 : IMAGE_DECODE_RESERVATION_BYTES;
@@ -194,8 +203,9 @@ async function pipeline<T>(key: string, url: string, edge: number, purpose: Resi
 }
 
 export function decodeImageInWorker(url: string, maxEdge = 1024, signal?: AbortSignal, encoded = false): Promise<ImageResult> {
-  const key = `decode:${url}#${maxEdge}#${encoded ? 'png' : 'rgba'}#${++jobSequence}`;
-  return pipeline(key, url, maxEdge, "interactive", false, signal, (bytes, decodeSignal) => workerDecode(url, maxEdge, decodeSignal, encoded, bytes));
+  const edge = Math.min(maxEdge, MAX_DECODE_EDGE);
+  const key = `decode:${url}#${edge}#${encoded ? 'png' : 'rgba'}#${++jobSequence}`;
+  return pipeline(key, url, edge, "interactive", false, signal, (bytes, decodeSignal) => workerDecode(url, edge, decodeSignal, encoded, bytes));
 }
 
 /** Encoded DOM preview: browser display decoding needs no application Canvas readback. */
@@ -221,8 +231,11 @@ export type PrepareImageOptions = {
   fetched?: boolean;
 };
 
-async function sharedPrepare(url:string, edge:number, signal:AbortSignal|undefined, purpose:ResidencyPurpose, fetched:boolean, admissionKey:string):Promise<Prepared> {
+async function sharedPrepare(requestedEdge:number, url:string, signal:AbortSignal|undefined, purpose:ResidencyPurpose, fetched:boolean, admissionKey:string):Promise<Prepared> {
   if(signal?.aborted)throw new Error('image-cancelled');
+  // 纹理档位可以选到 4096，但解码器只出到 `MAX_DECODE_EDGE`；收敛后再进缓存与预留，
+  // 让同一个 URL 的 2048/4096 两档共用一份结果，也不会按 4096 多计解码预算。
+  const edge = Math.min(requestedEdge, MAX_DECODE_EDGE);
   const native=nativeImagePort();
   if(native && !nativeIds.has(native))nativeIds.set(native,++nextNativeId);
   const key=`${native?`native-${nativeIds.get(native)}`:'worker'}:${url}:${edge}`;
@@ -266,8 +279,8 @@ async function sharedPrepare(url:string, edge:number, signal:AbortSignal|undefin
  */
 export function prepareImageResource(url: string, edge = 1024, signal?: AbortSignal, options: PrepareImageOptions = {}): Promise<Prepared> {
   const purpose = options.purpose ?? "interactive";
-  const admissionKey = options.key ?? `facade:${url}#${edge}#${++jobSequence}`;
-  return sharedPrepare(url, edge, signal, purpose, options.fetched ?? false, admissionKey);
+  const admissionKey = options.key ?? `facade:${url}#${Math.min(edge, MAX_DECODE_EDGE)}#${++jobSequence}`;
+  return sharedPrepare(edge, url, signal, purpose, options.fetched ?? false, admissionKey);
 }
 
 /** Explicit bounded RGBA export in the 2048-edge prepared variant, at most 512 × 512. */

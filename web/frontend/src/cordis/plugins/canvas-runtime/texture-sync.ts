@@ -395,9 +395,11 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       uploads.clear(`image:${nodeId}`);
     }
     const content = contents.get(key);
+    // 换档位/换源后，新内容还没上传：`sent` 必须从 false 开始，否则解码完成的新档位会被
+    // `if (entry.sent) continue` 跳过，放大后永远停在旧的低清图。`uploaded` 不动，旧纹理继续显示。
     if (content) {
       content.nodes.add(nodeId);
-      entries.set(nodeId, { url, contentKey: key, tier, load: previous?.load ?? loading.track(nodeId, url), sent: previous?.sent ?? false });
+      entries.set(nodeId, { url, contentKey: key, tier, load: previous?.load ?? loading.track(nodeId, url), sent: false });
       // 同一张图已解码过（例如重复导入）：新卡片同样按比例定尺寸。
       if (content.ready && content.width && content.height) {
         options.onImageSize?.(nodeId, { width: content.width, height: content.height });
@@ -411,11 +413,14 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       contentKey: key,
       tier,
       load: previous?.load ?? loading.track(nodeId, url),
-      sent: previous?.sent ?? false
+      sent: false
     };
     entries.set(nodeId, entry);
     resourceDirty.add(nodeId);
-    loading.setLoading(entry.load, true);
+    // 缩放换档位时节点已经有一张可用纹理在画面上：新档位只是后台换一张更合适的，
+    // 不能再弹「加载中」遮住它。首次加载、换源、运行代际重建（`uploaded` 已清空）才显示。
+    const hasUsableTexture = !!previous && previous.url === url && uploaded.has(nodeId);
+    if (!hasUsableTexture) loading.setLoading(entry.load, true);
     const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]), decodeKey: key };
     contents.set(key, target);
     // 先准入再创建：解码本身也经 image 通道（并发 + 真实在途计数）。
@@ -427,6 +432,9 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     for (const [id, entry] of entries) {
       const want = desired.get(id);
       if (want && want.url === entry.url && want.tier === entry.tier) continue;
+      // 同一张图只是缩放换了档位：不拆除。旧纹理继续留在画面上，由 `bindNode` 原地换到新档位，
+      // 新档位解码完成后再无声替换；这里若拆掉，缩放时就会先摘掉图、再弹「加载中」。
+      if (want && want.url === entry.url) continue;
       entries.delete(id);
       setUploaded(id, false);
       uploads.clear(`image:${id}`);
