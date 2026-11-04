@@ -221,3 +221,16 @@ export * from "./canvas/world-authoring.js";
 export * from "./canvas/assistant-world-authority.js";
 export * from "./canvas/group-authoring-scope.js";
 export * from "./canvas/world-authoring-response-codec.js";
+
+// 以下为主干在分叉后新增、而特性线未导出的模块（日志信封、图片资源、人形骨架等）。
+export * from "./canvas/generated-image-registry.js";
+export * from "./canvas/humanoid-rig.js";
+export * from "./canvas/resource-state-update.js";
+export * from "./media/image-resource.js";
+export {
+  LOG_ATTRIBUTE_VALUE_LIMIT, LOG_ERROR_CODE_PATTERN, LOG_EVENT_PATTERN, LOG_LEVELS, LOG_LIMITS,
+  LOG_MESSAGE_LIMIT, LOG_MODULE_PATTERN, LOG_SCHEMA_VERSION, LOG_TRACE_ID_PATTERN, REDACTED,
+  isSensitiveLogKey, logLevelAtLeast, logText, logValueToString, normalizeLogRecord,
+  redactLogPatterns, redactLogText,
+  type LogAttrValue, type LogLevel, type LogRecord, type LogRuntime, type NormalizeLogInput
+} from "./log/index.js";

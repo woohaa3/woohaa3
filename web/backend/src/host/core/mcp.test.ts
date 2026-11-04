@@ -17,7 +17,7 @@ type CapturedOptions = {
  * 由测试决定 mock 的 `handle` 在「网关请求作用域内」执行什么（从而验证 principal 绑定）。
  */
 function boot(handleImpl: () => unknown) {
-  createMcpService.mockImplementation((options: CapturedOptions) => ({
+  createMcpService.mockImplementation((_options: CapturedOptions) => ({
     handle: async () => handleImpl(),
     readiness: async () => ({ ready: true }),
     close: vi.fn(async () => undefined),

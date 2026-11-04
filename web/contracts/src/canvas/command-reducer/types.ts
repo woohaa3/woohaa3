@@ -28,6 +28,8 @@ export type CanvasCommandRejectionCode =
   | "invalid-model-cameras"
   | "invalid-image-edit"
   | "missing-edge-id"
+  /** 已存在骨架的模型不允许通过命令移除骨架。 */
+  | "rig-removed"
   | "invalid-command"
   /** `edit.apply` 前置条件不成立（可诊断冲突）；整批拒绝，无部分写入。 */
   | "edit-precondition-failed"

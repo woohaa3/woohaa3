@@ -50,7 +50,7 @@ export async function completeImage(ctx: EditCompletionContext, request: ImageEd
     return recordFailure(ctx, request, fingerprint, "EDIT_SESSION_GENERATION_ACTIVE", "节点存在进行中的生成，无法提交编辑");
   }
 
-  const currentIdentity = currentIdentityOfNode(canvas, request.nodeId, "image", ctx.content);
+  const currentIdentity = currentIdentityOfNode(canvas, request.nodeId, "image");
   const baselineEntry = await ctx.completions.get(request.canvasId, request.nodeId, `begin:${request.sessionId}`);
   const expectedBaseline = baselineEntry?.baselineContentIdentity ?? request.baselineContentIdentity;
   if (currentIdentity !== null && currentIdentity !== expectedBaseline) {

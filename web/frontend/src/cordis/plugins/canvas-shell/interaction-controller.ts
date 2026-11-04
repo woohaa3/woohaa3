@@ -40,6 +40,10 @@ import { nodeSelectionStore } from "../../services/selection-store.js";
 import { modelPreviewStore } from "../../services/model-preview-store.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import type { InteractionCore, InteractionState, Viewport } from "./interaction-core.js";
+import type { AlignmentSnapPolicy } from "./alignment-snap.js";
+
+/** 无参考线时的共享空数组：覆盖层据此判断"没有线"，避免每次新建数组。 */
+const EMPTY_ALIGNMENT_GUIDES: readonly import("../../contract/alignment-snap.js").AlignmentGuide[] = Object.freeze([]);
 import type { InteractionController, InteractionControllerOptions } from "./interaction-types.js";
 export type { InteractionController, InteractionControllerOptions, Gesture } from "./interaction-types.js";
 export { MEMORY_CLIPBOARD_KEY } from "./interaction-keyboard.js";
@@ -86,9 +90,18 @@ export function installInteractionController(options: InteractionControllerOptio
   });
   const localViewport = createLocalViewportStore(options.canvasId ?? "default");
   const viewportListeners = new Set<() => void>();
+  /**
+   * 拖动吸附策略（内置插件 `alignment-guides` 注入；`null` 表示完全不吸附）。
+   * 用可变引用而不是构造期选项，插件可在画布已挂载后启停。
+   */
+  const alignmentSnapRef: { current: AlignmentSnapPolicy | null } = { current: null };
+  const currentAlignmentSnap = (): AlignmentSnapPolicy | null =>
+    alignmentSnapRef.current ?? options.alignmentSnap?.() ?? null;
   const state: InteractionState = {
     gesture: { kind: "none" },
     selected: [],
+    alignmentGuides: [],
+    alignmentGuidesVersion: 0,
     localPositions: new Map(),
     localSizes: new Map(),
     draft: null,
@@ -268,7 +281,6 @@ export function installInteractionController(options: InteractionControllerOptio
     hoverNodeStore.invalidatePlayback();
     state.lastNotifiedViewport = { ...viewport };
     // 本地缩放/平移变化（含不推进画布 revision 的捏合与手势）通知宿主缩放读数跟进（fix-viewport-zoom-range）。
-    for (const listener of viewportListeners) listener();
     options.onViewportChange?.(viewport);
     // 视口变化也改变节点屏幕位置：通知节点操作横条重排（design D7）。
     notifyProjection();
@@ -281,6 +293,9 @@ export function installInteractionController(options: InteractionControllerOptio
    * 拖动/改尺寸预览或节点尺寸实际变化时才通知订阅者。横条消费方按需重算唯一 runtime 投影。
    */
   let lastProjectionSignature = "";
+  let geometryIndex: ReturnType<typeof sharedCanvasNodeIndex> | undefined;
+  let geometrySignature = "";
+  let geometryVersion = 0;
   const projectionSignature = () => {
     const viewport = activeViewport();
     const parts: string[] = [`${viewport.x},${viewport.y},${viewport.zoom}`];
@@ -289,11 +304,18 @@ export function installInteractionController(options: InteractionControllerOptio
     // working 节点位置/尺寸签名（拖动提交前的规范位置变化）；selection/pan 不改变它。
     const index = sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
     // `byId` 保存的是带渲染数据的节点引用（与来源同一批对象），可直接用于几何 helper。
-    if (index) for (const node of index.byId.values()) {
-      if (!node.position) continue;
-      const size = indexNodeSize(node);
-      parts.push(`n:${node.id}:${node.position.x},${node.position.y},${size.width},${size.height}`);
+    if (index !== geometryIndex) {
+      geometryIndex = index;
+      const geometry: string[] = [];
+      if (index) for (const node of index.byId.values()) {
+        if (!node.position) continue;
+        const size = indexNodeSize(node);
+        geometry.push(`n:${node.id}:${node.position.x},${node.position.y},${size.width},${size.height}`);
+      }
+      const next = geometry.join("|");
+      if (next !== geometrySignature) { geometrySignature = next; geometryVersion += 1; }
     }
+    parts.push(`g:${geometryVersion}`);
     return parts.join("|");
   };
   const notifyProjection = () => {
@@ -563,7 +585,8 @@ export function installInteractionController(options: InteractionControllerOptio
     pruneAttach: () => input.pruneAttach(),
     aggregateProjection: () => aggregateProjectionRef.current?.() ?? null,
     aggregateActive: () => state.gesture.kind === "aggregate-connect",
-    cancelAggregateConnect: () => input.cancelAggregateConnect()
+    cancelAggregateConnect: () => input.cancelAggregateConnect(),
+    alignmentSnap: currentAlignmentSnap
   };
 
   const input = create2dInputFamily(core);
@@ -768,6 +791,9 @@ export function installInteractionController(options: InteractionControllerOptio
       const viewport = activeViewport();
       return { left: topLeft.x, top: topLeft.y, width: size.width * viewport.zoom, height: size.height * viewport.zoom };
     },
+    alignmentGuides: () => state.gesture.kind === "drag" && state.gesture.moved ? state.alignmentGuides : EMPTY_ALIGNMENT_GUIDES,
+    alignmentGuidesVersion: () => state.alignmentGuidesVersion,
+    setAlignmentSnapPolicy: (policy) => { alignmentSnapRef.current = policy; },
     dispose() {
       disposed = true;
       const hooks = target as unknown as { __worldGroundPreview?: InteractionController };

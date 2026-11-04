@@ -14,6 +14,9 @@ import { createAttachedMedia } from "./attached-media.js";
 import { projectFocusContentRect } from "./project-focus-content-rect.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { decodeSceneAreaData, defaultAppTheme, type BevyModelEditor, type GhostRenderNode, type ModelFocusProjection } from "@woohaa3/contracts";
+import type { AlignmentGuide } from "../../contract/alignment-snap.js";
+import type { AlignmentSnapPolicy } from "../../contract/alignment-snap.js";
+import { applyAlignmentSnapPolicy, createAlignmentSnapRef, readAlignmentGuides, readAlignmentGuidesVersion } from "./alignment-snap-refs.js";
 import type { CanvasRuntimeService, CanvasRuntimeStatus } from "../../contracts.js";
 import { type CanvasRuntimeOptions } from "./canvas-runtime-options.js";
 import { installCanvasRuntimeMirrors } from "./canvas-runtime-mirrors.js";
@@ -85,7 +88,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   };
   registerImageViewportTarget = (target: import("../../focus/types.js").FocusViewportTarget): (() => void) =>
     this.imageFocusStore.registerViewportTarget(target);
-  setImageFocusTexture = (texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null): void => {
+  setImageFocusTexture = (texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null): void => {
     this.imageFocusStore.setTexture(texture);
     this.controllerInstance?.invalidate("image-focus-texture");
   };
@@ -176,6 +179,11 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   /** 帧窗口（`perf.frame`）：DOM canvas 挂上后开，卸载/释放时关（design D4）。 */
   private frameWindow: import("../../services/telemetry-performance.js").PerfFrameWindow | null = null;
   private readonly loadAbort = new AbortController();
+  /**
+   * 拖动吸附策略（内置插件 `alignment-guides` 注入）。
+   * 与手势注入同一套语义：插件可在画布挂载前后任意时刻启停，controller 每次求值都读最新值。
+   */
+  private readonly alignmentSnapRef = createAlignmentSnapRef();
 
   constructor(private readonly options: CanvasRuntimeOptions) {}
 
@@ -537,6 +545,18 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     applyShotWheel(this.modelEditorGestures, this.controllerInstance, handler);
   }
 
+  /**
+   * 注入/替换拖动吸附策略（内置插件 `alignment-guides`；传 null 关闭吸附）。
+   *
+   * 与手势注入同一套语义：插件在画布挂载前后任意时刻都能启停，controller 每次求值读最新值。
+   */
+  setAlignmentSnapPolicy(policy: AlignmentSnapPolicy | null): void {
+    applyAlignmentSnapPolicy(this.alignmentSnapRef, this.controllerInstance, policy);
+  }
+
+  alignmentGuides = (): readonly AlignmentGuide[] => readAlignmentGuides(this.controllerInstance);
+  alignmentGuidesVersion = (): number => readAlignmentGuidesVersion(this.controllerInstance);
+
   /** 当前已接受的 interaction generation。 */
   interactionGeneration = (): number => this.runtimeInstance?.interactionGeneration?.() ?? 0;
 
@@ -698,6 +718,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         focusTransition: () => this.focusTransition.modelProgress(),
         runState: () => this.options.getRunState?.() ?? null,
         gestures: this.modelEditorGestures,
+        alignmentSnap: () => this.alignmentSnapRef.current,
         onModelFocusChange: (projection) => {
           this.modelFocus = projection;
           this.emitModelFocus();

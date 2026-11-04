@@ -191,7 +191,7 @@ export class NodeHistoryApplicationService {
     if (!node) return null;
     const kind = historyKindForNodeType(node.type, exported.canvas.nodeData[nodeId]);
     if (!kind) return null;
-    const identity = currentIdentityOf(exported.canvas, nodeId, kind, this.context.content);
+    const identity = currentIdentityOf(exported.canvas, nodeId, kind);
     const data = exported.canvas.nodeData[nodeId] as Record<string, unknown> | undefined;
     const outputAssetId = typeof data?.outputAssetId === "string" ? data.outputAssetId : undefined;
     let entryId: string | undefined;
@@ -488,7 +488,7 @@ export class NodeHistoryApplicationService {
     const placement = rawPlacement === undefined || rawPlacement === null
       ? null
       : decodeModelPlacement(rawPlacement);
-    return { identity: currentIdentityOf(exported.canvas, nodeId, kind, this.context.content), placement };
+    return { identity: currentIdentityOf(exported.canvas, nodeId, kind), placement };
   }
 
   async health(): Promise<{ ok: boolean; backend: string; reason?: string }> {

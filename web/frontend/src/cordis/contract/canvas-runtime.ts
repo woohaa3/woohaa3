@@ -133,7 +133,7 @@ export interface CanvasRuntimeService {
   setImageFocus(projection: import("@woohaa3/contracts").BevyImageFocus | null): void;
   /** 把图片取景作为画布输入的当前目标；返回注销函数。 */
   registerImageViewportTarget(target: import("../focus/types.js").FocusViewportTarget): () => void;
-  setImageFocusTexture(texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null): void;
+  setImageFocusTexture(texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null): void;
   setImageFocusDetails(frame:import("../plugins/canvas-runtime/focus-details.js").ImageFocusDetails|null):void;
   /**
    * 图片聚焦已进入、但编辑器还没接管画面（引擎或首帧未就绪）。
@@ -277,6 +277,18 @@ export interface CanvasRuntimeService {
   setShotWheel(
     handler: import("../plugins/canvas-shell/interaction-controller.js").InteractionControllerOptions["shotWheel"] | null
   ): void;
+  /**
+   * 注入/替换拖动吸附策略（内置插件 `alignment-guides`；传 null 关闭吸附）。
+   *
+   * 策略只做几何求解，宿主负责在拖动预览里叠加位移与绘制参考线。
+   */
+  setAlignmentSnapPolicy?(policy: import("./alignment-snap.js").AlignmentSnapPolicy | null): void;
+  /** 当前拖动的辅助对齐线（世界坐标）；未挂载或不在拖动中时为空。 */
+  alignmentGuides?(): readonly import("./alignment-snap.js").AlignmentGuide[];
+  /** 参考线版本号；内容变化才递增（供覆盖层决定是否重绘）。 */
+  alignmentGuidesVersion?(): number;
+  /** 当前已接受的 interaction generation（供对象 picking 的 generation 守卫）。 */
+  interactionGeneration(): number;
   /**
    * 暂停活动动画播放头（编辑对象前调用；change: 2026-10-09-add-film-set-object-motion-and-editing）。
    * 无活动播放或未接线时为 no-op。

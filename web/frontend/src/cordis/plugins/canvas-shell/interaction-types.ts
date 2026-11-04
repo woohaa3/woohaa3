@@ -181,7 +181,7 @@ export type InteractionControllerOptions = {
    * 只传 canonical nodeId；打开历史面板不改变 selection、不提交 Canvas 命令。
    */
   onNodeHistory?: (request: { nodeId: string }) => void;
-  onNodeHistorySelect?: (request: { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string; viewOnly?: boolean }) => void;
+  onNodeHistorySelect?: (request: { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string }) => void;
   /**
    * 顶部操作横条动作命中（change: 2026-10-13-add-node-to-film-set-shortcut）。
    * 横条由 Bevy 绘制、Rust 命中；宿主据 `actionId`（= 贡献 id）派发，`menu` 为设置箭头。
@@ -280,6 +280,13 @@ export type InteractionControllerOptions = {
    * 缺省/返回 null 时不发送（Rust 回退既有内部计时）。只承载浏览器本地呈现态。
    */
   getFocusTransition?: () => import("@woohaa3/contracts").BevyFocusTransition | null;
+  /**
+   * 拖动吸附策略（内置插件 `alignment-guides` 注入）。
+   *
+   * 宿主在每次拖动预览时向它求一次吸附偏移与参考线；返回 `null` 或未注入时完全不吸附，
+   * 行为与本能力上线前一致。几何求解在 contracts 的纯函数里，插件只提供开关与候选裁剪。
+   */
+  alignmentSnap?: () => import("./alignment-snap.js").AlignmentSnapPolicy | null;
   /**
    * 镜头 pose gizmo 手势（change: add-model-editor-gizmo-shot-capture，任务 3.2）。
    *
@@ -477,6 +484,17 @@ export type InteractionController = {
    * 不写状态、不建第二套相机。节点不存在时返回 null。供节点顶部操作横条锚定。
    */
   nodeScreenRect(nodeId: string, part?: "scope-title"): import("@woohaa3/contracts").ScreenRect | null;
+  /**
+   * 本次拖动的辅助对齐线（世界坐标）
+   * （内置插件 `alignment-guides`；宿主只在拖动中返回非空数组）。
+   *
+   * 覆盖层把它按唯一本地视口换算成屏幕线段绘制；不写画布、不参与命中。
+   */
+  alignmentGuides(): readonly import("../../contract/alignment-snap.js").AlignmentGuide[];
+  /** 参考线版本号；内容变化才递增，覆盖层据此决定是否重绘。 */
+  alignmentGuidesVersion(): number;
+  /** 注入/替换拖动吸附策略（内置插件提供；不注入即完全不吸附）。 */
+  setAlignmentSnapPolicy(policy: import("./alignment-snap.js").AlignmentSnapPolicy | null): void;
 };
 
 export type Gesture =

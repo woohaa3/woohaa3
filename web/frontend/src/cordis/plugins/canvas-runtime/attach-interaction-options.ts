@@ -43,6 +43,11 @@ export type AttachAssemblyDeps = {
   focusTransition: () => import("@woohaa3/contracts").BevyFocusTransition | null;
   runState: () => import("../canvas-shell/interaction-types.js").RunStateProjectionInput | null;
   gestures: ModelEditorGestureRefs;
+  /**
+   * 拖动吸附策略（内置插件 `alignment-guides` 提供）。
+   * 缺省不吸附；插件可在画布挂载前后启停。
+   */
+  alignmentSnap?: () => import("../canvas-shell/alignment-snap.js").AlignmentSnapPolicy | null;
   onModelFocusChange: NonNullable<InteractionControllerOptions["onModelFocusChange"]>;
   onViewportChange: (viewport: { x: number; y: number; zoom: number }) => void;
   onFrame?: () => void;

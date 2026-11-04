@@ -123,7 +123,8 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
               records: snapshot?.records ?? [],
               currentOperationByNode: service?.currentOperationByNode(),
               versionsByNode: versions?.snapshot(),
-              selectedByNode: versions?.preview?.selected
+              selectedByNode: versions?.selectedByNode(),
+              unseenByNode: versions?.unseenSnapshot()
             };
           },
           projectHistoryCanvas: canvas => {

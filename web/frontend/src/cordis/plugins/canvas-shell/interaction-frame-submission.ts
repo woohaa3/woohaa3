@@ -147,7 +147,7 @@ export function createFrameSubmission(deps: {
       const rows = deps.options.textureSync.resourceStateChanges();
       const safe = rows.every(row => {
         const node = mirror.node(baseline!.scene, row.id);
-        return node?.type === "image" && !node.model && !node.modelPreview && !node.shotPreview && !node.compositeAsset && !node.group && !node.ghost;
+        return node?.type === "image" && !node.model && !node.modelPreview && !node.ghost;
       });
       if (safe) {
         try {

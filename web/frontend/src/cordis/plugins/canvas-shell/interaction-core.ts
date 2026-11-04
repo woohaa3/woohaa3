@@ -9,6 +9,7 @@
 import type { Point, HitTarget } from "./hit-test.js";
 import type { CanvasBounds } from "./canvas-surface-metrics.js";
 import type { CanvasRenderScene } from "@woohaa3/contracts";
+import type { AlignmentGuide } from "../../contract/alignment-snap.js";
 import type { InteractionControllerOptions, Gesture } from "./interaction-types.js";
 import type { ModelGestureFamily } from "./model-gesture-family.js";
 import type { WheelSourceState } from "./input/wheel-gesture.js";
@@ -47,6 +48,13 @@ export type InteractionState = {
   hoverPointer?: Point | null;
   hoveredVideoNode: string | null;
   hoveredHistory?: { nodeId: string; presentationId: string } | null;
+  /**
+   * 本次拖动命中的辅助对齐线（世界坐标，内置插件 `alignment-guides` 提供策略）。
+   * 只在拖动手势内有效；不进规范状态、不进 render scene，由覆盖层按视口换算绘制。
+   */
+  alignmentGuides: AlignmentGuide[];
+  /** 参考线版本号；只在内容变化时递增，供覆盖层判断是否重绘。 */
+  alignmentGuidesVersion: number;
   wheelSource: WheelSourceState;
   viewportCommitTimer: number | null;
   lastNotifiedViewport: Viewport | null;
@@ -73,6 +81,11 @@ export type InteractionCore = {
    * `external`（overlay 搬场景手柄）由自己的 end/cancel 收尾。
    */
   claimSceneAreaGesture: (owner: "pointer" | "external") => void;
+  /**
+   * 当前拖动吸附策略（内置插件 `alignment-guides` 注入；`null` 表示不吸附）。
+   * 拖动预览每次求值时读取，插件启停随即可见。
+   */
+  alignmentSnap: () => import("./alignment-snap.js").AlignmentSnapPolicy | null;
   localViewport: ReturnType<typeof createLocalViewportStore>;
   viewportListeners: Set<() => void>;
   model: ModelGestureFamily;
