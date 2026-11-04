@@ -99,6 +99,10 @@ export function routeFor(pathname) {
   // 提示词库（生图对话框的「提示词」面板）：由宿主 core 的 prompt-library 插件代理官网预设包。
   // 上游站点不带 CORS 头，浏览器直连会被拦，所以必须走这条同源路由。**同样必须登记。**
   if (pathname === "/api/prompt-library" || pathname.startsWith("/api/prompt-library/")) return "application";
+  // 宿主日志导出（change: unify-host-client-logging）：由宿主 core 的 `base/log` 承载。
+  // `order.ts` 里登记了优先级，但 `routeFor` 漏了这一条 —— 未登记会被判 `none` 直接 404，
+  // 导出面在浏览器/ingress 形态下拿不到。**同样必须登记。**
+  if (pathname === "/api/logs/export" || pathname.startsWith("/api/logs/export/")) return "application";
   return "none";
 }
 

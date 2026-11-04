@@ -61,8 +61,18 @@ test("本机遥测入口路由到 Application Service（宿主 core 承载）", 
   }
 });
 
-test("ppserver 转发前缀路由到 Application Service", () => {
-  // 未登记时整条链路 404：令牌拿到了、目录拉到了，前端生成却永远成功不了。
+test("宿主日志导出路由到 Application Service（宿主 core 承载）", () => {
+  // change: unify-host-client-logging：`order.ts` 登记了优先级，routeFor 一度漏掉这一条，
+  // 未登记会被判 none 直接 404，导出面在浏览器/ingress 形态下拿不到。
+  assert.equal(routeFor("/api/logs/export"), "application");
+  assert.equal(routeFor("/api/logs/export/"), "application");
+  // 相似前缀不被吞掉。
+  for (const path of ["/api/logs", "/api/logs/exported", "/api/logs/exportish/x"]) {
+    assert.equal(routeFor(path), "none", path);
+  }
+});
+
+test("ppserver 转发前缀路由到 Application Service", () => {  // 未登记时整条链路 404：令牌拿到了、目录拉到了，前端生成却永远成功不了。
   for (const path of [
     "/api/ppserver",
     "/api/ppserver/tasks/create_stream",
