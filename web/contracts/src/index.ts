@@ -133,6 +133,32 @@ export * from "./backend/index.js";
 export * from "./settings/index.js";
 export * from "./telemetry/event.js";
 export * from "./telemetry/query.js";
+// 日志信封导出除与 telemetry 同名的两个文本工具外的全部内容：
+// 两处实现有意不同——日志截断要留省略号，telemetry 的按码点上限截断则不留。
+export {
+  LOG_ATTRIBUTE_VALUE_LIMIT,
+  LOG_ERROR_CODE_PATTERN,
+  LOG_EVENT_PATTERN,
+  LOG_LEVELS,
+  LOG_LIMITS,
+  LOG_MESSAGE_LIMIT,
+  LOG_MODULE_PATTERN,
+  LOG_SCHEMA_VERSION,
+  LOG_TRACE_ID_PATTERN,
+  REDACTED,
+  isSensitiveLogKey,
+  logLevelAtLeast,
+  logText,
+  logValueToString,
+  normalizeLogRecord,
+  redactLogPatterns,
+  redactLogText,
+  type LogAttrValue,
+  type LogLevel,
+  type LogRecord,
+  type LogRuntime,
+  type NormalizeLogInput
+} from "./log/index.js";
 export * from "./plugin-icon.js";
 
 export { compositeAssetSceneOps } from "./canvas/composite-asset-scene.js";

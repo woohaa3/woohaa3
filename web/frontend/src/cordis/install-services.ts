@@ -21,6 +21,7 @@ import type { CanvasCommand } from "@woohaa3/contracts";
 import { createCanvasRemote } from "./services/canvas-remote.js";
 import { createTaskRemote } from "./services/task-remote.js";
 import { createMediaRemote } from "./services/media-remote.js";
+import { createFrontendLogPlugin } from "./plugins/log/plugin.js";
 import { DialogService } from "./services/dialogs/service.js";
 import { InputScopeService } from "./services/input-scopes.js";
 import { PageLeaveGuard } from "./leave-guard.js";
@@ -150,6 +151,9 @@ function appInstanceId(basePath: string): string {
  * 跨画布 Catalog Service。Task History 与 Canvas 页面都依赖这些；它们不创建任何远端连接。
  */
 export function installAppServices(ctx: Context, options: PlatformOptions = {}): AppRouterStore {
+  // 日志出口最先装配：后面所有 Service 与插件都可能立刻用到 `ctx.log`。
+  // 前端只写 console（change: unify-host-client-logging，design D4）。
+  void ctx.plugin(createFrontendLogPlugin());
   const dialogs = new DialogService();
   const slots = new SlotRegistry();
   const theme = new AppThemeService({ ...(options.themeOptions ?? {}) });

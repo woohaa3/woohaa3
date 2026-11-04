@@ -78,6 +78,13 @@ declare module "@deepseek-ai/cordis" {
     canvasState: import("./contract/platform.js").CanvasStoreFacade;
     dialogs: DialogsService;
     slots: SlotsService;
+    /**
+     * 结构化日志出口（change: unify-host-client-logging）。
+     *
+     * 前端实现只写 console：不落盘、不上报、不缓冲。宿主侧同名服务由
+     * `web/backend/src/host/base/log.ts` 提供；两者共用 contracts 的信封与脱敏表。
+     */
+    log: import("./plugins/log/plugin.js").FrontendLogService;
     /** 扩展渲染故障与会话内熔断（App scope；change: 2026-10-21-harden-extension-fault-isolation）。 */
     extensionFaults: import("./extension-faults.js").ExtensionFaultService;
     inputScopes: InputScopesService;
