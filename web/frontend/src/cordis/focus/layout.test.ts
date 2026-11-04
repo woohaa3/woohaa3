@@ -52,3 +52,29 @@ it.each([{ width: 1024, height: 768 }, { width: 1280, height: 800 }, { width: 19
   expect(collapsed.contentRect.width - layout.contentRect.width).toBeCloseTo(184);
   expect(collapsed.contentRect.height - layout.contentRect.height).toBe(96);
 });
+
+it("缺省不带卡片留白：cardRect 即整个表面，内容矩形与此前一致", () => {
+  const layout = focusLayout({ width: 1440, height: 900 });
+  expect(layout.cardRect).toEqual({ x: 0, y: 0, width: 1440, height: 900 });
+  expect(layout.contentRect).toEqual({ x: 0, y: 56, width: 1440, height: 800 });
+});
+
+it("cardInset 把整个工作区收进居中卡片：内容矩形相对卡片布局，而不是只缩内容区", () => {
+  const layout = focusLayout({ width: 1440, height: 900, cardInset: 48, panel: true, panelMaxWidth: 320 });
+  expect(layout.cardRect).toEqual({ x: 48, y: 48, width: 1344, height: 804 });
+  // 检查器宽度按卡片宽度的 30% 取：1344 * 0.3 = 403.2，被 320 封顶。
+  expect(layout.panelWidth).toBe(320);
+  // 内容矩形 = 卡片内扣掉顶栏（56）、底栏（44）与右侧检查器。
+  expect(layout.contentRect).toEqual({ x: 48, y: 48 + 56, width: 1344 - 320, height: 804 - 56 - 44 });
+  // 内容矩形始终落在卡片内。
+  expect(layout.contentRect.x + layout.contentRect.width).toBeLessThanOrEqual(layout.cardRect.x + layout.cardRect.width);
+  expect(layout.contentRect.y + layout.contentRect.height).toBeLessThanOrEqual(layout.cardRect.y + layout.cardRect.height);
+});
+
+it("cardInset 在极小窗口下被夹住：卡片与内容矩形尺寸始终为正", () => {
+  const layout = focusLayout({ width: 60, height: 40, cardInset: 48 });
+  expect(layout.cardRect.width).toBeGreaterThan(0);
+  expect(layout.cardRect.height).toBeGreaterThan(0);
+  expect(layout.contentRect.width).toBeGreaterThan(0);
+  expect(layout.contentRect.height).toBeGreaterThan(0);
+});

@@ -60,7 +60,8 @@ export function useFocusLayout(config: FocusLayoutConfig): void {
     typeof config.player === "function" ? 0 : config.player,
     config.panelMaxWidth,
     config.panelMaxHeight,
-    config.chromeOwner
+    config.chromeOwner,
+    config.cardInset
   ]);
   useLayoutEffect(() => {
     setConfig?.(snapshot);
@@ -160,7 +161,10 @@ export function FocusWorkspace({ presentation, runtime, surfaceRef, sidePanel = 
     "--focus-footer": `${layout.footer}px`, "--focus-player-height": `${layout.player}px`, "--focus-panel-width": `${layout.panelWidth}px`,
     "--focus-panel-height": `${layout.panelHeight}px`, "--focus-tools": `${layout.tools}px`,
     "--focus-content-x": `${layout.contentRect.x}px`, "--focus-content-y": `${layout.contentRect.y}px`,
-    "--focus-content-width": `${layout.contentRect.width}px`, "--focus-content-height": `${layout.contentRect.height}px`
+    "--focus-content-width": `${layout.contentRect.width}px`, "--focus-content-height": `${layout.contentRect.height}px`,
+    // 浮动卡片矩形：卡片内的顶栏/检查器/底栏都相对它定位（见 focus.css 的 model 分支）。
+    "--focus-card-x": `${layout.cardRect.x}px`, "--focus-card-y": `${layout.cardRect.y}px`,
+    "--focus-card-width": `${layout.cardRect.width}px`, "--focus-card-height": `${layout.cardRect.height}px`
   } as CSSProperties;
   const panelState: FocusWorkspaceContextValue["panel"] = history ? "history" : detail ? "detail" : config.panel ? "tools" : "closed";
   const contextValue = useMemo<FocusWorkspaceContextValue | null>(

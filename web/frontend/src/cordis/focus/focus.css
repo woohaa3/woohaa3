@@ -25,6 +25,28 @@
 	background: var(--mc-panel);
 	z-index: 45;
 }
+/*
+ * 模型聚焦顶栏改为悬浮胶囊（2026-11-04，对齐 miora 的 3D 预览窗）：去掉通栏底板与分隔线，
+ * 只留居中的一块胶囊，让卡面与画布从上边一直通到底。返回 / 历史按钮自身带底，不随胶囊浮起。
+ */
+.app[data-focus-kind="model"] .model-focus-chrome {
+	background: transparent;
+	border-bottom: 0;
+	pointer-events: none;
+}
+.app[data-focus-kind="model"] .model-focus-chrome > * { pointer-events: auto; }
+.app[data-focus-kind="model"] .focus-workspace__context {
+	flex: 0 1 auto;
+	align-self: center;
+	height: 40px;
+	padding: 0 18px;
+	border-radius: 999px;
+	border: 1px solid var(--app-web-border);
+	background: var(--mc-panel);
+	/* 胶片式投影：轻一层即可。两层叠加会在卡片内壁叠出明显灰晕。 */
+	box-shadow: 0 2px 8px var(--app-web-shadow);
+}
+.app[data-focus-kind="model"] .focus-workspace__identity { padding: 0; }
 .app[data-focus-kind] .model-focus-back,
 .app[data-focus-kind] .model-focus-history { flex-shrink: 0; box-shadow: none; border-color: transparent; background: transparent; border-radius: 8px; min-height: 36px; }
 .app[data-focus-kind] .model-focus-back:hover,
@@ -152,3 +174,67 @@
 }
 
 @media (prefers-reduced-motion: reduce) { .model-editor-dock { transition: none; } }
+
+/*
+ * 模型聚焦的浮动卡片外观（2026-11-04，参考 miora.design 的 3D 预览窗）。
+ *
+ * 几何由 `focusLayout()` 的 `cardInset` 决定：**整个工作区**（顶栏 + 检查器 + 内容）收进
+ * 一张居中卡片，`workspace.tsx` 投影成 `--focus-card-x/y/width/height`。这里负责：
+ *   1. 卡片外铺画布底色，让整窗看起来浮在画布上；
+ *   2. 卡片画圆角、描边、投影；
+ *   3. 顶栏与右侧检查器改为相对卡片定位，不再贴屏幕边。
+ *
+ * 为什么外圈用 `box-shadow: 0 0 0 100vmax` 而不是 `clip-path` 挖洞：`polygon()` 默认
+ * `nonzero` 填充规则不会因顶点绕序相反就挖出空洞，写错会得到一块实心板把界面盖住。
+ * 大扩散纯色阴影只落在卡片外侧，行为确定。
+ *
+ * 限定 `[data-focus-kind="model"]`：图片、视频与文档工作区保持原有全屏形态。
+ * 伪元素 `pointer-events: none`，不拦截画布命中与手势。
+ */
+.app[data-focus-kind="model"]::after {
+	content: "";
+	position: absolute;
+	top: var(--focus-card-y);
+	left: var(--focus-card-x);
+	width: var(--focus-card-width);
+	height: var(--focus-card-height);
+	border-radius: 14px;
+	border: 1px solid var(--app-web-border);
+	pointer-events: none;
+	z-index: 12;
+	/* 只留一层柔和投影。此前叠加的 `0 0 0 100vmax` 会在整块 .app 外描一圈灰边，
+	   配合检查器与胶囊各自的阴影就是「一层套一层」的来源。
+	   这里**不能**加 background：伪元素正好盖在卡片矩形上，会把里面的 3D 画面糊掉。 */
+	box-shadow: 0 12px 32px var(--app-web-shadow);
+}
+
+/* 顶栏改到卡片内：距卡片上沿 8px，左右各留 12px。 */
+.app[data-focus-kind="model"] .model-focus-chrome {
+	top: calc(var(--focus-card-y) + 8px);
+	left: calc(var(--focus-card-x) + 12px);
+	right: calc(100% - var(--focus-card-x) - var(--focus-card-width) + 12px);
+}
+
+/* 右侧检查器贴卡片右沿，不再贴屏幕边。 */
+.app[data-focus-kind="model"] .model-editor-dock,
+.app[data-focus-kind="model"] .node-history--drawer,
+.app[data-focus-kind="model"] .focus-workspace__panel {
+	top: calc(var(--focus-card-y) + var(--focus-header));
+	right: calc(100% - var(--focus-card-x) - var(--focus-card-width));
+	bottom: calc(100% - var(--focus-card-y) - var(--focus-card-height));
+	border-radius: 0 14px 14px 0;
+	/* 检查器已贴在卡片内沿：自带的 `-8px 0 28px` 向左投影会在卡片里压出一道灰晕，
+	   且在圆角外露出一截。卡片本身有投影，这里不再叠第二层。 */
+	box-shadow: none;
+	overflow: hidden;
+}
+
+/*
+ * 聚焦时隐藏画布上各卡片旁的「版本缩略图列表」。
+ *
+ * `.history-layers` 是 `canvas.overlay` 槽里的 `position: fixed` 浮层，位置按节点在**画布上**
+ * 的屏幕矩形投影；聚焦页里没有那张卡片，它却照原位置悬在聚焦内容之上，看起来就是模型预览
+ * 左边多了一列猫图。聚焦工作区自己有历史入口（顶栏「历史」），不需要这一列。
+ * 所有聚焦类型共用——图片/视频聚焦同样不该在内容上叠别的卡片的图层。
+ */
+.app[data-focus-kind] .history-layers { display: none; }

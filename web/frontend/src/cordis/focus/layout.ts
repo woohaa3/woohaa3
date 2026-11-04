@@ -43,6 +43,15 @@ export type FocusLayoutConfig = {
    * 到 layout 结果（避免与窗口 chrome 偏移混淆）。
    */
   chromeOwner?: "host" | "workspace";
+  /**
+   * 浮动卡片的四周留白（CSS px，2026-11-04 模型聚焦卡片外观）。
+   *
+   * 四边各加这么多内距，内容矩形因此缩成居中的一块「卡片」；卡片外的区域由工作区自绘画布
+   * 底色，呈现「窗口浮在画布上」的观感。缺省 0 = 保持铺满，不影响其它工作区。
+   *
+   * 该值同时进入 `framingDistance` 的有效视口计算：内容矩形变小，模型会自动按卡片尺寸取景。
+   */
+  cardInset?: number;
 };
 /**
  * 插件提供给公共宿主的布局来源（design D3）：静态配置，或**可订阅布局快照**。
@@ -102,6 +111,8 @@ export type FocusLayout = {
   navigationWidth: number;
   panelWidth: number;
   panelHeight: number;
+  /** 浮动卡片矩形（相对画布表面）；无 `cardInset` 时即整个表面。 */
+  cardRect: FocusContentRect;
   insets: FocusInsets;
   contentRect: FocusContentRect;
 };
@@ -138,23 +149,40 @@ export function focusLayout(input: FocusLayoutInput): FocusLayout {
   const toolbar = Math.max(0, input.toolbar ?? 0);
   const panelMaxWidth = Math.max(0, input.panelMaxWidth ?? 320);
   const panelMaxHeight = Math.max(0, input.panelMaxHeight ?? 280);
+  // 浮动卡片：整个工作区（顶栏 + 检查器 + 内容）收进一张居中卡片，卡片外由工作区自绘
+  // 画布底色。留白不超过可用空间的一半，保证卡片尺寸始终为正（极小窗口也不会算出负值）。
+  const cardInset = Math.max(0, input.cardInset ?? 0);
+  const insetH = Math.min(cardInset, Math.max(0, width / 2 - 1));
+  const insetV = Math.min(cardInset, Math.max(0, height / 2 - 1));
+  // 卡片矩形（相对画布表面）。卡片内的一切——顶栏、检查器、内容区——都相对于它布局。
+  const cardRect = {
+    x: insetH,
+    y: insetV,
+    width: Math.max(1, width - insetH * 2),
+    height: Math.max(1, height - insetV * 2)
+  };
   const panel = input.panel ?? false;
-  const panelWidth = panel && !narrow ? Math.min(panelMaxWidth, width * 0.3) : 0;
+  const panelWidth = panel && !narrow ? Math.min(panelMaxWidth, cardRect.width * 0.3) : 0;
   const panelHeight = panel && narrow
-    ? Math.min(panelMaxHeight, Math.max(120, height * 0.34), Math.max(0, height - header - footer - tools - 96))
+    ? Math.min(panelMaxHeight, Math.max(120, cardRect.height * 0.34), Math.max(0, cardRect.height - header - footer - tools - 96))
     : 0;
+  // 内容矩形 = 卡片矩形扣掉卡片内的顶栏/工具/检查器/底栏占位。
+  const innerLeft = rail + navigationWidth + (narrow ? 0 : tools);
+  const innerRight = rail + panelWidth;
+  const innerTop = header + toolbar + (narrow ? tools : 0);
+  const innerBottom = footer + panelHeight;
   const insets: FocusInsets = {
-    left: rail + navigationWidth + (narrow ? 0 : tools),
-    right: rail + panelWidth,
-    top: header + toolbar + (narrow ? tools : 0),
-    bottom: footer + panelHeight
+    left: cardRect.x + innerLeft,
+    right: cardRect.x + innerRight,
+    top: cardRect.y + innerTop,
+    bottom: cardRect.y + innerBottom
   };
   return {
-    narrow, rail, header, footer, tools, toolbar, player, navigationWidth, panelWidth, panelHeight, insets,
+    narrow, rail, header, footer, tools, toolbar, player, navigationWidth, panelWidth, panelHeight, cardRect, insets,
     contentRect: {
       x: insets.left, y: insets.top,
-      width: Math.max(1, width - insets.left - insets.right),
-      height: Math.max(1, height - insets.top - insets.bottom)
+      width: Math.max(1, cardRect.width - innerLeft - innerRight),
+      height: Math.max(1, cardRect.height - innerTop - innerBottom)
     }
   };
 }

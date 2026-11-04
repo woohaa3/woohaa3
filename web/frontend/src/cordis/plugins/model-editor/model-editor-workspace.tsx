@@ -25,6 +25,14 @@ import { useFocusLayout } from "../../focus/workspace.js";
 const MODEL_HELP = "右键或 Alt + 拖动旋转；滚轮缩放";
 const MODEL_HINT = "旋转：右键拖动 / Alt（Option）+ 左键拖动 / 触摸板双指滑动";
 
+/**
+ * 普通模型聚焦的卡片四周留白（CSS px）。
+ *
+ * 卡片外的区域由 `focus.css` 画成画布底色，看起来像预览窗浮在画布上。取 48 是「明显浮起
+ * 又不吃掉太多取景区」的折中；改大只会让卡片更小，模型会按新内容矩形自动重新取景。
+ */
+const MODEL_FOCUS_CARD_INSET = 48;
+
 export function ModelEditorWorkspace({
   ctx,
   session,
@@ -55,7 +63,13 @@ export function ModelEditorWorkspace({
     return JSON.stringify(nodeId ? ctx.compositeAssets.resolve(canvas, nodeId)?.focusLayout?.(nodeId) ?? {} : {});
   }, () => "{}");
   const extensionLayout = useMemo(() => JSON.parse(extensionLayoutKey) as import("../../focus/layout.js").FocusLayoutConfig, [extensionLayoutKey]);
-  useFocusLayout(useMemo(() => ({ panel, animationPreview, ...extensionLayout }), [panel, animationPreview, extensionLayout]));
+  // 浮动卡片外观（2026-11-04）：普通模型聚焦把内容区收进居中卡片，四周露出画布底色，
+  // 呈现「3D 预览窗浮在画布上」。片场沿用扩展自带的布局，不被这里覆盖。
+  const cardInset = filmSet ? 0 : MODEL_FOCUS_CARD_INSET;
+  useFocusLayout(useMemo(
+    () => ({ panel, animationPreview, cardInset, ...extensionLayout }),
+    [panel, animationPreview, cardInset, extensionLayout]
+  ));
 
   const historyOpen = navigation.panel?.type === "node-history" && navigation.panel.nodeId === nodeId;
   return (
