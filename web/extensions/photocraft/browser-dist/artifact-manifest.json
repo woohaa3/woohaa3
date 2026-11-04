@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "22188484acd424b938934134d66c3a6101a697a6b59e871126b4b525623d90cf",
+  "metadata": {
+    "extensionId": "photocraft",
+    "version": "0.1.3",
+    "label": "PhotoCraft 图片编辑",
+    "description": "PhotoCraft 工具、真实画布取景与 PNG 写回",
+    "icon": "media",
+    "activation": "server-active",
+    "configScope": "site",
+    "required": false,
+    "sdkAbi": 1
+  },
+  "protocolVersion": 1,
+  "sdkAbi": 1,
+  "reactMajor": 18,
+  "entry": "entry-UCPDCQVG.js",
+  "styles": [
+    "entry-YBVFNOI2.css"
+  ],
+  "requiredSdkGroups": [
+    "core",
+    "ui",
+    "model",
+    "authoring"
+  ],
+  "requiredSdkExports": [
+    "IMAGE_EDIT_SERVICE",
+    "defineExtensionPlugin",
+    "resolvePublicUrl"
+  ],
+  "files": [
+    {
+      "path": "entry-UCPDCQVG.js",
+      "bytes": 478,
+      "gzipBytes": 358,
+      "sha256": "ce873ed9d8e33106e445c2ab56f149894313f6ef13c95e227ddafb8f790a968b",
+      "kind": "entry"
+    },
+    {
+      "path": "chunks/frontend-NYSBNJTO.js",
+      "bytes": 160056,
+      "gzipBytes": 47078,
+      "sha256": "a9df41b6f8acfc0235451c06c92e5a39eb88dd3d181bdb8886cd0b149d26d1bf",
+      "kind": "private-chunk"
+    },
+    {
+      "path": "chunks/chunk-JN2CHJ4H.js",
+      "bytes": 447,
+      "gzipBytes": 251,
+      "sha256": "340e54e042ffae3e74a4fb2ae8da7b2d77cf2e21db9b02244bda05d380a9f22f",
+      "kind": "private-chunk"
+    },
+    {
+      "path": "entry-YBVFNOI2.css",
+      "bytes": 4359,
+      "gzipBytes": 1293,
+      "sha256": "41e47fc404e5d581d77de7e758b2731dbdb7d5bda1e9ae4bd4612b631e3c8d7b",
+      "kind": "style"
+    },
+    {
+      "path": "chunks/frontend-O5DJBWYB.css",
+      "bytes": 4359,
+      "gzipBytes": 1293,
+      "sha256": "41e47fc404e5d581d77de7e758b2731dbdb7d5bda1e9ae4bd4612b631e3c8d7b",
+      "kind": "style"
+    },
+    {
+      "path": "assets/photocraft/fonts/manifest.txt",
+      "bytes": 630,
+      "gzipBytes": 423,
+      "sha256": "85ff073fc7718fb8b3548dd611009dd1e11da5eb4ace8bf2c3fbf07e8f043ae2",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/fonts/NotoSansSC-Regular.otf",
+      "bytes": 8331336,
+      "gzipBytes": 7227047,
+      "sha256": "faa6c9df652116dde789d351359f3d7e5d2285a2b2a1f04a2d7244df706d5ea9",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/fonts/OFL-NotoSansSC.txt",
+      "bytes": 4301,
+      "gzipBytes": 1929,
+      "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/frame-channel.js",
+      "bytes": 1259,
+      "gzipBytes": 557,
+      "sha256": "0f884c964a28965de352769cb3c4e0fb0feb70ff5278b710ee710e61c57beb55",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/host-bridge-core.js",
+      "bytes": 11238,
+      "gzipBytes": 3949,
+      "sha256": "0bce770da5c353648a89fce371f71608efee19cdb6382ebb5eee53992078a79f",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/host-bridge.js",
+      "bytes": 55,
+      "gzipBytes": 75,
+      "sha256": "dc4eb7919e8305cc2b8946374b8e7b9f290fca2c851d385615adc8ab8855c27b",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/index.html",
+      "bytes": 143,
+      "gzipBytes": 154,
+      "sha256": "306aad7fe5133821e0cf4147c4563ba58b1123d088fa9f62cbbc1f516b0945f4",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/LICENSE-APACHE",
+      "bytes": 10174,
+      "gzipBytes": 3540,
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/LICENSE-MIT",
+      "bytes": 1102,
+      "gzipBytes": 671,
+      "sha256": "1a8f66d8a86b146f5336fa0d4b1186576c8aa98e60823080c85c7811cfd810af",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/photocraft-web_bg.wasm",
+      "bytes": 27808236,
+      "gzipBytes": 11958271,
+      "sha256": "1d26e4b97ae38bc1d7a8f83fdd91ba627c6ef5aa38168b563ac04fbe3f0dea36",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/photocraft-web.js",
+      "bytes": 180483,
+      "gzipBytes": 27069,
+      "sha256": "eb8ccbc2f19af3e1f77a667fd6dd9e7c721c049ce5d9260eb83bf515778024a9",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/source.sha256",
+      "bytes": 65,
+      "gzipBytes": 71,
+      "sha256": "b30cda8cd810b459f2136fa110e76edaff31caed37123fe22efa5107c5dadce6",
+      "kind": "asset"
+    }
+  ],
+  "imports": [
+    {
+      "from": "chunks/frontend-NYSBNJTO.js",
+      "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
+      "resolved": "chunks/chunk-JN2CHJ4H.js"
+    },
+    {
+      "from": "entry-UCPDCQVG.js",
+      "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
+      "resolved": "chunks/chunk-JN2CHJ4H.js"
+    },
+    {
+      "from": "entry-UCPDCQVG.js",
+      "specifier": "../browser-dist/chunks/frontend-NYSBNJTO.js",
+      "resolved": "chunks/frontend-NYSBNJTO.js"
+    }
+  ]
+}

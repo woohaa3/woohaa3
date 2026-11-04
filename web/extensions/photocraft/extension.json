@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "photocraft",
+  "version": "0.1.3",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1
+  },
+  "icon": {
+    "glyph": "media"
+  },
+  "site": {
+    "name": "PhotoCraft 图片编辑",
+    "description": "图片编辑、工程格式核验与 PNG 写回",
+    "version": "0.1.3",
+    "configSchema": {
+      "schemaId": "photocraft-config",
+      "schemaVersion": 1
+    },
+    "capabilities": [
+      {
+        "id": "photocraft.edit",
+        "kind": "capability",
+        "description": "图片编辑及工程核验"
+      }
+    ],
+    "defaultEnabled": true,
+    "order": 20
+  },
+  "hostPlugin": {
+    "module": "./backend-dist/entry",
+    "factory": "createPhotocraftPlugin",
+    "order": 50
+  }
+}

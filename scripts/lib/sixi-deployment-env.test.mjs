@@ -12,8 +12,8 @@ test('清单读得到，且只含四喜发行版的这批扩展', () => {
   const ids = readInventoryIds();
   assert.ok(ids.length > 0, `清单为空或读不到：${INVENTORY_FILE}`);
   assert.deepEqual([...ids].sort(), [
-    'alignment-guides', 'film-set', 'local-storage', 'ppserver-provider',
-    'prompt-skills', 'sixi-spike', 'sqlite-storage'
+    'alignment-guides', 'film-set', 'local-agent', 'local-storage', 'oauth-agent', 'photocraft',
+    'ppserver-provider', 'prompt-skills', 'sixi-spike', 'sqlite-storage'
   ]);
 });
 
@@ -30,7 +30,7 @@ test('白名单不依赖仓库根：不传 repoRoot 也照常注入', () => {
   const env = sixiDeploymentEnv({inherited: {}});
   assert.equal(
     env.WOOHAA3_EXTENSION_ALLOWLIST,
-    'ppserver-provider,sixi-spike,local-storage,sqlite-storage,prompt-skills,film-set,alignment-guides'
+    'ppserver-provider,sixi-spike,local-storage,sqlite-storage,prompt-skills,oauth-agent,local-agent,film-set,alignment-guides,photocraft'
   );
 });
 

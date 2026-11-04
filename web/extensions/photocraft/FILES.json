@@ -1,0 +1,117 @@
+[
+  {
+    "path": "README.md",
+    "sha256": "ebece91741003b56b1539c5c5641ac4acfc172296f7df3d3d68ef9b34dc2ef43",
+    "size": 5109
+  },
+  {
+    "path": "backend-dist/entry.mjs",
+    "sha256": "04b689d660453e45ca6ceb2de7e5724a156da5e29b23cbb6dc725b60140876a3",
+    "size": 251424
+  },
+  {
+    "path": "browser-dist/artifact-manifest.json",
+    "sha256": "57426912cf18956186087f92728fb70d626b83913305a699f564730c7781cbf5",
+    "size": 4935
+  },
+  {
+    "path": "browser-dist/assets/photocraft/LICENSE-APACHE",
+    "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+    "size": 10174
+  },
+  {
+    "path": "browser-dist/assets/photocraft/LICENSE-MIT",
+    "sha256": "1a8f66d8a86b146f5336fa0d4b1186576c8aa98e60823080c85c7811cfd810af",
+    "size": 1102
+  },
+  {
+    "path": "browser-dist/assets/photocraft/fonts/NotoSansSC-Regular.otf",
+    "sha256": "faa6c9df652116dde789d351359f3d7e5d2285a2b2a1f04a2d7244df706d5ea9",
+    "size": 8331336
+  },
+  {
+    "path": "browser-dist/assets/photocraft/fonts/OFL-NotoSansSC.txt",
+    "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
+    "size": 4301
+  },
+  {
+    "path": "browser-dist/assets/photocraft/fonts/manifest.txt",
+    "sha256": "85ff073fc7718fb8b3548dd611009dd1e11da5eb4ace8bf2c3fbf07e8f043ae2",
+    "size": 630
+  },
+  {
+    "path": "browser-dist/assets/photocraft/frame-channel.js",
+    "sha256": "0f884c964a28965de352769cb3c4e0fb0feb70ff5278b710ee710e61c57beb55",
+    "size": 1259
+  },
+  {
+    "path": "browser-dist/assets/photocraft/host-bridge-core.js",
+    "sha256": "0bce770da5c353648a89fce371f71608efee19cdb6382ebb5eee53992078a79f",
+    "size": 11238
+  },
+  {
+    "path": "browser-dist/assets/photocraft/host-bridge.js",
+    "sha256": "dc4eb7919e8305cc2b8946374b8e7b9f290fca2c851d385615adc8ab8855c27b",
+    "size": 55
+  },
+  {
+    "path": "browser-dist/assets/photocraft/index.html",
+    "sha256": "306aad7fe5133821e0cf4147c4563ba58b1123d088fa9f62cbbc1f516b0945f4",
+    "size": 143
+  },
+  {
+    "path": "browser-dist/assets/photocraft/photocraft-web.js",
+    "sha256": "eb8ccbc2f19af3e1f77a667fd6dd9e7c721c049ce5d9260eb83bf515778024a9",
+    "size": 180483
+  },
+  {
+    "path": "browser-dist/assets/photocraft/photocraft-web_bg.wasm",
+    "sha256": "1d26e4b97ae38bc1d7a8f83fdd91ba627c6ef5aa38168b563ac04fbe3f0dea36",
+    "size": 27808236
+  },
+  {
+    "path": "browser-dist/assets/photocraft/source.sha256",
+    "sha256": "b30cda8cd810b459f2136fa110e76edaff31caed37123fe22efa5107c5dadce6",
+    "size": 65
+  },
+  {
+    "path": "browser-dist/chunks/chunk-JN2CHJ4H.js",
+    "sha256": "340e54e042ffae3e74a4fb2ae8da7b2d77cf2e21db9b02244bda05d380a9f22f",
+    "size": 447
+  },
+  {
+    "path": "browser-dist/chunks/frontend-NYSBNJTO.js",
+    "sha256": "a9df41b6f8acfc0235451c06c92e5a39eb88dd3d181bdb8886cd0b149d26d1bf",
+    "size": 160056
+  },
+  {
+    "path": "browser-dist/chunks/frontend-O5DJBWYB.css",
+    "sha256": "41e47fc404e5d581d77de7e758b2731dbdb7d5bda1e9ae4bd4612b631e3c8d7b",
+    "size": 4359
+  },
+  {
+    "path": "browser-dist/entry-UCPDCQVG.js",
+    "sha256": "ce873ed9d8e33106e445c2ab56f149894313f6ef13c95e227ddafb8f790a968b",
+    "size": 478
+  },
+  {
+    "path": "browser-dist/entry-YBVFNOI2.css",
+    "sha256": "41e47fc404e5d581d77de7e758b2731dbdb7d5bda1e9ae4bd4612b631e3c8d7b",
+    "size": 4359
+  },
+  {
+    "path": "browser-dist/metadata.json",
+    "sha256": "08564d196e9ff4f730896ff8cf72fb4a690b6f8d54553d55764212762b770fd8",
+    "size": 279
+  },
+  {
+    "path": "extension.json",
+    "sha256": "a8545c76dfb5c12c80030761d6791ab8da838345a1e8503f921b866795c516cd",
+    "size": 776
+  },
+  {
+    "path": "package.json",
+    "sha256": "b4b12f65846a757d3035a61cfa5a97dd1e528ff420d41d559ce1f0227870b86c",
+    "size": 182
+  }
+]

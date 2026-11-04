@@ -63,6 +63,13 @@ web/extensions/*/.browser-build/
 web/extensions/*/.browser-test/
 # extension independent backend builds（scripts/build-extension-backend.mjs 的产物，不入库）
 web/extensions/*/backend-dist/
+# 例外：photocraft 是**从市场下载的预构建分发包**，没有 src/，产物就是它唯一的实现。
+# 忽略掉这两个目录等于提交一个空壳（装上去没有后端入口、没有前端产物）。它不参与本仓构建；
+# 升级时重新从市场 release 解包覆盖，见 docs/woohaa-extension-migration.md 8.3。
+!web/extensions/photocraft/browser-dist/
+!web/extensions/photocraft/browser-dist/**
+!web/extensions/photocraft/backend-dist/
+!web/extensions/photocraft/backend-dist/**
 # 第二扩展根（仓库根 extensions/）的同名生成物
 extensions/*/browser-dist/
 extensions/*/backend-dist/
