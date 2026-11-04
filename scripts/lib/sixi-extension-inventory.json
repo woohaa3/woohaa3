@@ -6,6 +6,8 @@
     "sixi-spike",
     "local-storage",
     "sqlite-storage",
-    "prompt-skills"
+    "prompt-skills",
+    "film-set",
+    "alignment-guides"
   ]
 }
