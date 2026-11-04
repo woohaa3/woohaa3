@@ -5,6 +5,7 @@
     "ppserver-provider",
     "sixi-spike",
     "local-storage",
+    "sqlite-storage",
     "prompt-skills"
   ]
 }

@@ -4,15 +4,19 @@ import {readInventoryIds,sixiDeploymentEnv,INVENTORY_FILE,SDK_HOSTS_PLACEHOLDER}
 
 // 这份清单守的是「发行版只装四喜必需的那几个扩展」。上游 51ed5d16 删掉了旧清单文件后，
 // 白名单静默退化成「不过滤」，六个第三方 provider 全回到了设置页，所以这里必须有单测。
-test('清单读得到，且只含四喜发行版的四个扩展', () => {
+//
+// `sqlite-storage` 不能漏：槽位声明只认 `extension.json` 的 `bootstrap`，而它的是**唯一**
+// 声明 `storage` 槽位的扩展（`local-storage` 只有 `hostPlugin`，是对象存储后端，顶不上）。
+// 漏掉它宿主启动时 fail-fast：`EXTENSION_SLOT_MISSING 缺少必需槽位 storage`。
+test('清单读得到，且只含四喜发行版的五个扩展', () => {
   const ids = readInventoryIds();
   assert.ok(ids.length > 0, `清单为空或读不到：${INVENTORY_FILE}`);
-  assert.deepEqual([...ids].sort(), ['local-storage', 'ppserver-provider', 'prompt-skills', 'sixi-spike']);
+  assert.deepEqual([...ids].sort(), ['local-storage', 'ppserver-provider', 'prompt-skills', 'sixi-spike', 'sqlite-storage']);
 });
 
 test('白名单不依赖仓库根：不传 repoRoot 也照常注入', () => {
   const env = sixiDeploymentEnv({inherited: {}});
-  assert.equal(env.WOOHAA3_EXTENSION_ALLOWLIST, 'ppserver-provider,sixi-spike,local-storage,prompt-skills');
+  assert.equal(env.WOOHAA3_EXTENSION_ALLOWLIST, 'ppserver-provider,sixi-spike,local-storage,sqlite-storage,prompt-skills');
 });
 
 test('显式环境变量优先，写成 * 时不注入清单而是显式放开', () => {
