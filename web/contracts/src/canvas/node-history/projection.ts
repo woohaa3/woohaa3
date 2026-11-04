@@ -95,7 +95,6 @@ function buildPreview(
     case "model":
       return {
         kind: "model",
-        thumbnailHref: entry.previewable ? href("thumbnail") : null,
         entry: { canvasId: entry.canvasId, nodeId: entry.nodeId, entryId: entry.entryId }
       };
   }
@@ -130,7 +129,6 @@ export function toNodeHistoryDetail(entry: NodeGenerationHistoryEntry): NodeGene
         sourceHash: payload.sourceHash,
         ...(payload.placement ? { placement: payload.placement } : {}),
         ...(payload.modelCameras ? { modelCameras: payload.modelCameras } : {}),
-        ...(payload.animation ? { animation: payload.animation } : {})
       };
     }
     default: {

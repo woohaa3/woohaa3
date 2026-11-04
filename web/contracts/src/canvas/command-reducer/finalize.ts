@@ -5,19 +5,18 @@
  * R12）。把工作副本一次性写回规范聚合；`changed` 由显式比较得出。
  */
 import { reconcileInputMappings } from "../domain/input-mapping.js";
-import { normalizeCanvas, sanitizeWoohaa3CanvasParentIds, toWoohaa3CanvasDocument, type CanvasNodeData, type ServerCanvas } from "../domain/index.js";
+import { normalizeCanvas, toWoohaa3CanvasDocument, type CanvasNodeData, type ServerCanvas } from "../domain/index.js";
 import type { ApplyCanvasCommandsResult, WorkingState } from "./types.js";
 
 /**
  * 把工作副本写回规范聚合。
  *
- * 复用 `toWoohaa3CanvasDocument`（含网格吸附与视口钳制）与 `sanitizeWoohaa3CanvasParentIds`，
- * 与 Web Store 的 `commitCanvas` 语义一致。`changed` 由显式比较得出：无净变化时 revision
+ * 复用 `toWoohaa3CanvasDocument`（含网格吸附与视口钳制），与 Web Store 的 `commitCanvas`
+ * 语义一致。`changed` 由显式比较得出：无净变化时 revision
  * 不递增，调用方据此记录可幂等返回的结果。
  */
 export function finalize(canvas: ServerCanvas, work: WorkingState, now: string): ApplyCanvasCommandsResult {
-  const nodes = sanitizeWoohaa3CanvasParentIds(work.nodes);
-  const document = toWoohaa3CanvasDocument({ nodes, edges: work.edges }, now);
+  const document = toWoohaa3CanvasDocument({ nodes: work.nodes, edges: work.edges }, now);
 
   const candidate: ServerCanvas = {
     ...canvas,

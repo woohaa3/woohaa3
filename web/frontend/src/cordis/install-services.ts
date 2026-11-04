@@ -15,7 +15,6 @@ import { hoverNodeStore } from "./services/hover-store.js";
  * - Task History page scope：Task history reader + 受控 Media resolver；**不**创建
  *   Canvas Session、Canvas sync socket、Bevy/WASM、selection 或 canvas plugins。
  */
-import { CompositeAssetRegistry } from "../extension-api/composite-assets.js";
 import type { Context } from "@deepseek-ai/cordis";
 import type { CanvasCommand } from "@woohaa3/contracts";
 import { createCanvasRemote } from "./services/canvas-remote.js";
@@ -46,7 +45,6 @@ import { currentAppBasePath } from "./services/app-base-path.js";
 import { createAgentConversationRemote } from "./services/agent-conversation-remote.js";
 import { createAgentConversationService, type AgentConversationServiceHandle } from "./services/agent-conversation-service.js";
 import { preloadAgentDirectory } from "./services/agent-directory.js";
-import { createCanvasGroupRuns } from "./services/canvas-group-runs.js";
 import { createIdentitySubjectService } from "./services/identity-subject.js";
 import { createCurrentUserService } from "./services/current-user.js";
 import {
@@ -351,7 +349,21 @@ export async function installCanvasPageServices(
 ): Promise<CanvasPageServices> {
   const canvasId = options.canvasId ?? DEFAULT_CANVAS_ID;
 
-  const canvasRemote = createCanvasRemote({ canvasId, ...options.canvasRemoteOptions });
+  const canvasRemote = createCanvasRemote({
+    canvasId,
+    /**
+     * 页面渲染取景路径：惰性读取 `canvasRuntime`（页面插件可能后于服务安装装载），
+     * 由运行时在同一 Bevy App 内离屏渲染并编码 PNG；缺省时 freeze 直接失败，不回退原生。
+     */
+    renderWorldCapture: async ({ cameraId, width, height }) => {
+      const runtime = ctx.get("canvasRuntime" as never) as {
+        captureWorldCamera?(input: { cameraId: string; width: number; height: number }): Promise<{ ok: true; png: Uint8Array } | { ok: false; code: string }>;
+      } | undefined;
+      if (!runtime?.captureWorldCamera) return { ok: false, code: "renderer-unavailable" };
+      return runtime.captureWorldCamera({ cameraId, width, height });
+    },
+    ...options.canvasRemoteOptions
+  });
   const taskRemote = createTaskRemote(options.taskRemoteOptions);
   const applicationRemote = createApplicationRemote(options.applicationRemoteOptions);
   const settingsRemote = createSettingsRemote();
@@ -383,9 +395,6 @@ export async function installCanvasPageServices(
   );
 
   ctx.provide("hoverState" as never, hoverNodeStore as never);
-  const compositeAssets = new CompositeAssetRegistry();
-  ctx.provide("compositeAssets" as never, compositeAssets as never);
-  ctx.effect(() => () => compositeAssets.clear(), "composite-asset-registry");
   const fileModelPreparation = createFileModelPreparation({
     // canvasRuntime 由页面插件注入；install 阶段只捕获惰性读取。
     runtime: () => (ctx.get("canvasRuntime" as never) as {
@@ -394,7 +403,7 @@ export async function installCanvasPageServices(
       } | null;
     } | undefined) ?? null
   });
-  const nodeImplementations = createNodeImplementationRegistry(compositeAssets, fileModelPreparation);
+  const nodeImplementations = createNodeImplementationRegistry(fileModelPreparation);
   ctx.provide("nodeImplementations" as never, nodeImplementations as never);
   ctx.effect(() => () => nodeImplementations.clear(), "node-implementation-registry");
   const inputScopes = new InputScopeService();
@@ -507,12 +516,9 @@ export async function installCanvasPageServices(
     : null;
   // 宿主重连门禁（fault-isolation D6）：App 级 hostConnectivity 存在时才设置，会话在重连期间拒绝提交。
   const submissionGate = hostSubmissionGate(ctx);
-  const session = await createCanvasSession({ canvasId, remote: canvasRemote, lifecycle: compositeAssets.managedLifecycles, getContent: compositeAssets.getContent, subscribeContent: compositeAssets.subscribeContent, ...(access ? { access } : {}), ...submissionGate });
+  const session = await createCanvasSession({ canvasId, remote: canvasRemote, ...(access ? { access } : {}), ...submissionGate });
   ctx.provide("canvasSession" as never, session as never);
   ctx.effect(() => preloadAgentDirectory(agentConversations, ctx.currentUser, session), "agent-directory-preload");
-  const groupRuns = createCanvasGroupRuns({ canvasId, transport: applicationRemote.transport, conversations: agentConversations, user: ctx.currentUser, writable: () => session.isWritable() });
-  ctx.provide("canvasGroupRuns" as never, groupRuns as never);
-  ctx.effect(() => () => groupRuns.dispose(), "canvas-group-runs");
   const mediaContent = createMediaContentService({
     canvas: () => woohaa3CanvasStore.getState().canvas,
     subscribe: listener => woohaa3CanvasStore.subscribe(listener),
@@ -549,8 +555,6 @@ export async function installCanvasPageServices(
   }
   // 页面级编辑历史（撤销/重做）；随 page scope dispose 清空（change: 2026-10-09，任务 1.5）。
   const canvasEdit = createCanvasEditService({
-    getContent: compositeAssets.getContent,
-    lifecycle: compositeAssets.managedLifecycles,
     session,
     getCanvas: () => woohaa3CanvasStore.getState().canvas
   });

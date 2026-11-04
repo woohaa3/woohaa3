@@ -46,6 +46,15 @@ describe("grsai 请求体", () => {
     expect(buildGenerateBody(image, { prompt: "a cat" })).toEqual({ model: "nano-banana-2", prompt: "a cat", replyType: "async" });
   });
 
+  it.each([
+    { label: "camel", parameters: { aspectRatio: "1:1" }, expected: "1:1" },
+    { label: "normalized snake", parameters: { aspect_ratio: "16:9" }, expected: "16:9" },
+    { label: "public camel takes precedence", parameters: { aspectRatio: "1:1", aspect_ratio: "16:9" }, expected: "1:1" }
+  ])("maps $label aspect ratio to the Grsai wire field", ({ parameters, expected }) => {
+    expect(buildGenerateBody(image, { prompt: "a cat", ...parameters }))
+      .toEqual({ model: "nano-banana-2", prompt: "a cat", replyType: "async", aspectRatio: expected });
+  });
+
   it("视频带分辨率与时长，不带图片专属字段", () => {
     expect(buildGenerateBody(video, { prompt: "pan", urls: ["https://cdn.example/first.png"], resolution: "1080p", duration: 8, imageSize: "1K" }))
       .toEqual({

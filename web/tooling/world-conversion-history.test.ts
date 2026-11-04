@@ -1,0 +1,72 @@
+import http from "node:http";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { expect, it } from "vitest";
+import { createEmptyWoohaa3ServerCanvas, planCanvasEdit, type CanvasCommand } from "@woohaa3/contracts";
+import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
+import { createCanvasService } from "../services/canvas-service/src/composition.js";
+import { InMemoryCanvasRepository } from "../services/canvas-service/src/storage/core/in-memory-repository.js";
+import { SqliteYjsRepository } from "../services/canvas-service/src/storage/sqlite/yjs.js";
+import { createCanvasRemote } from "../frontend/src/cordis/services/canvas-remote.js";
+import { createCanvasEditService } from "../frontend/src/cordis/services/canvas-state/store/canvas-edit-service.js";
+import type { CanvasSession } from "../frontend/src/cordis/contracts.js";
+
+it("converts over HTTP and replays the frozen journal through a durable room", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "conversion-history-"));
+  const db = path.join(dir, "canvas.sqlite");
+  const canvas = createEmptyWoohaa3ServerCanvas("conversion");
+  canvas.document.nodes.push({ id: "model", type: "model3d", position: { x: 0, y: 0 } });
+  canvas.nodeData.model = { modelScript: "scene.box({ id: 'body' });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "source", contentHash: "content" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } };
+  const repository = new InMemoryCanvasRepository();
+  await repository.createCanvas(canvas);
+  let yjs = new SqliteYjsRepository({ path: db });
+  const start = () => createCanvasService({ repository, yjsRepository: yjs, storageConfig: { backend: "sqlite", sqlitePath: db, limits: {} }, mediaClient: { async verify() { return { exists: true, matches: true }; } } });
+  let service = await start();
+  let room = await service.sync!.registry.resolve(canvas.id);
+  const server = http.createServer((req, res) => { void service.handle(req, res).then(handled => { if (!handled) { res.statusCode = 404; res.end(); } }); });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw Error("missing address");
+    const remote = createCanvasRemote({ canvasId: canvas.id, basePath: `http://127.0.0.1:${address.port}/api/canvases` });
+    const current = () => { const value = room.exportCanvas(); if (!value.ok) throw Error(value.message); return value.canvas; };
+    const session = { isWritable: () => true, commandLifecycle: () => null, submitCommands(commands: readonly CanvasCommand[], commandId: string) {
+      const settled = room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: canvas.id, commandId, actorId: "history-test", baseRevision: current().revision, commands: [...commands] }).then(result => result.ok ? { state: "committed", error: null } : { state: "rejected", error: result.message });
+      return { ok: true, handle: { settled } };
+    } } as unknown as CanvasSession;
+    const edit = createCanvasEditService({ session, getCanvas: current });
+    const input = { remote, canvasId: canvas.id, operationId: "op", targets: [{ nodeId: "model", instanceId: "instance" }] };
+    expect(await edit.convertWorld(input)).toMatchObject({ ok: true });
+    const converted = structuredClone(current().nodeData.model.sharedWorldInstance);
+    expect(converted).toBeTruthy();
+    expect(await edit.convertWorld(input)).toMatchObject({ ok: true });
+    expect(edit.getSnapshot().size).toBe(1);
+    expect(await edit.undo()).toEqual({ ok: true });
+    expect(current().nodeData.model.sharedWorldInstance).toBeUndefined();
+    const extra = await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: canvas.id, commandId: "later-node", actorId: "history-test", baseRevision: current().revision, commands: [{ type: "node.add", node: { id: "later", type: "model3d", position: { x: 10, y: 10 } } }] });
+    expect(extra.ok).toBe(true);
+    expect(await edit.redo()).toEqual({ ok: true });
+    expect(current().nodeData.model.sharedWorldInstance).toEqual(converted);
+    expect(current().nodeData.later?.sharedWorldInstance).toBeUndefined();
+    await service.close();
+    yjs.close();
+    yjs = new SqliteYjsRepository({ path: db });
+    service = await start();
+    room = await service.sync!.registry.resolve(canvas.id);
+    expect(current().nodeData.model.sharedWorldInstance).toEqual(converted);
+    const replacement = { ...(converted as Record<string, unknown>), instanceId: "other" };
+    const plan = planCanvasEdit(current(), [{ type: "nodeData.patch", nodeId: "model", value: { sharedWorldInstance: replacement } }]);
+    if (!plan.ok) throw Error(plan.reason);
+    const changed = await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: canvas.id, commandId: "conflict", actorId: "history-test", baseRevision: current().revision, commands: [{ type: "edit.apply", ...plan.forward }] });
+    expect(changed.ok).toBe(true);
+    const before = structuredClone(current());
+    expect(await edit.undo()).toMatchObject({ ok: false });
+    expect(current()).toEqual(before);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await service.close();
+    yjs.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

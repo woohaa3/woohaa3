@@ -127,6 +127,32 @@ export function registerAgentPlanTools(server: McpServer, deps: AgentAuthoringTo
   );
 
   server.registerTool(
+    "resize_canvas_node",
+    {
+      title: "调整画布卡片尺寸",
+      description:
+        "只改节点的卡片矩形宽高，不移动节点、不改成员关系。2D 组整理后缩小组卡片、或调整卡片大小时使用。",
+      inputSchema: z.strictObject({
+        ...CANVAS_ID_SCHEMA,
+        requestId: z.string().min(1),
+        nodeId: z.string().min(1),
+        width: z.number().positive(),
+        height: z.number().positive()
+      }),
+      outputSchema: z.looseObject({ ok: z.literal(true), canvasId: z.string(), requestId: z.string(), revision: z.number() }),
+      annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false }
+    },
+    async ({ canvasId, requestId, nodeId, width, height }) => {
+      const operation: AgentPlanOperation = {
+        op: "resize_node",
+        target: { nodeId },
+        size: { width, height }
+      };
+      return applyOperations(deps, { canvasId, requestId, operations: [operation], scope: "apply_canvas_plan" });
+    }
+  );
+
+  server.registerTool(
     "connect_canvas_nodes",
     {
       title: "连接 Agent 画布节点",

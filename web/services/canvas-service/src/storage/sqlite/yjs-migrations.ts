@@ -7,7 +7,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { CanvasStorageError } from "../core/index.js";
 
-export const SQLITE_YJS_SCHEMA_VERSION = 6;
+export const SQLITE_YJS_SCHEMA_VERSION = 7;
 
 /** 迁移：建表/删表按版本顺序，记录 applied_at。 */
 export function migrateYjsSchema(db: DatabaseSync, now: () => string): void {
@@ -36,7 +36,8 @@ export function migrateYjsSchema(db: DatabaseSync, now: () => string): void {
     { version: 3, run: migrationV3 },
     { version: 4, run: migrationV4 },
     { version: 5, run: migrationV5 },
-    { version: 6, run: migrationV6 }
+    { version: 6, run: migrationV6 },
+    { version: 7, run: migrationV7 }
   ];
   for (const step of steps) {
     if (current >= step.version) continue;
@@ -147,4 +148,9 @@ export function rollback(db: DatabaseSync): void {
 /** Frozen model authoring summaries share the command transaction. */
 function migrationV6(db: DatabaseSync): void {
   db.exec("ALTER TABLE canvas_yjs_commands ADD COLUMN model_batch_json TEXT");
+}
+
+/** T06 scene-area authority receipts share the command transaction. */
+function migrationV7(db: DatabaseSync): void {
+  db.exec("ALTER TABLE canvas_yjs_commands ADD COLUMN world_authoring_json TEXT");
 }

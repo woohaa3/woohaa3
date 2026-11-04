@@ -37,7 +37,6 @@ export type {
 } from "./store.js";
 export {
   compareRows,
-  groupRunTone,
   BACKGROUND_KIND_LABELS,
   BACKGROUND_STATUS_LABELS,
   SKILL_STATE_LABELS,
@@ -49,7 +48,6 @@ export type {
   ActivityRow,
   ActivityRowActions,
   ActivityRowCapabilities,
-  ActivityRowGroupCapabilities,
   ActivityRowKind,
   ActivityRowSkillCapabilities,
   ActivityRowSource,
@@ -57,7 +55,6 @@ export type {
 } from "./rows.js";
 export { adaptTaskRow, defaultTaskTitle, taskRowKey } from "./adapt-task-row.js";
 export { adaptJobRow, isActiveBackgroundJob, jobRowKey } from "./adapt-job-row.js";
-export { adaptGroupRow, canRetryGroupRun, canStopGroupRun, groupRowKey } from "./adapt-group-row.js";
 export { adaptSkillRow, currentSkillAttempt, skillRowKey, skillStepActive, skillStepTitle } from "./adapt-skill-row.js";
 export { createTaskActivityEventBridge } from "./bridge.js";
 export type {
@@ -68,8 +65,6 @@ export type {
 } from "./bridge.js";
 export { TaskActivityFeed } from "./feed.js";
 export type { TaskActivityFeedProps } from "./feed.js";
-/** 组创作读模型行类型（`ActivityRow.source` 组的载荷）。 */
-export type { CanvasGroupRun } from "@woohaa3/frontend/extension-api";
 export { resolveTaskActivityDisplay, modelDisplayName, taskActivityAction } from "./display.js";
 export type { ActivityCanvasNode, TaskActivityDisplay } from "./display.js";
 

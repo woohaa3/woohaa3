@@ -8,3 +8,4 @@ export * from "./internal-api.js";
 export * from "./authorization.js";
 export * from "./delta-journal.js";
 export * from "./run-adapter.js";
+export * from "./group-scope.js";

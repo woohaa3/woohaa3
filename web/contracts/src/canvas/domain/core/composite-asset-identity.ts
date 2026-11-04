@@ -3,7 +3,7 @@
  * （change: 2026-10-11-extract-film-set-extension，D1/D11/D12）。
  *
  * 「复合资产节点」管理由原始素材组成的复合资产，当前以模型/场景直接呈现在画布，无顶部卡片、
- * 标题/状态面板、端口或内嵌预览容器。片场（film-set）是首个业务，共享**唯一** canonical type
+ * 标题/状态面板、端口或内嵌预览容器。复合业务共享**唯一** canonical type
  * `composite-asset`，以 nodeData.extensionId 严格判别业务。
  *
  * 权威规则：
@@ -14,13 +14,11 @@
  */
 export const COMPOSITE_ASSET_NODE_TYPE = "composite-asset" as const;
 
-/** 片场业务扩展标识（规范判别值）。 */
-export const FILM_SET_EXTENSION_ID = "film-set" as const;
 /** 生物视频资产制作扩展。 */
 export const CREATURE_VIDEO_ASSETS_EXTENSION_ID = "creature-video-assets" as const;
 
 /** 受信任的业务 extensionId 集合（用于严格 nodeData 校验与未知业务识别）。 */
-export const COMPOSITE_ASSET_EXTENSION_IDS = [FILM_SET_EXTENSION_ID, CREATURE_VIDEO_ASSETS_EXTENSION_ID] as const;
+export const COMPOSITE_ASSET_EXTENSION_IDS = [CREATURE_VIDEO_ASSETS_EXTENSION_ID] as const;
 
 export type CompositeAssetExtensionId = (typeof COMPOSITE_ASSET_EXTENSION_IDS)[number];
 
@@ -38,10 +36,4 @@ export function readCompositeAssetExtensionId(nodeData: unknown): CompositeAsset
   return typeof id === "string" && (COMPOSITE_ASSET_EXTENSION_IDS as readonly string[]).includes(id)
     ? (id as CompositeAssetExtensionId)
     : null;
-}
-
-/** 是否为片场业务节点（`composite-asset` + `extensionId="film-set"`）。 */
-export function isFilmSetNode(type: string | undefined, nodeData: unknown): boolean {
-  return isCompositeAssetNodeType(type) && readCompositeAssetExtensionId(nodeData) === FILM_SET_EXTENSION_ID
-    && (nodeData as { compositeAssetRole?: unknown }).compositeAssetRole === undefined;
 }

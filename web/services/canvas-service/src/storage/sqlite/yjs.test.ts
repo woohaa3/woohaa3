@@ -42,7 +42,7 @@ registerYjsRepositoryContract(
 );
 
 describe("SQLite Yjs schema 与文件布局（任务 3.2）", () => {
-  it("只创建 Yjs 三张表 + 锁表 + schema 版本表", () => {
+  it("创建 Yjs、writer lock 和空间占用表", () => {
     const repository = open();
     const tables = repository
       .debugQuery<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -55,7 +55,9 @@ describe("SQLite Yjs schema 与文件布局（任务 3.2）", () => {
       "canvas_yjs_commands",
       "canvas_yjs_documents",
       "canvas_yjs_schema_migrations",
-      "canvas_yjs_updates"
+      "canvas_yjs_updates",
+      "spatial_lease_locks",
+      "spatial_lease_runs"
     ]);
   });
 

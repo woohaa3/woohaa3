@@ -21,6 +21,7 @@ import {
   type RunStateService
 } from "../service-keys.js";
 import { hasModelFocusTarget, resolveModelFocusTargets } from "../canvas-shell/model-focus-targets.js";
+import { submitWorldCameraSave } from "../../services/world-camera-ui.js";
 import type { FocusTargetInput } from "../canvas-shell/model-focus-session.js";
 import { CanvasRuntimeHost, type CanvasRuntimeOptions } from "./host.js";
 import type { CanvasRuntimeService } from "../../contracts.js";
@@ -35,7 +36,7 @@ export const CANVAS_CONTEXT_MENU_TYPE = "canvas-context";
 
 export type CanvasRuntimeExtensionOptions = Pick<
   CanvasRuntimeOptions,
-  "loadRuntime" | "createVideoSessions" | "createCompositeAssetMediaSessions" | "onViewportChange"
+  "loadRuntime" | "createVideoSessions" | "onViewportChange"
 > & {
   /** 已构造的运行时 host（测试注入）；缺省新建。 */
   canvasRuntime?: CanvasRuntimeService;
@@ -78,7 +79,6 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
         options.canvasRuntime ??
         new CanvasRuntimeHost({
           canvasId,
-          compositeAssets: ctx.compositeAssets,
           nodeCapabilities: ctx.nodeImplementations,
           mediaContent: ctx.get("mediaContent"),
           getSession: () => ctx.canvasSession,
@@ -110,9 +110,8 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
           subscribeModelScenes: (listener) => {
             const provider = ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider | undefined;
             const stop = provider?.subscribe(listener);
-            const stopComposite = ctx.compositeAssets.subscribe(listener);
             const stopNodes = ctx.nodeImplementations.subscribe(listener);
-            return () => { stop?.(); stopComposite(); stopNodes(); };
+            return () => { stop?.(); stopNodes(); };
           },
           getRunState: () => {
             const service = ctx.get(RUN_STATE_SERVICE) as RunStateService | undefined;
@@ -124,9 +123,7 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
               records: snapshot?.records ?? [],
               currentOperationByNode: service?.currentOperationByNode(),
               versionsByNode: versions?.snapshot(),
-              groupStatuses: new Map(ctx.get("canvasGroupRuns")?.getSnapshot().rows.slice().reverse().map(row => [row.rootGroupId, { label: row.label, state: row.status }]) ?? []),
-              selectedByNode: versions?.selectedByNode(),
-              unseenByNode: versions?.unseenSnapshot()
+              selectedByNode: versions?.preview?.selected
             };
           },
           projectHistoryCanvas: canvas => {
@@ -139,8 +136,7 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
             const unsubscribe = service?.subscribe(listener);
             const unsubscribeCurrent = service?.subscribeCurrentOperations(listener);
             const unsubscribeVersions = versions?.subscribe(listener);
-            const unsubscribeGroups = ctx.get("canvasGroupRuns")?.subscribe(listener);
-            return () => { unsubscribe?.(); unsubscribeCurrent?.(); unsubscribeVersions?.(); unsubscribeGroups?.(); };
+            return () => { unsubscribe?.(); unsubscribeCurrent?.(); unsubscribeVersions?.(); };
           },
           isModalActive: () => ctx.inputScopes.blocksCanvas(),
           // Ctrl/⌘+F 打开查找（只读仍可；change: 2026-10-09，任务 4.2）。
@@ -150,12 +146,22 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
           onRedoRequest: () => void ctx.canvasEdit.redo(),
           // 结构动作经编辑历史提交（可撤销；任务 1.5）。
           onEditCommands: (commands, label) => { void ctx.canvasEdit.record(commands, label); },
+          // 共享世界镜头视锥拖动：释放经权威 `world-camera-save`，可逆回调进页面撤销历史。
+          saveWorldCamera: (input, signal) => submitWorldCameraSave(ctx.canvasRemote, input, signal),
+          moveWorldCameraCard: (nodeId, position, operationId) => {
+            const result = ctx.canvasSession.submitCommands(
+              [{ type: "node.update", nodeId, position }],
+              operationId
+            );
+            return Promise.resolve(result.ok ? { ok: true as const } : { ok: false as const, reason: result.reason });
+          },
+          recordExternal: (entry) => ctx.canvasEdit.recordExternal(entry),
           // 提交/回调错误不静默：记录诊断（手势仍由输入层复位）。
           onInteractionError: (error) => {
             console.error("[canvas-runtime] interaction error", error);
           },
           // 聚焦相机输入只被真正 modal Dialog 阻断（design D6）。
-          isFocusInputBlocked: () => ctx.inputScopes.blocksFocusInput() || ctx.compositeAssets.blocksFocusInput(),
+          isFocusInputBlocked: () => ctx.inputScopes.blocksFocusInput(),
           prefersReducedMotion: () => prefersReducedMotion(),
           // 宿主转发目录中的 UI 请求；使用字面量 emit 供架构审计。
           emit: (name, payload) => {
@@ -174,9 +180,6 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
                 return;
               case "ui.node-history.open-requested":
                 ctx.emit("ui.node-history.open-requested", payload as never);
-                return;
-              case "ui.shot-preview.enter-requested":
-                ctx.emit("ui.shot-preview.enter-requested", payload as never);
                 return;
             }
           },
@@ -209,19 +212,8 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
             // 双击视频进入视频聚焦（change: 2026-10-10-add-video-node-focus-workspace，design D1）。
             void ctx.canvasNavigation.requestEnterNodeFocus({ nodeId: request.nodeId, kind: "video", owner: "direct" });
           },
-          onShotPreviewEnterIntent: (request) => {
-            // 双击拍摄镜头预览卡片：进入所属片场聚焦并选择该镜头（任务 5.4 / design D8）。
-            // 归属由输入层严格解码，这里只经 Navigation 进入片场 focus；具体选择哪一路镜头由
-            // 片场扩展消费 `ui.shot-preview.enter-requested` 时决定（宿主不猜默认镜头）。
-            void ctx.canvasNavigation
-              .requestEnterNodeFocus({ nodeId: request.filmSetNodeId, kind: "model", owner: "direct" })
-              .then(result => {
-                if (result.ok) ctx.emit("ui.shot-preview.enter-requested", request as never);
-              });
-          },
           ...(options.loadRuntime ? { loadRuntime: options.loadRuntime } : {}),
           ...(options.createVideoSessions ? { createVideoSessions: options.createVideoSessions } : {}),
-          ...(options.createCompositeAssetMediaSessions ? { createCompositeAssetMediaSessions: options.createCompositeAssetMediaSessions } : {}),
           ...(options.onViewportChange ? { onViewportChange: options.onViewportChange } : {})
         });
 
@@ -308,7 +300,7 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
         };
       }, "canvas-runtime-load");
     },
-    { name: CANVAS_RUNTIME_PLUGIN_ID, inject: ["nodeImplementations", "compositeAssets", "canvasState", "canvasSession", "inputScopes", "theme", "canvasNavigation", "canvasEdit", "slots"] }
+    { name: CANVAS_RUNTIME_PLUGIN_ID, inject: ["nodeImplementations", "canvasState", "canvasSession", "inputScopes", "theme", "canvasNavigation", "canvasEdit", "canvasRemote", "slots"] }
   );
 }
 

@@ -12,10 +12,11 @@
  * 因此「请求返回后页面即可关闭」「终态只由服务端写入」是结构性保证。
  */
 import type { CanvasTaskCatalog, CanvasTaskModelType } from "@woohaa3/contracts";
-import { CANVAS_TASK_LIMITS, APP_THEME_DEFAULT_TOKENS, freezeShotImageReferences, readyShotImageAsset, shotImageMappingsMatch, catalogModelBindings, type FrozenShotImageReference } from "@woohaa3/contracts";
+import { CANVAS_TASK_LIMITS } from "@woohaa3/contracts";
 import type { ExecutionLaunchEvent, ExecutionOrigin } from "./execution-launch.js";
 import type { Woohaa3CanvasStoreState } from "../../services/canvas-state/index.js";
 import type { CanvasRunRequest, CanvasRunResult } from "../../contracts.js";
+import type { CanvasCaptureFreezeResult } from "../../contract/remote.js";
 import type {
   TaskActivityFinishedLocalRejection,
   TaskActivityStarted
@@ -24,6 +25,12 @@ import type {
 /** run/cancel 能力（由 Canvas Remote adapter 实现）。 */
 export type CanvasRunClient = {
   run(request: CanvasRunRequest): Promise<CanvasRunResult>;
+  /** T10: optional at the type level so older adapters fail closed, never fake success. */
+  freezeWorldCapture?(input: {
+    cameraId: string;
+    requestId?: string;
+    signal?: AbortSignal;
+  }): Promise<CanvasCaptureFreezeResult>;
   cancel(input: { nodeId: string; runId: string }): Promise<{ ok: true } | { ok: false; error: string }>;
 };
 
@@ -44,30 +51,15 @@ export type SubmitCanvasReader = Pick<Woohaa3CanvasStoreState, "canvas"> & {
   getState: () => Pick<Woohaa3CanvasStoreState, "canvas">;
 };
 
-/**
- * 同一节点连续提交的前沿防抖窗口。
- *
- * 只吸收「手还没离开键」级别的连按（Enter 重复、双击），远小于有意的再次生成间隔，
- * 因此不会阻止用户重新发一个独立 run。作用域与既有的镜头参考提交门禁一致：
- * 只有会冻结静态镜头版本、可能进入等图或真正发请求的节点才需要它。
- */
-export const RAPID_SUBMIT_WINDOW_MS = 100;
-
-/** 连按被防抖吸收时的提示文案（同一句也用于图片参考提交在飞时的手动重入）。 */
-export const RAPID_SUBMIT_MESSAGE = "提交速度过快 请慢一点";
-
 export type SubmitCoordinatorOptions = {
   store: { getState: () => Pick<Woohaa3CanvasStoreState, "canvas"> };
   client: CanvasRunClient;
   /** 任务活动 typed 事件出口（optional；缺失时行为不变）。 */
   activity?: TaskActivityEventSink;
-  /** 判断一次网关拒绝是否属于「等待镜头参考」等可自动续交状态。 */
-  isWaiting?: (error: string) => boolean;
-  imageReferenceBackground?: () => string;
   isWritable?: () => boolean;
+  /** False after the page/panel is disposed; stale async feedback is suppressed. */
+  isCurrent?: () => boolean;
   now?: () => string;
-  /** 防抖窗口的单调时钟（毫秒）；测试注入，缺省 `Date.now`。 */
-  nowMs?: () => number;
   createRunId?: () => string;
 };
 
@@ -80,65 +72,31 @@ export type SubmitInput = {
   catalog: CanvasTaskCatalog;
   /** 该节点的期望模型类型（由面板 kind 推导）。 */
   expectedModelType: CanvasTaskModelType;
+  /**
+   * T10: when the generation consumes a world camera framing, freeze that camera's
+   * exact version before durable acceptance. The camera id is only a selection; every
+   * version/media field comes from the authoritative service response.
+   */
+  worldCapture?: { cameraId: string };
 };
 
 export type SubmitOutcome =
   | { ok: true; runId: string; jobId: string }
-  | { ok: false; error: string; /** 属于「等待镜头参考」等可自动续交状态。 */ waiting?: boolean };
+  | { ok: false; error: string; code?: string };
 
 export type SubmitCoordinator = {
   submit(input: SubmitInput): Promise<SubmitOutcome>;
   cancel(input: { nodeId: string; runId: string }): Promise<{ ok: true } | { ok: false; error: string }>;
-  /**
-   * 画布/版本变化后重试等待中的提交（每个节点至多续交一次，成功后出队）。
-   * 供插件在权威画布更新（例如镜头参考录制完成并冻结）后调用。
-   */
-  retryWaiting(): Promise<readonly SubmitOutcome[]>;
-  /** 当前等待续交的节点 id。 */
-  pendingWaiting(): readonly string[];
-  subscribeWaiting?: (listener: () => void) => () => void;
-  waitingMessage?: (nodeId: string) => string | null | undefined;
 };
 
 export function createSubmitCoordinator(options: SubmitCoordinatorOptions): SubmitCoordinator {
   const createRunId = options.createRunId ?? defaultRunId;
-  const nowMs = options.nowMs ?? (() => Date.now());
-  type PendingInput = SubmitInput & { imageReferences?: FrozenShotImageReference[]; canvasId?: string };
-  const waiting = new Map<string, PendingInput>();
-  const submitting = new Set<string>();
-  /** 每个节点最近一次**通过防抖**的提交时刻，用于吸收窗口内的连按。 */
-  const lastSubmitAt = new Map<string, number>();
-  const waitingMessages = new Map<string, string | null>();
-  const waitingListeners = new Set<() => void>();
-  const message = (nodeId: string, value: string | null) => {
-    if (waitingMessages.get(nodeId) === value) return;
-    waitingMessages.set(nodeId, value); waitingListeners.forEach(listener => listener());
-  };
+  const isCurrent = () => options.isCurrent?.() !== false;
 
-  /**
-   * 连按防抖的时间戳归属：「真正要发请求」的那一次才推进，预检拒绝不推进。
-   *
-   * 这样提示词为空、模型不匹配这类可反复触发的拒绝不会被误判成连按，
-   * 只有已经受理（或进入等图）的提交才会开启 100ms 窗口。
-   */
-  const armRapidWindow = (nodeId: string) => { lastSubmitAt.set(nodeId, nowMs()); };
-  const insideRapidWindow = (nodeId: string) => {
-    const previous = lastSubmitAt.get(nodeId);
-    return previous !== undefined && nowMs() - previous < RAPID_SUBMIT_WINDOW_MS;
-  };
-  /** 连按命中的统一出口：返回值给 generic 面板，同时写 waiting 通道给宿主面板。 */
-  const rapidRejection = (nodeId: string): SubmitOutcome => {
-    message(nodeId, RAPID_SUBMIT_MESSAGE);
-    return { ok: false, error: RAPID_SUBMIT_MESSAGE };
-  };
-
-  const attempt = async (input: PendingInput): Promise<SubmitOutcome> => {
+  const attempt = async (input: SubmitInput): Promise<SubmitOutcome> => {
     const canvas = options.store.getState().canvas;
     if (!canvas) return { ok: false, error: "画布尚未加载，无法提交任务" };
-    if (options.isWritable?.() === false) return { ok: false, error: "shot-image-permission-denied: 画布当前不可写，请恢复连接后重新执行" };
-
-    // 连按防抖只服务会冻结静态镜头版本的那一类节点；普通节点仍可获得连续独立 run。
-    const rapidGuarded = canvas.nodeData[input.nodeId]?.inputMapping?.some(mapping => mapping.role === "shot_image_reference") === true;
+    if (options.isWritable?.() === false) return { ok: false, error: "画布当前不可写，请恢复连接后重新执行" };
 
     if (!input.catalog.available) {
       return { ok: false, error: input.catalog.reason ?? "任务目录不可用" };
@@ -155,38 +113,23 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
     if (input.prompt.length > CANVAS_TASK_LIMITS.promptMaxChars) {
       return { ok: false, error: `提示词超过 ${CANVAS_TASK_LIMITS.promptMaxChars} 字上限` };
     }
-    if (input.canvasId && input.canvasId !== canvas.id) return { ok: false, error: "画布已切换，图片参考等待已取消" };
-    if (!input.imageReferences) {
-      const frozen = freezeShotImageReferences(canvas, input.nodeId, options.imageReferenceBackground?.() ?? APP_THEME_DEFAULT_TOKENS.webSubtle);
-      if (typeof frozen === "string") return { ok: false, error: frozen };
-      input = { ...input, parameters: structuredClone(input.parameters), canvasId: canvas.id, imageReferences: frozen };
-    }
-    const images = input.imageReferences ?? [];
-    if (!shotImageMappingsMatch(canvas, input.nodeId, images)) return { ok: false, error: "输入连接已变化，请重新执行" };
-    if (images.length) {
-      const current = freezeShotImageReferences(canvas, input.nodeId, options.imageReferenceBackground?.() ?? APP_THEME_DEFAULT_TOKENS.webSubtle);
-      if (typeof current === "string") return { ok: false, error: current };
-      if (!catalogModelBindings(model).some(binding => binding.roles.includes("reference_image") && binding.mediaKinds.includes("image") && binding.mediaTypes.includes("image/png"))) {
-        return { ok: false, error: "所选模型不接受图片参考（image/png）" };
-      }
-      for (const ref of images) {
-        if (readyShotImageAsset(canvas.assets, ref)) continue;
-        if (!current.some(candidate => candidate.slotId === ref.slotId && candidate.contentIdentity === ref.contentIdentity && candidate.profileKey === ref.profileKey)) {
-          return { ok: false, error: "shot-image-version-stale: 图片参考版本已失效，请重新执行" };
-        }
-        waiting.set(input.nodeId, input);
-        message(input.nodeId, "等待镜头参考图片准备完成");
-        return { ok: false, error: "等待镜头参考图片准备完成", waiting: true };
-      }
-    }
 
-    // 真正要发请求前才判定连按：预检拒绝（空提示词、版本失效）与进入等图都不占用窗口，
-    // 因此它们仍返回自己的原因，不会被“提交速度过快”盖掉。
-    if (rapidGuarded && insideRapidWindow(input.nodeId)) return rapidRejection(input.nodeId);
-    if (rapidGuarded) armRapidWindow(input.nodeId);
+    // T10: freeze the exact framing before announcing acceptance. A failed, cancelled
+    // or superseded wait must not produce an "accepted" activity event or run.
+    let worldCapture: import("@woohaa3/contracts").WorldCaptureGenerationBinding | undefined;
+    if (input.worldCapture) {
+      const freeze = options.client.freezeWorldCapture;
+      if (!freeze) return { ok: false, code: "capture-unavailable", error: "当前画布未装配取景服务，任务未提交" };
+      const frozen = await freeze({ cameraId: input.worldCapture.cameraId });
+      if (!isCurrent()) return { ok: false, code: "stale-scope", error: "页面已切换，取景结果已忽略" };
+      if (!frozen.ok) {
+        // No run was created, so there is no run identity to report or settle.
+        return { ok: false, code: frozen.code, error: frozen.error };
+      }
+      worldCapture = frozen.binding;
+    }
 
     const runId = createRunId();
-    message(input.nodeId, null);
     const jobId = `job-${runId}`;
     const now = options.now ?? (() => new Date().toISOString());
     const launch = (phase: ExecutionLaunchEvent["phase"]) => {
@@ -211,8 +154,10 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
       modelKey: input.modelKey,
       prompt: input.prompt,
       parameters: input.parameters,
-      ...(images.length ? { shotImageReferences: images } : {})
-    }).catch(() => ({ ok: false as const, error: "提交失败，请检查连接后重试" }));
+      ...(worldCapture ? { worldCapture } : {})
+    }).catch(() => ({ ok: false as const, error: "提交失败，请检查连接后重试", code: "run-failed" }));
+    // Page switch/dispose while the request was in flight: do not emit late feedback.
+    if (!isCurrent()) return { ok: false, code: "stale-scope", error: "页面已切换，提交结果已忽略" };
     if (!result.ok) {
       launch("rejected");
       // 网关在接受前拒绝：抛出 local-rejection finished，不写 canonical 成功状态。
@@ -227,55 +172,15 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
           updatedAt: now()
         }
       });
-      const isWaiting = options.isWaiting?.(result.error) ?? false;
-      if (isWaiting) waiting.set(input.nodeId, { ...input, origin: undefined });
-      return { ok: false, error: result.error, ...(isWaiting ? { waiting: true } : {}) };
+      return { ok: false, error: result.error, ...(result.code ? { code: result.code } : {}) };
     }
-    waiting.delete(input.nodeId);
     launch("accepted");
     return { ok: true, runId: result.runId, jobId: result.jobId };
   };
 
   return {
-    async submit(input) {
-      const imageInput = options.store.getState().canvas?.nodeData[input.nodeId]?.inputMapping?.some(mapping => mapping.role === "shot_image_reference");
-      if (imageInput && submitting.has(input.nodeId)) return rapidRejection(input.nodeId);
-      if (imageInput) submitting.add(input.nodeId);
-      waiting.delete(input.nodeId);
-      try {
-        const outcome = await attempt(input);
-        message(input.nodeId, outcome.ok ? null : outcome.error);
-        return outcome;
-      } finally { if (imageInput) submitting.delete(input.nodeId); }
-    },
-    async retryWaiting() {
-      const outcomes: SubmitOutcome[] = [];
-      for (const [nodeId, input] of [...waiting.entries()]) {
-        if (submitting.has(nodeId)) continue;
-        // 自动续交不经过预检里的连按窗口：它由画布更新驱动，本身已按节点去重。
-        lastSubmitAt.delete(nodeId);
-        submitting.add(nodeId);
-        try {
-          const outcome = await attempt(input);
-          outcomes.push(outcome);
-          if (!(outcome.ok === false && outcome.waiting)) waiting.delete(nodeId);
-          message(nodeId, outcome.ok ? null : outcome.error);
-        } finally {
-          submitting.delete(nodeId);
-        }
-      }
-      return outcomes;
-    },
-    pendingWaiting() {
-      return [...waiting.keys()];
-    },
-    subscribeWaiting(listener) { waitingListeners.add(listener); return () => { waitingListeners.delete(listener); }; },
-    waitingMessage(nodeId) { return waitingMessages.get(nodeId); },
-    cancel(input) {
-      waiting.delete(input.nodeId);
-      message(input.nodeId, null);
-      return options.client.cancel(input);
-    }
+    submit: attempt,
+    cancel: (input) => options.client.cancel(input)
   };
 }
 

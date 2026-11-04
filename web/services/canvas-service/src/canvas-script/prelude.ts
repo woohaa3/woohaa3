@@ -296,33 +296,6 @@ export function canvasScriptPrelude(options: CanvasScriptPreludeOptions): string
       if (condition !== undefined) op.if = condition;
       record(op, "setPrompt");
     },
-    group: function (members, options) {
-      beginCall("group");
-      checkKeys(options, "group options", "group", ["key", "title", "layout", "placement", "if"]);
-      var ref = allocRef(options.key, "group");
-      var op = { op: "create_group", ref: ref, title: requiredTitle(options.title, "group"), members: nodeList(members, "group", "members") };
-      if (options.layout !== undefined) op.layout = grid(options.layout, "group");
-      if (options.placement !== undefined) op.placement = placement(options.placement, "group");
-      var condition = precondition(options.if, "group"); if (condition !== undefined) op.if = condition;
-      S.refs.set(ref, "node"); S.nodes.add(ref); record(op, "group");
-      return makeNodeHandle(ref);
-    },
-    reparent: function (targets, parent, options) {
-      beginCall("reparent"); options = options === undefined ? {} : options;
-      checkKeys(options, "reparent options", "reparent", ["if"]);
-      var op = { op: "reparent", targets: nodeList(targets, "reparent", "targets"), parent: parent === null ? null : entity(asNode(parent, "reparent", "parent")) };
-      var condition = precondition(options.if, "reparent"); if (condition !== undefined) op.if = condition;
-      record(op, "reparent");
-    },
-    ungroup: function (target, options) {
-      beginCall("ungroup"); options = options === undefined ? {} : options;
-      checkKeys(options, "ungroup options", "ungroup", ["if"]);
-      var handle = asNode(target, "ungroup", "target");
-      var op = { op: "ungroup", target: entity(handle) };
-      var condition = precondition(options.if, "ungroup"); if (condition !== undefined) op.if = condition;
-      record(op, "ungroup");
-      if (handle.__ref !== undefined) S.deleted.add(handle.__ref);
-    },
     setTitle: function (target, title, options) {
       beginCall("setTitle"); options = options === undefined ? {} : options;
       checkKeys(options, "setTitle options", "setTitle", ["if"]);
@@ -336,6 +309,18 @@ export function canvasScriptPrelude(options: CanvasScriptPreludeOptions): string
       var op = { op: "layout", targets: nodeList(targets, "layout", "targets"), layout: grid(layout, "layout") };
       var condition = precondition(options.if, "layout"); if (condition !== undefined) op.if = condition;
       record(op, "layout");
+    },
+    resize: function (target, size, options) {
+      beginCall("resize"); options = options === undefined ? {} : options;
+      checkKeys(options, "resize options", "resize", ["if"]);
+      checkKeys(size, "size", "resize", ["width", "height"]);
+      if (typeof size.width !== "number" || typeof size.height !== "number" || !isFinite(size.width) || !isFinite(size.height)
+        || size.width <= 0 || size.height <= 0 || size.width > POS_ABS_MAX || size.height > POS_ABS_MAX) {
+        reject("malformed-request", "resize 需要正的有限 { width, height }", "resize", "size");
+      }
+      var op = { op: "resize_node", target: entity(asNode(target, "resize", "target")), size: { width: size.width, height: size.height } };
+      var condition = precondition(options.if, "resize"); if (condition !== undefined) op.if = condition;
+      record(op, "resize");
     },
     remove: function (nodeOrNodes, options) {
       beginCall("remove");

@@ -17,10 +17,6 @@ import type {
   EditSessionCompleteRequest,
   EditSessionCompletionReceipt,
   EditSessionStatusRequest,
-  FilmSetConversionModelCandidate,
-  FilmSetConversionReceipt,
-  FilmSetConversionRequest,
-  FilmSetConversionStatus,
   MergeNodeHistoryReceipt,
   NodeGenerationHistoryDetail,
   NodeGenerationHistoryListPage,
@@ -29,8 +25,6 @@ import type {
   PromptSnippetListQuery,
   PromptSnippetListResult,
   PromptSnippetTag,
-  RecordingStatusView,
-  RecordingSubmitRequest,
   RenamePromptSnippetTagInput,
   UpdatePromptSnippetInput
 } from "@woohaa3/contracts";
@@ -44,16 +38,42 @@ import type { TaskHistoryReader } from "../../shared/task-history/client.js";
 export type CanvasActivityChangesQuery = { canvasId: string; after: number; limit?: number };
 
 export type CanvasRunRequest = {
-  shotImageReferences?: import("@woohaa3/contracts").FrozenShotImageReference[];
   nodeId: string;
   runId: string;
   jobId: string;
   modelKey: string;
   prompt: string;
   parameters: Record<string, unknown>;
+  /** T10 exact capture binding frozen at click time. */
+  worldCapture?: import("@woohaa3/contracts").WorldCaptureGenerationBinding;
 };
 
-export type CanvasRunResult = { ok: true; runId: string; jobId: string } | { ok: false; error: string };
+export type CanvasRunResult =
+  | { ok: true; runId: string; jobId: string }
+  | { ok: false; error: string; code?: string };
+
+export type CanvasCaptureFreezeResult =
+  | { ok: true; binding: import("@woohaa3/contracts").WorldCaptureGenerationBinding }
+  | {
+      ok: false;
+      code: string;
+      error: string;
+      requestedKey?: import("@woohaa3/contracts").WorldCaptureVersionKey;
+      currentKey?: import("@woohaa3/contracts").WorldCaptureVersionKey;
+    };
+
+/** 页面驱动取景：宿主登记的待渲染镜头项。 */
+export type PageCapturePendingEntry = {
+  canvasId: string;
+  cameraId: string;
+  key: import("@woohaa3/contracts").WorldCaptureVersionKey;
+  width: number;
+  height: number;
+};
+
+export type PageCapturePendingResult =
+  | { ok: true; captures: PageCapturePendingEntry[] }
+  | { ok: false; code: string; error: string };
 export type CanvasCancelResult = { ok: true } | { ok: false; error: string };
 
 export type ModelScriptReport = {
@@ -67,7 +87,19 @@ export type ModelScriptReport = {
  * Canvas Remote：Canvas Yjs transport、语义命令 wire、run/cancel、Model MCP report、
  * 提示词片段目录的唯一浏览器出口。所有最终进入 Canvas Service 的协议都在这里。
  */
+export type WorldRemoteOutcome<T> = T & { transportCode?: string };
+
 export interface CanvasRemoteService {
+  issueWorldToolContext(input: import("@woohaa3/contracts").WorldToolContextRequest, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldToolContextOutcome>>;
+  revokeWorldToolContext(input: import("@woohaa3/contracts").WorldToolContextRevokeInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<{ ok: true } | import("@woohaa3/contracts").WorldAuthoringFailure>>;
+  saveWorldCamera(input: import("@woohaa3/contracts").WorldCameraSettingsSaveInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldCameraSettingsSaveOutcome>>;
+  restoreWorldCamera(input: import("@woohaa3/contracts").WorldCameraRestoreInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldCameraRestoreOutcome>>;
+  listWorldCameraHistory(input: import("@woohaa3/contracts").WorldCameraHistoryListInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldCameraHistoryListOutcome>>;
+  prepareSceneArea(input: { canvasId: string; areaId: string }, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringPrepareOutcome>>;
+  executeSceneArea(input: import("@woohaa3/contracts").WorldAuthoringExecuteInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringExecuteOutcome>>;
+  historySceneArea(direction: "undo" | "redo", input: import("@woohaa3/contracts").WorldAuthoringHistoryInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringHistoryOutcome>>;
+  prepareWorldConversion(input: import("@woohaa3/contracts").WorldConversionPrepareInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome>;
+  commitWorldConversion(input: import("@woohaa3/contracts").WorldConversionCommitInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionCommitOutcome>;
   /**
    * 打开当前 Canvas page 的 `canvas-yjs` 逻辑通道
    * （change: unify-canvas-session-websocket，design D2）。
@@ -91,6 +123,26 @@ export interface CanvasRemoteService {
   reconnectCanvasSession(): void;
   /** 发起节点任务（最终由 Canvas Service 校验并提交 Task）。 */
   run(request: CanvasRunRequest): Promise<CanvasRunResult>;
+  /**
+   * T10: wait for the exact current framing and return a trusted frozen binding. A
+   * superseded/cancelled/old-version wait returns an explicit error, never another
+   * framing. Missing service/route fails closed.
+   */
+  freezeWorldCapture(input: {
+    cameraId: string;
+    requestId?: string;
+    signal?: AbortSignal;
+  }): Promise<CanvasCaptureFreezeResult>;
+  /** 页面驱动取景：宿主登记的待渲染镜头清单（无则空数组）。 */
+  listPendingPageCaptures(): Promise<PageCapturePendingResult>;
+  /** 页面驱动取景：提交页面渲染的 PNG；版本已变返回 superseded。 */
+  commitPageCapture(input: {
+    cameraId: string;
+    key: import("@woohaa3/contracts").WorldCaptureVersionKey;
+    png: Uint8Array;
+    width: number;
+    height: number;
+  }): Promise<CanvasCaptureFreezeResult>;
   cancel(input: { nodeId: string; runId: string }): Promise<CanvasCancelResult>;
   /** 上报浏览器 model script 执行结果。 */
   reportModelScript(report: ModelScriptReport): Promise<void>;
@@ -131,7 +183,7 @@ export interface CanvasRemoteService {
     expectedTargetCurrentIdentity?: string;
   }): Promise<NodeHistoryResult<MergeNodeHistoryReceipt>>;
   /** 受控预览 URL（模型缩略图 / 媒体预览 / 视频海报）；只返回同源受控地址。 */
-  nodeHistoryPreviewUrl(input: { canvasId: string; nodeId: string; entryId: string; variant: "preview" | "poster" | "thumbnail" }): string;
+  nodeHistoryPreviewUrl(input: { canvasId: string; nodeId: string; entryId: string; variant: "preview" | "poster" }): string;
   /**
    * 编辑完成面（change: 图片聚焦编辑，design D6）。
    * `begin` 捕获会话基线；`complete` 提交最终编辑版本；`status` 查询受保护回执；
@@ -179,55 +231,6 @@ export interface CanvasRemoteService {
   /** 目录素材 resolver：确认稳定 storageKey 可解析（不返回任何 URL）。 */
   resolveSnippetMaterial(storageKey: string): Promise<SnippetResult<{ storageKey: string; resolvable: boolean }>>;
 
-  // --- 单节点快捷「转为片场」（change: 2026-10-13-add-node-to-film-set-shortcut） ----------
-  /**
-   * 当前可用转换模型候选（提供方集合的只读投影）；无候选时返回空数组。
-   * 前端据此展示真实模型名并在无配置时给出「连接 ChatGPT / 配置语言模型」入口。
-   */
-  filmSetConversionModels(): Promise<NodeHistoryResult<{ models: FilmSetConversionModelCandidate[] }>>;
-  /** 提交一次转换；`unknown` 由状态查询回答（不自动重跑）。 */
-  filmSetConversionSubmit(
-    request: FilmSetConversionRequest
-  ): Promise<NodeHistoryResult<{ receipt: FilmSetConversionReceipt & { ok: true }; status: FilmSetConversionStatus }>>;
-  /** 查询转换状态；`null` 表示无该请求。 */
-  filmSetConversionStatus(input: {
-    canvasId: string;
-    requestId: string;
-  }): Promise<NodeHistoryResult<{ status: FilmSetConversionStatus | null }>>;
-  /** 取消未提交工作；已提交返回实际结果（不掩盖）。 */
-  filmSetConversionCancel(input: {
-    canvasId: string;
-    requestId: string;
-  }): Promise<NodeHistoryResult<{ status: FilmSetConversionStatus }>>;
-  /** 显式重试：合法候选复用提交；无候选产生新的尝试身份。 */
-  filmSetConversionRetry(input: {
-    canvasId: string;
-    requestId: string;
-  }): Promise<NodeHistoryResult<{ receipt: FilmSetConversionReceipt & { ok: true }; status: FilmSetConversionStatus }>>;
-
-  // --- 原生离屏录制（change: 2026-10-17-add-native-offscreen-film-set-recording） ---------------
-  /**
-   * 提交一次原生录制（参考或显式导出）。
-   *
-   * 前端只提交意图：不传像素、不驱动录制时钟。任务由本机宿主执行，
-   * 切换片段/重载页面/最小化不会取消已接受的任务。
-   */
-  recordingSubmit(input: {
-    canvasId: string;
-    request: RecordingSubmitRequest;
-  }): Promise<NodeHistoryResult<{ jobId: string; state: RecordingStatusView["state"]; duplicate: boolean }>>;
-  /** 查询任务状态（页面重连后可继续观察/取消）。 */
-  recordingStatus(input: {
-    canvasId: string;
-    jobId: string;
-  }): Promise<NodeHistoryResult<{ status: RecordingStatusView }>>;
-  /** 当前画布仍在跟踪的任务；不回填活动历史。 */
-  recordingList(input: { canvasId: string }): Promise<NodeHistoryResult<{ jobs: RecordingStatusView[] }>>;
-  /** 取消；已进入保存返回 `recording-too-late`，不谎称取消成功。 */
-  recordingCancel(input: {
-    canvasId: string;
-    jobId: string;
-  }): Promise<NodeHistoryResult<{ cancelled: true }>>;
 }
 
 /** 片段目录协议结果；失败携带稳定错误码（跨进程按字符串判定）。 */

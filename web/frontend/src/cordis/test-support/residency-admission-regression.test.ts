@@ -1,5 +1,5 @@
 /**
- * 驻留准入的两个真实运行时回归
+ * 驻留准入的真实运行时回归
  * （change: 2026-10-23-scale-canvas-media-residency，design D1/D3/D5）。
  *
  * 两者都是「逻辑正确但语义错位」的缺陷，单测只断言了硬上限所以漏过：
@@ -9,8 +9,10 @@
  * 2. 内容身份（模型 prepared resource key）是异步就绪的，画布对象不变。候选表只按画布对象
  *    memo 时，首次投影早于资源就绪会让模型/片场候选永久 `eligible: false`，payload lease 永远
  *    为空 → 被 Rust 淘汰后不再重建（真实故障：片场节点模型全部不显示）。
+ * 3. 共享世界模型直接绘制在世界层，不需要离屏预览槽；超过 16 个唯一模型资源时仍须全部
+ *    提交 payload lease，同时保留普通模型卡片的预览槽上限。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import {
   CanvasResourceCoordinator,
@@ -39,12 +41,14 @@ function project(options: {
   coordinator: CanvasResourceCoordinator;
   candidatesFor: ReturnType<typeof createResidencyCandidateCache>;
   contentVersion?: () => number;
+  onAdmittedContent?: (contentKeys: readonly string[], revision: number) => void;
 }) {
   return createResidencyProjector({
     coordinator: options.coordinator,
     getCanvas: () => options.canvas,
     candidatesFor: options.candidatesFor,
     ...(options.contentVersion ? { contentVersion: options.contentVersion } : {}),
+    ...(options.onAdmittedContent ? { onAdmittedContent: options.onAdmittedContent } : {}),
     viewport: () => ({ x: 0, y: 0, zoom: 1 }),
     surface: () => ({ width: 4000, height: 1000, pixelRatio: 1 }),
     interactive: () => [],
@@ -95,13 +99,57 @@ describe("预览槽只约束离屏预览需求", () => {
     expect(coordinator.diagnostics().deferred).toBe(4);
     coordinator.dispose();
   });
+
+  it("超过 16 个唯一共享世界资源全部获得 payload lease，普通模型卡仍只准入 16 个", () => {
+    const worldIds = Array.from({ length: 21 }, (_, index) => `world-${index}`);
+    const cardIds = Array.from({ length: 20 }, (_, index) => `card-${index}`);
+    const canvas = canvasWith([
+      ...worldIds.map(id => ({ id, type: "model3d", x: 100_000, y: 100_000 })),
+      ...cardIds.map((id, index) => ({ id, type: "model3d", x: index * 120, y: 0 }))
+    ]);
+    for (const [index, id] of worldIds.entries()) {
+      // 第一项保留迁移前的远屏卡片位置，其余节点是无卡片 rect 的共享世界模型。
+      if (index > 0) delete canvas.document.nodes[index].position;
+      canvas.nodeData[id] = {
+        sharedWorldInstance: {
+          kind: "world-instance",
+          version: "shared-world-v1",
+          instanceId: `instance-${id}`,
+          transform: {
+            version: "shared-world-v1",
+            position: { u: index, v: 0, h: 0 },
+            rotation: [0, 0, 0, 1],
+            scale: 1
+          }
+        }
+      };
+    }
+    const coordinator = new CanvasResourceCoordinator();
+    const candidatesFor = createResidencyCandidateCache(
+      createContentIdentity({ modelResourceKey: nodeId => `rk-${nodeId}` })
+    );
+    const onAdmittedContent = vi.fn();
+    const projectOnce = project({ canvas, coordinator, candidatesFor, onAdmittedContent });
+    projectOnce();
+
+    const leased = onAdmittedContent.mock.calls[0]?.[0] as readonly string[];
+    expect(coordinator.admittedNodeIds()).toHaveLength(21 + 16);
+    expect(leased).toHaveLength(21 + 16);
+    for (const id of worldIds) expect(leased).toContain(`rk-${id}`);
+    expect(leased.filter(key => key.startsWith("rk-card-"))).toHaveLength(16);
+    expect(coordinator.diagnostics().deferred).toBe(4);
+
+    // 静止帧复用准入集合，不重复提交或丢失世界资源 lease。
+    projectOnce();
+    expect(onAdmittedContent).toHaveBeenCalledTimes(1);
+    coordinator.dispose();
+  });
 });
 
 describe("异步模型资源就绪后候选表失效", () => {
   it("资源在首次投影后才就绪时，模型进入需求并提交 payload lease", () => {
     const canvas = canvasWith([
-      { id: "m1", type: "model3d", x: 0, y: 0 },
-      { id: "composite-1", type: "composite-asset", x: 400, y: 0 }
+      { id: "m1", type: "model3d", x: 0, y: 0 }
     ]);
     const resources = new Map<string, { resourceKey: string }>();
     let version = 0;
@@ -114,29 +162,18 @@ describe("异步模型资源就绪后候选表失效", () => {
     );
     const projectOnce = project({ canvas, coordinator, candidatesFor, contentVersion: () => version });
 
-    // 首次投影：`model3d` 的 prepared resource 还没派生出来，因此没有可准入内容；
-    // 复合资产此时只有画布合成身份（合法但会被 Rust 过滤为「不是模型」）。
+    // 首次投影：`model3d` 的 prepared resource 还没派生出来，因此没有可准入内容。
     projectOnce();
-    expect(coordinator.admittedNodeIds()).toEqual(["composite-1"]);
-    expect(coordinator.admittedContentKeys()).toEqual([`${canvas.id}:composite:composite-1`]);
+    expect(coordinator.admittedNodeIds()).toEqual([]);
 
     // 资源异步就绪（画布对象不变，只有内容版本推进）。
     resources.set("m1", { resourceKey: "rk-m1" });
-    resources.set("composite-1", { resourceKey: "rk-composite-1" });
     version += 1;
     projectOnce();
 
-    expect(coordinator.admittedNodeIds().sort()).toEqual(["composite-1", "m1"]);
-    expect(coordinator.admittedContentKeys().sort()).toEqual(["rk-composite-1", "rk-m1"]);
+    expect(coordinator.admittedNodeIds()).toEqual(["m1"]);
+    expect(coordinator.admittedContentKeys()).toEqual(["rk-m1"]);
     coordinator.dispose();
   });
 
-  it("复合资产用模型 resourceKey 作为内容身份，而不是画布合成身份", () => {
-    const keyOfOf = createContentIdentity({ modelResourceKey: () => "rk-film-set" });
-    const canvas = canvasWith([{ id: "film", type: "composite-asset", x: 0, y: 0 }]);
-    const keyOf = keyOfOf(canvas);
-    const node = canvas.document.nodes[0]!;
-    // 片场模型 payload lease 只认模型 key；合成身份会被 Rust 过滤掉。
-    expect(keyOf(node)).toBe("rk-film-set");
-  });
 });

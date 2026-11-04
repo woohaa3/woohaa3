@@ -1,5 +1,3 @@
-import { currentCanvasGroupScope, normalizeGroupScopeCommands } from "../agent-authoring/group-scope.js";
-import { validateCanvasGroupChange } from "@woohaa3/contracts";
 /**
  * Canvas script service
  * （change: 2026-10-13-add-canvas-script-authoring，任务 3.1–3.7 / design D1、D3、D5、D6）。
@@ -41,6 +39,8 @@ import {
 import { CanvasScriptRecorder } from "./recorder.js";
 import { CanvasScriptConcurrencyGate, type CanvasScriptCapability } from "./availability.js";
 import { checkPreconditions, collectCascade, stageForCode, toPlannerSnapshot, toScriptError } from "./plan-projection.js";
+import { currentCanvasGroupScope, scopedCanvas } from "../agent-authoring/group-scope.js";
+import { validateCanvasGroupChange } from "@woohaa3/contracts";
 import { frozenReceipt, summarizeEdges } from "./receipt.js";
 import type { CanvasAuthorizer, CanvasPermission } from "../agent-authoring/authorization.js";
 
@@ -175,25 +175,36 @@ export class CanvasScriptService {
     return room.inspectPublished(async (exported): Promise<CanvasScriptValidateOutcome> => {
       if (!exported.ok) return { ok: false, error: canvasScriptError("canvas-unavailable", "commit", exported.message, { retryable: true }) };
 
+      const groupScope = currentCanvasGroupScope();
+      let scoped = exported.canvas;
+      if (groupScope) {
+        try {
+          scoped = scopedCanvas(exported.canvas);
+        } catch {
+          return { ok: false, error: canvasScriptError("group-scope-revoked", "authorize", "2D 组已删除或授权失效") };
+        }
+      }
       const compiled = await compileAgentPlanWithHash({
         canvasId: decoded.value.canvasId,
         requestId: decoded.value.requestId,
         scope: "submit_canvas_script",
         principalId: input.principalId,
         operations: recorded.operations,
-        snapshot: toPlannerSnapshot(exported.canvas)
+        snapshot: toPlannerSnapshot(scoped, groupScope ? { rootGroupId: groupScope.rootGroupId } : undefined)
       });
       if (!compiled.ok) {
         return { ok: false, error: toScriptError(compiled.error.code, compiled.error.message, compiled.error.operationIndex, compiled.error.field) };
       }
       if (decoded.value.expectedRevision !== undefined && decoded.value.expectedRevision !== exported.canvas.revision) return { ok: false, error: canvasScriptError("revision-conflict", "precondition", "画布 revision 已变化") };
-      const preconditionFailure = checkPreconditions(exported.canvas, compiled.preconditions);
+      const preconditionFailure = checkPreconditions(scoped, compiled.preconditions);
       if (preconditionFailure) return { ok: false, error: canvasScriptError("precondition-failed", "precondition", preconditionFailure.message) };
-      const scope = currentCanvasGroupScope();
-      const commands = scope ? normalizeGroupScopeCommands(compiled.commands, scope.rootGroupId) : compiled.commands;
+      const commands = compiled.commands;
       const projected = applyCanvasCommands(exported.canvas, commands);
-      if (projected.ok && scope) { const reason = validateCanvasGroupChange(exported.canvas, projected.canvas, scope.rootGroupId); if (reason) return { ok: false, error: canvasScriptError("forbidden", "authorize", reason) }; }
       if (!projected.ok) return { ok: false, error: toScriptError(projected.rejection.code, projected.rejection.message) };
+      if (groupScope) {
+        const reason = validateCanvasGroupChange(exported.canvas, projected.canvas, groupScope.rootGroupId);
+        if (reason) return { ok: false, error: canvasScriptError("forbidden", "authorize", reason) };
+      }
       if (this.deps.verifyScope) {
         const scope = await this.deps.verifyScope({
           principalId: input.principalId,
@@ -334,18 +345,27 @@ export class CanvasScriptService {
       return { ok: false, code: "revision-conflict", message: `画布已是 revision ${input.canvas.revision}，与 expectedRevision ${input.expectedRevision} 不一致` };
     }
 
+    const groupScope = currentCanvasGroupScope();
+    let scoped = input.canvas;
+    if (groupScope) {
+      try {
+        scoped = scopedCanvas(input.canvas);
+      } catch {
+        return { ok: false, code: "group-scope-revoked", message: "2D 组已删除或授权失效" };
+      }
+    }
     const compiled = await compileAgentPlanWithHash({
       canvasId: input.canvas.id,
       requestId: input.requestId,
       scope: "submit_canvas_script",
       principalId: input.principalId,
       operations: input.operations,
-      snapshot: toPlannerSnapshot(input.canvas)
+      snapshot: toPlannerSnapshot(scoped, groupScope ? { rootGroupId: groupScope.rootGroupId } : undefined)
     });
     if (!compiled.ok) return { ok: false, code: compiled.error.code, message: compiled.error.message };
 
     // 局部前置条件在权威 snapshot 上、命令批次提交前复核。
-    const preconditionFailure = checkPreconditions(input.canvas, compiled.preconditions);
+    const preconditionFailure = checkPreconditions(scoped, compiled.preconditions);
     if (preconditionFailure) return { ok: false, code: "precondition-failed", message: preconditionFailure.message };
 
     // 全量影响范围复核（任务 3.6）：含级联删除的后代与关联边端点。
@@ -360,11 +380,13 @@ export class CanvasScriptService {
       if (!scope.ok) return { ok: false, code: scope.code, message: scope.message };
     }
 
-    const scope = currentCanvasGroupScope();
-    const commands = scope ? normalizeGroupScopeCommands(compiled.commands, scope.rootGroupId) : compiled.commands;
+    const commands = compiled.commands;
     const projected = applyCanvasCommands(input.canvas, commands);
     if (!projected.ok) return { ok: false, code: projected.rejection.code, message: projected.rejection.message };
-    if (scope) { const reason = validateCanvasGroupChange(input.canvas, projected.canvas, scope.rootGroupId); if (reason) return { ok: false, code: "group-scope-forbidden", message: reason }; }
+    if (groupScope) {
+      const reason = validateCanvasGroupChange(input.canvas, projected.canvas, groupScope.rootGroupId);
+      if (reason) return { ok: false, code: "forbidden", message: reason };
+    }
     const affected = new Set(compiled.organization.affectedNodeIds);
     const script: CanvasScriptSubmissionMeta = {
       submissionHash: input.submissionHash,
@@ -393,9 +415,6 @@ export class CanvasScriptService {
   }
 
   private async authorize(principalId: string, canvasId: string, permission: CanvasPermission): Promise<{ ok: true } | { ok: false; error: CanvasScriptError }> {
-    const scope = currentCanvasGroupScope();
-    if (scope && (!scope.valid() || scope.canvasId !== canvasId)) return { ok: false, error: canvasScriptError("group-scope-revoked", "authorize", "组创作授权已撤销") };
-    principalId = scope?.owner ?? principalId;
     if (this.deps.accessRuntime?.enabled !== false && principalId.trim() === "") {
       return { ok: false, error: canvasScriptError("unauthorized", "authorize", "缺少已认证 principal") };
     }

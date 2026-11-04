@@ -18,12 +18,13 @@ import type {
   ApplicationPersonalGenerationFacade,
   ApplicationToolDelegationFacade,
   ApplicationUserDelegation,
-  ApplicationToolGrant
+  ApplicationToolGrant,
+  AssistantWorldScopeSelection
 } from "@woohaa3/contracts";
+import { assistantWorldToolsForScope, CANVAS_GROUP_TOOLS } from "@woohaa3/contracts";
+import { canvasGroupEpoch } from "@woohaa3/canvas-service";
 import type { CanvasService } from "@woohaa3/canvas-service";
 import { randomUUID } from "node:crypto";
-import { CANVAS_GROUP_TOOLS } from "@woohaa3/contracts";
-import { canvasGroupEpoch } from "@woohaa3/canvas-service";
 import type { MediaService } from "@woohaa3/media-service";
 
 export type AuthoringAdapterDeps = {
@@ -43,6 +44,8 @@ export type ToolGrantRegistry = {
   issue: (grant: ApplicationToolGrant, subject?: string) => void;
   subject: (token: string) => string | undefined;
   verify: (token: string) => ApplicationToolGrant | null;
+  /** Host-only snapshot used to invalidate world contexts before dropping grants. */
+  list: () => readonly ApplicationToolGrant[];
   revoke: (workId: string, subject?: string) => void;
   /**
    * 工具入口强制校验（change: 2026-10-22-remove-agent-execution-limits，任务 2.1 / design D2）。
@@ -69,20 +72,25 @@ export function createToolGrantRegistry(): ToolGrantRegistry {
     verify(token) {
       return grants.get(token) ?? null;
     },
+    list() {
+      return [...grants.values()];
+    },
     revoke(workId, subject) {
       for (const [token, grant] of grants) {
-        if (grant.workId === workId && (subject === undefined ? !grant.groupScope : subject === grant.subject)) grants.delete(token);
+        if (grant.workId === workId && (subject === undefined || subject === grant.subject)) grants.delete(token);
       }
     },
     authorize(input) {
       const grant = grants.get(input.token);
       if (!grant) return { ok: false, reason: "unknown-grant" };
-      if ((grant.groupScope || grant.tools.length > 0) && !grant.tools.includes(input.tool)) return { ok: false, reason: "tool-not-allowed" };
-      if (grant.groupScope && canvasGroupEpoch(grant.groupScope.canvasId, grant.groupScope.rootGroupId) !== grant.groupScope.scopeEpoch) return { ok: false, reason: "group-scope-revoked" };
+      if (grant.tools.length > 0 && !grant.tools.includes(input.tool)) return { ok: false, reason: "tool-not-allowed" };
+      if (grant.groupScope && canvasGroupEpoch(grant.groupScope.canvasId, grant.groupScope.rootGroupId) !== grant.groupScope.scopeEpoch) {
+        return { ok: false, reason: "group-scope-revoked" };
+      }
       if (input.canvasId !== undefined && grant.canvasIds.length > 0 && !grant.canvasIds.includes(input.canvasId)) {
         return { ok: false, reason: "canvas-not-allowed" };
       }
-      if (!grant.groupScope && input.nodeId !== undefined && grant.nodeIds.length > 0 && !grant.nodeIds.includes(input.nodeId)) {
+      if (input.nodeId !== undefined && grant.nodeIds.length > 0 && !grant.nodeIds.includes(input.nodeId)) {
         return { ok: false, reason: "node-not-allowed" };
       }
       if (grant.cameraId && !input.tool.startsWith("get_") && input.cameraId !== grant.cameraId) return { ok: false, reason: "camera-not-allowed" };
@@ -108,24 +116,11 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
   const authoring: ApplicationCanvasAuthoringFacade = {
     async readNode(input): Promise<ApplicationAuthoringNodeRead> {
       delegateOrThrow(input.delegation, log);
-      const rootRoom = await deps.canvas.sync?.registry.resolve(input.canvasId);
-      const rootSnapshot = rootRoom?.exportCanvas();
-      const root = rootSnapshot?.ok ? rootSnapshot.canvas.document.nodes.find(n => n.id === input.nodeId) : undefined;
-      if (root?.type === "group") {
-        const access = await deps.canvas.mcpServices().agent?.authorizeCanvas({ principalId: input.delegation.subject, canvasId: input.canvasId, permission: "read" });
-        if (!access?.ok) return { ok: false, code: "unauthorized", message: "无权读取目标画布" };
-        return { ok: true, nodeType: "group", title: String(rootSnapshot!.ok && rootSnapshot!.canvas.nodeData[input.nodeId]?.title || "创作组"), prompt: "", references: [], cameras: [], snapshotHash: `group-epoch:${canvasGroupEpoch(input.canvasId, input.nodeId)}` };
-      }
       const services = deps.canvas.mcpServices();
       const modelMcp = services.modelMcp;
       if (!modelMcp) return { ok: false, code: "unavailable", message: "模型 MCP 当前不可用" };
       const node = await modelMcp.getModelNode({ canvasId: input.canvasId, nodeId: input.nodeId });
       if (!node.ok) return { ok: false, code: node.code, message: node.message };
-      let animation: unknown;
-      if (services.readAnimation) {
-        const read = await services.readAnimation({ canvasId: input.canvasId, nodeId: input.nodeId });
-        if (read.ok) animation = read.animation;
-      }
       return {
         ok: true,
         nodeType: node.nodeType ?? "model3d",
@@ -139,7 +134,6 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
           ...(reference.asset ? { url: reference.asset.url, mediaKind: reference.asset.mediaKind, mediaType: reference.asset.mediaType } : {})
         })),
         ...(node.modelContentVersion ? { modelContentVersion: node.modelContentVersion } : {}),
-        ...(animation ? { animation } : {}),
         ...(node.snapshotHash ? { snapshotHash: node.snapshotHash } : {}),
         cameras: node.cameras
       } as ApplicationAuthoringNodeRead;
@@ -157,22 +151,6 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
       });
       if (!outcome.ok) return { ok: false, code: outcome.code, message: outcome.message };
       return { ok: true, canvasId: outcome.canvasId, nodeId: outcome.nodeId, commandId: outcome.commandId, duplicate: outcome.idempotent, noop: outcome.idempotent };
-    },
-    async commitAnimation(input): Promise<ApplicationAuthoringWriteOutcome> {
-      delegateOrThrow(input.delegation, log);
-      const services = deps.canvas.mcpServices();
-      if (!services.commitAnimation) return { ok: false, code: "unavailable", message: "动画提交端口当前不可用" };
-      const outcome = await services.commitAnimation({
-        canvasId: input.canvasId,
-        nodeId: input.nodeId,
-        requestId: input.operationId,
-        animation: input.animation,
-        ...(input.clipId ? { clipId: input.clipId } : {}),
-        ...(input.expectedClipHash ? { expectedClipHash: input.expectedClipHash } : {}),
-        ...(input.expectedSnapshotHash ? { expectedSnapshotHash: input.expectedSnapshotHash } : {})
-      });
-      if (!outcome.ok) return { ok: false, code: outcome.code, message: outcome.message };
-      return { ok: true, canvasId: outcome.canvasId, nodeId: outcome.nodeId, commandId: outcome.commandId, duplicate: outcome.duplicate, noop: outcome.noop };
     },
     async mutateCamerasBatch(input): Promise<ApplicationAuthoringWriteOutcome> {
       delegateOrThrow(input.delegation, log);
@@ -212,20 +190,76 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
   const tools: ApplicationToolDelegationFacade = {
     async issue(request): Promise<ApplicationToolGrant> {
       delegateOrThrow(request.delegation, log);
-      if (request.mode !== undefined && !["model3d", "film-set", "camera", "canvas-group"].includes(request.mode)) throw new Error("unsupported-target-mode");
-      if (request.mode === "camera") throw new Error("camera-mode-deprecated");
+      if (request.mode !== undefined && !["model3d", "text", "world", "canvas-group"].includes(request.mode)) throw new Error("unsupported-target-mode");
       if (request.mode === "canvas-group") {
-        if (!request.tools?.length) throw new Error("group-tools-required");
-        if (request.tools.some(tool => !(CANVAS_GROUP_TOOLS as readonly string[]).includes(tool))) throw new Error("group-tool-not-supported");
-        const access = await deps.canvas.mcpServices().agent?.authorizeCanvas({ principalId: request.delegation.subject, canvasId: request.canvasId, permission: "write" });
-        if (!access?.ok) throw new Error("write-forbidden");
-        const room = await deps.canvas.sync?.registry.resolve(request.canvasId);
-        const exported = room?.exportCanvas();
-        if (!exported?.ok || !exported.canvas.document.nodes.some(n => n.id === request.nodeId && n.type === "group")) throw new Error("group-target-missing");
-        if (request.expectedScopeEpoch === undefined || request.expectedScopeEpoch !== canvasGroupEpoch(request.canvasId, request.nodeId)) throw new Error("group-scope-revoked");
+        if (!request.nodeId) throw Object.assign(new Error("2D 组目标缺少根组节点"), { code: "malformed-request" });
+        const room = deps.canvas.sync ? await deps.canvas.sync.registry.resolve(request.canvasId) : null;
+        const snapshot = room?.exportCanvas();
+        const group = snapshot?.ok
+          ? snapshot.canvas.document.nodes.find((node) => node.id === request.nodeId && node.type === "workflow-group-2d")
+          : undefined;
+        if (!snapshot?.ok || !group) throw Object.assign(new Error("2D 组不存在或已删除"), { code: "group-target-missing" });
+        const scopeEpoch = canvasGroupEpoch(request.canvasId, request.nodeId);
+        if (request.expectedScopeEpoch !== undefined && request.expectedScopeEpoch !== scopeEpoch) {
+          throw Object.assign(new Error("2D 组作用域已变化，请重新打开组"), { code: "version-conflict" });
+        }
+        const grant: ApplicationToolGrant = {
+          token: `grant-${randomUUID()}`,
+          canvasIds: [request.canvasId],
+          // 组作用域按成员表校验，不按单一节点授权。
+          nodeIds: [],
+          tools: request.tools && request.tools.length > 0 ? request.tools : CANVAS_GROUP_TOOLS,
+          workId: request.workId,
+          groupScope: { canvasId: request.canvasId, rootGroupId: request.nodeId, scopeEpoch },
+          ...(request.credentialEpoch !== undefined ? { credentialEpoch: request.credentialEpoch } : {})
+        };
+        grants.issue(grant, request.delegation.subject);
+        return grant;
+      }
+      if (request.mode === "world") {
+        const scope: AssistantWorldScopeSelection | undefined = request.worldScope;
+        if (!scope) throw Object.assign(new Error("世界目标缺少可信范围选择"), { code: "malformed-request" });
+        const assistantWorld = deps.canvas.assistantWorld;
+        if (!assistantWorld) throw Object.assign(new Error("宿主未装配世界助手权威"), { code: "capability-unsupported" });
+        const allowedTools: readonly string[] = [...(scope.kind === "scene-area" ? ["get_model_api"] : []), ...assistantWorldToolsForScope(scope)];
+        if (request.tools?.some(tool => !allowedTools.includes(tool))) {
+          throw Object.assign(new Error("工具不属于本轮世界范围"), { code: "capability-unsupported" });
+        }
+        const tools = request.tools?.length ? request.tools : allowedTools;
+        const issued = await assistantWorld.issue({
+          canvasId: request.canvasId,
+          requestId: request.workId,
+          runId: request.workId,
+          epoch: 0,
+          executionId: request.workId,
+          scope
+        });
+        if (!issued.ok) throw Object.assign(new Error(issued.message), { code: issued.code });
+
+        const grant: ApplicationToolGrant = {
+          token: `grant-${randomUUID()}`,
+          canvasIds: [request.canvasId],
+          // World writes are scoped by the issued context, not by card node ids.
+          nodeIds: [],
+          ...(request.cameraId ? { cameraId: request.cameraId } : {}),
+          ...(request.clipId ? { clipId: request.clipId } : {}),
+          ...(request.itemId ? { itemId: request.itemId } : {}),
+          tools,
+          workId: request.workId,
+          world: {
+            contextId: issued.context.contextId,
+            completionId: issued.completionId,
+            runId: issued.run.runId,
+            epoch: issued.run.epoch,
+            executionId: issued.run.executionId,
+            scope: issued.context.scope
+          },
+          ...(request.credentialEpoch !== undefined ? { credentialEpoch: request.credentialEpoch } : {})
+        };
+        grants.issue(grant, request.delegation.subject);
+        return grant;
       }
       const grant: ApplicationToolGrant = {
-        ...(request.mode === "canvas-group" ? { groupScope: { canvasId: request.canvasId, rootGroupId: request.nodeId, scopeEpoch: canvasGroupEpoch(request.canvasId, request.nodeId) } } : {}),
         token: `grant-${randomUUID()}`,
         canvasIds: [request.canvasId],
         nodeIds: [request.nodeId],
@@ -239,7 +273,20 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
       grants.issue(grant, request.delegation.subject);
       return grant;
     },
-    revoke: (workId, delegation) => grants.revoke(workId, delegation?.subject),
+    revoke: (workId, delegation) => {
+      // Invalidate the world grant/context before dropping the token. The lease
+      // itself stays until the host confirms the exact run stopped.
+      for (const grant of grants.list()) {
+        if (grant.workId !== workId || (delegation?.subject !== undefined && grant.subject !== delegation.subject)) continue;
+        if (grant.world) {
+          void deps.canvas.assistantWorld?.cancel({
+            canvasId: grant.canvasIds[0] ?? "",
+            contextId: grant.world.contextId
+          }).catch((error) => log({ event: "assistant-world-cancel-failed", message: error instanceof Error ? error.message : String(error) }));
+        }
+      }
+      grants.revoke(workId, delegation?.subject);
+    },
     /**
      * 工具入口强制校验（任务 2.1 / design D2）：宿主在 MCP 工具调用点用它与 bearer 令牌核对。
      * 校验只判范围、权限与撤销状态，不消耗额度。

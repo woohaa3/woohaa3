@@ -27,6 +27,6 @@ The acceptance response includes `runId`, `jobId` and a real `execution` referen
 
 `cancel_canvas_run` stops that exact run, including an older independent round; it does not stop the node's newest run implicitly. An already durable save wins over a racing cancellation. `get_node_output` returns only that run's saved text, including archived results; failed or unsaved runs do not substitute the current node body. The text result is a normal ready Canvas asset and version, consumed by existing downstream references and history restore.
 
-Saved candidates can be retried through the application's explicit retry-save action without calling the model again. Conversation state, credentials and native threads stay private to the local host. Text candidates have no Canvas/MCP write tools. Group authoring still enforces the current root-group grant at Canvas read/write boundaries.
+Saved candidates can be retried through the application's explicit retry-save action without calling the model again. Conversation state, credentials and native threads stay private to the local host. Text candidates have no Canvas/MCP write tools. Canvas writes still enforce the per-turn grant at Canvas read/write boundaries.
 
 Capability declarations and automated protocol tests do not establish availability of a real account. Verify each configured OAuth/local/SDK connection against its actual model before claiming upstream support.

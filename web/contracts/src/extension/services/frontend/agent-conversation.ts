@@ -145,6 +145,7 @@ export type AgentConversationService = AgentConversationView & {
   submitTurn: (
     input: AgentConversationSubmitInput & { requestId: string }
   ) => Promise<AgentConversationResult<AgentConversationSubmitResult>>;
+  submitImageDirectorScene?: (input: AgentConversationSubmitInput & { requestId: string }) => Promise<AgentConversationResult<AgentConversationSubmitResult>>;
   /** 按确切 requestId 查询回合与快照（断流/unknown 恢复；不重新 dispatch）。 */
   queryTurn: (requestId: string) => Promise<AgentConversationResult<{ conversation: ConversationSummary; turn: ConversationTurn; snapshot: ConversationSnapshot }>>;
   /**

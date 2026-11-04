@@ -54,15 +54,15 @@ async function boot(options: {
   authenticator?: ApplicationRequestAuthenticator;
   connections?: AgentConnectionRegistry;
   assistantText?: import("../extensions/assistant-text-service.js").AssistantTextService;
-  canvasCreations?: import("../extensions/canvas-creation-service.js").CanvasCreationService;
+  imageDirectorScene?: import("../extensions/image-director-scene-service.js").ImageDirectorSceneService;
   access?: import("@woohaa3/contracts").ApplicationExtensionCanvasAccessFacade;
 } = {}) {
   const handler = createAgentConversationApiHandler({
     service: options.service ?? serviceStub(),
     serviceConnections: options.serviceConnections,
     serviceConnectionProviders: options.serviceConnectionProviders,
-    canvasCreations: options.canvasCreations,
     assistantText: options.assistantText,
+    imageDirectorScene: options.imageDirectorScene,
     ...(options.basePath ? { basePath: options.basePath } : {}),
     ...(options.discovery ? { mcpDiscovery: options.discovery } : {}),
     ...(options.connections ? { connections: options.connections } : {}),
@@ -98,37 +98,20 @@ const READY: McpBuiltinDiscoveryView = {
   checkedAt: "2026-10-13T00:00:00.000Z"
 };
 
-describe("canvas creation API authority", () => {
-  const input = { requestId: "request", canvasId: "canvas", position: { x: 1, y: 2 }, prompt: "create", connection: { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 } };
-  function creations() {
-    const view = { ...input, rootGroupId: "root", stage: "accepted", turnRequestId: "first" };
-    return { accept: vi.fn(async () => view), peek: vi.fn((owner: string) => owner === "user-a" ? view : null), query: vi.fn(async () => view), retry: vi.fn(async () => view), list: vi.fn(async () => [view]) };
-  }
-  it("uses the trusted principal and original request for reads and explicit retries", async () => {
-    const s = creations();
-    const access = { authorize: vi.fn(async () => ({ ok: true as const })) };
-    const { base } = await boot({ basePath: "/studio/", canvasCreations: s as never, access });
-    const post = await fetch(`${base}/api/agent-conversations/canvas-creations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
-    expect(post.status).toBe(200); expect(s.accept).toHaveBeenCalledWith("user-a", input);
-    expect((await fetch(`${base}/api/agent-conversations/canvas-creations/request`)).status).toBe(200);
-    expect(s.query).toHaveBeenCalledWith("user-a", "request");
-    expect((await fetch(`${base}/api/agent-conversations/canvas-creations/request/retry`, { method: "POST" })).status).toBe(200);
-    expect(s.retry).toHaveBeenCalledWith("user-a", "request");
-    expect(access.authorize).toHaveBeenCalledWith({ subject: "user-a", canvasId: "canvas", permission: "write" });
-    expect(s.accept).toHaveBeenCalledTimes(1);
-  });
-  it("rejects unauthenticated, read-only, cross-owner and forged scope input before effects", async () => {
-    const s = creations();
-    const anonymous = await boot({ canvasCreations: s as never, authenticator: async () => null });
-    expect((await fetch(`${anonymous.base}/api/agent-conversations/canvas-creations/request`)).status).toBe(401);
-    const denied = await boot({ canvasCreations: s as never, access: { authorize: async () => ({ ok: false, code: "forbidden", message: "read only" }) } as never });
-    expect((await fetch(`${denied.base}/api/agent-conversations/canvas-creations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) })).status).toBe(401);
-    const other = await boot({ canvasCreations: s as never, authenticator: async () => ({ subject: "other", sessionId: "s", identityProvider: "test" }) });
-    expect((await fetch(`${other.base}/api/agent-conversations/canvas-creations/request`)).status).toBe(404);
-    const own = await boot({ canvasCreations: s as never });
-    expect((await fetch(`${own.base}/api/agent-conversations/canvas-creations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...input, owner: "other", scope: { rootGroupId: "anything" } }) })).status).toBe(400);
-    expect(s.accept).not.toHaveBeenCalled(); expect(s.query).not.toHaveBeenCalled();
-  });
+it("image director API rejects private fields and derives the owner and connection", async () => {
+  const service = serviceStub();
+  service.readConversation = () => ({ ok: true, snapshot: { conversation: { canvasId: "canvas", adapterId: "adapter" } } } as never);
+  service.resolveConnectionBinding = async () => ({ ok: true, binding: { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 } });
+  const accept = vi.fn(async () => ({ ok: true, conversation: {}, turn: {}, reused: false }));
+  const { base } = await boot({ service, imageDirectorScene: { accept } as never });
+  const entry = { action: "discuss", canvasId: "canvas", nodeId: "image", model: "model", connectionId: "connection", prompt: "build" };
+  const path = `${base}/api/agent-conversations/conversations/conversation/image-director-scenes`;
+  const post = (body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  expect((await post({ requestId: "request", entry: { ...entry, owner: "forged" } })).status).toBe(400);
+  expect((await post({ requestId: "request", entry: { ...entry, mode: "world", worldScope: { kind: "scene-area", areaId: "area" } } })).status).toBe(400);
+  expect(accept).not.toHaveBeenCalled();
+  expect((await post({ requestId: "request", entry })).status).toBe(200);
+  expect(accept).toHaveBeenCalledWith(expect.objectContaining({ owner: "user-a", canvasId: "canvas", connection: { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 } }));
 });
 
 describe("Agent 会话 API · MCP 真实发现", () => {

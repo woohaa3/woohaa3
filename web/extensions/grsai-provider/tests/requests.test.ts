@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GrsaiModel } from "../src/discovery.js";
+import type { PptaskProvider } from "@sdppp/pptask";
 import { createGrsaiProvider } from "../src/provider.js";
+import { createGrsaiRegistration } from "../src/backend.js";
 
 const IMAGE = new Uint8Array([1, 2, 3]);
 
@@ -91,5 +93,49 @@ describe("grsai 请求", () => {
 
     expect(() => provider.imageModel("nope")).toThrow(/未登记/);
     expect(() => provider.videoModel("nano-banana-2")).toThrow(/类型是 image/);
+  });
+});
+
+describe("grsai registration preserves normalized aspect ratio", () => {
+  function registrationHarness(model: GrsaiModel) {
+    const requests: Array<{ path: string; method: string; body: Record<string, unknown> }> = [];
+    const { registration } = createGrsaiRegistration({
+      apiKey: "test-only-key",
+      baseUrl: "https://grsai-registration.test",
+      discovered: [model],
+      fetchImpl: async (input, init) => {
+        const url = new URL(String(input));
+        if (url.origin !== "https://grsai-registration.test" || url.pathname !== "/v1/api/generate" || init?.method !== "POST") {
+          throw new Error("Unexpected request in intercepted registration test");
+        }
+        requests.push({ path: url.pathname, method: init.method, body: JSON.parse(String(init.body)) });
+        return Response.json({ id: "intercepted-task", status: "running" });
+      }
+    });
+    if (!registration.provider) throw new Error("Provider was not registered");
+    return { provider: registration.provider as PptaskProvider, requests };
+  }
+
+  it.each([
+    { label: "public camel", parameters: { aspectRatio: "1:1" } },
+    { label: "normalized snake", parameters: { aspect_ratio: "1:1" } },
+    { label: "public camel over conflicting snake", parameters: { aspectRatio: "1:1", aspect_ratio: "16:9" } }
+  ])("sends image aspect ratio from $label through imageModel.doStart", async ({ parameters }) => {
+    const { provider, requests } = registrationHarness(imageModel);
+    const model = provider.imageModel("nano-banana-2");
+    await model.doStart!({ prompt: "a product", ...parameters, imageSize: "1K", urls: ["https://reference.test/product.png"] } as never);
+    expect(requests).toEqual([{ path: "/v1/api/generate", method: "POST", body: {
+      model: "nano-banana-2", prompt: "a product", replyType: "async", aspectRatio: "1:1", imageSize: "1K",
+      images: ["https://reference.test/product.png"]
+    } }]);
+  });
+
+  it("sends video aspect ratio through the same registration conversion boundary", async () => {
+    const { provider, requests } = registrationHarness(videoModel);
+    const model = provider.videoModel("minimax-h3");
+    await model.doStart!({ prompt: "pan", aspectRatio: "16:9", resolution: "1080p", duration: 8 } as never);
+    expect(requests).toEqual([{ path: "/v1/api/generate", method: "POST", body: {
+      model: "minimax-h3", prompt: "pan", replyType: "async", aspectRatio: "16:9", resolution: "1080p", duration: 8
+    } }]);
   });
 });

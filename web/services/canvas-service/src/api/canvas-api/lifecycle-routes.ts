@@ -17,7 +17,7 @@ import { authorizeCanvasRequest, httpStatusForCanvasAccess } from "../../access/
 import { SESSION_ERROR } from "../../../../../../api/gen/es/woohaa/errors/v1alpha1/wirecodes_gen.js";
 
 /** 统一资源授权（仅在宿主注入 authenticate 时执行）；返回是否放行。 */
-async function requireCanvasAccess(input: {
+export async function requireCanvasAccess(input: {
   req: IncomingMessage;
   res: ServerResponse;
   canvasId: string;

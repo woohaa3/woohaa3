@@ -11,7 +11,7 @@
  * 不含任何 DOM 副作用，便于单测。
  */
 
-export type CanvasShortcutAction = "copy" | "paste" | "delete" | "find" | "undo" | "redo";
+export type CanvasShortcutAction = "copy" | "paste" | "duplicate" | "delete" | "find" | "undo" | "redo";
 
 export type ShortcutEventLike = {
   key: string;
@@ -64,6 +64,7 @@ export function resolveCanvasShortcut(
   if (mod && !event.shiftKey && !event.altKey) {
     if (key === "c") return "copy";
     if (key === "v") return "paste";
+    if (key === "d" && context.writable) return "duplicate";
     if (key === "f") return "find";
   }
   // Delete/Backspace 是持久化删除，离线（不可写）时留给编辑面/浏览器。

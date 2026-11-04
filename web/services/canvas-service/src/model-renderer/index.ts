@@ -10,4 +10,3 @@ export {
   type RendererSceneRequest
 } from "./client.js";
 export { createRenderCache, type CacheEntry, type RenderCache } from "./cache.js";
-export { NodeHistoryThumbnailJob, type NodeHistoryThumbnailResult } from "./node-history-thumbnail.js";

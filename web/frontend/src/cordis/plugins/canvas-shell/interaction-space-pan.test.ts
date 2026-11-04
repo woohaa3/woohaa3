@@ -152,6 +152,7 @@ describe("聚焦进出门禁释放 Space 平移闩锁", () => {
   it("进入/退出聚焦时清掉已按下的空格，返回画布后左键仍点选节点", () => {
     const h = focusHarness();
     const point = modelCenter(h.target);
+    const cardPoint = { x: 200 + 98, y: 100 + 32 };
     // 在普通画布按住空格进入聚焦（例如聚焦里要继续按空格播放）。
     h.dom.fireKey("keydown", { code: "Space", key: " " });
     h.dom.fire("dblclick", { clientX: point.x, clientY: point.y });
@@ -159,12 +160,12 @@ describe("聚焦进出门禁释放 Space 平移闩锁", () => {
     // 退出聚焦时 keyup 可能丢在覆盖层里：控制器必须自行释放。
     h.controller.applyFocusTarget(null, { preserveSession: false });
     expect(h.controller.isModelFocused()).toBe(false);
-    h.dom.fire("pointerdown", { clientX: point.x, clientY: point.y });
+    h.dom.fire("pointerdown", { clientX: cardPoint.x, clientY: cardPoint.y });
     const selection = (h.dom.target as unknown as {
       __canvasSelection: () => { nodeIds: string[] };
     }).__canvasSelection;
     expect(selection().nodeIds).toEqual(["m1"]);
-    h.dom.fire("pointerup", { clientX: point.x, clientY: point.y });
+    h.dom.fire("pointerup", { clientX: cardPoint.x, clientY: cardPoint.y });
     h.controller.dispose();
   });
 });

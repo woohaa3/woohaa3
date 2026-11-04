@@ -122,55 +122,20 @@ it("topmost ordinary media blocks drop to a furnace underneath", () => {
   expect(onDrop).not.toHaveBeenCalled();
 });
 
-describe("group drop ownership", () => {
-  const filmSet = () => canvas([
-    node("film", "group", { x: 0, y: 0 }, { width: 300, height: 200 }),
-    node("plain", "group", { x: 400, y: 0 }, { width: 300, height: 200 }),
-    node("member", "model3d", { x: 20, y: 20 }, { parentId: "film" }),
-    node("source", "model3d", { x: 900, y: 0 }),
-  ]);
-  const filmTarget: NodeDropTarget = {
-    nodeType: "group",
-    matchesTarget: ({ targetNodeId }) => targetNodeId === "film",
+describe("container-less drop ownership", () => {
+  const c = canvas([node("owner", "composite-asset", { x: 0, y: 0 }, { width: 300, height: 200 })]);
+  const owner: NodeDropTarget = {
+    nodeType: "composite-asset",
+    matchesTarget: ({ targetNodeId }) => targetNodeId === "owner",
     onDrop: vi.fn(() => true),
-    onPreview: () => "放到此处加入片场",
+    onPreview: () => "放到此处"
   };
 
-  it("a plain group without a matching owner is not consumed (falls back to group reparent)", () => {
-    const onDrop = vi.fn(() => true);
-    const owner: NodeDropTarget = { nodeType: "group", matchesTarget: () => false, onDrop };
-    expect(dropNodeDrop([owner], filmSet(), ["source"], { x: 410, y: 20 }, target("plain"))).toBe(false);
-    expect(onDrop).not.toHaveBeenCalled();
-    expect(previewNodeDrop([owner], filmSet(), ["source"], target("plain"))).toBeNull();
-    // 命中普通组的成员卡片同样不能被片场接收方吞掉。
-    const c = filmSet();
-    c.document.nodes.push(node("plain-member", "model3d", { x: 420, y: 20 }, { parentId: "plain" }));
-    expect(dropNodeDrop([owner], c, ["source"], { x: 420, y: 20 }, target("plain-member"))).toBe(false);
-    expect(onDrop).not.toHaveBeenCalled();
-  });
-
-  it("a member card delegates to its film-set group ancestor", () => {
-    const c = filmSet();
-    const owner: NodeDropTarget = { ...filmTarget, onDrop: vi.fn(() => true) };
-    expect(dropNodeDrop([owner], c, ["source"], { x: 20, y: 20 }, target("member"))).toBe(true);
-    expect(owner.onDrop).toHaveBeenCalledWith({ canvas: c, targetNodeId: "film", sourceNodeIds: ["source"], point: { x: 20, y: 20 } });
-    expect(previewNodeDrop([owner], c, ["source"], target("member"))).toBe("放到此处加入片场");
-  });
-
-  it("a member card dragged inside its own group is a normal move, not a re-import", () => {
-    const c = filmSet();
-    const owner: NodeDropTarget = { ...filmTarget, onDrop: vi.fn(() => true) };
-    expect(dropNodeDrop([owner], c, ["member"], { x: 10, y: 10 }, target("film"))).toBe(false);
-    expect(dropNodeDrop([owner], c, ["member"], { x: 20, y: 20 }, target("member"))).toBe(false);
-    expect(owner.onDrop).not.toHaveBeenCalled();
-    expect(previewNodeDrop([owner], c, ["member"], target("film"))).toBeNull();
-  });
-
-  it("the film-set group itself still consumes its own target", () => {
-    const c = filmSet();
-    const owner: NodeDropTarget = { ...filmTarget, onDrop: vi.fn(() => true) };
-    expect(dropNodeDrop([owner], c, ["source"], { x: 10, y: 10 }, target("film"))).toBe(true);
-    expect(owner.onDrop).toHaveBeenCalledOnce();
+  it("a matching owner consumes its own target", () => {
+    const targetOwner: NodeDropTarget = { ...owner, onDrop: vi.fn(() => true) };
+    expect(dropNodeDrop([targetOwner], c, ["source"], { x: 10, y: 10 }, target("owner"))).toBe(true);
+    expect(targetOwner.onDrop).toHaveBeenCalledOnce();
+    expect(previewNodeDrop([targetOwner], c, ["source"], target("owner"))).toBe("放到此处");
   });
 });
 

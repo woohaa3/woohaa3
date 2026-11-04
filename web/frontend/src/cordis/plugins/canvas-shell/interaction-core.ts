@@ -9,7 +9,6 @@
 import type { Point, HitTarget } from "./hit-test.js";
 import type { CanvasBounds } from "./canvas-surface-metrics.js";
 import type { CanvasRenderScene } from "@woohaa3/contracts";
-import type { AlignmentGuide } from "../../contract/alignment-snap.js";
 import type { InteractionControllerOptions, Gesture } from "./interaction-types.js";
 import type { ModelGestureFamily } from "./model-gesture-family.js";
 import type { WheelSourceState } from "./input/wheel-gesture.js";
@@ -44,17 +43,10 @@ export type InteractionState = {
   hoveredNodeId: string | null;
   hoveredPort: "input" | "output" | null;
   hoveredEdgeId: string | null;
+  selectedEdgeId?: string | null;
+  hoverPointer?: Point | null;
   hoveredVideoNode: string | null;
   hoveredHistory?: { nodeId: string; presentationId: string } | null;
-  /** Groups whose frozen frame currently contains a dragged node center. */
-  dropTargetGroupIds: string[];
-  /**
-   * 本次拖动命中的辅助对齐线（世界坐标，内置插件 `alignment-guides` 提供策略）。
-   * 只在拖动手势内有效；不进规范状态、不进 render scene，由覆盖层按视口换算绘制。
-   */
-  alignmentGuides: AlignmentGuide[];
-  /** 参考线版本号；只在内容变化时递增，供覆盖层判断是否重绘。 */
-  alignmentGuidesVersion: number;
   wheelSource: WheelSourceState;
   viewportCommitTimer: number | null;
   lastNotifiedViewport: Viewport | null;
@@ -74,11 +66,13 @@ export type InteractionCore = {
   /** 聚焦相机输入门禁（只有 modal 阻断）；见 `InteractionControllerOptions.isFocusInputBlocked`。 */
   focusInputBlocked: () => boolean;
   state: InteractionState;
+  /** 导演区手势运行时（T07）：只转发指针，不在此判断权限或写共享世界。 */
+  sceneAreaGestures: () => import("../world-scopes/gestures.js").SceneAreaGesturePort | null;
   /**
-   * 当前拖动吸附策略（内置插件 `alignment-guides` 注入；`null` 表示不吸附）。
-   * 拖动预览每次求值时读取，插件启停随即可见。
+   * 标记当前导演区手势的输入归属。帧结算只取消 `pointer` 路径启动的手势；
+   * `external`（overlay 搬场景手柄）由自己的 end/cancel 收尾。
    */
-  alignmentSnap: () => import("./alignment-snap.js").AlignmentSnapPolicy | null;
+  claimSceneAreaGesture: (owner: "pointer" | "external") => void;
   localViewport: ReturnType<typeof createLocalViewportStore>;
   viewportListeners: Set<() => void>;
   model: ModelGestureFamily;
@@ -113,12 +107,23 @@ export type InteractionCore = {
     hoveredEdgeId?: string | null
   ) => InteractionQuery<HitTarget | null>;
   queryMarquee: (rect: { x: number; y: number; width: number; height: number }) => InteractionQuery<string[]>;
-  queryProbe: (source: string, direction: "prev" | "next") => InteractionQuery<ProbeCandidate[]>;
+  /** 拖动释放时的通用 drop target（最上层实际节点，排除来源）；用于组拖入判定。 */
+  queryDropTarget: (point: Point, excludedIds?: readonly string[]) => InteractionQuery<string | null>;
+  queryWorldGround: (point: Point) => { u: number; v: number } | null;
   /**
-   * 复合资产范围几何读取（拖动提示/resize 抓手消费，按 accepted generation）
-   * （change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
+   * 共享世界模型的瞬时地面位移预览（米制增量；`null` 清除）。
+   *
+   * 只进入 Render Scene 的 `worldGroundPreviews`，不写卡片位置、不发命令；返回 `false`
+   * 表示该节点不是世界实例或聚焦/过渡期间不允许预览。
    */
-  queryCompositeAssetScopes: () => InteractionQuery<import("../canvas-runtime/bevy-runtime.js").CompositeAssetScopeGeometryEntry[]>;
+  setWorldGroundPreview: (nodeId: string, delta: { u: number; v: number } | null) => boolean;
+  /** 镜头视锥瞬时位姿（地面增量）；只影响本页呈现，不写规范 nodeData。 */
+  setWorldCameraPreview: (nodeId: string, delta: { u: number; v: number } | null) => boolean;
+  /** 清除全部镜头瞬时位姿。 */
+  clearWorldCameraPreviews: () => void;
+  /** 清除全部地面位移预览（取消手势/释放提交后）。 */
+  clearWorldGroundPreviews: () => void;
+  queryProbe: (source: string, direction: "prev" | "next") => InteractionQuery<ProbeCandidate[]>;
   /**
    * 模型网格命中（change: play-model-animations-on-hover）。
    * `point` 为 canvas 内 CSS 坐标；返回命中的模型节点 identity 或 `null`。
@@ -173,9 +178,4 @@ export type InteractionCore = {
   aggregateActive: () => boolean;
   /** 取消聚合拉线手势并清空预览（不提交命令）。 */
   cancelAggregateConnect: () => void;
-  /**
-   * 片场对象局部键盘 action 读取（change: 2026-10-10-improve-film-set-editing-and-inspector）。
-   * 由 gesture family 持有，支持运行时注入；缺省回落 options。
-   */
-  filmSetObjectAction?: () => InteractionControllerOptions["filmSetObjectAction"] | null;
 };

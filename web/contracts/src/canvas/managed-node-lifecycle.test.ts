@@ -74,7 +74,7 @@ it("keeps active-run gates for lifecycle removals and rejects malformed planner 
   expect(applyCanvasCommands(base, [{ type: "nodeData.patch", nodeId: "owner", value: { entries: [] } }], { lifecycle: registry })).toMatchObject({ ok: false, rejection: { message: expect.stringContaining("active-run") } });
   delete base.nodeData["owner:one"].taskStatus;
   for (const mutate of [
-    (entry: ReturnType<typeof adapter.plan>["nodes"][number]) => { entry.node.position.x = Infinity; },
+    (entry: ReturnType<typeof adapter.plan>["nodes"][number]) => { entry.node.position!.x = Infinity; },
     (entry: ReturnType<typeof adapter.plan>["nodes"][number]) => { entry.node.width = 1; },
     (entry: ReturnType<typeof adapter.plan>["nodes"][number]) => { entry.data.mediaContent = { providerId: "bad", schemaVersion: 0, payload: {} }; },
     (entry: ReturnType<typeof adapter.plan>["nodes"][number]) => { entry.data.managedBy!.entityId = "forged"; }

@@ -37,7 +37,9 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
   audio: "音频",
   model3d: "3D 模型",
   "composite-asset": "复合资产",
+  "scene-area": "导演区",
   group: "分组",
+  "world-camera": "镜头",
   custom: "自定义"
 };
 
@@ -48,7 +50,9 @@ const DEFAULT_NAMES: Record<string, string> = {
   audio: "未命名音频",
   model3d: "未命名模型",
   "composite-asset": "未命名复合资产",
-  group: "未命名分组"
+  "scene-area": "导演区",
+  group: "未命名分组",
+  "world-camera": "未命名镜头"
 };
 
 /** 按类型返回中文代号（未知类型回退“作品”）。 */

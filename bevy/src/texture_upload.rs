@@ -23,7 +23,6 @@ pub fn set_texture(
     if content.len() > 4096 {
         return Err(BoundaryError::from_str("Texture content identity too large"));
     }
-    bridge::texture_receipts::invalidate("node",id);
     bridge::queue_texture(
         id,
         width,
@@ -48,7 +47,6 @@ pub fn set_texture_owned(
     if content.len() > 4096 {
         return Err(BoundaryError::from_str("Texture content identity too large"));
     }
-    bridge::texture_receipts::invalidate("node",id);
     bridge::queue_texture_owned(id, width, height, rgba, (!content.is_empty()).then_some(content));
     Ok(())
 }
@@ -67,8 +65,9 @@ pub fn set_image_focus_details(manifest:&str,rgba:&[u8])->Result<(),BoundaryErro
     bridge::queue_focus_details(Some(frame),rgba).map_err(BoundaryError::from_str)
 }
 
-/// 上传/更新一张片场媒体平面 RGBA 纹理（键为全局唯一 `planeId`，latest-wins）
-/// （change: 2026-10-08-make-film-set-model-only，design D5）。
+/// 上传/更新一张模型自带 RGBA 纹理（点击值 id，latest-wins）。
+///
+/// `model3d::model_textures` 只消费 `modeltex:` 前缀的内容；其它 id 被忽略。
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_model_media_texture(
@@ -79,12 +78,11 @@ pub fn set_model_media_texture(
 ) -> Result<(), BoundaryError> {
     crate::wake_canvas();
     protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
-    bridge::texture_receipts::invalidate("plane",id);
-    bridge::queue_film_set_texture(id, width, height, rgba);
+    bridge::queue_model_texture(id, width, height, rgba);
     Ok(())
 }
 
-/// Native counterpart of the borrowed media-plane upload entry point.
+/// Native counterpart of the owned model-texture upload entry point.
 #[cfg(all(feature = "canvas-core", not(feature = "wasm")))]
 pub fn set_model_media_texture_owned(
     id: &str,
@@ -93,24 +91,6 @@ pub fn set_model_media_texture_owned(
     rgba: Vec<u8>,
 ) -> Result<(), BoundaryError> {
     protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
-    bridge::texture_receipts::invalidate("plane",id);
-    bridge::queue_film_set_texture_owned(id, width, height, rgba);
+    bridge::queue_model_texture_owned(id, width, height, rgba);
     Ok(())
-}
-
-/// Drains application receipts. Applying assets is distinct from GPU presentation.
-#[cfg(feature = "canvas-core")]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn poll_texture_receipts() -> String { bridge::texture_receipts::take() }
-
-/// Apply presentation-only resource flags without replacing the full scene/query snapshot.
-#[cfg(feature = "canvas-core")]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn set_resource_states(json: &str) -> Result<u32, BoundaryError> {
-    if json.len() > 1024 * 1024 { return Err(BoundaryError::from_str("Resource state payload too large")); }
-    let request: protocol::ResourceStateRequest = serde_json::from_str(json).map_err(|e| BoundaryError::from_str(&e.to_string()))?;
-    let generation = crate::canvas_query::interaction::accept_resource_states(&request).map_err(BoundaryError::from_str)?;
-    bridge::queue_resource_states(request.nodes);
-    crate::wake_canvas();
-    Ok(generation)
 }

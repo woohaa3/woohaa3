@@ -10,6 +10,7 @@ import type {
   CanvasReferenceMediaKind,
   ServerCanvas
 } from "@woohaa3/contracts";
+import { decodeWorldCamera } from "@woohaa3/contracts";
 import { catalogBlockingReasons, catalogStateBlockingReasons, capabilityForModel } from "./catalog-projection.js";
 import { resolveNodeReferenceInputs } from "./input-resolution.js";
 import { readGenerationMode, validateGenerationModeInputs } from "@woohaa3/contracts";
@@ -95,10 +96,10 @@ export function resolveBlockingReasons(input: ResolveBlockingReasonsInput): stri
         reasons.push(
           ...validateGenerationModeInputs(
             mode,
-            resolution.references.map((reference) => ({
+            [...resolution.deferredReferences, ...resolution.references.map((reference) => ({
               role: reference.role,
               mediaKind: reference.input.mediaKind
-            })),
+            }))],
             capability.bindings
           )
         );
@@ -127,15 +128,18 @@ export function computePickerCandidates(
   );
   return canvas.document.nodes
     .filter((node) => node.id !== nodeId && !connected.has(node.id))
-    .filter((node) => node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "text")
+    .filter((node) => node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "text" || node.type === "world-camera")
     .map((node) => {
       const data = canvas.nodeData[node.id];
+      const isCamera = node.type === "world-camera";
+      const camera = isCamera ? decodeWorldCamera(data?.worldCamera) : null;
       const assetId = typeof data?.outputAssetId === "string" ? data.outputAssetId : null;
       const asset = assetId ? canvas.assets.find((entry) => entry.id === assetId) : undefined;
       const assetKind = asset?.mediaKind;
-      const mediaKind: string = node.type === "text" ? "text" : (assetKind ?? node.type);
+      const mediaKind: string = node.type === "text" ? "text" : isCamera ? "image" : (assetKind ?? node.type);
       // 候选不可用（上游尚无 ready 输出）时提供稳定禁用原因；仍展示缩略图/fallback。
-      const ready = asset ? asset.status === "ready" : node.type === "text";
+      // 镜头没有资产：配置合法即可作为图像参考，像素由宿主/页面在提交时按当前取景冻结。
+      const ready = isCamera ? (camera?.ok ?? false) : asset ? asset.status === "ready" : node.type === "text";
       const acceptable = !options.bindings
         ? true
         : mediaKind === "text"
@@ -144,7 +148,9 @@ export function computePickerCandidates(
               binding.mediaKinds.includes(mediaKind as CanvasReferenceMediaKind)
             );
       const disabled = !ready || !acceptable;
-      const reason = !ready ? `上游节点 ${node.id} 还没有可用输出` : !acceptable ? "当前模型不接受该媒体类型" : undefined;
+      const reason = !ready
+        ? isCamera ? "上游镜头配置无效" : `上游节点 ${node.id} 还没有可用输出`
+        : !acceptable ? "当前模型不接受该媒体类型" : undefined;
       return {
         nodeId: node.id,
         label: data?.title || node.id,

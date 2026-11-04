@@ -42,7 +42,7 @@ export class VideoDialogsSession {
   private readonly openedInstances = new Set<string>();
   private disposed = false;
   /** 各编辑实例的目标节点（instanceId → nodeId），供 confirm 定位写入目标。 */
-  private readonly editTargets = new Map<string, string>();
+  private readonly editTargets = new Map<string, { nodeId: string; commandId: string }>();
 
   constructor(private readonly deps: VideoDialogsSessionDeps) {}
 
@@ -52,7 +52,11 @@ export class VideoDialogsSession {
 
   openVideoEdit(payload: VideoDialogPayload): OpenVideoDialogResult {
     const result = this.open(VIDEO_EDIT_DIALOG_ID, payload);
-    if (result.ok) this.editTargets.set(result.instanceId, payload.targetNodeId);
+    if (result.ok) this.editTargets.set(result.instanceId, {
+      nodeId: payload.targetNodeId,
+      // Dialog 实例计数在页面重载后重新开始，不能作为持久命令的唯一身份。
+      commandId: `web-video-edit-${crypto.randomUUID()}`
+    });
     return result;
   }
 
@@ -77,8 +81,8 @@ export class VideoDialogsSession {
     if (!this.deps.session.isWritable()) return { ok: false, error: "网络不可用，画布只读" };
     const normalized = normalizeVideoEditIntents(input.intents);
     if (!normalized.ok) return { ok: false, error: normalized.error };
-    const targetNodeId = this.editTargets.get(input.instanceId);
-    if (!targetNodeId) return { ok: false, error: "编辑目标节点已失效" };
+    const target = this.editTargets.get(input.instanceId);
+    if (!target) return { ok: false, error: "编辑目标节点已失效" };
 
     const assets: StoredAsset[] = [];
     const resolved: VideoEditIntent[] = [];
@@ -111,9 +115,9 @@ export class VideoDialogsSession {
     const value: CanvasNodeData = { videoEditIntents: resolved };
     const commands: CanvasCommand[] = [
       ...assets.map((asset): CanvasCommand => ({ type: "asset.upsert", asset })),
-      { type: "nodeData.patch", nodeId: targetNodeId, value }
+      { type: "nodeData.patch", nodeId: target.nodeId, value }
     ];
-    const result = this.deps.session.submitCommands(commands, `web-video-edit-${input.instanceId}`);
+    const result = this.deps.session.submitCommands(commands, target.commandId);
     if (!result.ok) return { ok: false, error: result.reason };
     return { ok: true };
   }

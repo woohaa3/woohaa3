@@ -134,6 +134,85 @@ afterEach(async () => {
 });
 
 describe("Paste Import Plugin", () => {
+  it("reports rejected and thrown edit results at both real entries and ignores stale results", async () => {
+    const harness = await makeHarness(); runtime = harness.runtime;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());
+    const open = vi.spyOn(harness.dialogs, "open");
+    const text = JSON.stringify({ format: "infinspire-canvas-copy-v1", nodes: [{ id: "a", type: "text", position: { x: 0, y: 0 } }], edges: [], incomingEdges: [], nodeData: {} });
+    const paste = () => harness.slots.list("input.paste")[0]!.handle({ clipboardData: { files: [], items: [], types: [], getData: () => text } } as unknown as ClipboardEvent);
+    harness.record.mockResolvedValueOnce({ ok: false, reason: "版本冲突" });
+    paste(); await flush();
+    expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ payload: expect.objectContaining({ description: expect.stringContaining("版本冲突") }) }));
+    harness.dialogs.close();
+    harness.record.mockRejectedValueOnce(new Error("提交异常"));
+    window.dispatchEvent(new CustomEvent("woohaa3-canvas-duplicate", { detail: text })); await flush();
+    expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ payload: expect.objectContaining({ description: expect.stringContaining("提交异常") }) }));
+    harness.dialogs.close();
+    let reject!: (reason: Error) => void;
+    harness.record.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    paste();
+    woohaa3CanvasStore.getState().applyRemoteCanvas(createEmptyWoohaa3ServerCanvas("other"));
+    reject(new Error("过期")); await flush();
+    expect(open).toHaveBeenCalledTimes(2);
+  });
+  it("rejects malformed structural fields at the real paste entry", async () => {
+    const harness = await makeHarness(); runtime = harness.runtime;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());
+    const open = vi.spyOn(harness.dialogs, "open");
+    const node = { id: "a", type: "text", position: { x: 0, y: 0 } };
+    for (const bad of [{ width: -1 }, { height: "2" }, { zIndex: "1" }, { parentId: "missing" }, { position: { x: 1e400, y: 0 } }]) {
+      const text = JSON.stringify({ format: "infinspire-canvas-copy-v1", nodes: [{ ...node, ...bad }], edges: [], incomingEdges: [], nodeData: {} });
+      expect(harness.slots.list("input.paste")[0]!.handle({ clipboardData: { files: [], items: [], types: [], getData: () => text } } as unknown as ClipboardEvent)).toBe(true);
+      harness.dialogs.close();
+    }
+    expect(open).toHaveBeenCalledTimes(5);
+    expect(harness.record).not.toHaveBeenCalled();
+  });
+  it("reports missing group members and rejects malformed assets at the real paste entry", async () => {
+    const harness = await makeHarness(); runtime = harness.runtime;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());
+    const open = vi.spyOn(harness.dialogs, "open");
+    const base = { format: "infinspire-canvas-copy-v1", nodes: [{ id: "g", type: "workflow-group-2d", position: { x: 0, y: 0 } }], edges: [], incomingEdges: [], nodeData: { g: { workflowGroup2d: { kind: "workflow-group-2d", version: "shared-world-v1", groupId: "g", scopeVersion: "1", memberNodeIds: ["missing"] } } } };
+    const paste = (value: unknown) => harness.slots.list("input.paste")[0]!.handle({ clipboardData: { files: [], items: [], types: [], getData: () => JSON.stringify(value) } } as unknown as ClipboardEvent);
+    expect(paste(base)).toBe(true);
+    expect(open.mock.calls[0]![0]).toMatchObject({ payload: { description: expect.stringContaining("缺失成员一起复制") } });
+    window.dispatchEvent(new CustomEvent("woohaa3-canvas-duplicate", { detail: JSON.stringify(base) }));
+    expect(open.mock.calls[1]![0]).toMatchObject({ payload: { description: expect.stringContaining("缺失成员一起复制") } });
+    for (const assets of [{}, [null], [{ id: "bad" }]]) expect(paste({ ...base, assets })).toBe(true);
+    expect(open).toHaveBeenCalledTimes(5);
+    expect(harness.record).not.toHaveBeenCalled();
+  });
+  it("rejects malformed edge data at paste and duplicate without committing", async () => {
+    const harness = await makeHarness(); runtime = harness.runtime;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());
+    const open = vi.spyOn(harness.dialogs, "open");
+    const base = { format: "infinspire-canvas-copy-v1", nodes: [{ id: "a", type: "text", position: { x: 0, y: 0 } }, { id: "b", type: "text", position: { x: 1, y: 0 } }], edges: [], incomingEdges: [], nodeData: {} };
+    for (const key of ["edges", "incomingEdges"]) {
+      for (const data of [undefined, null, [], "invalid"]) {
+        const payload = { ...base, [key]: [{ id: "e", source: "a", target: "b", data }] };
+        const text = JSON.stringify(payload);
+        expect(harness.slots.list("input.paste")[0]!.handle({ clipboardData: { files: [], items: [], types: [], getData: () => text } } as unknown as ClipboardEvent)).toBe(true);
+        harness.dialogs.close();
+        window.dispatchEvent(new CustomEvent("woohaa3-canvas-duplicate", { detail: text }));
+        harness.dialogs.close();
+      }
+    }
+    expect(open).toHaveBeenCalledTimes(16);
+    expect(harness.record).not.toHaveBeenCalled();
+  });
+  it("reports an unavailable world binding through the real paste and duplicate handlers", async () => {
+    const harness = await makeHarness(); runtime = harness.runtime;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());
+    const open = vi.spyOn(harness.dialogs, "open");
+    const payload = { format: "infinspire-canvas-copy-v1", nodes: [{ id: "c", type: "world-camera", position: { x: 0, y: 0 } }], edges: [], incomingEdges: [], nodeData: { c: { worldCamera: { kind: "world-camera", version: "shared-world-v1", cameraId: "c", settingsVersion: "1", position: { u: 1, v: 2, h: 4 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: "missing" } } } };
+    const text = JSON.stringify(payload);
+    const event = { clipboardData: { files: [], items: [], types: [], getData: () => text } } as unknown as ClipboardEvent;
+    expect(harness.slots.list("input.paste")[0]!.handle(event)).toBe(true);
+    window.dispatchEvent(new CustomEvent("woohaa3-canvas-duplicate", { detail: text }));
+    expect(harness.record).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open.mock.calls[0]![0]).toMatchObject({ payload: { description: expect.stringContaining("目标模型一起复制") } });
+  });
   it("uses the completed in-page snapshot when a native copy leaves empty clipboard text", async () => {
     const harness = await makeHarness(); runtime = harness.runtime;
     woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());

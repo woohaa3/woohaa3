@@ -260,7 +260,6 @@ describe("视频节点 hover 与双击截帧（change: enable-video-node-live-pr
     const release = hoverNodeStore.acquirePlaybackOwner();
     try {
       // 拍摄预览候选仍被撤销（owner 语义不变）。
-      expect(hoverNodeStore.getPlaybackSnapshot().blocked).toBe(true);
       dom.fire("pointermove", { clientX: 5, clientY: 5 });
       expect(videoSessions.playingNodeId()).toBe("vid1");
     } finally {

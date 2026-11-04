@@ -15,7 +15,6 @@ import {
 describe("Frontend Event Catalog（任务 2.1）", () => {
   it("目录事件名集合固定且每个事件都有 producer/consumer", () => {
     expect([...FRONTEND_EVENT_NAMES].sort()).toEqual([
-      "extension.activity.updated",
       "extension.release.changed",
       "task.activity.finished",
       "task.activity.started",
@@ -24,8 +23,6 @@ describe("Frontend Event Catalog（任务 2.1）", () => {
       "ui.node-download.save-requested",
       "ui.node-history.open-requested",
       "ui.node-history.switch-requested",
-      "ui.shot-preview.enter-requested",
-      "ui.task-activity.open-requested",
       "ui.text-preview.open-requested",
       "ui.video-frame-capture.open-requested"
     ]);

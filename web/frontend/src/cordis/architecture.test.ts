@@ -249,7 +249,6 @@ describe("前端协议边界审计", () => {
       // RGBA→PNG 编码（桥接槽 latest-wins，两类作业必须串行）
       // （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
       "cordis/plugins/node-history/model-thumbnail-render.ts -> canvas-runtime",
-      "cordis/plugins/model-editor/model-shot-capture-run.ts -> canvas-runtime",
       // canvas-shell ↔ canvas-runtime：运行时是 canvas-shell 的低层依赖。
       "cordis/plugins/canvas-shell/interaction-controller.ts -> canvas-runtime",
       "cordis/plugins/canvas-shell/interaction-core.ts -> canvas-runtime",
@@ -278,7 +277,6 @@ describe("前端协议边界审计", () => {
       // （change: 2026-10-21-unify-assistant-execution）。
       "cordis/plugins/agent-assistant/assistant.tsx -> settings",
       "cordis/plugins/agent-assistant/plugin.tsx -> settings",
-      "cordis/plugins/canvas-menu/canvas-creation-agent.tsx -> task-execution",
       // settings ↔ extension-manager：设置分区与入口链接只读取扩展管理契约类型（type-only）。
       "cordis/plugins/settings/backend-settings-section.tsx -> extension-manager",
       "cordis/plugins/settings/extension-point-links.ts -> extension-manager",
@@ -288,7 +286,6 @@ describe("前端协议边界审计", () => {
       // model-editor ↔ canvas-shell / model-scene / media-import：聚焦会话、场景 store 与上传共享。
       "cordis/plugins/model-editor/model-camera-store.ts -> canvas-shell",
       "cordis/plugins/model-editor/model-camera-store.ts -> model-scene",
-      "cordis/plugins/model-editor/model-editor-plugin.tsx -> canvas-shell",
       // MP4 export shares the pure uploaded-asset / atomic node planner with still capture.
       // media-import ↔ paste-import：导入共享 clipboard/datatransfer 分类。
       "cordis/plugins/media-import/service.ts -> paste-import",
@@ -311,7 +308,6 @@ describe("前端协议边界审计", () => {
       // change: 2026-10-27-merge-same-type-node-history，design D2）。
       "cordis/plugins/node-merge/merge-overlay.ts -> canvas-shell",
       // canvas-runtime ↔ media-preview：片场媒体会话与既有视频会话共用受控媒体 URL 解析。
-      "cordis/plugins/canvas-runtime/composite-asset-media-session.ts -> media-preview",
       // canvas-runtime 装配契约复用聚焦目标类型（type-only；从 host 抽出）。
       "cordis/plugins/canvas-runtime/canvas-runtime-options.ts -> canvas-shell",
       // image-viewer ↔ canvas-shell / canvas-runtime：宿主默认图片聚焦查看器复用共享滚轮分类、
@@ -359,12 +355,8 @@ describe("前端协议边界审计", () => {
       "cordis/plugins/canvas-switcher/chrome.tsx -> scene-experience",
       // scene-experience 只读取 canvas-runtime 的只读场景诊断快照（帧健康/失败分类）。
       "cordis/plugins/scene-experience/experience-bar.tsx -> canvas-runtime",
-      // 徽标几何与共享索引读取 model-scene 已准备资源（extent/aabb/placement）：组徽标与渲染
-      // 使用同一口径的几何事实，避免前端再算一份（change: 2026-10-30-remove-group-badge-scaling）。
-      "cordis/plugins/canvas-shell/canvas-node-index.ts -> model-scene",
-      "cordis/plugins/canvas-shell/group-badge-projection.ts -> model-scene",
-      // task-execution 的 dock 揭示读取共享组徽标投影，与画布命中/布局共用同一几何。
-      "cordis/plugins/task-execution/dock-reveal.ts -> canvas-shell"
+      // 共享索引读取 model-scene 已准备资源（extent/aabb/placement），避免前端再算一份。
+      "cordis/plugins/canvas-shell/canvas-node-index.ts -> model-scene"
     ]);
     const extensionsDir = path.join(CORDIS_DIR, "plugins");
     const extensionNames = readdirSync(extensionsDir, { withFileTypes: true })

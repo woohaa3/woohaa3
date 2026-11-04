@@ -16,8 +16,6 @@ use bevy::{
     text::{LineBreak, TextBounds},
 };
 
-use std::collections::{HashMap, HashSet};
-
 use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole};
 use crate::canvas2d::CanvasOverlayCache;
 use crate::canvas2d::text_presentation::{LogicalText, TextScaleMode};
@@ -95,7 +93,7 @@ impl LabelStyle {
 }
 
 /// 一个 owner 在一帧内期望的标签集合。
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub(crate) struct LabelRequest {
     pub(crate) owner: Entity,
     pub(crate) labels: Vec<Label>,
@@ -109,21 +107,13 @@ pub(crate) struct LabelRequest {
 /// 未运行的（被 `FrameFlags` 门禁的）生产者保留上一帧请求，标签不会闪失。
 #[derive(Resource, Default)]
 pub(crate) struct LabelRequests {
-    roles: HashMap<CanvasLabelRole, HashMap<Entity, LabelRequest>>,
-    pending_removals: HashMap<CanvasLabelRole, HashSet<Entity>>,
-    dirty: HashSet<(Entity, CanvasLabelRole)>,
+    roles: std::collections::HashMap<CanvasLabelRole, Vec<LabelRequest>>,
 }
 
 impl LabelRequests {
     /// 开始收集某个角色的本帧请求（替换上一帧）。
     pub(crate) fn begin(&mut self, role: CanvasLabelRole) {
-        self.pending_removals.insert(
-            role,
-            self.roles
-                .get(&role)
-                .map(|owners| owners.keys().copied().collect())
-                .unwrap_or_default(),
-        );
+        self.roles.insert(role, Vec::new());
     }
 
     /// 追加一个 owner 的标签集合；空集合等价于「本帧不显示该 owner 的该角色标签」。
@@ -136,7 +126,10 @@ impl LabelRequests {
         style: LabelStyle,
     ) {
         if labels.is_empty() {
-            self.remove(role, owner);
+            self.roles
+                .entry(role)
+                .or_default()
+                .retain(|request| request.owner != owner);
             return;
         }
         self.push_request(
@@ -159,66 +152,38 @@ impl LabelRequests {
 
     /// 直接提交一个构造好的请求（缓存块复用时保持同一形状）。
     pub(crate) fn push_request(&mut self, role: CanvasLabelRole, request: LabelRequest) {
-        if let Some(pending) = self.pending_removals.get_mut(&role) {
-            pending.remove(&request.owner);
-        }
-        let owners = self.roles.entry(role).or_default();
-        if owners.get(&request.owner) != Some(&request) {
-            self.dirty.insert((request.owner, role));
-            owners.insert(request.owner, request);
-        }
-    }
-
-    /// Remove one owner's role without clearing unrelated blocks.
-    pub(crate) fn remove(&mut self, role: CanvasLabelRole, owner: Entity) {
-        if let Some(pending) = self.pending_removals.get_mut(&role) {
-            pending.remove(&owner);
-        }
-        if self
-            .roles
-            .get_mut(&role)
-            .and_then(|owners| owners.remove(&owner))
-            .is_some()
+        let requests = self.roles.entry(role).or_default();
+        match requests
+            .iter_mut()
+            .find(|current| current.owner == request.owner)
         {
-            self.dirty.insert((owner, role));
+            Some(current) => *current = request,
+            None => requests.push(request),
         }
     }
 
     /// 清空全部角色（测试/帧边界用）。
     #[cfg(test)]
     pub(crate) fn clear(&mut self) {
-        self.dirty.extend(
-            self.roles
-                .iter()
-                .flat_map(|(role, owners)| owners.keys().map(move |owner| (*owner, *role))),
-        );
         self.roles.clear();
-        self.pending_removals.clear();
     }
 
     fn iter(&self) -> impl Iterator<Item = (&CanvasLabelRole, &LabelRequest)> {
         self.roles
             .iter()
-            .flat_map(|(role, requests)| requests.values().map(move |request| (role, request)))
+            .flat_map(|(role, requests)| requests.iter().map(move |request| (role, request)))
     }
 }
 
-/// Entity handles are only an index of CanvasLabel + ChildOf, scoped to this renderer.
-#[derive(Default)]
-pub(crate) struct LabelIndex {
-    slots: HashMap<(Entity, CanvasLabelRole), HashMap<u16, Entity>>,
-    reverse: HashMap<Entity, ((Entity, CanvasLabelRole), u16)>,
-    initialized: bool,
-}
-
-/// Maintain the slot index from component additions/removals; reconcile changed requests only.
+/// 按 owner+role+slot 同步标签实体。
+///
+/// `labels` 是全部文字实体（只读 owner/role），`text` 是可写呈现组件。两次查询的组件集合
+/// 不重叠，因此可以同时存在。
 pub(crate) fn sync_canvas_labels(
     mut commands: Commands,
-    mut requests: ResMut<LabelRequests>,
+    requests: Res<LabelRequests>,
     visuals: Res<CanvasOverlayCache>,
-    changed: Query<(Entity, &CanvasLabel, &ChildOf), Or<(Changed<CanvasLabel>, Changed<ChildOf>)>>,
-    mut removed: RemovedComponents<CanvasLabel>,
-    mut index: Local<LabelIndex>,
+    existing: Query<(Entity, &CanvasLabel, &ChildOf)>,
     mut text: Query<(
         &mut Text2d,
         &mut Transform,
@@ -226,136 +191,71 @@ pub(crate) fn sync_canvas_labels(
         &mut LogicalText,
     )>,
 ) {
-    if index.initialized
-        && requests.pending_removals.is_empty()
-        && requests.dirty.is_empty()
-        && changed.is_empty()
-        && removed.is_empty()
-    {
-        return;
+    let mut wanted: std::collections::HashMap<(Entity, CanvasLabelRole), &LabelRequest> =
+        std::collections::HashMap::new();
+    for (role, request) in requests.iter() {
+        wanted.insert((request.owner, *role), request);
     }
-    for (role, pending) in std::mem::take(&mut requests.pending_removals) {
-        for owner in pending {
-            requests.remove(role, owner);
+
+    // 1) 回收不再被请求的角色/owner 标签。
+    for (entity, label, child) in &existing {
+        if !wanted.contains_key(&(child.parent(), label.role)) {
+            commands.entity(entity).despawn();
         }
     }
-    let mut dirty = std::mem::take(&mut requests.dirty);
-    if !index.initialized {
-        dirty.extend(
-            requests
-                .iter()
-                .map(|(role, request)| (request.owner, *role)),
-        );
-        index.initialized = true;
-    }
-    for entity in removed.read() {
-        if let Some((key, slot)) = index.reverse.remove(&entity) {
-            if let Some(slots) = index.slots.get_mut(&key) {
-                slots.remove(&slot);
-            }
-            dirty.insert(key);
-        }
-    }
-    for (entity, label, child) in &changed {
-        let key = (child.parent(), label.role);
-        let entry = (key, label.slot);
-        if index.reverse.get(&entity) == Some(&entry) {
+
+    // 2) 每个请求按 slot 复用/补建/缩容。
+    for ((owner, role), request) in &wanted {
+        if commands.get_entity(*owner).is_err() {
+            // 投影已回收的 owner：请求是上一帧残留，安全丢弃。
             continue;
         }
-        if let Some((old, slot)) = index.reverse.insert(entity, entry) {
-            if let Some(slots) = index.slots.get_mut(&old) {
-                slots.remove(&slot);
+        let mut slots: Vec<(u16, Entity)> = existing
+            .iter()
+            .filter(|(_, label, child)| child.parent() == *owner && label.role == *role)
+            .map(|(entity, label, _)| (label.slot, entity))
+            .collect();
+        slots.sort_by_key(|(slot, _)| *slot);
+        let len = request.labels.len();
+        for (slot, entity) in &slots {
+            if *slot as usize >= len {
+                commands.entity(*entity).despawn();
             }
-            dirty.insert(old);
         }
-        index
-            .slots
-            .entry(key)
-            .or_default()
-            .insert(label.slot, entity);
-        dirty.insert(key);
-    }
-    for (owner, role) in dirty {
-        let key = (owner, role);
-        let mut slots = index.slots.remove(&key).unwrap_or_default();
-        let owner_alive = commands.get_entity(owner).is_ok();
-        let request = owner_alive
-            .then(|| requests.roles.get(&role)?.get(&owner))
-            .flatten();
-        let Some(request) = request else {
-            for entity in slots.into_values() {
-                index.reverse.remove(&entity);
-                if let Ok(mut entity) = commands.get_entity(entity) {
-                    entity.despawn();
-                }
-            }
-            if !owner_alive {
-                if let Some(owners) = requests.roles.get_mut(&role) {
-                    owners.remove(&owner);
-                }
-            }
-            continue;
-        };
-        slots.retain(|slot, entity| {
-            if (*slot as usize) < request.labels.len() {
-                return true;
-            }
-            index.reverse.remove(entity);
-            if let Ok(mut entity) = commands.get_entity(*entity) {
-                entity.despawn();
-            }
-            false
-        });
-        for (i, (label, position, size, color)) in request.labels.iter().enumerate() {
-            let slot = i as u16;
-            let mut reuse = false;
-            if let Some(entity) = slots.get(&slot) {
-                if let Ok((mut text, mut transform, mut text_color, mut meta)) =
-                    text.get_mut(*entity)
-                {
-                    reuse = true;
-                    if text.0 != *label {
-                        text.0 = label.clone();
-                    }
-                    let translation = Vec3::new(position.x, -position.y, request.z);
-                    if transform.translation != translation {
-                        transform.translation = translation;
-                    }
-                    let color = Color::LinearRgba(super::layout::hex(*color).to_linear());
-                    if text_color.0 != color {
-                        text_color.0 = color;
-                    }
-                    if !meta.matches(*size, request.style.bounds(), request.style.scale_mode()) {
-                        meta.set(*size, request.style.bounds(), request.style.scale_mode());
+        for (index, (label, position, size, color)) in request.labels.iter().enumerate() {
+            let slot = index as u16;
+            match slots.iter().find(|(current, _)| *current == slot) {
+                Some((_, entity)) => {
+                    if let Ok((mut text, mut transform, mut text_color, mut meta)) =
+                        text.get_mut(*entity)
+                    {
+                        if text.0 != *label {
+                            text.0 = label.clone();
+                        }
+                        transform.translation = Vec3::new(position.x, -position.y, request.z);
+                        text_color.0 = super::layout::hex(*color);
+                        if !meta.matches(*size, request.style.bounds(), request.style.scale_mode())
+                        {
+                            meta.set(*size, request.style.bounds(), request.style.scale_mode());
+                        }
                     }
                 }
-            }
-            if !reuse {
-                if let Some(old) = slots.remove(&slot) {
-                    index.reverse.remove(&old);
-                    if let Ok(mut entity) = commands.get_entity(old) {
-                        entity.despawn();
-                    }
-                }
-                let entity = commands
-                    .spawn(label_bundle(
+                None => {
+                    commands.spawn(label_bundle(
                         &visuals,
                         label.clone(),
                         *position,
                         *size,
                         *color,
                         request.z,
-                        role,
+                        *role,
                         slot,
                         request.style,
-                        owner,
-                    ))
-                    .id();
-                slots.insert(slot, entity);
-                index.reverse.insert(entity, (key, slot));
+                        *owner,
+                    ));
+                }
             }
         }
-        index.slots.insert(key, slots);
     }
 }
 
@@ -380,7 +280,7 @@ fn label_bundle(
             font_size: FontSize::Px(size),
             ..default()
         },
-        TextColor(Color::LinearRgba(super::layout::hex(color).to_linear())),
+        TextColor(super::layout::hex(color)),
         style.layout(),
         TextBounds {
             width: bounds.map(|bounds| bounds.x),

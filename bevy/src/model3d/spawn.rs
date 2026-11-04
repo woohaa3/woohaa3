@@ -13,7 +13,7 @@ use crate::protocol::{GraphNode, ModelOp, ModelPlacement, ModelSnapshot};
 use super::animation::{
     self, TransformAnimation, TransformAnimationKind, TransformAnimationPlayback,
 };
-use super::layout::{model_anchor, model_unit, model_view_rotation};
+use super::layout::model_root_transform;
 use super::mesh::mesh_key;
 use super::quality::Quality;
 use super::resources::SharedResources;
@@ -33,24 +33,20 @@ pub(super) fn spawn_model(
     shared: &mut SharedResources,
     batched: bool,
     strategy: super::batch_strategy::BatchStrategy,
-    overview: bool,
 ) -> ModelRoot {
-    let unit = model_unit(node, model, placement);
-    let root_rotation = model_view_rotation(placement);
-    let world = model_anchor(node, model, placement, unit);
+    let transform = model_root_transform(node, model, placement);
     let mut root = spawn_v2(
         commands,
         meshes,
         materials,
         model,
-        world,
-        unit,
-        root_rotation,
+        transform.translation,
+        transform.scale.x,
+        transform.rotation,
         quality,
         shared,
         batched,
         strategy,
-        overview,
         &HashSet::new(),
     );
     root.content_signature = model.signature.clone();
@@ -93,7 +89,6 @@ pub(crate) fn spawn_preview_root(
         &mut shared,
         false,
         super::batch_strategy::BatchStrategy::Spatial,
-        false,
         &HashSet::new(),
     );
     // 每个实体单独写入租用层：`RenderLayers` 不随层级继承，缺省层（0）会被主画布相机看到。
@@ -126,7 +121,6 @@ pub(super) fn spawn_v2(
     shared: &mut SharedResources,
     batched: bool,
     strategy: super::batch_strategy::BatchStrategy,
-    overview: bool,
     barriers: &HashSet<String>,
 ) -> ModelRoot {
     let root = commands
@@ -166,7 +160,7 @@ pub(super) fn spawn_v2(
         .collect();
     // 总览片场把只做平移的父级分组平铺到根空间，按材质合并批次（draw call 优化）。
     let plans = if batched && strategy == super::batch_strategy::BatchStrategy::Spatial {
-        let planned = super::batching::plan(&specs, &opaque, &Default::default(), overview, barriers);
+        let planned = super::batching::plan(&specs, &opaque, &Default::default(), false, barriers);
         super::batching::apply_flatten(&mut specs, &planned.flatten);
         planned.plans
     } else {
@@ -216,7 +210,7 @@ pub(super) fn spawn_v2(
             .parts
             .iter()
             .filter_map(|&i| specs[i].geometry.as_ref())
-            .map(|geometry| super::mesh::effective_quality(geometry, quality, overview))
+            .map(|geometry| super::mesh::effective_quality(geometry, quality))
             .min()
             .unwrap_or(quality);
         let Some(asset) = shared.batches.get(meshes, &source, batch_quality) else {
@@ -289,7 +283,7 @@ pub(super) fn spawn_v2(
                     .cloned()
                     .unwrap_or_else(|| mesh_key(geometry));
                 // 每几何有效档位：总览根的自定义 Mesh 保持 High，不新增简化任务。
-                let effective = super::mesh::effective_quality(geometry, quality, overview);
+                let effective = super::mesh::effective_quality(geometry, quality);
                 let Some((mesh, shared_geometry)) = shared.mesh(meshes, &base, geometry, effective)
                 else {
                     continue;
@@ -389,14 +383,8 @@ pub(super) fn spawn_v2(
         instance_parts,
         quality,
         quality_changed_at: None,
-        overview_medium_since: None,
         quality_refresh_pending: false,
         representation_generation: 0,
-        overview_lod: overview,
-        projection: Default::default(),
-        overview_fraction: None,
-        overview_desired: quality,
-        overview_reason: "initial",
         material_handles: material_cache.into_values().collect(),
         animation_entities,
         part_entities: entities,

@@ -80,28 +80,6 @@ it("remote deletion of an attached target keeps the source move but drops the in
   expect(woohaa3CanvasStore.getState().working!.document.nodes.find(n => n.id === "source")!.position).toEqual({ x: 50, y: 20 });
 });
 
-it("selected ancestor and descendant commit one root move without changing member local coordinates", () => {
-  const canonical = canvasWith([]);
-  // 画布禁止嵌套组：选中祖先组与其直属成员时只提交一次根移动，成员局部坐标不变。
-  canonical.document.nodes = [
-    { id: "g", type: "group", position: { x: 20, y: 20 }, width: 300, height: 240 },
-    { id: "leaf", type: "image", position: { x: 30, y: 40 }, parentId: "g", width: 100, height: 80 }
-  ];
-  woohaa3CanvasStore.getState().applyRemoteCanvas(canonical);
-  const dom = harness(), captured = runtimeCapturing();
-  const controller = installInteractionController({ canvas: dom.canvas, target: dom.target as never,
-    getRuntime: () => captured.runtime, getSession: () => getSession() as never });
-  cleanups.push(() => controller.dispose()); controller.flush();
-  (dom.target.__canvasSetSelection as (ids: string[]) => void)(["g", "leaf"]); controller.flush();
-  dom.fire("pointerdown", { clientX: 50, clientY: 35 });
-  dom.fire("pointermove", { clientX: 80, clientY: 75 }); controller.flush();
-  dom.fire("pointerup", { clientX: 80, clientY: 75 }); controller.flush();
-  expect(submitted).toEqual([{ type: "node.update", nodeId: "g", position: { x: 50, y: 60 } }]);
-  const working = woohaa3CanvasStore.getState().working!;
-  expect(working.document.nodes.find(n => n.id === "leaf")).toEqual(canonical.document.nodes[1]);
-  expect(woohaa3CanvasStore.getState().canvas).toEqual(canonical);
-});
-
 it.each(["server-rejected", "send-failed"])("%s rolls back an admitted pending move without reverting remote data", async reason => {
   const s = setup(), projection = new WorkingProjectionStore();
   projection.applyCanonical(s.canonical);

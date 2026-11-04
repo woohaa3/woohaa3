@@ -2,7 +2,7 @@
  * ChatGPT 生成编排：结构化输出 schema
  * （自 `generation.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R09）。
  */
-import { MOTION_SCRIPT_VERSION, PREFERRED_MODEL_SCRIPT_VERSION } from "@woohaa3/contracts";
+import { PREFERRED_MODEL_SCRIPT_VERSION } from "@woohaa3/contracts";
 
 /** 结构化的模型候选 schema。 */
 export function modelSchema(): Record<string, unknown> {
@@ -16,25 +16,6 @@ export function modelSchema(): Record<string, unknown> {
       cameraMutations: cameraMutationsSchema()
     },
     required: ["modelScript", "modelScriptVersion", "cameraMutations"],
-    additionalProperties: false
-  };
-}
-
-export function animationSchema(): Record<string, unknown> {
-  return {
-    type: "object",
-    properties: {
-      modelScript: { type: ["string", "null"], description: "完整静态模型 SceneBuilder JavaScript 源码；只调镜头时填 null" },
-      motionScript: { type: ["string", "null"], description: `完整运动脚本（${MOTION_SCRIPT_VERSION}）；引用模型稳定部件 id；只调镜头时填 null` },
-      timeline: {
-        type: ["object", "null"],
-        properties: { duration: { type: "number" }, loop: { type: "boolean" } },
-        required: ["duration", "loop"],
-        additionalProperties: false
-      },
-      cameraMutations: cameraMutationsSchema()
-    },
-    required: ["modelScript", "motionScript", "timeline", "cameraMutations"],
     additionalProperties: false
   };
 }

@@ -12,6 +12,16 @@ import { createEmptyWoohaa3ServerCanvas, type ServerCanvas, type StoredAsset } f
 import { isCanvasCommandSatisfied } from "./command-satisfaction.js";
 import { isEditApplyCommand } from "./edit-command.js";
 import { computeCommandPayloadHash } from "./yjs/commands.js";
+import { matchNodeDataField } from "./command-reducer/edit-command.js";
+
+it("compares structured world instance preconditions by JSON value", () => {
+  const value = { kind: "world-instance", version: "v1", instanceId: "i", transform: { position: [1, 2, 3] } };
+  const data = { sharedWorldInstance: value } as never;
+  expect(matchNodeDataField(data, "sharedWorldInstance", { present: true, value: JSON.parse(JSON.stringify(value)) })).toBe(true);
+  expect(matchNodeDataField(data, "sharedWorldInstance", { present: true, value: { ...value, instanceId: "other" } })).toBe(false);
+  expect(matchNodeDataField(data, "sharedWorldInstance", { present: false })).toBe(false);
+  expect(matchNodeDataField(undefined, "sharedWorldInstance", { present: true, value: null })).toBe(false);
+});
 
 const NOW = "2026-10-09T00:00:00.000Z";
 
@@ -314,36 +324,6 @@ describe("edit.apply 删除保护与恢复", () => {
       { type: "edit.apply", preconditions: [{ kind: "asset-ready", assetId: "bad" }], operations: [{ kind: "node-data-set", nodeId: "a", value: { title: "x" } }] }
     ], { now: NOW });
     expect(bad.ok).toBe(false);
-  });
-});
-
-describe("edit.apply 创建撤销保护后续新增关联", () => {
-  it("创建后他人新增子节点，撤销创建时 child-ids 条件拒绝", () => {
-    const canvas = base();
-    const created = applyCanvasCommands(canvas, [
-      { type: "edit.apply", preconditions: [], operations: [{ kind: "node-add", node: { id: "created", type: "text", position: { x: 0, y: 0 } } }] }
-    ], { now: NOW });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-    // 另一操作为 created 新增子节点
-    const withChild = applyCanvasCommands(created.canvas, [
-      { type: "node.add", node: { id: "child", type: "text", position: { x: 0, y: 0 }, parentId: undefined } }
-    ], { now: NOW });
-    expect(withChild.ok).toBe(true);
-    // 直接改写为父子以模拟「后来新增关联」
-    if (!withChild.ok) return;
-    const childCanvas = withChild.canvas;
-    childCanvas.document.nodes.find((n) => n.id === "child")!.parentId = "created";
-    // 但 created 必须是 group 才能挂 child；这里改用 incident-edge 关联验证
-    childCanvas.document.edges = [{ id: "later", source: "child", target: "created", sourceHandle: null, targetHandle: null, data: {} }];
-    const undo = applyCanvasCommands(childCanvas, [
-      {
-        type: "edit.apply",
-        preconditions: [{ kind: "child-ids", nodeId: "created", childIds: [] }, { kind: "incident-edge-ids", nodeId: "created", edgeIds: [] }],
-        operations: [{ kind: "node-remove", nodeIds: ["created"] }]
-      }
-    ], { now: NOW });
-    expect(undo.ok).toBe(false);
   });
 });
 

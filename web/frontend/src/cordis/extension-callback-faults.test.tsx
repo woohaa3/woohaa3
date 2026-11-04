@@ -17,7 +17,7 @@ import { createExtensionFaultService } from "./extension-faults.js";
 import { guardContributionCall, guardContributionMethods } from "./contribution-guard.js";
 import { extensionNodeTemplateMenuItems } from "./plugins/canvas-menu/plugin.js";
 import { dropNodeDrop, type NodeDropTarget } from "./plugins/canvas-shell/node-drop-dispatch.js";
-import { describeNodeActions, routeSelectionActionHit } from "./plugins/canvas-shell/node-action-host.js";
+import { describeNodeActions } from "./plugins/canvas-shell/node-action-host.js";
 import { DialogService } from "./services/dialogs/service.js";
 import { DialogHost } from "./services/dialogs/DialogHost.js";
 
@@ -77,16 +77,6 @@ describe("同步回调故障归因", () => {
     const description = describeNodeActions({ contributions: contributions as never, context: { nodeId: "n", nodeType: "image", writable: true } });
     expect(description?.presentation.actions.map((action) => action.id)).toEqual(["download"]);
     expect(faults.diagnostics()).toHaveLength(1);
-  });
-
-  it("selection-action：扩展 activate 抛错时归因，不污染画布输入", () => {
-    const { slots, scoped, faults } = setup();
-    scoped.register("canvas.selection-action", { id: "group", owner: "ext-x", order: 0, describe: () => null, activate: boom } as never);
-    const contributions = (slots.list("canvas.selection-action") as never[]).map((entry) =>
-      guardContributionMethods(entry as object, "canvas.selection-action", faults, ["available", "describe", "activate"] as never)
-    );
-    expect(() => routeSelectionActionHit({ hit: { actionId: "group", menu: false }, context: { selectedNodeIds: ["a", "b"], writable: true }, contributions: contributions as never })).not.toThrow();
-    expect(faults.diagnostics()[0]).toMatchObject({ slot: "canvas.selection-action" });
   });
 
   it("input.paste：扩展处理器抛错时返回回落值（交给下一个处理器/浏览器默认）；内置处理器照常抛出", () => {

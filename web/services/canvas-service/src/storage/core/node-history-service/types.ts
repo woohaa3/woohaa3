@@ -11,7 +11,6 @@ import type {
   ModelCamera,
   ModelScriptBatchMeta,
   NodeGenerationKind,
-  NodeHistoryAnimationPayload,
   NodeHistoryModelPlacement,
   NodeHistoryOutcome,
   ServerCanvas,
@@ -164,7 +163,6 @@ export type RegisterModelEditInput = {
   version: string;
   placement: NodeHistoryModelPlacement;
   createdAt: string;
-  animation?: NodeHistoryAnimationPayload;
   modelCameras?: ModelCamera[];
 };
 

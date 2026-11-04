@@ -7,12 +7,13 @@ use bevy::{
 use crate::{bridge, canvas2d, theme::ThemeResource};
 
 use super::{
-    CurrentScene, FilmSetTextureBatch, FrameFlags, ModelAssetTable, NodeIndex, SurfaceState,
-    TextureBatch, helpers::place_native_surface,
+    helpers::place_native_surface, CurrentScene, FrameFlags, ModelAssetTable, ModelTextureBatch,
+    NodeIndex, SurfaceState, TextureBatch,
 };
 
 /// 重置帧标记，取走最新 scene/texture batch；检测 theme-only 变化。
 pub(crate) fn ingest_bridge(
+    _main_thread: bevy::ecs::system::NonSendMarker,
     mut flags: ResMut<FrameFlags>,
     mut scene: ResMut<CurrentScene>,
     mut index: ResMut<NodeIndex>,
@@ -20,12 +21,12 @@ pub(crate) fn ingest_bridge(
     mut theme: ResMut<ThemeResource>,
     mut batch: ResMut<TextureBatch>,
     mut focus_details: ResMut<canvas2d::focus_details::FocusDetailBatch>,
-    mut film_set_batch: ResMut<FilmSetTextureBatch>,
+    mut model_textures: ResMut<ModelTextureBatch>,
     mut resources: ResMut<ModelAssetTable>,
     mut clear_color: ResMut<ClearColor>,
 ) {
     let input = bridge::take_input();
-    flags.film_set_media_changed = !input.film_set_textures.is_empty();
+    flags.model_textures_changed = !input.model_textures.is_empty();
     flags.scene_received = input.scene.is_some();
     flags.positions_received = !input.positions.is_empty();
     flags.resource_nodes.clear();
@@ -38,7 +39,6 @@ pub(crate) fn ingest_bridge(
     flags.card_blocks_rebuilt = 0;
     flags.card_decorations_rebuilt = 0;
     flags.edge_blocks_rebuilt = 0;
-    flags.container_blocks_rebuilt = 0;
     if let Some(next) = input.scene {
         flags.theme_changed = next.theme.fingerprint != theme.0.fingerprint;
         theme.0 = next.theme.clone();
@@ -75,7 +75,7 @@ pub(crate) fn ingest_bridge(
     }
     batch.0 = input.textures;
     focus_details.0 = input.focus_details;
-    film_set_batch.0 = input.film_set_textures;
+    model_textures.0 = input.model_textures;
     resources.0 = bridge::model_assets_snapshot();
 }
 
@@ -192,7 +192,6 @@ pub(crate) fn publish_rendered_revision(flags: Res<FrameFlags>, scene: Res<Curre
     }
     bridge::note_card_block_builds(flags.card_blocks_rebuilt);
     bridge::note_local_block_builds(flags.card_decorations_rebuilt, flags.edge_blocks_rebuilt);
-    bridge::note_container_block_builds(flags.container_blocks_rebuilt);
 }
 
 /// 发布 shot camera 运行时诊断快照（不进入 canonical 状态）。

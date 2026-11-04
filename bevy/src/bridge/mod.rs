@@ -45,7 +45,7 @@ thread_local! {
     static OBSERVER: RefCell<Option<ObserverUpdateRequest>> = const { RefCell::new(None) };
     static TEXTURES: RefCell<HashMap<String, (u32, u32, Vec<u8>, Option<String>)>> = RefCell::new(HashMap::new());
     /// 片场媒体平面纹理（键为全局唯一 `planeId`；change: 2026-10-08-make-film-set-model-only）。
-    static FILM_SET_TEXTURES: RefCell<HashMap<String, (u32, u32, Vec<u8>)>> = RefCell::new(HashMap::new());
+    static MODEL_TEXTURES: RefCell<HashMap<String, (u32, u32, Vec<u8>)>> = RefCell::new(HashMap::new());
     static STARTED: Cell<bool> = const { Cell::new(false) };
     static READY: Cell<bool> = const { Cell::new(false) };
     static REVISION: Cell<u32> = const { Cell::new(0) };
@@ -61,6 +61,10 @@ thread_local! {
     static HISTORY_THUMBNAIL_REQUEST: RefCell<Option<HistoryThumbnailRequest>> = const { RefCell::new(None) };
     /// 完成的历史缩略图结果，按 (requestId, generation) 匹配后由 JS 取走。
     static HISTORY_THUMBNAIL_RESULT: RefCell<Option<HistoryThumbnailResult>> = const { RefCell::new(None) };
+    /// 页面内共享世界镜头捕获请求（latest-wins 单槽；JS 串行发送）。
+    static WORLD_CAPTURE_REQUEST: RefCell<Option<WorldCaptureRequest>> = const { RefCell::new(None) };
+    /// 完成的世界镜头捕获结果，按 (requestId, generation) 匹配后由 JS 取走。
+    static WORLD_CAPTURE_RESULT: RefCell<Option<WorldCaptureResult>> = const { RefCell::new(None) };
     /// shot camera 运行时诊断快照
     /// （change: add-reusable-bevy-shot-camera；JSON 字符串，宿主/Showcase 读取）。
     static SHOT_DIAGNOSTICS: RefCell<String> = RefCell::new(String::new());
@@ -77,7 +81,6 @@ thread_local! {
     /// 静态 2D mesh 重建次数（纯视口路径不增加）。
     static WORK_MESH_BUILDS: Cell<u64> = const { Cell::new(0) };
     static WORK_DECORATION_BUILDS: Cell<u64> = const { Cell::new(0) };
-    static WORK_CONTAINER_BLOCK_BUILDS: Cell<u64> = const { Cell::new(0) };
     static WORK_EDGE_BLOCK_BUILDS: Cell<u64> = const { Cell::new(0) };
     static WORK_CARD_BLOCK_BUILDS: Cell<u64> = const { Cell::new(0) };
 /// 最近 full scene 的 surface（CSS 尺寸）；视口增量沿用该值
@@ -87,6 +90,9 @@ thread_local! {
     static RENDER_STAGE_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
     /// 模型实例/唯一资源预算快照（JSON；scene3d 在表示变化后写入）。
     static MODEL_RENDER_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
+    static MODEL_POSE_REQUESTED: Cell<bool> = const { Cell::new(false) };
+    static MODEL_POSES: RefCell<String> = RefCell::new("{\"sequence\":0,\"focusNode\":null,\"models\":[]}".to_owned());
+    static MODEL_POSE_SEQUENCE: Cell<u64> = const { Cell::new(0) };
     /// 预览同步阶段延迟快照（JSON；变化时写入）。
     static PREVIEW_LATENCY_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
     /// 帧节奏状态标签（`idle` / `dwell` / `active:<reasons>`；变化时写入）。
@@ -95,11 +101,6 @@ thread_local! {
     static FRAME_PACING_DIAGNOSTICS: RefCell<String> = RefCell::new(String::new());
     /// 预览队列/纹理预算 gauge（active/pending/bytes/visible/retained/live/deferred/ready）。
     static PREVIEW_DIAGNOSTICS: Cell<[u64; 8]> = const { Cell::new([0; 8]) };
-    /// 拍摄镜头卡片预览的实际工作/预算 gauge
-    /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
-    ///
-    /// 与 `PREVIEW_DIAGNOSTICS`（模型内嵌预览）分开：两者是不同消费者，混用会互相覆盖。
-    static SHOT_PREVIEW_DIAGNOSTICS: Cell<[u64; 8]> = const { Cell::new([0; 8]) };
 }
 
 /// 记录一次 prepared/register 派生。
@@ -144,23 +145,21 @@ pub(crate) fn note_local_block_builds(decorations: u64, edges: u64) {
     WORK_EDGE_BLOCK_BUILDS.with(|cell| cell.set(cell.get() + edges));
 }
 
-pub(crate) fn note_container_block_builds(count: u64) {
-    WORK_CONTAINER_BLOCK_BUILDS.with(|cell| cell.set(cell.get() + count));
-}
 
 /// 实际工作计数快照（JSON）：供 Frontend 合并进帧诊断。
 pub(crate) fn set_model_render_diagnostics(json: String) {
     MODEL_RENDER_DIAGNOSTICS.with(|v| *v.borrow_mut() = json);
+}
+pub(crate) fn take_model_pose_request() -> bool { MODEL_POSE_REQUESTED.with(|v| v.replace(false)) }
+pub(crate) fn set_model_poses(models: serde_json::Value, focus_node: Option<&str>) {
+    let sequence = MODEL_POSE_SEQUENCE.with(|v| { let next = v.get().saturating_add(1); v.set(next); next });
+    MODEL_POSES.with(|v| *v.borrow_mut() = serde_json::json!({"sequence": sequence, "focusNode": focus_node, "models": models}).to_string());
 }
 pub(crate) fn set_render_stage_diagnostics(json: String) {
     RENDER_STAGE_DIAGNOSTICS.with(|v| *v.borrow_mut() = json);
 }
 pub(crate) fn set_preview_diagnostics(gauges: [u64; 8]) {
     PREVIEW_DIAGNOSTICS.with(|v| v.set(gauges));
-}
-/// 拍摄镜头卡片预览的实际工作/预算 gauge（与模型内嵌预览分开，避免互相覆盖）。
-pub(crate) fn set_shot_preview_diagnostics(gauges: [u64; 8]) {
-    SHOT_PREVIEW_DIAGNOSTICS.with(|v| v.set(gauges));
 }
 pub(crate) fn set_preview_latency_diagnostics(json: String) {
     PREVIEW_LATENCY_DIAGNOSTICS.with(|slot| *slot.borrow_mut() = json);
@@ -171,27 +170,26 @@ pub(crate) fn set_frame_pacing_diagnostics(label: String) {
 }
 
 pub(crate) fn work_diagnostics() -> String {
+    MODEL_POSE_REQUESTED.with(|v| v.set(true));
+    let poses = MODEL_POSES.with(|v| v.borrow().clone());
     let latency = PREVIEW_LATENCY_DIAGNOSTICS.with(|slot| slot.borrow().clone());
     let render = RENDER_STAGE_DIAGNOSTICS.with(|v| v.borrow().clone());
     let model = MODEL_RENDER_DIAGNOSTICS.with(|v| v.borrow().clone());
     let preview = PREVIEW_DIAGNOSTICS.with(Cell::get);
-    let shot_preview = SHOT_PREVIEW_DIAGNOSTICS.with(Cell::get);
-    let film_set_items = crate::canvas_query::film_set_pick::diagnostics_json();
     // 3D 根按可见地面顺序做整对象分离；这里只报告接受点结算到的根/重叠簇规模，
     // 同一根内部的遮挡仍交给深度缓冲（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D3/D4）。
     let depth = crate::depth_order::diagnostics();
     let pacing = FRAME_PACING_DIAGNOSTICS.with(|v| v.borrow().clone());
     format!(
-        "{{\"snapshotBuilds\":{},\"pickCandidateBuilds\":{},\"meshBuilds\":{},\"cardBlockBuilds\":{},\"cardDecorationBuilds\":{},\"edgeBlockBuilds\":{},\"containerBlockBuilds\":{},\"filmSetItems\":{},\"models\":{},\"renderStages\":{},\"previewLatency\":{},\"previews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"shotPreviews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"depthOrder\":{{\"roots\":{},\"clusters\":{},\"compressedClusters\":{}}},\"pacing\":\"{}\"}}",
+        "{{\"snapshotBuilds\":{},\"pickCandidateBuilds\":{},\"meshBuilds\":{},\"cardBlockBuilds\":{},\"cardDecorationBuilds\":{},\"edgeBlockBuilds\":{},\"models\":{},\"modelPoses\":{},\"renderStages\":{},\"previewLatency\":{},\"previews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"depthOrder\":{{\"roots\":{},\"clusters\":{},\"compressedClusters\":{}}},\"pacing\":\"{}\"}}",
         WORK_SNAPSHOT_BUILDS.with(Cell::get),
         WORK_PICK_CANDIDATE_BUILDS.with(Cell::get),
         WORK_MESH_BUILDS.with(Cell::get),
         WORK_CARD_BLOCK_BUILDS.with(Cell::get),
         WORK_DECORATION_BUILDS.with(Cell::get),
         WORK_EDGE_BLOCK_BUILDS.with(Cell::get),
-        WORK_CONTAINER_BLOCK_BUILDS.with(Cell::get),
-        film_set_items,
         model,
+        poses,
         render,
         latency,
         preview[0],
@@ -202,14 +200,6 @@ pub(crate) fn work_diagnostics() -> String {
         preview[5],
         preview[6],
         preview[7],
-        shot_preview[0],
-        shot_preview[1],
-        shot_preview[2],
-        shot_preview[3],
-        shot_preview[4],
-        shot_preview[5],
-        shot_preview[6],
-        shot_preview[7],
         depth.roots,
         depth.clusters,
         depth.compressed_clusters,
@@ -428,9 +418,68 @@ pub(crate) fn take_history_thumbnail_result(
     })
 }
 
+/// 页面内共享世界镜头捕获请求：镜头身份（由 `CurrentScene` 解析出姿态/投影）+ 输出尺寸 +
+/// 稳定 identity。页面已持有世界内容，本模块不接收实例脚本或纹理。
+pub(crate) struct WorldCaptureRequest {
+    pub(crate) request_id: u64,
+    pub(crate) generation: u64,
+    pub(crate) camera_id: String,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+}
+
+/// 世界镜头捕获完成结果。
+pub(crate) struct WorldCaptureResult {
+    pub(crate) request_id: u64,
+    pub(crate) generation: u64,
+    pub(crate) outcome: WorldCaptureOutcome,
+}
+
+/// 成功（RGBA + 尺寸）或失败（稳定 code）。
+pub(crate) enum WorldCaptureOutcome {
+    Ok {
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+    Failed {
+        code: String,
+    },
+}
+
+/// 排队一次世界镜头捕获请求（latest-wins；调用方串行发送）。
+pub(crate) fn queue_world_capture_request(request: WorldCaptureRequest) {
+    WORLD_CAPTURE_REQUEST.with(|slot| *slot.borrow_mut() = Some(request));
+}
+
+/// 一次性取走世界镜头捕获请求。
+pub(crate) fn take_world_capture_request() -> Option<WorldCaptureRequest> {
+    WORLD_CAPTURE_REQUEST.with(|slot| slot.borrow_mut().take())
+}
+
+/// 发布完成的世界镜头捕获结果（latest-wins）。
+pub(crate) fn set_world_capture_result(result: WorldCaptureResult) {
+    WORLD_CAPTURE_RESULT.with(|slot| *slot.borrow_mut() = Some(result));
+}
+
+/// 取走匹配 (request_id, generation) 的结果；不匹配则保留（迟到结果不影响新请求）。
+pub(crate) fn take_world_capture_result(
+    request_id: u64,
+    generation: u64,
+) -> Option<WorldCaptureResult> {
+    WORLD_CAPTURE_RESULT.with(|slot| {
+        let mut guard = slot.borrow_mut();
+        match guard.as_ref() {
+            Some(result) if result.request_id == request_id && result.generation == generation => {
+                guard.take()
+            }
+            _ => None,
+        }
+    })
+}
+
 /// 一帧输入：最新 scene 与按 key 合并的纹理批次。
-pub(crate) struct FrameInput {
-    pub(crate) focus_details: Option<Option<crate::protocol::focus_details::FocusDetailUpload>>,
+pub(crate) struct FrameInput {    pub(crate) focus_details: Option<Option<crate::protocol::focus_details::FocusDetailUpload>>,
     pub(crate) scene: Option<Scene>,
     pub(crate) positions: HashMap<String, NodePosition>,
     pub(crate) resource_states: HashMap<String, crate::protocol::NodeResourceState>,
@@ -441,7 +490,7 @@ pub(crate) struct FrameInput {
     /// nodeId → (宽, 高, RGBA, 内容身份)。内容身份用于 Rust 侧按内容共享 GPU 纹理
     /// （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
     pub(crate) textures: HashMap<String, (u32, u32, Vec<u8>, Option<String>)>,
-    pub(crate) film_set_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    pub(crate) model_textures: HashMap<String, (u32, u32, Vec<u8>)>,
 }
 
 /// 覆盖排队中的 scene（latest-wins）。调用方必须已通过 `Scene::validate`。
@@ -526,12 +575,12 @@ pub(crate) fn queue_texture_owned(
 }
 
 /// 记录一次合法片场媒体平面纹理上传（键为全局唯一 `planeId`；latest-wins）。
-pub(crate) fn queue_film_set_texture(id: &str, width: u32, height: u32, rgba: &[u8]) {
-    queue_film_set_texture_owned(id, width, height, rgba.to_vec());
+pub(crate) fn queue_model_texture(id: &str, width: u32, height: u32, rgba: &[u8]) {
+    queue_model_texture_owned(id, width, height, rgba.to_vec());
 }
 
-pub(crate) fn queue_film_set_texture_owned(id: &str, width: u32, height: u32, rgba: Vec<u8>) {
-    FILM_SET_TEXTURES.with(|textures| {
+pub(crate) fn queue_model_texture_owned(id: &str, width: u32, height: u32, rgba: Vec<u8>) {
+    MODEL_TEXTURES.with(|textures| {
         textures
             .borrow_mut()
             .insert(id.to_owned(), (width, height, rgba));
@@ -545,8 +594,8 @@ pub(crate) fn take_input() -> FrameInput {
     let viewport = VIEWPORT.with(|slot| slot.borrow_mut().take());
     let observer = OBSERVER.with(|slot| slot.borrow_mut().take());
     let textures = TEXTURES.with(|textures| std::mem::take(&mut *textures.borrow_mut()));
-    let film_set_textures =
-        FILM_SET_TEXTURES.with(|textures| std::mem::take(&mut *textures.borrow_mut()));
+    let model_textures =
+        MODEL_TEXTURES.with(|textures| std::mem::take(&mut *textures.borrow_mut()));
     FrameInput {
         focus_details: FOCUS_DETAILS.with(|slot| slot.borrow_mut().take()),
         scene,
@@ -555,7 +604,7 @@ pub(crate) fn take_input() -> FrameInput {
         viewport,
         observer,
         textures,
-        film_set_textures,
+        model_textures,
     }
 }
 

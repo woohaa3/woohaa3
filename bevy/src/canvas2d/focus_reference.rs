@@ -1,4 +1,4 @@
-//! Minimal focus reference: identity, ownership line, and a presentation-only close.
+//! Minimal focus reference: identity icon and a single-line title.
 use super::{geometry::Geometry, labels::Label, layout::shortened};
 use crate::{protocol::GraphNode, theme::ThemeResource};
 use bevy::prelude::*;
@@ -74,20 +74,6 @@ pub(super) fn draw(
     }
     if kind == "image" {
         geometry.ring(center, 3., 1.2, z + 0.004, accent, 16);
-    }
-    if node.kind == "focus-reference" {
-        let (x, y, w, h) = crate::canvas_query::focus_context::close_rect(node);
-        let center = Vec2::new(x + w / 2., y + h / 2.);
-        let color = theme.token_u32("canvasCloseIcon");
-        for direction in [Vec2::new(4., 4.), Vec2::new(4., -4.)] {
-            geometry.line(
-                center - direction,
-                center + direction,
-                1.4,
-                z + 0.005,
-                color,
-            );
-        }
     }
     let title = if node.title.trim().is_empty() {
         match kind {

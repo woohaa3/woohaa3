@@ -43,7 +43,7 @@ export type CanvasMediaClient = {
    * `canvasId` 可选：远端画布的字节只在服务端托管存储里（键 `<canvasId>/media/<key>`），
    * 调用方知道所属画布时必须传，服务端据此路由与判权；省略表示与画布无关（保持旧行为）。
    */
-  read?(storageKey: string, canvasId?: string, extensionId?: string): Promise<{ bytes: Uint8Array; contentType: string }>;
+  read?(storageKey: string, canvasId?: string): Promise<{ bytes: Uint8Array; contentType: string }>;
   /**
    * 核验稳定对象。
    *
@@ -62,14 +62,11 @@ export function createCanvasMediaClient(options: CanvasMediaClientOptions): Canv
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
 
   return {
-    async read(storageKey, canvasId, extensionId) {
-      if (typeof extensionId !== "string" || !/^[a-z][a-z0-9-]{0,127}$/.test(extensionId)) {
-        throw new CanvasMediaClientError("extension-scope-required", "媒体读取必须声明扩展作用域");
-      }
+    async read(storageKey, canvasId) {
       const response = await withTimeout(signal => fetchImpl(`${baseUrl}/internal/v1/media/extension-read`, {
         method: "POST", headers: buildInternalHeaders({ serviceToken: options.serviceToken, correlationId: createCorrelationId() }),
         // 有画布就带上作用域：body.canvasId 由 media-service 用 canvasScopeOf 校验后交给存储路由。
-        body: JSON.stringify({ extensionId, storageKey, ...(canvasId !== undefined ? { canvasId } : {}) }), signal
+        body: JSON.stringify({ extensionId: "canvas-service", storageKey, ...(canvasId !== undefined ? { canvasId } : {}) }), signal
       }), options.timeoutMs);
       if (!response.ok) throw new CanvasMediaClientError("media-read-failed", "稳定媒体资源读取失败", response.status);
       const result = await response.json() as { bytesBase64?: string; contentType?: string };

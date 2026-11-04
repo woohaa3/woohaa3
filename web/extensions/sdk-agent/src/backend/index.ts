@@ -24,8 +24,8 @@ import type {
   ApplicationUserDelegation,
   AgentConnectionProvider
 } from "@woohaa3/contracts";
-import { agentConnectionProviderCapabilityId, agentConversationAdapterCapabilityId, filmSetConversionCapabilityId } from "@woohaa3/contracts";
-import { createConnectionService, createConnectionProvider, createAssistantFilmSetConversionProvider, redactEvent } from "@woohaa3/agent-connections";
+import { agentConnectionProviderCapabilityId, agentConversationAdapterCapabilityId } from "@woohaa3/contracts";
+import { createConnectionService, createConnectionProvider, redactEvent } from "@woohaa3/agent-connections";
 import { SDK_AGENT_PLUGIN_ID, readAllowedHostsFromEnv, readAllowHttpFromEnv } from "../shared.js";
 import { createSdkAgentDescriptors, createSdkAgentConversationAdapter } from "./sdk-agent-connections.js";
 import { createSdkAgentHandler } from "./handler.js";
@@ -139,7 +139,6 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
 
       for (const adapter of SDK_AGENT_ADAPTERS) {
         const instance = createSdkAgentConversationAdapter(adapter, runtimeOptions);
-        host.registerCapability({ id: filmSetConversionCapabilityId(adapter.adapterId), value: createAssistantFilmSetConversionProvider(instance) });
         host.registerCapability({
           id: agentConversationAdapterCapabilityId(adapter.adapterId),
           value: instance

@@ -27,7 +27,6 @@ export type RunStateProjectionInput = import("./run-state-projection.js").NodeRu
 export type InteractionControllerOptions = {
   nodeCapabilities?: import("../../../extension-api/node-implementations.js").NodeImplementationRegistry;
   mediaContent?: import("../../../extension-api/media-content.js").MediaContentService;
-  compositeAssets?: import("../../../extension-api/composite-assets.js").CompositeAssetRegistry;
   canvas: HTMLCanvasElement;
   getRuntime: () => BevyRuntime | null;
   getSession: () => CanvasSession | null;
@@ -54,6 +53,20 @@ export type InteractionControllerOptions = {
    * 缺省时回退到直接提交（保持单测/最小 fixture 可用）。
    */
   onEditCommands?: (commands: readonly CanvasCommand[], label: string) => void | Promise<void | { ok: boolean; entry?: { state: string } }>;
+  /**
+   * 共享世界镜头的权威保存端口（视锥拖动释放时提交位姿）。
+   *
+   * 缺省时镜头只能选中、不能拖动位姿；拖动手势本身仍由 2D 输入层编排。
+   */
+  saveWorldCamera?: import("./world-camera-gesture.js").WorldCameraSavePort["save"];
+  /** 镜头拖动时同步移动卡片；不新增撤销条目（由镜头手势的外部历史统一管理）。 */
+  moveWorldCameraCard?: import("./world-camera-gesture.js").WorldCameraGestureDeps["moveCard"];
+  /**
+   * 页面撤销历史入口（镜头位姿的可逆回调）。
+   *
+   * 缺省时回落到 `onEditCommands` 的页面编辑历史；两者都没有时只提交，不进撤销时间线。
+   */
+  recordExternal?: import("./world-camera-gesture.js").WorldCameraGestureDeps["recordExternal"];
   /**
    * 指针手势派发错误出口（提交/回调失败时）。缺省静默；输入层始终复位手势，绝不卡死。
    * （change: 2026-10-09-improve-canvas-workflow）
@@ -125,12 +138,6 @@ export type InteractionControllerOptions = {
    */
   videoSessions?: VideoFrameSessions | null;
   /**
-   * 片场媒体会话（change: 2026-10-08-make-film-set-model-only）。
-   *
-   * 缺省为 null 时不渲染片场内部图片/视频平面纹理。会话跟随片场唯一播放头。
-   */
-  compositeAssetMediaSessions?: import("../canvas-runtime/composite-asset-media-session.js").CompositeAssetMediaSessions | null;
-  /**
    * modal 门禁（design D6）：返回 true 时画布不开始任何手势、快捷键、paste 或 wheel 缩放。
    * 缺省恒为 false（无弹窗），保持既有行为。
    */
@@ -174,7 +181,7 @@ export type InteractionControllerOptions = {
    * 只传 canonical nodeId；打开历史面板不改变 selection、不提交 Canvas 命令。
    */
   onNodeHistory?: (request: { nodeId: string }) => void;
-  onNodeHistorySelect?: (request: { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string }) => void;
+  onNodeHistorySelect?: (request: { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string; viewOnly?: boolean }) => void;
   /**
    * 顶部操作横条动作命中（change: 2026-10-13-add-node-to-film-set-shortcut）。
    * 横条由 Bevy 绘制、Rust 命中；宿主据 `actionId`（= 贡献 id）派发，`menu` 为设置箭头。
@@ -185,17 +192,6 @@ export type InteractionControllerOptions = {
    * 缺省/空表示本帧不绘制任何横条；由宿主从 `canvas.node-action` 贡献的 `describe` 聚合。
    */
   getNodeActionToolbars?: () => ReadonlyMap<string, import("@woohaa3/contracts").BevyNodeActionsPresentation>;
-  /**
-   * 多选动作横条命中回传（change: 2026-10-16-add-group-selection-toolbar）。
-   * 横条锚定选区包围盒、由 Bevy 绘制、Rust 命中；无单一节点身份。
-   */
-  onSelectionAction?: (request: { actionId: string; menu: boolean }) => void;
-  /**
-   * 每帧下发给 render scene 的多选横条描述
-   * （change: 2026-10-16-add-group-selection-toolbar）。缺省/空表示不绘制；由宿主从
-   * `canvas.selection-action` 贡献的 `describe` 聚合。
-   */
-  getSelectionActionToolbar?: () => import("@woohaa3/contracts").BevyNodeActionsPresentation | null;
   /**
    * 当前所有可聚焦模型目标（change: add-model-focus-viewing，任务 3.1；design D1/D3）。
    * 由宿主从 model-scene provider + canonical/working 画布解析；空数组表示无模型。
@@ -212,14 +208,6 @@ export type InteractionControllerOptions = {
    * 双击进入 / Escape 退出统一走 Canvas Navigation；缺省时回落到直接控制器调用（测试）。
    */
   onModelFocusIntent?: (intent: { type: "enter"; nodeId: string; kind?: "model" | "extension" } | { type: "exit" }) => void;
-  /**
-   * 双击拍摄镜头预览卡片 → 进入所属片场并选择该镜头
-   * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4 / design D8）。
-   *
-   * 只携带**已校验归属**的预览节点身份（`shotPreview.filmSetNodeId` + `clipId`）；片场扩展
-   * 负责进入聚焦、选择该 clipId 并在零点暂停。宿主不读取片场业务数据，也不猜默认镜头。
-   */
-  onShotPreviewEnterIntent?: (request: { previewNodeId: string; filmSetNodeId: string; clipId: string }) => void;
   /**
    * 聚焦目标/runtime projection 失效上报（change: fix-model-focus-navigation-and-camera-parity，D5）。
    * runtime/host 据此请求 Canvas Navigation 原子收敛（不再由 selection 直接退出）。
@@ -282,6 +270,8 @@ export type InteractionControllerOptions = {
    * 投影进快照，不持有播放时钟。
    */
   getAnimationPlayback?: () => import("@woohaa3/contracts").BevyAnimationPlayback | null;
+  /** 导演区整对象动画播放头（秒）；缺省不采样。 */
+  getWorldAnimationTimes?: () => ReadonlyMap<string, number>;
   /**
    * 公共聚焦过渡进度
    * （change: 2026-10-12-unify-node-editors-and-focus-transitions，design D6/D7）。
@@ -290,66 +280,6 @@ export type InteractionControllerOptions = {
    * 缺省/返回 null 时不发送（Rust 回退既有内部计时）。只承载浏览器本地呈现态。
    */
   getFocusTransition?: () => import("@woohaa3/contracts").BevyFocusTransition | null;
-  /**
-   * 每片场节点的对象身份映射与诊断
-   * （change: 2026-10-09-add-film-set-object-motion-and-editing）。
-   * 缺省时 controller 回落到 model-scene 组合 store 快照。
-   */
-  getCompositeAssetCompositions?: () => ReadonlyMap<string, import("@woohaa3/contracts").BevyCompositeAssetCompositionInfo>;
-  /**
-   * 拖动吸附策略（内置插件 `alignment-guides` 注入）。
-   *
-   * 宿主在每次拖动预览时向它求一次吸附偏移与参考线；返回 `null` 或未注入时完全不吸附，
-   * 行为与本能力上线前一致。几何求解在 contracts 的纯函数里，插件只提供开关与候选裁剪。
-   */
-  alignmentSnap?: () => import("./alignment-snap.js").AlignmentSnapPolicy | null;
-  /**
-   * 片场对象模式手势（change: 2026-10-09-add-film-set-object-motion-and-editing）。
-   *
-   * 聚焦片场且处于对象模式时：单击命中对象选择稳定 itemId；主按钮拖动对象移动（逆变换到
-   * 基础 localTransform），Shift 拖动绕局部 Y 旋转。缺省时不处理对象手势。
-   */
-  filmSetObjectGesture?: {
-    /** 当前是否对象模式（整体模式返回 false，主按钮保留整体/镜头语义）。 */
-    active(): boolean;
-    /** 单击命中：按屏幕点选择对象并返回是否命中/改变选择。 */
-    select(point: { x: number; y: number }, options?: { preserveOnMiss?: boolean }): boolean;
-    /** 命中选中对象时开始拖动；返回是否已开始。 */
-    begin(point: { x: number; y: number }, shift: boolean): boolean;
-    move(point: { x: number; y: number }): void;
-    hover?(point: { x: number; y: number } | null): void;
-    /** 结束并提交一次对象摆放操作。 */
-    end(): void;
-    /** 取消（丢弃 preview，不提交）。 */
-    cancel(): void;
-    /** 若正在拖动则取消并返回 true（Escape 分层手势取消；不提交）。 */
-    cancelIfDragging?(): boolean;
-  };
-  /**
-   * 片场对象局部键盘 action（change: 2026-10-10-improve-film-set-editing-and-inspector，
-   * 任务 4.1/5.1/5.4 / design D3/D4）。
-   *
-   * 由 Model Editor feature 持有对象会话与权限判断，经此注入既有 Runtime/Interaction owner。
-   * Canvas Shell 只按键与输入范围路由，不持久保存 item 快照；按钮和快捷键共用同一 action。
-   * 返回是否已消费该键。
-   */
-  filmSetObjectAction?: {
-    /** 当前是否处于可写片场编辑（非只读/历史/预览）。 */
-    active(): boolean;
-    /** 当前是否有选中对象（对象列表/场景共享）。 */
-    hasSelection(): boolean;
-    /** 是否有未结算的同目标删除（长按/重复不连删）。 */
-    pending(): boolean;
-    /** 删除当前选中对象（与删除按钮同一 action）。 */
-    deleteSelected(): boolean;
-    /** 清空对象选择与 gizmo。返回是否清空了选择。 */
-    clearSelection(): boolean;
-    /**
-     * 取消活动对象手势（丢弃 preview、释放 capture），返回是否有活动手势被取消。
-     * 用于 Escape 分层：先取消手势、再清选择、最后退出。
-     */
-    cancelGesture(): boolean;
-  };
   /**
    * 镜头 pose gizmo 手势（change: add-model-editor-gizmo-shot-capture，任务 3.2）。
    *
@@ -392,6 +322,13 @@ export type InteractionControllerOptions = {
     scale(scale: number): void;
     scaleEnd(): void;
   };
+  /**
+   * 导演区手势运行时（T07 scope gestures）。
+   *
+   * 缺省时读取 world-scopes 绑定的页面实例；测试与宿主可显式注入。控制器只把指针
+   * 交给它，不在这里判断场景权限或直接改共享世界。
+   */
+  sceneAreaGestures?: import("../world-scopes/gestures.js").SceneAreaGesturePort | null;
 };
 
 export type InteractionController = {
@@ -444,17 +381,6 @@ export type InteractionController = {
    * TS 矩形几何或提交移动。
    */
   queryDropTarget(point: { x: number; y: number }, excludedIds?: readonly string[]): import("./interaction-core.js").InteractionQuery<string | null>;
-  /** 复合资产范围几何读取（拖动提示消费，按 accepted generation）。 */
-  queryCompositeAssetScopes(): import("./interaction-core.js").InteractionQuery<import("../canvas-runtime/bevy-runtime.js").CompositeAssetScopeGeometryEntry[]>;
-  /**
-   * 通用 drop target 查询（change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D5）。
-   *
-   * 按 accepted snapshot 固定最上层实际节点（排除来源）；`ok:false` 时调用方 MUST NOT 回退
-   * TS 矩形几何或提交移动。
-   */
-  queryDropTarget(point: { x: number; y: number }, excludedIds?: readonly string[]): import("./interaction-core.js").InteractionQuery<string | null>;
-  /** 复合资产范围几何读取（拖动提示消费，按 accepted generation）。 */
-  queryCompositeAssetScopes(): import("./interaction-core.js").InteractionQuery<import("../canvas-runtime/bevy-runtime.js").CompositeAssetScopeGeometryEntry[]>;
   /**
    * 取消尚未提交的瞬时画布交互（modal 从空变非空时由宿主调用，design D6）。
    */
@@ -465,6 +391,25 @@ export type InteractionController = {
   exitModelFocus(): void;
   /** 是否处于模型聚焦查看。 */
   isModelFocused(): boolean;
+  /** Transient renderer-only ground displacement. Null cancels without a document write. */
+  setWorldGroundPreview(nodeId: string, delta: { u: number; v: number } | null): boolean;
+  /**
+   * 导演区地面范围瞬时预览（搬动/调范围）。只影响本页呈现，松手或取消传 `null` 清除；
+   * 不写规范 nodeData，也不代替权威 scene-area 提交。
+   */
+  setSceneAreaPreview(nodeId: string, bounds: import("@woohaa3/contracts").GroundAabb | null): boolean;
+  /** Resolve a client point against the accepted renderer camera's ground plane. */
+  queryWorldGround(point: { x: number; y: number }): { u: number; v: number } | null;
+  beginWorldGroundPreview(nodeId: string, point: { x: number; y: number }): boolean;
+  updateWorldGroundPreview(point: { x: number; y: number }): boolean;
+  cancelWorldGroundPreview(): void;
+  /**
+   * 镜头视锥瞬时位姿（按地面增量）；`null` 清除。只影响本页呈现，不写规范 nodeData，
+   * 也不代替权威 `world-camera-save`（见 `world-camera-drag.ts`）。
+   */
+  setWorldCameraPreview(nodeId: string, delta: { u: number; v: number } | null): boolean;
+  /** 清除全部镜头瞬时位姿（取消/卸载）。 */
+  clearWorldCameraPreviews(): void;
   /**
    * 以 canonical nodeId 请求进入聚焦（历史 owner 用）
    * （change: add-canvas-node-generation-history，任务 4.1）。目标不合法返回 false。
@@ -472,6 +417,19 @@ export type InteractionController = {
   enterModelFocusForNode(nodeId: string): boolean;
   /** 更新右侧遮挡宽度，按未遮挡左侧区域重新取景（任务 4.2）。 */
   setContentRect(rect: { right: number; left?: number; top?: number; bottom?: number }): void;
+  /**
+   * 注入/替换导演区手势运行时（T07 scope gestures）；传 null 恢复页面绑定实例。
+   * 导演区卡片/地面边缘按下时由 2D 输入层转发，不新建指针监听。
+   */
+  setSceneAreaGestures(handler: InteractionControllerOptions["sceneAreaGestures"] | null): void;
+  /**
+   * Overlay bridge for externally started scene gestures (projected 搬场景 handle).
+   * The controller records the external owner so its frame reconciliation cannot
+   * cancel the gesture on the next animation frame.
+   */
+  beginSceneAreaGesture(input: import("../world-scopes/gestures.js").SceneAreaGestureBeginInput): import("../world-scopes/gestures.js").SceneAreaGestureStart | null;
+  endSceneAreaGesture(): Promise<import("../world-scopes/gestures.js").SceneAreaGestureResult>;
+  cancelSceneAreaGesture(): void;
   restoreViewport(viewport: { x: number; y: number; zoom: number }): void;
   /**
    * 带动画地平移到目标视口（保持传入 zoom）。尊重减少动态效果偏好；duration 为 0 时瞬时。
@@ -494,16 +452,8 @@ export type InteractionController = {
    */
   setFocusGesture(handler: InteractionControllerOptions["focusGesture"] | null): void;
   /**
-   * 注入/替换片场对象模式手势处理器
-   * （change: 2026-10-09-add-film-set-object-motion-and-editing）。
+   * 注入/替换主画面滚轮与捏合对镜头 distance 的处理。
    */
-  setFilmSetObjectGesture(handler: InteractionControllerOptions["filmSetObjectGesture"] | null): void;
-  /**
-   * 注入/替换片场对象局部键盘 action
-   * （change: 2026-10-10-improve-film-set-editing-and-inspector，任务 4.1）。
-   */
-  setFilmSetObjectAction?(handler: InteractionControllerOptions["filmSetObjectAction"] | null): void;
-  /** 注入/替换主画面滚轮与捏合对镜头 distance 的处理。 */
   setShotWheel(handler: InteractionControllerOptions["shotWheel"] | null): void;
   /**
    * 应用完整 focus target transition（Canvas Navigation focus adapter）
@@ -526,23 +476,11 @@ export type InteractionController = {
    * 优先使用 working 拖动/改尺寸预览，其次规范绝对坐标与节点尺寸，经唯一本地视口换算；
    * 不写状态、不建第二套相机。节点不存在时返回 null。供节点顶部操作横条锚定。
    */
-  nodeScreenRect(nodeId: string): import("@woohaa3/contracts").ScreenRect | null;
-  /**
-   * 本次拖动的辅助对齐线（世界坐标）
-   * （内置插件 `alignment-guides`；宿主只在拖动中返回非空数组）。
-   *
-   * 覆盖层把它按唯一本地视口换算成屏幕线段绘制；不写画布、不参与命中。
-   */
-  alignmentGuides(): readonly import("../../contract/alignment-snap.js").AlignmentGuide[];
-  /** 参考线版本号；内容变化才递增，覆盖层据此决定是否重绘。 */
-  alignmentGuidesVersion(): number;
-  /** 注入/替换拖动吸附策略（内置插件提供；不注入即完全不吸附）。 */
-  setAlignmentSnapPolicy(policy: import("./alignment-snap.js").AlignmentSnapPolicy | null): void;
+  nodeScreenRect(nodeId: string, part?: "scope-title"): import("@woohaa3/contracts").ScreenRect | null;
 };
 
 export type Gesture =
   | { kind: "none" }
-  | { kind: "group-badge-press"; pointerId: number; nodeId: string; collapsed: boolean; startScreen: Point; moved: boolean }
   | { kind: "history-press"; pointerId: number; nodeId: string; presentationId: string; startScreen: Point }
   | { kind: "model-preview"; pointerId: number; nodeId: string; last: Point }
   | { kind: "pan"; pointerId: number; last: Point }
@@ -567,23 +505,11 @@ export type Gesture =
       start: Point;
       originWidth: number;
       originHeight: number;
-      /** 规范节点中心（绝对画布坐标）；地面范围对角锁定缩放用。 */
-      originCenter: Point;
+      /** Scope edge resizing keeps the opposite edge fixed. */
+      edge?: import("./scene-area-cursor.js").FrameEdge;
+      originPosition?: Point;
+      cursor?: string;
       moved: boolean;
-      /**
-       * 缩放策略（change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D6）。
-       * `scope` 锁定 dragged 抓手的对角，等比缩放；缺省/`free` 为既有分轴自由缩放。
-       * 仅由 pointerdown 依据 accepted 范围几何决定，整个手势不得中途切换。
-       */
-      mode?: "free" | "scope";
-      /** 地面范围拖拽抓手世界坐标（`scope` 模式必需）。 */
-      handle?: Point;
-      /** 地面范围对角锁定锚点世界坐标（`scope` 模式必需）。 */
-      anchor?: Point;
-      /** 组四角缩放方向；把左上角固定到对角后再提交（缺省为右下角自由缩放）。 */
-      corner?: import("./interaction-2d-helpers.js").GroupResizeCorner;
-      /** 规范节点绝对左上角；角缩放据它固定对角。 */
-      origin?: Point;
     }
   | { kind: "connect"; pointerId: number; source: string; side: "input" | "output" }
   | {
@@ -597,4 +523,33 @@ export type Gesture =
       /** 拖拽中命中的待提交边预览。 */
       pendingEdges: Array<{ id: string; source: string; target: string }>;
     }
-  | { kind: "marquee"; pointerId: number; start: Point; current: Point };
+  | { kind: "marquee"; pointerId: number; start: Point; current: Point }
+  | {
+      /**
+       * 共享世界模型直接沿地面拖动：只产生瞬时 `worldGroundPreviews`，释放时提交
+       * `nodeData.patch{sharedWorldInstance}`（见 `world-ground-drag.ts`）。
+       */
+      kind: "world-ground";
+      pointerId: number;
+      start: import("./world-ground-drag.js").WorldGroundDragStart;
+      /** 最近一次（移除前）的地面增量；用于释放那一下没有 pointermove 的情况。 */
+      delta: import("@woohaa3/contracts").GroundPoint | null;
+    }
+  | {
+      /**
+       * 共享世界镜头的视锥直接拖动：只产生瞬时 `worldCameraPreviews`，释放时经权威
+       * `world-camera-save` 提交（见 `world-camera-drag.ts`）。
+       */
+      kind: "world-camera";
+      pointerId: number;
+      start: import("./world-camera-drag.js").WorldCameraDragStart;
+      /** 最近一次（移除前）的地面增量；用于释放那一下没有 pointermove 的情况。 */
+      delta: import("@woohaa3/contracts").GroundPoint | null;
+    }
+  | {
+      kind: "scene-area";
+      pointerId: number;
+      areaNodeId: string;
+      intent: "move" | "resize";
+      cursor?: string;
+    };

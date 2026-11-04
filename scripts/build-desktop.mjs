@@ -183,7 +183,7 @@ function buildNativeTools() {
   const triple = /host:\s*(\S+)/.exec(probe.stdout ?? "")?.[1];
   if (probe.error || probe.status !== 0 || !triple) throw new Error("无法探测原生 Rust host triple");
   if (triple !== nodeArtifact().triple) throw new Error(`Rust host ${triple} 与本机宿主目标 ${nodeArtifact().triple} 不匹配，请使用对应原生工具链`);
-  run("cargo", ["build", "--release", "--target", triple, "--no-default-features", "--features", "native-renderer,recording-worker", "--bin", "model-renderer", "--bin", "shot-recorder"], { cwd: path.join(root, "bevy"), env: { ...childEnv(), CARGO_TARGET_DIR: path.join(root, "bevy/target") } });
+  run("cargo", ["build", "--release", "--target", triple, "--no-default-features", "--features", "native-renderer", "--bin", "model-renderer"], { cwd: path.join(root, "bevy"), env: { ...childEnv(), CARGO_TARGET_DIR: path.join(root, "bevy/target") } });
 }
 
 function frontendBuildSteps(standalone) {
@@ -304,7 +304,7 @@ async function runBuild(options) {
     console.log("[desktop] dry-run：以下步骤不会执行");
     console.log(`  平台/架构：${platform}/${arch}`);
     if (options.buildFrontend) for (const step of frontendBuildSteps(!options.uiUrl)) console.log(`  pnpm ${step.join(" ")}`);
-    if (!options.uiUrl) console.log("  cargo build 原生 model-renderer + shot-recorder (--release)，然后装配宿主运行时");
+    if (!options.uiUrl) console.log("  cargo build 原生 model-renderer (--release)，然后装配宿主运行时");
     console.log(`  前端 dist：${relative(frontendDist)}`);
     console.log(`  bundle 种类：${kindList.length > 0 ? kindList.join(", ") : "（--no-bundle）"}`);
     console.log(`  默认值资源：${relative(defaultsPath)}`);

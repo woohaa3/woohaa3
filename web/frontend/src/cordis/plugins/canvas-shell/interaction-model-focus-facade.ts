@@ -46,12 +46,6 @@ export function createModelFocusFacade(
       model.setShotGesture(handler),
     setFocusGesture: (handler: Parameters<ModelGestureFamily["setFocusGesture"]>[0]) =>
       model.setFocusGesture(handler),
-    setFilmSetObjectGesture: (
-      handler: Parameters<ModelGestureFamily["setFilmSetObjectGesture"]>[0]
-    ) => model.setFilmSetObjectGesture(handler),
-    setFilmSetObjectAction: (
-      handler: Parameters<ModelGestureFamily["setFilmSetObjectAction"]>[0]
-    ) => model.setFilmSetObjectAction(handler),
     setShotWheel: (handler: Parameters<ModelGestureFamily["setShotWheel"]>[0]) =>
       model.setShotWheel(handler)
   };

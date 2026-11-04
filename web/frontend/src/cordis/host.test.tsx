@@ -474,7 +474,7 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
   /** 注册来源贡献（只声明 sourceId/sourceLabel），并注入按 adapter 返回连接的会话 service。 */
   async function renderAuthoring(options: {
     contributions?: Array<{ id: string; sourceId?: string; sourceLabel?: string }>;
-    mode?: "model3d" | "camera" | "film-set";
+    mode?: "model3d" | "text";
     delivery?: import("./contract/authoring.js").AssistantDeliveryTarget;
     connectionsFor?: (adapterId?: string) => Array<{ connectionId: string; name: string; ready: boolean; authMode?: "api-key" | "oauth" | "local-login"; adapterId?: string; reason?: string | null }>;
     findConversationForTarget?: () => Promise<unknown>;
@@ -536,16 +536,6 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
       serviceOverrides: { findConversationForTarget: async input => ({ ok: true, value: { conversation: hasHistory && !input.connectionId ? { connectionId: "first" } as never : null } }) }
     });
     expect(el.querySelector('button[aria-label="选择助手"]')?.textContent).toContain(hasHistory ? "节点原助手" : "全局助手");
-  });
-
-  it.each(["running", "failed", "cancelled"] as const)("片场 %s 交付仍渲染原执行面板与工具栏", async status => {
-    const { el } = await renderAuthoring({ mode: "film-set", delivery: { status, stage: "转换状态", query: async () => ({ ok: true }) } });
-    const panel = el.querySelector('[data-testid="authoring-generate"]');
-    expect(panel?.classList.contains("mc-panel")).toBe(true);
-    expect(panel?.getAttribute("data-presentation")).toBe("dock");
-    expect(panel?.textContent).toContain("转换状态");
-    expect(el.querySelector("textarea")?.disabled).toBe(true);
-    expect(panel?.querySelector(".assistant-toolbar")).not.toBeNull();
   });
 
   it("无任何来源扩展时仍渲染内置面板并提示配置来源（MUST NOT 隐藏生成入口）", async () => {
@@ -665,13 +655,5 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
     const { el } = await renderAuthoring({ contributions: [{ id: "legacy-generate" }] });
     expect(el.querySelector('[data-testid="authoring-generate"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="authoring-generate-empty"]')).not.toBeNull();
-  });
-
-  it("镜头与片场目标复用同一宿主内置面板（仅目标身份不同）", async () => {
-    for (const mode of ["camera", "film-set"] as const) {
-      const { el } = await renderAuthoring({ mode, contributions: [{ id: "sdk-generate", sourceId: "openai-responses" }] });
-      const panelEl = el.querySelector('[data-testid="authoring-generate"]')!;
-      expect(panelEl.getAttribute("data-mode")).toBe(mode);
-    }
   });
 });

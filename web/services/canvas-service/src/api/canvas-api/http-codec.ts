@@ -35,6 +35,7 @@ export function respondError(res: ServerResponse, error: unknown, log: CanvasLog
     sendError(res, status, code, message, details);
     return;
   }
+  console.error("DEBUG_CANVAS_ERROR", error);
   log?.({ event: "canvas-error", status: 500, code: "REPOSITORY_FAILURE" });
   sendError(res, 500, "REPOSITORY_FAILURE", "服务内部错误");
 }

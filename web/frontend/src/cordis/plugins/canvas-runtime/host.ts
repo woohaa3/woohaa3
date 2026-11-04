@@ -12,45 +12,35 @@ import { installInteractionController, type InteractionController, type Interact
 import { type FocusTargetInput } from "../canvas-shell/model-focus-session.js";
 import { createAttachedMedia } from "./attached-media.js";
 import { projectFocusContentRect } from "./project-focus-content-rect.js";
-import { queryCompositeAssetItemPick, type CompositeAssetPickInput } from "./composite-asset-picking.js";
-import { compositeFocusContextIds } from "../canvas-shell/composite-focus-context.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
-import { defaultAppTheme, type BevyModelEditor, type GhostRenderNode, type ModelFocusProjection } from "@woohaa3/contracts";
-import type { AlignmentGuide } from "../../contract/alignment-snap.js";
-import type { AlignmentSnapPolicy } from "../../contract/alignment-snap.js";
-import { applyAlignmentSnapPolicy, createAlignmentSnapRef, readAlignmentGuides, readAlignmentGuidesVersion } from "./alignment-snap-refs.js";
+import { decodeSceneAreaData, defaultAppTheme, type BevyModelEditor, type GhostRenderNode, type ModelFocusProjection } from "@woohaa3/contracts";
 import type { CanvasRuntimeService, CanvasRuntimeStatus } from "../../contracts.js";
 import { type CanvasRuntimeOptions } from "./canvas-runtime-options.js";
 import { installCanvasRuntimeMirrors } from "./canvas-runtime-mirrors.js";
 import { FocusContentRectStore } from "./focus-content-rect-store.js";
 import { FocusTransitionCoordinator } from "./focus-transition-coordinator.js";
 import { MediaResourceStore } from "./media-resource-store.js";
+import { WorldAnimationTransport } from "./world-animation-transport.js";
+import { nodeSelectionStore } from "../../services/selection-store.js";
 import { hoverNodeStore } from "../../services/hover-store.js";
 import { createDefaultMediaDecoder } from "./media-decoder.js";
 import { VideoLeaseRegistry } from "./video-lease-registry.js";
-import { OverviewCacheCoordinator } from "./overview-cache.js";
-import { OverviewCacheBridge } from "./overview-cache-bridge.js";
+import { acquireCaptureLock, rgbaToPngBlob } from "./model-capture-shared.js";
+
+/** 页面世界镜头捕获的进程内单调代数：按它丢弃跨画布/重建的迟到结果。 */
+let worldCaptureGeneration = 0;
 
 const defaultMediaDecoder = createDefaultMediaDecoder();
 import { applyFocusTargetTransition } from "./focus-target-transition.js";
 import { isDocumentFocusTarget } from "../../navigation/contracts.js";
 import { buildAttachInteractionOptions } from "./attach-interaction-options.js";
 import { AnimationPlaybackStore } from "./animation-playback-store.js";
-import { readNodeActionToolbars, activateNodeAction, readSelectionActionToolbar, activateSelectionAction } from "../canvas-shell/node-action-bridge.js";
+import { readNodeActionToolbars, activateNodeAction } from "../canvas-shell/node-action-bridge.js";
 import { ImageFocusStore } from "./image-focus-store.js";
 import { VideoFocusStore } from "./video-focus-store.js";
 import { ModelSceneOverrideStore } from "./model-scene-override-store.js";
 import { installPerfFrameWindow } from "./perf-frame-window.js";
 import {
-  installOverviewLodTelemetry,
-  type OverviewLodTelemetryHandle
-} from "./overview-lod-telemetry.js";
-import { getGroupLayoutSizes } from "@woohaa3/contracts";
-import { groupBadgePresentationScreenRect } from "./group-badge-screen-rect.js";
-import { groupBadgeProjectionOf } from "../canvas-shell/group-badge-projection.js";
-import {
-  applyFilmSetObjectAction,
-  applyFilmSetObjectGesture,
   applyModelEditorFocusGesture,
   applyModelEditorShotGesture,
   applyShotWheel,
@@ -95,7 +85,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   };
   registerImageViewportTarget = (target: import("../../focus/types.js").FocusViewportTarget): (() => void) =>
     this.imageFocusStore.registerViewportTarget(target);
-  setImageFocusTexture = (texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null): void => {
+  setImageFocusTexture = (texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null): void => {
     this.imageFocusStore.setTexture(texture);
     this.controllerInstance?.invalidate("image-focus-texture");
   };
@@ -185,14 +175,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private loadPromise: Promise<BevyRuntime> | null = null;
   /** 帧窗口（`perf.frame`）：DOM canvas 挂上后开，卸载/释放时关（design D4）。 */
   private frameWindow: import("../../services/telemetry-performance.js").PerfFrameWindow | null = null;
-  /** 片场总览 LOD 采样（`perf.lod`）：与帧窗口同生命周期，只在画布挂载期间记录。 */
-  private lodTelemetry: OverviewLodTelemetryHandle | null = null;
   private readonly loadAbort = new AbortController();
-  /**
-   * 拖动吸附策略（内置插件 `alignment-guides` 注入）。
-   * 与手势注入同一套语义：插件可在画布挂载前后任意时刻启停，controller 每次求值都读最新值。
-   */
-  private readonly alignmentSnapRef = createAlignmentSnapRef();
 
   constructor(private readonly options: CanvasRuntimeOptions) {}
 
@@ -208,6 +191,37 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   lastPointerWorld = (): { x: number; y: number } | null =>
     this.controllerInstance?.lastPointerWorld() ?? null;
   runtime = (): BevyRuntime | null => this.runtimeInstance;
+  /**
+   * 页面内共享世界镜头捕获：按 canonical 输出尺寸在页面 Bevy App 内离屏渲染，返回 PNG。
+   * 与截图/历史缩略图共用 latest-wins 回读通道，内部串行。
+   */
+  captureWorldCamera = async (input: {
+    cameraId: string;
+    width: number;
+    height: number;
+  }): Promise<{ ok: true; png: Uint8Array } | { ok: false; code: string }> => {
+    const runtime = this.runtimeInstance;
+    if (!runtime?.requestWorldCapture) return { ok: false, code: "renderer-unavailable" };
+    const release = await acquireCaptureLock();
+    try {
+      worldCaptureGeneration += 1;
+      const frame = await runtime.requestWorldCapture({
+        generation: worldCaptureGeneration,
+        cameraId: input.cameraId,
+        width: input.width,
+        height: input.height
+      });
+      if (!frame) return { ok: false, code: "renderer-unavailable" };
+      if (!frame.ok) return { ok: false, code: frame.code };
+      const blob = await rgbaToPngBlob(frame.rgba, frame.width, frame.height);
+      if (!blob) return { ok: false, code: "capture-encode-failed" };
+      return { ok: true, png: new Uint8Array(await blob.arrayBuffer()) };
+    } catch {
+      return { ok: false, code: "capture-render-failed" };
+    } finally {
+      release();
+    }
+  };
   clientToWorld = (client: { x: number; y: number }): { x: number; y: number } | null =>
     this.controllerInstance?.clientToWorld(client) ?? null;
   worldToClient = (world: { x: number; y: number }): { x: number; y: number } | null =>
@@ -218,10 +232,6 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   /** 通用 drop target 查询；未挂载控制器时稳定 unavailable（change: 2026-10-12 片场菱形范围）。 */
   queryDropTarget = (point: { x: number; y: number }, excludedIds: readonly string[] = []) =>
     this.controllerInstance?.queryDropTarget(point, excludedIds) ?? { ok: false as const, reason: "unavailable" as const };
-  /** 复合资产范围几何读取；未挂载控制器时稳定 unavailable。 */
-  queryCompositeAssetScopes = () =>
-    this.controllerInstance?.queryCompositeAssetScopes() ?? { ok: false as const, reason: "unavailable" as const };
-
   // ── 模型聚焦查看（change: add-model-focus-viewing，任务 3.4） ──────────────────
 
   /** 当前模型聚焦投影；未聚焦返回 null。 */
@@ -437,19 +447,11 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   // ── 动画节点播放（change: 2026-10-05-bind-model-animation-to-shots） ──
 
   private readonly animationPlaybackStore = new AnimationPlaybackStore();
-  /** 当前挂载的片场媒体会话（change: 2026-10-08-make-film-set-model-only）。 */
-  private compositeAssetMediaSessionsInstance: import("./composite-asset-media-session.js").CompositeAssetMediaSessions | null = null;
+  private readonly worldAnimation = new WorldAnimationTransport(() => this.controllerInstance?.invalidate("world-animation"));
   /** 当前 attach 的页面级资源需求 owner（change: 2026-10-23-scale-canvas-media-residency）。 */
   private residencyInstance: import("./residency/index.js").CanvasResourceCoordinator | null = null;
-  private overviewCacheInstance: OverviewCacheCoordinator | null = null;
   /** 当前资源协调器（诊断/测试；未挂载返回 null）。 */
   resourceResidencyDiagnostics = (): unknown => this.residencyInstance?.diagnostics() ?? null;
-  overviewCacheDiagnostics = (): unknown => this.overviewCacheInstance?.diagnostics() ?? null;
-  setOverviewCacheBenchmarkDisabled = (disabled: boolean): void => {
-    this.overviewCacheInstance?.setBenchmarkDisabled(disabled);
-    this.controllerInstance?.invalidate("overview-cache-benchmark");
-  };
-  syncOverviewCache = (inputs: readonly import("./overview-cache.js").OverviewCacheInput[]): void => { this.overviewCacheInstance?.sync(inputs); };
   residency = (): import("./residency/index.js").CanvasResourceCoordinator | null => this.residencyInstance;
 
   /**
@@ -462,11 +464,6 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     const ids = new Set<string>();
     const add = (nodeId: string | null | undefined) => { if (nodeId) ids.add(nodeId); };
     add(this.modelFocus?.nodeId);
-    if (this.modelFocus) {
-      const working = workingCanvasOf(woohaa3CanvasStore.getState());
-      const projected = this.options.compositeAssets?.projectCanvas(this.options.projectHistoryCanvas?.(working) ?? working) ?? working;
-      for (const id of compositeFocusContextIds(projected, this.options.compositeAssets, this.modelFocus.nodeId)) add(id);
-    }
     add(this.imageFocusStore.getTargetId());
     add(this.videoFocusStore.getTargetId());
     add(this.animationPlaybackStore.current()?.nodeId);
@@ -493,16 +490,26 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   setAnimationPlayback = (playback: import("@woohaa3/contracts").BevyAnimationPlayback | null): void => {
     if (this.animationPlaybackStore.set(playback)) this.controllerInstance?.invalidate("animation-playback");
   };
-  /**
-   * 片场唯一播放头通知（change: 2026-10-08-make-film-set-model-only）。
-   *
-   * 由动画播放控制器每帧调用；不改变动画投影，只把时间转给片场媒体会话。
-   */
-  notifyAnimationTime = (input: { nodeId: string | null; time: number; playing: boolean }): void => {
-    this.animationPlaybackStore.notify(input);
-  };
-  /** 当前片场媒体会话（供截图等待目标帧就绪；change: 2026-10-08-make-film-set-model-only）。 */
-  compositeAssetMediaSessions = (): import("./composite-asset-media-session.js").CompositeAssetMediaSessions | null => this.compositeAssetMediaSessionsInstance;
+  worldAnimationTimes = () => this.worldAnimation.sampleTimes();
+  worldAnimationState = () => this.worldAnimation.snapshot();
+  subscribeWorldAnimation = (listener: () => void) => this.worldAnimation.subscribe(listener);
+  playWorldAnimation = () => this.worldAnimation.play();
+  pauseWorldAnimation = () => this.worldAnimation.pause();
+  seekWorldAnimation = (time: number) => this.worldAnimation.seek(time);
+  setWorldAnimationLoop = (loop: boolean) => this.worldAnimation.setLoop(loop);
+
+  private syncWorldAnimation(): void {
+    const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+    const selection = nodeSelectionStore.getSnapshot();
+    const definitions = canvas?.document.nodes.flatMap(node => {
+      const area = decodeSceneAreaData(canvas.nodeData[node.id]?.sceneArea);
+      const script = area.ok ? area.value.animationScript : undefined;
+      return script
+        ? [{ nodeId: node.id, key: `${script.sourceHash}:${script.revision}`, duration: script.duration, loop: script.loop }]
+        : [];
+    }) ?? [];
+    this.worldAnimation.sync(canvas?.id ?? null, definitions, selection.nodeIds.length === 1 ? selection.primaryNodeId : null);
+  }
   /** 当前活动动画播放投影；无返回 null。 */
   animationPlaybackState = (): import("@woohaa3/contracts").BevyAnimationPlayback | null =>
     this.animationPlaybackStore.current();
@@ -530,37 +537,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     applyShotWheel(this.modelEditorGestures, this.controllerInstance, handler);
   }
 
-  /** 宿主注入的片场对象模式手势处理器（change: 2026-10-09 片场对象编辑）。 */
-  setFilmSetObjectGesture(handler: InteractionControllerOptions["filmSetObjectGesture"] | null): void {
-    applyFilmSetObjectGesture(this.modelEditorGestures, this.controllerInstance, handler);
-  }
-
-  /**
-   * 注入/替换拖动吸附策略（内置插件 `alignment-guides`；传 null 关闭吸附）。
-   *
-   * 与手势注入同一套语义：插件在画布挂载前后任意时刻都能启停，controller 每次求值读最新值。
-   */
-  setAlignmentSnapPolicy(policy: AlignmentSnapPolicy | null): void {
-    applyAlignmentSnapPolicy(this.alignmentSnapRef, this.controllerInstance, policy);
-  }
-
-  alignmentGuides = (): readonly AlignmentGuide[] => readAlignmentGuides(this.controllerInstance);
-  alignmentGuidesVersion = (): number => readAlignmentGuidesVersion(this.controllerInstance);
-
-  /** 宿主注入的片场对象局部键盘 action（change: 2026-10-10）。 */
-  setFilmSetObjectAction(handler: InteractionControllerOptions["filmSetObjectAction"] | null): void {
-    applyFilmSetObjectAction(this.modelEditorGestures, this.controllerInstance, handler);
-  }
-
   /** 当前已接受的 interaction generation。 */
   interactionGeneration = (): number => this.runtimeInstance?.interactionGeneration?.() ?? 0;
-
-  /** 片场对象 picking（聚焦透视相机 + 同帧组合几何）。 */
-  queryCompositeAssetItemPick = (input: CompositeAssetPickInput) => queryCompositeAssetItemPick(this.runtimeInstance, input);
-
-  /** 片场对象世界包围盒（选中反馈/gizmo 定位）。 */
-  queryCompositeAssetItemBounds = (nodeId: string): Array<{ itemId: string; center: [number, number, number]; radius: number; unit: number; yaw: number; worldToLocal?: number[] }> =>
-    this.runtimeInstance?.queryCompositeAssetItemBounds?.(nodeId) ?? [];
 
   /** 暂停活动动画播放头（对象编辑前调用；无播放时 no-op）。 */
   pauseAnimation?: () => void;
@@ -592,47 +570,10 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
    * 单节点屏幕矩形（CSS px）（change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1）。
    * 转发到控制器；未挂载或节点不存在返回 null。
    */
-  nodeScreenRect = (nodeId: string): import("@woohaa3/contracts").ScreenRect | null =>
-    this.controllerInstance?.nodeScreenRect(nodeId) ?? null;
-  nodePresentationScreenRect = (nodeId: string): import("@woohaa3/contracts").ScreenRect | null => {
-    const card = this.nodeScreenRect(nodeId);
-    const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
-    const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-    // 普通 group 的执行面板跟随外部 3D 徽标，而不是跟随气泡主体。使用当前 screen rect
-    // 保留拖动/缩放预览，再把同一份徽标几何投影到屏幕。
-    //
-    // 基准必须是**渲染矩形**而不是节点自身尺寸：Rust 把徽标画在渲染场景节点矩形的下缘，
-    // 而 group 的渲染矩形是成员包围后的布局尺寸（`getGroupLayoutSizes`，可比节点自身高得多）。
-    // 用节点尺寸推导会把徽标算高一整段，面板随之压回场景上。
-    if (card && node?.type === "group" && this.controllerInstance) {
-      const controller = this.controllerInstance;
-      const data = canvas?.nodeData[nodeId];
-      const layout = canvas ? getGroupLayoutSizes(canvas.document.nodes).get(nodeId) ?? null : null;
-      return groupBadgePresentationScreenRect({
-        card,
-        zoom: controller.viewport().zoom,
-        node,
-        layout,
-        collapsed: data?.groupCollapsed === true,
-        projection: groupBadgeProjectionOf(canvas, nodeId)
-      }) ?? card;
-    }
-    const scopes = this.controllerInstance?.queryCompositeAssetScopes();
-    if (!scopes?.ok) return card;
-    const scope = scopes.value.find((entry) => entry.nodeId === nodeId);
-    if (!scope) return card;
-    const [worldLeft, worldTop, width, height] = scope.aabb;
-    const start = this.worldToClient({ x: worldLeft, y: worldTop });
-    const end = this.worldToClient({ x: worldLeft + width, y: worldTop + height });
-    if (!start || !end) return card;
-    const left = Math.min(start.x, end.x);
-    const top = Math.min(start.y, end.y);
-    const right = Math.max(start.x, end.x);
-    const bottom = Math.max(start.y, end.y);
-    const x = Math.min(card?.left ?? left, left);
-    const y = Math.min(card?.top ?? top, top);
-    return { left: x, top: y, width: right - x, height: bottom - y };
-  };
+  nodeScreenRect = (nodeId: string, part?: "scope-title"): import("@woohaa3/contracts").ScreenRect | null =>
+    this.controllerInstance?.nodeScreenRect(nodeId, part) ?? null;
+  nodePresentationScreenRect = (nodeId: string): import("@woohaa3/contracts").ScreenRect | null =>
+    this.nodeScreenRect(nodeId);
 
   /** 上传中的幽灵节点（只渲染、不进规范状态）。 */
   ghostNodes = (): readonly GhostRenderNode[] => this.ghosts;
@@ -690,7 +631,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       current: (() => { width: number; height: number; pixelRatio: number }) | null;
     } = { current: null };
     const {
-      textureSync, videoSessions, compositeAssetMediaSessions, residency, projectResidency, dispose: disposeAttachedMedia
+      textureSync, videoSessions, residency, projectResidency, dispose: disposeAttachedMedia
     } = createAttachedMedia({
       runtime,
       options: this.options,
@@ -698,7 +639,6 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       getFocusTexture: () => this.videoFocusStore.getTexture() ?? this.imageFocusStore.getTexture(),
       getFocusDetails: this.imageFocusStore.getDetails,
       isFocused: this.isFocused,
-      playback: this.animationPlaybackStore,
       invalidate: (reason) => this.controllerInstance?.invalidate(reason),
       getViewport: () => viewportRef.current?.() ?? { x: 0, y: 0, zoom: 1 },
       getSurface: () => surfaceRef.current?.() ?? { width: 0, height: 0, pixelRatio: 1 },
@@ -708,23 +648,14 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       getModelContentVersion: () => this.modelContentVersion
     });
     this.residencyInstance = residency;
-    const overviewBridge = new OverviewCacheBridge(runtime, residency, owner => {
-      const playback = this.animationPlaybackStore.current();
-      return playback?.nodeId === owner && playback.playing;
-    });
-    this.overviewCacheInstance = new OverviewCacheCoordinator(residency, undefined, overviewBridge.render, overviewBridge.release);
-    overviewBridge.connect(this.overviewCacheInstance);
-    this.compositeAssetMediaSessionsInstance = compositeAssetMediaSessions;
     // E2E/排障镜像：观察视频会话/模型聚焦/图片聚焦/放置预览（生产无副作用）。
     installCanvasRuntimeMirrors({
-      compositeAssetMediaSessions,
       videoSessions,
       modelFocus: () => this.modelFocus,
       imageFocus: () => this.imageFocusStore.get(),
       videoFocus: () => this.videoFocusStore.get(),
       videoFocusTargetId: () => this.videoFocusStore.getTargetId(),
-      residency,
-      overviewCache: { diagnostics: this.overviewCacheDiagnostics, setBenchmarkDisabled: this.setOverviewCacheBenchmarkDisabled }
+      residency
     });
     const controller = installInteractionController(
       buildAttachInteractionOptions({
@@ -733,16 +664,14 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         onSceneSubmitted: this.sceneSubmitted,
         textureSync,
         videoSessions,
-        compositeAssetMediaSessions,
         getRuntime: () => this.runtimeInstance,
         getModelResources: () => this.options.getModelResources?.() ?? new Map(),
         theme: () => this.options.getTheme?.() ?? defaultAppTheme(),
         getGhostNodes: () => this.ghosts,
         getNodeActionToolbars: () => readNodeActionToolbars(),
         onNodeAction: (hit) => activateNodeAction(hit),
-        getSelectionActionToolbar: () => readSelectionActionToolbar(),
-        onSelectionAction: (hit) => activateSelectionAction(hit),
         modelFocus: () => this.modelFocus,
+        worldAnimationTimes: this.worldAnimationTimes,
         modelFocusMode: this.modelFocusMode,
         focusTargets: () => this.resolveModelFocusTargets(),
         hasFocusTarget: (nodeId) => this.modelFocusTargetsOverride !== null
@@ -769,40 +698,30 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         focusTransition: () => this.focusTransition.modelProgress(),
         runState: () => this.options.getRunState?.() ?? null,
         gestures: this.modelEditorGestures,
-        alignmentSnap: () => this.alignmentSnapRef.current,
         onModelFocusChange: (projection) => {
           this.modelFocus = projection;
           this.emitModelFocus();
           // 聚焦投影变化只请求失效；同一帧的输入/媒体 tick 会合并进一次提交（design D2）。
           this.controllerInstance?.invalidate("model-focus");
         },
-        onViewportChange: (viewport) => {
+        onViewportChange: () => {
           this.viewportRevision += 1;
           for (const listener of this.viewportListeners) listener();
-          this.lodTelemetry?.viewportChanged(viewport.zoom);
           this.options.onViewportChange?.(this.controllerInstance?.viewport() ?? { x: 0, y: 0, zoom: 1 });
         },
         onFrame: () => {
-          overviewBridge.frame();
           for (const listener of this.frameListeners) listener();
         }
       })
     );
     controller.start();
     this.controllerInstance = controller;
+    this.syncWorldAnimation();
+    const unsubscribeWorldSelection = nodeSelectionStore.subscribe(() => this.syncWorldAnimation());
     // 帧窗口只在挂载后开：没有 DOM canvas 就没有帧，先开窗会让 fps 的分母包含等待时间
     // （change: 2026-10-25-enhance-telemetry-performance-collection，design D4）。
     this.frameWindow?.dispose();
     this.frameWindow = installPerfFrameWindow(() => runtime.getFrameCounters?.() ?? null);
-    // 片场总览 LOD 采样：只在画布挂载期间读渲染器已有的按根诊断，缩放停止/定时心跳各采一次
-    // （2026-10-28 片场总览 LOD 遥测采样）。
-    this.lodTelemetry?.dispose();
-    this.lodTelemetry = installOverviewLodTelemetry({
-      read: () => runtime.getWorkDiagnostics?.() ?? {},
-      // 场景只用来把 `high-owner` 细分为选中/聚焦/编辑/声明缺失；读不到不影响档位采样。
-      readScene: () => runtime.lastScene?.() ?? null,
-      isHidden: () => (globalThis.document?.visibilityState ?? "visible") === "hidden"
-    });
     const unsubscribe = this.options.subscribeModelScenes(() => {
       // prepared resource 就绪/替换不改变画布对象，但会改变内容身份与可准入性。
       this.modelContentVersion += 1;
@@ -812,12 +731,16 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     const unsubscribeRunState = this.options.subscribeRunState?.(() => controller.flush());
     const unsubscribeMediaContent = this.options.mediaContent?.subscribe(() => controller.invalidate("media-content"));
     // 规范画布变化（目标删除/失效）也触发一次重算（任务 3.4）。
-    const unsubscribeCanvas = woohaa3CanvasStore.subscribe(() => controller.invalidate("canvas-store"));
+    const unsubscribeCanvas = woohaa3CanvasStore.subscribe(() => {
+      this.syncWorldAnimation();
+      controller.invalidate("canvas-store");
+    });
     let attached = true;
     const teardown = () => {
       if (!attached) return;
       attached = false;
       unsubscribe();
+      unsubscribeWorldSelection();
       unsubscribeTheme?.();
       unsubscribeRunState?.();
       unsubscribeMediaContent?.();
@@ -826,17 +749,10 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       // 卸载即关闭窗口：残留的定时器会在没有画布时继续聚合，发出与用户所见无关的样本。
       this.frameWindow?.dispose();
       this.frameWindow = null;
-      this.lodTelemetry?.dispose();
-      this.lodTelemetry = null;
       controller.dispose();
       textureSync.dispose();
       videoSessions.dispose();
-      compositeAssetMediaSessions.dispose();
-      this.overviewCacheInstance?.dispose();
-      this.overviewCacheInstance = null;
-      overviewBridge.dispose();
       residency.dispose();
-      this.compositeAssetMediaSessionsInstance = null;
       this.residencyInstance = null;
       if (this.controllerInstance === controller) this.controllerInstance = null;
       this.sceneSubmitted();
@@ -844,6 +760,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       this.modelFocusTargetsOverride = null;
       this.modelEditor = null;
       this.animationPlaybackStore.set(null);
+      this.worldAnimation.dispose();
       this.imageFocusStore.set(null);
       this.imageFocusStore.setTargetId(null);
       this.videoFocusStore.set(null);
@@ -863,8 +780,6 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     this.detach?.();
     this.frameWindow?.dispose();
     this.frameWindow = null;
-    this.lodTelemetry?.dispose();
-    this.lodTelemetry = null;
     this.loadAbort.abort();
     this.runtimeInstance?.dispose();
     this.controllerInstance = null;

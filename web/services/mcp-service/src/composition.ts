@@ -71,6 +71,8 @@ export type McpServiceOptions = {
    */
   skillClient?: SkillStepClient;
   skillAvailability?: { available: boolean; reason?: string };
+  /** T11a host world-authority client; absent leaves scoped world tools unregistered. */
+  assistantWorld?: import("./agent-authoring/world-tools.js").AssistantWorldToolClient;
   enableModelMcp?: boolean;
   /**
    * MCP 工具授权校验（任务 3.6 / design D8）：请求携带 bearer 时校验工具允许集合/目标范围/预算。
@@ -138,6 +140,7 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
             ? {
                 agentAuthoring: {
                   client: agentClient,
+                  ...(options.assistantWorld ? { world: options.assistantWorld } : {}),
                   runAvailability: { available: true },
                   ...(options.skillClient ? { skillClient: options.skillClient } : {}),
                   ...(options.skillAvailability ? { skillAvailability: options.skillAvailability } : {}),

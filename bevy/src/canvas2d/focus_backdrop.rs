@@ -13,11 +13,19 @@ pub(crate) fn sync(
     flags: Res<FrameFlags>,
     mut sprites: Query<(Entity, &mut Sprite, &mut Transform), With<MediaBackdrop>>,
 ) {
-    if !flags.camera_changed && !(flags.scene_received || flags.positions_received || flags.surface_changed || flags.theme_changed) && !scene.is_changed() {
+    if !flags.camera_changed
+        && !(flags.scene_received
+            || flags.positions_received
+            || flags.surface_changed
+            || flags.theme_changed)
+        && !scene.is_changed()
+    {
         return;
     }
     let Some([x, y, width, height]) = backdrop_rect(&scene.0) else {
-        for (entity, _, _) in &sprites { commands.entity(entity).despawn(); }
+        for (entity, _, _) in &sprites {
+            commands.entity(entity).despawn();
+        }
         return;
     };
     let size = Vec2::new(width, height);

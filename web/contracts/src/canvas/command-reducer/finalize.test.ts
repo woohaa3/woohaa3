@@ -18,7 +18,7 @@ describe("committed state JSON comparison", () => {
     base.nodeData = { a: { title: "model", modelScript: "scene.box({});" } };
     const variants = [structuredClone(base)];
     for (const mutate of [
-      (c: ServerCanvas) => { c.document.nodes[0].position.x = 1; },
+      (c: ServerCanvas) => { c.document.nodes[0]!.position!.x = 1; },
       (c: ServerCanvas) => { c.document.nodes.reverse(); c.document.nodes.push({ id: "b", type: "text", position: { x: 0, y: 0 } }); },
       (c: ServerCanvas) => { c.title = "changed"; },
       (c: ServerCanvas) => { c.nodeData.a.title = "changed"; },

@@ -12,7 +12,6 @@ import type { Context, Plugin } from "@deepseek-ai/cordis";
 import type { BackgroundActivityJob, CanvasTaskActivity } from "@woohaa3/contracts";
 
 export type { Context, Plugin };
-export type { CanvasGroupRun, CanvasGroupRunsService, CanvasGroupRunsSnapshot } from "../cordis/contract/canvas-group-runs.js";
 export type { CanvasNavigationService } from "../cordis/navigation/contracts.js";
 export type { AppRouterService } from "../cordis/navigation/app-router.js";
 

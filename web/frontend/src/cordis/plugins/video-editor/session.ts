@@ -118,9 +118,12 @@ export class VideoFocusSession {
       if (!this.isCurrent(generation)) return;
       this.pumpFrame(generation);
     });
-    this.video.addEventListener("timeupdate", () => { if (this.isCurrent(generation)) this.emit(); });
-    this.video.addEventListener("play", () => { if (this.isCurrent(generation)) { this.scheduleFrames(generation); this.emit(); } });
-    this.video.addEventListener("pause", () => { if (this.isCurrent(generation)) { this.cancelFrameLoop(); this.emit(); } });
+    // 播放状态监听属于整个解码元素的会话寿命；历史/当前来源切换后仍需通知 UI。
+    // 只有取帧与来源加载回调按 generation 丢弃迟到结果。
+    this.video.addEventListener("timeupdate", () => { if (!this.disposed) this.emit(); });
+    this.video.addEventListener("play", () => { if (!this.disposed) { this.scheduleFrames(this.generation); this.emit(); } });
+    this.video.addEventListener("pause", () => { if (!this.disposed) { this.cancelFrameLoop(); this.emit(); } });
+    this.video.addEventListener("ended", () => { if (!this.disposed) { this.cancelFrameLoop(); this.emit(); } });
     this.video.addEventListener("error", () => {
       if (!this.isCurrent(generation)) return;
       this.loadError = "视频加载失败";
@@ -368,6 +371,7 @@ export class VideoFocusSession {
    * 的旧来源回调），因此历史视频同样在中央主画布显示。
    */
   setHistoryOverride(override: { url: string } | null): void {
+    if (!override && this.historyUrl === null) return;
     this.cancelTransition();
     this.generation += 1;
     this.cancelFrameLoop();

@@ -24,7 +24,7 @@ import { YJS_CANVAS_FORMAT_VERSION,
 type SerializedNode = {
   id: string;
   type: string;
-  position: { x: number; y: number };
+  position?: { x: number; y: number };
   width?: number;
   height?: number;
   parentId?: string;
@@ -230,7 +230,7 @@ function serializeNode(node: CanvasStructureNode): SerializedNode {
   const result: SerializedNode = {
     id: node.id,
     type: node.type,
-    position: { x: node.position.x, y: node.position.y }
+    ...(node.position ? { position: { x: node.position.x, y: node.position.y } } : {})
   };
   if (typeof node.width === "number") result.width = node.width;
   if (typeof node.height === "number") result.height = node.height;
@@ -253,7 +253,9 @@ function serializeEdge(edge: ServerCanvas["document"]["edges"][number]): Seriali
 function isSerializedNode(value: unknown): value is SerializedNode {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
-  return typeof record.id === "string" && typeof record.type === "string" && typeof record.position === "object";
+  return typeof record.id === "string"
+    && typeof record.type === "string"
+    && (record.position === undefined || typeof record.position === "object");
 }
 
 function isSerializedEdge(value: unknown): value is SerializedEdge {

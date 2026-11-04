@@ -16,16 +16,18 @@ use std::collections::HashMap;
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
 use crate::app::{CurrentScene, NodeIndex};
-use crate::canvas_ecs::components::{CanvasDepth, CanvasLabelRole, CanvasLayout, CanvasNodeId, NodeActionBar, NodeActionLayer};
+use crate::canvas_ecs::components::{
+    CanvasDepth, CanvasLabelRole, CanvasLayout, CanvasNodeId, NodeActionBar, NodeActionLayer,
+};
 use crate::protocol::{GraphNode, NodeActions};
 use crate::theme::ThemeResource;
 
 use super::geometry::Geometry;
 use super::labels::{Label, LabelRequests, LabelStyle};
 use super::layout::{
-    NODE_ACTION_TOOLBAR_ACTION_HEIGHT, NODE_ACTION_TOOLBAR_FONT,
+    NODE_ACTION_TOOLBAR_ACTION_HEIGHT, NODE_ACTION_TOOLBAR_ACTION_PAD, NODE_ACTION_TOOLBAR_FONT,
     NODE_ACTION_TOOLBAR_ICON_GAP, NODE_ACTION_TOOLBAR_ICON_SIZE, NODE_ACTION_TOOLBAR_PAD,
-    node_action_content_x, node_action_toolbar,
+    node_action_toolbar,
 };
 
 /// 横条容器圆角半径。
@@ -59,7 +61,11 @@ pub(crate) fn draw(
 
     let mut out = Vec::new();
     for (entity, node) in nodes {
-        // 容器（片场）与普通节点共用同一条动作横条；投影以 `action_bar_enabled` 决定是否绘制
+        // `chrome.none` 的世界对象没有卡片锚点，动作横条留在原生菜单中选择。
+        if node.chrome.is_none() {
+            continue;
+        }
+        // 容器（片场）与普通节点共用同一条动作横条；是否绘制由 `action_bar_visible` 决定
         // （只有声明 `actionBar` 的容器才带 NodeActionBar 组件）。
         let Some(actions) = node_actions.get(&node.id) else {
             continue;
@@ -68,10 +74,19 @@ pub(crate) fn draw(
             continue;
         };
 
-        let scale = layout.bar.3 / (NODE_ACTION_TOOLBAR_ACTION_HEIGHT + NODE_ACTION_TOOLBAR_PAD * 2.0);
+        let scale =
+            layout.bar.3 / (NODE_ACTION_TOOLBAR_ACTION_HEIGHT + NODE_ACTION_TOOLBAR_PAD * 2.0);
         let (bx, by, bw, bh) = layout.bar;
         geometry.rounded_rect(bx, by, bw, bh, BAR_RADIUS * scale, z, border);
-        geometry.rounded_rect(bx + scale, by + scale, (bw - 2.0 * scale).max(scale), (bh - 2.0 * scale).max(scale), (BAR_RADIUS - 1.0) * scale, z + 0.001, surface);
+        geometry.rounded_rect(
+            bx + scale,
+            by + scale,
+            (bw - 2.0 * scale).max(scale),
+            (bh - 2.0 * scale).max(scale),
+            (BAR_RADIUS - 1.0) * scale,
+            z + 0.001,
+            surface,
+        );
         // 横条文字是**固定屏幕字号**：`layout` 已是世界矩形（屏幕像素 ÷ zoom），因此文字在
         // 世界空间里的高度是 `NODE_ACTION_TOOLBAR_FONT / zoom`（下面的 `world_font` 只用于
         // 垂直居中），而 `Label.size` 传**屏幕逻辑字号**，由共享文字策略用实体尺度抵消相机
@@ -82,12 +97,20 @@ pub(crate) fn draw(
         let mut labels: Vec<Label> = Vec::new();
         for slot in &layout.slots {
             let (ax, ay, aw, ah) = slot.rect;
-            // 槽宽按屏幕像素排版（世界矩形 = 屏幕像素 ÷ zoom），内容在其中水平居中。
-            let content_x = node_action_content_x(aw / scale, &slot.label, slot.icon.is_some());
             let primary = slot.tone == "primary";
-            let tint = if !slot.enabled { body_text } else if primary { theme.token_u32("interactionOnAccent") } else { body_text };
+            let tint = if !slot.enabled {
+                body_text
+            } else if primary {
+                theme.token_u32("interactionOnAccent")
+            } else {
+                body_text
+            };
             if primary {
-                let fill = if slot.enabled { accent } else { theme.token_u32("interactionDisabled") };
+                let fill = if slot.enabled {
+                    accent
+                } else {
+                    theme.token_u32("interactionDisabled")
+                };
                 geometry.rounded_rect(ax, ay, aw, ah, ACTION_RADIUS * scale, z + 0.002, fill);
             }
             if let Some(icon) = slot.icon.as_deref().filter(|icon| {
@@ -104,12 +127,13 @@ pub(crate) fn draw(
                         | "expand-groups"
                 )
             }) {
-                // 纯图标按钮居中；图标 + 文字时整块内容按槽内富余居中，文字紧随图标。
+                // 纯图标按钮居中；图标 + 文字时图标贴左，文字紧随其后（与 contracts 同一栅格）。
                 let center = if slot.icon_only {
                     Vec2::new(ax + aw / 2.0, ay + ah / 2.0)
                 } else {
                     Vec2::new(
-                        ax + (content_x + NODE_ACTION_TOOLBAR_ICON_SIZE / 2.0) * scale,
+                        ax + (NODE_ACTION_TOOLBAR_ACTION_PAD + NODE_ACTION_TOOLBAR_ICON_SIZE / 2.0)
+                            * scale,
                         ay + ah / 2.0,
                     )
                 };
@@ -210,13 +234,13 @@ pub(crate) fn draw(
             }
             if !slot.icon_only {
                 let label_x = ax
-                    + (content_x
-                        + if slot.icon.is_some() {
-                            NODE_ACTION_TOOLBAR_ICON_SIZE + NODE_ACTION_TOOLBAR_ICON_GAP
-                        } else {
-                            0.0
-                        })
-                        * scale;
+                    + (if slot.icon.is_some() {
+                        NODE_ACTION_TOOLBAR_ACTION_PAD
+                            + NODE_ACTION_TOOLBAR_ICON_SIZE
+                            + NODE_ACTION_TOOLBAR_ICON_GAP
+                    } else {
+                        NODE_ACTION_TOOLBAR_ACTION_PAD
+                    }) * scale;
                 let text_y = ay + (ah - world_font) / 2.0 - scale;
                 labels.push((
                     slot.label.clone(),
@@ -227,18 +251,21 @@ pub(crate) fn draw(
             }
             if let Some((mx, my, mw, mh)) = slot.menu {
                 let center = Vec2::new(mx + mw / 2.0, my + mh / 2.0);
-                geometry.polygon(&[center + Vec2::new(-4.0, -1.5) * scale, center + Vec2::new(4.0, -1.5) * scale, center + Vec2::new(0.0, 3.0) * scale], z + 0.004, body_text);
+                geometry.polygon(
+                    &[
+                        center + Vec2::new(-4.0, -1.5) * scale,
+                        center + Vec2::new(4.0, -1.5) * scale,
+                        center + Vec2::new(0.0, 3.0) * scale,
+                    ],
+                    z + 0.004,
+                    body_text,
+                );
             }
         }
         // 模型名摘要：最右侧弱化文本。
         if let Some((text, (sx, sy, _sw, sh))) = &layout.summary {
             let text_y = sy + (sh - world_font) / 2.0 - scale;
-            labels.push((
-                text.clone(),
-                Vec2::new(*sx, text_y),
-                screen_font,
-                body_text,
-            ));
+            labels.push((text.clone(), Vec2::new(*sx, text_y), screen_font, body_text));
         }
         out.push((*entity, labels));
     }
@@ -259,7 +286,13 @@ pub(crate) fn sync_node_action_bars(
     materials: Res<super::CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
-    nodes: Query<(Entity, &CanvasNodeId, &CanvasLayout, &CanvasDepth, &NodeActionBar)>,
+    nodes: Query<(
+        Entity,
+        &CanvasNodeId,
+        &CanvasLayout,
+        &CanvasDepth,
+        &NodeActionBar,
+    )>,
     layers: Query<(Entity, Option<&Mesh2d>), With<NodeActionLayer>>,
 ) {
     requests.begin(CanvasLabelRole::NodeAction);
@@ -275,7 +308,10 @@ pub(crate) fn sync_node_action_bars(
         .iter()
         .filter_map(|(entity, id, _layout, _depth, _bar)| {
             let (_, source) = index.node(&scene.0, &id.0)?;
-            Some((entity, crate::canvas_query::focus_context::node(&scene.0, source).into_owned()))
+            Some((
+                entity,
+                crate::canvas_query::focus_context::node(&scene.0, source).into_owned(),
+            ))
         })
         .collect();
     let actions = nodes
@@ -296,7 +332,13 @@ pub(crate) fn sync_node_action_bars(
         clear_mesh(&mut commands, &mut meshes, &layers);
         return;
     }
-    replace_mesh(&mut commands, &mut meshes, &materials, &layers, geometry.build());
+    replace_mesh(
+        &mut commands,
+        &mut meshes,
+        &materials,
+        &layers,
+        geometry.build(),
+    );
     for (owner, labels) in drawn {
         requests.push(
             CanvasLabelRole::NodeAction,
@@ -327,7 +369,12 @@ fn replace_mesh(
             }
         }
         None => {
-            commands.spawn((NodeActionLayer, Mesh2d(handle), MeshMaterial2d(materials.blend.clone()), NoFrustumCulling));
+            commands.spawn((
+                NodeActionLayer,
+                Mesh2d(handle),
+                MeshMaterial2d(materials.blend.clone()),
+                NoFrustumCulling,
+            ));
         }
     }
 }
@@ -356,11 +403,11 @@ mod tests {
 
     fn node(id: &str, x: f32, y: f32) -> GraphNode {
         GraphNode {
+            chrome: crate::protocol::NodeChrome::Card,
+            shared_world_instance: None,
+            world_camera: None,
             model_preview: None,
-            aggregate_run: None,
             history_strip: None,
-            shot_preview: None,
-
             id: id.into(),
             kind: "image".into(),
             x,
@@ -378,9 +425,7 @@ mod tests {
             resizable: false,
             ghost: false,
             card_label: None,
-            group: None,
             model: None,
-            composite_asset: None,
         }
     }
 
@@ -517,7 +562,10 @@ mod tests {
                 (target.font_size * target.scale - NODE_ACTION_TOOLBAR_FONT / zoom).abs() <= 1.0e-3
             );
         }
-        assert!(keys.iter().all(|key| *key == keys[0]), "连续缩放不得产生新字号键：{keys:?}");
+        assert!(
+            keys.iter().all(|key| *key == keys[0]),
+            "连续缩放不得产生新字号键：{keys:?}"
+        );
     }
 
     #[test]
@@ -551,9 +599,14 @@ mod tests {
         let mesh = geometry.build();
         let positions = mesh
             .attribute(bevy::render::mesh::Mesh::ATTRIBUTE_POSITION)
-            .expect("positions").as_float3().expect("float3 positions");
+            .expect("positions")
+            .as_float3()
+            .expect("float3 positions");
         let min_y = positions.iter().map(|p| p[1]).fold(f32::MAX, f32::min);
         let max_y = positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
-        assert!(min_y >= -193.0 && max_y <= -151.0, "min={min_y} max={max_y}");
+        assert!(
+            min_y >= -193.0 && max_y <= -151.0,
+            "min={min_y} max={max_y}"
+        );
     }
 }

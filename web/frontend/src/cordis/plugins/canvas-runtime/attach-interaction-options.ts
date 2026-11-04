@@ -5,27 +5,24 @@
  * 只读取宿主回调，返回可由 `installInteractionController` 消费的 options。
  */
 import type { InteractionControllerOptions } from "../canvas-shell/interaction-controller.js";
-import type { CompositeAssetMediaSessions } from "./composite-asset-media-session.js";
 import type { VideoFrameSessions } from "./video-frame-session.js";
 import type { TextureUploader } from "./texture-sync.js";
 import type { ModelEditorGestureRefs } from "./model-editor-gestures.js";
 import type { CanvasRuntimeOptions } from "./canvas-runtime-options.js";
 import type { FocusTargetInput } from "../canvas-shell/model-focus-session.js";
+import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 
 export type AttachAssemblyDeps = {
   canvas: HTMLCanvasElement;
   options: CanvasRuntimeOptions;
   textureSync: TextureUploader;
   videoSessions: VideoFrameSessions;
-  compositeAssetMediaSessions: CompositeAssetMediaSessions;
   getRuntime: InteractionControllerOptions["getRuntime"];
   getModelResources: InteractionControllerOptions["getModelResources"];
   theme: InteractionControllerOptions["getTheme"];
   getGhostNodes: () => readonly import("@woohaa3/contracts").GhostRenderNode[];
   getNodeActionToolbars?: NonNullable<InteractionControllerOptions["getNodeActionToolbars"]>;
   onNodeAction?: NonNullable<InteractionControllerOptions["onNodeAction"]>;
-  getSelectionActionToolbar?: NonNullable<InteractionControllerOptions["getSelectionActionToolbar"]>;
-  onSelectionAction?: NonNullable<InteractionControllerOptions["onSelectionAction"]>;
   modelFocus: () => import("@woohaa3/contracts").ModelFocusProjection | null;
   modelFocusMode: InteractionControllerOptions["getModelFocusMode"];
   focusTargets: () => readonly FocusTargetInput[];
@@ -42,14 +39,10 @@ export type AttachAssemblyDeps = {
   modelEditor: () => import("@woohaa3/contracts").BevyModelEditor | null;
   onGizmoFeedback?: InteractionControllerOptions["onGizmoFeedback"];
   animationPlayback: () => import("@woohaa3/contracts").BevyAnimationPlayback | null;
+  worldAnimationTimes: () => ReadonlyMap<string, number>;
   focusTransition: () => import("@woohaa3/contracts").BevyFocusTransition | null;
   runState: () => import("../canvas-shell/interaction-types.js").RunStateProjectionInput | null;
   gestures: ModelEditorGestureRefs;
-  /**
-   * 拖动吸附策略读取器（内置插件 `alignment-guides` 注入）。
-   * 每次拖动预览都会调用；返回 null 表示完全不吸附。
-   */
-  alignmentSnap?: () => import("../canvas-shell/alignment-snap.js").AlignmentSnapPolicy | null;
   onModelFocusChange: NonNullable<InteractionControllerOptions["onModelFocusChange"]>;
   onViewportChange: (viewport: { x: number; y: number; zoom: number }) => void;
   onFrame?: () => void;
@@ -66,7 +59,6 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     nodeCapabilities: options.nodeCapabilities,
     onSceneSubmitted: deps.onSceneSubmitted,
     ...(options.mediaContent ? { mediaContent: options.mediaContent } : {}),
-    ...(options.compositeAssets ? { compositeAssets: options.compositeAssets } : {}),
     ...(options.canvasId ? { canvasId: options.canvasId } : {}),
     getRuntime: deps.getRuntime,
     getSession: () => options.getSession(),
@@ -76,19 +68,19 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     getTheme: deps.theme,
     textureSync: deps.textureSync,
     videoSessions: deps.videoSessions,
-    compositeAssetMediaSessions: deps.compositeAssetMediaSessions,
     ...(options.isModalActive ? { isModalActive: options.isModalActive } : {}),
     ...(options.isFocusInputBlocked ? { isFocusInputBlocked: options.isFocusInputBlocked } : {}),
     ...(options.onFindRequest ? { onFindRequest: options.onFindRequest } : {}),
     ...(options.onUndoRequest ? { onUndoRequest: options.onUndoRequest } : {}),
     ...(options.onRedoRequest ? { onRedoRequest: options.onRedoRequest } : {}),
     ...(options.onEditCommands ? { onEditCommands: options.onEditCommands } : {}),
+    ...(options.saveWorldCamera ? { saveWorldCamera: options.saveWorldCamera } : {}),
+    ...(options.moveWorldCameraCard ? { moveWorldCameraCard: options.moveWorldCameraCard } : {}),
+    ...(options.recordExternal ? { recordExternal: options.recordExternal } : {}),
     ...(options.onInteractionError ? { onInteractionError: options.onInteractionError } : {}),
     getGhostNodes: deps.getGhostNodes,
     ...(deps.getNodeActionToolbars ? { getNodeActionToolbars: deps.getNodeActionToolbars } : {}),
     ...(deps.onNodeAction ? { onNodeAction: deps.onNodeAction } : {}),
-    ...(deps.getSelectionActionToolbar ? { getSelectionActionToolbar: deps.getSelectionActionToolbar } : {}),
-    ...(deps.onSelectionAction ? { onSelectionAction: deps.onSelectionAction } : {}),
     getModelFocusTargets: deps.focusTargets,
     hasModelFocusTarget: deps.hasFocusTarget,
     getModelFocus: deps.modelFocus,
@@ -105,17 +97,13 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     getModelEditor: deps.modelEditor,
     onGizmoFeedback: deps.onGizmoFeedback,
     getAnimationPlayback: deps.animationPlayback,
+    getWorldAnimationTimes: deps.worldAnimationTimes,
     getFocusTransition: deps.focusTransition,
     getRunState: deps.runState,
     projectHistoryCanvas: options.projectHistoryCanvas,
     ...(deps.gestures.shot ? { shotGesture: deps.gestures.shot } : {}),
     ...(deps.gestures.focus ? { focusGesture: deps.gestures.focus } : {}),
     ...(deps.gestures.shotWheel ? { shotWheel: deps.gestures.shotWheel } : {}),
-    ...(deps.gestures.object ? { filmSetObjectGesture: deps.gestures.object } : {}),
-    // 片场对象局部键盘 action（Delete/Backspace/分层 Escape）随 controller 构造注入；
-    // 缺省会丢失已注册的 action，导致真实浏览器按键路由失效（change: 2026-10-10 任务 4.1/5.1）。
-    ...(deps.gestures.objectAction ? { filmSetObjectAction: deps.gestures.objectAction } : {}),
-    ...(deps.alignmentSnap ? { alignmentSnap: deps.alignmentSnap } : {}),
     onModelFocusChange: deps.onModelFocusChange,
     onViewportChange: deps.onViewportChange,
     ...(deps.onFrame ? { onFrame: deps.onFrame } : {}),
@@ -130,7 +118,15 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     onNodeHistory: (request) => options.emit("ui.node-history.open-requested", request as never),
     onNodeHistorySelect: (request) => options.emit("ui.node-history.switch-requested", request),
     onContextMenu: ({ screen, world, node }) => {
-      options.onMenuIntent?.({ screen, world, nodeId: node?.nodeId ?? null });
+      // 2D 组不是作品节点：右键直接走空白画布菜单（共用同一套菜单代码），
+      // 组成员卡片仍保持自己的节点菜单。
+      let nodeId = node?.nodeId ?? null;
+      if (nodeId) {
+        const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+        const type = canvas?.document.nodes.find((entry) => entry.id === nodeId)?.type;
+        if (type === "workflow-group-2d") nodeId = null;
+      }
+      options.onMenuIntent?.({ screen, world, nodeId });
     },
     onConnectToEmpty: ({ screen, world, sourceNodeId, sourceNodeType }) => {
       options.onMenuIntent?.({
@@ -141,7 +137,6 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
       });
     },
     ...(options.onModelFocusIntent ? { onModelFocusIntent: options.onModelFocusIntent } : {}),
-    ...(options.onShotPreviewEnterIntent ? { onShotPreviewEnterIntent: options.onShotPreviewEnterIntent } : {}),
     ...(options.onModelFocusInvalid ? { onModelFocusInvalid: options.onModelFocusInvalid } : {})
   };
 }

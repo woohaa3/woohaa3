@@ -18,7 +18,6 @@ export const PENDING_SPLIT: ReadonlySet<string> = new Set<string>([
   "bevy/src/model3d/quality.rs",
   "bevy/src/canvas_query/interaction/snapshot.rs",
   "bevy/src/canvas_query/layout.rs",
-  "bevy/src/canvas_query/scope.rs",
   "bevy/src/lib.rs",
   "bevy/src/model3d/runtime.rs",
   "bevy/src/model3d/runtime/quality.rs",
@@ -34,14 +33,12 @@ export const PENDING_SPLIT: ReadonlySet<string> = new Set<string>([
   // 扩展协议实现（1）：RunningHub 协议已从 vendor 迁回本扩展（747 行），待按 App/API 两条链路拆分。
   "web/extensions/runninghub-provider/src/provider/provider.ts",
   // 扩展自身（2）
-  "web/extensions/film-set/src/authoring/backend/film-set-conversion.ts",
   "web/extensions/tokenhub-provider/src/routes.ts",
   // 前端宿主（13）
   "web/frontend/src/cordis/contract/platform.ts",
   "web/frontend/src/cordis/page-scope.ts",
   "web/frontend/src/cordis/plugins/canvas-menu/plugin.ts",
   "web/frontend/src/cordis/plugins/canvas-runtime/bevy-runtime.ts",
-  "web/frontend/src/cordis/plugins/canvas-runtime/composite-asset-media-session.ts",
   "web/frontend/src/cordis/plugins/canvas-runtime/host.ts",
   "web/frontend/src/cordis/plugins/canvas-runtime/video-frame-session.ts",
   "web/frontend/src/cordis/plugins/canvas-shell/interaction-2d-input.ts",

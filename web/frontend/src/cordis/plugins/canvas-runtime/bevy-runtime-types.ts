@@ -29,8 +29,6 @@ export type BevyModule = {
   set_image_focus_details?: (manifest:string,pixels:Uint8Array)=>void;
   /** 上传片场媒体平面纹理（键为全局唯一 planeId；change: 2026-10-08-make-film-set-model-only）。 */
   set_model_media_texture?: (id: string, width: number, height: number, rgba: Uint8Array) => void;
-  overview_cache_snapshot?: () => string;
-  overview_cache_command?: (json: string) => void;
   rendered_revision: () => number;
   is_ready: () => boolean;
   /** 请求一次镜头截图（change: 2026-10-07-remove-residual-compatibility —— 直接 Shot Camera 边界）。 */
@@ -54,6 +52,13 @@ export type BevyModule = {
   request_history_thumbnail?: (json: string) => void;
   /** 轮询历史缩略图结果帧（布局与截图通道一致；无则空数组）。 */
   poll_history_thumbnail?: (requestId: number, generation: number) => Uint8Array;
+  /**
+   * 请求一次页面内共享世界镜头捕获：只给镜头身份、输出尺寸与稳定 identity，镜头姿态/投影
+   * 从当前 Scene 解析，世界内容直接用页面已渲染的实体（不含等距网格）。
+   */
+  request_world_capture?: (json: string) => void;
+  /** 轮询世界镜头捕获结果帧（布局与截图通道一致；无则空数组）。 */
+  poll_world_capture?: (requestId: number, generation: number) => Uint8Array;
   /** shot camera 运行时诊断快照 JSON（change: add-reusable-bevy-shot-camera）。 */
   shot_diagnostics?: () => string;
   /**
@@ -65,10 +70,6 @@ export type BevyModule = {
   query_probe: (json: string) => string;
   /** 普通正交画布模型 picking（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。 */
   query_model_pick?: (json: string) => string;
-  /** 片场对象 picking（change: 2026-10-09-add-film-set-object-motion-and-editing）。 */
-  query_composite_asset_item_pick?: (json: string) => string;
-  /** 片场对象世界包围盒（选中反馈/gizmo 定位）。 */
-  query_composite_asset_item_bounds?: (json: string) => string;
   /** 模型编辑 gizmo 命中与轴拖动约束（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。 */
   query_gizmo_hit?: (json: string) => string;
   /** 合并准备与注册（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。 */
@@ -102,8 +103,7 @@ export type BevyModule = {
   /** 视口能力版本字符串；loader 据非空/匹配校验能力（change: 同上）。 */
   viewport_capability?: () => string;
   /**
-   * 场景 wire 能力版本字符串；loader 据非空/匹配校验，旧 WASM 明确拒绝
-   * （change: 2026-10-15-add-film-set-overview-lod，design D1）。
+   * 场景 wire 能力版本字符串；loader 据非空/匹配校验，旧 WASM 明确拒绝。
    */
   scene_capability?: () => string;
   /**
@@ -111,8 +111,6 @@ export type BevyModule = {
    * 只接收坐标、generation 与来源排除列表，返回最上层实际节点 identity。
    */
   query_drop_target?: (json: string) => string;
-  /** 复合资产范围几何读取（拖动提示消费）。 */
-  query_composite_asset_scopes?: (json: string) => string;
   /** 实际工作计数快照（JSON）：世界索引 / pick 候选 / 静态 mesh 重建（change: 同上）。 */
   canvas_work_diagnostics?: () => string;
   /** Native-only background diagnostics; never used for acceptance/picking. */
@@ -126,16 +124,6 @@ export type BevyModule = {
 export type PointHit =
   | { kind: "model-preview"; nodeId: string }
   | { kind: "node"; nodeId: string }
-  /** 片场范围命中（纯模型片场，change: 2026-10-08-make-film-set-model-only）。 */
-  | { kind: "film-scope"; nodeId: string }
-  /**
-   * 拍摄镜头预览卡片**内容区**命中
-   * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D6）。
-   *
-   * 只有内容区建立拍摄播放资格；标题区、卡片边框、归属线与相机标记保持普通命中，不作为开播
-   * 入口。归属（filmSetNodeId/clipId）由宿主从当前画布权威 nodeData 读取。
-   */
-  | { kind: "shot-preview"; nodeId: string }
   | { kind: "history"; nodeId: string }
   | { kind: "port"; nodeId: string; side: "input" | "output" }
   | { kind: "resize"; nodeId: string; handle?: string }
@@ -147,32 +135,10 @@ export type PointHit =
    * 顶部操作横条动作命中（change: 2026-10-13-add-node-to-film-set-shortcut）。
    * 横条由 Bevy 绘制、Rust 命中；`menu` 为真表示命中该动作的独立设置箭头。
    */
-  | { kind: "node-action"; nodeId: string; actionId: string; menu: boolean }
-  /**
-   * 多选动作横条动作命中（change: 2026-10-16-add-group-selection-toolbar）。
-   * 锚定选区包围盒、无单一节点身份；`menu` 为真表示命中该项的独立设置箭头。
-   */
-  | { kind: "selection-action"; actionId: string; menu: boolean };
+  | { kind: "node-action"; nodeId: string; actionId: string; menu: boolean };
 
 /** probe 候选（稳定节点 identity 与连接能力）。 */
 export type ProbeCandidate = { nodeId: string; direction: "prev" | "next"; connectable: boolean };
-
-/**
- * 复合资产范围几何条目（与 Rust `ScopeGeometryEntry` serde 输出同构）
- * （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D5）。
- */
-export type CompositeAssetScopeGeometryEntry = {
-  nodeId: string;
-  /** `rect` / `isometric-diamond`。 */
-  shape: "rect" | "isometric-diamond";
-  /** 闭合多边形顶点 `[x, y]`（rect 为四角，地面矩形为 top/right/bottom/left）。 */
-  vertices: [[number, number], [number, number], [number, number], [number, number]];
-  /** 8 抓手中心 `[x, y]`：`n, ne, e, se, s, sw, w, nw`。 */
-  handles: [[number, number], [number, number], [number, number], [number, number], [number, number], [number, number], [number, number], [number, number]];
-  aabb: [number, number, number, number];
-  /** 内容适配基准矩形 `[x, y, width, height]`。 */
-  base: [number, number, number, number];
-};
 
 /** gizmo 轴拖动约束（与 Rust `AxisDragConstraint` 同构）。 */
 export type AxisDragConstraint = { axis: string; direction: [number, number]; worldPerPixel: number };
@@ -198,8 +164,6 @@ export type QueryResult<T> =
   | { ok: false; reason: QueryUnavailableReason };
 
 export type BevyRuntime = {
-  overviewCacheSnapshot?(): string;
-  overviewCacheCommand?(json: string): void;
   /** 性能读数读取的累计帧计数；render 完成表示调度完成，不表示 GPU 呈现确认。开发构建与桌面壳提供。 */
   getFrameCounters?(): {
     generation: number;
@@ -362,8 +326,7 @@ export type BevyRuntime = {
     direction: "prev" | "next";
   }): QueryResult<ProbeCandidate[]>;
   /**
-   * 通用 drop target 查询：按既有顺序固定最上层实际节点（排除来源），只返回 identity
-   * （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D5）。
+   * 通用 drop target 查询：按既有顺序固定最上层实际节点（排除来源），只返回 identity。
    * `ok:true` 且 `value=null` 表示查询成功但该点无节点；`ok:false` 时调用方 MUST NOT 回退
    * TS 矩形几何或提交移动。
    */
@@ -373,10 +336,6 @@ export type BevyRuntime = {
     y: number;
     excludedIds?: readonly string[];
   }): QueryResult<string | null>;
-  /** 复合资产范围几何读取（拖动提示消费；含 shape/四顶点/AABB/基准矩形）。 */
-  queryCompositeAssetScopes?(input: {
-    generation: number;
-  }): QueryResult<CompositeAssetScopeGeometryEntry[]>;
   /**
    * 普通正交画布模型 picking：返回最近 canonical 模型的 identity 与世界 bounds
    * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，设计 D5）。
@@ -388,24 +347,9 @@ export type BevyRuntime = {
     width: number;
     height: number;
   }): QueryResult<{ nodeId: string; target: [number, number, number]; radius: number } | null>;
-  /**
-   * 片场对象 picking：返回 `nodeId` 下最近的稳定 itemId
-   * （change: 2026-10-09-add-film-set-object-motion-and-editing）。
-   */
-  queryCompositeAssetItemPick?(input: {
-    nodeId: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    /** 聚焦透视相机投影（对象选择只在聚焦发生）。 */
-    projection: { target: [number, number, number]; yaw: number; pitch: number; distance: number };
-  }): QueryResult<{ nodeId: string; itemId: string } | null>;
-  /**
-   * 片场对象世界包围盒（选中反馈/gizmo 定位）
-   * （change: 2026-10-09-add-film-set-object-motion-and-editing）。
-   */
-  queryCompositeAssetItemBounds?(nodeId: string): Array<{ itemId: string; center: [number, number, number]; radius: number; unit: number; yaw: number; worldToLocal?: number[] }>;
+  queryWorldGround?(input: { generation: number; x: number; y: number; width: number; height: number }): QueryResult<{ u: number; v: number } | null>;
+  /** Hit the visible model surface through the accepted perspective editor lens. */
+  queryCameraEditorSurface?(input: { generation: number; x: number; y: number; width: number; height: number }): QueryResult<import("@woohaa3/contracts").WorldPoint | null>;
   /**
    * 模型编辑 gizmo 命中与轴拖动约束；返回稳定 handle 与（可选）屏幕轴约束
    * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 5.3/5.4）。
@@ -449,5 +393,20 @@ export type BevyRuntime = {
     width?: number;
     height?: number;
   }): Promise<import("./history-thumbnail-poll.js").HistoryThumbnailFrame | null>;
+  /**
+   * 请求一次共享世界镜头捕获并等待 RGBA 像素。
+   *
+   * 只传镜头身份、输出尺寸与稳定 identity；姿态/投影由当前 Scene 解析，世界内容直接用页面
+   * 已渲染实体。返回匹配 identity 的帧尺寸与 RGBA 字节，不支持/失败/超时返回 null。
+   *
+   * 与 `requestCapture` / `requestHistoryThumbnail` 共用 latest-wins 单一回读通道，调用方必须
+   * 通过共享捕获锁串行发送。
+   */
+  requestWorldCapture?(input: {
+    generation: number;
+    cameraId: string;
+    width: number;
+    height: number;
+  }): Promise<import("./world-capture-poll.js").WorldCaptureFrame | null>;
   dispose(): void;
 };

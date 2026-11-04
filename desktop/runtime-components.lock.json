@@ -16,9 +16,6 @@
     "dsh": {
       "version": "0.2.1-rc.2"
     },
-    "shot-recorder": {
-      "version": "source-build"
-    },
     "model-renderer": {
       "version": "source-build"
     }

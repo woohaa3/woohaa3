@@ -40,20 +40,15 @@ impl ShotCaptureRouting {
     /// 直到结果发布或失败，避免在 GPU ready/readback 前降档或回收（B1.6）。
     ///
     /// 同时覆盖仍在 bridge slot 中、尚未被 `route_capture_request` 取走的一帧窗口。
-    /// 卡片 rig 截图额外 pin **归属片场**：临时离屏相机渲染的是该片场在该层上的模型与媒体，
-    /// 片场若被降档/回收，成片就会缺内容（change: 2026-10-15，任务 8.4）。
-    pub(crate) fn pins(&self, scene: &crate::protocol::Scene) -> std::collections::HashSet<String> {
+    pub(crate) fn pins(&self, _scene: &crate::protocol::Scene) -> std::collections::HashSet<String> {
         let mut pins: std::collections::HashSet<String> = self
             .pending
             .iter()
             .map(|p| p.bridge.node_id.clone())
             .collect();
-        pins.extend(self.pending.iter().filter_map(|p| p.pin_owner.clone()));
         if let Some(node_id) = crate::bridge::queued_shot_capture_node() {
             pins.insert(node_id);
         }
-        // 首次请求尚未路由时也必须保留归属片场，否则屏外模型会先于 rig 创建被回收。
-        crate::shot_node_preview::pin_capture_owners(scene, &mut pins);
         pins
     }
 }
@@ -72,9 +67,6 @@ impl ShotCaptureRouting {
         };
         for pending in &self.pending {
             push(&pending.bridge.node_id, &pending.bridge.source);
-            if let Some(owner) = pending.pin_owner.as_deref() {
-                push(owner, &pending.bridge.source);
-            }
         }
         if let Some((node, source)) = crate::bridge::queued_shot_capture_details() {
             push(&node, &source);
@@ -87,8 +79,6 @@ impl ShotCaptureRouting {
 struct PendingShotCapture {
     shot_request_id: u64,
     bridge: ShotCaptureBridgeRequest,
-    /// 卡片 rig 截图时一并 pin 的归属片场节点 id。
-    pin_owner: Option<String>,
 }
 
 /// 路由 bridge 的截图请求到当前 rig 的 capture 队列。
@@ -104,7 +94,6 @@ struct PendingShotCapture {
 pub(crate) fn route_capture_request(
     mut routing: ResMut<ShotCaptureRouting>,
     adapter: Res<ShotAdapterState>,
-    preview_cards: Res<crate::shot_node_preview::ShotPreviewCards>,
     rigs: Query<&crate::shot_camera::ShotCameraDerived>,
     mut queue: ResMut<ShotCaptureQueue>,
     mut results: ResMut<ShotCaptureResults>,
@@ -125,35 +114,6 @@ pub(crate) fn route_capture_request(
             },
         });
     }
-    // Native 后台准备：目标片场仍处于 Pending（未发布完整表示）时，截图必须等待合法
-    // High Published 根与既有 GPU readiness，而不是把半场/灰底当成结果。请求留在 bridge
-    // slot 中由后续帧继续等待；本系统开头的排队超时兜底，前端轮询超时/中止时也会主动
-    // 调用 `cancel_shot_capture` —— 否则这一帧窗口（以及下面两处早退）会把归属片场
-    // 一直 pin 在 High。**不在**同步请求内强制创建或阻塞等后台任务。
-    if let Some(node) = bridge::queued_shot_capture_node() {
-        let owner = scene
-            .0
-            .nodes
-            .iter()
-            .find(|entry| entry.id == node)
-            .and_then(|entry| entry.shot_preview.as_ref())
-            .map(|preview| preview.film_set_node_id.as_str())
-            .unwrap_or(&node);
-        if capture_must_wait(&models, owner) {
-            return;
-        }
-        // Preview requests pin the owner at High even outside the viewport. Wait for that
-        // representation and its GPU readiness, rather than capturing the last LOD cover.
-        if owner != node
-            && (models.quality(owner) != super::quality::Quality::High
-                || preview_cards
-                    .cards
-                    .get(&node)
-                    .is_none_or(|card| !card.confirmed))
-        {
-            return;
-        }
-    }
     let Some(request) = bridge::take_shot_capture_request() else {
         return;
     };
@@ -170,17 +130,15 @@ pub(crate) fn route_capture_request(
     let adapter_rig = adapter
         .rig
         .filter(|_| adapter.node_id.as_deref() == Some(request.node_id.as_str()));
-    let preview_card = preview_cards.cards.get(&request.node_id);
     let Some(route) = crate::shot_camera::resolve_capture_route(
         &request.node_id,
         (adapter_rig, adapter.node_id.as_deref()),
-        preview_card.map(|card| card.rig),
+        None,
     ) else {
         fail("camera-gone");
         return;
     };
     let rig = route.rig();
-    let pin_owner = preview_card.map(|card| card.owner.clone());
     let Ok(derived) = rigs.get(rig) else {
         fail("camera-gone");
         return;
@@ -215,25 +173,10 @@ pub(crate) fn route_capture_request(
     routing.pending.push(PendingShotCapture {
         shot_request_id,
         bridge: bridge_request,
-        pin_owner,
     });
 }
 
-/// 目标片场仍在准备中时，截图必须等合法 High Published 根。
-///
-/// 纯判定（便于无 GPU 回归）：Pending 表示还没有可截的完整表示，不能把半场/灰底当成结果；
-/// 准备失败或取消会变回 Absent，此时按既有失败码结束，不会无限等待。
-fn capture_must_wait(models: &super::ModelVisuals, node: &str) -> bool {
-    models.preparation_state(node) == super::preparation::RootState::Pending
-}
 
-/// 供回归断言：捕获等待规则与准备状态严格绑定（Pending 才等待）。
-#[cfg(test)]
-pub(crate) fn preparation_gate_waits(models: &super::ModelVisuals, node: &str) -> bool {
-    capture_must_wait(models, node)
-}
-
-/// 把完成的 rig capture 结果写回 bridge；迟到结果只释放。
 pub(crate) fn publish_capture_results(
     mut routing: ResMut<ShotCaptureRouting>,
     mut results: ResMut<ShotCaptureResults>,
@@ -278,37 +221,3 @@ pub(crate) fn publish_capture_results(
 
 /// 截图不再改主画面：离屏回读不覆盖窗口画面。保留为空系统，作为渲染顺序的锚点。
 pub(crate) fn sync_capture_chrome() {}
-
-#[cfg(test)]
-mod preparation_gate_tests {
-    use super::*;
-
-    #[test]
-    fn capture_waits_only_while_the_root_is_pending() {
-        let mut visuals = super::super::ModelVisuals::default();
-        assert!(!capture_must_wait(&visuals, "film"));
-        let snapshot = std::sync::Arc::new(crate::protocol::ModelSnapshot::default());
-        let key = super::super::preparation::PrepareKey::new(
-            &snapshot,
-            super::super::quality::Quality::High,
-            true,
-            super::super::batch_strategy::BatchStrategy::Spatial,
-            true,
-        );
-        visuals.preparation.demand(
-            "film",
-            key,
-            snapshot,
-            super::super::preparation::Priority::Visible,
-        );
-        assert!(
-            capture_must_wait(&visuals, "film"),
-            "准备中不得把半场当结果"
-        );
-        visuals.preparation.cancel("film");
-        assert!(
-            !capture_must_wait(&visuals, "film"),
-            "失败/取消后必须明确结束等待"
-        );
-    }
-}

@@ -11,6 +11,10 @@ import type { SkillStepClient } from "../downstream/skill-step-client.js";
 /** 工具面依赖的能力：只有下游 client。 */
 export type AgentAuthoringToolDeps = {
   client: AgentCanvasClient;
+  /** Per-request host grant, resolved by the MCP transport; never model-supplied. */
+  grant?: import("@woohaa3/contracts").ApplicationToolGrant | null;
+  /** Host world-authority client used by scoped world tools. */
+  world?: import("./world-tools.js").AssistantWorldToolClient;
   runAvailability?: { available: boolean; reason?: string } & (
     | { available: true }
     | { available: false }

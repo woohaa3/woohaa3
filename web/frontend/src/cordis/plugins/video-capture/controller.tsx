@@ -183,8 +183,8 @@ export function createVideoDialogsController(deps: VideoDialogsControllerDeps): 
       return resolved.ok ? { ok: true } : { ok: false, reason: resolved.reason };
     },
 
-    openEdit({ canvas, nodeId, intentId }) {
-      const resolved = resolveCanonicalReadyVideo(canvas, nodeId);
+    openEdit({ canvas, nodeId, intentId, ownOutput }) {
+      const resolved = ownOutput ? resolveOwnReadyVideo(canvas, nodeId) : resolveCanonicalReadyVideo(canvas, nodeId);
       if (!resolved.ok) return;
       const payload: VideoDialogPayload = {
         ...toPayload(resolved, nodeId),

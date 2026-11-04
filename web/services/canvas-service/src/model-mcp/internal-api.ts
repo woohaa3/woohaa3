@@ -14,22 +14,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   decodeMcpApplyCommandsRequest,
-  decodeMcpAddFilmSetMediaRequest,
-  decodeMcpCommitAnimationRequest,
-  decodeMcpConfirmAdaptationRequest,
-  decodeMcpCreateFilmSetNodeRequest,
-  decodeMcpExportFilmSetClipRequest,
-  decodeMcpGetFilmSetExportRequest,
   decodeMcpGetNodeRequest,
   decodeMcpGetModelNodesRequest,
-  decodeMcpImportFilmSetContentRequest,
-  decodeMcpImportModelSnapshotRequest,
   decodeMcpListNodesRequest,
   decodeMcpModelScriptBatchRequest,
   decodeMcpModelStatisticsRequest,
   decodeMcpMutateCamerasBatchRequest,
   decodeMcpMutateCamerasRequest,
-  decodeMcpMutateFilmSetItemRequest,
   decodeMcpRenderPreviewRequest,
   decodeMcpReportScriptRequest,
   decodeMcpSubmitScriptRequest,
@@ -66,42 +57,6 @@ import type {
   ModelScriptBatchRequest
 } from "@woohaa3/contracts";
 import type { ModelBatchContext } from "./batch-service.js";
-import type {
-  McpAddFilmSetMediaOutcome,
-  McpAddFilmSetMediaRequest,
-  McpCommitAnimationRequest,
-  McpConfirmAdaptationRequest,
-  McpCreateFilmSetNodeRequest,
-  McpExportFilmSetClipOutcome,
-  McpExportFilmSetClipRequest,
-  McpGetFilmSetExportOutcome,
-  McpGetFilmSetExportRequest,
-  McpImportModelSnapshotRequest,
-  McpImportFilmSetContentRequest,
-  McpMutateFilmSetItemRequest
-} from "@woohaa3/contracts";
-import type { FilmSetNodeOutcome, MutateFilmSetItemOutcome } from "@woohaa3/contracts";
-
-export type CreateFilmSetNodeOutcome =
-  | { ok: true; canvasId: string; nodeId: string; commandId: string; duplicate: boolean; noop: boolean }
-  | { ok: false; code: string; message: string };
-
-/** 片场内容导入结果（change: 2026-10-08-make-film-set-model-only，任务 2.3）。 */
-export type ImportFilmSetContentOutcome =
-  | {
-      ok: true;
-      canvasId: string;
-      nodeId: string;
-      commandId: string;
-      duplicate: boolean;
-      noop: boolean;
-      contentHash: string;
-      itemCount: number;
-    }
-  | { ok: false; code: string; message: string };
-
-export type { MutateFilmSetItemOutcome };
-
 /** handler 只依赖这份能力；`ModelMcpService` 结构上满足它。 */
 export type ModelMcpInternalService = {
   listModelNodes: (input: { canvasId?: string }) => Promise<ListModelNodesOutcome>;
@@ -127,23 +82,6 @@ export type ModelMcpInternalService = {
   validateScripts?: (input: ModelScriptBatchRequest, context: ModelBatchContext) => Promise<ModelScriptBatchOutcome>;
   /** 模型脚本批量校验并提交（model-script-batch）；省略时相应路由返回 503。 */
   submitScripts?: (input: ModelScriptBatchRequest, context: ModelBatchContext) => Promise<ModelScriptBatchOutcome>;
-  /** 创建动画节点（复制模型快照）；省略时相应路由返回 503。 */
-  createFilmSetNode?: (input: McpCreateFilmSetNodeRequest & { canvasId: string }) => Promise<CreateFilmSetNodeOutcome>;
-  /** 导入模型快照（保留运动与旧适配版本）；省略时相应路由返回 503。 */
-  importModelSnapshot?: (input: McpImportModelSnapshotRequest & { canvasId: string }) => Promise<CreateFilmSetNodeOutcome>;
-  /** 复制导入片场内容；省略时相应路由返回 503。 */
-  importFilmSetContent?: (input: McpImportFilmSetContentRequest & { canvasId: string }) => Promise<ImportFilmSetContentOutcome>;
-  /** 完整动画定义提交；省略时 commitAnimation 路由返回 503。 */
-  commitAnimation?: (input: McpCommitAnimationRequest & { canvasId: string; nodeId: string; requestId: string }) => Promise<FilmSetNodeOutcome>;
-  /** 确认运动适配当前模型版本；省略时 confirmAdaptation 路由返回 503。 */
-  confirmAdaptation?: (input: McpConfirmAdaptationRequest & { canvasId: string; nodeId: string; requestId: string }) => Promise<FilmSetNodeOutcome>;
-  /** 片场对象级权威变更；省略时相应路由返回 503。 */
-  mutateFilmSetItem?: (input: McpMutateFilmSetItemRequest & { canvasId: string }) => Promise<MutateFilmSetItemOutcome>;
-  /** 片场媒体条目受控导入（D5）；省略时对应路由 503。 */
-  addFilmSetMedia?: (input: McpAddFilmSetMediaRequest & { canvasId: string }) => Promise<McpAddFilmSetMediaOutcome>;
-  /** agent 发起显式导出（D8）；省略时对应路由 503（`recording-unavailable` 语义）。 */
-  exportFilmSetClip?: (input: McpExportFilmSetClipRequest & { canvasId: string }) => Promise<McpExportFilmSetClipOutcome>;
-  getFilmSetExport?: (input: McpGetFilmSetExportRequest & { canvasId: string }) => Promise<McpGetFilmSetExportOutcome>;
 };
 
 export type ModelMcpInternalHandlerOptions = {
@@ -182,15 +120,6 @@ export function createModelMcpInternalHandler(
       && pathname !== MCP_INTERNAL_PATHS.getModelNodes
       && pathname !== MCP_INTERNAL_PATHS.validateModelScripts
       && pathname !== MCP_INTERNAL_PATHS.submitModelScripts
-      && pathname !== MCP_INTERNAL_PATHS.createFilmSetNode
-      && pathname !== MCP_INTERNAL_PATHS.commitAnimation
-      && pathname !== MCP_INTERNAL_PATHS.confirmAdaptation
-      && pathname !== MCP_INTERNAL_PATHS.importModelSnapshot
-      && pathname !== MCP_INTERNAL_PATHS.importFilmSetContent
-      && pathname !== MCP_INTERNAL_PATHS.mutateFilmSetItem
-      && pathname !== MCP_INTERNAL_PATHS.addFilmSetMedia
-      && pathname !== MCP_INTERNAL_PATHS.exportFilmSetClip
-      && pathname !== MCP_INTERNAL_PATHS.getFilmSetExport
       && pathname !== MCP_INTERNAL_PATHS.modelStatistics) {
       sendJson(res, 404, { error: "not-found" });
       return true;
@@ -239,7 +168,6 @@ export function createModelMcpInternalHandler(
       const outcome = await options.service.getModelNode({
         canvasId: decoded.value.canvasId,
         nodeId: decoded.value.nodeId,
-        ...(decoded.value.resource ? { resource: decoded.value.resource } : {}),
         ...(decoded.value.includeStatistics === true ? { includeStatistics: true } : {})
       });
       return sendOutcome(res, outcome, log);
@@ -266,7 +194,7 @@ export function createModelMcpInternalHandler(
         nodeId: decoded.value.nodeId,
         source: decoded.value.source,
         requestId: decoded.value.requestId ?? "",
-        ...(decoded.value.resource ? { resource: decoded.value.resource, expectedContentHash: decoded.value.expectedContentHash } : {}),
+        ...(decoded.value.expectedContentHash !== undefined ? { expectedContentHash: decoded.value.expectedContentHash } : {}),
         ...(decoded.value.version ? { version: decoded.value.version as SupportedModelScriptVersion } : {}),
         ...(decoded.value.expectedModelContentHash === undefined
           ? {}
@@ -299,8 +227,7 @@ export function createModelMcpInternalHandler(
         ...(decoded.value.height !== undefined ? { height: decoded.value.height } : {}),
         ...(decoded.value.background !== undefined ? { background: decoded.value.background } : {}),
         ...(decoded.value.cameraPreset !== undefined ? { cameraPreset: decoded.value.cameraPreset } : {}),
-        ...(decoded.value.timeSeconds !== undefined ? { timeSeconds: decoded.value.timeSeconds } : {}),
-        ...(decoded.value.clipId ? { clipId: decoded.value.clipId } : {})
+        ...(decoded.value.timeSeconds !== undefined ? { timeSeconds: decoded.value.timeSeconds } : {})
       });
       return sendOutcome(res, outcome, log);
     }
@@ -351,112 +278,6 @@ export function createModelMcpInternalHandler(
         requestId: decoded.value.requestId,
         mutations: decoded.value.mutations
       });
-      return sendOutcome(res, outcome, log);
-    }
-
-    // 创建动画节点（复制模型快照）
-    if (pathname === MCP_INTERNAL_PATHS.createFilmSetNode) {
-      const decoded = decodeMcpCreateFilmSetNodeRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.createFilmSetNode) return unavailable(res, "片场能力当前不可用");
-      const outcome = await options.service.createFilmSetNode({
-        ...decoded.value,
-        canvasId: decoded.value.canvasId,
-        position: decoded.value.position ?? { x: 0, y: 0 }
-      });
-      return sendOutcome(res, outcome, log);
-    }
-
-    // 完整动画定义提交（模型 + 运动 + 初始镜头 + 时间线）
-    if (pathname === MCP_INTERNAL_PATHS.commitAnimation) {
-      const decoded = decodeMcpCommitAnimationRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.commitAnimation) return unavailable(res, "片场能力当前不可用");
-      const outcome = await options.service.commitAnimation({
-        ...decoded.value,
-        canvasId: decoded.value.canvasId,
-        nodeId: decoded.value.nodeId,
-        requestId: decoded.value.requestId
-      });
-      return sendOutcome(res, outcome, log);
-    }
-
-    // 确认运动适配当前模型版本
-    if (pathname === MCP_INTERNAL_PATHS.confirmAdaptation) {
-      const decoded = decodeMcpConfirmAdaptationRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.confirmAdaptation) return unavailable(res, "片场能力当前不可用");
-      const outcome = await options.service.confirmAdaptation({
-        ...decoded.value,
-        canvasId: decoded.value.canvasId,
-        nodeId: decoded.value.nodeId,
-        requestId: decoded.value.requestId
-      });
-      return sendOutcome(res, outcome, log);
-    }
-
-    // 导入模型快照（保留运动与旧适配版本）
-    if (pathname === MCP_INTERNAL_PATHS.importModelSnapshot) {
-      const decoded = decodeMcpImportModelSnapshotRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.importModelSnapshot) return unavailable(res, "片场能力当前不可用");
-      const outcome = await options.service.importModelSnapshot({
-        ...decoded.value,
-        canvasId: decoded.value.canvasId
-      });
-      return sendOutcome(res, outcome, log);
-    }
-
-    // 复制导入片场内容（change: 2026-10-08-make-film-set-model-only）
-    if (pathname === MCP_INTERNAL_PATHS.importFilmSetContent) {
-      const decoded = decodeMcpImportFilmSetContentRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.importFilmSetContent) return unavailable(res, "片场导入能力当前不可用");
-      const outcome = await options.service.importFilmSetContent({
-        ...decoded.value,
-        canvasId: decoded.value.canvasId
-      });
-      return sendOutcome(res, outcome, log);
-    }
-
-    // 片场对象级权威变更（change: 2026-10-09-add-film-set-object-motion-and-editing）
-    if (pathname === MCP_INTERNAL_PATHS.mutateFilmSetItem) {
-      const decoded = decodeMcpMutateFilmSetItemRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.mutateFilmSetItem) return unavailable(res, "片场对象能力当前不可用");
-      const outcome = await options.service.mutateFilmSetItem({
-        ...decoded.value,
-        canvasId: decoded.value.canvasId
-      });
-      return sendOutcome(res, outcome, log);
-    }
-
-    // 片场媒体条目受控导入（change: 2026-10-19-extend-film-set-for-motion-graphics，D5）
-    if (pathname === MCP_INTERNAL_PATHS.addFilmSetMedia) {
-      const decoded = decodeMcpAddFilmSetMediaRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.addFilmSetMedia) return unavailable(res, "片场媒体导入能力当前不可用");
-      const outcome = await options.service.addFilmSetMedia({ ...decoded.value, canvasId: decoded.value.canvasId });
-      return sendOutcome(res, outcome, log);
-    }
-
-    // agent 发起显式导出与查询（D8）
-    if (pathname === MCP_INTERNAL_PATHS.exportFilmSetClip) {
-      const decoded = decodeMcpExportFilmSetClipRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.exportFilmSetClip) {
-        return unavailable(res, "当前宿主未提供原生录制能力，无法经 MCP 导出");
-      }
-      const outcome = await options.service.exportFilmSetClip({ ...decoded.value, canvasId: decoded.value.canvasId });
-      return sendOutcome(res, outcome, log);
-    }
-    if (pathname === MCP_INTERNAL_PATHS.getFilmSetExport) {
-      const decoded = decodeMcpGetFilmSetExportRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.getFilmSetExport) {
-        return unavailable(res, "当前宿主未提供原生录制能力，无法查询导出任务");
-      }
-      const outcome = await options.service.getFilmSetExport({ ...decoded.value, canvasId: decoded.value.canvasId });
       return sendOutcome(res, outcome, log);
     }
 

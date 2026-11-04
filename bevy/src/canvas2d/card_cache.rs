@@ -27,6 +27,8 @@ struct HistoryKey {
 struct DrawKey {
     id: String,
     kind: String,
+    /// 0 card / 1 frame / 2 none；外壳变化必须重建几何分块。
+    chrome: u8,
     visual: crate::canvas_ecs::components::CardGeometryInput,
     /// 节点下方历史条呈现（change: 2026-10-12-unify-generation-history-strip）：
     /// `Some` 表示该普通节点应绘制历史条（含空圆点时仍画条与图标）；
@@ -34,9 +36,6 @@ struct DrawKey {
     history: Option<HistoryKey>,
     /// 该节点是拖动粘连 owner 时让位历史条（下方已被操作条占用）。
     hide_history: bool,
-    /// 拍摄镜头预览卡片呈现（change: 2026-10-15-add-film-set-shooting-shot-previews）：
-    /// 状态/类型/播放进度变化即时重建内容面与进度条（只读投影，不进入 canonical）。
-    shot_preview: Option<crate::protocol::ShotPreviewPresentation>,
 }
 impl DrawKey {
     fn history(node: &GraphNode) -> Option<HistoryKey> {
@@ -60,10 +59,14 @@ impl DrawKey {
         Self {
             id: node.id.clone(),
             kind: node.kind.clone(),
+            chrome: match &node.chrome {
+                crate::protocol::NodeChrome::Card => 0,
+                crate::protocol::NodeChrome::Frame { .. } => 1,
+                crate::protocol::NodeChrome::None => 2,
+            },
             visual: CardVisual::from_node(node).geometry,
             history: Self::history(node),
             hide_history: attach_owner == Some(node.id.as_str()),
-            shot_preview: node.shot_preview.clone(),
         }
     }
 }
@@ -87,8 +90,8 @@ pub(crate) struct CardBlockCache {
     pub(super) blocks: Vec<Block>,
     pub(super) initialized: bool,
 }
-fn ordinary(node: &GraphNode) -> bool {
-    node.group.is_none() && node.composite_asset.is_none()
+fn ordinary(_node: &GraphNode) -> bool {
+    true
 }
 
 impl Block {

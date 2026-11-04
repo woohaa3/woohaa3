@@ -7,15 +7,6 @@
 import type { CanvasRoom } from "../sync/index.js";
 import type { CanvasNodeData, ModelContentVersion } from "@woohaa3/contracts";
 import {
-  canonicalFilmSetFields,
-  readFilmSetGroupMarker,
-  readFilmSetAnimationProjection,
-  MODEL_CAMERA_ASPECTS,
-  type ModelCameraAspect,
-  readGroupAppearanceForNode,
-  animationSnapshotHash,
-  filmSetAnimationsOf,
-  decodeFilmSetNodeData,
   decodeModelContentVersion,
   decodeModelPlacement,
   isModelAuthoringNodeType,
@@ -26,41 +17,9 @@ import {
 } from "@woohaa3/contracts";
 import type { GetModelNodeInput, GetModelNodeOutcome, ListModelNodesOutcome, ModelNodeSummary } from "./service-types.js";
 
-/** The scene camera remains addressable even when a legacy saved-camera collection exists. */
-export function readAuthoringCameras(data: CanvasNodeData | undefined, nodeType: string) {
-  const marker = nodeType === "group" ? readFilmSetGroupMarker(data) : null;
-  if (marker) return (marker.cameras ?? []).map((camera, order) => ({ ...camera, name: camera.name ?? camera.id, order,
-    aspect: (MODEL_CAMERA_ASPECTS as readonly string[]).includes(camera.aspect ?? "") ? camera.aspect as ModelCameraAspect : "16:9" as const }));
-  const saved = readModelCameras(data);
-  const scene = nodeType === "composite-asset" ? decodeFilmSetNodeData(data) : null;
-  return scene?.ok ? [{ ...scene.value.sceneCamera, id: "scene-camera", name: "Scene camera", order: 0,
-    elevation: scene.value.sceneCamera.elevation ?? 0, aspect: scene.value.sceneCamera.aspect ?? "16:9" },
-    ...saved.filter(camera => camera.id !== "scene-camera")] : saved;
-}
-
-/** 读取片场节点的完整 items-only 定义与默认片段运行时视图。 */
-export function readAnimationDefinition(
-  data: CanvasNodeData | undefined
-): NonNullable<Extract<GetModelNodeOutcome, { ok: true }>["animation"]> | undefined {
-  const decoded = decodeFilmSetNodeData(data);
-  if (!decoded.ok) return undefined;
-  const animation = decoded.value;
-  return {
-    title: animation.title,
-    sceneCamera: animation.sceneCamera,
-    ...(animation.origin ? { origin: animation.origin } : {}),
-    scenePlacement: animation.scenePlacement,
-    filmSetContent: animation.filmSetContent,
-    filmSetAnimations: filmSetAnimationsOf(animation),
-    initialCamera: {
-      azimuth: animation.camera.azimuth,
-      elevation: animation.camera.elevation,
-      distance: animation.camera.distance,
-      aspect: animation.camera.aspect,
-      focusOffset: animation.camera.focusOffset
-    },
-    timeline: animation.timeline
-  };
+/** 节点当前可用的规范镜头集合。 */
+export function readAuthoringCameras(data: CanvasNodeData | undefined) {
+  return readModelCameras(data);
 }
 
 /** 校验并读取本节点模型内容版本；缺失或非法时返回 null。 */
@@ -87,7 +46,7 @@ export async function getModelNode(
   if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${canvasId} 不存在` };
   const exported = room.exportCanvas();
   if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
-  const projected = projectModelNode(exported.canvas, nodeId, input.resource);
+  const projected = projectModelNode(exported.canvas, nodeId);
   if (!projected.ok || input.includeStatistics !== true || !statistics) return projected;
   if (projected.source.trim() === "") return projected;
   // 统计失败不把读取整体降级：节点内容仍可读，只是没有可引用的数字。
@@ -101,31 +60,18 @@ export async function getModelNode(
 }
 
 /** Pure projection shared by single and batch reads of one authority snapshot. */
-export function projectModelNode(canvas: import("@woohaa3/contracts").ServerCanvas, nodeId: string, resource?: "group-appearance"): GetModelNodeOutcome {
+export function projectModelNode(canvas: import("@woohaa3/contracts").ServerCanvas, nodeId: string): GetModelNodeOutcome {
   const canvasId = canvas.id;
   const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
   if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
-  if (resource === "group-appearance") {
-    const data = canvas.nodeData[nodeId];
-    if (node.type !== "group") return { ok: false, code: "invalid-node-type", message: "该节点没有组形象" };
-    const appearance = readGroupAppearanceForNode(data);
-    const model = appearance.value.model;
-    return { ok: true, canvasId, nodeId, nodeType: node.type, resource, appearanceSource: appearance.source,
-      ...(appearance.diagnostic ? { diagnostic: appearance.diagnostic } : {}), contentHash: model.contentVersion.contentHash,
-      modelContentVersion: model.contentVersion, placement: model.placement, title: String(data?.title ?? "组形象"),
-      prompt: "", source: model.modelScript, language: model.modelScriptLanguage, version: model.modelScriptVersion, references: [], cameras: [] };
-  }
-  if (!isModelAuthoringNodeType(node.type) && !(node.type === "group" && readFilmSetGroupMarker(canvas.nodeData[nodeId]))) {
-    return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是模型节点，组形象必须显式指定 resource` };
+  if (!isModelAuthoringNodeType(node.type)) {
+    return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是模型节点` };
   }
 
   const data = canvas.nodeData[nodeId] as CanvasNodeData | undefined;
   const references = resolveModelReferenceInputs(canvas, nodeId).references;
-  const projected = readFilmSetAnimationProjection(canvas, nodeId);
-  const animation = projected ? readAnimationDefinition(canonicalFilmSetFields(projected) as CanvasNodeData) : undefined;
   const modelContentVersion = readModelContentVersion(data?.modelContentVersion);
   const placement = decodeModelPlacement(data?.modelPlacement);
-  const decodedAnimation = projected ? { ok: true as const, value: projected } : null;
   return {
     ok: true,
     canvasId,
@@ -133,7 +79,6 @@ export function projectModelNode(canvas: import("@woohaa3/contracts").ServerCanv
     nodeType: node.type,
     ...(modelContentVersion ? { modelContentVersion } : {}),
     ...(placement ? { placement } : {}),
-    ...(decodedAnimation?.ok ? { snapshotHash: animationSnapshotHash(decodedAnimation.value) } : {}),
     title: typeof data?.title === "string" ? data.title : "模型",
     prompt: typeof data?.prompt === "string"
       ? data.prompt
@@ -148,8 +93,7 @@ export function projectModelNode(canvas: import("@woohaa3/contracts").ServerCanv
     ...(data?.modelScriptStatus ? { status: data.modelScriptStatus } : {}),
     ...(data?.modelScriptError !== undefined ? { error: data.modelScriptError } : {}),
     references,
-    cameras: readAuthoringCameras(data, node.type),
-    ...(animation ? { animation } : {})
+    cameras: readAuthoringCameras(data)
   };
 }
 
@@ -169,7 +113,7 @@ export async function listModelNodes(
 
   const nodes: ModelNodeSummary[] = [];
   for (const node of exported.canvas.document.nodes) {
-    if (!isModelAuthoringNodeType(node.type) && !(node.type === "group" && readFilmSetGroupMarker(exported.canvas.nodeData[node.id]))) continue;
+    if (!isModelAuthoringNodeType(node.type)) continue;
     const data = exported.canvas.nodeData[node.id] as CanvasNodeData | undefined;
     const hasScript = typeof data?.modelScript === "string" && data.modelScript !== "";
     const isFileModel = isGlbModelNodeData(data);
@@ -188,7 +132,7 @@ export async function listModelNodes(
       ...(isFileModel ? { sourceKind: "glb" as const } : {}),
       ...(status ? { status } : {}),
       pending: isFileModel ? status === "failed" : (!hasScript || status === "failed"),
-      cameraCount: readAuthoringCameras(data, node.type).length
+      cameraCount: readAuthoringCameras(data).length
     });
   }
   return { ok: true, canvasId, nodes };

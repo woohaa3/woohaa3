@@ -12,6 +12,7 @@ import type { AgentConversationService } from "../../contract/agent-conversation
 import { providerConfigGroups } from "../settings/plugin-groups.js";
 import { PluginIconMark } from "../settings/plugin-icons.js";
 import { CapabilityOverview, type CapabilityPage } from "./capability-pages.js";
+import type { ActiveCapability } from "./capability-directory.js";
 import { useServiceDirectory, serviceSourceState } from "./service-directory.js";
 import "./style.css";
 
@@ -42,6 +43,9 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
   const History = historyContributions[0]?.render;
   const userNavigated = useRef(false);
   const [addRequest, requestAdd] = useState(0);
+  const [addCapability, setAddCapability] = useState<ActiveCapability | undefined>();
+  const [sourceRequest, setSourceRequest] = useState<{ id: string } | null>(null);
+  const [overviewRevision, resetOverview] = useState(0);
   const [connections, setConnections] = useState<AgentConnectionView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +55,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
   const navigate = (next: CapabilityPage) => {
     userNavigated.current = true;
     setPage(next);
+    if (next === "overview") resetOverview(value => value + 1);
     if (next === "generation-history") setHistoryVisited(true);
     if (next === "sources") setServicesVisited(true);
     if (next === "agents") setLocalVisited(true);
@@ -84,7 +89,8 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
     globalThis.dispatchEvent(new CustomEvent("woohaa3-agent-assistant-selection", { detail: { canvasId: payload.canvasId, nodeId: payload.nodeId, connectionId: connection.connectionId } }));
     onClose();
   };
-  const add = () => { navigate("sources"); requestAdd(value => value + 1); };
+  const add = (capability?: ActiveCapability) => { setAddCapability(capability); navigate("sources"); requestAdd(value => value + 1); };
+  const openSource = (id: string) => { setSourceRequest({ id }); navigate("sources"); };
   const localConnections = connections.filter(isLocalConnection);
   const sourceConnections = connections.filter(connection => !isLocalConnection(connection));
   const sources = directoryState.directory?.connections ?? [];
@@ -93,8 +99,8 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
   const navigation: { id: CapabilityPage; label: string; count?: number }[] = [
     { id: "overview", label: "能力总览" },
     { id: "agents", label: "本地 Agent", count: localConnections.length },
-    { id: "mcp", label: "MCP 服务", count: mcp?.configured },
     { id: "sources", label: "模型提供商", count: directoryState.directory ? sources.length : sourceConnections.length },
+    { id: "mcp", label: "MCP 服务", count: mcp?.configured },
     { id: "generation-history", label: "生成历史" },
   ];
   return <Dialog.Content size="lg" className="agent-assistant" ariaLabel="AI 能力中心">
@@ -105,7 +111,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
         <div className="agent-assistant__content">
           <section hidden={page !== "overview"} className="agent-assistant__page" data-ai-page="overview">
             {error ? <SettingsFeedback tone="danger">{error} <Button size="sm" onClick={() => refresh(value => value + 1)}>重试</Button></SettingsFeedback> : null}
-            <CapabilityOverview local={localConnections} sources={sources} loading={loading} sourceLoading={directoryState.loading} sourceError={directoryState.error} mcp={mcp} onNavigate={navigate} onAdd={add} />
+            <CapabilityOverview key={overviewRevision} local={localConnections} remote={sourceConnections} sources={sources} loading={loading} connectionError={error} sourceLoading={directoryState.loading} sourceError={directoryState.error} mcp={mcp} onNavigate={navigate} onAdd={add} onOpenSource={openSource} onRetry={() => refresh(value => value + 1)} />
           </section>
           {localVisited ? <section hidden={page !== "agents"} className="agent-assistant__page" data-ai-page="agents"><UiPortalScope>
             <div className="agent-assistant__page-heading"><h2>本地 Agent</h2><span className="agent-assistant__muted">宿主电脑 · {localConnections.length} 个连接</span></div>
@@ -115,7 +121,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
           </UiPortalScope></section> : null}
           <section hidden={page !== "mcp"} className="agent-assistant__page" data-ai-page="mcp"><UiPortalScope><div className="agent-assistant__page-heading"><h2>MCP 服务</h2></div><McpConnectionPanel canvasId={payload.canvasId} onStatusChange={setMcp} refreshRevision={revision} /></UiPortalScope></section>
           {servicesVisited ? <section hidden={page !== "sources"} className="agent-assistant__page" data-ai-page="sources"><UiPortalScope>
-            {service.listServiceConnections || service.serviceConnectionDirectory ? <ServiceSources service={service} connections={connections} contributions={contributions.filter(entry => entry.kind !== "installed")} payload={payload} settingsStore={settingsStore} directoryState={directoryState} addRequest={addRequest} onSaved={saved} onChoose={choose} /> : <ConnectionPanel local={false} connections={sourceConnections} contributions={contributions.filter(entry => entry.kind !== "installed")} payload={payload} loading={loading} onSaved={saved} onChoose={choose} />}
+            {service.listServiceConnections || service.serviceConnectionDirectory ? <ServiceSources service={service} connections={connections} contributions={contributions.filter(entry => entry.kind !== "installed")} payload={payload} settingsStore={settingsStore} directoryState={directoryState} addRequest={addRequest} addCapability={addCapability} sourceRequest={sourceRequest} onSaved={saved} onChoose={choose} /> : <ConnectionPanel key={sourceRequest?.id} local={false} connections={sourceConnections} contributions={contributions.filter(entry => entry.kind !== "installed")} payload={sourceRequest ? { ...payload, connectionId: sourceRequest.id } : payload} loading={loading} onSaved={saved} onChoose={choose} />}
           </UiPortalScope></section> : null}
           {historyVisited ? <section hidden={page !== "generation-history"} className="agent-assistant__page agent-assistant__history" data-ai-page="generation-history">
             <div className="agent-assistant__page-heading"><h2>生成历史</h2></div>
@@ -187,13 +193,14 @@ function ConnectionPanel({ local, compact = false, connections, contributions, p
   </>;
 }
 
-function AddConnectionForm({ contributions, onSaved, local, providerGroups = [], settingsStore, initialKind }: {
+function AddConnectionForm({ contributions, onSaved, local, providerGroups = [], settingsStore, initialKind, capability }: {
   local: boolean;
   contributions: ReadonlyArray<{ kind: string; render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }> }>;
   onSaved: (connectionId: string) => void;
   providerGroups?: readonly ProviderTemplate[];
   settingsStore?: BackendSettingsStore;
   initialKind?: string;
+  capability?: ActiveCapability;
 }) {
   const initial = ["api-key", "login"].includes(initialKind ?? "") ? initialKind! : null;
   const [selectedKind, setSelectedKind] = useState<string | null>(initial);
@@ -210,13 +217,13 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
     const container = addRef.current?.closest<HTMLElement>(".agent-assistant__drawer-body, .agent-assistant__page");
     if (container) container.scrollTop = selectedKind ? 0 : selectionScrollTop.current;
   }, [selectedKind]);
-  const providerMethods = local ? [] : providerGroups;
+  const providerMethods = local ? [] : providerGroups.filter(group => !capability || group.modelTypes.includes(capability === "agent" ? "language" : capability));
   const selectedMethod = selectedKind
     ? kinds.find(item => item.id === selectedKind) ?? providerMethods.find(group => `provider:${group.providerId}` === selectedKind)
     : null;
   const selectedLabel = selectedMethod?.label ?? null;
   return <div ref={addRef} className="agent-assistant__add" data-step={selectedKind ? "configuration" : "selection"}>
-    <div className="agent-assistant__methods" hidden={selectedKind !== null}>{kinds.filter(item => local ? item.id === "installed" : item.id !== "installed").map(item => {
+    <div className="agent-assistant__methods" hidden={selectedKind !== null}>{kinds.filter(item => local ? item.id === "installed" : item.id !== "installed" && (!capability || capability === "agent")).map(item => {
       const available = contributions.some(entry => entry.kind === item.id);
       return <button key={item.id} type="button" className="agent-assistant__method" data-kind={item.id} data-selected={selectedKind === item.id} disabled={!available}
         onClick={() => selectMethod(item.id)}>
@@ -237,6 +244,7 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
         <span className="agent-assistant__method-state">{selectedKind === id ? "正在配置" : "点击配置"}</span>
       </button>;
     })}</div>
+    {capability && capability !== "agent" && !providerMethods.length && selectedKind === null ? <p className="agent-assistant__empty-note">当前没有可配置的{MODEL_TYPE_LABELS.find(([type]) => type === capability)?.[1]}供应商扩展。</p> : null}
     <div className="agent-assistant__forms" hidden={selectedKind === null}>
       <div className="agent-assistant__form-heading">
         <Button size="sm" tone="ghost" icon={<BackIcon size={14} />} onClick={() => setSelectedKind(null)}>返回选择</Button>
@@ -254,9 +262,10 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
   </div>;
 }
 
-function ServiceSources({ service, connections, contributions, payload, settingsStore, directoryState, addRequest, onSaved, onChoose }: {
+function ServiceSources({ service, connections, contributions, payload, settingsStore, directoryState, addRequest, addCapability, sourceRequest, onSaved, onChoose }: {
   service: AgentConversationService; connections: AgentConnectionView[]; contributions: readonly ConfigurationContribution[];
   payload: Payload; settingsStore?: BackendSettingsStore; directoryState: ReturnType<typeof useServiceDirectory>; addRequest: number; onSaved: () => void; onChoose: (connection: AgentConnectionView) => void;
+  addCapability?: ActiveCapability; sourceRequest: { id: string } | null;
 }) {
   const { directory, loading, error: directoryError } = directoryState;
   const sources = directory?.connections ?? [];
@@ -278,14 +287,21 @@ function ServiceSources({ service, connections, contributions, payload, settings
   }] : []) : [];
   useEffect(() => { void settingsStore?.load(); }, [settingsStore]);
   const [addVisited, setAddVisited] = useState(adding);
-  useEffect(() => { if (addRequest) { setAdding(true); setAddVisited(true); setSelected(null); } }, [addRequest]);
-  const showAdd = () => { setAdding(true); setAddVisited(true); setSelected(null); };
+  const [activeCapability, setActiveCapability] = useState<ActiveCapability | undefined>();
+  const handledSourceRequest = useRef<typeof sourceRequest>(null);
+  useEffect(() => { if (addRequest) { setActiveCapability(addCapability); setAdding(true); setAddVisited(true); setSelected(null); } }, [addRequest, addCapability]);
+  const showAdd = () => { setActiveCapability(undefined); setAdding(true); setAddVisited(true); setSelected(null); };
   const open = (id: string) => { setSelected(id); setAdding(false); setVisited(current => current.includes(id) ? current : [...current, id]); };
   useEffect(() => {
     if (!payload.connectionId || payload.section) return;
     const source = sources.find(item => item.serviceConnectionId === payload.connectionId || item.bindings.some(binding => binding.consumerId === payload.connectionId));
     if (source) open(source.serviceConnectionId);
   }, [payload.connectionId, sources]);
+  useEffect(() => {
+    if (!sourceRequest || handledSourceRequest.current === sourceRequest) return;
+    const source = sources.find(item => item.serviceConnectionId === sourceRequest.id || item.bindings.some(binding => binding.consumerId === sourceRequest.id));
+    if (source) { handledSourceRequest.current = sourceRequest; open(source.serviceConnectionId); }
+  }, [sourceRequest, sources]);
   const back = () => { setSelected(null); setAdding(false); };
   const confirmChange = async () => {
     if (!confirmation || !service.manageServiceConnection || busy) return;
@@ -309,8 +325,8 @@ function ServiceSources({ service, connections, contributions, payload, settings
       const state = serviceSourceState(source);
       return <li key={source.serviceConnectionId}><div className="agent-assistant__identity"><strong>{source.name}</strong></div><span className="agent-assistant__state" data-tone={state.tone}>{state.label}{source.managedByAdministrator ? " · 只读" : ""}</span><div className="agent-assistant__actions"><Button size="sm" tone="ghost" onClick={() => open(source.serviceConnectionId)}>配置</Button>{connection && payload.canvasId && payload.nodeId ? <Button size="sm" disabled={!connection.ready} onClick={() => onChoose(connection)}>使用</Button> : null}</div></li>;
     })}</ul> : null}
-    {addVisited ? <AssistantDrawer title="添加模型提供商" onClose={back} hidden={!adding} wide>
-      <AddConnectionForm local={false} initialKind={payload.kind} contributions={contributions} providerGroups={providerGroups} settingsStore={settingsStore} onSaved={() => { onSaved(); back(); }} />
+    {addVisited ? <AssistantDrawer title={activeCapability ? `添加${activeCapability === "agent" ? " Agent" : MODEL_TYPE_LABELS.find(([type]) => type === activeCapability)?.[1]}供应商` : "添加模型提供商"} onClose={back} hidden={!adding} wide>
+      <AddConnectionForm key={`${addRequest}:${activeCapability ?? "all"}`} capability={activeCapability} local={false} initialKind={activeCapability ? undefined : payload.kind} contributions={contributions} providerGroups={providerGroups} settingsStore={settingsStore} onSaved={() => { onSaved(); back(); }} />
       {settings?.status === "loading" ? <p>正在读取供应商…</p> : settings?.status === "error" ? <SettingsFeedback tone="danger">{settings.error} <Button size="sm" onClick={() => void settingsStore?.load()}>重试</Button></SettingsFeedback> : settings?.status === "unauthorized" ? <p>供应商配置由管理员管理。个人 API 与账号授权仍可使用。</p> : null}
     </AssistantDrawer> : null}
     <AssistantDrawer title={current?.name ?? "连接配置"} onClose={back} hidden={!selected}>

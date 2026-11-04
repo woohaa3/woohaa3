@@ -18,6 +18,7 @@ import { definePlugin } from "../../plugin.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
 import { imageEditAssetIdsOf, imageEditProjectObjectOf, parseCanvasCopyPayload, type CanvasCopyPayload } from "../canvas-shell/clipboard/payload.js";
 import { planCanvasPaste } from "../canvas-shell/clipboard/planner.js";
+import { DUPLICATE_CANVAS_EVENT } from "../canvas-shell/interaction-keyboard.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { ClipboardAdapterRegistry } from "./adapter.js";
 import { classifyFileList, classifyTransferFiles, dedupeClassifiedFiles, type ClassifiedFile } from "./datatransfer.js";
@@ -69,6 +70,7 @@ export function pasteImportExtension(): Plugin.Function<void> {
         const canonical = woohaa3CanvasStore.getState().canvas;
         const session = ctx.canvasSession;
         if (!canonical || !session) return true;
+        const currentTarget = () => !disposed && ctx.canvasSession === session && woohaa3CanvasStore.getState().canvas?.id === canonical.id;
         const controller = ctx.canvasRuntime.controller();
         if (!controller) return true;
         const pointer = ctx.canvasRuntime.lastPointerWorld();
@@ -82,8 +84,21 @@ export function pasteImportExtension(): Plugin.Function<void> {
           if (!writable() || disposed) return;
           const current = woohaa3CanvasStore.getState().canvas;
           if (!current || current.id !== canonical.id) return;
-          const plan = planCanvasPaste({ lifecycle: ctx.get("compositeAssets")?.managedLifecycles, canvas: current, payload: verified, anchor, viewport: controller.viewport() });
-          if (plan) void ctx.canvasEdit.record(plan.commands, plan.newNodeIds.length > 1 ? `粘贴 ${plan.newNodeIds.length} 个作品` : "粘贴作品");
+          let reported = false;
+          const report = (description: string) => {
+            if (!currentTarget()) return;
+            reported = true;
+            ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴作品", description } });
+          };
+          try {
+            const plan = planCanvasPaste({ lifecycle: ctx.get("compositeAssets")?.managedLifecycles, canvas: current, payload: verified, anchor, viewport: controller.viewport(), onRefusal: report });
+            if (plan) void Promise.resolve(ctx.canvasEdit.record(plan.commands, plan.newNodeIds.length > 1 ? `粘贴 ${plan.newNodeIds.length} 个作品` : "粘贴作品"))
+              .then((result) => { if (!result.ok) report(`粘贴失败：${result.reason}`); })
+              .catch((error: unknown) => report(`粘贴失败：${error instanceof Error ? error.message : "请稍后重试"}`));
+            else if (!reported) report("复制内容无效或引用不可用，请重新选择作品后复制。");
+          } catch {
+            report("复制内容无效或无法提交，请重新选择作品后重试。");
+          }
         };
         const projects = payload.nodes.flatMap((node) => {
           const project = imageEditProjectObjectOf(payload.nodeData[node.id]);
@@ -101,8 +116,8 @@ export function pasteImportExtension(): Plugin.Function<void> {
             sourceCanvasId: payload.sourceCanvasId ?? canonical.id, nodeIds: payload.nodes.map((node) => node.id),
             assetIds: [...assetIds], projects }).then((result) => {
               if (result.ok) apply({ ...payload, assets: [ ...(payload.assets ?? []).filter((asset) => !assetIds.has(asset.id)), ...result.value.assets ] });
-              else if (!disposed) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴图片工程", description: result.error } });
-            }).catch(() => { if (!disposed) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴图片工程", description: "无法核验工程与来源素材，请稍后重试" } }); });
+              else if (currentTarget()) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴图片工程", description: result.error } });
+            }).catch(() => { if (currentTarget()) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴图片工程", description: "无法核验工程与来源素材，请稍后重试" } }); });
         }
         return true;
       };
@@ -198,6 +213,14 @@ export function pasteImportExtension(): Plugin.Function<void> {
           // 页内 fallback：浏览器未派发可用文本时使用复制时的内存载荷。
           const fallbackText = text || readMemoryClipboard();
           const resolvedInternal = internal ?? parseCanvasCopyPayload(fallbackText);
+          if (!resolvedInternal && fallbackText) {
+            try {
+              if (JSON.parse(fallbackText)?.format === "infinspire-canvas-copy-v1") {
+                if (writable()) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法粘贴作品", description: "复制内容无效，请重新选择作品后复制。" } });
+                return true;
+              }
+            } catch { /* Ordinary clipboard text. */ }
+          }
           const { files } = classifyTransferFiles(data);
           const intent = resolvePasteIntent({
             text,
@@ -219,6 +242,16 @@ export function pasteImportExtension(): Plugin.Function<void> {
         }
       });
       disposers.push(removePaste);
+
+      const onDuplicate = (event: Event) => {
+        if (ctx.canvasRuntime.imageFocusProjection?.()) return;
+        const detail = (event as CustomEvent<unknown>).detail;
+        const payload = typeof detail === "string" ? parseCanvasCopyPayload(detail) : null;
+        if (payload) pasteInternal(payload);
+        else if (writable()) ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法重复作品", description: "复制内容无效，请重新选择作品后重试。" } });
+      };
+      window.addEventListener(DUPLICATE_CANVAS_EVENT, onDuplicate);
+      disposers.push(() => window.removeEventListener(DUPLICATE_CANVAS_EVENT, onDuplicate));
 
       const handleFilesPaste = async (files: ClassifiedFile[]): Promise<void> => {
         const raw = files.map((entry) => entry.file);

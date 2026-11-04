@@ -30,7 +30,7 @@ export type StreamAccumulatorPorts = {
   /** 追加 `message-delta` / `message-completed` 事件。 */
   appendEvent: (type: "message-delta" | "message-completed", payload: Record<string, unknown>) => void;
   /** 结算一条完整助手正文（用于与回合汇总比对，避免重复追加）。 */
-  recordAssistantText?: (text: string) => void;
+  recordAssistantText?: (messageId: string, text: string) => void;
 };
 
 export type StreamAccumulator = {
@@ -45,11 +45,9 @@ export function createStreamAccumulator(ports: StreamAccumulatorPorts): StreamAc
   let chunkCount = 0;
   // 已落库的逻辑消息：结算后同一消息的累计更新仍要回到原行，而不是新增一条。
   const rowIds = new Map<string, string>();
-  // 已计入摘要的消息：同一条消息被结算多次时不能重复累计（否则汇总比对会失配）。
-  const digested = new Set<string>();
-
   const push = (event: MessageTextEvent): void => {
     const streamKey = event.streamId ?? "assistant";
+    if (buffer && (buffer.streamKey !== streamKey || buffer.role !== event.role)) flush();
     const known = rowIds.get(streamKey);
     // 结算后继续收到同一消息的 replace（累计快照）：回到原行更新，不新增一条。
     const current: MessageStreamBuffer | null = buffer ?? (
@@ -89,10 +87,7 @@ export function createStreamAccumulator(ports: StreamAccumulatorPorts): StreamAc
     if (!finished) return;
     buffer = null;
     // 汇总比对用未截断正文：长回复被单条消息预算截断后，不应在结算时再追加一次。
-    if (finished.role === "assistant" && !digested.has(finished.messageId)) {
-      digested.add(finished.messageId);
-      ports.recordAssistantText?.(finished.raw);
-    }
+    if (finished.role === "assistant") ports.recordAssistantText?.(finished.messageId, finished.raw);
     ports.appendEvent("message-completed", {
       messageId: finished.messageId,
       role: finished.role,

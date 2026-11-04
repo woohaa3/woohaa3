@@ -11,7 +11,7 @@ import { modelBounds, type FocusHitResult } from "./model-focus-session.js";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import type { InteractionCore } from "./interaction-core.js";
-import { builtinNodeCapabilityResolver, managedShotPreviewOwnershipOf, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { builtinNodeCapabilityResolver } from "@woohaa3/contracts";
 
 export function createDoubleClickHandler(core: InteractionCore) {
   const { options, canvas, model, setSelection, activeViewport, surfaceSize } = core;
@@ -32,15 +32,11 @@ export function createDoubleClickHandler(core: InteractionCore) {
     if (core.focusInputBlocked()) return;
     const rect = canvas.getBoundingClientRect();
     const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    // Focus references are visual only; a double click must not enter their card/shot.
-    if (model.active && model.isFocusReferenceEvent(event)) { event.preventDefault(); return; }
     const world = screenToWorld(point, activeViewport());
     // 命中由 Rust interaction snapshot 计算；不可用时不派发卡片命中（design D3）。
     const hitResult = core.queryPoint(world, activeViewport().zoom);
     const hit = hitResult.ok ? hitResult.value : null;
-    // 只有徽标本体（group-badge-select）是聚焦入口；其它组动作不进入容器聚焦。
-    const badgeNodeId = hit?.kind === "node-action" && hit.actionId === "group-badge-select" ? hit.nodeId : null;
-    // 卡片命中涵盖拍摄镜头预览内容区：它承载缩略图，双击必须命中卡片，不能落到空白菜单。
+    // 卡片命中。
     const cardNodeId = cardHitNodeId(hit);
     const canvasState = woohaa3CanvasStore.getState().canvas;
     if (!canvasState) return;
@@ -55,50 +51,11 @@ export function createDoubleClickHandler(core: InteractionCore) {
     const focusKind = (id: string) => {
       const context = contextOf(id); return context ? resolver.resolve(context).focus?.kind(context) : null;
     };
-    // 模型徽标：双击直接进入容器聚焦（与画布横条「编辑」按钮同一入口）。只对有自己模型
-    // 聚焦工作区的容器生效（片场）；普通 group 的徽标仍只负责选择/拖动与展开/收起。
-    if (badgeNodeId) {
-      event.preventDefault();
-      const kind = focusKind(badgeNodeId);
-      if (contextOf(badgeNodeId)?.node.type !== "group" || kind !== "model") return;
-      setSelection([badgeNodeId]);
-      if (options.onModelFocusIntent) {
-        options.onModelFocusIntent({ type: "enter", nodeId: badgeNodeId, kind });
-        return;
-      }
-      model.enterModelFocusForNode?.(badgeNodeId);
-      return;
-    }
     const cardEntry = cardNodeId
       ? canvasState.document.nodes.find((candidate) => candidate.id === cardNodeId)
       : undefined;
 
-    // 拍摄镜头预览卡片：双击进入所属片场聚焦并选择该镜头（零点暂停）
-    // （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4 / design D8）。
-    // 归属由 nodeData 严格解码得到；缺失/非法即不派发（保留节点与归属保护，不猜默认镜头）。
-    if (cardEntry) {
-      const ownership = shotPreviewOwnershipOf(canvasState.nodeData?.[cardEntry.id]) ?? managedShotPreviewOwnershipOf(canvasState.nodeData?.[cardEntry.id]);
-      if (ownership) {
-        event.preventDefault();
-        options.onShotPreviewEnterIntent?.({
-          previewNodeId: cardEntry.id,
-          filmSetNodeId: ownership.filmSetNodeId,
-          clipId: ownership.clipId
-        });
-        return;
-      }
-    }
-
-    const child = cardEntry ? options.compositeAssets?.children(canvasState).get(cardEntry.id) : null;
-    if (child?.kind === "container" && child.focusOwner && focusKind(child.ownerNodeId)) {
-      event.preventDefault();
-      setSelection([child.ownerNodeId]);
-      options.onModelFocusIntent?.({ type: "enter", nodeId: child.ownerNodeId,
-        kind: focusKind(child.ownerNodeId)! });
-      return;
-    }
-
-    // 片场支持模型 picking；普通模型按内嵌预览卡片命中进入聚焦。
+    // 模型 picking；普通模型按内嵌预览卡片命中进入聚焦。
     // 命中由 Rust 相机/bounds/placement 派生（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
     // 没有命中任何卡片，或命中的就是模型卡片时才尝试模型 picking。
     // 射线未打中网格时，双击模型卡片本身仍然进入：网格画在卡片下方，常被底部面板挡住。

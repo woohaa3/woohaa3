@@ -9,15 +9,11 @@
  * 3. 终态由 projector 从 Task history 消费并投影（不在本模块）。
  */
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
-import { currentCanvasGroupScope, scopedCanvas } from "../agent-authoring/group-scope.js";
-import { canvasGroupMembers, canvasGroupAssetIds, hasExternalCanvasReference, stableStringify } from "@woohaa3/contracts";
 import type { CanvasRoom } from "../sync/index.js";
-import type { CanvasTaskCatalog, CanvasTaskModelType, CanvasRunRequest, CanvasTaskNodeType, CanvasTaskInput } from "@woohaa3/contracts";
-import { catalogModelBindings, compileVideoEditProviderPrompt, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, validateGenerationModeInputs } from "@woohaa3/contracts";
+import type { CanvasTaskCatalog, CanvasTaskModelType, CanvasRunRequest, CanvasTaskNodeType, CanvasTaskInput, WorldCaptureGenerationBinding } from "@woohaa3/contracts";
+import { catalogModelBindings, checkModelCapability, compileVideoEditProviderPrompt, decodeWorldCamera, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, validateGenerationModeInputs, worldCaptureReferenceInput } from "@woohaa3/contracts";
 import type { CanvasTaskClient } from "../clients/task-client.js";
-import { resolveNodeReferenceInputs } from "./input-resolution.js";
-import { withFrozenShotImages } from "./shot-reference-resolution.js";
-import { shotImageReferenceAssetId } from "@woohaa3/contracts";
+import { collectInputMappings, resolveNodeReferenceInputs } from "./input-resolution.js";
 import { resolveMentionsAndCompile } from "./mention-resolution.js";
 import {
   EMPTY_UPSTREAM_TEXT_CODE,
@@ -42,6 +38,8 @@ export type RunServiceDependencies = {
    * （change: 2026-10-12-unify-generation-history-strip，design D5）。
    */
   isAggregateNode?: (node: { type: string }) => boolean;
+  /** T10 trusted framing claims; absent means capture-bound runs fail closed. */
+  worldCapture?: import("../world-authoring/capture-service.js").WorldCaptureService | null;
   now?: () => string;
   logger?: (event: Record<string, unknown>) => void;
 };
@@ -63,45 +61,37 @@ export class CanvasRunService {
 
   async run(request: CanvasRunRequest, context?: { owner: string }): Promise<RunOutcome> {
     const selectedSource = request.parameters.serviceConnectionId;
-    const sourceOwner = context?.owner ?? currentCanvasGroupScope()?.owner;
+    const sourceOwner = context?.owner;
     if (selectedSource !== undefined && (typeof selectedSource !== "string" || !selectedSource || !sourceOwner)) return { ok: false, code: "source-owner-unavailable", message: "个人来源需要当前可信用户，请重新发起运行" };
     const room = await this.deps.resolveRoom(request.canvasId);
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${request.canvasId} 不存在` };
 
     const exported = room.exportCanvas();
     if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
-    const scope = currentCanvasGroupScope();
-    if (scope && (!scope.valid() || scope.canvasId !== request.canvasId)) return { ok: false, code: "group-scope-revoked", message: "组创作授权已撤销" };
-    if (scope && !canvasGroupMembers(exported.canvas, scope.rootGroupId).has(request.nodeId)) return { ok: false, code: "group-scope-forbidden", message: "运行目标已移出根组" };
-    let canvas = scope ? scopedCanvas(exported.canvas) : exported.canvas;
-    if (!request.shotImageReferences && canvas.nodeData[request.nodeId]?.inputMapping?.some(mapping => mapping.role === "shot_image_reference")) {
-      return { ok: false, code: "shot-image-version-stale", message: "图片参考需要冻结镜头版本，请重新执行" };
-    }
-    if (request.shotImageReferences) {
-      const frozen = withFrozenShotImages(canvas, request.nodeId, request.shotImageReferences);
-      if (typeof frozen === "string") return { ok: false, code: "shot-image-version-stale", message: frozen };
-      canvas = frozen;
-    }
-    if (scope && exported.canvas.document.edges.some(e => e.target === request.nodeId && !canvas.document.nodes.some(n => n.id === e.source))) return { ok: false, code: "group-external-input", message: "不能使用组外输入" };
-    if (scope && hasExternalCanvasReference(canvas.nodeData[request.nodeId], canvasGroupMembers(canvas, scope.rootGroupId), canvasGroupAssetIds(canvas, canvasGroupMembers(canvas, scope.rootGroupId)))) return { ok: false, code: "group-external-input", message: "节点引用了组外输入" };
-    const inputBasis = (snapshot: typeof canvas) => {
-      const view = scope ? scopedCanvas(snapshot) : snapshot;
-      if (!scope && request.shotImageReferences) {
-        const mappings = view.nodeData[request.nodeId]?.inputMapping ?? [];
-        return stableStringify({
-          targetType: view.document.nodes.find(node => node.id === request.nodeId)?.type,
-          mappings: mappings.map(mapping => mapping.role === "shot_image_reference"
-            ? { slotId: mapping.slotId, sourceNodeId: mapping.sourceNodeId, role: mapping.role } : mapping),
-          otherInputs: mappings.filter(mapping => mapping.role !== "shot_image_reference").map(mapping => view.nodeData[mapping.sourceNodeId]),
-          images: request.shotImageReferences.map(ref => view.assets.find(asset => asset.id === shotImageReferenceAssetId(ref)))
-        });
-      }
-      return stableStringify({ nodes: view.document.nodes, data: view.nodeData, edges: view.document.edges, assets: view.assets });
-    };
-    const basis = inputBasis(exported.canvas);
+    const canvas = exported.canvas;
 
     const node = canvas.document.nodes.find((entry) => entry.id === request.nodeId);
     if (!node) return { ok: false, code: "unknown-node", message: `节点 ${request.nodeId} 不存在` };
+
+    // T10: validate the exact framing frozen at click time before anything durable is
+    // written. A later canvas change must not rewrite this binding, and a forged or
+    // expired binding is rejected instead of borrowing the current capture.
+    let worldCapture: WorldCaptureGenerationBinding | undefined;
+    if (request.worldCapture) {
+      const captureService = this.deps.worldCapture;
+      if (!captureService) {
+        return { ok: false, code: "capture-unavailable", message: "取景服务未装配，不能受理带取景的生成" };
+      }
+      const claim = captureService.claimForGeneration({
+        canvasId: request.canvasId,
+        requestId: request.worldCapture.requestId,
+        binding: request.worldCapture
+      });
+      if (!claim.ok) {
+        return { ok: false, code: claim.code, message: claim.message };
+      }
+      worldCapture = claim.binding;
+    }
 
     if (node.type === "text") return { ok: false, code: "assistant-required", message: "文本生成需要助手连接和模型，请从助手文本入口提交" };
 
@@ -154,7 +144,31 @@ export class CanvasRunService {
       return { ok: false, code: "empty-prompt", message: "请先输入提示词" };
     }
 
-    const resolution = resolveNodeReferenceInputs({ canvas, nodeId: request.nodeId, bindings, frozenShotImages: request.shotImageReferences });
+    const cameraInputs = new Map<string, CanvasTaskInput>();
+    for (const mapping of collectInputMappings(canvas, request.nodeId, canvas.nodeData)) {
+      if (mapping.role === "text_prompt" || cameraInputs.has(mapping.sourceNodeId)) continue;
+      const source = canvas.document.nodes.find(node => node.id === mapping.sourceNodeId);
+      if (source?.type !== "world-camera") continue;
+      const camera = decodeWorldCamera(canvas.nodeData[source.id]?.worldCamera);
+      if (!camera.ok) return { ok: false, code: "invalid-camera", message: "上游镜头配置无效" };
+      if (!this.deps.worldCapture) return { ok: false, code: "capture-unavailable", message: "镜头取景服务不可用" };
+      const frozen = worldCapture?.key.cameraId === camera.value.cameraId
+        ? { ok: true as const, binding: worldCapture }
+        : await this.deps.worldCapture.freezeForGeneration({
+            canvasId: canvas.id,
+            cameraId: camera.value.cameraId,
+            // A cached frame can outlive a generation claim. New runs need their
+            // own claim; retries of the same run/camera keep the same identity.
+            requestId: JSON.stringify(["run-camera", canvas.id, request.runId, camera.value.cameraId])
+          });
+      if (!frozen.ok) return { ok: false, code: frozen.code, message: frozen.message };
+      const claimed = this.deps.worldCapture.claimForGeneration({ canvasId: canvas.id, requestId: frozen.binding.requestId, binding: frozen.binding });
+      if (!claimed.ok) return { ok: false, code: claimed.code, message: claimed.message };
+      const reference = worldCaptureReferenceInput(claimed.binding);
+      if (!reference.ok) return { ok: false, code: reference.code, message: reference.message };
+      cameraInputs.set(source.id, reference.input);
+    }
+    const resolution = resolveNodeReferenceInputs({ canvas, nodeId: request.nodeId, bindings, cameraInputs });
     if (resolution.blockingReasons.length > 0) {
       return { ok: false, code: "invalid-input", message: resolution.blockingReasons[0] };
     }
@@ -167,6 +181,7 @@ export class CanvasRunService {
       nodeId: request.nodeId,
       authored,
       bindings,
+      cameraInputs,
       directInputs: resolution.inputs
     });
     if (compiled.kind !== "ok") {
@@ -176,7 +191,33 @@ export class CanvasRunService {
     if (providerPrompt.trim().length === 0) {
       return { ok: false, code: "empty-prompt", message: "请先输入提示词" };
     }
-    const taskInputs: CanvasTaskInput[] = compiled.inputs;
+    const taskInputs: CanvasTaskInput[] = [...compiled.inputs];
+
+    // T10: a claimed framing is a real provider reference, not just job metadata.
+    // Materialize the exact verified media identity and reject models that cannot
+    // accept reference_image before any durable begin/job write happens.
+    if (worldCapture) {
+      const captureInput = worldCaptureReferenceInput(worldCapture);
+      if (!captureInput.ok) {
+        return { ok: false, code: captureInput.code, message: captureInput.message };
+      }
+      if (!taskInputs.some(input => input.assetId === captureInput.input.assetId)) taskInputs.push(captureInput.input);
+      const capability = checkModelCapability(
+        {
+          modelKey: model.modelKey,
+          modelType: model.modelType,
+          inputs: taskInputs
+        } as never,
+        model
+      );
+      if (!capability.ok) {
+        return {
+          ok: false,
+          code: capability.code,
+          message: `模型 ${model.modelKey} 不接受该取景参考图：${capability.message}`
+        };
+      }
+    }
 
     // edit_video：再次 sanitize/validate intents，确定性地编译进 provider prompt（change:
     // port-video-editing-dialogs，design D8）。只有授权且稳定的 annotation preview 才会在
@@ -254,23 +295,17 @@ export class CanvasRunService {
             // 模型身份随 begin 的 job 落盘：产物 → provenance.runId → job 即可读到当时模型
             // （change: l0-generation-provenance）。
             modelKey,
+            ...(worldCapture ? { worldCapture } : {}),
             status: "running",
             updatedAt: this.deps.now?.() ?? new Date().toISOString()
           }
         }
       ]
-    }, scope || request.shotImageReferences ? { authorize: async () => {
-      const latest = room.exportCanvas();
-      return (!scope || (scope.valid() && (!scope.authorize || await scope.authorize("write")) && latest.ok && canvasGroupMembers(latest.canvas, scope.rootGroupId).has(request.nodeId)))
-        && latest.ok && (!request.shotImageReferences || typeof withFrozenShotImages(latest.canvas, request.nodeId, request.shotImageReferences) !== "string")
-        && inputBasis(latest.canvas) === basis;
-    } } : undefined);
+    });
     if (!begin.ok) {
       return { ok: false, code: begin.code, message: begin.message };
     }
 
-    scope?.onAction?.({ canvasId: request.canvasId, nodeId: request.nodeId, runId: request.runId, jobId: request.jobId });
-    if (scope && !scope.valid()) return { ok: false, code: "group-scope-revoked", message: "运行已接受，授权随后撤销；请核对原运行" };
     // 2) 异步 submit：accepted 不等待终态；响应丢失时重试复用同 key。
     // 执行时显示快照：只从当前可信 catalog/画布投影；缺省时历史页降级为稳定 ID
     // （change: improve-task-history-experience，任务 1.3）。
@@ -297,7 +332,8 @@ export class CanvasRunService {
         ...(nodeTitle ? { nodeTitle } : {}),
         prompt: providerPrompt,
         parameters: { ...request.parameters, model: modelKey },
-        inputs: taskInputs
+        inputs: taskInputs,
+        ...(worldCapture ? { worldCapture } : {})
       });
     } catch (error) {
       // 提交失败当场说清楚：返回 ok:false 让面板立刻显示原因，并把 begin 写下的 processing
@@ -319,10 +355,8 @@ export class CanvasRunService {
         jobId: request.jobId,
         workerTaskKey,
         modelKey,
-        message,
-        ...(scope
-          ? { authorize: async () => scope.valid() && (!scope.authorize || (await scope.authorize("write"))) }
-          : {})
+        ...(worldCapture ? { worldCapture } : {}),
+        message
       });
       return { ok: false, code: "task-submit-failed", message };
     }
@@ -346,8 +380,8 @@ export class CanvasRunService {
     jobId: string;
     workerTaskKey: string;
     modelKey: string;
+    worldCapture?: WorldCaptureGenerationBinding;
     message: string;
-    authorize?: () => Promise<boolean>;
   }): Promise<void> {
     try {
       const room = await this.deps.resolveRoom(input.canvasId);
@@ -382,14 +416,14 @@ export class CanvasRunService {
                 taskId: input.workerTaskKey,
                 runId: input.runId,
                 modelKey: input.modelKey,
+                ...(input.worldCapture ? { worldCapture: input.worldCapture } : {}),
                 status: "failed",
                 error: input.message,
                 updatedAt: this.deps.now?.() ?? new Date().toISOString()
               }
             }
           ]
-        },
-        input.authorize ? { authorize: input.authorize } : undefined
+        }
       );
       if (!result.ok) {
         this.deps.logger?.({

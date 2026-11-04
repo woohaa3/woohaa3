@@ -36,9 +36,9 @@ import { createRuntimeObserver } from "./runtime-observer.js";
 import {FocusDetailEncoder} from "./focus-details.js";
 import { pollShotCapture } from "./shot-capture-poll.js";
 import { pollHistoryThumbnail } from "./history-thumbnail-poll.js";
+import { pollWorldCapture } from "./world-capture-poll.js";
 import {
   createQueryBridge,
-  encodeCompositeAssetScopesRequest,
   encodeDropTargetRequest,
   encodeGizmoRequest,
   encodeMarqueeRequest,
@@ -46,15 +46,11 @@ import {
   encodePointRequest,
   encodeProbeRequest,
   parseGizmoResult,
-  projectCompositeAssetScopes,
   projectDropTarget,
   projectMarquee,
   projectModelPick,
   projectPoint,
-  projectProbe,
-  projectFilmSetItemPick,
-  queryCompositeAssetItemBoundsRaw,
-  queryCompositeAssetItemPickRaw
+  projectProbe
 } from "./query-bridge.js";
 import type {
   BevyModule,
@@ -65,7 +61,6 @@ export type {
   AxisDragConstraint,
   BevyModule,
   BevyRuntime,
-  CompositeAssetScopeGeometryEntry,
   GizmoHitResult,
   PointHit,
   ProbeCandidate,
@@ -89,6 +84,11 @@ let thumbnailRequestSeq = 1;
 function nextThumbnailRequestId(): number {
   thumbnailRequestSeq += 1;
   return thumbnailRequestSeq;
+}
+let worldCaptureRequestSeq = 1;
+function nextWorldCaptureRequestId(): number {
+  worldCaptureRequestSeq += 1;
+  return worldCaptureRequestSeq;
 }
 
 /** 稳定模块诊断标识；实际 glue 在 runtime-realm-entry 通过字面量 import 打包。 */
@@ -123,12 +123,8 @@ export function assertRequiredCapabilities(module: BevyModule): void {
   if (!module.viewport_capability) missing.push("viewport_capability");
   if (!module.set_positions) missing.push("set_positions");
   if (!module.position_capability) missing.push("position_capability");
-  // change: 2026-10-12-align-film-set-scope-with-isometric-grid —— 片场菱形范围要求 drop
-  // 目标查询与范围几何读取；缺失时明确能力不匹配，不静默回退 TS 矩形几何（design D5/D8）。
   if (!module.query_drop_target) missing.push("query_drop_target");
-  if (!module.query_composite_asset_scopes) missing.push("query_composite_asset_scopes");
-  // change: 2026-10-15-add-film-set-overview-lod —— 片场总览 LOD 要求 scene wire 版本同步；
-  // 缺失 scene 能力字符串时明确能力不匹配，不静默忽略新增 `compositeAsset.geometryQuality`。
+  // scene wire 版本必须同步：缺失能力字符串时明确能力不匹配，不静默忽略结构变化。
   if (!module.scene_capability) missing.push("scene_capability");
   if (missing.length > 0) {
     throw new Error(`Bevy WASM 缺少必需能力：${missing.join(", ")}`);
@@ -698,8 +694,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         };
         afterPaint(revealWhenRendered);
       }
-      textures.retain(new Set(scene.nodes.map(node => node.id)),
-        new Set(scene.nodes.flatMap(node => node.compositeAsset?.media?.map(plane => plane.id) ?? [])));
+      textures.retain(new Set(scene.nodes.map(node => node.id)), new Set());
     },
     queryPoint: (input) =>
       guardGeneration(input.generation, () =>
@@ -729,13 +724,6 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
           projectDropTarget
         )
       ),
-    queryCompositeAssetScopes: (input) =>
-      guardGeneration(input.generation, () =>
-        runQuery(
-          () => (module.query_composite_asset_scopes ?? (() => ""))(encodeCompositeAssetScopesRequest(input)),
-          projectCompositeAssetScopes
-        )
-      ),
     queryModelPick: (input) =>
       guardGeneration(input.generation, () =>
         runQuery(
@@ -743,12 +731,20 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
           projectModelPick
         )
       ),
-    queryCompositeAssetItemPick: (input) =>
-      runQuery(
-        () => queryCompositeAssetItemPickRaw(module, input),
-        projectFilmSetItemPick
+    queryCameraEditorSurface: (input) =>
+      guardGeneration(input.generation, () =>
+        runQuery(
+          () => (module.query_model_pick ?? (() => ""))(JSON.stringify({ ...input, kind: "camera-editor" })),
+          (payload) => payload.surface && Number.isFinite(payload.surface.u) && Number.isFinite(payload.surface.v) && Number.isFinite(payload.surface.h) ? payload.surface : null
+        )
       ),
-    queryCompositeAssetItemBounds: (nodeId) => queryCompositeAssetItemBoundsRaw(module, nodeId),
+    queryWorldGround: (input) =>
+      guardGeneration(input.generation, () =>
+        runQuery(
+          () => (module.query_model_pick ?? (() => ""))(JSON.stringify({ ...input, kind: "ground" })),
+          (payload) => payload.ground && Number.isFinite(payload.ground.u) && Number.isFinite(payload.ground.v) ? payload.ground : null
+        )
+      ),
     queryGizmoHit: (input) => {
       if (!module.query_gizmo_hit) return null;
       try {
@@ -783,11 +779,6 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         return empty;
       }
     },
-    overviewCacheSnapshot: () => module.overview_cache_snapshot?.() ?? '{"candidates":[],"results":[],"releases":[]}',
-    overviewCacheCommand: (json) => {
-      if (!module.overview_cache_command) throw new Error("overview-cache-renderer-bridge-unavailable");
-      module.overview_cache_command(json);
-    },
     /**
      * 页面内模型历史缩略图（change: 2026-10-26-move-generation-history-to-ai-center，D6）。
      *
@@ -803,6 +794,21 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         ...(input.width ? { width: input.width } : {}),
         ...(input.height ? { height: input.height } : {})
       }, () => !disposed && thumbnailGeneration === generation && (!supervisor || supervisor.phase === "running"));
+      return frame;
+    },
+    /**
+     * 页面内共享世界镜头捕获：与截图/缩略图共用 latest-wins 回读通道，调用方通过共享捕获锁
+     * 串行发送。
+     */
+    requestWorldCapture: async (input) => {
+      const captureGeneration = generation;
+      const frame = await pollWorldCapture(module, {
+        requestId: nextWorldCaptureRequestId(),
+        generation: input.generation,
+        cameraId: input.cameraId,
+        width: input.width,
+        height: input.height
+      }, () => !disposed && captureGeneration === generation && (!supervisor || supervisor.phase === "running"));
       return frame;
     },
     dispose: () => {
@@ -922,10 +928,10 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     textureApplied: runtime.textureApplied,
     setTexture: runtime.setTexture,
     queryGizmoHit: runtime.queryGizmoHit,
-    queryCompositeAssetItemBounds: runtime.queryCompositeAssetItemBounds,
-    queryCompositeAssetItemPick: runtime.queryCompositeAssetItemPick,
-    // 真实 WASM 命中查询：E2E 用它验证 Rust 侧 serde 确实读到 camelCase 键
-    // （change: 2026-10-08-make-film-set-model-only）。
+    queryModelPick: runtime.queryModelPick,
+    queryCameraEditorSurface: runtime.queryCameraEditorSurface,
+    queryWorldGround: runtime.queryWorldGround,
+    // 真实 WASM 命中查询：E2E 用它验证 Rust 侧 serde 确实读到 camelCase 键。
     queryPoint: (input: { x: number; y: number; zoom: number; hoveredEdgeId?: string | null }) =>
       runtime.queryPoint?.({
         generation: interactionGeneration,
@@ -934,10 +940,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         zoom: input.zoom,
         hoveredEdgeId: input.hoveredEdgeId ?? null
       }) ?? { ok: false, reason: "unsupported" },
-    // accepted drop/scope 查询镜像：E2E 用它验证真实 WASM 的范围几何与目标固定
-    // （change: 2026-10-12-align-film-set-scope-with-isometric-grid）。生产无副作用。
-    queryCompositeAssetScopes: () =>
-      runtime.queryCompositeAssetScopes?.({ generation: interactionGeneration }) ?? { ok: false, reason: "unsupported" },
+    // accepted drop target 查询镜像：E2E 用它验证真实 WASM 的目标固定。生产无副作用。
     queryDropTarget: (point: { x: number; y: number }, excludedIds: readonly string[] = []) =>
       runtime.queryDropTarget?.({ generation: interactionGeneration, x: point.x, y: point.y, excludedIds }) ??
       { ok: false, reason: "unsupported" }

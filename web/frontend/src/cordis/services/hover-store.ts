@@ -19,17 +19,6 @@ const EMPTY: HoverSnapshot = Object.freeze({ nodeId: null });
 
 export type HoverListener = () => void;
 
-/** 拍摄播放目标的稳定比较：同身份不清空/重发，避免重复通知重置 hover 截止点。 */
-function samePlaybackTarget(
-  a: import("../../extension-api/model-workspace.js").HoverPlaybackTarget,
-  b: import("../../extension-api/model-workspace.js").HoverPlaybackTarget
-): boolean {
-  if (a === null || b === null) return a === b;
-  return a.previewNodeId === b.previewNodeId
-    && a.filmSetNodeId === b.filmSetNodeId
-    && a.clipId === b.clipId;
-}
-
 export class HoverNodeStore {
   private playbackGate: (() => boolean) | null = null;
   /** Deadline reads consult the live input owner, including modal changes between frames. */
@@ -51,22 +40,8 @@ export class HoverNodeStore {
       this.invalidatePlayback();
     };
   }
-  private playback: import("../../extension-api/model-workspace.js").HoverPlaybackSnapshot = { target: null, blocked: true, epoch: 0 };
-  getPlaybackSnapshot = () => this.playbackGate?.()
-    ? { ...this.playback, target: null, blocked: true } : this.playback;
-  /** 发布拍摄播放目标（typed）；blocked 或更高优先级 owner 存在时清除目标。 */
-  setPlaybackTarget(
-    target: import("../../extension-api/model-workspace.js").HoverPlaybackTarget,
-    blocked = false
-  ): void {
-    blocked ||= this.hasPlaybackOwner() || !!this.playbackGate?.();
-    const next = blocked ? null : target;
-    if (samePlaybackTarget(this.playback.target, next) && this.playback.blocked === blocked) return;
-    this.playback = { ...this.playback, target: next, blocked };
-    for (const listener of this.listeners) listener();
-  }
+  /** 失效当前播放资格；capture 等更高优先级 owner 释放后由下一次输入重新判定。 */
   invalidatePlayback(): void {
-    this.playback = { target: null, blocked: true, epoch: this.playback.epoch + 1 };
     for (const listener of this.listeners) listener();
   }
   private snapshot: HoverSnapshot = EMPTY;

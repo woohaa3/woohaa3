@@ -1,46 +1,27 @@
-//! Stable full-scene slots and scope offsets; position frames touch moved IDs only.
+//! Stable full-scene slots; position frames touch moved IDs only.
 use crate::protocol::{NodePosition, Scene};
 use bevy::prelude::*;
 use std::collections::HashMap;
 
 #[derive(Resource, Default)]
-pub(crate) struct PositionIndex(HashMap<String, (usize, Option<Vec2>)>);
+pub(crate) struct PositionIndex(HashMap<String, usize>);
 impl PositionIndex {
     pub(super) fn reset(&mut self, scene: &Scene) {
         self.0 = scene
             .nodes
             .iter()
             .enumerate()
-            .map(|(i, n)| {
-                (
-                    n.id.clone(),
-                    (
-                        i,
-                        n.composite_asset
-                            .as_ref()
-                            .map(|s| Vec2::new(s.x - n.x, s.y - n.y)),
-                    ),
-                )
-            })
+            .map(|(i, n)| (n.id.clone(), i))
             .collect();
     }
     pub(super) fn apply(&self, scene: &mut Scene, positions: HashMap<String, NodePosition>) {
         for (id, p) in positions {
-            let Some(&(index, offset)) = self.0.get(&id) else {
+            let Some(&index) = self.0.get(&id) else {
                 continue;
             };
             let node = &mut scene.nodes[index];
-            let delta = Vec2::new(p.x - node.x, p.y - node.y);
             node.x = p.x;
             node.y = p.y;
-            if let (Some(scope), Some(offset)) = (&mut node.composite_asset, offset) {
-                scope.x = p.x + offset.x;
-                scope.y = p.y + offset.y;
-                if let Some(ground) = &mut scope.scope_ground {
-                    ground.cx += delta.x;
-                    ground.cy += delta.y;
-                }
-            }
         }
     }
 }
@@ -48,135 +29,130 @@ impl PositionIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        app::{CurrentScene, FilmSetTextureBatch, FrameFlags, ModelAssetTable, TextureBatch},
-        bridge,
-        theme::ThemeResource,
-    };
-    use bevy::ecs::system::RunSystemOnce;
 
-    fn scene() -> Scene {
-        Scene {
-            nodes: serde_json::from_value(serde_json::json!([
-                {"id":"a","type":"text","x":0,"y":0},
-                {"id":"film","type":"model","x":100,"y":200,
-                    "compositeAsset":{"x":120,"y":240,"width":300,"height":200,
-                        "scopeGround":{"cx":250,"cy":340,"hx":100,"hz":100}}}
-            ]))
+    #[test]
+    fn positions_move_body_and_ignore_unknown_ids() {
+        let mut scene = Scene::default();
+        scene.nodes.push(
+            serde_json::from_value(serde_json::json!({
+                "id":"a","type":"text","x":10,"y":20,"width":100,"height":50
+            }))
             .unwrap(),
-            ..default()
-        }
-    }
-    fn row(id: &str, x: f32, y: f32) -> NodePosition {
-        NodePosition {
-            id: id.into(),
-            x,
-            y,
-        }
-    }
-    #[test]
-    fn merged_positions_and_viewport_apply_after_pending_full_scene() {
-        let mut world = World::new();
-        world.insert_resource(CurrentScene::default());
-        // `ingest_bridge` 在读入完整场景后重建同代节点索引（design D7 / 任务 7.2）。
-        world.insert_resource(crate::app::NodeIndex::default());
-        world.insert_resource(PositionIndex::default());
-        world.insert_resource(FrameFlags::default());
-        world.insert_resource(ModelAssetTable::default());
-        world.insert_resource(TextureBatch::default());
-        world.insert_resource(FilmSetTextureBatch::default());
-        world.insert_resource(ThemeResource::default());
-        world.insert_resource(ClearColor::default());
-        // `ingest_bridge` 每帧消费图片聚焦细节批次；缺该资源会让系统参数校验失败
-        // （既有测试缺口，change: 2026-10-23-scale-canvas-media-residency 任务 10.2 修正）。
-        world.insert_resource(crate::canvas2d::focus_details::FocusDetailBatch::default());
-        bridge::queue_scene(scene());
-        bridge::queue_positions(vec![row("a", 40., 50.), row("film", 200., 300.)], None);
-        bridge::queue_viewport(crate::protocol::Viewport {
-            x: 20.,
-            y: 30.,
-            zoom: 0.5,
-        });
-        bridge::queue_positions(vec![row("a", 70., 80.)], None);
-        let resource = |texture| crate::protocol::NodeResourceState {
-            id: "a".into(),
-            texture,
-            media_loading: false,
-        };
-        bridge::queue_resource_states(vec![resource(false)]);
-        bridge::queue_resource_states(vec![resource(true)]);
-        world
-            .run_system_once(crate::app::input::ingest_bridge)
-            .unwrap();
-        let current = &world.resource::<CurrentScene>().0;
-        assert_eq!((current.nodes[0].x, current.nodes[0].y), (70., 80.));
-        assert!(current.nodes[0].texture);
-        assert!(!current.nodes[0].media_loading);
-        assert_eq!((current.nodes[1].x, current.nodes[1].y), (200., 300.));
-        let scope = current.nodes[1].composite_asset.as_ref().unwrap();
-        assert_eq!((scope.x, scope.y), (220., 340.));
-        assert_eq!(
-            (
-                current.viewport.x,
-                current.viewport.y,
-                current.viewport.zoom
-            ),
-            (20., 30., 0.5)
         );
-        let flags = world.resource::<FrameFlags>();
-        assert!(flags.scene_received && flags.positions_received);
-        assert!(!flags.viewport_only);
-        bridge::queue_positions(vec![row("a", 300., 400.)], None);
-        bridge::queue_resource_states(vec![resource(true)]);
-        bridge::queue_scene(scene()); // later full replaces every preceding increment
-        world
-            .run_system_once(crate::app::input::ingest_bridge)
-            .unwrap();
-        assert_eq!(world.resource::<CurrentScene>().0.nodes[0].x, 0.);
-        assert!(!world.resource::<FrameFlags>().positions_received);
-        assert!(world.resource::<FrameFlags>().resource_nodes.is_empty());
-        assert!(!world.resource::<CurrentScene>().0.nodes[0].texture);
-        world.clear_trackers();
-        bridge::queue_resource_states(vec![resource(false)]);
-        world
-            .run_system_once(crate::app::input::ingest_bridge)
-            .unwrap();
-        assert!(
-            !world
-                .get_resource_ref::<CurrentScene>()
-                .unwrap()
-                .is_changed(),
-            "unchanged resources and empty positions must not dirty the scene"
-        );
-        world.clear_trackers();
-        world
-            .run_system_once(crate::app::input::ingest_bridge)
-            .unwrap();
-        assert!(
-            !world
-                .get_resource_ref::<CurrentScene>()
-                .unwrap()
-                .is_changed(),
-            "an empty bridge inbox must leave CurrentScene unchanged"
-        );
-    }
-    #[test]
-    fn scope_translation_uses_full_baseline_offset_without_accumulating_drift() {
-        let mut scene = scene();
         let mut index = PositionIndex::default();
         index.reset(&scene);
-        for i in 0..200 {
-            let x = i as f32 * 0.13;
-            let y = i as f32 * 0.17;
-            index.apply(
-                &mut scene,
-                HashMap::from([("film".into(), row("film", x, y))]),
+        index.apply(
+            &mut scene,
+            [(
+                "a".to_owned(),
+                NodePosition {
+                    id: "a".into(),
+                    x: 40.0,
+                    y: 60.0,
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!((scene.nodes[0].x, scene.nodes[0].y), (40.0, 60.0));
+    }
+
+    #[test]
+    fn position_increment_does_not_reanchor_shared_world_model() {
+        use crate::model3d::{sync_models, FocusVisuals, ModelVisuals};
+        use crate::protocol::{ModelOp, ModelPlacement, ModelReference, ModelSnapshot};
+        use std::sync::Arc;
+        let mut node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({
+            "id":"a", "type":"model", "x":10, "y":20, "width":100, "height":50,
+            "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i",
+                "transform":{"version":"shared-world-v1","position":{"u":1,"v":2,"h":3},"rotation":[0,0,0,1],"scale":1}}
+        })).unwrap();
+        let snapshot = ModelSnapshot {
+            scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.into()),
+            ops: vec![ModelOp::Sphere {
+                id: "s".into(),
+                parent: None,
+                position: [0.; 3],
+                rotation: [0.; 3],
+                scale: [1.; 3],
+                color: Some("#ffffff".into()),
+                material: None,
+                radius: 1.,
+            }],
+            signature: "s".into(),
+            extent: 2.,
+            aabb: None,
+            geometry_keys: None,
+            prepared_bounds: None,
+            placement: ModelPlacement::default(),
+        };
+        node.model = Some(ModelReference {
+            resource_key: "s".into(),
+            scene_version: snapshot.scene_version.clone(),
+            signature: "s".into(),
+            placement: ModelPlacement::default(),
+        });
+        let assets = [("s".to_owned(), Arc::new(snapshot))].into_iter().collect();
+        let mut scene = Scene {
+            nodes: vec![node],
+            ..Scene::default()
+        };
+        let mut index = PositionIndex::default();
+        index.reset(&scene);
+        let mut world = World::new();
+        let mut visuals = ModelVisuals::default();
+        let mut focus = FocusVisuals::default();
+        let mut meshes = Assets::<Mesh>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let sync = |world: &mut World,
+                    visuals: &mut ModelVisuals,
+                    focus: &mut FocusVisuals,
+                    meshes: &mut Assets<Mesh>,
+                    materials: &mut Assets<StandardMaterial>,
+                    scene: &Scene| {
+            sync_models(
+                &mut world.commands(),
+                meshes,
+                materials,
+                visuals,
+                focus,
+                &assets,
+                scene,
             );
-            let scope = scene.nodes[1].composite_asset.as_ref().unwrap();
-            assert_eq!((scope.x, scope.y), (x + 20., y + 40.));
-            let ground = scope.scope_ground.as_ref().unwrap();
-            assert!((ground.cx - (x + 150.)).abs() < 0.001);
-            assert!((ground.cy - (y + 140.)).abs() < 0.001);
-        }
+            world.flush();
+        };
+        sync(
+            &mut world,
+            &mut visuals,
+            &mut focus,
+            &mut meshes,
+            &mut materials,
+            &scene,
+        );
+        let mut query = world.query_filtered::<&Transform, With<crate::model3d::ModelAnchor>>();
+        let before = *query.single(&world).unwrap();
+        index.apply(
+            &mut scene,
+            [(
+                "a".into(),
+                NodePosition {
+                    id: "a".into(),
+                    x: 900.,
+                    y: -200.,
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+        sync(
+            &mut world,
+            &mut visuals,
+            &mut focus,
+            &mut meshes,
+            &mut materials,
+            &scene,
+        );
+        assert_eq!(*query.single(&world).unwrap(), before);
+        assert_eq!(before.translation, Vec3::new(64., 192., -128.));
     }
 }

@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UiProvider } from "@woohaa3/ui/primitives";
 import CanvasCreationPopover from "./canvas-creation-popover.js";
+import type { CanvasContextMenuItem } from "./canvas-context-menu.js";
 
 const mocks = vi.hoisted(() => ({ services: {} as Record<string, any> }));
 vi.mock("../../react.js", () => ({ useService: (key: string) => mocks.services[key] }));
@@ -29,46 +30,46 @@ beforeEach(() => {
 });
 const select = vi.fn();
 afterEach(async () => { await act(async () => root.unmount()); el.remove(); });
-async function render(writable = true, items = [{ id: "insert:text", label: "文本", section: "basic-material" }]) {
+async function render(writable = true, items: CanvasContextMenuItem[] = [{ id: "insert:text", label: "文本", section: "basic-material" }]) {
   await act(async () => root.render(<UiProvider><CanvasCreationPopover menuIdentity={menu} screen={{ x: 100, y: 100 }} world={{ x: 40, y: 50 }} items={items} writable={writable} onSelect={selectItem} onClose={close} /></UiProvider>));
 }
-function entry() { return document.querySelector<HTMLButtonElement>(".canvas-create__ai-entry")!; }
 describe("blank canvas creation menu", () => {
-  it("creates and selects a group at the context position without an assistant input step", async () => {
-    await render();
-    expect(mocks.services.canvasEdit.record).not.toHaveBeenCalled();
-    await act(async () => entry().click());
-    const commands = mocks.services.canvasEdit.record.mock.calls[0][0];
-    expect(commands).toEqual([{ type: "node.add", node: { id: expect.any(String), type: "group", position: { x: 40, y: 50 } }, nodeData: {} }]);
-    expect(select).toHaveBeenCalledWith(commands[0].node.id);
-    expect(mocks.services.canvasNavigation.openPanel).toHaveBeenCalledWith({ type: "model-node-editor", nodeId: commands[0].node.id });
-    expect(close).toHaveBeenCalledOnce();
-    expect(document.querySelector(".canvas-create__composer")).toBeNull();
-  });
-  it("把上传放到基础素材行末尾，并用浅色分隔与音频隔开", async () => {
+  it("按创建分区展示操作，上传独立置底并保留扩展贡献", async () => {
     await render(true, [
       { id: "insert:text", label: "文本", section: "basic-material" },
       { id: "insert:image", label: "图片", section: "basic-material" },
       { id: "insert:model3d", label: "3D 模型", section: "basic-material" },
       { id: "insert:video", label: "视频", section: "basic-material" },
       { id: "insert:audio", label: "音频", section: "basic-material" },
-      { id: "insert-template:film-set-node", label: "3D 片场", section: "creation-tools" },
+      { id: "insert-scope:area", label: "导演区", section: "basic-material" },
+      { id: "insert-scope:group", label: "节点组", section: "basic-material" },
+      { id: "insert-scope:camera", label: "镜头", section: "basic-material" },
+      { id: "insert-template:custom", label: "扩展素材", section: "creation-tools" },
       { id: "upload", label: "上传…", section: "other" }
     ]);
+    expect(document.querySelector(".canvas-create__heading h2")?.textContent).toBe("在此处新建");
     const action = document.querySelector<HTMLButtonElement>(
-      '.canvas-create__materials [data-section="basic-material"] .canvas-create__grid-action'
+      '.canvas-create__footer .canvas-create__upload'
     )!;
-    const basicButtons = [...document.querySelectorAll('.canvas-create__materials [data-section="basic-material"] button')];
-    expect(basicButtons).toHaveLength(6);
-    expect(basicButtons[basicButtons.length - 1]).toBe(action);
-    expect(action.title).toBe("上传…");
+    const labels = (section: string) => [...document.querySelectorAll(`.canvas-create__materials [data-section="${section}"] .canvas-create__label`)].map(label => label.textContent);
+    expect(labels("canvas-2d")).toEqual(["新建文本", "新建图片", "新建视频", "新建音频", "新建节点组"]);
+    expect(labels("shared")).toEqual(["新建镜头"]);
+    expect(labels("scene-3d")).toEqual(["新建3D 模型", "新建导演区"]);
+    expect(labels("creation-tools")).toEqual(["新建扩展素材"]);
+    const badges = [...document.querySelectorAll(".canvas-create__agent-badge")];
+    expect(badges.map(badge => [badge.closest("button")?.querySelector(".canvas-create__label")?.textContent, badge.textContent])).toEqual([
+      ["新建节点组", "Agent 编排"],
+      ["新建3D 模型", "Agent 生成"],
+      ["新建导演区", "Agent 编排"]
+    ]);
+    expect(action.title).toBe("上传素材…");
     expect(action.querySelector("svg")).not.toBeNull();
-    expect(action.textContent).toBe("上传…");
-    expect(action.className).toContain("canvas-create__grid-action");
+    expect(action.textContent).toBe("上传素材…");
     expect(document.querySelector('.canvas-create__materials [data-section="other"]')).toBeNull();
-    expect(document.querySelectorAll(".canvas-create__materials section")).toHaveLength(2);
     await act(async () => action.click());
     expect(selectItem).toHaveBeenCalledWith("upload");
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-section="creation-tools"] button')!.click());
+    expect(selectItem).toHaveBeenLastCalledWith("insert-template:custom");
   });
   it("uses concrete type icons for every node material", async () => {
     await render(true, [
@@ -82,51 +83,30 @@ describe("blank canvas creation menu", () => {
     expect(classes[0]).toContain("lucide-type");
     expect(classes[1]).toContain("lucide-image");
     expect(classes[2]).toContain("lucide-film");
-    expect(classes[3]).toContain("lucide-box");
-    expect(classes[4]).toContain("lucide-music");
+    expect(classes[3]).toContain("lucide-music");
+    expect(classes[4]).toContain("lucide-box");
   });
-  it("keeps material shortcuts and a search field without executing on Enter", async () => {
+  it("does not render a filter input and never executes on Enter", async () => {
     await render();
-    const field = document.querySelector("textarea")!;
-    expect(field.placeholder).toBe("搜索素材…");
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-      setter.call(field, "不存在的素材");
-      field.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    expect(document.querySelector(".canvas-create__grid")).toBeNull();
-    expect(entry().textContent).toContain("用 AI 创作");
-    await act(async () => field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true })));
+    expect(document.querySelector("input")).toBeNull();
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true })));
     expect(mocks.services.canvasEdit.record).not.toHaveBeenCalled();
   });
-  it("disables creation for read-only menus and rechecks write permission on click", async () => {
-    await render(false);
-    expect(entry().disabled).toBe(true);
-    await render();
-    mocks.services.canvasSession.isWritable.mockReturnValue(false);
-    await act(async () => entry().click());
-    expect(mocks.services.canvasEdit.record).not.toHaveBeenCalled();
+  it("footer keeps the upload action and its disabled reason", async () => {
+    await render(true, [
+      { id: "insert:text", label: "文本", section: "basic-material" },
+      { id: "insert-scope:camera", label: "镜头", section: "basic-material" },
+      { id: "upload", label: "上传…", section: "other", disabled: true, reason: "当前画布只读" }
+    ]);
+    const upload = document.querySelector<HTMLButtonElement>(".canvas-create__footer .canvas-create__upload")!;
+    expect(upload.disabled).toBe(true);
+    expect(upload.title).toBe("当前画布只读");
+    await act(async () => upload.click());
+    expect(selectItem).not.toHaveBeenCalledWith("upload");
+    expect(document.querySelectorAll(".canvas-create__grid button")).toHaveLength(2);
   });
-  it("prevents repeated creation and preserves the menu on a rejected edit", async () => {
-    let resolve!: (result: unknown) => void;
-    mocks.services.canvasEdit.record.mockReturnValue(new Promise(r => { resolve = r; }));
+  it("no longer offers the group creation entry", async () => {
     await render();
-    act(() => { entry().click(); entry().click(); });
-    expect(mocks.services.canvasEdit.record).toHaveBeenCalledOnce();
-    await act(async () => resolve({ ok: false, reason: "画布已断开连接" }));
-    expect(document.body.textContent).toContain("画布已断开连接");
-    expect(select).not.toHaveBeenCalled();
-    expect(close).not.toHaveBeenCalled();
-    expect(entry().disabled).toBe(false);
-  });
-  it.each(["canvas", "menu"])("does not select a late result after switching %s", async target => {
-    let resolve!: (result: unknown) => void;
-    mocks.services.canvasEdit.record.mockReturnValue(new Promise(r => { resolve = r; }));
-    await render();
-    act(() => entry().click());
-    if (target === "canvas") canvasId = "other"; else currentMenu = {};
-    await act(async () => resolve({ ok: true }));
-    expect(select).not.toHaveBeenCalled();
-    expect(close).not.toHaveBeenCalled();
+    expect(document.querySelector(".canvas-create__ai-entry")).toBeNull();
   });
 });

@@ -6,7 +6,7 @@
  * `assets`、`jobs`、`revision` 与 `updatedAt`。返回 `changed: false` 时不递增 revision，
  * 避免无操作提交制造 revision 抖动。
  */
-import { DEFAULT_NODE_DIMS, collectWoohaa3CanvasRemovalIds, createWoohaa3CanvasEdge, fromWoohaa3CanvasDocument, isValidWoohaa3CanvasConnection, nextWoohaa3CanvasNodeZIndex, sanitizeWoohaa3CanvasParentIds, toWoohaa3CanvasDocument, type CanvasNodeData, type ServerCanvas, type StoredAsset, type StoredJob, type Woohaa3CanvasEdge, type Woohaa3CanvasJsonObject, type Woohaa3CanvasNode, type Woohaa3CanvasPosition, type Woohaa3CanvasSnapshot } from "@woohaa3/contracts";
+import { DEFAULT_NODE_DIMS, collectWoohaa3CanvasRemovalIds, createWoohaa3CanvasEdge, fromWoohaa3CanvasDocument, isValidWoohaa3CanvasConnection, nextWoohaa3CanvasNodeZIndex, toWoohaa3CanvasDocument, type CanvasNodeData, type ServerCanvas, type StoredAsset, type StoredJob, type Woohaa3CanvasEdge, type Woohaa3CanvasJsonObject, type Woohaa3CanvasNode, type Woohaa3CanvasPosition, type Woohaa3CanvasSnapshot } from "@woohaa3/contracts";
 
 export type CanvasCommitRejectionCode =
   | "unknown-node"
@@ -55,7 +55,7 @@ export function commitCanvas(
   const now = options.now ?? new Date().toISOString();
   const current = canvasGraphOf(canvas);
 
-  const nodes = sanitizeWoohaa3CanvasParentIds([...(patch.nodes ?? current.nodes)]);
+  const nodes = [...(patch.nodes ?? current.nodes)];
   const edges = [...(patch.edges ?? current.edges)];
   const nodeIds = new Set(nodes.map((node) => node.id));
 

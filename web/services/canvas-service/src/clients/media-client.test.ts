@@ -23,25 +23,18 @@ function recordingFetch(): { bodies: unknown[]; fetchImpl: typeof globalThis.fet
 }
 
 describe("CanvasMediaClient.read 画布作用域", () => {
-  it("调用方声明的扩展作用域原样进入请求体", async () => {
+  it("调用方给了 canvasId 时请求体带 canvasId", async () => {
     const { bodies, fetchImpl } = recordingFetch();
     const client = createCanvasMediaClient({ baseUrl: "http://media.local", serviceToken: "token", fetchImpl });
-    const media = await client.read!(STORAGE_KEY, "canvas-a", "studio-media");
+    const media = await client.read!(STORAGE_KEY, "canvas-a");
     expect(Array.from(media.bytes)).toEqual([1, 2, 3]);
-    expect(bodies).toEqual([{ extensionId: "studio-media", storageKey: STORAGE_KEY, canvasId: "canvas-a" }]);
+    expect(bodies).toEqual([{ extensionId: "canvas-service", storageKey: STORAGE_KEY, canvasId: "canvas-a" }]);
   });
 
-  it("没有画布时仍发送调用方声明的扩展作用域", async () => {
+  it("调用方没有画布时不添加 canvasId（保持旧行为）", async () => {
     const { bodies, fetchImpl } = recordingFetch();
     const client = createCanvasMediaClient({ baseUrl: "http://media.local", serviceToken: "token", fetchImpl });
-    await client.read!(STORAGE_KEY, undefined, "studio-media");
-    expect(bodies).toEqual([{ extensionId: "studio-media", storageKey: STORAGE_KEY }]);
-  });
-
-  it("没有扩展作用域时拒绝，不替调用方填片场身份", async () => {
-    const { bodies, fetchImpl } = recordingFetch();
-    const client = createCanvasMediaClient({ baseUrl: "http://media.local", serviceToken: "token", fetchImpl });
-    await expect(client.read!(STORAGE_KEY, "canvas-a")).rejects.toMatchObject({ code: "extension-scope-required" });
-    expect(bodies).toEqual([]);
+    await client.read!(STORAGE_KEY);
+    expect(bodies).toEqual([{ extensionId: "canvas-service", storageKey: STORAGE_KEY }]);
   });
 });

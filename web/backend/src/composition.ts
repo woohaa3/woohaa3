@@ -149,8 +149,6 @@ export type BackendService = {
     runtime: BackendRuntime;
     generation: HostGenerationService;
     storage: HostStorageService;
-    /** 本机录制执行器通道；无 Unix socket 的平台上为 null。 */
-    recordingExecutor: import("./host/core/recording-executor.js").RecordingExecutorChannel | null;
   };
 };
 
@@ -343,8 +341,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
       application: service("application").service,
       runtime: service("application").runtime,
       generation: service("generation"),
-      storage: service("storage"),
-      recordingExecutor: ctx.get("recordingExecutor") ?? null
+      storage: service("storage")
     })
   };
 }

@@ -1,4 +1,3 @@
-import { validateGroupAppearanceCommands } from "./group-appearance-validation.js";
 /**
  * 服务端 canvas room：命令验证、事务与持久化管线
  * （自 `room.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R27）。
@@ -64,11 +63,13 @@ export async function executeDerived(
     /** 脚本请求 hash；提供时用于区分「重试已成功请求」与「复用身份改内容」。 */
     expectedPayloadHash?: string;
     expectedModelBatchHash?: string;
+    /** T06: same operationId must carry the same frozen scene-area intent. */
+    expectedWorldAuthoringHash?: string;
     derive: (canvas: ServerCanvas) =>
-      | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta }
+      | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta; worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt }
       | { ok: false; code: string; message: string }
       | Promise<
-          | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta }
+          | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta; worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt }
           | { ok: false; code: string; message: string }
         >;
   },
@@ -83,6 +84,9 @@ export async function executeDerived(
   // 幂等预检在派生之前：命中同 commandId 的回执直接返回首次结果，不重新读取/应用变更。
   const existing = input.commandId.trim() === "" ? null : await host.repository.getCommandRecord(host.canvasId, input.commandId);
   if (existing) {
+    if (input.expectedWorldAuthoringHash !== undefined && existing.worldAuthoring?.intentHash !== input.expectedWorldAuthoringHash) return {
+      ok: false, status: "rejected", commandId: input.commandId, code: "request-id-reused", message: "相同 operationId 使用了不同场景意图"
+    };
     if (input.expectedModelBatchHash !== undefined && existing.modelBatch?.submissionHash !== input.expectedModelBatchHash) return {
       ok: false, status: "rejected", commandId: input.commandId, code: "request-id-reused", message: "相同 requestId 使用了不同模型批次"
     };
@@ -105,6 +109,7 @@ export async function executeDerived(
       update: null,
       ...(existing.script ? { script: existing.script } : {}),
       ...(existing.modelBatch ? { modelBatch: existing.modelBatch } : {}),
+      ...(existing.worldAuthoring ? { worldAuthoring: existing.worldAuthoring } : {}),
       duplicate: true
     };
   }
@@ -116,7 +121,7 @@ export async function executeDerived(
   if (!derived.ok) {
     return { ok: false, status: "rejected", commandId: input.commandId, code: derived.code, message: derived.message };
   }
-  return executeCommand(host, derived.batch, { ...options, ...(derived.script ? { script: derived.script } : {}), ...(derived.modelBatch ? { modelBatch: derived.modelBatch } : {}) });
+  return executeCommand(host, derived.batch, { ...options, ...(derived.script ? { script: derived.script } : {}), ...(derived.modelBatch ? { modelBatch: derived.modelBatch } : {}), ...(derived.worldAuthoring ? { worldAuthoring: derived.worldAuthoring } : {}) });
 }
 
 export async function executeCommand(
@@ -166,15 +171,13 @@ export async function executeCommand(
   // 也保证提交失败时不需要回滚 published。
   const authoring = cloneDoc(host.publishedDoc);
   const before = host.exportCanvas();
-  const scope = currentCanvasGroupScope();
-  if (scope && (!scope.valid() || scope.canvasId !== host.canvasId)) return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-revoked", message: "组创作授权已失效" };
-  if (scope?.authorize && !await scope.authorize("write")) return { ok: false, status: "rejected", commandId: batch.commandId, code: "write-forbidden", message: "画布写入权限已撤销" };
-
-  if (before.ok) {
-    const appearanceError = await validateGroupAppearanceCommands(before.canvas, batch.commands);
-    if (appearanceError) return { ok: false, status: "rejected", commandId: batch.commandId, code: "invalid-group-appearance", message: appearanceError };
+  const groupScope = currentCanvasGroupScope();
+  if (groupScope && (!groupScope.valid() || groupScope.canvasId !== host.canvasId)) {
+    return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-revoked", message: "组创作授权已失效" };
   }
-  if (scope && !scope.valid()) return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-revoked", message: "组创作授权已失效" };
+  if (groupScope?.authorize && !(await groupScope.authorize("write"))) {
+    return { ok: false, status: "rejected", commandId: batch.commandId, code: "write-forbidden", message: "画布写入权限已撤销" };
+  }
   const outcome = await applyCommandTransaction({
     doc: authoring,
     batch,
@@ -194,10 +197,14 @@ export async function executeCommand(
     };
   }
 
-  if (scope) {
-    const reason = before.ok ? validateCanvasGroupChange(before.canvas, outcome.canvas, scope.rootGroupId) : "画布不可读";
-    if (reason || !scope.valid()) return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-forbidden", message: reason ?? "组创作授权已撤销" };
+  if (before.ok) invalidateRemovedCanvasGroups(before.canvas, outcome.canvas);
+  if (groupScope) {
+    const reason = before.ok ? validateCanvasGroupChange(before.canvas, outcome.canvas, groupScope.rootGroupId) : "画布不可读";
+    if (reason || !groupScope.valid()) {
+      return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-forbidden", message: reason ?? "组创作授权已撤销" };
+    }
   }
+
   const record: YjsCommandRecord = {
     commandId: batch.commandId,
     payloadHash,
@@ -207,12 +214,16 @@ export async function executeCommand(
     createdAt: host.nowIso(),
     // noop 也保存首次回执（spec）；元数据在首次提交时冻结。
     ...(options?.script ? { script: options.script } : {}),
-    ...(options?.modelBatch ? { modelBatch: options.modelBatch } : {})
+    ...(options?.modelBatch ? { modelBatch: options.modelBatch } : {}),
+    ...(options?.worldAuthoring ? { worldAuthoring: options.worldAuthoring } : {})
   };
 
   // 无净变化：仍持久化幂等记录，但 update 为空、revision 不变（design D5）。
   const updateForStorage = outcome.update ?? new Uint8Array(0);
+  if (options?.signal?.aborted) return { ok: false, status: "rejected", commandId: batch.commandId, code: "cancelled", message: "提交已取消" };
   const commit = await host.repository.commitYjsCommand({
+    spatialContext: options?.spatialContext,
+    signal: options?.signal,
     canvasId: host.canvasId,
     expectedStorageSeq: host.storageSeq,
     update: updateForStorage,
@@ -221,6 +232,9 @@ export async function executeCommand(
     projection: outcome.canvas,
     command: record
   }).catch((error: unknown) => {
+    if (options?.signal?.aborted && error instanceof Error && error.name === "AbortError") {
+      return { ok: false as const, code: "cancelled" as const };
+    }
     // 暂时存储失败：不广播、不确认成功（design D6 步骤 5）。
     return { ok: false as const, code: "storage-failed" as const, message: message(error) };
   });
@@ -231,7 +245,6 @@ export async function executeCommand(
 
   // durable 成功 → 前进 published → 广播 → 才返回 accepted（design D6 步骤 4）。
   const acceptedUpdate = outcome.changed ? outcome.update : null;
-  if (before.ok) invalidateRemovedCanvasGroups(before.canvas, outcome.canvas);
   host.finalizeAccepted({
     storageSeq: commit.storageSeq,
     update: acceptedUpdate,
@@ -239,7 +252,6 @@ export async function executeCommand(
     canvas: outcome.canvas,
     commands: batch.commands
   });
-  scope?.onAction?.({ canvasId: host.canvasId, commandId: batch.commandId, revision: outcome.revision });
 
   return {
     ok: true,
@@ -249,7 +261,8 @@ export async function executeCommand(
     noop: !outcome.changed,
     update: acceptedUpdate,
     ...(options?.script ? { script: options.script } : {}),
-    ...(options?.modelBatch ? { modelBatch: options.modelBatch } : {})
+    ...(options?.modelBatch ? { modelBatch: options.modelBatch } : {}),
+    ...(options?.worldAuthoring ? { worldAuthoring: options.worldAuthoring } : {})
   };
 }
 
@@ -310,15 +323,19 @@ function duplicateResult(
     update: null,
     ...(existing.script ? { script: existing.script } : {}),
       ...(existing.modelBatch ? { modelBatch: existing.modelBatch } : {}),
+      ...(existing.worldAuthoring ? { worldAuthoring: existing.worldAuthoring } : {}),
     duplicate: true
   };
 }
 
 /** 持久化失败 → 稳定错误码映射。 */
 function commitFailure(
-  commit: { ok: false; code: string; message?: string },
+  commit: { ok: false; code: string; message?: string; reason?: string; conflict?: import("../world-authoring/spatial-leases.js").LeaseConflict },
   commandId: string
 ): RoomCommandResult {
+  if (commit.code === "cancelled") return { ok: false, status: "rejected", commandId, code: "cancelled", message: "提交已取消" };
+  if (commit.code === "lease-conflict") return { ok: false, status: "rejected", commandId, code: "lease-conflict", message: "对象正在被其他运行占用", conflict: commit.conflict };
+  if (commit.code === "spatial-rejected") return { ok: false, status: "rejected", commandId, code: "spatial-rejected", message: "空间写入资格无效", spatialReason: commit.reason, conflict: commit.conflict };
   if (commit.code === "storage-seq-conflict") {
     // room 已在本层之上自动重载并重试（见 `CanvasRoom.withStorageSeqRecovery`）；走到这里
     // 说明重试上限用尽（仍在与别的 writer 竞争），因此这里的失败确实可以再试一次。

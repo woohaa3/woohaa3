@@ -52,8 +52,13 @@ describe("projectAgentTurnOperations", () => {
     }
   });
 
-  it("片场与镜头回合使用各自种类，其它画布或无节点目标不投影", () => {
-    expect(projectAgentTurnOperations(snapshot(turn({ target: { canvasId: "canvas-1", nodeId: "n1", mode: "film-set" } })), "canvas-1")[0]?.kind).toBe("film-set");
+  it("图片转 3D 的回合不将来源图片标记为生成中", () => {
+    const target = { canvasId: "canvas-1", nodeId: "n1", mode: "model3d" as const, delivery: { purpose: "image-director-scene" as const, domainRequestId: "req-1", attemptId: "1" } };
+    expect(projectAgentTurnOperations(snapshot(turn({ target })), "canvas-1")).toEqual([]);
+    expect(projectAgentTurnOperations(snapshot(turn({ target: { ...target, nodeId: "director", delivery: { ...target.delivery, nodeId: "director" } } })), "canvas-1")).toMatchObject([{ nodeId: "director", state: "running" }]);
+  });
+
+  it("镜头回合使用镜头种类，其它画布或无节点目标不投影", () => {
     expect(projectAgentTurnOperations(snapshot(turn({ target: { canvasId: "canvas-1", nodeId: "n1", mode: "camera" } })), "canvas-1")[0]?.kind).toBe("camera");
     expect(projectAgentTurnOperations(snapshot(turn({ target: { canvasId: "other", nodeId: "n1" } })), "canvas-1")).toEqual([]);
     expect(projectAgentTurnOperations(snapshot(turn({ target: { canvasId: "canvas-1" } })), "canvas-1")).toEqual([]);

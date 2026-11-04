@@ -1956,9 +1956,6 @@
 	background: color-mix(in srgb, var(--app-web-surface, transparent) 55%, transparent);
 }
 .focus-run-strip__overlay { font-size: 14px; color: var(--app-interaction-accent); }
-.focus-run-strip--film-set { top: var(--focus-content-y, 0px); left: var(--focus-content-x, 0px); width: var(--focus-content-width, 100%); height: var(--focus-content-height, 100%); background: color-mix(in srgb, var(--app-canvas-node-content) 45%, transparent); }
-.focus-run-strip--film-set span { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: block; padding: 4px 10px; border-radius: 6px; background: var(--app-web-surface); color: var(--app-interaction-accent); font-size: 12px; }
-.focus-run-strip--film-set[data-phase="failed"] span { color: var(--app-status-danger); }
 
 .node-history__apply {
 	border: 1px solid var(--app-interaction-accent);
@@ -3195,55 +3192,6 @@
 	height: 14px;
 }
 
-/* 分组提交摘要：结果文案 + 可展开原因；展开时改为纵向卡片。 */
-.group-run-summary {
-	position: relative;
-	flex-direction: column;
-	align-items: stretch;
-	gap: 6px;
-	padding-right: 32px;
-	max-width: min(520px, calc(100vw - 32px));
-	border-radius: 14px;
-}
-
-.group-run-summary > .canvas-undo-toast__text {
-	text-align: center;
-}
-
-.group-run-summary > .canvas-undo-toast__action {
-	align-self: center;
-}
-
-.group-run-summary__details {
-	margin: 0;
-	padding: 4px 2px 0;
-	list-style: none;
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	max-height: 200px;
-	overflow-y: auto;
-}
-
-.group-run-summary__detail {
-	color: var(--app-web-text-muted);
-	font-size: 12px;
-	line-height: 1.5;
-	white-space: normal;
-	word-break: break-word;
-}
-
-.group-run-summary__detail--headline {
-	color: var(--app-web-text-primary);
-}
-
-/* 关闭按钮在有详情时贴右上，避免挤压结果文案。 */
-.group-run-summary > .canvas-undo-toast__close {
-	position: absolute;
-	top: 6px;
-	right: 8px;
-}
-
 /* 作品重命名输入浮层：画布中央。 */
 .node-rename {
 	position: fixed;
@@ -3333,31 +3281,8 @@
 .canvas-render-warnings ul { margin: 8px 0; padding-left: 18px; }
 .canvas-render-warnings li + li { margin-top: 8px; }
 .canvas-render-warnings pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.film-set-animation-controls input:not([type="checkbox"]), .film-set-animation-controls select {
-  box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--mc-border);
-  border-radius: 6px; background: var(--mc-panel); color: var(--mc-text); font: inherit;
-}
-.film-set-animation-controls input[type="checkbox"], .film-set-animation-player input[type="range"] { accent-color: var(--mc-accent); }
-.film-set-animation-modes [aria-pressed="true"] { background: var(--mc-accent-soft); color: var(--mc-accent); }
-.film-set-animation-player { max-height: 100px; overflow-y: auto; }
-@media (max-width: 899px) {
-  .film-set-animation-player { max-height: 160px; padding: 8px; gap: 6px; }
-  .film-set-animation-player input[type="range"] { flex-basis: 100%; order: -1; }
-}
 @media (pointer: coarse) {
-  .film-set-animation-controls .ui-button, .film-set-animation-player .ui-button,
   .canvas-empty .ui-button { min-height: 44px; min-width: 44px; }
-  .film-set-animation-controls input:not([type="checkbox"]), .film-set-animation-controls select { min-height: 44px; }
-}
-.film-set-animation-player__transport, .film-set-animation-player__actions { display: contents; }
-@media (max-width: 899px) {
-  .film-set-animation-player__transport, .film-set-animation-player__actions {
-    display: flex; align-items: center; gap: 6px; flex-basis: 100%; min-width: 0; flex-wrap: wrap;
-  }
-  .film-set-animation-player input[type="range"] { order: 0; width: 100%; margin: 0; }
-  .film-set-animation-player__transport output { margin-left: auto; }
-  .film-set-animation-player__actions > .ui-button { flex: 1 1 0; min-width: 0; padding-inline: 4px; }
-  .film-set-animation-player__actions > p { flex-basis: 100%; }
 }
 .canvas-empty { pointer-events: none; }
 .canvas-empty .ui-button { pointer-events: auto; }

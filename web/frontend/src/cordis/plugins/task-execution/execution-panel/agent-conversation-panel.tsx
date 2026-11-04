@@ -66,11 +66,6 @@ const TURN_STAGE_LABEL: Record<string, string> = {
   responding: "生成中",
   "thread-started": "助手已连接",
   resumed: "助手已连接",
-  "prepare-source": "准备素材",
-  "analyze-content": "分析素材",
-  "generate-film-set": "生成片场",
-  "repair-candidate": "修正片场数据",
-  "validate-and-save": "校验并保存",
   completed: "生成结束",
   committing: "提交中",
 };
@@ -117,7 +112,6 @@ export type AgentConversationPanelProps = {
    * 传入宽度；`null` 表示释放占位。
    */
   targetExecution?: () => AgentEntryIntent | null;
-  onContinueGroup?: () => void;
   onWidthChange?: (width: number | null) => void;
 };
 
@@ -158,10 +152,10 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
   const latest = snapshot.detail?.turns.at(-1);
   const continuationTarget = snapshot.detail ? [...snapshot.detail.turns].reverse().find((turn) =>
     (!props.nodeId || turn.target.nodeId === props.nodeId) &&
-    (turn.target.mode || turn.target.cameraId || turn.target.clipId || turn.target.itemId),
+    (turn.target.mode || turn.target.cameraId),
   )?.target : undefined;
   const modifying = Boolean(props.nodeId && snapshot.detail?.conversation.nodeId === props.nodeId &&
-    ["model3d", "film-set", "canvas-group"].includes(continuationTarget?.mode ?? ""));
+    continuationTarget?.mode === "model3d");
   const replyConnectionId = snapshot.detail?.conversation.connectionId;
   const replyConnection = directoryView.connections.find(connection => connection.connectionId === replyConnectionId);
   const replyModels = agentDirectoryModels(replyConnection?.models, replyConnection ? directoryView.catalogs[replyConnection.adapterId]?.models : undefined);
@@ -248,7 +242,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
     setReplyError(null);
     const session = replySession.current;
     // 详情回复仍属于原目标会话。把上一轮目标的稳定标识带回去，
-    // 本机 Agent 才能命中同一原生线程（尤其是 model3d / film-set 的 mode、clip）。
+    // 本机 Agent 才能命中同一原生线程（尤其是 model3d 的 mode、camera）。
     void controller.submit({
       canvasId: snapshot.detail.conversation.canvasId, conversationId: props.conversationId,
       connectionId: snapshot.detail.conversation.connectionId, adapterId: snapshot.detail.conversation.adapterId,
@@ -259,8 +253,6 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
         ...(props.nodeId ? { nodeId: props.nodeId } : {}), prompt,
         ...(continuationTarget?.mode ? { mode: continuationTarget.mode } : {}),
         ...(continuationTarget?.cameraId ? { cameraId: continuationTarget.cameraId } : {}),
-        ...(continuationTarget?.clipId ? { clipId: continuationTarget.clipId } : {}),
-        ...(continuationTarget?.itemId ? { itemId: continuationTarget.itemId } : {}),
         ...(execution ? { ...execution, action: "modify", prompt } : {}),
         // 用户在侧栏显式选择的模型优先于旧目标携带的模型。
         model: replyModel || undefined,
@@ -395,8 +387,6 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
               </button>
             )
           ) : null}
-          {turn?.target.mode === "canvas-group" && props.onContinueGroup ? <button type="button" className="agent-detail__back"
-            disabled={!props.targetExecution?.()} onClick={props.onContinueGroup}>继续组内创作</button> : null}
           <button
             type="button"
             className="agent-detail__back"
@@ -473,7 +463,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
             ) : null}
           </div>
         ) : null}
-        {turn?.target.mode === "text" && ["queued", "running", "committing"].includes(turn.status) ? <Button tone="neutral" disabled={stopping || !props.targetExecution?.()} onClick={() => void stopTurn()}>停止此回合</Button> : null}
+        {turn && ["queued", "running", "committing"].includes(turn.status) ? <Button tone="neutral" disabled={stopping || !props.targetExecution?.()} onClick={() => void stopTurn()}>停止此回合</Button> : null}
         {turn?.status === "failed" && turn.error?.code === UNCONFIRMED_WRITE_ERROR_CODE && turn.target.mode === "text" ? (
           <div className="agent-detail__result" data-status="failed">
             <p>重试会先查询原提交并复用候选，不会重新推理。</p>
@@ -483,9 +473,9 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
                 setStopping(true); void service.retryTextSave(turn.requestId).then(result => { if (!result.ok) setStopError(result.error); else void service.openDetail(props.conversationId); }).finally(() => setStopping(false));
               }}>重试保存</button>
             </div>
-            {stopError ? <p className="agent-detail__error">{stopError}</p> : null}
           </div>
         ) : null}
+        {stopError ? <p className="agent-detail__error">{stopError}</p> : null}
       </div>
 
       {turn?.target.mode === "text" ? <Button tone="neutral" disabled={!props.targetExecution?.() || input.busy || !draft.trim() || Boolean(selectionReason)} onClick={() => submitReply(undefined, true)}>按描述继续生成文本</Button> : null}
@@ -528,7 +518,7 @@ function MessageRow({ message, structuredOutput }: { message: ConversationMessag
   // 转换候选是建模输入；按确切回合识别，普通讨论（包括 JSON 回复）仍按消息展示。
   if (structuredOutput && message.role === "assistant") return (
     <details className="agent-detail__receipt" onToggle={event => setExpanded(event.currentTarget.open)}>
-      <summary><ChevronRightIcon size={14} />片场生成数据</summary>
+      <summary><ChevronRightIcon size={14} />结构化生成数据</summary>
       {expanded ? <pre>{message.content}{message.truncated ? "\n（历史记录已截断）" : ""}</pre> : null}
     </details>
   );
@@ -650,8 +640,6 @@ function describeTarget(turn: ConversationTurn): string {
   const parts: string[] = [];
   if (turn.target.mode) parts.push(turn.target.mode);
   if (turn.target.nodeId) parts.push(turn.target.nodeId);
-  if (turn.target.clipId) parts.push(turn.target.clipId);
-  if (turn.target.itemId) parts.push(turn.target.itemId);
   return parts.length > 0 ? parts.join(" · ") : `请求 ${turn.requestId}`;
 }
 

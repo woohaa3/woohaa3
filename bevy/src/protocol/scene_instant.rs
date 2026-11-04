@@ -66,6 +66,8 @@ pub(crate) struct NodeHover {
     /// 指针下的连线 id；节点悬停时缺省。
     #[serde(default)]
     pub(crate) edge_id: Option<String>,
+    #[serde(default)]
+    pub(crate) cursor: Option<CursorPoint>,
 }
 
 /// 待提交连线（拖动粘连与聚合拉线预览共用）
@@ -344,15 +346,7 @@ pub(crate) struct ModelEditor {
     /// 工具模式："model" | "camera"。
     pub(crate) tool_mode: String,
     #[serde(default)]
-    pub(crate) object_tool: crate::gizmo_layout::ObjectTool,
-    #[serde(default)]
-    pub(crate) shot_preview: bool,
-    #[serde(default)]
     pub(crate) grid: Option<EditorGrid>,
-    #[serde(default)]
-    pub(crate) item_id: Option<String>,
-    #[serde(default)]
-    pub(crate) parent_basis: Option<[f32; 9]>,
     #[serde(default)]
     pub(crate) feedback: Option<GizmoFeedback>,
     /// 显式镜头工具："orbit" | "distance" | "focus"
@@ -451,19 +445,8 @@ impl ModelEditor {
         if self.node_id.is_empty() || self.node_id.len() > 128 {
             return Err("Invalid model editor node id");
         }
-        if self.tool_mode != "model" && self.tool_mode != "object" && self.tool_mode != "camera" {
+        if self.tool_mode != "model" && self.tool_mode != "camera" {
             return Err("Invalid model editor tool mode");
-        }
-        if let Some(id) = &self.item_id
-            && (id.is_empty() || id.len() > 128)
-        {
-            return Err("Invalid gizmo item id");
-        }
-        if let Some(basis) = self.parent_basis {
-            let matrix = bevy::math::Mat3::from_cols_array(&basis);
-            if !matrix.is_finite() || matrix.determinant().abs() < 1e-12 {
-                return Err("Invalid gizmo parent basis");
-            }
         }
         if self.grid.as_ref().is_some_and(|grid| {
             !grid.origin.iter().all(|v| v.is_finite())

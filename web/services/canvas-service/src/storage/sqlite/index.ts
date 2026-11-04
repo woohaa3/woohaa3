@@ -13,8 +13,11 @@
  * 用 `(canvas_id, operation_id)` 主键去重。任何失败都 `ROLLBACK`，不留下部分写入。
  */
 import type { DatabaseSync } from "node:sqlite";
-import type { ServerCanvas } from "@woohaa3/contracts";
+import { parseCanvasAggregate, type ServerCanvas } from "@woohaa3/contracts";
 import { loadNodeSqlite } from "./sqlite-loader.js";
+import { SqliteSpatialLeaseStore } from "./spatial-leases.js";
+import { SpatialLeaseError } from "../../world-authoring/spatial-leases.js";
+import { affectedWorldObjects } from "../../world-authoring/affected-objects.js";
 import { normalizeCanvasListQuery, CanvasStorageError, runCanvasMigrationsSync, type CanvasCommandCommitResult, type CanvasListQuery, type CanvasListResult, type CanvasOperationRecord, type CanvasRepository, type CanvasRepositoryHealth, type CanvasSummary, type CommitCanvasInput } from "../core/index.js";
 
 export const SQLITE_CANVAS_SCHEMA_VERSION = 2;
@@ -69,6 +72,7 @@ export class SqliteCanvasRepository implements CanvasRepository {
   private readonly db: DatabaseSync;
   private readonly now: () => string;
   private readonly failWrites: () => boolean;
+  private readonly spatialLeases: SqliteSpatialLeaseStore;
   private closed = false;
 
   constructor(options: SqliteCanvasStorageOptions) {
@@ -88,6 +92,7 @@ export class SqliteCanvasRepository implements CanvasRepository {
     try {
       this.applyPragmas(options);
       this.migrate();
+      this.spatialLeases = new SqliteSpatialLeaseStore(this.db);
     } catch (error) {
       try {
         this.db.close();
@@ -337,8 +342,8 @@ export class SqliteCanvasRepository implements CanvasRepository {
       }
 
       const current = this.db
-        .prepare("SELECT revision FROM canvases WHERE id = ?")
-        .get(input.canvasId) as { revision: number } | undefined;
+        .prepare("SELECT revision, canvas_json FROM canvases WHERE id = ?")
+        .get(input.canvasId) as { revision: number; canvas_json: string } | undefined;
       if (!current) {
         throw new CanvasStorageError("CANVAS_NOT_FOUND", `画布 ${input.canvasId} 不存在`);
       }
@@ -347,6 +352,8 @@ export class SqliteCanvasRepository implements CanvasRepository {
           currentRevision: current.revision
         });
       }
+
+      this.spatialLeases.validateUnoccupied(input.canvasId, affectedWorldObjects(deserialize(current.canvas_json), input.canvas));
 
       if (this.failWrites()) {
         throw new CanvasStorageError("REPOSITORY_FAILURE", "注入的写失败");
@@ -410,6 +417,7 @@ export class SqliteCanvasRepository implements CanvasRepository {
           currentRevision: row.revision
         });
       }
+      this.spatialLeases.validateCanvasUnoccupied(canvasId);
       // 只删结构化记录（operation 经外键级联删除）；不触碰任何 COS 对象。
       for (const table of ["canvas_yjs_documents", "node_generation_history", "canvas_edit_completions"]) {
         if (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
@@ -429,6 +437,7 @@ export class SqliteCanvasRepository implements CanvasRepository {
   /** 运维恢复：按原样 upsert（保留 revision/updatedAt），不重置为 1。 */
   async restoreCanvas(canvas: ServerCanvas): Promise<void> {
     this.inImmediateTransaction(() => {
+      this.spatialLeases.validateCanvasUnoccupied(canvas.id);
       this.db
         .prepare(
           `INSERT INTO canvases (id, revision, title, canvas_json, created_at, updated_at)
@@ -505,7 +514,10 @@ function rowToOperation(row: OperationRow): CanvasOperationRecord {
 }
 
 function deserialize(json: string): ServerCanvas {
-  return JSON.parse(json) as ServerCanvas;
+  const input: unknown = JSON.parse(json);
+  const parsed = parseCanvasAggregate(input);
+  if (!parsed.ok) throw new Error(`Invalid stored canvas: ${parsed.failure.message}`);
+  return parsed.canvas;
 }
 
 function toSummary(row: CanvasRow): CanvasSummary {
@@ -523,7 +535,7 @@ function toSummary(row: CanvasRow): CanvasSummary {
 
 /** 把底层 SQLite 异常翻译成稳定错误码，且**不**回显文件路径或原始栈。 */
 function translateWriteError(error: unknown): unknown {
-  if (error instanceof CanvasStorageError) return error;
+  if (error instanceof CanvasStorageError || error instanceof SpatialLeaseError) return error;
   const message = safeMessage(error);
   if (/readonly|read-only|attempt to write/i.test(message)) {
     return new CanvasStorageError("REPOSITORY_FAILURE", "数据库不可写");
@@ -553,3 +565,13 @@ function safeMessage(error: unknown): string {
 
 export { SqliteYjsRepository, SQLITE_YJS_SCHEMA_VERSION, createSqliteWriterLockStore } from "./yjs.js";
 export type { SqliteYjsRepositoryOptions } from "./yjs.js";
+export {
+  SqliteWorldCameraHistoryRepository,
+  SQLITE_WORLD_CAMERA_HISTORY_SCHEMA_VERSION
+} from "./world-camera-history.js";
+export type { SqliteWorldCameraHistoryRepositoryOptions } from "./world-camera-history.js";
+export {
+  SqliteAssistantHostCompletionRepository,
+  SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION
+} from "./host-completions.js";
+export type { SqliteAssistantHostCompletionRepositoryOptions } from "./host-completions.js";

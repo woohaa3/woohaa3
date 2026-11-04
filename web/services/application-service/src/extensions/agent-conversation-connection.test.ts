@@ -79,7 +79,7 @@ type Controls = { seen: AgentAdapterRunInput[]; outcomes: AgentAdapterRunOutcome
 function fakeAdapter(controls: Controls): AgentConversationAdapter {
   return {
     id: "fake",
-    capabilities: () => ({ discussion: true, targets: ["model3d", "film-set", "camera"], tools: true, models: "remote" }),
+    capabilities: () => ({ discussion: true, targets: ["model3d", "camera"], tools: true, models: "remote" }),
     authorization: async () => "ready",
     models: async () => ({ models: [] }),
     async run(input) {

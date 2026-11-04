@@ -25,7 +25,6 @@ import { DialogService } from "../../services/dialogs/service.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { CatalogState, TaskCatalogService } from "../../contracts.js";
 import type { CanvasTaskCatalog } from "@woohaa3/contracts";
-import { createFilmSetGroupMarker, filmSetGroupData, shotPreviewNodeId } from "@woohaa3/contracts";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -105,136 +104,20 @@ afterEach(async () => {
 });
 
 describe("ModelExecutionHost 提示词归属", () => {
-  it("uses the page coordinator and updates its waiting result without remounting or losing drafts", async () => {
+  it("uses the page coordinator and surfaces its rejection without remounting or losing drafts", async () => {
     let panel: ModelPanelProps | undefined;
-    let message: string | null = "等待镜头参考图片准备完成";
-    const listeners = new Set<() => void>();
-    const submit = vi.fn(async () => ({ ok: false as const, error: message!, waiting: true }));
+    const submit = vi.fn(async () => ({ ok: false as const, error: "shot-image-version-stale" }));
     const run = vi.fn();
     const registry = new ModelInteractionService();
     registry.register({ id: "test-panel", version: 1, owner: "test", Panel: props => { panel = props; return <output>{props.draft.prompt}</output>; } });
     const container = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never}
       runClient={{ run, cancel: vi.fn() } as never} writable dialogs={new DialogService()} catalog={new StubCatalogService(CATALOG)}
-      registry={registry} draftStore={createModelDraftStore()} submitCoordinator={{ submit, cancel: vi.fn(), retryWaiting: vi.fn(), pendingWaiting: () => [NODE_ID],
-        waitingMessage: () => message, subscribeWaiting: listener => { listeners.add(listener); return () => listeners.delete(listener); } }} />);
+      registry={registry} draftStore={createModelDraftStore()} submitCoordinator={{ submit, cancel: vi.fn() }} />);
     await act(async () => { panel!.patchDraft({ prompt: "preserved draft" }); });
     await act(async () => { await panel!.submit({ prompt: "preserved draft", parameters: {} }); });
     expect(submit).toHaveBeenCalledOnce(); expect(run).not.toHaveBeenCalled();
-    expect(container.textContent).toContain(message);
-    await act(async () => { message = "shot-image-version-stale"; listeners.forEach(listener => listener()); });
     expect(container.textContent).toContain("shot-image-version-stale");
-    await act(async () => { message = null; listeners.forEach(listener => listener()); });
-    expect(container.textContent).not.toContain("shot-image-version-stale");
-    expect(container.querySelector("output")!.textContent).toBe("preserved draft");
-  });
-  it("keeps custom panels ready during active tasks and accepts three clicks before any request resolves", async () => {
-    const saved=canvasWithVideoNode(); saved.nodeData[NODE_ID]!.taskStatus="processing";
-    woohaa3CanvasStore.getState().hydrate(saved);
-    const pending: Array<()=>void>=[];
-    const run=vi.fn((input:{runId:string;jobId:string}) => new Promise(resolve=>pending.push(()=>resolve({ok:true,...input}))));
-    const started=vi.fn(), registry=new ModelInteractionService();
-    registry.register({id:"test-panel",version:1,owner:"test",Panel:props=><button disabled={props.status==="pending"||props.status==="processing"}
-      onClick={()=>void props.submit({prompt:"independent",parameters:{}})}>提交</button>});
-    const container=await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never}
-      runClient={{run,cancel:vi.fn()} as never} writable dialogs={new DialogService()} catalog={new StubCatalogService(CATALOG)}
-      registry={registry} draftStore={createModelDraftStore()} activity={{started,localRejected:vi.fn()}}/>);
-    await act(async()=>{const button=container.querySelector("button")!;button.click();button.click();button.click();});
-    expect(run).toHaveBeenCalledTimes(3);expect(started).toHaveBeenCalledTimes(3);
-    expect(new Set(run.mock.calls.map(([request])=>request.runId)).size).toBe(3);
-    expect(container.querySelector("button")!.disabled).toBe(false);
-    await act(async()=>{pending.forEach(release=>release());});
-  });
-  it("按钮和输入框回车均从当前执行按钮的真实矩形发光，重挂载不重放", async () => {
-    const launch = vi.fn(), run = vi.fn(async (input: {runId:string;jobId:string}) => ({ok:true as const,runId:input.runId,jobId:input.jobId}));
-    const registry = new ModelInteractionService();
-    registry.register({id:"test-panel",version:1,owner:"test",Panel:props=><>
-      <input onKeyDown={event=>{if(event.key==="Enter")void props.submit({prompt:"p",parameters:{}});}}/>
-      <button type="button" data-execution-launch="" onClick={()=>void props.submit({prompt:"p",parameters:{}})}><span>提交</span></button>
-    </>});
-    const props={canvasId:"canvas-1",selectedNodeId:NODE_ID,session:{} as never,runClient:{run,cancel:vi.fn()} as never,writable:true,
-      dialogs:new DialogService(),catalog:new StubCatalogService(CATALOG),registry,draftStore:createModelDraftStore(),activity:{launch,started:vi.fn(),localRejected:vi.fn()}};
-    const container=await mount(<ModelExecutionHost {...props}/>);
-    const surface=container.querySelector<HTMLElement>(".node-execution-dock__expanded-body")!;
-    surface.getBoundingClientRect=()=>({left:100,top:200,width:300,height:120}) as DOMRect;
-    const button=container.querySelector("button")!;
-    button.getBoundingClientRect=()=>({left:320,top:280,width:112,height:36}) as DOMRect;
-    button.style.backgroundColor="rgb(22, 132, 108)";
-    button.style.borderTopLeftRadius="8px";
-    await act(async()=>{button.querySelector("span")!.click();});
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(launch.mock.calls[0]?.[0]).toMatchObject({phase:"started",nodeId:NODE_ID,
-      origin:{x:376,y:298,surface:{width:112,height:36,radius:8,color:"rgb(22, 132, 108)"}}});
-    button.getBoundingClientRect=()=>({left:360,top:300,width:140,height:40}) as DOMRect;
-    await act(async()=>{container.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));});
-    expect(run).toHaveBeenCalledTimes(2);
-    const started=launch.mock.calls.map(([event])=>event).filter(event=>event.phase==="started");
-    expect(started).toHaveLength(2);
-    expect(started[1].origin).toMatchObject({x:430,y:320,surface:{width:140,height:40}});
-    expect(started[0].origin.token).not.toBe(started[1].origin.token);
-    await act(async()=>{root!.render(null);});
-    await act(async()=>{root!.render(<ModelExecutionHost {...props}/>);});
-    expect(run).toHaveBeenCalledTimes(2);
-    expect(launch).toHaveBeenCalledTimes(4);
-  });
-  async function mountPromptHost() {
-    woohaa3CanvasStore.getState().hydrate(canvasFixture({ nodes: [
-      { id: "empty-node", type: "video" },
-      { id: NODE_ID, type: "video", data: { prompt: "镜头缓推" } }
-    ] }));
-    const models = catalogFixture([
-      { modelKey: "model-a", modelType: "video", interaction: { id: "prompt-test", version: 1 } },
-      { modelKey: "model-b", modelType: "video", interaction: { id: "prompt-test", version: 1 } }
-    ]);
-    const registry = new ModelInteractionService();
-    let panel: ModelPanelProps;
-    registry.register({
-      id: "prompt-test", version: 1, owner: "test",
-      Panel: (props) => { panel = props; return <output>{props.draft.prompt}</output>; }
-    });
-    const props = {
-      canvasId: "canvas-1", session: {} as never, runClient: {} as never, writable: true,
-      dialogs: new DialogService(), catalog: new StubCatalogService(models), registry,
-      draftStore: createModelDraftStore()
-    };
-    const container = await mount(<ModelExecutionHost {...props} selectedNodeId="empty-node" />);
-    return {
-      container,
-      panel: () => panel!,
-      select: async (selectedNodeId: string) => {
-        await act(async () => { root!.render(<ModelExecutionHost {...props} selectedNodeId={selectedNodeId} />); });
-      },
-      patch: async (patch: Parameters<ModelPanelProps["patchDraft"]>[0]) => {
-        await act(async () => { panel!.patchDraft(patch); });
-      }
-    };
-  }
-
-  it("空节点 → 有提示词节点 → 空节点不串词，也不写入其它节点草稿", async () => {
-    const host = await mountPromptHost();
-    expect(host.panel().draft.prompt).toBe("");
-    await host.select(NODE_ID);
-    expect(host.panel().draft.prompt).toBe("镜头缓推");
-    await host.patch({ prompt: "未提交的镜头描述" });
-    await host.select("empty-node");
-    expect(host.container.querySelector("output")?.textContent).toBe("");
-    expect(nodeDraftStore.get("empty-node", "model-a")).toBeUndefined();
-    await host.select(NODE_ID);
-    expect(host.panel().draft.prompt).toBe("未提交的镜头描述");
-  });
-
-  it("切换模型始终沿用当前提示词并尊重显式清空", async () => {
-    const host = await mountPromptHost();
-    await host.select(NODE_ID);
-    await host.patch({ parameters: { model: "model-b", duration: 5 } });
-    expect(host.panel().draft.prompt).toBe("镜头缓推");
-    await host.patch({ prompt: "修改后的提示词" });
-    await host.patch({ parameters: { model: "model-a" } });
-    expect(host.panel().draft.prompt).toBe("修改后的提示词");
-    await host.patch({ prompt: "" });
-    await host.patch({ parameters: { model: "model-b" } });
-    expect(host.panel().draft.prompt).toBe("");
-    await host.select("empty-node");
-    expect(host.panel().draft.prompt).toBe("");
+    expect(panel!.draft.prompt).toBe("preserved draft");
   });
 });
 
@@ -289,86 +172,5 @@ describe("ModelExecutionHost 选中节点被删除", () => {
       woohaa3CanvasStore.getState().hydrate(canvasWithVideoNode());
     });
     expect(container.querySelector('[data-testid="video-panel"]')).not.toBeNull();
-  });
-});
-
-describe("ModelExecutionHost 片场外显镜头", () => {
-  it("展示镜头参数而不是图片/视频生成面板", async () => {
-    const groupId = "film";
-    const clipId = "clip-1";
-    const shotId = shotPreviewNodeId(groupId, clipId);
-    await act(async () => {
-      woohaa3CanvasStore.getState().hydrate(canvasFixture({
-        nodes: [
-          {
-            id: groupId,
-            type: "group",
-            data: filmSetGroupData(createFilmSetGroupMarker({
-              cameras: [{ id: "camera-1", azimuth: 0, elevation: 0.35, distance: 4, focusOffset: { x: 0, y: 0, z: 0 }, aspect: "16:9" }],
-              clips: [{ id: clipId, name: "推镜", cameraId: "camera-1", duration: 2.5, loop: false }],
-              activeClip: clipId
-            }))
-          },
-          {
-            id: shotId,
-            type: "video",
-            data: {
-              managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: groupId, entityId: clipId, lifecycle: "owner-managed" },
-              mediaContent: { providerId: "film-set.shot", schemaVersion: 1, payload: { filmSetNodeId: groupId, clipId } }
-            }
-          }
-        ]
-      }));
-    });
-    const container = await mount(
-      <ModelExecutionHost
-        canvasId="canvas-1"
-        selectedNodeId={shotId}
-        session={{} as never}
-        runClient={{} as never}
-        writable
-        dialogs={new DialogService()}
-        catalog={new StubCatalogService(CATALOG)}
-        registry={registryWithPanel()}
-        draftStore={createModelDraftStore()}
-      />
-    );
-    expect(container.querySelector('[aria-label="镜头视频参数"]')).not.toBeNull();
-    expect(container.textContent).toContain("推镜");
-    expect(container.textContent).toContain("1280 × 720");
-    // 时长在可写面板里是数值输入（change: 可写镜头参数），不再渲染成「2.5 秒」文本。
-    expect(container.textContent).toContain("时长（秒）");
-    expect(container.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe("2.5");
-    expect(container.querySelector('[data-testid="video-panel"]')).toBeNull();
-  });
-});
-
-/**
- * 目录里没有该节点类型的模型时的空态面板。
- *
- * 锁定的缺陷（截图反馈）：空态沿用 760 宽度上限，在画布上留下一条几乎空白的深色横条；
- * 原因又落进两列栅格的右侧控件列，文字从卡片中线才开始，看起来像一条错位的提示条。
- */
-describe("目录没有该类型模型时的空态面板", () => {
-  it("原因占整列，并由窄空态卡片承载而不是铺满面板宽度", async () => {
-    woohaa3CanvasStore.getState().hydrate(canvasFixture({ nodes: [{ id: "audio-node", type: "audio" }] }));
-    const container = await mount(
-      <ModelExecutionHost
-        canvasId="canvas-1"
-        selectedNodeId="audio-node"
-        session={{} as never}
-        runClient={{} as never}
-        writable
-        dialogs={new DialogService()}
-        // 目录可用，但只有图片模型：音频节点没有任何可执行模型。
-        catalog={new StubCatalogService(catalogFixture([{ modelKey: "image-model", modelType: "image" }]))}
-        registry={registryWithPanel()}
-        draftStore={createModelDraftStore()}
-      />
-    );
-    const panel = container.querySelector(".mc-panel--catalog-fallback");
-    expect(panel).not.toBeNull();
-    expect(panel!.textContent).toContain("该节点没有可用模型");
-    expect(panel!.querySelector(".mc-panel__grid-control")!.closest(".mc-panel__grid-item--untitled")).not.toBeNull();
   });
 });

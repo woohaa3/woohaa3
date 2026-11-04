@@ -8,12 +8,10 @@
  *
  * 另含：稳定媒体引用的受限解析、MCP 工具委托（grant）与个人生成能力。
  */
-import type {
-  FilmSetNodeData
-} from "../../canvas/canvas-node-model.js";
 import type { ModelCamera, ModelCameraMutation } from "../../canvas/model-cameras.js";
 import type { ModelContentVersion } from "../../canvas/model-definition.js";
 import type { ApplicationUserDelegation } from "../host/principal.js";
+import type { AssistantWorldGrantBinding } from "../../canvas/assistant-world-authority.js";
 
 /** 权威节点上下文读取结果。 */
 export type ApplicationAuthoringNodeRead =
@@ -26,7 +24,6 @@ export type ApplicationAuthoringNodeRead =
       source?: string;
       references: ReadonlyArray<{ kind: string; role?: string; text?: string; url?: string; mediaKind?: string; mediaType?: string }>;
       modelContentVersion?: ModelContentVersion;
-      animation?: FilmSetNodeData;
       snapshotHash?: string;
       cameras: ModelCamera[];
     }
@@ -52,14 +49,6 @@ export type ApplicationCanvasAuthoringFacade = {
     nodeId: string;
     source: string;
     expectedModelContentHash?: string;
-  }): Promise<ApplicationAuthoringWriteOutcome>;
-  commitAnimation(input: ApplicationAuthoringWriteContext & {
-    canvasId: string;
-    nodeId: string;
-    animation: FilmSetNodeData;
-    expectedSnapshotHash?: string;
-  cameraId?: string; clipId?: string; itemId?: string;
-  expectedClipHash?: string;
   }): Promise<ApplicationAuthoringWriteOutcome>;
   mutateCamerasBatch(input: ApplicationAuthoringWriteContext & {
     canvasId: string;
@@ -90,7 +79,6 @@ export type ApplicationMediaReferenceFacade = {
  * 撤权与连接代次决定。工具入口每次操作仍重新检查权限与失效状态。
  */
 export type ApplicationToolGrant = {
-  groupScope?: import("../../canvas/group-authoring-scope.js").CanvasGroupScope;
   token: string;
   /** 允许访问的画布集合。 */
   canvasIds: readonly string[];
@@ -105,6 +93,17 @@ export type ApplicationToolGrant = {
   subject?: string;
   /** 绑定的连接代次；连接重建后旧委托不可继续使用。 */
   credentialEpoch?: number;
+  /**
+   * Host-issued world run binding for scoped assistant authoring. The token is
+   * minted only after the host acquired the scope/version/lease context; tools
+   * read the context from this binding, never from model-supplied arguments.
+   */
+  world?: AssistantWorldGrantBinding;
+  /**
+   * 2D 组作用域绑定：工具读写被限制在根组与 `memberNodeIds` 成员内。
+   * 与 `world` 互斥；组作用域不授予共享世界写资格。
+   */
+  groupScope?: { canvasId: string; rootGroupId: string; scopeEpoch: number };
 };
 
 export type ApplicationToolGrantRequest = {
@@ -116,6 +115,8 @@ export type ApplicationToolGrantRequest = {
   nodeId: string;
   cameraId?: string; clipId?: string; itemId?: string;
   tools?: readonly string[];
+  /** Trusted world scope selection for `mode: "world"`. */
+  worldScope?: import("../../canvas/assistant-world-authority.js").AssistantWorldScopeSelection;
   /** 绑定的连接代次（可选；变更后旧委托失效）。 */
   credentialEpoch?: number;
 };

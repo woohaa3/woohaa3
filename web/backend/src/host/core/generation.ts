@@ -7,7 +7,6 @@
 import path from "node:path";
 import { readRuntimeModelViews, mergeRuntimeModelViews } from "./runtime-model-catalog.js";
 import type {
-  FilmSetConversionProvider,
   GenerationModelPolicyView,
   GenerationModelsSnapshot,
   GenerationProvider,
@@ -21,7 +20,6 @@ import { ROUTE_ORDER } from "../order.js";
 export function createGenerationRegistry(options: { logger?: (event: Record<string, unknown>) => void } = {}): HostGenerationService {
   const log = options.logger ?? (() => undefined);
   const registry = new Map<string, GenerationProvider>();
-  const conversions = new Set<FilmSetConversionProvider>();
   const unregister = (providerId: string) => {
     if (registry.delete(providerId)) log({ event: "generation-provider-unregistered", providerId });
   };
@@ -37,15 +35,8 @@ export function createGenerationRegistry(options: { logger?: (event: Record<stri
       };
     },
     unregister,
-    registerConversion(provider) {
-      conversions.add(provider);
-      return () => {
-        conversions.delete(provider);
-      };
-    },
     list: () => [...registry.values()],
-    resolve: (providerId) => registry.get(providerId),
-    conversions: () => [...conversions]
+    resolve: (providerId) => registry.get(providerId)
   };
 }
 

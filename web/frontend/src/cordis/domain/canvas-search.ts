@@ -32,9 +32,6 @@ export type CanvasSearchQuery = {
   kinds?: readonly string[];
 };
 
-/** 可搜索的节点类型（结构容器 group 也纳入，便于按名称定位）。 */
-const SEARCHABLE_EXTRA: readonly string[] = ["group"];
-
 export function searchCanvasNodes(canvas: ServerCanvas, input: CanvasSearchQuery): CanvasSearchResult[] {
   const nodeData = canvas.nodeData as Record<string, CanvasNodeData | undefined>;
   // 先构建完整名称表，保证组名可解析（不依赖节点顺序）。
@@ -50,9 +47,7 @@ export function searchCanvasNodes(canvas: ServerCanvas, input: CanvasSearchQuery
 
   const results: CanvasSearchResult[] = [];
   for (const node of canvas.document.nodes) {
-    if (input.kinds && input.kinds.length > 0 && !input.kinds.includes(node.type)) {
-      if (!SEARCHABLE_EXTRA.includes(node.type)) continue;
-    }
+    if (input.kinds && input.kinds.length > 0 && !input.kinds.includes(node.type)) continue;
     results.push({
       nodeId: node.id,
       name: nameById.get(node.id)!,

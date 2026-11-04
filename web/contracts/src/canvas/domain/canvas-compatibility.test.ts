@@ -160,10 +160,11 @@ describe("M4–M7 不受信任输入规范化", () => {
       )
     };
     const parsed = normalizeCanvas(input);
-    expect(parsed.document.nodes.find((node) => node.id === "orphan")?.parentId).toBeUndefined();
     expect(parsed.document.nodes.find((node) => node.id === "orphan")?.position).toEqual({ x: 20, y: 30 });
-    expect(parsed.document.nodes.find((node) => node.id === "member")?.parentId).toBe("g1");
-    // group 作为任一端点的边都不进入规范状态。
+    // 组在读取期溶解：成员上提为顶层并烘焙绝对坐标，组节点不再出现在规范状态。
+    expect(parsed.document.nodes.find((node) => node.id === "g1")).toBeUndefined();
+    expect(parsed.document.nodes.find((node) => node.id === "member")?.position).toEqual({ x: 140, y: 140 });
+    expect(parsed.document.nodes.every((node) => node.parentId === undefined)).toBe(true);
     expect(parsed.document.edges.map((edge) => edge.id)).toEqual([]);
   });
 
@@ -187,11 +188,11 @@ describe("M4–M7 不受信任输入规范化", () => {
     const parsed = normalizeCanvas(input);
     // 复合资产节点是合法 canonical 类型（不再收敛为 custom）。
     expect(parsed.document.nodes.find((node) => node.id === "n-ext")?.type).toBe(COMPOSITE_ASSET_NODE_TYPE);
-    // 纯模型节点不能作为边端点：相关边在规范化阶段清除。
-    expect(parsed.document.edges.map((edge) => edge.id)).toEqual([]);
+    // 复合资产现在是普通节点，连线保留。
+    expect(parsed.document.edges.map((edge) => edge.id)).toEqual(["e-ext"]);
   });
 
-  it("引用容器的依赖线在规范化与重新加载后保留，模型节点仍清理连线", () => {
+  it("复合资产节点连线在规范化与重新加载后保留", () => {
     const canvas = createEmptyWoohaa3ServerCanvas("reference-container", NOW);
     canvas.document.nodes.push(
       { id: "container", type: "composite-asset", position: { x: 0, y: 0 } },
@@ -204,12 +205,10 @@ describe("M4–M7 不受信任输入规范化", () => {
       { id: "model-edge", source: "model", target: "output", sourceHandle: null, targetHandle: null, data: { kind: "dependency" } }
     );
     const normalized = normalizeCanvas(canvas);
-    expect(normalized.document.edges.map(edge => edge.id)).toEqual(["reference"]);
+    expect(normalized.document.edges.map(edge => edge.id)).toEqual(["reference", "model-edge"]);
     expect(normalizeCanvas(JSON.parse(JSON.stringify(normalized))).document.edges).toEqual(normalized.document.edges);
-    const scene = buildCanvasRenderScene({ canvas: normalized, compositeAssetScopeShapes: new Map([["container", "rect"]]) });
-    expect(scene.edges.map(edge => edge.id)).toEqual(["reference"]);
-    expect(scene.nodes.find(node => node.id === "container")?.compositeAsset).toBeDefined();
-    expect(scene.nodes.find(node => node.id === "container")?.compositeAsset).not.toHaveProperty("scopeGround");
+    const scene = buildCanvasRenderScene({ canvas: normalized });
+    expect(scene.edges.map(edge => edge.id)).toEqual(["reference", "model-edge"]);
   });
 
   it("M5 丢弃缺少端点或 data 非对象的边", () => {    const { canvas, issues } = parseOk(partialFixture);

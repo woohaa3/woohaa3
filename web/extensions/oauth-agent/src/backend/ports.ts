@@ -7,7 +7,6 @@
  * `ModelMcpService` 一致，便于统一后端进程内直接注入。
  */
 import type {
-  FilmSetNodeData,
   ModelCamera,
   ModelCameraMutation,
   ModelContentVersion
@@ -25,8 +24,6 @@ export type CanvasNodeReadResult =
       references: ReadonlyArray<{ kind: string; role?: string; text?: string; url?: string; mediaKind?: string; mediaType?: string }>;
       /** model3d 模型内容版本（含 contentHash）。 */
       modelContentVersion?: ModelContentVersion;
-      /** 片场（composite-asset + extensionId="film-set"）完整当前定义与 snapshotHash。 */
-      animation?: FilmSetNodeData;
       snapshotHash?: string;
       cameras: ModelCamera[];
     }
@@ -56,18 +53,6 @@ export type CanvasSubmitModelInput = {
   expectedModelContentHash?: string;
 };
 
-/** 完整动画定义原子提交。 */
-export type CanvasCommitFilmSetInput = {
-  ownerId: CanvasOwner;
-  canvasId: string;
-  nodeId: string;
-  requestId: string;
-  animation: FilmSetNodeData;
-  expectedSnapshotHash?: string;
-  clipId?: string;
-  expectedClipHash?: string;
-};
-
 /** 批量受限镜头变更（整批原子）。 */
 export type CanvasMutateCamerasBatchInput = {
   ownerId: CanvasOwner;
@@ -80,6 +65,5 @@ export type CanvasMutateCamerasBatchInput = {
 export type ChatGptCanvasPorts = {
   readNode: (input: { ownerId: CanvasOwner; canvasId: string; nodeId: string }) => Promise<CanvasNodeReadResult>;
   submitModel: (input: CanvasSubmitModelInput) => Promise<CanvasWriteOutcome>;
-  commitAnimation: (input: CanvasCommitFilmSetInput) => Promise<CanvasWriteOutcome>;
   mutateCamerasBatch: (input: CanvasMutateCamerasBatchInput) => Promise<CanvasWriteOutcome>;
 };

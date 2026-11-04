@@ -65,7 +65,7 @@ export function summarizeNodes(
       kind: descriptor?.kind ?? null,
       ...(typeof data?.title === "string" && data.title !== "" ? { title: data.title } : {}),
       ...(typeof data?.prompt === "string" ? { prompt: data.prompt } : {}),
-      position: { x: node?.position.x ?? created?.node.position.x ?? 0, y: node?.position.y ?? created?.node.position.y ?? 0 },
+      position: { x: node?.position?.x ?? created?.node.position?.x ?? 0, y: node?.position?.y ?? created?.node.position?.y ?? 0 },
       size,
       affordances: projectNodeAffordances(canonicalType, data)
     };

@@ -9,7 +9,7 @@
  * 非渲染检查：使用真实 CanvasRoom + in-memory durable 仓库，不采集帧率/GPU/截图。
  */
 import { describe, expect, it } from "vitest";
-import { buildCanvasRenderScene, groupBottomPadding, createEmptyWoohaa3ServerCanvas, defaultAgentNodeData, projectAgentGraph, type ServerCanvas } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
 import { InMemoryYjsDocumentRepository } from "../sync/in-memory-yjs-repository.js";
 import { CanvasRoom } from "../sync/room.js";
 import { CanvasScriptService } from "./service.js";
@@ -288,54 +288,6 @@ describe("级联影响范围复核（任务 3.6）", () => {
     });
     expect(seen.at(-1)).toContain(target);
   });
-
-  it("级联删除时范围复核包含后代节点，回执报告实际删除 identity（任务 3.6）", async () => {
-    const seen: Array<{ ids: string[]; deletes: boolean }> = [];
-    const canvas: ServerCanvas = {
-      id: CANVAS,
-      title: "画布",
-      revision: 0,
-      document: {
-        schemaVersion: "asset-canvas-v1",
-        updatedAt: NOW,
-        nodes: [
-          { id: "group", type: "group", position: { x: 0, y: 0 } },
-          { id: "member", type: "image", position: { x: 20, y: 20 }, parentId: "group" },
-          { id: "linked", type: "text", position: { x: 300, y: 0 } }
-        ],
-        edges: [{ id: "e1", source: "member", target: "linked", data: {} }]
-      },
-      nodeData: { group: {}, member: { prompt: "m" }, linked: { prompt: "l" } },
-      assets: [],
-      jobs: [],
-      updatedAt: NOW
-    };
-    const { service, room } = await setup({
-      canvas,
-      verifyScope: (input) => {
-        seen.push({ ids: [...input.existingNodeIds], deletes: input.deletesExisting });
-        return { ok: true };
-      }
-    });
-    const outcome = await service.submit({
-      principalId: "dev-user",
-      canvasId: CANVAS,
-      requestId: "req-cascade",
-      version: "woohaa-canvas-js-v1",
-      // 删除 group：领域级联删除成员 member；member 的关联边也一并移除。
-      source: `canvas.remove(canvas.existing("group"));`
-    });
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    // 级联后代 + 关联边端点都在影响范围里，且标记为删除既有实体。
-    expect(seen.at(-1)?.deletes).toBe(true);
-    expect(seen.at(-1)?.ids).toEqual(expect.arrayContaining(["group", "member", "linked"]));
-    // 回执报告实际删除 identity（含级联与关联边），不依赖当前画布重建。
-    expect(outcome.receipt.deletedNodeIds.sort()).toEqual(["group", "member"]);
-    expect(outcome.receipt.deletedEdgeIds).toEqual(["e1"]);
-    const exported = room.exportCanvas();
-    if (exported.ok) expect(exported.canvas.document.nodes.map((n) => n.id)).toEqual(["linked"]);
-  });
 });
 
 describe("源码不持久化（任务 3.2 / 4.6）", () => {
@@ -355,111 +307,5 @@ describe("源码不持久化（任务 3.2 / 4.6）", () => {
     expect(record!.script).toBeDefined();
     expect(JSON.stringify(record!.script)).not.toContain("placement");
     expect(record!.script!.submissionHash).toMatch(/^[0-9a-f]{64}$/);
-  });
-});
-
-describe("Canvas Script 分类分组端到端", () => {
-  it("预检、首次回执和图查询使用实际卡片尺寸，已有紧凑模型不被改写", async () => {
-    const canvas = createEmptyWoohaa3ServerCanvas(CANVAS, NOW);
-    canvas.document.nodes = [{ id: "legacy", type: "model3d", position: { x: 0, y: 344 }, width: 196, height: 64 }];
-    canvas.nodeData.legacy = defaultAgentNodeData("model")!;
-    const { service, room } = await setup({ canvas });
-    const input = request({ source: `
-      const fresh=canvas.node("model",{key:"fresh"});
-      canvas.group([fresh,canvas.existing("legacy")],{key:"g",title:"建筑模块",layout:{mode:"grid",columns:1,gapY:12}});
-    ` });
-    const dry = await service.validate(input);
-    if (!dry.ok) throw new Error(JSON.stringify(dry));
-    expect(room.exportCanvas()).toMatchObject({ ok: true, canvas: { revision: 0 } });
-    const saved = await service.submit(input);
-    if (!saved.ok) throw new Error(JSON.stringify(saved));
-    expect(saved.receipt.organization).toEqual(dry.receipt.organization);
-    const read = room.exportCanvas(); if (!read.ok) throw new Error("export");
-    const graph = projectAgentGraph(read.canvas); if (!graph.ok) throw new Error("graph");
-    const scene = buildCanvasRenderScene({ canvas: read.canvas });
-    for (const card of scene.nodes) {
-      const size = { width: card.width, height: card.height };
-      expect(saved.receipt.nodes.find(n => n.nodeId === card.id)?.size).toEqual(size);
-      expect(graph.graph.nodes.find(n => n.nodeId === card.id)?.worldBounds).toEqual({ x: card.x, y: card.y, ...size });
-    }
-    expect(read.canvas.document.nodes.find(n => n.id === "legacy")).toMatchObject({ width: 196, height: 64 });
-    expect(read.canvas.document.nodes.find(n => n.id === saved.receipt.refs.fresh)).toMatchObject({ width: 248, height: 232 });
-    const group = scene.nodes.find(n => n.id === saved.receipt.refs.g)!;
-    expect(dry.receipt.predicted.g).toEqual({ x: group.x, y: group.y });
-    const cards = scene.nodes.filter(n => n.type === "model");
-    expect(Math.abs(cards[0].y - cards[1].y)).toBe(244);
-    expect(Math.max(...cards.map(n => n.y + n.height)) + groupBottomPadding).toBe(group.y + group.height);
-    room.dispose();
-  });
-  const source = `
-    const a = canvas.node("model", {key:"a", title:"潜入者"});
-    const b = canvas.node("model", {key:"b", title:"守卫"});
-    const c = canvas.node("model", {key:"c", title:"地砖"});
-    const characters = canvas.group([a,b], {key:"characters", title:"角色", layout:{mode:"grid", columns:2}, placement:{mode:"absolute", position:{x:-2000,y:0}}});
-    const environment = canvas.group([c], {key:"environment", title:"环境", layout:{mode:"grid", columns:2}, placement:{mode:"absolute", position:{x:-1000,y:0}}});
-  `;
-  it("预检真实组和最终边界，原子保存并冻结首次组织回执", async () => {
-    const { service, room } = await setup();
-    const input = request({ source });
-    const dry = await service.validate(input);
-    expect(dry.ok).toBe(true); if (!dry.ok) throw new Error(JSON.stringify(dry));
-    expect(dry.receipt.organization?.groups.map(g => g.title)).toEqual(["角色", "环境"]);
-    const saved = await service.submit(input);
-    expect(saved.ok).toBe(true); if (!saved.ok) throw new Error(JSON.stringify(saved));
-    expect(saved.receipt.organization).toEqual(dry.receipt.organization);
-    expect(saved.receipt.nodes).toHaveLength(5);
-    const read = room.exportCanvas(); if (!read.ok) throw new Error("export");
-    expect(read.canvas.document.nodes.filter(n => n.type === "group")).toHaveLength(2);
-    expect(read.canvas.document.nodes.find(n => n.id === saved.receipt.refs.a)?.parentId).toBe(saved.receipt.refs.characters);
-    expect(read.canvas.document.edges).toHaveLength(0);
-    expect(read.canvas.nodeData[saved.receipt.refs.a]?.modelScript).toBe("");
-    const rename = await service.submit(request({requestId:"rename", source:`canvas.setTitle(canvas.existing(${JSON.stringify(saved.receipt.refs.characters)}), "新标题");`}));
-    expect(rename.ok).toBe(true);
-    const retry = await service.submit(input); if (!retry.ok) throw new Error("retry");
-    expect(retry.receipt.duplicate).toBe(true);
-    expect(retry.receipt.organization).toEqual(saved.receipt.organization);
-  });
-  it("解组保留模型内容和世界位置，删除组才级联成员", async () => {
-    const {service,room}=await setup();
-    const saved=await service.submit(request({source}));if(!saved.ok)throw new Error("build");
-    const refs=saved.receipt.refs;
-    const dissolved=await service.submit(request({requestId:"ungroup",source:`canvas.ungroup(canvas.existing(${JSON.stringify(refs.characters)}));`}));
-    expect(dissolved.ok).toBe(true);if(!dissolved.ok)throw new Error(JSON.stringify(dissolved));
-    expect(dissolved.receipt.deletedNodeIds).toEqual([refs.characters]);
-    const read=room.exportCanvas();if(!read.ok)throw new Error("export");
-    // 解组后的模型回到顶层，内容与世界位置保持不变；嵌套总组已不存在。
-    expect(read.canvas.document.nodes.find(n=>n.id===refs.a)?.parentId ?? null).toBeNull();
-    expect(read.canvas.nodeData[refs.a]?.modelScript).toBe("");
-    const removed=await service.submit(request({requestId:"remove",source:`canvas.remove(canvas.existing(${JSON.stringify(refs.environment)}));`}));
-    if(!removed.ok)throw new Error(JSON.stringify(removed));
-    expect(removed.receipt.deletedNodeIds).toHaveLength(2);
-    const left=room.exportCanvas();if(!left.ok)throw new Error("export");
-    expect(left.canvas.document.nodes.map(n=>n.id).sort()).toEqual([refs.a,refs.b].sort());
-  });
-  it("后段非法分组拒绝整批创建，预检与提交都零写入", async () => {
-    const {service,room}=await setup();
-    const source=`const a=canvas.node("image",{key:"a"}); const g=canvas.group([a],{title:"组"}); canvas.reparent([g],g);`;
-    expect(await service.validate(request({source}))).toMatchObject({ok:false,error:{code:"invalid-parent"}});
-    expect(await service.submit(request({source}))).toMatchObject({ok:false,error:{code:"invalid-parent"}});
-    expect(room.exportCanvas()).toMatchObject({ok:true,canvas:{revision:0,document:{nodes:[]}}});
-  });
-  it("scope 检查覆盖 refit 时未选成员的坐标补偿", async () => {
-    let denied:string|undefined;
-    const {service,room}=await setup({verifyScope:async ({existingNodeIds})=>existingNodeIds.includes(denied??"")?{ok:false,code:"forbidden",message:"成员不在范围"}:{ok:true}});
-    const saved=await service.submit(request({source}));if(!saved.ok)throw new Error("build");
-    denied=saved.receipt.refs.b;
-    const read=room.exportCanvas();if(!read.ok)throw new Error("export");
-    const outcome=await service.submit(request({requestId:"scope",source:`canvas.move(canvas.existing(${JSON.stringify(saved.receipt.refs.a)}), {x:-4000,y:0});`}));
-    expect(outcome).toMatchObject({ok:false,error:{code:"forbidden"}});
-    expect(room.exportCanvas()).toEqual(read);
-  });
-  it("公开分类示例可直接执行，五个分类都是顶层真实 group", async () => {
-    const {CANVAS_SCRIPT_ORGANIZATION_EXAMPLE}=await import("@woohaa3/contracts");
-    const {service}=await setup();
-    const result=await service.submit(request({source:CANVAS_SCRIPT_ORGANIZATION_EXAMPLE}));
-    expect(result.ok).toBe(true);if(!result.ok)throw new Error(JSON.stringify(result));
-    expect(result.receipt.organization?.groups).toHaveLength(5);
-    expect(result.receipt.organization?.groups.find(g=>g.title==="角色")?.worldBounds.x).toBe(-2600);
-    expect(result.receipt.organization?.groups.every(g=>!g.parentId)).toBe(true);
   });
 });

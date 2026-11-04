@@ -4,26 +4,17 @@
  * 只把 working 画布投影成小地图可直接绘制的世界矩形与连线；不读 DOM、不建第二套
  * 相机、不触发布局读取。屏幕映射与视口换算也在这里保持纯函数，宿主组件只负责绘制和
  * 指针转发。
- *
- * 可见性与画布一致：
- * - 收起分组的后代按 `hiddenByCollapsedGroups` 跳过，分组自身用紧凑展示矩形；
- * - 复合资产（片场、炉体等）内部的受管节点不是概览卡片，按祖先类型排除。
  */
 import {
   bevyKindForNodeType,
-  groupPresentationRect,
-  hiddenByCollapsedGroups,
-  isCompositeAssetNodeType,
   isModelNodeType,
   nodeWorldRect,
   resolveNodeDisplayName,
   unionRects,
   type BevyNodeKind,
   type Rect,
-  type ServerCanvas,
-  type Woohaa3CanvasSerializedNode
+  type ServerCanvas
 } from "@woohaa3/contracts";
-import { groupBadgeProjectionsForCanvas } from "./group-badge-projection.js";
 
 export type MinimapNode = {
   id: string;
@@ -32,7 +23,6 @@ export type MinimapNode = {
   kind: BevyNodeKind;
   /** 3D 内容节点：以小方块（积木）缩略图呈现。 */
   model: boolean;
-  group: boolean;
   title: string;
   /** 世界坐标矩形（含父级链偏移与有效渲染尺寸）。 */
   rect: Rect;
@@ -69,29 +59,22 @@ export function projectMinimap(canvas: ServerCanvas | null): MinimapProjection {
   if (!canvas) return EMPTY_PROJECTION;
   const document = canvas.document;
   const byId = new Map(document.nodes.map((node) => [node.id, node]));
-  const hidden = hiddenByCollapsedGroups(canvas);
-  const badgeProjections = groupBadgeProjectionsForCanvas(canvas);
   const nodes: MinimapNode[] = [];
   for (const node of document.nodes) {
-    const visible = !hidden.has(node.id) && !insideCompositeAsset(node, byId);
-    if (!visible) continue;
     const data = canvas.nodeData[node.id] ?? {};
     const title = resolveNodeDisplayName({
       type: node.type,
       explicitName: data.title,
       prompt: data.prompt
     }).displayName;
-    const collapsed = node.type === "group" && data.groupCollapsed === true;
-    const rect = groupPresentationRect(node, collapsed, nodeWorldRect(node, byId), badgeProjections.get(node.id));
     const kind = bevyKindForNodeType(node.type);
     nodes.push({
       id: node.id,
       type: node.type,
       kind,
       model: isModelNodeType(node.type),
-      group: node.type === "group",
       title,
-      rect
+      rect: nodeWorldRect(node, byId)
     });
   }
   const byVisibleId = new Map(nodes.map((node) => [node.id, node]));
@@ -111,22 +94,6 @@ export function projectMinimap(canvas: ServerCanvas | null): MinimapProjection {
     edges,
     bounds: unionRects(nodes.map((node) => node.rect))
   };
-}
-
-function insideCompositeAsset(
-  node: Woohaa3CanvasSerializedNode,
-  byId: ReadonlyMap<string, Woohaa3CanvasSerializedNode>
-): boolean {
-  const visited = new Set<string>();
-  let parentId = node.parentId;
-  while (parentId && !visited.has(parentId)) {
-    visited.add(parentId);
-    const parent = byId.get(parentId);
-    if (!parent) return false;
-    if (isCompositeAssetNodeType(parent.type)) return true;
-    parentId = parent.parentId;
-  }
-  return false;
 }
 
 export function rectCenter(rect: Rect): { x: number; y: number } {

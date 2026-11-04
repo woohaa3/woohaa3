@@ -13,6 +13,10 @@ import { InMemoryYjsDocumentRepository } from "./in-memory-yjs-repository.js";
 import { recoverYjsDocument } from "./recovery.js";
 import { CanvasRoom } from "./room.js";
 import { CanvasRoomRegistry } from "./room-registry.js";
+import { SqliteYjsRepository } from "../storage/sqlite/index.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
 
 const NOW = "2026-09-23T00:00:00.000Z";
@@ -68,6 +72,48 @@ async function readyRoom(options: {
 }
 
 describe("串行命令与并行 room（任务 4.1）", () => {
+  it("persists world identities through a SQLite room restart", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "world-room-"));
+    const file = path.join(dir, "canvas.sqlite");
+    const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 1, v: 2, h: 3 }, rotation: [0, 0, 0, 1], scale: 1 } };
+    const parameters = { matrix: [[1, 0], [0, 1]], lease: "commercial", gpuCount: 2, nested: [null, true, { writeLease: "parameter" }] };
+    const group = { kind: "workflow-group-2d", version: "shared-world-v1", groupId: "g", scopeVersion: "1", memberNodeIds: ["model"] };
+    const area = { kind: "scene-area", version: "shared-world-v1", areaId: "a", scopeVersion: "1", bounds: { min: { u: 0, v: 0 }, max: { u: 2, v: 2 } } };
+    const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "c", settingsVersion: "1", position: { u: 0, v: 0, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: "missing" };
+    const repository = new SqliteYjsRepository({ path: file });
+    try {
+      const room = new CanvasRoom({ canvasId: CANVAS, repository, now: () => NOW });
+      await room.initialize({ canvas: createEmptyWoohaa3ServerCanvas(CANVAS, NOW), roomEpoch: "epoch-1", createdAt: NOW });
+      const result = await room.submit(batch({ commands: [
+        { ...addModel3dCommand("model"), nodeData: { ...MODEL3D_NODE_DATA, sharedWorldInstance: instance, parameters } },
+        addModel3dCommand("legacy-model"),
+        { type: "node.add", node: { id: "image", type: "image", position: { x: 0, y: 0 } } },
+        { type: "node.add", node: { id: "group", type: "workflow-group-2d", position: { x: 0, y: 0 } }, nodeData: { workflowGroup2d: group }, connect: { fromNodeId: "image", edgeId: "e-group" } },
+        { type: "node.add", node: { id: "area", type: "scene-area", position: { x: 0, y: 0 } }, nodeData: { sceneArea: area }, connect: { fromNodeId: "image", edgeId: "e-area" } },
+        { type: "node.add", node: { id: "camera", type: "world-camera", position: { x: 0, y: 0 } }, nodeData: { worldCamera: camera }, connect: { fromNodeId: "image", edgeId: "e-camera" } }
+      ] }));
+      expect(result.ok).toBe(true);
+      repository.close();
+      const reopened = new SqliteYjsRepository({ path: file });
+      try {
+        const restored = new CanvasRoom({ canvasId: CANVAS, repository: reopened, now: () => NOW });
+        expect((await restored.load()).ok).toBe(true);
+        const exported = restored.exportCanvas();
+        expect(exported.ok).toBe(true);
+        if (exported.ok) {
+          expect(exported.canvas.nodeData.model.sharedWorldInstance).toEqual(instance);
+          expect(exported.canvas.nodeData.model.parameters).toEqual(parameters);
+          expect(exported.canvas.nodeData["legacy-model"]).toEqual(MODEL3D_NODE_DATA);
+          expect(exported.canvas.nodeData["legacy-model"].sharedWorldInstance).toBeUndefined();
+          expect(exported.canvas.nodeData.group.workflowGroup2d).toEqual(group);
+          expect(exported.canvas.nodeData.area.sceneArea).toEqual(area);
+          expect(exported.canvas.nodeData.camera.worldCamera).toEqual(camera);
+          for (const id of ["group", "area", "camera"]) expect(exported.canvas.nodeData[id].inputMapping).toHaveLength(1);
+        }
+        expect((await restored.submit(batch({ commandId: "after-reload", baseRevision: 1, commands: [{ type: "node.update", nodeId: "camera", position: { x: 10, y: 20 } }] }))).ok).toBe(true);
+      } finally { reopened.close(); }
+    } finally { repository.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
   it("同 room 的并发命令不交错，revision 连续递增", async () => {
     const { room } = await readyRoom();
     const results = await Promise.all([

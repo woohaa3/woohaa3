@@ -10,7 +10,6 @@
  * Agent 投影与 group 几何因此共享同一数值，避免「读到 196×64、渲染成 248×232」
  * 的世界坐标分叉。
  */
-import { getWoohaa3CanvasNodeAbsolutePosition, getGroupLayoutSizes } from "./domain/core/group-ops.js";
 import type { Woohaa3CanvasSerializedNode } from "./domain/core/document-schema.js";
 import { clampWoohaa3CanvasZoom } from "./domain/core/viewport-zoom.js";
 import { effectiveCanvasNodeSize as effectiveNodeSize } from "./node-dimensions.js";
@@ -19,16 +18,10 @@ export { effectiveNodeSize };
 export type Rect = { x: number; y: number; width: number; height: number };
 export type Position = { x: number; y: number };
 
-/** 节点世界包围盒（含 group 父级链偏移与有效尺寸）。 */
-export function nodeWorldRect(node: Woohaa3CanvasSerializedNode, byId: ReadonlyMap<string, Woohaa3CanvasSerializedNode>): Rect {
-  const map = byId instanceof Map ? byId : new Map(byId as Iterable<[string, Woohaa3CanvasSerializedNode]>);
-  const abs = getWoohaa3CanvasNodeAbsolutePosition(
-    { id: node.id, type: node.type, position: node.position, parentId: node.parentId, data: {} },
-    map as Map<string, { id: string; type: string; position: Position; parentId?: string; data: unknown }> as never
-  );
-  const size = (node.type === "group" ? getGroupLayoutSizes([...byId.values()]).get(node.id) : undefined)
-    ?? effectiveNodeSize(node);
-  return { x: abs.x, y: abs.y, width: size.width, height: size.height };
+/** 节点世界包围盒（有效尺寸）。 */
+export function nodeWorldRect(node: Woohaa3CanvasSerializedNode, _byId?: ReadonlyMap<string, Woohaa3CanvasSerializedNode>): Rect {
+  const size = effectiveNodeSize(node);
+  return { x: node.position?.x ?? 0, y: node.position?.y ?? 0, width: size.width, height: size.height };
 }
 
 /** 多个节点世界包围盒的并集；空集合返回 null。 */

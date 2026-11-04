@@ -49,6 +49,7 @@ export type AgentConversationRemote = {
   switchConnection: (input: { canvasId: string; nodeId: string; connectionId: string }) => Promise<AgentConversationResult<{ ok: true; cleared: number }>>;
   read: (conversationId: string, cursor?: number) => Promise<AgentConversationResult<ConversationSnapshot>>;
   accept: (conversationId: string, input: { requestId: string; entry: AgentEntryIntent }) => Promise<AgentConversationResult<{ conversation: ConversationSummary; turn: ConversationTurn; reused: boolean }>>;
+  acceptImageDirectorScene?: (conversationId: string, input: { requestId: string; entry: AgentEntryIntent }) => Promise<AgentConversationResult<{ conversation: ConversationSummary; turn: ConversationTurn; reused: boolean }>>;
   query: (requestId: string) => Promise<AgentConversationResult<{ conversation: ConversationSummary; turn: ConversationTurn; snapshot: ConversationSnapshot }>>;
   /**
    * 按领域运行关联定位确切回合（活动/历史 Agent 记录 → 确切 request/run）
@@ -141,6 +142,9 @@ export function createAgentConversationRemote(options: AgentConversationRemoteOp
     },
     async accept(conversationId, input) {
       return unwrap(await transport.request({ path: path(`conversations/${encodeURIComponent(conversationId)}/turns`), method: "POST", body: input }));
+    },
+    async acceptImageDirectorScene(conversationId, input) {
+      return unwrap(await transport.request({ path: path(`conversations/${encodeURIComponent(conversationId)}/image-director-scenes`), method: "POST", body: input }));
     },
     async query(requestId) {
       return unwrap(await transport.request({ path: path(`turns/${encodeURIComponent(requestId)}`), method: "GET" }));

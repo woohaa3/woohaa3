@@ -14,7 +14,6 @@
 #![cfg_attr(not(feature = "canvas-core"), allow(dead_code))]
 
 mod animation_playback;
-mod film_set_object;
 pub(crate) mod focus_details;
 mod focus_transition;
 mod image_focus;
@@ -26,7 +25,9 @@ pub(crate) use resource_state::{NodeResourceState, ResourceStateRequest};
 mod prepared;
 mod scene;
 mod scene_instant;
+mod shared_world;
 mod theme;
+mod world_camera;
 mod video_focus;
 mod viewport;
 
@@ -34,8 +35,6 @@ mod viewport;
 //
 // 部分 DTO 只在 WASM 或 native-renderer 其中之一（或只在测试中）被引用，因此某个
 // feature 组合下个别再导出会看似“未被使用”。这些 path 必须稳定存在，故显式放行。
-#[allow(unused_imports)]
-pub(crate) use film_set_object::{FilmSetObjectMotion, FilmSetObjectPlayback};
 #[allow(unused_imports)]
 pub(crate) use focus_transition::{FOCUS_TRANSITION_VERSION, FocusTransitionProgress};
 #[allow(unused_imports)]
@@ -58,13 +57,8 @@ pub(crate) use position::{
 pub(crate) use prepared::{PreparedModelMetadata, PreparedModelRequest};
 #[allow(unused_imports)]
 pub(crate) use scene::{
-    AggregateRunPresentation, CompositeAssetGeometryQuality, CompositeAssetOverviewCache,
-    CompositeAssetPresentation,
-    CompositeAssetScopeShape, Edge, FilmSetGroupBinding, FilmSetGroupGround,
-    FilmSetGroupPreparation, FilmSetGroupTransform, FilmSetRunFeedback, GraphNode,
-    GroupPresentation, GroupRunStatus, HistoryStripDot, HistoryStripPresentation, ModelMediaPlane,
-    Scene, ScopeGroundDto, Selection, ShotCoverCamera, ShotPreviewLink, ShotPreviewPresentation,
-    Viewport,
+    Edge, GraphNode, HistoryStripDot, HistoryStripPresentation, NodeChrome, Scene, SceneArea,
+    SceneAreaBounds, SceneAreaPoint, Selection, Viewport,
 };
 #[allow(unused_imports)]
 pub(crate) use scene_instant::{
@@ -74,7 +68,18 @@ pub(crate) use scene_instant::{
     parse_shot_aspect_ratio,
 };
 #[allow(unused_imports)]
+pub(crate) use shared_world::{
+    WorldInstance,
+    UNITS_PER_METER, renderer_rotation_to_world, renderer_to_world, world_rotation_to_renderer,
+    world_to_renderer,
+};
+#[allow(unused_imports)]
 pub(crate) use theme::{Theme, is_known_theme_token, parse_theme_hex};
+#[allow(unused_imports)]
+pub(crate) use world_camera::{
+    WorldCamera, WorldCameraAspect, WorldCameraCaptureMode, WorldCameraPoint,
+    WorldCameraProjection, WORLD_CAMERA_VERSION,
+};
 #[allow(unused_imports)]
 pub(crate) use video_focus::{VIDEO_FOCUS_VERSION, VideoFocus};
 pub(crate) use viewport::{CANVAS_VIEWPORT_UPDATE_VERSION, ViewportUpdateRequest};
@@ -105,13 +110,5 @@ mod tests;
 #[cfg(test)]
 mod tests_instant;
 #[cfg(test)]
-mod tests_object_motion;
-#[cfg(test)]
-mod tests_run_effect;
-#[cfg(test)]
-mod tests_shot_preview;
-#[cfg(test)]
 mod tests_progress;
 
-mod composite_panel;
-pub(crate) use composite_panel::CompositeContainerPanel;

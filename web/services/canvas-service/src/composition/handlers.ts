@@ -10,19 +10,19 @@ import { createSnippetRequestHandler } from "../api/snippet-api.js";
 import { createNodeHistoryRequestHandler } from "../api/node-history-api.js";
 import { createEditCompletionRequestHandler } from "../api/edit-completion-api.js";
 import { createTaskActivityRequestHandler } from "../api/task-activity-api.js";
-import type { NodeHistoryThumbnailOptions } from "../model-renderer/node-history-thumbnail.js";
-import { createRendererClient, type RendererClient } from "../model-renderer/index.js";
 import type { CanvasStorageComposition } from "../storage/composition.js";
 import type { SnippetComposition } from "../storage/snippet-composition.js";
 import type { NodeHistoryComposition } from "../storage/node-history-composition.js";
 import type { CanvasRunService } from "../task/run-service.js";
 import type { CanvasTaskClient } from "../clients/task-client.js";
-import { createThumbnailPort } from "./history-observers.js";
 import { isCanvasPath, safePathname, sendJson } from "./deployment.js";
 import { authorizeCanvasRequest, httpStatusForCanvasAccess } from "../access/resolve-access.js";
 
 export type ComposedHandlerDeps = {
-  recording?: import("@woohaa3/contracts").CanvasRecordingPort;
+  worldConversion: import("@woohaa3/contracts").BackendWorldConversionPort | null;
+  worldAuthoring: import("@woohaa3/contracts").BackendWorldAuthoringPort | null;
+  worldCamera: import("../world-authoring/camera-service.js").WorldCameraSettingsService | null;
+  worldCapture: import("../world-authoring/capture-service.js").WorldCaptureService | null;
   env: Record<string, string | undefined>;
   canvasEnabled: boolean;
   unavailableReason: string | null;
@@ -30,17 +30,6 @@ export type ComposedHandlerDeps = {
   runService: CanvasRunService | null;
   snippets: SnippetComposition | null;
   nodeHistory: NodeHistoryComposition | null;
-  filmSetImportService:
-    | ReturnType<NonNullable<NonNullable<import("@woohaa3/contracts").CanvasContentRuntime["mcp"]>["createImportService"]>>
-    | undefined;
-  filmSetConversionService: import("@woohaa3/contracts").FilmSetConversionServicePort | null;
-  /** 「转为片场」owner 解析（宿主注入）；省略时生成端按自身边界处理。 */
-  filmSetConversionOwnerResolver?: (input: {
-    subject?: string;
-    cookie?: string;
-  }) => import("@woohaa3/contracts").FilmSetConversionOwner | null;
-  modelRenderer: RendererClient | null;
-  prepareCompositeHistory?: NodeHistoryThumbnailOptions["prepareCompositeHistory"];
   modelMcpHandler: ((req: unknown, res: ServerResponse) => Promise<boolean>) | null;
   modelMcpInternalHandler: ((req: unknown, res: ServerResponse) => Promise<boolean>) | null;
   agentInternalHandler: ((req: unknown, res: ServerResponse) => Promise<boolean>) | null;
@@ -70,7 +59,6 @@ export type ComposedHandlerDeps = {
   /** 在线迁移访问门（GET/WS 未准备、DELETE tombstone）。 */
   importGuard?: import("../api/canvas-api/types.js").CanvasImportGuard;
   log: (event: Record<string, unknown>) => void;
-  content?: import("@woohaa3/contracts").ContentContributionResolver;
 };
 
 /** 组装最终 `handle`（canvas → snippets → editCompletion → nodeHistory → activity → MCP 面）。 */
@@ -93,34 +81,14 @@ export function composeRequestHandler(deps: ComposedHandlerDeps): (req: Incoming
           return true;
         }
       : createCanvasRequestHandler({
-          get recording() { return deps.recording; },
-          ...(deps.content ? { content: deps.content } : {}),
+          ...(deps.worldConversion ? { worldConversion: deps.worldConversion } : {}),
+          ...(deps.worldAuthoring ? { worldAuthoring: deps.worldAuthoring } : {}),
+          ...(deps.worldCamera ? { worldCamera: deps.worldCamera } : {}),
+          ...(deps.worldCapture ? { worldCapture: deps.worldCapture } : {}),
           service: composition.service,
           ...(composition.catalog ? { catalog: composition.catalog } : {}),
           ...(deps.importGuard ? { importGuard: deps.importGuard } : {}),
           runService: deps.runService ?? undefined,
-          filmSetImport: {
-            import: (request) =>
-              deps.filmSetImportService
-                ? deps.filmSetImportService.importContent({ ...request, items: [...request.items] })
-                : Promise.resolve({ ok: false as const, code: "unavailable", message: "片场导入未启用" })
-          },
-          ...(deps.filmSetConversionService
-            ? {
-                filmSetConversion: {
-                  submit: (request) => deps.filmSetConversionService!.submit(request),
-                  status: (request) => deps.filmSetConversionService!.status(request),
-                  cancel: (request) => deps.filmSetConversionService!.cancel(request),
-                  ...(deps.filmSetConversionService.retry
-                    ? { retry: (request) => deps.filmSetConversionService!.retry!(request) }
-                    : {}),
-                  ...(deps.filmSetConversionService.models
-                    ? { models: () => deps.filmSetConversionService!.models!() }
-                    : {})
-                }
-              }
-            : {}),
-          ...(deps.filmSetConversionOwnerResolver ? { filmSetConversionOwnerResolver: deps.filmSetConversionOwnerResolver } : {}),
           serviceToken: deps.storageServiceToken,
           ...(deps.accessRuntime ? { accessRuntime: deps.accessRuntime } : {}),
           ...(deps.authenticate ? { authenticate: deps.authenticate } : {}),
@@ -168,7 +136,6 @@ export function composeRequestHandler(deps: ComposedHandlerDeps): (req: Incoming
               }
             }
           : {}),
-        thumbnail: createThumbnailPort(deps.modelRenderer ?? createRendererClient(), deps.nodeHistory.service, deps.prepareCompositeHistory),
         logger: tokenLogger
       })
     : null;

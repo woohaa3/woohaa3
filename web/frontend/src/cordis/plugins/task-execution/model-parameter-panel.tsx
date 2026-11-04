@@ -10,8 +10,6 @@ export type ModelParameterPanelProps = {
   canvasId?: string;
   nodeId: string;
   nodeType: string;
-  /** 是否片场业务（composite-asset + extensionId="film-set"）；缺省按非片场处理。 */
-  isFilmSet?: boolean;
   mcpServerUrl?: string;
   disabledReason?: string | null;
   /**
@@ -49,7 +47,7 @@ export function ModelParameterPanel(props: ModelParameterPanelProps) {
   if (props.renderGenerate) return <>{props.renderGenerate()}</>;
 
   const mcpServerUrl = props.mcpServerUrl ?? "/mcp/model-canvas";
-  const promptGuide = modelPromptGuide(props.canvasId, props.nodeId, props.isFilmSet === true);
+  const promptGuide = modelPromptGuide(props.canvasId, props.nodeId);
 
   const mcpBody = (
     <div className="node-param-panel" data-node-id={props.nodeId}>
@@ -112,8 +110,8 @@ export function ModelParameterPanel(props: ModelParameterPanelProps) {
 }
 
 /** 生成面板内的外部 MCP 指引：悬停查看完整内容，点击复制同一份内容。 */
-export function AuthoringMcpButton(props: Pick<ModelParameterPanelProps, "canvasId" | "nodeId" | "isFilmSet" | "mcpServerUrl" | "copyText">) {
-  const content = `${MCP_HINT_INSTALL_COPY_PREFIX}${props.mcpServerUrl ?? resolveModelMcpServerUrl()}\n${modelPromptGuide(props.canvasId, props.nodeId, props.isFilmSet)}`;
+export function AuthoringMcpButton(props: Pick<ModelParameterPanelProps, "canvasId" | "nodeId" | "mcpServerUrl" | "copyText">) {
+  const content = `${MCP_HINT_INSTALL_COPY_PREFIX}${props.mcpServerUrl ?? resolveModelMcpServerUrl()}\n${modelPromptGuide(props.canvasId, props.nodeId)}`;
   return <McpCopyButton key={content} content={content} copyText={props.copyText} />;
 }
 
@@ -136,15 +134,12 @@ function McpCopyButton({ content, copyText }: { content: string; copyText?: Mode
   </Tooltip>;
 }
 
-export function modelPromptGuide(canvasId: string | undefined, nodeId: string, filmSet = false): string {
+export function modelPromptGuide(canvasId: string | undefined, nodeId: string): string {
   const target = canvasId ? `画布 ${canvasId} 的节点 ${nodeId}` : `节点 ${nodeId}`;
-  if (filmSet) {
-    return `使用 Woohaa3 Model Canvas MCP 修改${target}片场；先调用 get_model_api 和 get_model_node 读取脚本 API、完整 animation 与 snapshotHash。生成或增添对象用 submit_film_set（带稳定 requestId 与 expectedSnapshotHash），在现有片场保存完整对象集合和片段；空片场或只有地面也可生成。保留未修改的对象、片段、运动和镜头。修改指定已有模型用 import_model_snapshot（必须指定 itemId），片段动作用 mutate_film_set_clip。片场不保存顶层模型脚本；创建另一片场才用 create_film_set_node。修改后检查运动适配状态。`;
-  }
   return `使用 Woohaa3 Model Canvas MCP 生成或修改${target}；先调用 get_model_api 读取脚本 API 与尺度约定，再调用 get_model_node，然后调用 submit_model_script（带稳定 requestId 与 expectedModelContentHash）。模型按真实尺度建模（1 单位 ≈ 1 米，站立人物约 1.7 单位高）。点数/面数引用 get_model_statistics 或提交回执，不要自己按成本表推算（segment 缺省是 capsule）。`;
 }
 
-/** 具备 MCP 模型生成面板的节点类型（两类自包含 3D 节点）。 */
+/** 具备 MCP 模型生成面板的节点类型。 */
 function isModelScriptMcpNodeType(nodeType: string): boolean {
-  return isModelAuthoringNodeType(nodeType) || nodeType === "group";
+  return isModelAuthoringNodeType(nodeType);
 }

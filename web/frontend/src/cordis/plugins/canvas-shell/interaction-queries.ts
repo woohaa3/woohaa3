@@ -16,14 +16,12 @@ export type InteractionQueries = {
   queryMarquee(rect: { x: number; y: number; width: number; height: number }): InteractionQuery<string[]>;
   queryProbe(source: string, direction: "prev" | "next"): InteractionQuery<ProbeCandidate[]>;
   /**
-   * 通用 drop target 查询（change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D5）。
+   * 通用 drop target 查询。
    *
    * 按既有顺序固定最上层实际节点（排除来源），只返回 identity；`ok:true` 且 `value=null` 表示
    * 查询成功但该点无节点。`ok:false` 时调用方 MUST NOT 回退 TS 矩形几何或提交移动。
    */
   queryDropTarget(point: Point, excludedIds?: readonly string[]): InteractionQuery<string | null>;
-  /** 复合资产范围几何读取（拖动提示消费，按 accepted generation）。 */
-  queryCompositeAssetScopes(): InteractionQuery<import("../canvas-runtime/bevy-runtime.js").CompositeAssetScopeGeometryEntry[]>;
   /**
    * 模型网格（渲染在卡片下方）命中：返回最近模型节点 identity。
    *
@@ -86,13 +84,6 @@ export function createInteractionQueries(deps: {
       const generation = generationOf(runtime);
       if (!runtime?.queryDropTarget || generation === null) return { ok: false, reason: "unavailable" };
       return runtime.queryDropTarget({ generation, x: point.x, y: point.y, excludedIds }) as InteractionQuery<string | null>;
-    },
-    queryCompositeAssetScopes() {
-      const runtime = deps.getRuntime();
-      ensurePublished();
-      const generation = generationOf(runtime);
-      if (!runtime?.queryCompositeAssetScopes || generation === null) return { ok: false, reason: "unavailable" };
-      return runtime.queryCompositeAssetScopes({ generation }) as InteractionQuery<import("../canvas-runtime/bevy-runtime.js").CompositeAssetScopeGeometryEntry[]>;
     },
     queryModelPick(point, surface) {
       const runtime = deps.getRuntime();

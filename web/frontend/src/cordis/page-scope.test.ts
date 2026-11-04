@@ -10,8 +10,6 @@ import { startApp, type AppRuntime } from "./page-scope.js";
 import { resolvePageLocation, locationToPath } from "./navigation/app-router-store.js";
 import { createFakeCanvasCatalogRemote, makeSummary } from "./test-support/canvas-catalog.js";
 import { createSourceExtensionRuntimeService } from "./test-support/source-extensions.js";
-import { routeNodeActionHit } from "./plugins/canvas-shell/node-action-host.js";
-import type { TaskActivityStore } from "@woohaa3/extension-task-activity/frontend";
 
 let app: AppRuntime | null = null;
 
@@ -143,7 +141,7 @@ describe("Page scope 生命周期", () => {
     // 公开 client 只带 task-activity 与内置 node-history；prompt-snippets 在父仓扩展根。
     expect(page.diagnostics.getStatus().plugins.find((plugin) => plugin.id === "node-history")?.status).toBe("active");
     expect(page.ctx.get("promptSnippetSource" as never)).toBeUndefined();
-    expect(page.ctx.slots.list("canvas.context-menu").map((entry) => entry.id)).toEqual(["canvas-menu", "generation-trace"]);
+    expect(page.ctx.slots.list("canvas.context-menu").map((entry) => entry.id)).toEqual(["image-director-scene", "canvas-menu", "generation-trace"]);
     expect(actions).not.toContain("node-history-all");
     expect(page.ctx.slots.list("ai-center.generation-history")).toHaveLength(1);
   });
@@ -162,14 +160,6 @@ describe("Page scope 生命周期", () => {
     expect(diagnostics.plugins.find((plugin) => plugin.id === "model-editor")?.status).toBe("active");
     expect(diagnostics.plugins.find((plugin) => plugin.id === "task-activity")?.status).toBe("active");
     expect(page.ctx.slots.list("canvas.overlay").some(entry => entry.id === "task-activity-feed")).toBe(true);
-    const activity = page.ctx.get("taskActivityStore" as never) as unknown as { store: TaskActivityStore };
-    routeNodeActionHit({
-      hit: { nodeId: "creation-group", actionId: "group-run-status", menu: false },
-      context: { nodeId: "creation-group", nodeType: "group", writable: false },
-      contributions: page.ctx.slots.list("canvas.node-action"),
-      openSettings: () => { throw new Error("状态入口不应打开节点设置"); }
-    });
-    expect(activity.store.getSnapshot()).toMatchObject({ selectedGroupId: "creation-group", openRevision: 1 });
     expect(page.ctx.slots.list("canvas.toolbar-action").some((entry) => entry.id === "node-history-all")).toBe(false);
   });
 
@@ -222,7 +212,7 @@ describe("Page scope 生命周期", () => {
     // 页面没有因为 optional 失败而失败：required 插件仍 active。
     expect(page.diagnostics.getStatus().plugins.find((plugin) => plugin.id === "paste-import")?.status).toBe("active");
     // 可选片段入口缺席不影响画布菜单与任务执行的生成溯源入口。
-    expect(page.ctx.slots.list("canvas.context-menu").map(entry => entry.id)).toEqual(["canvas-menu", "generation-trace"]);
+    expect(page.ctx.slots.list("canvas.context-menu").map(entry => entry.id)).toEqual(["image-director-scene", "canvas-menu", "generation-trace"]);
     expect(page.ctx.slots.list("canvas.overlay").some(entry => entry.id === "task-activity-feed")).toBe(true);
     // 失败的可选入口在运行时服务中记录为 load-failed（供 Plugin Manager 显示「启动失败」）。
     const failed = runtime.diagnostics().find((row) => row.extensionId === FIXTURE_ID);

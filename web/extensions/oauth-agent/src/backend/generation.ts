@@ -1,4 +1,3 @@
-import { resolveFilmSetClip } from "@woohaa3/contracts";
 /**
  * ChatGPT 3D 生成编排公共入口
  * （change: 2026-10-08-add-chatgpt-oauth-3d-generation，任务 3.3–3.6、4.1–4.4 / design D4/D5；
@@ -16,16 +15,16 @@ import type { ChatGptGenerationMode, ChatGptGenerationReceipt } from "@woohaa3/c
 import type { ChatGptCanvasPorts } from "./ports.js";
 import type { CodexAdapter, CodexRunEvent } from "./codex-adapter.js";
 import type { ChatGptWorkJournal } from "./work-journal.js";
-import { animationSchema, cameraSchema, modelSchema } from "./generation/schemas.js";
+import { cameraSchema, modelSchema } from "./generation/schemas.js";
 import { parseCandidateText } from "./generation/candidate-codec.js";
 import { buildPrompt, buildToolsPrompt } from "./generation/prompts.js";
-import { commitAnimation, commitCameras, commitModel, type CommitContext } from "./generation/commit.js";
+import { commitCameras, commitModel, type CommitContext } from "./generation/commit.js";
 import { priorToReceipt } from "./generation/receipts.js";
 import { identityOf, type GenerateRequest, type GenerationOutcome, type GenerationProgress, type RequestRecord } from "./generation/types.js";
 
 export type { GenerateRequest, GenerationProgress, GenerationOutcome } from "./generation/types.js";
-export { modelSchema, animationSchema, cameraSchema } from "./generation/schemas.js";
-export { parseCandidateText, overwriteGuard, normalizeCameraMutations, toFlatAnimation } from "./generation/candidate-codec.js";
+export { modelSchema, cameraSchema } from "./generation/schemas.js";
+export { parseCandidateText, overwriteGuard, normalizeCameraMutations } from "./generation/candidate-codec.js";
 export { buildPrompt, buildToolsPrompt } from "./generation/prompts.js";
 
 export type ChatGptGenerationOptions = {
@@ -121,18 +120,14 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
     controller: AbortController,
     onProgress?: GenerationProgress
   ): Promise<GenerationOutcome> => {
-    const WRITE_TOOLS = new Set(input.mode === "camera" ? (input.selectedCameraId ? ["update_model_camera", "reset_model_camera"] : ["create_model_camera"]) : input.clipId && input.mode === "film-set" ? ["mutate_film_set_clip", "export_film_set_clip"] : [
-      ...(input.mode === "film-set" ? ["submit_film_set", "add_film_set_media", "export_film_set_clip", "mutate_film_set_item", "mutate_film_set_clip"] : ["submit_model_script"]),
+    const WRITE_TOOLS = new Set(input.mode === "camera" ? (input.selectedCameraId ? ["update_model_camera", "reset_model_camera"] : ["create_model_camera"]) : [
+      "submit_model_script",
       "create_model_camera",
       "update_model_camera",
       "delete_model_camera",
       "rename_model_camera",
       "reset_model_camera",
-      "set_model_camera",
-      "create_film_set_node",
-      "add_film_set_media",
-      "export_film_set_clip",
-      "import_model_snapshot"
+      "set_model_camera"
     ]);
     const applied: string[] = [];
     const failed: Array<{ part: string; code: string; message: string }> = [];
@@ -147,7 +142,7 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
           workId: workIds.get(input.requestId) ?? input.requestId,
           canvasId: input.canvasId,
           nodeId: input.nodeId,
-          tools: [...WRITE_TOOLS, "get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_film_set_clips"],
+          tools: [...WRITE_TOOLS, "get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras"],
           ...(input.selectedCameraId ? { cameraId: input.selectedCameraId } : {}),
           ...(input.clipId ? { clipId: input.clipId } : {}),
           ...(input.itemId ? { itemId: input.itemId } : {})
@@ -260,21 +255,12 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
         if (!read.ok) return fail(record, onProgress, read.code, read.message, 409);
         record.clipId = input.clipId;
         if (input.mode === "camera" && input.selectedCameraId && !read.cameras.some(camera => camera.id === input.selectedCameraId)) return fail(record, onProgress, "unknown-camera", "Selected camera no longer exists", 409);
-        if (input.mode === "camera" && input.clipId && read.animation && !resolveFilmSetClip(read.animation, input.clipId)) return fail(record, onProgress, "unknown-clip", "Selected clip no longer exists", 409);
-        if (input.itemId && (!read.animation?.filmSetContent.items.some(item => item.id === input.itemId) || !input.clipId)) return fail(record, onProgress, "unknown-item", "生成目标对象或片段不存在", 409);
-        if (input.itemId && !toolsEnabled) return fail(record, onProgress, "tools-required", "对象动作生成需要启用片段工具能力", 409);
-        if (input.mode === "film-set" && read.animation) {
-          // 片场生成按片段定位：captured clipId 必须仍存在；不把视图回写到 read（items-only 完整节点保留）。
-          if (input.clipId && !resolveFilmSetClip(read.animation, input.clipId)) {
-            return fail(record, onProgress, "unknown-clip", "生成目标片段不存在", 409);
-          }
-          if (input.itemId && !input.clipId) return fail(record, onProgress, "clip-required", "对象动作生成必须指定目标片段", 409);
-        }
+        if (input.itemId || input.clipId) return fail(record, onProgress, "invalid-target", "片段或对象动作目标已停用，请改为模型或镜头目标。", 409);
         if (toolsEnabled) {
           return await runWithTools(input, read, record, controller, onProgress);
         }
         const prompt = buildPrompt(input, read);
-        const schema = input.mode === "model3d" ? modelSchema() : input.mode === "film-set" ? animationSchema() : cameraSchema();
+        const schema = input.mode === "camera" ? cameraSchema() : modelSchema();
         record.receipt = { status: "running", requestId: input.requestId, stage: "reasoning" };
         onProgress?.({ requestId: input.requestId, stage: "reasoning" });
         const { finalResponse } = await codex.runStreamed(
@@ -290,9 +276,8 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
         if (!parsed.ok) return fail(record, onProgress, "invalid-candidate", parsed.message, 422);
 
         onProgress?.({ requestId: input.requestId, stage: "committing" });
-        if (input.mode === "model3d") return await commitModel(commitCtx, input, read, parsed.value, record, onProgress);
-        if (input.mode === "film-set") return await commitAnimation(commitCtx, input, read, parsed.value, record, onProgress);
-        return await commitCameras(commitCtx, input, read, parsed.value, record, onProgress);
+        if (input.mode === "camera") return await commitCameras(commitCtx, input, read, parsed.value, record, onProgress);
+        return await commitModel(commitCtx, input, read, parsed.value, record, onProgress);
       } catch (error) {
         if (controller.signal.aborted) return fail(record, onProgress, "cancelled", "生成已取消。", 499);
         return fail(record, onProgress, "generation-failed", error instanceof Error ? error.message : String(error), 502);

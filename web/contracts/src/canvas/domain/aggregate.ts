@@ -16,6 +16,8 @@ import { sanitizeWoohaa3CanvasDocument,
   type Woohaa3CanvasDocument,
   type Woohaa3CanvasNodeDataMap } from "./core";
 import { normalizeCanvas, type NormalizeCanvasOptions } from "./normalization";
+import { validateWorldIdentities } from "./world-identities.js";
+import { decodeWorldCaptureGenerationBinding } from "../world-capture-pipeline-contract.js";
 import { DEFAULT_CANVAS_TITLE,
   type CanvasAssetSource,
   type CanvasAssetStatus,
@@ -51,6 +53,7 @@ export type CanvasAggregateIssueCode =
 export type CanvasAggregateFailureCode =
   | "not-an-object"
   | "missing-schema-version"
+  | "invalid-world-identities"
   | "unsupported-schema-version";
 
 export type CanvasAggregateFailure = {
@@ -117,6 +120,8 @@ export function parseCanvasAggregate(
 
   // rawDocument 已是不受信任输入；`sanitizeWoohaa3CanvasDocument` 做结构规范化。
   const document: Woohaa3CanvasDocument = sanitizeWoohaa3CanvasDocument(rawDocument, now);
+  const worldError = validateWorldIdentities(document.nodes, isRecord(input.nodeData) ? input.nodeData : {});
+  if (worldError) return { ok: false, issues, failure: { code: "invalid-world-identities", message: worldError, schemaVersion: declared } };
   const nodeData = sanitizeWoohaa3CanvasNodeData(input.nodeData);
   const assets = sanitizeStoredAssets(input.assets, now, issues);
   const jobs = sanitizeStoredJobs(input.jobs, now, issues);
@@ -144,7 +149,12 @@ export function parseCanvasAggregate(
     updatedAt: readIsoString(input.updatedAt) ?? document.updatedAt
   };
 
-  const canvas = normalizeCanvas(provisional, options);
+  let canvas: ServerCanvas;
+  try {
+    canvas = normalizeCanvas(provisional, options);
+  } catch (error) {
+    return { ok: false, issues, failure: { code: "invalid-world-identities", message: error instanceof Error ? error.message : String(error), schemaVersion: declared } };
+  }
   collectStructuralIssues(rawDocument, canvas, nodeData, issues);
   collectNodeDataPruning(document, nodeData, canvas, issues);
   return { ok: true, canvas, issues };
@@ -256,6 +266,8 @@ function sanitizeStoredJobs(
       return;
     }
     const status = isRecord(entry) ? readGenerationStatus(entry.status) : undefined;
+    const rawWorldCapture = isRecord(entry) ? entry.worldCapture : undefined;
+    const worldCapture = rawWorldCapture === undefined ? undefined : decodeWorldCaptureGenerationBinding(rawWorldCapture);
     result.push({
       id,
       nodeId,
@@ -266,6 +278,7 @@ function sanitizeStoredJobs(
       // modelKey 决定「这次用的是哪个模型」，是产物溯源的一环（change: l0-generation-provenance），
       // 必须和 runId 一样往返保留，否则导出画布就丢。
       modelKey: isRecord(entry) ? readNonEmptyString(entry.modelKey) : undefined,
+      ...(worldCapture?.ok ? { worldCapture: worldCapture.value } : {}),
       status: status ?? "idle",
       error: isRecord(entry) ? readNonEmptyString(entry.error) : undefined,
       updatedAt: (isRecord(entry) ? readIsoString(entry.updatedAt) : undefined) ?? now

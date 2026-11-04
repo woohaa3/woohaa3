@@ -174,34 +174,35 @@ export function clamp(value: string, max: number): string {
 }
 
 /**
- * 在预算截断前增量记录完整消息摘要，不缓存文本；每个回合结算时只比较一次。
+ * 在预算截断前按消息身份记录最新正文的长度与摘要，不缓存文本。
  *
- * 同时维护两种连接形式：消息之间加空行（详情按独立消息渲染）与直接拼接（部分原生协议把
- * 多条助手消息当作一段连续文本返回）。任一种与回合汇总一致即视为「已展示」，避免重复追加。
+ * 原生消息在工具事件结算后仍可能更新累计快照；更新同一身份但保留消息顺序。
+ * 汇总只允许在消息边界直接拼接、加单换行或空行，消息内部的换行保持原样，避免误吞新正文。
  */
 export function createAssistantMessageDigest() {
-  const joined = createHash("sha256");
-  const plain = createHash("sha256");
-  let count = 0;
-  let digests: { joined: string; plain: string } | null = null;
-  const seal = () => {
-    if (!digests) digests = { joined: joined.digest("hex"), plain: plain.digest("hex") };
-    return digests;
-  };
+  const messages = new Map<string, { length: number; digest: string }>();
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
   return {
-    append(content: string) {
-      if (count++ > 0) joined.update("\n\n");
-      joined.update(content);
-      plain.update(content);
+    record(messageId: string, content: string) {
+      messages.set(messageId, { length: content.length, digest: digest(content) });
     },
     matches(summary: string) {
-      if (count === 0) return false;
-      const sealed = seal();
-      if (sealed.joined === createHash("sha256").update(summary).digest("hex")) return true;
-      // 多段消息在不同协议里可能按空行或直接拼接返回：忽略换行后再比一次。
-      if (count === 1) return false;
-      const normalized = summary.replace(/\s*\n\s*/g, "").trim();
-      return sealed.plain === createHash("sha256").update(normalized).digest("hex");
+      if (messages.size === 0) return false;
+      return ["", "\n", "\n\n"].some(separator => {
+        let offset = 0;
+        let first = true;
+        for (const message of messages.values()) {
+          if (!first) {
+            if (summary.slice(offset, offset + separator.length) !== separator) return false;
+            offset += separator.length;
+          }
+          const end = offset + message.length;
+          if (end > summary.length || digest(summary.slice(offset, end)) !== message.digest) return false;
+          offset = end;
+          first = false;
+        }
+        return offset === summary.length;
+      });
     }
   };
 }

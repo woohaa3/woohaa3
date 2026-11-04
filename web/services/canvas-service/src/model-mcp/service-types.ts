@@ -1,4 +1,3 @@
-import type { ContentAnimationMetadata, ContentFrameRuntime, ContentMediaReader } from "@woohaa3/contracts";
 /**
  * 模型 MCP 服务：DTO、依赖与共享类型
  * （自 `service.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R03）。
@@ -8,12 +7,10 @@ import type { ContentAnimationMetadata, ContentFrameRuntime, ContentMediaReader 
  */
 import type { CanvasRoom } from "../sync/index.js";
 import type {
-  FilmSetContent,
   ModelCamera,
   ModelCameraMutation,
   ModelContentVersion,
   ModelReferenceInput,
-  NodeHistoryAnimationPayload,
   NodeHistoryModelPlacement,
   SupportedModelScriptVersion
 } from "@woohaa3/contracts";
@@ -22,7 +19,6 @@ import type { RenderCache, RendererClient } from "../model-renderer/index.js";
 import type { ScriptExecutorOptions } from "./script-executor.js";
 
 export type SubmitScriptInput = {
-  resource?: "group-appearance";
   expectedContentHash?: string;
   canvasId: string;
   nodeId: string;
@@ -78,7 +74,6 @@ export type ReportScriptOutcome =
   | { ok: false; code: string; message: string };
 
 export type GetModelNodeInput = {
-  resource?: "group-appearance";
   expectedContentHash?: string;
   canvasId: string;
   nodeId: string;
@@ -97,9 +92,6 @@ export type GetModelNodeOutcome =
       canvasId: string;
       nodeId: string;
       nodeType?: string;
-      resource?: "group-appearance";
-      appearanceSource?: "default" | "custom" | "unsupported";
-      diagnostic?: string;
       contentHash?: string;
       modelContentVersion?: ModelContentVersion;
       /** 文件模型（GLB）来源标记；脚本模型省略（change: 2026-10-28-support-glb-model-nodes）。 */
@@ -120,26 +112,6 @@ export type GetModelNodeOutcome =
       /** 当前权威脚本的规模统计（与聚焦信息面板同源）；脚本为空或执行失败时省略。 */
       statistics?: import("@woohaa3/contracts").ModelSceneStatistics;
       breakdown?: import("@woohaa3/contracts").ModelSceneStatisticsBreakdown;
-      animation?: {
-        title?: string;
-        sceneCamera?: import("@woohaa3/contracts").InitialShotCamera;
-        origin?: import("@woohaa3/contracts").ModelImportOrigin;
-        /** D7 独立片场根变换。 */
-        scenePlacement: import("@woohaa3/contracts").FilmSetLocalTransform;
-        /** items-only 共享内容（schema 3）。 */
-        filmSetContent: FilmSetContent;
-        /** 片段集合（schema 2；无片段时为空集合）。 */
-        filmSetAnimations: import("@woohaa3/contracts").FilmSetAnimations;
-        /** 默认片段派生的运行时镜头/时间线视图。 */
-        initialCamera: {
-          azimuth: number;
-          elevation: number;
-          distance: number;
-          aspect: string;
-          focusOffset: { x: number; y: number; z: number };
-        };
-        timeline: { duration: number; loop: boolean };
-      };
     }
   | { ok: false; code: string; message: string };
 
@@ -171,9 +143,8 @@ export type RenderPreviewInput = {
   height?: number;
   background?: string;
   cameraPreset?: string;
-  /** 动画节点采样时刻（秒）；仅 animation3d 有效，缺省 0（D4）。 */
+  /** 采样时刻（秒）；静态模型只接受 0。 */
   timeSeconds?: number;
-  clipId?: string;
 };
 
 /** 预览元数据：防陈旧且可追溯。 */
@@ -188,7 +159,6 @@ export type RenderPreviewMetadata = {
   height: number;
   background: string;
   cameraPreset: string;
-  animation?: ContentAnimationMetadata;
 };
 
 export type RenderPreviewOutcome =
@@ -248,13 +218,6 @@ export type MutateCamerasBatchOutcome =
   | { ok: false; code: string; message: string; failedIndex?: number };
 
 export type ModelMcpServiceDependencies = {
-  /** 媒体读取端口（宿主媒体服务）：内容扩展准备原生媒体帧时用。 */
-  readMedia?: ContentMediaReader;
-  /**
-   * 复合内容帧端口（预览/历史缩略图）：由拥有内容领域的扩展实现，宿主在装配时注入。
-   * 未注入时片场预览返回 `content-runtime-unavailable`、历史缩略图回落 composite-history-unavailable。
-   */
-  contentFrames?: ContentFrameRuntime;
   resolveRoom: (canvasId: string) => Promise<CanvasRoom | null>;
   /** 稳定 commandId 生成器（测试可注入确定性实现）；默认由内容哈希派生。 */
   createCommandId?: (input: SubmitScriptInput) => string;
@@ -278,7 +241,6 @@ export type ModelMcpServiceDependencies = {
     createdAt: string;
     nodeType?: string;
     placement?: NodeHistoryModelPlacement;
-    animation?: NodeHistoryAnimationPayload;
   }) => Promise<unknown>;
   /** 写入审计用的 actorId。由**调用方身份**派生。 */
   actorId?: string;

@@ -183,6 +183,23 @@ describe("CanvasResourceCoordinator", () => {
     coordinator.dispose();
   });
 
+  it("admits no-card world models even when their sentinel rect is outside the viewport", () => {
+    const coordinator = new CanvasResourceCoordinator();
+    const fresh = coordinator.project({
+      viewport: { x: 0, y: 0, zoom: 1 },
+      surface: { width: 800, height: 600, pixelRatio: 1 },
+      pageVisible: true,
+      interactive: [],
+      pins: [],
+      candidates: [
+        { nodeId: "world", contentKey: "world", x: 0, y: 0, width: 248, height: 232, eligible: true, alwaysVisible: true }
+      ]
+    });
+    expect(fresh).toEqual(["world"]);
+    expect(coordinator.isAdmitted("world")).toBe(true);
+    coordinator.dispose();
+  });
+
   it("pauses ordinary prefetch without a surface but keeps explicit pins", () => {
     const coordinator = new CanvasResourceCoordinator();
     coordinator.project({

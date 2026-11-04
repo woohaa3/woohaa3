@@ -1,4 +1,3 @@
-import { migrateFilmSetCanvasFixture } from "../../../../test-support/film-set-groups.js";
 /**
  * ModelMcpService 权威提交测试
  * （change: integrate-origin-master-after-web-split；
@@ -12,10 +11,9 @@ import { migrateFilmSetCanvasFixture } from "../../../../test-support/film-set-g
  * - 非法脚本（空/超长/非模型节点/不可执行）在写入前失败且不改节点状态。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, modelSourceHash, filmSetNodeDataFields, createFilmSetSnapshot, type CanvasNodeData, type FilmSetGroupMarker } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, modelSourceHash, type CanvasNodeData } from "@woohaa3/contracts";
 import { InMemoryYjsDocumentRepository } from "../sync/index.js";
 import { CanvasRoom } from "../sync/room.js";
-import { filmSetFrameRuntime } from "@woohaa3/extension-film-set/backend";
 import { ModelMcpService } from "./service.js";
 
 const NOW = "2026-09-24T00:00:00.000Z";
@@ -409,44 +407,6 @@ describe("ModelMcpService.submitScript", () => {
     expect(exported.canvas.revision).toBe(0);
   });
 
-  it("getModelNode 接受片场并返回 items-only 完整定义与片段（D7/D8/D10）", async () => {
-    const animationData = filmSetNodeDataFields(createFilmSetSnapshot({
-      title: "片场",
-      model: { modelScript: "scene.box({ id: 'torso', size: [1,1,1] });", modelScriptVersion: "woohaa-model-js-v2" },
-      modelItemId: "actor",
-      motionScript: "motion.model.rotate('torso', { speed: 1 });",
-      timeline: { duration: 4, loop: true },
-      initialCamera: { azimuth: 0.25, elevation: 0.5, distance: 4, aspect: "16:9", focusOffset: { x: 0, y: 1, z: 0 } }
-    }));
-    const repository = new InMemoryYjsDocumentRepository();
-    const room = new CanvasRoom({ canvasId: "canvas-anim-read", repository, now: () => NOW });
-    const base = createEmptyWoohaa3ServerCanvas("canvas-anim-read", NOW);
-    await initializeFixture(room, {
-      canvas: {
-        ...base,
-        document: { ...base.document, nodes: [
-          { id: "anim-1", type: "composite-asset", position: { x: 0, y: 0 } },
-          { id: "image-1", type: "image", position: { x: 1, y: 0 } }
-        ] },
-        nodeData: { "anim-1": animationData as unknown as CanvasNodeData }
-      },
-      roomEpoch: "epoch-1",
-      createdAt: NOW
-    });
-    const service = new ModelMcpService({ resolveRoom: async () => room });
-    const outcome = await service.getModelNode({ canvasId: "canvas-anim-read", nodeId: "anim-1" });
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    expect(outcome.nodeType).toBe("group");
-    expect(outcome.animation?.filmSetContent.items.some(item => item.id === "actor" && item.kind === "model")).toBe(true);
-    expect(outcome.animation?.filmSetAnimations.defaultClipId).toBe("clip-1");
-    expect(outcome.animation?.timeline).toEqual({ duration: 4, loop: true });
-    expect(outcome.animation?.initialCamera).toMatchObject({ distance: 4, aspect: "16:9", focusOffset: { x: 0, y: 1, z: 0 } });
-    // 非 3D 节点仍拒绝。
-    expect(await service.getModelNode({ canvasId: "canvas-anim-read", nodeId: "image-1" }))
-      .toMatchObject({ ok: false, code: "invalid-node-type" });
-  });
-
   it("画布不存在返回 canvas-not-found", async () => {
     const service = serviceFor(null);
     const outcome = await service.submitScript({ canvasId: "missing", nodeId: "model-1", source: VALID_SCRIPT, requestId: "req-missing" });
@@ -621,122 +581,6 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
       .toMatchObject({ ok: false, code: "renderer-unavailable" });
   });
 
-  it("支持片场：默认 initial 镜头、指定时刻并返回动画身份（任务 3.1-3.3 / D8/D10）", async () => {
-    const animationData = filmSetNodeDataFields(createFilmSetSnapshot({
-      title: "片场",
-      model: { modelScript: "scene.box({ id: 'torso', size: [1,1,1] });", modelScriptVersion: "woohaa-model-js-v2" },
-      modelItemId: "actor",
-      motionScript: "motion.model.rotate('torso', { speed: 1 });",
-      timeline: { duration: 4, loop: false },
-      initialCamera: { azimuth: 0, elevation: 0.5, distance: 4, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } }
-    }));
-    const repository = new InMemoryYjsDocumentRepository();
-    const room = new CanvasRoom({ canvasId: "canvas-anim-preview", repository, now: () => NOW });
-    const base = createEmptyWoohaa3ServerCanvas("canvas-anim-preview", NOW);
-    await initializeFixture(room, {
-      canvas: {
-        ...base,
-        document: { ...base.document, nodes: [{ id: "anim-1", type: "composite-asset", position: { x: 0, y: 0 } }] },
-        nodeData: { "anim-1": animationData as unknown as CanvasNodeData }
-      },
-      roomEpoch: "epoch-1",
-      createdAt: NOW
-    });
-    const fake = fakeRenderer();
-    const service = new ModelMcpService({ resolveRoom: async () => room, rendererClient: fake.client, contentFrames: filmSetFrameRuntime });
-    const outcome = await service.renderPreview({ canvasId: "canvas-anim-preview", nodeId: "anim-1", timeSeconds: 2 });
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    expect(outcome.metadata.cameraPreset).toBe("initial");
-    expect(outcome.metadata.animation).toMatchObject({
-      clipId: "clip-1",
-      timeSeconds: 2,
-      duration: 4,
-      loop: false
-    });
-    expect(outcome.metadata.animation?.snapshotHash).toBeTruthy();
-    expect(outcome.metadata.animation?.contentHash).toBeTruthy();
-
-    // 越界时刻稳定拒绝。
-    expect(await service.renderPreview({ canvasId: "canvas-anim-preview", nodeId: "anim-1", timeSeconds: 9 }))
-      .toMatchObject({ ok: false, code: "malformed-request" });
-  });
-
-  it("片场原生预览组合内部对象并按固定 T 烘焙动作；媒体帧不可用时明确失败（任务 6.3 / D8/D10）", async () => {
-    const filmSetData = filmSetNodeDataFields(createFilmSetSnapshot({
-      title: "片场",
-      model: { modelScript: "scene.box({ id: 'body', size: [1,1,1] });", modelScriptVersion: "woohaa-model-js-v2" },
-      modelItemId: "obj-a",
-      // 对象动作只经片段 binding（items-only）。
-      motionScript: "motion.model.move('body', { speed: 1, range: [0,2] });",
-      timeline: { duration: 4, loop: false },
-      filmSetContent: {
-        schemaVersion: 4,
-        items: [
-          { id: "g", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }
-        ]
-      }
-    }));
-    const repository = new InMemoryYjsDocumentRepository();
-    const room = new CanvasRoom({ canvasId: "canvas-film-preview", repository, now: () => NOW });
-    const base = createEmptyWoohaa3ServerCanvas("canvas-film-preview", NOW);
-    await initializeFixture(room, {
-      canvas: {
-        ...base,
-        document: { ...base.document, nodes: [{ id: "film-1", type: "composite-asset", position: { x: 0, y: 0 } }] },
-        nodeData: { "film-1": filmSetData as unknown as CanvasNodeData }
-      },
-      roomEpoch: "epoch-1",
-      createdAt: NOW
-    });
-    const fake = fakeRenderer();
-    const service = new ModelMcpService({ resolveRoom: async () => room, rendererClient: fake.client, contentFrames: filmSetFrameRuntime });
-    const outcome = await service.renderPreview({ canvasId: "canvas-film-preview", nodeId: "film-1", timeSeconds: 2 });
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    // 组合 ops 含内部模型与地面（不止顶层空源码）。
-    const lastRequest = fake.calls.at(-1) as { ops: unknown[]; motion?: { objects: unknown[] } };
-    expect(lastRequest.ops.length).toBeGreaterThanOrEqual(2);
-    expect(lastRequest.motion?.objects.length).toBeGreaterThanOrEqual(1);
-    // 媒体对象（无真实帧准备）明确失败，不用占位冒充。
-    const mediaData = filmSetNodeDataFields(createFilmSetSnapshot({
-      title: "媒体片场",
-      timeline: { duration: 0, loop: false },
-      filmSetContent: {
-        schemaVersion: 4,
-        items: [{ id: "img", kind: "image", name: "图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "a1", aspectRatio: 1 }]
-      }
-    }));
-    const room2 = new CanvasRoom({ canvasId: "canvas-film-media", repository: new InMemoryYjsDocumentRepository(), now: () => NOW });
-    const base2 = createEmptyWoohaa3ServerCanvas("canvas-film-media", NOW);
-    await initializeFixture(room2, {
-      canvas: { ...base2, document: { ...base2.document, nodes: [{ id: "film-m", type: "composite-asset", position: { x: 0, y: 0 } }] }, nodeData: { "film-m": mediaData as unknown as CanvasNodeData } },
-      roomEpoch: "epoch-1",
-      createdAt: NOW
-    });
-    const service2 = new ModelMcpService({ resolveRoom: async () => room2, rendererClient: fakeRenderer().client, contentFrames: filmSetFrameRuntime });
-    expect(await service2.renderPreview({ canvasId: "canvas-film-media", nodeId: "film-m", timeSeconds: 0 }))
-      .toMatchObject({ ok: false, code: "native-media-unavailable" });
-  });
-
-  it("未装配内容端口时片场预览明确回落，不冒充渲染（change: 2026-10-17-decouple-film-set-from-canvas-service）", async () => {
-    const data = filmSetNodeDataFields(createFilmSetSnapshot({ title: "片场", timeline: { duration: 4, loop: false } }));
-    const room = new CanvasRoom({ canvasId: "canvas-no-content-runtime", repository: new InMemoryYjsDocumentRepository(), now: () => NOW });
-    const base = createEmptyWoohaa3ServerCanvas("canvas-no-content-runtime", NOW);
-    await initializeFixture(room, {
-      canvas: {
-        ...base,
-        document: { ...base.document, nodes: [{ id: "film-x", type: "composite-asset", position: { x: 0, y: 0 } }] },
-        nodeData: { "film-x": data as unknown as CanvasNodeData }
-      },
-      roomEpoch: "epoch-1",
-      createdAt: NOW
-    });
-    const service = new ModelMcpService({ resolveRoom: async () => room, rendererClient: fakeRenderer().client });
-    expect(await service.renderPreview({ canvasId: "canvas-no-content-runtime", nodeId: "film-x", timeSeconds: 0 }))
-      .toMatchObject({ ok: false, code: "content-runtime-unavailable" });
-  });
-
   it("静态 model3d 节点非零时刻被拒绝（任务 3.1）", async () => {
     const { room } = await readyRoom("canvas-static-preview", {
       "model-1": { modelScript: V2, modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2" }
@@ -787,102 +631,6 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
   });
 
   // ---- 任务 4.4：缓存命中与渲染完成后比较完整权威身份 ----
-
-  /**
-   * 在 renderer 渲染期间并发修改权威节点，验证返回前重新检查身份并拒绝陈旧结果（D6）。
-   * `mutate` 收到当前动画定义，返回写回后的 nodeData。
-   */
-  async function previewWithConcurrentMutation(
-    canvasId: string,
-    mutate: (base: Record<string, unknown>) => Record<string, unknown>
-  ): Promise<{ outcome: Awaited<ReturnType<ModelMcpService["renderPreview"]>>; fake: ReturnType<typeof fakeRenderer> }> {
-    const base = filmSetNodeDataFields(createFilmSetSnapshot({
-      title: "片场",
-      model: { modelScript: "scene.box({ id: 'torso', size: [1, 1, 1] });", modelScriptVersion: "woohaa-model-js-v2" },
-      modelItemId: "actor",
-      motionScript: "motion.model.rotate('torso', { speed: 1 });",
-      timeline: { duration: 4, loop: false },
-      initialCamera: { azimuth: 0, elevation: 0.5, distance: 4, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } }
-    }));
-    const repository = new InMemoryYjsDocumentRepository();
-    const room = new CanvasRoom({ canvasId, repository, now: () => NOW });
-    const empty = createEmptyWoohaa3ServerCanvas(canvasId, NOW);
-    await initializeFixture(room, {
-      canvas: {
-        ...empty,
-        document: { ...empty.document, nodes: [{ id: "anim-1", type: "composite-asset", position: { x: 0, y: 0 } }] },
-        nodeData: { "anim-1": base as unknown as CanvasNodeData }
-      },
-      roomEpoch: "epoch-1",
-      createdAt: NOW
-    });
-    const calls: unknown[] = [];
-    const client = {
-      available: () => true,
-      close: async () => undefined,
-      render: async (request: unknown) => {
-        calls.push(request);
-        // 渲染期间并发修改权威节点。
-        await room.submit({
-          protocolVersion: 1,
-          canvasId,
-          commandId: `concurrent-${calls.length}`,
-          baseRevision: room.currentRevision,
-          actorId: "concurrent-test",
-          commands: (() => {
-            const current = room.exportCanvas(); if (!current.ok) throw Error(current.message);
-            const value = mutate(structuredClone(current.canvas.nodeData["anim-1"]));
-            return value ? [{ type: "nodeData.patch", nodeId: "anim-1", value }] : [{ type: "node.remove", nodeIds: ["anim-1"] }];
-          })()
-        } as never);
-        return { ok: true as const, png: PNG, renderVersion: "woohaa-model-render-v1" };
-      }
-    };
-    const service = new ModelMcpService({ resolveRoom: async () => room, rendererClient: client, contentFrames: filmSetFrameRuntime });
-    const outcome = await service.renderPreview({ canvasId, nodeId: "anim-1", timeSeconds: 2 });
-    return { outcome, fake: { calls, client } };
-  }
-
-  it("motion-only 并发修改 → stale-source", async () => {
-    const { outcome } = await previewWithConcurrentMutation("canvas-stale-motion", (base) => {
-      const group = structuredClone(base.filmSetGroup) as FilmSetGroupMarker;
-      group.clips![0]!.bindings![0]!.motion!.sourceHash = "m2";
-      return { filmSetGroup: group };
-    });
-    expect(outcome).toMatchObject({ ok: false, code: "stale-source" });
-  });
-
-  it("camera-only 并发修改 → stale-source", async () => {
-    const { outcome } = await previewWithConcurrentMutation("canvas-stale-camera", (base) => {
-      const group = structuredClone(base.filmSetGroup) as FilmSetGroupMarker;
-      group.cameras!.find(camera => camera.id === group.clips![0]!.cameraId)!.azimuth = 1;
-      return { filmSetGroup: group };
-    });
-    expect(outcome).toMatchObject({ ok: false, code: "stale-source" });
-  });
-
-  it("placement-only 并发修改 → stale-source", async () => {
-    const { outcome } = await previewWithConcurrentMutation("canvas-stale-placement", (base) => {
-      const group = structuredClone(base.filmSetGroup) as FilmSetGroupMarker;
-      group.sceneBindings[0]!.transform.x = 1;
-      return { filmSetGroup: group };
-    });
-    expect(outcome).toMatchObject({ ok: false, code: "stale-source" });
-  });
-
-  it("timeline-only 并发修改 → stale-source", async () => {
-    const { outcome } = await previewWithConcurrentMutation("canvas-stale-timeline", (base) => {
-      const group = structuredClone(base.filmSetGroup) as FilmSetGroupMarker;
-      group.clips![0]!.duration = 8; group.clips![0]!.loop = true;
-      return { filmSetGroup: group };
-    });
-    expect(outcome).toMatchObject({ ok: false, code: "stale-source" });
-  });
-
-  it("节点删除 → stale-source", async () => {
-    const { outcome } = await previewWithConcurrentMutation("canvas-stale-delete", () => null as unknown as Record<string, unknown>);
-    expect(outcome).toMatchObject({ ok: false, code: "stale-source" });
-  });
 
   it("无并发修改时缓存命中，且命中不重复调用 renderer", async () => {
     const { room } = await readyRoom("canvas-stale-clean", {
@@ -1230,5 +978,5 @@ describe("模型规模统计（change: 2026-10-18-align-model-statistics-with-ag
 });
 
 function initializeFixture(room: CanvasRoom, input: Parameters<CanvasRoom["initialize"]>[0]) {
-  return room.initialize({ ...input, canvas: migrateFilmSetCanvasFixture(input.canvas) });
+  return room.initialize(input);
 }

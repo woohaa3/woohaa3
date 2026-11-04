@@ -102,6 +102,23 @@ pub(crate) fn dashed_rounded_rect(
     z: f32,
     color: u32,
 ) {
+    dashed_rounded_rect_alpha(geometry, x, y, width, height, radius, border, z, color, 1.0);
+}
+
+/// Execution overlays share the exact dash slots and solid corners of the ordinary frame.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn dashed_rounded_rect_alpha(
+    geometry: &mut Geometry,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    radius: f32,
+    border: f32,
+    z: f32,
+    color: u32,
+    alpha: f32,
+) {
     let right = x + width;
     let bottom = y + height;
     // 四条直边：把可用长度按 dash+gap 切片。
@@ -117,7 +134,7 @@ pub(crate) fn dashed_rounded_rect(
             Vec2::new(right, bottom - radius),
         ),
     ] {
-        dashed_line(geometry, a, b, border, z, color);
+        dashed_line(geometry, a, b, border, z, color, alpha);
     }
     // 圆角：用连续短弧近似（半径小，视觉上仍是圆角）。
     for (cx, cy, start) in [
@@ -130,12 +147,13 @@ pub(crate) fn dashed_rounded_rect(
         for i in 0..steps {
             let a0 = start + (i as f32 / steps as f32) * std::f32::consts::FRAC_PI_2;
             let a1 = start + ((i + 1) as f32 / steps as f32) * std::f32::consts::FRAC_PI_2;
-            geometry.line(
+            geometry.line_alpha(
                 Vec2::new(cx + a0.cos() * radius, cy + a0.sin() * radius),
                 Vec2::new(cx + a1.cos() * radius, cy + a1.sin() * radius),
                 border,
                 z,
                 color,
+                alpha,
             );
         }
     }
@@ -196,7 +214,16 @@ pub(crate) fn dashed_polygon(
 }
 
 /// 一条由 dash/gap 组成的线段。
-fn dashed_line(geometry: &mut Geometry, a: Vec2, b: Vec2, border: f32, z: f32, color: u32) {
+#[allow(clippy::too_many_arguments)]
+fn dashed_line(
+    geometry: &mut Geometry,
+    a: Vec2,
+    b: Vec2,
+    border: f32,
+    z: f32,
+    color: u32,
+    alpha: f32,
+) {
     let total = (b - a).length();
     if total <= 0.0 {
         return;
@@ -206,7 +233,7 @@ fn dashed_line(geometry: &mut Geometry, a: Vec2, b: Vec2, border: f32, z: f32, c
     let mut offset = 0.0;
     while offset < total {
         let end = (offset + DASH_LENGTH).min(total);
-        geometry.line(a + dir * offset, a + dir * end, border, z, color);
+        geometry.line_alpha(a + dir * offset, a + dir * end, border, z, color, alpha);
         offset += step;
     }
 }

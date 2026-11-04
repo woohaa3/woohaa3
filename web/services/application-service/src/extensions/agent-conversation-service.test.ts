@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentAdapterRunInput,
   AgentAdapterRunOutcome,
+  AgentConversationAdapterEvent,
   AgentConversationAdapter
 } from "@woohaa3/contracts";
 import { createSqliteAgentConversationStore as openConversationStore } from "../repository/agent-conversation-repository.js";
@@ -50,7 +51,7 @@ type FakeAdapterControls = {
 function fakeAdapter(controls: FakeAdapterControls): AgentConversationAdapter {
   return {
     id: "fake",
-    capabilities: () => ({ candidateGeneration:{imageInput:true,maxImages:8}, discussion: true, targets: ["model3d", "film-set", "camera", "canvas-group"], tools: true, models: "remote" }),
+    capabilities: () => ({ candidateGeneration:{imageInput:true,maxImages:8}, discussion: true, targets: ["model3d", "camera"], tools: true, models: "remote" }),
     authorization: async () => "ready",
     models: async () => ({ models: [{ id: "gpt-6.1-sol", label: "GPT 6.1 Sol" }] }),
     async run(input) {
@@ -77,35 +78,6 @@ function fakeRegistry(adapter: AgentConversationAdapter) {
     snapshot: () => [{ extensionId: "fake-ext", capabilities: ["agent-conversation-adapter:fake"] }]
   });
 }
-
-describe("group ledger recovery", () => {
-  it("freezes the host epoch, links child runs by exact owner and reconciles without inference", async () => {
-    const controls: FakeAdapterControls = { seen: [], outcomes: [], queries: [], pending: [] };
-    const adapter = fakeAdapter(controls);
-    adapter.capabilities = () => ({ discussion: true, targets: ["canvas-group"], tools: true, models: "remote" });
-    const store = createSqliteAgentConversationStore({ path: path.join(tempDir(), "group.sqlite") });
-    const settle = vi.fn(async (input) => ({ status: "failed" as const, receipt: { kind: "canvas-group", actions: input.actions, outcomes: [{ runId: "child", state: "running" }] } }));
-    const cancel = vi.fn();
-    const service = createAgentConversationService({ store, registry: fakeRegistry(adapter), groupScopeEpoch: () => 7, groupEffects: { settle, cancel } });
-    const created = service.createConversation({ owner: "owner", canvasId: "canvas", nodeId: "root", adapterId: "fake" });
-    expect(created.ok).toBe(true); if (!created.ok) return;
-    const accepted = service.acceptTurn({ owner: "owner", conversationId: created.conversation.conversationId, requestId: "request", entry: { action: "generate", canvasId: "canvas", nodeId: "root", mode: "canvas-group", prompt: "create" } });
-    expect(accepted.ok).toBe(true); if (!accepted.ok) return;
-    expect(accepted.turn.target.expectedContentHash).toBe("group-epoch:7");
-    service.recordGroupAction({ owner: "owner", requestId: "request", action: { canvasId: "canvas", nodeId: "n", runId: "child" } });
-    service.recordGroupAction({ owner: "other", requestId: "request", action: { canvasId: "canvas", nodeId: "n", runId: "forged" } });
-    expect(service.locateTurnByRun({ owner: "owner", runId: "child" }).ok).toBe(true);
-    expect(service.locateTurnByRun({ owner: "other", runId: "child" }).ok).toBe(false);
-    expect(service.locateTurnByRun({ owner: "owner", runId: "forged" }).ok).toBe(false);
-    await service.reconcileUnknown();
-    expect(controls.seen).toEqual([]); expect(controls.queries).toEqual([]);
-    expect(settle).toHaveBeenCalledWith(expect.objectContaining({ recovery: true }));
-    expect(service.queryTurn({ owner: "owner", requestId: "request" })).toMatchObject({ ok: true, turn: { status: "failed", receipt: { outcomes: [{ runId: "child", state: "running" }] } } });
-    service.cancelTurn({ owner: "owner", requestId: "request" });
-    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ owner: "owner", actions: [{ canvasId: "canvas", nodeId: "n", runId: "child" }] }));
-    expect(service.queryTurn({ owner: "owner", requestId: "request" })).toMatchObject({ ok: true, turn: { status: "failed" } });
-  });
-});
 
 function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageChars?: number) {
   const controls: FakeAdapterControls = {
@@ -179,6 +151,30 @@ describe("agent conversation service", () => {
     expect(done.turn.assistantText).toBe("回复");
     expect(controls.seen).toHaveLength(1);
     expect(controls.seen[0]!.intent).toMatchObject({ model: "gpt-5", reasoningEffort: "high" });
+  });
+
+  it("persists the world scope in the turn target so a sidebar continuation keeps it", async () => {
+    const { service } = setup();
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) throw new Error("create failed");
+    const accepted = service.acceptTurn({
+      owner: "user-a",
+      conversationId: created.conversation.conversationId,
+      requestId: "req-world",
+      entry: entry({
+        mode: "world",
+        nodeId: "area-node",
+        worldScope: { kind: "scene-area", areaId: "area-1" },
+        prompt: "搭场景"
+      })
+    });
+    expect(accepted.ok).toBe(true);
+    if (!accepted.ok) return;
+    expect(accepted.turn.target).toMatchObject({ mode: "world", worldScope: { kind: "scene-area", areaId: "area-1" } });
+    const reread = service.queryTurn({ owner: "user-a", requestId: "req-world" });
+    expect(reread.ok).toBe(true);
+    if (!reread.ok) return;
+    expect(reread.turn.target.worldScope).toEqual({ kind: "scene-area", areaId: "area-1" });
   });
 
   it("保存消息与工具的混合顺序，完成时保留回合汇总且不重复追加消息", async () => {
@@ -271,6 +267,94 @@ describe("agent conversation service", () => {
     if (!read.ok) throw new Error("read failed");
     expect(read.snapshot.messages.filter((message) => message.role === "assistant").map((message) => message.content))
       .toEqual(["先看一下", "改完了"]);
+  });
+
+  it.each([
+    {
+      name: "OpenCode 单换行连接保留消息内部 Markdown 换行，不重复存整轮汇总",
+      events: [
+        { type: "message", role: "assistant", content: "先读取\n范围", delivery: "replace", streamId: "intro" },
+        { type: "tool-started", tool: "get_world_context", callId: "read" },
+        { type: "tool-completed", tool: "get_world_context", callId: "read", ok: true },
+        { type: "message", role: "assistant", content: "已完成\n\n- 右柱已移动\n- 左柱未变", delivery: "replace", streamId: "result" }
+      ],
+      summary: "先读取\n范围\n已完成\n\n- 右柱已移动\n- 左柱未变",
+      expected: ["先读取\n范围", "已完成\n\n- 右柱已移动\n- 左柱未变"]
+    },
+    {
+      name: "工具事件后同一原生消息从空快照更新完整正文，去重使用最新正文",
+      events: [
+        { type: "message", role: "assistant", content: "", delivery: "replace", streamId: "intro" },
+        { type: "tool-started", tool: "move_world_model", callId: "move" },
+        { type: "message", role: "assistant", content: "只移动右柱", delivery: "replace", streamId: "intro" },
+        { type: "tool-completed", tool: "move_world_model", callId: "move", ok: true },
+        { type: "message", role: "assistant", content: "完成\n位置核对通过", delivery: "replace", streamId: "result" }
+      ],
+      summary: "只移动右柱\n\n完成\n位置核对通过",
+      expected: ["只移动右柱", "完成\n位置核对通过"]
+    },
+    {
+      name: "无工具分隔的不同原生消息都参与汇总去重，仍各自独立保存",
+      events: [
+        { type: "message", role: "assistant", content: "先读取\n范围", delivery: "replace", streamId: "intro" },
+        { type: "message", role: "assistant", content: "完成\n右柱已移动", delivery: "replace", streamId: "result" }
+      ],
+      summary: "先读取\n范围\n\n完成\n右柱已移动",
+      expected: ["先读取\n范围", "完成\n右柱已移动"]
+    },
+    {
+      name: "无流式增量时仍保存最终正文",
+      events: [],
+      summary: "最终正文\n- 右柱已移动",
+      expected: ["最终正文\n- 右柱已移动"]
+    },
+    {
+      name: "汇总仅部分重复时保留包含新信息的最终正文",
+      events: [{ type: "message", role: "assistant", content: "右柱已移动", delivery: "replace", streamId: "progress" }],
+      summary: "右柱已移动\n新增结论：左柱版本未变",
+      expected: ["右柱已移动", "右柱已移动\n新增结论：左柱版本未变"]
+    },
+    {
+      name: "最终正文不同于已有消息时不丢弃",
+      events: [{ type: "message", role: "assistant", content: "开始移动", delivery: "replace", streamId: "progress" }],
+      summary: "修改完成，已保存",
+      expected: ["开始移动", "修改完成，已保存"]
+    },
+    {
+      name: "不删除消息内部换行来误判不同最终正文",
+      events: [
+        { type: "message", role: "assistant", content: "模型", delivery: "replace", streamId: "first" },
+        { type: "tool-started", tool: "get_world_context", callId: "read" },
+        { type: "message", role: "assistant", content: "AB", delivery: "replace", streamId: "second" }
+      ],
+      summary: "模型\nA\nB",
+      expected: ["模型", "AB", "模型\nA\nB"]
+    },
+    {
+      name: "原生协议直接拼接多条消息时仍能去重",
+      events: [
+        { type: "message", role: "assistant", content: "先读取\n范围", delivery: "replace", streamId: "first" },
+        { type: "tool-started", tool: "get_world_context", callId: "read" },
+        { type: "message", role: "assistant", content: "已完成", delivery: "replace", streamId: "second" }
+      ],
+      summary: "先读取\n范围已完成",
+      expected: ["先读取\n范围", "已完成"]
+    }
+  ] satisfies Array<{ name: string; events: AgentConversationAdapterEvent[]; summary: string; expected: string[] }>)('$name', async ({ events, summary, expected }) => {
+    const { controls, service } = setup();
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) throw new Error("create failed");
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "aggregate", entry: entry() });
+    if (!accepted.ok) throw new Error("accept failed");
+    const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    for (const event of events) controls.seen[0]!.emit(event);
+    controls.pending[0]!({ status: "succeeded", assistantText: summary });
+    await dispatched;
+    const read = service.readConversation({ owner: "user-a", conversationId: created.conversation.conversationId });
+    if (!read.ok) throw new Error("read failed");
+    expect(read.snapshot.messages.filter(message => message.role === "assistant").map(message => message.content)).toEqual(expected);
+    expect(read.snapshot.turns[0]?.assistantText).toBe(summary);
+    expect(read.snapshot.turns[0]?.status).toBe("succeeded");
   });
 
   it("消息被预算截断时，不重复追加未截断的汇总", async () => {    const { controls, service } = setup({}, 8);
@@ -373,7 +457,7 @@ describe("agent conversation service", () => {
       expect(created.ok).toBe(true);
       if (!created.ok) throw new Error("conversation not created");
       const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId,
-        requestId: `request-${n}`, entry: entry({ nodeId: `group-${n}`, mode: "canvas-group" }) });
+        requestId: `request-${n}`, entry: entry({ nodeId: `group-${n}`, mode: "model3d" }) });
       // 原 owner/global 各 8 的门禁已删除：全部独立受理为 queued。
       expect(accepted).toMatchObject({ ok: true, turn: { status: "queued" } });
     }
@@ -746,32 +830,6 @@ describe("trusted structured assistant execution", () => {
   });
 });
 
-it("discovers every group turn from the owner ledger across pages, archived conversations and restart, without dispatch", () => {
-  const { store, controls } = setup();
-  const service = createAgentConversationService({ store, registry: fakeRegistry(fakeAdapter(controls)), groupScopeEpoch: () => 7 });
-  const accepted: string[] = [];
-  for (const nodeId of ["manual", "manual", "other", "manual", "manual"]) {
-    const created = service.createConversation({ owner: "owner", canvasId: "canvas", nodeId, adapterId: "fake" });
-    if (!created.ok) throw Error(created.error.message);
-    const requestId = `ledger-${accepted.length}`;
-    const result = service.acceptTurn({ owner: "owner", conversationId: created.conversation.conversationId, requestId,
-      entry: { action: "generate", mode: "canvas-group", canvasId: "canvas", nodeId, prompt: "test" } });
-    if (!result.ok) throw Error(result.error.message);
-    accepted.push(requestId);
-    // Archiving the conversation must not hide its outstanding execution.
-    store.clearTarget({ owner: "owner", canvasId: "canvas", nodeId });
-  }
-  const requests: string[] = []; let cursor: string | undefined;
-  do {
-    const page = service.listGroupExecutions({ owner: "owner", canvasId: "canvas", nodeId: "manual", limit: 2, cursor });
-    requests.push(...page.turns.map(t => t.requestId)); cursor = page.nextCursor;
-  } while (cursor);
-  expect(new Set(requests).size).toBe(4);
-  expect(service.listGroupExecutions({ owner: "other", canvasId: "canvas" }).turns).toEqual([]);
-  expect(service.listGroupExecutions({ owner: "owner", canvasId: "other" }).turns).toEqual([]);
-  expect(controls.seen).toEqual([]); expect(controls.queries).toEqual([]);
-  expect(service.clearContext({ owner: "owner", canvasId: "canvas", nodeId: "manual" })).toMatchObject({ ok: false });
-});
 
 it("DSML 工具文本不能把无工具的讨论结算为成功", async () => {
   const { service } = setup({ outcomes: [{ status: "succeeded", assistantText: '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="woohaa_get_film_set_clips">' }] });

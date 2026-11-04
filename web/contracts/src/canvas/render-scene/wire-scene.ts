@@ -5,15 +5,10 @@
  * 只承载发给 Bevy `set_scene` 的快照 wire 结构与本地瞬时呈现态类型；不包含任何投影算法，
  * 也不依赖具体业务领域模块（仅引用叶子 wire 类型）。
  */
-import type { Aabb } from "../model-transform.js";
 import type { AppThemeSnapshot } from "../../theme/index.js";
-import type { BevyModelPlacement, BevyModelPreview, BevyModelReference } from "./wire-model.js";
+import type { BevyModelPreview, BevyModelReference } from "./wire-model.js";
 import type { BevyNodeKind } from "./node-geometry.js";
 import type { BevyRenderDraft, BevyRenderMarquee, BevyRenderSurface } from "./wire-transient.js";
-import type { BevyShotPreviewLink, BevyShotPreviewPresentation } from "./wire-shot-preview.js";
-
-/** 拍摄镜头预览卡片/归属线 wire 类型（自本文件拆出；保持既有引用路径可用）。 */
-export * from "./wire-shot-preview.js";
 
 /**
  * CanvasRenderScene 版本；结构变化时必须升版本。
@@ -82,35 +77,43 @@ export * from "./wire-shot-preview.js";
 //      would reject every scene of a canvas whose revision is lower than the previous one's.
 // v34: group presentations no longer carry badge scale/resizable flags; the badge is the model
 //      itself at the shared canvas model unit, so older renderers would draw a fixed frame.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v34" as const;
+// v35: groups and film sets are removed. `group`, `compositeAsset`, `aggregateRun`,
+//      `shotPreview`, `filmSetGroups`, `shotPreviewLinks` and `selectionActions` are gone;
+//      older renderers would keep drawing containers, badges and film-set overlays.
+// v39: `world-camera` nodes carry their shared-world pose so the renderer can draw and
+//      pick a real frustum. Older renderers would ignore the field and leave the camera
+//      without any 3D presence, so reject mixed combinations instead of silently dropping it.
+// v40: local first-person world-camera editor; never persisted to the document.
+// v41: transient assistant execution feedback on scope borders.
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v41" as const;
 
-/** Group-owned scene primitives. Kept separate from the legacy composite wire during migration. */
-export const FILM_SET_GROUP_RENDER_SCHEMA_VERSION = "woohaa-film-set-group-render-v1" as const;
-export type BevyFilmSetGroupBinding = {
-  bindingId: string;
-  sourceNodeId: string;
-  kind: "model3d" | "image" | "video";
-  contentKey: string;
-  /** Prepared source-card resource identity; group renderers use this instead of a snapshot. */
-  resourceKey?: string;
-  signature?: string;
-  transform: { x: number; y: number; z: number; yaw: number; scale: number };
-  visible: boolean;
-  diagnostic?: string;
-  aspectRatio?: number;
-};
-export type BevyFilmSetGroupPreparation = {
-  schemaVersion: typeof FILM_SET_GROUP_RENDER_SCHEMA_VERSION;
-  ownerId: string;
-  badgeOrigin: { x: number; y: number };
-  bindings: BevyFilmSetGroupBinding[];
-  ground?: { width: number; depth: number; color?: string };
-  sceneTransform?: { x: number; y: number; z: number; yaw: number; scale: number };
-  activeClip?: string | null;
-};
+/**
+ * 非内容节点的画布 chrome。
+ *
+ * - `card`（缺省）：普通内容卡片外壳；
+ * - `frame`：2D 组的外框，只画包围框/标签，不画内容卡片；成员身份随节点下发；
+ * - `none`：共享世界实例等只保留世界对象与选择身份，不画卡片、端口和内容底。
+ *
+ * 缺省字段保持旧 wire 兼容：旧渲染器按卡片绘制。新渲染器 MUST 在 `chrome.kind` 为
+ * `frame`/`none` 时抑制通用卡片，否则导演区/2D 组/世界模型仍会露出内容卡片。
+ */
+export type BevyNodeChrome =
+  | { kind: "card" }
+  | { kind: "frame"; groupId: string; memberNodeIds: string[] }
+  | { kind: "none" };
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
+  sharedWorldInstance?: import("../shared-world.js").WorldInstanceData;
+  /**
+   * 共享世界镜头的真实位姿与投影参数（shared-world v1）。
+   *
+   * 只承载渲染/拾取所需的相机快照；镜头卡片仍由通用节点字段表达。缺省表示该节点不是
+   * 镜头或旧场景，Bevy 不绘制视锥。
+   */
+  worldCamera?: import("../shared-world.js").WorldCameraData;
+  /** 可选画布 chrome；缺省为通用内容卡片。 */
+  chrome?: BevyNodeChrome;
   id: string;
   type: BevyNodeKind;
   x: number;
@@ -154,31 +157,16 @@ export type BevyRenderNode = {
    */
   ghost?: boolean;
   /**
-   * group 结构容器（change: add-canvas-node-grouping）。
-   *
-   * `x/y/width/height` 已由映射层投影为**绝对画布几何**（成员同理）；
-   * Bevy 只负责按低 z 画虚线容器，不持有 parentId 或相对坐标。
-   */
-  group?: BevyGroupPresentation;
-  /**
    * 卡片分类名覆盖（change: 2026-10-05-bind-model-animation-to-shots）。
    *
    * 默认（缺省）由 Bevy 主题 palette 按 kind 给出分类名；自包含 3D 节点用它区分
    * 「3D 模型」与「导演场」，避免两类都显示同一分类名。
    */
   cardLabel?: string;
-  /** 3D 模型轻量引用（仅 model3d/animation3d 且脚本执行成功时）。 */
+  /** 3D 模型轻量引用（仅 model3d 且脚本执行成功时）。 */
   model?: BevyModelReference;
   /** Browser-local orbit view rendered into the card, never into canonical nodeData. */
   modelPreview?: BevyModelPreview;
-  /**
-   * 片场范围（change: 2026-10-08-make-film-set-model-only）。
-   *
-   * 纯模型片场不绘制顶部卡片/端口/控件；此字段给出条件性范围虚线框的世界坐标几何，
-   * 范围绘制、hover、选择、框选、双击与 drop 命中复用同一份派生几何。缺失时 Rust 使用
-   * 节点锚点附近的最小范围（空片场）。
-   */
-  compositeAsset?: BevyCompositeAssetPresentation;
   /**
    * 节点下方独立历史条呈现（change: 2026-10-12-unify-generation-history-strip，design D4）。
    *
@@ -187,22 +175,6 @@ export type BevyRenderNode = {
    * 只承载浏览器本地派生状态，不进入 ServerCanvas / Y.Doc。
    */
   historyStrip?: BevyHistoryStripPresentation;
-  /**
-   * 聚合节点运行遮罩（change: 2026-10-12-unify-generation-history-strip，design D5）。
-   *
-   * 仅聚合节点（片场等）携带；`active` 表示存在运行中操作，驱动覆盖整个节点范围的半透明
-   * 遮罩与“运行中”文案。缺失或 `active: false` 表示不绘制。
-   */
-  aggregateRun?: BevyAggregateRunPresentation;
-  /**
-   * 拍摄镜头预览卡片呈现
-   * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D2/D8）。
-   *
-   * 仅 `film-set-shot-preview` 节点携带；除节点标准位置/尺寸外的标题、类型、画幅、时长、
-   * 状态与播放进度都是所属源镜头的**只读投影**，不是第二份权威数据。缺失即不绘制预览内容
-   * （未知/停用扩展、或非法帧）。
-   */
-  shotPreview?: BevyShotPreviewPresentation;
 };
 
 export type BevyNodeAction = {
@@ -226,117 +198,6 @@ export type BevyNodeActionsPresentation = {
   actions: BevyNodeAction[];
   /** 节点摘要（可选，显示在动作左侧）。 */
   summary?: string;
-};
-
-/**
- * 复合资产范围形状（change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D3）。
- *
- * 通用声明：`isometric-diamond` 为复合资产类别默认，即与当前地面投影轴平行的平行四边形
- * （地面宽深相等时为菱形）；可信 adapter 可按严格身份覆盖为 `rect` 轴对齐矩形。宿主与 Rust 只
- * 消费该声明，不按业务 extensionId 分支。
- */
-export type CompositeAssetScopeShape = "rect" | "isometric-diamond";
-
-/**
- * 复合资产总览 primitive LOD 策略声明
- * （change: 2026-10-15-add-film-set-overview-lod，design D1）。
- *
- * 通用声明：可信 adapter 按严格身份声明「总览按实际世界投影尺寸选择整场图元细分」。当前唯一
- * 合法值 `overview-primitives-v1`；未声明的 World 用途（普通卡片、炉体、第三方）保持 High。
- * 宿主与 Rust 只消费该声明，不按业务 extensionId、nodeData 形状或历史类型推断资格。
- */
-export type CompositeAssetGeometryQuality = "overview-primitives-v1";
-
-/**
- * 通用总览纹理缓存声明（change: 2026-10-29-cache-film-set-overview-textures）。
- *
- * 可信 adapter 按严格身份声明「把整场稳定画面缓存成透明纹理」。当前唯一合法值
- * `transparent-world-v1`；未声明（普通 group、炉体、第三方）保持逐帧实时绘制。
- * 声明只承载呈现策略，不进入 executionKey、内容 hash 或持久 DTO；Rust 未知值整帧拒绝。
- */
-export type CompositeAssetOverviewCache = "transparent-world-v1";
-
-/**
- * 复合资产范围呈现（change: 2026-10-08-make-film-set-model-only，design D1；
- *  change: 2026-10-09-add-film-set-object-motion-and-editing 增加对象根映射；
- *  change: 2026-10-12-align-film-set-scope-with-isometric-grid 增加通用形状与地面矩形）。
- *
- * `x/y/width/height` 始终为**内容适配基准矩形**（Rust 侧同一公式派生的最小范围矩形）。复合资产
- * 类别默认 `isometric-diamond`：可见与可交互范围由 `scopeGround`（模型地面占地的等比外扩，四边
- * 平行地面投影轴）派生；**不**把 AABB 写回 width/height。可信 adapter 可按严格身份覆盖为 `rect`，
- * 此时基准矩形即范围框。这是纯派生呈现几何，不写规范文档、不进镜头成片。
- */
-export type CompositeAssetEmptyPlaceholder = "brand-plinth-v1";
-
-export type BevyCompositeAssetPresentation = {
-  emptyPlaceholder?: CompositeAssetEmptyPlaceholder;
-  /** Shared canvas container surface, rendered inside Bevy. */
-  panel?: import("../composite-children.js").CompositeContainerPanel;
-  /** Derived ownership only; local model anchor → target card bottoms. Not editable document edges. */
-  ownershipLinks?: { anchor: [number, number, number]; targetNodeIds: string[]; targetItemIds?: Record<string, string> };
-  rootPlacement?: BevyModelPlacement;
-  contentExtent?: number;
-  /** 范围形状声明；缺失即复合资产类别默认 `isometric-diamond`。 */
-  scopeShape?: CompositeAssetScopeShape;
-  /**
-   * 总览 primitive LOD 策略声明（change: 2026-10-15-add-film-set-overview-lod，design D1）。
-   *
-   * 可信 adapter 按严格身份声明 `overview-primitives-v1` 时，运行时按世界相机下的实际模型投影
-   * 尺寸为该复合资产根选择整场图元细分；缺失即 World 用途保持 High。只承载派生呈现声明，
-   * 不进入 canonical 内容 hash、脚本执行 key 或持久 DTO。
-   */
-  geometryQuality?: CompositeAssetGeometryQuality;
-  /**
-   * 范围地面矩形（`isometric-diamond` 时必需）：投影中心 + 沿地面 +x/+z 的半球面尺寸。
-   *
-   * 由映射层从模型内容局部 AABB + 共同根 + 适配单位派生；Rust 由它展开四顶点与 8 抓手。
-   */
-  scopeGround?: { cx: number; cy: number; hx: number; hz: number };
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  /** 场内媒体平面（图片/视频）；缺失即无媒体平面（change: 2026-10-08-make-film-set-model-only）。 */
-  media?: BevyModelMediaPlane[];
-  /**
-   * 稳定 itemId → 组合作用域根 id（change: 2026-10-09-add-film-set-object-motion-and-editing）。
-   * 供对象模式 picking 按 item 分组派生 AABB；缺失即对象 picking 不可用。
-   */
-  itemRoots?: Record<string, string>;
-  itemPlacements?: Record<string, BevyModelPlacement>;
-  layoutAabb?: Aabb | null;
-};
-
-/**
- * 片场组合信息（change: 2026-10-09-add-film-set-object-motion-and-editing）。
- *
- * 浏览器从 model-scene 组合派生的对象身份与诊断；供渲染层下发 Rust（对象 picking 的 itemRoots）
- * 与 UI 显示对象级诊断。只承载本地派生状态，不进入 canonical。
- */
-export type BevyCompositeAssetCompositionInfo = {
-  itemRoots: Record<string, string>;
-  failures?: Array<{ itemId: string; diagnostic: string }>;
-};
-
-/**
- * 片场媒体平面投影（change: 2026-10-08-make-film-set-model-only，design D5）。
- *
- * 世界坐标由映射层派生（含片场 root、局部变换与竖直落地）；Rust 只据此放置真实平面。
- * `id` 全局唯一（`nodeId::itemId`），是纹理上传键。
- */
-export type BevyModelMediaPlane = {
-  id: string;
-  itemId?: string;
-  unit?: number;
-  kind: "image" | "video";
-  x: number;
-  y: number;
-  z: number;
-  width: number;
-  height: number;
-  yaw: number;
-  /** 是否已上传纹理；未就绪时 Rust 保留平面几何但显示占位。 */
-  hasTexture: boolean;
 };
 
 /**
@@ -385,62 +246,6 @@ export type BevyHistoryStripPresentation = {
   dots: BevyHistoryStripDot[];
   /** 被折叠（未绘制）的较早记录数；>0 时底条显示折叠提示。 */
   truncated: number;
-};
-
-/** 聚合节点运行遮罩呈现（change: 2026-10-12-unify-generation-history-strip，design D5）。 */
-export type BevyAggregateRunPresentation = {
-  filmSet?: import("../run-state/film-set-feedback.js").FilmSetRunFeedback;
-  /** 是否存在运行反馈；片场使用 filmSet 扫描，其它聚合保留范围遮罩。 */
-  active: boolean;
-  /** 减少动态效果偏好下使用静态可区分形态。 */
-  reduceMotion?: boolean;
-};
-
-/**
- * group 容器的呈现字段（change: add-canvas-node-grouping，design D2）。
- *
- * 只承载渲染所需信息：标题、直接/递归成员计数、是否暴露聚合输出端点。
- * 成员关系仍在 `document.nodes[].parentId`，不在此重复。
- */
-export type BevyGroupPresentation = {
-  /** 紧凑折叠态，不改变 canonical 成员与展开尺寸。 */
-  collapsed?: boolean;
-  /**
-   * 组容器是否绘制节点顶部操作横条。
-   *
-   * 普通 group 与片场组都声明该标志：展开/收起、排列、整理/解组等动作由
-   * `canvas.node-action` 贡献决定实际呈现；Rust 只消费该声明，不按业务 ID 推断。
-   */
-  actionBar?: boolean;
-  /** 可编辑标题（nodeData.title）；缺省空串。 */
-  title: string;
-  /** 直接成员数。 */
-  memberCount: number;
-  /** 递归叶子成员中具备输出能力的数量（>0 才显示聚合输出端点）。 */
-  outputCapableLeafCount: number;
-  /** Prepared local bounds, without ops/mesh; shared model layout and perimeter input. */
-  modelBounds?: { aabb: Aabb; extent: number };
-  /**
-   * 片场组的外部徽标顶边贴住组底边锚点向下展开；缺省为 false（模型投影中心对齐锚点）。
-   * 只影响徽标几何，不改组框结构、成员布局或模型身份。
-   */
-  badgeTopAnchor?: boolean;
-  /**
-   * Trusted adapter's overview primitive LOD declaration. Only group-owned scene
-   * compositions that opt in (currently film sets) get fraction-based tiers;
-   * missing keeps the existing High representation.
-   */
-  geometryQuality?: CompositeAssetGeometryQuality;
-  /**
-   * Trusted adapter's transparent overview cache declaration. Present only for group-owned
-   * compositions that opt in; the renderer may replace the stable subject with a cached
-   * texture and must fall back to live geometry when it cannot guarantee equivalence.
-   */
-  overviewCache?: CompositeAssetOverviewCache;
-  /** Private run projection: group-header status button; no ledger identity crosses into renderer. */
-  runStatus?: { label: string; state: string };
-  /** Render-only target emphasis while a node is being released into this group. */
-  dropTarget?: boolean;
 };
 
 export type BevyRenderEdge = {
@@ -503,6 +308,10 @@ export type GhostRenderNode = {
 
 /** 与 Rust `Scene` 对应；这是发给 Bevy `set_scene` 的唯一快照。 */
 export type CanvasRenderScene = {
+  /** Live assistant edits on scope boundaries; presentation only. */
+  executingScopes?: string[];
+  worldCameraEdit?: { nodeId: string; camera: import("../shared-world.js").WorldCameraData; showHelpers?: boolean };
+  sceneAreas?: Array<{ nodeId: string; title?: string; bounds: { min: { u: number; v: number }; max: { u: number; v: number } } }>;
   version: typeof CANVAS_RENDER_SCENE_VERSION;
   /**
    * 文档身份（画布 id）。
@@ -515,17 +324,6 @@ export type CanvasRenderScene = {
   revision: number;
   nodes: BevyRenderNode[];
   edges: BevyRenderEdge[];
-  /** Film-set group preparation primitives. Legacy composite fields are never emitted here. */
-  filmSetGroups?: BevyFilmSetGroupPreparation[];
-  /**
-   * 派生拍摄镜头归属线集合
-   * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。
-   *
-   * 独立于 `edges` 的呈现集合：表示源镜头小相机到预览卡片的永久归属，无端口/删除/重连，
-   * 不参与普通边拓扑或 inputMapping。缺失或空即无可见拍摄镜头。只承载派生呈现，不进入
-   * ServerCanvas / Y.Doc。
-   */
-  shotPreviewLinks?: BevyShotPreviewLink[];
   selection: BevyRenderSelection;
   viewport: { x: number; y: number; zoom: number };
   draft: BevyRenderDraft | null;
@@ -618,13 +416,4 @@ export type CanvasRenderScene = {
    * 与 Rust 同一公式派生；只承载浏览器本地呈现态与命中所需字段，不进入 ServerCanvas / Y.Doc。
    */
   nodeActions?: Record<string, BevyNodeActionsPresentation>;
-  /**
-   * 多选动作横条描述（change: 2026-10-16-add-group-selection-toolbar）。
-   *
-   * 选中 ≥2 个节点时显示，锚定选区轴对齐包围盒顶部；缺省或空表示不绘制。与
-   * `nodeActions` 同样由 Bevy 在画布内绘制、Rust 命中，动作矩形由 contracts
-   * `nodeActionToolbarLayout` 与 Rust 同一公式派生。只承载浏览器本地呈现态与命中所需字段，
-   * 不进入 ServerCanvas / Y.Doc。
-   */
-  selectionActions?: BevyNodeActionsPresentation;
 };

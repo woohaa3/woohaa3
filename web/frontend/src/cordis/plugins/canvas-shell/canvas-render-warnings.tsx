@@ -4,28 +4,22 @@ import type { RuntimeIssue } from "../canvas-runtime/runtime-issues.js";
 import type { ModelRenderIssue } from "../canvas-runtime/model-resource-failures.js";
 import { Button, IconButton } from "@woohaa3/ui/primitives";
 import { CloseIcon } from "@woohaa3/ui/icons";
-import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
-import { canvasMotionIssues } from "./canvas-motion-issues.js";
 
 const EMPTY: readonly ModelRenderIssue[] = [];
 const noIssues = () => EMPTY;
+const noSubscribe = () => () => undefined;
 const EMPTY_RUNTIME: readonly RuntimeIssue[] = [];
 const noRuntimeIssues = () => EMPTY_RUNTIME;
-const noSubscribe = () => () => undefined;
-const readCanvas = () => woohaa3CanvasStore.getState().canvas;
 
 export function CanvasRenderWarnings({ runtime, onRetry }: { runtime: BevyRuntime | null; onRetry: () => void }) {
   const issues = useSyncExternalStore(runtime?.subscribeRenderIssues ?? noSubscribe, runtime?.getRenderIssues ?? noIssues, noIssues);
   const runtimeIssues = useSyncExternalStore(runtime?.subscribeRuntimeIssues ?? noSubscribe, runtime?.getRuntimeIssues ?? noRuntimeIssues, noRuntimeIssues);
   const fatal = runtimeIssues.some(issue => !issue.recoverable);
-  const canvas = useSyncExternalStore(woohaa3CanvasStore.subscribe, readCanvas, readCanvas);
-  const motionIssues = useMemo(() => canvasMotionIssues(canvas), [canvas]);
   const signature = useMemo(() => JSON.stringify([
     runtimeIssues.map(issue => [issue.key, issue.message]),
-    issues.map(issue => [issue.nodeId, issue.title, issue.message]),
-    motionIssues.map(issue => [issue.nodeId, issue.details])
-  ]), [runtimeIssues, issues, motionIssues]);
-  const hasIssues = issues.length > 0 || motionIssues.length > 0 || runtimeIssues.length > 0;
+    issues.map(issue => [issue.nodeId, issue.title, issue.message])
+  ]), [runtimeIssues, issues]);
+  const hasIssues = issues.length > 0 || runtimeIssues.length > 0;
   const [dismissed, setDismissed] = useState<string | null>(null);
   useEffect(() => {
     if (!hasIssues) setDismissed(current => current === null ? current : null);
@@ -58,12 +52,6 @@ export function CanvasRenderWarnings({ runtime, onRetry }: { runtime: BevyRuntim
             <span>{issue.title}：{issue.message}</span>
             <span>{issue.retainedPreview ? " 当前显示上次成功加载的预览。" : " 当前保留节点，暂不显示模型预览。"}</span>
             <details><summary>查看错误详情</summary><pre>{issue.detail}</pre></details>
-          </li>
-        ))}
-        {motionIssues.map(issue => (
-          <li key={`motion:${issue.nodeId}`}>
-            <span>{issue.title}：动作检查失败，请修改动作脚本。</span>
-            <details><summary>查看错误详情</summary><pre>{issue.details.join("\n")}</pre></details>
           </li>
         ))}
       </ul>

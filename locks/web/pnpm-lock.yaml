@@ -258,52 +258,6 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@22.20.4)(jsdom@30.1.1)(lightningcss@1.33.0)(msw@2.15.0(@types/node@22.20.4)(typescript@7.0.2))
 
-  ../../web/extensions/film-set:
-    dependencies:
-      '@woohaa3/contracts':
-        specifier: workspace:*
-        version: link:../../contracts
-      '@woohaa3/frontend':
-        specifier: workspace:*
-        version: link:../../frontend
-      '@woohaa3/ui':
-        specifier: workspace:*
-        version: link:../../ui
-      mediabunny:
-        specifier: ^1.61.3
-        version: 1.61.3
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: 4.0.5
-        version: 4.0.5(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)
-      '@types/node':
-        specifier: ^22.15.3
-        version: 22.20.4
-      '@types/react':
-        specifier: ^18.3.12
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.1
-        version: 18.3.7(@types/react@18.3.31)
-      jsdom:
-        specifier: ^30.1.1
-        version: 30.1.1
-      react-dom:
-        specifier: ^18.3.1
-        version: 18.3.1(react@18.3.1)
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      typescript-legacy:
-        specifier: npm:typescript@5.9.3
-        version: typescript@5.9.3
-      vitest:
-        specifier: ^2.0.0
-        version: 2.1.9(@types/node@22.20.4)(jsdom@30.1.1)(lightningcss@1.33.0)(msw@2.15.0(@types/node@22.20.4)(typescript@7.0.2))
-
   ../../web/extensions/grsai-provider:
     dependencies:
       '@sdppp/pptask':
@@ -920,9 +874,6 @@ importers:
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
-      '@woohaa3/extension-film-set':
-        specifier: workspace:*
-        version: link:../../extensions/film-set
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -1186,9 +1137,6 @@ importers:
       '@woohaa3/contracts':
         specifier: workspace:*
         version: link:../../contracts
-      '@woohaa3/extension-film-set':
-        specifier: workspace:*
-        version: link:../../extensions/film-set
       '@woohaa3/extension-task-activity':
         specifier: workspace:*
         version: link:../../extensions/task-activity

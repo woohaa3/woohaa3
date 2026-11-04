@@ -240,20 +240,6 @@ describe("门禁：多选 / group / 只读不提供粘连（design D1）", () =>
     controller.dispose();
   });
 
-  it("group 拖动不提供粘连", () => {
-    const { dom, controller, scenes } = setup(
-      nodesCanvas([
-        { id: "g", type: "group", x: 0, y: 0, width: 600, height: 500 },
-        { id: "b", x: 700, y: 0 }
-      ])
-    );
-    dom.fire("pointerdown", { clientX: 500, clientY: 420 });
-    dom.fire("pointermove", { clientX: 520, clientY: 420 });
-    dom.fireKey("keydown", { code: "KeyE", key: "e" });
-    controller.flush();
-    expect(lastAttach(scenes)).toBeUndefined();
-    controller.dispose();
-  });
 
   it("只读会话拖动不提供粘连", () => {
     setSession({ isWritable: () => false, submitCommands: () => ({ ok: true }) as never });
