@@ -26,9 +26,10 @@ export function resolveModelExecutionContext(
   if (!canvas || !nodeId) return null;
   const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
   if (!node) return null;
+  const nodeData = (canvas.nodeData as Record<string, CanvasNodeData | undefined>)[nodeId];
+  if (node.type === "image" && nodeData?.codexImageImport === true) return null;
   const panelKind = panelKindForNodeType(node.type);
   if (!panelKind && !isModelNodeType(node.type)) return null;
-  const nodeData = (canvas.nodeData as Record<string, CanvasNodeData | undefined>)[nodeId];
   return {
     nodeId,
     nodeType: node.type,

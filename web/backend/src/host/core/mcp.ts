@@ -12,7 +12,9 @@ import type { HostPlugin } from "../context.js";
 import { READINESS_ORDER, ROUTE_ORDER } from "../order.js";
 import { catalogToolsForGrant, createToolGrantRegistry } from "../../ports/authoring-adapters.js";
 import { createExtensionMcpBridge } from "../../ports/extension-mcp.js";
+import { generatedImageCodexHome, generatedImagePaths } from "@woohaa3/contracts";
 import { agentCanvasServiceToClient, modelMcpServiceToClient } from "../../ports/mcp-adapters.js";
+import { importCodexGeneratedImage, resolveCodexHome } from "../../ports/import-generated-image.js";
 
 export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> = {
   name: "mcp",
@@ -120,7 +122,42 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
         ...(services.mutateFilmSetItem ? { mutateFilmSetItem: services.mutateFilmSetItem } : {})
       }), ctx.canvas),
       // 只共享显式配置的 Canvas 身份；缺省/空值不得凭空造身份。
-      agentClient: groupScopedClient(agentCanvasServiceToClient(services.agent, { principalId: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "" }), ctx.canvas),
+      agentClient: groupScopedClient({
+        ...agentCanvasServiceToClient(services.agent, { principalId: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "" }),
+        importGeneratedImage: async (input) => {
+          const scope = currentCanvasGroupScope();
+          const media = ctx.get("media");
+          if (!scope || !media) return { ok: false as const, code: "unavailable", message: "生图导入需要组授权与媒体存储" };
+          const room = await ctx.canvas.sync?.registry.resolve(scope.canvasId);
+          const result = await importCodexGeneratedImage({
+            canvasId: scope.canvasId,
+            requestId: input.requestId,
+            index: input.index ?? 0,
+            rootGroupId: scope.rootGroupId,
+            codexHome: generatedImageCodexHome(input.requestId) ?? resolveCodexHome(env),
+            paths: generatedImagePaths(input.requestId),
+            importBytes: (bytes) => media.port().importBytes(bytes),
+            apply: async (commands, commandId) => {
+              const agent = ctx.canvas.mcpServices().agent;
+              if (!agent) return { ok: false as const, code: "unavailable", message: "画布写入未就绪" };
+              const latest = room?.exportCanvas();
+              const outcome = await agent.apply({
+                principalId: scope.owner,
+                canvasId: scope.canvasId,
+                requestId: input.requestId,
+                commandId,
+                payloadHash: commandId,
+                baseRevision: latest?.ok ? latest.canvas.revision : 0,
+                commands
+              });
+              return outcome.ok
+                ? { ok: true as const, revision: outcome.revision }
+                : { ok: false as const, code: outcome.code, message: outcome.message };
+            }
+          });
+          return result.ok ? { ok: true as const, duplicate: result.duplicate, receipt: result.receipt } : result;
+        }
+      }, ctx.canvas),
       toolGrant: { allowedTools: token => catalogToolsForGrant(toolGrants.verify(token)), authorize: (input) => toolGrants.authorize(input) },
       logger: ctx.log.scope("mcp")
     });

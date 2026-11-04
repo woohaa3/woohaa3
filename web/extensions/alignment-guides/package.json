@@ -1,0 +1,30 @@
+{
+  "name": "@woohaa3/extension-alignment-guides",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "拖动节点时的轴对齐吸附与虚线参考线：中心线与边线分样式，可在插件设置里关闭。",
+  "exports": {
+    "./frontend": { "types": "./src/frontend/index.ts", "import": "./src/frontend/index.ts" }
+  },
+  "files": ["dist", "browser-dist", "src"],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/frontend/index.ts --outdir dist --platform browser --entry-name frontend",
+    "build:browser": "node ../../scripts/build-extension-browser.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/frontend": "workspace:*",
+    "@woohaa3/ui": "workspace:*",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@types/node": "^22.15.3",
+    "@types/react": "^18.3.12",
+    "typescript": "^7.0.2",
+    "vitest": "^2.0.0"
+  }
+}

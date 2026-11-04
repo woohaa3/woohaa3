@@ -144,6 +144,7 @@ describe("读取工具 structuredContent（任务 5.1 / 5.2）", () => {
     expect(result.structuredContent?.nodeKinds).toBeDefined();
     expect(result.structuredContent?.limits).toBeDefined();
     expect(result.structuredContent?.run).toMatchObject({ available: false });
+    expect(result.structuredContent?.recommendedFlow).toContain("import_generated_image");
   });
 
   it("graph 返回 structuredContent 与简短 text 摘要", async () => {

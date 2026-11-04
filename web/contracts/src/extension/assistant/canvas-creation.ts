@@ -38,6 +38,7 @@ export const CANVAS_GROUP_TOOLS = [
   "get_canvas_script_api", "validate_canvas_script", "submit_canvas_script",
   "validate_canvas_plan", "apply_canvas_plan", "create_canvas_node", "connect_canvas_nodes", "set_node_prompt", "delete_canvas_entities",
   "run_canvas_node", "get_canvas_run", "cancel_canvas_run", "get_node_output",
+  "import_generated_image",
   "wait_for_skill_step", "get_latest_skill_step_output",
   "get_model_api", "get_model_node", "get_model_statistics", "submit_model_script", "submit_model_scripts",
   "get_film_set_clips", "submit_film_set", "add_film_set_media", "mutate_film_set_item", "mutate_film_set_clip"

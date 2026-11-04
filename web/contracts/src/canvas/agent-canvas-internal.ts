@@ -37,7 +37,12 @@ export const AGENT_INTERNAL_PATHS = {
   run: `${AGENT_INTERNAL_BASE_PATH}/run`,
   runStatus: `${AGENT_INTERNAL_BASE_PATH}/run/status`,
   runCancel: `${AGENT_INTERNAL_BASE_PATH}/run/cancel`,
-  output: `${AGENT_INTERNAL_BASE_PATH}/output`
+  output: `${AGENT_INTERNAL_BASE_PATH}/output`,
+  /**
+   * 把本机 Codex 内建生图的产物导入画布
+   * （change: 2026-11-03-add-codex-image-import）。
+   */
+  importGeneratedImage: `${AGENT_INTERNAL_BASE_PATH}/import-generated-image`
 } as const;
 
 type DecodeResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
@@ -407,6 +412,51 @@ export function decodeAgentRunCancelRequest(body: unknown, principalId: string):
 
 export function decodeAgentOutputRequest(body: unknown, principalId: string): DecodeResult<AgentOutputRequest> {
   return decodeAgentRunCancelRequest(body, principalId);
+}
+
+// ---------------------------------------------------------------------------
+// import-generated-image
+// ---------------------------------------------------------------------------
+
+/**
+ * 导入本机 Codex 内建生图产物（change: 2026-11-03-add-codex-image-import）。
+ *
+ * 请求体只有 canvasId、requestId 与可选 index。产物路径由宿主按本轮登记表取用，
+ * 不接受调用方自报路径。
+ */
+export type AgentImportGeneratedImageRequest = {
+  /** 由受认证上下文注入的 principal；请求体不携带。 */
+  principalId: string;
+  canvasId: string;
+  requestId: string;
+  /** 本轮第几张生图产物（从 0 开始）。 */
+  index: number;
+};
+
+const IMPORT_GENERATED_IMAGE_KEYS = ["canvasId", "requestId", "index"] as const;
+
+export function decodeAgentImportGeneratedImageRequest(
+  body: unknown,
+  principalId: string
+): DecodeResult<AgentImportGeneratedImageRequest> {
+  if (!isJsonObject(body)) return fail("malformed-request", "请求体必须是对象");
+  for (const key of Object.keys(body)) {
+    if (!(IMPORT_GENERATED_IMAGE_KEYS as readonly string[]).includes(key)) {
+      return fail("malformed-request", `未知字段 ${key}`);
+    }
+  }
+  if (!isBoundedId(body.canvasId)) return fail("malformed-request", "canvasId 必须是非空字符串");
+  if (!isBoundedId(body.requestId)) return fail("malformed-request", "requestId 必须是非空字符串");
+  const index = body.index ?? 0;
+  if (!Number.isInteger(index) || (index as number) < 0) {
+    return fail("malformed-request", "index 必须是非负整数");
+  }
+  return ok({
+    principalId,
+    canvasId: body.canvasId,
+    requestId: body.requestId,
+    index: index as number
+  });
 }
 
 /** 校验 precondition 形状（Canvas 侧在权威快照上使用时再求值）。 */

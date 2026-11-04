@@ -634,13 +634,14 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       ) : readOnly ? null : (
         <ExecutionPanelShell ariaLabel="节点执行面板（目录不可用）" className="mc-panel--catalog-fallback">
           <div className="mc-panel__grid">
-            <div className="mc-panel__grid-item" style={{ gridColumn: "span 24" }} role="status">
+            {/* 空态只有这一行状态：用整列变体，别落进两列栅格右侧的控件列。 */}
+            <div className="mc-panel__grid-item mc-panel__grid-item--untitled" style={{ gridColumn: "span 24" }} role="status">
               <span className="mc-panel__grid-control">
                 {blockingReasons.length > 0 ? blockingReasons.join("；") : "任务目录尚未就绪"}
               </span>
             </div>
             {catalogState.status === "error" ? (
-              <div className="mc-panel__grid-item" style={{ gridColumn: "span 24" }}>
+              <div className="mc-panel__grid-item mc-panel__grid-item--untitled" style={{ gridColumn: "span 24" }}>
                 <span className="mc-panel__grid-control">
                   <Button size="sm" className="node-execution-dock__retry" onClick={reload}>
                     重新加载模型目录

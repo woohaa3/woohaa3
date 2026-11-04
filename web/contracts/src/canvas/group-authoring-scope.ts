@@ -78,9 +78,15 @@ export function validateCanvasGroupChange(before: ServerCanvas, after: ServerCan
   const originalEdges = new Set(before.document.edges.map(e => e.id));
   for (const e of after.document.edges) if (!originalEdges.has(e.id) && (!nextIds.has(e.source) || !nextIds.has(e.target))) return "连接端点必须均在组内";
   const assets = canvasGroupAssetIds(before, ids);
-  const storageKeys = new Set(before.assets.filter(a => assets.has(a.id)).map(a => a.metadata?.storageKey).filter((v): v is string => typeof v === "string"));
+  for (const asset of after.assets) if (asset.nodeId && nextIds.has(asset.nodeId)) assets.add(asset.id);
+  const storageKeys = new Set<string>();
+  for (const asset of [...before.assets, ...after.assets]) {
+    if (!assets.has(asset.id)) continue;
+    const key = asset.metadata?.storageKey;
+    if (typeof key === "string") storageKeys.add(key);
+  }
   for (const [id, data] of Object.entries(after.nodeData)) if (nextIds.has(id) && !same(data, before.nodeData[id]) && hasExternalCanvasReference(data, nextIds, assets, storageKeys)) return `节点 ${id} 引用了组外输入`;
-  if (before.title !== after.title || !same(before.assets, after.assets)) return "组工具不能修改画布标题或全局资产";
+  if (before.title !== after.title || !groupAssetsStayInside(before, after, nextIds)) return "组工具不能修改画布标题或全局资产";
   const oldJobs = new Map(before.jobs.map(j => [j.id, j]));
   for (const j of after.jobs) if (!nextIds.has(j.nodeId) && !same(j, oldJobs.get(j.id))) return "组外任务受到影响";
   for (const j of before.jobs) if (!ids.has(j.nodeId) && !after.jobs.some(n => n.id === j.id)) return "组外任务受到影响";
@@ -108,6 +114,23 @@ export function hasExternalCanvasReference(value: unknown, ids: Set<string>, ass
   });
 }
 function same(a: unknown, b: unknown) { return stableStringify(a) === stableStringify(b); }
+
+/** 组内节点名下的素材可以新增或替换；组外素材和没有节点归属的全局素材必须原样保留。 */
+function groupAssetsStayInside(before: ServerCanvas, after: ServerCanvas, nextIds: Set<string>): boolean {
+  const beforeById = new Map(before.assets.map(asset => [asset.id, asset]));
+  const afterById = new Map(after.assets.map(asset => [asset.id, asset]));
+  const owned = (nodeId: string | undefined) => typeof nodeId === "string" && nextIds.has(nodeId);
+  for (const asset of before.assets) {
+    if (owned(asset.nodeId)) continue;
+    const next = afterById.get(asset.id);
+    if (!next || !same(asset, next)) return false;
+  }
+  for (const asset of after.assets) {
+    if (beforeById.has(asset.id)) continue;
+    if (!owned(asset.nodeId)) return false;
+  }
+  return true;
+}
 
 type PositionedNode = { position: { x: number; y: number }; parentId?: string };
 

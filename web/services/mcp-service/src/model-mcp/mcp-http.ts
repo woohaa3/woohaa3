@@ -206,5 +206,6 @@ const GRANTED_TOOLS = new Set([
   "create_film_set_node",
   "import_model_snapshot",
   "mutate_model_cameras",
-  "mutate_model_cameras_batch"
+  "mutate_model_cameras_batch",
+  "import_generated_image"
 ]);

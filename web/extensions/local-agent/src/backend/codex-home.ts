@@ -49,6 +49,22 @@ function pathEntryExists(target: string): boolean {
  * 显式的 `CODEX_HOME` 优先；否则使用 `$HOME/.codex`。只返回实际存在的目录，
  * 避免把空路径当成可复用来源。
  */
+/**
+ * 这条连接上 Codex 进程实际写入的 home。
+ *
+ * 进程管理把子进程 `HOME` 换成连接的 `configDir`，并去掉 `WOOHAA3_*`。
+ * 子进程若继承了 `CODEX_HOME`，生图落在那里；否则落在 `<configDir>/.codex`。
+ * 导入校验必须用这个目录，不能用用户自己的 `~/.codex`。
+ */
+export function connectionCodexHome(
+  configDir: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const explicit = (env.CODEX_HOME ?? "").trim();
+  if (explicit !== "") return path.resolve(explicit);
+  return path.resolve(configDir, ".codex");
+}
+
 export function resolveCodexHome(
   env: Record<string, string | undefined> = process.env,
 ): string | null {

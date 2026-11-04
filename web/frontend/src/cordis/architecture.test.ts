@@ -237,6 +237,9 @@ describe("前端协议边界审计", () => {
     const REVIEWED = new Set<string>([
       // canvas-runtime ↔ canvas-shell：运行时宿主装载 controller 与聚焦目标解析（type-only 依赖）。
       "cordis/plugins/canvas-runtime/host.ts -> canvas-shell",
+      // canvas-runtime ↔ canvas-shell：拖动吸附策略的注入转发只引用 controller 类型
+      // （内置插件 alignment-guides；与 host.ts 同一类 type-only 依赖）。
+      "cordis/plugins/canvas-runtime/alignment-snap-refs.ts -> canvas-shell",
       "cordis/plugins/canvas-runtime/plugin.tsx -> canvas-shell",
       // canvas-runtime 查询桥复用 gizmo 请求类型（type-only）。
       "cordis/plugins/canvas-runtime/query-bridge.ts -> canvas-shell",

@@ -168,3 +168,15 @@ export type { MediaContentService, MediaContentProvider, MediaContentState, Medi
 export type { ManagedNodeRelation, ManagedNodeLifecycleAdapter, ManagedNodeLifecycleContext, ManagedNodeLifecyclePlan } from "@woohaa3/contracts";
 
 export type { PersistentResource, PersistentSurface, PersistentSurfaces } from "../cordis/services/persistent-surfaces.js";
+/**
+ * 拖动吸附策略契约（`canvasRuntime.setAlignmentSnapPolicy` 的入参类型）。
+ *
+ * 扩展只能提供"几何策略"，不能直接改写拖动预览：宿主在拖动热路径里调用它，并负责把返回的
+ * 位移叠加到预览、把参考线交给呈现层。
+ */
+export type {
+  AlignmentGuide,
+  AlignmentRect,
+  AlignmentSnapPolicy,
+  AlignmentSnapResult
+} from "../cordis/contract/alignment-snap.js";

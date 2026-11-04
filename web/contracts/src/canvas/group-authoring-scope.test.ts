@@ -66,6 +66,23 @@ describe("canvas group scope", () => {
     const after = structuredClone(before); after.nodeData.a.prompt = "updated";
     expect(validateCanvasGroupChange(before, after, "root")).toBeNull();
   });
+  it("accepts a new in-group image asset and rejects assets owned outside the group", () => {
+    const before = fixture();
+    before.assets = [{ id: "outside-asset", nodeId: "outside", title: "外", mediaKind: "image", source: "uploaded", status: "ready", createdAt: "2026-10-20T00:00:00Z", metadata: { storageKey: "outside-key" } }];
+    const after = structuredClone(before);
+    after.document.nodes.push({ id: "shot", type: "image", parentId: "root", position: { x: 48, y: 48 }, width: 320, height: 320 });
+    after.nodeData.shot = { title: "Codex 图片", codexImageImport: true, outputAssetId: "shot-asset", resourceKind: "image", taskStatus: "successed" };
+    after.assets.push({ id: "shot-asset", nodeId: "shot", title: "Codex 图片", mediaKind: "image", source: "uploaded", status: "ready", createdAt: "2026-10-20T00:00:00Z", url: "/api/media/new-key", metadata: { storageKey: "new-key" } });
+    expect(validateCanvasGroupChange(before, after, "root")).toBeNull();
+
+    const stolen = structuredClone(after);
+    stolen.nodeData.shot.outputAssetId = "outside-asset";
+    expect(validateCanvasGroupChange(before, stolen, "root")).toMatch(/引用了组外输入/);
+
+    const global = structuredClone(before);
+    global.assets.push({ id: "loose", title: "无主", mediaKind: "image", source: "uploaded", status: "ready", createdAt: "2026-10-20T00:00:00Z" });
+    expect(validateCanvasGroupChange(before, global, "root")).toMatch(/全局资产/);
+  });
   it("accepts a root grown up/left to contain derived film-set cards, but not unneeded growth or negative local coordinates", () => {
     const before = fixture();
     before.document.nodes.push({ id: "film", type: "composite-asset", parentId: "root", position: { x: 40, y: 40 } });

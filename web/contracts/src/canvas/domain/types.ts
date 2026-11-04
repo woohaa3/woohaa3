@@ -61,6 +61,11 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
   mediaContent?: import("../media-content.js").MediaContentRef;
   outputAssetId?: string;
   /**
+   * Codex 内建生图导入的成品图。选中时不打开图片生成面板。
+   * （change: 2026-11-03-add-codex-image-import，D9）
+   */
+  codexImageImport?: boolean;
+  /**
    * 浏览器本地历史预览的失败信息。
    *
    * 只在 node-history 的 `ExecutionPreview` 渲染投影中写入：选中失败/取消归档时，卡片正文

@@ -12,7 +12,7 @@
  *
  * stdio 连接由调用方注入（`input.stdio`），测试用本地协议模拟；不启动真实进程。
  */
-import type { AgentConversationAdapterEvent, AgentModelView } from "@woohaa3/contracts";
+import { recordGeneratedImage, type AgentConversationAdapterEvent, type AgentModelView } from "@woohaa3/contracts";
 import {
   request,
   initializeRequest,
@@ -23,7 +23,7 @@ import {
   threadIdFromResult
 } from "../protocol/codex-appserver.js";
 import type { StdioConnection } from "../process-manager.js";
-import { inheritedMcpServerNames, inheritedPluginNames } from "../codex-home.js";
+import { connectionCodexHome, inheritedMcpServerNames, inheritedPluginNames } from "../codex-home.js";
 import type { LocalAgentTransport, LocalAgentTransportInput, LocalAgentTransportResult } from "./transport.js";
 
 export type CodexAppServerTransportOptions = {
@@ -174,6 +174,10 @@ function threadConfig(input: LocalAgentTransportInput): Record<string, unknown> 
     "features.skills": false,
     web_search: "disabled"
   };
+  // 讨论回合只读对话，不得产生画布外产物：显式关闭内建生图。
+  // 目标回合不设置该键，沿用 Codex 默认（开启），由 import_generated_image 回收产物。
+  // （change: 2026-11-03-add-codex-image-import，D3）
+  if (!input.mcpEndpoint) config["features.image_generation"] = false;
   const mcpServers: Record<string, unknown> = {};
   // 复用现有 Codex home 时，全局 config.toml 的 MCP server 会与本次 thread config 合并。
   // 显式禁用继承项，避免模型绕过宿主 grant 直接调用用户的其他本机工具。
@@ -350,6 +354,9 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
       let nativeTurn: string | null = null;
       let startingTurn = false;
       let interrupted = false;
+      // 内建 image_gen 的产物路径（按到达顺序）。只收 savedPath，不收 result 的 base64：
+      // 三张图实测合计约 8.4 MB，转发会拖垮 JSONL 流式解析。
+      const generatedImagePaths: string[] = [];
       const emit = (event: AgentConversationAdapterEvent) => input.onEvent(event);
       const rpc = createCodexRpc(connection, {
         logger: log,
@@ -364,6 +371,19 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
           if (!nativeThread || threadId !== nativeThread) return;
           if (nativeTurn && typeof turnId === "string" && turnId !== nativeTurn) return;
           if (startingTurn && message.method === "turn/started" && typeof turnId === "string") nativeTurn = turnId;
+          // 内建生图产物：只记录 savedPath，不进事件流（change: 2026-11-03-add-codex-image-import）。
+          if (message.method === "item/completed") {
+            const item = params.item as Record<string, unknown> | undefined;
+            if (item?.type === "imageGeneration") {
+              const savedPath = typeof item.savedPath === "string" ? item.savedPath.trim() : "";
+              if (savedPath.length > 0) {
+                generatedImagePaths.push(savedPath);
+                if (input.turnRequestId) recordGeneratedImage(input.turnRequestId, savedPath, connectionCodexHome(input.configDir));
+              }
+              else log({ event: "codex-image-saved-path-missing", generationId: item.id ?? null });
+              return;
+            }
+          }
           for (const event of decoder.onMessage(message)) emit(event);
         },
         onInvalid: () => decoder.onError("protocol-mismatch", "本地 ChatGPT 输出非 JSON 帧")
@@ -485,7 +505,7 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
           return { ok: false, code: outcome.error?.code ?? "protocol-mismatch", message: outcome.error?.message ?? "Codex 运行失败", nativeId: threadId };
         }
         if (outcome.status === "cancelled") return { ok: false, code: "cancelled", message: "回合已取消", nativeId: threadId };
-        return { ok: true, outcome, nativeId: threadId };
+        return { ok: true, outcome, nativeId: threadId, generatedImagePaths: [...generatedImagePaths] };
       } catch (error) {
         return { ok: false, code: input.signal.aborted ? "cancelled" : "transport-unavailable", message: error instanceof Error ? error.message : "本地 ChatGPT 运行失败" };
       } finally {

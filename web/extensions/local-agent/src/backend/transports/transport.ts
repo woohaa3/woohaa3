@@ -35,6 +35,11 @@ export type LocalAgentTransportInput = {
   toolToken: string | null;
   /** 受控 MCP 工具 endpoint（讨论回合为 null）。 */
   mcpEndpoint: { name: string; url: string } | null;
+  /**
+   * 本回合 requestId。Codex 传输在生图事件到达时立刻登记路径，
+   * 供回合进行中的导入工具按索引读取。
+   */
+  turnRequestId?: string;
   /** 续轮原生会话 id（按连接 + epoch 归属）。 */
   resumeNativeId: string | null;
   signal: AbortSignal;
@@ -44,7 +49,16 @@ export type LocalAgentTransportInput = {
 };
 
 export type LocalAgentTransportResult =
-  | { ok: true; outcome: AgentAdapterRunOutcome; nativeId?: string }
+  | {
+      ok: true;
+      outcome: AgentAdapterRunOutcome;
+      nativeId?: string;
+      /**
+       * 本回合内建生图产生的产物绝对路径，按到达顺序（change: 2026-11-03-add-codex-image-import）。
+       * 仅 Codex 传输填充；不含 base64 内容。
+       */
+      generatedImagePaths?: string[];
+    }
   | { ok: false; code: string; message: string; nativeId?: string };
 
 /** 模型目录探测输入：只打开协议目录，不发送 prompt、不触发生成。 */

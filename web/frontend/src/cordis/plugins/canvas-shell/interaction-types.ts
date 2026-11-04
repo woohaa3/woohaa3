@@ -315,6 +315,13 @@ export type InteractionControllerOptions = {
    */
   getCompositeAssetCompositions?: () => ReadonlyMap<string, import("@woohaa3/contracts").BevyCompositeAssetCompositionInfo>;
   /**
+   * 拖动吸附策略（内置插件 `alignment-guides` 注入）。
+   *
+   * 宿主在每次拖动预览时向它求一次吸附偏移与参考线；返回 `null` 或未注入时完全不吸附，
+   * 行为与本能力上线前一致。几何求解在 contracts 的纯函数里，插件只提供开关与候选裁剪。
+   */
+  alignmentSnap?: () => import("./alignment-snap.js").AlignmentSnapPolicy | null;
+  /**
    * 片场对象模式手势（change: 2026-10-09-add-film-set-object-motion-and-editing）。
    *
    * 聚焦片场且处于对象模式时：单击命中对象选择稳定 itemId；主按钮拖动对象移动（逆变换到
@@ -538,6 +545,17 @@ export type InteractionController = {
    * 不写状态、不建第二套相机。节点不存在时返回 null。供节点顶部操作横条锚定。
    */
   nodeScreenRect(nodeId: string): import("@woohaa3/contracts").ScreenRect | null;
+  /**
+   * 本次拖动的辅助对齐线（世界坐标）
+   * （内置插件 `alignment-guides`；宿主只在拖动中返回非空数组）。
+   *
+   * 覆盖层把它按唯一本地视口换算成屏幕线段绘制；不写画布、不参与命中。
+   */
+  alignmentGuides(): readonly import("../../contract/alignment-snap.js").AlignmentGuide[];
+  /** 参考线版本号；内容变化才递增，覆盖层据此决定是否重绘。 */
+  alignmentGuidesVersion(): number;
+  /** 注入/替换拖动吸附策略（内置插件提供；不注入即完全不吸附）。 */
+  setAlignmentSnapPolicy(policy: import("./alignment-snap.js").AlignmentSnapPolicy | null): void;
 };
 
 export type Gesture =

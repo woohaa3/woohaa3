@@ -36,6 +36,10 @@ import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { modelPreviewStore } from "../../services/model-preview-store.js";
 import type { InteractionCore, InteractionState, Viewport } from "./interaction-core.js";
+import type { AlignmentSnapPolicy } from "./alignment-snap.js";
+
+/** 无参考线时的共享空数组：覆盖层据此判断"没有线"，避免每次新建数组。 */
+const EMPTY_ALIGNMENT_GUIDES: readonly import("../../contract/alignment-snap.js").AlignmentGuide[] = Object.freeze([]);
 import type { InteractionController, InteractionControllerOptions } from "./interaction-types.js";
 export type { InteractionController, InteractionControllerOptions, Gesture } from "./interaction-types.js";
 export { MEMORY_CLIPBOARD_KEY } from "./interaction-keyboard.js";
@@ -83,9 +87,18 @@ export function installInteractionController(options: InteractionControllerOptio
   });
   const localViewport = createLocalViewportStore(options.canvasId ?? "default");
   const viewportListeners = new Set<() => void>();
+  /**
+   * 拖动吸附策略（内置插件 `alignment-guides` 注入；`null` 表示完全不吸附）。
+   * 用可变引用而不是构造期选项，插件可在画布已挂载后启停。
+   */
+  const alignmentSnapRef: { current: AlignmentSnapPolicy | null } = { current: null };
+  const currentAlignmentSnap = (): AlignmentSnapPolicy | null =>
+    alignmentSnapRef.current ?? options.alignmentSnap?.() ?? null;
   const state: InteractionState = {
     gesture: { kind: "none" },
     selected: [],
+    alignmentGuides: [],
+    alignmentGuidesVersion: 0,
     localPositions: new Map(),
     localSizes: new Map(),
     draft: null,
@@ -512,7 +525,8 @@ export function installInteractionController(options: InteractionControllerOptio
     aggregateProjection: () => aggregateProjectionRef.current?.() ?? null,
     aggregateActive: () => state.gesture.kind === "aggregate-connect",
     cancelAggregateConnect: () => input.cancelAggregateConnect(),
-    filmSetObjectAction: () => model.filmSetObjectAction()
+    filmSetObjectAction: () => model.filmSetObjectAction(),
+    alignmentSnap: currentAlignmentSnap
   };
 
   const input = create2dInputFamily(core);
@@ -638,6 +652,9 @@ export function installInteractionController(options: InteractionControllerOptio
       const viewport = activeViewport();
       return { left: topLeft.x, top: topLeft.y, width: size.width * viewport.zoom, height: size.height * viewport.zoom };
     },
+    alignmentGuides: () => state.gesture.kind === "drag" && state.gesture.moved ? state.alignmentGuides : EMPTY_ALIGNMENT_GUIDES,
+    alignmentGuidesVersion: () => state.alignmentGuidesVersion,
+    setAlignmentSnapPolicy: (policy) => { alignmentSnapRef.current = policy; },
     dispose() {
       disposed = true;
       disposeDiagnostics();

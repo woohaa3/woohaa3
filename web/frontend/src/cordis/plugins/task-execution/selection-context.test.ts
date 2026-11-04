@@ -25,6 +25,13 @@ describe("resolveSelectionContext", () => {
     });
   });
 
+  it("Codex 成品图不打开生成面板", () => {
+    const canvas = canvasFixture({
+      nodes: [{ id: "img-codex", type: "image", data: { codexImageImport: true, outputAssetId: "asset-1" } }]
+    });
+    expect(resolveSelectionContext(canvas, "img-codex")).toBeNull();
+  });
+
   it("选中图片节点 → image-generation，数据来自规范 nodeData", () => {
     const context = resolveSelectionContext(CANVAS, "img-1");
     expect(context).toEqual({

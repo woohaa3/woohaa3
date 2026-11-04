@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  connectionCodexHome,
   inheritedMcpServerNames,
   inheritedPluginNames,
   parseMcpServerNames,
@@ -35,6 +36,14 @@ describe("Codex 本机配置复用", () => {
     mkdirSync(explicit, { recursive: true });
     expect(resolveCodexHome({ HOME: home, CODEX_HOME: explicit })).toBe(path.resolve(explicit));
     expect(resolveCodexHome({ HOME: path.join(root, "missing"), CODEX_HOME: "" })).toBeNull();
+  });
+
+  it("连接进程的 home 跟 configDir，只有子进程继承了 CODEX_HOME 才用它", () => {
+    const root = tempRoot();
+    const configDir = path.join(root, "connection", "config");
+    expect(connectionCodexHome(configDir, { CODEX_HOME: "" })).toBe(path.resolve(configDir, ".codex"));
+    const explicit = path.join(root, "explicit");
+    expect(connectionCodexHome(configDir, { CODEX_HOME: explicit })).toBe(path.resolve(explicit));
   });
 
   // Windows 建文件软链要开发者模式/管理员权限；生产代码在链接失败时会优雅降级，
