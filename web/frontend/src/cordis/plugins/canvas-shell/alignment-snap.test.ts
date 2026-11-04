@@ -11,8 +11,6 @@ import { createCanvasNodeIndex } from "./canvas-node-index.js";
 import {
   ALIGNMENT_SNAP_THRESHOLD_PX,
   applyDragAlignment,
-  collectAlignmentCandidates,
-  movingNodeIds,
   resolveDragAlignmentSnap
 } from "./alignment-snap.js";
 import type { AlignmentSnapPolicy } from "../../contract/alignment-snap.js";

@@ -12,19 +12,22 @@ import { nativeContextFor, nativeContextKey } from "@woohaa3/agent-connections";
  * - 工具范围逐次经宿主 grant 校验；无 grant 时不注入工具面；
  * - 缺 CLI/版本不支持 → `runtime-missing`/`version-unsupported`，不影响基础健康。
  */
-import type {
-  AgentAdapterAuthState,
-  AgentAdapterRunInput,
-  AgentAdapterRunOutcome,
-  AgentAdapterCapabilities,
-  AgentCatalogSnapshot,
-  AgentModelView,
-  AgentConnectionCapabilities,
-  AgentConversationAdapter
+import {
+  clearGeneratedImages,
+  type AgentAdapterAuthState,
+  type AgentAdapterRunInput,
+  type AgentAdapterRunOutcome,
+  type AgentImageInput,
+  type AgentAdapterCapabilities,
+  type AgentCatalogSnapshot,
+  type AgentModelView,
+  type AgentConnectionCapabilities,
+  type AgentConversationAdapter,
+  type ApplicationToolDelegationFacade
 } from "@woohaa3/contracts";
 import { ASSISTANT_CANDIDATE_CAPABILITIES, createTurnObserver, createTurnOutcomeJournal, preflightInput, type ConnectionDescriptor, type ConnectionService } from "@woohaa3/agent-connections";
-import type { ApplicationToolDelegationFacade } from "@woohaa3/contracts";
 import { LOCAL_AGENT_ADAPTERS, LOCAL_AGENT_PLUGIN_ID, localAgentConnectionName, type LocalAgentAdapterDescriptor } from "../shared.js";
+import { generatedImageImportFailure } from "./generated-image-import.js";
 import type { ProcessManager } from "./process-manager.js";
 import type { LocalAgentTransport } from "./transports/transport.js";
 import { buildTargetPrompt } from "./target-prompt.js";
@@ -43,6 +46,16 @@ export type LocalAgentRuntimeOptions = {
   argsFor: (adapterId: string) => readonly string[];
   tools?: ApplicationToolDelegationFacade;
   logger?: (event: Record<string, unknown>) => void;
+  /**
+   * 组内回合发送前，按用户原文点名的图片标题读出字节。
+   * 失败或没有命中时返回空，回合照常进行。
+   */
+  resolveMentionedImages?: (input: {
+    owner: string;
+    canvasId: string;
+    rootGroupId: string;
+    prompt: string;
+  }) => Promise<{ images: readonly AgentImageInput[]; note: string } | undefined>;
 };
 
 /** 本机来源能力：需要工具的执行由宿主 grant 门禁；讨论只读。 */
@@ -256,7 +269,9 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     const observation = createTurnObserver();
     const toolCalls: string[] = [];
     let successfulWrite = false;
+    let imageImported = false;
     let toolFailure: string | undefined;
+    clearGeneratedImages(input.requestId);
     const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output", "wait_for_skill_step", "get_latest_skill_step_output", "get_world_context"]);
 
     // 工具面变化必须切换原生会话：OpenCode/App Server 的 MCP 工具目录在会话内是冻结的，
@@ -273,6 +288,20 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         kind: adapter.transport === "stdio-jsonrpc" ? "stdio" : "http"
       });
       const binding = input.candidate ? null : await options.service.resolveNativeBinding({ owner: input.owner, connectionId, context });
+      const mentioned = input.candidate || input.intent.mode !== "canvas-group" || !input.intent.nodeId
+        ? undefined
+        : await options.resolveMentionedImages?.({
+          owner: input.owner,
+          canvasId: input.canvasId,
+          rootGroupId: input.intent.nodeId,
+          prompt: input.intent.prompt
+        }).catch((error: unknown) => {
+          options.logger?.({ event: "reference-image-resolve-failed", message: error instanceof Error ? error.message : String(error) });
+          return undefined;
+        });
+      const promptBody = discussion
+        ? (binding ? input.intent.prompt : buildDiscussionPrompt(input.history, input.intent.prompt))
+        : buildDiscussionPrompt(binding ? [] : input.history, buildTargetPrompt(input.intent, input.requestId));
       const result = await transport.run({
         configDir: handle.configDir,
         workDir: handle.workDir,
@@ -281,13 +310,14 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         stdio: handle.stdio ?? null,
         model: input.intent.model ?? record.models?.[0] ?? "",
         ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}),
-        prompt: discussion
-          ? (binding ? input.intent.prompt : buildDiscussionPrompt(input.history, input.intent.prompt))
-          : buildDiscussionPrompt(binding ? [] : input.history, buildTargetPrompt(input.intent, input.requestId)),
-        ...(input.candidate ? { images: input.candidate.images, outputSchema: input.candidate.outputSchema } : {}),
+        prompt: mentioned ? `${promptBody}\n\n${mentioned.note}` : promptBody,
+        ...(input.candidate
+          ? { images: input.candidate.images, outputSchema: input.candidate.outputSchema }
+          : mentioned ? { images: mentioned.images } : {}),
         allowedTools: toolNames,
         toolToken,
         mcpEndpoint: !discussion && toolToken && options.mcpEndpoint ? options.mcpEndpoint : null,
+        turnRequestId: input.requestId,
         resumeNativeId: binding?.nativeId ?? null,
         signal: input.signal,
         onEvent: async (event) => {
@@ -304,6 +334,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
           if (event.type === "tool-completed" && toolNames.includes(event.tool)) {
             if (event.ok === false) toolFailure = event.summary ?? "画布工具执行失败";
             if (event.ok === true && !readTools.has(event.tool)) successfulWrite = true;
+            if (event.tool === "import_generated_image" && event.ok === true) imageImported = true;
           }
           input.emit(event);
         },
@@ -338,12 +369,17 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
       if (result.nativeId && !input.candidate) {
         await options.service.setNativeBinding({ owner: input.owner, connectionId, context, native: { nativeId: result.nativeId, credentialEpoch: record.credentialEpoch, updatedAt: new Date().toISOString() } });
       }
+      if (!discussion) {
+        const imageFailure = generatedImageImportFailure(result.generatedImagePaths?.length ?? 0, imageImported);
+        if (imageFailure) return { status: "failed", error: imageFailure };
+      }
       if (!discussion && !successfulWrite) return { status: "failed", error: { code: "canvas-not-modified", message: toolFailure ?? "推理结束，但没有成功的画布写入回执" } };
       return result.outcome;
     } catch (error) {
       // 停用/回收时进程不可用：明确失败，不假装成功。
       return { status: "failed", error: { code: "transport-unavailable", message: error instanceof Error ? error.message : "本机来源运行失败" } };
     } finally {
+      clearGeneratedImages(input.requestId);
       if (input.candidate) await options.processManager.stop({ adapterId: adapter.adapterId, owner: input.owner, connectionId: resourceKey });
     }
   };
