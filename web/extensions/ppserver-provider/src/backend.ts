@@ -25,6 +25,7 @@ import { createPpserverProvider, type PpserverCatalog } from "./provider.js";
 import { fetchRemoteSixiConfig } from "./remote-config.js";
 import { ensureSession, sessionFilePath } from "./session.js";
 import { registerPpserverProxy } from "./routes.js";
+import { registerAccountProxy } from "./account-routes.js";
 import { registerPpserverAuthSessionRoute } from "./auth-session.js";
 import { uploadPpserverReference } from "./upload.js";
 import {
@@ -45,6 +46,17 @@ const REFRESH_PATH = "/api/providers/ppserver/refresh";
  * 不是猜的 —— 两边必须指向同一个租户，否则计费与模板筛选会对不上。
  */
 const DEFAULT_TENANT_ID = "d531fe93-2b6a-4941-a3c9-3fd312053379";
+
+/**
+ * 账户服务的地址。
+ *
+ * **与生图的 `baseUrl` 是两个不同的服务**：生图在 `sdpppx.zombee.tech/ppserver`，
+ * 账户（余额 / 会员 / 签到 / 报价 / 订单 / 券）在 `api.sixiai.com.cn`。
+ * 新对接包 `SIXI_DESKTOP_API.md` 写明的公开配置就是它。
+ *
+ * 固定常量而不是配置项：它是公开值，且换域名意味着整套协议迁移，不该悄悄改。
+ */
+const ACCOUNT_BASE_URL = "https://api.sixiai.com.cn";
 
 /**
  * 配置项与 PS 插件对齐：**只有令牌要人填**。
@@ -288,6 +300,9 @@ export function createPpserverProviderPlugin(
       let cachedToken = accessToken;
       const resolveAccessToken = async (): Promise<string> => {
         const result = await ensureSession({
+          // 续期走新账户服务的 `/auth/refresh`（租户放 body）；没配账户地址才回落 Supabase 直连。
+          accountBaseUrl: ACCOUNT_BASE_URL,
+          tenantId,
           supabaseUrl,
           anonKey,
           ...(accessToken ? { fallbackAccessToken: accessToken } : {}),
@@ -370,6 +385,16 @@ export function createPpserverProviderPlugin(
       // 「自动续期」在最需要它的地方失效（一小时后必然 401，要重启宿主才恢复）。
       registerPpserverProxy(ctx, {
         baseUrl,
+        accessToken: resolveAccessToken,
+        tenantId: () => tenantId
+      });
+      /*
+       * 账户接口（余额 / 会员 / 签到 / 报价 / 订单）在**另一个服务**上：
+       * `api.sixiai.com.cn`，而它的 CORS 只放行官网 Origin，宿主页面直连会被拦。
+       * 所以同样经宿主转发 —— 前端调 `/api/ppserver/account/*`，这里补令牌与租户头。
+       */
+      registerAccountProxy(ctx, {
+        baseUrl: ACCOUNT_BASE_URL,
         accessToken: resolveAccessToken,
         tenantId: () => tenantId
       });

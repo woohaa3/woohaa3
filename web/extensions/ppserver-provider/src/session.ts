@@ -89,7 +89,13 @@ export async function clearSession(file: string): Promise<void> {
   await fs.rm(file, { force: true });
 }
 
-/** `POST /auth/v1/token?grant_type=refresh_token` 的响应解读。 */
+/**
+ * `POST /auth/refresh` 的响应解读。
+ *
+ * 新契约的响应体与 Supabase 的 `/auth/v1/token` 同形（`access_token` / `refresh_token` /
+ * `expires_in`），所以这一份解读两处共用。**缺 `access_token` 就判失败** ——
+ * 宁可让调用方看到"续期响应缺少 access_token"，也不要留一个空令牌在盘上。
+ */
 export function interpretRefreshResponse(payload: unknown, now = Date.now()): StoredSession | undefined {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
   const record = payload as Record<string, unknown>;
@@ -104,10 +110,103 @@ export function interpretRefreshResponse(payload: unknown, now = Date.now()): St
   return { accessToken, refreshToken, expiresAt };
 }
 
-export type EnsureSessionOptions = {
-  /** Supabase 地址（形如 `https://.../supabase/<项目 id>`）。 */
+/**
+ * 取续期端点的地址。
+ *
+ * **优先新账户服务的 `/auth/refresh`**：技术方给的新契约是这一条，租户放 body、
+ * 不带 `X-Tenant-ID`（带了会被预检拦）。旧实现直连 Supabase 的
+ * `/auth/v1/token?grant_type=refresh_token`，那是 Supabase 的私有入口，
+ * 一旦后端把刷新逻辑收进账户服务（现在就是这样），继续打它等于绕过后端的
+ * 轮换与审计。
+ *
+ * 只有没配账户地址时才回落到 Supabase 直连 —— 留给私有部署或本地试验。
+ */
+export function refreshEndpoint(input: {
+  accountBaseUrl?: string;
   supabaseUrl: string;
-  /** 公开 anon key，刷新请求要带。 */
+}): { url: string; style: "account" | "supabase" } {
+  const accountBase = input.accountBaseUrl?.trim();
+  if (accountBase) {
+    return { url: `${accountBase.replace(/\/+$/, "")}/auth/refresh`, style: "account" };
+  }
+  return {
+    url: `${input.supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`,
+    style: "supabase"
+  };
+}
+
+/** 从错误响应里取出可读原因。旧接口把说明放在 `error` 字符串里，新接口可能是对象。 */
+async function readRefreshError(response: Response): Promise<string> {
+  const text = await response.text().catch(() => "");
+  if (!text.trim()) return `HTTP ${response.status}`;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const raw = parsed.error ?? parsed.message;
+    if (typeof raw === "string" && raw.trim()) return raw.trim();
+    if (raw && typeof raw === "object") {
+      const message = (raw as { message?: unknown }).message;
+      if (typeof message === "string" && message.trim()) return message.trim();
+    }
+  } catch {
+    /* 不是 JSON 就退回状态码 */
+  }
+  return `HTTP ${response.status}`;
+}
+
+/**
+ * 换一次令牌。两条 REST 入口的**请求体与头部不同**，所以在这里分叉，
+ * 上面的 `ensureSession` 只关心"成功拿到会话 / 失败原因"。
+ */
+async function requestRefresh(input: {
+  fetchImpl: typeof globalThis.fetch;
+  endpoint: { url: string; style: "account" | "supabase" };
+  supabaseAnonKey: string;
+  tenantId?: string;
+  refreshToken: string;
+}): Promise<{ ok: true; session: StoredSession } | { ok: false; message: string }> {
+  const body =
+    input.endpoint.style === "account"
+      ? { refresh_token: input.refreshToken, ...(input.tenantId ? { tenantId: input.tenantId } : {}) }
+      : { refresh_token: input.refreshToken };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "application/json"
+  };
+  // anon key 只给 Supabase 直连用；新账户服务的鉴权靠 body 里的租户与令牌本身
+  if (input.endpoint.style === "supabase" && input.supabaseAnonKey) headers.apikey = input.supabaseAnonKey;
+
+  const response = await input.fetchImpl(input.endpoint.url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000)
+  });
+  if (!response.ok) return { ok: false, message: `续期失败（${await readRefreshError(response)}）` };
+
+  const payload = await response.json().catch(() => null);
+  const session = interpretRefreshResponse(payload);
+  if (!session) {
+    const keys = payload && typeof payload === "object" && !Array.isArray(payload)
+      ? Object.keys(payload as Record<string, unknown>).join(",")
+      : "非对象";
+    return { ok: false, message: `续期响应缺少 access_token（收到字段：${keys}）` };
+  }
+  return { ok: true, session };
+}
+
+export type EnsureSessionOptions = {
+  /**
+   * 账户服务地址（`https://api.sixiai.com.cn`）。
+   *
+   * 给了它就用新契约 `POST /auth/refresh`（租户放 body）；不给才回落到 Supabase 直连。
+   * 见 `refreshEndpoint`。
+   */
+  accountBaseUrl?: string;
+  /** 租户 ID，只有新契约的刷新请求要它（放 body，不是头部）。 */
+  tenantId?: string;
+  /** Supabase 地址（形如 `https://.../supabase/<项目 id>`）。回落路径才用。 */
+  supabaseUrl: string;
+  /** 公开 anon key，只有回落到 Supabase 直连时才带。 */
   anonKey: string;
   /** 配置里手填的访问令牌（可选，用于首次冷启动）。 */
   fallbackAccessToken?: string;
@@ -170,37 +269,31 @@ async function runEnsureSession(options: EnsureSessionOptions): Promise<Supabase
 
   // 2. 有 refresh_token：续期。
   if (stored?.refreshToken) {
-    if (!options.supabaseUrl || !options.anonKey) {
+    const endpoint = refreshEndpoint({
+      ...(options.accountBaseUrl ? { accountBaseUrl: options.accountBaseUrl } : {}),
+      supabaseUrl: options.supabaseUrl
+    });
+    // 新契约不依赖 Supabase 地址/anon key；只有回落到直连时这两项才是必需的。
+    if (endpoint.style === "supabase" && (!options.supabaseUrl || !options.anonKey)) {
       return { ok: false, message: "缺少 Supabase 地址或 anon key，无法续期令牌" };
     }
     try {
-      const url = `${options.supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`;
-      const response = await fetchImpl(url, {
-        method: "POST",
-        headers: {
-          apikey: options.anonKey,
-          "content-type": "application/json",
-          accept: "application/json"
-        },
-        body: JSON.stringify({ refresh_token: stored.refreshToken }),
-        signal: AbortSignal.timeout(15_000)
+      const refreshed = await requestRefresh({
+        fetchImpl,
+        endpoint,
+        supabaseAnonKey: options.anonKey,
+        ...(options.tenantId ? { tenantId: options.tenantId } : {}),
+        refreshToken: stored.refreshToken
       });
-      if (!response.ok) {
-        const message = `续期失败（HTTP ${response.status}）`;
-        options.onRefreshError?.(message);
+      if (!refreshed.ok) {
+        options.onRefreshError?.(refreshed.message);
         // 旧令牌还没真正过期就先用着（只是进了续期窗口，不是不能用）。
         if (!isExpired(stored, now())) return { ok: true, session: stored, refreshed: false };
-        return { ok: false, message };
-      }
-      const next = interpretRefreshResponse(await response.json(), now());
-      if (!next) {
-        const message = "续期响应缺少 access_token";
-        options.onRefreshError?.(message);
-        return { ok: false, message };
+        return { ok: false, message: refreshed.message };
       }
       // **先落盘再返回**：新 refresh_token 一旦没存住，旧的已经作废，下次就续不上了。
-      await saveSession(options.filePath, next);
-      return { ok: true, session: next, refreshed: true };
+      await saveSession(options.filePath, refreshed.session);
+      return { ok: true, session: refreshed.session, refreshed: true };
     } catch (error) {
       const message = `续期异常：${error instanceof Error ? error.message : String(error)}`;
       options.onRefreshError?.(message);
@@ -211,26 +304,28 @@ async function runEnsureSession(options: EnsureSessionOptions): Promise<Supabase
 
   // 3a. 没有持久化会话、但有配置的 refresh_token：先换一次，再把轮换后的值落盘。
   const seed = options.seedRefreshToken?.trim();
-  if (seed && options.supabaseUrl && options.anonKey) {
-    try {
-      const url = `${options.supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`;
-      const response = await fetchImpl(url, {
-        method: "POST",
-        headers: { apikey: options.anonKey, "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ refresh_token: seed }),
-        signal: AbortSignal.timeout(15_000)
-      });
-      if (response.ok) {
-        const next = interpretRefreshResponse(await response.json(), now());
-        if (next) {
-          await saveSession(options.filePath, next);
-          return { ok: true, session: next, refreshed: true };
+  if (seed) {
+    const endpoint = refreshEndpoint({
+      ...(options.accountBaseUrl ? { accountBaseUrl: options.accountBaseUrl } : {}),
+      supabaseUrl: options.supabaseUrl
+    });
+    if (endpoint.style === "account" || (options.supabaseUrl && options.anonKey)) {
+      try {
+        const refreshed = await requestRefresh({
+          fetchImpl,
+          endpoint,
+          supabaseAnonKey: options.anonKey,
+          ...(options.tenantId ? { tenantId: options.tenantId } : {}),
+          refreshToken: seed
+        });
+        if (refreshed.ok) {
+          await saveSession(options.filePath, refreshed.session);
+          return { ok: true, session: refreshed.session, refreshed: true };
         }
-      } else {
-        options.onRefreshError?.(`用配置的刷新令牌换权失败（HTTP ${response.status}）`);
+        options.onRefreshError?.(`用配置的刷新令牌换权失败：${refreshed.message}`);
+      } catch (error) {
+        options.onRefreshError?.(`用配置的刷新令牌换权异常：${error instanceof Error ? error.message : String(error)}`);
       }
-    } catch (error) {
-      options.onRefreshError?.(`用配置的刷新令牌换权异常：${error instanceof Error ? error.message : String(error)}`);
     }
     // 换权失败就继续往下，看手填的访问令牌还能不能用。
   }

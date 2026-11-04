@@ -11,6 +11,7 @@ import {
   readExpiry,
   saveSession,
   sessionFilePath,
+  refreshEndpoint,
   type StoredSession
 } from "../src/session.js";
 
@@ -237,5 +238,68 @@ describe("ensureSession", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.message).toMatch(/accessToken|refresh_token/);
+  });
+});
+
+describe("续期端点", () => {
+  it("配了账户地址就用账户服务的 /auth/refresh", () => {
+    expect(refreshEndpoint({ accountBaseUrl: "https://api.sixiai.com.cn/", supabaseUrl: "https://sb.test" }))
+      .toEqual({ url: "https://api.sixiai.com.cn/auth/refresh", style: "account" });
+  });
+
+  it("没配账户地址才回落 Supabase 直连", () => {
+    expect(refreshEndpoint({ supabaseUrl: "https://pp.test/supabase/p1" }))
+      .toEqual({ url: "https://pp.test/supabase/p1/auth/v1/token?grant_type=refresh_token", style: "supabase" });
+  });
+
+  it("账户续期把租户放 body，且**不带** X-Tenant-ID 与 anon key", async () => {
+    const file = sessionFilePath(await tempDir());
+    await saveSession(file, { accessToken: "old", refreshToken: "r1", expiresAt: Date.now() + 1000 });
+    const next = jwt(Math.floor(Date.now() / 1000) + 3600, "acct");
+    let seen: { url: string; headers: Headers; body: string } | undefined;
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      seen = {
+        url: String(input),
+        headers: new Headers(init?.headers),
+        body: typeof init?.body === "string" ? init.body : ""
+      };
+      return Response.json({ access_token: next, refresh_token: "r2", expires_in: 3600 });
+    });
+
+    const result = await ensureSession({
+      accountBaseUrl: "https://api.sixiai.com.cn",
+      tenantId: "t-1",
+      supabaseUrl: "https://sb.test",
+      anonKey: "anon",
+      filePath: file,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+
+    expect(result).toMatchObject({ ok: true, refreshed: true });
+    expect(seen?.url).toBe("https://api.sixiai.com.cn/auth/refresh");
+    expect(JSON.parse(seen!.body)).toEqual({ refresh_token: "r1", tenantId: "t-1" });
+    // 认证路径的 CORS 白名单只放行 Authorization / Content-Type，附加头部会让预检失败
+    expect(seen!.headers.get("x-tenant-id")).toBeNull();
+    expect(seen!.headers.get("apikey")).toBeNull();
+  });
+
+  it("账户续期失败时把服务端原因带出来，而不是只报状态码", async () => {
+    const file = sessionFilePath(await tempDir());
+    await saveSession(file, { accessToken: "old", refreshToken: "r1", expiresAt: Date.now() - 1000 });
+    const fetchImpl = vi.fn(async () =>
+      Response.json({ error: "Supabase refresh token 无效或已过期。" }, { status: 401 })
+    );
+
+    const result = await ensureSession({
+      accountBaseUrl: "https://api.sixiai.com.cn",
+      supabaseUrl: "https://sb.test",
+      anonKey: "k",
+      filePath: file,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toMatch(/Supabase refresh token 无效或已过期/);
   });
 });
