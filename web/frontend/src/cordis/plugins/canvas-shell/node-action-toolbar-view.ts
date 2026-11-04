@@ -76,6 +76,24 @@ export function resolveContainerFocusEdit(input: {
 }
 
 /**
+ * 模型卡片「查看 3D」的目标：任何自带模型聚焦工作区的**非容器**节点（普通 `model3d` 卡片）。
+ *
+ * 与 `resolveContainerFocusEdit` 分开是因为入口语义不同：容器的「编辑」进的是片场工作区，
+ * 模型卡片进的是模型预览。卡片内交互关闭后（见 `input/model-preview.ts` 的
+ * `CARD_MODEL_INTERACTION`），这是普通模型卡片唯一的查看入口，不提供会变成"只能双击"的隐藏操作。
+ */
+export function resolveModelFocusView(input: {
+  canvas: ServerCanvas | null;
+  nodeId: string;
+  nodeCapabilities: NodeCapabilityResolver;
+}): "model" | null {
+  const { canvas, nodeId, nodeCapabilities } = input;
+  const context = canvas ? nodeCapabilityContext(canvas, nodeId) : null;
+  if (!context || context.node.type === "group") return null;
+  return nodeCapabilities.resolve(context).focus?.kind(context) === "model" ? "model" : null;
+}
+
+/**
  * 依来源节点与**当前画布**判定「下载」是否可用；不可用时给出可读原因。
  *
  * 只读取内容就绪性（3D 有模型脚本、图片/视频有 ready 原资产），**不**检查画布写权限：

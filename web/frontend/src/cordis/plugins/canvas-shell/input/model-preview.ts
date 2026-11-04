@@ -5,11 +5,24 @@ import { clampPitch, isFilmSetObjectModelNode, normalizeYaw } from "@woohaa3/con
 import { clampPreviewDistanceScale } from "../model-preview-focus.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../../services/canvas-state/index.js";
 
+/**
+ * 卡片上的模型交互开关（2026-11-04 起关闭）。
+ *
+ * 卡片里的模型只是缩略图：拖转会被误当成移动卡片，滚轮缩放会让模型在卡片里变形
+ * （表现为模型被拉近拉远、看不出原本比例）。要看模型请选中卡片后点横条上的「查看 3D」，
+ * 全屏预览里旋转/缩放/平移都还在。
+ *
+ * 保留代码与手势机制而不是删除：`model-preview` 手势、命中类型与聚焦工作区共用同一套投影，
+ * 拆掉会牵连命中测试与帧调度。改回 `true` 即恢复卡片内交互。
+ */
+const CARD_MODEL_INTERACTION = false;
+
 export function modelPreviewPointerDown(
   core: InteractionCore,
   event: PointerEvent,
   hit: HitTarget | null,
 ): boolean {
+  if (!CARD_MODEL_INTERACTION) return false;
   if (
     hit?.kind !== "model-preview" ||
     !core.state.selected.includes(hit.nodeId) ||
@@ -63,6 +76,8 @@ export function modelPreviewWheel(
   core: InteractionCore,
   event: WheelEvent,
 ): boolean {
+  // 卡片内滚轮缩放已关闭（见 `CARD_MODEL_INTERACTION`）：滚轮交回画布做视口缩放。
+  if (!CARD_MODEL_INTERACTION) return false;
   // Only selected previews can consume wheel input. Avoid an exact renderer
   // query (a synchronous native IPC round trip on desktop) when none can win.
   if (core.state.selected.length === 0) return false;

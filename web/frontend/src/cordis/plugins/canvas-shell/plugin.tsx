@@ -22,7 +22,7 @@ import { nodeSelectionStore } from "../../services/selection-store.js";
 import { definePlugin } from "../../plugin.js";
 import { NodeDownloadService } from "../../services/node-download.js";
 import { NodeDownloadStatus } from "./node-download-status.js";
-import { resolveNodeDownloadAvailability, resolveContainerFocusEdit, resolveNodeActionToolbarView, resolveSelectionActionToolbarView } from "./node-action-toolbar-view.js";
+import { resolveNodeDownloadAvailability, resolveContainerFocusEdit, resolveModelFocusView, resolveNodeActionToolbarView, resolveSelectionActionToolbarView } from "./node-action-toolbar-view.js";
 import { describeNodeActions, describeSelectionActions, nodeActionSettingsStore, routeNodeActionHit, routeSelectionActionHit } from "./node-action-host.js";
 import { setNodeActionBridge } from "./node-action-bridge.js";
 import type { BevyNodeActionsPresentation } from "@woohaa3/contracts";
@@ -125,6 +125,28 @@ export function canvasShellExtension(): Plugin.Function<void> {
           : { label: "编辑", icon: "edit" as const, enabled: true },
         activate: ({ nodeId }) => {
           const kind = containerFocusEdit(nodeId);
+          if (!kind) return;
+          void ctx.canvasNavigation.requestEnterNodeFocus({ nodeId, kind, owner: "direct" });
+        }
+      });
+      // 模型卡片的「查看 3D」：卡片内交互关闭后（`CARD_MODEL_INTERACTION`），这是普通
+      // `model3d` 卡片唯一的查看入口。与容器的「编辑」分开注册，两者互斥（容器走编辑、
+      // 普通模型卡片走查看），避免同一个节点上出现两个指向同一工作区的按钮。
+      const modelFocusView = (nodeId: string) => resolveModelFocusView({
+        canvas: workingCanvasOf(woohaa3CanvasStore.getState()) ?? null,
+        nodeId,
+        nodeCapabilities: ctx.nodeImplementations
+      });
+      const removeModelFocusViewAction = ctx.slots.register("canvas.node-action", {
+        id: "model-focus-view",
+        owner: CANVAS_SHELL_PLUGIN_ID,
+        order: -20,
+        available: ({ nodeId, nodeType }) => nodeType !== "group" && modelFocusView(nodeId) !== null,
+        describe: ({ nodeId }) => modelFocusView(nodeId) === null
+          ? null
+          : { label: "查看 3D", tone: "primary" as const, enabled: true },
+        activate: ({ nodeId }) => {
+          const kind = modelFocusView(nodeId);
           if (!kind) return;
           void ctx.canvasNavigation.requestEnterNodeFocus({ nodeId, kind, owner: "direct" });
         }
@@ -249,7 +271,7 @@ export function canvasShellExtension(): Plugin.Function<void> {
         render: () => <NodeDownloadStatus service={downloads} />
       });
       ctx.effect(() => () => {
-        offBridge(); offActionSlots(); offSelectionActionSlots(); offDownload(); removeDownloadAction(); removeContainerFocusEditAction(); removeCollapsedGroupAction(); removeExpandedGroupAction(); removeDownloadStatus();
+        offBridge(); offActionSlots(); offSelectionActionSlots(); offDownload(); removeDownloadAction(); removeContainerFocusEditAction(); removeModelFocusViewAction(); removeCollapsedGroupAction(); removeExpandedGroupAction(); removeDownloadStatus();
         nodeActionSettingsStore.close();
         downloads.dispose();
       }, "canvas-shell-downloads");

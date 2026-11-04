@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { builtinNodeCapabilityResolver, createEmptyWoohaa3ServerCanvas, createFilmSetGroupMarker, type ServerCanvas } from "@woohaa3/contracts";
-import { resolveContainerFocusEdit, resolveNodeActionToolbarView, resolveNodeDownloadAvailability } from "./node-action-toolbar-view.js";
+import { resolveContainerFocusEdit, resolveModelFocusView, resolveNodeActionToolbarView, resolveNodeDownloadAvailability } from "./node-action-toolbar-view.js";
 
 const NODES = [
   { id: "img", type: "image" },
@@ -36,6 +36,26 @@ describe("容器编辑入口（片场）", () => {
     expect(edit("plain")).toBeNull();
     expect(edit("model")).toBeNull();
     expect(edit("missing")).toBeNull();
+  });
+});
+
+describe("模型卡片「查看 3D」入口", () => {
+  it("普通模型卡片返回可进入的 kind，容器与无模型节点不返回", () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("model-view");
+    canvas.document.nodes = [
+      { id: "film", type: "group", position: { x: 0, y: 0 }, width: 400, height: 300 },
+      { id: "model", type: "model3d", position: { x: 0, y: 400 } },
+      { id: "img", type: "image", position: { x: 400, y: 400 } }
+    ];
+    canvas.nodeData.film = { filmSetGroup: createFilmSetGroupMarker() } as never;
+    canvas.nodeData.model = { modelSourceKind: "glb", modelAssetId: "a1" } as never;
+    const view = (nodeId: string) => resolveModelFocusView({ canvas, nodeId, nodeCapabilities: builtinNodeCapabilityResolver });
+    expect(view("model")).toBe("model");
+    // 容器走「编辑」，不在这里重复出现。
+    expect(view("film")).toBeNull();
+    // 图片没有模型聚焦工作区。
+    expect(view("img")).toBeNull();
+    expect(view("missing")).toBeNull();
   });
 });
 

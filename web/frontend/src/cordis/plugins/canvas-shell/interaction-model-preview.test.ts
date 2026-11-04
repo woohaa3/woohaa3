@@ -57,73 +57,45 @@ function setup() {
   return { active, fire, point, stopPropagation };
 }
 
-describe("模型预览仅在节点已选中时接管手势", () => {
-  it("首次拖动未选中预览选择并移动节点，不旋转模型", () => {
+describe("卡片内模型交互已关闭（CARD_MODEL_INTERACTION = false）", () => {
+  /**
+   * 卡片里的模型只是缩略图：拖转、滚轮缩放都交回画布（移动/缩放卡片与视口）。
+   * 要看模型请走横条「查看 3D」进聚焦工作区 —— 那里的旋转/缩放/平移不受这里影响。
+   */
+  it("已选中模型拖动移动卡片本身，不旋转模型", () => {
     const { active, fire, point } = setup();
+    active.selectNode("model");
     const start = point();
     const view = { ...modelPreviewStore.get("model") };
     fire("pointerdown", { clientX: start.x, clientY: start.y });
     fire("pointermove", { clientX: start.x + 60, clientY: start.y + 15 });
     fire("pointerup", { clientX: start.x + 60, clientY: start.y + 15 });
     active.flush();
-    expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["model"]);
-    expect(submitted.some((command) => command.type === "node.update")).toBe(
-      true,
-    );
+    expect(submitted.some((command) => command.type === "node.update")).toBe(true);
     expect(modelPreviewStore.get("model")).toEqual(view);
   });
 
-  it("已选中模型拖动只旋转，且消费指针事件", () => {
+  it.each([false, true])("滚轮在卡片上缩放视口，不改模型机位（捏合=%s）", (ctrlKey) => {
     const { active, fire, point, stopPropagation } = setup();
     active.selectNode("model");
-    const start = point(),
-      viewport = active.viewport();
-    const angle = modelPreviewStore.get("model").azimuth;
-    fire("pointerdown", { clientX: start.x, clientY: start.y });
-    fire("pointermove", { clientX: start.x + 60, clientY: start.y + 15 });
-    fire("pointerup", { clientX: start.x + 60, clientY: start.y + 15 });
-    expect(modelPreviewStore.get("model").azimuth).not.toBe(angle);
-    expect(active.viewport()).toEqual(viewport);
-    expect(submitted).toHaveLength(0);
-    expect(stopPropagation).toHaveBeenCalledTimes(3);
-  });
-
-  it.each([false, true])("触摸板手势遵循当前选择（捏合=%s）", (ctrlKey) => {
-    const { active, fire, point, stopPropagation } = setup();
     const initial = { ...modelPreviewStore.get("model") };
-    const wheel = () => {
-      const at = point();
-      fire("wheel", {
-        clientX: at.x,
-        clientY: at.y,
-        deltaX: 12,
-        deltaY: -20,
-        deltaMode: 0,
-        ctrlKey,
-        metaKey: false,
-      });
-    };
     const before = active.viewport();
-    wheel();
+    const at = point();
+    fire("wheel", {
+      clientX: at.x,
+      clientY: at.y,
+      deltaX: 12,
+      deltaY: -20,
+      deltaMode: 0,
+      ctrlKey,
+      metaKey: false,
+    });
     expect(active.viewport()).not.toEqual(before);
     expect(modelPreviewStore.get("model")).toEqual(initial);
     expect(stopPropagation).not.toHaveBeenCalled();
-
-    active.selectNode("model");
-    const selectedViewport = active.viewport();
-    wheel();
-    expect(modelPreviewStore.get("model")).not.toEqual(initial);
-    expect(active.viewport()).toEqual(selectedViewport);
-    expect(stopPropagation).toHaveBeenCalledTimes(1);
-
-    const selectedView = { ...modelPreviewStore.get("model") };
-    active.selectNode("other");
-    wheel();
-    expect(modelPreviewStore.get("model")).toEqual(selectedView);
-    expect(active.viewport()).not.toEqual(selectedViewport);
   });
 
-  it("Shift 点击仍可取消选择，不开启模型旋转", () => {
+  it("Shift 点击取消选择，卡片机位不变", () => {
     const { active, fire, point } = setup();
     active.selectNode("model");
     const at = point(),
@@ -132,19 +104,18 @@ describe("模型预览仅在节点已选中时接管手势", () => {
     fire("pointerup", { clientX: at.x, clientY: at.y, shiftKey: true });
     expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual([]);
     expect(modelPreviewStore.get("model")).toEqual(view);
-    expect(submitted).toHaveLength(0);
   });
 
-  it("手势中取消选择后不继续旋转", () => {
+  it("未选中时拖动选择并移动节点，不旋转模型", () => {
     const { active, fire, point } = setup();
-    active.selectNode("model");
-    const at = point(),
-      view = { ...modelPreviewStore.get("model") };
-    fire("pointerdown", { clientX: at.x, clientY: at.y });
-    active.selectNode("other");
-    fire("pointermove", { clientX: at.x + 50, clientY: at.y });
-    fire("pointerup", { clientX: at.x + 50, clientY: at.y });
+    const start = point();
+    const view = { ...modelPreviewStore.get("model") };
+    fire("pointerdown", { clientX: start.x, clientY: start.y });
+    fire("pointermove", { clientX: start.x + 60, clientY: start.y + 15 });
+    fire("pointerup", { clientX: start.x + 60, clientY: start.y + 15 });
+    active.flush();
+    expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["model"]);
+    expect(submitted.some((command) => command.type === "node.update")).toBe(true);
     expect(modelPreviewStore.get("model")).toEqual(view);
-    expect(submitted).toHaveLength(0);
   });
 });
