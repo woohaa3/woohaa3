@@ -28,6 +28,7 @@ export const ROUTE_ORDER = {
    */
   telemetry: 42,
   /**
+  /**
    * `/api/library/*`：素材库（浏览器扩展保存进来的网页图片，不属于任何画布）。
    *
    * 自己的前缀不在 canvas / task / mcp / media 的匹配范围里，排在哪都不会被截走；
@@ -42,6 +43,11 @@ export const ROUTE_ORDER = {
    * **同样要在 ingress 的 `routeFor` 登记**，否则后端根本收不到请求。
    */
   promptLibrary: 88,
+  /**
+   * `/api/logs/export`：宿主日志导出（change: unify-host-client-logging）。
+   * 与 telemetry 同区间；路径不落进 canvas / task / mcp / media 的宽前缀。
+   */
+  logExport: 43,
   mcpInstallation: 45,
   canvas: 60,
   taskInspection: 65,

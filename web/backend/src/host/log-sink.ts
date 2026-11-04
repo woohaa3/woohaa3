@@ -16,7 +16,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import type { HostLog } from "@woohaa3/contracts";
+import { normalizeLogRecord, type HostLog, type LogRecord } from "@woohaa3/contracts";
 
 /** 日志目录；空串表示显式关闭文件落盘，只写 stderr。 */
 export const LOG_DIR_ENV = "WOOHAA3_LOG_DIR";
@@ -54,6 +54,12 @@ export type HostLogSinkOptions = {
   stderr?: HostLogWriter;
   now?: () => Date;
   limits?: Partial<HostLogLimits>;
+  /** 记录里的 `pid`；缺省 `process.pid`。多个宿主进程写同一目录时用来区分来源。 */
+  pid?: number;
+  /** 记录里的 `runId`；缺省从 `WOOHAA_DESKTOP_RUN_DIR` 末段取。 */
+  runId?: string;
+  /** 记录里的 `runtime`；缺省 `host`。 */
+  runtime?: "host" | "web";
 };
 
 export type HostLogSink = {
@@ -64,6 +70,21 @@ export type HostLogSink = {
   /** 当前分段文件；还没建立目录（尚未写过一条）时为 null。 */
   currentFile(): string | null;
 };
+
+/**
+ * 桌面壳注入的本次运行目录；末段就是这次运行的 `runId`。
+ *
+ * 只用来给记录补一个关联字段，**不改变落盘位置**（宿主日志仍按 `WOOHAA3_LOG_DIR` 走）。
+ */
+const RUN_DIR_ENV = "WOOHAA_DESKTOP_RUN_DIR";
+
+/** 取运行标识：兼容 Windows 分隔符，末段为空时返回 undefined。 */
+export function resolveHostLogRunId(env: Record<string, string | undefined>): string | undefined {
+  const raw = env[RUN_DIR_ENV]?.trim();
+  if (!raw) return undefined;
+  const tail = raw.split(/[\\/]+/).filter((part) => part !== "").pop();
+  return tail === undefined || tail === "" ? undefined : tail;
+}
 
 const LEVEL_RANK: Record<HostLogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 /** Cordis `LoggerLevel`：ERROR=0、INFO=1、WARN=2、DEBUG=3。 */
@@ -251,6 +272,7 @@ export function createHostLogSink(options: HostLogSinkOptions = {}): HostLogSink
   const cwd = options.cwd ?? process.cwd();
   const stderr = options.stderr ?? process.stderr;
   const now = options.now ?? (() => new Date());
+  const nowEnv = options.env ?? process.env;
   const threshold = LEVEL_RANK[resolveHostLogLevel(env)];
   const dir = resolveHostLogDir(env, cwd);
   // A desktop run shares its budget with native/WebView logs and incident samples.
@@ -259,10 +281,34 @@ export function createHostLogSink(options: HostLogSinkOptions = {}): HostLogSink
     : DEFAULT_LOG_LIMITS;
   const writer = dir === null ? null : createFileWriter(dir, { ...defaults, ...options.limits }, stderr, now);
 
+  const pid = options.pid ?? process.pid;
+  const runId = options.runId ?? resolveHostLogRunId(nowEnv);
+  const runtime = options.runtime ?? "host";
+
+  /**
+   * 出口做两件事：**归一成信封**，再写两个落点。
+   *
+   * 归一放在这里而不是 `log` 插件里，是因为只有 sink 拿到 pid / runId / 落盘位置；
+   * 插件只负责补 `module`。调用点（扩展、各 service）仍然传普通对象，签名不变。
+   */
   const log: HostLog = (event) => {
     const level = eventLevel(event);
     if (LEVEL_RANK[level] < threshold) return;
-    const line = `${JSON.stringify({ ...event, time: now().toISOString(), level })}\n`;
+    let line: string;
+    try {
+      const record: LogRecord = normalizeLogRecord({
+        module: typeof event.module === "string" ? event.module : "unknown",
+        runtime,
+        raw: event,
+        now: now().getTime(),
+        pid,
+        ...(runId === undefined ? {} : { runId })
+      });
+      line = `${JSON.stringify(record)}\n`;
+    } catch {
+      // 归一自身失败（理论上不该发生）时退回最小记录，绝不把异常抛回业务。
+      line = `${JSON.stringify({ schema: 1, time: now().toISOString(), level, runtime, module: "unknown", event: "log" })}\n`;
+    }
     try {
       stderr.write(`[backend] ${line}`);
     } catch {

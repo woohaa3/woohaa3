@@ -55,6 +55,7 @@ pub fn startup(
             Ok(update) => update,
             Err(error) => {
                 crate::diagnostics::stderr(format_args!("desktop updater check failed: {error}"));
+                crate::shell_log::warn(&format!("desktop updater check failed: {error}"));
                 if required.load(std::sync::atomic::Ordering::Acquire) {
                     return Err(format!("必须更新，但检查失败: {error}"));
                 }

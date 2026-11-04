@@ -514,7 +514,11 @@ pub fn install(
                 let envelope = match result {
                     Ok(value) => json!({"ok":true,"value":value}),
                     Err(error) => {
-                        crate::diagnostics::event("native-bridge","request-failed",json!({"error":error}));
+                        crate::shell_log::warn(&format!(
+                            "native bridge request failed: {}",
+                            crate::shell_log::clip(&error, 240)
+                        ));
+                        crate::diagnostics::event("native-bridge","request-failed",json!({"error":&error}));
                         json!({"ok":false,"error":error})
                     },
                 };

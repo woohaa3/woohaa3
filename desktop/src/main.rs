@@ -20,6 +20,7 @@ fn fatal(message: &str, code: i32) -> ! {
 }
 
 fn report_fatal(message: &str) {
+    woohaa_desktop_host::shell_log::error(message);
     woohaa_desktop_host::diagnostics::stderr(format_args!("{message}"));
     write_startup_log(message);
     #[cfg(target_os = "windows")]

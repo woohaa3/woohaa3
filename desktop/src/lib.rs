@@ -74,3 +74,6 @@ mod diagnostic_export;
 mod diagnostic_upload;
 
 mod diagnostic_history;
+
+/// 壳层日志装配（官方 `tauri-plugin-log`；change: unify-host-client-logging）。
+pub mod shell_log;
