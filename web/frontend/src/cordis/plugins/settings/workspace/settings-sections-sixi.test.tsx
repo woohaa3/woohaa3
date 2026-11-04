@@ -12,13 +12,19 @@ import { createRoot, type Root } from "react-dom/client";
 import type { SettingsSnapshot } from "@woohaa3/contracts";
 import { AppThemeService } from "../../../services/theme/service.js";
 import { createExtensionManagerFacade } from "../../extension-manager/facade.js";
-import { createBackendSettingsStore, type BackendSettingsRemote } from "../backend-settings-store.js";
+import { createBackendSettingsStore } from "../backend-settings-store.js";
+import { indexPlugins } from "../plugin-groups.js";
+import type { ExtensionManagerView } from "../../extension-manager/contract.js";
 import { SettingsWorkspace } from "./settings-workspace.js";
 import {
   SIXI_SETTINGS_DEFAULT_SECTION,
   SIXI_SETTINGS_SECTIONS,
   isSixiSettingsSectionVisible
 } from "./settings-sections-sixi.js";
+import {
+  SIXI_HIDDEN_SETTINGS_PLUGINS,
+  isSixiHiddenSettingsPlugin
+} from "./settings-plugins-sixi.js";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -36,13 +42,47 @@ const SNAPSHOT = {
   extensionPoints: { storage: [], exposer: [] }
 } as unknown as SettingsSnapshot;
 
-const remote: BackendSettingsRemote = {
-  fetchSnapshot: async () => ({ ok: true, snapshot: SNAPSHOT }),
-  write: async () => ({ ok: true, snapshot: SNAPSHOT })
-};
+/**
+ * 带 ppserver-provider 的快照：它在发行版里必须被装配（生图链路要靠它），
+ * 但设置列表不该出现这一行。
+ */
+const SNAPSHOT_WITH_PPSERVER = {
+  ...SNAPSHOT,
+  installedExtensions: [
+    {
+      id: "ppserver-provider",
+      label: "ppserver",
+      description: "ppserver 任务路由器。",
+      directory: "/extensions/ppserver-provider",
+      version: "1.0.0",
+      writable: false
+    },
+    {
+      id: "prompt-skills",
+      label: "提示词快捷改写",
+      description: "执行面板的快捷改写。",
+      directory: "/extensions/prompt-skills",
+      version: "0.1.0",
+      writable: false
+    }
+  ],
+  plugins: [
+    { id: "ppserver-provider", label: "ppserver", description: "", layer: "extension", settingCount: 6, siteManaged: false, provider: true },
+    { id: "prompt-skills", label: "提示词快捷改写", description: "", layer: "extension", settingCount: 0, siteManaged: false, provider: false }
+  ]
+} as unknown as SettingsSnapshot;
 
-async function renderDefault(initialSection?: "backend" | "plugins" | "appearance" | "notifications" | "runtimes" | "about") {
-  const backend = createBackendSettingsStore(remote);
+async function renderDefault(
+  initialSection?: "backend" | "plugins" | "appearance" | "notifications" | "runtimes" | "about",
+  snapshot: SettingsSnapshot = SNAPSHOT
+) {
+  const backend = createBackendSettingsStore({
+    fetchSnapshot: async () => ({ ok: true, snapshot }),
+    write: async () => ({ ok: true, snapshot })
+  });
+  // 快照是异步读的（`SettingsWorkspace` 挂载后自己 `load()`），断言前必须先等它落地，
+  // 否则看到的是空列表，测出来的「没有 ppserver」是假的。
+  await backend.load();
   const extensions = createExtensionManagerFacade({
     catalog: [],
     ids: [],
@@ -73,7 +113,40 @@ const navIds = (container: Element) =>
     node.getAttribute("data-testid")!.replace("settings-nav-", "")
   );
 
+/** 没有站点/浏览器行的插件管理快照：这里只关心「已安装清单 → 插件行」这一步。 */
+const emptyManagerView = (): ExtensionManagerView =>
+  ({
+    rows: [],
+    siteRows: [],
+    modelRows: [],
+    siteManageable: false,
+    siteError: null,
+    pending: false,
+    persistenceMessage: null,
+    error: null
+  }) as ExtensionManagerView;
+
 describe("四喜发行形态的设置分区", () => {
+  it("ppserver-provider 不出现在插件列表里（装配与生成链路不受影响）", async () => {
+    expect([...SIXI_HIDDEN_SETTINGS_PLUGINS]).toEqual(["ppserver-provider"]);
+    expect(isSixiHiddenSettingsPlugin("ppserver-provider")).toBe(true);
+    expect(isSixiHiddenSettingsPlugin("prompt-skills")).toBe(false);
+
+    // 直接测投影函数：列表页的分组在「非可操作」分区里默认收起，行不会渲染，
+    // 用 DOM 断言只能证明「收起后看不见」，证明不了过滤本身。
+    const index = indexPlugins(SNAPSHOT_WITH_PPSERVER, emptyManagerView());
+    const ids = index.groups.map((group) => group.id);
+    expect(ids).not.toContain("ppserver-provider");
+    // 同一份快照里的其他插件照常保留：过滤只针对清单内的 id，不是「有一条就全空」。
+    expect(ids).toContain("prompt-skills");
+  });
+
+  it("ppserver 那一行在插件配置页面上也读不到", async () => {
+    const container = await renderDefault("plugins", SNAPSHOT_WITH_PPSERVER);
+    expect(container.querySelector('[data-testid="settings-plugin-ppserver-provider"]')).toBeNull();
+    expect(container.textContent).not.toContain("ppserver");
+  });
+
   it("分区清单只含插件配置与外观，默认落在插件配置", () => {
     expect([...SIXI_SETTINGS_SECTIONS]).toEqual(["plugins", "appearance"]);
     expect(SIXI_SETTINGS_DEFAULT_SECTION).toBe("plugins");

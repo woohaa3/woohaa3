@@ -10,6 +10,10 @@
  * 插件管理 facade 的行当作额外种子传进来，插件清单才是完整的。
  */
 import {
+  SIXI_HIDDEN_SETTINGS_PLUGINS,
+  isSixiHiddenSettingsPlugin
+} from "./workspace/settings-plugins-sixi.js";
+import {
   PROVIDER_SETTING_PREFIX,
   providerIdFromConfigPrefix,
   type PluginIcon,
@@ -261,14 +265,21 @@ export function indexPlugins(snapshot: SettingsSnapshot | null, view: ExtensionM
     if (!group.description) group.description = row.description;
     if (!group.icon && row.icon) group.icon = row.icon;
   }
+  // 四喜发行形态：把不该给客户看的插件行摘掉（清单在 `workspace/settings-plugins-sixi.ts`）。
+  // 只影响设置列表与它的详情入口；装配、`/api/settings` 快照与生成链路都不经过这里。
+  // 被摘掉的 Provider 的模型行随之不入索引（没有卡片可挂），四喜的模型选择读的是
+  // `hostGenerateModels.ts` 那条任务目录，与本索引无关。
+  const visibleGroups = SIXI_HIDDEN_SETTINGS_PLUGINS.length === 0
+    ? groups
+    : groups.filter((group) => !isSixiHiddenSettingsPlugin(group.id));
   const models = new Map<string, ExtensionModelRow[]>();
   for (const row of view.modelRows) {
     // 归属顺序：先按 Provider id（Provider 类插件照旧），再回落到「提供该模型的插件 id」。
     // 远端 Provider（providerId=remote-server）没有 providers.* 配置段，providerId 为 null，
     // 只靠 providerId 会让它的模型整片丢掉；旧宿主没有 extensionId，回落分支自然不生效。
     const group =
-      groups.find((candidate) => candidate.providerId !== null && candidate.providerId === row.providerId) ??
-      (row.extensionId !== undefined ? groups.find((candidate) => candidate.id === row.extensionId) : undefined);
+      visibleGroups.find((candidate) => candidate.providerId !== null && candidate.providerId === row.providerId) ??
+      (row.extensionId !== undefined ? visibleGroups.find((candidate) => candidate.id === row.extensionId) : undefined);
     // Provider 已停用（不在已安装集合里是卸载，这里是不再有对应行）时模型不另立分组：
     // 服务端仍会用 `executable: false` 报告撤出，行消失即代表该 Provider 不再可用。
     if (!group) continue;
@@ -276,7 +287,7 @@ export function indexPlugins(snapshot: SettingsSnapshot | null, view: ExtensionM
     list.push(row);
     models.set(group.id, list);
   }
-  return { host: partition.host, groups, siteRows, browserRows, models, installedIds };
+  return { host: partition.host, groups: visibleGroups, siteRows, browserRows, models, installedIds };
 }
 
 export function modelsOf(index: PluginViewIndex, group: PluginSettingsGroup): readonly ExtensionModelRow[] {
