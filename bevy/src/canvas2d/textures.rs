@@ -382,4 +382,33 @@ mod tests {
         let frame_pixels = images.get(&private).unwrap().data.clone().unwrap();
         assert_eq!(frame_pixels, vec![0u8, 255, 0, 255, 0, 255, 0, 255]);
     }
+
+    /// 每应用一批纹理都必须发出「已应用」回执：前端靠它结束卡片的「加载中」，
+    /// 缺了这条调用图会正常显示、提示却永远不消失
+    /// （共享世界合并 9b0ec243 曾把这条调用删掉，视觉上就是所有图片卡停在同一状态）。
+    #[test]
+    fn applied_texture_emits_receipt_for_frontend_loading_state() {
+        let _guard = crate::bridge::texture_receipts::test_lock();
+        let mut world = World::new();
+        let scene = scene();
+        world.insert_resource(CurrentScene(scene.clone()));
+        world.insert_resource(NodeIndex::default());
+        world.resource_mut::<NodeIndex>().rebuild(&scene);
+        world.insert_resource(TextureStore::default());
+        world.insert_resource(TextureBatch::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.spawn(CanvasNodeId("img".into()));
+        world.resource_mut::<TextureBatch>().0.insert(
+            "img".into(),
+            (2, 1, vec![9u8, 9, 9, 255, 9, 9, 9, 255], Some("receipt-frontend".into())),
+        );
+        // 排空开始前的遗留条目，断言只认本用例写入的内容身份。
+        let _ = crate::bridge::texture_receipts::take();
+        world.run_system_once(sync_textures).unwrap();
+        let receipts = crate::bridge::texture_receipts::take();
+        assert!(
+            receipts.contains("\"node\",\"img\",2,1,\"receipt-frontend\""),
+            "纹理同步后未发出前端可消费的回执：{receipts}"
+        );
+    }
 }
