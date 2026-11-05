@@ -10,7 +10,7 @@
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import {
   beginWorldGroundDragMany,
-  planWorldGroundMove,
+  planWorldGroundMoveWithAnimationParts,
   worldGroundDelta,
   type WorldGroundDragStart
 } from "./world-ground-drag.js";
@@ -94,13 +94,48 @@ export function createWorldGroundGestureFamily(core: InteractionCore): WorldGrou
         )
       : null;
     clearPreview();
-    const commands = planWorldGroundMove(gesture.start, delta);
-    if (!commands) {
+    const plan = planWorldGroundMoveWithAnimationParts(
+      workingCanvasOf(woohaa3CanvasStore.getState()),
+      gesture.start,
+      delta,
+      core.options.getWorldAnimationTimes?.()
+    );
+    if (!plan) {
       schedule("world-ground-preview");
       return false;
     }
     gesture.delta = delta;
-    submit(commands);
+    if (!plan.animated) {
+      submit(plan.forward);
+      return true;
+    }
+    // 动画拖动同时改 sceneArea；绕开只认识少数 nodeData 字段的编辑计划，直接提交整批，
+    // 并用外部撤销条目保证一次撤销能同时恢复基础变换与动画轨道。
+    const session = core.options.getSession();
+    if (!session) {
+      submit(plan.forward);
+      return true;
+    }
+    const commandId = `web-world-ground-animation-${core.nextSeq()}`;
+    const result = session.submitCommands(plan.forward, commandId);
+    if (!result.ok) {
+      schedule("world-ground-preview");
+      return false;
+    }
+    const replay = (commands: typeof plan.forward) => {
+      const id = `web-world-ground-animation-${core.nextSeq()}`;
+      const replayResult = session.submitCommands(commands, id);
+      if (!replayResult.ok) return Promise.resolve({ ok: false as const, reason: replayResult.reason });
+      return replayResult.handle.settled.then(settled => settled.state === "committed"
+        ? { ok: true as const }
+        : { ok: false as const, reason: settled.error ?? "移动未提交" });
+    };
+    core.options.recordExternal?.({
+      id: commandId,
+      label: "移动世界对象",
+      undo: () => replay(plan.inverse),
+      redo: () => replay(plan.forward)
+    });
     return true;
   };
 

@@ -5,10 +5,11 @@
  * 姿态与实例身份；无位移不提交（不产生空撤销记录）。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, createWorldAnimationScript, decodeSceneAreaData, executeWorldAnimationScript, type ServerCanvas } from "@woohaa3/contracts";
 import {
   beginWorldGroundDrag,
   beginWorldGroundDragMany,
+  planWorldGroundMoveWithAnimation,
   isWorldDragTarget,
   planWorldGroundMove,
   worldGroundDelta,
@@ -140,6 +141,54 @@ describe("世界模型地面拖动", () => {
       } } }
     } as ServerCanvas;
     expect(worldGroundDelta(start, changed, { u: 1, v: 1 })).toBeNull();
+  });
+
+  it("拖动动画实例时同步平移脚本的位置轨道", () => {
+    const base = createEmptyWoohaa3ServerCanvas("c1");
+    const animationScript = createWorldAnimationScript({
+      script: 'motion.instance.tween("inst-1", { property: "position", startTime: 0, endTime: 4, from: [2, -3, 1.5], to: [4, -3, 1.5], easing: "linear" });',
+      duration: 4,
+      loop: false,
+      revision: 3
+    });
+    const canvas = {
+      ...base,
+      revision: 1,
+      document: { ...base.document, nodes: [
+        { id: "m1", type: "model3d", position: { x: 0, y: 0 } },
+        { id: "area", type: "scene-area", position: { x: 0, y: 0 } }
+      ] },
+      nodeData: {
+        m1: { sharedWorldInstance: instance },
+        area: { title: "导演区", sceneArea: {
+          kind: "scene-area", version: "shared-world-v1", areaId: "a1", scopeVersion: "s1",
+          bounds: { min: { u: -10, v: -10 }, max: { u: 10, v: 10 } },
+          animationScript
+        } }
+      }
+    } as unknown as ServerCanvas;
+    const start = beginWorldGroundDrag(canvas, "m1", { u: 0, v: 0 })!;
+    const commands = planWorldGroundMoveWithAnimation(canvas, start, { u: 1, v: 2 }, new Map([["area", 2]]))!;
+    expect(commands).toHaveLength(2);
+    const instancePatch = commands.find(command => command.type === "nodeData.patch" && command.nodeId === "m1") as unknown as {
+      value: { sharedWorldInstance: { transform: { position: { u: number; v: number; h: number } } } };
+    };
+    // t=2 的采样位置是 [3,-3,1.5]；拖动后基础变换应落到可见位置 + delta，而不是旧基础 + delta。
+    expect(instancePatch.value.sharedWorldInstance.transform.position).toEqual({ u: 4, v: -1, h: 1.5 });
+    const areaPatch = commands.find(command => command.type === "nodeData.patch" && command.nodeId === "area") as unknown as {
+      value: { sceneArea: { animationScript: { script: string; duration: number; loop: boolean; revision: number } } };
+    };
+    const decoded = decodeSceneAreaData(areaPatch.value.sceneArea);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    const nextScript = decoded.value.animationScript!;
+    expect(nextScript.revision).toBe(4);
+    const executed = executeWorldAnimationScript(nextScript.script, { duration: nextScript.duration, loop: nextScript.loop });
+    expect(executed.ok).toBe(true);
+    if (!executed.ok) return;
+    const track = executed.ir.instanceTracks.find(item => item.targetId === "inst-1" && item.property === "position")!;
+    expect(track.from).toEqual([3, -1, 1.5]);
+    expect(track.to).toEqual([5, -1, 1.5]);
   });
 
   it("不影响其它 nodeData 字段（脚本、内容身份等原样保留在 patch 之外）", () => {
