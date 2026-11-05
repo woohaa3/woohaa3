@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
 import {
   beginWorldGroundDrag,
+  beginWorldGroundDragMany,
   isWorldDragTarget,
   planWorldGroundMove,
   worldGroundDelta,
@@ -57,7 +58,7 @@ describe("世界模型地面拖动", () => {
     expect(delta).toEqual({ u: 2.5, v: -3 });
     const commands = planWorldGroundMove(start, delta);
     expect(commands).toHaveLength(1);
-    const command = commands![0] as { type: string; nodeId: string; value: { sharedWorldInstance: typeof instance } };
+    const command = commands![0] as unknown as { type: string; nodeId: string; value: { sharedWorldInstance: typeof instance } };
     expect(command.type).toBe("nodeData.patch");
     expect(command.nodeId).toBe("m1");
     const moved = command.value.sharedWorldInstance;
@@ -84,6 +85,60 @@ describe("世界模型地面拖动", () => {
       ...instance,
       transform: { ...instance.transform, position: { u: 9, v: 9, h: 9 } }
     });
+    expect(worldGroundDelta(start, changed, { u: 1, v: 1 })).toBeNull();
+  });
+
+  it("多选时同一地面增量应用到全部世界实例", () => {
+    const base = createEmptyWoohaa3ServerCanvas("c1");
+    const second = {
+      ...instance,
+      instanceId: "inst-2",
+      transform: { ...instance.transform, position: { u: -1, v: 2, h: 0.5 } }
+    };
+    const canvas = {
+      ...base,
+      revision: 1,
+      document: { ...base.document, nodes: [
+        { id: "m1", type: "model3d", position: { x: 0, y: 0 } },
+        { id: "m2", type: "model3d", position: { x: 200, y: 0 } }
+      ] },
+      nodeData: { m1: { sharedWorldInstance: instance }, m2: { sharedWorldInstance: second } }
+    } as ServerCanvas;
+    const start = beginWorldGroundDragMany(canvas, ["m1", "m2"], "m1", { u: 0, v: 0 })!;
+    expect(start.targets).toHaveLength(2);
+    const delta = worldGroundDelta(start, canvas, { u: 1, v: 2 });
+    expect(delta).toEqual({ u: 1, v: 2 });
+    const commands = planWorldGroundMove(start, delta)!;
+    expect(commands).toHaveLength(2);
+    const positions = commands.map(command => {
+      const value = (command as unknown as { value: { sharedWorldInstance: typeof instance } }).value.sharedWorldInstance;
+      return [value.instanceId, value.transform.position];
+    });
+    expect(positions).toEqual([
+      ["inst-1", { u: 3, v: -1, h: 1.5 }],
+      ["inst-2", { u: 0, v: 4, h: 0.5 }]
+    ]);
+  });
+
+  it("多选拖动中任一实例被外部改写时整批取消", () => {
+    const base = createEmptyWoohaa3ServerCanvas("c1");
+    const second = { ...instance, instanceId: "inst-2" };
+    const canvas = {
+      ...base,
+      revision: 1,
+      document: { ...base.document, nodes: [
+        { id: "m1", type: "model3d", position: { x: 0, y: 0 } },
+        { id: "m2", type: "model3d", position: { x: 200, y: 0 } }
+      ] },
+      nodeData: { m1: { sharedWorldInstance: instance }, m2: { sharedWorldInstance: second } }
+    } as ServerCanvas;
+    const start = beginWorldGroundDragMany(canvas, ["m1", "m2"], "m1", { u: 0, v: 0 })!;
+    const changed = {
+      ...canvas,
+      nodeData: { ...canvas.nodeData, m2: { sharedWorldInstance: {
+        ...second, transform: { ...second.transform, position: { u: 9, v: 9, h: 9 } }
+      } } }
+    } as ServerCanvas;
     expect(worldGroundDelta(start, changed, { u: 1, v: 1 })).toBeNull();
   });
 

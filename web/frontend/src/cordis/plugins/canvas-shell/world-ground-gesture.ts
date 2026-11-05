@@ -9,7 +9,7 @@
  */
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import {
-  beginWorldGroundDrag,
+  beginWorldGroundDragMany,
   planWorldGroundMove,
   worldGroundDelta,
   type WorldGroundDragStart
@@ -38,8 +38,12 @@ export function createWorldGroundGestureFamily(core: InteractionCore): WorldGrou
 
   const begin = (event: PointerEvent, nodeId: string) => {
     if (!writable()) return null;
-    const start = beginWorldGroundDrag(
-      workingCanvasOf(woohaa3CanvasStore.getState()),
+    const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+    // 点击已在选区内的世界模型时，整个选区的世界实例一起移动；未选中则只选/拖这一个。
+    const selected = state.selected.includes(nodeId) ? state.selected : [nodeId];
+    const start = beginWorldGroundDragMany(
+      canvas,
+      selected,
       nodeId,
       core.queryWorldGround({ x: event.clientX, y: event.clientY })
     );
@@ -70,7 +74,8 @@ export function createWorldGroundGestureFamily(core: InteractionCore): WorldGrou
       return false;
     }
     gesture.delta = delta;
-    core.setWorldGroundPreview(gesture.start.nodeId, delta);
+    // 同一地面增量写到本轮全部目标；预览按 nodeId 复用导演区搬动的同一通道。
+    for (const target of gesture.start.targets) core.setWorldGroundPreview(target.nodeId, delta);
     schedule("world-ground-preview");
     return true;
   };
