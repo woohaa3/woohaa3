@@ -16,7 +16,7 @@ function harness({ fps = 111, missing = false, restart = false, hidden = false }
       renderFrames: now, renderMs: now * 3
     } },
     models: { roots: 0, modelEntities: 0 },
-    previews: { active: 0 }, shotPreviews: { active: 0 }, pacing: "active:scene"
+    previews: { active: 0 }, pacing: "active:scene"
   };
   const runtime = {
     isReady: () => true,

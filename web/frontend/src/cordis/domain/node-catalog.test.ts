@@ -28,7 +28,7 @@ describe("node-catalog", () => {
     ]);
     expect(findNodeTemplate("model")?.nodeType).toBe("model3d");
     expect(findNodeTemplate("model3d")?.nodeType).toBe("model3d");
-    // 片场由 film-set 扩展经 canvas.node-template 贡献默认镜头/片段。
+    // 复合资产由扩展经 canvas.node-template 贡献。
     expect(findNodeTemplate("composite-asset")).toBeNull();
   });
 

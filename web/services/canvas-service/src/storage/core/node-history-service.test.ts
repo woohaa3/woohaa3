@@ -40,9 +40,7 @@ function fakeRoom(canvas: ServerCanvas): CanvasRoom & { canvas: ServerCanvas } {
 function canvasWithNode(type: string, data: Record<string, unknown> = {}): ServerCanvas {
   const base = createEmptyWoohaa3ServerCanvas(CANVAS, NOW);
   // 自包含 3D 节点必须携带完整本地模型定义（命令边界校验要求）；测试用最小合法默认值。
-  // 片场（composite-asset + extensionId="film-set"）是 items-only，不写顶层模型字段。
-  const filmSet = (type === "composite-asset" && (data.extensionId === "film-set" || data.filmSetContent !== undefined));
-  const selfContained: Record<string, unknown> = (type === "model3d" || (type === "composite-asset" && !filmSet))
+  const selfContained: Record<string, unknown> = type === "model3d"
     ? {
         modelScript: "build(default)",
         modelScriptLanguage: "javascript",

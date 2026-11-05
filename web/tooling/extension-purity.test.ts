@@ -229,19 +229,19 @@ describe("扩展纯粹性：框架不登记具体插件", () => {
 });
 
 describe("字段级扩展纯粹性", () => {
-  const literals = ["filmSetContent", "film-set"];
+  const literals = ["sampleContent", "sample-extension"];
 
   it("新增耦合失败，注释和更长标识符不算", () => {
-    expect(findContentLiterals(`const field = "filmSetContent";`, literals)).toEqual(["filmSetContent"]);
-    expect(findContentLiterals(`// "filmSetContent"\nconst id = "film-set-shot";`, literals)).toEqual([]);
-    expect(diffContentCoupling([{ file: "web/contracts/src/new.ts", literals: ["filmSetContent"] }], []).unexpected).toEqual([
-      "web/contracts/src/new.ts → filmSetContent"
+    expect(findContentLiterals(`const field = "sampleContent";`, literals)).toEqual(["sampleContent"]);
+    expect(findContentLiterals(`// "sampleContent"\nconst id = "sample-extension-shot";`, literals)).toEqual([]);
+    expect(diffContentCoupling([{ file: "web/contracts/src/new.ts", literals: ["sampleContent"] }], []).unexpected).toEqual([
+      "web/contracts/src/new.ts → sampleContent"
     ]);
   });
 
   it("清理后残留的 allowlist 条目失败", () => {
-    expect(diffContentCoupling([], [{ file: "web/contracts/src/gone.ts", literals: ["filmSetContent"], stage: "node-data", reason: "已清理" }]).stale).toEqual([
-      "web/contracts/src/gone.ts 已不再出现 filmSetContent"
+    expect(diffContentCoupling([], [{ file: "web/contracts/src/gone.ts", literals: ["sampleContent"], stage: "node-data", reason: "已清理" }]).stale).toEqual([
+      "web/contracts/src/gone.ts 已不再出现 sampleContent"
     ]);
   });
 

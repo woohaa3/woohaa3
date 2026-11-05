@@ -184,7 +184,7 @@ test("preflightDirectory：受管禁止项 bootstrap / canvasContent / 市场来
   const cases = [
     [{ descriptor: { bootstrap: { module: "./bootstrap", export: "b" } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:bootstrap"],
     [{ descriptor: { canvasContent: { module: "./backend", factory: "c" } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:canvasContent"],
-    [{ descriptor: { content: { ownedFields: ["filmSetContent"] } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:content"],
+    [{ descriptor: { content: { ownedFields: ["sampleContent"] } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:content"],
     [{ descriptor: { hostPlugin: { module: "./backend", factory: "s", features: ["marketplace-source"] } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:hostPlugin.features"],
     [{ descriptor: { migrate: { module: "./backend", export: "m" } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:migrate"],
     [{ descriptor: { required: true } }, "MARKETPLACE_FORBIDDEN_DECLARATION:required"],

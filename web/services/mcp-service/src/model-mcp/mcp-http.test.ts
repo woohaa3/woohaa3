@@ -276,7 +276,6 @@ describe("模型脚本指南的朝向约定（change: model-orientation-conventi
     expect(text).toContain("motion.model.keyframes");
     expect(text).toContain("同一目标同一属性");
     expect(text).toContain("严禁按时间复制人物");
-    expect(text).toContain("mutate_film_set_item");
     // rotation 使用角度制与固定 Y-X-Z 顺序。
     expect(text).toContain("角度制");
     expect(text).toContain("Y-X-Z");

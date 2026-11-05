@@ -70,7 +70,8 @@ const GLUE_POSTPROCESS_VERSION = "3";
 // change: 2026-10-28-fix-stuck-shot-capture-pin —— 新增 cancel_shot_capture 导出，模板版本提升。
 // change: 2026-11-04-page-render-world-capture —— 新增 request_world_capture / poll_world_capture
 // 导出，模板版本提升使缓存失效。
-const DTS_TEMPLATE_VERSION = "15";
+// 2026-11-05：移除随片场组下线的 query_composite_asset_* / overview_cache_* 声明。
+const DTS_TEMPLATE_VERSION = "16";
 
 const OUT_NAME = "woohaa_bevy_canvas";
 const glueName = `${OUT_NAME}.js`;
@@ -98,6 +99,9 @@ export function set_scene(json: string): number;
 export function set_texture(id: string, width: number, height: number, rgba: Uint8Array, content: string): void;
 export function set_image_focus_details(manifest:string,pixels:Uint8Array):void;
 export function set_model_media_texture(id: string, width: number, height: number, rgba: Uint8Array): void;
+export function poll_texture_receipts(): string;
+export function set_resource_states(json: string): number;
+export function set_idle_frame_pacing(enabled?: boolean): void;
 export function request_shot_capture(json: string): void;
 export function poll_shot_capture(requestId: number, generation: number): Uint8Array;
 export function cancel_shot_capture(requestId: number): void;
@@ -111,11 +115,8 @@ export function query_point_hit(json: string): string;
 export function query_marquee(json: string): string;
 export function query_probe(json: string): string;
 export function query_drop_target(json: string): string;
-export function query_composite_asset_scopes(json: string): string;
 export function query_model_pick(json: string): string;
 export function query_model_marquee(json: string): string;
-export function query_composite_asset_item_pick(json: string): string;
-export function query_composite_asset_item_bounds(json: string): string;
 export function query_gizmo_hit(json: string): string;
 export function prepare_and_register_model_resource(json: string): string;
 export function declare_model_resource(json: string): string;

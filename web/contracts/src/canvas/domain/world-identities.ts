@@ -153,7 +153,7 @@ export function validateWorldIdentities(nodes: readonly { id: string; type: stri
       used.add(id); ids.set(key, used);
       if (key === "workflowGroup2d") {
         for (const member of value.memberNodeIds as string[]) {
-          if (!types.has(member) || ["workflow-group-2d", "group", "film-set-shot-preview"].includes(types.get(member)!)) return `Invalid group member: ${member}`;
+          if (!types.has(member) || types.get(member) === "workflow-group-2d") return `Invalid group member: ${member}`;
         }
       }
     }

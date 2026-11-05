@@ -12,55 +12,55 @@ import { normalizeCanvas } from "./domain/normalization.js";
 import { sanitizeNodeDataForClipboard } from "./domain/runtime-node-data.js";
 import { buildCanvasRenderScene } from "./render-scene/scene-builder.js";
 
-const film: ContentContribution = { extensionId: "film-set" };
+const film: ContentContribution = { extensionId: "demo-extension" };
 const furnace: ContentContribution = { extensionId: "game-furnace" };
 
 describe("content contribution registry", () => {
   it("rejects a duplicate extension id and keeps the first contribution", () => {
     const registry = new ContentContributionRegistry();
     registry.register(film);
-    expect(() => registry.register({ extensionId: "film-set" })).toThrow(/content-registration-conflict/);
-    expect(registry.resolve("film-set")).toBe(film);
+    expect(() => registry.register({ extensionId: "demo-extension" })).toThrow(/content-registration-conflict/);
+    expect(registry.resolve("demo-extension")).toBe(film);
     expect(() => registry.register({ extensionId: "Film_Set" })).toThrow(/content-registration-invalid/);
   });
 
   it("replaces nothing when the same disposer runs again after a new registration", () => {
     const registry = new ContentContributionRegistry();
     const release = registry.register(film);
-    expect(registry.resolve("film-set")).toBe(film);
+    expect(registry.resolve("demo-extension")).toBe(film);
     release();
     release();
-    const next: ContentContribution = { extensionId: "film-set" };
+    const next: ContentContribution = { extensionId: "demo-extension" };
     registry.register(next);
     release();
-    expect(registry.resolve("film-set")).toBe(next);
+    expect(registry.resolve("demo-extension")).toBe(next);
   });
 
   it("rolls back an activation in reverse order when a later contribution conflicts", () => {
     const registry = new ContentContributionRegistry();
-    expect(() => registry.activate([film, furnace, { extensionId: "film-set" }])).toThrow(/content-registration-conflict/);
+    expect(() => registry.activate([film, furnace, { extensionId: "demo-extension" }])).toThrow(/content-registration-conflict/);
     expect(registry.implementations()).toEqual([]);
-    expect(registry.resolve("film-set")).toBeNull();
+    expect(registry.resolve("demo-extension")).toBeNull();
     expect(registry.resolve("game-furnace")).toBeNull();
   });
 
   it("does not return a cached contribution after release or before the next registration", () => {
     const registry = new ContentContributionRegistry();
-    expect(registry.resolve("film-set")).toBeNull();
+    expect(registry.resolve("demo-extension")).toBeNull();
     const release = registry.register(film);
-    expect(registry.resolve("film-set")).toBe(film);
+    expect(registry.resolve("demo-extension")).toBe(film);
     release();
-    expect(registry.resolve("film-set")).toBeNull();
-    const next: ContentContribution = { extensionId: "film-set" };
+    expect(registry.resolve("demo-extension")).toBeNull();
+    const next: ContentContribution = { extensionId: "demo-extension" };
     registry.register(next);
-    expect(registry.resolve("film-set")).toBe(next);
-    expect(registry.resolve("film-set")).not.toBe(film);
+    expect(registry.resolve("demo-extension")).toBe(next);
+    expect(registry.resolve("demo-extension")).not.toBe(film);
   });
 
   it("rejects a later contribution that reuses a tool name or route", () => {
     const registry = new ContentContributionRegistry();
     registry.register({
-      extensionId: "film-set",
+      extensionId: "demo-extension",
       mcpTools: [{ name: "import_content", title: "导入", description: "导入", inputSchema: {}, handle: () => ({ ok: true }) }],
       routes: [{ method: "POST", path: ["import"], handle: () => ({ status: 204 }) }]
     });
@@ -73,7 +73,7 @@ describe("content contribution registry", () => {
       routes: [{ method: "POST", path: ["import"], handle: () => ({ status: 204 }) }]
     })).toThrow(/content-route-conflict/);
     expect(registry.resolve("game-furnace")).toBeNull();
-    expect(registry.resolve("film-set")?.extensionId).toBe("film-set");
+    expect(registry.resolve("demo-extension")?.extensionId).toBe("demo-extension");
   });
 });
 
@@ -81,7 +81,7 @@ describe("content route dispatch", () => {
   const registry = () => {
     const routes = new ContentContributionRegistry();
     routes.register({
-      extensionId: "film-set",
+      extensionId: "demo-extension",
       routes: [{
         method: "POST",
         path: ["import"],
@@ -98,18 +98,18 @@ describe("content route dispatch", () => {
   it("未注册路径返回 404，冲突结果保持 409", async () => {
     const routes = registry();
     expect(await dispatchContentRoute(routes, { method: "POST", extensionId: "missing", path: ["import"], body: {}, authorized: true })).toEqual({ status: 404, body: { code: "content-route-not-found" } });
-    expect(await dispatchContentRoute(routes, { method: "POST", extensionId: "film-set", path: ["import"], body: { conflict: true }, authorized: true })).toEqual({ status: 409, body: { code: "conflict" } });
+    expect(await dispatchContentRoute(routes, { method: "POST", extensionId: "demo-extension", path: ["import"], body: { conflict: true }, authorized: true })).toEqual({ status: 409, body: { code: "conflict" } });
   });
 
   it("未授权、处理失败和超时都是稳定状态，不带出异常文本", async () => {
     const routes = registry();
-    expect(await dispatchContentRoute(routes, { method: "POST", extensionId: "film-set", path: ["import"], body: {}, authorized: false })).toEqual({ status: 401, body: { code: "unauthorized" } });
-    const failed = await dispatchContentRoute(routes, { method: "POST", extensionId: "film-set", path: ["import"], body: { secret: true }, authorized: true });
+    expect(await dispatchContentRoute(routes, { method: "POST", extensionId: "demo-extension", path: ["import"], body: {}, authorized: false })).toEqual({ status: 401, body: { code: "unauthorized" } });
+    const failed = await dispatchContentRoute(routes, { method: "POST", extensionId: "demo-extension", path: ["import"], body: { secret: true }, authorized: true });
     expect(failed.status).toBe(503);
     expect(JSON.stringify(failed)).not.toContain("secret");
     const hung = new ContentContributionRegistry();
-    hung.register({ extensionId: "film-set", routes: [{ method: "POST", path: ["import"], handle: () => new Promise(() => undefined) }] });
-    expect(await dispatchContentRoute(hung, { method: "POST", extensionId: "film-set", path: ["import"], body: {}, authorized: true }, { timeoutMs: 15 })).toEqual({ status: 503, body: { code: "content-route-timeout" } });
+    hung.register({ extensionId: "demo-extension", routes: [{ method: "POST", path: ["import"], handle: () => new Promise(() => undefined) }] });
+    expect(await dispatchContentRoute(hung, { method: "POST", extensionId: "demo-extension", path: ["import"], body: {}, authorized: true }, { timeoutMs: 15 })).toEqual({ status: 503, body: { code: "content-route-timeout" } });
   });
 });
 

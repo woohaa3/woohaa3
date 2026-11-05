@@ -102,14 +102,17 @@ describe("SQLite 重启恢复（任务 3.4）", () => {
       expect((await repository.getCanvas("locked"))?.title).toBe(original.title);
     } finally { db.close(); }
   });
-  it("读取时返回规范化的旧容器和旧节点", async () => {
+  it("读取时把未知节点类型收敛为 custom 并保留节点", async () => {
     const repository = openRepository();
     const canvas = createEmptyWoohaa3ServerCanvas("legacy", NOW);
     canvas.document.nodes.push({ id: "old-group", type: "group", position: { x: 0, y: 0 } }, { id: "old-shot", type: "shot", position: { x: 0, y: 0 } });
     canvas.nodeData["old-shot"] = { title: "old" };
     await repository.createCanvas(canvas);
     const restored = await repository.getCanvas("legacy");
-    expect(restored?.document.nodes).toEqual([{ id: "old-shot", type: "custom", position: { x: 0, y: 0 } }]);
+    expect(restored?.document.nodes).toEqual([
+      { id: "old-group", type: "custom", position: { x: 0, y: 0 }, parentId: undefined, width: undefined, height: undefined },
+      { id: "old-shot", type: "custom", position: { x: 0, y: 0 }, parentId: undefined, width: undefined, height: undefined }
+    ]);
     expect(restored?.nodeData["old-shot"]).toBeUndefined();
   });
   it("拒绝读取损坏的世界身份", async () => {

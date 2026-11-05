@@ -175,7 +175,7 @@ it("已有 tabindex 的宿主元素不被 dispose 改写", async () => {
 it("native gizmo RPC preserves transient tools, feedback, constraints and identity", async () => {
   const host=document.createElement("div");document.body.append(host);mountBevyCanvas(host);
   const target=nativeTarget();
-  const editor={version:"woohaa-model-editor-v2",nodeId:"film",itemId:"item",toolMode:"object",objectTool:"yaw",feedback:{epoch:9,active:"yaw-ring"}};
+  const editor={version:"woohaa-model-editor-v2",nodeId:"model",toolMode:"model",feedback:{epoch:9,active:"yaw-ring"}};
   const response={available:true,generation:4,epoch:9,layoutId:"accepted",handle:"yaw-ring",yawConstraint:{mode:"tangent",direction:[1,0],radiansPerPixel:0.02}};
   let received:unknown;
   (target as unknown as {XMLHttpRequest:unknown}).XMLHttpRequest=class {

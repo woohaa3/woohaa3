@@ -5,8 +5,8 @@ import { withMcpPrincipal } from './mcp-principal.js';
 it('forwards the selected animation clip and sampled time to the authoritative renderer', async () => {
   const renderPreview = vi.fn().mockResolvedValue({ok:false,code:'renderer-unavailable',message:'fixture'});
   const client = modelMcpServiceToClient({renderPreview} as unknown as ModelMcpService);
-  await client.renderPreview({canvasId:'canvas',nodeId:'film',clipId:'parkour',timeSeconds:8,width:960,height:540});
-  expect(renderPreview).toHaveBeenCalledWith({canvasId:'canvas',nodeId:'film',clipId:'parkour',timeSeconds:8,width:960,height:540});
+  await client.renderPreview({canvasId:'canvas',nodeId:'model',clipId:'clip',timeSeconds:8,width:960,height:540});
+  expect(renderPreview).toHaveBeenCalledWith({canvasId:'canvas',nodeId:'model',clipId:'clip',timeSeconds:8,width:960,height:540});
 });
 it('批量模型能力在进程内直连权威服务，并用内部 actor 作为 principal', async () => {
   const getModelNodes = vi.fn().mockResolvedValue({ok:true,canvasId:'canvas',revision:1,nodes:[]});

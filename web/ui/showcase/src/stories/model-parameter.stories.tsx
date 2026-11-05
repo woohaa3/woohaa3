@@ -5,7 +5,7 @@
  *  change: 2026-10-07-remove-legacy-node-type-compat —— 旧 generate/edit/shot 类型下线）。
  *
  * 直接渲染生产 `ModelParameterPanel`。面板能力由生产组件按 `nodeType` 决定：只有
- * model3d 与片场（composite-asset + extensionId="film-set"）承载 MCP 模型生成；已下线的 generate/edit/shot 与其它类型整体不渲染。
+ * model3d 与 composite-asset 承载 MCP 模型生成；已下线的 generate/edit/shot 与其它类型整体不渲染。
  * 查看页用注入的 clipboard adapter 观察复制反馈，不连接任何真实服务。
  */
 import { useState, type ReactNode } from "react";

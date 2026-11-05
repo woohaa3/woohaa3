@@ -249,7 +249,7 @@ describe("edit.apply 删除保护与恢复", () => {
   it("级联后代中隐藏的进行中任务同样被拒绝", () => {
     const canvas = base();
     canvas.document.nodes = [
-      { id: "g", type: "group", position: { x: 0, y: 0 }, width: 300, height: 300 },
+      { id: "g", type: "composite-asset", position: { x: 0, y: 0 }, width: 300, height: 300 },
       { id: "child", type: "text", position: { x: 20, y: 20 }, parentId: "g" }
     ];
     canvas.nodeData = { child: { activeRunId: "run-x", taskStatus: "processing" } };

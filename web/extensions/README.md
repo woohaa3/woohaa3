@@ -20,7 +20,7 @@ web/extensions/<extensionId>/
 较大的插件可以在该目录内增加 `frontend/`、`backend/` 子目录。插件实现不放进宿主目录；宿主只负责
 加载、管理和测试插件。
 
-片场（`film-set`）采用职责在外、执行环境在内的组织方式；其它扩展无需同步迁移：
+较大的扩展可以按职责与执行环境分目录；其它扩展无需同步迁移：
 
 ```text
 src/state/{shared,browser,backend}        # 内容事实、纯规则、草稿和注入式快照存取
@@ -33,7 +33,7 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 
 `frontend/index.ts`、`frontend/metadata.ts` 与 package exports 的既有公共路径保持稳定，门面仅转出或委托。metadata 是独立构建的固定发现入口，可转出 integration 中的纯 metadata，不能可达 activation。内部直接导入职责叶子，不绕回公共聚合门面。两包测试使用 [AST 依赖扫描](../tooling/extension-dependencies.ts) 校验实际解析目标、类型/动态导入、重导出、环境闭包与循环。
 
-页面 integration 持有 slots、输入 owner、焦点/删除观察与活动镜像，退出时幂等释放，部分装配失败逆序回滚。编辑会话管理字段草稿，preview 管理时钟、缓存和短期 token；目标或版本切换时隔离迟到回调。authoring 管理取消、重试与后台收尾，关闭工作区不取消宿主工作租约。片场仍经权威画布命令提交，不新增持久状态源。
+页面 integration 持有 slots、输入 owner、焦点/删除观察与活动镜像，退出时幂等释放，部分装配失败逆序回滚。编辑会话管理字段草稿，preview 管理时钟、缓存和短期 token；目标或版本切换时隔离迟到回调。authoring 管理取消、重试与后台收尾，关闭工作区不取消宿主工作租约。扩展仍经权威画布命令提交，不新增持久状态源。
 
 ## 声明面：`extension.json`
 
@@ -44,7 +44,7 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 | --- | --- |
 | `backend` | 站点插件宿主的后端定义工厂（宿主核心站点插件走静态可信清单时才需要）。声明的导出必须真的存在，否则 `pnpm extensions:check` 失败 |
 | `hostPlugin` | 插件树扩展层的 Cordis 插件：`provider`（向 `ctx.generation` 注册）或 `storage`（向 `ctx.storage` 注册）；声明模块、工厂、顺序与是否可选 |
-| `canvasContent` | 画布内容端口：工厂返回 `CanvasContentRuntime`（可选分组 `frames` 预览/历史帧、`conversion` 转片场服务构造、`mcp` 片场 MCP 能力面），宿主装配 canvas-service 时注入；canvas-service 不 import 扩展实现。与 `hostPlugin` 不同，它不参与插件树 |
+| `canvasContent` | 画布内容端口：工厂返回 `CanvasContentRuntime`（可选分组 `frames` 预览/历史帧、`conversion` 转换服务构造、`mcp` 扩展 MCP 能力面），宿主装配 canvas-service 时注入；canvas-service 不 import 扩展实现。与 `hostPlugin` 不同，它不参与插件树 |
 | `metadata` | 设置面元数据导出（`/api/settings` 的插件卡片用它） |
 | `site` | 站点目录条目（名称、描述、能力、默认启停） |
 | `publicRoutes` | 固定公开路径映射（`publicPath` 或包内导出 `publicPathExport`） |
@@ -115,7 +115,7 @@ export const descriptor: ExtensionFrontendDescriptor = {
 
 | activation | configScope | 启动行为 | 失败语义 |
 | --- | --- | --- | --- |
-| `always` | `site` | Canvas 启动时与 required 一起**同步准备**（ChatGPT、片场） | required 失败 → 页面进入稳定错误，不挂载半可用画布 |
+| `always` | `site` | Canvas 启动时与 required 一起**同步准备**（ChatGPT） | required 失败 → 页面进入稳定错误，不挂载半可用画布 |
 | `server-active` | `site` | 只登记 metadata；由服务端权威 active 状态驱动 reconciler 装配/释放（runninghub-provider） | 隔离失败、可重试；不影响核心画布 |
 | `browser-local` | `browser-local` | 由当前 origin 的本地偏好决定是否加入启动清单（如 task-activity） | optional 失败隔离，不影响 required |
 | `browser-local` + `required` | — | **非法组合**，装配前报错 | — |

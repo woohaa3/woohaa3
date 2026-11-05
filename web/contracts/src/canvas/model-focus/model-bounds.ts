@@ -2,7 +2,7 @@
  * 模型聚焦：模型布局/world bounds/锚点/取景距离
  * （自 `model-focus.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R24）。
  *
- * 与 Rust `model_anchor` / `model_world_aabb` / `film_set_fit` 逐位一致；复用 scene-ir 的
+ * 与 Rust `model_anchor` / `model_world_aabb` / `focused_model_bounds` 逐位一致；复用 scene-ir 的
  * 规范化 AABB。
  */
 import { v2SceneAabb } from "../scene-ir-v2.js";

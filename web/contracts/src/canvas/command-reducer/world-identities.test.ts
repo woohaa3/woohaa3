@@ -105,7 +105,7 @@ describe("world identities", () => {
     }
   });
 
-  it("rejects unknown top-level runtime fields and references to dissolved containers", () => {
+  it("rejects unknown top-level runtime fields and invalid group members", () => {
     const base = createEmptyWoohaa3ServerCanvas("x", now);
     for (const field of ["writeLease", "gpuResource"]) {
       const result = applyCanvasCommands(base, [{ type: "node.add", node: node("camera", "world-camera"), nodeData: { worldCamera: camera, [field]: { id: 1 } } }], { now });
@@ -119,17 +119,6 @@ describe("world identities", () => {
       expect(applyCanvasCommands(added.canvas, [{ type: "nodeData.patch", nodeId: "camera", value: { title: { writeLease: { owner: "run" } } as unknown as string } }], { now }).ok).toBe(false);
       expect(added.canvas.nodeData.camera.worldCamera).toEqual(camera);
     }
-    const legacy = { ...base, document: { ...base.document, nodes: [node("old", "group"), node("new", "workflow-group-2d")] }, nodeData: { new: { workflowGroup2d: { ...group, memberNodeIds: ["old"] } } } };
-    expect(parseCanvasAggregate(legacy).ok).toBe(false);
-    const composite = { ...legacy, document: { ...legacy.document, nodes: [node("old", "composite-asset"), node("new", "workflow-group-2d")] }, nodeData: { ...legacy.nodeData, old: { extensionId: "film-set" } } };
-    expect(parseCanvasAggregate(composite).ok).toBe(false);
-    const before = structuredClone(base);
-    const rejected = applyCanvasCommands(base, [
-      { type: "node.add", node: node("old", "composite-asset"), nodeData: { extensionId: "film-set" } },
-      { type: "node.add", node: node("new", "workflow-group-2d"), nodeData: { workflowGroup2d: { ...group, memberNodeIds: ["old"] } } }
-    ], { now });
-    expect(rejected).toMatchObject({ ok: false, rejection: { code: "invalid-command" } });
-    expect(base).toEqual(before);
     expect(applyCanvasCommands(base, [{ type: "node.add", node: node("next", "text") }], { now }).ok).toBe(true);
   });
 

@@ -54,8 +54,8 @@ export const NODE_TEMPLATES: readonly CanvasNodeTemplate[] = [
 
 /** model 语义别名与 model3d 菜单项返回同一份模板。 */
 export function findNodeTemplate(id: string): CanvasNodeTemplate | null {
-  // 优先稳定菜单 id；film-set 与扩展占位模板共用 composite-asset canonical type，不能让
-  // canonical 查询意外吞掉显式的 composite-asset 模板。
+  // 优先稳定菜单 id；扩展占位模板共用 composite-asset canonical type，不能让 canonical
+  // 查询意外吞掉显式的 composite-asset 模板。
   const fixed = NODE_TEMPLATES.find((template) => template.id === id)
     ?? NODE_TEMPLATES.find((template) => template.nodeType === id);
   if (fixed) return fixed;
@@ -98,7 +98,7 @@ export function connectNodeDataFor(
   if (!base) return undefined;
   // 自包含 3D 节点不从来源节点取得运行数据：连线只作来源说明，不注入任务 inputMapping
   // （change: 2026-10-05-bind-model-animation-to-shots）；复合资产节点同理。
-  if (toNodeType === "model3d" || toNodeType === "composite-asset" || toNodeType === "film-set") return { ...base };
+  if (toNodeType === "model3d" || toNodeType === "composite-asset") return { ...base };
   const data: CanvasNodeData = { ...base };
   data.inputMapping = [
     {

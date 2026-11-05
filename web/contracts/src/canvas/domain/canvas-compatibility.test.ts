@@ -138,36 +138,6 @@ describe("M4–M7 不受信任输入规范化", () => {
     expect(issuesOf(issues, "node.type-coerced")).toHaveLength(4);
   });
 
-  it("group 悬空 parent 被清除且坐标烘焙为绝对，group 端点边被丢弃（change: add-canvas-node-grouping）", () => {
-    const canvas = createEmptyWoohaa3ServerCanvas("canvas-groups", NOW);
-    const input = {
-      ...canvas,
-      document: toWoohaa3CanvasDocument(
-        {
-          nodes: [
-            { ...createWoohaa3CanvasNode("group", { x: 100, y: 100 }, "g1"), width: 400, height: 300 },
-            // 引用不存在的 parent → 规范化清除 parentId 并把局部坐标 20,30 保留为绝对坐标。
-            { ...createWoohaa3CanvasNode("image", { x: 20, y: 30 }, "orphan"), parentId: "missing" },
-            { ...createWoohaa3CanvasNode("image", { x: 40, y: 40 }, "member"), parentId: "g1" }
-          ],
-          edges: [
-            // group 作为端点 → 丢弃。
-            { id: "e-group", source: "g1", target: "member", sourceHandle: null, targetHandle: null, data: {} },
-            { id: "e-ok", source: "member", target: "g1", sourceHandle: null, targetHandle: null, data: {} }
-          ]
-        },
-        NOW
-      )
-    };
-    const parsed = normalizeCanvas(input);
-    expect(parsed.document.nodes.find((node) => node.id === "orphan")?.position).toEqual({ x: 20, y: 30 });
-    // 组在读取期溶解：成员上提为顶层并烘焙绝对坐标，组节点不再出现在规范状态。
-    expect(parsed.document.nodes.find((node) => node.id === "g1")).toBeUndefined();
-    expect(parsed.document.nodes.find((node) => node.id === "member")?.position).toEqual({ x: 140, y: 140 });
-    expect(parsed.document.nodes.every((node) => node.parentId === undefined)).toBe(true);
-    expect(parsed.document.edges.map((edge) => edge.id)).toEqual([]);
-  });
-
   it("M4c 通用复合资产节点 composite-asset 被接受，边被清除（change: 2026-10-10-add-game-furnace-extension；2026-10-11 身份迁移）", () => {
     const canvas = createEmptyWoohaa3ServerCanvas("canvas-ext3d", NOW);
     const input = {

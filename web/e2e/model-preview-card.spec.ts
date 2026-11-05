@@ -49,9 +49,7 @@ async function colors(
   }, png);
 }
 
-test("模型卡片独立渲染、聚焦视角同步、模型信息面板，片场保留镜头工具", async ({
-  page,
-}, info) => {
+test("模型卡片独立渲染、聚焦视角同步、模型信息面板", async ({ page }) => {
   // 多次真实截图/捕获在 SwiftShader 上需要等待帧完成。
   test.setTimeout(240000);
   const errors: string[] = [];
@@ -85,27 +83,15 @@ test("模型卡片独立渲染、聚焦视角同步、模型信息面板，片�
             position: { x: 420, y: 60 },
           },
         },
-        {
-          type: "node.add",
-          nodeData: defaultSelfContained3DNodeData("composite-asset"),
-          node: {
-            id: "filmset",
-            type: "composite-asset",
-            position: { x: 760, y: 60 },
-            width: 196,
-            height: 64,
-          },
-        },
       ])
     ).ok,
   ).toBe(true);
   await expect
     .poll(async () => (await readStoredCanvas(page))!.document.nodes.length)
-    .toBe(3);
+    .toBe(2);
   for (const [nodeId, color] of [
     ["red-model", "#ee3520"],
     ["blue-model", "#2080ff"],
-    ["filmset", "#40ee50"],
   ]) {
     const response = await page.request.post("/api/model-mcp/scripts", {
       data: {
@@ -127,7 +113,7 @@ test("模型卡片独立渲染、聚焦视角同步、模型信息面板，片�
             ?.nodes.filter((n: any) => n.model).length,
       ),
     )
-    .toBe(3);
+    .toBe(2);
   let red = await rect(page, "red-model");
   const blue = await rect(page, "blue-model");
   expect(red.width).toBeGreaterThan(150);
@@ -319,39 +305,7 @@ test("模型卡片独立渲染、聚焦视角同步、模型信息面板，片�
       page.evaluate(() => (window as any).__canvasModelFocus?.focused?.()),
     )
     .toBe(false);
-  // 片场为纯模型：无卡片分类名，携带条件范围几何（change: 2026-10-08-make-film-set-model-only）。
-  // 节点矩形即范围框；旧紧凑尺寸（196×64）按默认片场尺寸 260×195 渲染，保证范围框罩住模型
-  // （见 `compositeAssetNodeBoxSize` 与 `render-scene.test.ts` 的 260×195 断言）。
-  const film = await page.evaluate(() => {
-    const scene = (window as any).__bevyRuntime.lastScene(),
-      node = scene.nodes.find((n: any) => n.id === "filmset");
-    const canvas = document
-      .querySelector("#bevy-canvas")!
-      .getBoundingClientRect();
-    return {
-      x: canvas.left + (node.x + 90) * scene.viewport.zoom + scene.viewport.x,
-      y: canvas.top + (node.y + 20) * scene.viewport.zoom + scene.viewport.y,
-      height: node.height,
-      label: node.cardLabel,
-      compositeAsset: node.compositeAsset,
-    };
-  });
-  expect(film.height).toBe(195);
-  expect(film.label).toBeUndefined();
-  expect(film.compositeAsset).toBeDefined();
-  await page.mouse.dblclick(film.x, film.y);
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as any).__canvasModelFocus?.focused?.()),
-    )
-    .toBe(true);
-  // 片场检查面板默认对象页；镜头工具栏位于「镜头」页签。
-  await page.getByRole("tab", { name: "镜头", exact: true }).click();
-  await expect(page.locator(".model-editor")).toBeVisible();
   expect(errors).toEqual([]);
-  await page.screenshot({
-    path: info.outputPath("model-card-and-filmset.png"),
-  });
 });
 
 test.afterEach(async ({ page }, info) => {

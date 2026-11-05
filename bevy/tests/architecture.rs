@@ -124,15 +124,12 @@ fn lib_is_facade_without_ecs_definitions() {
         "query_marquee",
         "query_probe",
         "query_drop_target",
-        "query_composite_asset_scopes",
         "prepare_and_register_model_resource",
         "declare_model_resource",
         "set_model_payload_leases",
         "model_asset_diagnostics",
         "query_model_pick",
         "query_gizmo_hit",
-        "query_composite_asset_item_pick",
-        "query_composite_asset_item_bounds",
         // change: 2026-10-10-optimize-canvas-interaction-hot-path —— 纯视口增量 + 能力/工作计数。
         "set_viewport",
         "set_observer",
@@ -150,7 +147,7 @@ fn lib_is_facade_without_ecs_definitions() {
 }
 
 #[test]
-fn wasm_exports_are_exactly_thirty_four() {
+fn wasm_exports_are_exactly_thirty_seven() {
     let source = wasm_facade_source();
     // 只统计真正标记函数的属性行（doc 里的行内引用带反引号，不计入）。
     // 5 个基础导出 + request_shot_capture/poll_shot_capture（change:
@@ -159,20 +156,19 @@ fn wasm_exports_are_exactly_thirty_four() {
     // + query_point_hit/query_marquee/query_probe/query_model_pick/query_gizmo_hit/
     //   prepare_and_register_model_resource/model_asset_diagnostics
     //   （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
-    // + set_film_set_texture（change: 2026-10-08-make-film-set-model-only 片场媒体平面）。
-    // + query_composite_asset_item_pick / query_composite_asset_item_bounds
-    //   （change: 2026-10-09-add-film-set-object-motion-and-editing）。
+    // + set_model_media_texture / poll_texture_receipts / set_resource_states
+    //   （模型媒体平面与资源状态回执）。
     // + set_viewport / base_scene_generation / viewport_capability / canvas_work_diagnostics
     //   （change: 2026-10-10-optimize-canvas-interaction-hot-path）。
-    // + query_drop_target / query_composite_asset_scopes
-    //   （change: 2026-10-12-align-film-set-scope-with-isometric-grid drop/scope 查询）。
+    // + query_drop_target（drop/scope 查询）。
     // + set_positions / position_capability
     //   （change: 2026-10-12-optimize-canvas-model-lod-and-interactions 原子位置预览）。
-    // + scene_capability（change: 2026-10-15-add-film-set-overview-lod 片场总览 LOD 协议升级）。
+    // + scene_capability（scene wire 能力字符串）。
     // + set_observer / observer_capability（聚焦朝向增量，旧 WASM 可缺省回退 full）。
     // + declare_model_resource / set_model_payload_leases
     //   （change: 2026-10-23-scale-canvas-media-residency —— descriptor 声明与 payload lease 分离）。
     // + request_history_thumbnail / poll_history_thumbnail（现有历史缩略图请求与回读）。
+    // + request_world_capture / poll_world_capture / set_idle_frame_pacing（共享世界捕获与帧率开关）。
     // 导出属性有两种写法，都是 wasm-bindgen 导出，必须一起计数：
     // - `#[wasm_bindgen]`：仅 wasm 编译的条目；
     // - `#[cfg_attr(feature = "wasm", wasm_bindgen)]`：wasm 与 native 共享实现、只在 wasm
@@ -185,7 +181,7 @@ fn wasm_exports_are_exactly_thirty_four() {
                 || trimmed == r#"#[cfg_attr(feature = "wasm", wasm_bindgen)]"#
         })
         .count();
-    assert_eq!(count, 34, "WASM 导出数量必须固定为 34，实际 {count}");
+    assert_eq!(count, 37, "WASM 导出数量必须固定为 37，实际 {count}");
 }
 
 #[test]

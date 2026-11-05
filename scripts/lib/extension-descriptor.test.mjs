@@ -226,25 +226,25 @@ test("hostPlugin.features 接受 marketplace-source", () => {
 
 test("content 声明校验字段格式，并拒绝跨扩展重名", () => {
   const content = {
-    ownedFields: ["filmSetContent"],
-    ownedWireFields: ["shotPreview"],
+    ownedFields: ["sampleContent"],
+    ownedWireFields: ["sampleWire"],
     routePrefix: "import",
     mcpTools: ["import_content"],
-    targetModes: ["film-set"],
-    eventOwners: ["film-set"]
+    targetModes: ["sample-target"],
+    eventOwners: ["sample-extension"]
   };
   assert.equal(validateExtensionDescriptor({ ...MINIMAL, content }).ok, true);
-  assert.match(errorsOf({ ...MINIMAL, content: { ownedFields: ["film-set"] } }), /ownedFields/);
+  assert.match(errorsOf({ ...MINIMAL, content: { ownedFields: ["bad-field"] } }), /ownedFields/);
   assert.match(errorsOf({ ...MINIMAL, content: { mcpTools: ["Import"] } }), /mcpTools/);
   assert.match(errorsOf({ ...MINIMAL, content: { routePrefix: "/import" } }), /routePrefix/);
   assert.match(errorsOf({ ...MINIMAL, content: { ownedFields: ["title", "title"] } }), /ownedFields 不得重复/);
   assert.match(errorsOf({ ...MINIMAL, content: { extra: true } }), /content 未知字段：extra/);
   const collisions = contentDeclarationCollisions([
-    { extensionId: "film-set", directory: "a", descriptor: { content } },
-    { extensionId: "game-furnace", directory: "b", descriptor: { content: { ownedFields: ["filmSetContent"], mcpTools: ["other_tool"] } } }
+    { extensionId: "sample-extension", directory: "a", descriptor: { content } },
+    { extensionId: "other-extension", directory: "b", descriptor: { content: { ownedFields: ["sampleContent"], mcpTools: ["other_tool"] } } }
   ]);
   assert.equal(collisions.length, 1);
-  assert.match(collisions[0].message, /ownedFields「filmSetContent」/);
+  assert.match(collisions[0].message, /ownedFields「sampleContent」/);
 });
 
 // deprecated-declaration：`hostPlugin.kind` 过渡期用例。删除废弃别名时一并删掉这两条。

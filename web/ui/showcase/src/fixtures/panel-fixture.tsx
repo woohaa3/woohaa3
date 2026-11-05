@@ -107,6 +107,21 @@ export function createFixtureCanvasRemote(operations: OperationLog): CanvasRemot
     throw new Error("查看页不实现该远端能力");
   };
   return {
+    issueWorldToolContext: notImplemented as never,
+    revokeWorldToolContext: notImplemented as never,
+    saveWorldCamera: notImplemented as never,
+    restoreWorldCamera: notImplemented as never,
+    listWorldCameraHistory: notImplemented as never,
+    prepareSceneArea: notImplemented as never,
+    executeSceneArea: notImplemented as never,
+    historySceneArea: notImplemented as never,
+    prepareWorldConversion: notImplemented as never,
+    commitWorldConversion: notImplemented as never,
+    freezeWorldCapture: notImplemented as never,
+    listPendingPageCaptures: notImplemented as never,
+    listWorldCaptureStatuses: notImplemented as never,
+    commitPageVideoCapture: notImplemented as never,
+    commitPageCapture: notImplemented as never,
     mergeNodeHistory: async () => ({ ok: false, error: "fixture has no history merge" }) as never,
     openCanvasSession: (() => {
       throw new Error("查看页不打开同步 socket");
@@ -146,16 +161,7 @@ export function createFixtureCanvasRemote(operations: OperationLog): CanvasRemot
     resolveSnippetMaterial: notImplemented as never,
     taskActivitySnapshot: notImplemented as never,
     taskActivityChanges: notImplemented as never,
-    subscribeTaskActivity: (() => () => undefined) as unknown as CanvasRemoteService["subscribeTaskActivity"],
-    filmSetConversionModels: notImplemented as never,
-    filmSetConversionSubmit: notImplemented as never,
-    filmSetConversionStatus: notImplemented as never,
-    filmSetConversionCancel: notImplemented as never,
-    filmSetConversionRetry: notImplemented as never,
-    recordingSubmit: notImplemented as never,
-    recordingStatus: notImplemented as never,
-    recordingList: notImplemented as never,
-    recordingCancel: notImplemented as never
+    subscribeTaskActivity: (() => () => undefined) as unknown as CanvasRemoteService["subscribeTaskActivity"]
   };
 }
 

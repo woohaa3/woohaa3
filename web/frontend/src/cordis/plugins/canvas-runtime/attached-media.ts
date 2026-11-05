@@ -76,7 +76,7 @@ export function createAttachedMedia(input: {
   // 页面级需求 owner：一个 attach scope 一个实例（design D1）。所有媒体 owner 共享同一预算。
   const residency = new CanvasResourceCoordinator({
     ...(input.residencyPolicy ? { policy: input.residencyPolicy } : {}),
-    onGpuClaimReleased: () => input.invalidate("overview-cache-budget")
+    onGpuClaimReleased: () => input.invalidate("media-residency-budget")
   });
   // 模型准备的重型工作同样只读页面策略（design D3 / 任务 2.2、6.1）：并发与片段预算
   // 来自同一个 owner，各媒体 owner 不能各自放宽。

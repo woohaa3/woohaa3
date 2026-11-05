@@ -50,7 +50,7 @@ export type AgentNodeDescriptor = {
 };
 
 /**
- * 节点目录；顺序与前端菜单/旧 Godot 菜单一致，并补充片场这一自包含 3D 节点。
+ * 节点目录；顺序与前端菜单/旧 Godot 菜单一致，并补充复合资产这一自包含 3D 节点。
  *
  * 尺寸来自 `effectiveCanvasNodeSize`，与 Bevy 渲染共用同一数值，避免菜单预览与画布实际尺寸分叉。
  */

@@ -35,7 +35,6 @@ function imageAsset(id = "asset-image"): StoredAsset {
   };
 }
 
-/** 带一个 items-only 片场（composite-asset + film-set）节点的画布（change: 2026-10-11 身份/结构迁移）。 */
 describe("applyCanvasCommands（共享 reducer）", () => {
   it("覆盖 node.add / nodeData.patch / edge.add 且只产生一个聚合", () => {
     const result = applyCanvasCommands(base(), [

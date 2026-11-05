@@ -8,7 +8,7 @@
 
 ```js
 await __canvasPerfProbe.sample("initial-empty"); // 初始空场，默认采 20 秒
-await __canvasPerfProbe.sample("film-set");      // 主画布中查看片场后
+await __canvasPerfProbe.sample("world-camera");  // 主画布中查看共享世界镜头后
 await __canvasPerfProbe.sample("returned-empty"); // 返回原空白区域或原空画布后
 await __canvasPerfProbe.sample("returned-after-60s"); // 返回空场等 60 秒，再采一段
 ```

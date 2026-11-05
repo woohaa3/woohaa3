@@ -20,9 +20,9 @@ describe("extension.command", () => {
     const canvas = createEmptyWoohaa3ServerCanvas("canvas", "2026-10-27T00:00:00.000Z");
     const registry = new ContentContributionRegistry();
     const apply = vi.fn(renameCodec().apply);
-    registry.register({ extensionId: "film-set", commands: { ...renameCodec(), apply } });
+    registry.register({ extensionId: "demo-extension", commands: { ...renameCodec(), apply } });
     const now = "2026-10-27T00:00:00.000Z";
-    const applied = applyCanvasCommands(canvas, [{ type: "extension.command", extensionId: "film-set", kind: "rename", payload: "ok" }], { now, content: registry });
+    const applied = applyCanvasCommands(canvas, [{ type: "extension.command", extensionId: "demo-extension", kind: "rename", payload: "ok" }], { now, content: registry });
     expect(applied.ok).toBe(true);
     if (applied.ok) expect(applied.canvas.title).toBe("已改");
     expect(apply).toHaveBeenCalledOnce();
@@ -32,33 +32,33 @@ describe("extension.command", () => {
     expect(canvas.title).not.toBe("已改");
 
     const forged = applyCanvasCommands(canvas, [
-      { type: "extension.command", extensionId: "film-set", kind: "rename", payload: "ok" },
-      { type: "extension.command", extensionId: "film-set", kind: "forge", payload: "ok" }
+      { type: "extension.command", extensionId: "demo-extension", kind: "rename", payload: "ok" },
+      { type: "extension.command", extensionId: "demo-extension", kind: "forge", payload: "ok" }
     ], { now, content: registry });
     expect(forged).toMatchObject({ ok: false, rejection: { code: "content-owner-unavailable" } });
 
-    const rejected = applyCanvasCommands(canvas, [{ type: "extension.command", extensionId: "film-set", kind: "rename", payload: "no" }], { now, content: registry });
+    const rejected = applyCanvasCommands(canvas, [{ type: "extension.command", extensionId: "demo-extension", kind: "rename", payload: "no" }], { now, content: registry });
     expect(rejected).toMatchObject({ ok: false, rejection: { code: "content-command-rejected", message: "rename-invalid" } });
 
     const throwing = new ContentContributionRegistry();
     throwing.register({
-      extensionId: "film-set",
+      extensionId: "demo-extension",
       commands: { ...renameCodec(), apply: () => { throw new Error("secret command detail"); } }
     });
-    const failed = applyCanvasCommands(canvas, [{ type: "extension.command", extensionId: "film-set", kind: "rename", payload: "ok" }], { now, content: throwing });
-    expect(failed).toMatchObject({ ok: false, rejection: { code: "content-codec-failed", message: "film-set" } });
+    const failed = applyCanvasCommands(canvas, [{ type: "extension.command", extensionId: "demo-extension", kind: "rename", payload: "ok" }], { now, content: throwing });
+    expect(failed).toMatchObject({ ok: false, rejection: { code: "content-codec-failed", message: "demo-extension" } });
     expect(JSON.stringify(failed)).not.toContain("secret");
   });
 
   it("结构解码要求 payload 存在", () => {
-    expect(isCanvasCommand({ type: "extension.command", extensionId: "film-set", kind: "rename", payload: null })).toBe(true);
-    expect(isCanvasCommand({ type: "extension.command", extensionId: "film-set", kind: "rename" })).toBe(false);
+    expect(isCanvasCommand({ type: "extension.command", extensionId: "demo-extension", kind: "rename", payload: null })).toBe(true);
+    expect(isCanvasCommand({ type: "extension.command", extensionId: "demo-extension", kind: "rename" })).toBe(false);
     const batch = decodeCanvasCommandBatch({
       canvasId: "canvas",
       expectedRevision: 0,
       operationId: "op",
       actorId: "user",
-      commands: [{ type: "extension.command", extensionId: "film-set", kind: "rename", payload: { title: "标题" } }]
+      commands: [{ type: "extension.command", extensionId: "demo-extension", kind: "rename", payload: { title: "标题" } }]
     });
     expect(batch.ok).toBe(true);
   });

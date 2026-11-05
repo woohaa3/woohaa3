@@ -1,12 +1,9 @@
-import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 选区整理规划测试（change: 2026-10-09-improve-canvas-workflow，任务 4.3）。
  */
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/index.js";
 import { planArrangeNodes } from "./arrange.js";
-
-import { nodeWorldRect } from "./geometry.js";
 
 const NOW = "2026-10-09T00:00:00.000Z";
 
@@ -42,26 +39,3 @@ describe("planArrangeNodes 对齐", () => {
   });
 });
 
-describe("planArrangeNodes 组内整理保持未选成员世界位置", () => {
-  it("组内两个成员左对齐后，未选成员世界位置不变", () => {
-    const canvas = base();
-    canvas.document.nodes = [
-      { id: "g", type: "group", position: { x: 0, y: 0 }, width: 600, height: 400 },
-      { id: "m1", type: "text", position: { x: 40, y: 40 }, parentId: "g", width: 100, height: 50 },
-      { id: "m2", type: "text", position: { x: 300, y: 40 }, parentId: "g", width: 100, height: 50 },
-      { id: "m3", type: "text", position: { x: 500, y: 300 }, parentId: "g", width: 100, height: 50 }
-    ];
-    const byIdBefore = new Map(canvas.document.nodes.map((n) => [n.id, n]));
-    const m3Before = nodeWorldRect(byIdBefore.get("m3")!, byIdBefore);
-
-    const result = planArrangeNodes(canvas, ["m1", "m2"], { kind: "left" });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const applied = applyCanvasCommands(canvas, result.commands, { now: NOW });
-    if (!applied.ok) return;
-    const byIdAfter = new Map(applied.canvas.document.nodes.map((n) => [n.id, n]));
-    const m3After = nodeWorldRect(byIdAfter.get("m3")!, byIdAfter);
-    expect(m3After.x).toBeCloseTo(m3Before.x, 3);
-    expect(m3After.y).toBeCloseTo(m3Before.y, 3);
-  });
-});

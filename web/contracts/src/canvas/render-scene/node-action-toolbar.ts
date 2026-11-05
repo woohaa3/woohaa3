@@ -228,9 +228,8 @@ export function nodeActionToolbarLayout(
  * 显示节点操作横条的节点类型（design D7：「单选图片、视频或 3D」；
  * change: 2026-10-16-add-group-selection-toolbar 增加 `group`）。
  *
- * 与 `FilmSetConversionSourceKind` 对齐，但属于**渲染宿主**的通用呈现规则：宿主只按通用
- * node type 判定是否呈现单节点横条，MUST NOT 按 film-set 业务 ID 分支。复合资产
- * 可以提供自己的动作；没有贡献时不绘制横条。
+ * 属于**渲染宿主**的通用呈现规则：宿主只按通用 node type 判定是否呈现单节点横条，
+ * MUST NOT 按具体扩展 ID 分支。复合资产可以提供自己的动作；没有贡献时不绘制横条。
  */
 export type NodeActionToolbarNodeType = string;
 export function isNodeActionToolbarNodeType(nodeType: string): boolean {
