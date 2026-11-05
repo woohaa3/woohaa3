@@ -37,6 +37,11 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
 
+/** 例外清单用 `/` 分隔；Windows 的 `path.relative` 给 `\`，不归一会让整条 allowlist 失效。 */
+function toPosix(value: string): string {
+  return value.split(path.sep).join("/");
+}
+
 function collect(relative: string, out: string[]): void {
   const dir = path.join(REPO_ROOT, relative);
   let entries;
@@ -49,9 +54,9 @@ function collect(relative: string, out: string[]): void {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue;
-      collect(path.relative(REPO_ROOT, full), out);
+      collect(toPosix(path.relative(REPO_ROOT, full)), out);
     } else if (/\.(ts|tsx|mjs|js|rs|json)$/.test(entry.name)) {
-      out.push(path.relative(REPO_ROOT, full));
+      out.push(toPosix(path.relative(REPO_ROOT, full)));
     }
   }
 }

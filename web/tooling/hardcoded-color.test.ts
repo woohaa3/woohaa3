@@ -129,7 +129,8 @@ describe("硬编码 chrome 色守卫（任务 5.1 / design D9）", () => {
     expect(files.length, "应至少扫描到一个 Web 文件").toBeGreaterThan(0);
     const violations: ColorViolation[] = [];
     for (const file of files) {
-      const relative = path.relative(REPO_ROOT, file);
+      // 例外清单用 `/` 分隔：Windows 上 `path.relative` 给的是 `\`，不归一就会整条失效。
+      const relative = path.relative(REPO_ROOT, file).split(path.sep).join("/");
       violations.push(...scanHardcodedColors({ file: relative, source: readFileSync(file, "utf8") }));
     }
     expect(violations, format(violations)).toEqual([]);
@@ -140,7 +141,7 @@ describe("硬编码 chrome 色守卫（任务 5.1 / design D9）", () => {
     expect(files.length).toBeGreaterThan(0);
     const violations: ColorViolation[] = [];
     for (const file of files) {
-      const relative = path.relative(REPO_ROOT, file);
+      const relative = path.relative(REPO_ROOT, file).split(path.sep).join("/");
       violations.push(...scanHardcodedRustColors({ file: relative, source: readFileSync(file, "utf8") }));
     }
     expect(violations, format(violations)).toEqual([]);

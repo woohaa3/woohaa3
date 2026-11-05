@@ -15,6 +15,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { registerAgentGraphTools } from "./graph-tools.js";
 import { registerAgentPlanTools } from "./plan-tools.js";
 import { registerAgentRunTools } from "./run-tools.js";
+import { registerImportGeneratedImageTool } from "./import-image-tool.js";
 import { registerAgentScriptTools } from "./script-tools.js";
 import { registerAgentSkillTools } from "./skill-tools.js";
 import { registerAssistantWorldTools } from "./world-tools.js";
@@ -32,6 +33,9 @@ export function registerAgentAuthoringTools(server: McpServer, deps: AgentAuthor
   // 脚本能力面未接入时保留既有的 validate/apply plan 回退。
   if (!deps.scriptAvailability?.available) registerAgentPlanTools(server, deps);
   registerAgentRunTools(server, deps);
+  // Codex 内建生图的产物导入（change: 2026-11-03-add-codex-image-import）：工具必须真的注册，
+  // 否则提示词里引用的 `import_generated_image` 在会话里根本不存在。
+  registerImportGeneratedImageTool(server, deps);
   registerAgentSkillTools(server, deps);
   if (deps.world) registerAssistantWorldTools(server, deps);
 }

@@ -68,6 +68,11 @@ export const PLUGIN_REGISTRATION_DEBT: readonly RegistrationSurfaceDebt[] = [
     file: "scripts/lib/ingress.mjs",
     literals: ["oauth-agent", "sdk-agent", "local-agent", "remote-server"],
     reason: "宿主已有公开 API 路由前缀（OAuth/SDK/本机 Agent 来源）；Windows 路径归一化后同步现有清单，不新增业务装配。"
+  },
+  {
+    file: "web/frontend/src/cordis/plugins/settings/workspace/settings-plugins-sixi.ts",
+    literals: ["local-storage", "ppserver-provider", "sixi-spike", "sqlite-storage"],
+    reason: "四喜发行形态的设置页隐藏清单：这是**展示层**的隐藏规则（装配、`/api/settings` 快照与生成链路都不受影响），不是业务装配；规则集中在单个文件、由上游 `indexPlugins` 调用一个纯函数。"
   }
 ];
 
