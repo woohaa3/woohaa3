@@ -16,6 +16,11 @@ export interface SpatialLeaseAuthority {
 export interface SpatialCommitAuthority extends SpatialLeaseAuthority {
   resolve(intent: LeaseIntent, before: ServerCanvas, after: ServerCanvas, targets: WorldObjectIdentity[]): {
     scope: WorldScopeVersion; previous: WorldObjectVersion[]; next: WorldObjectVersion[];
+    /**
+     * 这次提交**确实写入了**作用域本体（改导演区范围），因此 scope 版本推进是它有据可依的结果，
+     * 而不是解析出的版本与签约时不一致。缺省 false：只有显式范围写入才允许在同一批里推进 scope。
+     */
+    advancedScope?: boolean;
   } | null;
 }
 

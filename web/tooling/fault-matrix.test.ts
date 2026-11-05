@@ -178,8 +178,8 @@ async function startCluster(options: { mediaFault?: "put" | "down"; taskDown?: b
       provider: {},
       models: [{
         providerId: "fake",
-        providerModelId: "fake-text",
-        modelType: "language",
+        providerModelId: "fake-image",
+        modelType: "image",
         title: "Fake",
         inputSchema: {},
         defaultInput: {}
@@ -240,7 +240,7 @@ async function startCluster(options: { mediaFault?: "put" | "down"; taskDown?: b
     revision: 0,
     document: {
       schemaVersion: "asset-canvas-v1",
-      nodes: [{ id: "text-1", type: "text", position: { x: 0, y: 0 } }],
+      nodes: [{ id: "image-1", type: "image", position: { x: 0, y: 0 } }],
       edges: [],
       viewport: { x: 0, y: 0, zoom: 1 },
       updatedAt: "2026-09-24T00:00:00.000Z"
@@ -331,17 +331,18 @@ describe("故障隔离矩阵（任务 7.1）", () => {
       method: "POST",
       headers: { "content-type": "application/json", "x-woohaa3-service-token": cluster.canvasToken, "x-woohaa3-protocol-version": "1" },
       body: JSON.stringify({
-        nodeId: "text-1",
+        nodeId: "image-1",
         runId: "run-down",
         jobId: "job-down",
-        modelKey: "fake:fake-text",
+        modelKey: "fake:fake-image",
         prompt: "p",
         parameters: {}
       })
     });
     // run 受理后异步 submit 失败仍返回 accepted（画布已记录 processing，可恢复）；
+    // 同步就发现 Task 不可用时报 502（task-submit-failed，不能骗调用方"已受理"）。
     // 关键是它不挂起，且后续 reconcile 可补齐。
-    expect([202, 503]).toContain(run.status);
+    expect([202, 502, 503]).toContain(run.status);
   }, 20_000);
 
   it("Media 下载故障：需要媒体的操作在副作用前失败", async () => {
@@ -375,9 +376,9 @@ describe("故障隔离矩阵（任务 7.1）", () => {
         nodeId: "n",
         runId: "run-orphan",
         jobId: "j",
-        nodeType: "text",
-        modelType: "language",
-        modelKey: "fake:fake-text",
+        nodeType: "image",
+        modelType: "image",
+        modelKey: "fake:fake-image",
         prompt: "p",
         parameters: {},
         inputs: []
@@ -431,7 +432,7 @@ describe("故障隔离矩阵（任务 7.1）", () => {
 
     // 权威 revision 只被结构命令推进一次：从 Yjs 文档导出（Yjs 是唯一权威）。
     const state = await cluster.yjsRepository.loadYjsState(cluster.canvasId);
-    expect(state?.projection?.document.nodes.map((node) => node.id)).toEqual(["text-1", "n2"]);
+    expect(state?.projection?.document.nodes.map((node) => node.id)).toEqual(["image-1", "n2"]);
     expect(state?.projection?.assets).toEqual([]);
   }, 20_000);
 

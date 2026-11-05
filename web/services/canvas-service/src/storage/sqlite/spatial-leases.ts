@@ -167,19 +167,25 @@ export class SqliteSpatialLeaseStore {
     }
   }
   /** Call synchronously inside the same transaction as the canonical write. */
-  validateForCommit(canvasId: string, requestId: string, runId: string, epoch: number, executionId: string, scope: WorldScopeVersion, targets: WorldObjectVersion[]): void {
+  validateForCommit(canvasId: string, requestId: string, runId: string, epoch: number, executionId: string, scope: WorldScopeVersion, targets: WorldObjectVersion[], options: { advancedScope?: boolean } = {}): void {
     const record = this.lookup(canvasId, requestId);
     if (!record || record.intent.runId !== runId || record.intent.epoch !== epoch || record.intent.executionId !== executionId) throw new SpatialLeaseError("stale-epoch");
     if (record.state !== "active") throw new SpatialLeaseError("cancelled");
     const nextScope = normalize({ ...record.intent, scope }).scope;
     const scopeChanged = JSON.stringify(nextScope) !== JSON.stringify(record.intent.scope);
-    // Only an explicit scene-area bounds write may advance the scope version, and it
-    // must not carry object versions in the same commit.
+    // A scope version may only advance because this commit explicitly wrote the
+    // scene-area bounds. Such a write may still move objects the run already holds
+    // (a director-area drag is exactly that), but it must not absorb new objects:
+    // their eligibility was never decided against the pre-edit footprint.
+    if (scopeChanged && !options.advancedScope) throw new SpatialLeaseError("version-conflict");
     if (scopeChanged && JSON.stringify(nextScope.scope) !== JSON.stringify(record.intent.scope.scope)) {
       throw new SpatialLeaseError("version-conflict");
     }
     const normalized = normalizeTargets(targets);
-    if (scopeChanged && normalized.length > 0) throw new SpatialLeaseError("version-conflict");
+    if (scopeChanged) {
+      const grantedKeys = new Set(record.intent.writable.map(objectKey));
+      if (normalized.some(target => !grantedKeys.has(objectKey(target)))) throw new SpatialLeaseError("version-conflict");
+    }
     const granted = new Map(record.intent.writable.map(t => [objectKey(t), t.version]));
     for (const target of normalized) {
       if (granted.get(objectKey(target)) !== target.version) throw new SpatialLeaseError("version-conflict");
@@ -191,17 +197,21 @@ export class SqliteSpatialLeaseStore {
   }
   /** After the canonical write, advance its versions in the same caller-owned transaction.
    * The caller must first validateForCommit with previous versions before writing. */
-  advanceVersionsForCommit(canvasId: string, requestId: string, runId: string, epoch: number, executionId: string, scope: WorldScopeVersion, previous: WorldObjectVersion[], next: WorldObjectVersion[]): void {
+  advanceVersionsForCommit(canvasId: string, requestId: string, runId: string, epoch: number, executionId: string, scope: WorldScopeVersion, previous: WorldObjectVersion[], next: WorldObjectVersion[], options: { advancedScope?: boolean } = {}): void {
     const record = this.lookup(canvasId, requestId);
     if (!record || record.intent.runId !== runId || record.intent.epoch !== epoch || record.intent.executionId !== executionId) throw new SpatialLeaseError("stale-epoch");
     if (record.state !== "active") throw new SpatialLeaseError("cancelled");
     const nextScope = normalize({ ...record.intent, scope }).scope;
     const scopeChanged = JSON.stringify(nextScope) !== JSON.stringify(record.intent.scope);
+    if (scopeChanged && !options.advancedScope) throw new SpatialLeaseError("version-conflict");
     if (scopeChanged && JSON.stringify(nextScope.scope) !== JSON.stringify(record.intent.scope.scope)) {
       throw new SpatialLeaseError("version-conflict");
     }
     const before = normalizeTargets(previous), after = normalizeTargets(next);
-    if (scopeChanged && after.length > 0) throw new SpatialLeaseError("version-conflict");
+    if (scopeChanged) {
+      const grantedKeys = new Set(record.intent.writable.map(objectKey));
+      if (after.some(target => !grantedKeys.has(objectKey(target)))) throw new SpatialLeaseError("version-conflict");
+    }
     if (before.length !== after.length || before.some((t, i) => objectKey(t) !== objectKey(after[i]!))) throw new SpatialLeaseError("invalid-data");
     const granted = new Map(record.intent.writable.map(t => [objectKey(t), t.version]));
     for (const target of before) {

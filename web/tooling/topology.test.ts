@@ -167,7 +167,7 @@ describe("三服务真实拓扑（任务 8.1）", () => {
         PPTASK_LITELLM_API_KEY: "test-placeholder",
         PPTASK_LITELLM_BASE_URL: "https://litellm.invalid"
       },
-      modelsConfig: { version: 1, models: [] },
+      modelsConfig: { version: 1, models: [{ id: "fake:fake-image", default: true }] },
       serviceToken: taskToken,
       mediaServiceUrl: `http://127.0.0.1:${media.port}`,
       workerServer: fakeWorkerServer(),
@@ -178,8 +178,8 @@ describe("三服务真实拓扑（任务 8.1）", () => {
         provider: {},
         models: [{
           providerId: "fake",
-          providerModelId: "fake-text",
-          modelType: "language",
+          providerModelId: "fake-image",
+          modelType: "image",
           title: "Fake",
           inputSchema: { type: "object", properties: { prompt: { type: "string" } } },
           defaultInput: {}
@@ -201,7 +201,7 @@ describe("三服务真实拓扑（任务 8.1）", () => {
       revision: 0,
       document: {
         schemaVersion: "asset-canvas-v1",
-        nodes: [{ id: "text-1", type: "text", position: { x: 0, y: 0 } }],
+        nodes: [{ id: "image-1", type: "image", position: { x: 0, y: 0 } }],
         edges: [],
         viewport: { x: 0, y: 0, zoom: 1 },
         updatedAt: "2026-09-24T00:00:00.000Z"
@@ -269,10 +269,10 @@ describe("三服务真实拓扑（任务 8.1）", () => {
       method: "POST",
       headers: { "content-type": "application/json", "x-woohaa3-service-token": canvasToken, "x-woohaa3-protocol-version": "1" },
       body: JSON.stringify({
-        nodeId: "text-1",
+        nodeId: "image-1",
         runId: "run-topology",
         jobId: "job-topology",
-        modelKey: "fake:fake-text",
+        modelKey: "fake:fake-image",
         prompt: "hello",
         parameters: {}
       })
@@ -290,7 +290,7 @@ describe("三服务真实拓扑（任务 8.1）", () => {
     for (;;) {
       const state = await yjsRepository.loadYjsState(canvasId);
       const projection = state?.projection as { nodeData?: Record<string, Record<string, unknown>> } | null | undefined;
-      nodeData = projection?.nodeData?.["text-1"];
+      nodeData = projection?.nodeData?.["image-1"];
       if (nodeData?.taskStatus === "successed" || Date.now() > deadline) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }

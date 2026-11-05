@@ -850,7 +850,10 @@ export function createWorldAuthoringAuthority(
       return {
         scope: { scope: { kind: "scene-area", areaId: effectiveArea.areaId }, scopeVersion: effectiveArea.scopeVersion },
         previous,
-        next
+        next,
+        // 只有后态真的换了范围版本，才算「这次提交改了作用域本体」；否则解析出的版本与
+        // 签约时不同就是竞态，租约层必须拒绝。
+        advancedScope: effectiveArea.scopeVersion !== scope.scopeVersion
       };
     }
   };

@@ -13,6 +13,23 @@ import { readJsonBody, sendError, sendJson } from "./http-codec.js";
 import { authorizeCanvasRequest, httpStatusForCanvasAccess } from "../../access/resolve-access.js";
 
 /**
+ * 本次运行的 owner（个人来源/凭据寻址用）。
+ *
+ * 只在身份运行时**启用**时才推导：`accessRuntime.enabled === false`（本机单实例）与
+ * `undefined`（独立单元/本机部署，走「服务令牌 / loopback」历史边界）都没有可信 principal，
+ * 此时 `runService` 按无 owner 处理。旧写法缺省成 `{ enabled: true }`，会和
+ * `requireWriteAccess` 的默认放行打架 —— 授权通过、随后在这里抛 `unauthenticated`，
+ * 表现成本机部署下所有 run 都回 500。
+ */
+function runOwner(
+  options: CanvasRequestHandlerOptions,
+  principal: import("@woohaa3/contracts").PrincipalContext | undefined
+): string | undefined {
+  if (options.accessRuntime?.enabled !== true) return undefined;
+  return resolveRequestDataContext(options.accessRuntime, principal ?? null).dataScope.ownerId;
+}
+
+/**
  * run/cancel 前的 write 资源授权（仅注入 authenticate 时）。
  *
  * 返回可信 principal 供 actor 注入；未注入认证时返回 `{ ok: true }`（历史行为）。
@@ -58,8 +75,8 @@ export async function handleRun(
     sendError(res, 400, "INVALID_COMMAND_BATCH", decoded.message);
     return true;
   }
-  const owner = resolveRequestDataContext(options.accessRuntime ?? { enabled: true }, access.principal ?? null).dataScope.ownerId;
-  const outcome = await options.runService.run(decoded.value, { owner });
+  const owner = runOwner(options, access.principal);
+  const outcome = await options.runService.run(decoded.value, owner ? { owner } : undefined);
   if (!outcome.ok) {
     // task-submit-failed 是上游（Task/Provider 物化）在调用前就失败：2xx 会骗调用方「已受理」。
     const status =
