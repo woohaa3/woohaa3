@@ -383,6 +383,15 @@ pub fn query_model_pick(json: &str) -> String {
     canvas_query::model_pick::pick_query_json(json)
 }
 
+/// 普通正交画布模型框选：按 CSS 屏幕矩形返回投影 AABB 相交的世界模型 identity。
+/// 世界对象没有内容卡片，不能依赖 2D interaction snapshot 的 card 框选。
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn query_model_marquee(json: &str) -> String {
+    model3d::pick::refresh_shared_models(bridge::lookup_model_asset);
+    canvas_query::model_pick::marquee_query_json(json)
+}
+
 /// 模型编辑 gizmo（focus 三轴 / shot 镜头 / placement）命中与轴拖动约束
 /// （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 5.3）。
 #[cfg(feature = "canvas-core")]

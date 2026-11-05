@@ -70,6 +70,8 @@ export type BevyModule = {
   query_probe: (json: string) => string;
   /** 普通正交画布模型 picking（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。 */
   query_model_pick?: (json: string) => string;
+  /** 普通正交画布模型框选：按 CSS 屏幕矩形返回投影 AABB 相交的世界模型。 */
+  query_model_marquee?: (json: string) => string;
   /** 模型编辑 gizmo 命中与轴拖动约束（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。 */
   query_gizmo_hit?: (json: string) => string;
   /** 合并准备与注册（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。 */
@@ -347,6 +349,14 @@ export type BevyRuntime = {
     width: number;
     height: number;
   }): QueryResult<{ nodeId: string; target: [number, number, number]; radius: number } | null>;
+  /** 世界模型框选：`x/y/width/height` 为 canvas CSS 屏幕矩形；返回节点 id 列表。 */
+  queryModelMarquee?(input: {
+    generation: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): QueryResult<string[]>;
   queryWorldGround?(input: { generation: number; x: number; y: number; width: number; height: number }): QueryResult<{ u: number; v: number } | null>;
   /** Hit the visible model surface through the accepted perspective editor lens. */
   queryCameraEditorSurface?(input: { generation: number; x: number; y: number; width: number; height: number }): QueryResult<import("@woohaa3/contracts").WorldPoint | null>;

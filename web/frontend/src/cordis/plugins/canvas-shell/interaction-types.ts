@@ -541,7 +541,7 @@ export type Gesture =
       /** 拖拽中命中的待提交边预览。 */
       pendingEdges: Array<{ id: string; source: string; target: string }>;
     }
-  | { kind: "marquee"; pointerId: number; start: Point; current: Point }
+  | { kind: "marquee"; pointerId: number; start: Point; current: Point; startClient: Point }
   | {
       /**
        * 共享世界模型直接沿地面拖动：只产生瞬时 `worldGroundPreviews`，释放时提交

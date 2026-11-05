@@ -20,7 +20,7 @@ import { createDragGestureFamily } from "./drag-gesture.js";
 import { applyDragAlignment, setAlignmentGuides } from "./alignment-snap.js";
 import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
 import { createAggregateConnectFamily } from "./aggregate-connect.js";
-import { shouldUseWorldModelPick, worldModelSelectionFromPick } from "../canvas-runtime/model-world-presentation.js";
+import { mergeMarqueeSelection, shouldUseWorldModelPick, worldModelSelectionFromPick } from "../canvas-runtime/model-world-presentation.js";
 import { isWorldInstanceNode } from "./model-world-presentation.js";
 import { createWorldCameraGestureFamilyFromOptions } from "./world-camera-gesture.js";
 import { createWorldObjectPress } from "./world-object-press.js";
@@ -524,7 +524,13 @@ export function create2dInputFamily(core: InteractionCore) {
     if (!event.shiftKey && !groundClick) setSelection([]);
     beginGesture();
     beginPerfGesture("marquee");
-    state.gesture = { kind: "marquee", pointerId: event.pointerId, start: world, current: world };
+    state.gesture = {
+      kind: "marquee",
+      pointerId: event.pointerId,
+      start: world,
+      current: world,
+      startClient: { x: event.clientX, y: event.clientY }
+    };
     canvas.setPointerCapture?.(event.pointerId);
     schedule();
   };
@@ -769,13 +775,26 @@ export function create2dInputFamily(core: InteractionCore) {
         const next = (click.candidates.indexOf(state.selected.length === 1 ? state.selected[0]! : "") + 1) % click.candidates.length;
         setSelection([click.candidates[next]!]);
       } else {
+        const gesture = state.gesture;
         const marqueeResult = core.queryMarquee({
-          x: state.gesture.start.x,
-          y: state.gesture.start.y,
-          width: world.x - state.gesture.start.x,
-          height: world.y - state.gesture.start.y
+          x: gesture.start.x,
+          y: gesture.start.y,
+          width: world.x - gesture.start.x,
+          height: world.y - gesture.start.y
         });
-        if (marqueeResult.ok) setSelection(marqueeResult.value);
+        // 世界模型没有内容卡片，2D 框选拿不到它们；用同一屏幕矩形补一次模型 AABB 框选。
+        const modelResult = core.queryModelMarquee({
+          x: gesture.startClient.x,
+          y: gesture.startClient.y,
+          width: event.clientX - gesture.startClient.x,
+          height: event.clientY - gesture.startClient.y
+        });
+        if (marqueeResult.ok || modelResult.ok) {
+          setSelection(mergeMarqueeSelection(
+            marqueeResult.ok ? marqueeResult.value : [],
+            modelResult.ok ? modelResult.value : []
+          ));
+        }
       }
     } else if (state.gesture.kind === "right-press") {
       // 短按右键不是平移：到这里才确定它是菜单（spec: kind 取 `context-menu`）。

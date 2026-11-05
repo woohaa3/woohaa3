@@ -468,6 +468,7 @@ fn history_dots_hit_inside_node_and_single_version_does_not_capture() {
                 recoverable: None,
                 state: "succeeded".into(),
                 current: true,
+                unseen: false,
             },
             crate::protocol::HistoryStripDot {
                 selected: None,
@@ -479,6 +480,7 @@ fn history_dots_hit_inside_node_and_single_version_does_not_capture() {
                 recoverable: None,
                 state: "succeeded".into(),
                 current: false,
+                unseen: false,
             },
         ],
         truncated: 0,

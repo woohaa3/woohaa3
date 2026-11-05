@@ -83,3 +83,16 @@ export function worldModelPickPoint(input: {
     height: Math.max(1, input.surface.height)
   };
 }
+
+/**
+ * 合并 2D 卡片框选与世界模型框选结果：世界模型没有内容卡片，必须由 Rust 的模型 AABB
+ * 框选补充；同一节点若两边都命中只保留一次（卡片顺序优先）。
+ */
+export function mergeMarqueeSelection(
+  cardIds: readonly string[],
+  modelIds: readonly string[]
+): string[] {
+  const merged = [...cardIds];
+  for (const id of modelIds) if (!merged.includes(id)) merged.push(id);
+  return merged;
+}

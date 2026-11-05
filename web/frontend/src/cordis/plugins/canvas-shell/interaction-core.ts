@@ -120,6 +120,8 @@ export type InteractionCore = {
     hoveredEdgeId?: string | null
   ) => InteractionQuery<HitTarget | null>;
   queryMarquee: (rect: { x: number; y: number; width: number; height: number }) => InteractionQuery<string[]>;
+  /** 世界模型框选：rect 为 canvas CSS 屏幕矩形（世界模型没有卡片，不能走 2D 框选）。 */
+  queryModelMarquee: (rect: { x: number; y: number; width: number; height: number }) => InteractionQuery<string[]>;
   /** 拖动释放时的通用 drop target（最上层实际节点，排除来源）；用于组拖入判定。 */
   queryDropTarget: (point: Point, excludedIds?: readonly string[]) => InteractionQuery<string | null>;
   queryWorldGround: (point: Point) => { u: number; v: number } | null;
