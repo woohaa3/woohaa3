@@ -188,11 +188,6 @@ export type InteractionControllerOptions = {
    */
   onNodeAction?: (request: { nodeId: string; actionId: string; menu: boolean }) => void;
   /**
-   * 每帧下发给 render scene 的节点横条描述（change: 2026-10-13-add-node-to-film-set-shortcut）。
-   * 缺省/空表示本帧不绘制任何横条；由宿主从 `canvas.node-action` 贡献的 `describe` 聚合。
-   */
-  getNodeActionToolbars?: () => ReadonlyMap<string, import("@woohaa3/contracts").BevyNodeActionsPresentation>;
-  /**
    * 当前所有可聚焦模型目标（change: add-model-focus-viewing，任务 3.1；design D1/D3）。
    * 由宿主从 model-scene provider + canonical/working 画布解析；空数组表示无模型。
    */
@@ -481,9 +476,11 @@ export type InteractionController = {
    * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1）。
    *
    * 优先使用 working 拖动/改尺寸预览，其次规范绝对坐标与节点尺寸，经唯一本地视口换算；
-   * 不写状态、不建第二套相机。节点不存在时返回 null。供节点顶部操作横条锚定。
+   * 不写状态、不建第二套相机。节点不存在时返回 null。供节点顶部操作横条与生成面板锚定；
+   * `part: "action-toolbar"` 使用 accepted 卡片投影，世界对象/隐藏节点返回空；
+   * `part: "panel"` 为生成面板专用锚点（世界镜头在机位可见时改用 3D 机位底点）。
    */
-  nodeScreenRect(nodeId: string, part?: "scope-title"): import("@woohaa3/contracts").ScreenRect | null;
+  nodeScreenRect(nodeId: string, part?: "scope-title" | "panel" | "action-toolbar"): import("@woohaa3/contracts").ScreenRect | null;
   /**
    * 本次拖动的辅助对齐线（世界坐标）
    * （内置插件 `alignment-guides`；宿主只在拖动中返回非空数组）。

@@ -84,18 +84,24 @@ fn real_font_glyphs_are_3d_ground_meshes_with_stable_size_across_raster_steps() 
         let batches = glyph_meshes(&info, &geometry, scale, world.resource::<Assets<Image>>());
         assert!(!batches.is_empty());
         for batch in batches.into_values() {
-            assert!(batch
-                .positions
-                .iter()
-                .all(|point| point[1] == GROUND_SCOPE_HEIGHT));
-            assert!(batch
-                .uvs
-                .iter()
-                .all(|uv| uv.iter().all(|v| (0.0..=1.0).contains(v))));
-            assert!(batch
-                .indices
-                .iter()
-                .all(|index| (*index as usize) < batch.positions.len()));
+            assert!(
+                batch
+                    .positions
+                    .iter()
+                    .all(|point| point[1] == GROUND_SCOPE_HEIGHT)
+            );
+            assert!(
+                batch
+                    .uvs
+                    .iter()
+                    .all(|uv| uv.iter().all(|v| (0.0..=1.0).contains(v)))
+            );
+            assert!(
+                batch
+                    .indices
+                    .iter()
+                    .all(|index| (*index as usize) < batch.positions.len())
+            );
         }
     }
     assert!(
@@ -186,9 +192,11 @@ fn ground_label_reuses_entities_and_releases_assets_when_area_disappears() {
     app.update();
     assert!(app.world().get_entity(entity).is_ok());
     assert_eq!(app.world().resource::<Assets<Mesh>>().len(), visuals.len());
-    assert!(visuals
-        .iter()
-        .all(|(entity, _)| app.world().get_entity(*entity).is_ok()));
+    assert!(
+        visuals
+            .iter()
+            .all(|(entity, _)| app.world().get_entity(*entity).is_ok())
+    );
     app.world_mut()
         .resource_mut::<CurrentScene>()
         .0
@@ -198,4 +206,55 @@ fn ground_label_reuses_entities_and_releases_assets_when_area_disappears() {
     assert!(app.world().get_entity(entity).is_err());
     assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
     assert_eq!(app.world().resource::<Assets<StandardMaterial>>().len(), 0);
+}
+
+#[test]
+fn scope_label_compensation_keeps_real_glyphs_inside_the_capsule_at_each_dpr() {
+    let mut world = text_world();
+    let font = world.resource_mut::<Assets<Font>>().add(Font::from_bytes(
+        include_bytes!("../../../assets/fonts/NotoSansSC-Regular.otf").to_vec(),
+    ));
+    world
+        .run_system_once(bevy::text::load_font_assets_into_font_collection)
+        .unwrap();
+    let mut area = area();
+    area.bounds.max.u = 200.0;
+    area.bounds.max.v = 200.0;
+    let entity = world.spawn_empty().id();
+    for zoom in [0.1, 0.3, 0.8, 1.0, 3.0] {
+        let geometry = layout::scene_area_label_geometry_for_zoom(&area, zoom).unwrap();
+        let mut screen_widths = Vec::new();
+        for dpr in [1.0, 2.0, 4.0] {
+            let target = text_presentation::present(
+                &LogicalText::world(12.0, None),
+                zoom * geometry.scale(),
+                dpr,
+            )
+            .unwrap();
+            let font = font.clone();
+            let info = world
+                .run_system_once(move |mut resources: TextResources| {
+                    resources.shape(
+                        entity,
+                        "导演区 A",
+                        font.clone(),
+                        target.font_size,
+                        dpr,
+                        Vec2::new(1024.0, 768.0),
+                    )
+                })
+                .unwrap()
+                .unwrap();
+            let scale = geometry.text_size() / (target.font_size * dpr).round().max(1.0);
+            let width = info.size.x * scale;
+            assert!(width < geometry.width - geometry.padding() * 2.0);
+            screen_widths.push(width * zoom);
+            let batches = glyph_meshes(&info, &geometry, scale, world.resource::<Assets<Image>>());
+            assert!(!batches.is_empty());
+        }
+        assert!(
+            (screen_widths[0] - screen_widths[2]).abs() < 1.0,
+            "DPR must change raster detail, not logical layout"
+        );
+    }
 }

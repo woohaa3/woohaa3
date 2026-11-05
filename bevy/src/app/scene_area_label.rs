@@ -2,13 +2,13 @@
 //! Glyphs reuse Bevy's font layout/atlas; only 3D meshes are submitted for drawing.
 use super::{CurrentScene, SurfaceState};
 use crate::{
+    canvas_query::layout::{self, SceneAreaLabelGeometry},
     canvas2d::{
+        CanvasOverlayCache,
         geometry::Geometry,
         text_presentation::{self, LogicalText},
-        CanvasOverlayCache,
     },
-    canvas_query::layout::{self, SceneAreaLabelGeometry},
-    scope_visual::{ScopeStyle, ScopeVisuals, GROUND_SCOPE_HEIGHT, LABEL_PADDING},
+    scope_visual::{GROUND_SCOPE_HEIGHT, ScopeStyle, ScopeVisuals},
     theme::ThemeResource,
 };
 use bevy::{
@@ -142,11 +142,11 @@ fn body_mesh(geometry: &SceneAreaLabelGeometry, style: ScopeStyle) -> Mesh {
             let a = (outline[i] - previous).normalize_or_zero().perp();
             let b = (next - outline[i]).normalize_or_zero().perp();
             let normal = (a + b).normalize_or_zero();
-            outline[i] + normal * (0.5 / normal.dot(b).abs().max(0.25))
+            outline[i] + normal * (0.5 * geometry.scale() / normal.dot(b).abs().max(0.25))
         })
         .collect();
     shape.polygon(&inner, 0.0, style.label_fill);
-    shape.outline(&outline, 1.0, 0.0, style.border);
+    shape.outline(&outline, geometry.scale(), 0.0, style.border);
     let mut mesh = shape.build();
     let count = if let Some(VertexAttributeValues::Float32x3(points)) =
         mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
@@ -240,7 +240,10 @@ fn spawn_visual(
             GroundScopeLabel,
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material.clone()),
-            RenderLayers::from_layers(&[crate::world_camera::WORLD_CAMERA_GIZMO_LAYER, crate::world_camera_preview::EDITOR_GUIDE_LAYER]),
+            RenderLayers::from_layers(&[
+                crate::world_camera::WORLD_CAMERA_GIZMO_LAYER,
+                crate::world_camera_preview::EDITOR_GUIDE_LAYER,
+            ]),
             NoFrustumCulling,
             NotShadowCaster,
         ))
@@ -281,13 +284,15 @@ pub(super) fn sync(
         || scene.0.video_focus.is_some();
     if !hidden {
         for area in &scene.0.scene_areas {
-            let Some(geometry) = layout::scene_area_label_geometry(area) else {
+            let Some(geometry) =
+                layout::scene_area_label_geometry_for_zoom(area, scene.0.viewport.zoom)
+            else {
                 continue;
             };
             let dpr = surface.pixel_ratio.min(text_presentation::MAX_DPR);
             let Some(target) = text_presentation::present(
                 &LogicalText::world(layout::SCENE_AREA_LABEL_TEXT_SIZE, None),
-                scene.0.viewport.zoom,
+                scene.0.viewport.zoom * geometry.scale(),
                 dpr,
             ) else {
                 continue;
@@ -331,8 +336,7 @@ pub(super) fn sync(
             } else {
                 &area.title
             };
-            let limit = ((geometry.width - 2.0 * LABEL_PADDING)
-                / layout::SCENE_AREA_LABEL_TEXT_SIZE)
+            let limit = ((geometry.width - 2.0 * geometry.padding()) / geometry.text_size())
                 .max(1.0) as usize;
             let mut title: String = title.chars().take(limit).collect();
             if title.chars().count() < area.title.chars().count() {
@@ -359,7 +363,7 @@ pub(super) fn sync(
                 let scale = visual
                     .text_key
                     .as_ref()
-                    .map_or(1.0, |key| layout::SCENE_AREA_LABEL_TEXT_SIZE / key.1 as f32);
+                    .map_or(1.0, |key| geometry.text_size() / key.1 as f32);
                 let batches = glyph_meshes(&visual.layout, &geometry, scale, &text.images);
                 visual.glyphs.retain(|atlas, glyph| {
                     if batches.contains_key(atlas) {

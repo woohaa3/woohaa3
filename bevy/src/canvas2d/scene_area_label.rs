@@ -5,7 +5,7 @@
 //! 标签底与描边合并为一张共享 mesh（集合/主题/状态变化时重建）；文字是独立
 //! `Text2d` 实体，交给统一字体清晰度 pipeline 处理。
 
-use crate::scope_visual::{LABEL_PADDING, ScopeStyle, ScopeVisuals};
+use crate::scope_visual::{ScopeStyle, ScopeVisuals};
 use std::collections::HashSet;
 
 use bevy::prelude::*;
@@ -44,8 +44,8 @@ struct LabelSpec {
     border: u32,
 }
 
-fn truncate(text: &str, max_width: f32) -> String {
-    let max_chars = (max_width / layout::SCENE_AREA_LABEL_TEXT_SIZE).max(1.0) as usize;
+fn truncate(text: &str, max_width: f32, font_size: f32) -> String {
+    let max_chars = (max_width / font_size).max(1.0) as usize;
     let mut out = String::new();
     for (index, ch) in text.chars().enumerate() {
         if index >= max_chars.saturating_sub(1) {
@@ -100,7 +100,11 @@ fn specs(
                 .map(|scopes| scopes.style(scene, theme, &geometry.node_id))
                 .unwrap_or_else(|| ScopeStyle::for_node(scene, theme, &geometry.node_id));
             LabelSpec {
-                text: truncate(title, geometry.width - 2.0 * LABEL_PADDING),
+                text: truncate(
+                    title,
+                    geometry.width - 2.0 * geometry.padding(),
+                    geometry.text_size(),
+                ),
                 geometry,
                 fill: style.label_fill,
                 text_color: Color::srgb_u8(
@@ -136,19 +140,28 @@ mod tests {
     }
 }
 
+fn label_text_mode(geometry: &layout::SceneAreaLabelGeometry, zoom: f32) -> (f32, TextScaleMode) {
+    if geometry.scale() > 1.0 {
+        (geometry.text_size() * zoom, TextScaleMode::Screen)
+    } else {
+        (layout::SCENE_AREA_LABEL_TEXT_SIZE, TextScaleMode::World)
+    }
+}
+
 fn signature(specs: &[LabelSpec], theme: &ThemeResource) -> String {
     let mut out = String::with_capacity(specs.len() * 48);
     for spec in specs {
         use std::fmt::Write;
         let _ = write!(
             out,
-            "{}:{:.2},{:.2}:{:.2},{:.2}:{:.1}:{}:{}:{}|",
+            "{}:{:.2},{:.2}:{:.2},{:.2}:{:.2},{:.2}:{}:{}:{}|",
             spec.geometry.node_id,
             spec.geometry.center.x,
             spec.geometry.center.y,
             spec.geometry.axis.x,
             spec.geometry.axis.y,
             spec.geometry.width,
+            spec.geometry.height,
             spec.text,
             spec.border,
             spec.fill,
@@ -208,11 +221,10 @@ pub(crate) fn sync_scene_area_labels(
         if color.0 != spec.text_color {
             color.0 = spec.text_color;
         }
-        meta.set(
-            layout::SCENE_AREA_LABEL_TEXT_SIZE,
-            None,
-            TextScaleMode::World,
-        );
+        let (size, mode) = label_text_mode(&spec.geometry, scene.0.viewport.zoom);
+        if !meta.matches(size, None, mode) {
+            meta.set(size, None, mode);
+        }
     }
     for spec in &specs {
         if seen.contains(&spec.geometry.node_id) {
@@ -232,7 +244,12 @@ pub(crate) fn sync_scene_area_labels(
             TextLayout::new(Justify::Center, LineBreak::NoWrap),
             Anchor::CENTER,
             TextBounds::default(),
-            LogicalText::world(layout::SCENE_AREA_LABEL_TEXT_SIZE, None),
+            {
+                let (size, mode) = label_text_mode(&spec.geometry, scene.0.viewport.zoom);
+                let mut meta = LogicalText::world(size, None);
+                meta.set(size, None, mode);
+                meta
+            },
             Transform::from_xyz(
                 spec.geometry.center.x,
                 -spec.geometry.center.y,
@@ -263,7 +280,7 @@ pub(crate) fn sync_scene_area_labels(
     for spec in &specs {
         let path = layout::scene_area_label_outline(&spec.geometry);
         geometry.polygon(&path, LABEL_Z, spec.fill);
-        geometry.outline(&path, 1.0, LABEL_Z + 0.001, spec.border);
+        geometry.outline(&path, spec.geometry.scale(), LABEL_Z + 0.001, spec.border);
     }
     let handle = meshes.add(geometry.build());
     if let Some(entity) = layer.entity {

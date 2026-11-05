@@ -58,11 +58,6 @@ export type CanvasRuntimeOptions = {
   isModalActive: () => boolean;
   /** 聚焦相机输入门禁（只有真正 modal 阻断；change: fix-model-focus-navigation-and-camera-parity）。 */
   isFocusInputBlocked?: () => boolean;
-  /**
-   * 每帧节点顶部操作横条描述（change: 2026-10-13-add-node-to-film-set-shortcut）。
-   * 由宿主从 `canvas.node-action` 贡献聚合；缺省/空则不绘制横条。
-   */
-  getNodeActionToolbars?: () => ReadonlyMap<string, import("@woohaa3/contracts").BevyNodeActionsPresentation>;
   /** 顶部操作横条命中回传（`actionId` = 贡献 id；`menu` 为独立设置箭头）。 */
   onNodeAction?: (hit: { nodeId: string; actionId: string; menu: boolean }) => void;
   /** 本地视口变化（pan/zoom）；供瞬时 overlay 重排。 */

@@ -61,7 +61,8 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       const canvas = document.getElementById("bevy-canvas");
       const fixtureArea = dock?.closest<HTMLElement>("[data-node-anchor-area]") ?? null;
       const areaElement = fixtureArea ?? canvas;
-      const node = runtime.nodeScreenRect(nodeId);
+      // `panel` 锚点让世界镜头在 3D 机位可见时贴机位底点，否则退回卡片（见 interaction-controller）。
+      const node = runtime.nodeScreenRect(nodeId, "panel");
       if (!dock || !areaElement || !node) {
         if (dock) {
           dock.style.visibility = "hidden";
@@ -71,7 +72,9 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       }
       const bounds = areaElement.getBoundingClientRect();
       const area = usableCanvasArea({ left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, fixtureArea ? [] : visibleOcclusions());
-      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current);
+      // 节点面板统一优先落在锚点下方：3D 模型/镜头不再翻到模型上方遮挡对象，2D 节点也不随
+      // 视口在「上/下/贴边」之间跳。下方确实放不下时依次退到侧面、再退到视口边缘。
+      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, "below");
       if (!next) {
         dock.style.visibility = "hidden";
         dock.removeAttribute("data-placement");

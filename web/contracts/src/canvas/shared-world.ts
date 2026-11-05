@@ -6,7 +6,16 @@ export const SHARED_WORLD_UNITS_PER_METER = 64;
 export const WORKFLOW_GROUP_2D_NODE_TYPE = "workflow-group-2d" as const;
 export const SCENE_AREA_NODE_TYPE = "scene-area" as const;
 export const WORLD_CAMERA_NODE_TYPE = "world-camera" as const;
-export const SCENE_FOOTPRINT_TOLERANCE_METERS = 1e-6;
+/**
+ * Fixed metric tolerance for scene-area containment (never scaled by zoom).
+ *
+ * Models often carry thin decorative geometry (arch ribs, trims) whose projected
+ * AABB sticks a few centimetres past what the user sees as the model edge. A
+ * user-sized director area around that visible edge must still count as "fully
+ * contained", otherwise the whole model silently leaves the move/edit set. The
+ * tolerance stays small enough that genuinely partial models remain read-only.
+ */
+export const SCENE_FOOTPRINT_TOLERANCE_METERS = 0.05;
 export const WORLD_ROTATION_UNIT_TOLERANCE = 1e-6;
 /**
  * Authoring-input tolerance for a supplied rotation (squared norm). Storage stays

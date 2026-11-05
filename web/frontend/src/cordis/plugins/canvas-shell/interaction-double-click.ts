@@ -12,6 +12,7 @@ import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import type { InteractionCore } from "./interaction-core.js";
 import { builtinNodeCapabilityResolver } from "@woohaa3/contracts";
+import { shouldSuppressDoubleClickFocus } from "./input/selection/sequence.js";
 
 export function createDoubleClickHandler(core: InteractionCore) {
   const { options, canvas, model, setSelection, activeViewport, surfaceSize } = core;
@@ -89,6 +90,9 @@ export function createDoubleClickHandler(core: InteractionCore) {
       if (resolved && canonical && canonicalType !== undefined) {
         event.preventDefault();
         setSelection([resolved.nodeId]);
+        // 这次双击如果是在“选入”模型（双击开始时它还没被选中），只完成选择，
+        // 不再叠加放大聚焦；模型原本已选中时才保留双击进入聚焦。
+        if (shouldSuppressDoubleClickFocus(core.state, resolved.nodeId)) return;
         // 聚焦入口统一经 Canvas Navigation（design D7）；缺省回落到直接控制器调用（测试）。
         // 复合资产类别按严格业务身份（type + extensionId）选择工作区 kind：片场走宿主 model
         // 编辑器，炉体等其他业务走 extension 工作区（change: 2026-10-11-extract-film-set-extension，D11）。

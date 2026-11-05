@@ -16,6 +16,7 @@ import type { WheelSourceState } from "./input/wheel-gesture.js";
 import type { createLocalViewportStore } from "../canvas-runtime/local-viewport.js";
 import type { ProbeCandidate } from "../canvas-runtime/bevy-runtime.js";
 import type { planMoveNodes } from "../../../extension-api/command-planner.js";
+import type { SelectionPressRecord } from "./input/selection/types.js";
 
 export type Viewport = { x: number; y: number; zoom: number };
 export type Map2D = Map<string, { x: number; y: number }>;
@@ -35,6 +36,9 @@ export type DragAttachKeyboardController = {
 export type InteractionState = {
   gesture: Gesture;
   selected: string[];
+  /** 最近一次节点按下的选择记录；双击用它区分“选入模型”和“已选后聚焦”。 */
+  lastSelectionPress: SelectionPressRecord | null;
+  previousSelectionPress: SelectionPressRecord | null;
   localPositions: Map2D;
   localSizes: SizeMap;
   draft: { source: string; side: "input" | "output"; x: number; y: number } | null;

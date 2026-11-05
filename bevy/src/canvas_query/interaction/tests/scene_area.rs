@@ -98,3 +98,70 @@ fn workflow_frame_only_hits_perimeter_leaving_interior_for_members_and_marquee()
         assert_eq!(point_query(generation, -8. / zoom, 100., zoom, None).hit, None);
     }
 }
+
+#[test]
+fn scope_titles_compensate_only_when_zoomed_out_and_have_room() {
+    use crate::canvas_query::layout;
+    let group = |width| serde_json::from_value::<GraphNode>(serde_json::json!({
+        "id":"g", "type":"workflow-group-2d", "x":0,"y":0,"width":width,"height":1000,
+        "chrome":{"kind":"frame","groupId":"g","memberNodeIds":[]}
+    })).unwrap();
+    let large = group(5000.0);
+    let base = layout::workflow_group_label_geometry_for_zoom(&large, 1.0).unwrap();
+    assert_eq!((base.width, base.height), (200.0, 22.0));
+    for zoom in [0.1, 0.2, 0.5, 0.8, 1.0, 2.0, 12.0] {
+        let g = layout::workflow_group_label_geometry_for_zoom(&large, zoom).unwrap();
+        assert!((g.height * zoom - (22.0 * zoom).max(18.0)).abs() < 0.001);
+        assert!((g.width / g.height - base.width / base.height).abs() < 0.001);
+        assert!(g.width <= large.width * 0.72);
+        assert!((g.center.x - g.width / 2.0 - 12.0).abs() < 0.001);
+        if zoom >= 1.0 { assert_eq!(g, base); }
+    }
+    let small = group(200.0);
+    let tiny = layout::workflow_group_label_geometry_for_zoom(&small, 0.1).unwrap();
+    assert_eq!(tiny.height, 22.0, "a tiny overview scope must not acquire an oversized title");
+    let mut area = area();
+    area.bounds.max.u = 200.0;
+    area.bounds.max.v = 200.0;
+    let a = layout::scene_area_label_geometry_for_zoom(&area, 1.0).unwrap();
+    let b = layout::scene_area_label_geometry_for_zoom(&area, 0.1).unwrap();
+    assert_eq!(a.center, b.center);
+    assert_eq!(a.axis, b.axis);
+    assert!((b.height * 0.1 - 18.0).abs() < 0.001);
+}
+
+#[test]
+fn scope_title_hits_follow_viewport_and_position_increments() {
+    use crate::canvas_query::layout;
+    clear_snapshot();
+    let group: GraphNode = serde_json::from_value(serde_json::json!({
+        "id":"g", "type":"workflow-group-2d", "x":0,"y":0,"width":5000,"height":1000,
+        "chrome":{"kind":"frame","groupId":"g","memberNodeIds":[]}
+    })).unwrap();
+    let mut s = scene(vec![group], vec![]);
+    let mut area = area();
+    area.bounds.max.u = 200.0;
+    area.bounds.max.v = 200.0;
+    s.scene_areas = vec![area];
+    let base = accept_scene(&s);
+    let large = layout::workflow_group_label_geometry_for_zoom(&s.nodes[0], 0.1).unwrap();
+    let probe = Vec2::new(large.center.x, -large.height * 0.4);
+    assert_eq!(point_query(base, probe.x, probe.y, 1.0, None).hit, None);
+    let view = crate::protocol::Viewport { x: 30.0, y: 50.0, zoom: 0.1 };
+    let generation = accept_viewport(base, view).unwrap();
+    assert_eq!(point_query(generation, probe.x, probe.y, 0.1, None).hit,
+        Some(PointHit::Node { node_id: "g".into() }));
+    let area_g = layout::scene_area_label_geometry_for_zoom(&s.scene_areas[0], 0.1).unwrap();
+    let area_probe = area_g.center + area_g.axis * (area_g.width * 0.4);
+    assert_eq!(point_query(generation, area_probe.x, area_probe.y, 0.1, None).hit,
+        Some(PointHit::Node { node_id: "area".into() }));
+    let (generation, _) = accept_positions(&crate::protocol::PositionUpdateRequest {
+        version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.into(),
+        base_scene_generation: base,
+        positions: vec![crate::protocol::NodePosition { id: "g".into(), x: 100.0, y: 500.0 }],
+        viewport: None,
+    }).unwrap();
+    assert_eq!(point_query(generation, probe.x + 100.0, probe.y + 500.0, 0.1, None).hit,
+        Some(PointHit::Node { node_id: "g".into() }));
+    assert_eq!(point_query(generation, probe.x, probe.y, 0.1, None).hit, None);
+}

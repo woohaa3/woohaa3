@@ -138,13 +138,29 @@ type NodeEntry = {
   submitted?: boolean;
 };
 
+/**
+ * 正在后台准备、尚未替换当前纹理的目标绑定。
+ *
+ * 缩放会跨过 128/256/512/1024 档位。旧实现直接解绑旧纹理再解码新档，卡片在解码期间
+ * 只能画背景（表现为「先变灰再出现」）。这里保留当前绑定，等目标内容真正解码并上传
+ * 成功后才原子替换；失败或用户缩放回原档时继续显示旧图。
+ */
+type PendingEntry = {
+  url: string;
+  contentKey: string;
+  tier: ThumbnailTier;
+  load: NodeResourceLoad;
+};
+
 export function createTextureSync(options: TextureSyncOptions): TextureUploader {
   const loadImage = options.loadImage;
   const createCanvas = options.createCanvas ?? defaultRasterCanvasFactory;
   const residency = options.residency;
-  /** nodeId → 绑定信息。 */
+  /** nodeId → 当前正在显示的绑定信息。 */
   const entries = new Map<string, NodeEntry>();
-  /** contentKey → 共享解码内容。 */
+  /** nodeId → 后台准备中的目标绑定；上传成功前不替换 `entries`。 */
+  const pendingEntries = new Map<string, PendingEntry>();
+  /** contentKey（内容身份 + 尺寸档）→ 共享解码内容。 */
   const contents = new Map<string, ContentEntry>();
   const resourceDirty = new Set<string>();
   const loading = new NodeResourceLoading(options.onChange, id => resourceDirty.add(id));
@@ -177,8 +193,14 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
   let boundStructure = "";
   let boundDesired: Map<string, { url: string; tier: ThumbnailTier }> | null = null;
 
-  /** 内容身份：URL 本身（已含画布读提示）；不含 nodeId（design D4）。 */
-  const contentKeyOf = (url: string): string => url;
+  /**
+   * 内容身份：受控 URL + 尺寸档。
+   *
+   * 档位必须参与键：缩放跨档时新旧两份像素会在同一时间共存（旧图继续显示、新图后台解码），
+   * 只用 URL 会让后绑定的节点误用旧档像素，也会让 `releaseContent` 提前拆掉仍在显示的纹理。
+   * 不含 nodeId（design D4）。
+   */
+  const contentKeyOf = (url: string, tier: ThumbnailTier): string => `${url}\u0000${tier}`;
 
   /**
    * 该节点当前的准入信息。
@@ -251,10 +273,12 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     if (attempt >= IMAGE_RETRY_MAX_ATTEMPTS) return false;
     if (contents.get(key) !== target || target.nodes.size === 0) return false;
     target.retryAttempts = attempt + 1;
-    // 重新进入「加载中」：卡片继续显示自己的占位/上次合法图，而不是先闪一次错误态。
+    // 重新进入「加载中」：卡片继续显示占位/上次合法图，而不是先闪一次错误态。
     for (const nodeId of target.nodes) {
+      const pending = pendingEntries.get(nodeId);
       const node = entries.get(nodeId);
-      if (node) loading.setLoading(node.load, true);
+      const load = pending?.contentKey === target.key ? pending.load : node?.load;
+      if (load) loading.setLoading(load, true);
     }
     target.retryTimer = globalThis.setTimeout(() => {
       target.retryTimer = undefined;
@@ -326,9 +350,11 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         // 内容失败（4xx、解码失败）仍只走显式重试，静止帧不反复启动失败任务。
         if (isTransientImageFailure(error) && scheduleRetry(target, url, tier, purpose, key)) return;
         for (const nodeId of target.nodes) {
+          const pending = pendingEntries.get(nodeId);
           const node = entries.get(nodeId);
-          if (!node) continue;
-          loading.setLoading(node.load, false);
+          const load = pending?.contentKey === target.key ? pending.load : node?.load;
+          if (!load) continue;
+          loading.setLoading(load, false);
           options.runtime.reportRuntimeIssue?.({ key: `decode:image:${nodeId}`, scope: "texture", operation: "decode-image",
             nodeId, message: "图片预览加载失败，可以重试或更换素材。", detail: errorDetail(error),
             recoverable: true, retainedPreview: uploaded.has(nodeId) });
@@ -347,71 +373,154 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
    */
   const hasPendingUpload = (content: ContentEntry): boolean => {
     for (const nodeId of content.nodes) {
+      const pending = pendingEntries.get(nodeId);
+      if (pending?.contentKey === content.key) return true;
       const entry = entries.get(nodeId);
       if (entry && !entry.sent) return true;
     }
     return false;
   };
 
-  /** 把某个已解码内容绑定到节点（必要时重新上传）。 */
-  const bindNode = (nodeId: string, url: string, tier: ThumbnailTier): void => {
-    const key = contentKeyOf(url);
+  /** 解除节点对某份内容的引用；最后一个引用结束时释放像素/在途解码。 */
+  const detachContent = (nodeId: string, contentKey: string): void => {
+    const content = contents.get(contentKey);
+    if (!content) return;
+    content.nodes.delete(nodeId);
+    // 最后引用者消失时，待定的自动重试也要取消，不能对已删除节点重试。
+    if (content.nodes.size === 0 && content.retryTimer !== undefined) {
+      globalThis.clearTimeout(content.retryTimer);
+      content.retryTimer = undefined;
+    }
+    releaseContent(contentKey);
+  };
+
+  /** 彻底移除节点的当前纹理绑定（删除/未准入/换源且无可保留旧图）。 */
+  const removeBinding = (nodeId: string): void => {
+    const entry = entries.get(nodeId);
+    setUploaded(nodeId, false);
+    uploads.clear(`image:${nodeId}`);
+    options.runtime.clearRuntimeIssue?.(`decode:image:${nodeId}`);
+    if (!entry) return;
+    entries.delete(nodeId);
+    loading.remove(entry.load);
+    detachContent(nodeId, entry.contentKey);
+  };
+
+  /** 放弃尚未替换的后台目标（用户缩放回原档/节点删除）。 */
+  const dropPending = (nodeId: string): void => {
+    const pending = pendingEntries.get(nodeId);
+    if (!pending) return;
+    pendingEntries.delete(nodeId);
+    detachContent(nodeId, pending.contentKey);
+  };
+
+  /** 把后台目标提升为当前绑定。`submitted` 为 true 表示刚受理上传、等待 GPU 回执。 */
+  const adoptPending = (nodeId: string, submitted: boolean): NodeEntry | null => {
+    const pending = pendingEntries.get(nodeId);
+    if (!pending) return null;
     const previous = entries.get(nodeId);
-    const unchanged = previous && previous.url === url && previous.tier === tier;
-    if (unchanged) {
-      // 引用已存在：只要内容还在就保持。
-      if (contents.has(key)) return;
-    }
-    if (previous && (previous.url !== url || previous.tier !== tier)) {
-      const oldContent = contents.get(previous.contentKey);
-      oldContent?.nodes.delete(nodeId);
-      if (previous.contentKey !== key) releaseContent(previous.contentKey);
+    if (previous) {
+      entries.delete(nodeId);
       uploads.clear(`image:${nodeId}`);
+      detachContent(nodeId, previous.contentKey);
     }
-    const content = contents.get(key);
-    if (content) {
-      content.nodes.add(nodeId);
-      entries.set(nodeId, { url, contentKey: key, tier, load: previous?.load ?? loading.track(nodeId, url), sent: previous?.sent ?? false });
-      resourceDirty.add(nodeId);
-      return;
-    }
+    pendingEntries.delete(nodeId);
     const entry: NodeEntry = {
-      url,
-      contentKey: key,
-      tier,
-      load: previous?.load ?? loading.track(nodeId, url),
-      sent: previous?.sent ?? false
+      url: pending.url,
+      contentKey: pending.contentKey,
+      tier: pending.tier,
+      load: pending.load,
+      sent: false,
+      ...(submitted ? { submitted: true } : {})
     };
     entries.set(nodeId, entry);
     resourceDirty.add(nodeId);
-    loading.setLoading(entry.load, true);
+    return entry;
+  };
+
+  /** 把某个已解码内容绑定到节点（必要时重新上传）。 */
+  const bindNode = (nodeId: string, url: string, tier: ThumbnailTier): void => {
+    const key = contentKeyOf(url, tier);
+    const previous = entries.get(nodeId);
+    if (previous && previous.url === url && previous.tier === tier && contents.has(key)) return;
+    if (previous) removeBinding(nodeId);
+    const load = loading.track(nodeId, url);
+    loading.setLoading(load, true);
+    const content = contents.get(key);
+    if (content) {
+      content.nodes.add(nodeId);
+      entries.set(nodeId, { url, contentKey: key, tier, load, sent: false });
+      resourceDirty.add(nodeId);
+      return;
+    }
+    const entry: NodeEntry = { url, contentKey: key, tier, load, sent: false };
+    entries.set(nodeId, entry);
+    resourceDirty.add(nodeId);
     const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]), decodeKey: key };
     contents.set(key, target);
     // 先准入再创建：解码本身也经 image 通道（并发 + 真实在途计数）。
     startDecode(target, url, tier, admissionOf(nodeId).purpose, key);
   };
 
-  /** 清理不再需要的节点绑定（删除/换源/未准入/失权）。 */
-  const retainNodes = (desired: ReadonlyMap<string, { url: string; tier: ThumbnailTier }>): void => {
-    for (const [id, entry] of entries) {
-      const want = desired.get(id);
-      if (want && want.url === entry.url && want.tier === entry.tier) continue;
-      entries.delete(id);
-      setUploaded(id, false);
-      uploads.clear(`image:${id}`);
-      loading.remove(entry.load);
-      options.runtime.clearRuntimeIssue?.(`decode:image:${id}`);
-      const content = contents.get(entry.contentKey);
-      if (content) {
-        content.nodes.delete(id);
-        // 最后引用者消失时，待定的自动重试也要取消，不能对已删除节点重试。
-        if (content.nodes.size === 0 && content.retryTimer !== undefined) {
-          globalThis.clearTimeout(content.retryTimer);
-          content.retryTimer = undefined;
-        }
-      }
-      releaseContent(entry.contentKey);
+  /**
+   * 后台准备目标档位/新内容，但不拆当前纹理。
+   *
+   * 只有节点已经有可显示纹理时才走这里；冷卡片仍立即解码（没有旧图可保留）。
+   */
+  const startPending = (nodeId: string, url: string, tier: ThumbnailTier): void => {
+    const previous = pendingEntries.get(nodeId);
+    if (previous && previous.url === url && previous.tier === tier && contents.has(previous.contentKey)) return;
+    if (previous) dropPending(nodeId);
+    const key = contentKeyOf(url, tier);
+    const load = loading.track(nodeId, url);
+    pendingEntries.set(nodeId, { url, contentKey: key, tier, load });
+    resourceDirty.add(nodeId);
+    const content = contents.get(key);
+    if (content) {
+      content.nodes.add(nodeId);
+      return;
     }
+    const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]), decodeKey: key };
+    contents.set(key, target);
+    startDecode(target, url, tier, admissionOf(nodeId).purpose, key);
+  };
+
+  /**
+   * 让当前绑定收敛到目标集合。
+   *
+   * - 节点不再需要：立即释放（删除/未准入不能被宽限拖住）。
+   * - 目标与当前一致：保持不变，并撤掉多余的后台目标。
+   * - 当前没有可显示纹理：直接重新绑定（此时变灰不可避免，但视口内新卡片本来就在加载）。
+   * - 当前有可显示纹理而目标变了：保留旧图，后台准备新档，等上传成功再替换。
+   */
+  const retainNodes = (desired: ReadonlyMap<string, { url: string; tier: ThumbnailTier }>): boolean => {
+    let changed = false;
+    for (const id of [...entries.keys()]) {
+      if (!desired.has(id)) { removeBinding(id); changed = true; }
+    }
+    for (const id of [...pendingEntries.keys()]) {
+      if (!desired.has(id)) dropPending(id);
+    }
+    for (const [id, want] of desired) {
+      const entry = entries.get(id);
+      if (entry && entry.url === want.url && entry.tier === want.tier && contents.has(entry.contentKey)) {
+        if (pendingEntries.has(id)) {
+          dropPending(id);
+          const load = loading.track(id, want.url);
+          loading.setLoading(load, false);
+        }
+        continue;
+      }
+      if (!entry || !uploaded.has(id) || !contents.has(entry.contentKey)) {
+        dropPending(id);
+        bindNode(id, want.url, want.tier);
+        changed = true;
+        continue;
+      }
+      // 旧纹理仍可用：先留着，等新档真正上传成功再原子替换。
+      startPending(id, want.url, want.tier);
+    }
+    return changed;
   };
 
   const acknowledged = new Map<string, import("@woohaa3/contracts").CanvasNodeResourceState>();
@@ -441,6 +550,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       const canvas = options.getCanvas();
       if (!canvas) {
         entries.clear();
+        pendingEntries.clear();
         for (const content of contents.values()) releaseImagePixels(content.pixels);
       contents.clear();
         clearUploaded();
@@ -478,6 +588,24 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         runtimeGeneration = nextGeneration;
         clearUploaded(); previousOverride = null;
         previousDetails=undefined;
+        // GPU 代际已重建：旧纹理和后台目标都不能再假定存在。把目标直接提升为当前绑定，
+        // 由下方重新上传；保留 pending 会让旧条目先上传一份马上被替换的纹理。
+        for (const nodeId of [...pendingEntries.keys()]) {
+          const pending = pendingEntries.get(nodeId);
+          pendingEntries.delete(nodeId);
+          const previous = entries.get(nodeId);
+          if (previous) {
+            entries.delete(nodeId);
+            detachContent(nodeId, previous.contentKey);
+          }
+          if (pending) {
+            entries.set(nodeId, {
+              url: pending.url, contentKey: pending.contentKey, tier: pending.tier,
+              load: pending.load, sent: false
+            });
+            resourceDirty.add(nodeId);
+          }
+        }
         for (const entry of entries.values()) { entry.sent = false; entry.submitted = false; loading.setLoading(entry.load, true); }
       }
       const retry = options.runtime.retryVersion?.() ?? 0;
@@ -491,7 +619,8 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
           }
           if (content.failed) contents.delete(key);
         }
-        for (const [id, entry] of [...entries]) if (!desired.has(id) || !contents.has(entry.contentKey)) entries.delete(id);
+        for (const [id, entry] of [...entries]) if (!desired.has(id) || !contents.has(entry.contentKey)) removeBinding(id);
+        for (const [id, pending] of [...pendingEntries]) if (!desired.has(id) || !contents.has(pending.contentKey)) dropPending(id);
         previousOverride = null;
         previousDetails=undefined;
       }
@@ -505,12 +634,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       let changed = false;
       if (bindingsChanged || retryChanged) {
         for (const id of uploaded) if (!desired.has(id)) setUploaded(id, false);
-        retainNodes(desired);
-        for (const [id, { url, tier }] of desired) {
-          const before = entries.get(id);
-          bindNode(id, url, tier);
-          if (!before || before.url !== url || before.tier !== tier) changed = true;
-        }
+        if (retainNodes(desired)) changed = true;
       }
       if (override && override !== previousOverride) {
         focusSource = `focus:${override.nodeId}:${++nextFocusSource}`;
@@ -544,7 +668,37 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       }
       // A failed focus upgrade still allows the card to upload once decoding finishes.
       const restarted = new Set<string>();
+      // 后台目标先于普通条目上传：旧纹理继续显示，只有目标真正受理后才替换。
+      for (const [id, pending] of [...pendingEntries]) {
+        if (id === override?.nodeId && overrideUploaded) continue;
+        const content = contents.get(pending.contentKey);
+        if (!content) continue;
+        if (content.released) {
+          if (content.ready && !content.failed && !restarted.has(content.key)) {
+            restarted.add(content.key);
+            startDecode(content, content.url, content.tier, admissionOf(id).purpose, content.key);
+          }
+          continue;
+        }
+        if (!content.ready || !content.pixels || !content.width || !content.height) continue;
+        if (!(residency?.spendUploadBytes(content.width * content.height * 4) ?? true)) continue;
+        const accepted = uploads.run(`image:${id}`, content, id,
+          () => options.runtime.setTexture(id, content.width!, content.height!, content.pixels!,
+            { sourceKey: content.url, preserveFailure: id === override?.nodeId }) !== false);
+        if (!accepted) {
+          loading.setLoading(pending.load, false);
+          continue;
+        }
+        const committed = adoptPending(id, true);
+        setUploaded(id, true);
+        changed = true;
+        if (committed && (options.runtime.textureApplied?.(id, content.width, content.height, content.url) ?? true)) {
+          committed.sent = true;
+          loading.setLoading(committed.load, false);
+        }
+      }
       for (const [id, entry] of entries) {
+        if (pendingEntries.has(id)) continue;
         if ((id === override?.nodeId && overrideUploaded) || entry.sent) continue;
         const content = contents.get(entry.contentKey);
         if (!content) continue;
@@ -609,6 +763,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       previousDetails=null;
       uploads.retainNodes(new Set());
       for (const id of entries.keys()) options.runtime.clearRuntimeIssue?.(`decode:image:${id}`);
+      for (const id of pendingEntries.keys()) options.runtime.clearRuntimeIssue?.(`decode:image:${id}`);
       for (const content of contents.values()) residency?.cancel(content.decodeKey);
       for (const content of contents.values()) {
         if (content.retryTimer === undefined) continue;
@@ -616,6 +771,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         content.retryTimer = undefined;
       }
       entries.clear();
+      pendingEntries.clear();
       for (const content of contents.values()) releaseImagePixels(content.pixels);
       contents.clear();
       clearUploaded();

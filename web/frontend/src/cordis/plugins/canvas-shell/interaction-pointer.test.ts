@@ -459,11 +459,11 @@ describe("连线悬停与删除按钮（change: add-edge-hover-delete）", () =>
   it.each([0, 248])("port at x=%s acquires before following, resets outside its fixed anchor range", x => {
     const { dom, controller, scenes } = setup();
     // Inside the extension alone must not acquire a port.
-    move(dom, x + 20); controller.flush();
+    move(dom, x + 32); controller.flush();
     expect(scenes.at(-1)?.hover).not.toMatchObject({ port: x ? "output" : "input" });
     move(dom, x); controller.flush();
-    move(dom, x + 20); controller.flush();
-    expect(scenes.at(-1)).toMatchObject({ hover: { nodeId: "n1", port: x ? "output" : "input", cursor: { x: x + 20, y: 116 } } });
+    move(dom, x + 32); controller.flush();
+    expect(scenes.at(-1)).toMatchObject({ hover: { nodeId: "n1", port: x ? "output" : "input", cursor: { x: x + 32, y: 116 } } });
     move(dom, x + 40); controller.flush();
     expect(scenes.at(-1)?.hover).not.toMatchObject({ port: x ? "output" : "input" });
     controller.dispose();

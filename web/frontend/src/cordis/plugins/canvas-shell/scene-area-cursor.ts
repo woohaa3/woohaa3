@@ -86,9 +86,11 @@ export function workflowGroupInteraction(
   const bounds = groups.get(hit.nodeId);
   if (!bounds || (hit.kind !== "node" && hit.kind !== "resize")) return null;
   const { x, y, width, height } = bounds;
-  // Same R6/22px title geometry as Rust workflow_group_label_geometry.
-  const title = { x: x + 12, y: y - 11, width: Math.max(56, Math.min(200, width * 0.72)), height: 22 };
-  if (hit.kind === "node" && roundedDistance(title, point, 6) <= 0) return { intent: "move", cursor: "grab" };
+  // Same bounded title compensation as Rust scope_label_scale.
+  const baseWidth = Math.max(56, Math.min(200, width * 0.72));
+  const scale = Math.min(Math.max(1, 18 / (22 * Math.max(0.01, zoom))), Math.max(1, width * 0.72 / baseWidth));
+  const title = { x: x + 12, y: y - 11 * scale, width: baseWidth * scale, height: 22 * scale };
+  if (hit.kind === "node" && roundedDistance(title, point, 6 * scale) <= 0) return { intent: "move", cursor: "grab" };
   const tolerance = 6 / Math.max(0.01, zoom);
   const radius = Math.min(12, width / 2, height / 2);
   if (hit.kind !== "resize" && Math.abs(roundedDistance(bounds, point, radius)) > tolerance) return null;

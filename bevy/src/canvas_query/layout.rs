@@ -157,8 +157,8 @@ pub(crate) fn hit_radius(zoom: f32) -> f32 {
     (10.0 / zoom).max(10.0)
 }
 
-/// A 24-unit button acquires at its normal hit radius, then follows for
-/// another half diameter. The anchor stays fixed so it cannot be dragged away.
+/// A 24-unit button acquires at its normal hit radius, then follows for one
+/// full button diameter. The anchor stays fixed so it cannot be dragged away.
 pub(crate) fn magnetic_port_center(
     anchor: Vec2,
     hover: &crate::protocol::NodeHover,
@@ -167,13 +167,13 @@ pub(crate) fn magnetic_port_center(
     if hover.port.as_deref() == Some(side)
         && let Some(cursor) = hover.cursor
     {
-        return anchor + (Vec2::new(cursor.x, cursor.y) - anchor).clamp_length_max(12.0);
+        return anchor + (Vec2::new(cursor.x, cursor.y) - anchor).clamp_length_max(24.0);
     }
     anchor
 }
 
 pub(crate) fn magnetic_port_radius(zoom: f32) -> f32 {
-    hit_radius(zoom).max(12.0) + 12.0
+    hit_radius(zoom).max(12.0) + 24.0
 }
 
 /// 边命中距离（世界坐标）：7 / zoom，与既有 JS 判定一致。
@@ -202,9 +202,11 @@ pub(crate) fn history_strip_icon(x: f32, y: f32, width: f32, height: f32) -> Vec
     )
 }
 
-/// 导演区边框标签（Bevy 2D 胶囊）的几何：贴在投影后最靠上的边框，沿边框方向倾斜。
+/// Scope nameplate baseline dimensions; ground scopes follow the lower-left edge.
 pub(crate) const SCENE_AREA_LABEL_HEIGHT: f32 = 22.0;
 pub(crate) const SCENE_AREA_LABEL_TEXT_SIZE: f32 = 12.0;
+/// Zoomed-out titles aim for an 18 CSS-pixel height when their edge has room.
+const SCOPE_LABEL_MIN_SCREEN_HEIGHT: f32 = 18.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SceneAreaLabelGeometry {
@@ -215,6 +217,35 @@ pub(crate) struct SceneAreaLabelGeometry {
     pub(crate) axis: Vec2,
     pub(crate) width: f32,
     pub(crate) height: f32,
+}
+
+fn safe_zoom(zoom: f32) -> f32 {
+    if zoom.is_finite() && zoom > 0.0 {
+        zoom
+    } else {
+        1.0
+    }
+}
+
+/// Only compensate below 18/22 zoom. Scale the full capsule uniformly, with
+/// a 72% edge budget so tiny scopes retain their place in the visual hierarchy.
+fn scope_label_scale(edge_length: f32, zoom: f32) -> f32 {
+    let base_width = (edge_length * 0.72).clamp(56.0, 200.0);
+    let desired =
+        (SCOPE_LABEL_MIN_SCREEN_HEIGHT / (SCENE_AREA_LABEL_HEIGHT * safe_zoom(zoom))).max(1.0);
+    desired.min((edge_length * 0.72 / base_width).max(1.0))
+}
+
+impl SceneAreaLabelGeometry {
+    pub(crate) fn scale(&self) -> f32 {
+        self.height / SCENE_AREA_LABEL_HEIGHT
+    }
+    pub(crate) fn text_size(&self) -> f32 {
+        SCENE_AREA_LABEL_TEXT_SIZE * self.scale()
+    }
+    pub(crate) fn padding(&self) -> f32 {
+        crate::scope_visual::LABEL_PADDING * self.scale()
+    }
 }
 
 /// 地面 `(u, v)` → canvas 坐标（与 web `worldToCanvasPoint` 同一等距投影）。
@@ -248,6 +279,13 @@ fn scene_area_canvas_corners(bounds: &crate::protocol::SceneAreaBounds) -> Optio
 pub(crate) fn scene_area_label_geometry(
     area: &crate::protocol::SceneArea,
 ) -> Option<SceneAreaLabelGeometry> {
+    scene_area_label_geometry_for_zoom(area, 1.0)
+}
+
+pub(crate) fn scene_area_label_geometry_for_zoom(
+    area: &crate::protocol::SceneArea,
+    zoom: f32,
+) -> Option<SceneAreaLabelGeometry> {
     let corners = scene_area_canvas_corners(&area.bounds)?;
     // 标签固定在**左下边**：取投影后最左角与最下角之间的那条边框。
     let mut left = 0;
@@ -276,9 +314,7 @@ pub(crate) fn scene_area_label_geometry(
             let b = corners[(index + 1) % 4];
             ((a + b) * 0.5, a, b)
         })
-        .max_by(|left, right| {
-            (left.0.y - left.0.x).total_cmp(&(right.0.y - right.0.x))
-        })
+        .max_by(|left, right| (left.0.y - left.0.x).total_cmp(&(right.0.y - right.0.x)))
         .map(|(_, a, b)| (a, b))?;
     let (a, b) = adjacent(left, bottom).unwrap_or(fallback);
     let length = a.distance(b);
@@ -294,15 +330,23 @@ pub(crate) fn scene_area_label_geometry(
         node_id: area.node_id.clone(),
         center: (a + b) * 0.5,
         axis,
-        width: (length * 0.72).clamp(56.0, 200.0),
-        height: SCENE_AREA_LABEL_HEIGHT,
+        width: (length * 0.72).clamp(56.0, 200.0) * scope_label_scale(length, zoom),
+        height: SCENE_AREA_LABEL_HEIGHT * scope_label_scale(length, zoom),
     })
 }
 
 /// 胶囊轮廓（canvas 坐标，y 向下）；绘制与命中共用同一几何。
 pub(crate) fn scene_area_label_outline(geometry: &SceneAreaLabelGeometry) -> Vec<Vec2> {
-    let local = crate::scope_visual::rounded_path(-geometry.width / 2.0,
-        -geometry.height / 2.0, geometry.width, geometry.height, crate::scope_visual::LABEL_RADIUS);
+    let radius = (crate::scope_visual::LABEL_RADIUS * geometry.height / SCENE_AREA_LABEL_HEIGHT)
+        .min(geometry.width / 2.0)
+        .min(geometry.height / 2.0);
+    let local = crate::scope_visual::rounded_path(
+        -geometry.width / 2.0,
+        -geometry.height / 2.0,
+        geometry.width,
+        geometry.height,
+        radius,
+    );
     let (sin, cos) = (geometry.axis.y, geometry.axis.x);
     local
         .into_iter()
@@ -320,11 +364,37 @@ pub(crate) fn scene_area_label_rotation(geometry: &SceneAreaLabelGeometry) -> f3
 
 /// 2D scope title uses the same dimensions and contour as ground scope labels.
 pub(crate) fn workflow_group_label_geometry(node: &GraphNode) -> Option<SceneAreaLabelGeometry> {
-    if !matches!(node.chrome, crate::protocol::NodeChrome::Frame { .. }) { return None; }
-    let width = (node.width * 0.72).clamp(56.0, 200.0);
-    Some(SceneAreaLabelGeometry { node_id: node.id.clone(),
-        center: Vec2::new(node.x + 12.0 + width / 2.0, node.y), axis: Vec2::X,
-        width, height: SCENE_AREA_LABEL_HEIGHT })
+    workflow_group_label_geometry_for_zoom(node, 1.0)
+}
+
+pub(crate) fn workflow_group_label_geometry_for_zoom(
+    node: &GraphNode,
+    zoom: f32,
+) -> Option<SceneAreaLabelGeometry> {
+    if !matches!(node.chrome, crate::protocol::NodeChrome::Frame { .. }) {
+        return None;
+    }
+    Some(workflow_group_label_for_bounds(
+        &node.id,
+        (node.x, node.y, node.width, node.height),
+        zoom,
+    ))
+}
+
+pub(crate) fn workflow_group_label_for_bounds(
+    id: &str,
+    (x, y, width, _height): (f32, f32, f32, f32),
+    zoom: f32,
+) -> SceneAreaLabelGeometry {
+    let scale = scope_label_scale(width, zoom);
+    let label_width = (width * 0.72).clamp(56.0, 200.0) * scale;
+    SceneAreaLabelGeometry {
+        node_id: id.to_owned(),
+        center: Vec2::new(x + 12.0 + label_width / 2.0, y),
+        axis: Vec2::X,
+        width: label_width,
+        height: SCENE_AREA_LABEL_HEIGHT * scale,
+    }
 }
 
 /// All scope labels, shared by painting and pointer hit testing.
@@ -332,8 +402,18 @@ pub(crate) fn scene_area_labels(scene: &crate::protocol::Scene) -> Vec<SceneArea
     if scene.model_focus.is_some() || scene.image_focus.is_some() || scene.video_focus.is_some() {
         return Vec::new();
     }
-    scene.scene_areas.iter().filter_map(scene_area_label_geometry)
-        .chain(scene.nodes.iter().filter_map(workflow_group_label_geometry)).collect()
+    let zoom = scene.viewport.zoom;
+    scene
+        .scene_areas
+        .iter()
+        .filter_map(|area| scene_area_label_geometry_for_zoom(area, zoom))
+        .chain(
+            scene
+                .nodes
+                .iter()
+                .filter_map(|node| workflow_group_label_geometry_for_zoom(node, zoom)),
+        )
+        .collect()
 }
 
 /// 第 `index` 个圆点中心，紧凑居中排列；与 contracts 同公式。

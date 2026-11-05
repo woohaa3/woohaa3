@@ -77,3 +77,11 @@ describe("workflow group border cursor", () => {
     expect(workflowGroupCursor(groups, null, point, 1)).toBeNull();
   });
 });
+
+it("enlarged group titles remain move targets while nearby frame edges resize", () => {
+  const groups = new Map([["g", { x: 0, y: 0, width: 5000, height: 2000 }]]);
+  const hit = { kind: "node" as const, nodeId: "g" };
+  expect(workflowGroupCursor(groups, hit, { x: 700, y: -60 }, 0.1)).toBe("grab");
+  expect(workflowGroupCursor(groups, hit, { x: 700, y: -60 }, 1)).toBeNull();
+  expect(workflowGroupCursor(groups, hit, { x: 2200, y: 0 }, 0.1)).toBe("ns-resize");
+});

@@ -6,13 +6,15 @@
  * - 释放时提交一次 `nodeData.patch`，并清掉预览避免双倍位移；
  * - 取消 / Escape 不提交。
  */
-import { expect, it } from "vitest";
+import { expect, it, afterEach } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
 import { installInteractionController } from "./interaction-controller.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
+import { nodeSelectionStore } from "../../services/selection-store.js";
 import { getSession, harness, installSharedSession, runtimeCapturing, submitted } from "./test-support/controller-harness.js";
 
 installSharedSession();
+afterEach(() => nodeSelectionStore.reset());
 
 const instance = {
   kind: "world-instance" as const,
@@ -133,5 +135,165 @@ it("只读会话中世界模型不开始地面拖动", () => {
   dom.fire("pointerup", { clientX: 200, clientY: 180 });
   controller.flush();
   expect(submitted).toHaveLength(0);
+  controller.dispose();
+});
+
+it("selects the containing director area before the world model", () => {
+  const base = worldCanvas();
+  const area = { id: "area", type: "scene-area", position: { x: 0, y: 0 } };
+  const canvas = {
+    ...base,
+    document: { ...base.document, nodes: [...base.document.nodes, area] },
+    nodeData: {
+      ...base.nodeData,
+      area: {
+        sceneArea: {
+          kind: "scene-area", version: "shared-world-v1", areaId: "a1", scopeVersion: "s1",
+          bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+        }
+      }
+    }
+  } as unknown as ServerCanvas;
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  const dom = harness();
+  const { runtime } = runtimeCapturing();
+  const controller = installInteractionController({
+    canvas: dom.canvas, getRuntime: () => runtime, getSession: () => getSession() as never,
+    target: dom.target as never
+  });
+  controller.flush();
+  submitted.length = 0;
+  // 世界模型 `m1` 的地面位置 (2,3) 落在导演区内：第一次点击先选中导演区。
+  dom.fire("pointerdown", { clientX: 150, clientY: 140 });
+  dom.fire("pointerup", { clientX: 150, clientY: 140 });
+  expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["area"]);
+  // 导演区已选中后，再次点击才落到模型本身。
+  dom.fire("pointerdown", { clientX: 150, clientY: 140 });
+  dom.fire("pointerup", { clientX: 150, clientY: 140 });
+  expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["m1"]);
+  controller.dispose();
+});
+
+it("selects a sibling world model directly once the area is already entered", () => {
+  const base = worldCanvas();
+  const area = { id: "area", type: "scene-area", position: { x: 0, y: 0 } };
+  const model2 = { id: "m2", type: "model3d", position: { x: 400, y: 100 }, width: 200, height: 160 };
+  const canvas = {
+    ...base,
+    document: { ...base.document, nodes: [...base.document.nodes, model2, area] },
+    nodeData: {
+      ...base.nodeData,
+      m2: { sharedWorldInstance: { ...instance, instanceId: "i2", transform: {
+        ...instance.transform, position: { u: 6, v: 6, h: 4 }
+      } } },
+      area: {
+        sceneArea: {
+          kind: "scene-area", version: "shared-world-v1", areaId: "a1", scopeVersion: "s1",
+          bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+        }
+      }
+    }
+  } as unknown as ServerCanvas;
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  const dom = harness();
+  const { runtime } = runtimeCapturing();
+  const controller = installInteractionController({
+    canvas: dom.canvas, getRuntime: () => runtime, getSession: () => getSession() as never,
+    target: dom.target as never
+  });
+  controller.flush();
+  submitted.length = 0;
+  // 第一次进入导演区，第二次才落到 m1。
+  dom.fire("pointerdown", { clientX: 150, clientY: 140 });
+  dom.fire("pointerup", { clientX: 150, clientY: 140 });
+  dom.fire("pointerdown", { clientX: 150, clientY: 140 });
+  dom.fire("pointerup", { clientX: 150, clientY: 140 });
+  expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["m1"]);
+  // m1 与 m2 同导演区：点 m2 直接切换，不再先选导演区。
+  dom.fire("pointerdown", { clientX: 450, clientY: 140 });
+  dom.fire("pointerup", { clientX: 450, clientY: 140 });
+  expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["m2"]);
+  controller.dispose();
+});
+
+it("switches sibling world models directly when both are hit only by the renderer pick", () => {
+  const base = worldCanvas();
+  const area = { id: "area", type: "scene-area", position: { x: 0, y: 0 } };
+  const canvas = {
+    ...base,
+    document: { ...base.document, nodes: [...base.document.nodes, { id: "m2", type: "model3d", position: { x: 400, y: 100 }, width: 200, height: 160 }, area] },
+    nodeData: {
+      ...base.nodeData,
+      m2: { sharedWorldInstance: { ...instance, instanceId: "i2", transform: {
+        ...instance.transform, position: { u: 6, v: 6, h: 4 }
+      } } },
+      area: {
+        sceneArea: {
+          kind: "scene-area", version: "shared-world-v1", areaId: "a1", scopeVersion: "s1",
+          bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+        }
+      }
+    }
+  } as unknown as ServerCanvas;
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  const dom = harness();
+  const { runtime } = runtimeCapturing({
+    pointHit: () => null,
+    modelPick: input => ({ nodeId: input.x >= 300 ? "m2" : "m1", target: [0, 0, 0], radius: 1 })
+  });
+  runtime.queryWorldGround = () => ({ ok: true, generation: runtime.interactionGeneration?.() ?? 0, value: { u: 2, v: 3 } });
+  const controller = installInteractionController({
+    canvas: dom.canvas, getRuntime: () => runtime, getSession: () => getSession() as never,
+    target: dom.target as never
+  });
+  controller.flush();
+  submitted.length = 0;
+  dom.fire("pointerdown", { clientX: 150, clientY: 140 });
+  dom.fire("pointerup", { clientX: 150, clientY: 140 });
+  dom.fire("pointerdown", { clientX: 150, clientY: 140 });
+  dom.fire("pointerup", { clientX: 150, clientY: 140 });
+  expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["m1"]);
+  dom.fire("pointerdown", { clientX: 450, clientY: 140 });
+  dom.fire("pointerup", { clientX: 450, clientY: 140 });
+  expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["m2"]);
+  controller.dispose();
+});
+
+it("applies the same area-first rule when the world model is hit only by the renderer pick", () => {
+  const base = worldCanvas();
+  const area = { id: "area", type: "scene-area", position: { x: 0, y: 0 } };
+  const canvas = {
+    ...base,
+    document: { ...base.document, nodes: [...base.document.nodes, area] },
+    nodeData: {
+      ...base.nodeData,
+      area: {
+        sceneArea: {
+          kind: "scene-area", version: "shared-world-v1", areaId: "a1", scopeVersion: "s1",
+          bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+        }
+      }
+    }
+  } as unknown as ServerCanvas;
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  const dom = harness();
+  // 真实世界模型没有卡片：点命中为空，只有渲染器拾取返回 nodeId。
+  const { runtime } = runtimeCapturing({
+    pointHit: () => null,
+    modelPick: () => ({ nodeId: "m1", target: [0, 0, 0], radius: 1 })
+  });
+  runtime.queryWorldGround = () => ({ ok: true, generation: runtime.interactionGeneration?.() ?? 0, value: { u: 2, v: 3 } });
+  const controller = installInteractionController({
+    canvas: dom.canvas, getRuntime: () => runtime, getSession: () => getSession() as never,
+    target: dom.target as never
+  });
+  controller.flush();
+  submitted.length = 0;
+  dom.fire("pointerdown", { clientX: 150, clientY: 140 });
+  dom.fire("pointerup", { clientX: 150, clientY: 140 });
+  expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["area"]);
+  dom.fire("pointerdown", { clientX: 150, clientY: 140 });
+  dom.fire("pointerup", { clientX: 150, clientY: 140 });
+  expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["m1"]);
   controller.dispose();
 });

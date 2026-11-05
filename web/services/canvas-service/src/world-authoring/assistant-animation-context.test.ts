@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
   decodeSceneAreaData,
+  executeWorldAnimationScript,
   type WorldAnimationScript,
   type WorldToolContext
 } from "@woohaa3/contracts";
@@ -192,5 +193,60 @@ describe("current director animation in assistant context", () => {
     const area = published.ok ? decodeSceneAreaData(published.canvas.nodeData["area-node"]!.sceneArea) : null;
     expect(area?.ok && area.value.animationScript?.script).toBe(original.script);
     expect(room.currentRevision).toBe(0);
+  });
+
+  it("drops tracks whose target was deleted instead of locking the whole director area", async () => {
+    const deletedCamera: WorldAnimationScript = {
+      ...original,
+      script: [
+        'motion.instance.tween("actor", { property: "position", startTime: 0, endTime: 5, from: [-1.5, 0, 0], to: [1.5, 0, 0], easing: "easeOut" });',
+        'motion.camera.tween({ cameraId: "deleted-camera", property: "position", startTime: 0, endTime: 5, from: [0, 0, 1.5], to: [2, 2, 1.5], easing: "linear" });'
+      ].join("\n"),
+      sourceHash: "hash-deleted-camera"
+    };
+    const { service, room } = await fixture({ animationScript: deletedCamera });
+    const result = await service.read(query);
+    if (!result.ok || !result.view.sceneArea) throw new Error(result.ok ? "Expected sceneArea" : result.message);
+    expect(result.view.sceneArea.animationScript?.script).not.toContain("deleted-camera");
+    const compiled = result.view.sceneArea.animationScript
+      ? executeWorldAnimationScript(result.view.sceneArea.animationScript.script, {
+          duration: result.view.sceneArea.animationScript.duration,
+          loop: result.view.sceneArea.animationScript.loop
+        })
+      : null;
+    expect(compiled?.ok && compiled.ir.cameraTracks).toEqual([]);
+    expect(compiled?.ok && compiled.ir.instanceTracks.map(track => track.targetId)).toEqual(["actor"]);
+    // Reading is pure: the dead track stays in the canonical script until a write replaces it.
+    const published = room.exportCanvas();
+    const area = published.ok ? decodeSceneAreaData(published.canvas.nodeData["area-node"]!.sceneArea) : null;
+    expect(area?.ok && area.value.animationScript?.script).toContain("deleted-camera");
+    expect(room.currentRevision).toBe(0);
+  });
+
+  it("reports no animation when every track references a deleted target", async () => {
+    const deadOnly: WorldAnimationScript = {
+      ...original,
+      script: 'motion.camera.tween({ cameraId: "deleted-camera", property: "zoom", startTime: 0, endTime: 5, from: [1.2], to: [0.8], easing: "linear" });',
+      sourceHash: "hash-dead-only"
+    };
+    const { service } = await fixture({ animationScript: deadOnly });
+    expect(await service.read(query)).toMatchObject({ ok: true, view: { sceneArea: { animationScript: null } } });
+  });
+
+  it("keeps reading after an animated model node is deleted", async () => {
+    const { service, room } = await fixture();
+    const removed = await room.submit({
+      protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+      canvasId: query.canvasId,
+      commandId: "delete-prop",
+      baseRevision: room.currentRevision,
+      actorId: "test",
+      commands: [{ type: "node.remove", nodeIds: ["prop"] }]
+    });
+    expect(removed.ok).toBe(true);
+    const result = await service.read(query);
+    if (!result.ok || !result.view.sceneArea?.animationScript) throw new Error(result.ok ? "Expected script" : result.message);
+    expect(result.view.sceneArea.animationScript.script).not.toContain('"prop"');
+    expect(result.view.sceneArea.animationScript.script).toContain('"actor"');
   });
 });

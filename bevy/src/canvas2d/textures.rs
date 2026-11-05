@@ -110,6 +110,9 @@ pub(crate) fn sync_textures(
         };
         // 共享表里换绑可能释放旧 handle（同内容换 handle / 换源 / 换档）。
         let released = texture_store.bind(&id, content, texture_px, handle.clone());
+        // 纹理已进入 Bevy 资产表：前端据此结束「加载中」。缺回执会让图片显示后
+        // 仍停在加载环上（`textureApplied` 一直等这条内容+尺寸的确认）。
+        crate::bridge::texture_receipts::applied("node", &id, width, height, content.unwrap_or(""));
         for stale in released {
             if stale != handle {
                 images.remove(stale.id());
@@ -327,6 +330,35 @@ mod tests {
             .find(|(sprite, _)| sprite.node_id == node_id)
             .map(|(_, sprite)| sprite.image.clone())
             .unwrap_or_else(|| panic!("node {node_id} sprite missing"))
+    }
+
+    /// 纹理进入资产表后必须回执内容身份与尺寸；前端靠它结束图片的「加载中」。
+    #[test]
+    fn applied_texture_emits_receipt_for_loading_state() {
+        let mut world = World::new();
+        let scene = scene();
+        world.insert_resource(CurrentScene(scene.clone()));
+        world.insert_resource(NodeIndex::default());
+        world.resource_mut::<NodeIndex>().rebuild(&scene);
+        world.insert_resource(TextureStore::default());
+        world.insert_resource(TextureBatch::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.spawn(CanvasNodeId("img".into()));
+        world.resource_mut::<TextureBatch>().0.insert(
+            "img".into(),
+            (
+                2,
+                1,
+                vec![255u8, 0, 0, 255, 255, 0, 0, 255],
+                Some("poster".into()),
+            ),
+        );
+        world.run_system_once(sync_textures).unwrap();
+        let receipts = crate::bridge::texture_receipts::take();
+        assert!(
+            receipts.contains(r#"["node","img",2,1,"poster"]"#),
+            "missing texture receipt: {receipts}"
+        );
     }
 
     /// 独占上传（视频实时帧）不得原地覆盖别的节点共享的纹理。

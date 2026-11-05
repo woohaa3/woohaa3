@@ -54,6 +54,7 @@ import {
   createWorldAnimationScript,
   executeWorldAnimationScript,
   mergeWorldCameraSettings,
+  serializeWorldAnimationScript,
   worldCameraView
 } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash } from "@woohaa3/contracts/canvas-yjs";
@@ -284,6 +285,21 @@ function findInstanceNode(canvas: ServerCanvas, instanceId: string): { nodeId: s
     if (decoded.ok && decoded.value.instanceId === instanceId) return { nodeId: node.id, fields };
   }
   return null;
+}
+
+/** Existing world instance/camera identities in the published canvas. */
+function existingWorldTargets(canvas: ServerCanvas): { instances: Set<string>; cameras: Set<string> } {
+  const instances = new Set<string>();
+  const cameras = new Set<string>();
+  for (const node of canvas.document.nodes) {
+    const fields = canvas.nodeData[node.id];
+    if (!record(fields)) continue;
+    const instance = decodeWorldInstanceData(fields.sharedWorldInstance);
+    if (instance.ok) instances.add(instance.value.instanceId);
+    const camera = decodeWorldCamera(fields.worldCamera);
+    if (camera.ok) cameras.add(camera.value.cameraId);
+  }
+  return { instances, cameras };
 }
 
 function hasNode(canvas: ServerCanvas, nodeId: string): boolean {
@@ -759,18 +775,41 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
         if (decoded.value.scopeVersion !== context.scope.scopeVersion) return failure("version-conflict", "导演区范围已变化");
         const writableInstances = new Set(context.writableTargets.flatMap(({ target }) => target.kind === "instance" ? [target.instanceId] : []));
         const writableCameras = new Set(context.writableTargets.flatMap(({ target }) => target.kind === "camera" ? [target.cameraId] : []));
+        let animationScript = decoded.value.animationScript ?? null;
         if (decoded.value.animationScript) {
-          const compiled = executeWorldAnimationScript(decoded.value.animationScript.script, {
-            duration: decoded.value.animationScript.duration,
-            loop: decoded.value.animationScript.loop
+          const script = decoded.value.animationScript;
+          const compiled = executeWorldAnimationScript(script.script, {
+            duration: script.duration,
+            loop: script.loop
           });
-          const outside = !compiled.ok
-            || compiled.ir.instanceTracks.some(track => !writableInstances.has(track.targetId))
-            || compiled.ir.cameraTracks.some(track => !writableCameras.has(track.targetId));
+          if (!compiled.ok) {
+            return failure("outside-scope", "导演区动画脚本无法编译，原动画未修改");
+          }
+          // Tracks whose target no longer exists reference a deleted instance or
+          // camera. They cannot animate or be preserved, but refusing the whole
+          // context would permanently lock the area (a later create-camera or
+          // animation write could never read the scope again). Drop only those
+          // dead tracks; a live target outside the writable set still refuses.
+          const existing = existingWorldTargets(inspected.canvas);
+          const instanceTracks = compiled.ir.instanceTracks.filter(track => existing.instances.has(track.targetId));
+          const cameraTracks = compiled.ir.cameraTracks.filter(track => existing.cameras.has(track.targetId));
+          const outside = instanceTracks.some(track => !writableInstances.has(track.targetId))
+            || cameraTracks.some(track => !writableCameras.has(track.targetId));
           if (outside) {
             // The write tool replaces the whole script: a filtered read would
             // silently delete hidden tracks on a later local revision.
             return failure("outside-scope", "导演区动画包含本轮不可写的部件，无法安全读取并局部返修；原动画未修改");
+          }
+          if (instanceTracks.length !== compiled.ir.instanceTracks.length
+            || cameraTracks.length !== compiled.ir.cameraTracks.length) {
+            animationScript = instanceTracks.length === 0 && cameraTracks.length === 0
+              ? null
+              : createWorldAnimationScript({
+                  script: serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks }),
+                  duration: script.duration,
+                  loop: script.loop,
+                  revision: script.revision
+                });
           }
         }
         bounds = decoded.value.bounds;
@@ -779,7 +818,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
           revision: inspected.canvas.revision,
           scopeVersion: decoded.value.scopeVersion,
           animationOrigin: sceneAreaAnimationOrigin(decoded.value),
-          animationScript: decoded.value.animationScript ?? null
+          animationScript
         };
         break;
       }

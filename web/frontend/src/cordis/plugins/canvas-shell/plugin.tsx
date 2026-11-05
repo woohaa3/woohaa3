@@ -18,12 +18,14 @@ import { CanvasUndoToast } from "./canvas-undo-toast.js";
 import { SearchIcon } from "@woohaa3/ui/icons";
 import { canvasSearchStore } from "../../services/canvas-search-store.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
+import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { definePlugin } from "../../plugin.js";
 import { NodeDownloadService } from "../../services/node-download.js";
 import { NodeDownloadStatus } from "./node-download-status.js";
 import { resolveNodeDownloadAvailability, resolveNodeActionToolbarView } from "./node-action-toolbar-view.js";
 import { describeNodeActions, nodeActionSettingsStore, routeNodeActionHit } from "./node-action-host.js";
+import { NodeActionToolbarHost } from "./node-action-toolbar-host.js";
 import { setNodeActionBridge } from "./node-action-bridge.js";
 import type { BevyNodeActionsPresentation } from "@woohaa3/contracts";
 import type { NodeActionContribution, NodeActionContext } from "../../contract/platform.js";
@@ -38,7 +40,7 @@ export function canvasShellExtension(): Plugin.Function<void> {
       const downloads = new NodeDownloadService({ getCanvas: () => workingCanvasOf(woohaa3CanvasStore.getState()), mediaContent: ctx.mediaContent });
       const offDownload = ctx.on("ui.node-download.save-requested", ({ nodeId }) => { void downloads.download(nodeId); });
       // 节点顶部操作横条的**宿主下载贡献**（change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.2）。
-      // 横条由 Bevy 绘制、Rust 命中：本贡献只提供**纯数据描述**与命中派发，复用同一
+      // 横条由 Web 渲染：本贡献提供纯数据描述与动作派发，复用同一
       // `NodeDownloadService` 与同一事件总线（发出 `save-requested`）；不依赖画布写权限，
       // film-set 停用也不移除。
       const removeDownloadAction = ctx.slots.register("canvas.node-action", {
@@ -78,7 +80,7 @@ export function canvasShellExtension(): Plugin.Function<void> {
           ctx.emit("ui.node-download.save-requested", { nodeId });
         }
       });
-      // 下行桥：canvas-runtime 每帧据此下发 `nodeActions`；上行：Rust 命中回传派发。
+      // Web 动作栏读取描述并通过同一宿主派发，不再向 renderer 下发 nodeActions。
       // 目标是当前**单选**的适用类型节点（横条显隐与 selection/focus 一致）。
       // 扩展动作的 available/describe/activate 抛错：归因并计入熔断，再交回横条既有的跳过逻辑
       // （change: 2026-10-21-harden-extension-fault-isolation）。
@@ -87,7 +89,8 @@ export function canvasShellExtension(): Plugin.Function<void> {
         .map((entry) => guardContributionMethods(entry, "canvas.node-action", faults(), ["available", "describe", "activate"]));
       /** 当前 working 画布节点的 `{ id, type }` 轻量视图（横条判定共用）。 */
       const workingNodes = () => workingCanvasOf(woohaa3CanvasStore.getState())?.document.nodes.map((node) => ({ id: node.id, type: node.type })) ?? [];
-      const focused = () => ctx.canvasNavigation.getSnapshot().mode.type === "node-focus";
+      const focused = () => ctx.canvasNavigation.getSnapshot().mode.type !== "overview"
+        || worldCameraEditorStore.getSnapshot()?.canvasId === workingCanvasOf(woohaa3CanvasStore.getState())?.id;
       const toolbarTarget = () => {
         const selection = nodeSelectionStore.getSnapshot();
         return resolveNodeActionToolbarView({
@@ -112,7 +115,10 @@ export function canvasShellExtension(): Plugin.Function<void> {
         activate: ({ nodeId, actionId, menu }) => {
           const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
           const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-          if (!node) return;
+          if (!node || toolbarTarget()?.nodeId !== nodeId) return;
+          const description = describeNodeActions({ contributions: contributions(),
+            context: { nodeId, nodeType: node.type, writable: ctx.canvasSession.isWritable() } });
+          if (!description?.presentation.actions.some(action => action.id === actionId && (menu ? action.menu : action.enabled))) return;
           const context: NodeActionContext = { nodeId, nodeType: node.type, writable: ctx.canvasSession.isWritable() };
           routeNodeActionHit({
             hit: { nodeId, actionId, menu },
@@ -122,16 +128,16 @@ export function canvasShellExtension(): Plugin.Function<void> {
           });
         }
       });
-      // 贡献注册/撤销时描述可能变化：请求一帧重建，避免画布残留旧横条。
-      const offActionSlots = ctx.slots.subscribe("canvas.node-action", () => {
-        ctx.canvasRuntime.controller()?.invalidate("node-action-slots");
+      const removeNodeActionToolbar = ctx.slots.register("canvas.overlay", {
+        id: "node-action-toolbar", owner: CANVAS_SHELL_PLUGIN_ID, priority: 25,
+        render: () => <NodeActionToolbarHost ctx={ctx} />
       });
       const removeDownloadStatus = ctx.slots.register("canvas.overlay", {
         id: "node-download-status", owner: CANVAS_SHELL_PLUGIN_ID, priority: 26,
         render: () => <NodeDownloadStatus service={downloads} />
       });
       ctx.effect(() => () => {
-        offBridge(); offActionSlots(); offDownload(); removeDownloadAction(); removeDownloadStatus();
+        offBridge(); removeNodeActionToolbar(); offDownload(); removeDownloadAction(); removeDownloadStatus();
         nodeActionSettingsStore.close();
         downloads.dispose();
       }, "canvas-shell-downloads");

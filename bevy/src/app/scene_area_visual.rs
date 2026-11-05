@@ -140,10 +140,10 @@ pub(super) fn sync_scene_areas(
             let zoom = scene.0.viewport.zoom.max(0.01);
             // Match the current ground projection rather than assuming a fixed camera pitch.
             let width = ground_stroke_width(style.width, zoom);
-            let label = layout::scene_area_label_geometry(area);
+            let label = layout::scene_area_label_geometry_for_zoom(area, scene.0.viewport.zoom);
             let contour = label.as_ref().map(layout::scene_area_label_outline);
-            // Include the full cuboid footprint and the nameplate's half-unit border.
-            let padding = projected_stroke_padding(width);
+            // Include the cuboid footprint and the compensated nameplate border.
+            let padding = projected_stroke_padding(width) + label.as_ref().map_or(0.0, |g| (g.scale() - 1.0) * 0.5);
             for (side, (a, b)) in [
                 (Vec2::new(x0, z0), Vec2::new(x1, z0)),
                 (Vec2::new(x0, z1), Vec2::new(x1, z1)),
@@ -289,10 +289,9 @@ fn sync_execution(
         Vec2::new(x0 as f32, z1 as f32),
     ];
     let width = ground_stroke_width(3.0, zoom);
-    let contour = layout::scene_area_label_geometry(area)
-        .as_ref()
-        .map(layout::scene_area_label_outline);
-    let padding = projected_stroke_padding(width);
+    let label = layout::scene_area_label_geometry_for_zoom(area, zoom);
+    let contour = label.as_ref().map(layout::scene_area_label_outline);
+    let padding = projected_stroke_padding(width) + label.as_ref().map_or(0.0, |g| (g.scale() - 1.0) * 0.5);
     let mut count = 0;
     for segment in crate::scope_visual::execution_trail(&path, seconds) {
         for (start, end) in

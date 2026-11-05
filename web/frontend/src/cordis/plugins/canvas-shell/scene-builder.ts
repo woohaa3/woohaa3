@@ -126,7 +126,6 @@ export function buildSceneWithResources(
     sceneAreaPreviews: input.sceneAreaPreviews,
     sceneAnimationTimes: input.sceneAnimationTimes,
     ghostNodes: options.getGhostNodes?.() ?? [],
-    nodeActionToolbars: options.getNodeActionToolbars?.(),
     theme: options.getTheme?.() ?? defaultAppTheme(),
     modelFocus: options.getModelFocus?.() ?? null,
     imageFocus: options.getImageFocus?.() ?? null,
@@ -146,7 +145,6 @@ export function buildSceneWithResources(
   const cameraEdit = worldCameraEditorStore.getSnapshot();
   if (cameraEdit?.canvasId === canvasState.id && scene.nodes.some(node => node.id === cameraEdit.nodeId && node.worldCamera)) {
     scene.worldCameraEdit = { nodeId: cameraEdit.nodeId, camera: cameraEdit.draft, showHelpers: cameraEdit.showHelpers };
-    scene.nodeActions = {};
   }
   applyNodeResourceLoading(scene, {
     image: options.textureSync,
