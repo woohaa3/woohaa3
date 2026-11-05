@@ -15,6 +15,7 @@
  * type-only 副作用导入（空绑定）足以让 augmentation 生效，不产生运行时依赖。
  */
 import type {} from "../cordis/context.js";
+export { nativeDocumentEditorClient, type NativeDocumentEditorClient } from "./native-document-editor.js";
 export { defineExtensionFrontend, defineExtensionPlugin } from "./entry.js";
 export { AssistantConnectionPicker, type AssistantConnectionSelection } from "../cordis/plugins/task-execution/assistant-connection-picker.js";
 export { resolveAgentDetailAction } from "../cordis/plugins/task-execution/execution-panel/agent-detail-action.js";

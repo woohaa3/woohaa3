@@ -30,7 +30,11 @@ pub(crate) fn setup_camera(commands: &mut Commands) -> Entity {
         .spawn((
             Camera3d::default(),
             ModelCanvasCamera,
-            RenderLayers::from_layers(&[0, crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER]),
+            RenderLayers::from_layers(&[
+                0,
+                crate::preview_layers::GRID_LAYER,
+                crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER,
+            ]),
             Projection::Orthographic(canvas_camera_projection()),
             crate::isometric_grid::canvas_camera_transform(Vec2::ZERO),
             Tonemapping::None,
@@ -72,9 +76,9 @@ fn model_light_layers() -> RenderLayers {
     }
 }
 
-/// 网格可见层：主画布 3D 层（0），排除 editor layer 与截图层。
+/// 网格可见层：只给主观察相机；镜头卡片、编辑镜头与捕获相机都不包含。
 fn grid_layers() -> RenderLayers {
-    RenderLayers::layer(0)
+    RenderLayers::layer(crate::preview_layers::GRID_LAYER)
 }
 
 /// 初始化 Canvas adapter：写入网格 target/config，并挂上 grid line 标记实体。

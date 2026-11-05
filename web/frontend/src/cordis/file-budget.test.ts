@@ -36,6 +36,7 @@ const ALLOWLIST = new Set<string>([
   "cordis/page-scope.ts",
   "cordis/plugins/canvas-runtime/bevy-runtime.ts",
   "cordis/services/canvas-session.ts",
+  "cordis/services/canvas-remote.ts",
   "cordis/services/canvas-session.test.ts",
   "cordis/ui/assistant-execution/authoring-composer.tsx",
   "cordis/plugins/node-history/plugin.test.tsx",

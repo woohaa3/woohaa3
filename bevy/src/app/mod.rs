@@ -310,6 +310,6 @@ fn configure_canvas(app: &mut App) {
                     .before(bevy::transform::TransformSystems::Propagate),
                 model3d::capture::sync_capture_chrome
                     .after(scene3d::hide_shot_gizmos_during_transition),
-            ),
+            ).run_if(crate::canvas_activity::running),
         );
 }

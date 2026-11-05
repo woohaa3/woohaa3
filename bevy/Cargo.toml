@@ -17,6 +17,8 @@ default = ["wasm-webgpu"]
 canvas-core = [
   "bevy/bevy_window", "bevy/bevy_sprite", "bevy/bevy_sprite_render",
   "bevy/bevy_text", "bevy/bevy_ui",
+  # Parley otherwise uses ICU's non-complex segmenter and logs once per CJK run.
+  "bevy/complex_script_segmentation",
 ]
 # Tauri 提供真实窗口句柄与 OS 事件循环，不启用 bevy_winit。
 native-canvas = ["canvas-core", "bevy/multi_threaded"]
@@ -53,6 +55,7 @@ native-renderer = [
   "bevy/bevy_window",
   "bevy/multi_threaded",
   "dep:png",
+  "dep:openh264",
 ]
 
 [dependencies]
@@ -69,10 +72,18 @@ meshopt = "=0.6.2"
 wasm-bindgen = { version = "=0.2.128", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 png = { version = "0.17", optional = true }
+# 动态镜头视频编码（change: 2026-11-05-camera-shot-as-video）：仅原生构建启用，
+# 浏览器 WASM 显式不可用而不是降级成图片。
+openh264 = { version = "0.9.9", optional = true }
 
 [[bin]]
 name = "model-renderer"
 path = "src/bin/model-renderer.rs"
+required-features = ["native-renderer"]
+
+[[bin]]
+name = "world-video-encoder"
+path = "src/bin/world-video-encoder.rs"
 required-features = ["native-renderer"]
 
 # hot_paths_golden 与 scope_golden 依赖 golden_api（native-renderer 门控）。

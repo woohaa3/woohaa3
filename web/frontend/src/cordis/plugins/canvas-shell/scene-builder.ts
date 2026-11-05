@@ -9,10 +9,12 @@
  */
 import {
   buildCanvasRenderScene,
+  decodeWorldCamera,
   defaultAppTheme,
   prepareModelResource,
   type CanvasRenderScene,
-  type PreparedModelResource
+  type PreparedModelResource,
+  type WorldCameraShotPhase
 } from "@woohaa3/contracts";
 import { applyRunStateProjection, executingScopeIds } from "./run-state-projection.js";
 import { relocateHistoryStrips } from "./history-layers.js";
@@ -23,6 +25,7 @@ import type { InteractionControllerOptions } from "./interaction-types.js";
 import type { Viewport } from "./interaction-core.js";
 import { applyNodeResourceLoading } from "../../services/node-resource-loading.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
+import { shotPhaseOf, worldCameraShotStore } from "../../services/world-camera-shot-store.js";
 
 export type SceneBuildInput = {
   selected: readonly string[];
@@ -124,6 +127,7 @@ export function buildSceneWithResources(
     modelPlacements: modelPlacements(),
     worldGroundPreviews: input.worldGroundPreviews,
     worldCameraPreviews: input.worldCameraPreviews,
+    worldCameraShotPhases: shotPhasesByNode(canvasState),
     sceneAreaPreviews: input.sceneAreaPreviews,
     sceneAnimationTimes: input.sceneAnimationTimes,
     ghostNodes: options.getGhostNodes?.() ?? [],
@@ -179,4 +183,19 @@ export function buildSceneWithResources(
   }
   sceneDiagnostics.sceneBuilds += 1;
   return { scene, resources };
+}
+
+
+/** 把宿主状态按镜头 id 映射到节点 id，供卡片呈现使用。 */
+function shotPhasesByNode(canvas: ReturnType<typeof workingCanvasOf>): Map<string, WorldCameraShotPhase> {
+  const phases = new Map<string, WorldCameraShotPhase>();
+  if (!canvas) return phases;
+  const nodeData = canvas.nodeData as Record<string, { worldCamera?: unknown } | undefined>;
+  for (const node of canvas.document.nodes) {
+    if (node.type !== "world-camera") continue;
+    const camera = decodeWorldCamera(nodeData[node.id]?.worldCamera);
+    if (!camera.ok) continue;
+    phases.set(node.id, shotPhaseOf(worldCameraShotStore.get(camera.value.cameraId)));
+  }
+  return phases;
 }

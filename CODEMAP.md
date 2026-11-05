@@ -1,4 +1,7 @@
 # Client code map
+> **2026-11-05 清理**：画布旧「普通组」与「片场组」能力已删除，且不再保留读取期迁移；
+> 旧 `group` / `film-set-shot-preview` 节点按未知类型收敛为 `custom`。片场扩展、镜头/对象/录制、
+> 组徽标与组创作入口均已移除。下文仍提到它们的句子属于历史记录，以源码为准。
 
 ## Perspective world cameras (2026-11-03)
 
@@ -135,4 +138,17 @@ The frontend's HTTP adaptation and receipt decoding live in `web/frontend/src/co
 
 Content contribution rollout (2026-10-30): trusted `CanvasContentRuntime.contributions` are owner-checked by `web/backend/src/extensions/canvas-content.ts` and injected into both CAS and Yjs command paths. `CompositeAssetAdapter.content` registers the browser counterpart; sessions read `CompositeAssetRegistry.getContent()` live for speculative commands, observation and edit planning. Once enabled, owner removal keeps writes strict. `web/contracts/src/canvas/content-node-data.ts` handles registered composite codec validation/normalization and clipboard sanitation; `extension.edit` expands bounded owner operations into protected structural edits. Film-set group/history/routes/migrations remain separate unfinished migration stages; existing scopes without declarations retain staged compatibility.
 
+Extension signing integration: `scripts/lib/extension-trust/runtime.mjs` owns pinned-domain refresh, durable receipts and activation gates; `web/backend/src/host/core/extension-manager/` applies the same policy to installs, reloads, quarantine and rollback. `scripts/prepare-desktop-host.mjs` includes verifier modules and optional public `extension-trust.json`, and `desktop-host-data.mjs` selects only the bundled anchor in production. Existing v1 packages under a configured domain require exact signed migration grants.
+
+Offline extension trust: domain `metadataUrl` is optional. `bootstrap` seeds empty caches with signed metadata; `scripts/import-extension-trust.mjs` imports the same public material under pinned anchors. No server RPC or online session is required for first installation with fresh offline metadata.
+
+## Optional native document editor
+
+`desktop/src/document_editor` owns typed admission, bounded asynchronous controls, layout/input generations and retained completion receipts. `desktop/src/editor_runtime.rs` registers optional factories and binds the existing Bevy device on the host thread; the default registry is empty. External composition roots may call `host::run_host_with_editors`; the default checkout has no editor implementation dependency. `web/frontend/src/extension-api/native-document-editor.ts` exposes the optional async client and bounded binary tickets. Parse/serialization work runs on IPC workers.
+
+`desktop/src/editor_compositor.rs` presents same-device document/UI textures with premultiplied gamma-to-linear conversion. `desktop/src/canvas_suspension.rs` pauses canvas schedules and non-editor cameras during native presentation, preserving framework/resource lifecycle and restoring prior state on exit. `bevy/src/canvas_activity.rs` gates canvas-derived work; `document_editor_visibility.rs` suppresses legacy source pixels where needed. `document_editor_textures.rs` owns allocation/lease lifetime state. Native editor input includes pointer/pen, wheel, zoom, keys and IME; local DOM input ownership prevents outer canvas capture from stealing gestures.
+
+`desktop/src/performance_capture.rs` and `scripts/export-webview-performance.mjs` record CPU intervals, presentation path and transport byte counts. These diagnostics do not establish GPU execution time or presented FPS. The client exposes generic seams only; provider implementations, packaging composition and device acceptance remain external.
+
+桌面普通入口 `desktop/src/main.rs` 委托 `desktop/src/desktop_entry.rs`；后者提供接受通用 editor factory 的启动流程，包含 panic/启动日志、诊断 watchdog、probe 和开发录制生命周期。单独构建传空 provider；外部装配显式注入 factory 并可向 `scripts/build-desktop.mjs` 提供 `WOOHAA_DESKTOP_PROJECT_DIR`，无业务扩展反向依赖。`--probe-editors` 只报告 provider 声明，不创建窗口或 GPU。
 Scope assistant feedback: Render Scene v41 carries transient `executingScopes` IDs from live agent run-state. `canvas-shell/run-state-projection.ts` excludes history selection and terminal turns; Rust `scope_visual.rs` supplies a shared 1.8s border breath. `canvas2d/generation.rs` uses the existing dynamic overlay for frames; `app/scene_area_visual.rs` animates retained ground border materials. `canvas-shell/scene-area-cursor.ts` shares the group title-move / edge-resize decision between hover and press without a second renderer query. Four sides and corners resize only the group frame, keeping the opposite edge fixed; position and size commit atomically. Rust interaction snapshot leaves frame interiors transparent to member hits and marquee. Director titles move and edges resize under the same rules, preserving the starting resize cursor during the gesture.

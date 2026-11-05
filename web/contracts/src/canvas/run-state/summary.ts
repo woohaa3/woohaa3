@@ -4,9 +4,8 @@
  *
  * 纯函数：不依赖 DOM / Node / Yjs，不修改输入，也不产生 canonical 写入。
  *
- * 聚合节点在本 change 中明确指 “复合资产/片场”。
- * 当前基线只有片场（规范类型 `composite-asset`）；谓词是唯一权威判定，接入新聚合类型时只需扩展
- * 本函数，不改任何调用方，也 MUST NOT 为一个不存在的类型造占位节点。
+ * 聚合节点指规范类型 `composite-asset` 的复合资产节点；谓词是唯一权威判定，接入新聚合类型时
+ * 只需扩展本函数，不改任何调用方，也 MUST NOT 为一个不存在的类型造占位节点。
  */
 import type {
   AggregateRunNodeInput,
@@ -19,8 +18,8 @@ import { COMPOSITE_ASSET_NODE_TYPE } from "../domain/core/composite-asset-identi
 /**
  * 是否为聚合运行节点。
  *
- * `composite-asset`（复合资产/片场）在本基线是唯一聚合节点。未来声明为纯模型聚合的宿主节点
- * 接入时在此追加其规范类型；在该类型进入仓库前不得凭猜测添加。
+ * `composite-asset` 在本基线是唯一聚合节点。未来声明为纯模型聚合的宿主节点接入时在此追加
+ * 其规范类型；在该类型进入仓库前不得凭猜测添加。
  */
 export function isAggregateRunNode(node: AggregateRunNodeInput): boolean {
   return node.type === COMPOSITE_ASSET_NODE_TYPE;

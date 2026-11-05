@@ -50,8 +50,10 @@ import { findStaleFrontend, formatStaleFrontend } from "./lib/frontend-freshness
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
-const desktopDir = path.join(root, "desktop");
-const iconsDir = path.join(desktopDir, "icons");
+// Explicit external composition projects use the same packaging pipeline.
+// Standalone client builds keep their empty-provider desktop project.
+const desktopDir = path.resolve(process.env.WOOHAA_DESKTOP_PROJECT_DIR ?? path.join(root, "desktop"));
+const iconsDir = path.join(root, "desktop", "icons");
 const configPath = path.join(desktopDir, "tauri.conf.json");
 const defaultsPath = path.join(process.env.WOOHAA_DESKTOP_PACKAGING_DIR ?? path.join(desktopDir, "build", "packaging"), DESKTOP_DEFAULTS_RESOURCE);
 const require = createRequire(import.meta.url);
@@ -193,7 +195,7 @@ function buildNativeTools() {
   const triple = /host:\s*(\S+)/.exec(probe.stdout ?? "")?.[1];
   if (probe.error || probe.status !== 0 || !triple) throw new Error("无法探测原生 Rust host triple");
   if (triple !== nodeArtifact().triple) throw new Error(`Rust host ${triple} 与本机宿主目标 ${nodeArtifact().triple} 不匹配，请使用对应原生工具链`);
-  run("cargo", ["build", "--release", "--target", triple, "--no-default-features", "--features", "native-renderer", "--bin", "model-renderer"], { cwd: path.join(root, "bevy"), env: { ...childEnv(), CARGO_TARGET_DIR: path.join(root, "bevy/target") } });
+  run("cargo", ["build", "--release", "--target", triple, "--no-default-features", "--features", "native-renderer", "--bin", "model-renderer", "--bin", "world-video-encoder"], { cwd: path.join(root, "bevy"), env: { ...childEnv(), CARGO_TARGET_DIR: path.join(root, "bevy/target") } });
 }
 
 function frontendBuildSteps(standalone) {
@@ -249,6 +251,7 @@ async function runBuild(options) {
   const frontendDist = frontendDistPath(options, config);
   const resolvedReleaseId = options.releaseId ?? releaseIdFor({ platform, arch });
   const resolved = { ...options, resolvedReleaseId };
+
   const kindList = resolveBundleKinds({ platform, requested: options.bundles, bundle: options.bundle });
   const targetError = nativeTargetError({ platform, arch, target: options.target });
   if (targetError) throw new Error(targetError);
@@ -282,7 +285,7 @@ async function runBuild(options) {
   const override = tauriConfigOverride({
     identifier: options.identifier,
     version: options.version,
-    frontendDist: options.frontend ? tauriFrontendDist(frontendDist, desktopDir) : null,
+    frontendDist: options.frontend ? (process.env.WOOHAA_DESKTOP_PROJECT_DIR ? frontendDist : tauriFrontendDist(frontendDist, desktopDir)) : null,
     defaultsPath
   });
   const platformKey = updaterPlatformKey({ platform, arch });
@@ -299,7 +302,7 @@ async function runBuild(options) {
     const publicKey = updatePublicKey;
     const standalone = standaloneBundleConfig({ ...prepared, endpoint, publicKey });
     const startupFrontend = prepareStartupFrontend(frontendDist, path.join(path.dirname(defaultsPath), "startup-frontend"));
-    override.build = { ...override.build, frontendDist: tauriFrontendDist(startupFrontend, desktopDir) };
+    override.build = { ...override.build, frontendDist: process.env.WOOHAA_DESKTOP_PROJECT_DIR ? startupFrontend : tauriFrontendDist(startupFrontend, desktopDir) };
     override.plugins = standalone.plugins;
     const hostArchive = createHostArchive(prepared.resourceRoot, path.join(path.dirname(defaultsPath), "desktop-host.tar.gz"));
     const runtimeFile = path.join(path.dirname(defaultsPath), "desktop-runtime.json");
@@ -307,6 +310,14 @@ async function runBuild(options) {
     fs.writeFileSync(runtimeFile, JSON.stringify({ hostArchiveSha256: hostArchive.sha256, nodeVersion: prepared.nodeVersion, ...(endpoint ? { updater: { endpoint, publicKey } } : {}) }));
     override.bundle = { ...override.bundle, ...standalone.bundle, resources: { ...override.bundle?.resources, ...standalone.bundle.resources, [runtimeFile]: "desktop-runtime.json", [hostArchive.path]: "desktop-host.tar.gz", [path.join(root, "bevy/assets/")]: "native-assets/" } };
     hostPackage = { status: "packaged", nodeVersion: prepared.nodeVersion, nodeSha256: prepared.nodeSha256, extensions: prepared.extensions, packages: prepared.packages, updater: endpoint ? "configured" : "unconfigured" };
+  }
+  let nativeComposition = null;
+  if (process.env.WOOHAA_DESKTOP_COMPOSITION_IDENTITY) {
+    const identityPath = path.resolve(process.env.WOOHAA_DESKTOP_COMPOSITION_IDENTITY);
+    nativeComposition = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+    override.bundle = { ...override.bundle, resources: {
+      ...override.bundle?.resources, [identityPath]: "native-composition.json"
+    } };
   }
   const args = tauriBuildArgs({ options, kinds: kindList, config: override });
 
@@ -328,14 +339,14 @@ async function runBuild(options) {
   writeDefaults(options.uiUrl);
   // 先清空本次要产出的 bundle 目录：tauri 不清理旧版本，残留会让 manifest 混进上一版安装包
   // （发布索引要求恰好一个 updater archive，直接失败），也会被 --copy 复制进上传目录。
-  clearBundleOutputDirs({ desktopDir, target: options.target, debug: options.debug, kinds: kindList });
+  clearBundleOutputDirs({ desktopDir, targetDir: process.env.CARGO_TARGET_DIR, target: options.target, debug: options.debug, kinds: kindList });
   run(process.execPath, [cli.entry, ...args], { cwd: desktopDir });
 
   const outDir = outDirPath(resolved);
   fs.mkdirSync(outDir, { recursive: true });
-  const collected = collectBundleArtifacts({ desktopDir, target: options.target, debug: options.debug, kinds: kindList });
+  const collected = collectBundleArtifacts({ desktopDir, targetDir: process.env.CARGO_TARGET_DIR, target: options.target, debug: options.debug, kinds: kindList });
   const missing = missingBundleKinds({
-    desktopDir,
+    desktopDir, targetDir: process.env.CARGO_TARGET_DIR,
     target: options.target,
     debug: options.debug,
     kinds: kindList,
@@ -412,6 +423,7 @@ async function runBuild(options) {
   });
   // Capture provenance for same-revision installer + offline scene delivery.
   const sourceAfter = readSourceIdentity(root);
+  if (nativeComposition) manifest.nativeComposition = nativeComposition;
   manifest.sourceRevision = sourceBefore.revision;
   manifest.sourceDirty = sourceBefore.dirty || sourceAfter.dirty || sourceBefore.revision !== sourceAfter.revision;
   const manifestPath = path.join(outDir, "manifest.json");

@@ -1,6 +1,6 @@
 # 画布 ECS 投影层
 
-`canvas_ecs` 是 2D 卡片、group、片场（composite-asset）以及 3D owner 共用的实体语义层
+`canvas_ecs` 是 2D 卡片、共享世界对象以及 3D owner 共用的实体语义层
 （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs）。它只拥有三件事：
 
 1. **公共组件**（[components.rs](components.rs)）：节点身份、布局、深度、选中/悬停/可见性、
@@ -28,9 +28,8 @@
 | `CanvasHover { hovered, port }` | 指针悬停瞬时状态 |
 | `CanvasVisibility { hidden }` | 聚焦/隐藏投影；隐藏时仍保留实体身份 |
 
-内置展示类型用空标记区分几何 producer：`CardPresentation`、`GroupPresentation`、
-`FilmSetPresentation`；未知类型保留为 `CustomPresentation { kind }`，节点仍被投影，只是没有
-内置 producer。派生实体（标签、纹理 Sprite、group 面板、缩略图、focus 细节）通过
+内置展示类型用空标记区分几何 producer：`CardPresentation`；未知类型保留为
+`CustomPresentation { kind }`，节点仍被投影，只是没有内置 producer。派生实体（标签、纹理 Sprite、group 面板、缩略图、focus 细节）通过
 `ChildOf(owner)` 挂在节点实体下，节点删除即递归回收。
 
 ## 新增第三方展示类型
@@ -94,12 +93,4 @@ size, texture, history, or run-state changes while title and type-label edits re
 `canvas_query::action_bar_enabled` for focus, actions and group opt-in; interaction applies the
 same policy to its accepted node set without scanning the scene once per node.
 
-## 总览缓存 owner 生命周期
 
-带 `group.overviewCache = "transparent-world-v1"` 的片场组实体额外携带
-`OverviewCacheOwner`。它保存启用位、输入 fingerprint、物理 tier 与回退原因；颜色图、
-深度/MSAA resolve 附件、离屏相机和层租约由 renderer Resource 管理。状态账本提供
-`Direct → Queued → Rendering → Cached` 和 `Suspended`，并以
-`epoch/owner/generation/slot_generation` token 隔离迟到反馈。`subject` 只从 accepted
-场景读取徽标布局与 prepared model bounds（不含绝对位置），`dispatch` 在帧链中推进作业并
-发布颜色图；发布后实时源层降为采样/镜头可见层，主体不再由主相机逐帧重绘。

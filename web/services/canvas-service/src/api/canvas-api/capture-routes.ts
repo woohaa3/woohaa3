@@ -8,6 +8,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
+  decodeWorldCaptureDynamicVersionKey,
   decodeWorldCaptureResourceReadyNotice,
   decodeWorldCaptureVersionKey,
   type WorldCaptureFreezeOutcome,
@@ -19,6 +20,8 @@ import { DEFAULT_CANVAS_MAX_BODY_BYTES } from "./types.js";
 
 /** 页面渲染取景的 PNG base64 上限（2048² 复杂画面约 8 MiB，base64 约 11 MiB）。 */
 const PAGE_CAPTURE_MAX_BODY_BYTES = 32 * 1024 * 1024;
+/** 页面录制的 MP4 base64 上限（60s / 4Mbps 约 30MB 原始，base64 约 40MB）。 */
+const PAGE_VIDEO_MAX_BODY_BYTES = 96 * 1024 * 1024;
 
 function readCameraId(body: Record<string, unknown>): string | null {
   return typeof body.cameraId === "string" && body.cameraId.trim() !== "" ? body.cameraId : null;
@@ -245,6 +248,88 @@ export async function handleCapturePagePending(
   const pending = options.worldCapture.pendingPageCaptures(canvasId);
   log?.({ event: "canvas-capture-page-pending", status: 200 });
   sendJson(res, 200, { ok: true, captures: pending });
+  return true;
+}
+
+/**
+ * 动态镜头的页面视频提交：页面已逐帧渲染并由 WebCodecs 编码成 MP4；宿主重新核对
+ * 当前动态键、经可信视频端口保存后冻结并申领 binding。
+ */
+export async function handleCapturePageCommitVideo(
+  req: IncomingMessage,
+  res: ServerResponse,
+  canvasId: string,
+  options: CanvasRequestHandlerOptions,
+  log: CanvasLogger
+): Promise<boolean> {
+  if (!options.worldCapture) {
+    sendError(res, 503, "NOT_READY", "取景服务未装配");
+    return true;
+  }
+  const body = await readJsonBody(req, PAGE_VIDEO_MAX_BODY_BYTES);
+  if ("canvasId" in body) {
+    sendError(res, 400, "INVALID_COMMAND_BATCH", "请求包含非法字段");
+    return true;
+  }
+  const cameraId = readCameraId(body);
+  const key = decodeWorldCaptureDynamicVersionKey(body.key);
+  const mp4Base64 = typeof body.mp4Base64 === "string" ? body.mp4Base64 : "";
+  const width = typeof body.width === "number" && Number.isInteger(body.width) && body.width > 0 ? body.width : 0;
+  const height = typeof body.height === "number" && Number.isInteger(body.height) && body.height > 0 ? body.height : 0;
+  if (!cameraId || !key.ok || mp4Base64 === "" || width === 0 || height === 0) {
+    sendError(res, 400, "INVALID_COMMAND_BATCH", "页面视频取景提交字段不合法");
+    return true;
+  }
+  const mp4 = Buffer.from(mp4Base64, "base64");
+  if (mp4.byteLength === 0) {
+    sendError(res, 400, "INVALID_COMMAND_BATCH", "页面视频取景为空");
+    return true;
+  }
+  const outcome = await options.worldCapture.commitPageVideoCapture({
+    canvasId,
+    cameraId,
+    key: key.value,
+    video: {
+      bytes: new Uint8Array(mp4),
+      contentType: "video/mp4",
+      width,
+      height,
+      durationSeconds: key.value.timeRange.endSeconds - key.value.timeRange.startSeconds,
+      fps: key.value.fps
+    }
+  });
+  const status = outcome.ok ? 200
+    : outcome.code === "camera-not-found" || outcome.code === "canvas-not-found" ? 404
+      : outcome.code === "superseded" ? 409
+        : outcome.code === "capture-unavailable" || outcome.code === "capture-not-ready" ? 503
+          : 400;
+  log?.({ event: "canvas-capture-page-commit-video", status, code: outcome.ok ? "ready" : outcome.code });
+  sendJson(res, status, outcome);
+  return true;
+}
+
+/**
+ * 卡片状态：返回当前画布已观察镜头的取景状态（静态图片或动态视频）。
+ * 只读；不触发取景。
+ */
+export async function handleCaptureStatuses(
+  req: IncomingMessage,
+  res: ServerResponse,
+  canvasId: string,
+  options: CanvasRequestHandlerOptions,
+  log: CanvasLogger
+): Promise<boolean> {
+  if (!options.worldCapture) {
+    sendError(res, 503, "NOT_READY", "取景服务未装配");
+    return true;
+  }
+  const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
+  if ("canvasId" in body) {
+    sendError(res, 400, "INVALID_COMMAND_BATCH", "请求包含非法字段");
+    return true;
+  }
+  log?.({ event: "canvas-capture-statuses", status: 200 });
+  sendJson(res, 200, { ok: true, statuses: options.worldCapture.statuses(canvasId) });
   return true;
 }
 

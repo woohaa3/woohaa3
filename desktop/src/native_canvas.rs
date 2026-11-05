@@ -99,6 +99,7 @@ impl FrameBackend for BevyCanvasBackend {
         .to_string_lossy()
         .into_owned();
         self.app = woohaa_bevy_canvas::build_native_canvas_app(window, handle, assets);
+        crate::editor_compositor::install(&mut self.app);
 
         self.built = true;
         Ok(())
@@ -110,6 +111,43 @@ impl FrameBackend for BevyCanvasBackend {
 
     fn finish_plugins(&mut self) {
         self.app.finish();
+        // Bevy 0.20 keeps RenderInstance only in RenderApp. Resolve the whole
+        // context from that owner instead of requiring it in the main world.
+        let gpu = self
+            .app
+            .get_sub_app(bevy::render::RenderApp)
+            .and_then(|render| {
+                let world = render.world();
+                Some((
+                    world
+                        .get_resource::<bevy::render::renderer::RenderDevice>()?
+                        .clone(),
+                    world
+                        .get_resource::<bevy::render::renderer::RenderQueue>()?
+                        .clone(),
+                    world
+                        .get_resource::<bevy::render::renderer::RenderAdapter>()?
+                        .clone(),
+                    world
+                        .get_resource::<bevy::render::renderer::RenderInstance>()?
+                        .clone(),
+                ))
+            });
+        if let Some((device, queue, adapter, instance)) = gpu {
+            let executable = std::env::current_exe().unwrap_or_default();
+            let assets = native_assets_path(
+                &executable,
+                std::env::var_os("WOOHAA_DESKTOP_HOST_ROOT")
+                    .as_deref()
+                    .map(std::path::Path::new),
+                cfg!(debug_assertions),
+            );
+            crate::editor_runtime::install_gpu(device, queue, adapter, instance, assets);
+        } else {
+            crate::shell_log::error(
+                "Native editor GPU injection unavailable: RenderApp resources missing",
+            );
+        }
         // The legacy bridge/query core uses thread-local state. Its native
         // facade and ECS consumers must share the Tauri main thread. Asset IO
         // and GPU work remain asynchronous; only ECS schedule execution is serial.
@@ -122,6 +160,8 @@ impl FrameBackend for BevyCanvasBackend {
     }
 
     fn update(&mut self) {
+        crate::editor_runtime::tick(&mut self.app);
+        crate::canvas_suspension::set(&mut self.app, crate::editor_runtime::owns_presentation());
         self.app.update();
     }
 
@@ -136,6 +176,7 @@ impl FrameBackend for BevyCanvasBackend {
     }
 
     fn dispose(&mut self) {
+        crate::editor_runtime::detach_gpu();
         // 用空 App 替换，释放 world/渲染资源；后续任何调用都不再访问已销毁状态。
         self.app = App::new();
         self.built = false;
@@ -174,6 +215,42 @@ where
 mod tests {
     use super::*;
 
+    #[test]
+    #[ignore = "requires real GPU; bootstrap regression for render-world-only RenderInstance"]
+    fn editor_gpu_is_installed_by_real_bevy_finish_plugins() {
+        let mut backend = BevyCanvasBackend::new(NativeCanvasOptions::default());
+        backend.app.add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: None,
+                    exit_condition: bevy::window::ExitCondition::DontExit,
+                    ..default()
+                })
+                .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>(),
+        );
+        backend.finish_plugins();
+        assert!(
+            backend
+                .app
+                .world()
+                .get_resource::<bevy::render::renderer::RenderInstance>()
+                .is_none()
+        );
+        assert!(
+            backend
+                .app
+                .sub_app(bevy::render::RenderApp)
+                .world()
+                .get_resource::<bevy::render::renderer::RenderInstance>()
+                .is_some()
+        );
+        assert_eq!(
+            crate::editor_runtime::control("document_editor_capabilities", None).unwrap()["gpu_ready"],
+            true,
+            "native editor must receive the GPU produced by the real Bevy bootstrap"
+        );
+        crate::editor_runtime::detach_gpu();
+    }
     #[test]
     fn host_thread_schedules_apply_startup_commands_before_update() {
         #[derive(Resource)]

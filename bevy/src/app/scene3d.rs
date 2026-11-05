@@ -416,6 +416,7 @@ pub(super) fn drive_observer_from_shot(
         camera.viewport = None;
         *layers = bevy::camera::visibility::RenderLayers::from_layers(&[
             0,
+            crate::preview_layers::GRID_LAYER,
             crate::world_camera::WORLD_CAMERA_GIZMO_LAYER,
         ]);
     }

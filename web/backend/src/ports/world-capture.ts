@@ -8,14 +8,19 @@
  */
 import type {
   BackendMediaPort,
+  WorldCaptureDynamicMediaSaveRequest,
+  WorldCaptureDynamicSaveResult,
   WorldCaptureMediaMetadata,
   WorldCaptureMediaSavePort,
   WorldCaptureMediaSaveRequest,
-  WorldCaptureMediaSaveResult
+  WorldCaptureMediaSaveResult,
+  WorldCaptureVideoMediaSavePort
 } from "@woohaa3/contracts";
 import {
+  WORLD_CAPTURE_VIDEO_MEDIA_VERSION,
   isInspectableWorldCaptureContentType,
-  readWorldCaptureImageDimensions
+  readWorldCaptureImageDimensions,
+  readWorldCaptureVideoInfo
 } from "@woohaa3/contracts";
 
 const DEFAULT_MAX_CAPTURE_BYTES = 64 * 1024 * 1024;
@@ -97,6 +102,97 @@ function failed(
   request: WorldCaptureMediaSaveRequest,
   code: "write-failed" | "verification-failed"
 ): WorldCaptureMediaSaveResult {
+  return {
+    status: "failed",
+    requestId: request.requestId,
+    key: request.key,
+    contentFingerprint: request.contentFingerprint,
+    code
+  };
+}
+
+/**
+ * 动态镜头视频保存端口：先读真实 MP4（mdhd 时长 + tkhd 像素），再登记 `world-capture-video-media-v1`。
+ * 容器/时长/尺寸不匹配或上传校验失败都不会产生 ready 资产。
+ */
+export function createVideoCaptureMediaSavePort(
+  media: BackendMediaPort,
+  options: { maxBytes?: number } = {}
+): WorldCaptureVideoMediaSavePort {
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_CAPTURE_BYTES;
+  return {
+    async save(request: WorldCaptureDynamicMediaSaveRequest): Promise<WorldCaptureDynamicSaveResult> {
+      const { video } = request;
+      if (video.bytes.length === 0 || video.bytes.length > maxBytes || video.contentType !== "video/mp4") {
+        return videoFailed(request, "verification-failed");
+      }
+      const info = readWorldCaptureVideoInfo(video.bytes);
+      if (
+        !info ||
+        info.width !== video.width ||
+        info.height !== video.height ||
+        Math.abs(info.durationSeconds - video.durationSeconds) > 0.5
+      ) {
+        return videoFailed(request, "verification-failed");
+      }
+
+      let imported: { storageKey: string; contentType: string; size: number; checksum: string };
+      try {
+        imported = await media.importBytes({
+          bytesBase64: Buffer.from(video.bytes).toString("base64"),
+          contentType: video.contentType,
+          maxBytes,
+          canvasId: request.key.canvasId
+        });
+      } catch {
+        return videoFailed(request, "write-failed");
+      }
+      if (
+        imported.contentType !== video.contentType ||
+        imported.size !== video.bytes.length ||
+        !/^[0-9a-f]{64}$/.test(imported.checksum) ||
+        imported.storageKey.trim().length === 0
+      ) {
+        return videoFailed(request, "verification-failed");
+      }
+      try {
+        const verified = await media.verify(
+          imported.storageKey,
+          { contentType: video.contentType, size: video.bytes.length, checksum: imported.checksum },
+          { canvasId: request.key.canvasId }
+        );
+        if (!verified.exists || !verified.matches) return videoFailed(request, "verification-failed");
+      } catch {
+        return videoFailed(request, "verification-failed");
+      }
+
+      return {
+        status: "saved",
+        requestId: request.requestId,
+        key: request.key,
+        contentFingerprint: request.contentFingerprint,
+        media: {
+          version: WORLD_CAPTURE_VIDEO_MEDIA_VERSION,
+          mediaId: imported.storageKey,
+          storageKey: imported.storageKey,
+          checksum: imported.checksum,
+          size: video.bytes.length,
+          contentType: video.contentType,
+          width: info.width,
+          height: info.height,
+          container: "video/mp4",
+          durationSeconds: info.durationSeconds,
+          fps: video.fps
+        }
+      };
+    }
+  };
+}
+
+function videoFailed(
+  request: WorldCaptureDynamicMediaSaveRequest,
+  code: "write-failed" | "verification-failed"
+): WorldCaptureDynamicSaveResult {
   return {
     status: "failed",
     requestId: request.requestId,

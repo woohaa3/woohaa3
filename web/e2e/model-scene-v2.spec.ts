@@ -188,7 +188,7 @@ async function foregroundStatsIn(
   }, base64);
 }
 
-/** 取实际渲染节点中心，适配片场模型居中布局。 */async function modelClientPoint(page: Page, nodeId: string): Promise<{ x: number; y: number }> {
+/** 取实际渲染节点中心，适配模型卡片居中布局。 */async function modelClientPoint(page: Page, nodeId: string): Promise<{ x: number; y: number }> {
   return page.evaluate((id) => {
     const scene = (window as any).__bevyRuntime.lastScene();
     const node = scene.nodes.find((entry: any) => entry.id === id);
@@ -257,8 +257,8 @@ test.describe("V2 连续人物 WASM 视觉回归", () => {
     await waitForCanvasSession(page);
 
     const created = await createNode(page, {
-      // model3d 现为内嵌预览卡片；普通画布自由模型的 hover 动画由片场（composite-asset + extensionId="film-set"）承载。
-      nodeType: "composite-asset",
+      // 普通画布 free model 直接使用 model3d；hover 时播放动画。
+      nodeType: "model3d",
       position: { x: 380, y: 120 },
       nodeId: "model-v2-anim"
     });
@@ -274,7 +274,7 @@ test.describe("V2 连续人物 WASM 视觉回归", () => {
       scene.sphere({ id: "hand", parent: "arm", radius: 0.16, position: [0.25, -1.7, 0], color: "#e8c39e" });
       scene.rotate("arm", { axis: "z", speed: 1.5 });
     `;
-    // 片场模型按节点矩形适配；使用足够大的矩形保持像素判定的信噪比。
+    // 模型按节点矩形适配；使用足够大的矩形保持像素判定的信噪比。
     expect((await sendCommands(page, [{ type: "node.update", nodeId: "model-v2-anim", width: 320, height: 320 }])).ok).toBe(true);
     await waitForCommandsSettled(page);
     await submitModelScript(page, "model-v2-anim", animated);
@@ -332,7 +332,7 @@ test.describe("V2 连续人物 WASM 视觉回归", () => {
       ["anim-a", 200, "y"],
       ["anim-b", 900, "z"]
     ] as const) {
-      const created = await createNode(page, { nodeType: "composite-asset", position: { x, y: 150 }, nodeId: id });
+      const created = await createNode(page, { nodeType: "model3d", position: { x, y: 150 }, nodeId: id });
       expect(created.ok).toBe(true);
       expect((await sendCommands(page, [{ type: "node.update", nodeId: id, width: 320, height: 320 }])).ok).toBe(true);
       await waitForCommandsSettled(page);

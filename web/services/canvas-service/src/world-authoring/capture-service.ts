@@ -9,12 +9,19 @@
  */
 import { randomUUID } from "node:crypto";
 import {
+  worldCaptureDynamicBaseKey,
   createWorldCaptureContentResolutionRequest,
+  createWorldCaptureDynamicContentResolutionRequest,
+  createWorldCaptureDynamicMediaSaveRequest,
   createWorldCaptureMediaSaveRequest,
   decodeWorldCaptureResourceReadyNotice,
+  resolveWorldCaptureDynamicOutcome,
   resolveWorldCaptureOutcome,
   worldCaptureContentResolutionOutcome,
+  worldCaptureDynamicKeysEqual,
   worldCaptureVersionKeysEqual,
+  type WorldCaptureDynamicProducerOutcome,
+  type WorldCaptureDynamicSaveResult,
   type WorldCaptureMediaSaveResult,
   type WorldCaptureProducer,
   type WorldCaptureProducerOutcome,
@@ -22,11 +29,12 @@ import {
   type WorldCaptureRequest
 } from "@woohaa3/contracts";
 import {
-  buildWorldCaptureObservation,
+  buildWorldCameraObservation,
   DEFAULT_OUTPUT_LONG_EDGE,
   listCameraIds,
-  type Observation,
-  type SnapshotResult
+  type CameraObservation,
+  type CameraObservationResult,
+  type DynamicCameraObservation
 } from "./capture-snapshot.js";
 import {
   DEFAULT_CLAIM_TTL_MS,
@@ -38,7 +46,8 @@ import {
   type PendingPageCapture,
   type WorldCapturePagePrepareOutcome,
   type WorldCaptureService,
-  type WorldCaptureServiceOptions
+  type WorldCaptureServiceOptions,
+  type WorldCaptureVideoProducer
 } from "./capture-service-types.js";
 import { createCaptureClaimLedger } from "./capture-claims.js";
 import { freezeMessage, waitForFreeze } from "./capture-wait.js";
@@ -49,6 +58,22 @@ function nonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+/** 静态图片或动态视频任一已冻结，都算「有可查看的旧结果」。 */
+function hasFrozenContent(state: FramingState): boolean {
+  return state.frozen !== undefined || state.frozenVideo !== undefined;
+}
+
+/**
+ * 调度状态里保存的始终是**基础六字段键**。动态键额外带动画/区间/fps，
+ * 若直接拿它去做 `worldCaptureVersionKeysEqual`（严格六字段解码）会永远不相等，
+ * 于是每次冻结都被误判为 superseded。动态性单独存在 `state.dynamicKey`。
+ */
+function baseKeyOf(observation: CameraObservation): import("@woohaa3/contracts").WorldCaptureVersionKey {
+  return observation.kind === "dynamic"
+    ? worldCaptureDynamicBaseKey(observation.key)
+    : observation.key;
+}
+
 export function createWorldCaptureService(options: WorldCaptureServiceOptions): WorldCaptureService {
   const now = options.now ?? (() => Date.now());
   const outputLongEdge = options.outputLongEdge ?? DEFAULT_OUTPUT_LONG_EDGE;
@@ -57,6 +82,8 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
   const states = new Map<string, FramingState>();
   const claims = createCaptureClaimLedger({ now, claimTtlMs });
   let producer: WorldCaptureProducer | null = null;
+  let videoProducer: WorldCaptureVideoProducer | null = null;
+  let videoProducerToken = 0;
   let producerToken = 0;
   let disposed = false;
 
@@ -71,6 +98,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       canvasId,
       cameraId,
       key: null,
+      kind: "static",
       phase: "empty",
       stale: false,
       attemptCounter: 0
@@ -89,7 +117,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
   function applyFailure(state: FramingState, phase: "failed" | "unavailable", reason: string): void {
     state.phase = phase;
     state.reason = reason;
-    state.stale = state.frozen !== undefined;
+    state.stale = hasFrozenContent(state);
   }
 
   async function saveImage(input: {
@@ -102,7 +130,8 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
     return options.mediaSave.save(saveRequest.value);
   }
 
-  async function runAttempt(state: FramingState, observation: Observation, attempt: Attempt): Promise<void> {
+  async function runAttempt(state: FramingState, observation: CameraObservation, attempt: Attempt): Promise<void> {
+    if (observation.kind === "dynamic") return runDynamicAttempt(state, observation, attempt);
     try {
       if (!producer) {
         applyFailure(state, "unavailable", "producer-missing");
@@ -173,7 +202,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
   function applyProducerOutcome(
     state: FramingState,
     attempt: Attempt,
-    observation: Observation,
+    observation: Extract<CameraObservation, { kind: "static" }>,
     outcome: WorldCaptureProducerOutcome,
     saved: WorldCaptureMediaSaveResult | undefined
   ): void {
@@ -206,7 +235,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       case "waiting":
         state.phase = "waiting";
         state.reason = decision.reason;
-        state.stale = state.frozen !== undefined;
+        state.stale = hasFrozenContent(state);
         return;
       case "unavailable":
         applyFailure(state, "unavailable", decision.reason);
@@ -217,7 +246,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       case "cancelled":
         state.phase = "cancelled";
         state.reason = "cancelled";
-        state.stale = state.frozen !== undefined;
+        state.stale = hasFrozenContent(state);
         return;
       case "rejected":
         applyFailure(state, "failed", decision.code);
@@ -228,19 +257,204 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
     }
   }
 
+  /** 应用一次动态结果：只有键相等且保存校验通过才发布 ready。 */
+  function applyDynamicOutcome(
+    state: FramingState,
+    attempt: Attempt,
+    observation: DynamicCameraObservation,
+    outcome: WorldCaptureDynamicProducerOutcome,
+    saved: WorldCaptureDynamicSaveResult | undefined
+  ): void {
+    if (state.attempt !== attempt || disposed) return;
+    if (!state.key || !state.dynamicKey || !worldCaptureVersionKeysEqual(state.key, baseKeyOf(observation))) return;
+    if (!worldCaptureDynamicKeysEqual(state.dynamicKey, observation.key)) return;
+    if (attempt.controller.signal.aborted && outcome.status !== "cancelled") return;
+
+    const decision = resolveWorldCaptureDynamicOutcome({
+      request: observation.request,
+      currentKey: observation.key,
+      cancelled: attempt.controller.signal.aborted,
+      outcome,
+      ...(saved ? { saved } : {})
+    });
+    switch (decision.status) {
+      case "ready": {
+        state.frozenVideo = decision.frozen;
+        state.frozen = undefined;
+        state.phase = "ready";
+        state.stale = false;
+        state.reason = undefined;
+        state.width = decision.frozen.media.width;
+        state.height = decision.frozen.media.height;
+        state.durationSeconds = observation.durationSeconds;
+        return;
+      }
+      case "media-required":
+        applyFailure(state, "failed", "video-media-save-unavailable");
+        return;
+      case "waiting":
+        state.phase = "waiting";
+        state.reason = decision.reason;
+        state.stale = state.frozenVideo !== undefined;
+        return;
+      case "unavailable":
+        applyFailure(state, "unavailable", decision.reason);
+        return;
+      case "failed":
+        applyFailure(state, "failed", decision.code);
+        return;
+      case "cancelled":
+        state.phase = "cancelled";
+        state.reason = "cancelled";
+        state.stale = state.frozenVideo !== undefined;
+        return;
+      case "rejected":
+        applyFailure(state, "failed", decision.code);
+        return;
+      case "superseded":
+        return;
+    }
+  }
+
+  async function runDynamicAttempt(
+    state: FramingState,
+    observation: DynamicCameraObservation,
+    attempt: Attempt
+  ): Promise<void> {
+    try {
+      if (!videoProducer) {
+        applyFailure(state, "unavailable", "dynamic-renderer-unavailable");
+        return;
+      }
+      const request = observation.request;
+      if (request.subject.kind === "bound-missing") {
+        applyFailure(state, "unavailable", "bound-target-missing");
+        return;
+      }
+      state.phase = "capturing";
+      state.reason = undefined;
+      state.lastRequestId = request.requestId;
+      state.lastContentFingerprint = request.contentFingerprint;
+
+      if (videoProducer.resolveContent) {
+        const resolution = await videoProducer.resolveContent.resolve(
+          createWorldCaptureDynamicContentResolutionRequest(request)
+        );
+        if (resolution.requestId !== request.requestId ||
+            resolution.contentFingerprint !== request.contentFingerprint) {
+          applyDynamicOutcome(state, attempt, observation, {
+            status: "failed",
+            requestId: request.requestId,
+            key: request.key,
+            contentFingerprint: request.contentFingerprint,
+            code: "content-mismatch"
+          }, undefined);
+          return;
+        }
+        if (resolution.status === "waiting") {
+          applyDynamicOutcome(state, attempt, observation, {
+            status: "waiting",
+            requestId: request.requestId,
+            key: request.key,
+            contentFingerprint: request.contentFingerprint,
+            reason: resolution.reason ?? "resources-not-ready"
+          }, undefined);
+          return;
+        }
+        if (resolution.status === "unavailable") {
+          applyDynamicOutcome(state, attempt, observation, {
+            status: "unavailable",
+            requestId: request.requestId,
+            key: request.key,
+            contentFingerprint: request.contentFingerprint,
+            reason: resolution.reason ?? "content-unavailable"
+          }, undefined);
+          return;
+        }
+        if (resolution.status === "failed") {
+          applyDynamicOutcome(state, attempt, observation, {
+            status: "failed",
+            requestId: request.requestId,
+            key: request.key,
+            contentFingerprint: request.contentFingerprint,
+            code: resolution.code ?? "render-failed"
+          }, undefined);
+          return;
+        }
+      }
+      if (attempt.controller.signal.aborted) {
+        applyDynamicOutcome(state, attempt, observation, {
+          status: "cancelled",
+          requestId: request.requestId,
+          key: request.key,
+          contentFingerprint: request.contentFingerprint
+        }, undefined);
+        return;
+      }
+
+      const outcome = await videoProducer.captureVideo(request, { signal: attempt.controller.signal });
+      let saved: WorldCaptureDynamicSaveResult | undefined;
+      const first = resolveWorldCaptureDynamicOutcome({
+        request,
+        currentKey: request.key,
+        cancelled: attempt.controller.signal.aborted,
+        outcome
+      });
+      if (first.status === "media-required") {
+        const saveRequest = options.videoMediaSave && outcome.status === "video"
+          ? createWorldCaptureDynamicMediaSaveRequest(request, outcome.video)
+          : null;
+        saved = saveRequest?.ok
+          ? await options.videoMediaSave!.save(saveRequest.value)
+          : {
+              status: "failed",
+              requestId: request.requestId,
+              key: request.key,
+              contentFingerprint: request.contentFingerprint,
+              code: "write-failed"
+            };
+      }
+      applyDynamicOutcome(state, attempt, observation, outcome, saved);
+    } catch (error) {
+      if (state.attempt !== attempt) return;
+      applyFailure(state, "failed", error instanceof Error ? error.message : "capture-failed");
+      log({
+        event: "world-capture-dynamic-attempt-failed",
+        canvasId: state.canvasId,
+        cameraId: state.cameraId,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
   async function startAttempt(
     state: FramingState,
-    observation: Observation
+    observation: CameraObservation
   ): Promise<void> {
     if (disposed) return;
     state.observation = observation;
-    if (!producer) {
-      // 页面驱动渲染：宿主只登记待取景，等待前端渲染并把帧提交回来。
+    state.kind = observation.kind;
+    state.durationSeconds = observation.kind === "dynamic" ? observation.durationSeconds : undefined;
+    state.dynamicKey = observation.kind === "dynamic" ? observation.key : null;
+    const attemptKey = baseKeyOf(observation);
+    if (observation.kind === "dynamic" && !videoProducer) {
+      // 没有原生视频 producer 时走页面录制：宿主登记待取景，前端逐帧渲染 + WebCodecs 编码。
       supersedeAttempt(state);
-      state.key = observation.key;
+      state.key = attemptKey;
       state.phase = "waiting";
       state.reason = "page-render-pending";
-      state.stale = state.frozen !== undefined;
+      state.stale = hasFrozenContent(state);
+      state.lastRequestId = observation.request.requestId;
+      state.lastContentFingerprint = observation.request.contentFingerprint;
+      return;
+    }
+    if (observation.kind === "static" && !producer) {
+      // 页面驱动渲染：宿主只登记待取景，等待前端渲染并把帧提交回来。
+      supersedeAttempt(state);
+      state.key = attemptKey;
+      state.phase = "waiting";
+      state.reason = "page-render-pending";
+      state.stale = hasFrozenContent(state);
       state.lastRequestId = observation.request.requestId;
       state.lastContentFingerprint = observation.request.contentFingerprint;
       return;
@@ -249,11 +463,11 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
     const attempt: Attempt = {
       attemptId: state.attemptCounter,
       requestId: observation.request.requestId,
-      key: observation.key,
+      key: attemptKey,
       controller: new AbortController(),
       promise: Promise.resolve()
     };
-    state.key = observation.key;
+    state.key = attemptKey;
     state.phase = "capturing";
     state.reason = undefined;
     state.lastRequestId = observation.request.requestId;
@@ -265,18 +479,23 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
     await attempt.promise;
   }
 
-  async function observeFromRoom(canvasId: string, cameraId: string): Promise<SnapshotResult | { ok: false; code: "canvas-not-found"; message: string }> {
+  async function observeFromRoom(
+    canvasId: string,
+    cameraId: string
+  ): Promise<CameraObservationResult | { ok: false; code: "canvas-not-found"; message: string }> {
     const room = await options.resolveRoom(canvasId);
     if (!room) return { ok: false, code: "canvas-not-found", message: "画布不存在" };
     const exported = room.exportCanvas();
     if (!exported.ok) return { ok: false, code: "canvas-not-found", message: exported.message };
     const state = ensureState(canvasId, cameraId);
-    return buildWorldCaptureObservation({
+    return buildWorldCameraObservation({
       canvasId,
       canvas: exported.canvas,
       cameraId,
       outputLongEdge,
-      attemptCounter: state.attemptCounter + 1
+      attemptCounter: state.attemptCounter + 1,
+      ...(options.dynamicOutputLongEdge !== undefined ? { dynamicOutputLongEdge: options.dynamicOutputLongEdge } : {}),
+      ...(options.dynamicFps !== undefined ? { fps: options.dynamicFps } : {})
     });
   }
 
@@ -284,13 +503,14 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
     const observed = await observeFromRoom(canvasId, cameraId);
     if (!observed.ok) {
       const state = ensureState(canvasId, cameraId);
-      state.stale = state.frozen !== undefined;
+      state.stale = hasFrozenContent(state);
       if (observed.code === "camera-not-found") applyFailure(state, "unavailable", "camera-not-found");
       return { ok: false, code: observed.code, message: observed.message, status: statusOf(state) };
     }
     const state = ensureState(canvasId, cameraId);
     const observation = observed.observation;
-    if (state.key && worldCaptureVersionKeysEqual(state.key, observation.key)) {
+    const observedKey = baseKeyOf(observation);
+    if (state.key && worldCaptureVersionKeysEqual(state.key, observedKey)) {
       if (state.phase === "ready") return { ok: true, status: statusOf(state) };
       if (state.attempt) {
         await state.attempt.promise;
@@ -298,9 +518,9 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       }
     } else {
       supersedeAttempt(state);
-      state.key = observation.key;
+      state.key = observedKey;
       // The previous frozen input belongs to an older key: keep it viewable but stale.
-      state.stale = state.frozen !== undefined;
+      state.stale = hasFrozenContent(state);
       state.phase = "capturing";
     }
     await startAttempt(state, observation);
@@ -346,9 +566,43 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
             supersedeAttempt(state);
             state.phase = "unavailable";
             state.reason = "producer-unregistered";
-            state.stale = state.frozen !== undefined;
+            state.stale = hasFrozenContent(state);
           }
           log({ event: "world-capture-producer-unregistered", producerId: candidate.producerId });
+        }
+      };
+    },
+
+    registerVideoProducer(candidate) {
+      if (!candidate || !nonEmpty(candidate.producerId) || typeof candidate.captureVideo !== "function") {
+        throw new Error("world video producer requires producerId and captureVideo()");
+      }
+      if (videoProducer && videoProducer.producerId !== candidate.producerId) {
+        throw new Error("world video producer already registered");
+      }
+      videoProducer = candidate;
+      const token = ++videoProducerToken;
+      log({ event: "world-video-producer-registered", producerId: candidate.producerId });
+      for (const state of states.values()) {
+        if (state.kind !== "dynamic") continue;
+        if (state.phase === "unavailable" && state.reason === "dynamic-renderer-unavailable" && state.observation) {
+          void startAttempt(state, state.observation).catch(() => undefined);
+        }
+      }
+      return {
+        producerId: candidate.producerId,
+        unregister() {
+          if (!videoProducer || videoProducer.producerId !== candidate.producerId || token !== videoProducerToken) return;
+          videoProducer = null;
+          videoProducerToken += 1;
+          for (const state of states.values()) {
+            if (state.kind !== "dynamic") continue;
+            supersedeAttempt(state);
+            state.phase = "unavailable";
+            state.reason = "dynamic-renderer-unavailable";
+            state.stale = hasFrozenContent(state);
+          }
+          log({ event: "world-video-producer-unregistered", producerId: candidate.producerId });
         }
       };
     },
@@ -375,7 +629,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       if (disposed) return;
       const cameraIds = listCameraIds(input.canvas);
       for (const cameraId of cameraIds) {
-        const observed = buildWorldCaptureObservation({
+        const observed = buildWorldCameraObservation({
           canvasId: input.canvasId,
           canvas: input.canvas,
           cameraId,
@@ -388,10 +642,10 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
           applyFailure(state, "failed", observed.message);
           continue;
         }
-        if (state.key && worldCaptureVersionKeysEqual(state.key, observed.observation.key)) continue;
+        if (state.key && worldCaptureVersionKeysEqual(state.key, baseKeyOf(observed.observation))) continue;
         supersedeAttempt(state);
-        state.key = observed.observation.key;
-        state.stale = state.frozen !== undefined;
+        state.key = baseKeyOf(observed.observation);
+        state.stale = hasFrozenContent(state);
         void startAttempt(state, observed.observation).catch(() => undefined);
       }
       // Removed cameras: settle explicitly instead of leaving a stale current framing.
@@ -415,18 +669,37 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         ? statusOf(states.get(stateKey(canvasId, cameraId))!)
         : emptyStatus(canvasId, cameraId),
 
+    statuses(canvasId) {
+      const result: import("@woohaa3/contracts").WorldCaptureFramingStatus[] = [];
+      for (const state of states.values()) {
+        if (state.canvasId === canvasId) result.push(statusOf(state));
+      }
+      return result;
+    },
+
     pendingPageCaptures(canvasId) {
       const pending: PendingPageCapture[] = [];
       for (const state of states.values()) {
         if (state.canvasId !== canvasId) continue;
         if (state.phase !== "waiting" || !state.key) continue;
         const output = state.observation?.request.output;
+        const observation = state.observation;
+        const dynamic = observation?.kind === "dynamic" ? observation : null;
         pending.push({
           canvasId: state.canvasId,
           cameraId: state.cameraId,
           key: state.key,
           width: output?.width ?? 0,
           height: output?.height ?? 0,
+          kind: state.kind,
+          ...(dynamic
+            ? {
+                dynamicKey: dynamic.key,
+                fps: dynamic.key.fps,
+                timeRange: dynamic.key.timeRange,
+                ...(dynamic.shot.animation ? { animationNodeId: dynamic.shot.animation.areaNodeId } : {})
+              }
+            : {}),
           ...(state.lastRequestId ? { requestId: state.lastRequestId } : {})
         });
       }
@@ -445,11 +718,12 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       }
       const state = ensureState(canvasId, cameraId);
       const target = observed.observation;
+      const targetKey = baseKeyOf(target);
       const targetRequestId = requestId && nonEmpty(requestId)
         ? requestId
         : `world-capture-claim:${randomUUID()}`;
-      if (state.key && worldCaptureVersionKeysEqual(state.key, target.key)) {
-        if (state.phase === "ready" && !state.stale && state.frozen) {
+      if (state.key && worldCaptureVersionKeysEqual(state.key, targetKey)) {
+        if (state.phase === "ready" && !state.stale && hasFrozenContent(state)) {
           return claims.claim(state, target, targetRequestId);
         }
         if (!state.attempt) {
@@ -457,29 +731,29 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         }
       } else {
         supersedeAttempt(state);
-        state.key = target.key;
-        state.stale = state.frozen !== undefined;
+        state.key = targetKey;
+        state.stale = hasFrozenContent(state);
         void startAttempt(state, target).catch(() => undefined);
       }
 
-      const wait = await waitForFreeze(state, target.key, signal, freezeTimeoutMs);
+      const wait = await waitForFreeze(state, targetKey, signal, freezeTimeoutMs);
       if (wait !== "ready") {
         if (wait === "timeout" && state.attempt) supersedeAttempt(state);
         return {
           ok: false,
           code: wait,
           message: freezeMessage(wait),
-          requestedKey: target.key,
-          ...(state.key && !worldCaptureVersionKeysEqual(state.key, target.key) ? { currentKey: state.key } : {}),
+          requestedKey: targetKey,
+          ...(state.key && !worldCaptureVersionKeysEqual(state.key, targetKey) ? { currentKey: state.key } : {}),
           status: statusOf(state)
         };
       }
-      if (!state.key || !worldCaptureVersionKeysEqual(state.key, target.key) || !state.frozen || state.stale) {
+      if (!state.key || !worldCaptureVersionKeysEqual(state.key, targetKey) || !hasFrozenContent(state) || state.stale) {
         return {
           ok: false,
           code: "superseded",
           message: freezeMessage("superseded"),
-          requestedKey: target.key,
+          requestedKey: targetKey,
           ...(state.key ? { currentKey: state.key } : {}),
           status: statusOf(state)
         };
@@ -492,11 +766,19 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       const observed = await observeFromRoom(canvasId, cameraId);
       if (!observed.ok) return { ok: false, code: observed.code, message: observed.message };
       const { observation } = observed;
+      if (observation.kind === "dynamic") {
+        return {
+          ok: false,
+          code: "dynamic-capture-unsupported",
+          message: "动态镜头需要原生视频编码，浏览器页面取景不可用"
+        };
+      }
       const state = ensureState(canvasId, cameraId);
-      if (!state.key || !worldCaptureVersionKeysEqual(state.key, observation.key)) {
+      const observedKey = baseKeyOf(observation);
+      if (!state.key || !worldCaptureVersionKeysEqual(state.key, observedKey)) {
         supersedeAttempt(state);
-        state.key = observation.key;
-        state.stale = state.frozen !== undefined;
+        state.key = observedKey;
+        state.stale = hasFrozenContent(state);
         state.phase = "capturing";
       }
       state.observation = observation;
@@ -504,7 +786,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       state.lastContentFingerprint = observation.request.contentFingerprint;
       return {
         ok: true,
-        key: observation.key,
+        key: observedKey,
         width: observation.request.output.width,
         height: observation.request.output.height
       };
@@ -521,12 +803,19 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         };
       }
       const { observation } = observed;
+      if (observation.kind === "dynamic") {
+        return {
+          ok: false,
+          code: "dynamic-capture-unsupported",
+          message: "动态镜头需要原生视频编码，浏览器页面取景不可用"
+        };
+      }
       const state = ensureState(canvasId, cameraId);
       state.key = observation.key;
       state.lastRequestId = observation.request.requestId;
       state.lastContentFingerprint = observation.request.contentFingerprint;
       if (!worldCaptureVersionKeysEqual(observation.key, key)) {
-        state.stale = state.frozen !== undefined;
+        state.stale = hasFrozenContent(state);
         return {
           ok: false,
           code: "superseded",
@@ -573,6 +862,78 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       state.observation = observation;
       // A new page render is a new freeze operation even when the scene version
       // is unchanged. Keep the version identity separate from its expiring claim.
+      return claims.claim(state, observation, `world-capture-claim:${randomUUID()}`);
+    },
+
+    async commitPageVideoCapture({ canvasId, cameraId, key, video }) {
+      if (disposed) return { ok: false, code: "capture-unavailable", message: "取景服务已关闭" };
+      const observed = await observeFromRoom(canvasId, cameraId);
+      if (!observed.ok) {
+        return {
+          ok: false,
+          code: observed.code === "camera-not-found" ? "camera-not-found" : observed.code,
+          message: observed.message
+        };
+      }
+      const { observation } = observed;
+      if (observation.kind !== "dynamic") {
+        return { ok: false, code: "invalid-data", message: "该镜头不是动态取景" };
+      }
+      const state = ensureState(canvasId, cameraId);
+      state.key = baseKeyOf(observation);
+      state.dynamicKey = observation.key;
+      state.kind = "dynamic";
+      state.durationSeconds = observation.durationSeconds;
+      state.lastRequestId = observation.request.requestId;
+      state.lastContentFingerprint = observation.request.contentFingerprint;
+      if (!worldCaptureDynamicKeysEqual(observation.key, key)) {
+        state.stale = hasFrozenContent(state);
+        return {
+          ok: false,
+          code: "superseded",
+          message: "画布在页面录制期间已变化，请重新取景",
+          requestedKey: baseKeyOf(observation),
+          currentKey: state.key,
+          status: statusOf(state)
+        };
+      }
+      const saveRequest = createWorldCaptureDynamicMediaSaveRequest(observation.request, video);
+      if (!saveRequest.ok) {
+        return { ok: false, code: "invalid-data", message: "页面录制的视频尺寸或时长与当前输出不一致" };
+      }
+      const saved = options.videoMediaSave
+        ? await options.videoMediaSave.save(saveRequest.value)
+        : null;
+      const outcome: WorldCaptureDynamicProducerOutcome = {
+        status: "video",
+        requestId: observation.request.requestId,
+        key: observation.key,
+        contentFingerprint: observation.request.contentFingerprint,
+        video
+      };
+      const decision = resolveWorldCaptureDynamicOutcome({
+        request: observation.request,
+        currentKey: observation.key,
+        cancelled: false,
+        outcome,
+        ...(saved ? { saved } : {})
+      });
+      if (decision.status !== "ready") {
+        const reason = decision.status === "media-required" ? "video-media-save-unavailable"
+          : decision.status === "unavailable" ? decision.reason
+            : decision.status === "failed" || decision.status === "rejected" ? decision.code
+              : "capture-failed";
+        applyFailure(state, "failed", reason);
+        return { ok: false, code: "capture-not-ready", message: "页面视频取景提交失败", status: statusOf(state) };
+      }
+      state.frozenVideo = decision.frozen;
+      state.frozen = undefined;
+      state.phase = "ready";
+      state.stale = false;
+      state.reason = undefined;
+      state.width = decision.frozen.media.width;
+      state.height = decision.frozen.media.height;
+      state.observation = observation;
       return claims.claim(state, observation, `world-capture-claim:${randomUUID()}`);
     },
 

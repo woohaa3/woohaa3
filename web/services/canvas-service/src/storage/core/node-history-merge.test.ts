@@ -414,7 +414,7 @@ describe("同类型节点合并", () => {
     const managed = canvasWith([
       {
         node: { id: "source", type: "text", position: { x: 0, y: 0 } },
-        data: { managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: "set", entityId: "e", lifecycle: "owner-managed" } }
+        data: { managedBy: { schemaVersion: 1, extensionId: "demo-extension", ownerNodeId: "set", entityId: "e", lifecycle: "owner-managed" } }
       },
       textNode("target", "target-current")
     ]);

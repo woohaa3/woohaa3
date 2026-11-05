@@ -18,7 +18,7 @@ fn parse(json: &str) -> Scene {
 #[test]
 fn node_progress_start_defaults_to_absent() {
     let scene = parse(
-        r#"{"version":"woohaa-canvas-render-scene-v41","nodes":[{"id":"n1","type":"image","x":0,"y":0,"busy":true,"progress":20.0}],"edges":[]}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v42","nodes":[{"id":"n1","type":"image","x":0,"y":0,"busy":true,"progress":20.0}],"edges":[]}"#,
     );
     assert_eq!(scene.nodes[0].progress_started_at, None);
     assert!(scene.validate().is_ok());
@@ -27,7 +27,7 @@ fn node_progress_start_defaults_to_absent() {
 #[test]
 fn node_progress_start_parses_from_camel_case_field() {
     let scene = parse(
-        r#"{"version":"woohaa-canvas-render-scene-v41","nodes":[{"id":"n1","type":"image","x":0,"y":0,"busy":true,"progress":20.0,"progressStartedAt":1767225600000}],"edges":[]}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v42","nodes":[{"id":"n1","type":"image","x":0,"y":0,"busy":true,"progress":20.0,"progressStartedAt":1767225600000}],"edges":[]}"#,
     );
     assert_eq!(scene.nodes[0].progress_started_at, Some(1_767_225_600_000.0));
     assert!(scene.validate().is_ok());
@@ -37,7 +37,7 @@ fn node_progress_start_parses_from_camel_case_field() {
 fn invalid_node_progress_start_rejects_frame() {
     // 负起点没有任何经过时间可算；整帧拒绝而不是静默夹取。
     let scene = parse(
-        r#"{"version":"woohaa-canvas-render-scene-v41","nodes":[{"id":"n1","type":"image","x":0,"y":0,"busy":true,"progressStartedAt":-1}],"edges":[]}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v42","nodes":[{"id":"n1","type":"image","x":0,"y":0,"busy":true,"progressStartedAt":-1}],"edges":[]}"#,
     );
     assert!(scene.validate().is_err());
 }

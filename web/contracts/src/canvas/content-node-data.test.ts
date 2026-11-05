@@ -30,14 +30,6 @@ describe("registered node data owner", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.canvas.nodeData.owned).toEqual({ extensionId: "test-recipe", recipe: 2, normalized: true });
   });
-  it("keeps owner fields but drops removed film-set fields through final commit normalization", () => {
-    const result = applyCanvasCommands(canvas(), [{ type: "nodeData.patch", nodeId: "owned", value: { recipe: 2, filmSetContent: { opaque: true } } }], { content: registry() });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.canvas.nodeData.owned.recipe).toBe(2);
-      expect(result.canvas.nodeData.owned).not.toHaveProperty("filmSetContent");
-    }
-  });
   it("rejects absent owners and identity replacement atomically", () => {
     const original = canvas();
     const unknown = applyCanvasCommands(original, [{ type: "nodeData.patch", nodeId: "owned", value: { recipe: 2 } }], { content: new ContentContributionRegistry() });
@@ -74,13 +66,13 @@ describe("registered node data owner", () => {
   it("does not invoke a composite owner on unrelated node types", () => {
     const original = canvas();
     original.document.nodes[0]!.type = "image";
-    original.nodeData.owned.filmSetContent = { opaque: true };
-    original.nodeData.owned.extensionId = "film-set";
+    original.nodeData.owned.exampleContent = { opaque: true };
+    original.nodeData.owned.extensionId = "demo-extension";
     const throwing = { ...codec, normalize: () => { throw Error("private diagnostic"); } };
     const content = new ContentContributionRegistry();
-    content.register({ extensionId: "film-set", nodeData: throwing });
+    content.register({ extensionId: "demo-extension", nodeData: throwing });
     const normalized = normalizeCanvas(original, { content });
-    expect(normalized.nodeData.owned).not.toHaveProperty("filmSetContent");
+    expect(normalized.nodeData.owned.exampleContent).toEqual({ opaque: true });
     expect(normalized.nodeData.owned.recipe).toBe(1);
   });
   it("preserves unknown and failed owner data when reading", () => {

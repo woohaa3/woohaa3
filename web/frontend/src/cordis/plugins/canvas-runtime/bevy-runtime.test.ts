@@ -6,7 +6,7 @@
  * descriptor 与 payload 分离的用例见 `bevy-runtime-payload.test.ts`（同一份 harness）。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION, MODEL_FOCUS_VERSION, DEFAULT_MODEL_PREVIEW, prepareModelResource, type CanvasRenderScene } from "@woohaa3/contracts";
+import { CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION, MODEL_FOCUS_VERSION, DEFAULT_MODEL_PREVIEW, prepareModelResource, type CanvasRenderScene } from "@woohaa3/contracts";
 import { loadBevyRuntime, frameCountersReadable } from "./bevy-runtime.js";
 import { resetSceneDiagnostics, sceneDiagnostics } from "./scene-diagnostics.js";
 import { mockModule, sceneWith, v2Ops, type Calls } from "./test-support/runtime-harness.js";
@@ -283,7 +283,7 @@ describe("Bevy runtime viewport capability（change: 2026-10-10-optimize-canvas-
     const stale = mockModule([]);
     stale.scene_capability = () => "woohaa-canvas-render-scene-v36";
     await expect(loadBevyRuntime({ importModule: async () => stale })).rejects.toThrow(
-      /场景能力不匹配：woohaa-canvas-render-scene-v36 != woohaa-canvas-render-scene-v41/
+      new RegExp(`场景能力不匹配：woohaa-canvas-render-scene-v36 != ${CANVAS_RENDER_SCENE_VERSION}`)
     );
   });
 
@@ -550,7 +550,7 @@ it("gizmo queries carry full transient identity, retry stale once and reject old
     return JSON.stringify(stale ? {available:false,reason:"stale"} : {available:true,generation:request.generation,handle:"scale",layoutId:"layout",epoch:7});
   };
   const runtime=await loadBevyRuntime({importModule:async()=>module});
-  const input={kind:"object" as const,editor:{version:"woohaa-model-editor-v2" as const,nodeId:"film",itemId:"a",toolMode:"object" as const,objectTool:"scale" as const,
+  const input={kind:"object" as const,editor:{version:"woohaa-model-editor-v2" as const,nodeId:"model",toolMode:"model" as const,
     focus:[0,0,0] as [number,number,number],radius:1,feedback:{epoch:7,hover:"scale" as const}},
     projection:{target:[0,0,0] as [number,number,number],yaw:0,pitch:0,distance:10},surface:{width:1024,height:768},point:{x:1,y:2}};
   expect(runtime.queryGizmoHit!(input)?.available).toBe(false);

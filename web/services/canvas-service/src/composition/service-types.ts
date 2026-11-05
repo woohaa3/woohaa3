@@ -70,6 +70,8 @@ export type CanvasServiceOptions = {
   mediaClient?: CanvasMediaClient;
   /** T10 trusted save port. Missing makes capture-bound generation fail closed. */
   worldCaptureMediaSave?: import("@woohaa3/contracts").WorldCaptureMediaSavePort;
+  /** 动态镜头视频媒体保存端口（视频容器校验后登记）。 */
+  worldCaptureVideoMediaSave?: import("@woohaa3/contracts").WorldCaptureVideoMediaSavePort;
   /** Static capture output long edge (host configuration, never browser-reported). */
   worldCaptureOutputLongEdge?: number;
   /** Generation wait budget for one exact capture key. */

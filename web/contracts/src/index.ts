@@ -217,6 +217,9 @@ export {
 export * from "./canvas/world-capture-port-contract.js";
 export * from "./canvas/world-capture-content-contract.js";
 export * from "./canvas/world-capture-pipeline-contract.js";
+export * from "./canvas/world-capture-dynamic-contract.js";
+export * from "./canvas/world-capture-video-media.js";
+export * from "./canvas/world-camera-shot.js";
 export * from "./canvas/world-capture-image.js";
 export * from "./canvas/scene-area-plan-contract.js";
 export * from "./canvas/scene-area-operation-plan.js";
@@ -230,6 +233,7 @@ export * from "./canvas/generated-image-registry.js";
 export * from "./canvas/humanoid-rig.js";
 export * from "./canvas/resource-state-update.js";
 export * from "./media/image-resource.js";
+export type * from "./media/native-document-editor.js";
 export {
   LOG_ATTRIBUTE_VALUE_LIMIT, LOG_ERROR_CODE_PATTERN, LOG_EVENT_PATTERN, LOG_LEVELS, LOG_LIMITS,
   LOG_MESSAGE_LIMIT, LOG_MODULE_PATTERN, LOG_SCHEMA_VERSION, LOG_TRACE_ID_PATTERN, REDACTED,

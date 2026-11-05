@@ -34,16 +34,33 @@ import {
   isWorldCaptureContentFingerprint,
   type WorldCaptureContentResolutionPort
 } from "./world-capture-content-contract.js";
+import {
+  decodeWorldCaptureVideoMediaMetadata,
+  encodeWorldCaptureVideoMediaMetadata,
+  type WorldCaptureDynamicProducerOutcome,
+  type WorldCaptureDynamicRequest,
+  type WorldCaptureVideoFrozenInput,
+  type WorldCaptureVideoMediaMetadata
+} from "./world-capture-dynamic-contract.js";
 import type {
   WorldCaptureProducerOutcome,
   WorldCaptureRequest
 } from "./world-capture-port-contract.js";
 
-/** Version of the generation binding envelope. */
-export const WORLD_CAPTURE_GENERATION_BINDING_VERSION = "world-capture-generation-binding-v1" as const;
+/**
+ * Version of the generation binding envelope.
+ *
+ * v2 adds the optional `video` envelope for动态镜头. v1 bindings persisted by older
+ * builds keep decoding (they can only carry an image `media`); new claims always write
+ * v2 so a video asset can never be mistaken for an image reference.
+ */
+export const WORLD_CAPTURE_GENERATION_BINDING_VERSION = "world-capture-generation-binding-v2" as const;
+/** Legacy envelope still read from persisted jobs; never written again. */
+export const LEGACY_WORLD_CAPTURE_GENERATION_BINDING_VERSION = "world-capture-generation-binding-v1" as const;
 
 const CHECKSUM_PATTERN = /^[0-9a-f]{64}$/;
 const BINDING_KEYS = ["version", "requestId", "key", "contentFingerprint", "input", "media"] as const;
+const BINDING_V2_KEYS = ["version", "requestId", "key", "contentFingerprint", "input", "media", "video"] as const;
 const READY_NOTICE_KEYS = ["canvasId", "cameraId", "requestId", "contentFingerprint"] as const;
 
 /**
@@ -68,6 +85,15 @@ export interface WorldCaptureProducer {
    * exactly the pinned content (never the mutable current scene).
    */
   readonly resolveContent?: WorldCaptureContentResolutionPort;
+  /**
+   * Dynamic (video) capture for cameras derived as `dynamic`. Producers without a
+   * real video encoder MUST omit it; the scheduler then reports an explicit
+   * unavailable reason instead of silently returning a static image.
+   */
+  readonly captureVideo?: (
+    request: WorldCaptureDynamicRequest,
+    options?: { readonly signal?: AbortSignal }
+  ) => Promise<WorldCaptureDynamicProducerOutcome>;
 }
 
 export interface WorldCaptureProducerRegistration {
@@ -102,6 +128,11 @@ export interface WorldCaptureGenerationBinding {
    * consumers that need a reference must fail closed when it is absent.
    */
   readonly media?: WorldCaptureMediaMetadata;
+  /**
+   * Exact verified video envelope for a dynamic camera shot. Absent for static
+   * (image) framings; never combined with `media`.
+   */
+  readonly video?: WorldCaptureVideoMediaMetadata;
 }
 
 export type WorldCaptureFramingPhase =
@@ -127,6 +158,12 @@ export interface WorldCaptureFramingStatus {
   readonly requestId?: WorldId;
   readonly contentFingerprint?: string;
   readonly input?: WorldCaptureInput;
+  /** 卡片语义：`dynamic` 表示该镜头代表视频，不只是图片。 */
+  readonly shotKind?: "static" | "dynamic";
+  /** 动态镜头关联的动画时长（秒）；静止镜头缺省。 */
+  readonly durationSeconds?: number;
+  /** 当前键已冻结的视频媒体（仅动态镜头且 ready 时存在）。 */
+  readonly video?: WorldCaptureVideoMediaMetadata;
   /** Current output pixels of the last captured key (not byte size). */
   readonly width?: number;
   readonly height?: number;
@@ -138,6 +175,8 @@ export type WorldCaptureRefreshFailureCode =
   | "camera-not-found"
   | "capture-unavailable"
   | "unsupported-capture-mode"
+  | "duration-exceeded"
+  | "fps-out-of-range"
   | "invalid-data"
   | "producer-missing";
 
@@ -159,6 +198,9 @@ export type WorldCaptureFreezeFailureCode =
   | "superseded"
   | "timeout"
   | "unsupported-capture-mode"
+  | "dynamic-capture-unsupported"
+  | "duration-exceeded"
+  | "fps-out-of-range"
   | "invalid-data"
   | "request-conflict";
 
@@ -182,12 +224,15 @@ export type WorldCaptureClaimOutcome =
 export function decodeWorldCaptureGenerationBinding(
   input: unknown
 ): SharedWorldDecodeResult<WorldCaptureGenerationBinding> {
-  if (!isJsonRecord(input) || !hasOnlyKeys(input, BINDING_KEYS)) {
-    return decodeFailure("invalid-data", input);
-  }
+  if (!isJsonRecord(input)) return decodeFailure("invalid-data", input);
   const version = ownField(input, "version");
-  if (version !== WORLD_CAPTURE_GENERATION_BINDING_VERSION) {
+  if (version !== WORLD_CAPTURE_GENERATION_BINDING_VERSION && version !== LEGACY_WORLD_CAPTURE_GENERATION_BINDING_VERSION) {
     return decodeFailure("unsupported-version", input);
+  }
+  if (version === WORLD_CAPTURE_GENERATION_BINDING_VERSION) {
+    if (!hasOnlyKeys(input, BINDING_V2_KEYS)) return decodeFailure("invalid-data", input);
+  } else if (!hasOnlyKeys(input, BINDING_KEYS)) {
+    return decodeFailure("invalid-data", input);
   }
   const requestId = ownField(input, "requestId");
   const contentFingerprint = ownField(input, "contentFingerprint");
@@ -211,6 +256,19 @@ export function decodeWorldCaptureGenerationBinding(
   ) {
     return decodeFailure("invalid-data", input);
   }
+  const rawVideo = ownField(input, "video");
+  const video = rawVideo === undefined ? undefined : decodeWorldCaptureVideoMediaMetadata(rawVideo);
+  if (video && !video.ok) {
+    return decodeFailure(video.code === "unsupported-version" ? "unsupported-version" : "invalid-data", input);
+  }
+  if (media?.ok && video?.ok) return decodeFailure("invalid-data", input);
+  if (
+    video?.ok &&
+    (video.value.mediaId !== inputValue.value.mediaId ||
+      video.value.checksum !== inputValue.value.checksum)
+  ) {
+    return decodeFailure("invalid-data", input);
+  }
   return {
     ok: true,
     value: {
@@ -219,8 +277,29 @@ export function decodeWorldCaptureGenerationBinding(
       key: key.value,
       contentFingerprint,
       input: inputValue.value,
-      ...(media?.ok ? { media: media.value } : {})
+      ...(media?.ok ? { media: media.value } : {}),
+      ...(video?.ok ? { video: video.value } : {})
     }
+  };
+}
+
+/**
+ * Build a v2 binding from a verified dynamic video freeze. Only called after
+ * `freezeWorldCaptureVideoInput` succeeded, so the base key and media identity already
+ * belong to the same frozen version.
+ */
+export function worldCaptureVideoBinding(
+  requestId: WorldId,
+  contentFingerprint: string,
+  frozen: WorldCaptureVideoFrozenInput
+): WorldCaptureGenerationBinding {
+  return {
+    version: WORLD_CAPTURE_GENERATION_BINDING_VERSION,
+    requestId,
+    key: frozen.input.key,
+    contentFingerprint,
+    input: frozen.input,
+    video: frozen.media
   };
 }
 
@@ -242,6 +321,9 @@ export function encodeWorldCaptureGenerationBinding(
     },
     ...(decoded.value.media
       ? { media: encodeWorldCaptureMediaMetadata(decoded.value.media) }
+      : {}),
+    ...(decoded.value.video
+      ? { video: encodeWorldCaptureVideoMediaMetadata(decoded.value.video) }
       : {})
   };
 }

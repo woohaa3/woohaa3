@@ -27,7 +27,14 @@ export type RendererSceneRequest = {
   signature: string;
   extent: number;
   ops: unknown[];
-  capture: { width: number; height: number; background: string; cameraPreset: string };
+  capture: {
+    width: number;
+    height: number;
+    background: string;
+    cameraPreset: string;
+    /** `png`（默认预览）或 `rgba`（动态帧序列，不经过 PNG 编解码）。 */
+    format?: "png" | "rgba";
+  };
   /** 模型节点自身的摆放（模型坐标系 → 画布单位）。 */
   placement?: { offset: [number, number, number]; scale: number; yaw: number };
   world?: {
@@ -41,7 +48,14 @@ export type RendererSceneRequest = {
 };
 
 export type RendererResult =
-  | { ok: true; png: Buffer; renderVersion: string }
+  | {
+      ok: true;
+      /** PNG 字节；`format: "rgba"` 时为空 Buffer。 */
+      png: Buffer;
+      /** 裸 RGBA 帧；仅 `format: "rgba"` 时存在。 */
+      rgba?: Buffer;
+      renderVersion: string;
+    }
   | { ok: false; code: string; message: string };
 
 export type RendererClientOptions = {
@@ -94,6 +108,7 @@ export function createRendererClient(options: RendererClientOptions = {}): Rende
   const queue: Pending[] = [];
   let stdoutBuffer = Buffer.alloc(0);
   let pendingPngLength: number | null = null;
+  let pendingRgba = false;
   let current: Pending | null = null;
   let stderrTail = "";
 
@@ -170,10 +185,15 @@ export function createRendererClient(options: RendererClientOptions = {}): Rende
         if (stdoutBuffer.length < 4 + pendingPngLength) return;
         const pngLength = pendingPngLength;
         pendingPngLength = null;
-        const png = stdoutBuffer.subarray(4, 4 + pngLength);
+        const bytes = stdoutBuffer.subarray(4, 4 + pngLength);
         stdoutBuffer = stdoutBuffer.subarray(4 + pngLength);
         clearTimeout(current.timer);
-        current.resolve({ ok: true, png: Buffer.from(png), renderVersion: RENDER_VERSION });
+        current.resolve({
+          ok: true,
+          png: pendingRgba ? Buffer.alloc(0) : Buffer.from(bytes),
+          ...(pendingRgba ? { rgba: Buffer.from(bytes) } : {}),
+          renderVersion: RENDER_VERSION
+        });
         current = null;
         pump();
         continue;
@@ -190,7 +210,7 @@ export function createRendererClient(options: RendererClientOptions = {}): Rende
       if (stdoutBuffer.length < 4 + jsonLength) return;
       const json = stdoutBuffer.subarray(4, 4 + jsonLength).toString("utf8");
       stdoutBuffer = stdoutBuffer.subarray(4 + jsonLength);
-      let parsed: { ok?: boolean; code?: string; message?: string; pngLen?: number };
+      let parsed: { ok?: boolean; code?: string; message?: string; pngLen?: number; rgbaLen?: number };
       try {
         parsed = JSON.parse(json);
       } catch {
@@ -206,7 +226,8 @@ export function createRendererClient(options: RendererClientOptions = {}): Rende
         pump();
         continue;
       }
-      pendingPngLength = parsed.pngLen ?? 0;
+      pendingRgba = parsed.rgbaLen !== undefined;
+      pendingPngLength = parsed.pngLen ?? parsed.rgbaLen ?? 0;
     }
   };
 
@@ -304,7 +325,14 @@ export function renderCacheKey(input: {
   sourceHash: string;
   sceneVersion: string;
   renderVersion: string;
-  capture: { width: number; height: number; background: string; cameraPreset: string };
+  capture: {
+    width: number;
+    height: number;
+    background: string;
+    cameraPreset: string;
+    /** `png`（默认预览）或 `rgba`（动态帧序列，不经过 PNG 编解码）。 */
+    format?: "png" | "rgba";
+  };
 }): string {
   const capture = `${input.capture.width}x${input.capture.height}:${input.capture.background}:${input.capture.cameraPreset}`;
   return createHash("sha1")

@@ -25,6 +25,11 @@ pub const RESERVED_LAYERS: [usize; 8] = [0, 1, 2, 3, 4, 7, 8, PARKED_LAYER];
 /// 没有卡片视图的模型根停放在此层：任何预览/主相机都不看它，但仍保留合法渲染层身份。
 pub const PARKED_LAYER: usize = 31;
 
+/// 画布等距网格专用层：主观察相机包含，镜头卡片/编辑镜头/捕获相机都不包含。
+///
+/// 这样捕获不需要临时把网格挪走，避免连续录制逐帧开关图层造成网格闪烁。
+pub const GRID_LAYER: usize = 10;
+
 /// 可出租层区间起点：高于全部保留层。
 pub const SLOT_BASE: usize = 32;
 

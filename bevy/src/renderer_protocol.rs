@@ -123,7 +123,17 @@ pub struct CaptureOptions {
     pub(crate) background: String,
     #[serde(default = "default_preset")]
     pub(crate) camera_preset: String,
+    /// 输出格式：`png`（默认）或 `rgba`（动态取景逐帧编码用，避免 PNG 编解码往返）。
+    #[serde(default = "default_format")]
+    pub(crate) format: String,
 }
+
+fn default_format() -> String {
+    "png".to_owned()
+}
+
+/// 支持的输出帧格式。
+pub const CAPTURE_FORMATS: [&str; 2] = ["png", "rgba"];
 
 fn default_width() -> u32 {
     512
@@ -148,6 +158,7 @@ impl Default for CaptureOptions {
             height: default_height(),
             background: default_background(),
             camera_preset: default_preset(),
+            format: default_format(),
         }
     }
 }
@@ -346,6 +357,9 @@ pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErr
         || capture.height > MAX_PREVIEW_EDGE
     {
         return Err((RenderErrorCode::MalformedRequest, "预览尺寸越界".to_owned()));
+    }
+    if !CAPTURE_FORMATS.contains(&capture.format.as_str()) {
+        return Err((RenderErrorCode::MalformedRequest, "未知 capture format".to_owned()));
     }
     if !CAMERA_PRESETS.contains(&capture.camera_preset.as_str()) {
         return Err((

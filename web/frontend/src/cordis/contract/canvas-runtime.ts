@@ -40,6 +40,14 @@ export interface CanvasRuntimeService {
    *
    * 与截图/历史缩略图共用 latest-wins 回读通道，内部串行；运行时未装载或渲染失败返回稳定 code。
    */
+  /** 录制期间临时固定导演区动画采样时间；null 恢复实时播放。 */
+  setCaptureAnimationTimes?(times: ReadonlyMap<string, number> | null): void;
+  /** 裸 RGBA 帧（动态镜头逐帧编码，不经过 PNG）。 */
+  captureWorldCameraRaw?(input: {
+    cameraId: string;
+    width: number;
+    height: number;
+  }): Promise<{ ok: true; rgba: Uint8Array; width: number; height: number } | { ok: false; code: string }>;
   captureWorldCamera?(input: {
     cameraId: string;
     width: number;

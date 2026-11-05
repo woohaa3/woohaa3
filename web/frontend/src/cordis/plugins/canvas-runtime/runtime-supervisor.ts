@@ -1,6 +1,6 @@
 import { errorDetail, type RuntimeIssues } from "./runtime-issues.js";
 
-export type RuntimeHealth = { updates: number; renders: number; appliedRevision: number; appliedGeneration?: number; renderedGeneration?: number; drawCalls3d?: number | null };
+export type RuntimeHealth = { updates: number; renders: number; appliedRevision: number; appliedGeneration?: number; renderedGeneration?: number; suspended?: boolean; drawCalls3d?: number | null };
 export type RecoveryPhase = "running" | "recovering" | "degraded" | "disposed";
 export function readRuntimeHealth(json: string): RuntimeHealth {
   const health = JSON.parse(json) as RuntimeHealth & { version?: string };
@@ -59,7 +59,10 @@ export class RuntimeSupervisor {
   sample(health: RuntimeHealth, visible: boolean) {
     if (this.phase !== "running") return;
     if (visible !== this.visible) { this.progressAt = this.now(); this.visible = visible; }
-    if (!visible) { this.progressAt = this.now(); this.health = health; return; }
+    // Pending canvas generations cannot advance while another native surface owns
+    // presentation. Preserve them, and grant a fresh timeout when work resumes.
+    if (health.suspended || this.health.suspended) this.progressAt = this.now();
+    if (!visible || health.suspended) { this.progressAt = this.now(); this.health = health; return; }
     if (health.updates !== this.health.updates && health.renders !== this.health.renders && (this.pendingGeneration === null || health.renderedGeneration !== this.health.renderedGeneration)) this.progressAt = this.now();
     this.health = health;
     if (this.pending !== null && health.appliedRevision >= this.pending && health.renders !== this.acceptedRenders && (this.pendingGeneration === null || ((health.appliedGeneration ?? 0) >= this.pendingGeneration && (health.renderedGeneration ?? 0) >= this.pendingGeneration))) { this.pending = null; this.pendingGeneration = null; }

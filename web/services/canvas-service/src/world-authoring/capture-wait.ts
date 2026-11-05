@@ -28,7 +28,7 @@ export async function waitForFreeze(
   for (;;) {
     if (signal?.aborted) return "cancelled";
     if (!state.key || !worldCaptureVersionKeysEqual(state.key, targetKey)) return "superseded";
-    if (state.phase === "ready" && !state.stale && state.frozen) return "ready";
+    if (state.phase === "ready" && !state.stale && (state.frozen || state.frozenVideo)) return "ready";
     if (state.phase === "failed") return "capture-not-ready";
     if (state.phase === "unavailable") return "capture-unavailable";
     if (state.phase === "cancelled") return "cancelled";

@@ -10,6 +10,10 @@
 //! 原生画布与浏览器通过 `canvas-core` 共用帧系统与 facade；WASM ABI 只在 `wasm` 下导出。
 
 mod frame_samples;
+#[cfg(all(feature = "native-canvas", not(feature = "wasm")))]
+pub mod document_editor_textures;
+#[cfg(all(feature = "native-canvas", not(feature = "wasm")))]
+pub mod document_editor_visibility;
 #[cfg(feature = "canvas-core")]
 mod runtime_health;
 
@@ -97,6 +101,9 @@ pub mod native_embedding;
 pub mod model3d;
 /// 可复用 shot camera ECS 模块（change: add-reusable-bevy-shot-camera）。
 pub mod shot_camera;
+/// 动态镜头视频编码（native-renderer only；浏览器 WASM 不编译）。
+#[cfg(feature = "native-renderer")]
+pub mod video_encode;
 
 /// 跨语言 golden 测试用的纯函数门面（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 7.2）。
 ///
@@ -759,3 +766,5 @@ pub fn native_frame_ready() -> bool {
 pub use runtime_health::{
     benchmark_frames, benchmark_media, runtime_health, seed_runtime_generation,
 };
+
+pub mod canvas_activity;

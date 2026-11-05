@@ -103,7 +103,7 @@ bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
 
 每个扩展独立 `build:browser`，产物在自己的 `browser-dist/`。宿主 Vite **不扫描、不编译**扩展源码；运行时按发布目录加载。未启用的入口不产生 JS/CSS 请求。
 
-较大扩展（如片场）按职责分子目录：`state` / `authoring` / `preview` / `integration`，再按 `shared` / `browser` / `backend` 分环境。依赖方向是 integration → authoring / preview → state。约定与示例见 [web/extensions/README.md](web/extensions/README.md)。
+较大扩展按职责分子目录：`state` / `authoring` / `preview` / `integration`，再按 `shared` / `browser` / `backend` 分环境。依赖方向是 integration → authoring / preview → state。约定与示例见 [web/extensions/README.md](web/extensions/README.md)。
 
 ### 状态归属
 
@@ -125,7 +125,7 @@ bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
 | 独立整页（不装画布） | `web/frontend/src/pages` | 画布 plugin catalog |
 | 领域权威：命令、Yjs、任务、媒体、MCP | 对应 `web/services/<name>` | backend 里写业务规则 |
 | 装配、路由、端口适配 | `web/backend` | 在 composition 里识别具体扩展 |
-| 业务功能、Provider、存储后端、片场 | `web/extensions/<id>` | 宿主目录、contracts 里写死业务 ID |
+| 业务功能、Provider、存储后端 | `web/extensions/<id>` | 宿主目录、contracts 里写死业务 ID |
 | 几何、命中、绘制、录制 | `bevy` | 前端再算一份世界坐标 |
 | 窗口、托盘、更新、随包进程 | `desktop` | 画布或扩展逻辑 |
 
@@ -138,7 +138,7 @@ bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
 | 页面、路由、面板、主题 | `web/frontend/src/cordis/page-scope.ts`、`canvas-manifest.ts`、`web/ui/src` |
 | 画布保存、同步、撤销 | `web/services/canvas-service`、`web/frontend/src/cordis/services/canvas-session.ts` |
 | 生成、参数、历史 | `web/frontend/src/cordis/plugins/task-execution`、`web/services/task-service` |
-| 3D / 片场 / 模型 | `web/extensions/film-set`、`web/frontend/src/cordis/plugins/model-scene`、`bevy/src/model3d` |
+| 3D / 共享世界 / 模型 | `web/frontend/src/cordis/plugins/model-scene`、`web/frontend/src/cordis/plugins/world-scopes`、`bevy/src/model3d` |
 | 拖放、命中、纹理、帧率 | `web/frontend/src/cordis/plugins/canvas-shell`、`canvas-runtime`、`bevy/src` |
 | 新增扩展 / Provider / 存储 | [web/extensions/README.md](web/extensions/README.md)、邻近扩展、`extension.json` |
 | 本机遥测 | `web/services/telemetry-service`、`web/frontend/src/pages/telemetry` |
@@ -149,7 +149,7 @@ bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
 
 1. **本仓必须能单独 checkout 构建**。禁止 import 父仓、闭源 `server/` `admin/`、内部工具或仅内部扩展。门禁是 `pnpm boundary:check`。
 2. **`api/gen/es` 是生成物**。协议变更以重新生成的绑定提交进来，不在本仓补 `.proto` 或手改绑定。管理面契约（`*_admin_pb.ts` / `ops_pb.ts` / `rbac_pb.ts` / `inspect_pb.ts`）不得出现。
-3. **宿主不认识业务 ID**。按扩展 ID、Provider 名或片场字段做 `if` 的代码属于放错位置；改成公共端口、slot 或 contracts 声明。
+3. **宿主不认识业务 ID**。按扩展 ID、Provider 名或私有内容字段做 `if` 的代码属于放错位置；改成公共端口、slot 或 contracts 声明。
 4. **扩展只走公共入口**，具名导入。新增扩展不改框架源码；声明写在自己的 `extension.json`。
 5. **界面面向电脑与平板**，不为手机或极窄窗口做专用布局。无障碍不是默认验收项，除非明确要求。
 6. **渲染结论必须来自真实 GPU**。macOS 用 `/usr/sbin/system_profiler SPDisplaysDataType`（出现 Apple M* / AMD / Intel 即真实 GPU）；Linux 看 `/dev/dri/renderD*`，WSL2 看 `/dev/dxg` 与 `/usr/lib/wsl/lib/libcuda.so.1`（WSL 不产生 `renderD*`）。macOS 没有 `/dev/dri` 是正常现象。容器 / WSL 里没有本机 GPU 时用宿主浏览器 CDP（`WOOHAA_E2E_CDP` + `E2E_BASE_URL`，实现见 [web/e2e/base-test.ts](web/e2e/base-test.ts)）取证，不 launch 本地软件渲染浏览器。禁止用 SwiftShader / lavapipe 或估算冒充硬件结论。

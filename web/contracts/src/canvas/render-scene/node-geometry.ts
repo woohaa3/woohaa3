@@ -11,7 +11,7 @@ import { estimateNodeActionTextWidth } from "./node-action-toolbar.js";
 export { effectiveCanvasNodeSize, minimumNodeSizeFor } from "../node-dimensions.js";
 
 /** 参考实现的 palette kind（决定 Bevy 中的配色与图标）。 */
-export type BevyNodeKind = "text" | "image" | "model" | "audio" | "video" | "node";
+export type BevyNodeKind = "text" | "image" | "model" | "audio" | "video" | "shot" | "node";
 
 /** 静态 model3d 卡片自带本地轨道预览。
  * 已下线的 generate/edit/shot 不在此列，保持未知节点行为（change: 2026-10-08-integrate-render-performance-and-model-preview）。 */
@@ -31,13 +31,15 @@ export function bevyKindForNodeType(type: string): BevyNodeKind {
     case COMPOSITE_ASSET_NODE_TYPE: return "model";
     case "audio": return "audio";
     case "video": return "video";
+    // 镜头卡片使用相机图标（与右键“插入镜头”一致），不再落回通用节点图标。
+    case "world-camera": return "shot";
     default: return "node";
   }
 }
 
 /** 参考 `nodeSize`：富内容节点 248x232，其余 196x64。 */
 export function bevyNodeSize(kind: BevyNodeKind): { width: number; height: number } {
-  return kind === "text" || kind === "image" || kind === "audio" || kind === "video"
+  return kind === "text" || kind === "image" || kind === "audio" || kind === "video" || kind === "shot"
     ? { width: 248, height: 232 }
     : { width: 196, height: 64 };
 }

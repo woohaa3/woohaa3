@@ -237,7 +237,6 @@ export const MODEL_EDITOR_VERSION = "woohaa-model-editor-v2" as const;
 export type ModelEditorVersion = typeof MODEL_EDITOR_VERSION;
 
 /** Disposable tools and feedback, transported with the instance's accepted render scene. */
-export type ObjectGizmoTool = "move" | "yaw" | "scale";
 export type GizmoHandleName = "x" | "y" | "z" | "center" | "yaw-ring" | "scale" | "orbit-ring" | "elevation-ring" | "distance" | "shot-origin";
 export type GizmoFeedback = { hover?: GizmoHandleName; active?: GizmoHandleName; epoch: number };
 export type GizmoYawConstraint = { origin: [number, number, number]; u: [number, number, number]; v: [number, number, number]; normal: [number, number, number]; startAngle: number; mode: "plane" | "tangent"; direction: [number, number]; radiansPerPixel: number };
@@ -247,19 +246,10 @@ export type BevyModelEditor = {
   version: ModelEditorVersion;
   /** 编辑目标 canonical 模型 nodeId。 */
   nodeId: string;
-  /**
-   * 工具模式：整体模型 placement gizmo、片场对象编辑或镜头 shot gizmo。
-   * `object` 为片场对象模式（重心/三轴位移，change: 2026-10-09）。
-   */
-  toolMode: "model" | "object" | "camera";
-  /** Full-size read-only shot rig; no animation clock is created. */
-  shotPreview?: boolean;
+  /** 工具模式：整体模型 placement gizmo 或镜头 shot gizmo。 */
+  toolMode: "model" | "camera";
   /** Disposable XZ reference grid in display space. */
   grid?: { origin: [number, number, number]; spacing: number };
-  objectTool?: ObjectGizmoTool;
-  itemId?: string;
-  /** Parent basis before the item's base yaw and animation (column-major). */
-  parentBasis?: number[];
   feedback?: GizmoFeedback;
   /**
    * 显式镜头工具（change: fix-model-focus-navigation-and-camera-parity，task 4.4/design D6；
@@ -301,15 +291,7 @@ export type BevyAnimationPlayback = {
   clipId?: string;
   sourceIdentity?: string;
   generation?: number;
-  viewMode?: "overview-observer" | "focus-preview" | "shot-node-preview";
-  /**
-   * `shot-node-preview` 模式的目标预览卡片 canonical 节点 id
-   * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D6）。
-   *
-   * 明确输入为所属片场 nodeId + clipId，输出目标为该预览节点；渲染层据此把画面路由到
-   * 该卡片而不是 `overview-observer` 的默认片段/地面。缺失即无指定卡片。
-   */
-  targetPreviewNodeId?: string;
+  viewMode?: "overview-observer" | "focus-preview";
   /** 活动动画节点 canonical id。 */
   nodeId: string;
   /** Motion IR 版本（`woohaa-motion-ir-v1`）；Bevy 据此刻意拒绝未知版本。 */
@@ -320,12 +302,7 @@ export type BevyAnimationPlayback = {
   duration: number;
   looped: boolean;
   playing: boolean;
-  /**
-   * 所播放镜头背景的具体色（`#rrggbb`）；缺省即跟随主题。
-   *
-   * 只影响该镜头的预览与导出清屏，不改编辑片场的工作区视图
-   * （change: 2026-10-19-extend-film-set-for-motion-graphics，D6）。
-   */
+  /** 所播放镜头背景的具体色（`#rrggbb`）；缺省即跟随主题。 */
   backdrop?: string;
   /** 初始镜头（第 0 秒）。 */
   initialCamera: {
@@ -339,20 +316,7 @@ export type BevyAnimationPlayback = {
   cameraMotion: MotionIr["cameraMotion"];
   /** 已校验的模型轨道（默认值已补齐）。 */
   modelMotion: MotionIr["modelMotion"];
-  /**
-   * 片场内部对象的 child 运动（change: 2026-10-09-add-film-set-object-motion-and-editing，
-   * design D4）。按片场统一播放头 T 在 Rust 侧映射对象局部时间后求值；目标 id 为组合作用域
-   * 编码（`itemId:partId`），对象根 group 以空 partId 表示。缺省即无对象动作。
-   */
 };
-
-/**
- * 单个片场对象的运行时 child 运动投影（design D2/D4）。
- *
- * `itemId` 为稳定对象 id；`playback` 决定局部时间映射；`modelMotion` 为已校验的对象动作轨道
- * （目标为对象内作者语义 partId，空串/`root` 即对象根）；`partIds` 为作者语义 partId → 组合
- * 作用域编码 id，供 Rust 直接定位实体。对象基础局部变换已烘焙进组合 group，不在此重复。
- */
 
 /** 序列化给 Rust 的 theme 形状（与 `AppThemeSnapshot` 同构，显式声明以防漂移）。 */
 export type CanvasRenderSceneTheme = AppThemeSnapshot;

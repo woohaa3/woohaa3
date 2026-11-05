@@ -58,6 +58,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private readonly listeners = new Set<() => void>();
   private readonly viewportListeners = new Set<() => void>();
   private readonly frameListeners = new Set<() => void>();
+  private captureAnimationTimesOverride: ReadonlyMap<string, number> | null = null;
   private readonly modelFocusListeners = new Set<() => void>();
   private viewportRevision = 0;
   private sceneRevision = 0;
@@ -209,6 +210,18 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     width: number;
     height: number;
   }): Promise<{ ok: true; png: Uint8Array } | { ok: false; code: string }> => {
+    const frame = await this.captureWorldCameraRaw(input);
+    if (!frame.ok) return frame;
+    const blob = await rgbaToPngBlob(frame.rgba, frame.width, frame.height);
+    if (!blob) return { ok: false, code: "capture-encode-failed" };
+    return { ok: true, png: new Uint8Array(await blob.arrayBuffer()) };
+  };
+  /** 页面内镜头捕获的裸 RGBA 帧（动态镜头逐帧编码用）。 */
+  captureWorldCameraRaw = async (input: {
+    cameraId: string;
+    width: number;
+    height: number;
+  }): Promise<{ ok: true; rgba: Uint8Array; width: number; height: number } | { ok: false; code: string }> => {
     const runtime = this.runtimeInstance;
     if (!runtime?.requestWorldCapture) return { ok: false, code: "renderer-unavailable" };
     const release = await acquireCaptureLock();
@@ -222,9 +235,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       });
       if (!frame) return { ok: false, code: "renderer-unavailable" };
       if (!frame.ok) return { ok: false, code: frame.code };
-      const blob = await rgbaToPngBlob(frame.rgba, frame.width, frame.height);
-      if (!blob) return { ok: false, code: "capture-encode-failed" };
-      return { ok: true, png: new Uint8Array(await blob.arrayBuffer()) };
+      return { ok: true, rgba: frame.rgba, width: frame.width, height: frame.height };
     } catch {
       return { ok: false, code: "capture-render-failed" };
     } finally {
@@ -452,7 +463,15 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   setAnimationPlayback = (playback: import("@woohaa3/contracts").BevyAnimationPlayback | null): void => {
     if (this.animationPlaybackStore.set(playback)) this.controllerInstance?.invalidate("animation-playback");
   };
-  worldAnimationTimes = () => this.worldAnimation.sampleTimes();
+  /**
+   * 页面录制动态镜头时临时固定采样时间：只影响 Render Scene 的派生呈现，
+   * 不写规范、不改变用户播放头；传 null 恢复。
+   */
+  setCaptureAnimationTimes = (times: ReadonlyMap<string, number> | null): void => {
+    this.captureAnimationTimesOverride = times ? new Map(times) : null;
+    this.controllerInstance?.invalidate("world-capture-animation");
+  };
+  worldAnimationTimes = () => this.captureAnimationTimesOverride ?? this.worldAnimation.sampleTimes();
   worldAnimationState = () => this.worldAnimation.snapshot();
   subscribeWorldAnimation = (listener: () => void) => this.worldAnimation.subscribe(listener);
   playWorldAnimation = () => this.worldAnimation.play();

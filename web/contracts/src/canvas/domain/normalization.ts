@@ -10,7 +10,6 @@ import { DEFAULT_CANVAS_TITLE,
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { isCompositeAssetNodeType } from "./core/composite-asset-identity.js";
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
-import { migrateLegacyContainerNodes } from "./core/legacy-containers.js";
 import { validateWorldIdentities, nodeHasCanvasCard } from "./world-identities.js";
 
 export type UploadFileDescriptor = {
@@ -39,8 +38,8 @@ export type NormalizeCanvasOptions = {
  *
  * 与运行时节点种类一一对应（`text`/`image`/`video`/`audio`/`model3d`/`composite-asset`）；
  * 前端的 `CanvasNodeKind` 用同一集合。这些是**应用节点**，不属于「未知类型」，因此规范化
- * 必须保留它们。已下线的旧类型（`generate`/`edit`/`shot`/`start`/`group`）不再兼容，都会被
- * 读取期迁移去掉或收敛为 `custom`（change: remove-canvas-groups-and-film-set）。
+ * 必须保留它们。已下线的旧类型（`generate`/`edit`/`shot`/`start`/`group`/`film-set-shot-preview`）
+ * 不再兼容，读取时收敛为 `custom`；不再保留旧容器迁移。
  */
 export const WOOHAA3_APP_NODE_TYPES = ["text", "image", "video", "audio", "model3d", "composite-asset", "workflow-group-2d", "scene-area", "world-camera"] as const;
 
@@ -52,19 +51,14 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   if (worldError) throw new InvalidWorldIdentitiesError(worldError);
   const assets = Array.isArray(input.assets) ? input.assets.map(normalizeAsset) : [];
   const sanitizedNodeData = sanitizeWoohaa3CanvasNodeData(input.nodeData) as Woohaa3CanvasNodeDataMap<CanvasNodeData>;
-  const rawDocument: Woohaa3CanvasDocument = {
+  const document: Woohaa3CanvasDocument = {
     ...input.document,
     nodes: input.document.nodes.map((node) => normalizeNodeType(node, options?.extraNodeTypes))
   };
-  // 组与片场已删除：旧文档在读取时溶解容器、保留成员并烘焙绝对坐标
-  // （change: remove-canvas-groups-and-film-set）。迁移幂等，新文档是无容器形态的直通。
-  const migrated = migrateLegacyContainerNodes(rawDocument, sanitizedNodeData);
-  const document = migrated.document;
-  const migratedNodeData = migrated.nodeData;
   // 导演区/共享世界模型没有卡片布局：读取时丢弃遗留的卡片坐标与尺寸，
   // 位置只由 sceneArea.bounds / sharedWorldInstance.transform 表达。
   document.nodes = document.nodes.map(node => {
-    if (nodeHasCanvasCard(node, migrated.nodeData[node.id] as Record<string, unknown> | undefined)) return node;
+    if (nodeHasCanvasCard(node, sanitizedNodeData[node.id] as Record<string, unknown> | undefined)) return node;
     const next = { ...node };
     delete next.position;
     delete next.width;
@@ -73,8 +67,8 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
     delete next.zIndex;
     return next;
   });
-  const migratedWorldError = validateWorldIdentities(document.nodes, migratedNodeData);
-  if (migratedWorldError) throw new InvalidWorldIdentitiesError(migratedWorldError);
+  const normalizedWorldError = validateWorldIdentities(document.nodes, sanitizedNodeData);
+  if (normalizedWorldError) throw new InvalidWorldIdentitiesError(normalizedWorldError);
 
   const nodeIdsAfterSanitize = new Set(document.nodes.map((node) => node.id));
   document.edges = document.edges.filter(
@@ -86,7 +80,7 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   // longer exists after CRDT hydration.
   const nodeIds = new Set(document.nodes.map((node) => node.id));
   const nodeTypes = new Map(document.nodes.map((node) => [node.id, node.type]));
-  const nodeData = Object.fromEntries(Object.entries(migratedNodeData)
+  const nodeData = Object.fromEntries(Object.entries(sanitizedNodeData)
     .filter(([nodeId]) => nodeIds.has(nodeId) && nodeTypes.get(nodeId) !== "custom")) as Woohaa3CanvasNodeDataMap<CanvasNodeData>;
 
   // slot 身份在创建/planner 阶段生成并持久化（change: 2026-10-07-remove-residual-compatibility）：
@@ -108,9 +102,6 @@ function normalizeNodeType(
 ): Woohaa3CanvasDocument["nodes"][number] {
   if (
     (WOOHAA3_APP_NODE_TYPES as readonly string[]).includes(node.type)
-    // 已删除的容器类型先原样保留，由读取期迁移溶解/删除，不能收敛成 custom 而逃过迁移。
-    || node.type === "group"
-    || node.type === "film-set-shot-preview"
     || node.type === "custom"
     || extraNodeTypes?.includes(node.type)
   ) return node;

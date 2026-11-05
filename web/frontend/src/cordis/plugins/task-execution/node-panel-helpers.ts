@@ -10,7 +10,7 @@ import type {
   CanvasReferenceMediaKind,
   ServerCanvas
 } from "@woohaa3/contracts";
-import { decodeWorldCamera } from "@woohaa3/contracts";
+import { decodeWorldCamera, worldCameraShotContext } from "@woohaa3/contracts";
 import { catalogBlockingReasons, catalogStateBlockingReasons, capabilityForModel } from "./catalog-projection.js";
 import { resolveNodeReferenceInputs } from "./input-resolution.js";
 import { readGenerationMode, validateGenerationModeInputs } from "@woohaa3/contracts";
@@ -136,7 +136,12 @@ export function computePickerCandidates(
       const assetId = typeof data?.outputAssetId === "string" ? data.outputAssetId : null;
       const asset = assetId ? canvas.assets.find((entry) => entry.id === assetId) : undefined;
       const assetKind = asset?.mediaKind;
-      const mediaKind: string = node.type === "text" ? "text" : isCamera ? "image" : (assetKind ?? node.type);
+      const shot = isCamera && camera?.ok ? worldCameraShotContext(canvas, camera.value) : null;
+      const mediaKind: string = node.type === "text"
+        ? "text"
+        : isCamera
+          ? (shot?.kind === "dynamic" ? "video" : "image")
+          : (assetKind ?? node.type);
       // 候选不可用（上游尚无 ready 输出）时提供稳定禁用原因；仍展示缩略图/fallback。
       // 镜头没有资产：配置合法即可作为图像参考，像素由宿主/页面在提交时按当前取景冻结。
       const ready = isCamera ? (camera?.ok ?? false) : asset ? asset.status === "ready" : node.type === "text";

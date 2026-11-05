@@ -253,7 +253,7 @@ function captureBinding(): WorldCaptureGenerationBinding {
     outputVersion: "output-1"
   };
   return {
-    version: "world-capture-generation-binding-v1",
+    version: "world-capture-generation-binding-v2",
     requestId: "capture-request-1",
     key,
     contentFingerprint: "0123456789abcdef",

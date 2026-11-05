@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  WORLD_CAPTURE_GENERATION_BINDING_VERSION,
   decodeWorldCaptureGenerationBinding,
   decodeWorldCaptureResourceReadyNotice,
   encodeWorldCaptureGenerationBinding,
@@ -27,7 +28,7 @@ const MEDIA = {
 };
 
 const BINDING: WorldCaptureGenerationBinding = {
-  version: "world-capture-generation-binding-v1",
+  version: WORLD_CAPTURE_GENERATION_BINDING_VERSION,
   requestId: "request-1",
   key: KEY,
   contentFingerprint: "0123456789abcdef",

@@ -48,8 +48,7 @@
       } : null,
       surface: { width: target.innerWidth, height: target.innerHeight, pixelRatio: target.devicePixelRatio },
       js: target.__canvasSceneDiagnostics,
-      residency: target.__canvasResidency?.snapshot?.(),
-      overviewCache: target.__canvasOverviewCache?.snapshot?.()
+      residency: target.__canvasResidency?.snapshot?.()
     });
   }
 
@@ -95,7 +94,6 @@
           modelRoots: after.work?.models?.roots ?? null,
           modelEntities: after.work?.models?.modelEntities ?? null,
           activePreviews: after.work?.previews?.active ?? null,
-          activeShotPreviews: after.work?.shotPreviews?.active ?? null,
           pacing: after.work?.pacing ?? null,
           boundaryReadMs: round(before.readMs + after.readMs)
         };

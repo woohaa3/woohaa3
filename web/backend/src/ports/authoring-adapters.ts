@@ -3,7 +3,7 @@
  * （change: 2026-10-08-unlock-plugin-contracts-and-extensionize-chatgpt，任务 3.4/3.5 / design D7/D8）。
  *
  * 统一后端进程内，插件经公共 `ApplicationAuthoringServices` 端口读写；实现把端口调用映射到
- * Canvas 的 `mcpServices()`（ModelMcpService + FilmSetNodeService）与 Media 的受限签名。
+ * Canvas 的 `mcpServices()`（ModelMcpService + AgentCanvasInternalService）与 Media 的受限签名。
  * 插件拿不到 Y.Doc、数据库或任意命令入口；内容 precondition/幂等/历史仍由 Canvas 负责。
  *
  * 每一步都绑定可信用户委托（`delegation.subject`）与稳定 operationId；这里做委托存在性校验，
@@ -94,9 +94,6 @@ export function createToolGrantRegistry(): ToolGrantRegistry {
         return { ok: false, reason: "node-not-allowed" };
       }
       if (grant.cameraId && !input.tool.startsWith("get_") && input.cameraId !== grant.cameraId) return { ok: false, reason: "camera-not-allowed" };
-      if (input.tool === "submit_film_set" && (grant.itemId || grant.clipId || grant.cameraId)) return { ok: false, reason: "whole-film-set-not-allowed" };
-      if (grant.itemId && input.tool === "mutate_film_set_clip" && input.itemId !== grant.itemId) return { ok: false, reason: "item-not-allowed" };
-      if (grant.clipId && (input.tool === "mutate_film_set_clip" || input.tool === "export_film_set_clip") && input.clipId !== grant.clipId) return { ok: false, reason: "clip-not-allowed" };
       return { ok: true };
     }
   };

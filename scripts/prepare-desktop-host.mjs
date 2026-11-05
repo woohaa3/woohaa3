@@ -131,7 +131,7 @@ export async function prepareDevelopmentHost(){
  const appVersion=JSON.parse(fs.readFileSync(path.join(root,'desktop/tauri.conf.json'),'utf8')).version;
  fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,version:appVersion,build:'development',nodeVersion:DESKTOP_NODE_VERSION,developmentRoot:root}));
  fs.mkdirSync(path.join(output,'tools'),{recursive:true});
- for(const [name,source] of [['model-renderer',path.join(root,`bevy/target/${artifact.triple}/debug/model-renderer${suffix}`)]]){const dest=path.join(output,'tools',name+suffix);if(fs.existsSync(source)&&!fs.existsSync(dest)){if(process.platform==='win32')fs.copyFileSync(source,dest);else fs.symlinkSync(source,dest);}}
+ for(const [name,source] of [['model-renderer',path.join(root,`bevy/target/${artifact.triple}/debug/model-renderer${suffix}`)],['world-video-encoder',path.join(root,`bevy/target/${artifact.triple}/debug/world-video-encoder${suffix}`)]]){const dest=path.join(output,'tools',name+suffix);if(fs.existsSync(source)&&!fs.existsSync(dest)){if(process.platform==='win32')fs.copyFileSync(source,dest);else fs.symlinkSync(source,dest);}}
  return {...prepared,resourceRoot:output};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){prepareDesktopHost({build:process.env.WOOHAA_DESKTOP_BUILD??'development'}).catch(error=>{console.error(error);process.exitCode=1;});}

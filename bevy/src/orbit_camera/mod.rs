@@ -288,7 +288,7 @@ pub struct OrbitCameraPlugin;
 impl Plugin for OrbitCameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OrbitCameraCommands>()
-            .add_systems(PostUpdate, (apply_orbit_commands, sync_orbit_rigs).chain());
+            .add_systems(PostUpdate, (apply_orbit_commands, sync_orbit_rigs).chain().run_if(crate::canvas_activity::running));
     }
 }
 

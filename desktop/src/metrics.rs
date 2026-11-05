@@ -21,7 +21,7 @@ static DROPPED: AtomicU64 = AtomicU64::new(0);
 thread_local! { static NAVIGATION: std::cell::Cell<Option<(Instant, Instant)>> = const { std::cell::Cell::new(None) }; }
 
 pub fn initialize() {
-    if !cfg!(debug_assertions) {
+    if !cfg!(any(debug_assertions, feature = "diagnostic-performance")) {
         return;
     }
     let Ok(path) = std::env::var("WOOHAA_NATIVE_METRICS_PATH") else {
@@ -31,7 +31,9 @@ pub fn initialize() {
     if SENDER.set(tx).is_err() {
         return;
     }
-    crate::diagnostics::stderr(format_args!("[native-performance] CPU wall timings → {path}"));
+    crate::diagnostics::stderr(format_args!(
+        "[native-performance] CPU wall timings → {path}"
+    ));
     std::thread::spawn(move || {
         let mut groups: BTreeMap<&str, Samples> = BTreeMap::new();
         let (mut client, mut layout, mut work) = (Value::Null, Value::Null, Value::Null);
@@ -79,6 +81,9 @@ fn send(event: Event) {
     }
 }
 pub fn sample(name: &'static str, elapsed: Duration) {
+    if name == "display_link.interval_ms" {
+        crate::performance_capture::native_interval(elapsed);
+    }
     send(Event::Sample(name, elapsed.as_secs_f64() * 1000.0));
 }
 pub fn layout(value: Value) {

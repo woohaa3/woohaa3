@@ -7,7 +7,7 @@ import os from "node:os";
 import { join } from "node:path";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveModelRendererCommand } from "./lib/model-renderer-command.mjs";
+import { resolveModelRendererCommand, resolveWorldVideoEncoderCommand } from "./lib/model-renderer-command.mjs";
 import { loadServiceEnv } from "./lib/service-env.mjs";
 import { resolveAppBasePath } from "./lib/app-base-path.mjs";
 import { resolveAppPageTitle } from "./lib/app-html.mjs";
@@ -402,6 +402,8 @@ async function main() {
 
   const rendererCommand = resolveModelRendererCommand({ root, env: serviceEnv });
   if (rendererCommand) serviceEnv.WOOHAA3_MODEL_RENDERER_CMD = rendererCommand;
+  const videoEncoderCommand = resolveWorldVideoEncoderCommand({ root, env: serviceEnv });
+  if (videoEncoderCommand) serviceEnv.WOOHAA3_WORLD_VIDEO_ENCODER_CMD = videoEncoderCommand;
 
   const backendHost = serviceEnv.HOST || serviceEnv.BACKEND_HOST || "127.0.0.1";
   const proxyHost = backendHost === "0.0.0.0" ? "127.0.0.1" : backendHost === "::" ? "::1" : backendHost;

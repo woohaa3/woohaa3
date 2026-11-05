@@ -24,7 +24,7 @@ export function contentStageReason(stage) {
 }
 
 export function stageForContentFile(file) {
-  if (file.includes("composite-asset-identity") || file.includes("legacy-film-set") || file.includes("compat-inventory")) return "identity";
+  if (file.includes("composite-asset-identity") || file.includes("compat-inventory")) return "identity";
   if (file.startsWith("bevy/") || file.includes("render-scene") || file.includes("scene-builder") || file.includes("/recording")) return "render";
   if (file.includes("/mcp") || file.includes("media-client") || file.includes("agent-connections") || file.includes("/canvas-api")) return "route";
   if (file.includes("command-reducer") || file.endsWith("/commands.ts") || file.includes("edit-plan") || file.includes("edit-command") || file.includes("command-satisfaction")) return "command";

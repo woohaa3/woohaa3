@@ -15,6 +15,13 @@
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod devtools;
 pub mod host;
+pub mod desktop_entry;
+pub mod document_editor;
+pub mod editor_runtime;
+pub mod platform_clipboard;
+mod editor_blobs;
+mod editor_compositor;
+mod canvas_suspension;
 pub mod lifecycle;
 #[cfg(target_os = "macos")]
 mod macos_frame_clock;
@@ -24,6 +31,7 @@ mod metrics;
 pub mod native_canvas;
 pub mod notifications;
 pub mod packaging;
+mod performance_capture;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod pinterest_save;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]

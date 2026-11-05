@@ -126,7 +126,9 @@ export function createSurfaceInteractions(deps: SurfaceInteractionDeps): Surface
    * 门禁用 `focusInputBlocked()`（只有 modal Dialog 才阻断）：非模态 history/editor panel
    * 打开时仍可在 focus canvas 上滚轮/捏合缩放主观察相机（design D6）。
    */
+  const locallyOwned = (event: Event) => (event.target as Element | null)?.closest?.('[data-canvas-input-owner="local"]') != null;
   const onDocumentWheel = (event: WheelEvent) => {
+    if (locallyOwned(event)) return;
     if (deps.imageFocused?.()) {
       // canvas 本体仍由原生 wheel 监听处理；覆盖层也进入同一个画布输入入口。
       const target = event.target as HTMLElement | null;
@@ -192,9 +194,9 @@ export function createSurfaceInteractions(deps: SurfaceInteractionDeps): Surface
       onDocumentFocusChange,
       onDocumentBlur,
       onDocumentVisibility,
-      onGestureStart: (event) => model.onGestureStart(event, focusInputBlocked()),
-      onGestureChange: (event) => model.onGestureChange(event, focusInputBlocked()),
-      onGestureEnd: (event) => { model.onGestureEnd(event); wheelOwner.reset(); },
+      onGestureStart: (event) => { if (!locallyOwned(event)) model.onGestureStart(event, focusInputBlocked()); },
+      onGestureChange: (event) => { if (!locallyOwned(event)) model.onGestureChange(event, focusInputBlocked()); },
+      onGestureEnd: (event) => { if (locallyOwned(event)) return; model.onGestureEnd(event); wheelOwner.reset(); },
       onWindowResize
     }
   };

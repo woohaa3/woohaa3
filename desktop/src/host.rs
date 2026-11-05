@@ -223,6 +223,13 @@ pub fn run_host() -> Result<(), String> {
     platform::run(HostConfig::overlay())
 }
 
+/// Optional composition root. The default executable never registers a provider.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub fn run_host_with_editors(factories: Vec<std::sync::Arc<dyn crate::document_editor::NativeDocumentEditorFactory>>) -> Result<(), String> {
+    crate::editor_runtime::register(factories).map_err(|e| e.message)?;
+    platform::run(HostConfig::overlay())
+}
+
 /// 启动关闭 WebView 的 native 画布宿主。
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub fn run_native_only_host() -> Result<(), String> {
@@ -263,6 +270,7 @@ mod platform {
 
     pub fn run(config: HostConfig) -> Result<(), String> {
         crate::metrics::initialize();
+        crate::performance_capture::initialize();
         // 上限 1 个未消费 tick（design D2：最多一个）。
         let pending = Arc::new(AtomicBool::new(false));
         let stopped = Arc::new(AtomicBool::new(false));
@@ -277,13 +285,15 @@ mod platform {
         // bundle 资源才确定，因此使用 RwLock，允许宿主恢复后更新 loopback origin。
         let origin = std::sync::Arc::new(std::sync::RwLock::new(String::from("tauri://localhost")));
         let bootstrap = format!(
-            "window.__WOOHAA_NATIVE__ = {{ token: {0}, protocol: 'woohaa-native-v1', viewportAsync: true, platform: {1}, diagnosticsVerbose: {2} }};\
+            "window.__WOOHAA_NATIVE__ = {{ token: {0}, protocol: 'woohaa-native-v1', viewportAsync: true, platform: {1}, diagnosticsVerbose: {2}, performanceCapture: {3} }};\
              window.__WOOHAA_DESKTOP__ = {{ token: {0}, protocol: 'woohaa-window-v1', platform: {1} }};",
             serde_json::to_string(&token).unwrap(),
             serde_json::to_string(std::env::consts::OS).unwrap(),
             std::env::var("WOOHAA_DIAGNOSTICS_VERBOSE").as_deref() == Ok("1"),
+            crate::performance_capture::enabled(),
         );
         let bootstrap = format!("{}\n{}", bootstrap, include_str!("webview-diagnostics.js"));
+        let bootstrap = format!("{}\n{}", bootstrap, include_str!("webview-performance.js"));
         // 系统通知（change: 2026-10-17-move-settings-into-canvas-dialog，任务 8.1）：
         // 注册插件并在 setup 时安装受控 sink。通知失败不影响画布与任务。
         let builder = tauri::Builder::default()

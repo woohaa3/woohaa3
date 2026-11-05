@@ -93,7 +93,7 @@ describe("合并节点资格", () => {
       expect(isMergeableNodeType(type)).toBe(true);
       expect(isMergeEligibleNode({ node: { id: `${type}-1`, type }, data: {} })).toBe(true);
     }
-    for (const type of ["composite-asset", "group", "film-set-shot-preview"]) {
+    for (const type of ["composite-asset"]) {
       expect(isMergeableNodeType(type)).toBe(false);
       expect(isMergeEligibleNode({ node: { id: `${type}-1`, type }, data: {} })).toBe(false);
     }

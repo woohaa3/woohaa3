@@ -1,5 +1,5 @@
-import { resolveModelRendererCommand } from "./lib/model-renderer-command.mjs";
 #!/usr/bin/env node
+import { resolveModelRendererCommand, resolveWorldVideoEncoderCommand } from "./lib/model-renderer-command.mjs";
 // 生产/本地组合入口（change: 2026-10-06-unify-backend-runtime-with-cordis，任务 4.1）。
 //
 // 在**同一进程**内组合前端静态资源与统一后端运行单元：
@@ -46,6 +46,8 @@ const host = serviceEnv.HOST || "127.0.0.1";
 // renderer-unavailable，不影响画布存储、Yjs 与其它 MCP 工具。
 const rendererCommand = resolveModelRendererCommand({ root, env: serviceEnv });
 if (rendererCommand) serviceEnv.WOOHAA3_MODEL_RENDERER_CMD = rendererCommand;
+const videoEncoderCommand = resolveWorldVideoEncoderCommand({ root, env: serviceEnv });
+if (videoEncoderCommand) serviceEnv.WOOHAA3_WORLD_VIDEO_ENCODER_CMD = videoEncoderCommand;
 
 if (!fs.existsSync(path.join(dist, "index.html"))) {
   process.stderr.write(`${dist} 还不存在。先构建：pnpm -C web run build:units && pnpm -C web --filter @woohaa3/frontend build\n`);

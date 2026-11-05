@@ -9,6 +9,7 @@
 import { defineExtensionFrontend, defineExtensionPlugin } from "../../extension-api/entry.js";
 import { PROMPT_SNIPPET_SOURCE, IMAGE_EDIT_SERVICE } from "../../extension-api/capability-keys.js";
 import { desktopBootstrap, isDesktopHost } from "../../extension-api/host-platform.js";
+import { nativeDocumentEditorClient } from "../../extension-api/native-document-editor.js";
 import {
   resolvePublicUrl,
   toLogicalAppPath,
@@ -35,6 +36,7 @@ export const namedExports = {
   // change: 2026-10-18-split-performance-readout-location：运行宿主判定（桌面壳 / 浏览器）。
   desktopBootstrap,
   isDesktopHost,
+  nativeDocumentEditorClient,
   // 构建标识：扩展（如 remote-server 的诊断上报）要把自己跑的是哪次构建告诉宿主/服务端。
   // 扩展是独立构建的，只能由宿主把这个值交过去。
   appBuildVersion

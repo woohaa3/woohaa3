@@ -16,6 +16,8 @@ import type { WorldCaptureGenerationBinding } from "../canvas/world-capture-pipe
 
 /** Role used for a static world framing consumed as image guidance. */
 export const WORLD_CAPTURE_REFERENCE_ROLE = "reference_image" as const;
+/** Role used for a dynamic world framing (frozen video asset). */
+export const WORLD_CAPTURE_VIDEO_REFERENCE_ROLE = "reference_video" as const;
 
 export type WorldCaptureReferenceInput =
   | { readonly ok: true; readonly input: CanvasTaskInput }
@@ -31,6 +33,33 @@ export type WorldCaptureReferenceInput =
 export function worldCaptureReferenceInput(
   binding: WorldCaptureGenerationBinding
 ): WorldCaptureReferenceInput {
+  if (binding.video) {
+    const video = binding.video;
+    if (video.storageKey.trim() === "" || !video.contentType.startsWith("video/")) {
+      return {
+        ok: false,
+        code: "capture-media-unavailable",
+        message: "动态取景冻结结果缺少可信视频媒体元数据"
+      };
+    }
+    if (video.checksum !== binding.input.checksum || video.mediaId !== binding.input.mediaId) {
+      return {
+        ok: false,
+        code: "capture-media-unavailable",
+        message: "动态取景冻结结果的媒体身份与版本不一致"
+      };
+    }
+    return {
+      ok: true,
+      input: {
+        assetId: binding.input.mediaId,
+        role: WORLD_CAPTURE_VIDEO_REFERENCE_ROLE,
+        storageKey: video.storageKey,
+        mediaType: video.contentType,
+        mediaKind: "video"
+      }
+    };
+  }
   const media = binding.media;
   if (!media || media.storageKey.trim() === "" || !media.contentType.startsWith("image/")) {
     return {

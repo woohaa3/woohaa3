@@ -12,6 +12,8 @@
 import {
   collectWoohaa3CanvasMentions,
   selfReferenceMapping,
+  decodeWorldCamera,
+  worldCameraShotContext,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   pickInputBinding,
@@ -92,19 +94,31 @@ export function collectDirectMentionCandidates(
 ): MentionCandidate[] {
   const candidates: MentionCandidate[] = [];
   let ordinal = 0;
+  const nodeData = canvas.nodeData as Record<string, CanvasNodeData | undefined>;
   for (const mapping of collectDirectMappings(canvas, nodeId)) {
-    const kind = mentionTypeForMapping(mapping);
+    let kind = mentionTypeForMapping(mapping);
+    let role = mapping.role;
+    const isCamera = canvas.document.nodes.some(node => node.id === mapping.sourceNodeId && node.type === "world-camera");
+    if (isCamera) {
+      // 镜头槽类型按动画上下文派生：动态镜头是视频槽，静态仍是图片槽。
+      const camera = decodeWorldCamera(nodeData[mapping.sourceNodeId]?.worldCamera);
+      if (camera.ok && worldCameraShotContext(canvas, camera.value)?.kind === "dynamic") {
+        kind = "input_video";
+        role = "reference_video";
+      }
+    }
     ordinal += 1;
     const resolved = resolveMappingAsset(canvas, mapping);
     const slotId = mapping.slotId;
     if (typeof slotId !== "string" || slotId === "") continue;
+    const cameraInput = cameraInputs?.get(mapping.sourceNodeId);
     candidates.push({
       slotId,
       type: kind,
-      role: mapping.role,
+      role,
       sourceNodeId: mapping.sourceNodeId,
       label: mentionLabel(kind, ordinal, mapping),
-      input: cameraInputs?.get(mapping.sourceNodeId) ? { ...cameraInputs.get(mapping.sourceNodeId)!, role: mapping.role } : resolved?.input ?? null,
+      input: cameraInput ? { ...cameraInput, role } : resolved?.input ?? null,
       ...(kind === "input_text" && resolved?.text !== undefined ? { text: resolved.text } : {})
     });
   }

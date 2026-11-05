@@ -47,12 +47,7 @@ function fakeCanvas(options: { modelMcp?: unknown } = {}): CanvasService {
   const canvas = {
     mcpServices: () => ({
       modelMcp: options.modelMcp === null ? null : modelMcp,
-      agent: null,
-      createFilmSetNode: null,
-      importModelSnapshot: null,
-      commitAnimation: async (input: { requestId: string }) => ({ ok: true as const, canvasId: "cv", nodeId: "n", commandId: `cmd-anim-${input.requestId}`, duplicate: false, noop: false }),
-      confirmAdaptation: null,
-      readAnimation: null
+      agent: null
     }),
     _submitted: submitted
   } as unknown as CanvasService;
@@ -157,18 +152,6 @@ describe("进程内 authoring 适配器", () => {
     expect(registry.authorize({ ...call, tool: "submit_model_script" }).ok).toBe(false);
     expect(registry.authorize(call)).toEqual({ ok: true });
   });
-  it("captured clip and actor grants reject switched targets and stay usable afterwards", () => {
-    const registry = createToolGrantRegistry();
-    registry.issue({ token: "actor", canvasIds: ["c"], nodeIds: ["n"], tools: ["mutate_film_set_clip"], clipId: "jump", itemId: "hero", workId: "w-actor" });
-    const call = { token: "actor", tool: "mutate_film_set_clip", canvasId: "c", nodeId: "n", clipId: "jump", itemId: "hero" };
-    expect(registry.authorize({ ...call, clipId: "walk" })).toEqual({ ok: false, reason: "clip-not-allowed" });
-    expect(registry.authorize({ ...call, itemId: "other" })).toEqual({ ok: false, reason: "item-not-allowed" });
-    expect(registry.authorize({ ...call, itemId: undefined })).toEqual({ ok: false, reason: "item-not-allowed" });
-    // 范围错误不消耗任何额度：正确目标继续可用，且没有次数上限。
-    expect(registry.authorize(call)).toEqual({ ok: true });
-    for (let index = 0; index < 60; index += 1) expect(registry.authorize(call)).toEqual({ ok: true });
-  });
-
   it("已下线的 film-set 模式不再签发目标授权", async () => {
     await expect(createInProcessAuthoringServices({ canvas: fakeCanvas() }).tools.issue({
       delegation: DELEGATION,

@@ -124,7 +124,7 @@ pub(crate) fn sync(
         *layers = RenderLayers::layer(if edit.is_some() {
             crate::world_camera::WORLD_CAMERA_GIZMO_LAYER
         } else {
-            0
+            crate::preview_layers::GRID_LAYER
         });
     }
     if edit.is_some() {
@@ -713,7 +713,7 @@ mod tests {
         );
         assert_eq!(
             app.world().get::<RenderLayers>(backdrop_grid).unwrap(),
-            &RenderLayers::layer(0)
+            &RenderLayers::layer(crate::preview_layers::GRID_LAYER)
         );
         assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
         assert_eq!(

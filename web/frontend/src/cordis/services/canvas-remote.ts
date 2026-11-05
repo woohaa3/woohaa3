@@ -35,7 +35,8 @@ import type {
 import type {
   CanvasCaptureFreezeResult,
   PageCapturePendingEntry,
-  PageCapturePendingResult
+  PageCapturePendingResult,
+  WorldCaptureStatusResult
 } from "../contract/remote.js";
 import type {
   CreatePromptSnippetInput,
@@ -480,6 +481,55 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
 
     async commitPageCapture(input): Promise<CanvasCaptureFreezeResult> {
       return postPageCommit(captureBase, fetchImpl, input);
+    },
+
+    async commitPageVideoCapture(input): Promise<CanvasCaptureFreezeResult> {
+      let response: Response;
+      try {
+        response = await fetchImpl(`${captureBase}-page-commit-video`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cameraId: input.cameraId,
+            key: input.key,
+            mp4Base64: bytesToBase64(input.mp4),
+            width: input.width,
+            height: input.height
+          })
+        });
+      } catch {
+        return { ok: false, code: "capture-unavailable", error: "无法连接取景服务" };
+      }
+      const parsed = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (parsed && parsed.ok === true) {
+        return { ok: true, binding: parsed.binding as import("@woohaa3/contracts").WorldCaptureGenerationBinding };
+      }
+      return {
+        ok: false,
+        code: typeof parsed?.code === "string" ? parsed.code : `http-${response.status}`,
+        error: typeof parsed?.message === "string" ? parsed.message : `页面视频取景提交失败（HTTP ${response.status}）`
+      };
+    },
+
+    async listWorldCaptureStatuses(): Promise<WorldCaptureStatusResult> {
+      let response: Response;
+      try {
+        response = await fetchImpl(`${captureBase}-status`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({})
+        });
+      } catch {
+        return { ok: false, code: "capture-unavailable", error: "无法连接取景服务" };
+      }
+      const parsed = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (parsed && parsed.ok === true && Array.isArray(parsed.statuses)) {
+        return {
+          ok: true,
+          statuses: parsed.statuses as import("@woohaa3/contracts").WorldCaptureFramingStatus[]
+        };
+      }
+      return { ok: false, code: `http-${response.status}`, error: `读取镜头状态失败（HTTP ${response.status}）` };
     },
 
     async cancel(input): Promise<CanvasCancelResult> {

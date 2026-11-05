@@ -162,7 +162,7 @@ fn build_logger(
 ///
 /// 发行构建只记 `info` 及以上；调试构建放开到 `debug`。
 pub fn plugin() -> TauriPlugin<tauri::Wry> {
-    let debug_build = cfg!(debug_assertions);
+    let debug_build = cfg!(debug_assertions) && !crate::performance_capture::enabled();
     PluginBuilder::new("log")
         .setup(move |app, _api| {
             let mut last_error = String::new();

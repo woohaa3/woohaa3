@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  createDefaultWorldCameraData,
+  createWorldAnimationScript,
   createEmptyWoohaa3ServerCanvas,
   serializeWoohaa3CanvasMention,
   type CanvasTaskInputBinding,
@@ -209,5 +211,48 @@ describe("mergeInputs 去重", () => {
       { assetId: "a2", role: "reference_image", storageKey: "s2", mediaType: "image/png" }
     ];
     expect(mergeInputs(direct, carried).map((input) => input.assetId)).toEqual(["a1", "a2"]);
+  });
+});
+
+describe("动态镜头 mention 槽类型", () => {
+  it("动画区镜头是视频槽，插入“视频 1”不会再报类型不匹配", () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("c1", NOW);
+    canvas.document.nodes.push(
+      { id: "cam", type: "world-camera", position: { x: 0, y: 0 } },
+      { id: "target", type: "video", position: { x: 300, y: 0 } },
+      { id: "area", type: "scene-area" }
+    );
+    canvas.document.edges.push({ id: "e1", source: "cam", target: "target", data: {} });
+    canvas.nodeData.cam = { worldCamera: { ...createDefaultWorldCameraData("camera", "v1", { u: 0, v: 0 }), captureMode: { kind: "static" } } } as never;
+    canvas.nodeData.area = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "scope-1",
+        bounds: { min: { u: -30, v: -30 }, max: { u: 30, v: 30 } },
+        animationScript: createWorldAnimationScript({ script: "function build(motion) {}", duration: 4, loop: false })
+      }
+    } as never;
+    canvas.nodeData.target = {
+      inputMapping: [{ slotId: "slot-cam", sourceNodeId: "cam", role: "reference_image", sortKey: "0" }]
+    };
+
+    const cameraInput = { assetId: "media", role: "reference_video", storageKey: "k", mediaType: "video/mp4", mediaKind: "video" } as const;
+    const candidates = collectDirectMentionCandidates(canvas, "target", new Map([["cam", cameraInput as never]]));
+    expect(candidates).toEqual([
+      expect.objectContaining({ slotId: "slot-cam", type: "input_video", role: "reference_video", label: "视频 1" })
+    ]);
+
+    const authored = serializeWoohaa3CanvasMention({ type: "input_video", slotId: "slot-cam", label: "视频 1" })!;
+    const resolution = resolveMentionsAndCompile({
+      canvas,
+      nodeId: "target",
+      authored,
+      bindings: [{ field: "videoUrls", semantic: "reference-video", roles: ["reference_video"], mediaKinds: ["video"], mediaTypes: ["video/mp4"], maxItems: 1, valueFormat: "url" }],
+      directInputs: [{ assetId: "media", role: "reference_video", storageKey: "k", mediaType: "video/mp4", mediaKind: "video" }],
+      cameraInputs: new Map([["cam", cameraInput as never]])
+    });
+    expect(resolution.kind).toBe("ok");
   });
 });

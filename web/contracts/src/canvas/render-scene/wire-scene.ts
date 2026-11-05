@@ -85,7 +85,9 @@ import type { BevyRenderDraft, BevyRenderMarquee, BevyRenderSurface } from "./wi
 //      without any 3D presence, so reject mixed combinations instead of silently dropping it.
 // v40: local first-person world-camera editor; never persisted to the document.
 // v41: transient assistant execution feedback on scope borders.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v41" as const;
+// v42: world-camera cards carry derived `cameraShot` (video duration/status). Older
+//      renderers would ignore it and keep claiming a static image card.
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v42" as const;
 
 /**
  * 非内容节点的画布 chrome。
@@ -112,6 +114,12 @@ export type BevyRenderNode = {
    * 镜头或旧场景，Bevy 不绘制视锥。
    */
   worldCamera?: import("../shared-world.js").WorldCameraData;
+  /**
+   * 镜头卡片语义：动态镜头显示时长与 preview/ready/stale/failed。
+   *
+   * 只作为呈现投影随帧下发，不写规范文档；实时预览画面永不因为该状态变成可下载媒体。
+   */
+  cameraShot?: import("../world-camera-shot.js").WorldCameraShotState;
   /** 可选画布 chrome；缺省为通用内容卡片。 */
   chrome?: BevyNodeChrome;
   id: string;

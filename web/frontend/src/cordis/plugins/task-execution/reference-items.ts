@@ -9,6 +9,7 @@
 import {
   selfReferenceMapping,
   decodeWorldCamera,
+  worldCameraShotContext,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   sortWoohaa3CanvasInputMappings,
@@ -90,12 +91,24 @@ export function resolveReferenceItems(options: {
     }
     if (canvas.document.nodes.some(node => node.id === mapping.sourceNodeId && node.type === "world-camera")) {
       const camera = decodeWorldCamera(nodeData[mapping.sourceNodeId]?.worldCamera);
-      const acceptable = bindings === undefined || bindings.some(entry => entry.roles.includes(mapping.role)
-        && entry.mediaKinds.includes("image") && entry.mediaTypes.includes("image/png"));
-      const reason = !camera.ok ? "上游镜头配置无效" : !acceptable ? "所选模型不接受镜头图像参考" : null;
+      // 镜头类型由动画上下文派生：动态镜头在参考区显示为“视频 N”，静态才是“图片 N”。
+      const dynamic = camera.ok && worldCameraShotContext(canvas, camera.value)?.kind === "dynamic";
+      const referenceRole = dynamic ? "reference_video" : mapping.role;
+      const effectiveMention: Woohaa3CanvasMentionType = dynamic ? "input_video" : mentionType;
+      const effectiveLabel = typeof mapping.label === "string" && mapping.label !== ""
+        ? mapping.label
+        : referenceLabel({ ...mapping, role: referenceRole }, effectiveMention, ordinal);
+      const acceptable = bindings === undefined || bindings.some(entry => entry.roles.includes(referenceRole)
+        && entry.mediaKinds.includes(dynamic ? "video" : "image")
+        && entry.mediaTypes.includes(dynamic ? "video/mp4" : "image/png"));
+      const reason = !camera.ok
+        ? "上游镜头配置无效"
+        : !acceptable
+          ? dynamic ? "所选模型不接受镜头视频参考" : "所选模型不接受镜头图像参考"
+          : null;
       // 镜头像素由宿主/页面在提交时按当前取景冻结；配置合法且模型接受时即可引用（可 @）。
-      items.push({ slotId, sourceNodeId: mapping.sourceNodeId, role: mapping.role, mentionType,
-        label, mediaKind: "image", previewUrl: null, assetId: null,
+      items.push({ slotId, sourceNodeId: mapping.sourceNodeId, role: referenceRole, mentionType: effectiveMention,
+        label: effectiveLabel, mediaKind: dynamic ? "video" : "image", previewUrl: null, assetId: null,
         status: reason ? "invalid" : "ready", blockingReason: reason, fieldLabel: null });
       if (reason) blockingReasons.push(reason);
       continue;

@@ -31,8 +31,6 @@ use crate::{
     world_camera_view,
 };
 
-/// 网格停放层：捕获相机看不到；每帧由 `world_camera_preview::sync` 复位。
-const GRID_PARKED_LAYER: usize = crate::preview_layers::PARKED_LAYER;
 /// 提交回读前等待的稳定帧数（世界实体已由主画布渲染，仍给管线/目标注册留余量）。
 const SETTLE_FRAMES: u32 = 2;
 /// 等待回读的帧上限。
@@ -91,7 +89,6 @@ pub(crate) fn sync(
     models: Res<ModelVisuals>,
     mut bindings: ResMut<WorldCameraBinding>,
     mut pool: ResMut<PreviewLayerPool>,
-    mut grids: Query<&mut RenderLayers, With<crate::isometric_grid::IsometricGrid>>,
 ) {
     state.frames = state.frames.wrapping_add(1);
 
@@ -124,11 +121,8 @@ pub(crate) fn sync(
         return;
     }
 
-    // 3. 作业期间把网格挪出世界层：捕获相机与主画布都不该在捕获里看到网格。
-    //    （主画布只在这几帧短暂丢失网格；`world_camera_preview::sync` 下一帧自动复位。）
-    for mut layers in &mut grids {
-        *layers = RenderLayers::layer(GRID_PARKED_LAYER);
-    }
+    // 3. 网格在独立渲染层（`preview_layers::GRID_LAYER`），捕获相机天然看不到；
+    //    不再逐帧挪动图层，连续录制不会让画布网格闪烁。
 
     // 4. 稳定后提交一次回读。
     let frames = state.frames;

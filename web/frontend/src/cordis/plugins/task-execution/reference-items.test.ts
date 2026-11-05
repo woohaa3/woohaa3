@@ -2,7 +2,7 @@
  * 参考素材 items 投影（change: add-reference-inputs-and-mentions，任务 3.1）。
  */
 import { describe, expect, it } from "vitest";
-import { createDefaultWorldCameraData, createEmptyWoohaa3ServerCanvas, type CanvasTaskInputBinding, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+import { createDefaultWorldCameraData, createEmptyWoohaa3ServerCanvas, createWorldAnimationScript, type CanvasTaskInputBinding, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
 import { resolveReferenceItems } from "./reference-items.js";
 
 const NOW = "2026-09-26T00:00:00.000Z";
@@ -61,6 +61,39 @@ describe("resolveReferenceItems", () => {
     expect(result.items[0]).toMatchObject({ mediaKind: "image", assetId: null, blockingReason: null });
     expect(resolveReferenceItems({ canvas, nodeId: "target", bindings: [] }).items[0].status).toBe("invalid");
   });
+  it("动画区镜头在参考区显示为视频而不是图片", () => {
+    const canvas = canvasWith({ sourceType: "world-camera" });
+    canvas.nodeData.src = {
+      worldCamera: { ...createDefaultWorldCameraData("camera", "v1", { u: 0, v: 0 }), captureMode: { kind: "static" } }
+    } as never;
+    canvas.document.nodes.push({ id: "area", type: "scene-area" });
+    canvas.nodeData.area = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "scope-1",
+        bounds: { min: { u: -30, v: -30 }, max: { u: 30, v: 30 } },
+        animationScript: createWorldAnimationScript({ script: "function build(motion) {}", duration: 4, loop: false })
+      }
+    } as never;
+    const videoBindings: CanvasTaskInputBinding[] = [
+      { field: "videoUrls", semantic: "reference-video", roles: ["reference_video"], mediaKinds: ["video"], mediaTypes: ["video/mp4"], maxItems: 1, valueFormat: "url" }
+    ];
+    const result = resolveReferenceItems({ canvas, nodeId: "target", bindings: videoBindings });
+    expect(result.items[0]).toMatchObject({
+      mentionType: "input_video",
+      mediaKind: "video",
+      role: "reference_video",
+      label: "视频 1",
+      status: "ready"
+    });
+    // 只有图片能力的模型明确拒绝视频参考，不伪装成图片。
+    const rejected = resolveReferenceItems({ canvas, nodeId: "target", bindings: BINDINGS });
+    expect(rejected.items[0]!.status).toBe("invalid");
+    expect(rejected.items[0]!.blockingReason).toContain("视频参考");
+  });
+
   it("ready 图片映射为 ready item 且带稳定预览", () => {
     const canvas = canvasWith({ assets: [mediaAsset("a1", "image", "ready", "/api/media/x.png")], assetId: "a1" });
     const result = resolveReferenceItems({ canvas, nodeId: "target", bindings: BINDINGS });

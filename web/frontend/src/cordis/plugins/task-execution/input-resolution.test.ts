@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { CanvasTaskInputBinding } from "@woohaa3/contracts";
-import { createDefaultWorldCameraData } from "@woohaa3/contracts";
+import { createDefaultWorldCameraData, createWorldAnimationScript } from "@woohaa3/contracts";
 import { GENERATED_KEY,
   STORAGE_KEY,
   canvasFixture,
@@ -356,5 +356,57 @@ describe("节点自带主图（selfReferenceAssetId）", () => {
       assets: []
     });
     expect(resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: IMAGE_CAPABILITY }).inputs).toEqual([]);
+  });
+});
+
+describe("镜头参考按派生类型分流", () => {
+  const VIDEO_CAPABILITY: CanvasTaskInputBinding[] = [
+    {
+      field: "referenceVideos",
+      semantic: "reference-video",
+      roles: ["reference_video"],
+      mediaKinds: ["video"],
+      mediaTypes: ["video/mp4"],
+      maxItems: 1,
+      valueFormat: "url"
+    }
+  ];
+
+  function animatedCameraCanvas() {
+    const canvas = upstreamCanvas({});
+    canvas.document.nodes.find(node => node.id === "up-1")!.type = "world-camera";
+    canvas.nodeData["up-1"] = { worldCamera: createDefaultWorldCameraData("camera", "v1", { u: 0, v: 0 }) } as never;
+    canvas.document.nodes.push({ id: "area", type: "scene-area" });
+    canvas.nodeData.area = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "scope-1",
+        bounds: { min: { u: -30, v: -30 }, max: { u: 30, v: 30 } },
+        animationScript: createWorldAnimationScript({ script: "function build(motion) {}", duration: 4, loop: false })
+      }
+    } as never;
+    return canvas;
+  }
+
+  it("动态镜头解析为 reference_video，不降级成图片", () => {
+    const canvas = animatedCameraCanvas();
+    const video = resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: VIDEO_CAPABILITY });
+    expect(video.blockingReasons).toEqual([]);
+    expect(video.deferredReferences).toEqual([{ role: "reference_video", mediaKind: "video" }]);
+
+    // 只有图片能力的模型明确拒绝，而不是把视频当图片。
+    const imageOnly = resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: IMAGE_CAPABILITY });
+    expect(imageOnly.deferredReferences).toEqual([]);
+    expect(imageOnly.blockingReasons.join("")).toContain("视频参考");
+  });
+
+  it("静态镜头仍按 reference_image 解析", () => {
+    const canvas = upstreamCanvas({});
+    canvas.document.nodes.find(node => node.id === "up-1")!.type = "world-camera";
+    canvas.nodeData["up-1"] = { worldCamera: createDefaultWorldCameraData("camera", "v1", { u: 0, v: 0 }) } as never;
+    const result = resolveNodeReferenceInputs({ canvas, nodeId: "target", bindings: IMAGE_CAPABILITY });
+    expect(result.deferredReferences).toEqual([{ role: "reference_image", mediaKind: "image" }]);
   });
 });

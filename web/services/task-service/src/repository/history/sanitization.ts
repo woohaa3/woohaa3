@@ -92,7 +92,10 @@ function sanitizeWorldCapture(
   if (!binding || typeof binding !== "object") return undefined;
   const input = binding.input;
   if (!input || typeof input !== "object") return undefined;
-  if (binding.version !== "world-capture-generation-binding-v1") return undefined;
+  const version: string = binding.version;
+  if (version !== "world-capture-generation-binding-v1" && version !== "world-capture-generation-binding-v2") {
+    return undefined;
+  }
   const key = input.key;
   if (!key || typeof key !== "object") return undefined;
   const fields = ["canvasId", "cameraId", "worldContentVersion", "cameraSettingsVersion", "bindingVersion", "outputVersion"] as const;
