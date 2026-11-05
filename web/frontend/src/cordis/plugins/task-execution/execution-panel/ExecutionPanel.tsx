@@ -368,21 +368,7 @@ export function ExecutionPanel({
 			onRunSkill={runSkill}
 			promptLibraryOpen={promptLibraryOpen}
 			onTogglePromptLibrary={() => setPromptLibraryOpen((open) => !open)}
-			{...(promptLibrarySlot
-				? {
-						promptLibrary: promptLibrarySlot({
-							// 追加而不是覆盖：用户已经写了一半的草稿不能被一次点击清掉。
-							//
-							// **必须同时回流给父级**：只 `setPrompt` 只改本组件 state，面板一收起
-							// 或换节点（`data.panelPrompt` 一来就被 effect 覆盖）刚写的词就没了。
-							onUse: (text: string) => {
-								const next = mergePromptText(prompt, text);
-								setPrompt(next);
-								patch({ panelPrompt: next });
-							}
-						})
-					}
-				: {})}
+			{...(promptLibrarySlot ? { hasPromptLibrary: true } : {})}
 			showRun={showRun}
 			busy={busy}
 			canRun={canRun}
@@ -530,22 +516,49 @@ export function ExecutionPanel({
 		</div>
 	);
 
+	/*
+	 * 提示词库：**画在对话框上方**、与对话框等宽（参考稿的形态），不是挂在工具栏某个图标上的
+	 * 浮层 —— 那样 420px 宽的卡片会悬在运行键旁边，既不贴边也和对话框对不齐。
+	 *
+	 * 位置靠 `mc-panel__stack` 这一列：面板在上、对话框在下，两者同宽。折叠成底边条时不显示
+	 * （那时没有「对话框上方」这回事，入口键也一起藏在折叠条里）。
+	 */
+	const promptLibraryLayer =
+		promptLibrarySlot && promptLibraryOpen && !collapsed ? (
+			<div className="mc-panel__prompt-library-layer" data-testid="prompt-library-layer">
+				{promptLibrarySlot({
+					// 追加而不是覆盖：用户已经写了一半的草稿不能被一次点击清掉。
+					//
+					// **必须同时回流给父级**：只 `setPrompt` 只改本组件 state，面板一收起
+					// 或换节点（`data.panelPrompt` 一来就被 effect 覆盖）刚写的词就没了。
+					onUse: (text: string) => {
+						const next = mergePromptText(prompt, text);
+						setPrompt(next);
+						patch({ panelPrompt: next });
+					}
+				})}
+			</div>
+		) : null;
+
 	// expanded 的 fullscreen 宿主由 Canvas Shell / 宿主（`FullscreenPanelHost`）提供，
 	// 组件本身不再自绘 overlay（design D5）。
 	return (
 		<div className="mc-panel__host" data-surface={expanded ? "canvas" : surface}>
-			{collapsed ? (
-				<CollapsedBar
-					value={prompt}
-					placeholder={PLACEHOLDER}
-					status={status}
-					{...(STATUS_LABEL[status] ? { statusLabel: STATUS_LABEL[status] } : {})}
-					{...(disabledHint ? { hint: disabledHint } : {})}
-					onExpand={panelCollapse.expand}
-				/>
-			) : (
-				editor
-			)}
+			<div className="mc-panel__stack">
+				{promptLibraryLayer}
+				{collapsed ? (
+					<CollapsedBar
+						value={prompt}
+						placeholder={PLACEHOLDER}
+						status={status}
+						{...(STATUS_LABEL[status] ? { statusLabel: STATUS_LABEL[status] } : {})}
+						{...(disabledHint ? { hint: disabledHint } : {})}
+						onExpand={panelCollapse.expand}
+					/>
+				) : (
+					editor
+				)}
+			</div>
 		</div>
 	);
 }

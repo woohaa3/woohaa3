@@ -270,7 +270,7 @@ export function RunActions({
 	onRunSkill,
 	promptLibraryOpen,
 	onTogglePromptLibrary,
-	promptLibrary,
+	hasPromptLibrary,
 	showRun,
 	busy,
 	canRun,
@@ -287,11 +287,11 @@ export function RunActions({
 	polishProcessing: boolean;
 	visibleSkills: ReadonlyArray<ExecutionPanelSkill>;
 	onRunSkill: (skill: ExecutionPanelSkill) => void;
-	/** 提示词库浮层的受控状态。 */
+	/** 提示词库面板的受控状态。 */
 	promptLibraryOpen: boolean;
 	onTogglePromptLibrary: () => void;
-	/** 提示词库浮层内容（由面板从 `promptLibrarySlot` 渲染）。未提供时不显示入口。 */
-	promptLibrary?: React.ReactNode;
+	/** 是否有提示词库；没有时不显示入口。内容本身由 ExecutionPanel 画在对话框上方。 */
+	hasPromptLibrary?: boolean;
 	showRun: boolean;
 	busy: boolean;
 	canRun: boolean;
@@ -365,32 +365,24 @@ export function RunActions({
 					</Popover>
 				</div>
 			) : null}
-			{promptLibrary ? (
+			{hasPromptLibrary ? (
 				<div className="mc-panel__polish-menu-wrap">
-					<Popover
-						open={promptLibraryOpen}
-						onOpenChange={(next) => {
-							if (next !== promptLibraryOpen) onTogglePromptLibrary();
-						}}
-						side="top"
-						align="end"
-						className="mc-panel__prompt-library-popover"
-						dismissOnOutside
-						trigger={
-							<button
-								type="button"
-								className="mc-panel__icon-btn mc-panel__prompt-library"
-								data-tooltip="提示词"
-								aria-label="打开提示词库"
-								aria-haspopup="dialog"
-								aria-expanded={promptLibraryOpen}
-							>
-								<SnippetLibraryIcon className="mc-panel__prompt-library-icon" />
-							</button>
-						}
+					{/*
+					 * 只留触发键：面板本身由 ExecutionPanel 画在对话框**上方**、与对话框等宽
+					 * （参考稿的形态）。早期是锚在这个小图标上的 Popover，420px 宽的浮层
+					 * 悬在工具栏旁边，既不贴边也和对话框不对齐。
+					 */}
+					<button
+						type="button"
+						className="mc-panel__icon-btn mc-panel__prompt-library"
+						data-tooltip="提示词"
+						aria-label="打开提示词库"
+						aria-haspopup="dialog"
+						aria-expanded={promptLibraryOpen}
+						onClick={onTogglePromptLibrary}
 					>
-						{promptLibrary}
-					</Popover>
+						<SnippetLibraryIcon className="mc-panel__prompt-library-icon" />
+					</button>
 				</div>
 			) : null}
 			{showRun ? (

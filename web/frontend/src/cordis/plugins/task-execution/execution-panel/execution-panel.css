@@ -963,13 +963,6 @@
   height: 17px;
 }
 
-/* 浮层本身由 prompt-library-panel.css 负责，这里只去掉 Popover 默认的内边距。 */
-.mc-panel__prompt-library-popover {
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
 .mc-panel__polish-menu {
   position: relative;
   z-index: var(--z-popover);
@@ -1423,6 +1416,69 @@
   display: flex;
   width: 100%;
   height: 100%;
+}
+
+/* ------------------------------------------------------------------ *
+ * 提示词库：浮在对话框上方，不占布局
+ * ------------------------------------------------------------------ */
+
+/*
+ * 面板**不参与高度分配**。停靠区（`.node-execution-dock`）的高度由 runtime 几何投影给出、
+ * 是个定值；把面板放进同一列当兄弟元素，它会吃掉大半高度，对话框被压成一条
+ * （踩过：`flex: 1 1 auto` + `max-height: 52vh` 直接把输入框挤没了）。
+ *
+ * 参考稿的形态是「浮在对话框上沿之上、与对话框等宽」——所以这里用绝对定位贴着 stack 的
+ * 上沿往上长，对话框保持原高度不变。
+ */
+.mc-panel__stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.mc-panel__prompt-library-layer {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  /* 贴着对话框上沿，留 8px 与四周间隙一致 */
+  bottom: calc(100% + 8px);
+  min-width: 0;
+}
+
+/*
+ * 面板比对话框高，会向上溢出停靠区。停靠区本身是 `overflow-y: auto` 的滚动容器，
+ * 溢出部分会被裁掉（表现为「面板只剩底下几行」）。打开面板时放开裁剪，其余时间保持原样。
+ */
+.node-execution-dock:has(.mc-panel__prompt-library-layer) {
+  overflow: visible;
+}
+
+/*
+ * 面板与对话框同宽：库面板自己的 `min(420px, 100vw - 32px)` 是给「悬在图标旁的小浮层」
+ * 定的，放进这一列后必须让位给容器宽度。放在这里而不是改 prompt-library-panel.css，
+ * 是因为那个文件同时服务独立使用场景（面板单独弹出时不希望被拉满整屏）。
+ */
+.mc-panel__prompt-library-layer > .prompt-library {
+  width: 100%;
+  /*
+   * 面板高度：比共享样式（440 上限）高一截，露出整整两行卡片。
+   * 上限同时受视口约束 —— 面板是向上长的，太高会顶出屏幕，所以 78vh 与具体像素取小值；
+   * 超出部分由面板内部的 `__body` 自己滚动。
+   */
+  max-height: min(600px, 78vh);
+  border-radius: 16px;
+}
+
+/*
+ * 四列卡片。只在「贴对话框上方」这个宽场景生效：共享的 `prompt-library-panel.css` 里
+ * 两列是给 420px 独立浮层定的，在这个更宽的容器里四列才填得满。
+ * 窄屏（容器放不下四张）自动降级到三列 / 两列，不做断点硬切。
+ */
+.mc-panel__prompt-library-layer .prompt-library__grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .mc-panel__reference-hint {
