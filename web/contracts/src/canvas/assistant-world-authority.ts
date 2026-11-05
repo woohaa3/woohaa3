@@ -210,7 +210,7 @@ export type AssistantWorldWriteOperation =
   | {
       kind: "set-scene-animation-script";
       operationId: WorldId;
-      /** 导演区统一动画脚本源码（`woohaa-world-animation-js-v1`）。 */
+      /** 导演区统一动画脚本源码（`woohaa-world-animation-js-v2`，位置轨道相对 `animationOrigin`）。 */
       script: string;
       duration: number;
       loop: boolean;
@@ -672,6 +672,8 @@ export type AssistantWorldContextView = {
     revision: number;
     /** Canonical scope version the next range write must present. */
     scopeVersion: WorldVersion;
+    /** Stable origin for position tracks; u/v are offsets from it, h is absolute. */
+    animationOrigin: import("./shared-world.js").GroundPoint;
     /** An explicit null means the current director area has no animation script. */
     animationScript: WorldAnimationScript | null;
   };

@@ -38,7 +38,7 @@ function animatedWorldFixture(): ServerCanvas {
           'motion.instance.tween("actor-instance", { property: "scale", startTime: 0, endTime: 5, from: [1], to: [2], easing: "linear" });'
         ].join("\n"),
         scriptLanguage: "javascript",
-        scriptVersion: "woohaa-world-animation-js-v1",
+        scriptVersion: "woohaa-world-animation-js-v2",
         revision: 1,
         sourceHash: "hash-animated",
         duration: 5,
@@ -81,8 +81,10 @@ it.each(["same-canvas", "cross-canvas"])("copies a complete animated collection 
   if (!compiled.ok) return;
   expect(compiled.ir.instanceTracks.map(track => track.targetId)).toEqual([actor.instanceId, actor.instanceId, actor.instanceId]);
   const position = compiled.ir.instanceTracks.find(track => track.property === "position")!;
-  expect(position.from).toEqual([1 + u, 2 + v, 3]);
-  expect(position.to).toEqual([4 + u, 3 + v, 3]);
+  // Position tracks are area-relative; the copy moves the origin, not the track.
+  expect(position.from).toEqual([1, 2, 3]);
+  expect(position.to).toEqual([4, 3, 3]);
+  expect(area.animationOrigin).toEqual({ u, v });
   expect(compiled.ir.instanceTracks.find(track => track.property === "rotation")!.from).toEqual([0, 90, 0]);
   expect(compiled.ir.instanceTracks.find(track => track.property === "scale")!.to).toEqual([2]);
   expect(area.bounds.min).toEqual({ u: -4 + u, v: -4 + v });

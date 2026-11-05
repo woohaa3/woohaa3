@@ -3,9 +3,9 @@ import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
 import { decodeWorldCamera } from "../world-camera-codec.js";
 import { quatMul } from "../model-transform.js";
-import type { WorldPoint, WorldRotation } from "../shared-world.js";
+import { sceneAreaAnimationOrigin, type GroundAabb, type GroundPoint, type SceneAreaData, type WorldPoint, type WorldRotation } from "../shared-world.js";
 import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
-import { executeWorldAnimationScript, sampleWorldAnimation, type SampledCameraMotion, type SampledInstanceMotion, type WorldAnimationIr, type WorldAnimationScript } from "../world-animation-script.js";
+import { executeWorldAnimationScript, sampleWorldAnimationInArea, type SampledCameraMotion, type SampledInstanceMotion, type WorldAnimationIr, type WorldAnimationScript } from "../world-animation-script.js";
 import type { NodeCapabilityResolver } from "../node-capabilities.js";
 /**
  * `CanvasRenderScene` 快照装配与呈现指纹（自 `render-scene.ts` 拆出）
@@ -152,6 +152,21 @@ export function resolveSceneTheme(input: unknown): AppThemeSnapshot {
 }
 
 /** 构建 Bevy 快照。 */
+/**
+ * Area-move previews translate bounds; carry the animation origin by the same
+ * delta. Resize previews change an edge, so the stable origin stays put.
+ */
+function animationOriginForPreview(area: SceneAreaData, preview: GroundAabb | undefined): GroundPoint {
+  const origin = sceneAreaAnimationOrigin(area);
+  if (!preview) return origin;
+  const u = preview.min.u - area.bounds.min.u;
+  const v = preview.min.v - area.bounds.min.v;
+  const maxU = preview.max.u - area.bounds.max.u;
+  const maxV = preview.max.v - area.bounds.max.v;
+  if (Math.abs(u - maxU) > 1e-9 || Math.abs(v - maxV) > 1e-9) return origin;
+  return { u: origin.u + u, v: origin.v + v };
+}
+
 export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRenderScene {
   observeContentResolver(input.content);
   const { canvas } = input;
@@ -173,10 +188,14 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     for (const node of animationNodes) {
       const area = decodeSceneAreaData(nodeData[node.id]?.sceneArea);
       const script = area.ok ? area.value.animationScript : undefined;
-      if (!script) continue;
+      if (!area.ok || !script) continue;
       const ir = compiledWorldAnimation(script);
       if (!ir) continue;
-      const sample = sampleWorldAnimation(ir, input.sceneAnimationTimes.get(node.id) ?? 0);
+      const sample = sampleWorldAnimationInArea(
+        ir,
+        input.sceneAnimationTimes.get(node.id) ?? 0,
+        animationOriginForPreview(area.value, input.sceneAreaPreviews?.get(node.id))
+      );
       for (const [instanceId, transform] of sample.instances) {
         const current = animationSamples.get(instanceId) ?? {};
         animationSamples.set(instanceId, { ...current, ...transform });

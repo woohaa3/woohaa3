@@ -48,6 +48,7 @@
 import {
   SHARED_WORLD_NODE_DATA_KEYS,
   SHARED_WORLD_VERSION,
+  sceneAreaAnimationOrigin,
   type SharedWorldDecodeResult,
   type SceneAreaData,
   type WorldCameraCaptureMode,
@@ -484,6 +485,7 @@ function remapWorldPayload(
           version: SHARED_WORLD_VERSION,
           areaId,
           scopeVersion: world.value.scopeVersion,
+          animationOrigin: sceneAreaAnimationOrigin(world.value),
           bounds: { min: world.value.bounds.min, max: world.value.bounds.max },
           ...(animationScript ? { animationScript } : {})
         }

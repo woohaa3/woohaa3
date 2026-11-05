@@ -208,7 +208,7 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
             ? { workflowGroup2d: { kind: "workflow-group-2d", version: SHARED_WORLD_VERSION, groupId: id, scopeVersion: version, memberNodeIds: [] } }
             : cameraData
               ? { worldCamera: cameraData } as unknown as CanvasNodeData
-              : { sceneArea: { kind: "scene-area", version: SHARED_WORLD_VERSION, areaId: id, scopeVersion: version, bounds: { min: { u: ground.u - 2, v: ground.v - 2 }, max: { u: ground.u + 2, v: ground.v + 2 } } } };
+              : { sceneArea: { kind: "scene-area", version: SHARED_WORLD_VERSION, areaId: id, scopeVersion: version, animationOrigin: { u: ground.u, v: ground.v }, bounds: { min: { u: ground.u - 2, v: ground.v - 2 }, max: { u: ground.u + 2, v: ground.v + 2 } } } };
           const position = cameraData ? initialCameraCardPosition(cameraData) : context.world;
           void ctx.canvasEdit.record(planInsertNode({
             nodeType: group ? "workflow-group-2d" : camera ? "world-camera" : "scene-area",

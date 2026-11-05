@@ -181,7 +181,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     {
       title: "读取世界助手上下文",
       description:
-        "读取宿主为本轮签发的导演区/2D 组/所选镜头范围、版本、可写模型/镜头和只读参考；镜头范围返回 camera.settings 完整配置与 sceneModels 只读空间信息，只能调整该镜头；导演区 sceneArea 返回当前发布 revision 与完整 animationScript（null 表示没有动画），sceneModels 返回导演区内可写/只读模型的世界变换（含朝向）与本地包围盒，用于推导动画支点、尺寸和镜头取景，bounds 是导演区地面范围。返修前先读取原脚本，保留未要求修改的轨道和参数。目标与版本来自宿主任命，不接受模型自报；2D 组只返回只读参考。",
+        "读取宿主为本轮签发的导演区/2D 组/所选镜头范围、版本、可写模型/镜头和只读参考；镜头范围返回 camera.settings 完整配置与 sceneModels 只读空间信息，只能调整该镜头；导演区 sceneArea 返回当前发布 revision、animationOrigin 与完整 animationScript（null 表示没有动画），sceneModels 返回导演区内可写/只读模型的世界变换（含朝向）与本地包围盒，用于推导动画支点、尺寸和镜头取景，bounds 是导演区地面范围。返修前先读取原脚本，保留未要求修改的轨道和参数。目标与版本来自宿主任命，不接受模型自报；2D 组只返回只读参考。",
       inputSchema: z.strictObject({}),
       outputSchema: z.looseObject({ ok: z.boolean() }),
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
@@ -324,7 +324,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
       title: "设置导演区动画脚本",
       description:
         "用 JS 动画脚本声明导演区内模型实例与镜头的运动。脚本通过注入的 motion 对象：motion.instance.tween(instanceId, { property: position|rotation|scale, startTime, endTime, from, to, easing }) 与 motion.camera.tween({ cameraId, property: position|rotation|zoom, startTime, endTime, from, to, easing })。只允许本轮可写的导演区内部部件。\n" +
-        "坐标与轴向（务必按此约定，写错轴会得到横滚而不是想要的朝向）：position 为世界 u/v/h 米，零方位时镜头朝 +v、上方为 +h；rotation 为欧拉角 [x, y, z] 度、按 Y-X-Z 组合，其中 x 绕 u 轴俯仰（抬头/低头）、y 绕 v 轴横滚（歪地平线，一般不要用）、z 绕 h 轴偏航（左右转头）——要让镜头转向某个物体就改 z，不要改 y；zoom 为镜头倍率，1 为原始视野，>1 更广（拉远/全景），<1 更窄（推近/特写）。from/to 长度：position 为 [u,v,h]，rotation 为 [x,y,z] 度，scale 与 zoom 为单元素数组 [值]。\n" +
+        "坐标与轴向（务必按此约定，写错轴会得到横滚而不是想要的朝向）：position 的 u/v 是相对 sceneArea.animationOrigin 的偏移、h 为绝对高度（米），零方位时镜头朝 +v、上方为 +h；rotation 为欧拉角 [x, y, z] 度、按 Y-X-Z 组合，其中 x 绕 u 轴俯仰（抬头/低头）、y 绕 v 轴横滚（歪地平线，一般不要用）、z 绕 h 轴偏航（左右转头）——要让镜头转向某个物体就改 z，不要改 y；zoom 为镜头倍率，1 为原始视野，>1 更广（拉远/全景），<1 更窄（推近/特写）。from/to 长度：position 为 [u,v,h]，rotation 为 [x,y,z] 度，scale 与 zoom 为单元素数组 [值]。\n" +
         "要「从特写拉到全景」优先用 zoom，例如 motion.camera.tween({ cameraId, property: \"zoom\", startTime: 0, endTime: 4, from: [1], to: [2.2], easing: \"easeOut\" })；确实需要移动机位或转头时再加 position 与 property:\"rotation\"（只改 z）轨道。设置后请读取返回的相机朝向/地面落点，确认对准目标再结束。脚本编译一次后按时间确定性求值，播放不写规范文档。",
       inputSchema: z.strictObject({
         duration: z.number().finite().positive().max(3600),

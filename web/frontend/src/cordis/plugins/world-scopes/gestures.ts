@@ -19,6 +19,7 @@ import {
   SCENE_AREA_PLAN_CONTRACT_VERSION,
   createHighEntropyId,
   decodeSceneAreaData,
+  executeWorldAnimationScript,
   planSceneAreaOperation,
   type GroundAabb,
   type GroundPoint,
@@ -552,10 +553,32 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
   const applyPreview = (gesture: ActiveGesture): void => {
     if (!gesture.snapshot || gesture.intent !== "move") return;
     const nodeIdByInstance = instanceNodeIds(gesture.snapshot);
+    // The scene builder previews the moved area's origin, which already carries
+    // every instance with a position track. Ground-previewing those again would
+    // move them twice; only non-position-animated members need the direct delta.
+    const animatedInstances = new Set<string>();
+    const canvas = deps.getCanvas();
+    const area = decodeSceneAreaData(canvas?.nodeData[gesture.areaNodeId]?.sceneArea);
+    if (area.ok && area.value.animationScript) {
+      const executed = executeWorldAnimationScript(area.value.animationScript.script, {
+        duration: area.value.animationScript.duration,
+        loop: area.value.animationScript.loop
+      });
+      if (executed.ok) {
+        for (const track of executed.ir.instanceTracks) {
+          if (track.property === "position") animatedInstances.add(track.targetId);
+        }
+      }
+    }
     const next = new Set<string>();
     for (const member of gesture.snapshot.members.instances) {
       const nodeId = nodeIdByInstance.get(member.identity.instanceId);
       if (!nodeId) continue;
+      if (animatedInstances.has(member.identity.instanceId)) {
+        // The origin preview moves it; make sure a previous direct preview is cleared.
+        if (gesture.previewed.has(nodeId)) deps.preview(nodeId, null);
+        continue;
+      }
       deps.preview(nodeId, { u: gesture.delta.u, v: gesture.delta.v });
       next.add(nodeId);
     }

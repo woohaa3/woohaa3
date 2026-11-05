@@ -46,7 +46,7 @@ const WORKFLOW_GROUP_KEYS = ["kind", "version", "groupId", "scopeVersion", "memb
 const SCENE_AREA_KIND = "scene-area";
 // 旧关键帧字段 `animation` 不再支持，但读取时容忍并从规范化结果中丢弃，避免已持久化画布
 // 因遗留字段整体判为 corrupt；新写入不会产生该字段。
-const SCENE_AREA_KEYS = ["kind", "version", "areaId", "scopeVersion", "bounds", "animationScript", "animation"] as const;
+const SCENE_AREA_KEYS = ["kind", "version", "areaId", "scopeVersion", "bounds", "animationOrigin", "animationScript", "animation"] as const;
 const GROUND_POINT_KEYS = ["u", "v"] as const;
 const GROUND_AABB_KEYS = ["min", "max"] as const;
 
@@ -98,19 +98,24 @@ export function decodeSceneAreaData(input: unknown): SharedWorldDecodeResult<Sce
   }
   const bounds = decodeGroundAabb(ownField(read.record, "bounds"));
   if (!bounds) return decodeFailure("invalid-data", input);
+  const rawOrigin = ownField(read.record, "animationOrigin");
+  const animationOrigin = rawOrigin === undefined ? undefined : decodeGroundPoint(rawOrigin);
+  if (rawOrigin !== undefined && !animationOrigin) return decodeFailure("invalid-data", input);
+  const base = {
+    kind: SCENE_AREA_KIND,
+    version: SHARED_WORLD_VERSION,
+    areaId,
+    scopeVersion,
+    bounds,
+    ...(animationOrigin ? { animationOrigin } : {})
+  } as const;
   const rawScript = ownField(read.record, "animationScript");
   if (rawScript !== undefined) {
     const animationScript = decodeWorldAnimationScript(rawScript);
     if (!animationScript.ok) return decodeFailure("invalid-data", input);
-    return {
-      ok: true,
-      value: { kind: SCENE_AREA_KIND, version: SHARED_WORLD_VERSION, areaId, scopeVersion, bounds, animationScript: animationScript.value }
-    };
+    return { ok: true, value: { ...base, animationScript: animationScript.value } };
   }
-  return {
-    ok: true,
-    value: { kind: SCENE_AREA_KIND, version: SHARED_WORLD_VERSION, areaId, scopeVersion, bounds }
-  };
+  return { ok: true, value: base };
 }
 
 /** Decode either creation scope by its `kind` discriminant; cameras are not scopes. */

@@ -18,6 +18,7 @@ import {
 
 function canvasWithAnimatedCamera(input: {
   bounds?: { min: { u: number; v: number }; max: { u: number; v: number } };
+  origin?: { u: number; v: number };
   from?: [number, number, number];
   to?: [number, number, number];
 } = {}): { canvas: ServerCanvas; script: WorldAnimationScript; cameraId: string } {
@@ -39,6 +40,7 @@ function canvasWithAnimatedCamera(input: {
       areaId: "area-main",
       scopeVersion: "scope-1",
       bounds: input.bounds ?? { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } },
+      animationOrigin: input.origin ?? { u: 0, v: 0 },
       animationScript: script
     }
   } as unknown as CanvasNodeData;
@@ -63,6 +65,12 @@ it("samples an animated camera's visible pose instead of its distant canonical b
   expect(sample).not.toBeNull();
   expect(sample!.camera.position).toEqual({ u: 1, v: 2, h: 1 });
   expect(sample!.areas).toHaveLength(1);
+});
+
+it("adds the area origin to relative camera positions", () => {
+  const { canvas } = canvasWithAnimatedCamera({ origin: { u: 10, v: 20 } });
+  const sample = animatedCameraAt(canvas, "camera-1", new Map([["area", 0]]));
+  expect(sample!.camera.position).toEqual({ u: 11, v: 22, h: 1 });
 });
 
 it("shifts camera position tracks with the drag and restores them on undo", () => {

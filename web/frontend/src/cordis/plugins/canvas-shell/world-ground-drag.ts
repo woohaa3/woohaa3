@@ -18,7 +18,8 @@ import {
   decodeWorldInstanceData,
   encodeWorldInstanceData,
   executeWorldAnimationScript,
-  sampleWorldAnimation,
+  sampleWorldAnimationInArea,
+  sceneAreaAnimationOrigin,
   serializeWorldAnimationScript,
   type CanvasCommand,
   type CanvasNodeData,
@@ -260,7 +261,11 @@ export function planWorldGroundMoveWithAnimationParts(
           return { ...track, from, to };
         });
     if (!changed) continue;
-    const sampled = sampleWorldAnimation(executed.ir, times?.get(node.id) ?? 0).instances;
+    const sampled = sampleWorldAnimationInArea(
+      executed.ir,
+      times?.get(node.id) ?? 0,
+      sceneAreaAnimationOrigin(area.value)
+    ).instances;
     for (const instanceId of instanceIds) {
       const position = sampled.get(instanceId)?.position;
       if (position) animatedPositions.set(instanceId, position);

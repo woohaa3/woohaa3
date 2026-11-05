@@ -18,7 +18,8 @@ import {
   decodeSceneAreaData,
   decodeWorldCamera,
   executeWorldAnimationScript,
-  sampleWorldAnimation,
+  sampleWorldAnimationInArea,
+  sceneAreaAnimationOrigin,
   serializeWorldAnimationScript,
   worldCameraUiSettingsOf,
   worldToCanvasPoint,
@@ -319,7 +320,11 @@ export function animatedCameraAt(
     const executed = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
     if (!executed.ok) continue;
     if (!executed.ir.cameraTracks.some(track => track.targetId === cameraId)) continue;
-    const sample = sampleWorldAnimation(executed.ir, times?.get(node.id) ?? 0).cameras.get(cameraId);
+    const sample = sampleWorldAnimationInArea(
+      executed.ir,
+      times?.get(node.id) ?? 0,
+      sceneAreaAnimationOrigin(decoded.value)
+    ).cameras.get(cameraId);
     if (sample?.position) position = sample.position;
     if (sample?.rotation) rotation = sample.rotation;
     areas.push({ nodeId: node.id, data: data ?? {}, area: decoded.value, script, ir: executed.ir });
@@ -410,8 +415,11 @@ export function planWorldCameraMoveWithAnimationParts(
     if (!changed) continue;
 
     if (!unbind && start.mode === "move") {
-      const sampled = sampleWorldAnimation(area.ir, times?.get(area.nodeId) ?? 0)
-        .cameras.get(start.canonical.cameraId);
+      const sampled = sampleWorldAnimationInArea(
+        area.ir,
+        times?.get(area.nodeId) ?? 0,
+        sceneAreaAnimationOrigin(area.area)
+      ).cameras.get(start.canonical.cameraId);
       const from = sampled?.position ?? start.camera.position;
       const next = { u: from.u + delta!.u, v: from.v + delta!.v };
       if (insideArea(area.area.bounds, from) && !insideArea(area.area.bounds, next)) {

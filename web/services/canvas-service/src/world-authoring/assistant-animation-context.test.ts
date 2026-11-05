@@ -21,7 +21,7 @@ const original: WorldAnimationScript = {
     'motion.instance.tween("prop", { property: "scale", startTime: 0, endTime: 5, from: [1], to: [2], easing: "linear" });'
   ].join("\n"),
   scriptLanguage: "javascript",
-  scriptVersion: "woohaa-world-animation-js-v1",
+  scriptVersion: "woohaa-world-animation-js-v2",
   revision: 1,
   sourceHash: "hash-original",
   duration: 5,

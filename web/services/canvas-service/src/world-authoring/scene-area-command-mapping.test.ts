@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
   createWorldAnimationScript,
+  decodeSceneAreaData,
   executeWorldAnimationScript,
   sampleWorldAnimation,
+  sampleWorldAnimationInArea,
+  sceneAreaAnimationOrigin,
   type CanvasCommand,
   type SceneAreaPlan,
   type ServerCanvas
@@ -129,145 +132,126 @@ function movePlan(canvas: ServerCanvas): SceneAreaPlan {
 type AreaPatch = {
   type: "nodeData.patch";
   nodeId: string;
-  value: { sceneArea?: { animationScript?: { script: string } } };
+  value: { sceneArea?: Record<string, unknown> };
 };
 
 function areaCommand(commands: CanvasCommand[]): AreaPatch {
   const command = commands.find(candidate => {
     if (candidate.type !== "nodeData.patch" || candidate.nodeId !== "area") return false;
-    const value = candidate.value as { sceneArea?: { animationScript?: unknown } };
-    return value.sceneArea?.animationScript !== undefined;
+    const value = candidate.value as { sceneArea?: unknown };
+    return value.sceneArea !== undefined;
   });
-  if (!command) throw new Error("missing animation area patch");
+  if (!command) throw new Error("missing area patch");
   return command as unknown as AreaPatch;
 }
 
-function sampledPosition(script: string): { u: number; v: number } {
-  const executed = executeWorldAnimationScript(script, { duration: 4, loop: false });
+function worldPosition(sceneArea: unknown): { u: number; v: number } {
+  const decoded = decodeSceneAreaData(sceneArea);
+  if (!decoded.ok || !decoded.value.animationScript) throw new Error("missing animation");
+  const executed = executeWorldAnimationScript(decoded.value.animationScript.script, {
+    duration: decoded.value.animationScript.duration,
+    loop: decoded.value.animationScript.loop
+  });
   if (!executed.ok) throw new Error(executed.message);
-  const sample = sampleWorldAnimation(executed.ir, 0).instances.get("solo-a");
-  if (!sample?.position) throw new Error("missing animation sample");
+  const sample = sampleWorldAnimationInArea(
+    executed.ir,
+    0,
+    sceneAreaAnimationOrigin(decoded.value)
+  ).instances.get("solo-a");
+  if (!sample?.position) throw new Error("missing sample");
   return { u: sample.position.u, v: sample.position.v };
 }
 
-describe("scene-area command mapping animation shifts", () => {
-  it("translates the moved area's own animation position tracks and restores them on undo", () => {
+describe("scene-area command mapping animation origin", () => {
+  it("moves the origin with a translated area and restores it on undo without rewriting the script", () => {
     const canvas = canvasWithAnimation();
     const plan = movePlan(canvas);
     const forward = buildForwardCommands(canvas, plan);
     expect(forward.ok).toBe(true);
     if (!forward.ok) return;
 
-    const shifted = areaCommand(forward.commands).value.sceneArea?.animationScript?.script;
-    expect(shifted).toBeDefined();
-    expect(sampledPosition(shifted!)).toEqual({ u: 3, v: 4 });
+    const sceneArea = areaCommand(forward.commands).value.sceneArea!;
+    expect(sceneArea.animationOrigin).toEqual({ u: 7, v: 8 });
+    const rawScript = executeWorldAnimationScript(
+      (sceneArea.animationScript as { script: string }).script,
+      { duration: 4, loop: false }
+    );
+    expect(rawScript.ok).toBe(true);
+    if (rawScript.ok) {
+      // The authored track stays relative; only the origin moved.
+      expect(sampleWorldAnimation(rawScript.ir, 0).instances.get("solo-a")?.position)
+        .toEqual({ u: 1, v: 1, h: 0 });
+    }
+    expect(worldPosition(sceneArea)).toEqual({ u: 8, v: 9 });
 
     const inverse = buildInverseCommands(canvas, plan, forward.source, forward.deleted);
     expect(inverse.ok).toBe(true);
     if (!inverse.ok) return;
-    const restored = areaCommand(inverse.commands).value.sceneArea?.animationScript?.script;
-    expect(restored).toBeDefined();
-    expect(sampledPosition(restored!)).toEqual({ u: 1, v: 1 });
+    const restored = areaCommand(inverse.commands).value.sceneArea!;
+    expect(restored.animationOrigin).toBeUndefined();
+    expect(worldPosition(restored)).toEqual({ u: 6, v: 6 });
   });
 
-  it("leaves the animation script untouched for a resize", () => {
+  it("keeps the stable origin on resize", () => {
     const canvas = canvasWithAnimation();
     const plan = movePlan(canvas);
     const resize: SceneAreaPlan = {
       ...plan,
       intent: "resize",
-      commands: [plan.commands[0]!],
+      commands: [{
+        kind: "set-scene-area-bounds",
+        areaId,
+        expectedScopeVersion: "scope-1",
+        bounds: { min: { u: 0, v: 0 }, max: { u: 11, v: 10 } }
+      }],
       inverse: [plan.inverse[0]!]
     };
     const forward = buildForwardCommands(canvas, resize);
     expect(forward.ok).toBe(true);
     if (!forward.ok) return;
-    const script = areaCommand(forward.commands).value.sceneArea?.animationScript?.script;
-    expect(script).toBeDefined();
-    expect(sampledPosition(script!)).toEqual({ u: 1, v: 1 });
-  });
-});
-
-it("translates camera position tracks for a moved camera member", () => {
-  const canvas = canvasWithAnimation();
-  const camera = {
-    kind: "world-camera",
-    version: "shared-world-v1",
-    cameraId: "camera-1",
-    settingsVersion: "camera-v1",
-    position: { u: 2, v: 2, h: 1 },
-    rotation: [0, 0, 0, 1],
-    projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 },
-    captureMode: { kind: "static" },
-    aspect: { width: 16, height: 9 },
-    boundInstanceId: null
-  };
-  canvas.document.nodes.push({ id: "camera", type: "world-camera", position: { x: 0, y: 0 } });
-  canvas.nodeData.camera = { worldCamera: camera };
-  const area = canvas.nodeData.area!.sceneArea as { animationScript?: unknown };
-  area.animationScript = createWorldAnimationScript({
-    script: 'motion.camera.tween({ cameraId: "camera-1", property: "position", startTime: 0, endTime: 4, from: [2, 2, 1], to: [3, 3, 1], easing: "linear" });',
-    duration: 4,
-    loop: false
+    const sceneArea = areaCommand(forward.commands).value.sceneArea!;
+    expect(sceneArea.animationOrigin).toEqual({ u: 5, v: 5 });
+    expect(worldPosition(sceneArea)).toEqual({ u: 6, v: 6 });
   });
 
-  const plan = movePlan(canvas);
-  plan.commands = [
-    plan.commands[0]!,
-    {
-      kind: "set-world-camera-pose",
-      target: { kind: "camera", cameraId: "camera-1" },
-      expectedVersion: "camera-v1",
-      position: { u: 4, v: 5, h: 1 },
-      rotation: [0, 0, 0, 1]
-    }
-  ];
-  plan.inverse = [plan.inverse[0]!];
-  plan.source.members.cameras = [{
-    identity: { kind: "camera", cameraId: "camera-1" },
-    version: "camera-v1",
-    camera: camera as never
-  }];
+  it("carries camera position tracks with the area origin", () => {
+    const canvas = canvasWithAnimation();
+    const camera = {
+      kind: "world-camera",
+      version: "shared-world-v1",
+      cameraId: "camera-1",
+      settingsVersion: "camera-v1",
+      position: { u: 2, v: 2, h: 1 },
+      rotation: [0, 0, 0, 1],
+      projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 },
+      captureMode: { kind: "static" },
+      aspect: { width: 16, height: 9 },
+      boundInstanceId: null
+    };
+    canvas.document.nodes.push({ id: "camera", type: "world-camera", position: { x: 0, y: 0 } });
+    canvas.nodeData.camera = { worldCamera: camera };
+    const area = canvas.nodeData.area!.sceneArea as { animationScript?: unknown };
+    area.animationScript = createWorldAnimationScript({
+      script: 'motion.camera.tween({ cameraId: "camera-1", property: "position", startTime: 0, endTime: 4, from: [2, 2, 1], to: [3, 3, 1], easing: "linear" });',
+      duration: 4,
+      loop: false
+    });
 
-  const forward = buildForwardCommands(canvas, plan);
-  expect(forward.ok).toBe(true);
-  if (!forward.ok) return;
-  const script = areaCommand(forward.commands).value.sceneArea?.animationScript?.script;
-  expect(script).toBeDefined();
-  const executed = executeWorldAnimationScript(script!, { duration: 4, loop: false });
-  if (!executed.ok) throw new Error(executed.message);
-  expect(sampleWorldAnimation(executed.ir, 0).cameras.get("camera-1")?.position).toEqual({ u: 4, v: 5, h: 1 });
-});
-
-it("moves animation tracks whose target is not in the writable member set with the owning area", () => {
-  const canvas = canvasWithAnimation();
-  const camera = {
-    kind: "world-camera",
-    version: "shared-world-v1",
-    cameraId: "camera-1",
-    settingsVersion: "camera-v1",
-    position: { u: 40, v: 40, h: 1 },
-    rotation: [0, 0, 0, 1],
-    projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 },
-    captureMode: { kind: "static" },
-    aspect: { width: 16, height: 9 },
-    boundInstanceId: null
-  };
-  canvas.document.nodes.push({ id: "camera", type: "world-camera", position: { x: 0, y: 0 } });
-  canvas.nodeData.camera = { worldCamera: camera };
-  const area = canvas.nodeData.area!.sceneArea as { animationScript?: unknown };
-  area.animationScript = createWorldAnimationScript({
-    script: 'motion.camera.tween({ cameraId: "camera-1", property: "position", startTime: 0, endTime: 4, from: [2, 2, 1], to: [3, 3, 1], easing: "linear" });',
-    duration: 4,
-    loop: false
+    const forward = buildForwardCommands(canvas, movePlan(canvas));
+    expect(forward.ok).toBe(true);
+    if (!forward.ok) return;
+    const sceneArea = areaCommand(forward.commands).value.sceneArea!;
+    expect(sceneArea.animationOrigin).toEqual({ u: 7, v: 8 });
+    const decoded = decodeSceneAreaData(sceneArea);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok || !decoded.value.animationScript) return;
+    const executed = executeWorldAnimationScript(decoded.value.animationScript.script, {
+      duration: decoded.value.animationScript.duration,
+      loop: decoded.value.animationScript.loop
+    });
+    expect(executed.ok).toBe(true);
+    if (!executed.ok) return;
+    expect(sampleWorldAnimationInArea(executed.ir, 0, sceneAreaAnimationOrigin(decoded.value))
+      .cameras.get("camera-1")?.position).toEqual({ u: 9, v: 10, h: 1 });
   });
-
-  const forward = buildForwardCommands(canvas, movePlan(canvas));
-  expect(forward.ok).toBe(true);
-  if (!forward.ok) return;
-  const script = areaCommand(forward.commands).value.sceneArea?.animationScript?.script;
-  expect(script).toBeDefined();
-  const executed = executeWorldAnimationScript(script!, { duration: 4, loop: false });
-  if (!executed.ok) throw new Error(executed.message);
-  expect(sampleWorldAnimation(executed.ir, 0).cameras.get("camera-1")?.position).toEqual({ u: 4, v: 5, h: 1 });
 });

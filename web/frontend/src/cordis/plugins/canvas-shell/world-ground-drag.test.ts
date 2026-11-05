@@ -164,6 +164,7 @@ describe("世界模型地面拖动", () => {
         area: { title: "导演区", sceneArea: {
           kind: "scene-area", version: "shared-world-v1", areaId: "a1", scopeVersion: "s1",
           bounds: { min: { u: -10, v: -10 }, max: { u: 10, v: 10 } },
+          animationOrigin: { u: 0, v: 0 },
           animationScript
         } }
       }
@@ -212,6 +213,7 @@ describe("世界模型地面拖动", () => {
         area: { title: "小导演区", sceneArea: {
           kind: "scene-area", version: "shared-world-v1", areaId: "a1", scopeVersion: "s1",
           bounds: { min: { u: 0, v: -5 }, max: { u: 5, v: -1 } },
+          animationOrigin: { u: 0, v: 0 },
           animationScript
         } }
       }

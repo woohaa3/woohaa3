@@ -73,8 +73,25 @@ export interface SceneAreaData {
   areaId: WorldId;
   scopeVersion: WorldVersion;
   bounds: GroundAabb;
-  /** 导演区统一动画脚本（模型实例 + 镜头）；播放时钟属于浏览器本地，不写回规范数据。 */
+  /**
+   * Stable ground origin for the area's animation position tracks. Track `u`/`v`
+   * are offsets from this point; `h` remains an absolute height. Moving the area
+   * translates both `bounds` and this origin; resizing leaves it untouched.
+   * Missing on legacy areas: `sceneAreaAnimationOrigin` falls back to the bounds
+   * center (the same point new areas are created with).
+   */
+  animationOrigin?: GroundPoint;
+  /** 导演区统一动画脚本（模型实例 + 镜头）；位置轨道相对 `animationOrigin`，播放时钟属于浏览器本地，不写回规范数据。 */
   animationScript?: WorldAnimationScript;
+}
+
+/** Stable animation origin; legacy areas without one use their bounds center. */
+export function sceneAreaAnimationOrigin(area: SceneAreaData): GroundPoint {
+  if (area.animationOrigin) return { ...area.animationOrigin };
+  return {
+    u: (area.bounds.min.u + area.bounds.max.u) / 2,
+    v: (area.bounds.min.v + area.bounds.max.v) / 2
+  };
 }
 export type WorldCameraProjection =
   | { kind: "isometric"; verticalSizeMeters: number; nearMeters: number; farMeters: number }

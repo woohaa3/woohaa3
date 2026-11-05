@@ -27,6 +27,7 @@ import {
   decodeWorldCamera,
   decodeWorldInstanceData,
   normalizeModelDefinition,
+  sceneAreaAnimationOrigin,
   type AssistantWorldCancelInput,
   type AssistantWorldCompletionInput,
   type AssistantWorldCompletionOutcome,
@@ -773,7 +774,13 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
           }
         }
         bounds = decoded.value.bounds;
-        sceneArea = { nodeId: node.id, revision: inspected.canvas.revision, scopeVersion: decoded.value.scopeVersion, animationScript: decoded.value.animationScript ?? null };
+        sceneArea = {
+          nodeId: node.id,
+          revision: inspected.canvas.revision,
+          scopeVersion: decoded.value.scopeVersion,
+          animationOrigin: sceneAreaAnimationOrigin(decoded.value),
+          animationScript: decoded.value.animationScript ?? null
+        };
         break;
       }
       if (!sceneArea) return failure("outside-scope", "导演区不存在");
@@ -949,7 +956,13 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
             commands: [{
               type: "nodeData.patch" as const,
               nodeId: current.node.id,
-              value: { sceneArea: { ...current.area, animationScript } } as unknown as CanvasNodeData
+              value: {
+                sceneArea: {
+                  ...current.area,
+                  animationOrigin: sceneAreaAnimationOrigin(current.area),
+                  animationScript
+                }
+              } as unknown as CanvasNodeData
             }]
           }
         };
@@ -1014,7 +1027,14 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
             commands: [{
               type: "nodeData.patch" as const,
               nodeId: current.node.id,
-              value: { sceneArea: { ...current.area, bounds, scopeVersion } } as unknown as CanvasNodeData
+              value: {
+                sceneArea: {
+                  ...current.area,
+                  bounds,
+                  scopeVersion,
+                  animationOrigin: sceneAreaAnimationOrigin(current.area)
+                }
+              } as unknown as CanvasNodeData
             }]
           }
         };
