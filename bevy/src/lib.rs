@@ -85,6 +85,13 @@ mod shot_capture_wire;
 #[cfg(feature = "native-renderer")]
 pub mod renderer_protocol;
 
+/// Host-neutral contract for embedding the native canvas in an external window.
+///
+/// The module contains the lifecycle, bounds, manifest and request validation
+/// rules.  It deliberately does not create a window or own the host's parent
+/// handle; platform adapters remain responsible for those operations.
+#[cfg(feature = "native-canvas")]
+pub mod native_embedding;
 
 // `model3d` 的网格/相机依赖 bevy_render；其纯场景构建在 native-renderer 下也可复用。
 pub mod model3d;

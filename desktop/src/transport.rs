@@ -226,25 +226,11 @@ pub fn control(body: &[u8]) -> Result<Value, String> {
         "set_model_payload_leases" => json!(
             canvas::set_model_payload_leases(arg(&req, 0)?).map_err(|e| e.to_string())?
         ),
-        "overview_cache_snapshot" => json!(canvas::overview_cache_snapshot()),
-        "overview_cache_command" => {
-            canvas::overview_cache_command(arg(&req, 0)?).map_err(|e| e.to_string())?;
-            Value::Null
-        }
         "query_point_hit" => json!(canvas::query_point_hit(arg(&req, 0)?)),
         "query_marquee" => json!(canvas::query_marquee(arg(&req, 0)?)),
         "query_probe" => json!(canvas::query_probe(arg(&req, 0)?)),
         "query_drop_target" => json!(canvas::query_drop_target(arg(&req, 0)?)),
-        "query_composite_asset_scopes" => {
-            json!(canvas::query_composite_asset_scopes(arg(&req, 0)?))
-        }
         "query_model_pick" => json!(canvas::query_model_pick(arg(&req, 0)?)),
-        "query_composite_asset_item_pick" => {
-            json!(canvas::query_composite_asset_item_pick(arg(&req, 0)?))
-        }
-        "query_composite_asset_item_bounds" => {
-            json!(canvas::query_composite_asset_item_bounds(arg(&req, 0)?))
-        }
         "query_gizmo_hit" => json!(canvas::query_gizmo_hit(arg(&req, 0)?)),
         "request_shot_capture" => {
             canvas::request_shot_capture(arg(&req, 0)?).map_err(|e| e.to_string())?;
