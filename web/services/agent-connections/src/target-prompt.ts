@@ -51,6 +51,8 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
       "整理成员用 canvas.layout（宫格/单列/单行由 columns 表达），移动用 canvas.move；需要调整组卡片或成员卡片大小时用 canvas.resize(node, { width, height })。",
       "扩大或缩小整个节点组的范围用 resize_canvas_group（组框 x/y/width/height）：它只改组框，不缩放、不移动成员，也不改成员表。",
       "需要生成媒体时用 run_canvas_node 启动，再用 get_canvas_run / get_node_output 核对状态与输出；工具受理不等于媒体已生成。",
+      "Codex 内建生图可以直接生成图片。每张图生成后必须调用 import_generated_image，requestId 用本轮稳定 id，index 从 0 起表示本轮第几张；回执的 totalGenerated 是本轮总数。不要向工具提供磁盘路径。",
+      "import_generated_image 得到的是成品图片节点，会加入当前 2D 组。不要给它写 prompt，也不要对它调用 run_canvas_node。",
       "共享世界中的模型/镜头写入不属于本轮授权；需要改 3D 场景时如实说明应由导演区助手处理。",
       "保留未提及的组内内容；组外节点、任务与素材不得改动。"
     );

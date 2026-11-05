@@ -16,6 +16,8 @@ export const CANVAS_GROUP_TOOLS = [
   "resize_canvas_node", "resize_canvas_group", "delete_canvas_entities",
   // 节点执行与结果
   "run_canvas_node", "get_canvas_run", "cancel_canvas_run", "get_node_output",
+  // Codex 内建生图导入当前 2D 组（宿主按组作用域校验，工具参数不能自报范围）
+  "import_generated_image",
   // 组内模型的读取与脚本编辑（作用域由组投影限定）
   "get_model_api", "get_model_node", "get_model_statistics", "submit_model_script", "submit_model_scripts"
 ] as const;

@@ -14,7 +14,9 @@ import { agentCanvasServiceToClient, modelMcpServiceToClient } from "../../ports
 import { groupScopedClient } from "../../ports/group-scoped-client.js";
 import { withMcpPrincipal } from "../../ports/mcp-principal.js";
 import { devPrincipalIdFromEnv } from "../base/access.js";
-import { canvasGroupEpoch, withCanvasGroupScope } from "@woohaa3/canvas-service";
+import { decodeWorkflowGroupData, generatedImageCodexHome, generatedImagePaths } from "@woohaa3/contracts";
+import { importCodexGeneratedImage, resolveCodexHome } from "../../ports/import-generated-image.js";
+import { canvasGroupEpoch, currentCanvasGroupScope, withCanvasGroupScope } from "@woohaa3/canvas-service";
 
 export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> = {
   name: "mcp",
@@ -125,7 +127,66 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       canvasClient: groupScopedClient(modelMcpServiceToClient(services.modelMcp), ctx.canvas),
       // 每请求可信主体由网关按 bearer grant 注入（见下方 route）；此处的静态值只作缺省回退，
       // 与本地单实例 owner（`dev-admin`）保持一致，绝不凭空捏造多用户身份。
-      agentClient: groupScopedClient(agentCanvasServiceToClient(services.agent, { principalId: devPrincipalIdFromEnv(env) }), ctx.canvas),
+      agentClient: groupScopedClient({
+        ...agentCanvasServiceToClient(services.agent, { principalId: devPrincipalIdFromEnv(env) }),
+        // Codex 生图导入：目标只来自当前受信的 2D 组作用域，不接受工具参数自报。
+        importGeneratedImage: async (input) => {
+          const scope = currentCanvasGroupScope();
+          const media = ctx.get("media");
+          if (!scope || !media) {
+            return { ok: false as const, code: "group-scope-required", message: "生图导入需要当前 2D 组授权与媒体存储" };
+          }
+          if (!scope.valid()) {
+            return { ok: false as const, code: "group-scope-revoked", message: "2D 组创作授权已失效" };
+          }
+          if (scope.authorize && !(await scope.authorize("write"))) {
+            return { ok: false as const, code: "forbidden", message: "画布写入权限已撤销" };
+          }
+          if (input.canvasId !== undefined && input.canvasId !== scope.canvasId) {
+            return { ok: false as const, code: "group-scope-forbidden", message: "目标画布不在当前 2D 组作用域" };
+          }
+          const room = await ctx.canvas.sync?.registry.resolve(scope.canvasId);
+          const snapshot = room?.exportCanvas();
+          if (!snapshot?.ok) {
+            return { ok: false as const, code: "canvas-unavailable", message: "画布当前不可用" };
+          }
+          const groupNode = snapshot.canvas.document.nodes.find(node => node.id === scope.rootGroupId && node.type === "workflow-group-2d");
+          const groupNodeData = snapshot.canvas.nodeData[scope.rootGroupId] as Record<string, unknown> | undefined;
+          const workflowGroup = groupNodeData ? decodeWorkflowGroupData(groupNodeData.workflowGroup2d) : null;
+          if (!groupNode || !groupNodeData || !workflowGroup?.ok) {
+            return { ok: false as const, code: "group-target-missing", message: "2D 组已删除或成员表无效" };
+          }
+          const result = await importCodexGeneratedImage({
+            canvasId: scope.canvasId,
+            requestId: input.requestId,
+            index: input.index ?? 0,
+            group: { nodeId: scope.rootGroupId, nodeData: groupNodeData, workflowGroup: workflowGroup.value },
+            codexHome: generatedImageCodexHome(input.requestId) ?? resolveCodexHome(env),
+            paths: generatedImagePaths(input.requestId),
+            importBytes: (bytes) => media.port().importBytes(bytes),
+            apply: async (commands, commandId) => {
+              const agent = ctx.canvas.mcpServices().agent;
+              if (!agent) return { ok: false as const, code: "unavailable", message: "画布写入未就绪" };
+              const latest = room?.exportCanvas();
+              const outcome = await agent.apply({
+                principalId: scope.owner,
+                canvasId: scope.canvasId,
+                requestId: input.requestId,
+                commandId,
+                payloadHash: commandId,
+                baseRevision: latest?.ok ? latest.canvas.revision : 0,
+                commands
+              });
+              return outcome.ok
+                ? { ok: true as const, revision: outcome.revision }
+                : { ok: false as const, code: outcome.code, message: outcome.message };
+            }
+          });
+          return result.ok
+            ? { ok: true as const, duplicate: result.duplicate, receipt: result.receipt }
+            : result;
+        }
+      }, ctx.canvas),
       toolGrant: {
         allowedTools: token => catalogToolsForGrant(toolGrants.verify(token)),
         resolve: token => toolGrants.verify(token),
