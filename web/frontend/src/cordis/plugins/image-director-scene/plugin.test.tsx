@@ -79,13 +79,17 @@ it("contributes the same image action to toolbar, context menu and focus header"
   const service = { getDataScopeId: () => "slots", listConnections: async () => ({ ok: true, value: [] }), subscribe: () => () => {}, getSnapshot: () => null };
   const ctx = { slots: { register: (slot: string, value: unknown) => { entries.set(slot, value); return () => {}; } }, effect: () => {}, get: () => service, canvasSession: { isWritable: () => true }, canvasNavigation: { openDialog: vi.fn() }, applicationRemote: { transport: { request: async () => ({ ok: true, data: null }) } } };
   imageDirectorSceneExtension({ canvasId: "slots-test" })(ctx as never);
+  // 四喜形态：横条「转 3D」保留，右键与聚焦页顶栏这两个重复入口隐藏
+  // （清单在 workspace/image-director-sixi.ts）。
   expect(entries.get("canvas.node-action").describe({ nodeId: "image", writable: true })).toMatchObject({ label: "转 3D", enabled: true });
-  expect(entries.get("canvas.context-menu").items({ nodeId: "image", writable: true })).toMatchObject([{ label: "生成模型与导演区" }]);
+  expect(entries.get("canvas.context-menu").items({ nodeId: "image", writable: true })).toEqual([]);
   const Focus = entries.get("canvas.focus-header").render;
   const overlay = entries.get("canvas.overlay");
   const host = document.createElement("div"), root = createRoot(host);
   await act(async () => { root.render(<><Focus nodeId="image" />{overlay.render({ writable: true })}</>); });
-  await act(async () => { host.querySelector<HTMLButtonElement>("button[title='生成模型与导演区']")!.click(); });
+  expect(host.querySelector("button[title='生成模型与导演区']")).toBeNull();
+  // 唯一入口仍然可用：横条动作点开同一个浮窗。
+  await act(async () => { entries.get("canvas.node-action").activate({ nodeId: "image" }); });
   expect(host.textContent).toContain("生成模型与导演区");
   await act(async () => root.unmount());
   vi.unstubAllGlobals();

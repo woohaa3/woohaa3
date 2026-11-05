@@ -10,6 +10,7 @@ import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
 import { DirectorSceneDeliveries } from "./scene-deliveries.js";
 import { beginDirectorSceneSelection, type DirectorSceneSelectionIntent } from "./scene-selection.js";
+import { isSixiHiddenImageDirectorEntry } from "./workspace/image-director-sixi.js";
 import { readAssistantPreference, rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
 import type { AgentConversationServiceHandle } from "../../services/agent-conversation-service.js";
 import "./style.css";
@@ -133,9 +134,10 @@ export function imageDirectorSceneExtension(options: { canvasId?: string } = {})
       useEffect(() => { const listener = () => setCurrent(target); listeners.add(listener); return () => { listeners.delete(listener); }; }, []);
       return <><DirectorSceneDeliveries ctx={ctx} canvasId={options.canvasId} />{current && <ImageDirectorPanel key={`${scope}:${current.canvasId}:${current.nodeId}`} ctx={ctx} {...current} visible beginSelection={beginSelection} onClose={() => { target = null; notify(); }} />}</>;
     }
-    function FocusAction({ nodeId }: { nodeId: string }) { return imageReady(nodeId) ? <button type="button" title="生成模型与导演区" onClick={() => openTarget(nodeId)}><SparklesIcon /></button> : null; }
+    function FocusAction({ nodeId }: { nodeId: string }) { return imageReady(nodeId) && !isSixiHiddenImageDirectorEntry("focus-header") ? <button type="button" title="生成模型与导演区" onClick={() => openTarget(nodeId)}><SparklesIcon /></button> : null; }
     const removeAction = ctx.slots.register("canvas.node-action", { id: IMAGE_DIRECTOR_PLUGIN_ID, owner: IMAGE_DIRECTOR_PLUGIN_ID, order: 20, describe: ({ nodeId, writable }) => imageReady(nodeId) ? { label: "转 3D", icon: "box", enabled: writable } : null, activate: ({ nodeId }) => openTarget(nodeId) });
-    const removeMenu = ctx.slots.register("canvas.context-menu", { id: IMAGE_DIRECTOR_PLUGIN_ID, owner: IMAGE_DIRECTOR_PLUGIN_ID, items: ({ nodeId, writable }) => nodeId && imageReady(nodeId) ? [{ id: IMAGE_DIRECTOR_PLUGIN_ID, label: "生成模型与导演区", disabled: !writable }] : [], onSelect: (itemId, context) => { if (itemId === IMAGE_DIRECTOR_PLUGIN_ID && context.nodeId) openTarget(context.nodeId); } });
+    // 四喜发行形态隐藏右键入口（清单在 workspace/image-director-sixi.ts）；横条「转 3D」保留。
+    const removeMenu = ctx.slots.register("canvas.context-menu", { id: IMAGE_DIRECTOR_PLUGIN_ID, owner: IMAGE_DIRECTOR_PLUGIN_ID, items: ({ nodeId, writable }) => nodeId && imageReady(nodeId) && !isSixiHiddenImageDirectorEntry("context-menu") ? [{ id: IMAGE_DIRECTOR_PLUGIN_ID, label: "生成模型与导演区", disabled: !writable }] : [], onSelect: (itemId, context) => { if (itemId === IMAGE_DIRECTOR_PLUGIN_ID && context.nodeId) openTarget(context.nodeId); } });
     const removeFocus = ctx.slots.register("canvas.focus-header", { id: IMAGE_DIRECTOR_PLUGIN_ID, owner: IMAGE_DIRECTOR_PLUGIN_ID, render: FocusAction });
     const removeOverlay = ctx.slots.register("canvas.overlay", { id: IMAGE_DIRECTOR_PLUGIN_ID, owner: IMAGE_DIRECTOR_PLUGIN_ID, priority: 30, render: () => <Overlay /> });
     ctx.effect(() => () => { cancelSelection(); removeAction(); removeMenu(); removeFocus(); removeOverlay(); }, IMAGE_DIRECTOR_PLUGIN_ID);
