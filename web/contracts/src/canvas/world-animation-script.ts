@@ -1,18 +1,21 @@
 /**
- * 导演区统一动画脚本（`woohaa-world-animation-js-v1`）。
+ * 导演区统一动画脚本（`woohaa-world-animation-js-v2`）。
  *
  * 导演区不再使用整对象关键帧：动画由一个 JS 脚本声明，脚本只通过注入的 `motion` 对象
  * 描述**导演区内部部件**——共享世界实例与镜头——的运动。脚本执行一次编译成受控 IR，
  * 播放时按时间确定性求值，不每帧执行 JS，也不逐帧写规范文档。
  *
- * 目标必须是导演区完整包含的实例/镜头；权限与占用由权威写入时校验，求值本身只读。
+ * **位置轨道以导演区的 `animationOrigin` 为原点**：`from`/`to` 的 u/v 是相对偏移，
+ * h 仍是绝对高度。求值本身只读；导演区移动时无需改写轨道。
+ *
+ * 目标必须是导演区完整包含的实例/镜头；权限与占用由权威写入时校验。
  */
 import { fnv1a64Hex } from "./content-hash.js";
 import { easingProgress } from "./motion-ir.js";
 import { quatFromEulerYXZDegrees } from "./model-transform.js";
-import type { WorldPoint, WorldRotation } from "./shared-world.js";
+import type { GroundPoint, WorldPoint, WorldRotation } from "./shared-world.js";
 
-export const WORLD_ANIMATION_SCRIPT_VERSION = "woohaa-world-animation-js-v1" as const;
+export const WORLD_ANIMATION_SCRIPT_VERSION = "woohaa-world-animation-js-v2" as const;
 export const WORLD_ANIMATION_SCRIPT_LANGUAGE = "javascript" as const;
 export const WORLD_ANIMATION_IR_VERSION = "woohaa-world-animation-ir-v1" as const;
 export const WORLD_ANIMATION_MAX_TRACKS = 256;
@@ -292,7 +295,11 @@ export type SampledCameraMotion = {
   zoom?: number;
 };
 
-/** 在 time 秒采样动画 IR；未命中的部件不产生覆盖。 */
+/**
+ * 在 time 秒采样动画 IR；未命中的部件不产生覆盖。
+ * Position 值是脚本里的相对 u/v 偏移（h 为绝对高度），需要世界位置时用
+ * `sampleWorldAnimationInArea` 加上导演区 origin。
+ */
 export function sampleWorldAnimation(
   ir: WorldAnimationIr,
   time: number
@@ -319,6 +326,30 @@ export function sampleWorldAnimation(
     cameras.set(track.targetId, current);
   }
   return { instances, cameras };
+}
+
+/**
+ * 采样并把位置轨道换算到导演区 origin 所在的世界坐标。
+ * 实例与镜头的 u/v 加 origin；h 保持脚本值。
+ */
+export function sampleWorldAnimationInArea(
+  ir: WorldAnimationIr,
+  time: number,
+  origin: GroundPoint
+): { instances: Map<string, SampledInstanceMotion>; cameras: Map<string, SampledCameraMotion> } {
+  const sample = sampleWorldAnimation(ir, time);
+  const shift = <T extends { position?: WorldPoint }>(motions: Map<string, T>) => {
+    for (const motion of motions.values()) {
+      if (motion.position) motion.position = {
+        u: motion.position.u + origin.u,
+        v: motion.position.v + origin.v,
+        h: motion.position.h
+      };
+    }
+  };
+  shift(sample.instances);
+  shift(sample.cameras);
+  return sample;
 }
 
 function sampleTrack(track: WorldInstanceTrack | WorldCameraTrack, now: number): number[] | null {

@@ -89,6 +89,10 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
     globalThis.dispatchEvent(new CustomEvent("woohaa3-agent-assistant-selection", { detail: { canvasId: payload.canvasId, nodeId: payload.nodeId, connectionId: connection.connectionId } }));
     onClose();
   };
+  const chooseById = (connectionId: string) => {
+    const connection = connections.find(item => item.connectionId === connectionId);
+    if (connection) choose(connection);
+  };
   const add = (capability?: ActiveCapability) => { setAddCapability(capability); navigate("sources"); requestAdd(value => value + 1); };
   const openSource = (id: string) => { setSourceRequest({ id }); navigate("sources"); };
   const localConnections = connections.filter(isLocalConnection);
@@ -111,7 +115,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
         <div className="agent-assistant__content">
           <section hidden={page !== "overview"} className="agent-assistant__page" data-ai-page="overview">
             {error ? <SettingsFeedback tone="danger">{error} <Button size="sm" onClick={() => refresh(value => value + 1)}>重试</Button></SettingsFeedback> : null}
-            <CapabilityOverview key={overviewRevision} local={localConnections} remote={sourceConnections} sources={sources} loading={loading} connectionError={error} sourceLoading={directoryState.loading} sourceError={directoryState.error} mcp={mcp} onNavigate={navigate} onAdd={add} onOpenSource={openSource} onRetry={() => refresh(value => value + 1)} />
+            <CapabilityOverview key={overviewRevision} local={localConnections} remote={sourceConnections} sources={sources} loading={loading} connectionError={error} sourceLoading={directoryState.loading} sourceError={directoryState.error} mcp={mcp} contextual={Boolean(payload.canvasId && payload.nodeId)} onNavigate={navigate} onAdd={add} onOpenSource={openSource} onUse={chooseById} onRetry={() => refresh(value => value + 1)} />
           </section>
           {localVisited ? <section hidden={page !== "agents"} className="agent-assistant__page" data-ai-page="agents"><UiPortalScope>
             <div className="agent-assistant__page-heading"><h2>本地 Agent</h2><span className="agent-assistant__muted">宿主电脑 · {localConnections.length} 个连接</span></div>
@@ -305,10 +309,11 @@ function ServiceSources({ service, connections, contributions, payload, settings
   const back = () => { setSelected(null); setAdding(false); };
   const confirmChange = async () => {
     if (!confirmation || !service.manageServiceConnection || busy) return;
+    const action = confirmation.action;
     setBusy(true); setError(null);
     try {
       const result = await service.manageServiceConnection(confirmation);
-      if (result.ok) { setConfirmation(null); onSaved(); }
+      if (result.ok) { setConfirmation(null); if (action === "remove") back(); onSaved(); }
       else setError(result.error);
     } catch { setError("操作未确认，请保留本次操作并重试。"); }
     finally { setBusy(false); }
@@ -341,9 +346,10 @@ function ServiceSources({ service, connections, contributions, payload, settings
         {source && service.manageServiceConnection ? <>
           {!source.managedByAdministrator && !source.locked && source.kind === "api" ? <>
             <Button size="sm" tone="ghost" onClick={() => setConfirmation({ action: "enabled", serviceConnectionId: id, configRevision: source.configRevision, credentialEpoch: source.credentialEpoch, enabled: !source.enabled })}>{source.enabled ? "停用来源" : "启用来源"}</Button>
+            {source.scope === "personal" || !source.enabled ? <Button size="sm" tone="ghost" onClick={() => setConfirmation({ action: "remove", serviceConnectionId: id, configRevision: source.configRevision, credentialEpoch: source.credentialEpoch })}>移除来源</Button> : null}
             <AdditionalProtocolForm source={source} onConfirm={setConfirmation} />
           </> : null}
-          {source.scope === "site" && !source.managedByAdministrator && source.capabilities.some(capability => capability.purpose === "discussion" && capability.protocol === "chat-completions") ? <Button size="sm" onClick={() => setConfirmation({ action: "assistant", serviceConnectionId: id, configRevision: source.configRevision, credentialEpoch: source.credentialEpoch, enabled: !source.bindings.some(binding => binding.consumerId === "shared:chat-completions") })}>{source.bindings.some(binding => binding.consumerId === "shared:chat-completions") ? "关闭共享助手用途" : "开放共享讨论用途"}</Button> : null}
+          {source.scope === "site" && !source.managedByAdministrator && !source.bindings.some(binding => binding.bindingId.startsWith("provider-assistant:")) && source.capabilities.some(capability => capability.purpose === "discussion" && capability.protocol === "chat-completions") ? <Button size="sm" onClick={() => setConfirmation({ action: "assistant", serviceConnectionId: id, configRevision: source.configRevision, credentialEpoch: source.credentialEpoch, enabled: !source.bindings.some(binding => binding.consumerId === "shared:chat-completions") })}>{source.bindings.some(binding => binding.consumerId === "shared:chat-completions") ? "关闭共享助手用途" : "开放共享讨论用途"}</Button> : null}
           {source.scope === "personal" && source.kind === "api" ? <details><summary>绑定普通文本生成</summary><p>沿用 Provider 的模型身份，共用此来源的 Key。仅列出已适配的相同模型。</p>{directory?.providers.flatMap(provider => provider.models.filter(model => model.type === "language" && source.capabilities.some(capability => capability.purpose === "discussion" && capability.modelId === model.modelId && provider.protocols.includes(capability.protocol))).map(model => <Button key={model.modelKey} size="sm" onClick={() => setConfirmation({ action: "provider", serviceConnectionId: id, configRevision: source.configRevision, credentialEpoch: source.credentialEpoch, providerId: provider.providerId, modelId: model.modelId })}>{model.modelKey}</Button>))}</details> : null}
           {directory?.duplicates.filter(pair => pair.includes(id)).map(pair => {
             const otherId = pair.find(candidate => candidate !== id)!;
@@ -360,7 +366,7 @@ function ServiceSources({ service, connections, contributions, payload, settings
         {source?.managedByAdministrator ? <p>此共享来源由管理员管理。</p> : provider && settingsStore ? <Suspense fallback={<p>正在读取配置…</p>}><GenerationProviders store={settingsStore} compact providerId={provider} onSaved={() => { onSaved(); back(); }} /></Suspense> : Contribution && binding ? <Contribution connectionId={binding.consumerId} onSaved={() => { onSaved(); back(); }} /> : <p>当前来源未提供配置适配器，请启用对应扩展。</p>}
       </UiPortalScope></div>;
     })}
-    {confirmation ? <div className="provider-connection__confirmation"><p>{confirmation.action === "protocol" ? "确认新增此协议入口并共用当前认证？请确认该地址属于同一受信任服务。手填模型只开放讨论，不授予目标工具权限。" : confirmation.action === "enabled" ? `确认${confirmation.enabled ? "启用" : "停用"}整个来源？将影响该来源的全部消费绑定和后续调用；已提交回执仍保留。` : confirmation.action === "merge" ? "确认使用保留来源的认证重绑消费者？原来源和历史保留；执行中的回合会阻止合并。" : confirmation.action === "assistant" ? "确认调整站点共享讨论用途？此操作影响已获站点使用权限的用户；不会授予作品写入或工具权限。" : "确认让此 Provider 使用当前来源？不会复制 Key，也不会发送生成请求。"}</p><Button size="sm" disabled={busy} onClick={() => setConfirmation(null)}>取消</Button><Button size="sm" disabled={busy} onClick={() => void confirmChange()}>确认</Button></div> : null}
+    {confirmation ? <div className="provider-connection__confirmation"><p>{confirmation.action === "protocol" ? "确认新增此协议入口并共用当前认证？请确认该地址属于同一受信任服务。手填模型只开放讨论，不授予目标工具权限。" : confirmation.action === "enabled" ? `确认${confirmation.enabled ? "启用" : "停用"}整个来源？将影响该来源的全部消费绑定和后续调用；已提交回执仍保留。` : confirmation.action === "merge" ? "确认使用保留来源的认证重绑消费者？原来源和历史保留；执行中的回合会阻止合并。" : confirmation.action === "assistant" ? "确认调整站点共享讨论用途？此操作影响已获站点使用权限的用户；不会授予作品写入或工具权限。" : confirmation.action === "remove" ? "确认移除来源？后续调用与旧工具授权将失效；已提交结果与历史保留。Provider 配置变化后可重新投影。" : "确认让此 Provider 使用当前来源？不会复制 Key，也不会发送生成请求。"}</p><Button size="sm" disabled={busy} onClick={() => setConfirmation(null)}>取消</Button><Button size="sm" disabled={busy} onClick={() => void confirmChange()}>确认</Button></div> : null}
     {selectedProvider && settings?.status === "unauthorized" ? <p>此共享来源由管理员管理。</p> : null}
     </AssistantDrawer>
   </>;

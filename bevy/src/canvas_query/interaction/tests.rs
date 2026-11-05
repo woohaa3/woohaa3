@@ -594,7 +594,7 @@ fn magnetic_ports_require_acquisition_and_remain_bounded_to_the_original_anchor(
         clear_snapshot();
         let mut s = scene(vec![node("a", 0.0, 0.0, 100.0, 50.0)], vec![]);
         let g = accept_scene(&s);
-        let near = anchor + Vec2::new(20.0, 0.0);
+        let near = anchor + Vec2::new(32.0, 0.0);
         assert!(!matches!(
             point_query(g, near.x, near.y, 1.0, None).hit,
             Some(PointHit::Port { .. })
@@ -609,7 +609,7 @@ fn magnetic_ports_require_acquisition_and_remain_bounded_to_the_original_anchor(
             }),
         };
         let center = crate::canvas_query::layout::magnetic_port_center(anchor, &hover, side);
-        assert!((center - anchor - Vec2::new(12.0, 0.0)).length() < 0.001);
+        assert!((center - anchor - Vec2::new(24.0, 0.0)).length() < 0.001);
         s.hover = Some(hover);
         let g = accept_scene(&s);
         assert_eq!(
@@ -619,14 +619,14 @@ fn magnetic_ports_require_acquisition_and_remain_bounded_to_the_original_anchor(
                 side: side.into()
             })
         );
-        let far = anchor + Vec2::new(30.0, 0.0);
+        let far = anchor + Vec2::new(40.0, 0.0);
         assert!(!matches!(
             point_query(g, far.x, far.y, 1.0, None).hit,
             Some(PointHit::Port { .. })
         ));
         // Diagonal tolerance is circular; the corner of its bounding square cannot latch.
         assert!(!matches!(
-            point_query(g, anchor.x + 22.0, anchor.y + 22.0, 1.0, None).hit,
+            point_query(g, anchor.x + 30.0, anchor.y + 30.0, 1.0, None).hit,
             Some(PointHit::Port { .. })
         ));
     }

@@ -113,6 +113,7 @@ export function query_probe(json: string): string;
 export function query_drop_target(json: string): string;
 export function query_composite_asset_scopes(json: string): string;
 export function query_model_pick(json: string): string;
+export function query_model_marquee(json: string): string;
 export function query_composite_asset_item_pick(json: string): string;
 export function query_composite_asset_item_bounds(json: string): string;
 export function query_gizmo_hit(json: string): string;

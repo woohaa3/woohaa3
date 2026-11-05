@@ -321,6 +321,29 @@ describe("CanvasResourceCoordinator", () => {
     coordinator.dispose();
   });
 
+  it("keeps the demand identity stable while zoom stays inside a thumbnail tier", () => {
+    const coordinator = new CanvasResourceCoordinator();
+    const candidates = [{ nodeId: "n", contentKey: "k", x: 0, y: 0, width: 512, height: 512, eligible: true }];
+    const project = (zoom: number) => coordinator.project({
+      viewport: { x: 0, y: 0, zoom },
+      surface: { width: 1600, height: 1200, pixelRatio: 1 },
+      pageVisible: true, interactive: [], pins: [], candidates
+    });
+    project(0.4);
+    expect(coordinator.tierOf("n")).toBe(256);
+    const revision = coordinator.projectionRevision();
+    // 同一档内的连续缩放不重建需求，避免每个 wheel 事件都重算全量媒体绑定。
+    project(0.45);
+    project(0.5);
+    expect(coordinator.tierOf("n")).toBe(256);
+    expect(coordinator.projectionRevision()).toBe(revision);
+    // 跨档才推进版本，媒体 owner 只需为新档重建一次绑定。
+    project(0.6);
+    expect(coordinator.tierOf("n")).toBe(512);
+    expect(coordinator.projectionRevision()).not.toBe(revision);
+    coordinator.dispose();
+  });
+
   it("runs media work through the unified channel budget", async () => {
     const coordinator = new CanvasResourceCoordinator({ policy: { videoFirstFrameConcurrency: 1 } });
     const gate = deferred<void>();

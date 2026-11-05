@@ -94,7 +94,7 @@ export function hitTestOracle(
     const node = nodeMap.get(scene.hover.nodeId);
     if (node && !node.ghost) {
       const anchor = portPosition(node, scene.hover.port);
-      if (Math.hypot(world.x - anchor.x, world.y - anchor.y) <= Math.max(radius, 12) + 12)
+      if (Math.hypot(world.x - anchor.x, world.y - anchor.y) <= Math.max(radius, 12) + 24)
         return { kind: "port", nodeId: node.id, side: scene.hover.port };
     }
   }

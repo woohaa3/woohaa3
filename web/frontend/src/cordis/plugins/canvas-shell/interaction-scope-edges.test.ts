@@ -110,4 +110,15 @@ describe("group edges resize; title moves", () => {
     expect(submitted).toHaveLength(0);
     controller.dispose();
   });
+
+  it("selects the group on the first click and the member on the next", () => {
+    const { fire, controller } = setup();
+    fire("pointerdown", 150, 150);
+    fire("pointerup", 150, 150);
+    expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["g"]);
+    fire("pointerdown", 150, 150);
+    fire("pointerup", 150, 150);
+    expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["m"]);
+    controller.dispose();
+  });
 });

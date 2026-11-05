@@ -58,6 +58,14 @@ describe("classifyFootprint", () => {
     expect(classifyFootprint(footprintQuery(aabb(-TOLERANCE * 2, 0, 10, 10)))).toBe("partial");
   });
 
+  it("absorbs a few-centimetre decorative overhang inside the fixed metric tolerance", () => {
+    // Thin arch ribs/trims can project past the edge the user sees; the model must
+    // still count as contained or it silently drops out of the area move/edit set.
+    expect(TOLERANCE).toBeGreaterThanOrEqual(0.03);
+    expect(classifyFootprint(footprintQuery(aabb(-0.03, 2, 10, 8)))).toBe("complete");
+    expect(classifyFootprint(footprintQuery(aabb(-TOLERANCE - 0.01, 2, 10, 8)))).toBe("partial");
+  });
+
   it("reports partial when the footprint crosses one or both area edges", () => {
     expect(classifyFootprint(footprintQuery(aabb(5, 2, 15, 8)))).toBe("partial");
     expect(classifyFootprint(footprintQuery(aabb(2, 5, 8, 15)))).toBe("partial");

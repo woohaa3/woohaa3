@@ -112,5 +112,6 @@ export type ServiceConnectionManagement =
   | { action: "protocol"; serviceConnectionId: string; configRevision: number; credentialEpoch: number; endpoint: ServiceConnectionEndpoint; models: readonly string[] }
   | { action: "enabled"; serviceConnectionId: string; configRevision: number; credentialEpoch: number; enabled: boolean }
   | { action: "assistant"; serviceConnectionId: string; configRevision: number; credentialEpoch: number; enabled: boolean }
+  | { action: "remove"; serviceConnectionId: string; configRevision: number; credentialEpoch: number }
   | { action: "provider"; serviceConnectionId: string; configRevision: number; credentialEpoch: number; providerId: string; modelId: string }
   | { action: "merge"; operationId: string; retainedId: string; removedId: string; retained: ServiceConnectionVersion; removed: ServiceConnectionVersion };

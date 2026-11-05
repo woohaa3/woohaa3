@@ -135,6 +135,35 @@ describe("registered source adapters", () => {
       expect(JSON.stringify(await restarted.list("alice"))).not.toMatch(/first|second|origin|credentialKey/);
     } finally { f.close(); }
   });
+  it("removes a disabled adapter source and republishes it only after the adapter content changes", async () => {
+    const f = fixture();
+    let enabled = true;
+    let name = "source-a";
+    const snapshot = () => ({
+      legacyId: "a", scope: "personal" as const, kind: "api" as const, name, endpoints: input.endpoints,
+      capabilities: [{ purpose: "discussion" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
+      bindings: [{ ...binding, bindingId: "a", consumerId: "a" }],
+      enabled, removed: false, locked: false, credentialConfigured: true, configRevision: 1, credentialEpoch: 1,
+    });
+    const adapter = { id: "removable", scope: "personal" as const, get: async () => snapshot(), list: async () => [snapshot()] };
+    try {
+      const port = f.registry.forExtension("sdk");
+      port.registerSource(adapter);
+      const [active] = await port.list("alice");
+      await expect(f.registry.remove(alice, active.serviceConnectionId, active)).rejects.toMatchObject({ code: "invalid" });
+
+      enabled = false;
+      const [disabled] = await port.list("alice");
+      const removed = await f.registry.remove(alice, disabled.serviceConnectionId, disabled);
+      expect(removed.removed).toBe(true);
+      expect(await port.list("alice")).toEqual([]);
+      expect(await port.list("alice")).toEqual([]);
+
+      name = "source-b";
+      const [revived] = await port.list("alice");
+      expect(revived).toMatchObject({ serviceConnectionId: active.serviceConnectionId, name: "source-b", removed: false });
+    } finally { f.close(); }
+  });
 });
 
 it("adds a protocol without copying credentials, invalidates every use on disable and denies unsupported media", async () => {

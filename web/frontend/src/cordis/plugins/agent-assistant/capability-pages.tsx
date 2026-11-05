@@ -15,10 +15,10 @@ const capabilities = [
   { id: "hosting", label: "图床", description: "图片托管与外链", icon: CloudIcon },
 ] as const;
 
-export function CapabilityOverview({ local, remote, sources, loading, connectionError, sourceLoading, sourceError, mcp, onNavigate, onAdd, onOpenSource, onRetry }: {
+export function CapabilityOverview({ local, remote, sources, loading, connectionError, sourceLoading, sourceError, mcp, contextual, onNavigate, onAdd, onOpenSource, onUse, onRetry }: {
   local: AgentConnectionView[]; remote: AgentConnectionView[]; sources: ServiceConnectionView[]; loading: boolean; connectionError: string | null; sourceLoading: boolean;
-  sourceError: string | null; mcp: McpPanelSnapshot | null; onNavigate: (page: CapabilityPage) => void;
-  onAdd: (capability?: ActiveCapability) => void; onOpenSource: (id: string) => void; onRetry: () => void;
+  sourceError: string | null; mcp: McpPanelSnapshot | null; contextual: boolean; onNavigate: (page: CapabilityPage) => void;
+  onAdd: (capability?: ActiveCapability) => void; onOpenSource: (id: string) => void; onUse: (connectionId: string) => void; onRetry: () => void;
 }) {
   const [selected, select] = useState<CapabilityKind | null>(null);
   const capability = capabilities.find(item => item.id === selected);
@@ -27,7 +27,15 @@ export function CapabilityOverview({ local, remote, sources, loading, connection
   const pending = (kind: CapabilityKind) => sourceLoading || kind === "agent" && loading;
   const failed = (kind: CapabilityKind) => sourceError || kind === "agent" && connectionError;
   const open = (supplier: CapabilitySupplier) => supplier.local ? onNavigate("agents") : onOpenSource(supplier.sourceId ?? supplier.connectionId!);
-  const status = (kind: ActiveCapability, rows: CapabilitySupplier[]) => pending(kind) ? "读取中…" : failed(kind) ? "读取失败" : `已配置 ${rows.filter(row => row.configured).length} 个${kind === "agent" ? "连接" : "供应商"}`;
+  const counts = (kind: ActiveCapability, rows: CapabilitySupplier[]) => kind === "agent"
+    ? { local: rows.filter(row => row.local && row.configured).length, suppliers: rows.filter(row => !row.local && row.configured).length }
+    : { local: 0, suppliers: rows.filter(row => row.configured).length };
+  const status = (kind: ActiveCapability, rows: CapabilitySupplier[]) => {
+    if (pending(kind)) return "读取中…";
+    if (failed(kind)) return "读取失败";
+    const value = counts(kind, rows);
+    return kind === "agent" ? `已配置 ${value.local} 个本地 Agent · 已配置 ${value.suppliers} 个供应商` : `已配置 ${value.suppliers} 个供应商`;
+  };
 
   if (capability) {
     const rows = placeholder ? [] : suppliers(capability.id as ActiveCapability);
@@ -45,7 +53,10 @@ export function CapabilityOverview({ local, remote, sources, loading, connection
             {capability.id === "agent" ? <div className="agent-assistant__section-heading"><h3>{isLocal ? "本地 Agent" : "模型提供商"}</h3>{isLocal ? <Button size="sm" tone="ghost" onClick={() => onNavigate("agents")}>管理本地 Agent</Button> : null}</div> : null}
             <ul className="agent-assistant__list">{group.map(supplier => <li key={supplier.id}>
               <div className="agent-assistant__identity"><strong>{supplier.name}</strong><p>{supplier.status}</p>{supplier.models.length ? <div className="agent-assistant__capability-models">{supplier.models.map(model => <span key={model}>{model}</span>)}</div> : null}</div>
-              <Button size="sm" tone="ghost" onClick={() => open(supplier)}>配置</Button>
+              <div className="agent-assistant__actions">
+                <Button size="sm" tone="ghost" onClick={() => open(supplier)}>配置</Button>
+                {capability.id === "agent" && !supplier.local && contextual ? <Button size="sm" disabled={!supplier.usable || !supplier.connectionId} onClick={() => supplier.connectionId && onUse(supplier.connectionId)}>使用</Button> : null}
+              </div>
             </li>)}</ul>
           </section>;
         })}
@@ -60,11 +71,16 @@ export function CapabilityOverview({ local, remote, sources, loading, connection
       const reserved = item.id === "model3d" || item.id === "hosting";
       const rows = reserved ? [] : suppliers(item.id);
       const label = reserved ? "暂未接入" : status(item.id, rows);
+      const split = !reserved && item.id === "agent" && !pending(item.id) && !failed(item.id);
+      const counted = item.id === "agent" ? rows.filter(row => row.configured) : rows;
+      const value = counts(item.id as ActiveCapability, rows);
       return <button key={item.id} type="button" className="agent-assistant__capability-card" data-capability={item.id} data-placeholder={reserved} onClick={() => select(item.id)}>
         <span className="agent-assistant__capability-card-top"><item.icon size={26} /><ChevronRightIcon size={16} /></span>
         <strong>{item.label}</strong><span className="agent-assistant__capability-description">{item.description}</span>
-        <Tooltip disabled={reserved || pending(item.id) || Boolean(failed(item.id))} side="bottom" align="start" content={<div className="agent-assistant__supplier-tooltip">{rows.length ? rows.map(row => <span key={row.id}><strong>{row.name}</strong><span>{row.status}</span></span>) : "尚未配置供应商，点击查看详情。"}</div>}>
-          <span className="agent-assistant__capability-count" data-error={!reserved && Boolean(failed(item.id))}>{label}</span>
+        <Tooltip disabled={reserved || pending(item.id) || Boolean(failed(item.id))} side="bottom" align="start" content={<div className="agent-assistant__supplier-tooltip">{counted.length ? counted.map(row => <span key={row.id}><strong>{row.name}</strong><span>{row.status}</span></span>) : "尚未配置供应商，点击查看详情。"}</div>}>
+          <span className="agent-assistant__capability-count" data-split={split} data-error={!reserved && Boolean(failed(item.id))}>
+            {split ? <><span data-count="local">已配置 {value.local} 个本地 Agent</span><span data-count="suppliers">已配置 {value.suppliers} 个供应商</span></> : label}
+          </span>
         </Tooltip>
       </button>;
     })}</div>

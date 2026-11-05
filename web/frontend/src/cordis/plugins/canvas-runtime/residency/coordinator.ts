@@ -275,9 +275,11 @@ export class CanvasResourceCoordinator {
       if (!purpose) continue;
       const physicalEdge = Math.max(candidate.width, candidate.height) * zoom * pixelRatio;
       const existing = this.demands.get(candidate.nodeId);
-      // 需求未变化时保留原对象，避免每帧重建（静止热路径）。
+      // 需求未变化时保留原对象，避免每帧重建（静止热路径）。视口内的像素级缩放只要没有
+      // 跨过缩略图档，就仍属于同一需求：否则每个 wheel 事件都会推进 projectionRevision，
+      // 媒体 owner 随即重算全量媒体 URL 并检查绑定（缩放时的卡顿来源之一）。
       if (existing && existing.purpose === purpose && existing.contentKey === candidate.contentKey
-        && existing.physicalEdge === physicalEdge) {
+        && selectThumbnailTier(existing.physicalEdge) === selectThumbnailTier(physicalEdge)) {
         next.set(candidate.nodeId, existing);
         continue;
       }

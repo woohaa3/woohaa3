@@ -14,7 +14,7 @@ export function registerImportGeneratedImageTool(server: McpServer, deps: AgentA
     "import_generated_image",
     {
       title: "导入 Codex 生成的图片",
-      description: "把本轮 Codex 内建生图的第 index 张（从 0 开始）导入授权根组，成为成品图片节点。不要提供磁盘路径。",
+      description: "把本轮 Codex 内建生图的第 index 张（从 0 开始）导入当前 2D 组，成为成品图片节点。不要提供磁盘路径。",
       inputSchema: z.strictObject({
         ...CANVAS_ID_SCHEMA,
         requestId: z.string().min(1),

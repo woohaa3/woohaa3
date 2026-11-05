@@ -11,7 +11,7 @@
  * 本地 Store/Y.Doc 更新，也不做 optimistic 状态。
  */
 import type { CanvasCommand, ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition } from "@woohaa3/contracts";
-import { canvasPointToGround, createHighEntropyId, createWorldAnimationScript, decodeSceneAreaData, executeWorldAnimationScript, managedNodeRelationOf, newWorldInstance, remapWorldCopyReferences, serializeWorldAnimationScript, type ManagedNodeLifecycleResolver, type WorldAnimationScript } from "@woohaa3/contracts";
+import { canvasPointToGround, createHighEntropyId, decodeSceneAreaData, managedNodeRelationOf, newWorldInstance, remapWorldCopyReferences, sceneAreaAnimationOrigin, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
 import type { CanvasCopyPayload, CopyNode } from "./payload.js";
 import { imageEditAssetIdsOf, imageEditProjectObjectOf } from "./payload.js";
 
@@ -245,14 +245,16 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
       const source = mappedData ?? payload.nodeData[node.id] ?? {};
       const area = decodeSceneAreaData(source.sceneArea);
       if (!area.ok) return null;
-      const script = area.value.animationScript;
+      const origin = sceneAreaAnimationOrigin(area.value);
       mappedData = { ...source, sceneArea: {
         ...area.value,
         bounds: {
           min: { u: area.value.bounds.min.u + groundDelta.u, v: area.value.bounds.min.v + groundDelta.v },
           max: { u: area.value.bounds.max.u + groundDelta.u, v: area.value.bounds.max.v + groundDelta.v }
         },
-        ...(script ? { animationScript: shiftAnimationScript(script, groundDelta) } : {})
+        // Position tracks are relative to the area origin; moving the copy's
+        // origin carries the whole authored shot without rewriting the script.
+        animationOrigin: { u: origin.u + groundDelta.u, v: origin.v + groundDelta.v }
       } };
       remappedData.set(node.id, mappedData);
     }
@@ -437,21 +439,3 @@ function cloneJson(value: Woohaa3CanvasJsonObject): Woohaa3CanvasJsonObject {
   return JSON.parse(JSON.stringify(value)) as Woohaa3CanvasJsonObject;
 }
 
-/** 粘贴整体平移时，把脚本里实例的位置轨道按地面增量平移后重新序列化。 */
-function shiftAnimationScript(script: WorldAnimationScript, delta: { u: number; v: number }): WorldAnimationScript {
-  const compiled = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
-  if (!compiled.ok) return script;
-  const instanceTracks = compiled.ir.instanceTracks.map(track => track.property === "position"
-    ? {
-        ...track,
-        from: [track.from[0]! + delta.u, track.from[1]! + delta.v, track.from[2]!],
-        to: [track.to[0]! + delta.u, track.to[1]! + delta.v, track.to[2]!]
-      }
-    : track);
-  return createWorldAnimationScript({
-    script: serializeWorldAnimationScript({ ...compiled.ir, instanceTracks }),
-    duration: script.duration,
-    loop: script.loop,
-    revision: script.revision
-  });
-}

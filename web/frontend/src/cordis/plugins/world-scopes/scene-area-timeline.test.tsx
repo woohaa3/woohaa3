@@ -13,7 +13,7 @@ const titleRect = { left: 300, top: 300, width: 140, height: 40 };
 const animationScript: WorldAnimationScript = {
   script: 'motion.instance.tween("model", { property: "scale", startTime: 0, endTime: 4, from: [1], to: [2], easing: "linear" });',
   scriptLanguage: "javascript",
-  scriptVersion: "woohaa-world-animation-js-v1",
+  scriptVersion: "woohaa-world-animation-js-v2",
   revision: 1,
   sourceHash: "hash-timeline",
   duration: 4,

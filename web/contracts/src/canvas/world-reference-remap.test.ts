@@ -105,7 +105,7 @@ describe("world copy reference remapping", () => {
         'motion.instance.tween("instance-2", { property: "scale", startTime: 0, endTime: 5, from: [1], to: [2], easing: "linear" });'
       ].join("\n"),
       scriptLanguage: "javascript",
-      scriptVersion: "woohaa-world-animation-js-v1",
+      scriptVersion: "woohaa-world-animation-js-v2",
       revision: 1,
       sourceHash: "hash-script",
       duration: 5,
@@ -143,7 +143,7 @@ describe("world copy reference remapping", () => {
       nodes: [node("node-area", { sceneArea: { ...area("area-1"), animationScript: {
         script: 'motion.instance.tween("external-instance", { property: "position", startTime: 0, endTime: 5, from: [0, 0, 0], to: [1, 0, 0], easing: "linear" });',
         scriptLanguage: "javascript",
-        scriptVersion: "woohaa-world-animation-js-v1",
+        scriptVersion: "woohaa-world-animation-js-v2",
         revision: 1,
         sourceHash: "hash-external",
         duration: 5,

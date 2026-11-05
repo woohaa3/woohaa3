@@ -71,6 +71,8 @@ pub(crate) struct InteractionSnapshot {
     pub(super) edges: Vec<SnapshotEdge>,
     /// 导演区边框胶囊的命中几何（Bevy 2D）：画在 3D 线框上，点它选中导演区。
     pub(super) scene_area_labels: Vec<layout::SceneAreaLabelGeometry>,
+    pub(super) scope_areas: Vec<crate::protocol::SceneArea>,
+    pub(super) scope_frames: Vec<usize>,
     /// 点命中顺序：按发射序列倒序（最上层先）。
     pub(super) order: Vec<usize>,
     /// 两个把手只在合法 scene 投影声明可见时存在（冷路径生成）。
@@ -244,6 +246,19 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
         adjacency,
         aggregate_selection,
         scene_area_labels: layout::scene_area_labels(scene),
+        scope_frames: nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, node)| (node.frame && !node.ghost).then_some(i))
+            .collect(),
+        scope_areas: if scene.model_focus.is_none()
+            && scene.image_focus.is_none()
+            && scene.video_focus.is_none()
+        {
+            scene.scene_areas.clone()
+        } else {
+            Vec::new()
+        },
         nodes,
         edges,
         order_rank: build_order_rank(&order, nodes_len),
@@ -725,13 +740,38 @@ impl InteractionSnapshot {
     }
 }
 
+fn refresh_scope_labels(snapshot: &mut InteractionSnapshot) {
+    if !snapshot.overview {
+        return;
+    }
+    let zoom = snapshot.viewport.2;
+    snapshot.scene_area_labels = snapshot
+        .scope_areas
+        .iter()
+        .filter_map(|area| layout::scene_area_label_geometry_for_zoom(area, zoom))
+        .chain(
+            snapshot
+                .scope_frames
+                .iter()
+                .map(|&index| &snapshot.nodes[index])
+                .map(|node| {
+                    layout::workflow_group_label_for_bounds(&node.id, node.layout_bounds, zoom)
+                }),
+        )
+        .collect();
+}
+
 /// 屏幕尺寸固定的横条必须随 zoom/pan 重新派生；其余世界几何保持复用。
 pub(super) fn refresh_node_actions(
     snapshot: &mut InteractionSnapshot,
     viewport: Option<&crate::protocol::Viewport>,
 ) {
+    let labels_changed = viewport.is_none_or(|v| v.zoom != snapshot.viewport.2);
     if let Some(viewport) = viewport {
         snapshot.viewport = (viewport.x, viewport.y, viewport.zoom);
+    }
+    if labels_changed {
+        refresh_scope_labels(snapshot);
     }
     for (index, actions) in &snapshot.action_descriptors {
         let node = &mut snapshot.nodes[*index];

@@ -33,6 +33,26 @@ function finiteVec(values: readonly number[]): boolean {
 }
 
 /**
+ * 已应用实例根变换的模型世界 AABB。
+ *
+ * 供面板锚点直接读取**当前渲染姿态**：导演区动画会把实例变换覆盖成采样后的位姿，用权威
+ * `sharedWorldInstance` 会得到动画前的包围盒。
+ */
+export function worldInstanceAabb(
+  transform: import("@woohaa3/contracts").WorldTransform,
+  localAabb?: Aabb | null
+): Aabb | null {
+  if (!localAabb) return null;
+  const anchor = [...worldToRendererPosition(transform.position)] as Vec3;
+  const rotation = worldToRendererRotation(transform.rotation) as [number, number, number, number];
+  const unit = transform.scale * SHARED_WORLD_UNITS_PER_METER;
+  if (!finiteVec([...anchor, ...rotation, unit]) || unit <= 0) return null;
+  const aabb = transformAabb({ translation: anchor, rotation: [...rotation], scale: [unit, unit, unit] }, localAabb);
+  if (!finiteVec([...aabb.min, ...aabb.max])) return null;
+  return aabb;
+}
+
+/**
  * 解析一个节点是否是共享世界实例，并给出渲染器世界的根姿态。
  *
  * `localAabb` 来自 prepared Scene IR；缺失表示模型内容尚未就绪或空模型——调用方应把它
@@ -52,10 +72,7 @@ export function worldInstancePresentation(
   const rotation = worldToRendererRotation(transform.rotation) as [number, number, number, number];
   const unit = transform.scale * SHARED_WORLD_UNITS_PER_METER;
   if (!finiteVec([...anchor, ...rotation, unit]) || unit <= 0) return null;
-  const aabb = localAabb
-    ? transformAabb({ translation: anchor, rotation: [...rotation], scale: [unit, unit, unit] }, localAabb)
-    : null;
-  if (aabb && !finiteVec([...aabb.min, ...aabb.max])) return null;
+  const aabb = worldInstanceAabb(transform, localAabb);
   return {
     kind: "world",
     instanceId: decoded.value.instanceId,

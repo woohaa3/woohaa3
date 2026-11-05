@@ -2,9 +2,9 @@
  * 节点顶部操作横条的**非 React** 宿主：描述收集、命中派发与设置弹窗状态
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1/3.2/3.4/3.6 / design D6/D7 修订）。
  *
- * 横条由 Bevy 绘制、Rust 命中；本模块只做三件纯逻辑的事，便于非渲染单元测试：
- * 1. 把 `canvas.node-action` 贡献的 `describe` 结果聚合成下发给 render scene 的**纯数据**描述
- *    （`nodeActions`），宿主下载与 film-set 转换共用同一接缝；
+ * 横条由 Web 渲染和处理点击；本模块只做三件纯逻辑的事，便于非渲染单元测试：
+ * 1. 把 `canvas.node-action` 贡献的 `describe` 结果聚合成供 Web 动作栏读取的纯数据描述，
+ *    宿主下载与 film-set 转换共用同一接缝；
  * 2. 命中（`{ nodeId, actionId, menu }`）后按贡献 id 派发到对应 `activate`；
  * 3. 维护「设置箭头打开的 DOM 弹窗」状态（复杂 UI 走 DOM），供 React 覆盖层渲染。
  *
@@ -27,7 +27,7 @@ export type NodeActionSettingsState = {
   contributionId: string;
 };
 
-/** 聚合结果：下发给 render scene 的描述 + 每个动作 id 归属的贡献。 */
+/** 聚合结果：Web 动作栏描述 + 每个动作 id 归属的贡献。 */
 export type NodeActionDescription = {
   presentation: BevyNodeActionsPresentation;
   /** actionId（= 贡献 id）→ 贡献，用于命中派发与设置弹窗内容解析。 */
@@ -73,7 +73,7 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
     }
     if (!descriptor) continue;
     const menu = descriptor.menu === true;
-    const supportedIcons = ["download", "edit", "arrange-horizontal", "arrange-vertical", "arrange-grid", "arrange-diagonal-up", "arrange-diagonal-down", "collapse-groups", "expand-groups"] as const;
+    const supportedIcons = ["download", "edit", "box", "arrange-horizontal", "arrange-vertical", "arrange-grid", "arrange-diagonal-up", "arrange-diagonal-down", "collapse-groups", "expand-groups"] as const;
     const icon = supportedIcons.find((candidate) => candidate === descriptor.icon);
     actions.push({
       id: contribution.id,
@@ -116,7 +116,7 @@ function safeAvailable<C>(
 }
 
 /**
- * 命中派发器：把 Rust 命中的 `{ nodeId, actionId, menu }` 路由到对应贡献。
+ * 命中派发器：把 Web 按钮激活的 `{ nodeId, actionId, menu }` 路由到对应贡献。
  *
  * `menu: true` 时优先打开设置弹窗（贡献声明了 `settings`）；否则调用 `activate`，并在命中上下文
  * 中注入宿主的 `requestSettings`——贡献在无法直接开始时据此打开设置弹窗（横条模式下宿主持有

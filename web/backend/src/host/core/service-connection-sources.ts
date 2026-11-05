@@ -27,13 +27,22 @@ export function createSiteProviderSource(options: {
     });
     const baseUrl = typeof values.baseUrl === "string" ? values.baseUrl : typeof values.baseURL === "string" ? values.baseURL : undefined;
     const assistantProtocol = provider?.serviceConnectionFactory?.assistantProtocol;
-    const assistantCapabilities = assistantProtocol ? (provider?.models ?? []).filter(model => model.modelType === "language").map(model => ({
-      purpose: "discussion" as const, protocol: assistantProtocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const,
-    })) : [];
+    const assistantModels = assistantProtocol ? (provider?.models ?? []).filter(model => model.modelType === "language") : [];
+    const assistantCapabilities = assistantModels.flatMap(model => [
+      { purpose: "discussion" as const, protocol: assistantProtocol!, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const },
+      { purpose: "target-execution" as const, protocol: assistantProtocol!, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const },
+    ]);
+    // A trusted assistant protocol is executable Agent evidence for discussion and target execution.
+    // The stable binding lets the SDK Agent bridge project this source without an explicit admin opt-in.
+    const assistantBinding = assistantProtocol && assistantModels.length ? {
+      bindingId: `provider-assistant:${options.providerId}`, extensionId: "sdk-agent", consumer: "agent" as const,
+      consumerId: `shared:${assistantProtocol}`, purposes: ["discussion", "target-execution"] as const,
+      modelKeys: assistantModels.map(model => model.providerModelId),
+    } : null;
     return { legacyId: options.providerId, scope: "site", kind: "api", name: options.label,
       endpoints: baseUrl ? [{ protocol, baseUrl }, ...(assistantProtocol ? [{ protocol: assistantProtocol, baseUrl }] : [])] : [], capabilities: [...capabilities, ...assistantCapabilities],
       bindings: provider ? [{ bindingId: `provider:${options.providerId}`, extensionId: options.extensionId, consumer: "provider", consumerId: options.providerId,
-        purposes: [...purposes], modelKeys: provider.models.map(model => `${options.providerId}:${model.providerModelId}`) }] : [],
+        purposes: [...purposes], modelKeys: provider.models.map(model => `${options.providerId}:${model.providerModelId}`) }, ...(assistantBinding ? [assistantBinding] : [])] : [],
       enabled: provider?.available ?? false, removed: false, locked: fields.some(field => field.lockedBy !== null), credentialConfigured: configured,
       configRevision: Number.parseInt(hash(publicValues).slice(0, 12), 16), credentialEpoch: 0,
       credentialFingerprint: hash(secretValues) };

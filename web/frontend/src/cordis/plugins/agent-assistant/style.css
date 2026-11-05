@@ -39,6 +39,8 @@
 .agent-assistant__capability-description { margin-top: 6px; color: var(--assistant-secondary); font-size: 12px; }
 .agent-assistant__capability-count { align-self: flex-start; margin-top: auto; padding-top: 20px; color: var(--app-interaction-accent-pressed); font-size: 12px; font-variant-numeric: tabular-nums; text-decoration: underline dotted; text-underline-offset: 4px; }
 .agent-assistant__capability-count[data-error="true"] { color: var(--app-status-warning); }
+.agent-assistant__capability-count[data-split="true"] { display: grid; gap: 3px; text-decoration: none; }
+.agent-assistant__capability-count[data-split="true"] > span { width: fit-content; border-bottom: 1px dotted currentColor; padding-bottom: 1px; }
 .agent-assistant__capability-card[data-placeholder="true"] { background: var(--app-web-subtle); }
 .agent-assistant__capability-card[data-placeholder="true"] .agent-assistant__capability-card-top,
 .agent-assistant__capability-card[data-placeholder="true"] .agent-assistant__capability-count { color: var(--assistant-secondary); }

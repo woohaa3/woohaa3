@@ -5,7 +5,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
-import { createTextureSync, TEXTURE_FALLBACK_TIER } from "./texture-sync.js";
+import { createTextureSync, TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
 import type { BevyRuntime } from "./bevy-runtime.js";
 import { IMAGE_RETRY_DELAYS_MS, ImageLoadError } from "./image-load.js";
 
@@ -191,6 +191,41 @@ describe("createTextureSync", () => {
     sync.dispose();
   });
 
+  it("缩放跨缩略图档时保留旧纹理，等新档上传后再替换", async () => {
+    const { context } = fakeCanvasContext();
+    const requests: Array<{ resolve: (image: HTMLImageElement) => void }> = [];
+    let tier: 256 | 512 = 256;
+    const setTexture = vi.fn(() => true);
+    const sync = createTextureSync({
+      runtime: { setTexture } as unknown as BevyRuntime,
+      getCanvas: () => canvas(true),
+      admissionOf: () => ({ admitted: true, purpose: "visible", tier }),
+      loadImage: () => new Promise((resolve) => requests.push({ resolve })),
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => context })
+    });
+    sync.sync();
+    requests[0].resolve(fakeImage());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    sync.sync();
+    expect(setTexture).toHaveBeenCalledTimes(1);
+    expect(sync.textureNodeIds().has("n1")).toBe(true);
+
+    // 放大跨到 512 档：旧纹理保持可用，新档在后台解码。
+    tier = 512;
+    sync.sync();
+    expect(requests).toHaveLength(2);
+    expect(setTexture).toHaveBeenCalledTimes(1);
+    expect(sync.textureNodeIds().has("n1")).toBe(true);
+
+    // 新档就绪后由下一次同步替换，中途没有 texture=false 的空档。
+    requests[1].resolve(fakeImage());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    sync.sync();
+    expect(setTexture).toHaveBeenCalledTimes(2);
+    expect(sync.textureNodeIds().has("n1")).toBe(true);
+    sync.dispose();
+  });
+
   it("uploads a ready image asset once", async () => {
     (globalThis as unknown as { document: unknown }).document = {
       createElement: () => {
@@ -225,13 +260,13 @@ describe("createTextureSync", () => {
     };
     let current = canvas(true);
     const { runtime, uploaded } = runtimeRecorder();
-    // 4000x2000 → 无准入投影时按兜底档 1024 解码，比例仍为 2:1。
+    // 4000x2000 → 缩放到最长边 1024，比例仍为 2:1。
     const sync = createTextureSync({ runtime, getCanvas: () => current, loadImage: async () => fakeImage(4000, 2000) });
     sync.sync();
     await new Promise((resolve) => setTimeout(resolve, 0));
     sync.sync();
     const [upload] = uploaded;
-    expect(upload.width).toBe(TEXTURE_FALLBACK_TIER);
+    expect(upload.width).toBe(TEXTURE_MAX_DIMENSION);
     expect(upload.width / upload.height).toBeCloseTo(2, 2);
     sync.dispose();
   });
@@ -463,58 +498,4 @@ it("资源增量在 ACK 前保留、合并中间状态，完整基线 ACK 无须
   current = canvas(true); sync.sync();
   expect(sync.resourceStateChanges?.()).toEqual([{ id: "n1", texture: false, mediaLoading: true }]);
   sync.dispose();
-});
-
-describe("缩放换档位", () => {
-  /** 受控的档位与解码：每个请求挂起到测试显式放行，便于观察「新档位解码中」这一段。 */
-  function harness() {
-    const { context } = fakeCanvasContext();
-    const pending: Array<() => void> = [];
-    const setTexture = vi.fn();
-    let tier: 512 | 1024 = 512;
-    // 档位由缩放决定；真实运行时缩放会让准入版本变化、触发重新绑定。
-    // 测试里用「换一个画布引用」达到同样效果（`canvas !== boundCanvas`）。
-    let current = canvas(true);
-    const sync = createTextureSync({
-      runtime: { setTexture, textureApplied: () => true } as unknown as BevyRuntime,
-      getCanvas: () => current,
-      admissionOf: () => ({ admitted: true, purpose: "visible", tier }),
-      loadImage: () => new Promise(resolve => pending.push(() => resolve(fakeImage()))),
-      createCanvas: () => ({ width: 0, height: 0, getContext: () => context })
-    });
-    const settle = async () => { pending.splice(0).forEach(release => release()); await new Promise(resolve => setTimeout(resolve, 0)); sync.sync(); };
-    return { sync, setTexture, settle, setTier: (next: 512 | 1024) => { tier = next; current = canvas(true); } };
-  }
-
-  it("已有旧档位纹理时，换到新档位解码期间不重新显示加载中", async () => {
-    const { sync, settle, setTier } = harness();
-    sync.sync(); await settle();
-    expect(sync.textureNodeIds().has("n1")).toBe(true);
-    expect(sync.isLoading?.("n1")).toBe(false);
-    // 缩放让档位变化：新档位在解码，但旧档位的图还在画面上，不能闪「加载中」。
-    setTier(1024);
-    sync.resourceStateChanges?.(); sync.acknowledgeResourceStates?.();
-    sync.sync();
-    expect(sync.isLoading?.("n1")).toBe(false);
-    expect(sync.textureNodeIds().has("n1")).toBe(true);
-    sync.dispose();
-  });
-
-  it("新档位解码完成后仍会重新上传，保证放大后变清晰", async () => {
-    const { sync, setTexture, settle, setTier } = harness();
-    sync.sync(); await settle();
-    expect(setTexture).toHaveBeenCalledTimes(1);
-    setTier(1024);
-    sync.sync(); await settle(); sync.sync();
-    expect(setTexture).toHaveBeenCalledTimes(2);
-    expect(sync.isLoading?.("n1")).toBe(false);
-    sync.dispose();
-  });
-
-  it("首次加载（没有旧纹理）仍然显示加载中", () => {
-    const { sync } = harness();
-    sync.sync();
-    expect(sync.isLoading?.("n1")).toBe(true);
-    sync.dispose();
-  });
 });

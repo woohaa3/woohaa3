@@ -206,5 +206,6 @@ const GRANTED_TOOLS = new Set([
   "create_world_camera",
   "set_world_camera",
   "complete_world_camera",
-  "resize_scene_area"
+  "resize_scene_area",
+  "import_generated_image"
 ]);

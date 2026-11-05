@@ -9,7 +9,7 @@ import { createHistoryClick } from "./input/history-click.js";
  * 右键菜单、双击预览。只通过 `InteractionCore` 访问共享坐标系、调度与提交，不自建监听。
  */
 import { modelPreviewPointerDown, modelPreviewPointerMove } from "./input/model-preview.js";
-import { bevyKindForNodeType, effectiveCanvasNodeSize, builtinNodeCapabilityResolver, decodeSceneAreaData, decodeWorkflowGroupData, explainWoohaa3CanvasConnectionBlock } from "@woohaa3/contracts";
+import { bevyKindForNodeType, effectiveCanvasNodeSize, builtinNodeCapabilityResolver, decodeWorkflowGroupData, explainWoohaa3CanvasConnectionBlock } from "@woohaa3/contracts";
 import { nodeSize, cardHitNodeId, type Point } from "./hit-test.js";
 import { planConnectEdge, planResizeNode } from "../../../extension-api/command-planner.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -20,8 +20,10 @@ import { createDragGestureFamily } from "./drag-gesture.js";
 import { applyDragAlignment, setAlignmentGuides } from "./alignment-snap.js";
 import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
 import { createAggregateConnectFamily } from "./aggregate-connect.js";
-import { shouldUseWorldModelPick, worldModelSelectionFromPick } from "../canvas-runtime/model-world-presentation.js";
-import { isWorldInstanceNode } from "./model-world-presentation.js";
+import { mergeMarqueeSelection, shouldUseWorldModelPick } from "../canvas-runtime/model-world-presentation.js";
+import { commitPressSelection, noteSelectionPress } from "./input/selection/apply.js";
+import { resolveContextSelection, resolvePressSelection } from "./input/selection/press.js";
+import { cardPointerTarget, groundAreaCandidates, hasWorldObject, pickedWorldTarget } from "./input/selection/target.js";
 import { createWorldCameraGestureFamilyFromOptions } from "./world-camera-gesture.js";
 import { createWorldObjectPress } from "./world-object-press.js";
 import { createWorldGroundGestureFamily } from "./world-ground-gesture.js";
@@ -275,68 +277,132 @@ export function create2dInputFamily(core: InteractionCore) {
     };
     if (sceneAreaFirst && trySceneAreaGesture()) return;
 
+    // 先把卡片/模型预览归一成节点目标；容器优先级只读一次选择规则，后面 2D/3D 共用。
+    const pressedCanvas = workingCanvasOf(woohaa3CanvasStore.getState());
+    const cardTarget = cardPointerTarget(pressedCanvas, hit);
+    const cardNodeId = cardTarget?.nodeId ?? null;
+    const cardPlan = !isRight && cardTarget
+      ? resolvePressSelection({
+          canvas: pressedCanvas,
+          nodeId: cardTarget.nodeId,
+          selected: state.selected,
+          additive: event.shiftKey,
+          scopeId: cardTarget.scopeId
+        })
+      : null;
+    // 点击进入容器：组/导演区尚未被选中时，第一次点击先选中容器；容器已进入
+    // （自身已选或同区已有兄弟）时直接落到子元素。
+    if (cardTarget && cardPlan?.gesture === "scope") {
+      commitPressSelection({
+        state,
+        nodeId: cardTarget.nodeId,
+        plan: cardPlan,
+        setSelection,
+        x: event.clientX,
+        y: event.clientY
+      });
+      event.preventDefault();
+      return;
+    }
+
     // 共享世界模型没有内容卡片（`chrome.kind === "none"`）；命中到的卡片矩形可能是迁移
     // 前的残留。只要节点是世界实例，就按世界模型处理：选中并可直接沿地面拖动。
-    const pressedCanvas = workingCanvasOf(woohaa3CanvasStore.getState());
-    const cardNodeId = cardHitNodeId(hit);
-    const pressedWorldId = !isRight && cardNodeId !== null && isWorldInstanceNode(pressedCanvas, cardNodeId)
-      ? cardNodeId
-      : null;
-    if (pressedWorldId) {
-      beginWorldObjectPress(event, pressedWorldId);
+    if (!isRight && cardTarget?.kind === "world-object") {
+      beginWorldObjectPress(event, cardTarget.nodeId, cardPlan ?? undefined);
       return;
     }
 
     // 共享世界模型没有内容卡片；**空白命中**才补一次渲染器拾取（真实表面/空模型锚点），
     // 否则 auto 模式的 scene-area 会先把世界模型点击当成搬场景；同时不抢可见端口、
     // 连线、历史条与动作横条的命中。
-    if (!hit && shouldUseWorldModelPick({
+    if (!hit && hasWorldObject(pressedCanvas) && shouldUseWorldModelPick({
       cardHitNodeId: cardNodeId,
       focusActive: model.active,
       modalActive: core.modalActive(),
       gestureActive: state.gesture.kind !== "none"
     }) && !isRight) {
       const pick = core.queryModelPick({ x: event.clientX, y: event.clientY }, core.surfaceSize());
-      const picked = worldModelSelectionFromPick({
-        canvas: pressedCanvas,
-        pick,
-        selected: state.selected,
-        additive: event.shiftKey
-      });
-      if (picked && pick.ok && pick.value) {
-        // Shift 是附加选择：不要同时开始拖动（高度/朝向修饰键从卡片或面板操作）。
-        if (event.shiftKey) {
-          setSelection(picked);
+      // 细长/带孔模型（如自行车）可能从模型表面的空隙穿过；点拾取未命中时，
+      // 用指针周围极小的 AABB 框选补一次，避免“选中了却拖不动”。
+      let pickedNodeId = pick.ok && pick.value ? pick.value.nodeId : null;
+      if (!pickedNodeId) {
+        const fallback = core.queryModelMarquee({
+          x: event.clientX - 2,
+          y: event.clientY - 2,
+          width: 4,
+          height: 4
+        });
+        if (fallback.ok) {
+          const candidates = fallback.value.filter(id => pickedWorldTarget(pressedCanvas, id));
+          if (candidates.length === 1) pickedNodeId = candidates[0]!;
+        }
+      }
+      const pickedTarget = pickedWorldTarget(pressedCanvas, pickedNodeId);
+      if (pickedTarget && pickedNodeId) {
+        const plan = resolvePressSelection({
+          canvas: pressedCanvas,
+          nodeId: pickedNodeId,
+          selected: state.selected,
+          additive: event.shiftKey,
+          scopeId: pickedTarget.scopeId
+        });
+        if (plan.gesture === "scope") {
+          // 世界模型没有卡片、只经渲染器拾取命中；同样先选中它所在的组/导演区。
+          commitPressSelection({
+            state,
+            nodeId: pickedNodeId,
+            plan,
+            setSelection,
+            x: event.clientX,
+            y: event.clientY
+          });
           schedule();
           event.preventDefault();
           return;
         }
-        beginWorldObjectPress(event, pick.value.nodeId);
+        // Shift 由世界对象按下统一处理：只切换选择，不开始拖动。
+        beginWorldObjectPress(event, pickedNodeId, plan);
         return;
       }
     }
 
     if (trySceneAreaGesture()) return;
 
-    if (modelPreviewPointerDown(core, event, hit)) return;
+    if (modelPreviewPointerDown(core, event, hit)) {
+      // 已选模型预览旋转也是双击序列的一部分：记录按下前选区，保持双击语义一致。
+      noteSelectionPress({
+        state,
+        nodeId: cardTarget?.nodeId ?? null,
+        reason: "already-selected",
+        x: event.clientX,
+        y: event.clientY
+      });
+      return;
+    }
 
     if (!hit && !isRight && !event.shiftKey) {
       const ground = core.queryWorldGround({ x: event.clientX, y: event.clientY });
-      const current = workingCanvasOf(woohaa3CanvasStore.getState());
-      if (ground && current) {
-        const candidates = current.document.nodes.flatMap(node => {
-          const area = decodeSceneAreaData(current.nodeData[node.id]?.sceneArea);
-          if (!area.ok) return [];
-          const { min, max } = area.value.bounds;
-          return ground.u >= min.u && ground.u <= max.u && ground.v >= min.v && ground.v <= max.v ? [node.id] : [];
-        }).sort();
-        if (candidates.length) groundClick = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, candidates };
-      }
+      const candidates = groundAreaCandidates(workingCanvasOf(woohaa3CanvasStore.getState()), ground);
+      if (candidates.length) groundClick = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, candidates };
     }
 
     if (isRight) {
       const nodeId = hit && "nodeId" in hit ? hit.nodeId : null;
-      if (nodeId && !state.selected.includes(nodeId)) setSelection([nodeId]);
+      if (nodeId) {
+        const plan = resolveContextSelection({
+          canvas: workingCanvasOf(woohaa3CanvasStore.getState()),
+          nodeId,
+          selected: state.selected
+        });
+        commitPressSelection({
+          state,
+          nodeId,
+          plan,
+          setSelection,
+          x: event.clientX,
+          y: event.clientY
+        });
+      }
       beginGesture();
       // 右键的种类要等到释放才知道（短按=菜单，越过阈值=平移），所以此处**不开门**：
       // 菜单在 pointerup 结算，平移在 pointermove 越过阈值时开。这样 kind 不会记错。
@@ -438,18 +504,23 @@ export function create2dInputFamily(core: InteractionCore) {
     }
 
     // 未选中的模型预览与普通卡片一样，先选择并拖动节点；Shift 保留选择操作。
-    if (hit && cardHitNodeId(hit) !== null) {
-      const hitNodeId = cardHitNodeId(hit) as string;
+    if (cardTarget && (cardTarget.kind === "card" || cardTarget.kind === "model-preview")) {
+      const hitNodeId = cardTarget.nodeId;
       const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
-      if (event.shiftKey) {
-        setSelection(
-          state.selected.includes(hitNodeId)
-            ? state.selected.filter((id) => id !== hitNodeId)
-            : [...state.selected, hitNodeId]
-        );
-      } else if (!state.selected.includes(hitNodeId)) {
-        setSelection([hitNodeId]);
-      }
+      commitPressSelection({
+        state,
+        nodeId: hitNodeId,
+        plan: cardPlan ?? resolvePressSelection({
+          canvas: canvasState,
+          nodeId: hitNodeId,
+          selected: state.selected,
+          additive: event.shiftKey,
+          scopeId: cardTarget.scopeId
+        }),
+        setSelection,
+        x: event.clientX,
+        y: event.clientY
+      });
       // 结构/位置索引按 working 身份缓存（design D5）：selection/pan 不失效，pending/远端
       // 结构与位置变化会产生新对象并重建。避免每次按下复制带 data 的整表节点数组。
       const index = sharedCanvasNodeIndex(canvasState);
@@ -521,10 +592,25 @@ export function create2dInputFamily(core: InteractionCore) {
       return;
     }
 
-    if (!event.shiftKey && !groundClick) setSelection([]);
+    if (!event.shiftKey && !groundClick) {
+      commitPressSelection({
+        state,
+        nodeId: null,
+        plan: { selection: [], reason: "empty", scopeId: null, gesture: "keep" },
+        setSelection,
+        x: event.clientX,
+        y: event.clientY
+      });
+    }
     beginGesture();
     beginPerfGesture("marquee");
-    state.gesture = { kind: "marquee", pointerId: event.pointerId, start: world, current: world };
+    state.gesture = {
+      kind: "marquee",
+      pointerId: event.pointerId,
+      start: world,
+      current: world,
+      startClient: { x: event.clientX, y: event.clientY }
+    };
     canvas.setPointerCapture?.(event.pointerId);
     schedule();
   };
@@ -769,13 +855,26 @@ export function create2dInputFamily(core: InteractionCore) {
         const next = (click.candidates.indexOf(state.selected.length === 1 ? state.selected[0]! : "") + 1) % click.candidates.length;
         setSelection([click.candidates[next]!]);
       } else {
+        const gesture = state.gesture;
         const marqueeResult = core.queryMarquee({
-          x: state.gesture.start.x,
-          y: state.gesture.start.y,
-          width: world.x - state.gesture.start.x,
-          height: world.y - state.gesture.start.y
+          x: gesture.start.x,
+          y: gesture.start.y,
+          width: world.x - gesture.start.x,
+          height: world.y - gesture.start.y
         });
-        if (marqueeResult.ok) setSelection(marqueeResult.value);
+        // 世界模型没有内容卡片，2D 框选拿不到它们；用同一屏幕矩形补一次模型 AABB 框选。
+        const modelResult = core.queryModelMarquee({
+          x: gesture.startClient.x,
+          y: gesture.startClient.y,
+          width: event.clientX - gesture.startClient.x,
+          height: event.clientY - gesture.startClient.y
+        });
+        if (marqueeResult.ok || modelResult.ok) {
+          setSelection(mergeMarqueeSelection(
+            marqueeResult.ok ? marqueeResult.value : [],
+            modelResult.ok ? modelResult.value : []
+          ));
+        }
       }
     } else if (state.gesture.kind === "right-press") {
       // 短按右键不是平移：到这里才确定它是菜单（spec: kind 取 `context-menu`）。

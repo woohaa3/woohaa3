@@ -21,7 +21,6 @@ export type AttachAssemblyDeps = {
   getModelResources: InteractionControllerOptions["getModelResources"];
   theme: InteractionControllerOptions["getTheme"];
   getGhostNodes: () => readonly import("@woohaa3/contracts").GhostRenderNode[];
-  getNodeActionToolbars?: NonNullable<InteractionControllerOptions["getNodeActionToolbars"]>;
   onNodeAction?: NonNullable<InteractionControllerOptions["onNodeAction"]>;
   modelFocus: () => import("@woohaa3/contracts").ModelFocusProjection | null;
   modelFocusMode: InteractionControllerOptions["getModelFocusMode"];
@@ -84,7 +83,6 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     ...(options.recordExternal ? { recordExternal: options.recordExternal } : {}),
     ...(options.onInteractionError ? { onInteractionError: options.onInteractionError } : {}),
     getGhostNodes: deps.getGhostNodes,
-    ...(deps.getNodeActionToolbars ? { getNodeActionToolbars: deps.getNodeActionToolbars } : {}),
     ...(deps.onNodeAction ? { onNodeAction: deps.onNodeAction } : {}),
     getModelFocusTargets: deps.focusTargets,
     hasModelFocusTarget: deps.hasFocusTarget,

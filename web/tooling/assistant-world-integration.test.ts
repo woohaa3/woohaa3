@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, deriveModelContentVersion, worldCameraCompletionKey } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, deriveModelContentVersion, createWorldAnimationScript, worldCameraCompletionKey } from "@woohaa3/contracts";
 import { CanvasRoom } from "../services/canvas-service/src/sync/room.js";
 import { SqliteYjsRepository } from "../services/canvas-service/src/storage/sqlite/yjs.js";
 import { createWorldAuthoringAuthority } from "../services/canvas-service/src/world-authoring/authority.js";
@@ -1014,6 +1014,120 @@ describe("assistant world authoring through the real canvas queue", () => {
       expect(blocked).toMatchObject({ ok: false, code: "outside-scope" });
       projection = (await repository.loadYjsState(canvas.id))?.projection ?? null;
       expect((projection?.nodeData["model-a"]?.sharedWorldInstance as { transform: { position: { u: number } } }).transform.position.u).toBe(20);
+    } finally {
+      assistant.close();
+      repository.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("repairs a director animation whose camera was deleted, then creates a new camera and rewrites the shot", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "assistant-world-deleted-camera-"));
+    const file = join(dir, "canvas.sqlite");
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas-1", now);
+    canvas.document.nodes.push(
+      { id: "area-node", type: "scene-area", position: { x: 0, y: 0 } },
+      { id: "model-a", type: "model3d", position: { x: 0, y: 0 } }
+    );
+    canvas.nodeData["area-node"] = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "area-scope-1",
+        bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } },
+        animationScript: createWorldAnimationScript({
+          script: [
+            'motion.instance.tween("instance-a", { property: "position", startTime: 0, endTime: 4, from: [0, 0, 0], to: [1, 0, 0], easing: "linear" });',
+            'motion.camera.tween({ cameraId: "deleted-camera", property: "position", startTime: 0, endTime: 4, from: [0, 0, 1.5], to: [2, 2, 1.5], easing: "linear" });'
+          ].join("\n"),
+          duration: 4,
+          loop: false
+        })
+      }
+    };
+    canvas.nodeData["model-a"] = modelData("instance-a", 1, 1);
+
+    const authority = createWorldAuthoringAuthority({ executeScene });
+    const repository = new SqliteYjsRepository({ path: file, spatialAuthority: authority });
+    const room = new CanvasRoom({ canvasId: canvas.id, repository, now: () => now });
+    await room.initialize({ canvas, roomEpoch: "initial", createdAt: now });
+    const worldAuthoring = createWorldAuthoringService({
+      authority,
+      resolveRoom: async () => room,
+      acquire: async (intent) => repository.acquireSpatialRun(intent),
+      cancel: async (canvasId, requestId) => repository.cancelSpatialRun(canvasId, requestId),
+      findLatest: async (canvasId, operationId) => repository.findLatestWorldAuthoringCommand(canvasId, operationId)
+    });
+    const assistant = createAssistantWorldService({
+      authority,
+      worldAuthoring,
+      cameraSettings: {
+        async save() { return { ok: false as const, code: "write-forbidden" as const, message: "camera not used" }; },
+        async complete() { return { ok: false as const, code: "write-forbidden" as const, message: "camera not used" }; }
+      },
+      resolveRoom: async () => room,
+      cancel: async (canvasId, requestId) => repository.cancelSpatialRun(canvasId, requestId),
+      confirmStopped: async (input) => repository.confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence),
+      pending: async () => repository.pendingSpatialRuns()
+    });
+    try {
+      const issued = await assistant.issue({
+        canvasId: canvas.id,
+        requestId: "run-1",
+        runId: "run-1",
+        epoch: 0,
+        executionId: "exec-1",
+        scope: { kind: "scene-area", areaId: "area-1" }
+      });
+      if (!issued.ok) throw new Error(issued.message);
+
+      // A deleted camera leaves a dead track. Reading must still hand back the live
+      // script and bounds so the assistant can create a replacement shot.
+      const read = await assistant.read({ canvasId: canvas.id, contextId: issued.context.contextId });
+      if (!read.ok) throw new Error(read.message);
+      expect(read.view.sceneArea?.animationScript?.script).not.toContain("deleted-camera");
+      expect(read.view.sceneArea?.animationScript?.script).toContain("instance-a");
+
+      const created = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "create-world-camera",
+          operationId: "camera-create",
+          nodeId: "camera-node",
+          cameraId: "camera-new",
+          settings: {
+            position: { u: -4, v: 5, h: 1.6 },
+            rotation: [0, 0, 0, 1],
+            projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+            captureMode: { kind: "static" },
+            aspect: { width: 16, height: 9 },
+            boundInstanceId: null
+          }
+        }
+      });
+      expect(created).toMatchObject({ ok: true, cameraId: "camera-new" });
+
+      const written = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "set-scene-animation-script",
+          operationId: "animation-rewrite",
+          script: [
+            'motion.instance.tween("instance-a", { property: "rotation", startTime: 0, endTime: 4, from: [0, 0, 0], to: [0, 0, 15], easing: "easeOut" });',
+            'motion.camera.tween({ cameraId: "camera-new", property: "zoom", startTime: 0, endTime: 4, from: [1.4], to: [0.8], easing: "easeOut" });'
+          ].join("\n"),
+          duration: 4,
+          loop: false
+        }
+      });
+      expect(written).toMatchObject({ ok: true });
+
+      const reread = await assistant.read({ canvasId: canvas.id, contextId: issued.context.contextId });
+      if (!reread.ok) throw new Error(reread.message);
+      expect(reread.view.sceneArea?.animationScript?.script).toContain("camera-new");
+      const projection = (await repository.loadYjsState(canvas.id))?.projection ?? null;
+      expect(Object.keys(projection?.nodeData ?? {})).toContain("camera-node");
     } finally {
       assistant.close();
       repository.close();

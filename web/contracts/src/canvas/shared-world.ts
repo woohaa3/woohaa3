@@ -6,7 +6,16 @@ export const SHARED_WORLD_UNITS_PER_METER = 64;
 export const WORKFLOW_GROUP_2D_NODE_TYPE = "workflow-group-2d" as const;
 export const SCENE_AREA_NODE_TYPE = "scene-area" as const;
 export const WORLD_CAMERA_NODE_TYPE = "world-camera" as const;
-export const SCENE_FOOTPRINT_TOLERANCE_METERS = 1e-6;
+/**
+ * Fixed metric tolerance for scene-area containment (never scaled by zoom).
+ *
+ * Models often carry thin decorative geometry (arch ribs, trims) whose projected
+ * AABB sticks a few centimetres past what the user sees as the model edge. A
+ * user-sized director area around that visible edge must still count as "fully
+ * contained", otherwise the whole model silently leaves the move/edit set. The
+ * tolerance stays small enough that genuinely partial models remain read-only.
+ */
+export const SCENE_FOOTPRINT_TOLERANCE_METERS = 0.05;
 export const WORLD_ROTATION_UNIT_TOLERANCE = 1e-6;
 /**
  * Authoring-input tolerance for a supplied rotation (squared norm). Storage stays
@@ -73,8 +82,25 @@ export interface SceneAreaData {
   areaId: WorldId;
   scopeVersion: WorldVersion;
   bounds: GroundAabb;
-  /** 导演区统一动画脚本（模型实例 + 镜头）；播放时钟属于浏览器本地，不写回规范数据。 */
+  /**
+   * Stable ground origin for the area's animation position tracks. Track `u`/`v`
+   * are offsets from this point; `h` remains an absolute height. Moving the area
+   * translates both `bounds` and this origin; resizing leaves it untouched.
+   * Missing on legacy areas: `sceneAreaAnimationOrigin` falls back to the bounds
+   * center (the same point new areas are created with).
+   */
+  animationOrigin?: GroundPoint;
+  /** 导演区统一动画脚本（模型实例 + 镜头）；位置轨道相对 `animationOrigin`，播放时钟属于浏览器本地，不写回规范数据。 */
   animationScript?: WorldAnimationScript;
+}
+
+/** Stable animation origin; legacy areas without one use their bounds center. */
+export function sceneAreaAnimationOrigin(area: SceneAreaData): GroundPoint {
+  if (area.animationOrigin) return { ...area.animationOrigin };
+  return {
+    u: (area.bounds.min.u + area.bounds.max.u) / 2,
+    v: (area.bounds.min.v + area.bounds.max.v) / 2
+  };
 }
 export type WorldCameraProjection =
   | { kind: "isometric"; verticalSizeMeters: number; nearMeters: number; farMeters: number }

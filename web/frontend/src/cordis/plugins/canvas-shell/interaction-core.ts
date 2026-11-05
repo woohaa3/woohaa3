@@ -16,6 +16,7 @@ import type { WheelSourceState } from "./input/wheel-gesture.js";
 import type { createLocalViewportStore } from "../canvas-runtime/local-viewport.js";
 import type { ProbeCandidate } from "../canvas-runtime/bevy-runtime.js";
 import type { planMoveNodes } from "../../../extension-api/command-planner.js";
+import type { SelectionPressRecord } from "./input/selection/types.js";
 
 export type Viewport = { x: number; y: number; zoom: number };
 export type Map2D = Map<string, { x: number; y: number }>;
@@ -35,6 +36,9 @@ export type DragAttachKeyboardController = {
 export type InteractionState = {
   gesture: Gesture;
   selected: string[];
+  /** 最近一次节点按下的选择记录；双击用它区分“选入模型”和“已选后聚焦”。 */
+  lastSelectionPress: SelectionPressRecord | null;
+  previousSelectionPress: SelectionPressRecord | null;
   localPositions: Map2D;
   localSizes: SizeMap;
   draft: { source: string; side: "input" | "output"; x: number; y: number } | null;
@@ -120,6 +124,8 @@ export type InteractionCore = {
     hoveredEdgeId?: string | null
   ) => InteractionQuery<HitTarget | null>;
   queryMarquee: (rect: { x: number; y: number; width: number; height: number }) => InteractionQuery<string[]>;
+  /** 世界模型框选：rect 为 canvas CSS 屏幕矩形（世界模型没有卡片，不能走 2D 框选）。 */
+  queryModelMarquee: (rect: { x: number; y: number; width: number; height: number }) => InteractionQuery<string[]>;
   /** 拖动释放时的通用 drop target（最上层实际节点，排除来源）；用于组拖入判定。 */
   queryDropTarget: (point: Point, excludedIds?: readonly string[]) => InteractionQuery<string | null>;
   queryWorldGround: (point: Point) => { u: number; v: number } | null;

@@ -152,6 +152,8 @@ export type AgentConnectionModel = {
 export type AgentConnectionView = {
   /** 稳定连接身份（不从显示名/地址/token 推导）。 */
   connectionId: string;
+  /** 来自服务连接来源的连接投影到该来源身份；本地 Agent 与旧连接可能缺省。 */
+  serviceConnectionId?: string;
   /** 旧记录缺省；仅投影已由贡献方核验的引擎证据。 */
   runtime?: AgentConnectionRuntime;
   /** 解析 adapter 的稳定 id。 */

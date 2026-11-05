@@ -2,11 +2,20 @@
  * 把本回合 Codex 生图产物导入画布（change: 2026-11-03-add-codex-image-import）。
  *
  * 路径只从本进程登记表按 index 取。媒体先写入；节点创建失败时保留已写入对象（D8），
- * 并向调用方返回原始错误。节点是成品图：挂在授权根组下，不写 prompt。
+ * 并向调用方返回原始错误。节点是成品图：加入当前 2D 组（workflow-group-2d）的成员表，
+ * 不写 prompt，也不写入旧组容器字段。
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { findAgentNodeDescriptor, type CanvasCommand, type MediaMetadata, type StoredAsset } from "@woohaa3/contracts";
+import {
+  findAgentNodeDescriptor,
+  type CanvasCommand,
+  type CanvasNodeData,
+  type MediaMetadata,
+  type StoredAsset,
+  type WorkflowGroupData
+} from "@woohaa3/contracts";
+import { stableAuthorityVersion } from "@woohaa3/canvas-service";
 import { resolveGeneratedImage } from "./generated-image-source.js";
 
 export type CodexImageImportReceipt = {
@@ -25,7 +34,12 @@ export type CodexImageImportDeps = {
   canvasId: string;
   requestId: string;
   index: number;
-  rootGroupId: string;
+  /** 当前 2D 组（workflow-group-2d）；成品图片节点加入其 memberNodeIds。 */
+  group: {
+    nodeId: string;
+    nodeData: Record<string, unknown>;
+    workflowGroup: WorkflowGroupData;
+  };
   codexHome: string;
   paths: readonly string[];
   importBytes(input: { bytesBase64: string; contentType: string; maxBytes?: number; canvasId: string }): Promise<MediaMetadata>;
@@ -95,6 +109,13 @@ export async function importCodexGeneratedImage(deps: CodexImageImportDeps): Pro
       size: metadata.size
     }
   };
+  // 2D 组成员来自 workflowGroup2d.memberNodeIds；新节点不加 parentId，也不复用旧组容器。
+  const memberNodeIds = deps.group.workflowGroup.memberNodeIds.filter(id => id !== nodeId);
+  const nextMembers = [...memberNodeIds, nodeId];
+  const scopeVersion = stableAuthorityVersion("workflow-group-scope", {
+    groupId: deps.group.workflowGroup.groupId,
+    memberNodeIds: nextMembers
+  });
   const commands: CanvasCommand[] = [
     {
       type: "node.add",
@@ -103,8 +124,7 @@ export async function importCodexGeneratedImage(deps: CodexImageImportDeps): Pro
         type: "image",
         position: { x: 48 + deps.index * (size.width + 40), y: 48 },
         width: size.width,
-        height: size.height,
-        parentId: deps.rootGroupId
+        height: size.height
       },
       nodeData: {
         title: "Codex 图片",
@@ -114,7 +134,19 @@ export async function importCodexGeneratedImage(deps: CodexImageImportDeps): Pro
         taskStatus: "successed"
       }
     },
-    { type: "asset.upsert", asset }
+    { type: "asset.upsert", asset },
+    {
+      type: "nodeData.patch",
+      nodeId: deps.group.nodeId,
+      value: {
+        ...deps.group.nodeData,
+        workflowGroup2d: {
+          ...deps.group.workflowGroup,
+          memberNodeIds: nextMembers,
+          scopeVersion
+        }
+      } as unknown as CanvasNodeData
+    }
   ];
   const commandId = `codex-image-import:${hash}`;
   const applied = await deps.apply(commands, commandId);

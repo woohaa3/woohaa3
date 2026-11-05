@@ -85,6 +85,36 @@ describe("框选选区瞬时投影（change: fix-group-and-marquee-preview）", 
     controller.dispose();
   });
 
+  it("框选把世界模型 AABB 结果并入同一选择", () => {
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvasWith([
+      { id: "n1", x: 100, y: 100 },
+      { id: "m1", x: 900, y: 900 }
+    ]));
+    const dom = harness();
+    const calls: Array<{ x: number; y: number; width: number; height: number }> = [];
+    const { runtime } = runtimeCapturing({
+      modelMarquee: input => {
+        calls.push({ x: input.x, y: input.y, width: input.width, height: input.height });
+        return ["m1"];
+      }
+    });
+    const controller = installInteractionController({
+      canvas: dom.canvas,
+      getRuntime: () => runtime,
+      getSession: () => getSession() as never,
+      target: dom.target as never
+    });
+
+    dom.fire("pointerdown", { clientX: 20, clientY: 30 });
+    dom.fire("pointermove", { clientX: 220, clientY: 130 });
+    dom.fire("pointerup", { clientX: 220, clientY: 130 });
+    controller.flush();
+
+    expect(calls).toEqual([{ x: 20, y: 30, width: 200, height: 100 }]);
+    expect(nodeSelectionStore.getSnapshot().nodeIds.sort()).toEqual(["m1", "n1"]);
+    controller.dispose();
+  });
+
   it("框选不推进 revision、不提交命令", () => {
     woohaa3CanvasStore.getState().applyRemoteCanvas(canvasWith([{ id: "n1", x: 100, y: 100 }]));
     const dom = harness();
@@ -429,11 +459,11 @@ describe("连线悬停与删除按钮（change: add-edge-hover-delete）", () =>
   it.each([0, 248])("port at x=%s acquires before following, resets outside its fixed anchor range", x => {
     const { dom, controller, scenes } = setup();
     // Inside the extension alone must not acquire a port.
-    move(dom, x + 20); controller.flush();
+    move(dom, x + 32); controller.flush();
     expect(scenes.at(-1)?.hover).not.toMatchObject({ port: x ? "output" : "input" });
     move(dom, x); controller.flush();
-    move(dom, x + 20); controller.flush();
-    expect(scenes.at(-1)).toMatchObject({ hover: { nodeId: "n1", port: x ? "output" : "input", cursor: { x: x + 20, y: 116 } } });
+    move(dom, x + 32); controller.flush();
+    expect(scenes.at(-1)).toMatchObject({ hover: { nodeId: "n1", port: x ? "output" : "input", cursor: { x: x + 32, y: 116 } } });
     move(dom, x + 40); controller.flush();
     expect(scenes.at(-1)?.hover).not.toMatchObject({ port: x ? "output" : "input" });
     controller.dispose();

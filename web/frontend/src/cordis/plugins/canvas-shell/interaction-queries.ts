@@ -14,6 +14,8 @@ import type { InteractionQuery } from "./interaction-core.js";
 export type InteractionQueries = {
   queryPoint(world: Point, zoom: number, hoveredEdgeId?: string | null): InteractionQuery<HitTarget | null>;
   queryMarquee(rect: { x: number; y: number; width: number; height: number }): InteractionQuery<string[]>;
+  /** 世界模型框选：rect 为 canvas CSS 屏幕矩形，返回投影 AABB 相交的模型 identity。 */
+  queryModelMarquee(rect: { x: number; y: number; width: number; height: number }): InteractionQuery<string[]>;
   queryProbe(source: string, direction: "prev" | "next"): InteractionQuery<ProbeCandidate[]>;
   /**
    * 通用 drop target 查询。
@@ -70,6 +72,13 @@ export function createInteractionQueries(deps: {
       const generation = generationOf(runtime);
       if (!runtime?.queryMarquee || generation === null) return { ok: false, reason: "unavailable" };
       return runtime.queryMarquee({ generation, x: rect.x, y: rect.y, width: rect.width, height: rect.height }) as InteractionQuery<string[]>;
+    },
+    queryModelMarquee(rect) {
+      const runtime = deps.getRuntime();
+      ensurePublished();
+      const generation = generationOf(runtime);
+      if (!runtime?.queryModelMarquee || generation === null) return { ok: false, reason: "unavailable" };
+      return runtime.queryModelMarquee({ generation, x: rect.x, y: rect.y, width: rect.width, height: rect.height }) as InteractionQuery<string[]>;
     },
     queryProbe(source, direction) {
       const runtime = deps.getRuntime();

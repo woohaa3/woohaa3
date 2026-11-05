@@ -5,7 +5,7 @@ import { sceneDiagnostics, noteFrameStep } from "../canvas-runtime/scene-diagnos
  * 2D 手势、视口和模型编辑各由独立模块处理，不在此重建命中几何。
  * （change: replace-godot-canvas-runtime-with-bevy / split-frontend-god-plugins）
  */
-import { bevyNodeHistoryStripDot, decodeSceneAreaData, decodeWorldInstanceData, worldToCanvasPoint, worldToRendererPosition, type CanvasRenderScene, type GroundAabb } from "@woohaa3/contracts";
+import { bevyNodeHistoryStripDot, decodeSceneAreaData, decodeWorldCamera, decodeWorldInstanceData, worldToCanvasPoint, worldToRendererPosition, type CanvasRenderScene, type GroundAabb } from "@woohaa3/contracts";
 import { createSurfaceMetrics } from "./canvas-surface-metrics.js";
 import { hasNativeBootstrap } from "../canvas-runtime/runtime-realm.js";
 import { createModelGestureFamily } from "./model-gesture-family.js";
@@ -33,7 +33,8 @@ import { INITIAL_WHEEL_SOURCE } from "./input/wheel-gesture.js";
 import type { TextureUploader } from "../canvas-runtime/texture-sync.js";
 import { createLocalViewportStore } from "../canvas-runtime/local-viewport.js";
 import { currentSceneAreaGestures } from "../world-scopes/gestures.js";
-import { sceneAreaPanelRect, sceneAreaTitleRect, worldInstancePanelRect } from "./panel-anchor-rect.js";
+import { sceneAreaPanelRect, sceneAreaTitleRect, worldAabbPanelRect, worldCameraPanelRect, worldInstancePanelRect } from "./panel-anchor-rect.js";
+import { worldInstanceAabb } from "./model-world-presentation.js";
 import { createWorldCameraPreviewState } from "./world-camera-preview.js";
 import { createWorldGroundPreviewState } from "./world-ground-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -101,6 +102,8 @@ export function installInteractionController(options: InteractionControllerOptio
   const state: InteractionState = {
     gesture: { kind: "none" },
     selected: [],
+    lastSelectionPress: null,
+    previousSelectionPress: null,
     alignmentGuides: [],
     alignmentGuidesVersion: 0,
     localPositions: new Map(),
@@ -769,7 +772,18 @@ export function installInteractionController(options: InteractionControllerOptio
       setSelection([nodeId]); return true;
     },
     nodeScreenRect: (nodeId, part) => {
+      if (part === "action-toolbar") {
+        // Match the old renderer toolbar eligibility and anchor using the accepted card projection.
+        const node = frameSubmission.renderedNode(nodeId);
+        if (!node || node.chrome?.kind === "none") return null;
+        const point = worldToClient({ x: node.x, y: node.y });
+        const zoom = activeViewport().zoom;
+        return { left: point.x, top: point.y, width: node.width * zoom, height: node.height * zoom };
+      }
       const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+      // 面板锚点必须跟随**当前渲染姿态**：导演区动画会覆盖镜头/实例位姿，权威 nodeData 是动画前
+      // 的基准；直接用规范位姿会把面板留在动画前的位置。
+      const rendered = frameSubmission.renderedNode(nodeId);
       const project = (u: number, v: number, h = 0) => {
         const renderer = worldToRendererPosition({ u, v, h });
         const point = worldToCanvasPoint([renderer[0], renderer[1], renderer[2]]);
@@ -781,10 +795,23 @@ export function installInteractionController(options: InteractionControllerOptio
         const bounds = sceneAreaPreviews.get(nodeId) ?? area.value.bounds;
         return part === "scope-title" ? sceneAreaTitleRect(bounds, project, activeViewport().zoom) : sceneAreaPanelRect(bounds, project);
       }
-      // 共享世界模型没有内容卡片：以模型世界原点（脚点）为锚，面板落在模型下方。
+      // 共享世界模型没有内容卡片。生成面板用模型世界 AABB 的屏幕包围盒，面板才会落在模型
+      // 真实下沿之外；缺少 prepared AABB（加载中/空模型）时退回世界原点脚点。
       const instance = decodeWorldInstanceData(canvas?.nodeData[nodeId]?.sharedWorldInstance);
       if (instance.ok) {
-        return worldInstancePanelRect(instance.value.transform.position, project);
+        // 动画/拖动预览后的实例位姿优先；没有已提交场景时退回权威位姿。
+        const transform = rendered?.sharedWorldInstance?.transform ?? instance.value.transform;
+        if (part === "panel") {
+          const localAabb = options.getModelResources?.().get(nodeId)?.aabb;
+          const worldAabb = worldInstanceAabb(transform, localAabb);
+          if (worldAabb) {
+            return worldAabbPanelRect(worldAabb, (x, y, z) => {
+              const point = worldToCanvasPoint([x, y, z]);
+              return worldToClient({ x: point.x, y: point.y });
+            });
+          }
+        }
+        return worldInstancePanelRect(transform.position, project);
       }
       const index = sharedCanvasNodeIndex(canvas);
       const node = index?.byId.get(nodeId);
@@ -795,7 +822,18 @@ export function installInteractionController(options: InteractionControllerOptio
       const size = state.localSizes.get(nodeId) ?? indexNodeSize(node);
       const topLeft = worldToClient(position);
       const viewport = activeViewport();
-      return { left: topLeft.x, top: topLeft.y, width: size.width * viewport.zoom, height: size.height * viewport.zoom };
+      const card = { left: topLeft.x, top: topLeft.y, width: size.width * viewport.zoom, height: size.height * viewport.zoom };
+      // 世界镜头有独立 3D 机位：生成面板（`part: "panel"`）在机位可见时贴机位底点，否则退回
+      // 2D 卡片；其它锚点（顶部横条、设置箭头）继续跟随卡片，避免横条跟着 3D 机位跑。
+      if (part === "panel") {
+        // 动画/机位拖动预览后的镜头位姿优先；没有已提交场景时退回权威配置。
+        const renderedCamera = rendered?.worldCamera;
+        const camera = renderedCamera
+          ? { ok: true as const, value: renderedCamera }
+          : decodeWorldCamera(canvas?.nodeData[nodeId]?.worldCamera);
+        if (camera.ok) return worldCameraPanelRect(camera.value.position, project, readBounds(), card);
+      }
+      return card;
     },
     alignmentGuides: () => state.gesture.kind === "drag" && state.gesture.moved ? state.alignmentGuides : EMPTY_ALIGNMENT_GUIDES,
     alignmentGuidesVersion: () => state.alignmentGuidesVersion,

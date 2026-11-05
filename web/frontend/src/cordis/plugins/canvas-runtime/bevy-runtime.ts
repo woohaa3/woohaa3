@@ -588,6 +588,13 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
           projectModelPick
         )
       ),
+    queryModelMarquee: (input) =>
+      guardGeneration(input.generation, () =>
+        runQuery(
+          () => (module.query_model_marquee ?? (() => ""))(encodeMarqueeRequest(input)),
+          projectMarquee
+        )
+      ),
     queryCameraEditorSurface: (input) =>
       guardGeneration(input.generation, () =>
         runQuery(
@@ -786,6 +793,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     setTexture: runtime.setTexture,
     queryGizmoHit: runtime.queryGizmoHit,
     queryModelPick: runtime.queryModelPick,
+    queryModelMarquee: runtime.queryModelMarquee,
     queryCameraEditorSurface: runtime.queryCameraEditorSurface,
     queryWorldGround: runtime.queryWorldGround,
     // 真实 WASM 命中查询：E2E 用它验证 Rust 侧 serde 确实读到 camelCase 键。

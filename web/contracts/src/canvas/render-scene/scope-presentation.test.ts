@@ -137,6 +137,77 @@ it("applies a transient camera pose without rewriting the source canvas", () => 
     .toMatchObject({ position: { u: 0, v: 0, h: 1.5 } });
 });
 
+it("adds the director area's stable origin to relative position tracks", () => {
+  const canvas = fixture();
+  const area = canvas.nodeData.area!.sceneArea as Record<string, unknown>;
+  area.animationOrigin = { u: 10, v: 20 };
+  area.animationScript = {
+    script: 'motion.instance.tween("instance-main", { property: "position", startTime: 0, endTime: 4, from: [1, 2, 0], to: [3, 4, 0], easing: "linear" });',
+    scriptLanguage: "javascript",
+    scriptVersion: "woohaa-world-animation-js-v2",
+    revision: 1,
+    sourceHash: "instance-position-hash",
+    duration: 4,
+    loop: false
+  } satisfies WorldAnimationScript;
+  const scene = buildCanvasRenderScene({ canvas, sceneAnimationTimes: new Map([["area", 0]]) });
+  expect(scene.nodes.find(node => node.id === "model")!.sharedWorldInstance!.transform.position)
+    .toEqual({ u: 11, v: 22, h: 0 });
+});
+
+it("translates the animation origin with an area-move preview", () => {
+  const canvas = fixture();
+  const area = canvas.nodeData.area!.sceneArea as Record<string, unknown>;
+  area.animationOrigin = { u: 10, v: 20 };
+  area.animationScript = {
+    script: 'motion.instance.tween("instance-main", { property: "position", startTime: 0, endTime: 4, from: [1, 2, 0], to: [3, 4, 0], easing: "linear" });',
+    scriptLanguage: "javascript",
+    scriptVersion: "woohaa-world-animation-js-v2",
+    revision: 1,
+    sourceHash: "instance-preview-hash",
+    duration: 4,
+    loop: false
+  } satisfies WorldAnimationScript;
+  const scene = buildCanvasRenderScene({
+    canvas,
+    sceneAnimationTimes: new Map([["area", 0]]),
+    sceneAreaPreviews: new Map([["area", {
+      min: { u: 0, v: 1 },
+      max: { u: 4, v: 5 }
+    }]])
+  });
+  expect(scene.nodes.find(node => node.id === "model")!.sharedWorldInstance!.transform.position)
+    .toEqual({ u: 13, v: 25, h: 0 });
+});
+
+it("lets a transient camera pose win over the sampled animation", () => {
+  const canvas = fixture();
+  const area = canvas.nodeData.area!.sceneArea as Record<string, unknown>;
+  area.animationScript = {
+    script: 'motion.camera.tween({ cameraId: "camera-main", property: "position", startTime: 0, endTime: 4, from: [1, 2, 1.5], to: [3, 4, 1.5], easing: "linear" });',
+    scriptLanguage: "javascript",
+    scriptVersion: "woohaa-world-animation-js-v2",
+    revision: 1,
+    sourceHash: "camera-hash",
+    duration: 4,
+    loop: false
+  } satisfies WorldAnimationScript;
+  const sampled = buildCanvasRenderScene({ canvas, sceneAnimationTimes: new Map([["area", 0]]) });
+  expect(sampled.nodes.find(node => node.id === "camera")!.worldCamera?.position)
+    .toEqual({ u: 1, v: 2, h: 1.5 });
+
+  const dragged = buildCanvasRenderScene({
+    canvas,
+    sceneAnimationTimes: new Map([["area", 0]]),
+    worldCameraPreviews: new Map([["camera", {
+      position: { u: 9, v: 8, h: 7 },
+      rotation: [0, 0, 0, 1]
+    }]])
+  });
+  expect(dragged.nodes.find(node => node.id === "camera")!.worldCamera?.position)
+    .toEqual({ u: 9, v: 8, h: 7 });
+});
+
 it("drops edges that would point at the omitted scene-area node", () => {
   const canvas = fixture();
   canvas.document.edges.push(
@@ -163,7 +234,7 @@ it("samples each director at its own playhead without modifying canonical transf
   const animationScript = (instanceId: string): WorldAnimationScript => ({
     script: `motion.instance.tween(${JSON.stringify(instanceId)}, { property: "scale", startTime: 0, endTime: 4, from: [1], to: [5], easing: "linear" });`,
     scriptLanguage: "javascript",
-    scriptVersion: "woohaa-world-animation-js-v1",
+    scriptVersion: "woohaa-world-animation-js-v2",
     revision: 1,
     sourceHash: `hash-${instanceId}`,
     duration: 4,

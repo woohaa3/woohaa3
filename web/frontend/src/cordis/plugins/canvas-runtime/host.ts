@@ -39,7 +39,6 @@ import { driveModelFocusTransition, focusTransitionHost } from "./focus-transiti
 import { isDocumentFocusTarget } from "../../navigation/contracts.js";
 import { buildAttachInteractionOptions } from "./attach-interaction-options.js";
 import { AnimationPlaybackStore } from "./animation-playback-store.js";
-import { readNodeActionToolbars, activateNodeAction } from "../canvas-shell/node-action-bridge.js";
 import { ImageFocusStore } from "./image-focus-store.js";
 import { VideoFocusStore } from "./video-focus-store.js";
 import { ModelSceneOverrideStore } from "./model-scene-override-store.js";
@@ -545,7 +544,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
    * 单节点屏幕矩形（CSS px）（change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1）。
    * 转发到控制器；未挂载或节点不存在返回 null。
    */
-  nodeScreenRect = (nodeId: string, part?: "scope-title"): import("@woohaa3/contracts").ScreenRect | null =>
+  nodeScreenRect = (nodeId: string, part?: "scope-title" | "panel" | "action-toolbar"): import("@woohaa3/contracts").ScreenRect | null =>
     this.controllerInstance?.nodeScreenRect(nodeId, part) ?? null;
   nodePresentationScreenRect = (nodeId: string): import("@woohaa3/contracts").ScreenRect | null =>
     this.nodeScreenRect(nodeId);
@@ -643,8 +642,6 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         getModelResources: () => this.options.getModelResources?.() ?? new Map(),
         theme: () => this.options.getTheme?.() ?? defaultAppTheme(),
         getGhostNodes: () => this.ghosts,
-        getNodeActionToolbars: () => readNodeActionToolbars(),
-        onNodeAction: (hit) => activateNodeAction(hit),
         modelFocus: () => this.modelFocus,
         worldAnimationTimes: this.worldAnimationTimes,
         modelFocusMode: this.modelFocusMode,

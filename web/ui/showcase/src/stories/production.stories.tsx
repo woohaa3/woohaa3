@@ -32,13 +32,13 @@ export const AnchorBelow: Story = () => (
 );
 AnchorBelow.storyName = "锚点 · 下方";
 
-export const AnchorFlip: Story = () => (
+export const AnchorTightBelow: Story = () => (
 	<FixtureStage>
-		<ProductionFixtureHeader title="节点锚点 · 边缘翻转" note="底边节点优先在上方呈现，左右边缘由生产定位函数纠偏。" />
+		<ProductionFixtureHeader title="节点锚点 · 下方空间不足" note="面板只落在节点下方：空间不足时压缩高度并内部滚动，不飘到左右两侧，也不上翻。" />
 		<ShowcasePanelHost canvas={baseCanvas("image")} anchor="bottom" />
 	</FixtureStage>
 );
-AnchorFlip.storyName = "锚点 · 上方翻转";
+AnchorTightBelow.storyName = "锚点 · 下方空间不足";
 
 export const AnchorUnavailable: Story = () => (
 	<FixtureStage>

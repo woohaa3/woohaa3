@@ -86,7 +86,7 @@ describe("assistant world MCP tools", () => {
     const animationScript: WorldAnimationScript = {
       script: 'motion.instance.tween("actor-1", { property: "rotation", startTime: 0, endTime: 5, from: [0, 0, 0], to: [0, 90, 0], easing: "easeOut" });',
       scriptLanguage: "javascript",
-      scriptVersion: "woohaa-world-animation-js-v1",
+      scriptVersion: "woohaa-world-animation-js-v2",
       revision: 1,
       sourceHash: "hash-script",
       duration: 5,
@@ -101,7 +101,7 @@ describe("assistant world MCP tools", () => {
           version: "assistant-world-authority-v1", canvasId: "canvas-1", contextId: "ctx-1", runId: "run-1", epoch: 0,
           scope: { scope: { kind: "scene-area", areaId: "area-1" }, scopeVersion: "scope-1" },
           writable: [{ kind: "instance", instanceId: "actor-1", version: "actor-v1" }], readOnly: [], objects: [],
-          worldWritable: true, sceneArea: { nodeId: "area-node", revision: 7, scopeVersion: "scope-1", animationScript }
+          worldWritable: true, sceneArea: { nodeId: "area-node", revision: 7, scopeVersion: "scope-1", animationOrigin: { u: 0, v: 0 }, animationScript }
         } };
       },
       async write() { throw new Error("Read must not write"); },

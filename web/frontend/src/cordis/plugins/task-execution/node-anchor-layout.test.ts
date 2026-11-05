@@ -27,6 +27,12 @@ describe("layoutNodePanel", () => {
       .toMatchObject({ top: 616, maxHeight: 134, placement: "below" });
   });
 
+  it("节点完全离开视口时不再留下贴边面板（含 below 策略）", () => {
+    const offscreen = { left: 1200, top: 200, width: 100, height: 80 };
+    expect(layoutNodePanel(offscreen, area, { width: 600, height: 300 })).toBeNull();
+    expect(layoutNodePanel(offscreen, area, { width: 600, height: 300 }, undefined, "below")).toBeNull();
+  });
+
   it("flips above when the lower area is too short", () => {
     expect(layoutNodePanel({ left: 440, top: 540, width: 100, height: 80 }, area, { width: 600, height: 300 })?.placement).toBe("above");
   });
@@ -57,10 +63,10 @@ describe("layoutNodePanel", () => {
   });
 });
 
-describe("组徽标锚点（below 策略）", () => {
+describe("严格下方（below 策略）", () => {
   const viewport = { left: 0, top: 0, width: 1440, height: 2000 };
 
-  it("面板整块落在徽标下缘之外，不盖住场景", () => {
+  it("面板整块落在锚点下缘之外，不盖住对象", () => {
     const badge = { left: 100, top: 1000, width: 880, height: 640 };
     const panel = layoutNodePanel(badge, viewport, { width: 760, height: 320 }, undefined, "below")!;
     expect(panel.placement).toBe("below");
@@ -68,23 +74,23 @@ describe("组徽标锚点（below 策略）", () => {
     expect(panel.top).toBeGreaterThanOrEqual(badge.top + badge.height);
   });
 
-  it("徽标探出视口底边时改贴侧面，而不是压回模型上", () => {
-    const badge = { left: 400, top: 600, width: 880, height: 640 };
-    const area = { left: 0, top: 0, width: 1440, height: 900 };
-    const panel = layoutNodePanel(badge, area, { width: 400, height: 320 }, undefined, "below")!;
-    expect(panel.placement).toBe("left");
-    // 完全不与徽标水平重叠 → 不遮挡模型。
-    expect(panel.left + panel.width).toBeLessThanOrEqual(badge.left);
-    expect(panel.top).toBeGreaterThanOrEqual(area.top);
-    expect(panel.top + Math.min(320, panel.maxHeight)).toBeLessThanOrEqual(area.top + area.height);
+  it("下方空间不足时只压缩高度并保持在下方，不飘到对象左右两侧", () => {
+    const node = { left: 440, top: 540, width: 100, height: 80 };
+    const area = { left: 0, top: 0, width: 1440, height: 700 };
+    const panel = layoutNodePanel(node, area, { width: 600, height: 320 }, undefined, "below")!;
+    expect(panel.placement).toBe("below");
+    expect(panel.top).toBe(node.top + node.height + 12);
+    // 高度收回视口内的可用空间，面板内部滚动；不再改贴 left/right。
+    expect(panel.maxHeight).toBe(area.top + area.height - (node.top + node.height) - 12);
+    expect(panel.maxHeight).toBeLessThan(320);
+    // 仍以节点中心水平居中，不是贴到节点侧面。
+    const center = panel.left + panel.width / 2;
+    expect(center).toBeCloseTo(node.left + node.width / 2, 5);
   });
 
-  it("两侧都放不下时才退回视口底边（面板仍可见）", () => {
-    const badge = { left: 0, top: 600, width: 1440, height: 640 };
+  it("锚点下缘已越过视口底边时隐藏，而不是改贴侧面或视口边缘", () => {
+    const badge = { left: 400, top: 600, width: 880, height: 640 };
     const area = { left: 0, top: 0, width: 1440, height: 900 };
-    const panel = layoutNodePanel(badge, area, { width: 760, height: 320 }, undefined, "below")!;
-    expect(panel.placement).toBe("edge");
-    expect(panel.top).toBeGreaterThanOrEqual(area.top);
-    expect(panel.top + Math.min(320, panel.maxHeight)).toBeLessThanOrEqual(area.top + area.height);
+    expect(layoutNodePanel(badge, area, { width: 760, height: 320 }, undefined, "below")).toBeNull();
   });
 });

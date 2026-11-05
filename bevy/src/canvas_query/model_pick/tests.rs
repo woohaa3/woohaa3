@@ -157,3 +157,23 @@ fn pick_query_respects_generation_and_emptiness() {
     assert!(stale.contains("\"available\":false"));
     assert!(stale.contains("stale"));
 }
+
+#[test]
+fn marquee_selects_world_models_by_projected_aabb() {
+    let view = crate::isometric_grid::IsometricGridView::default();
+    let center = crate::isometric_grid::screen_point_from_world(bevy::prelude::Vec3::ZERO, &view);
+    let candidate = |id: &str, offset: f32| ModelCandidate {
+        node_id: id.into(),
+        shared_world: true,
+        empty_marker: false,
+        min: [offset - 1.0, offset - 1.0, -1.0],
+        max: [offset + 1.0, offset + 1.0, 1.0],
+        triangles: None,
+    };
+    let candidates = vec![candidate("near", 0.0), candidate("far", 1000.0)];
+    let ids = marquee_node_ids(&candidates, &view, center.x - 200.0, center.y - 200.0, 400.0, 400.0);
+    assert_eq!(ids, vec!["near".to_owned()]);
+    // 空矩形不命中任何模型。
+    let empty = marquee_node_ids(&candidates, &view, center.x + 5000.0, center.y + 5000.0, 10.0, 10.0);
+    assert!(empty.is_empty());
+}

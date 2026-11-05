@@ -30,6 +30,8 @@ import { definePlugin } from "../../plugin.js";
 import { documentWorkspaceAvailable, resolveFocusWorkspace, watchFocusWorkspace } from "../../focus/host.js";
 import { imageFocusTargetValid } from "../../focus/image-focus-target.js";
 import type { CanvasSlotProps } from "../../contract/platform.js";
+import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
+import { setWorldUnbindConfirmer } from "../canvas-shell/world-unbind-confirm.js";
 
 export const CANVAS_RUNTIME_PLUGIN_ID = "canvas-runtime";
 export const CANVAS_CONTEXT_MENU_TYPE = "canvas-context";
@@ -221,6 +223,51 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
           ...(options.onViewportChange ? { onViewportChange: options.onViewportChange } : {})
         });
 
+      // 模型移出动画所属导演区时，用共享 AlertDialog 确认是否解绑脚本。
+      ctx.effect(() => {
+        setWorldUnbindConfirmer(input => new Promise<boolean>(resolve => {
+          let settled = false;
+          let instanceId: string | null = null;
+          let disposeAction: (() => void) | null = null;
+          let unsubscribe: (() => void) | null = null;
+          const finish = (confirmed: boolean) => {
+            if (settled) return;
+            settled = true;
+            disposeAction?.();
+            disposeAction = null;
+            unsubscribe?.();
+            unsubscribe = null;
+            if (instanceId) ctx.dialogs.close(instanceId);
+            resolve(confirmed);
+          };
+          const actionKey = `world-unbind:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+          disposeAction = ctx.dialogs.registerAlertAction(actionKey, async () => {
+            finish(true);
+            return { ok: true };
+          });
+          const opened = ctx.dialogs.open({
+            dialogId: ALERT_DIALOG_ID,
+            payload: {
+              title: input.title,
+              description: input.description,
+              confirmLabel: input.confirmLabel,
+              cancelLabel: "取消",
+              danger: true,
+              actionKey
+            }
+          });
+          if (!opened.ok) {
+            finish(false);
+            return;
+          }
+          instanceId = opened.instance.instanceId;
+          unsubscribe = ctx.dialogs.subscribe(() => {
+            if (instanceId && !ctx.dialogs.find(instanceId)) finish(false);
+          });
+        }));
+        return () => setWorldUnbindConfirmer(null);
+      }, "world-unbind-confirm");
+
       ctx.provide("canvasRuntime" as never, host as never);
 
       // 向 Canvas Navigation 注册 model-focus adapter（design D2/D7）。
@@ -304,7 +351,7 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
         };
       }, "canvas-runtime-load");
     },
-    { name: CANVAS_RUNTIME_PLUGIN_ID, inject: ["nodeImplementations", "canvasState", "canvasSession", "inputScopes", "theme", "canvasNavigation", "canvasEdit", "canvasRemote", "slots"] }
+    { name: CANVAS_RUNTIME_PLUGIN_ID, inject: ["nodeImplementations", "canvasState", "canvasSession", "inputScopes", "theme", "canvasNavigation", "canvasEdit", "canvasRemote", "slots", "dialogs"] }
   );
 }
 

@@ -126,9 +126,9 @@ test.describe("fixed surface containment", () => {
     expect(dock!.y + dock!.height).toBeLessThanOrEqual(box!.y + box!.height);
   });
 
-  test("舞台节点靠底边时使用生产上翻位置", async ({ page }) => {
-    await openStory(page, "画布组件--执行面板--生产组合--锚点-·-上方翻转");
-    await expect(page.locator(".node-execution-dock")).toHaveAttribute("data-placement", "above");
+  test("舞台节点下方空间不足时只压缩高度，仍保持在节点下方", async ({ page }) => {
+    await openStory(page, "画布组件--执行面板--生产组合--锚点-·-下方空间不足");
+    await expect(page.locator(".node-execution-dock")).toHaveAttribute("data-placement", "below");
     const box = await page.locator(".showcase__panel-box").boundingBox();
     const dock = await page.locator(".node-execution-dock").boundingBox();
     expect(dock!.y).toBeGreaterThanOrEqual(box!.y - 1);

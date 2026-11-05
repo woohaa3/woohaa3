@@ -61,7 +61,7 @@ describe("world animation script", () => {
   it("persists and strictly decodes the script definition", () => {
     const script = createWorldAnimationScript({ script: SCRIPT, duration: 4, loop: true });
     expect(decodeWorldAnimationScript(script)).toEqual({ ok: true, value: script });
-    expect(decodeWorldAnimationScript({ ...script, scriptVersion: "woohaa-world-animation-js-v2" }).ok).toBe(false);
+    expect(decodeWorldAnimationScript({ ...script, scriptVersion: "woohaa-world-animation-js-v1" }).ok).toBe(false);
     expect(decodeWorldAnimationScript({ ...script, duration: 0 }).ok).toBe(false);
     expect(decodeWorldAnimationScript({ ...script, extra: 1 }).ok).toBe(false);
   });

@@ -335,6 +335,105 @@ pub(crate) fn pick_query_json(json: &str) -> String {
     serde_json::to_string(&result).unwrap_or_else(|_| stale_result("unavailable"))
 }
 
+/// 屏幕矩形框选：把模型世界 AABB 的 8 个角投影到画布 CSS 坐标，返回与矩形相交的模型。
+///
+/// 世界对象没有内容卡片，2D interaction snapshot 的 `node.card` 框选无法覆盖它们；
+/// 这里复用模型 pick 的同一世界 AABB 与相机映射，避免为框选另造一套 3D 几何。
+pub(crate) fn marquee_query_json(json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Request {
+        generation: u32,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    }
+    let request = match serde_json::from_str::<Request>(json) {
+        Ok(request) => request,
+        Err(_) => return serde_json::json!({"available": false, "reason": "unavailable"}).to_string(),
+    };
+    if !READY.with(std::cell::Cell::get) {
+        return serde_json::json!({"available": false, "reason": "unavailable"}).to_string();
+    }
+    if request.generation != GENERATION.with(std::cell::Cell::get) {
+        return serde_json::json!({"available": false, "reason": "stale"}).to_string();
+    }
+    if ![request.x, request.y, request.width, request.height].iter().all(|n| n.is_finite()) {
+        return serde_json::json!({"available": false, "reason": "unavailable"}).to_string();
+    }
+    let camera = CAMERA.with(|slot| *slot.borrow());
+    if !camera.ordinary {
+        return serde_json::json!({"available": false, "reason": "unavailable"}).to_string();
+    }
+    let view = crate::isometric_grid::IsometricGridView {
+        x: camera.viewport[0],
+        y: camera.viewport[1],
+        zoom: camera.viewport[2],
+    };
+    let mut candidates = CANDIDATES.with(|slot| slot.borrow().clone());
+    SHARED_CURRENT.with(|slot| candidates.extend(slot.borrow().iter().cloned()));
+    let node_ids = marquee_node_ids(&candidates, &view, request.x, request.y, request.width, request.height);
+    serde_json::json!({
+        "available": true,
+        "generation": request.generation,
+        "nodeIds": node_ids
+    })
+    .to_string()
+}
+
+fn marquee_node_ids(
+    candidates: &[ModelCandidate],
+    view: &crate::isometric_grid::IsometricGridView,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> Vec<String> {
+    let left = x.min(x + width);
+    let right = x.max(x + width);
+    let top = y.min(y + height);
+    let bottom = y.max(y + height);
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for candidate in candidates {
+        if !seen.insert(candidate.node_id.as_str()) {
+            continue;
+        }
+        if !candidate.min.iter().chain(candidate.max.iter()).all(|value| value.is_finite()) {
+            continue;
+        }
+        let mut sx_min = f32::INFINITY;
+        let mut sx_max = f32::NEG_INFINITY;
+        let mut sy_min = f32::INFINITY;
+        let mut sy_max = f32::NEG_INFINITY;
+        for xi in [candidate.min[0], candidate.max[0]] {
+            for yi in [candidate.min[1], candidate.max[1]] {
+                for zi in [candidate.min[2], candidate.max[2]] {
+                    let point = crate::isometric_grid::screen_point_from_world(
+                        bevy::prelude::Vec3::new(xi, yi, zi),
+                        view,
+                    );
+                    if !point.x.is_finite() || !point.y.is_finite() {
+                        continue;
+                    }
+                    sx_min = sx_min.min(point.x);
+                    sx_max = sx_max.max(point.x);
+                    sy_min = sy_min.min(point.y);
+                    sy_max = sy_max.max(point.y);
+                }
+            }
+        }
+        if !sx_min.is_finite() || !sy_min.is_finite() {
+            continue;
+        }
+        if sx_min < right && sx_max > left && sy_min < bottom && sy_max > top {
+            out.push(candidate.node_id.clone());
+        }
+    }
+    out
+}
+
 pub(crate) fn pick_candidates(candidates: &[ModelCandidate], origin: bevy::prelude::Vec3, direction: bevy::prelude::Vec3, max_t: f32) -> Option<(String, [f32; 3], f32)> {
     let mut best = None;
     let mut best_t = max_t;

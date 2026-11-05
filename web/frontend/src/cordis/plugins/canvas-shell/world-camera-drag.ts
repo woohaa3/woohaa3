@@ -14,13 +14,26 @@
  * 集中在本文件，便于回归。
  */
 import {
+  createWorldAnimationScript,
+  decodeSceneAreaData,
   decodeWorldCamera,
+  executeWorldAnimationScript,
+  sampleWorldAnimationInArea,
+  sceneAreaAnimationOrigin,
+  serializeWorldAnimationScript,
   worldCameraUiSettingsOf,
   worldToCanvasPoint,
   worldToRendererPosition,
+  type CanvasCommand,
+  type CanvasNodeData,
+  type GroundAabb,
   type GroundPoint,
+  type SceneAreaData,
   type ServerCanvas,
+  type WorldAnimationIr,
+  type WorldAnimationScript,
   type WorldCameraData,
+  type WorldCameraTrack,
   type WorldPoint,
   type WorldRotation
 } from "@woohaa3/contracts";
@@ -33,7 +46,10 @@ export type WorldCameraDragStart = {
   nodeId: string;
   /** 按下瞬间的规范镜头数据（JSON），用于检测外部改写与空操作。 */
   source: string;
+  /** 拖拽使用的有效位姿：动画镜头取当前采样位姿，普通镜头等于规范位姿。 */
   camera: WorldCameraData;
+  /** 规范镜头；撤销与版本校验始终以它为准。 */
+  canonical: WorldCameraData;
   mode: WorldCameraDragMode;
   start: GroundPoint;
   /** 按下时的卡片左上角（绝对画布坐标），用于撤销/重做时一起还原。 */
@@ -74,11 +90,13 @@ export function beginWorldCameraDrag(
   canvas: ServerCanvas | null | undefined,
   nodeId: string | null,
   ground: GroundPoint | null,
-  mode: WorldCameraDragMode
+  mode: WorldCameraDragMode,
+  sampledCamera?: WorldCameraData
 ): WorldCameraDragStart | null {
   if (!ground || !Number.isFinite(ground.u) || !Number.isFinite(ground.v)) return null;
-  const camera = cameraOf(canvas, nodeId);
-  if (!camera || !nodeId) return null;
+  const canonical = cameraOf(canvas, nodeId);
+  if (!canonical || !nodeId) return null;
+  const camera = sampledCamera ?? canonical;
   const start = { u: ground.u, v: ground.v };
   const pose = poseFor(camera, mode, { u: 0, v: 0 });
   // 等距镜头的朝向必须保持等距；无法构造合法姿态时不开始手势（走点击选中）。
@@ -91,6 +109,7 @@ export function beginWorldCameraDrag(
     nodeId,
     source: JSON.stringify(canvas?.nodeData?.[nodeId]?.worldCamera),
     camera,
+    canonical,
     mode,
     start,
     card,
@@ -263,4 +282,185 @@ export function cardFollowPosition(start: WorldCameraDragStart, pose: WorldCamer
 /** 渲染器空间位置（米制 → Bevy 世界）供诊断/测试核对。 */
 export function worldCameraRendererPosition(pose: WorldCameraPose): [number, number, number] {
   return worldToRendererPosition(pose.position) as [number, number, number];
+}
+
+/** 一个正在驱动该镜头的导演区脚本。 */
+export type WorldCameraAnimationArea = {
+  nodeId: string;
+  data: Record<string, unknown>;
+  area: SceneAreaData;
+  script: WorldAnimationScript;
+  ir: WorldAnimationIr;
+};
+
+export type WorldCameraAnimationSample = {
+  /** 当前动画时间下的有效镜头位姿；投影、绑定与版本仍取规范值。 */
+  camera: WorldCameraData;
+  areas: WorldCameraAnimationArea[];
+};
+
+function cameraById(canvas: ServerCanvas, cameraId: string): WorldCameraData | null {
+  for (const node of canvas.document.nodes) {
+    const decoded = decodeWorldCamera(canvas.nodeData?.[node.id]?.worldCamera);
+    if (decoded.ok && decoded.value.cameraId === cameraId) return decoded.value;
+  }
+  return null;
+}
+
+/**
+ * 采样所有驱动该镜头的导演区脚本。多个区同时声明时按文档顺序后者覆盖，
+ * 与 `scene-builder` 的投影顺序一致。
+ */
+export function animatedCameraAt(
+  canvas: ServerCanvas | null | undefined,
+  cameraId: string,
+  times?: ReadonlyMap<string, number>
+): WorldCameraAnimationSample | null {
+  if (!canvas) return null;
+  const canonical = cameraById(canvas, cameraId);
+  if (!canonical) return null;
+  let position = canonical.position;
+  let rotation = canonical.rotation;
+  const areas: WorldCameraAnimationArea[] = [];
+  for (const node of canvas.document.nodes) {
+    const data = canvas.nodeData[node.id] as Record<string, unknown> | undefined;
+    const decoded = decodeSceneAreaData(data?.sceneArea);
+    if (!decoded.ok || !decoded.value.animationScript) continue;
+    const script = decoded.value.animationScript;
+    const executed = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
+    if (!executed.ok) continue;
+    if (!executed.ir.cameraTracks.some(track => track.targetId === cameraId)) continue;
+    const sample = sampleWorldAnimationInArea(
+      executed.ir,
+      times?.get(node.id) ?? 0,
+      sceneAreaAnimationOrigin(decoded.value)
+    ).cameras.get(cameraId);
+    if (sample?.position) position = sample.position;
+    if (sample?.rotation) rotation = sample.rotation;
+    areas.push({ nodeId: node.id, data: data ?? {}, area: decoded.value, script, ir: executed.ir });
+  }
+  return {
+    camera: { ...canonical, position, rotation },
+    areas
+  };
+}
+
+function insideArea(bounds: GroundAabb, point: GroundPoint): boolean {
+  return point.u >= bounds.min.u && point.u <= bounds.max.u
+    && point.v >= bounds.min.v && point.v <= bounds.max.v;
+}
+
+function titleOf(data: Record<string, unknown>): string {
+  return typeof data.title === "string" && data.title.trim() !== "" ? data.title.trim() : "导演区";
+}
+
+export type WorldCameraUnbindCandidate = {
+  areaNodeId: string;
+  title: string;
+};
+
+export type WorldCameraAnimationMovePlan = {
+  /** 要保存到规范镜头的位姿（动画采样位姿 + 本次地面增量）。 */
+  pose: WorldCameraPose;
+  /** 动画脚本改动；与镜头保存分两步提交，外部撤销条目统一回放。 */
+  forwardAreas: CanvasCommand[];
+  inverseAreas: CanvasCommand[];
+  /** 本次移动会让镜头离开动画所属导演区；确认后才真正提交。 */
+  unbindCandidates: WorldCameraUnbindCandidate[];
+  /** 是否有动画脚本需要改写；false 时走原有镜头保存路径。 */
+  animated: boolean;
+};
+
+/**
+ * 镜头拖动落点计划：位置轨道随镜头整体平移；旋转模式下手动朝向优先，
+ * 移除该镜头的旋转轨道。移出动画所属导演区时返回待确认的解除绑定候选。
+ */
+export function planWorldCameraMoveWithAnimationParts(
+  canvas: ServerCanvas | null | undefined,
+  start: WorldCameraDragStart,
+  delta: GroundPoint | null | undefined,
+  times?: ReadonlyMap<string, number>,
+  unbindAreaIds?: ReadonlySet<string>
+): WorldCameraAnimationMovePlan | null {
+  const pose = planWorldCameraMove(start, delta);
+  if (!pose) return null;
+  const sample = animatedCameraAt(canvas, start.canonical.cameraId, times);
+  if (!canvas || !sample || sample.areas.length === 0) {
+    return { pose, forwardAreas: [], inverseAreas: [], unbindCandidates: [], animated: false };
+  }
+
+  const unbindCandidates: WorldCameraUnbindCandidate[] = [];
+  const forwardAreas: CanvasCommand[] = [];
+  const inverseAreas: CanvasCommand[] = [];
+  for (const area of sample.areas) {
+    const unbind = unbindAreaIds?.has(area.nodeId) === true;
+    let changed = false;
+    const cameraTracks = (unbind
+      ? area.ir.cameraTracks.filter(track => {
+          if (track.targetId !== start.canonical.cameraId) return true;
+          changed = true;
+          return false;
+        })
+      : area.ir.cameraTracks
+          .map((track): WorldCameraTrack | null => {
+            if (track.targetId !== start.canonical.cameraId) return track;
+            if (track.property === "position" && start.mode === "move") {
+              changed = true;
+              const from = [...track.from];
+              const to = [...track.to];
+              from[0] = from[0]! + delta!.u;
+              from[1] = from[1]! + delta!.v;
+              to[0] = to[0]! + delta!.u;
+              to[1] = to[1]! + delta!.v;
+              return { ...track, from, to };
+            }
+            // 手动旋转是显式覆盖：去掉朝向轨道，避免松手瞬间被脚本拉回。
+            if (track.property === "rotation" && start.mode === "rotate") {
+              changed = true;
+              return null;
+            }
+            return track;
+          })
+          .filter((track): track is WorldCameraTrack => track !== null));
+    if (!changed) continue;
+
+    if (!unbind && start.mode === "move") {
+      const sampled = sampleWorldAnimationInArea(
+        area.ir,
+        times?.get(area.nodeId) ?? 0,
+        sceneAreaAnimationOrigin(area.area)
+      ).cameras.get(start.canonical.cameraId);
+      const from = sampled?.position ?? start.camera.position;
+      const next = { u: from.u + delta!.u, v: from.v + delta!.v };
+      if (insideArea(area.area.bounds, from) && !insideArea(area.area.bounds, next)) {
+        unbindCandidates.push({ areaNodeId: area.nodeId, title: titleOf(area.data) });
+      }
+    }
+
+    const rawArea = (area.data.sceneArea && typeof area.data.sceneArea === "object"
+      ? area.data.sceneArea
+      : area.area) as Record<string, unknown>;
+    const nextArea: Record<string, unknown> = { ...rawArea };
+    if (cameraTracks.length === 0 && area.ir.instanceTracks.length === 0) {
+      delete nextArea.animationScript;
+    } else {
+      nextArea.animationScript = createWorldAnimationScript({
+        script: serializeWorldAnimationScript({ ...area.ir, cameraTracks }),
+        duration: area.script.duration,
+        loop: area.script.loop,
+        revision: area.script.revision + 1
+      });
+    }
+    const value = (next: Record<string, unknown>): CanvasNodeData =>
+      ({ ...area.data, sceneArea: next }) as unknown as CanvasNodeData;
+    forwardAreas.push({ type: "nodeData.patch", nodeId: area.nodeId, value: value(nextArea) });
+    inverseAreas.push({ type: "nodeData.patch", nodeId: area.nodeId, value: value(rawArea) });
+  }
+  return {
+    pose,
+    forwardAreas,
+    inverseAreas,
+    unbindCandidates,
+    animated: forwardAreas.length > 0
+  };
 }

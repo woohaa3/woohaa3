@@ -7,8 +7,10 @@
  * must be restored for undo. It never recomputes membership.
  */
 import {
+  decodeSceneAreaData,
   decodeWorldCamera,
   decodeWorldInstanceData,
+  sceneAreaAnimationOrigin,
   type CanvasCommand,
   type CanvasNodeData,
   type SceneAreaPlan,
@@ -206,9 +208,29 @@ export function buildForwardCommands(
         if (!ref) return { ok: false, code: "not-found", message: "导演区不存在" };
         const scopeVersion = nextSceneAreaScopeVersion(command.areaId, command.bounds);
         const current = ref.data.sceneArea as JsonRecord;
+        const decoded = decodeSceneAreaData(current);
+        const currentBounds = decoded.ok ? decoded.value.bounds : plan.source.area.bounds;
+        const origin = decoded.ok
+          ? sceneAreaAnimationOrigin(decoded.value)
+          : {
+              u: (currentBounds.min.u + currentBounds.max.u) / 2,
+              v: (currentBounds.min.v + currentBounds.max.v) / 2
+            };
+        // A pure translation moves the stable animation origin with the area; a
+        // resize keeps it, so the authored animation stays anchored to the stage.
+        const du = command.bounds.min.u - currentBounds.min.u;
+        const dv = command.bounds.min.v - currentBounds.min.v;
+        const translated = Math.abs(du - (command.bounds.max.u - currentBounds.max.u)) < 1e-9
+          && Math.abs(dv - (command.bounds.max.v - currentBounds.max.v)) < 1e-9;
+        const animationOrigin = translated ? { u: origin.u + du, v: origin.v + dv } : origin;
         commands.push(patch(ref, asNodeData({
           ...ref.data,
-          sceneArea: { ...current, bounds: clone(command.bounds), scopeVersion }
+          sceneArea: {
+            ...current,
+            bounds: clone(command.bounds),
+            scopeVersion,
+            animationOrigin
+          }
         })));
         areaScopeVersion = scopeVersion;
         break;
@@ -352,10 +374,19 @@ export function buildInverseCommands(
         const ref = findArea(canvas, command.areaId);
         if (!ref) return { ok: false, code: "not-found", message: "导演区不存在" };
         const current = ref.data.sceneArea as JsonRecord;
-        commands.push(patch(ref, asNodeData({
-          ...ref.data,
-          sceneArea: { ...current, bounds: clone(command.bounds), scopeVersion: command.scopeVersion }
-        })));
+        // Undo restores the frozen origin; the script itself never moves with the
+        // area because its position tracks are already area-relative.
+        const sourceArea = (source.area.nodeData as JsonRecord | undefined)?.sceneArea as JsonRecord | undefined;
+        const restored: JsonRecord = {
+          ...current,
+          bounds: clone(command.bounds),
+          scopeVersion: command.scopeVersion
+        };
+        if (sourceArea) {
+          if (sourceArea.animationOrigin !== undefined) restored.animationOrigin = clone(sourceArea.animationOrigin);
+          else delete restored.animationOrigin;
+        }
+        commands.push(patch(ref, asNodeData({ ...ref.data, sceneArea: restored })));
         areaScopeVersion = command.scopeVersion;
         break;
       }
