@@ -189,3 +189,39 @@ it("samples opposite extreme finite keyframe angles without overflow", () => {
  if(!result.ok)throw new Error(result.message);
  for(const t of [0,0.125,0.25,0.5,0.75,1])expect(sampleWorldAnimation(result.ir,t).instances.get("a")?.partRotations?.knee.every(Number.isFinite)).toBe(true);
 });
+
+import {describeHumanoidWalkProfile} from './world-walk.js';
+import {describeWorldModelAnimationRig} from './world-animation-spatial.js';
+import {executeModelWithStoredRig} from './model-executor-v2.js';
+import {HUMANOID_REFERENCE_PARAMETERS} from './humanoid-rig.js';
+function walkOptions(){
+ const rig={profile:'humanoid',templateId:'humanoid',templateVersion:1,parameters:HUMANOID_REFERENCE_PARAMETERS} as const;
+ const c=executeModelWithStoredRig('scene.segment({id:"abdomen",parent:rig.joint("Spine"),from:[0,-0.5,0],to:[0,0,0],width:0.32,depth:0.24,shape:"box"});for(const side of ["Left","Right"])scene.box({id:side+"Sole",parent:rig.joint(side+"Foot"),position:[0,-0.04,0.08],size:[0.24,0.14,0.38]});','woohaa-model-js-v2',rig);
+ if(!c.ok)throw new Error(c.message);
+ const profile=describeHumanoidWalkProfile(describeWorldModelAnimationRig(c.scene.ops,rig));
+ if(!profile)throw new Error('fixture walk profile unavailable');
+ return {startTime:0,endTime:24,path:[[0,0],[4,0],[4,-3],[0,-3]],cornerRadius:.5,strideLength:.6,stepHeight:.09,scale:1,baseYawDegrees:0,profile};
+}
+it('records a compact deterministic walk and roundtrips all sampled channels',()=>{
+ const source=`motion.instance.walk("walker",${JSON.stringify(walkOptions())});`;
+ const result=executeWorldAnimationScript(source,{duration:24,loop:true});
+ expect(result.ok).toBe(true);if(!result.ok)return;
+ expect(result.ir.walkTracks).toHaveLength(1);
+ expect(countWorldAnimationChannels(result.ir)).toBe(12);
+ const serialized=serializeWorldAnimationScript(result.ir);
+ expect(serialized).toContain('motion.instance.walk');
+ expect(serialized.length).toBeLessThan(3000);
+ const again=executeWorldAnimationScript(serialized,{duration:24,loop:true});
+ expect(again.ok).toBe(true);if(!again.ok)return;
+ expect(again.json).toBe(result.json);
+ expect(sampleWorldAnimation(again.ir,1.23)).toEqual(sampleWorldAnimation(result.ir,1.23));
+ const pose=sampleWorldAnimation(result.ir,1.23).instances.get('walker')!;
+ expect(pose.position).toBeDefined();expect(Object.keys(pose.partRotations!)).toHaveLength(10);
+});
+it('rejects mixing generated walk and independent motion on the same target',()=>{
+ const walk=`motion.instance.walk("walker",${JSON.stringify(walkOptions())});`;
+ for(const extra of ['motion.part.tween("walker","LeftUpperArm",{property:"rotation",startTime:0,endTime:1,from:[0,0,0],to:[1,0,0]});','motion.instance.tween("walker",{property:"position",startTime:0,endTime:1,from:[0,0,0],to:[1,0,0]});',walk]){
+  const result=executeWorldAnimationScript(walk+extra,{duration:24,loop:true});
+  expect(result.ok).toBe(false);if(!result.ok)expect(result.code).toBe('conflicting-walk');
+ }
+});

@@ -16,7 +16,7 @@ import {
   createWorldAnimationScript,
   classifyCameraPoint,
   worldModelGroundAnchor,
-  quatMul,
+  quatMul,quatRotate,
   type Vec3,
   decodeSceneAreaData,
   decodeWorldInstanceData,
@@ -246,7 +246,7 @@ export function planWorldGroundMoveWithAnimationParts(
     const script = area.value.animationScript;
     const executed = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
     if (!executed.ok) continue;
-    if (![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? [])].some(track => instanceIds.has(track.targetId))) continue;
+    if (![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? []),...(executed.ir.walkTracks ?? [])].some(track => instanceIds.has(track.targetId))) continue;
     const unbind = unbindAreaIds?.has(node.id) === true;
     let changed = false;
     const instanceTracks = unbind
@@ -266,6 +266,11 @@ export function planWorldGroundMoveWithAnimationParts(
           to[1] = to[1]! + delta.v;
           return { ...track, from, to };
         });
+    const walkTracks=(executed.ir.walkTracks ?? []).flatMap(track=>{
+      if(!instanceIds.has(track.targetId))return [track];
+      changed=true;
+      return unbind ? [] : [{...track,path:track.path.map(([u,v])=>[u+delta.u,v+delta.v] as [number,number])}];
+    });
     const partTracks = (executed.ir.partTracks ?? []).filter(track => !unbind || !instanceIds.has(track.targetId));
     if (partTracks.length !== (executed.ir.partTracks?.length ?? 0)) changed = true;
     const sampled = sampleWorldAnimationInArea(
@@ -277,9 +282,20 @@ export function planWorldGroundMoveWithAnimationParts(
       const motion = sampled.get(instanceId);
       const position = motion?.position;
       if (position) animatedPositions.set(instanceId, position);
+      const walk=unbind ? executed.ir.walkTracks?.find(track=>track.targetId===instanceId) : undefined;
+      const target=start.targets.find(entry=>entry.instance.instanceId===instanceId);
+      if(walk && target && position){
+        // Removing the generated pose restores the bind legs. Keep the same
+        // ground anchor while restoring their standing height and base yaw.
+        const base=target.instance.transform,anchor=walk.profile.groundAnchorLocal;
+        const current={...base,position,rotation:motion?.rotation ? quatMul([...base.rotation],[...motion.rotation]) : base.rotation};
+        const ground=worldModelGroundAnchor(anchor,current);
+        const offset=quatRotate([...base.rotation],[anchor[0]*base.scale,-anchor[2]*base.scale,anchor[1]*base.scale]);
+        animatedPositions.set(instanceId,{u:ground.u-offset[0],v:ground.v-offset[1],h:-offset[2]});
+      }
       if (!unbind && !unbindAreaIds) {
         const target = start.targets.find(entry => entry.instance.instanceId === instanceId);
-        if (!target || ![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? [])].some(track => track.targetId === instanceId)) continue;
+        if (!target || ![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? []),...(executed.ir.walkTracks ?? [])].some(track => track.targetId === instanceId)) continue;
         // Missing prepared geometry cannot authorize a destructive unlink.
         if (!target.localAnchor) return null;
         const base = target.instance.transform;
@@ -302,7 +318,7 @@ export function planWorldGroundMoveWithAnimationParts(
     }
     if (!changed && unbindCandidates.length === 0) continue;
     const nextScript = createWorldAnimationScript({
-      script: serializeWorldAnimationScript({ ...executed.ir, instanceTracks, partTracks }),
+      script: serializeWorldAnimationScript({ ...executed.ir, instanceTracks, partTracks,walkTracks }),
       duration: script.duration,
       loop: script.loop,
       revision: script.revision + 1
@@ -314,7 +330,7 @@ export function planWorldGroundMoveWithAnimationParts(
       ...(nodeData ?? {}),
       sceneArea: nextArea
     }) as unknown as CanvasNodeData;
-    if (unbind && instanceTracks.length === 0 && partTracks.length === 0 && executed.ir.cameraTracks.length === 0) {
+    if (unbind && instanceTracks.length === 0 && partTracks.length === 0 && walkTracks.length === 0 && executed.ir.cameraTracks.length === 0) {
       const { animationScript: _removed, ...rest } = rawArea;
       forwardAreas.push({ type: "nodeData.patch", nodeId: node.id, value: value(rest) });
     } else {

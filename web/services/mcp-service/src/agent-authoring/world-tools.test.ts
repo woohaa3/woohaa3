@@ -127,7 +127,7 @@ describe("assistant world MCP tools", () => {
     expect(guidance).toContain("phase:0.5");
     expect(guidance).toContain("不按时长展开");
     expect(guidance).toContain("不可为绕过通道预算降低步态频率");
-    expect(guidance).toContain("未添加距离同步步态或 IK");
+    expect(guidance).toContain("motion.instance.walk");
     for(const term of ["motionReference", "armsDownPose", "longAxisLocal", "joint-twist-without-swing", "T-pose", "endpoint"]) expect(guidance).toContain(term);
 
     const result = await callTool(base, "get_world_context", {}, issued.token);

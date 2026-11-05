@@ -62,8 +62,10 @@ export function describeHumanoidMotion(rig:WorldModelAnimationRig):HumanoidMotio
    const joint=groups.get(jointId!)!,child=groups.get(childId!)!;
    const axis=normalize([...child.position]);
    if(!axis)continue;
-   // Cross(long axis, model +Z) is a candidate flexion axis, not a joint limit.
-   const flexionAxisLocal=normalize([axis[1],-axis[0],0]);
+   // Knees bend opposite to forward hip swing in the standard downward leg bind.
+   const candidate=normalize([axis[1],-axis[0],0]);
+   const flexionAxisLocal=jointId!.endsWith("LowerLeg") && candidate
+    ? candidate.map(value=>value===0 ? 0 : -value) as Vec3 : candidate?.map(value=>value===0 ? 0 : value) as Vec3 | null;
    const scaled=child.position.map((value,i)=>value*joint.scale[i]!) as Vec3;
    joints.push({jointId:jointId!,childId:childId!,longAxisLocal:axis,lengthMeters:Math.hypot(...scaled),flexionAxisLocal});
   }

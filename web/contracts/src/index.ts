@@ -121,6 +121,7 @@ export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService 
 export * from "./canvas/scene-package.js";
 export * from "./canvas/shared-world.js";
 export * from "./canvas/world-animation-script.js";
+export * from "./canvas/world-walk.js";
 export * from "./canvas/world-animation-spatial.js";
 export * from "./canvas/world-animation-verification.js";
 export * from "./canvas/humanoid-motion-reference.js";

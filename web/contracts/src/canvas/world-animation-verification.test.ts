@@ -74,3 +74,68 @@ it("does not compare a delayed static twist to an invented pre-track identity",(
  const result=analyzeWorldAnimationData(ir(script),[{instanceId:"a",transform,animationRig:humanoid()}],origin);
  expect(result.issues.filter(i=>i.code==="joint-twist-without-swing")).toEqual([]);
 });
+
+it("warns on known knee hyperextension but accepts positive flexion and unknown rigs",()=>{
+ for(const [angle,known,warning] of [[-38,true,true],[38,true,false],[-38,false,false]] as const){
+  const rig=humanoid();if(!known)rig.rig=null;
+  const result=analyzeWorldAnimationData(ir(tween("LeftLowerLeg",[0,0,0],[angle,0,0])),[{instanceId:"a",transform,animationRig:rig}],origin);
+  expect(result.issues.some(i=>i.code==="knee-hyperextension")).toBe(warning);
+ }
+});
+it("warns on sideways travel and sharp path corners including the loop seam",()=>{
+ const script='motion.instance.tween("a",{property:"position",startTime:0,endTime:9,from:[0,0,1.1],to:[1,0,1.1]});motion.instance.tween("a",{property:"position",startTime:9,endTime:18,from:[1,0,1.1],to:[0,-1,1.1]});';
+ const result=analyzeWorldAnimationData(ir(script),[{instanceId:"a",transform,animationRig}],origin);
+ expect(result.issues.map(i=>i.code)).toContain("sideways-motion");
+ const corners=result.issues.find(i=>i.code==="path-tangent-discontinuity");
+ expect(corners?.times).toContain(9);
+ expect(corners?.times).toContain(0);
+});
+it("does not warn about tangent changes on a straight nonlooping path",()=>{
+ const animation=ir('motion.instance.tween("a",{property:"position",startTime:0,endTime:18,from:[0,0,1.1],to:[0,-2,1.1]});');animation.loop=false;
+ const result=analyzeWorldAnimationData(animation,[{instanceId:"a",transform,animationRig}],origin);
+ expect(result.issues).toEqual([]);
+});
+
+it("warns about apparent near-ground foot drift without claiming contact",()=>{
+ const rig=humanoid(),height=rig.spatial!.rootToGroundHeightMeters!;
+ const animation=ir(tween("LeftLowerLeg",[0,0,0],[0,0,0])+`motion.instance.tween("a",{property:"position",startTime:0,endTime:18,from:[0,0,${height}],to:[0,-4,${height}]});`);
+ const result=analyzeWorldAnimationData(animation,[{instanceId:"a",transform,animationRig:rig}],origin);
+ expect(result.issues.map(i=>i.code)).toContain("apparent-support-foot-drift");
+ expect(result.sampleCount).toBeLessThanOrEqual(96);
+});
+
+it("diagnoses the generated 24 second rectangle with gradually turning heading and negative knees",()=>{
+ const points=[[0,0],[0,-4],[4,-4],[4,0],[0,0]];
+ let script='motion.part.cycle("a","LeftLowerLeg",{property:"rotation",startTime:0,endTime:24,period:1,keyframes:[{time:0,value:[0,0,0]},{time:0.5,value:[-38,0,0]},{time:1,value:[0,0,0]}]});';
+ for(let i=0;i<4;i++){
+  script+=`motion.instance.tween("a",{property:"position",startTime:${i*6},endTime:${(i+1)*6},from:[${points[i]},1],to:[${points[i+1]},1]});`;
+  script+=`motion.part.tween("a","Root",{property:"rotation",startTime:${i*6},endTime:${(i+1)*6},from:[0,${i*90},0],to:[0,${(i+1)*90},0]});`;
+ }
+ const execution=executeWorldAnimationScript(script,{duration:24,loop:true});if(!execution.ok)throw new Error(execution.message);
+ const result=analyzeWorldAnimationData(execution.ir,[{instanceId:"a",transform,animationRig:humanoid()}],origin);
+ expect(result.issues.map(i=>i.code)).toEqual(expect.arrayContaining(["knee-hyperextension","sideways-motion","path-tangent-discontinuity"]));
+ expect(result.issues.find(i=>i.code==="path-tangent-discontinuity")?.occurrenceCount).toBe(4);
+ expect(result.sampleCount).toBeLessThanOrEqual(96);
+});
+it("does not infer support drift from a stationary or clearly airborne foot",()=>{
+ for(const h of [humanoid().spatial!.rootToGroundHeightMeters!,4]){
+  const result=analyzeWorldAnimationData(ir(tween("LeftLowerLeg",[0,0,0],[0,0,0])),[{instanceId:"a",transform:{...transform,position:{u:0,v:0,h}},animationRig:humanoid()}],origin);
+  expect(result.issues.filter(i=>i.code==="apparent-support-foot-drift")).toEqual([]);
+ }
+});
+
+it('checks generated stance labels against actual rig motion without treating a new step as sliding',()=>{
+ const stored={profile:'humanoid',templateId:'humanoid',templateVersion:1,parameters:HUMANOID_REFERENCE_PARAMETERS} as const;
+ const execution=executeModelWithStoredRig('scene.segment({id:"abdomen",parent:rig.joint("Spine"),from:[0,-0.5,0],to:[0,0,0],width:0.32});for(const side of ["Left","Right"])scene.box({id:side+"Sole",parent:rig.joint(side+"Foot"),position:[0,-.04,.08],size:[.24,.14,.38]});','woohaa-model-js-v2',stored);
+ if(!execution.ok)throw new Error(execution.message);
+ const rig=describeWorldModelAnimationRig(execution.scene.ops,stored);
+ const options={startTime:0,endTime:18,path:[[0,0],[4,0],[4,-3],[0,-3]],cornerRadius:.5,strideLength:.6,stepHeight:.09,scale:1,baseYawDegrees:0,profile:rig.walkProfile};
+ const compiled=ir(`motion.instance.walk("a",${JSON.stringify(options)});`);
+ const model={instanceId:'a',transform,animationRig:rig};
+ const clear=analyzeWorldAnimationData(compiled,[model],origin);
+ expect(clear.issues.map(i=>i.code)).not.toContain('apparent-support-foot-drift');
+ const mismatched=structuredClone(rig);
+ mismatched.groups.find(g=>g.id==='LeftLowerLeg')!.position[1]*=.3;
+ const broken=analyzeWorldAnimationData(compiled,[{...model,animationRig:mismatched}],origin);
+ expect(broken.issues.map(i=>i.code)).toContain('apparent-support-foot-drift');
+});

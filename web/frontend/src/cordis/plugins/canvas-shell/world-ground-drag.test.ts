@@ -327,3 +327,22 @@ it("composes animation rotation with a nonidentity base pose and overrides scale
   expect(planWorldGroundMoveWithAnimationParts(canvas, start, { u: 1, v: 0 })!.unbindCandidates).toEqual([]);
   expect(planWorldGroundMoveWithAnimationParts(canvas, start, { u: 1.1, v: 0 })!.unbindCandidates).toHaveLength(1);
 });
+
+it('moves compact walk waypoints and unlinks them with complete undo',()=>{
+ const profile={version:'humanoid-walk-v1',groundAnchorLocal:[0,-.86,.08],legs:{Left:{hipLocal:[.2,0,0],upperLength:.4,lowerLength:.35,soleLocal:[0,-.11,.08]},Right:{hipLocal:[-.2,0,0],upperLength:.4,lowerLength:.35,soleLocal:[0,-.11,.08]}},armsDownPose:{LeftUpperArm:[0,0,-90],RightUpperArm:[0,0,90]}};
+ const options={startTime:0,endTime:4,path:[[1,-2],[4,-2],[4,-4],[1,-4]],cornerRadius:.5,strideLength:.6,stepHeight:.09,scale:1.25,baseYawDegrees:0,profile};
+ const canvas=anchorCanvas(`motion.instance.walk("inst-1",${JSON.stringify(options)});`);
+ canvas.nodeData.m1.sharedWorldInstance={...instance,transform:{...instance.transform,rotation:[0,0,0,1]}} as never;
+ const start=beginWorldGroundDrag(canvas,'m1',{u:0,v:0},new Map([['m1',[0,-.86,.08] as [number,number,number]]]))!;
+ const plan=planWorldGroundMoveWithAnimationParts(canvas,start,{u:.1,v:.2})!;
+ const patch=plan.forward.find(c=>c.type==='nodeData.patch'&&c.nodeId==='area') as any;
+ const compiled=executeWorldAnimationScript(patch.value.sceneArea.animationScript.script,{duration:4,loop:false});
+ expect(compiled.ok&&compiled.ir.walkTracks?.[0]?.path).toEqual(options.path.map(([u,v])=>[u!+.1,v!+.2]));
+ const unlinked=planWorldGroundMoveWithAnimationParts(canvas,start,{u:10,v:0},undefined,new Set(['area']))!;
+ const areaPatch=unlinked.forward.find(c=>c.type==='nodeData.patch'&&c.nodeId==='area') as any;
+ expect(areaPatch.value.sceneArea.animationScript).toBeUndefined();
+ const grounded=unlinked.forward.find(c=>c.type==='nodeData.patch'&&c.nodeId==='m1') as any;
+ expect(grounded.value.sharedWorldInstance.transform.position.h).toBeCloseTo(.86*options.scale,8);
+ const undo=unlinked.inverse.find(c=>c.type==='nodeData.patch'&&c.nodeId==='area') as any;
+ expect(undo.value.sceneArea).toEqual(canvas.nodeData.area.sceneArea);
+});

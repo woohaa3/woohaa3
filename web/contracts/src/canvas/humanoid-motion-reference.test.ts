@@ -62,3 +62,11 @@ it("preserves nonuniform ancestor scaling in landmarks while keeping joint endpo
  expect(endpoint.endpointInParent[0]).toBeCloseTo(0.3/Math.sqrt(2));
  expect(endpoint.endpointInParent[1]).toBeCloseTo(0.3/Math.sqrt(2));
 });
+
+it("uses positive X knee flexion while preserving forward hip and elbow axes",()=>{
+ const joints=describeHumanoidMotion(fixture())!.joints;
+ for(const side of ["Left","Right"]) {
+  expect(joints.find(j=>j.jointId===`${side}LowerLeg`)?.flexionAxisLocal).toEqual([1,0,0]);
+  expect(joints.find(j=>j.jointId===`${side}UpperLeg`)?.flexionAxisLocal).toEqual([-1,0,0]);
+ }
+});

@@ -10,6 +10,7 @@
  *
  * 目标必须是导演区完整包含的实例/镜头；权限与占用由权威写入时校验。
  */
+import {validateHumanoidWalk,sampleHumanoidWalk,HUMANOID_WALK_PART_IDS,type HumanoidWalkTrack} from "./world-walk.js";
 import { fnv1a64Hex } from "./content-hash.js";
 import { easingProgress } from "./motion-ir.js";
 import { quatFromEulerYXZDegrees } from "./model-transform.js";
@@ -80,6 +81,7 @@ export type WorldAnimationIr = {
   instanceTracks: WorldInstanceTrack[];
   cameraTracks: WorldCameraTrack[];
   partTracks?: WorldPartTrack[];
+  walkTracks?: HumanoidWalkTrack[];
 };
 
 export type WorldAnimationScriptFailure = {
@@ -171,8 +173,12 @@ class WorldAnimationRecorder {
   private readonly instanceTracks: RawTrack[] = [];
   private readonly cameraTracks: RawTrack[] = [];
   private readonly partTracks: RawPartTrack[] = [];
+  private readonly walkTracks: unknown[] = [];
 
   readonly instance = {
+    walk: (targetId: unknown, options: unknown): void => {
+      this.walkTracks.push({ ...(isRecord(options) ? options : {}), targetId });
+    },
     tween: (targetId: unknown, options: unknown): void => {
       this.instanceTracks.push(rawTrack(targetId, options));
     }
@@ -198,8 +204,8 @@ class WorldAnimationRecorder {
     }
   };
 
-  raw(): { instanceTracks: RawTrack[]; cameraTracks: RawTrack[]; partTracks: RawPartTrack[] } {
-    return { instanceTracks: [...this.instanceTracks], cameraTracks: [...this.cameraTracks], partTracks: [...this.partTracks] };
+  raw(): { instanceTracks: RawTrack[]; cameraTracks: RawTrack[]; partTracks: RawPartTrack[]; walkTracks:unknown[] } {
+    return { instanceTracks: [...this.instanceTracks], cameraTracks: [...this.cameraTracks], partTracks: [...this.partTracks],walkTracks:[...this.walkTracks] };
   }
 }
 
@@ -230,11 +236,12 @@ function readRotationCycle(options: unknown): WorldRotationCycle | null {
 }
 
 /** Each target/property is one logical track even with many tween segments. */
-export function countWorldAnimationChannels(ir: Pick<WorldAnimationIr,"instanceTracks"|"cameraTracks"|"partTracks">): number {
+export function countWorldAnimationChannels(ir: Pick<WorldAnimationIr,"instanceTracks"|"cameraTracks"|"partTracks"|"walkTracks">): number {
   return new Set([
     ...ir.instanceTracks.map(track => JSON.stringify(["instance",track.targetId,track.property])),
     ...ir.cameraTracks.map(track => JSON.stringify(["camera",track.targetId,track.property])),
-    ...(ir.partTracks ?? []).map(track => JSON.stringify(["part",track.targetId,track.partId,track.property]))
+    ...(ir.partTracks ?? []).map(track => JSON.stringify(["part",track.targetId,track.partId,track.property])),
+    ...(ir.walkTracks ?? []).flatMap(track => [JSON.stringify(["instance",track.targetId,"position"]),JSON.stringify(["instance",track.targetId,"rotation"]),...HUMANOID_WALK_PART_IDS.map(partId=>JSON.stringify(["part",track.targetId,partId,"rotation"]))])
   ]).size;
 }
 
@@ -309,7 +316,16 @@ function runWorldAnimationOnce(
     }
     partTracks.push({ ...valid.value, property: "rotation", partId: track.partId, ...(track.cycle ? { cycle:track.cycle } : {}) });
   }
-  const channelCount = countWorldAnimationChannels({ instanceTracks,cameraTracks,partTracks });
+  const walkTracks:HumanoidWalkTrack[]=[];
+  try { for(const track of raw.walkTracks)walkTracks.push(validateHumanoidWalk(track,input.duration)); }
+  catch(error) { return {ok:false,stage:"invalid",code:"invalid-walk",message:error instanceof Error ? error.message : String(error)}; }
+  const walkTargets=new Set<string>();
+  for(const track of walkTracks){
+    if(walkTargets.has(track.targetId)||[...instanceTracks,...partTracks].some(other=>other.targetId===track.targetId))
+      return {ok:false,stage:"invalid",code:"conflicting-walk",message:"行走生成已拥有该模型的位置、朝向和关节通道，不能混合独立轨道"};
+    walkTargets.add(track.targetId);
+  }
+  const channelCount = countWorldAnimationChannels({ instanceTracks,cameraTracks,partTracks,walkTracks });
   if (channelCount > WORLD_ANIMATION_MAX_CHANNELS) {
     return { ok:false,stage:"invalid",code:"too-many-tracks",message:`逻辑动画轨道 ${channelCount} 超过 ${WORLD_ANIMATION_MAX_CHANNELS} 上限；按目标及属性计数，关键帧/分段/循环次数不增加轨道数。` };
   }
@@ -319,7 +335,8 @@ function runWorldAnimationOnce(
     loop: input.loop,
     instanceTracks,
     cameraTracks,
-    ...(partTracks.length ? { partTracks } : {})
+    ...(partTracks.length ? { partTracks } : {}),
+    ...(walkTracks.length ? { walkTracks } : {})
   };
   return { ok: true, ir, json: JSON.stringify(ir) };
 }
@@ -362,6 +379,8 @@ function validateTrack(
 }
 
 export type SampledInstanceMotion = {
+  /** Trusted generator stance labels, not measured collision/contact. */
+  footContacts?: Record<string,{stance:boolean;plant:number}>;
   partRotations?: Record<string, WorldRotation>;
   position?: WorldPoint;
   rotation?: WorldRotation;
@@ -413,6 +432,10 @@ export function sampleWorldAnimation(
     if (value) rotations[track.partId] = quatFromEulerYXZDegrees([value[0]!, value[1]!, value[2]!]);
     current.partRotations = rotations;
     instances.set(track.targetId, current);
+  }
+  for(const track of ir.walkTracks ?? []) {
+    const motion=sampleHumanoidWalk(track,now);
+    if(motion)instances.set(track.targetId,motion);
   }
   return { instances, cameras };
 }
@@ -492,6 +515,10 @@ export function serializeWorldAnimationScript(ir: WorldAnimationIr): string {
       property: track.property, startTime: track.startTime, endTime: track.endTime,
       from: track.from, to: track.to, easing: track.easing
     })});`);
+  }
+  for(const track of ir.walkTracks ?? []) {
+    const {targetId,...options}=track;
+    lines.push(`motion.instance.walk(${JSON.stringify(targetId)}, ${JSON.stringify(options)});`);
   }
   return lines.join("\n");
 }

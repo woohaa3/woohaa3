@@ -355,3 +355,20 @@ it("preserves custom rig parameters and content hashes across director replaceme
   } })).toMatchObject({ ok: false, code: "invalid-data", message: expect.stringContaining("不能移除已有骨架") });
   expect(room.currentRevision).toBe(revision);
 });
+
+it('validates generated walks against actual rig, transform and writable scope',async()=>{
+ const modelScript=humanoidSource+'\nfor(const side of ["Left","Right"])scene.box({id:side+"Sole",parent:rig.joint(side+"Foot"),position:[0,-0.04,0.08],size:[0.24,0.14,0.38]});';
+ const {service,room}=await fixture({animationScript:null,modelScript});
+ const read=await service.read(query);if(!read.ok)throw new Error(read.message);
+ const profile=read.view.sceneModels?.find(m=>m.instanceId==='actor')?.animationRig?.walkProfile;
+ expect(profile).toBeTruthy();
+ const options={startTime:0,endTime:24,path:[[-1,-1],[1,-1],[1,1],[-1,1]],cornerRadius:.5,strideLength:.6,stepHeight:.09,scale:1,baseYawDegrees:0,profile};
+ const write=(id:string,target='actor',changes={})=>service.write({contextId:query.contextId,operation:{kind:'set-scene-animation-script',operationId:id,duration:24,loop:true,script:`motion.instance.walk(${JSON.stringify(target)},${JSON.stringify({...options,...changes})});`}});
+ expect(await write('walk-good')).toMatchObject({ok:true});
+ const revision=room.currentRevision;
+ expect(await write('walk-bad-scale','actor',{scale:1.1})).toMatchObject({ok:false,code:'invalid-data'});
+ expect(await write('walk-bad-yaw','actor',{baseYawDegrees:30})).toMatchObject({ok:false,code:'invalid-data'});
+ expect(await write('walk-bad-profile','actor',{profile:{...profile,armsDownPose:{LeftUpperArm:[0,0,-80],RightUpperArm:[0,0,80]}}})).toMatchObject({ok:false,code:'invalid-data'});
+ expect(await write('walk-outside','missing')).toMatchObject({ok:false,code:'outside-scope'});
+ expect(room.currentRevision).toBe(revision);
+});

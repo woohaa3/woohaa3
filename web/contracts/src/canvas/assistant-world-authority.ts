@@ -658,6 +658,7 @@ export type AssistantWorldObjectSummary = {
 };
 
 export type WorldModelAnimationRig = {
+  walkProfile?: import("./world-walk.js").HumanoidWalkProfile | null;
   motionReference?: import("./humanoid-motion-reference.js").HumanoidMotionReference;
   shapes?: Array<{
     id: string; parent: string | null;

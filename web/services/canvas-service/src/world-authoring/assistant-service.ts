@@ -59,7 +59,7 @@ import {
   serializeWorldAnimationScript,
   worldCameraView
 } from "@woohaa3/contracts";
-import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash } from "@woohaa3/contracts/canvas-yjs";
+import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash, stableStringify } from "@woohaa3/contracts/canvas-yjs";
 import { executeSceneIr } from "../model-mcp/script-executor.js";
 import type { CanvasRoom } from "../sync/room.js";
 import type { RoomCommandResult } from "../sync/room-types.js";
@@ -818,8 +818,9 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
           const existing = existingWorldTargets(inspected.canvas);
           const instanceTracks = compiled.ir.instanceTracks.filter(track => existing.instances.has(track.targetId));
           const partTracks = (compiled.ir.partTracks ?? []).filter(track => existing.instances.has(track.targetId));
+          const walkTracks = (compiled.ir.walkTracks ?? []).filter(track => existing.instances.has(track.targetId));
           const cameraTracks = compiled.ir.cameraTracks.filter(track => existing.cameras.has(track.targetId));
-          const outside = partTracks.some(track => !writableInstances.has(track.targetId))
+          const outside = walkTracks.some(track => !writableInstances.has(track.targetId)) || partTracks.some(track => !writableInstances.has(track.targetId))
             || instanceTracks.some(track => !writableInstances.has(track.targetId))
             || cameraTracks.some(track => !writableCameras.has(track.targetId));
           if (outside) {
@@ -827,13 +828,14 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
             // silently delete hidden tracks on a later local revision.
             return failure("outside-scope", "导演区动画包含本轮不可写的部件，无法安全读取并局部返修；原动画未修改");
           }
-          if (instanceTracks.length !== compiled.ir.instanceTracks.length
+          if (walkTracks.length !== (compiled.ir.walkTracks?.length ?? 0)
+            || instanceTracks.length !== compiled.ir.instanceTracks.length
             || cameraTracks.length !== compiled.ir.cameraTracks.length
             || partTracks.length !== (compiled.ir.partTracks ?? []).length) {
-            animationScript = instanceTracks.length === 0 && cameraTracks.length === 0 && partTracks.length === 0
+            animationScript = instanceTracks.length === 0 && cameraTracks.length === 0 && partTracks.length === 0 && walkTracks.length === 0
               ? null
               : createWorldAnimationScript({
-                  script: serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks, partTracks }),
+                  script: serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks, partTracks, walkTracks }),
                   duration: script.duration,
                   loop: script.loop,
                   revision: script.revision
@@ -1014,6 +1016,25 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       const rig = model ? await animationRigOf(model.fields) : null;
       if (!rig?.groups.some(group => group.id === track.partId)) return failure("invalid-data", `模型 ${track.targetId} 没有可动画部件 ${track.partId}`);
     }
+    const validateWalkTargets = async (canvas:ServerCanvas, writable:(id:string)=>boolean) => {
+      for(const track of compiled.ir.walkTracks ?? []){
+        if(!writable(track.targetId))return {code:"outside-scope" as const,message:"行走模型不在本轮可写范围"};
+        const model=findInstanceNode(canvas,track.targetId);
+        const rig=model ? await animationRigOf(model.fields) : null;
+        const instance=decodeWorldInstanceData(model?.fields.sharedWorldInstance);
+        const actual=rig?.walkProfile;
+        if(!actual||stableStringify(actual)!==stableStringify(track.profile))return {code:"invalid-data" as const,message:"行走参数与模型实际骨架或脚底几何不匹配；请重新 get_world_model_rig"};
+        if(!instance.ok)return {code:"invalid-data" as const,message:"行走模型变换不可用"};
+        const transform=instance.value.transform,q=transform.rotation;
+        const yaw=2*Math.atan2(q[2],q[3])*180/Math.PI;
+        const difference=((track.baseYawDegrees-yaw+180)%360+360)%360-180;
+        if(Math.abs(q[0])+Math.abs(q[1])>1e-6||Math.abs(difference)>1e-5||Math.abs(track.scale-transform.scale)>1e-6)
+          return {code:"invalid-data" as const,message:"行走只支持直立模型，scale/baseYawDegrees 必须匹配当前基础变换"};
+      }
+      return null;
+    };
+    const walkFailure=await validateWalkTargets(inspected.canvas,id=>writableInstances.has(id));
+    if(walkFailure)return failure(walkFailure.code,walkFailure.message);
     const animationScript = createWorldAnimationScript({
       script: operation.script,
       duration: operation.duration,
@@ -1028,6 +1049,8 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         if (!current) return { ok: false as const, code: "outside-scope", message: "导演区不存在" };
         const stillIssued = resolve(context.contextId);
         if ("ok" in stillIssued) return { ok: false as const, code: "outside-scope", message: stillIssued.message };
+        const walkFailure=await validateWalkTargets(canvas,id=>!!findWritable(stillIssued.context,{kind:"instance",instanceId:id}));
+        if(walkFailure)return {ok:false as const,...walkFailure};
         for (const track of compiled.ir.partTracks ?? []) {
           if (!findWritable(stillIssued.context, { kind: "instance", instanceId: track.targetId })) return { ok: false as const, code: "outside-scope", message: "动画部件不在本轮可写范围" };
           const model = findInstanceNode(canvas, track.targetId);

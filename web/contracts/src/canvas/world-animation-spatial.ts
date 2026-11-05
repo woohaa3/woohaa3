@@ -1,4 +1,5 @@
 /** Data-only model motion diagnostics. Bounds are conservative, not mesh contact or IK. */
+import {describeHumanoidWalkProfile,HUMANOID_WALK_PART_IDS} from "./world-walk.js";
 import {describeHumanoidMotion,sampleRigLandmarks,sampleJointEndpoint} from "./humanoid-motion-reference.js";
 import type { WorldModelAnimationRig } from "./assistant-world-authority.js";
 import type { StoredHumanoidRig } from "./humanoid-rig.js";
@@ -79,6 +80,7 @@ export function describeWorldModelAnimationRig(ops: readonly SceneV2Op[], rig: S
     rootToGroundHeightMeters:groundAnchorLocal ? -groundAnchorLocal[1] : null,
     anchorSource:feet.length ? "foot-geometry-bounds" : bounds ? "geometry-bounds" : "unknown"
   };
+  result.walkProfile=describeHumanoidWalkProfile(result);
   return result;
 }
 
@@ -105,12 +107,14 @@ export function worldModelGroundAnchor(localAnchor: Vec3, transform: WorldTransf
 
 export function worldAnimationSegmentSummary(ir: WorldAnimationIr) {
   const parts = ir.partTracks ?? [];
+  const walks=ir.walkTracks ?? [];
   const channelCount = countWorldAnimationChannels(ir);
   const partSegmentCount = parts.reduce((count, track) => count + (track.cycle ? track.cycle.keyframes.length - 1 : 1), 0);
   return {
     segmentCount: ir.instanceTracks.length + partSegmentCount + ir.cameraTracks.length,
     maxChannels: WORLD_ANIMATION_MAX_CHANNELS,
-    animatedJointCount: new Set(parts.map(t => JSON.stringify([t.targetId,t.partId]))).size,
+    animatedJointCount: new Set([...parts.map(t => JSON.stringify([t.targetId,t.partId])),...walks.flatMap(t=>HUMANOID_WALK_PART_IDS.map(id=>JSON.stringify([t.targetId,id])))]).size,
+    locomotionCount:walks.length,
     channelCount,
     logicalTrackCount: channelCount,
     keyframeCount: 2 * (ir.instanceTracks.length + ir.cameraTracks.length) + parts.reduce((count, track) => count + (track.cycle ? track.cycle.keyframes.length : 2), 0),
