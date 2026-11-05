@@ -37,7 +37,7 @@ export const ACCOUNT_ROUTE_PREFIX = "/api/ppserver/account/";
  * 充值相关先不放：技术方建议加固完成前隐藏充值入口。
  */
 const ALLOWED_PREFIXES = [
-  // 认证：换业务会话与刷新。**这两条不带 X-Tenant-ID**（租户在 body 里）
+  // 认证：换业务会话、刷新、本人资料、当前会话注销
   "auth/",
   // 读取与签到
   "client/v1/",
@@ -50,8 +50,17 @@ const ALLOWED_PREFIXES = [
   "sixi/v1/",
 ] as const;
 
-/** 认证路径：租户放 body，**不能**带 X-Tenant-ID（否则预检失败） */
-const AUTH_PREFIXES = ["auth/"] as const;
+/**
+ * **租户放 body、不带 `X-Tenant-ID`** 的认证路径。
+ *
+ * 只有这两条：桥接与刷新。对接包 1.1.0 写明它们「只使用 body.tenantId」，
+ * 附加业务租户头会让 WebView 预检失败（CORS 白名单只放行 Authorization / Content-Type）。
+ *
+ * **`auth/me` 与 `auth/logout` 是反的**：它们要业务 Bearer **加** `X-Tenant-ID`，
+ * 请求头只带一个会得到 400 `TENANT_ID_REQUIRED`。所以这里不能笼统按 `auth/` 前缀判断 ——
+ * 早期就是这么写的，接新接口时会直接调不通。
+ */
+const BODY_TENANT_AUTH_PATHS = ["auth/refresh", "auth/authing-bridge3"] as const;
 
 type RouteRuntime = {
   gateway: {
@@ -85,8 +94,14 @@ function allowed(name: string): boolean {
   return ALLOWED_PREFIXES.some((prefix) => name.startsWith(prefix));
 }
 
-function isAuthPath(name: string): boolean {
-  return AUTH_PREFIXES.some((prefix) => name.startsWith(prefix));
+/**
+ * 租户是否要放进 body（即**不带** `X-Tenant-ID`）。
+ *
+ * 只有桥接与刷新两条；其余全部带租户头，包括 `auth/me` 与 `auth/logout`。
+ * 用精确匹配而不是前缀：`auth/` 下两种规则并存，靠前缀区分会误伤新接口。
+ */
+function bodyCarriesTenant(name: string): boolean {
+  return BODY_TENANT_AUTH_PATHS.some((path) => name === path);
 }
 
 /** 转发一条账户请求。抽出来便于单测。 */
@@ -112,7 +127,7 @@ export async function proxyAccountRequest(input: {
    * 认证路径**不能**带租户头：`/auth/*` 的 CORS 白名单只放行
    * Authorization / Content-Type，附加业务租户头会让预检失败。
    */
-  if (!isAuthPath(name)) headers["x-tenant-id"] = input.tenantId;
+  if (!bodyCarriesTenant(name)) headers["x-tenant-id"] = input.tenantId;
 
   let body: string | undefined;
   if (method !== "GET" && method !== "HEAD") {
