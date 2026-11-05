@@ -48,7 +48,7 @@ impl Plugin for TransformGizmoPlugin {
         app.init_resource::<TransformGizmoSelection>()
             .init_resource::<TransformGizmoStyle>()
             .init_resource::<GizmoRenderAssets>()
-            .add_systems(PostUpdate, sync_transform_gizmo);
+            .add_systems(PostUpdate, sync_transform_gizmo.run_if(crate::canvas_activity::running));
     }
 }
 impl TransformGizmoSelection {

@@ -187,3 +187,4 @@ export * from "./canvas/film-set-group-projection.js";
 export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService } from "./extension/services/host/media-formats.js";
 export * from "./canvas/scene-package.js";
 export * from "./media/image-resource.js";
+export type * from "./media/native-document-editor.js";

@@ -10,6 +10,10 @@
 //! 原生画布与浏览器通过 `canvas-core` 共用帧系统与 facade；WASM ABI 只在 `wasm` 下导出。
 
 mod frame_samples;
+#[cfg(all(feature = "native-canvas", not(feature = "wasm")))]
+pub mod document_editor_textures;
+#[cfg(all(feature = "native-canvas", not(feature = "wasm")))]
+pub mod document_editor_visibility;
 #[cfg(feature = "canvas-core")]
 mod runtime_health;
 
@@ -888,3 +892,5 @@ pub fn native_frame_ready() -> bool {
 pub use runtime_health::{
     benchmark_frames, benchmark_media, runtime_health, seed_runtime_generation,
 };
+
+pub mod canvas_activity;

@@ -72,9 +72,9 @@ fn file_accepts(level: log::Level, debug_build: bool) -> bool {
     level <= max
 }
 
-/// 构造插件。发行构建只记 `info` 及以上；调试构建放开到 `debug`。
+/// 构造插件。显式性能采集与发行构建只记 `info` 及以上，避免依赖的逐帧 debug 干扰测量。
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    let debug_build = cfg!(debug_assertions);
+    let debug_build = cfg!(debug_assertions) && !crate::performance_capture::enabled();
     tauri_plugin_log::Builder::new()
         .targets([
             Target::new(TargetKind::Stdout),
@@ -85,7 +85,7 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         ])
         .rotation_strategy(RotationStrategy::KeepSome(KEEP_SEGMENTS))
         .timezone_strategy(TimezoneStrategy::UseLocal)
-        .level(if cfg!(debug_assertions) {
+        .level(if debug_build {
             log::LevelFilter::Debug
         } else {
             log::LevelFilter::Info

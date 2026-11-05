@@ -69,7 +69,7 @@ impl Plugin for InstancingPlugin {
             ExtractComponentPlugin::<Instances>::default(),
         ))
         .init_resource::<InstanceMaterials>()
-        .add_systems(PostUpdate, prepare_materials);
+        .add_systems(PostUpdate, prepare_materials.run_if(crate::canvas_activity::running));
         let work = super::InstanceWork::default();
         app.insert_resource(work.clone());
         if let Some(render) = app.get_sub_app_mut(RenderApp) {

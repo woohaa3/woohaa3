@@ -17,6 +17,8 @@ default = ["wasm-webgpu"]
 canvas-core = [
   "bevy/bevy_window", "bevy/bevy_sprite", "bevy/bevy_sprite_render",
   "bevy/bevy_text", "bevy/bevy_ui",
+  # Parley otherwise uses ICU's non-complex segmenter and logs once per CJK run.
+  "bevy/complex_script_segmentation",
 ]
 # Tauri 提供真实窗口句柄与 OS 事件循环，不启用 bevy_winit。
 native-canvas = ["canvas-core", "bevy/multi_threaded"]

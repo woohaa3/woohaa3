@@ -12,6 +12,37 @@ use woohaa_bevy_canvas as canvas;
 /// （change: 2026-10-28-support-glb-model-nodes）。
 const MAX_CONTROL_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TEXTURE_BYTES: usize = 2048 * 2048 * 4;
+// Two bounded IPC workers isolate editor byte parsing/encoding from Tauri's UI loop.
+type EditorIpcJob = Box<dyn FnOnce() + Send + 'static>;
+fn editor_ipc_workers() -> &'static std::sync::mpsc::SyncSender<EditorIpcJob> {
+    static WORKERS: std::sync::OnceLock<std::sync::mpsc::SyncSender<EditorIpcJob>> = std::sync::OnceLock::new();
+    WORKERS.get_or_init(|| {
+        let (tx,rx) = std::sync::mpsc::sync_channel::<EditorIpcJob>(256);
+        let receiver=std::sync::Arc::new(std::sync::Mutex::new(rx));
+        for _ in 0..2 { let receiver=receiver.clone(); std::thread::spawn(move || loop {
+            let job=receiver.lock().unwrap_or_else(|p|p.into_inner()).recv();
+            match job { Ok(job) => { let _=std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)); }, Err(_) => break }
+        }); }
+        tx
+    })
+}
+#[derive(serde::Serialize)]
+struct EditorIpcEnvelope {
+    ok: bool,
+    #[serde(skip_serializing_if="Option::is_none")]
+    value: Option<crate::editor_runtime::ControlReply>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    error: Option<String>,
+}
+fn editor_ipc_envelope(result: Result<crate::editor_runtime::ControlReply,String>) -> Vec<u8> {
+    let started=std::time::Instant::now();
+    let envelope=match result { Ok(value)=>EditorIpcEnvelope {ok:true,value:Some(value),error:None},
+        Err(error)=>EditorIpcEnvelope {ok:false,value:None,error:Some(error)} };
+    let bytes=serde_json::to_vec(&envelope).unwrap_or_else(|_| br#"{"ok":false,"error":"editor response encoding failed"}"#.to_vec());
+    crate::metrics::sample("native_editor.ipc_encode_ms",started.elapsed());
+    crate::performance_capture::native_span("ipc-encode",started.elapsed(),None);
+    bytes
+}
 thread_local! {
     // 最近一次 full 基线、导航序号及真实接受代数；仅宿主主线程访问。
     static VIEWPORT_SEQUENCE: std::cell::Cell<(u32, u64, u32)> = const { std::cell::Cell::new((0, 0, 0)) };
@@ -146,6 +177,9 @@ pub fn control(body: &[u8]) -> Result<Value, String> {
     let started=std::time::Instant::now();
     if trace {crate::diagnostics::event("native-bridge","operation-start",json!({"method":req.method,"operation":operation}));}
     let result = match req.method.as_str() {
+        method if method.starts_with("document_editor_") => {
+            return Err("Native editor calls require isolated /editor-rpc transport".into());
+        }
         "client_metrics" => {
             crate::metrics::client_with_work(
                 req.args.first().ok_or("Missing metrics")?,
@@ -332,7 +366,7 @@ pub fn install(
                             "Access-Control-Allow-Headers",
                             "Content-Type, X-Woohaa-Token",
                         )
-                        .header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+                        .header("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS")
                         .header("Cache-Control", "no-store")
                         .body(body)
                         .expect("native response"),
@@ -356,6 +390,25 @@ pub fn install(
                 return;
             }
             // Diagnostics must remain usable when the renderer/main thread is blocked.
+            if request.uri().path() == "/performance-clock" {
+                let value = if request.method() == tauri::http::Method::GET {
+                    crate::performance_capture::clock_pair()
+                } else {
+                    json!({"ok":false,"error":"Timing clock requires GET"})
+                };
+                respond(serde_json::to_vec(&value).unwrap(), "application/json");
+                return;
+            }
+            if request.uri().path() == "/performance" {
+                let result = if request.method() == tauri::http::Method::POST {
+                    crate::performance_capture::ingest(request.body())
+                } else { Err("Timing capture requires POST".into()) };
+                respond(serde_json::to_vec(&match result {
+                    Ok(()) => json!({"ok":true}),
+                    Err(error) => json!({"ok":false,"error":error}),
+                }).unwrap(), "application/json");
+                return;
+            }
             if request.uri().path() == "/diagnostics" {
                 let result = if request.method() == tauri::http::Method::POST {
                     crate::diagnostics::ingest(request.body())
@@ -372,7 +425,7 @@ pub fn install(
                 );
                 return;
             }
-            if request.body().len() > if request.uri().path() == "/image-register" { woohaa_media_image::MAX_COMPRESSED_BYTES } else { MAX_TEXTURE_BYTES } {
+            if request.body().len() > if request.uri().path() == "/image-register" { woohaa_media_image::MAX_COMPRESSED_BYTES } else if request.uri().path()=="/editor-blob" { crate::editor_blobs::MAX_BLOB_BYTES } else { MAX_TEXTURE_BYTES } {
                 respond(
                     br#"{"ok":false,"error":"Native request exceeds budget"}"#.to_vec(),
                     "application/json",
@@ -381,9 +434,91 @@ pub fn install(
             }
             // The callback may run on a WebKit IO thread. Queue the request; never
             // touch the App, AppKit views, bridge TLS or query indexes from that thread.
+            let reservation = match crate::document_editor::transport::reserve_control(request.body().len()) {
+                Ok(reservation) => reservation,
+                Err(error) => {
+                    respond(serde_json::to_vec(&json!({"ok":false,"error":error.message,"code":error.code})).unwrap(), "application/json");
+                    return;
+                }
+            };
+            if request.uri().path()=="/editor-blob" {
+                let job:EditorIpcJob=Box::new(move || {
+                    let _reservation=reservation;
+                    if request.method()==tauri::http::Method::POST {
+                        let result=crate::editor_blobs::upload(request.into_body());
+                        let envelope=match result {Ok(ticket)=>json!({"ok":true,"value":{"ticket":ticket}}),Err(error)=>json!({"ok":false,"error":error})};
+                        respond(serde_json::to_vec(&envelope).unwrap(),"application/json");
+                    } else if request.method()==tauri::http::Method::GET {
+                        let result=(|| {
+                            let uri=tauri::Url::parse(&request.uri().to_string()).map_err(|_|"invalid editor binary URL")?;
+                            let ticket=uri.query_pairs().find(|(key,_)|key=="id").map(|(_,value)|value.into_owned()).ok_or("missing editor export ticket")?;
+                            if ticket.len()>64 {return Err("invalid editor export ticket".to_string());}
+                            crate::editor_blobs::download(&ticket)
+                        })();
+                        match result {
+                            Ok(receipt)=>if let Ok(crate::document_editor::OperationResult::Exported {bytes,..})=&receipt.result { respond(bytes.clone(),"application/octet-stream"); },
+                            Err(error)=>respond(serde_json::to_vec(&json!({"ok":false,"error":error})).unwrap(),"application/json"),
+                        }
+                    } else if request.method()==tauri::http::Method::DELETE {
+                        let result=(|| {
+                            let uri=tauri::Url::parse(&request.uri().to_string()).map_err(|_|"invalid editor binary URL")?;
+                            let ticket=uri.query_pairs().find(|(key,_)|key=="id").map(|(_,value)|value.into_owned()).ok_or("missing editor upload ticket")?;
+                            if ticket.len()>64 {return Err("invalid editor upload ticket");}
+                            crate::editor_blobs::admitted(&ticket);
+                            Ok(())
+                        })();
+                        let value=match result {Ok(())=>json!({"ok":true}),Err(error)=>json!({"ok":false,"error":error})};
+                        respond(serde_json::to_vec(&value).unwrap(),"application/json");
+                    } else {respond(br#"{"ok":false,"error":"Editor binary transfer requires POST, GET or DELETE"}"#.to_vec(),"application/json");}
+                });
+                if let Err(std::sync::mpsc::TrySendError::Full(job) | std::sync::mpsc::TrySendError::Disconnected(job))=editor_ipc_workers().try_send(job) {std::thread::spawn(job);}
+                return;
+            }
+            if request.uri().path() == "/editor-rpc" {
+                let app=ctx.app_handle().clone();
+                let reservation=std::sync::Arc::new(reservation);
+                let job: EditorIpcJob=Box::new(move || {
+                    let _reservation=reservation.clone();
+                    let prepared=(|| {
+                        if request.method()!=tauri::http::Method::POST { return Err("Editor RPC requires POST".into()); }
+                        let request:Request=serde_json::from_slice(request.body()).map_err(|e|e.to_string())?;
+                        crate::editor_runtime::prepare(&request.method,request.args.first().and_then(Value::as_str))
+                    })();
+                    // Release the raw JSON before queueing the decoded request.
+                    drop(request);
+                    let result=match prepared {
+                        Err(error)=>Err(error),
+                        Ok(prepared)=>{
+                            let upload=match &prepared {crate::editor_runtime::PreparedControl::Enqueue(_,upload)=>upload.clone(),_=>None};
+                            let (tx,rx)=std::sync::mpsc::sync_channel(1);
+                            let held=reservation.clone();
+                            let queued=std::time::Instant::now();
+                            let result=match app.run_on_main_thread(move || {
+                                crate::metrics::sample("native_editor.control_dispatch_ms",queued.elapsed());
+                                crate::performance_capture::native_span("control-dispatch",queued.elapsed(),None);
+                                let _held=held;
+                                let _=tx.send(crate::editor_runtime::control_prepared(prepared));
+                            }) {
+                                Ok(())=>rx.recv().unwrap_or_else(|_|Err("Editor owner disconnected".into())),
+                                Err(_)=>Err("Editor owner unavailable".into()),
+                            };
+                            if result.is_ok() {if let Some(ticket)=upload {crate::editor_blobs::admitted(&ticket);}}
+                            result
+                        }
+                    };
+                    respond(editor_ipc_envelope(result),"application/json");
+                });
+                // The reservation also bounds the rare fallback if the worker queue is unavailable.
+                if let Err(std::sync::mpsc::TrySendError::Full(job) | std::sync::mpsc::TrySendError::Disconnected(job))=editor_ipc_workers().try_send(job) {
+                    // Reservation still bounds this fallback; parsing never runs on the caller.
+                    std::thread::spawn(job);
+                }
+                return;
+            }
             let queued = std::time::Instant::now();
             let app = ctx.app_handle().clone();
             let _ = ctx.app_handle().run_on_main_thread(move || {
+                let _reservation = reservation;
                 crate::metrics::sample("rpc.dispatch_wait_ms", queued.elapsed());
                 let service = std::time::Instant::now();
                 let uri = tauri::Url::parse(&request.uri().to_string()).expect("scheme URL");
