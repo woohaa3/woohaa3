@@ -39,20 +39,40 @@ describe("导演区独立时间轴", () => {
     expect(frames.size).toBe(0);
   });
 
-  it("pauses on area switches and deselection, and remembers each area's playhead and loop", () => {
+  it("pauses on director switches, keeps playing after deselection and remembers each playhead", () => {
     const { player, tick, definitions, frames } = fixture();
     player.play(); tick(1);
     player.sync("canvas", definitions, "b");
     expect(player.snapshot()).toMatchObject({ nodeId: "b", time: 0, playing: false, loop: true });
     player.seek(0.5); player.setLoop(false); player.play(); tick(0.25);
     player.sync("canvas", definitions, null);
-    expect(player.snapshot()).toMatchObject({ nodeId: null, playing: false });
-    expect(frames.size).toBe(0);
+    expect(player.snapshot()).toMatchObject({ nodeId: "b", playing: true });
+    expect(frames.size).toBe(1);
+    tick(0.25);
     player.sync("canvas", definitions, "a");
     expect(player.snapshot()).toMatchObject({ time: 1, playing: false });
     player.sync("canvas", definitions, "b");
-    expect(player.snapshot()).toMatchObject({ time: 0.75, loop: false, playing: false });
-    expect([...player.sampleTimes()]).toEqual([["a", 1], ["b", 0.75]]);
+    expect(player.snapshot()).toMatchObject({ time: 1, loop: false, playing: false });
+    expect([...player.sampleTimes()]).toEqual([["a", 1], ["b", 1]]);
+  });
+
+  it("continues when selection is cleared or moves to a model, and still stops at the end", () => {
+    const { player, tick, definitions, frames } = fixture();
+    player.play(); tick(1);
+    player.sync("canvas", definitions, null); tick(0.5);
+    expect(player.snapshot()).toMatchObject({nodeId:"a",time:1.5,playing:true});
+    player.sync("canvas", definitions, "model"); tick(0.5);
+    expect(player.snapshot()).toMatchObject({nodeId:"a",time:2,playing:true});
+    player.sync("canvas", definitions, "a"); tick(0.5);
+    expect(player.snapshot()).toMatchObject({time:2.5,playing:true});
+    player.sync("canvas", definitions, null); tick(2);
+    expect(player.snapshot()).toMatchObject({time:4,playing:false});
+    expect(frames.size).toBe(0);
+    player.play(); player.setLoop(true); tick(5);
+    expect(player.snapshot()).toMatchObject({nodeId:"a",time:1,playing:true});
+    player.sync("canvas", [], null);
+    expect(player.snapshot()).toMatchObject({nodeId:null,playing:false});
+    expect(frames.size).toBe(0);
   });
 
   it("holds the exact final pose, restarts at the end and wraps only when loop is enabled", () => {

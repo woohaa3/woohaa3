@@ -39,6 +39,9 @@ export type AttachAssemblyDeps = {
   onGizmoFeedback?: InteractionControllerOptions["onGizmoFeedback"];
   animationPlayback: () => import("@woohaa3/contracts").BevyAnimationPlayback | null;
   worldAnimationTimes: () => ReadonlyMap<string, number>;
+  worldAnimationPlayheads?: () => ReadonlyMap<string, number>;
+  worldAnimationPlayer?: () => { nodeId: string | null; playing: boolean };
+  worldAnimationLoop?: (nodeId: string) => boolean;
   focusTransition: () => import("@woohaa3/contracts").BevyFocusTransition | null;
   runState: () => import("../canvas-shell/interaction-types.js").RunStateProjectionInput | null;
   gestures: ModelEditorGestureRefs;
@@ -101,6 +104,9 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     onGizmoFeedback: deps.onGizmoFeedback,
     getAnimationPlayback: deps.animationPlayback,
     getWorldAnimationTimes: deps.worldAnimationTimes,
+    getWorldAnimationPlayheads: deps.worldAnimationPlayheads,
+    getWorldAnimationPlayer: deps.worldAnimationPlayer,
+    getWorldAnimationLoop: deps.worldAnimationLoop,
     getFocusTransition: deps.focusTransition,
     getRunState: deps.runState,
     projectHistoryCanvas: options.projectHistoryCanvas,

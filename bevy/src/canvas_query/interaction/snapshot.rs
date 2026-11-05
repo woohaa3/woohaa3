@@ -71,6 +71,7 @@ pub(crate) struct InteractionSnapshot {
     pub(super) edges: Vec<SnapshotEdge>,
     /// 导演区边框胶囊的命中几何（Bevy 2D）：画在 3D 线框上，点它选中导演区。
     pub(super) scene_area_labels: Vec<layout::SceneAreaLabelGeometry>,
+    pub(super) scene_area_players: Vec<layout::SceneAreaLabelGeometry>,
     pub(super) scope_areas: Vec<crate::protocol::SceneArea>,
     pub(super) scope_frames: Vec<usize>,
     /// 点命中顺序：按发射序列倒序（最上层先）。
@@ -241,6 +242,20 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
         adjacency,
         aggregate_selection,
         scene_area_labels: layout::scene_area_labels(scene),
+        scene_area_players: if scene.model_focus.is_none()
+            && scene.image_focus.is_none()
+            && scene.video_focus.is_none()
+        {
+            scene
+                .scene_areas
+                .iter()
+                .filter_map(|area| {
+                    crate::canvas_query::scene_area_player::geometry(area, scene.viewport.zoom)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        },
         scope_frames: nodes
             .iter()
             .enumerate()
@@ -430,6 +445,16 @@ impl InteractionSnapshot {
                         direction: direction.clone(),
                     });
                 }
+            }
+        }
+        for player in &self.scene_area_players {
+            if let Some(control) = crate::canvas_query::scene_area_player::control(player, world) {
+                let (a, b) = crate::canvas_query::scene_area_player::track(player);
+                return Some(PointHit::SceneAreaPlayback {
+                    node_id: player.node_id.clone(),
+                    control: control.into(),
+                    track: [a.x, a.y, b.x, b.y],
+                });
             }
         }
         // 导演区边框胶囊画在 3D 线框上、位于节点之上：先判标签，点它选中导演区。
@@ -718,6 +743,11 @@ fn refresh_scope_labels(snapshot: &mut InteractionSnapshot) {
         return;
     }
     let zoom = snapshot.viewport.2;
+    snapshot.scene_area_players = snapshot
+        .scope_areas
+        .iter()
+        .filter_map(|area| crate::canvas_query::scene_area_player::geometry(area, zoom))
+        .collect();
     snapshot.scene_area_labels = snapshot
         .scope_areas
         .iter()

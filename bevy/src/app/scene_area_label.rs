@@ -27,6 +27,7 @@ use bevy::{
     },
 };
 use std::collections::{HashMap, HashSet};
+mod player;
 
 #[derive(Component)]
 struct GroundScopeLabel;
@@ -38,11 +39,13 @@ struct GlyphVisual {
 }
 struct LabelVisual {
     body: GlyphVisual,
+    controls: Option<GlyphVisual>,
     glyphs: HashMap<AssetId<Image>, GlyphVisual>,
     geometry: Option<SceneAreaLabelGeometry>,
     style: Option<ScopeStyle>,
     text_key: Option<(String, u32)>,
     layout: TextLayoutInfo,
+    playback: Option<crate::protocol::SceneAreaPlayback>,
 }
 #[derive(Default)]
 pub(super) struct Labels {
@@ -131,7 +134,7 @@ fn ground_point(point: Vec2) -> Vec3 {
 fn label_point(geometry: &SceneAreaLabelGeometry, local: Vec2) -> Vec3 {
     ground_point(geometry.center + geometry.axis * local.x - geometry.axis.perp() * local.y)
 }
-fn body_mesh(geometry: &SceneAreaLabelGeometry, style: ScopeStyle) -> Mesh {
+fn body_shape(geometry: &SceneAreaLabelGeometry, style: ScopeStyle) -> Geometry {
     let mut shape = Geometry::default();
     let outline = layout::scene_area_label_outline(geometry);
     // Share the exact inner edge with Geometry::outline rather than overlap two fills.
@@ -147,6 +150,12 @@ fn body_mesh(geometry: &SceneAreaLabelGeometry, style: ScopeStyle) -> Mesh {
         .collect();
     shape.polygon(&inner, 0.0, style.label_fill);
     shape.outline(&outline, geometry.scale(), 0.0, style.border);
+    shape
+}
+fn body_mesh(geometry: &SceneAreaLabelGeometry, style: ScopeStyle) -> Mesh {
+    ground_mesh(body_shape(geometry, style))
+}
+fn ground_mesh(shape: Geometry) -> Mesh {
     let mut mesh = shape.build();
     let count = if let Some(VertexAttributeValues::Float32x3(points)) =
         mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
@@ -283,10 +292,17 @@ pub(super) fn sync(
         || scene.0.image_focus.is_some()
         || scene.0.video_focus.is_some();
     if !hidden {
-        for area in &scene.0.scene_areas {
-            let Some(geometry) =
+        for (area, is_player) in scene
+            .0
+            .scene_areas
+            .iter()
+            .flat_map(|area| [(area, false), (area, true)])
+        {
+            let Some(geometry) = (if is_player {
+                crate::canvas_query::scene_area_player::geometry(area, scene.0.viewport.zoom)
+            } else {
                 layout::scene_area_label_geometry_for_zoom(area, scene.0.viewport.zoom)
-            else {
+            }) else {
                 continue;
             };
             let dpr = surface.pixel_ratio.min(text_presentation::MAX_DPR);
@@ -297,39 +313,72 @@ pub(super) fn sync(
             ) else {
                 continue;
             };
-            seen.insert(area.node_id.clone());
+            let key = if is_player {
+                format!("{}:playback", area.node_id)
+            } else {
+                area.node_id.clone()
+            };
+            seen.insert(key.clone());
+            let playback = if is_player {
+                area.playback.clone()
+            } else {
+                None
+            };
             let style = scopes
                 .as_deref()
                 .map(|scopes| scopes.style(&scene.0, &theme, &area.node_id))
                 .unwrap_or_else(|| ScopeStyle::for_node(&scene.0, &theme, &area.node_id));
-            let visual = labels
-                .areas
-                .entry(area.node_id.clone())
-                .or_insert_with(|| LabelVisual {
-                    body: spawn_visual(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        body_mesh(&geometry, style),
-                        StandardMaterial {
-                            unlit: true,
-                            cull_mode: None,
-                            // Only resolves coplanarity with the outline; scene depth testing stays enabled.
-                            depth_bias: 1.0,
-                            ..default()
-                        },
-                    ),
-                    glyphs: HashMap::new(),
-                    geometry: None,
-                    style: None,
-                    text_key: None,
-                    layout: TextLayoutInfo::default(),
-                });
+            let visual = labels.areas.entry(key).or_insert_with(|| LabelVisual {
+                body: spawn_visual(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    body_mesh(&geometry, style),
+                    StandardMaterial {
+                        unlit: true,
+                        cull_mode: None,
+                        // Only resolves coplanarity with the outline; scene depth testing stays enabled.
+                        depth_bias: 1.0,
+                        ..default()
+                    },
+                ),
+                controls: None,
+                glyphs: HashMap::new(),
+                geometry: None,
+                style: None,
+                text_key: None,
+                layout: TextLayoutInfo::default(),
+                playback: None,
+            });
             let geometry_changed = visual.geometry.as_ref() != Some(&geometry);
             if geometry_changed || visual.style != Some(style) {
                 meshes
                     .insert(visual.body.mesh.id(), body_mesh(&geometry, style))
                     .expect("retained label mesh");
+            }
+            if let Some(state) = &playback {
+                if geometry_changed || visual.style != Some(style) || visual.playback != playback {
+                    let mesh = player::mesh(&geometry, style, state, &theme);
+                    if let Some(controls) = &visual.controls {
+                        meshes
+                            .insert(controls.mesh.id(), mesh)
+                            .expect("retained player ink");
+                    } else {
+                        visual.controls = Some(spawn_visual(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            mesh,
+                            StandardMaterial {
+                                unlit: true,
+                                alpha_mode: AlphaMode::Blend,
+                                cull_mode: None,
+                                depth_bias: 2.0,
+                                ..default()
+                            },
+                        ));
+                    }
+                }
             }
             let title = if area.title.trim().is_empty() {
                 "导演区"
@@ -343,6 +392,11 @@ pub(super) fn sync(
                 title.pop();
                 title.push('…');
             }
+            let title = if let Some(state) = &playback {
+                format!("{:.1} / {:.1}s", state.time, state.duration)
+            } else {
+                title
+            };
             let text_key = (title, (target.font_size * dpr).round().max(1.0) as u32);
             let mut layout_changed = false;
             if visual.text_key.as_ref() != Some(&text_key) {
@@ -364,7 +418,11 @@ pub(super) fn sync(
                     .text_key
                     .as_ref()
                     .map_or(1.0, |key| geometry.text_size() / key.1 as f32);
-                let batches = glyph_meshes(&visual.layout, &geometry, scale, &text.images);
+                let mut text_geometry = geometry.clone();
+                if is_player {
+                    text_geometry.center += geometry.axis * (54.0 * geometry.scale());
+                }
+                let batches = glyph_meshes(&visual.layout, &text_geometry, scale, &text.images);
                 visual.glyphs.retain(|atlas, glyph| {
                     if batches.contains_key(atlas) {
                         true
@@ -408,6 +466,7 @@ pub(super) fn sync(
             }
             visual.geometry = Some(geometry);
             visual.style = Some(style);
+            visual.playback = playback;
         }
     }
     labels.areas.retain(|id, visual| {
@@ -415,6 +474,9 @@ pub(super) fn sync(
             return true;
         }
         remove_visual(&visual.body, &mut commands, &mut meshes, &mut materials);
+        if let Some(controls) = &visual.controls {
+            remove_visual(controls, &mut commands, &mut meshes, &mut materials);
+        }
         for glyph in visual.glyphs.values() {
             remove_visual(glyph, &mut commands, &mut meshes, &mut materials);
         }

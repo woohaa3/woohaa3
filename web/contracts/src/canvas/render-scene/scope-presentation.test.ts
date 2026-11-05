@@ -260,4 +260,28 @@ it("samples each director at its own playhead without modifying canonical transf
   const selected = buildCanvasRenderScene({ canvas, selection: { nodes: ["area"] },
     sceneAnimationTimes: new Map([["area", 1], ["area-b", 3]]) });
   expect(selected.nodes.find(node => node.id === "model")!.sharedWorldInstance!.transform.scale).toBe(2);
+  const playing = buildCanvasRenderScene({canvas, selection:{nodes:[]},
+    sceneAnimationTimes:new Map([["area",1],["area-b",3]]),sceneAnimationPlayer:{nodeId:"area",playing:true}});
+  expect(playing.nodes.find(node => node.id === "model")!.sharedWorldInstance!.transform.scale).toBe(2);
+  expect(playing.sceneAreas![0]!.playback).toMatchObject({time:1,playing:true});
+});
+
+it("projects ground player state separately from capture sampling and invalidates controls", () => {
+  const canvas = fixture();
+  const area = canvas.nodeData.area!.sceneArea as Record<string, unknown>;
+  area.animationScript = {
+    script: 'motion.instance.tween("instance-main", { property: "scale", startTime: 0, endTime: 4, from: [1], to: [2], easing: "linear" });',
+    scriptLanguage: "javascript", scriptVersion: "woohaa-world-animation-js-v2", revision: 1,
+    sourceHash: "player-state", duration: 4, loop: false
+  } satisfies WorldAnimationScript;
+  const input = { canvas, sceneAnimationTimes: new Map([["area", 3]]),
+    sceneAnimationPlayheads: new Map([["area", 1]]), sceneAnimationPlayer: {nodeId:"area",playing:true},
+    sceneAnimationLoop: () => true };
+  const playing = buildCanvasRenderScene(input);
+  expect(playing.sceneAreas![0]!.playback).toEqual({time:1,duration:4,playing:true,loop:true});
+  expect(playing.nodes.find(node => node.id === "model")!.sharedWorldInstance!.transform.scale).toBe(1.75);
+  const paused = buildCanvasRenderScene({...input,sceneAnimationPlayer:{nodeId:null,playing:false}});
+  expect(renderSceneFingerprint(paused)).not.toBe(renderSceneFingerprint(playing));
+  const preview = buildCanvasRenderScene({...input,sceneAreaPreviews:new Map([["area", {min:{u:0,v:0},max:{u:5,v:5}}]])});
+  expect(preview.sceneAreas![0]!.playback).toEqual(playing.sceneAreas![0]!.playback);
 });

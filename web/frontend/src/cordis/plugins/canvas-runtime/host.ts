@@ -518,6 +518,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   };
   worldAnimationTimes = () => this.captureAnimationTimesOverride ?? this.worldAnimation.sampleTimes();
   worldAnimationState = () => this.worldAnimation.snapshot();
+  worldAnimationPlayheads = () => this.worldAnimation.sampleTimes();
+  worldAnimationLoop = (nodeId: string) => this.worldAnimation.loopFor(nodeId);
   subscribeWorldAnimation = (listener: () => void) => this.worldAnimation.subscribe(listener);
   playWorldAnimation = () => this.worldAnimation.play();
   pauseWorldAnimation = () => this.worldAnimation.pause();
@@ -708,6 +710,9 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         getGhostNodes: () => this.ghosts,
         modelFocus: () => this.modelFocus,
         worldAnimationTimes: this.worldAnimationTimes,
+        worldAnimationPlayheads: this.worldAnimationPlayheads,
+        worldAnimationPlayer: this.worldAnimationState,
+        worldAnimationLoop: this.worldAnimationLoop,
         modelFocusMode: this.modelFocusMode,
         focusTargets: () => this.resolveModelFocusTargets(),
         hasFocusTarget: (nodeId) => this.modelFocusTargetsOverride !== null

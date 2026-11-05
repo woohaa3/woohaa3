@@ -58,7 +58,7 @@ pub(crate) use prepared::{PreparedModelMetadata, PreparedModelRequest};
 #[allow(unused_imports)]
 pub(crate) use scene::{
     Edge, GraphNode, HistoryStripDot, HistoryStripPresentation, NodeChrome, Scene, SceneArea,
-    SceneAreaBounds, SceneAreaPoint, Selection, Viewport,
+    SceneAreaBounds, SceneAreaPlayback, SceneAreaPoint, Selection, Viewport,
 };
 #[allow(unused_imports)]
 pub(crate) use scene_instant::{
