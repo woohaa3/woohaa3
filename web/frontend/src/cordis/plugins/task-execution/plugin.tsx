@@ -35,6 +35,8 @@ import { nodeDraftStore } from "./drafts.js";
 import { reeditFromSnapshot } from "./reedit.js";
 import { shouldDismissAgentDetailOnDeselect } from "./detail-dismissal.js";
 import { registerGenerationTraceMenu } from "./generation-trace.js";
+import { GENERATION_TRACE_MENU_ID } from "./generation-trace.js";
+import { isSixiHiddenCanvasMenuItem } from "./workspace/generation-trace-sixi.js";
 import { GENERATION_TRACE_DIALOG_ID, registerGenerationTraceDialog } from "./generation-trace-dialog.js";
 import { createTaskMonitorRemote } from "../../../shared/task-trace/remote.js";
 import { decodeWorldCamera, decodeSceneAreaData, isGlbModelNodeData, isModelNodeType, OPEN_TASK_INSPECTION_ACTION, TASKS_INSPECT_ACTION } from "@woohaa3/contracts";
@@ -158,6 +160,8 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         owner: TASK_EXECUTION_PLUGIN_ID,
         getCanvas: () => workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas,
         canInspect: canViewTask,
+        // 四喜发行形态点名隐藏「查看生成溯源」（清单在 workspace/generation-trace-sixi.ts）。
+        hidden: () => isSixiHiddenCanvasMenuItem(GENERATION_TRACE_MENU_ID),
         // 解析到 taskKey → 画布内浮窗；未入栈（或解析不到）→ 回退任务监控页筛选。
         openTraceDialog: openGenerationTraceDialog,
         // 解析到 taskKey 时只带 taskKey 精确定位；否则回退 canvasId + nodeId 筛选列表。

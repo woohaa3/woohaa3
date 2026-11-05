@@ -143,13 +143,18 @@ export function resolveGenerationTraceTarget(
  *
  * 无权限时**静默隐藏**而不是禁用：与执行面板「查看任务」一致（无该 action 时不渲染入口），
  * 不把全局管理数据引导给普通用户。拉线创建（`connectFrom`）不是节点动作，不出现。
+ *
+ * `hidden` 是发行形态的点名隐藏（四喜传 `SIXI_HIDDEN_CANVAS_MENU_ITEMS`）：放在入参上而不是
+ * 写死，是为了上游在同一份纯函数里保留自己的语义，发行形态自己决定藏谁。
  */
 export function generationTraceMenuItems(input: {
   canvas: ServerCanvas | null;
   context: ContextMenuContext;
   canInspect: boolean;
+  hidden?: boolean;
 }): GenerationTraceMenuItem[] {
-  const { canvas, context, canInspect } = input;
+  const { canvas, context, canInspect, hidden = false } = input;
+  if (hidden) return [];
   if (!canInspect) return [];
   if (!context.nodeId || context.connectFrom) return [];
   if (!resolveGenerationTraceTarget(canvas, context.nodeId)) return [];
@@ -165,6 +170,8 @@ export type GenerationTraceMenuDeps = {
   getCanvas: () => ServerCanvas | null;
   /** 是否有任务监控权限（与「查看任务」同一门禁）。 */
   canInspect: () => boolean;
+  /** 发行形态点名隐藏这一项（四喜传 `isSixiHiddenCanvasMenuItem(GENERATION_TRACE_MENU_ID)`）。 */
+  hidden?: () => boolean;
   /** 打开画布内「生成溯源」浮窗；返回是否入栈（false 时回退任务监控页）。 */
   openTraceDialog?: (payload: GenerationTraceDialogPayload) => boolean;
   /** 降级路径：打开任务监控页（有 taskKey 精确定位，否则回退 canvasId + nodeId 筛选）。 */
@@ -182,7 +189,12 @@ export function registerGenerationTraceMenu(ctx: Context, deps: GenerationTraceM
     owner: deps.owner,
     priority: 5,
     items: (context: ContextMenuContext) =>
-      generationTraceMenuItems({ canvas: deps.getCanvas(), context, canInspect: deps.canInspect() }),
+      generationTraceMenuItems({
+        canvas: deps.getCanvas(),
+        context,
+        canInspect: deps.canInspect(),
+        ...(deps.hidden ? { hidden: deps.hidden() } : {})
+      }),
     onSelect: (itemId: string, context: ContextMenuContext) => {
       if (itemId !== GENERATION_TRACE_MENU_ID || !context.nodeId) return;
       const target = resolveGenerationTraceTarget(deps.getCanvas(), context.nodeId);

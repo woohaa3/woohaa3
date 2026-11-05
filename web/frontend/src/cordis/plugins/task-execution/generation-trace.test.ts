@@ -203,6 +203,27 @@ describe("registerGenerationTraceMenu 选择派发", () => {
     expect(pages).toHaveLength(1);
     expect(pages[0]).toMatchObject({ canvasId: expect.any(String), nodeId: NODE_ID, taskKey: "task-upstream-1" });
   });
+
+  it("hidden 传入后菜单项为空（接线段把发行形态的隐藏清单接上了）", () => {
+    let captured: { items?: (context: ContextMenuContext) => unknown[] } = {};
+    const ctx = {
+      slots: {
+        register: (_slot: string, entry: typeof captured) => {
+          captured = entry;
+          return () => undefined;
+        }
+      }
+    } as unknown as Context;
+    const canvas = canvasFixture({ nodes: [{ id: NODE_ID, type: "image", data: { activeRunId: "run-1" } }] });
+    registerGenerationTraceMenu(ctx, {
+      owner: "task-execution",
+      getCanvas: () => canvas,
+      canInspect: () => true,
+      hidden: () => true,
+      openTrace: () => undefined
+    });
+    expect(captured.items?.(menuContext(NODE_ID))).toHaveLength(0);
+  });
 });
 
 describe("generationTraceMenuItems", () => {
@@ -233,5 +254,14 @@ describe("generationTraceMenuItems", () => {
     expect(generationTraceMenuItems({ canvas: traceable, context: menuContext(null), canInspect: true })).toEqual([]);
     const connectFrom = menuContext(NODE_ID, { connectFrom: { nodeId: "src", nodeType: "image" } });
     expect(generationTraceMenuItems({ canvas: traceable, context: connectFrom, canInspect: true })).toEqual([]);
+  });
+
+  it("发行形态点名隐藏时不出现菜单项（四喜清单），缺省不隐藏", () => {
+    expect(
+      generationTraceMenuItems({ canvas: traceable, context: menuContext(NODE_ID), canInspect: true, hidden: true })
+    ).toEqual([]);
+    expect(
+      generationTraceMenuItems({ canvas: traceable, context: menuContext(NODE_ID), canInspect: true })
+    ).toHaveLength(1);
   });
 });
