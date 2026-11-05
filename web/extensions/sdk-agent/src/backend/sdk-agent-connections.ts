@@ -1,7 +1,7 @@
 import { sdkSourceFor, sdkSourceProtocol } from "./service-source.js";
 /** Fixed framework dispatch. The host ledger owns idempotency; frameworks own inference loops. */
 import type {
-  AgentConnectionCapabilities, AgentConnectionModel, AgentConversationAdapter, AgentAdapterRunInput,
+  AgentConnectionCapabilities, AgentConnectionModel, AgentConnectionStatus, AgentConversationAdapter, AgentAdapterRunInput,
   AgentAdapterRunOutcome, AgentConnectionRuntime, AgentEngineId, ApplicationToolDelegationFacade,
   ApplicationCanvasAuthoringFacade, ApplicationUserDelegation
 } from "@woohaa3/contracts";
@@ -65,8 +65,20 @@ export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, 
         }
       };
       const models: AgentConnectionModel[] = (record.models ?? []).map((id) => ({ id, label: id, reasoningEfforts: sdkReasoningEfforts(adapter.adapterId, id), source: "user-provided", accountAuthorized: false, ...(record.modelCapabilities?.[id] ? { capabilities: record.modelCapabilities[id] } : {}) }));
-      return { runtime, capabilities: capabilitiesFor(adapter), models, required: ["credential", "transport"], endpointAllowed,
-        ...(!endpointAllowed ? { reason: runtime.dependency.reason } : !credentialConfigured ? { reason: "尚未保存 API Key" } : {}) };
+      // A saved Key on an allowed endpoint makes the HTTP transport attemptable. This is not a model
+      // probe: modelAccess stays unknown, and an explicit failed/unavailable evidence is preserved.
+      const transport = record.lastStatus?.transport;
+      const transportEvidence = transport && (transport.state === "failed" || transport.state === "unavailable")
+        ? transport
+        : endpointAllowed && credentialConfigured ? { state: "ready" as const, checkedAt: transport?.checkedAt ?? null } : transport ?? unknown;
+      const status: AgentConnectionStatus = { transport: transportEvidence, credential: record.lastStatus?.credential ?? unknown,
+        modelAccess: record.lastStatus?.modelAccess ?? unknown, tools: record.lastStatus?.tools ?? unknown };
+      const blockedReason = !endpointAllowed ? runtime.dependency.reason
+        : !credentialConfigured ? "尚未保存 API Key"
+        : runtime.dependency.state === "unavailable" || runtime.dependency.state === "failed" ? runtime.dependency.reason
+        : undefined;
+      return { runtime, status, capabilities: capabilitiesFor(adapter), models, required: ["credential", "transport"], endpointAllowed,
+        ...(blockedReason ? { reason: blockedReason } : {}) };
     }
   } satisfies ConnectionDescriptor]));
 }

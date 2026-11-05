@@ -142,7 +142,7 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         sendJson(res, 200, { connections: await deps.serviceConnections?.list(actor) ?? [], duplicates: await deps.serviceConnections?.suspectedDuplicates(actor) ?? [], providers: (deps.serviceConnectionProviders?.() ?? []).filter(provider => provider.serviceConnectionFactory).map(provider => ({ providerId: provider.providerId, protocols: provider.serviceConnectionFactory!.protocols, models: provider.models.map(model => ({ modelId: model.providerModelId, modelKey: `${provider.providerId}:${model.providerModelId}`, type: model.modelType })) })) });
         return true;
       }
-      if ((suffix === "service-connections/protocol" || suffix === "service-connections/enabled") && method === "POST") {
+      if ((suffix === "service-connections/protocol" || suffix === "service-connections/enabled" || suffix === "service-connections/remove") && method === "POST") {
         const origin = firstHeader(req.headers.origin);
         if (!sameSourceOrigin(req, origin)) { sendJson(res, 403, { code: "forbidden", message: "需要同源请求" }); return true; }
         const input = await readJson(req, maxBytes) as Record<string, unknown>;
@@ -155,6 +155,9 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         if (suffix.endsWith("/enabled")) {
           if (typeof input.enabled !== "boolean") return badRequest(res, "启用状态无效");
           sendJson(res, 200, { connection: await deps.serviceConnections.setEnabled(actor, input.serviceConnectionId, expected, input.enabled) }); return true;
+        }
+        if (suffix.endsWith("/remove")) {
+          sendJson(res, 200, { connection: await deps.serviceConnections.remove(actor, input.serviceConnectionId, expected) }); return true;
         }
         const endpoint = input.endpoint as Record<string, unknown> | undefined;
         if (!endpoint || !["responses", "messages", "chat-completions", "gemini"].includes(String(endpoint.protocol)) || typeof endpoint.baseUrl !== "string" || !Array.isArray(input.models) || !input.models.every(model => typeof model === "string" && model.trim())) return badRequest(res, "协议入口和模型无效");
@@ -187,9 +190,9 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         if (!provider || !model || !endpoint || !source.capabilities.some(capability => capability.modelId === model.providerModelId && capability.protocol === endpoint.protocol && capability.purpose === "discussion")) return badRequest(res, "此来源或 Provider 未提供所选模型的文本生成适配");
         const connection = await deps.serviceConnections!.bind(actor, source.serviceConnectionId, { bindingId: `provider:${provider.providerId}`,
           extensionId: provider.extensionId, consumer: "provider", consumerId: provider.providerId, purposes: ["text"], modelKeys: [...new Set([...(source.bindings.find(binding => binding.bindingId === `provider:${provider.providerId}`)?.modelKeys ?? []), `${provider.providerId}:${model.providerModelId}`])] }, source,
-          [...source.capabilities.filter(capability => !(capability.purpose === "text" && capability.protocol === endpoint.protocol && capability.modelId === model.providerModelId)),
-            { purpose: "text", protocol: endpoint.protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" }]);
-        sendJson(res, 200, { connection }); return true;
+          normalizeCapabilities([...source.capabilities.filter(capability => !(capability.purpose === "text" && capability.protocol === endpoint.protocol && capability.modelId === model.providerModelId)),
+            { purpose: "text", protocol: endpoint.protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" }]));
+        sendJson(res, 200, { connection: await ensureProviderAssistantBinding(deps, actor, connection, provider) }); return true;
       }
       if (suffix === "service-connections/assistant" && method === "POST") {
         const origin = firstHeader(req.headers.origin);
@@ -582,6 +585,45 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
       return true;
     }
   };
+}
+
+/** Stable capability order keeps repeated binding CAS idempotent. */
+function normalizeCapabilities(capabilities: readonly import("@woohaa3/contracts").ServiceConnectionCapability[]) {
+  const key = (capability: import("@woohaa3/contracts").ServiceConnectionCapability) => `${capability.protocol}\u0000${capability.modelId}\u0000${capability.purpose}`;
+  return [...capabilities].sort((left, right) => key(left).localeCompare(key(right)));
+}
+
+/**
+ * A provider with a trusted assistant protocol makes its own language model usable as an Agent on the
+ * same personal source. The text binding stays independent; failing to project the optional Agent
+ * consumer must not break ordinary generation.
+ */
+async function ensureProviderAssistantBinding(
+  deps: AgentConversationApiDependencies,
+  actor: { owner: string; administrator: boolean; canUseSite: boolean },
+  connection: import("@woohaa3/contracts").ServiceConnectionView,
+  provider: import("@woohaa3/contracts").GenerationProvider
+): Promise<import("@woohaa3/contracts").ServiceConnectionView> {
+  const protocol = provider.serviceConnectionFactory?.assistantProtocol;
+  if (!protocol || !deps.serviceConnections) return connection;
+  const modelKeys = provider.models.filter(model => model.modelType === "language" && connection.capabilities.some(capability =>
+    capability.purpose === "discussion" && capability.protocol === protocol && capability.modelId === model.providerModelId)).map(model => model.providerModelId);
+  if (!modelKeys.length) return connection;
+  const assistantCapabilities = modelKeys.flatMap(modelId => [
+    { purpose: "discussion" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const },
+    { purpose: "target-execution" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const },
+  ]);
+  const capabilities = normalizeCapabilities([
+    ...connection.capabilities.filter(capability => !(capability.protocol === protocol && modelKeys.includes(capability.modelId)
+      && (capability.purpose === "discussion" || capability.purpose === "target-execution"))),
+    ...assistantCapabilities,
+  ]);
+  try {
+    return await deps.serviceConnections.bind(actor, connection.serviceConnectionId, {
+      bindingId: `provider-assistant:${provider.providerId}`, extensionId: "sdk-agent", consumer: "agent",
+      consumerId: `shared:${protocol}`, purposes: ["discussion", "target-execution"], modelKeys,
+    }, connection, capabilities);
+  } catch { return connection; }
 }
 
 async function authorizeCanvas(

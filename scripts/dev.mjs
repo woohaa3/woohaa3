@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import http from "node:http";
 import { createRequire } from "node:module";
+import os from "node:os";
 import { join } from "node:path";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -107,7 +109,10 @@ function signalChild(child, signal) {
 function agentSupervisorHost() {
   agentSupervisor ??= createAgentSupervisorHost({
     root,
-    runtimeDir: path.join(root, ".local", "agent-runtime"),
+    // AF_UNIX paths are limited to ~107 bytes; long worktree paths must not break the dev server.
+    runtimeDir: process.platform !== "win32" && Buffer.byteLength(path.join(root, ".local", "agent-runtime", "supervisor.sock")) >= 104
+      ? path.join(os.tmpdir(), `woohaa-agent-${createHash("sha256").update(root).digest("hex").slice(0, 20)}`)
+      : path.join(root, ".local", "agent-runtime"),
     log: message => console.warn(`[dev] ${message}`)
   });
   return agentSupervisor;

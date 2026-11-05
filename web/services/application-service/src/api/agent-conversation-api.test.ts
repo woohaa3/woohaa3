@@ -378,6 +378,7 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
   it("GET /connections 返回该 owner 的公开连接（不含秘密）", async () => {
     const view = {
       connectionId: "c1",
+      serviceConnectionId: "service-auto",
       adapterId: "openai-responses",
       extensionId: "sdk-agent",
       name: "OpenAI",
@@ -401,6 +402,8 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
     expect(response.status).toBe(200);
     const body = (await response.json()) as { connections: AgentConnectionView[] };
     expect(body.connections).toHaveLength(1);
+    // Auto-projected connections keep their service source identity in the public directory.
+    expect(body.connections[0]).toMatchObject({ connectionId: "c1", serviceConnectionId: "service-auto" });
     // 只暴露非秘密视图：无任何 secret/key/token 字段。
     expect(JSON.stringify(body)).not.toMatch(/secret|token|apiKey/i);
   });
@@ -515,7 +518,7 @@ it("service management uses trusted owner, enforces Origin/admin and atomically 
   try {
     const { base } = await boot({ serviceConnections: registry, serviceConnectionProviders: providers });
     const body = { ...evidenced, owner: "victim", scope: "site", providerId: "demo", modelId: "model" };
-    const post = (action: string, origin = base, payload = body) => fetch(`${base}/api/agent-conversations/service-connections/${action}`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const post = (action: string, origin = base, payload: Record<string, unknown> = body) => fetch(`${base}/api/agent-conversations/service-connections/${action}`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(payload) });
     expect((await post("provider", "https://evil.example")).status).toBe(403);
     expect((await post("provider", "invalid-url")).status).toBe(403);
     expect((await post("assistant")).status).toBe(403);
@@ -529,9 +532,45 @@ it("service management uses trusted owner, enforces Origin/admin and atomically 
     expect((await post("provider")).status).toBe(409);
     const forwarded = await fetch(`${base}/api/agent-conversations/service-connections/enabled`, { method: "POST", headers: { origin: "https://canvas.example", "x-forwarded-host": "canvas.example", "x-forwarded-proto": "https", "content-type": "application/json" }, body: JSON.stringify({ ...connection, enabled: false }) });
     expect(forwarded.status).toBe(200);
+    const disabled = ((await forwarded.json()) as { connection: import("@woohaa3/contracts").ServiceConnectionView }).connection;
+    const removed = await post("remove", base, { ...disabled });
+    expect(removed.status).toBe(200);
+    expect(((await removed.json()) as { connection: import("@woohaa3/contracts").ServiceConnectionView }).connection.removed).toBe(true);
+    expect(await registry.list(actor)).toEqual([]);
   } finally { store.close(); }
 });
 
+
+it("auto-projects a declared provider assistant as a discussion binding without wrapping ordinary text generation", async () => {
+  const { createServiceConnectionRegistry } = await import("../service-connections/registry.js");
+  const { createSqliteExtensionDocumentStore } = await import("../repository/extension-document-store.js");
+  const store = createSqliteExtensionDocumentStore({ path: ":memory:", owners: ["sources"] });
+  const registry = createServiceConnectionRegistry({ documents: store.forExtension("sources")!, checkEndpoint: () => true, validateBinding: () => false });
+  const actor = { owner: "user-a", administrator: false, canUseSite: true };
+  registry.forExtension("demo").registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
+  registry.forExtension("sdk-agent").registerConsumer({ protocols: ["chat-completions"], purposes: ["discussion", "target-execution"] });
+  const source = (await registry.save(actor, { operationId: "create", name: "Relay", endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }], expectedRevision: 0, expectedCredentialEpoch: 0 })).connection;
+  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
+  const providers = () => [{ providerId: "demo", extensionId: "demo", models: [{ providerModelId: "model", modelType: "language" }], serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" } }] as unknown as import("@woohaa3/contracts").GenerationProvider[];
+  try {
+    const { base } = await boot({ serviceConnections: registry, serviceConnectionProviders: providers });
+    const post = (payload: Record<string, unknown>) => fetch(`${base}/api/agent-conversations/service-connections/provider`, { method: "POST", headers: { origin: base, "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const first = await post({ ...evidenced, providerId: "demo", modelId: "model" });
+    expect(first.status).toBe(200);
+    const connection = ((await first.json()) as { connection: import("@woohaa3/contracts").ServiceConnectionView }).connection;
+    expect(connection.bindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ bindingId: "provider:demo", consumer: "provider", purposes: ["text"] }),
+      expect.objectContaining({ bindingId: "provider-assistant:demo", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion", "target-execution"], modelKeys: ["model"] }),
+    ]));
+    // Repeating the same operation does not add a binding or advance the published revision.
+    const second = await post({ ...connection, providerId: "demo", modelId: "model" });
+    expect(second.status).toBe(200);
+    const replay = ((await second.json()) as { connection: import("@woohaa3/contracts").ServiceConnectionView }).connection;
+    expect(replay.configRevision).toBe(connection.configRevision);
+    expect(replay.bindings.filter(binding => binding.bindingId === "provider-assistant:demo")).toHaveLength(1);
+    // The default service stub throws when touched: a binding alone never creates conversation state.
+  } finally { store.close(); }
+});
 
 it("text query, retry and exact stop authorize the trusted owner before touching delivery; public linking is rejected", async () => {
   const text = {

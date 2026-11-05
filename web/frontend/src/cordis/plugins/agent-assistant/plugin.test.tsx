@@ -453,7 +453,8 @@ it("总览不展示诊断状态或会话历史入口", async () => {
   const f = await render([api, local], true, undefined, { canvasId: "canvas" }, { listConversations });
   expect(f.el.textContent).not.toContain("诊断与历史");
   expect(f.el.textContent).not.toContain("待验证");
-  expect(f.el.querySelector('[data-capability="agent"]')?.textContent).toContain("已配置 2 个连接");
+  expect(f.el.querySelector('[data-capability="agent"] [data-count="local"]')?.textContent).toBe("已配置 1 个本地 Agent");
+  expect(f.el.querySelector('[data-capability="agent"] [data-count="suppliers"]')?.textContent).toBe("已配置 1 个供应商");
   expect(listConversations).not.toHaveBeenCalled();
 });
 
@@ -501,7 +502,8 @@ it("能力按来源身份计数，跨能力共享供应商，详情直接打开�
   const f = await render([api, local], true, undefined, {}, {
     serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [source, unconfigured, removed], providers: [], duplicates: [] } }),
   });
-  expect(f.el.querySelector('[data-capability="agent"] .agent-assistant__capability-count')?.textContent).toBe("已配置 2 个连接");
+  expect(f.el.querySelector('[data-capability="agent"] [data-count="local"]')?.textContent).toBe("已配置 1 个本地 Agent");
+  expect(f.el.querySelector('[data-capability="agent"] [data-count="suppliers"]')?.textContent).toBe("已配置 1 个供应商");
   for (const kind of ["image", "video"]) expect(f.el.querySelector(`[data-capability="${kind}"] .agent-assistant__capability-count`)?.textContent).toBe("已配置 1 个供应商");
   await f.click("图片");
   const detail = f.el.querySelector('[data-capability-detail="image"]')!;
@@ -538,4 +540,86 @@ it("从图片能力添加时仅列出图片供应商，普通添加保留所有�
   await f.click("关闭详情");
   await f.click("添加连接");
   expect([...drawer().querySelectorAll(".agent-assistant__method > strong")].map(item => item.textContent)).toEqual(["我有 ChatGPT 账号", "我有 API Key", "图片供应商", "音频供应商"]);
+});
+
+const declaredSite = (overrides: Partial<ServiceConnectionView> = {}): ServiceConnectionView => ({
+  serviceConnectionId: "site-provider", scope: "site", kind: "api", name: "声明供应商",
+  endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }],
+  capabilities: [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }],
+  bindings: [{ bindingId: "provider-assistant:demo", extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion"], modelKeys: ["model"] }],
+  enabled: true, removed: false, credentialConfigured: true, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1,
+  ...overrides,
+});
+
+it("供应商声明的共享讨论用途始终开放，不提供关闭入口", async () => {
+  const f = await render([], true, undefined, {}, {
+    serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [declaredSite()], duplicates: [], providers: [] } }),
+  });
+  await f.click("模型提供商"); await f.click("配置");
+  const page = f.el.querySelector('[data-ai-page="sources"]')!;
+  expect(page.textContent).not.toContain("关闭共享讨论用途");
+  expect(page.textContent).not.toContain("开放共享讨论用途");
+});
+
+it("已停用的来源可显式移除，移除动作带冻结版本", async () => {
+  const disabled = declaredSite({ enabled: false });
+  const manage = vi.fn(async () => ({ ok: true as const, value: disabled }));
+  const f = await render([], true, undefined, {}, {
+    serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [disabled], duplicates: [], providers: [] } }),
+    manageServiceConnection: manage,
+  });
+  await f.click("模型提供商"); await f.click("配置");
+  const page = f.el.querySelector('[data-ai-page="sources"]')!;
+  expect(page.textContent).toContain("已停用");
+  await f.click("移除来源"); await f.click("确认");
+  expect(manage).toHaveBeenCalledWith({ action: "remove", serviceConnectionId: "site-provider", configRevision: 1, credentialEpoch: 1 });
+});
+
+it("无供应商声明的自填来源仍需显式开放共享讨论用途", async () => {
+  const selfFilled = declaredSite({ serviceConnectionId: "site-manual", name: "自填来源", bindings: [] });
+  const f = await render([], true, undefined, {}, {
+    serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [selfFilled], duplicates: [], providers: [] } }),
+    manageServiceConnection: vi.fn(async () => ({ ok: true as const, value: selfFilled })),
+  });
+  await f.click("模型提供商"); await f.click("配置");
+  expect(f.el.querySelector('[data-ai-page="sources"]')?.textContent).toContain("开放共享讨论用途");
+});
+
+it("Agent 详情在有目标时显式使用供应商并返回原节点", async () => {
+  const source = declaredSite({ serviceConnectionId: "svc", name: "文字供应商", scope: "personal", managedByAdministrator: false });
+  const connection = { ...api, connectionId: "auto-c1", name: "文字供应商", serviceConnectionId: "svc", ready: true } as AgentConnectionView;
+  const selected = vi.fn(); globalThis.addEventListener("woohaa3-agent-assistant-selection", selected);
+  try {
+    const f = await render([connection], true, undefined, { canvasId: "canvas", nodeId: "node" }, {
+      serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [source], duplicates: [], providers: [] } }),
+    });
+    await f.click("Agent");
+    const detail = f.el.querySelector('[data-capability-detail="agent"]')!;
+    const use = [...detail.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "使用");
+    expect(use?.disabled).toBe(false);
+    expect(selected).not.toHaveBeenCalled();
+    await act(async () => use!.click());
+    expect(selected).toHaveBeenCalledTimes(1);
+    expect((selected.mock.calls[0]![0] as CustomEvent).detail).toMatchObject({ canvasId: "canvas", nodeId: "node", connectionId: "auto-c1" });
+  } finally { globalThis.removeEventListener("woohaa3-agent-assistant-selection", selected); }
+});
+
+it("Agent 详情无目标仅配置，来源不可用禁用使用", async () => {
+  const source = declaredSite({ serviceConnectionId: "svc", name: "文字供应商", scope: "personal", managedByAdministrator: false });
+  const connection = { ...api, connectionId: "auto-c1", name: "文字供应商", serviceConnectionId: "svc", ready: true } as AgentConnectionView;
+  const noTarget = await render([connection], true, undefined, { canvasId: "canvas" }, {
+    serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [source], duplicates: [], providers: [] } }),
+  });
+  await noTarget.click("Agent");
+  const noTargetButtons = [...noTarget.el.querySelectorAll('[data-capability-detail="agent"] button')].map(button => button.textContent);
+  expect(noTargetButtons).toContain("配置");
+  expect(noTargetButtons).not.toContain("使用");
+  await act(async () => { root?.unmount(); }); root = undefined; await runtime?.dispose(); runtime = undefined; document.body.innerHTML = "";
+  const unavailable = await render([{ ...connection, ready: false, credentialConfigured: false }], true, undefined, { canvasId: "canvas", nodeId: "node" }, {
+    serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [{ ...source, credentialConfigured: false }], duplicates: [], providers: [] } }),
+  });
+  await unavailable.click("Agent");
+  const disabled = [...unavailable.el.querySelectorAll<HTMLButtonElement>('[data-capability-detail="agent"] button')].find(button => button.textContent === "使用");
+  expect(disabled?.disabled).toBe(true);
+  expect(unavailable.el.querySelector('[data-capability-detail="agent"]')?.textContent).toContain("待配置密钥");
 });
