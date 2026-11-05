@@ -22,6 +22,7 @@ import {
   serializeWorldAnimationScript,
   type CanvasCommand,
   type CanvasNodeData,
+  type GroundAabb,
   type GroundPoint,
   type ServerCanvas,
   type WorldPoint
@@ -171,14 +172,26 @@ export function planWorldGroundMove(
   return commands;
 }
 
+export type WorldGroundUnbindCandidate = {
+  areaNodeId: string;
+  title: string;
+};
+
 export type WorldGroundMoveAnimationPlan = {
-  /** 规范命令：实例基础变换 + 动画脚本平移（直接提交，外部撤销条目）。 */
+  /** 规范命令：实例基础变换 + 动画脚本平移/解绑（直接提交，外部撤销条目）。 */
   forward: CanvasCommand[];
   /** 撤销命令：实例基础变换 + 动画脚本恢复原值。 */
   inverse: CanvasCommand[];
   /** 是否包含动画脚本改写；false 时走普通编辑历史。 */
   animated: boolean;
+  /** 本次移动会让模型离开其动画所属导演区；确认后才真正提交。 */
+  unbindCandidates: WorldGroundUnbindCandidate[];
 };
+
+function insideArea(bounds: GroundAabb, point: GroundPoint): boolean {
+  return point.u >= bounds.min.u && point.u <= bounds.max.u
+    && point.v >= bounds.min.v && point.v <= bounds.max.v;
+}
 
 function instancePatch(nodeId: string, instance: ReturnType<typeof instanceOf> & object, position: WorldPoint): CanvasCommand | null {
   const next = { ...instance, transform: { ...instance.transform, position } };
@@ -191,31 +204,33 @@ function instancePatch(nodeId: string, instance: ReturnType<typeof instanceOf> &
 }
 
 /**
- * 拖动已由导演区动画脚本驱动的实例时，除了移动 canonical 基础变换，还要把脚本里该实例的
- * `position` 轨道整体平移相同的地面增量。否则场景构建器会用脚本的绝对位置覆盖基础变换，
- * 拖动提交成功但画面不动。
+ * 拖动由导演区动画脚本驱动的实例：
  *
- * 动画实例的 canonical 基础可能仍停在创作初值（与实际动画位置不一致）；拖动时以当前播放
- * 时刻的采样位置作为新基础，使 canonical 与画面一致，也让后续容器包含判定基于可见位置。
+ * - 仍在动画所属导演区内：把实例基础同步到当前采样位置，并把 `position` 轨道整体平移；
+ * - 移出该导演区：调用方先确认，确认后移除该实例在脚本里的全部轨道（解绑），
+ *   基础同步到新位置，画面停在拖动后的位置；
+ * - 取消：调用方不提交，模型留在原处。
  *
- * 返回正/反两批命令。动画脚本属于 sceneArea 字段，普通编辑规划只认识少数 nodeData 字段；
- * 为避免把所有导演区的规范化差异卷进编辑计划，带动画的拖动由调用方直接提交并登记外部撤销。
+ * 动画脚本属于 sceneArea 字段，普通编辑规划只认识少数 nodeData 字段；为避免把所有导演区的
+ * 规范化差异卷进编辑计划，带动画的拖动由调用方直接提交并登记外部撤销。
  */
 export function planWorldGroundMoveWithAnimationParts(
   canvas: ServerCanvas | null | undefined,
   start: WorldGroundDragStart,
   delta: GroundPoint | null | undefined,
-  times?: ReadonlyMap<string, number>
+  times?: ReadonlyMap<string, number>,
+  unbindAreaIds?: ReadonlySet<string>
 ): WorldGroundMoveAnimationPlan | null {
   if (!worldGroundMoved(delta)) return null;
   if (!canvas || !delta) {
     const plain = planWorldGroundMove(start, delta);
-    return plain ? { forward: plain, inverse: [], animated: false } : null;
+    return plain ? { forward: plain, inverse: [], animated: false, unbindCandidates: [] } : null;
   }
   const instanceIds = new Set(start.targets.map(target => target.instance.instanceId));
   const animatedPositions = new Map<string, WorldPoint>();
   const forwardAreas: CanvasCommand[] = [];
   const inverseAreas: CanvasCommand[] = [];
+  const unbindCandidates: WorldGroundUnbindCandidate[] = [];
   for (const node of canvas.document.nodes) {
     if (node.type !== "scene-area") continue;
     const nodeData = canvas.nodeData[node.id] as Record<string, unknown> | undefined;
@@ -224,23 +239,43 @@ export function planWorldGroundMoveWithAnimationParts(
     const script = area.value.animationScript;
     const executed = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
     if (!executed.ok) continue;
+    if (!executed.ir.instanceTracks.some(track => instanceIds.has(track.targetId))) continue;
+    const unbind = unbindAreaIds?.has(node.id) === true;
     let changed = false;
-    const instanceTracks = executed.ir.instanceTracks.map(track => {
-      if (track.property !== "position" || !instanceIds.has(track.targetId) || track.from.length < 2 || track.to.length < 2) return track;
-      changed = true;
-      const from = [...track.from];
-      const to = [...track.to];
-      from[0] = from[0]! + delta.u;
-      from[1] = from[1]! + delta.v;
-      to[0] = to[0]! + delta.u;
-      to[1] = to[1]! + delta.v;
-      return { ...track, from, to };
-    });
+    const instanceTracks = unbind
+      ? executed.ir.instanceTracks.filter(track => {
+          if (!instanceIds.has(track.targetId)) return true;
+          changed = true;
+          return false;
+        })
+      : executed.ir.instanceTracks.map(track => {
+          if (track.property !== "position" || !instanceIds.has(track.targetId) || track.from.length < 2 || track.to.length < 2) return track;
+          changed = true;
+          const from = [...track.from];
+          const to = [...track.to];
+          from[0] = from[0]! + delta.u;
+          from[1] = from[1]! + delta.v;
+          to[0] = to[0]! + delta.u;
+          to[1] = to[1]! + delta.v;
+          return { ...track, from, to };
+        });
     if (!changed) continue;
     const sampled = sampleWorldAnimation(executed.ir, times?.get(node.id) ?? 0).instances;
     for (const instanceId of instanceIds) {
       const position = sampled.get(instanceId)?.position;
       if (position) animatedPositions.set(instanceId, position);
+      if (!unbind && !unbindAreaIds) {
+        const target = start.targets.find(entry => entry.instance.instanceId === instanceId);
+        if (!target) continue;
+        const old = position ?? target.instance.transform.position;
+        const next = { u: old.u + delta.u, v: old.v + delta.v };
+        if (insideArea(area.value.bounds, old) && !insideArea(area.value.bounds, next)) {
+          if (!unbindCandidates.some(candidate => candidate.areaNodeId === node.id)) {
+            const title = typeof nodeData?.title === "string" && nodeData.title.trim() !== "" ? nodeData.title.trim() : "导演区";
+            unbindCandidates.push({ areaNodeId: node.id, title });
+          }
+        }
+      }
     }
     const nextScript = createWorldAnimationScript({
       script: serializeWorldAnimationScript({ ...executed.ir, instanceTracks }),
@@ -249,13 +284,18 @@ export function planWorldGroundMoveWithAnimationParts(
       revision: script.revision + 1
     });
     // 保留 raw sceneArea 的其它 allowlist 字段（包括读取期容忍的 legacy `animation`），
-    // 只替换 animationScript；撤销回到完整原值。
+    // 只替换/移除 animationScript；撤销回到完整原值。
     const rawArea = (nodeData?.sceneArea ?? area.value) as Record<string, unknown>;
     const value = (nextArea: Record<string, unknown>): CanvasNodeData => ({
       ...(nodeData ?? {}),
       sceneArea: nextArea
     }) as unknown as CanvasNodeData;
-    forwardAreas.push({ type: "nodeData.patch", nodeId: node.id, value: value({ ...rawArea, animationScript: nextScript }) });
+    if (unbind && instanceTracks.length === 0 && executed.ir.cameraTracks.length === 0) {
+      const { animationScript: _removed, ...rest } = rawArea;
+      forwardAreas.push({ type: "nodeData.patch", nodeId: node.id, value: value(rest) });
+    } else {
+      forwardAreas.push({ type: "nodeData.patch", nodeId: node.id, value: value({ ...rawArea, animationScript: nextScript }) });
+    }
     inverseAreas.push({ type: "nodeData.patch", nodeId: node.id, value: value(rawArea) });
   }
   const forward: CanvasCommand[] = [];
@@ -277,9 +317,9 @@ export function planWorldGroundMoveWithAnimationParts(
   if (!animated) {
     // 非动画目标只走普通编辑历史（保持冲突前置条件与原有撤销语义）。
     const plain = planWorldGroundMove(start, delta);
-    return plain ? { forward: plain, inverse: [], animated: false } : null;
+    return plain ? { forward: plain, inverse: [], animated: false, unbindCandidates: [] } : null;
   }
-  return { forward: [...forward, ...forwardAreas], inverse: [...inverse, ...inverseAreas], animated: true };
+  return { forward: [...forward, ...forwardAreas], inverse: [...inverse, ...inverseAreas], animated: true, unbindCandidates };
 }
 
 /** 兼容既有调用：返回正向前向命令。 */
@@ -287,7 +327,8 @@ export function planWorldGroundMoveWithAnimation(
   canvas: ServerCanvas | null | undefined,
   start: WorldGroundDragStart,
   delta: GroundPoint | null | undefined,
-  times?: ReadonlyMap<string, number>
+  times?: ReadonlyMap<string, number>,
+  unbindAreaIds?: ReadonlySet<string>
 ): CanvasCommand[] | null {
-  return planWorldGroundMoveWithAnimationParts(canvas, start, delta, times)?.forward ?? null;
+  return planWorldGroundMoveWithAnimationParts(canvas, start, delta, times, unbindAreaIds)?.forward ?? null;
 }

@@ -15,6 +15,7 @@ import {
   type WorldGroundDragStart
 } from "./world-ground-drag.js";
 import type { InteractionCore } from "./interaction-core.js";
+import { confirmWorldUnbind } from "./world-unbind-confirm.js";
 
 export type WorldGroundGestureFamily = {
   /**
@@ -80,47 +81,23 @@ export function createWorldGroundGestureFamily(core: InteractionCore): WorldGrou
     return true;
   };
 
-  const commit = (event: PointerEvent) => {
-    const gesture = state.gesture;
-    if (gesture.kind !== "world-ground") return false;
-    // 释放那一帧可能没有 pointermove：用释放点重算增量。拿不到地面点或实例已被
-    // 外部改写时 `worldGroundDelta` 返回 null——此时必须放弃，不能用上一帧增量覆盖
-    // 别人刚写入的变换。
-    const delta = gesture.pointerId === event.pointerId
-      ? worldGroundDelta(
-          gesture.start,
-          workingCanvasOf(woohaa3CanvasStore.getState()),
-          core.queryWorldGround({ x: event.clientX, y: event.clientY })
-        )
-      : null;
-    clearPreview();
-    const plan = planWorldGroundMoveWithAnimationParts(
-      workingCanvasOf(woohaa3CanvasStore.getState()),
-      gesture.start,
-      delta,
-      core.options.getWorldAnimationTimes?.()
-    );
-    if (!plan) {
-      schedule("world-ground-preview");
-      return false;
-    }
-    gesture.delta = delta;
+  const applyPlan = (plan: NonNullable<ReturnType<typeof planWorldGroundMoveWithAnimationParts>>) => {
     if (!plan.animated) {
       submit(plan.forward);
-      return true;
+      return;
     }
     // 动画拖动同时改 sceneArea；绕开只认识少数 nodeData 字段的编辑计划，直接提交整批，
     // 并用外部撤销条目保证一次撤销能同时恢复基础变换与动画轨道。
     const session = core.options.getSession();
     if (!session) {
       submit(plan.forward);
-      return true;
+      return;
     }
     const commandId = `web-world-ground-animation-${core.nextSeq()}`;
     const result = session.submitCommands(plan.forward, commandId);
     if (!result.ok) {
       schedule("world-ground-preview");
-      return false;
+      return;
     }
     const replay = (commands: typeof plan.forward) => {
       const id = `web-world-ground-animation-${core.nextSeq()}`;
@@ -136,6 +113,64 @@ export function createWorldGroundGestureFamily(core: InteractionCore): WorldGrou
       undo: () => replay(plan.inverse),
       redo: () => replay(plan.forward)
     });
+  };
+
+  const commit = (event: PointerEvent) => {
+    const gesture = state.gesture;
+    if (gesture.kind !== "world-ground") return false;
+    // 释放那一帧可能没有 pointermove：用释放点重算增量。拿不到地面点或实例已被
+    // 外部改写时 `worldGroundDelta` 返回 null——此时必须放弃，不能用上一帧增量覆盖
+    // 别人刚写入的变换。
+    const delta = gesture.pointerId === event.pointerId
+      ? worldGroundDelta(
+          gesture.start,
+          workingCanvasOf(woohaa3CanvasStore.getState()),
+          core.queryWorldGround({ x: event.clientX, y: event.clientY })
+        )
+      : null;
+    if (!delta) {
+      clearPreview();
+      schedule("world-ground-preview");
+      return false;
+    }
+    const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+    const times = core.options.getWorldAnimationTimes?.();
+    const plan = planWorldGroundMoveWithAnimationParts(canvas, gesture.start, delta, times);
+    if (!plan) {
+      clearPreview();
+      schedule("world-ground-preview");
+      return false;
+    }
+    gesture.delta = delta;
+    if (plan.unbindCandidates.length === 0) {
+      clearPreview();
+      applyPlan(plan);
+      return true;
+    }
+    // 模型移出动画所属导演区：保留拖动预览，等用户确认后再决定提交或复原。
+    const candidates = plan.unbindCandidates;
+    void (async () => {
+      const confirmed = await confirmWorldUnbind({
+        title: "模型移出导演区",
+        description: `移出后${candidates.map(candidate => `「${candidate.title}」`).join("、")}的动画脚本将与模型解绑。是否继续？`,
+        confirmLabel: "移出并解绑"
+      });
+      if (!confirmed) {
+        clearPreview();
+        schedule("world-ground-preview");
+        return;
+      }
+      const latest = planWorldGroundMoveWithAnimationParts(
+        workingCanvasOf(woohaa3CanvasStore.getState()),
+        gesture.start,
+        delta,
+        core.options.getWorldAnimationTimes?.(),
+        new Set(candidates.map(candidate => candidate.areaNodeId))
+      );
+      clearPreview();
+      if (latest) applyPlan(latest);
+      else schedule("world-ground-preview");
+    })();
     return true;
   };
 

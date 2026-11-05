@@ -10,6 +10,7 @@ import {
   beginWorldGroundDrag,
   beginWorldGroundDragMany,
   planWorldGroundMoveWithAnimation,
+  planWorldGroundMoveWithAnimationParts,
   isWorldDragTarget,
   planWorldGroundMove,
   worldGroundDelta,
@@ -189,6 +190,51 @@ describe("世界模型地面拖动", () => {
     const track = executed.ir.instanceTracks.find(item => item.targetId === "inst-1" && item.property === "position")!;
     expect(track.from).toEqual([3, -1, 1.5]);
     expect(track.to).toEqual([5, -1, 1.5]);
+  });
+
+  it("移出动画所属导演区时提供解绑候选，确认后移除该实例轨道", () => {
+    const base = createEmptyWoohaa3ServerCanvas("c1");
+    const animationScript = createWorldAnimationScript({
+      script: 'motion.instance.tween("inst-1", { property: "position", startTime: 0, endTime: 4, from: [2, -3, 1.5], to: [4, -3, 1.5], easing: "linear" });',
+      duration: 4,
+      loop: false,
+      revision: 1
+    });
+    const canvas = {
+      ...base,
+      revision: 1,
+      document: { ...base.document, nodes: [
+        { id: "m1", type: "model3d", position: { x: 0, y: 0 } },
+        { id: "area", type: "scene-area", position: { x: 0, y: 0 } }
+      ] },
+      nodeData: {
+        m1: { sharedWorldInstance: instance },
+        area: { title: "小导演区", sceneArea: {
+          kind: "scene-area", version: "shared-world-v1", areaId: "a1", scopeVersion: "s1",
+          bounds: { min: { u: 0, v: -5 }, max: { u: 5, v: -1 } },
+          animationScript
+        } }
+      }
+    } as unknown as ServerCanvas;
+    const start = beginWorldGroundDrag(canvas, "m1", { u: 0, v: 0 })!;
+    const detected = planWorldGroundMoveWithAnimationParts(canvas, start, { u: 10, v: 0 }, new Map([["area", 0]]))!;
+    expect(detected.unbindCandidates).toEqual([{ areaNodeId: "area", title: "小导演区" }]);
+    const confirmed = planWorldGroundMoveWithAnimationParts(
+      canvas, start, { u: 10, v: 0 }, new Map([["area", 0]]), new Set(["area"])
+    )!;
+    expect(confirmed.unbindCandidates).toEqual([]);
+    const areaPatch = confirmed.forward.find(command => command.type === "nodeData.patch" && command.nodeId === "area") as unknown as {
+      value: { sceneArea: { animationScript?: unknown } };
+    };
+    expect(areaPatch.value.sceneArea.animationScript).toBeUndefined();
+    const instancePatch = confirmed.forward.find(command => command.type === "nodeData.patch" && command.nodeId === "m1") as unknown as {
+      value: { sharedWorldInstance: { transform: { position: { u: number; v: number; h: number } } } };
+    };
+    expect(instancePatch.value.sharedWorldInstance.transform.position).toEqual({ u: 12, v: -3, h: 1.5 });
+    const inverseArea = confirmed.inverse.find(command => command.type === "nodeData.patch" && command.nodeId === "area") as unknown as {
+      value: { sceneArea: { animationScript?: { revision: number } } };
+    };
+    expect(inverseArea.value.sceneArea.animationScript?.revision).toBe(1);
   });
 
   it("不影响其它 nodeData 字段（脚本、内容身份等原样保留在 patch 之外）", () => {
