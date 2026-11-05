@@ -98,3 +98,20 @@ it("重建成功后的观察者异常不能触发重复重建", async () => {
   expect(f.supervisor.snapshot().counts["observer-failed"]).toBe(1);
   f.supervisor.dispose();
 });
+
+
+it("原生编辑器暂停画布时保留待处理代次，切屏返回不误重建，恢复后仍检测卡死", () => {
+  const f = fixture();
+  f.supervisor.accepted(5, 10);
+  const paused = { updates: 10, renders: 10, appliedRevision: 4, appliedGeneration: 9, renderedGeneration: 9, suspended: true };
+  f.time(1000); f.supervisor.sample(paused, true);
+  f.time(2000); f.supervisor.sample(paused, false);
+  f.time(3000); f.supervisor.sample(paused, true);
+  expect(f.supervisor.phase).toBe("running");
+  expect(f.supervisor.snapshot().pendingGeneration).toBe(10);
+  f.time(5000); f.supervisor.sample({ ...paused, suspended: false }, true);
+  expect(f.supervisor.phase).toBe("running");
+  f.time(5101); f.supervisor.sample({ ...paused, suspended: false }, true);
+  expect(f.supervisor.phase).toBe("recovering");
+  f.supervisor.dispose();
+});

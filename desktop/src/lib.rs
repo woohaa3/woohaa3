@@ -15,6 +15,7 @@
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod devtools;
 pub mod host;
+pub mod desktop_entry;
 pub mod document_editor;
 pub mod editor_runtime;
 pub mod platform_clipboard;

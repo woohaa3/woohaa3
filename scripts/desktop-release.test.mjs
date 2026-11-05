@@ -340,3 +340,8 @@ test("frontendDist keeps Windows startup assets as a directory rather than a dri
   assert.throws(() => tauriFrontendDist(String.raw`F:\startup`, desktop, path.win32), /同一盘符/);
   assert.equal(tauriFrontendDist("/tmp/desktop/build/startup", "/tmp/desktop", path.posix), "./build/startup");
 });
+
+test('external composition bundle discovery honors the Cargo target directory', () => {
+  const targetDir = path.resolve('/tmp/custom-native-cache');
+  assert.equal(bundleOutputDir({ desktopDir:path.resolve('/tmp/composition/host'), targetDir, kind:'app' }), path.join(targetDir,'release/bundle/macos'));
+});

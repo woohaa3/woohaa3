@@ -238,10 +238,10 @@ export function releaseIdFor({ platform, arch, now = new Date() }) {
 }
 
 /** bundle 产物目录：`<desktop>/target[/<triple>]/<profile>/bundle/<kind 目录>`。 */
-export function bundleOutputDir({ desktopDir, target = null, debug = false, kind }) {
+export function bundleOutputDir({ desktopDir, targetDir = null, target = null, debug = false, kind }) {
   const dir = BUNDLE_OUTPUT_DIRS[kind];
   if (!dir) throw new Error(`未知 bundle 种类：${kind}`);
-  return path.join(desktopDir, "target", ...(target ? [target] : []), debug ? "debug" : "release", "bundle", dir);
+  return path.join(targetDir ?? path.join(desktopDir, "target"), ...(target ? [target] : []), debug ? "debug" : "release", "bundle", dir);
 }
 
 /**
@@ -250,10 +250,10 @@ export function bundleOutputDir({ desktopDir, target = null, debug = false, kind
  * 缺目录（该种类没产出）不抛裸 ENOENT：交给调用方按「请求了却没有产物」给出可读错误，
  * 这样 `--bundles app,dmg` 只有 dmg 失败时也能指出具体是哪一项。
  */
-export function collectBundleArtifacts({ desktopDir, target = null, debug = false, kinds, listDir = fs.readdirSync }) {
+export function collectBundleArtifacts({ desktopDir, targetDir = null, target = null, debug = false, kinds, listDir = fs.readdirSync }) {
   const artifacts = [];
   for (const kind of kinds) {
-    const dir = bundleOutputDir({ desktopDir, target, debug, kind });
+    const dir = bundleOutputDir({ desktopDir, targetDir, target, debug, kind });
     let entries;
     try {
       entries = listDir(dir, { withFileTypes: true });
@@ -276,18 +276,18 @@ export function collectBundleArtifacts({ desktopDir, target = null, debug = fals
  * （发布索引要求「恰好一个 updater archive」直接失败），`--copy` 也会把旧安装包一并复制进
  * 上传目录。这里清掉，产物即「本次构建产出的那些」。
  */
-export function clearBundleOutputDirs({ desktopDir, target = null, debug = false, kinds }) {
+export function clearBundleOutputDirs({ desktopDir, targetDir = null, target = null, debug = false, kinds }) {
   for (const kind of kinds) {
-    fs.rmSync(bundleOutputDir({ desktopDir, target, debug, kind }), { recursive: true, force: true });
+    fs.rmSync(bundleOutputDir({ desktopDir, targetDir, target, debug, kind }), { recursive: true, force: true });
   }
 }
 
 /** 请求了却完全没有产物的 bundle 种类，附期望目录，便于直接定位 tauri build 的失败点。 */
-export function missingBundleKinds({ desktopDir, target = null, debug = false, kinds, artifacts }) {
+export function missingBundleKinds({ desktopDir, targetDir = null, target = null, debug = false, kinds, artifacts }) {
   const produced = new Set(artifacts.map(entry => entry.kind));
   return kinds
     .filter(kind => !produced.has(kind))
-    .map(kind => ({ kind, dir: bundleOutputDir({ desktopDir, target, debug, kind }) }));
+    .map(kind => ({ kind, dir: bundleOutputDir({ desktopDir, targetDir, target, debug, kind }) }));
 }
 
 /**

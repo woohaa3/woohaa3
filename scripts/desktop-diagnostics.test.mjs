@@ -18,7 +18,7 @@ test('archive helper invocation does not emit running-host heartbeats',()=>{
 
 test('normal-exit journaling is wired inside the Tauri callback, never after its non-returning run',()=>{
  const host=readFileSync(new URL('../desktop/src/host.rs',import.meta.url),'utf8');
- const main=readFileSync(new URL('../desktop/src/main.rs',import.meta.url),'utf8');
+ const main=readFileSync(new URL('../desktop/src/desktop_entry.rs',import.meta.url),'utf8');
  assert.match(host,/app\.run\([\s\S]*?diagnostics::handle_run_event\(&event\)/);
  assert(!main.includes('diagnostics::finish(true)'));
 });
