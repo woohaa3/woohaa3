@@ -23,7 +23,7 @@ function validate(capabilities: NodeCapabilities): void {
     }
   }
   const appearance = capabilities.appearance;
-  if (appearance && (!['text', 'image', 'model', 'audio', 'video', 'node'].includes(appearance.palette) || ![appearance.defaultSize?.width, appearance.defaultSize?.height].every(value => Number.isFinite(value) && value > 0))) throw new Error('Invalid node appearance');
+  if (appearance && (!['text', 'image', 'model', 'audio', 'video', 'shot', 'node'].includes(appearance.palette) || ![appearance.defaultSize?.width, appearance.defaultSize?.height].every(value => Number.isFinite(value) && value > 0))) throw new Error('Invalid node appearance');
   if (capabilities.resize && capabilities.resize.mode !== 'rect') throw new Error('Invalid resize mode');
   if (capabilities.resources && (!['image', 'video', 'model'].includes(capabilities.resources.channel) || typeof capabilities.resources.previewSlot !== 'boolean')) throw new Error('Invalid resource demand');
 }

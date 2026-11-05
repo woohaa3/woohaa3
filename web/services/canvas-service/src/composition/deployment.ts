@@ -26,6 +26,8 @@ export const CANVAS_MCP_SERVICE_TOKEN_ENV = "WOOHAA3_MCP_TO_CANVAS_TOKEN";
 export const CANVAS_MODEL_RENDERER_CMD_ENV = "WOOHAA3_MODEL_RENDERER_CMD";
 /** 预览请求超时（毫秒）。 */
 export const CANVAS_MODEL_RENDERER_TIMEOUT_ENV = "WOOHAA3_MODEL_RENDERER_TIMEOUT_MS";
+/** 动态镜头视频编码器（Rust `world-video-encoder`）命令；缺失时动态取景显式不可用。 */
+export const CANVAS_WORLD_VIDEO_ENCODER_CMD_ENV = "WOOHAA3_WORLD_VIDEO_ENCODER_CMD";
 /** 环境变量：显式声明脚本隔离执行器可用（缺省按可用尝试；设为 "0"/"false" 时禁用）。 */
 export const CANVAS_SCRIPT_ENGINE_ENV = "WOOHAA3_CANVAS_SCRIPT_ENGINE" as const;
 /**

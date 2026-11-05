@@ -2,6 +2,7 @@ import { observeContentResolver, type ContentContributionResolver } from "../con
 import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
 import { decodeWorldCamera } from "../world-camera-codec.js";
+import { cameraShotPresentation, worldCameraShotContext } from "../world-camera-shot.js";
 import { quatMul } from "../model-transform.js";
 import { sceneAreaAnimationOrigin, type GroundAabb, type GroundPoint, type SceneAreaData, type WorldPoint, type WorldRotation } from "../shared-world.js";
 import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
@@ -100,6 +101,8 @@ export type CanvasRenderSceneInput = {
    * the canonical `nodeData.worldCamera` is never rewritten here.
    */
   worldCameraPreviews?: ReadonlyMap<string, { position: WorldPoint; rotation: WorldRotation }>;
+  /** 取景阶段（卡片 preview/ready/stale/failed）；由宿主状态轮询提供。 */
+  worldCameraShotPhases?: ReadonlyMap<string, import("../world-camera-shot.js").WorldCameraShotPhase>;
   /**
    * Transient scene-area ground bounds keyed by area node id (move/resize preview).
    * Presentation only; the canonical `nodeData.sceneArea` is never rewritten here.
@@ -292,6 +295,12 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           ? prepareModelResource({ sceneVersion: MODEL_SCRIPT_SCENE_IR_V2_VERSION, ops: modelOpsV2 })
           : null))
       : null;
+    const shotPresentation = camera?.ok
+      ? cameraShotPresentation(
+          worldCameraShotContext(canvas, camera.value),
+          input.worldCameraShotPhases?.get(node.id)
+        )
+      : null;
     const rendered: BevyRenderNode = {
       id: node.id,
       type: kind,
@@ -301,8 +310,12 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       height,
       body: readBody(node.type, data, assets),
       ...(camera?.ok ? { worldCamera: camera.value } : {}),
+      ...(shotPresentation ? { cameraShot: shotPresentation } : {}),
       title: displayName.displayName,
-      typeLabel: displayName.contentTypeLabel,
+      // 动态镜头的次标题直接承载视频语义：预览/就绪/过期/失败 + 动画时长。
+      typeLabel: shotPresentation && shotPresentation.kind === "dynamic" && shotPresentation.label !== ""
+        ? shotPresentation.label
+        : displayName.contentTypeLabel,
       progress: clampProgress(data?.progress),
       busy: isBusy(data),
       texture,

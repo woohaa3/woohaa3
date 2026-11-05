@@ -69,10 +69,20 @@ export type PageCapturePendingEntry = {
   key: import("@woohaa3/contracts").WorldCaptureVersionKey;
   width: number;
   height: number;
+  kind?: "static" | "dynamic";
+  dynamicKey?: import("@woohaa3/contracts").WorldCaptureDynamicVersionKey;
+  fps?: number;
+  timeRange?: import("@woohaa3/contracts").WorldCaptureTimeRange;
+  animationNodeId?: string;
 };
 
 export type PageCapturePendingResult =
   | { ok: true; captures: PageCapturePendingEntry[] }
+  | { ok: false; code: string; error: string };
+
+/** 镜头卡片状态列表（静态图片 / 动态视频共用）。 */
+export type WorldCaptureStatusResult =
+  | { ok: true; statuses: import("@woohaa3/contracts").WorldCaptureFramingStatus[] }
   | { ok: false; code: string; error: string };
 export type CanvasCancelResult = { ok: true } | { ok: false; error: string };
 
@@ -135,6 +145,16 @@ export interface CanvasRemoteService {
   }): Promise<CanvasCaptureFreezeResult>;
   /** 页面驱动取景：宿主登记的待渲染镜头清单（无则空数组）。 */
   listPendingPageCaptures(): Promise<PageCapturePendingResult>;
+  /** 镜头卡片状态：当前画布已观察镜头的 preview/ready/stale/failed。 */
+  listWorldCaptureStatuses(): Promise<WorldCaptureStatusResult>;
+  /** 页面录制的动态镜头视频提交（浏览器 WebCodecs 编码后的 MP4）。 */
+  commitPageVideoCapture(input: {
+    cameraId: string;
+    key: import("@woohaa3/contracts").WorldCaptureDynamicVersionKey;
+    mp4: Uint8Array;
+    width: number;
+    height: number;
+  }): Promise<CanvasCaptureFreezeResult>;
   /** 页面驱动取景：提交页面渲染的 PNG；版本已变返回 superseded。 */
   commitPageCapture(input: {
     cameraId: string;

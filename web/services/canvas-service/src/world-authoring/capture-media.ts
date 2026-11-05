@@ -15,12 +15,17 @@
  * checksum or dimension.
  */
 import {
+  WORLD_CAPTURE_VIDEO_MEDIA_VERSION,
   isInspectableWorldCaptureContentType,
   readWorldCaptureImageDimensions,
+  readWorldCaptureVideoInfo,
+  type WorldCaptureDynamicMediaSaveRequest,
+  type WorldCaptureDynamicSaveResult,
   type WorldCaptureMediaMetadata,
   type WorldCaptureMediaSavePort,
   type WorldCaptureMediaSaveRequest,
-  type WorldCaptureMediaSaveResult
+  type WorldCaptureMediaSaveResult,
+  type WorldCaptureVideoMediaSavePort
 } from "@woohaa3/contracts";
 
 /** Narrow media imports needed by the save port; satisfied by `BackendMediaPort`. */
@@ -127,6 +132,104 @@ function failed(
   request: WorldCaptureMediaSaveRequest,
   code: "write-failed" | "verification-failed"
 ): WorldCaptureMediaSaveResult {
+  return {
+    status: "failed",
+    requestId: request.requestId,
+    key: request.key,
+    contentFingerprint: request.contentFingerprint,
+    code
+  };
+}
+
+
+/**
+ * Trusted video save adapter for dynamic camera shots.
+ *
+ * Verifies the real MP4 container (mdhd duration + tkhd pixels) before importing the
+ * bytes, then returns the exact `world-capture-video-media-v1` envelope. A failed or
+ * mismatching upload never becomes `ready`; the scheduler already treats a missing
+ * receipt as failure.
+ */
+export function createWorldCaptureVideoMediaSavePort(options: WorldCaptureMediaSaveOptions): WorldCaptureVideoMediaSavePort {
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_CAPTURE_BYTES;
+  return {
+    async save(request: WorldCaptureDynamicMediaSaveRequest): Promise<WorldCaptureDynamicSaveResult> {
+      const { video } = request;
+      if (video.bytes.length === 0 || video.bytes.length > maxBytes) {
+        return videoFailed(request, "verification-failed");
+      }
+      if (video.contentType !== "video/mp4") {
+        return videoFailed(request, "verification-failed");
+      }
+      const info = readWorldCaptureVideoInfo(video.bytes);
+      if (
+        !info ||
+        info.width !== video.width ||
+        info.height !== video.height ||
+        Math.abs(info.durationSeconds - video.durationSeconds) > 0.5
+      ) {
+        return videoFailed(request, "verification-failed");
+      }
+
+      let imported: { storageKey: string; contentType: string; size: number; checksum: string };
+      try {
+        imported = await options.media.importBytes({
+          bytesBase64: Buffer.from(video.bytes).toString("base64"),
+          contentType: video.contentType,
+          maxBytes,
+          canvasId: request.key.canvasId
+        });
+      } catch {
+        return videoFailed(request, "write-failed");
+      }
+
+      if (
+        imported.contentType !== video.contentType ||
+        imported.size !== video.bytes.length ||
+        !/^[0-9a-f]{64}$/.test(imported.checksum) ||
+        imported.storageKey.trim().length === 0
+      ) {
+        return videoFailed(request, "verification-failed");
+      }
+
+      try {
+        const verified = await options.media.verify(
+          imported.storageKey,
+          { contentType: video.contentType, size: video.bytes.length, checksum: imported.checksum },
+          { canvasId: request.key.canvasId }
+        );
+        if (!verified.exists || !verified.matches) return videoFailed(request, "verification-failed");
+      } catch {
+        return videoFailed(request, "verification-failed");
+      }
+
+      return {
+        status: "saved",
+        requestId: request.requestId,
+        key: request.key,
+        contentFingerprint: request.contentFingerprint,
+        media: {
+          version: WORLD_CAPTURE_VIDEO_MEDIA_VERSION,
+          mediaId: imported.storageKey,
+          storageKey: imported.storageKey,
+          checksum: imported.checksum,
+          size: video.bytes.length,
+          contentType: video.contentType,
+          width: info.width,
+          height: info.height,
+          container: "video/mp4",
+          durationSeconds: info.durationSeconds,
+          fps: video.fps
+        }
+      };
+    }
+  };
+}
+
+function videoFailed(
+  request: WorldCaptureDynamicMediaSaveRequest,
+  code: "write-failed" | "verification-failed"
+): WorldCaptureDynamicSaveResult {
   return {
     status: "failed",
     requestId: request.requestId,

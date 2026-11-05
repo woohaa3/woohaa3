@@ -94,6 +94,9 @@ pub mod renderer_protocol;
 pub mod model3d;
 /// 可复用 shot camera ECS 模块（change: add-reusable-bevy-shot-camera）。
 pub mod shot_camera;
+/// 动态镜头视频编码（native-renderer only；浏览器 WASM 不编译）。
+#[cfg(feature = "native-renderer")]
+pub mod video_encode;
 
 /// 跨语言 golden 测试用的纯函数门面（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 7.2）。
 ///

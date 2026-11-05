@@ -41,6 +41,8 @@ function main() {
       "native-renderer",
       "--bin",
       "model-renderer",
+      "--bin",
+      "world-video-encoder",
       "-j",
       process.env.CARGO_BUILD_JOBS ?? "8",
       ...(release ? ["--release"] : [])
@@ -48,12 +50,18 @@ function main() {
     crate
   );
 
-  const artifact = join(crate, "target", triple, profile, `model-renderer${process.platform === "win32" ? ".exe" : ""}`);
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const artifact = join(crate, "target", triple, profile, `model-renderer${suffix}`);
   if (!existsSync(artifact)) {
     throw new Error(`缺少原生 renderer 产物 ${artifact}`);
   }
   console.log(`✓ model-renderer 就绪 → ${artifact}`);
   console.log(`  配置 Canvas Service：WOOHAA3_MODEL_RENDERER_CMD=${artifact}`);
+  const encoder = join(crate, "target", triple, profile, `world-video-encoder${suffix}`);
+  if (existsSync(encoder)) {
+    console.log(`✓ world-video-encoder 就绪 → ${encoder}`);
+    console.log(`  配置 Canvas Service：WOOHAA3_WORLD_VIDEO_ENCODER_CMD=${encoder}`);
+  }
 }
 
 /** 本机 host triple（rustc -vV 的 host 行）。 */

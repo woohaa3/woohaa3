@@ -18,6 +18,12 @@ export type WorldCaptureServiceOptions = {
   resolveRoom(canvasId: string): Promise<import("../sync/room.js").CanvasRoom | null>;
   /** Trusted save port (host injects the media service adapter). Missing means fail closed. */
   mediaSave?: WorldCaptureMediaSavePort;
+  /** Trusted video save port for dynamic shots; missing means no video can be frozen. */
+  videoMediaSave?: import("@woohaa3/contracts").WorldCaptureVideoMediaSavePort;
+  /** 动态输出长边（像素），默认 1024。 */
+  dynamicOutputLongEdge?: number;
+  /** 动态默认帧率，默认 24。 */
+  dynamicFps?: number;
   /** Static capture long edge in pixels; host configuration, never a browser claim. */
   outputLongEdge?: number;
   /** How long generation acceptance may wait for one exact key. */
@@ -50,19 +56,41 @@ export type WorldCapturePagePrepareOutcome =
 export type PendingPageCapture = {
   canvasId: string;
   cameraId: string;
+  /** 基础六字段键（静态图片或动态视频共享）。 */
   key: WorldCaptureVersionKey;
   width: number;
   height: number;
   requestId?: string;
+  /** `dynamic` 时页面逐帧渲染并由浏览器 WebCodecs 编码成 MP4。 */
+  kind?: "static" | "dynamic";
+  /** 动态镜头的完整冻结键（含动画/区间/fps），页面提交视频时必须原样回传。 */
+  dynamicKey?: import("@woohaa3/contracts").WorldCaptureDynamicVersionKey;
+  fps?: number;
+  timeRange?: import("@woohaa3/contracts").WorldCaptureTimeRange;
+  /** 需要动画采样的导演区节点；页面按时间固定采样后逐帧捕获。 */
+  animationNodeId?: string;
+};
+
+export type WorldCaptureVideoProducer = {
+  producerId: string;
+  captureVideo: NonNullable<WorldCaptureProducer["captureVideo"]>;
+  resolveContent?: WorldCaptureProducer["resolveContent"];
 };
 
 export type WorldCaptureService = {
   registerProducer(producer: WorldCaptureProducer): WorldCaptureProducerRegistration;
+  /**
+   * 注册动态镜头视频生产者（原生编码）。与静态图片 producer 分开：缺少它时动态镜头
+   * 显式不可用，静态页面取景不受影响。
+   */
+  registerVideoProducer(producer: WorldCaptureVideoProducer): WorldCaptureProducerRegistration;
   notifyResourcesReady(notice: import("@woohaa3/contracts").WorldCaptureResourceReadyNotice): void;
   /** Observe a committed canonical snapshot; only a changed authoring key starts work. */
   observeCanonical(input: { canvasId: string; canvas: import("@woohaa3/contracts").ServerCanvas }): void;
   refresh(input: { canvasId: string; cameraId: string }): Promise<WorldCaptureRefreshOutcome>;
   status(input: { canvasId: string; cameraId: string }): WorldCaptureFramingStatus;
+  /** 当前画布全部已观察镜头的状态；供卡片显示 preview/ready/stale/failed。 */
+  statuses(canvasId: string): WorldCaptureFramingStatus[];
   freezeForGeneration(input: {
     canvasId: string;
     cameraId: string;
@@ -78,6 +106,15 @@ export type WorldCaptureService = {
    * 页面渲染路径的提交：校验页面渲染版本仍是当前 canonical 取景，经可信 Media 端口保存后
    * 冻结并申领 binding；版本不一致返回 superseded，不产生替代画面。
    */
+  /**
+   * 动态镜头的页面视频提交：校验当前动态键、经可信视频端口保存后冻结并申领 binding。
+   */
+  commitPageVideoCapture(input: {
+    canvasId: string;
+    cameraId: string;
+    key: import("@woohaa3/contracts").WorldCaptureDynamicVersionKey;
+    video: import("@woohaa3/contracts").WorldCaptureVideo;
+  }): Promise<import("@woohaa3/contracts").WorldCaptureFreezeOutcome>;
   commitPageCapture(input: {
     canvasId: string;
     cameraId: string;
@@ -108,10 +145,17 @@ export type Attempt = {
 export type FramingState = {
   canvasId: string;
   cameraId: string;
+  /** 静态镜头是静态键；动态镜头是基础六字段键（outputVersion 已覆盖动画/区间/fps）。 */
   key: WorldCaptureVersionKey | null;
+  /** 动态镜头的完整冻结键；静态镜头为 null。 */
+  dynamicKey?: import("@woohaa3/contracts").WorldCaptureDynamicVersionKey | null;
+  kind: "static" | "dynamic";
   phase: WorldCaptureFramingStatus["phase"];
   stale: boolean;
   frozen?: import("@woohaa3/contracts").WorldCaptureFrozenInput;
+  frozenVideo?: import("@woohaa3/contracts").WorldCaptureVideoFrozenInput;
+  /** 动态镜头关联的动画时长（秒），供卡片显示。 */
+  durationSeconds?: number;
   lastRequestId?: string;
   lastContentFingerprint?: string;
   width?: number;
@@ -119,7 +163,7 @@ export type FramingState = {
   reason?: string;
   attempt?: Attempt;
   attemptCounter: number;
-  observation?: import("./capture-snapshot.js").Observation;
+  observation?: import("./capture-snapshot.js").CameraObservation;
 };
 
 export type Claim = {
@@ -129,15 +173,19 @@ export type Claim = {
 
 export function statusOf(state: FramingState): WorldCaptureFramingStatus {
   const frozen = state.frozen;
+  const video = state.frozenVideo;
   return {
     canvasId: state.canvasId,
     cameraId: state.cameraId,
     key: state.key,
     phase: state.phase,
     stale: state.stale,
+    shotKind: state.kind,
+    ...(state.durationSeconds !== undefined ? { durationSeconds: state.durationSeconds } : {}),
     ...(state.lastRequestId ? { requestId: state.lastRequestId } : {}),
     ...(state.lastContentFingerprint ? { contentFingerprint: state.lastContentFingerprint } : {}),
     ...(frozen ? { input: { key: frozen.key, mediaId: frozen.media.mediaId, checksum: frozen.media.checksum } } : {}),
+    ...(video ? { video: video.media } : {}),
     ...(state.width !== undefined ? { width: state.width } : {}),
     ...(state.height !== undefined ? { height: state.height } : {}),
     ...(state.reason ? { reason: state.reason } : {})

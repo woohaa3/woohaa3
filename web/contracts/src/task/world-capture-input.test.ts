@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { WORLD_CAPTURE_GENERATION_BINDING_VERSION } from "../canvas/world-capture-pipeline-contract.js";
 import type { WorldCaptureGenerationBinding } from "../canvas/world-capture-pipeline-contract.js";
 import {
   WORLD_CAPTURE_REFERENCE_ROLE,
@@ -27,7 +28,7 @@ const MEDIA = {
 };
 
 const BINDING: WorldCaptureGenerationBinding = {
-  version: "world-capture-generation-binding-v1",
+  version: WORLD_CAPTURE_GENERATION_BINDING_VERSION,
   requestId: "request-1",
   key: KEY,
   contentFingerprint: "0123456789abcdef",
@@ -72,5 +73,46 @@ describe("world capture task reference input", () => {
     ]);
     expect(withWorldCaptureTaskInput(once, BINDING)).toEqual(once);
     expect(withWorldCaptureTaskInput([existing], undefined)).toEqual([existing]);
+  });
+});
+
+describe("动态镜头视频绑定", () => {
+  const VIDEO_KEY = { ...KEY, outputVersion: "output-video" };
+  const VIDEO_MEDIA = {
+    version: "world-capture-video-media-v1" as const,
+    mediaId: "sha256-video",
+    storageKey: `capture-videos/${"b".repeat(64)}.mp4`,
+    checksum: "b".repeat(64),
+    size: 2048,
+    contentType: "video/mp4",
+    width: 1024,
+    height: 576,
+    container: "video/mp4" as const,
+    durationSeconds: 4,
+    fps: 24
+  };
+
+  it("v2 视频绑定解析为 reference_video，而不是图片", () => {
+    const binding: WorldCaptureGenerationBinding = {
+      version: WORLD_CAPTURE_GENERATION_BINDING_VERSION,
+      requestId: "request-video",
+      key: VIDEO_KEY,
+      contentFingerprint: "0123456789abcdef",
+      input: { key: VIDEO_KEY, mediaId: VIDEO_MEDIA.mediaId, checksum: VIDEO_MEDIA.checksum },
+      video: VIDEO_MEDIA
+    };
+    expect(worldCaptureReferenceInput(binding)).toMatchObject({
+      ok: true,
+      input: {
+        assetId: VIDEO_MEDIA.mediaId,
+        role: "reference_video",
+        mediaKind: "video",
+        mediaType: "video/mp4",
+        storageKey: VIDEO_MEDIA.storageKey
+      }
+    });
+    // 图片元数据不能冒充视频，反之亦然。
+    expect(worldCaptureReferenceInput({ ...binding, video: { ...VIDEO_MEDIA, contentType: "image/png" } }))
+      .toMatchObject({ ok: false, code: "capture-media-unavailable" });
   });
 });

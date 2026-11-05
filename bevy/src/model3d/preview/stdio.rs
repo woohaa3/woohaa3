@@ -7,6 +7,14 @@ use super::render::render_preview;
 ///
 /// 返回 `(requestId, ok, code, message, png)`；PNG 仅成功时非空。
 pub fn render_request_json(json: &str) -> (String, bool, Option<String>, Option<String>, Vec<u8>) {
+    let (request_id, ok, code, message, bytes, _rgba) = render_request_frame(json);
+    (request_id, ok, code, message, bytes)
+}
+
+/// 与 `render_request_json` 相同，但额外返回输出是否为裸 RGBA 帧。
+pub fn render_request_frame(
+    json: &str,
+) -> (String, bool, Option<String>, Option<String>, Vec<u8>, bool) {
     let request = match crate::renderer_protocol::parse_request(json) {
         Ok(request) => request,
         Err((code, message)) => {
@@ -16,10 +24,12 @@ pub fn render_request_json(json: &str) -> (String, bool, Option<String>, Option<
                 Some(code.as_str().to_owned()),
                 Some(message),
                 Vec::new(),
+                false,
             );
         }
     };
     let request_id = request.request_id.clone();
+    let rgba = request.capture.format == "rgba";
     if let Err((code, message)) = crate::renderer_protocol::validate_request(&request) {
         return (
             request_id,
@@ -27,16 +37,18 @@ pub fn render_request_json(json: &str) -> (String, bool, Option<String>, Option<
             Some(code.as_str().to_owned()),
             Some(message),
             Vec::new(),
+            rgba,
         );
     }
     match render_preview(&request) {
-        Ok(png) => (request_id, true, None, None, png),
+        Ok(bytes) => (request_id, true, None, None, bytes, rgba),
         Err((code, message)) => (
             request_id,
             false,
             Some(code.as_str().to_owned()),
             Some(message),
             Vec::new(),
+            rgba,
         ),
     }
 }
@@ -73,9 +85,9 @@ pub fn run_stdio() -> std::io::Result<()> {
             break;
         }
         let json = String::from_utf8_lossy(&payload);
-        let (request_id, ok, code, message, png) = render_request_json(&json);
+        let (request_id, ok, code, message, bytes, rgba) = render_request_frame(&json);
         if ok {
-            write_success_frame(&mut output, &request_id, &png)?;
+            write_success_frame(&mut output, &request_id, &bytes, rgba)?;
         } else {
             write_error_frame(
                 &mut output,
@@ -92,15 +104,17 @@ pub fn run_stdio() -> std::io::Result<()> {
 fn write_success_frame(
     output: &mut impl std::io::Write,
     request_id: &str,
-    png: &[u8],
+    bytes: &[u8],
+    rgba: bool,
 ) -> std::io::Result<()> {
+    let field = if rgba { "rgbaLen" } else { "pngLen" };
     let json = format!(
-        r#"{{"requestId":{},"ok":true,"pngLen":{}}}"#,
+        r#"{{"requestId":{},"ok":true,"{field}":{}}}"#,
         json_string(request_id),
-        png.len()
+        bytes.len()
     );
     write_frame(output, json.as_bytes())?;
-    write_frame(output, png)
+    write_frame(output, bytes)
 }
 
 fn write_error_frame(

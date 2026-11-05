@@ -31,6 +31,8 @@ import { createDurableWriterLock } from "./sync/index.js";
 import { hostname } from "node:os";
 import { createManagedRendererClient } from "./model-renderer/managed-client.js";
 import { createRendererClient } from "./model-renderer/index.js";
+import { createVideoEncoderClient } from "./model-renderer/video-encoder.js";
+import { createWorldCaptureProducer } from "./world-authoring/capture-producer.js";
 import { isAggregateRunNode } from "@woohaa3/contracts";
 import { composeSnippets, type SnippetComposition } from "./storage/snippet-composition.js";
 import { composeNodeHistory, type NodeHistoryComposition } from "./storage/node-history-composition.js";
@@ -44,6 +46,7 @@ import {
   CANVAS_MCP_SERVICE_TOKEN_ENV,
   CANVAS_MODEL_RENDERER_CMD_ENV,
   CANVAS_MODEL_RENDERER_TIMEOUT_ENV,
+  CANVAS_WORLD_VIDEO_ENCODER_CMD_ENV,
   CANVAS_TASK_SERVICE_TOKEN_ENV,
   CANVAS_TASK_SERVICE_URL_ENV,
   resolveAgentDeploymentProfile
@@ -81,6 +84,7 @@ export {
   CANVAS_MCP_SERVICE_TOKEN_ENV,
   CANVAS_MODEL_RENDERER_CMD_ENV,
   CANVAS_MODEL_RENDERER_TIMEOUT_ENV,
+  CANVAS_WORLD_VIDEO_ENCODER_CMD_ENV,
   CANVAS_AGENT_DEVELOPMENT_PRINCIPAL_ENV,
   CANVAS_AGENT_LOOPBACK_MODE_ENV,
   resolveAgentDeploymentProfile
@@ -526,6 +530,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     ? createWorldCaptureService({
         resolveRoom: async (canvasId) => sync.registry.resolve(canvasId),
         ...(options.worldCaptureMediaSave ? { mediaSave: options.worldCaptureMediaSave } : {}),
+        ...(options.worldCaptureVideoMediaSave ? { videoMediaSave: options.worldCaptureVideoMediaSave } : {}),
         ...(options.worldCaptureOutputLongEdge ? { outputLongEdge: options.worldCaptureOutputLongEdge } : {}),
         ...(options.worldCaptureFreezeTimeoutMs ? { freezeTimeoutMs: options.worldCaptureFreezeTimeoutMs } : {}),
         ...(options.now ? { now: () => Date.parse(options.now!()) || Date.now() } : {}),
@@ -581,7 +586,30 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         : createManagedRendererClient();
   // 共享世界镜头捕获由**页面**渲染：宿主只观察 canonical 变化并登记待取景
   // （`captures-page-pending`），前端在同一次渲染后经 `captures-page-commit` 回填。
-  // 因此这里不再注册原生 world producer；`modelRenderer` 仍服务模型 MCP 预览。
+  // 因此这里不注册静态图片 producer；`modelRenderer` 仍服务模型 MCP 预览。
+  // 动态镜头需要真实视频资产：仅在配置了原生编码器时注册视频 producer，否则显式不可用。
+  // 默认由前端渲染 + WebCodecs 录制；只有显式要求原生录制时才注册原生视频 producer。
+  const videoEncoderCommand = env[CANVAS_WORLD_VIDEO_ENCODER_CMD_ENV];
+  if (worldCapture && sync && videoEncoderCommand && modelRenderer && env.WOOHAA3_WORLD_VIDEO_NATIVE === "1") {
+    const videoEncoder = createVideoEncoderClient({
+      command: videoEncoderCommand,
+      logger: (event) => log(event)
+    });
+    log({ event: "world-video-encoder-configured", available: videoEncoder.available(), command: videoEncoderCommand });
+    const videoProducer = createWorldCaptureProducer({
+      renderer: modelRenderer,
+      resolveRoom: async (canvasId) => sync.registry.resolve(canvasId),
+      media: mediaClient,
+      videoEncoder
+    });
+    if (videoProducer.captureVideo) {
+      worldCapture.registerVideoProducer({
+        producerId: "native-world-camera-video-v1",
+        captureVideo: videoProducer.captureVideo,
+        ...(videoProducer.resolveContent ? { resolveContent: videoProducer.resolveContent } : {})
+      });
+    }
+  }
   const agentProfile = resolveAgentDeploymentProfile(env, env[CANVAS_AGENT_DEVELOPMENT_PRINCIPAL_ENV]);
   const mcpRuntime =
     modelMcpEnabled && sync && composition

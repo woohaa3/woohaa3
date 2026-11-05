@@ -75,15 +75,24 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
     if (mapping.role === "text_prompt") continue;
     const cameraInput = options.cameraInputs?.get(mapping.sourceNodeId);
     if (cameraInput) {
-      const binding = bindings.find(entry => entry.roles.includes(mapping.role)
+      // 冻结结果自带权威角色（动态镜头为 reference_video，静态为 reference_image）。
+      const referenceRole = cameraInput.mediaKind === "video" ? cameraInput.role : mapping.role;
+      const binding = bindings.find(entry => entry.roles.includes(referenceRole)
         && entry.mediaKinds.includes(cameraInput.mediaKind as CanvasReferenceMediaKind)
         && entry.mediaTypes.includes(cameraInput.mediaType));
-      if (!binding) { blockingReasons.push("所选模型不接受镜头图像参考"); continue; }
+      if (!binding) {
+        blockingReasons.push(
+          cameraInput.mediaKind === "video"
+            ? "所选模型不接受镜头视频参考"
+            : "所选模型不接受镜头图像参考"
+        );
+        continue;
+      }
       const used = (counts.get(binding.field) ?? 0) + 1;
       if (used > binding.maxItems) { blockingReasons.push(`镜头参考数量超过模型对 ${binding.field} 的上限 ${binding.maxItems}`); continue; }
       counts.set(binding.field, used);
-      references.push({ slotId: mapping.slotId ?? "", role: mapping.role, sortKey: mapping.sortKey,
-        sourceNodeId: mapping.sourceNodeId, input: { ...cameraInput, role: mapping.role } });
+      references.push({ slotId: mapping.slotId ?? "", role: referenceRole, sortKey: mapping.sortKey,
+        sourceNodeId: mapping.sourceNodeId, input: { ...cameraInput, role: referenceRole } });
       continue;
     }
     const explicit = (mapping.sourceAssetIds ?? []).filter(

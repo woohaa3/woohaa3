@@ -185,7 +185,7 @@ function buildNativeTools() {
   const triple = /host:\s*(\S+)/.exec(probe.stdout ?? "")?.[1];
   if (probe.error || probe.status !== 0 || !triple) throw new Error("无法探测原生 Rust host triple");
   if (triple !== nodeArtifact().triple) throw new Error(`Rust host ${triple} 与本机宿主目标 ${nodeArtifact().triple} 不匹配，请使用对应原生工具链`);
-  run("cargo", ["build", "--release", "--target", triple, "--no-default-features", "--features", "native-renderer", "--bin", "model-renderer"], { cwd: path.join(root, "bevy"), env: { ...childEnv(), CARGO_TARGET_DIR: path.join(root, "bevy/target") } });
+  run("cargo", ["build", "--release", "--target", triple, "--no-default-features", "--features", "native-renderer", "--bin", "model-renderer", "--bin", "world-video-encoder"], { cwd: path.join(root, "bevy"), env: { ...childEnv(), CARGO_TARGET_DIR: path.join(root, "bevy/target") } });
 }
 
 function frontendBuildSteps(standalone) {

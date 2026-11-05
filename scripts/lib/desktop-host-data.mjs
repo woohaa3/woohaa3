@@ -36,7 +36,7 @@ export function desktopEnvironment({ dataDir, resourceRoot, baseEnv = {}, platfo
  else if(development&&baseEnv.WOOHAA3_EXTENSION_TRUST_CONFIG)env.WOOHAA3_EXTENSION_TRUST_CONFIG=path.resolve(baseEnv.WOOHAA3_EXTENSION_TRUST_CONFIG);
  const master=path.join(dataDir,'secrets/master.key');
  if(fs.existsSync(master))env.WOOHAA3_PLUGIN_SECRET_MASTER_KEY=fs.readFileSync(master,'utf8').trim();
- for(const [file,key] of [['model-renderer','WOOHAA3_MODEL_RENDERER_CMD']]) {
+ for(const [file,key] of [['model-renderer','WOOHAA3_MODEL_RENDERER_CMD'],['world-video-encoder','WOOHAA3_WORLD_VIDEO_ENCODER_CMD']]) {
   const candidate=path.join(resourceRoot,'tools',file+(platform==='win32'?'.exe':''));if(fs.existsSync(candidate))env[key]=candidate;
  }
  return env;

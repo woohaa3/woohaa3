@@ -55,6 +55,7 @@ native-renderer = [
   "bevy/bevy_window",
   "bevy/multi_threaded",
   "dep:png",
+  "dep:openh264",
 ]
 
 [dependencies]
@@ -71,10 +72,18 @@ meshopt = "=0.6.2"
 wasm-bindgen = { version = "=0.2.128", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 png = { version = "0.17", optional = true }
+# 动态镜头视频编码（change: 2026-11-05-camera-shot-as-video）：仅原生构建启用，
+# 浏览器 WASM 显式不可用而不是降级成图片。
+openh264 = { version = "0.9.9", optional = true }
 
 [[bin]]
 name = "model-renderer"
 path = "src/bin/model-renderer.rs"
+required-features = ["native-renderer"]
+
+[[bin]]
+name = "world-video-encoder"
+path = "src/bin/world-video-encoder.rs"
 required-features = ["native-renderer"]
 
 # hot_paths_golden 与 scope_golden 依赖 golden_api（native-renderer 门控）。

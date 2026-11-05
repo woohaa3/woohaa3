@@ -153,6 +153,7 @@ fn native_renderer_png() {
         height: 128,
         background: "#101010".to_owned(),
         camera_preset: "dimetric".to_owned(),
+        format: "png".to_owned(),
     };
     let req = request(ops, 3.0, capture);
     let png = render_preview(&req).expect("native renderer 应产出 PNG");

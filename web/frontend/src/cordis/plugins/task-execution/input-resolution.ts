@@ -16,7 +16,7 @@
  *
  * 每次渲染都从当前画布重算（不缓存旧快照）。
  */
-import { decodeWorldCamera, ensureWoohaa3CanvasInputMappingSlotId,
+import { decodeWorldCamera, worldCameraShotContext, ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   sortWoohaa3CanvasInputMappings,
   type CanvasNodeData,
@@ -40,8 +40,11 @@ export type InputResolution = {
   /** 提交给网关的形态：只有稳定媒体引用。 */
   inputs: CanvasTaskInput[];
   blockingReasons: string[];
-  /** Camera pixels are frozen by the host at submission, never fabricated here. */
-  deferredReferences: Array<{ role: string; mediaKind: "image" }>;
+  /**
+   * Camera media is frozen by the host at submission, never fabricated here. Dynamic
+   * shots resolve as video; static shots stay images.
+   */
+  deferredReferences: Array<{ role: string; mediaKind: "image" | "video" }>;
 };
 
 export type ResolveNodeInputsOptions = {
@@ -86,14 +89,27 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
     const providerRole = mapping.role;
     if (canvas.document.nodes.some(node => node.id === mapping.sourceNodeId && node.type === "world-camera")) {
       const camera = decodeWorldCamera(nodeData[mapping.sourceNodeId]?.worldCamera);
-      const binding = bindings.find(entry => entry.roles.includes(providerRole)
-        && entry.mediaKinds.includes("image") && entry.mediaTypes.includes("image/png"));
       if (!camera.ok) { blockingReasons.push("上游镜头配置无效"); continue; }
-      if (!binding) { blockingReasons.push("所选模型不接受镜头图像参考"); continue; }
+      // 镜头类型由动画上下文派生：动态镜头是视频参考，静态继续是图片。
+      const shot = worldCameraShotContext(canvas, camera.value);
+      const mediaKind: "image" | "video" = shot?.kind === "dynamic" ? "video" : "image";
+      const mediaType = mediaKind === "video" ? "video/mp4" : "image/png";
+      // 动态镜头代表视频：参考角色固定为 reference_video，不沿用图片角色。
+      const referenceRole = mediaKind === "video" ? "reference_video" : providerRole;
+      const binding = bindings.find(entry => entry.roles.includes(referenceRole)
+        && entry.mediaKinds.includes(mediaKind) && entry.mediaTypes.includes(mediaType));
+      if (!binding) {
+        blockingReasons.push(
+          mediaKind === "video"
+            ? "所选模型不接受镜头视频参考，未降级为图片"
+            : "所选模型不接受镜头图像参考"
+        );
+        continue;
+      }
       const used = (counts.get(binding.field) ?? 0) + 1;
       counts.set(binding.field, used);
       if (used > binding.maxItems) { blockingReasons.push(`参考输入数量超过模型对 ${binding.field} 的上限 ${binding.maxItems}`); continue; }
-      deferredReferences.push({ role: providerRole, mediaKind: "image" });
+      deferredReferences.push({ role: referenceRole, mediaKind });
       continue;
     }
     const explicit = (mapping.sourceAssetIds ?? []).filter(

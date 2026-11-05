@@ -17,3 +17,19 @@ export function resolveModelRendererCommand({ root, env = process.env, platform 
   }
   return undefined;
 }
+
+/** 动态镜头视频编码器（Rust `world-video-encoder`）；同样只在真实文件存在时启用。 */
+export function resolveWorldVideoEncoderCommand({ root, env = process.env, platform = process.platform, arch = process.arch, exists = existsSync }) {
+  if (env.WOOHAA3_WORLD_VIDEO_ENCODER_CMD && exists(env.WOOHAA3_WORLD_VIDEO_ENCODER_CMD)) return env.WOOHAA3_WORLD_VIDEO_ENCODER_CMD;
+  const cpu = arch === "arm64" ? "aarch64" : "x86_64";
+  const triple = env.WOOHAA3_NATIVE_TARGET ?? (platform === "darwin" ? `${cpu}-apple-darwin`
+    : platform === "win32" ? `${cpu}-pc-windows-msvc` : `${cpu}-unknown-linux-gnu`);
+  const binary = platform === "win32" ? "world-video-encoder.exe" : "world-video-encoder";
+  for (const profile of ["release", "debug"]) {
+    for (const dir of [path.join(root, "bevy/target", triple, profile), path.join(root, "bevy/target", profile)]) {
+      const candidate = path.join(dir, binary);
+      if (exists(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}

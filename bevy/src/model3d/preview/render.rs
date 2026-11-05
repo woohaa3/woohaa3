@@ -304,11 +304,14 @@ fn setup_animation_camera(
     ));
 }
 
-/// 渲染一次请求并返回 PNG 字节。启动一个短命 Bevy App；读回后退出。
+/// 渲染一次请求并按 `capture.format` 返回 PNG 或裸 RGBA 字节。
 pub fn render_preview(request: &RenderRequest) -> Result<Vec<u8>, (RenderErrorCode, String)> {
     let capture = request.capture.clone();
     let image =
         run_render(request, &capture).map_err(|error| (RenderErrorCode::RenderFailed, error))?;
+    if capture.format == "rgba" {
+        return Ok(image);
+    }
     encode_png(&image, capture.width, capture.height)
         .map_err(|error| (RenderErrorCode::RenderFailed, error))
 }

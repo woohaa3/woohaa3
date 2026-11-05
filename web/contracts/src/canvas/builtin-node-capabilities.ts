@@ -61,7 +61,7 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
     appearance: { palette: 'node', defaultSize: { width: 260, height: 195 }, cardLabel: '导演区' }
   });
   entries.set('world-camera', {
-    appearance: { palette: 'node', defaultSize: WORLD_CAMERA_CARD_SIZE, cardLabel: '镜头' },
+    appearance: { palette: 'shot', defaultSize: WORLD_CAMERA_CARD_SIZE, cardLabel: '镜头' },
     actions: nodeActionContributions,
     connections: { endpoints: () => 'ordinary' },
     resize: rectangularNodeResize

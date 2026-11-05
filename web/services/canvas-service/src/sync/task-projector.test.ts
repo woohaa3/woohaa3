@@ -110,7 +110,7 @@ describe("终态投影（任务 7.3 / 7.4）", () => {
       outputVersion: "output-1"
     };
     const worldCapture: WorldCaptureGenerationBinding = {
-      version: "world-capture-generation-binding-v1",
+      version: "world-capture-generation-binding-v2",
       requestId: "capture-1",
       key,
       contentFingerprint: "0123456789abcdef",
