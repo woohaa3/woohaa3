@@ -31,7 +31,7 @@ import {
 	executionRunSnapshot,
 	isExecutionBusy,
 } from "./run-snapshot.js";
-import { isBusy, missingRequiredParameters, parametersAfterModelSwitch, parametersOnOpen, readParameters } from "./panel-shared.js";
+import { isBusy, missingRequiredParameters, parametersAfterModelSwitch, parametersOnOpen, parameterViolationReasons, readParameters } from "./panel-shared.js";
 import { resolvePromptSubmitKey } from "../prompt-keyboard.js";
 import { isMacPlatform } from "../../canvas-shell/input/shortcuts.js";
 import { FormatToolbar } from "./format-toolbar.js";
@@ -176,10 +176,13 @@ export function ExecutionPanel({
 	const missingRequiredHint = missingRequired.length
 		? `缺少必填参数：${missingRequired.map((field) => field.label).join("、")}`
 		: undefined;
+	const parameterViolations = parameterViolationReasons(fields, effectiveParameters);
+	const parameterViolationHint = parameterViolations[0];
 	const promptOptional = allowEmptySubmit;
 	const canRun =
 		!readOnly &&
 		missingRequired.length === 0 &&
+		parameterViolations.length === 0 &&
 		(canRunExecution({ prompt, status, blockingReasons }) ||
 			(promptOptional &&
 				prompt.trim().length === 0 &&
@@ -191,11 +194,13 @@ export function ExecutionPanel({
 			? pendingLabel
 			: missingRequiredHint
 				? missingRequiredHint
-				: hasBlockingReasons
-					? blockingReasons?.[0]
-					: !promptOptional && prompt.trim().length === 0
-						? "请先输入提示词"
-						: undefined;
+				: parameterViolationHint
+					? parameterViolationHint
+					: hasBlockingReasons
+						? blockingReasons?.[0]
+						: !promptOptional && prompt.trim().length === 0
+							? "请先输入提示词"
+							: undefined;
 
 	const patch = (next: Partial<ExecutionPanelData>) => onChange?.(next);
 
@@ -379,7 +384,9 @@ export function ExecutionPanel({
 		</div>
 	) : null;
 
-	const blockingBlock = <BlockingBlock {...(blockingReasons ? { reasons: blockingReasons } : {})} />;
+	// 提交前的可理解提示：参数越界（枚举/范围）与宿主阻止原因并排展示，避免只藏在主操作 tooltip 里。
+	const visibleBlockingReasons = [...parameterViolations, ...(blockingReasons ?? [])];
+	const blockingBlock = <BlockingBlock reasons={visibleBlockingReasons} />;
 	// Agent 详情具名入口：与阶段/错误/结果摘要同排，位于状态区、临近主操作（design D6）。
 	const agentDetailBlock = <AgentDetailBlock action={agentDetailAction} {...(onViewAgentDetail ? { onView: onViewAgentDetail } : {})} />;
 	const runActionGroup = showRunActions ? (
