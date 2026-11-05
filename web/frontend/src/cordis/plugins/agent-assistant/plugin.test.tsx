@@ -8,6 +8,7 @@ import { RuntimeProvider } from "../../react.js";
 import { startFrontendRuntime, type FrontendRuntime } from "../../kernel.js";
 import { SlotRegistry } from "../../slots.js";
 import { SelectInput } from "@woohaa3/ui/forms";
+import { UiProvider } from "@woohaa3/ui/primitives";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import type { GenerationModelsStatusService, GenerationModelsStatusSnapshot } from "../../services/generation-models-status.js";
 import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";
@@ -33,7 +34,7 @@ async function render(connections: AgentConnectionView[] = [], configure = false
   runtime = await startFrontendRuntime({ installPlatform: (ctx) => { ctx.provide("slots" as never, slots as never); if (models) ctx.provide("generationModelsStatus" as never, models as never); }, plugins: [] });
   const el = document.createElement("div"); document.body.append(el); root = createRoot(el);
   const close = vi.fn();
-  const updatePayload = async (next: typeof payload) => { await act(async () => { root!.render(<RuntimeProvider runtime={runtime!}><AgentAssistant settingsStore={settingsStore} service={service} payload={next} onClose={close} /></RuntimeProvider>); }); };
+  const updatePayload = async (next: typeof payload) => { await act(async () => { root!.render(<RuntimeProvider runtime={runtime!}><UiProvider><AgentAssistant settingsStore={settingsStore} service={service} payload={next} onClose={close} /></UiProvider></RuntimeProvider>); }); };
   await updatePayload(payload);
   const click = async (label: string) => { const button = [...el.querySelectorAll("button")].find((item) => !item.closest("[hidden]") && (item.querySelector("strong")?.textContent ?? (item.matches("[data-page]") ? item.querySelector("span")?.textContent : item.textContent)) === label); expect(button).toBeDefined(); await act(async () => button!.click()); };
   return { el, click, service, listConnections, close, updatePayload };
@@ -45,9 +46,10 @@ const oauth = { ...api, connectionId: "oauth", extensionId: "oauth-agent", authM
 
 it("按 demo 显示能力总览和五项侧栏，MCP 与模型提供商独立", async () => {
   const f = await render();
-  expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "MCP 服务", "模型提供商", "生成历史"]);
+  expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "模型提供商", "MCP 服务", "生成历史"]);
   expect(f.el.querySelector('.agent-assistant__sidebar [data-state="active"]')?.getAttribute("data-page")).toBe("overview");
-  expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("模型提供商");
+  expect([...f.el.querySelectorAll('[data-ai-page="overview"] [data-capability] > strong')].map(item => item.textContent)).toEqual(["Agent", "图片", "视频", "音频", "3D", "图床"]);
+  expect(f.el.querySelector('.agent-assistant__mcp-overview')?.textContent).toContain("MCP");
   expect(f.el.textContent).not.toContain("添加本地助手");
   await f.click("模型提供商");
   await f.click("添加连接");
@@ -234,7 +236,7 @@ it("保存首个 Provider Key 后空引导消失并显示已配置的模型提�
   const Renderer = dialogs.resolveRenderer("agent-assistant")!;
   const el = document.createElement("div"); document.body.append(el); root = createRoot(el);
   await act(async () => {
-    root!.render(<RuntimeProvider runtime={runtime!}><Renderer instance={dialogs.top()!} requestClose={() => {}} setBusy={() => {}} replace={() => {}} /></RuntimeProvider>);
+    root!.render(<RuntimeProvider runtime={runtime!}><UiProvider><Renderer instance={dialogs.top()!} requestClose={() => {}} setBusy={() => {}} replace={() => {}} /></UiProvider></RuntimeProvider>);
     await import("./assistant.js");
   });
   const sourceState = () => el.querySelector(".agent-assistant__source-list .agent-assistant__state")?.textContent;
@@ -294,7 +296,7 @@ it("工具栏单例打开且不读取模型，dispose 撤销事件、槽位和 D
   const Renderer = dialogs.resolveRenderer("agent-assistant")!;
   const el = document.createElement("div"); document.body.append(el); root = createRoot(el);
   await act(async () => {
-    root!.render(<RuntimeProvider runtime={runtime!}><Renderer instance={{ ...first!, payload: {} }} requestClose={() => {}} setBusy={() => {}} replace={() => {}} /></RuntimeProvider>);
+    root!.render(<RuntimeProvider runtime={runtime!}><UiProvider><Renderer instance={{ ...first!, payload: {} }} requestClose={() => {}} setBusy={() => {}} replace={() => {}} /></UiProvider></RuntimeProvider>);
     await import("./assistant.js");
   });
   expect(el.querySelector('[data-ai-tab="mcp"]')?.textContent).toContain("画布 current-canvas");
@@ -451,8 +453,7 @@ it("总览不展示诊断状态或会话历史入口", async () => {
   const f = await render([api, local], true, undefined, { canvasId: "canvas" }, { listConversations });
   expect(f.el.textContent).not.toContain("诊断与历史");
   expect(f.el.textContent).not.toContain("待验证");
-  expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个可用");
-  expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个提供商");
+  expect(f.el.querySelector('[data-capability="agent"]')?.textContent).toContain("已配置 2 个连接");
   expect(listConversations).not.toHaveBeenCalled();
 });
 
@@ -486,4 +487,55 @@ it("无显式定位的旧连接入口也尊重用户先行选择", async () => {
   await f.click("MCP 服务");
   await act(async () => resolveConnections({ ok: true, value: [api] }));
   expect(f.el.querySelector('[data-page="mcp"]')?.getAttribute("data-state")).toBe("active");
+});
+
+it("能力按来源身份计数，跨能力共享供应商，详情直接打开原配置", async () => {
+  const source: ServiceConnectionView = {
+    serviceConnectionId: "multi", scope: "personal", kind: "api", name: "多能力来源", endpoints: [],
+    capabilities: ["discussion", "image", "image", "video"].map((purpose, index) => ({ purpose, protocol: "chat-completions", modelId: `model-${index}`, imageInput: false, evidence: "adapter" })) as ServiceConnectionView["capabilities"],
+    bindings: [{ bindingId: "agent", extensionId: "sdk-agent", consumer: "agent", consumerId: api.connectionId, purposes: ["discussion"], modelKeys: [] }],
+    enabled: true, removed: false, credentialConfigured: true, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1,
+  };
+  const unconfigured = { ...source, serviceConnectionId: "draft", name: "未授权来源", credentialConfigured: false, bindings: [] };
+  const removed = { ...source, serviceConnectionId: "removed", name: "已移除来源", removed: true, bindings: [] };
+  const f = await render([api, local], true, undefined, {}, {
+    serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [source, unconfigured, removed], providers: [], duplicates: [] } }),
+  });
+  expect(f.el.querySelector('[data-capability="agent"] .agent-assistant__capability-count')?.textContent).toBe("已配置 2 个连接");
+  for (const kind of ["image", "video"]) expect(f.el.querySelector(`[data-capability="${kind}"] .agent-assistant__capability-count`)?.textContent).toBe("已配置 1 个供应商");
+  await f.click("图片");
+  const detail = f.el.querySelector('[data-capability-detail="image"]')!;
+  expect(detail.textContent).toContain("多能力来源");
+  expect(detail.textContent).toContain("未授权来源");
+  expect(detail.textContent).not.toContain("已移除来源");
+  expect(detail.textContent).toContain("model-1");
+  expect(detail.textContent).toContain("model-2");
+  await f.click("配置");
+  expect(f.el.querySelector('.agent-assistant__drawer-layer:not([hidden])')?.textContent).toContain("多能力来源");
+  expect(f.el.querySelector('input[aria-label="新增 API Key"]')).not.toBeNull();
+  await f.click("能力总览");
+  await f.click("3D");
+  const placeholder = f.el.querySelector('[data-capability-detail="model3d"]')!;
+  expect(placeholder.textContent).toContain("暂未接入");
+  expect(placeholder.textContent).not.toContain("添加供应商");
+});
+
+it("从图片能力添加时仅列出图片供应商，普通添加保留所有方式", async () => {
+  const snapshot = { settings: ["pictures", "sound"].map(id => ({
+    key: `providers.${id}.apiKey`, kind: "string" as const, label: "API Key", description: "", reload: "hot" as const, secret: true,
+    source: null, lockedBy: null, value: null, configured: false, pendingRestart: false, group: id,
+  })), plugins: [
+    { id: "pictures-provider", configPrefix: "providers.pictures", label: "图片供应商", description: "", layer: "extension" as const, settingCount: 1, siteManaged: false, provider: true, modelTypes: ["image"] as const },
+    { id: "sound-provider", configPrefix: "providers.sound", label: "音频供应商", description: "", layer: "extension" as const, settingCount: 1, siteManaged: false, provider: true, modelTypes: ["audio"] as const },
+  ], files: { config: "c", secrets: "s" } };
+  const store = createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write: vi.fn() });
+  const f = await render([], true, store);
+  await f.click("图片");
+  await f.click("添加供应商");
+  const drawer = () => f.el.querySelector('.agent-assistant__drawer-layer:not([hidden])')!;
+  expect(drawer().textContent).toContain("添加图片供应商");
+  expect([...drawer().querySelectorAll(".agent-assistant__method > strong")].map(item => item.textContent)).toEqual(["图片供应商"]);
+  await f.click("关闭详情");
+  await f.click("添加连接");
+  expect([...drawer().querySelectorAll(".agent-assistant__method > strong")].map(item => item.textContent)).toEqual(["我有 ChatGPT 账号", "我有 API Key", "图片供应商", "音频供应商"]);
 });

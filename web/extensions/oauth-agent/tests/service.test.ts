@@ -52,7 +52,6 @@ function ports(): ChatGptCanvasPorts {
   return {
     readNode: async () => ({ ok: true, nodeType: "model3d", title: "m", prompt: "", references: [], modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" }, cameras: [] }),
     submitModel: async () => ({ ok: true, canvasId: "cv", nodeId: "n", commandId: "cmd", duplicate: false, noop: false }),
-    commitAnimation: async () => ({ ok: true, canvasId: "cv", nodeId: "n", commandId: "cmd", duplicate: false, noop: false }),
     mutateCamerasBatch: async () => ({ ok: true, canvasId: "cv", nodeId: "n", commandId: "cmd", duplicate: false, noop: false })
   };
 }
@@ -327,23 +326,5 @@ describe("ChatGPT 未配置部署", () => {
     await service.handle({ url: "/api/oauth-agent/status", method: "GET", headers: {} } as never, fakeRes as never);
     expect(status).toBe(503);
     expect(service.credentialDirectory()).toBeNull();
-  });
-});
-
-/** 画布「转为片场」在宿主 HTTP 边界复用同一 owner 规则。 */
-describe("ChatGPT 转换 owner 解析（供画布转换边界复用）", () => {
-  it("本地开发姿态：签发受控本地会话，cookie 稳定复用，不重复下发", async () => {
-    const { service } = await boot();
-    const first = service.resolveConversionOwner({});
-    expect(first?.ownerId.startsWith("local:")).toBe(true);
-    const cookieValue = first?.setCookie?.split(";")[0] ?? "";
-    const second = service.resolveConversionOwner({ cookie: cookieValue });
-    expect(second?.ownerId).toBe(first?.ownerId);
-    expect(second?.setCookie).toBeUndefined();
-  });
-
-  it("未配置部署返回 null（不静默匿名）", () => {
-    const service = createChatGptService({ env: {}, canvasPorts: ports(), authConfigured: false });
-    expect(service.resolveConversionOwner({ subject: "someone" })).toBeNull();
   });
 });

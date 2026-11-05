@@ -8,7 +8,6 @@
  * `operationId` / `actorId` 由批次（`CanvasCommandBatch`）承载，命令本身不重复携带。
  */
 import type { CanvasNodeData, StoredAsset, StoredJob, Woohaa3CanvasJsonObject, Woohaa3CanvasNode } from "./domain/index.js";
-import { isFilmSetClipPatchOp, type FilmSetClipPatchOp } from "./film-set-clip-ops.js";
 
 /** 创建节点时可一次性连一条来自已有节点的边（「拉线创建」）。 */
 export type CanvasNodeConnectInput = {
@@ -23,30 +22,12 @@ export type CanvasNodeConnectInput = {
 };
 
 import { isEditApplyCommand, type EditApplyCommand } from "./edit-command.js";
-import type {
-  FilmSetLocalTransform
-} from "./film-set-content.js";
-import type { FilmSetGroupSceneBinding } from "./film-set-group.js";
-
-/**
- * 片场对象级权威操作（change: 2026-10-09-add-film-set-object-motion-and-editing，任务 2.3；
- * change: 2026-10-11-extract-film-set-extension，D8/D10 —— items-only）。
- *
- * 固定 `nodeId` / `itemId`，reducer 从**最新权威集合**读取对应 item 后原子更新，绝不用客户端
- * 旧完整数组覆盖其他项，也不按数组序号定位。items 只保存几何与基础变换：对象动作/播放配置
- * 一律通过 `filmSet.clipPatch` 的 binding 表达，故这里只有 transform / delete。
- */
-export type FilmSetItemPatchOp =
-  | { kind: "transform"; localTransform: FilmSetLocalTransform; expectedLocalTransform?: FilmSetLocalTransform }
-  | { kind: "delete" }
-  | { kind: "replace-model"; sourceNodeId: string; expectedSourceHash: string; expectedModelHash: string; expectedItemHash: string; importedAt: string };
-
 export type CanvasCommand =
   | EditApplyCommand
   | { type: "canvas.setTitle"; title: string }
   | {
       type: "node.add";
-      node: Pick<Woohaa3CanvasNode, "id" | "type" | "position"> & Partial<Pick<Woohaa3CanvasNode, "width" | "height" | "parentId" | "zIndex">>;
+      node: Pick<Woohaa3CanvasNode, "id" | "type" | "position"> & Partial<Pick<Woohaa3CanvasNode, "width" | "height" | "zIndex" | "parentId">>;
       nodeData?: CanvasNodeData;
       connect?: CanvasNodeConnectInput;
     }
@@ -56,7 +37,6 @@ export type CanvasCommand =
       position?: { x: number; y: number };
       width?: number;
       height?: number;
-      parentId?: string | null;
       zIndex?: number;
       /**
        * 改节点类型（只在 `image` ↔ `video` 之间，且节点还没有任何结果）：生成面板里的「图片 / 视频」切换。
@@ -67,14 +47,8 @@ export type CanvasCommand =
   | { type: "node.remove"; nodeIds: readonly string[] }
   /** `value: null` 等价于删除该 nodeData 键。 */
   | { type: "nodeData.patch"; nodeId: string; value: CanvasNodeData | null; expectedInputMapping?: CanvasNodeData["inputMapping"]; expectedNodeData?: Record<string, CanvasNodeData | null> }
-  /** 片场对象级权威更新；`nodeId` 必须是 `animation3d`。 */
-  | { type: "filmSet.itemPatch"; nodeId: string; itemId: string; op: FilmSetItemPatchOp }
   /** 扩展内容命令。内核只校验信封，业务由 owner codec 解码和应用。 */
   | { type: "extension.command"; extensionId: string; nodeId?: string; kind: string; payload: unknown }
-  | { type: "filmSet.clipPatch"; nodeId: string; clipId: string; expectedHash: string; op: FilmSetClipPatchOp }
-  /** Canonical film-set group binding edit. Composite object patches are legacy read-only paths. */
-  | { type: "filmSetGroup.bindingPatch"; groupId: string; bindingId: string; expectedContentKey?: string; patch: Partial<Pick<FilmSetGroupSceneBinding, "transform" | "visibility" | "contentKey" | "animation">> }
-  | { type: "filmSetGroup.ungroup"; groupId: string; expectedSchemaVersion?: number }
   | {
       type: "edge.add";
       edge: {
@@ -102,10 +76,6 @@ export const CANVAS_COMMAND_TYPES: readonly CanvasCommandType[] = [
   "node.update",
   "node.remove",
   "nodeData.patch",
-  "filmSet.itemPatch",
-  "filmSet.clipPatch",
-  "filmSetGroup.bindingPatch",
-  "filmSetGroup.ungroup",
   "extension.command",
   "edge.add",
   "edge.remove",
@@ -161,23 +131,6 @@ export function isCanvasCommand(value: unknown): value is CanvasCommand {
         && (value.expectedNodeData === undefined || (isRecord(value.expectedNodeData) && Object.values(value.expectedNodeData).every(entry => entry === null || isRecord(entry))))
         && (value.expectedInputMapping === undefined || (Array.isArray(value.expectedInputMapping)
           && value.expectedInputMapping.every(entry => isRecord(entry) && isNonEmptyString(entry.sourceNodeId) && isNonEmptyString(entry.role))));
-    case "filmSet.itemPatch":
-      return isNonEmptyString(value.nodeId)
-        && isNonEmptyString(value.itemId)
-        && isRecord(value.op)
-        && typeof value.op.kind === "string";
-    case "filmSet.clipPatch":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.clipId)
-        && isNonEmptyString(value.expectedHash) && isFilmSetClipPatchOp(value.op);
-    case "filmSetGroup.bindingPatch":
-      return isNonEmptyString(value.groupId) && isNonEmptyString(value.bindingId)
-        && (value.expectedContentKey === undefined || isNonEmptyString(value.expectedContentKey))
-        && isRecord(value.patch)
-        && (value.patch.transform === undefined || isRecord(value.patch.transform))
-        && (value.patch.visibility === undefined || typeof value.patch.visibility === "boolean")
-        && (value.patch.contentKey === undefined || isNonEmptyString(value.patch.contentKey));
-    case "filmSetGroup.ungroup":
-      return isNonEmptyString(value.groupId) && (value.expectedSchemaVersion === undefined || Number.isSafeInteger(value.expectedSchemaVersion));
     case "extension.command":
       return isNonEmptyString(value.extensionId)
         && isNonEmptyString(value.kind)

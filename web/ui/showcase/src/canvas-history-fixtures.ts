@@ -82,7 +82,7 @@ export const CANVAS_HISTORY_FIXTURES: CanvasGenerationHistoryListItem[] = [	{
 		recoverable: true,
 		previewable: true,
 		source: { label: "模型脚本" },
-		preview: { kind: "model", thumbnailHref: historyPreviewUrl("model-01"), entry: { canvasId: "canvas-showcase", nodeId: "node-gen-5", entryId: "ngh-model-1" } }
+		preview: { kind: "model", entry: { canvasId: "canvas-showcase", nodeId: "node-gen-5", entryId: "ngh-model-1" } }
 	},
 	{
 		entryId: "ngh-text-2",
@@ -123,7 +123,7 @@ export function previewFailureFixtures(): CanvasGenerationHistoryListItem[] {
       recoverable: true,
       previewable: false,
       source: { label: "模型脚本" },
-      preview: { kind: "model", thumbnailHref: null, entry: { canvasId: "canvas-showcase", nodeId: "node-model-fail", entryId: "ngh-fail-model" } }
+      preview: { kind: "model", entry: { canvasId: "canvas-showcase", nodeId: "node-model-fail", entryId: "ngh-fail-model" } }
     }
   ];
 }

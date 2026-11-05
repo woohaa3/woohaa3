@@ -30,10 +30,13 @@ describe("registered node data owner", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.canvas.nodeData.owned).toEqual({ extensionId: "test-recipe", recipe: 2, normalized: true });
   });
-  it("keeps owner fields through final commit normalization", () => {
+  it("keeps owner fields but drops removed film-set fields through final commit normalization", () => {
     const result = applyCanvasCommands(canvas(), [{ type: "nodeData.patch", nodeId: "owned", value: { recipe: 2, filmSetContent: { opaque: true } } }], { content: registry() });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.canvas.nodeData.owned.filmSetContent).toEqual({ opaque: true });
+    if (result.ok) {
+      expect(result.canvas.nodeData.owned.recipe).toBe(2);
+      expect(result.canvas.nodeData.owned).not.toHaveProperty("filmSetContent");
+    }
   });
   it("rejects absent owners and identity replacement atomically", () => {
     const original = canvas();

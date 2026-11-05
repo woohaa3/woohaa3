@@ -1,41 +1,67 @@
+/**
+ * 2D 组创作作用域（group scope）的宿主运行时。
+ *
+ * 旧的普通组版本随 `f510576d` 删除；这里重建同一套语义，但成员来自
+ * `nodeData.workflowGroup2d.memberNodeIds`（见 `@woohaa3/contracts` 的 `group-authoring-scope`），
+ * 而不是 `parentId` 树：
+ *
+ * - 作用域只存在于宿主进程内的 `AsyncLocalStorage`，从不来自模型参数；
+ * - `scopedCanvas` 把任意读取投影成“只有根组与成员”的画布；
+ * - 命令提交与脚本校验在作用域内走 `validateCanvasGroupChange`，保证组外零影响；
+ * - 每次提交前复核授权令牌与 `scopeEpoch`，过期即拒绝，不靠调用方自觉。
+ */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { projectCanvasGroup, type CanvasGroupScope, type ServerCanvas } from "@woohaa3/contracts";
 
-export type TrustedCanvasGroupScope = CanvasGroupScope & { owner: string; valid: () => boolean; authorize?: (permission: "read" | "write") => Promise<boolean>; ownsRun?: (nodeId: string, runId: string) => boolean; onAction?: (action: import("@woohaa3/contracts").CanvasGroupAction) => void };
+export type TrustedCanvasGroupScope = CanvasGroupScope & {
+  owner: string;
+  /** 授权令牌仍有效且作用域未被作废。 */
+  valid: () => boolean;
+  authorize?: (permission: "read" | "write") => Promise<boolean>;
+  /** 本轮只能停止自己启动的运行。 */
+  ownsRun?: (nodeId: string, runId: string) => boolean;
+  onAction?: (action: { canvasId: string; nodeId?: string; commandId?: string; revision?: number; runId?: string; jobId?: string }) => void;
+};
+
 const active = new AsyncLocalStorage<TrustedCanvasGroupScope>();
 const epochs = new Map<string, number>();
-type EpochStore = { read(canvasId: string, rootGroupId: string): number; advance(canvasId: string, rootGroupId: string): number };
+type EpochStore = { read(canvasId: string, groupNodeId: string): number; advance(canvasId: string, groupNodeId: string): number };
 let epochStore: EpochStore | undefined;
-/** Host-owned durable ledger. Grants themselves remain process-local and never survive restart. */
-export function bindCanvasGroupEpochStore(store: EpochStore): () => void { epochStore = store; return () => { if (epochStore === store) epochStore = undefined; }; }
-const key = (canvasId: string, rootGroupId: string) => JSON.stringify([canvasId, rootGroupId]);
-export const canvasGroupEpoch = (canvasId: string, rootGroupId: string) => Math.max(epochs.get(key(canvasId, rootGroupId)) ?? 0, epochStore?.read(canvasId, rootGroupId) ?? 0);
-export function invalidateRemovedCanvasGroups(before: ServerCanvas, after: ServerCanvas): void {
-  for (const n of before.document.nodes) if (n.type === "group" && !after.document.nodes.some(next => next.id === n.id && next.type === "group")) {
-    const next = canvasGroupEpoch(before.id, n.id) + 1;
-    epochs.set(key(before.id, n.id), next);
-    // The in-memory fence takes effect even if the separate application ledger is
-    // temporarily unavailable. A restart destroys every bearer grant regardless.
-    try { epochStore?.advance(before.id, n.id); } catch { /* rechecked against root existence on recovery */ }
-  }
-}
-export const currentCanvasGroupScope = () => active.getStore();
-export function withCanvasGroupScope<T>(scope: TrustedCanvasGroupScope, run: () => T): T { return active.run(scope, run); }
-/**
- * Projected group reads deliberately hide the root's parent so the group looks like a
- * top-level canvas. The planner then emits a root `node.update` with `parentId: null`;
- * applying that to a nested group would detach it from its manager. Preserve the root's
- * existing parent (omit the field) and let the existing group validator decide whether
- * any other root structure changed.
- */
-export function normalizeGroupScopeCommands<T extends import("@woohaa3/contracts").CanvasCommand>(commands: readonly T[], rootGroupId: string): T[] {
-  return commands.map(command => {
-    if (command.type !== "node.update" || command.nodeId !== rootGroupId || command.parentId === undefined) return command;
-    const { parentId: _parentId, ...rest } = command;
-    return rest as T;
-  });
+
+/** 宿主持久化的代次账本（可选）；grant 本身仍是进程内事实，重启后一律失效。 */
+export function bindCanvasGroupEpochStore(store: EpochStore): () => void {
+  epochStore = store;
+  return () => {
+    if (epochStore === store) epochStore = undefined;
+  };
 }
 
+const key = (canvasId: string, groupNodeId: string) => JSON.stringify([canvasId, groupNodeId]);
+
+export const canvasGroupEpoch = (canvasId: string, groupNodeId: string): number =>
+  Math.max(epochs.get(key(canvasId, groupNodeId)) ?? 0, epochStore?.read(canvasId, groupNodeId) ?? 0);
+
+/** 组被删除时作废仍在途的授权：内存围栏立即生效，账本写入失败也不阻塞。 */
+export function invalidateRemovedCanvasGroups(before: ServerCanvas, after: ServerCanvas): void {
+  for (const node of before.document.nodes) {
+    if (node.type !== "workflow-group-2d") continue;
+    if (after.document.nodes.some((next) => next.id === node.id && next.type === "workflow-group-2d")) continue;
+    epochs.set(key(before.id, node.id), canvasGroupEpoch(before.id, node.id) + 1);
+    try {
+      epochStore?.advance(before.id, node.id);
+    } catch {
+      /* 内存围栏足够让本轮失效；重启后 grant 不复存在。 */
+    }
+  }
+}
+
+export const currentCanvasGroupScope = (): TrustedCanvasGroupScope | undefined => active.getStore();
+
+export function withCanvasGroupScope<T>(scope: TrustedCanvasGroupScope, run: () => T): T {
+  return active.run(scope, run);
+}
+
+/** 组作用域内的只读投影；作用域失效直接抛错，绝不退化成整张画布。 */
 export function scopedCanvas(canvas: ServerCanvas): ServerCanvas {
   const scope = active.getStore();
   if (!scope) return canvas;

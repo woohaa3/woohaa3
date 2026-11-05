@@ -35,88 +35,23 @@ pub(crate) fn node<'a>(scene: &Scene, original: &'a GraphNode) -> Cow<'a, GraphN
     node.width = entry.width;
     node.height = entry.height;
     // This internal drawing kind is derived, never a wire or document node type.
-    node.kind = if close_enabled(scene, &original.id) {
-        "focus-reference"
-    } else {
-        "focus-reference-readonly"
-    }
-    .into();
-    node.card_label = Some(
-        original
-            .shot_preview
-            .as_ref()
-            .map(|shot| {
-                if shot.kind == "dynamic" {
-                    "video"
-                } else {
-                    "image"
-                }
-            })
-            .unwrap_or(if original.composite_asset.is_some() {
-                "model"
-            } else {
-                &original.kind
-            })
-            .into(),
-    );
-    if let Some(panel) = original
-        .composite_asset
-        .as_ref()
-        .and_then(|asset| asset.panel.as_ref())
-    {
-        if !panel.title.is_empty() {
-            node.title = panel.title.clone();
-        }
-    }
+    node.kind = "focus-reference-readonly".into();
+    node.card_label = Some(original.kind.clone());
     node.ghost = true;
     node.resizable = false;
     node.history_strip = None;
-    node.composite_asset = None;
-    node.group = None;
     node.model = None;
     node.model_preview = None;
-    node.shot_preview = None;
     node.texture = false;
     node.busy = false;
     node.media_loading = false;
-    node.aggregate_run = None;
     node.body.clear();
     node.type_label.clear();
     Cow::Owned(node)
 }
 pub(crate) fn overlay(scene: &Scene) -> Cow<'_, Scene> {
     if scene.model_focus.is_none() {
-        if !scene
-            .nodes
-            .iter()
-            .any(crate::canvas_query::shot_preview::hidden)
-        {
-            return Cow::Borrowed(scene);
-        }
-        let mut overlay = scene.clone();
-        let hidden: std::collections::HashSet<_> = scene
-            .nodes
-            .iter()
-            .filter(|n| crate::canvas_query::shot_preview::hidden(n))
-            .map(|n| n.id.as_str())
-            .collect();
-        overlay
-            .nodes
-            .retain(|node| !hidden.contains(node.id.as_str()));
-        overlay.edges.retain(|edge| {
-            !hidden.contains(edge.source.as_str()) && !hidden.contains(edge.target.as_str())
-        });
-        overlay
-            .node_actions
-            .retain(|id, _| !hidden.contains(id.as_str()));
-        overlay
-            .selection
-            .nodes
-            .retain(|id| !hidden.contains(id.as_str()));
-        overlay
-            .shot_preview_links
-            .retain(|link| !hidden.contains(link.preview_node_id.as_str()));
-        return Cow::Owned(overlay);
+        return Cow::Borrowed(scene);
     }
     let mut overlay = Scene::default();
     // 聚焦投影仍是同一份文档快照：身份与代数必须保留，否则投影的「同文档代数单调」
@@ -133,23 +68,6 @@ pub(crate) fn overlay(scene: &Scene) -> Cow<'_, Scene> {
         .map(|n| node(scene, n).into_owned())
         .collect();
     Cow::Owned(overlay)
-}
-pub(crate) const CLOSE_ACTION: &str = "composite.close-reference";
-pub(crate) fn close_enabled(scene: &Scene, id: &str) -> bool {
-    scene.node_actions.get(id).is_some_and(|actions| {
-        actions
-            .actions
-            .iter()
-            .any(|action| action.id == CLOSE_ACTION && action.enabled)
-    })
-}
-pub(crate) fn close_rect(node: &GraphNode) -> (f32, f32, f32, f32) {
-    (
-        node.x + node.width - 32.,
-        node.y + 4.,
-        28.,
-        node.height - 8.,
-    )
 }
 pub(crate) fn viewport(scene: &Scene) -> [f32; 3] {
     if scene.model_focus.is_some() {
@@ -169,8 +87,7 @@ mod tests {
             "theme": { "id": theme.id, "version": theme.version, "fingerprint": theme.fingerprint, "tokens": theme.tokens },
             "nodes": [
                 {"id":"owner","type":"model","x":500,"y":500},
-                {"id":"container","type":"model","x":1000,"y":1000,"width":248,"height":232,
-                    "compositeAsset":{"x":1000,"y":1000,"width":248,"height":232,"scopeShape":"rect","panel":{"title":"Object"}}},
+                {"id":"container","type":"model","x":1000,"y":1000,"width":248,"height":232,"title":"Object"},
                 {"id":"card","type":"model","x":1012,"y":1012,"width":224,"height":208,"resizable":true},
                 {"id":"unrelated","type":"image","x":0,"y":0}
             ], "edges":[], "viewport":{"x":123,"y":456,"zoom":3},
@@ -212,21 +129,11 @@ mod tests {
         assert_eq!(viewport(&source), [0., 0., 1.]);
         assert_eq!(overlay.viewport.zoom, 1.);
         assert_eq!(overlay.nodes[0].title, "Object");
-        assert!(overlay.nodes.iter().all(|n| n.composite_asset.is_none()
-            && n.model.is_none()
-            && n.model_preview.is_none()
-            && n.shot_preview.is_none()
-            && !n.texture));
-        assert_eq!(
-            source.nodes[1]
-                .composite_asset
-                .as_ref()
-                .unwrap()
-                .panel
-                .as_ref()
-                .unwrap()
-                .title,
-            "Object"
+        assert!(
+            overlay
+                .nodes
+                .iter()
+                .all(|n| n.model.is_none() && n.model_preview.is_none() && !n.texture)
         );
     }
     #[test]

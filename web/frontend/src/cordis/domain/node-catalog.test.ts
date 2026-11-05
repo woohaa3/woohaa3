@@ -17,22 +17,18 @@ describe("node-catalog", () => {
       "image",
       "model3d",
       "video",
-      "audio",
-      // 片场已迁移为"组"，不再是独立模板；便签是本仓新增的纯批注卡片。
-      "sticky-note"
+      "audio"
     ]);
     expect(NODE_TEMPLATES.map((entry) => entry.label)).toEqual([
       "文本",
       "图片",
       "3D 模型",
       "视频",
-      "音频",
-      "便签"
+      "音频"
     ]);
     expect(findNodeTemplate("model")?.nodeType).toBe("model3d");
     expect(findNodeTemplate("model3d")?.nodeType).toBe("model3d");
     // 片场由 film-set 扩展经 canvas.node-template 贡献默认镜头/片段。
-    expect(findNodeTemplate("film-set")).toBeNull();
     expect(findNodeTemplate("composite-asset")).toBeNull();
   });
 
@@ -43,9 +39,7 @@ describe("node-catalog", () => {
       "image",
       "model3d",
       "video",
-      "audio",
-      // 便签：纯批注卡片，排在最后，不与素材类节点抢位置。
-      "sticky-note"
+      "audio"
     ]);
     expect(findNodeTemplate("shot")).toBeNull();
     expect(findNodeTemplate("generate")).toBeNull();
@@ -69,10 +63,6 @@ describe("node-catalog", () => {
     expect(data?.inputMapping?.[0]).toMatchObject({ sourceNodeId: "n1", sortKey: "0" });
     // 模型节点不承载任务字段/输入映射（旧 generate 类型已下线）。
     expect(connectNodeDataFor({ id: "n1", type: "image" }, "generate")).toBeUndefined();
-    // 自包含 3D 节点拉线创建只作来源说明：不注入任务 inputMapping。
-    const fromImage = connectNodeDataFor({ id: "n1", type: "image" }, "film-set");
-    expect(fromImage?.filmSetGroup?.sceneBindings).toEqual([]);
-    expect(fromImage?.inputMapping).toBeUndefined();
   });
 
   it("拉线边标签与旧 _wire_label 等价", () => {
@@ -88,13 +78,6 @@ describe("node-catalog", () => {
     expect(model?.modelScript).toBe("");
     expect(model?.modelScriptVersion).toBe("woohaa-model-js-v2");
     expect(model?.modelContentVersion).toBeTruthy();
-
-    const animation = defaultNodeDataForType("film-set");
-    expect(animation?.filmSetGroup?.sceneBindings).toEqual([]);
-    expect(animation?.filmSetGroup?.clips ?? []).toEqual([]);
-    expect(animation?.filmSetContent).toBeUndefined();
-    expect(animation?.modelScript).toBeUndefined();
-    expect(defaultNodeDataForType("group")).toBeUndefined();
 
   });
 });

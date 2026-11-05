@@ -70,12 +70,13 @@ export function createChatGptConversationAdapter(
 ): AgentConversationAdapter {
   const service = options.service;
   const ownerIdFor = options.ownerIdFor ?? ((owner) => `principal:${owner}`);
+  const candidateRuns = new Map<string, { controller: AbortController; done: Promise<unknown> }>();
 
   const capabilities = (): AgentAdapterCapabilities => ({
     textDelivery: { imageInput: true, maxImages: 12 },
     candidateGeneration: { imageInput: true, maxImages: 12 },
     discussion: true,
-    targets: ["model3d", "film-set", "camera"],
+    targets: ["model3d", "camera"],
     tools: true,
     models: "remote"
   });
@@ -124,7 +125,10 @@ export function createChatGptConversationAdapter(
     // 仅讨论：无工具面、无写能力；历史只当内容（design D2/D5）。
     if (input.intent.action === "discuss") {
       input.emit({ type: "stage", stage: "reasoning" });
-      const result = await service.converse({
+      const controller = input.candidate ? new AbortController() : null;
+      const abort = () => controller?.abort();
+      if (controller) { input.signal.addEventListener("abort", abort, { once: true }); if (input.signal.aborted) abort(); }
+      const operation = service.converse({
         ownerId,
         model: input.intent.model ?? "",
         prompt: input.intent.prompt,
@@ -132,9 +136,14 @@ export function createChatGptConversationAdapter(
         ...(input.candidate ? { outputSchema: input.candidate.outputSchema } : {}),
         ...(isChatGptReasoningEffort(input.intent.reasoningEffort) ? { reasoningEffort: input.intent.reasoningEffort } : {}),
         history: input.history.map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content })),
-        signal: input.signal,
+        signal: controller?.signal ?? input.signal,
         onStage: (stage) => input.emit({ type: "stage", stage })
       });
+      const key = JSON.stringify([input.owner, input.requestId]);
+      if (controller) candidateRuns.set(key, { controller, done: operation });
+      let result: Awaited<typeof operation>;
+      try { result = await operation; }
+      finally { if (controller) { input.signal.removeEventListener("abort", abort); candidateRuns.delete(key); } }
       if (!result.ok) return { status: "failed", error: { code: result.code, message: result.message } };
       return { status: "succeeded", assistantText: result.text };
     }
@@ -143,7 +152,9 @@ export function createChatGptConversationAdapter(
     if (!service.generation) {
       return { status: "failed", error: { code: "capability-unsupported", message: "ChatGPT 生成未启用" } };
     }
-    if (input.intent.mode === "canvas-group" || input.intent.mode === "text") return { status: "failed", error: { code: "capability-unsupported", message: "此连接尚不支持受控组创作" } };
+    if (input.intent.mode === "text") return { status: "failed", error: { code: "capability-unsupported", message: "此连接尚不支持文本交付" } };
+    if (input.intent.mode === "world") return { status: "failed", error: { code: "capability-unsupported", message: "此连接未声明世界场景写工具，不能执行导演区创作" } };
+    if (input.intent.mode === "canvas-group") return { status: "failed", error: { code: "capability-unsupported", message: "此连接未声明 2D 组画布工具，不能执行组创作" } };
     const mode: ChatGptGenerationMode | null = input.intent.mode ?? (input.intent.nodeId ? "model3d" : null);
     if (!mode) return { status: "failed", error: { code: "malformed-request", message: "缺少目标模式" } };
     if (!input.intent.nodeId) return { status: "failed", error: { code: "malformed-request", message: "目标动作必须带 nodeId" } };
@@ -203,7 +214,14 @@ export function createChatGptConversationAdapter(
     return receiptToOutcome(receipt);
   };
 
-  const cancel = async (input: { owner: string; requestId: string }): Promise<void> => {
+  const cancel: NonNullable<AgentConversationAdapter["cancel"]> = async (input): Promise<void> => {
+    if (input.candidateContext) {
+      const running = candidateRuns.get(JSON.stringify([input.owner, input.requestId]));
+      if (!running) throw new Error("无法确认 OAuth 候选执行已停止");
+      running.controller.abort();
+      await running.done;
+      return;
+    }
     service.generation?.cancel(ownerIdFor(input.owner), input.requestId);
   };
 

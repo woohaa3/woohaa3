@@ -115,7 +115,7 @@ export function ownerAcceptsSources(
 const unavailable = "此节点的素材接收方不可用，请检查扩展配置。";
 const queryUnavailable = "拖入目标查询不可用，请稍后重试。";
 
-function resolveTarget(targets: readonly NodeDropTarget[], canvas: ServerCanvas, sourceNodeIds: readonly string[], resolution: DropTargetResolution) {
+function resolveTarget(targets: readonly NodeDropTarget[], canvas: ServerCanvas, resolution: DropTargetResolution) {
   // 查询失败与「范围外」严格区分：不可用时不返回 null，避免回退普通移动（design D5）。
   if (resolution.status === "unavailable") return { failed: true as const };
   if (resolution.status === "none") return null;
@@ -124,10 +124,6 @@ function resolveTarget(targets: readonly NodeDropTarget[], canvas: ServerCanvas,
   try {
     const resolved = matchingHit(targets, canvas, hit);
     if (resolved) {
-      // 来源已经在目标 group 里：这是一次组内移动，不是「拖入复制」。否则成员卡片
-      // 在自己的容器气泡/徽标上松手会被当成再次导入，卡片反而不动。
-      if (resolved.hit.type === "group" && sourceNodeIds.length > 0
-        && sourceNodeIds.every((id) => isDescendantOf(canvas, id, resolved.hit.id))) return null;
       return { failed: false as const, hit: resolved.hit, owners: resolved.owners };
     }
     // 没有接收方时保持既有语义：复合资产仍消费为不可用，普通节点回退普通移动。
@@ -138,22 +134,9 @@ function resolveTarget(targets: readonly NodeDropTarget[], canvas: ServerCanvas,
   }
 }
 
-function isDescendantOf(canvas: ServerCanvas, nodeId: string, ancestorId: string): boolean {
-  const byId = new Map(canvas.document.nodes.map((node) => [node.id, node]));
-  const seen = new Set<string>([nodeId]);
-  let current = byId.get(nodeId);
-  while (current?.parentId) {
-    if (current.parentId === ancestorId) return true;
-    if (seen.has(current.parentId)) break;
-    seen.add(current.parentId);
-    current = byId.get(current.parentId);
-  }
-  return false;
-}
-
 /** Disabled/unknown/ambiguous targets and unavailable queries consume the drop without moving sources. */
 export function previewNodeDrop(targets: readonly NodeDropTarget[], canvas: ServerCanvas, sourceNodeIds: readonly string[], resolution: DropTargetResolution): string | null {
-  const target = resolveTarget(targets, canvas, sourceNodeIds, resolution);
+  const target = resolveTarget(targets, canvas, resolution);
   if (!target) return null;
   if (target.failed) return queryUnavailable;
   if (target.owners.length !== 1) return unavailable;
@@ -162,7 +145,7 @@ export function previewNodeDrop(targets: readonly NodeDropTarget[], canvas: Serv
 }
 
 export function dropNodeDrop(targets: readonly NodeDropTarget[], canvas: ServerCanvas, sourceNodeIds: readonly string[], point: { x: number; y: number }, resolution: DropTargetResolution): boolean {
-  const target = resolveTarget(targets, canvas, sourceNodeIds, resolution);
+  const target = resolveTarget(targets, canvas, resolution);
   if (!target) return false;
   if (target.failed) return true;
   if (target.owners.length !== 1) return true;

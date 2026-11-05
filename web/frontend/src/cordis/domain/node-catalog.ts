@@ -25,7 +25,7 @@ import {
 export { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
 
 /** 前端菜单项 id：共享语义 kind 加上扩展注册的自包含 3D 节点。 */
-export type CanvasNodeTemplateId = AgentSemanticKind | "model3d" | "composite-asset" | "sticky-note";
+export type CanvasNodeTemplateId = AgentSemanticKind | "model3d" | "composite-asset";
 
 export type CanvasNodeTemplate = {
   id: CanvasNodeTemplateId;
@@ -40,22 +40,16 @@ export type CanvasNodeTemplate = {
 /**
  * 节点菜单目录；空白右键与拉线创建共用，顺序与旧 Godot 菜单一致。
  *
- * 片场由 film-set 扩展经 `canvas.node-template` 贡献（携带扩展自己的默认镜头/片段），
- * 宿主目录不再重复列出，避免右键菜单出现两个「片场」。共享描述符仍保留 film-set，
- * 供 MCP 与默认 nodeData 复用。
+ * 目录只包含普通应用节点；扩展节点经 `canvas.node-template` 贡献。
  */
 export const NODE_TEMPLATES: readonly CanvasNodeTemplate[] = [
   ...AGENT_NODE_DESCRIPTORS
-    // 片场已迁移为"组"，不再作为独立菜单项出现（change: 2026-10-29-migrate-film-sets-to-groups）。
-    .filter((descriptor) => descriptor.kind !== "film-set")
     .map((descriptor) => ({
       id: (descriptor.kind === "model" ? "model3d" : descriptor.kind) as CanvasNodeTemplateId,
       label: descriptor.kind === "model" ? "3D 模型" : descriptor.label,
       nodeType: descriptor.canonicalType,
       taskKind: descriptor.taskKind !== undefined
     })),
-  // 便签：纯批注卡片，不连线、不执行。排在最后，不与"素材"类节点抢位置。
-  { id: "sticky-note", label: "便签", nodeType: "sticky-note", taskKind: false }
 ];
 
 /** model 语义别名与 model3d 菜单项返回同一份模板。 */
@@ -88,7 +82,6 @@ export function connectLabelFor(sourceNodeType: string, targetNodeType: string):
 export function defaultNodeDataForType(nodeType: string): CanvasNodeData | undefined {
   // 便签不是 Agent 语义节点，没有描述符；它的 nodeData 只有正文一个字段。
   // 空串而不是缺省：空便签在画布上显示"双击写点什么…"占位，用户能看出这是可写的。
-  if (nodeType === "sticky-note") return { note: "" };
   const selfContained = defaultSelfContained3DNodeData(nodeType);
   if (selfContained) return selfContained;
   const descriptor = findAgentNodeDescriptor(nodeType);

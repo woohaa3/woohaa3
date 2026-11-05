@@ -10,12 +10,9 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  filmSetNodeDataFields,
   applyCanvasCommands,
-  createFilmSetSnapshot,
   createEmptyWoohaa3ServerCanvas,
   hashModelScript,
-  decodeNodeGenerationHistoryEntry,
   IMAGE_EDIT_DOCUMENT_VERSION,
   type ImageProjectDocument,
   modelContentIdentity,
@@ -437,80 +434,6 @@ describe("模型会话完成", () => {
       canvasId: CANVAS, nodeId: "node-1", sessionId: "s", requestId: "mreq-2", kind: "model",
       baselineContentIdentity: modelContentIdentity(hashModelScript("build(default)"), placement),
       model: { baselineSourceHash: hashModelScript("build(default)"), finalSourceHash: hashModelScript("build(default)") }
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.receipt.entryId).toBeNull();
-    expect(await historyService.listEntriesForNode(CANVAS, "node-1")).toHaveLength(0);
-  });
-});
-
-describe("items-only 片场会话完成（D8/D10）", () => {
-  function filmSetData(placementYaw = 0): Record<string, unknown> {
-    const snapshot = createFilmSetSnapshot({
-      title: "片场",
-      model: { modelScript: "scene.box({ id: 'torso' });", modelScriptVersion: "woohaa-model-js-v2" },
-      timeline: { duration: 0, loop: false },
-      scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: placementYaw }
-    });
-    return { extensionId: "film-set", ...filmSetNodeDataFields(snapshot) };
-  }
-
-  function filmSetCanvas(placementYaw = 0): ServerCanvas {
-    const base = createEmptyWoohaa3ServerCanvas(CANVAS, NOW);
-    return {
-      ...base,
-      revision: 1,
-      document: { ...base.document, nodes: [{ id: "node-1", type: "composite-asset", position: { x: 0, y: 0 }, width: 320, height: 240 }] },
-      nodeData: { "node-1": filmSetData(placementYaw) as never }
-    } as unknown as ServerCanvas;
-  }
-
-  it("无顶层模型脚本的片场仍可 begin、归档完整片场定义且不推进 revision", async () => {
-    const canvas = filmSetCanvas();
-    const { editService, room, historyService } = setup(canvas);
-    const data = canvas.nodeData["node-1"] as Record<string, unknown>;
-    // 片场不得保存顶层作者模型字段；其身份为完整定义 `animation:<snapshotHash>`。
-    expect(data.modelScript).toBeUndefined();
-
-    const begun = await editService.begin({
-      canvasId: CANVAS, nodeId: "node-1", sessionId: "fs-s", requestId: "begin:fs-s",
-      kind: "model", baselineContentIdentity: "animation:unused"
-    });
-    expect(begun.ok).toBe(true);
-    if (begun.ok) expect(begun.baselineContentIdentity.startsWith("animation:")).toBe(true);
-
-    // 会话期实际改了片场整体摆放（权威提交到 canonical）；complete 应归档新定义身份。
-    (room as unknown as { setCanvas: (next: ServerCanvas) => void }).setCanvas(filmSetCanvas(Math.PI / 4));
-
-    const revisionBefore = room.canvas.revision;
-    const result = await editService.complete({
-      canvasId: CANVAS, nodeId: "node-1", sessionId: "fs-s", requestId: "fs-req", kind: "model",
-      baselineContentIdentity: begun.ok ? begun.baselineContentIdentity : "animation:unused",
-      model: { baselineSourceHash: "", finalSourceHash: hashModelScript("") }
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.receipt.status).toBe("completed");
-    expect(room.canvas.revision).toBe(revisionBefore);
-    const entries = await historyService.listEntriesForNode(CANVAS, "node-1");
-    expect(entries).toHaveLength(1);
-    expect(entries[0].payload).toMatchObject({ kind: "model", animation: { schemaVersion: 3 } });
-    expect(entries[0].currentIdentity.startsWith("animation:")).toBe(true);
-    expect(entries[0].payload).toMatchObject({ modelScript: "", language: "javascript", version: "woohaa-model-js-v2" });
-    expect(entries[0].payload).not.toHaveProperty("placement");
-    expect(decodeNodeGenerationHistoryEntry(JSON.parse(JSON.stringify(entries[0])))).toMatchObject({ ok: true });
-  });
-
-  it("片场无净变化（回到基线）不新增版本", async () => {
-    const canvas = filmSetCanvas();
-    const { editService, historyService } = setup(canvas);
-    const begun = await editService.begin({
-      canvasId: CANVAS, nodeId: "node-1", sessionId: "fs-s2", requestId: "begin:fs-s2",
-      kind: "model", baselineContentIdentity: "animation:unused"
-    });
-    const result = await editService.complete({
-      canvasId: CANVAS, nodeId: "node-1", sessionId: "fs-s2", requestId: "fs-req2", kind: "model",
-      baselineContentIdentity: begun.ok ? begun.baselineContentIdentity : "animation:unused",
-      model: { baselineSourceHash: "", finalSourceHash: hashModelScript("") }
     });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.receipt.entryId).toBeNull();

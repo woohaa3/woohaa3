@@ -22,11 +22,9 @@ export const CANVAS_SCRIPT_API_NAMES = [
   "move",
   "setPrompt",
   "remove",
-  "group",
-  "reparent",
-  "ungroup",
   "setTitle",
-  "layout"
+  "layout",
+  "resize"
 ] as const;
 
 export type CanvasScriptApiName = (typeof CANVAS_SCRIPT_API_NAMES)[number];

@@ -121,7 +121,8 @@ export function buildProjectionCommands(input: {
   record: PptaskExecutionRecord;
   currentCanvas: ServerCanvas;
 }): { ok: true; commands: CanvasCommand[] } | { ok: false; reason: "stale-run" | "unknown-node"; message: string } {
-  const { record, currentCanvas } = input;
+  const { currentCanvas } = input;
+  const record = withAcceptedJob(input.record, currentCanvas);
   const node = currentCanvas.nodeData[record.nodeId] as CanvasNodeData | undefined;
   if (!node || !currentCanvas.document.nodes.some((entry) => entry.id === record.nodeId)) {
     return { ok: false, reason: "unknown-node", message: `节点 ${record.nodeId} 不存在` };
@@ -197,6 +198,12 @@ export function buildProjectionCommands(input: {
   }
 
   const existingJobInput = currentCanvas.jobs.find((job) => job.id === record.jobId)?.input;
+  // `job.upsert` replaces the whole job. Carry the accepted T10 framing binding
+  // forward so a terminal projection does not erase the exact media/version the run
+  // consumed (the task history keeps a copy, but the durable job must stay auditable).
+  const acceptedJob = currentCanvas.jobs.find(
+    (job) => job.id === record.jobId && job.nodeId === record.nodeId && job.runId === record.runId
+  );
   commands.push({
     type: "job.upsert",
     job: {
@@ -208,6 +215,7 @@ export function buildProjectionCommands(input: {
       // （change: l0-generation-provenance）。旧记录缺省即不写。
       ...(record.modelKey ? { modelKey: record.modelKey } : {}),
       ...(existingJobInput ? { input: existingJobInput } : {}),
+      ...(acceptedJob?.worldCapture ? { worldCapture: acceptedJob.worldCapture } : {}),
       status: record.status === "succeeded" ? "success" : "failed",
       error: record.status === "succeeded" ? undefined : record.error,
       updatedAt: record.terminalAt
@@ -217,13 +225,25 @@ export function buildProjectionCommands(input: {
   return { ok: true, commands };
 }
 
+/** Prefer the accepted node/run/task association over a history-derived job id.
+ * Old terminal records with no durable job keep their existing recovery identity.
+ */
+function withAcceptedJob(record: PptaskExecutionRecord, canvas: ServerCanvas): PptaskExecutionRecord {
+  const candidates = canvas.jobs.filter(job =>
+    job.nodeId === record.nodeId && job.runId === record.runId && job.taskId === record.taskKey
+  );
+  const job = candidates.find(job => job.id === record.jobId)
+    ?? (candidates.length === 1 ? candidates[0] : undefined);
+  return job && job.id !== record.jobId ? { ...record, jobId: job.id } : record;
+}
+
 /**
  * 画布任务投影器。
  *
  * 单个终态的投影流程：
  * 1. 查 receipt：已有则直接 duplicate（实时订阅与补偿扫描重复观察）。
- * 2. 取 room，导出当前规范聚合。
- * 3. latest-run-wins / 节点存在性校验。
+ * 2. 取 room，导出当前规范聚合并解析已受理 job 身份。
+ * 3. 登记历史，再做 latest-run-wins / 节点存在性校验。
  * 4. 经 room 提交命令批次（room 负责持久化先于广播与 commandId 幂等）。
  * 5. 记录 receipt（含 skipped 情况，避免旧终态永久重试）。
  */
@@ -252,7 +272,20 @@ export class CanvasTaskProjector {
       return { status: "duplicate", revision: -1 };
     }
 
-    // 1.5) 终态先登记历史（独立于 latest-run-wins）：成功版本与失败/取消/中断归档都保留。
+    // 2) Probe the authority when available to recover the accepted job identity.
+    // Unavailable/deleted rooms must not skip the existing history/Skill callbacks.
+    let room: CanvasRoom | null = null;
+    let exported: ReturnType<CanvasRoom["exportCanvas"]> | undefined;
+    let roomReadFailure: { error: unknown } | undefined;
+    try {
+      room = await this.resolveRoom(record.canvasId);
+      exported = room?.exportCanvas();
+    } catch (error) {
+      roomReadFailure = { error };
+    }
+    if (exported?.ok) record = withAcceptedJob(record, exported.canvas);
+
+    // 3) 终态先登记历史（独立于 latest-run-wins）：成功版本与失败/取消/中断归档都保留。
     // 失败登记失败不阻断当前节点投影；receipt 未写，补偿扫描会连同登记重试。
     if (record.status === "succeeded" && record.output && this.registerHistory) {
       try {
@@ -268,24 +301,19 @@ export class CanvasTaskProjector {
       }
     }
 
-    // 1.75) Skill 步骤结算：迟到旧 run 只写自己的历史，不影响当前节点投影。
+    // Skill 步骤结算：迟到旧 run 只写自己的历史，不影响当前节点投影。
     try { this.onSettled?.(record); } catch { /* 查询复核兜底 */ }
 
-    // 2) 取 room。
-    const room = await this.resolveRoom(record.canvasId);
+    // Preserve terminal archival and settlement even when room projection cannot run.
+    if (roomReadFailure) throw roomReadFailure.error;
     if (!room) {
       return { status: "failed", code: "room-not-found", message: `room ${record.canvasId} 不存在` };
     }
-
-    // 3) 导出当前聚合做校验。
-    const exported = room.exportCanvas();
-    if (!exported.ok) {
-      // 文档不存在 = 画布已被删除（dev 库里任务还在、画布没了很常见）。重试永远不可能成功，
-      // 标成 permanent 让消费方推进水位并停止每轮 44 行的重试日志。
-      if (exported.code === "not-found") {
+    if (!exported || !exported.ok) {
+      if (exported?.code === "not-found") {
         return { status: "failed", code: "canvas-not-found", message: exported.message, permanent: true };
       }
-      return { status: "failed", code: "canvas-unavailable", message: exported.message };
+      return { status: "failed", code: "canvas-unavailable", message: exported?.message ?? "画布不可读" };
     }
 
     const built = buildProjectionCommands({ record, currentCanvas: exported.canvas });

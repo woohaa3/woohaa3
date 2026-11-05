@@ -45,7 +45,6 @@ pub(crate) struct GizmoHitResult {
     pub(crate) handle: Option<String>,
     /// 轴拖动约束（仅焦点三轴命中时）。
     pub(crate) constraint: Option<AxisDragConstraint>,
-    pub(crate) yaw_constraint: Option<crate::gizmo_layout::YawConstraint>,
     pub(crate) layout_id: Option<String>,
     pub(crate) generation: u32,
     pub(crate) epoch: u32,

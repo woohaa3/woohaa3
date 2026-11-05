@@ -11,44 +11,34 @@
 #![cfg_attr(not(feature = "canvas-core"), allow(dead_code))]
 
 pub(crate) mod aggregate;
-pub(crate) mod composite_panel;
 pub(crate) mod curve;
-pub(crate) mod film_set_pick;
 pub(crate) mod focus_context;
 pub(crate) mod gizmo;
-pub(crate) mod group_model;
+pub(crate) mod grip;
 pub(crate) mod interaction;
 pub(crate) mod layout;
 pub(crate) mod media_focus;
 pub(crate) mod model_pick;
 mod position_basis;
-pub(crate) mod scope;
-pub(crate) mod shot_preview;
 
 /// Renderer-side visibility rule for the node action toolbar. The interaction snapshot applies the
-/// same group opt-in (`actionBar`) when exposing hits, so a hidden toolbar cannot remain
-/// clickable. Ordinary groups and film-set groups both opt in through the generic presentation
-/// flag; the flag still keeps the renderer from inventing a toolbar for older scenes that did not
-/// declare it.
-#[cfg(test)]
+/// same rule when exposing hits, so a hidden toolbar cannot remain clickable.
 pub(crate) fn action_bar_visible(
     scene: &crate::protocol::Scene,
     node: &crate::protocol::GraphNode,
 ) -> bool {
-    action_bar_enabled(scene, node) && focus_context::overlay(scene).nodes.iter().any(|candidate| candidate.id == node.id)
-}
-
-/// The caller already owns the accepted projection and knows this node is present.
-pub(crate) fn action_bar_enabled(
-    scene: &crate::protocol::Scene, node: &crate::protocol::GraphNode,
-) -> bool {
     if scene.image_focus.is_some() || scene.video_focus.is_some() || scene.model_focus.is_some() {
         return false;
     }
-    if node.group.is_some() && !node.group.as_ref().is_some_and(|group| group.action_bar) {
-        return false;
-    }
-    scene.node_actions.get(&node.id).is_some_and(|actions| !actions.actions.is_empty())
+    let projected = focus_context::overlay(scene);
+    projected
+        .nodes
+        .iter()
+        .any(|candidate| candidate.id == node.id)
+        && scene
+            .node_actions
+            .get(&node.id)
+            .is_some_and(|actions| !actions.actions.is_empty())
 }
 
 /// 记录一次合法 `set_scene` 并在同一接受点同步发布 interaction snapshot。

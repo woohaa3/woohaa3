@@ -1,4 +1,3 @@
-import { scopedCanvas, currentCanvasGroupScope } from "./group-scope.js";
 /**
  * Canvas Agent 内部能力服务
  * （change: add-agent-canvas-authoring-mcp，任务 2.3 / 3.2 / 3.5 / 4.7 / 5.1）。
@@ -23,6 +22,7 @@ import type { CanvasTaskCatalog } from "@woohaa3/contracts";
 import type { AgentDeltaJournal } from "./delta-journal.js";
 import type { CanvasAuthorizer, CanvasDirectory } from "./authorization.js";
 import { AgentCanvasAuthoringService, type AgentApplyInput, type AgentApplyOutcome } from "./service.js";
+import { currentCanvasGroupScope, scopedCanvas } from "./group-scope.js";
 import type { CanvasScriptService } from "../canvas-script/service.js";
 
 export type AgentCanvasReadDependencies = {
@@ -82,7 +82,17 @@ export class AgentCanvasInternalService {
     const exported = room.exportCanvas();
     if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
 
-    const projected = projectAgentGraph(scopedCanvas(exported.canvas), {
+    // 组作用域：Agent 只能看见根组与其成员（成员表权威，卡片矩形不参与）。
+    let canvas = exported.canvas;
+    const scope = currentCanvasGroupScope();
+    if (scope) {
+      try {
+        canvas = scopedCanvas(exported.canvas);
+      } catch (error) {
+        return { ok: false, code: "group-scope-revoked", message: error instanceof Error && error.message === "group-target-missing" ? "2D 组已删除" : "组创作授权已失效" };
+      }
+    }
+    const projected = projectAgentGraph(canvas, {
       ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
       ...(input.nodeIds ? { nodeIds: input.nodeIds } : {}),
       ...(input.aroundNodeId ? { aroundNodeId: input.aroundNodeId } : {}),
@@ -94,7 +104,14 @@ export class AgentCanvasInternalService {
     if (!projected.ok) {
       return { ok: false, code: projected.code, message: projected.message, currentRevision: projected.currentRevision };
     }
-    return { ok: true, graph: { ...projected.graph, ...(currentCanvasGroupScope() ? { rootGroupId: currentCanvasGroupScope()!.rootGroupId } : {}) } };
+    return {
+      ok: true,
+      graph: scope ? {
+        ...projected.graph,
+        rootGroupId: scope.rootGroupId,
+        rootGroupData: canvas.nodeData[scope.rootGroupId] as Record<string, unknown> | undefined
+      } : projected.graph
+    };
   }
 
   async readChanges(input: { principalId: string; canvasId?: string; sinceRevision: number; limit?: number }) {
@@ -107,15 +124,17 @@ export class AgentCanvasInternalService {
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${resolved.canvasId} 不存在` };
     const exported = room.exportCanvas();
     if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
-    const canvas = scopedCanvas(exported.canvas);
+    let canvas: typeof exported.canvas;
+    try {
+      canvas = scopedCanvas(exported.canvas);
+    } catch {
+      return { ok: false, code: "group-scope-revoked", message: "2D 组已删除或授权失效" };
+    }
     if (input.sinceRevision > canvas.revision) {
       return { ok: false, code: "malformed-request", message: "sinceRevision 大于当前 revision", currentRevision: canvas.revision };
     }
     // change: 2026-10-22-remove-agent-execution-limits，任务 4.2：删除增量按节点/边/响应字符
     // 总量拒绝。同一 published snapshot 的增量完整返回；确实不可恢复时才返回 resetRequired。
-    if (currentCanvasGroupScope()) {
-      return { ok: true as const, delta: buildResetDelta(canvas, input.sinceRevision) };
-    }
     this.deps.journal.seed(resolved.canvasId);
     const payload = this.deps.journal.deltaFor(resolved.canvasId, input.sinceRevision, canvas.revision);
     const delta = payload
@@ -252,9 +271,7 @@ export class AgentCanvasInternalService {
     if (this.deps.accessRuntime?.enabled !== false && principalId.trim() === "") {
       return { ok: false as const, code: "unauthorized", message: "缺少已认证 principal" };
     }
-    const scope = currentCanvasGroupScope();
-    if (scope && (!scope.valid() || scope.canvasId !== canvasId)) return { ok: false as const, code: "group-scope-revoked", message: "组创作授权已撤销" };
-    const decision = await this.deps.authorizer.authorize({ principalId: scope?.owner ?? principalId, canvasId, permission });
+    const decision = await this.deps.authorizer.authorize({ principalId, canvasId, permission });
     if (!decision.allowed) return { ok: false as const, code: "forbidden", message: decision.reason };
     return { ok: true as const };
   }
@@ -275,7 +292,7 @@ export function agentCapabilitiesFor(
   return {
     protocolVersion: AGENT_CANVAS_PROTOCOL_VERSION,
     nodeKinds,
-    operations: ["create_node", "connect", "set_prompt", "move_node", "delete", "create_group", "reparent", "ungroup", "set_title", "layout"] as const,
+    operations: ["create_node", "connect", "set_prompt", "move_node", "delete", "set_title", "layout"] as const,
     placementModes: ["absolute", "auto", "after", "before", "below"] as const,
     limits: AGENT_CANVAS_LIMITS,
     run

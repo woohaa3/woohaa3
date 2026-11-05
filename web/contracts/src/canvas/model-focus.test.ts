@@ -19,7 +19,6 @@ import {
   focusCameraRotation,
   focusRay,
   focusTargetFor,
-  filmSetFitFactor,
   modelAnchor,
   modelLocalAabb,
   modelUnit,
@@ -284,40 +283,6 @@ describe("modelAnchor", () => {
     expect(anchor[1]).toBeCloseTo(expected[1], 6);
   });
 
-  it("片场（centered）：把模型投影中心对齐节点矩形中心，无朝下偏移", () => {
-    const relative = { min: [-1, 0, -1] as Vec3, max: [1, 4, 1] as Vec3 };
-    const anchor = modelAnchor({
-      nodeX: 100,
-      nodeY: 200,
-      nodeWidth: 260,
-      nodeHeight: 195,
-      relativeAabb: relative,
-      offset: { x: 0, y: 0, z: 0 },
-      centered: true
-    });
-    // 投影中心：cx = 230 - 0 = 230；cy = 297.5 + (0+4)/2 = 299.5（y 向下）。
-    const expected = canvasPointToWorld(230, 299.5, 0);
-    expect(anchor[0]).toBeCloseTo(expected[0], 6);
-    expect(anchor[1]).toBeCloseTo(expected[1], 6);
-    expect(anchor[2]).toBeCloseTo(expected[2], 6);
-  });
-});
-
-describe("filmSetFitFactor", () => {
-  it("受限维度时按比例缩小（框越小缩放越小）", () => {
-    const input = {
-      sceneVersion: "v2",
-      ops: [],
-      extent: 4,
-      aabb: { min: [-1, 0, -1] as Vec3, max: [1, 4, 1] as Vec3 },
-      placement: null
-    };
-    const roomy = filmSetFitFactor(input, { width: 1000, height: 1000 });
-    const tight = filmSetFitFactor(input, { width: 100, height: 100 });
-    expect(roomy).toBeGreaterThan(0);
-    expect(tight).toBeGreaterThan(0);
-    expect(tight).toBeLessThan(roomy);
-  });
 });
 
 describe("modelUnit", () => {

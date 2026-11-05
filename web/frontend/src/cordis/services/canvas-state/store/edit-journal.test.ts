@@ -133,6 +133,32 @@ describe("Edit Journal 撤销/重做与 redo 语义", () => {
 });
 
 describe("Edit Journal 容量与超大动作", () => {
+  it("releases trimmed plans and rejects authoritative duplicate receipts", async () => {
+    const { journal } = makeJournal();
+    const run = async () => ({ ok: true as const, label: "conversion", forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    await journal.adoptExternal("old", run);
+    for (let i = 0; i < EDIT_JOURNAL_MAX_ENTRIES; i++) await journal.recordAndSubmit({ label: `${i}`, forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    expect(journal.snapshot().entries.some(entry => entry.id === "old")).toBe(false);
+    expect((await journal.adoptExternal("old", async () => ({ ...await run(), allowNew: false }))).ok).toBe(false);
+    await journal.adoptExternal("redo", run);
+    await journal.undo({ apply: async () => ({ ok: true }) });
+    await journal.recordAndSubmit({ label: "new", forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    expect((await journal.adoptExternal("redo", async () => ({ ...await run(), allowNew: false }))).ok).toBe(false);
+    expect(journal.snapshot().entries.some(entry => entry.id === "redo")).toBe(false);
+    await journal.adoptExternal("conflict", run);
+    journal.markConflict("conflict");
+    expect(journal.skipConflict("conflict")).toBe(true);
+    expect((await journal.adoptExternal("conflict", async () => ({ ...await run(), allowNew: false }))).ok).toBe(false);
+    expect(journal.snapshot().entries.some(entry => entry.id === "conflict")).toBe(false);
+  });
+
+  it("rolls history beyond 1000 identities", async () => {
+    const { journal } = makeJournal();
+    const run = vi.fn(async () => ({ ok: true as const, label: "conversion", forward: NOOP_EDIT, inverse: NOOP_EDIT }));
+    for (let i = 0; i < 1001; i++) expect((await journal.adoptExternal(`op-${i}`, run)).ok).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1001);
+    expect(journal.size).toBe(EDIT_JOURNAL_MAX_ENTRIES);
+  });
   it("超过 100 条移除最旧已结算记录", async () => {
     const { journal } = makeJournal();
     for (let i = 0; i < EDIT_JOURNAL_MAX_ENTRIES + 5; i += 1) {
@@ -182,6 +208,43 @@ describe("Edit Journal 会话清理", () => {
     expect(journal.size).toBe(0);
     expect(journal.snapshot().canUndo).toBe(false);
     expect(journal.snapshot().canRedo).toBe(false);
+  });
+});
+
+describe("Edit Journal 外部权威动作", () => {
+  it("verified external entries share the same cursor and move only after confirmed replay", async () => {
+    const { journal } = makeJournal();
+    const undo = vi.fn(async () => ({ ok: true as const }));
+    const redo = vi.fn(async () => ({ ok: true as const }));
+    expect(journal.recordExternal({ id: "scene-area:op", label: "搬动场景", undo, redo }).ok).toBe(true);
+    expect(journal.recordExternal({ id: "scene-area:op", label: "搬动场景", undo, redo }).ok).toBe(true);
+    expect(journal.size).toBe(1);
+    const handlers = {
+      apply: async (entry: ReturnType<typeof journal.snapshot>["entries"][number], direction: -1 | 1) =>
+        entry.kind === "external" ? (direction === -1 ? entry.undo() : entry.redo()) : { ok: false as const, reason: "unexpected entry" }
+    };
+    expect((await journal.undo(handlers)).ok).toBe(true);
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(journal.snapshot()).toMatchObject({ canUndo: false, canRedo: true });
+    expect((await journal.redo(handlers)).ok).toBe(true);
+    expect(redo).toHaveBeenCalledTimes(1);
+    expect(journal.snapshot()).toMatchObject({ canUndo: true, canRedo: false });
+  });
+
+  it("keeps the cursor when the authority replay is version-conflicted", async () => {
+    const { journal } = makeJournal();
+    journal.recordExternal({
+      id: "world-camera:op",
+      label: "调整镜头设置",
+      undo: async () => ({ ok: false as const, reason: "版本冲突" }),
+      redo: async () => ({ ok: true as const })
+    });
+    const handlers = {
+      apply: async (entry: ReturnType<typeof journal.snapshot>["entries"][number], direction: -1 | 1) =>
+        entry.kind === "external" ? (direction === -1 ? entry.undo() : entry.redo()) : { ok: false as const, reason: "unexpected entry" }
+    };
+    expect((await journal.undo(handlers)).ok).toBe(false);
+    expect(journal.snapshot()).toMatchObject({ canUndo: true, canRedo: false });
   });
 });
 

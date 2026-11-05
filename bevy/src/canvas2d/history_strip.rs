@@ -176,10 +176,11 @@ mod tests {
 
     fn node(strip: Option<HistoryStripPresentation>) -> GraphNode {
         GraphNode {
+            chrome: crate::protocol::NodeChrome::Card,
+            shared_world_instance: None,
+            world_camera: None,
             model_preview: None,
             media_loading: false,
-            shot_preview: None,
-
             id: "n".into(),
             kind: "image".into(),
             x: 0.0,
@@ -196,11 +197,8 @@ mod tests {
             resizable: false,
             ghost: false,
             card_label: None,
-            group: None,
             model: None,
-            composite_asset: None,
             history_strip: strip,
-            aggregate_run: None,
         }
     }
 

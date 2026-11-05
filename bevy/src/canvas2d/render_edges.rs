@@ -15,11 +15,11 @@ use crate::protocol::{Edge, Scene};
 use crate::theme::ThemeResource;
 
 use super::geometry::Geometry;
+use super::labels::Label;
 use super::layout::{
     EDGE_DELETE_BUTTON_SIZE, EDGE_LABEL_FONT, EDGE_LABEL_HEIGHT, edge_delete_center,
     edge_label_text, edge_label_width,
 };
-use super::labels::Label;
 
 /// Draw one retained document-order block; labels belong to that block's lifetime.
 #[allow(clippy::too_many_arguments)]
@@ -70,18 +70,23 @@ pub(super) fn draw_block(
                     theme.token_u32("canvasEdgeLabelText"),
                 ));
             }
-            // 悬停该连线时显示删除按钮（change: add-edge-hover-delete）。
-            // 位置与 JS 命中测试共用 contracts.`bevyEdgeDeleteRect` 的同一公式与常量：
-            // 无标签时居中于连线中点，有标签时排在**按内容收缩**的标签胶囊右侧，避免盖住标签，
-            // 也避免固定 104px 宽度把按钮推到远离曲线的地方（修复：标签过宽导致删除按钮点不到）。
-            // 颜色取自既有主题 token（不新增 token、不升主题 schema）。
-            if scene
-                .hover
-                .as_ref()
-                .is_some_and(|hover| hover.edge_id.as_deref() == Some(edge.id.as_str()))
-            {
-                let center =
-                    edge_delete_center(source.port(true), target.port(false), label_width);
+            // Selection arms deletion; hover places the control on the nearest curve point.
+            if let Some(hover) = scene.hover.as_ref().filter(|hover| {
+                hover.edge_id.as_deref() == Some(edge.id.as_str())
+                    && (selected || hover.cursor.is_none())
+            }) {
+                let center = hover
+                    .cursor
+                    .map(|p| {
+                        crate::canvas_query::curve::closest_edge_point(
+                            Vec2::new(p.x, p.y),
+                            source.port(true),
+                            target.port(false),
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        edge_delete_center(source.port(true), target.port(false), label_width)
+                    });
                 let radius = EDGE_DELETE_BUTTON_SIZE / 2.0;
                 let accent = theme.token_u32("canvasEdgeSelected");
                 // 圆面 + 描边环 + 叉号；z 高于所有卡片与标签，保证可点。
@@ -137,144 +142,5 @@ pub(super) fn draw_draft(
             };
             geometry.curve(a, b, 2.2, 2.0, theme.token_u32("canvasEdgeDraft"), true);
         }
-    }
-}
-
-/// 拍摄镜头归属线（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。
-///
-/// 起点由映射层投影给出（`ShotPreviewLink.start`），终点复用卡片左侧中点
-/// （`canvas_query::shot_preview::card_attachment_of`，与卡片命中几何一致）。使用共享边曲线
-/// 规则，但画**虚线**（`dashed = true`、与普通边同宽 2.0）：只表达稳定的永久归属而非临时/
-/// 草稿关系，虚线也让它与普通边一眼可分（change: 2026-10-28-migrate-film-set-to-groups，
-/// 用户要求恢复虚线）。不参与普通边拓扑，因此没有端口、删除按钮、断开或重连命中。目标节点
-/// 缺失时跳过该线，绝不伪造终点。`overlay_z` 使线画在普通卡片之上，便于始终看清归属。
-pub(super) fn draw_shot_preview_links(
-    geometry: &mut Geometry,
-    scene: &Scene,
-    theme: &ThemeResource,
-    layouts: &HashMap<&str, CanvasLayout>,
-    overlay_z: f32,
-) {
-    if scene.shot_preview_links.is_empty() {
-        return;
-    }
-    let color = theme.token_u32("canvasEdgeDefault");
-    for link in &scene.shot_preview_links {
-        let Some(target) = layouts.get(link.preview_node_id.as_str()) else {
-            continue;
-        };
-        let start = Vec2::new(link.start.x, link.start.y);
-        let end = crate::canvas_query::shot_preview::card_attachment(
-            target.x,
-            target.y,
-            target.width,
-            target.height,
-        );
-        geometry.curve(start, end, 2.0, overlay_z, color, true);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::canvas_query::curve::EDGE_CURVE_SEGMENTS;
-    use crate::protocol::{GraphNode, ShotPreviewLink};
-
-    fn preview_card(id: &str) -> GraphNode {
-        GraphNode {
-            model_preview: None,
-            id: id.into(),
-            kind: "node".into(),
-            x: 400.0,
-            y: 200.0,
-            width: 240.0,
-            height: 140.0,
-            body: String::new(),
-            title: String::new(),
-            type_label: String::new(),
-            progress: 0.0,
-            progress_started_at: None,
-            busy: false,
-            texture: false,
-            media_loading: false,
-            resizable: false,
-            ghost: false,
-            card_label: None,
-            group: None,
-            model: None,
-            composite_asset: None,
-            history_strip: None,
-            aggregate_run: None,
-            shot_preview: None,
-        }
-    }
-
-    fn link(preview_node_id: &str) -> ShotPreviewLink {
-        ShotPreviewLink {
-            id: format!("link:film:{preview_node_id}"),
-            owner_node_id: "film".into(),
-            preview_node_id: preview_node_id.into(),
-            clip_id: "clip-1".into(),
-            start: crate::protocol::CursorPoint { x: 80.0, y: 60.0 },
-        }
-    }
-
-    fn draw(links: Vec<ShotPreviewLink>, with_target: bool) -> usize {
-        let theme = ThemeResource::default();
-        let scene = Scene {
-            shot_preview_links: links,
-            ..Default::default()
-        };
-        let target = preview_card("shot-preview:AAAA");
-        let mut map: HashMap<&str, CanvasLayout> = HashMap::new();
-        if with_target {
-            map.insert(target.id.as_str(), CanvasLayout::from_node(&target));
-        }
-        let mut geometry = Geometry::default();
-        draw_shot_preview_links(&mut geometry, &scene, &theme, &map, 20.0);
-        let mesh = geometry.build();
-        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-            .and_then(|values| values.as_float3())
-            .map(|values| values.iter().filter(|p| p[0] > -1.0e5).count())
-            .unwrap_or(0)
-    }
-
-    /// 归属线是**虚线**：与 group 容器框、框选范围共用「结构/归属而非实体连线」的表达，
-    /// 也避免和普通边混淆（change: 2026-10-28-migrate-film-set-to-groups，用户要求恢复虚线）。
-    /// 虚线按 10/6 世界单位跳段，顶点数少于实线的「每段一个四边形」。
-    #[test]
-    fn shot_preview_link_is_dashed() {
-        // 短线上虚线的四边形数量可能与固定采样实线恰好相同（每段都只切出一块），
-        // 因此用一条明显更长的归属线来区分：虚线按 10/6 世界长度继续切片，几何数量随
-        // 长度增长；实线固定 `EDGE_CURVE_SEGMENTS` 段，与长度无关。
-        let mut far = link("shot-preview:AAAA");
-        far.start = crate::protocol::CursorPoint {
-            x: -1200.0,
-            y: 900.0,
-        };
-        let dashed = draw(vec![far], true);
-        assert!(dashed > 0, "归属线必须画得出来");
-        assert_eq!(dashed % 4, 0, "每个绘制的子段仍是 4 顶点四边形");
-        assert_ne!(
-            dashed,
-            EDGE_CURVE_SEGMENTS * 4,
-            "归属线必须是虚线而不是实线"
-        );
-        assert!(
-            draw(vec![link("shot-preview:AAAA")], true) > 0,
-            "短线上同样要画出来"
-        );
-    }
-
-    /// 目标卡片缺失时跳过该线，绝不伪造终点。
-    #[test]
-    fn shot_preview_link_skips_missing_target() {
-        assert_eq!(draw(vec![link("shot-preview:MISSING")], true), 0);
-    }
-
-    /// 无归属线时不产生任何几何。
-    #[test]
-    fn shot_preview_links_empty_draws_nothing() {
-        assert_eq!(draw(vec![], true), 0);
     }
 }

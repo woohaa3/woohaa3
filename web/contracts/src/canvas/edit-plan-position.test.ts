@@ -8,8 +8,7 @@ import type { CanvasCommand } from "./commands.js";
 
 function fixture() {
   const result = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("c"), [
-    { type: "node.add", node: { id: "g", type: "group", position: { x: 10, y: 10 }, width: 400, height: 300 } },
-    { type: "node.add", node: { id: "a", type: "image", position: { x: 2, y: 3 }, parentId: "g" } },
+    { type: "node.add", node: { id: "a", type: "image", position: { x: 12, y: 13 } } },
     { type: "node.add", node: { id: "b", type: "text", position: { x: 500, y: 0 } } },
     { type: "nodeData.patch", nodeId: "a", value: { title: "retain me" } }
   ]);

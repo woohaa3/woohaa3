@@ -51,7 +51,7 @@ export function projectNodeAffordances(canvasType: string, data: CanvasNodeData 
     canRun: descriptor?.executable === true && !processing,
     canConnect: descriptor !== null,
     canDelete: true,
-    canMove: true, canGroup: true, canReparent: true, canUngroup: canvasType === "group", canSetTitle: true
+    canMove: true, canSetTitle: true
   };
 }
 
@@ -64,15 +64,13 @@ export function projectAgentNode(
   const descriptor = agentDescriptorForCanonicalType(node.type, data);
   const task = projectTaskSummary(data);
   const inputs = projectInputSummaries(canvas, node.id, data);
-  const worldBounds = organizationWorldBounds(node, new Map(canvas.document.nodes.map(n => [n.id, n])));
+  const worldBounds = organizationWorldBounds(node);
   return {
     nodeId: node.id,
     kind: descriptor?.kind ?? null,
     canonicalType: node.type,
-    parentId: node.parentId ?? null,
     worldBounds,
-    ...(node.type === "group" ? { directMemberCount: canvas.document.nodes.filter(n => n.parentId === node.id).length } : {}),
-    position: { x: node.position.x, y: node.position.y },
+    position: { x: node.position?.x ?? 0, y: node.position?.y ?? 0 },
     size: { width: worldBounds.width, height: worldBounds.height },
     ...(typeof data?.title === "string" && data.title !== "" ? { title: data.title } : {}),
     ...(options.includePrompt && typeof data?.prompt === "string" ? { prompt: data.prompt } : {}),

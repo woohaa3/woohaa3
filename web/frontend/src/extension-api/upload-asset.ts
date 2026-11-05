@@ -13,6 +13,7 @@ import {
   GLB_MODEL_FORMAT,
   MODEL_FORMAT_METADATA_KEY,
   createHighEntropyId,
+  newWorldInstance,
   isGlbFile,
   normalizeGlbModelReference,
   uploadedMediaKind,
@@ -121,6 +122,9 @@ export function planUploadedNode(input: {
   connectFrom?: { nodeId: string; nodeType: string; label?: string };
 }): CanvasCommand[] {
   const nodeData = uploadedNodeData(input.nodeType, input.asset, input.file);
+  if (nodeData && input.nodeType === "model3d") {
+    nodeData.sharedWorldInstance = newWorldInstance(createHighEntropyId("world-instance"), input.position);
+  }
   const connect = input.connectFrom;
   const commands: CanvasCommand[] = [{ type: "asset.upsert", asset: input.asset }];
   if (connect) {

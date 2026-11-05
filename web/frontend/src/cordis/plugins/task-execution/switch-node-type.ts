@@ -6,7 +6,7 @@
  * - 已经有图/视频的节点 → 在它旁边**新建**另一种类型的节点，连成它的参考输入（`create`），原节点不动；
  * - 画布只读，或空节点正在生成 → 不可切换（`blocked`，带原因）。
  */
-import { createWoohaa3CanvasNodeId, getWoohaa3CanvasNodeRect, type CanvasCommand, type CanvasNodeData } from "@woohaa3/contracts";
+import { DEFAULT_NODE_DIMS, createWoohaa3CanvasNodeId, type CanvasCommand, type CanvasNodeData } from "@woohaa3/contracts";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
 import { connectLabelFor, connectNodeDataFor } from "../../domain/node-catalog.js";
 
@@ -59,7 +59,8 @@ export function buildLinkedNodeCommands(input: {
     input.nodeData as Record<string, CanvasNodeData> | undefined
   );
   if (!nodeData) return null;
-  const rect = getWoohaa3CanvasNodeRect(source as never, new Map(input.nodes.map((entry) => [entry.id, entry])) as never);
+  if (!source.position) return null;
+  const rect = { x: source.position.x, y: source.position.y, width: Number(source.width ?? DEFAULT_NODE_DIMS.width) };
   const nodeId = createWoohaa3CanvasNodeId(input.nextType);
   const label = connectLabelFor(source.type, input.nextType);
   return {

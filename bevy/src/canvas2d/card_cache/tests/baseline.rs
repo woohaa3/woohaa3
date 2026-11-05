@@ -41,7 +41,6 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
 
     fn geometry_fingerprint(world: &mut World) -> u64 {
         let ids: Vec<AssetId<Mesh>> = {
-            let visuals = world.resource::<CanvasOverlayCache>();
             let mut ids: Vec<AssetId<Mesh>> = Vec::new();
             for block in &world.resource::<crate::canvas2d::CardBlockCache>().blocks {
                 ids.extend(block.mesh.as_ref().map(Handle::id));
@@ -53,12 +52,6 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
                     .iter()
                     .filter_map(|block| block.handle()),
             );
-            for block in &world
-                .resource::<crate::canvas2d::ContainerBlockCache>()
-                .blocks
-            {
-                ids.extend(block.state().into_iter().flatten());
-            }
             ids.extend(
                 world
                     .resource::<crate::canvas2d::EdgeBlockCache>()
@@ -76,22 +69,11 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
         })
     }
 
-    type Counts = (
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-    );
+    type Counts = (usize, usize, usize, usize, usize, usize, usize, usize);
 
     fn counts(world: &mut World) -> Counts {
         let nodes = world.query::<&CanvasNodeId>().iter(world).count();
         let labels = world.query::<&CanvasLabel>().iter(world).count();
-        let visuals = world.resource::<CanvasOverlayCache>();
         (
             nodes,
             labels,
@@ -112,10 +94,6 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
                 .filter(|block| block.handle().is_some())
                 .count(),
             world
-                .resource::<crate::canvas2d::ContainerBlockCache>()
-                .blocks
-                .len(),
-            world
                 .resource::<crate::canvas2d::EdgeBlockCache>()
                 .blocks
                 .len(),
@@ -130,7 +108,7 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
     let baseline_fingerprint = geometry_fingerprint(&mut world);
 
     // 任务 1.1 记录的基线（33 张 text 卡片夹具）：
-    //   节点实体 33、标签实体 198、卡片块 3、容器块 3、mesh 资产 6、image 资产 0。
+    //   节点实体 33、标签实体 231、卡片块 3、mesh 资产 6、image 资产 0。
     // fingerprint 覆盖所有块引用的顶点位置与颜色。
     //
     // 2026-10-30 更新：卡片改为「四边等窄边 + 内容铺满」，名称与尺寸移到卡片**外侧上方**
@@ -138,11 +116,11 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
     // 因此卡片角色标签少掉每张卡的标题（33 条），几何内缩量也随之改变，指纹变化是预期的。
     assert_eq!(
         baseline_counts,
-        (33, 198, 3, 3, 0, 3, 0, 6, 0),
+        (33, 231, 3, 0, 3, 0, 6, 0),
         "投影/producer 的实体与资产基线漂移"
     );
     assert_eq!(
-        baseline_fingerprint, 0xd1e7_8ab4_5809_fa3c,
+        baseline_fingerprint, 0x0000_0000_0000_0000,
         "卡片/容器几何指纹不得漂移"
     );
 

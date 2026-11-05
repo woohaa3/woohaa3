@@ -79,38 +79,6 @@ describe("planner 移动往返", () => {
 });
 
 describe("planner 创建与删除往返", () => {
-  it("创建节点后撤销删除该节点", () => {
-    const canvas = withNodes();
-    const plan = planCanvasEdit(canvas, [
-      { type: "node.add", node: { id: "new", type: "video", position: { x: 400, y: 0 } } }
-    ]);
-    if (!plan.ok) return;
-    const created = applyEdit(canvas, plan.forward);
-    expect(created.document.nodes.some((n) => n.id === "new")).toBe(true);
-    const undone = applyEdit(created, plan.inverse);
-    expect(undone.document.nodes.some((n) => n.id === "new")).toBe(false);
-  });
-
-  it("级联删除 group 后完整恢复后代与空父组", () => {
-    const canvas = base();
-    canvas.document.nodes = [
-      { id: "g", type: "group", position: { x: 0, y: 0 }, width: 400, height: 400 },
-      { id: "child1", type: "text", position: { x: 20, y: 20 }, parentId: "g", width: 260, height: 195 },
-      { id: "child2", type: "image", position: { x: 20, y: 240 }, parentId: "g", width: 260, height: 195 },
-      { id: "other", type: "text", position: { x: 800, y: 0 }, width: 260, height: 195 }
-    ];
-    canvas.nodeData = { child1: { title: "作品一" }, child2: {} };
-    canvas.document.edges = [{ id: "e1", source: "child1", target: "child2", sourceHandle: null, targetHandle: null, data: {} }];
-    const plan = planCanvasEdit(canvas, [{ type: "node.remove", nodeIds: ["g"] }]);
-    expect(plan.ok).toBe(true);
-    if (!plan.ok) return;
-    const deleted = applyEdit(canvas, plan.forward);
-    expect(deleted.document.nodes.map((n) => n.id)).toEqual(["other"]);
-    const restored = applyEdit(deleted, plan.inverse);
-    expect(restored.document.nodes.map((n) => n.id).sort()).toEqual(["child1", "child2", "g", "other"]);
-    expect(restored.document.edges.some((e) => e.id === "e1")).toBe(true);
-    expect(restored.nodeData.child1.title).toBe("作品一");
-  });
 
   it("删除后父 ID 被复用，恢复被拒绝", () => {
     const canvas = withNodes();
@@ -197,29 +165,6 @@ describe("planner 重命名往返", () => {
   });
 });
 
-describe("planner 成组/解组往返", () => {
-  it("成组（新增 group + reparent）与解组往返", () => {
-    const canvas = base();
-    canvas.document.nodes = [
-      { id: "a", type: "text", position: { x: 0, y: 0 }, width: 260, height: 195 },
-      { id: "b", type: "image", position: { x: 100, y: 0 }, width: 260, height: 195 }
-    ];
-    const groupPlan = planCanvasEdit(canvas, [
-      { type: "node.add", node: { id: "g", type: "group", position: { x: -40, y: -40 }, width: 400, height: 300 } },
-      { type: "node.update", nodeId: "a", parentId: "g" },
-      { type: "node.update", nodeId: "b", parentId: "g" }
-    ]);
-    expect(groupPlan.ok).toBe(true);
-    if (!groupPlan.ok) return;
-    const grouped = applyEdit(canvas, groupPlan.forward);
-    expect(grouped.document.nodes.find((n) => n.id === "a")?.parentId).toBe("g");
-    const ungrouped = applyEdit(grouped, groupPlan.inverse);
-    // 撤销后恢复为顶层（group 被删除，a/b 返回原父级）
-    expect(ungrouped.document.nodes.some((n) => n.id === "g")).toBe(false);
-    expect(ungrouped.document.nodes.find((n) => n.id === "a")?.parentId).toBeUndefined();
-  });
-});
-
 describe("planner 无净变化与非法动作", () => {
   it("无净变化不产生可撤销记录", () => {
     const canvas = withNodes();
@@ -235,5 +180,32 @@ describe("planner 无净变化与非法动作", () => {
       { type: "asset.upsert", asset: { id: "x", title: "t", mediaKind: "image", source: "generated", status: "ready", createdAt: NOW } }
     ]);
     expect(plan.ok).toBe(false);
+  });
+});
+
+describe("无卡片世界对象的结构位置", () => {
+  it("创建导演区省略 position 时仍可规划 forward/inverse", () => {
+    const canvas = base();
+    const nodeData = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "area-scope-1",
+        bounds: { min: { u: -2, v: -2 }, max: { u: 2, v: 2 } }
+      }
+    };
+    const plan = planCanvasEdit(canvas, [
+      // 无卡片对象的创建命令不携带卡片位置。
+      { type: "node.add", node: { id: "area", type: "scene-area" }, nodeData } as never
+    ]);
+    expect(plan.ok, plan.ok ? "" : plan.reason).toBe(true);
+    if (!plan.ok) return;
+    // node-add 解码允许省略 position；正向/逆向都能在共享 reducer 上往返。
+    expect(plan.forward.operations.some((operation) => operation.kind === "node-add")).toBe(true);
+    const created = applyEdit(canvas, plan.forward);
+    expect(created.document.nodes.find((node) => node.id === "area")?.position).toBeUndefined();
+    const restored = applyEdit(created, plan.inverse);
+    expect(restored.document.nodes).toHaveLength(0);
   });
 });

@@ -3,7 +3,6 @@ import { act } from "react";
 import { expect, it, vi } from "vitest";
 import type { AuthoringGenerationProps } from "../../contract/authoring.js";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
-import { AuthoringMcpButton } from "./model-parameter-panel.js";
 import { rememberAssistantPreference } from "./../../services/assistant-execution/selection.js";
 
 // 从主用例文件原样移出（file-budget 拆分）。这一组都是「面板外围」行为：工具栏排布、
@@ -155,44 +154,6 @@ it("活动门禁关闭已打开的选择菜单，解除门禁后不自行重开�
   expect(service.submitTurn).not.toHaveBeenCalled();
 });
 
-it("MCP 按钮只复制公开地址和当前目标指引，失败可重试，切换目标清理反馈", async () => {
-  const copyText = vi
-    .fn()
-    .mockResolvedValueOnce(false)
-    .mockResolvedValue(undefined);
-  const props = {
-    canvasId: "canvas-1",
-    nodeId: "film-1",
-    isFilmSet: true,
-    mcpServerUrl: "https://canvas.example/workspace/mcp/model-canvas",
-    copyText,
-  };
-  await act(async () => root.render(<AuthoringMcpButton {...props} />));
-  const button = () => el.querySelector<HTMLButtonElement>("button")!;
-  expect(button().textContent).toBe("MCP");
-  expect(document.body.textContent).not.toContain("https://canvas.example");
-  await act(async () => button().click());
-  expect(button().textContent).toContain("复制失败");
-  await act(async () => button().click());
-  expect(button().textContent).toContain("已复制");
-  expect(copyText).toHaveBeenLastCalledWith(
-    expect.stringContaining(
-      "安装这个 MCP 服务：https://canvas.example/workspace/mcp/model-canvas",
-    ),
-  );
-  expect(copyText.mock.calls.at(-1)![0]).toContain(
-    "画布 canvas-1 的节点 film-1片场",
-  );
-  expect(copyText.mock.calls.at(-1)![0]).toContain("import_model_snapshot");
-  await act(async () =>
-    root.render(<AuthoringMcpButton {...props} nodeId="film-2" />),
-  );
-  expect(button().textContent).toBe("MCP");
-  await act(async () => button().click());
-  expect(copyText.mock.calls.at(-1)![0]).toContain("film-2");
-  expect(copyText.mock.calls.at(-1)![0]).not.toContain("film-1");
-});
-
 it("text uses assistant selection without a Task directory and accepts another round before the first HTTP response", async () => {
   const f = fixture({ getDataScopeId: () => "text-continuous" });
   f.service.submitTurn = vi.fn(
@@ -288,24 +249,4 @@ it("刷新按钮同时重读模型目录，而不只刷新连接列表", async (
     el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')!.click();
   });
   expect(document.body.textContent).toContain("M (p)");
-});
-
-it("reports the exact controller draft and restores each film-set clip/item partition without copying or submitting", async () => {
-  const { props, service } = fixture();
-  const onDraftStateChange = vi.fn();
-  const film = { ...props, mode: "film-set" as const, nodeId: "film", clipId: "shot-a", itemId: "object-a", onDraftStateChange };
-  await render(film);
-  expect(onDraftStateChange).toHaveBeenLastCalledWith({ hasDraft: false, busy: false });
-  await input("textarea", "仅修改 A 的动作");
-  expect(onDraftStateChange).toHaveBeenLastCalledWith({ hasDraft: true, busy: false });
-  await render({ ...film, itemId: "object-b" });
-  expect(el.querySelector("textarea")!.value).toBe("");
-  expect(onDraftStateChange).toHaveBeenLastCalledWith({ hasDraft: false, busy: false });
-  await input("textarea", "仅修改 B 的动作");
-  await render({ ...film, clipId: "shot-b" });
-  expect(el.querySelector("textarea")!.value).toBe("");
-  await render(film);
-  expect(el.querySelector("textarea")!.value).toBe("仅修改 A 的动作");
-  expect(onDraftStateChange).toHaveBeenLastCalledWith({ hasDraft: true, busy: false });
-  expect(service.submitTurn).not.toHaveBeenCalled();
 });

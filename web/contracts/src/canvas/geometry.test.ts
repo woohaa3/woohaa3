@@ -8,15 +8,10 @@ import {
   computeDistribution,
   computeLocateViewport,
   effectiveNodeSize,
-  nodeWorldRect,
   unionRects,
   type AlignableNode
 } from "./geometry.js";
-import type { Woohaa3CanvasSerializedNode } from "./domain/core/document-schema.js";
 
-function node(partial: Partial<Woohaa3CanvasSerializedNode> & { id: string; position: { x: number; y: number } }): Woohaa3CanvasSerializedNode {
-  return { type: "text", ...partial } as Woohaa3CanvasSerializedNode;
-}
 
 describe("effectiveNodeSize", () => {
   it("普通类型使用参考尺寸，显式尺寸优先", () => {
@@ -34,21 +29,6 @@ describe("effectiveNodeSize", () => {
 
   it("显式尺寸低于共享下限时收敛到下限", () => {
     expect(effectiveNodeSize({ type: "text", width: 50, height: 50 })).toEqual({ width: 180, height: 64 });
-  });
-
-  it("group 使用文档尺寸", () => {
-    expect(effectiveNodeSize({ type: "group", width: 400, height: 300 })).toEqual({ width: 400, height: 300 });
-  });
-});
-
-describe("nodeWorldRect", () => {
-  it("解析 group 内节点的世界坐标", () => {
-    const nodes = [
-      node({ id: "g", type: "group", position: { x: 100, y: 100 }, width: 400, height: 400 }),
-      node({ id: "child", type: "text", position: { x: 20, y: 30 }, parentId: "g", width: 200, height: 100 })
-    ];
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    expect(nodeWorldRect(nodes[1]!, byId)).toEqual({ x: 120, y: 130, width: 200, height: 100 });
   });
 });
 

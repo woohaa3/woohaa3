@@ -1,0 +1,94 @@
+import { describe, expect, it, vi } from "vitest";
+import { IMAGE_DIRECTOR_SCENE_VERSION, SHARED_WORLD_VERSION } from "@woohaa3/contracts";
+import { ImageDirectorSceneService } from "./image-director-scene-service.js";
+
+describe("image director orchestration", () => {
+  it("passes frozen image bytes to an untooled candidate and repairs invalid output", async () => {
+    const candidate = { version: IMAGE_DIRECTOR_SCENE_VERSION, models: [{ key: "a", name: "A", script: "scene.box({})", transform: { version: SHARED_WORLD_VERSION, position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } }], camera: { position: { u: 0, v: 1, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 10 } } };
+    const run = vi.fn().mockResolvedValueOnce({ status: "succeeded", assistantText: "{}" }).mockResolvedValueOnce({ status: "succeeded", assistantText: JSON.stringify(candidate) });
+    let stored: any = null;
+    const store = { get: () => stored, insert: (value: unknown) => ({ record: stored = value, reused: false }), save: (value: unknown) => { stored = value; } };
+    let finished: Promise<unknown> | undefined;
+    const conversations = { catalog: async () => ({ ok: true, models: [{ id: "model" }] }), acceptDeliveryTurn: () => ({ ok: true, reused: false, conversation: {}, turn: { turnId: "turn" } }), dispatchDeliveryTurn: (_id: string, execute: (ctx: unknown) => Promise<unknown>) => finished = execute({ signal: new AbortController().signal, history: [], emit: () => {} }) };
+    const canvas = { reserve: async () => ({ nodeId: "area" }), prepare: async () => ({ source: { sourceNodeId: "image", assetId: "asset", contentVersion: "v", checksum: "hash", mimeType: "image/png", width: 4, height: 3 }, bytes: Uint8Array.from([1, 2, 3]) }), validate: async () => ({ ok: true }), plan: async () => ({ delta: { u: 0, v: 0 }, bounds: { min: { u: 0, v: 0 }, max: { u: 1, v: 1 } } }), commit: async () => ({ ok: true, receipt: { operationId: "op" }, revision: 1, duplicate: false }) };
+    const binding = { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 };
+    const connections = { getConnection: async () => ({ ...binding, ready: true, capabilities: { textDelivery: { imageInput: true, maxImages: 1 } }, models: [{ id: "model" }] }) };
+    const registry = { resolve: () => ({ ok: true, handle: { adapter: { run }, capabilities: { candidateGeneration: { imageInput: true, maxImages: 1 } } } }) };
+    const service = new ImageDirectorSceneService({ store, conversations, canvas, connections, registry } as never);
+    const request = { requestId: "request", sourceNodeId: "image", connectionId: "connection", model: "model", variant: null, instructions: "build" };
+    const entry = { action: "discuss", canvasId: "canvas", nodeId: "image", connectionId: "connection", model: "model", prompt: "build" } as const;
+    expect((await service.accept({ owner: "owner", canvasId: "canvas", conversationId: "conversation", request, connection: binding, entry } as never)).ok).toBe(true);
+    await finished;
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[0]![0].candidate.images[0].bytes).toEqual(Buffer.from([1, 2, 3]));
+    expect(run.mock.calls[1]![0].intent.prompt).toContain("Diagnostic");
+    expect(stored.stage).toBe("delivered");
+  });
+  it("reconciles a durable receipt before treating a cancelled save as failed", async () => {
+    let record: any = { owner: "owner", canvasId: "canvas", request: { requestId: "request" }, stage: "failed", placement: { commandId: "command", attemptId: "1", state: "unknown" } };
+    const receipt = { operationId: "op" };
+    const reconcileDeliveryTurn = vi.fn();
+    const service = new ImageDirectorSceneService({ store: { get: () => record, save: (value: unknown) => { record = value; } }, canvas: { lookup: async () => ({ ok: true, receipt, revision: 5 }) }, conversations: { reconcileDeliveryTurn }, connections: {}, registry: {} } as never);
+    expect(await service.reconcile("owner", "canvas", "request")).toMatchObject({ stage: "delivered", receipt, revision: 5 });
+    expect(reconcileDeliveryTurn).toHaveBeenCalledWith(expect.objectContaining({ outcome: { status: "succeeded", receipt } }));
+  });
+  it("stops only the persisted child attempt on recovery and never reruns it", async () => {
+    let record: any = { owner: "owner", canvasId: "canvas", request: { requestId: "request" }, stage: "generating", activeAttemptId: "3", connection: { adapterId: "adapter" }, entry: { action: "discuss", canvasId: "canvas" } };
+    const cancel = vi.fn(async () => {}), run = vi.fn();
+    const service = new ImageDirectorSceneService({ store: { get: () => record, save: (value: unknown) => { record = value; } }, canvas: {}, conversations: { cancelTurn: vi.fn() }, connections: {}, registry: { resolve: () => ({ ok: true, handle: { adapter: { cancel, run } } }) } } as never);
+    expect(await service.reconcile("owner", "canvas", "request")).toMatchObject({ stage: "failed" });
+    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ owner: "owner", requestId: "request:3", candidateContext: expect.objectContaining({ canvasId: "canvas", conversationId: "request:3" }) }));
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("does not replace an unconfirmed command with a new placement", async () => {
+    const record = { owner: "owner", canvasId: "canvas", request: { requestId: "request" }, stage: "failed", candidate: {}, placement: { attemptId: "1", commandId: "original", state: "unknown" } };
+    const plan = vi.fn();
+    const service = new ImageDirectorSceneService({ store: { get: () => record }, canvas: { plan }, conversations: {}, connections: {}, registry: {} } as never);
+    await expect(service.retryPlacement("owner", "canvas", "request")).rejects.toThrow("尚未确认");
+    expect(plan).not.toHaveBeenCalled();
+  });
+  it("retries a confirmed absent save with its original command and plan", async () => {
+    const binding = { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 };
+    const placement = { delta: { u: 1, v: 2 }, bounds: { min: { u: 0, v: 0 }, max: { u: 3, v: 3 } } };
+    let record: any = { owner: "owner", canvasId: "canvas", request: { requestId: "request" }, stage: "failed", candidate: {}, source: {}, connection: binding, entry: { model: "model" }, placement: { attemptId: "1", commandId: "original", plan: placement, state: "not-committed" } };
+    const commit = vi.fn(async () => ({ ok: true, receipt: { operationId: "op" }, revision: 2, duplicate: false }));
+    const plan = vi.fn();
+    const service = new ImageDirectorSceneService({ store: { get: () => record, save: (value: unknown) => { record = value; } }, canvas: { lookup: async () => ({ ok: false, code: "receipt-not-found" }), commit, plan }, conversations: { catalog: async () => ({ ok: true, models: [{ id: "model" }] }), reconcileDeliveryTurn: vi.fn() }, connections: { getConnection: async () => ({ ...binding, ready: true, models: [{ id: "model" }], capabilities: { textDelivery: { imageInput: true, maxImages: 1 } } }) }, registry: { resolve: () => ({ ok: true, handle: { adapter: {}, capabilities: { candidateGeneration: { imageInput: true, maxImages: 1 } } } }) } } as never);
+    expect(await service.retrySave("owner", "canvas", "request")).toMatchObject({ stage: "delivered" });
+    expect(commit).toHaveBeenCalledWith(expect.objectContaining({ commandId: "original", ...placement }));
+    expect(plan).not.toHaveBeenCalled();
+  });
+  it("uses a new command for an explicitly rejected placement without calling the assistant", async () => {
+    const binding = { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 };
+    const candidate = { version: "candidate" };
+    let record: any = { owner: "owner", canvasId: "canvas", request: { requestId: "request" }, stage: "failed", candidate, source: {}, connection: binding, entry: { model: "model" }, placement: { attemptId: "1", commandId: "original", plan: {}, state: "rejected" } };
+    const plan = vi.fn(async () => ({ delta: { u: 10, v: 0 }, bounds: { min: { u: 10, v: 0 }, max: { u: 12, v: 2 } } }));
+    const commit = vi.fn(async (_input: { commandId: string }) => ({ ok: true, receipt: { operationId: "op" }, revision: 3, duplicate: false }));
+    const run = vi.fn();
+    const service = new ImageDirectorSceneService({ store: { get: () => record, save: (value: unknown) => { record = value; } }, canvas: { lookup: async () => ({ ok: false, code: "receipt-not-found" }), commit, plan }, conversations: { catalog: async () => ({ ok: true, models: [{ id: "model" }] }), reconcileDeliveryTurn: vi.fn() }, connections: { getConnection: async () => ({ ...binding, ready: true, models: [{ id: "model" }], capabilities: { textDelivery: { imageInput: true, maxImages: 1 } } }) }, registry: { resolve: () => ({ ok: true, handle: { adapter: { run }, capabilities: { candidateGeneration: { imageInput: true, maxImages: 1 } } } }) } } as never);
+    expect(await service.retryPlacement("owner", "canvas", "request")).toMatchObject({ stage: "delivered" });
+    expect(commit.mock.calls[0]![0]).toMatchObject({ candidate, delta: { u: 10, v: 0 } });
+    expect(commit.mock.calls[0]![0].commandId).not.toBe("original");
+    expect(record.placementHistory).toMatchObject([{ commandId: "original", state: "rejected" }]);
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("isolates simultaneous requests when one is cancelled", async () => {
+    const records = new Map<string, any>(), controllers = new Map<string, AbortController>(), completions = new Map<string, Promise<unknown>>();
+    const store = { get: (_owner: string, _canvas: string, id: string) => records.get(id) ?? null, insert: (value: any) => { records.set(value.request.requestId, value); return { record: value, reused: false }; }, save: (value: any) => { records.set(value.request.requestId, value); } };
+    const candidate = { version: IMAGE_DIRECTOR_SCENE_VERSION, models: [{ key: "a", name: "A", script: "scene.box({})", transform: { version: SHARED_WORLD_VERSION, position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } }], camera: { position: { u: 0, v: 1, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 10 } } };
+    const run = vi.fn((input: any) => input.requestId.startsWith("first:") ? new Promise(resolve => input.signal.addEventListener("abort", () => resolve({ status: "cancelled" }), { once: true })) : Promise.resolve({ status: "succeeded", assistantText: JSON.stringify(candidate) }));
+    const conversations = { catalog: async () => ({ ok: true, models: [{ id: "model" }] }), acceptDeliveryTurn: (input: any) => ({ ok: true, reused: false, conversation: {}, turn: { turnId: input.requestId } }), dispatchDeliveryTurn: (id: string, execute: (ctx: any) => Promise<unknown>) => { const controller = new AbortController(); controllers.set(id, controller); const done = execute({ signal: controller.signal, history: [], emit: () => {} }); completions.set(id, done); return done; } };
+    const canvas = { reserve: async ({ operationId }: any) => ({ nodeId: operationId }), settleReservation: async () => {}, prepare: async ({ sourceNodeId }: any) => ({ source: { sourceNodeId, assetId: sourceNodeId, contentVersion: "v", checksum: "hash", mimeType: "image/png", width: 4, height: 3 }, bytes: Uint8Array.from([1]) }), validate: async () => ({ ok: true }), plan: async () => ({ delta: { u: 0, v: 0 }, bounds: { min: { u: 0, v: 0 }, max: { u: 1, v: 1 } } }), commit: async () => ({ ok: true, receipt: { operationId: "op" }, revision: 1, duplicate: false }), lookup: async () => ({ ok: false, code: "receipt-not-found" }) };
+    const binding = { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 };
+    const service = new ImageDirectorSceneService({ store, conversations, canvas, connections: { getConnection: async () => ({ ...binding, ready: true, capabilities: { textDelivery: { imageInput: true, maxImages: 1 } }, models: [{ id: "model" }] }) }, registry: { resolve: () => ({ ok: true, handle: { adapter: { run }, capabilities: { candidateGeneration: { imageInput: true, maxImages: 1 } } } }) } } as never);
+    const input = (id: string) => ({ owner: "owner", canvasId: "canvas", conversationId: `conversation-${id}`, connection: binding, request: { requestId: id, sourceNodeId: id, connectionId: "connection", model: "model", variant: null, instructions: "build" }, entry: { action: "discuss" as const, canvasId: "canvas", nodeId: id, connectionId: "connection", model: "model", prompt: "build" } });
+    expect((await service.accept(input("first"))).ok).toBe(true);
+    expect((await service.accept(input("second"))).ok).toBe(true);
+    while (!run.mock.calls.some(call => call[0].requestId.startsWith("first:"))) await Promise.resolve();
+    controllers.get("first")!.abort();
+    await Promise.all(completions.values());
+    expect(records.get("first").stage).toBe("cancelled");
+    expect(records.get("second").stage).toBe("delivered");
+    expect(records.get("first").receipt).toBeUndefined();
+  });
+});

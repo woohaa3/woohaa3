@@ -132,3 +132,18 @@ it("candidate run uses native images and no history binding/grant, rejects a sta
   f.run.mockImplementation(async () => { f.record.configRevision++; return { ok: true, assistantText: "late", toolCalls: [], finishReason: "stop" }; });
   expect(await f.create().run(f.input({ candidate }))).toMatchObject({ status: "failed", error: { code: "version-conflict" } });
 });
+
+it("cancels the matching candidate and reports an unknown execution after restart", async () => {
+  const f = fixture();
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  f.run.mockImplementation(input => new Promise(resolve => { started(); input.signal.addEventListener("abort", () => resolve({ ok: false, code: "cancelled", message: "stopped" }), { once: true }); }));
+  const adapter = f.create();
+  const input = f.input({ candidate: { images: [{ bytes: new Uint8Array([1]), contentType: "image/png" }], outputSchema: {} } });
+  const running = adapter.run(input);
+  await ready;
+  const cancel = { owner: input.owner, requestId: input.requestId, candidateContext: { canvasId: input.canvasId, conversationId: input.conversationId, connection: input.connection!, intent: input.intent } };
+  await adapter.cancel!(cancel);
+  expect((await running).status).not.toBe("succeeded");
+  await expect(f.create().cancel!(cancel)).rejects.toThrow("无法确认");
+});

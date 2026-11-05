@@ -20,6 +20,8 @@ import type { AggregateConnectDirection, DragAttachMode } from "./node-geometry.
 export type BevyNodeHover = {
   /** 指针下的节点 id（命中节点、关闭按钮、历史动作、端点或 resize 抓手均算悬停）。 */
   nodeId: string;
+  /** Pointer world position for bounded magnetic port feedback. */
+  cursor?: { x: number; y: number };
   /** 指针落在某侧端点命中区时的端点侧；否则缺省/`null`。 */
   port?: "input" | "output" | null;
 };
@@ -33,6 +35,8 @@ export type BevyNodeHover = {
 export type BevyEdgeHover = {
   /** 指针下的连线 id。 */
   edgeId: string;
+  /** Pointer world position; the delete control follows the selected curve. */
+  cursor?: { x: number; y: number };
 };
 
 /** 指针悬停态：节点或连线；`null` 表示无悬停。 */
@@ -340,7 +344,6 @@ export type BevyAnimationPlayback = {
    * design D4）。按片场统一播放头 T 在 Rust 侧映射对象局部时间后求值；目标 id 为组合作用域
    * 编码（`itemId:partId`），对象根 group 以空 partId 表示。缺省即无对象动作。
    */
-  objects?: BevyFilmSetObjectMotion[];
 };
 
 /**
@@ -350,14 +353,6 @@ export type BevyAnimationPlayback = {
  * （目标为对象内作者语义 partId，空串/`root` 即对象根）；`partIds` 为作者语义 partId → 组合
  * 作用域编码 id，供 Rust 直接定位实体。对象基础局部变换已烘焙进组合 group，不在此重复。
  */
-export type BevyFilmSetObjectMotion = {
-  itemId: string;
-  playback: { startTime: number; duration: number; timeScale: number; loop: boolean };
-  /** 已校验的对象动作轨道（目标为对象内 partId）。 */
-  modelMotion: MotionIr["modelMotion"];
-  /** 作者语义 partId → 组合作用域编码 id。 */
-  partIds: Record<string, string>;
-};
 
 /** 序列化给 Rust 的 theme 形状（与 `AppThemeSnapshot` 同构，显式声明以防漂移）。 */
 export type CanvasRenderSceneTheme = AppThemeSnapshot;

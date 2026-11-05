@@ -8,8 +8,6 @@
 import type { ModelCamera } from "../model-cameras.js";
 import type { RunInputSnapshot } from "../domain/types.js";
 import type { ImageEditDocument, ImageEditProjectObjectRef } from "../image-edit.js";
-import type { FilmSetContent } from "../film-set-content.js";
-import type { InitialShotCamera } from "../canvas-node-model.js";
 
 /** 历史条目契约版本；结构变化必须升版本。 */
 export const NODE_GENERATION_HISTORY_VERSION = "woohaa-node-generation-history-v1" as const;
@@ -112,52 +110,6 @@ export type NodeHistoryModelPayload = {
   sourceHash: string;
   placement?: NodeHistoryModelPlacement;
   modelCameras?: ModelCamera[];
-  animation?: NodeHistoryAnimationPayload;
-};
-
-/** 动画版本 payload：运动、初始镜头、时间线与适配关联。 */
-export type NodeHistoryAnimationPayload = LegacyNodeHistoryAnimationPayload | FilmSetHistoryAnimationPayload | FilmSetGroupHistoryPayload;
-/**
- * 片场历史动画 payload（items-only，change 2026-10-11-extract-film-set-extension D7/D8/D10）。
- *
- * 保存独立根 + 共享 items + 全部 clips/defaultClipId（含 binding 动作/适配/播放与片段独立镜头），
- * **不另存顶层模型**。schema 2 的旧片场 payload 只允许由隔离离线 reader 转换，在线读取直接拒绝。
- */
-export type FilmSetGroupHistoryPayload = {
-  schemaVersion: 4;
-  filmSetGroup: import("../film-set-group.js").FilmSetGroupMarker;
-  origin?: never;
-};
-export type FilmSetHistoryAnimationPayload = {
-  /** payload 布局版本（items-only）：与内部 `filmSetContent.schemaVersion` 无关。 */
-  schemaVersion: 3;
-  /** D7 独立片场根（整体摆放）。 */
-  scenePlacement: import("../film-set-content.js").FilmSetLocalTransform;
-  /** D10 规范静态镜头（无 clips 或删空片段时的持久化构图）。 */
-  sceneCamera: InitialShotCamera;
-  filmSetContent: FilmSetContent;
-  filmSetAnimations: import("../film-set-animations.js").FilmSetAnimations;
-  origin?: LegacyNodeHistoryAnimationPayload["origin"];
-};
-export type LegacyNodeHistoryAnimationPayload = {
-  schemaVersion?: 1;
-  modelContentVersion: { revision: number; sourceHash: string; contentHash: string };
-  motionScript: string;
-  motionScriptVersion: string;
-  motionRevision: number;
-  motionSourceHash: string;
-  motionBasedOnModelVersion: { revision: number; contentHash: string };
-  initialCamera: {
-    azimuth: number;
-    elevation: number;
-    distance: number;
-    aspect: string;
-    focusOffset: { x: number; y: number; z: number };
-  };
-  timeline: { duration: number; loop: boolean };
-  filmSetContent?: FilmSetContent;
-  /** 可选来源说明（不用于加载或运行）。 */
-  origin?: { sourceNodeId?: string; sourceCanvasId?: string; importedModelContentHash: string; importedAt: string };
 };
 
 export type NodeHistoryContentPayload = NodeHistoryTextPayload | NodeHistoryMediaPayload | NodeHistoryModelPayload;
@@ -230,7 +182,7 @@ export type NodeHistorySourceSummary = {
  * 受控预览引用。
  *
  * 图片/视频/音频只给**条目作用域**的受控 href；文本给安全截断摘要；模型给**条目身份**
- * 与可选缩略图 href——模型缩略图由页面内同一 Bevy 运行时按权威脚本一次性离屏渲染
+ * ——模型缩略图由页面内同一 Bevy 运行时按权威脚本一次性离屏渲染
  * （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
  */
 export type NodeHistoryPreview =
@@ -238,7 +190,7 @@ export type NodeHistoryPreview =
   | { kind: "image"; href: string }
   | { kind: "video"; href: string; posterHref: string | null; durationSeconds: number | null }
   | { kind: "audio"; href: string; durationSeconds: number | null }
-  | { kind: "model"; thumbnailHref: string | null; entry: NodeHistoryPreviewEntry }
+  | { kind: "model"; entry: NodeHistoryPreviewEntry }
   | { kind: "failure"; outcome: Exclude<NodeHistoryOutcome, "succeeded">; message: string };
 
 /** 模型预览的条目身份：渲染器按它读取权威脚本并缓存结果。 */
@@ -319,8 +271,7 @@ export type NodeGenerationHistoryDetail =
       sourceHash: string;
       placement?: NodeHistoryModelPlacement;
       modelCameras?: ModelCamera[];
-      animation?: NodeHistoryAnimationPayload;
-    }
+        }
   | {
       entryId: string;
       kind: "failure";

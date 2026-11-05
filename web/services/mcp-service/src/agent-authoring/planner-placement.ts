@@ -79,7 +79,7 @@ export function resolveAnchor(
   declaredRefs: Map<string, DeclaredEntity>,
   snapshot: IndexedSnapshot,
   operationIndex: number
-): { ok: true; node: Pick<Woohaa3CanvasSerializedNode, "id" | "type" | "position" | "width" | "height"> } | { ok: false; error: AgentCanvasError } {
+): { ok: true; node: Pick<Woohaa3CanvasSerializedNode, "id" | "type" | "position" | "width" | "height"> & { position: { x: number; y: number } } } | { ok: false; error: AgentCanvasError } {
   if ("ref" in ref) {
     const declared = declaredRefs.get(ref.ref);
     if (!declared || declared.kind !== "node") {
@@ -87,14 +87,14 @@ export function resolveAnchor(
     }
     const node = snapshot.nodeById.get(declared.nodeId);
     // 同计划新建节点不在 snapshot 中：用声明时的占位位置（已由 plannedRects 处理避让）。
-    if (node) return { ok: true, node };
+    if (node?.position) return { ok: true, node: node as typeof node & { position: { x: number; y: number } } };
     return { ok: false, error: { code: "unsupported-placement", message: `暂不支持相对同计划新建节点 ${ref.ref} 布局`, retryable: false, operationIndex, field: "placement.anchor" } };
   }
   const node = snapshot.nodeById.get(ref.nodeId);
-  if (!node) {
-    return { ok: false, error: { code: "unknown-node", message: `锚点节点 ${ref.nodeId} 不存在`, retryable: false, operationIndex, field: "placement.anchor" } };
+  if (!node?.position) {
+    return { ok: false, error: { code: "unknown-node", message: `锚点节点 ${ref.nodeId} 不存在或没有卡片位置`, retryable: false, operationIndex, field: "placement.anchor" } };
   }
-  return { ok: true, node };
+  return { ok: true, node: node as typeof node & { position: { x: number; y: number } } };
 }
 
 function graphBounds(
@@ -104,6 +104,7 @@ function graphBounds(
   let minY = 0;
   let maxX = 0;
   for (const node of nodes) {
+    if (!node.position) continue;
     const size = sizeOf(node, { width: 196, height: 64 });
     minY = Math.min(minY, node.position.y);
     maxX = Math.max(maxX, node.position.x + size.width);
@@ -124,7 +125,7 @@ function avoidOverlap(
   gap: number
 ): { x: number; y: number } {
   const occupied: Rect[] = [
-    ...snapshot.nodes.map((node) => rectOf(node.position, sizeOf(node, { width: 196, height: 64 }))),
+    ...snapshot.nodes.filter(node => node.position).map((node) => rectOf(node.position!, sizeOf(node, { width: 196, height: 64 }))),
     ...planned
   ];
   const step = size.height + Math.max(gap, 20);

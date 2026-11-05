@@ -12,7 +12,6 @@
  *   `started` 按 runId 插入/刷新乐观项，`updated`/`finished` 按 taskKey（缺失时 runId）
  *   幂等 upsert 权威记录；
  * - `extension.activity.updated` 的 `applyJob`（扩展后台活动，按活动 id 幂等）；
- * - 宿主 `canvasGroupRuns` 轮询的 `replaceGroupRuns`（整表替换）；
  * - 用户显式动作（关闭、清除、从组节点重开）。
  *
  * 事件**不是**严格状态机：`updated`/`finished` 可在没有 `started` 时先到达（刷新、跨标签页、
@@ -24,7 +23,7 @@
  * 寿命规则只有一条（change: 2026-10-22-unify-task-activity-rows，design D2）：任何来源的记录
  * 首次观察到终态后停留 `ACTIVITY_TERMINAL_LINGER_MS`，随后标记退出、`ACTIVITY_EXIT_DURATION_MS`
  * 后移除。判定只看 `ActivityRow.active`，不再有 `task:` / `job:` 前缀分支。移除后的「不复活」
- * 分工见 `rows.ts`：任务/后台活动写 `expired`，组记录写 `dismissedGroups`。
+ * 分工见 `rows.ts`：任务/后台活动写 `expired`，Skill 步骤写 `dismissedSkills`。
  *
  * dispose 后任何迟到输入都不得再改变状态（scope identity 保护）。React 只订阅 store
  * snapshot（design D7），不从事件回调直接渲染。
@@ -42,8 +41,7 @@ import type {
   TaskActivityUpdated
 } from "@woohaa3/contracts";
 import { isLocalRejection } from "@woohaa3/contracts";
-import type { CanvasGroupRun, CanvasGroupRunsSnapshot, TaskActivityRow } from "@woohaa3/frontend/extension-api";
-import { adaptGroupRow } from "./adapt-group-row.js";
+import type { TaskActivityRow } from "@woohaa3/frontend/extension-api";
 import { adaptJobRow, isActiveBackgroundJob } from "./adapt-job-row.js";
 import { adaptSkillRow, skillRowKey, skillStepActive } from "./adapt-skill-row.js";
 import { adaptTaskRow } from "./adapt-task-row.js";
@@ -74,15 +72,8 @@ export const ACTIVITY_TERMINAL_LINGER_MS = 10_000;
 export type ActivityFeedSnapshot = {
   /** 唯一记录列表：全部来源按开始时间从新到旧交错。 */
   rows: readonly ActivityRow[];
-  /**
-   * 组创作读模型的可见子集（等价于 `rows` 里的 group 记录）。
-   * 过渡字段，仅为兼容既有读法保留。
-   */
-  groups: readonly CanvasGroupRun[];
   /** Skill 媒体步骤读模型（等价于 `rows` 里的 skill 记录；任务 5.2）。 */
   skills: readonly SkillMediaStepView[];
-  groupError: string;
-  selectedGroupId: string | null;
   openRevision: number;
   /** 过渡字段：由 `rows` 中的 task 记录派生。 */
   items: ActivityFeedItem[];
@@ -107,13 +98,9 @@ export type ActivityStoreOptions = {
 const MAX_BACKGROUND_JOBS = 32;
 
 export class TaskActivityStore {
-  private groupRuns: readonly CanvasGroupRun[] = [];
-  private groupError = "";
-  private readonly dismissedGroups = new Set<string>();
   /** Skill 步骤来源是宿主轮询快照，与组记录一样用 dismiss 集合实现「移除后不复活」。 */
   private skillSteps: readonly SkillMediaStepView[] = [];
   private readonly dismissedSkills = new Set<string>();
-  private selectedGroupId: string | null = null;
   private openRevision = 0;
   private items: ActivityFeedItem[] = [];
   private readonly jobs = new Map<string, BackgroundFeedJob>();
@@ -127,10 +114,7 @@ export class TaskActivityStore {
     rows: [],
     items: [],
     jobs: [],
-    groups: [],
     skills: [],
-    groupError: "",
-    selectedGroupId: null,
     openRevision: 0,
     exitingKeys: [],
     unread: 0,
@@ -144,7 +128,7 @@ export class TaskActivityStore {
   private readonly acceptedCursorByKey = new Map<string, number>();
   private disposed = false;
   private readonly expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** 已移除、不得因重放复活的记录键（任务 / 后台活动）。组记录用 `dismissedGroups`。 */
+  /** 已移除、不得因重放复活的记录键（任务 / 后台活动）。 */
   private readonly expired = new Set<string>();
   private readonly exiting = new Set<string>();
 
@@ -163,20 +147,6 @@ export class TaskActivityStore {
   }
 
   getSnapshot = (): ActivityFeedSnapshot => this.snapshot;
-
-  replaceGroupRuns(input: CanvasGroupRunsSnapshot): void {
-    if (this.disposed) return;
-    for (const row of input.rows) {
-      const previous = this.groupRuns.find(entry => entry.requestId === row.requestId);
-      // 组记录重新 active（用户重开 / 同组再次执行）视为新活动：清除移除标记并重新计时。
-      if (row.active) this.dismissedGroups.delete(row.requestId);
-      // 与任务一致：首次观察到该组进入终态时记未读，重复终态不重复计数。
-      if (!row.active && (!previous || previous.active)) this.unread++;
-    }
-    this.groupRuns = input.rows;
-    this.groupError = input.error;
-    this.publish();
-  }
 
   /**
    * Skill 步骤：整表替换最近步骤（宿主轮询快照）。
@@ -221,27 +191,6 @@ export class TaskActivityStore {
     const next = [...this.skillSteps];
     next[index] = step;
     this.skillSteps = next;
-    this.publish();
-  }
-
-  /** 组节点入口：重开已移除的组记录并按新的终态观察重新计时。 */
-  openGroup(nodeId: string): void {
-    if (this.disposed) return;
-    const row = this.groupRuns.find(entry => entry.rootGroupId === nodeId);
-    if (row) {
-      const key = `group:${row.requestId}`;
-      this.dismissedGroups.delete(row.requestId);
-      // 重开是用户显式动作：撤销可能仍在进行的退出计时，让记录按新的终态观察重新计时。
-      this.exiting.delete(key);
-      const timer = this.expiryTimers.get(key);
-      if (timer) {
-        clearTimeout(timer);
-        this.expiryTimers.delete(key);
-      }
-    }
-    this.selectedGroupId = nodeId;
-    this.openRevision++;
-    this.unread = 0;
     this.publish();
   }
 
@@ -364,7 +313,7 @@ export class TaskActivityStore {
    * 旧签名接收 taskKey，而记录键是 `task:<runId>`，因此先按 taskKey/runId 解析出 runId。
    */
   dismiss(key: string): void {
-    if (key.startsWith("task:") || key.startsWith("job:") || key.startsWith("group:") || key.startsWith("skill:")) {
+    if (key.startsWith("task:") || key.startsWith("job:") || key.startsWith("skill:")) {
       this.dismissRow(key);
       return;
     }
@@ -396,11 +345,6 @@ export class TaskActivityStore {
   /** @deprecated 使用 `dismissRow(job:<id>)`；保留薄委托以缩小调用面改动。 */
   dismissJob(id: string): void {
     this.dismissRow(id.startsWith("job:") ? id : `job:${id}`);
-  }
-
-  /** @deprecated 使用 `dismissRow(group:<requestId>)`；保留薄委托以缩小调用面改动。 */
-  dismissGroup(id: string): void {
-    this.dismissRow(id.startsWith("group:") ? id : `group:${id}`);
   }
 
   /** 清除全部终态记录（active 项保留）。三种来源遵循同一规则。 */
@@ -508,12 +452,6 @@ export class TaskActivityStore {
       const job = this.jobs.get(id);
       if (job) rows.push(adaptJobRow(job, this.capabilities));
     }
-    for (const run of this.groupRuns) {
-      if (this.dismissedGroups.has(run.requestId)) continue;
-      rows.push(adaptGroupRow(run, this.capabilities, {
-        selected: this.selectedGroupId === run.rootGroupId
-      }));
-    }
     for (const step of this.skillSteps) {
       if (this.dismissedSkills.has(skillRowKey(step))) continue;
       rows.push(adaptSkillRow(step, this.capabilities));
@@ -532,10 +470,6 @@ export class TaskActivityStore {
       case "job":
         this.expired.add(row.key);
         this.removeJob(row.source.job.id);
-        break;
-      case "group":
-        // 组来源是整表轮询：标记 dismiss，`replaceGroupRuns` 在重新 active 时清除。
-        this.dismissedGroups.add(row.source.run.requestId);
         break;
       case "skill":
         // Skill 来源同样是整表轮询：重新 active 时由 `replaceSkillSteps` 清除标记。
@@ -581,8 +515,8 @@ export class TaskActivityStore {
       this.expiryTimers.set(key, setTimeout(() => {
         if (this.disposed) return;
         // 任务 / 后台活动：退出期间即标记移除，事件重放不得让它复活。组/Skill 记录的来源是
-        // 整表轮询，由 `dismissedGroups` / `dismissedSkills` 承担同一职责（重新 active 时清除）。
-        if (!key.startsWith("group:") && !key.startsWith("skill:")) this.expired.add(key);
+        // 整表轮询，由 `dismissedSkills` 承担同一职责（重新 active 时清除）。
+        if (!key.startsWith("skill:")) this.expired.add(key);
         this.exiting.add(key);
         // 保持记录和面板挂载到动画结束；即使 CSS 动画未执行也能按时清理。
         this.expiryTimers.set(key, setTimeout(() => {
@@ -605,14 +539,10 @@ export class TaskActivityStore {
     this.syncExpiry(rows);
     const items = rows.flatMap((row) => (row.source.kind === "task" ? [row.source.item] : []));
     const jobs = rows.flatMap((row) => (row.source.kind === "job" ? [row.source.job] : []));
-    const groups = rows.flatMap((row) => (row.source.kind === "group" ? [row.source.run] : []));
     const skills = rows.flatMap((row) => (row.source.kind === "skill" ? [row.source.step] : []));
     this.snapshot = {
       rows,
-      groups,
       skills,
-      groupError: this.groupError,
-      selectedGroupId: this.selectedGroupId,
       openRevision: this.openRevision,
       items,
       jobs,

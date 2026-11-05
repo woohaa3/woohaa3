@@ -8,6 +8,9 @@ use bevy::prelude::*;
 
 fn model_node() -> GraphNode {
     GraphNode {
+        chrome: crate::protocol::NodeChrome::Card,
+        shared_world_instance: None,
+        world_camera: None,
         model_preview: None,
         id: "m".into(),
         kind: "model".into(),
@@ -26,12 +29,8 @@ fn model_node() -> GraphNode {
         resizable: false,
         ghost: false,
         card_label: None,
-        group: None,
         model: None,
-        composite_asset: None,
         history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
     }
 }
 
@@ -55,6 +54,91 @@ fn sphere_snapshot(signature: &str) -> ModelSnapshot {
         prepared_bounds: None,
         placement: ModelPlacement::default(),
     }
+}
+
+#[test]
+fn shared_world_roots_survive_relayout_and_resource_recreation() {
+    use super::super::runtime::ModelRootLayout;
+    let mut world = world_with_resources();
+    let mut node = model_node();
+    node.shared_world_instance = Some(serde_json::from_value(serde_json::json!({
+        "kind": "world-instance", "version": "shared-world-v1", "instanceId": "one",
+        "transform": { "version": "shared-world-v1", "position": {"u": 1, "v": 2, "h": 3},
+            "rotation": [0, 0, 0, 1], "scale": 2 }
+    })).unwrap());
+    let snapshot = sphere_snapshot("shared");
+    let reference = reference_for(&snapshot, ModelPlacement::default());
+    let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
+    let root = |world: &World| {
+        let visuals = world.resource::<super::super::runtime::ModelVisuals>();
+        let ModelRootLayout::V2 { root } = visuals.roots["m"].layout;
+        (root, *world.get::<Transform>(root).unwrap())
+    };
+    run_sync(&mut world, &scene_with(&node, Some(reference.clone())), &resources);
+    let (entity, original) = root(&world);
+    assert_eq!(original.translation, Vec3::new(64., 192., -128.));
+    assert_eq!(original.scale, Vec3::splat(128.));
+    node.x = 900.; node.y = -400.;
+    let mut changed = reference.clone();
+    changed.placement.scale = 7.; changed.placement.yaw = 90.;
+    run_sync(&mut world, &scene_with(&node, Some(changed)), &resources);
+    assert_eq!(root(&world), (entity, original));
+    node.shared_world_instance.as_mut().unwrap().transform.position.u = 4.;
+    node.shared_world_instance.as_mut().unwrap().transform.rotation = [0., 0., std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2];
+    run_sync(&mut world, &scene_with(&node, Some(reference.clone())), &resources);
+    assert_eq!(root(&world).1.translation.x, 256.);
+    assert!(root(&world).1.rotation.abs_diff_eq(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), 1e-6));
+    run_sync(&mut world, &scene_with(&node, Some(reference.clone())), &Default::default());
+    assert!(world.resource::<super::super::runtime::ModelVisuals>().roots.is_empty());
+    run_sync(&mut world, &scene_with(&node, Some(reference)), &resources);
+    assert_eq!(root(&world).1.translation.x, 256.);
+    let parent = Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2))
+        .with_scale(Vec3::splat(2.));
+    let child = Transform::from_xyz(1., 0., 0.);
+    let actual = original.to_matrix() * parent.to_matrix() * child.to_matrix();
+    assert!((actual.transform_point3(Vec3::ZERO) - Vec3::new(64., 192., -384.)).length() < 0.01);
+}
+
+#[test]
+fn shared_resource_instances_keep_independent_roots_and_child_hierarchy() {
+    use super::super::runtime::ModelRootLayout;
+    let mut world = world_with_resources();
+    let mut snapshot = sphere_snapshot("hierarchy");
+    snapshot.ops = vec![
+        ModelOp::Group { id: "parent".into(), parent: None, position: [0., 0., 0.],
+            rotation: [0., 90., 0.], scale: [2., 2., 2.] },
+        ModelOp::Sphere { id: "child".into(), parent: Some("parent".into()),
+            position: [1., 0., 0.], rotation: [0.; 3], scale: [1.; 3],
+            color: Some("#ffffff".into()), material: None, radius: 0.3 },
+    ];
+    let reference = reference_for(&snapshot, ModelPlacement::default());
+    let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
+    let mut a = model_node();
+    a.model = Some(reference.clone());
+    a.shared_world_instance = Some(serde_json::from_value(serde_json::json!({
+        "kind":"world-instance", "version":"shared-world-v1", "instanceId":"a",
+        "transform":{"version":"shared-world-v1", "position":{"u":0,"v":0,"h":0},
+            "rotation":[0,0,0,1], "scale":1}
+    })).unwrap());
+    let mut b = a.clone();
+    b.id = "b".into();
+    b.shared_world_instance.as_mut().unwrap().transform.position.u = 3.;
+    let scene = Scene { nodes: vec![a, b], ..Scene::default() };
+    run_sync(&mut world, &scene, &resources);
+    let visuals = world.resource::<super::super::runtime::ModelVisuals>();
+    let first = &visuals.roots["m"];
+    let second = &visuals.roots["b"];
+    let ModelRootLayout::V2 { root: r1 } = first.layout;
+    let ModelRootLayout::V2 { root: r2 } = second.layout;
+    assert_ne!(r1, r2);
+    assert_eq!(world.get::<Transform>(r2).unwrap().translation.x, 192.);
+    let parent = first.part_entities["parent"];
+    let child = first.part_entities["child"];
+    assert_eq!(world.get::<ChildOf>(child).unwrap().parent(), parent);
+    let matrix = world.get::<Transform>(r1).unwrap().to_matrix()
+        * world.get::<Transform>(parent).unwrap().to_matrix()
+        * world.get::<Transform>(child).unwrap().to_matrix();
+    assert!((matrix.transform_point3(Vec3::ZERO) - Vec3::new(0., 0., -128.)).length() < 0.01);
 }
 
 fn table_for(signatures: &[&str]) -> (super::super::runtime::ModelAssets, Vec<ModelReference>) {
@@ -183,6 +267,9 @@ fn focus_hides_non_target_models_without_despawn() {
     let mut world = world_with_resources();
 
     let node = |id: &str| GraphNode {
+        chrome: crate::protocol::NodeChrome::Card,
+        shared_world_instance: None,
+        world_camera: None,
         model_preview: None,
         id: id.to_owned(),
         kind: "model".into(),
@@ -201,12 +288,8 @@ fn focus_hides_non_target_models_without_despawn() {
         resizable: false,
         ghost: false,
         card_label: None,
-        group: None,
         model: None,
-        composite_asset: None,
         history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
     };
     let snapshot = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),

@@ -56,51 +56,6 @@ fn bindings(world: &World) -> Vec<(Entity, bevy::asset::AssetId<Mesh>)> {
         .collect()
 }
 #[test]
-fn camera_and_object_group_keep_every_static_entity_and_handle() {
-    let (mut scene, resources) = fixture();
-    let mut world = world_with_resources();
-    run_sync(&mut world, &scene, &resources);
-    let before = bindings(&world);
-    let entities = world.resource::<ModelVisuals>().roots["film"]
-        .entities
-        .clone();
-    scene.animation_playback = Some(playback(None));
-    for time in [0., 1., 3., 0.] {
-        scene.animation_playback.as_mut().unwrap().time = time;
-        run_sync(&mut world, &scene, &resources);
-        apply(&mut world, &scene);
-        assert_eq!(bindings(&world), before);
-        assert_eq!(
-            world.resource::<ModelVisuals>().roots["film"].entities,
-            entities
-        );
-    }
-    let mut p = playback(None);
-    p.objects = vec![serde_json::from_value(serde_json::json!({"itemId":"actor","playback":{"duration":4},"partIds":{"root":"actor"},"modelMotion":playback(Some("root")).model_motion.iter().map(|_| serde_json::json!({"targetId":"root","motion":{"kind":"rotate","axis":"y","speed":1}})).collect::<Vec<_>>()})).unwrap()];
-    scene.animation_playback = Some(p);
-    run_sync(&mut world, &scene, &resources);
-    apply(&mut world, &scene);
-    assert_eq!(bindings(&world), before);
-    let root = &world.resource::<ModelVisuals>().roots["film"];
-    let actor = root.part_entities["actor"];
-    assert_ne!(
-        world.entity(actor).get::<Transform>().unwrap().rotation,
-        root.part_bases["actor"].rotation
-    );
-    assert_eq!(root.entities, entities);
-    assert!(
-        root.batches
-            .iter()
-            .any(|b| world.entity(b.entity).get::<ChildOf>().unwrap().parent() == actor)
-    );
-    scene.animation_playback = None;
-    apply(&mut world, &scene);
-    assert_eq!(
-        *world.entity(actor).get::<Transform>().unwrap(),
-        world.resource::<ModelVisuals>().roots["film"].part_bases["actor"]
-    );
-}
-#[test]
 fn local_targets_replace_only_their_blocks_and_repeat_without_any_geometry_work() {
     let (mut scene, resources) = fixture();
     let mut world = world_with_resources();
@@ -226,24 +181,6 @@ fn local_targets_replace_only_their_blocks_and_repeat_without_any_geometry_work(
     assert!(world.resource::<Assets<Mesh>>().is_empty());
     assert!(world.resource::<Assets<StandardMaterial>>().is_empty());
 }
-#[test]
-fn object_mapping_cannot_animate_another_objects_unmapped_runtime_id() {
-    let (mut scene, resources) = fixture();
-    let mut world = world_with_resources();
-    run_sync(&mut world, &scene, &resources);
-    let before = bindings(&world);
-    let mut p = playback(None);
-    p.objects = vec![serde_json::from_value(serde_json::json!({"itemId":"actor","playback":{"duration":4},"partIds":{"root":"actor"},"modelMotion":[{"targetId":"p0","motion":{"kind":"rotate","axis":"y","speed":1}}]})).unwrap()];
-    scene.animation_playback = Some(p);
-    run_sync(&mut world, &scene, &resources);
-    apply(&mut world, &scene);
-    assert_eq!(bindings(&world), before);
-    assert!(
-        !world.resource::<ModelVisuals>().roots["film"]
-            .part_entities
-            .contains_key("p0")
-    );
-}
 
 #[test]
 fn prepared_targets_release_on_content_replacement_and_offscreen_root_release() {
@@ -339,75 +276,4 @@ fn prepared_rigid_geometry_has_local_mesh_bounds_and_lod_invalidates_stale_bound
     let mesh = world.entity(entity).get::<Mesh3d>().unwrap();
     let updated = meshes.get(&mesh.0).unwrap().get_aabb().unwrap();
     assert!(updated.half_extents.abs_diff_eq(Vec3::ONE.into(), 1e-5));
-}
-
-#[test]
-fn shot_source_keeps_prepared_motion_parts_across_short_viewport_exit() {
-    let (mut scene, resources) = fixture();
-    scene.surface = Some(
-        serde_json::from_value(serde_json::json!({"width":800,"height":600,"pixelRatio":1}))
-            .unwrap(),
-    );
-    scene.viewport.zoom = 1.;
-    scene.nodes.push(
-        serde_json::from_value(serde_json::json!({
-            "id":"preview","type":"film-set-shot-preview","x":300,"y":0,"width":240,"height":185,
-            "shotPreview":{"filmSetNodeId":"film","clipId":"a","kind":"dynamic","name":"镜头",
-                "aspect":1.7777778,"duration":4,"state":"ready",
-                "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}
-        }))
-        .unwrap(),
-    );
-    let mut world = world_with_resources();
-    scene.animation_playback = Some(playback(Some("p0")));
-    super::super::demand::update(
-        &mut world.resource_mut::<ModelVisuals>(),
-        &scene,
-        None,
-        &Default::default(),
-        &Default::default(),
-        0.,
-    );
-    run_sync(&mut world, &scene, &resources);
-    let part = world.resource::<ModelVisuals>().roots["film"].part_entities["p0"];
-    let before = world
-        .resource::<ModelVisuals>()
-        .playback_events
-        .iter()
-        .filter(|event| event["event"] == "target-preparation")
-        .count();
-    scene.animation_playback = None;
-    scene.viewport.x = -10_000.;
-    for now in [1., 5.] {
-        super::super::demand::update(
-            &mut world.resource_mut::<ModelVisuals>(),
-            &scene,
-            None,
-            &Default::default(),
-            &Default::default(),
-            now,
-        );
-        run_sync(&mut world, &scene, &resources);
-    }
-    scene.viewport.x = 0.;
-    scene.animation_playback = Some(playback(Some("p0")));
-    super::super::demand::update(
-        &mut world.resource_mut::<ModelVisuals>(),
-        &scene,
-        None,
-        &Default::default(),
-        &Default::default(),
-        6.,
-    );
-    run_sync(&mut world, &scene, &resources);
-    let models = world.resource::<ModelVisuals>();
-    assert_eq!(models.roots["film"].part_entities["p0"], part);
-    assert_eq!(
-        models
-            .playback_events
-            .iter()
-            .filter(|event| event["event"] == "target-preparation")
-            .count(),
-        before
-    );
 }

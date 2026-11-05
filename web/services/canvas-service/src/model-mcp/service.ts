@@ -75,7 +75,7 @@ export type {
   ModelStatisticsOutcome,
   ModelMcpServiceDependencies
 } from "./service-types.js";
-export { readAnimationDefinition, readModelContentVersion } from "./model-reader.js";
+export { readModelContentVersion } from "./model-reader.js";
 
 export class ModelMcpService {
   private readonly deps: ModelMcpServiceDependencies;

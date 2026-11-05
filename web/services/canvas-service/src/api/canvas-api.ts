@@ -1,7 +1,7 @@
 /**
  * 画布存储 HTTP API（任务 4.2–4.8 / design D9、D14；
  *  change: 2026-10-09-refactor-large-source-files-and-remove-compatibility R23 —— 抽出类型、
- *  HTTP codec、lifecycle 与 run/film-set 路由，本文件保留顶层路由 dispatch）。
+ *  HTTP codec、lifecycle 与 run 路由，本文件保留顶层路由 dispatch）。
  *
  * 与框架解耦（只依赖 Node 的 `IncomingMessage` / `ServerResponse`）。
  *
@@ -26,17 +26,12 @@ import {
   type CanvasRequestHandler,
   type CanvasRequestHandlerOptions
 } from "./canvas-api/types.js";
-import { checkServiceToken, decodeSegment, isLoopbackRequest, respondError, sendError, sendJson } from "./canvas-api/http-codec.js";
-import { handleCreate, handleDelete, handleGet, handleHealth, handleImageList, handleList, loadCanvasListPage } from "./canvas-api/lifecycle-routes.js";
+import { checkServiceToken, decodeSegment, isLoopbackRequest, readJsonBody, respondError, sendError, sendJson } from "./canvas-api/http-codec.js";
+import { handleCreate, handleDelete, handleGet, handleHealth, handleImageList, handleList, loadCanvasListPage, requireCanvasAccess } from "./canvas-api/lifecycle-routes.js";
 import { handleArchiveExport, handleArchiveImport } from "./canvas-api/archive-routes.js";
-import { handleCancel, handleFilmSetConversionCancel, handleFilmSetConversionModels, handleFilmSetConversionRetry, handleFilmSetConversionStatus, handleFilmSetConversionSubmit, handleFilmSetImport, handleRun } from "./canvas-api/run-routes.js";
-import {
-  handleRecordingCancel,
-  handleRecordingList,
-  handleRecordingStatus,
-  handleRecordingSubmit
-} from "./canvas-api/recording-routes.js";
-import { handleContentRoute } from "./canvas-api/content-routes.js";
+import { DEFAULT_CANVAS_MAX_BODY_BYTES } from "./canvas-api/types.js";
+import { handleCancel, handleRun } from "./canvas-api/run-routes.js";
+import { handleCaptureFreeze, handleCapturePageCommit, handleCapturePagePending, handleCapturePagePrepare, handleCaptureReady, handleCaptureRefresh } from "./canvas-api/capture-routes.js";
 
 export {
   DEFAULT_CANVAS_API_BASE_PATH,
@@ -46,8 +41,6 @@ export {
 export type {
   CanvasRequestHandler,
   CanvasRequestHandlerOptions,
-  CanvasFilmSetImportPort,
-  CanvasFilmSetConversionPort,
   CanvasRunPort,
   CanvasReadiness
 } from "./canvas-api/types.js";
@@ -204,6 +197,190 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         return await handleArchiveExport(req, res, segments[0], options, log);
       }
 
+      if (segments.length === 2 && segments[1] === "world-conversion-commit") {
+        if (req.method !== "POST") { sendError(res, 405, "INVALID_COMMAND_BATCH", "方法不允许"); return true; }
+        const canvasId = segments[0];
+        const gate = options.importGuard?.state(canvasId);
+        if (gate?.kind === "deleted" || gate?.kind === "preparing") { sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用"); return true; }
+        if (await authorizeImported(canvasId, "write") === "deny") return denyImported("write");
+        const access = await requireCanvasAccess({ req, res, canvasId, permission: "write", options, log });
+        if (!access.ok) return true;
+        if (!options.worldConversion) { sendError(res, 503, "NOT_READY", "转换服务不可用"); return true; }
+        const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
+        if ("canvasId" in body) { sendError(res, 400, "INVALID_COMMAND_BATCH", "请求包含非法字段"); return true; }
+        const authorize = async () => (await authorizeImported(canvasId, "write")) !== "deny" && (!options.authenticate || !!access.principal && !!options.access && (await options.access.authorize({ principal: access.principal, canvasId, permission: "write" })).allowed);
+        const controller = new AbortController();
+        const onClose = () => { if (!res.writableFinished) controller.abort(); };
+        res.once("close", onClose);
+        if (res.destroyed) controller.abort();
+        try {
+          const result = await options.worldConversion.commit({ ...body, canvasId } as import("@woohaa3/contracts").WorldConversionCommitInput, { authorize, signal: controller.signal });
+          if (!controller.signal.aborted) sendJson(res, result.ok ? 200 : result.code === "malformed-request" ? 400 : result.code === "canvas-not-found" ? 404 : 409, result);
+        } finally { res.removeListener("close", onClose); }
+        return true;
+      }
+      if (segments.length === 2 && segments[1] === "world-conversion-prepare") {
+        if (req.method !== "POST") { sendError(res, 405, "INVALID_COMMAND_BATCH", "方法不允许"); return true; }
+        const canvasId = segments[0];
+        const gate = options.importGuard?.state(canvasId);
+        if (gate?.kind === "deleted" || gate?.kind === "preparing") {
+          sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用"); return true;
+        }
+        if (await authorizeImported(canvasId, "read") === "deny") return denyImported("read");
+        if (!(await requireCanvasAccess({ req, res, canvasId, permission: "read", options, log })).ok) return true;
+        if (!options.worldConversion) { sendError(res, 503, "NOT_READY", "准备服务不可用"); return true; }
+        const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
+        if (Object.keys(body).length !== 1 || !Array.isArray(body.nodeIds)) {
+          sendError(res, 400, "INVALID_COMMAND_BATCH", "请求必须只包含 nodeIds"); return true;
+        }
+        const controller = new AbortController();
+        const onClose = () => { if (!res.writableFinished) controller.abort(); };
+        res.once("close", onClose);
+        if (res.destroyed) controller.abort();
+        try {
+          const result = await options.worldConversion.prepare({ canvasId, nodeIds: body.nodeIds as string[] }, { signal: controller.signal });
+          if (!controller.signal.aborted) sendJson(res, result.ok ? 200 : result.code === "malformed-request" ? 400 : result.code === "canvas-not-found" ? 404 : 409, result);
+        } finally {
+          res.removeListener("close", onClose);
+        }
+        return true;
+      }
+      if (segments.length === 2 && (segments[1] === "scene-area-prepare"
+        || segments[1] === "scene-area-commit"
+        || segments[1] === "scene-area-undo"
+        || segments[1] === "scene-area-redo"
+        || segments[1] === "world-tool-context"
+        || segments[1] === "world-tool-context-revoke")) {
+        if (req.method !== "POST") { sendError(res, 405, "INVALID_COMMAND_BATCH", "方法不允许"); return true; }
+        const canvasId = segments[0];
+        const gate = options.importGuard?.state(canvasId);
+        if (gate?.kind === "deleted" || gate?.kind === "preparing") {
+          sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用");
+          return true;
+        }
+        const write = segments[1] !== "scene-area-prepare";
+        const permission = write ? "write" : "read";
+        if (await authorizeImported(canvasId, permission) === "deny") return denyImported(permission);
+        const access = await requireCanvasAccess({ req, res, canvasId, permission, options, log });
+        if (!access.ok) return true;
+        if (!options.worldAuthoring) { sendError(res, 503, "NOT_READY", "导演区权威服务不可用"); return true; }
+        const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
+        if ("canvasId" in body) { sendError(res, 400, "INVALID_COMMAND_BATCH", "请求包含非法字段"); return true; }
+        const authorize = async () => (await authorizeImported(canvasId, "write")) !== "deny" &&
+          (!options.authenticate || !!access.principal && !!options.access &&
+            (await options.access.authorize({ principal: access.principal, canvasId, permission: "write" })).allowed);
+        const controller = new AbortController();
+        const onClose = () => { if (!res.writableFinished) controller.abort(); };
+        res.once("close", onClose);
+        if (res.destroyed) controller.abort();
+        try {
+          const route = segments[1];
+          const outcome = route === "scene-area-prepare"
+            ? await options.worldAuthoring.prepare({ canvasId, areaId: String(body.areaId ?? "") }, { signal: controller.signal })
+            : route === "scene-area-commit"
+              ? await options.worldAuthoring.execute({ ...body, canvasId } as never, { authorize, signal: controller.signal })
+              : route === "scene-area-undo"
+                ? await options.worldAuthoring.undo({ ...body, canvasId } as never, { authorize, signal: controller.signal })
+                : route === "scene-area-redo"
+                  ? await options.worldAuthoring.redo({ ...body, canvasId } as never, { authorize, signal: controller.signal })
+                  : route === "world-tool-context"
+                    ? await options.worldAuthoring.issueContext({ ...body, canvasId } as never)
+                    : (await options.worldAuthoring.revokeContext({ ...body, canvasId } as never),
+                      { ok: true as const });
+          if (!controller.signal.aborted) {
+            const code = "code" in outcome && !outcome.ok ? outcome.code : null;
+            const status = code === "invalid-data" || code === "unsupported-version" ? 400
+              : code === "not-found" ? 404
+                : code === "write-forbidden" ? 403
+                  : code === null ? 200 : 409;
+            sendJson(res, status, outcome);
+          }
+        } finally {
+          res.removeListener("close", onClose);
+        }
+        return true;
+      }
+      if (segments.length === 2 && (segments[1] === "world-camera-save"
+        || segments[1] === "world-camera-restore"
+        || segments[1] === "world-camera-history")) {
+        const route = segments[1];
+        const write = route !== "world-camera-history";
+        if (req.method !== (write ? "POST" : "GET")) { sendError(res, 405, "INVALID_COMMAND_BATCH", "方法不允许"); return true; }
+        const canvasId = segments[0];
+        const gate = options.importGuard?.state(canvasId);
+        if (gate?.kind === "deleted" || gate?.kind === "preparing") {
+          sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用");
+          return true;
+        }
+        const permission = write ? "write" : "read";
+        if (await authorizeImported(canvasId, permission) === "deny") return denyImported(permission);
+        const access = await requireCanvasAccess({ req, res, canvasId, permission, options, log });
+        if (!access.ok) return true;
+        if (!options.worldCamera) { sendError(res, 503, "NOT_READY", "世界镜头服务不可用"); return true; }
+        const authorize = async () => (await authorizeImported(canvasId, "write")) !== "deny" &&
+          (!options.authenticate || !!access.principal && !!options.access &&
+            (await options.access.authorize({ principal: access.principal, canvasId, permission: "write" })).allowed);
+        const controller = new AbortController();
+        const onClose = () => { if (!res.writableFinished) controller.abort(); };
+        res.once("close", onClose);
+        if (res.destroyed) controller.abort();
+        try {
+          let outcome: { ok: boolean; code?: string };
+          if (route === "world-camera-history") {
+            const query = new URL(req.url ?? "/", "http://localhost").searchParams;
+            const limit = Number(query.get("limit") ?? "50");
+            outcome = await options.worldCamera.history({
+              canvasId,
+              cameraId: query.get("cameraId") ?? "",
+              ...(Number.isFinite(limit) ? { limit } : {})
+            }) as { ok: boolean; code?: string };
+          } else {
+            const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
+            if ("canvasId" in body) { sendError(res, 400, "INVALID_COMMAND_BATCH", "请求包含非法字段"); return true; }
+            outcome = route === "world-camera-save"
+              ? await options.worldCamera.save({ ...body, canvasId } as never, { authorize, signal: controller.signal }) as { ok: boolean; code?: string }
+              : await options.worldCamera.restore({ ...body, canvasId } as never, { authorize, signal: controller.signal }) as { ok: boolean; code?: string };
+          }
+          if (!controller.signal.aborted) {
+            const code = outcome.ok ? null : outcome.code;
+            const status = code === "invalid-data" || code === "unsupported-version" ? 400
+              : code === "not-found" ? 404
+                : code === "write-forbidden" ? 403
+                  : code === null ? 200 : 409;
+            sendJson(res, status, outcome);
+          }
+        } finally {
+          res.removeListener("close", onClose);
+        }
+        return true;
+      }
+      if (
+        segments.length === 2 &&
+        (segments[1] === "captures-refresh" || segments[1] === "captures-freeze" || segments[1] === "captures-ready" || segments[1] === "captures-page-prepare" || segments[1] === "captures-page-commit" || segments[1] === "captures-page-pending") &&
+        req.method === "POST"
+      ) {
+        const canvasId = segments[0];
+        const route = segments[1];
+        const gate = options.importGuard?.state(canvasId);
+        if (gate?.kind === "deleted" || gate?.kind === "preparing") {
+          sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用");
+          return true;
+        }
+        const permission = route === "captures-refresh" || route === "captures-page-pending" ? "read" : "write";
+        if (await authorizeImported(canvasId, permission) === "deny") return denyImported(permission);
+        if (!(await requireCanvasAccess({ req, res, canvasId, permission, options, log })).ok) return true;
+        return route === "captures-refresh"
+          ? await handleCaptureRefresh(req, res, canvasId, options, log)
+          : route === "captures-freeze"
+            ? await handleCaptureFreeze(req, res, canvasId, options, log)
+            : route === "captures-ready"
+              ? await handleCaptureReady(req, res, canvasId, options, log)
+              : route === "captures-page-prepare"
+                ? await handleCapturePagePrepare(req, res, canvasId, options, log)
+                : route === "captures-page-pending"
+                  ? await handleCapturePagePending(req, res, canvasId, options, log)
+                  : await handleCapturePageCommit(req, res, canvasId, options, log);
+      }
       if (segments.length === 2 && segments[1] === "runs" && req.method === "POST") {
         const decision = await authorizeImported(segments[0], "write");
         if (decision === "deny") return denyImported("write");
@@ -214,80 +391,10 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         if (decision === "deny") return denyImported("write");
         return await handleCancel(req, res, segments[0], options, log);
       }
-      // 原生录制 submit/cancel/status（change: 2026-10-17-add-native-offscreen-film-set-recording）。
-      if (segments.length === 2 && segments[1] === "recording" && req.method === "POST") {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleRecordingSubmit(req, res, segments[0], options, log);
-      }
-      if (segments.length === 2 && segments[1] === "recording" && req.method === "GET") {
-        const decision = await authorizeImported(segments[0], "read");
-        if (decision === "deny") return denyImported("read");
-        return await handleRecordingList(req, res, segments[0], options, log);
-      }
-      if (segments.length === 3 && segments[1] === "recording" && req.method === "GET") {
-        const decision = await authorizeImported(segments[0], "read");
-        if (decision === "deny") return denyImported("read");
-        return await handleRecordingStatus(req, res, segments[0], segments[2]!, options, log);
-      }
-      if (segments.length === 4 && segments[1] === "recording" && segments[3] === "cancel" && req.method === "POST") {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleRecordingCancel(req, res, segments[0], segments[2]!, options, log);
-      }
-      if (segments.length === 3 && segments[1] === "film-set" && segments[2] === "import" && req.method === "POST") {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleFilmSetImport(req, res, segments[0], options, log);
-      }
-      // 单节点快捷「转为片场」（change: 2026-10-13-add-node-to-film-set-shortcut）。
-      if (segments.length === 3 && segments[1] === "film-set" && segments[2] === "conversion-models" && req.method === "GET") {
-        const decision = await authorizeImported(segments[0], "read");
-        if (decision === "deny") return denyImported("read");
-        return await handleFilmSetConversionModels(req, res, segments[0], options, log);
-      }
-      if (segments.length === 3 && segments[1] === "film-set" && segments[2] === "conversion" && req.method === "POST") {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleFilmSetConversionSubmit(req, res, segments[0], options, log);
-      }
-      if (segments.length === 4 && segments[1] === "film-set" && segments[2] === "conversion" && req.method === "GET") {
-        const decision = await authorizeImported(segments[0], "read");
-        if (decision === "deny") return denyImported("read");
-        return await handleFilmSetConversionStatus(req, res, segments[0], segments[3], options, log);
-      }
-      if (
-        segments.length === 5
-        && segments[1] === "film-set"
-        && segments[2] === "conversion"
-        && segments[4] === "cancel"
-        && req.method === "POST"
-      ) {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleFilmSetConversionCancel(req, res, segments[0], segments[3], options, log);
-      }
-      if (
-        segments.length === 5
-        && segments[1] === "film-set"
-        && segments[2] === "conversion"
-        && segments[4] === "retry"
-        && req.method === "POST"
-      ) {
-        const decision = await authorizeImported(segments[0], "write");
-        if (decision === "deny") return denyImported("write");
-        return await handleFilmSetConversionRetry(req, res, segments[0], segments[3], options, log);
-      }
-      if (options.content && segments[1] === "content" && segments[2]) {
-        const permission = req.method === "GET" || req.method === "HEAD" ? "read" : "write";
-        const decision = await authorizeImported(segments[0], permission);
-        if (decision === "deny") return denyImported(permission);
-        return await handleContentRoute(req, res, segments[2], segments.slice(3), options, log);
-      }
-
       sendError(res, 404, "CANVAS_NOT_FOUND", "未知的画布路由");
       return true;
     } catch (error) {
+      console.error("DEBUG_RUN_THROW", error);
       respondError(res, error, log);
       return true;
     }

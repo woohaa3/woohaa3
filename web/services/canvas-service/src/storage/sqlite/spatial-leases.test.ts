@@ -1,0 +1,194 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { WorldObjectVersion } from "@woohaa3/contracts";
+import { afterEach, describe, expect, it } from "vitest";
+import { loadNodeSqlite } from "./sqlite-loader.js";
+import { SqliteSpatialLeaseStore } from "./spatial-leases.js";
+import type { LeaseIntent, SpatialLeaseAuthority } from "../../world-authoring/spatial-leases.js";
+
+const instance = (instanceId: string) => ({ kind: "instance" as const, instanceId, version: "v1" });
+const camera = (cameraId: string) => ({ kind: "camera" as const, cameraId, version: "v1" });
+const intent = (requestId: string, writable: WorldObjectVersion[] = [instance("a")]): LeaseIntent => ({ requestId, canvasId: "canvas", runId: requestId, epoch: 1, executionId: `exec-${requestId}`, scope: { scope: { kind: "scene-area", areaId: "area" }, scopeVersion: "s1" }, writable, readOnly: [] });
+const { DatabaseSync } = loadNodeSqlite();
+const authority: SpatialLeaseAuthority = { eligible: (_intent, targets) => targets.every(t => t.version === "v1"), stopped: (identity, evidence) => evidence === `stopped-${identity.executionId}` };
+const dirs: string[] = [];
+afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+function fixture() {
+  const dir = mkdtempSync(join(tmpdir(), "spatial-leases-")); dirs.push(dir);
+  const file = join(dir, "db.sqlite");
+  const a = new DatabaseSync(file), b = new DatabaseSync(file);
+  return { file, a, b, one: new SqliteSpatialLeaseStore(a, authority), two: new SqliteSpatialLeaseStore(b, authority) };
+}
+describe("durable spatial leases", () => {
+  it("atomically fences overlapping typed identities across connections", () => {
+    const { a, b, one, two } = fixture();
+    one.acquire(intent("one", [instance("a"), instance("b")]));
+    expect(() => two.acquire(intent("two", [instance("c"), instance("b")]))).toThrow("lease-conflict");
+    two.acquire(intent("three", [instance("c"), camera("a")]));
+    expect(() => one.validateUnoccupied("canvas", [instance("a")])).toThrow("lease-conflict");
+    a.close(); b.close();
+  });
+  it("reports the typed target and occupying run observed in each conflict", () => {
+    const { a, b, one, two } = fixture();
+    one.acquire({ ...intent("owner", [camera("shared")]), epoch: 7 });
+    two.acquire(intent("contender", [instance("own")]));
+    const conflict = { code: "lease-conflict", conflict: { target: { kind: "camera", cameraId: "shared" }, runId: "owner", epoch: 7 } };
+    expect(() => two.acquire(intent("other", [instance("free"), camera("shared")]))).toThrow(expect.objectContaining(conflict));
+    expect(() => two.extend("canvas", "contender", [instance("free"), camera("shared")])).toThrow(expect.objectContaining(conflict));
+    expect(() => two.validateUnoccupied("canvas", [camera("shared")])).toThrow(expect.objectContaining(conflict));
+    two.validateUnoccupied("canvas", [instance("free"), instance("shared")]);
+    expect(two.lookup("canvas", "contender")?.intent.writable).toEqual([instance("own")]);
+    a.close(); b.close();
+  });
+  it("does not leave a partial run when another connection holds the write transaction", () => {
+    const { a, b, one, two } = fixture();
+    a.exec("BEGIN IMMEDIATE");
+    expect(() => two.acquire(intent("contender", [instance("a"), instance("b")]))).toThrow();
+    a.exec("ROLLBACK");
+    expect(two.lookup("canvas", "contender")).toBeNull();
+    one.validateUnoccupied("canvas", [instance("a"), instance("b")]);
+    two.acquire(intent("contender", [instance("a"), instance("b")]));
+    expect(() => one.acquire(intent("other", [instance("b"), instance("c")]))).toThrow("lease-conflict");
+    one.validateUnoccupied("canvas", [instance("c")]);
+    a.close(); b.close();
+  });
+  it("persists normalized intent and rolls back injected failures", () => {
+    const { file, a, b, one } = fixture();
+    const original = intent("one", [instance("b"), instance("a")]);
+    one.acquire(original);
+    one.extend("canvas", "one", [instance("c")]);
+    expect(one.acquire({ ...original, writable: [...original.writable].reverse() }).intent.writable).toHaveLength(3);
+    expect(one.acquire({ ...original, runId: "retry-candidate", epoch: 2, executionId: "retry-execution" }).intent.runId).toBe("one");
+    expect(() => one.acquire({ ...original, scope: { ...original.scope, scopeVersion: "different" } })).toThrow("request-conflict");
+    let writes = 0;
+    const faulty = new SqliteSpatialLeaseStore(b, authority, () => { if (++writes === 2) throw new Error("injected"); });
+    expect(() => faulty.acquire(intent("failed", [instance("z")]))).toThrow("injected");
+    expect(faulty.lookup("canvas", "failed")).toBeNull();
+    faulty.validateUnoccupied("canvas", [instance("z")]);
+    a.close(); b.close();
+    const reopened = new DatabaseSync(file); const store = new SqliteSpatialLeaseStore(reopened, authority);
+    expect(store.acquire(original).intent.runId).toBe("one");
+    expect(store.listPending()).toHaveLength(1); reopened.close();
+  });
+  it("retains cancelled locks until exact trusted stop and fences stale completion", () => {
+    const { file, a, b, one, two } = fixture(); const first = intent("one");
+    one.acquire(first); one.cancel("canvas", "one");
+    const reopened = new DatabaseSync(file); const recovery = new SqliteSpatialLeaseStore(reopened, authority);
+    expect(recovery.listPending()[0]?.state).toBe("cancelled");
+    expect(() => recovery.validateUnoccupied("canvas", [instance("a")])).toThrow("lease-conflict");
+    reopened.close();
+    expect(() => one.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, first.writable)).toThrow("cancelled");
+    expect(() => two.acquire(intent("two"))).toThrow("lease-conflict");
+    expect(() => one.confirmStopped("canvas", "one", "one", 1, first.executionId, true)).toThrow("unverified-stop");
+    one.confirmStopped("canvas", "one", "one", 1, first.executionId, "stopped-exec-one");
+    two.acquire({ ...intent("two"), epoch: 2 });
+    one.confirmStopped("canvas", "one", "one", 1, first.executionId, "stopped-exec-one");
+    expect(() => one.confirmStopped("canvas", "two", "two", 1, "exec-two", "stopped-exec-two")).toThrow("stale-epoch");
+    expect(() => one.validateUnoccupied("canvas", [instance("a")])).toThrow("lease-conflict");
+    a.close(); b.close();
+  });
+  it("rechecks eligibility and atomically extends without upgrading references", () => {
+    const { a, b, one, two } = fixture();
+    const first = { ...intent("one"), readOnly: [instance("ref")] }; one.acquire(first);
+    two.acquire(intent("two", [instance("busy")]));
+    expect(() => one.extend("canvas", "one", [instance("new"), instance("busy")])).toThrow("lease-conflict");
+    one.validateUnoccupied("canvas", [instance("new"), instance("ref")]);
+    expect(() => one.extend("canvas", "one", [instance("ref")])).toThrow("outside-scope");
+    expect(() => one.extend("canvas", "one", [{ ...instance("new"), version: "untrusted" }])).toThrow("outside-scope");
+    one.extend("canvas", "one", [instance("new")]);
+    a.exec("BEGIN IMMEDIATE");
+    one.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [instance("new")]);
+    expect(() => one.validateForCommit("canvas", "one", "one", 1, "other-execution", first.scope, [instance("new")])).toThrow("stale-epoch");
+    expect(() => one.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [{ ...instance("new"), version: "v2" }])).toThrow("version-conflict");
+    a.exec("ROLLBACK");
+    expect(() => new SqliteSpatialLeaseStore(b).acquire(intent("no-authority", [instance("free")]))).toThrow("unavailable");
+    a.close(); b.close();
+  });
+  it("rolls back an interrupted extension and revalidates current authority in the caller transaction", () => {
+    const { a, b, one } = fixture();
+    const first = intent("one");
+    one.acquire(first);
+    let writes = 0;
+    let allowed = true;
+    const changingAuthority: SpatialLeaseAuthority = {
+      eligible: () => allowed,
+      stopped: () => false,
+    };
+    const faulty = new SqliteSpatialLeaseStore(b, changingAuthority, () => { if (++writes === 1) throw new Error("extension failure"); });
+    expect(() => faulty.extend("canvas", "one", [instance("b"), instance("c")])).toThrow("extension failure");
+    expect(one.lookup("canvas", "one")?.intent.writable).toEqual(first.writable);
+    one.validateUnoccupied("canvas", [instance("b"), instance("c")]);
+    expect(() => one.validateUnoccupied("canvas", [instance("a")])).toThrow("lease-conflict");
+    allowed = false;
+    b.exec("BEGIN IMMEDIATE");
+    expect(() => faulty.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, first.writable)).toThrow("outside-scope");
+    b.exec("ROLLBACK");
+    a.close(); b.close();
+  });
+  it("advances versions with canonical writes and rolls both back together", () => {
+    const { file, a, b } = fixture();
+    a.exec("CREATE TABLE canonical (version TEXT NOT NULL); INSERT INTO canonical VALUES ('v1')");
+    const current: SpatialLeaseAuthority = {
+      eligible: (_intent, targets) => targets.every(t => t.version === (a.prepare("SELECT version FROM canonical").get() as { version: string }).version),
+      stopped: () => false,
+    };
+    const store = new SqliteSpatialLeaseStore(a, current);
+    const first = intent("one"); const v1 = instance("a"), v2 = { ...v1, version: "v2" }, v3 = { ...v1, version: "v3" };
+    store.acquire(first);
+    a.exec("BEGIN IMMEDIATE");
+    store.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [v1]);
+    a.exec("UPDATE canonical SET version = 'v2'");
+    store.advanceVersionsForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [v1], [v2]);
+    a.exec("COMMIT");
+    a.exec("BEGIN IMMEDIATE");
+    expect(() => store.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [v1])).toThrow("version-conflict");
+    store.validateForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [v2]);
+    a.exec("UPDATE canonical SET version = 'v3'");
+    store.advanceVersionsForCommit("canvas", "one", "one", 1, first.executionId, first.scope, [v2], [v3]);
+    a.exec("ROLLBACK");
+    expect((a.prepare("SELECT version FROM canonical").get() as { version: string }).version).toBe("v2");
+    expect(store.lookup("canvas", "one")?.intent.writable).toEqual([v2]);
+    a.close(); b.close();
+    const reopened = new DatabaseSync(file); const recovered = new SqliteSpatialLeaseStore(reopened);
+    expect(recovered.lookup("canvas", "one")?.intent.writable).toEqual([v2]);
+    expect(recovered.acquire(first).intent.runId).toBe("one");
+    reopened.close();
+  });
+  it("reads current occupancy facts without touching runs, locks or other canvases", () => {
+    const { file, a, b, one, two } = fixture();
+    one.acquire(intent("instance-owner", [instance("shared")]));
+    two.acquire({ ...intent("camera-owner"), epoch: 3, writable: [camera("shared")] });
+    const other = { ...intent("other-canvas", [instance("shared"), camera("shared")]), canvasId: "canvas-other" };
+    one.acquire(other);
+
+    const read = one.readOccupancy("canvas", [instance("shared"), camera("shared"), instance("missing")]);
+    expect(read).toEqual([
+      { target: { kind: "instance", instanceId: "shared" }, runId: "instance-owner", epoch: 1, state: "active" },
+      { target: { kind: "camera", cameraId: "shared" }, runId: "camera-owner", epoch: 3, state: "active" }
+    ]);
+    expect(one.readOccupancy("canvas-other", [instance("shared"), camera("shared")]).map(lock => lock.runId))
+      .toEqual(["other-canvas", "other-canvas"]);
+    // Reading is not a write: retries keep the same runs and locks.
+    expect(one.readOccupancy("canvas", [instance("shared")])).toEqual(one.readOccupancy("canvas", [instance("shared")]));
+    expect(one.lookup("canvas", "instance-owner")?.state).toBe("active");
+
+    one.cancel("canvas", "instance-owner");
+    expect(one.readOccupancy("canvas", [instance("shared")])).toEqual([
+      { target: { kind: "instance", instanceId: "shared" }, runId: "instance-owner", epoch: 1, state: "cancelled" }
+    ]);
+    expect(() => one.validateUnoccupied("canvas", [instance("shared")])).toThrow("lease-conflict");
+
+    a.close(); b.close();
+    const reopened = new DatabaseSync(file);
+    const recovered = new SqliteSpatialLeaseStore(reopened, authority);
+    expect(recovered.readOccupancy("canvas", [instance("shared"), camera("shared")])).toEqual([
+      { target: { kind: "instance", instanceId: "shared" }, runId: "instance-owner", epoch: 1, state: "cancelled" },
+      { target: { kind: "camera", cameraId: "shared" }, runId: "camera-owner", epoch: 3, state: "active" }
+    ]);
+    recovered.confirmStopped("canvas", "instance-owner", "instance-owner", 1, "exec-instance-owner", "stopped-exec-instance-owner");
+    expect(recovered.readOccupancy("canvas", [instance("shared")])).toEqual([]);
+    expect(recovered.readOccupancy("canvas", [camera("shared")])).toHaveLength(1);
+    reopened.close();
+  });
+});

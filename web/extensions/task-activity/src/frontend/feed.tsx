@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { TaskResultSummary } from "@woohaa3/contracts";
-import { SKILL_STATE_LABELS, displayedProgressPercent, type ActivityRow, type ActivityRowActions, type ActivityRowCapabilities } from "./rows.js";
+import { SKILL_STATE_LABELS, displayedProgressPercent, type ActivityRow, type ActivityRowCapabilities } from "./rows.js";
 import { ACTIVITY_EXIT_DURATION_MS, type TaskActivityStore } from "./store.js";
 import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger, ScrollArea, Button, IconButton, Tooltip, Popover } from "@woohaa3/ui/primitives";
 import { ChevronDownIcon, CloseIcon, MenuListIcon } from "@woohaa3/ui/icons";
@@ -52,11 +52,11 @@ export function TaskActivityFeed({ store, resolveMediaUrl, onOpenHistory, capabi
   // 初始展开状态取决于启动时是否已有记录；后续新项由 effect 自动展开（SSR/静态渲染
   // 不执行 effect，因此这里必须按首帧快照决定）。只有已结算的组/Skill 记录不抢开面板。
   const [expanded, setExpanded] = useState(() =>
-    store.getSnapshot().rows.some((row) => (row.kind !== "group" && row.kind !== "skill") || row.active)
+    store.getSnapshot().rows.some((row) => (row.kind !== "skill") || row.active)
   );
   const previousRows = useRef({
     count: rows.length,
-    pollingKeys: new Set(rows.filter((row) => row.kind === "group" || row.kind === "skill").map((row) => row.key))
+    pollingKeys: new Set(rows.filter((row) => row.kind === "skill").map((row) => row.key))
   });
 
   // 有新项时自动展开；清空后收起。后台录制随画布加载自动开始，不因它的首条记录抢开面板。
@@ -64,13 +64,13 @@ export function TaskActivityFeed({ store, resolveMediaUrl, onOpenHistory, capabi
     const tasks = rows.filter((row) => row.kind === "task").length;
     const previous = previousRows.current;
     const newlyActivePolling = rows.some((row) =>
-      (row.kind === "group" || row.kind === "skill") && row.active && !previous.pollingKeys.has(row.key)
+      row.kind === "skill" && row.active && !previous.pollingKeys.has(row.key)
     );
     if ((tasks > 0 && previous.count === 0) || newlyActivePolling) setExpanded(true);
     if (rows.length === 0) setExpanded(false);
     previousRows.current = {
       count: rows.length,
-      pollingKeys: new Set(rows.filter((row) => row.kind === "group" || row.kind === "skill").map((row) => row.key))
+      pollingKeys: new Set(rows.filter((row) => row.kind === "skill").map((row) => row.key))
     };
   }, [rows]);
   useEffect(() => {
@@ -125,7 +125,6 @@ export function TaskActivityFeed({ store, resolveMediaUrl, onOpenHistory, capabi
       data-has-active={snapshot.hasActive}
     >
       <CollapsibleContent className="task-activity-feed__collapse-content">
-        {snapshot.groupError ? <p className="task-activity-feed__empty">状态更新失败：{snapshot.groupError}（保留上次状态）</p> : null}
         {total === 0 ? (
           <p className="task-activity-feed__empty">暂无任务</p>
         ) : (
@@ -219,8 +218,6 @@ function ActivityListRow(props: {
   const { row, store, resolveMediaUrl, now, capabilities } = props;
   const actions = row.actions;
   const [preview, setPreview] = useState(false);
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
   const rowRef = useRef<HTMLLIElement | null>(null);
   const pinned = useRef(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -243,9 +240,9 @@ function ActivityListRow(props: {
       setPreview(false);
       return;
     }
-    if (pinned.current || busy) return;
+    if (pinned.current) return;
     closeTimer.current = setTimeout(() => setPreview(false), GROUP_PREVIEW_CLOSE_DELAY_MS);
-  }, [busy, cancelClose, interactive]);
+  }, [cancelClose, interactive]);
 
   /** 点击主行锁定详情（组记录）；只读记录立刻显示预览。 */
   const openDetails = useCallback(() => {
@@ -254,50 +251,16 @@ function ActivityListRow(props: {
     setPreview(true);
   }, [cancelClose]);
 
-  // 组节点入口选中该记录时展开详情并滚动到可视区（change: 2026-10-22，design D4 保留项）。
-  useEffect(() => {
-    if (!interactive || !row.selected) return;
-    rowRef.current?.scrollIntoView?.({ block: "nearest" });
-    pinned.current = true;
-    setPreview(true);
-  }, [interactive, row.selected, props.openRevision]);
-
-  const act = useCallback(async (action: "stop" | "retry" | "openConversation") => {
-    if (busy) return;
-    const run = action === "openConversation" ? actions.openConversation : actions[action];
-    if (!run) {
-      setError(action === "openConversation" ? "对话详情暂不可用" : "运行状态服务不可用");
-      return;
-    }
-    setBusy(action);
-    setError("");
-    try {
-      await run();
-      if (action === "openConversation") {
-        pinned.current = false;
-        setPreview(false);
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "操作失败，请重试");
-    } finally {
-      setBusy("");
-    }
-  }, [actions, busy]);
-
   const progressPercent = displayedProgressPercent(row, now, capabilities);
   const progressText = progressPercent !== undefined ? ` · ${progressPercent}%` : "";
   const stateText = `${row.status}${progressText}`;
 
-  /** 主行点击：组记录锁定详情；有详情能力时打开详情；否则退回节点定位（后台活动）。 */
+  /** 主行点击：有详情能力时打开详情；否则退回节点定位（后台活动）。 */
   const activatePrimary = () => {
     if (interactive) return openDetails();
     if (actions.openDetail) return actions.openDetail();
     actions.locate?.();
   };
-  /**
-   * 任务行始终保留可点击主行（历史行为：打开详情，缺省无副作用）；组行可锁定详情；
-   * 后台活动仅在可定位时才是按钮。
-   */
   const primaryInteractive = interactive || row.kind === "task" || actions.locate !== undefined;
   /** 主行动作文案：锁定详情 / 打开详情 / 定位节点，与真实点击行为一致。 */
   const primaryActionLabel = interactive || actions.openDetail ? "查看详情" : "定位节点";
@@ -310,8 +273,6 @@ function ActivityListRow(props: {
       data-state={row.state}
       data-tone={row.tone}
       data-kind={row.kind}
-      {...(row.kind === "group" ? { "data-group-id": row.nodeId } : {})}
-      {...(row.selected ? { "data-selected": true } : {})}
       {...(row.source.kind === "task" && row.source.item.optimistic ? { "data-optimistic": true } : {})}
       {...(row.source.kind === "task" && row.source.item.localFailure ? { "data-local-failure": true } : {})}
       onMouseEnter={openPreview}
@@ -359,7 +320,7 @@ function ActivityListRow(props: {
           side="right"
           align="start"
           sideOffset={8}
-          className={interactive ? "task-activity-feed__pop task-activity-feed__pop--group" : "task-activity-feed__pop"}
+          className={interactive ? "task-activity-feed__pop" : "task-activity-feed__pop"}
           dismissOnOutside={interactive}
           dismissOnEscape={interactive}
           restoreFocus={false}
@@ -373,10 +334,7 @@ function ActivityListRow(props: {
             {row.secondary ? <span>{row.secondary}</span> : null}
             <span>{stateText}</span>
             <RowDetail row={row} resolveMediaUrl={resolveMediaUrl} />
-            {row.detail || error ? <p>{error || row.detail}</p> : null}
-            {row.kind === "group" || row.kind === "skill" ? (
-              <RowActionsPanel kind={row.kind === "skill" ? "skill" : "group"} actions={actions} busy={busy} onActivate={(action) => void act(action)} />
-            ) : null}
+            {row.detail ? <p>{row.detail}</p> : null}
           </div>
         </Popover>
       ) : null}
@@ -408,7 +366,6 @@ function RowDetail(props: { row: ActivityRow; resolveMediaUrl: (storageKey: stri
     case "job":
       // 后台活动的失败原因已由适配器放进 `row.detail`，与任务一致地显示在统一详情里。
       return null;
-    case "group":
       return null;
     case "skill": {
       /**
@@ -444,38 +401,6 @@ function RowDetail(props: { row: ActivityRow; resolveMediaUrl: (storageKey: stri
       );
     }
   }
-}
-
-/** 组创作 / Skill 步骤的动作集合：只由记录声明的动作决定，不再从组件 props 逐层透传。 */
-function RowActionsPanel(props: {
-  kind: "group" | "skill";
-  actions: ActivityRowActions;
-  busy: string;
-  onActivate: (action: "stop" | "retry" | "openConversation") => void;
-}) {
-  const { kind, actions, busy, onActivate } = props;
-  const writable = actions.writable !== false;
-  if (!actions.locate && !actions.stop && !actions.retry && !actions.openConversation) return null;
-  return (
-    <div className="task-activity-feed__group-actions">
-      {actions.locate ? <Button size="sm" tone="ghost" onClick={() => actions.locate!()}>{kind === "group" ? "定位创作组" : "定位节点"}</Button> : null}
-      {actions.openConversation ? (
-        <Button size="sm" tone="ghost" disabled={!!busy} onClick={() => onActivate("openConversation")}>
-          {busy === "openConversation" ? "正在打开…" : "查看对话"}
-        </Button>
-      ) : null}
-      {actions.stop ? (
-        <Button size="sm" tone="ghost" disabled={!!busy || !writable} onClick={() => onActivate("stop")}>
-          {busy === "stop" ? "正在停止…" : "停止"}
-        </Button>
-      ) : null}
-      {actions.retry ? (
-        <Button size="sm" tone="ghost" disabled={!!busy || !writable} onClick={() => onActivate("retry")}>
-          {busy === "retry" ? "正在重试…" : "重试原请求"}
-        </Button>
-      ) : null}
-    </div>
-  );
 }
 
 function PreviewBody(props: { result: TaskResultSummary; resolveMediaUrl: (storageKey: string) => string }) {

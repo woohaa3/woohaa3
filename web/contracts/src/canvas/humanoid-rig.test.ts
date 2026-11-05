@@ -21,7 +21,7 @@ import {
 } from "./humanoid-rig.js";
 import { executeModelScriptVersioned } from "./model-executor-v2.js";
 import { executeMotionScript } from "./motion-executor.js";
-import { modelPartIds } from "./motion-validation.js";
+import { modelPartIds } from "./model-parts.js";
 import { DEFAULT_MODEL_PLACEMENT, modelContentHash, modelSourceHash } from "./model-definition.js";
 
 const PARAMETERS: HumanoidParameters = HUMANOID_REFERENCE_PARAMETERS;

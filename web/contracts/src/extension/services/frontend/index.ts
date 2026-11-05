@@ -16,7 +16,6 @@
  */
 export * from "./agent-conversation.js";
 export * from "./canvas-catalog.js";
-export * from "./canvas-group-runs.js";
 export * from "./canvas-preparation.js";
 export * from "./import.js";
 export * from "./notification.js";

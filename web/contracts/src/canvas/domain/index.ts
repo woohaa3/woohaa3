@@ -12,6 +12,7 @@ export * from "./runtime-node-data";
 export * from "./generation-mode";
 export * from "./interaction-coverage";
 export * from "./normalization";
+export * from "./world-identities";
 export * from "./input-mapping";
 export * from "./input-mapping-lifecycle";
 export * from "./model-reference-inputs";

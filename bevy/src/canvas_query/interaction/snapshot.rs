@@ -8,18 +8,15 @@
 use bevy::prelude::*;
 
 use crate::canvas_query::aggregate::{aggregate_handle, selection_bounds};
-use crate::canvas_query::scope::{
-    self, DIAMOND_GRIP_TOLERANCE, ScopeGeometry, ScopeGrip, ScopeRect,
-};
-use crate::canvas_query::{curve, layout};
+use crate::canvas_query::{curve, grip::ResizeGrip, layout};
 use crate::protocol::{GraphNode, Scene};
 
-use super::results::{PointHit, ProbeCandidate, ScopeGeometryEntry};
+use super::results::{PointHit, ProbeCandidate};
 use super::spatial::SpatialGrid;
 
 /// 空间网格 cell 边长（世界单位）。
 ///
-/// 取固定卡片量级：太小会让大卡片/片场跨很多 cell，太大则退化为全量候选。位置增量只搬动
+/// 取固定卡片量级：太小会让大卡片跨很多 cell，太大则退化为全量候选。位置增量只搬动
 /// 真正移动的对象，因此该值不需要随 zoom 变化（design D7 / 任务 7.3）。
 const SPATIAL_CELL_SIZE: f32 = 256.0;
 
@@ -29,31 +26,23 @@ pub(super) struct SnapshotNode {
     pub(super) initial_position: Vec2,
     pub(super) layout_bounds: (f32, f32, f32, f32),
     pub(super) id: String,
-    pub(super) group: bool,
-    pub(super) group_collapsed: bool,
-    pub(super) group_outline: Vec<Vec2>,
-    /// 徽标范围四角（模型投影包围盒）；无可呈现模型时为空。
-    pub(super) group_badge: Vec<Vec2>,
     pub(super) ghost: bool,
-    pub(super) composite_asset: bool,
-    /// 粗筛用外接矩形；复合资产为范围 AABB，普通节点为节点矩形。
+    /// 粗筛用外接矩形（节点矩形）。
     pub(super) bounds: (f32, f32, f32, f32),
-    /// 复合资产真实范围几何；普通节点为 `None`（用 `bounds`）。
-    pub(super) scope: Option<ScopeGeometry>,
     pub(super) center: Vec2,
     pub(super) input_port: Option<Vec2>,
     pub(super) output_port: Option<Vec2>,
-    pub(super) output_capable_group: bool,
     /// 底部历史条命中矩形（change: 2026-10-12-unify-generation-history-strip）。
     pub(super) history_strip: Option<(f32, f32, f32, f32)>,
-    pub(super) group_status: Option<(f32, f32, f32, f32)>,
     pub(super) preview: Option<(f32, f32, f32, f32)>,
-    /// 拍摄镜头预览**内容区**命中矩形（change: 2026-10-15，design D6）；
-    /// 只有内容区建立拍摄播放资格，标题区走普通 `Node`。
-    pub(super) shot_preview_content: Option<(f32, f32, f32, f32)>,
-    /// 选中时的 resize 抓手；复合资产为菱形右顶点三角，普通节点为右下方形。
-    pub(super) resize: Option<ScopeGrip>,
+    /// 选中时显示的右下角 resize 抓手。
+    pub(super) resize: Option<ResizeGrip>,
     pub(super) resizable: bool,
+    /// `chrome.kind == "none"` 的世界模型没有内容卡片：不再保留卡片矩形、端口、
+    /// 历史条与选中抓手的命中（change: shared-world 直接地面拖动）。
+    pub(super) card: bool,
+    /// Frames have a transparent interior for point queries; drop/marquee keep their bounds.
+    pub(super) frame: bool,
     /// 顶部操作横条世界几何（change: 2026-10-13-add-node-to-film-set-shortcut）；无横条为 `None`。
     pub(super) node_actions: Option<layout::NodeActionLayout>,
 }
@@ -78,11 +67,11 @@ pub(crate) struct InteractionSnapshot {
     /// 是否为普通 overview 画布（非模型聚焦/图片聚焦）。纯视口增量只在 overview 下接受
     /// （change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3）。
     pub(crate) overview: bool,
-    focus_closes: Option<Vec<(String, (f32, f32, f32, f32))>>,
     pub(super) nodes: Vec<SnapshotNode>,
     pub(super) edges: Vec<SnapshotEdge>,
-    /// 点命中顺序：按发射序列倒序（最上层先）。容器先于成员发射，因此成员控件先于容器背景命中；
-    /// 与 2D 绘制顺序完全一致（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D2）。
+    /// 导演区边框胶囊的命中几何（Bevy 2D）：画在 3D 线框上，点它选中导演区。
+    pub(super) scene_area_labels: Vec<layout::SceneAreaLabelGeometry>,
+    /// 点命中顺序：按发射序列倒序（最上层先）。
     pub(super) order: Vec<usize>,
     /// 两个把手只在合法 scene 投影声明可见时存在（冷路径生成）。
     pub(super) aggregate_handles: Option<[(String, Vec2); 2]>,
@@ -104,9 +93,11 @@ pub(crate) struct InteractionSnapshot {
     pub(super) order_rank: Vec<u32>,
     pub(super) viewport: (f32, f32, f32),
     pub(super) surface: Option<(f32, f32)>,
+    pub(super) hover: Option<crate::protocol::NodeHover>,
+    pub(super) selected_edge: Option<String>,
 }
 
-/// 节点参与空间候选的外接矩形：片场用真实范围 AABB，其余用节点矩形。
+/// 节点参与空间候选的外接矩形。
 pub(super) fn node_bounds(node: &SnapshotNode) -> (f32, f32, f32, f32) {
     node.bounds
 }
@@ -120,42 +111,16 @@ fn union(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> (f32, f32, f32, f3
     (left, top, right - left, bottom - top)
 }
 
-/// 点命中可触及的节点范围：节点几何 + 屏幕固定的操作横条/组运行状态芯片。
+/// 点命中可触及的节点范围：节点几何 + 屏幕固定的操作横条。
 ///
 /// 横条按屏幕像素排版后换算回世界坐标，可能明显超出节点矩形（甚至在视口边缘被夹住），
 /// 因此它必须计入空间候选，否则「画在哪、点在哪」会出现命不中的回归（design D7 / 任务 7.3）。
 pub(super) fn node_hit_bounds(node: &SnapshotNode) -> (f32, f32, f32, f32) {
     let mut rect = node_bounds(node);
-    for p in &node.group_outline {
-        rect = union(rect, (p.x, p.y, 0., 0.));
-    }
-    // The badge is deliberately outside the structural group rectangle. Keep its complete
-    // polygon in the broad phase as well as the outline/tail; otherwise the lower half can be
-    // filtered out before `path_contains` gets a chance to perform the exact hit test.
-    for p in &node.group_badge {
-        rect = union(rect, (p.x, p.y, 0., 0.));
-    }
-    if let Some(status) = node.group_status {
-        rect = union(rect, status);
-    }
     if let Some(actions) = &node.node_actions {
         rect = union(rect, actions.bar);
     }
     rect
-}
-
-/// 徽标命中多边形：模型投影包围盒的闭合四角；无徽标为空。
-fn badge_polygon(node: &crate::protocol::GraphNode) -> Vec<Vec2> {
-    match crate::canvas_query::group_model::badge_rect(node) {
-        Some(rect) => vec![
-            Vec2::new(rect.x, rect.y),
-            Vec2::new(rect.x + rect.z, rect.y),
-            Vec2::new(rect.x + rect.z, rect.y + rect.w),
-            Vec2::new(rect.x, rect.y + rect.w),
-            Vec2::new(rect.x, rect.y),
-        ],
-        None => Vec::new(),
-    }
 }
 
 /// 重建节点网格（只在完整场景接受点调用；位置增量用 `relocate`）。
@@ -234,7 +199,7 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
         })
         .collect();
 
-    // 命中顺序：按发射序列倒序，最上层（最后绘制）优先；容器背景自然排在成员之后。
+    // 命中顺序：按发射序列倒序，最上层（最后绘制）优先。
     let order: Vec<usize> = (0..nodes.len()).rev().collect();
 
     let mut adjacency = vec![Vec::new(); nodes.len()];
@@ -260,39 +225,14 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
     let nodes_len = nodes.len();
     InteractionSnapshot {
         generation,
-        focus_closes: scene
-            .model_focus
-            .as_ref()
-            .filter(|_| !scene.model_focus_context.is_empty())
-            .map(|_| {
-                scene
-                    .model_focus_context
-                    .iter()
-                    .filter_map(|entry| {
-                        if !crate::canvas_query::focus_context::close_enabled(scene, &entry.node_id)
-                        {
-                            return None;
-                        }
-                        let original = node_map.get(entry.node_id.as_str())?;
-                        let node = crate::canvas_query::focus_context::node(scene, original);
-                        Some((
-                            entry.node_id.clone(),
-                            crate::canvas_query::focus_context::close_rect(&node),
-                        ))
-                    })
-                    .collect()
-            }),
+        hover: scene.hover.clone(),
+        selected_edge: scene.selection.edge.clone(),
         overview: scene.model_focus.is_none()
             && scene.image_focus.is_none()
             && scene.video_focus.is_none(),
         action_descriptors: scene
             .node_actions
             .iter()
-            .filter(|(id, _)| {
-                node_map
-                    .get(id.as_str())
-                    .is_some_and(|node| node.group.as_ref().is_none_or(|group| group.action_bar))
-            })
             .filter_map(|(id, actions)| {
                 let index = *node_index.get(id)?;
                 Some((index, actions.clone()))
@@ -303,6 +243,7 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
         node_index,
         adjacency,
         aggregate_selection,
+        scene_area_labels: layout::scene_area_labels(scene),
         nodes,
         edges,
         order_rank: build_order_rank(&order, nodes_len),
@@ -335,27 +276,10 @@ fn snapshot_node(
     viewport: (f32, f32, f32),
     surface: Option<&crate::protocol::SurfaceSize>,
 ) -> SnapshotNode {
-    let group = node.group.is_some();
-    let group_collapsed = node.group.as_ref().is_some_and(|g| g.collapsed);
-    let film_set = node.composite_asset.is_some();
-    let selected = false; // resize handle 只对单选节点；由 scene.selection 决定，见下。
-    let _ = selected;
-    let output_capable_group = group
-        && node
-            .group
-            .as_ref()
-            .is_some_and(|group| group.output_capable_leaf_count > 0);
-    // 片场纯模型：不暴露端口、关闭/历史/resize 控件；命中只用范围几何。
-    let (input_port, output_port) = if film_set {
-        (None, None)
-    } else if group {
-        (None, output_capable_group.then(|| layout::port(node, true)))
-    } else {
-        (
-            Some(layout::port(node, false)),
-            Some(layout::port(node, true)),
-        )
-    };
+    // `card` 只表示“有内容卡片”（普通卡片/模型预览）；2D 组是空框，没有内容卡，
+    // 但仍必须可点、可拖、可缩放并显示顶部栏。
+    let card = node.chrome.is_card();
+    let interactable = !node.chrome.is_none();
     let history_strip = if !layout::has_history_strip(node) {
         None
     } else {
@@ -366,25 +290,9 @@ fn snapshot_node(
             node.height,
         ))
     };
-    // 复合资产：保存真实范围几何（形状由 presentation 声明），AABB 仅作粗筛。
-    let scope_geometry = film_set.then(|| scope::node_scope(node));
-    let bounds = match &scope_geometry {
-        Some(scope) => (
-            scope.aabb.x,
-            scope.aabb.y,
-            scope.aabb.width,
-            scope.aabb.height,
-        ),
-        None if group_collapsed => {
-            let rect = crate::canvas_query::group_model::presentation_rect(node);
-            (rect.x, rect.y, rect.z, rect.w)
-        }
-        None => (node.x, node.y, node.width, node.height),
-    };
-    // 绘制、完整快照与视口增量共用徽标/背板锚点。group 只有声明 `actionBar`（普通组与片场组
-    // 都由呈现层声明）时才暴露横条命中，避免旧场景出现「看不见但能点」的动作热区。
-    let actions_visible = !group || node.group.as_ref().is_some_and(|group| group.action_bar);
-    let node_actions = actions_visible
+    // `chrome.none` 的世界对象不在画布上绘制动作横条（动作留在原生菜单），
+    // 因此也不保留命中的隐形横条。
+    let node_actions = interactable
         .then(|| node_actions.get(&node.id))
         .flatten()
         .and_then(|actions| {
@@ -399,42 +307,21 @@ fn snapshot_node(
         initial_position: Vec2::new(node.x, node.y),
         layout_bounds: (node.x, node.y, node.width, node.height),
         id: node.id.clone(),
-        group,
-        group_collapsed,
-        group_badge: badge_polygon(node),
-        group_outline: if !node.group.as_ref().is_some_and(|group| group.collapsed) {
-            crate::canvas_query::group_model::outline(node)
-        } else {
-            Vec::new()
-        },
-        ghost: node.ghost || crate::canvas_query::shot_preview::hidden(node),
-        composite_asset: film_set,
-        bounds,
-        scope: scope_geometry,
-        center: if group_collapsed {
-            Vec2::new(bounds.0 + bounds.2 / 2., bounds.1 + bounds.3 / 2.)
-        } else {
-            Vec2::new(node.x + node.width / 2., node.y + node.height / 2.)
-        },
-        input_port,
-        output_port,
-        output_capable_group,
-        history_strip,
-        group_status: (!node.group.as_ref().is_some_and(|group| group.collapsed))
-            .then(|| layout::group_run_status_rect(node))
-            .flatten(),
+        ghost: node.ghost,
+        bounds: (node.x, node.y, node.width, node.height),
+        center: Vec2::new(node.x + node.width / 2., node.y + node.height / 2.),
+        // 世界模型没有内容卡片：端口/预览/历史条都不可见，也不能留下可命中的隐形矩形。
+        input_port: card.then(|| layout::port(node, false)),
+        output_port: card.then(|| layout::port(node, true)),
+        history_strip: card.then_some(history_strip).flatten(),
         // resize 抓手只在选中时命中；快照构建时按 selection 决定（见 `apply_selection`）。
         resize: None,
-        resizable: node.resizable,
-        preview: if film_set {
-            None
-        } else {
-            (node.model_preview.is_some() && node.model.is_some())
-                .then(|| layout::content_rect(node))
-        },
-        // 拍摄镜头预览：内容区命中矩形（标题区在上）；只有内容区建立拍摄播放入口（design D6）。
-        shot_preview_content: crate::canvas_query::shot_preview::is_shot_preview_node(node)
-            .then(|| crate::canvas_query::shot_preview::content_rect_of(node)),
+        resizable: interactable && node.resizable,
+        // 命中与拖拽按“可交互画布对象”判定：2D 组空框也要能选中；世界对象仍排除。
+        card: interactable,
+        frame: matches!(node.chrome, crate::protocol::NodeChrome::Frame { .. }),
+        preview: (card && node.model_preview.is_some() && node.model.is_some())
+            .then(|| layout::content_rect(node)),
         node_actions,
     }
 }
@@ -443,45 +330,19 @@ fn snapshot_node(
 pub(super) fn apply_selection(snapshot: &mut InteractionSnapshot, selected: &[String]) {
     let set: std::collections::HashSet<&str> = selected.iter().map(String::as_str).collect();
     for node in &mut snapshot.nodes {
-        // 片场：范围右顶点/右下角可拖拽缩放（拖动即等比缩放整个片场内容）。
         // Selection can narrow an accepted capability, never grant a missing one.
-        if set.len() != 1
-            || !set.contains(node.id.as_str())
-            || !node.resizable
-            || node.group_collapsed
-        {
+        // `resizable` 已在快照期按 chrome 收窄：世界模型没有卡片尺寸抓手。
+        if set.len() != 1 || !set.contains(node.id.as_str()) || !node.resizable {
             node.resize = None;
-        } else if let Some(scope) = &node.scope {
-            node.resize = Some(scope::grip(scope));
-        } else if node.group {
-            // 组容器：四个角都能拖拽缩放（与绘制的四角角标同源）。
-            node.resize = Some(scope::corners_grip(layout::resize_corner_rects(
+        } else {
+            node.resize = Some(ResizeGrip::for_bounds(
                 node.bounds.0,
                 node.bounds.1,
                 node.bounds.2,
                 node.bounds.3,
-            )));
-        } else {
-            let (x, y, width, height) =
-                layout::resize_rect(node.bounds.0, node.bounds.1, node.bounds.2, node.bounds.3);
-            node.resize = Some(ScopeGrip::Rect(ScopeRect {
-                x,
-                y,
-                width,
-                height,
-            }));
+            ));
         }
     }
-}
-
-/// 抓手索引 → 方向名（8 抓手为 `n/ne/e/se/s/sw/w/nw`；组四角为 `nw/ne/sw/se`；
-/// 普通矩形右下角返回 `None`）。
-fn handle_name(grip: &ScopeGrip, index: usize) -> Option<String> {
-    let names: &[&str] = match grip {
-        ScopeGrip::Corners(_) => &scope::CORNER_NAMES,
-        _ => &scope::HANDLE_NAMES,
-    };
-    names.get(index).map(|name| (*name).to_owned())
 }
 
 impl InteractionSnapshot {
@@ -497,7 +358,8 @@ impl InteractionSnapshot {
         self.node_grid.relocate(index, bounds);
     }
 
-    /// 点查询的候选半径（世界单位）。    ///
+    /// 点查询的候选半径（世界单位）。
+    ///
     /// 端口/抓手的命中半径随 zoom 放大（`10/zoom`），节点顶部操作横条按屏幕像素排版后换算回
     /// 世界坐标（约 `48/zoom` 的偏移），因此候选窗口必须同时覆盖两者；这样既不会漏掉横条，
     /// 也不会因为固定 64 世界单位在低 zoom 下漏判。
@@ -550,24 +412,13 @@ impl InteractionSnapshot {
         candidates
     }
 
-    /// 点命中：悬停边删除按钮 → 节点端口/关闭/历史/抓手 → 节点本体 → 悬停保持区 → 边。
+    /// 点命中：悬停边删除按钮 → 节点端口/控件/抓手 → 节点本体 → 悬停保持区 → 边。
     pub(crate) fn point_hit(
         &self,
         world: Vec2,
         zoom: f32,
         hovered_edge: Option<&str>,
     ) -> Option<PointHit> {
-        if let Some(closes) = &self.focus_closes {
-            return closes.iter().rev().find_map(|(id, (x, y, w, h))| {
-                (world.x >= *x && world.x <= x + w && world.y >= *y && world.y <= y + h).then(
-                    || PointHit::NodeAction {
-                        node_id: id.clone(),
-                        action_id: crate::canvas_query::focus_context::CLOSE_ACTION.into(),
-                        menu: false,
-                    },
-                )
-            });
-        }
         let radius = layout::hit_radius(zoom);
         // 多选横条优先：在节点和把手之上（change: canvas-grouping-redesign）。
         if let Some(layout) = &self.selection_action_layout {
@@ -593,17 +444,68 @@ impl InteractionSnapshot {
                 }
             }
         }
-        // 悬停连线的删除按钮优先：先于节点判定，避免节点压住连线中点被误判。
-        // 命中区在视觉按钮外扩 `EDGE_DELETE_HIT_PADDING`，补上标签与按钮之间的间隙
-        // （修复：删除按钮悬停丢失）。
+        // 导演区边框胶囊画在 3D 线框上、位于节点之上：先判标签，点它选中导演区。
+        for label in &self.scene_area_labels {
+            let offset = world - label.center;
+            let along = offset.dot(label.axis).abs();
+            let across = offset.dot(label.axis.perp()).abs();
+            if along <= label.width / 2.0 && across <= label.height / 2.0 {
+                return Some(PointHit::Node {
+                    node_id: label.node_id.clone(),
+                });
+            }
+        }
+        // New pointer-following controls only exist on the selected edge.
         if let Some(edge_id) = hovered_edge
             && let Some(edge) = self.edges.iter().find(|edge| edge.id == edge_id)
         {
-            let center =
-                layout::edge_delete_center(edge.source_port, edge.target_port, edge.label_width);
-            if layout::in_rect(world, layout::edge_delete_hit_rect(center)) {
-                return Some(PointHit::EdgeDelete {
-                    edge_id: edge_id.to_owned(),
+            let cursor = self
+                .hover
+                .as_ref()
+                .filter(|h| h.edge_id.as_deref() == Some(edge_id))
+                .and_then(|h| h.cursor);
+            if cursor.is_none() || self.selected_edge.as_deref() == Some(edge_id) {
+                let center = cursor
+                    .map(|p| {
+                        curve::closest_edge_point(
+                            Vec2::new(p.x, p.y),
+                            edge.source_port,
+                            edge.target_port,
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        layout::edge_delete_center(
+                            edge.source_port,
+                            edge.target_port,
+                            edge.label_width,
+                        )
+                    });
+                if layout::in_rect(world, layout::edge_delete_hit_rect(center)) {
+                    return Some(PointHit::EdgeDelete {
+                        edge_id: edge_id.to_owned(),
+                    });
+                }
+            }
+        }
+        // Keep the acquired side active around its fixed anchor, including the
+        // half-button extension inside the node. Never acquire the other side here.
+        if let Some(hover) = &self.hover
+            && let Some(node_id) = &hover.node_id
+            && let Some(index) = self.node_index.get(node_id)
+        {
+            let node = &self.nodes[*index];
+            let point = match hover.port.as_deref() {
+                Some("input") => node.input_port,
+                Some("output") => node.output_port,
+                _ => None,
+            };
+            if !node.ghost
+                && let Some(anchor) = point
+                && world.distance(anchor) <= layout::magnetic_port_radius(zoom)
+            {
+                return Some(PointHit::Port {
+                    node_id: node_id.clone(),
+                    side: hover.port.clone().unwrap(),
                 });
             }
         }
@@ -612,16 +514,6 @@ impl InteractionSnapshot {
             let node = &self.nodes[index];
             if node.ghost {
                 continue;
-            }
-            if node
-                .group_status
-                .is_some_and(|rect| layout::in_rect(world, rect))
-            {
-                return Some(PointHit::NodeAction {
-                    node_id: node.id.clone(),
-                    action_id: "group-run-status".into(),
-                    menu: false,
-                });
             }
             // 顶部操作横条优先命中（change: 2026-10-13-add-node-to-film-set-shortcut）：横条浮在
             // 节点上方，位于画布内，因此命中与画布手势并存——只有左键落在动作矩形内才触发动作。
@@ -645,57 +537,24 @@ impl InteractionSnapshot {
                     }
                 }
             }
-            // 片场纯模型：按范围多边形或范围顶部之上的模型身体命中（无端口/控件/preview）；
-            // 选中时抓手优先命中 resize（拖动即等比缩放整个片场内容）。
-            if node.composite_asset {
-                if let Some(scope) = &node.scope {
-                    if let Some((grip, handle)) = node.resize.as_ref().and_then(|grip| {
-                        scope::grip_hit(grip, world, DIAMOND_GRIP_TOLERANCE)
-                            .map(|handle| (grip, handle))
-                    }) {
-                        return Some(PointHit::Resize {
-                            node_id: node.id.clone(),
-                            handle: handle_name(grip, handle),
-                        });
-                    }
-                    if scope::pick_contains(scope, world) {
-                        return Some(PointHit::FilmScope {
-                            node_id: node.id.clone(),
-                        });
-                    }
-                }
-                continue;
-            }
-            if node.group {
-                if node.output_capable_group
-                    && let Some(output) = node.output_port
-                    && world.distance(output) <= radius
+            for (side, point) in [("input", node.input_port), ("output", node.output_port)] {
+                if let Some(point) = point
+                    && world.distance(point) <= radius
                 {
                     return Some(PointHit::Port {
                         node_id: node.id.clone(),
-                        side: "output".to_owned(),
+                        side: side.to_owned(),
                     });
-                }
-            } else {
-                for (side, point) in [("input", node.input_port), ("output", node.output_port)] {
-                    if let Some(point) = point
-                        && world.distance(point) <= radius
-                    {
-                        return Some(PointHit::Port {
-                            node_id: node.id.clone(),
-                            side: side.to_owned(),
-                        });
-                    }
                 }
             }
             // resize 抓手优先于历史条：若仍重叠则 resize 胜出
             // （change: 2026-10-12-unify-generation-history-strip，design D4）。
-            if let Some((grip, handle)) = node.resize.as_ref().and_then(|grip| {
-                scope::grip_hit(grip, world, DIAMOND_GRIP_TOLERANCE).map(|handle| (grip, handle))
-            }) {
+            if let Some(grip) = &node.resize
+                && grip.hit(world, radius)
+            {
                 return Some(PointHit::Resize {
                     node_id: node.id.clone(),
-                    handle: handle_name(grip, handle),
+                    handle: None,
                 });
             }
             if node
@@ -714,26 +573,21 @@ impl InteractionSnapshot {
                     node_id: node.id.clone(),
                 });
             }
-            // 拍摄镜头预览内容区（change: 2026-10-15，design D6）：只有内容区建立拍摄播放入口，
-            // 标题区与卡片边框保持普通 Node 命中（不误开播）。
-            if node
-                .shot_preview_content
-                .is_some_and(|rect| layout::in_rect(world, rect))
-            {
-                return Some(PointHit::ShotPreview {
-                    node_id: node.id.clone(),
-                });
-            }
-            if crate::canvas_query::group_model::path_contains(&node.group_badge, world) {
-                return Some(PointHit::NodeAction {
-                    node_id: node.id.clone(),
-                    action_id: "group-badge-select".into(),
-                    menu: false,
-                });
-            }
-            if (!node.group_collapsed && layout::in_rect(world, node.bounds))
-                || crate::canvas_query::group_model::path_contains(&node.group_outline, world)
-            {
+            // 世界模型（`chrome.none`）没有卡片本体：点它只能经渲染器的模型拾取命中，
+            // 这里不再返回可能是迁移前残留矩形的 `Node` 命中。
+            let body_hit = if node.frame {
+                let (x, y, width, height) = node.bounds;
+                let r = crate::scope_visual::FRAME_RADIUS
+                    .min(width / 2.0)
+                    .min(height / 2.0);
+                let q = (world - Vec2::new(x + width / 2.0, y + height / 2.0)).abs()
+                    - Vec2::new(width / 2.0 - r, height / 2.0 - r);
+                let distance = q.max(Vec2::ZERO).length() + q.x.max(q.y).min(0.0) - r;
+                distance.abs() <= 6.0 / zoom.max(0.01)
+            } else {
+                layout::in_rect(world, node.bounds)
+            };
+            if node.card && body_hit {
                 return Some(PointHit::Node {
                     node_id: node.id.clone(),
                 });
@@ -743,7 +597,8 @@ impl InteractionSnapshot {
         // 标签走到按钮时，这一段既不在曲线命中带、也还没进按钮；把它判为该边可以让悬停
         // 连续，按钮不会在途中消失（修复：删除按钮悬停丢失）。只维持悬停，
         // 点击此处仍是连线本体（无操作），删除只由上面的按钮命中区触发。
-        if let Some(edge_id) = hovered_edge
+        if self.hover.as_ref().and_then(|h| h.cursor).is_none()
+            && let Some(edge_id) = hovered_edge
             && let Some(edge) = self.edges.iter().find(|edge| edge.id == edge_id)
             && layout::in_rect(
                 world,
@@ -782,20 +637,13 @@ impl InteractionSnapshot {
 
     /// 框选：与归一化矩形**正面积**相交且可交互（非 ghost）的节点，保持当前发射顺序。
     ///
-    /// 复合资产使用真实范围多边形 SAT；仅触边不选中（change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
     /// 候选来自空间网格（design D7 / 任务 7.3），因此只遍历可能相交的节点；结果仍按发射顺序返回
-    /// （与 scene.nodes 一致，容器先于成员），未驻留/离屏节点照常参与框选。
+    /// （与 scene.nodes 一致），未驻留/离屏节点照常参与框选。
     pub(crate) fn marquee(&self, x: f32, y: f32, width: f32, height: f32) -> Vec<String> {
         let left = x.min(x + width);
         let right = x.max(x + width);
         let top = y.min(y + height);
         let bottom = y.max(y + height);
-        let rect = ScopeRect {
-            x: left,
-            y: top,
-            width: right - left,
-            height: bottom - top,
-        };
         let mut candidates = self
             .node_grid
             .candidates((left, top, right - left, bottom - top));
@@ -803,13 +651,11 @@ impl InteractionSnapshot {
         candidates
             .into_iter()
             .filter_map(|index| self.nodes.get(index))
-            .filter(|node| !node.ghost)
-            .filter(|node| match &node.scope {
-                Some(scope) => scope::intersects_rect(scope, rect),
-                None => {
-                    let (nx, ny, nw, nh) = node.bounds;
-                    nx < right && nx + nw > left && ny < bottom && ny + nh > top
-                }
+            // 世界对象没有内容卡片：不能用迁移前的卡片矩形参与框选/点击框选。
+            .filter(|node| node.card && !node.ghost)
+            .filter(|node| {
+                let (nx, ny, nw, nh) = node.bounds;
+                nx < right && nx + nw > left && ny < bottom && ny + nh > top
             })
             .map(|node| node.id.clone())
             .collect()
@@ -847,151 +693,35 @@ impl InteractionSnapshot {
         candidates
             .into_iter()
             .filter_map(|index| self.nodes.get(index))
-            .filter(|node| node.id != source_id && !node.ghost)
+            // 世界对象没有卡片/端口，不能成为拖动粘连或合并的目标。
+            .filter(|node| node.card && node.id != source_id && !node.ghost)
             .filter(|node| (node.center.x - source.center.x) * sign > 0.0)
             .map(|node| ProbeCandidate {
                 node_id: node.id.clone(),
                 direction: direction.to_owned(),
-                connectable: !node.group && !node.composite_asset,
+                connectable: true,
             })
             .collect()
     }
 
     /// 通用 drop target 查询：按既有命中顺序固定**最上层实际节点**，排除来源与 ghost。
     ///
-    /// 只判定节点本体范围（复合资产用真实 shape），不命中端口、控件、resize 抓手、连线或把手。
+    /// 只判定节点本体范围，不命中端口、控件、resize 抓手、连线或把手。
     /// 返回 `None` 表示该点无实际节点（查询成功但继续普通移动）；调用方再按业务 owner 过滤。
-    /// 不预过滤任何业务类型——否则被上层普通卡片遮住的片场会错误接收
-    /// （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D5）。
     pub(crate) fn drop_target(&self, world: Vec2, excluded: &[String]) -> Option<String> {
         if !world.x.is_finite() || !world.y.is_finite() {
             return None;
         }
         for index in self.point_node_candidates(world, 1.0) {
             let node = &self.nodes[index];
-            if node.ghost || excluded.iter().any(|id| id == &node.id) {
+            if !node.card || node.ghost || excluded.iter().any(|id| id == &node.id) {
                 continue;
             }
-            if node.composite_asset {
-                if node
-                    .scope
-                    .as_ref()
-                    .is_some_and(|scope| scope::contains(scope, world))
-                {
-                    return Some(node.id.clone());
-                }
-                continue;
-            }
-            if (!node.group_collapsed
-                && (layout::in_rect(world, node.bounds)
-                    || crate::canvas_query::group_model::path_contains(&node.group_badge, world)))
-                || crate::canvas_query::group_model::path_contains(&node.group_outline, world)
-            {
+            if layout::in_rect(world, node.bounds) {
                 return Some(node.id.clone());
             }
         }
         None
-    }
-
-    /// 复合资产范围几何轻量读取：nodeId、shape、四顶点、AABB 与基准矩形。
-    ///
-    /// 只承载拖动提示所需几何，不含 SceneIR、mesh 或完整 scene JSON
-    /// （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D5）。
-    pub(crate) fn scope_entries(&self) -> Vec<ScopeGeometryEntry> {
-        self.nodes
-            .iter()
-            .filter_map(|node| {
-                if let Some(scope) = node.scope.as_ref() {
-                    return Some(ScopeGeometryEntry {
-                        node_id: node.id.clone(),
-                        shape: if scope::is_diamond(scope.shape) {
-                            "isometric-diamond".to_owned()
-                        } else {
-                            "rect".to_owned()
-                        },
-                        vertices: [
-                            [scope.vertices[0].x, scope.vertices[0].y],
-                            [scope.vertices[1].x, scope.vertices[1].y],
-                            [scope.vertices[2].x, scope.vertices[2].y],
-                            [scope.vertices[3].x, scope.vertices[3].y],
-                        ],
-                        handles: [
-                            [scope.handles[0].x, scope.handles[0].y],
-                            [scope.handles[1].x, scope.handles[1].y],
-                            [scope.handles[2].x, scope.handles[2].y],
-                            [scope.handles[3].x, scope.handles[3].y],
-                            [scope.handles[4].x, scope.handles[4].y],
-                            [scope.handles[5].x, scope.handles[5].y],
-                            [scope.handles[6].x, scope.handles[6].y],
-                            [scope.handles[7].x, scope.handles[7].y],
-                        ],
-                        aabb: [
-                            scope.aabb.x,
-                            scope.aabb.y,
-                            scope.aabb.width,
-                            scope.aabb.height,
-                        ],
-                        base: [
-                            scope.base.x,
-                            scope.base.y,
-                            scope.base.width,
-                            scope.base.height,
-                        ],
-                    });
-                }
-                // Film-set groups keep their scene inside the free-standing 3D badge, which
-                // lives below the structural bubble. The drop overlay needs the badge rect
-                // so dragging a model onto the visible scene advertises the same target as
-                // the body; unrelated groups are filtered by the contribution's owner check.
-                if node.group && !node.group_collapsed && !node.group_badge.is_empty() {
-                    let min_x = node
-                        .group_badge
-                        .iter()
-                        .map(|point| point.x)
-                        .fold(f32::INFINITY, f32::min);
-                    let max_x = node
-                        .group_badge
-                        .iter()
-                        .map(|point| point.x)
-                        .fold(f32::NEG_INFINITY, f32::max);
-                    let min_y = node
-                        .group_badge
-                        .iter()
-                        .map(|point| point.y)
-                        .fold(f32::INFINITY, f32::min);
-                    let max_y = node
-                        .group_badge
-                        .iter()
-                        .map(|point| point.y)
-                        .fold(f32::NEG_INFINITY, f32::max);
-                    let (x, y, width, height) = (min_x, min_y, max_x - min_x, max_y - min_y);
-                    let (cx, cy) = (x + width / 2., y + height / 2.);
-                    return Some(ScopeGeometryEntry {
-                        node_id: node.id.clone(),
-                        shape: "rect".to_owned(),
-                        vertices: [
-                            [x, y],
-                            [x + width, y],
-                            [x + width, y + height],
-                            [x, y + height],
-                        ],
-                        handles: [
-                            [cx, y],
-                            [x + width, y],
-                            [x + width, cy],
-                            [x + width, y + height],
-                            [cx, y + height],
-                            [x, y + height],
-                            [x, cy],
-                            [x, y],
-                        ],
-                        aabb: [x, y, width, height],
-                        base: [x, y, width, height],
-                    });
-                }
-                None
-            })
-            .collect()
     }
 }
 

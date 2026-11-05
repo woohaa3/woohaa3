@@ -7,7 +7,10 @@
  */
 import { isBoundedId, isJsonObject } from "../validation.js";
 import { isModelKey } from "../task/model-identity.js";
-import type { FrozenShotImageReference } from "./film-set-shot-image-reference.js";
+import {
+  decodeWorldCaptureGenerationBinding,
+  type WorldCaptureGenerationBinding
+} from "./world-capture-pipeline-contract.js";
 
 export const CANVAS_API_BASE_PATH = "/api/canvases" as const;
 export const CANVAS_HEALTH_BASE_PATH = "/api/canvas-storage/health" as const;
@@ -23,7 +26,12 @@ export type CanvasRunRequest = {
   modelKey: string;
   prompt: string;
   parameters: Record<string, unknown>;
-  shotImageReferences?: FrozenShotImageReference[];
+  /**
+   * T10: exact world-capture input frozen at click time. The Canvas service verifies
+   * the binding against its own trusted claim ledger before durable acceptance; later
+   * canvas changes never rewrite it.
+   */
+  worldCapture?: WorldCaptureGenerationBinding;
 };
 
 export type CanvasRunResponse =
@@ -63,10 +71,11 @@ export function decodeCanvasRunRequest(
   if (body.parameters !== undefined && !isJsonObject(body.parameters)) {
     return { ok: false, code: "malformed-request", message: "parameters 必须是对象" };
   }
-  if (body.shotImageReferences !== undefined && (!Array.isArray(body.shotImageReferences) || body.shotImageReferences.length > 128 || !body.shotImageReferences.every(ref => isJsonObject(ref)
-    && ["slotId", "sourceNodeId", "filmSetNodeId", "clipId", "contentIdentity", "profileKey"].every(key => isBoundedId(ref[key]))
-    && typeof ref.background === "string" && /^#[0-9a-f]{6}$/i.test(ref.background)))) {
-    return { ok: false, code: "malformed-request", message: "shotImageReferences 格式无效" };
+  const worldCapture = body.worldCapture === undefined
+    ? undefined
+    : decodeWorldCaptureGenerationBinding(body.worldCapture);
+  if (worldCapture !== undefined && !worldCapture.ok) {
+    return { ok: false, code: "malformed-request", message: "worldCapture 不是可信冻结输入" };
   }
   return {
     ok: true,
@@ -77,8 +86,8 @@ export function decodeCanvasRunRequest(
       jobId: jobId as string,
       modelKey: modelKey as string,
       prompt: body.prompt,
-      ...(body.shotImageReferences === undefined ? {} : { shotImageReferences: body.shotImageReferences as FrozenShotImageReference[] }),
-      parameters: (body.parameters as Record<string, unknown> | undefined) ?? {}
+      parameters: (body.parameters as Record<string, unknown> | undefined) ?? {},
+      ...(worldCapture?.ok ? { worldCapture: worldCapture.value } : {})
     }
   };
 }

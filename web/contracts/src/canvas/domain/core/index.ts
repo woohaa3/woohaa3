@@ -19,14 +19,11 @@ export * from "./connection-adapters";
 export * from "./composite-asset-identity";
 export * from "./connection-rules";
 export * from "./grid";
-export * from "./group-ops";
 export * from "./incoming-edges";
 export * from "./input-role";
 export * from "./input-role-contract";
 export * from "./input-slots";
 export * from "./mention-token";
-export * from "./shot-reference";
-export * from "./sticky-note-node";
 
 export * from "./node-factory";
 export * from "./node-removal";

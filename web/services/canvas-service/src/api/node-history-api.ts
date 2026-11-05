@@ -11,8 +11,10 @@
  * POST /api/canvas-node-history/:canvasId/:nodeId/:entryId/apply   原子恢复
  * GET  /api/canvas-node-history/:canvasId/:nodeId/:entryId/preview  受控媒体预览（同源重定向）
  * GET  /api/canvas-node-history/:canvasId/:nodeId/:entryId/poster   视频海报预览
- * GET  /api/canvas-node-history/:canvasId/:nodeId/:entryId/thumbnail 模型缩略图（受控派生 PNG）
  * ```
+ *
+ * 模型历史缩略图不再由服务端派生：前端在页面内用同一 Bevy 运行时离屏渲染
+ * （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
  *
  * 授权：所有路由在读取 repository **之前**校验调用方对目标画布的访问资格（服务令牌或
  * 本机），再校验 canvas/node/entry 归属；越权枚举返回稳定 not-found，绝不泄露种类、
@@ -51,13 +53,6 @@ export const CANVAS_NODE_HISTORY_MEDIA_BASE = "/api/media";
 /** 预览 302 从 `.../:canvas/:node/:entry/:action` 上跳四级到挂载的 `/api/`。 */
 const NODE_HISTORY_PREVIEW_UP_TO_API = "../../../../";
 
-export type NodeHistoryThumbnailPort = {
-  /** 为历史模型条目生成/复用缓存缩略图 PNG；失败返回稳定 code。 */
-  render(input: { canvasId: string; nodeId: string; entryId: string }): Promise<
-    { ok: true; png: Buffer; cached: boolean } | { ok: false; code: string; message: string }
-  >;
-};
-
 export type NodeHistoryRequestHandler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
 
 export type NodeHistoryRequestHandlerOptions = {
@@ -72,8 +67,6 @@ export type NodeHistoryRequestHandlerOptions = {
    * 服务令牌/本机访问（独立单元历史行为）。
    */
   authorizeWrite?: (input: { canvasId: string; req: IncomingMessage }) => Promise<{ ok: true } | { ok: false; status: number; code: string; message: string }>;
-  /** 模型缩略图作业；缺省时缩略图路由返回 renderer-unavailable。 */
-  thumbnail?: NodeHistoryThumbnailPort | null;
   logger?: (event: { event: string; status: number; code?: string }) => void;
 };
 
@@ -248,8 +241,6 @@ export function createNodeHistoryRequestHandler(options: NodeHistoryRequestHandl
           case "preview":
           case "poster":
             return await handleMediaPreview(res, options, canvasId, nodeId, entryId, action);
-          case "thumbnail":
-            return await handleThumbnail(res, options, canvasId, nodeId, entryId);
           default:
             sendError(res, 404, "NODE_HISTORY_NOT_FOUND", "未知的节点历史路由");
             return true;
@@ -380,7 +371,7 @@ async function handleApply(
   nodeId: string,
   entryId: string
 ): Promise<boolean> {
-  const outcome = await options.service.restore({ canvasId, nodeId, entryId });
+  const outcome = await options.service.restore({ canvasId, nodeId, entryId, rejectActiveGeneration: true });
   if (!outcome.ok) {
     const status = outcome.code === "not-found" ? 404
       : outcome.code === "canvas-not-found" ? 404
@@ -427,35 +418,6 @@ async function handleMediaPreview(
   res.setHeader("Location", `${NODE_HISTORY_PREVIEW_UP_TO_API}${CANVAS_NODE_HISTORY_MEDIA_BASE.replace(/^\/api\//, "")}/${mediaPath}${canvasHint}`);
   res.setHeader("Cache-Control", "private, max-age=300");
   res.end();
-  return true;
-}
-
-async function handleThumbnail(
-  res: ServerResponse,
-  options: NodeHistoryRequestHandlerOptions,
-  canvasId: string,
-  nodeId: string,
-  entryId: string
-): Promise<boolean> {
-  const entry = await options.service.getEntry({ canvasId, nodeId, entryId });
-  if (entry.kind !== "model") {
-    sendError(res, 404, "NODE_HISTORY_NOT_FOUND", "历史条目不存在");
-    return true;
-  }
-  if (!options.thumbnail) {
-    sendError(res, 503, "renderer-unavailable", "未配置模型缩略图作业");
-    return true;
-  }
-  const rendered = await options.thumbnail.render({ canvasId, nodeId, entryId });
-  if (!rendered.ok) {
-    sendError(res, ["renderer-unavailable", "renderer-start-failed", "composite-history-unavailable"].includes(rendered.code) ? 503 : 422, rendered.code, rendered.message);
-    return true;
-  }
-  res.statusCode = 200;
-  res.setHeader("Content-Type", "image/png");
-  res.setHeader("Content-Length", String(rendered.png.byteLength));
-  res.setHeader("Cache-Control", "private, max-age=300");
-  res.end(rendered.png);
   return true;
 }
 

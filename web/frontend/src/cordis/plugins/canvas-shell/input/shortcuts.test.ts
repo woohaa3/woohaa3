@@ -4,6 +4,15 @@
 import { describe, expect, it } from "vitest";
 import { isEditableElement, isMacPlatform, resolveCanvasShortcut, type ShortcutContext } from "./shortcuts.js";
 
+it("only duplicates when canvas input is writable and not editing", () => {
+  const event = { key: "d", ctrlKey: true, metaKey: false };
+  const context = { keyboardActive: true, editingFocus: false, isMac: false, writable: true };
+  expect(resolveCanvasShortcut(event, context)).toBe("duplicate");
+  expect(resolveCanvasShortcut(event, { ...context, writable: false })).toBeNull();
+  expect(resolveCanvasShortcut({ ...event, editableTarget: true }, context)).toBeNull();
+  expect(resolveCanvasShortcut(event, { ...context, editingFocus: true })).toBeNull();
+});
+
 function ctx(overrides: Partial<ShortcutContext> = {}): ShortcutContext {
   return { keyboardActive: true, editingFocus: false, isMac: false, writable: true, ...overrides };
 }

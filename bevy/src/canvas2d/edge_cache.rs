@@ -2,7 +2,9 @@
 //!
 //! change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs —— 端点读取 ECS `CanvasLayout`，
 //! 连线标签通过 `LabelRequests`（owner = 边批次实体）同步，块内不再保存标签实体。
-use super::{CanvasMaterials, geometry::Geometry, labels::Label, labels::LabelRequests, labels::LabelStyle};
+use super::{
+    CanvasMaterials, geometry::Geometry, labels::Label, labels::LabelRequests, labels::LabelStyle,
+};
 use crate::canvas_ecs::components::{CanvasLabelRole, CanvasLayout, EdgeVisual};
 use crate::{
     protocol::{Edge, Scene},
@@ -26,7 +28,12 @@ fn hovered(scene: &Scene, edge: &Edge) -> bool {
 }
 type Key = EdgeVisual;
 impl Key {
-    fn new(edge: &Edge, scene: &Scene, layouts: &HashMap<&str, CanvasLayout>, overlay_z: f32) -> Self {
+    fn new(
+        edge: &Edge,
+        scene: &Scene,
+        layouts: &HashMap<&str, CanvasLayout>,
+        overlay_z: f32,
+    ) -> Self {
         Self {
             id: edge.id.clone(),
             source: edge.source.clone(),
@@ -35,6 +42,12 @@ impl Key {
             bounds: bounds(edge, layouts),
             selected: scene.selection.edge.as_ref() == Some(&edge.id),
             hovered: hovered(scene, edge),
+            hover_cursor: scene
+                .hover
+                .as_ref()
+                .filter(|_| hovered(scene, edge))
+                .and_then(|h| h.cursor)
+                .map(|p| [p.x, p.y]),
             overlay_z: hovered(scene, edge).then_some(overlay_z),
         }
     }

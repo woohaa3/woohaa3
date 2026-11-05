@@ -74,7 +74,7 @@ export function buildGenerateBody(model: GrsaiModel, raw: Record<string, unknown
   const body: Record<string, unknown> = { model: model.id, prompt: promptText(raw), replyType: "async" };
   const images = uniqueUrls(raw.urls, raw.images);
   if (images.length > 0) body.images = images;
-  assignText(body, "aspectRatio", raw.aspectRatio);
+  assignText(body, "aspectRatio", raw.aspectRatio ?? raw.aspect_ratio);
   if (model.kind === "image") {
     assignText(body, "imageSize", raw.imageSize);
     assignText(body, "quality", raw.quality);

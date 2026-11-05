@@ -22,12 +22,9 @@ function canvasOf(): ServerCanvas {
       ...base.document,
       nodes: [
         { id: "source", type: "image", position: { x: 0, y: 0 }, width: 248, height: 232 },
-        { id: "target", type: "image", position: { x: 300, y: 0 }, width: 248, height: 232 },
-        { id: "group", type: "group", position: { x: 800, y: 0 }, width: 400, height: 400 },
-        { id: "hidden", type: "image", position: { x: 40, y: 40 }, width: 248, height: 232, parentId: "group" }
+        { id: "target", type: "image", position: { x: 300, y: 0 }, width: 248, height: 232 }
       ]
-    },
-    nodeData: { group: { groupCollapsed: true } }
+    }
   } as ServerCanvas;
 }
 
@@ -65,13 +62,10 @@ it("候选消失或换算不可用时移除高亮（不猜测几何）", () => {
   unavailable.update(canvas, drag);
   expect(document.querySelector(".node-merge-overlays")).toBeNull();
 
-  // 目标被删除 / 折叠组内隐藏：更新画面后高亮消失。
+  // 目标被删除：更新画面后高亮消失。
   const withoutTarget = { ...canvas, document: { ...canvas.document,
     nodes: canvas.document.nodes.filter((node) => node.id !== "target") } } as ServerCanvas;
   stale.update(withoutTarget, drag);
-  expect(document.querySelector(".node-merge-overlays")).toBeNull();
-
-  stale.update(canvas, { ...drag, targetNodeId: "hidden" });
   expect(document.querySelector(".node-merge-overlays")).toBeNull();
   stale.clear();
 });

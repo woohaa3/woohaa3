@@ -1,42 +1,11 @@
-//! Ordinary card drawing. Groups and film scopes keep their shared overlay order.
+//! Ordinary card drawing.
 use super::layout::{port, shortened, shows_content};
 use super::{geometry::Geometry, labels::Label};
 use crate::{
-    protocol::{GraphNode, NodeHover},
+    protocol::{GraphNode, NodeChrome, NodeHover},
     theme::ThemeResource,
 };
 use bevy::prelude::*;
-
-/// 拍摄镜头预览卡片正文与装饰
-/// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D8）。
-///
-/// 预览节点复用普通卡片外壳（标题/类型已在映射层投影为镜头名/静态·动态），但内容区改为
-/// **实时取景窗口**：GPU Sprite 由 `shot_node_preview` 摆放，这里只画标题区与状态承载面。
-/// 只显示状态文案（准备中/待更新/失败），不绘制播放按钮或进度条。
-/// `ready` 且无诊断时不覆盖内容面（交给实时画面）。
-pub(super) fn draw_shot_preview(
-    geometry: &mut Geometry,
-    theme: &ThemeResource,
-    node: &GraphNode,
-    index: usize,
-) -> Vec<Label> {
-    let z = 10.0 + index as f32 * 0.1 + 0.004;
-    let (cx, cy, cw, ch) = super::shot_preview::content_rect_of(node);
-    // 内容承载面：实时画面尚未就绪/待更新/失败时用主题内容底衬，保证状态文案可辨认。
-    geometry.rounded_rect(cx, cy, cw, ch, 3., z, theme.token_u32("canvasNodeContent"));
-    let mut labels = Vec::new();
-    // 状态文案：`ready` 且无诊断时返回空串（不覆盖实时画面），否则在内容区上沿展示。
-    let status = super::shot_preview::status_text(node, &shortened);
-    if !status.is_empty() {
-        labels.push((
-            status,
-            Vec2::new(cx + 12.0, cy + 10.0),
-            12.0,
-            theme.token_u32("canvasBodyText"),
-        ));
-    }
-    labels
-}
 
 pub(super) fn draw_static(
     geometry: &mut Geometry,
@@ -47,10 +16,13 @@ pub(super) fn draw_static(
     if node.kind.starts_with("focus-reference") {
         return super::focus_reference::draw(geometry, theme, node, index);
     }
-    // 便签整体换一套画法：没有内容区/种类符号/标题行，只画一张纸和正文。
-    // 必须先于 `compact_card` 判断 —— 便签缩到很小时也该保持便签的样子，不能退化成小卡片。
-    if node.kind == "sticky" {
-        return super::sticky_note::draw(geometry, theme, node, index);
+    match &node.chrome {
+        NodeChrome::Card => {}
+        NodeChrome::Frame { .. } => {
+            // Scope chrome is drawn once in the shared overlay, including hover/selection.
+            return Vec::new();
+        }
+        NodeChrome::None => return Vec::new(),
     }
     if super::layout::compact_card(node) {
         return super::compact_card::draw(geometry, theme, node, index);
@@ -87,7 +59,7 @@ pub(super) fn draw_static(
         z + 0.003,
         theme.token_u32("canvasNodeSurface"),
     );
-    if show_content && !super::shot_preview::is_shot_preview_node(node) {
+    if show_content {
         let (cx, cy, cw, ch) = super::layout::content_rect(node);
         geometry.rounded_rect(
             cx,
@@ -104,15 +76,9 @@ pub(super) fn draw_static(
     // 名称与尺寸不再画在卡片内部：选中/悬停时画在卡片上方外侧（见 `card_meta`）。
     // 卡片本身只留四边等宽窄边 + 内容，图片因此能铺满整张卡。
     let mut labels: Vec<Label> = Vec::new();
-    if super::shot_preview::is_shot_preview_node(node) {
-        labels.extend(draw_shot_preview(geometry, theme, node, index));
-        return labels;
-    }
-    // 正文画在内容区内部（标题行已移到卡片底部，不再占用顶部）。
+    // 正文画在内容区内部。
     let (bcx, bcy, bcw, _bch) = super::layout::content_rect(node);
-    // 换行宽度取内容区实际宽度（main 的 wrapped_lines + sixi 的窄内边距）：
-    // 先用满可用宽度换行，超过 6 行才在最后一行省略，而不是一行提前截断。
-    let body_lines = super::layout::wrapped_lines(&node.body, (bcw - 16.).max(1.), 12., 6);
+    let body_lines: Vec<&str> = node.body.lines().collect();
     for i in 0..6 {
         labels.push((
             if show_content
@@ -120,8 +86,7 @@ pub(super) fn draw_static(
                 && !node.busy
                 && !(node.model_preview.is_some() && node.model.is_some())
             {
-                // 已在 `wrapped_lines` 里换行并截断，这里原样取用。
-                body_lines.get(i).cloned().unwrap_or_default()
+                shortened(body_lines.get(i).unwrap_or(&""), (bcw - 16.).max(1.), 12.)
             } else {
                 String::new()
             },
@@ -158,9 +123,7 @@ pub(super) fn draw_hover_ports(
     hover: Option<&NodeHover>,
     index: usize,
 ) {
-    // 便签不连线，悬停时也不该冒出接线端点 —— 那是"可以拉线"的暗示，会误导用户去拖。
-    // 与 `bevyKindHasInput/HasOutput` 对 sticky 返回 false 是同一条规则的两层落点。
-    if node.kind == "sticky" {
+    if !node.chrome.is_card() {
         return;
     }
     let (accent, _, _) = theme.node_palette(&node.kind);
@@ -170,7 +133,8 @@ pub(super) fn draw_hover_ports(
     if let Some(hover) = hover.filter(|hover| hover.node_id.as_deref() == Some(node.id.as_str())) {
         let hovered_port = hover.port.as_deref();
         for (output, side) in [(false, "input"), (true, "output")] {
-            let p = port(node, output);
+            let p =
+                crate::canvas_query::layout::magnetic_port_center(port(node, output), hover, side);
             let ring = if hovered_port == Some(side) {
                 accent
             } else {
@@ -196,11 +160,13 @@ pub(crate) fn draw_selection_outline(
     node: &GraphNode,
     index: usize,
 ) {
-    // 便签有自己的一套选中描边：它是倾斜的圆角纸片，套用卡片的轴对齐外框 +
-    // 卡片底色内层（白面）会露出一圈白边、且与纸的角度对不齐。
-    if node.kind == "sticky" {
-        super::sticky_note::draw_selection_outline(geometry, theme, node, index);
-        return;
+    match &node.chrome {
+        NodeChrome::Card => {}
+        NodeChrome::Frame { .. } => {
+            // Scope overlay owns the single rounded contour for all interaction states.
+            return;
+        }
+        NodeChrome::None => return,
     }
     let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     let (width, height) = (node.width, node.height);
@@ -255,23 +221,15 @@ pub(super) fn draw(
     labels
 }
 
-/// Shared rectangle grip; interaction uses the same layout::resize_rect.
+/// 右下角矩形 resize 抓手；交互复用同一 `canvas_query::grip::ResizeGrip`。
 pub(super) fn draw_resize_grip(
     geometry: &mut Geometry,
     theme: &ThemeResource,
     node: &GraphNode,
     z: f32,
 ) {
-    let (x, y, w, h) = super::layout::resize_rect(node.x, node.y, node.width, node.height);
-    super::film_set::draw_scope_grip(
-        geometry,
-        theme,
-        &super::scope::ScopeGrip::Rect(super::scope::ScopeRect {
-            x,
-            y,
-            width: w,
-            height: h,
-        }),
-        z,
-    );
+    let grip =
+        crate::canvas_query::grip::ResizeGrip::for_bounds(node.x, node.y, node.width, node.height);
+    let color = theme.token_u32("canvasResizeHandle");
+    geometry.rounded_rect(grip.x, grip.y, grip.width, grip.height, 2.0, z, color);
 }

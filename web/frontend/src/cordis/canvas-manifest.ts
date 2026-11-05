@@ -23,6 +23,9 @@ import type { FrontendExtensionDefinition } from "./kernel.js";
 import { canvasNavigationExtension, CANVAS_NAVIGATION_PLUGIN_ID } from "./plugins/canvas-navigation/plugin.js";
 import { canvasRuntimeExtension, CANVAS_RUNTIME_PLUGIN_ID } from "./plugins/canvas-runtime/plugin.js";
 import { canvasShellExtension, CANVAS_SHELL_PLUGIN_ID } from "./plugins/canvas-shell/plugin.js";
+import { worldScopesExtension, WORLD_SCOPES_PLUGIN_ID } from "./plugins/world-scopes/plugin.js";
+import { worldCamerasExtension, WORLD_CAMERAS_PLUGIN_ID } from "./plugins/world-cameras/plugin.js";
+import { imageDirectorSceneExtension, IMAGE_DIRECTOR_PLUGIN_ID } from "./plugins/image-director-scene/plugin.js";
 import { canvasMenuExtension, CANVAS_MENU_PLUGIN_ID } from "./plugins/canvas-menu/plugin.js";
 import { mediaPreviewExtension, MEDIA_PREVIEW_PLUGIN_ID } from "./plugins/media-preview/plugin.js";
 import { mediaImportExtension, MEDIA_IMPORT_PLUGIN_ID } from "./plugins/media-import/plugin.js";
@@ -148,6 +151,16 @@ export const CANVAS_PLUGIN_CATALOG: readonly CanvasExtensionCatalogEntry[] = [
     required: true,
     configurable: false,
     create: () => canvasShellExtension()
+  },
+  { id: WORLD_SCOPES_PLUGIN_ID, name: "场景范围", description: "场景范围和组织上下文。", required: true, configurable: false, create: (options) => worldScopesExtension(options.canvasId) },
+  { id: IMAGE_DIRECTOR_PLUGIN_ID, name: "图片场景", description: "从图片创建模型与导演区。", required: true, configurable: false, create: (options) => imageDirectorSceneExtension({ canvasId: options.canvasId }) },
+  {
+    id: WORLD_CAMERAS_PLUGIN_ID,
+    name: "镜头",
+    description: "镜头卡片与共享世界镜头设置、绑定和历史恢复。",
+    required: true,
+    configurable: false,
+    create: (options) => worldCamerasExtension({ canvasId: options.canvasId })
   },
   // required：多画布切换器 chrome（当前标题 + 分页列表 + 新建 + 重命名）。
   {

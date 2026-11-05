@@ -11,6 +11,7 @@ bevy/target-host/
 bevy/core/target/
 desktop/target/
 desktop/supervisor/target/
+media-image/target/
 # Tauri 构建生成的能力/权限 schema（tauri-build 每次构建重写，不入库）
 desktop/gen/
 # 桌面打包时生成的输入（bundle 默认值等），不入库
@@ -22,6 +23,8 @@ web/frontend/src/bevy-wasm/*.wasm
 web/frontend/src/bevy-wasm/*.wasm.d.ts
 # photocraft 编辑器（client/photocraft）的 wasm-bindgen 产物，同样是纯构建输出，不入库。
 web/frontend/src/photocraft-wasm/
+# media-image（client/media-image）的 wasm-bindgen 产物，同样是纯构建输出，不入库。
+web/frontend/src/media-image-wasm/
 # 字体由构建脚本从 bevy/assets/fonts/ 复制到 public/，不入库（源文件在 bevy/ 下）。
 web/frontend/public/assets/
 

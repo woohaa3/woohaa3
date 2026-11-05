@@ -8,6 +8,8 @@ import type { MediaStorage } from "@woohaa3/contracts";
 import type { YjsDocumentRepository } from "./yjs-repository.js";
 
 export type RoomSubmitOptions = {
+  spatialContext?: import("../world-authoring/spatial-leases.js").SpatialWriteContext;
+  signal?: AbortSignal;
   /**
    * 每画布访问屏障的 write 复核（change: 2026-10-13-add-enterprise-access-and-production-deployment，
    * 任务 4.5/6.2/6.3）。
@@ -25,6 +27,8 @@ export type RoomSubmitOptions = {
    */
   script?: CanvasScriptSubmissionMeta;
   modelBatch?: ModelScriptBatchMeta;
+  /** Immutable scene-area authority receipt (T06) persisted with the command. */
+  worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
 };
 
 export type RoomCommandResult =
@@ -46,6 +50,8 @@ export type RoomCommandResult =
        */
       script?: CanvasScriptSubmissionMeta;
       modelBatch?: ModelScriptBatchMeta;
+      /** Frozen scene-area authority receipt; duplicate returns the first value. */
+      worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
       /** duplicate 时标记该回执来自 durable 首次记录。 */
       duplicate?: boolean;
     }
@@ -58,6 +64,8 @@ export type RoomCommandResult =
       retryable?: boolean;
       currentRevision?: number;
       preconditionIndex?: number;
+      conflict?: import("../world-authoring/spatial-leases.js").LeaseConflict;
+      spatialReason?: string;
     };
 
 /** published 前进的来源：本 room 执行的命令，或从远端同步上游合入的 update。 */

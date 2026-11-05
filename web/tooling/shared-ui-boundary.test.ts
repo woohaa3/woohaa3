@@ -35,7 +35,7 @@ describe("shared UI package ownership", () => {
     'import type { X } from "@woohaa3/frontend/extension-api";',
     'export type { X } from "../../../frontend/src/cordis/contracts.js";',
     'const x = import("@woohaa3/backend");',
-    'type X = import("@woohaa3/extension-film-set").X;',
+    'type X = import("@woohaa3/extension-task-activity").X;',
     'export * from "./Buttons.stories.js";',
     'import { fixture } from "../fixtures/data.js";',
     'import { X } from "@ladle/react";'

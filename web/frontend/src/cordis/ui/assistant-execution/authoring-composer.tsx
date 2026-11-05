@@ -47,10 +47,6 @@ const EMPTY_SNAPSHOT: AgentConversationSnapshotView = {
   error: null,
   contextRevision: 0,
 };
-const EMPTY_GROUP_RUNS = {
-  rows: [],
-  error: "",
-} as import("../../contract/canvas-group-runs.js").CanvasGroupRunsSnapshot;
 const noopSubscribe = () => () => undefined;
 
 export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
@@ -58,15 +54,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
   const inspector = props.presentation === "inspector";
   const conversation = props.agentConversation;
   const service = conversation?.service;
-  const groupSnapshot = useSyncExternalStore(
-    props.groupRuns?.subscribe ?? noopSubscribe,
-    props.groupRuns?.getSnapshot ?? (() => EMPTY_GROUP_RUNS),
-    () => EMPTY_GROUP_RUNS,
-  );
-  const groupRows =
-    props.mode === "canvas-group"
-      ? groupSnapshot.rows.filter((row) => row.rootGroupId === props.nodeId)
-      : [];
   const delivery =
     props.deliveryHistory?.status !== "succeeded"
       ? props.deliveryHistory
@@ -84,9 +71,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       canvasId: props.canvasId,
       nodeId: props.nodeId,
       purpose: props.mode,
-      cameraId: props.selectedCameraId,
-      clipId: props.clipId,
-      itemId: props.itemId,
     },
     { prompt: props.mode === "text" ? "" : (props.initialPrompt ?? "") },
   );
@@ -247,11 +231,9 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       active.conversationId === conversation?.conversationId)
       ? active
       : null;
-  const inProgress =
-    groupRows.some((row) => row.active) ||
-    Boolean(
-      turn && ["queued", "running", "committing"].includes(turn.turn.status),
-    );
+  const inProgress = Boolean(
+    turn && ["queued", "running", "committing"].includes(turn.turn.status),
+  );
   // 失败是终态：停止后即可继续提交；不再保留独立的待核对锁定。
   const locked =
     busy ||
@@ -264,7 +246,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
   useEffect(() => {
     if (locked || noConnection) setOpenSelector(null);
   }, [locked, noConnection]);
-  const ambiguousObjectAction = Boolean(props.itemId) && !props.clipId;
 
   const connectionModels = selectedConnection?.models;
   // 连接自带的模型列表优先；空列表表示该来源尚未内联目录，继续读 adapter 的真实目录
@@ -307,7 +288,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
   // 文案表在 `authoring-composer-copy.ts`（file-budget 拆分）。
   const target = authoringComposerCopy(props.mode, {
     inspector,
-    itemId: props.itemId,
+    worldCamera: props.worldScope?.kind === "world-camera",
   });
 
   // 连接或来源变化时收起选择器；目录重读（catalogAttempt）不打断已展开的面板。
@@ -344,7 +325,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       (!selectedConnection?.ready && !toolDefault) ||
       !props.writable ||
       (props.mode !== "text" && !prompt.trim()) ||
-      ambiguousObjectAction ||
       invalidModel ||
       invalidEffort ||
       missingRequiredModel ||
@@ -354,11 +334,11 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       return;
     if (!conversation || !service || !connectionId) return;
     const entry = {
-      action:
-        props.mode === "camera" ? ("modify" as const) : ("generate" as const),
+      action: "generate" as const,
       canvasId: props.canvasId,
       nodeId: props.nodeId,
       mode: props.mode,
+      ...(props.worldScope ? { worldScope: props.worldScope } : {}),
       connectionId,
       ...(selectedConnection?.binding
         ? { connection: selectedConnection.binding }
@@ -368,9 +348,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       ...(props.expectedContentHash
         ? { expectedContentHash: props.expectedContentHash }
         : {}),
-      ...(props.selectedCameraId ? { cameraId: props.selectedCameraId } : {}),
-      ...(props.clipId ? { clipId: props.clipId } : {}),
-      ...(props.itemId ? { itemId: props.itemId } : {}),
       prompt: props.mode === "text" ? prompt : prompt.trim(),
     };
     await (
@@ -398,9 +375,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       ? (selectedConnection.reason ?? "助手尚未就绪，请检查连接")
       : null) ||
     (!props.writable ? props.disabledReason : null) ||
-    (ambiguousObjectAction
-      ? "尚未选定动画片段，请先选择片段再生成对象动作。"
-      : null) ||
     props.mcpHint?.blockedReason ||
     (invalidModel ? "所选模型已不在当前目录中，请重新选择。" : null) ||
     (invalidEffort ? "当前模型已不支持所选 Variant，请重新选择。" : null);
@@ -449,7 +423,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
           <AuthoringMcpButton
             canvasId={props.canvasId}
             nodeId={props.nodeId}
-            isFilmSet={props.mode === "film-set"}
             mcpServerUrl={props.mcpHint?.serverUrl}
           />
         }
@@ -543,49 +516,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
           ) : null
         }
         detail={
-          props.mode === "canvas-group" && groupRows.length ? (
-            <>
-              {(groupRows.some((row) => row.active)
-                ? groupRows.filter((row) => row.active)
-                : groupRows.slice(0, 1)
-              ).map((row) => (
-                <span key={row.requestId} className="authoring-generate__run">
-                  <span>{row.label}</span>
-                  {row.conversationId ? (
-                    <Button
-                      size="sm"
-                      tone="ghost"
-                      onClick={() =>
-                        conversation?.onOpenDetail({
-                          conversationId: row.conversationId!,
-                          requestId: row.requestId,
-                          nodeId: props.nodeId,
-                        })
-                      }
-                    >
-                      查看此回合
-                    </Button>
-                  ) : null}
-                  {row.active && row.conversationId ? (
-                    <Button
-                      size="sm"
-                      tone="ghost"
-                      disabled={!props.writable || deliveryActions.busy}
-                      onClick={() =>
-                        void deliveryActions.perform(async () => {
-                          await props.groupRuns!.stop(row.requestId);
-                          return { ok: true };
-                        })
-                      }
-                    >
-                      停止此回合
-                    </Button>
-                  ) : null}
-                </span>
-              ))}
-            </>
-          ) : (
-            <>
+          <>
               {textRows.map((row, index) => (
                 <span key={row.requestId} className="authoring-generate__run">
                   <span>
@@ -680,8 +611,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                   {detail.label}
                 </Button>
               ) : null}
-            </>
-          )
+          </>
         }
         submit={
           delivery ? (
@@ -743,12 +673,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
             </p>
           ) : null}
         </>
-      ) : null}
-      {props.mode === "canvas-group" &&
-      (groupSnapshot.error || deliveryActions.error) ? (
-        <p className="authoring-generate__reason">
-          {groupSnapshot.error || deliveryActions.error}
-        </p>
       ) : null}
       {!delivery && modelError ? (
         <p className="authoring-generate__reason">{modelError}</p>

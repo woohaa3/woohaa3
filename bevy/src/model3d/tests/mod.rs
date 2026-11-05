@@ -11,7 +11,6 @@ mod instancing;
 mod lifecycle;
 mod lod;
 mod motion_playback;
-mod overview_lod;
 mod playback;
 mod playback_representation;
 mod units;
@@ -86,21 +85,8 @@ pub(super) fn run_sync(world: &mut World, scene: &Scene, resources: &ModelAssets
     settle_preparation(world, scene, resources);
 }
 
-/// 把 native 后台准备与预算化装配推进到静止（发布完成、旧根退役完成）。
-pub(super) fn settle_preparation(world: &mut World, scene: &Scene, resources: &ModelAssets) {
-    for _ in 0..512 {
-        let changed = super::preparation::advance_for_test(world, scene, resources);
-        let idle = {
-            let visuals = world.resource::<ModelVisuals>();
-            visuals.staging.is_empty()
-                && visuals.retiring.is_empty()
-                && visuals.preparation.is_empty()
-        };
-        if idle && !changed {
-            break;
-        }
-    }
-}
+/// 物化为空操作：模型在同步路径上直接发布。
+pub(super) fn settle_preparation(_world: &mut World, _scene: &Scene, _resources: &ModelAssets) {}
 
 /// 初始化 world-based 测试所需的资源。
 pub(super) fn world_with_resources() -> World {

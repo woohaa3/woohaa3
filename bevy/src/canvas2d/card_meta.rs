@@ -24,7 +24,7 @@ pub(crate) fn meta_top(node: &GraphNode) -> f32 {
 
 /// 富内容卡（非紧凑）才有卡片外的名称行。
 fn rich(node: &GraphNode) -> bool {
-    !super::layout::compact_card(node) && node.group.is_none() && node.composite_asset.is_none()
+    !super::layout::compact_card(node) && node.chrome.is_card()
 }
 
 /// 尺寸文案：`5460 x 3072`（原图像素）。

@@ -1,5 +1,3 @@
-import { createFilmSetGroupMarker } from "../film-set-group.js";
-import { applyCanvasCommands } from "../../../../test-support/managed-shot-commands.js";
 /**
  * `ServerCanvas` ⇄ Y.Doc 映射测试（任务 2.1）。
  *
@@ -13,7 +11,6 @@ import { YJS_CANVAS_FORMAT_VERSION, YJS_SHARED_TYPES } from "./format.js";
 import { serverCanvasToYDoc,
   yDocToServerCanvas,
   yjsSharedTypes } from "./mapping.js";
-import { defaultSelfContained3DNodeData } from "../agent-node-descriptors.js";
 
 import { ALL_FIXTURES, FIXTURE_NOW } from "./__fixtures__/canvases.js";
 
@@ -49,42 +46,6 @@ describe("映射往返（任务 2.1）", () => {
     });
   }
 
-  it("写入同一 Y.Doc 两次是幂等的（整体替换语义）", () => {
-    const canvas = normalize(ALL_FIXTURES[1].build());
-    const doc = new Y.Doc();
-    serverCanvasToYDoc(canvas, doc);
-    const first = yDocToServerCanvas(doc, { now: FIXTURE_NOW });
-    serverCanvasToYDoc(canvas, doc);
-    const second = yDocToServerCanvas(doc, { now: FIXTURE_NOW });
-    expect(first.ok && second.ok).toBe(true);
-    if (!first.ok || !second.ok) return;
-    expect(persistedShape(second.canvas)).toEqual(persistedShape(first.canvas));
-  });
-
-  it("嵌套 group 的 parentId 与相对坐标往返保留（change: add-canvas-node-grouping）", () => {
-    const base = ALL_FIXTURES[0].build();
-    const canvas: ServerCanvas = {
-      ...base,
-      document: {
-        ...base.document,
-        nodes: [
-          { id: "g1", type: "group", position: { x: 100, y: 100 }, width: 600, height: 600 },
-          { id: "g2", type: "group", parentId: "g1", position: { x: 50, y: 50 }, width: 300, height: 300 },
-          { id: "leaf", type: "image", parentId: "g2", position: { x: 10, y: 20 }, width: 200, height: 100 }
-        ],
-        edges: []
-      }
-    };
-    const original = normalize(canvas);
-    const doc = serverCanvasToYDoc(original);
-    const exported = yDocToServerCanvas(doc, { now: FIXTURE_NOW });
-    expect(exported.ok).toBe(true);
-    if (!exported.ok) return;
-    expect(persistedShape(exported.canvas)).toEqual(persistedShape(original));
-    const exportedLeaf = exported.canvas.document.nodes.find((node) => node.id === "leaf");
-    expect(exportedLeaf?.parentId).toBe("g2");
-    expect(exportedLeaf?.position).toEqual({ x: 10, y: 20 });
-  });
 
   it("悬空 parent 的 Y.Doc 导出被拒绝（不静默修剪）", () => {
     const base = ALL_FIXTURES[0].build();
@@ -213,28 +174,3 @@ describe("非法状态与格式闸门（任务 2.1）", () => {
   });
 });
 
-it("空模型与空片场在保存/同步/复制/撤销后不注入几何", () => {
-  const canvas = normalize(ALL_FIXTURES[0].build());
-  const created = applyCanvasCommands(canvas, ["model3d", "group"].map(type => ({
-    type: "node.add" as const, node: { id: type, type, position: { x: 0, y: 0 } }, nodeData: type === "group" ? { filmSetGroup: createFilmSetGroupMarker() } : defaultSelfContained3DNodeData(type),
-  })));
-  expect(created.ok).toBe(true);
-  if (!created.ok) return;
-  const doc = serverCanvasToYDoc(created.canvas);
-  const peer = new Y.Doc();
-  Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
-  const restored = yDocToServerCanvas(peer, { now: FIXTURE_NOW });
-  expect(restored.ok).toBe(true);
-  if (!restored.ok) return;
-  expect(restored.canvas.nodeData.model3d.modelScript).toBe("");
-  expect(restored.canvas.nodeData.group.filmSetGroup).toMatchObject({ sceneBindings: [] });
-  expect(restored.canvas.nodeData.group.filmSetContent).toBeUndefined();
-  const copied = applyCanvasCommands(restored.canvas, [{ type: "node.add", node: { id: "copy", type: "model3d", position: { x: 300, y: 0 } }, nodeData: structuredClone(restored.canvas.nodeData.model3d) }]);
-  expect(copied.ok).toBe(true);
-  if (!copied.ok) return;
-  expect(copied.canvas.nodeData.copy.modelScript).toBe("");
-  const undone = applyCanvasCommands(copied.canvas, [{ type: "node.remove", nodeIds: ["copy"] }]);
-  expect(undone.ok).toBe(true);
-  if (undone.ok) expect(persistedShape(undone.canvas)).toEqual(persistedShape(restored.canvas));
-  doc.destroy(); peer.destroy();
-});

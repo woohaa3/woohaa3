@@ -18,7 +18,7 @@ fn request(ops: Vec<ModelOp>, extent: f32, capture: CaptureOptions) -> RenderReq
         capture,
         placement: None,
         motion: None,
-        composite_asset_frame: None,
+        world: None,
     }
 }
 
@@ -158,6 +158,101 @@ fn native_renderer_png() {
     let png = render_preview(&req).expect("native renderer 应产出 PNG");
     assert!(png.len() > 100, "PNG 过小");
     assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+}
+
+/// Exercises the production model synchronizer and canvas camera on a hardware target.
+#[cfg(feature = "native-canvas")]
+#[test]
+#[ignore = "requires hardware GPU"]
+fn shared_world_canvas_hardware() {
+    use bevy::{prelude::*, asset::RenderAssetUsages, camera::RenderTarget,
+        render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
+        app::ScheduleRunnerPlugin};
+    use std::sync::{Arc, Mutex};
+    use crate::model3d::{runtime::{FocusVisuals, ModelVisuals, sync_models}, scene::prepare_snapshot};
+    use crate::protocol::{GraphNode, ModelPlacement, ModelReference, ModelSnapshot, Scene};
+
+    fn frame(swap: bool, moved_cards: bool, parent_changed: bool) -> Vec<u8> {
+        let pixels = Arc::new(Mutex::new(None));
+        let mut app = App::new();
+        app.add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: None,
+            exit_condition: bevy::window::ExitCondition::DontExit, ..default() }));
+        app.add_plugins(ScheduleRunnerPlugin::run_loop(std::time::Duration::from_millis(8)));
+        let ready = super::readiness::install(&mut app);
+        let output = pixels.clone();
+        app.add_systems(Startup, move |mut commands: Commands, mut images: ResMut<Assets<Image>>,
+            mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>,
+            info: Res<bevy::render::renderer::RenderAdapterInfo>| {
+            println!("hardware adapter: {} {:?} {:?}", info.name, info.backend, info.device_type);
+            assert_ne!(format!("{:?}", info.device_type), "Cpu");
+            let mut image = Image::new_uninit(Extent3d { width: 256, height: 256, ..default() },
+                TextureDimension::D2, TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD);
+            image.texture_descriptor.usage |= TextureUsages::COPY_SRC | TextureUsages::RENDER_ATTACHMENT;
+            let image = images.add(image);
+            let camera = crate::model3d::grid::setup_camera(&mut commands);
+            commands.entity(camera).insert(RenderTarget::Image(image.clone().into()));
+            let mut visuals = ModelVisuals::default();
+            let mut focus = FocusVisuals::default();
+            let mut scene = Scene::default();
+            let mut assets = std::collections::HashMap::new();
+            for (i, color) in ["#ff0000", "#00ff00"].iter().enumerate() {
+                let signature = format!("hardware-{i}");
+                let snapshot = prepare_snapshot(ModelSnapshot { scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.into()),
+                    ops: vec![ModelOp::Group { id: "parent".into(), parent: None, position: [0.;3],
+                        rotation: if parent_changed && i == 0 { [0., 45., 0.] } else { [0.;3] },
+                        scale: if parent_changed && i == 0 { [0.5, 0.5, 0.5] } else { [1.;3] } },
+                        ModelOp::Box { id: "box".into(), parent: Some("parent".into()), position: [0.;3], rotation: [0.;3],
+                        scale: [1.;3], color: Some((*color).into()), material: None, size: [2., 2., 2.] }],
+                    signature: signature.clone(), extent: 2., aabb: None, geometry_keys: None,
+                    prepared_bounds: None, placement: ModelPlacement::default() });
+                let key = format!("hardware-{i}");
+                assets.insert(key.clone(), Arc::new(snapshot));
+                let depth = if (i == 0) ^ swap { 0.5 } else { -0.5 };
+                let point = crate::isometric_grid::canvas_camera_rotation()
+                    * Vec3::new(if i == 0 { -0.35 } else { 0.35 }, 0., depth);
+                let mut node: GraphNode = serde_json::from_value(serde_json::json!({"id":format!("n{i}"),
+                    "type":"model", "x":if moved_cards { 900 } else { 0 }, "y":0,"width":100,"height":50,
+                    "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":format!("i{i}"),
+                        "transform":{"version":"shared-world-v1","position":{"u":point.x,"v":-point.z,"h":point.y},"rotation":[0,0,0,1],"scale":1}}})).unwrap();
+                node.model = Some(ModelReference { resource_key:key, scene_version:Some(crate::protocol::MODEL_SCENE_IR_V2.into()),
+                    signature, placement:ModelPlacement::default() });
+                scene.nodes.push(node);
+            }
+            scene.surface = Some(serde_json::from_value(serde_json::json!({
+                "width": 256., "height": 256., "pixelRatio": 1.
+            })).unwrap());
+            // Exercise the same demand gate and lease calculation used by the canvas system.
+            for now in [0., 3.] {
+                crate::model3d::demand::update(&mut visuals, &scene, None,
+                    &Default::default(), &Default::default(), now);
+                assert_eq!(crate::model3d::demand::payload_lease_keys(&scene, &visuals).len(), 2);
+                sync_models(&mut commands, &mut meshes, &mut materials, &mut visuals, &mut focus, &assets, &scene);
+                assert_eq!(visuals.roots.len(), 2);
+            }
+            commands.insert_resource(visuals);
+            super::readiness::enqueue_readback(&mut commands, image, output.clone(), ready.clone());
+        });
+        app.run();
+        let data = pixels.lock().unwrap().take().unwrap();
+        super::render::normalize_readback(&data, 256, 256)
+    }
+    let a = frame(false, false, false);
+    let reordered = frame(false, true, false);
+    let swapped = frame(true, false, false);
+    let parent = frame(false, false, true);
+    assert_eq!(a, reordered);
+    assert_ne!(a, swapped);
+    assert_ne!(a, parent);
+    let center = (128 * 256 + 128) * 4;
+    println!("center original={:?} swapped={:?}", &a[center..center+4], &swapped[center..center+4]);
+    assert!(a[center] > a[center + 1] && swapped[center + 1] > swapped[center]);
+    let dir = std::env::var("WOOHAA_WORLD_EVIDENCE").unwrap();
+    for (name, pixels) in [("original", a), ("reordered", reordered), ("swapped", swapped), ("parent", parent)] {
+        println!("{name}: red={}, green={}", pixels.chunks_exact(4).filter(|p| p[0] > 200 && p[1] < 80).count(),
+            pixels.chunks_exact(4).filter(|p| p[1] > 200 && p[0] < 80).count());
+        std::fs::write(format!("{dir}/{name}.png"), encode_png(&pixels, 256, 256).unwrap()).unwrap();
+    }
 }
 
 fn humanoid_ops() -> Vec<ModelOp> {

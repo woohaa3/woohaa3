@@ -32,7 +32,8 @@ export function resolveSelectionContext(
   const nodeData = (canvas.nodeData as Record<string, CanvasNodeData | undefined>)[nodeId];
   if (node.type === "image" && nodeData?.codexImageImport === true) return null;
   const panelKind = panelKindForNodeType(node.type);
-  if (!panelKind && !isModelNodeType(node.type) && node.type !== "group") return null;
+  if (!panelKind && !isModelNodeType(node.type)) return null;
+
   return {
     nodeId,
     nodeType: node.type,

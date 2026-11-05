@@ -17,6 +17,7 @@
  * - 同一节点旧任务与较新会话各自保留关联，打开/关闭/查询都不创建新执行。
  */
 import { isBoolean, isBoundedId, isJsonObject, isStringArray } from "../../validation.js";
+import type { AssistantWorldScopeSelection } from "../../canvas/assistant-world-authority.js";
 
 /** Agent 会话 API 的固定同源前缀（宿主拥有）。 */
 export const AGENT_CONVERSATION_BASE_PATH = "/api/agent-conversations" as const;
@@ -100,8 +101,14 @@ export function isAgentEntryAction(value: unknown): value is AgentEntryAction {
   return typeof value === "string" && (AGENT_ENTRY_ACTIONS as readonly string[]).includes(value);
 }
 
-/** 目标创作模式；`camera` 仅为旧会话兼容值，新的片场镜头统一使用 `film-set`。 */
-export const AGENT_TARGET_MODES = ["model3d", "film-set", "camera", "canvas-group", "text"] as const;
+/**
+ * 目标创作模式。
+ *
+ * 片场（`film-set`）已下线；`canvas-group` 重新启用，表示 2D 组（`workflow-group-2d`）作用域：
+ * 只授权组内卡片组织与节点执行，不授予共享世界写资格。
+ * `camera` 指模型自身的镜头预设，仍属 model3d 节点的子资源。
+ */
+export const AGENT_TARGET_MODES = ["model3d", "camera", "text", "world", "canvas-group"] as const;
 export type AgentTargetMode = (typeof AGENT_TARGET_MODES)[number];
 
 export function isAgentTargetMode(value: unknown): value is AgentTargetMode {
@@ -149,13 +156,18 @@ export type AgentTargetSnapshot = {
   /** Trusted structured runner identity; ordinary dispatch must never execute this turn. */
   structuredInputHash?: string;
   /** Trusted host delivery association; never accepted from a browser entry intent. */
-  delivery?: { purpose: "film-set-conversion" | "text-generation"; domainRequestId: string; attemptId: string };
+  delivery?: { purpose: "text-generation" | "image-director-scene"; domainRequestId: string; attemptId: string; nodeId?: string };
   canvasId: string;
   nodeId?: string;
   mode?: AgentTargetMode;
   cameraId?: string;
   clipId?: string;
   itemId?: string;
+  /**
+   * Trusted world scope selection for `mode: "world"`. The host resolves the
+   * canonical scope/version and leases; the assistant never supplies them.
+   */
+  worldScope?: AssistantWorldScopeSelection;
   /**
    * 冻结的账户模型 id（来自真实目录）。
    *
@@ -181,6 +193,8 @@ export type AgentEntryIntent = {
   cameraId?: string;
   clipId?: string;
   itemId?: string;
+  /** Trusted world scope selection for `mode: "world"` (see AgentTargetSnapshot). */
+  worldScope?: AssistantWorldScopeSelection;
   /** 冻结的账户模型 id（来自真实目录）；缺失时由 adapter 按当前目录处理或拒绝。 */
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
@@ -240,10 +254,6 @@ export type AgentCatalogResponse = {
 
 /** 会话摘要（列表用；不含消息正文）。 */
 /** Separates new whole-set conversations from historical local authoring context. */
-export function authoringConversationContext(entry: { mode?: string; clipId?: string | null; itemId?: string | null; cameraId?: string | null }): string | undefined {
-  return entry.mode === "film-set" && !entry.clipId && !entry.itemId && !entry.cameraId ? "film-set:whole" : undefined;
-}
-
 export type ConversationSummary = {
   contextKey?: string;
   conversationId: string;
@@ -450,7 +460,7 @@ export type AgentConversationAdapter = {
   /** 重启后核对领域回执（不自动重推理）。 */
   query?(input: { owner: string; requestId: string }): Promise<AgentAdapterRunOutcome | null>;
   /** 取消在途回合（不撤销已提交领域动作）。 */
-  cancel?(input: { owner: string; requestId: string }): Promise<void>;
+  cancel?(input: { owner: string; requestId: string; candidateContext?: { canvasId: string; conversationId: string; connection: AgentConnectionBinding; intent: AgentEntryIntent } }): Promise<void>;
   dispose?(): void | Promise<void>;
 };
 

@@ -1,13 +1,19 @@
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
+import { decodeWorldInstanceData } from "../shared-world-codec.js";
+import { decodeWorldCamera } from "../world-camera-codec.js";
+import { quatMul } from "../model-transform.js";
+import type { WorldPoint, WorldRotation } from "../shared-world.js";
+import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
+import { executeWorldAnimationScript, sampleWorldAnimation, type SampledCameraMotion, type SampledInstanceMotion, type WorldAnimationIr, type WorldAnimationScript } from "../world-animation-script.js";
 import type { NodeCapabilityResolver } from "../node-capabilities.js";
 /**
  * `CanvasRenderScene` 快照装配与呈现指纹（自 `render-scene.ts` 拆出）
  * （change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R01）。
  *
  * 单一映射层：把 woohaa3 的 `ServerCanvas` + 瞬时 selection/hover/gesture + surface 转换为
- * **Bevy 运行时期望的快照结构**。节点/边/交互与片场对象 motion/editor/media 投影复用独立叶子
- * 模块；本模块只做编排与产出，不复制几何公式。
+ * **Bevy 运行时期望的快照结构**。画布已删除组与片场容器（change:
+ * remove-canvas-groups-and-film-set），因此这里只投影普通节点卡片、幽灵节点与边。
  *
  * 热路径预算：`renderSceneFingerprint` 只覆盖可见标量与模型 `resourceKey/signature`，不遍历
  * mesh 顶点或序列化 ops。
@@ -22,12 +28,7 @@ import { MODEL_SCRIPT_SCENE_IR_V2_VERSION } from "../model-script.js";
 import type { SceneV2Op } from "../scene-ir-v2.js";
 import { prepareModelResource, type PreparedModelResource } from "../prepared-model.js";
 import { fnv1a64Hex } from "../content-hash.js";
-import { encodeFilmSetPartId, readFilmSetContent } from "../film-set-content.js";
 import type { ModelFocusProjection } from "../model-focus.js";
-import { getGroupLayoutSizes } from "../domain/core/group-geometry.js";
-import { groupAppearanceModel } from "../group-appearance.js";
-import { hiddenByCollapsedGroups } from "../group-presentation.js";
-import { canvasGroundAnchor, compareCanvasGroundOrder } from "../ground-anchor.js";
 import { defaultAppTheme, validateAppThemePreset, type AppThemeSnapshot } from "../../theme/index.js";
 import { resolveNodeDisplayName, contentTypeLabelForNode } from "../node-display-name.js";
 import {
@@ -52,17 +53,10 @@ import {
   type BevyRenderMarquee,
   type BevyRenderNode,
   type BevyRenderSurface,
-  type BevyShotPreviewLink,
   type BevyVideoFocus,
   type CanvasRenderScene,
-  type CompositeAssetScopeShape,
   type GhostRenderNode
 } from "./wire-scene.js";
-import {
-  EMPTY_PLANE_IDS,
-  compositeAssetScopeForNode,
-  pureModelFit
-} from "./film-set-projection.js";
 import {
   clampProgress,
   isBusy,
@@ -70,24 +64,16 @@ import {
   readPlacement,
   resolveTextureKey
 } from "./node-projection.js";
-import { shotPreviewCardPresentation, shotPreviewCardPresentationForFilmSetGroup, shotPreviewLinksForFilmSet, shotPreviewLinksForFilmSetGroup } from "./shot-preview-projection.js";
-import { managedShotPreviewOwnershipOf, shotPreviewOwnershipOf } from "../film-set-shot-preview.js";
-import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
-import type { FilmSetNodeData } from "../canvas-node-model.js";
-import { activeFilmSetSceneBindings, prepareFilmSetGroup, readFilmSetGroupMarker } from "../film-set-group.js";
-import { FILM_SET_GROUP_RENDER_SCHEMA_VERSION, type BevyFilmSetGroupPreparation, type BevyFilmSetGroupBinding } from "./wire-scene.js";
 
 export type CanvasRenderSceneInput = {
   /** 扩展内容贡献。缺省时空解析器，不改变现有场景。 */
   content?: ContentContributionResolver;
-  /** Group ids carrying a render-only drop target highlight. */
-  dropTargetGroupIds?: ReadonlySet<string> | readonly string[];
   canvas: ServerCanvas;
   nodeCapabilities?: NodeCapabilityResolver;
   modelPreviews?: ReadonlyMap<string, import("./wire-model.js").BevyModelPreview>;
   selection?: { nodes?: readonly string[]; edge?: string | null };
   draft?: BevyRenderDraft | null;
-  /** 框选选区矩形（世界坐标，change: fix-group-and-marquee-preview）。 */
+  /** 框选选区矩形（世界坐标）。 */
   marquee?: BevyRenderMarquee | null;
   surface?: BevyRenderSurface | null;
   /** 节点瞬时位置覆盖（拖拽预览），世界坐标。 */
@@ -107,56 +93,20 @@ export type CanvasRenderSceneInput = {
   modelResources?: ReadonlyMap<string, PreparedModelResource>;
   /** 模型 placement（来自 DOM 参数面板的瞬时/规范 nodeData）。 */
   modelPlacements?: ReadonlyMap<string, BevyModelPlacement>;
+  /** Transient ground displacement in meters; never applied to the canvas document. */
+  worldGroundPreviews?: ReadonlyMap<string, { u: number; v: number }>;
   /**
-   * 已上传纹理的片场媒体平面 id 集合（change: 2026-10-08-make-film-set-model-only）。
-   *
-   * 平面几何由 `filmSetContent` 派生；此集合只标记哪些平面已有可用纹理（影响 `hasTexture`）。
-   * 只承载浏览器本地呈现态与稳定引用，不进入 canonical。
+   * Transient camera pose while the user drags a camera frustum. Presentation only:
+   * the canonical `nodeData.worldCamera` is never rewritten here.
    */
-  compositeAssetReadyPlanes?: ReadonlySet<string>;
+  worldCameraPreviews?: ReadonlyMap<string, { position: WorldPoint; rotation: WorldRotation }>;
   /**
-   * 每片场节点的对象身份映射（稳定 itemId → 组合作用域根 id）与其编译诊断
-   * （change: 2026-10-09-add-film-set-object-motion-and-editing）。
-   *
-   * 供渲染层把 itemRoots 下发 Rust（对象 picking）与 UI 显示对象级诊断；只承载浏览器本地
-   * 派生状态，不进入 canonical。
+   * Transient scene-area ground bounds keyed by area node id (move/resize preview).
+   * Presentation only; the canonical `nodeData.sceneArea` is never rewritten here.
    */
-  compositeAssetCompositions?: ReadonlyMap<string, import("./wire-scene.js").BevyCompositeAssetCompositionInfo>;
-  /**
-   * 每复合资产节点的范围形状**覆盖**声明（change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
-   *
-   * 复合资产类别默认即 `isometric-diamond`；可信 adapter 只在需要按严格身份改为轴对齐矩形时
-   * 通过宿主注入 `rect`。缺省不写入即使用类别默认。只承载派生呈现声明，不进入 canonical。
-   */
-  compositeAssetEmptyPlaceholders?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetEmptyPlaceholder>;
-  compositeAssetScopeShapes?: ReadonlyMap<string, CompositeAssetScopeShape>;
-  /**
-   * 每节点的总览 primitive LOD 策略声明
-   * （change: 2026-10-15-add-film-set-overview-lod，design D1；
-   *  change: film-set group 迁移后同时覆盖 group 徽标场景）。
-   *
-   * 由宿主按可信 adapter 严格身份解析后注入；存在即写入复合资产的
-   * `compositeAsset.geometryQuality` 或 group 的 `geometryQuality`，运行时据此按世界投影尺寸选择
-   * 整场图元细分。缺省不写入即 World 用途保持 High。只承载派生呈现声明，不进入 canonical 内容
-   * hash、脚本执行 key 或持久 DTO。
-   */
-  geometryQualities?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetGeometryQuality>;
-  /**
-   * 每节点总览纹理缓存声明（change: 2026-10-29-cache-film-set-overview-textures）。
-   *
-   * 由宿主按可信 adapter 严格身份解析后注入；存在即写入 group 的 `overviewCache`，渲染器据此
-   * 把稳定主体替换为缓存纹理。缺省不写入即逐帧实时绘制。只承载派生呈现声明，不进入 canonical
-   * 内容 hash、脚本执行 key 或持久 DTO。
-   */
-  overviewCaches?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetOverviewCache>;
-  /**
-   * 每复合资产节点的**业务类型显示名**（如「片场」「游戏炼丹炉」）
-   * （change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
-   *
-   * 由宿主按可信 adapter 身份解析后注入；存在即覆盖通用内容类型标签，供渲染层标注聚合节点业务类型。
-   * 缺省不写入即回落到 `contentTypeLabelForNode`。只承载派生呈现声明，不进入 canonical。
-   */
-  compositeAssetTypeLabels?: ReadonlyMap<string, string>;
+  sceneAreaPreviews?: ReadonlyMap<string, import("../shared-world.js").GroundAabb>;
+  /** 导演区整体动画播放头（秒）；缺省不采样。 */
+  sceneAnimationTimes?: ReadonlyMap<string, number>;
   /** 上传中的幽灵节点（只渲染，不进规范状态）；与真实节点同 id 时自动跳过。 */
   ghostNodes?: readonly GhostRenderNode[];
   /**
@@ -166,93 +116,32 @@ export type CanvasRenderSceneInput = {
    * （兼容测试/最小 fixture）；传入非法值会抛出，避免混合主题。
    */
   theme?: AppThemeSnapshot | unknown;
-  /**
-   * 模型聚焦瞬时投影（change: add-model-focus-viewing）。
-   * 由 Canvas Runtime 传入；缺省或 null 表示普通正交画布。
-   */
+  /** 模型聚焦瞬时投影（change: add-model-focus-viewing）。 */
   modelFocus?: ModelFocusProjection | null;
-  /**
-   * 图片聚焦瞬时投影（change: 2026-10-08-add-image-focus-editing-and-unified-node-history）。
-   * 由 Canvas Runtime 传入；缺省或 null 表示普通画布。
-   */
+  /** 图片聚焦瞬时投影（change: 2026-10-08-add-image-focus-editing-and-unified-node-history）。 */
   imageFocus?: BevyImageFocus | null;
-  /**
-   * 视频聚焦瞬时投影（change: 2026-10-10-add-video-node-focus-workspace）。
-   * 由 Canvas Runtime 传入；缺省或 null 表示普通画布。与 `imageFocus` 互斥。
-   */
+  /** 视频聚焦瞬时投影（change: 2026-10-10-add-video-node-focus-workspace）。 */
   videoFocus?: BevyVideoFocus | null;
-  /**
-   * 模型编辑 gizmo/镜头工具瞬时态（change: add-model-editor-gizmo-shot-capture）。
-   * 由 Canvas Runtime 传入；缺省表示不绘制编辑 gizmo。
-   */
+  /** 模型编辑 gizmo/镜头工具瞬时态（change: add-model-editor-gizmo-shot-capture）。 */
   modelEditor?: BevyModelEditor | null;
-  /**
-   * 节点端点 / 连线悬停瞬时态（change: add-node-endpoint-hover / add-edge-hover-delete）。
-   * 由 Canvas Runtime 传入；缺省或 null 表示无悬停（端点与删除按钮均不绘制）。
-   */
+  /** 节点端点 / 连线悬停瞬时态（change: add-node-endpoint-hover / add-edge-hover-delete）。 */
   hover?: BevyHover | null;
-  /**
-   * 单节点拖动中的 Q/E 触碰粘连瞬时投影（change: add-drag-touch-connections）。
-   * 由 Canvas Runtime 传入；缺省或 null 表示当前没有粘连拖动（不绘制操作条）。
-   */
+  /** 单节点拖动中的 Q/E 触碰粘连瞬时投影（change: add-drag-touch-connections）。 */
   dragAttach?: BevyDragAttach | null;
-  /**
-   * 多选聚合拉线瞬时投影（change: add-multi-select-aggregate-connect）。
-   * 由 Canvas Runtime 传入；缺省或 null 表示当前没有聚合把手。
-   */
+  /** 多选聚合拉线瞬时投影（change: add-multi-select-aggregate-connect）。 */
   aggregateConnect?: BevyAggregateConnect | null;
-  /**
-   * 活动动画节点播放瞬时投影（change: 2026-10-05-bind-model-animation-to-shots）。
-   * 由 Canvas Runtime 传入；缺省或 null 表示当前无活动动画节点。
-   */
+  /** 活动动画节点播放瞬时投影（change: 2026-10-05-bind-model-animation-to-shots）。 */
   animationPlayback?: BevyAnimationPlayback | null;
-  /**
-   * 公共聚焦过渡进度瞬时更新
-   * （change: 2026-10-12-unify-node-editors-and-focus-transitions，design D6/D7）。
-   * 由 Canvas Runtime coordinator 按唯一帧账本推入；Rust 三维相机据此求值，不再独立计时。
-   */
+  /** 公共聚焦过渡进度瞬时更新。 */
   focusTransition?: BevyFocusTransition | null;
   /**
    * 每节点的顶部操作横条呈现（change: 2026-10-13-add-node-to-film-set-shortcut）。
    *
-   * 由 canvas-shell 贡献层计算后注入：宿主贡献「下载」、film-set 贡献「转为片场」，
-   * 条目按 `order` 从左到右。横条由 Bevy 绘制、Rust 命中，映射层把每节点的动作描述写入
-   * render scene（`nodeActions`）。缺省或空表示该节点不绘制横条。
+   * 由 canvas-shell 贡献层计算后注入；横条由 Bevy 绘制、Rust 命中。
    */
   nodeActionToolbars?: ReadonlyMap<string, BevyNodeActionsPresentation>;
-  /**
-   * 多选动作横条描述（change: 2026-10-16-add-group-selection-toolbar）。
-   *
-   * 由 canvas-shell 贡献层在选中 ≥2 个节点时计算后注入；横条锚定选区轴对齐包围盒顶部。缺省或空
-   * 表示不绘制。与 `nodeActionToolbars` 一样由 Bevy 绘制、Rust 命中。
-   */
-  selectionActionToolbar?: BevyNodeActionsPresentation;
-  /**
-   * 每预览节点的本地播放状态（change: 2026-10-15-add-film-set-shooting-shot-previews）。
-   *
-   * 由 canvas-shell/film-set 播放 owner 注入：`progress`/`playing` 只承载**本地**播放投影，
-   * 不是 canonical 数据。卡片状态机（准备中/待更新/失败）也在此声明。缺省即全部 `ready`
-   * 且无播放进度。
-   */
-  shotPreviews?: ReadonlyMap<string, {
-    state?: import("./wire-scene.js").BevyShotPreviewCardState;
-    progress?: number;
-    playing?: boolean;
-    diagnostic?: string;
-  }>;
-  /**
-   * 每镜头的归属线起点投影（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。
-   *
-   * 由 canvas-shell 注入：把镜头当前相机世界姿态（静态/非活动用 initialCamera，活动动态用
-   * 同一 T 的采样相机）经当前观察相机投影为画布 2D 起点。缺省即不派生归属线（不伪造起点）。
-   */
-  shotPreviewCameraProjection?: (filmSetNodeId: string, clipId: string) => { x: number; y: number } | null;
 };
 
-
-/** 校验并返回本帧使用的主题；非法输入直接抛错（不得部分降级）。 */
-
-/** 校验并返回本帧使用的主题；非法输入直接抛错（不得部分降级）。 */
 /** 校验并返回本帧使用的主题；非法输入直接抛错（不得部分降级）。 */
 export function resolveSceneTheme(input: unknown): AppThemeSnapshot {
   const result = validateAppThemePreset(input ?? defaultAppTheme());
@@ -271,91 +160,99 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   const nodeData = canvas.nodeData as Record<string, CanvasNodeData | undefined>;
   const assets = new Map<string, StoredAsset>(canvas.assets.map((asset) => [asset.id, asset]));
   const selectedIds = new Set(input.selection?.nodes ?? []);
-  // group 的父级几何（change: add-canvas-node-grouping，design D2）：
-  // Bevy 只接收绝对画布几何，因此这里先按 parentId 链解析每个节点的绝对偏移。
-  const nodeById = new Map(canvas.document.nodes.map((node) => [node.id, node]));
-  const absoluteOffset = (node: { id: string; parentId?: string }): { x: number; y: number } => {
-    let x = 0;
-    let y = 0;
-    let parentId = node.parentId;
-    const guard = new Set<string>([node.id]);
-    while (parentId && !guard.has(parentId)) {
-      guard.add(parentId);
-      const parent = nodeById.get(parentId);
-      if (!parent) break;
-      // 父级有位置预览（拖拽 group）时用预览值，使后代在预览中跟随容器
-      // （change: add-canvas-node-grouping，design D3）。
-      const parentOverride = input.positionOverrides?.get(parentId);
-      x += parentOverride ? parentOverride.x : parent.position.x;
-      y += parentOverride ? parentOverride.y : parent.position.y;
-      // Overrides are absolute: their ancestor offset is already included.
-      if (parentOverride) break;
-      parentId = parent.parentId;
-    }
-    return { x, y };
-  };
-  const directChildren = new Map<string, number>();
-  for (const node of canvas.document.nodes) {
-    if (!node.parentId) continue;
-    directChildren.set(node.parentId, (directChildren.get(node.parentId) ?? 0) + 1);
-  }
-  // 递归叶子（非 group）计数：决定 group 是否显示聚合输出端点。
-  const outputCapableLeaves = (groupId: string): number => {
-    let count = 0;
-    const stack = canvas.document.nodes.filter((node) => node.parentId === groupId);
-    const seen = new Set<string>();
-    while (stack.length > 0) {
-      const node = stack.pop()!;
-      if (seen.has(node.id)) continue;
-      seen.add(node.id);
-      if (capabilitiesOf(node).container) {
-        stack.push(...canvas.document.nodes.filter((candidate) => candidate.parentId === node.id));
-      } else {
-        count += 1;
+
+  // 导演区是 h=0 的地面范围，不是画布卡片：只通过 `sceneAreas` 投影，节点列表不再
+  // 生成通用卡片。2D 组保留节点身份（命中/选择/动作）但以 `frame` chrome 绘制包围框。
+  const sceneAreaNodeIds = new Set<string>();
+  const sceneAreaOrdinals = new Map<string, number>();
+  const animationSamples = new Map<string, SampledInstanceMotion>();
+  const cameraAnimationSamples = new Map<string, SampledCameraMotion>();
+  if (input.sceneAnimationTimes) {
+    // A shared instance can belong to several areas: the selected director owns its preview.
+    const animationNodes = [...canvas.document.nodes].sort((a, b) => Number(selectedIds.has(a.id)) - Number(selectedIds.has(b.id)));
+    for (const node of animationNodes) {
+      const area = decodeSceneAreaData(nodeData[node.id]?.sceneArea);
+      const script = area.ok ? area.value.animationScript : undefined;
+      if (!script) continue;
+      const ir = compiledWorldAnimation(script);
+      if (!ir) continue;
+      const sample = sampleWorldAnimation(ir, input.sceneAnimationTimes.get(node.id) ?? 0);
+      for (const [instanceId, transform] of sample.instances) {
+        const current = animationSamples.get(instanceId) ?? {};
+        animationSamples.set(instanceId, { ...current, ...transform });
+      }
+      for (const [cameraId, motion] of sample.cameras) {
+        const current = cameraAnimationSamples.get(cameraId) ?? {};
+        cameraAnimationSamples.set(cameraId, { ...current, ...motion });
       }
     }
-    return count;
-  };
-  const groupSizes = getGroupLayoutSizes(canvas.document.nodes, input.sizeOverrides);
-  const dropTargetGroupIds = input.dropTargetGroupIds instanceof Set
-    ? input.dropTargetGroupIds
-    : new Set(input.dropTargetGroupIds ?? []);
-  const hidden = input.modelFocus || input.imageFocus || input.videoFocus ? new Set<string>() : hiddenByCollapsedGroups(canvas);
-  // Keep projection input independent from insertion order. Render depth has a
-  // deliberate layering policy below: ungrouped roots are always the lowest
-  // layer and top-level containers are ordered by their structural bottom edge.
-  // Persisted zIndex remains a document/edit field; it is not reused as a second
-  // visual truth here (change: 2026-10-27-order-canvas-layers-by-ground-anchor).
-  const canonicalNodes = [...canvas.document.nodes];
-  // 顶层容器身份（group 结构容器与 composite-asset 片场）：只有在容器层按锚点排序，
-  // 普通节点永远留在未归属层（change: 2026-10-27-order-canvas-layers-by-ground-anchor）。
-  const containerIds = new Set<string>();
-  const projectedNodes = canonicalNodes.filter(node => !hidden.has(node.id)).map((node) => {
+  }
+  let sceneAreaCount = 0;
+  for (const node of canvas.document.nodes) {
+    if (decodeSceneAreaData(nodeData[node.id]?.sceneArea).ok) {
+      sceneAreaCount += 1;
+      sceneAreaOrdinals.set(node.id, sceneAreaCount);
+    }
+  }
+  const nodes: BevyRenderNode[] = canvas.document.nodes.flatMap((node) => {
     const context = { canvas, node, data: nodeData[node.id] };
     const capabilities = capabilitiesOf(node);
-    if (capabilities.container || capabilities.scope) containerIds.add(node.id);
     const kind = capabilities.appearance?.palette ?? "node";
     const previewCard = capabilities.modelPreview;
-    // 纯模型节点（片场 animation3d + 通用扩展节点 extension3d）：无卡片，节点矩形即范围框。
-    const pureModel = !!capabilities.scope;
-    // Legacy film-set composites remain readable for migration/history, but are
-    // never emitted as executable compositeAsset wire. Canonical film-set
-    // rendering is provided by the group preparation plane below.
-    const filmSet = pureModel;
-    const size = groupSizes.get(node.id) ?? effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id), capabilities);
+    const size = effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id), capabilities);
     const override = input.positionOverrides?.get(node.id);
-    const offset = absoluteOffset(node);
-    // 位置预览（拖拽）是绝对画布坐标；无预览时用文档局部坐标 + 父级绝对偏移投影。
     const data = nodeData[node.id];
-    const executableComposite = filmSet && !isFilmSetNode(node.type, data);
-    const collapsed = node.type === "group" && data?.groupCollapsed === true;
-    // Preserve the structural anchor so collapsing never moves/resizes the badge.
-    // Rust derives the visible bounds from the badge when group.collapsed is true.
-    const { x, y, width, height } = {
-      x: override ? override.x : node.position.x + offset.x,
-      y: override ? override.y : node.position.y + offset.y,
-      ...size,
-    };
+    const cameraPreview = input.worldCameraPreviews?.get(node.id);
+    const baseCameraInput = data?.worldCamera === undefined
+      ? undefined
+      : cameraPreview && typeof data.worldCamera === "object" && data.worldCamera !== null
+        ? { ...data.worldCamera, position: cameraPreview.position, rotation: cameraPreview.rotation }
+        : data.worldCamera;
+    const baseCamera = baseCameraInput === undefined ? undefined : decodeWorldCamera(baseCameraInput);
+    const cameraMotion = baseCamera?.ok ? cameraAnimationSamples.get(baseCamera.value.cameraId) : undefined;
+    const cameraInput = baseCameraInput !== undefined && cameraMotion
+      ? {
+          ...(baseCameraInput as Record<string, unknown>),
+          ...(cameraMotion.position ? { position: cameraMotion.position } : {}),
+          ...(cameraMotion.rotation ? { rotation: cameraMotion.rotation } : {}),
+          ...(cameraMotion.zoom !== undefined ? { projection: zoomedProjection((baseCameraInput as { projection: unknown }).projection, cameraMotion.zoom) } : {})
+        }
+      : baseCameraInput;
+    const camera = cameraInput === undefined ? undefined : decodeWorldCamera(cameraInput);
+    if (camera && !camera.ok) throw new Error(`Invalid shared world camera: ${camera.code}`);
+    const area = decodeSceneAreaData(data?.sceneArea);
+    if (area.ok) {
+      sceneAreaNodeIds.add(node.id);
+      return [];
+    }
+    const workflowGroupInput = data?.workflowGroup2d;
+    const workflowGroup = workflowGroupInput === undefined ? undefined : decodeWorkflowGroupData(workflowGroupInput);
+    const worldInput = data?.sharedWorldInstance;
+    const world = worldInput === undefined ? undefined : decodeWorldInstanceData(worldInput);
+    if (world && !world.ok) throw new Error(`Invalid shared world instance: ${world.code}`);
+    const groundPreview = input.worldGroundPreviews?.get(node.id);
+    if (groundPreview && (!Number.isFinite(groundPreview.u) || !Number.isFinite(groundPreview.v))) {
+      throw new Error("Invalid shared world ground preview");
+    }
+    const animated = world?.ok ? animationSamples.get(world.value.instanceId) : undefined;
+    const baseTransform = world?.ok && animated ? {
+      ...world.value.transform,
+      ...(animated.position ? { position: animated.position } : {}),
+      ...(animated.rotation ? { rotation: quatMul(world.value.transform.rotation as unknown as import("../model-transform.js").Quat, animated.rotation as unknown as import("../model-transform.js").Quat) as WorldRotation } : {}),
+      ...(animated.scale !== undefined ? { scale: animated.scale } : {})
+    } : world?.ok ? world.value.transform : undefined;
+    const projectedWorld = world?.ok && baseTransform && (groundPreview || animated) ? {
+      ...world.value,
+      transform: { ...baseTransform, ...(groundPreview ? { position: {
+        ...baseTransform.position,
+        u: baseTransform.position.u + groundPreview.u,
+        v: baseTransform.position.v + groundPreview.v
+      } } : {}) }
+    } : world?.ok ? world.value : undefined;
+    if (projectedWorld && !decodeWorldInstanceData(projectedWorld).ok) throw new Error("Invalid shared world ground preview");
+    const x = override ? override.x : node.position?.x ?? 0;
+    const y = override ? override.y : node.position?.y ?? 0;
+    const { width, height } = size;
     const displayName = resolveNodeDisplayName({
       type: node.type,
       explicitName: data?.title,
@@ -364,37 +261,13 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const texture = resolveTextureKey(node.type, data, assets) !== null;
     const modelOpsV2 = input.modelScenesV2?.get(node.id);
     const preparedResource = input.modelResources?.get(node.id);
-    const placement = input.modelPlacements?.get(node.id)
-      ?? (kind === "group" ? groupAppearanceModel(data).placement : readPlacement(data));
-    // 模型资源：prepared resource 优先，缺省时在同一份规范化结果上一次性派生
-    // （测试/最小 fixture 兼容）。
+    const placement = input.modelPlacements?.get(node.id) ?? readPlacement(data);
     const resource = capabilities.modelPreparation
       ? (preparedResource
         ?? (modelOpsV2
           ? prepareModelResource({ sceneVersion: MODEL_SCRIPT_SCENE_IR_V2_VERSION, ops: modelOpsV2 })
           : null))
       : null;
-    /**
-     * 片场组与普通组、`model3d` 卡片共用同一画布模型单位（`placement.scale × 64 × 3 / extent`）：
-     * 徽标按模型自身宽高渲染，不读组框或徽标矩形，也不按组宽取景
-     * （change: 2026-10-31-render-film-set-badge-at-model-units）。
-     */
-    const filmSetGroup = node.type === "group" && readFilmSetGroupMarker(data) !== null;
-    // 片场：模型与媒体平面共用同一等比适配因子，让范围框（节点矩形）罩住整套内容，
-    // 拖动角落缩放矩形即等比缩放内容（change: 2026-10-08-make-film-set-model-only 修订）。
-    const pureFit = executableComposite
-      ? pureModelFit({
-          nodeId: node.id,
-          data,
-          resource,
-          placement,
-          width,
-          height,
-          readyPlaneIds: input.compositeAssetReadyPlanes ?? EMPTY_PLANE_IDS
-        })
-      : null;
-    const filmSetLayoutAabb = pureFit?.layoutAabb ?? null;
-    const filmSetMediaPlanes = pureFit?.mediaPlanes ?? [];
     const rendered: BevyRenderNode = {
       id: node.id,
       type: kind,
@@ -403,165 +276,40 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       width,
       height,
       body: readBody(node.type, data, assets),
+      ...(camera?.ok ? { worldCamera: camera.value } : {}),
       title: displayName.displayName,
-      // 复合资产节点优先显示可信 adapter 声明的**业务类型名**（如「片场」「游戏炼丹炉」），
-      // 否则回落通用内容类型标签（change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
-      typeLabel: input.compositeAssetTypeLabels?.get(node.id) ?? displayName.contentTypeLabel,
+      typeLabel: displayName.contentTypeLabel,
       progress: clampProgress(data?.progress),
       busy: isBusy(data),
       texture,
       // 仅当该节点是唯一选中项时才绘制抓手，避免多选时语义歧义（design D1）。
-      // group 容器同样支持右下角 resize（design D2）。
-      resizable: !!capabilities.resize && !collapsed && selectedIds.size === 1 && selectedIds.has(node.id),
-      ...(previewCard ? { modelPreview: previewCard.project(context, input.modelPreviews?.get(node.id)) } : {}),
-      // 片场（animation3d）纯模型：不携带卡片分类名（Bevy 不绘制卡片），只给条件范围几何。
-      // 普通 model3d 保留「3D 模型」分类名（change: 2026-10-08-make-film-set-model-only）。
-      ...(capabilities.appearance?.cardLabel ? { cardLabel: capabilities.appearance.cardLabel } : {}),
-      ...(executableComposite
-      ? {
-          compositeAsset: compositeAssetScopeForNode({
-            x,
-            y,
-            width,
-            height,
-            // 范围形状是**复合资产类别的默认**：除非可信 adapter 按严格身份另行声明，所有
-            // composite-asset（片场、炼丹炉、未来第三方）一律使用地面占地的等距范围；非
-            // composite-asset（text/image/model3d 卡片/group）不进入此分支，保持矩形。
-            // （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D3 修订）。
-            scopeShape: input.compositeAssetScopeShapes?.get(node.id) ?? capabilities.scope!.shape(context),
-            // 总览 LOD 策略只由可信 adapter 声明；缺失即 World 用途保持 High
-            // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
-            emptyPlaceholder: input.compositeAssetEmptyPlaceholders?.get(node.id),
-            geometryQuality: input.geometryQualities?.get(node.id),
-            mediaPlanes: filmSetMediaPlanes,
-            layoutAabb: filmSetLayoutAabb,
-            rootPlacement: placement,
-            contentExtent: resource?.extent ?? 2,
-            itemPlacements: Object.fromEntries(readFilmSetContent(data).items.map(item => [
-              encodeFilmSetPartId(item.id, ""),
-              { offset: { ...item.localTransform.offset }, scale: item.localTransform.scale, yaw: item.localTransform.yaw * 180 / Math.PI }
-            ])),
-            ...(input.compositeAssetCompositions?.get(node.id)?.itemRoots
-              ? { itemRoots: input.compositeAssetCompositions.get(node.id)!.itemRoots }
-              : {})
-          })
+      // 共享世界实例没有卡片尺寸抓手：模型缩放走世界变换/助手，不是卡片 resize。
+      resizable: !projectedWorld && !!capabilities.resize && selectedIds.size === 1 && selectedIds.has(node.id),
+      ...(projectedWorld ? {
+        sharedWorldInstance: projectedWorld,
+        chrome: { kind: "none" as const }
+      } : {}),
+      ...(workflowGroup?.ok ? {
+        chrome: {
+          kind: "frame" as const,
+          groupId: workflowGroup.value.groupId,
+          memberNodeIds: [...workflowGroup.value.memberNodeIds]
         }
-      : {})
+      } : {}),
+      // 共享世界实例没有卡片，也不再申请卡内轨道预览；模型由世界姿态直接绘制。
+      ...(previewCard && !projectedWorld ? { modelPreview: previewCard.project(context, input.modelPreviews?.get(node.id)) } : {}),
+      ...(capabilities.appearance?.cardLabel ? { cardLabel: capabilities.appearance.cardLabel } : {})
     };
-    if (capabilities.container) {
-      rendered.group = {
-        ...capabilities.container.project(context, {
-          memberCount: directChildren.get(node.id) ?? 0,
-          outputCapableLeafCount: outputCapableLeaves(node.id)
-        }),
-        // Group-only presentation stays a projection of canonical nodeData; defaults are never
-        // written back (change: 2026-10-24-unify-group-and-film-set-authoring).
-        ...(kind === "group" ? {
-          collapsed,
-          // 所有 group（普通组与片场组）都绘制节点顶部操作横条；具体动作仍由
-          // `canvas.node-action` 贡献按通用能力与节点身份决定。
-          actionBar: true,
-          // 可信 adapter 的声明同时覆盖 group 徽标的场景组合（片场迁移后不再有 compositeAsset）。
-          ...(input.geometryQualities?.get(node.id) ? { geometryQuality: input.geometryQualities.get(node.id) } : {}),
-          // 总览纹理缓存同样是 group 级声明；缺省保持逐帧实时。
-          ...(input.overviewCaches?.get(node.id) ? { overviewCache: input.overviewCaches.get(node.id) } : {}),
-          ...(resource?.aabb ? { modelBounds: { aabb: resource.aabb, extent: resource.extent } } : {}),
-          // 片场场景按模型自身单位呈现，只向下展开：顶边贴住组底边锚点，避免盖住成员卡片。
-          ...(filmSetGroup ? { badgeTopAnchor: true } : {})
-        } : {})
+    if (capabilities.modelPreparation && resource) {
+      rendered.model = {
+        sceneVersion: resource.sceneVersion,
+        resourceKey: resource.resourceKey,
+        signature: resource.signature,
+        ...(placement ? { placement } : {})
       };
-      if (node.type === "group" && dropTargetGroupIds.has(node.id)) rendered.group.dropTarget = true;
     }
-    if (capabilities.modelPreparation) {
-      // prepared resource 优先：映射层只引用 resource key，不遍历顶点/序列化 ops。
-      // 缺省时回落到裸 ops，在同一份规范化结果上一次性派生（测试/最小 fixture 兼容）。
-      if (resource) {
-        rendered.model = {
-          sceneVersion: resource.sceneVersion,
-          resourceKey: resource.resourceKey,
-          signature: resource.signature,
-          ...(placement ? { placement } : {})
-        };
-      }
-    }
-    // 拍摄镜头预览卡片呈现（change: 2026-10-15-add-film-set-shooting-shot-previews，design D2/D8）：
-    // 只读投影源镜头的标题/类型/画幅/时长/状态，不复制第二份权威数据；无归属或源已消失时不绘制。
-    // 旧形态写 `shotPreview`；迁移后的形态是 owner-managed 媒体节点（`managedBy` + `mediaContent`）。
-    const legacyShotOwnership = shotPreviewOwnershipOf(data);
-    const shotOwnership = legacyShotOwnership ?? managedShotPreviewOwnershipOf(data);
-    if (shotOwnership) {
-      const filmSetData = nodeData[shotOwnership.filmSetNodeId] as FilmSetNodeData | undefined;
-      const local = input.shotPreviews?.get(node.id);
-      const ownerNode = canvas.document.nodes.find(entry => entry.id === shotOwnership.filmSetNodeId);
-      const groupMarker = ownerNode?.type === "group" ? readFilmSetGroupMarker(filmSetData) : null;
-      const presentation = groupMarker
-        ? shotPreviewCardPresentationForFilmSetGroup({ groupNodeId: shotOwnership.filmSetNodeId, groupData: filmSetData, clipId: shotOwnership.clipId, state: local?.state, progress: local?.progress, playing: local?.playing, diagnostic: local?.diagnostic })
-        : legacyShotOwnership ? shotPreviewCardPresentation({
-          filmSetNodeId: shotOwnership.filmSetNodeId,
-          previewData: data,
-          filmSetData,
-          state: local?.state,
-          progress: local?.progress,
-          playing: local?.playing,
-          diagnostic: local?.diagnostic
-        }) : null;
-      if (presentation) {
-        rendered.shotPreview = presentation;
-        // 卡片主标题 = 镜头名，次要标记 = 静态/动态类型（design D8）。这些是源镜头的只读投影，
-        // 不在预览节点上复制权威数据。
-        rendered.title = presentation.name;
-        rendered.typeLabel = presentation.kind === "static" ? "静态镜头" : "动态镜头";
-      }
-    }
-    return rendered;
+    return [rendered];
   });
-
-  // Render depth is intentionally separate from persisted zIndex
-  // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D2/D3）：
-  // 1. 未归属层：`parentId` 为空且不是容器的节点按现有文档顺序在最下；
-  // 2. 容器层：顶层容器（`group` 与顶层 `composite-asset` 片场）按**绝对结构底边**锚点
-  //    升序（y 越大越靠前、越后绘制），同锚点按节点 id 升序；每个容器后紧跟它的成员闭包，
-  //    组内片场按成员处理，不重复进入容器排序；
-  // 3. 兜底：被环/异常 parent 关系挤出的节点仍按文档顺序发射，不丢节点。
-  // 这是派生的绘制序列，不写回第二份持久顺序字段。
-  const projectedById = new Map(projectedNodes.map((node) => [node.id, node]));
-  const documentOrder = new Map(canonicalNodes.map((node, index) => [node.id, index]));
-  const children = new Map<string, string[]>();
-  for (const node of canonicalNodes) {
-    if (!node.parentId || !projectedById.has(node.id) || !projectedById.has(node.parentId)) continue;
-    const list = children.get(node.parentId) ?? [];
-    list.push(node.id);
-    children.set(node.parentId, list);
-  }
-  const compareId = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
-  const compareChildIds = (left: string, right: string): number => {
-    const leftNode = projectedById.get(left);
-    const rightNode = projectedById.get(right);
-    const leftGroup = leftNode?.type === "group" ? 0 : 1;
-    const rightGroup = rightNode?.type === "group" ? 0 : 1;
-    return leftGroup - rightGroup
-      || (leftGroup === 0 ? compareId(left, right) : (documentOrder.get(left) ?? 0) - (documentOrder.get(right) ?? 0));
-  };
-  for (const ids of children.values()) ids.sort(compareChildIds);
-  const orderedIds: string[] = [];
-  const visited = new Set<string>();
-  const visit = (id: string): void => {
-    if (visited.has(id)) return;
-    const node = projectedById.get(id);
-    if (!node) return;
-    visited.add(id);
-    orderedIds.push(id);
-    for (const child of children.get(id) ?? []) visit(child);
-  };
-  const roots = canonicalNodes.filter((node) => !node.parentId || !projectedById.has(node.parentId));
-  for (const node of roots.filter((entry) => !containerIds.has(entry.id))) visit(node.id);
-  const containers = roots
-    .filter((entry) => containerIds.has(entry.id) && projectedById.has(entry.id))
-    .map((entry) => ({ id: entry.id, anchor: canvasGroundAnchor(projectedById.get(entry.id)!) }))
-    .sort(compareCanvasGroundOrder);
-  for (const container of containers) visit(container.id);
-  for (const node of projectedNodes) visit(node.id);
-  const nodes = orderedIds.map((id) => projectedById.get(id)!);
 
   // 幽灵节点（上传中）：追加为普通 Bevy 节点，复用完全相同的卡片绘制。
   // 同 id 的真实节点已存在时跳过（working projection 接管，避免重复绘制）。
@@ -570,7 +318,6 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     if (realIds.has(ghost.id)) continue;
     const kind = bevyKindForNodeType(ghost.nodeType);
     const size = bevyNodeSize(kind);
-    const progress = clampProgress(ghost.progress);
     nodes.push({
       id: ghost.id,
       type: kind,
@@ -581,7 +328,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       body: ghost.label ?? "",
       title: ghost.label ?? "",
       typeLabel: contentTypeLabelForNode(ghost.nodeType),
-      progress,
+      progress: clampProgress(ghost.progress),
       // busy=true 驱动进度环；节点卡片不显示任何状态文案。
       busy: true,
       texture: ghost.texture === true,
@@ -590,14 +337,15 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     });
   }
 
-  // 纯模型节点（片场 animation3d + 通用扩展节点 extension3d）不能作为边端点：
-  // canonical 已由 reducer/规范化保证；映射层再做一次防御过滤，避免异常帧绘制纯模型连线
+  // 纯模型扩展节点没有连线端点：映射层防御性过滤，避免异常帧绘制非法连线
   // （change: 2026-10-08-make-film-set-model-only；change: 2026-10-10 泛化）。
-  const filmSetNodeIds = new Set(
+  const endpointlessNodeIds = new Set(
     canvas.document.nodes.filter((node) => capabilitiesOf(node).connections?.endpoints({ canvas, node, data: nodeData[node.id] }) === "none").map((node) => node.id)
   );
+  // 导演区节点不出现在节点列表里；指向它的旧连线不能留下悬空端点。
+  for (const nodeId of sceneAreaNodeIds) endpointlessNodeIds.add(nodeId);
   const edges = canvas.document.edges
-    .filter((edge) => !hidden.has(edge.source) && !hidden.has(edge.target) && !filmSetNodeIds.has(edge.source) && !filmSetNodeIds.has(edge.target))
+    .filter((edge) => !endpointlessNodeIds.has(edge.source) && !endpointlessNodeIds.has(edge.target))
     .map((edge) => ({
       id: edge.id,
       source: edge.source,
@@ -605,86 +353,30 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       label: typeof edge.data?.label === "string" ? edge.data.label : ""
     }));
 
-  // 派生拍摄镜头归属线（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）：
-  // 独立于普通边拓扑；起点由注入的相机投影给出，缺失即不派生该线（不伪造起点）。
-  const previewNodeById = new Map(nodes.map((node) => [node.id, node]));
-  const shotPreviewLinks: BevyShotPreviewLink[] = [];
-  if (input.shotPreviewCameraProjection) {
-    for (const node of canvas.document.nodes) {
-      const data = nodeData[node.id];
-      if (hidden.has(node.id)) continue;
-      if (isFilmSetNode(node.type, data)) {
-        shotPreviewLinks.push(...shotPreviewLinksForFilmSet({
-          filmSetNodeId: node.id,
-          data: data as FilmSetNodeData | undefined,
-          previewNodeById: (previewId) => { const node = previewNodeById.get(previewId); return node?.shotPreview?.hidden ? undefined : node; },
-          cameraProjection: (clipId) => input.shotPreviewCameraProjection!(node.id, clipId)
-        }));
-      } else if (node.type === "group" && readFilmSetGroupMarker(data)) {
-        shotPreviewLinks.push(...shotPreviewLinksForFilmSetGroup({
-          groupNodeId: node.id,
-          groupData: data,
-          previewNodeById: (previewId) => { const preview = previewNodeById.get(previewId); return preview?.shotPreview?.hidden ? undefined : preview; },
-          cameraProjection: (clipId) => input.shotPreviewCameraProjection!(node.id, clipId)
-        }));
-      }
-    }
-  }
-
-  // Film-set groups are rendered from source cards and bindings.  The
-  // preparation is deliberately a read projection: unavailable cards remain
-  // represented by diagnostics and never cause the binding to disappear.
-  const filmSetGroups: BevyFilmSetGroupPreparation[] = [];
-  for (const node of canvas.document.nodes) {
-    if (hidden.has(node.id) || node.type !== "group" || !readFilmSetGroupMarker(nodeData[node.id])) continue;
-    const prepared = prepareFilmSetGroup(canvas, node.id);
-    if (!prepared) continue;
-    const diagnosticByBinding = new Map(prepared.diagnostics.map(diagnostic => [diagnostic.bindingId, diagnostic.message]));
-    const objectIds = new Set((input.modelResources?.get(node.id)?.ops ?? input.modelScenesV2?.get(node.id) ?? []).map(op => op.id));
-    const sceneBindings = activeFilmSetSceneBindings(prepared.marker);
-    for (const binding of sceneBindings) if (objectIds.has(encodeFilmSetPartId(binding.bindingId, "resource-unavailable"))) diagnosticByBinding.set(binding.bindingId, diagnosticByBinding.get(binding.bindingId) ?? "资源准备失败，请检查来源卡片后重试");
-    const bindings: BevyFilmSetGroupBinding[] = sceneBindings.map(binding => {
-      const resolved = prepared.bindings.find(candidate => candidate.bindingId === binding.bindingId);
-      const sourcePresentation = projectedNodes.find(candidate => candidate.id === binding.sourceNodeId);
-      const sourceData = nodeData[binding.sourceNodeId];
-      const assetId = sourceData?.outputAssetId ?? sourceData?.mediaContent?.payload?.assetId;
-      const sourceAsset = typeof assetId === "string" ? assets.get(assetId) : undefined;
-      const width = sourceAsset?.metadata?.width, height = sourceAsset?.metadata?.height;
-      const aspectRatio = typeof width === "number" && Number.isFinite(width) && width > 0 && typeof height === "number" && Number.isFinite(height) && height > 0 ? width / height : 1;
-      return {
-        bindingId: binding.bindingId,
-        sourceNodeId: binding.sourceNodeId,
-        kind: binding.kind,
-        contentKey: resolved?.contentKey ?? binding.contentKey,
-        ...(sourcePresentation?.model?.resourceKey ? { resourceKey: sourcePresentation.model.resourceKey } : {}),
-        ...(sourcePresentation?.model?.signature ? { signature: sourcePresentation.model.signature } : {}),
-        transform: { ...binding.transform },
-        visible: binding.visibility,
-        ...(binding.kind === "model3d" ? {} : { aspectRatio }),
-        ...(diagnosticByBinding.has(binding.bindingId) ? { diagnostic: diagnosticByBinding.get(binding.bindingId) } : {})
-      };
-    });
-    filmSetGroups.push({
-      schemaVersion: FILM_SET_GROUP_RENDER_SCHEMA_VERSION,
-      ownerId: node.id,
-      ...(prepared.marker.sceneTransform ? { sceneTransform: { ...prepared.marker.sceneTransform } } : {}),
-      badgeOrigin: { x: absoluteOffset(node).x + (node.width ?? 0) / 2, y: absoluteOffset(node).y + (node.height ?? 0) },
-      bindings,
-      ...(prepared.marker.ground ? { ground: { ...prepared.marker.ground } } : {}),
-      ...(prepared.marker.activeClip === undefined ? {} : { activeClip: prepared.marker.activeClip })
-    });
-  }
-
   return {
     version: CANVAS_RENDER_SCENE_VERSION,
     canvasId: canvas.id,
     revision: canvas.revision,
     nodes,
+    sceneAreas: canvas.document.nodes.flatMap(node => {
+      const area = decodeSceneAreaData(canvas.nodeData[node.id]?.sceneArea);
+      if (!area.ok) return [];
+      const data = canvas.nodeData[node.id] as { title?: unknown } | undefined;
+      const resolved = resolveNodeDisplayName({ type: node.type, explicitName: data?.title });
+      const title = resolved.nameSource === "default"
+        ? `导演区 ${sceneAreaOrdinals.get(node.id) ?? 1}`
+        : resolved.displayName;
+      const preview = input.sceneAreaPreviews?.get(node.id);
+      if (!preview) return [{ nodeId: node.id, title, bounds: area.value.bounds }];
+      if (![preview.min.u, preview.min.v, preview.max.u, preview.max.v].every(Number.isFinite)
+        || preview.min.u > preview.max.u || preview.min.v > preview.max.v) {
+        throw new Error("Invalid scene area bounds preview");
+      }
+      return [{ nodeId: node.id, title, bounds: { min: { ...preview.min }, max: { ...preview.max } } }];
+    }),
     edges,
-    ...(filmSetGroups.length > 0 ? { filmSetGroups } : {}),
-    ...(shotPreviewLinks.length > 0 ? { shotPreviewLinks } : {}),
     selection: {
-      nodes: [...(input.selection?.nodes ?? [])].filter(id => !hidden.has(id)),
+      nodes: [...(input.selection?.nodes ?? [])],
       edge: input.selection?.edge ?? null
     },
     viewport: input.viewportOverride ?? { x: 0, y: 0, zoom: 1 },
@@ -702,10 +394,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     ...(input.animationPlayback ? { animationPlayback: input.animationPlayback } : {}),
     ...(input.focusTransition ? { focusTransition: input.focusTransition } : {}),
     ...(input.nodeActionToolbars && input.nodeActionToolbars.size > 0
-      ? { nodeActions: Object.fromEntries([...input.nodeActionToolbars].filter(([id, value]) => !hidden.has(id) && value.actions.length > 0)) }
-      : {}),
-    ...(input.selectionActionToolbar && input.selectionActionToolbar.actions.length > 0
-      ? { selectionActions: input.selectionActionToolbar }
+      ? { nodeActions: Object.fromEntries([...input.nodeActionToolbars].filter(([, value]) => value.actions.length > 0)) }
       : {})
   };
 }
@@ -737,8 +426,11 @@ export function renderSceneEquals(left: CanvasRenderScene | null, right: CanvasR
 export function renderSceneFingerprint(scene: CanvasRenderScene): string {
   const parts: string[] = [
     scene.version,
+    `cameraEdit=${JSON.stringify(scene.worldCameraEdit ?? null)}`,
     `rev=${scene.revision}`,
     `sel=${scene.selection.nodes.join(",")}|${scene.selection.edge ?? ""}`,
+    JSON.stringify(scene.sceneAreas ?? []),
+    JSON.stringify(scene.executingScopes ?? []),
     `vp=${scene.viewport.x},${scene.viewport.y},${scene.viewport.zoom}`,
     `theme=${scene.theme.fingerprint}`,
     scene.draft ? `draft=${scene.draft.source},${scene.draft.side},${scene.draft.x},${scene.draft.y}` : "draft=",
@@ -757,6 +449,7 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
       ? `vfocus=${scene.videoFocus.nodeId},${scene.videoFocus.viewport.x},${scene.videoFocus.viewport.y},${scene.videoFocus.viewport.zoom},${scene.videoFocus.sourceWidth}x${scene.videoFocus.sourceHeight}`
       : "vfocus=",
     scene.modelEditor ? `editor=${JSON.stringify(scene.modelEditor)}` : "editor=",
+    `hoverCursor=${scene.hover?.cursor?.x ?? ""},${scene.hover?.cursor?.y ?? ""}`,
     scene.hover
       ? "nodeId" in scene.hover
         ? `hover=n:${scene.hover.nodeId}:${scene.hover.port ?? ""}`
@@ -780,24 +473,13 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
       : "ftrans=",
     scene.nodeActions
       ? `na=${Object.entries(scene.nodeActions).map(([id, value]) => `${id}:${value.actions.map((action) => `${action.id}:${action.label}:${action.enabled ? 1 : 0}:${action.menu ? 1 : 0}:${action.tone ?? "neutral"}:${action.icon ?? ""}:${action.iconOnly ? 1 : 0}`).join("|")}@${value.summary ?? ""}`).join(";")}`
-      : "na=",
-    scene.selectionActions
-      ? `sa=${scene.selectionActions.actions.map((action) => `${action.id}:${action.label}:${action.enabled ? 1 : 0}:${action.menu ? 1 : 0}:${action.tone ?? "neutral"}`).join("|")}@${scene.selectionActions.summary ?? ""}`
-      : "sa="
+      : "na="
   ];
   for (const node of scene.nodes) {
     parts.push(`n=${stablePresentationStringify(node)}`);
   }
   for (const edge of scene.edges) {
     parts.push(`e=${edge.id},${edge.source},${edge.target},${edge.label}`);
-  }
-  // 派生归属线（change: 2026-10-15-add-film-set-shooting-shot-previews）：起点/目标变化即重绘。
-  for (const link of scene.shotPreviewLinks ?? []) {
-    parts.push(`shot-link=${link.id},${link.ownerNodeId},${link.previewNodeId},${link.clipId},${link.start.x},${link.start.y}`);
-  }
-  // 活动播放投影的 viewMode/目标卡片参与指纹，使 hover 目标切换触发一次 set_scene。
-  if (scene.animationPlayback) {
-    parts.push(`motion-view=${scene.animationPlayback.viewMode ?? ""},${scene.animationPlayback.targetPreviewNodeId ?? ""}`);
   }
   return fnv1a64Hex(parts.join("\n"));
 }
@@ -813,4 +495,31 @@ export function stablePresentationStringify(value: unknown): string {
     }
     return item;
   });
+}
+
+/** 编译缓存：同一动画脚本只在源码/时长/循环变化时重新执行。 */
+const worldAnimationCache = new Map<string, WorldAnimationIr | null>();
+
+function compiledWorldAnimation(script: WorldAnimationScript): WorldAnimationIr | null {
+  const key = `${script.sourceHash}:${script.scriptVersion}:${script.duration}:${script.loop ? 1 : 0}`;
+  if (worldAnimationCache.has(key)) return worldAnimationCache.get(key)!;
+  const result = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
+  const ir = result.ok ? result.ir : null;
+  if (worldAnimationCache.size >= 64) {
+    const first = worldAnimationCache.keys().next().value;
+    if (first !== undefined) worldAnimationCache.delete(first);
+  }
+  worldAnimationCache.set(key, ir);
+  return ir;
+}
+
+function zoomedProjection(projection: unknown, zoom: number): unknown {
+  const p = projection as { kind?: string; verticalFovRadians?: number; verticalSizeMeters?: number };
+  if (p?.kind === "perspective" && typeof p.verticalFovRadians === "number") {
+    return { ...p, verticalFovRadians: Math.max(0.01, Math.min(Math.PI * 0.9, p.verticalFovRadians * zoom)) };
+  }
+  if (p?.kind === "isometric" && typeof p.verticalSizeMeters === "number") {
+    return { ...p, verticalSizeMeters: Math.max(0.01, p.verticalSizeMeters * zoom) };
+  }
+  return projection;
 }

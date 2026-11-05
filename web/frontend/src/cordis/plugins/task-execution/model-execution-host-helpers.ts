@@ -3,23 +3,15 @@
  * （change: 2026-09-29-add-pluggable-model-interactions，任务 4.1）。
  */
 import type { CanvasSession } from "../../contracts.js";
-import { SELF_REFERENCE_ASSET_FIELD, isShotReferenceRole, type CanvasTaskCatalogModel, type CanvasTaskModelType, type ServerCanvas } from "@woohaa3/contracts";
+import { SELF_REFERENCE_ASSET_FIELD, type CanvasTaskCatalogModel, type CanvasTaskModelType, type ServerCanvas } from "@woohaa3/contracts";
 import { planConnectEdge, planDeleteEdge, planNodeDataPatch } from "../../../extension-api/command-planner.js";
 import type { ModelReferenceItem } from "../../contract/model-interaction.js";
 
-/**
- * 某条参考能否进入 `@` 候选。
- *
- * 镜头参考的类型由 role 唯一确定（视频），录制期间只是资产还没就绪；此时就允许 `@`，
- * 让用户先把提示词写好，提交时由既有的「等待镜头参考录制完成」门禁拦截并续交。
- * 其他参考必须已就绪，避免把类型未知或上游缺失的槽位写进提示词。
- */
+/** 参考必须已就绪，避免把类型未知或上游缺失的槽位写进提示词。 */
 export function canMentionReference(
   item: Pick<ModelReferenceItem, "slotId" | "role" | "status">
 ): boolean {
-  if (item.slotId === "") return false;
-  if (item.status === "ready") return true;
-  return isShotReferenceRole(item.role) && item.status === "pending";
+  return item.slotId !== "" && item.status === "ready";
 }
 
 /** 连接一个来源节点作为目标节点的参考输入（受控 Canvas 命令）。 */

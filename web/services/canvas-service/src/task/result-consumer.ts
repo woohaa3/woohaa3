@@ -289,6 +289,7 @@ function defaultContentType(mediaKind: "image" | "video" | "audio"): string {
 }
 
 function readJobId(item: TaskExecutionDetail): string {
-  // history 的列表项不含 jobId（安全裁剪），由 runId 派生稳定 job id。
+  // 安全 history 不含 jobId；仅作为无 durable job 的旧记录恢复身份。
+  // projector 会先用权威画布的 node/run/task 关联解析实际受理 job。
   return `job-${item.runId}`;
 }

@@ -1,0 +1,14 @@
+{
+  "cases": [
+    { "world": [0, 0, 0], "renderer": [0, 0, 0], "rotation": [0, 0, 0, 1], "renderer_rotation": [0, 0, 0, 1], "scale": 1, "asset_point": [1, 2, 3], "renderer_point": [64, 128, 192] },
+    { "world": [1, 2, 3], "renderer": [64, 192, -128], "rotation": [0.5, 0.5, 0.5, 0.5], "renderer_rotation": [0.5, 0.5, -0.5, 0.5], "scale": 2, "asset_point": [1, 2, 3], "renderer_point": [320, -192, -256] },
+    { "world": [-1.5, -0.25, 0.125], "renderer": [-96, 8, 16], "rotation": [0, 1, 0, 0], "renderer_rotation": [0, 0, -1, 0], "scale": 0.25, "asset_point": [1, 2, 3], "renderer_point": [-112, -24, 64] }
+  ],
+  "codecRejections": [
+    { "reason": "unsupported-version", "input": { "version": "shared-world-v2", "position": { "u": 0, "v": 0, "h": 0 }, "rotation": [0, 0, 0, 1], "scale": 1 } },
+    { "reason": "invalid-data", "input": { "version": "shared-world-v1", "position": { "u": 0, "v": 0, "h": 0 }, "rotation": [0, 0, 0, 0], "scale": 1 } },
+    { "reason": "invalid-data", "input": { "version": "shared-world-v1", "position": { "u": 0, "v": 0, "h": 0 }, "rotation": [0, 0, 0, 1], "scale": 0 } },
+    { "reason": "invalid-data", "input": { "version": "shared-world-v1", "position": { "u": null, "v": 0, "h": 0 }, "rotation": [0, 0, 0, 1], "scale": 1 } }
+  ],
+  "nonJsonNumberRejections": ["NaN", "Infinity", "-Infinity"]
+}

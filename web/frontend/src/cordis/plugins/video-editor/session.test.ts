@@ -177,6 +177,51 @@ describe("视频聚焦会话", () => {
     expect(video.paused).toBe(true);
   });
 
+  it("未预览历史时的清理不打断当前视频加载和播放通知", () => {
+    const { session, video, textures } = makeSession();
+    const listener = vi.fn();
+    session.subscribe(listener);
+    session.start();
+    session.setHistoryOverride(null);
+    video.fire("loadeddata");
+    expect(textures.at(-1)).toMatchObject({ nodeId: "vid1" });
+    listener.mockClear();
+    video.currentTime = 1;
+    video.fire("timeupdate");
+    expect(listener).toHaveBeenCalledOnce();
+    expect(session.state().currentTime).toBe(1);
+  });
+
+  it.each(["历史来源", "返回当前来源"])("%s继续发出播放进度与自然结束通知", (source) => {
+    const { session, video } = makeSession();
+    session.start();
+    session.setHistoryOverride({ url: "/api/media/sha256-history" });
+    video.fire("loadeddata");
+    if (source === "返回当前来源") {
+      session.setHistoryOverride(null);
+      video.fire("loadeddata");
+    }
+    const listener = vi.fn();
+    session.subscribe(listener);
+    video.paused = false;
+    video.fire("play");
+    video.currentTime = 1;
+    video.fire("timeupdate");
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(session.state()).toMatchObject({ currentTime: 1, playing: true });
+    video.currentTime = 2;
+    Object.assign(video, { ended: true });
+    video.fire("ended");
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(session.state()).toMatchObject({ currentTime: 2, playing: false });
+    video.fire("pause");
+    expect(listener).toHaveBeenCalledTimes(4);
+    session.dispose();
+    listener.mockClear();
+    video.fire("timeupdate");
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it("历史 override 加载完成后上传历史画面纹理（中央切换来源）", () => {
     const { session, video, textures } = makeSession();
     session.start();

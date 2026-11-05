@@ -44,26 +44,6 @@ pub(crate) struct CardVisual {
     pub(crate) labels: CardLabelsInput,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ContainerGeometryInput {
-    pub(crate) bounds: [f32; 4],
-    pub(crate) collapsed: bool,
-    pub(crate) running: bool,
-    pub(crate) member_count: u32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ContainerLabelsInput {
-    pub(crate) title: String,
-    pub(crate) type_label: String,
-}
-
-#[derive(Component, Clone, Debug, PartialEq)]
-pub(crate) struct ContainerVisual {
-    pub(crate) geometry: ContainerGeometryInput,
-    pub(crate) labels: ContainerLabelsInput,
-}
-
 #[derive(Component, Clone, Debug, PartialEq)]
 pub(crate) struct EdgeVisual {
     pub(crate) id: String,
@@ -73,6 +53,7 @@ pub(crate) struct EdgeVisual {
     pub(crate) bounds: Option<([f32; 2], [f32; 2])>,
     pub(crate) selected: bool,
     pub(crate) hovered: bool,
+    pub(crate) hover_cursor: Option<[f32; 2]>,
     pub(crate) overlay_z: Option<f32>,
 }
 
@@ -111,29 +92,6 @@ impl CardVisual {
             },
             labels: CardLabelsInput { title: node.title.clone(), type_label: node.type_label.clone(), body: node.body.clone(), card_label: node.card_label.clone() },
         }
-    }
-}
-
-impl ContainerVisual {
-    pub(crate) fn from_node(node: &GraphNode) -> Option<Self> {
-        let group = node.group.as_ref();
-        let composite = node.composite_asset.as_ref();
-        if group.is_none() && composite.is_none() { return None; }
-        let (collapsed, running, member_count) = if let Some(group) = group {
-            // 运行态来自画布运行时（`canvas2d::group`）；无画布构建（原生模型渲染/录制）
-            // 没有运行态来源，按未运行处理，保持 `native-renderer` 单独可编译。
-            #[cfg(feature = "canvas-core")]
-            let running = crate::canvas2d::group_is_running(node);
-            #[cfg(not(feature = "canvas-core"))]
-            let running = false;
-            (group.collapsed, running, group.member_count.max(0) as u32)
-        } else {
-            (false, false, composite.and_then(|asset| asset.panel.as_ref()).map_or(0, |_| 0))
-        };
-        Some(Self {
-            geometry: ContainerGeometryInput { bounds: [node.x, node.y, node.width, node.height], collapsed, running, member_count },
-            labels: ContainerLabelsInput { title: group.map_or_else(|| node.title.clone(), |group| group.title.clone()), type_label: node.type_label.clone() },
-        })
     }
 }
 
@@ -220,37 +178,6 @@ pub(crate) struct CardPresentation {
     pub(crate) model: bool,
     pub(crate) model_preview: bool,
     pub(crate) history: bool,
-    pub(crate) shot_preview: bool,
-}
-
-/// group 容器展示能力。名称与协议 DTO 同名，但组件只保留生产几何需要的语义位。
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct GroupPresentation {
-    pub(crate) drop_target: bool,
-    pub(crate) collapsed: bool,
-    pub(crate) member_count: u32,
-    pub(crate) running: bool,
-    pub(crate) resizable: bool,
-}
-
-/// 片场（composite-asset）纯模型展示能力。
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct FilmSetPresentation {
-    /// 是否携带复合面板缩略图（无面板时只画范围框）。
-    pub(crate) panel: bool,
-    pub(crate) has_model: bool,
-    /// 地面菱形范围（与 `canvas_query::scope::is_diamond` 同一判定）。
-    pub(crate) diamond: bool,
-}
-
-/// Per-node cache owner projection. The cache resource owns pixels and reservations; this
-/// component only mirrors the accepted capability and the latest input fingerprint.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct OverviewCacheOwner {
-    pub(crate) enabled: bool,
-    pub(crate) input_fingerprint: u64,
-    pub(crate) tier: Option<super::overview_cache::geometry::OverviewTier>,
-    pub(crate) fallback: Option<super::overview_cache::eligibility::Fallback>,
 }
 
 /// 未识别的第三方展示类型：节点仍被投影，只是没有内置 producer。
@@ -266,7 +193,7 @@ pub(crate) enum CanvasLabelRole {
     Card,
     /// 卡片上方外侧的名称与尺寸行（仅选中/悬停时）。
     CardMeta,
-    /// group 标题、片场标题与面板文字（owner 为容器节点实体）。
+    /// 容器/面板文字（owner 为节点实体）。
     Container,
     /// 连线标签（owner 为边批次实体）。
     Edge,
@@ -298,14 +225,6 @@ pub(crate) struct CanvasTextureSprite {
     pub(crate) texture_px: [u32; 2],
 }
 
-/// 复合面板缩略图归属与槽位。
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CompositePanelThumbnail {
-    pub(crate) owner: Entity,
-    pub(crate) image_id: String,
-    pub(crate) slot: u16,
-}
-
 /// focus 细节区域的种类（基础分片或替换分片）。
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FocusDetailKind {
@@ -320,20 +239,6 @@ pub(crate) struct FocusDetailRegion {
     pub(crate) rect: [u32; 4],
     pub(crate) generation: u64,
     pub(crate) kind: FocusDetailKind,
-}
-
-/// 拍摄镜头预览 Sprite 归属（采样策略与发布图像状态仍在 Resource）。
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ShotPreviewSprite {
-    pub(crate) node_id: String,
-    pub(crate) owner: Entity,
-}
-
-/// 片场拍摄镜头小相机标记身份。
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(crate) struct FilmSetCameraMarker {
-    pub(crate) preview_node_id: String,
-    pub(crate) owner_node_id: String,
 }
 
 /// 模型根实例 owner：每个由根创建/复用的实体都携带根实体身份。

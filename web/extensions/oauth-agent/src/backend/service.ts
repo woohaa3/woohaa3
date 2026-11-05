@@ -14,9 +14,6 @@ import { ChatGptOAuth } from "./oauth.js";
 import { createChatGptAuthorizationService, type ChatGptAuthorizationService } from "./authorization.js";
 import { createChatGptModelCatalog } from "./models.js";
 import { createCodexAdapter, type CodexAdapter, type CodexFactoryOptions, type CodexLike } from "./codex-adapter.js";
-import { CHATGPT_ALLOWED_MODEL_IDS } from "./models.js";
-import { CHATGPT_PROVIDER_ID } from "./config.js";
-import { createChatGptFilmSetConversionGenerator, CHATGPT_CONVERSION_CAPABILITIES } from "./conversion.js";
 import { createChatGptGenerationService, type ChatGptGenerationService } from "./generation.js";
 import { createChatGptWorkJournal, type ChatGptWorkJournal } from "./work-journal.js";
 import { createChatGptApiHandler } from "./handler.js";
@@ -45,8 +42,6 @@ export type ChatGptServiceOptions = {
   jwks?: import("jose").JWTVerifyGetKey;
   /** 允许的同源 Origin 集合（回调 origin）；缺省由回调 origin 推导。 */
   allowedOrigins?: readonly string[];
-  /** 「转为片场」使用的模型 slug（缺省 allowlist 首选；未知模型不提供转换）。 */
-  conversionModel?: string;
   basePath?: string;
   /**
    * 当前公开挂载路径（change: 2026-10-15-support-configurable-app-base-path）。
@@ -71,21 +66,6 @@ export type ChatGptService = {
   credentials: import("./credentials.js").ChatGptCredentialStore | null;
   /** durable 工作日志（恢复/回执核验；design D6/D7）。 */
   workJournal: ChatGptWorkJournal;
-  /**
-   * 构造「转为片场」转换生成端口（change: 2026-10-13-add-node-to-film-set-shortcut）。
-   *
-   * 复用本服务已授权的 Codex 执行器与 owner 解析（可信主体 → 个人授权）；未配置/未授权时该
-   * 端口在调用时明确拒绝，不静默换账户或 Provider。返回 null 表示本服务不可用。
-   */
-  filmSetConversionGenerator: (
-    media: import("@woohaa3/contracts").FilmSetConversionMediaReader
-  ) => import("@woohaa3/contracts").FilmSetConversionGenerator | null;
-  /**
-   * 在宿主 HTTP 边界解析本次转换的 owner（与 `/api/oauth-agent/*` **同源**）：生产用可信
-   * `principal:<subject>`；无应用登录的本地开发姿态用受控本地会话 `local:<id>`；公网缺认证返回
-   * `null`（不静默匿名）。供画布「转为片场」边界复用，使本地开发也能真正调用已连接的个人授权。
-   */
-  resolveConversionOwner: (input: { subject?: string; cookie?: string }) => { ownerId: string; setCookie?: string } | null;
   /**
    * 显式宿主 identity port：把本插件**自身已有**的本地 HttpOnly 会话复用为宿主可用身份
    * （change: 2026-10-12-add-agent-conversation-panel，任务 1.3 / design D2）。
@@ -131,9 +111,6 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
       generation: null,
       credentials: null,
       workJournal: createChatGptWorkJournal({ logger: (event) => log({ module: "chatgpt-work", ...event }) }),
-      // 未配置时不提供转换端口（前端显示不可用原因；不静默换 Provider）。
-      filmSetConversionGenerator: () => null,
-      resolveConversionOwner: () => null,
       // 未配置时不存在可信本地会话；宿主不伪造身份（任务 1.3）。
       localSessionIdentity: () => null,
       converse: async () => ({ ok: false, code: "not-configured", message: resolved.reason }),
@@ -258,39 +235,6 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
     generation,
     credentials: store,
     workJournal,
-    filmSetConversionGenerator: (media) => {
-      const model = options.conversionModel ?? CHATGPT_ALLOWED_MODEL_IDS[0];
-      if (!model || !CHATGPT_ALLOWED_MODEL_IDS.includes(model)) return null;
-      return createChatGptFilmSetConversionGenerator({
-        codex,
-        // 模型身份由调用方解析（`providerModelId` → ChatGPT slug）；未知模型明确拒绝，不静默换模型。
-        model: ({ modelKey }) => {
-          if (!modelKey) return model;
-          const slug = modelKey.startsWith(`${CHATGPT_PROVIDER_ID}:`)
-            ? modelKey.slice(CHATGPT_PROVIDER_ID.length + 1)
-            : modelKey;
-          return CHATGPT_ALLOWED_MODEL_IDS.includes(slug) ? slug : null;
-        },
-        // owner 复用服务同一可信来源：宿主认证的 principal.subject 映射为 `principal:<subject>`；
-        // 缺失（未认证/公网匿名）时明确拒绝，不静默回退到其它账户或本地会话。
-        ownerId: ({ subject, ownerId }) => ownerId ?? (subject && subject.trim() !== "" ? `principal:${subject.trim()}` : null),
-        media,
-        capabilities: CHATGPT_CONVERSION_CAPABILITIES,
-        logger: (event) => log({ module: "chatgpt-conversion", ...event })
-      });
-    },
-    /**
-     * 转换 owner 解析（与 `/api/oauth-agent/*` 同源）：由宿主在画布转换边界调用，把结果作为
-     * `ownerId` 传给生成端口。生产只认 `principal:<subject>`；本地开发姿态用受控本地会话
-     * （可能返回新会话 `setCookie`）；公网缺认证返回 null。
-     */
-    resolveConversionOwner: (input) => {
-      const resolution = owners.resolveFor(input);
-      if (!resolution.ok) return null;
-      return resolution.setCookie
-        ? { ownerId: resolution.ownerId, setCookie: resolution.setCookie }
-        : { ownerId: resolution.ownerId };
-    },
     localSessionIdentity,
     converse: async (input) => {
       try {

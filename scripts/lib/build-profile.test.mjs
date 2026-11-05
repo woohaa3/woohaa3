@@ -125,9 +125,9 @@ test("updateEndpointFor 展开平台键，缺平台键时抛错", () => {
 });
 
 test("extensions.defaultEnabled 解码通过，非法 id 与非布尔值被拒", () => {
-  assert.equal(decodeBuildProfile(validProfile({ extensions: { defaultEnabled: { "film-set": false } } })).ok, true);
+  assert.equal(decodeBuildProfile(validProfile({ extensions: { defaultEnabled: { "task-activity": false } } })).ok, true);
   assert.equal(decodeBuildProfile(validProfile({ extensions: { defaultEnabled: { "Film Set": false } } })).ok, false);
-  assert.equal(decodeBuildProfile(validProfile({ extensions: { defaultEnabled: { "film-set": "no" } } })).ok, false);
+  assert.equal(decodeBuildProfile(validProfile({ extensions: { defaultEnabled: { "task-activity": "no" } } })).ok, false);
   assert.equal(decodeBuildProfile(validProfile({ extensions: { other: {} } })).ok, false);
 });
 

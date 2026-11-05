@@ -89,6 +89,9 @@ const LISTENER_EXCEPTIONS = new Set<string>([
   "cordis/plugins/video-capture/video-edit-dialog.tsx",
   // 场景体验条监听画布上的任意输入/Escape 以取消取景导航，不是浮层 dismiss。
   "cordis/plugins/scene-experience/experience-bar.tsx",
+  // 共享世界镜头编辑器/飞行输入：浮层生命周期由 world-cameras 自己持有。
+  "cordis/plugins/world-cameras/camera-editor.tsx",
+  "cordis/plugins/world-cameras/flight-input.ts",
 ]);
 
 describe("剩余 Canvas UI 迁移审计（任务 8.2）", () => {
@@ -153,7 +156,9 @@ describe("剩余 Canvas UI 迁移审计（任务 8.2）", () => {
       // 图库顶部两个标签（所有图片 / 收藏的图片）：手写 role=tab，尚未迁到 Tabs primitive。
       // 这是**待迁移的登记**，不是「primitive 承载不了」的正当例外 —— 迁完要从这里删掉
       // （2026-11-02 图库面板引入，合并时发现审计缺口）。
-      "cordis/plugins/canvas-shell/canvas-image-panel.tsx"
+      "cordis/plugins/canvas-shell/canvas-image-panel.tsx",
+      // 提示词库面板的分类标签与列表：手写 role=tab/menu，待迁到 primitive（sixi 侧引入）。
+      "cordis/plugins/task-execution/prompt-library/prompt-library-panel.tsx"
     ]);
     const offenders: string[] = [];
     for (const file of productionFiles(PLUGINS_DIR)) {

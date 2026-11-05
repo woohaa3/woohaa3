@@ -11,6 +11,9 @@ use bevy::prelude::*;
 
 fn model_node() -> GraphNode {
     GraphNode {
+        chrome: crate::protocol::NodeChrome::Card,
+        shared_world_instance: None,
+        world_camera: None,
         model_preview: None,
         id: "m".into(),
         kind: "model".into(),
@@ -29,12 +32,8 @@ fn model_node() -> GraphNode {
         resizable: false,
         ghost: false,
         card_label: None,
-        group: None,
         model: None,
-        composite_asset: None,
         history_strip: None,
-        aggregate_run: None,
-        shot_preview: None,
     }
 }
 
@@ -94,6 +93,7 @@ fn hover_node(id: &str) -> crate::protocol::NodeHover {
         node_id: Some(id.to_owned()),
         port: None,
         edge_id: None,
+        cursor: None,
     }
 }
 

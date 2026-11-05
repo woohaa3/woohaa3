@@ -1,4 +1,3 @@
-import { getWoohaa3CanvasSelectionBounds } from "./group-ops";
 import type { Woohaa3CanvasNode } from "./canvas-runtime";
 import type { Woohaa3CanvasPosition, Woohaa3CanvasViewport } from "./document-schema";
 
@@ -39,8 +38,13 @@ export function getSelectedNodesCanvasCenter(
 ): Woohaa3CanvasPosition | null {
   if (selectedNodeIds.length === 0) return null;
   const selectedIds = new Set(selectedNodeIds);
-  const bounds = getWoohaa3CanvasSelectionBounds(nodes.filter((node) => selectedIds.has(node.id)), nodes);
-  return bounds ? { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 } : null;
+  const selected = nodes.filter((node) => selectedIds.has(node.id) && node.position);
+  if (selected.length === 0) return null;
+  const left = Math.min(...selected.map((node) => node.position!.x));
+  const top = Math.min(...selected.map((node) => node.position!.y));
+  const right = Math.max(...selected.map((node) => node.position!.x + (node.width ?? 0)));
+  const bottom = Math.max(...selected.map((node) => node.position!.y + (node.height ?? 0)));
+  return { x: (left + right) / 2, y: (top + bottom) / 2 };
 }
 
 export function resolveZoomScreenAnchor(options: {

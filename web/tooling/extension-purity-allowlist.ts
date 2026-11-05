@@ -44,11 +44,6 @@ export const EXTENSION_IMPORT_DEBT: readonly ExtensionImportDebt[] = [
     reason: "同上：application-service 的样例 fixture。私有业务扩展（如炉体）不在此列。"
   },
   {
-    file: "web/services/canvas-service/package.json",
-    packages: ["@woohaa3/extension-film-set"],
-    reason: "Tier C 债：canvas-service 静态依赖 film-set 的实现包。去向：把片场的节点服务/预览/转换注册改为公共扩展点（宿主不 import 扩展实现）。"
-  },
-  {
     file: "web/frontend/src/cordis/test-support/source-extensions.ts",
     packages: ["@woohaa3/extension-task-activity"],
     reason: "测试支持：前端集成测试用源码扩展入口构造 fixture，不是生产装配路径。"

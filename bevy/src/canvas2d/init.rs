@@ -1,7 +1,6 @@
 //! 2D camera、字体与共享 mesh/material 初始化
 //! （change: refactor-bevy-rust-file-size，任务 3.1 / design D3）。
 
-
 use bevy::sprite_render::AlphaMode2d;
 use bevy::{prelude::*, render::view::Tonemapping};
 
@@ -58,7 +57,6 @@ pub(crate) fn setup(
     commands.insert_resource(super::TextureStore::default());
     commands.insert_resource(super::CardDecorationCache::default());
     commands.insert_resource(super::CardBlockCache::default());
-    commands.insert_resource(super::ContainerBlockCache::default());
     commands.insert_resource(super::EdgeBlockCache::default());
 }
 

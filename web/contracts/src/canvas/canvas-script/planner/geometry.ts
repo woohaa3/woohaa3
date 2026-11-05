@@ -1,11 +1,11 @@
-/** Mutable plan-local geometry. World positions keep refits from moving unrelated siblings. */
+/** Mutable plan-local geometry. */
 import { effectiveCanvasNodeSize } from "../../node-dimensions.js";
 import { AGENT_CANVAS_LIMITS, type AgentGridLayout } from "../../agent-canvas-protocol.js";
 import type { CanvasCommand } from "../../commands.js";
 import { collectWoohaa3CanvasRemovalIds } from "../../domain/core/node-removal.js";
-import { groupPadding, groupBottomPadding } from "../../domain/core/group-geometry.js";
-import { organizationWorldBounds, type OrganizationNode } from "../organization.js";
+import type { OrganizationNode } from "../organization.js";
 import type { PlannerSnapshot } from "./types.js";
+import type { CanvasNodeData } from "../../domain/index.js";
 
 export class PlanGeometryError extends Error {
   constructor(
@@ -19,21 +19,32 @@ export class PlanGeometryError extends Error {
 export function planAssert(value: unknown, code: string, message: string, field?: string): asserts value {
   if (!value) throw new PlanGeometryError(code, message, field);
 }
-export type GeometryNode = OrganizationNode & { width: number; height: number };
+export type GeometryNode = OrganizationNode & {
+  position: { x: number; y: number };
+  width: number;
+  height: number;
+  /** 组作用域计划中新建的成员：提交时需要同步写进根组 `memberNodeIds`。 */
+  groupMemberOf?: string;
+};
 
 export class PlanGeometry {
   readonly nodes = new Map<string, GeometryNode>();
   readonly affected = new Set<string>();
   readonly originalIds: Set<string>;
-  constructor(readonly snapshot: PlannerSnapshot) {
-    const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
-    for (const n of snapshot.nodes)
+  constructor(
+    readonly snapshot: PlannerSnapshot,
+    /** 组作用域计划的根组与数据读取器；缺省表示普通画布（无组作用域）。 */
+    readonly groupScope?: { rootGroupId: string; nodeDataOf: (nodeId: string) => Record<string, unknown> | undefined },
+  ) {
+    for (const n of snapshot.nodes) {
+      if (!n.position) continue;
       this.nodes.set(n.id, {
         ...n,
-        position: (({ x, y }) => ({ x, y }))(organizationWorldBounds(n, byId)),
+        position: { x: n.position.x, y: n.position.y },
         width: n.width ?? effectiveCanvasNodeSize(n).width,
         height: n.height ?? effectiveCanvasNodeSize(n).height,
       });
+    }
     this.originalIds = new Set(this.nodes.keys());
   }
   require(id: string): GeometryNode {
@@ -41,100 +52,20 @@ export class PlanGeometry {
     planAssert(n, "unknown-node", `节点 ${id} 不存在或已删除`);
     return n;
   }
-  children(id: string) {
-    return [...this.nodes.values()].filter((n) => n.parentId === id);
-  }
-  isAncestor(ancestor: string, id: string): boolean {
-    let p = this.require(id).parentId;
-    const seen = new Set<string>();
-    while (p && !seen.has(p)) {
-      if (p === ancestor) return true;
-      seen.add(p);
-      p = this.nodes.get(p)?.parentId;
-    }
-    return false;
-  }
-  roots(ids: string[], sameParent: boolean) {
-    planAssert(ids.length && new Set(ids).size === ids.length, "invalid-ref", "选择必须非空且不重复");
-    const selected = ids.map((id) => this.require(id));
-    for (const a of ids)
-      for (const b of ids) if (a !== b) planAssert(!this.isAncestor(a, b), "invalid-parent", "不能混选祖先与后代");
-    if (sameParent)
-      planAssert(
-        selected.every((n) => n.parentId === selected[0].parentId),
-        "invalid-parent",
-        "成员必须共享直属 parent；请先 reparent",
-      );
-    return selected;
-  }
   touch(id: string) {
     // change: 2026-10-22-remove-agent-execution-limits，任务 5.1：影响节点数不再是额度；
     // 完整派生集合由同一 planner 原子处理。
     this.affected.add(id);
   }
   move(id: string, target: { x: number; y: number }) {
-    const n = this.require(id),
-      dx = target.x - n.position.x,
-      dy = target.y - n.position.y;
-    if (!dx && !dy) {
-      this.touch(id);
-      return;
-    }
-    for (const child of this.nodes.values())
-      if (child.id === id || this.isAncestor(id, child.id)) {
-        this.touch(child.id);
-        child.position = { x: child.position.x + dx, y: child.position.y + dy };
-      }
-  }
-  /** Tight refit, inner to outer; world positions of every child stay fixed. */
-  refit(ids: Iterable<string | undefined>) {
-    const queue = new Set<string>();
-    for (const id of ids) {
-      let cursor = id;
-      while (cursor && !queue.has(cursor)) {
-        queue.add(cursor);
-        cursor = this.nodes.get(cursor)?.parentId;
-      }
-    }
-    const depth = (id: string) => {
-      let d = 0,
-        p = this.nodes.get(id)?.parentId;
-      while (p) {
-        d++;
-        p = this.nodes.get(p)?.parentId;
-      }
-      return d;
-    };
-    for (const id of [...queue].sort((a, b) => depth(b) - depth(a))) {
-      const n = this.nodes.get(id);
-      if (!n || n.type !== "group") continue;
-      const children = this.children(id);
-      if (!children.length && n.retainWhenEmpty === true) continue;
-      if (!children.length) {
-        this.touch(id);
-        this.nodes.delete(id);
-        continue;
-      }
-      const x = this.snapshot.rootGroupId === id
-        ? Math.min(n.position.x, Math.min(...children.map((c) => c.position.x)) - groupPadding)
-        : Math.min(...children.map((c) => c.position.x)) - groupPadding;
-      const y = this.snapshot.rootGroupId === id
-        ? Math.min(n.position.y, Math.min(...children.map((c) => c.position.y)) - groupPadding)
-        : Math.min(...children.map((c) => c.position.y)) - groupPadding;
-      const right = Math.max(...children.map((c) => c.position.x + effectiveCanvasNodeSize(c).width)) + groupPadding;
-      const bottom = Math.max(...children.map((c) => c.position.y + effectiveCanvasNodeSize(c).height)) + groupBottomPadding;
-      const root = this.snapshot.rootGroupId === id;
-      // 根组向外扩展时保留原来的右/下边界；否则上/左移动会把另一侧缩小。
-      const rightEdge = root ? Math.max(right, n.position.x + n.width) : right;
-      const bottomEdge = root ? Math.max(bottom, n.position.y + n.height) : bottom;
-      this.touch(id);
-      n.position = { x, y };
-      n.width = root ? rightEdge - x : Math.max(248, rightEdge - x);
-      n.height = root ? bottomEdge - y : Math.max(232, bottomEdge - y);
-    }
+    const n = this.require(id);
+    if (!n.position.x && !n.position.y && !target.x && !target.y) return;
+    this.touch(id);
+    n.position = { x: target.x, y: target.y };
   }
   grid(ids: string[], grid: AgentGridLayout) {
-    const selected = this.roots(ids, true);
+    planAssert(ids.length && new Set(ids).size === ids.length, "invalid-ref", "选择必须非空且不重复");
+    const selected = ids.map((id) => this.require(id));
     planAssert(
       grid.mode === "grid" && Number.isInteger(grid.columns) && grid.columns >= 1,
       "malformed-request",
@@ -151,8 +82,8 @@ export class PlanGeometry {
     const widths = Array(columns).fill(0),
       heights = Array(Math.ceil(selected.length / columns)).fill(0);
     selected.forEach((n, i) => {
-      widths[i % columns] = Math.max(widths[i % columns], effectiveCanvasNodeSize(n).width);
-      heights[Math.floor(i / columns)] = Math.max(heights[Math.floor(i / columns)], effectiveCanvasNodeSize(n).height);
+      widths[i % columns] = Math.max(widths[i % columns]!, n.width);
+      heights[Math.floor(i / columns)] = Math.max(heights[Math.floor(i / columns)]!, n.height);
     });
     const origin = grid.origin ?? {
       x: Math.min(...selected.map((n) => n.position.x)),
@@ -165,60 +96,71 @@ export class PlanGeometry {
         y: origin.y + offset(heights, Math.floor(i / columns), gapY),
       }),
     );
-    this.refit(selected.map((n) => n.parentId));
-  }
-  reparent(ids: string[], parent: string | null) {
-    const selected = this.roots(ids, false);
-    if (parent !== null) {
-      planAssert(this.require(parent).type === "group", "invalid-parent", "parent 必须是 group");
-      // 不支持嵌套 group（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）。
-      planAssert(
-        selected.every((n) => n.type !== "group"),
-        "invalid-parent",
-        "不支持嵌套 group：group 不能成为另一个 group 的成员",
-      );
-      for (const id of ids)
-        planAssert(id !== parent && !this.isAncestor(id, parent), "invalid-parent", "成员关系不能成环");
-    }
-    const ancestors = selected.map((n) => n.parentId);
-    for (const n of selected) {
-      this.touch(n.id);
-      n.parentId = parent ?? undefined;
-    }
-    this.refit([...ancestors, parent ?? undefined]);
-  }
-  ungroup(id: string) {
-    const group = this.require(id);
-    planAssert(group.type === "group", "invalid-parent", "ungroup 需要 group");
-    for (const child of this.children(id)) {
-      this.touch(child.id);
-      child.parentId = group.parentId;
-    }
-    this.touch(id);
-    this.nodes.delete(id);
-    this.refit([group.parentId]);
   }
   remove(ids: string[]) {
     ids.forEach((id) => this.require(id));
-    const removed = collectWoohaa3CanvasRemovalIds(this.canonical(), ids, Object.fromEntries([...this.nodes].map(([id, n]) => [id, { retainWhenEmpty: n.retainWhenEmpty }])));
-    const parents = [...removed].map((id) => this.nodes.get(id)?.parentId);
+    const removed = collectWoohaa3CanvasRemovalIds(this.canonical(), ids, Object.fromEntries([...this.nodes].map(([id]) => [id, {}])));
     for (const id of removed) {
       this.touch(id);
       this.nodes.delete(id);
     }
-    this.refit(parents);
     return removed;
   }
-  canonical(): GeometryNode[] {
-    return [...this.nodes.values()].map((n) => {
-      const parent = n.parentId ? this.nodes.get(n.parentId) : undefined;
-      return {
-        ...n,
-        position: { x: n.position.x - (parent?.position.x ?? 0), y: n.position.y - (parent?.position.y ?? 0) },
-      };
-    });
+
+  /**
+   * 调整卡片矩形（change: 2D 组组作用域 agent）。
+   *
+   * 2D 组的成员表独立于卡片矩形，因此“整理进组后缩小组卡片”必须能单独改宽高；这里只改
+   * 世界坐标下的宽高，不改位置，也不改动任何成员关系。
+   */
+  resize(id: string, size: { width: number; height: number }) {
+    const n = this.require(id);
+    planAssert(
+      Number.isFinite(size.width) && Number.isFinite(size.height) && size.width > 0 && size.height > 0,
+      "malformed-request",
+      "尺寸必须是正数",
+    );
+    if (n.width === size.width && n.height === size.height) return;
+    this.touch(id);
+    n.width = size.width;
+    n.height = size.height;
   }
-  /** Emit reparent/geometry updates before removals, so ungroup cannot cascade into members. */
+  canonical(): GeometryNode[] {
+    return [...this.nodes.values()].map((n) => ({ ...n, position: { ...n.position } }));
+  }
+
+  /**
+   * 组作用域提交收尾：把本次新建的成员写进根组 `memberNodeIds`（换新 `scopeVersion`）。
+   *
+   * 2D 组用显式成员表表达归属，`parentId` 不参与；没有这一步，Agent 新建的节点只是落在组
+   * 卡片范围内的普通节点。`groupData` 是根组当前解码后的 2D 组数据（含 `memberNodeIds`）。
+   */
+  syncGroupMembers(nextScopeVersion: () => string): CanvasCommand[] {
+    if (!this.groupScope) return [];
+    const rootGroupId = this.groupScope.rootGroupId;
+    const root = this.require(rootGroupId);
+    const raw = this.groupScope.nodeDataOf(root.id);
+    const group = (raw as { workflowGroup2d?: Record<string, unknown> } | undefined)?.workflowGroup2d;
+    planAssert(group && Array.isArray(group.memberNodeIds), "invalid-group", "根组缺少 2D 组数据", "workflowGroup2d");
+    const current = (group.memberNodeIds as unknown[]).filter((id): id is string => typeof id === "string");
+    const next = [...current];
+    for (const node of this.nodes.values()) {
+      if (node.groupMemberOf !== rootGroupId) continue;
+      if (!next.includes(node.id)) next.push(node.id);
+    }
+    const removed = new Set(current.filter((id) => !this.nodes.has(id)));
+    if (next.length === current.length && removed.size === 0) return [];
+    const remaining = next.filter((id) => !removed.has(id));
+    this.touch(root.id);
+    return [{
+      type: "nodeData.patch",
+      nodeId: root.id,
+      value: {
+        ...(raw ?? {}),
+        workflowGroup2d: { ...group, scopeVersion: nextScopeVersion(), memberNodeIds: remaining },
+      } as CanvasNodeData,
+    }];
+  }
   diff(before: GeometryNode[]): CanvasCommand[] {
     const old = new Map(before.map((n) => [n.id, n]));
     const commands: CanvasCommand[] = [];
@@ -226,7 +168,6 @@ export class PlanGeometry {
       const prev = old.get(n.id);
       if (!prev) continue;
       if (
-        prev.parentId !== n.parentId ||
         prev.position.x !== n.position.x ||
         prev.position.y !== n.position.y ||
         prev.width !== n.width ||
@@ -236,7 +177,6 @@ export class PlanGeometry {
         commands.push({
           type: "node.update",
           nodeId: n.id,
-          parentId: n.parentId ?? null,
           position: n.position,
           width: n.width,
           height: n.height,
@@ -244,10 +184,7 @@ export class PlanGeometry {
       }
     }
     const removed = before.filter((n) => !this.nodes.has(n.id));
-    // Deepest first: all surviving descendants have already been detached above.
-    const removedIds = new Set(removed.map((n) => n.id));
-    const roots = removed.filter((n) => !n.parentId || !removedIds.has(n.parentId));
-    if (roots.length) commands.push({ type: "node.remove", nodeIds: roots.map((n) => n.id) });
+    if (removed.length) commands.push({ type: "node.remove", nodeIds: removed.map((n) => n.id) });
     for (const n of this.nodes.values())
       planAssert(
         Number.isFinite(n.position.x) &&

@@ -4,10 +4,7 @@
  */
 import { describe, expect, it, afterEach } from "vitest";
 import {
-  bevyEdgeDeleteRect,
-  bevyPort,
   createEmptyWoohaa3ServerCanvas,
-  edgeLabelWidth,
   type ServerCanvas
 } from "@woohaa3/contracts";
 import { installInteractionController } from "./interaction-controller.js";
@@ -312,7 +309,7 @@ describe("节点端点悬停态（change: add-node-endpoint-hover）", () => {
     // 节点 248x232；输出端点世界坐标 (248, 116)。命中半径 >= 10，指针落在端点上。
     dom.fire("pointermove", { clientX: 248, clientY: 116 });
     controller.flush();
-    expect((scenes.at(-1) as { hover?: unknown }).hover).toEqual({ nodeId: "n1", port: "output" });
+    expect((scenes.at(-1) as { hover?: unknown }).hover).toEqual({ nodeId: "n1", port: "output", cursor: { x: 248, y: 116 } });
 
     // 指针离开画布清除 hover。
     dom.fire("pointerleave", {});
@@ -377,157 +374,106 @@ describe("连线悬停与删除按钮（change: add-edge-hover-delete）", () =>
     return { dom, controller, scenes };
   }
 
-  it("悬停连线本体即携带 edgeId 悬停态（删除按钮出现）", () => {
+  const move = (dom: ReturnType<typeof harness>, x: number, y = 116) => dom.fire("pointermove", { clientX: x, clientY: y });
+  const click = (dom: ReturnType<typeof harness>, x: number, y = 116) => {
+    dom.fire("pointerdown", { clientX: x, clientY: y, button: 0 });
+    dom.fire("pointerup", { clientX: x, clientY: y, button: 0 });
+  };
+
+  it("first click selects, subsequent hover moves the control and a distant line click deletes", () => {
     const { dom, controller, scenes } = setup();
-    // 指针落在连线上（中点附近但避开恰好的正中心，先测连线本体命中）。
-    dom.fire("pointermove", { clientX: 424, clientY: 116 });
-    controller.flush();
-    expect((scenes.at(-1) as { hover?: unknown }).hover).toEqual({ edgeId: "e1" });
+    move(dom, 340); controller.flush();
+    click(dom, 340); controller.flush();
+    expect(submitted).toEqual([]);
+    expect(scenes.at(-1)).toMatchObject({ selection: { nodes: [], edge: "e1" } });
+    move(dom, 470); controller.flush();
+    expect(scenes.at(-1)).toMatchObject({ hover: { edgeId: "e1", cursor: { x: 470, y: 116 } } });
+    move(dom, 520); controller.flush();
+    expect(scenes.at(-1)).toMatchObject({ hover: { edgeId: "e1", cursor: { x: 520, y: 116 } } });
+    // Release/click can jump along the selected line without an intervening frame.
+    click(dom, 550);
+    expect(submitted.filter(c => c.type === "edge.remove")).toEqual([{ type: "edge.remove", edgeId: "e1" }]);
     controller.dispose();
   });
 
-  it("点击连线本体不再删除，也不改变 selection", () => {
-    const { dom, controller } = setup();
-    // 连线本体上、但远离中点按钮的位置（两端同 y，曲线是 y=116 的水平线）。
-    const body = { x: 340, y: 116 };
-    dom.fire("pointermove", { clientX: body.x, clientY: body.y });
-    controller.flush();
-    dom.fire("pointerdown", { clientX: body.x, clientY: body.y, button: 0 });
-    dom.fire("pointerup", { clientX: body.x, clientY: body.y, button: 0 });
-    controller.flush();
-    expect(submitted.some((command) => command.type === "edge.remove")).toBe(false);
-    expect(submitted).toHaveLength(0);
+  it("first click at the former fixed delete position only selects", () => {
+    const { dom, controller, scenes } = setup();
+    move(dom, mid.x); controller.flush();
+    click(dom, mid.x); controller.flush();
+    expect(submitted).toEqual([]);
+    expect(scenes.at(-1)).toMatchObject({ selection: { edge: "e1" } });
     controller.dispose();
   });
 
-  it("点击删除按钮提交一次 edge.remove 且不改 selection", () => {
-    const { dom, controller } = setup();
-    // 先悬停连线，使按钮可命中。
-    dom.fire("pointermove", { clientX: mid.x, clientY: mid.y });
+  it.each(["blank", "node", "escape"])("%s clears edge selection", action => {
+    const { dom, controller, scenes } = setup();
+    click(dom, 340); controller.flush();
+    if (action === "escape") dom.fireKey("keydown", { key: "Escape", code: "Escape" });
+    else click(dom, action === "node" ? 100 : 400, action === "node" ? 80 : 300);
     controller.flush();
-    dom.fire("pointerdown", { clientX: mid.x, clientY: mid.y, button: 0 });
-    controller.flush();
-    const removals = submitted.filter((command) => command.type === "edge.remove");
-    expect(removals).toEqual([{ type: "edge.remove", edgeId: "e1" }]);
-    // selection 未被清空（点击按钮不是「点空白」）。
-    expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual([]);
+    expect(scenes.at(-1)).toMatchObject({ selection: { edge: null } });
+    expect(submitted).toEqual([]);
     controller.dispose();
   });
 
-  it("只读会话下点击删除按钮不提交命令", () => {
+  it("read-only permits selection and never submits removal", () => {
     setSession({ isWritable: () => false, submitCommands: () => ({ ok: true }) as never });
-    const { dom, controller } = setup();
-    dom.fire("pointermove", { clientX: mid.x, clientY: mid.y });
-    controller.flush();
-    dom.fire("pointerdown", { clientX: mid.x, clientY: mid.y, button: 0 });
-    controller.flush();
-    expect(submitted).toHaveLength(0);
+    const { dom, controller, scenes } = setup();
+    click(dom, 340); controller.flush();
+    move(dom, 500); controller.flush(); click(dom, 500); controller.flush();
+    expect(scenes.at(-1)).toMatchObject({ selection: { edge: "e1" } });
+    expect(submitted).toEqual([]);
     controller.dispose();
   });
 
-  it("有标签时删除按钮排在标签右侧：点击该处删除，点击标签处不删除", () => {
-    const base = createEmptyWoohaa3ServerCanvas("c1");
-    woohaa3CanvasStore.getState().applyRemoteCanvas({
-      ...base,
-      revision: 1,
-      document: {
-        ...base.document,
-        nodes: [
-          { id: "n1", type: "text", position: { x: 0, y: 0 } },
-          { id: "n2", type: "image", position: { x: 600, y: 0 } }
-        ],
-        edges: [{ id: "e1", source: "n1", target: "n2", data: { label: "输入" }, sourceHandle: null, targetHandle: null }]
-      }
-    });
-    const dom = harness();
-    const { runtime } = runtimeCapturing();
-    const controller = installInteractionController({
-      canvas: dom.canvas,
-      getRuntime: () => runtime,
-      getSession: () => getSession() as never,
-      target: dom.target as never
-    });
-    // 先悬停标签处（连线本体），使按钮出现。
-    dom.fire("pointermove", { clientX: mid.x, clientY: mid.y });
-    controller.flush();
-    // 标签处点击：不删除。
-    dom.fire("pointerdown", { clientX: mid.x, clientY: mid.y, button: 0 });
-    controller.flush();
-    expect(submitted.some((command) => command.type === "edge.remove")).toBe(false);
-    // 标签右侧按钮处点击：删除。真实指针必有一次移动（按下即清 hover 投影，按钮命中上下文
-    // 来自按下那一刻的悬停态，见 interaction-2d-input 的 clearHover 说明）。
-    const button = bevyEdgeDeleteRect(
-      { x: 0, y: 0, width: 248, height: 232 },
-      { x: 600, y: 0, width: 248, height: 232 },
-      "输入"
-    );
-    const buttonX = button.x + button.width / 2;
-    dom.fire("pointermove", { clientX: buttonX, clientY: mid.y });
-    controller.flush();
-    dom.fire("pointerdown", { clientX: buttonX, clientY: mid.y, button: 0 });
-    controller.flush();
-    expect(submitted.filter((command) => command.type === "edge.remove")).toEqual([
-      { type: "edge.remove", edgeId: "e1" }
-    ]);
-    controller.dispose();
-  });
-  it("纵向带标签连线：从线体经标签移到按钮时悬停不丢失，按钮仍可删除", () => {
-    const base = createEmptyWoohaa3ServerCanvas("c1");
-    woohaa3CanvasStore.getState().applyRemoteCanvas({
-      ...base,
-      revision: 1,
-      document: {
-        ...base.document,
-        nodes: [
-          { id: "n1", type: "image", position: { x: 0, y: 0 } },
-          { id: "n2", type: "image", position: { x: 200, y: 400 } }
-        ],
-        edges: [{ id: "e1", source: "n1", target: "n2", data: { label: "图片" }, sourceHandle: null, targetHandle: null }]
-      }
-    });
-    const dom = harness();
-    const { runtime, scenes } = runtimeCapturing();
-    const controller = installInteractionController({
-      canvas: dom.canvas,
-      getRuntime: () => runtime,
-      getSession: () => getSession() as never,
-      target: dom.target as never
-    });
-    // 端口 (248,116) / (200,516) → 中点 (224,316)；两端口几乎竖直，标签居中，按钮在标签右侧。
-    const source = { x: 0, y: 0, width: 248, height: 232 };
-    const target = { x: 200, y: 400, width: 248, height: 232 };
-    const from = bevyPort(source, "output");
-    const to = bevyPort(target, "input");
-    const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
-    const button = bevyEdgeDeleteRect(source, target, "图片");
-    const buttonCenter = { x: button.x + button.width / 2, y: button.y + button.height / 2 };
-    const labelWidth = edgeLabelWidth("图片");
-    const lastHover = (entries: Array<Record<string, unknown>>) => (entries.at(-1) as { hover?: unknown }).hover;
-
-    // 先悬停线体（曲线穿过标签中点）。
-    dom.fire("pointermove", { clientX: mid.x, clientY: mid.y });
-    controller.flush();
-    expect(lastHover(scenes)).toEqual({ edgeId: "e1" });
-    // 真实指针会连续经过「标签」「间隙」再到按钮；每一步都必须保持悬停，
-    // 否则按钮在途中消失（修复：删除按钮悬停丢失）。
-    for (const point of [
-      // 标签右半部：离曲线 12px，只可能命中标签保持区。
-      { x: mid.x + labelWidth / 2 - 7, y: mid.y },
-      // 标签与按钮之间的间隙（落在按钮命中外扩里）。
-      { x: mid.x + labelWidth / 2 + 1, y: mid.y },
-      buttonCenter
-    ]) {
-      dom.fire("pointermove", { clientX: point.x, clientY: point.y });
-      controller.flush();
-      expect(lastHover(scenes), `hover lost at ${JSON.stringify(point)}`).toEqual({ edgeId: "e1" });
-    }
-    dom.fire("pointerdown", { clientX: buttonCenter.x, clientY: buttonCenter.y, button: 0 });
-    controller.flush();
-    expect(submitted.filter((command) => command.type === "edge.remove")).toEqual([
-      { type: "edge.remove", edgeId: "e1" }
-    ]);
+  it.each([0, 248])("port at x=%s acquires before following, resets outside its fixed anchor range", x => {
+    const { dom, controller, scenes } = setup();
+    // Inside the extension alone must not acquire a port.
+    move(dom, x + 20); controller.flush();
+    expect(scenes.at(-1)?.hover).not.toMatchObject({ port: x ? "output" : "input" });
+    move(dom, x); controller.flush();
+    move(dom, x + 20); controller.flush();
+    expect(scenes.at(-1)).toMatchObject({ hover: { nodeId: "n1", port: x ? "output" : "input", cursor: { x: x + 20, y: 116 } } });
+    move(dom, x + 40); controller.flush();
+    expect(scenes.at(-1)?.hover).not.toMatchObject({ port: x ? "output" : "input" });
     controller.dispose();
   });
 });
 
 /** 选中 n1（图片节点，默认 248x232）并返回可拖拽抓手的坐标。 */
+
+
+describe("节点组边框 cursor 生命周期", () => {
+  it("边框显示手型，内部与只读清空，离开和卸载恢复", () => {
+    const source = createEmptyWoohaa3ServerCanvas("c1");
+    source.document.nodes.push({ id: "g", type: "workflow-group-2d", position: { x: 0, y: 0 }, width: 300, height: 200 });
+    source.nodeData.g = { workflowGroup2d: { kind: "workflow-group-2d", version: "shared-world-v1",
+      groupId: "g", scopeVersion: "v1", memberNodeIds: [] } };
+    woohaa3CanvasStore.getState().applyRemoteCanvas(source);
+    const dom = harness();
+    const style = { cursor: "" };
+    Object.defineProperty(dom.canvas, "style", { value: style });
+    const { runtime } = runtimeCapturing({ pointHit: () => ({ kind: "node", nodeId: "g" }) });
+    let writable = true;
+    const controller = installInteractionController({ canvas: dom.canvas,
+      getRuntime: () => runtime, getSession: () => getSession() as never,
+      target: dom.target as never, isWritable: () => writable });
+    controller.flush();
+    dom.fire("pointermove", { clientX: 100, clientY: 2 });
+    expect(style.cursor).toBe("grab");
+    dom.fire("pointermove", { clientX: 100, clientY: 100 });
+    expect(style.cursor).toBe("");
+    dom.fire("pointermove", { clientX: 100, clientY: 2 });
+    expect(style.cursor).toBe("grab");
+    writable = false;
+    dom.fire("pointermove", { clientX: 100, clientY: 2 });
+    expect(style.cursor).toBe("");
+    writable = true;
+    dom.fire("pointermove", { clientX: 100, clientY: 2 });
+    dom.fire("pointerleave", {});
+    expect(style.cursor).toBe("");
+    dom.fire("pointermove", { clientX: 100, clientY: 2 });
+    controller.dispose();
+    expect(style.cursor).toBe("");
+  });
+});

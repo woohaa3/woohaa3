@@ -98,20 +98,9 @@ fn marquee_on_a_thousand_nodes_matches_document_order_scan() {
             .nodes
             .iter()
             .filter(|node| !node.ghost)
-            .filter(|node| match &node.scope {
-                Some(scope) => crate::canvas_query::scope::intersects_rect(
-                    scope,
-                    crate::canvas_query::scope::ScopeRect {
-                        x: left,
-                        y: top,
-                        width: right - left,
-                        height: bottom - top,
-                    },
-                ),
-                None => {
-                    let (nx, ny, nw, nh) = node.bounds;
-                    nx < right && nx + nw > left && ny < bottom && ny + nh > top
-                }
+            .filter(|node| {
+                let (nx, ny, nw, nh) = node.bounds;
+                nx < right && nx + nw > left && ny < bottom && ny + nh > top
             })
             .map(|node| node.id.clone())
             .collect::<Vec<String>>()

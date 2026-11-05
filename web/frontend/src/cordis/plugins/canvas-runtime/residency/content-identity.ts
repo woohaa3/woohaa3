@@ -30,8 +30,6 @@ export type ContentIdentityOptions = {
   nodeCapabilities?: NodeCapabilityResolver;
   /** 模型 prepared resource key（nodeId → resourceKey）；缺省视为无模型内容。 */
   modelResourceKey?: (nodeId: string) => string | null;
-  /** 复合资产内容身份；缺省用「画布 + 节点」稳定身份。 */
-  compositeKey?: (node: CanvasNode, canvas: ServerCanvas) => string | null;
   /** Runtime-resolved provider asset when outputAssetId is not persisted yet. */
   assetForNode?: (nodeId: string) => StoredAsset | null | undefined;
 };

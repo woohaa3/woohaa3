@@ -58,9 +58,7 @@ export const COLOR_ALLOWLIST: Record<string, string> = {
   // showcase 夹具：程序化模型 fixture 的 Scene IR 输入（领域内容色，非 app chrome）。
   "web/ui/showcase/src/fixtures/shot-camera-fixture.tsx": "程序化模型 Scene IR 输入（领域内容色）",
   // showcase 夹具：图片编辑色板/原图占位内容色（领域内容色，与生产色板一致）。
-  "web/ui/showcase/src/image-focus-fixtures.tsx": "图片编辑色板与原图占位内容色（领域内容色）",
-  // showcase 夹具：片场检查面板的程序化模型 Scene IR 输入（领域内容色，非 app chrome）。
-  "web/ui/showcase/src/film-set-inspector-fixtures.tsx": "程序化模型 Scene IR 输入（领域内容色）"
+  "web/ui/showcase/src/image-focus-fixtures.tsx": "图片编辑色板与原图占位内容色（领域内容色）"
 };
 
 /** 透明的中性合成常量（允许，不构成品牌色）。 */

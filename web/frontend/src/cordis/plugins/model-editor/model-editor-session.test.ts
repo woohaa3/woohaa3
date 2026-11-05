@@ -283,7 +283,7 @@ describe("asynchronous authoritative camera writes", () => {
     let writes = 0;
     const session = new ModelEditorSession({ readCameras: () => [camera()], isWritable: () => true,
       submitCameras: () => { ++writes; return new Promise<boolean>(resolve => { finish = resolve; }); } });
-    session.enter("film");
+    session.enter("m1");
     session.commitAzimuth(0.8);
     expect(session.getState().cameraWritePending).toBe(true);
     expect(session.selectedCamera()?.azimuth).toBe(0.2);
@@ -301,7 +301,7 @@ describe("asynchronous authoritative camera writes", () => {
     let writes = 0;
     const session = new ModelEditorSession({ readCameras: () => [camera(), camera({ id: "b", order: 1 })], isWritable: () => true,
       submitCameras: () => { ++writes; return new Promise<boolean>(resolve => { finish = resolve; }); } });
-    session.enter("film");
+    session.enter("m1");
     session.beginPose(); session.updatePose({ azimuth: 1 }); session.cancelPose(); session.endPose();
     expect(writes).toBe(0);
     session.beginFocus(); session.updateFocus({ x: 3, y: 0, z: 0 }); session.selectCamera("b"); session.endFocus();

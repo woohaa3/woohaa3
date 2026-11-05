@@ -46,6 +46,12 @@ node --test scripts/canvas-benchmark/*.test.mjs
 
 运行时需保持测试窗口可见、接电和显示器配置不变，避免编译、视频会议及其它重负载。不要把未安装浏览器、缺显示会话或软件 renderer 写成“无 GPU”。本机平台检测之外，还会核对实际 Chromium adapter。
 
+WSL2 / 容器里没有 DRM 设备与显示会话：设置 `WOOHAA_E2E_CDP`（宿主浏览器 CDP，例如
+`http://127.0.0.1:9222`）与 `E2E_BASE_URL`（宿主可达的基准服务地址，配合
+`ssh -L <port>:127.0.0.1:<port>`）后，`run.mjs` 会把这些变量透传给用例，基准改用
+`connectOverCDP` 驱动宿主浏览器；GPU 证据仍取该连接的 `SystemInfo.getInfo`。仅连接成功不算
+硬件通过。
+
 ## 计划与运行
 
 计划为 JSON 数组，例如：

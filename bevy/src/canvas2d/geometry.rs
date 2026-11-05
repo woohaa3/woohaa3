@@ -59,6 +59,36 @@ impl Geometry {
         }
     }
 
+    /// Closed contour stroke without filling or repainting the interior.
+    pub(crate) fn outline(&mut self, points: &[Vec2], width: f32, z: f32, color: u32) {
+        if points.len() < 3 {
+            return;
+        }
+        let offsets: Vec<_> = (0..points.len())
+            .map(|i| {
+                let previous = points[(i + points.len() - 1) % points.len()];
+                let next = points[(i + 1) % points.len()];
+                let a = (points[i] - previous).normalize_or_zero().perp();
+                let b = (next - points[i]).normalize_or_zero().perp();
+                let normal = (a + b).normalize_or_zero();
+                normal * (width * 0.5 / normal.dot(b).abs().max(0.25))
+            })
+            .collect();
+        for i in 0..points.len() {
+            let j = (i + 1) % points.len();
+            self.polygon(
+                &[
+                    points[i] + offsets[i],
+                    points[i] - offsets[i],
+                    points[j] - offsets[j],
+                    points[j] + offsets[j],
+                ],
+                z,
+                color,
+            );
+        }
+    }
+
     pub(crate) fn rounded_rect(
         &mut self,
         x: f32,

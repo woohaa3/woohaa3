@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentAdapterRunInput } from "@woohaa3/contracts";
 import { createMcpTurnGateway } from "./mcp-turn-gateway.js";
 
-async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: () => void, group = false) {
+async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: () => void) {
   const received: Array<{ method: string; params?: any; authorization?: string }> = [];
   const upstream = createServer(async (req, res) => {
     let text = ""; for await (const chunk of req) text += chunk;
@@ -23,7 +23,7 @@ async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: 
   const controller = new AbortController(); let valid = true;
   const emit = vi.fn();
   const input = { owner: "owner", requestId: "request", canvasId: "canvas", conversationId: "conversation", turnId: "turn", history: [], signal: controller.signal, emit,
-    intent: { action: "modify", canvasId: "canvas", nodeId: "node", mode: group ? "canvas-group" : "model3d", prompt: "update", expectedContentHash: group ? "group-epoch:7" : "hash" } } as AgentAdapterRunInput;
+    intent: { action: "modify", canvasId: "canvas", nodeId: "node", mode: "model3d", prompt: "update", expectedContentHash: "hash" } } as AgentAdapterRunInput;
   const validateTarget = vi.fn(async () => validate);
   const gateway = await createMcpTurnGateway({ input, upstream: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/mcp`, grant: "real-grant", valid: () => valid, validateTarget });
   const call = async (name: string, args: Record<string, unknown> = {}, id = 1, token = gateway.token) => {
@@ -33,16 +33,6 @@ async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: 
   return { gateway, received, call, validateTarget, emit, controller, invalidate: () => { valid = false; }, close: async () => { await gateway.close(); upstream.closeAllConnections(); await new Promise<void>((resolve) => upstream.close(() => resolve())); } };
 }
 describe("每轮 MCP 授权与权威回执", () => {
-  it("forwards a group descendant without replacing it with the root and checks the frozen epoch", async () => {
-    const f = await fixture(true, undefined, undefined, true);
-    try {
-      expect((await f.call("submit_model_script", { nodeId: "descendant", script: "model" })).body).toHaveProperty("result");
-      expect(f.received.find(r => r.method === "tools/call")?.params.arguments.nodeId).toBe("descendant");
-      expect(f.validateTarget).toHaveBeenCalledOnce();
-      f.invalidate();
-      expect((await f.call("submit_model_script", { nodeId: "descendant" }, 2)).status).toBe(410);
-    } finally { await f.close(); }
-  });
   it("只公开真实目标工具；秘密替换、目标冻结与重复调用幂等", async () => {
     const f = await fixture();
     try {

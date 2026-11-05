@@ -79,6 +79,9 @@ export type ExecutionPanelPresentation = "compact" | "expanded";
 export type CanvasPanelRoute =
   | { type: "node-execution"; nodeId: string; presentation?: ExecutionPanelPresentation }
   | { type: "model-node-editor"; nodeId: string }
+  | { type: "group-execution"; nodeId: string }
+  | { type: "director-execution"; nodeId: string }
+  | { type: "camera-execution"; nodeId: string }
   | { type: "node-history"; nodeId: string }
   | {
       type: "agent-conversation";

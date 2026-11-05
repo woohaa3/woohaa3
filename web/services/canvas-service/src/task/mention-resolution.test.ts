@@ -161,74 +161,7 @@ describe("resolveMentionsAndCompile", () => {
   });
 });
 
-const VIDEO_BINDING: CanvasTaskInputBinding[] = [
-  {
-    field: "referenceVideos",
-    semantic: "reference-video",
-    roles: ["reference_video"],
-    mediaKinds: ["video"],
-    mediaTypes: ["video/mp4"],
-    maxItems: 2,
-    valueFormat: "url"
-  }
-];
 
-function canvasWithShotReference(): ServerCanvas {
-  const canvas = createEmptyWoohaa3ServerCanvas("c-shot", NOW);
-  canvas.document.nodes.push(
-    { id: "shot-preview:x", type: "film-set-shot-preview", position: { x: 0, y: 0 } },
-    { id: "target", type: "video", position: { x: 300, y: 0 } }
-  );
-  canvas.document.edges.push({
-    id: "e-shot",
-    source: "shot-preview:x",
-    target: "target",
-    data: { kind: "shot-reference", schemaVersion: 1 }
-  });
-  canvas.assets.push(mediaAsset("shot-asset", "video"));
-  canvas.nodeData.target = {
-    inputMapping: [
-      {
-        slotId: "slot-shot",
-        sourceNodeId: "shot-preview:x",
-        role: "shot_reference",
-        sortKey: "0",
-        sourceAssetIds: ["shot-asset"]
-      }
-    ]
-  };
-  return canvas;
-}
-
-describe("镜头参考 mention（视频类型）", () => {
-  it("候选类型是 input_video，视频 token 通过校验", () => {
-    const canvas = canvasWithShotReference();
-    const candidates = collectDirectMentionCandidates(canvas, "target");
-    expect(candidates).toHaveLength(1);
-    expect(candidates[0]).toMatchObject({ slotId: "slot-shot", type: "input_video", role: "shot_reference" });
-
-    const token = serializeWoohaa3CanvasMention({ type: "input_video", slotId: "slot-shot", label: "视频 1" })!;
-    const result = resolveMentionsAndCompile({
-      canvas,
-      nodeId: "target",
-      authored: token,
-      bindings: VIDEO_BINDING,
-      directInputs: [
-        {
-          assetId: "shot-asset",
-          role: "reference_video",
-          storageKey: `${STORAGE}.mp4`,
-          mediaType: "video/mp4",
-          mediaKind: "video"
-        }
-      ]
-    });
-    expect(result.kind).toBe("ok");
-    if (result.kind !== "ok") return;
-    expect(result.providerText).toContain("视频 1");
-    expect(result.inputs).toHaveLength(1);
-  });
-});
 
 describe("carried inputs（一层文字）", () => {
   function canvasWithTextCarrier(options: { mention: boolean; nested?: boolean }): ServerCanvas {

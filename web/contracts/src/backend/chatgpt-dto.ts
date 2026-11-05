@@ -36,8 +36,8 @@ export function isChatGptAuthState(value: unknown): value is ChatGptAuthState {
   return typeof value === "string" && (CHATGPT_AUTH_STATES as readonly string[]).includes(value);
 }
 
-/** 生成目标模式。`film-set` 表达片场整体生成（D6 更名；旧 `animation3d` 不再接受）。 */
-export const CHATGPT_GENERATION_MODES = ["model3d", "film-set", "camera"] as const;
+/** 生成目标模式（片场已下线；`camera` 指模型自身的镜头预设子资源）。 */
+export const CHATGPT_GENERATION_MODES = ["model3d", "camera"] as const;
 export type ChatGptGenerationMode = (typeof CHATGPT_GENERATION_MODES)[number];
 
 export function isChatGptGenerationMode(value: unknown): value is ChatGptGenerationMode {
@@ -182,7 +182,7 @@ export function decodeChatGptGenerateRequest(body: unknown): DecodeResult<ChatGp
   const nodeId = readId(body.nodeId, "nodeId");
   if (typeof nodeId === "object") return fail("malformed-request", nodeId.error);
   const mode = body.mode;
-  if (!isChatGptGenerationMode(mode)) return fail("malformed-request", "mode 必须是 model3d / film-set / camera");
+  if (!isChatGptGenerationMode(mode)) return fail("malformed-request", "mode 必须是 model3d / camera");
   const model = readId(body.model, "model");
   if (typeof model === "object") return fail("malformed-request", model.error);
   if (body.reasoningEffort !== undefined && !isChatGptReasoningEffort(body.reasoningEffort)) {

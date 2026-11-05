@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { reviewBaseUrl, reviewProbeUrl, reviewUseOptions, reviewWebServerEnv, reviewWebServerIgnoreHTTPSErrors } from "./e2e/review-target.js";
+import { webTarget } from "./e2e/target";
 
 /**
  * Yjs 协作同步的专用 E2E 配置（change: add-yjs-canvas-sync，任务 9.1–9.3）。
@@ -10,6 +10,17 @@ import { reviewBaseUrl, reviewProbeUrl, reviewUseOptions, reviewWebServerEnv, re
  *   pnpm exec playwright test -c playwright.yjs.config.ts
  */
 const PORT = Number(process.env.E2E_YJS_PORT ?? 4373);
+const target = webTarget({
+	port: PORT,
+	server: {
+		command: `node e2e/server.mjs --port ${PORT}`,
+		url: `http://127.0.0.1:${PORT}/`,
+		reuseExistingServer: !process.env.CI,
+		timeout: 60_000,
+		stdout: "pipe",
+		stderr: "pipe"
+	}
+});
 
 export default defineConfig({
   testDir: "./e2e",
@@ -21,17 +32,14 @@ export default defineConfig({
   retries: 0,
   reporter: [["list"]],
   use: {
-  	...reviewUseOptions,
-    baseURL: reviewBaseUrl(PORT),
+    baseURL: `http://127.0.0.1:${PORT}`,
     // 与默认配置一致：全屏 Canvas 用例不需要逐动作 DOM 快照，失败仍保留截图与 sources。
     trace: { mode: "retain-on-failure", snapshots: false }
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-  	ignoreHTTPSErrors: reviewWebServerIgnoreHTTPSErrors,
     command: `node e2e/server.mjs --port ${PORT}`,
-    url: reviewProbeUrl(PORT),
-    env: reviewWebServerEnv,
+    url: `http://127.0.0.1:${PORT}/`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
     stdout: "pipe",

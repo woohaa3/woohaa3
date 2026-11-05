@@ -16,7 +16,7 @@ const readJson=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 const sha256=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 export function nativeToolSources({platform=process.platform,arch=process.arch}={}){
  const artifact=nodeArtifact(platform,arch),suffix=platform==='win32'?'.exe':'';
- return Object.fromEntries(['shot-recorder','model-renderer'].map(id=>{
+ return Object.fromEntries(['model-renderer'].map(id=>{
   const preferred=path.join(root,`bevy/target/${artifact.triple}/release/${id}${suffix}`);
   const fallback=path.join(root,id==='model-renderer'?'bevy':'desktop',`target/release/${id}${suffix}`);
   return [id,fs.existsSync(preferred)?preferred:fallback];
@@ -32,7 +32,7 @@ export function resolvedRuntimeLock(options={}){
 }
 function dependency(source,name){const found=locateDependency(fs.realpathSync(source),name);if(!found)throw new Error(`缺少已安装依赖 ${name}`);return found;}
 function copyLicenses(source,target){for(const name of fs.readdirSync(source))if(/^(license|licence|notice|readme)/i.test(name)&&fs.statSync(path.join(source,name)).isFile())fs.copyFileSync(path.join(source,name),path.join(target,name));}
-export async function packageRuntimeComponents({output=path.join(root,'artifacts/runtimes/upload'),platform=process.platform,arch=process.arch,releaseVersion=readJson(path.join(root,'desktop/tauri.conf.json')).version,keyFile=process.env.WOOHAA_RUNTIME_SIGNING_KEY_FILE,key=process.env.WOOHAA_RUNTIME_SIGNING_KEY,ids=['codex','claude','dsh','shot-recorder','model-renderer']}={}){
+export async function packageRuntimeComponents({output=path.join(root,'artifacts/runtimes/upload'),platform=process.platform,arch=process.arch,releaseVersion=readJson(path.join(root,'desktop/tauri.conf.json')).version,keyFile=process.env.WOOHAA_RUNTIME_SIGNING_KEY_FILE,key=process.env.WOOHAA_RUNTIME_SIGNING_KEY,ids=['codex','claude','dsh','model-renderer']}={}){
  const layout=runtimeReleaseLayout({platform,arch,version:releaseVersion});
  output=path.join(output,...layout.relativeDirectory.split('/'));
  const privateKey=createPrivateKey(keyFile?fs.readFileSync(keyFile):key??(()=>{throw new Error('需要 WOOHAA_RUNTIME_SIGNING_KEY_FILE（Ed25519 PEM 私钥路径）');})());

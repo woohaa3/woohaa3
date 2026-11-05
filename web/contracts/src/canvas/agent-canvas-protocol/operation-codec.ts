@@ -139,6 +139,25 @@ function decodeAgentPlanOperation(raw: unknown, operationIndex: number): AgentDe
         value: { op: "move_node", target: target.value, position: position.value, ...(raw.coordinateSpace !== undefined ? { coordinateSpace: raw.coordinateSpace as "world" | "parent" } : {}), ...(precondition ? { if: precondition.value } : {}) }
       };
     }
+    case "resize_node": {
+      const known = assertKnownKeys(raw, ["op", "target", "size", "if"], { operationIndex });
+      if (!known.ok) return known;
+      const target = readEntityRef(raw.target, { operationIndex, field: "target" });
+      if (!target.ok) return target;
+      if (!isJsonObject(raw.size)) return decodeFail("malformed-request", "size 必须是对象", { operationIndex, field: "size" });
+      const sizeKnown = assertKnownKeys(raw.size, ["width", "height"], { operationIndex, field: "size" });
+      if (!sizeKnown.ok) return sizeKnown;
+      const { width, height } = raw.size;
+      if (!isFiniteNumber(width) || !isFiniteNumber(height) || width <= 0 || height <= 0) {
+        return decodeFail("malformed-request", "size 必须是正的有限数值", { operationIndex, field: "size" });
+      }
+      const precondition = raw.if === undefined ? undefined : readPrecondition(raw.if, { operationIndex, field: "if" });
+      if (precondition && !precondition.ok) return precondition;
+      return {
+        ok: true,
+        value: { op: "resize_node", target: target.value, size: { width, height }, ...(precondition ? { if: precondition.value } : {}) }
+      };
+    }
     case "delete": {
       const known = assertKnownKeys(raw, ["op", "targets", "if"], { operationIndex });
       if (!known.ok) return known;

@@ -1,5 +1,5 @@
-//! Exact draw-only invalidation for the retained shared group/overlay buffers.
-//! No model/media/vertex payloads, viewport or unrelated ordinary-card content is copied.
+//! Exact draw-only invalidation for the retained shared overlay buffers.
+//! No model/media/vertex payloads or unrelated ordinary-card content is copied.
 use crate::{
     protocol::{AggregateConnect, Draft, DragAttach, Marquee, Scene},
     theme::ThemeResource,
@@ -10,13 +10,15 @@ struct Reference {
     id: String,
     rect: [f32; 4],
     ports: [[f32; 2]; 2],
-    composite: bool,
 }
 #[derive(PartialEq)]
 pub(super) struct SharedKey {
-    pub(super) focus_ownership_links: bool,
-    pub(super) ownership_links: Vec<([f32; 2], [f32; 2])>,
     theme: String,
+    scope_revision: u64,
+    frame_zoom: Option<f32>,
+    frames: Vec<(String, [f32; 4])>,
+    frame_hover: Option<String>,
+    frame_selection: Vec<String>,
     references: Vec<Reference>,
     draft: Option<Draft>,
     marquee: Option<Marquee>,
@@ -24,12 +26,9 @@ pub(super) struct SharedKey {
     aggregate: Option<AggregateConnect>,
     selection: Vec<String>,
     overlay_count: Option<usize>,
-    /// 拍摄镜头归属线（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）：
-    /// 派生呈现，起点随相机姿态变更。参与 key 使线随起点/目标增量重绘。
-    shot_preview_links: Vec<crate::protocol::ShotPreviewLink>,
 }
 impl SharedKey {
-    pub(super) fn new(scene: &Scene, theme: &ThemeResource) -> Self {
+    pub(super) fn new(scene: &Scene, theme: &ThemeResource, scope_revision: u64) -> Self {
         let selected: HashSet<_> = scene.selection.nodes.iter().map(String::as_str).collect();
         let mut references = HashSet::new();
         if let Some(draft) = &scene.draft {
@@ -61,13 +60,42 @@ impl SharedKey {
                     super::layout::port(n, false).to_array(),
                     super::layout::port(n, true).to_array(),
                 ],
-                composite: n.composite_asset.is_some(),
             })
             .collect();
         Self {
-            focus_ownership_links: false,
-            ownership_links: Vec::new(),
             theme: theme.fingerprint().to_owned(),
+            scope_revision,
+            frame_zoom: scene
+                .nodes
+                .iter()
+                .any(|node| matches!(node.chrome, crate::protocol::NodeChrome::Frame { .. }))
+                .then_some(scene.viewport.zoom),
+            frames: scene
+                .nodes
+                .iter()
+                .filter(|node| matches!(node.chrome, crate::protocol::NodeChrome::Frame { .. }))
+                .map(|node| (node.id.clone(), [node.x, node.y, node.width, node.height]))
+                .collect(),
+            frame_hover: scene
+                .hover
+                .as_ref()
+                .and_then(|hover| hover.node_id.as_ref())
+                .filter(|id| {
+                    scene.nodes.iter().any(|node| {
+                        &node.id == *id
+                            && matches!(node.chrome, crate::protocol::NodeChrome::Frame { .. })
+                    })
+                })
+                .cloned(),
+            frame_selection: scene
+                .nodes
+                .iter()
+                .filter(|node| {
+                    matches!(node.chrome, crate::protocol::NodeChrome::Frame { .. })
+                        && selected.contains(node.id.as_str())
+                })
+                .map(|node| node.id.clone())
+                .collect(),
             references,
             draft: scene.draft.clone(),
             marquee: scene.marquee.clone(),
@@ -80,7 +108,35 @@ impl SharedKey {
             },
             overlay_count: (scene.drag_attach.is_some() || scene.aggregate_connect.is_some())
                 .then_some(scene.nodes.len()),
-            shot_preview_links: scene.shot_preview_links.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn moving_resizing_and_selecting_a_scope_invalidates_its_backing() {
+        let theme = ThemeResource::default();
+        let mut scene = Scene::default();
+        scene.nodes.push(
+            serde_json::from_value(serde_json::json!({
+                "id":"g", "type":"workflow-group-2d", "x":0,"y":0,"width":200,"height":100,
+                "chrome":{"kind":"frame","groupId":"g","memberNodeIds":[]}
+            }))
+            .unwrap(),
+        );
+        let before = SharedKey::new(&scene, &theme, 0);
+        scene.nodes[0].x = 100.0;
+        assert!(before != SharedKey::new(&scene, &theme, 0));
+        let moved = SharedKey::new(&scene, &theme, 0);
+        scene.nodes[0].width = 300.0;
+        assert!(moved != SharedKey::new(&scene, &theme, 0));
+        let resized = SharedKey::new(&scene, &theme, 0);
+        scene.selection.nodes.push("g".into());
+        assert!(resized != SharedKey::new(&scene, &theme, 0));
+        let selected = SharedKey::new(&scene, &theme, 0);
+        scene.viewport.zoom = 2.0;
+        assert!(selected != SharedKey::new(&scene, &theme, 0));
     }
 }

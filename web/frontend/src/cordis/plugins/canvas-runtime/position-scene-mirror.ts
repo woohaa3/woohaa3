@@ -2,17 +2,12 @@ import type { CanvasRenderScene, CanvasPositionUpdate } from "@woohaa3/contracts
 
 /** Mirror after renderer acceptance; Rust owns validation and query/render acceptance. */
 export class PositionSceneMirror {
-  private slots = new Map<string, { index: number; scopeOffset?: { x: number; y: number } }>();
+  private slots = new Map<string, { index: number }>();
 
   reset(scene: CanvasRenderScene): CanvasRenderScene {
     this.slots.clear();
     scene.nodes.forEach((node, index) => {
-      this.slots.set(node.id, {
-        index,
-        ...(node.compositeAsset ? { scopeOffset: {
-          x: node.compositeAsset.x - node.x, y: node.compositeAsset.y - node.y
-        } } : {})
-      });
+      this.slots.set(node.id, { index });
     });
     return { ...scene, nodes: [...scene.nodes] };
   }
@@ -27,17 +22,7 @@ export class PositionSceneMirror {
       const slot = this.slots.get(position.id);
       if (!slot) continue; // Accepted by Rust; no speculative mirror writes before acceptance.
       const node = scene.nodes[slot.index]!;
-      scene.nodes[slot.index] = {
-        ...node, x: position.x, y: position.y,
-        ...(node.compositeAsset && slot.scopeOffset ? { compositeAsset: {
-          ...node.compositeAsset, x: position.x + slot.scopeOffset.x, y: position.y + slot.scopeOffset.y,
-          ...(node.compositeAsset.scopeGround ? { scopeGround: {
-            ...node.compositeAsset.scopeGround,
-            cx: node.compositeAsset.scopeGround.cx + position.x - node.x,
-            cy: node.compositeAsset.scopeGround.cy + position.y - node.y
-          } } : {})
-        } } : {})
-      };
+      scene.nodes[slot.index] = { ...node, x: position.x, y: position.y };
     }
     return input.viewport ? { ...scene, viewport: { ...input.viewport } } : scene;
   }

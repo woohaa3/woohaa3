@@ -19,8 +19,28 @@ use crate::isometric_grid::CANVAS_CAMERA_Z;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ModelCandidate {
     pub(crate) node_id: String,
+    pub(crate) shared_world: bool,
+    /// 空模型/资源未就绪的世界锚点：没有可见三角面，但必须可选中。
+    pub(crate) empty_marker: bool,
     pub(crate) min: [f32; 3],
     pub(crate) max: [f32; 3],
+    pub(crate) triangles: Option<std::sync::Arc<Vec<SurfaceTriangle>>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SurfaceTriangle {
+    pub(crate) vertices: [[f32; 3]; 3],
+    pub(crate) cull_back: bool,
+}
+
+/// 模型聚焦时的透视相机快照；与渲染/手势共用同一 target/yaw/pitch/fov。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ModelPickFocus {
+    pub(crate) target: [f32; 3],
+    pub(crate) yaw: f32,
+    pub(crate) pitch: f32,
+    pub(crate) distance: f32,
+    pub(crate) fov: f32,
 }
 
 /// 与候选一同发布的画布相机快照（viewport/surface）。
@@ -28,6 +48,8 @@ pub(crate) struct ModelCandidate {
 pub(crate) struct ModelPickCamera {
     pub(crate) viewport: [f32; 3],
     pub(crate) surface: [f32; 2],
+    pub(crate) ordinary: bool,
+    pub(crate) focus: Option<ModelPickFocus>,
 }
 
 impl Default for ModelPickCamera {
@@ -35,13 +57,17 @@ impl Default for ModelPickCamera {
         Self {
             viewport: [0.0, 0.0, 1.0],
             surface: [1.0, 1.0],
+            ordinary: true,
+            focus: None,
         }
     }
 }
 
 thread_local! {
+    static EDITOR_CAMERA: RefCell<Option<(crate::protocol::WorldCamera, Option<String>)>> = const { RefCell::new(None) };
     /// 最近接受场景派生的模型候选世界 AABB；在 `set_scene` 接受点更新。
     static CANDIDATES: RefCell<Vec<ModelCandidate>> = const { RefCell::new(Vec::new()) };
+    static SHARED_CURRENT: RefCell<Vec<ModelCandidate>> = const { RefCell::new(Vec::new()) };
     static POSITION_BASIS: RefCell<super::position_basis::PositionBasis<ModelCandidate>> = RefCell::new(Default::default());
     /// 每个候选最近发布的观察深度（逐像素平局偏移）；位置增量只按差值更新 AABB 的 z。
     ///
@@ -52,11 +78,24 @@ thread_local! {
     static CAMERA: RefCell<ModelPickCamera> = const { RefCell::new(ModelPickCamera {
         viewport: [0.0, 0.0, 1.0],
         surface: [1.0, 1.0],
+        ordinary: true,
+        focus: None,
     }) };
     /// 模型 pick generation（与 2D interaction generation 同步递增通过 facade）。
     static GENERATION: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     /// 是否已接受过模型索引（区分「空画布」与「尚未就绪」）。
     static READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(crate) fn accept_editor_camera(scene: &crate::protocol::Scene) {
+    let camera = scene.world_camera_edit.as_ref().map(|edit| {
+        let bound_node = edit.camera.bound_instance_id.as_ref().map(|id| {
+            scene.nodes.iter().find(|node| node.shared_world_instance.as_ref().is_some_and(|instance| &instance.instance_id == id))
+                .map(|node| node.id.clone()).unwrap_or_default()
+        });
+        (edit.camera.clone(), bound_node)
+    });
+    EDITOR_CAMERA.with(|slot| *slot.borrow_mut() = camera);
 }
 
 /// 接受一份模型候选列表与同 generation 的相机快照（`set_scene` 接受点调用）；latest-wins。
@@ -83,13 +122,19 @@ pub(crate) fn accept_models(
     READY.with(|cell| cell.set(true));
 }
 
+pub(crate) fn replace_shared_models(shared: Vec<ModelCandidate>) {
+    SHARED_CURRENT.with(|slot| *slot.borrow_mut() = shared);
+}
+
 pub(crate) fn plan_positions(
     deltas: &[super::interaction::PositionDelta],
 ) -> Result<Vec<(usize, ModelCandidate)>, &'static str> {
     POSITION_BASIS.with(|slot| {
         slot.borrow().plan(deltas, |base, delta| {
             let mut next = base.clone();
-            (next.min, next.max) = super::position_basis::shift_bounds(base.min, base.max, delta)?;
+            if !base.shared_world {
+                (next.min, next.max) = super::position_basis::shift_bounds(base.min, base.max, delta)?;
+            }
             Ok(next)
         })
     })
@@ -104,6 +149,9 @@ pub(crate) fn retune_depth(plan: &mut [(usize, ModelCandidate)]) {
     DEPTHS.with(|slot| {
         let mut depths = slot.borrow_mut();
         for (_, candidate) in plan.iter_mut() {
+            if candidate.shared_world {
+                continue;
+            }
             let next = crate::depth_order::depth_of(&candidate.node_id);
             let previous = depths
                 .insert(candidate.node_id.clone(), next)
@@ -136,7 +184,9 @@ pub(crate) fn commit_positions(
 /// （change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3；MUST NOT 重算 bounds）。
 pub(crate) fn accept_viewport_camera(viewport: [f32; 3], surface: [f32; 2], generation: u32) {
     CAMERA.with(|slot| {
-        *slot.borrow_mut() = ModelPickCamera { viewport, surface };
+        let mut camera = slot.borrow_mut();
+        camera.viewport = viewport;
+        camera.surface = surface;
     });
     GENERATION.with(|cell| cell.set(generation));
 }
@@ -155,6 +205,8 @@ pub(crate) fn pick_query_json(json: &str) -> String {
     #[allow(dead_code)] // `width`/`height` 属查询线格式，当前实现只消费 x/y/generation。
     struct Request {
         generation: u32,
+        #[serde(default)]
+        kind: Option<String>,
         x: f32,
         y: f32,
         width: f32,
@@ -170,15 +222,98 @@ pub(crate) fn pick_query_json(json: &str) -> String {
     if request.generation != GENERATION.with(std::cell::Cell::get) {
         return stale_result("stale");
     }
-    let candidates = CANDIDATES.with(|slot| slot.borrow().clone());
+    #[cfg(feature = "canvas-core")]
+    if request.kind.as_deref() == Some("camera-editor") {
+        use bevy::prelude::*;
+        let Some((camera, bound_node)) = EDITOR_CAMERA.with(|slot| slot.borrow().clone()) else { return stale_result("unavailable") };
+        if ![request.x, request.y, request.width, request.height].iter().all(|n| n.is_finite()) || request.width <= 0.0 || request.height <= 0.0 {
+            return stale_result("unavailable");
+        }
+        let crate::protocol::WorldCameraProjection::Perspective { vertical_fov_radians, near_meters, far_meters } = camera.projection else { return stale_result("unavailable") };
+        let aspect = (camera.aspect.width / camera.aspect.height) as f32;
+        let (x, y, width, height) = crate::world_camera_preview::editor_rect(Vec2::new(request.width, request.height), aspect);
+        if request.x < x || request.x > x + width || request.y < y || request.y > y + height {
+            return serde_json::json!({"available": true, "generation": request.generation, "surface": null}).to_string();
+        }
+        let pose = crate::world_camera_view::pose(&camera);
+        let half = (vertical_fov_radians as f32 / 2.0).tan();
+        let direction = (pose.rotation * Vec3::new(((request.x - x) / width * 2.0 - 1.0) * half * aspect,
+            (1.0 - (request.y - y) / height * 2.0) * half, -1.0)).normalize();
+        let near = (near_meters * crate::protocol::UNITS_PER_METER) as f32;
+        let far = (far_meters * crate::protocol::UNITS_PER_METER) as f32;
+        let hit = SHARED_CURRENT.with(|slot| slot.borrow().iter()
+            .filter(|candidate| !candidate.empty_marker && bound_node.as_ref().is_none_or(|id| id == &candidate.node_id))
+            .filter(|candidate| ray_hits_aabb_clipped(pose.translation.to_array(), direction.to_array(), candidate.min, candidate.max, far).is_some())
+            .filter_map(|candidate| candidate.triangles.as_ref())
+            .flat_map(|triangles| triangles.iter())
+            .filter_map(|triangle| ray_triangle(pose.translation, direction, triangle))
+            .filter(|t| *t >= near && *t <= far)
+            .min_by(f32::total_cmp));
+        let surface = hit.map(|distance| {
+            let point = (pose.translation + direction * distance) / crate::protocol::UNITS_PER_METER as f32;
+            serde_json::json!({"u": point.x, "v": -point.z, "h": point.y})
+        });
+        return serde_json::json!({"available": true, "generation": request.generation, "surface": surface}).to_string();
+    }
+    if request.kind.as_deref() == Some("ground") {
+        if !request.x.is_finite() || !request.y.is_finite() {
+            return stale_result("unavailable");
+        }
+        let camera = CAMERA.with(|slot| *slot.borrow());
+        if !camera.ordinary { return stale_result("unavailable"); }
+        let view = crate::isometric_grid::IsometricGridView {
+            x: camera.viewport[0], y: camera.viewport[1], zoom: camera.viewport[2],
+        };
+        let p = crate::isometric_grid::screen_to_ground(&view, bevy::prelude::Vec2::new(request.x, request.y));
+        let u = p.x as f64 / crate::protocol::UNITS_PER_METER;
+        let v = -(p.y as f64) / crate::protocol::UNITS_PER_METER;
+        if !u.is_finite() || !v.is_finite() { return stale_result("unavailable"); }
+        return serde_json::json!({"available": true, "generation": request.generation, "ground": {"u": u, "v": v}}).to_string();
+    }
+    if request.kind.is_some() { return stale_result("unsupported"); }
+    let mut candidates = CANDIDATES.with(|slot| slot.borrow().iter().filter(|candidate| !candidate.shared_world).cloned().collect::<Vec<_>>());
+    SHARED_CURRENT.with(|slot| candidates.extend(slot.borrow().iter().cloned()));
     let camera = CAMERA.with(|slot| *slot.borrow());
-    let tuples = as_tuples(&candidates);
-    let picked = pick_nearest(
-        &tuples,
-        (camera.surface[0], camera.surface[1]),
-        (request.x, request.y),
-        camera.viewport,
-    );
+    let (origin, direction, max_t) = if let Some(focus) = camera.focus {
+        let width = if camera.surface[0].is_finite() && camera.surface[0] > 1.0 {
+            camera.surface[0]
+        } else {
+            request.width.max(1.0)
+        };
+        let height = if camera.surface[1].is_finite() && camera.surface[1] > 1.0 {
+            camera.surface[1]
+        } else {
+            request.height.max(1.0)
+        };
+        let target = bevy::prelude::Vec3::from_array(focus.target);
+        let cp = focus.pitch.cos();
+        let dir = bevy::prelude::Vec3::new(
+            focus.yaw.sin() * cp,
+            -focus.pitch.sin(),
+            focus.yaw.cos() * cp,
+        );
+        let position = target + dir * focus.distance;
+        let rotation = bevy::prelude::Transform::from_translation(position)
+            .looking_at(target, bevy::prelude::Vec3::Y)
+            .rotation;
+        let ndc_x = (request.x / width) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (request.y / height) * 2.0;
+        let half = (focus.fov * 0.5).tan().max(1e-4);
+        let local = bevy::prelude::Vec3::new(
+            ndc_x * half * (width / height).max(1e-4),
+            ndc_y * half,
+            -1.0,
+        )
+        .normalize_or_zero();
+        (position, (rotation * local).normalize_or_zero(), 200_000.0)
+    } else {
+        let view = crate::isometric_grid::IsometricGridView { x: camera.viewport[0], y: camera.viewport[1], zoom: camera.viewport[2] };
+        let projection = crate::isometric_grid::canvas_camera_projection();
+        let origin = crate::isometric_grid::screen_point_to_world(bevy::prelude::Vec2::new(request.x, request.y), CANVAS_CAMERA_Z - projection.near, &view);
+        let direction = crate::isometric_grid::canvas_camera_rotation() * bevy::prelude::Vec3::NEG_Z;
+        (origin, direction, projection.far - projection.near)
+    };
+    let picked = pick_candidates(&candidates, origin, direction, max_t);
     let result = match picked {
         Some((node_id, target, radius)) => ModelPickResult {
             available: true,
@@ -198,6 +333,42 @@ pub(crate) fn pick_query_json(json: &str) -> String {
         },
     };
     serde_json::to_string(&result).unwrap_or_else(|_| stale_result("unavailable"))
+}
+
+pub(crate) fn pick_candidates(candidates: &[ModelCandidate], origin: bevy::prelude::Vec3, direction: bevy::prelude::Vec3, max_t: f32) -> Option<(String, [f32; 3], f32)> {
+    let mut best = None;
+    let mut best_t = max_t;
+    for candidate in candidates {
+        let Some(broad) = ray_hits_aabb_clipped(origin.to_array(), direction.to_array(), candidate.min, candidate.max, max_t) else { continue };
+        let t = if let Some(triangles) = &candidate.triangles {
+            triangles.iter().filter_map(|triangle| ray_triangle(origin, direction, triangle)).filter(|t| *t <= max_t).fold(None, |best: Option<f32>, t| Some(best.map_or(t, |b| b.min(t))))
+        } else if candidate.empty_marker || !candidate.shared_world { Some(broad) } else { None };
+        if let Some(t) = t.filter(|t| *t < best_t) {
+            best_t = t;
+            let (center, radius) = center_radius(candidate.min, candidate.max);
+            best = Some((candidate.node_id.clone(), center, radius));
+        }
+    }
+    best
+}
+
+fn ray_triangle(origin: bevy::prelude::Vec3, direction: bevy::prelude::Vec3, triangle: &SurfaceTriangle) -> Option<f32> {
+    use bevy::prelude::Vec3;
+    let [a, b, c] = triangle.vertices.map(Vec3::from_array);
+    let edge1 = b - a;
+    let edge2 = c - a;
+    let p = direction.cross(edge2);
+    let determinant = edge1.dot(p);
+    if determinant.abs() < 1e-8 || (triangle.cull_back && determinant <= 0.0) { return None; }
+    let inverse = determinant.recip();
+    let s = origin - a;
+    let u = s.dot(p) * inverse;
+    if !(0.0..=1.0).contains(&u) { return None; }
+    let q = s.cross(edge1);
+    let v = direction.dot(q) * inverse;
+    if v < 0.0 || u + v > 1.0 { return None; }
+    let t = edge2.dot(q) * inverse;
+    (t >= 0.0 && t.is_finite()).then_some(t)
 }
 
 fn stale_result(reason: &str) -> String {
@@ -409,3 +580,52 @@ mod position_tests;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, feature = "canvas-core"))]
+mod camera_editor_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn setup() {
+        let camera = serde_json::from_value(serde_json::json!({
+            "kind":"world-camera", "version":"shared-world-v1", "cameraId":"c", "settingsVersion":"v1",
+            "position":{"u":0,"v":0,"h":2}, "rotation":[0,0,0,1],
+            "projection":{"kind":"perspective","verticalFovRadians":1.0,"nearMeters":0.1,"farMeters":500},
+            "captureMode":{"kind":"static"},"aspect":{"width":16,"height":9},"boundInstanceId":null
+        })).unwrap();
+        EDITOR_CAMERA.with(|slot| *slot.borrow_mut() = Some((camera, None)));
+        accept_models(Vec::new(), 7, ModelPickCamera::default());
+        let candidate = |id: &str, z: f32| ModelCandidate {
+            node_id: id.into(), shared_world: true, empty_marker: false,
+            min: [-200., 0., z], max: [200., 400., z],
+            triangles: Some(Arc::new(vec![SurfaceTriangle {
+                vertices: [[-200., 0., z], [200., 0., z], [0., 400., z]], cull_back: false
+            }])),
+        };
+        replace_shared_models(vec![candidate("near", -1.5 * crate::protocol::UNITS_PER_METER as f32), candidate("far", -3.0 * crate::protocol::UNITS_PER_METER as f32)]);
+    }
+    fn query(generation: u32, x: f32) -> serde_json::Value {
+        serde_json::from_str(&pick_query_json(&serde_json::json!({"kind":"camera-editor", "generation":generation,
+            "x":x,"y":356,"width":1000,"height":800}).to_string())).unwrap()
+    }
+    #[test]
+    fn camera_editor_picks_the_visible_surface_in_meters_and_respects_binding() {
+        setup();
+        let value = query(7, 500.);
+        assert_eq!(value["surface"]["u"].as_f64(), Some(0.0));
+        assert_eq!(value["surface"]["v"].as_f64(), Some(1.5));
+        assert_eq!(value["surface"]["h"].as_f64(), Some(2.0));
+        EDITOR_CAMERA.with(|slot| slot.borrow_mut().as_mut().unwrap().1 = Some("far".into()));
+        assert_eq!(query(7, 500.)["surface"]["v"].as_f64(), Some(3.0));
+        EDITOR_CAMERA.with(|slot| slot.borrow_mut().as_mut().unwrap().1 = Some("missing".into()));
+        assert!(query(7, 500.)["surface"].is_null());
+    }
+    #[test]
+    fn camera_editor_does_not_pick_letterboxing_or_an_old_generation() {
+        setup();
+        assert!(query(7, 0.)["surface"].is_null());
+        assert_eq!(query(6, 500.)["reason"], "stale");
+        EDITOR_CAMERA.with(|slot| *slot.borrow_mut() = None);
+        assert_eq!(query(7, 500.)["reason"], "unavailable");
+    }
+}

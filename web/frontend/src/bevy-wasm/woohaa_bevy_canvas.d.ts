@@ -21,6 +21,8 @@ export function poll_shot_capture(requestId: number, generation: number): Uint8A
 export function cancel_shot_capture(requestId: number): void;
 export function request_history_thumbnail(json: string): void;
 export function poll_history_thumbnail(requestId: number, generation: number): Uint8Array;
+export function request_world_capture(json: string): void;
+export function poll_world_capture(requestId: number, generation: number): Uint8Array;
 export function shot_diagnostics(): string;
 export function start(): void;
 export function query_point_hit(json: string): string;

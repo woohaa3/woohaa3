@@ -7,8 +7,8 @@ import { CanvasAssetRail } from "./canvas-asset-rail.js";
  * 业务工作流。controller 生命周期由 canvas-shell plugin 持有。
  */
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import { CanvasRenderWarnings } from "./canvas-render-warnings.js";
-import { FocusRunStrip } from "./focus-run-strip.js";
 import { Button } from "@woohaa3/ui/primitives";
 import { mountBevyCanvas, unmountBevyCanvas } from "./bevy-canvas-element.js";
 import { useOptionalService, useService } from "../../react.js";
@@ -29,6 +29,8 @@ import { NodeActionSettingsHost } from "./node-action-settings-host.js";
 import ContextMenuHost from "../canvas-menu/canvas-context-menu-host.js";
 
 export function CanvasHost({ canvasId }: { canvasId: string }) {
+  const cameraEditing = useSyncExternalStore(worldCameraEditorStore.subscribe,
+    () => worldCameraEditorStore.getSnapshot()?.canvasId === canvasId, () => false);
   const canvasRuntime = useService("canvasRuntime");
   const canvasSession = useService("canvasSession");
   const canvasNavigation = useService("canvasNavigation");
@@ -131,7 +133,7 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
   const documentFocus = presentation.mode.type === "document-workspace"
     ? { documentId: presentation.mode.documentId }
     : null;
-  const focused = snapshotFocus !== null || documentFocus !== null;
+  const focused = snapshotFocus !== null || documentFocus !== null || cameraEditing;
   // 显式重连入口交给两个状态气泡宿主（右下角工具栏与桌面横栏）。
   const slotProps = {
     revision,
@@ -159,7 +161,6 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
   const overlays = (
     <>
       <CanvasOverlayHost {...slotProps} />
-      {snapshotFocus && presentation.mode.type === "node-focus" && presentation.mode.owner !== "history" ? <FocusRunStrip canvasId={canvasId} nodeId={snapshotFocus.nodeId} /> : null}
       {contextMenu}
     </>
   );
@@ -174,7 +175,7 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
       <SceneExperienceBar key={canvasId} canvasId={canvasId} surfaceRef={surfaceRef} ready={ready} hidden={focused} />
       {/* 左侧资源轨：概览态才有位置，聚焦 / 文档工作区里由各自的工作区界面接管 */}
       <CanvasAssetRail hidden={focused} imageSource={imageSource} currentCanvasId={canvasId} />
-      <CanvasTopBarHost {...slotProps} overview={presentation.mode.type === "overview"} />
+      <CanvasTopBarHost {...slotProps} overview={presentation.mode.type === "overview" && !cameraEditing} />
       {diagnostic && ready ? <aside className="canvas-render-warnings" role="alert" aria-label="工作区提示">{diagnostic}</aside> : null}
 
       {!ready ? (
@@ -194,7 +195,7 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
             <div className="status-title">正在启动画布…</div>
           )}
         </div>
-      ) : snapshotFocus ? (
+      ) : cameraEditing ? overlays : snapshotFocus ? (
         // 聚焦：渲染唯一匹配的通用工作区贡献（缺失/重复/校验失败时由宿主兜底诊断与受控返回）；
         // 普通画布邻居不呈现。工作区自带公共顶部栏，兜底不渲染顶部栏（design D5）。
         // 聚焦侧栏 panel（如 Agent 详情）与工作区检查器共用唯一侧栏容器（design D6a）。

@@ -10,7 +10,6 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createSqliteAgentConversationStore } from "../repository/agent-conversation-repository.js";
 import { AssistantTextStore } from "../repository/assistant-text-store.js";
-import { CanvasCreationStore } from "../repository/canvas-creation-store.js";
 import { loadNodeSqlite } from "../repository/sqlite-loader.js";
 
 const directories: string[] = [];
@@ -102,55 +101,6 @@ describe("legacy unknown storage migration", () => {
       status: "failed",
       errorCode: "outcome-unknown",
       errorMessage: "外部工作日志无法确认",
-    });
-    reopened.close();
-  });
-
-  it("turns a legacy creation stage into failed while keeping root and turn identity", () => {
-    const path = database();
-    new CanvasCreationStore(path).close();
-    const db = raw(path);
-    db.prepare("INSERT INTO canvas_agent_creations VALUES(?,?,?,?,?)").run(
-      "owner",
-      "canvas",
-      "request",
-      "hash",
-      JSON.stringify({
-        owner: "owner",
-        inputHash: "hash",
-        input: {
-          requestId: "request",
-          canvasId: "canvas",
-          position: { x: 0, y: 0 },
-          prompt: "create",
-          connection: {
-            connectionId: "connection",
-            adapterId: "adapter",
-            configRevision: 1,
-            credentialEpoch: 1,
-          },
-        },
-        view: {
-          requestId: "request",
-          canvasId: "canvas",
-          rootGroupId: "root",
-          commandId: "command",
-          turnRequestId: "turn",
-          scopeEpoch: 0,
-          stage: "unknown",
-        },
-      }),
-    );
-    db.close();
-
-    const reopened = new CanvasCreationStore(path);
-    expect(reopened.get("owner", "request")).toMatchObject({
-      view: {
-        stage: "failed",
-        error: { code: "result-unconfirmed" },
-        rootGroupId: "root",
-        turnRequestId: "turn",
-      },
     });
     reopened.close();
   });

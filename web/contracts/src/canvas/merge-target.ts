@@ -13,8 +13,6 @@
  */
 import { nodeHistoryKindForNodeType } from "./node-history/identity.js";
 import { managedNodeRelationOf } from "./managed-node.js";
-import { isFilmSetObjectContainerNode } from "./film-set-object-container.js";
-import { FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "./domain/core/shot-preview-node.js";
 import type { Woohaa3CanvasNode } from "./domain/index.js";
 
 /**
@@ -41,7 +39,7 @@ export function isMergeableNodeType(type: string): type is MergeableNodeType {
 /**
  * 节点是否可参与合并（作为来源或目标）。
  *
- * 排除组、托管节点、拍摄镜头预览与片场对象容器；类型必须属于 v1 范围且承载历史种类。
+ * 排除托管节点；类型必须属于 v1 范围且承载历史种类。
  * 共享给拖动候选过滤与 Canvas Service 校验。
  */
 export function isMergeEligibleNode(input: {
@@ -51,11 +49,7 @@ export function isMergeEligibleNode(input: {
   const { node, data } = input;
   if (!isMergeableNodeType(node.type)) return false;
   if (!nodeHistoryKindForNodeType(node.type)) return false;
-  // 拍摄镜头预览类型本身不在 v1 范围内（上面的类型判定已排除）；保留显式断言避免未来放宽
-  // 类型范围时把预览当成可合并目标。
-  if ((node.type as string) === FILM_SET_SHOT_PREVIEW_NODE_TYPE) return false;
   if (managedNodeRelationOf(data)) return false;
-  if (isFilmSetObjectContainerNode(node, data)) return false;
   return true;
 }
 

@@ -7,18 +7,13 @@
  * 主观察相机取景控件与右侧非模态检查器。
  *
  * 普通 `model3d` 只保留 **AI 修改**（生成为首要动作）与模型规模信息：镜头工具、镜头列表、
- * 镜头预览与截图已移除。片场（`extensionId="film-set"`）继续由扩展检查器拥有对象/镜头/动画
- * 页，本工作区只为它保留镜头开关与取景控件。
- *
- * 工具开关是本 editor 的局部状态，经 `useFocusLayout` 以布局快照上报，公共层不拥有 toolsOpen。
+ * 镜头预览与截图已移除。
  */
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import type { Context } from "@deepseek-ai/cordis";
 import type { ModelEditorSession } from "../../../extension-api/model-workspace-session.js";
 import { ModelEditorOverlay } from "./model-editor-overlay.js";
 import { ModelViewControls } from "./model-view-controls.js";
-import { useFocusedModelKind } from "./model-focus-kind.js";
-import { Button } from "@woohaa3/ui/primitives";
 import { FocusHeader } from "../../focus/header.js";
 import { useFocusLayout } from "../../focus/workspace.js";
 
@@ -44,51 +39,21 @@ export function ModelEditorWorkspace({
   writable: boolean;
   canvasId?: string;
 }) {
-  const [toolsOpen, setToolsOpen] = useState(true);
   const state = useSyncExternalStore(session.subscribe, session.getState, session.getState);
-  const navigation = useSyncExternalStore(ctx.canvasNavigation.subscribe, ctx.canvasNavigation.getSnapshot, ctx.canvasNavigation.getSnapshot);
   const nodeId = state.nodeId;
-  // 片场仍由扩展检查器提供镜头工具；普通模型已移除整套镜头控制。
-  const filmSet = useFocusedModelKind(ctx, nodeId) === "film-set";
-  // 片场动画预览占位：由组合资产 owner 派生的通用布尔（宿主不知道具体业务）。
-  const animationPreview = useSyncExternalStore(
-    ctx.compositeAssets.subscribe,
-    () => ctx.compositeAssets.blocksFocusInput(),
-    () => false
-  );
-  // 普通模型仍需要右侧检查器（AI 修改 + 信息）；片场由扩展检查器承载，可经「属性」收起。
-  const panel = filmSet ? toolsOpen : nodeId !== null;
-  const extensionLayoutKey = useSyncExternalStore(ctx.compositeAssets.subscribe, () => {
-    const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
-    return JSON.stringify(nodeId ? ctx.compositeAssets.resolve(canvas, nodeId)?.focusLayout?.(nodeId) ?? {} : {});
-  }, () => "{}");
-  const extensionLayout = useMemo(() => JSON.parse(extensionLayoutKey) as import("../../focus/layout.js").FocusLayoutConfig, [extensionLayoutKey]);
-  // 浮动卡片外观（2026-11-04）：普通模型聚焦把内容区收进居中卡片，四周露出画布底色，
-  // 呈现「3D 预览窗浮在画布上」。片场沿用扩展自带的布局，不被这里覆盖。
-  const cardInset = filmSet ? 0 : MODEL_FOCUS_CARD_INSET;
-  useFocusLayout(useMemo(
-    () => ({ panel, animationPreview, cardInset, ...extensionLayout }),
-    [panel, animationPreview, cardInset, extensionLayout]
-  ));
+  // 右侧检查器只服务普通模型节点。
+  const panel = nodeId !== null;
+  // 浮动卡片外观（2026-11-04）：聚焦把内容区收进居中卡片，四周露出画布底色。
+  const cardInset = MODEL_FOCUS_CARD_INSET;
+  useFocusLayout(useMemo(() => ({ panel, cardInset }), [panel, cardInset]));
 
-  const historyOpen = navigation.panel?.type === "node-history" && navigation.panel.nodeId === nodeId;
   return (
     <>
       <FocusHeader
         fallbackTitle="模型"
         help={MODEL_HELP}
         hint={MODEL_HINT}
-        actions={
-          <>
-            {filmSet ? (
-              <Button size="sm" aria-pressed={toolsOpen} disabled={!nodeId} onClick={() => {
-                if (historyOpen) void ctx.canvasNavigation.requestCloseNodeHistory();
-                else { ctx.canvasRuntime.controller()?.cancelTransientGesture(); setToolsOpen((value) => !value); }
-              }}>属性</Button>
-            ) : null}
-            {nodeId && !filmSet ? <ModelViewControls nodeId={nodeId} /> : null}
-          </>
-        }
+        actions={nodeId ? <ModelViewControls nodeId={nodeId} /> : null}
       />
       <ModelEditorOverlay ctx={ctx} session={session} writable={writable} {...(canvasId ? { canvasId } : {})} />
     </>

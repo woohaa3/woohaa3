@@ -12,6 +12,8 @@ import { CanvasApplicationService, canvasStorageErrorCode, registerCanvasReposit
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { SQLITE_CANVAS_SCHEMA_VERSION,
   SqliteCanvasRepository } from "./index.js";
+import { loadNodeSqlite } from "./sqlite-loader.js";
+import { SqliteSpatialLeaseStore } from "./spatial-leases.js";
 
 const NOW = "2026-09-23T00:00:00.000Z";
 const tempDirs: string[] = [];
@@ -45,13 +47,13 @@ registerCanvasRepositoryContract(
 );
 
 describe("SQLite schema 与文件布局（任务 3.2 / 3.6）", () => {
-  it("只创建 canvases / canvas_operations / schema_migrations 三张表", () => {
+  it("创建画布、回执和空间占用表", () => {
     const repository = openRepository();
     const tables = repository
       .debugQuery<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .map((row) => row.name)
       .filter((name) => !name.startsWith("sqlite_"));
-    expect(tables).toEqual(["canvas_lifecycle_receipts", "canvas_operations", "canvases", "schema_migrations"]);
+    expect(tables).toEqual(["canvas_lifecycle_receipts", "canvas_operations", "canvases", "schema_migrations", "spatial_lease_locks", "spatial_lease_runs"]);
   });
 
   it("不存在任何 asset blob 表或 Blob 列", () => {
@@ -87,6 +89,61 @@ describe("SQLite schema 与文件布局（任务 3.2 / 3.6）", () => {
 });
 
 describe("SQLite 重启恢复（任务 3.4）", () => {
+  it("拒绝归档回滚覆盖已占用画布", async () => {
+    const file = path.join(tempDir(), "canvas.sqlite");
+    const repository = openRepository({ path: file });
+    const original = createEmptyWoohaa3ServerCanvas("locked", NOW);
+    await repository.createCanvas(original);
+    const db = new (loadNodeSqlite().DatabaseSync)(file);
+    try {
+      const leases = new SqliteSpatialLeaseStore(db, { eligible: () => true, stopped: () => true });
+      leases.acquire({ canvasId: "locked", requestId: "r", runId: "run", epoch: 1, executionId: "exec", scope: { scope: { kind: "scene-area", areaId: "a" }, scopeVersion: "s" }, writable: [{ kind: "instance", instanceId: "i", version: "v" }], readOnly: [] });
+      await expect(repository.restoreCanvas({ ...original, title: "stale" })).rejects.toMatchObject({ code: "lease-conflict" });
+      expect((await repository.getCanvas("locked"))?.title).toBe(original.title);
+    } finally { db.close(); }
+  });
+  it("读取时返回规范化的旧容器和旧节点", async () => {
+    const repository = openRepository();
+    const canvas = createEmptyWoohaa3ServerCanvas("legacy", NOW);
+    canvas.document.nodes.push({ id: "old-group", type: "group", position: { x: 0, y: 0 } }, { id: "old-shot", type: "shot", position: { x: 0, y: 0 } });
+    canvas.nodeData["old-shot"] = { title: "old" };
+    await repository.createCanvas(canvas);
+    const restored = await repository.getCanvas("legacy");
+    expect(restored?.document.nodes).toEqual([{ id: "old-shot", type: "custom", position: { x: 0, y: 0 } }]);
+    expect(restored?.nodeData["old-shot"]).toBeUndefined();
+  });
+  it("拒绝读取损坏的世界身份", async () => {
+    const repository = openRepository();
+    const canvas = createEmptyWoohaa3ServerCanvas("corrupt-world", NOW);
+    canvas.document.nodes.push({ id: "camera", type: "world-camera", position: { x: 0, y: 0 } });
+    canvas.nodeData.camera = { worldCamera: { version: "future" } };
+    await repository.createCanvas(canvas);
+    await expect(repository.getCanvas("corrupt-world")).rejects.toThrow("Invalid stored canvas");
+  });
+  it("重开后保留共享世界身份和失效镜头绑定", async () => {
+    const dbPath = path.join(tempDir(), "world.sqlite");
+    const first = new SqliteCanvasRepository({ path: dbPath, now: () => NOW });
+    const service = new CanvasApplicationService({ repository: first, now: () => NOW });
+    await service.createCanvas({ canvasId: "world" });
+    const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "c", settingsVersion: "1", position: { u: 0, v: 0, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: "missing" };
+    const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 1, v: 2, h: 3 }, rotation: [0, 0, 0, 1], scale: 1 } };
+    const group = { kind: "workflow-group-2d", version: "shared-world-v1", groupId: "g", scopeVersion: "1", memberNodeIds: ["model"] };
+    const area = { kind: "scene-area", version: "shared-world-v1", areaId: "a", scopeVersion: "1", bounds: { min: { u: 0, v: 0 }, max: { u: 2, v: 2 } } };
+    await service.commitCommands({ canvasId: "world", expectedRevision: 1, operationId: "world-op", actorId: "actor", commands: [
+      { type: "node.add", node: { id: "model", type: "model3d", position: { x: 0, y: 0 } }, nodeData: { sharedWorldInstance: instance } },
+      { type: "node.add", node: { id: "group", type: "workflow-group-2d", position: { x: 0, y: 0 } }, nodeData: { workflowGroup2d: group } },
+      { type: "node.add", node: { id: "area", type: "scene-area", position: { x: 0, y: 0 } }, nodeData: { sceneArea: area } },
+      { type: "node.add", node: { id: "camera", type: "world-camera", position: { x: 0, y: 0 } }, nodeData: { worldCamera: camera } }
+    ] });
+    first.close();
+    const reopened = new SqliteCanvasRepository({ path: dbPath, now: () => NOW });
+    openRepositories.push(reopened);
+    const restored = await reopened.getCanvas("world");
+    expect(restored?.nodeData.model.sharedWorldInstance).toEqual(instance);
+    expect(restored?.nodeData.group.workflowGroup2d).toEqual(group);
+    expect(restored?.nodeData.area.sceneArea).toEqual(area);
+    expect(restored?.nodeData.camera.worldCamera).toEqual(camera);
+  });
   it("重开同一数据库后保留 revision、operation 幂等与资产 metadata", async () => {
     const dbPath = path.join(tempDir(), "canvas.sqlite");
     const first = new SqliteCanvasRepository({ path: dbPath, now: () => NOW });

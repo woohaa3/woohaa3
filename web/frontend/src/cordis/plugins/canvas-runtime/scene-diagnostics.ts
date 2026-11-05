@@ -94,19 +94,7 @@ export type SceneDiagnostics = {
   cardBlockBuilds: number;
   cardDecorationBuilds: number;
   edgeBlockBuilds: number;
-  containerBlockBuilds: number;
   batchSourceMeshBuilds: number;
-  /**
-   * Rust：片场内部对象准备的实际工作量（change:
-   * 2026-10-14-scope-film-set-object-picking-to-focus，任务 3.1；design D5）。
-   *
-   * 只在片场聚焦接受点、按 accepted `modelFocus` 目标真实执行准备时累计；总览/非片场聚焦的
-   * 完整提交、视口与位置增量都不增加。清空索引不计构建。与其它 Rust 计数一样按 owner 差分。
-   */
-  filmSetItemBuilds: number;
-  filmSetItemTargets: number;
-  filmSetItemCandidates: number;
-  filmSetItemPartBounds: number;
 };
 
 const state: SceneDiagnostics = {
@@ -150,12 +138,7 @@ const state: SceneDiagnostics = {
   cardBlockBuilds: 0,
   cardDecorationBuilds: 0,
   edgeBlockBuilds: 0,
-  containerBlockBuilds: 0,
-  batchSourceMeshBuilds: 0,
-  filmSetItemBuilds: 0,
-  filmSetItemTargets: 0,
-  filmSetItemCandidates: 0,
-  filmSetItemPartBounds: 0
+  batchSourceMeshBuilds: 0
 };
 
 /** 页面级单例（字段可直接读写，便于热路径 `+=`）。 */
@@ -190,7 +173,7 @@ export function measureSceneWork<T>(key: "stringifyMs" | "wasmAcceptMs", now: ()
 }
 
 /** Rust 上报计数的最新合并值；用于把累计值差分成增量。 */
-const emptyRustCounters = { rustRenderQueueMs: 0, rustRenderPrepareMs: 0, rustRenderPrepareFrames: 0, rustGeometryBuilds: 0, rustGeometryBuildMs: 0, rustGeometryCacheHits: 0, worldSnapshotBuilds: 0, pickCandidateBuilds: 0, meshBuilds: 0, cardBlockBuilds: 0, cardDecorationBuilds: 0, edgeBlockBuilds: 0, containerBlockBuilds: 0, batchSourceMeshBuilds: 0, filmSetItemBuilds: 0, filmSetItemTargets: 0, filmSetItemCandidates: 0, filmSetItemPartBounds: 0 };
+const emptyRustCounters = { rustRenderQueueMs: 0, rustRenderPrepareMs: 0, rustRenderPrepareFrames: 0, rustGeometryBuilds: 0, rustGeometryBuildMs: 0, rustGeometryCacheHits: 0, worldSnapshotBuilds: 0, pickCandidateBuilds: 0, meshBuilds: 0, cardBlockBuilds: 0, cardDecorationBuilds: 0, edgeBlockBuilds: 0, batchSourceMeshBuilds: 0 };
 
 const defaultRustOwner = {};
 let rustBaselines = new WeakMap<object, typeof emptyRustCounters>();
@@ -210,14 +193,7 @@ export function mergeRustWorkDiagnostics(input: {
   cardBlockBuilds?: number;
   cardDecorationBuilds?: number;
   edgeBlockBuilds?: number;
-  containerBlockBuilds?: number;
   batchSourceMeshBuilds?: number;
-  filmSetItems?: {
-    builds?: number;
-    targets?: number;
-    candidatesProduced?: number;
-    partBounds?: number;
-  };
 }, owner: object = defaultRustOwner): void {
   const rustCounters = rustBaselines.get(owner) ?? { ...emptyRustCounters };
   rustBaselines.set(owner, rustCounters);
@@ -257,13 +233,7 @@ export function mergeRustWorkDiagnostics(input: {
   apply("cardBlockBuilds", input.cardBlockBuilds);
   apply("cardDecorationBuilds", input.cardDecorationBuilds);
   apply("edgeBlockBuilds", input.edgeBlockBuilds);
-  apply("containerBlockBuilds", input.containerBlockBuilds);
   apply("batchSourceMeshBuilds", input.batchSourceMeshBuilds);
-  // 内部对象准备只在片场聚焦真实执行时推进；读取累计差分成增量（design D5）。
-  apply("filmSetItemBuilds", input.filmSetItems?.builds);
-  apply("filmSetItemTargets", input.filmSetItems?.targets);
-  apply("filmSetItemCandidates", input.filmSetItems?.candidatesProduced);
-  apply("filmSetItemPartBounds", input.filmSetItems?.partBounds);
 }
 
 /**

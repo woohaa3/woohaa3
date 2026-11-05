@@ -9,7 +9,7 @@
  * （`canvasCatalog` 只有 `assetCount`，`mediaRemote` 没有 list），不要在这里假装有。
  */
 import type { CanvasCommand, CanvasNodeData, ServerCanvas, StoredAsset } from "@woohaa3/contracts";
-import { createHighEntropyId, getWoohaa3CanvasNodeRect } from "@woohaa3/contracts";
+import { DEFAULT_NODE_DIMS, createHighEntropyId } from "@woohaa3/contracts";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
 import { planImportLayout } from "../paste-import/batch.js";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
@@ -452,14 +452,13 @@ export function nearbyNodeCount(
 ): number {
   const canvas = state.getWorkingCanvas() ?? state.getCanvas();
   if (!canvas) return 0;
-  const byId = new Map(canvas.document.nodes.map((node) => [node.id, node]));
   const radius = 200;
   let count = 0;
   for (const node of canvas.document.nodes) {
-    // 返回的是绝对外框 { x, y, width, height }（不是 { position }），组内节点已换算过
-    const rect = getWoohaa3CanvasNodeRect(node as never, byId as never);
-    const cx = rect.x + rect.width / 2;
-    const cy = rect.y + rect.height / 2;
+    // 没有卡片布局的节点（导演区等）没有位置，不参与错开。
+    if (!node.position) continue;
+    const cx = node.position.x + (node.width ?? DEFAULT_NODE_DIMS.width) / 2;
+    const cy = node.position.y + (node.height ?? DEFAULT_NODE_DIMS.height) / 2;
     if (Math.abs(cx - centerX) <= radius && Math.abs(cy - centerY) <= radius) count += 1;
   }
   return count;

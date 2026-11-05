@@ -38,7 +38,7 @@ export function videoEditorExtension(_options: VideoEditorPluginOptions = {}): P
         resolveNodePosition: (nodeId) => {
           const canvas = getCanvas();
           const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-          return node ? { x: node.position.x, y: node.position.y } : null;
+          return node?.position ? { x: node.position.x, y: node.position.y } : null;
         }
       });
 
@@ -183,7 +183,7 @@ export function videoEditorExtension(_options: VideoEditorPluginOptions = {}): P
     },
     {
       name: VIDEO_EDITOR_PLUGIN_ID,
-      inject: ["slots", "canvasRuntime", "canvasNavigation", "canvasSession", "mediaRemote", "focusExit"]
+      inject: ["slots", "canvasRuntime", "canvasNavigation", "canvasSession", "canvasScope", "mediaRemote", "focusExit"]
     }
   );
 }

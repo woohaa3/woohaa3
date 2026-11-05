@@ -1,4 +1,3 @@
-import { authoringConversationContext } from "@woohaa3/contracts";
 /**
  * React Host slot 渲染（change: adopt-frontend-cordis-plugin-runtime，design D6/D8）。
  *
@@ -155,15 +154,14 @@ export function AuthoringGenerateHost(props: import("./contract/authoring.js").A
 
 function AuthoringGenerateContent(props: import("./contract/authoring.js").AuthoringGenerationProps) {
   const contributions = useSlot("authoring.generate");
-  const groupRuns = useOptionalService("canvasGroupRuns");
   const deliveries = useSlot("authoring.delivery");
   const canvasState = useOptionalService("canvasState");
   const canvasSession = useOptionalService("canvasSession");
   useSyncExternalStore(listener => canvasState?.subscribe(listener) ?? (() => undefined), () => canvasState?.getWorkingCanvas() ?? null, () => null);
   const conversation = useService("agentConversationService");
   // 来源选择（change: 2026-10-16-...，任务 2.4）：宿主决定当前来源，而不是由首个贡献隐式决定。
-  const contextKey = authoringConversationContext({ mode: props.mode, cameraId: props.selectedCameraId, clipId: props.clipId, itemId: props.itemId });
-  const selectionKey = `${props.canvasId}:${props.nodeId}:${contextKey ?? ""}`;
+  const contextKey: string | undefined = undefined;
+  const selectionKey = `${props.canvasId}:${props.nodeId}`;
   const selectionMemory = assistantSelectionMemory(conversation, conversation.getDataScopeId?.() ?? "page");
   const targetRememberedSelection = selectionMemory.get(selectionKey);
   const rememberedSelection = targetRememberedSelection ?? readAssistantPreference(conversation.getDataScopeId?.() ?? "page") ?? selectionMemory.get("last-explicit");
@@ -337,7 +335,6 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
     ...(hostSourceSelection ? { sourceSelection: hostSourceSelection } : {}),
     ...(service?.navigateToDetail
       ? {
-          groupRuns: props.mode === "canvas-group" ? groupRuns : undefined,
           agentConversation: {
             service: conversation as never,
             conversationId: resolvedTarget.current === targetKey ? nodeConversation?.conversationId ?? null : null,
@@ -347,7 +344,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
         }
       : {})
   };
-  const generationKey = JSON.stringify([props.canvasId, props.nodeId, props.mode, props.selectedCameraId, props.clipId, props.itemId]);
+  const generationKey = JSON.stringify([props.canvasId, props.nodeId, props.mode]);
   const data = (canvasState?.getWorkingCanvas() ?? canvasState?.getCanvas())?.nodeData[props.nodeId];
   const delivery = deliveries.map(contribution => contribution.resolve({ canvasId: props.canvasId, nodeId: props.nodeId, data })).find(Boolean);
   // 面板 UI 由宿主内置渲染；来源扩展只声明来源（design D10）。无来源时仍渲染面板并提示配置。

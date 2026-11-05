@@ -8,7 +8,6 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
-import { CompositeAssetRegistry } from "../../../extension-api/composite-assets.js";
 import { startFrontendRuntime, type FrontendRuntime } from "../../kernel.js";
 import { nodeHistoryExtension, NODE_HISTORY_PLUGIN_ID } from "./plugin.js";
 import type { NodeHistoryClient } from "./controller.js";
@@ -79,7 +78,6 @@ export async function makeHarness(input: {
   const fakeRuntime = (input.includeRuntime ?? true) ? fakeCanvasRuntime(focusCalls) : null;
   const instance = await startFrontendRuntime({
     installPlatform: (ctx: Context) => {
-      ctx.provide("compositeAssets" as never, new CompositeAssetRegistry() as never);
       ctx.provide("canvasState" as never, { getCanvas: () => woohaa3CanvasStore.getState().canvas, getWorkingCanvas: () => woohaa3CanvasStore.getState().canvas, subscribe: woohaa3CanvasStore.subscribe } as never);
       ctx.provide("slots" as never, slots as never);
       ctx.provide("inputScopes" as never, inputScopes as never);

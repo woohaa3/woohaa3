@@ -68,7 +68,14 @@ export async function readPlannerSnapshot(
       edges.push({ id: edge.edgeId, source: edge.source, target: edge.target });
     }
     if (!outcome.graph.nextCursor) {
-      return { ok: true, snapshot: { canvasId: outcome.graph.canvasId, revision, nodes, edges, rootGroupId: outcome.graph.rootGroupId } };
+      return { ok: true, snapshot: {
+        canvasId: outcome.graph.canvasId,
+        revision,
+        nodes,
+        edges,
+        ...(outcome.graph.rootGroupId ? { rootGroupId: outcome.graph.rootGroupId } : {}),
+        ...(outcome.graph.rootGroupData ? { groupNodeData: outcome.graph.rootGroupData } : {})
+      } };
     }
     cursor = outcome.graph.nextCursor;
   }

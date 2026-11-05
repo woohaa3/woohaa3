@@ -20,10 +20,6 @@ describe("复合资产扩展内容引用", () => {
     const result = applyCanvasCommands(canvas(extensionId), [{ type: "nodeData.patch", nodeId: "node", value: { extensionContentRef: ref } }]);
     expect(result.ok).toBe(false);
   });
-  it("片场不能以内容引用绕过损坏的 items-only 内容", () => {
-    const result = applyCanvasCommands(canvas("film-set"), [{ type: "nodeData.patch", nodeId: "node", value: { extensionContentRef: ref, filmSetContent: { version: 999, items: [] } } }]);
-    expect(result.ok).toBe(false);
-  });
   it.each([{ schemaVersion: 2, instanceId: "instance-123456" }, { schemaVersion: 1, instanceId: "short" }])("拒绝损坏的引用", extensionContentRef => {
     expect(applyCanvasCommands(canvas("creature-video-assets"), [{ type: "nodeData.patch", nodeId: "node", value: { extensionContentRef } }]).ok).toBe(false);
   });

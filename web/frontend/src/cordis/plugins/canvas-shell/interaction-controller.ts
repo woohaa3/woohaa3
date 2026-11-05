@@ -5,7 +5,7 @@ import { sceneDiagnostics, noteFrameStep } from "../canvas-runtime/scene-diagnos
  * 2D 手势、视口和模型编辑各由独立模块处理，不在此重建命中几何。
  * （change: replace-godot-canvas-runtime-with-bevy / split-frontend-god-plugins）
  */
-import { bevyNodeHistoryStripDot, type CanvasRenderScene } from "@woohaa3/contracts";
+import { bevyNodeHistoryStripDot, decodeSceneAreaData, decodeWorldInstanceData, worldToCanvasPoint, worldToRendererPosition, type CanvasRenderScene, type GroundAabb } from "@woohaa3/contracts";
 import { createSurfaceMetrics } from "./canvas-surface-metrics.js";
 import { hasNativeBootstrap } from "../canvas-runtime/runtime-realm.js";
 import { createModelGestureFamily } from "./model-gesture-family.js";
@@ -32,9 +32,14 @@ import { collectModelPlacements } from "./interaction-placements.js";
 import { INITIAL_WHEEL_SOURCE } from "./input/wheel-gesture.js";
 import type { TextureUploader } from "../canvas-runtime/texture-sync.js";
 import { createLocalViewportStore } from "../canvas-runtime/local-viewport.js";
+import { currentSceneAreaGestures } from "../world-scopes/gestures.js";
+import { sceneAreaPanelRect, sceneAreaTitleRect, worldInstancePanelRect } from "./panel-anchor-rect.js";
+import { createWorldCameraPreviewState } from "./world-camera-preview.js";
+import { createWorldGroundPreviewState } from "./world-ground-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { modelPreviewStore } from "../../services/model-preview-store.js";
+import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import type { InteractionCore, InteractionState, Viewport } from "./interaction-core.js";
 import type { AlignmentSnapPolicy } from "./alignment-snap.js";
 
@@ -47,14 +52,13 @@ export function installInteractionController(options: InteractionControllerOptio
   const canvas = options.canvas;
   const writable = options.isWritable ?? (() => options.getSession()?.isWritable() ?? false);
   /** modal 打开时禁止画布输入（design D6）。 */
-  const modalActive = options.isModalActive ?? (() => false);
+  const modalActive = () => !!worldCameraEditorStore.getSnapshot() || (options.isModalActive?.() ?? false);
   /**
    * 聚焦相机输入门禁：只由 modal Dialog 阻断（change: fix-model-focus-navigation-and-camera-parity，D6）。
    * 非模态 editor/history panel 不阻断 focus 缩放/观察/双击进入。
    */
   const focusInputBlocked = options.isFocusInputBlocked ?? modalActive;
   const textureSync: TextureUploader | null = options.textureSync ?? null;
-  let compositeAssetMediaReady: ReadonlySet<string> | null = null;
   let disposed = false;
   /**
    * 场景失效信号（change: optimize-model-scene-snapshot-hot-path，design D3；
@@ -108,8 +112,9 @@ export function installInteractionController(options: InteractionControllerOptio
     hoveredNodeId: null,
     hoveredPort: null,
     hoveredEdgeId: null,
+    selectedEdgeId: null,
+    hoverPointer: null,
     hoveredVideoNode: null,
-    dropTargetGroupIds: [],
     wheelSource: INITIAL_WHEEL_SOURCE,
     viewportCommitTimer: null,
     lastNotifiedViewport: null
@@ -133,6 +138,36 @@ export function installInteractionController(options: InteractionControllerOptio
 
   const modelPlacements = () => collectModelPlacements();
   /**
+   * 镜头视锥拖动中的瞬时位姿：只影响呈现，不写规范 nodeData。
+   * 规则与状态在 `world-camera-preview.ts`（保持 controller 文件体积）。
+   */
+  const worldCameraPreview = createWorldCameraPreviewState({
+    mode: () => state.gesture.kind === "world-camera" ? state.gesture.start.mode : "move",
+    schedule: (reason) => schedule(reason)
+  });
+  /** 导演区范围瞬时预览：拖动/调范围时每帧随指针更新，松手或取消后清空。 */
+  const sceneAreaPreviews = new Map<string, GroundAabb>();
+  const groundAvailable = () => !disposed && !modalActive() && !options.getModelFocus?.()
+    && !options.getImageFocus?.() && !options.getVideoFocus?.() && !options.getFocusTransition?.();
+  const groundAt = (point: { x: number; y: number }) => {
+    if (!groundAvailable()) return null;
+    const runtime = options.getRuntime();
+    const bounds = readBounds();
+    const result = runtime?.queryWorldGround?.({ generation: runtime.interactionGeneration?.() ?? 0,
+      x: point.x - bounds.left, y: point.y - bounds.top, width: bounds.width, height: bounds.height });
+    return result?.ok ? result.value : null;
+  };
+  /**
+   * 世界模型地面拖动预览（状态与外部改写检查在 `world-ground-preview.ts`）。
+   * 放在 `groundAt` 之后，转发时复用同一地面查询。
+   */
+  const worldGroundPreview = createWorldGroundPreviewState({
+    getCanvas: () => workingCanvasOf(woohaa3CanvasStore.getState()),
+    groundAt: (point) => groundAt(point),
+    available: groundAvailable,
+    schedule: (reason) => schedule(reason)
+  });
+  /**
    * 拖动粘连瞬时投影 provider（change: add-drag-touch-connections）。
    * 由 2D input family 实现（它拥有 drag gesture），controller 只转发；闭包避免长依赖。
    */
@@ -148,24 +183,31 @@ export function installInteractionController(options: InteractionControllerOptio
   } = { current: null };
   // 合成快照并附带本帧引用到的 prepared resources（change: optimize-model-scene-snapshot-hot-path）。
   /** 一帧的瞬时态快照（供场景构建读取）。 */
-  const frameState = () => ({
+  const frameState = () => {
+    worldGroundPreview.sync();
+    return {
     selected: state.selected,
     draft: state.draft,
     marquee: marqueeRect(),
     localPositions: state.localPositions,
     localSizes: state.localSizes,
+    worldGroundPreviews: worldGroundPreview.values(),
+    worldCameraPreviews: worldCameraPreview.overrides(),
+    sceneAreaPreviews,
+    sceneAnimationTimes: options.getWorldAnimationTimes?.(),
     viewportPreview: state.viewportPreview,
     fallbackViewport: localViewport.get(),
     hoveredNodeId: state.hoveredNodeId,
     hoveredPort: state.hoveredPort,
     hoveredEdgeId: state.hoveredEdgeId,
+    selectedEdgeId: state.selectedEdgeId,
+    hoverPointer: state.hoverPointer,
     hoveredHistory: state.hoveredHistory,
     pressedHistory: state.gesture.kind === "history-press" ? state.gesture : null,
-    dropTargetGroupIds: state.dropTargetGroupIds,
     dragAttach: attachProjectionRef.current?.() ?? null,
-    aggregateConnect: aggregateProjectionRef.current?.() ?? null,
-    compositeAssetReadyPlanes: compositeAssetMediaReady
-  });
+    aggregateConnect: aggregateProjectionRef.current?.() ?? null
+    };
+  };
   /**
    * 首个完整场景构建是否已计时。
    *
@@ -208,7 +250,7 @@ export function installInteractionController(options: InteractionControllerOptio
   });
 
   /**
-   * 当前框选选区矩形（世界坐标，change: fix-group-and-marquee-preview）。
+   * 当前框选选区矩形（世界坐标）。
    * 只在 marquee 手势进行中返回；拖拽中每帧随 `state.gesture.current` 更新。
    */
   const marqueeRect = (): { x: number; y: number; width: number; height: number } | null => {
@@ -216,6 +258,19 @@ export function installInteractionController(options: InteractionControllerOptio
     const { start, current } = state.gesture;
     return { x: start.x, y: start.y, width: current.x - start.x, height: current.y - start.y };
   };
+
+  /**
+   * 导演区手势运行时（T07）。显式注入优先，否则读取 world-scopes 的页面绑定；
+   * 输入层只在卡片/地面边缘按下时转发，不自建监听。
+   */
+  let sceneAreaGestures = options.sceneAreaGestures ?? null;
+  const sceneArea = () => sceneAreaGestures ?? currentSceneAreaGestures();
+  /**
+   * Who owns the active scene gesture. The frame reconciliation only cancels gestures
+   * started by this canvas pointer path; an external overlay handle (搬场景) owns its
+   * own release and must never be cancelled by a frame tick.
+   */
+  let sceneAreaOwner: "pointer" | "external" | null = null;
 
   /** 清除全部悬停态；仅在确实有悬停时触发重绘。 */
   const clearHover = () => hover.clearHover();
@@ -259,6 +314,7 @@ export function installInteractionController(options: InteractionControllerOptio
       geometryIndex = index;
       const geometry: string[] = [];
       if (index) for (const node of index.byId.values()) {
+        if (!node.position) continue;
         const size = indexNodeSize(node);
         geometry.push(`n:${node.id}:${node.position.x},${node.position.y},${size.width},${size.height}`);
       }
@@ -297,6 +353,7 @@ export function installInteractionController(options: InteractionControllerOptio
   };
 
   const setSelection = (nodeIds: string[]) => {
+    state.selectedEdgeId = null;
     state.selected = [...new Set(nodeIds)];
     nodeSelectionStore.setFromRuntime(
       { nodeIds: state.selected, primaryNodeId: state.selected[state.selected.length - 1] ?? null, editingFocus: false },
@@ -325,8 +382,7 @@ export function installInteractionController(options: InteractionControllerOptio
     schedule: (reason?: string) => schedule(reason ?? "input"),
     nextSeq: () => seq++,
     queryGizmo: queries.queryGizmo,
-    queryPoint: queries.queryPoint,
-    focusContextContains: frameSubmission.focusContextContains
+    queryPoint: queries.queryPoint
   });
   const clearHeldKeys = () => {
     // Space 临时平移也是 held input：与聚焦飞行键/粘连键一起复位，避免失焦、modal 或
@@ -354,8 +410,8 @@ export function installInteractionController(options: InteractionControllerOptio
     frameLoop.step("projection-notify", notifyProjection, undefined);
     // 瞬时 DOM overlay 需要和画布刷新保持同一帧节奏；它们自行读取当前 accepted/working 几何。
     frameLoop.step("frame-notify", () => options.onFrame?.(), undefined);
-    // 推进与场景无关的逐帧工作（瞬时态/会话/失效清理）；返回就绪片场媒体平面集合。
-    compositeAssetMediaReady = advanceTransientState({
+    // 推进与场景无关的逐帧工作（瞬时态/会话/失效清理）。
+    advanceTransientState({
       focusInputBlocked,
       clearHeldKeys,
       syncModelFocusValid: () => frameLoop.step("focus-valid", () => model.syncModelFocusValid(), undefined),
@@ -367,7 +423,6 @@ export function installInteractionController(options: InteractionControllerOptio
       }, undefined),
       syncTexture: () => frameLoop.step("image-sync", () => textureSync?.sync(), undefined),
       syncVideoSessions: () => frameLoop.step("video-sync", () => options.videoSessions?.sync(), undefined),
-      syncCompositeAssetMedia: () => frameLoop.step("composite-media-sync", () => options.compositeAssetMediaSessions?.sync() ?? null, compositeAssetMediaReady),
       state,
       isFocused: () => !!(options.getModelFocus?.() || options.getImageFocus?.() || options.getVideoFocus?.()),
       setSelection,
@@ -379,6 +434,12 @@ export function installInteractionController(options: InteractionControllerOptio
       markInvalidated,
       writable
     });
+    // Escape/焦点门禁可能直接复位 state.gesture；指针路径启动的导演区预览与准备请求
+    // 必须由同一帧结算清理。外部 overlay 手柄（搬场景）拥有自己的释放，不得被帧清掉。
+    // end() 已开始的提交由运行时自身拒绝 cancel，避免把真实写请求伪装成取消。
+    const sceneGesture = sceneArea();
+    if (!sceneGesture?.active()) sceneAreaOwner = null;
+    else if (state.gesture.kind !== "scene-area" && sceneAreaOwner === "pointer") sceneGesture.cancel();
     const runtime = options.getRuntime();
     const playbackBlocked = modalActive() || state.viewportPreview !== null || hoverNodeStore.hasPlaybackOwner() || runtime?.acceptsPlayback?.() === false;
     const ownerKey = `${state.gesture.kind}:${playbackBlocked}:${runtime?.generation?.() ?? 0}`;
@@ -389,7 +450,7 @@ export function installInteractionController(options: InteractionControllerOptio
     }
     const refreshGround = () => hover.refreshGround(point => queries.queryPoint({
       x: (point.x - activeViewport().x) / activeViewport().zoom,
-      y: (point.y - activeViewport().y) / activeViewport().zoom }, activeViewport().zoom));
+      y: (point.y - activeViewport().y) / activeViewport().zoom }, activeViewport().zoom, state.hoveredEdgeId));
     // 无失效且非强制：跳过全部场景构建/序列化/跨边界（静止画布热路径）。
     if (!force && !sceneInvalidated) { if (ownerChanged || hover.needsRefresh()) refreshGround(); return; }
     sceneInvalidated = false;
@@ -446,7 +507,6 @@ export function installInteractionController(options: InteractionControllerOptio
 
   /** 指针 hover 与视频播放跟踪（实现见 `interaction-hover.ts`）。 */
   const hover = createHoverTracker({
-    projectCanvas: canvas => options.compositeAssets?.projectCanvas(canvas) ?? canvas,
     nodeCapabilities: options.nodeCapabilities,
     state,
     historyAt: nodeId => {
@@ -489,6 +549,8 @@ export function installInteractionController(options: InteractionControllerOptio
     modalActive,
     focusInputBlocked,
     state,
+    sceneAreaGestures: sceneArea,
+    claimSceneAreaGesture: (owner) => { sceneAreaOwner = owner; },
     localViewport,
     viewportListeners,
     model,
@@ -503,6 +565,11 @@ export function installInteractionController(options: InteractionControllerOptio
     buildDragScene: frameSubmission.dragScene,
     renderedNode: frameSubmission.renderedNode,
     ...queries,
+    queryWorldGround: groundAt,
+    setWorldGroundPreview: worldGroundPreview.set,
+    clearWorldGroundPreviews: worldGroundPreview.clear,
+    setWorldCameraPreview: (nodeId, delta) => worldCameraPreview.set(nodeId, delta),
+    clearWorldCameraPreviews: () => worldCameraPreview.clear(),
     setSelection,
     submit,
     schedule,
@@ -525,7 +592,6 @@ export function installInteractionController(options: InteractionControllerOptio
     aggregateProjection: () => aggregateProjectionRef.current?.() ?? null,
     aggregateActive: () => state.gesture.kind === "aggregate-connect",
     cancelAggregateConnect: () => input.cancelAggregateConnect(),
-    filmSetObjectAction: () => model.filmSetObjectAction(),
     alignmentSnap: currentAlignmentSnap
   };
 
@@ -552,6 +618,8 @@ export function installInteractionController(options: InteractionControllerOptio
     suspendHoverPlayback,
     clearHover,
     clearHeldKeys,
+    clearWorldGroundPreviews: worldGroundPreview.clear,
+    clearWorldCameraPreviews: () => worldCameraPreview.clear(),
     attach: {
       onAttachKey: (code, down) => input.onAttachKey(code, down),
       attachActive: () => input.attachActive(),
@@ -559,7 +627,16 @@ export function installInteractionController(options: InteractionControllerOptio
       cancelAggregateConnect: () => input.cancelAggregateConnect()
     }
   });
-  const { cancelTransientGesture, settleViewportBeforeFocus, handlers: { onDocumentWheel, onDocumentPointerDown, onDocumentFocusChange, onDocumentBlur, onDocumentVisibility, onGestureStart, onGestureChange, onGestureEnd, onWindowResize } } = surface;
+  const { cancelTransientGesture: cancelSurfaceTransientGesture, settleViewportBeforeFocus, handlers: { onDocumentWheel, onDocumentPointerDown, onDocumentFocusChange, onDocumentBlur, onDocumentVisibility, onGestureStart, onGestureChange, onGestureEnd, onWindowResize } } = surface;
+  /** modal/宿主取消路径同时清掉导演区准备请求与模型地面预览。 */
+  const cancelTransientGesture = () => {
+    sceneAreaOwner = null;
+    sceneArea()?.cancel();
+    // 镜头视锥位姿预览不属于 surface family：取消/模态路径在这里一并清掉。
+    if (state.gesture.kind === "world-camera") state.gesture = { kind: "none" };
+    worldCameraPreview.clear();
+    cancelSurfaceTransientGesture();
+  };
 
   installCanvasListeners(canvas, target, input, keyboard, dblclick, {
     onDocumentWheel,
@@ -581,6 +658,7 @@ export function installInteractionController(options: InteractionControllerOptio
     schedule("node-capabilities");
   });
   const unsubscribePreview = modelPreviewStore.subscribe(() => schedule("model-preview"));
+  const unsubscribeCameraEditor = worldCameraEditorStore.subscribe(() => schedule("world-camera-editor"));
   const disposeDiagnostics = installCanvasDiagnostics({ core, target, state, activeViewport, setSelection, model,
     renderError: () => renderError,
     queryCounters: () => ({ queries: sceneDiagnostics.interactionQueries, unavailableQueries: sceneDiagnostics.interactionUnavailable }) });
@@ -593,8 +671,59 @@ export function installInteractionController(options: InteractionControllerOptio
     state.spacePressed = false;
   });
 
-  return {
+  const controller: InteractionController = {
     start: () => schedule("start"),
+    setWorldGroundPreview: worldGroundPreview.set,
+    setSceneAreaPreview: (nodeId, bounds) => {
+      if (bounds) {
+        if (!Number.isFinite(bounds.min.u) || !Number.isFinite(bounds.min.v)
+          || !Number.isFinite(bounds.max.u) || !Number.isFinite(bounds.max.v)) return false;
+        if (bounds.min.u > bounds.max.u || bounds.min.v > bounds.max.v) return false;
+        const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+        if (!canvas?.nodeData[nodeId]?.sceneArea) return false;
+        sceneAreaPreviews.set(nodeId, { min: { ...bounds.min }, max: { ...bounds.max } });
+      } else {
+        sceneAreaPreviews.delete(nodeId);
+      }
+      schedule("scene-area-preview");
+      return true;
+    },
+    queryWorldGround: (point) => {
+      return groundAt(point);
+    },
+    beginWorldGroundPreview: worldGroundPreview.begin,
+    updateWorldGroundPreview: worldGroundPreview.update,
+    cancelWorldGroundPreview: worldGroundPreview.cancel,
+    setWorldCameraPreview: (nodeId, delta) => worldCameraPreview.set(nodeId, delta),
+    clearWorldCameraPreviews: () => { worldCameraPreview.clear(); schedule("world-camera-preview"); },
+    setSceneAreaGestures: (handler) => { sceneAreaGestures = handler ?? null; },
+    /**
+     * Overlay bridge: start a scene gesture outside the canvas pointer path and mark it
+     * as externally owned, so performFrame's reconciliation never cancels it. end/cancel
+     * keep the owner until the authoritative prepare/commit settles.
+     */
+    beginSceneAreaGesture: (input) => {
+      const port = sceneArea();
+      if (!port) return null;
+      const started = port.begin(input);
+      if (!started) return null;
+      sceneAreaOwner = "external";
+      schedule("scene-area");
+      return started;
+    },
+    endSceneAreaGesture: async () => {
+      const port = sceneArea();
+      try {
+        return port ? await port.end()
+          : { ok: false as const, code: "not-ready", message: "场景手势未就绪" };
+      } finally {
+        sceneAreaOwner = null;
+      }
+    },
+    cancelSceneAreaGesture: () => {
+      sceneAreaOwner = null;
+      sceneArea()?.cancel();
+    },
     flush,
     /** 唯一失效入口（design D2）；缺省 reason 归一为 `invalidate`。 */
     invalidate: (reason) => schedule(reason ?? "invalidate"),
@@ -632,7 +761,6 @@ export function installInteractionController(options: InteractionControllerOptio
       return { ...point, generation: options.getRuntime()?.generation?.() ?? 0 };
     },
     queryDropTarget: (point, excludedIds) => queries.queryDropTarget(point, excludedIds),
-    queryCompositeAssetScopes: () => queries.queryCompositeAssetScopes(),
     cancelTransientGesture,
     ...modelFocus,
     selectNode: (nodeId) => {
@@ -640,8 +768,25 @@ export function installInteractionController(options: InteractionControllerOptio
       if (!known.has(nodeId)) return false;
       setSelection([nodeId]); return true;
     },
-    nodeScreenRect: (nodeId) => {
-      const index = sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
+    nodeScreenRect: (nodeId, part) => {
+      const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+      const project = (u: number, v: number, h = 0) => {
+        const renderer = worldToRendererPosition({ u, v, h });
+        const point = worldToCanvasPoint([renderer[0], renderer[1], renderer[2]]);
+        return worldToClient({ x: point.x, y: point.y });
+      };
+      // 导演区没有卡片：用地面范围投影后的屏幕包围盒定位底部面板。
+      const area = decodeSceneAreaData(canvas?.nodeData[nodeId]?.sceneArea);
+      if (area.ok) {
+        const bounds = sceneAreaPreviews.get(nodeId) ?? area.value.bounds;
+        return part === "scope-title" ? sceneAreaTitleRect(bounds, project, activeViewport().zoom) : sceneAreaPanelRect(bounds, project);
+      }
+      // 共享世界模型没有内容卡片：以模型世界原点（脚点）为锚，面板落在模型下方。
+      const instance = decodeWorldInstanceData(canvas?.nodeData[nodeId]?.sharedWorldInstance);
+      if (instance.ok) {
+        return worldInstancePanelRect(instance.value.transform.position, project);
+      }
+      const index = sharedCanvasNodeIndex(canvas);
       const node = index?.byId.get(nodeId);
       if (!index || !node) return null;
       // working 拖动/改尺寸预览优先（与画布投影同一来源），提交后由规范坐标接管。
@@ -657,6 +802,8 @@ export function installInteractionController(options: InteractionControllerOptio
     setAlignmentSnapPolicy: (policy) => { alignmentSnapRef.current = policy; },
     dispose() {
       disposed = true;
+      const hooks = target as unknown as { __worldGroundPreview?: InteractionController };
+      if (hooks.__worldGroundPreview === controller) delete hooks.__worldGroundPreview;
       disposeDiagnostics();
       unbindPlaybackGate();
       hover.forgetPointer();
@@ -664,6 +811,7 @@ export function installInteractionController(options: InteractionControllerOptio
       frameLoop.dispose();
       unsubscribeCapabilities?.();
       unsubscribePreview();
+      unsubscribeCameraEditor();
       modelPreviewStore.clear();
       viewportTransition.cancel();
       // 取消未提交的拖动粘连 / 聚合拉线手势（change: add-drag-touch-connections /
@@ -685,4 +833,6 @@ export function installInteractionController(options: InteractionControllerOptio
       suspendHoverPlayback();
     }
   };
+  (target as unknown as { __worldGroundPreview?: InteractionController }).__worldGroundPreview = controller;
+  return controller;
 }

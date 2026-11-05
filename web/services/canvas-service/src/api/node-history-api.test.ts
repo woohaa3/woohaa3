@@ -251,17 +251,14 @@ describe("节点历史 HTTP API", () => {
     expect(after.items[0]?.current).toBe(true);
   });
 
-  // 07978f7d 起历史恢复不再因 taskStatus 进行中被拒绝（面板与圆点可直接切换），46c886b2 又改为
-  // 恢复时清空 activeRunId；service 层同场景的用例早已跟进，这里对齐 HTTP 层。
-  it("生成中恢复返回 200，切换当前版本并清空 activeRunId", async () => {
-    const { base, service, room } = await start(canvasWithNode("text", { taskStatus: "processing" }));
+  it("生成中恢复返回 409 conflict", async () => {
+    const { base, service } = await start(canvasWithNode("text", { taskStatus: "processing" }));
     const { entryId } = await service.registerTaskResult({
       canvasId: CANVAS, nodeId: "node-1", runId: "run-1", kind: "text", createdAt: NOW,
       output: { mediaKind: "text", text: "hello" }
     });
     const response = await fetch(`${base}${DEFAULT_NODE_HISTORY_API_BASE_PATH}/${CANVAS}/node-1/${entryId}/apply`, { method: "POST" });
-    expect(response.status).toBe(200);
-    expect(room.canvas.nodeData["node-1"]).toMatchObject({ activeRunId: "", taskStatus: "successed" });
+    expect(response.status).toBe(409);
   });
 
   it("画布级列表返回跨节点条目、安全标题与种类计数", async () => {

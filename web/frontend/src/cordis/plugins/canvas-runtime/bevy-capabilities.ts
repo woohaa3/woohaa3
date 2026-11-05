@@ -28,12 +28,8 @@ export function assertRequiredCapabilities(module: BevyModule): void {
   if (!module.viewport_capability) missing.push("viewport_capability");
   if (!module.set_positions) missing.push("set_positions");
   if (!module.position_capability) missing.push("position_capability");
-  // change: 2026-10-12-align-film-set-scope-with-isometric-grid —— 片场菱形范围要求 drop
-  // 目标查询与范围几何读取；缺失时明确能力不匹配，不静默回退 TS 矩形几何（design D5/D8）。
   if (!module.query_drop_target) missing.push("query_drop_target");
-  if (!module.query_composite_asset_scopes) missing.push("query_composite_asset_scopes");
-  // change: 2026-10-15-add-film-set-overview-lod —— 片场总览 LOD 要求 scene wire 版本同步；
-  // 缺失 scene 能力字符串时明确能力不匹配，不静默忽略新增 `compositeAsset.geometryQuality`。
+  // scene wire 版本必须同步：缺失能力字符串时明确能力不匹配，不静默忽略结构变化。
   if (!module.scene_capability) missing.push("scene_capability");
   if (missing.length > 0) {
     throw new Error(`Bevy WASM 缺少必需能力：${missing.join(", ")}`);

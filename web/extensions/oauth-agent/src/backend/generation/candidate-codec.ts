@@ -2,7 +2,7 @@
  * ChatGPT 生成编排：候选解码与归一化
  * （自 `generation.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R09）。
  */
-import { canonicalFilmSetFields, FILM_SET_EXTENSION_ID, type FilmSetNodeData, type ModelCameraMutation } from "@woohaa3/contracts";
+import type { ModelCameraMutation } from "@woohaa3/contracts";
 
 /** 解析候选 JSON；SDK 结构化输出失败时给出可读原因。 */
 export function parseCandidateText(text: string): { ok: true; value: unknown } | { ok: false; message: string } {
@@ -16,14 +16,6 @@ export function parseCandidateText(text: string): { ok: true; value: unknown } |
   } catch {
     return { ok: false, message: "推理返回不是合法 JSON，无法作为候选结果。" };
   }
-}
-
-export function normalizeTimeline(input: unknown, fallback: FilmSetNodeData["timeline"]): FilmSetNodeData["timeline"] {
-  if (typeof input !== "object" || input === null) return fallback;
-  const duration = (input as { duration?: unknown }).duration;
-  const loop = (input as { loop?: unknown }).loop;
-  if (typeof duration !== "number" || !Number.isFinite(duration) || duration < 0) return fallback;
-  return { duration, loop: typeof loop === "boolean" ? loop : fallback.loop };
 }
 
 /**
@@ -90,12 +82,4 @@ export function normalizeCameraMutations(input: unknown): ModelCameraMutation[] 
     }
   }
   return out;
-}
-
-/**
- * 把 items-only 片场定义还原为 canonical flat nodeData 以便复用权威 decoder
- * （change: 2026-10-11-extract-film-set-extension，D7/D8/D10：不再有顶层 authored 模型）。
- */
-export function toFlatAnimation(animation: FilmSetNodeData): Record<string, unknown> {
-  return { extensionId: FILM_SET_EXTENSION_ID, ...canonicalFilmSetFields(animation) };
 }

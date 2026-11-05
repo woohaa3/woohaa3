@@ -32,9 +32,11 @@ export function taskPortToCanvasTaskClient(port: BackendTaskPort): CanvasTaskCli
   };
 }
 
-/** BackendMediaPort → CanvasMediaClient（只暴露 verify；scope 原样透传给媒体模块）。 */
+/** BackendMediaPort → CanvasMediaClient（固定资源读取与核验，保留画布作用域）。 */
 export function mediaPortToCanvasMediaClient(port: BackendMediaPort): CanvasMediaClient {
+  const resources = port.resources;
   return {
+    ...(resources ? { read: (storageKey: string, canvasId?: string) => resources.read(storageKey, canvasId) } : {}),
     verify: (storageKey, expected, scope) => port.verify(storageKey, expected, scope)
   };
 }

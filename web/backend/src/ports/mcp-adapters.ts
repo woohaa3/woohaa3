@@ -1,4 +1,3 @@
-import { currentCanvasGroupScope } from "@woohaa3/canvas-service";
 /**
  * MCP → Canvas 进程内适配器
  * （change: 2026-10-06-unify-backend-runtime-with-cordis，任务 2.1 / design D2）。
@@ -7,39 +6,22 @@ import { currentCanvasGroupScope } from "@woohaa3/canvas-service";
  * `ModelMcpService` / `AgentCanvasInternalService`。授权、actorId、错误映射仍由 Canvas 侧完成；
  * 本适配器只做形状转换。
  */
-import type { AgentCanvasInternalService, ModelMcpService, CreateFilmSetNodeOutcome } from "@woohaa3/canvas-service";
+import type { AgentCanvasInternalService, ModelMcpService } from "@woohaa3/canvas-service";
 import type {
   CanvasCommand,
   McpCameraMutation,
-  McpCreateFilmSetNodeRequest,
-  McpImportModelSnapshotRequest,
-  McpMutateFilmSetItemRequest,
   SupportedModelScriptVersion
 } from "@woohaa3/contracts";
 import type { CanvasMcpClient } from "@woohaa3/mcp-service";
-import type { AgentCanvasClient, McpMutateFilmSetItemResult } from "@woohaa3/mcp-service";
-
-type MutateFilmSetItemOutcome = McpMutateFilmSetItemResult;
+import type { AgentCanvasClient } from "@woohaa3/mcp-service";
+import { currentMcpPrincipal } from "./mcp-principal.js";
 
 const MCP_ACTOR_CANVAS_READ = "canvas-model-mcp";
 const MCP_ACTOR_CANVAS_INTERNAL = "wolf-woohaa3-mcp-internal-actor";
 
 /** ModelMcpService（内部 actor）→ MCP CanvasMcpClient。 */
 export function modelMcpServiceToClient(
-  service: ModelMcpService | null,
-  options: {
-    /** 动画节点权威写入（change: 2026-10-05-bind-model-animation-to-shots）。 */
-    createFilmSetNode?: (input: McpCreateFilmSetNodeRequest & { canvasId: string }) => Promise<CreateFilmSetNodeOutcome>;
-    commitAnimation?: (input: import("@woohaa3/contracts").McpCommitAnimationRequest) => Promise<CreateFilmSetNodeOutcome>;
-    importModelSnapshot?: (input: McpImportModelSnapshotRequest & { canvasId: string }) => Promise<CreateFilmSetNodeOutcome>;
-    /** 片场对象级权威变更（change: 2026-10-09-add-film-set-object-motion-and-editing）。 */
-    mutateFilmSetItem?: (input: McpMutateFilmSetItemRequest & { canvasId: string }) => Promise<MutateFilmSetItemOutcome>;
-    /** 片场媒体条目受控导入（D5）。 */
-    addFilmSetMedia?: (input: import("@woohaa3/contracts").McpAddFilmSetMediaRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>;
-    /** agent 发起显式导出与查询（D8）。 */
-    exportFilmSetClip?: (input: import("@woohaa3/contracts").McpExportFilmSetClipRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>;
-    getFilmSetExport?: (input: import("@woohaa3/contracts").McpGetFilmSetExportRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>;
-  }
+  service: ModelMcpService | null
 ): CanvasMcpClient {
   const unavailable = { ok: false as const, code: "unavailable", message: "模型 MCP 当前不可用" };
   // change: 2026-10-07-remove-residual-compatibility —— 不再提供默认画布回退；canvasId 必填。
@@ -125,61 +107,33 @@ export function modelMcpServiceToClient(
       if (!service?.submitScripts) return unavailable as never;
       return service.submitScripts(input, { principalId: MCP_ACTOR_CANVAS_INTERNAL }) as never;
     },
-    async createFilmSetNode(input) {
-      if (!options.createFilmSetNode) return unavailable as never;
-      return options.createFilmSetNode({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async importModelSnapshot(input) {
-      if (!options.importModelSnapshot) return unavailable as never;
-      return options.importModelSnapshot({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async commitAnimation(input) {
-      if (!options.commitAnimation) return unavailable as never;
-      return options.commitAnimation({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async mutateFilmSetItem(input) {
-      if (!options.mutateFilmSetItem) return unavailable as never;
-      return options.mutateFilmSetItem({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async addFilmSetMedia(input) {
-      if (!options.addFilmSetMedia) return unavailable as never;
-      return options.addFilmSetMedia({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async exportFilmSetClip(input) {
-      if (!options.exportFilmSetClip) {
-        return { ok: false, code: "recording-unavailable", message: "当前宿主未提供原生录制能力" } as never;
-      }
-      return options.exportFilmSetClip({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
-    async getFilmSetExport(input) {
-      if (!options.getFilmSetExport) {
-        return { ok: false, code: "recording-unavailable", message: "当前宿主未提供原生录制能力" } as never;
-      }
-      return options.getFilmSetExport({ ...input, canvasId: canvasId(input.canvasId) }) as never;
-    },
     async ready() {
       return service ? { ready: true } : { ready: false, reason: "模型 MCP 当前不可用" };
     }
   };
 }
 
-/** AgentCanvasInternalService → MCP AgentCanvasClient（带固定内部 principal）。 */
+/** AgentCanvasInternalService → MCP AgentCanvasClient（每请求解析可信 principal）。 */
 export function agentCanvasServiceToClient(
   service: AgentCanvasInternalService | null,
   options: { principalId: string }
 ): AgentCanvasClient {
   const unavailable = { ok: false as const, code: "unavailable", message: "Agent Canvas 当前不可用" };
+  // 每请求可信主体优先（MCP 传输按已验证 bearer grant 注入），缺省回落到部署配置/实例 owner。
+  // 绝不从工具参数或模型输出取主体。
+  const principalId = (): string => currentMcpPrincipal()?.trim() || options.principalId.trim();
   return {
     async listCanvases(input) {
       if (!service) return unavailable as never;
-      if (!options.principalId.trim()) return { ok: false, code: "unauthorized", message: "缺少已认证 principal" };
-      const page = await service.listCanvases({ principalId: currentCanvasGroupScope()?.owner ?? options.principalId, ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit !== undefined ? { limit: input.limit } : {}) });
+      const subject = principalId();
+      if (!subject) return { ok: false, code: "unauthorized", message: "缺少已认证 principal" };
+      const page = await service.listCanvases({ principalId: subject, ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit !== undefined ? { limit: input.limit } : {}) });
       return { ok: true, ...page };
     },
     async getGraph(input) {
       if (!service) return unavailable as never;
       return service.readGraph({
-        principalId: currentCanvasGroupScope()?.owner ?? options.principalId,
+        principalId: principalId(),
         ...(input.canvasId !== undefined ? { canvasId: input.canvasId } : {}),
         ...(input.nodeIds ? { nodeIds: input.nodeIds } : {}),
         ...(input.aroundNodeId !== undefined ? { aroundNodeId: input.aroundNodeId } : {}),
@@ -192,22 +146,22 @@ export function agentCanvasServiceToClient(
     async getChanges(input) {
       if (!service) return unavailable as never;
       return service.readChanges({
-        principalId: currentCanvasGroupScope()?.owner ?? options.principalId,
+        principalId: principalId(),
         ...(input.canvasId !== undefined ? { canvasId: input.canvasId } : {}),
         sinceRevision: input.sinceRevision,
         ...(input.limit !== undefined ? { limit: input.limit } : {})
       }) as never;
     },
-    async scriptCapability(input) { return service ? service.scriptCapability({ ...input, principalId: currentCanvasGroupScope()?.owner ?? options.principalId }) as never : unavailable as never; },
-    async validateScript(input) { return service ? service.validateScript({ ...input, principalId: currentCanvasGroupScope()?.owner ?? options.principalId }) as never : unavailable as never; },
-    async submitScript(input) { return service ? service.submitScript({ ...input, principalId: currentCanvasGroupScope()?.owner ?? options.principalId }) as never : unavailable as never; },
-    async runNode(input) { return service?.runAdapter ? service.runAdapter.run({ ...input, canvasId: input.canvasId ?? "" }) as never : unavailable as never; },
-    async getRun(input) { return service?.runAdapter ? service.runAdapter.status({ ...input, canvasId: input.canvasId ?? "" }) as never : unavailable as never; },
-    async cancelRun(input) { return service?.runAdapter ? service.runAdapter.cancel({ ...input, canvasId: input.canvasId ?? "" }) as never : unavailable as never; },
+    async scriptCapability(input) { return service ? service.scriptCapability({ ...input, principalId: principalId() }) as never : unavailable as never; },
+    async validateScript(input) { return service ? service.validateScript({ ...input, principalId: principalId() }) as never : unavailable as never; },
+    async submitScript(input) { return service ? service.submitScript({ ...input, principalId: principalId() }) as never : unavailable as never; },
+    async runNode(input) { return service?.runAdapter ? service.runAdapter.run({ ...input, canvasId: input.canvasId ?? "", owner: principalId() }) as never : unavailable as never; },
+    async getRun(input) { return service?.runAdapter ? service.runAdapter.status({ ...input, canvasId: input.canvasId ?? "", owner: principalId() }) as never : unavailable as never; },
+    async cancelRun(input) { return service?.runAdapter ? service.runAdapter.cancel({ ...input, canvasId: input.canvasId ?? "", owner: principalId() }) as never : unavailable as never; },
     async getOutput(input) { return service?.runAdapter ? service.runAdapter.output({ ...input, canvasId: input.canvasId ?? "" }) as never : unavailable as never; },
     async applyPlan(input) {
       if (!service) return unavailable as never;
-      return service.apply({ ...(input as object), principalId: currentCanvasGroupScope()?.owner ?? options.principalId } as never) as never;
+      return service.apply({ ...(input as object), principalId: principalId() } as never) as never;
     }
   };
 }

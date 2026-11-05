@@ -1,8 +1,7 @@
 import { createSiteProviderSource } from "./service-connection-sources.js";
 import { createAssistantTextPort } from "../../ports/assistant-text.js";
-import { createCanvasCreationPort } from "../../ports/canvas-creation.js";
-import { createGroupEffects } from "../../ports/group-effects.js";
-import { canvasGroupEpoch, currentCanvasGroupScope, deriveRunIdentity } from "@woohaa3/canvas-service";
+import { createImageDirectorPort } from "../../ports/image-director-scene.js";
+import { deriveRunIdentity } from "@woohaa3/canvas-service";
 /**
  * 核心层 · application：站点插件宿主（控制面、站点配置 facade、工作 lease、公开路由分派）。
  *
@@ -189,25 +188,8 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         owner: string;
         canvasId: string;
         permission: "read" | "write";
-        rootGroupId?: string;
-        scopeEpoch?: number;
         nodeId?: string;
       }) => {
-        const scope = currentCanvasGroupScope();
-        if (scope) {
-          if (!scope.valid()) return { ok: false as const, code: "group-scope-revoked" as const, message: "组创作授权已撤销" };
-          if (scope.canvasId !== input.canvasId) return { ok: false as const, code: "forbidden" as const, message: "画布不在当前组作用域" };
-          if (input.rootGroupId !== undefined && input.rootGroupId !== scope.rootGroupId) {
-            return { ok: false as const, code: "forbidden" as const, message: "步骤不属于当前组" };
-          }
-          if (input.scopeEpoch !== undefined && canvasGroupEpoch(input.canvasId, scope.rootGroupId) !== input.scopeEpoch) {
-            return { ok: false as const, code: "group-scope-revoked" as const, message: "组作用域已失效" };
-          }
-          if (scope.authorize && !(await scope.authorize(input.permission))) {
-            return { ok: false as const, code: "forbidden" as const, message: "画布权限已撤销" };
-          }
-          return { ok: true as const };
-        }
         const agent = canvasAgent();
         const decision = await agent?.authorizeCanvas({ principalId: input.owner, canvasId: input.canvasId, permission: input.permission });
         if (decision && !decision.ok) return { ok: false as const, code: decision.code, message: decision.message };
@@ -281,6 +263,52 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       // unresolved turns while the backend reconnects instead of converting a
       // lost in-process receipt into a terminal failure.
       ...(env.WOOHAA3_AGENT_RUNTIME_SOCKET ? { preserveUnreconciledOnRestart: true } : {}),
+      // T11a: the durable application turn status is the trusted host completion
+      // fact. A successful terminal turn first records one camera completion for
+      // the exact camera/version this run wrote, then the scoped world run is
+      // released against that same application ledger. Failed/cancelled turns
+      // never create completion history.
+      onTurnSettled: ({ turn, status }) => {
+        const assistantWorld = ctx.canvas.assistantWorld;
+        if (!assistantWorld) return;
+        const input = {
+          canvasId: turn.canvasId,
+          runId: turn.requestId,
+          status,
+          evidence: { owner: turn.owner, requestId: turn.requestId, turnId: turn.turnId }
+        } as const;
+        // The settle hook is synchronous, but the trusted host-completion fact
+        // and the T08 history write are asynchronous. Consume a structured
+        // failure and retry with backoff; the durable fact also survives a
+        // restart and is replayed by the canvas composition.
+        const retryDelays = [250, 1_000, 4_000] as const;
+        const attempt = (remaining: number): void => {
+          void assistantWorld.settleRun(input).then((result) => {
+            if (result.ok) return;
+            ctx.log.scope("application")({
+              event: "assistant-world-settle-failed",
+              canvasId: turn.canvasId,
+              requestId: turn.requestId,
+              code: result.code,
+              remaining
+            });
+            if (remaining <= 0) return;
+            const timer = setTimeout(
+              () => attempt(remaining - 1),
+              retryDelays[retryDelays.length - remaining] ?? retryDelays[retryDelays.length - 1]
+            );
+            timer.unref?.();
+          }).catch((error) => {
+            ctx.log.scope("application")({
+              event: "assistant-world-settle-error",
+              canvasId: turn.canvasId,
+              requestId: turn.requestId,
+              message: error instanceof Error ? error.message : "unknown"
+            });
+          });
+        };
+        attempt(retryDelays.length);
+      },
       serviceConnectionProviders: () => generation.list(),
       serviceConnectionSources: {
         ...(sourceSecrets ? { secrets: sourceSecrets.forExtension("@service-connections") } : {}),
@@ -400,9 +428,7 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         const result = await ctx.media.port().resources!.read!(storageKey, canvasId);
         return result;
       } }),
-      canvasCreation: createCanvasCreationPort(ctx.canvas),
-      candidateAssistantProviders: () => ctx.generation.conversions(),
-      groupEffects: createGroupEffects(ctx.canvas, ctx.toolGrants),
+      imageDirectorScene: createImageDirectorPort(ctx.canvas, { verify: ctx.media.port().verify, read: async (storageKey, canvasId) => ctx.media.port().resources!.read!(storageKey, canvasId) }),
       conversationCanvasAccess: createExtensionCanvasAccessFacade(ctx.canvas),
       // 内置 MCP 的真实发现结果；缺工具/不可达/协议错误分别带原因，不伪造 ready。
       mcpDiscovery: async () => projectMcpDiscovery(await mcp.discoverTools()),

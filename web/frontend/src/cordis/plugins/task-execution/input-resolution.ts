@@ -16,13 +16,10 @@
  *
  * 每次渲染都从当前画布重算（不缓存旧快照）。
  */
-import { selfReferenceMapping,
+import { decodeWorldCamera, selfReferenceMapping,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   pickInputBinding,
-  providerReferenceRole,
-  SHOT_REFERENCE_ROLE,
-  SHOT_IMAGE_REFERENCE_ROLE,
   sortWoohaa3CanvasInputMappings,
   type CanvasNodeData,
   type CanvasNodeInputMapping,
@@ -45,6 +42,8 @@ export type InputResolution = {
   /** 提交给网关的形态：只有稳定媒体引用。 */
   inputs: CanvasTaskInput[];
   blockingReasons: string[];
+  /** Camera pixels are frozen by the host at submission, never fabricated here. */
+  deferredReferences: Array<{ role: string; mediaKind: "image" }>;
 };
 
 export type ResolveNodeInputsOptions = {
@@ -76,17 +75,29 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
   const blockingReasons: string[] = [];
   const references: ResolvedReference[] = [];
   const counts = new Map<string, number>();
+  const deferredReferences: InputResolution["deferredReferences"] = [];
 
   if (!targetNode) {
-    return { references, inputs: [], blockingReasons: [`节点 ${nodeId} 不存在`] };
+    return { references, deferredReferences, inputs: [], blockingReasons: [`节点 ${nodeId} 不存在`] };
   }
 
   const mappings = collectInputMappings(canvas, nodeId, nodeData);
 
   for (const mapping of mappings) {
     if (mapping.role === "text_prompt") continue;
-    // 画布角色 → provider 绑定角色：镜头参考以 video reference 参与校验与提交。
-    const providerRole = providerReferenceRole(mapping.role);
+    const providerRole = mapping.role;
+    if (canvas.document.nodes.some(node => node.id === mapping.sourceNodeId && node.type === "world-camera")) {
+      const camera = decodeWorldCamera(nodeData[mapping.sourceNodeId]?.worldCamera);
+      const binding = bindings.find(entry => entry.roles.includes(providerRole)
+        && entry.mediaKinds.includes("image") && entry.mediaTypes.includes("image/png"));
+      if (!camera.ok) { blockingReasons.push("上游镜头配置无效"); continue; }
+      if (!binding) { blockingReasons.push("所选模型不接受镜头图像参考"); continue; }
+      const used = (counts.get(binding.field) ?? 0) + 1;
+      counts.set(binding.field, used);
+      if (used > binding.maxItems) { blockingReasons.push(`参考输入数量超过模型对 ${binding.field} 的上限 ${binding.maxItems}`); continue; }
+      deferredReferences.push({ role: providerRole, mediaKind: "image" });
+      continue;
+    }
     const explicit = (mapping.sourceAssetIds ?? []).filter(
       (id): id is string => typeof id === "string" && id !== ""
     );
@@ -94,13 +105,7 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
     if (assetIds.length === 0) {
       const outputAssetId = nodeData[mapping.sourceNodeId]?.outputAssetId;
       if (typeof outputAssetId !== "string" || outputAssetId === "") {
-        // 镜头参考的资产由录制冻结写入（预览节点不承载 outputAssetId）：还在录制时是**等待**，
-        // 不是「上游没有输出」。与服务端/参考 chips 用同一说法（change: 2026-10-15，任务 8.6）。
-        blockingReasons.push(
-          mapping.role === SHOT_IMAGE_REFERENCE_ROLE ? "等待镜头参考图片准备完成" : mapping.role === SHOT_REFERENCE_ROLE
-            ? "等待镜头参考录制完成"
-            : `上游节点 ${mapping.sourceNodeId} 还没有可用输出，无法作为参考输入`
-        );
+        blockingReasons.push(`上游节点 ${mapping.sourceNodeId} 还没有可用输出，无法作为参考输入`);
         continue;
       }
       assetIds = [outputAssetId];
@@ -150,6 +155,7 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
 
   return {
     references,
+    deferredReferences,
     inputs: references.map((reference) => reference.input),
     blockingReasons
   };

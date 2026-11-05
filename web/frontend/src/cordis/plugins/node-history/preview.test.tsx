@@ -72,7 +72,7 @@ describe("HistoryPreview 加载与失败", () => {
     const render = vi.fn(async () => ({ ok: true as const, blob: new Blob(["png"], { type: "image/png" }) }));
     await act(async () => {
       root.render(<HistoryPreview
-        preview={{ kind: "model", thumbnailHref: null, entry: { canvasId: "c", nodeId: "n", entryId: "e" } }}
+        preview={{ kind: "model", entry: { canvasId: "c", nodeId: "n", entryId: "e" } }}
         renderModelThumbnail={render}
       />);
     });
@@ -92,7 +92,7 @@ describe("HistoryPreview 加载与失败", () => {
     document.body.append(container);
     const root = createRoot(container);
     await act(async () => {
-      root.render(<HistoryPreview preview={{ kind: "model", thumbnailHref: null, entry: { canvasId: "c", nodeId: "n", entryId: "e" } }} />);
+      root.render(<HistoryPreview preview={{ kind: "model", entry: { canvasId: "c", nodeId: "n", entryId: "e" } }} />);
     });
     await vi.waitFor(() => {
       expect(container.querySelector('[data-state="failed"]')).not.toBeNull();

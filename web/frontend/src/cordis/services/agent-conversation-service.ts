@@ -1,4 +1,3 @@
-import { authoringConversationContext } from "@woohaa3/contracts";
 /**
  * 宿主 Agent 会话前端 service（Canvas page scope 唯一 owner）
  * （change: 2026-10-12-add-agent-conversation-panel，任务 5.2/5.4/5.6 / design D1/D6a）。
@@ -167,7 +166,7 @@ export function createAgentConversationService(
     // 一个节点复用一条会话（design D8）：先按目标查找现有会话，未命中再新建。宿主未注入
     // conversationId（如重开面板）时也据此复用，避免每次生成都新会话。
     const nodeId = input.entry.nodeId;
-    const contextKey = authoringConversationContext(input.entry);
+    const contextKey = undefined;
     if (nodeId) {
       const found = contextKey ? await remote.findForTarget(input.canvasId, nodeId, input.connectionId, contextKey) : input.connectionId
         ? await remote.findForTarget(input.canvasId, nodeId, input.connectionId)
@@ -258,11 +257,11 @@ export function createAgentConversationService(
     return { ok: true as const, value: { cleared } };
   };
 
-  const submitTurn = async (
-    input: AgentConversationSubmitInput & { requestId: string }
+  const submit = async (
+    input: AgentConversationSubmitInput & { requestId: string }, imageDirector = false
   ): Promise<AgentConversationResult<AgentConversationSubmitResult>> => {
     const submittedScope = dataScopeId();
-    publish({ loading: true, error: null, pendingSubmissions: { ...snapshot.pendingSubmissions, [input.requestId]: input.entry } });
+    publish({ loading: true, error: null, ...(!imageDirector ? { pendingSubmissions: { ...snapshot.pendingSubmissions, [input.requestId]: input.entry } } : {}) });
     const clearPending = () => {
       if (submittedScope !== dataScopeId()) return;
       const pendingSubmissions = { ...snapshot.pendingSubmissions };
@@ -270,13 +269,15 @@ export function createAgentConversationService(
       publish({ pendingSubmissions });
     };
     try {
-      const conversation = await ensureConversation(input);
+      const conversation = await ensureConversation(imageDirector ? { ...input, conversationId: undefined, entry: { ...input.entry, nodeId: undefined } } : input);
       if (!conversation.ok) {
         if (submittedScope === dataScopeId()) publish({ loading: false, error: conversation.error });
         return conversation;
       }
       if (submittedScope !== dataScopeId()) return { ok: false, code: "identity-changed", error: "Assistant identity changed" };
-      const accepted = await remote.accept(conversation.value, { requestId: input.requestId, entry: input.entry });
+      const accept = imageDirector ? remote.acceptImageDirectorScene : remote.accept;
+      if (!accept) return { ok: false, code: "unavailable", error: "图片场景创建不可用" };
+      const accepted = await accept(conversation.value, { requestId: input.requestId, entry: input.entry });
       if (!accepted.ok) {
         if (submittedScope === dataScopeId()) publish({ loading: false, error: accepted.error });
         return accepted;
@@ -298,6 +299,8 @@ export function createAgentConversationService(
       return { ok: true, value };
     } finally { clearPending(); }
   };
+  const submitTurn: AgentConversationService["submitTurn"] = input => submit(input);
+  const submitImageDirectorScene: NonNullable<AgentConversationService["submitImageDirectorScene"]> = input => submit(input, true);
 
   const queries = new Map<string, ReturnType<AgentConversationService["queryTurn"]>>();
   const queryTurn: AgentConversationService["queryTurn"] = (requestId) => {
@@ -522,6 +525,7 @@ export function createAgentConversationService(
     switchConnection,
     readConversation,
     submitTurn,
+    submitImageDirectorScene,
     queryTurn,
     locateTurnByRun,
     retryTextSave: async (requestId: string) => {

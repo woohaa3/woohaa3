@@ -7,6 +7,7 @@
  * 纯类型/纯函数：不含 SQLite、SDK、HTTP handler 或秘密。
  */
 import { isBoundedId, isJsonObject, isNonEmptyString } from "../../validation.js";
+import { decodeAssistantWorldScope } from "../../canvas/assistant-world-authority.js";
 import {
   isAgentEntryAction,
   isAgentReasoningEffort,
@@ -100,8 +101,15 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
   if (Object.keys(body).some(key => !["requestId", "entry"].includes(key))) return fail("malformed-request", "请求包含私有或未知字段");
   const entryRaw = body.entry;
   if (!isJsonObject(entryRaw)) return fail("malformed-request", "entry 必须是对象");
-  if (Object.keys(entryRaw).some(key => !["action", "canvasId", "nodeId", "mode", "cameraId", "clipId", "itemId", "model", "reasoningEffort", "connectionId", "connection", "expectedContentHash", "prompt", "references"].includes(key))) return fail("malformed-request", "entry 包含私有或未知字段");
-  if (entryRaw.mode === "text" && ["cameraId", "clipId", "itemId"].some(key => entryRaw[key] !== undefined)) return fail("malformed-request", "文本目标不能带片场或镜头身份");
+  if (Object.keys(entryRaw).some(key => !["action", "canvasId", "nodeId", "mode", "cameraId", "clipId", "itemId", "worldScope", "model", "reasoningEffort", "connectionId", "connection", "expectedContentHash", "prompt", "references"].includes(key))) return fail("malformed-request", "entry 包含私有或未知字段");
+  if (entryRaw.mode === "text" && ["cameraId", "clipId", "itemId", "worldScope"].some(key => entryRaw[key] !== undefined)) return fail("malformed-request", "文本目标不能带镜头或世界范围身份");
+  if (entryRaw.mode === "world" && entryRaw.worldScope === undefined) return fail("malformed-request", "世界目标必须带可信范围选择");
+  if (entryRaw.mode === "canvas-group" && entryRaw.nodeId === undefined) return fail("malformed-request", "2D 组目标必须带根组节点");
+  if (entryRaw.mode !== "world" && entryRaw.worldScope !== undefined) return fail("malformed-request", "世界范围只适用于 world 目标");
+  if (entryRaw.worldScope !== undefined) {
+    const scope = decodeAssistantWorldScope(entryRaw.worldScope);
+    if (!scope.ok) return fail("malformed-request", scope.message);
+  }
   const binding = entryRaw.connection;
   if (binding !== undefined && (!isJsonObject(binding) || Object.keys(binding).some(key => !["connectionId", "adapterId", "configRevision", "credentialEpoch"].includes(key)) || !isBoundedId(binding.connectionId) || !isBoundedId(binding.adapterId) || ![binding.configRevision, binding.credentialEpoch].every(n => Number.isSafeInteger(n) && (n as number) >= 0))) return fail("malformed-request", "connection 非法");
   const action = entryRaw.action;
@@ -125,6 +133,7 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
   if (entryRaw.reasoningEffort !== undefined && !isAgentReasoningEffort(entryRaw.reasoningEffort)) return fail("malformed-request", "reasoningEffort 非法");
   const references = decodeReferences(entryRaw.references);
   if (references === null) return fail("malformed-request", "references 非法");
+  const worldScope = entryRaw.worldScope === undefined ? null : decodeAssistantWorldScope(entryRaw.worldScope);
 
   const entry: AgentEntryIntent = {
     ...(binding === undefined ? {} : { connection: binding as AgentEntryIntent["connection"] }),
@@ -133,6 +142,7 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
     ...(entryRaw.nodeId === undefined ? {} : { nodeId: entryRaw.nodeId as string }),
     ...(entryRaw.mode === undefined ? {} : { mode: entryRaw.mode as AgentTargetMode }),
     ...(entryRaw.cameraId === undefined ? {} : { cameraId: entryRaw.cameraId as string }),
+    ...(worldScope?.ok ? { worldScope: worldScope.value } : {}),
     ...(entryRaw.clipId === undefined ? {} : { clipId: entryRaw.clipId as string }),
     ...(entryRaw.itemId === undefined ? {} : { itemId: entryRaw.itemId as string }),
     ...(entryRaw.model === undefined ? {} : { model: entryRaw.model as string }),
@@ -143,11 +153,7 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
     ...(references === undefined ? {} : { references })
   };
 
-  // 对象类目标动作缺少片段身份：拒绝并说明，MUST NOT 扩大成整体片场修改（design D3/任务 4.2）。
-  if ((action === "modify" || (action === "generate" && entry.mode === "film-set")) && entry.itemId !== undefined && entry.clipId === undefined) {
-    return fail("malformed-request", "对象动作缺少 clipId，拒绝退化成整体片场修改");
-  }
-  if ((entry.mode === "camera" || entry.mode === "canvas-group") && entry.nodeId === undefined) {
+  if (entry.mode === "camera" && entry.nodeId === undefined) {
     return fail("malformed-request", "camera 目标必须带 nodeId");
   }
   return { ok: true, value: { requestId, entry } };
@@ -223,6 +229,10 @@ export function isAgentEntryIntent(value: unknown): value is AgentEntryIntent {
   if (!isNonEmptyString(value.prompt)) return false;
   if (value.nodeId !== undefined && !isBoundedId(value.nodeId)) return false;
   if (value.mode !== undefined && !isAgentTargetMode(value.mode)) return false;
+  if (value.worldScope !== undefined) {
+    if (value.mode !== "world") return false;
+    if (!decodeAssistantWorldScope(value.worldScope).ok) return false;
+  }
   if (value.model !== undefined && !isBoundedId(value.model)) return false;
   if (value.reasoningEffort !== undefined && !isAgentReasoningEffort(value.reasoningEffort)) return false;
   if (value.connectionId !== undefined && !isBoundedId(value.connectionId)) return false;

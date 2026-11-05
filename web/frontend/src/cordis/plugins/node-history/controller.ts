@@ -76,7 +76,7 @@ export type NodeHistoryClient = {
   clear?(input: { canvasId: string; nodeId: string }): Promise<
     { ok: true; removed: number } | { ok: false; code: string; error: string }
   >;
-  previewUrl(input: { canvasId: string; nodeId: string; entryId: string; variant: "preview" | "poster" | "thumbnail" }): string;
+  previewUrl(input: { canvasId: string; nodeId: string; entryId: string; variant: "preview" | "poster" }): string;
 };
 
 const PAGE_SIZE = 20;

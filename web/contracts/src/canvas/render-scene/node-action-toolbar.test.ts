@@ -177,16 +177,6 @@ describe("resolveNodeActionToolbarTarget（任务 3.1/3.9）", () => {
     { id: "text", type: "text" }
   ];
 
-  it("单选适用类型节点时返回该节点及其通用类型", () => {
-    expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["img"], nodes })).toEqual({ nodeId: "img", nodeType: "image" });
-    expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["vid"], nodes })).toEqual({ nodeId: "vid", nodeType: "video" });
-    expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["model"], nodes })).toEqual({ nodeId: "model", nodeType: "model3d" });
-  });
-
-  it("单选 group 时返回 group 目标（change: 2026-10-16-add-group-selection-toolbar）", () => {
-    expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["group"], nodes })).toEqual({ nodeId: "group", nodeType: "group" });
-  });
-
   it("多选、取消选择、非适用类型或不存在节点时隐藏", () => {
     expect(resolveNodeActionToolbarTarget({ selectedNodeIds: [], nodes })).toBeNull();
     expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["img", "vid"], nodes })).toBeNull();
@@ -201,7 +191,7 @@ describe("resolveNodeActionToolbarTarget（任务 3.1/3.9）", () => {
     expect(isNodeActionToolbarNodeType("image")).toBe(true);
     expect(isNodeActionToolbarNodeType("video")).toBe(true);
     expect(isNodeActionToolbarNodeType("model3d")).toBe(true);
-    expect(isNodeActionToolbarNodeType("group")).toBe(true);
+    expect(isNodeActionToolbarNodeType("group")).toBe(false);
     expect(isNodeActionToolbarNodeType("text")).toBe(false);
     expect(isNodeActionToolbarNodeType("composite-asset")).toBe(true);
   });

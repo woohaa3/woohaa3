@@ -30,8 +30,8 @@ export function createFrameSubmission(deps: {
   const indexNow = () => sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
   const transientNow = () => JSON.stringify({
     ...deps.transient(), selected:deps.state.selected, draft:deps.state.draft,
-    dropTargetGroupIds: deps.state.dropTargetGroupIds,
-    hover:[deps.state.hoveredNodeId,deps.state.hoveredPort,deps.state.hoveredEdgeId]
+    hover:[deps.state.hoveredNodeId,deps.state.hoveredPort,deps.state.hoveredEdgeId,deps.state.hoverPointer],
+    selectedEdge:deps.state.selectedEdgeId
   });
   const baselineBlock = (runtime: BevyRuntime, index: CanvasNodeIndex | null): string | null => {
     if (!baseline) return "no-baseline";
@@ -147,7 +147,7 @@ export function createFrameSubmission(deps: {
       const rows = deps.options.textureSync.resourceStateChanges();
       const safe = rows.every(row => {
         const node = mirror.node(baseline!.scene, row.id);
-        return node?.type === "image" && !node.model && !node.modelPreview && !node.shotPreview && !node.compositeAsset && !node.group && !node.ghost;
+        return node?.type === "image" && !node.model && !node.modelPreview && !node.ghost;
       });
       if (safe) {
         try {
@@ -219,7 +219,5 @@ export function createFrameSubmission(deps: {
       || baseline.base !== (runtime?.baseSceneGeneration?.() ?? 0)) return undefined;
     return mirror.node(baseline.scene, nodeId);
   };
-  const focusContextContains = (point: { x: number; y: number }): boolean => !!baseline?.scene.modelFocus
-    && (baseline.scene.modelFocusContext ?? []).some(rect => point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height);
-  return {run,dragScene,renderedNode,focusContextContains};
+  return {run,dragScene,renderedNode};
 }

@@ -53,7 +53,7 @@ test.describe("独立扩展发布加载", () => {
 
     // always（ChatGPT、片场）与默认启用的 browser-local（task-activity）artifact 入口被请求；
     // server-active 的 RunningHub 未激活也不请求。
-    for (const id of ["oauth-agent", "film-set", "task-activity"]) {
+    for (const id of ["oauth-agent", "task-activity"]) {
       expect(
         requests.some((url) => url.includes(`/extensions/${id}/`)),
         `${id} 应被加载`

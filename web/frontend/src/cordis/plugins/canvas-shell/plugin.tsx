@@ -22,116 +22,23 @@ import { nodeSelectionStore } from "../../services/selection-store.js";
 import { definePlugin } from "../../plugin.js";
 import { NodeDownloadService } from "../../services/node-download.js";
 import { NodeDownloadStatus } from "./node-download-status.js";
-import { resolveNodeDownloadAvailability, resolveContainerFocusEdit, resolveModelFocusView, resolveNodeActionToolbarView, resolveSelectionActionToolbarView } from "./node-action-toolbar-view.js";
-import { describeNodeActions, describeSelectionActions, nodeActionSettingsStore, routeNodeActionHit, routeSelectionActionHit } from "./node-action-host.js";
+import { resolveNodeDownloadAvailability, resolveModelFocusView, resolveNodeActionToolbarView } from "./node-action-toolbar-view.js";
+import { describeNodeActions, nodeActionSettingsStore, routeNodeActionHit } from "./node-action-host.js";
 import { setNodeActionBridge } from "./node-action-bridge.js";
 import type { BevyNodeActionsPresentation } from "@woohaa3/contracts";
-import { isFilmSetGroupNode } from "@woohaa3/contracts";
-import type { NodeActionContribution, NodeActionContext, SelectionActionContribution, SelectionActionContext } from "../../contract/platform.js";
+import type { NodeActionContribution, NodeActionContext } from "../../contract/platform.js";
 import { guardContributionMethods } from "../../contribution-guard.js";
 import type { ExtensionFaultService } from "../../extension-faults.js";
 
 export const CANVAS_SHELL_PLUGIN_ID = "canvas-shell";
-
-function groupToolbarSummary(canvas: NonNullable<ReturnType<typeof workingCanvasOf>>, nodeId: string): string | null {
-  const node = canvas.document.nodes.find(entry => entry.id === nodeId);
-  if (!node || node.type !== "group") return null;
-  const descendants = new Set<string>();
-  const visit = (parentId: string) => {
-    for (const child of canvas.document.nodes) if (child.parentId === parentId && !descendants.has(child.id)) {
-      descendants.add(child.id);
-      if (child.type === "group") visit(child.id);
-    }
-  };
-  visit(nodeId);
-  const data = canvas.nodeData[nodeId];
-  const title = typeof data?.title === "string" && data.title.trim() ? data.title.trim() : "未命名组";
-  const kind = isFilmSetGroupNode(node, data) ? "片场" : "组";
-  return `${kind} · ${descendants.size} 个节点 · ${title}`;
-}
 
 export function canvasShellExtension(): Plugin.Function<void> {
   return definePlugin(
     (ctx: Context) => {
       const downloads = new NodeDownloadService({ getCanvas: () => workingCanvasOf(woohaa3CanvasStore.getState()), mediaContent: ctx.mediaContent });
       const offDownload = ctx.on("ui.node-download.save-requested", ({ nodeId }) => { void downloads.download(nodeId); });
-      // 组徽标只负责选中/拖动；展开与收起都是选中后出现在组背板上方的明确动作。
-      // 两个动作按 group 能力工作，片场 marker 只改变摘要文案，不改变宿主分支。
-      const removeCollapsedGroupAction = ctx.slots.register("canvas.node-action", {
-        id: "group-expand",
-        owner: CANVAS_SHELL_PLUGIN_ID,
-        order: -30,
-        available: ({ nodeId, nodeType }) => {
-          if (nodeType !== "group") return false;
-          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
-          return canvas?.nodeData[nodeId]?.groupCollapsed === true;
-        },
-        describe: ({ nodeId, nodeType, writable }) => {
-          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
-          const summary = canvas ? groupToolbarSummary(canvas, nodeId) : null;
-          if (!canvas || nodeType !== "group" || canvas.nodeData[nodeId]?.groupCollapsed !== true || !summary) return null;
-          // 图标 + 文字：与其它横条动作同一栅格，不占用主色调强调。
-          return { label: "展开", icon: "expand-groups" as const, enabled: writable,
-            ...(writable ? {} : { reason: "当前画布只读" }), summary };
-        },
-        activate: ({ nodeId, nodeType, writable }) => {
-          if (!writable || nodeType !== "group") return;
-          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
-          const data = canvas?.nodeData[nodeId];
-          if (!canvas || data?.groupCollapsed !== true) return;
-          void ctx.canvasEdit.record([{ type: "nodeData.patch", nodeId,
-            value: { groupCollapsed: false }, expectedNodeData: { [nodeId]: data ?? null } }], "展开组");
-        }
-      });
-      const removeExpandedGroupAction = ctx.slots.register("canvas.node-action", {
-        id: "group-collapse",
-        owner: CANVAS_SHELL_PLUGIN_ID,
-        order: -30,
-        available: ({ nodeId, nodeType }) => {
-          if (nodeType !== "group") return false;
-          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
-          return canvas?.nodeData[nodeId]?.groupCollapsed !== true;
-        },
-        describe: ({ nodeId, nodeType, writable }) => {
-          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
-          const summary = canvas ? groupToolbarSummary(canvas, nodeId) : null;
-          if (!canvas || nodeType !== "group" || canvas.nodeData[nodeId]?.groupCollapsed === true || !summary) return null;
-          return { label: "收起", icon: "collapse-groups" as const, enabled: writable,
-            ...(writable ? {} : { reason: "当前画布只读" }), summary };
-        },
-        activate: ({ nodeId, nodeType, writable }) => {
-          if (!writable || nodeType !== "group") return;
-          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
-          const data = canvas?.nodeData[nodeId];
-          if (!canvas || data?.groupCollapsed === true) return;
-          void ctx.canvasEdit.record([{ type: "nodeData.patch", nodeId,
-            value: { groupCollapsed: true }, expectedNodeData: { [nodeId]: data ?? null } }], "收起组");
-        }
-      });
-      // 片场（自带模型聚焦工作区的容器）在画布横条上提供明确的「编辑」入口（图标 + 文字）；
-      // 它与徽标双击进入同一个聚焦工作区。普通 group 不出现该动作，宿主不按业务 ID 分支。
-      const containerFocusEdit = (nodeId: string) => resolveContainerFocusEdit({
-        canvas: workingCanvasOf(woohaa3CanvasStore.getState()) ?? null,
-        nodeId,
-        nodeCapabilities: ctx.nodeImplementations
-      });
-      const removeContainerFocusEditAction = ctx.slots.register("canvas.node-action", {
-        id: "container-focus-edit",
-        owner: CANVAS_SHELL_PLUGIN_ID,
-        order: -20,
-        available: ({ nodeId, nodeType }) => nodeType === "group" && containerFocusEdit(nodeId) !== null,
-        describe: ({ nodeId }) => containerFocusEdit(nodeId) === null
-          ? null
-          : { label: "编辑", icon: "edit" as const, enabled: true },
-        activate: ({ nodeId }) => {
-          const kind = containerFocusEdit(nodeId);
-          if (!kind) return;
-          void ctx.canvasNavigation.requestEnterNodeFocus({ nodeId, kind, owner: "direct" });
-        }
-      });
       // 模型卡片的「查看 3D」：卡片内交互关闭后（`CARD_MODEL_INTERACTION`），这是普通
-      // `model3d` 卡片唯一的查看入口。与容器的「编辑」分开注册，两者互斥（容器走编辑、
-      // 普通模型卡片走查看），避免同一个节点上出现两个指向同一工作区的按钮。
+      // `model3d` 卡片唯一的查看入口。单独注册。
       const modelFocusView = (nodeId: string) => resolveModelFocusView({
         canvas: workingCanvasOf(woohaa3CanvasStore.getState()) ?? null,
         nodeId,
@@ -141,7 +48,7 @@ export function canvasShellExtension(): Plugin.Function<void> {
         id: "model-focus-view",
         owner: CANVAS_SHELL_PLUGIN_ID,
         order: -20,
-        available: ({ nodeId, nodeType }) => nodeType !== "group" && modelFocusView(nodeId) !== null,
+        available: ({ nodeId }) => modelFocusView(nodeId) !== null,
         describe: ({ nodeId }) => modelFocusView(nodeId) === null
           ? null
           : { label: "查看 3D", tone: "primary" as const, enabled: true },
@@ -162,9 +69,9 @@ export function canvasShellExtension(): Plugin.Function<void> {
         // 下载门禁只读**内容就绪性**，MUST NOT 被只读拒绝（design D7）。
         available: () => true,
         describe: ({ nodeId, nodeType }) => {
-          // group 横条只显示分组动作（批量执行/整理/解组，change: 2026-10-16-add-group-selection-toolbar
-          // design D1）；下载是媒体内容动作，不属于分组。
-          if (nodeType === "group" || nodeType === "audio" || nodeType === "composite-asset") return null;
+          if (nodeType === "audio" || nodeType === "composite-asset" || nodeType === "world-camera") return null;
+          // 2D 组/导演区没有可下载的作品内容，横条只保留各自的组织动作。
+          if (nodeType === "workflow-group-2d" || nodeType === "scene-area") return null;
           const readiness = resolveNodeDownloadAvailability({
             canvas: workingCanvasOf(woohaa3CanvasStore.getState()),
             nodeId,
@@ -199,8 +106,6 @@ export function canvasShellExtension(): Plugin.Function<void> {
       const faults = () => ctx.get?.("extensionFaults" as never) as ExtensionFaultService | undefined;
       const contributions = () => (ctx.slots.list("canvas.node-action") as unknown as NodeActionContribution[])
         .map((entry) => guardContributionMethods(entry, "canvas.node-action", faults(), ["available", "describe", "activate"]));
-      const selectionContributions = () => (ctx.slots.list("canvas.selection-action") as unknown as SelectionActionContribution[])
-        .map((entry) => guardContributionMethods(entry, "canvas.selection-action", faults(), ["available", "describe", "activate"]));
       /** 当前 working 画布节点的 `{ id, type }` 轻量视图（横条判定共用）。 */
       const workingNodes = () => workingCanvasOf(woohaa3CanvasStore.getState())?.document.nodes.map((node) => ({ id: node.id, type: node.type })) ?? [];
       const focused = () => ctx.canvasNavigation.getSnapshot().mode.type === "node-focus";
@@ -214,17 +119,6 @@ export function canvasShellExtension(): Plugin.Function<void> {
           focused: focused(),
           writable: ctx.canvasSession.isWritable()
         });
-      };
-      // 多选横条：选中 ≥2 个节点时按同一选区解析稳定目标；与单节点横条互斥（选择数决定谁呈现）。
-      const selectionToolbarContext = (): SelectionActionContext | null => {
-        const selection = nodeSelectionStore.getSnapshot();
-        const target = resolveSelectionActionToolbarView({
-          selectedNodeIds: selection.nodeIds,
-          nodes: workingNodes(),
-          focused: focused()
-        });
-        if (!target) return null;
-        return { selectedNodeIds: target.nodeIds, writable: ctx.canvasSession.isWritable() };
       };
       const offBridge = setNodeActionBridge({
         toolbars: () => {
@@ -247,31 +141,18 @@ export function canvasShellExtension(): Plugin.Function<void> {
             contributions: contributions(),
             openSettings: (state) => { nodeActionSettingsStore.open(state); }
           });
-        },
-        selectionToolbar: () => {
-          const context = selectionToolbarContext();
-          if (!context) return null;
-          return describeSelectionActions({ contributions: selectionContributions(), context })?.presentation ?? null;
-        },
-        activateSelection: ({ actionId, menu }) => {
-          const context = selectionToolbarContext();
-          if (!context) return;
-          routeSelectionActionHit({ hit: { actionId, menu }, context, contributions: selectionContributions() });
         }
       });
-      // 贡献注册/撤销（例如 film-set 停用）时描述可能变化：请求一帧重建，避免画布残留旧横条。
+      // 贡献注册/撤销时描述可能变化：请求一帧重建，避免画布残留旧横条。
       const offActionSlots = ctx.slots.subscribe("canvas.node-action", () => {
         ctx.canvasRuntime.controller()?.invalidate("node-action-slots");
-      });
-      const offSelectionActionSlots = ctx.slots.subscribe("canvas.selection-action", () => {
-        ctx.canvasRuntime.controller()?.invalidate("selection-action-slots");
       });
       const removeDownloadStatus = ctx.slots.register("canvas.overlay", {
         id: "node-download-status", owner: CANVAS_SHELL_PLUGIN_ID, priority: 26,
         render: () => <NodeDownloadStatus service={downloads} />
       });
       ctx.effect(() => () => {
-        offBridge(); offActionSlots(); offSelectionActionSlots(); offDownload(); removeDownloadAction(); removeContainerFocusEditAction(); removeModelFocusViewAction(); removeCollapsedGroupAction(); removeExpandedGroupAction(); removeDownloadStatus();
+        offBridge(); offActionSlots(); offDownload(); removeDownloadAction(); removeModelFocusViewAction(); removeDownloadStatus();
         nodeActionSettingsStore.close();
         downloads.dispose();
       }, "canvas-shell-downloads");

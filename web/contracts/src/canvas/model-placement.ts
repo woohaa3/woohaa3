@@ -94,28 +94,6 @@ export function placementOffsetToWorldDelta(
   ]);
 }
 
-/**
- * 片场对象世界位移 → 对象基础 `localTransform.offset` 增量
- * （change: 2026-10-09-add-film-set-object-motion-and-editing，design D5）。
- *
- * 组合链为 `片场 placement × 顶层编排 × item.localTransform × ...`。对象基础摆放位于片场
- * 模型局部空间（由组合 group 直接承载），因此逆换算 = 去掉片场根摆放旋转（`R⁻¹`）再除以片场组合
- * `unit`（含 fit / placement.scale）。`unit` 非法时按 1。可选 `parentRotationInverse`/`parentScale`
- * 让调用方纳入顶层编排的逆变换，避免把 world delta 直接当 item offset。
- */
-export function worldDeltaToFilmSetItemOffset(
-  delta: Vec3,
-  options: { unit: number; extraRotationInverse?: import("./model-transform.js").Quat; extraScale?: number } = { unit: 1 }
-): { x: number; y: number; z: number } {
-  const unit = Number.isFinite(options.unit) && options.unit > 1e-9 ? options.unit : 1;
-  const extraScale = options.extraScale !== undefined && Number.isFinite(options.extraScale) && Math.abs(options.extraScale) > 1e-9
-    ? options.extraScale
-    : 1;
-  // Observer orientation belongs to the camera, not the model root.
-  let local: Vec3 = [...delta];
-  if (options.extraRotationInverse) local = quatRotate(options.extraRotationInverse, local);
-  return { x: local[0] / unit / extraScale, y: local[1] / unit / extraScale, z: local[2] / unit / extraScale };
-}
 
 /** 聚焦相机前向（世界空间，从相机指向 target 的反方向）。 */
 export function cameraForwardVector(camera: ModelFocusCamera): Vec3 {

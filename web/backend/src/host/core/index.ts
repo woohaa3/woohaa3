@@ -15,7 +15,6 @@ import { mcpInstallationPlugin } from "./mcp-installation.js";
 import { libraryPlugin } from "./library.js";
 import { promptLibraryPlugin } from "./prompt-library.js";
 import { mediaPlugin } from "./media.js";
-import { recordingExecutorPlugin } from "./recording-executor.js";
 import { storagePlugin } from "./storage.js";
 import { taskPlugin } from "./task.js";
 import { telemetryPlugin } from "./telemetry.js";
@@ -35,7 +34,7 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
   const { env } = options;
   // 插件对象按装载顺序留一份，供设置面登记插件清单。
   // 遥测排在任务之前：任务终态经 `ctx.get("telemetry")` 写入（懒取，不影响单独装载 taskPlugin 的场景）。
-  const plugins = [storagePlugin, exposerPlugin, telemetryPlugin, mediaPlugin, libraryPlugin, promptLibraryPlugin, generationPlugin, marketplacePlugin, adminApiPlugin, taskPlugin, recordingExecutorPlugin, canvasPlugin, mcpPlugin, mcpInstallationPlugin, applicationPlugin, extensionManagerPlugin];
+  const plugins = [storagePlugin, exposerPlugin, telemetryPlugin, mediaPlugin, libraryPlugin, promptLibraryPlugin, generationPlugin, marketplacePlugin, adminApiPlugin, taskPlugin, canvasPlugin, mcpPlugin, mcpInstallationPlugin, applicationPlugin, extensionManagerPlugin];
   // 逐插件计时：core 层整体耗时异常时，必须能直接看出是哪个插件慢。
   const timed = async <T>(plugin: string, load: () => PromiseLike<T> | T): Promise<T> => {
     const started = Date.now();
@@ -56,13 +55,6 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
     await timed("generation", () => ctx.plugin(generationPlugin, { env })),
     await timed("marketplace", () => ctx.plugin(marketplacePlugin)),
     await timed("admin-api", () => ctx.plugin(adminApiPlugin)),
-    // 录制通道在 canvas 之前：canvas 的录制编排按 `ctx.get("recordingExecutor")` 懒取。
-    await timed("recording-executor", () =>
-      ctx.plugin(recordingExecutorPlugin, {
-        env,
-        ...(options.recordingCheckoutDirectory ? { checkoutDirectory: options.recordingCheckoutDirectory } : {})
-      })
-    ),
     await timed("task", () => ctx.plugin(taskPlugin, { env, ...(options.modelsConfig ? { modelsConfig: options.modelsConfig } : {}) })),
     await timed("canvas", () =>
       ctx.plugin(canvasPlugin, {

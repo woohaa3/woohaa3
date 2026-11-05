@@ -14,33 +14,21 @@
  * 命名规则（design D2）：UI 行为请求用 `ui.<feature>.<action>-requested`；任务活动事实用
  * `task.activity.<phase>`。事件名不表达后端部署来源。
  */
-import type { BackgroundActivityJob } from "@woohaa3/contracts";
 import type { TaskActivityFinished, TaskActivityStarted, TaskActivityUpdated } from "./task-activity.js";
 import type { ReleaseChangedPayload } from "../extension-entry/release-adoption.js";
 
 /** 所有跨插件事件的 payload 类型（编译期事实源）。 */
 export type FrontendEventPayloads = {
-  "ui.task-activity.open-requested": { nodeId: string };
   "ui.media-preview.open-requested": { assetId: string; nodeId: string; title: string };
   "ui.text-preview.open-requested": { nodeId: string };
   /** 双击卡片底部标题行 → 请求重命名该节点（由 canvas-menu 的重命名浮层消费）。 */
   "ui.node-rename.open-requested": { nodeId: string };
-  /** 双击便签 → 请求编辑正文（由 canvas-menu 的便签编辑浮层消费）。 */
-  "ui.sticky-note.edit-requested": { nodeId: string };
   "ui.video-frame-capture.open-requested": { nodeId: string };
   "ui.node-history.open-requested": { nodeId: string };
   "ui.node-history.switch-requested": { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string };
   /** 版本卡片「重新编辑」→ 请求把该版本生成时的输入载回节点的对话框（由 task-execution 消费）。 */
   "ui.node-history.reedit-requested": { nodeId: string; snapshot: import("@woohaa3/contracts").RunInputSnapshot };
   "ui.node-download.save-requested": { nodeId: string };
-  /**
-   * 双击拍摄镜头预览卡片 → 进入所属片场并选择该镜头
-   * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4 / design D8）。
-   *
-   * 画布输入层只发布**已校验归属**的目标身份；片场扩展负责进入聚焦、选择该 clipId 并在零点
-   * 暂停。宿主不读取片场业务数据，也不猜默认镜头。
-   */
-  "ui.shot-preview.enter-requested": { previewNodeId: string; filmSetNodeId: string; clipId: string };
   "task.activity.started": TaskActivityStarted;
   "task.activity.updated": TaskActivityUpdated;
   "task.activity.finished": TaskActivityFinished;
@@ -48,7 +36,6 @@ export type FrontendEventPayloads = {
    * 扩展后台活动（非 durable 任务）：扩展在 canvas scope 内按稳定 `job.id` 幂等发布，
    * 由 task-activity 浮层展示（如镜头参考录制）。payload 只含可读摘要。
    */
-  "extension.activity.updated": { job: BackgroundActivityJob };
   /**
    * 宿主发布目录已切换并完成热登记（change: 2026-10-21-add-extension-marketplace-point，6.2/6.3）：
    * 新增条目已按资格装配；升级/卸载的条目当前页面仍用旧版本，`pendingReopen` 供设置面提示重开画布。
@@ -83,7 +70,6 @@ export type EventDescriptor = {
  * 登记 descriptor，或登记了不存在的 payload，都会在 typecheck 失败。
  */
 export const frontendEventCatalog = {
-  "ui.task-activity.open-requested": { scope: "canvas", kind: "request", producers: ["canvas-context-menu"], consumers: ["task-activity"] },
   "ui.node-history.switch-requested": { scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["node-history"] },
   "ui.media-preview.open-requested": {
     scope: "canvas",
@@ -95,9 +81,6 @@ export const frontendEventCatalog = {
     scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["media-preview"]
   },
   "ui.node-rename.open-requested": {
-    scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["canvas-menu"]
-  },
-  "ui.sticky-note.edit-requested": {
     scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["canvas-menu"]
   },
   "ui.video-frame-capture.open-requested": {
@@ -127,9 +110,6 @@ export const frontendEventCatalog = {
   "ui.node-download.save-requested": {
     scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["canvas-shell"]
   },
-  "ui.shot-preview.enter-requested": {
-    scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["film-set"]
-  },
   "task.activity.updated": {
     scope: "canvas",
     kind: "fact",
@@ -140,12 +120,6 @@ export const frontendEventCatalog = {
     scope: "canvas",
     kind: "fact",
     producers: ["task-execution", "task-activity"],
-    consumers: ["task-activity"]
-  },
-  "extension.activity.updated": {
-    scope: "canvas",
-    kind: "fact",
-    producers: ["film-set"],
     consumers: ["task-activity"]
   },
   "extension.release.changed": {

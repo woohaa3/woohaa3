@@ -74,7 +74,6 @@ declare module "@deepseek-ai/cordis" {
     hoverState: import("../extension-api/model-workspace.js").HoverStateService;
     nodeImplementations: import("../extension-api/node-implementations.js").NodeImplementationRegistry;
     mediaContent: import("../extension-api/media-content.js").MediaContentService;
-    compositeAssets: import("../extension-api/composite-assets.js").CompositeAssetRegistry;
     canvasState: import("./contract/platform.js").CanvasStoreFacade;
     /**
      * 当前画布的图片库（资源栏「图片」面板与扩展的资源页共用同一份数据）。
@@ -167,7 +166,6 @@ declare module "@deepseek-ai/cordis" {
      * 业务生成扩展只消费它，不自行持久化会话。
      */
     agentConversationService: import("./contract/agent-conversation.js").AgentConversationService;
-    canvasGroupRuns: import("./contract/canvas-group-runs.js").CanvasGroupRunsService;
     /**
      * 画布内设置的打开能力（Canvas page scope 提供；change: 2026-10-17-move-settings-into-canvas-dialog）。
      *

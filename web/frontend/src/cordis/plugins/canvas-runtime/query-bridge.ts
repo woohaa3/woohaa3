@@ -8,7 +8,6 @@
 import type { BevyModelEditor } from "@woohaa3/contracts";
 import type { GizmoQueryInput } from "../canvas-shell/model-gizmo-hit.js";
 import type {
-  CompositeAssetScopeGeometryEntry,
   GizmoHitResult,
   PointHit,
   ProbeCandidate,
@@ -25,13 +24,12 @@ export type QueryEnvelope<T> = {
   nodeIds?: string[];
   candidates?: T;
   nodeId?: string;
-  itemId?: string;
   target?: [number, number, number];
   radius?: number;
-  /** 通用 drop target 查询结果（change: 2026-10-12-align-film-set-scope-with-isometric-grid）。 */
+  ground?: { u: number; v: number };
+  surface?: import("@woohaa3/contracts").WorldPoint | null;
+  /** 通用 drop target 查询结果。 */
   targetNodeId?: string | null;
-  /** 复合资产范围几何读取结果。 */
-  scopes?: CompositeAssetScopeGeometryEntry[];
 };
 
 export type QueryBridge = {
@@ -146,19 +144,9 @@ export function encodeDropTargetRequest(input: {
   });
 }
 
-/** 复合资产范围几何查询编码。 */
-export function encodeCompositeAssetScopesRequest(input: { generation: number }): string {
-  return JSON.stringify(input);
-}
-
 /** 通用 drop target 结果投影（success 且无目标 → null）。 */
 export const projectDropTarget = (payload: QueryEnvelope<unknown>): string | null =>
   typeof payload.targetNodeId === "string" ? payload.targetNodeId : null;
-
-/** 复合资产范围几何结果投影。 */
-export const projectCompositeAssetScopes = (
-  payload: QueryEnvelope<unknown>
-): CompositeAssetScopeGeometryEntry[] => payload.scopes ?? [];
 
 /** 模型 picking 查询编码。 */
 export function encodeModelPickRequest(input: {
@@ -169,25 +157,6 @@ export function encodeModelPickRequest(input: {
   height: number;
 }): string {
   return JSON.stringify(input);
-}
-
-/** 片场对象 picking 查询编码（change: 2026-10-09-add-film-set-object-motion-and-editing）。 */
-export function encodeFilmSetItemPickRequest(input: {
-  nodeId: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  projection: { target: [number, number, number]; yaw: number; pitch: number; distance: number };
-}): string {
-  return JSON.stringify({
-    nodeId: input.nodeId,
-    x: input.x,
-    y: input.y,
-    width: input.width,
-    height: input.height,
-    projection: input.projection
-  });
 }
 
 /** 点查询结果投影。 */
@@ -203,58 +172,6 @@ export const projectModelPick = (
   payload.nodeId && payload.target && payload.radius !== undefined
     ? { nodeId: payload.nodeId, target: payload.target, radius: payload.radius }
     : null;
-
-/** 片场对象 pick 结果投影（change: 2026-10-09-add-film-set-object-motion-and-editing）。 */
-export const projectFilmSetItemPick = (
-  payload: QueryEnvelope<unknown>
-): { nodeId: string; itemId: string } | null =>
-  typeof payload.nodeId === "string" && typeof payload.itemId === "string"
-    ? { nodeId: payload.nodeId, itemId: payload.itemId }
-    : null;
-
-/** 片场对象包围盒查询编码。 */
-export function encodeFilmSetItemBoundsRequest(nodeId: string): string {
-  return JSON.stringify({ nodeId });
-}
-
-/** 片场对象包围盒结果投影。 */
-export const projectFilmSetItemBounds = (
-  payload: { items?: Array<{ itemId: string; center: [number, number, number]; radius: number; unit: number; yaw: number; worldToLocal?: number[] }> }
-): Array<{ itemId: string; center: [number, number, number]; radius: number; unit: number; yaw: number; worldToLocal?: number[] }> => payload.items ?? [];
-
-/** 片场对象 picking 原始 JSON 调用（供 bevy-runtime 复用，减少体积）。 */
-export function queryCompositeAssetItemPickRaw(
-  module: {
-    query_composite_asset_item_pick?: (json: string) => string;
-  },
-  input: {
-    nodeId: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    projection: { target: [number, number, number]; yaw: number; pitch: number; distance: number };
-  }
-): string {
-  return (module.query_composite_asset_item_pick ?? (() => ""))(encodeFilmSetItemPickRequest(input));
-}
-
-/** 片场对象包围盒原始调用（解析失败返回空数组）。 */
-export function queryCompositeAssetItemBoundsRaw(
-  module: {
-    query_composite_asset_item_bounds?: (json: string) => string;
-  },
-  nodeId: string
-): Array<{ itemId: string; center: [number, number, number]; radius: number; unit: number; yaw: number; worldToLocal?: number[] }> {
-  if (!module.query_composite_asset_item_bounds) return [];
-  try {
-    return projectFilmSetItemBounds(
-      JSON.parse(module.query_composite_asset_item_bounds(encodeFilmSetItemBoundsRequest(nodeId))) as never
-    );
-  } catch {
-    return [];
-  }
-}
 
 /** 解析 gizmo 命中结果（失败返回 null）。 */
 export function parseGizmoResult(result: string | null | undefined): GizmoHitResult | null {

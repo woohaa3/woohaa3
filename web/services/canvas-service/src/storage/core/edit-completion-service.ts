@@ -93,7 +93,7 @@ export class EditCompletionService {
     if (!node) return fail("EDIT_SESSION_TARGET_INVALID", `节点 ${request.nodeId} 不存在`);
     const nodeKind = kindForNodeType(node.type);
     if (nodeKind !== request.kind) return fail("EDIT_SESSION_TARGET_INVALID", "节点类型与会话种类不匹配");
-    const currentIdentity = currentIdentityOfNode(exported.canvas, request.nodeId, request.kind, this.content);
+    const currentIdentity = currentIdentityOfNode(exported.canvas, request.nodeId, request.kind);
     if (currentIdentity === null) return fail("EDIT_SESSION_TARGET_INVALID", "节点当前无可归档内容");
 
     const key = `begin:${request.sessionId}`;

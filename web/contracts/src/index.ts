@@ -17,6 +17,7 @@ export * from "./task/activity.js";
 export * from "./task/background-activity.js";
 export * from "./task/recording-activity.js";
 export * from "./task/protocol.js";
+export * from "./task/world-capture-input.js";
 export * from "./task/schema-validation.js";
 export * from "./task/parameter-schema.js";
 export * from "./task/image-parameters.js";
@@ -42,49 +43,36 @@ export * from "./canvas/agent-node-descriptors.js";
 export * from "./canvas/agent-canvas-protocol.js";
 export * from "./canvas/agent-canvas-projection.js";
 export * from "./canvas/agent-canvas-internal.js";
-export * from "./canvas/generated-image-registry.js";
 export * from "./canvas/agent-canvas-run.js";
 export * from "./canvas/agent-media-continuation.js";
 export * from "./canvas/canvas-script/index.js";
 export * from "./canvas/domain/index.js";
 export * from "./canvas/model-script.js";
 export * from "./canvas/model-transform.js";
-export * from "./canvas/content-frame.js";
-export * from "./canvas/content-conversion.js";
-export * from "./canvas/film-set-mcp.js";
 export * from "./canvas/content-runtime.js";
-export * from "./canvas/content-recording.js";
-export * from "./canvas/content-recording-port.js";
-export * from "./canvas/film-set-export-profile.js";
-export * from "./canvas/recording-protocol.js";
 export * from "./canvas/model-definition.js";
-export * from "./canvas/humanoid-rig.js";
 export * from "./canvas/glb/parse.js";
 export * from "./canvas/glb/import.js";
-export * from "./canvas/group-appearance.js";
 export * from "./canvas/scene-ir-v2.js";
 export * from "./canvas/model-executor.js";
 export * from "./canvas/model-executor-v2.js";
 export * from "./canvas/model-api-descriptor.js";
+export * from "./canvas/image-director-scene.js";
 export * from "./canvas/motion-script.js";
 export * from "./canvas/motion-ir.js";
 export * from "./canvas/motion-executor.js";
 export * from "./canvas/model-api-descriptor-motion.js";
 export * from "./canvas/mcp-internal.js";
 export * from "./canvas/render-scene.js";
-export * from "./canvas/render-scene/overview-cache.js";
 export * from "./canvas/viewport-update.js";
 export * from "./canvas/observer-update.js";
 export * from "./canvas/position-update.js";
-export * from "./canvas/resource-state-update.js";
 export * from "./canvas/prepared-model.js";
 export * from "./canvas/content-hash.js";
-export * from "./canvas/source-descriptor.js";
 export * from "./canvas/node-history.js";
 export * from "./canvas/merge-target.js";
 export * from "./canvas/run-state.js";
 export * from "./canvas/node-display-name.js";
-export * from "./canvas/director-studio-title.js";
 export * from "./canvas/menu-sections.js";
 export * from "./canvas/geometry.js";
 export * from "./canvas/arrange.js";
@@ -98,31 +86,9 @@ export * from "./canvas/shot-camera.js";
 export * from "./canvas/gizmo.js";
 export * from "./canvas/canvas-node-model.js";
 export * from "./canvas/animation-snapshot.js";
-export * from "./canvas/film-set-content.js";
-export * from "./canvas/film-set-group.js";
-export * from "./canvas/film-set-group-member-layout.js";
-export * from "./canvas/film-set-animations.js";
-export * from "./canvas/film-set-clip-view.js";
-export * from "./canvas/film-set-clip-ops.js";
-export * from "./canvas/film-set-clip-compilation.js";
-export * from "./canvas/film-set-shot-preview.js";
 export * from "./canvas/managed-node.js";
 export * from "./canvas/managed-node-lifecycle.js";
 export * from "./canvas/content-contribution.js";
-export * from "./canvas/film-set-shot-reference.js";
-export * from "./canvas/film-set-shot-image-reference.js";
-export * from "./canvas/film-set-clip-edit.js";
-export * from "./canvas/film-set-item-ops.js";
-export * from "./canvas/film-set-item-edit.js";
-export * from "./canvas/film-set-object-container.js";
-export * from "./canvas/film-set-object-replacement.js";
-export * from "./canvas/film-set-conversion.js";
-export * from "./canvas/film-set-composition.js";
-export * from "./canvas/film-set-layout.js";
-export * from "./canvas/film-set-space.js";
-export * from "./canvas/film-set-camera-motion.js";
-export * from "./canvas/film-set-placement-repair.js";
-export * from "./canvas/motion-validation.js";
 export * from "./canvas/model-validity.js";
 export * from "./theme/index.js";
 export * from "./prompt-snippets/index.js";
@@ -133,57 +99,141 @@ export * from "./backend/index.js";
 export * from "./settings/index.js";
 export * from "./telemetry/event.js";
 export * from "./telemetry/query.js";
-// 日志信封导出除与 telemetry 同名的两个文本工具外的全部内容：
-// 两处实现有意不同——日志截断要留省略号，telemetry 的按码点上限截断则不留。
-export {
-  LOG_ATTRIBUTE_VALUE_LIMIT,
-  LOG_ERROR_CODE_PATTERN,
-  LOG_EVENT_PATTERN,
-  LOG_LEVELS,
-  LOG_LIMITS,
-  LOG_MESSAGE_LIMIT,
-  LOG_MODULE_PATTERN,
-  LOG_SCHEMA_VERSION,
-  LOG_TRACE_ID_PATTERN,
-  REDACTED,
-  isSensitiveLogKey,
-  logLevelAtLeast,
-  logText,
-  logValueToString,
-  normalizeLogRecord,
-  redactLogPatterns,
-  redactLogText,
-  type LogAttrValue,
-  type LogLevel,
-  type LogRecord,
-  type LogRuntime,
-  type NormalizeLogInput
-} from "./log/index.js";
 export * from "./plugin-icon.js";
 
-export { compositeAssetSceneOps } from "./canvas/composite-asset-scene.js";
-
-export * from "./canvas/media-time.js";
 
 export * from "./canvas/model-script-batch.js";
 
 export * from "./canvas/image-project-references.js";
 export * from "./mcp-installation.js";
-export * from "./canvas/group-authoring-scope.js";
 export * from "./canvas/node-history/execution-presentation.js";
 
 export * from "./canvas/composite-children.js";
 
 export * from "./canvas/node-capabilities.js";
 export * from "./canvas/builtin-node-capabilities.js";
+export * from "./canvas/world-camera-ui.js";
 
 export * from "./canvas/media-content.js";
-export * from "./canvas/group-presentation.js";
-export * from "./canvas/group-badge.js";
 export * from "./canvas/ground-anchor.js";
-export * from "./canvas/film-set-animation-projection.js";
-export * from "./canvas/film-set-group-projection.js";
 
 export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService } from "./extension/services/host/media-formats.js";
 export * from "./canvas/scene-package.js";
+export * from "./canvas/shared-world.js";
+export * from "./canvas/world-animation-script.js";
+export * from "./canvas/scene-footprint.js";
+export * from "./canvas/world-conversion.js";
+export * from "./canvas/creation-scopes-ui.js";
+export {
+  SharedWorldCodecError,
+  decodeWorldInstanceData,
+  decodeWorldPoint,
+  decodeWorldRotation,
+  decodeWorldTransform,
+  encodeWorldInstanceData,
+  encodeWorldPoint,
+  encodeWorldRotation,
+  encodeWorldTransform,
+  type SharedWorldCodecFailureCode
+} from "./canvas/shared-world-codec.js";
+export {
+  decodeCreationScopeData,
+  decodeGroundAabb,
+  decodeGroundPoint,
+  decodeSceneAreaData,
+  decodeWorkflowGroupData,
+  encodeCreationScopeData,
+  encodeGroundAabb,
+  encodeGroundPoint,
+  encodeSceneAreaData,
+  encodeWorkflowGroupData,
+  type CreationScopeNodeData
+} from "./canvas/creation-scope-codec.js";
+export {
+  remapWorldCopyReferences,
+  type WorldCopyIdTable,
+  type WorldCopySourceNode,
+  type WorldReferenceRemapEntry,
+  type WorldReferenceRemapFailure,
+  type WorldReferenceRemapFailureCode,
+  type WorldReferenceRemapIdMap,
+  type WorldReferenceRemapInput,
+  type WorldReferenceRemapResult,
+  type WorldReferenceRemapWorldKind,
+  type WorldReferenceRelation,
+  type WorldReferenceUnavailable
+} from "./canvas/world-reference-remap.js";
+export {
+  WORLD_CAMERA_HISTORY_VERSION,
+  canonicalizeWorldCameraRotation,
+  decodeWorldCamera,
+  decodeWorldCameraHistorySnapshot,
+  diagnoseWorldCameraSettings,
+  encodeWorldCamera,
+  encodeWorldCameraHistorySnapshot,
+  worldCameraCompletionKey,
+  type WorldCameraHistorySnapshot,
+  type WorldCameraSettingsDiagnosis
+} from "./canvas/world-camera-codec.js";
+export {
+  WORLD_CAPTURE_INPUT_VERSION,
+  WORLD_CAPTURE_MEDIA_VERSION,
+  WORLD_CAPTURE_NON_AUTHORING_CAUSES,
+  applyWorldCaptureChange,
+  decodeWorldCaptureFrozenInput,
+  decodeWorldCaptureMediaMetadata,
+  decodeWorldCaptureVersionKey,
+  encodeWorldCaptureFrozenInput,
+  encodeWorldCaptureMediaMetadata,
+  encodeWorldCaptureVersionKey,
+  freezeWorldCaptureInput,
+  resolveWorldCaptureWait,
+  settleWorldCaptureResult,
+  toWorldCaptureInput,
+  worldCaptureChangeInvalidates,
+  worldCaptureVersionKeysEqual,
+  worldCaptureVersionSignature,
+  type WorldCaptureAuthoringChange,
+  type WorldCaptureChange,
+  type WorldCaptureFreezeFailureCode,
+  type WorldCaptureFreezeResult,
+  type WorldCaptureFrozenInput,
+  type WorldCaptureMediaMetadata,
+  type WorldCaptureNonAuthoringCause,
+  type WorldCaptureSettlement,
+  type WorldCaptureSettlementDecision,
+  type WorldCaptureWaitRequest,
+  type WorldCaptureWaitResolution
+} from "./canvas/world-capture-contract.js";
+export {
+  compareWorldCaptureVersionKeys,
+  decodeWorldCaptureInputMetadata,
+  decodeWorldCaptureVersionKeyText,
+  encodeWorldCaptureInputMetadata,
+  encodeWorldCaptureVersionKeyText,
+  worldCaptureInputMetadataEqual,
+  type WorldCaptureVersionComparison
+} from "./canvas/world-capture-codec.js";
+export * from "./canvas/world-capture-port-contract.js";
+export * from "./canvas/world-capture-content-contract.js";
+export * from "./canvas/world-capture-pipeline-contract.js";
+export * from "./canvas/world-capture-image.js";
+export * from "./canvas/scene-area-plan-contract.js";
+export * from "./canvas/scene-area-operation-plan.js";
+export * from "./canvas/world-authoring.js";
+export * from "./canvas/assistant-world-authority.js";
+export * from "./canvas/group-authoring-scope.js";
+export * from "./canvas/world-authoring-response-codec.js";
+
+// 以下为主干在分叉后新增、而特性线未导出的模块（日志信封、图片资源、人形骨架等）。
+export * from "./canvas/generated-image-registry.js";
+export * from "./canvas/humanoid-rig.js";
+export * from "./canvas/resource-state-update.js";
 export * from "./media/image-resource.js";
+export {
+  LOG_ATTRIBUTE_VALUE_LIMIT, LOG_ERROR_CODE_PATTERN, LOG_EVENT_PATTERN, LOG_LEVELS, LOG_LIMITS,
+  LOG_MESSAGE_LIMIT, LOG_MODULE_PATTERN, LOG_SCHEMA_VERSION, LOG_TRACE_ID_PATTERN, REDACTED,
+  isSensitiveLogKey, logLevelAtLeast, logText, logValueToString, normalizeLogRecord,
+  redactLogPatterns, redactLogText,
+  type LogAttrValue, type LogLevel, type LogRecord, type LogRuntime, type NormalizeLogInput
+} from "./log/index.js";

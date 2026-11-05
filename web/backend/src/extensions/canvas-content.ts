@@ -24,11 +24,6 @@ export function mergeCanvasContentRuntimes(entries: readonly { extensionId: stri
       migrations.add(migration.extensionId);
       result.managedMigrations = [...result.managedMigrations!, migration];
     }
-    for (const capability of ["frames", "conversion", "mcp", "recording"] as const) {
-      if (!runtime[capability]) continue;
-      if (result[capability]) throw Error(`canvas-content-registration-conflict: ${capability}`);
-      Object.assign(result, { [capability]: runtime[capability] });
-    }
   }
   result.managedLifecycles = lifecycle.implementations();
   return result;

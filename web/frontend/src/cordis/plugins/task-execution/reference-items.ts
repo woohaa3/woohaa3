@@ -8,11 +8,9 @@
  */
 import {
   selfReferenceMapping,
+  decodeWorldCamera,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
-  providerReferenceRole,
-  SHOT_REFERENCE_ROLE,
-  SHOT_IMAGE_REFERENCE_ROLE,
   sortWoohaa3CanvasInputMappings,
   type CanvasNodeData,
   type CanvasNodeInputMapping,
@@ -23,9 +21,6 @@ import {
   type Woohaa3CanvasMentionType
 } from "@woohaa3/contracts";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
-
-/** Provider 侧角色：镜头参考按视频参考参与绑定校验与展示（映射定义在 contracts，前后端共用）。 */
-export { providerReferenceRole };
 
 export type ReferenceItemStatus = "ready" | "waiting" | "invalid";
 
@@ -93,6 +88,18 @@ export function resolveReferenceItems(options: {
       });
       continue;
     }
+    if (canvas.document.nodes.some(node => node.id === mapping.sourceNodeId && node.type === "world-camera")) {
+      const camera = decodeWorldCamera(nodeData[mapping.sourceNodeId]?.worldCamera);
+      const acceptable = bindings === undefined || bindings.some(entry => entry.roles.includes(mapping.role)
+        && entry.mediaKinds.includes("image") && entry.mediaTypes.includes("image/png"));
+      const reason = !camera.ok ? "上游镜头配置无效" : !acceptable ? "所选模型不接受镜头图像参考" : null;
+      // 镜头像素由宿主/页面在提交时按当前取景冻结；配置合法且模型接受时即可引用（可 @）。
+      items.push({ slotId, sourceNodeId: mapping.sourceNodeId, role: mapping.role, mentionType,
+        label, mediaKind: "image", previewUrl: null, assetId: null,
+        status: reason ? "invalid" : "ready", blockingReason: reason, fieldLabel: null });
+      if (reason) blockingReasons.push(reason);
+      continue;
+    }
     const resolved = resolveMappingAsset(canvas, mapping);
     if (!resolved) {
       items.push({
@@ -101,20 +108,18 @@ export function resolveReferenceItems(options: {
         role: mapping.role,
         mentionType,
         label,
-        mediaKind: mapping.role === SHOT_REFERENCE_ROLE ? "video" : mapping.role === SHOT_IMAGE_REFERENCE_ROLE ? "image" : null,
+        mediaKind: null,
         previewUrl: null,
         assetId: null,
         status: "waiting",
-        blockingReason: mapping.role === SHOT_IMAGE_REFERENCE_ROLE ? "等待镜头参考图片准备完成" : mapping.role === SHOT_REFERENCE_ROLE
-          ? "等待镜头参考录制完成"
-          : `上游节点 ${mapping.sourceNodeId} 还没有可用输出`,
+        blockingReason: `上游节点 ${mapping.sourceNodeId} 还没有可用输出`,
         fieldLabel: null
       });
       continue;
     }
     const binding = bindings?.find(
       (entry) =>
-        entry.roles.includes(providerReferenceRole(mapping.role)) &&
+        entry.roles.includes(mapping.role) &&
         entry.mediaKinds.includes(resolved.mediaKind) &&
         entry.mediaTypes.includes(resolved.mediaType)
     );
@@ -129,7 +134,7 @@ export function resolveReferenceItems(options: {
       previewUrl: resolved.previewUrl,
       assetId: resolved.assetId,
       status: resolved.ready && acceptable ? "ready" : resolved.ready ? "invalid" : "waiting",
-      blockingReason: acceptable ? null : `所选模型不接受参考角色「${providerReferenceRole(mapping.role)}」或媒体类型「${resolved.mediaType}」`,
+      blockingReason: acceptable ? null : `所选模型不接受参考角色「${mapping.role}」或媒体类型「${resolved.mediaType}」`,
       fieldLabel: binding?.label ?? null
     };
     items.push(item);
@@ -249,8 +254,6 @@ export function collectDirectMappings(canvas: ServerCanvas, nodeId: string): Can
 
 function mentionTypeForMapping(mapping: CanvasNodeInputMapping): Woohaa3CanvasMentionType {
   if (mapping.role === "text_prompt") return "input_text";
-  if (mapping.role === SHOT_REFERENCE_ROLE) return "input_video";
-  if (mapping.role === SHOT_IMAGE_REFERENCE_ROLE) return "input_image";
   if (mapping.role.includes("video")) return "input_video";
   if (mapping.role.includes("audio") || mapping.role.includes("voice") || mapping.role.includes("music")) {
     return "input_audio";

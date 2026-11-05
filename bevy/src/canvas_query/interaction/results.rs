@@ -26,19 +26,6 @@ pub(crate) enum PointHit {
     ModelPreview {
         node_id: String,
     },
-    /// 片场范围命中（纯模型片场，change: 2026-10-08-make-film-set-model-only）。
-    FilmScope {
-        node_id: String,
-    },
-    /// 拍摄镜头预览卡片**内容区**命中
-    /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D6）。
-    ///
-    /// 只有内容区建立拍摄播放资格；标题区、卡片边框、归属线与相机标记保持普通 `Node`
-    /// 命中（或被其它控件的命中优先消费），不得作为开播入口。归属（filmSetNodeId/clipId）
-    /// 是权威 nodeData，由宿主从当前画布读取，命中只表达「指针落在该卡片内容区」。
-    ShotPreview {
-        node_id: String,
-    },
     Port {
         node_id: String,
         side: String,
@@ -129,31 +116,3 @@ pub(crate) struct DropTargetQueryResult {
     pub(crate) target_node_id: Option<String>,
 }
 
-/// 单个复合资产范围几何读取条目：nodeId、形状与派生顶点/AABB/基准矩形。
-///
-/// 只承载拖动提示所需轻量几何，不返回 SceneIR、mesh 或完整 scene JSON
-/// （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D5）。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ScopeGeometryEntry {
-    pub(crate) node_id: String,
-    /// `rect` / `isometric-diamond`。
-    pub(crate) shape: String,
-    /// 闭合多边形顶点 `[x, y]`（rect 为四角，地面矩形为 top/right/bottom/left）。
-    pub(crate) vertices: [[f32; 2]; 4],
-    /// 8 抓手中心 `[x, y]`：`n, ne, e, se, s, sw, w, nw`。
-    pub(crate) handles: [[f32; 2]; 8],
-    pub(crate) aabb: [f32; 4],
-    /// 内容适配基准矩形 `[x, y, width, height]`。
-    pub(crate) base: [f32; 4],
-}
-
-/// 复合资产范围几何查询结果（拖动提示消费）。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ScopeGeometryQueryResult {
-    pub(crate) available: bool,
-    pub(crate) reason: Option<String>,
-    pub(crate) generation: u32,
-    pub(crate) scopes: Vec<ScopeGeometryEntry>,
-}

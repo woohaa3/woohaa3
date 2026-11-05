@@ -40,7 +40,7 @@ export function registerAgentScriptTools(server: McpServer, deps: AgentAuthoring
     {
       title: "读取 Canvas Script API",
       description:
-        "按当前授权范围返回受支持脚本版本、node/group/reparent/ungroup/layout/setTitle/existing/connect/move/setPrompt/remove 签名、handle/key 与 placement 规则、执行边界（隔离与可取消）、可用节点种类和示例。只读；不执行脚本、不改变画布。不可用时明确标注原因。",
+        "按当前授权范围返回受支持脚本版本、node/layout/setTitle/existing/connect/move/setPrompt/remove 签名、handle/key 与 placement 规则、执行边界（隔离与可取消）、可用节点种类和示例。只读；不执行脚本、不改变画布。不可用时明确标注原因。",
       inputSchema: z.strictObject({ ...CANVAS_ID_SCHEMA }),
       outputSchema: z.looseObject({
         available: z.boolean(),

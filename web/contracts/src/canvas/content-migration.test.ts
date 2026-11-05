@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { ContentContributionRegistry, migrateContentNodeData, type ContentNodeDataCodec } from "./content-contribution.js";
-import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
-import { normalizeCanvas } from "./domain/normalization.js";
-import { filmSetContentContribution, filmSetNodeDataCodec } from "./film-set-content.js";
 
 function codec(schemaVersion: (data: unknown) => number | null): ContentNodeDataCodec {
   return {
@@ -68,40 +65,4 @@ describe("内容迁移", () => {
     expect(migrateContentNodeData(older, gapped)).toEqual({ data: older, readOnly: true, applied: [] });
   });
 
-  it("片场组版本过新时读取保留 marker", () => {
-    const canvas = createEmptyWoohaa3ServerCanvas("canvas", "2026-11-02T00:00:00.000Z");
-    canvas.document.nodes = [{ id: "film", type: "group", position: { x: 0, y: 0 } }];
-    canvas.nodeData = { film: { filmSetGroup: { schemaVersion: 99, sceneBindings: [] } } as never };
-    const content = new ContentContributionRegistry();
-    content.register(filmSetContentContribution);
-    expect(normalizeCanvas(canvas, { content }).nodeData.film?.filmSetGroup).toEqual({ schemaVersion: 99, sceneBindings: [] });
-    expect(normalizeCanvas(canvas).nodeData.film?.filmSetGroup).toBeUndefined();
-  });
-
-  it("传入片场 codec 时，当前版本的非法 marker 保留，非 group 仍删除", () => {
-    const content = new ContentContributionRegistry();
-    content.register(filmSetContentContribution);
-    const canvas = createEmptyWoohaa3ServerCanvas("canvas", "2026-11-02T00:00:00.000Z");
-    const marker = { schemaVersion: 1, sceneBindings: "nope" };
-    canvas.document.nodes = [
-      { id: "film", type: "group", position: { x: 0, y: 0 } },
-      { id: "card", type: "model3d", position: { x: 0, y: 0 } }
-    ];
-    canvas.nodeData = {
-      film: { filmSetGroup: marker } as never,
-      card: { filmSetGroup: marker } as never
-    };
-    const normalized = normalizeCanvas(canvas, { content });
-    expect(normalized.nodeData.film?.filmSetGroup).toEqual(marker);
-    expect(normalized.nodeData.card?.filmSetGroup).toBeUndefined();
-    expect(normalizeCanvas(canvas).nodeData.film?.filmSetGroup).toBeUndefined();
-
-    const throwing = new ContentContributionRegistry();
-    throwing.register({
-      extensionId: "film-set",
-      contentVersion: 1,
-      nodeData: { ...filmSetNodeDataCodec, normalize: () => { throw new Error("secret normalize detail"); } }
-    });
-    expect(normalizeCanvas(canvas, { content: throwing }).nodeData.film?.filmSetGroup).toEqual(marker);
-  });
 });

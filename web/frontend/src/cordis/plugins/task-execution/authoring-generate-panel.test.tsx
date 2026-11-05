@@ -5,6 +5,8 @@ import type {
   AgentConversationService,
   AgentConversationSnapshotView,
 } from "../../contract/agent-conversation.js";
+import type { AuthoringGenerationProps } from "../../contract/authoring.js";
+import { AuthoringMcpButton } from "./model-parameter-panel.js";
 import { rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
 
 vi.mock("../../ui/assistant-execution/text-input.js", () => ({
@@ -110,7 +112,7 @@ describe("统一 Agent 创作入口", () => {
             {
               turnId: "conversion-turn",
               role: "user",
-              content: "将照片变成花园片场",
+              content: "将照片变成花园模型",
             },
           ],
         },
@@ -130,7 +132,7 @@ describe("统一 Agent 创作入口", () => {
     };
     const panelProps = {
       ...props,
-      mode: "film-set" as const,
+      mode: "model3d" as const,
       renderers: { references: () => <span>参考素材</span> },
       sourceSelection: {
         ...props.sourceSelection!,
@@ -154,7 +156,7 @@ describe("统一 Agent 创作入口", () => {
     await render({ ...panelProps, deliveryHistory: delivery });
     const panel = el.querySelector('[data-testid="authoring-generate"]');
     const field = el.querySelector("textarea")!;
-    expect(field.value).toBe("将照片变成花园片场");
+    expect(field.value).toBe("将照片变成花园模型");
     expect(field.disabled).toBe(true);
     expect(
       el.querySelector('button[aria-label="选择助手"]')?.textContent,
@@ -198,7 +200,7 @@ describe("统一 Agent 创作入口", () => {
       deliveryHistory: {
         ...delivery,
         status: "succeeded",
-        stage: "片场已创建",
+        stage: "模型已创建",
         cancel: undefined,
       },
     });
@@ -214,7 +216,7 @@ describe("统一 Agent 创作入口", () => {
     const retry = vi.fn(async () => ({ ok: true }));
     await render({
       ...props,
-      mode: "film-set",
+      mode: "model3d",
       deliveryHistory: {
         status: "failed",
         stage: "创建失败",
@@ -287,8 +289,7 @@ describe("统一 Agent 创作入口", () => {
     const { props, service } = fixture();
     await render({
       ...props,
-      mode: "film-set",
-      clipId: "default-clip",
+      mode: "model3d",
       deliveryHistory: {
         status: "succeeded",
         stage: "Completed",
@@ -481,7 +482,7 @@ describe("统一 Agent 创作入口", () => {
     );
   });
 
-  it("重复点击只提交一次，镜头请求保留目标与所选模型", async () => {
+  it("重复点击只提交一次，模型请求保留目标与所选模型", async () => {
     let resolve: (value: unknown) => void = () => undefined;
     const submitTurn = vi.fn(
       () =>
@@ -492,15 +493,13 @@ describe("统一 Agent 创作入口", () => {
     const { props } = fixture({ submitTurn });
     await render({
       ...props,
-      mode: "camera",
-      selectedCameraId: "cam1",
-      clipId: "clip1",
+      mode: "model3d",
       expectedContentHash: "hash",
     });
     await input("textarea", "缓慢环绕");
     await select("模型", "模型 A");
     const button = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
-      (entry) => entry.textContent === "调整镜头",
+      (entry) => entry.textContent === "生成",
     )!;
     await act(async () => {
       button.click();
@@ -508,15 +507,55 @@ describe("统一 Agent 创作入口", () => {
     });
     expect(submitTurn).toHaveBeenCalledTimes(1);
     expect(vi.mocked(submitTurn).mock.calls[0][0].entry).toMatchObject({
-      action: "modify",
-      cameraId: "cam1",
-      clipId: "clip1",
+      action: "generate",
       model: "model-a",
       expectedContentHash: "hash",
     });
     await act(async () =>
       resolve(ok({ conversationId: "conversation", requestId: "request" })),
     );
+  });
+
+  it("world 目标提交时携带宿主冻结的导演区范围", async () => {
+    const submitTurn = vi.fn(async (input: { requestId: string }) =>
+      ok({ conversationId: "conversation", requestId: input.requestId }),
+    ) as unknown as AgentConversationService["submitTurn"];
+    const { props } = fixture({ submitTurn });
+    await render({
+      ...props,
+      nodeId: "area-node",
+      mode: "world",
+      worldScope: { kind: "scene-area", areaId: "area-1" },
+    });
+    await input("textarea", "把桌子移到左边");
+    const button = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
+      (entry) => entry.textContent === "生成",
+    )!;
+    await act(async () => button.click());
+    expect(submitTurn).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(submitTurn).mock.calls[0]![0].entry).toMatchObject({
+      action: "generate",
+      mode: "world",
+      nodeId: "area-node",
+      worldScope: { kind: "scene-area", areaId: "area-1" },
+      prompt: "把桌子移到左边",
+    });
+  });
+
+  it("镜头生成面板提交所选镜头，保持调整用途和用户输入", async () => {
+    const submitTurn = vi.fn(async (input: { requestId: string }) =>
+      ok({ conversationId: "conversation", requestId: input.requestId }),
+    ) as unknown as AgentConversationService["submitTurn"];
+    const { props } = fixture({ submitTurn });
+    await render({ ...props, nodeId: "camera-card", mode: "world", worldScope: { kind: "world-camera", cameraId: "camera-a" } });
+    await input("textarea", "拉近桌子，视野调到 45 度");
+    const button = [...el.querySelectorAll<HTMLButtonElement>("button")].find(entry => entry.textContent === "调整镜头");
+    expect(button).toBeTruthy();
+    await act(async () => button!.click());
+    expect(submitTurn).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(submitTurn).mock.calls[0]![0].entry).toMatchObject({
+      action: "generate", mode: "world", nodeId: "camera-card", worldScope: { kind: "world-camera", cameraId: "camera-a" }, prompt: "拉近桌子，视野调到 45 度"
+    });
   });
 
   it("未选连接时不能生成，配置入口可用并保留输入", async () => {
@@ -566,7 +605,6 @@ describe("统一 Agent 创作入口", () => {
   it("对象缺少片段、只读或缺少工具时均阻止提交", async () => {
     const { props, service } = fixture();
     for (const patch of [
-      { mode: "film-set" as const, itemId: "item" },
       { writable: false, disabledReason: "只读" },
       {
         mcpHint: {
@@ -733,3 +771,257 @@ describe("统一 Agent 创作入口", () => {
     expect(service.submitTurn).not.toHaveBeenCalled();
   });
 });
+
+it("参考图在提示词上方，助手、模型和 Variant 收在提示词下方工具栏；切换并提交实际参数", async () => {
+  const { props, service } = fixture();
+  props.onAuthorize = vi.fn();
+  props.sourceSelection!.onRefresh = vi.fn();
+  props.renderers = {
+    references: () => <div data-testid="references">参考图</div>,
+  };
+  props.sourceSelection!.connections = [
+    {
+      connectionId: "c1",
+      label: "Codex",
+      ready: true,
+      models: [
+        { id: "model-a", label: "模型 A", reasoningEfforts: ["low", "high"] },
+        { id: "model-b", label: "模型 B", reasoningEfforts: ["medium"] },
+      ],
+    },
+  ];
+  await render(props);
+  const toolbar = el.querySelector(".assistant-toolbar")!;
+  const refresh = toolbar.querySelector<HTMLButtonElement>(
+    'button[aria-label="刷新助手"]',
+  )!;
+  const manage = toolbar.querySelector<HTMLButtonElement>(
+    'button[aria-label="管理助手"]',
+  )!;
+  expect(toolbar.querySelectorAll("button")).toHaveLength(5);
+  expect(refresh.textContent).toBe("");
+  expect(manage.textContent).toBe("");
+  await act(async () => {
+    refresh.click();
+    manage.click();
+  });
+  expect(props.sourceSelection!.onRefresh).toHaveBeenCalledOnce();
+  expect(props.onAuthorize).toHaveBeenCalledOnce();
+  expect(service.submitTurn).not.toHaveBeenCalled();
+  expect(
+    el.querySelector(
+      '.authoring-generate__header button[aria-label="复制 MCP 指引"]',
+    ),
+  ).not.toBeNull();
+  expect(
+    el.querySelector('.authoring-generate__header [data-testid="references"]'),
+  ).not.toBeNull();
+  expect(
+    el.querySelector(
+      '.authoring-generate__actions button[aria-label="复制 MCP 指引"]',
+    ),
+  ).toBeNull();
+  expect(
+    el
+      .querySelector('[data-testid="references"]')!
+      .compareDocumentPosition(el.querySelector("textarea")!) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    el
+      .querySelector("textarea")!
+      .compareDocumentPosition(
+        el.querySelector('button[aria-label="选择助手"]')!,
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  await input("textarea", "改成四层建筑");
+  await select("模型", "模型 A");
+  expect(el.querySelector('button[aria-label="Variant"]')).toBeNull();
+  expect(
+    el.querySelectorAll(".assistant-toolbar .mc-panel__model-trigger"),
+  ).toHaveLength(2);
+  await select("模型", "high");
+  await select("模型", "模型 B");
+  await select("模型", "medium");
+  await select("模型", "模型 A");
+  expect(
+    el.querySelector('button[aria-label="模型"]')!.textContent,
+  ).not.toContain("high");
+  await select("模型", "high");
+  await act(async () => generate().click());
+  expect(vi.mocked(service.submitTurn).mock.calls[0]![0].entry).toMatchObject({
+    model: "model-a",
+    reasoningEffort: "high",
+  });
+  await act(async () => root.render(<div />));
+  await render(props);
+  expect(el.querySelector('button[aria-label="模型"]')!.textContent).toContain(
+    "high",
+  );
+});
+
+it("活动门禁关闭已打开的选择菜单，解除门禁后不自行重开或提交", async () => {
+  const { props, service } = fixture();
+  await render(props);
+  await act(async () =>
+    el
+      .querySelector<HTMLButtonElement>('button[aria-label="模型"]')!
+      .dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      ),
+  );
+  expect(
+    document.querySelector('[role="dialog"][aria-label="模型"]'),
+  ).not.toBeNull();
+  await render({
+    ...props,
+    sourceSelection: { ...props.sourceSelection!, blockedReason: "正在执行" },
+  });
+  expect(
+    document.querySelector('[role="dialog"][aria-label="模型"]'),
+  ).toBeNull();
+  expect(
+    el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')!.disabled,
+  ).toBe(true);
+  await render(props);
+  expect(
+    document.querySelector('[role="dialog"][aria-label="模型"]'),
+  ).toBeNull();
+  expect(service.submitTurn).not.toHaveBeenCalled();
+});
+
+it("MCP 按钮只复制公开地址和当前目标指引，失败可重试，切换目标清理反馈", async () => {
+  const copyText = vi
+    .fn()
+    .mockResolvedValueOnce(false)
+    .mockResolvedValue(undefined);
+  const props = {
+    canvasId: "canvas-1",
+    nodeId: "model-1",
+    mcpServerUrl: "https://canvas.example/workspace/mcp/model-canvas",
+    copyText,
+  };
+  await act(async () => root.render(<AuthoringMcpButton {...props} />));
+  const button = () => el.querySelector<HTMLButtonElement>("button")!;
+  expect(button().textContent).toBe("MCP");
+  expect(document.body.textContent).not.toContain("https://canvas.example");
+  await act(async () => button().click());
+  expect(button().textContent).toContain("复制失败");
+  await act(async () => button().click());
+  expect(button().textContent).toContain("已复制");
+  expect(copyText).toHaveBeenLastCalledWith(
+    expect.stringContaining(
+      "安装这个 MCP 服务：https://canvas.example/workspace/mcp/model-canvas",
+    ),
+  );
+  expect(copyText.mock.calls.at(-1)![0]).toContain(
+    "画布 canvas-1 的节点 model-1",
+  );
+  expect(copyText.mock.calls.at(-1)![0]).toContain("submit_model_script");
+  await act(async () =>
+    root.render(<AuthoringMcpButton {...props} nodeId="model-2" />),
+  );
+  expect(button().textContent).toBe("MCP");
+  await act(async () => button().click());
+  expect(copyText.mock.calls.at(-1)![0]).toContain("model-2");
+  expect(copyText.mock.calls.at(-1)![0]).not.toContain("model-1");
+});
+
+it("text uses assistant selection without a Task directory and accepts another round before the first HTTP response", async () => {
+  const f = fixture({ getDataScopeId: () => "text-continuous" });
+  f.service.submitTurn = vi.fn(
+    () =>
+      new Promise<Awaited<ReturnType<AgentConversationService["submitTurn"]>>>(
+        () => undefined,
+      ),
+  );
+  const props: AuthoringGenerationProps = {
+    ...f.props,
+    mode: "text",
+    nodeId: "text-node",
+    initialPrompt: "legacy prompt",
+  };
+  props.sourceSelection!.connections[0]!.modelSelection = "explicit";
+  props.sourceSelection!.connections[0]!.textDelivery = {
+    imageInput: true,
+    maxImages: 12,
+  };
+  rememberAssistantPreference("text-continuous", {
+    sourceId: "sdk",
+    connectionId: "c1",
+    model: "model-a",
+  });
+  await render(props);
+  expect(el.querySelector("textarea")!.value).toBe("");
+  await act(async () => {
+    generate().click();
+  });
+  expect(f.service.submitTurn).toHaveBeenCalledTimes(1);
+  await input("textarea", "second independent draft");
+  expect(generate().disabled).toBe(false);
+  await act(async () => {
+    generate().click();
+  });
+  expect(f.service.submitTurn).toHaveBeenCalledTimes(2);
+  const requests = vi
+    .mocked(f.service.submitTurn)
+    .mock.calls.map(([request]) => request);
+  expect(requests.map((request) => request.entry)).toMatchObject([
+    { mode: "text", prompt: "", model: "model-a" },
+    { mode: "text", prompt: "second independent draft", model: "model-a" },
+  ]);
+  expect(requests[0]!.requestId).not.toBe(requests[1]!.requestId);
+  await act(async () => root.render(<div />));
+  await render(props);
+  expect(el.querySelector("textarea")!.value).toBe("second independent draft");
+  expect(f.service.submitTurn).toHaveBeenCalledTimes(2);
+});
+
+it("text keeps drafts on target switches and disables submission in read-only sessions", async () => {
+  const { props, service } = fixture({
+    getDataScopeId: () => "text-isolation",
+  });
+  const a = {
+    ...props,
+    mode: "text" as const,
+    nodeId: "text-a",
+    initialPrompt: "a",
+  };
+  await render(a);
+  await input("textarea", "a edited");
+  await render({ ...a, nodeId: "text-b", initialPrompt: "b" });
+  expect(el.querySelector("textarea")!.value).toBe("");
+  await render({ ...a, writable: false });
+  expect(el.querySelector("textarea")!.value).toBe("a edited");
+  expect(generate().disabled).toBe(true);
+  expect(service.submitTurn).not.toHaveBeenCalled();
+});
+
+it("刷新按钮同时重读模型目录，而不只刷新连接列表", async () => {
+  const { props, service } = fixture();
+  props.sourceSelection!.onRefresh = vi.fn();
+  props.sourceSelection!.connections = [
+    { connectionId: "c1", label: "本地 OpenCode", ready: true, models: [] },
+  ];
+  vi.mocked(service.catalog).mockResolvedValue(
+    ok({ models: [{ id: "p/m", label: "M (p)" }] }) as never,
+  );
+  await render(props);
+  await act(async () => undefined);
+  expect(service.catalog).toHaveBeenCalledTimes(1);
+  const refresh = el.querySelector<HTMLButtonElement>(
+    'button[aria-label="刷新助手"]',
+  )!;
+  await act(async () => {
+    refresh.click();
+  });
+  await act(async () => undefined);
+  expect(props.sourceSelection!.onRefresh).toHaveBeenCalledOnce();
+  expect(service.catalog).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')!.click();
+  });
+  expect(document.body.textContent).toContain("M (p)");
+});
+
+

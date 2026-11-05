@@ -15,7 +15,7 @@ use crate::{
 };
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
-pub(super) const BLOCK_SIZE: usize = 16;
+const BLOCK_SIZE: usize = 16;
 // Owned exact draw inputs, rather than hashes or complete model/media payloads.
 // Comparing borrows on warm frames avoids copying body strings and vertex data.
 #[derive(PartialEq)]
@@ -27,6 +27,8 @@ struct HistoryKey {
 struct DrawKey {
     id: String,
     kind: String,
+    /// 0 card / 1 frame / 2 none；外壳变化必须重建几何分块。
+    chrome: u8,
     visual: crate::canvas_ecs::components::CardGeometryInput,
     /// 节点下方历史条呈现（change: 2026-10-12-unify-generation-history-strip）：
     /// `Some` 表示该普通节点应绘制历史条（含空圆点时仍画条与图标）；
@@ -34,9 +36,6 @@ struct DrawKey {
     history: Option<HistoryKey>,
     /// 该节点是拖动粘连 owner 时让位历史条（下方已被操作条占用）。
     hide_history: bool,
-    /// 拍摄镜头预览卡片呈现（change: 2026-10-15-add-film-set-shooting-shot-previews）：
-    /// 状态/类型/播放进度变化即时重建内容面与进度条（只读投影，不进入 canonical）。
-    shot_preview: Option<crate::protocol::ShotPreviewPresentation>,
 }
 impl DrawKey {
     fn history(node: &GraphNode) -> Option<HistoryKey> {
@@ -60,10 +59,14 @@ impl DrawKey {
         Self {
             id: node.id.clone(),
             kind: node.kind.clone(),
+            chrome: match &node.chrome {
+                crate::protocol::NodeChrome::Card => 0,
+                crate::protocol::NodeChrome::Frame { .. } => 1,
+                crate::protocol::NodeChrome::None => 2,
+            },
             visual: CardVisual::from_node(node).geometry,
             history: Self::history(node),
             hide_history: attach_owner == Some(node.id.as_str()),
-            shot_preview: node.shot_preview.clone(),
         }
     }
 }
@@ -72,7 +75,7 @@ impl DrawKey {
 pub(super) struct Block {
     // Includes local document index: changing a group/card slot shifts z even
     // when the remaining ordinary cards have identical IDs and coordinates.
-    keys: Vec<(usize, usize, DrawKey)>,
+    keys: Vec<(usize, DrawKey)>,
     theme: String,
     entity: Option<Entity>,
     mesh: Option<Handle<Mesh>>,
@@ -85,10 +88,9 @@ pub(super) struct Block {
 #[derive(Resource, Default)]
 pub(crate) struct CardBlockCache {
     pub(super) blocks: Vec<Block>,
-    pub(super) initialized: bool,
 }
-fn ordinary(node: &GraphNode) -> bool {
-    node.group.is_none() && node.composite_asset.is_none()
+fn ordinary(_node: &GraphNode) -> bool {
+    true
 }
 
 impl Block {
@@ -124,14 +126,11 @@ pub(super) fn sync(
     requests: &mut LabelRequests,
     cards: &[CardInput<'_>],
     document_len: usize,
-    dirty_blocks: Option<&std::collections::HashSet<usize>>,
     scene: &Scene,
     theme: &ThemeResource,
     materials: &CanvasMaterials,
 ) -> u64 {
-    if dirty_blocks.is_none() {
-        requests.begin(CanvasLabelRole::Card);
-    }
+    requests.begin(CanvasLabelRole::Card);
     let mut blocks = std::mem::take(&mut visuals.blocks);
     let count = document_len.div_ceil(BLOCK_SIZE);
     let focused_id = super::image_focus::presented_media_focus(scene).map(|focus| focus.node_id);
@@ -144,36 +143,18 @@ pub(super) fn sync(
     }
     blocks.truncate(count);
     blocks.resize_with(count, Block::default);
-    // Bucket once instead of scanning every card for every 16-node block.
-    let mut buckets = vec![Vec::new(); count];
-    for card in cards {
-        if card.index < document_len
-            && ordinary(card.node)
-            && focused_id != Some(card.node.id.as_str())
-        {
-            buckets[card.index / BLOCK_SIZE].push(card);
-        }
-    }
     let mut rebuilt = 0;
-    for (block_index, block_cards) in buckets.into_iter().enumerate() {
-        if dirty_blocks.is_some_and(|dirty| !dirty.contains(&block_index)) {
-            continue;
-        }
+    for block_index in 0..count {
         let block = &mut blocks[block_index];
-        if dirty_blocks.is_some() {
-            for request in &block.labels {
-                requests.remove(CanvasLabelRole::Card, request.owner);
-            }
-        }
-        let keys: Vec<(usize, usize, DrawKey)> = block_cards
+        let range = block_index * BLOCK_SIZE..((block_index + 1) * BLOCK_SIZE).min(document_len);
+        let block_cards: Vec<&CardInput<'_>> = cards
             .iter()
-            .map(|card| {
-                (
-                    card.index,
-                    card.render,
-                    DrawKey::new(card.node, attach_owner),
-                )
-            })
+            .filter(|card| range.contains(&card.index))
+            .filter(|card| ordinary(card.node) && focused_id != Some(card.node.id.as_str()))
+            .collect();
+        let keys: Vec<(usize, DrawKey)> = block_cards
+            .iter()
+            .map(|card| (card.index, DrawKey::new(card.node, attach_owner)))
             .collect();
         let label_keys: Vec<_> = block_cards
             .iter()
@@ -260,7 +241,6 @@ pub(super) fn sync(
         rebuilt += 1;
     }
     visuals.blocks = blocks;
-    visuals.initialized = true;
     rebuilt
 }
 

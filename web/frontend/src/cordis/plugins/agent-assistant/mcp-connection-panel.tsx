@@ -12,6 +12,7 @@ type TargetRef = { client: McpInstallClient; target: McpInstallTarget };
 export type McpPanelSnapshot = {
   loading: boolean;
   configured: number;
+  configuredTargets?: string[];
   error: string | null;
   issues: { key: string; label: string; message: string }[];
 };
@@ -60,6 +61,7 @@ export function McpConnectionPanel({ canvasId, remote: injectedRemote, onStatusC
   }), []);
   useEffect(() => {
     onStatusChange?.({ loading, error, configured: clients.flatMap(client => client.targets).filter(target => target.configured && !target.error).length,
+      configuredTargets: clients.flatMap(client => client.targets.filter(target => target.configured && !target.error).map(target => targetTitle({ client, target }))),
       issues: Object.entries(issues).map(([key, message]) => ({ key, label: issueTarget(key, clients), message })) });
   }, [loading, error, clients, issues, onStatusChange]);
   return <section className="agent-assistant__mcp" data-ai-tab="mcp">

@@ -21,24 +21,18 @@ export type CanvasCommandRejectionCode =
   | "invalid-edge-endpoint"
   | "node-data-orphan"
   | "invalid-connection"
-  /** 镜头参考边携带的持久化结构版本不受支持（能力门禁，任务 8.1）。 */
-  | "unsupported-shot-reference"
   | "invalid-node-size"
   | "invalid-node-retype"
   | "operation-in-progress"
-  | "invalid-group-config"
-  | "invalid-group-appearance"
+  /** 节点内容违反自包含 3D/复合资产写入约束。 */
+  | "invalid-self-contained-node"
   | "invalid-video-edit-intent"
   | "invalid-model-cameras"
   | "invalid-image-edit"
-  | "invalid-self-contained-node"
-  /** 已有人形骨架被 patch 成空。骨架只能替换，不能从已保存的模型上拿掉。 */
-  | "rig-removed"
-  | "invalid-film-set-group"
   | "missing-edge-id"
+  /** 已存在骨架的模型不允许通过命令移除骨架。 */
+  | "rig-removed"
   | "invalid-command"
-  /** 拍摄镜头预览的归属/生命周期不变式被绕过（独立创建、删除、改归属或写媒体字段）。 */
-  | "invalid-shot-preview"
   /** `edit.apply` 前置条件不成立（可诊断冲突）；整批拒绝，无部分写入。 */
   | "edit-precondition-failed"
   /** `edit.apply` 内部操作失败或结构非法。 */

@@ -16,7 +16,7 @@ function fixture() {
   cleanup.push(() => store.close());
   const run = vi.fn(async () => ({ status: "succeeded" as const }));
   const query = vi.fn(async () => ({ status: "succeeded" as const }));
-  const adapter: AgentConversationAdapter = { id: "fake", capabilities: () => ({ discussion: true, tools: true, models: "none", targets: ["film-set"] }),
+  const adapter: AgentConversationAdapter = { id: "fake", capabilities: () => ({ discussion: true, tools: true, models: "none", targets: ["model3d"] }),
     authorization: async () => "ready", models: async () => ({ models: [] }), run, query };
   const registry = createAgentAdapterRegistry({ hasCapability: () => true,
     resolveCapabilityOwner: () => ({ extensionId: "fake", configVersion: 1, mode: "public" }),
@@ -25,8 +25,8 @@ function fixture() {
   const created = service.createConversation({ owner: "owner", canvasId: "canvas", nodeId: "target", adapterId: "fake" });
   if (!created.ok) throw new Error(created.error.message);
   const input = { owner: "owner", conversationId: created.conversation.conversationId, requestId: "conversion:request:1",
-    entry: { action: "generate" as const, canvasId: "canvas", nodeId: "target", mode: "film-set" as const, prompt: "Build from the source image" },
-    delivery: { purpose: "film-set-conversion" as const, domainRequestId: "request", attemptId: "attempt-1" } };
+    entry: { action: "generate" as const, canvasId: "canvas", nodeId: "target", mode: "model3d" as const, prompt: "Build from the source image" },
+    delivery: { purpose: "text-generation" as const, domainRequestId: "request", attemptId: "attempt-1" } };
   const accepted = service.acceptDeliveryTurn(input);
   if (!accepted.ok) throw new Error(accepted.error.message);
   return { service, store, registry, run, query, input, accepted,

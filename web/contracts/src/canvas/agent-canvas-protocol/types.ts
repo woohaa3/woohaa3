@@ -102,6 +102,13 @@ export type AgentPlanOperation =
       if?: AgentPrecondition;
     }
   | {
+      /** 只改卡片矩形宽高，不移动节点、不改成员关系（整理 2D 组卡片用）。 */
+      op: "resize_node";
+      target: AgentEntityRef;
+      size: { width: number; height: number };
+      if?: AgentPrecondition;
+    }
+  | {
       op: "delete";
       targets: AgentEntityRef[];
       if?: AgentPrecondition;
@@ -168,6 +175,8 @@ export type AgentCanvasEdgeProjection = {
 export type AgentCanvasGraph = {
   /** Trusted host projection only; an execution grant is never accepted from tool arguments. */
   rootGroupId?: string;
+  /** 组作用域下的根组 `nodeData`（含 `workflowGroup2d.memberNodeIds` 与 `scopeVersion`）。 */
+  rootGroupData?: Readonly<Record<string, unknown>>;
   protocolVersion: AgentCanvasProtocolVersion;
   canvasId: string;
   title: string;

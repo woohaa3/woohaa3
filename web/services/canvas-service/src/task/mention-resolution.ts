@@ -16,8 +16,6 @@ import {
   inferWoohaa3CanvasInputRole,
   pickInputBinding,
   renderWoohaa3CanvasMentionProviderText,
-  SHOT_REFERENCE_ROLE,
-  SHOT_IMAGE_REFERENCE_ROLE,
   sortWoohaa3CanvasInputMappings,
   type Woohaa3CanvasMentionType,
   type CanvasNodeData,
@@ -89,7 +87,8 @@ function resolveEffectivePrompt(canvas: ServerCanvas, nodeId: string, authored: 
 /** 直接 slot 候选（当前节点直接 mapping，含文字）。 */
 export function collectDirectMentionCandidates(
   canvas: ServerCanvas,
-  nodeId: string
+  nodeId: string,
+  cameraInputs?: ReadonlyMap<string, CanvasTaskInput>
 ): MentionCandidate[] {
   const candidates: MentionCandidate[] = [];
   let ordinal = 0;
@@ -105,7 +104,7 @@ export function collectDirectMentionCandidates(
       role: mapping.role,
       sourceNodeId: mapping.sourceNodeId,
       label: mentionLabel(kind, ordinal, mapping),
-      input: resolved?.input ?? null,
+      input: cameraInputs?.get(mapping.sourceNodeId) ? { ...cameraInputs.get(mapping.sourceNodeId)!, role: mapping.role } : resolved?.input ?? null,
       ...(kind === "input_text" && resolved?.text !== undefined ? { text: resolved.text } : {})
     });
   }
@@ -125,9 +124,10 @@ export function resolveMentionsAndCompile(options: {
   bindings: CanvasTaskInputBinding[];
   /** 直接媒体输入（由 input-resolution 解析，需与 carried inputs 合并去重）。 */
   directInputs: CanvasTaskInput[];
+  cameraInputs?: ReadonlyMap<string, CanvasTaskInput>;
 }): MentionResolution {
   const { canvas, nodeId, bindings } = options;
-  const candidates = collectDirectMentionCandidates(canvas, nodeId);
+  const candidates = collectDirectMentionCandidates(canvas, nodeId, options.cameraInputs);
 
   // 有效 prompt 与 token 的归属节点（上游文字回退时 token 属于文字节点自身 mappings）。
   const effective = resolveEffectivePrompt(canvas, nodeId, options.authored);
@@ -303,10 +303,6 @@ function collectDirectMappings(canvas: ServerCanvas, nodeId: string): CanvasNode
 /** mapping → mention 类型（文字角色为 input_text，其余按 role 判定媒体类型）。 */
 function mentionTypeForMapping(mapping: CanvasNodeInputMapping): Woohaa3CanvasMentionType {
   if (mapping.role === "text_prompt") return "input_text";
-  // 镜头参考是视频语义（与前端 @ 候选、provider 角色 reference_video 一致）；
-  // 角色名不含 "video"，不显式映射会误判为图片，导致合法的视频 mention 被判类型不匹配。
-  if (mapping.role === SHOT_REFERENCE_ROLE) return "input_video";
-  if (mapping.role === SHOT_IMAGE_REFERENCE_ROLE) return "input_image";
   const role = mapping.role;
   if (role.includes("video")) return "input_video";
   if (role.includes("audio") || role.includes("voice") || role.includes("music")) return "input_audio";

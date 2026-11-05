@@ -12,7 +12,6 @@ export * from "./oauth.js";
 export * from "./authorization.js";
 export * from "./models.js";
 export * from "./codex-adapter.js";
-export * from "./conversion.js";
 export * from "./generation.js";
 export * from "./handler.js";
 export * from "./ports.js";

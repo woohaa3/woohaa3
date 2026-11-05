@@ -6,9 +6,8 @@
  * 只改本地 selection/viewport，不写规范 viewport、不提交命令；只读仍可定位。
  */
 import type { ServerCanvas } from "@woohaa3/contracts";
-import { computeCenteredViewport, groupPresentationRect, hiddenByCollapsedGroups, nodeWorldRect, unionRects, type Rect } from "@woohaa3/contracts";
+import { computeCenteredViewport, nodeWorldRect, unionRects, type Rect } from "@woohaa3/contracts";
 import type { InteractionController } from "../plugins/canvas-shell/interaction-types.js";
-import { groupBadgeProjectionsForCanvas } from "../plugins/canvas-shell/group-badge-projection.js";
 
 export type LocateNodesResult =
   | { ok: true }
@@ -53,17 +52,8 @@ export function createCanvasLocateService(options: CanvasLocateOptions): CanvasL
       if (nodes.some((node) => node === undefined)) {
         return { ok: false, reason: "目标作品已不存在" };
       }
-      const hidden = hiddenByCollapsedGroups(canvas);
-      // 定位隐藏成员时指向可见的收起祖先，不选择画布上不可见的节点。
-      const visibleNodes = nodes.map(node => {
-        let visible = node!;
-        while (hidden.has(visible.id) && visible.parentId && byId.has(visible.parentId)) visible = byId.get(visible.parentId)!;
-        return visible;
-      });
-      const badgeProjections = groupBadgeProjectionsForCanvas(canvas);
-      const rects: Rect[] = visibleNodes.map(node => groupPresentationRect(node,
-        canvas.nodeData[node.id]?.groupCollapsed === true, nodeWorldRect(node, byId),
-        badgeProjections.get(node.id)));
+      const visibleNodes = nodes.map(node => node!);
+      const rects: Rect[] = visibleNodes.map(node => nodeWorldRect(node, byId));
       if (settings.fit && options.renderBounds) {
         const rendered = new Map(options.renderBounds()?.map(node => [node.id,node]));
         if (nodeIds.some(id => !rendered.has(id))) return {ok:false,reason:"场景边界尚未就绪"};

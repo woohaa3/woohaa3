@@ -7,11 +7,11 @@ import {resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 import {generateFixture} from '../../scripts/canvas-benchmark/fixture.mjs';
 import {summarize} from '../../scripts/canvas-benchmark/statistics.mjs';
-import {createModel3DNodeData,model3DNodeDataFields,computeCenteredViewport,groupPresentationRect,nodeWorldRect,unionRects,hiddenByCollapsedGroups} from '@woohaa3/contracts';
+import {createModel3DNodeData,model3DNodeDataFields,computeCenteredViewport,nodeWorldRect,unionRects} from '@woohaa3/contracts';
 import {seedYjsCanvas,waitForCanvasSession} from './helpers.js';
 
 const CASE=process.env.BENCH_SUPPLEMENT;
-if(!CASE||!['distance','selection','groups','residency','cache-state'].includes(CASE)) throw new Error('BENCH_SUPPLEMENT must be distance|selection|groups|residency|cache-state');
+if(!CASE||!['distance','selection','residency','cache-state'].includes(CASE)) throw new Error('BENCH_SUPPLEMENT must be distance|selection|residency|cache-state');
 const json=(path:string,value:unknown)=>writeFileSync(path,JSON.stringify(value,null,2));
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 async function snapshot(page:Page){return page.evaluate(()=>{
@@ -45,9 +45,8 @@ async function locate(page:Page,ids:string[],models:string[]=[],expectedSelectio
  // not an acknowledgement that any partially visible node is an arrived target.
  const state=await page.evaluate(()=>{const w=window as any,r=document.querySelector('#bevy-canvas')!.getBoundingClientRect();return {canvas:w.__canvasCanonical,viewport:w.__canvasViewport(),size:{width:r.width,height:r.height}};});
  const byId=new Map<string,any>(state.canvas.document.nodes.map((n:any)=>[n.id,n]));
- const hidden=hiddenByCollapsedGroups(state.canvas);
- const targets=ids.map(id=>{let n=byId.get(id);while(n&&hidden.has(n.id)&&n.parentId&&byId.has(n.parentId))n=byId.get(n.parentId);return n;});
- const bounds=targets.every(Boolean)?unionRects(targets.map(n=>groupPresentationRect(n,state.canvas.nodeData[n.id]?.groupCollapsed===true,nodeWorldRect(n,byId)))):null;
+ const targets=ids.map(id=>byId.get(id));
+ const bounds=targets.every(Boolean)?unionRects(targets.map(n=>nodeWorldRect(n,byId))):null;
  const expectedViewport=bounds?computeCenteredViewport({bounds,hostSize:state.size,zoom:state.viewport.zoom}):null;
  return page.evaluate(async({ids,models,expectedSelection,expectedViewport})=>{
   const w=window as any,start=performance.now(),result=w.__canvasLocate(ids),handlerMs=performance.now()-start;
@@ -71,7 +70,7 @@ async function locate(page:Page,ids:string[],models:string[]=[],expectedSelectio
  },{ids,models,expectedSelection,expectedViewport});
 }
 
-for(const kind of ['distance','selection','groups','residency','cache-state'])test(`supplement-${kind}`,async()=>{
+for(const kind of ['distance','selection','residency','cache-state'])test(`supplement-${kind}`,async()=>{
  test.skip(CASE!==kind,'Select exactly one probe with BENCH_SUPPLEMENT');
  const round=Number(process.env.BENCH_ROUND??0),runId=`supplement-${kind}-r${round}-${Date.now()}`;
  const dir=resolve(process.env.BENCH_OUT??'../artifacts/canvas-benchmark',runId);mkdirSync(dir,{recursive:true});
@@ -86,12 +85,6 @@ for(const kind of ['distance','selection','groups','residency','cache-state'])te
   const fixture:any=generateFixture({nodes:1000,visible:kind==='selection'?100:24});
   const nodes=fixture.canvas.document.nodes;
   if(kind==='distance')for(let i=0;i<3;i++)nodes[24+i].position={x:[1,10,100][i]*1440+100,y:140};
-  if(kind==='groups'){
-   // Replace offscreen text rows with real groups, preserving total N.
-   const defs=[{index:24,id:'depth1',x:20000,parentId:undefined},{index:25,id:'depth3-root',x:40000,parentId:undefined},{index:26,id:'depth3-mid',x:30,parentId:'depth3-root'},{index:27,id:'depth3-inner',x:30,parentId:'depth3-mid'}];
-   for(const def of defs){const n=nodes[def.index];delete fixture.canvas.nodeData[n.id];Object.assign(n,{id:def.id,type:'group',position:{x:def.x,y:def.parentId?30:140},width:600,height:500,...(def.parentId?{parentId:def.parentId}:{})});fixture.canvas.nodeData[n.id]={title:n.id};}
-   nodes[0].parentId='depth1';nodes[0].position={x:40,y:40};nodes[1].parentId='depth3-inner';nodes[1].position={x:40,y:40};
-  }
   const regions:string[][]=[];const modelRegions:string[][]=[];
   if(kind==='residency')for(let region=0;region<3;region++){
    const ids:string[]=[],models:string[]=[];
@@ -150,15 +143,6 @@ for(const kind of ['distance','selection','groups','residency','cache-state'])te
     await expect.poll(()=>page!.evaluate(updates=>updates.every(u=>{const p=(window as any).__canvasCanonical.document.nodes.find((n:any)=>n.id===u.nodeId).position;return p.x===u.position.x&&p.y===u.position.y;}),updates)).toBe(true);
     await submit(page!,nodes.slice(200,210).map((n:any)=>({type:'node.update',nodeId:n.id,position:n.position})));return {count:10,fraction:.01,...timing};
    });
-  }
-  if(kind==='groups'){
-   for(const [depth,target,ancestor] of [[1,nodes[0].id,'depth1'],[3,nodes[1].id,'depth3-root']] as const){
-    for(const collapsed of [false,true])await phase(`group-depth-${depth}-${collapsed?'collapsed':'expanded'}`,async()=>{
-     await submit(page!,[{type:'nodeData.patch',nodeId:ancestor,value:{groupCollapsed:collapsed}}]);await reset(page!);
-     const row=await locate(page!,[target],[],collapsed?ancestor:target);result.locates.push({...row,depth,collapsed});expect(row.status).toBe('ok');expect(row.selection).toContain(collapsed?ancestor:target);return row;
-    });
-   }
-   await phase('missing-target-rejection',async()=>{const before=await page!.evaluate(()=>(window as any).__canvasViewport());const row=await locate(page!,['benchmark-nonexistent']);const after=await page!.evaluate(()=>(window as any).__canvasViewport());expect(row.status).toBe('rejected');expect(after).toEqual(before);return row;});
   }
   if(kind==='cache-state'){
    const a=nodes[0].id,b=nodes[24].id;result.cacheEvidence=[];

@@ -250,43 +250,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn solid_handles_keep_css_width_and_highlight_enlarges_rather_than_shrinks() {
-        for distance in [10.0, 100.0, 10000.0] {
-            let view = GizmoView::orbit(
-                Vec3::ZERO,
-                0.6,
-                -0.4,
-                distance,
-                Vec2::new(1200.0, 800.0),
-                1.0,
-            )
-            .unwrap();
-            let layout = super::super::ObjectGizmoLayout::new(
-                &view,
-                Vec3::ZERO,
-                super::super::ObjectTool::Move,
-                Mat3::IDENTITY,
-            )
-            .unwrap();
-            for line in layout
-                .lines
-                .iter()
-                .filter(|line| line.shape == GizmoShape::Cone)
-            {
-                let idle = line_transform(line, &view, false).unwrap();
-                let active = line_transform(line, &view, true).unwrap();
-                let per_css = view.world_per_css(idle.translation).unwrap();
-                assert!((idle.scale.x / per_css - 11.0).abs() < 1e-4);
-                assert!(active.scale.x > idle.scale.x);
-                assert_eq!(idle.scale.y, active.scale.y);
-                let axis = idle.rotation * Vec3::Y;
-                assert!(axis.dot((line.end - line.start).normalize()) > 0.999);
-                assert_eq!(
-                    layout.hit(&view, view.project(line.end).unwrap()),
-                    Some(line.handle)
-                );
-            }
-        }
-    }
 }

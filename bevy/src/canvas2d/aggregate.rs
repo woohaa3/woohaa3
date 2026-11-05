@@ -20,7 +20,12 @@ use super::layout::{hex, port};
 
 #[cfg(test)]
 use crate::canvas_query::aggregate::AGGREGATE_HANDLE_GAP;
-use crate::canvas_query::aggregate::{AGGREGATE_HANDLE_RADIUS, aggregate_handle, selection_bounds_iter};
+use crate::canvas_query::aggregate::{
+    AGGREGATE_HANDLE_RADIUS, aggregate_handle, selection_bounds_iter,
+};
+
+/// 多选选区背景带的 z：低于所有卡片（卡片 z = 10.0 + index*0.1），高于边。
+pub(crate) const SELECTION_BAND_Z: f32 = 1.0;
 
 /// 待提交连线预览线宽。
 const PENDING_EDGE_WIDTH: f32 = 2.0;
@@ -155,11 +160,12 @@ mod tests {
 
     fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         GraphNode {
+            chrome: crate::protocol::NodeChrome::Card,
+            shared_world_instance: None,
+            world_camera: None,
             model_preview: None,
             ghost: false,
             card_label: None,
-            shot_preview: None,
-
             id: id.into(),
             kind: "image".into(),
             x,
@@ -175,11 +181,8 @@ mod tests {
             texture: false,
             media_loading: false,
             resizable: false,
-            group: None,
             model: None,
-            composite_asset: None,
             history_strip: None,
-            aggregate_run: None,
         }
     }
 
@@ -212,7 +215,14 @@ mod tests {
             pending_edges: vec![],
         };
         let mut geometry = Geometry::default();
-        draw_aggregate_connect(&mut geometry, &theme, &refs(&nodes), &aggregate, &selected, 100.0);
+        draw_aggregate_connect(
+            &mut geometry,
+            &theme,
+            &refs(&nodes),
+            &aggregate,
+            &selected,
+            100.0,
+        );
         // 两个把手：各为圆面 + 环 + 圆点。
         assert!(positions(geometry) > 60);
     }

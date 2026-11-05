@@ -53,15 +53,14 @@ describe("ModelParameterPanel MCP 指引", () => {
     expect(modelPromptGuide("canvas-1", "model-7")).toContain("不要自己按成本表推算");
   });
 
-  it("自包含 3D 节点同样显示 MCP 面板，片场给出动画工具指引（change: 2026-10-05；2026-10-11 身份迁移）", () => {
+  it("自包含 3D 节点同样显示 MCP 面板与模型脚本指引", () => {
     const model = renderToStaticMarkup(<ModelParameterPanel nodeId="m3d-1" nodeType="model3d" />);
     expect(model).toContain("MCP 模型生成");
     expect(model).toContain("submit_model_script");
 
-    const animation = renderToStaticMarkup(<ModelParameterPanel nodeId="anim-1" nodeType="composite-asset" isFilmSet />);
-    expect(animation).toContain("MCP 模型生成");
-    expect(animation).toContain("create_film_set_node");
-    expect(animation).toContain("import_model_snapshot");
+    const composite = renderToStaticMarkup(<ModelParameterPanel nodeId="asset-1" nodeType="composite-asset" />);
+    expect(composite).toContain("MCP 模型生成");
+    expect(composite).toContain("submit_model_script");
   });
 });
 
@@ -90,7 +89,4 @@ describe("ModelParameterPanel 通用 authoring 生成入口（change: 2026-10-08
   });
 });
 
-it("普通 group 也显示公共生成入口", () => {
-  const markup = renderToStaticMarkup(<ModelParameterPanel nodeId="group-1" nodeType="group" renderGenerate={() => <div data-testid="group-generate">组内创作</div>} />);
-  expect(markup).toContain("组内创作");
-});
+

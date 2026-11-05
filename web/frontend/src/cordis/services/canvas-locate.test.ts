@@ -4,15 +4,9 @@
 import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
-  groupAppearanceModel,
-  groupBadgeRect,
-  groupModelProjection,
-  nodeWorldRect,
-  type SceneV2Op,
   type ServerCanvas
 } from "@woohaa3/contracts";
 import { createCanvasLocateService } from "./canvas-locate.js";
-import { modelSceneStore } from "../plugins/model-scene/model-scene-store.js";
 
 const NOW = "2026-10-09T00:00:00.000Z";
 
@@ -39,42 +33,6 @@ function controller() {
 }
 
 describe("createCanvasLocateService", () => {
-  it("定位收起组或隐藏后代时，使用徽标中心", () => {
-    const source = canvas();
-    source.document.nodes = [
-      {id:"g",type:"group",position:{x:100,y:100},width:600,height:400},
-      {id:"nested",type:"group",parentId:"g",position:{x:40,y:40},width:300,height:200},
-      {id:"member",type:"text",parentId:"nested",position:{x:40,y:40},width:100,height:80}
-    ];
-    source.nodeData.g = {groupCollapsed:true};
-    const ctrl = controller();
-    const service = createCanvasLocateService({getCanvas:()=>source,getController:()=>ctrl as never});
-    const resource = modelSceneStore.put("g", "woohaa-model-scene-ir-v2", [{
-      t: "box", id: "body", parent: null, position: [0, 0, 0], rotation: [0, 0, 0],
-      scale: [1, 1, 1], size: [2, 1, 1], color: "#ffffff"
-    } as SceneV2Op]);
-    try {
-      const byId = new Map(source.document.nodes.map(node => [node.id, node]));
-      const layout = nodeWorldRect(source.document.nodes[0]!, byId);
-      const projection = groupModelProjection({
-        sceneVersion: resource.sceneVersion, ops: [], extent: resource.extent,
-        aabb: resource.aabb, placement: groupAppearanceModel(undefined).placement
-      })!;
-      const badge = groupBadgeRect(layout, projection)!;
-      expect(service.locateNodes(["member"]).ok).toBe(true);
-      expect(ctrl.selected).toEqual(["g"]);
-      // 收起组定位到模型投影派生的徽标中心（结构底边下方 40）。
-      expect(ctrl.viewports[0]).toEqual({
-        x: 500 - (badge.x + badge.width / 2),
-        y: 400 - (badge.y + badge.height / 2),
-        zoom: 1
-      });
-      expect(service.locateNodes(["g"]).ok).toBe(true);
-      expect(ctrl.viewports[1]).toEqual(ctrl.viewports[0]);
-    } finally {
-      modelSceneStore.delete("g");
-    }
-  });
   it("定位存在节点：选择并用当前缩放居中（走 panViewportTo）", () => {
     const ctrl = controller();
     const panned: Array<{ x: number; y: number; zoom: number }> = [];

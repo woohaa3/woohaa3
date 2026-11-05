@@ -1,0 +1,343 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { createEmptyWoohaa3ServerCanvas, parseCanvasAggregate } from "@woohaa3/contracts";
+import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
+import { CanvasRoom } from "../services/canvas-service/src/sync/room.js";
+import { SqliteYjsRepository } from "../services/canvas-service/src/storage/sqlite/yjs.js";
+import { SqliteSpatialLeaseStore } from "../services/canvas-service/src/storage/sqlite/spatial-leases.js";
+import { loadNodeSqlite } from "../services/canvas-service/src/storage/sqlite/sqlite-loader.js";
+import { createCanvasService } from "../services/canvas-service/src/composition.js";
+import { InMemoryCanvasRepository } from "../services/canvas-service/src/storage/core/in-memory-repository.js";
+import { createInMemoryWriterLock } from "../services/canvas-service/src/sync/index.js";
+
+describe("SQLite room spatial gate", () => {
+  it("rejects replacement of an occupied canonical camera atomically", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "spatial-camera-"));
+    const file = join(dir, "canvas.sqlite");
+    const db = new (loadNodeSqlite().DatabaseSync)(file);
+    const leases = new SqliteSpatialLeaseStore(db, { eligible: () => true, stopped: () => true });
+    const repository = new SqliteYjsRepository({ path: file });
+    const now = "2026-01-01T00:00:00Z";
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas", now);
+    const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "camera-id", settingsVersion: "1", position: { u: 0, v: 0, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: null };
+    canvas.document.nodes.push({ id: "camera", type: "world-camera", position: { x: 0, y: 0 } });
+    canvas.nodeData.camera = { worldCamera: camera };
+    expect(parseCanvasAggregate(canvas, { now }).ok).toBe(true);
+    let published = 0;
+    try {
+      const room = new CanvasRoom({ canvasId: canvas.id, repository, broadcast: () => { published++; } });
+      await room.initialize({ canvas, roomEpoch: "e", createdAt: now });
+      leases.acquire({ canvasId: canvas.id, requestId: "r", runId: "run", epoch: 1, executionId: "exec", scope: { scope: { kind: "scene-area", areaId: "a" }, scopeVersion: "s" }, writable: [{ kind: "camera", cameraId: "camera-id", version: "v" }], readOnly: [] });
+      const result = await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: canvas.id, commandId: "replace-camera", actorId: "manual", baseRevision: 0, commands: [
+        { type: "node.remove", nodeIds: ["camera"] },
+        { type: "node.add", node: { id: "replacement", type: "world-camera", position: { x: 0, y: 0 } }, nodeData: { worldCamera: camera } },
+      ] } as never);
+      expect(result).toMatchObject({ ok: false, code: "lease-conflict", conflict: { target: { kind: "camera", cameraId: "camera-id" } } });
+      expect(await repository.getCommandRecord(canvas.id, "replace-camera")).toBeNull();
+      const projection = (await repository.loadYjsState(canvas.id))!.projection!;
+      expect(projection.revision).toBe(0);
+      expect(projection.document.nodes.map(node => node.id)).toEqual(["camera"]);
+      expect(projection.nodeData.camera).toEqual(canvas.nodeData.camera);
+      expect(projection.nodeData.replacement).toBeUndefined();
+      expect(published).toBe(0);
+    } finally { repository.close(); db.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
+  it("arbitrates complete sets across two service rooms and keeps capabilities local", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "spatial-services-"));
+    const file = join(dir, "canvas.sqlite");
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas");
+    const makeInstance = (id: string) => ({ kind: "world-instance", version: "shared-world-v1", instanceId: id, transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } });
+    for (const id of ["a", "b", "c", "reference"]) {
+      canvas.document.nodes.push({ id, type: "model3d", position: { x: 0, y: 0 } });
+      canvas.nodeData[id] = { sharedWorldInstance: makeInstance(id), modelScript: "scene.box({ id: 'body' });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "same-resource", contentHash: "same-resource" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } };
+    }
+    const target = (id: string) => ({ kind: "instance" as const, instanceId: id, version: JSON.stringify(canvas.nodeData[id]) });
+    const scope = { scope: { kind: "scene-area" as const, areaId: "area" }, scopeVersion: "1" };
+    const authority = {
+      eligible: () => true,
+      stopped: () => true,
+      resolve: (_intent: unknown, before: typeof canvas, after: typeof canvas, targets: Array<{ kind: "instance"; instanceId: string }>) => ({
+        scope,
+        previous: targets.map(t => ({ ...t, version: JSON.stringify(before.nodeData[t.instanceId]) })),
+        next: targets.map(t => ({ ...t, version: JSON.stringify(after.nodeData[t.instanceId]) }))
+      })
+    };
+    const catalog = new InMemoryCanvasRepository();
+    await catalog.createCanvas(canvas);
+    const repositories = [new SqliteYjsRepository({ path: file, spatialAuthority: authority as never }), new SqliteYjsRepository({ path: file, spatialAuthority: authority as never })];
+    await new CanvasRoom({ canvasId: canvas.id, repository: repositories[0] }).initialize({ canvas, roomEpoch: "initial" });
+    const services = await Promise.all(repositories.map(yjsRepository => createCanvasService({ repository: catalog, yjsRepository, storageConfig: { backend: "sqlite", sqlitePath: file, limits: {} }, writerLock: createInMemoryWriterLock() })));
+    try {
+      const rooms = [await services[0].sync!.registry.resolve(canvas.id), await services[1].sync!.registry.resolve(canvas.id)];
+      expect(rooms.map(room => room.diagnostics)).toEqual([null, null]);
+      const intent = (id: string, writable: string[]) => ({ canvasId: canvas.id, requestId: id, runId: id, epoch: 1, executionId: id, scope, writable: writable.map(target), readOnly: [target("reference")] });
+      const results = await Promise.allSettled([services[0].spatialWrites!.acquire(intent("first", ["a", "b"])), services[1].spatialWrites!.acquire(intent("second", ["b", "c"]))]);
+      expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+      expect(results.filter(result => result.status === "rejected")).toHaveLength(1);
+      const winner = results[0].status === "fulfilled" ? 0 : 1;
+      const loser = 1 - winner;
+      const free = winner === 0 ? "c" : "a";
+      const independent = await services[loser].spatialWrites!.acquire(intent("independent", [free]));
+      const winning = results[winner] as PromiseFulfilledResult<{ capability: object | null }>;
+      const capability = winning.value.capability!;
+      expect(capability).not.toBeNull();
+      const patch = (id: string, node: string) => ({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: canvas.id, commandId: id, actorId: "tool", baseRevision: 0, commands: [{ type: "nodeData.patch", nodeId: node, value: { sharedWorldInstance: { ...makeInstance(node), transform: { ...makeInstance(node).transform, scale: 2 } } } }] }) as never;
+      expect(await services[loser].spatialWrites!.submit(canvas.id, capability, patch("foreign", winner === 0 ? "a" : "c"))).toMatchObject({ ok: false, code: "spatial-rejected" });
+      expect(await services[loser].spatialWrites!.submit(canvas.id, independent.capability, patch("readonly", "reference"))).toMatchObject({ ok: false, code: "spatial-rejected" });
+      expect(await services[winner].spatialWrites!.submit(canvas.id, capability, patch("valid", winner === 0 ? "a" : "c"))).toMatchObject({ ok: true, revision: 1 });
+      expect(await repositories[loser].getCommandRecord(canvas.id, "foreign")).toBeNull();
+      expect(await repositories[loser].getCommandRecord(canvas.id, "readonly")).toBeNull();
+      expect(rooms).toHaveLength(2);
+      expect((await repositories[0].loadYjsState(canvas.id))?.projection?.revision).toBe(1);
+    } finally {
+      await Promise.all(services.map(service => service.close()));
+      repositories.forEach(repository => repository.close());
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("admits disjoint same-resource instances concurrently and revokes a cancelled capability without releasing its lock", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "spatial-disjoint-"));
+    const file = join(dir, "canvas.sqlite");
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas");
+    const makeInstance = (id: string) => ({ kind: "world-instance", version: "shared-world-v1", instanceId: id, transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } });
+    for (const id of ["a", "b", "reference"]) {
+      canvas.document.nodes.push({ id, type: "model3d", position: { x: 0, y: 0 } });
+      canvas.nodeData[id] = { sharedWorldInstance: makeInstance(id), modelScript: "scene.box({ id: 'body' });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "same-resource", contentHash: "same-resource" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } };
+    }
+    const target = (id: string) => ({ kind: "instance" as const, instanceId: id, version: JSON.stringify(canvas.nodeData[id]) });
+    const scope = { scope: { kind: "scene-area" as const, areaId: "area" }, scopeVersion: "1" };
+    const authority = {
+      eligible: () => true,
+      stopped: () => true,
+      resolve: (_intent: unknown, before: typeof canvas, after: typeof canvas, targets: Array<{ kind: "instance"; instanceId: string }>) => ({
+        scope,
+        previous: targets.map(t => ({ ...t, version: JSON.stringify(before.nodeData[t.instanceId]) })),
+        next: targets.map(t => ({ ...t, version: JSON.stringify(after.nodeData[t.instanceId]) }))
+      })
+    };
+    const catalog = new InMemoryCanvasRepository();
+    await catalog.createCanvas(canvas);
+    const repositories = [new SqliteYjsRepository({ path: file, spatialAuthority: authority as never }), new SqliteYjsRepository({ path: file, spatialAuthority: authority as never })];
+    await new CanvasRoom({ canvasId: canvas.id, repository: repositories[0] }).initialize({ canvas, roomEpoch: "initial" });
+    const services = await Promise.all(repositories.map(yjsRepository => createCanvasService({ repository: catalog, yjsRepository, storageConfig: { backend: "sqlite", sqlitePath: file, limits: {} }, writerLock: createInMemoryWriterLock() })));
+    try {
+      const intent = (requestId: string, instanceId: string) => ({ canvasId: canvas.id, requestId, runId: requestId, epoch: 1, executionId: requestId, scope, writable: [target(instanceId)], readOnly: [target("reference")] });
+      const [left, right] = await Promise.all([
+        services[0].spatialWrites!.acquire(intent("left", "a")),
+        services[1].spatialWrites!.acquire(intent("right", "b"))
+      ]);
+      expect(left.capability).not.toBeNull();
+      expect(right.capability).not.toBeNull();
+      expect(repositories[0].debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_locks")).toEqual([{ count: 2 }]);
+      await services[0].spatialWrites!.cancel(canvas.id, "left");
+      const retried = await services[0].spatialWrites!.acquire(intent("left", "a"));
+      expect(retried).toMatchObject({ retry: true, capability: null, run: { runId: "left", epoch: 1, executionId: "left", state: "cancelled" } });
+      const patch = (commandId: string, instanceId: string) => ({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: canvas.id, commandId, actorId: "tool", baseRevision: 0, commands: [{ type: "nodeData.patch", nodeId: instanceId, value: { sharedWorldInstance: { ...makeInstance(instanceId), transform: { ...makeInstance(instanceId).transform, scale: 2 } } } }] }) as never;
+      expect(await services[0].spatialWrites!.submit(canvas.id, left.capability, patch("cancelled-left", "a"))).toMatchObject({ ok: false, code: "spatial-rejected" });
+      expect(await repositories[0].getCommandRecord(canvas.id, "cancelled-left")).toBeNull();
+      expect(repositories[0].debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_locks")).toEqual([{ count: 2 }]);
+      expect(await services[1].spatialWrites!.submit(canvas.id, right.capability, patch("right-b", "b"))).toMatchObject({ ok: true, revision: 1 });
+    } finally {
+      await Promise.all(services.map(service => service.close()));
+      repositories.forEach(repository => repository.close());
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("fences real tool commits and retains cancelled locks until exact stop", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "spatial-tool-"));
+    const file = join(dir, "canvas.sqlite");
+    const now = "2026-01-01T00:00:00Z";
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas", now);
+    const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } };
+    canvas.document.nodes.push({ id: "model", type: "model3d", position: { x: 0, y: 0 } });
+    canvas.nodeData.model = { sharedWorldInstance: instance, modelScript: "scene.box({ id: 'body' });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } };
+    const scope = { scope: { kind: "scene-area" as const, areaId: "a" }, scopeVersion: "s" };
+    const target = { kind: "instance" as const, instanceId: "i" };
+    const version = (snapshot: typeof canvas) => JSON.stringify(snapshot.nodeData.model);
+    let scopeVersion = "s";
+    let eligible = true;
+    const authority = { eligible: () => eligible, stopped: (_identity: unknown, evidence: unknown) => evidence === "confirmed", resolve: (_intent: unknown, before: typeof canvas, after: typeof canvas, targets: Array<{ kind: "instance"; instanceId: string }>) => ({ scope: { ...scope, scopeVersion }, previous: targets.map(t => ({ ...t, version: t.instanceId === "i" ? version(before) : "absent" })), next: targets.map(t => ({ ...t, version: t.instanceId === "i" ? version(after) : "new" })) }) };
+    let fail = false;
+    const repository = new SqliteYjsRepository({ path: file, spatialAuthority: authority as never, failWrites: () => fail });
+    const db = new (loadNodeSqlite().DatabaseSync)(file);
+    const other = new SqliteSpatialLeaseStore(db, authority);
+    let published = 0;
+    try {
+      const room = new CanvasRoom({ canvasId: "canvas", repository, broadcast: () => { published++; } });
+      await room.initialize({ canvas, roomEpoch: "e", createdAt: now });
+      const context = repository.acquireSpatialRun({ canvasId: "canvas", requestId: "r", runId: "run", epoch: 1, executionId: "exec", scope, writable: [{ ...target, version: version(canvas) }], readOnly: [] }).capability!;
+      const submit = (id: string, scale: number, capability: object) => room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas", commandId: id, actorId: "tool", baseRevision: 0, commands: [{ type: "nodeData.patch", nodeId: "model", value: { sharedWorldInstance: { ...instance, transform: { ...instance.transform, scale } } } }] } as never, { spatialContext: capability });
+      expect(await submit("forged", 2, {})).toMatchObject({ ok: false, code: "spatial-rejected" });
+      expect(await submit("one", 2, context)).toMatchObject({ ok: true, revision: 1 });
+      fail = true;
+      const newIdentity = { protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas", commandId: "new-failed", actorId: "tool", baseRevision: 0, commands: [{ type: "nodeData.patch", nodeId: "model", value: { sharedWorldInstance: { ...instance, instanceId: "new" } } }] } as never;
+      expect(await room.submit(newIdentity, { spatialContext: context })).toMatchObject({ ok: false });
+      expect(await repository.getCommandRecord("canvas", "new-failed")).toBeNull();
+      other.acquire({ canvasId: "canvas", requestId: "new-owner", runId: "new-owner", epoch: 1, executionId: "new-owner", scope, writable: [{ kind: "instance", instanceId: "new", version: "absent" }], readOnly: [] });
+      fail = false;
+      other.acquire({ canvasId: "canvas", requestId: "other", runId: "other", epoch: 2, executionId: "other", scope, writable: [{ kind: "instance", instanceId: "busy", version: "absent" }], readOnly: [] });
+      const replacement = { protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas", commandId: "replace", actorId: "tool", baseRevision: 0, commands: [{ type: "nodeData.patch", nodeId: "model", value: { sharedWorldInstance: { ...instance, instanceId: "busy" } } }] } as never;
+      expect(await room.submit(replacement, { spatialContext: context })).toMatchObject({ ok: false, code: "lease-conflict", conflict: { runId: "other" } });
+      expect(await repository.getCommandRecord("canvas", "replace")).toBeNull();
+      scopeVersion = "changed";
+      expect(await submit("stale-scope", 3, context)).toMatchObject({ ok: false, code: "spatial-rejected" });
+      scopeVersion = "s";
+      eligible = false;
+      expect(await submit("ineligible", 3, context)).toMatchObject({ ok: false, code: "spatial-rejected" });
+      eligible = true;
+      fail = true;
+      expect(await submit("failed", 3, context)).toMatchObject({ ok: false });
+      expect(await repository.getCommandRecord("canvas", "failed")).toBeNull();
+      fail = false;
+      expect(await submit("two", 3, context)).toMatchObject({ ok: true, revision: 2 });
+      const restarted = new SqliteYjsRepository({ path: file, spatialAuthority: authority as never });
+      try {
+        expect(restarted.pendingSpatialRuns()).toEqual(expect.arrayContaining([expect.objectContaining({ state: "active", intent: expect.objectContaining({ runId: "run", epoch: 1 }) })]));
+        expect(restarted.acquireSpatialRun({ canvasId: "canvas", requestId: "r", runId: "retry", epoch: 7, executionId: "retry", scope, writable: [{ ...target, version: version(canvas) }], readOnly: [] })).toMatchObject({
+          retry: true,
+          capability: null,
+          run: { canvasId: "canvas", requestId: "r", runId: "run", epoch: 1, executionId: "exec", state: "active" }
+        });
+      } finally { restarted.close(); }
+      repository.cancelSpatialRun("canvas", "r");
+      expect(await submit("cancelled", 4, context)).toMatchObject({ ok: false, code: "spatial-rejected" });
+      expect(() => repository.acquireSpatialRun({ canvasId: "canvas", requestId: "contender", runId: "contender", epoch: 2, executionId: "contender", scope, writable: [{ ...target, version: "v" }], readOnly: [] })).toThrow("lease-conflict");
+      expect(() => repository.confirmSpatialStopped("canvas", "r", "run", 1, "exec", true)).toThrow("unverified-stop");
+      repository.confirmSpatialStopped("canvas", "r", "run", 1, "exec", "confirmed");
+      const current = (await repository.loadYjsState("canvas"))!.projection!;
+      const newer = repository.acquireSpatialRun({ canvasId: "canvas", requestId: "newer", runId: "newer", epoch: 2, executionId: "newer", scope, writable: [{ ...target, version: version(current) }], readOnly: [] }).capability!;
+      expect(await submit("newer-write", 4, newer)).toMatchObject({ ok: true, revision: 3 });
+      expect(await submit("late", 5, context)).toMatchObject({ ok: false, code: "spatial-rejected" });
+      expect(published).toBe(3);
+      expect((await repository.loadYjsState("canvas"))?.projection?.revision).toBe(3);
+      other.confirmStopped("canvas", "new-owner", "new-owner", 1, "new-owner", "confirmed");
+      const extension = { protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas", commandId: "new-success", actorId: "tool", baseRevision: 0, commands: [{ type: "nodeData.patch", nodeId: "model", value: { sharedWorldInstance: { ...instance, instanceId: "new" } } }] } as never;
+      expect(await room.submit(extension, { spatialContext: newer })).toMatchObject({ ok: true, revision: 4 });
+      expect(() => other.validateUnoccupied("canvas", [{ kind: "instance", instanceId: "new" }])).toThrow("lease-conflict");
+    } finally { db.close(); repository.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
+  it("rejects an occupied model modification without a receipt or publication, including after reopen", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "spatial-room-"));
+    const file = join(dir, "canvas.sqlite");
+    const { DatabaseSync } = loadNodeSqlite();
+    const db = new DatabaseSync(file);
+    const leases = new SqliteSpatialLeaseStore(db, { eligible: () => true, stopped: () => true });
+    const repository = new SqliteYjsRepository({ path: file });
+    const now = "2026-01-01T00:00:00Z";
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas", now);
+    const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } };
+    canvas.document.nodes.push({ id: "model", type: "model3d", position: { x: 0, y: 0 } });
+    canvas.nodeData.model = { sharedWorldInstance: instance, modelScript: "scene.box({ id: 'body' });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } };
+    let published = 0;
+    try {
+      const room = new CanvasRoom({ canvasId: "canvas", repository, broadcast: () => { published++; } });
+      await room.initialize({ canvas, roomEpoch: "e", createdAt: now });
+      leases.acquire({ canvasId: "canvas", requestId: "r", runId: "run", epoch: 1, executionId: "exec", scope: { scope: { kind: "scene-area", areaId: "a" }, scopeVersion: "s" }, writable: [{ kind: "instance", instanceId: "i", version: "v" }], readOnly: [] });
+      const replaceNode = { protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas", commandId: "replace-node", actorId: "manual", baseRevision: 0, commands: [
+        { type: "node.remove", nodeIds: ["model"] },
+        { type: "node.add", node: { id: "replacement", type: "model3d", position: { x: 0, y: 0 } }, nodeData: canvas.nodeData.model },
+      ] } as never;
+      expect(await room.submit(replaceNode)).toMatchObject({ ok: false, code: "lease-conflict" });
+      expect(await repository.getCommandRecord("canvas", "replace-node")).toBeNull();
+      expect((await repository.loadYjsState("canvas"))?.projection?.revision).toBe(0);
+      expect(published).toBe(0);
+      const submit = (activeRoom: CanvasRoom, commandId: string) => activeRoom.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas", commandId, actorId: "manual", baseRevision: 0, commands: [{ type: "nodeData.patch", nodeId: "model", value: { sharedWorldInstance: { ...instance, transform: { ...instance.transform, scale: 2 } } } }] } as never);
+      expect(await submit(room, "blocked")).toMatchObject({ ok: false, code: "lease-conflict", conflict: { target: { kind: "instance", instanceId: "i" }, runId: "run", epoch: 1 } });
+      expect(await repository.getCommandRecord("canvas", "blocked")).toBeNull();
+      expect(published).toBe(0);
+      repository.close();
+      const reopened = new SqliteYjsRepository({ path: file, spatialAuthority: { eligible: () => true, stopped: () => true, resolve: () => null } });
+      try {
+        expect(reopened.pendingSpatialRuns()).toMatchObject([{ state: "active", intent: { runId: "run", epoch: 1 } }]);
+        expect(reopened.acquireSpatialRun({ canvasId: "canvas", requestId: "r", runId: "other-run", epoch: 9, executionId: "other-exec", scope: { scope: { kind: "scene-area", areaId: "a" }, scopeVersion: "s" }, writable: [{ kind: "instance", instanceId: "i", version: "v" }], readOnly: [] })).toMatchObject({
+          retry: true,
+          capability: null,
+          run: { runId: "run", epoch: 1, executionId: "exec", state: "active" }
+        });
+        const restored = new CanvasRoom({ canvasId: "canvas", repository: reopened });
+        expect((await restored.load()).ok).toBe(true);
+        expect(await submit(restored, "blocked-again")).toMatchObject({ ok: false, code: "lease-conflict" });
+        expect((await reopened.loadYjsState("canvas"))?.projection?.revision).toBe(0);
+      } finally { reopened.close(); }
+    } finally { repository.close(); db.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
+  it("returns the persistent run for public retries and reopens without re-issuing write capability", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "spatial-retry-"));
+    const file = join(dir, "canvas.sqlite");
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas");
+    const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "model", transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } };
+    canvas.document.nodes.push({ id: "model", type: "model3d", position: { x: 0, y: 0 } });
+    canvas.nodeData.model = { sharedWorldInstance: instance, modelScript: "scene.box({ id: 'body' });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } };
+    const scope = { scope: { kind: "scene-area" as const, areaId: "area" }, scopeVersion: "1" };
+    const version = () => JSON.stringify(canvas.nodeData.model);
+    const authority = {
+      eligible: () => true,
+      stopped: () => true,
+      resolve: (_intent: unknown, before: typeof canvas, after: typeof canvas, targets: Array<{ kind: "instance"; instanceId: string }>) => ({
+        scope,
+        previous: targets.map(t => ({ ...t, version: JSON.stringify(before.nodeData[t.instanceId]) })),
+        next: targets.map(t => ({ ...t, version: JSON.stringify(after.nodeData[t.instanceId]) }))
+      })
+    };
+    const catalog = new InMemoryCanvasRepository();
+    await catalog.createCanvas(canvas);
+    const open = async () => {
+      const repository = new SqliteYjsRepository({ path: file, spatialAuthority: authority as never });
+      const service = await createCanvasService({ repository: catalog, yjsRepository: repository, storageConfig: { backend: "sqlite", sqlitePath: file, limits: {} }, writerLock: createInMemoryWriterLock() });
+      return { repository, service };
+    };
+    const intent = (identity: { runId: string; epoch: number; executionId: string }, writableVersion = version()) => ({
+      canvasId: canvas.id,
+      requestId: "request",
+      ...identity,
+      scope,
+      writable: [{ kind: "instance" as const, instanceId: "model", version: writableVersion }],
+      readOnly: []
+    });
+    const first = await open();
+    let firstServiceClosed = false;
+    await new CanvasRoom({ canvasId: canvas.id, repository: first.repository }).initialize({ canvas, roomEpoch: "initial" });
+    try {
+      const acquired = await first.service.spatialWrites!.acquire(intent({ runId: "run-1", epoch: 3, executionId: "exec-1" }));
+      expect(acquired).toMatchObject({ retry: false, run: { canvasId: canvas.id, requestId: "request", runId: "run-1", epoch: 3, executionId: "exec-1", state: "active" } });
+      expect(acquired.capability).not.toBeNull();
+      const retried = await first.service.spatialWrites!.acquire(intent({ runId: "run-2", epoch: 8, executionId: "exec-2" }));
+      expect(retried).toMatchObject({ retry: true, run: { runId: "run-1", epoch: 3, executionId: "exec-1", state: "active" } });
+      expect(retried.capability).toBe(acquired.capability);
+      await expect(first.service.spatialWrites!.acquire(intent({ runId: "run-3", epoch: 9, executionId: "exec-3" }, "different-version"))).rejects.toThrow("request-conflict");
+      expect(first.repository.debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_runs")).toEqual([{ count: 1 }]);
+      expect(first.repository.debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_locks")).toEqual([{ count: 1 }]);
+      await first.service.close();
+      firstServiceClosed = true;
+      first.repository.close();
+      const reopened = await open();
+      try {
+        const recovered = await reopened.service.spatialWrites!.acquire(intent({ runId: "run-4", epoch: 11, executionId: "exec-4" }));
+        expect(recovered).toMatchObject({ retry: true, capability: null, run: { runId: "run-1", epoch: 3, executionId: "exec-1", state: "active" } });
+        expect(await reopened.service.spatialWrites!.pending()).toMatchObject([{ state: "active", intent: { runId: "run-1", epoch: 3, executionId: "exec-1" } }]);
+        await expect(reopened.service.spatialWrites!.acquire(intent({ runId: "run-5", epoch: 12, executionId: "exec-5" }, "different-version"))).rejects.toThrow("request-conflict");
+        const command = { protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: canvas.id, commandId: "recovered-write", actorId: "tool", baseRevision: 0, commands: [{ type: "nodeData.patch", nodeId: "model", value: { sharedWorldInstance: { ...instance, transform: { ...instance.transform, scale: 2 } } } }] } as never;
+        expect(await reopened.service.spatialWrites!.submit(canvas.id, null, command)).toMatchObject({ ok: false, code: "spatial-rejected", spatialReason: "unavailable" });
+        expect(await reopened.service.spatialWrites!.submit(canvas.id, acquired.capability, command)).toMatchObject({ ok: false, code: "spatial-rejected" });
+        expect(await reopened.repository.getCommandRecord(canvas.id, "recovered-write")).toBeNull();
+        expect(reopened.repository.debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_runs")).toEqual([{ count: 1 }]);
+        expect(reopened.repository.debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_locks")).toEqual([{ count: 1 }]);
+        await reopened.service.spatialWrites!.cancel(canvas.id, "request");
+        const cancelled = await reopened.service.spatialWrites!.acquire(intent({ runId: "run-6", epoch: 13, executionId: "exec-6" }));
+        expect(cancelled).toMatchObject({ retry: true, capability: null, run: { runId: "run-1", epoch: 3, executionId: "exec-1", state: "cancelled" } });
+        expect(reopened.repository.debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_locks")).toEqual([{ count: 1 }]);
+        await reopened.service.spatialWrites!.confirmStopped(canvas.id, "request", "run-1", 3, "exec-1", "confirmed");
+        const stopped = await reopened.service.spatialWrites!.acquire(intent({ runId: "run-7", epoch: 14, executionId: "exec-7" }));
+        expect(stopped).toMatchObject({ retry: true, capability: null, run: { runId: "run-1", epoch: 3, executionId: "exec-1", state: "stopped" } });
+        expect(reopened.repository.debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_locks")).toEqual([{ count: 0 }]);
+        expect(reopened.repository.debugQuery("SELECT COUNT(*) AS count FROM spatial_lease_runs")).toEqual([{ count: 1 }]);
+      } finally { await reopened.service.close(); reopened.repository.close(); }
+    } finally {
+      if (!firstServiceClosed) await first.service.close();
+      first.repository.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

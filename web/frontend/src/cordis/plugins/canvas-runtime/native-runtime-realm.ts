@@ -135,11 +135,12 @@ export async function createNativeRuntimeRealm(
   } as BevyModule;
   for (const name of [
     "is_ready", "rendered_revision", "base_scene_generation", "viewport_capability", "observer_capability", "position_capability", "scene_capability",
-    "poll_texture_receipts", "runtime_health", "canvas_work_diagnostics", "model_asset_diagnostics", "shot_diagnostics",
-    "set_scene", "set_viewport", "set_observer", "set_positions", "set_resource_states", "prepare_and_register_model_resource",
-    "declare_model_resource", "set_model_payload_leases", "overview_cache_snapshot", "overview_cache_command",
-    "query_point_hit", "query_marquee", "query_probe", "query_drop_target", "query_composite_asset_scopes",
-    "query_model_pick", "query_composite_asset_item_pick", "query_composite_asset_item_bounds", "query_gizmo_hit",
+    "runtime_health", "canvas_work_diagnostics", "model_asset_diagnostics", "shot_diagnostics",
+    "set_scene", "set_viewport", "set_observer", "set_positions", "prepare_and_register_model_resource",
+    "declare_model_resource", "set_model_payload_leases",
+    "query_point_hit", "query_marquee", "query_probe", "query_drop_target",
+    "query_model_pick", "query_gizmo_hit",
+
     "request_shot_capture", "seed_runtime_generation"
   ]) {
     (module as unknown as Record<string, unknown>)[name] = (...args: unknown[]) => rpc(name, ...args);

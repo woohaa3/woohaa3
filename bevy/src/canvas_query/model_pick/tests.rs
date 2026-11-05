@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn back_faces_only_pick_when_material_is_double_sided() {
+    let mut face = SurfaceTriangle { vertices: [[-1., -1., 0.], [1., -1., 0.], [0., 1., 0.]], cull_back: true };
+    let origin = bevy::prelude::Vec3::new(0., 0., -1.);
+    let direction = bevy::prelude::Vec3::Z;
+    assert!(ray_triangle(origin, direction, &face).is_none());
+    face.cull_back = false;
+    assert!(ray_triangle(origin, direction, &face).is_some());
+}
+
+#[test]
+fn shared_pick_uses_surface_depth_and_preserves_gaps() {
+    use bevy::prelude::Vec3;
+    let candidate = |id: &str, z: f32| ModelCandidate {
+        node_id: id.into(), shared_world: true, empty_marker: false, min: [-2., -2., 0.], max: [2., 2., 10.],
+        triangles: Some(std::sync::Arc::new(vec![SurfaceTriangle { vertices: [[-1., -1., z], [1., -1., z], [0., 1., z]], cull_back: false }])),
+    };
+    let candidates = vec![candidate("back", 7.), candidate("front", 3.)];
+    assert_eq!(pick_candidates(&candidates, Vec3::ZERO, Vec3::Z, 20.).unwrap().0, "front");
+    assert!(pick_candidates(&candidates, Vec3::new(1.5, 1.5, 0.), Vec3::Z, 20.).is_none());
+}
+
+#[test]
 fn ray_hits_aabb_matches_slab_semantics() {
     // 正前方命中。
     assert_eq!(
@@ -106,6 +128,8 @@ fn pick_query_respects_generation_and_emptiness() {
     );
     accept_models(
         vec![ModelCandidate {
+            shared_world: false, empty_marker: false,
+            triangles: None,
             node_id: "m".into(),
             min: [center.x - 5.0, center.y - 5.0, center.z - 5.0],
             max: [center.x + 5.0, center.y + 5.0, center.z + 5.0],
@@ -114,6 +138,8 @@ fn pick_query_respects_generation_and_emptiness() {
         ModelPickCamera {
             viewport: origin_view(),
             surface: [1000.0, 800.0],
+            ordinary: true,
+            focus: None,
         },
     );
     // 命中。

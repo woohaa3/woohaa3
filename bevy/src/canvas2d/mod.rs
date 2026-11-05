@@ -19,38 +19,31 @@ mod camera;
 mod card_cache;
 mod card_meta;
 mod cards;
+mod chrome;
 mod compact_card;
-mod focus_reference;
-mod container_cache;
 mod dash;
 mod decoration_cache;
 pub(crate) mod draw_order;
 mod edge_cache;
-mod film_set;
-#[cfg(test)]
-pub(crate) use film_set::draw_film_set_run_mask;
 mod focus_backdrop;
-mod generation;
-pub(crate) mod group;
-mod group_motion;
-mod group_outline;
-mod history_strip;
-pub(crate) mod history_pulse;
-pub(crate) mod image_focus;
 pub(crate) mod focus_details;
+mod focus_reference;
+mod generation;
+pub(crate) mod history_pulse;
+pub(crate) mod history_strip;
+pub(crate) mod image_focus;
 mod init;
 mod labels;
 mod marquee;
 mod node_action;
 mod render;
 mod render_edges;
-mod ownership_links;
+mod scene_area_label;
 mod shared_key;
-pub(crate) mod scope_panel;
-mod sticky_note;
 pub(crate) mod text_presentation;
-mod textures;
 mod texture_store;
+mod textures;
+pub(crate) mod world_camera_connector;
 
 /// 共享纯布局函数（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）：渲染与查询复用
 /// `canvas_query::layout` 的同一实现，保持既有 `super::layout` 路径与常量。
@@ -58,22 +51,9 @@ pub(crate) mod layout {
     pub(crate) use crate::canvas_query::layout::*;
 }
 
-/// 共享复合资产范围几何（change: 2026-10-12-align-film-set-scope-with-isometric-grid）：
-/// 绘制与命中复用 `canvas_query::scope` 的同一派生，保持既有 `super::scope` 路径。
-pub(crate) mod scope {
-    pub(crate) use crate::canvas_query::scope::*;
-}
-
 /// 共享边曲线函数（同上）：渲染与命中查询共用同一采样/距离实现。
 pub(crate) mod curve {
     pub(crate) use crate::canvas_query::curve::*;
-}
-
-/// 拍摄镜头预览卡片内容区/状态/进度条的共享纯几何
-/// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D8）：
-/// 卡片绘制、GPU Sprite 摆放与归属线终点复用 `canvas_query::shot_preview` 的同一实现。
-pub(crate) mod shot_preview {
-    pub(crate) use crate::canvas_query::shot_preview::*;
 }
 
 use bevy::prelude::*;
@@ -92,26 +72,24 @@ pub(crate) struct CanvasMaterials {
 /// registration during the staged migration.
 pub(crate) use card_cache::CardBlockCache;
 pub(crate) use decoration_cache::CardDecorationCache;
-pub(crate) use container_cache::ContainerBlockCache;
 pub(crate) use edge_cache::EdgeBlockCache;
 pub(crate) use texture_store::TextureStore;
 
 pub(crate) use attach::sync_attach_probe;
 pub(crate) use camera::sync_camera;
+pub(crate) use card_meta::produce_card_meta;
 pub(crate) use focus_backdrop::sync as sync_focus_backdrop;
 pub(crate) use generation::{GenerationClock, sync_generation};
-pub(crate) use group_motion::sync as sync_group_motion;
 pub(crate) use init::{font_ready, setup};
+pub(crate) use labels::{LabelRequests, sync_canvas_labels};
 pub(crate) use node_action::sync_node_action_bars;
-pub(crate) use group::is_running as group_is_running;
 pub(crate) use render::{
     begin_selection_outlines, canvas_render_requested, produce_card_geometry, produce_card_hover,
-    produce_card_selection, produce_container_geometry, produce_edges, produce_film_set_selection,
-    produce_group_selection, sync_canvas_overlay,
+    produce_card_selection, produce_edges, sync_canvas_overlay,
 };
-pub(crate) use labels::{sync_canvas_labels, LabelRequests};
-pub(crate) use card_meta::produce_card_meta;
-pub(crate) use textures::{sync_textures, texture_sync_requested};
+pub(crate) use scene_area_label::sync_scene_area_labels;
+pub(crate) use textures::sync_textures;
+pub(crate) use world_camera_connector::sync as sync_world_camera_connectors;
 
 /// 2D 渲染的共享材质、字体与主卡片块资源。装饰、容器、连线块和纹理内容表分别由
 /// `CardDecorationCache`、`ContainerBlockCache`、`EdgeBlockCache` 与 `TextureStore` 拥有；

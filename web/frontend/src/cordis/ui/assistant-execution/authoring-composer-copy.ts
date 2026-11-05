@@ -14,24 +14,17 @@ export type AuthoringComposerCopy = {
 
 export function authoringComposerCopy(
   mode: AuthoringGenerationProps["mode"],
-  input: { inspector: boolean; itemId?: string | null | undefined },
+  input: { inspector: boolean; worldCamera?: boolean },
 ): AuthoringComposerCopy {
-  const { inspector, itemId } = input;
-  return mode === "camera"
+  const { inspector, worldCamera } = input;
+  return worldCamera
     ? {
         title: "调整镜头",
         placeholder:
           "描述构图、视角或镜头运动，例如：缓慢环绕主体，保持低机位…",
         action: "调整镜头",
       }
-    : mode === "film-set"
-      ? {
-          title: itemId ? "生成对象动作" : "生成片场",
-          placeholder:
-            "描述场景、对象和动作，例如：让主体沿小路前进，镜头缓慢跟随…",
-          action: "生成",
-        }
-      : mode === "canvas-group"
+    : mode === "canvas-group"
         ? {
             title: "生成组",
             placeholder:
