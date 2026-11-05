@@ -18,16 +18,30 @@ pub(crate) fn take() -> String {
     serde_json::to_string(&entries.into_iter().map(|((channel, id), (width, height, content))|
         (channel, id, width, height, content)).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into())
 }
+
+/// 断言「回执已发出」的用例必须互斥：`take()` 是排空语义，两个用例并发时会把对方
+/// 刚写入的条目取走（`canvas2d::textures` 的同步测试也会写这张表）。
+#[cfg(test)]
+pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// 只断言本用例写入的条目：`APPLIED` 是进程级全局表，同二进制的其它测试（如
+    /// `canvas2d::textures` 的纹理同步）会并发写入，`take()` 之后不保证为空。
+    fn taken_contains(channel: &str, id: &str) -> bool {
+        take().contains(&format!("\"{channel}\",\"{id}\""))
+    }
     #[test]
     fn replacement_invalidates_old_receipts_and_scheduler_threads_share_outbox() {
-        applied("node", "a", 128, 128, "old");
-        invalidate("node", "a");
-        assert_eq!(take(), "[]");
-        std::thread::spawn(|| applied("node", "a", 256, 128, "new")).join().unwrap();
-        assert!(take().contains("new"));
-        assert_eq!(take(), "[]");
+        let id = "receipts-test-replacement";
+        applied("node", id, 128, 128, "old");
+        invalidate("node", id);
+        let drained = take();
+        assert!(!drained.contains(&format!("\"node\",\"{id}\"")), "{drained}");
+        std::thread::spawn(move || applied("node", id, 256, 128, "new")).join().unwrap();
+        assert!(taken_contains("node", id));
     }
 }

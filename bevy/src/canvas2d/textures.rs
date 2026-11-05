@@ -110,6 +110,8 @@ pub(crate) fn sync_textures(
         };
         // 共享表里换绑可能释放旧 handle（同内容换 handle / 换源 / 换档）。
         let released = texture_store.bind(&id, content, texture_px, handle.clone());
+        // 前端以这条回执结束卡片的「加载中」；缺了它图已显示、提示却永远不消失。
+        crate::bridge::texture_receipts::applied("node", &id, width, height, content.unwrap_or(""));
         for stale in released {
             if stale != handle {
                 images.remove(stale.id());

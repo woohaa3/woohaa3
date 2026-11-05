@@ -232,8 +232,16 @@ pub(crate) fn sync_canvas_labels(
                         if text.0 != *label {
                             text.0 = label.clone();
                         }
-                        transform.translation = Vec3::new(position.x, -position.y, request.z);
-                        text_color.0 = super::layout::hex(*color);
+                        let translation = Vec3::new(position.x, -position.y, request.z);
+                        if transform.translation != translation {
+                            transform.translation = translation;
+                        }
+                        // 线性空间颜色：与 `label_bundle` 一致，且只在真的变化时才写 ——
+                        // 否则每帧都会标脏 TextColor/Transform，文字被反复重新栅格化。
+                        let color = Color::LinearRgba(super::layout::hex(*color).to_linear());
+                        if text_color.0 != color {
+                            text_color.0 = color;
+                        }
                         if !meta.matches(*size, request.style.bounds(), request.style.scale_mode())
                         {
                             meta.set(*size, request.style.bounds(), request.style.scale_mode());
@@ -280,7 +288,7 @@ fn label_bundle(
             font_size: FontSize::Px(size),
             ..default()
         },
-        TextColor(super::layout::hex(color)),
+        TextColor(Color::LinearRgba(super::layout::hex(color).to_linear())),
         style.layout(),
         TextBounds {
             width: bounds.map(|bounds| bounds.x),

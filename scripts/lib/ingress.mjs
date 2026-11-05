@@ -58,7 +58,7 @@ export function routeFor(pathname) {
   // ppserver 任务路由器的同源转发（`ppserver-provider` 扩展的 gateway 路由）。
   // **必须登记**：未登记的 `/api/...` 会被判 `none` 直接 404，请求到不了宿主 gateway，
   // 表现为「令牌配了、目录也拉到了，但前端生成一律 404」。四喜前端与登录后的会话投递
-  // 都走这个前缀（`/api/ppserver/tasks/*` 与 `/api/ppserver/auth/session`）。
+  // 都走这个前缀（任务路由与登录会话投递两个前缀）。
   if (pathname === "/api/ppserver" || pathname.startsWith("/api/ppserver/")) return "application";
   // 站点应用插件控制面与 Application 健康（change: 2026-10-05-extract-application-plugin-host）：
   // 由独立 Application Service 承载；ingress 只路由与传递可信身份，不持有配置权威。
