@@ -2,7 +2,7 @@
  * 交互控制器测试：resize 手势与 modal 输入门禁
  * （由 interaction-controller.test.ts 机械拆分，断言不变）。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
 import { installInteractionController } from "./interaction-controller.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
@@ -11,6 +11,56 @@ import {
 } from "./test-support/controller-harness.js";
 
 installSharedSession();
+
+it("world ground preview is transient and cancellation restores the accepted pose", () => {
+  const base = createEmptyWoohaa3ServerCanvas("c1");
+  const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i1",
+    transform: { version: "shared-world-v1", position: { u: 2, v: 3, h: 4 }, rotation: [0, 0, 0, 1], scale: 1 } };
+  const canvasState = { ...base, revision: 1, document: { ...base.document,
+    nodes: [{ id: "m1", type: "model3d", position: { x: 0, y: 0 } }] },
+    nodeData: { m1: { sharedWorldInstance: instance } } } as ServerCanvas;
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvasState);
+  const dom = harness();
+  const { runtime, scenes } = runtimeCapturing();
+  const controller = installInteractionController({ canvas: dom.canvas, getRuntime: () => runtime,
+    getSession: () => getSession() as never, target: dom.target as never });
+  submitted.length = 0;
+  expect(controller.setWorldGroundPreview("m1", { u: 1, v: -2 })).toBe(true);
+  controller.flush();
+  const position = () => (scenes.at(-1) as import("@woohaa3/contracts").CanvasRenderScene).nodes[0].sharedWorldInstance?.transform.position;
+  expect(position()).toEqual({ u: 3, v: 1, h: 4 });
+  controller.cancelTransientGesture();
+  controller.flush();
+  expect(position()).toEqual({ u: 2, v: 3, h: 4 });
+  expect(canvasState.nodeData.m1.sharedWorldInstance).toEqual(instance);
+  expect(submitted).toHaveLength(0);
+  controller.dispose();
+});
+
+it("rejects ground queries and gestures while focus or a focus transition is active", () => {
+  const base = createEmptyWoohaa3ServerCanvas("c1");
+  const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i1",
+    transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 1 }, rotation: [0, 0, 0, 1], scale: 1 } };
+  woohaa3CanvasStore.getState().applyRemoteCanvas({ ...base, document: { ...base.document,
+    nodes: [{ id: "m1", type: "model3d", position: { x: 0, y: 0 } }] }, nodeData: { m1: { sharedWorldInstance: instance } } } as ServerCanvas);
+  const dom = harness();
+  const { runtime } = runtimeCapturing();
+  const query = vi.fn(() => ({ ok: true as const, generation: 1, value: { u: 0, v: 0 } }));
+  runtime.queryWorldGround = query;
+  let focus = false, transition = false;
+  const controller = installInteractionController({ canvas: dom.canvas, getRuntime: () => runtime,
+    getSession: () => getSession() as never, target: dom.target as never,
+    getModelFocus: () => focus ? {} as never : null, getFocusTransition: () => transition ? {} as never : null });
+  const point = { x: 10, y: 20 };
+  expect(controller.beginWorldGroundPreview("m1", point)).toBe(true);
+  focus = true;
+  expect(controller.queryWorldGround(point)).toBeNull();
+  expect(controller.updateWorldGroundPreview(point)).toBe(false);
+  transition = true; focus = false;
+  expect(controller.beginWorldGroundPreview("m1", point)).toBe(false);
+  expect(query).toHaveBeenCalledTimes(1);
+  controller.dispose();
+});
 
 function setupResizable(
   type = "image",
@@ -70,102 +120,9 @@ describe("resize 手势（change: add-node-resize）", () => {
     controller.dispose();
   });
 
-  it("组可反复拉大缩小，最小尺寸贴住成员（不再预留包围盒留白）", () => {
-    const member = { id: "m", type: "image", parentId: "n1", position: { x: 40, y: 40 }, width: 200, height: 100 };
-    const { dom, controller, scenes, handle } = setupResizable("group", 500, 400, [member]);
-    dom.fire("pointerdown", { clientX: 20, clientY: 20 });
-    dom.fire("pointerup", { clientX: 20, clientY: 20 });
-    controller.flush();
-    submitted.length = 0;
-    dom.fire("pointerdown", { clientX: handle.x, clientY: handle.y });
-    dom.fire("pointermove", { clientX: handle.x + 100, clientY: handle.y + 80 });
-    dom.fire("pointerup", { clientX: handle.x + 100, clientY: handle.y + 80 });
-    controller.flush();
-    const grow = submitted.filter(entry => entry.type === "node.update");
-    expect(grow).toHaveLength(1);
-    expect(grow[0]).toMatchObject({nodeId: "n1", width: 600, height: 480});
-    expect((scenes.at(-1) as {nodes: Array<{id: string; width: number; height: number}>}).nodes.find(n => n.id === "n1"))
-      .toMatchObject({width: 600, height: 480});
-    submitted.length = 0;
-    dom.fire("pointerdown", { clientX: 590, clientY: 470 });
-    dom.fire("pointermove", { clientX: -1000, clientY: -1000 });
-    dom.fire("pointerup", { clientX: -1000, clientY: -1000 });
-    controller.flush();
-    const shrink = submitted.filter(entry => entry.type === "node.update");
-    expect(shrink).toHaveLength(1);
-    // 右下角固定左上角；宽度收到成员右边 240，高度保留底部页脚 80（140 + 80）。
-    expect(shrink[0]).toMatchObject({nodeId: "n1", width: 240, height: 220});
-    expect(submitted.some(entry => "nodeId" in entry && entry.nodeId === "m")).toBe(false);
-    expect(woohaa3CanvasStore.getState().canvas?.document.nodes.find(n => n.id === "m")?.position)
-      .toEqual({x: 40, y: 40});
-    controller.dispose();
-  });
 
-  it("组四角都能拖拽缩放：左上角固定右下角，并同时提交 position", () => {
-    const member = { id: "m", type: "image", parentId: "n1", position: { x: 40, y: 40 }, width: 200, height: 100 };
-    const { dom, controller } = setupResizable("group", 500, 400, [member]);
-    dom.fire("pointerdown", { clientX: 20, clientY: 20 });
-    dom.fire("pointerup", { clientX: 20, clientY: 20 });
-    controller.flush();
-    submitted.length = 0;
 
-    // 左上角抓手命中框贴住内缘 20×20；向内拖 40/20 后右/下边保持不动。
-    dom.fire("pointerdown", { clientX: 5, clientY: 5 });
-    dom.fire("pointermove", { clientX: 45, clientY: 25 });
-    dom.fire("pointerup", { clientX: 45, clientY: 25 });
-    controller.flush();
 
-    const update = submitted.filter((entry) => entry.type === "node.update");
-    expect(update).toHaveLength(2);
-    expect(update[0]).toMatchObject({ nodeId: "n1", width: 460, height: 380, position: { x: 40, y: 20 } });
-    // 成员保持画布绝对位置：组原点右移 40、下移 20，成员局部坐标反向补偿。
-    expect(update[1]).toMatchObject({ nodeId: "m", position: { x: 0, y: 20 } });
-    controller.dispose();
-  });
-
-  it("成员挡住右下角时左侧仍能缩到成员边界，且成员不动", () => {
-    // 组 800×700 @ (300,200)，唯一成员贴在右下：绝对 (900,600) 150×150。
-    // 旧规则按「成员包围盒 + 留白」把宽度卡在 790，左侧几乎缩不动。
-    const member = { id: "m", type: "image", parentId: "n1", position: { x: 600, y: 400 }, width: 150, height: 150 };
-    const { dom, controller, scenes } = setupResizable("group", 800, 700, [member], { x: 300, y: 200 });
-    dom.fire("pointerdown", { clientX: 320, clientY: 220 });
-    dom.fire("pointerup", { clientX: 320, clientY: 220 });
-    controller.flush();
-    submitted.length = 0;
-
-    dom.fire("pointerdown", { clientX: 300, clientY: 200 });
-    dom.fire("pointermove", { clientX: 600, clientY: 400 });
-    controller.flush();
-    const preview = scenes.at(-1) as { nodes: Array<{ id: string; x: number; y: number }> };
-    expect(preview.nodes.find(node => node.id === "m")).toMatchObject({ x: 900, y: 600 });
-    dom.fire("pointerup", { clientX: 600, clientY: 400 });
-    controller.flush();
-
-    const update = submitted.filter(entry => entry.type === "node.update");
-    expect(update[0]).toMatchObject({ nodeId: "n1", width: 500, height: 500, position: { x: 600, y: 400 } });
-    expect(update[1]).toMatchObject({ nodeId: "m", position: { x: 300, y: 200 } });
-    controller.dispose();
-  });
-
-  it("组左侧缩到底停在成员边界，不会把成员挤出框", () => {
-    const member = { id: "m", type: "image", parentId: "n1", position: { x: 600, y: 400 }, width: 150, height: 150 };
-    const { dom, controller } = setupResizable("group", 800, 700, [member]);
-    dom.fire("pointerdown", { clientX: 20, clientY: 20 });
-    dom.fire("pointerup", { clientX: 20, clientY: 20 });
-    controller.flush();
-    submitted.length = 0;
-
-    dom.fire("pointerdown", { clientX: 0, clientY: 0 });
-    dom.fire("pointermove", { clientX: 5000, clientY: 5000 });
-    dom.fire("pointerup", { clientX: 5000, clientY: 5000 });
-    controller.flush();
-
-    const update = submitted.filter(entry => entry.type === "node.update");
-    // 右/下边固定在 800/700，左边缘停在成员左边界 600、上边缘停在成员上边界 400。
-    expect(update[0]).toMatchObject({ nodeId: "n1", width: 200, height: 300, position: { x: 600, y: 400 } });
-    expect(update[1]).toMatchObject({ nodeId: "m", position: { x: 0, y: 0 } });
-    controller.dispose();
-  });
 
   it("图片节点宽高也可独立变化（节点不受宽高比锁定）", () => {
     const { dom, controller, handle, width } = setupResizable("image", 300, 200);

@@ -29,18 +29,17 @@ async function record(source: string, overrides: Partial<Parameters<CanvasScript
 }
 
 describe("受限执行：合法语义记录（任务 2.1 / 2.3）", () => {
-  it("记录六类节点与规范字段", async () => {
+  it("记录五类节点与规范字段", async () => {
     const outcome = await record(`
       canvas.node("text", { key: "t", title: "文本", prompt: "p" });
       canvas.node("image", { key: "i" });
       canvas.node("video", { key: "v" });
       canvas.node("audio", { key: "a" });
       canvas.node("model", { key: "m" });
-      canvas.node("film-set", { key: "f" });
     `);
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.operations.map((op) => (op as { kind?: string }).kind)).toEqual(["text", "image", "video", "audio", "model", "film-set"]);
+    expect(outcome.operations.map((op) => (op as { kind?: string }).kind)).toEqual(["text", "image", "video", "audio", "model"]);
     expect(outcome.operations[0]).toMatchObject({ op: "create_node", ref: "t", title: "文本", prompt: "p" });
   });
 

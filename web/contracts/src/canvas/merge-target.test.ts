@@ -6,7 +6,6 @@ import {
   resolveMergeTarget,
   type MergeTargetCandidate
 } from "./merge-target.js";
-import { filmSetObjectContainerId } from "./film-set-object-container.js";
 
 function candidate(
   nodeId: string,
@@ -100,16 +99,10 @@ describe("合并节点资格", () => {
     }
   });
 
-  it("托管节点、拍摄镜头预览与片场对象容器不可参与", () => {
+  it("托管节点不可参与", () => {
     expect(isMergeEligibleNode({
       node: { id: "managed", type: "model3d" },
-      data: { managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: "set", entityId: "e1", lifecycle: "owner-managed" } }
-    })).toBe(false);
-    expect(isMergeEligibleNode({ node: { id: "preview", type: "film-set-shot-preview" }, data: {} })).toBe(false);
-    const containerId = filmSetObjectContainerId("set", "item-1");
-    expect(isMergeEligibleNode({
-      node: { id: containerId, type: "composite-asset" },
-      data: { extensionId: "film-set", compositeAssetRole: "object-container", filmSetObject: { schemaVersion: 1, filmSetNodeId: "set", itemId: "item-1" } }
+      data: { managedBy: { schemaVersion: 1, extensionId: "demo", ownerNodeId: "set", entityId: "e1", lifecycle: "owner-managed" } }
     })).toBe(false);
   });
 });

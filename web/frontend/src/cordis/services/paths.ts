@@ -85,7 +85,7 @@ export function nodeHistoryUrlFor(input: {
   canvasId: string;
   nodeId: string;
   entryId: string;
-  variant: "preview" | "poster" | "thumbnail";
+  variant: "preview" | "poster";
 }): string {
   return `${NODE_HISTORY_BASE_PATH}/${encodeURIComponent(input.canvasId)}/${encodeURIComponent(input.nodeId)}/${encodeURIComponent(input.entryId)}/${input.variant}`;
 }

@@ -14,7 +14,8 @@ export type Woohaa3CanvasNodeData = Record<string, never>;
 export type Woohaa3CanvasNode = {
   id: string;
   type: string;
-  position: Woohaa3CanvasPosition;
+  /** 2D 卡片布局；导演区与共享世界模型没有卡片，省略。 */
+  position?: Woohaa3CanvasPosition;
   width?: number;
   height?: number;
   parentId?: string;

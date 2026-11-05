@@ -15,42 +15,8 @@ pub(crate) fn accept_gizmo_scene(scene: &Scene) {
     let accepted = (|| {
         let editor = scene.model_editor.as_ref()?;
         let focus = scene.model_focus.as_ref()?;
-        let node = scene.nodes.iter().find(|node| node.id == editor.node_id)?;
-        // The accepted render preparation owns group bindings. A group has no
-        // legacy composite_asset; never infer its objects from stale item roots.
-        let group = scene
-            .film_set_groups
-            .iter()
-            .find(|group| group.owner_id == node.id);
-        let composite = node.composite_asset.as_ref();
-        if group.is_none() && composite.is_none() {
-            return None;
-        }
-        let valid_item = editor.item_id.as_ref().is_some_and(|id| {
-            if let Some(group) = group {
-                (id == "film-set-ground" && group.ground.is_some())
-                    || group.bindings.iter().any(|binding| {
-                        &binding.binding_id == id
-                            && binding.visible
-                            && binding.diagnostic.is_none()
-                            && matches!(binding.kind.as_str(), "model3d" | "image" | "video")
-                            && scene.nodes.iter().any(|source| {
-                                source.id == binding.source_node_id && source.kind == binding.kind
-                            })
-                    })
-            } else {
-                composite.is_some_and(|composite| {
-                    composite.item_roots.contains_key(id)
-                        || composite.media.iter().any(|plane| &plane.item_id == id)
-                })
-            }
-        });
-        if editor.tool_mode == "object" && !valid_item {
-            return None;
-        }
         if editor.node_id != focus.node_id
-            || editor.tool_mode == "model"
-            || editor.shot_preview
+            || editor.tool_mode != "camera"
             || scene
                 .animation_playback
                 .as_ref()
@@ -92,15 +58,12 @@ pub(super) fn current() -> Option<Accepted> {
 }
 pub(super) fn layout_id(editor: &ModelEditor, view: &GizmoView) -> String {
     let identity = format!(
-        "{}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}",
+        "{}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}",
         editor.node_id,
-        editor.item_id,
         editor.camera_id,
         editor.tool_mode,
-        editor.object_tool,
         editor.camera_tool,
         editor.focus,
-        editor.parent_basis,
         editor.shot,
         view
     );

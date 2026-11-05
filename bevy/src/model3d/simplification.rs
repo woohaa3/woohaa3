@@ -29,11 +29,10 @@ pub(super) struct Reduced {
     pub error: f32,
 }
 pub(super) fn error_limit(quality: Quality) -> f32 {
-    match quality.tier() {
+    match quality {
         Quality::Low => 0.005,
         Quality::Medium => 0.002,
         Quality::High => 0.0,
-        _ => unreachable!("tier returns a base quality"),
     }
 }
 

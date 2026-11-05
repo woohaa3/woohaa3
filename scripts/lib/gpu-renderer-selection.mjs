@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 
 export const RENDERER_OVERRIDE_ENV = "WOOHAA_BEVY_RENDERER";
 export const RENDERER_BACKENDS = ["webgpu", "webgl2"];
@@ -30,14 +30,17 @@ function windowsGraphicsAdapters({ exec = execFileSync } = {}) {
 /**
  * 探测构建机是否有真实 GPU。
  *
- * 规则与 ATC 的 probeEnvironment 保持一致：macOS 用 system_profiler，Linux 只认
- * renderD*，Windows 排除远程/虚拟显示适配器。这里的结果只影响构建产物选择，不能
- * 代替浏览器运行时的 WebGPU 能力探测。
+ * 规则与 ATC 的 probeEnvironment 保持一致：macOS 用 system_profiler，Linux 先认
+ * renderD*，没有 DRM 设备时再按 WSL2 的 /dev/dxg 判定（WSL 不产生 renderD*），
+ * Windows 排除远程/虚拟显示适配器。这里的结果只影响构建产物选择，不能代替浏览器
+ * 运行时的 WebGPU 能力探测。
  */
 export function probeBuildGpu({
 	platform = process.platform,
 	readDir = readdirSync,
-	exec = execFileSync
+	exec = execFileSync,
+	readFile = readFileSync,
+	exists = existsSync
 } = {}) {
 	if (platform === "darwin") {
 		try {
@@ -58,7 +61,9 @@ export function probeBuildGpu({
 				evidence: "/dev/dri/renderD*"
 			};
 		} catch {
-			return { hasGpu: false, evidence: "/dev/dri/renderD* unavailable" };
+			// WSL2 的 GPU 直通不会产生 renderD*：宿主显卡以 /dev/dxg 暴露，用户态驱动在
+			// /usr/lib/wsl/lib。这里必须单独判定，否则 WSL 会被误报成「无 GPU」。
+			return wslGraphics({ readFile, exists }) ?? { hasGpu: false, evidence: "/dev/dri/renderD* unavailable" };
 		}
 	}
 	if (platform === "win32") {
@@ -72,6 +77,33 @@ export function probeBuildGpu({
 	}
 	return { hasGpu: false, evidence: `unsupported platform: ${platform}` };
 }
+
+/**
+ * 判定 Linux 是否是 WSL2，以及宿主 GPU 是否直通进来。
+ *
+ * 内核串带 `microsoft-standard-WSL2`；GPU 走 `/dev/dxg` 与 `/usr/lib/wsl/lib` 下的
+ * libcuda / libd3d12，不以 DRM `renderD*` 呈现。非 WSL 返回 null，让调用方保留原有
+ * 「无 renderD 即无 GPU」的结论。
+ */
+function wslGraphics({ readFile, exists }) {
+	let kernel = "";
+	try {
+		kernel = String(readFile("/proc/version", "utf8"));
+	} catch {
+		return null;
+	}
+	if (!/microsoft/i.test(kernel) || !/wsl/i.test(kernel)) return null;
+	const dxg = exists("/dev/dxg");
+	const libraries = ["/usr/lib/wsl/lib/libcuda.so.1", "/usr/lib/wsl/lib/libd3d12.so"].filter((file) =>
+		exists(file)
+	);
+	return {
+		hasGpu: dxg || libraries.length > 0,
+		evidence: dxg || libraries.length > 0 ? "WSL2 /dev/dxg GPU passthrough" : "WSL2 without /dev/dxg",
+		wsl: true
+	};
+}
+
 
 export function resolveRendererBackend({ env = process.env, probe = probeBuildGpu } = {}) {
 	const override = env[RENDERER_OVERRIDE_ENV]?.trim().toLowerCase();

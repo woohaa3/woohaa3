@@ -131,6 +131,21 @@ describe("截帧添加", () => {
 });
 
 describe("编辑确认", () => {
+  it("页面重开复用dialog实例编号时创建独立命令，同会话重试保持命令身份", async () => {
+    const first = makeHarness();
+    const reopened = makeHarness();
+    const before = first.videoSession.openVideoEdit(payload());
+    const after = reopened.videoSession.openVideoEdit(payload());
+    if (!before.ok || !after.ok) throw new Error("Expected edit sessions");
+    expect(before.instanceId).toBe(after.instanceId);
+    const confirm = { intents: [intent({ annotationShapes: [] })], previews: new Map<string, Blob>() };
+    await first.videoSession.confirmVideoEdit({ ...confirm, instanceId: before.instanceId });
+    await reopened.videoSession.confirmVideoEdit({ ...confirm, instanceId: after.instanceId });
+    await reopened.videoSession.confirmVideoEdit({ ...confirm, instanceId: after.instanceId });
+    expect(first.submitted[0]!.commandId).not.toBe(reopened.submitted[0]!.commandId);
+    expect(reopened.submitted[0]!.commandId).toBe(reopened.submitted[1]!.commandId);
+  });
+
   it("只把稳定 preview identity 写入 nodeData", async () => {
     const harness = makeHarness();
     const opened = harness.videoSession.openVideoEdit(payload());

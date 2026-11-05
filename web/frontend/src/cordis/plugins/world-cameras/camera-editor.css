@@ -1,0 +1,132 @@
+.world-camera-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: auto;
+  color: var(--app-web-text-primary);
+  font: 13px/1.5 var(--app-font);
+}
+/* Matches the renderer's work area: x24, y68, width-48, height-224. */
+.world-camera-editor__view-area {
+  position: absolute;
+  inset: 68px 24px 156px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.world-camera-editor__control { pointer-events: auto; touch-action: none; cursor: grab; }
+.world-camera-editor__control:active { cursor: grabbing; }
+.world-camera-editor__control[data-tool="center"] { cursor: crosshair; }
+.world-camera-editor__control[data-tool="dolly"] { cursor: ns-resize; }
+.world-camera-editor__header {
+  position: absolute;
+  top: 16px;
+  left: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  padding: 4px 8px 4px 12px;
+  border-radius: 8px;
+  background: var(--app-web-panel);
+}
+.world-camera-editor__header strong { max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.world-camera-editor__header > span { color: var(--app-web-text-muted); }
+.world-camera-editor__header-actions { margin-left: auto; display: flex; gap: 8px; }
+.world-camera-editor__footer {
+  position: absolute;
+  bottom: 16px;
+  left: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.world-camera-editor__dock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  width: max-content;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--app-web-panel);
+  pointer-events: auto;
+}
+.world-camera-editor__tool-row,
+.world-camera-editor__parameter-row,
+.world-camera-editor__tool-group,
+.world-camera-editor__tools { display: flex; align-items: center; gap: 8px; }
+.world-camera-editor__tool-row { justify-content: space-between; }
+.world-camera-editor__tool-group { gap: 2px; }
+.world-camera-editor__parameter-row { gap: 16px; }
+.world-camera-editor__parameter-row > * { flex-shrink: 0; }
+.world-camera-editor button { white-space: nowrap; flex-shrink: 0; }
+.world-camera-editor__labeled-select { display: flex; align-items: center; gap: 8px; }
+.world-camera-editor__labeled-select > span { white-space: nowrap; }
+.world-camera-editor__parameter-row .ui-select-input { width: auto; min-width: 88px; max-width: 160px; }
+.world-camera-editor__separator { height: 22px; width: 1px; background: var(--app-web-border); }
+.world-camera-editor__framing { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.world-camera-editor__framing input[type="range"] { width: clamp(120px, 15vw, 220px); accent-color: var(--app-interaction-accent); }
+.world-camera-editor input[type="number"] {
+  width: 64px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 5px;
+  background: var(--app-web-subtle);
+  color: var(--app-web-text-primary);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.world-camera-editor input[type="number"]:focus { outline: 1px solid var(--app-interaction-accent); }
+.world-camera-editor input[type="number"]::selection { background: var(--app-interaction-accent); }
+.world-camera-editor__more-anchor { display: flex; }
+.world-camera-editor__popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 12px;
+  width: 348px;
+  max-height: min(480px, calc(100vh - 240px));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 10px;
+  background: var(--app-web-panel);
+  scrollbar-color: var(--app-web-text-muted) transparent;
+  scrollbar-width: thin;
+}
+.world-camera-editor__fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.world-camera-editor__fields label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.world-camera-editor__fields label > span { font-size: 12px; color: var(--app-web-text-muted); }
+.world-camera-editor__fields input[type="number"] { width: 100%; box-sizing: border-box; }
+.world-camera-editor__presets { display: flex; align-items: center; gap: 8px; }
+.world-camera-editor__guide {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--app-web-panel);
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+}
+.world-camera-editor__guide > span { white-space: nowrap; }
+.world-camera-editor__guide kbd { font: inherit; color: var(--app-web-text-primary); }
+.world-camera-editor__flight-summary { padding: 8px 12px; border-radius: 8px; background: var(--app-web-panel); pointer-events: auto; }
+.world-camera-editor__notice { margin: 0; padding: 4px 8px; border-radius: 6px; background: var(--app-web-panel); color: var(--app-web-text-muted); font-size: 12px; }
+.world-camera-editor__message { margin: 0; color: var(--app-status-warning); }
+.world-camera-editor__history-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; }

@@ -1,13 +1,8 @@
-import { readFilmSetGroupMarker, fnv1a64Hex, decodeAnimationPayload, type ContentContributionResolver } from "@woohaa3/contracts";
-import { decodeFilmSetNodeData, filmSetAnimationsOf } from "@woohaa3/contracts";
 /**
- * 节点生成历史服务：登记 payload 构造与动画读取
+ * 节点生成历史服务：登记 payload 构造
  * （自 `node-history-service.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R02）。
  */
 import {
-  animationDefinitionSnapshotHash,
-  MODEL_SCRIPT_LANGUAGE,
-  MODEL_SCRIPT_V2_VERSION,
   decodeModelCameras,
   encodeNodeGenerationIdentity,
   modelContentIdentity,
@@ -16,7 +11,6 @@ import {
   nodeHistoryEntryId,
   type ModelCamera,
   type NodeGenerationHistoryEntry,
-  type NodeHistoryAnimationPayload,
   type NodeHistoryFailurePayload,
   type NodeHistoryMediaPayload,
   type NodeHistoryModelPayload,
@@ -24,7 +18,6 @@ import {
   type NodeHistoryTextPayload,
   type StoredAsset
 } from "@woohaa3/contracts";
-import { animationDefinitionIdentityFromPayload } from "./current-state.js";
 import type { RegisterModelEditInput, RegisterTaskFailureInput } from "./types.js";
 
 export function kindLabel(kind: "image" | "video" | "audio"): string {
@@ -221,18 +214,11 @@ export function buildModelHistoryEntry(input: {
  * （change: 图片聚焦编辑，design D5/D6 的固定 snapshot outbox 复用）。
  */
 export function buildModelEditEntry(input: RegisterModelEditInput): NodeGenerationHistoryEntry {
-  // 自包含动画节点：以完整动画定义（snapshotHash）作为去重键与当前身份。
-  const animationIdentity = input.animation ? animationDefinitionIdentityFromPayload(input.animation) : null;
-  const filmSet = input.animation?.schemaVersion === 3 ? input.animation : null;
-  const group = input.animation?.schemaVersion === 4 ? input.animation : null;
-  const sourceHash = group ? fnv1a64Hex(JSON.stringify(group.filmSetGroup)) : filmSet ? animationDefinitionSnapshotHash(filmSet) : input.sourceHash;
-  const identity = animationIdentity
-    ? { kind: "model-edit" as const, sourceHash, snapshotKey: animationIdentity }
-    : {
-        kind: "model-edit" as const,
-        sourceHash,
-        snapshotKey: modelPlacementSnapshotKey(input.placement)
-      };
+  const identity = {
+    kind: "model-edit" as const,
+    sourceHash: input.sourceHash,
+    snapshotKey: modelPlacementSnapshotKey(input.placement)
+  };
   const entryId = nodeHistoryEntryId({ canvasId: input.canvasId, nodeId: input.nodeId, identity });
   return {
     version: "woohaa-node-generation-history-v1",
@@ -242,20 +228,19 @@ export function buildModelEditEntry(input: RegisterModelEditInput): NodeGenerati
     kind: "model",
     createdAt: input.createdAt,
     sourceIdentity: encodeNodeGenerationIdentity(identity),
-    // 内容寻址：动画节点用完整定义身份，普通模型用脚本 + 摆放快照。
-    currentIdentity: animationIdentity ?? modelContentIdentity(input.sourceHash, input.placement),
+    // 内容寻址：脚本 + 摆放快照。
+    currentIdentity: modelContentIdentity(input.sourceHash, input.placement),
     recoverable: true,
     previewable: true,
-    source: { label: "模型编辑", sourceHash },
+    source: { label: "模型编辑", sourceHash: input.sourceHash },
     payload: {
       kind: "model",
-      modelScript: (filmSet || group) ? "" : input.modelScript,
-      language: (filmSet || group) ? MODEL_SCRIPT_LANGUAGE : input.language,
-      version: (filmSet || group) ? MODEL_SCRIPT_V2_VERSION : input.version,
-      sourceHash,
-      ...(!filmSet && !group ? { placement: input.placement } : {}),
-      ...(input.modelCameras && input.modelCameras.length > 0 ? { modelCameras: input.modelCameras } : {}),
-      ...(input.animation ? { animation: input.animation } : {})
+      modelScript: input.modelScript,
+      language: input.language,
+      version: input.version,
+      sourceHash: input.sourceHash,
+      placement: input.placement,
+      ...(input.modelCameras && input.modelCameras.length > 0 ? { modelCameras: input.modelCameras } : {})
     } satisfies NodeHistoryModelPayload
   };
 }
@@ -267,28 +252,4 @@ export function readModelCamerasSnapshot(data: Record<string, unknown> | undefin
   if (!data || data.modelCameras === undefined) return null;
   const decoded = decodeModelCameras(data.modelCameras);
   return decoded.ok && decoded.value.length > 0 ? decoded.value : null;
-}
-
-/**
- * 从节点当前 nodeData 读取动画节点的完整自身动画定义
- * （change: 2026-10-05-bind-model-animation-to-shots，任务 5.1）。
- */
-export function readAnimationHistoryPayload(
-  data: Record<string, unknown> | undefined,
-  content?: ContentContributionResolver
-): NodeHistoryAnimationPayload | null {
-  if (!data) return null;
-  if (content && Object.prototype.hasOwnProperty.call(data, "filmSetGroup")) {
-    return decodeAnimationPayload({ schemaVersion: 4, filmSetGroup: data.filmSetGroup }, { content });
-  }
-  const marker = readFilmSetGroupMarker(data);
-  if (marker) return { schemaVersion: 4, filmSetGroup: marker };
-  if (data.filmSetAnimations !== undefined || data.filmSetContent !== undefined) {
-    const decoded = decodeFilmSetNodeData(data);
-    if (!decoded.ok) return null;
-    const payload = { schemaVersion: 3 as const, scenePlacement: decoded.value.scenePlacement, sceneCamera: decoded.value.sceneCamera, filmSetContent: decoded.value.filmSetContent, filmSetAnimations: filmSetAnimationsOf(decoded.value), ...(decoded.value.origin ? { origin: decoded.value.origin } : {}) };
-    if (!content) return payload;
-    return decodeAnimationPayload(payload, { content });
-  }
-  return null;
 }

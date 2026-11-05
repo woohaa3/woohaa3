@@ -1,4 +1,3 @@
-import { currentCanvasGroupScope, scopedCanvas } from "../agent-authoring/group-scope.js";
 /**
  * Canvas script：计划投影与领域复核纯函数
  * （change: 2026-10-13-add-canvas-script-authoring，任务 3.5 / 3.6）。
@@ -15,12 +14,14 @@ import {
 } from "@woohaa3/contracts";
 
 /** 只读计划快照投影（不含 nodeData/yjs）。 */
-export function toPlannerSnapshot(canvas: ServerCanvas): PlannerSnapshot {
-  canvas = scopedCanvas(canvas);
+export function toPlannerSnapshot(
+  canvas: ServerCanvas,
+  group?: { rootGroupId: string }
+): PlannerSnapshot {
   return {
-    ...(currentCanvasGroupScope() ? { rootGroupId: currentCanvasGroupScope()!.rootGroupId } : {}),
     canvasId: canvas.id,
     revision: canvas.revision,
+    ...(group ? { rootGroupId: group.rootGroupId, groupNodeData: canvas.nodeData[group.rootGroupId] as Record<string, unknown> | undefined } : {}),
     nodes: canvas.document.nodes.map((node) => ({
       id: node.id,
       type: node.type,
@@ -28,7 +29,6 @@ export function toPlannerSnapshot(canvas: ServerCanvas): PlannerSnapshot {
       width: node.width,
       height: node.height,
       parentId: node.parentId,
-      retainWhenEmpty: canvas.nodeData[node.id]?.retainWhenEmpty,
       title: canvas.nodeData[node.id]?.title
     })),
     edges: canvas.document.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target }))

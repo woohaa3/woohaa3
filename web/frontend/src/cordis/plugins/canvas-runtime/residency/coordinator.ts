@@ -67,6 +67,8 @@ export type ResidencyProjectionInput = {
     height: number;
     /** 是否属于可被准入的媒体类型（图片/视频/模型/片场平面）。 */
     eligible: boolean;
+    /** 是否不受卡片视口裁剪（共享世界模型没有卡片 rect）。 */
+    alwaysVisible?: boolean;
     /**
      * 是否消耗离屏预览渲染槽（模型/复合资产）。
      *
@@ -273,9 +275,11 @@ export class CanvasResourceCoordinator {
       if (!purpose) continue;
       const physicalEdge = Math.max(candidate.width, candidate.height) * zoom * pixelRatio;
       const existing = this.demands.get(candidate.nodeId);
-      // 需求未变化时保留原对象，避免每帧重建（静止热路径）。
+      // 需求未变化时保留原对象，避免每帧重建（静止热路径）。视口内的像素级缩放只要没有
+      // 跨过缩略图档，就仍属于同一需求：否则每个 wheel 事件都会推进 projectionRevision，
+      // 媒体 owner 随即重算全量媒体 URL 并检查绑定（缩放时的卡顿来源之一）。
       if (existing && existing.purpose === purpose && existing.contentKey === candidate.contentKey
-        && existing.physicalEdge === physicalEdge) {
+        && selectThumbnailTier(existing.physicalEdge) === selectThumbnailTier(physicalEdge)) {
         next.set(candidate.nodeId, existing);
         continue;
       }
@@ -541,6 +545,8 @@ export class CanvasResourceCoordinator {
     insideView: { left: number; top: number; right: number; bottom: number } | null
   ): ResidencyPurpose | null {
     if (interactive.has(candidate.nodeId) || pins.has(candidate.nodeId)) return "interactive";
+    // 共享世界模型没有卡片 rect：始终按可见需求保留，不受视口/无 surface 裁剪。
+    if (candidate.alwaysVisible) return "visible";
     // 页面隐藏已在 `project` 入口冻结整集合，这里只处理无有效 surface：只保留 interactive/pin，
     // 暂停大批新预热（design D1）。
     if (!this.surfaceValid || !this.pageVisible || !view) return null;

@@ -1,13 +1,4 @@
 import { createHash } from "node:crypto";
-import {
-  scopedCanvas,
-  currentCanvasGroupScope,
-} from "../agent-authoring/group-scope.js";
-import {
-  canvasGroupMembers,
-  hasExternalCanvasReference,
-  canvasGroupAssetIds,
-} from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import {
   stableStringify,
@@ -113,28 +104,9 @@ export function createCanvasAssistantTextPort(deps: {
   return {
     async prepare({ owner, entry, capabilities }) {
       const room = await roomFor(owner, entry.canvasId);
-      const complete = snapshot(room);
-      const canvas = scopedCanvas(complete);
+      const canvas = snapshot(room);
       const nodeId = entry.nodeId ?? fail("target-invalid", "缺少文本目标");
       target(canvas, nodeId);
-      const scope = currentCanvasGroupScope();
-      if (
-        scope &&
-        (complete.document.edges.some(
-          (edge) =>
-            edge.target === nodeId &&
-            !canvas.document.nodes.some((node) => node.id === edge.source),
-        ) ||
-          hasExternalCanvasReference(
-            canvas.nodeData[nodeId],
-            canvasGroupMembers(canvas, scope.rootGroupId),
-            canvasGroupAssetIds(
-              canvas,
-              canvasGroupMembers(canvas, scope.rootGroupId),
-            ),
-          ))
-      )
-        fail("group-external-input", "不能使用组外输入");
       const bindings: CanvasTaskInputBinding[] = capabilities.imageInput
         ? [
             {
@@ -212,7 +184,7 @@ export function createCanvasAssistantTextPort(deps: {
                 code: "content-conflict",
                 message: "文本作品已改变，请重新生成",
               };
-            const view = scopedCanvas(canvas);
+            const view = canvas;
             const bindings: CanvasTaskInputBinding[] = prepared.capabilities
               .imageInput
               ? [
@@ -327,12 +299,6 @@ export function createCanvasAssistantTextPort(deps: {
         { authorize: () => deps.authorize(owner, prepared.canvasId, "write") },
       );
       if (!result.ok) fail(result.code, result.message);
-      currentCanvasGroupScope()?.onAction?.({
-        canvasId: prepared.canvasId,
-        nodeId: prepared.nodeId,
-        runId: run.runId,
-        jobId: run.jobId,
-      });
     },
     async commit({ owner, prepared, run, text }) {
       if (!text.trim()) fail("candidate-invalid", "助手未返回有效文本正文");
@@ -344,13 +310,14 @@ export function createCanvasAssistantTextPort(deps: {
           commandId: run.commandId,
           derive: (canvas) => {
             target(canvas, prepared.nodeId);
-            const current =
-              canvas.nodeData[prepared.nodeId]?.activeRunId === run.runId;
+            const activeRunId = canvas.nodeData[prepared.nodeId]?.activeRunId;
+            const current = activeRunId === run.runId;
+            // 恢复历史或清空 activeRunId 后，节点正文不再属于任何在途 run；
+            // 此时候选不得覆盖已恢复的人工/历史正文。乱序完成（activeRunId 是另一个 run）
+            // 仍按 latest-run-wins 归档，不在此拒绝。
+            const restored = activeRunId === "" || activeRunId?.startsWith("history:");
             if (
-              (current ||
-                canvas.nodeData[prepared.nodeId]?.activeRunId?.startsWith(
-                  "history:",
-                )) &&
+              (current || restored) &&
               textContentBaseline(canvas, prepared.nodeId) !== prepared.baseline
             )
               return {

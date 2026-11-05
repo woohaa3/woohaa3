@@ -49,9 +49,6 @@ export const MODEL_SIZE_BASE = 64.0;
  * （默认卡片 248×232 约合 3.9 m × 3.6 m）。
  */
 export const CANVAS_UNITS_PER_METER = MODEL_SIZE_BASE;
-/** 片场模型适配节点矩形时四周保留的边距（与 Rust `FILM_SET_FIT_MARGIN` 一致）。 */
-export const FILM_SET_FIT_MARGIN = 16.0;
-
 /**
  * 聚焦缩小的最近距离：允许相机进入包围球内部以贴近观察细节。
  *
@@ -104,14 +101,4 @@ export type ModelSceneInput = {
   /** 模型局部规范空间 AABB；缺省时从 ops 计算。 */
   aabb?: import("../model-transform.js").Aabb | null;
   placement?: import("../render-scene/wire-model.js").BevyModelPlacement | null;
-  /**
-   * 片场（animation3d）适配尺寸：设置后模型投影 AABB 等比适配该矩形（节点矩形）。
-   * 普通 model3d 不设置。
-   */
-  filmSetFit?: { width: number; height: number } | null;
-  /**
-   * 片场组的徽标锚定方式：设置后模型顶边贴住组底边锚点向下展开；
-   * 普通组缺省把模型投影中心对齐锚点。
-   */
-  badgeTopAnchored?: boolean;
 };

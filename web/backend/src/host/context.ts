@@ -179,11 +179,6 @@ export type HostServices = {
   mcp: McpService;
   toolGrants: ReturnType<typeof createToolGrantRegistry>;
   application: ApplicationModule;
-  /**
-   * 本机录制执行器通道（change: 2026-10-17-add-native-offscreen-film-set-recording）。
-   * Windows 等无 Unix socket 的平台上不存在该服务，录制能力据此明确不可用。
-   */
-  recordingExecutor: import("./core/recording-executor.js").RecordingExecutorChannel;
 };
 
 export type HostContext = Context & HostServices & {

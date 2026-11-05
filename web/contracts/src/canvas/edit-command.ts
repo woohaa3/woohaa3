@@ -10,17 +10,15 @@
  * 解码与语义。
  */
 import type { CanvasNodeData, Woohaa3CanvasJsonObject } from "./domain/index.js";
-import { decodeFilmSetLocalTransform } from "./film-set-content.js";
-import type { FilmSetItem } from "./film-set-content.js";
-import type { FilmSetItemBindingRestore, FilmSetItemOrderAnchor } from "./film-set-item-edit.js";
-import type { FilmSetAnimationClip } from "./film-set-animations.js";
 import {
   EDIT_APPLY_LIMITS,
   EDIT_NODE_DATA_FIELDS,
+  EDIT_NODE_DATA_GUARD_FIELDS,
   EDIT_NODE_FIELDS,
   type EditApplyCommand,
   type EditFieldSnapshot,
   type EditNodeDataField,
+  type EditNodeDataGuardField,
   type EditNodeDataFieldSnapshot,
   type EditNodeField,
   type EditNodeFieldSnapshot,
@@ -34,6 +32,7 @@ export {
   EDIT_NODE_DATA_FIELDS,
   type EditNodeField,
   type EditNodeDataField,
+  type EditNodeDataGuardField,
   type EditFieldSnapshot,
   type EditNodeFieldSnapshot,
   type EditNodeDataFieldSnapshot,
@@ -90,9 +89,9 @@ function decodeNodeFieldSnapshot(value: unknown): EditNodeFieldSnapshot | null {
 }
 
 function decodeNodeDataFieldSnapshot(value: unknown): EditNodeDataFieldSnapshot | null {
-  if (!isRecord(value) || !isEditNodeDataField(value.field)) return null;
+  if (!isRecord(value) || typeof value.field !== "string" || !(EDIT_NODE_DATA_GUARD_FIELDS as readonly string[]).includes(value.field)) return null;
   const snapshot = decodeFieldSnapshot(value);
-  return snapshot ? { field: value.field, ...snapshot } : null;
+  return snapshot ? { field: value.field as EditNodeDataGuardField, ...snapshot } : null;
 }
 
 function decodePrecondition(value: unknown): EditPrecondition | null {
@@ -122,16 +121,8 @@ function decodePrecondition(value: unknown): EditPrecondition | null {
       }
       return { kind: "node-data-fields", nodeId: value.nodeId, fields };
     }
-    case "parent": {
-      if (!isNonEmptyString(value.nodeId)) return null;
-      if (value.parentId !== null && !isNonEmptyString(value.parentId)) return null;
-      return { kind: "parent", nodeId: value.nodeId, parentId: value.parentId };
-    }
-    case "child-ids": {
-      if (!isNonEmptyString(value.nodeId) || !Array.isArray(value.childIds)) return null;
-      if (!value.childIds.every(isNonEmptyString)) return null;
-      return { kind: "child-ids", nodeId: value.nodeId, childIds: [...value.childIds] };
-    }
+    case "node-data-equals":
+      return isNonEmptyString(value.nodeId) && isRecord(value.value) && isJsonPayload(value.value) ? { kind: "node-data-equals", nodeId: value.nodeId, value: value.value as CanvasNodeData } : null;
     case "incident-edge-ids": {
       if (!isNonEmptyString(value.nodeId) || !Array.isArray(value.edgeIds)) return null;
       if (!value.edgeIds.every(isNonEmptyString)) return null;
@@ -153,39 +144,6 @@ function decodePrecondition(value: unknown): EditPrecondition | null {
       if (!Array.isArray(value.assetIds) || !value.assetIds.every(isNonEmptyString)) return null;
       return { kind: "assets-present", assetIds: [...value.assetIds] };
     }
-    case "film-set-item-state":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.itemId) && typeof value.contentHash === "string"
-        ? { kind: "film-set-item-state", nodeId: value.nodeId, itemId: value.itemId, contentHash: value.contentHash }
-        : null;
-    case "film-set-item-missing":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.itemId)
-        ? { kind: "film-set-item-missing", nodeId: value.nodeId, itemId: value.itemId }
-        : null;
-    case "film-set-clip-present":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.clipId)
-        ? { kind: "film-set-clip-present", nodeId: value.nodeId, clipId: value.clipId }
-        : null;
-    case "film-set-item-binding":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.clipId) && isNonEmptyString(value.itemId) && typeof value.bindingHash === "string"
-        ? { kind: "film-set-item-binding", nodeId: value.nodeId, clipId: value.clipId, itemId: value.itemId, bindingHash: value.bindingHash }
-        : null;
-    case "film-set-item-binding-closure": {
-      if (!isNonEmptyString(value.nodeId) || !isNonEmptyString(value.itemId) || !Array.isArray(value.bindings)) return null;
-      const bindings: { clipId: string; bindingHash: string }[] = [];
-      for (const entry of value.bindings) {
-        if (!isRecord(entry) || !isNonEmptyString(entry.clipId) || typeof entry.bindingHash !== "string") return null;
-        bindings.push({ clipId: entry.clipId, bindingHash: entry.bindingHash });
-      }
-      return { kind: "film-set-item-binding-closure", nodeId: value.nodeId, itemId: value.itemId, bindings };
-    }
-    case "film-set-clip-state":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.clipId) && typeof value.clipHash === "string"
-        ? { kind: "film-set-clip-state", nodeId: value.nodeId, clipId: value.clipId, clipHash: value.clipHash }
-        : null;
-    case "film-set-shot-preview-state":
-      return isNonEmptyString(value.previewNodeId) && isNonEmptyString(value.filmSetNodeId) && isNonEmptyString(value.clipId)
-        ? { kind: "film-set-shot-preview-state", previewNodeId: value.previewNodeId, filmSetNodeId: value.filmSetNodeId, clipId: value.clipId }
-        : null;
     default:
       return null;
   }
@@ -201,10 +159,11 @@ function decodeOperation(value: unknown): EditOperation | null {
       const node = value.node;
       if (!isRecord(node)) return null;
       if (!isNonEmptyString(node.id) || !isNonEmptyString(node.type)) return null;
-      if (!isPosition(node.position)) return null;
+      // 导演区/共享世界实例没有卡片，结构位置可省略（`EditOperation` 的 position 可选）；
+      // 提供时仍必须是有限位置。继续强制 position 会让创建导演区的 edit.apply 解码失败。
+      if (node.position !== undefined && !isPosition(node.position)) return null;
       if (node.width !== undefined && !isFiniteNumber(node.width)) return null;
       if (node.height !== undefined && !isFiniteNumber(node.height)) return null;
-      if (node.parentId !== undefined && !isNonEmptyString(node.parentId)) return null;
       if (node.zIndex !== undefined && !isFiniteNumber(node.zIndex)) return null;
       if (value.nodeData !== undefined && !isRecord(value.nodeData)) return null;
       return {
@@ -212,10 +171,9 @@ function decodeOperation(value: unknown): EditOperation | null {
         node: {
           id: node.id,
           type: node.type,
-          position: { x: node.position.x, y: node.position.y },
+          ...(node.position !== undefined ? { position: { x: node.position.x, y: node.position.y } } : {}),
           ...(node.width !== undefined ? { width: node.width as number } : {}),
           ...(node.height !== undefined ? { height: node.height as number } : {}),
-          ...(node.parentId !== undefined ? { parentId: node.parentId as string } : {}),
           ...(node.zIndex !== undefined ? { zIndex: node.zIndex as number } : {})
         },
         ...(value.nodeData !== undefined ? { nodeData: value.nodeData as CanvasNodeData } : {})
@@ -227,14 +185,12 @@ function decodeOperation(value: unknown): EditOperation | null {
       if (value.width !== undefined && !isFiniteNumber(value.width)) return null;
       if (value.height !== undefined && !isFiniteNumber(value.height)) return null;
       if (value.zIndex !== undefined && !isFiniteNumber(value.zIndex)) return null;
-      if (value.parentId !== undefined && value.parentId !== null && !isNonEmptyString(value.parentId)) return null;
       return {
         kind: "node-update",
         nodeId: value.nodeId,
         ...(value.position !== undefined ? { position: { x: value.position.x, y: value.position.y } } : {}),
         ...(value.width !== undefined ? { width: value.width as number } : {}),
         ...(value.height !== undefined ? { height: value.height as number } : {}),
-        ...(value.parentId !== undefined ? { parentId: value.parentId as string | null } : {}),
         ...(value.zIndex !== undefined ? { zIndex: value.zIndex as number } : {})
       };
     }
@@ -274,78 +230,9 @@ function decodeOperation(value: unknown): EditOperation | null {
     }
     case "canvas-title-set":
       return typeof value.title === "string" ? { kind: "canvas-title-set", title: value.title } : null;
-    case "film-set-item-transform": {
-      if (!isNonEmptyString(value.nodeId) || !isNonEmptyString(value.itemId)) return null;
-      const transform = decodeFilmSetLocalTransform(value.localTransform);
-      if (!transform.ok) return null;
-      if (value.expectedLocalTransform !== undefined) {
-        const expected = decodeFilmSetLocalTransform(value.expectedLocalTransform);
-        if (!expected.ok) return null;
-        return { kind: "film-set-item-transform", nodeId: value.nodeId, itemId: value.itemId, localTransform: transform.value, expectedLocalTransform: expected.value };
-      }
-      return { kind: "film-set-item-transform", nodeId: value.nodeId, itemId: value.itemId, localTransform: transform.value };
-    }
-    case "film-set-item-set":
-      return isNonEmptyString(value.nodeId) && isRecord(value.item) && isNonEmptyString(value.item.id)
-        ? { kind: "film-set-item-set", nodeId: value.nodeId, item: value.item as FilmSetItem } : null;
-    case "film-set-item-remove":
-      return isNonEmptyString(value.nodeId) && isNonEmptyString(value.itemId)
-        ? { kind: "film-set-item-remove", nodeId: value.nodeId, itemId: value.itemId }
-        : null;
-    case "film-set-item-restore": {
-      if (!isNonEmptyString(value.nodeId) || !isRecord(value.item)) return null;
-      const itemId = (value.item as { id?: unknown }).id;
-      if (!isNonEmptyString(itemId)) return null;
-      const anchor = decodeOrderAnchor(value.orderAnchor);
-      if (!anchor) return null;
-      const bindings = decodeBindingRestores(value.bindings);
-      if (!bindings) return null;
-      return { kind: "film-set-item-restore", nodeId: value.nodeId, item: value.item as FilmSetItem, orderAnchor: anchor, bindings };
-    }
-    case "film-set-clip-set": {
-      if (!isNonEmptyString(value.nodeId) || !isNonEmptyString(value.clipId) || !isRecord(value.clip)) return null;
-      if (value.defaultClipId !== null && !isNonEmptyString(value.defaultClipId)) return null;
-      if ((value.clip as { id?: unknown }).id !== value.clipId) return null;
-      return {
-        kind: "film-set-clip-set",
-        nodeId: value.nodeId,
-        clipId: value.clipId,
-        clip: value.clip as FilmSetAnimationClip,
-        defaultClipId: value.defaultClipId as string | null
-      };
-    }
-    case "film-set-clip-remove": {
-      if (!isNonEmptyString(value.nodeId) || !isNonEmptyString(value.clipId)) return null;
-      if (value.defaultClipId !== null && !isNonEmptyString(value.defaultClipId)) return null;
-      return { kind: "film-set-clip-remove", nodeId: value.nodeId, clipId: value.clipId, defaultClipId: value.defaultClipId as string | null };
-    }
     default:
       return null;
   }
-}
-
-/** 交替顺序锚点：`{}` / `{after}` / `{before}` / `{after,before}` 均可。 */
-function decodeOrderAnchor(value: unknown): FilmSetItemOrderAnchor | null {
-  if (value === undefined) return {};
-  if (!isRecord(value)) return null;
-  if (value.after !== undefined && !isNonEmptyString(value.after)) return null;
-  if (value.before !== undefined && !isNonEmptyString(value.before)) return null;
-  return {
-    ...(value.after !== undefined ? { after: value.after as string } : {}),
-    ...(value.before !== undefined ? { before: value.before as string } : {})
-  };
-}
-
-/** 绑定闭包：`{clipId, binding}[]`，binding 的形状由 reducer/reducer 的片场解码校验。 */
-function decodeBindingRestores(value: unknown): FilmSetItemBindingRestore[] | null {
-  if (!Array.isArray(value) || value.length > EDIT_APPLY_LIMITS.maxPreconditions) return null;
-  const out: FilmSetItemBindingRestore[] = [];
-  for (const entry of value) {
-    if (!isRecord(entry) || !isNonEmptyString(entry.clipId) || !isRecord(entry.binding)) return null;
-    if (!isNonEmptyString(entry.binding.itemId)) return null;
-    out.push({ clipId: entry.clipId, binding: entry.binding as FilmSetItemBindingRestore["binding"] });
-  }
-  return out;
 }
 
 /**

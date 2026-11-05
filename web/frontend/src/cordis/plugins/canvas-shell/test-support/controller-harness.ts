@@ -89,6 +89,8 @@ export function runtimeCapturing(options: {
     target: [number, number, number];
     radius: number;
   } | null;
+  /** 测试用世界模型框选 oracle：生产由 Rust 投影 AABB 计算。 */
+  modelMarquee?: (input: { x: number; y: number; width: number; height: number }) => string[];
   /** 测试用 gizmo 命中 oracle（生产由 Rust 计算）。 */
   gizmoHit?: (input: import("../model-gizmo-hit.js").GizmoQueryInput) => import("../../canvas-runtime/bevy-runtime.js").GizmoHitResult | null;
   /**
@@ -202,6 +204,10 @@ export function runtimeCapturing(options: {
       if (input.generation !== generation) return { ok: false, reason: "stale" };
       const pick = options.modelPick ? options.modelPick(input) : defaultModelPick(input);
       return { ok: true, generation, value: pick };
+    },
+    queryModelMarquee: (input: { generation: number; x: number; y: number; width: number; height: number }) => {
+      if (input.generation !== generation) return { ok: false, reason: "stale" };
+      return { ok: true, generation, value: options.modelMarquee ? options.modelMarquee(input) : [] };
     },
     // gizmo 命中 oracle 由 harness 注入（生产由 Rust query_gizmo_hit 计算）。
     queryGizmoHit: (input: import("../model-gizmo-hit.js").GizmoQueryInput) =>

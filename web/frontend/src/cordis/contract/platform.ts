@@ -215,14 +215,12 @@ export type PromptSnippetSource = {
  * 通用「选中节点操作」横条的贡献契约
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1/3.2/3.4 / design D6/D7 修订）。
  *
- * 横条**由 Bevy 在画布场景内绘制、由 Rust interaction snapshot 命中**（整张画布仍是同一张
- * canvas，因此中键/空格/右键拖拽平移与滚轮缩放在横条覆盖区域照常生效）。贡献因此不再贡献 DOM
- * 横条本体，而是：
+ * 横条由 Web 宿主统一渲染 DOM 按钮，runtime 提供 accepted 节点锚点。贡献提供：
  * - `describe`：给出**纯数据**动作描述（文案、可用性、是否带设置箭头、模型名摘要）；
  * - `activate`：命中后派发（`menu: true` 表示命中独立设置箭头）；
  * - `settings`（可选）：点击设置箭头后在横条锚点打开的**DOM 弹窗**（复杂 UI 走 DOM）。
  *
- * 宿主只做通用描述收集、绘制数据下发、命中派发与弹窗锚定，MUST NOT import 任何具体扩展实现
+ * 宿主只做通用描述收集、Web 渲染、动作派发与弹窗锚定，MUST NOT import 任何具体扩展实现
  * 或按 film-set ID 分支。下载由宿主自己贡献（`order: 0`）；film-set 通过同一 slot 贡献转换。
  */
 export type NodeActionContext = {
@@ -235,7 +233,7 @@ export type NodeActionContext = {
 /**
  * 命中上下文：在显示上下文之上标明命中的是本体还是独立设置箭头，并提供**宿主设置弹窗开启器**。
  *
- * 横条由 Bevy 绘制时，宿主是设置 DOM 弹窗的**唯一渲染者**（扩展自身的 `<Popover>` 只在聚焦
+ * 横条与设置弹窗由 Web 宿主统一渲染（扩展自身的 `<Popover>` 只在聚焦
  * 标题栏挂载）。因此贡献在一次点击无法直接开始、需要打开就近设置时 MUST 调用
  * `requestSettings()`，由宿主在节点锚点打开本贡献的 `settings` 弹窗；只写扩展内部瞬态
  * `settingsOpen` 在横条模式下没有任何渲染者。
@@ -250,11 +248,11 @@ export type NodeActionActivation = NodeActionContext & {
 export type NodeActionDescriptor = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download" | "edit" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
+  icon?: "download" | "edit" | "box" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
   iconOnly?: boolean;
   /** 按钮文案（中文）。 */
   label: string;
-  /** 是否可用；false 时仍可命中，由 `activate` 决定是否响应。 */
+  /** 是否可用；false 时 Web 主按钮禁用，独立设置箭头仍可打开设置。 */
   enabled: boolean;
   /** 不可用原因（供 tooltip/诊断；无障碍不适用，仅用于呈现）。 */
   reason?: string;

@@ -130,6 +130,54 @@ export function missingRequiredParameters(
 }
 
 /**
+ * 提交前的参数值约束提示（枚举 / 数值范围）。
+ *
+ * 目录已经把 Provider 的 `enum` / `minimum` / `maximum` 投影进参数表。值越界或不在枚举里时
+ * 不要让请求发出去再等 Provider 回一句泛化错误——那时用户不知道是哪个字段、允许什么范围。
+ * 只在字段可见且有值时校验：缺失值由 `missingRequiredParameters` 负责，两者合并成同一份
+ * 「提交前可理解提示」。
+ *
+ * 返回可直接展示的中文句子，顺序与参数表一致，便于稳定断言。
+ */
+export function parameterViolationReasons(
+	fields: ReadonlyArray<ExecutionPanelParameterField>,
+	parameters: Record<string, unknown>,
+): string[] {
+	const reasons: string[] = [];
+	for (const field of fields) {
+		if (hiddenBy(field, parameters)) continue;
+		const value = parameters[field.key];
+		if (value === undefined || value === null || value === "") continue;
+		if (field.type === "select") {
+			const options = field.options ?? [];
+			if (options.length === 0) continue;
+			if (!options.some((option) => option.value === String(value))) {
+				reasons.push(
+					`${field.label}只支持 ${options.map((option) => option.label).join("、")}，当前为「${String(value)}」`,
+				);
+			}
+			continue;
+		}
+		if (field.type === "number") {
+			const numeric =
+				typeof value === "number"
+					? value
+					: typeof value === "string" && value.trim() !== ""
+						? Number(value)
+						: Number.NaN;
+			if (!Number.isFinite(numeric)) continue;
+			const unit = field.unit ?? "";
+			if (field.minimum !== undefined && numeric < field.minimum) {
+				reasons.push(`${field.label}不能小于 ${field.minimum}${unit}，当前为 ${numeric}${unit}`);
+			} else if (field.maximum !== undefined && numeric > field.maximum) {
+				reasons.push(`${field.label}不能大于 ${field.maximum}${unit}，当前为 ${numeric}${unit}`);
+			}
+		}
+	}
+	return reasons;
+}
+
+/**
  * 面板局部 Escape 路由（change: 2026-09-28-align-execution-reference-and-expansion，
  * design D7）。
  *

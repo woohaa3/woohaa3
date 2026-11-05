@@ -28,10 +28,39 @@
 .agent-assistant__section-heading span, .agent-assistant__muted { color: var(--assistant-secondary); font-size: 12px; }
 .agent-assistant__navigation { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 12px; }
 .agent-assistant__back { margin-bottom: 16px; }
-.agent-assistant__overview-list, .agent-assistant__list { list-style: none; margin: 0; padding: 0; background: var(--app-web-panel); border: 1px solid var(--app-web-border); border-radius: 12px; overflow: hidden; }
-.agent-assistant__overview-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px 64px; align-items: center; gap: 14px; min-height: 66px; padding: 0 16px; border-bottom: 1px solid var(--app-web-border); }
-.agent-assistant__overview-row:last-child, .agent-assistant__list li:last-child { border-bottom: 0; }
-.agent-assistant__overview-row > strong { font-size: 13px; font-weight: 600; }
+.agent-assistant__list { list-style: none; margin: 0; padding: 0; background: var(--app-web-panel); border: 1px solid var(--app-web-border); border-radius: 12px; overflow: hidden; }
+.agent-assistant__list li:last-child { border-bottom: 0; }
+.agent-assistant__capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.agent-assistant__capability-card { display: flex; flex-direction: column; align-items: stretch; min-width: 0; min-height: 192px; padding: 20px; border: 1px solid var(--app-web-border); border-radius: 14px; background: var(--app-web-panel); color: var(--app-web-text-primary); text-align: left; font: inherit; cursor: pointer; transition: border-color .16s ease-out, background-color .16s ease-out; }
+.agent-assistant__capability-card:hover { border-color: var(--app-interaction-accent); background: color-mix(in srgb, var(--app-interaction-accent-soft) 24%, var(--app-web-panel)); }
+.agent-assistant__capability-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 19px; color: var(--app-interaction-accent); }
+.agent-assistant__capability-card-top > svg:last-child { color: var(--assistant-secondary); }
+.agent-assistant__capability-card > strong { font-size: 22px; line-height: 1.3; font-weight: 600; }
+.agent-assistant__capability-description { margin-top: 6px; color: var(--assistant-secondary); font-size: 12px; }
+.agent-assistant__capability-count { align-self: flex-start; margin-top: auto; padding-top: 20px; color: var(--app-interaction-accent-pressed); font-size: 12px; font-variant-numeric: tabular-nums; text-decoration: underline dotted; text-underline-offset: 4px; }
+.agent-assistant__capability-count[data-error="true"] { color: var(--app-status-warning); }
+.agent-assistant__capability-count[data-split="true"] { display: grid; gap: 3px; text-decoration: none; }
+.agent-assistant__capability-count[data-split="true"] > span { width: fit-content; border-bottom: 1px dotted currentColor; padding-bottom: 1px; }
+.agent-assistant__capability-card[data-placeholder="true"] { background: var(--app-web-subtle); }
+.agent-assistant__capability-card[data-placeholder="true"] .agent-assistant__capability-card-top,
+.agent-assistant__capability-card[data-placeholder="true"] .agent-assistant__capability-count { color: var(--assistant-secondary); }
+.agent-assistant__capability-card[data-placeholder="true"] .agent-assistant__capability-count { text-decoration: none; }
+.agent-assistant__supplier-tooltip { display: flex; flex-direction: column; gap: 8px; max-width: 320px; max-height: 280px; overflow: auto; }
+.agent-assistant__supplier-tooltip > span { display: flex; justify-content: space-between; gap: 20px; overflow-wrap: anywhere; }
+.agent-assistant__supplier-tooltip strong { font-weight: 500; }
+.agent-assistant__mcp-overview { display: flex; align-items: flex-start; gap: 16px; margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--app-web-border); }
+.agent-assistant__mcp-overview > svg { margin-top: 2px; color: var(--assistant-secondary); flex-shrink: 0; }
+.agent-assistant__mcp-overview > div { flex: 1; min-width: 0; }
+.agent-assistant__mcp-overview h3 { font-size: 17px; }
+.agent-assistant__mcp-overview p { margin: 4px 0 7px; font-size: 12px; }
+.agent-assistant__capability-breadcrumb { display: flex; align-items: center; gap: 8px; margin: -6px 0 20px; color: var(--assistant-secondary); }
+.agent-assistant__capability-breadcrumb .ui-button { padding-left: 0; }
+.agent-assistant__capability-summary { margin: -10px 0 24px !important; }
+.agent-assistant__capability-placeholder { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 72px 24px; color: var(--assistant-secondary); text-align: center; }
+.agent-assistant__capability-placeholder h3 { color: var(--app-web-text-primary); font-size: 17px; }
+.agent-assistant__capability-models { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.agent-assistant__capability-models > span { padding: 2px 7px; border-radius: 5px; background: var(--app-web-subtle); color: var(--assistant-secondary); font-size: 11px; overflow-wrap: anywhere; }
+.agent-assistant__capability-suppliers .ui-button { flex-shrink: 0; white-space: nowrap; }
 .agent-assistant__state { display: inline-flex; align-items: center; gap: 7px; color: var(--assistant-secondary); font-size: 12px; white-space: nowrap; }
 .agent-assistant__state::before { content: ""; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; }
 .agent-assistant__state[data-tone="warning"] { color: var(--app-status-warning); }
@@ -109,7 +138,7 @@
 @media (max-width: 1040px) {
   .agent-assistant__sidebar { flex-basis: 180px; }
   .agent-assistant__page { padding: 22px 20px 28px; }
-  .agent-assistant__overview-row { grid-template-columns: minmax(0, 1fr) 140px 58px; gap: 8px; }
+  .agent-assistant__capability-card { padding: 16px; }
   .agent-assistant__source-list li { grid-template-columns: minmax(0, 1fr) 100px auto; gap: 10px; }
 }
 .agent-assistant__mcp-tile { position: relative; display: flex; justify-content: center; }

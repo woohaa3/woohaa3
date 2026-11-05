@@ -1,5 +1,3 @@
-import { migrateFilmSetFixture } from "../../../../../../test-support/film-set-groups.js";
-import { readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
 import { testManagedLifecycle, testManagedOwner } from "../../../../../../test-support/managed-test-extension.js";
 import { applyCanvasCommands } from "../../../../../../test-support/managed-shot-commands.js";
@@ -8,22 +6,131 @@ import { applyCanvasCommands } from "../../../../../../test-support/managed-shot
  */
 import { describe, expect, it } from "vitest";
 import {
+  executeWorldAnimationScript,
   createEmptyWoohaa3ServerCanvas,
   createWoohaa3CanvasNode,
   toWoohaa3CanvasDocument,
-  createFilmSetSnapshot, canonicalFilmSetFields, filmSetAnimationsOf,
-  filmSetObjectContainerId, filmSetObjectContainerData,
-  managedNodeRelationOf, shotReferenceOwnershipOf, SHOT_REFERENCE_ROLE,
-  type FilmSetModelItem, type FilmSetMediaItem,
+  managedNodeRelationOf,
+  type SceneAreaData,
+  type WorldInstanceData,
   type ServerCanvas,
   type StoredAsset
 } from "@woohaa3/contracts";
 import { buildCanvasCopyPayload, parseCanvasCopyPayload, serializeCanvasCopyPayload } from "./payload.js";
 import { checkPasteReferences, planCanvasPaste as planPaste } from "./planner.js";
-import { filmSetTestLifecycles } from "../../../../../../test-support/managed-shot-commands.js";
-const planCanvasPaste = (options: Parameters<typeof planPaste>[0]) => planPaste({ lifecycle: filmSetTestLifecycles, ...options });
+const planCanvasPaste = (options: Parameters<typeof planPaste>[0]) => planPaste(options);
 
 const NOW = "2026-09-24T00:00:00.000Z";
+
+function animatedWorldFixture(): ServerCanvas {
+  const result = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("source-world", NOW), [
+    { type: "node.add", node: { id: "actor", type: "model3d" }, nodeData: { sharedWorldInstance: {
+      kind: "world-instance", version: "shared-world-v1", instanceId: "actor-instance",
+      transform: { version: "shared-world-v1", position: { u: 1, v: 2, h: 3 }, rotation: [0, 0, 0, 1], scale: 1 }
+    } } },
+    { type: "node.add", node: { id: "area", type: "scene-area" }, nodeData: { sceneArea: {
+      kind: "scene-area", version: "shared-world-v1", areaId: "area-id", scopeVersion: "scope-1",
+      bounds: { min: { u: -4, v: -4 }, max: { u: 4, v: 4 } },
+      animationScript: {
+        script: [
+          'motion.instance.tween("actor-instance", { property: "position", startTime: 0, endTime: 5, from: [1, 2, 3], to: [4, 3, 3], easing: "easeOut" });',
+          'motion.instance.tween("actor-instance", { property: "rotation", startTime: 0, endTime: 5, from: [0, 90, 0], to: [0, 180, 0], easing: "linear" });',
+          'motion.instance.tween("actor-instance", { property: "scale", startTime: 0, endTime: 5, from: [1], to: [2], easing: "linear" });'
+        ].join("\n"),
+        scriptLanguage: "javascript",
+        scriptVersion: "woohaa-world-animation-js-v2",
+        revision: 1,
+        sourceHash: "hash-animated",
+        duration: 5,
+        loop: true
+      }
+    } } }
+  ] as never, { now: NOW });
+  if (!result.ok) throw Error(JSON.stringify(result.rejection));
+  return result.canvas;
+}
+
+it("round-trips world nodes without card positions while rejecting ordinary or invalid unplaced nodes", () => {
+  const payload = buildCanvasCopyPayload(animatedWorldFixture(), ["area", "actor"])!;
+  expect(payload.nodes.every(node => node.position === undefined)).toBe(true);
+  expect(parseCanvasCopyPayload(serializeCanvasCopyPayload(payload))).toEqual(payload);
+  const ordinary = { ...payload, nodes: [{ id: "text", type: "text" }], nodeData: {} };
+  expect(parseCanvasCopyPayload(JSON.stringify(ordinary))).toBeNull();
+  expect(parseCanvasCopyPayload(JSON.stringify({ ...payload, nodeData: {} }))).toBeNull();
+  expect(parseCanvasCopyPayload(JSON.stringify({ ...payload, nodes: payload.nodes.map(node => ({ ...node, position: null })) }))).toBeNull();
+});
+
+it.each(["same-canvas", "cross-canvas"])("copies a complete animated collection safely in %s", destination => {
+  const source = animatedWorldFixture();
+  const before = JSON.parse(JSON.stringify(source));
+  const payload = parseCanvasCopyPayload(serializeCanvasCopyPayload(buildCanvasCopyPayload(source, ["area", "actor"])!))!;
+  const canvas = destination === "same-canvas" ? source : createEmptyWoohaa3ServerCanvas("other", NOW);
+  const plan = planCanvasPaste({ canvas, payload, viewport: { x: 0, y: 0, zoom: 1 },
+    anchor: { kind: "point", position: { x: 600, y: 400 } }, createId: (prefix, index) => `${prefix}-copy-${index}` })!;
+  expect(plan).not.toBeNull();
+  const result = applyCanvasCommands(canvas, plan.commands, { now: NOW });
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  if (!result.ok) return;
+  const actor = result.canvas.nodeData["model3d-copy-0"]!.sharedWorldInstance as unknown as WorldInstanceData;
+  const area = result.canvas.nodeData["scene-area-copy-1"]!.sceneArea as unknown as SceneAreaData;
+  const u = actor.transform.position.u - 1, v = actor.transform.position.v - 2;
+  expect(area.animationScript!.duration).toBe(5);
+  expect(area.animationScript!.loop).toBe(true);
+  const compiled = executeWorldAnimationScript(area.animationScript!.script, { duration: 5, loop: true });
+  expect(compiled.ok).toBe(true);
+  if (!compiled.ok) return;
+  expect(compiled.ir.instanceTracks.map(track => track.targetId)).toEqual([actor.instanceId, actor.instanceId, actor.instanceId]);
+  const position = compiled.ir.instanceTracks.find(track => track.property === "position")!;
+  // Position tracks are area-relative; the copy moves the origin, not the track.
+  expect(position.from).toEqual([1, 2, 3]);
+  expect(position.to).toEqual([4, 3, 3]);
+  expect(area.animationOrigin).toEqual({ u, v });
+  expect(compiled.ir.instanceTracks.find(track => track.property === "rotation")!.from).toEqual([0, 90, 0]);
+  expect(compiled.ir.instanceTracks.find(track => track.property === "scale")!.to).toEqual([2]);
+  expect(area.bounds.min).toEqual({ u: -4 + u, v: -4 + v });
+  expect(area.bounds.max).toEqual({ u: 4 + u, v: 4 + v });
+  expect(result.canvas.document.nodes.filter(node => plan.newNodeIds.includes(node.id)).every(node => node.position === undefined)).toBe(true);
+  expect(source).toEqual(before);
+  const refusals: string[] = [];
+  expect(planCanvasPaste({ canvas, payload: buildCanvasCopyPayload(source, ["area"])!, viewport: { x: 0, y: 0, zoom: 1 }, anchor: null,
+    onRefusal: message => refusals.push(message) })).toBeNull();
+  expect(refusals[0]).toContain("动画对象");
+});
+
+it("remaps a world collection in the actual paste batch", () => {
+  const base = createEmptyWoohaa3ServerCanvas("world", NOW);
+  const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 1, v: 2, h: 3 }, rotation: [0, 0, 0, 1], scale: 2 } };
+  const camera = { kind: "world-camera", version: "shared-world-v1", cameraId: "c", settingsVersion: "1", position: { u: 1, v: 2, h: 4 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 }, captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: "i" };
+  const original = applyCanvasCommands(base, [
+    { type: "node.add", node: { id: "m", type: "model3d", position: { x: 0, y: 0 } }, nodeData: { sharedWorldInstance: instance } },
+    { type: "node.add", node: { id: "g", type: "workflow-group-2d", position: { x: 10, y: 0 } }, nodeData: { workflowGroup2d: { kind: "workflow-group-2d", version: "shared-world-v1", groupId: "g", scopeVersion: "1", memberNodeIds: ["m"] } } },
+    { type: "node.add", node: { id: "a", type: "scene-area", position: { x: 20, y: 0 } }, nodeData: { sceneArea: { kind: "scene-area", version: "shared-world-v1", areaId: "a", scopeVersion: "1", bounds: { min: { u: 0, v: 0 }, max: { u: 2, v: 2 } } } } },
+    { type: "node.add", node: { id: "c", type: "world-camera", position: { x: 30, y: 0 } }, nodeData: { worldCamera: camera } }
+  ] as never, { now: NOW });
+  expect(original.ok).toBe(true);
+  if (!original.ok) return;
+  const payload = buildCanvasCopyPayload(original.canvas, ["m", "g", "a", "c"])!;
+  const plan = planCanvasPaste({ canvas: original.canvas, payload, viewport: { x: 0, y: 0, zoom: 1 }, anchor: { kind: "point", position: { x: 500, y: 500 } }, createId: (prefix, index) => `new-${prefix}-${index}` })!;
+  const result = applyCanvasCommands(original.canvas, plan.commands, { now: NOW });
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  if (!result.ok) return;
+  const model = result.canvas.nodeData["new-model3d-0"].sharedWorldInstance as typeof instance;
+  const copiedCamera = result.canvas.nodeData["new-world-camera-3"].worldCamera!;
+  expect(model.instanceId).toBe("new-instanceId-0");
+  expect(model.transform.rotation).toEqual(instance.transform.rotation);
+  expect(model.transform.scale).toEqual(instance.transform.scale);
+  const pastedNode = result.canvas.document.nodes.find(node => node.id === "new-model3d-0")!;
+  // 共享世界模型没有卡片坐标；粘贴保留世界高度并只平移水平位置。
+  expect(pastedNode.position).toBeUndefined();
+  expect(model.transform.position.h).toBe(instance.transform.position.h);
+  expect(model.transform.position).not.toEqual(instance.transform.position);
+  expect(copiedCamera).toEqual({ ...camera, cameraId: "new-cameraId-3", boundInstanceId: model.instanceId });
+  expect(result.canvas.nodeData["new-workflow-group-2d-1"].workflowGroup2d).toMatchObject({ groupId: "new-groupId-1", scopeVersion: "new-scopeVersion-1", memberNodeIds: ["new-model3d-0"] });
+  expect(result.canvas.nodeData["new-scene-area-2"].sceneArea).toMatchObject({ areaId: "new-areaId-2", scopeVersion: "new-scopeVersion-2" });
+  expect(result.canvas.nodeData.m.sharedWorldInstance).toEqual(instance);
+  const missing = buildCanvasCopyPayload(original.canvas, ["c"])!;
+  expect(planCanvasPaste({ canvas: original.canvas, payload: missing, viewport: { x: 0, y: 0, zoom: 1 }, anchor: null })).toBeNull();
+});
 
 function canvasFixture(): ServerCanvas {
   const base = createEmptyWoohaa3ServerCanvas("canvas-1", NOW);
@@ -67,31 +174,6 @@ describe("复制载荷", () => {
     canvas.document.nodes.push(child);
     const payload = buildCanvasCopyPayload(canvas, ["text-1"]);
     expect(payload!.nodes.map((node) => node.id).sort()).toEqual(["child-1", "text-1"]);
-  });
-
-  it("复制的节点数据丢弃已移除的徽标倍率，修改副本不影响原组", () => {
-    const canvas = createEmptyWoohaa3ServerCanvas("badge-copy", NOW);
-    canvas.document.nodes = [
-      { id: "g", type: "group", position: { x: 0, y: 0 }, width: 600, height: 400 },
-      { id: "m", type: "text", parentId: "g", position: { x: 40, y: 40 } }
-    ];
-    canvas.nodeData = { g: { groupBadgeScale: 2, groupCollapsed: true, title: "组" }, m: { prompt: "成员" } };
-    const payload = parseCanvasCopyPayload(serializeCanvasCopyPayload(buildCanvasCopyPayload(canvas, ["g"])!))!;
-    expect(payload.nodeData.g).not.toHaveProperty("groupBadgeScale");
-    const plan = planCanvasPaste({ canvas, payload, anchor: null, viewport: { x: 0, y: 0, zoom: 1 },
-      createId: (prefix, index) => `${prefix}-copy-${index}` })!;
-    const pasted = applyCanvasCommands(canvas, plan.commands);
-    if (!pasted.ok) throw new Error(pasted.rejection.message);
-    const groupId = plan.newNodeIds[0]!;
-    expect(pasted.canvas.nodeData[groupId]).toMatchObject({ groupCollapsed: true, title: "组" });
-    expect(pasted.canvas.nodeData[groupId]).not.toHaveProperty("groupBadgeScale");
-    expect(pasted.canvas.document.nodes.find(node => node.id === plan.newNodeIds[1])?.parentId).toBe(groupId);
-    // 已删除的字段不能再写入：整批拒绝，原组与副本都不变。
-    const rejected = applyCanvasCommands(pasted.canvas, [{ type: "nodeData.patch", nodeId: groupId, value: { groupBadgeScale: 0.5 } }]);
-    expect(rejected.ok).toBe(false);
-    if (!rejected.ok) expect(rejected.rejection.code).toBe("invalid-group-config");
-    expect(pasted.canvas.nodeData[groupId]).not.toHaveProperty("groupBadgeScale");
-    expect(pasted.canvas.nodeData[groupId]?.groupAppearance).toBeUndefined();
   });
 
   it("空选择或全失效选择返回 null", () => {
@@ -222,134 +304,6 @@ describe("复制载荷", () => {
 });
 
 describe("粘贴规划", () => {
-  it("copying a film set remaps clips, default and bindings while sharing geometry and media", () => {
-    const canvas = canvasFixture();
-    const snapshot = createFilmSetSnapshot({
-      title: "电影",
-      model: { modelScript: "scene.box({id:'body',size:[1,1,1]});", modelScriptVersion: "woohaa-model-js-v2" },
-      modelItemId: "actor",
-      // 对象动作只经片段 binding（items-only，D10）。
-      motionScript: "motion.model.rotate('body', { speed: 1 });",
-      timeline: { duration: 2, loop: false },
-      filmSetContent: { schemaVersion: 4, items: [{ id: "video", kind: "video", name: "视频", assetId: "asset-video", aspectRatio: 16 / 9, localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } }] }
-    });
-    const collection = filmSetAnimationsOf(snapshot);
-    collection.clips.push({ ...structuredClone(collection.clips[0]), id: "second", name: "第二段" });
-    const fields = canonicalFilmSetFields({ ...snapshot, filmSetAnimations: collection });
-    canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
-    canvas.nodeData.film = { ...fields, filmSetShotPreviewsHidden: [collection.clips[1].id] } as never;
-    canvas.assets.push({ id: "asset-video", title: "video", mediaKind: "video", status: "ready", source: "uploaded", createdAt: NOW });
-    Object.assign(canvas, migrateFilmSetFixture(canvas, "film"));
-    const payload = buildCanvasCopyPayload(canvas, ["film"])!;
-    const plan = planCanvasPaste({ viewport: { x: 0, y: 0, zoom: 1 }, canvas, payload, anchor: { kind: "point", position: { x: 0, y: 0 } } })!;
-    const added = plan.commands.find(command => command.type === "node.add");
-    if (!added || added.type !== "node.add" || !added.nodeData) throw new Error("missing pasted node data");
-    const applied = applyCanvasCommands(canvas, plan.commands);
-    if (!applied.ok) throw Error(applied.rejection.message);
-    const data = readFilmSetAnimationProjection(applied.canvas, added.node.id)!;
-    const pastedClips = filmSetAnimationsOf(data);
-    const modelItem = data.filmSetContent.items.find((item): item is FilmSetModelItem => item.kind === "model")!;
-    const actorItem = snapshot.filmSetContent.items.find((item): item is FilmSetModelItem => item.id === "actor")!;
-    expect(modelItem.model).toEqual(actorItem.model);
-    const videoItem = data.filmSetContent.items.find((item): item is FilmSetMediaItem => item.kind === "video")!;
-    expect(videoItem.assetId).toBe("asset-video");
-    expect(videoItem.id).not.toBe("video");
-    expect(pastedClips.clips.map(c => c.id)).not.toEqual(collection.clips.map(c => c.id));
-    expect(pastedClips.defaultClipId).toBe(pastedClips.clips[0].id);
-    for (const c of pastedClips.clips) expect(c.bindings[0].itemId).toBe(modelItem.id);
-  });
-  it("复制片场重算预览身份与归属，粘贴后闭包自洽（change: 2026-10-15 任务 5.5）", () => {
-    const canvas = canvasFixture();
-    const snapshot = createFilmSetSnapshot({
-      title: "电影",
-      model: { modelScript: "scene.box({id:'body',size:[1,1,1]});", modelScriptVersion: "woohaa-model-js-v2" },
-      modelItemId: "actor",
-      motionScript: "motion.model.rotate('body', { speed: 1 });",
-      timeline: { duration: 2, loop: false }
-    });
-    const fields = canonicalFilmSetFields(snapshot);
-    canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
-    canvas.nodeData.film = fields as never;
-    // 先让共享 reducer 补齐源片场的预览闭包（与真实画布状态一致）。
-    const materialized = applyCanvasCommands(migrateFilmSetFixture(canvas, "film"), [], { now: NOW });
-    if (!materialized.ok) throw new Error(materialized.rejection.message);
-    const withPreview = materialized.canvas;
-    const sourcePreview = withPreview.document.nodes.find((node) => managedNodeRelationOf(withPreview.nodeData[node.id])?.extensionId === "film-set");
-    expect(sourcePreview).toBeDefined();
-    const sourceOwnership = shotReferenceOwnershipOf(withPreview.nodeData[sourcePreview!.id]);
-    expect(sourceOwnership).not.toBeNull();
-
-    // 只选片场：载荷必须补齐其预览闭包（预览与片场是兄弟节点，不随后代扩展进入）。
-    const payload = buildCanvasCopyPayload(withPreview, ["film"])!;
-    expect(payload.nodes.some((node) => node.id === sourcePreview!.id)).toBe(true);
-
-    const plan = planCanvasPaste({ viewport: { x: 0, y: 0, zoom: 1 }, canvas: withPreview, payload, anchor: { kind: "point", position: { x: 0, y: 0 } } })!;
-    const result = applyCanvasCommands(withPreview, plan.commands, { now: NOW });
-    if (!result.ok) throw new Error(`${result.rejection.code}:${result.rejection.message}`);
-    const previews = result.canvas.document.nodes.filter((node) => managedNodeRelationOf(result.canvas.nodeData[node.id])?.extensionId === "film-set");
-    // 源片场 + 副本各一个预览；副本预览必须是新身份且归属指向副本与新 clipId。
-    expect(previews).toHaveLength(2);
-    const pastedPreview = previews.find((node) => node.id !== sourcePreview!.id)!;
-    expect(pastedPreview).toBeDefined();
-    const ownership = shotReferenceOwnershipOf(result.canvas.nodeData[pastedPreview.id]);
-    expect(ownership).not.toBeNull();
-    expect(ownership!.filmSetNodeId).not.toBe(sourceOwnership!.filmSetNodeId);
-    expect(ownership!.clipId).not.toBe(sourceOwnership!.clipId);
-    // 归属指向的新片场确实是本次粘贴新增的片场节点。
-    expect(result.canvas.document.nodes.some((node) => node.id === ownership!.filmSetNodeId)).toBe(true);
-  });
-
-  it.each(["dynamic", "static"] as const)("copy %s shot reference remaps both ends and preserves media role", kind => {
-    const canvas = canvasFixture();
-    const snapshot = createFilmSetSnapshot({
-      title: "电影",
-      model: { modelScript: "scene.box({id:'body',size:[1,1,1]});", modelScriptVersion: "woohaa-model-js-v2" },
-      modelItemId: "actor",
-      motionScript: "motion.model.rotate('body', { speed: 1 });",
-      timeline: { duration: 2, loop: false }
-    });
-    canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
-    if (kind === "static") {
-      const clip = snapshot.filmSetAnimations!.clips[0]!;
-      clip.kind = "static"; clip.timeline = { duration: 0, loop: false }; clip.bindings = [];
-      clip.cameraMotion = { ...clip.cameraMotion, motionScript: "" };
-    }
-    canvas.nodeData.film = canonicalFilmSetFields(snapshot) as never;
-    const materialized = applyCanvasCommands(migrateFilmSetFixture(canvas, "film"), [], { now: NOW });
-    if (!materialized.ok) throw new Error(materialized.rejection.message);
-    const source = materialized.canvas;
-    const preview = source.document.nodes.find((node) => managedNodeRelationOf(source.nodeData[node.id])?.extensionId === "film-set")!;
-    source.document.nodes.push({ ...createWoohaa3CanvasNode("video", { x: 800, y: 0 }, "video-1") });
-    source.nodeData["video-1"] = { taskKind: "video-generation", taskStatus: "idle" } as never;
-    const linked = applyCanvasCommands(source, [{
-      type: "edge.add",
-      edge: { id: "edge-ref", source: preview.id, target: "video-1", sourceHandle: null, targetHandle: null }
-    }], { now: NOW });
-    if (!linked.ok) throw new Error(linked.rejection.message);
-
-    const payload = buildCanvasCopyPayload(linked.canvas, ["film", "video-1"])!;
-    // 预览闭包随片场进入载荷，镜头参考边成为内部边。
-    expect(payload.nodes.some((node) => node.id === preview.id)).toBe(true);
-    expect(payload.edges.some((edge) => edge.id === "edge-ref")).toBe(true);
-
-    const plan = planCanvasPaste({ viewport: { x: 0, y: 0, zoom: 1 }, canvas: linked.canvas, payload, anchor: { kind: "point", position: { x: 0, y: 0 } } })!;
-    const pasted = applyCanvasCommands(linked.canvas, plan.commands, { now: NOW });
-    if (!pasted.ok) throw new Error(`${pasted.rejection.code}:${pasted.rejection.message}`);
-    const refEdges = pasted.canvas.document.edges.filter((edge) => edge.data?.kind === (kind === "static" ? "shot-image-reference" : "shot-reference") && edge.id !== "edge-ref");
-    expect(refEdges).toHaveLength(1);
-    // 边两端都指向新实体，不再指向源预览/源视频节点。
-    expect(refEdges[0].source).not.toBe(preview.id);
-    expect(refEdges[0].target).not.toBe("video-1");
-    const mapping = (pasted.canvas.nodeData[refEdges[0].target] as { inputMapping?: Array<{ role?: string }> }).inputMapping ?? [];
-    expect(mapping.some((entry) => entry.role === (kind === "static" ? "shot_image_reference" : SHOT_REFERENCE_ROLE))).toBe(true);
-  });
-
-  it("单独复制预览节点无操作（受保护，不产生悬空载荷）", () => {
-    // 选择集只有受保护预览时不构造任何载荷（design D2：不能单独复制）。
-    const canvas = canvasFixture();
-    expect(buildCanvasCopyPayload(canvas, [])).toBeNull();
-  });
-
   it("重复粘贴生成互不冲突的新 ID", () => {
     const canvas = canvasFixture();
     const payload = buildCanvasCopyPayload(canvas, ["text-1", "image-1"])!;
@@ -414,7 +368,7 @@ describe("粘贴规划", () => {
     expect(planCanvasPaste({ viewport: { x: 0, y: 0, zoom: 1 }, canvas, payload: empty, anchor: null })).toBeNull();
   });
 
-  it("粘贴 group 子树只平移顶层，成员保持相对坐标（change: add-canvas-node-grouping）", () => {
+  it("粘贴父子树时扁平化坐标并保留相对布局", () => {
     const base = createEmptyWoohaa3ServerCanvas("canvas-group", NOW);
     const canvas: ServerCanvas = {
       ...base,
@@ -442,18 +396,15 @@ describe("粘贴规划", () => {
     const adds = plan.commands.filter((command) => command.type === "node.add") as Array<{
       node: { id: string; type: string; position: { x: number; y: number }; width?: number; height?: number; parentId?: string };
     }>;
-    const groupAdd = adds.find((command) => command.node.type === "group" && command.node.parentId === undefined)!;
-    const innerAdd = adds.find((command) => command.node.type === "group" && command.node.parentId !== undefined)!;
+    const [groupAdd, innerAdd] = adds.filter((command) => command.node.type === "group");
     const childAdd = adds.find((command) => command.node.type === "image")!;
     const grandchildAdd = adds.find((command) => command.node.type === "text")!;
     // 顶层 group 的中心落在锚点上（原 group 中心 (2200,1650)，尺寸 400×300）。
     expect(groupAdd.node.position).toEqual({ x: anchor.x - 200, y: anchor.y - 150 });
-    // 成员保持相对坐标（未被二次偏移），嵌套 group 的局部坐标同样不变。
-    expect(childAdd.node.position).toEqual({ x: 20, y: 30 });
-    expect(innerAdd.node.position).toEqual({ x: 40, y: 60 });
-    expect(grandchildAdd.node.position).toEqual({ x: 10, y: 20 });
-    expect(childAdd.node.parentId).toBeDefined();
-    expect(grandchildAdd.node.parentId).toBeDefined();
+    expect(childAdd.node.position).toEqual({ x: 320, y: 380 });
+    expect(innerAdd.node.position).toEqual({ x: 340, y: 410 });
+    expect(grandchildAdd.node.position).toEqual({ x: 350, y: 430 });
+    expect(adds.every(({ node }) => node.parentId === undefined)).toBe(true);
   });
 
   it("单独复制组内成员：以鼠标为中心，且丢弃已不存在的父级", () => {
@@ -660,25 +611,6 @@ describe("图片工程复制与跨画布引用（任务 2.4）", () => {
   });
 });
 
-
-describe("片场对象容器复制", () => {
-  it("旧对象容器仅用于迁移读取，不能复制或物化", () => {
-    const canvas = createEmptyWoohaa3ServerCanvas("object-copy", NOW);
-    canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
-    canvas.nodeData.film = canonicalFilmSetFields(createFilmSetSnapshot({ title: "片场", modelItemId: "actor",
-      model: { modelScript: "scene.box({id:'body',size:[1,1,1]});", modelScriptVersion: "woohaa-model-js-v2" },
-      timeline: { duration: 0, loop: false } })) as never;
-    const film = canvas.nodeData.film;
-    const content = film.filmSetContent as any;
-    content.items.push({ ...structuredClone(content.items[0]), id: "hidden-actor", name: "隐藏对象" });
-    film.filmSetObjectContainersHidden = ["hidden-actor"];
-    const id = filmSetObjectContainerId("film", "actor");
-    canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 400, y: 0 }, id));
-    canvas.nodeData[id] = filmSetObjectContainerData("film", "actor");
-    expect(buildCanvasCopyPayload(canvas, [id])).toBeNull();
-    expect(buildCanvasCopyPayload(canvas, ["film"])).toBeNull();
-  });
-});
 
 it("copies a managed closure through an unrelated extension and fails closed after unload", () => {
   const lifecycle = new ManagedNodeLifecycleRegistry();

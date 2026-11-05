@@ -82,12 +82,15 @@ function buildDiscussionPrompt(
  *
  * 明确用宿主签发 token（不伪造）；失败时不注入工具面（宁可少做，不越权）。
  */
+type ToolGrantOutcome = { token: string } | { token: null; message: string };
+
 async function issueToolGrant(
   facade: ApplicationToolDelegationFacade | undefined,
   input: AgentAdapterRunInput,
   tools: readonly string[]
-): Promise<string | null> {
-  if (!facade || input.intent.action === "discuss") return null;
+): Promise<ToolGrantOutcome> {
+  if (!facade) return { token: null, message: "宿主未配置工具委托" };
+  if (input.intent.action === "discuss") return { token: null, message: "讨论回合不需要工具授权" };
   try {
     const grant = await facade.issue({
       delegation: { subject: input.owner, authLevel: "authenticated" },
@@ -95,19 +98,29 @@ async function issueToolGrant(
       canvasId: input.canvasId,
       nodeId: input.intent.nodeId ?? "",
       mode: input.intent.mode,
-      ...(input.intent.mode === "canvas-group" ? { expectedScopeEpoch: Number(input.intent.expectedContentHash?.slice("group-epoch:".length)) } : {}),
       ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
-      ...(input.intent.clipId ? { clipId: input.intent.clipId } : {}),
-      ...(input.intent.itemId ? { itemId: input.intent.itemId } : {}),
+      ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
+      ...(input.intent.mode === "canvas-group" && input.intent.expectedContentHash?.startsWith("group-epoch:")
+        ? { expectedScopeEpoch: Number(input.intent.expectedContentHash.slice("group-epoch:".length)) }
+        : {}),
       tools
     });
-    return grant.token;
-  } catch {
-    return null;
+    return { token: grant.token };
+  } catch (error) {
+    // 授权失败不能静默成“未取得授权”：保留目标模式与真实原因，便于定位范围/占地问题。
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[local-agent] tool grant issue failed", {
+      mode: input.intent.mode,
+      nodeId: input.intent.nodeId,
+      worldScope: input.intent.worldScope,
+      code: (error as { code?: unknown })?.code,
+      message
+    });
+    return { token: null, message };
   }
 }
 
-const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d", "film-set"], tools: true, models: "remote" };
+const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d", "world", "canvas-group"], tools: true, models: "remote" };
 
 export function createLocalAgentDescriptors(): Record<string, ConnectionDescriptor> {
   const descriptors: Record<string, ConnectionDescriptor> = {};
@@ -167,20 +180,23 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     try {
       const probe = await options.processManager.probe(adapter.adapterId);
       if (!probe.ok) return { models: [...catalog.values()], error: probe.message };
-      const handle = await options.processManager.ensure({
+      const identity = { adapterId: adapter.adapterId, owner: input.owner, connectionId: record.connectionId };
+      const ensureCatalog = () => options.processManager.ensure({
         adapterId: adapter.adapterId,
         owner: input.owner,
         connectionId: record.connectionId,
         args: options.argsFor(adapter.adapterId),
         kind: adapter.transport === "stdio-jsonrpc" ? "stdio" : "http"
       });
-      const snapshot = await transport.models({
-        configDir: handle.configDir,
-        workDir: handle.workDir,
-        loopbackUrl: handle.loopbackUrl,
-        httpHeaders: handle.httpHeaders,
-        stdio: handle.stdio ?? null
-      });
+      const readCatalog = async () => {
+        const handle = await ensureCatalog();
+        return transport.models!({ configDir: handle.configDir, workDir: handle.workDir, loopbackUrl: handle.loopbackUrl, httpHeaders: handle.httpHeaders, stdio: handle.stdio ?? null });
+      };
+      let snapshot = await readCatalog();
+      if (adapter.adapterId === "codex-appserver" && snapshot.error?.includes("Already initialized")) {
+        await options.processManager.stop(identity);
+        snapshot = await readCatalog();
+      }
       for (const model of snapshot.models) catalog.set(model.id, model);
       // 目录读取成功证明传输可用：清掉上次运行留下的 transport 失败证据；账号/模型权限仍由
       // credential/modelAccess 证据单独表达，不能因目录成功就宣称可生成。
@@ -244,10 +260,11 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
       }
     }
     if (input.intent.reasoningEffort && !adapter.supportsReasoningEffort) return { status: "failed", error: { code: "capability-unsupported", message: "此本机工具未开放思考强度配置，请使用默认设置" } };
-    const toolNames = discussion ? [] : localAgentToolsForMode(input.intent.mode ?? "model3d");
-    const toolToken = await issueToolGrant(options.tools, input, toolNames);
+    const toolNames = discussion ? [] : localAgentToolsForMode(input.intent.mode ?? "model3d", input.intent.worldScope);
+    const toolGrant = await issueToolGrant(options.tools, input, toolNames);
+    const toolToken = toolGrant.token;
     if (!discussion && !toolToken) {
-      return { status: "failed", error: { code: "capability-unsupported", message: "本轮未取得画布工具授权，不能执行目标动作" } };
+      return { status: "failed", error: { code: "capability-unsupported", message: `本轮未取得画布工具授权：${"message" in toolGrant ? toolGrant.message : "授权不可用"}` } };
     }
     const observation = createTurnObserver();
     const toolCalls: string[] = [];
@@ -255,9 +272,11 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     let imageImported = false;
     let toolFailure: string | undefined;
     clearGeneratedImages(input.requestId);
-    const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_film_set_clips", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output", "wait_for_skill_step", "get_latest_skill_step_output"]);
+    const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output", "wait_for_skill_step", "get_latest_skill_step_output", "get_world_context"]);
 
-    const context = nativeContextFor(input, `${adapter.adapterId}:1`);
+    // 工具面变化必须切换原生会话：OpenCode/App Server 的 MCP 工具目录在会话内是冻结的，
+    // 重用旧会话会让新授权的工具（例如导演区动画）永远不可见。
+    const context = nativeContextFor(input, `${adapter.adapterId}:1:${[...toolNames].sort().join(",")}`);
     const resourceKey = nativeContextKey(input.owner, connectionId, context);
     try {
       const handle = await options.processManager.ensure({
@@ -375,10 +394,19 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
 
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ ...ADAPTER_CAPS, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: [...ADAPTER_CAPS.targets, ...(options.tools && options.mcpEndpoint ? ["canvas-group" as const] : [])] }),
+    capabilities: () => ({ ...ADAPTER_CAPS, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES }),
     authorization,
     models,
     run,
+    cancel: async ({ owner, requestId, candidateContext }) => {
+      if (!candidateContext) return;
+      const input = { owner, requestId, canvasId: candidateContext.canvasId, conversationId: candidateContext.conversationId, connection: candidateContext.connection, intent: candidateContext.intent } as AgentAdapterRunInput;
+      const context = nativeContextFor(input, `${adapter.adapterId}:1:`);
+      const identity = { adapterId: adapter.adapterId, owner, connectionId: nativeContextKey(owner, candidateContext.connection.connectionId, context) };
+      const known = options.processManager.get(identity);
+      await options.processManager.stop(identity);
+      if (!known) throw new Error("无法确认本机候选执行已停止");
+    },
     // 重启/断线后核对：只回答本进程内已落定终态；无记录返回 null（宿主保留既有回执，
     // 不重跑推理；design D6）。
     query: async (input: { owner: string; requestId: string }) => journal.get(input.requestId)

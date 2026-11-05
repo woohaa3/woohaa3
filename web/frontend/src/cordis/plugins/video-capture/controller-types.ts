@@ -21,7 +21,7 @@ export type VideoEditController = {
     taskPending: boolean;
   }): { ok: true } | { ok: false; reason: string };
   /** 打开编辑 dialog（`intentId` 提供时预选）。 */
-  openEdit(input: { canvas: ServerCanvas | null; nodeId: string; intentId?: string }): void;
+  openEdit(input: { canvas: ServerCanvas | null; nodeId: string; intentId?: string; ownOutput?: boolean }): void;
   /** 打开截帧 dialog（从 `edit_video` 面板的帧捕获入口）。 */
   openFrameCapture(input: { canvas: ServerCanvas | null; nodeId: string }): { ok: boolean; error?: string };
   /** 删除单个 intent。 */

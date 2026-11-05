@@ -1,15 +1,14 @@
 /** Trusted implementation bindings owned by a single page scope. */
 import {
-  builtinNodeImplementations, savedCompositePreparation, scriptModelPreparation, isFilmSetNode,
+  builtinNodeImplementations, scriptModelPreparation,
   type NodeCapabilities, type NodeCapabilityContext, type NodeCapabilityResolver,
   type ResolvedNodeCapabilities,
 } from '@woohaa3/contracts';
-import type { CompositeAssetRegistry } from './composite-assets.js';
 import type { FileModelPreparation } from '../cordis/services/file-model-preparation.js';
 
 export type NodeImplementation = { type: string; capabilities: NodeCapabilities };
-const keys = new Set(['appearance', 'modelPreparation', 'modelPreview', 'scope', 'container', 'connections', 'resources', 'focus', 'resize', 'actions']);
-const handlers = { connections: ['endpoints'], modelPreparation: ['executionKey', 'prepare'], modelPreview: ['project'], scope: ['shape'], container: ['project'], resources: ['contentKey'], focus: ['kind'], resize: ['minimum'], actions: ['accepts'] } as const;
+const keys = new Set(['appearance', 'modelPreparation', 'modelPreview', 'connections', 'resources', 'focus', 'resize', 'actions']);
+const handlers = { connections: ['endpoints'], modelPreparation: ['executionKey', 'prepare'], modelPreview: ['project'], resources: ['contentKey'], focus: ['kind'], resize: ['minimum'], actions: ['accepts'] } as const;
 function snapshot<T>(value: T): T {
   if (!value || typeof value !== 'object') return value;
   if (Array.isArray(value)) return Object.freeze(value.map(snapshot)) as T;
@@ -24,8 +23,8 @@ function validate(capabilities: NodeCapabilities): void {
     }
   }
   const appearance = capabilities.appearance;
-  if (appearance && (!['text', 'image', 'model', 'audio', 'video', 'node', 'group'].includes(appearance.palette) || ![appearance.defaultSize?.width, appearance.defaultSize?.height].every(value => Number.isFinite(value) && value > 0))) throw new Error('Invalid node appearance');
-  if (capabilities.resize && !['rect', 'scope'].includes(capabilities.resize.mode)) throw new Error('Invalid resize mode');
+  if (appearance && (!['text', 'image', 'model', 'audio', 'video', 'node'].includes(appearance.palette) || ![appearance.defaultSize?.width, appearance.defaultSize?.height].every(value => Number.isFinite(value) && value > 0))) throw new Error('Invalid node appearance');
+  if (capabilities.resize && capabilities.resize.mode !== 'rect') throw new Error('Invalid resize mode');
   if (capabilities.resources && (!['image', 'video', 'model'].includes(capabilities.resources.channel) || typeof capabilities.resources.previewSlot !== 'boolean')) throw new Error('Invalid resource demand');
 }
 export class NodeImplementationRegistry implements NodeCapabilityResolver {
@@ -71,7 +70,6 @@ const EMPTY = Object.freeze({ generation: 0 });
  * 普通 `model3d` 按节点数据的权威来源在脚本执行与文件解析之间分流，两者不共存。
  */
 export function createNodeImplementationRegistry(
-  composites: CompositeAssetRegistry,
   fileModel?: FileModelPreparation
 ): NodeImplementationRegistry {
   const builtins = new Map(builtinNodeImplementations());
@@ -84,23 +82,5 @@ export function createNodeImplementationRegistry(
         : scriptModelPreparation.prepare(context)
     } });
   }
-  const composite = builtins.get('composite-asset')!;
-  builtins.set('composite-asset', { ...composite, modelPreparation: {
-    executionKey: context => {
-      const adapter = composites.resolve(context.canvas, context.node.id);
-      return adapter && context.data
-        ? JSON.stringify([adapter.extensionId, composites.generation(adapter.extensionId), context.data.extensionContentRef, adapter.executionKey(context.data, context.node.id)])
-        : `unavailable:${String(context.data?.extensionId)}:${savedCompositePreparation.executionKey(context)}`;
-    },
-    prepare: async context => {
-      const adapter = composites.resolve(context.canvas, context.node.id);
-      if (isFilmSetNode(context.node.type, context.data)) return { status: 'fail:compile:legacy-film-set-read-only' };
-      const projection = adapter && context.data ? adapter.prepare(context.node.id, context.data) : null;
-      if (!projection) return !adapter && context.data?.modelScript
-        ? savedCompositePreparation.prepare(context)
-        : { status: 'fail:compile:unavailable-composite-asset' };
-      return { ...projection, status: projection.diagnostic ? `ok:partial:${projection.diagnostic}` : 'ok' };
-    }
-  } });
   return new NodeImplementationRegistry(builtins);
 }

@@ -1,17 +1,12 @@
 import { applyContentNodeDataPatch, replaceContentNodeData } from "../content-node-data.js";
+import { validateWorldIdentities, nodeHasCanvasCard } from "../domain/world-identities.js";
 /**
- * 命令 reducer 的节点类命令（add/update/remove/nodeData.patch）与 group parent 校验。
+ * 命令 reducer 的节点类命令（add/update/remove/nodeData.patch）。
  *
  * 自 `command-reducer.ts` 拆出（change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，
  * R12）。复用 domain 结构校验，语义与 edit.apply 的对应操作完全一致。
  */
-import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
 import { minimumNodeSizeFor } from "../node-dimensions.js";
-import {
-  filmSetObjectContainerId,
-  filmSetObjectOwnershipOf,
-  isFilmSetObjectModelNode
-} from "../film-set-object-container.js";
 import type { CanvasCommand } from "../commands.js";
 import {
   DEFAULT_NODE_DIMS,
@@ -23,25 +18,17 @@ import {
   type Woohaa3CanvasNode
 } from "../domain/index.js";
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
-import {
-  hasShotPreviewOwnership,
-  isProtectedShotPreview
-} from "./film-set-shot-previews.js";
-import { FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "../film-set-shot-preview.js";
 import { findActiveRunNode, isModelDefinitionNode } from "./working-state.js";
 import { decodeManagedNodeRelation, managedNodeRelationOf } from "../managed-node.js";
-import { shotReferenceOwnershipOf } from "../film-set-shot-reference.js";
+import { decodeWorldInstanceData } from "../shared-world-codec.js";
 import {
   normalizeSelfContained3D,
-  validateGroupAppearancePatch,
   validateMediaContentPatch,
   validateImageEditPatch,
   validateModelCamerasPatch,
   validateSelfContained3DNodePatch,
   validateVideoEditIntentsPatch
 } from "./node-data-validation.js";
-import { validateFilmSetGroupDataPatch, convertFilmSetGroupConsumers } from "./film-set-group-commands.js";
-import { isFilmSetGroupNode } from "../film-set-group.js";
 
 /**
  * 校验本次提交的 width/height 是否满足节点类别最小下限（change: add-node-resize, design D5）。
@@ -54,89 +41,6 @@ export function validateNodeSize(width: number | undefined, height: number | und
   }
   if (height !== undefined && (!Number.isFinite(height) || height < minimum.height)) {
     return reject("invalid-node-size", `节点高度 ${height} 小于下限 ${minimum.height}`);
-  }
-  return null;
-}
-
-/**
- * 校验 `node.update` / `node.add` 的 group parent 不变式
- * （change: add-canvas-node-grouping，design D1；
- *  change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）。
- *
- * - parent 必须存在；
- * - parent 必须是 `group` 类型；唯一例外是片场对象容器下与归属匹配的真实 `model3d` 子节点；
- * - 不能自指；
- * - 不能形成 parent 环；
- * - `group` 不能成为另一个 group 的成员（不支持嵌套组，整批拒绝）。
- *
- * 只校验显式提供的 `parentId`；`undefined`（不修改）与 `null`（解除）直接通过。
- */
-export function validateGroupParent(
-  work: WorkingState,
-  nodeId: string,
-  parentId: string | null | undefined,
-  nodeData?: CanvasNodeData,
-  nodeType?: string
-): CommandApplyResult | null {
-  if (parentId === undefined || parentId === null) return null;
-  const parent = work.nodes.find((entry) => entry.id === parentId);
-  if (!parent) {
-    return reject("invalid-parent", `父节点 ${parentId} 不存在`);
-  }
-  const child = work.nodes.find((entry) => entry.id === nodeId);
-  const childData = nodeData ?? (child ? work.nodeData[nodeId] : undefined);
-  const ownership = filmSetObjectOwnershipOf(childData);
-  const childIdentity = child ?? (nodeData && nodeType ? { id: nodeId, type: nodeType } : undefined);
-  const parentOwnership = filmSetObjectOwnershipOf(work.nodeData[parent.id]);
-  const isFilmSetModelChild = isFilmSetObjectModelNode(childIdentity, childData)
-    && parent.type === "composite-asset"
-    && parentOwnership?.filmSetNodeId === ownership?.filmSetNodeId
-    && parentOwnership?.itemId === ownership?.itemId
-    && parent.id === filmSetObjectContainerId(ownership!.filmSetNodeId, ownership!.itemId);
-  // 嵌套组不支持：group 一旦获得 group parent 就整批拒绝，不写部分 parent/position
-  // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）。
-  if (childIdentity?.type === "group") {
-    return reject("invalid-parent", `group ${nodeId} 不能成为父节点 ${parentId} 的成员`);
-  }
-  if (parent.type !== "group" && !isFilmSetModelChild) {
-    return reject("invalid-parent", `父节点 ${parentId} 不是 group`);
-  }
-  if (parentId === nodeId) {
-    return reject("invalid-parent", "节点不能作为自身父节点");
-  }
-  // 沿候选 parent 的祖先链上溯：若回到本节点则成环。
-  const seen = new Set<string>();
-  let cursor: string | undefined = parentId;
-  while (cursor) {
-    if (cursor === nodeId) {
-      return reject("invalid-parent", `parent 关系成环：${nodeId} -> ${parentId}`);
-    }
-    if (seen.has(cursor)) break;
-    seen.add(cursor);
-    cursor = work.nodes.find((entry) => entry.id === cursor)?.parentId;
-  }
-  return null;
-}
-
-/**
- * 拒绝以 `group` 作为端点的持久化边（change: add-canvas-node-grouping，design D5）。
- *
- * group 的输出端点是 UI 聚合入口：客户端必须在同一批次里把它展开为成员的真实边。
- * 持久化 `group -> target` 会让输入解析与任务执行误把结构容器当成数据来源。
- *
- * `extra` 用于 `node.add.connect`：目标节点尚未进入 `work.nodes`。
- */
-export function validateNoGroupEndpoint(
-  work: WorkingState,
-  source: string,
-  target: string,
-  extra?: Woohaa3CanvasNode
-): CommandApplyResult | null {
-  for (const endpoint of [source, target]) {
-    const node = work.nodes.find((entry) => entry.id === endpoint) ?? (extra?.id === endpoint ? extra : undefined);
-    if (node?.type === "group") {
-      return reject("invalid-edge-endpoint", `group ${endpoint} 不能作为边端点`);
-    }
   }
   return null;
 }
@@ -165,12 +69,8 @@ export function addNode(
   command: Extract<CanvasCommand, { type: "node.add" }>
 ): CommandApplyResult {
   const { node } = command;
-  const legacyCreate = rejectLegacyFilmSet(work, node.type, command.nodeData, () => (
-    isFilmSetNode(node.type, command.nodeData) || filmSetObjectOwnershipOf(command.nodeData)
-      ? reject("invalid-self-contained-node", "旧 composite 片场与对象容器只允许迁移读取，请创建 film-set group")
-      : null
-  ));
-  if (legacyCreate) return legacyCreate;
+  const worldRejection = validateWorldInstance(node.type, command.nodeData);
+  if (worldRejection) return worldRejection;
   const managed = command.nodeData?.managedBy;
   if (managed !== undefined) {
     const decoded = decodeManagedNodeRelation(managed);
@@ -179,45 +79,36 @@ export function addNode(
     if (!work.nodes.some(entry => entry.id === decoded.value.ownerNodeId)) return reject("unknown-node", `托管 owner ${decoded.value.ownerNodeId} 不存在`);
     if (work.nodes.some(entry => managedNodeRelationOf(work.nodeData[entry.id])?.extensionId === decoded.value.extensionId && managedNodeRelationOf(work.nodeData[entry.id])?.ownerNodeId === decoded.value.ownerNodeId && managedNodeRelationOf(work.nodeData[entry.id])?.entityId === decoded.value.entityId)) return reject("duplicate-node", "同一托管实体已经存在节点");
   }
-  if (command.nodeData?.retainWhenEmpty !== undefined && (node.type !== "group" || typeof command.nodeData.retainWhenEmpty !== "boolean")) return reject("invalid-group-config", "retainWhenEmpty 只允许 group 的布尔配置");
-  if (command.nodeData?.groupCollapsed !== undefined && (node.type !== "group" || typeof command.nodeData.groupCollapsed !== "boolean")) return reject("invalid-group-config", "groupCollapsed 只允许 group 的布尔配置");
-  if (command.nodeData?.groupBadgeScale !== undefined) return reject("invalid-group-config", "groupBadgeScale 已移除：组徽标按画布共享模型单位呈现，不再接受展示倍率");
-  if (command.nodeData?.groupAppearance !== undefined && node.type !== "group") return reject("invalid-group-appearance", "groupAppearance 只属于普通组节点");
-  if (command.nodeData?.filmSetGroup !== undefined) {
-    const markerRejection = validateFilmSetGroupDataPatch(work, node.id, command.nodeData, node.type);
-    if (markerRejection) return markerRejection;
-  }
-  // 预览节点只能由源镜头生命周期派生（D3）：普通新建路径禁止预览类型；恢复路径（撤销删除
-  // 镜头）允许重建，但必须携带合法归属、派生 ID 与存在的源片场，最终不变式仍会复核。
-  if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE || hasShotPreviewOwnership(command.nodeData)) {
-    return reject("invalid-shot-preview", "普通节点不能写入拍摄镜头预览归属");
-  }
-  // 容器只保存归属：内容必须落在真实 `model3d` 子节点。旧版本曾把片场/模型内容直接写在容器上，
-  // 之后每个命令的 reconciliation 都会因此整批失败（整张画布不可写），所以在写入入口就拒绝。
-  if (command.nodeData && filmSetObjectOwnershipOf(command.nodeData)
-    && node.type !== "model3d"
-    && Object.keys(command.nodeData).some((key) => !["extensionId", "compositeAssetRole", "filmSetObject"].includes(key))) {
-    return reject("invalid-self-contained-node", "对象容器只保存归属，模型内容必须位于 model3d 子节点");
-  }
   if (work.nodes.some((entry) => entry.id === node.id)) {
     return reject("duplicate-node", `节点 ${node.id} 已存在`);
   }
+  const hasCard = nodeHasCanvasCard(node, command.nodeData as Record<string, unknown> | undefined);
+  if (node.position !== undefined
+    && (!Number.isFinite(node.position?.x) || !Number.isFinite(node.position?.y))) {
+    return reject("invalid-command", `节点 ${node.id} 的位置必须是有限数`);
+  }
+  if (hasCard && !node.position) return reject("invalid-command", `卡片节点 ${node.id} 缺少位置`);
   // 最小尺寸下限：挡住 model MCP 等写入方提交畸形尺寸（design D5）。
-  const sizeRejection = validateNodeSize(node.width, node.height, node.type);
+  const sizeRejection = hasCard ? validateNodeSize(node.width, node.height, node.type) : null;
   if (sizeRejection) return sizeRejection;
-  // group parent 不变式（change: add-canvas-node-grouping）：新节点必须挂在已有 group 下。
-  const parentRejection = validateGroupParent(work, node.id, node.parentId, command.nodeData, node.type);
-  if (parentRejection) return parentRejection;
   const nextNode: Woohaa3CanvasNode = {
     id: node.id,
     type: node.type,
-    position: { ...node.position },
-    width: node.width ?? DEFAULT_NODE_DIMS.width,
-    height: node.height ?? DEFAULT_NODE_DIMS.height,
-    parentId: node.parentId,
-    zIndex: typeof node.zIndex === "number" && Number.isFinite(node.zIndex)
-      ? node.zIndex
-      : nextWoohaa3CanvasNodeZIndex(work.nodes),
+    ...(hasCard && node.position ? { position: { ...node.position } } : {}),
+    ...(hasCard
+      ? {
+          width: node.width ?? DEFAULT_NODE_DIMS.width,
+          height: node.height ?? DEFAULT_NODE_DIMS.height
+        }
+      : {}),
+    ...(hasCard && typeof node.parentId === "string" && node.parentId.length > 0 ? { parentId: node.parentId } : {}),
+    ...(hasCard
+      ? {
+          zIndex: typeof node.zIndex === "number" && Number.isFinite(node.zIndex)
+            ? node.zIndex
+            : nextWoohaa3CanvasNodeZIndex(work.nodes)
+        }
+      : {}),
     data: {}
   };
 
@@ -236,9 +127,6 @@ export function addNode(
       sourceHandle: null,
       targetHandle: null
     };
-    // group 不得作为持久化边端点（change: add-canvas-node-grouping，design D5）。
-    const groupEndpoint = validateNoGroupEndpoint(work, candidate.source, candidate.target, nextNode);
-    if (groupEndpoint) return groupEndpoint;
     if (!isValidWoohaa3CanvasConnection(candidate, [...work.nodes, nextNode], work.edges, connectDataReader(work, nextNode.id, command.nodeData))) {
       return reject(
         "invalid-connection",
@@ -275,6 +163,10 @@ export function addNode(
   }
   if (command.nodeData) {
     const value = { ...command.nodeData };
+    if (nextNode.type === "model3d" && value.sharedWorldInstance !== undefined) {
+      const error = validateWorldIdentities([nextNode], { [nextNode.id]: value });
+      if (error) return reject("invalid-command", error);
+    }
     work.nodeData[nextNode.id] = value;
     // 文件模型（GLB）在创建时就要走与 patch 相同的权威校验与内容身份归一化：导入/粘贴/恢复
     // 都不能依赖客户端声明的 hash，也不能绕过来源互斥与资产存在性校验。脚本模型的创建语义
@@ -296,33 +188,14 @@ export function updateNode(
 ): CommandApplyResult {
   const node = work.nodes.find((entry) => entry.id === command.nodeId);
   if (!node) return reject("unknown-node", `节点 ${command.nodeId} 不存在`);
-  if (isFilmSetObjectModelNode(node, work.nodeData[node.id])) {
-    if (command.position || command.parentId !== undefined || command.zIndex !== undefined) {
-      return reject("invalid-self-contained-node", "片场对象内的 model3d 节点不能移动或改父级");
-    }
-  }
-  // 预览节点不得独立改归属（D4）：重父化只随所属片场移动由 reconciliation 补齐。
-  if (command.parentId !== undefined && isProtectedShotPreview(work, command.nodeId)) {
-    const owner = shotReferenceOwnershipOf(work.nodeData[command.nodeId]);
-    const parent = owner ? work.nodes.find(entry => entry.id === owner.filmSetNodeId) : null;
-    // 受保护编辑重放会显式携带由 owner 派生的 parent 更新，允许与当前 owner 一致的值。
-    if (!parent || (command.parentId ?? null) !== (parent.parentId ?? null)) {
-      return reject("invalid-shot-preview", "拍摄镜头预览不能独立改变所属分组");
-    }
-  }
-
-  const parentRejection = validateGroupParent(work, command.nodeId, command.parentId);
-  if (parentRejection) return parentRejection;
-
-  if (command.position) node.position = { x: command.position.x, y: command.position.y };  // 最小尺寸下限：只校验本次提交的字段，既不改写既有记录也不受其影响（design D5）。
+  // 3D 节点没有卡片布局，但转换/撤销可能在同一批次里先恢复卡片字段再移除 3D 数据；
+  // 最终由 normalizeCanvas 按节点最终形态剔除卡片布局，命令层不提前拒绝。
+  if (command.position) node.position = { x: command.position.x, y: command.position.y };
   const sizeRejection = validateNodeSize(command.width, command.height, node.type);
   if (sizeRejection) return sizeRejection;
   if (command.width !== undefined) node.width = command.width;
   if (command.height !== undefined) node.height = command.height;
   if (command.zIndex !== undefined) node.zIndex = command.zIndex;
-  if (command.parentId !== undefined) {
-    node.parentId = command.parentId === null ? undefined : command.parentId;
-  }
   return OK;
 }
 
@@ -331,56 +204,14 @@ export function removeNodes(work: WorkingState, nodeIds: readonly string[]): Com
   const missing = nodeIds.find((id) => !work.nodes.some((node) => node.id === id));
   if (missing) return reject("unknown-node", `节点 ${missing} 不存在`);
 
-  const directModelChild = nodeIds.find((id) => {
-    const node = work.nodes.find((entry) => entry.id === id);
-    return isFilmSetObjectModelNode(node, work.nodeData[id])
-      && !nodeIds.includes(node?.parentId ?? "");
-  });
-  if (directModelChild) {
-    return reject("invalid-self-contained-node", `片场对象内的 model3d 节点 ${directModelChild} 需随片场对象生命周期管理`);
-  }
-
   // 受保护预览不能独立删除（D2）：合法级联（源片场同批删除）由 reconciliation 在同一批次
   // 维护闭包，因此这里直接拒绝任何直接命中的预览；只删受保护预览的原始 node.remove 明确拒绝。
   const removed = collectWoohaa3CanvasRemovalIds(work.nodes, nodeIds, work.nodeData);
-  // Deleting a film-set group only removes orchestration and managed previews.
-  // Its source cards remain usable on the canvas; move them to the former
-  // parent while preserving their world position in this same transaction.
-  for (const groupId of nodeIds) {
-    const group = work.nodes.find(node => node.id === groupId);
-    if (!group || !isFilmSetGroupNode(group, work.nodeData[groupId])) continue;
-    const byId = new Map(work.nodes.map(node => [node.id, node]));
-    const parent = group.parentId ? byId.get(group.parentId) : undefined;
-    const world = (node: typeof group) => {
-      let x = node.position.x, y = node.position.y, parentId = node.parentId;
-      const seen = new Set<string>();
-      while (parentId && !seen.has(parentId)) {
-        seen.add(parentId);
-        const ancestor = byId.get(parentId);
-        if (!ancestor) break;
-        x += ancestor.position.x; y += ancestor.position.y; parentId = ancestor.parentId;
-      }
-      return { x, y };
-    };
-    const parentWorld = parent ? world(parent) : { x: 0, y: 0 };
-    for (const candidate of work.nodes) {
-      if (!removed.has(candidate.id) || candidate.id === groupId) continue;
-      if (!['model3d', 'image', 'video'].includes(candidate.type)) continue;
-      const position = world(candidate);
-      candidate.parentId = group.parentId;
-      candidate.position = { x: position.x - parentWorld.x, y: position.y - parentWorld.y };
-      removed.delete(candidate.id);
-    }
-  }
   const directManaged = nodeIds.find((id) => {
     const relation = managedNodeRelationOf(work.nodeData[id]);
     return relation && !removed.has(relation.ownerNodeId);
   });
   if (directManaged) return reject("invalid-command", `托管节点 ${directManaged} 需由 owner 生命周期管理`);
-  const directPreview = nodeIds.find((id) => isProtectedShotPreview(work, id) && !managedNodeRelationOf(work.nodeData[id]));
-  if (directPreview) {
-    return reject("invalid-shot-preview", `拍摄镜头预览 ${directPreview} 需在拍摄镜头管理中删除`);
-  }
 
   // 递归删除后代 + 空父容器，再清理关联边与 nodeData。
   // 刻意**不**级联删除 assets / jobs：资产是内容寻址且可能被历史或其它节点引用。
@@ -416,48 +247,14 @@ export function removeNodes(work: WorkingState, nodeIds: readonly string[]): Com
   return OK;
 }
 
-function rejectLegacyFilmSet(
-  work: WorkingState,
-  type: string | undefined,
-  data: unknown,
-  kernel: () => CommandApplyResult | null
-): CommandApplyResult | null {
-  if (work.content) {
-    let handled = false;
-    for (const contribution of work.content.implementations()) {
-      const rejectLegacy = contribution.nodeData?.rejectLegacy;
-      if (!rejectLegacy) continue;
-      handled = true;
-      try {
-        const diagnostic = rejectLegacy(type, data);
-        if (diagnostic) return reject("content-command-rejected", diagnostic.code);
-      } catch {
-        return reject("content-codec-failed", "content-codec-failed");
-      }
-    }
-    if (handled) return null;
-  }
-  return kernel();
-}
-
 export function patchNodeData(
   work: WorkingState,
   nodeId: string,
   value: CanvasNodeData | null
 ): CommandApplyResult {
   const node = work.nodes.find((entry) => entry.id === nodeId);
-  const legacyCurrent = rejectLegacyFilmSet(work, node?.type, work.nodeData[nodeId], () => (
-    isFilmSetNode(node?.type, work.nodeData[nodeId])
-      ? reject("invalid-self-contained-node", "旧 composite 片场只允许迁移读取，请编辑 film-set group")
-      : null
-  ));
-  if (legacyCurrent) return legacyCurrent;
-  const legacyPatch = rejectLegacyFilmSet(work, node?.type, value, () => (
-    isFilmSetNode(node?.type, value)
-      ? reject("invalid-self-contained-node", "旧 composite 片场只允许迁移读取，请编辑 film-set group")
-      : null
-  ));
-  if (legacyPatch) return legacyPatch;
+  const worldRejection = validateWorldInstance(node?.type, value);
+  if (worldRejection) return worldRejection;
   const currentManaged = managedNodeRelationOf(work.nodeData[nodeId]);
   const hasManagedField = !!work.nodeData[nodeId] && Object.prototype.hasOwnProperty.call(work.nodeData[nodeId], "managedBy");
   if (value && Object.prototype.hasOwnProperty.call(value, "managedBy")) {
@@ -465,18 +262,9 @@ export function patchNodeData(
     if (!currentManaged || !incoming || JSON.stringify(currentManaged) !== JSON.stringify(incoming)) return reject("invalid-command", "托管归属只能由生命周期事务修改");
   }
   if (value === null && hasManagedField) return reject("invalid-command", "托管归属不能通过普通 patch 清除");
-  if (isFilmSetObjectModelNode(node, work.nodeData[nodeId])) {
-    return reject("invalid-self-contained-node", "片场对象内的 model3d 节点模型由片场自动同步，不能直接修改");
-  }
-  if (filmSetObjectOwnershipOf(work.nodeData[nodeId])) return reject("invalid-self-contained-node", "对象容器只保存归属；请拖入模型替换对象，或移除容器");
   // Legacy cards have no writable media cache. Canonical managed image/video
   // nodes do: managedBy is protected above, while outputAssetId/status must be
   // writable by the media host without changing ownership.
-  if (hasShotPreviewOwnership(value)
-    || node?.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE
-    || hasShotPreviewOwnership(work.nodeData[nodeId])) {
-    return reject("invalid-shot-preview", "拍摄镜头预览归属不能通过普通数据写入修改");
-  }
   if (value === null && node?.type === "composite-asset" && work.content) {
     return reject("content-owner-unavailable", "content-owner-unavailable");
   }
@@ -484,14 +272,14 @@ export function patchNodeData(
     delete work.nodeData[nodeId];
     return OK;
   }
-  if (value.retainWhenEmpty !== undefined && (work.nodes.find(node => node.id === nodeId)?.type !== "group" || typeof value.retainWhenEmpty !== "boolean")) return reject("invalid-group-config", "retainWhenEmpty 只允许 group 的布尔配置");
-  if (value.groupCollapsed !== undefined && (node?.type !== "group" || typeof value.groupCollapsed !== "boolean")) return reject("invalid-group-config", "groupCollapsed 只允许 group 的布尔配置");
-  if (value.groupBadgeScale !== undefined) return reject("invalid-group-config", "groupBadgeScale 已移除：组徽标按画布共享模型单位呈现，不再接受展示倍率");
   if (!work.nodes.some((node) => node.id === nodeId)) {
     return reject("node-data-orphan", `节点业务数据指向不存在的节点 ${nodeId}`);
   }
-  // 片场 canonical 写入不做任何实时旧字段清理：正常混合/残留旧结构由严格解码拒绝，
-  // 旧磁盘格式仅在隔离离线迁移中转换（D8；不得靠 patch 删字段将旧磁盘升版）。
+  const candidate = { ...(work.nodeData[nodeId] ?? {}), ...value };
+  if (node?.type === "model3d" && candidate.sharedWorldInstance !== undefined) {
+    const error = validateWorldIdentities([node], { [nodeId]: candidate });
+    if (error) return reject("invalid-command", error);
+  }
   const intentRejection = validateVideoEditIntentsPatch(value);
   if (intentRejection) return intentRejection;
   const cameraRejection = validateModelCamerasPatch(value);
@@ -500,10 +288,6 @@ export function patchNodeData(
   if (imageEditRejection) return imageEditRejection;
   const mediaRejection = validateMediaContentPatch(work, nodeId, value);
   if (mediaRejection) return mediaRejection;
-  const appearanceRejection = validateGroupAppearancePatch(work, nodeId, value);
-  if (appearanceRejection) return appearanceRejection;
-  const filmSetGroupRejection = validateFilmSetGroupDataPatch(work, nodeId, value);
-  if (filmSetGroupRejection) return filmSetGroupRejection;
   if (node?.type === "composite-asset" && work.content) {
     const owned = applyContentNodeDataPatch(work.nodeData[nodeId] ?? {}, value, work.content);
     if (!owned.ok) return reject(owned.code, owned.message);
@@ -521,10 +305,15 @@ export function patchNodeData(
     const normalized = normalizeSelfContained3D(work, nodeId, value, merged);
     if (normalized) return normalized;
   }
-  const conversion = convertFilmSetGroupConsumers(work, nodeId, value);
-  if (conversion) return conversion;
   work.nodeData[nodeId] = { ...(work.nodeData[nodeId] ?? {}), ...value };
   return OK;
+}
+
+function validateWorldInstance(type: string | undefined, data: CanvasNodeData | null | undefined): CommandApplyResult | null {
+  if (!data || !Object.prototype.hasOwnProperty.call(data, "sharedWorldInstance")) return null;
+  if (type !== "model3d") return reject("invalid-command", "sharedWorldInstance 仅允许模型节点");
+  const result = decodeWorldInstanceData(data.sharedWorldInstance);
+  return result.ok ? null : reject("invalid-command", `sharedWorldInstance: ${result.code}`);
 }
 
 /**

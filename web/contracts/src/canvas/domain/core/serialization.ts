@@ -76,7 +76,7 @@ function toFlowNode(node: Woohaa3CanvasSerializedNode): Woohaa3CanvasNode {
   const flowNode: Woohaa3CanvasNode = {
     id: node.id,
     type: node.type,
-    position: node.position,
+    ...(node.position ? { position: node.position } : {}),
     width: node.width,
     height: node.height,
     parentId: node.parentId,
@@ -101,10 +101,14 @@ function toSerializedNode(node: Woohaa3CanvasNode): Woohaa3CanvasSerializedNode 
   const serialized: Woohaa3CanvasSerializedNode = {
     id: node.id,
     type: node.type ?? "unknown",
-    position: {
-      x: snapGraphPosition(node.position.x),
-      y: snapGraphPosition(node.position.y)
-    },
+    ...(node.position
+      ? {
+          position: {
+            x: snapGraphPosition(node.position.x),
+            y: snapGraphPosition(node.position.y)
+          }
+        }
+      : {}),
     width: readPositiveNumber(node.width),
     height: readPositiveNumber(node.height),
     parentId: node.parentId

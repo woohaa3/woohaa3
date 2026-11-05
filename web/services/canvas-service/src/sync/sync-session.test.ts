@@ -4,7 +4,7 @@
  * 用内存 fake socket，覆盖：握手版本闸门、epoch 过期、state-vector 初始同步（空/部分/最新）、
  * 命令提交与结果、拒绝客户端 sync update、容量/速率限制、result 与 update 顺序无关性。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { MESSAGE_TYPE,
@@ -260,6 +260,15 @@ describe("state-vector 初始同步（任务 5.3）", () => {
 });
 
 describe("COMMAND 与结果（任务 5.4）", () => {
+  it("冲突回执保留目标和占用运行", async () => {
+    const { room, repository } = await readyRoom();
+    const conflict = { target: { kind: "instance" as const, instanceId: "i" }, runId: "run", epoch: 2 };
+    vi.spyOn(repository, "commitYjsCommand").mockResolvedValue({ ok: false, code: "lease-conflict", conflict });
+    const { fake } = await connect(room);
+    fake.receive(encodeCommandMessage(commandBatch()));
+    await room.settle();
+    expect(fake.sent.find(entry => entry.kind === "result")).toMatchObject({ kind: "result", result: { code: "lease-conflict", conflict } });
+  });
   it("命令经 room 提交并返回 accepted + revision", async () => {
     const { room } = await readyRoom();
     const { fake } = await connect(room);

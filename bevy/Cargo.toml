@@ -50,24 +50,12 @@ wasm-webgl2 = [
 # 仍启用 bevy_window 抽象（WindowPlugin primary_window: None），因为 render 的
 # camera_system 依赖 WindowResized 事件；但不启用 bevy_winit，因此不会有真实窗口。
 native-renderer = [
+  "bevy/png",
+  "bevy/jpeg",
   "bevy/bevy_window",
   "bevy/multi_threaded",
   "dep:png",
 ]
-# 原生录制 worker：无窗口 Bevy + 原生 H.264 编码（OpenH264，非 GPL）。
-# 不含 winit/窗口 UI，也不依赖用户 PATH 或 ffmpeg。
-recording-worker = [
-  "native-renderer",
-  "recording-codec",
-  "recording-gpu",
-  "recording-media",
-]
-# 只启用原生编码器（不链接 Bevy）：供无 GPU 的编码回归使用。
-recording-codec = ["dep:openh264"]
-# 真实 GPU 取帧：复用预览渲染入口（需要 Bevy 渲染后端，不需要窗口）。
-recording-gpu = ["native-renderer"]
-# 原生媒体解码（图片保留 alpha；视频按 PTS 选帧）。
-recording-media = ["recording-codec", "dep:image"]
 
 [dependencies]
 base64 = "0.22"
@@ -83,26 +71,21 @@ meshopt = "=0.6.2"
 wasm-bindgen = { version = "=0.2.128", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 png = { version = "0.17", optional = true }
-# 固定版本的 H.264 软件编码器（OpenH264，Cisco 许可，非 GPL）。
-# `source` 表示随包编译，不依赖系统库或用户安装。
-openh264 = { version = "=0.9.9", features = ["source"], optional = true }
-# 图片解码（PNG/JPEG/WebP/GIF/AVIF），保留 alpha。
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "avif"], optional = true }
 
 [[bin]]
 name = "model-renderer"
 path = "src/bin/model-renderer.rs"
 required-features = ["native-renderer"]
 
+# hot_paths_golden 与 scope_golden 依赖 golden_api（native-renderer 门控）。
+[[test]]
+name = "hot_paths_golden"
+required-features = ["native-renderer"]
+
 [[bin]]
 name = "mesh-lod-benchmark"
 path = "src/bin/mesh-lod-benchmark.rs"
 required-features = ["native-renderer"]
-
-[[bin]]
-name = "shot-recorder"
-path = "src/bin/shot-recorder.rs"
-required-features = ["recording-worker"]
 
 [profile.release]
 opt-level = "s"

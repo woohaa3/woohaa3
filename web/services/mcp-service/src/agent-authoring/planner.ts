@@ -135,9 +135,6 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
         }
         const sourceNode = snapshot.nodeById.get(from.nodeId);
         const targetNode = snapshot.nodeById.get(to.nodeId);
-        if (sourceNode?.type === "group" || targetNode?.type === "group") {
-          return fail(operationIndex, "to", "invalid-connection", "group 节点不接受连线");
-        }
         if (hasEdge(snapshot, from.nodeId, to.nodeId)) {
           return fail(operationIndex, "to", "duplicate-edge", `${from.nodeId} -> ${to.nodeId} 已存在连线`);
         }

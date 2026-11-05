@@ -2,7 +2,6 @@
 import type { CanvasNodeData, ServerCanvas } from './domain/index.js';
 import type { PreparedModelResource } from './prepared-model.js';
 import type { BevyModelPreview } from './render-scene/wire-model.js';
-import type { BevyCompositeAssetCompositionInfo, CompositeAssetScopeShape } from './render-scene/wire-scene.js';
 import type { BevyNodeKind } from './render-scene/node-geometry.js';
 
 export type NodeCapabilityContext = {
@@ -12,7 +11,6 @@ export type NodeCapabilityContext = {
 };
 export type NodePreparationResult = {
   resource?: PreparedModelResource;
-  composition?: BevyCompositeAssetCompositionInfo;
   diagnostic?: string;
   status: string;
   /** Optional ownership-specific resource cleanup, including discarded late results. */
@@ -36,8 +34,6 @@ export type NodeCapabilities = {
   appearance?: Readonly<{ palette: BevyNodeKind; defaultSize: Readonly<{ width: number; height: number }>; cardLabel?: string }>;
   modelPreparation?: NodeModelPreparation;
   modelPreview?: { project(context: NodeCapabilityContext, view?: BevyModelPreview): BevyModelPreview };
-  scope?: { shape(context: NodeCapabilityContext): CompositeAssetScopeShape };
-  container?: { project(context: NodeCapabilityContext, counts: { memberCount: number; outputCapableLeafCount: number }): { title: string; memberCount: number; outputCapableLeafCount: number } };
   connections?: { endpoints(context: NodeCapabilityContext): 'ordinary' | 'none' | 'aggregate' };
   resources?: { channel: 'image' | 'video' | 'model'; previewSlot: boolean; contentKey(context: NodeResourceContext): string | null };
   focus?: { kind(context: NodeCapabilityContext): 'model' | 'extension' | null };

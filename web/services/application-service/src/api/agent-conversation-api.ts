@@ -28,7 +28,6 @@ import {
   addAppBasePath,
   WOOHAA3_PROTOCOL_VERSION,
   decodeAcceptTurnRequest,
-  decodeCanvasCreationRequest,
   decodeClearContextRequest,
   decodeCreateConversationRequest,
   decodeCursorQuery,
@@ -43,8 +42,8 @@ import type { AgentConnectionRegistry } from "../extensions/agent-connection-reg
 import type { SkillMediaService } from "../skill-media/service.js";
 
 export type AgentConversationApiDependencies = {
+  imageDirectorScene?: import("../extensions/image-director-scene-service.js").ImageDirectorSceneService;
   assistantText?: import("../extensions/assistant-text-service.js").AssistantTextService;
-  canvasCreations?: import("../extensions/canvas-creation-service.js").CanvasCreationService;
   accessRuntime?: import("@woohaa3/contracts").AccessRuntime;
   service: AgentConversationService;
   /** Skill 媒体步骤续接（change: 2026-10-28-add-agent-skill-media-regeneration）。 */
@@ -134,18 +133,6 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
     const method = req.method ?? "GET";
 
     try {
-      if (suffix === "group-executions" && method === "GET") {
-        const canvasId = url.searchParams.get("canvasId") ?? "";
-        const allowed = await authorizeCanvas(deps, owner, canvasId, "read");
-        if (!allowed.ok) return respondError(res, allowed.error);
-        const limit = Number(url.searchParams.get("limit") ?? 50);
-        if (!Number.isInteger(limit) || limit < 1 || limit > 200) return badRequest(res, "limit 必须在 1–200 之间");
-        try {
-          sendJson(res, 200, deps.service.listGroupExecutions({ owner, canvasId, limit,
-            nodeId: url.searchParams.get("nodeId") ?? undefined, cursor: url.searchParams.get("cursor") ?? undefined }));
-        } catch { return badRequest(res, "无效组执行分页游标"); }
-        return true;
-      }
       if (suffix === "service-connections" && method === "GET") {
         let administrator = deps.accessRuntime?.enabled === false;
         if (!administrator && deps.accessEnforcer) {
@@ -155,7 +142,7 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         sendJson(res, 200, { connections: await deps.serviceConnections?.list(actor) ?? [], duplicates: await deps.serviceConnections?.suspectedDuplicates(actor) ?? [], providers: (deps.serviceConnectionProviders?.() ?? []).filter(provider => provider.serviceConnectionFactory).map(provider => ({ providerId: provider.providerId, protocols: provider.serviceConnectionFactory!.protocols, models: provider.models.map(model => ({ modelId: model.providerModelId, modelKey: `${provider.providerId}:${model.providerModelId}`, type: model.modelType })) })) });
         return true;
       }
-      if ((suffix === "service-connections/protocol" || suffix === "service-connections/enabled") && method === "POST") {
+      if ((suffix === "service-connections/protocol" || suffix === "service-connections/enabled" || suffix === "service-connections/remove") && method === "POST") {
         const origin = firstHeader(req.headers.origin);
         if (!sameSourceOrigin(req, origin)) { sendJson(res, 403, { code: "forbidden", message: "需要同源请求" }); return true; }
         const input = await readJson(req, maxBytes) as Record<string, unknown>;
@@ -168,6 +155,9 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         if (suffix.endsWith("/enabled")) {
           if (typeof input.enabled !== "boolean") return badRequest(res, "启用状态无效");
           sendJson(res, 200, { connection: await deps.serviceConnections.setEnabled(actor, input.serviceConnectionId, expected, input.enabled) }); return true;
+        }
+        if (suffix.endsWith("/remove")) {
+          sendJson(res, 200, { connection: await deps.serviceConnections.remove(actor, input.serviceConnectionId, expected) }); return true;
         }
         const endpoint = input.endpoint as Record<string, unknown> | undefined;
         if (!endpoint || !["responses", "messages", "chat-completions", "gemini"].includes(String(endpoint.protocol)) || typeof endpoint.baseUrl !== "string" || !Array.isArray(input.models) || !input.models.every(model => typeof model === "string" && model.trim())) return badRequest(res, "协议入口和模型无效");
@@ -200,9 +190,9 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         if (!provider || !model || !endpoint || !source.capabilities.some(capability => capability.modelId === model.providerModelId && capability.protocol === endpoint.protocol && capability.purpose === "discussion")) return badRequest(res, "此来源或 Provider 未提供所选模型的文本生成适配");
         const connection = await deps.serviceConnections!.bind(actor, source.serviceConnectionId, { bindingId: `provider:${provider.providerId}`,
           extensionId: provider.extensionId, consumer: "provider", consumerId: provider.providerId, purposes: ["text"], modelKeys: [...new Set([...(source.bindings.find(binding => binding.bindingId === `provider:${provider.providerId}`)?.modelKeys ?? []), `${provider.providerId}:${model.providerModelId}`])] }, source,
-          [...source.capabilities.filter(capability => !(capability.purpose === "text" && capability.protocol === endpoint.protocol && capability.modelId === model.providerModelId)),
-            { purpose: "text", protocol: endpoint.protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" }]);
-        sendJson(res, 200, { connection }); return true;
+          normalizeCapabilities([...source.capabilities.filter(capability => !(capability.purpose === "text" && capability.protocol === endpoint.protocol && capability.modelId === model.providerModelId)),
+            { purpose: "text", protocol: endpoint.protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" }]));
+        sendJson(res, 200, { connection: await ensureProviderAssistantBinding(deps, actor, connection, provider) }); return true;
       }
       if (suffix === "service-connections/assistant" && method === "POST") {
         const origin = firstHeader(req.headers.origin);
@@ -223,48 +213,6 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
           modelKeys: source.capabilities.filter(capability => capability.purpose === "discussion" && capability.protocol === "chat-completions").map(capability => capability.modelId),
         }, expected) : await deps.serviceConnections!.unbind(actor, source.serviceConnectionId, bindingId, expected);
         sendJson(res, 200, { connection }); return true;
-      }
-      if (suffix === "canvas-creations" && method === "GET") {
-        const canvasId = url.searchParams.get("canvasId") ?? "";
-        const allowed = await authorizeCanvas(deps, owner, canvasId, "read");
-        if (!allowed.ok) return respondError(res, allowed.error);
-        sendJson(res, 200, { creations: await deps.canvasCreations?.list(owner, canvasId) ?? [] });
-        return true;
-      }
-      if (suffix === "canvas-creations" && method === "POST") {
-        const decoded = decodeCanvasCreationRequest(await readJson(req, maxBytes));
-        if (!decoded.ok) return badRequest(res, decoded.message);
-        const allowed = await authorizeCanvas(deps, owner, decoded.value.canvasId, "write");
-        if (!allowed.ok) return respondError(res, allowed.error);
-        if (!deps.canvasCreations) return badRequest(res, "组创作服务未装配");
-        try { sendJson(res, 200, { creation: await deps.canvasCreations.accept(owner, decoded.value) }); }
-        catch (e) { const error = e as { code?: string; message?: string }; sendJson(res, error.code === "unauthorized" ? 403 : error.code === "request-id-reused" ? 409 : 400, { code: error.code ?? "creation-failed", message: error.message ?? "创建失败", creationRegistered: Boolean(deps.canvasCreations.peek(owner, decoded.value.requestId)) }); }
-        return true;
-      }
-      const creationRetry = /^canvas-creations\/([^/]+)\/retry$/.exec(suffix);
-      if (creationRetry && method === "POST") {
-        const requestId = decodeURIComponent(creationRetry[1]!);
-        const known = deps.canvasCreations?.peek(owner, requestId);
-        if (!known) return respondError(res, { code: "not-found", message: "创建请求不存在" });
-        const allowed = await authorizeCanvas(deps, owner, known.canvasId, "write");
-        if (!allowed.ok) return respondError(res, allowed.error);
-        try { sendJson(res, 200, { creation: await deps.canvasCreations!.retry(owner, requestId) }); }
-        catch (e) {
-          const error = e as { code?: string; message?: string };
-          sendJson(res, error.code === "unauthorized" ? 403 : error.code === "request-id-reused" ? 409 : 400, { code: error.code ?? "creation-failed", message: error.message ?? "创建失败", creationRegistered: true });
-        }
-        return true;
-      }
-      const creationRead = /^canvas-creations\/([^/]+)$/.exec(suffix);
-      if (creationRead && method === "GET") {
-        const requestId = decodeURIComponent(creationRead[1]!);
-        const known = deps.canvasCreations?.peek(owner, requestId);
-        if (!known) return respondError(res, { code: "not-found", message: "创建请求不存在" });
-        const allowed = await authorizeCanvas(deps, owner, known.canvasId, "read");
-        if (!allowed.ok) return respondError(res, allowed.error);
-        const creation = await deps.canvasCreations!.query(owner, requestId);
-        sendJson(res, 200, { creation });
-        return true;
       }
       // GET /catalog
       if (suffix === "catalog" && method === "GET") {
@@ -474,6 +422,47 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         return true;
       }
 
+      const imageDirectorCreate = /^conversations\/([^/]+)\/image-director-scenes$/.exec(suffix);
+      if (imageDirectorCreate && method === "POST") {
+        if (!deps.imageDirectorScene) return badRequest(res, "图片场景创建不可用");
+        const conversationId = decodeURIComponent(imageDirectorCreate[1]!);
+        const decoded = decodeAcceptTurnRequest(await readJson(req, maxBytes));
+        if (!decoded.ok) return badRequest(res, decoded.message, decoded.code);
+        const entry = decoded.value.entry;
+        if (!entry.nodeId || !entry.model || !entry.connectionId || entry.action !== "discuss" || entry.references?.length || entry.mode || entry.cameraId || entry.clipId || entry.itemId || entry.worldScope || entry.expectedContentHash) return badRequest(res, "图片场景请求无效");
+        const conversation = deps.service.readConversation({ owner, conversationId });
+        if (!conversation.ok) return respondError(res, conversation.error);
+        if (conversation.snapshot.conversation.canvasId !== entry.canvasId) return respondError(res, { code: "unauthorized", message: "目标画布与会话不一致" });
+        const allowed = await authorizeCanvas(deps, owner, entry.canvasId, "write");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        const connection = await deps.service.resolveConnectionBinding({ owner, adapterId: conversation.snapshot.conversation.adapterId, connectionId: entry.connectionId });
+        if (!connection.ok) return respondError(res, connection.error);
+        if (!connection.binding || (entry.connection && (entry.connection.connectionId !== connection.binding.connectionId || entry.connection.adapterId !== connection.binding.adapterId || entry.connection.configRevision !== connection.binding.configRevision || entry.connection.credentialEpoch !== connection.binding.credentialEpoch))) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
+        const accepted = await deps.imageDirectorScene.accept({ owner, canvasId: entry.canvasId, conversationId, entry, connection: connection.binding, request: { requestId: decoded.value.requestId, sourceNodeId: entry.nodeId, connectionId: entry.connectionId, model: entry.model, variant: entry.reasoningEffort ?? null, instructions: entry.prompt } });
+        if (!accepted.ok) return respondError(res, accepted.error);
+        sendJson(res, 200, accepted);
+        return true;
+      }
+      if (suffix === "image-director-scenes" && method === "GET") {
+        const canvasId = url.searchParams.get("canvasId") ?? "", requestId = url.searchParams.get("requestId") ?? "";
+        if (!canvasId || !requestId || !deps.imageDirectorScene) return badRequest(res, "缺少创建身份");
+        const allowed = await authorizeCanvas(deps, owner, canvasId, "read");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        const result = await deps.imageDirectorScene.reconcile(owner, canvasId, requestId);
+        sendJson(res, 200, result);
+        return true;
+      }
+      if ((suffix === "image-director-scenes/retry-placement" || suffix === "image-director-scenes/retry-save") && method === "POST") {
+        const body = await readJson(req, maxBytes);
+        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join(",") !== "canvasId,requestId") return badRequest(res, "创建身份无效");
+        const { canvasId, requestId } = body as { canvasId?: unknown; requestId?: unknown };
+        if (typeof canvasId !== "string" || !canvasId || typeof requestId !== "string" || !requestId || !deps.imageDirectorScene) return badRequest(res, "创建身份无效");
+        const allowed = await authorizeCanvas(deps, owner, canvasId, "write");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        try { sendJson(res, 200, await (suffix.endsWith("retry-save") ? deps.imageDirectorScene.retrySave(owner, canvasId, requestId) : deps.imageDirectorScene.retryPlacement(owner, canvasId, requestId))); }
+        catch (error) { return badRequest(res, error instanceof Error ? error.message : "重试失败"); }
+        return true;
+      }
       const turnsCreate = /^conversations\/([^/]+)\/turns$/.exec(suffix);
       if (turnsCreate && method === "POST") {
         const conversationId = decodeURIComponent(turnsCreate[1]!);
@@ -596,6 +585,45 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
       return true;
     }
   };
+}
+
+/** Stable capability order keeps repeated binding CAS idempotent. */
+function normalizeCapabilities(capabilities: readonly import("@woohaa3/contracts").ServiceConnectionCapability[]) {
+  const key = (capability: import("@woohaa3/contracts").ServiceConnectionCapability) => `${capability.protocol}\u0000${capability.modelId}\u0000${capability.purpose}`;
+  return [...capabilities].sort((left, right) => key(left).localeCompare(key(right)));
+}
+
+/**
+ * A provider with a trusted assistant protocol makes its own language model usable as an Agent on the
+ * same personal source. The text binding stays independent; failing to project the optional Agent
+ * consumer must not break ordinary generation.
+ */
+async function ensureProviderAssistantBinding(
+  deps: AgentConversationApiDependencies,
+  actor: { owner: string; administrator: boolean; canUseSite: boolean },
+  connection: import("@woohaa3/contracts").ServiceConnectionView,
+  provider: import("@woohaa3/contracts").GenerationProvider
+): Promise<import("@woohaa3/contracts").ServiceConnectionView> {
+  const protocol = provider.serviceConnectionFactory?.assistantProtocol;
+  if (!protocol || !deps.serviceConnections) return connection;
+  const modelKeys = provider.models.filter(model => model.modelType === "language" && connection.capabilities.some(capability =>
+    capability.purpose === "discussion" && capability.protocol === protocol && capability.modelId === model.providerModelId)).map(model => model.providerModelId);
+  if (!modelKeys.length) return connection;
+  const assistantCapabilities = modelKeys.flatMap(modelId => [
+    { purpose: "discussion" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const },
+    { purpose: "target-execution" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const },
+  ]);
+  const capabilities = normalizeCapabilities([
+    ...connection.capabilities.filter(capability => !(capability.protocol === protocol && modelKeys.includes(capability.modelId)
+      && (capability.purpose === "discussion" || capability.purpose === "target-execution"))),
+    ...assistantCapabilities,
+  ]);
+  try {
+    return await deps.serviceConnections.bind(actor, connection.serviceConnectionId, {
+      bindingId: `provider-assistant:${provider.providerId}`, extensionId: "sdk-agent", consumer: "agent",
+      consumerId: `shared:${protocol}`, purposes: ["discussion", "target-execution"], modelKeys,
+    }, connection, capabilities);
+  } catch { return connection; }
 }
 
 async function authorizeCanvas(

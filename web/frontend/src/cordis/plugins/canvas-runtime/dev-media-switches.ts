@@ -7,7 +7,7 @@
  * 这些工作与 wgpu 抢同一块 GPU，是那次卡顿的可疑来源。
  *
  * 为了做隔离实验，开启后让画布媒体层**完全不碰视频**：不建立视频帧会话（不创建 `<video>`、
- * 不下载、不上传），并跳过复合资产媒体源里的视频源。
+ * 不下载、不上传）。
  *
  * 开启方式（任一命中即可，便于不同入口/被改写 URL 的情况）：
  * 1. 页面 URL 带 `?woohaaDevNoVideo=1`（也接受 `#...?woohaaDevNoVideo=1`）；
@@ -20,7 +20,6 @@
  * 这是录 trace 的临时手段，不属于产品行为。
  */
 import type { ServerCanvas } from "@woohaa3/contracts";
-import type { CompositeAssetMediaSource } from "../../../extension-api/composite-assets.js";
 
 /** 关闭视频用的查询参数名（值必须为 `1`）。 */
 export const DEV_NO_VIDEO_PARAM = "woohaaDevNoVideo";
@@ -121,9 +120,4 @@ export function withoutVideoNodes(canvas: ServerCanvas | null): ServerCanvas | n
   const nodes = canvas.document.nodes;
   if (!nodes.some((node) => node.type === "video")) return canvas;
   return { ...canvas, document: { ...canvas.document, nodes: nodes.filter((node) => node.type !== "video") } };
-}
-
-/** 去掉复合资产媒体源里的视频源，保留图片等其它媒体。 */
-export function withoutVideoMediaSources(sources: readonly CompositeAssetMediaSource[]): CompositeAssetMediaSource[] {
-  return sources.filter((source) => source.kind !== "video");
 }

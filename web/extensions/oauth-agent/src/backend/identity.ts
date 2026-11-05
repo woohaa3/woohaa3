@@ -68,9 +68,9 @@ export type OwnerResolverOptions = {
 export type OwnerResolver = {
   resolve: (req: IncomingMessage) => OwnerResolution;
   /**
-   * 由**显式输入**解析 owner（不依赖请求对象）：宿主在其它路由（如画布「转为片场」的 HTTP
-   * 边界）已解析出可信主体并持有 Cookie 头时，复用**同一规则**解析 owner，保证与
-   * `/api/oauth-agent/*` 的姿态完全一致（生产 principal、本地受控会话、公网拒绝匿名）。
+   * 由**显式输入**解析 owner（不依赖请求对象）：宿主在其它 HTTP 边界已解析出可信主体并持有
+   * Cookie 头时，复用**同一规则**解析 owner，保证与 `/api/oauth-agent/*` 的姿态完全一致
+   * （生产 principal、本地受控会话、公网拒绝匿名）。
    */
   resolveFor: (input: { subject?: string | null; cookie?: string | null }) => OwnerResolution;
   /** 清除本地会话 cookie 的 Set-Cookie 值。 */

@@ -51,12 +51,7 @@ pub(super) fn draw(
         13.,
         theme.token_u32("canvasBodyText"),
     )];
-    if node.shot_preview.is_some() {
-        labels.extend(super::cards::draw_shot_preview(
-            geometry, theme, node, index,
-        ));
-    } else if !node.texture && !node.busy && !(node.model_preview.is_some() && node.model.is_some())
-    {
+    if !node.texture && !node.busy && !(node.model_preview.is_some() && node.model.is_some()) {
         for (i, line) in node
             .body
             .lines()

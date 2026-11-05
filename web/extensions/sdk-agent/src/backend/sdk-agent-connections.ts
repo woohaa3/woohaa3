@@ -1,8 +1,7 @@
 import { sdkSourceFor, sdkSourceProtocol } from "./service-source.js";
-import { filmSetAnimationsOf, filmSetClipHash } from "@woohaa3/contracts";
 /** Fixed framework dispatch. The host ledger owns idempotency; frameworks own inference loops. */
 import type {
-  AgentConnectionCapabilities, AgentConnectionModel, AgentConversationAdapter, AgentAdapterRunInput,
+  AgentConnectionCapabilities, AgentConnectionModel, AgentConnectionStatus, AgentConversationAdapter, AgentAdapterRunInput,
   AgentAdapterRunOutcome, AgentConnectionRuntime, AgentEngineId, ApplicationToolDelegationFacade,
   ApplicationCanvasAuthoringFacade, ApplicationUserDelegation
 } from "@woohaa3/contracts";
@@ -66,8 +65,20 @@ export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, 
         }
       };
       const models: AgentConnectionModel[] = (record.models ?? []).map((id) => ({ id, label: id, reasoningEfforts: sdkReasoningEfforts(adapter.adapterId, id), source: "user-provided", accountAuthorized: false, ...(record.modelCapabilities?.[id] ? { capabilities: record.modelCapabilities[id] } : {}) }));
-      return { runtime, capabilities: capabilitiesFor(adapter), models, required: ["credential", "transport"], endpointAllowed,
-        ...(!endpointAllowed ? { reason: runtime.dependency.reason } : !credentialConfigured ? { reason: "尚未保存 API Key" } : {}) };
+      // A saved Key on an allowed endpoint makes the HTTP transport attemptable. This is not a model
+      // probe: modelAccess stays unknown, and an explicit failed/unavailable evidence is preserved.
+      const transport = record.lastStatus?.transport;
+      const transportEvidence = transport && (transport.state === "failed" || transport.state === "unavailable")
+        ? transport
+        : endpointAllowed && credentialConfigured ? { state: "ready" as const, checkedAt: transport?.checkedAt ?? null } : transport ?? unknown;
+      const status: AgentConnectionStatus = { transport: transportEvidence, credential: record.lastStatus?.credential ?? unknown,
+        modelAccess: record.lastStatus?.modelAccess ?? unknown, tools: record.lastStatus?.tools ?? unknown };
+      const blockedReason = !endpointAllowed ? runtime.dependency.reason
+        : !credentialConfigured ? "尚未保存 API Key"
+        : runtime.dependency.state === "unavailable" || runtime.dependency.state === "failed" ? runtime.dependency.reason
+        : undefined;
+      return { runtime, status, capabilities: capabilitiesFor(adapter), models, required: ["credential", "transport"], endpointAllowed,
+        ...(blockedReason ? { reason: blockedReason } : {}) };
     }
   } satisfies ConnectionDescriptor]));
 }
@@ -77,6 +88,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
   const runtime = options.runtime ?? (options.agentSdkDirs ? createFixedEngineRuntime(options.agentSdkDirs) : undefined);
   const journal = new Map<string, AgentAdapterRunOutcome>();
   const active = new Map<string, AbortController>();
+  const candidateRuns = new Map<string, { controller: AbortController; done: Promise<AgentAdapterRunOutcome> }>();
   const fail = (code: string, message: string): AgentAdapterRunOutcome => ({ status: "failed", error: { code, message } });
   const runInner = async (input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome> => {
     if (options.admission && !options.admission()) return fail("extension-disabled", "SDK 扩展已停用或正在排空");
@@ -135,30 +147,40 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       relay = await createModelTransport({ apiType: engine.apiType, upstream: baseUrl, apiKey: credential.secret,
         policy: endpointPolicy, valid, signal: controller.signal });
       if (input.intent.action !== "discuss") {
-        if (!options.tools || !options.mcpServerUrl || !input.intent.nodeId || !options.authoring) return fail("capability-unsupported", "目标执行需要受控工具、权威目标及内容版本");
-        const targetHash = (target: Awaited<ReturnType<ApplicationCanvasAuthoringFacade["readNode"]>>) => {
-          if (!target.ok) return undefined;
-          if (input.intent.mode === "film-set" && input.intent.clipId && target.animation) {
-            const clip = filmSetAnimationsOf(target.animation).clips.find((entry) => entry.id === input.intent.clipId);
-            return clip ? filmSetClipHash(clip) : undefined;
-          }
-          return target.modelContentVersion?.contentHash ?? target.snapshotHash;
-        };
-        const target = await options.authoring.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId });
-        const frozenHash = targetHash(target);
-        if (!target.ok || !frozenHash || (input.intent.expectedContentHash && input.intent.expectedContentHash !== frozenHash)) return fail("version-conflict", "目标内容已变化或不可读取，请重新打开作品");
-        const frozenInput = { ...input, intent: { ...input.intent, expectedContentHash: frozenHash } };
-        options.tools.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" });
-        const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" },
-          workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
-          ...(input.intent.mode === "canvas-group" ? { expectedScopeEpoch: Number(frozenHash.slice("group-epoch:".length)) } : {}),
-          ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
-      ...(input.intent.clipId ? { clipId: input.intent.clipId } : {}), ...(input.intent.itemId ? { itemId: input.intent.itemId } : {}), tools: localAgentToolsForMode(input.intent.mode) });
-        gateway = await createMcpTurnGateway({ input: { ...frozenInput, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
-          validateTarget: async () => {
-            const target = await options.authoring!.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId! });
-            return targetHash(target) === frozenHash;
-          } });
+        if (!options.tools || !options.mcpServerUrl || !input.intent.nodeId) return fail("capability-unsupported", "目标执行需要受控工具与权威目标");
+        if (input.intent.mode === "world" || input.intent.mode === "canvas-group") {
+          if (input.intent.mode === "world" && !input.intent.worldScope) return fail("capability-unsupported", "世界目标缺少可信范围选择");
+          options.tools.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" });
+          const expectedScopeEpoch = input.intent.mode === "canvas-group" && input.intent.expectedContentHash?.startsWith("group-epoch:")
+            ? Number(input.intent.expectedContentHash.slice("group-epoch:".length))
+            : undefined;
+          const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" },
+            workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
+            ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
+            ...(expectedScopeEpoch !== undefined ? { expectedScopeEpoch } : {}),
+            tools: localAgentToolsForMode(input.intent.mode, input.intent.worldScope) });
+          gateway = await createMcpTurnGateway({ input: { ...input, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
+            // The issued world context revalidates scope/version/leases on every write.
+            validateTarget: async () => valid() });
+        } else {
+          if (!options.authoring) return fail("capability-unsupported", "目标执行需要受控工具、权威目标及内容版本");
+          const targetHash = (target: Awaited<ReturnType<ApplicationCanvasAuthoringFacade["readNode"]>>) =>
+            target.ok ? target.modelContentVersion?.contentHash ?? target.snapshotHash : undefined;
+          const target = await options.authoring.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId });
+          const frozenHash = targetHash(target);
+          if (!target.ok || !frozenHash || (input.intent.expectedContentHash && input.intent.expectedContentHash !== frozenHash)) return fail("version-conflict", "目标内容已变化或不可读取，请重新打开作品");
+          const frozenInput = { ...input, intent: { ...input.intent, expectedContentHash: frozenHash } };
+          options.tools.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" });
+          const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" },
+            workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
+            ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
+            tools: localAgentToolsForMode(input.intent.mode, input.intent.worldScope) });
+          gateway = await createMcpTurnGateway({ input: { ...frozenInput, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
+            validateTarget: async () => {
+              const target = await options.authoring!.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId! });
+              return targetHash(target) === frozenHash;
+            } });
+        }
       }
       const native = input.candidate ? null : await options.service.resolveNativeBinding({ owner: input.owner, connectionId: record.connectionId, context });
       const sdk = createAgentSdkAdapter({ kind: engine.engine, apiKey: relay.token, modelBaseUrl: relay.baseUrl, resourceKey,
@@ -187,9 +209,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       if (result.nativeId && !input.candidate && await valid()) await options.service.setNativeBinding({ owner: input.owner, connectionId: record.connectionId, context, native: { nativeId: result.nativeId, credentialEpoch: record.credentialEpoch, conversationId: input.conversationId, updatedAt: new Date().toISOString() } });
       await options.service.setStatus({ owner: input.owner, connectionId: record.connectionId, patch: { transport: { state: "ready", checkedAt: new Date().toISOString() }, modelAccess: { state: "ready", checkedAt: new Date().toISOString() }, ...(receipts.length ? { tools: { state: "ready" as const, checkedAt: new Date().toISOString() } } : {}) } });
       if (input.intent.action === "discuss") return { status: "succeeded", assistantText: result.outcome.assistantText };
-      // Group runs have authoritative child-run evidence in the host ledger even
-      // when no structural command was needed. The host settles their real outputs.
-      return receipts.length || input.intent.mode === "canvas-group" ? { status: "succeeded", assistantText: result.outcome.assistantText, receipt } :
+      return receipts.length ? { status: "succeeded", assistantText: result.outcome.assistantText, receipt } :
         { status: "failed", assistantText: result.outcome.assistantText, error: { code: "write-unconfirmed", message: "回复完成，作品更新未确认；请核对原请求" } };
     } catch {
       await gateway?.drain();
@@ -203,7 +223,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
   };
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "film-set", "camera", ...(options.tools && options.authoring && options.mcpServerUrl ? ["canvas-group" as const] : [])], tools: true, models: "remote" }),
+    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "world", "canvas-group"], tools: true, models: "remote" }),
     authorization: async ({ owner }) => {
       const records = (await options.service.list(owner)).filter((record) => record.adapterId === adapter.adapterId);
       for (const record of records) if (await options.service.credentialConfigured({ owner, connectionId: record.connectionId, purpose: "model-api-key" })) return "ready";
@@ -211,10 +231,22 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     },
     models: async ({ owner }) => ({ models: (await options.service.list(owner)).filter((record) => record.adapterId === adapter.adapterId).flatMap((record) => (record.models ?? []).map((id) => ({ id, label: id }))) }),
     run: async (input) => {
-      const operation = runInner(input);
+      const controller = input.candidate ? new AbortController() : null;
+      const abort = () => controller?.abort();
+      if (controller) { input.signal.addEventListener("abort", abort, { once: true }); if (input.signal.aborted) abort(); }
+      const operation = runInner(controller ? { ...input, signal: controller.signal } : input);
+      const candidateKey = JSON.stringify([input.owner, input.requestId]);
+      if (controller) candidateRuns.set(candidateKey, { controller, done: operation });
       options.inFlight?.add(operation);
       try { const outcome = await operation; journal.set(`${input.owner}:${input.requestId}`, outcome); return outcome; }
-      finally { options.inFlight?.delete(operation); }
+      finally { options.inFlight?.delete(operation); if (controller) { input.signal.removeEventListener("abort", abort); candidateRuns.delete(candidateKey); } }
+    },
+    cancel: async ({ owner, requestId, candidateContext }) => {
+      if (!candidateContext) return;
+      const running = candidateRuns.get(JSON.stringify([owner, requestId]));
+      if (!running) throw new Error("无法确认 SDK 候选执行已停止");
+      running.controller.abort();
+      await running.done;
     },
     query: async ({ owner, requestId }) => journal.get(`${owner}:${requestId}`) ?? null
   };

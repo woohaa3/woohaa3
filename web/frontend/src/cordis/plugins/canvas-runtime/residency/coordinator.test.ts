@@ -183,6 +183,23 @@ describe("CanvasResourceCoordinator", () => {
     coordinator.dispose();
   });
 
+  it("admits no-card world models even when their sentinel rect is outside the viewport", () => {
+    const coordinator = new CanvasResourceCoordinator();
+    const fresh = coordinator.project({
+      viewport: { x: 0, y: 0, zoom: 1 },
+      surface: { width: 800, height: 600, pixelRatio: 1 },
+      pageVisible: true,
+      interactive: [],
+      pins: [],
+      candidates: [
+        { nodeId: "world", contentKey: "world", x: 0, y: 0, width: 248, height: 232, eligible: true, alwaysVisible: true }
+      ]
+    });
+    expect(fresh).toEqual(["world"]);
+    expect(coordinator.isAdmitted("world")).toBe(true);
+    coordinator.dispose();
+  });
+
   it("pauses ordinary prefetch without a surface but keeps explicit pins", () => {
     const coordinator = new CanvasResourceCoordinator();
     coordinator.project({
@@ -298,6 +315,29 @@ describe("CanvasResourceCoordinator", () => {
       candidates: [{ nodeId: "n", contentKey: "k", x: 0, y: 0, width: 512, height: 512, eligible: true }]
     });
     expect(coordinator.tierOf("n")).toBe(1024);
+    coordinator.dispose();
+  });
+
+  it("keeps the demand identity stable while zoom stays inside a thumbnail tier", () => {
+    const coordinator = new CanvasResourceCoordinator();
+    const candidates = [{ nodeId: "n", contentKey: "k", x: 0, y: 0, width: 512, height: 512, eligible: true }];
+    const project = (zoom: number) => coordinator.project({
+      viewport: { x: 0, y: 0, zoom },
+      surface: { width: 1600, height: 1200, pixelRatio: 1 },
+      pageVisible: true, interactive: [], pins: [], candidates
+    });
+    project(0.4);
+    expect(coordinator.tierOf("n")).toBe(256);
+    const revision = coordinator.projectionRevision();
+    // 同一档内的连续缩放不重建需求，避免每个 wheel 事件都重算全量媒体绑定。
+    project(0.45);
+    project(0.5);
+    expect(coordinator.tierOf("n")).toBe(256);
+    expect(coordinator.projectionRevision()).toBe(revision);
+    // 跨档才推进版本，媒体 owner 只需为新档重建一次绑定。
+    project(0.6);
+    expect(coordinator.tierOf("n")).toBe(512);
+    expect(coordinator.projectionRevision()).not.toBe(revision);
     coordinator.dispose();
   });
 

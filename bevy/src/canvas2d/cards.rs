@@ -1,42 +1,11 @@
-//! Ordinary card drawing. Groups and film scopes keep their shared overlay order.
+//! Ordinary card drawing.
 use super::layout::{port, shortened, shows_content};
 use super::{geometry::Geometry, labels::Label};
 use crate::{
-    protocol::{GraphNode, NodeHover},
+    protocol::{GraphNode, NodeChrome, NodeHover},
     theme::ThemeResource,
 };
 use bevy::prelude::*;
-
-/// 拍摄镜头预览卡片正文与装饰
-/// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D8）。
-///
-/// 预览节点复用普通卡片外壳（标题/类型已在映射层投影为镜头名/静态·动态），但内容区改为
-/// **实时取景窗口**：GPU Sprite 由 `shot_node_preview` 摆放，这里只画标题区与状态承载面。
-/// 只显示状态文案（准备中/待更新/失败），不绘制播放按钮或进度条。
-/// `ready` 且无诊断时不覆盖内容面（交给实时画面）。
-pub(super) fn draw_shot_preview(
-    geometry: &mut Geometry,
-    theme: &ThemeResource,
-    node: &GraphNode,
-    index: usize,
-) -> Vec<Label> {
-    let z = 10.0 + index as f32 * 0.1 + 0.004;
-    let (cx, cy, cw, ch) = super::shot_preview::content_rect_of(node);
-    // 内容承载面：实时画面尚未就绪/待更新/失败时用主题内容底衬，保证状态文案可辨认。
-    geometry.rounded_rect(cx, cy, cw, ch, 3., z, theme.token_u32("canvasNodeContent"));
-    let mut labels = Vec::new();
-    // 状态文案：`ready` 且无诊断时返回空串（不覆盖实时画面），否则在内容区上沿展示。
-    let status = super::shot_preview::status_text(node, &shortened);
-    if !status.is_empty() {
-        labels.push((
-            status,
-            Vec2::new(cx + 12.0, cy + 10.0),
-            12.0,
-            theme.token_u32("canvasBodyText"),
-        ));
-    }
-    labels
-}
 
 pub(super) fn draw_static(
     geometry: &mut Geometry,
@@ -46,6 +15,14 @@ pub(super) fn draw_static(
 ) -> Vec<Label> {
     if node.kind.starts_with("focus-reference") {
         return super::focus_reference::draw(geometry, theme, node, index);
+    }
+    match &node.chrome {
+        NodeChrome::Card => {}
+        NodeChrome::Frame { .. } => {
+            // Scope chrome is drawn once in the shared overlay, including hover/selection.
+            return Vec::new();
+        }
+        NodeChrome::None => return Vec::new(),
     }
     if super::layout::compact_card(node) {
         return super::compact_card::draw(geometry, theme, node, index);
@@ -83,20 +60,14 @@ pub(super) fn draw_static(
         theme.token_u32("canvasNodeSurface"),
     );
     geometry.rounded_rect(x + 14., y + 12., 28., 28., 6., z + 0.004, tint);
-    // 镜头预览节点底层是 image/video 媒体，但类型图标应读作「镜头」，与普通图片/视频区分。
-    let icon_kind = if node.shot_preview.is_some() {
-        "shot"
-    } else {
-        node.kind.as_str()
-    };
-    geometry.icon(icon_kind, Vec2::new(x + 28., y + 26.), z + 0.005, accent);
+    geometry.icon(&node.kind, Vec2::new(x + 28., y + 26.), z + 0.005, accent);
     // 卡片“×”删除入口已移除（change: 2026-10-09-improve-canvas-workflow，任务 1.7）：
     // 删除只经“删除作品”菜单与键盘 Delete/Backspace，避免误删与语义歧义。
     // 历史动作图标已移除（迁移到节点下方独立历史条，
     // change: 2026-10-12-unify-generation-history-strip，design D4）；
     // 下载入口也移出卡片（迁移到节点顶部 Bevy 横条，
     // change: 2026-10-13-add-node-to-film-set-shortcut）。
-    if show_content && !super::shot_preview::is_shot_preview_node(node) {
+    if show_content {
         let (cx, cy, cw, ch) = super::layout::content_rect(node);
         geometry.rounded_rect(
             cx,
@@ -138,11 +109,7 @@ pub(super) fn draw_static(
             theme.token_u32("canvasCloseIcon"),
         ));
     }
-    if super::shot_preview::is_shot_preview_node(node) {
-        labels.extend(draw_shot_preview(geometry, theme, node, index));
-        return labels;
-    }
-    let body_lines = super::layout::wrapped_lines(&node.body, width - 48., 12., 6);
+    let body_lines: Vec<&str> = node.body.lines().collect();
     for i in 0..6 {
         labels.push((
             if show_content
@@ -150,7 +117,7 @@ pub(super) fn draw_static(
                 && !node.busy
                 && !(node.model_preview.is_some() && node.model.is_some())
             {
-                body_lines.get(i).cloned().unwrap_or_default()
+                shortened(body_lines.get(i).unwrap_or(&""), width - 48., 12.)
             } else {
                 String::new()
             },
@@ -187,6 +154,9 @@ pub(super) fn draw_hover_ports(
     hover: Option<&NodeHover>,
     index: usize,
 ) {
+    if !node.chrome.is_card() {
+        return;
+    }
     let (accent, _, _) = theme.node_palette(&node.kind);
     let (_, _, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     // 端点：静止时 MUST NOT 绘制常驻图形；仅指针悬停该节点时在左右中点显示「+」圆钮
@@ -194,7 +164,8 @@ pub(super) fn draw_hover_ports(
     if let Some(hover) = hover.filter(|hover| hover.node_id.as_deref() == Some(node.id.as_str())) {
         let hovered_port = hover.port.as_deref();
         for (output, side) in [(false, "input"), (true, "output")] {
-            let p = port(node, output);
+            let p =
+                crate::canvas_query::layout::magnetic_port_center(port(node, output), hover, side);
             let ring = if hovered_port == Some(side) {
                 accent
             } else {
@@ -220,6 +191,14 @@ pub(crate) fn draw_selection_outline(
     node: &GraphNode,
     index: usize,
 ) {
+    match &node.chrome {
+        NodeChrome::Card => {}
+        NodeChrome::Frame { .. } => {
+            // Scope overlay owns the single rounded contour for all interaction states.
+            return;
+        }
+        NodeChrome::None => return,
+    }
     let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     let (width, height) = (node.width, node.height);
     geometry.rounded_rect(
@@ -273,23 +252,15 @@ pub(super) fn draw(
     labels
 }
 
-/// Shared rectangle grip; interaction uses the same layout::resize_rect.
+/// 右下角矩形 resize 抓手；交互复用同一 `canvas_query::grip::ResizeGrip`。
 pub(super) fn draw_resize_grip(
     geometry: &mut Geometry,
     theme: &ThemeResource,
     node: &GraphNode,
     z: f32,
 ) {
-    let (x, y, w, h) = super::layout::resize_rect(node.x, node.y, node.width, node.height);
-    super::film_set::draw_scope_grip(
-        geometry,
-        theme,
-        &super::scope::ScopeGrip::Rect(super::scope::ScopeRect {
-            x,
-            y,
-            width: w,
-            height: h,
-        }),
-        z,
-    );
+    let grip =
+        crate::canvas_query::grip::ResizeGrip::for_bounds(node.x, node.y, node.width, node.height);
+    let color = theme.token_u32("canvasResizeHandle");
+    geometry.rounded_rect(grip.x, grip.y, grip.width, grip.height, 2.0, z, color);
 }

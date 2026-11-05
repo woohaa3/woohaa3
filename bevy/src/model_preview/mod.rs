@@ -353,7 +353,7 @@ pub(crate) fn sync(
                 &mut models,
                 &node.id,
                 31,
-                rig.focus_node.as_deref() == Some(node.id.as_str()),
+                rig.focus_node.as_deref() == Some(node.id.as_str()) || node.shared_world_instance.is_some(),
             );
             // 离屏且**没有卡片**的节点这一帧不会做任何分配，它的延迟项必须就地作废：
             // 留着就是「排过队、后来离开画面」的孤儿，`has_pending()` 会一直为真。
@@ -536,7 +536,7 @@ pub(crate) fn sync(
             &mut models,
             &node.id,
             card_layer,
-            focused,
+            focused || node.shared_world_instance.is_some(),
         );
         let card = state.cards.get_mut(&node.id).unwrap();
         card.pivot = pivot;

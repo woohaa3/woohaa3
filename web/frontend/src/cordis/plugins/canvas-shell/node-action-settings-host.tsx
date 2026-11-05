@@ -2,7 +2,7 @@
  * 「设置箭头」DOM 弹窗宿主
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.4/3.6 / design D6 修订）。
  *
- * 横条本体的按钮由 Bevy 绘制、Rust 命中；命中**独立设置箭头**时 canvas-shell 打开
+ * 横条本体的按钮由 Web 渲染；点击**独立设置箭头**时 canvas-shell 打开
  * `nodeActionSettingsStore`，本组件按贡献 id 取该贡献声明的 `settings` 组件，锚定在节点
  * 屏幕矩形上方渲染。复杂 UI（模型选择、可选要求、视频范围、配置入口）继续走 DOM，不受画布
  * 手势影响；关闭由贡献的「开始转换」/宿主 `onClose` 完成。

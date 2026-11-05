@@ -91,12 +91,14 @@ export class InMemoryYjsDocumentRepository implements YjsDocumentRepository {
       throw fault;
     }
 
+    const sha256 = await computeUpdateSha256(commit.update);
+    if (commit.signal?.aborted) throw new DOMException("Commit cancelled", "AbortError");
     // 全部校验通过后一次性写入（模拟单事务）。
     const nextSeq = doc.storageSeq + 1;
     doc.updates.push({
       seq: nextSeq,
       update: commit.update.slice(),
-      sha256: await computeUpdateSha256(commit.update)
+      sha256
     });
     doc.storageSeq = nextSeq;
     doc.projection = structuredClone(commit.projection);

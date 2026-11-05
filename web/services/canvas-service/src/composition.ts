@@ -1,7 +1,5 @@
-import { ContentContributionRegistry, ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
-import type { FilmSetConversionRegistry, MediaStorageScope, ServerCanvas } from "@woohaa3/contracts";
-import { MCP_INTERNAL_ACTOR_ID } from "@woohaa3/contracts";
-import { createFilmSetConversionProviderSet } from "@woohaa3/contracts";
+import { ContentContributionRegistry, ManagedNodeLifecycleRegistry, worldCameraCompletionKey } from "@woohaa3/contracts";
+import type { MediaStorageScope, ServerCanvas } from "@woohaa3/contracts";
 import type { IncomingMessage } from "node:http";
 /**
  * Canvas Service composition root（change: split-web-runtime-services，任务 5.1–5.6；
@@ -36,6 +34,8 @@ import { createRendererClient } from "./model-renderer/index.js";
 import { isAggregateRunNode } from "@woohaa3/contracts";
 import { composeSnippets, type SnippetComposition } from "./storage/snippet-composition.js";
 import { composeNodeHistory, type NodeHistoryComposition } from "./storage/node-history-composition.js";
+import { composeWorldCameraHistory, type WorldCameraHistoryComposition } from "./storage/world-camera-history-composition.js";
+import { composeAssistantHostCompletions, type AssistantHostCompletionComposition } from "./storage/host-completion-composition.js";
 import { AgentDeltaJournal } from "./agent-authoring/index.js";
 import {
   CANVAS_AGENT_DEVELOPMENT_PRINCIPAL_ENV,
@@ -63,6 +63,12 @@ import { composeImportedFirstCanvasAccess, importedPermissionFor, type ImportedC
 import type { CanvasAccessPort, CanvasLifecyclePort } from "./access/resolve-access.js";
 import type { PrincipalContext } from "@woohaa3/contracts";
 import type { CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
+import { createWorldConversionService } from "./world-authoring/conversion-service.js";
+import { createWorldAuthoringAuthority } from "./world-authoring/authority.js";
+import { createWorldAuthoringService } from "./world-authoring/scene-area-service.js";
+import { createWorldCameraSettingsService, type WorldCameraCompletionVerification } from "./world-authoring/camera-service.js";
+import { createAssistantWorldService } from "./world-authoring/assistant-service.js";
+import { createWorldCaptureService, type WorldCaptureService } from "./world-authoring/capture-service.js";
 
 export type { CanvasMediaAssetSyncPort, CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
 
@@ -81,25 +87,6 @@ export {
 } from "./composition/deployment.js";
 export type { AgentDeploymentProfile } from "./composition/deployment.js";
 export { recordModelPlacementHistory } from "./composition/history-observers.js";
-
-/**
- * 转换幂等登记仓库工厂：注入的 SQLite 提供 durable 回执；无 backend 时用内容扩展提供的内存实现
- * （测试/单实例）。登记仓属于宿主持久化选择，领域对象由扩展端口构造。
- */
-async function createFilmSetConversionRegistry(
-  env: Record<string, string | undefined>,
-  conversion: import("@woohaa3/contracts").ContentConversionRuntime
-): Promise<FilmSetConversionRegistry & { close?: () => void }> {
-  const backend = env[CANVAS_STORAGE_BACKEND_ENV];
-  if (backend === undefined) return conversion.createInMemoryRegistry();
-  const resolved = resolveCanvasStorageConfig(env);
-  if (!resolved.ok) throw new Error(`转片场登记配置无效：${resolved.reason}`);
-  if (resolved.config.backend === "sqlite") {
-    const { SqliteFilmSetConversionRegistry } = await import("./storage/sqlite/film-set-conversion.js");
-    return new SqliteFilmSetConversionRegistry({ path: resolved.config.sqlitePath as string });
-  }
-  throw new Error("Mongo 转片场登记 adapter 尚未实现（拒绝回退到内存）");
-}
 
 /**
  * 合并「文档同步」与「媒体字节同步」两个状态。
@@ -140,17 +127,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   const resolveStorageConfig = (): CanvasStorageConfigResult =>
     options.storageConfig ? { ok: true, config: options.storageConfig } : resolveCanvasStorageConfig(env);
 
-  // Run before any repository/room opens, outside the degraded-storage catch:
-  // a failed migration must prevent startup rather than expose old data.
-  if (canvasEnabled && !options.repository && !options.yjsRepository) {
-    const resolved = resolveStorageConfig();
-    if (resolved.ok && resolved.config.backend === "sqlite") {
-      const { migrateSqliteCanvasBeforeStartup } = await import("./storage/migrations/startup.js");
-      const result = migrateSqliteCanvasBeforeStartup(resolved.config.sqlitePath as string, { managedMigrations: options.contentRuntime?.managedMigrations });
-      if (result.changed) log({ event: "canvas-startup-migrated", ...result });
-    }
-  }
-
   // Media client 必须先于存储组合解析（资产校验 port 的生产实现就是 Media client）。
   const mediaClient =
     options.mediaClient ??
@@ -163,6 +139,15 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       : undefined);
 
   let yjsRepositoryPromise: Promise<YjsDocumentRepository> | null = null;
+  /**
+   * T06 production authority. It is the same instance handed to the SQLite
+   * repository and to the semantic scene-area service, so acquire and commit use
+   * one footprint cache. Test-injected repositories may omit it.
+   */
+  const spatialAuthority = options.spatialAuthority ?? createWorldAuthoringAuthority({ media: mediaClient });
+  const worldAuthoringAuthority = "prepareCanvas" in spatialAuthority
+    ? spatialAuthority as import("./world-authoring/authority.js").WorldAuthoringAuthority
+    : null;
   const resolveYjsRepository = (): Promise<YjsDocumentRepository> => {
     if (options.yjsRepository) return Promise.resolve(options.yjsRepository);
     yjsRepositoryPromise ??= (async () => {
@@ -170,7 +155,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       if (!resolved.ok) throw new Error(`画布存储配置无效：${resolved.reason}`);
       if (resolved.config.backend === "sqlite") {
         const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
-        return new SqliteYjsRepository({ path: resolved.config.sqlitePath as string });
+        return new SqliteYjsRepository({ path: resolved.config.sqlitePath as string, spatialAuthority });
       }
       const { MongoYjsRepository } = await import("./storage/mongo/index.js");
       return MongoYjsRepository.connect({
@@ -380,6 +365,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   };
 
   let syncHandler: SyncUpgradeHandler | null = null;
+  let worldCapture: WorldCaptureService | null = null;
   const createSyncHandler = (): SyncUpgradeHandler => {
     const verifier = mediaClient ? createMediaVerifierStorage({ client: mediaClient }) : undefined;
     syncHandler ??= createSyncUpgradeHandler({
@@ -431,6 +417,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         log({ event: event.event, status: event.status, ...(event.code ? { code: event.code } : {}),
           ...(event.latencyMs !== undefined ? { latencyMs: event.latencyMs } : {}) }),
       onCommitted: (input) => {
+        worldCapture?.observeCanonical({ canvasId: input.canvasId, canvas: input.canvas });
         void recordModelPlacementHistory(
           nodeHistoryRef && nodeHistoryRef.editCompletion
             ? {
@@ -483,7 +470,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         ...(options.nodeHistoryRepository ? { repository: options.nodeHistoryRepository } : {}),
         ...(options.editCompletionRepository ? { editCompletionRepository: options.editCompletionRepository } : {}),
         ...(verifier ? { mediaVerifier: verifier } : {}),
-        ...(content ? { content } : {}),
         logger: (event) => log(event)
       });
     } catch (error) {
@@ -493,6 +479,39 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   }
   nodeHistoryRef = nodeHistory;
 
+  // 世界镜头完成历史（T08）：独立表/事务，绝不进入画布聚合或节点历史。
+  let cameraHistory: WorldCameraHistoryComposition | null = null;
+  if (options.enableWorldCameraHistory ?? true) {
+    try {
+      cameraHistory = await composeWorldCameraHistory({
+        env,
+        ...(options.storageConfig ? { storageConfig: options.storageConfig } : {}),
+        ...(options.worldCameraHistoryRepository ? { repository: options.worldCameraHistoryRepository } : {}),
+        ...(options.now ? { now: options.now } : {})
+      });
+    } catch (error) {
+      log({ event: "world-camera-history-compose-failed", message: error instanceof Error ? error.message : "unknown" });
+      cameraHistory = null;
+    }
+  }
+
+  // T11a trusted host-completion facts: separate durable row written before the
+  // T08 history row so a transient history failure or restart can补记.
+  let hostCompletions: AssistantHostCompletionComposition | null = null;
+  if (options.enableWorldCameraHistory ?? true) {
+    try {
+      hostCompletions = await composeAssistantHostCompletions({
+        env,
+        ...(options.storageConfig ? { storageConfig: options.storageConfig } : {}),
+        ...(options.assistantHostCompletionRepository ? { repository: options.assistantHostCompletionRepository } : {}),
+        ...(options.now ? { now: options.now } : {})
+      });
+    } catch (error) {
+      log({ event: "assistant-host-completion-compose-failed", message: error instanceof Error ? error.message : "unknown" });
+      hostCompletions = null;
+    }
+  }
+
   if (nodeHistory) {
     void nodeHistory.editCompletion.processPending().then(
       (result) => {
@@ -501,6 +520,18 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       (error) => log({ event: "edit-completion-compensate-failed", message: error instanceof Error ? error.message : "unknown" })
     );
   }
+
+  // T10 取景刷新/冻结：从权威 room 快照派生请求，只在创作版本变化时合并刷新。
+  worldCapture = sync
+    ? createWorldCaptureService({
+        resolveRoom: async (canvasId) => sync.registry.resolve(canvasId),
+        ...(options.worldCaptureMediaSave ? { mediaSave: options.worldCaptureMediaSave } : {}),
+        ...(options.worldCaptureOutputLongEdge ? { outputLongEdge: options.worldCaptureOutputLongEdge } : {}),
+        ...(options.worldCaptureFreezeTimeoutMs ? { freezeTimeoutMs: options.worldCaptureFreezeTimeoutMs } : {}),
+        ...(options.now ? { now: () => Date.parse(options.now!()) || Date.now() } : {}),
+        logger: log
+      })
+    : null;
 
   // run/cancel 应用服务与 task projector（唯一终态写入方）。
   let runService: CanvasRunService | null = null;
@@ -520,7 +551,8 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       now: options.now,
       logger: log,
       // 聚合节点（片场等）同一时间只允许一个运行任务，权威入口保证（design D5）。
-      isAggregateNode: isAggregateRunNode
+      isAggregateNode: isAggregateRunNode,
+      worldCapture
     });
     consumer = createTaskResultConsumer({
       projector,
@@ -547,6 +579,9 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
             logger: (event) => log(event)
           })
         : createManagedRendererClient();
+  // 共享世界镜头捕获由**页面**渲染：宿主只观察 canonical 变化并登记待取景
+  // （`captures-page-pending`），前端在同一次渲染后经 `captures-page-commit` 回填。
+  // 因此这里不再注册原生 world producer；`modelRenderer` 仍服务模型 MCP 预览。
   const agentProfile = resolveAgentDeploymentProfile(env, env[CANVAS_AGENT_DEVELOPMENT_PRINCIPAL_ENV]);
   const mcpRuntime =
     modelMcpEnabled && sync && composition
@@ -559,15 +594,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
           assistantTextRuns: options.assistantTextRuns,
           ...(options.skillAttempts ? { skillAttempts: options.skillAttempts } : {}),
           modelRenderer,
-          mediaClient: mediaClient ?? null,
-          ...(options.contentRuntime ? { contentRuntime: options.contentRuntime } : {}),
-          // agent 导出（D8）：端口延迟读取（录制服务在画布创建后才装配）。
-          ...(options.recording
-            ? {
-                recording: () => options.recording,
-                ...(options.themeBackdrop ? { themeBackdrop: options.themeBackdrop } : {})
-              }
-            : {}),
           agentDeltaJournal,
           modelMcpEnabled,
           env,
@@ -581,20 +607,12 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         })
       : null;
   const {
-    filmSetNodeService,
-    filmSetImportService,
-    filmSetItemService,
-    filmSetExportService,
     modelMcpInternalService,
     agentAuthoringService,
     modelMcpHandler,
     modelMcpInternalHandler,
     agentInternalHandler
   } = mcpRuntime ?? {
-    filmSetNodeService: undefined,
-    filmSetImportService: undefined,
-    filmSetItemService: undefined,
-    filmSetExportService: undefined,
     modelMcpInternalService: undefined,
     agentAuthoringService: undefined,
     modelMcpHandler: null,
@@ -716,70 +734,117 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     return merged;
   };
 
-  // 单节点快捷「转为片场」（change: 2026-10-13-add-node-to-film-set-shortcut）：
-  // 幂等登记由 durable 仓库提供（SQLite）；缺失持久 backend 时内存实现。生成端口由宿主
-  // （Section 2 的公开 adapter）注入；此处不装配任何 provider 或 LLM 实现 —— 宿主按扩展
-  // 激活结果给出提供方 capability 集合与媒体读取端口，这里只做**选择/路由**与门禁注入。
-  let filmSetConversion: import("@woohaa3/contracts").FilmSetConversionServicePort | null = null;
-  let filmSetConversionRegistry: (FilmSetConversionRegistry & { close?: () => void }) | null = null;
-  const conversionRuntime = options.contentRuntime?.conversion;
-  if (sync && conversionRuntime) {
-    try {
-      const providerSource = options.filmSetConversionProviders;
-      const conversionMediaReader =
-        options.filmSetConversionMediaReader
-        ?? (options.filmSetConversionMediaRead
-          ? conversionRuntime.createMediaReader({ read: options.filmSetConversionMediaRead })
-          : undefined);
-      const providerSet = providerSource !== undefined
-        ? createFilmSetConversionProviderSet(providerSource)
-        : null;
-      const conversionGenerator =
-        providerSet && conversionMediaReader
-          ? providerSet.createGenerator({ media: conversionMediaReader }) ?? undefined
-          : options.filmSetConversionGenerator;
-      const resolveModelCapabilities = providerSet
-        ? async (input: { canvasId: string; sourceKind: import("@woohaa3/contracts").FilmSetConversionSourceKind; modelKey?: string }) =>
-            providerSet.resolveCapabilities(input) ?? undefined
-        : undefined;
-      filmSetConversionRegistry = await createFilmSetConversionRegistry(env, conversionRuntime);
-      filmSetConversion = conversionRuntime.createService({
-        authorize: async record => options.accessRuntime?.enabled === false || (Boolean(record.subject) && await authorizeWs({ canvasId: record.canvasId,
-          principal: { subject: record.subject!, identityProvider: "host-conversion-delegation" }, permission: "write" })),
-        ...(options.filmSetConversionExecution ? { execution: options.filmSetConversionExecution } : {}),
-        resolveRoom: async (canvasId) => sync.registry.resolve(canvasId),
-        registry: filmSetConversionRegistry,
-        actorId: MCP_INTERNAL_ACTOR_ID,
-        ...(conversionGenerator ? { generator: conversionGenerator } : {}),
-        ...(resolveModelCapabilities ? { resolveModelCapabilities } : {}),
-        ...(providerSet ? { models: () => providerSet.listModels() } : {}),
-        ...(options.now ? { now: options.now } : {})
-      });
-    } catch (error) {
-      log({ event: "film-set-conversion-compose-failed", message: error instanceof Error ? error.message : "unknown" });
-      filmSetConversion = null;
-      filmSetConversionRegistry = null;
-    }
-  } else if (sync && !conversionRuntime) {
-    log({ event: "film-set-conversion-unavailable", message: "未装配内容扩展的转换端口；转片场功能不可用" });
-  }
-
-  const composedHandler = composeRequestHandler({
-    ...(content ? { content } : {}),
-    prepareCompositeHistory: async ({ canvasId, nodeId, payload }) => {
-      if (payload.animation?.schemaVersion !== 3 && payload.animation?.schemaVersion !== 4) throw new Error("历史复合资产定义非法");
-      const room = await activeSync?.registry.resolve(canvasId);
-      const exported = room?.exportCanvas();
-      const canvas = exported?.ok ? exported.canvas : await composition?.service.getCanvas(canvasId);
-      if (!canvas) throw new Error("历史媒体资产所属画布不可用");
-      const contentFrames = options.contentRuntime?.frames;
-      if (!contentFrames) throw new Error("复合内容历史渲染能力不可用（未装配内容扩展）");
-      // 历史帧素材属于**这张画布**：分立部署下 read 走内部 HTTP，必须带 canvasId 让服务端按
-      // 画布作用域路由；远端画布的素材只在托管存储里。
-      const mediaRead = mediaClient?.read;
-      const mediaExtensionId = options.contentRuntime?.mediaExtensionId;
-      return contentFrames.prepareHistoryFrame({ nodeId, payload: payload.animation, canvas, assets: canvas.assets, ...(mediaRead && mediaExtensionId ? { read: (storageKey: string) => mediaRead(storageKey, canvasId, mediaExtensionId) } : {}) });
+  const worldConversion = sync ? createWorldConversionService(async (id) =>
+    await canvasContentExists(id) ? sync.registry.resolve(id) : null) : null;
+  const spatialWrites: CanvasService["spatialWrites"] = sync ? {
+    acquire: async (intent) => {
+      // Refresh the authority's exact-revision footprint cache before the lease is
+      // checked. The repository still validates every target inside its transaction.
+      const room = await sync.registry.resolve(intent.canvasId);
+      if (room && worldAuthoringAuthority && (!options.yjsRepository || options.spatialAuthority)) {
+        const inspected = await room.inspectPublished(value => value);
+        if (inspected.ok) {
+          if (intent.scope.scope.kind === "scene-area") {
+            await worldAuthoringAuthority.prepareCanvas(inspected.canvas, { kind: "scene-area", areaId: intent.scope.scope.areaId });
+          } else if (intent.scope.scope.kind === "world-camera") {
+            await worldAuthoringAuthority.prepareCamera(inspected.canvas, intent.scope.scope.cameraId);
+          } else {
+            await worldAuthoringAuthority.prepareGroup(inspected.canvas, intent.scope.scope.groupId);
+          }
+        }
+      }
+      return (await spatialRepository()).acquireSpatialRun(intent);
     },
+    cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
+    confirmStopped: async (canvasId, requestId, runId, epoch, executionId, evidence) => (await spatialRepository()).confirmSpatialStopped(canvasId, requestId, runId, epoch, executionId, evidence),
+    pending: async () => (await spatialRepository()).pendingSpatialRuns(),
+    submit: async (canvasId, context, batch) => {
+      if (!context) return { ok: false, status: "rejected", commandId: batch.commandId, code: "spatial-rejected", spatialReason: "unavailable", message: "运行尚未取得写能力，需先核对执行" };
+      const room = await sync.registry.resolve(canvasId);
+      if (!room) return { ok: false, status: "failed", commandId: batch.commandId, code: "canvas-unavailable", message: "画布不可用" };
+      return room.submit(batch, { spatialContext: context });
+    }
+  } : null;
+  const worldAuthoring = sync && worldAuthoringAuthority && (!options.yjsRepository || options.spatialAuthority) ? createWorldAuthoringService({
+    authority: worldAuthoringAuthority,
+    resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
+    acquire: async (intent) => (await spatialRepository()).acquireSpatialRun(intent),
+    cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
+    readOccupancy: async (canvasId, targets) => {
+      try {
+        return (await spatialRepository()).readSpatialOccupancy(canvasId, targets);
+      } catch {
+        return { ok: false, reason: "store-unavailable" } as const;
+      }
+    },
+    findLatest: async (canvasId, operationId) => {
+      const repository = await spatialRepository();
+      return repository.findLatestWorldAuthoringCommand(canvasId, operationId);
+    }
+  }) : null;
+  let completionVerifier: ((completion: import("@woohaa3/contracts").WorldCompletion, evidence: unknown) => WorldCameraCompletionVerification | Promise<WorldCameraCompletionVerification>) | undefined =
+    options.verifyWorldCameraCompletion;
+  const cameraSettings = sync && cameraHistory ? createWorldCameraSettingsService({
+    resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
+    resolveContext: (canvasId, contextId) => worldAuthoring
+      ? worldAuthoring.resolveCapability(canvasId, contextId)
+      : { ok: false, code: "not-ready", message: "世界工具上下文不可用" },
+    history: cameraHistory.repository,
+    verifyCompletion: (completion, evidence) => completionVerifier ? completionVerifier(completion, evidence) : false,
+    ...(options.now ? { now: options.now } : {})
+  }) : null;
+  const assistantWorld = sync && worldAuthoringAuthority && worldAuthoring && cameraSettings
+    ? createAssistantWorldService({
+        authority: worldAuthoringAuthority,
+        worldAuthoring,
+        cameraSettings,
+        resolveRoom: async (canvasId) => await sync.registry.resolve(canvasId),
+        cancel: async (canvasId, requestId) => (await spatialRepository()).cancelSpatialRun(canvasId, requestId),
+        confirmStopped: async (input) => {
+          const repository = await spatialRepository();
+          await repository.confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence);
+        },
+        findRecordedCompletion: async (completion) => {
+          const entry = await cameraHistory!.repository.get(completion.canvasId, worldCameraCompletionKey(completion));
+          return !!entry
+            && entry.runId === completion.runId
+            && entry.completionId === completion.completionId
+            && entry.cameraId === completion.cameraId
+            && entry.settingsVersion === completion.settingsVersion;
+        },
+        ...(hostCompletions ? { hostCompletions: hostCompletions.repository } : {}),
+        pending: async () => (await spatialRepository()).pendingSpatialRuns()
+      })
+    : null;
+  if (assistantWorld) {
+    const assistant = assistantWorld;
+    completionVerifier = async (completion, evidence) => {
+      if (options.verifyWorldCameraCompletion && !(await options.verifyWorldCameraCompletion(completion, evidence))) return false;
+      return assistant.verifyCompletion(completion, evidence);
+    };
+    // Retry trusted completion facts left by a transient history failure before
+    // the previous process stopped. This never re-runs the assistant.
+    void assistant.resumePendingCompletions().then((result) => {
+      if (!result.ok || result.remaining > 0) {
+        log({ event: "assistant-host-completion-resume-pending", result });
+      }
+    }).catch((error) => {
+      log({ event: "assistant-host-completion-resume-failed", message: error instanceof Error ? error.message : "unknown" });
+    });
+  }
+  async function spatialRepository() {
+    const repository = await resolveYjsRepository();
+    const { SqliteYjsRepository } = await import("./storage/sqlite/index.js");
+    if (!(repository instanceof SqliteYjsRepository)) throw new Error("spatial writes unavailable");
+    // 存储槽位可能先于组合根构造仓库：补注同一空间权威，不能退回“无权威=unavailable”。
+    repository.attachSpatialAuthority(spatialAuthority);
+    return repository;
+  }
+  const composedHandler = composeRequestHandler({
+    worldConversion,
+    worldAuthoring,
+    worldCamera: cameraSettings,
+    worldCapture,
     env,
     canvasEnabled,
     unavailableReason,
@@ -787,13 +852,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     runService,
     snippets,
     nodeHistory,
-    filmSetImportService,
-    filmSetConversionService: filmSetConversion,
-    get recording() { return options.recording; },
-    ...(options.filmSetConversionOwnerResolver
-      ? { filmSetConversionOwnerResolver: options.filmSetConversionOwnerResolver }
-      : {}),
-    modelRenderer,
     modelMcpHandler,
     modelMcpInternalHandler,
     agentInternalHandler,
@@ -814,6 +872,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     ...(sync
       ? {
           closeSessions: async (canvasId: string, reason: string) => {
+            worldCapture?.forgetCanvas(canvasId);
             sync.hub.closeCanvas(canvasId, reason);
             await sync.registry.destroy(canvasId);
             // 画布不存在了，远端归属随之作废：否则同一 id 重建后会被误路由到托管存储。
@@ -825,11 +884,16 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   });
 
   return {
+    spatialWrites,
+    worldConversion,
+    worldAuthoring,
+    cameraSettings,
+    assistantWorld,
+    worldCapture,
     scenePackages,
     sync,
     runService,
     consumer,
-    filmSetConversionService: filmSetConversion,
     composition,
     snippets,
     nodeHistory,
@@ -837,10 +901,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     importService,
     mcpServices: () =>
       buildMcpServicesProjection({
-        filmSetNodeService,
-        filmSetImportService,
-        filmSetItemService,
-        filmSetExportService,
         internalModelMcp: modelMcpInternalService ?? null,
         agent: agentAuthoringService ?? null
       }) as ReturnType<CanvasService["mcpServices"]>,
@@ -881,9 +941,10 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     },
     close: async () => {
       consumer?.stop();
-      filmSetConversionRegistry?.close?.();
       if (options.modelRenderer === undefined) await modelRenderer?.close().catch(() => undefined);
       await nodeHistory?.close().catch(() => undefined);
+      await cameraHistory?.close().catch(() => undefined);
+      await hostCompletions?.close().catch(() => undefined);
 
       if (syncHandler) await syncHandler.close();
       if (releaseWriterLock) await releaseWriterLock().catch(() => undefined);

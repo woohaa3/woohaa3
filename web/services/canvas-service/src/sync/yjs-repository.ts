@@ -9,9 +9,12 @@
  */
 import type { ServerCanvas } from "@woohaa3/contracts";
 import type { ModelScriptBatchMeta, CanvasScriptSubmissionMeta } from "@woohaa3/contracts";
+import type { LeaseConflict } from "../world-authoring/spatial-leases.js";
 
 /** 一次命令提交要原子写入的全部内容（design D6/D7）。 */
 export type YjsCommandCommit = {
+  spatialContext?: import("../world-authoring/spatial-leases.js").SpatialWriteContext;
+  signal?: AbortSignal;
   canvasId: string;
   /** 期望的存储 sequence；不匹配即拒绝（防止与其它 writer 交错）。 */
   expectedStorageSeq: number;
@@ -44,6 +47,8 @@ export type YjsCommandRecord = {
    */
   script?: CanvasScriptSubmissionMeta;
   modelBatch?: ModelScriptBatchMeta;
+  /** Immutable scene-area authority receipt (T06); written in the same transaction. */
+  worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
 };
 
 /** 从存储恢复出的完整 Yjs 状态。 */
@@ -67,6 +72,8 @@ export type YjsLoadedState = {
 
 export type YjsCommitResult =
   | { ok: true; storageSeq: number; revision: number; duplicate: boolean }
+  | { ok: false; code: "lease-conflict"; conflict?: LeaseConflict }
+  | { ok: false; code: "spatial-rejected"; reason: string; conflict?: LeaseConflict }
   | { ok: false; code: "storage-seq-conflict"; currentSeq: number }
   | { ok: false; code: "command-id-reused"; existingHash: string };
 
@@ -91,6 +98,14 @@ export interface YjsDocumentRepository {
 
   /** 查询命令幂等结果。 */
   getCommandRecord(canvasId: string, commandId: string): Promise<YjsCommandRecord | null>;
+
+  /**
+   * Latest scene-area authority command for one operation (T06).
+   *
+   * Undo/redo walk this chain: forward → undo → redo. Implementations without
+   * receipts may omit it; the authority service then fails closed.
+   */
+  findLatestWorldAuthoringCommand?(canvasId: string, operationId: string): Promise<YjsCommandRecord | null>;
 
   /**
    * 在 cutoffSeq 原子替换 checkpoint：写入新 checkpoint/snapshotSeq，删除

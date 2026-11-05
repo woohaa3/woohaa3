@@ -18,7 +18,7 @@ export function toWorkingState(canvas: ServerCanvas): WorkingState {
     nodes: canvas.document.nodes.map((node) => ({
       id: node.id,
       type: node.type,
-      position: { ...node.position },
+      ...(node.position ? { position: { ...node.position } } : {}),
       width: node.width,
       height: node.height,
       parentId: node.parentId,

@@ -13,15 +13,13 @@
  * bridge → 注册 overlay**，保证首批同步 snapshot 结果不会早于 consumer 丢失。切换画布或释放
  * scope 时反序清理：停止 bridge、取消 listener、清理 store/浮层；迟到结果按 scope identity 丢弃。
  *
- * 任务记录经 `task.activity.*` 事件进入 store，组创作订阅宿主 canvasGroupRuns 读模型；不查询
+ * 任务记录经 `task.activity.*` 事件进入 store，Skill 步骤经应用服务轮询；不查询
  * Task Execution service，也不由本插件拥有 WebSocket（物理连接由 page-owned Canvas Session 负责）。
  */
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
 import type {
   AgentConversationServiceHandle,
-  CanvasGroupRunsService,
-  CanvasSession,
   CanvasNavigationService,
   CanvasLocateService,
   CanvasRemoteService,
@@ -70,7 +68,6 @@ type ExtensionContext = Context & {
   canvasLocate: CanvasLocateService;
   canvasScope: CanvasScopeService;
   canvasState: CanvasStoreFacade;
-  canvasGroupRuns: CanvasGroupRunsService;
 };
 
 export function taskActivityExtension(): Plugin.Function<void> {
@@ -80,7 +77,6 @@ export function taskActivityExtension(): Plugin.Function<void> {
 
       // 1) store（可重放状态源）。
       const store = new TaskActivityStore();
-      const groupRuns = ctx.canvasGroupRuns;
 
       // 2) 行能力：装配时构造一次（design D6）。记录只携带这里构造的动作函数引用。
       const capabilities: ActivityRowCapabilities = {
@@ -117,28 +113,6 @@ export function taskActivityExtension(): Plugin.Function<void> {
             if (!result.ok) ctx.dialogs.open({ dialogId: "alert", payload: { title: "无法打开作品生成历史", description: result.reason } });
           });
         },
-        group: {
-          writable: () => (ctx.get("canvasSession" as never) as CanvasSession | undefined)?.isWritable() ?? false,
-          resolveTitle: (nodeId) => {
-            const data = ctx.canvasState.getWorkingCanvas()?.nodeData[nodeId] as { title?: string } | undefined;
-            return data?.title || "节点搭建";
-          },
-          action: async (row, action) => {
-            if (action === "stop") await groupRuns.stop(row.requestId);
-            else await groupRuns.retry(row.creation!.requestId);
-          },
-          openConversation: (row) => {
-            const conversations = ctx.get("agentConversationService" as never) as AgentConversationServiceHandle | undefined;
-            if (!conversations?.navigateToDetail) throw new Error("对话服务尚未就绪");
-            const conversationId = row.conversationId;
-            if (!conversationId) throw new Error("该创作尚未建立对话");
-            conversations.navigateToDetail({ conversationId, requestId: row.requestId, nodeId: row.rootGroupId });
-            const panel = ctx.canvasNavigation.getSnapshot().panel;
-            if (panel?.type !== "agent-conversation" || panel.conversationId !== conversationId || panel.requestId !== row.requestId) {
-              throw new Error("无法打开对话详情，详情面板尚未就绪");
-            }
-          }
-        },
         skill: {
           resolveTitle: (nodeId) => {
             const data = ctx.canvasState.getWorkingCanvas()?.nodeData[nodeId] as { title?: string } | undefined;
@@ -159,11 +133,6 @@ export function taskActivityExtension(): Plugin.Function<void> {
         }
       };
       store.configure(capabilities);
-
-      const syncGroups = () => store.replaceGroupRuns(groupRuns.getSnapshot());
-      const disposeGroups = groupRuns.subscribe(syncGroups);
-      syncGroups();
-      const disposeOpen = ctx.on("ui.task-activity.open-requested", ({ nodeId }) => store.openGroup(nodeId));
 
       // Skill 步骤：宿主应用服务是事实源；面板持有有界轮询，失败时保留上次快照。
       let skillTimer: ReturnType<typeof setInterval> | undefined;
@@ -189,12 +158,6 @@ export function taskActivityExtension(): Plugin.Function<void> {
       const disposeFinished = ctx.on("task.activity.finished", (payload) => {
         store.applyEvent({ name: "task.activity.finished", payload });
       });
-      // 扩展后台活动（非 durable 任务，如镜头参考录制）：按画布过滤后幂等 upsert。
-      const disposeJob = ctx.on("extension.activity.updated", ({ job }) => {
-        if (job.canvasId !== canvasId) return;
-        store.applyJob(job);
-      });
-
       // 4) 启动 bridge（snapshot 只取高水位；session 通道；有限 HTTP recovery）。
       // 扩展用**目录字面量** emit（架构审计要求生产 emit 使用字面量）。
       const bridge = createTaskActivityEventBridge({
@@ -262,9 +225,6 @@ export function taskActivityExtension(): Plugin.Function<void> {
         disposeStarted();
         disposeUpdated();
         disposeFinished();
-        disposeJob();
-        disposeGroups?.();
-        disposeOpen();
         store.dispose();
       };
     },
@@ -279,8 +239,7 @@ export function taskActivityExtension(): Plugin.Function<void> {
         "taskCatalog",
         "canvasLocate",
         "canvasScope",
-        "canvasState",
-        "canvasGroupRuns"
+        "canvasState"
       ]
     }
   );

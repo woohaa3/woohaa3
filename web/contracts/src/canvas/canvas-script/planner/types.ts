@@ -26,6 +26,12 @@ export type PlannerSnapshot = {
   canvasId: string;
   revision: number;
   nodes: ReadonlyArray<Pick<Woohaa3CanvasSerializedNode, "id" | "type" | "position" | "width" | "height" | "parentId"> & { title?: string; retainWhenEmpty?: boolean }>;
+  /**
+   * 2D 组作用域的根组身份与原始 `nodeData.workflowGroup2d` 数据
+   * （change: 2D 组组作用域 agent）。计划编译据此把新建成员同步写进成员表；
+   * 普通画布为空，行为与既有 planner 完全一致。
+   */
+  groupNodeData?: Readonly<Record<string, unknown>>;
   edges: ReadonlyArray<{ id: string; source: string; target: string }>;
 };
 

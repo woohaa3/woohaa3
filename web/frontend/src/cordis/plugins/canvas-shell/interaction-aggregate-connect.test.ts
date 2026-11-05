@@ -185,30 +185,6 @@ describe("输出把手批量提交（design D3/D4）", () => {
   });
 });
 
-describe("group 成员展开（design D3）", () => {
-  it("选中 group 与普通节点：成员叶子参与批量连接", () => {
-    const canvasState = nodesCanvas([
-      { id: "g", type: "group", x: 0, y: 0, width: 500, height: 400 },
-      { id: "m1", x: 40, y: 40, width: 200, height: 120, parentId: "g" },
-      { id: "m2", x: 40, y: 220, width: 200, height: 120, parentId: "g" },
-      { id: "x", x: 0, y: 600, width: 200, height: 120 },
-      { id: "t", x: 700, y: 0, width: 200, height: 120 },
-    ]);
-    const { dom, controller } = setup(canvasState);
-    // group 背景 (g) 与 x：包围盒右侧把手。
-    select(dom, ["g", "x"]);
-    controller.flush();
-    // 选区包围盒：x 0..500, y 0..720 → 输出把手 (518, 360)。
-    dom.fire("pointerdown", { clientX: 518, clientY: 360 });
-    dom.fire("pointermove", { clientX: 800, clientY: 60 });
-    dom.fire("pointerup", { clientX: 800, clientY: 60 });
-    controller.flush();
-    const edges = submitted.filter((c) => c.type === "edge.add") as Array<Extract<CanvasCommand, { type: "edge.add" }>>;
-    expect(edges.map((c) => `${c.edge.source}>${c.edge.target}`).sort()).toEqual(["m1>t", "m2>t", "x>t"]);
-    controller.dispose();
-  });
-});
-
 describe("取消路径（design D6）", () => {
   it("Escape 取消：清预览、不提交", () => {
     const { dom, controller } = setup(baseCanvas());

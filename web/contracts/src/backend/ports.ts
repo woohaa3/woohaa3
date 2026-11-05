@@ -20,6 +20,27 @@ import type { TaskSubmitRequest, TaskSubmitResponse } from "../task/protocol.js"
 import type { MediaMetadata } from "../media/protocol.js";
 import type { MediaStorageScope } from "../media/storage.js";
 
+export type BackendWorldConversionPort = {
+  commit(input: import("../canvas/world-conversion.js").WorldConversionCommitInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<import("../canvas/world-conversion.js").WorldConversionCommitOutcome>;
+  prepare(input: import("../canvas/world-conversion.js").WorldConversionPrepareInput, options?: { signal?: AbortSignal }): Promise<import("../canvas/world-conversion.js").WorldConversionPrepareOutcome>;
+};
+
+/**
+ * Scene-area authority port (T06).
+ *
+ * Every write method runs through the real `CanvasRoom` serial queue; preparation
+ * only reads the canonical projection. `issueContext` returns the public
+ * `WorldToolContext` while the process-local write capability stays in the host.
+ */
+export type BackendWorldAuthoringPort = {
+  prepare(input: { canvasId: string; areaId: string }, options?: { signal?: AbortSignal }): Promise<import("../canvas/world-authoring.js").WorldAuthoringPrepareOutcome>;
+  issueContext(input: import("../canvas/world-authoring.js").WorldToolContextRequest, options?: { signal?: AbortSignal }): Promise<import("../canvas/world-authoring.js").WorldToolContextOutcome>;
+  revokeContext(input: import("../canvas/world-authoring.js").WorldToolContextRevokeInput): Promise<void>;
+  execute(input: import("../canvas/world-authoring.js").WorldAuthoringExecuteInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<import("../canvas/world-authoring.js").WorldAuthoringExecuteOutcome>;
+  undo(input: import("../canvas/world-authoring.js").WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<import("../canvas/world-authoring.js").WorldAuthoringHistoryOutcome>;
+  redo(input: import("../canvas/world-authoring.js").WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<import("../canvas/world-authoring.js").WorldAuthoringHistoryOutcome>;
+};
+
 /** Canvas -> Task 进程内契约（替代 CanvasTaskClient 的网络实现）。 */
 export type BackendTaskPort = {
   /** 按可信扩展及不可变配置版本裁剪的非画布任务端口。 */

@@ -36,11 +36,11 @@ mod tests {
         let _ = take_input();
         let mut pixels = vec![1, 2, 3, 4];
         queue_texture("image", 1, 1, &pixels, Some("asset"));
-        queue_film_set_texture("plane", 1, 1, &pixels);
+        queue_model_texture("plane", 1, 1, &pixels);
         pixels.fill(0);
         let input = take_input();
         assert_eq!(input.textures["image"].2, vec![1, 2, 3, 4]);
-        assert_eq!(input.film_set_textures["plane"].2, vec![1, 2, 3, 4]);
+        assert_eq!(input.model_textures["plane"].2, vec![1, 2, 3, 4]);
     }
 
     #[cfg(not(feature = "wasm"))]
@@ -76,10 +76,10 @@ mod tests {
         crate::set_model_media_texture_owned("plane", 1, 1, pixels).unwrap();
         assert!(crate::set_model_media_texture_owned("plane", 2, 2, vec![0; 4]).is_err());
         let input = take_input();
-        assert_eq!(input.film_set_textures["plane"].2.as_ptr(), allocation);
-        assert_eq!(input.film_set_textures["plane"].2, vec![1, 2, 3, 4]);
+        assert_eq!(input.model_textures["plane"].2.as_ptr(), allocation);
+        assert_eq!(input.model_textures["plane"].2, vec![1, 2, 3, 4]);
         assert!(input.textures.is_empty());
-        assert!(take_input().film_set_textures.is_empty());
+        assert!(take_input().model_textures.is_empty());
     }
 
     #[test]
@@ -232,12 +232,11 @@ mod tests {
         };
         let scene = Scene {
             nodes: vec![crate::protocol::GraphNode {
+                chrome: crate::protocol::NodeChrome::Card,
+                shared_world_instance: None,
+                world_camera: None,
                 model_preview: None,
-                composite_asset: None,
                 history_strip: None,
-                aggregate_run: None,
-                shot_preview: None,
-
                 id: "n".into(),
                 kind: "model".into(),
                 x: 0.0,
@@ -255,7 +254,6 @@ mod tests {
                 resizable: false,
                 ghost: false,
                 card_label: None,
-                group: None,
                 model: Some(reference),
             }],
             ..Scene::default()
@@ -280,11 +278,11 @@ mod tests {
         assert!(model_asset_registered(protected));
         queue_scene(Scene {
             nodes: vec![crate::protocol::GraphNode {
+                chrome: crate::protocol::NodeChrome::Card,
+                shared_world_instance: None,
+                world_camera: None,
                 model_preview: None,
-                composite_asset: None,
                 history_strip: None,
-                aggregate_run: None,
-                shot_preview: None,
                 id: "n".into(),
                 kind: "model".into(),
                 x: 0.0,
@@ -302,7 +300,6 @@ mod tests {
                 resizable: false,
                 ghost: false,
                 card_label: None,
-                group: None,
                 model: Some(crate::protocol::ModelReference {
                     scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
                     resource_key: protected.to_owned(),
@@ -340,21 +337,12 @@ mod tests {
             let signature = format!("first-{index}");
             let key = format!("v2:{signature}");
             queue_model_asset(descriptor(&key, &signature, 1.0));
-            let mut node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({
+            let node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({
                 "id": format!("object-{index}"), "type": "model",
                 "x": index as f32 * 260.0, "y": 0.0, "width": 248.0, "height": 232.0,
                 "model": { "resourceKey": key, "signature": signature }
             }))
             .unwrap();
-            // Object containers and ordinary model cards share the same immutable resource table.
-            if index >= 22 {
-                node.composite_asset = Some(
-                    serde_json::from_value(serde_json::json!({
-                        "x": 0.0, "y": 0.0, "width": 248.0, "height": 232.0
-                    }))
-                    .unwrap(),
-                );
-            }
             nodes.push(node);
         }
         let scene = Scene {
@@ -395,12 +383,11 @@ mod tests {
         // 排队一个引用 protected 的场景。
         queue_scene(Scene {
             nodes: vec![crate::protocol::GraphNode {
+                chrome: crate::protocol::NodeChrome::Card,
+                shared_world_instance: None,
+                world_camera: None,
                 model_preview: None,
-                composite_asset: None,
                 history_strip: None,
-                aggregate_run: None,
-                shot_preview: None,
-
                 id: "n".into(),
                 kind: "model".into(),
                 x: 0.0,
@@ -418,7 +405,6 @@ mod tests {
                 resizable: false,
                 ghost: false,
                 card_label: None,
-                group: None,
                 model: Some(crate::protocol::ModelReference {
                     scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
                     resource_key: protected.to_owned(),

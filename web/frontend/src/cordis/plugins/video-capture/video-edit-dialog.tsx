@@ -350,6 +350,7 @@ export function createVideoEditRenderer({ onConfirm, story }: { onConfirm: Video
       const wasPlaying = video ? !video.paused : false;
       const previousTime = video?.currentTime ?? 0;
       let seeking = false;
+      let confirmed = false;
       try {
         const previews = new Map<string, Blob>();
         const marked = sortVideoEditIntents(current).filter((intent) => intent.annotationShapes.length > 0);
@@ -375,7 +376,7 @@ export function createVideoEditRenderer({ onConfirm, story }: { onConfirm: Video
         }));
         const result = await onConfirm({ instanceId: instance.instanceId, intents: payloadIntents, previews });
         if (result.ok) {
-          requestClose();
+          confirmed = true;
           return;
         }
         setError(result.error);
@@ -389,6 +390,7 @@ export function createVideoEditRenderer({ onConfirm, story }: { onConfirm: Video
         }
         setLocalBusy(false);
         setBusy(false);
+        if (confirmed) requestClose();
       }
     }, [busy, duration, onConfirm, ready, requestClose, setBusy]);
 

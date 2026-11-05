@@ -1,4 +1,3 @@
-import { groupScopedClient } from "../../ports/group-scoped-client.js";
 /**
  * 核心层 · mcp：内置 MCP 服务与共享工具授权表。
  *
@@ -7,14 +6,17 @@ import { groupScopedClient } from "../../ports/group-scoped-client.js";
  */
 import { createMcpService } from "@woohaa3/mcp-service";
 import type { SkillStepClient } from "@woohaa3/mcp-service";
-import { canvasGroupEpoch, currentCanvasGroupScope, withCanvasGroupScope } from "@woohaa3/canvas-service";
 import type { HostPlugin } from "../context.js";
 import { READINESS_ORDER, ROUTE_ORDER } from "../order.js";
 import { catalogToolsForGrant, createToolGrantRegistry } from "../../ports/authoring-adapters.js";
 import { createExtensionMcpBridge } from "../../ports/extension-mcp.js";
-import { generatedImageCodexHome, generatedImagePaths } from "@woohaa3/contracts";
 import { agentCanvasServiceToClient, modelMcpServiceToClient } from "../../ports/mcp-adapters.js";
+import { groupScopedClient } from "../../ports/group-scoped-client.js";
+import { withMcpPrincipal } from "../../ports/mcp-principal.js";
+import { devPrincipalIdFromEnv } from "../base/access.js";
+import { decodeWorkflowGroupData, generatedImageCodexHome, generatedImagePaths } from "@woohaa3/contracts";
 import { importCodexGeneratedImage, resolveCodexHome } from "../../ports/import-generated-image.js";
+import { canvasGroupEpoch, currentCanvasGroupScope, withCanvasGroupScope } from "@woohaa3/canvas-service";
 
 export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> = {
   name: "mcp",
@@ -31,20 +33,18 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
      * Skill 步骤续接的 MCP 适配
      * （change: 2026-10-28-add-agent-skill-media-regeneration，任务 4.1–4.4）。
      *
-     * owner 与组作用域只来自受信任的请求上下文（`withCanvasGroupScope` / 已认证 principal），
-     * 不接受工具参数自报；等待与查询不提交生成。
+     * owner 只来自受信任的请求上下文（已认证 principal），不接受工具参数自报；
+     * 等待与查询不提交生成。
      */
     const skillClient: SkillStepClient = {
       async wait(input) {
         const media = application().skillMedia();
         if (!media) return { ok: false, code: "unavailable", message: "Skill 续接未启用" };
-        const scope = currentCanvasGroupScope();
-        const owner = scope?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
+        const owner = env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
         if (!owner) return { ok: false, code: "unauthorized", message: "缺少已认证 principal" };
         const result = await media.wait({
           owner,
-          canvasId: scope?.canvasId ?? input.canvasId,
-          ...(scope ? { rootGroupId: scope.rootGroupId, scopeEpoch: canvasGroupEpoch(scope.canvasId, scope.rootGroupId) } : {}),
+          canvasId: input.canvasId,
           skillRunId: input.skillRunId,
           stepId: input.stepId,
           waitMs: input.waitMs,
@@ -55,13 +55,11 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       async latestOutput(input) {
         const media = application().skillMedia();
         if (!media) return { ok: false, code: "unavailable", message: "Skill 续接未启用" };
-        const scope = currentCanvasGroupScope();
-        const owner = scope?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
+        const owner = env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
         if (!owner) return { ok: false, code: "unauthorized", message: "缺少已认证 principal" };
         const result = await media.latestOutput({
           owner,
-          canvasId: scope?.canvasId ?? input.canvasId,
-          ...(scope ? { rootGroupId: scope.rootGroupId, scopeEpoch: canvasGroupEpoch(scope.canvasId, scope.rootGroupId) } : {}),
+          canvasId: input.canvasId,
           skillRunId: input.skillRunId,
           stepId: input.stepId,
           ...(input.allowFallback !== undefined ? { allowFallback: input.allowFallback } : {})
@@ -71,13 +69,11 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       async snapshot(input) {
         const media = application().skillMedia();
         if (!media) return { ok: false, code: "unavailable", message: "Skill 续接未启用" };
-        const scope = currentCanvasGroupScope();
-        const owner = scope?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
+        const owner = env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
         if (!owner) return { ok: false, code: "unauthorized", message: "缺少已认证 principal" };
         const result = await media.snapshot({
           owner,
-          canvasId: scope?.canvasId ?? input.canvasId,
-          ...(scope ? { rootGroupId: scope.rootGroupId, scopeEpoch: canvasGroupEpoch(scope.canvasId, scope.rootGroupId) } : {}),
+          canvasId: input.canvasId,
           skillRunId: input.skillRunId,
           stepId: input.stepId
         });
@@ -86,13 +82,11 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       async events(input) {
         const media = application().skillMedia();
         if (!media) return { ok: false, code: "unavailable", message: "Skill 续接未启用" };
-        const scope = currentCanvasGroupScope();
-        const owner = scope?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
+        const owner = env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
         if (!owner) return { ok: false, code: "unauthorized", message: "缺少已认证 principal" };
         const result = await media.events({
           owner,
-          canvasId: scope?.canvasId ?? input.canvasId,
-          ...(scope ? { rootGroupId: scope.rootGroupId, scopeEpoch: canvasGroupEpoch(scope.canvasId, scope.rootGroupId) } : {}),
+          canvasId: input.canvasId,
           skillRunId: input.skillRunId,
           stepId: input.stepId,
           ...(input.after !== undefined ? { after: input.after } : {}),
@@ -101,10 +95,28 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
         return result.ok ? { ok: true, value: result.page } : { ok: false, code: result.code, message: result.message };
       }
     };
+    const assistantWorld: import("@woohaa3/mcp-service").AssistantWorldToolClient = {
+      read: (input) => {
+        const world = ctx.canvas.assistantWorld;
+        if (!world) return { ok: false, code: "capability-unsupported", message: "世界助手权威未装配" };
+        return world.read(input);
+      },
+      write: async (input) => {
+        const world = ctx.canvas.assistantWorld;
+        if (!world) return { ok: false, code: "capability-unsupported", message: "世界助手权威未装配" };
+        return world.write(input);
+      },
+      complete: async (input) => {
+        const world = ctx.canvas.assistantWorld;
+        if (!world) return { ok: false, code: "capability-unsupported", message: "世界助手权威未装配" };
+        return world.complete(input);
+      }
+    };
     const mcp = createMcpService({
       env,
       skillClient,
       skillAvailability: { available: true },
+      assistantWorld,
       extensionTools: createExtensionMcpBridge({
         definitions: () => ctx.get("application")?.definitions ?? [],
         application,
@@ -112,28 +124,43 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
         developmentPrincipal: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL,
         loopbackDevelopment: ["1", "true"].includes(env.WOOHAA3_AGENT_LOOPBACK_MODE ?? "")
       }),
-      canvasClient: groupScopedClient(modelMcpServiceToClient(services.modelMcp, {
-        ...(services.createFilmSetNode ? { createFilmSetNode: services.createFilmSetNode } : {}),
-        ...(services.importModelSnapshot ? { importModelSnapshot: services.importModelSnapshot } : {}),
-        ...(services.commitAnimation ? { commitAnimation: services.commitAnimation } : {}),
-        ...(services.addFilmSetMedia ? { addFilmSetMedia: services.addFilmSetMedia } : {}),
-        ...(services.exportFilmSetClip ? { exportFilmSetClip: services.exportFilmSetClip } : {}),
-        ...(services.getFilmSetExport ? { getFilmSetExport: services.getFilmSetExport } : {}),
-        ...(services.mutateFilmSetItem ? { mutateFilmSetItem: services.mutateFilmSetItem } : {})
-      }), ctx.canvas),
-      // 只共享显式配置的 Canvas 身份；缺省/空值不得凭空造身份。
+      canvasClient: groupScopedClient(modelMcpServiceToClient(services.modelMcp), ctx.canvas),
+      // 每请求可信主体由网关按 bearer grant 注入（见下方 route）；此处的静态值只作缺省回退，
+      // 与本地单实例 owner（`dev-admin`）保持一致，绝不凭空捏造多用户身份。
       agentClient: groupScopedClient({
-        ...agentCanvasServiceToClient(services.agent, { principalId: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "" }),
+        ...agentCanvasServiceToClient(services.agent, { principalId: devPrincipalIdFromEnv(env) }),
+        // Codex 生图导入：目标只来自当前受信的 2D 组作用域，不接受工具参数自报。
         importGeneratedImage: async (input) => {
           const scope = currentCanvasGroupScope();
           const media = ctx.get("media");
-          if (!scope || !media) return { ok: false as const, code: "unavailable", message: "生图导入需要组授权与媒体存储" };
+          if (!scope || !media) {
+            return { ok: false as const, code: "group-scope-required", message: "生图导入需要当前 2D 组授权与媒体存储" };
+          }
+          if (!scope.valid()) {
+            return { ok: false as const, code: "group-scope-revoked", message: "2D 组创作授权已失效" };
+          }
+          if (scope.authorize && !(await scope.authorize("write"))) {
+            return { ok: false as const, code: "forbidden", message: "画布写入权限已撤销" };
+          }
+          if (input.canvasId !== undefined && input.canvasId !== scope.canvasId) {
+            return { ok: false as const, code: "group-scope-forbidden", message: "目标画布不在当前 2D 组作用域" };
+          }
           const room = await ctx.canvas.sync?.registry.resolve(scope.canvasId);
+          const snapshot = room?.exportCanvas();
+          if (!snapshot?.ok) {
+            return { ok: false as const, code: "canvas-unavailable", message: "画布当前不可用" };
+          }
+          const groupNode = snapshot.canvas.document.nodes.find(node => node.id === scope.rootGroupId && node.type === "workflow-group-2d");
+          const groupNodeData = snapshot.canvas.nodeData[scope.rootGroupId] as Record<string, unknown> | undefined;
+          const workflowGroup = groupNodeData ? decodeWorkflowGroupData(groupNodeData.workflowGroup2d) : null;
+          if (!groupNode || !groupNodeData || !workflowGroup?.ok) {
+            return { ok: false as const, code: "group-target-missing", message: "2D 组已删除或成员表无效" };
+          }
           const result = await importCodexGeneratedImage({
             canvasId: scope.canvasId,
             requestId: input.requestId,
             index: input.index ?? 0,
-            rootGroupId: scope.rootGroupId,
+            group: { nodeId: scope.rootGroupId, nodeData: groupNodeData, workflowGroup: workflowGroup.value },
             codexHome: generatedImageCodexHome(input.requestId) ?? resolveCodexHome(env),
             paths: generatedImagePaths(input.requestId),
             importBytes: (bytes) => media.port().importBytes(bytes),
@@ -155,32 +182,39 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
                 : { ok: false as const, code: outcome.code, message: outcome.message };
             }
           });
-          return result.ok ? { ok: true as const, duplicate: result.duplicate, receipt: result.receipt } : result;
+          return result.ok
+            ? { ok: true as const, duplicate: result.duplicate, receipt: result.receipt }
+            : result;
         }
       }, ctx.canvas),
-      toolGrant: { allowedTools: token => catalogToolsForGrant(toolGrants.verify(token)), authorize: (input) => toolGrants.authorize(input) },
+      toolGrant: {
+        allowedTools: token => catalogToolsForGrant(toolGrants.verify(token)),
+        resolve: token => toolGrants.verify(token),
+        authorize: (input) => toolGrants.authorize(input)
+      },
       logger: ctx.log.scope("mcp")
     });
     ctx.effect(() => () => mcp.close());
     ctx.provide("toolGrants", toolGrants);
     ctx.provide("mcp", mcp);
+    // 2D 组作用域：grant 命中组绑定时，把本轮 MCP 调用放进受信作用域；成员/写膜由
+    // canvas-service 的 group-scope 与 command-execution 校验，模型参数无法伪造。
     ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.mcp, (req, res) => {
       const token = req.headers.authorization?.replace(/^Bearer\s+/i, "") ?? "";
       const grant = toolGrants.verify(token);
-      if (!grant?.groupScope) return mcp.handle(req, res);
-      const scope = grant.groupScope;
-      const owner = toolGrants.subject(token);
-      if (!owner) return mcp.handle(req, res);
-      return withCanvasGroupScope({ ...scope, owner,
-        ownsRun: (nodeId, runId) => {
-          const record = ctx.get("application")?.service.agentConversations().queryTurn({ owner, requestId: grant.workId ?? "" });
-          const receipt = record?.ok ? record.turn.receipt as { kind?: string; actions?: { nodeId?: string; runId?: string }[] } | undefined : undefined;
-          return receipt?.kind === "canvas-group" && receipt.actions?.some(action => action.nodeId === nodeId && action.runId === runId) === true;
-        },
-        authorize: async permission => (await services.agent?.authorizeCanvas({ principalId: owner, canvasId: scope.canvasId, permission }))?.ok === true,
-        onAction: action => ctx.get("application")?.service.agentConversations().recordGroupAction({ owner, requestId: grant.workId ?? "", action }),
-        valid: () => Boolean(toolGrants.verify(token)) && canvasGroupEpoch(scope.canvasId, scope.rootGroupId) === scope.scopeEpoch
-      }, () => mcp.handle(req, res));
+      const scope = grant?.groupScope;
+      // 已验证 grant 的主体是本轮 MCP 调用的可信 principal（模型不可自报）；组作用域另加范围膜。
+      const owner = token ? toolGrants.subject(token) : undefined;
+      const handle = () => mcp.handle(req, res);
+      const scoped = scope && owner
+        ? () => withCanvasGroupScope({
+            ...scope,
+            owner,
+            valid: () => Boolean(toolGrants.verify(token)) && canvasGroupEpoch(scope.canvasId, scope.rootGroupId) === scope.scopeEpoch,
+            authorize: async (permission) => (await services.agent?.authorizeCanvas({ principalId: owner, canvasId: scope.canvasId, permission }))?.ok === true
+          }, handle)
+        : handle;
+      return owner ? withMcpPrincipal(owner, scoped) : scoped();
     }));
     ctx.effect(() => ctx.gateway.readiness(READINESS_ORDER.mcp, () => mcp.readiness()));
   }

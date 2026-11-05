@@ -19,8 +19,11 @@ import type { CanvasNodeData } from "./types";
 import type { Woohaa3CanvasJsonObject } from "./core";
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeModelCameras } from "../model-cameras.js";
-import { decodeFilmSetNodeData, decodeModel3DNodeData } from "../canvas-node-model.js";
-import { filmSetNodeDataFields, model3DNodeDataFields } from "../animation-snapshot.js";
+import { decodeModel3DNodeData } from "../canvas-node-model.js";
+import { model3DNodeDataFields } from "../animation-snapshot.js";
+import { decodeWorldInstanceData } from "../shared-world-codec.js";
+import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
+import { decodeWorldCamera } from "../world-camera-codec.js";
 
 /** 首版允许运行时持久化的 nodeData 顶层字段。 */
 export const RUNTIME_NODE_CONFIG_FIELDS = [
@@ -112,6 +115,13 @@ export function sanitizeRuntimeNodeConfigPatch(input: unknown, context?: { conte
 
   const value: Woohaa3CanvasJsonObject = {};
 
+  for (const [key, decode] of Object.entries({ sharedWorldInstance: decodeWorldInstanceData, workflowGroup2d: decodeWorkflowGroupData, sceneArea: decodeSceneAreaData, worldCamera: decodeWorldCamera })) {
+    if (!(key in input)) continue;
+    const result = decode(input[key]);
+    if (!result.ok) return { ok: false, reason: `Invalid ${key}: ${result.code}` };
+    value[key] = result.value as unknown as Woohaa3CanvasJsonObject[string];
+  }
+
   for (const field of RUNTIME_NODE_CONFIG_FIELDS) {
     if (!(field in input)) continue;
     const raw = input[field];
@@ -174,6 +184,9 @@ function sanitizeClaimedContent(data: Record<string, unknown>, content: ContentC
 export function sanitizeNodeDataForClipboard(input: unknown, context?: { content?: ContentContributionResolver }): CanvasNodeData {
   observeContentResolver(context?.content);
   const original = isRecord(input) ? input : {};
+  for (const [key, decode] of Object.entries({ sharedWorldInstance: decodeWorldInstanceData, workflowGroup2d: decodeWorkflowGroupData, sceneArea: decodeSceneAreaData, worldCamera: decodeWorldCamera })) {
+    if (key in original && !decode(original[key]).ok) throw new Error(`Invalid ${key}`);
+  }
   const owned = context?.content && Object.prototype.hasOwnProperty.call(original, "extensionId");
   const claimed = !owned && context?.content ? sanitizeClaimedContent(original, context.content) : null;
   const source = owned ? sanitizeContentNodeData(original as CanvasNodeData, context!.content!) : claimed ?? original;
@@ -200,21 +213,12 @@ export function sanitizeNodeDataForClipboard(input: unknown, context?: { content
       }
       continue;
     }
-    // 自包含 3D 节点：复制时携带完整自身定义（模型 + 运动 + 镜头 + 时间线 + 片场内容），
-    // 不依赖来源节点（change: 2026-10-05-bind-model-animation-to-shots）。
-    if (!owned && (key === "modelContentVersion" || key === "motionBasedOnModelVersion" || key === "initialCamera" || key === "timeline" || key === "origin" || key === "filmSetContent")) {
-      const animation = decodeFilmSetNodeData(source);
-      if (animation.ok) {
-        const fields = filmSetNodeDataFields(animation.value);
-        for (const [field, fieldValue] of Object.entries(fields)) {
+    // 自包含 3D 节点：复制时携带完整自身定义，不依赖来源节点。
+    if (!owned && key === "modelContentVersion") {
+      const model = decodeModel3DNodeData(source);
+      if (model.ok) {
+        for (const [field, fieldValue] of Object.entries(model3DNodeDataFields(model.value))) {
           if (isFiniteJsonValue(fieldValue)) value[field] = fieldValue as Woohaa3CanvasJsonObject[string];
-        }
-      } else {
-        const model = decodeModel3DNodeData(source);
-        if (model.ok) {
-          for (const [field, fieldValue] of Object.entries(model3DNodeDataFields(model.value))) {
-            if (isFiniteJsonValue(fieldValue)) value[field] = fieldValue as Woohaa3CanvasJsonObject[string];
-          }
         }
       }
       continue;

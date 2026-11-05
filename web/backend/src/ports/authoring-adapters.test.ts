@@ -16,14 +16,13 @@ it("MCP 目录在有 grant 时按 tools 收窄，无 grant 才保持全量发现
   expect(catalogToolsForGrant({ tools: [] })).toEqual([]);
 });
 
-it("does not revoke another owner's group grant with a colliding request identity", () => {
+it("revokes grants by work identity without touching another owner's grant", () => {
   const registry = createToolGrantRegistry();
-  const grant = { token: "a", workId: "same-request", canvasIds: ["canvas"], nodeIds: [], tools: ["get_canvas_graph"], groupScope: { canvasId: "canvas", rootGroupId: "root", scopeEpoch: 0 } };
+  const grant = { token: "a", workId: "same-request", canvasIds: ["canvas"], nodeIds: [], tools: ["get_canvas_graph"] };
   registry.issue(grant, "user-a"); registry.issue({ ...grant, token: "b" }, "user-b");
-  registry.revoke("same-request");
-  expect(registry.verify("a")).not.toBeNull();
   registry.revoke("same-request", "user-a");
-  expect(registry.verify("a")).toBeNull(); expect(registry.verify("b")).not.toBeNull();
+  expect(registry.verify("a")).toBeNull();
+  expect(registry.verify("b")).not.toBeNull();
 });
 
 function fakeCanvas(options: { modelMcp?: unknown } = {}): CanvasService {
@@ -170,15 +169,30 @@ describe("进程内 authoring 适配器", () => {
     for (let index = 0; index < 60; index += 1) expect(registry.authorize(call)).toEqual({ ok: true });
   });
 
-  it("camera 模式已停用，不再签发新的目标授权", async () => {
+  it("已下线的 film-set 模式不再签发目标授权", async () => {
     await expect(createInProcessAuthoringServices({ canvas: fakeCanvas() }).tools.issue({
       delegation: DELEGATION,
-      workId: "camera-deprecated",
+      workId: "deprecated-film-set",
       canvasId: "cv",
       nodeId: "n",
-      mode: "camera",
-      tools: ["get_film_set_clips"]
-    })).rejects.toThrow("camera-mode-deprecated");
+      // 旧会话里仍可能出现的已下线模式（协议已收窄，这里模拟历史输入）。
+      mode: "film-set" as never,
+      tools: ["get_canvas_graph"]
+    })).rejects.toThrow("unsupported-target-mode");
   });
 
+});
+
+ it("issues a camera-only grant and rejects wider tool requests before acquiring a lease", async () => {
+  const scope = { kind: "world-camera" as const, cameraId: "camera-a" };
+  const issue = vi.fn(async () => ({ ok: true, context: { contextId: "context", scope: { scope, scopeVersion: "scope-v1" } },
+    completionId: "completion", run: { runId: "run", epoch: 0, executionId: "run" } }));
+  const services = createInProcessAuthoringServices({ canvas: { assistantWorld: { issue } } as unknown as CanvasService });
+  const request = { delegation: DELEGATION, workId: "run", canvasId: "canvas", nodeId: "camera-card", mode: "world" as const, worldScope: scope };
+  await expect(services.tools.issue({ ...request, tools: ["submit_model_script"] })).rejects.toThrow("工具不属于本轮世界范围");
+  expect(issue).not.toHaveBeenCalled();
+  const grant = await services.tools.issue(request);
+  expect(grant.tools).toEqual(["get_world_context", "set_world_camera", "complete_world_camera"]);
+  expect(grant.world?.scope.scope).toEqual(scope);
+  expect(issue).toHaveBeenCalledWith(expect.objectContaining({ scope }));
 });

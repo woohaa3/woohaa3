@@ -54,7 +54,24 @@ export type ParameterJournalEntry = {
   state: JournalEntryState;
 };
 
-export type JournalEntry = CanvasJournalEntry | ParameterJournalEntry;
+/**
+ * Entry whose forward/inverse edits are owned by another authoritative authority
+ * (scene-area receipts, camera settings). The journal only stores verified
+ * callbacks; a rejected, cancelled or version-conflicted callback leaves the
+ * cursor in place, so an uncertain receipt never advances global history.
+ */
+export type ExternalJournalEntry = {
+  kind: "external";
+  id: string;
+  label: string;
+  undo: () => Promise<ExternalJournalOutcome>;
+  redo: () => Promise<ExternalJournalOutcome>;
+  state: JournalEntryState;
+};
+
+export type ExternalJournalOutcome = { ok: true } | { ok: false; reason: string };
+
+export type JournalEntry = CanvasJournalEntry | ParameterJournalEntry | ExternalJournalEntry;
 
 /** 单次载荷上限 16 MiB（design D5.1）。 */
 export const EDIT_JOURNAL_MAX_BYTES = 16 * 1024 * 1024;
@@ -94,9 +111,65 @@ export class EditJournal {
   private undoCursor = -1;
   private currentBytes = 0;
   private busy = false;
+  private generation = 0;
 
   constructor(deps: EditJournalDependencies) {
     this.deps = deps;
+  }
+
+  async adoptExternal(id: string, run: () => Promise<{ ok: true; label: string; forward: JournalPlannedEdit; inverse: JournalPlannedEdit; allowNew?: boolean } | { ok: false; reason: string }>): Promise<{ ok: true; entry: CanvasJournalEntry } | { ok: false; reason: string }> {
+    if (this.busy) return { ok: false, reason: "正在结算上一次操作，请稍候" };
+    if (!this.deps.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };
+    if (id.length > 256) return { ok: false, reason: "操作身份过长" };
+    const generation = this.generation;
+    this.busy = true;
+    try {
+      const result = await run();
+      if (generation !== this.generation) return { ok: false, reason: "页面已切换" };
+      if (!result.ok) return result;
+      if (!this.deps.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };
+      const existing = this.entries.find((entry): entry is CanvasJournalEntry => entry.kind === "canvas" && entry.id === id);
+      if (existing) return { ok: true, entry: existing };
+      if (result.allowNew === false) return { ok: false, reason: "该操作已不在撤销历史中" };
+      if (estimateBytes(result.forward) + estimateBytes(result.inverse) > EDIT_JOURNAL_MAX_BYTES) return { ok: false, reason: "操作内容过多，请分批处理" };
+      const entry: CanvasJournalEntry = { kind: "canvas", id, label: result.label, forward: result.forward, inverse: result.inverse, state: "committed" };
+      this.pushCommitted(entry);
+      return { ok: true, entry };
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : "操作失败" };
+    } finally {
+      if (generation === this.generation) this.busy = false;
+    }
+  }
+
+  /**
+   * Adopt an already-verified authoritative action into the same undo timeline.
+   *
+   * The caller must have checked the authoritative receipt/canonical result first.
+   * Nothing is submitted here; the stored callbacks re-run the authority's own
+   * undo/redo operation. Duplicate ids are idempotent, matching `adoptExternal`.
+   */
+  recordExternal(input: {
+    id: string;
+    label: string;
+    undo: () => Promise<ExternalJournalOutcome>;
+    redo: () => Promise<ExternalJournalOutcome>;
+  }): { ok: true; entry: ExternalJournalEntry } | { ok: false; reason: string } {
+    if (this.busy) return { ok: false, reason: "正在结算上一次操作，请稍候" };
+    if (!this.deps.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };
+    if (!input.id || input.id.length > 256) return { ok: false, reason: "操作身份无效" };
+    const existing = this.entries.find((entry): entry is ExternalJournalEntry => entry.kind === "external" && entry.id === input.id);
+    if (existing) return { ok: true, entry: existing };
+    const entry: ExternalJournalEntry = {
+      kind: "external",
+      id: input.id,
+      label: input.label,
+      undo: input.undo,
+      redo: input.redo,
+      state: "committed"
+    };
+    this.pushCommitted(entry);
+    return { ok: true, entry };
   }
 
   /**
@@ -166,6 +239,7 @@ export class EditJournal {
     before: Record<string, unknown>;
     after: Record<string, unknown>;
   }): void {
+    if (this.busy) return;
     const top = this.entries[this.undoCursor];
     if (
       top?.kind === "parameter"
@@ -235,7 +309,8 @@ export class EditJournal {
     const index = this.entries.findIndex((entry) => entry.id === entryId && entry.state === "conflict");
     if (index < 0) return false;
     // 被跳过的记录从栈中移除；若位于 redo 区则一并裁剪。
-    this.entries.splice(index, 1);
+    const [removed] = this.entries.splice(index, 1);
+    if (removed) this.currentBytes = this.entries.reduce((sum, entry) => sum + estimateBytes(entry), 0);
     if (index <= this.undoCursor) this.undoCursor -= 1;
     return true;
   }
@@ -264,6 +339,7 @@ export class EditJournal {
 
   /** 清空（切画布 / 刷新 / page dispose）。 */
   clear(): void {
+    this.generation += 1;
     this.entries.length = 0;
     this.undoCursor = -1;
     this.currentBytes = 0;
@@ -314,7 +390,9 @@ export type JournalHandlers = {
 
 function estimateBytes(value: unknown): number {
   try {
-    return new TextEncoder().encode(JSON.stringify(value)).length;
+    const encoded = JSON.stringify(value);
+    // External entries store callbacks; they do not contribute a serializable payload.
+    return encoded === undefined ? 0 : new TextEncoder().encode(encoded).length;
   } catch {
     return 0;
   }

@@ -8,10 +8,10 @@ use std::collections::HashMap;
 
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
-use crate::app::{CurrentScene, FrameFlags, ModelAssetTable, NodeIndex, SurfaceState};
+use crate::app::{CurrentScene, FrameFlags, NodeIndex, SurfaceState};
 use crate::canvas_ecs::components::{
     CanvasDepth, CanvasLabelRole, CanvasLayout, CanvasNodeId, CanvasSelection, CardPresentation,
-    CardVisual, ContainerVisual, EdgeVisual, FilmSetPresentation, GroupPresentation,
+    CardVisual, EdgeVisual,
 };
 use crate::canvas_ecs::{CanvasBatchWriter, SelectionOutlineBatch};
 use crate::protocol::GraphNode;
@@ -19,15 +19,12 @@ use crate::theme::ThemeResource;
 
 use super::geometry::Geometry;
 use super::labels::{LabelRequests, LabelStyle};
-use super::{
-    CanvasOverlayCache, CardBlockCache, CardDecorationCache, ContainerBlockCache, EdgeBlockCache,
-};
+use super::{CanvasOverlayCache, CardBlockCache, CardDecorationCache, EdgeBlockCache};
 
 /// 静态 2D 场景只在 accepted scene/视口/主题变化时重建。
 pub(crate) fn canvas_render_requested(
     flags: Res<FrameFlags>,
     card_visuals: Query<(), Changed<CardVisual>>,
-    container_visuals: Query<(), Changed<ContainerVisual>>,
     edge_visuals: Query<(), Changed<EdgeVisual>>,
     theme: Res<ThemeResource>,
     surface: Res<SurfaceState>,
@@ -37,7 +34,6 @@ pub(crate) fn canvas_render_requested(
         || flags.surface_changed
         || flags.theme_changed
         || !card_visuals.is_empty()
-        || !container_visuals.is_empty()
         || !edge_visuals.is_empty()
         || theme.is_changed()
         || surface.is_changed()
@@ -46,6 +42,7 @@ pub(crate) fn canvas_render_requested(
 /// 一个按文档顺序投影的节点：实体 + 完整绘制 DTO。
 struct ProjectedNode {
     entity: Entity,
+    render: usize,
     node: GraphNode,
 }
 
@@ -57,17 +54,21 @@ fn projected_nodes(
     index: &NodeIndex,
     nodes: &Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
 ) -> Vec<ProjectedNode> {
-    let mut projected: Vec<(usize, Entity, GraphNode)> = nodes
+    let mut projected: Vec<(usize, Entity, usize, GraphNode)> = nodes
         .iter()
         .filter_map(|(entity, id, depth)| {
             crate::canvas_ecs::node_for_draw(scene, index, &id.0)
-                .map(|node| (depth.index, entity, node.into_owned()))
+                .map(|node| (depth.index, entity, depth.render, node.into_owned()))
         })
         .collect();
-    projected.sort_by_key(|(index, _, _)| *index);
+    projected.sort_by_key(|(index, _, _, _)| *index);
     projected
         .into_iter()
-        .map(|(_, entity, node)| ProjectedNode { entity, node })
+        .map(|(_, entity, render, node)| ProjectedNode {
+            entity,
+            render,
+            node,
+        })
         .collect()
 }
 
@@ -83,45 +84,11 @@ pub(crate) fn produce_card_geometry(
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
     mut flags: ResMut<FrameFlags>,
-    projection: Res<crate::canvas_ecs::CanvasProjectionState>,
     nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth, &CardPresentation)>,
 ) {
-    let full = !visuals.initialized
-        || flags.scene_received
-        || flags.positions_received
-        || flags.theme_changed
-        || theme.is_changed()
-        || (scene.is_changed() && flags.resource_nodes.is_empty());
-    if !full && flags.resource_nodes.is_empty() {
-        return;
-    }
-    let dirty: std::collections::HashSet<usize> = flags
-        .resource_nodes
-        .iter()
-        .map(|slot| slot / super::card_cache::BLOCK_SIZE)
-        .collect();
-    let candidates: Vec<_> = if full {
-        nodes.iter().collect()
-    } else {
-        // Resource deltas affect fixed document slots. Read only the affected blocks.
-        dirty
-            .iter()
-            .flat_map(|block| {
-                let start = block * super::card_cache::BLOCK_SIZE;
-                scene
-                    .0
-                    .nodes
-                    .iter()
-                    .skip(start)
-                    .take(super::card_cache::BLOCK_SIZE)
-            })
-            .filter_map(|node| projection.entity(&node.id))
-            .filter_map(|entity| nodes.get(entity).ok())
-            .collect()
-    };
     let mut cards: Vec<(usize, Entity, usize, std::borrow::Cow<'_, GraphNode>)> =
-        Vec::with_capacity(candidates.len());
-    for (entity, id, depth, _) in candidates {
+        Vec::with_capacity(nodes.iter().len());
+    for (entity, id, depth, _) in &nodes {
         let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
             continue;
         };
@@ -141,7 +108,6 @@ pub(crate) fn produce_card_geometry(
         &mut requests,
         &cards,
         scene.0.nodes.len(),
-        (!full).then_some(&dirty),
         &scene.0,
         &theme,
         &materials,
@@ -159,27 +125,23 @@ pub(crate) fn produce_card_hover(
     materials: Res<super::CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut flags: ResMut<FrameFlags>,
-    projection: Res<crate::canvas_ecs::CanvasProjectionState>,
     nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth, &CardPresentation)>,
 ) {
-    let projected: Vec<_> = scene
-        .0
-        .hover
-        .as_ref()
-        .and_then(|hover| hover.node_id.as_deref())
-        .and_then(|id| projection.entity(id))
-        .and_then(|entity| nodes.get(entity).ok())
-        .and_then(|(_, id, depth, _)| {
-            crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0).map(|node| {
-                super::decoration_cache::HoverInput {
-                    index: depth.index,
-                    render: depth.render,
-                    node,
-                }
-            })
-        })
-        .into_iter()
-        .collect();
+    let mut projected = Vec::with_capacity(nodes.iter().len());
+    for (_, id, depth, _) in &nodes {
+        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
+            continue;
+        };
+        projected.push((
+            depth.index,
+            super::decoration_cache::HoverInput {
+                index: depth.index,
+                node,
+            },
+        ));
+    }
+    projected.sort_by_key(|(index, _)| *index);
+    let projected: Vec<_> = projected.into_iter().map(|(_, input)| input).collect();
     flags.card_decorations_rebuilt = super::decoration_cache::sync(
         &mut commands,
         &mut meshes,
@@ -189,56 +151,6 @@ pub(crate) fn produce_card_hover(
         &projected,
         &materials,
         scene.0.nodes.len(),
-    );
-}
-
-/// group 与片场容器几何。
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn produce_container_geometry(
-    mut commands: Commands,
-    scene: Res<CurrentScene>,
-    index: Res<NodeIndex>,
-    theme: Res<ThemeResource>,
-    mut visuals: ResMut<ContainerBlockCache>,
-    materials: Res<super::CanvasMaterials>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut requests: ResMut<LabelRequests>,
-    mut flags: ResMut<FrameFlags>,
-    nodes: Query<
-        (Entity, &CanvasNodeId, &CanvasDepth),
-        Or<(With<GroupPresentation>, With<FilmSetPresentation>)>,
-    >,
-) {
-    let mut containers = Vec::new();
-    for (entity, id, depth) in &nodes {
-        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
-            continue;
-        };
-        if node.group.is_none() && node.composite_asset.is_none() {
-            continue;
-        }
-        containers.push((
-            depth.index,
-            super::container_cache::ContainerInput {
-                index: depth.index,
-                render: depth.render,
-                entity,
-                node,
-            },
-        ));
-    }
-    containers.sort_by_key(|(index, _)| *index);
-    let containers: Vec<_> = containers.into_iter().map(|(_, input)| input).collect();
-    flags.container_blocks_rebuilt = super::container_cache::sync(
-        &mut commands,
-        &mut meshes,
-        &mut visuals,
-        &mut requests,
-        &containers,
-        scene.0.nodes.len(),
-        &scene.0,
-        &theme,
-        &materials,
     );
 }
 
@@ -301,68 +213,11 @@ pub(crate) fn produce_card_selection(
         let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
             continue;
         };
-        if node.group.is_some() || node.composite_asset.is_some() {
-            continue;
-        }
         super::cards::draw_selection_outline(writer, &theme, &node, depth.render);
     }
 }
 
-/// Group 持久选中描边 producer。
-pub(crate) fn produce_group_selection(
-    scene: Res<CurrentScene>,
-    index: Res<NodeIndex>,
-    theme: Res<ThemeResource>,
-    mut batch: ResMut<SelectionOutlineBatch>,
-    nodes: Query<(
-        &CanvasNodeId,
-        &CanvasDepth,
-        &CanvasSelection,
-        &GroupPresentation,
-    )>,
-) {
-    let writer = batch.writer();
-    for (id, depth, selection, _) in &nodes {
-        if !selection.selected {
-            continue;
-        }
-        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
-            continue;
-        };
-        super::group::draw_group_selection(writer, &theme, &node, depth.z);
-    }
-}
-
-/// FilmSet 持久选中描边 producer（面板范围框与纯模型范围框共用同一批次）。
-pub(crate) fn produce_film_set_selection(
-    scene: Res<CurrentScene>,
-    index: Res<NodeIndex>,
-    theme: Res<ThemeResource>,
-    mut batch: ResMut<SelectionOutlineBatch>,
-    nodes: Query<(
-        &CanvasNodeId,
-        &CanvasDepth,
-        &CanvasSelection,
-        &FilmSetPresentation,
-    )>,
-) {
-    let writer = batch.writer();
-    for (id, depth, selection, presentation) in &nodes {
-        if !selection.selected {
-            continue;
-        }
-        let Some(node) = crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0) else {
-            continue;
-        };
-        if presentation.panel {
-            super::scope_panel::draw_selection(writer, &theme, &node, depth.z);
-        } else {
-            super::film_set::draw_film_set_selection(writer, &theme, &node, depth.z);
-        }
-    }
-}
-
-/// 共享 overlay 几何：归属线、草稿线、拍摄归属、粘连操作条、聚合把手与框选。
+/// 共享 overlay 几何：草稿线、粘连操作条、聚合把手与框选。
 ///
 /// 只读取公共节点组件与瞬时 scene state；`shared_key` 未变化时跳过重建，但卡片/容器
 /// 几何与选中描边批次仍按各自 cache 独立提交。
@@ -370,8 +225,8 @@ pub(crate) fn produce_film_set_selection(
 pub(crate) fn sync_canvas_overlay(
     mut commands: Commands,
     scene: Res<CurrentScene>,
+    scopes: Option<Res<crate::scope_visual::ScopeVisuals>>,
     index: Res<NodeIndex>,
-    model_assets: Res<ModelAssetTable>,
     theme: Res<ThemeResource>,
     mut visuals: ResMut<CanvasOverlayCache>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -382,10 +237,11 @@ pub(crate) fn sync_canvas_overlay(
     let source = &scene.0;
     let overlay = crate::canvas_query::focus_context::overlay(source);
     let scene = overlay.as_ref();
-    let ownership_links = super::ownership_links::segments(source, &model_assets.0);
-    let mut shared_key = super::shared_key::SharedKey::new(scene, &theme);
-    shared_key.ownership_links = ownership_links.clone();
-    shared_key.focus_ownership_links = source.model_focus.is_some();
+    let shared_key = super::shared_key::SharedKey::new(
+        scene,
+        &theme,
+        scopes.as_deref().map_or(0, |scopes| scopes.revision),
+    );
     if visuals.shared_key.as_ref() == Some(&shared_key) {
         flags.canvas_committed = true;
         return;
@@ -418,18 +274,34 @@ pub(crate) fn sync_canvas_overlay(
     requests.begin(CanvasLabelRole::Attach);
     let attach_base_z = overlay_z + 1.0;
     let mut geometry = Geometry::default();
-    super::ownership_links::draw(
-        &mut geometry,
-        &ownership_links,
-        &theme,
-        if source.model_focus.is_some() {
-            super::ownership_links::FOCUS_LINK_OPACITY
-        } else {
-            1.
-        },
-    );
+    // Scope backing and its only outline share invalidation, including geometry and hover fades.
+    for projected_node in &projected {
+        let node = &projected_node.node;
+        if matches!(node.chrome, crate::protocol::NodeChrome::Frame { .. }) {
+            let mut style = scopes
+                .as_deref()
+                .map(|scopes| scopes.style(scene, &theme, &node.id))
+                .unwrap_or_else(|| {
+                    crate::scope_visual::ScopeStyle::for_node(scene, &theme, &node.id)
+                });
+            style.width /= scene.viewport.zoom.max(0.01);
+            super::chrome::draw_frame(&mut geometry, &theme, node, projected_node.render, style);
+        }
+    }
     super::render_edges::draw_draft(&mut geometry, scene, &theme, &layouts);
-    super::render_edges::draw_shot_preview_links(&mut geometry, scene, &theme, &layouts, overlay_z);
+    // 多选选区背景带：低 z 的临时容器感，绘制在成员卡片之下。
+    if scene.aggregate_connect.is_some()
+        && crate::canvas_query::aggregate::selection_bounds(&scene.nodes, &scene.selection.nodes)
+            .is_some()
+    {
+        super::aggregate::draw_aggregate_selection_band(
+            &mut geometry,
+            &theme,
+            &nodes,
+            &scene.selection.nodes,
+            super::aggregate::SELECTION_BAND_Z,
+        );
+    }
 
     // 单节点拖动粘连 overlay（change: add-drag-touch-connections）：绘制在普通边与节点之后、
     // 框选之前；只被动消费语义投影，不执行碰撞或创建命令。

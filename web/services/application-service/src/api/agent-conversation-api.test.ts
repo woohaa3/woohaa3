@@ -54,15 +54,15 @@ async function boot(options: {
   authenticator?: ApplicationRequestAuthenticator;
   connections?: AgentConnectionRegistry;
   assistantText?: import("../extensions/assistant-text-service.js").AssistantTextService;
-  canvasCreations?: import("../extensions/canvas-creation-service.js").CanvasCreationService;
+  imageDirectorScene?: import("../extensions/image-director-scene-service.js").ImageDirectorSceneService;
   access?: import("@woohaa3/contracts").ApplicationExtensionCanvasAccessFacade;
 } = {}) {
   const handler = createAgentConversationApiHandler({
     service: options.service ?? serviceStub(),
     serviceConnections: options.serviceConnections,
     serviceConnectionProviders: options.serviceConnectionProviders,
-    canvasCreations: options.canvasCreations,
     assistantText: options.assistantText,
+    imageDirectorScene: options.imageDirectorScene,
     ...(options.basePath ? { basePath: options.basePath } : {}),
     ...(options.discovery ? { mcpDiscovery: options.discovery } : {}),
     ...(options.connections ? { connections: options.connections } : {}),
@@ -98,37 +98,20 @@ const READY: McpBuiltinDiscoveryView = {
   checkedAt: "2026-10-13T00:00:00.000Z"
 };
 
-describe("canvas creation API authority", () => {
-  const input = { requestId: "request", canvasId: "canvas", position: { x: 1, y: 2 }, prompt: "create", connection: { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 } };
-  function creations() {
-    const view = { ...input, rootGroupId: "root", stage: "accepted", turnRequestId: "first" };
-    return { accept: vi.fn(async () => view), peek: vi.fn((owner: string) => owner === "user-a" ? view : null), query: vi.fn(async () => view), retry: vi.fn(async () => view), list: vi.fn(async () => [view]) };
-  }
-  it("uses the trusted principal and original request for reads and explicit retries", async () => {
-    const s = creations();
-    const access = { authorize: vi.fn(async () => ({ ok: true as const })) };
-    const { base } = await boot({ basePath: "/studio/", canvasCreations: s as never, access });
-    const post = await fetch(`${base}/api/agent-conversations/canvas-creations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
-    expect(post.status).toBe(200); expect(s.accept).toHaveBeenCalledWith("user-a", input);
-    expect((await fetch(`${base}/api/agent-conversations/canvas-creations/request`)).status).toBe(200);
-    expect(s.query).toHaveBeenCalledWith("user-a", "request");
-    expect((await fetch(`${base}/api/agent-conversations/canvas-creations/request/retry`, { method: "POST" })).status).toBe(200);
-    expect(s.retry).toHaveBeenCalledWith("user-a", "request");
-    expect(access.authorize).toHaveBeenCalledWith({ subject: "user-a", canvasId: "canvas", permission: "write" });
-    expect(s.accept).toHaveBeenCalledTimes(1);
-  });
-  it("rejects unauthenticated, read-only, cross-owner and forged scope input before effects", async () => {
-    const s = creations();
-    const anonymous = await boot({ canvasCreations: s as never, authenticator: async () => null });
-    expect((await fetch(`${anonymous.base}/api/agent-conversations/canvas-creations/request`)).status).toBe(401);
-    const denied = await boot({ canvasCreations: s as never, access: { authorize: async () => ({ ok: false, code: "forbidden", message: "read only" }) } as never });
-    expect((await fetch(`${denied.base}/api/agent-conversations/canvas-creations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) })).status).toBe(401);
-    const other = await boot({ canvasCreations: s as never, authenticator: async () => ({ subject: "other", sessionId: "s", identityProvider: "test" }) });
-    expect((await fetch(`${other.base}/api/agent-conversations/canvas-creations/request`)).status).toBe(404);
-    const own = await boot({ canvasCreations: s as never });
-    expect((await fetch(`${own.base}/api/agent-conversations/canvas-creations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...input, owner: "other", scope: { rootGroupId: "anything" } }) })).status).toBe(400);
-    expect(s.accept).not.toHaveBeenCalled(); expect(s.query).not.toHaveBeenCalled();
-  });
+it("image director API rejects private fields and derives the owner and connection", async () => {
+  const service = serviceStub();
+  service.readConversation = () => ({ ok: true, snapshot: { conversation: { canvasId: "canvas", adapterId: "adapter" } } } as never);
+  service.resolveConnectionBinding = async () => ({ ok: true, binding: { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 } });
+  const accept = vi.fn(async () => ({ ok: true, conversation: {}, turn: {}, reused: false }));
+  const { base } = await boot({ service, imageDirectorScene: { accept } as never });
+  const entry = { action: "discuss", canvasId: "canvas", nodeId: "image", model: "model", connectionId: "connection", prompt: "build" };
+  const path = `${base}/api/agent-conversations/conversations/conversation/image-director-scenes`;
+  const post = (body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  expect((await post({ requestId: "request", entry: { ...entry, owner: "forged" } })).status).toBe(400);
+  expect((await post({ requestId: "request", entry: { ...entry, mode: "world", worldScope: { kind: "scene-area", areaId: "area" } } })).status).toBe(400);
+  expect(accept).not.toHaveBeenCalled();
+  expect((await post({ requestId: "request", entry })).status).toBe(200);
+  expect(accept).toHaveBeenCalledWith(expect.objectContaining({ owner: "user-a", canvasId: "canvas", connection: { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 } }));
 });
 
 describe("Agent 会话 API · MCP 真实发现", () => {
@@ -395,6 +378,7 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
   it("GET /connections 返回该 owner 的公开连接（不含秘密）", async () => {
     const view = {
       connectionId: "c1",
+      serviceConnectionId: "service-auto",
       adapterId: "openai-responses",
       extensionId: "sdk-agent",
       name: "OpenAI",
@@ -418,6 +402,8 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
     expect(response.status).toBe(200);
     const body = (await response.json()) as { connections: AgentConnectionView[] };
     expect(body.connections).toHaveLength(1);
+    // Auto-projected connections keep their service source identity in the public directory.
+    expect(body.connections[0]).toMatchObject({ connectionId: "c1", serviceConnectionId: "service-auto" });
     // 只暴露非秘密视图：无任何 secret/key/token 字段。
     expect(JSON.stringify(body)).not.toMatch(/secret|token|apiKey/i);
   });
@@ -532,7 +518,7 @@ it("service management uses trusted owner, enforces Origin/admin and atomically 
   try {
     const { base } = await boot({ serviceConnections: registry, serviceConnectionProviders: providers });
     const body = { ...evidenced, owner: "victim", scope: "site", providerId: "demo", modelId: "model" };
-    const post = (action: string, origin = base, payload = body) => fetch(`${base}/api/agent-conversations/service-connections/${action}`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const post = (action: string, origin = base, payload: Record<string, unknown> = body) => fetch(`${base}/api/agent-conversations/service-connections/${action}`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(payload) });
     expect((await post("provider", "https://evil.example")).status).toBe(403);
     expect((await post("provider", "invalid-url")).status).toBe(403);
     expect((await post("assistant")).status).toBe(403);
@@ -546,9 +532,45 @@ it("service management uses trusted owner, enforces Origin/admin and atomically 
     expect((await post("provider")).status).toBe(409);
     const forwarded = await fetch(`${base}/api/agent-conversations/service-connections/enabled`, { method: "POST", headers: { origin: "https://canvas.example", "x-forwarded-host": "canvas.example", "x-forwarded-proto": "https", "content-type": "application/json" }, body: JSON.stringify({ ...connection, enabled: false }) });
     expect(forwarded.status).toBe(200);
+    const disabled = ((await forwarded.json()) as { connection: import("@woohaa3/contracts").ServiceConnectionView }).connection;
+    const removed = await post("remove", base, { ...disabled });
+    expect(removed.status).toBe(200);
+    expect(((await removed.json()) as { connection: import("@woohaa3/contracts").ServiceConnectionView }).connection.removed).toBe(true);
+    expect(await registry.list(actor)).toEqual([]);
   } finally { store.close(); }
 });
 
+
+it("auto-projects a declared provider assistant as a discussion binding without wrapping ordinary text generation", async () => {
+  const { createServiceConnectionRegistry } = await import("../service-connections/registry.js");
+  const { createSqliteExtensionDocumentStore } = await import("../repository/extension-document-store.js");
+  const store = createSqliteExtensionDocumentStore({ path: ":memory:", owners: ["sources"] });
+  const registry = createServiceConnectionRegistry({ documents: store.forExtension("sources")!, checkEndpoint: () => true, validateBinding: () => false });
+  const actor = { owner: "user-a", administrator: false, canUseSite: true };
+  registry.forExtension("demo").registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
+  registry.forExtension("sdk-agent").registerConsumer({ protocols: ["chat-completions"], purposes: ["discussion", "target-execution"] });
+  const source = (await registry.save(actor, { operationId: "create", name: "Relay", endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }], expectedRevision: 0, expectedCredentialEpoch: 0 })).connection;
+  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
+  const providers = () => [{ providerId: "demo", extensionId: "demo", models: [{ providerModelId: "model", modelType: "language" }], serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" } }] as unknown as import("@woohaa3/contracts").GenerationProvider[];
+  try {
+    const { base } = await boot({ serviceConnections: registry, serviceConnectionProviders: providers });
+    const post = (payload: Record<string, unknown>) => fetch(`${base}/api/agent-conversations/service-connections/provider`, { method: "POST", headers: { origin: base, "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const first = await post({ ...evidenced, providerId: "demo", modelId: "model" });
+    expect(first.status).toBe(200);
+    const connection = ((await first.json()) as { connection: import("@woohaa3/contracts").ServiceConnectionView }).connection;
+    expect(connection.bindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ bindingId: "provider:demo", consumer: "provider", purposes: ["text"] }),
+      expect.objectContaining({ bindingId: "provider-assistant:demo", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion", "target-execution"], modelKeys: ["model"] }),
+    ]));
+    // Repeating the same operation does not add a binding or advance the published revision.
+    const second = await post({ ...connection, providerId: "demo", modelId: "model" });
+    expect(second.status).toBe(200);
+    const replay = ((await second.json()) as { connection: import("@woohaa3/contracts").ServiceConnectionView }).connection;
+    expect(replay.configRevision).toBe(connection.configRevision);
+    expect(replay.bindings.filter(binding => binding.bindingId === "provider-assistant:demo")).toHaveLength(1);
+    // The default service stub throws when touched: a binding alone never creates conversation state.
+  } finally { store.close(); }
+});
 
 it("text query, retry and exact stop authorize the trusted owner before touching delivery; public linking is rejected", async () => {
   const text = {

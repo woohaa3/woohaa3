@@ -12,7 +12,7 @@ export function registerCameraTools(reg: ToolRegistration, options: ModelMcpHttp
   const registerToolWithGrant = createToolRegistrar(reg);
   const defaultElevationDegrees = Math.round((SHOT_CAMERA_DEFAULT_ELEVATION * 180) / Math.PI);
   const cameraCanvasId = z.string().min(1).describe("画布 ID");
-  const cameraNodeId = z.string().min(1).describe("model3d / 片场（composite-asset）节点 ID");
+  const cameraNodeId = z.string().min(1).describe("model3d 节点 ID");
 
   function mutateCamera(nodeId: string, resolvedCanvasId: string, requestId: string, mutation: McpCameraMutation) {
     if (!options.service?.mutateCameras) return toolError("镜头编辑当前不可用", "unavailable");

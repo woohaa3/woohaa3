@@ -67,7 +67,6 @@ fn base_scene() -> Scene {
         source_identity: "test".into(),
         generation: 1,
         view_mode: "overview-observer".into(),
-        target_preview_node_id: None,
         node_id: "anim".into(),
         version: crate::motion::MOTION_IR_VERSION.into(),
         time: 1.0,
@@ -83,7 +82,6 @@ fn base_scene() -> Scene {
             focus_offset: [0.0; 3],
         },
         camera_motion: vec![],
-        objects: vec![],
         model_motion: vec![crate::motion::RawModelTrack {
             target_id: "body".into(),
             start_time: Some(0.0),
@@ -228,61 +226,6 @@ fn seeking_before_motion_start_restores_base_instead_of_previous_frame() {
     assert_eq!(restored.translation, base.translation);
 }
 
-#[test]
-fn object_root_tracks_map_to_one_entity_and_preserve_geometry_on_seek() {
-    let snapshot = rig_snapshot();
-    let resources = resource_table([("woohaa-model-scene-ir-v2:sig-anim".to_owned(), snapshot)]);
-    let mut world = world_with_resources();
-    run_sync(&mut world, &base_scene_no_playback(), &resources);
-    let entity = entity_of(&world, "body");
-    let base = *world.entity(entity).get::<Transform>().unwrap();
-    let count = world.entities().len();
-    let ir: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/parkour-motion.json"),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let mut scene = base_scene();
-    let playback = scene.animation_playback.as_mut().unwrap();
-    playback.model_motion.clear();
-    playback.duration = 12.0;
-    playback.time = 8.0;
-    playback.objects = vec![
-        serde_json::from_value(serde_json::json!({
-            "itemId":"hero", "playback":{"startTime":0,"duration":8,"timeScale":1,"loop":false},
-            "partIds":{"root":"body"}, "modelMotion":ir["modelMotion"]
-        }))
-        .unwrap(),
-    ];
-    run_motion(&mut world, &scene);
-    let at_landing = *world.entity(entity).get::<Transform>().unwrap();
-    assert_eq!(
-        at_landing.translation,
-        base.translation + Vec3::new(16.0, 3.0, 0.0)
-    );
-    assert!(
-        at_landing
-            .rotation
-            .abs_diff_eq(base.rotation * Quat::from_rotation_y(1.57), 1e-5)
-    );
-    scene.animation_playback.as_mut().unwrap().time = 12.0;
-    run_motion(&mut world, &scene);
-    assert_eq!(
-        world.entity(entity).get::<Transform>().unwrap().translation,
-        at_landing.translation
-    );
-    scene.animation_playback.as_mut().unwrap().time = 0.0;
-    run_motion(&mut world, &scene);
-    assert_eq!(
-        world.entity(entity).get::<Transform>().unwrap().translation,
-        base.translation
-    );
-    assert_eq!(entity_of(&world, "body"), entity);
-    assert_eq!(world.entities().len(), count);
-}
 
 #[test]
 fn removing_motion_on_same_node_restores_previous_targets() {
@@ -476,66 +419,6 @@ fn zero_opacity_hides_the_part() {
 }
 
 /// 对象根透明度：该对象名下全部块同步淡出，实体与 mesh handle 不变（不拆合并块）。
-#[test]
-fn object_root_opacity_applies_to_every_part_without_touching_meshes() {
-    let resources = resource_table([(
-        "woohaa-model-scene-ir-v2:sig-anim".to_owned(),
-        rig_snapshot(),
-    )]);
-    let mut world = world_with_resources();
-    run_sync(&mut world, &base_scene_no_playback(), &resources);
-    let entities = [entity_of(&world, "body"), entity_of(&world, "hand")];
-    let meshes: Vec<_> = entities
-        .iter()
-        .map(|entity| {
-            world
-                .entity(*entity)
-                .get::<Mesh3d>()
-                .expect("mesh")
-                .0
-                .clone()
-        })
-        .collect();
-    let mut scene = base_scene();
-    let playback = scene.animation_playback.as_mut().unwrap();
-    playback.model_motion.clear();
-    playback.duration = 4.0;
-    playback.time = 2.0;
-    // `partIds` 把对象根映射到本夹具的 `body` 实体；两个部件共用同一对象根编码。
-    playback.objects = vec![serde_json::from_value(serde_json::json!({
-        "itemId":"hero",
-        "playback":{"startTime":0,"duration":4,"timeScale":1,"loop":false},
-        "partIds":{"root":"hero-root","body":"hero-body","hand":"hero-hand"},
-        "modelMotion":[
-            {"targetId":"root","startTime":0,"endTime":2,"motion":{"kind":"keyframes","property":"opacity","frames":[
-                {"time":0,"value":1,"easing":"linear"},
-                {"time":2,"value":0.25,"easing":"linear"}
-            ]}}
-        ]
-    }))
-    .unwrap()];
-    // 夹具里对象根与部件共用同一 itemId：让组合作用域编码与实体 id 对齐。
-    for (runtime, entity_id) in [
-        ("hero-root", "body"),
-        ("hero-body", "body"),
-        ("hero-hand", "hand"),
-    ] {
-        let objects = &mut scene.animation_playback.as_mut().unwrap().objects;
-        if let Some(object) = objects.first_mut() {
-            object
-                .part_ids
-                .insert(runtime.to_owned(), entity_id.to_owned());
-        }
-    }
-    run_motion(&mut world, &scene);
-    for (index, entity) in entities.into_iter().enumerate() {
-        assert_eq!(
-            world.entity(entity).get::<Mesh3d>().expect("mesh").0,
-            meshes[index],
-            "合并块 mesh handle 不得因透明度动作改变"
-        );
-    }
-}
 
 /// 反复播放不增长透明度材质实例；根释放时实例从材质资产中回收（D2 / 任务 2.6）。
 #[test]

@@ -1,13 +1,11 @@
 /**
- * Canvas Service composition：历史观察者与缩略图端口
+ * Canvas Service composition：历史观察者
  * （自 `composition.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R07）。
  *
  * 只在 room 提交后由权威命令触发留档；不持有第二份状态。
+ * 模型历史缩略图由页面内 Bevy 运行时渲染，服务端不再派生 PNG，因此这里没有缩略图端口。
  */
 import { nodeHistoryKindForNodeType, type ServerCanvas } from "@woohaa3/contracts";
-import { NodeHistoryThumbnailJob } from "../model-renderer/index.js";
-import type { NodeHistoryThumbnailOptions } from "../model-renderer/node-history-thumbnail.js";
-import type { RendererClient } from "../model-renderer/index.js";
 import type { NodeHistoryApplicationService } from "../storage/core/node-history-service.js";
 import type { PptaskExecutionRecord } from "../sync/index.js";
 
@@ -127,7 +125,7 @@ export async function recordModelPlacementHistory(
     const record = command as { type?: unknown; nodeId?: unknown; value?: unknown };
     if (record.type !== "nodeData.patch" || typeof record.nodeId !== "string") continue;
     const value = record.value as Record<string, unknown> | undefined;
-    if (!value || (value.modelPlacement === undefined && value.filmSetGroup === undefined)) continue;
+    if (!value || value.modelPlacement === undefined) continue;
     const node = input.canvas.document.nodes.find((candidate) => candidate.id === record.nodeId);
     if (!node || nodeHistoryKindForNodeType(node.type, input.canvas.nodeData[node.id]) !== "model") continue;
     targets.add(record.nodeId);
@@ -141,17 +139,4 @@ export async function recordModelPlacementHistory(
       // 留档失败不影响命令结果。
     }
   }
-}
-
-/**
- * 模型历史缩略图作业
- * （change: add-canvas-node-generation-history，任务 2.4 / design D5）。
- */
-export function createThumbnailPort(
-  rendererClient: RendererClient,
-  service: NodeHistoryApplicationService,
-  prepareCompositeHistory?: NodeHistoryThumbnailOptions["prepareCompositeHistory"]
-): { render(input: { canvasId: string; nodeId: string; entryId: string }): Promise<{ ok: true; png: Buffer; cached: boolean } | { ok: false; code: string; message: string }> } {
-  const job = new NodeHistoryThumbnailJob({ service, rendererClient, prepareCompositeHistory });
-  return { render: (input) => job.render(input) };
 }

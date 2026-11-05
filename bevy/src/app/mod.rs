@@ -14,6 +14,8 @@ mod helpers;
 mod input;
 mod positions;
 mod scene3d;
+mod scene_area_label;
+mod scene_area_visual;
 mod setup;
 mod startup_timing;
 mod state;
@@ -26,7 +28,7 @@ pub(crate) use input::{
     ingest_bridge, publish_rendered_revision, publish_shot_diagnostics, sync_ready, sync_surface,
 };
 pub(crate) use state::{
-    AnimationCameraState, CurrentScene, FilmSetTextureBatch, FocusRig, FrameFlags, ModelAssetTable,
+    AnimationCameraState, CurrentScene, FocusRig, FrameFlags, ModelAssetTable, ModelTextureBatch,
     NodeIndex, PreviewLayerPool, SurfaceState, TextureBatch,
 };
 
@@ -121,15 +123,17 @@ fn configure_canvas(app: &mut App) {
         .add_systems(Last, startup_timing::end)
         .insert_resource(ClearColor(ThemeResource::default().backdrop_color()))
         .init_resource::<CurrentScene>()
-        .init_resource::<model3d::empty_placeholder::Placeholders>()
+        .init_resource::<crate::scope_visual::ScopeVisuals>()
         .init_resource::<positions::PositionIndex>()
         .init_resource::<TextureBatch>()
+        .init_resource::<ModelTextureBatch>()
         .init_resource::<canvas2d::focus_details::FocusDetailBatch>()
         .init_resource::<canvas2d::focus_details::FocusDetailVisuals>()
-        .init_resource::<FilmSetTextureBatch>()
-        .init_resource::<canvas2d::scope_panel::PanelImages>()
-        .init_resource::<model3d::film_set_media::FilmSetMediaVisuals>()
         .init_resource::<ModelAssetTable>()
+        .init_resource::<model3d::world_presence::WorldPresence>()
+        .init_resource::<crate::world_camera::WorldCameraPresence>()
+        .init_resource::<crate::world_camera_preview::WorldCameraPreviews>()
+        .init_resource::<crate::world_camera_binding::WorldCameraBinding>()
         .init_resource::<NodeIndex>()
         .init_resource::<crate::canvas_ecs::CanvasProjectionState>()
         .init_resource::<canvas2d::LabelRequests>()
@@ -140,21 +144,14 @@ fn configure_canvas(app: &mut App) {
         .init_resource::<FrameFlags>()
         .init_resource::<FocusRig>()
         .init_resource::<AnimationCameraState>()
-        .init_resource::<model3d::filmset_camera::FilmSetCameraAssets>()
         .init_resource::<ThemeResource>()
         .init_resource::<canvas2d::GenerationClock>()
         .init_resource::<canvas2d::text_presentation::PresentationCache>()
         .add_plugins(crate::runtime_health::RuntimeHealthPlugin)
         .add_plugins(crate::shot_camera::ShotCameraPlugin)
         .add_plugins(crate::model_preview::ModelPreviewPlugin)
-        .init_resource::<crate::canvas_ecs::overview_cache::gpu::OverviewTargets>()
-        .init_resource::<crate::canvas_ecs::overview_cache::gpu::OverviewDisplayed>()
-        .init_resource::<crate::canvas_ecs::overview_cache::dispatch::OverviewDispatch>()
-        .init_resource::<crate::canvas_ecs::overview_cache::OverviewCacheRegistry>()
-        .init_resource::<crate::canvas_ecs::overview_cache::OverviewSourceLayers>()
         .add_plugins(crate::history_preview::HistoryThumbnailPlugin)
-        .add_plugins(model3d::run_effect::RunEffectPlugin)
-        .add_plugins(crate::shot_node_preview::ShotNodePreviewPlugin)
+        .add_plugins(crate::world_capture::WorldCapturePlugin)
         .add_plugins(crate::isometric_grid::IsometricGridPlugin)
         .add_plugins(crate::orbit_camera::OrbitCameraPlugin)
         .add_plugins(crate::transform_gizmo::TransformGizmoPlugin)
@@ -180,49 +177,38 @@ fn configure_canvas(app: &mut App) {
                             crate::canvas_ecs::project_canvas_nodes
                                 .run_if(crate::canvas_ecs::projection_requested),
                             bevy::ecs::schedule::ApplyDeferred,
+                            crate::scope_visual::sync,
                         )
                             .chain(),
                         sync_surface,
                         sync_ready,
-                        canvas2d::sync_textures.run_if(canvas2d::texture_sync_requested),
-                        (
-                            model3d::film_set_media::sync_film_set_planes,
-                            canvas2d::scope_panel::sync_images,
-                            // GLB 内嵌纹理 → 共享 Image（先于片场批次 drain 与模型 spawn）。
-                            model3d::model_textures::sync_model_textures,
-                            model3d::film_set_media::sync_film_set_textures,
-                        )
-                            .chain(),
+                        canvas2d::sync_textures,
+                        // GLB 内嵌纹理 → 共享 Image（先于模型 spawn）。
+                        model3d::model_textures::sync_model_textures,
                         canvas2d::sync_camera,
                         focus::sync_focus,
                         scene3d::sync_grid.before(crate::isometric_grid::IsometricGridSet::Style),
+                        scene3d::sync_scene_areas,
+                        // 这里只画 2D 组名称；导演区名称在 PostUpdate 走真实地面深度。
+                        canvas2d::sync_scene_area_labels,
                         // 门禁结算（含 hover stop/reset/start）与模型 spawn 同一系统，且在动画求值前
                         // 完成（change: play-model-animations-on-hover，design D4）。
                         scene3d::sync_models.in_set(model3d::TransformAnimationSet::Playback),
+                        // 世界对象的空模型锚点/选择指示：不依赖卡片，排在模型根同步之后。
+                        scene3d::sync_world_presence,
+                        // 共享世界镜头的视锥/机位：与模型、导演区同帧呈现。
+                        crate::world_camera::sync,
+                        // 镜头卡片实时取景（离屏相机）；排在相机/模型同步之后。
+                        crate::world_camera_preview::sync,
+                        // 页面内共享世界镜头捕获：排在镜头卡片之后，才能覆盖其网格层复位。
+                        crate::world_capture::sync,
+                        // 卡片底部到机位的虚线贝塞尔（Bevy 2D 层）。
+                        canvas2d::sync_world_camera_connectors,
                         // 页面内历史缩略图：同一 App 内一次性离屏渲染，排在模型根同步之后
                         // （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
                         crate::history_preview::sync,
-                        // Native 片场后台准备：非阻塞 poll + 全局预算装配，排在消费者之前
-                        // （change: 2026-10-18-prepare-native-film-sets-in-background，design D4/D5）。
-                        (
-                            scene3d::advance_preparation,
-                            model3d::run_effect::sync,
-                            model3d::empty_placeholder::sync,
-                        )
-                            .chain(),
                         crate::model_preview::sync,
-                        // 卡片预览：消费同一帧的采样镜头/播放投影，并在模型落位后并入卡片渲染层
-                        // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
-                        crate::shot_node_preview::sync,
-                        (
-                            crate::canvas_ecs::overview_cache::input::sync_overview_inputs,
-                            crate::canvas_ecs::overview_cache::eligibility::sync_overview_eligibility,
-                            crate::canvas_ecs::overview_cache::dispatch::sync,
-                            crate::shot_node_preview::sync_source_layers,
-                        ).chain(),
                         scene3d::sync_editor_gizmo,
-                        scene3d::sync_shot_adapter,
-                        scene3d::reclaim_extra_shot_rigs,
                         scene3d::sync_shot_main_view,
                     )
                         .chain(),
@@ -230,12 +216,9 @@ fn configure_canvas(app: &mut App) {
                     // presentation → 分类型几何 → 选中描边批次 → 标签/文字。每个 set 边界都会
                     // 应用 deferred，producer 当帧即可读到投影实体与展示子实体。
                     (
-                        crate::canvas_ecs::sync_group_panels
-                            .in_set(crate::canvas_ecs::CanvasRenderSet::Presentation),
                         (
                             canvas2d::produce_card_geometry,
                             canvas2d::produce_card_hover,
-                            canvas2d::produce_container_geometry,
                             canvas2d::produce_edges,
                             canvas2d::sync_canvas_overlay,
                         )
@@ -244,14 +227,16 @@ fn configure_canvas(app: &mut App) {
                         (
                             canvas2d::begin_selection_outlines,
                             canvas2d::produce_card_selection,
-                            canvas2d::produce_group_selection,
-                            canvas2d::produce_film_set_selection,
                             crate::canvas_ecs::flush_selection_outlines,
                         )
                             .chain()
                             .in_set(crate::canvas_ecs::CanvasRenderSet::Selection)
                             .run_if(canvas2d::canvas_render_requested),
-                        canvas2d::focus_details::sync
+                        (
+                            canvas2d::sync_canvas_labels,
+                            canvas2d::focus_details::sync,
+                        )
+                            .chain()
                             .in_set(crate::canvas_ecs::CanvasRenderSet::Labels),
                     )
                         .chain(),
@@ -270,7 +255,6 @@ fn configure_canvas(app: &mut App) {
             (
                 canvas2d::sync_node_action_bars,
                 canvas2d::sync_focus_backdrop,
-                canvas2d::sync_group_motion,
             )
                 .after(crate::canvas_ecs::CanvasRenderSet::Geometry),
         )
@@ -281,7 +265,6 @@ fn configure_canvas(app: &mut App) {
         .add_systems(
             Update,
             (
-                canvas2d::sync_canvas_labels,
                 bevy::ecs::schedule::ApplyDeferred,
                 canvas2d::text_presentation::sync,
             )
@@ -301,13 +284,13 @@ fn configure_canvas(app: &mut App) {
         .add_systems(
             PostUpdate,
             (
+                scene_area_label::sync
+                    .after(bevy::text::load_font_assets_into_font_collection)
+                    .before(bevy::transform::TransformSystems::Propagate),
+                scene3d::publish_model_poses.after(bevy::transform::TransformSystems::Propagate),
                 animation_preview::apply_sampled_camera
                     .after(crate::shot_camera::ShotCameraSet::Derive)
                     .before(crate::shot_camera::ShotCameraSet::Preview),
-                // 片场 overview 播放小相机：消费同一采样镜头，独立辅助层，不影响成片输出
-                // （change: 2026-10-13-add-film-set-hover-camera-entity，任务 2.2）。
-                animation_preview::sync_film_set_camera
-                    .after(animation_preview::apply_sampled_camera),
                 // 路由排在 capture 提交前：同一帧里把请求送进队列并建立离屏相机，
                 // 否则每帧截图都要多等一帧（change: 2026-10-15，任务 8.10）。
                 model3d::capture::route_capture_request
@@ -328,28 +311,4 @@ fn configure_canvas(app: &mut App) {
                     .after(scene3d::hide_shot_gizmos_during_transition),
             ).run_if(crate::canvas_activity::running),
         );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bevy::ecs::schedule::ScheduleLabel;
-
-    #[test]
-    fn canvas_schedules_initialize_without_renderer() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AssetPlugin::default()));
-        configure_canvas(&mut app);
-        // Initialize real system parameters and ordering without starting a renderer or GPU.
-        for label in [
-            Startup.intern(),
-            Update.intern(),
-            PostUpdate.intern(),
-            Last.intern(),
-        ] {
-            app.world_mut().schedule_scope(label, |world, schedule| {
-                schedule.initialize(world).unwrap();
-            });
-        }
-    }
 }

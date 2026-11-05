@@ -6,8 +6,6 @@
  * 普通 `model3d` 聚焦**不再提供镜头、取景与截图**：面板只保留
  * - AI 修改入口（`authoring.generate`，mode=model3d）；
  * - 只读模型规模信息（对象/点数/面数等，见 `ModelInfoPanel`）。
- *
- * 片场（`composite-asset` + `extensionId="film-set"`）的检查器由扩展自己贡献，本组件不渲染。
  */
 import { useSyncExternalStore } from "react";
 import type { Context } from "@deepseek-ai/cordis";

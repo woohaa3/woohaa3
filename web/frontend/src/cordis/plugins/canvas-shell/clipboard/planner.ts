@@ -11,7 +11,7 @@
  * 本地 Store/Y.Doc 更新，也不做 optimistic 状态。
  */
 import type { CanvasCommand, ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition } from "@woohaa3/contracts";
-import { createHighEntropyId, managedNodeRelationOf, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
+import { canvasPointToGround, createHighEntropyId, decodeSceneAreaData, managedNodeRelationOf, newWorldInstance, remapWorldCopyReferences, sceneAreaAnimationOrigin, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
 import type { CanvasCopyPayload, CopyNode } from "./payload.js";
 import { imageEditAssetIdsOf, imageEditProjectObjectOf } from "./payload.js";
 
@@ -48,6 +48,7 @@ export type PlanPasteOptions = {
    * 未授权/对象缺失的跨画布复制必须在这里显式列出：命中即拒绝整次粘贴，不写悬空引用。
    */
   unverifiedProjectObjects?: readonly string[];
+  onRefusal?: (message: string) => void;
 };
 
 /** 粘贴拒绝原因（供 UI 显示明确原因，而不是静默无操作）。 */
@@ -121,7 +122,7 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
     payload,
     ...(options.unverifiedProjectObjects ? { unverifiedProjectObjects: options.unverifiedProjectObjects } : {})
   });
-  if (refusal) return null;
+  if (refusal) { options.onRefusal?.(refusal.message); return null; }
 
   const makeId = options.createId ?? defaultPasteId;
 
@@ -149,6 +150,51 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   }
   if (new Set(idMap.values()).size !== idMap.size) return null;
 
+  const instanceIds = new Map<string, string>();
+  const groupIds = new Map<string, string>();
+  const areaIds = new Map<string, string>();
+  const cameraIds = new Map<string, string>();
+  for (const [index, node] of payload.nodes.entries()) {
+    const data = remappedData.get(node.id) ?? payload.nodeData[node.id];
+    for (const [key, field, table] of [
+      ["sharedWorldInstance", "instanceId", instanceIds], ["workflowGroup2d", "groupId", groupIds],
+      ["sceneArea", "areaId", areaIds], ["worldCamera", "cameraId", cameraIds]
+    ] as const) {
+      const value = data?.[key];
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const id = (value as Record<string, unknown>)[field];
+        if (typeof id === "string") table.set(id, makeId(field, index));
+      }
+    }
+  }
+  const world = remapWorldCopyReferences({
+    nodes: payload.nodes.map(node => ({ nodeId: node.id, nodeData: remappedData.get(node.id) ?? payload.nodeData[node.id] })),
+    ids: { nodeIds: idMap, instanceIds, groupIds, areaIds, cameraIds }
+  });
+  if (!world.ok) {
+    options.onRefusal?.(world.code === "binding-unavailable"
+      ? world.field === "memberNodeIds"
+        ? `组成员 ${world.reference?.id ?? ""} 不在复制集合中，请将缺失成员一起复制后重试。`
+        : world.field === "animation.tracks.instanceId" || world.field === "animationScript.instanceTracks"
+          ? `动画对象 ${world.reference?.id ?? ""} 不在复制集合中，请将动画对象一起复制后重试。`
+          : world.field === "animationScript.cameraTracks"
+            ? `动画镜头 ${world.reference?.id ?? ""} 不在复制集合中，请将动画镜头一起复制后重试。`
+        : "绑定的模型不在复制集合中，请将目标模型一起复制后重试。"
+      : "复制内容无效，无法粘贴。请检查选择后重试。");
+    return null;
+  }
+  for (const [index, entry] of world.nodes.entries()) {
+    if (!entry.worldKind) continue;
+    const data = entry.nodeData;
+    for (const key of ["workflowGroup2d", "sceneArea"] as const) {
+      const value = data[key];
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        (value as Record<string, unknown>).scopeVersion = makeId("scopeVersion", index);
+      }
+    }
+    remappedData.set(entry.sourceNodeId, data as import("@woohaa3/contracts").CanvasNodeData);
+  }
+
   // 2. 计算包围盒中心，用于对齐锚点。
   //    包围盒与偏移都必须在**绝对坐标**下计算：成员节点保存的是相对父级的局部坐标，
   //    直接对它们加偏移会把子树整体推走（change: add-canvas-node-grouping，design D6）。
@@ -161,6 +207,7 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   const anchor = resolveAnchorPosition(options.anchor, options.viewport);
   const dx = anchor.x - (bounds.minX + bounds.maxX) / 2;
   const dy = anchor.y - (bounds.minY + bounds.maxY) / 2;
+  const groundDelta = canvasPointToGround({ x: dx, y: dy });
 
   const commands: CanvasCommand[] = [];
   for (const asset of payload.assets ?? []) {
@@ -170,27 +217,55 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   }
   const newNodeIds: string[] = [];
 
-  // 3. 节点：parent 重写为新 ID；只有**顶层节点**承载整体平移，成员保持相对坐标。
-  //    父节点先于子节点输出（拓扑排序），保证服务端 applyCommand 时 parent 存在。
+  // 3. node.add creates root nodes, so flatten the accepted source parent chain
+  //    into canvas coordinates before applying the shared translation.
   //    扩展重映射的数据随 node.add 一起提交，可信生命周期复核完整闭包。
-  for (const { node, isTopLevel, absolute } of placed) {
+  for (const [index, { node, absolute }] of placed.entries()) {
     const newId = idMap.get(node.id);
     if (newId === undefined) continue;
     newNodeIds.push(newId);
-    const mappedData = remappedData.get(node.id);
+    let mappedData = remappedData.get(node.id);
+    if (node.type === "model3d") {
+      const source = mappedData ?? payload.nodeData[node.id] ?? {};
+      const existing = source.sharedWorldInstance as ReturnType<typeof newWorldInstance> | undefined;
+      const placedInstance = newWorldInstance(existing?.instanceId ?? makeId("instanceId", index), { x: absolute.x + dx, y: absolute.y + dy });
+      if (existing) {
+        placedInstance.transform = {
+          ...existing.transform,
+          position: {
+            u: existing.transform.position.u + groundDelta.u,
+            v: existing.transform.position.v + groundDelta.v,
+            h: existing.transform.position.h
+          }
+        };
+      }
+      mappedData = { ...source, sharedWorldInstance: placedInstance };
+      remappedData.set(node.id, mappedData);
+    } else if (node.type === "scene-area") {
+      const source = mappedData ?? payload.nodeData[node.id] ?? {};
+      const area = decodeSceneAreaData(source.sceneArea);
+      if (!area.ok) return null;
+      const origin = sceneAreaAnimationOrigin(area.value);
+      mappedData = { ...source, sceneArea: {
+        ...area.value,
+        bounds: {
+          min: { u: area.value.bounds.min.u + groundDelta.u, v: area.value.bounds.min.v + groundDelta.v },
+          max: { u: area.value.bounds.max.u + groundDelta.u, v: area.value.bounds.max.v + groundDelta.v }
+        },
+        // Position tracks are relative to the area origin; moving the copy's
+        // origin carries the whole authored shot without rewriting the script.
+        animationOrigin: { u: origin.u + groundDelta.u, v: origin.v + groundDelta.v }
+      } };
+      remappedData.set(node.id, mappedData);
+    }
     commands.push({
       type: "node.add",
       node: {
         id: newId,
         type: node.type,
-        position: isTopLevel
-          ? { x: absolute.x + dx, y: absolute.y + dy }
-          : { ...node.position },
+        ...(node.position ? { position: { x: absolute.x + dx, y: absolute.y + dy } } : {}),
         ...(node.width !== undefined ? { width: node.width } : {}),
         ...(node.height !== undefined ? { height: node.height } : {}),
-        ...(node.parentId !== undefined && idMap.has(node.parentId)
-          ? { parentId: idMap.get(node.parentId) }
-          : {}),
         ...(node.zIndex !== undefined ? { zIndex: node.zIndex } : {})
       },
       ...(mappedData ? { nodeData: mappedData } : {})
@@ -338,13 +413,13 @@ function toAbsoluteNodes(nodes: readonly CopyNode[], nodeData: CanvasCopyPayload
   const included = new Set(nodes.map((node) => node.id));
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const absolutePosition = (node: CopyNode): Woohaa3CanvasPosition => {
-    let x = node.position.x;
-    let y = node.position.y;
+    let x = node.position?.x ?? 0;
+    let y = node.position?.y ?? 0;
     const guard = new Set<string>([node.id]);
     let parentId = node.parentId;
     while (parentId && !guard.has(parentId)) {
       const parent = byId.get(parentId);
-      if (!parent) break;
+      if (!parent?.position) break;
       guard.add(parentId);
       x += parent.position.x;
       y += parent.position.y;
@@ -363,3 +438,4 @@ function toAbsoluteNodes(nodes: readonly CopyNode[], nodeData: CanvasCopyPayload
 function cloneJson(value: Woohaa3CanvasJsonObject): Woohaa3CanvasJsonObject {
   return JSON.parse(JSON.stringify(value)) as Woohaa3CanvasJsonObject;
 }
+

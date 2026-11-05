@@ -17,7 +17,7 @@ fn request(version: &str) -> RenderRequest {
         capture: CaptureOptions::default(),
         placement: None,
         motion: None,
-        composite_asset_frame: None,
+        world: None,
     }
 }
 
@@ -106,7 +106,6 @@ fn rejects_out_of_range_time() {
     let mut req = request("woohaa-model-scene-ir-v2");
     req.capture.camera_preset = "initial".to_owned();
     req.motion = Some(MotionRequest {
-        objects: Vec::new(),
         duration: 4.0,
         looped: false,
         camera_motion: vec![],
@@ -134,4 +133,61 @@ fn rejects_empty_ops() {
         validate_request(&req).unwrap_err().0,
         RenderErrorCode::InvalidScene
     );
+}
+
+fn world_request() -> RenderRequest {
+    let mut req = request("woohaa-model-scene-ir-v2");
+    req.protocol_version = WORLD_RENDERER_PROTOCOL_VERSION.into();
+    req.ops.clear();
+    req.world = Some(serde_json::from_value(serde_json::json!({
+        "camera": {
+            "kind": "world-camera", "version": "shared-world-v1", "cameraId": "camera", "settingsVersion": "v1",
+            "position": { "u": 3, "v": -2, "h": 4 }, "rotation": [0, 0, 0, 1],
+            "projection": { "kind": "perspective", "verticalFovRadians": 1.0, "nearMeters": 0.1, "farMeters": 500 },
+            "captureMode": { "kind": "static" }, "aspect": { "width": 1, "height": 1 }, "boundInstanceId": null
+        },
+        "instances": []
+    })).unwrap());
+    req
+}
+
+#[test]
+fn world_capture_accepts_an_empty_world_and_preserves_perspective() {
+    let req = world_request();
+    assert!(validate_request(&req).is_ok());
+    assert!(matches!(crate::world_camera_view::projection(&req.world.as_ref().unwrap().camera, bevy::prelude::UVec2::splat(512)),
+        bevy::prelude::Projection::Perspective(_)));
+}
+
+#[test]
+fn world_capture_rejects_legacy_worker_protocol_and_auto_framing() {
+    let mut req = world_request();
+    req.protocol_version = RENDERER_PROTOCOL_VERSION.into();
+    assert_eq!(validate_request(&req).unwrap_err().0, RenderErrorCode::UnsupportedProtocolVersion);
+    req.protocol_version = WORLD_RENDERER_PROTOCOL_VERSION.into();
+    req.ops = request("woohaa-model-scene-ir-v2").ops;
+    assert_eq!(validate_request(&req).unwrap_err().0, RenderErrorCode::InvalidScene);
+}
+
+#[test]
+fn bound_world_capture_cannot_silently_render_the_whole_world() {
+    let mut req = world_request();
+    req.world.as_mut().unwrap().camera.bound_instance_id = Some("missing".into());
+    assert_eq!(validate_request(&req).unwrap_err().0, RenderErrorCode::InvalidScene);
+}
+
+#[test]
+fn world_camera_uses_metric_pose_and_real_perspective_foreshortening() {
+    use bevy::{camera::CameraProjection, prelude::*};
+    let req = world_request();
+    let camera = &req.world.as_ref().unwrap().camera;
+    assert_eq!(crate::world_camera_view::pose(camera).translation, Vec3::new(192.0, 256.0, 128.0));
+    let Projection::Perspective(mut projection) = crate::world_camera_view::projection(camera, UVec2::new(1600, 900)) else { panic!("perspective required") };
+    projection.update(1600.0, 900.0);
+    let clip = projection.get_clip_from_view();
+    let near_object = clip.project_point3(Vec3::new(10.0, 0.0, -100.0));
+    let far_object = clip.project_point3(Vec3::new(10.0, 0.0, -200.0));
+    assert!((near_object.x / far_object.x - 2.0).abs() < 1e-5);
+    assert!((projection.near - 6.4).abs() < 1e-5);
+    assert_eq!(projection.far, 32000.0);
 }

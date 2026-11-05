@@ -84,9 +84,9 @@ describe("严格 codec（任务 1.1）", () => {
 });
 
 describe("API 指南（任务 1.2）", () => {
-  it("公开节点和分类 API 签名与执行边界，且不把 prompt 描述为作品输出", () => {
+  it("公开节点 API 签名与执行边界，且不把 prompt 描述为作品输出", () => {
     const descriptor = canvasScriptApiDescriptor();
-    expect(descriptor.apis.map((entry) => entry.name)).toEqual(["node", "group", "reparent", "ungroup", "setTitle", "layout", "existing", "connect", "move", "setPrompt", "remove"]);
+    expect(descriptor.apis.map((entry) => entry.name)).toEqual(["node", "setTitle", "layout", "resize", "existing", "connect", "move", "setPrompt", "remove"]);
     // change: 2026-10-22-remove-agent-execution-limits，任务 6.1：声明隔离/可取消，不声明应用额度。
     expect(descriptor.execution).toMatchObject({ isolated: true, cancellable: true, applicationQuotas: [] });
     expect(descriptor.execution).not.toHaveProperty("limits");

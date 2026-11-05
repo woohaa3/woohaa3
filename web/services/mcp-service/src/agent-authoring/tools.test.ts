@@ -9,7 +9,7 @@ import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH } from "../model-mcp/mcp-http.js";
 import type { AgentCanvasClient, AgentApplyClientInput } from "../downstream/agent-canvas-client.js";
-import type { AgentCanvasGraph, CanvasCommand } from "@woohaa3/contracts";
+import type { AgentCanvasGraph, ApplicationToolGrant, CanvasCommand } from "@woohaa3/contracts";
 
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -59,9 +59,21 @@ function sampleGraph(): AgentCanvasGraph {
   };
 }
 
-async function start(graph = sampleGraph(), recorder: Recorder = { applies: [] }, options: { apply?: (input: AgentApplyClientInput) => unknown } = {}) {
+async function start(graph = sampleGraph(), recorder: Recorder = { applies: [] }, options: { apply?: (input: AgentApplyClientInput) => unknown; grant?: ApplicationToolGrant } = {}) {
   const handler = createModelMcpHttpHandler({
-    agentAuthoring: { client: fakeAgentClient(graph, recorder, options) }
+    agentAuthoring: {
+      client: fakeAgentClient(graph, recorder, options),
+      ...(options.grant ? { grant: options.grant } : {})
+    },
+    ...(options.grant
+      ? {
+          toolGrant: {
+            allowedTools: () => options.grant!.tools,
+            resolve: () => options.grant!,
+            authorize: () => ({ ok: true as const })
+          }
+        }
+      : {})
   });
   const server = http.createServer((req, res) => {
     void handler.handle(req, res).then((handled) => {
@@ -81,10 +93,10 @@ async function start(graph = sampleGraph(), recorder: Recorder = { applies: [] }
   return { base: `http://127.0.0.1:${port}`, recorder };
 }
 
-async function callTool(base: string, name: string, args: Record<string, unknown>) {
+async function callTool(base: string, name: string, args: Record<string, unknown>, bearer?: string) {
   const response = await fetch(`${base}${MODEL_MCP_HTTP_PATH}`, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-03-26" },
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-03-26", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } })
   });
   const text = await response.text();
@@ -297,5 +309,45 @@ describe("结构化错误（任务 5.5）", () => {
     });
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({ ok: false, code: "unknown-node" });
+  });
+
+  it("resize_canvas_group 只改根组组框，不缩放成员", async () => {
+    const graph = sampleGraph();
+    graph.rootGroupId = "group-1";
+    graph.nodes = [
+      {
+        nodeId: "group-1", kind: null, canonicalType: "workflow-group-2d",
+        position: { x: 0, y: 0 }, size: { width: 300, height: 200 },
+        affordances: { canSetPrompt: false, canRun: false, canConnect: false, canDelete: false }
+      },
+      {
+        nodeId: "member-1", kind: "text", canonicalType: "text",
+        position: { x: 20, y: 20 }, size: { width: 240, height: 120 },
+        affordances: { canSetPrompt: true, canRun: true, canConnect: true, canDelete: true }
+      }
+    ];
+    const grant: ApplicationToolGrant = {
+      token: "grant-group",
+      canvasIds: ["c1"],
+      nodeIds: [],
+      workId: "work-group",
+      tools: ["resize_canvas_group"],
+      groupScope: { canvasId: "c1", rootGroupId: "group-1", scopeEpoch: 1 }
+    };
+    const recorder: Recorder = { applies: [] };
+    const { base } = await start(graph, recorder, { grant });
+    const result = await callTool(base, "resize_canvas_group", {
+      canvasId: "c1",
+      requestId: "req-group-range",
+      x: 10,
+      y: 20,
+      width: 420,
+      height: 260
+    }, grant.token);
+    expect(result.isError).toBeFalsy();
+    const commands = recorder.applies[0]!.commands as CanvasCommand[];
+    const groupUpdates = commands.filter((command) => command.type === "node.update" && command.nodeId === "group-1");
+    expect(groupUpdates.at(-1)).toMatchObject({ nodeId: "group-1", position: { x: 10, y: 20 }, width: 420, height: 260 });
+    expect(commands.some((command) => command.type === "node.update" && command.nodeId === "member-1")).toBe(false);
   });
 });

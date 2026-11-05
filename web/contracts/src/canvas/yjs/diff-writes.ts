@@ -65,7 +65,7 @@ export function applyCanvasDiffToYDoc(doc: Y.Doc, previous: ServerCanvas, next: 
       const result: Record<string, unknown> = {
         id: node.id,
         type: node.type,
-        position: { x: node.position.x, y: node.position.y }
+        ...(node.position ? { position: { x: node.position.x, y: node.position.y } } : {})
       };
       if (typeof node.width === "number") result.width = node.width;
       if (typeof node.height === "number") result.height = node.height;

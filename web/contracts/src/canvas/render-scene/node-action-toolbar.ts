@@ -3,12 +3,9 @@ import { builtinNodeCapabilitiesForType } from "../builtin-node-capabilities.js"
  * 节点顶部操作横条的纯几何与可见性判定
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1 / design D6/D7 修订）。
  *
- * 横条由 Bevy 在画布场景内绘制、由 Rust interaction snapshot 命中：**整张画布仍是同一张
- * canvas**，因此中键/空格/右键拖拽平移与滚轮缩放在横条覆盖区域照常生效，只有「左键落在哪个
- * 动作矩形内」由 Rust 决定。尺寸与间距用**屏幕像素**定义，保持屏幕尺寸，位置随画布投影。
- *
- * 本模块只做「给定节点世界矩形 + 动作列表（+ 视口用于顶部碰撞回退），横条与世界矩形放哪」的
- * **纯计算**，无 DOM、无 Bevy 依赖，供 canvas-shell 映射层与契约测试复用；映射层下发描述，Rust 按同一公式布局、绘制与命中，因此「画在哪、点在哪」一致。
+ * Web 动作栏用 runtime 提供的屏幕矩形锚定，并按屏幕像素排版、处理 DOM 点击。
+ * 本模块只做纯几何计算，不依赖 DOM；Rust 保留旧协议消费端的同一布局供兼容使用。
+ * 当前 Web scene builder 不再向 renderer 下发 nodeActions。
  */
 
 /** 横条与节点之间固定的屏幕像素间距（design D7「约 8px」）。 */
@@ -52,13 +49,13 @@ export type ScreenRect = { left: number; top: number; width: number; height: num
 export type NodeActionToolbarAction = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download" | "edit" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
+  icon?: "download" | "edit" | "box" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
   iconOnly?: boolean;
   /** 稳定动作 ID（命中回传，贡献据此派发）。 */
   id: string;
   /** 可见文案（中文）。 */
   label: string;
-  /** 是否可用；false 时 Rust 以弱化色绘制，仍可命中并回传（由贡献决定是否响应）。 */
+  /** 是否可用；Web 按钮在 false 时禁用。 */
   enabled: boolean;
   /** 是否附带独立设置箭头。 */
   menu?: boolean;

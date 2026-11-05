@@ -18,6 +18,7 @@ import { registerAgentRunTools } from "./run-tools.js";
 import { registerAgentScriptTools } from "./script-tools.js";
 import { registerAgentSkillTools } from "./skill-tools.js";
 import { registerImportGeneratedImageTool } from "./import-image-tool.js";
+import { registerAssistantWorldTools } from "./world-tools.js";
 import type { AgentAuthoringToolDeps } from "./tool-policy.js";
 
 export type { AgentAuthoringToolDeps } from "./tool-policy.js";
@@ -34,4 +35,5 @@ export function registerAgentAuthoringTools(server: McpServer, deps: AgentAuthor
   registerAgentRunTools(server, deps);
   registerImportGeneratedImageTool(server, deps);
   registerAgentSkillTools(server, deps);
+  if (deps.world) registerAssistantWorldTools(server, deps);
 }

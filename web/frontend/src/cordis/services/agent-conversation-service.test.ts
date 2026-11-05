@@ -47,6 +47,19 @@ function snapshot(): ConversationSnapshot {
 }
 
 describe("exact assistant request reads", () => {
+  it("creates an independent director conversation without source-image pending state or conversation reuse", async () => {
+    const findForTarget = vi.fn();
+    const create = vi.fn(async () => ({ ok: true as const, value: { conversation: summary({ conversationId: "new-director" }) } }));
+    const acceptImageDirectorScene = vi.fn(async () => ({ ok: true as const, value: { conversation: summary({ conversationId: "new-director", nodeId: "director" }), turn: turn({ target: { canvasId: "cv", nodeId: "director", delivery: { purpose: "image-director-scene", domainRequestId: "new", attemptId: "1", nodeId: "director" } } }), reused: false } }));
+    const service = createAgentConversationService({ remote: fakeRemote({ findForTarget, create, acceptImageDirectorScene }) });
+    const pending = service.submitImageDirectorScene!({ canvasId: "cv", requestId: "new", connectionId: "connection", entry: { action: "discuss", canvasId: "cv", nodeId: "image", model: "model", prompt: "build" } });
+    expect(service.getSnapshot().pendingSubmissions).toBeUndefined();
+    expect((await pending).ok).toBe(true);
+    expect(findForTarget).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith({ canvasId: "cv", connectionId: "connection" });
+    expect(service.getSnapshot().active?.turn.target.nodeId).toBe("director");
+    expect(service.getSnapshot().conversations.some(conversation => conversation.nodeId === "image")).toBe(false);
+  });
   it("deduplicates concurrent reads and retains independent targets in reverse response order", async () => {
     const pending = new Map<string, (value: Awaited<ReturnType<AgentConversationRemote["query"]>>) => void>();
     const query = vi.fn((id: string) => new Promise<Awaited<ReturnType<AgentConversationRemote["query"]>>>(resolve => pending.set(id, resolve)));
@@ -82,7 +95,7 @@ it("publishes a local submitting target and clears it after rejection without a 
   let reject!: (value: Awaited<ReturnType<AgentConversationRemote["accept"]>>) => void;
   const service = createAgentConversationService({ remote: fakeRemote({ accept: () => new Promise(resolve => { reject = resolve; }) }) });
   const request = service.submitTurn({ canvasId: "cv", conversationId: "conv-1", requestId: "pending",
-    entry: { canvasId: "cv", nodeId: "film", mode: "film-set", action: "modify", prompt: "change" } });
+    entry: { canvasId: "cv", nodeId: "film", mode: "model3d", action: "modify", prompt: "change" } });
   expect(service.getSnapshot().pendingSubmissions?.pending.nodeId).toBe("film");
   await vi.waitFor(() => expect(reject).toBeTypeOf("function"));
   reject({ ok: false, code: "rejected", error: "Rejected" });
@@ -450,17 +463,18 @@ describe("agent conversation service · 节点会话复用与清空（design D8�
   });
 });
 
-it("whole-set submission resolves its own context while explicit legacy requests retain their original conversation", async () => {
+it("target submission resolves the node conversation without a whole-set context", async () => {
   const legacy = summary({ conversationId: "legacy" });
-  const whole = summary({ conversationId: "whole", contextKey: "film-set:whole" });
+  const whole = summary({ conversationId: "whole" });
   const findForTarget = vi.fn(async (_canvasId: string, _nodeId: string, _connectionId?: string, contextKey?: string) => ({ ok: true as const, value: { conversation: contextKey ? whole : legacy } }));
   const accept = vi.fn(async (conversationId: string) => ({ ok: true as const, value: { conversation: conversationId === "whole" ? whole : legacy, turn: turn(), reused: false } }));
   const create = vi.fn();
   const service = createAgentConversationService({ remote: fakeRemote({ findForTarget, accept, create }) });
-  const entry = { canvasId: "cv", nodeId: "film", mode: "film-set" as const, action: "generate" as const, prompt: "创建镜头" };
+  const entry = { canvasId: "cv", nodeId: "film", mode: "model3d" as const, action: "generate" as const, prompt: "创建模型" };
   await service.submitTurn({ canvasId: "cv", requestId: "whole-request", connectionId: "connection", entry });
-  expect(findForTarget).toHaveBeenCalledWith("cv", "film", "connection", "film-set:whole");
-  expect(accept.mock.calls[0][0]).toBe("whole");
+  expect(findForTarget.mock.calls[0]!.slice(0, 3)).toEqual(["cv", "film", "connection"]);
+  expect(findForTarget.mock.calls[0]![3]).toBeUndefined();
+  expect(accept.mock.calls[0][0]).toBe("legacy");
   await service.submitTurn({ canvasId: "cv", conversationId: "legacy", requestId: "legacy-request", entry: { ...entry, clipId: "old-clip", itemId: "old-item" } });
   expect(accept.mock.calls[1][0]).toBe("legacy");
   expect(create).not.toHaveBeenCalled();

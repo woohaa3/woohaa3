@@ -11,22 +11,15 @@ pub(super) fn signature(
     clear: Color,
     quality: &str,
 ) -> String {
-    // HashMap wire order cannot invalidate otherwise identical object placements.
-    let placements = node.composite_asset.as_ref().map(|asset| {
-        asset
-            .item_placements
-            .iter()
-            .collect::<std::collections::BTreeMap<_, _>>()
-    });
+    let _ = node;
     format!(
-        "{}:{}:{:?}:{:?}:{:?}:{:?}:{:?}:{}:{}:{}",
+        "{}:{}:{:?}:{:?}:{:?}:{:?}:{}:{}:{}",
         reference.resource_key,
         reference.signature,
         relative_pose,
         size,
         projection,
         clear,
-        placements,
         reference.placement.yaw,
         reference.placement.scale,
         quality

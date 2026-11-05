@@ -76,6 +76,7 @@ describe("GLB 上传分类", () => {
     expect(data.modelSourceKind).toBe("glb");
     expect(data.modelAssetId).toBe(asset.id);
     expect(data.modelContentVersion).toMatchObject({ revision: 1 });
+    expect(data.sharedWorldInstance).toMatchObject({ kind: "world-instance", transform: { position: { h: 0 }, scale: 1 } });
     expect(data.modelScript).toBeUndefined();
     expect(data.modelScriptVersion).toBeUndefined();
   });

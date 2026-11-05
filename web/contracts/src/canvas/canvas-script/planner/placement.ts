@@ -115,7 +115,7 @@ export function resolveAnchorGeometry(
     }
     // 声明过但不在计划几何中：只可能是既有节点 ref（无 planned 记录），回退快照。
     const existing = state.snapshot.nodeById.get(declared.nodeId);
-    if (existing) {
+    if (existing?.position) {
       const size = effectiveCanvasNodeSize(existing);
       return { ok: true, node: { position: existing.position, ...size } };
     }
@@ -126,6 +126,9 @@ export function resolveAnchorGeometry(
     return { ok: false, error: { code: "unknown-node", message: `锚点节点 ${ref.nodeId} 不存在`, retryable: false, operationIndex: state.operationIndex, field: "placement.anchor" } };
   }
   const size = effectiveCanvasNodeSize(node);
+  if (!node.position) {
+    return { ok: false, error: { code: "unknown-node", message: `锚点节点 ${ref.nodeId} 没有卡片位置`, retryable: false, operationIndex: state.operationIndex, field: "placement.anchor" } };
+  }
   return { ok: true, node: { position: node.position, ...size } };
 }
 
@@ -136,6 +139,7 @@ function graphBounds(
   let minY = 0;
   let maxX = 0;
   for (const node of nodes) {
+    if (!node.position) continue;
     const size = effectiveCanvasNodeSize(node);
     minY = Math.min(minY, node.position.y);
     maxX = Math.max(maxX, node.position.x + size.width);
@@ -155,7 +159,7 @@ function avoidOverlap(
   gap: number
 ): { x: number; y: number } {
   const occupied: Rect[] = [
-    ...state.snapshot.nodes.map((node) => rectOf(node.position, effectiveCanvasNodeSize(node))),
+    ...state.snapshot.nodes.filter(node => node.position).map((node) => rectOf(node.position!, effectiveCanvasNodeSize(node))),
     ...state.plannedRects
   ];
   const step = size.height + Math.max(gap, 20);

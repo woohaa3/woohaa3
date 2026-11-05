@@ -12,14 +12,11 @@
 //! 归属节点实体，删除节点即回收派生状态。
 
 pub(crate) mod components;
-pub(crate) mod overview_cache;
 #[cfg(feature = "canvas-core")]
 pub(crate) mod layer;
 
 #[cfg(feature = "canvas-core")]
 pub(crate) mod batch;
-#[cfg(feature = "canvas-core")]
-pub(crate) mod presentation;
 #[cfg(feature = "canvas-core")]
 pub(crate) mod projection;
 
@@ -27,8 +24,6 @@ pub(crate) mod projection;
 pub(crate) use batch::{
     CanvasBatchWriter, SelectionOutlineBatch, SelectionOutlineLayer, flush_selection_outlines,
 };
-#[cfg(feature = "canvas-core")]
-pub(crate) use presentation::sync_group_panels;
 #[cfg(feature = "canvas-core")]
 pub(crate) use projection::{
     CanvasProjectionState, node_for_draw, project_canvas_nodes, projection_requested,
@@ -43,11 +38,11 @@ use bevy::ecs::schedule::SystemSet;
 pub(crate) enum CanvasRenderSet {
     /// 从 accepted snapshot 更新节点实体与公共组件（唯一的快照遍历点）。
     Project,
-    /// 按展示组件创建/复用语义子实体（group 面板、纹理 Sprite、缩略图、细节）。
+    /// 按展示组件创建/复用语义子实体（纹理 Sprite、缩略图、细节）。
     Presentation,
-    /// 按展示类型生产几何：卡片、group、片场、边。
+    /// 按展示类型生产几何：卡片与边。
     Geometry,
-    /// 各展示类型自己的持久选中描边 producer。
+    /// 持久选中描边 producer。
     Selection,
     /// 标签/文字与派生 overlay 同步。
     Labels,

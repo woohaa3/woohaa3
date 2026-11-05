@@ -97,7 +97,7 @@ export function registerModelBatchTools(
     {
       title: "原子提交多个模型与镜头",
       description:
-        "整套素材优先使用：所有脚本校验通过，并在权威队列复核每个节点类型及哈希后，以一个事务保存全部模型与镜头。commonSource 只传一次，落库为每节点独立完整脚本。cameras 省略则保留，提供则整体替换并必须带 expectedCamerasHash。相同 requestId/内容返回冻结首次回执，变更内容必须换 requestId；任何一项失败均零写入。预检后原样提交，无需 token。片场 items 使用独立作者接口。",
+        "整套素材优先使用：所有脚本校验通过，并在权威队列复核每个节点类型及哈希后，以一个事务保存全部模型与镜头。commonSource 只传一次，落库为每节点独立完整脚本。cameras 省略则保留，提供则整体替换并必须带 expectedCamerasHash。相同 requestId/内容返回冻结首次回执，变更内容必须换 requestId；任何一项失败均零写入。预检后原样提交，无需 token。",
       inputSchema: requestSchema,
       annotations: {
         readOnlyHint: false,

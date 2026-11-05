@@ -42,7 +42,7 @@ const PREVIEW_FRAME_DISTANCE_FACTOR: f32 = 4.4 / 1.732_050_8;
 const PREVIEW_ORTHO_ASPECT: f32 = 1.6 / 1.732_050_8;
 
 /// 固定预览灯光：一个环境光 + 一个方向光，脚本不可修改。
-fn setup_lights(commands: &mut Commands) {
+fn setup_lights(commands: &mut Commands, shared_world: bool) {
     commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
         brightness: 600.0,
@@ -55,7 +55,9 @@ fn setup_lights(commands: &mut Commands) {
             shadow_maps_enabled: false,
             ..default()
         },
-        Transform::from_xyz(180.0, 260.0, 300.0),
+        Transform::from_xyz(180.0, 260.0, 300.0).with_rotation(if shared_world {
+            crate::isometric_grid::canvas_camera_rotation()
+        } else { Quat::IDENTITY }),
     ));
 }
 
@@ -96,6 +98,7 @@ fn spawn_model(
     materials: &mut Assets<StandardMaterial>,
     model: &ModelSnapshot,
     root_transform: Transform,
+    textures: &std::collections::HashMap<String, Handle<Image>>,
 ) -> (
     std::collections::HashMap<String, Entity>,
     std::collections::HashMap<String, Transform>,
@@ -117,10 +120,13 @@ fn spawn_model(
                 let Some(mesh) = high_mesh(&mut resources, meshes, geometry) else {
                     continue;
                 };
-                let material = resources.material(
-                    materials,
-                    scene::standard_material_for(&spec.material_key, &material_specs),
-                );
+                let mut source = scene::standard_material_for(&spec.material_key, &material_specs);
+                if let Some(id) = spec.material_key.strip_prefix("material:")
+                    .and_then(|key| material_specs.get(key))
+                    .and_then(|material| material.base_color_texture.as_ref()) {
+                    source.base_color_texture = textures.get(id).cloned().or(source.base_color_texture);
+                }
+                let material = resources.material(materials, source);
                 part_materials.insert(spec.id.clone(), material.clone());
                 commands
                     .spawn((Mesh3d(mesh), MeshMaterial3d(material), transform))
@@ -321,6 +327,27 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
     let width = capture.width;
     let height = capture.height;
     let pixels: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(std::sync::Mutex::new(None));
+    let world = request.world.clone();
+    let mut world_models = Vec::new();
+    if let Some(world) = &world {
+        use base64::Engine;
+        for entry in &world.instances {
+            let model = crate::model3d::prepare_snapshot(ModelSnapshot {
+                scene_version: Some(request.scene_version.clone()), ops: entry.ops.clone(),
+                signature: entry.instance.instance_id.clone(), extent: 1.0,
+                aabb: None, geometry_keys: None, prepared_bounds: None, placement: default(),
+            });
+            let mut textures = Vec::new();
+            for texture in &entry.textures {
+                let bytes = base64::engine::general_purpose::STANDARD.decode(&texture.bytes_base64).map_err(|error| error.to_string())?;
+                let image = Image::from_buffer(&bytes, bevy::image::ImageType::MimeType(&texture.mime_type),
+                    bevy::image::CompressedImageFormats::NONE, true, bevy::image::ImageSampler::linear(), RenderAssetUsages::default())
+                    .map_err(|error| error.to_string())?;
+                textures.push((texture.id.clone(), image));
+            }
+            world_models.push((entry.instance.clone(), model, textures));
+        }
+    }
 
     let mut app = App::new();
     #[cfg(feature = "recording-gpu")]
@@ -374,7 +401,7 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
         placement,
     });
     let (root_transform, reference_center, reference_radius) =
-        super::framing::reference_frame(&model, request.composite_asset_frame.as_ref());
+        super::framing::reference_frame(&model);
     // 动画采样：在同一时刻求值模型部件增量与镜头状态（任务 4.2）。
     let sampled = request
         .motion
@@ -393,11 +420,6 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
         }),
         _ => None,
     };
-    let native_media = request
-        .composite_asset_frame
-        .as_ref()
-        .map(|frame| frame.media.clone())
-        .unwrap_or_default();
     let background = background_color(&capture.background);
     let pixels_setup = pixels.clone();
     let capture_setup = capture.clone();
@@ -424,21 +446,31 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                 TextureUsages::COPY_SRC | TextureUsages::RENDER_ATTACHMENT;
             let image = images.add(image);
 
-            setup_lights(&mut commands);
+            setup_lights(&mut commands, world.is_some());
+            if let Some(world) = &world {
+                for (instance, model, decoded) in &world_models {
+                    let textures = decoded.iter().map(|(id, image)| (id.clone(), images.add(image.clone()))).collect();
+                    spawn_model(&mut commands, &mut meshes, &mut materials, model,
+                        crate::world_camera_view::instance_pose(instance), &textures);
+                }
+                commands.spawn((
+                    Camera3d::default(),
+                    Camera { clear_color: ClearColorConfig::Custom(background), ..default() },
+                    RenderTarget::Image(image.clone().into()),
+                    crate::world_camera_view::pose(&world.camera),
+                    crate::world_camera_view::projection(&world.camera, size),
+                    Msaa::Sample4, Tonemapping::None, DebandDither::Disabled,
+                ));
+                super::readiness::enqueue_readback(&mut commands, image, pixels_setup.clone(), capture_ready.clone());
+                return;
+            }
             let (entities, bases, part_materials) = spawn_model(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
                 &model,
                 root_transform,
-            );
-            let media_planes = super::media::spawn_media(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut images,
-                &native_media,
-                &root_transform,
+                &default(),
             );
             // 应用部件增量（旋转乘基础旋转，平移/缩放叠加）与透明度。
             // 透明度规则与可见播放同源：1 = 原透明模式、<1 = 专属材质 Blend、0 = 隐藏。
@@ -456,21 +488,6 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                         continue;
                     }
                     let opacity = delta.opacity.max(0.0);
-                    if let Some(item_root) = super::super::part_id::decode_part_id(part_id)
-                        .filter(|decoded| decoded.part_id.is_empty())
-                    {
-                        // 对象根：该对象名下全部块一起变透明（不拆块）。
-                        for (candidate, _) in &part_materials {
-                            if !super::super::part_id::belongs_to_item(candidate, item_root.item_id)
-                            {
-                                continue;
-                            }
-                            if let Some(target) = entities.get(candidate).copied() {
-                                *opacities.entry(target).or_insert(1.0) *= opacity;
-                            }
-                        }
-                        continue;
-                    }
                     if part_materials.contains_key(part_id) {
                         *opacities.entry(*entity).or_insert(1.0) *= opacity;
                     }
@@ -484,32 +501,6 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                         continue;
                     };
                     apply_preview_opacity(&mut commands, &mut materials, entity, &material, value);
-                }
-                // 媒体平面：本身就有专属材质，直接写它的 alpha（对象根透明度同样生效）。
-                for plane in &media_planes {
-                    let Some(item_root) = deltas
-                        .iter()
-                        .find(|(part_id, _)| {
-                            super::super::part_id::decode_part_id(part_id).is_some_and(|decoded| {
-                                decoded.part_id.is_empty()
-                                    && super::super::part_id::belongs_to_item(
-                                        &plane.item_id,
-                                        decoded.item_id,
-                                    )
-                            })
-                        })
-                        .map(|(_, delta)| delta.opacity)
-                    else {
-                        continue;
-                    };
-                    if let Some(mut material) = materials.get_mut(&plane.material) {
-                        if item_root <= 0.0 {
-                            commands.entity(plane.entity).insert(Visibility::Hidden);
-                        } else if item_root < 1.0 {
-                            material.alpha_mode = bevy::material::AlphaMode::Blend;
-                            material.base_color.set_alpha(item_root.clamp(0.0, 1.0));
-                        }
-                    }
                 }
             }
             match &animation_camera {
@@ -564,7 +555,7 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
 }
 
 /// 回读缓冲可能带行对齐填充；裁剪到 `width*height*4`。
-pub(super) fn normalize_readback(data: &[u8], width: u32, height: u32) -> Vec<u8> {
+pub(crate) fn normalize_readback(data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let expected = (width as usize) * (height as usize) * 4;
     let row = width as usize * 4;
     let stride = row.div_ceil(256) * 256;
@@ -583,7 +574,7 @@ pub(super) fn normalize_readback(data: &[u8], width: u32, height: u32) -> Vec<u8
 }
 
 /// RGBA8 → PNG（不新增纹理/外部依赖之外的编码器）。
-pub(super) fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+pub(crate) fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     let expected = (width as usize) * (height as usize) * 4;
     if pixels.len() < expected {
         return Err(format!("像素数据不足：{} < {}", pixels.len(), expected));

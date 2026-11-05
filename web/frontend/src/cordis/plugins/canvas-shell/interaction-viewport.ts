@@ -4,7 +4,7 @@
  *
  * 视口是本地状态：预览写入 `state.viewportPreview`，提交写 localStorage，不发服务端命令。
  */
-import { clampWoohaa3CanvasZoom, compositeAssetScopeGeometry } from "@woohaa3/contracts";
+import { clampWoohaa3CanvasZoom, worldToCanvasPoint, worldToRendererPosition } from "@woohaa3/contracts";
 import { nodeSize } from "./hit-test.js";
 import { applyWheelToViewport, classifyWheelEvent, type NormalizedWheel } from "./input/wheel-gesture.js";
 import { createPerfInputRecorder } from "./input/perf-interaction.js";
@@ -133,27 +133,45 @@ export function createWheelViewport(core: InteractionCore) {
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const node of scene.nodes) {
-      // 复合资产地面范围只在其基准矩形之外扩张；取景必须完整包住可见范围（scope AABB），
-      // 否则新的范围边缘会被裁掉（change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D4）。
-      const ground = node.compositeAsset?.scopeGround;
-      const scope = node.compositeAsset && node.compositeAsset.scopeShape === "isometric-diamond" && ground
-        ? compositeAssetScopeGeometry(
-            { x: node.x, y: node.y, width: node.compositeAsset.width, height: node.compositeAsset.height },
-            "isometric-diamond",
-            32,
-            ground
-          ).aabb
-        : null;
-      const { width, height } = nodeSize(node);
-      const left = scope ? scope.x : node.x;
-      const top = scope ? scope.y : node.y;
-      const right = scope ? scope.x + scope.width : node.x + width;
-      const bottom = scope ? scope.y + scope.height : node.y + height;
+    const include = (left: number, top: number, right: number, bottom: number) => {
       minX = Math.min(minX, left);
       minY = Math.min(minY, top);
       maxX = Math.max(maxX, right);
       maxY = Math.max(maxY, bottom);
+    };
+    const project = (u: number, v: number) => {
+      const renderer = worldToRendererPosition({ u, v, h: 0 });
+      return worldToCanvasPoint([renderer[0], renderer[1], renderer[2]]);
+    };
+    for (const node of scene.nodes) {
+      // 共享世界模型没有卡片：用真实世界原点参与取景，不能再按 (0,0) 的卡片矩形。
+      if (node.sharedWorldInstance) {
+        const position = node.sharedWorldInstance.transform.position;
+        const point = project(position.u, position.v);
+        const pad = 48;
+        include(point.x - pad, point.y - pad, point.x + pad, point.y + pad);
+        continue;
+      }
+      const { width, height } = nodeSize(node);
+      const left = node.x;
+      const top = node.y;
+      include(left, top, node.x + width, node.y + height);
+    }
+    // 导演区只投影地面范围，不进入 nodes；取景必须把四角算进来。
+    for (const area of scene.sceneAreas ?? []) {
+      for (const corner of [
+        { u: area.bounds.min.u, v: area.bounds.min.v },
+        { u: area.bounds.min.u, v: area.bounds.max.v },
+        { u: area.bounds.max.u, v: area.bounds.min.v },
+        { u: area.bounds.max.u, v: area.bounds.max.v }
+      ]) {
+        const point = project(corner.u, corner.v);
+        include(point.x, point.y, point.x, point.y);
+      }
+    }
+    if (![minX, minY, maxX, maxY].every(Number.isFinite)) {
+      applyZoom(1);
+      return;
     }
     const surface = core.surfaceSize();
     const padding = 0.18;

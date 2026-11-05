@@ -21,6 +21,8 @@ import { SqliteYjsRepository } from "./yjs.js";
 import { SqliteNodeHistoryRepository } from "./node-history.js";
 import { CanvasStorageError } from "../core/index.js";
 import { SqliteCanvasImportStore } from "./canvas-import.js";
+import { SqliteSpatialLeaseStore } from "./spatial-leases.js";
+import { loadNodeSqlite } from "./sqlite-loader.js";
 
 const NOW = "2026-10-13T00:00:00.000Z";
 const tempDirs: string[] = [];
@@ -241,6 +243,20 @@ describe("导入存储：作业幂等 / fencing / 恢复（任务 4.6）", () =>
 });
 
 describe("导入存储：删除 tombstone 与反复活（任务 7.1 / 7.2）", () => {
+  it("拒绝删除仍有占用的导入画布并保留所有内容", () => {
+    const { store, dbPath } = openStore();
+    store.createJob({ jobId: "j1", targetCanvasId: "legacy-canvas-1", binding: binding(), subject: "creator-1", totalMedia: 0 });
+    store.beginAttempt("j1", "reading");
+    store.commitImport(commitInput(store, "j1"));
+    const db = new (loadNodeSqlite().DatabaseSync)(dbPath);
+    const leases = new SqliteSpatialLeaseStore(db, { eligible: () => true, stopped: () => true });
+    leases.acquire({ requestId: "request", canvasId: "legacy-canvas-1", runId: "run", epoch: 1, executionId: "exec", scope: { scope: { kind: "scene-area", areaId: "area" }, scopeVersion: "v1" }, writable: [{ kind: "instance", instanceId: "model", version: "v1" }], readOnly: [] });
+    expect(() => store.deleteImportedCanvas("legacy-canvas-1")).toThrow();
+    expect(store.hasCanvas("legacy-canvas-1")).toBe(true);
+    expect(store.getReceiptState("legacy-canvas-1")).toBe("ready");
+    expect(store.debugQuery("SELECT 1 FROM canvas_yjs_documents WHERE canvas_id = ?", "legacy-canvas-1")).toHaveLength(1);
+    db.close();
+  });
   it("删除后 receipt 保留 state=deleted，来源绑定不被级联删除", () => {
     const { store } = openStore();
     store.createJob({ jobId: "j1", targetCanvasId: "legacy-canvas-1", binding: binding(), subject: "creator-1", totalMedia: 0 });

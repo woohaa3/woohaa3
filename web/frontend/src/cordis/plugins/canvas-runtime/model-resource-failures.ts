@@ -94,7 +94,7 @@ export class ModelResourceFailures {
       const failure = this.failed.get(key);
       if (!failure) return node;
       const retained = previous.get(node.id);
-      return { ...node, model: retained?.model, compositeAsset: retained?.model ? retained.compositeAsset : node.compositeAsset };
+      return { ...node, model: retained?.model };
     });
     for (const key of this.failed.keys()) if (!activeKeys.has(key)) this.failed.delete(key);
     // 提示按**原始**场景引用统计：失败节点已被替换成上一帧合法引用（可能没有 model），

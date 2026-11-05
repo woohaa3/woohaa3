@@ -8,7 +8,6 @@ import {
   aggregateConnectProjection,
   aggregatePreviewEdges,
   aggregateTargetAt,
-  expandSelectionMembers,
   hitAggregateHandle,
   planAggregateBatchConnect,
   sceneAggregateHandleGeometry,
@@ -83,19 +82,6 @@ describe("选区把手几何（design D1/D2）", () => {
   });
 });
 
-describe("成员展开（design D3）", () => {
-  it("group 递归展开为非 group 叶子；普通节点保留自身", () => {
-    const canvasState = canvas([
-      { id: "g", type: "group", x: 0, y: 0, width: 500, height: 400 },
-      { id: "m1", type: "image", parentId: "g", x: 20, y: 20 },
-      { id: "m2", type: "image", parentId: "g", x: 20, y: 200 },
-      { id: "t", type: "image", x: 900, y: 900 },
-    ]);
-    expect(expandSelectionMembers(canvasState, ["g"]).map((n) => n.id).sort()).toEqual(["m1", "m2"]);
-    expect(expandSelectionMembers(canvasState, ["g", "t"]).map((n) => n.id).sort()).toEqual(["m1", "m2", "t"]);
-  });
-});
-
 describe("批量规划与去重（design D3）", () => {
   it("输出把手：每个成员 -> 目标；输入把手：目标 -> 成员", () => {
     const canvasState = canvas([
@@ -130,12 +116,7 @@ describe("批量规划与去重（design D3）", () => {
     expect((out[0] as { edge: { source: string } }).edge.source).toBe("b");
   });
 
-  it("目标为 group 或纯备注时无合法边（空批次）", () => {
-    const withGroupTarget = canvas([
-      { id: "a", x: 0, y: 0 },
-      { id: "g", type: "group", x: 400, y: 0, width: 300, height: 200 },
-    ]);
-    expect(planAggregateBatchConnect(withGroupTarget, ["a"], "g", "output")).toHaveLength(0);
+  it("目标为纯备注时无合法边（空批次）", () => {
     const withNote = canvas(
       [
         { id: "a", x: 0, y: 0 },

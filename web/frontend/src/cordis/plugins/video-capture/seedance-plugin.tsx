@@ -14,7 +14,7 @@
 import type { Plugin } from "@deepseek-ai/cordis";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { definePlugin } from "../../plugin.js";
-import { createVideoDialogsController, type VideoDialogsController } from "./controller.js";
+import { createVideoDialogsController, resolveOwnReadyVideo, type VideoDialogsController } from "./controller.js";
 import { SeedanceVideoPanel } from "./seedance-panel.js";
 import type { ModelPanelBinding } from "../../contract/model-interaction.js";
 import type { CanvasNodeData, ServerCanvas, VideoEditIntent } from "@woohaa3/contracts";
@@ -42,6 +42,38 @@ export function seedanceVideoInteractionExtension(): Plugin.Function<void> {
         if (!nodeId) return;
         const canvas = woohaa3CanvasStore.getState().canvas;
         videoDialogs.openOwnOutputFrameCapture({ canvas, nodeId });
+      });
+
+      const resolveEditEntry = (nodeId: string, writable: boolean) => {
+        const canvas = woohaa3CanvasStore.getState().canvas;
+        if (!resolveOwnReadyVideo(canvas, nodeId).ok) return null;
+        const status = canvas?.nodeData[nodeId]?.taskStatus;
+        return videoDialogs.controller.resolveEntry({
+          canvas,
+          nodeId,
+          writable: writable && ctx.canvasSession.isWritable(),
+          pending: ctx.canvasSession.getStatus().remote.pendingCount > 0,
+          taskPending: status === "pending" || status === "processing"
+        });
+      };
+      // 普通已就绪视频也可整理区间与标注，不依赖所选生成模型的交互面板。
+      const removeEditAction = ctx.slots.register("canvas.node-action", {
+        id: "video-edit-annotations",
+        owner: SEEDANCE_INTERACTION_PLUGIN_ID,
+        order: -10,
+        describe: ({ nodeId, writable }) => {
+          const entry = resolveEditEntry(nodeId, writable);
+          return entry ? {
+            label: "编辑视频标注",
+            icon: "edit",
+            enabled: entry.ok,
+            ...(!entry.ok ? { reason: entry.reason } : {})
+          } : null;
+        },
+        activate: ({ nodeId, writable }) => {
+          if (!resolveEditEntry(nodeId, writable)?.ok) return;
+          videoDialogs.controller.openEdit({ canvas: woohaa3CanvasStore.getState().canvas, nodeId, ownOutput: true });
+        }
       });
 
       // Panel + Dialog 的 disposer 由同一 scope 收集；部分激活失败时 Cordis 反序回滚。
@@ -77,6 +109,7 @@ export function seedanceVideoInteractionExtension(): Plugin.Function<void> {
       ctx.effect(
         () => () => {
           offFrameCapture();
+          removeEditAction();
           videoDialogs.dispose();
           disposePanel();
         },
@@ -85,7 +118,7 @@ export function seedanceVideoInteractionExtension(): Plugin.Function<void> {
     },
     {
       name: SEEDANCE_INTERACTION_PLUGIN_ID,
-      inject: ["dialogs", "mediaRemote", "canvasSession", "modelInteractions"]
+      inject: ["dialogs", "mediaRemote", "canvasSession", "canvasScope", "modelInteractions", "slots"]
     }
   );
 }
@@ -113,5 +146,5 @@ export function readCanonicalIntents(nodeId: string): readonly VideoEditIntent[]
 export function readNodePosition(nodeId: string): { x: number; y: number } | null {
   const canvas: ServerCanvas | null = woohaa3CanvasStore.getState().canvas;
   const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-  return node ? { x: node.position.x, y: node.position.y } : null;
+  return node?.position ? { x: node.position.x, y: node.position.y } : null;
 }

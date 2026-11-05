@@ -5,9 +5,12 @@
  * 旧实现把 cursor 推到全局高水位，失败记录在本进程内再也不会被读到，画布节点永久 processing。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { TaskExecutionDetail } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, type CanvasCommand, type TaskExecutionDetail } from "@woohaa3/contracts";
+import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
+import { CanvasRoom } from "../sync/room.js";
+import { InMemoryYjsDocumentRepository } from "../sync/in-memory-yjs-repository.js";
 import { createTaskResultConsumer, PROJECTION_RETRY_BASE_MS } from "./result-consumer.js";
-import type { CanvasTaskProjector, ProjectionOutcome, ProjectionReceiptStore } from "../sync/index.js";
+import { CanvasTaskProjector, InMemoryProjectionReceiptStore, type ProjectionOutcome, type ProjectionReceiptStore } from "../sync/index.js";
 import type { CanvasTaskClient } from "../clients/task-client.js";
 
 function historyRecord(revision: number): TaskExecutionDetail {
@@ -154,5 +157,127 @@ describe("createTaskResultConsumer 补偿重试", () => {
     const summary = await h.consumer.reconcileOnce();
     expect(summary).toMatchObject({ projected: 0, failed: 0 });
     expect(h.projections).toHaveLength(0);
+  });
+});
+
+// Exercise the actual history consumer, authority room and projector together:
+// Task's safe history has no jobId; the accepted job must remain authoritative.
+describe("Task history preserves the accepted job identity", () => {
+  const canvasId = "canvas-1";
+  const now = "2026-10-20T10:57:52.202Z";
+
+  async function acceptedRoom(jobId: string | null) {
+    const repository = new InMemoryYjsDocumentRepository();
+    const room = new CanvasRoom({ canvasId, repository, now: () => now });
+    await room.initialize({ canvas: createEmptyWoohaa3ServerCanvas(canvasId, now), roomEpoch: "epoch-1", createdAt: now });
+    const commands: CanvasCommand[] = [
+      { type: "node.add", node: { id: "node-1", type: "image", position: { x: 0, y: 0 } } },
+      { type: "nodeData.patch", nodeId: "node-1", value: { activeRunId: "run-1", taskStatus: "processing" } }
+    ];
+    if (jobId) commands.push({ type: "job.upsert", job: {
+      id: jobId, nodeId: "node-1", runId: "run-1", taskId: "run-1", status: "running", updatedAt: now
+    } });
+    expect((await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId,
+      commandId: "accepted-run", baseRevision: 0, actorId: "canvas-run-service", commands })).ok).toBe(true);
+    return { room, repository };
+  }
+
+  function published(room: CanvasRoom) {
+    const exported = room.exportCanvas();
+    if (!exported.ok) throw new Error(exported.message);
+    return exported.canvas;
+  }
+
+  function realConsumer(room: CanvasRoom, item = historyRecord(5)) {
+    const archived: string[] = [];
+    const projector = new CanvasTaskProjector({
+      resolveRoom: async id => id === canvasId ? room : null,
+      receipts: new InMemoryProjectionReceiptStore(),
+      registerHistory: async record => { archived.push(record.jobId); },
+      registerFailure: async record => { archived.push(record.jobId); },
+      now: () => now
+    });
+    const taskClient = { history: async ({ after = 0 }: { after?: number }) => ({
+      items: item.recordRevision > after ? [item] : [], cursor: item.recordRevision
+    }) } as unknown as CanvasTaskClient;
+    return { consumer: createTaskResultConsumer({ projector, taskClient,
+      receipts: new InMemoryProjectionReceiptStore() }), archived };
+  }
+
+  it.each(["custom-job-1", "agent-job-1", "job-run-1"])("settles %s without creating another job", async jobId => {
+    const { room } = await acceptedRoom(jobId);
+    const { consumer, archived } = realConsumer(room);
+    expect(await consumer.reconcileOnce()).toMatchObject({ projected: 1, failed: 0 });
+    expect(published(room).jobs).toEqual([expect.objectContaining({ id: jobId, status: "success", runId: "run-1", taskId: "run-1" })]);
+    expect(archived).toEqual([jobId]);
+    expect(published(room).nodeData["node-1"].taskStatus).toBe("successed");
+  });
+
+  it.each(["failed", "cancelled"] as const)("settles the original job for a %s terminal result", async state => {
+    const { room } = await acceptedRoom("custom-job-1");
+    const { consumer, archived } = realConsumer(room, { ...historyRecord(5), state, result: undefined, error: { message: "stopped" } });
+    expect(await consumer.reconcileOnce()).toMatchObject({ projected: 1, failed: 0 });
+    expect(published(room).jobs).toEqual([expect.objectContaining({ id: "custom-job-1", status: "failed", error: "stopped" })]);
+    expect(archived).toEqual(["custom-job-1"]);
+    expect(published(room).nodeData["node-1"].taskStatus).toBe(state);
+  });
+
+  it("recovers a nondefault accepted job after a room and consumer restart, without reexecuting Task", async () => {
+    const { room, repository } = await acceptedRoom("custom-job-1");
+    room.dispose();
+    const recovered = new CanvasRoom({ canvasId, repository, now: () => now });
+    expect(await recovered.load()).toEqual({ ok: true });
+    const { consumer } = realConsumer(recovered);
+    expect(await consumer.reconcileOnce()).toMatchObject({ projected: 1, failed: 0 });
+    const revision = published(recovered).revision;
+    recovered.dispose();
+    const again = new CanvasRoom({ canvasId, repository, now: () => now });
+    expect(await again.load()).toEqual({ ok: true });
+    expect(await realConsumer(again).consumer.reconcileOnce()).toMatchObject({ duplicate: 1, failed: 0 });
+    expect(published(again).revision).toBe(revision);
+    expect(published(again).jobs).toEqual([expect.objectContaining({ id: "custom-job-1", status: "success" })]);
+  });
+
+  async function beginNewer(room: CanvasRoom) {
+    expect((await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId,
+      commandId: "newer-run", baseRevision: room.currentRevision, actorId: "canvas-run-service", commands: [
+        { type: "nodeData.patch", nodeId: "node-1", value: { activeRunId: "run-2", taskStatus: "processing", result: { kind: "text", text: "newer draft" } } },
+        { type: "job.upsert", job: { id: "newer-job-2", nodeId: "node-1", runId: "run-2", taskId: "run-2", status: "running", updatedAt: now } }
+      ] })).ok).toBe(true);
+  }
+
+  function expectLateSettlement(room: CanvasRoom) {
+    expect(published(room).jobs).toHaveLength(2);
+    expect(published(room).jobs.find(job => job.id === "custom-job-1")?.status).toBe("success");
+    expect(published(room).jobs.find(job => job.id === "newer-job-2")?.status).toBe("running");
+    expect(published(room).nodeData["node-1"]).toMatchObject({ activeRunId: "run-2", taskStatus: "processing", result: { kind: "text", text: "newer draft" } });
+  }
+
+  it("archives and settles a late run's accepted job without touching a newer run", async () => {
+    const { room } = await acceptedRoom("custom-job-1");
+    await beginNewer(room);
+    const { consumer, archived } = realConsumer(room);
+    expect(await consumer.reconcileOnce()).toMatchObject({ skipped: 1, failed: 0 });
+    expectLateSettlement(room);
+    expect(archived).toEqual(["custom-job-1"]);
+  });
+
+  it("retains the original job when a newer begin wins the authority transaction race", async () => {
+    const { room } = await acceptedRoom("custom-job-1");
+    const submitDerived = room.submitDerived.bind(room);
+    vi.spyOn(room, "submitDerived").mockImplementationOnce(async input => {
+      await beginNewer(room);
+      return submitDerived(input);
+    });
+    const { consumer, archived } = realConsumer(room);
+    expect(await consumer.reconcileOnce()).toMatchObject({ skipped: 1, failed: 0 });
+    expectLateSettlement(room);
+    expect(archived.every(jobId => jobId === "custom-job-1")).toBe(true);
+  });
+
+  it("keeps legacy history recovery when no accepted durable job is present", async () => {
+    const { room } = await acceptedRoom(null);
+    expect(await realConsumer(room).consumer.reconcileOnce()).toMatchObject({ projected: 1, failed: 0 });
+    expect(published(room).jobs).toEqual([expect.objectContaining({ id: "job-run-1", status: "success" })]);
   });
 });

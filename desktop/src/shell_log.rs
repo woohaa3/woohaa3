@@ -9,9 +9,14 @@
 //! - 级别过滤把 `debug` 挡在生产构建之外。调试构建的文件出口同样收到 `debug`。
 //!   `log::Level` 的序是 `Error < Warn < Info < Debug < Trace`，比较用 `level <= max`。
 //!
+//! 文件出口是旁路：官方目录可能因权限/安全软件不可写（Windows 上确有其事）。此时依次
+//! 降级到宿主日志目录（`WOOHAA3_LOG_DIR` / 数据目录下的 `.woohaa3/logs`）、本次运行目录、
+//! 数据目录、临时目录；全部失败就只保留 stderr/stdout，绝不让日志初始化阻断桌面壳启动。
+//!
 //! **它不替代 `diagnostics`**：那边保存的是"本次运行的会话账本"（run 隔离、崩溃恢复、
 //! incidents、上传 spool），语义是会话而不是连续日志。两者互补：
 //! 连续日志回答"最近发生了什么"，run journal 回答"那次崩溃前发生了什么"。
+use tauri::plugin::{Builder as PluginBuilder, TauriPlugin};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 /// 壳自己的连续日志目标。依赖库的 `debug` 仍走各自 target；
@@ -72,23 +77,116 @@ fn file_accepts(level: log::Level, debug_build: bool) -> bool {
     level <= max
 }
 
-/// 构造插件。显式性能采集与发行构建只记 `info` 及以上，避免依赖的逐帧 debug 干扰测量。
-pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    let debug_build = cfg!(debug_assertions) && !crate::performance_capture::enabled();
-    tauri_plugin_log::Builder::new()
+/// 宿主日志目录约定：`WOOHAA3_LOG_DIR`，否则数据目录下的 `.woohaa3/logs`。
+fn host_log_dir() -> Option<std::path::PathBuf> {
+    let data = crate::diagnostics::data_directory();
+    if let Some(raw) = std::env::var_os("WOOHAA3_LOG_DIR") {
+        let raw = std::path::PathBuf::from(raw);
+        if raw.as_os_str().is_empty() {
+            return None;
+        }
+        return Some(if raw.is_absolute() {
+            raw
+        } else {
+            data?.join(raw)
+        });
+    }
+    data.map(|data| data.join(".woohaa3").join("logs"))
+}
+
+/// 文件出口候选，按优先级排列：官方目录 → 宿主 `.woohaa3` 日志 → 本次运行目录 →
+/// 数据目录 → 临时目录。
+fn file_targets() -> Vec<(&'static str, TargetKind)> {
+    let file_name = Some(SHELL_LOG_FILE.to_owned());
+    let mut targets = vec![(
+        "app_log_dir",
+        TargetKind::LogDir {
+            file_name: file_name.clone(),
+        },
+    )];
+    let mut seen = Vec::new();
+    let mut push_folder = |label: &'static str, path: std::path::PathBuf| {
+        if !seen.contains(&path) {
+            targets.push((
+                label,
+                TargetKind::Folder {
+                    path: path.clone(),
+                    file_name: file_name.clone(),
+                },
+            ));
+            seen.push(path);
+        }
+    };
+    if let Some(dir) = host_log_dir() {
+        push_folder("host_log_dir", dir);
+    }
+    if let Some(run) = crate::diagnostics::run_dir() {
+        push_folder("run_dir", run.to_path_buf());
+    }
+    if let Some(data) = crate::diagnostics::data_directory() {
+        push_folder("data_dir", data.join("logs"));
+    }
+    push_folder(
+        "temp_dir",
+        std::env::temp_dir().join("woohaa-desktop").join("logs"),
+    );
+    targets
+}
+
+/// 只构造 logger，不注册；注册失败（已有全局 logger）由调用方处理。
+fn build_logger(
+    app: &tauri::AppHandle,
+    kind: TargetKind,
+    debug_build: bool,
+) -> Result<(log::LevelFilter, Box<dyn log::Log>), String> {
+    let level = if debug_build {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+    let (_, max_level, logger) = tauri_plugin_log::Builder::new()
         .targets([
             Target::new(TargetKind::Stdout),
-            Target::new(TargetKind::LogDir {
-                file_name: Some(SHELL_LOG_FILE.to_owned())
-            })
-            .filter(move |metadata| file_accepts(metadata.level(), debug_build))
+            Target::new(kind)
+                .filter(move |metadata| file_accepts(metadata.level(), debug_build)),
         ])
         .rotation_strategy(RotationStrategy::KeepSome(KEEP_SEGMENTS))
         .timezone_strategy(TimezoneStrategy::UseLocal)
-        .level(if debug_build {
-            log::LevelFilter::Debug
-        } else {
-            log::LevelFilter::Info
+        .level(level)
+        .split(app)
+        .map_err(|error| error.to_string())?;
+    Ok((max_level, logger))
+}
+
+/// 构造插件。文件出口不可用时逐级降级，绝不阻断桌面壳启动。
+///
+/// 发行构建只记 `info` 及以上；调试构建放开到 `debug`。
+pub fn plugin() -> TauriPlugin<tauri::Wry> {
+    let debug_build = cfg!(debug_assertions) && !crate::performance_capture::enabled();
+    PluginBuilder::new("log")
+        .setup(move |app, _api| {
+            let mut last_error = String::new();
+            for (label, kind) in file_targets() {
+                match build_logger(app, kind, debug_build) {
+                    Ok((max_level, logger)) => {
+                        if let Err(error) = tauri_plugin_log::attach_logger(max_level, logger) {
+                            // 已有全局 logger：保留既有出口，不再追加文件出口。
+                            eprintln!("[shell-log] 全局 logger 已存在，保留现有出口：{error}");
+                            return Ok(());
+                        }
+                        if label != "app_log_dir" {
+                            eprintln!("[shell-log] 文件日志降级到 {label}：{last_error}");
+                        }
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        last_error = format!("{label}: {error}");
+                        eprintln!("[shell-log] 文件日志落点不可用：{last_error}");
+                    }
+                }
+            }
+            eprintln!("[shell-log] 文件日志已关闭，仅保留 stderr/stdout：{last_error}");
+            Ok(())
         })
         .build()
 }

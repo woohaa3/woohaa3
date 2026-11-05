@@ -13,7 +13,7 @@
  * 具体模型 React UI 由 Registry 解析出的 `definition.Panel` 直接渲染；Host 不含
  * audio/video/`edit_video` 专用布局分支，也不按 providerId 选择组件。
  */
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
 import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
 import { Button } from "@woohaa3/ui";
@@ -22,9 +22,6 @@ import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";
 import { derivePanelDraft, derivePanelTaskState } from "./panel-state.js";
 import { ModelParameterPanel } from "./model-parameter-panel.js";
-import { ShotMediaParametersPanel } from "./shot-media-parameters-panel.js";
-import { readShotMediaParameters } from "./shot-media-parameters.js";
-import { filmSetAnimationsOf, filmSetClipPrecondition, managedShotPreviewOwnershipOf, readFilmSetAnimationProjection, type FilmSetClipPatchOp } from "@woohaa3/contracts";
 import {
   EMPTY_UPSTREAM_TEXT_MESSAGE,
   upstreamTextIsEmpty
@@ -54,6 +51,7 @@ import {
   resolveSelectedModelKey
 } from "./node-panel-helpers.js";
 import { resolveModelExecutionContext } from "./model-execution-context.js";
+import { explicitWorldCaptureSelection } from "./capture-camera.js";
 import { createModelDraftStore } from "./model-draft.js";
 import {
   ModelInteractionDiagnosticView,
@@ -92,6 +90,11 @@ function executionButtonOrigin(button: HTMLButtonElement | null): ExecutionOrigi
 
 export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const launchSurface = useRef<HTMLDivElement>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const launchOrigin = useRef<ExecutionOrigin>();
   const captureLaunchOrigin = (event: SyntheticEvent<HTMLDivElement>) => {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
@@ -166,12 +169,6 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const pendingSelection = Boolean(context && !canonicalNodeIds.has(context.nodeId));
 
   const panelKind = context?.panelKind ?? null;
-  // 片场组外显的镜头节点是 owner-managed 的标准 image/video：没有可提交的生成配置，
-  // 选中时只展示镜头输出参数，不沿用图片/视频生成面板。
-  const shotMediaParameters = useMemo(
-    () => readShotMediaParameters(workingCanvas, context?.nodeId ?? null),
-    [workingCanvas, context]
-  );
   const modelType = panelKind ? modelTypeForPanelKind(panelKind) : null;
   const typedModels = useMemo(
     () => (catalog && panelKind ? allModelsForPanel(catalog, panelKind) : []),
@@ -208,6 +205,14 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     () => typedModels.find((entry) => entry.modelKey === targetModelKey) ?? null,
     [typedModels, targetModelKey]
   );
+  // T10: capture framing is explicit-only. The panel never scans the canvas for a
+  // camera card, so an unrelated world camera cannot change an ordinary generation.
+  // T09/T11b supply the production UI that passes `captureCameraId`.
+  const worldCapture = useMemo(
+    () => explicitWorldCaptureSelection(props.captureCameraId),
+    [props.captureCameraId]
+  );
+
   const definition = useMemo(
     () => (model ? registry.resolve(model.interaction) : null),
     [model, registry]
@@ -258,14 +263,13 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         ? props.submitCoordinator ?? createSubmitCoordinator({
             store: woohaa3CanvasStore,
             client: runClient,
-            ...(activity ? { activity } : {})
+            ...(activity ? { activity } : {}),
+            isCurrent: () => mounted.current
           })
         : null,
     [canvasId, runClient, activity, props.submitCoordinator]
   );
-  const waitingMessage = useSyncExternalStore(submitCoordinator?.subscribeWaiting ?? (() => () => {}),
-    () => submitCoordinator?.waitingMessage?.(selectedNodeId ?? ""), () => undefined);
-  const executionMessage = submitError ?? waitingMessage;
+  const executionMessage = submitError;
 
   const references = useMemo<ModelReferenceItem[]>(() => {
     if (!canvas || !context || !panelKind || !catalog || !targetModelKey) return [];
@@ -402,17 +406,22 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         prompt: input.prompt,
         parameters: input.parameters,
         catalog,
-        expectedModelType: modelTypeForPanelKind(panelKind)
+        expectedModelType: modelTypeForPanelKind(panelKind),
+        ...(worldCapture ? { worldCapture } : {})
       });
       if (!outcome.ok) {
+        // Page/panel disposal or scope change: do not paint stale failure feedback.
+        if (!mounted.current || outcome.code === "stale-scope") {
+          return { ok: false, error: outcome.error };
+        }
         draftStore.patch(nodeId, targetModelKey, { prompt: input.prompt });
         if (outcome.error === EMPTY_UPSTREAM_TEXT_MESSAGE) showEmptyUpstreamAlert();
-        else if (!submitCoordinator.waitingMessage) setSubmitError(outcome.error);
+        else setSubmitError(outcome.error);
         return { ok: false, error: outcome.error };
       }
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
     },
-    [catalog, canvas, catalogState, context, disabledReason, draftStore, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey]
+    [catalog, canvas, catalogState, context, disabledReason, draftStore, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
   );
 
   const submitIntent = useCallback(
@@ -443,34 +452,6 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   });
 
   if (!context) return null;
-
-  if (shotMediaParameters) {
-    const shotExpanded = resolveExecutionPanelSurface(presentation, context.nodeType) === "expanded";
-    return (
-      <ExecutionPanelSurface nodeId={context.nodeId} presentation={shotExpanded ? "expanded" : "compact"} runtime={runtime}>
-        <ShotMediaParametersPanel
-          nodeId={context.nodeId}
-          parameters={shotMediaParameters}
-          writable={writable && !!props.recordShotCommands}
-          onChange={async (change) => {
-            const current = woohaa3CanvasStore.getState();
-            const source = current.working ?? current.canvas;
-            const owner = source && managedShotPreviewOwnershipOf(source.nodeData[context.nodeId]);
-            const animation = owner && readFilmSetAnimationProjection(source, owner.filmSetNodeId);
-            const collection = animation && filmSetAnimationsOf(animation);
-            const clip = collection?.clips.find(entry => entry.id === owner?.clipId);
-            if (!owner || !collection || !clip || !props.recordShotCommands) return "镜头已不可用";
-            const op: FilmSetClipPatchOp = change.kind === "aspect"
-              ? { kind: "camera", initialCamera: { ...clip.initialCamera, aspect: change.aspect } }
-              : { kind: "timeline", timeline: { ...clip.timeline, ...change.timeline } };
-            const result = await props.recordShotCommands([{ type: "filmSet.clipPatch", nodeId: owner.filmSetNodeId, clipId: owner.clipId, op, expectedHash: filmSetClipPrecondition(collection, owner.clipId, op) }], "修改拍摄镜头");
-            return result.ok ? null : result.reason ?? "镜头修改失败";
-          }}
-          onClose={() => submitIntent({ kind: "close" })}
-        />
-      </ExecutionPanelSurface>
-    );
-  }
 
   if (!panelKind) {
     return (

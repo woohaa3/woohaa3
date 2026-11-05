@@ -32,7 +32,8 @@ export type Woohaa3CanvasViewport = Woohaa3CanvasPosition & {
 export type Woohaa3CanvasSerializedNode = {
   id: string;
   type: Woohaa3CanvasNodeType;
-  position: Woohaa3CanvasPosition;
+  /** 2D 卡片布局；导演区与共享世界模型没有卡片，序列化时省略。 */
+  position?: Woohaa3CanvasPosition;
   width?: number;
   height?: number;
   parentId?: string;
@@ -136,10 +137,11 @@ function readNode(input: unknown): Woohaa3CanvasSerializedNode | null {
   const id = readString(input.id);
   const type = readString(input.type);
   if (!id || !type) return null;
+  const position = isRecord(input.position) ? readPosition(input.position) : undefined;
   return {
     id,
     type,
-    position: readPosition(input.position),
+    ...(position ? { position } : {}),
     width: readPositiveNumber(input.width),
     height: readPositiveNumber(input.height),
     parentId: readString(input.parentId),

@@ -30,23 +30,6 @@ describe("模型编辑/镜头截图静态审计", () => {
     expect(commands).toContain('"nodeData.patch"');
   });
 
-  it("截图复用既有 Media upload 与原子 asset.upsert + node.add，不新增媒体协议", () => {
-    const capture = read("web/frontend/src/cordis/plugins/model-editor/model-shot-capture.ts");
-    expect(capture).toContain("planUploadedNode");
-    expect(capture).toContain("buildUploadedAsset");
-    // 不自行发起新的 fetch/协议。
-    expect(capture.includes("fetch(")).toBe(false);
-  });
-
-  it("截图会话不把 Blob/object URL 写入 nodeData 或命令", () => {
-    const capture = read("web/frontend/src/cordis/plugins/model-editor/model-shot-capture.ts");
-    // 命令构造路径不含 data:/blob: URL 字面量，也不创建 object URL。
-    expect(capture.includes("data:image")).toBe(false);
-    expect(capture.includes("createObjectURL")).toBe(false);
-    // 不把内部 Blob 引用塞进命令 value。
-    expect(capture.includes("url: blob")).toBe(false);
-  });
-
   it("capture camera 在同一 Bevy App 内（不创建第二个 canvas/window）", () => {
     // change: add-reusable-bevy-shot-camera —— 离屏 Image/capture 相机由可复用 shot_camera 模块
     // 拥有；兼容 adapter（capture.rs）只路由请求，不再自行创建相机。

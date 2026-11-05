@@ -54,10 +54,8 @@ it("连续滚动只提交视口；重复停止播放不触发 full，停止滚�
     expect(scenes).toHaveLength(fullBefore);
     expect(sceneDiagnostics.sceneBuilds).toBe(0);
     expect(query).not.toHaveBeenCalled();
-    expect(hoverNodeStore.getPlaybackSnapshot().blocked).toBe(true);
     vi.advanceTimersByTime(120); advance();
     expect(query).toHaveBeenCalledOnce();
-    expect(hoverNodeStore.getPlaybackSnapshot().blocked).toBe(false);
     expect(host.controller()?.viewport()).toMatchObject({ x: -120, y: -60 });
   } finally { unsubscribeScene(); unsubscribe(); host.dispose(); canvas.remove(); }
 });

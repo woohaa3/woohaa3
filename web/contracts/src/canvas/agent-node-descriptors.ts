@@ -12,30 +12,18 @@ import { effectiveCanvasNodeSize } from "./node-dimensions.js";
 import { NODE_TYPE_TO_TASK_KIND, type CanvasTaskKind } from "../task/dto.js";
 import type { CanvasNodeData } from "./domain/types.js";
 import type { CanvasNodeTaskStatus } from "../task/dto.js";
-import { createFilmSetGroupMarker, isFilmSetGroupNode } from "./film-set-group.js";
-import { createModel3DNodeData, model3DNodeDataFields, defaultInitialShotCamera } from "./animation-snapshot.js";
+import { createModel3DNodeData, model3DNodeDataFields } from "./animation-snapshot.js";
 import { MODEL_SCRIPT_V2_VERSION } from "./model-script.js";
 import { isModelAuthoringNodeType } from "./domain/core/input-role.js";
-import { COMPOSITE_ASSET_NODE_TYPE, isFilmSetNode } from "./domain/core/composite-asset-identity.js";
+import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 
-/**
- * 片场（复合资产 + `extensionId="film-set"`）展示名事实源
- * （change: 2026-10-11-extract-film-set-extension，D1/D6/D11）。
- *
- * 重新导出无依赖模块中的常量，避免 `normalization` 侧的模块初始化循环；新建默认标题、
- * UI 分类标签、MCP 可读描述与旧默认标题幂等迁移共用同一值。
- */
-export { DIRECTOR_STUDIO_DEFAULT_TITLE, LEGACY_ANIMATION_DEFAULT_TITLE } from "./director-studio-title.js";
-import { DIRECTOR_STUDIO_DEFAULT_TITLE } from "./director-studio-title.js";
-
-/** 对外暴露的语义节点种类。`model` 与 `film-set` 都是自包含的 3D 内容节点。 */
-export type AgentSemanticKind = "text" | "image" | "video" | "audio" | "model" | "film-set";
+/** 对外暴露的语义节点种类。`model` 是自包含的 3D 内容节点。 */
+export type AgentSemanticKind = "text" | "image" | "video" | "audio" | "model";
 
 export const AGENT_SEMANTIC_KINDS: readonly AgentSemanticKind[] = [
   "text",
   "image",
   "model",
-  "film-set",
   "video",
   "audio"
 ];
@@ -70,7 +58,6 @@ export const AGENT_NODE_DESCRIPTORS: readonly AgentNodeDescriptor[] = [
   descriptor("text", "text", "文本", { task: true, prompt: true, executable: true, sourceLabel: "文本" }),
   descriptor("image", "image", "图片", { task: true, prompt: true, executable: true, sourceLabel: "图片" }),
   descriptor("model", "model3d", "模型", { prompt: true, executable: false, sourceLabel: "模型" }),
-  descriptor("film-set", "group", "片场", { prompt: false, executable: false, sourceLabel: "片场" }),
   descriptor("video", "video", "视频", { task: true, prompt: true, executable: true, sourceLabel: "" }),
   descriptor("audio", "audio", "音频", { task: true, prompt: true, executable: true, sourceLabel: "" })
 ];
@@ -105,11 +92,9 @@ export function findAgentNodeDescriptor(kind: string): AgentNodeDescriptor | nul
 }
 
 export function agentDescriptorForCanonicalType(canonicalType: string, nodeData?: unknown): AgentNodeDescriptor | null {
-  if (canonicalType === "group") return isFilmSetGroupNode({ type: canonicalType }, nodeData) ? findAgentNodeDescriptor("film-set") : null;
-  // composite-asset 还承载其它扩展；只有明确的 film-set 身份才投影为片场语义，未知/其它业务保持模型兼容。
-  if (canonicalType === COMPOSITE_ASSET_NODE_TYPE) {
-    return isFilmSetNode(canonicalType, nodeData) ? findAgentNodeDescriptor("film-set") : findAgentNodeDescriptor("model");
-  }
+  void nodeData;
+  // composite-asset 承载扩展内容；语义上仍按模型兼容面投影。
+  if (canonicalType === COMPOSITE_ASSET_NODE_TYPE) return findAgentNodeDescriptor("model");
   if (isModelAuthoringNodeType(canonicalType)) return findAgentNodeDescriptor("model");
   return AGENT_NODE_DESCRIPTORS.find((entry) => entry.canonicalType === canonicalType) ?? null;
 }
@@ -121,7 +106,6 @@ export function agentDescriptorForCanonicalType(canonicalType: string, nodeData?
  * （canonical model3d）携带合法占位模型，不预填任务字段。
  */
 export function defaultAgentNodeData(kind: string): CanvasNodeData | undefined {
-  if (kind === "film-set") return { title: DIRECTOR_STUDIO_DEFAULT_TITLE, filmSetGroup: createFilmSetGroupMarker({ cameras: [{ id: "scene-camera", ...defaultInitialShotCamera() }] }) };
   const descriptor = findAgentNodeDescriptor(kind);
   if (descriptor?.canonicalType === "model3d" || descriptor?.canonicalType === COMPOSITE_ASSET_NODE_TYPE) {
     return defaultSelfContained3DNodeData(descriptor.canonicalType);

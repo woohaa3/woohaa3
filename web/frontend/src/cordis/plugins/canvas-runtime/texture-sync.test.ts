@@ -191,6 +191,41 @@ describe("createTextureSync", () => {
     sync.dispose();
   });
 
+  it("缩放跨缩略图档时保留旧纹理，等新档上传后再替换", async () => {
+    const { context } = fakeCanvasContext();
+    const requests: Array<{ resolve: (image: HTMLImageElement) => void }> = [];
+    let tier: 256 | 512 = 256;
+    const setTexture = vi.fn(() => true);
+    const sync = createTextureSync({
+      runtime: { setTexture } as unknown as BevyRuntime,
+      getCanvas: () => canvas(true),
+      admissionOf: () => ({ admitted: true, purpose: "visible", tier }),
+      loadImage: () => new Promise((resolve) => requests.push({ resolve })),
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => context })
+    });
+    sync.sync();
+    requests[0].resolve(fakeImage());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    sync.sync();
+    expect(setTexture).toHaveBeenCalledTimes(1);
+    expect(sync.textureNodeIds().has("n1")).toBe(true);
+
+    // 放大跨到 512 档：旧纹理保持可用，新档在后台解码。
+    tier = 512;
+    sync.sync();
+    expect(requests).toHaveLength(2);
+    expect(setTexture).toHaveBeenCalledTimes(1);
+    expect(sync.textureNodeIds().has("n1")).toBe(true);
+
+    // 新档就绪后由下一次同步替换，中途没有 texture=false 的空档。
+    requests[1].resolve(fakeImage());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    sync.sync();
+    expect(setTexture).toHaveBeenCalledTimes(2);
+    expect(sync.textureNodeIds().has("n1")).toBe(true);
+    sync.dispose();
+  });
+
   it("uploads a ready image asset once", async () => {
     (globalThis as unknown as { document: unknown }).document = {
       createElement: () => {

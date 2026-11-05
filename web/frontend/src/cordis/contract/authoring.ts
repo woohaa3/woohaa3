@@ -13,9 +13,8 @@ import type { ComponentType } from "react";
 import type { AgentConversationService } from "./agent-conversation.js";
 import type { PanelPresentationIntent } from "./model-interaction.js";
 
-/** 生成目标模式；`camera` 仅为旧入口兼容值，新的片场镜头统一使用 `film-set`。 */
-export type AuthoringGenerateMode =
-  "model3d" | "canvas-group" | "film-set" | "camera" | "text";
+/** 生成目标模式。 */
+export type AuthoringGenerateMode = "model3d" | "text" | "world" | "canvas-group";
 
 /** A finite domain delivery adapter. Conversation data and presentation remain host owned. */
 export type AssistantDeliveryTarget = {
@@ -47,10 +46,14 @@ export type AuthoringGenerationProps = {
   /** Domain delivery uses the same authoring panel; unfinished delivery locks ordinary edits. */
   initialPrompt?: string;
   deliveryHistory?: AssistantDeliveryTarget;
-  groupRuns?: import("./canvas-group-runs.js").CanvasGroupRunsService;
   canvasId: string;
   nodeId: string;
   mode: AuthoringGenerateMode;
+  /**
+   * Trusted world scope for `mode: "world"` (导演区或所选镜头): the host freezes the real
+   * scope identity; the assistant never supplies it.
+   */
+  worldScope?: import("@woohaa3/contracts").AssistantWorldScopeSelection;
   /** 外侧生成 dock 与聚焦检查器共享执行逻辑，分别组织输入和操作布局。 */
   presentation?: "dock" | "expanded" | "inspector";
   /** 会话可写性（离线/同步未就绪/历史只读时为 false）。 */
@@ -59,10 +62,6 @@ export type AuthoringGenerationProps = {
   disabledReason?: string | null;
   /** 模型内容哈希等并发 precondition（可选）。 */
   expectedContentHash?: string;
-  /** 当前选中镜头 id（camera 模式，可选）。 */
-  selectedCameraId?: string | null;
-  clipId?: string | null;
-  itemId?: string | null;
   /** 打开授权入口（如 Provider 凭据弹窗）；由宿主注入，贡献方只调用。 */
   onAuthorize?: () => void;
   /** 宿主拥有的参考素材 UI，贡献方只决定在生成面板中的呈现位置。 */

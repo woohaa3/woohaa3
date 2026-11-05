@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use crate::protocol::{GraphNode, ModelPlacement, ModelSnapshot, Scene};
 
 use super::animation::TransformAnimationPlayback;
-use super::layout::{model_anchor, model_unit, model_view_rotation};
+use super::layout::model_root_transform;
 use super::spawn::spawn_model;
 
 /// 已注册不可变模型资源表（只读视图）；由 app 从 bridge 资源表取得。
@@ -53,19 +53,8 @@ pub(crate) struct ModelVisuals {
     /// 上一次资源引用重建时的归属指纹；未变则跳过全量重建
     /// （change: 2026-10-14-scope-film-set-object-picking-to-focus，design D8）。
     pub(super) references_key: Option<OwnershipKey>,
-    /// 总览 LOD 实际工作量计数（change: 2026-10-15-add-film-set-overview-lod，design D6）。
-    pub(super) overview_work: super::resource_work::OverviewWork,
-    /// 全局单活动总览准备/发布（change 同上，design D4）。
-    pub(super) pending: Option<quality::PendingPublish>,
-    /// Native 后台准备调度与 staging（change: 2026-10-18-prepare-native-film-sets-in-background）。
-    pub(super) preparation: super::preparation::Scheduler,
-    /// 正在分帧装配的实例（只有 native 声明策略的根会进入）。
-    pub(super) staging: HashMap<String, super::preparation::Staging>,
     /// 已隐藏、等待按预算退役的旧根实体。
     pub(super) retiring: Vec<Entity>,
-    /// 上一帧准备管线是否有发布/取消/退役：诊断据此重新发布一次快照
-    /// （不做逐帧日志，也不额外遍历几何）。
-    pub(super) preparation_changed: bool,
 }
 
 /// 每帧命令插入/引用重建的实际工作量（累积）。用于证明优化确实减少了写入，
@@ -97,10 +86,6 @@ pub(super) struct OwnershipKey {
     capture_snapshots: usize,
     capture_handles: usize,
     capture_keys: u64,
-    /// Native staging（隐藏根）也持有已登记资产，必须计入归属指纹。
-    staging_roots: usize,
-    staging_generations: u64,
-    staging_handles: usize,
 }
 
 impl OwnershipKey {
@@ -113,9 +98,6 @@ impl OwnershipKey {
             capture_snapshots: models.capture_retention.len(),
             capture_handles: 0,
             capture_keys: 0,
-            staging_roots: models.staging.len(),
-            staging_generations: 0,
-            staging_handles: 0,
         };
         for root in models.roots.values() {
             keys.generations = keys
@@ -124,15 +106,6 @@ impl OwnershipKey {
                 .wrapping_mul(0x1000_0000_01b3);
             keys.mesh_handles += root.mesh_handles.len();
             keys.material_handles += root.material_handles.len();
-        }
-        for staging in models.staging.values() {
-            let (done, total) = staging.progress();
-            keys.staging_generations = keys
-                .staging_generations
-                .wrapping_add((done * 31 + total) as u64)
-                .wrapping_mul(0x1000_0000_01b3);
-            keys.staging_handles +=
-                staging.staged_meshes().len() + staging.staged_materials().len();
         }
         for (id, retained) in &models.capture_retention {
             keys.capture_keys = keys.capture_keys.wrapping_add(*id);
@@ -188,21 +161,9 @@ pub(crate) struct ModelRoot {
     pub(super) geometries: Vec<(Entity, String, Arc<super::scene::ModelGeometry>)>,
     pub(super) quality: super::quality::Quality,
     pub(super) quality_changed_at: Option<f64>,
-    /// 可见总览 Medium 的连续停留起点；离屏、降 Low 或显式 High owner 时重置。
-    pub(super) overview_medium_since: Option<f64>,
     /// Async LOD completion must survive offscreen quality deferral.
     pub(super) quality_refresh_pending: bool,
     pub(super) representation_generation: u64,
-    /// 该根是否声明了总览 primitive LOD：自定义 Mesh 的有效档位保持 High，不新增简化任务
-    /// （change: 2026-10-15-add-film-set-overview-lod，design D3）。
-    pub(super) overview_lod: bool,
-    /// 总览投影输入缓存：只有 bounds/fit/placement/zoom/可视窗口高度变化才重算
-    /// （change: 2026-10-15-add-film-set-overview-lod，design D2）。
-    pub(super) projection: super::quality::ProjectionCache,
-    /// 总览 LOD 诊断：最近一次投影占可视窗口高度的比例、期望/已发布档位与保持原因。
-    pub(super) overview_fraction: Option<f32>,
-    pub(super) overview_desired: super::quality::Quality,
-    pub(super) overview_reason: &'static str,
     /// 该模型创建/复用的 material handle；重建或删除时释放。
     pub(super) material_handles: Vec<Handle<StandardMaterial>>,
     /// 该模型内挂载了动画的实体集合（V2 层级节点）。
@@ -238,16 +199,10 @@ pub(super) fn apply_root_transform(
     model: &ModelSnapshot,
     placement: &ModelPlacement,
 ) {
-    let unit = model_unit(node, model, placement);
-    let root_rotation = model_view_rotation(placement);
-    let world = model_anchor(node, model, placement, unit);
+    let transform = model_root_transform(node, model, placement);
     let ModelRootLayout::V2 { root } = layout;
     if let Ok(mut entity) = commands.get_entity(*root) {
-        entity.insert(Transform {
-            translation: world,
-            rotation: root_rotation,
-            scale: Vec3::splat(unit),
-        });
+        entity.insert(transform);
     }
 }
 
@@ -268,56 +223,6 @@ pub(super) fn despawn_root(
     for entity in &root.entities {
         commands.entity(*entity).try_despawn();
     }
-}
-
-/// Native 后台准备分流：只登记需求，不在宿主线程展开几何或创建实体
-/// （change: 2026-10-18-prepare-native-film-sets-in-background，design D1/D3）。
-///
-/// 已发布且内容/批处理策略未变时只刷新根 transform；内容/档位变化保留旧完整表示直到新根
-/// 发布。仅平移、播放时钟与相同内容的新 generation 不改变准备 key，因此不会重启任务。
-#[allow(clippy::too_many_arguments)]
-fn route_native(
-    commands: &mut Commands,
-    models: &mut ModelVisuals,
-    node: &GraphNode,
-    resource: &Arc<ModelSnapshot>,
-    reference: &crate::protocol::ModelReference,
-    scene: &Scene,
-    focus: Option<&str>,
-    content_signature: &str,
-    batched: bool,
-) {
-    // 质量仍由既有策略决定：屏外 OverviewLow、可见按投影、High 消费者直接 High。
-    let quality = super::quality::initial(
-        node,
-        scene,
-        focus,
-        models.high_demand.contains(&node.id),
-        resource,
-    );
-    let high_consumer = super::quality::purpose(
-        node,
-        scene,
-        focus,
-        models.high_demand.contains(&node.id),
-    )
-    .requires_high()
-        || super::quality::card_visible(node, scene, focus);
-    let priority = super::preparation::PriorityInput {
-        visible: high_consumer,
-    };
-    if let Some(root) = models.roots.get_mut(&node.id)
-        && root.content_signature == content_signature
-        && Arc::ptr_eq(&root.resource, resource)
-        && root.batched == batched
-    {
-        // 内容未变：只刷新根 transform，并撤销已经不需要的准备需求。
-        models.preparation.cancel(&node.id);
-        root.placement.clone_from(&reference.placement);
-        apply_root_transform(commands, &root.layout, node, resource, &reference.placement);
-        return;
-    }
-    super::preparation::request(models, node, resource, quality, batched, priority);
 }
 
 /// 按内容 signature 重建 / 保留，并按 placement/position 刷新根 transform，最后按
@@ -363,19 +268,14 @@ pub(crate) fn sync_models(
         let allowed = allowed
             && (models.batching_strategy != super::batch_strategy::BatchStrategy::Explicit
                 || node.model_preview.is_some());
-        // 片场 group 的徽标场景沿用旧 composite 根的总览 primitive LOD：group owner 持有
-        // 所有绑定的聚合几何，后续 `sync_quality` 可整场原子切档。未声明时保持 High。
-        let overview = super::quality::has_overview_lod_declaration(node);
         // 总览片场合批会把只做平移的父级部件平铺到 binding 根（`batching::apply_flatten`），
         // 动画目标组因此失去几何，旋转/位移只写到没有子几何的组实体上。带部件动作的播放
         // （hover 拍摄预览卡片、录制/截图）必须使用非合批表示；纯镜头动作不需要拆部件。
         let part_motion = scene.animation_playback.as_ref().is_some_and(|playback| {
-            playback.node_id == node.id
-                && (!playback.model_motion.is_empty()
-                    || playback.objects.iter().any(|object| !object.model_motion.is_empty()))
+            playback.node_id == node.id && !playback.model_motion.is_empty()
         });
+        let _ = part_motion;
         let batched = allowed
-            && !(overview && part_motion)
             && !models.high_demand.contains(&node.id) && !scene
             .model_editor
             .as_ref()
@@ -384,54 +284,6 @@ pub(crate) fn sync_models(
                 .model_focus
                 .as_ref()
                 .is_some_and(|e| e.node_id == node.id);
-        if let Some(group) = scene
-            .film_set_groups
-            .iter()
-            .find(|group| group.owner_id == node.id)
-        {
-            let quality = if overview {
-                super::quality::initial(
-                    node,
-                    scene,
-                    focus.node.as_deref(),
-                    models.high_demand.contains(&node.id),
-                    resource,
-                )
-            } else {
-                super::quality::Quality::High
-            };
-            super::group_runtime::sync(
-                commands,
-                meshes,
-                materials,
-                models,
-                node,
-                resource,
-                &reference.placement,
-                group,
-                quality,
-                overview,
-                batched,
-            );
-            continue;
-        }
-        // Native 后台准备分流（change: 2026-10-18-prepare-native-film-sets-in-background，
-        // design D1）：只对显式声明总览策略的根生效；其它 target/feature 与普通模型卡片
-        // 继续走下面原有的同步创建入口。
-        if super::preparation::eligible(node) {
-            route_native(
-                commands,
-                models,
-                node,
-                resource,
-                reference,
-                scene,
-                focus.node.as_deref(),
-                content_signature,
-                batched,
-            );
-            continue;
-        }
         let texture_revision = super::model_textures::revision();
         // 只有真正引用内嵌纹理的模型需要在纹理表变化时重建；脚本模型与无纹理 GLB 不受影响。
         let needs_textures = resource.ops.iter().any(|op| {
@@ -472,7 +324,6 @@ pub(crate) fn sync_models(
                 &mut models.shared,
                 batched,
                 models.batching_strategy,
-                overview,
             );
             root.representation_generation = generation;
             root.content_signature = content_signature.to_owned();
@@ -513,17 +364,6 @@ pub(crate) fn sync_models(
             &plan.targets,
         );
     }
-    super::item_placement::sync(commands, models, scene);
-    // 失去 demand / 节点删除：取消准备需求（迟到结果不得装配或发布）。
-    let dropped: Vec<String> = scene
-        .nodes
-        .iter()
-        .filter(|node| !desired.contains_key(node.id.as_str()))
-        .map(|node| node.id.clone())
-        .collect();
-    for id in dropped {
-        models.preparation.cancel(&id);
-    }
     let stale: Vec<String> = models
         .roots
         .keys()
@@ -532,17 +372,9 @@ pub(crate) fn sync_models(
         .collect();
     for id in stale {
         if let Some(mut root) = models.roots.remove(&id) {
-            // 透明度实例不随实体销毁自动回收（不在共享缓存里），两条路径都要显式移除。
+            // 透明度实例不随实体销毁自动回收（不在共享缓存里），显式移除。
             root.opacity.release_instances(materials);
-            if super::preparation::enabled() {
-                // Native：旧根先隐藏，再按全局预算分帧退役，避免一次递归销毁整场。
-                for entity in &root.entities {
-                    commands.entity(*entity).insert(Visibility::Hidden);
-                }
-                models.retiring.extend(root.entities.iter().copied());
-            } else {
-                despawn_root(commands, materials, root);
-            }
+            despawn_root(commands, materials, root);
         }
     }
     models.set_visible_focus(
@@ -555,12 +387,6 @@ pub(crate) fn sync_models(
     );
     purge_unresolved_active(&mut models.active_model, &scene.nodes);
     apply_animation_playback(commands, models, scene);
-    // 场景整体清空（文档关闭/渲染器销毁前最后一次同步）：准备任务与待领结果全部作废，
-    // 运行中的任务保留额度到真实退出，之后不再回写任何 World
-    // （change: 2026-10-18-prepare-native-film-sets-in-background，design D6）。
-    if scene.nodes.is_empty() && models.roots.is_empty() && models.staging.is_empty() {
-        models.preparation.clear();
-    }
     models.trim_resources(meshes, materials);
 }
 
@@ -574,6 +400,17 @@ impl ModelRoot {
 }
 
 impl ModelVisuals {
+    #[cfg(test)]
+    pub(crate) fn test_root(&self, id: &str) -> Option<Entity> {
+        self.roots.get(id).map(|model| match model.layout {
+            ModelRootLayout::V2 { root } => root,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_part(&self, id: &str, part: &str) -> Option<Entity> {
+        self.roots.get(id)?.part_entities.get(part).copied()
+    }
     /// 测试替身：声明某个节点已有可用模型根（不涉及 GPU 资源）。
     #[cfg(test)]
     pub(crate) fn mark_root_ready_for_test(&mut self, id: &str) {
@@ -582,12 +419,6 @@ impl ModelVisuals {
 
     /// 是否存在需要连续更新的模型活动（hover/动画播放、运动求值、截图 pin/保留）。
     ///
-    /// 静止降频据此判断能否停帧（change: 2026-10-14-scope-film-set-object-picking-to-focus，design D9）。
-    /// 读取并清除「准备管线上一帧有变更」标记（诊断发布去重用）。
-    pub(crate) fn take_preparation_changed(&mut self) -> bool {
-        std::mem::take(&mut self.preparation_changed)
-    }
-
     pub(crate) fn has_hot_activity(&self) -> bool {
         self.active_model.is_some()
             || self.motion_plan.is_some()
@@ -603,11 +434,6 @@ impl ModelVisuals {
     pub(crate) fn is_active_animated_model(&self, id: &str) -> bool {
         self.is_active_model(id)
             && self.roots.get(id).is_some_and(|root| !root.animation_entities.is_empty())
-    }
-
-    /// 是否仍有排队/运行中/待装配的准备任务（静止降频据此判定需要连续帧）。
-    pub(crate) fn has_in_flight_preparation(&self) -> bool {
-        self.preparation.has_in_flight()
     }
 
     pub(crate) fn preview_meshes(&self, id: &str) -> Vec<bevy::asset::AssetId<Mesh>> {

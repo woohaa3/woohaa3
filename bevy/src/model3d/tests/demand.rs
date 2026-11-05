@@ -24,12 +24,6 @@ fn fixture(count: usize) -> (Scene, ModelAssets) {
         .unwrap();
         node.model = Some(reference.clone());
         scene.nodes.push(node);
-        scene.nodes.push(serde_json::from_value(serde_json::json!({
-            "id":format!("preview-{index}"),"type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":185,
-            "shotPreview":{"filmSetNodeId":id,"clipId":"clip","kind":"dynamic","name":"镜头",
-                "aspect":1.7777778,"duration":5,"state":"preparing",
-                "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}
-        })).unwrap());
     }
     (scene, resources)
 }
@@ -44,22 +38,6 @@ fn update(world: &mut World, scene: &Scene, resources: &ModelAssets, now: f64) {
         now,
     );
     run_sync(world, scene, resources);
-}
-
-#[test]
-fn visible_shot_card_retains_offscreen_source_root() {
-    let (mut scene, resources) = fixture(1);
-    scene.nodes[0].x = -10_000.;
-    let mut world = world_with_resources();
-    update(&mut world, &scene, &resources, 0.);
-    let entities = world.resource::<ModelVisuals>().roots["film-0"]
-        .entities
-        .clone();
-    update(&mut world, &scene, &resources, 30.);
-    assert_eq!(
-        world.resource::<ModelVisuals>().roots["film-0"].entities,
-        entities
-    );
 }
 
 #[test]

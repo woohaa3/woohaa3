@@ -21,10 +21,8 @@ import type {
 import {
   agentConnectionProviderCapabilityId,
   agentConversationAdapterCapabilityId,
-  filmSetConversionCapabilityId,
 } from "@woohaa3/contracts";
 import {
-  createAssistantFilmSetConversionProvider,
   createConnectionProvider,
   createConnectionService,
   redactEvent,
@@ -218,7 +216,6 @@ export function createLocalAgentExtension(
 
       for (const adapter of LOCAL_AGENT_ADAPTERS) {
         const instance = createLocalAgentConversationAdapter(adapter, runtimeOptions);
-        host.registerCapability({ id: filmSetConversionCapabilityId(adapter.adapterId), value: createAssistantFilmSetConversionProvider(instance) });
         host.registerCapability({
           id: agentConversationAdapterCapabilityId(adapter.adapterId),
           value: instance,

@@ -10,6 +10,18 @@ import { importCodexGeneratedImage, resetCodexImageImportReceipts } from "./impo
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 
+const IMPORT_GROUP = {
+  nodeId: "root-1",
+  nodeData: { title: "组" },
+  workflowGroup: {
+    kind: "workflow-group-2d" as const,
+    version: "shared-world-v1" as const,
+    groupId: "root-1",
+    scopeVersion: "scope-v0",
+    memberNodeIds: []
+  }
+};
+
 let root: string;
 let codexHome: string;
 let file: string;
@@ -40,7 +52,7 @@ describe("importCodexGeneratedImage", () => {
       canvasId: "canvas-1",
       requestId: "req-1",
       index: 0,
-      rootGroupId: "root-1",
+      group: IMPORT_GROUP,
       codexHome,
       paths: [file],
       importBytes: async (input) => {
@@ -61,9 +73,17 @@ describe("importCodexGeneratedImage", () => {
     const added = commands.find((command) => command.type === "node.add");
     expect(added).toMatchObject({
       type: "node.add",
-      node: { type: "image", parentId: "root-1" },
+      node: { type: "image" },
       nodeData: { codexImageImport: true, resourceKind: "image", taskStatus: "successed" }
     });
+    expect(added && added.type === "node.add" ? added.node : {}).not.toHaveProperty("parentId");
+    const patched = commands.find((command) => command.type === "nodeData.patch");
+    expect(patched).toMatchObject({ type: "nodeData.patch", nodeId: "root-1" });
+    const groupData = patched && patched.type === "nodeData.patch"
+      ? (patched.value as { workflowGroup2d?: { memberNodeIds?: string[]; scopeVersion?: string } }).workflowGroup2d
+      : undefined;
+    expect(groupData?.memberNodeIds).toEqual([added && added.type === "node.add" ? added.node.id : ""]);
+    expect(groupData?.scopeVersion).not.toBe("scope-v0");
     expect(added && added.type === "node.add" ? added.nodeData : {}).not.toHaveProperty("prompt");
     expect(added && added.type === "node.add" ? added.nodeData : {}).not.toHaveProperty("panelPrompt");
   });
@@ -74,7 +94,7 @@ describe("importCodexGeneratedImage", () => {
       canvasId: "canvas-1",
       requestId: "req-1",
       index: 2,
-      rootGroupId: "root-1",
+      group: IMPORT_GROUP,
       codexHome,
       paths: [file],
       importBytes: async () => {
@@ -93,7 +113,7 @@ describe("importCodexGeneratedImage", () => {
       canvasId: "canvas-1",
       requestId: "req-1",
       index: 0,
-      rootGroupId: "root-1",
+      group: IMPORT_GROUP,
       codexHome,
       paths: ["/etc/passwd"],
       importBytes: async () => {
@@ -112,7 +132,7 @@ describe("importCodexGeneratedImage", () => {
       canvasId: "canvas-1",
       requestId: "req-1",
       index: 0,
-      rootGroupId: "root-1",
+      group: IMPORT_GROUP,
       codexHome,
       paths: [file],
       importBytes: async () => {
@@ -133,7 +153,7 @@ describe("importCodexGeneratedImage", () => {
       canvasId: "canvas-1",
       requestId: "req-1",
       index: 0,
-      rootGroupId: "root-1",
+      group: IMPORT_GROUP,
       codexHome,
       paths: [file],
       importBytes: async () => metadata(),
@@ -145,7 +165,7 @@ describe("importCodexGeneratedImage", () => {
       canvasId: "canvas-1",
       requestId: "req-1",
       index: 0,
-      rootGroupId: "root-1",
+      group: IMPORT_GROUP,
       codexHome,
       paths: [file],
       importBytes: async () => {

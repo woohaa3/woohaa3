@@ -10,12 +10,10 @@ export type ModelEditorGestureRefs = {
   shot: InteractionControllerOptions["shotGesture"] | null;
   focus: InteractionControllerOptions["focusGesture"] | null;
   shotWheel: InteractionControllerOptions["shotWheel"] | null;
-  object: InteractionControllerOptions["filmSetObjectGesture"] | null;
-  objectAction: InteractionControllerOptions["filmSetObjectAction"] | null;
 };
 
 export function createModelEditorGestureRefs(): ModelEditorGestureRefs {
-  return { shot: null, focus: null, shotWheel: null, object: null, objectAction: null };
+  return { shot: null, focus: null, shotWheel: null };
 }
 
 export function applyModelEditorShotGesture(
@@ -43,23 +41,4 @@ export function applyShotWheel(
 ): void {
   refs.shotWheel = handler ?? null;
   controller?.setShotWheel(refs.shotWheel);
-}
-
-export function applyFilmSetObjectGesture(
-  refs: ModelEditorGestureRefs,
-  controller: InteractionController | null,
-  handler: InteractionControllerOptions["filmSetObjectGesture"] | null
-): void {
-  refs.object = handler ?? null;
-  controller?.setFilmSetObjectGesture(refs.object);
-}
-
-/** 注入/替换片场对象局部键盘 action（change: 2026-10-10 片场对象键盘删除/撤销）。 */
-export function applyFilmSetObjectAction(
-  refs: ModelEditorGestureRefs,
-  controller: InteractionController | null,
-  handler: InteractionControllerOptions["filmSetObjectAction"] | null
-): void {
-  refs.objectAction = handler ?? null;
-  controller?.setFilmSetObjectAction?.(refs.objectAction);
 }

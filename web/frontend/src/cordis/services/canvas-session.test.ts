@@ -573,7 +573,7 @@ describe("确认回流只发布一次规范/working 快照", () => {
         socket.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.UPDATE, Y.encodeStateAsUpdate(doc, before)));
         publications = 0;
         const seen: number[] = [];
-        const stop = store.subscribe(state => seen.push(state.working!.document.nodes[0]!.position.x));
+        const stop = store.subscribe(state => seen.push(state.working!.document.nodes[0]!.position!.x));
         synced(1);
         stop();
         // The second local edit must not briefly roll back to the first edit.

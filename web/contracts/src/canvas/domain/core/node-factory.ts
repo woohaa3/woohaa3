@@ -56,21 +56,22 @@ export function duplicateWoohaa3CanvasNode(
   return {
     ...source,
     id,
-    position: resolveDuplicateNodePosition(source, existingNodes),
+    ...(source.position ? { position: resolveDuplicateNodePosition(source, existingNodes) } : {}),
     data: {}
   };
 }
 
 function resolveDuplicateNodePosition(source: Woohaa3CanvasNode, existingNodes?: Woohaa3CanvasNode[]): Woohaa3CanvasPosition {
+  const origin = source.position ?? { x: 0, y: 0 };
   const fallback = {
-    x: source.position.x + woohaa3CanvasGridSize * 2,
-    y: source.position.y + woohaa3CanvasGridSize * 2
+    x: origin.x + woohaa3CanvasGridSize * 2,
+    y: origin.y + woohaa3CanvasGridSize * 2
   };
   if (!existingNodes?.length) return fallback;
   const sourceWidth = source.width ?? DEFAULT_NODE_DIMS.width;
   return findNonOverlappingNodePosition({
-    x: source.position.x + sourceWidth + woohaa3CanvasGridSize * 3,
-    y: source.position.y
+    x: origin.x + sourceWidth + woohaa3CanvasGridSize * 3,
+    y: origin.y
   }, source, existingNodes);
 }
 
@@ -101,6 +102,7 @@ function rectsOverlap(
 ): boolean {
   const nodeWidth = node.width ?? DEFAULT_NODE_DIMS.width;
   const nodeHeight = node.height ?? DEFAULT_NODE_DIMS.height;
+  if (!node.position) return false;
   return position.x < node.position.x + nodeWidth + gap
     && position.x + size.width + gap > node.position.x
     && position.y < node.position.y + nodeHeight + gap

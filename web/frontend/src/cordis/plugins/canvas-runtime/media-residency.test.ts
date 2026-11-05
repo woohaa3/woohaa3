@@ -90,8 +90,8 @@ function projectAll(coordinator: CanvasResourceCoordinator, canvas: ServerCanvas
     candidates: canvas.document.nodes.slice(0, count).map((node) => ({
       nodeId: node.id,
       contentKey: String((canvas.nodeData as Record<string, { outputAssetId?: string }>)[node.id]?.outputAssetId ?? ""),
-      x: node.position.x,
-      y: node.position.y,
+      x: node.position!.x,
+      y: node.position!.y,
       width: 256,
       height: 256,
       eligible: true
@@ -150,7 +150,7 @@ describe("千卡片媒体准入", () => {
       interactive: [],
       pins: [],
       candidates: canvas.document.nodes.map((node) => ({
-        nodeId: node.id, contentKey: "shared", x: node.position.x, y: node.position.y,
+        nodeId: node.id, contentKey: "shared", x: node.position!.x, y: node.position!.y,
         width: 256, height: 256, eligible: true
       }))
     });
@@ -195,7 +195,7 @@ describe("千卡片媒体准入", () => {
         surface: { width: 2_000_000, height: 100_000, pixelRatio: 1 },
         pageVisible: true, interactive: [], pins: [],
         candidates: canvas.document.nodes.map((node) => ({
-          nodeId: node.id, contentKey: "shared", x: node.position.x, y: node.position.y,
+          nodeId: node.id, contentKey: "shared", x: node.position!.x, y: node.position!.y,
           width: 256, height: 256, eligible: true
         }))
       });
@@ -309,7 +309,7 @@ describe("千视频卡片准入", () => {
       viewport: null, surface: null, pageVisible: true,
       interactive: ["n0", "n1"], pins: [],
       candidates: canvas.document.nodes.map((node) => ({
-        nodeId: node.id, contentKey: "shared", x: node.position.x, y: node.position.y,
+        nodeId: node.id, contentKey: "shared", x: node.position!.x, y: node.position!.y,
         width: 256, height: 256, eligible: true
       }))
     });
@@ -385,7 +385,7 @@ describe("千视频卡片准入", () => {
       viewport: { x: 0, y: 0, zoom: 1 }, surface: { width: 2000, height: 2000, pixelRatio: 1 },
       pageVisible: true, interactive: [], pins: [],
       candidates: canvas.document.nodes.map((node) => ({
-        nodeId: node.id, contentKey: "shared", x: node.position.x, y: node.position.y,
+        nodeId: node.id, contentKey: "shared", x: node.position!.x, y: node.position!.y,
         width: 256, height: 256, eligible: true
       }))
     });
@@ -412,7 +412,7 @@ describe("千视频卡片准入", () => {
     coordinator.project({
       viewport: null, surface: null, pageVisible: true, interactive: canvas.document.nodes.map((node) => node.id), pins: [],
       candidates: canvas.document.nodes.map((node) => ({
-        nodeId: node.id, contentKey: "shared", x: node.position.x, y: node.position.y,
+        nodeId: node.id, contentKey: "shared", x: node.position!.x, y: node.position!.y,
         width: 256, height: 256, eligible: true
       }))
     });

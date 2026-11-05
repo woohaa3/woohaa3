@@ -42,6 +42,18 @@ function recordingPort() {
 }
 
 describe("mediaPortToCanvasMediaClient", () => {
+  it("reads pinned GLB bytes through the media resources port with canvas scope", async () => {
+    const { port } = recordingPort();
+    const calls: unknown[] = [];
+    const bytes = new Uint8Array([1, 2, 3]);
+    port.resources = { read: async (storageKey: string, canvasId?: string) => {
+      calls.push({ storageKey, canvasId });
+      return { bytes, contentType: "model/gltf-binary" };
+    } } as never;
+    expect(await mediaPortToCanvasMediaClient(port).read!("pinned.glb", "canvas-remote")).toEqual({ bytes, contentType: "model/gltf-binary" });
+    expect(calls).toEqual([{ storageKey: "pinned.glb", canvasId: "canvas-remote" }]);
+    expect(mediaPortToCanvasMediaClient(recordingPort().port).read).toBeUndefined();
+  });
   it("verify 把 scope 原样透传给端口", async () => {
     const { port, verifyCalls } = recordingPort();
     await mediaPortToCanvasMediaClient(port).verify(`sha256-${"b".repeat(64)}`, undefined, { canvasId: "canvas-a" });

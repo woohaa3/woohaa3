@@ -10,10 +10,10 @@
 
 use std::collections::HashMap;
 
-use bevy::{prelude::*, camera::visibility::NoFrustumCulling};
+use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
-use crate::protocol::{DragAttach, GraphNode};
 use crate::canvas_ecs::components::AttachProbeLayer;
+use crate::protocol::{DragAttach, GraphNode};
 use crate::theme::ThemeResource;
 
 use super::geometry::Geometry;
@@ -70,7 +70,6 @@ pub(crate) fn draw_drag_attach(
     attach: &DragAttach,
     base_z: f32,
 ) -> Vec<AttachLabel> {
-    if owner.composite_asset.is_some() { return Vec::new(); }
     let mode = attach.mode.as_deref();
     let accent = theme.token_u32("interactionAccent");
     let border = theme.token_u32("canvasNodeBorder");
@@ -259,13 +258,20 @@ pub(crate) fn replace_probe_mesh(
     let handle = meshes.add(built);
     match layers.iter().next() {
         Some((entity, old_handle)) => {
-            if let Some(old) = old_handle { meshes.remove(old.0.id()); }
+            if let Some(old) = old_handle {
+                meshes.remove(old.0.id());
+            }
             if let Ok(mut entity_commands) = commands.get_entity(entity) {
                 entity_commands.insert(Mesh2d(handle));
             }
         }
         None => {
-            commands.spawn((AttachProbeLayer, Mesh2d(handle), MeshMaterial2d(materials.blend.clone()), NoFrustumCulling));
+            commands.spawn((
+                AttachProbeLayer,
+                Mesh2d(handle),
+                MeshMaterial2d(materials.blend.clone()),
+                NoFrustumCulling,
+            ));
         }
     }
 }
@@ -278,7 +284,9 @@ pub(crate) fn clear_probe_mesh(
 ) {
     if let Some((entity, old_handle)) = layers.iter().next() {
         let handle = meshes.add(Geometry::default().build());
-        if let Some(old) = old_handle { meshes.remove(old.0.id()); }
+        if let Some(old) = old_handle {
+            meshes.remove(old.0.id());
+        }
         if let Ok(mut entity_commands) = commands.get_entity(entity) {
             entity_commands.insert(Mesh2d(handle));
         }
@@ -329,7 +337,13 @@ pub(crate) fn sync_attach_probe(
         time.elapsed_secs(),
     );
     if drawn {
-        replace_probe_mesh(&mut commands, &mut meshes, &materials, &layers, geometry.build());
+        replace_probe_mesh(
+            &mut commands,
+            &mut meshes,
+            &materials,
+            &layers,
+            geometry.build(),
+        );
     } else {
         clear_probe_mesh(&mut commands, &mut meshes, &layers);
     }
@@ -342,11 +356,12 @@ mod tests {
 
     fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         GraphNode {
+            chrome: crate::protocol::NodeChrome::Card,
+            shared_world_instance: None,
+            world_camera: None,
             model_preview: None,
             ghost: false,
             card_label: None,
-            shot_preview: None,
-
             id: id.into(),
             kind: "text".into(),
             x,
@@ -362,11 +377,8 @@ mod tests {
             texture: false,
             media_loading: false,
             resizable: false,
-            group: None,
             model: None,
-            composite_asset: None,
             history_strip: None,
-            aggregate_run: None,
         }
     }
 
@@ -400,8 +412,14 @@ mod tests {
         let nodes = vec![node("a", 0.0, 0.0, 200.0, 80.0)];
         let map = node_map(&nodes);
         let mut geometry = Geometry::default();
-        let labels =
-            draw_drag_attach(&mut geometry, &theme, &nodes[0], &map, &attach(None, None), 100.0);
+        let labels = draw_drag_attach(
+            &mut geometry,
+            &theme,
+            &nodes[0],
+            &map,
+            &attach(None, None),
+            100.0,
+        );
         assert!(positions(geometry) > 20);
         assert_eq!(labels.len(), 2);
         assert_eq!(labels[0].text, "（Q）粘连前序");
@@ -411,7 +429,10 @@ mod tests {
     #[test]
     fn bar_and_pending_edges_emit_geometry() {
         let theme = ThemeResource::default();
-        let nodes = vec![node("a", 0.0, 0.0, 200.0, 80.0), node("b", 600.0, 0.0, 200.0, 80.0)];
+        let nodes = vec![
+            node("a", 0.0, 0.0, 200.0, 80.0),
+            node("b", 600.0, 0.0, 200.0, 80.0),
+        ];
         let map = node_map(&nodes);
         let mut spec = attach(None, None);
         spec.pending_edges = vec![DragAttachEdge {

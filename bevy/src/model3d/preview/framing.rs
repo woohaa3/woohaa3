@@ -1,4 +1,4 @@
-use crate::{protocol::ModelSnapshot, renderer_protocol::CompositeAssetFrameRequest};
+use crate::protocol::ModelSnapshot;
 use bevy::prelude::*;
 
 /// 片场场景单位 → 原生生产输出的换算倍率（change:
@@ -9,8 +9,8 @@ use bevy::prelude::*;
 /// 与镜头 distance/focusOffset 相同尺度的场景单位，不再除以 `extent`。画布节点矩形
 /// （`CompositeAssetFrameRequest.width/height`）与 viewport 不参与，因此调整呈现不会改变成片取景。
 ///
-/// 注意这里与浏览器 `filmSetNaturalScale` 的差异是**有意**的：浏览器还要乘
-/// `min(placement.scale,1)` 与节点矩形容器适配（`filmSetFit`）才有世界倍率；离屏渲染没有呈现
+/// 注意这里与浏览器的差异是**有意**的：浏览器还要乘
+/// `min(placement.scale,1)` 与节点矩形容器适配才有世界倍率；离屏渲染没有呈现
 /// 容器，`placement.scale` 仍按内容根倍率应用（见 [`production_root`]）。
 pub(super) fn scene_scale(_extent: f32) -> f32 {
     crate::model3d::layout::CANVAS_UNITS_PER_METER
@@ -50,31 +50,10 @@ fn scene_bounds(
     })
 }
 
-/// Same immutable reference geometry and card scale as the browser; no animated bounds.
+/// Same immutable reference geometry as the browser; no animated bounds.
 ///
-/// 生产取景在**场景空间**：包围球由内容单位 × `CANVAS_UNITS_PER_METER` 派生，`frame` 只提供媒体
-/// 与 layout bounds，节点宽高不参与取景（change: 2026-10-23-isolate-film-set-camera-space，
-/// 任务 3.1 / design D4；change: 2026-10-31-render-models-at-absolute-metric-scale 去掉按
-/// `extent` 归一化）。
-pub(super) fn reference_frame(
-    model: &ModelSnapshot,
-    frame: Option<&CompositeAssetFrameRequest>,
-) -> (Transform, Vec3, f32) {
-    let Some(frame) = frame else {
-        let (center, radius) = crate::model3d::preview_focus(model).unwrap_or((Vec3::ZERO, 1.0));
-        return (Transform::default(), center, radius);
-    };
-    let mut reference = model.clone();
-    reference.extent = frame.resource_extent;
-    let root = production_root(&reference, frame.resource_extent);
-    let local = frame
-        .layout_aabb
-        .as_ref()
-        .map(|bounds| crate::model3d::scene::ModelAabb::new(bounds.min, bounds.max))
-        .or_else(|| crate::model3d::scene::model_world_aabb(&reference, Quat::IDENTITY, 1.0));
-    let (center, radius) = local
-        .map(|bounds| scene_bounds(&reference, bounds))
-        .map(|b| (b.center(), b.radius()))
-        .unwrap_or((Vec3::ZERO, 1.0));
-    (root, center, radius)
+/// 生产取景在**场景空间**：包围球由内容单位 × `CANVAS_UNITS_PER_METER` 派生，节点宽高不参与。
+pub(super) fn reference_frame(model: &ModelSnapshot) -> (Transform, Vec3, f32) {
+    let (center, radius) = crate::model3d::preview_focus(model).unwrap_or((Vec3::ZERO, 1.0));
+    (Transform::default(), center, radius)
 }

@@ -7,7 +7,7 @@ import { AGENT_SEMANTIC_KINDS } from "@woohaa3/contracts";
 
 export const POSITION_SCHEMA = z.strictObject({ x: z.number(), y: z.number() });
 
-export const SEMANTIC_KIND_TUPLE = AGENT_SEMANTIC_KINDS as unknown as ["text", "image", "model", "film-set", "video", "audio"];
+export const SEMANTIC_KIND_TUPLE = AGENT_SEMANTIC_KINDS as unknown as ["text", "image", "model", "video", "audio"];
 
 export const ENTITY_REF_SCHEMA = z.union([
   z.strictObject({ ref: z.string().min(1) }),
@@ -56,6 +56,12 @@ export const OPERATION_SCHEMA = z.union([
     op: z.literal("move_node"),
     target: ENTITY_REF_SCHEMA,
     position: POSITION_SCHEMA,
+    if: PRECONDITION_SCHEMA.optional()
+  }),
+  z.strictObject({
+    op: z.literal("resize_node"),
+    target: ENTITY_REF_SCHEMA,
+    size: z.strictObject({ width: z.number().positive(), height: z.number().positive() }),
     if: PRECONDITION_SCHEMA.optional()
   }),
   z.strictObject({

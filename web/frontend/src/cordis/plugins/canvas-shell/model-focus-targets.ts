@@ -8,11 +8,6 @@ import { builtinNodeCapabilityResolver, type NodeCapabilityResolver } from "@woo
  * 不写 ServerCanvas / CanvasCommand / Y.Doc。
  */
 import {
-  filmSetLayoutBounds,
-  groupAppearanceModel,
-  readFilmSetContent,
-  readFilmSetGroupMarker,
-  isFilmSetNode,
   v2SceneExtent,
   MODEL_SCRIPT_SCENE_IR_V2_VERSION,
   type BevyModelPlacement,
@@ -66,12 +61,7 @@ export function resolveModelFocusTargets(source: ModelFocusTargetSource): FocusT
     const capabilities = (source.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve({ canvas, node, data: canvas.nodeData[node.id] });
     if (!capabilities.focus?.kind({ canvas, node, data: canvas.nodeData[node.id] })) continue;
     const data = canvas.nodeData[node.id];
-    // 普通组自身的展示 placement 存在 groupAppearance；片场组仍以 nodeData.modelPlacement
-    // 表示镜头场景的显示变换。两者混用会让片场组拿到 null placement，徽标取景与镜头归属线
-    // 退回共享单位；缺省 placement 由取景 helper 按单位缩放继续处理。
-    const placement = node.type === "group" && !readFilmSetGroupMarker(data)
-      ? groupAppearanceModel(data as { groupAppearance?: unknown } | undefined).placement
-      : readPlacement(data);
+    const placement = readPlacement(data);
     const nonCanonical = source.nonCanonicalNodes?.has(node.id) === true;
     const base = {
       canvas,
@@ -90,7 +80,7 @@ export function resolveModelFocusTargets(source: ModelFocusTargetSource): FocusT
         sceneVersion: resource.sceneVersion,
         ops: resource.ops,
         extent: resource.extent,
-        aabb: isFilmSetNode(node.type, canvas.nodeData?.[node.id]) ? filmSetLayoutBounds(resource.ops, readFilmSetContent(canvas.nodeData?.[node.id]), resource.extent) : resource.aabb
+        aabb: resource.aabb
       });
       continue;
     }

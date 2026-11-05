@@ -1,7 +1,7 @@
 /** Page-owned model preparation. Providers stage results; only current identities publish. */
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import {
-  compositeAssetSceneOps, executeModelWithStoredRig, isSupportedModelScriptVersion,
+  executeModelScriptVersioned, isSupportedModelScriptVersion,
   sceneIrVersionFor,
   type CanvasNodeData, type SceneV2Op, type NodePreparationResult, type ServerCanvas,
 } from "@woohaa3/contracts";
@@ -31,7 +31,7 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     const reports = createModelScriptReports(report => ctx.canvasRemote.reportModelScript(report));
     const schedule = options.schedule ?? queueMicrotask;
     let stopped = false, scheduled = false, running = false, rerun = false;
-    const readCanvas = () => ctx.compositeAssets.projectCanvas(ctx.canvasState.getCanvas());
+    const readCanvas = () => ctx.canvasState.getCanvas();
     const identity = (canvas: ServerCanvas | null | undefined, node: ServerCanvas["document"]["nodes"][number] | undefined) => {
       if (!canvas || !node) return null;
       const context = { canvas, node, data: canvas.nodeData[node.id] };
@@ -45,7 +45,6 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     const discard = (nodeId: string) => {
       releases.get(nodeId)?.(); releases.delete(nodeId);
       applied.delete(nodeId); scenes.delete(nodeId);
-      ctx.compositeAssets.setProjection(nodeId, null);
     };
     const drain = async () => {
       let started = performance.now();
@@ -63,7 +62,6 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
         return identity(latest, nodes.get(nodeId));
       };
       const ids = new Set(nodes.keys());
-      ctx.compositeAssets.retain(ids);
       for (const id of applied.keys()) if (!ids.has(id) || applied.get(id) !== currentIdentity(id)?.key) discard(id);
       for (const nodeId of ids) {
         if (stopped) return;
@@ -89,9 +87,6 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
         releases.get(nodeId)?.(); releases.delete(nodeId);
         if (result.release) releases.set(nodeId, result.release);
         if (result.resource) scenes.set(nodeId, result.resource); else scenes.delete(nodeId);
-        // Composite metadata is published only by an accepted, strictly owned adapter result.
-        const adapter = ctx.compositeAssets.resolveNode(current.context.canvas, current.context.node);
-        ctx.compositeAssets.setProjection(nodeId, adapter ? { ...(result.resource ? { resource: result.resource } : {}), ...(result.composition ? { composition: result.composition } : {}), ...(result.diagnostic ? { diagnostic: result.diagnostic } : {}) } : null, adapter?.extensionId);
         applied.set(nodeId, current.key);
         loading.setLoading(load, false);
         const status = result.status.startsWith("ok") ? "ok" : "failed";
@@ -131,7 +126,6 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
       });
     };
     const stopCanvas = ctx.canvasState.subscribe(trigger);
-    const stopAdapters = ctx.compositeAssets.subscribe(trigger);
     const stopRegistry = registry.subscribe(trigger);
     const provider: ModelScenesProvider = {
       getResources: () => scenes.snapshot(), isLoading: loading.isLoading,
@@ -140,22 +134,22 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     ctx.provide(MODEL_SCENES_SERVICE as never, provider as never);
     trigger();
     return () => {
-      stopped = true; reports.dispose(); stopCanvas(); stopAdapters(); stopRegistry(); loading.clear();
+      stopped = true; reports.dispose(); stopCanvas(); stopRegistry(); loading.clear();
       for (const id of applied.keys()) discard(id);
     };
-  }, { name: MODEL_SCENE_PLUGIN_ID, inject: ["canvasRemote", "canvasState", "compositeAssets", "nodeImplementations"] });
+  }, { name: MODEL_SCENE_PLUGIN_ID, inject: ["canvasRemote", "canvasState", "nodeImplementations"] });
 }
 
 export async function applyWithBevy(
   nodeId: string,
   source: string,
   version: unknown,
-  data?: CanvasNodeData,
-  nodeType?: string,
+  _data?: CanvasNodeData,
+  _nodeType?: string,
   scenes: ModelSceneStore = modelSceneStore,
 ): Promise<string> {
   // 按节点声明的版本 dispatch；未知版本稳定失败，不回退 V1。
-  const execution = executeModelWithStoredRig(source, version, data?.modelRig);
+  const execution = executeModelScriptVersioned(source, version);
   if (!execution.ok) {
     scenes.delete(nodeId);
     return `fail:${execution.stage}:${execution.code}`;
@@ -166,6 +160,6 @@ export async function applyWithBevy(
   }
   // 成功结果一次性派生 prepared resource（signature/AABB/extent/payload 同批）。
   const sceneIrVersion = sceneIrVersionFor(version);
-  scenes.put(nodeId, sceneIrVersion, nodeType === "composite-asset" ? compositeAssetSceneOps(execution.scene.ops as SceneV2Op[], data?.scenePlacement) : execution.scene.ops as SceneV2Op[]);
+  scenes.put(nodeId, sceneIrVersion, execution.scene.ops as SceneV2Op[]);
   return "ok";
 }

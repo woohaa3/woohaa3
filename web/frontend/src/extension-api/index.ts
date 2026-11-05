@@ -20,7 +20,6 @@ export { defineExtensionFrontend, defineExtensionPlugin } from "./entry.js";
 export { AssistantConnectionPicker, type AssistantConnectionSelection } from "../cordis/plugins/task-execution/assistant-connection-picker.js";
 export { resolveAgentDetailAction } from "../cordis/plugins/task-execution/execution-panel/agent-detail-action.js";
 export { AuthoringGenerateSurface } from "../cordis/plugins/task-execution/authoring-generate-layout.js";
-export type { CanvasGroupRun, CanvasGroupRunsService, CanvasGroupRunsSnapshot } from "./context-api.js";
 /**
  * 通用公开 URL 解析能力（change: 2026-10-15-support-configurable-app-base-path，design D6）：
  * extension 前端把应用逻辑路径解析为当前挂载下的公开 URL，而不是各自拼部署前缀。
@@ -149,7 +148,6 @@ export * from "./host-platform.js";
 export * from "./mention-editor.js";
 export * from "./panel-projection.js";
 export * from "./events.js";
-export * from "./composite-assets.js";
 
 export { ModelEditorSession } from "./model-workspace-session.js";
 export * from "./model-workspace.js";

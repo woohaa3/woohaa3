@@ -9,7 +9,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { priorToReceipt } from "../src/backend/generation/receipts.js";
 import { createChatGptWorkJournal } from "../src/backend/work-journal.js";
 
 const dirs: string[] = [];
@@ -69,13 +68,4 @@ describe("ChatGptWorkJournal", () => {
     expect(journal.bumpAuthEpoch()).toBe(1);
     expect(journal.authEpoch()).toBe(1);
   });
-  it("restart keeps captured clip, actor and LLM output in a terminal receipt", () => {
-    const directory = tempDir(); const journal = createChatGptWorkJournal({ directory });
-    const admitted = journal.admit({ requestId: "clip", ownerId: "o", authEpoch: 0, inputIdentity: "i", canvasId: "c", nodeId: "n", mode: "film-set", clipId: "jump", itemId: "hero" });
-    journal.update(admitted.workId, { state: "failed", code: "unknown-clip", message: "已删除", llmOutput: "模型回复正文" });
-    const recovered = createChatGptWorkJournal({ directory }).find("clip", "o")!;
-    expect(recovered.itemId).toBe("hero");
-    expect(priorToReceipt(recovered)).toMatchObject({ status: "failed", clipId: "jump", llmOutput: "模型回复正文" });
-  });
-
 });

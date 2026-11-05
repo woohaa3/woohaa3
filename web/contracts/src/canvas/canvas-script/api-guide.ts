@@ -41,19 +41,12 @@ export const CANVAS_SCRIPT_API_SIGNATURES: readonly CanvasScriptApiSignature[] =
   {
     name: "node",
     signature: "canvas.node(kind, { key?, title?, prompt?, placement? })",
-    description: "记录 create_node；kind 取自 text/image/video/audio/model/film-set。film-set 创建自包含片场节点，随后用片场工具写入对象与镜头。只接受语义字段，拒绝 nodeData/canonical type。",
+    description: "记录 create_node；kind 取自 text/image/video/audio/model。只接受语义字段，拒绝 nodeData/canonical type。",
     returns: "本次执行的节点 handle"
   },
-  {
-    name: "group",
-    signature: "canvas.group(members, { key?, title, layout?, placement?, if? })",
-    description: "创建真实命名分类组，至少一个同直属 parent 的节点或组。成员关系保存为 parentId；支持嵌套。layout 为 {mode:'grid', columns, gapX?, gapY?, origin?}。",
-    returns: "本次执行的组节点 handle"
-  },
-  { name: "reparent", signature: "canvas.reparent(nodes, groupOrNull, { if? }?)", description: "移入组或移出到顶层，保持世界位置；拒绝循环和祖先/后代混选。", returns: "void" },
-  { name: "ungroup", signature: "canvas.ungroup(group, { if? }?)", description: "只移除组容器，直属成员提升一级，保留内容和真实连线。remove(group) 则级联删除。", returns: "void" },
-  { name: "setTitle", signature: "canvas.setTitle(nodeOrGroup, title, { if? }?)", description: "修改节点或组标题，非空且最多 200 字符。", returns: "void" },
-  { name: "layout", signature: "canvas.layout(nodes, { mode: 'grid', columns, gapX?, gapY?, origin? }, { if? }?)", description: "对同层节点或组按数组顺序网格排布，origin 为世界坐标。组按完整边界排布，移动后代不重复。", returns: "void" },
+  { name: "setTitle", signature: "canvas.setTitle(node, title, { if? }?)", description: "修改节点标题，非空且最多 200 字符。", returns: "void" },
+  { name: "layout", signature: "canvas.layout(nodes, { mode: 'grid', columns, gapX?, gapY?, origin? }, { if? }?)", description: "对节点按数组顺序网格排布，origin 为世界坐标。", returns: "void" },
+  { name: "resize", signature: "canvas.resize(node, { width, height }, { if? }?)", description: "只改卡片矩形宽高，不移动节点；整理 2D 组后缩小组卡片时用它。", returns: "void" },
   {
     name: "existing",
     signature: "canvas.existing(nodeId)",
@@ -103,24 +96,6 @@ for (let i = 0; i < 3; i++) {
   canvas.connect(brief, shot, { key: "edge-" + i });
 }`;
 
-/** 分类是画布结构，与模型内部 scene.group 分开。 */
-export const CANVAS_SCRIPT_ORGANIZATION_EXAMPLE = `const categories = [];
-for (const [key, title, assets] of [
-  ["characters", "角色", ["潜入者", "巡逻守卫"]],
-  ["architecture", "建筑", ["地砖", "安全门"]],
-  ["cover", "掩体", ["物资箱"]],
-  ["props", "道具机关", ["门禁卡", "警报器"]],
-  ["markers", "提示标记", ["撤离区域"]]
-]) {
-  const members = assets.map((name, i) => canvas.node("model", {
-    key: key + "-" + i, title: name, prompt: "俯视角潜行游戏素材：" + name
-  }));
-  categories.push(canvas.group(members, {
-    key, title, layout: { mode: "grid", columns: 3, gapX: 60, gapY: 60 },
-    placement: { mode: "absolute", position: { x: -2600, y: categories.length * 760 } }
-  }));
-}`;
-
 /** 指南文本：人类可读，但事实与签名表同源。 */
 export const CANVAS_SCRIPT_GUIDE_TEXT = `# Canvas Script API 指南（${DEFAULT_CANVAS_SCRIPT_VERSION}）
 
@@ -137,14 +112,11 @@ export const CANVAS_SCRIPT_GUIDE_TEXT = `# Canvas Script API 指南（${DEFAULT_
 
 ${CANVAS_SCRIPT_API_SIGNATURES.map((entry) => `- \`${entry.signature}\` — ${entry.description}`).join("\n")}
 
-## 分类整理
+## 布局
 
-素材库应按用途创建有标题的真实分类组，分类组保持在顶层（画布不支持嵌套组）。只有一个成员也能成组。
-标题前缀、排成几行、文本说明不能代替组。组只表达归属，不应为了分类而添加 connect。
-connect 只表达真实生成输入。canvas.node 不接受 group kind；使用 canvas.group。
-预检检查 organization.groups 中的 title/memberIds/worldBounds，再提交并读回 parentId 核对。
-模型新建尺寸为 248×232。图查询 size/worldBounds、相对定位、grid 与组包围框都使用和界面一致的有效尺寸；已有 196×64 模型卡片也按实际预览尺寸参与布局，无需手工补偿尺寸。
-get_canvas_graph 的 parentId=null 查询顶层，parentId=组 ID 分页读取直属成员。
+画布只支持节点与连线，不支持分组容器。用 canvas.layout 网格排布相关节点，标题用 setTitle 表达用途。
+connect 只表达真实生成输入。
+模型新建尺寸为 248×232。图查询 size/worldBounds、相对定位与 grid 都使用和界面一致的有效尺寸；已有 196×64 模型卡片也按实际预览尺寸参与布局，无需手工补偿尺寸。
 
 ## handle 与 key 规则
 
@@ -172,17 +144,12 @@ ${CANVAS_SCRIPT_IF_RULES.map((rule) => `- ${rule}`).join("\n")}
 ${CANVAS_SCRIPT_GUIDE_EXAMPLE}
 \`\`\`
 
-## 分类素材库示例
-
-\`\`\`js
-${CANVAS_SCRIPT_ORGANIZATION_EXAMPLE}
-\`\`\`
-
 ## 约定
 
 - \`prompt\` 是生成输入，不冒充已有文本作品输出；节点执行必须在画布提交成功后经 \`run_canvas_node\` 触发。
 - 提交成功后脚本源码不写入画布、数据库、历史或日志；重试相同身份与内容返回首次回执。
-- model 种类映射为合法自包含 \`model3d\` 占位模型；实际模型源码通过独立 model authoring 工具提交。`;
+- model 种类映射为合法自包含 \`model3d\` 占位模型；实际模型源码通过独立 model authoring 工具提交。
+- 2D 组作用域内新建的节点会自动进入根组成员表；\`canvas.resize\` 只改卡片尺寸，不改成员关系。`;
 
 /** 机器可读的能力声明（供 `get_canvas_script_api`）。 */
 export function canvasScriptApiDescriptor() {
@@ -202,7 +169,6 @@ export function canvasScriptApiDescriptor() {
       applicationQuotas: []
     },
     examples: {
-      organization: CANVAS_SCRIPT_ORGANIZATION_EXAMPLE,
       basic: CANVAS_SCRIPT_GUIDE_EXAMPLE
     }
   };

@@ -28,6 +28,8 @@ import {
   isModelKey,
   type ModelInteractionDescriptor
 } from "./model-identity.js";
+import { decodeWorldCaptureGenerationBinding } from "../canvas/world-capture-pipeline-contract.js";
+import { worldCaptureReferenceInput, withWorldCaptureTaskInput } from "./world-capture-input.js";
 import type { TaskExecutionDetail, TaskExecutionState, TaskHistoryQuery } from "./history.js";
 
 export const DEFAULT_TASK_INTERNAL_BASE_PATH = "/internal/v1";
@@ -52,6 +54,12 @@ export type TaskSubmitRequest = {
   parameters: Record<string, unknown>;
   /** 只含稳定媒体引用；Task 通过 Media Service 校验并签出执行期 URL。 */
   inputs: CanvasTaskInput[];
+  /**
+   * T10 static world framing frozen at acceptance. It is stable metadata only (no
+   * bytes/URL); it is recorded so a completed run can be traced to the exact captured
+   * media and version, independent of later canvas changes.
+   */
+  worldCapture?: import("../canvas/world-capture-pipeline-contract.js").WorldCaptureGenerationBinding;
   /**
    * 执行时显示快照（由 Canvas 提交方从可信 catalog/画布投影；change:
    * improve-task-history-experience，任务 1.3）。缺省时旧记录降级为稳定 ID。
@@ -184,6 +192,18 @@ export function decodeTaskSubmitRequest(
   const inputs = readInputs(body.inputs);
   if (!inputs.ok) return inputs;
 
+  const worldCapture = body.worldCapture === undefined
+    ? undefined
+    : decodeWorldCaptureGenerationBinding(body.worldCapture);
+  if (worldCapture && !worldCapture.ok) {
+    return fail("malformed-request", "worldCapture 不是可信冻结输入");
+  }
+  if (worldCapture?.ok && !worldCaptureReferenceInput(worldCapture.value).ok) {
+    // A capture binding without verified media cannot become a provider reference;
+    // accepting it would silently fall back to a text-only generation.
+    return fail("malformed-request", "worldCapture 缺少可信媒体元数据");
+  }
+
   return {
     ok: true,
     value: {
@@ -198,7 +218,8 @@ export function decodeTaskSubmitRequest(
       ...(interaction ? { interaction: interaction as ModelInteractionDescriptor } : {}),
       prompt: body.prompt,
       parameters,
-      inputs: inputs.value,
+      inputs: withWorldCaptureTaskInput(inputs.value, worldCapture?.ok ? worldCapture.value : undefined),
+      ...(worldCapture?.ok ? { worldCapture: worldCapture.value } : {}),
       ...readOptionalTitle(body.modelTitle, "modelTitle"),
       ...readOptionalTitle(body.providerName, "providerName"),
       ...readOptionalTitle(body.canvasTitle, "canvasTitle"),

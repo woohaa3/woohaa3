@@ -1,0 +1,11 @@
+.image-director-panel { position: fixed; inset: 0; z-index: 45; pointer-events: auto; }
+.image-director-body { display: grid; gap: 16px; }
+.image-director-source { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; }
+.image-director-source > img,
+.image-director-source > span:first-child { width: 36px; height: 36px; flex-shrink: 0; border-radius: 6px; object-fit: cover; display: grid; place-items: center; background: var(--app-web-subtle); }
+.image-director-source > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-director-settings { display: grid; gap: 12px; }
+.image-director-prompt { box-sizing: border-box; width: 100%; min-height: 172px; padding: 14px; resize: vertical; border: 1px solid var(--app-web-border); border-radius: 8px; background: var(--app-web-panel); color: var(--app-web-text-primary); font: inherit; font-size: 14px; line-height: 1.6; }
+.image-director-prompt::placeholder { color: color-mix(in srgb, var(--app-web-text-primary) 68%, var(--app-web-panel)); }
+.image-director-hint { margin: 0; color: var(--app-web-text-muted); font-size: 12px; line-height: 1.6; }
+.image-director-status { font-size: 13px; overflow-wrap: anywhere; }

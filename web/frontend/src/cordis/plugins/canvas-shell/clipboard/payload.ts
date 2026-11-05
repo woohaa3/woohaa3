@@ -13,11 +13,9 @@
 import type { ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition, Woohaa3CanvasSerializedNode } from "@woohaa3/contracts";
 import {
   decodeImageEditDocument,
-  filmSetObjectOwnershipOf,
-  isFilmSetNode,
-  filmSetAssetReferences,
+  decodeSceneAreaData,
+  decodeWorldInstanceData,
   isImageProjectDocument,
-  readFilmSetContent,
   sanitizeNodeDataForClipboard,
   type ImageEditProjectObjectRef,
   type StoredAsset
@@ -30,7 +28,7 @@ export const CANVAS_COPY_FORMAT = "infinspire-canvas-copy-v1";
 export type CopyNode = {
   id: string;
   type: string;
-  position: Woohaa3CanvasPosition;
+  position?: Woohaa3CanvasPosition;
   width?: number;
   height?: number;
   parentId?: string;
@@ -104,8 +102,6 @@ export function buildCanvasCopyPayload(
     }
   }
 
-  // Legacy object shells are read-only migration inputs, never clipboard resources.
-  for (const id of included) if (filmSetObjectOwnershipOf(canvas.nodeData[id]) || isFilmSetNode(byId.get(id)?.type, canvas.nodeData[id])) return null;
   const previewOwnerByNode = new Map<string, string>();
   for (const node of nodes) {
     const managed = managedNodeRelationOf(canvas.nodeData[node.id]);
@@ -116,7 +112,27 @@ export function buildCanvasCopyPayload(
     if (owner && included.has(owner)) included.add(node.id);
   }
   if (included.size === 0) return null;
-  const copyNodes: CopyNode[] = nodes.filter(node => included.has(node.id)).map(toCopyNode);
+  const copyNodes = nodes.filter(node => included.has(node.id)).map((node) => {
+    const copy = toCopyNode(node);
+    if (copy.parentId && !included.has(copy.parentId)) {
+      if (!copy.position) return null;
+      const visited = new Set([node.id]);
+      let parentId: string | undefined = copy.parentId;
+      while (parentId) {
+        if (visited.has(parentId)) return null;
+        visited.add(parentId);
+        const parent = byId.get(parentId);
+        if (!parent?.position) return null;
+        copy.position.x += parent.position.x;
+        copy.position.y += parent.position.y;
+        parentId = parent.parentId;
+      }
+      delete copy.parentId;
+    }
+    return copy;
+  });
+  if (copyNodes.some((node) => node === null)) return null;
+  const portableNodes = copyNodes as CopyNode[];
 
   const copyEdges: CopyEdge[] = [];
   const incomingEdges: CopyIncomingEdge[] = [];
@@ -154,13 +170,13 @@ export function buildCanvasCopyPayload(
     if (Object.keys(cleaned).length > 0) nodeData[id] = cleaned;
   }
 
-  // 引用收集：片场内部对象引用（既有）之外，媒体节点的稳定内容引用也必须一并携带。
+  // 引用收集：媒体节点的稳定内容引用必须一并携带。
   // 上传的图片/视频/音频节点把内容存在 `outputAssetId`（清理器已按内容语义保留），
   // 若只把指针留在 nodeData 而不带资产，粘贴到别的画布就会得到「有引用、没有图」的节点
   // （change: fix-copy-keeps-node-media）。
-  const referencedAssetIds = new Set<string>(filmSetReferenceIdsOf(nodeData));
+  const referencedAssetIds = new Set<string>();
   const projectObjects = new Map<string, ImageEditProjectObjectRef>();
-  for (const node of copyNodes) {
+  for (const node of portableNodes) {
     const data = nodeData[node.id];
     if (!data) continue;
     for (const assetId of imageEditAssetIdsOf(data)) referencedAssetIds.add(assetId);
@@ -178,7 +194,7 @@ export function buildCanvasCopyPayload(
     ...(projectObjects.size > 0 ? { sourceCanvasId: canvas.id } : {}),
     assets: canvas.assets.filter(asset => referencedAssetIds.has(asset.id)),
     ...(projectObjects.size > 0 ? { projectObjects: [...projectObjects.values()] } : {}),
-    nodes: copyNodes,
+    nodes: portableNodes,
     edges: copyEdges,
     incomingEdges,
     nodeData
@@ -236,13 +252,6 @@ function restoreContentReferences(
   }
 }
 
-function filmSetReferenceIdsOf(nodeData: Record<string, Woohaa3CanvasJsonObject>): string[] {  const ids = new Set<string>();
-  for (const data of Object.values(nodeData)) {
-    for (const assetId of filmSetAssetReferences(readFilmSetContent(data))) ids.add(assetId);
-  }
-  return [...ids];
-}
-
 /** 图片编辑定义引用的稳定资产 id（工程分支含全部来源资产）。 */
 export function imageEditAssetIdsOf(data: Woohaa3CanvasJsonObject | undefined): string[] {
   const decoded = decodeImageEditDocument(data?.imageEdit);
@@ -274,33 +283,86 @@ export function parseCanvasCopyPayload(input: string | null | undefined): Canvas
   let raw: unknown;
   try {
     raw = JSON.parse(input);
+    return isCanvasCopyPayload(raw) ? raw : null;
   } catch {
     return null;
   }
-  return isCanvasCopyPayload(raw) ? raw : null;
 }
 
 export function isCanvasCopyPayload(input: unknown): input is CanvasCopyPayload {
   if (!isRecord(input)) return false;
+  if (!isJsonValue(input)) return false;
   if (input.format !== CANVAS_COPY_FORMAT) return false;
   if (!Array.isArray(input.nodes) || !Array.isArray(input.edges) || !Array.isArray(input.incomingEdges)) {
     return false;
   }
   if (!isRecord(input.nodeData)) return false;
+  if (Object.values(input.nodeData).some((value) => !isRecord(value))) return false;
+  if (input.assets !== undefined) {
+    if (!Array.isArray(input.assets)) return false;
+    const ids = new Set<string>();
+    for (const asset of input.assets) {
+      if (!isRecord(asset) || typeof asset.id !== "string" || !asset.id || ids.has(asset.id) ||
+          typeof asset.title !== "string" || typeof asset.createdAt !== "string" || !asset.createdAt ||
+          !["image", "video", "audio", "text", "storyboard", "file"].includes(asset.mediaKind as string) ||
+          !["generated", "uploaded", "external"].includes(asset.source as string) ||
+          !["ready", "generating", "needs-review", "missing", "failed"].includes(asset.status as string)) return false;
+      for (const key of ["url", "posterUrl", "text", "prompt", "error", "nodeId", "providerTaskId", "historyTitle"]) if (asset[key] !== undefined && typeof asset[key] !== "string") return false;
+      for (const key of ["durationSeconds", "progress"]) if (asset[key] !== undefined && (typeof asset[key] !== "number" || !Number.isFinite(asset[key]))) return false;
+      if (asset.isFavorite !== undefined && typeof asset.isFavorite !== "boolean") return false;
+      if (asset.tags !== undefined && (!Array.isArray(asset.tags) || asset.tags.some((tag) => typeof tag !== "string"))) return false;
+      if (asset.metadata !== undefined && !isRecord(asset.metadata)) return false;
+      if (asset.provenance !== undefined) {
+        if (!isRecord(asset.provenance)) return false;
+        for (const key of ["taskNodeId", "taskKind", "runId"]) if (asset.provenance[key] !== undefined && typeof asset.provenance[key] !== "string") return false;
+        if (asset.provenance.outputIndex !== undefined && (typeof asset.provenance.outputIndex !== "number" || !Number.isInteger(asset.provenance.outputIndex) || asset.provenance.outputIndex < 0)) return false;
+      }
+      ids.add(asset.id);
+    }
+  }
   const nodeIds = new Set<string>();
   for (const node of input.nodes) {
     if (!isRecord(node) || typeof node.id !== "string" || node.id === "") return false;
     if (typeof node.type !== "string" || node.type === "") return false;
-    if (!isPosition(node.position)) return false;
+    if (node.position === undefined) {
+      // Shared-world objects keep their placement in the validated world DTO,
+      // rather than an invented 2D card position. Ordinary cards still need one.
+      const data = input.nodeData[node.id];
+      const worldPlaced = isRecord(data) && (node.type === "scene-area"
+        ? decodeSceneAreaData(data?.sceneArea).ok
+        : node.type === "model3d" && decodeWorldInstanceData(data?.sharedWorldInstance).ok);
+      if (!worldPlaced || node.parentId !== undefined) return false;
+    } else if (!isPosition(node.position)) return false;
+    for (const key of ["width", "height"]) if (node[key] !== undefined && (typeof node[key] !== "number" || !Number.isFinite(node[key]) || node[key] <= 0)) return false;
+    if (node.zIndex !== undefined && (typeof node.zIndex !== "number" || !Number.isFinite(node.zIndex))) return false;
+    if (node.parentId !== undefined && (typeof node.parentId !== "string" || !node.parentId)) return false;
+    if (nodeIds.has(node.id)) return false;
     nodeIds.add(node.id);
   }
+  for (const node of input.nodes) if (node.parentId !== undefined && (!nodeIds.has(node.parentId) || node.parentId === node.id)) return false;
+  const parents = new Map(input.nodes.map((node) => [node.id, node.parentId]));
+  for (const node of input.nodes) {
+    const seen = new Set<string>();
+    let id: string | undefined = node.id;
+    while (id !== undefined) {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      id = parents.get(id);
+    }
+  }
+  const edgeIds = new Set<string>();
   for (const edge of input.edges) {
     if (!isRecord(edge) || typeof edge.id !== "string" || edge.id === "") return false;
     if (typeof edge.source !== "string" || typeof edge.target !== "string") return false;
+    if (!isRecord(edge.data)) return false;
+    if (!validHandles(edge) || edgeIds.has(edge.id)) return false;
+    edgeIds.add(edge.id);
     if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) return false;
   }
   for (const edge of input.incomingEdges) {
     if (!isRecord(edge) || typeof edge.source !== "string" || typeof edge.target !== "string") return false;
+    if (!isRecord(edge.data)) return false;
+    if (!edge.source || !validHandles(edge)) return false;
     if (!nodeIds.has(edge.target)) return false;
   }
   // 工程对象引用可选（旧载荷没有）；存在时逐字段校验，不接受的形状整条拒绝。
@@ -312,6 +374,17 @@ export function isCanvasCopyPayload(input: unknown): input is CanvasCopyPayload 
     }
   }
   return true;
+}
+
+function validHandles(edge: Record<string, unknown>): boolean {
+  return [edge.sourceHandle, edge.targetHandle].every((handle) => handle === undefined || handle === null || typeof handle === "string");
+}
+
+function isJsonValue(value: unknown): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isRecord(value) && Object.values(value).every(isJsonValue);
 }
 
 function isProjectObjectRef(input: unknown): boolean {
@@ -328,7 +401,7 @@ function toCopyNode(node: Woohaa3CanvasSerializedNode): CopyNode {
   return {
     id: node.id,
     type: node.type,
-    position: { ...node.position },
+    ...(node.position ? { position: { ...node.position } } : {}),
     ...(node.width !== undefined ? { width: node.width } : {}),
     ...(node.height !== undefined ? { height: node.height } : {}),
     ...(node.parentId !== undefined ? { parentId: node.parentId } : {}),
@@ -348,7 +421,7 @@ function toCopyEdge(edge: ServerCanvas["document"]["edges"][number]): CopyEdge {
 }
 
 function isPosition(input: unknown): input is Woohaa3CanvasPosition {
-  return isRecord(input) && typeof input.x === "number" && typeof input.y === "number";
+  return isRecord(input) && typeof input.x === "number" && Number.isFinite(input.x) && typeof input.y === "number" && Number.isFinite(input.y);
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {

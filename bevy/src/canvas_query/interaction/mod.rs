@@ -27,7 +27,6 @@ pub(crate) use observer::accept_observer;
 pub(crate) use results::PointHit;
 pub(crate) use results::{
     DropTargetQueryResult, MarqueeQueryResult, PointQueryResult, ProbeQueryResult,
-    ScopeGeometryQueryResult,
 };
 use snapshot::InteractionSnapshot;
 
@@ -114,9 +113,6 @@ pub(crate) fn accept_positions(
                 .map(|delta| (delta.id.as_str(), delta.dx, delta.dy)),
         );
         super::model_pick::retune_depth(&mut models);
-        // 内部对象候选只在片场聚焦存在，overview 位置增量没有需要同步的交集：
-        // 不再平移/维护内部候选或其基线（change: 2026-10-14-scope-film-set-object-picking-to-focus，
-        // design D3）。普通模型候选、2D snapshot、viewport 与 generation 仍走原有原子提交。
         let generation = GENERATION.with(|cell| {
             let next = cell.get().wrapping_add(1);
             cell.set(next);
@@ -280,24 +276,6 @@ pub(crate) fn drop_target_query(
     }
 }
 
-/// 复合资产范围几何读取：返回当前 accepted snapshot 中所有复合资产的轻量几何。
-pub(crate) fn scope_geometry_query(expected: u32) -> ScopeGeometryQueryResult {
-    match with_snapshot(expected, |snapshot| snapshot.scope_entries()) {
-        Err(reason) => ScopeGeometryQueryResult {
-            available: false,
-            reason: Some(reason),
-            generation: current_generation(),
-            scopes: Vec::new(),
-        },
-        Ok(scopes) => ScopeGeometryQueryResult {
-            available: true,
-            reason: None,
-            generation: expected,
-            scopes,
-        },
-    }
-}
-
 // ── JSON 边界入口（WASM facade 调用）────────────────────────────────────────
 
 /// 点查询请求（只接收固定大小坐标与 identity，绝不接收 scene）。
@@ -341,13 +319,6 @@ struct DropTargetRequest {
     y: f32,
     #[serde(default)]
     excluded: Vec<String>,
-}
-
-/// 复合资产范围几何查询请求。
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ScopeGeometryRequest {
-    generation: u32,
 }
 
 fn to_json<T: serde::Serialize>(value: &T) -> String {
@@ -424,20 +395,6 @@ pub(crate) fn drop_target_query_json(json: &str) -> String {
     to_json(&result)
 }
 
-/// JSON 入口：复合资产范围几何查询；解析失败返回稳定 unavailable 结果。
-pub(crate) fn scope_geometry_query_json(json: &str) -> String {
-    let result = match serde_json::from_str::<ScopeGeometryRequest>(json) {
-        Ok(request) => scope_geometry_query(request.generation),
-        Err(_) => ScopeGeometryQueryResult {
-            available: false,
-            reason: Some("unavailable".to_owned()),
-            generation: current_generation(),
-            scopes: Vec::new(),
-        },
-    };
-    to_json(&result)
-}
-
 /// 清空快照（测试 / 运行时代际重放前）。generation 继续单调，不重置。
 #[cfg(test)]
 pub(crate) fn clear_snapshot() {
@@ -468,8 +425,6 @@ pub(crate) fn point_hit_golden(
         results::PointHit::AggregateHandle { direction } => format!("aggregate-handle:{direction}"),
         results::PointHit::Node { node_id } => format!("node:{node_id}"),
         results::PointHit::ModelPreview { node_id } => format!("model-preview:{node_id}"),
-        results::PointHit::FilmScope { node_id } => format!("film-scope:{node_id}"),
-        results::PointHit::ShotPreview { node_id } => format!("shot-preview:{node_id}"),
         results::PointHit::History { node_id } => format!("history:{node_id}"),
         results::PointHit::Port { node_id, side } => format!("port:{node_id}:{side}"),
         results::PointHit::Resize { node_id, handle } => match handle {

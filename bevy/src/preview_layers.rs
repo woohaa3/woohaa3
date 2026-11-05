@@ -250,3 +250,6 @@ mod tests {
         assert_eq!(unique.len(), layers.len());
     }
 }
+
+/// Editor-only camera and scene-area helpers; excluded from final camera captures.
+pub(crate) const WORLD_CAMERA_GIZMO_LAYER: usize = 8;

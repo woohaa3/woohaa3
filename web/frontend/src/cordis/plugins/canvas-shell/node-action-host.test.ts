@@ -37,22 +37,6 @@ describe("describeNodeActions（任务 3.1/3.2）", () => {
     expect(result!.owners.has("convert")).toBe(true);
   });
 
-  it("保留组展开/收起图标并允许纯图标动作", () => {
-    const result = describeNodeActions({
-      contributions: [contribution({
-        id: "group-expand",
-        describe: () => ({ label: "展开", enabled: true, icon: "expand-groups", iconOnly: true })
-      })],
-      context: { nodeId: "group", nodeType: "group", writable: true }
-    });
-    expect(result!.presentation.actions).toEqual([{
-      id: "group-expand",
-      label: "展开",
-      enabled: true,
-      icon: "expand-groups",
-      iconOnly: true
-    }]);
-  });
 
   it("摘要只由排序最前的身份贡献提供，动作状态不会覆盖组名", () => {
     const result = describeNodeActions({

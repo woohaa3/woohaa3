@@ -22,9 +22,35 @@ import type {
 import { EMPTY_UPSTREAM_TEXT_MESSAGE, upstreamTextIsEmpty } from "./prompt-derivation.js";
 import { resolveBlockingReasons } from "./node-panel-helpers.js";
 import { panelKindForNodeType, modelTypeForPanelKind, type NodePanelKind } from "./node-panel-registry.js";
-import { resolveCatalogModelKey } from "./group-leaf-resolution.js";
 import type { CatalogState } from "../../contracts.js";
 import type { SubmitInput } from "./submit-coordinator.js";
+
+
+/** catalog 模型的稳定身份（opaque modelKey）。 */
+function catalogModelIdentity(model: { modelKey: string }): string {
+  return model.modelKey;
+}
+
+/**
+ * 解析某面板 kind 最终使用的模型身份。
+ *
+ * 与 `ExecutionPanel` 的语义一致：显式选择只有在目录里是合法选项时才生效，否则回落到
+ * `catalog.defaultModels[kind]`（合法时）或该 kind 的第一个模型。目录不可用时原样退回显式值。
+ */
+function resolveCatalogModelKey(
+  catalog: CanvasTaskCatalog,
+  modelType: CanvasTaskModelType,
+  candidate: string
+): string {
+  if (!catalog.available) return candidate;
+  const options = catalog.models.filter((model) => model.modelType === modelType);
+  if (options.some((model) => catalogModelIdentity(model) === candidate)) return candidate;
+  const configured = catalog.defaultModels?.[modelType];
+  if (configured && options.some((model) => catalogModelIdentity(model) === configured)) {
+    return configured;
+  }
+  return options[0] ? catalogModelIdentity(options[0]) : "";
+}
 
 /** 只读取 `{nodeId, modelKey}` 分区草稿所需的字段。 */
 export type LeafRunDraft = {

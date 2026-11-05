@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { missingRequiredParameters, parametersAfterModelSwitch, parametersOnOpen } from "./panel-shared.js";
-import type { ExecutionPanelModelConfig } from "./types.js";
+import { missingRequiredParameters, parametersAfterModelSwitch, parametersOnOpen, parameterViolationReasons } from "./panel-shared.js";
+import type { ExecutionPanelModelConfig, ExecutionPanelParameterField } from "./types.js";
 
 const CONFIG: ExecutionPanelModelConfig = {
 	modelOptions: [
@@ -179,5 +179,41 @@ describe("missingRequiredParameters", () => {
 			},
 		};
 		expect(missingRequiredParameters(config, { mode: "fixed" }, "hidden")).toEqual([]);
+	});
+});
+
+/**
+ * 提交前的参数值约束（枚举 / 数值范围）：越界不要让请求发出去再等 Provider 回泛化错误，
+ * 面板就地给出「哪个字段、允许什么」的中文句子并在提交前禁用主操作。
+ */
+describe("parameterViolationReasons", () => {
+	const FIELDS: ReadonlyArray<ExecutionPanelParameterField> =
+		CONFIG.parameterSchemaByModel?.["gpt-image-2"] ?? [];
+
+	it("合法值不报原因", () => {
+		expect(parameterViolationReasons(FIELDS, { resolution: "2K", aspectRatio: "16:9", n: 4 })).toEqual([]);
+	});
+
+	it("枚举外的值报出字段与允许选项", () => {
+		expect(parameterViolationReasons(FIELDS, { quality: "hd" })).toEqual([
+			"质量只支持 auto、low、medium、high，当前为「hd」",
+		]);
+	});
+
+	it("数值低于下限 / 高于上限分别报出可读范围", () => {
+		expect(parameterViolationReasons(FIELDS, { n: 0 })).toEqual(["数量不能小于 1，当前为 0"]);
+		expect(parameterViolationReasons(FIELDS, { n: 99 })).toEqual(["数量不能大于 10，当前为 99"]);
+	});
+
+	it("空值不参与判定，隐藏字段越界也不报", () => {
+		expect(parameterViolationReasons(FIELDS, { quality: "", n: null })).toEqual([]);
+		const hidden: ExecutionPanelParameterField[] = [
+			{
+				key: "size", label: "尺寸", type: "select",
+				options: [{ value: "1024x1024", label: "1024x1024" }],
+				hiddenWhen: [{ field: "mode", equals: "fixed" }],
+			},
+		];
+		expect(parameterViolationReasons(hidden, { mode: "fixed", size: "999x999" })).toEqual([]);
 	});
 });

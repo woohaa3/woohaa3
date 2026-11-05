@@ -177,7 +177,7 @@ it("详情展开旧尝试历史；失败记录不再提供核对入口", async (
     });
     expect(container.querySelector('[data-kind="skill"]')?.textContent).toContain("主图节点");
     act(() => container.querySelector<HTMLButtonElement>('[data-kind="skill"] .task-activity-feed__primary')!.click());
-    const detail = container.querySelector(".task-activity-feed__pop--group")!;
+    const detail = container.querySelector(".task-activity-feed__pop")!;
     expect(detail.textContent).toContain("第 1 次 · 已替代");
     expect(detail.textContent).toContain("由 run-2 替代");
     expect(detail.textContent).toContain("旧提示词");

@@ -26,8 +26,9 @@ import { GENERATION_TRACE_DIALOG_ID } from "./plugins/task-execution/generation-
 import { AGENT_ASSISTANT_DIALOG_ID } from "./plugins/agent-assistant/plugin.js";
 import { SETTINGS_DIALOG_ID } from "./plugins/settings/workspace/settings-dialog-chrome.js";
 import { PROMPT_SNIPPET_SOURCE } from "./plugins/service-keys.js";
-import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import { createDefaultWorldCameraData, createEmptyWoohaa3ServerCanvas, type CanvasNodeData } from "@woohaa3/contracts";
 import { woohaa3CanvasStore } from "./services/canvas-state/index.js";
+import { nodeSelectionStore } from "./services/selection-store.js";
 import { canvasFixture } from "./plugins/task-execution/test-support/fixtures.js";
 import type { FunctionComponent, ReactElement } from "react";
 import type { CanvasPanelRenderProps } from "./navigation/contracts.js";
@@ -117,6 +118,60 @@ describe("真实平台 + 静态清单", () => {
     } finally { await page.dispose(); }
   });
 
+  it("selecting a camera opens its generation panel and deselecting closes it", async () => {
+    installGlobals();
+    runtime = await startFrontendRuntime({ installPlatform: installFullPlatform, plugins: createSourceCanvasExtensionManifest() });
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas-test");
+    canvas.document.nodes.push({ id: "camera-card", type: "world-camera", position: { x: 0, y: 0 } });
+    canvas.nodeData["camera-card"] = { worldCamera: createDefaultWorldCameraData("camera-a", "v1", { u: 0, v: 0 }) } as unknown as CanvasNodeData;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+    try {
+      nodeSelectionStore.setFromRuntime({ nodeIds: ["camera-card"], primaryNodeId: "camera-card", editingFocus: false }, new Set(["camera-card"]));
+      expect(runtime.ctx.canvasNavigation.getSnapshot().panel).toEqual({ type: "camera-execution", nodeId: "camera-card" });
+      expect(runtime.ctx.canvasNavigation.resolvePanel("camera-execution")).not.toBeNull();
+      nodeSelectionStore.reset();
+      expect(runtime.ctx.canvasNavigation.getSnapshot().panel).toBeNull();
+    } finally { nodeSelectionStore.reset(); }
+  });
+
+  it("取消选中节点时直接收起 Agent 对话详情侧栏", async () => {
+    installGlobals();
+    runtime = await startFrontendRuntime({
+      installPlatform: ctx => { installAppServices(ctx, { testHooks: false }); },
+      plugins: []
+    });
+    const page = await startFrontendScope(runtime.ctx, {
+      install: async ctx => {
+        await installCanvasPageServices(ctx, { testHooks: false });
+      },
+      plugins: createSourceCanvasExtensionManifest(),
+      isolate: ["canvasState", "canvasSession", "canvasNavigation", "agentConversationService"]
+    });
+    try {
+      const nav = page.ctx.canvasNavigation;
+      nodeSelectionStore.setFromRuntime(
+        { nodeIds: ["n1"], primaryNodeId: "n1", editingFocus: false },
+        new Set(["n1"])
+      );
+      expect(nav.openPanel({
+        type: "agent-conversation",
+        conversationId: "conv-1",
+        requestId: "req-1",
+        nodeId: "n1"
+      }).ok).toBe(true);
+      expect(nav.getSnapshot().panel?.type).toBe("agent-conversation");
+
+      nodeSelectionStore.setFromRuntime(
+        { nodeIds: [], primaryNodeId: null, editingFocus: false },
+        new Set(["n1"])
+      );
+      expect(nav.getSnapshot().panel).toBeNull();
+    } finally {
+      nodeSelectionStore.reset();
+      await page.dispose();
+    }
+  });
+
   it("Canvas manifest 不再包含旧任务历史路由；node-execution panel definition 可见", async () => {
     installGlobals();
     runtime = await startFrontendRuntime({
@@ -127,8 +182,8 @@ describe("真实平台 + 静态清单", () => {
     // 旧任务历史已移出核心；Canvas scope 不再注册任何 app.route。
     expect(slots.list("app.route")).toHaveLength(0);
     expect(runtime.ctx.canvasNavigation.resolvePanel("node-execution")).not.toBeNull();
-    // canvas-menu 自身 + 任务执行的「查看生成溯源」项。
-    expect(slots.list("canvas.context-menu")).toHaveLength(2);
+    // canvas-menu 自身 + 任务执行的「查看生成溯源」项 + 图片场景的「生成模型与导演区」项。
+    expect(slots.list("canvas.context-menu")).toHaveLength(3);
   });
 
   it("通用 extension page scope 只注册自身 route，不装配 Canvas 能力（无核心业务分支）", async () => {
@@ -206,7 +261,7 @@ describe("真实平台 + 静态清单", () => {
     // paste/drop 不出现；片段库是父仓私有扩展，公开仓运行时不提供 fragment capability。
     expect(slots.list("input.paste")).toHaveLength(0);
     expect(slots.list("input.drop")).toHaveLength(0);
-    expect(slots.list("canvas.context-menu")).toHaveLength(2); // canvas-menu + 查看生成溯源
+    expect(slots.list("canvas.context-menu")).toHaveLength(3); // canvas-menu + 查看生成溯源 + 图片场景
     expect(runtime.ctx.get(PROMPT_SNIPPET_SOURCE as never)).toBeUndefined();
     // 基础能力仍在：右键上传（importService）、节点面板、画布会话。
     expect(runtime.ctx.get("importService" as never)).toBeDefined();
@@ -224,7 +279,7 @@ describe("真实平台 + 静态清单", () => {
     const slots = ctx.slots;
     const dialogs = ctx.dialogs;
     expect(slots.list("input.paste")).toHaveLength(1);
-    expect(slots.list("canvas.context-menu")).toHaveLength(2); // canvas-menu + 查看生成溯源
+    expect(slots.list("canvas.context-menu")).toHaveLength(3); // canvas-menu + 查看生成溯源 + 图片场景
     const current = runtime;
     runtime = null;
     await current.dispose();

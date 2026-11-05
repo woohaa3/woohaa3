@@ -25,13 +25,11 @@ import type { AgentConversationSnapshotView } from "../../contract/agent-convers
 
 export const AGENT_TURN_OPERATION_PREFIX = "agent:";
 
-/** Agent 回合的节点运行种类：片场与镜头复用既有种类，其余按 3D 模型处理。 */
+/** Agent 回合的节点运行种类：文本/镜头复用既有种类，其余按 3D 模型处理。 */
 function operationKindForTurn(turn: ConversationTurn): CanvasOperationRecord["kind"] {
   switch (turn.target.mode) {
     case "text":
       return "text";
-    case "film-set":
-      return "film-set";
     case "camera":
       return "camera";
     default:
@@ -67,7 +65,7 @@ export function projectAgentTurnOperations(
 ): CanvasOperationRecord[] {
   const turns = snapshot.turnsByRequest ? Object.values(snapshot.turnsByRequest) : snapshot.active ? [snapshot.active] : [];
   return turns.flatMap(({ turn }) => {
-  const nodeId = turn.target.nodeId;
+  const nodeId = turn.target.delivery?.purpose === "image-director-scene" ? turn.target.delivery.nodeId : turn.target.nodeId;
   if (!nodeId || turn.target.canvasId !== canvasId) return [];
   const state = operationStateForTurn(turn.status);
   if (!state) return [];

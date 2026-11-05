@@ -7,18 +7,17 @@
  * 的情况下覆盖目标动作/写范围与状态映射（任务 6.1）。
  *
  * 约束（design D3/任务 4.2）：
- * - 对象动作（片场片段内对象）必须带显式 `clipId`，否则不发送，MUST NOT 退化成整体片场修改；
- * - camera 动作使用稳定 `cameraId`（不写索引），模型/片场/镜头使用稳定 nodeId；
+ * - camera 动作使用稳定 `cameraId`（不写索引），模型使用稳定 nodeId；
  * - `discuss` 只读，不携带目标写许可。
  */
 import type { AgentEntryIntent, AgentEntryAction, AgentTargetMode, ConversationTurnStatus } from "@woohaa3/contracts";
 
-export type GenerationTargetMode = "model3d" | "film-set" | "camera";
+export type GenerationTargetMode = "model3d" | "camera";
 
 /**
  * 由生成面板当前目标派生 entry intent。
  *
- * `camera` 是「调整镜头」，其余是「生成」；片场片段内对象的修改通过 `itemId`/`clipId` 声明。
+ * `camera` 是「调整镜头」，其余是「生成」。
  * 返回值中的 `model` 是**账户目录冻结的模型 id**（design D5：选择失效必须要求用户处理，不自动换）。
  */
 export function buildGenerationEntryIntent(input: {
@@ -29,8 +28,6 @@ export function buildGenerationEntryIntent(input: {
   model: string;
   expectedContentHash?: string;
   cameraId?: string | null;
-  clipId?: string | null;
-  itemId?: string | null;
 }): AgentEntryIntent {
   const action: AgentEntryAction = input.mode === "camera" ? "modify" : "generate";
   return {
@@ -41,18 +38,14 @@ export function buildGenerationEntryIntent(input: {
     ...(input.model ? { model: input.model } : {}),
     ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
     ...(input.cameraId ? { cameraId: input.cameraId } : {}),
-    ...(input.clipId ? { clipId: input.clipId } : {}),
-    ...(input.itemId ? { itemId: input.itemId } : {}),
     prompt: input.prompt
   };
 }
 
 /**
- * 对象动作是否可安全发送：声明了片段内对象（itemId）却没有 clipId 时必须阻止，
- * MUST NOT 扩大成整体片场修改（design D3 / 任务 4.2）。
+ * 目标动作是否可安全发送：camera 必须带 nodeId；其余必须有非空提示词。
  */
 export function isEntryIntentSendable(intent: AgentEntryIntent): boolean {
-  if (intent.itemId !== undefined && intent.clipId === undefined) return false;
   if (intent.mode === "camera" && intent.nodeId === undefined) return false;
   return intent.prompt.trim() !== "";
 }

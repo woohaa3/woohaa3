@@ -2,7 +2,7 @@
  * 参考素材 items 投影（change: add-reference-inputs-and-mentions，任务 3.1）。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, type CanvasTaskInputBinding, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+import { createDefaultWorldCameraData, createEmptyWoohaa3ServerCanvas, type CanvasTaskInputBinding, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
 import { resolveReferenceItems } from "./reference-items.js";
 
 const NOW = "2026-09-26T00:00:00.000Z";
@@ -53,6 +53,14 @@ function canvasWith(options: {
 }
 
 describe("resolveReferenceItems", () => {
+  it("allows a connected camera to capture at submission without an output asset", () => {
+    const canvas = canvasWith({ sourceType: "world-camera" });
+    canvas.nodeData.src = { worldCamera: createDefaultWorldCameraData("camera", "v1", { u: 0, v: 0 }) } as never;
+    const result = resolveReferenceItems({ canvas, nodeId: "target", bindings: BINDINGS });
+    expect(result.blockingReasons).toEqual([]);
+    expect(result.items[0]).toMatchObject({ mediaKind: "image", assetId: null, blockingReason: null });
+    expect(resolveReferenceItems({ canvas, nodeId: "target", bindings: [] }).items[0].status).toBe("invalid");
+  });
   it("ready 图片映射为 ready item 且带稳定预览", () => {
     const canvas = canvasWith({ assets: [mediaAsset("a1", "image", "ready", "/api/media/x.png")], assetId: "a1" });
     const result = resolveReferenceItems({ canvas, nodeId: "target", bindings: BINDINGS });
@@ -96,42 +104,3 @@ describe("resolveReferenceItems", () => {
   });
 });
 
-describe("resolveReferenceItems（镜头参考，任务 8.6）", () => {
-  const VIDEO_BINDINGS: CanvasTaskInputBinding[] = [
-    { field: "videoUrls", semantic: "reference-video", roles: ["reference_video"], mediaKinds: ["video"], mediaTypes: ["video/mp4"], maxItems: 2, valueFormat: "reference" }
-  ];
-
-  function shotCanvas(options: { frozenAssetId?: string } = {}): ServerCanvas {
-    const canvas = createEmptyWoohaa3ServerCanvas("c1", NOW);
-    canvas.document.nodes.push(
-      { id: "preview", type: "film-set-shot-preview", position: { x: 0, y: 0 } },
-      { id: "video", type: "video", position: { x: 300, y: 0 } }
-    );
-    canvas.document.edges.push({ id: "e1", source: "preview", target: "video", data: { kind: "shot-reference", schemaVersion: 1 } });
-    canvas.nodeData.preview = { shotPreview: { schemaVersion: 1, filmSetNodeId: "film", clipId: "clip-1" } } as never;
-    canvas.nodeData.video = {
-      inputMapping: [{
-        slotId: "slot-shot",
-        sourceNodeId: "preview",
-        role: "shot_reference",
-        sortKey: "0",
-        ...(options.frozenAssetId ? { sourceAssetIds: [options.frozenAssetId] } : {})
-      }]
-    } as never;
-    return canvas;
-  }
-
-  it("未录制完成时显示等待镜头参考（视频类型），不是通用上游错误", () => {
-    const result = resolveReferenceItems({ canvas: shotCanvas(), nodeId: "video", bindings: VIDEO_BINDINGS });
-    expect(result.items[0]).toMatchObject({ mentionType: "input_video", mediaKind: "video", status: "waiting" });
-    expect(result.items[0]!.blockingReason).toContain("等待镜头参考");
-  });
-
-  it("已冻结的镜头参考按 reference_video 绑定显示 ready", () => {
-    const canvas = shotCanvas({ frozenAssetId: "shot-asset" });
-    canvas.assets.push(mediaAsset("shot-asset", "video"));
-    const result = resolveReferenceItems({ canvas, nodeId: "video", bindings: VIDEO_BINDINGS });
-    expect(result.items[0]).toMatchObject({ status: "ready", mediaKind: "video" });
-    expect(result.blockingReasons).toHaveLength(0);
-  });
-});

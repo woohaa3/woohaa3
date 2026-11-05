@@ -72,10 +72,14 @@ export type ConnectionProjectionInput = {
 };
 
 export function projectConnectionView(input: ConnectionProjectionInput): AgentConnectionView {
-  const ready = isReady(input.status, input.required ?? ["transport"]) &&
-    (!input.runtime || input.runtime.dependency.state === "ready");
+  // "unknown" means the runtime has not been probed yet, not that it is missing. Only explicit
+  // unavailable/failed evidence blocks the first attempt; the run itself refreshes the evidence.
+  const runtimeBlocked = input.runtime && (input.runtime.dependency.state === "unavailable" || input.runtime.dependency.state === "failed");
+  const ready = isReady(input.status, input.required ?? ["transport"]) && !runtimeBlocked &&
+    input.endpointAllowed !== false;
   return {
     connectionId: input.record.connectionId,
+    ...(input.record.serviceConnectionId ? { serviceConnectionId: input.record.serviceConnectionId } : {}),
     ...(input.runtime ? { runtime: input.runtime } : {}),
     adapterId: input.record.adapterId,
     extensionId: input.extensionId,

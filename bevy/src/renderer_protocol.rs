@@ -17,6 +17,7 @@ use crate::protocol::ModelOp;
 /// （change: 2026-10-06-fix-model-media-references-and-animation-preview，任务 4.1）。
 /// 旧 worker 只认识 v1，收到 v2 会稳定拒绝，不会忽略运动字段后返回静态帧。
 pub const RENDERER_PROTOCOL_VERSION: &str = "woohaa-model-renderer-protocol-v4";
+pub const WORLD_RENDERER_PROTOCOL_VERSION: &str = "woohaa-world-renderer-protocol-v1";
 /// 单条消息体上限（防止超大消息耗尽内存）。
 pub const MAX_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 /// 预览尺寸上限。
@@ -37,8 +38,6 @@ pub struct MotionRequest {
     pub(crate) looped: bool,
     pub(crate) camera_motion: Vec<crate::motion::RawCameraTrack>,
     pub(crate) model_motion: Vec<crate::motion::RawModelTrack>,
-    #[serde(default)]
-    pub(crate) objects: Vec<crate::protocol::FilmSetObjectMotion>,
     /// 初始镜头（第 0 秒）。
     pub(crate) initial_camera: InitialCameraRequest,
     /// 采样时刻（秒）。
@@ -55,7 +54,6 @@ impl MotionRequest {
             looped: false,
             camera_motion: Vec::new(),
             model_motion: Vec::new(),
-            objects: Vec::new(),
             initial_camera: InitialCameraRequest {
                 azimuth: 0.0,
                 elevation: default_elevation(),
@@ -154,27 +152,6 @@ impl Default for CaptureOptions {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeMediaFrame {
-    pub(crate) plane: crate::protocol::ModelMediaPlane,
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-    pub(crate) rgba: Vec<u8>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CompositeAssetFrameRequest {
-    #[serde(default)]
-    pub(crate) media: Vec<NativeMediaFrame>,
-    #[serde(default)]
-    pub(crate) layout_aabb: Option<crate::protocol::ModelAabbDto>,
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-    pub(crate) resource_extent: f32,
-}
-
 /// 渲染请求：**只接受规范化 Scene IR**，不接受 JavaScript 源码。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -191,80 +168,35 @@ pub struct RenderRequest {
     /// 实例 placement（动画/静态节点均可携带；缺省为单位 transform）。
     #[serde(default)]
     pub(crate) placement: Option<PlacementRequest>,
-    /// 动画采样（仅片场 composite-asset；缺省为静态预览）。
+    /// 动画采样；缺省为静态预览。
     #[serde(default)]
     pub(crate) motion: Option<MotionRequest>,
     #[serde(default)]
-    pub(crate) composite_asset_frame: Option<CompositeAssetFrameRequest>,
+    pub(crate) world: Option<WorldRenderRequest>,
 }
 
-impl RenderRequest {
-    /// 注入已解码的合成媒体帧（录制 worker 用）。
-    ///
-    /// 保留请求里其余字段不变；`compositeAssetFrame` 的尺寸来自当前请求（若未设置则用帧尺寸）。
-    #[cfg(feature = "recording-media")]
-    pub fn set_composite_media(&mut self, frame: crate::recording_media::DecodedFrame) {
-        let mut media = Vec::new();
-        // 单平面：片场里同一时刻通常一块媒体承载整幅画面；多平面时由调用方按需扩展。
-        media.push(NativeMediaFrame {
-            plane: crate::protocol::ModelMediaPlane {
-                item_id: String::new(),
-                unit: 1.0,
-                id: "recording-media".to_owned(),
-                kind: "video".to_owned(),
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-                width: frame.width as f32,
-                height: frame.height as f32,
-                yaw: 0.0,
-                has_texture: true,
-            },
-            width: frame.width,
-            height: frame.height,
-            rgba: frame.rgba,
-        });
-        let existing = self.composite_asset_frame.take();
-        self.composite_asset_frame = Some(CompositeAssetFrameRequest {
-            media,
-            layout_aabb: existing
-                .as_ref()
-                .and_then(|frame| frame.layout_aabb.clone()),
-            width: existing.as_ref().map(|frame| frame.width).unwrap_or(1.0),
-            height: existing.as_ref().map(|frame| frame.height).unwrap_or(1.0),
-            resource_extent: existing
-                .as_ref()
-                .map(|frame| frame.resource_extent)
-                .unwrap_or(1.0),
-        });
-    }
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct WorldRenderRequest {
+    pub(crate) camera: crate::protocol::WorldCamera,
+    pub(crate) instances: Vec<WorldRenderInstance>,
+}
 
-    /// 构造一帧录制请求（change: 2026-10-17-add-native-offscreen-film-set-recording）。
-    ///
-    /// 录制 worker 复用预览渲染入口；这里只提供显式构造，避免 worker 依赖字段可见性。
-    #[allow(clippy::too_many_arguments)]
-    pub fn for_recording(
-        request_id: String,
-        scene_version: String,
-        signature: String,
-        extent: f32,
-        ops: Vec<ModelOp>,
-        capture: CaptureOptions,
-        motion: MotionRequest,
-    ) -> Self {
-        Self {
-            protocol_version: RENDERER_PROTOCOL_VERSION.to_owned(),
-            request_id,
-            scene_version,
-            signature,
-            extent,
-            ops,
-            capture,
-            placement: None,
-            motion: Some(motion),
-            composite_asset_frame: None,
-        }
-    }
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct WorldRenderInstance {
+    pub(crate) instance: crate::protocol::WorldInstance,
+    pub(crate) ops: Vec<ModelOp>,
+    #[serde(default)]
+    pub(crate) textures: Vec<WorldRenderTexture>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct WorldRenderTexture {
+    pub(crate) id: String,
+    pub(crate) mime_type: String,
+    pub(crate) bytes_base64: String,
 }
 
 fn default_extent() -> f32 {
@@ -366,7 +298,7 @@ impl RenderResponse {
 
 /// 校验请求：版本、结构、脚本源码拒绝与尺寸上限。
 pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErrorCode, String)> {
-    if request.protocol_version != RENDERER_PROTOCOL_VERSION {
+    if request.protocol_version != if request.world.is_some() { WORLD_RENDERER_PROTOCOL_VERSION } else { RENDERER_PROTOCOL_VERSION } {
         // 旧 worker 收到 v2 会在此稳定拒绝，不静默忽略运动字段后返回静态帧（任务 4.1）。
         return Err((
             RenderErrorCode::UnsupportedProtocolVersion,
@@ -388,10 +320,26 @@ pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErr
     if !request.extent.is_finite() || request.extent <= 0.0 {
         return Err((RenderErrorCode::InvalidScene, "extent 非法".to_owned()));
     }
-    if request.ops.is_empty() {
+    if request.ops.is_empty() && request.world.is_none() {
         return Err((RenderErrorCode::InvalidScene, "ops 不能为空".to_owned()));
     }
     let capture = &request.capture;
+    if let Some(world) = &request.world {
+        world.camera.validate().map_err(|error| (RenderErrorCode::InvalidScene, error.to_owned()))?;
+        if request.motion.is_some() || request.placement.is_some() || !request.ops.is_empty() {
+            return Err((RenderErrorCode::InvalidScene, "World capture cannot mix model framing".into()));
+        }
+        let mut ids = std::collections::HashSet::new();
+        for entry in &world.instances {
+            entry.instance.validate().map_err(|error| (RenderErrorCode::InvalidScene, error.to_owned()))?;
+            if !ids.insert(&entry.instance.instance_id) || world.camera.bound_instance_id.as_ref().is_some_and(|id| id != &entry.instance.instance_id) {
+                return Err((RenderErrorCode::InvalidScene, "Invalid world capture binding".into()));
+            }
+        }
+        if world.camera.bound_instance_id.is_some() && world.instances.len() != 1 {
+            return Err((RenderErrorCode::InvalidScene, "Bound world capture requires one instance".into()));
+        }
+    }
     if capture.width == 0
         || capture.height == 0
         || capture.width > MAX_PREVIEW_EDGE
@@ -407,46 +355,6 @@ pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErr
     }
     if capture.background != "transparent" && !is_hex_color(&capture.background) {
         return Err((RenderErrorCode::MalformedRequest, "背景非法".to_owned()));
-    }
-    if let Some(frame) = &request.composite_asset_frame {
-        let mut bytes = 0usize;
-        for media in &frame.media {
-            let expected = media.width as usize * media.height as usize * 4;
-            bytes += expected;
-            if media.width == 0
-                || media.height == 0
-                || media.width > 512
-                || media.height > 512
-                || media.rgba.len() != expected
-                || bytes > 2 * 1024 * 1024
-                || ![
-                    media.plane.x,
-                    media.plane.y,
-                    media.plane.z,
-                    media.plane.width,
-                    media.plane.height,
-                    media.plane.yaw,
-                ]
-                .iter()
-                .all(|value| value.is_finite())
-                || media.plane.width <= 0.0
-                || media.plane.height <= 0.0
-            {
-                return Err((
-                    RenderErrorCode::MalformedRequest,
-                    "native media frame 非法".to_owned(),
-                ));
-            }
-        }
-        if ![frame.width, frame.height, frame.resource_extent]
-            .iter()
-            .all(|value| value.is_finite() && *value > 0.0)
-        {
-            return Err((
-                RenderErrorCode::MalformedRequest,
-                "compositeAssetFrame 非法".to_owned(),
-            ));
-        }
     }
     if let Some(motion) = &request.motion {
         if !motion.duration.is_finite() || motion.duration < 0.0 {

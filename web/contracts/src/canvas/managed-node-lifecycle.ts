@@ -168,8 +168,10 @@ export function planManagedNodeLifecycles(context: ManagedNodeLifecycleContext, 
       while (current) {
         if (seen.has(current)) throw Error("managed-lifecycle-cycle");
         seen.add(current);
+        // 容器组已下线：parentId 只剩通用祖先引用，存在且无环即可
+        // （change: remove-canvas-groups-and-film-set）。
         const ancestor = nodes.get(current);
-        if (!ancestor || (kind === "parent" && ancestor.type !== "group")) throw Error("managed-lifecycle-invalid-parent");
+        if (!ancestor) throw Error("managed-lifecycle-invalid-parent");
         current = kind === "ownership" ? managedNodeRelationOf(result.nodeData[current])?.ownerNodeId : ancestor.parentId;
       }
     }

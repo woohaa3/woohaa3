@@ -131,7 +131,7 @@ describe("ChatGPT 会话 adapter · 能力与授权", () => {
     expect(calls.converse[0]).toMatchObject({ outputSchema: candidate.outputSchema, images: [{ bytes: candidate.images[0].bytes, mimeType: "image/png" }] });
     expect(calls.generate).toEqual([]);
   });
-  it("声明讨论/工具与模型/片场/镜头目标，目录来源为真实账户", () => {
+  it("声明讨论/工具与模型/镜头目标，目录来源为真实账户", () => {
     const { service } = fakeService();
     const adapter = build({ service });
     expect(adapter.id).toBe(CHATGPT_CONVERSATION_ADAPTER_ID);
@@ -139,7 +139,7 @@ describe("ChatGPT 会话 adapter · 能力与授权", () => {
       textDelivery: { imageInput: true, maxImages: 12 },
       candidateGeneration: { imageInput: true, maxImages: 12 },
       discussion: true,
-      targets: ["model3d", "film-set", "camera"],
+      targets: ["model3d", "camera"],
       tools: true,
       models: "remote"
     });
@@ -289,7 +289,6 @@ describe("ChatGPT 会话 adapter · 目标执行", () => {
           model: "gpt-6.1-sol",
           prompt: "调整镜头",
           cameraId: "cam-9",
-          clipId: "clip-3",
           expectedContentHash: "hash-abc"
         },
         emit: (event) => events.push(event)
@@ -306,7 +305,6 @@ describe("ChatGPT 会话 adapter · 目标执行", () => {
       model: "gpt-6.1-sol",
       prompt: "调整镜头",
       selectedCameraId: "cam-9",
-      clipId: "clip-3",
       expectedContentHash: "hash-abc"
     });
   });

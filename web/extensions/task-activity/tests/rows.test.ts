@@ -7,11 +7,9 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { CanvasTaskActivity } from "@woohaa3/contracts";
-import type { CanvasGroupRun } from "@woohaa3/frontend/extension-api";
 import { adaptTaskRow } from "../src/frontend/adapt-task-row.js";
 import { adaptJobRow, jobRowKey } from "../src/frontend/adapt-job-row.js";
-import { adaptGroupRow, canRetryGroupRun, canStopGroupRun, groupRowKey } from "../src/frontend/adapt-group-row.js";
-import { compareRows, displayedProgressPercent, groupRunTone } from "../src/frontend/rows.js";
+import { compareRows, displayedProgressPercent } from "../src/frontend/rows.js";
 import type { ActivityFeedItem, BackgroundFeedJob } from "../src/frontend/store.js";
 
 function task(patch: Partial<CanvasTaskActivity> & { taskKey: string; runId: string; nodeId: string }): ActivityFeedItem {
@@ -34,20 +32,6 @@ const job = (patch: Partial<BackgroundFeedJob> = {}): BackgroundFeedJob => ({
   status: "running",
   updatedAt: "2026-01-01T00:00:02Z",
   createdAt: "2026-01-01T00:00:02Z",
-  ...patch
-});
-
-const groupRun = (patch: Partial<CanvasGroupRun> = {}): CanvasGroupRun => ({
-  rootGroupId: "g1", conversationId: "conversation-g1",
-  creation: {
-    requestId: "creation-g1", canvasId: "c", rootGroupId: "g1", commandId: "cmd", turnRequestId: "request-g1",
-    scopeEpoch: 1, stage: "accepted", conversationId: "conversation-g1", turnId: "turn-g1"
-  },
-  requestId: "request-g1",
-  status: "running",
-  label: "创作中",
-  active: true,
-  createdAt: "2026-01-01T00:00:03Z",
   ...patch
 });
 
@@ -156,52 +140,6 @@ describe("后台活动记录适配器", () => {
     expect(adaptJobRow(job({ status: "failed", detail: "第 0 秒超时" })).detail).toBe("第 0 秒超时");
     expect(adaptJobRow(job()).title).toBe("录制镜头参考 · 片场 · 镜头 1");
     expect(jobRowKey(job())).toBe("job:shot-reference:c1:film:clip-1");
-  });
-});
-
-describe("组创作记录适配器", () => {
-  it("进行中直接取组读模型的 active，状态文案与语义色按阶段映射", () => {
-    const active = adaptGroupRow(groupRun(), { locateNode: vi.fn(), group: { writable: () => true } });
-    expect(active.active).toBe(true);
-    expect(active.status).toBe("创作中");
-    expect(active.actions.pinOnOpen).toBe(true);
-    expect(active.actions.autoOpenOnSelect).toBe(true);
-
-    expect(adaptGroupRow(groupRun({ status: "succeeded", label: "已完成", active: false })).tone).toBe("success");
-    expect(groupRunTone("partial")).toBe("danger");
-    expect(groupRunTone("failed")).toBe("danger");
-    expect(groupRunTone("cancelled")).toBe("muted");
-    expect(groupRowKey(groupRun())).toBe("group:request-g1");
-  });
-
-  it("组动作只在装配能力与来源条件允许时出现", () => {
-    const action = vi.fn().mockResolvedValue(undefined);
-    const writable = adaptGroupRow(groupRun(), {
-      locateNode: vi.fn(),
-      group: { action, openConversation: vi.fn(), writable: () => true, resolveTitle: () => "故事组" }
-    });
-    expect(writable.title).toBe("故事组");
-    expect(writable.actions.stop).toBeTypeOf("function");
-    expect(writable.actions.openConversation).toBeTypeOf("function");
-    // turnId 已落地：不允许重试原请求。
-    expect(writable.actions.retry).toBeUndefined();
-
-    // 没有装配能力时只有关闭/（可选的）定位，不伪造动作。
-    const bare = adaptGroupRow(groupRun({ active: false, status: "succeeded", label: "已完成" }));
-    expect(bare.actions.stop).toBeUndefined();
-    expect(bare.actions.close).toBe(true);
-    expect(bare.actions.locate).toBeUndefined();
-  });
-
-  it("停止与重试的条件由来源语义给出", () => {
-    expect(canStopGroupRun(groupRun({ status: "failed" }))).toBe(false);
-    expect(canStopGroupRun(groupRun({ status: "succeeded", active: false }))).toBe(false);
-    expect(canStopGroupRun(groupRun({ conversationId: undefined, creation: { ...groupRun().creation!, conversationId: undefined } }))).toBe(false);
-    expect(canRetryGroupRun(groupRun({ creation: { ...groupRun().creation!, turnId: undefined } }))).toBe(true);
-    expect(canRetryGroupRun(groupRun())).toBe(false);
-    expect(canRetryGroupRun(groupRun({
-      creation: { ...groupRun().creation!, turnId: undefined, error: { code: "group-target-missing", message: "目标缺失" } }
-    }))).toBe(false);
   });
 });
 

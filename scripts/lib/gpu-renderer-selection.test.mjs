@@ -13,7 +13,53 @@ test("macOS uses system_profiler and recognizes Apple GPU", () => {
 
 test("Linux only recognizes renderD devices", () => {
 	assert.equal(probeBuildGpu({ platform: "linux", readDir: () => ["card0", "renderD128"] }).hasGpu, true);
-	assert.equal(probeBuildGpu({ platform: "linux", readDir: () => ["card0"] }).hasGpu, false);
+	assert.equal(
+		probeBuildGpu({
+			platform: "linux",
+			readDir: () => ["card0"],
+			readFile: () => "Linux version 6.8.0-45-generic",
+			exists: () => false
+		}).hasGpu,
+		false
+	);
+});
+
+test("WSL2 reads GPU passthrough from /dev/dxg instead of renderD", () => {
+	const kernel = () => "Linux version 6.18.33.2-microsoft-standard-WSL2 (root@build) #1 SMP";
+	const noDri = () => {
+		throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+	};
+	const wsl = probeBuildGpu({
+		platform: "linux",
+		readDir: noDri,
+		readFile: kernel,
+		exists: (file) => file === "/dev/dxg"
+	});
+	assert.equal(wsl.hasGpu, true);
+	assert.match(wsl.evidence, /dxg/);
+
+	const wslWithoutDevice = probeBuildGpu({
+		platform: "linux",
+		readDir: noDri,
+		readFile: kernel,
+		exists: () => false
+	});
+	assert.equal(wslWithoutDevice.hasGpu, false);
+	assert.match(wslWithoutDevice.evidence, /WSL2/);
+});
+
+test("plain Linux without renderD stays a no-GPU result", () => {
+	const noDri = () => {
+		throw new Error("ENOENT");
+	};
+	const result = probeBuildGpu({
+		platform: "linux",
+		readDir: noDri,
+		readFile: () => "Linux version 6.8.0-45-generic",
+		exists: () => true
+	});
+	assert.equal(result.hasGpu, false);
+	assert.equal(result.evidence, "/dev/dri/renderD* unavailable");
 });
 
 test("Windows ignores virtual display adapters", () => {

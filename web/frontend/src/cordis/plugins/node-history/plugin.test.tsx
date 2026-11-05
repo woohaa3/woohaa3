@@ -1,4 +1,3 @@
-import { CompositeAssetRegistry } from "../../../extension-api/composite-assets.js";
 /**
  * Node History Plugin 生命周期与面板测试
  * （change: add-canvas-node-generation-history，任务 3.1–3.4 / 4.1–4.4）。
@@ -85,7 +84,6 @@ async function makeHarness(input: {
   const fakeRuntime = (input.includeRuntime ?? true) ? fakeCanvasRuntime(focusCalls) : null;
   const instance = await startFrontendRuntime({
     installPlatform: (ctx: Context) => {
-      ctx.provide("compositeAssets" as never, new CompositeAssetRegistry() as never);
       ctx.provide("canvasState" as never, { getCanvas: () => woohaa3CanvasStore.getState().canvas, getWorkingCanvas: () => woohaa3CanvasStore.getState().canvas, subscribe: woohaa3CanvasStore.subscribe } as never);
       ctx.provide("slots" as never, slots as never);
       ctx.provide("inputScopes" as never, inputScopes as never);
@@ -279,7 +277,7 @@ describe("Node History Plugin", () => {
             recoverable: true,
             previewable: true,
             source: { label: "模型编辑" },
-            preview: { kind: "model", thumbnailHref: null, entry: { canvasId: "c1", nodeId: "m1", entryId: "e1" } }
+            preview: { kind: "model", entry: { canvasId: "c1", nodeId: "m1", entryId: "e1" } }
           }
         ] as never,
         nextCursor: null
@@ -511,7 +509,6 @@ describe("Node History Plugin", () => {
     const slots = new SlotRegistry();
     const instance = await startFrontendRuntime({
       installPlatform: (ctx: Context) => {
-      ctx.provide("compositeAssets" as never, new CompositeAssetRegistry() as never);
       ctx.provide("canvasState" as never, { getCanvas: () => woohaa3CanvasStore.getState().canvas, getWorkingCanvas: () => woohaa3CanvasStore.getState().canvas, subscribe: woohaa3CanvasStore.subscribe } as never);
         ctx.provide("slots" as never, slots as never);
         ctx.provide("dialogs" as never, new DialogService() as never);
@@ -673,7 +670,7 @@ describe("NodeHistoryPanel 静态渲染", () => {
     const controller = new NodeHistoryController({
       list: async () => ({
         ok: true,
-        items: [item("e1", { kind: "model", source: { label: "模型编辑" }, preview: { kind: "model", thumbnailHref: null, entry: { canvasId: "c1", nodeId: "n1", entryId: "e1" } } })],
+        items: [item("e1", { kind: "model", source: { label: "模型编辑" }, preview: { kind: "model", entry: { canvasId: "c1", nodeId: "n1", entryId: "e1" } } })],
         nextCursor: null
       }),
       detail: async () => ({

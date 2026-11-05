@@ -35,6 +35,24 @@ pub(crate) fn sample_edge(a: Vec2, b: Vec2) -> Vec<Vec2> {
         .collect()
 }
 
+/// Closest point on the same sampled curve used for rendering and hit testing.
+pub(crate) fn closest_edge_point(point: Vec2, a: Vec2, b: Vec2) -> Vec2 {
+    sample_edge(a, b)
+        .windows(2)
+        .map(|w| {
+            let ab = w[1] - w[0];
+            let t =
+                ((point - w[0]).dot(ab) / ab.length_squared().max(f32::EPSILON)).clamp(0.0, 1.0);
+            w[0] + ab * t
+        })
+        .min_by(|a, b| {
+            point
+                .distance_squared(*a)
+                .total_cmp(&point.distance_squared(*b))
+        })
+        .unwrap_or(a)
+}
+
 /// 点到线段的最短距离（线段零长时回退到点距）。
 pub(crate) fn point_segment_distance(point: Vec2, a: Vec2, b: Vec2) -> f32 {
     let ab = b - a;

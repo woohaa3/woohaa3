@@ -9,29 +9,13 @@ import { nodeCapabilityContext, type NodeCapabilityResolver } from "@woohaa3/con
  */
 import { isGlbModelNodeData, readGlbModelAssetId } from "@woohaa3/contracts";
 import type { ServerCanvas } from "@woohaa3/contracts";
-import { resolveNodeActionToolbarTarget, resolveSelectionActionToolbarTarget } from "@woohaa3/contracts";
+import { resolveNodeActionToolbarTarget } from "@woohaa3/contracts";
 
 export type NodeActionToolbarView = {
   nodeId: string;
   nodeType: string;
   writable: boolean;
 };
-
-/**
- * 解析当前是否显示多选动作横条及其目标
- * （change: 2026-10-16-add-group-selection-toolbar，design D1/D2）。
- *
- * 仅在**未聚焦**且选中 ≥2 个仍存在的节点时返回这些稳定 nodeId；单选、取消选择、进入聚焦工作区
- * 时返回 null（隐藏横条），但不因此取消任何已受理的后台工作。
- */
-export function resolveSelectionActionToolbarView(input: {
-  selectedNodeIds: readonly string[];
-  nodes: readonly { id: string }[];
-  focused: boolean;
-}): { nodeIds: string[] } | null {
-  if (input.focused) return null;
-  return resolveSelectionActionToolbarTarget({ selectedNodeIds: input.selectedNodeIds, nodes: input.nodes });
-}
 
 /**
  * 解析当前是否显示横条及其目标：仅在**未聚焦**且**单选**一个适用类型节点时显示。
@@ -56,23 +40,6 @@ export function resolveNodeActionToolbarView(input: {
   });
   if (!target) return null;
   return { nodeId: target.nodeId, nodeType: target.nodeType, writable: input.writable };
-}
-
-/**
- * 容器「编辑」动作的目标：只有自带模型聚焦工作区的容器（片场）返回可进入的 kind。
- *
- * 按通用能力判定（group + focus.kind === "model"），宿主不按 film-set 业务 ID 分支；
- * 普通 group 的聚焦 kind 是 `extension`，不提供画布横条上的直接编辑入口。
- */
-export function resolveContainerFocusEdit(input: {
-  canvas: ServerCanvas | null;
-  nodeId: string;
-  nodeCapabilities: NodeCapabilityResolver;
-}): "model" | null {
-  const { canvas, nodeId, nodeCapabilities } = input;
-  const context = canvas ? nodeCapabilityContext(canvas, nodeId) : null;
-  if (!context || context.node.type !== "group") return null;
-  return nodeCapabilities.resolve(context).focus?.kind(context) === "model" ? "model" : null;
 }
 
 /**

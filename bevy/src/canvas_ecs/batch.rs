@@ -1,7 +1,7 @@
 //! 共享批处理输出：`CanvasBatchWriter` 与 `SelectionOutlineBatch`
 //! （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs，design D3 / 任务 1.4、3.1）。
 //!
-//! 三类内置展示（Card/Group/FilmSet）以及第三方 producer 都写入同一个选择描边批次；批次只
+//! 内置卡片展示与第三方 producer 都写入同一个选择描边批次；批次只
 //! 持有**一帧的 CPU 几何**，flush 时替换共享 mesh handle。没有选中实体时 producer 贡献空结果，
 //! flush 用不可见兜底 mesh 清空上一帧描边。
 //!
@@ -18,7 +18,7 @@ pub(crate) trait CanvasBatchWriter {
     fn writer(&mut self) -> &mut Geometry;
 }
 
-/// 一帧的持久选中描边几何（Card/Group/FilmSet/第三方共享）。
+/// 一帧的持久选中描边几何（卡片/第三方共享）。
 #[derive(Resource, Default)]
 pub(crate) struct SelectionOutlineBatch {
     geometry: Geometry,

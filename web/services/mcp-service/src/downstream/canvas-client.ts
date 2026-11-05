@@ -7,19 +7,12 @@
  */
 import {
   decodeMcpApplyCommandsRequest,
-  decodeMcpAddFilmSetMediaRequest,
-  decodeMcpCreateFilmSetNodeRequest,
-  decodeMcpCommitAnimationRequest,
-  decodeMcpExportFilmSetClipRequest,
-  decodeMcpGetFilmSetExportRequest,
   decodeMcpGetNodeRequest,
   decodeMcpGetModelNodesRequest,
-  decodeMcpImportModelSnapshotRequest,
   decodeMcpListNodesRequest,
   decodeMcpModelScriptBatchRequest,
   decodeMcpModelStatisticsRequest,
   decodeMcpMutateCamerasRequest,
-  decodeMcpMutateFilmSetItemRequest,
   decodeMcpRenderPreviewRequest,
   decodeMcpSubmitScriptRequest,
   MCP_INTERNAL_PATHS,
@@ -31,13 +24,10 @@ import {
   type GetModelNodesInput,
   type McpApplyCommandsResult,
   type McpCameraMutation,
-  type McpCreateFilmSetNodeRequest,
   type McpGetNodeResult,
-  type McpImportModelSnapshotRequest,
   type McpListNodesResult,
   type McpModelStatisticsResult,
   type McpMutateCamerasResult,
-  type McpMutateFilmSetItemRequest,
   type McpRenderPreviewResult,
   type McpSubmitScriptResult,
   type ModelNodesOutcome,
@@ -67,7 +57,7 @@ export type CanvasMcpClient = {
   submitScripts?: (input: ModelScriptBatchRequest) => Promise<ModelScriptBatchOutcome>;
 
   listModelNodes(input: { canvasId?: string }): Promise<McpListNodesResult>;
-  getModelNode(input: { canvasId: string; nodeId: string; resource?: "group-appearance"; includeStatistics?: boolean }): Promise<McpGetNodeResult>;
+  getModelNode(input: { canvasId: string; nodeId: string; includeStatistics?: boolean }): Promise<McpGetNodeResult>;
   /** 当前或候选脚本的模型规模（与聚焦信息面板同源）。 */
   getModelStatistics(input: { canvasId: string; nodeId: string; source?: string }): Promise<McpModelStatisticsResult>;
   submitScript(input: {
@@ -75,12 +65,10 @@ export type CanvasMcpClient = {
     nodeId: string;
     source: string;
     version?: SupportedModelScriptVersion;
-    /** model3d/animation3d 编辑的稳定请求身份（change: 2026-10-06-fix-animation3d...，任务 5.1/5.2；2026-10-09 A09 改为必填）。 */
+    /** model3d 编辑的稳定请求身份（change: 2026-10-06-fix-animation3d...，任务 5.1/5.2；2026-10-09 A09 改为必填）。 */
     requestId: string;
     /** model3d 编辑的模型内容 precondition。 */
     expectedModelContentHash?: string;
-  resource?: "group-appearance";
-  expectedContentHash?: string;
   }): Promise<McpSubmitScriptResult>;
   renderPreview(input: {
     canvasId: string;
@@ -105,40 +93,9 @@ export type CanvasMcpClient = {
     requestId: string;
     mutation: McpCameraMutation;
   }): Promise<McpMutateCamerasResult>;
-  /** 创建自包含片场节点（复制模型快照）。 */
-  createFilmSetNode(input: McpCreateFilmSetNodeRequest & { canvasId: string }): Promise<McpCreateFilmSetNodeOutcome>;
-  commitAnimation?: (input: import("@woohaa3/contracts").McpCommitAnimationRequest) => Promise<McpCreateFilmSetNodeOutcome>;
-  /** 导入模型快照（保留运动与旧适配版本）。 */
-  importModelSnapshot(input: McpImportModelSnapshotRequest & { canvasId: string }): Promise<McpCreateFilmSetNodeOutcome>;
-  /** 片场对象级权威变更（change: 2026-10-09-add-film-set-object-motion-and-editing）。 */
-  mutateFilmSetItem(input: McpMutateFilmSetItemRequest & { canvasId: string }): Promise<McpMutateFilmSetItemResult>;
-  /** 片场媒体条目受控导入（D5）。 */
-  addFilmSetMedia(input: import("@woohaa3/contracts").McpAddFilmSetMediaRequest & { canvasId: string }): Promise<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>;
-  /** agent 发起显式导出与查询（D8）。 */
-  exportFilmSetClip(input: import("@woohaa3/contracts").McpExportFilmSetClipRequest & { canvasId: string }): Promise<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>;
-  getFilmSetExport(input: import("@woohaa3/contracts").McpGetFilmSetExportRequest & { canvasId: string }): Promise<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>;
   /** readiness 探针：Canvas 内部面可达且协议兼容。 */
   ready(): Promise<{ ready: boolean; reason?: string }>;
 };
-
-export type McpCreateFilmSetNodeOutcome =
-  | { ok: true; canvasId: string; nodeId: string; commandId: string; duplicate: boolean; noop: boolean }
-  | { ok: false; code: string; message: string };
-
-/** 片场对象变更结果（change: 2026-10-09-add-film-set-object-motion-and-editing）。 */
-export type McpMutateFilmSetItemResult =
-  | {
-      ok: true;
-      canvasId: string;
-      nodeId: string;
-      itemId: string;
-      commandId: string;
-      duplicate: boolean;
-      noop: boolean;
-      contentHash: string;
-      itemCount: number;
-    }
-  | { ok: false; code: string; message: string };
 
 export function createCanvasMcpClient(options: CanvasMcpClientOptions): CanvasMcpClient {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
@@ -216,20 +173,6 @@ export function createCanvasMcpClient(options: CanvasMcpClientOptions): CanvasMc
     getModelNodes: (input) => call<ModelNodesOutcome>(MCP_INTERNAL_PATHS.getModelNodes, decodeMcpGetModelNodesRequest(input)),
     validateScripts: (input) => call<ModelScriptBatchOutcome>(MCP_INTERNAL_PATHS.validateModelScripts, decodeMcpModelScriptBatchRequest(input)),
     submitScripts: (input) => call<ModelScriptBatchOutcome>(MCP_INTERNAL_PATHS.submitModelScripts, decodeMcpModelScriptBatchRequest(input)),
-    createFilmSetNode: (input) =>
-      call<McpCreateFilmSetNodeOutcome>(MCP_INTERNAL_PATHS.createFilmSetNode, decodeMcpCreateFilmSetNodeRequest(input)),
-    commitAnimation: (input) =>
-      call<McpCreateFilmSetNodeOutcome>(MCP_INTERNAL_PATHS.commitAnimation, decodeMcpCommitAnimationRequest(input)),
-    importModelSnapshot: (input) =>
-      call<McpCreateFilmSetNodeOutcome>(MCP_INTERNAL_PATHS.importModelSnapshot, decodeMcpImportModelSnapshotRequest(input)),
-    mutateFilmSetItem: (input) =>
-      call<McpMutateFilmSetItemResult>(MCP_INTERNAL_PATHS.mutateFilmSetItem, decodeMcpMutateFilmSetItemRequest(input)),
-    addFilmSetMedia: (input) =>
-      call<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>(MCP_INTERNAL_PATHS.addFilmSetMedia, decodeMcpAddFilmSetMediaRequest(input)),
-    exportFilmSetClip: (input) =>
-      call<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>(MCP_INTERNAL_PATHS.exportFilmSetClip, decodeMcpExportFilmSetClipRequest(input)),
-    getFilmSetExport: (input) =>
-      call<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>(MCP_INTERNAL_PATHS.getFilmSetExport, decodeMcpGetFilmSetExportRequest(input)),
     async ready() {
       const reachable = await probe(MCP_INTERNAL_PATHS.listNodes);
       return reachable ? { ready: true } : { ready: false, reason: "Canvas 内部协议不可达或认证失败" };

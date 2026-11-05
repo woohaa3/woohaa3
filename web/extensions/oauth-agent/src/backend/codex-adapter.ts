@@ -2,8 +2,7 @@ import { getRuntimeComponentManager } from "@woohaa3/runtime-components";
 import { mcpToolOutcome } from "./mcp-tool-outcome.js";
 /**
  * 用户隔离的 Codex SDK 生成适配器
- * （change: 2026-10-08-add-chatgpt-oauth-3d-generation，任务 3.3 / design D4；
- *   change: 2026-10-13-add-node-to-film-set-shortcut，任务 2.1 —— 补齐真实视觉附件传输）。
+ * （change: 2026-10-08-add-chatgpt-oauth-3d-generation，任务 3.3 / design D4）。
  *
  * 优先通过 `@openai/codex-sdk` 的 `startThread` / `run` / `runStreamed` 与 `outputSchema`
  * 调用推理；SDK 底层仍启动 Codex CLI 子进程，本模块负责隔离、取消与回收。

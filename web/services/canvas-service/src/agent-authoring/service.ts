@@ -139,7 +139,7 @@ export function summarizeAppliedEntities(
       kind: descriptor?.kind ?? null,
       ...(typeof data?.title === "string" && data.title !== "" ? { title: data.title } : {}),
       ...(typeof data?.prompt === "string" ? { prompt: data.prompt } : {}),
-      position: { x: node.position.x, y: node.position.y },
+      position: { x: node.position?.x ?? 0, y: node.position?.y ?? 0 },
       size: {
         width: node.width ?? descriptor?.defaultSize.width ?? 196,
         height: node.height ?? descriptor?.defaultSize.height ?? 64

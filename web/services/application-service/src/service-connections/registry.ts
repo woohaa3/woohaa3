@@ -9,7 +9,7 @@ import type {
 
 /** Trusted principal only; never construct from JSON request fields. */
 export type ServiceConnectionActor = { owner: string; administrator: boolean; canUseSite: boolean };
-type Source = ServiceConnectionView & { owner: string | null; credentialKey: string | null; origin?: { extensionId: string; adapterId: string; legacyId: string; version: ServiceConnectionVersion }; originFingerprint?: string; originCredentialFingerprint?: string; mergedInto?: string; extraBindings?: readonly ServiceConsumerBinding[]; extraCapabilities?: readonly ServiceConnectionCapability[]; extraEndpoints?: ServiceConnectionView["endpoints"]; enabledOverride?: boolean };
+type Source = ServiceConnectionView & { owner: string | null; credentialKey: string | null; origin?: { extensionId: string; adapterId: string; legacyId: string; version: ServiceConnectionVersion }; originFingerprint?: string; originCredentialFingerprint?: string; removedFingerprint?: string; mergedInto?: string; extraBindings?: readonly ServiceConsumerBinding[]; extraCapabilities?: readonly ServiceConnectionCapability[]; extraEndpoints?: ServiceConnectionView["endpoints"]; enabledOverride?: boolean };
 type Operation = { fingerprint: string; sourceId: string; credentialKey: string; state: "pending" | "published"; result?: ServiceConnectionView };
 export class ServiceConnectionError extends Error {
   constructor(readonly code: "not-found" | "forbidden" | "locked" | "conflict" | "invalid" | "storage-failed" | "stale" | "unavailable", message: string) { super(message); }
@@ -55,11 +55,21 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
   };
   const syncSnapshot = async (actor: ServiceConnectionActor, extensionId: string, adapter: ServiceConnectionSourceAdapter, snapshot: ServiceConnectionSourceSnapshot) => {
     requireActor(actor);
-    if (adapter.scope !== snapshot.scope || snapshot.bindings.some(binding => binding.extensionId !== extensionId)) throw new ServiceConnectionError("forbidden", "来源声明不属于注册扩展");
+    // Source-owned bindings must belong to the registering extension. A shared Agent consumer binding may
+    // name the consuming extension instead; resolve() still requires that consumer to be registered with a
+    // matching protocol/purpose and the source to carry the matching capability evidence.
+    if (adapter.scope !== snapshot.scope || snapshot.bindings.some(binding => binding.extensionId !== extensionId && binding.consumer !== "agent")) throw new ServiceConnectionError("forbidden", "来源声明不属于注册扩展");
     const id = `service-${digest([extensionId, adapter.id, adapter.scope, adapter.scope === "personal" ? actor.owner : "@site", snapshot.legacyId])}`;
     const found = await read(id);
-    if (found?.source.mergedInto || found?.source.removed && !(snapshot.kind === "oauth" && found.source.origin?.version.credentialEpoch !== snapshot.credentialEpoch)) return found.source;
     const fingerprint = digest(snapshot);
+    if (found?.source.mergedInto) return found.source;
+    if (found?.source.removed) {
+      // A removed adapter source stays tombstoned for its old content. Reconfiguring the provider
+      // (a new snapshot fingerprint) is an explicit new intent and may republish the same identity.
+      const oauthRefresh = snapshot.kind === "oauth" && found.source.origin?.version.credentialEpoch !== snapshot.credentialEpoch;
+      const reconfigured = !!found.source.origin && !!found.source.removedFingerprint && found.source.removedFingerprint !== fingerprint;
+      if (!oauthRefresh && !reconfigured) return found.source;
+    }
     if (found?.source.originFingerprint === fingerprint) return found.source;
     const { legacyId, credentialFingerprint, ...data } = snapshot;
     const next: Source = { ...data, serviceConnectionId: id, owner: adapter.scope === "personal" ? actor.owner : null,
@@ -272,10 +282,11 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
       requireActor(actor);
       const found = await read(id);
       if (!found || !mayWrite(actor, found.source)) throw new ServiceConnectionError("forbidden", "无权移除来源");
-      if (found.source.origin) throw new ServiceConnectionError("invalid", "请使用来源适配器撤销授权");
+      // An active adapter source is owned by its Provider settings; only a disabled one can be discarded here.
+      if (found.source.origin && found.source.enabled) throw new ServiceConnectionError("invalid", "请先停用来源，或使用来源适配器撤销授权");
       if (found.source.locked) throw new ServiceConnectionError("locked", "来源由环境锁定");
       if (found.source.configRevision !== expected.configRevision || found.source.credentialEpoch !== expected.credentialEpoch) throw new ServiceConnectionError("stale", "来源已变化");
-      const next = { ...found.source, removed: true, enabled: false, credentialKey: null, credentialConfigured: false, configRevision: found.source.configRevision + 1, credentialEpoch: found.source.credentialEpoch + 1 };
+      const next = { ...found.source, removed: true, enabled: false, credentialKey: null, credentialConfigured: false, ...(found.source.originFingerprint ? { removedFingerprint: found.source.originFingerprint } : {}), configRevision: found.source.configRevision + 1, credentialEpoch: found.source.credentialEpoch + 1 };
       await write([{ op: "set", key: sourceKey(id), value: json(next), expectedRevision: found.revision }]);
       return view(next, actor);
     },
@@ -287,6 +298,9 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
       await refresh(actor, original.source);
       const found = (await read(id))!;
       if (found.source.configRevision !== expected.configRevision || found.source.credentialEpoch !== expected.credentialEpoch) throw new ServiceConnectionError("stale", "来源代次已变化");
+      // Replaying the same auto binding is not a new configuration: keep the published revision.
+      const existing = found.source.bindings.find(item => item.bindingId === binding.bindingId);
+      if (existing && digest(existing) === digest(binding) && (!capabilities || digest(capabilities) === digest(found.source.capabilities))) return view(found.source, actor);
       const candidate = { ...found.source, capabilities: capabilities ? [...capabilities] : found.source.capabilities };
       if (!bindingAllowed(binding, candidate, actor)) throw new ServiceConnectionError("forbidden", "适配器未提供此用途");
       const next = { ...candidate, ...(capabilities ? { extraCapabilities: [...capabilities] } : {}), extraBindings: [...(found.source.extraBindings ?? []).filter(item => item.bindingId !== binding.bindingId), binding], bindings: [...found.source.bindings.filter(item => item.bindingId !== binding.bindingId), binding], configRevision: found.source.configRevision + 1 };

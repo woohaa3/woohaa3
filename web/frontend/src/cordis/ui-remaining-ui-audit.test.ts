@@ -86,6 +86,9 @@ const LISTENER_EXCEPTIONS = new Set<string>([
   "cordis/plugins/video-capture/video-edit-dialog.tsx",
   // 场景体验条监听画布上的任意输入/Escape 以取消取景导航，不是浮层 dismiss。
   "cordis/plugins/scene-experience/experience-bar.tsx",
+  // 共享世界镜头编辑器/飞行输入：浮层生命周期由 world-cameras 自己持有。
+  "cordis/plugins/world-cameras/camera-editor.tsx",
+  "cordis/plugins/world-cameras/flight-input.ts",
 ]);
 
 describe("剩余 Canvas UI 迁移审计（任务 8.2）", () => {
