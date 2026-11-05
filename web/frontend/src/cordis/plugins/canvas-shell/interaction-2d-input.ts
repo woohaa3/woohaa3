@@ -297,13 +297,34 @@ export function create2dInputFamily(core: InteractionCore) {
       gestureActive: state.gesture.kind !== "none"
     }) && !isRight) {
       const pick = core.queryModelPick({ x: event.clientX, y: event.clientY }, core.surfaceSize());
-      const picked = worldModelSelectionFromPick({
-        canvas: pressedCanvas,
-        pick,
-        selected: state.selected,
-        additive: event.shiftKey
-      });
-      if (picked && pick.ok && pick.value) {
+      // 细长/带孔模型（如自行车）可能从模型表面的空隙穿过；点拾取未命中时，
+      // 用指针周围极小的 AABB 框选补一次，避免“选中了却拖不动”。
+      let pickedNodeId = pick.ok && pick.value ? pick.value.nodeId : null;
+      let effectivePick = pick;
+      if (!pickedNodeId) {
+        const fallback = core.queryModelMarquee({
+          x: event.clientX - 2,
+          y: event.clientY - 2,
+          width: 4,
+          height: 4
+        });
+        if (fallback.ok) {
+          const candidates = fallback.value.filter(id => isWorldInstanceNode(pressedCanvas, id));
+          if (candidates.length === 1) {
+            pickedNodeId = candidates[0]!;
+            effectivePick = { ok: true, generation: fallback.generation, value: { nodeId: pickedNodeId } };
+          }
+        }
+      }
+      const picked = pickedNodeId
+        ? worldModelSelectionFromPick({
+            canvas: pressedCanvas,
+            pick: effectivePick,
+            selected: state.selected,
+            additive: event.shiftKey
+          })
+        : null;
+      if (picked && pickedNodeId) {
         // Shift 是附加选择：不要同时开始拖动（高度/朝向修饰键从卡片或面板操作）。
         if (event.shiftKey) {
           setSelection(picked);
@@ -311,7 +332,7 @@ export function create2dInputFamily(core: InteractionCore) {
           event.preventDefault();
           return;
         }
-        beginWorldObjectPress(event, pick.value.nodeId);
+        beginWorldObjectPress(event, pickedNodeId);
         return;
       }
     }

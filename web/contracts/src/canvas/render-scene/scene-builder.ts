@@ -203,14 +203,10 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const override = input.positionOverrides?.get(node.id);
     const data = nodeData[node.id];
     const cameraPreview = input.worldCameraPreviews?.get(node.id);
-    const baseCameraInput = data?.worldCamera === undefined
-      ? undefined
-      : cameraPreview && typeof data.worldCamera === "object" && data.worldCamera !== null
-        ? { ...data.worldCamera, position: cameraPreview.position, rotation: cameraPreview.rotation }
-        : data.worldCamera;
+    const baseCameraInput = data?.worldCamera;
     const baseCamera = baseCameraInput === undefined ? undefined : decodeWorldCamera(baseCameraInput);
     const cameraMotion = baseCamera?.ok ? cameraAnimationSamples.get(baseCamera.value.cameraId) : undefined;
-    const cameraInput = baseCameraInput !== undefined && cameraMotion
+    const animatedCameraInput = baseCameraInput !== undefined && cameraMotion
       ? {
           ...(baseCameraInput as Record<string, unknown>),
           ...(cameraMotion.position ? { position: cameraMotion.position } : {}),
@@ -218,6 +214,15 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           ...(cameraMotion.zoom !== undefined ? { projection: zoomedProjection((baseCameraInput as { projection: unknown }).projection, cameraMotion.zoom) } : {})
         }
       : baseCameraInput;
+    // A direct gesture preview is the user's current intent and must win over the
+    // sampled script; otherwise dragging an animated camera appears to do nothing.
+    const cameraInput = animatedCameraInput !== undefined && cameraPreview
+      ? {
+          ...(animatedCameraInput as Record<string, unknown>),
+          position: cameraPreview.position,
+          rotation: cameraPreview.rotation
+        }
+      : animatedCameraInput;
     const camera = cameraInput === undefined ? undefined : decodeWorldCamera(cameraInput);
     if (camera && !camera.ok) throw new Error(`Invalid shared world camera: ${camera.code}`);
     const area = decodeSceneAreaData(data?.sceneArea);

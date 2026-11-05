@@ -7,15 +7,21 @@
  * must be restored for undo. It never recomputes membership.
  */
 import {
+  createWorldAnimationScript,
+  decodeSceneAreaData,
   decodeWorldCamera,
   decodeWorldInstanceData,
+  executeWorldAnimationScript,
+  serializeWorldAnimationScript,
   type CanvasCommand,
   type CanvasNodeData,
+  type GroundPoint,
   type SceneAreaPlan,
   type SceneAreaPlanCommand,
   type SceneAreaPlanInverseCommand,
   type ServerCanvas,
   type Woohaa3CanvasSerializedNode,
+  type WorldAnimationScript,
   type WorldAuthoringEdgeSnapshot,
   type WorldAuthoringNodeSnapshot,
   type WorldAuthoringSourceSnapshot,
@@ -180,6 +186,108 @@ function sourceFor(canvas: ServerCanvas, plan: SceneAreaPlan): SceneAreaCommandR
   };
 }
 
+type SceneAreaMoveDeltas = {
+  instances: Map<string, GroundPoint>;
+  cameras: Map<string, GroundPoint>;
+};
+
+/**
+ * Ground displacement the plan applies to each moved member. Animated members keep
+ * their script-relative motion, so the same delta must be applied to their tracks.
+ */
+function moveDeltas(canvas: ServerCanvas, plan: SceneAreaPlan): SceneAreaMoveDeltas {
+  const instances = new Map<string, GroundPoint>();
+  const cameras = new Map<string, GroundPoint>();
+  for (const command of plan.commands) {
+    if (command.kind === "set-instance-transform") {
+      const ref = findInstance(canvas, command.target.instanceId);
+      if (!ref) continue;
+      const decoded = decodeWorldInstanceData(ref.data.sharedWorldInstance);
+      if (!decoded.ok) continue;
+      const old = decoded.value.transform.position;
+      const next = command.transform.position;
+      instances.set(command.target.instanceId, { u: next.u - old.u, v: next.v - old.v });
+    } else if (command.kind === "set-world-camera-pose") {
+      const ref = findCamera(canvas, command.target.cameraId);
+      if (!ref) continue;
+      const decoded = decodeWorldCamera(ref.data.worldCamera);
+      if (!decoded.ok) continue;
+      const old = decoded.value.position;
+      const next = command.position;
+      cameras.set(command.target.cameraId, { u: next.u - old.u, v: next.v - old.v });
+    }
+  }
+  return { instances, cameras };
+}
+
+/** Bounds translation of a move plan; `null` for resize and non-translation plans. */
+function areaDelta(plan: SceneAreaPlan): GroundPoint | null {
+  if (plan.intent !== "move") return null;
+  const command = plan.commands.find(candidate => candidate.kind === "set-scene-area-bounds");
+  if (!command || command.kind !== "set-scene-area-bounds") return null;
+  const old = plan.source.area.bounds;
+  const next = command.bounds;
+  const u = next.min.u - old.min.u;
+  const v = next.min.v - old.min.v;
+  const maxU = next.max.u - old.max.u;
+  const maxV = next.max.v - old.max.v;
+  return Math.abs(u - maxU) < 1e-9 && Math.abs(v - maxV) < 1e-9 ? { u, v } : null;
+}
+
+/**
+ * Shift an area's own animation script by the same ground delta as its moved
+ * members. Only position tracks move: area translation preserves each member's
+ * rotation, scale and camera zoom. Tracks whose target was not in the writable
+ * member set still follow the area that owns their script (the target can be a
+ * camera/instance whose canonical anchor is elsewhere in an inherited scene).
+ * Returns `null` when the script is unaffected.
+ */
+function shiftedAnimationScript(
+  area: NodeRef,
+  deltas: SceneAreaMoveDeltas,
+  fallback: GroundPoint | null
+): WorldAnimationScript | null {
+  const decoded = decodeSceneAreaData(area.data.sceneArea);
+  if (!decoded.ok || !decoded.value.animationScript) return null;
+  const script = decoded.value.animationScript;
+  const executed = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
+  if (!executed.ok) return null;
+  let changed = false;
+  const instanceTracks = executed.ir.instanceTracks.map(track => {
+    if (track.property !== "position") return track;
+    const delta = deltas.instances.get(track.targetId) ?? fallback;
+    if (!delta || (delta.u === 0 && delta.v === 0)) return track;
+    changed = true;
+    const from = [...track.from];
+    const to = [...track.to];
+    from[0] = from[0]! + delta.u;
+    from[1] = from[1]! + delta.v;
+    to[0] = to[0]! + delta.u;
+    to[1] = to[1]! + delta.v;
+    return { ...track, from, to };
+  });
+  const cameraTracks = executed.ir.cameraTracks.map(track => {
+    if (track.property !== "position") return track;
+    const delta = deltas.cameras.get(track.targetId) ?? fallback;
+    if (!delta || (delta.u === 0 && delta.v === 0)) return track;
+    changed = true;
+    const from = [...track.from];
+    const to = [...track.to];
+    from[0] = from[0]! + delta.u;
+    from[1] = from[1]! + delta.v;
+    to[0] = to[0]! + delta.u;
+    to[1] = to[1]! + delta.v;
+    return { ...track, from, to };
+  });
+  if (!changed) return null;
+  return createWorldAnimationScript({
+    script: serializeWorldAnimationScript({ ...executed.ir, instanceTracks, cameraTracks }),
+    duration: script.duration,
+    loop: script.loop,
+    revision: script.revision + 1
+  });
+}
+
 /** Plan forward commands; `frozenSource` reuses a receipt's source snapshots. */
 export function buildForwardCommands(
   canvas: ServerCanvas,
@@ -198,6 +306,8 @@ export function buildForwardCommands(
   const deleted: WorldAuthoringNodeSnapshot[] = [];
   const produced = new Map<string, WorldObjectVersion>();
   let areaScopeVersion: string | null = plan.source.area.scopeVersion;
+  const deltas = moveDeltas(canvas, plan);
+  const fallbackDelta = areaDelta(plan);
 
   for (const command of plan.commands) {
     switch (command.kind) {
@@ -206,9 +316,19 @@ export function buildForwardCommands(
         if (!ref) return { ok: false, code: "not-found", message: "导演区不存在" };
         const scopeVersion = nextSceneAreaScopeVersion(command.areaId, command.bounds);
         const current = ref.data.sceneArea as JsonRecord;
+        // A moved area carries its own animated members with it: shift position
+        // tracks by the same ground delta as their canonical transforms.
+        const animationScript = ref.nodeId === area.nodeId
+          ? shiftedAnimationScript(ref, deltas, fallbackDelta)
+          : null;
         commands.push(patch(ref, asNodeData({
           ...ref.data,
-          sceneArea: { ...current, bounds: clone(command.bounds), scopeVersion }
+          sceneArea: {
+            ...current,
+            bounds: clone(command.bounds),
+            scopeVersion,
+            ...(animationScript ? { animationScript } : {})
+          }
         })));
         areaScopeVersion = scopeVersion;
         break;
@@ -352,10 +472,19 @@ export function buildInverseCommands(
         const ref = findArea(canvas, command.areaId);
         if (!ref) return { ok: false, code: "not-found", message: "导演区不存在" };
         const current = ref.data.sceneArea as JsonRecord;
-        commands.push(patch(ref, asNodeData({
-          ...ref.data,
-          sceneArea: { ...current, bounds: clone(command.bounds), scopeVersion: command.scopeVersion }
-        })));
+        // A move also shifts the area's animation position tracks; undo restores
+        // the exact script captured in the frozen source snapshot.
+        const sourceArea = (source.area.nodeData as JsonRecord | undefined)?.sceneArea as JsonRecord | undefined;
+        const restored: JsonRecord = {
+          ...current,
+          bounds: clone(command.bounds),
+          scopeVersion: command.scopeVersion
+        };
+        if (sourceArea) {
+          if (sourceArea.animationScript !== undefined) restored.animationScript = clone(sourceArea.animationScript);
+          else delete restored.animationScript;
+        }
+        commands.push(patch(ref, asNodeData({ ...ref.data, sceneArea: restored })));
         areaScopeVersion = command.scopeVersion;
         break;
       }

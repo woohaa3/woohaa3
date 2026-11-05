@@ -5,12 +5,13 @@
  * `worldCameraPreviews`，释放时经权威 `world-camera-save` 提交，成功后把可逆回调记进
  * 页面撤销历史（`canvasEdit.recordExternal`）。
  */
-import { createHighEntropyId, type WorldCameraData } from "@woohaa3/contracts";
+import { createHighEntropyId, type CanvasCommand, type WorldCameraData } from "@woohaa3/contracts";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import {
+  animatedCameraAt,
   beginWorldCameraDrag,
   cardFollowPosition,
-  planWorldCameraMove,
+  planWorldCameraMoveWithAnimationParts,
   poseFor,
   worldCameraDelta,
   worldCameraSettingsOfPose,
@@ -19,6 +20,7 @@ import {
   type WorldCameraPose
 } from "./world-camera-drag.js";
 import type { InteractionCore } from "./interaction-core.js";
+import { confirmWorldUnbind } from "./world-unbind-confirm.js";
 
 export type WorldCameraGestureFamily = {
   /** 尝试开始镜头拖动；聚焦/过渡/模态、无人可写或镜头不合法时返回 `null`。 */
@@ -109,13 +111,19 @@ export function createWorldCameraGestureFamily(
 
   const begin = (event: PointerEvent, nodeId: string, mode: WorldCameraDragMode) => {
     if (!writable()) return null;
-    const start = beginWorldCameraDrag(
-      workingCanvasOf(woohaa3CanvasStore.getState()),
-      nodeId,
-      core.queryWorldGround({ x: event.clientX, y: event.clientY }),
-      mode
+    const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+    const ground = core.queryWorldGround({ x: event.clientX, y: event.clientY });
+    const baseStart = beginWorldCameraDrag(canvas, nodeId, ground, mode);
+    if (!baseStart) return null;
+    // 动画镜头可见位姿来自脚本采样；拖拽必须从可见位姿开始，不能从远处的规范基点跳变。
+    const sampled = animatedCameraAt(
+      canvas,
+      baseStart.canonical.cameraId,
+      core.options.getWorldAnimationTimes?.()
     );
-    if (!start) return null;
+    const start = sampled && sampled.areas.length > 0
+      ? beginWorldCameraDrag(canvas, nodeId, ground, mode, sampled.camera) ?? baseStart
+      : baseStart;
     clearPreview(nodeId);
     state.gesture = {
       kind: "world-camera",
@@ -150,6 +158,22 @@ export function createWorldCameraGestureFamily(
     return true;
   };
 
+  /** 动画脚本与镜头保存分两步提交；同一外部撤销条目回放两条命令。 */
+  const submitAreaCommands = async (
+    commands: CanvasCommand[],
+    commandId: string
+  ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    if (commands.length === 0) return { ok: true };
+    const session = core.options.getSession?.();
+    if (!session) return { ok: false, reason: "动画脚本保存端口未就绪" };
+    const result = session.submitCommands(commands, commandId);
+    if (!result.ok) return { ok: false, reason: result.reason ?? "动画脚本未提交" };
+    const settled = await result.handle.settled;
+    return settled.state === "committed"
+      ? { ok: true }
+      : { ok: false, reason: settled.error ?? "动画脚本未提交" };
+  };
+
   /** 一次提交：同一位姿既用于 redo，也用于 undo 的目标位姿。 */
   const submitPose = async (
     canvasId: string,
@@ -157,20 +181,26 @@ export function createWorldCameraGestureFamily(
     pose: WorldCameraPose,
     card: { x: number; y: number } | null,
     expectedSettingsVersion: string,
-    operationId: string
-  ): Promise<{ ok: true; settingsVersion: string } | { ok: false; reason: string }> => {
+    operationId: string,
+    areaCommands: CanvasCommand[]
+  ): Promise<
+    | { ok: true; settingsVersion: string }
+    | { ok: false; reason: string; settingsVersion?: string }
+  > => {
     if (!deps.save) return { ok: false, reason: "镜头保存端口未就绪" };
     const result = await deps.save({
       canvasId,
-      cameraId: start.camera.cameraId,
+      cameraId: start.canonical.cameraId,
       expectedSettingsVersion,
       settings: worldCameraSettingsOfPose(start.camera, pose),
       operationId
     });
     if (!result.ok) return { ok: false, reason: result.message ?? "镜头保存失败" };
+    const areas = await submitAreaCommands(areaCommands, `${operationId}:area`);
+    if (!areas.ok) return { ok: false, reason: areas.reason, settingsVersion: result.settingsVersion };
     if (card && deps.moveCard) {
       const moved = await deps.moveCard(start.nodeId, card, `${operationId}:card`);
-      if (!moved.ok) return { ok: false, reason: moved.reason };
+      if (!moved.ok) return { ok: false, reason: moved.reason, settingsVersion: result.settingsVersion };
     }
     return { ok: true, settingsVersion: result.settingsVersion };
   };
@@ -183,32 +213,49 @@ export function createWorldCameraGestureFamily(
       ? worldCameraDelta(gesture.start, canvas, core.queryWorldGround({ x: event.clientX, y: event.clientY }))
       : null;
     const delta = latest ?? gesture.delta;
-    const pose = planWorldCameraMove(gesture.start, delta);
-    if (!pose || !canvas) {
+    const plan = planWorldCameraMoveWithAnimationParts(
+      canvas,
+      gesture.start,
+      delta,
+      core.options.getWorldAnimationTimes?.()
+    );
+    if (!plan || !canvas) {
       clearPreview(gesture.start.nodeId);
       schedule("world-camera-preview");
       return false;
     }
     const canvasId = canvas.id;
+    // 撤销目标是规范位姿，不是动画采样位姿；外部改写与版本校验也只看规范值。
     const before: WorldCameraPose = {
-      position: { ...gesture.start.camera.position },
-      rotation: [...gesture.start.camera.rotation] as WorldCameraPose["rotation"]
+      position: { ...gesture.start.canonical.position },
+      rotation: [...gesture.start.canonical.rotation] as WorldCameraPose["rotation"]
     };
-    const afterCard = cardFollowPosition(gesture.start, pose);
     const beforeCard = gesture.start.card;
     const operationId = deps.operationId();
-    const expectedSettingsVersion = gesture.start.camera.settingsVersion;
-    void (async () => {
+    const expectedSettingsVersion = gesture.start.canonical.settingsVersion;
+
+    const execute = async (applied: NonNullable<typeof plan>) => {
+      const afterCard = cardFollowPosition(gesture.start, applied.pose);
       // 版本链只在确认保存成功后才推进；外部改写会让下一动作失败关闭。
       let version = expectedSettingsVersion;
-      const apply = async (target: WorldCameraPose, card: { x: number; y: number } | null, id: string) => {
-        const result = await submitPose(canvasId, gesture.start, target, card, version, id);
-        if (!result.ok) return result;
+      const apply = async (
+        target: WorldCameraPose,
+        card: { x: number; y: number } | null,
+        id: string,
+        areaCommands: CanvasCommand[]
+      ) => {
+        const result = await submitPose(canvasId, gesture.start, target, card, version, id, areaCommands);
+        if (!result.ok) {
+          // The camera save may already have advanced settingsVersion even when the
+          // following animation patch failed; keep the chain usable for recovery.
+          if (result.settingsVersion) version = result.settingsVersion;
+          return { ok: false as const, reason: result.reason };
+        }
         version = result.settingsVersion;
         return { ok: true as const };
       };
       try {
-        const first = await apply(pose, afterCard, operationId);
+        const first = await apply(applied.pose, afterCard, operationId, applied.forwardAreas);
         if (!first.ok) {
           deps.onError?.(first.reason ?? "镜头保存失败");
           clearPreview(gesture.start.nodeId);
@@ -218,10 +265,9 @@ export function createWorldCameraGestureFamily(
         deps.recordExternal?.({
           id: `world-camera:${operationId}`,
           label: gesture.start.mode === "rotate" ? "调整镜头朝向" : "移动镜头",
-          undo: () => apply(before, beforeCard, `${operationId}:undo`),
-          redo: () => apply(pose, afterCard, `${operationId}:redo`)
+          undo: () => apply(before, beforeCard, `${operationId}:undo`, applied.inverseAreas),
+          redo: () => apply(applied.pose, afterCard, `${operationId}:redo`, applied.forwardAreas)
         });
-        // 保存成功且回执版本已推进；规范位姿和卡片位置已在 working projection 中接替预览。
         clearPreview(gesture.start.nodeId);
         schedule("world-camera-preview");
       } catch (error) {
@@ -229,6 +275,40 @@ export function createWorldCameraGestureFamily(
         clearPreview(gesture.start.nodeId);
         schedule("world-camera-preview");
       }
+    };
+
+    if (plan.unbindCandidates.length === 0) {
+      void execute(plan);
+      return true;
+    }
+    const candidates = plan.unbindCandidates;
+    void (async () => {
+      const confirmed = await confirmWorldUnbind({
+        title: "镜头移出导演区",
+        description: `移出后${candidates.map(candidate => `「${candidate.title}」`).join("、")}的动画脚本将与镜头解绑。是否继续？`,
+        confirmLabel: "移出并解绑"
+      });
+      if (!confirmed) {
+        clearPreview(gesture.start.nodeId);
+        schedule("world-camera-preview");
+        return;
+      }
+      const latestCanvas = workingCanvasOf(woohaa3CanvasStore.getState());
+      const latestPlan = latestCanvas
+        ? planWorldCameraMoveWithAnimationParts(
+            latestCanvas,
+            gesture.start,
+            delta,
+            core.options.getWorldAnimationTimes?.(),
+            new Set(candidates.map(candidate => candidate.areaNodeId))
+          )
+        : null;
+      if (!latestPlan) {
+        clearPreview(gesture.start.nodeId);
+        schedule("world-camera-preview");
+        return;
+      }
+      await execute(latestPlan);
     })();
     return true;
   };

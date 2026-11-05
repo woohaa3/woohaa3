@@ -137,6 +137,34 @@ it("applies a transient camera pose without rewriting the source canvas", () => 
     .toMatchObject({ position: { u: 0, v: 0, h: 1.5 } });
 });
 
+it("lets a transient camera pose win over the sampled animation", () => {
+  const canvas = fixture();
+  const area = canvas.nodeData.area!.sceneArea as Record<string, unknown>;
+  area.animationScript = {
+    script: 'motion.camera.tween({ cameraId: "camera-main", property: "position", startTime: 0, endTime: 4, from: [1, 2, 1.5], to: [3, 4, 1.5], easing: "linear" });',
+    scriptLanguage: "javascript",
+    scriptVersion: "woohaa-world-animation-js-v1",
+    revision: 1,
+    sourceHash: "camera-hash",
+    duration: 4,
+    loop: false
+  } satisfies WorldAnimationScript;
+  const sampled = buildCanvasRenderScene({ canvas, sceneAnimationTimes: new Map([["area", 0]]) });
+  expect(sampled.nodes.find(node => node.id === "camera")!.worldCamera?.position)
+    .toEqual({ u: 1, v: 2, h: 1.5 });
+
+  const dragged = buildCanvasRenderScene({
+    canvas,
+    sceneAnimationTimes: new Map([["area", 0]]),
+    worldCameraPreviews: new Map([["camera", {
+      position: { u: 9, v: 8, h: 7 },
+      rotation: [0, 0, 0, 1]
+    }]])
+  });
+  expect(dragged.nodes.find(node => node.id === "camera")!.worldCamera?.position)
+    .toEqual({ u: 9, v: 8, h: 7 });
+});
+
 it("drops edges that would point at the omitted scene-area node", () => {
   const canvas = fixture();
   canvas.document.edges.push(
