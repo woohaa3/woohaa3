@@ -207,25 +207,25 @@
 	padding: 0;
 	border: 0;
 	border-radius: 999px;
-	/* 叠在图片上：用半透明深底 + 白图标，亮暗主题下都看得清 */
-	background: rgba(0, 0, 0, 0.55);
-	color: #fff;
+	/* 叠在图片上：用半透明深底 + 白图标，亮暗主题下都看得清（色值取主题 token，不写字面值） */
+	background: var(--app-web-overlay);
+	color: var(--app-on-primary);
 	cursor: pointer;
 	transition: background 0.15s ease;
 }
 
 .canvas-image-panel__action:hover {
-	background: rgba(0, 0, 0, 0.75);
+	background: color-mix(in srgb, var(--app-web-overlay) 80%, black);
 }
 
 .canvas-image-panel__action.is-active {
-	color: #f5c542;
+	color: var(--app-status-warning-soft);
 }
 
 .canvas-image-panel__failure {
 	margin: 0 0 4px;
 	flex-shrink: 0;
-	color: var(--app-web-danger, #d4380d);
+	color: var(--app-status-danger);
 	font-size: 12px;
 	text-align: center;
 }

@@ -5,7 +5,7 @@
 	box-sizing: border-box;
 	width: 272px;
 	padding: 12px 14px;
-	border: 1px solid var(--app-web-border, rgba(0, 0, 0, 0.12));
+	border: 1px solid var(--app-web-border);
 	border-radius: 14px;
 	background: var(--app-web-panel);
 	color: var(--app-web-text-primary);
@@ -60,7 +60,7 @@
 	height: 32px;
 	border-radius: 6px;
 	object-fit: cover;
-	background: var(--app-web-border, rgba(0, 0, 0, 0.08));
+	background: var(--app-web-border, var(--app-web-shadow));
 }
 
 .history-input-card__ref--gone {
@@ -95,7 +95,7 @@
 .history-input-card__button {
 	flex: 1;
 	height: 32px;
-	border: 1px solid var(--app-web-border, rgba(0, 0, 0, 0.12));
+	border: 1px solid var(--app-web-border, var(--app-web-border));
 	border-radius: 8px;
 	background: transparent;
 	color: var(--app-web-text-primary);

@@ -306,7 +306,9 @@ describe("interaction controller wiring regressions", () => {
     let target = "b";
     const { dom, controller } = setup({
       nodes: [
-        { id: "g", type: "workflow-group-2d", position: { x: 0, y: 0 } },
+        // 组**标题**才是搬动命中区（边框按下是调范围）：标题在 y-11…y+11、x+12 起，
+        // 所以组框要挪到测试按下点 (100,100) 下方，标题才覆盖它。
+        { id: "g", type: "workflow-group-2d", position: { x: 0, y: 100 } },
         { id: "a", type: "image", position: { x: 300, y: 300 } },
         { id: "b", type: "image", position: { x: 600, y: 600 } }
       ],

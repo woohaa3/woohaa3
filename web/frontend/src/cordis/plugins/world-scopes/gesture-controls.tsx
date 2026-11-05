@@ -21,10 +21,10 @@ const panelStyle: CSSProperties = {
   width: 320,
   padding: 12,
   borderRadius: 12,
-  border: "1px solid var(--app-web-border, #e2e8e4)",
-  background: "var(--app-web-panel, #fff)",
-  color: "var(--app-web-text-primary, #30443a)",
-  boxShadow: "0 14px 34px var(--app-web-shadow, #2d423933)",
+  border: "1px solid var(--app-web-border)",
+  background: "var(--app-web-panel)",
+  color: "var(--app-web-text-primary)",
+  boxShadow: "0 14px 34px var(--app-web-shadow)",
   fontFamily: "\"Noto Sans SC\", \"Noto Sans\", system-ui, sans-serif",
   fontSize: 13,
   lineHeight: 1.4,
@@ -32,7 +32,7 @@ const panelStyle: CSSProperties = {
   gap: 8
 };
 
-const hintStyle: CSSProperties = { fontSize: 12, lineHeight: 1.45, color: "var(--app-web-text-muted, #849188)" };
+const hintStyle: CSSProperties = { fontSize: 12, lineHeight: 1.45, color: "var(--app-web-text-muted)" };
 
 function GestureStatus() {
   const snapshot = useSyncExternalStore(sceneAreaGestureStore.subscribe, sceneAreaGestureStore.getSnapshot, sceneAreaGestureStore.getSnapshot);
@@ -54,16 +54,16 @@ function GestureStatus() {
         maxWidth: 460,
         padding: "8px 14px",
         borderRadius: 999,
-        background: "var(--app-web-panel, #fff)",
+        background: "var(--app-web-panel)",
         justifyItems: "center",
         textAlign: "center"
       }}
     >
       <strong style={{ fontSize: 13 }}>{label}</strong>
-      {snapshot.message ? <span style={{ ...hintStyle, color: "var(--app-status-danger, #bb5464)" }}>{snapshot.message}</span>
+      {snapshot.message ? <span style={{ ...hintStyle, color: "var(--app-status-danger)" }}>{snapshot.message}</span>
         : reading ? <span style={hintStyle}>{reading}</span> : null}
       {snapshot.conflicts.map(conflict => (
-        <span key={`${conflict.target.kind}:${conflict.target.kind === "instance" ? conflict.target.instanceId : conflict.target.cameraId}:${conflict.runId}:${conflict.epoch}`} style={{ ...hintStyle, color: "var(--app-status-danger, #bb5464)" }}>
+        <span key={`${conflict.target.kind}:${conflict.target.kind === "instance" ? conflict.target.instanceId : conflict.target.cameraId}:${conflict.runId}:${conflict.epoch}`} style={{ ...hintStyle, color: "var(--app-status-danger)" }}>
           {conflict.target.kind === "instance" ? `模型 ${conflict.target.instanceId}` : `镜头 ${conflict.target.cameraId}`}
           {" · "}{conflict.runId} / {conflict.epoch}
         </span>

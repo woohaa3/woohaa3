@@ -447,7 +447,7 @@
   padding: 18px 18px 14px;
   border: 1px solid var(--mc-border);
   border-radius: 12px;
-  background: var(--mc-surface, var(--app-bg, #1c1c1c));
+  background: var(--mc-surface, var(--app-bg));
   color: var(--mc-text);
   box-shadow: 0 16px 48px color-mix(in srgb, black 35%, transparent);
 }
@@ -1765,13 +1765,13 @@
 	border: 1px solid color-mix(in srgb, var(--mc-accent) 46%, transparent);
 	border-radius: 999px;
 	background: var(--mc-accent);
-	color: #fff;
+	color: var(--app-status-on-danger);
 	cursor: pointer;
 	box-shadow: 0 8px 22px color-mix(in srgb, var(--mc-accent) 34%, transparent);
 	transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 .settings-plugin-fab:hover {
-	background: color-mix(in srgb, var(--mc-accent) 88%, #000);
+	background: var(--app-interaction-accent-hover);
 	transform: translateY(-1px);
 	box-shadow: 0 10px 26px color-mix(in srgb, var(--mc-accent) 40%, transparent);
 }

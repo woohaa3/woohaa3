@@ -291,7 +291,7 @@
 	margin: 8px 12px 0;
 	font-size: 12px;
 	line-height: 1.5;
-	color: #e5484d;
+	color: var(--app-status-danger);
 	user-select: text;
 }
 

@@ -161,6 +161,13 @@ export function poseFor(
   };
 }
 
+/** 该增量是否真的改变朝向（等距镜头按 90° 象限吸附，足够小的拖动不改朝向）。 */
+function rotationChanges(camera: WorldCameraData, delta: GroundPoint): boolean {
+  if (camera.projection.kind === "isometric") return Math.abs(delta.u) >= 0.35;
+  return Math.abs(clamp(delta.v * PITCH_PER_METER, MIN_PITCH, MAX_PITCH)) > 0
+    || Math.abs(delta.u * YAW_PER_METER) > 0;
+}
+
 /**
  * 释放提交：只改位姿，保留投影、画幅、输出方向与绑定。
  *
@@ -171,6 +178,9 @@ export function planWorldCameraMove(
   delta: GroundPoint | null | undefined
 ): { position: WorldPoint; rotation: WorldRotation } | null {
   if (!worldCameraMoved(start, delta)) return null;
+  // 旋转没有净变化时不提交：等距镜头小幅拖动仍停在当前象限，透视镜头增量也能被夹到 0，
+  // 而四元数乘法会带进 1e-9 量级的浮点误差 —— 不拦的话一次误触就写成一条撤销记录。
+  if (start.mode === "rotate" && !rotationChanges(start.camera, delta)) return null;
   const pose = poseFor(start.camera, start.mode, delta);
   if (!pose) return null;
   if (!decodeWorldCamera({ ...start.camera, ...pose }).ok) return null;

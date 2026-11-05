@@ -55,8 +55,12 @@ export const Tooltip = forwardRef<HTMLButtonElement, TooltipProps>(function Tool
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>
   );
-  // UiProvider 已提供统一 delay/portal；脱离 Provider（测试/独立预览）时自带一个 narrow provider。
-  return hasProvider ? root : <TooltipPrimitive.Provider delayDuration={350}>{root}</TooltipPrimitive.Provider>;
+  // Radix 的 Tooltip 必须有一个 `Provider` 祖先。**只看 `UiContext` 不够**：`UiPortalScope`
+  // （弹窗用）会提供 `UiContext` 但并没有提供 Radix Provider，那时 `hasProvider` 为真却仍然
+  // 抛「Tooltip must be used within TooltipProvider」。嵌套 Provider 是 Radix 允许的，
+  // 所以缺省一律补一层；`UiProvider` 在场时它在外层，delay 仍以它为准。
+  void hasProvider;
+  return <TooltipPrimitive.Provider delayDuration={350}>{root}</TooltipPrimitive.Provider>;
 });
 
 /** 仅有可见文案时才需要 Tooltip 的便捷包装（content 为空则原样返回）。 */

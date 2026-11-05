@@ -35,17 +35,17 @@
 
 .skill-step-status__error {
 	margin: 0;
-	color: var(--app-web-danger, #d9534f);
+	color: var(--app-status-danger);
 	word-break: break-word;
 }
 
 .skill-step-status[data-state="failed"] .skill-step-status__state,
 .skill-step-status[data-state="unknown"] .skill-step-status__state {
-	color: var(--app-web-danger, #d9534f);
+	color: var(--app-status-danger);
 }
 
 .skill-step-status[data-state="cancel-requested"] .skill-step-status__state {
-	color: var(--app-web-warning, #b7791f);
+	color: var(--app-status-warning);
 }
 
 .skill-step-status__history {
@@ -66,7 +66,7 @@
 
 .skill-step-status__history li[data-state="failed"],
 .skill-step-status__history li[data-state="unknown"] {
-	color: var(--app-web-danger, #d9534f);
+	color: var(--app-status-danger);
 }
 
 .skill-step-status__actions {

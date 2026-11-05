@@ -23,7 +23,7 @@
 	height: 40px;
 	padding: 0;
 	overflow: hidden;
-	border: 1px solid var(--app-web-border, rgba(0, 0, 0, 0.12));
+	border: 1px solid var(--app-web-border);
 	border-radius: 8px;
 	background: var(--app-web-panel);
 	color: var(--app-web-text-secondary);
@@ -65,7 +65,7 @@
 .history-layer[data-state="failed"],
 .history-layer[data-state="cancelled"],
 .history-layer[data-state="interrupted"] {
-	color: var(--app-web-danger, #d4380d);
+	color: var(--app-status-danger);
 	border-color: currentColor;
 }
 
@@ -96,7 +96,7 @@
 	width: 7px;
 	height: 7px;
 	border-radius: 50%;
-	background: var(--app-web-danger, #d4380d);
+	background: var(--app-status-danger);
 	box-shadow: 0 0 0 1.5px var(--app-web-panel);
 }
 

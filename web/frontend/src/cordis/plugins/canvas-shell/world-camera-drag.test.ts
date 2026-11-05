@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   createDefaultWorldCameraData,
   createEmptyWoohaa3ServerCanvas,
+  defaultWorldCameraProjection,
   decodeWorldCamera,
   type CanvasNodeData,
   type ServerCanvas,
@@ -19,9 +20,13 @@ import {
 } from "./world-camera-drag.js";
 import { worldModelSelectionFromPick } from "../canvas-runtime/model-world-presentation.js";
 
-function canvasWithCamera(): { canvas: ServerCanvas; cameraId: string } {
+/** 默认投影现在是透视；需要等距语义的用例走参数显式声明，不靠默认值。 */
+function canvasWithCamera(projection: "isometric" | "perspective" = "perspective"): { canvas: ServerCanvas; cameraId: string } {
   const canvas = createEmptyWoohaa3ServerCanvas("camera-drag");
-  const camera = createDefaultWorldCameraData("camera-1", "camera-v1", { u: 0, v: 0 });
+  const camera = {
+    ...createDefaultWorldCameraData("camera-1", "camera-v1", { u: 0, v: 0 }),
+    projection: defaultWorldCameraProjection(projection)
+  };
   canvas.document.nodes.push({ id: "camera-node", type: "world-camera", position: { x: 0, y: 0 } });
   canvas.nodeData["camera-node"] = { worldCamera: camera } as unknown as CanvasNodeData;
   return { canvas, cameraId: camera.cameraId };
@@ -51,7 +56,7 @@ it("moves a camera on the ground without changing its height, rotation or settin
 });
 
 it("snaps an isometric camera to a valid 90-degree yaw when rotating", () => {
-  const { canvas } = canvasWithCamera();
+  const { canvas } = canvasWithCamera("isometric");
   const camera = (canvas.nodeData["camera-node"] as unknown as { worldCamera: WorldCameraData }).worldCamera;
   const start = beginWorldCameraDrag(canvas, "camera-node", { u: 0, v: 0 }, "rotate")!;
   const pose = planWorldCameraMove(start, { u: 1, v: 0 })!;
