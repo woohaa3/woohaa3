@@ -5,9 +5,10 @@ import { sanitizeRuntimeNodeConfigPatch } from "./runtime-node-data.js";
 import { decodeManagedNodeRelation } from "../managed-node.js";
 import { decodeMediaContentRef } from "../media-content.js";
 import { decodeModelContentVersion } from "../model-definition.js";
+import { storedHumanoidRig } from "../humanoid-rig.js";
 
 const WORLD_NODE_FIELDS = new Set(["title", "prompt", "panelPrompt", "agentId", "sceneId", "inputMapping", "workflowGroup2d", "sceneArea", "worldCamera", "imageDirectorSource", "imageDirectorGeneration"]);
-const MODEL_FIELDS = new Set([...WORLD_NODE_FIELDS, "sharedWorldInstance", "managedBy", "taskKind", "inputMapping", "status", "taskStatus", "activeRunId", "modelKey", "progress", "error", "errorMessage", "result", "resultPreview", "providerTaskId", "durationSeconds", "mediaContent", "outputAssetId", "posterAssetId", "resourceKind", "frozenPreview", "parameters", "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelScriptStatus", "modelScriptError", "modelSourceKind", "modelAssetId", "modelContentVersion", "modelPlacement", "shotPose", "modelCameras"]);
+const MODEL_FIELDS = new Set([...WORLD_NODE_FIELDS, "sharedWorldInstance", "managedBy", "taskKind", "inputMapping", "status", "taskStatus", "activeRunId", "modelKey", "progress", "error", "errorMessage", "result", "resultPreview", "providerTaskId", "durationSeconds", "mediaContent", "outputAssetId", "posterAssetId", "resourceKind", "frozenPreview", "parameters", "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelScriptStatus", "modelScriptError", "modelSourceKind", "modelAssetId", "modelContentVersion", "modelPlacement", "shotPose", "modelCameras", "modelRig"]);
 const TEXT_FIELDS = ["title", "prompt", "panelPrompt", "agentId", "sceneId"];
 const LOCAL_FIELDS = new Set(["writeLease", "lease", "toolContext", "gpuResource", "gpuHandle", "runtimeHandle", "matrix"]);
 
@@ -62,6 +63,10 @@ function validModelFields(fields: Record<string, unknown>): string | null {
   if (fields.managedBy !== undefined) {
     const decoded = decodeManagedNodeRelation(fields.managedBy);
     if (!decoded.ok || !containsOnlyDecodedFields(fields.managedBy, decoded.value)) return "managedBy";
+  }
+  if (fields.modelRig !== undefined) {
+    const decoded = storedHumanoidRig(fields.modelRig);
+    if (!decoded.ok || !containsOnlyDecodedFields(fields.modelRig, decoded.value)) return "modelRig";
   }
   return null;
 }

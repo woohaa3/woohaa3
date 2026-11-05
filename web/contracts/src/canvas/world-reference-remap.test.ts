@@ -102,7 +102,9 @@ describe("world copy reference remapping", () => {
       script: [
         'motion.instance.tween("instance-1", { property: "position", startTime: 0, endTime: 5, from: [1, 2, 3], to: [4, 5, 6], easing: "easeOut" });',
         'motion.instance.tween("instance-1", { property: "rotation", startTime: 0, endTime: 5, from: [0, 0, 0], to: [0, 90, 0], easing: "linear" });',
-        'motion.instance.tween("instance-2", { property: "scale", startTime: 0, endTime: 5, from: [1], to: [2], easing: "linear" });'
+        'motion.instance.tween("instance-2", { property: "scale", startTime: 0, endTime: 5, from: [1], to: [2], easing: "linear" });',
+        'motion.part.tween("instance-1", "LeftUpperLeg", { property: "rotation", startTime: 0, endTime: 5, from: [-30,0,0], to: [30,0,0] });',
+        'motion.part.cycle("instance-2","RightUpperLeg",{property:"rotation",startTime:0,endTime:5,period:1,keyframes:[{time:0,value:[-20,0,0]},{time:0.5,value:[20,0,0]},{time:1,value:[-20,0,0]}]});'
       ].join("\n"),
       scriptLanguage: "javascript",
       scriptVersion: "woohaa-world-animation-js-v2",
@@ -135,6 +137,8 @@ describe("world copy reference remapping", () => {
       "copy-instance-1:rotation",
       "copy-instance-2:scale"
     ]);
+    expect(compiled.ir.partTracks?.map(t => [t.targetId, t.partId])).toEqual([["copy-instance-1", "LeftUpperLeg"],["copy-instance-2","RightUpperLeg"]]);
+    expect(compiled.ir.partTracks?.[1]?.cycle?.keyframes).toHaveLength(3);
     expect(input).toEqual(before);
   });
 

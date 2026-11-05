@@ -86,7 +86,7 @@ mod tests {
             prepared_bounds: None,
             placement: ModelPlacement::default(),
         };
-        node.model = Some(ModelReference {
+        node.model = Some(ModelReference { ground_anchor_local: None, part_rotations: None,
             resource_key: "s".into(),
             scene_version: snapshot.scene_version.clone(),
             signature: "s".into(),

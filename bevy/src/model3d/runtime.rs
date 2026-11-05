@@ -44,6 +44,7 @@ pub(crate) struct ModelVisuals {
     /// 上一次门禁结算时正在播放的模型节点；用于 A→B 切换时原子 stop 旧根
     /// （change: play-model-animations-on-hover，design D1/D3）。
     pub(super) active_model: Option<String>,
+    pub(super) joint_targets: HashMap<String, std::collections::HashSet<String>>,
     pub(super) motion_plan: Option<std::sync::Arc<super::motion_plan::MotionPlan>>,
     pub(super) playback_events: std::collections::VecDeque<serde_json::Value>,
     pub(super) motion_targets: Option<(String, Arc<std::collections::HashSet<String>>)>,
@@ -268,14 +269,10 @@ pub(crate) fn sync_models(
         let allowed = allowed
             && (models.batching_strategy != super::batch_strategy::BatchStrategy::Explicit
                 || node.model_preview.is_some());
-        // 总览片场合批会把只做平移的父级部件平铺到 binding 根（`batching::apply_flatten`），
-        // 动画目标组因此失去几何，旋转/位移只写到没有子几何的组实体上。带部件动作的播放
-        // （hover 拍摄预览卡片、录制/截图）必须使用非合批表示；纯镜头动作不需要拆部件。
-        let part_motion = scene.animation_playback.as_ref().is_some_and(|playback| {
-            playback.node_id == node.id && !playback.model_motion.is_empty()
-        });
-        let _ = part_motion;
-        let batched = allowed
+        // Joint samples address stable hierarchical part entities. Keep this instance
+        // unbatched for the whole timeline, including frames before its first key.
+        let part_motion = reference.part_rotations.is_some();
+        let batched = allowed && !part_motion
             && !models.high_demand.contains(&node.id) && !scene
             .model_editor
             .as_ref()

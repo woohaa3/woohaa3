@@ -215,7 +215,7 @@ fn shared_world_canvas_hardware() {
                     "type":"model", "x":if moved_cards { 900 } else { 0 }, "y":0,"width":100,"height":50,
                     "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":format!("i{i}"),
                         "transform":{"version":"shared-world-v1","position":{"u":point.x,"v":-point.z,"h":point.y},"rotation":[0,0,0,1],"scale":1}}})).unwrap();
-                node.model = Some(ModelReference { resource_key:key, scene_version:Some(crate::protocol::MODEL_SCENE_IR_V2.into()),
+                node.model = Some(ModelReference { ground_anchor_local: None, part_rotations: None, resource_key:key, scene_version:Some(crate::protocol::MODEL_SCENE_IR_V2.into()),
                     signature, placement:ModelPlacement::default() });
                 scene.nodes.push(node);
             }

@@ -146,6 +146,7 @@ describe("trusted GLB world authority", () => {
     expect(prepared.snapshot.writable).toEqual([{ ...TARGET, version: worldObjectVersion(canvas, TARGET) }]);
     const content = await authority.prepareContent(canvas.nodeData.model, canvas);
     expect(content?.localAabb).toEqual({ min: [1, 1, 2], max: [5, 2, 4] });
+    expect(content?.localGroundAnchor).toEqual([3, 1, 3]);
     const footprint = instanceFootprint(content!.localAabb, transform);
     expect(footprint.min.u).toBeCloseTo(7); expect(footprint.max.u).toBeCloseTo(11);
     expect(footprint.min.v).toBeCloseTo(6); expect(footprint.max.v).toBeCloseTo(14);

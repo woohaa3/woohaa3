@@ -19,6 +19,7 @@
 
 import path from "node:path";
 import crypto from "node:crypto";
+import os from "node:os";
 
 /** 需要走命名管道与 shell 包装的平台。 */
 export const WINDOWS = "win32";
@@ -51,6 +52,21 @@ export function supervisorEndpoint({ platform = process.platform, workspaceKey, 
 export function stdioEndpoint({ platform = process.platform, key, stdioDir } = {}) {
 	if (isWindows(platform)) return `\\\\.\\pipe\\woohaa-agent-stdio-${hashKey(key)}`;
 	return path.join(stdioDir, `${hashKey(key)}.sock`);
+}
+
+/** Reserve space for the full stdio path, not just supervisor.sock. */
+export function agentRuntimeDirectory({root, platform=process.platform, tempDir=os.tmpdir(), uid=process.getuid?.() ?? "user"}={}) {
+ const local=path.join(root,".local","agent-runtime");
+ if(isWindows(platform))return local;
+ const fits=dir=>Buffer.byteLength(stdioEndpoint({platform,key:"maximum",stdioDir:path.join(dir,"stdio")}))<104;
+ if(fits(local))return local;
+ const digest=hashKey(path.resolve(root)).slice(0,20);
+ const temporary=path.join(tempDir,`woohaa-agent-${uid}-${digest}`);
+ if(fits(temporary))return temporary;
+ // macOS TMPDIR itself can be too long for AF_UNIX. Ownership is checked by the host.
+ const short=path.join("/tmp",`wa-${uid}-${digest}`);
+ if(!fits(short))throw new Error("Agent runtime socket directory exceeds Unix path limit");
+ return short;
 }
 
 /**

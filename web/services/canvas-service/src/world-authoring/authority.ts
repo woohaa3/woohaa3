@@ -4,14 +4,14 @@
  * The authority derives every write decision from the canonical canvas projection:
  *
  * - scope bounds/version come from the `sceneArea` payload, never a card rect;
- * - instance footprints come from authoritative script execution or scoped GLB
- *   bytes parsed into `v2SceneAabb`, transformed by the canonical
- *   world transform; unknown bounds never authorize;
+ * - instance ground anchors come from authoritative script execution with stored
+ *   rig parameters or scoped GLB bytes, transformed by the canonical world pose;
+ *   unknown geometry never authorizes; body AABBs only classify references;
  * - cameras are classified by their spatial anchor, never their card position;
  * - 2D workflow groups only return read-only references and cannot grant 3D writes.
  *
  * Footprint execution is asynchronous, so `prepareCanvas` resolves and caches the
- * local model AABBs for one exact canvas revision. `eligible`/`resolve` stay
+ * local model geometry and anchors for one exact canvas revision. `eligible`/`resolve` stay
  * synchronous (the lease store/commit transaction is synchronous) but fail closed
  * whenever the cached content/revision no longer matches.
  */
@@ -29,6 +29,10 @@ import {
   quatRotate,
   stableStringify,
   v2SceneAabb,
+  modelGroundAnchorLocal,
+  worldModelGroundAnchor,
+  storedHumanoidRig,
+  type Vec3,
   type Aabb,
   type GroundAabb,
   type SceneAreaData,
@@ -74,6 +78,7 @@ type InstanceRecord = {
   version: string;
   /** Asset-local AABB; `null` means the content could not be prepared. */
   localAabb: Aabb | null;
+  localGroundAnchor: Vec3 | null;
 };
 
 type CameraRecord = {
@@ -128,7 +133,8 @@ const CONTENT_FIELDS = [
   "modelScriptVersion",
   "modelSourceKind",
   "modelAssetId",
-  "modelContentVersion"
+  "modelContentVersion",
+  "modelRig"
 ] as const;
 
 function nonEmpty(value: unknown): value is string {
@@ -250,7 +256,8 @@ function instanceRecord(
   nodeId: string,
   data: WorldInstanceData,
   contentVersion: string,
-  localAabb: Aabb | null
+  localAabb: Aabb | null,
+  localGroundAnchor: Vec3 | null
 ): InstanceRecord {
   const transformVersion = stableAuthorityVersion("world-pose", data.transform);
   return {
@@ -260,7 +267,8 @@ function instanceRecord(
     contentVersion,
     transformVersion,
     version: instanceVersion(data.instanceId, contentVersion, transformVersion),
-    localAabb
+    localAabb,
+    localGroundAnchor
   };
 }
 
@@ -329,21 +337,19 @@ function objectEntry(
 }
 
 function instanceContainment(record: InstanceRecord, area: GroundAabb): WorldObjectAuthorityEntry["containment"] {
-  if (!record.localAabb) return "unknown";
-  const bounds = instanceFootprint(record.localAabb, record.data.transform);
-  const result = classifyFootprint({
-    area,
-    footprint: {
-      status: "ready",
-      bounds,
-      contentVersion: record.contentVersion,
-      transformVersion: record.transformVersion
-    },
-    contentVersion: record.contentVersion,
-    transformVersion: record.transformVersion
-  });
-  if (result === "unknown") return "unknown";
-  return result === "complete" ? "writable" : result === "partial" ? "read-only" : "outside";
+  return containmentOfGeometry(record.localAabb, record.localGroundAnchor, record.data.transform, area);
+}
+
+function containmentOfGeometry(localAabb: Aabb | null, localGroundAnchor: Vec3 | null, transform: WorldTransform, area: GroundAabb): WorldObjectAuthorityEntry["containment"] {
+  if (!localAabb || !localGroundAnchor) return "unknown";
+  const anchor = worldModelGroundAnchor(localGroundAnchor, transform);
+  const point = classifyCameraPoint({ area, position: { ...anchor, h: 0 } });
+  if (point === "unknown") return "unknown";
+  if (point === "complete") return "writable";
+  const overlap = classifyFootprint({ area, footprint: {
+    status: "ready", bounds: instanceFootprint(localAabb, transform), contentVersion: "prepared", transformVersion: "current"
+  }, contentVersion: "prepared", transformVersion: "current" });
+  return overlap === "unknown" ? "unknown" : overlap === "outside" ? "outside" : "read-only";
 }
 
 function cameraContainment(record: CameraRecord, area: GroundAabb): WorldObjectAuthorityEntry["containment"] {
@@ -374,7 +380,7 @@ function membersFor(instances: InstanceRecord[], cameras: CameraRecord[]): Scene
 type ObjectState = {
   identity: WorldObjectIdentity;
   version: string;
-  instance?: { contentVersion: string; transformVersion: string; transform: WorldTransform; localAabb: Aabb | null };
+  instance?: { contentVersion: string; transformVersion: string; transform: WorldTransform; localAabb: Aabb | null; localGroundAnchor: Vec3 | null };
   camera?: WorldCameraData;
 };
 
@@ -395,7 +401,7 @@ export type WorldAuthoringAuthority = SpatialCommitAuthority & {
    * the caller must prepare it before committing so containment is decided from
    * the exact post-state content. Returns `null` when bounds remain unknown.
    */
-  prepareContent(fields: Record<string, unknown>, canvas?: ServerCanvas): Promise<{ contentVersion: string; localAabb: Aabb } | null>;
+  prepareContent(fields: Record<string, unknown>, canvas?: ServerCanvas): Promise<{ contentVersion: string; localAabb: Aabb; localGroundAnchor?: Vec3 } | null>;
   /** Drop cached projections for one canvas. */
   invalidate(canvasId: string): void;
 };
@@ -414,13 +420,13 @@ export function createWorldAuthoringAuthority(
 ): WorldAuthoringAuthority {
   const caches = new Map<string, AuthorityCache>();
   /**
-   * Content-addressed successful local AABBs; pose changes reuse the same
+   * Content-addressed successful geometry and anchors; pose changes reuse the same
    * prepared geometry. Preparation failures are deliberately never stored: a
    * transient executor throw/structured failure must not poison the content, so
    * the same authority can retry and recover while every retry still starts
    * from `unknown` (fail closed) until real bounds exist.
    */
-  const localAabbCache = new Map<string, Aabb>();
+  const localAabbCache = new Map<string, { localAabb: Aabb; localGroundAnchor: Vec3 }>();
   /** Versions validated as the post-state of an in-flight atomic resolve. */
   const postEligible = new Set<string>();
   const postKey = (canvasId: string, scopeVersion: string, target: WorldObjectIdentity, version: string): string =>
@@ -448,7 +454,7 @@ export function createWorldAuthoringAuthority(
         contentType !== "model/gltf-binary") return null;
       if (storageKey !== `sha256-${checksum}` && !storageKey.startsWith(`generation-outputs/${checksum}.`)) return null;
       const cached = localAabbCache.get(contentVersion);
-      if (cached) return { contentVersion, localAabb: cached };
+      if (cached) return { contentVersion, ...cached };
       try {
         const raw = await options.media.read(storageKey, canvas.id);
         if (raw.contentType !== contentType || raw.bytes.byteLength !== size || raw.bytes.byteLength > GLB_MAX_FILE_BYTES ||
@@ -459,22 +465,29 @@ export function createWorldAuthoringAuthority(
         // applies only the instance root, never the legacy card modelPlacement.
         const localAabb = v2SceneAabb(parsed.ops);
         if (!localAabb) return null;
-        localAabbCache.set(contentVersion, localAabb);
-        return { contentVersion, localAabb };
+        const localGroundAnchor = modelGroundAnchorLocal(parsed.ops, null);
+        if (!localGroundAnchor) return null;
+        localAabbCache.set(contentVersion, { localAabb, localGroundAnchor });
+        return { contentVersion, localAabb, localGroundAnchor };
       } catch {
         return null;
       }
     }
     const cached = localAabbCache.get(contentVersion);
-    if (cached) return { contentVersion, localAabb: cached };
+    if (cached) return { contentVersion, ...cached };
     if (typeof fields.modelScript !== "string" || fields.modelScript.trim().length === 0) return null;
     try {
-      const execution = await (options.executeScene ?? executeSceneIr)(fields.modelScript, fields.modelScriptVersion, {});
+      const stored = fields.modelRig == null ? null : storedHumanoidRig(fields.modelRig);
+      if (stored && !stored.ok) return null;
+      const rig = stored?.ok ? stored.value : null;
+      const execution = await (options.executeScene ?? executeSceneIr)(fields.modelScript, fields.modelScriptVersion, rig ? { rig: rig.parameters } : {});
       if (!execution.ok) return null;
       const localAabb = v2SceneAabb(execution.ops);
       if (!localAabb) return null;
-      localAabbCache.set(contentVersion, localAabb);
-      return { contentVersion, localAabb };
+      const localGroundAnchor = modelGroundAnchorLocal(execution.ops, rig);
+      if (!localGroundAnchor) return null;
+      localAabbCache.set(contentVersion, { localAabb, localGroundAnchor });
+      return { contentVersion, localAabb, localGroundAnchor };
     } catch {
       return null;
     }
@@ -493,9 +506,11 @@ export function createWorldAuthoringAuthority(
       }
       const data = decoded.value;
       const contentVersion = instanceContentVersion(fields, canvas);
-      const localAabb = (await prepareContent(fields, canvas))?.localAabb ?? null;
-      if (!localAabb) unknown = true;
-      records.set(data.instanceId, instanceRecord(node.id, data, contentVersion, localAabb));
+      const prepared = await prepareContent(fields, canvas);
+      const localAabb = prepared?.localAabb ?? null;
+      const localGroundAnchor = prepared?.localGroundAnchor ?? null;
+      if (!localAabb || !localGroundAnchor) unknown = true;
+      records.set(data.instanceId, instanceRecord(node.id, data, contentVersion, localAabb, localGroundAnchor));
     }
     return { records, unknown };
   }
@@ -520,7 +535,7 @@ export function createWorldAuthoringAuthority(
     if (!found) return { ok: false, code: "outside-scope", message: "导演区不存在" };
     const { records: instances, unknown } = await collectInstances(canvas);
     const cameras = collectCameras(canvas);
-    if (unknown) return { ok: false, code: "not-ready", message: "存在无法确定权威占地的模型" };
+    if (unknown) return { ok: false, code: "not-ready", message: "存在无法确定权威落地锚点的模型" };
 
     const writable: WorldObjectVersion[] = [];
     const readOnly: WorldObjectVersion[] = [];
@@ -582,7 +597,7 @@ export function createWorldAuthoringAuthority(
     if (!found) return { ok: false, code: "outside-scope", message: "2D 组不存在" };
     const { records: instances, unknown } = await collectInstances(canvas);
     const cameras = collectCameras(canvas);
-    if (unknown) return { ok: false, code: "not-ready", message: "存在无法确定权威占地的模型" };
+    if (unknown) return { ok: false, code: "not-ready", message: "存在无法确定权威落地锚点的模型" };
 
     const readOnly: WorldObjectVersion[] = [];
     const objects: WorldObjectAuthorityEntry[] = [];
@@ -693,11 +708,14 @@ export function createWorldAuthoringAuthority(
         const cached = cache.instances.get(target.instanceId);
         const localAabb = cached && cached.contentVersion === contentVersion
           ? cached.localAabb
-          : localAabbCache.get(contentVersion) ?? null;
+          : localAabbCache.get(contentVersion)?.localAabb ?? null;
+        const localGroundAnchor = cached && cached.contentVersion === contentVersion
+          ? cached.localGroundAnchor
+          : localAabbCache.get(contentVersion)?.localGroundAnchor ?? null;
         return {
           identity: target,
           version: instanceVersion(target.instanceId, contentVersion, transformVersion),
-          instance: { contentVersion, transformVersion, transform: decoded.value.transform, localAabb }
+          instance: { contentVersion, transformVersion, transform: decoded.value.transform, localAabb, localGroundAnchor }
         };
       }
       const decoded = decodeWorldCamera(fields.worldCamera);
@@ -713,21 +731,7 @@ export function createWorldAuthoringAuthority(
 
   function containmentOf(state: ObjectState, area: GroundAabb): WorldObjectAuthorityEntry["containment"] {
     if (state.instance) {
-      if (!state.instance.localAabb) return "unknown";
-      const bounds = instanceFootprint(state.instance.localAabb, state.instance.transform);
-      const result = classifyFootprint({
-        area,
-        footprint: {
-          status: "ready",
-          bounds,
-          contentVersion: state.instance.contentVersion,
-          transformVersion: state.instance.transformVersion
-        },
-        contentVersion: state.instance.contentVersion,
-        transformVersion: state.instance.transformVersion
-      });
-      if (result === "unknown") return "unknown";
-      return result === "complete" ? "writable" : result === "partial" ? "read-only" : "outside";
+      return containmentOfGeometry(state.instance.localAabb, state.instance.localGroundAnchor, state.instance.transform, area);
     }
     if (!state.camera) return "unknown";
     const result = classifyCameraPoint({ area, position: state.camera.position });

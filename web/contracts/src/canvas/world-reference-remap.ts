@@ -456,6 +456,20 @@ function remapWorldPayload(
           if (typeof instanceId !== "string") return instanceId;
           instanceTracks.push({ ...track, targetId: instanceId });
         }
+        const partTracks = [];
+        for (const track of compiled.ir.partTracks ?? []) {
+          if (!context.sourceInstanceIds.has(track.targetId)) {
+            return fail("binding-unavailable", {
+              sourceNodeId: context.sourceNodeId,
+              field: "animationScript.partTracks",
+              reference: { relation: "instance", id: track.targetId }
+            });
+          }
+          const instanceId = requireMappedId(context.instanceIds, track.targetId,
+            { relation: "instance", id: track.targetId }, context.sourceNodeId);
+          if (typeof instanceId !== "string") return instanceId;
+          partTracks.push({ ...track, targetId: instanceId });
+        }
         const cameraTracks = [];
         for (const track of compiled.ir.cameraTracks) {
           if (!context.cameraIds?.has(track.targetId)) {
@@ -470,7 +484,7 @@ function remapWorldPayload(
           if (typeof cameraId !== "string") return cameraId;
           cameraTracks.push({ ...track, targetId: cameraId });
         }
-        const script = serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks });
+        const script = serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks, ...(compiled.ir.partTracks ? { partTracks } : {}) });
         animationScript = createWorldAnimationScript({
           script,
           duration: animationScript.duration,
