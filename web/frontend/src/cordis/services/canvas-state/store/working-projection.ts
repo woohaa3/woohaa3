@@ -117,6 +117,9 @@ export class WorkingProjectionStore {
     baseRevision: number;
     submittedAt: string;
   }): { ok: true; batch: PendingBatch } | { ok: false; code: string; message: string } {
+    // 重连后用原 commandId 重发同一 payload 是幂等的：保留一个 pending 批次，不重复叠加。
+    const existing = this.pending.find(entry => entry.commandId === input.commandId);
+    if (existing) return { ok: true, batch: existing };
     const base = this.working ?? this.canonical;
     if (!base) {
       const rejection: LocalRejection = { commandId: input.commandId, code: "unknown-node", message: NO_CANVAS };

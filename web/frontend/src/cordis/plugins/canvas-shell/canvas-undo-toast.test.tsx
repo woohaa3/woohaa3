@@ -39,6 +39,8 @@ function service() {
   };
 }
 
+const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
 function mount(edit: ReturnType<typeof service>["edit"]) {
   const container = document.createElement("div");
   document.body.append(container);
@@ -53,6 +55,7 @@ describe("CanvasUndoToast", () => {
     const { container } = mount(edit);
     await act(async () => {
       await edit.record([{ type: "node.remove", nodeIds: ["a"] }], "删除作品");
+      await settle();
     });
     expect(container.querySelector("[data-testid=canvas-undo-toast]")).not.toBeNull();
     expect(container.textContent).toContain("删除作品");
@@ -67,6 +70,7 @@ describe("CanvasUndoToast", () => {
     const { container } = mount(edit);
     await act(async () => {
       await edit.record([{ type: "node.remove", nodeIds: ["a"] }], "删除作品");
+      await settle();
     });
     const close = container.querySelector("[aria-label=关闭撤销提示]")!;
     act(() => {
@@ -81,6 +85,7 @@ describe("CanvasUndoToast", () => {
     const { container } = mount(edit);
     await act(async () => {
       await edit.record([{ type: "node.update", nodeId: "a", position: { x: 50, y: 0 } }], "移动作品");
+      await settle();
     });
     expect(container.querySelector("[data-testid=canvas-undo-toast]")).toBeNull();
   });

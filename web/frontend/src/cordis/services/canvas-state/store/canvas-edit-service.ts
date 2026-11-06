@@ -8,16 +8,22 @@
  * 本模块只依赖注入的会话与选择读取，不直接触碰 DOM/Yjs，便于组件与单元测试。
  */
 import type { CanvasCommand, ServerCanvas } from "@woohaa3/contracts";
-import { applyCanvasCommands, decodeImageDirectorSceneReceipt, planCanvasEdit, type EditPlan, type ImageDirectorSceneReceipt } from "@woohaa3/contracts";
+import { applyCanvasCommands, decodeImageDirectorSceneReceipt, isCanvasCommandBatchSatisfied, planCanvasEdit, type EditPlan, type ImageDirectorSceneReceipt } from "@woohaa3/contracts";
 import type { CanvasRemoteService, CanvasSession } from "../../../contracts.js";
-import { EditJournal, type EditJournalSnapshot, type JournalEntry, type JournalPlannedEdit } from "./edit-journal.js";
+import { EditJournal, type EditJournalSnapshot, type JournalConnectionState, type JournalEntry, type JournalPendingEntry, type JournalPlannedEdit } from "./edit-journal.js";
 
 export type CanvasEditServiceOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   getContent?: () => import("@woohaa3/contracts").ContentContributionResolver | undefined;
   session: CanvasSession;
-  /** 当前规范画布（working projection 的 committed 部分）。 */
+  /** 当前规范画布（canonical）。 */
   getCanvas: () => ServerCanvas | null;
+  /**
+   * 当前 working projection（canonical + 已入队未结算效果）。入队时 forward/inverse
+   * 以它为规划基线，保证“创建后立即移动/撤销”看到正确的中间态。
+   * 省略时退回 canonical。
+   */
+  getWorkingCanvas?: () => ServerCanvas | null;
   /** 监听外部变化（可选）。 */
   onChange?: (snapshot: CanvasEditSnapshot) => void;
   generateCommandId?: () => string;
@@ -29,10 +35,13 @@ export type CanvasEditSnapshot = {
   canRedo: boolean;
   undoLabel: string | null;
   redoLabel: string | null;
+  /** 仅长操作（世界转换/导演区采纳）的独立互斥；不再阻断普通结构动作。 */
   busy: boolean;
   writable: boolean;
   blockedReason: string | null;
   size: number;
+  /** 尚未结算/等待对账/冲突的记录（每条独立状态）。 */
+  pending: readonly JournalPendingEntry[];
   /**
    * 最近一次可撤销动作的类型（`delete` 用于删除提示；change: 2026-10-09，任务 1.7）。
    * 及其条目 id，提示按钮据此绑定具体动作身份，避免误撤销后来动作。
@@ -42,7 +51,7 @@ export type CanvasEditSnapshot = {
 
 export type CanvasEditRecordResult =
   | { ok: true; entry: JournalEntry }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; code?: string };
 
 function equalJson(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -95,8 +104,41 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
   let conversionAbort: AbortController | null = null;
   const conversionIntents = new Map<string, { targets: string; intent: import("@woohaa3/contracts").WorldConversionCommitInput; settled: boolean }>();
 
+  /**
+   * 同步连接状态：只有 ready 才 drain；offline/宿主重连标为 interrupted（保留队列等待对账）；
+   * 权限只读标为 unavailable（新的持久化动作本来就会被 isWritable 拒绝）。
+   */
+  const readConnectionState = (): JournalConnectionState => {
+    const getStatus = options.session.getStatus;
+    if (typeof getStatus !== "function") return "ready";
+    let status: ReturnType<CanvasSession["getStatus"]>;
+    try {
+      status = getStatus.call(options.session);
+    } catch {
+      return "ready";
+    }
+    const remote = status.remote;
+    if (remote.readOnly) return "unavailable";
+    if (remote.reconnecting) return "interrupted";
+    if (remote.mode === "offline" || remote.phase === "offline") return "interrupted";
+    if (remote.phase !== "synced") return "interrupted";
+    return "ready";
+  };
+
+  const observedInCanonical = (edit: JournalPlannedEdit): boolean | null => {
+    const canvas = options.getCanvas();
+    if (!canvas) return null;
+    return isCanvasCommandBatchSatisfied(
+      canvas,
+      [{ type: "edit.apply", preconditions: edit.preconditions, operations: edit.operations }],
+      options.getContent?.()
+    );
+  };
+
   const journal = new EditJournal({
     isWritable: () => options.session.isWritable(),
+    connectionState: readConnectionState,
+    isEffectObserved: observedInCanonical,
     hasNetChange: (commandId) => {
       const handle = options.session.commandLifecycle()?.get(commandId);
       // handle 可能已被 prune；提交已 committed 才会到达这里，因此缺失视为已确认。
@@ -120,9 +162,11 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
         )
       };
     },
+    onChange: () => { publish(); },
     ...(options.generateCommandId ? { generateCommandId: options.generateCommandId } : {}),
     ...(options.now ? { now: options.now } : {})
   });
+  journal.notifyConnection(readConnectionState());
 
   const parameterAppliers = new Map<string, (values: Record<string, unknown>) => void>();
 
@@ -135,7 +179,6 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
   const computeSnapshot = (): CanvasEditSnapshot => {
     const base = journal.snapshot();
     const next = base.entries[base.undoIndex];
-    const redo = base.entries[base.undoIndex + 1];
     const lastAction = next
       ? {
           kind: (next.label.includes("删除") ? "delete" : "other") as "delete" | "other",
@@ -146,12 +189,13 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
     return {
       canUndo: base.canUndo,
       canRedo: base.canRedo,
-      undoLabel: next?.label ?? null,
-      redoLabel: redo?.label ?? null,
+      undoLabel: base.undoLabel ?? next?.label ?? null,
+      redoLabel: base.redoLabel ?? null,
       busy,
       writable: options.session.isWritable(),
       blockedReason: base.blockedReason,
       size: base.entries.length,
+      pending: base.pending,
       lastAction
     };
   };
@@ -172,8 +216,14 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
     options.onChange?.(value);
   };
 
+  // 连接状态变化时让 journal 停止/恢复 drain（断线不丢 working effect 与队列）。
+  // 必须放在 publish 初始化之后：会话订阅会同步回放当前状态。
+  if (typeof options.session.subscribe === "function") {
+    options.session.subscribe(() => { journal.notifyConnection(readConnectionState()); });
+  }
+
   const plan = (commands: readonly CanvasCommand[]): { ok: true } & EditPlan | { ok: false; reason: string } => {
-    const canvas = options.getCanvas();
+    const canvas = options.getWorkingCanvas?.() ?? options.getCanvas();
     if (!canvas) return { ok: false, reason: "画布尚未加载" };
     const planned = planCanvasEdit(canvas, commands, { lifecycle: options.lifecycle, content: options.getContent?.() });
     if (!planned.ok) return { ok: false, reason: planned.reason };
@@ -312,28 +362,23 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
     },
 
     async record(commands, label) {
-      if (busy) return { ok: false, reason: "正在结算上一次操作，请稍候" };
-      if (!options.session.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };
+      // 普通结构动作不再被长操作忙碌态或上一条命令的结算阻塞：本地校验通过即入队。
+      if (!options.session.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作", code: "not-writable" };
       const planned = plan(commands);
       if (!planned.ok) return { ok: false, reason: planned.reason };
-      busy = true;
+      const result = await journal.recordAndSubmit({
+        label,
+        forward: { preconditions: planned.forward.preconditions, operations: planned.forward.operations },
+        inverse: { preconditions: planned.inverse.preconditions, operations: planned.inverse.operations }
+      });
+      if (!result.ok) return result;
       publish();
-      try {
-        const result = await journal.recordAndSubmit({
-          label,
-          forward: { preconditions: planned.forward.preconditions, operations: planned.forward.operations },
-          inverse: { preconditions: planned.inverse.preconditions, operations: planned.inverse.operations }
-        });
-        if (!result.ok) return { ok: false, reason: result.reason };
-        return { ok: true, entry: result.entry };
-      } finally {
-        busy = false;
-        publish();
-      }
+      return { ok: true, entry: result.entry };
     },
 
     recordParameter(input) {
-      if (busy) return;
+      // pending 结构动作未确认时不插入参数记录（避免撤销顺序倒置）。
+      if (journal.snapshot().pending.length > 0) return;
       journal.recordParameter({
         label: input.label,
         nodeId: input.nodeId,
