@@ -7,16 +7,19 @@
  * （`image-parameters`）与这个 Provider 都从卡片读，所以「新增一个模型」= 加一张卡片，
  * 本文件不用动。
  *
- * 为什么目录仍然是**手写**而不是发现来的：DashScope 没有免鉴权的模型列表接口，所有管理面
- * 接口都要 Key，且返回的是全品类（含文本、向量、语音）的部署信息，按「生图」筛选仍要一张
- * 能力表才能出参数面板。所以卡片里的能力数字按官方文档登记，执行路径只有一条。
+ * 为什么目录仍然是**手写**而不是发现来的：百炼**有**模型列表接口
+ * （`GET /api/v1/models`，需 API Key，`capabilities=IG` 可只看生图），但它只返回 id、名称、
+ * 模态这类身份事实，给不出档位、官方像素表、参考图上限、有没有负向提示词——而这些才决定参数
+ * 面板长什么样。所以卡片里的能力数字按官方文档登记，`discovery.ts` 只用发现结果做对账
+ * （卡片登记的模型上游还在不在、有没有新模型没卡片），执行路径只有一条。
  *
  * 事实来源（2026-11-06 核对）：
  * - 生图总览 <https://help.aliyun.com/zh/model-studio/text-to-image>
- * - Qwen-Image 文生图 <https://help.aliyun.com/zh/model-studio/qwen-image-api>
- * - Qwen-Image 编辑 <https://help.aliyun.com/zh/model-studio/qwen-image-edit-api>
+ * - Qwen-Image 生图与编辑 API 参考
+ *   <https://help.aliyun.com/zh/model-studio/qwen-image-generation-and-editing-api-reference>
  * - 通义万相 <https://help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference>
  * - Z-Image <https://help.aliyun.com/zh/model-studio/z-image-api-reference>
+ * - 模型列表 <https://help.aliyun.com/zh/model-studio/models>（`GET /api/v1/models`）
  *
  * 只登记**生图**。任何模型的参数支持范围以卡片为准：卡片没保的开关不做成控件，避免把
  * 上游会 400 的组合暴露给用户。

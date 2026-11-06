@@ -26,15 +26,27 @@
 （Model Studio）是承载它们的通道，写在卡片的 `providerId` 上。同一个模型换走网关时，卡片与
 目录都不用动。
 
-卡片本身是**手写**的，不是发现来的：DashScope 没有免鉴权的模型列表接口
-（`/api/v1/models`、`/compatible-mode/v1/models` 都要 Key，且返回全品类部署信息），无法像
-`grsai` / `tokenhub` 那样在设置页刷新。事实来源：
+卡片的**能力事实是手写的**：百炼有模型列表接口（`GET /api/v1/models`，需 Key，
+`capabilities=IG` 可只看生图），但它只返回 id、名称、模态这类身份事实，给不出档位、官方像素表、
+参考图上限、有没有负向提示词与智能改写——那些才决定参数面板长什么样。所以设置页的「刷新」走
+`src/discovery.ts` 拉一次真实清单做**对账**（卡片登记的模型上游还在不在、有没有新模型没卡片），
+注册表仍以卡片为准：没有卡片的模型不会被注册，否则用户选中后会撞上「模型未登记」。
+
+事实来源：
 
 - 生图总览 <https://help.aliyun.com/zh/model-studio/text-to-image>
-- Qwen-Image 文生图 <https://help.aliyun.com/zh/model-studio/qwen-image-api>
-- Qwen-Image 编辑 <https://help.aliyun.com/zh/model-studio/qwen-image-edit-api>
+- 模型列表（`GET /api/v1/models`）<https://help.aliyun.com/zh/model-studio/models>
+- Qwen-Image 生图与编辑
+  <https://help.aliyun.com/zh/model-studio/qwen-image-generation-and-editing-api-reference>
+  （3.0 / 2.1 系列；2.0 系列仍看 <https://help.aliyun.com/zh/model-studio/qwen-image-api>）
 - 通义万相 <https://help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference>
 - Z-Image <https://help.aliyun.com/zh/model-studio/z-image-api-reference>
+
+## 地址：优先业务空间专属域名
+
+官方建议把请求迁到业务空间专属域名 `https://{业务空间ID}.{地域}.maas.aliyuncs.com`（北京与新加坡
+已上线，老公开域名仍可用）。所以配置里有 `workspaceId` + `region`：填了就拼专属域名，
+留空才用 `baseUrl`。没做「先试专属域名再退回老域名」——翻倍重试会把一次配置错误变成两次超时。
 
 新增模型 = 在契约层的卡片目录里加一张卡片（`src/catalog.ts` 不用动）；同时更新本文件的来源与
 `tests/schema.test.ts` 的档位完整性断言。

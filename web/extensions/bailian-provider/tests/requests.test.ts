@@ -139,6 +139,19 @@ describe("百炼请求", () => {
     expect(requests[0]?.body?.parameters).toMatchObject({ size: "1024*1536" });
   });
 
+  it("自适应比例时不发 size（官方语义：不指定 size 由模型推荐）", async () => {
+    const { provider, requests } = harness();
+    await provider.imageModel("qwen-image-3.0-pro").doGenerate?.({
+      prompt: "一只猫",
+      aspectRatio: "auto",
+      resolution: "2K"
+    } as never);
+    const parameters = requests[0]?.body?.parameters as Record<string, unknown>;
+    expect(parameters).toEqual({ watermark: false, prompt_extend: true });
+    // 发 size: "auto" 会被 DashScope 拒，必须整条省略。
+    expect(parameters).not.toHaveProperty("size");
+  });
+
   it("把 DashScope 的业务错误翻成人能读的原因", async () => {
     // 参数错误与审核失败都是 HTTP 400，业务原因只在 body 的 code/message 里。
     const { provider } = harness({

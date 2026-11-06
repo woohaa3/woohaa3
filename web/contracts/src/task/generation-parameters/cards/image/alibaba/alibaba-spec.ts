@@ -17,8 +17,10 @@
  *
  * 事实来源（2026-11-06 核对）：
  * - 生图总览 <https://help.aliyun.com/zh/model-studio/text-to-image>
- * - Qwen-Image 文生图 <https://help.aliyun.com/zh/model-studio/qwen-image-api>
- * - Qwen-Image 编辑 <https://help.aliyun.com/zh/model-studio/qwen-image-edit-api>
+ * - Qwen-Image 生图与编辑 API 参考
+ *   <https://help.aliyun.com/zh/model-studio/qwen-image-generation-and-editing-api-reference>
+ *   （3.0 / 2.1 系列；2.0 系列仍只在旧文生图页
+ *   <https://help.aliyun.com/zh/model-studio/qwen-image-api>）
  * - 通义万相 <https://help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference>
  * - Z-Image <https://help.aliyun.com/zh/model-studio/z-image-api-reference>
  */
@@ -125,6 +127,15 @@ export type AlibabaSizePreset = {
   resolutions: readonly string[];
   defaultAspectRatio: string;
   defaultResolution: string;
+  /**
+   * 是否提供「自适应」比例（`auto`）。
+   *
+   * 只有 Qwen-Image 全系成立：官方写明「不指定 `size` 时，模型根据提示词自动推荐分辨率」，
+   * 所以面板给一档自适应、请求里**省略** `size` 就是官方语义。万相与 Z-Image 的 `size` 虽
+   * 也是可选，但省略时退化成固定默认（万相是正方形，Z-Image 是 1024*1536），不是按提示词
+   * 推荐，所以它们不给这个选项——给了就是在骗用户。
+   */
+  supportsAdaptiveAspectRatio: boolean;
   /**
    * 比例 + 档位 → 像素 `size`（`宽*高`）。
    *

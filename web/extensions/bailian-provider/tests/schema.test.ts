@@ -17,7 +17,7 @@ describe("百炼参数面板", () => {
     expect(properties.prompt).toMatchObject({ type: "string", "x-component": "Input.TextArea" });
     expect(properties.aspectRatio).toMatchObject({ title: "比例", "x-pptask-control": "aspect-ratio" });
     expect(properties.resolution).toMatchObject({ title: "图片分辨率", "x-pptask-control": "resolution" });
-    // 百炼不支持「自适应画幅」：比例必须落到具体像素。
+    // qwen-image-2.0 不认「省略 size」的推荐语义，所以没有自适应档。
     expect(findAdaptiveOption(properties.aspectRatio?.enum)).toBeUndefined();
   });
 
@@ -42,7 +42,10 @@ describe("百炼参数面板", () => {
     expect(qwen20Properties.negativePrompt).toMatchObject({ "x-component": "Input.TextArea" });
     expect(qwen20Properties.promptExtend).toMatchObject({ "x-component": "Switch", default: true });
 
-    // 2.1 / 3.0 文档只给 prompt_extend，没有 negative_prompt。
+    // negative_prompt 只有 3.0 系列接受；2.1 只给 prompt_extend。
+    const qwen30 = findBailianModel("qwen-image-3.0-pro")!;
+    const qwen30Properties = bailianInputSchema(qwen30, inputSchemaOptions(qwen30)).properties as Record<string, unknown>;
+    expect(qwen30Properties).toHaveProperty("negativePrompt");
     const qwen21Properties = bailianInputSchema(qwen21, inputSchemaOptions(qwen21)).properties as Record<string, unknown>;
     expect(qwen21Properties).toHaveProperty("promptExtend");
     expect(qwen21Properties).not.toHaveProperty("negativePrompt");
@@ -51,6 +54,21 @@ describe("百炼参数面板", () => {
     const wanProperties = bailianInputSchema(wan, inputSchemaOptions(wan)).properties as Record<string, unknown>;
     expect(wanProperties).not.toHaveProperty("negativePrompt");
     expect(wanProperties).not.toHaveProperty("promptExtend");
+  });
+
+  it("只有 qwen-image 给自适应比例：省略 size 才等于交给模型", () => {
+    const adaptiveOf = (id: string) => {
+      const model = findBailianModel(id)!;
+      const properties = bailianInputSchema(model, inputSchemaOptions(model)).properties as Record<string, Record<string, unknown>>;
+      return findAdaptiveOption(properties.aspectRatio?.enum)?.["value"];
+    };
+    for (const id of ["qwen-image-3.0-pro", "qwen-image-2.1-pro", "qwen-image-2.1-turbo"]) {
+      expect(adaptiveOf(id), id).toBe("auto");
+    }
+    // 万相与 Z-Image 省略 size 只是退回固定默认，不给这一档。
+    for (const id of ["wan2.7-image-pro", "wan2.7-image", "z-image-turbo", "qwen-image-2.0-pro", "qwen-image-2.0"]) {
+      expect(adaptiveOf(id), id).toBeUndefined();
+    }
   });
 
   it("z-image 的智能改写默认关（开启会加价）", () => {

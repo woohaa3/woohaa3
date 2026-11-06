@@ -27,6 +27,7 @@ export const alibabaZImageTurbo = imageCard({
     resolutions: ["1K"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1K",
+    supportsAdaptiveAspectRatio: false,
     sizes: ALIBABA_Z_IMAGE_SIZES,
     fallbackSize: "1024*1536",
     supportsNegativePrompt: false,

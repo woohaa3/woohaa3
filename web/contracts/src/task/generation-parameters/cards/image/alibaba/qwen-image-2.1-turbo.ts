@@ -16,7 +16,7 @@ export const alibabaQwenImage21Turbo = imageCard({
   providerId: "bailian",
   vendor: "alibaba",
   providerModelId: "qwen-image-2.1-turbo",
-  docs: "https://help.aliyun.com/zh/model-studio/qwen-image-api",
+  docs: "https://help.aliyun.com/zh/model-studio/qwen-image-generation-and-editing-api-reference",
   note: "Qwen-Image 2.1：更快的同能力版本",
   keeps: ["prompt", "referencesImage", "aspectRatio", "resolution", "promptExtend"],
   alibaba: {
@@ -24,6 +24,7 @@ export const alibabaQwenImage21Turbo = imageCard({
     resolutions: ["2K"],
     defaultAspectRatio: "1:1",
     defaultResolution: "2K",
+    supportsAdaptiveAspectRatio: true,
     sizes: ALIBABA_QWEN_SIZES,
     fallbackSize: "2048*2048",
     supportsNegativePrompt: false,

@@ -24,6 +24,7 @@ export const alibabaWan27 = imageCard({
     resolutions: ["1K", "2K"],
     defaultAspectRatio: "1:1",
     defaultResolution: "2K",
+    supportsAdaptiveAspectRatio: false,
     sizes: ALIBABA_WAN_SIZES,
     fallbackSize: "2048*2048",
     supportsNegativePrompt: false,

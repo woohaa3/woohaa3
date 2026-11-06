@@ -61,8 +61,8 @@ export const ALIBABA_SIZE_PRESETS: readonly AlibabaSizePreset[] = ALIBABA_SPECS.
 /**
  * 按模型 id 精确匹配阿里模型；未命中返回 undefined。
  *
- * 不做前缀兜底：`qwen-image-*` 这类前缀横跨三代、参数能力不同（2.0 有负向提示词，2.1 / 3.0
- * 没有），按前缀挑一张就会给出另一个版本的值域。
+ * 不做前缀兜底：`qwen-image-*` 这类前缀横跨三代、参数能力不同（3.0 才接受 `negative_prompt`，
+ * 2.1 只给 `prompt_extend`，2.0 又是另一套像素表），按前缀挑一张就会给出另一个版本的值域。
  */
 export function alibabaSizePresetFor(modelId: string): AlibabaSizePreset | undefined {
   const normalized = modelId.trim().toLowerCase();

@@ -11,16 +11,42 @@ export const BAILIAN_PLUGIN_ID = "bailian-provider";
 export const BAILIAN_PROVIDER_ID = "bailian";
 
 /**
- * 北京地域的公开域名。新加坡站是 `https://dashscope-intl.aliyuncs.com`。
+ * 老公开域名（北京）。文档仍标注「现有域名可正常使用」，所以保留为缺省兜底。
  *
- * 两套 Key 不互通；控制台现在推荐工作空间域名
- * `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com`（新加坡 `ap-southeast-1`），
- * 所以地址必须可配。
+ * 新加坡站是 `https://dashscope-intl.aliyuncs.com`，两套 Key 不互通。
  */
 export const DEFAULT_BAILIAN_BASE_URL = "https://dashscope.aliyuncs.com";
 
+/**
+ * 业务空间专属域名的缺省地域（华北 2）。
+ *
+ * 百炼为北京 / 新加坡推出了 `https://{WorkspaceId}.{region}.maas.aliyuncs.com`，官方建议迁移：
+ * 推理性能与稳定性更好。域名里带业务空间 ID，没法当常量写死，只能由配置拼出来。
+ */
+export const DEFAULT_BAILIAN_REGION = "cn-beijing";
+
+/**
+ * 有业务空间专属域名的地域（模型列表页逐个给出的 maas 主机）。
+ *
+ * 美国（弗吉尼亚）不在其中：那一站仍然是 `https://dashscope-us.aliyuncs.com`，没有
+ * `{WorkspaceId}.us-east-1.maas.aliyuncs.com` 这种主机。所以美国用户不填业务空间 ID，
+ * 直接填 API 地址。
+ */
+export const BAILIAN_REGIONS = [
+  "cn-beijing",
+  "ap-southeast-1",
+  "cn-hongkong",
+  "ap-northeast-1",
+  "eu-central-1"
+] as const;
+
+export type BailianRegion = (typeof BAILIAN_REGIONS)[number];
+
 /** 同步生图接口：文生图与图片编辑共用。 */
 export const BAILIAN_IMAGE_PATH = "/api/v1/services/aigc/multimodal-generation/generation";
+
+/** 模型列表（`GET`，`capabilities=IG` 只取生图）。 */
+export const BAILIAN_MODELS_PATH = "/api/v1/models";
 
 export const BAILIAN_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: BAILIAN_PLUGIN_ID,
@@ -38,4 +64,20 @@ export const BAILIAN_PLUGIN_METADATA: ApplicationExtensionMetadata = {
 /** 去掉末尾斜杠，后续路径自己带版本。 */
 export function bailianOrigin(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
+}
+
+/**
+ * 业务空间 ID → 专属域名。
+ *
+ * 只接受「像业务空间 ID」的值（字母数字与 `-`），避免把整条 URL 或空串拼进主机名后发出一个
+ * 必然失败的请求；不合法时返回 undefined，调用方回退到 `baseUrl`。
+ */
+export function bailianWorkspaceOrigin(
+  workspaceId: string | undefined,
+  region: string = DEFAULT_BAILIAN_REGION
+): string | undefined {
+  const id = (workspaceId ?? "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(id)) return undefined;
+  const zone = (BAILIAN_REGIONS as readonly string[]).includes(region) ? region : DEFAULT_BAILIAN_REGION;
+  return `https://${id}.${zone}.maas.aliyuncs.com`;
 }
