@@ -35,6 +35,8 @@ export const MODEL_TYPE_PRESETS: Readonly<Record<PresetModelType, ModelTypePrese
       "referencesImage",
       "aspectRatio",
       "resolution",
+      "negativePrompt",
+      "promptExtend",
       "quality",
       "n",
       "background",
@@ -49,6 +51,7 @@ export const MODEL_TYPE_PRESETS: Readonly<Record<PresetModelType, ModelTypePrese
         values: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"]
       },
       resolution: { title: "图片分辨率", default: "2K", values: ["1K", "1.5K", "2K", "4K"] },
+      promptExtend: { default: true },
       quality: { default: "auto", values: ["auto", "low", "medium", "high"] },
       n: { default: 1, maximum: 10 },
       background: { default: "auto", values: ["auto", "transparent", "opaque"] },

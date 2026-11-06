@@ -109,7 +109,7 @@ function writeSettings(base: string, values: Record<string, unknown>, headers: R
 }
 
 /** 全部自带 Provider 的稳定集合（providerId 排序后）。新增 Provider 时同步这里。 */
-const ALL_PROVIDER_IDS = ["ark", "cephalon", "fal", "grsai", "replicate", "runninghub", "tokenhub"].sort();
+const ALL_PROVIDER_IDS = ["ark", "bailian", "cephalon", "fal", "grsai", "replicate", "runninghub", "tokenhub"].sort();
 
 describe("Provider 密钥在自己的配置段里", () => {
   it("每个 Provider 都声明 apiKey 密钥项；写入后 RunningHub 模型进入目录，清除后撤出", async () => {

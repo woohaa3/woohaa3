@@ -62,6 +62,12 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节（路径由插件自己用
 `ctx.gateway.route` 注册并鉴权）；插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
 
+**上游没有模型列表接口时不要声明 `modelRefresh`**：目录改成源码里的手写表，并在表头注释与
+`assets/README.md` 里写清每个数字来自哪一页官方文档。[bailian-provider](bailian-provider) 是这种形态：
+DashScope 的 `/api/v1/models` 与 OpenAI 兼容 `/compatible-mode/v1/models` 都要 Key、且返回全品类部署信息，
+所以模型与「比例 × 档位的像素表 / 参考图上限 / 参数支持范围」都写在
+[src/catalog.ts](bailian-provider/src/catalog.ts)，换模型靠升级扩展。
+
 **Provider 自身示例**：[tokenhub-provider](tokenhub-provider) 是模板（`discovery` / `routes` / `provider` /
 `backend` 四段）。[cephalon-provider](cephalon-provider)（端脑云）是**发现驱动 + 固定平台地址**的变体：只声明
 `providers.cephalon.apiKey`，origin `https://cephalon.cloud` 写在 `src/shared.ts` 里且**不提供 `baseUrl` 配置项**
@@ -69,6 +75,11 @@ Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情
 `model_type`（`language` / `picture` / `video`，其余跳过），发现失败时保留上一次成功目录。视频是平台私有的异步任务协议
 （请求头 `Model-Name` + PascalCase 的 `Prompt` / `FileInfos` / `OutputConfig`），所以它在 `routes.ts` 里自己翻译，
 不走通用 OpenAI 形状；平台没有取消端点，模型定义声明 `cancel: "unsupported"`。
+
+[bailian-provider](bailian-provider)（阿里云百炼 / DashScope）是**单模态 + 手写目录 + 同步接口**的变体：
+`modelTypes: ["image"]`，文生图与参考图编辑共用一个同步接口，参考图直接放进
+`input.messages[].content[].image`（要公网 URL，所以没有 `uploadReference`），`status` 只能抛错
+（没有可查询的远端任务），模型定义声明 `cancel: "local"`。
 
 ## 前端入口与 metadata
 

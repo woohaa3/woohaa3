@@ -6,6 +6,11 @@
  *
  * 加控件前先确认它真的是跨模型的语义：只服务一个 Provider 的键应该留在那个 Provider 里，
  * 不进这里——否则集合会退化成各厂商字段的并集，前端又要开始按 key 名猜。
+ *
+ * `negativePrompt` / `promptExtend` 是**跨厂商概念**（负向提示词、提示词扩写），目前只有百炼
+ * 真的支持；不支持的模型不保这两个键，所以它们不会出现在那些模型的面板上。反过来，把一个
+ * 「只有一家用、且是这家独有名词」的字段（如万相的 `thinking_mode`）放进这里就会破坏上面那句
+ * 话——那种字段属于厂商自己的投影，不属于语义表。
  */
 import { aspectRatioField, resolutionField, semanticSelectField } from "../parameter-schema.js";
 
@@ -146,6 +151,36 @@ export const PARAMETER_CONTROLS: readonly ParameterControlSpec[] = [
       "x-component": "Select",
       "x-pptask-control": "quality",
       enum: enumValues(options).map((value) => selectOption(value, value))
+    })
+  },
+  {
+    // 负向提示词目前只有百炼（Qwen-Image 2.0）接受，其余厂商没有对应字段。
+    // 仍然放进语义表而不是百炼扩展：它是**跨厂商的概念**（Stable Diffusion 一类接口普遍有），
+    // 面板与请求翻译才是厂商的事。不支持它的模型不保这个键，因此不会出现在面板上。
+    key: "negativePrompt",
+    group: "图片",
+    label: "文本域",
+    control: "textarea",
+    build: () => ({
+      type: "string",
+      title: "负向提示词",
+      default: "",
+      "x-component": "Input.TextArea",
+      "x-component-props": { rows: 2 }
+    })
+  },
+  {
+    // 智能改写（提示词扩写）：百炼的 `prompt_extend`、即梦的 `prompt_extend` 一类。
+    // 默认值由卡片给（Z-Image 默认关，因为开启会增加费用），这里只兜 `true`。
+    key: "promptExtend",
+    group: "图片",
+    label: "布尔",
+    control: "boolean",
+    build: (options) => ({
+      type: "boolean",
+      title: "智能改写提示词",
+      default: options.default !== false,
+      "x-component": "Switch"
     })
   },
   {

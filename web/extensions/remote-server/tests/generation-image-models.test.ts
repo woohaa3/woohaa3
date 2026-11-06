@@ -103,6 +103,30 @@ describe("withModelFamily · 图像", () => {
     const original = serverGenericModel("some-vendor-image-v2", "image");
     expect(withModelFamily(original)).toBe(original);
   });
+
+  it("百炼型号按卡片精确命中：负向提示词与智能改写来自卡片", () => {
+    // 网关目录里出现百炼型号时，schema 由卡片给出（不是服务端那份裸 size）。
+    const model = withModelFamily(serverGenericModel("qwen-image-2.0-pro", "image"));
+    const properties = model.inputSchema!.properties as Record<string, Record<string, unknown>>;
+
+    expect(properties.size).toBeUndefined();
+    expect(Object.keys(properties).sort()).toEqual([
+      "aspectRatio",
+      "negativePrompt",
+      "prompt",
+      "promptExtend",
+      "referencesImage",
+      "resolution"
+    ]);
+    // 参考图上限来自卡片：2.0 系列一次最多三张。
+    expect(properties.referencesImage!.maxItems).toBe(3);
+    expect(model.defaultInput).toMatchObject({ aspectRatio: "1:1", resolution: "2K" });
+  });
+
+  it("百炼的卡片匹配是精确的：未登记的同名系列保持服务端 schema", () => {
+    const original = serverGenericModel("qwen-image-9.9-pro", "image");
+    expect(withModelFamily(original)).toBe(original);
+  });
 });
 
 describe("withModelFamily · 视频", () => {
@@ -206,6 +230,38 @@ describe("translateParameters", () => {
     expect(translateParameters("some-vendor-image", "image", { size: "1024x1024" })).toEqual({
       size: "1024x1024"
     });
+  });
+
+  it("图像：百炼型号落成 `宽*高` 与 watermark，负向提示词按上限截断", () => {
+    const fields = translateParameters("qwen-image-2.0-pro", "image", {
+      aspectRatio: "16:9",
+      resolution: "2K",
+      negativePrompt: "低清",
+      promptExtend: false
+    });
+    expect(fields).toEqual({
+      size: "2688*1536",
+      watermark: false,
+      negative_prompt: "低清",
+      prompt_extend: false
+    });
+    // 万相不认这两个开关：面板不会给，旧草稿带来的也不能发出去。
+    expect(
+      translateParameters("wan2.7-image-pro", "image", {
+        aspectRatio: "1:1",
+        resolution: "4K",
+        negativePrompt: "低清",
+        promptExtend: true
+      })
+    ).toEqual({ size: "4096*4096", watermark: false });
+  });
+
+  it("图像：百炼带参考图时档位收窄（万相 Pro 的 4K 只给文生图）", () => {
+    // `translateParameters` 只看参数、不看参考图数量：收窄由百炼插件在拼请求体时做，
+    // 网关链路没有参考图信息，所以这里按 4K 下发，与 `imageRequestFields` 的默认一致。
+    expect(
+      translateParameters("wan2.7-image-pro", "image", { aspectRatio: "16:9", resolution: "4K" })
+    ).toEqual({ size: "4096*2304", watermark: false });
   });
 
   it("音频：outputFormat 落成上游的 response_format，语速越界被夹住", () => {

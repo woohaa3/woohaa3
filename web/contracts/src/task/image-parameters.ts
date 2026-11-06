@@ -41,8 +41,13 @@ import {
   seedreamFamilySchema,
   seedreamRequestFields
 } from './generation-parameters/cards/image/ark/seedream-projection.js';
+import {
+  alibabaFamilySchema,
+  alibabaRequestFields,
+  alibabaSizePresetFor
+} from './generation-parameters/cards/image/alibaba/index.js';
 
-export type ImageParameterFamily = 'gemini' | 'gpt-image' | 'seedream' | 'generic';
+export type ImageParameterFamily = 'gemini' | 'gpt-image' | 'seedream' | 'alibaba' | 'generic';
 
 /** 画幅 + 分辨率 → 像素 `size`（GPT Image 只接受像素串）。 */
 const GPT_IMAGE_SIZES: Record<string, Record<string, string>> = {
@@ -81,6 +86,10 @@ const GPT_IMAGE_25_QUALITIES: readonly SelectOption[] = [
  */
 export function imageParameterFamily(modelId: string): ImageParameterFamily {
   if (seedreamSizePresetFor(modelId)) return 'seedream';
+  // 百炼的 id 是精确登记的（`qwen-image-2.0-pro` 一类），所以按卡片命中判断，不做关键字猜。
+  // 放在关键字判断之前：卡片命中是「我们知道这个模型」，比「名字里像谁」更可信；
+  // 未登记的 `qwen-image-9.9` 一类仍会落到 generic，不会被当成某个已知版本。
+  if (alibabaSizePresetFor(modelId)) return 'alibaba';
   const id = modelId.toLowerCase();
   if (id.includes('gpt-image')) return 'gpt-image';
   if (/gemini|nano.?banana|banana/.test(id)) return 'gemini';
@@ -228,18 +237,34 @@ export function imageFamilyParameters(modelId: string): {
       ...seedreamFamilySchema(spec),
     };
   }
+  if (family === 'alibaba') {
+    // 阿里同样是卡片投影（`cards/image/alibaba/alibaba-projection`）：负向提示词、智能改写、
+    // 档位与像素表都在卡片里，这里只按 id 找到模型并把投影接进目录形状。
+    const spec = alibabaSizePresetFor(modelId)!;
+    return {
+      maxReferenceImages: spec.maxReferenceImages,
+      schemaVersion: 'alibaba-image/v1',
+      ...alibabaFamilySchema(spec),
+    };
+  }
   return null;
 }
 
-/** 把面板参数翻译成 LiteLLM `/images/generations|edits` 的请求字段。 */
+/**
+ * 把面板参数翻译成 LiteLLM `/images/generations|edits` 的请求字段。
+ *
+ * 返回类型含 `boolean`：百炼的 `prompt_extend` / `watermark` 是布尔字段，而 OpenAI 兼容链路
+ * 只用到字符串与数字。由各家族自己决定下发哪些键，调用方按上游转述即可。
+ */
 export function imageRequestFields(
   modelId: string,
   input: Record<string, unknown>,
-): Record<string, string | number> {
+): Record<string, string | number | boolean> {
   const family = imageParameterFamily(modelId);
   if (family === 'gemini') return geminiImageFields(modelId, input);
   if (family === 'gpt-image') return gptImageImageFields(modelId, input);
   if (family === 'seedream') return seedreamRequestFields(seedreamSizePresetFor(modelId), input);
+  if (family === 'alibaba') return alibabaRequestFields(alibabaSizePresetFor(modelId), input);
   return genericImageFields(modelId, input);
 }
 
