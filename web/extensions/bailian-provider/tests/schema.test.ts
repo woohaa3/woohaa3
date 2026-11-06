@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { findAdaptiveOption } from "@woohaa3/contracts";
+import { bailianFamilySchema, findAdaptiveOption } from "@woohaa3/contracts";
 import { BAILIAN_IMAGE_MODELS, findBailianModel } from "../src/catalog.js";
 import { bailianDefaultInput, bailianInputSchema, describeBailianModel, inputSchemaOptions } from "../src/schema.js";
+import { bailianModelDefinitions } from "../src/backend.js";
 
 const qwen20 = findBailianModel("qwen-image-2.0")!;
 const qwen21 = findBailianModel("qwen-image-2.1-pro")!;
@@ -73,6 +74,37 @@ describe("百炼参数面板", () => {
       const defaults = bailianDefaultInput(model, options);
       expect(Object.keys(defaults).sort()).toEqual(Object.keys(schema.properties as Record<string, unknown>).sort());
       expect(describeBailianModel(model)).toMatchObject({ title: model.title, promptRequirement: "required" });
+    }
+  });
+
+  it("注册给宿主的模型定义与面板同源（不许两边各写一份 schema）", () => {
+    // 设置页/任务面板读的是 `bailianModelDefinitions()`，家族读的是卡片投影；
+    // 两者必须由同一个 `describeBailianModel` 派生，否则面板与请求体会悄悄分叉。
+    const definitions = bailianModelDefinitions();
+    expect(definitions.map((definition) => definition.providerModelId))
+      .toEqual(BAILIAN_IMAGE_MODELS.map((model) => model.id));
+    for (const definition of definitions) {
+      const model = findBailianModel(definition.providerModelId)!;
+      const expected = describeBailianModel(model);
+      expect(definition.title, model.id).toBe(expected.title);
+      expect(definition.inputSchema, model.id).toEqual(expected.inputSchema);
+      expect(definition.defaultInput, model.id).toEqual(expected.defaultInput);
+      expect(definition.promptRequirement).toBe("required");
+      // 同步接口没有远端 id 可取消。
+      expect(definition.cancel).toBe("local");
+    }
+  });
+
+  it("面板的语义控件就是卡片投影给出的那份", () => {
+    for (const model of BAILIAN_IMAGE_MODELS) {
+      const projected = bailianFamilySchema(model);
+      const properties = bailianInputSchema(model, inputSchemaOptions(model)).properties as Record<string, unknown>;
+      for (const [key, schema] of Object.entries(projected.properties)) {
+        expect(properties[key], `${model.id} ${key}`).toEqual(schema);
+      }
+      for (const [key, value] of Object.entries(projected.defaults)) {
+        expect(bailianDefaultInput(model, inputSchemaOptions(model))[key], `${model.id} ${key}`).toBe(value);
+      }
     }
   });
 

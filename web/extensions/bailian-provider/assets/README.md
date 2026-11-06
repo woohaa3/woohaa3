@@ -17,8 +17,13 @@
 
 ## 模型目录的来源
 
-`src/catalog.ts` 的模型与参数能力是**手写**的，不是发现来的：DashScope 没有免鉴权的模型列表
-接口（`/api/v1/models`、`/compatible-mode/v1/models` 都要 Key，且返回全品类部署信息），无法像
+`src/catalog.ts` 不自己登记模型：它把 `@woohaa3/contracts` 里
+`task/generation-parameters/cards/image/bailian/` 的卡片读成执行路径的形状。比例、档位、官方
+像素表、带参考图时的档位上限、负向提示词与智能改写都只写在卡片里，参数家族（`image-parameters`）
+读的是同一份。
+
+卡片本身是**手写**的，不是发现来的：DashScope 没有免鉴权的模型列表接口
+（`/api/v1/models`、`/compatible-mode/v1/models` 都要 Key，且返回全品类部署信息），无法像
 `grsai` / `tokenhub` 那样在设置页刷新。事实来源：
 
 - 生图总览 <https://help.aliyun.com/zh/model-studio/text-to-image>
@@ -27,7 +32,8 @@
 - 通义万相 <https://help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference>
 - Z-Image <https://help.aliyun.com/zh/model-studio/z-image-api-reference>
 
-新增模型时同时更新这张目录与本文件，并补一条 `tests/schema.test.ts` 的档位完整性断言。
+新增模型 = 在契约层的卡片目录里加一张卡片（`src/catalog.ts` 不用动）；同时更新本文件的来源与
+`tests/schema.test.ts` 的档位完整性断言。
 
 ## 为什么面板没有「数量」
 

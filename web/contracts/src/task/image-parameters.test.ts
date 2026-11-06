@@ -17,6 +17,15 @@ describe("imageParameterFamily", () => {
     expect(imageParameterFamily("seedream-4-0-250828")).toBe("seedream");
   });
 
+  it("百炼模型按卡片精确命中（不做关键字猜）", () => {
+    expect(imageParameterFamily("qwen-image-2.0-pro")).toBe("bailian");
+    expect(imageParameterFamily("wan2.7-image-pro")).toBe("bailian");
+    expect(imageParameterFamily("z-image-turbo")).toBe("bailian");
+    // 未登记的百炼同名系列不吃家族兜底：猜错代际会给出另一个版本的参数能力。
+    expect(imageParameterFamily("qwen-image-9.9-pro")).toBe("generic");
+    expect(imageParameterFamily("wan9.9-image")).toBe("generic");
+  });
+
   it("gemini / gpt-image / generic 分类", () => {
     expect(imageParameterFamily("gemini-3.1-flash-image")).toBe("gemini");
     expect(imageParameterFamily("nano-banana-pro")).toBe("gemini");
@@ -73,6 +82,48 @@ describe("imageFamilyParameters", () => {
 
   it("generic 返回 null（调用方保持既有 OpenAI schema）", () => {
     expect(imageFamilyParameters("some-unknown-model")).toBeNull();
+  });
+
+  it("bailian：比例 + 分辨率，负向提示词与智能改写按模型给", () => {
+    const qwen20 = imageFamilyParameters("qwen-image-2.0-pro")!;
+    expect(qwen20.schemaVersion).toBe("bailian-image/v1");
+    expect(Object.keys(qwen20.properties).sort())
+      .toEqual(["aspectRatio", "negativePrompt", "promptExtend", "resolution"]);
+    expect(qwen20.defaults).toEqual({
+      aspectRatio: "1:1",
+      resolution: "2K",
+      negativePrompt: "",
+      promptExtend: true,
+    });
+    // 百炼不接受「自适应画幅」：比例必须落到具体像素。
+    const aspectRatio = qwen20.properties.aspectRatio as { enum: Array<{ value: string }> };
+    expect(aspectRatio.enum.map((entry) => entry.value))
+      .toEqual(["1:1", "16:9", "9:16", "4:3", "3:4"]);
+
+    // 2.1 / 3.0 没有 negative_prompt（文档只给 prompt_extend）。
+    for (const id of ["qwen-image-3.0-pro", "qwen-image-2.1-pro", "qwen-image-2.1-turbo"]) {
+      expect(imageFamilyParameters(id)!.properties).not.toHaveProperty("negativePrompt");
+      expect(imageFamilyParameters(id)!.properties).toHaveProperty("promptExtend");
+    }
+    // 万相两个都没有（提质走 thinking_mode，不暴露）。
+    const wan = imageFamilyParameters("wan2.7-image-pro")!;
+    expect(wan.properties).not.toHaveProperty("negativePrompt");
+    expect(wan.properties).not.toHaveProperty("promptExtend");
+    expect(wan.defaults).toEqual({ aspectRatio: "1:1", resolution: "2K" });
+  });
+
+  it("bailian：档位随模型收窄，z-image 的智能改写默认关", () => {
+    const tiers = (id: string) =>
+      (imageFamilyParameters(id)!.properties.resolution as { enum: Array<{ value: string }> })
+        .enum.map((entry) => entry.value);
+    expect(tiers("wan2.7-image-pro")).toEqual(["1K", "2K", "4K"]);
+    expect(tiers("wan2.7-image")).toEqual(["1K", "2K"]);
+    expect(tiers("z-image-turbo")).toEqual(["1K"]);
+
+    // Z-Image 只能文生图：参考图上限 0，卡片不保 referencesImage。
+    const zImage = imageFamilyParameters("z-image-turbo")!;
+    expect(zImage.maxReferenceImages).toBe(0);
+    expect(zImage.defaults.promptExtend).toBe(false);
   });
 });
 
@@ -132,6 +183,33 @@ describe("imageRequestFields", () => {
     // 已经是 png 时不改动。
     expect(imageRequestFields("gpt-image-1", { background: "transparent", outputFormat: "png" }).output_format)
       .toBe("png");
+  });
+
+  it("bailian 发 `宽*高`（星号），并固定 watermark=false", () => {
+    expect(imageRequestFields("qwen-image-2.0-pro", { aspectRatio: "16:9", resolution: "2K" }))
+      .toEqual({ size: "2688*1536", watermark: false, prompt_extend: true });
+    // 负向提示词按模型上限截断；智能改写按模型默认值补齐。
+    expect(imageRequestFields("qwen-image-2.0-pro", {
+      aspectRatio: "1:1",
+      resolution: "2K",
+      negativePrompt: "低清",
+      promptExtend: false,
+    })).toEqual({ size: "2048*2048", watermark: false, negative_prompt: "低清", prompt_extend: false });
+    // 万相不认这两个开关：即使旧草稿里带着也不能发出去。
+    expect(imageRequestFields("wan2.7-image-pro", {
+      aspectRatio: "1:1",
+      resolution: "4K",
+      negativePrompt: "低清",
+      promptExtend: true,
+    })).toEqual({ size: "4096*4096", watermark: false });
+  });
+
+  it("bailian 未知比例/档位回落到模型自己的 fallbackSize", () => {
+    // 百炼不认档位串，所以任何组合都必须落到具体像素。
+    expect(imageRequestFields("qwen-image-2.0-pro", { aspectRatio: "21:9", resolution: "2K" }))
+      .toEqual({ size: "2048*2048", watermark: false, prompt_extend: true });
+    expect(imageRequestFields("z-image-turbo", { aspectRatio: "2:3", resolution: "1K" }))
+      .toEqual({ size: "1024*1536", watermark: false, prompt_extend: false });
   });
 
   it("gpt-image 比例+档位查成像素值；自适应发 auto", () => {

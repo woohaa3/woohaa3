@@ -1,19 +1,21 @@
 /**
  * 百炼生图的参数面板与请求体拼装。
  *
- * 面板只给「提示词 + 参考图 + 比例 + 分辨率」四件，其余按模型能力追加：
- * - `negative_prompt` 只有 Qwen-Image 2.0 系列接受；
- * - `prompt_extend` 只有 Qwen 系列与 Z-Image 接受（万相要提质得开 `thinking_mode`，不暴露）；
- * - 比例 + 分辨率查表得到像素 `size`：上游要求 `宽*高`，不认画幅字符串。
+ * 面板的**语义控件**来自契约层的卡片投影（`bailianFamilySchema`）：比例、分辨率、负向提示词、
+ * 智能改写都是卡片声明的事实，这里不重写一份。本文件只补两件百炼特有的东西：
  *
- * 请求体形状固定为单轮多模态：
- * `{ model, input: { messages: [{ role: "user", content: [{ image }..., { text }] }] }, parameters }`。
- * 参考图必须排在文本前（文档的多图编辑示例就是这个顺序），且 `text` 只能有一个。
+ * 1. 参考图的键名是 `urls`（DashScope 的字段叫 `input.messages[].content[].image`，任务服务
+ *    的 `buildInput` 只认 schema 里写的键名，所以这里用 `urls` 而不是 `referencesImage`）；
+ * 2. 请求体形状固定为单轮多模态：
+ *    `{ model, input: { messages: [{ role: "user", content: [{ image }..., { text }] }] }, parameters }`。
+ *    参考图必须排在文本前（文档的多图编辑示例就是这个顺序），且 `text` 只能有一个。
+ *
+ * `parameters` 由 `bailianRequestFields` 给出（`宽*高` 的 `size`、`watermark: false`、可选的
+ * `negative_prompt` / `prompt_extend`），带参考图时的档位收窄也在那里。
  */
 import {
-  aspectRatioField,
-  resolutionField,
-  resolvePixelSize,
+  bailianFamilySchema,
+  bailianRequestFields,
   type GenerationModelDescription
 } from "@woohaa3/contracts";
 import type { BailianModelSpec } from "./catalog.js";
@@ -46,44 +48,22 @@ export function inputSchemaOptions(model: BailianModelSpec): BailianInputSchemaO
   };
 }
 
+/**
+ * 面板 schema：卡片投影的语义控件 + 提示词 + 参考图。
+ *
+ * 投影已经覆盖比例 / 分辨率 / 负向提示词 / 智能改写，这里不再判断「哪个模型有什么」，
+ * 只把 `urls` 换成百炼的键名并补上提示词。
+ */
 export function bailianInputSchema(
   model: BailianModelSpec,
   options: BailianInputSchemaOptions
 ): Record<string, unknown> {
+  const projected = bailianFamilySchema(model);
   const properties: Record<string, unknown> = {
     prompt: promptSchema(),
     ...(options.withReferenceImages ? { urls: referenceSchema(model.maxReferenceImages) } : {}),
-    aspectRatio: aspectRatioField({
-      ratios: model.aspectRatios,
-      fallback: model.defaultAspectRatio,
-      title: "比例"
-    }),
-    ...(model.resolutions.length > 0
-      ? {
-          resolution: resolutionField({
-            tiers: model.resolutions,
-            fallback: model.defaultResolution,
-            title: "图片分辨率"
-          })
-        }
-      : {})
+    ...projected.properties
   };
-  if (options.withNegativePrompt) {
-    properties.negativePrompt = {
-      type: "string",
-      title: "负向提示词",
-      "x-component": "Input.TextArea",
-      "x-component-props": { rows: 2 }
-    };
-  }
-  if (options.withPromptExtend) {
-    properties.promptExtend = {
-      type: "boolean",
-      title: "智能改写提示词",
-      default: options.promptExtendDefault,
-      "x-component": "Switch"
-    };
-  }
   return { type: "object", required: ["prompt"], properties };
 }
 
@@ -94,18 +74,15 @@ export function bailianDefaultInput(
   return {
     prompt: "",
     ...(options.withReferenceImages ? { urls: [] } : {}),
-    aspectRatio: model.defaultAspectRatio,
-    ...(model.resolutions.length > 0 ? { resolution: model.defaultResolution } : {}),
-    ...(options.withNegativePrompt ? { negativePrompt: "" } : {}),
-    ...(options.withPromptExtend ? { promptExtend: options.promptExtendDefault } : {})
+    ...bailianFamilySchema(model).defaults
   };
 }
 
 /**
  * 组装 DashScope 同步生图请求体。
  *
- * `watermark` 固定发 false：上游默认就是 false，显式发出去是为了让「无水印」成为契约而不是
- * 随上游默认值漂移的行为。
+ * `watermark` / 档位收窄 / 两个开关都在 `bailianRequestFields` 里，本函数只负责把提示词与
+ * 参考图排成 DashScope 要求的多模态 `content` 顺序。
  */
 export function buildBailianImageBody(
   model: BailianModelSpec,
@@ -118,23 +95,10 @@ export function buildBailianImageBody(
     ...references.map((url) => ({ image: url })),
     { text: prompt }
   ];
-  const parameters: Record<string, unknown> = {
-    size: resolveSize(model, raw, references.length > 0),
-    watermark: false
-  };
-  if (model.supportsNegativePrompt) {
-    const negative = stringValue(raw.negativePrompt ?? raw.negative_prompt);
-    if (negative !== "") parameters.negative_prompt = negative.slice(0, model.negativePromptLimit);
-  }
-  if (model.supportsPromptExtend) {
-    parameters.prompt_extend = typeof raw.promptExtend === "boolean"
-      ? raw.promptExtend
-      : model.promptExtendDefault;
-  }
   return {
     model: model.id,
     input: { messages: [{ role: "user", content }] },
-    parameters
+    parameters: bailianRequestFields(model, raw, { hasReferences: references.length > 0 })
   };
 }
 
@@ -173,32 +137,8 @@ export function bailianErrorMessage(payload: unknown): string {
   return code === "" ? message : `${message}（${code}）`;
 }
 
-/**
- * 比例 + 分辨率 → 像素 `size`。
- *
- * 带参考图时先降到模型声明的上限档（万相 Pro 的 4K 只对纯文生图开放）。
- */
-function resolveSize(model: BailianModelSpec, raw: Record<string, unknown>, hasReferences: boolean): string {
-  const aspectRatio = raw.aspectRatio ?? raw.aspect_ratio;
-  const resolution = raw.resolution;
-  if (!hasReferences || model.referenceResolutionCap === undefined) {
-    return resolvePixelSize({ table: model.sizes, aspectRatio, resolution, fallback: model.fallbackSize });
-  }
-  const capped = resolvePixelSize({
-    table: model.sizes,
-    aspectRatio,
-    resolution: model.referenceResolutionCap,
-    fallback: model.fallbackSize
-  });
-  return capped;
-}
-
 function promptText(raw: Record<string, unknown>): string {
   const value = raw.prompt ?? raw.text;
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
