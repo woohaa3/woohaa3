@@ -244,8 +244,11 @@ export interface CanvasRuntimeService {
    * 由持有动画播放会话的插件提供；传 null 表示无活动动画节点。实现负责触发一次 scene flush。
    */
   setAnimationPlayback(playback: import("@woohaa3/contracts").BevyAnimationPlayback | null): void;
-  /** Selected director playback, browser-local and independent of assistant execution. */
+  /** Active director playback, independent of selection and assistant execution. */
   worldAnimationState(): WorldAnimationState;
+  /** Remembered director playheads, including unselected areas; excludes capture overrides. */
+  worldAnimationPlayheads(): ReadonlyMap<string, number>;
+  worldAnimationLoop(nodeId: string): boolean;
   subscribeWorldAnimation(listener: () => void): () => void;
   playWorldAnimation(): void;
   pauseWorldAnimation(): void;

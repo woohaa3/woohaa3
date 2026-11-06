@@ -441,7 +441,7 @@ export function planWorldCameraMoveWithAnimationParts(
       ? area.data.sceneArea
       : area.area) as Record<string, unknown>;
     const nextArea: Record<string, unknown> = { ...rawArea };
-    if (cameraTracks.length === 0 && area.ir.instanceTracks.length === 0) {
+    if (cameraTracks.length === 0 && area.ir.instanceTracks.length === 0 && (area.ir.partTracks?.length ?? 0) === 0 && (area.ir.walkTracks?.length ?? 0) === 0) {
       delete nextArea.animationScript;
     } else {
       nextArea.animationScript = createWorldAnimationScript({

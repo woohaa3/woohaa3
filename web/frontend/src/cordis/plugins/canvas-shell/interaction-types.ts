@@ -285,6 +285,9 @@ export type InteractionControllerOptions = {
   getAnimationPlayback?: () => import("@woohaa3/contracts").BevyAnimationPlayback | null;
   /** 导演区整对象动画播放头（秒）；缺省不采样。 */
   getWorldAnimationTimes?: () => ReadonlyMap<string, number>;
+  getWorldAnimationPlayheads?: () => ReadonlyMap<string, number>;
+  getWorldAnimationPlayer?: () => { nodeId: string | null; playing: boolean };
+  getWorldAnimationLoop?: (nodeId: string) => boolean;
   /**
    * 公共聚焦过渡进度
    * （change: 2026-10-12-unify-node-editors-and-focus-transitions，design D6/D7）。

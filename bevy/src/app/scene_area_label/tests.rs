@@ -112,6 +112,15 @@ fn real_font_glyphs_are_3d_ground_meshes_with_stable_size_across_raster_steps() 
 
 #[test]
 fn ground_label_reuses_entities_and_releases_assets_when_area_disappears() {
+    check_retained_labels(false);
+}
+
+#[test]
+fn scene_area_player_shares_nameplate_layers_depth_and_asset_lifetime() {
+    check_retained_labels(true);
+}
+
+fn check_retained_labels(with_player: bool) {
     let mut app = App::new();
     app.init_resource::<Assets<Font>>()
         .init_resource::<Assets<Image>>()
@@ -140,7 +149,16 @@ fn ground_label_reuses_entities_and_releases_assets_when_area_disappears() {
     app.world_mut()
         .run_system_once(bevy::text::load_font_assets_into_font_collection)
         .unwrap();
-    app.world_mut().resource_mut::<CurrentScene>().0.scene_areas = vec![area()];
+    let mut scope = area();
+    if with_player {
+        scope.playback = Some(crate::protocol::SceneAreaPlayback {
+            time: 1.0,
+            duration: 4.0,
+            playing: false,
+            r#loop: true,
+        });
+    }
+    app.world_mut().resource_mut::<CurrentScene>().0.scene_areas = vec![scope];
     app.update();
     let world = app.world_mut();
     let visuals: Vec<_> = world
@@ -148,7 +166,29 @@ fn ground_label_reuses_entities_and_releases_assets_when_area_disappears() {
         .iter(world)
         .map(|(entity, material)| (entity, material.0.clone()))
         .collect();
-    assert!(visuals.len() > 1, "must include actual font glyph meshes");
+    assert!(
+        visuals.len() >= if with_player { 4 } else { 2 },
+        "must include ground bodies and real glyphs"
+    );
+    for (entity, _) in &visuals {
+        assert_eq!(
+            *world.get::<RenderLayers>(*entity).unwrap(),
+            RenderLayers::from_layers(&[
+                crate::world_camera::WORLD_CAMERA_GIZMO_LAYER,
+                crate::world_camera_preview::EDITOR_GUIDE_LAYER
+            ])
+        );
+        let mesh = world
+            .resource::<Assets<Mesh>>()
+            .get(&world.get::<Mesh3d>(*entity).unwrap().0)
+            .unwrap();
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("ground mesh");
+        };
+        assert!(points.iter().all(|p| p[1] == GROUND_SCOPE_HEIGHT));
+    }
     let (entity, material) = visuals
         .iter()
         .find(|(_, material)| {

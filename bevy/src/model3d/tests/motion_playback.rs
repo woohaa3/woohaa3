@@ -469,3 +469,33 @@ fn opacity_material_instances_are_reused_and_released_with_the_root() {
         assert!(world.get_entity(entity).is_err(), "根实体应已销毁");
     }
 }
+
+#[test]
+fn part_rotations_preserve_hierarchy_instances_and_reset_without_rebuilding() {
+    let snapshot = rig_snapshot();
+    let resources = resource_table([("woohaa-model-scene-ir-v2:sig-anim".to_owned(), snapshot)]);
+    let mut scene = base_scene();
+    let q = Quat::from_rotation_z(0.7);
+    scene.nodes[0].model.as_mut().unwrap().part_rotations = Some(std::collections::HashMap::from([("root".into(), q.to_array())]));
+    let mut other = scene.nodes[0].clone();
+    other.id = "other".into();
+    other.model.as_mut().unwrap().part_rotations = Some(Default::default());
+    scene.nodes.push(other);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    let parent = entity_of(&world, "root");
+    let child = entity_of(&world, "hand");
+    run_motion(&mut world, &scene);
+    assert!(world.get::<Transform>(parent).unwrap().rotation.abs_diff_eq(q, 1e-5));
+    assert_eq!(world.get::<ChildOf>(child).unwrap().parent(), parent);
+    let models = world.resource::<ModelVisuals>();
+    let other_parent = models.roots["other"].part_entities["root"];
+    assert!(world.get::<Transform>(other_parent).unwrap().rotation.abs_diff_eq(Quat::IDENTITY, 1e-5));
+    assert!(!models.roots["anim"].batched);
+    scene.nodes[0].model.as_mut().unwrap().part_rotations = Some(Default::default());
+    run_sync(&mut world, &scene, &resources);
+    run_motion(&mut world, &scene);
+    assert_eq!(entity_of(&world, "root"), parent);
+    assert!(world.get::<Transform>(parent).unwrap().rotation.abs_diff_eq(Quat::IDENTITY, 1e-5));
+    assert!((world.get::<Transform>(entity_of(&world, "body")).unwrap().rotation.y - 0.5_f32.sin()).abs() < 1e-4);
+}

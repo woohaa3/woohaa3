@@ -99,6 +99,12 @@ export function createAgentSupervisorHost({
 	const readToken = () => {
 		if (token) return token;
 		fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+        if(process.platform!=="win32") {
+            const directory=fs.lstatSync(runtimeDir);
+            if(!directory.isDirectory() || directory.isSymbolicLink() || directory.uid!==process.getuid() || (directory.mode & 0o077)!==0) {
+                throw new Error("Agent runtime directory must be a private directory owned by the current user");
+            }
+        }
 		token = fs.existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8").trim() : "";
 		if (!token) {
 			token = crypto.randomBytes(32).toString("hex");

@@ -1,3 +1,5 @@
+import { modelGroundAnchorLocal } from "../world-animation-spatial.js";
+import { storedHumanoidRig } from "../humanoid-rig.js";
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
@@ -110,6 +112,9 @@ export type CanvasRenderSceneInput = {
   sceneAreaPreviews?: ReadonlyMap<string, import("../shared-world.js").GroundAabb>;
   /** 导演区整体动画播放头（秒）；缺省不采样。 */
   sceneAnimationTimes?: ReadonlyMap<string, number>;
+  sceneAnimationPlayheads?: ReadonlyMap<string, number>;
+  sceneAnimationPlayer?: { nodeId: string | null; playing: boolean };
+  sceneAnimationLoop?: (nodeId: string) => boolean;
   /** 上传中的幽灵节点（只渲染，不进规范状态）；与真实节点同 id 时自动跳过。 */
   ghostNodes?: readonly GhostRenderNode[];
   /**
@@ -186,8 +191,10 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   const animationSamples = new Map<string, SampledInstanceMotion>();
   const cameraAnimationSamples = new Map<string, SampledCameraMotion>();
   if (input.sceneAnimationTimes) {
-    // A shared instance can belong to several areas: the selected director owns its preview.
-    const animationNodes = [...canvas.document.nodes].sort((a, b) => Number(selectedIds.has(a.id)) - Number(selectedIds.has(b.id)));
+    // The playing director retains its preview when selection is cleared.
+    const priority = (id: string) => input.sceneAnimationPlayer?.playing && input.sceneAnimationPlayer.nodeId === id
+      ? 2 : Number(selectedIds.has(id));
+    const animationNodes = [...canvas.document.nodes].sort((a, b) => priority(a.id) - priority(b.id));
     for (const node of animationNodes) {
       const area = decodeSceneAreaData(nodeData[node.id]?.sceneArea);
       const script = area.ok ? area.value.animationScript : undefined;
@@ -338,10 +345,14 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       ...(capabilities.appearance?.cardLabel ? { cardLabel: capabilities.appearance.cardLabel } : {})
     };
     if (capabilities.modelPreparation && resource) {
+      const storedRig = data?.modelRig == null ? null : storedHumanoidRig(data.modelRig);
+      const groundAnchorLocal = projectedWorld ? modelGroundAnchorLocal(resource.ops, storedRig?.ok ? storedRig.value : null) : null;
       rendered.model = {
+        ...(groundAnchorLocal ? { groundAnchorLocal } : {}),
         sceneVersion: resource.sceneVersion,
         resourceKey: resource.resourceKey,
         signature: resource.signature,
+        ...(animated?.partRotations ? { partRotations: animated.partRotations } : {}),
         ...(placement ? { placement } : {})
       };
     }
@@ -404,12 +415,19 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         ? `导演区 ${sceneAreaOrdinals.get(node.id) ?? 1}`
         : resolved.displayName;
       const preview = input.sceneAreaPreviews?.get(node.id);
-      if (!preview) return [{ nodeId: node.id, title, bounds: area.value.bounds }];
+      const script = area.value.animationScript;
+      const playback = script && script.duration > 0 ? {
+        time: Math.max(0, Math.min(script.duration, (input.sceneAnimationPlayheads ?? input.sceneAnimationTimes)?.get(node.id) ?? 0)),
+        duration: script.duration,
+        playing: input.sceneAnimationPlayer?.nodeId === node.id && input.sceneAnimationPlayer.playing,
+        loop: input.sceneAnimationLoop?.(node.id) ?? script.loop
+      } : undefined;
+      if (!preview) return [{ nodeId: node.id, title, bounds: area.value.bounds, ...(playback ? { playback } : {}) }];
       if (![preview.min.u, preview.min.v, preview.max.u, preview.max.v].every(Number.isFinite)
         || preview.min.u > preview.max.u || preview.min.v > preview.max.v) {
         throw new Error("Invalid scene area bounds preview");
       }
-      return [{ nodeId: node.id, title, bounds: { min: { ...preview.min }, max: { ...preview.max } } }];
+      return [{ nodeId: node.id, title, bounds: { min: { ...preview.min }, max: { ...preview.max } }, ...(playback ? { playback } : {}) }];
     }),
     edges,
     selection: {

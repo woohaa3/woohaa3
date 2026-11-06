@@ -89,3 +89,21 @@ test("a Windows batch shim actually starts through the resolved target", { skip:
 	assert.equal(stdout, "ready");
 	fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("runtime directory leaves room for the longest stdio endpoint on macOS", async () => {
+ const { agentRuntimeDirectory } = await import("./agent-runtime-endpoints.mjs");
+ const root="/Users/developer/Documents/UGit/tx_game/woohaa3/client";
+ const runtimeDir=agentRuntimeDirectory({root,platform:"darwin",tempDir:"/var/folders/aa/"+"b".repeat(60)+"/T",uid:501});
+ assert.ok(Buffer.byteLength(stdioEndpoint({platform:"darwin",key:"agent",stdioDir:path.join(runtimeDir,"stdio")}))<104);
+ assert.notEqual(runtimeDir,path.join(root,".local","agent-runtime"));
+ assert.notEqual(runtimeDir,agentRuntimeDirectory({root:root+"-other",platform:"darwin",tempDir:"/tmp",uid:501}));
+});
+
+test("runtime directory keeps short checkouts and Windows paths unchanged", async()=>{
+ const {agentRuntimeDirectory}=await import("./agent-runtime-endpoints.mjs");
+ assert.equal(agentRuntimeDirectory({root:"/r",platform:"darwin"}),path.join("/r",".local","agent-runtime"));
+ const root="a".repeat(180);
+ assert.equal(agentRuntimeDirectory({root,platform:"win32"}),path.join(root,".local","agent-runtime"));
+ const dir=agentRuntimeDirectory({root:"/"+"路径".repeat(25),platform:"darwin",tempDir:"/tmp",uid:501});
+ assert.ok(Buffer.byteLength(stdioEndpoint({platform:"darwin",key:"a",stdioDir:path.join(dir,"stdio")}))<104);
+});

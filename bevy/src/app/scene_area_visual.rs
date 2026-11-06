@@ -19,8 +19,8 @@ struct AreaExecution {
     materials: Vec<Handle<StandardMaterial>>,
 }
 struct AreaVisual {
-    // Each of four edges can split into two pieces around the nameplate, plus the fill.
-    entities: [Entity; 9],
+    // Two ground capsules can split each edge into three pieces, plus the fill.
+    entities: [Entity; 13],
     border: Handle<StandardMaterial>,
     fill: Handle<StandardMaterial>,
     execution: Option<AreaExecution>,
@@ -108,11 +108,11 @@ pub(super) fn sync_scene_areas(
                 let entities = std::array::from_fn(|i| {
                     let mut entity = commands.spawn((
                         Mesh3d(cube.clone()),
-                        MeshMaterial3d(if i == 8 { fill.clone() } else { border.clone() }),
+                        MeshMaterial3d(if i == 12 { fill.clone() } else { border.clone() }),
                         RenderLayers::from_layers(&[crate::world_camera::WORLD_CAMERA_GIZMO_LAYER, crate::world_camera_preview::EDITOR_GUIDE_LAYER]),
                         NotShadowCaster,
                     ));
-                    if i == 8 {
+                    if i == 12 {
                         entity.insert(SceneAreaFill);
                     } else {
                         entity.insert(SceneAreaLine);
@@ -140,10 +140,7 @@ pub(super) fn sync_scene_areas(
             let zoom = scene.0.viewport.zoom.max(0.01);
             // Match the current ground projection rather than assuming a fixed camera pitch.
             let width = ground_stroke_width(style.width, zoom);
-            let label = layout::scene_area_label_geometry_for_zoom(area, scene.0.viewport.zoom);
-            let contour = label.as_ref().map(layout::scene_area_label_outline);
-            // Include the cuboid footprint and the compensated nameplate border.
-            let padding = projected_stroke_padding(width) + label.as_ref().map_or(0.0, |g| (g.scale() - 1.0) * 0.5);
+            let contours = scope_label_contours(area, scene.0.viewport.zoom);
             for (side, (a, b)) in [
                 (Vec2::new(x0, z0), Vec2::new(x1, z0)),
                 (Vec2::new(x0, z1), Vec2::new(x1, z1)),
@@ -153,8 +150,8 @@ pub(super) fn sync_scene_areas(
             .into_iter()
             .enumerate()
             {
-                let pieces = edge_outside_nameplate(a, b, contour.as_deref(), padding);
-                for slot in 0..2 {
+                let pieces = edge_outside_labels(a, b, &contours, width);
+                for slot in 0..3 {
                     let entity = visual.entities[side + slot * 4];
                     let Some(&(start, end)) = pieces.get(slot) else {
                         commands.entity(entity).insert(Visibility::Hidden);
@@ -177,7 +174,7 @@ pub(super) fn sync_scene_areas(
                     ));
                 }
             }
-            commands.entity(visual.entities[8]).insert((
+            commands.entity(visual.entities[12]).insert((
                 Transform::from_xyz((x0 + x1) / 2.0, 0.01, (z0 + z1) / 2.0).with_scale(Vec3::new(
                     x1 - x0,
                     0.001,
@@ -247,8 +244,8 @@ fn sync_execution(
                 })
             })
             .collect();
-        // Each trail slice can cross a corner and the nameplate can split a segment in two.
-        let entities = (0..4 * (crate::scope_visual::EXECUTION_TRAIL_STEPS + 4))
+        // Trail slices can cross corners and either ground capsule.
+        let entities = (0..4 * (crate::scope_visual::EXECUTION_TRAIL_STEPS + 8))
             .map(|_| {
                 commands
                     .spawn((
@@ -289,13 +286,11 @@ fn sync_execution(
         Vec2::new(x0 as f32, z1 as f32),
     ];
     let width = ground_stroke_width(3.0, zoom);
-    let label = layout::scene_area_label_geometry_for_zoom(area, zoom);
-    let contour = label.as_ref().map(layout::scene_area_label_outline);
-    let padding = projected_stroke_padding(width) + label.as_ref().map_or(0.0, |g| (g.scale() - 1.0) * 0.5);
+    let contours = scope_label_contours(area, zoom);
     let mut count = 0;
     for segment in crate::scope_visual::execution_trail(&path, seconds) {
         for (start, end) in
-            edge_outside_nameplate(segment.start, segment.end, contour.as_deref(), padding)
+            edge_outside_labels(segment.start, segment.end, &contours, width)
         {
             let Some(entity) = execution.entities.get(count) else {
                 break;
@@ -318,6 +313,24 @@ fn sync_execution(
     for entity in &execution.entities[count..] {
         commands.entity(*entity).insert(Visibility::Hidden);
     }
+}
+
+/// The outline and execution trail both leave room for the name and playback capsule.
+fn scope_label_contours(area: &crate::protocol::SceneArea, zoom: f32) -> Vec<(Vec<Vec2>, f32)> {
+    [layout::scene_area_label_geometry_for_zoom(area, zoom),
+     crate::canvas_query::scene_area_player::geometry(area, zoom)]
+        .into_iter().flatten()
+        .map(|g| (layout::scene_area_label_outline(&g), ((g.scale() - 1.0) * 0.5).max(0.0)))
+        .collect()
+}
+
+fn edge_outside_labels(a: Vec2, b: Vec2, contours: &[(Vec<Vec2>, f32)], width: f32) -> Vec<(Vec2, Vec2)> {
+    let mut pieces = vec![(a, b)];
+    for (contour, border_padding) in contours {
+        let padding = projected_stroke_padding(width) + border_padding;
+        pieces = pieces.into_iter().flat_map(|(a,b)| edge_outside_nameplate(a,b,Some(contour),padding)).collect();
+    }
+    pieces
 }
 
 /// Clip an actual ground edge against the shared convex nameplate contour.
@@ -497,6 +510,52 @@ mod tests {
                 }
                 if zoom == 1.0 {
                     assert_eq!(count, 5);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scene_area_edges_and_execution_trails_leave_both_ground_capsules_clear() {
+        let area: crate::protocol::SceneArea = serde_json::from_value(serde_json::json!({
+            "nodeId":"area", "bounds":{"min":{"u":0,"v":0},"max":{"u":3,"v":3}},
+            "playback":{"time":1,"duration":4,"playing":true,"loop":false}
+        })).unwrap();
+        let path = [Vec2::new(0.0,0.0), Vec2::new(192.0,0.0),
+                    Vec2::new(192.0,-192.0), Vec2::new(0.0,-192.0)];
+        let rotation = crate::isometric_grid::view_rotation();
+        for zoom in [0.1,0.25,1.0,8.0,12.0] {
+            let contours = scope_label_contours(&area, zoom);
+            assert_eq!(contours.len(),2);
+            for pixels in [1.25,1.5,2.0,3.0] {
+                let width = ground_stroke_width(pixels,zoom);
+                let mut segments = Vec::new();
+                for i in 0..4 {
+                    let pieces = edge_outside_labels(path[i],path[(i+1)%4],&contours,width);
+                    assert!(pieces.len() <= 3, "retained edge pool must fit all pieces");
+                    segments.extend(pieces);
+                }
+                for seconds in [0.1,0.9,1.8,3.1] {
+                    let trail: Vec<_> = crate::scope_visual::execution_trail(&path,seconds).into_iter()
+                        .flat_map(|segment| edge_outside_labels(segment.start,segment.end,&contours,width)).collect();
+                    assert!(trail.len() <= 4*(crate::scope_visual::EXECUTION_TRAIL_STEPS+8));
+                    segments.extend(trail);
+                }
+                for (start,end) in segments {
+                    for t in [0.0,0.5,1.0] {
+                        for x in [-0.5,0.5] { for z in [-0.5,0.5] {
+                            let p = start.lerp(end,t) + Vec2::new(x,z)*width;
+                            let projected = rotation*Vec3::new(p.x,0.0,p.y);
+                            let point = Vec2::new(projected.x,-projected.y);
+                            for (contour,_) in &contours {
+                                let inside = (0..contour.len()).all(|i| {
+                                    let normal = (contour[(i+1)%contour.len()]-contour[i]).normalize().perp();
+                                    normal.dot(point-contour[i]) >= -0.499
+                                });
+                                assert!(!inside,"scope line enters a ground capsule: zoom={zoom}, pixels={pixels}");
+                            }
+                        } }
+                    }
                 }
             }
         }

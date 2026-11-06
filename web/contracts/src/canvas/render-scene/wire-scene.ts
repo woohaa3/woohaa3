@@ -319,7 +319,8 @@ export type CanvasRenderScene = {
   /** Live assistant edits on scope boundaries; presentation only. */
   executingScopes?: string[];
   worldCameraEdit?: { nodeId: string; camera: import("../shared-world.js").WorldCameraData; showHelpers?: boolean };
-  sceneAreas?: Array<{ nodeId: string; title?: string; bounds: { min: { u: number; v: number }; max: { u: number; v: number } } }>;
+  sceneAreas?: Array<{ nodeId: string; title?: string; bounds: { min: { u: number; v: number }; max: { u: number; v: number } };
+    playback?: { time: number; duration: number; playing: boolean; loop: boolean } }>;
   version: typeof CANVAS_RENDER_SCENE_VERSION;
   /**
    * 文档身份（画布 id）。

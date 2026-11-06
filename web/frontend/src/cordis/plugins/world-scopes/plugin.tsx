@@ -13,7 +13,7 @@ export { ScopeContext } from "./presentation.js";
 
 export function worldScopesExtension(canvasId: string | undefined): Plugin.Function<void> {
   return definePlugin((ctx: Context) => {
-    // 导演区不再提供选中后的右侧权限/占用面板；只保留单一胶囊时间轴。
+    // 动画时间轴常驻右下地面边，选中时高亮；不再在执行面板旁挂第二个播放器。
     const remove = ctx.slots.register("canvas.overlay", {
       id: WORLD_SCOPES_PLUGIN_ID, owner: WORLD_SCOPES_PLUGIN_ID, priority: 25,
       render: () => <SceneAreaTimeline ctx={ctx} canvasId={canvasId} />

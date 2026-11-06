@@ -1,5 +1,7 @@
 import { expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "../domain/index.js";
+import { prepareModelResource } from "../prepared-model.js";
+import { createWorldAnimationScript } from "../world-animation-script.js";
 import type { WorldAnimationScript } from "../world-animation-script.js";
 import { buildCanvasRenderScene, renderSceneFingerprint } from "./scene-builder.js";
 
@@ -260,4 +262,69 @@ it("samples each director at its own playhead without modifying canonical transf
   const selected = buildCanvasRenderScene({ canvas, selection: { nodes: ["area"] },
     sceneAnimationTimes: new Map([["area", 1], ["area-b", 3]]) });
   expect(selected.nodes.find(node => node.id === "model")!.sharedWorldInstance!.transform.scale).toBe(2);
+  const playing = buildCanvasRenderScene({canvas, selection:{nodes:[]},
+    sceneAnimationTimes:new Map([["area",1],["area-b",3]]),sceneAnimationPlayer:{nodeId:"area",playing:true}});
+  expect(playing.nodes.find(node => node.id === "model")!.sharedWorldInstance!.transform.scale).toBe(2);
+  expect(playing.sceneAreas![0]!.playback).toMatchObject({time:1,playing:true});
+});
+
+it("projects ground player state separately from capture sampling and invalidates controls", () => {
+  const canvas = fixture();
+  const area = canvas.nodeData.area!.sceneArea as Record<string, unknown>;
+  area.animationScript = {
+    script: 'motion.instance.tween("instance-main", { property: "scale", startTime: 0, endTime: 4, from: [1], to: [2], easing: "linear" });',
+    scriptLanguage: "javascript", scriptVersion: "woohaa-world-animation-js-v2", revision: 1,
+    sourceHash: "player-state", duration: 4, loop: false
+  } satisfies WorldAnimationScript;
+  const input = { canvas, sceneAnimationTimes: new Map([["area", 3]]),
+    sceneAnimationPlayheads: new Map([["area", 1]]), sceneAnimationPlayer: {nodeId:"area",playing:true},
+    sceneAnimationLoop: () => true };
+  const playing = buildCanvasRenderScene(input);
+  expect(playing.sceneAreas![0]!.playback).toEqual({time:1,duration:4,playing:true,loop:true});
+  expect(playing.nodes.find(node => node.id === "model")!.sharedWorldInstance!.transform.scale).toBe(1.75);
+  const paused = buildCanvasRenderScene({...input,sceneAnimationPlayer:{nodeId:null,playing:false}});
+  expect(renderSceneFingerprint(paused)).not.toBe(renderSceneFingerprint(playing));
+  const preview = buildCanvasRenderScene({...input,sceneAreaPreviews:new Map([["area", {min:{u:0,v:0},max:{u:5,v:5}}]])});
+  expect(preview.sceneAreas![0]!.playback).toEqual(playing.sceneAreas![0]!.playback);
+});
+
+it("projects local joint poses without rebuilding model resources or moving the instance", () => {
+  const canvas = fixture();
+  const area = canvas.nodeData.area!.sceneArea as unknown as import("../shared-world.js").SceneAreaData;
+  area.animationScript = createWorldAnimationScript({
+    script: 'motion.part.tween("instance-main", "LeftUpperLeg", {property:"rotation",startTime:0,endTime:2,from:[-30,0,0],to:[30,0,0]});',
+    duration: 2, loop: true
+  });
+  const resource = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: [] });
+  const render = (time: number) => buildCanvasRenderScene({ canvas, modelResources: new Map([["model", resource]]), sceneAnimationTimes: new Map([["area", time]]) });
+  const start = render(0), end = render(2);
+  const a = start.nodes.find(n => n.id === "model")!, b = end.nodes.find(n => n.id === "model")!;
+  expect(a.model?.partRotations?.LeftUpperLeg[0]).toBeLessThan(0);
+  expect(b.model?.partRotations?.LeftUpperLeg[0]).toBeGreaterThan(0);
+  expect(a.model?.resourceKey).toBe(b.model?.resourceKey);
+  expect(a.sharedWorldInstance).toEqual(b.sharedWorldInstance);
+  expect(renderSceneFingerprint(start)).not.toBe(renderSceneFingerprint(end));
+  expect(buildCanvasRenderScene({canvas,modelResources:new Map([["model",resource]])}).nodes.find(n => n.id === "model")!.model?.partRotations).toBeUndefined();
+});
+
+it("lets the selected director's empty pre-roll pose clear another area's joints", () => {
+  const canvas = fixture();
+  const first = canvas.nodeData.area!.sceneArea as unknown as import("../shared-world.js").SceneAreaData;
+  first.animationScript = createWorldAnimationScript({ script: 'motion.part.tween("instance-main","joint",{property:"rotation",startTime:0,endTime:2,from:[30,0,0],to:[60,0,0]});',duration:2,loop:false });
+  canvas.document.nodes.push({id:"selected-area",type:"scene-area",position:{x:0,y:0}});
+  canvas.nodeData["selected-area"] = {sceneArea: {...first,areaId:"area-second",animationScript:createWorldAnimationScript({script:'motion.part.tween("instance-main","joint",{property:"rotation",startTime:1,endTime:2,from:[0,0,0],to:[-60,0,0]});',duration:2,loop:false})}} as unknown as typeof canvas.nodeData[string];
+  const resource = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: [] });
+  const scene = buildCanvasRenderScene({canvas,modelResources:new Map([["model",resource]]),selection:{nodes:["selected-area"]},sceneAnimationTimes:new Map([["area",0],["selected-area",0]])});
+  expect(scene.nodes.find(n=>n.id === "model")?.model?.partRotations).toEqual({});
+});
+
+it("projects the stable geometry ground anchor and omits unknown geometry", () => {
+  const canvas = fixture();
+  const resource = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: [
+    { t: "box", id: "body", parent: null, position: [2, 1, 3], rotation: [0, 0, 0], scale: [1, 1, 1], size: [2, 4, 2], color: "#ffffff", material: null }
+  ] });
+  const scene = buildCanvasRenderScene({ canvas, modelResources: new Map([["model", resource]]) });
+  expect(scene.nodes.find(n => n.id === "model")?.model?.groundAnchorLocal).toEqual([2, -1, 3]);
+  const unknown = prepareModelResource({ sceneVersion: resource.sceneVersion, ops: [] });
+  expect(buildCanvasRenderScene({canvas,modelResources:new Map([["model",unknown]])}).nodes.find(n => n.id === "model")?.model?.groundAnchorLocal).toBeUndefined();
 });

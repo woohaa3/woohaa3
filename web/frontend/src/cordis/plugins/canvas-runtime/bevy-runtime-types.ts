@@ -124,6 +124,7 @@ export type BevyModule = {
  * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
  */
 export type PointHit =
+  | { kind: "scene-area-playback"; nodeId: string; control: "play" | "loop" | "track" | "body"; track: [number, number, number, number] }
   | { kind: "model-preview"; nodeId: string }
   | { kind: "node"; nodeId: string }
   | { kind: "history"; nodeId: string }

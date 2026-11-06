@@ -14,6 +14,11 @@ use serde::Serialize;
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum PointHit {
+    SceneAreaPlayback {
+        node_id: String,
+        control: String,
+        track: [f32; 4],
+    },
     AggregateHandle {
         direction: String,
     },
@@ -115,4 +120,3 @@ pub(crate) struct DropTargetQueryResult {
     pub(crate) generation: u32,
     pub(crate) target_node_id: Option<String>,
 }
-

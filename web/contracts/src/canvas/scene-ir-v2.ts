@@ -46,7 +46,7 @@ export {
 export { validateModelSceneIrV2 } from "./scene-ir-v2/validator.js";
 
 // AABB/extent/signature 与确定性颜色归一化。
-export { v2SceneAabb, v2SceneExtent, v2ExtentFromAabb, v2SceneSignature } from "./scene-ir-v2/bounds.js";
+export { v2ShapeLocalBounds, v2ShapeLocalTransform, v2SceneAabb, v2SceneExtent, v2ExtentFromAabb, v2SceneSignature } from "./scene-ir-v2/bounds.js";
 
 // 模型规模统计（点数/面数/对象数，模型聚焦信息面板与 MCP 统计工具共用）。
 export {

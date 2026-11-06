@@ -102,7 +102,9 @@ describe("world copy reference remapping", () => {
       script: [
         'motion.instance.tween("instance-1", { property: "position", startTime: 0, endTime: 5, from: [1, 2, 3], to: [4, 5, 6], easing: "easeOut" });',
         'motion.instance.tween("instance-1", { property: "rotation", startTime: 0, endTime: 5, from: [0, 0, 0], to: [0, 90, 0], easing: "linear" });',
-        'motion.instance.tween("instance-2", { property: "scale", startTime: 0, endTime: 5, from: [1], to: [2], easing: "linear" });'
+        'motion.instance.tween("instance-2", { property: "scale", startTime: 0, endTime: 5, from: [1], to: [2], easing: "linear" });',
+        'motion.part.tween("instance-1", "LeftUpperLeg", { property: "rotation", startTime: 0, endTime: 5, from: [-30,0,0], to: [30,0,0] });',
+        'motion.part.cycle("instance-2","RightUpperLeg",{property:"rotation",startTime:0,endTime:5,period:1,keyframes:[{time:0,value:[-20,0,0]},{time:0.5,value:[20,0,0]},{time:1,value:[-20,0,0]}]});'
       ].join("\n"),
       scriptLanguage: "javascript",
       scriptVersion: "woohaa-world-animation-js-v2",
@@ -135,6 +137,8 @@ describe("world copy reference remapping", () => {
       "copy-instance-1:rotation",
       "copy-instance-2:scale"
     ]);
+    expect(compiled.ir.partTracks?.map(t => [t.targetId, t.partId])).toEqual([["copy-instance-1", "LeftUpperLeg"],["copy-instance-2","RightUpperLeg"]]);
+    expect(compiled.ir.partTracks?.[1]?.cycle?.keyframes).toHaveLength(3);
     expect(input).toEqual(before);
   });
 
@@ -539,4 +543,17 @@ describe("world copy reference remapping", () => {
   it("returns an empty successful batch for an empty collection", () => {
     expect(expectOk(remapWorldCopyReferences({ nodes: [], ids: { nodeIds: {} } }))).toEqual([]);
   });
+});
+
+it('remaps a compact walk and refuses a missing copied walker',()=>{
+ const profile={version:'humanoid-walk-v1',groundAnchorLocal:[0,-.86,.08],legs:{Left:{hipLocal:[.2,0,0],upperLength:.4,lowerLength:.35,soleLocal:[0,-.11,.08]},Right:{hipLocal:[-.2,0,0],upperLength:.4,lowerLength:.35,soleLocal:[0,-.11,.08]}},armsDownPose:{LeftUpperArm:[0,0,-90],RightUpperArm:[0,0,90]}};
+ const options={startTime:0,endTime:24,path:[[0,0],[4,0],[4,-3],[0,-3]],cornerRadius:.5,strideLength:.6,stepHeight:.09,scale:1,baseYawDegrees:0,profile};
+ const animationScript={script:`motion.instance.walk("instance-1",${JSON.stringify(options)});`,scriptLanguage:'javascript',scriptVersion:'woohaa-world-animation-js-v2',revision:1,sourceHash:'fixture',duration:24,loop:true};
+ const input={nodes:[node('node-area',{sceneArea:{...area('area-1'),animationScript}}),node('node-model',{sharedWorldInstance:instance('instance-1')})],ids:{nodeIds:{'node-area':'copy-area','node-model':'copy-model'},instanceIds:{'instance-1':'copy-instance'},areaIds:{'area-1':'copy-area-id'}}};
+ const result=expectOk(remapWorldCopyReferences(input));
+ const copied=bySource(result,'node-area').nodeData.sceneArea as SceneAreaData;
+ expect(copied.animationScript!.script).toContain('motion.instance.walk');
+ const compiled=executeWorldAnimationScript(copied.animationScript!.script,{duration:24,loop:true});
+ expect(compiled.ok&&compiled.ir.walkTracks?.[0]?.targetId).toBe('copy-instance');
+ expectFailed(remapWorldCopyReferences({...input,nodes:[input.nodes[0]!]}),'binding-unavailable');
 });

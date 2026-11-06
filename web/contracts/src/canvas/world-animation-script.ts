@@ -10,6 +10,7 @@
  *
  * 目标必须是导演区完整包含的实例/镜头；权限与占用由权威写入时校验。
  */
+import {validateHumanoidWalk,sampleHumanoidWalk,HUMANOID_WALK_PART_IDS,type HumanoidWalkTrack} from "./world-walk.js";
 import { fnv1a64Hex } from "./content-hash.js";
 import { easingProgress } from "./motion-ir.js";
 import { quatFromEulerYXZDegrees } from "./model-transform.js";
@@ -18,7 +19,9 @@ import type { GroundPoint, WorldPoint, WorldRotation } from "./shared-world.js";
 export const WORLD_ANIMATION_SCRIPT_VERSION = "woohaa-world-animation-js-v2" as const;
 export const WORLD_ANIMATION_SCRIPT_LANGUAGE = "javascript" as const;
 export const WORLD_ANIMATION_IR_VERSION = "woohaa-world-animation-ir-v1" as const;
-export const WORLD_ANIMATION_MAX_TRACKS = 256;
+export const WORLD_ANIMATION_MAX_CHANNELS = 256;
+/** Compatibility name; counts logical target-property channels, never segments. */
+export const WORLD_ANIMATION_MAX_TRACKS = WORLD_ANIMATION_MAX_CHANNELS;
 export const WORLD_ANIMATION_MAX_DURATION_SECONDS = 3600;
 
 export type WorldAnimationEasing = "linear" | "smoothstep" | "easeIn" | "easeOut" | "easeInOut";
@@ -57,12 +60,28 @@ export type WorldCameraTrack = {
   easing: WorldAnimationEasing;
 };
 
+export type WorldRotationCycle = {
+  period: number;
+  /** Offset in seconds within a period. */
+  phase: number;
+  keyframes: Array<{ time: number; value: number[] }>;
+};
+
+/** Local additive joint/group rotation, in model axes rather than ground axes. */
+export type WorldPartTrack = Omit<WorldInstanceTrack, "property"> & {
+  partId: string;
+  property: "rotation";
+  cycle?: WorldRotationCycle;
+};
+
 export type WorldAnimationIr = {
   version: typeof WORLD_ANIMATION_IR_VERSION;
   duration: number;
   loop: boolean;
   instanceTracks: WorldInstanceTrack[];
   cameraTracks: WorldCameraTrack[];
+  partTracks?: WorldPartTrack[];
+  walkTracks?: HumanoidWalkTrack[];
 };
 
 export type WorldAnimationScriptFailure = {
@@ -148,14 +167,33 @@ type RawTrack = {
   to: number[];
   easing: string;
 };
+type RawPartTrack = RawTrack & { partId: string; cycle?: WorldRotationCycle | null };
 
 class WorldAnimationRecorder {
   private readonly instanceTracks: RawTrack[] = [];
   private readonly cameraTracks: RawTrack[] = [];
+  private readonly partTracks: RawPartTrack[] = [];
+  private readonly walkTracks: unknown[] = [];
 
   readonly instance = {
+    walk: (targetId: unknown, options: unknown): void => {
+      this.walkTracks.push({ ...(isRecord(options) ? options : {}), targetId });
+    },
     tween: (targetId: unknown, options: unknown): void => {
       this.instanceTracks.push(rawTrack(targetId, options));
+    }
+  };
+
+  readonly part = {
+    tween: (targetId: unknown, partId: unknown, options: unknown): void => {
+      this.partTracks.push({ ...rawTrack(targetId, options), partId: typeof partId === "string" ? partId : "" });
+    },
+    cycle: (targetId: unknown, partId: unknown, options: unknown): void => {
+      const cycle = readRotationCycle(options);
+      const track = rawTrack(targetId, options);
+      this.partTracks.push({ ...track, partId: typeof partId === "string" ? partId : "", cycle,
+        from: cycle ? [...cycle.keyframes[0]!.value] : [],
+        to: cycle ? [...cycle.keyframes[cycle.keyframes.length - 1]!.value] : [] });
     }
   };
 
@@ -166,9 +204,45 @@ class WorldAnimationRecorder {
     }
   };
 
-  raw(): { instanceTracks: RawTrack[]; cameraTracks: RawTrack[] } {
-    return { instanceTracks: [...this.instanceTracks], cameraTracks: [...this.cameraTracks] };
+  raw(): { instanceTracks: RawTrack[]; cameraTracks: RawTrack[]; partTracks: RawPartTrack[]; walkTracks:unknown[] } {
+    return { instanceTracks: [...this.instanceTracks], cameraTracks: [...this.cameraTracks], partTracks: [...this.partTracks],walkTracks:[...this.walkTracks] };
   }
+}
+
+function positiveModulo(value: number, period: number): number {
+  const remainder = value % period;
+  return remainder < 0 ? remainder + period : remainder;
+}
+
+/** One authored period stays compact in IR, independent of playback length. */
+function readRotationCycle(options: unknown): WorldRotationCycle | null {
+  if (!isRecord(options) || !Object.keys(options).every(key => ["property","startTime","endTime","period","phase","keyframes","easing"].includes(key))) return null;
+  const { period, keyframes } = options;
+  const phase = options.phase === undefined ? 0 : options.phase;
+  if (typeof period !== "number" || !Number.isFinite(period) || period <= 0
+    || typeof phase !== "number" || !Number.isFinite(phase)
+    || !Array.isArray(keyframes) || keyframes.length < 2) return null;
+  const frames: WorldRotationCycle["keyframes"] = [];
+  for (const frame of keyframes) {
+    if (!isRecord(frame) || !Object.keys(frame).every(key => key === "time" || key === "value")
+      || typeof frame.time !== "number" || !Number.isFinite(frame.time) || frame.time < 0 || frame.time > period
+      || !Array.isArray(frame.value) || frame.value.length !== 3 || !frame.value.every(value => typeof value === "number" && Number.isFinite(value))
+      || (frames.length > 0 && frame.time <= frames[frames.length - 1]!.time)) return null;
+    frames.push({ time:frame.time,value:[...frame.value] as number[] });
+  }
+  if (frames[0]!.time !== 0 || frames[frames.length - 1]!.time !== period
+    || frames[0]!.value.some((value,i) => Math.abs(value - frames[frames.length - 1]!.value[i]!) > 1e-8)) return null;
+  return { period, phase:positiveModulo(phase,period), keyframes:frames };
+}
+
+/** Each target/property is one logical track even with many tween segments. */
+export function countWorldAnimationChannels(ir: Pick<WorldAnimationIr,"instanceTracks"|"cameraTracks"|"partTracks"|"walkTracks">): number {
+  return new Set([
+    ...ir.instanceTracks.map(track => JSON.stringify(["instance",track.targetId,track.property])),
+    ...ir.cameraTracks.map(track => JSON.stringify(["camera",track.targetId,track.property])),
+    ...(ir.partTracks ?? []).map(track => JSON.stringify(["part",track.targetId,track.partId,track.property])),
+    ...(ir.walkTracks ?? []).flatMap(track => [JSON.stringify(["instance",track.targetId,"position"]),JSON.stringify(["instance",track.targetId,"rotation"]),...HUMANOID_WALK_PART_IDS.map(partId=>JSON.stringify(["part",track.targetId,partId,"rotation"]))])
+  ]).size;
 }
 
 function rawTrack(targetId: unknown, options: unknown): RawTrack {
@@ -178,8 +252,8 @@ function rawTrack(targetId: unknown, options: unknown): RawTrack {
     property: typeof value.property === "string" ? value.property : "",
     startTime: typeof value.startTime === "number" ? value.startTime : Number.NaN,
     endTime: typeof value.endTime === "number" ? value.endTime : Number.NaN,
-    from: Array.isArray(value.from) ? value.from.filter((entry): entry is number => typeof entry === "number") : [],
-    to: Array.isArray(value.to) ? value.to.filter((entry): entry is number => typeof entry === "number") : [],
+    from: Array.isArray(value.from) ? value.from.map(entry => typeof entry === "number" ? entry : Number.NaN) : [],
+    to: Array.isArray(value.to) ? value.to.map(entry => typeof entry === "number" ? entry : Number.NaN) : [],
     easing: typeof value.easing === "string" ? value.easing : "linear"
   };
 }
@@ -232,15 +306,37 @@ function runWorldAnimationOnce(
     if (!valid.ok) return valid;
     cameraTracks.push(valid.value as WorldCameraTrack);
   }
-  if (instanceTracks.length + cameraTracks.length > WORLD_ANIMATION_MAX_TRACKS) {
-    return { ok: false, stage: "invalid", code: "too-many-tracks", message: `轨道数量超过 ${WORLD_ANIMATION_MAX_TRACKS} 上限` };
+  const partTracks: WorldPartTrack[] = [];
+  for (const track of raw.partTracks) {
+    if (track.cycle === null) return { ok:false,stage:"invalid",code:"invalid-cycle",message:"循环关节动画需有限正周期、有序关键帧覆盖 0 到 period，且首尾姿态相同" };
+    const valid = validateTrack(track, input.duration, ["rotation"]);
+    if (!valid.ok) return valid;
+    if (!track.partId.trim() || track.partId.length > 200) {
+      return { ok: false, stage: "invalid", code: "invalid-part", message: "动画部件 ID 无效" };
+    }
+    partTracks.push({ ...valid.value, property: "rotation", partId: track.partId, ...(track.cycle ? { cycle:track.cycle } : {}) });
+  }
+  const walkTracks:HumanoidWalkTrack[]=[];
+  try { for(const track of raw.walkTracks)walkTracks.push(validateHumanoidWalk(track,input.duration)); }
+  catch(error) { return {ok:false,stage:"invalid",code:"invalid-walk",message:error instanceof Error ? error.message : String(error)}; }
+  const walkTargets=new Set<string>();
+  for(const track of walkTracks){
+    if(walkTargets.has(track.targetId)||[...instanceTracks,...partTracks].some(other=>other.targetId===track.targetId))
+      return {ok:false,stage:"invalid",code:"conflicting-walk",message:"行走生成已拥有该模型的位置、朝向和关节通道，不能混合独立轨道"};
+    walkTargets.add(track.targetId);
+  }
+  const channelCount = countWorldAnimationChannels({ instanceTracks,cameraTracks,partTracks,walkTracks });
+  if (channelCount > WORLD_ANIMATION_MAX_CHANNELS) {
+    return { ok:false,stage:"invalid",code:"too-many-tracks",message:`逻辑动画轨道 ${channelCount} 超过 ${WORLD_ANIMATION_MAX_CHANNELS} 上限；按目标及属性计数，关键帧/分段/循环次数不增加轨道数。` };
   }
   const ir: WorldAnimationIr = {
     version: WORLD_ANIMATION_IR_VERSION,
     duration: input.duration,
     loop: input.loop,
     instanceTracks,
-    cameraTracks
+    cameraTracks,
+    ...(partTracks.length ? { partTracks } : {}),
+    ...(walkTracks.length ? { walkTracks } : {})
   };
   return { ok: true, ir, json: JSON.stringify(ir) };
 }
@@ -283,6 +379,9 @@ function validateTrack(
 }
 
 export type SampledInstanceMotion = {
+  /** Trusted generator stance labels, not measured collision/contact. */
+  footContacts?: Record<string,{stance:boolean;plant:number}>;
+  partRotations?: Record<string, WorldRotation>;
   position?: WorldPoint;
   rotation?: WorldRotation;
   scale?: number;
@@ -307,7 +406,7 @@ export function sampleWorldAnimation(
   const now = Number.isFinite(time) ? Math.max(0, Math.min(time, ir.duration)) : 0;
   const instances = new Map<string, SampledInstanceMotion>();
   const cameras = new Map<string, SampledCameraMotion>();
-  for (const track of ir.instanceTracks) {
+  for (const track of [...ir.instanceTracks].sort((a, b) => a.startTime - b.startTime)) {
     const value = sampleTrack(track, now);
     if (!value) continue;
     const current = instances.get(track.targetId) ?? {};
@@ -316,7 +415,7 @@ export function sampleWorldAnimation(
     else current.scale = value[0]!;
     instances.set(track.targetId, current);
   }
-  for (const track of ir.cameraTracks) {
+  for (const track of [...ir.cameraTracks].sort((a, b) => a.startTime - b.startTime)) {
     const value = sampleTrack(track, now);
     if (!value) continue;
     const current = cameras.get(track.targetId) ?? {};
@@ -324,6 +423,19 @@ export function sampleWorldAnimation(
     else if (track.property === "rotation") current.rotation = quatFromEulerYXZDegrees([value[0]!, value[1]!, value[2]!]);
     else current.zoom = value[0]!;
     cameras.set(track.targetId, current);
+  }
+  for (const track of [...(ir.partTracks ?? [])].sort((a, b) => a.startTime - b.startTime)) {
+    const current = instances.get(track.targetId) ?? {};
+    // Keep the dynamic hierarchy even before the first joint segment starts.
+    const rotations = current.partRotations ?? Object.create(null) as Record<string, WorldRotation>;
+    const value = sampleTrack(track, now);
+    if (value) rotations[track.partId] = quatFromEulerYXZDegrees([value[0]!, value[1]!, value[2]!]);
+    current.partRotations = rotations;
+    instances.set(track.targetId, current);
+  }
+  for(const track of ir.walkTracks ?? []) {
+    const motion=sampleHumanoidWalk(track,now);
+    if(motion)instances.set(track.targetId,motion);
   }
   return { instances, cameras };
 }
@@ -352,12 +464,28 @@ export function sampleWorldAnimationInArea(
   return sample;
 }
 
-function sampleTrack(track: WorldInstanceTrack | WorldCameraTrack, now: number): number[] | null {
-  if (now <= track.startTime) return [...track.from];
+/** Avoid overflowing the difference of opposite finite endpoints. */
+function interpolateFinite(from: number, to: number, t: number): number {
+  return (from >= 0) === (to >= 0) ? from + (to - from) * t : from * (1 - t) + to * t;
+}
+
+function sampleTrack(track: WorldInstanceTrack | WorldCameraTrack | WorldPartTrack, now: number): number[] | null {
+  if (now < track.startTime) return null;
+  if ("cycle" in track && track.cycle) {
+    const {period,phase,keyframes} = track.cycle;
+    const elapsed = Math.min(now,track.endTime) - track.startTime;
+    const local = positiveModulo(elapsed + phase,period);
+    const index = keyframes.findIndex((frame,i) => i > 0 && frame.time > local);
+    const a = keyframes[Math.max(0,index - 1)]!;
+    const b = keyframes[index < 0 ? keyframes.length - 1 : index]!;
+    const progress = (local - a.time) / (b.time - a.time);
+    const t = easingProgress(track.easing,Math.max(0,Math.min(1,progress)));
+    return a.value.map((value,i) => interpolateFinite(value,b.value[i]!,t));
+  }
   if (now >= track.endTime) return [...track.to];
   const progress = Math.max(0, Math.min(1, (now - track.startTime) / (track.endTime - track.startTime)));
   const t = easingProgress(track.easing, progress);
-  return track.from.map((from, index) => from + ((track.to[index] ?? from) - from) * t);
+  return track.from.map((from,index) => interpolateFinite(from,track.to[index] ?? from,t));
 }
 
 /** 从 IR 反序列化为等价脚本（用于复制/迁移时重写目标身份）。 */
@@ -374,6 +502,23 @@ export function serializeWorldAnimationScript(ir: WorldAnimationIr): string {
       cameraId: track.targetId, property: track.property, startTime: track.startTime, endTime: track.endTime,
       from: track.from, to: track.to, easing: track.easing
     })});`);
+  }
+  for (const track of ir.partTracks ?? []) {
+    if (track.cycle) {
+      lines.push(`motion.part.cycle(${JSON.stringify(track.targetId)}, ${JSON.stringify(track.partId)}, ${JSON.stringify({
+        property:track.property,startTime:track.startTime,endTime:track.endTime,easing:track.easing,
+        period:track.cycle.period,phase:track.cycle.phase,keyframes:track.cycle.keyframes
+      })});`);
+      continue;
+    }
+    lines.push(`motion.part.tween(${JSON.stringify(track.targetId)}, ${JSON.stringify(track.partId)}, ${JSON.stringify({
+      property: track.property, startTime: track.startTime, endTime: track.endTime,
+      from: track.from, to: track.to, easing: track.easing
+    })});`);
+  }
+  for(const track of ir.walkTracks ?? []) {
+    const {targetId,...options}=track;
+    lines.push(`motion.instance.walk(${JSON.stringify(targetId)}, ${JSON.stringify(options)});`);
   }
   return lines.join("\n");
 }

@@ -9,7 +9,7 @@
 import { isFiniteNumber, isJsonObject } from "../validation.js";
 import { fnv1a64Hex } from "./content-hash.js";
 import { SCENE_IR_V2_COORD_LIMIT } from "./scene-ir-v2/types.js";
-import { composeTransform, transformOf, type Vec3 } from "./model-transform.js";
+import { composeTransform, quatRotate, transformOf, transformPoint, type Quat, type Transform, type Vec3 } from "./model-transform.js";
 
 /** 短于场景 segment 下限的骨头视为退化。 */
 export const HUMANOID_LENGTH_EPSILON = 1e-4;
@@ -84,7 +84,8 @@ export type RigDiagnostic = {
     | "unknown-field"
     | "invalid-joint"
     | "unbound-shape"
-    | "root-binding";
+    | "root-binding"
+    | "torso-gap";
   path: string;
   expected: string;
   actual: string;
@@ -440,7 +441,130 @@ export function validateHumanoidScene(
       ));
     }
   });
+  if (diagnostics.length === 0 && torsoGap(compiled, ops)) {
+    diagnostics.push(issue(
+      "torso-gap",
+      "Spine",
+      "形体盖住髋到脊柱的中段",
+      "髋与脊柱之间中空",
+      "binding"
+    ));
+  }
   return diagnostics.length > 0 ? { ok: false, diagnostics } : { ok: true };
+}
+
+const TORSO_GAP_SLACK = 0.04;
+
+type CoverOp = {
+  t?: unknown;
+  id?: unknown;
+  parent?: unknown;
+  position?: unknown;
+  rotation?: unknown;
+  scale?: unknown;
+  size?: unknown;
+  radius?: unknown;
+  height?: unknown;
+  from?: unknown;
+  to?: unknown;
+  width?: unknown;
+  depth?: unknown;
+  vertices?: unknown;
+};
+
+/** 髋到脊柱的中段必须被某个形体盖住。只在两个关节原点放盒子会留下空腰。 */
+function torsoGap(compiled: CompiledHumanoid, ops: readonly CoverOp[]): boolean {
+  const worlds = jointWorldPositions(compiled);
+  const samples = [0.4, 0.5, 0.6].map((t) => lerpVec3(worlds.Hips, worlds.Spine, t));
+  const byId = new Map<string, CoverOp>();
+  for (const op of ops) if (typeof op.id === "string") byId.set(op.id, op);
+  const cache = new Map<string, Transform>();
+  const worldOf = (id: string, seen = new Set<string>()): Transform => {
+    const cached = cache.get(id);
+    if (cached) return cached;
+    const op = byId.get(id);
+    const local = transformOf({
+      position: vec3(op?.position, [0, 0, 0]),
+      rotation: vec3(op?.rotation, [0, 0, 0]),
+      scale: vec3(op?.scale, [1, 1, 1])
+    });
+    const parentId = typeof op?.parent === "string" && op.parent !== "" ? op.parent : null;
+    const world = !parentId || seen.has(id) ? local : composeTransform(worldOf(parentId, new Set(seen).add(id)), local);
+    cache.set(id, world);
+    return world;
+  };
+  return samples.some((sample) => !ops.some((op) => coversPoint(op, sample, worldOf)));
+}
+
+function coversPoint(op: CoverOp, point: Vec3, worldOf: (id: string) => Transform): boolean {
+  if (typeof op.t !== "string" || !SOLID_OPS.has(op.t)) return false;
+  const parent = typeof op.parent === "string" && op.parent !== "" ? worldOf(op.parent) : transformOf({ position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
+  if (op.t === "segment") {
+    const from = vec3(op.from, null);
+    const to = vec3(op.to, null);
+    if (!from || !to) return false;
+    const thickness = Math.max(num(op.width), num(op.depth)) / 2 + TORSO_GAP_SLACK;
+    return distanceToSegment(point, transformPoint(parent, from), transformPoint(parent, to)) <= thickness;
+  }
+  if (typeof op.id !== "string") return false;
+  const local = inverseTransformPoint(worldOf(op.id), point);
+  if (op.t === "box") {
+    const size = vec3(op.size, [0, 0, 0]);
+    return local.every((value, index) => Math.abs(value) <= size[index] / 2 + TORSO_GAP_SLACK);
+  }
+  if (op.t === "sphere") return Math.hypot(...local) <= num(op.radius) + TORSO_GAP_SLACK;
+  if (op.t === "cylinder" || op.t === "capsule") {
+    const radius = num(op.radius);
+    const half = Math.max(0, num(op.height) / 2 - (op.t === "capsule" ? radius : 0));
+    return Math.hypot(local[0], local[2]) <= radius + TORSO_GAP_SLACK && Math.abs(local[1]) <= half + radius + TORSO_GAP_SLACK;
+  }
+  if (op.t === "mesh" && Array.isArray(op.vertices) && op.vertices.length > 0) {
+    const points = op.vertices.map((vertex) => vec3(vertex, null)).filter((vertex): vertex is Vec3 => vertex !== null);
+    if (points.length === 0) return false;
+    return local.every((value, index) => {
+      const values = points.map((vertex) => vertex[index]);
+      return value >= Math.min(...values) - TORSO_GAP_SLACK && value <= Math.max(...values) + TORSO_GAP_SLACK;
+    });
+  }
+  return false;
+}
+
+function inverseTransformPoint(transform: Transform, point: Vec3): Vec3 {
+  const delta: Vec3 = [
+    point[0] - transform.translation[0],
+    point[1] - transform.translation[1],
+    point[2] - transform.translation[2]
+  ];
+  const rotation: Quat = [-transform.rotation[0], -transform.rotation[1], -transform.rotation[2], transform.rotation[3]];
+  const unrotated = quatRotate(rotation, delta);
+  return [
+    transform.scale[0] === 0 ? 0 : unrotated[0] / transform.scale[0],
+    transform.scale[1] === 0 ? 0 : unrotated[1] / transform.scale[1],
+    transform.scale[2] === 0 ? 0 : unrotated[2] / transform.scale[2]
+  ];
+}
+
+function distanceToSegment(point: Vec3, from: Vec3, to: Vec3): number {
+  const edge: Vec3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+  const length2 = edge[0] ** 2 + edge[1] ** 2 + edge[2] ** 2;
+  const start: Vec3 = [point[0] - from[0], point[1] - from[1], point[2] - from[2]];
+  const t = length2 === 0 ? 0 : Math.min(1, Math.max(0, (start[0] * edge[0] + start[1] * edge[1] + start[2] * edge[2]) / length2));
+  return Math.hypot(start[0] - edge[0] * t, start[1] - edge[1] * t, start[2] - edge[2] * t);
+}
+
+function lerpVec3(from: Vec3, to: Vec3, t: number): Vec3 {
+  return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t, from[2] + (to[2] - from[2]) * t];
+}
+
+function vec3(value: unknown, fallback: Vec3): Vec3;
+function vec3(value: unknown, fallback: null): Vec3 | null;
+function vec3(value: unknown, fallback: Vec3 | null): Vec3 | null {
+  if (!Array.isArray(value) || value.length < 3 || !value.slice(0, 3).every(isFiniteNumber)) return fallback;
+  return [value[0], value[1], value[2]];
+}
+
+function num(value: unknown): number {
+  return isFiniteNumber(value) ? value : 0;
 }
 
 /** 脚本是否调用了宿主注入的关节句柄。注释里的同名文字不会匹配。 */
@@ -498,6 +622,9 @@ export function humanoidAuthoringText(): string {
     "When the model is a humanoid or mecha, a fixed 14-joint rig already exists.",
     "Parent every visible shape with rig.joint(id). Legal joint ids:",
     HUMANOID_V1_JOINT_IDS.join(", ") + ".",
+    "position and segment from/to are local to that joint origin, not standing-height coordinates of the whole body.",
+    "The abdomen must span the spine bone. Parent a segment to Spine from [0, -0.5, 0] to [0, 0, 0]. A box on Hips plus a box on Spine leaves the waist empty.",
+    "A left thigh runs from [0, 0, 0] to [0, -0.4, 0] under LeftUpperLeg. Do not parent a head at y=1.69 or a foot at y=0.06 to a joint.",
     "rig.joint(\"Root\") is not a shape parent. Hands and guns use rig.joint(\"LeftHand\") or rig.joint(\"RightHand\"); those are forearm sockets, not joints.",
     "Do not invent limb ids such as thigh, shin, Shoulder, Chest, Neck, or Hand, and do not parent limbs to Root.",
     "Motion targetId must be one of the joint ids. An in-place run needs distinct rotation tracks on both UpperLeg, LowerLeg, and Foot.",

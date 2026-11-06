@@ -17,6 +17,7 @@ pub(crate) mod gizmo;
 pub(crate) mod grip;
 pub(crate) mod interaction;
 pub(crate) mod layout;
+pub(crate) mod scene_area_player;
 pub(crate) mod media_focus;
 pub(crate) mod model_pick;
 mod position_basis;

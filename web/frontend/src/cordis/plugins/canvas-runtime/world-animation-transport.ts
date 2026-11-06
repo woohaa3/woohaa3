@@ -4,7 +4,7 @@ type Definition = { nodeId: string; key: string; duration: number; loop: boolean
 type Entry = Definition & { time: number };
 type Clock = { now(): number; request(callback: (now: number) => void): number; cancel(id: number): void };
 
-/** Page-local playback: one selected director, independent remembered playheads. */
+/** Page-local playback: one active director, independent of deselection. */
 export class WorldAnimationTransport {
   private entries = new Map<string, Entry>();
   private canvasId: string | null = null;
@@ -28,6 +28,7 @@ export class WorldAnimationTransport {
     return () => { this.listeners.delete(listener); };
   };
   sampleTimes = (): ReadonlyMap<string, number> => this.times;
+  loopFor = (nodeId: string): boolean => this.entries.get(nodeId)?.loop ?? false;
 
   sync(canvasId: string | null, definitions: readonly Definition[], selectedId: string | null): void {
     if (this.canvasId !== canvasId) {
@@ -36,7 +37,9 @@ export class WorldAnimationTransport {
       this.target = null;
       this.canvasId = canvasId;
     }
-    const target = definitions.some(item => item.nodeId === selectedId) ? selectedId : null;
+    // Clearing selection or selecting a non-director keeps the active transport alive.
+    const target = definitions.some(item => item.nodeId === selectedId) ? selectedId
+      : definitions.some(item => item.nodeId === this.target) ? this.target : null;
     const targetDefinition = definitions.find(item => item.nodeId === target);
     if (this.target !== target || this.entries.get(target ?? "")?.key !== targetDefinition?.key) this.pause();
     const ids = new Set(definitions.map(item => item.nodeId));
@@ -121,7 +124,7 @@ export class WorldAnimationTransport {
     if (!samplesChanged && !stateChanged) return;
     this.times = times;
     this.state = next;
-    if (samplesChanged) this.invalidate();
+    if (samplesChanged || stateChanged) this.invalidate();
     for (const listener of this.listeners) listener();
   }
 }

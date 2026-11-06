@@ -84,3 +84,29 @@ test("stop 会先停掉探活，不再重启已关闭的 Supervisor", async () =
 		fs.rmSync(runtimeDir, { recursive: true, force: true });
 	}
 });
+
+test("long checkout stdio endpoint supports a real Supervisor echo round trip", {skip:process.platform==="win32"}, async () => {
+ const {agentRuntimeDirectory}=await import("./agent-runtime-endpoints.mjs");
+ const {supervisorRpc}=await import("./agent-runtime-supervisor-host.mjs");
+ const runtimeDir=agentRuntimeDirectory({root:path.join(root,"long-checkout-regression",String(process.pid))});
+ const host=createAgentSupervisorHost({root,runtimeDir});let socket;
+ try {
+  const config=await host.ensure();
+  const entry=await supervisorRpc(config,"ensure",{adapterId:"echo",owner:"test",connectionId:"socket",kind:"stdio",command:process.execPath,args:["-e","process.stdin.on('data',b=>process.stdout.write(b))"],cwd:root});
+  assert.ok(Buffer.byteLength(entry.stdioPath)<104);
+  await new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>{socket?.destroy();reject(new Error("stdio echo timed out"));},3000);
+   socket=net.createConnection(entry.stdioPath);
+   socket.on("error",e=>{clearTimeout(timer);reject(e);});
+   socket.once("connect",()=>socket.write("socket-path-ok\n"));
+   socket.once("data",data=>{clearTimeout(timer);assert.equal(String(data),"socket-path-ok\n");resolve();});
+  });
+ } finally {socket?.destroy();await host.stop();fs.rmSync(runtimeDir,{recursive:true,force:true});}
+});
+
+test("Supervisor refuses a shared writable runtime directory", {skip:process.platform==="win32"}, async()=>{
+ const runtimeDir=fs.mkdtempSync(path.join(os.tmpdir(),"woohaa-supervisor-perms-"));
+ fs.chmodSync(runtimeDir,0o755);
+ const host=createAgentSupervisorHost({root,runtimeDir});
+ try {await assert.rejects(host.ensure(),/private directory/);} finally {await host.stop();fs.rmSync(runtimeDir,{recursive:true,force:true});}
+});

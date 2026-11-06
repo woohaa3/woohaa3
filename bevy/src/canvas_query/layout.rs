@@ -295,7 +295,7 @@ fn scene_area_canvas_point(u: f64, v: f64) -> Vec2 {
 }
 
 /// 导演区地面范围的投影四角（canvas 坐标）；非法范围返回 `None`。
-fn scene_area_canvas_corners(bounds: &crate::protocol::SceneAreaBounds) -> Option<[Vec2; 4]> {
+pub(crate) fn scene_area_canvas_corners(bounds: &crate::protocol::SceneAreaBounds) -> Option<[Vec2; 4]> {
     if ![bounds.min.u, bounds.min.v, bounds.max.u, bounds.max.v]
         .iter()
         .all(|value| value.is_finite())

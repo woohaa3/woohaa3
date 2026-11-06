@@ -29,6 +29,7 @@ pub(crate) struct WorldPresence {
     key: Option<String>,
     entities: Vec<Entity>,
     assets: PresenceAssets,
+    ground_anchors: HashMap<String, [Entity; 2]>,
 }
 
 #[derive(Default)]
@@ -99,6 +100,7 @@ fn presentation_key(scene: &Scene, theme: &ThemeResource, resources: &HashMap<St
                 transform.scale.x
             );
         }
+        let _ = write!(key, "g{:?};", node.model.as_ref().and_then(|model| model.ground_anchor_local));
         match node
             .model
             .as_ref()
@@ -135,6 +137,7 @@ pub(crate) fn sync(
     for entity in presence.entities.drain(..) {
         commands.entity(entity).try_despawn();
     }
+    let mut active_anchors = std::collections::HashSet::new();
     let cube = presence.assets.cube(meshes);
     let focus = scene.model_focus.as_ref().map(|focus| focus.node_id.as_str());
     for node in &scene.nodes {
@@ -187,9 +190,29 @@ pub(crate) fn sync(
                 } else {
                     theme.token_u32("canvasPortDefault")
                 };
-                // 只画真实 AABB 线框。底部不再叠加独立的地面菱形：等距视角下它看起来像
-                // 第二个方框，既不是 AABB 的一部分，也不表示内容范围。
+                // Bounds outline plus a restrained selected-only ground anchor.
                 spawn_aabb_edges(commands, presence, &cube, materials, color, min, max);
+                if selected && focus.is_none() {
+                    if let Some(local) = node.model.as_ref().and_then(|model| model.ground_anchor_local) {
+                        let point = transform.transform_point(Vec3::from_array(local));
+                        if point.is_finite() {
+                            let radius = (transform.scale.x.abs() * 0.065).clamp(3.0, 9.0);
+                            let thickness = (radius * 0.14).max(0.7);
+                            let material = presence.assets.material(materials, color);
+                            active_anchors.insert(node.id.clone());
+                            let pair = *presence.ground_anchors.entry(node.id.clone()).or_insert_with(|| [commands.spawn_empty().id(), commands.spawn_empty().id()]);
+                            for (entity, scale) in pair.into_iter().zip([Vec3::new(radius * 2.0, thickness, thickness), Vec3::new(thickness, thickness, radius * 2.0)]) {
+                                commands.entity(entity).insert((
+                                    WorldPresenceMarker,
+                                    RenderLayers::layer(crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER),
+                                    Mesh3d(cube.clone()), MeshMaterial3d(material.clone()),
+                                    Transform::from_xyz(point.x, 0.0, point.z).with_scale(scale),
+                                    Visibility::Inherited,
+                                ));
+                            }
+                        }
+                    }
+                }
             }
             None => {
                 // 空模型/资源未就绪：真实实例根处的轻量占位，不是内容卡片。
@@ -248,6 +271,11 @@ pub(crate) fn sync(
             }
         }
     }
+    presence.ground_anchors.retain(|id, pair| {
+        if active_anchors.contains(id) { return true; }
+        for entity in pair { commands.entity(*entity).try_despawn(); }
+        false
+    });
 }
 
 fn spawn_aabb_edges(
@@ -442,7 +470,7 @@ mod tests {
             ..Scene::default()
         };
         scene.nodes[0].model = Some(serde_json::from_value(serde_json::json!({
-            "resourceKey": "v:sig"
+            "resourceKey": "v:sig", "groundAnchorLocal": [0.25, -0.5, 0.75]
         })).unwrap());
         scene.selection.nodes = vec![scene.nodes[0].id.clone()];
         app.world_mut().resource_mut::<TestScene>().0 = scene;
@@ -451,8 +479,40 @@ mod tests {
             .0
             .insert("v:sig".into(), Arc::new(snapshot()));
         app.update();
-        // 有几何的世界模型选中时只画真实 AABB 的 12 条边，不再叠加地面菱形。
+        // Selected geometry has twelve bounds edges and a small ground cross.
+        assert_eq!(marker_count(&mut app), 14);
+        let before = app.world().resource::<WorldPresence>().entities.clone();
+        app.update();
+        assert_eq!(app.world().resource::<WorldPresence>().entities, before);
+        let world = app.world_mut();
+        let mut markers = world.query::<(&Transform, &RenderLayers)>();
+        let ground: Vec<_> = markers.iter(world).filter(|(pose, _)| pose.translation.y == 0.0).collect();
+        assert_eq!(ground.len(), 2);
+        for (pose, layers) in ground {
+            assert!((pose.translation.x - 152.0).abs() < 0.001);
+            assert!((pose.translation.z + 120.0).abs() < 0.001);
+            assert_eq!(*layers, RenderLayers::layer(crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER));
+        }
+        let anchors = app.world().resource::<WorldPresence>().ground_anchors.clone();
+        app.world_mut().resource_mut::<TestScene>().0.nodes[0].shared_world_instance.as_mut().unwrap().transform.position.u += 2.0;
+        app.update();
+        assert_eq!(app.world().resource::<WorldPresence>().ground_anchors, anchors);
+        let half = std::f64::consts::FRAC_1_SQRT_2;
+        app.world_mut().resource_mut::<TestScene>().0.nodes[0].shared_world_instance.as_mut().unwrap().transform.rotation = [half, 0.0, 0.0, half];
+        app.update();
+        for entity in anchors["world"] {
+            let pose = app.world().get::<Transform>(entity).unwrap();
+            assert!((pose.translation.x - 280.0).abs() < 0.001);
+            // Rotate full local Y before projecting height to zero.
+            assert!((pose.translation.z + 240.0).abs() < 0.001);
+            assert_eq!(pose.translation.y, 0.0);
+        }
+        app.world_mut().resource_mut::<TestScene>().0.nodes[0].model.as_mut().unwrap().ground_anchor_local = None;
+        app.update();
         assert_eq!(marker_count(&mut app), 12);
+        app.world_mut().resource_mut::<TestScene>().0.selection.nodes.clear();
+        app.update();
+        assert_eq!(marker_count(&mut app), 0);
     }
 
     #[test]

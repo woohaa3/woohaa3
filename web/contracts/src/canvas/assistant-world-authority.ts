@@ -51,6 +51,8 @@ export function assistantWorldScopeIdentity(scope: AssistantWorldScopeSelection)
 /** Stable tool names shared by MCP registration, grant catalogs and prompts. */
 export const ASSISTANT_WORLD_TOOL = {
   readContext: "get_world_context",
+  readModelRig: "get_world_model_rig",
+  sampleAnimation: "sample_scene_animation",
   createModel: "create_world_model",
   replaceModel: "replace_world_model_content",
   moveModel: "move_world_model",
@@ -80,6 +82,8 @@ export const ASSISTANT_WORLD_WRITE_TOOLS = [
 
 export const ASSISTANT_WORLD_TOOLS = [
   ...ASSISTANT_WORLD_READ_TOOLS,
+  ASSISTANT_WORLD_TOOL.readModelRig,
+  ASSISTANT_WORLD_TOOL.sampleAnimation,
   ...ASSISTANT_WORLD_WRITE_TOOLS
 ] as const satisfies readonly AssistantWorldToolName[];
 
@@ -653,6 +657,26 @@ export type AssistantWorldObjectSummary = {
   transformVersion?: string;
 };
 
+export type WorldModelAnimationRig = {
+  walkProfile?: import("./world-walk.js").HumanoidWalkProfile | null;
+  motionReference?: import("./humanoid-motion-reference.js").HumanoidMotionReference;
+  shapes?: Array<{
+    id: string; parent: string | null;
+    position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number];
+    localBounds: import("./model-transform.js").Aabb;
+    localTransform?: import("./model-transform.js").Transform;
+  }>;
+  spatial?: {
+    forwardLocal: [number, number, number] | null;
+    forwardSource: "humanoid-v1" | "unknown";
+    groundAnchorLocal: [number, number, number] | null;
+    rootToGroundHeightMeters: number | null;
+    anchorSource: "foot-geometry-bounds" | "geometry-bounds" | "unknown";
+  };
+  groups: Array<Pick<import("./scene-ir-v2/types.js").SceneV2GroupOp, "id" | "parent" | "position" | "rotation" | "scale">>;
+  rig: import("./humanoid-rig.js").StoredHumanoidRig | null;
+};
+
 /** Read-only projection returned by `get_world_context`. */
 export type AssistantWorldContextView = {
   version: typeof ASSISTANT_WORLD_AUTHORITY_VERSION;
@@ -679,7 +703,7 @@ export type AssistantWorldContextView = {
   };
   /** Selected camera and published scene geometry, for camera-only composition edits. */
   camera?: { nodeId: WorldId; settings: WorldCameraData };
-  sceneModels?: Array<{ instanceId: WorldId; nodeId: WorldId; title: string; transform: WorldTransform; localBounds: import("./model-transform.js").Aabb | null }>;
+  sceneModels?: Array<{ instanceId: WorldId; nodeId: WorldId; title: string; transform: WorldTransform; localBounds: import("./model-transform.js").Aabb | null; animationRig?: WorldModelAnimationRig }>;
   /** A 2D group has no writable world set and no completion. */
   worldWritable: boolean;
 };

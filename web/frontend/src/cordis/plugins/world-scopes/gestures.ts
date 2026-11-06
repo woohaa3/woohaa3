@@ -565,6 +565,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
         loop: area.value.animationScript.loop
       });
       if (executed.ok) {
+        for (const track of executed.ir.walkTracks ?? [])animatedInstances.add(track.targetId);
         for (const track of executed.ir.instanceTracks) {
           if (track.property === "position") animatedInstances.add(track.targetId);
         }

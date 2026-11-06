@@ -3,12 +3,16 @@ import {
   createEmptyWoohaa3ServerCanvas,
   decodeSceneAreaData,
   executeWorldAnimationScript,
+  referenceHumanoidRig,
+  HUMANOID_REFERENCE_PARAMETERS,
+  normalizeModelDefinition,
   type WorldAnimationScript,
   type WorldToolContext
 } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { CanvasRoom } from "../sync/room.js";
 import { InMemoryYjsDocumentRepository } from "../sync/in-memory-yjs-repository.js";
+import { worldObjectVersion } from "./authority.js";
 import { createAssistantWorldService } from "./assistant-service.js";
 
 const NOW = "2026-11-04T00:00:00.000Z";
@@ -32,7 +36,7 @@ const original: WorldAnimationScript = {
 const closers: Array<() => void> = [];
 afterEach(() => { for (const close of closers.splice(0)) close(); });
 
-async function fixture(options: { animationScript?: WorldAnimationScript | null; group?: boolean; readOnlyProp?: boolean } = {}) {
+async function fixture(options: { animationScript?: WorldAnimationScript | null; group?: boolean; readOnlyProp?: boolean; modelScript?: string; empty?: boolean; modelRig?: unknown } = {}) {
   const animationScript = options.animationScript === undefined ? structuredClone(original) : options.animationScript;
   const canvas = createEmptyWoohaa3ServerCanvas(query.canvasId, NOW);
   canvas.document.nodes = [
@@ -44,10 +48,15 @@ async function fixture(options: { animationScript?: WorldAnimationScript | null;
     ...(animationScript ? { animationScript } : {})
   } };
   for (const id of ["actor", "prop"]) canvas.nodeData[id] = {
-    modelScript: "scene.box({});", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2",
+    modelScript: options.modelScript ?? "scene.box({});", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2",
     sharedWorldInstance: { kind: "world-instance", version: "shared-world-v1", instanceId: id,
       transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } }
   };
+  if (options.modelRig) canvas.nodeData.actor!.modelRig = options.modelRig;
+  if (options.empty) {
+    canvas.document.nodes = canvas.document.nodes.filter(node => node.type === "scene-area");
+    delete canvas.nodeData.actor; delete canvas.nodeData.prop;
+  }
   const repository = new InMemoryYjsDocumentRepository();
   const room = new CanvasRoom({ canvasId: canvas.id, repository, now: () => NOW });
   await room.initialize({ canvas, roomEpoch: "epoch-1", createdAt: NOW });
@@ -68,7 +77,7 @@ async function fixture(options: { animationScript?: WorldAnimationScript | null;
   const service = createAssistantWorldService({
     authority: {
       async prepareCanvas() { return { ok: true, snapshot: {} } as never; },
-      async prepareContent() { return null; },
+      async prepareContent() { return { contentVersion: "test-content", localAabb: { min: [0, 0, 0], max: [1, 1, 1] } }; },
       // Deliberately stale: reading animation must use the current published room.
       cacheFor() {
         return {
@@ -76,7 +85,7 @@ async function fixture(options: { animationScript?: WorldAnimationScript | null;
           area: canvas.nodeData["area-node"]!.sceneArea,
           instances: new Map(targets.map((target) => [target.instanceId, {
             identity: { kind: "instance", instanceId: target.instanceId },
-            nodeId: `node-${target.instanceId}`,
+            nodeId: target.instanceId,
             version: target.version,
             data: { transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } },
             localAabb: { min: [0, 0, 0], max: [1, 1, 1] }
@@ -249,4 +258,117 @@ describe("current director animation in assistant context", () => {
     expect(result.view.sceneArea.animationScript.script).not.toContain('"prop"');
     expect(result.view.sceneArea.animationScript.script).toContain('"actor"');
   });
+});
+
+ it("rejects phantom parts and readonly part targets before publishing animation", async () => {
+   const { service } = await fixture({ animationScript: null, readOnlyProp: true });
+   const write = (target: string, part: string) => service.write({ contextId: query.contextId, operation: {
+     kind: "set-scene-animation-script", operationId: `part-${target}`, duration: 2, loop: false,
+     script: `motion.part.tween("${target}", "${part}", {property:"rotation",startTime:0,endTime:2,from:[0,0,0],to:[30,0,0],easing:"linear"});`
+   } });
+   expect(await write("actor", "phantom")).toMatchObject({ ok: false, code: "invalid-data" });
+   expect(await write("prop", "phantom")).toMatchObject({ ok: false, code: "outside-scope" });
+ });
+
+it("publishes actual group bind hierarchy and accepts only emitted IDs", async () => {
+ const { service } = await fixture({ animationScript: null, modelScript: 'scene.group({id:"hip", position:[0,1,0]}); scene.box({id:"leg",parent:"hip"});' });
+ const read = await service.read(query);
+ expect(read).toMatchObject({ok:true,view:{sceneModels:[{instanceId:"actor",animationRig:{groups:[{id:"hip",parent:null,position:[0,1,0]}],rig:null}}, {instanceId:"prop"}]}});
+ const result = await service.write({contextId:query.contextId,operation:{kind:"set-scene-animation-script",operationId:"valid-part",duration:2,loop:false,
+ script:'motion.part.tween("actor","hip",{property:"rotation",startTime:0,endTime:2,from:[0,0,0],to:[30,0,0],easing:"linear"});'}});
+ expect(result).toMatchObject({ok:true});
+});
+
+it("persists reusable cycles without expanding them and reads them back unchanged", async () => {
+  const {service} = await fixture({animationScript:null,modelScript:'scene.group({id:"hip"});scene.box({id:"body",parent:"hip"});'});
+  const script='motion.part.cycle("actor","hip",{property:"rotation",startTime:0,endTime:18,period:1,keyframes:[{time:0,value:[-20,0,0]},{time:0.5,value:[20,0,0]},{time:1,value:[-20,0,0]}]});';
+  expect(await service.write({contextId:query.contextId,operation:{kind:"set-scene-animation-script",operationId:"cycle",duration:18,loop:true,script}})).toMatchObject({ok:true});
+  const read=await service.read(query);
+  expect(read.ok && read.view.sceneArea?.animationScript?.script).toBe(script);
+});
+
+const humanoidSource = [
+  'scene.segment({id:"abdomen",parent:rig.joint("Spine"),from:[0,-0.5,0],to:[0,0,0],width:0.1});',
+  ...["Left", "Right"].flatMap(side => [
+    `scene.segment({id:"${side}upper",parent:rig.joint("${side}UpperArm"),from:[0,0,0],to:[${side === "Left" ? 0.3 : -0.28},0,0],width:0.05});`,
+    `scene.segment({id:"${side}lower",parent:rig.joint("${side}LowerArm"),from:[0,0,0],to:[${side === "Left" ? 0.25 : -0.24},0,0],width:0.04});`
+  ])
+].join("\n");
+
+it("persists the rig of a newly created director actor and exposes its motion reference", async () => {
+  const { service, room } = await fixture({ empty: true, animationScript: null });
+  const result = await service.write({ contextId: query.contextId, operation: {
+    kind: "create-model", operationId: "fresh-actor", nodeId: "actor", instanceId: "actor",
+    content: { modelScript: humanoidSource },
+    transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 }
+  } });
+  expect(result).toMatchObject({ ok: true });
+  const published = room.exportCanvas();
+  if (!published.ok) throw new Error(published.message);
+  const fields = published.canvas.nodeData.actor!;
+  expect(fields.modelRig).toBeDefined();
+  const normalized = normalizeModelDefinition({ modelScript: fields.modelScript, modelScriptLanguage: fields.modelScriptLanguage,
+    modelScriptVersion: fields.modelScriptVersion, placement: fields.modelPlacement, rig: fields.modelRig });
+  expect(normalized.ok && normalized.value.contentVersion.contentHash).toBe((fields.modelContentVersion as { contentHash: string }).contentHash);
+  const read = await service.read(query);
+  expect(read.ok && read.view.sceneModels?.[0]?.animationRig?.motionReference).toBeDefined();
+});
+
+it("resolves the effective rig for legacy rig.joint scripts without mutating the model", async () => {
+  const { service, room } = await fixture({ animationScript: null, modelScript: humanoidSource });
+  const read = await service.read(query);
+  expect(read.ok && read.view.sceneModels?.[0]?.animationRig?.motionReference).toBeDefined();
+  const published = room.exportCanvas();
+  expect(published.ok && published.canvas.nodeData.actor?.modelRig).toBeUndefined();
+});
+
+it("keeps plain geometry without humanoid metadata", async () => {
+  const { service } = await fixture({ animationScript: null });
+  const read = await service.read(query);
+  expect(read.ok && read.view.sceneModels?.[0]?.animationRig?.rig).toBeNull();
+  expect(read.ok && read.view.sceneModels?.[0]?.animationRig?.motionReference).toBeUndefined();
+});
+
+it("preserves custom rig parameters and content hashes across director replacement, and blocks removal", async () => {
+  const custom = referenceHumanoidRig({ ...HUMANOID_REFERENCE_PARAMETERS, leftUpperArm: 0.42 });
+  if (!custom.ok) throw new Error("Invalid fixture rig");
+  const { service, room } = await fixture({ animationScript: null, modelScript: humanoidSource, modelRig: custom.value });
+  const before = room.exportCanvas();
+  if (!before.ok) throw new Error(before.message);
+  const identity = { kind: "instance" as const, instanceId: "actor" };
+  const result = await service.write({ contextId: query.contextId, operation: {
+    kind: "replace-model-content", operationId: "custom-replace", instanceId: "actor",
+    expectedVersion: worldObjectVersion(before.canvas, identity)!, content: { modelScript: humanoidSource + "\n// revised" }
+  } });
+  expect(result).toMatchObject({ ok: true });
+  const after = room.exportCanvas();
+  if (!after.ok) throw new Error(after.message);
+  const fields = after.canvas.nodeData.actor!;
+  expect(fields.modelRig).toEqual(custom.value);
+  const normalized = normalizeModelDefinition({ modelScript: fields.modelScript, modelScriptLanguage: fields.modelScriptLanguage,
+    modelScriptVersion: fields.modelScriptVersion, placement: fields.modelPlacement, rig: fields.modelRig });
+  expect(normalized.ok && normalized.value.contentVersion.contentHash).toBe((fields.modelContentVersion as { contentHash: string }).contentHash);
+  const revision = room.currentRevision;
+  expect(await service.write({ contextId: query.contextId, operation: {
+    kind: "replace-model-content", operationId: "remove-rig", instanceId: "actor",
+    expectedVersion: worldObjectVersion(after.canvas, identity)!, content: { modelScript: "scene.box({});" }
+  } })).toMatchObject({ ok: false, code: "invalid-data", message: expect.stringContaining("不能移除已有骨架") });
+  expect(room.currentRevision).toBe(revision);
+});
+
+it('validates generated walks against actual rig, transform and writable scope',async()=>{
+ const modelScript=humanoidSource+'\nfor(const side of ["Left","Right"])scene.box({id:side+"Sole",parent:rig.joint(side+"Foot"),position:[0,-0.04,0.08],size:[0.24,0.14,0.38]});';
+ const {service,room}=await fixture({animationScript:null,modelScript});
+ const read=await service.read(query);if(!read.ok)throw new Error(read.message);
+ const profile=read.view.sceneModels?.find(m=>m.instanceId==='actor')?.animationRig?.walkProfile;
+ expect(profile).toBeTruthy();
+ const options={startTime:0,endTime:24,path:[[-1,-1],[1,-1],[1,1],[-1,1]],cornerRadius:.5,strideLength:.6,stepHeight:.09,scale:1,baseYawDegrees:0,profile};
+ const write=(id:string,target='actor',changes={})=>service.write({contextId:query.contextId,operation:{kind:'set-scene-animation-script',operationId:id,duration:24,loop:true,script:`motion.instance.walk(${JSON.stringify(target)},${JSON.stringify({...options,...changes})});`}});
+ expect(await write('walk-good')).toMatchObject({ok:true});
+ const revision=room.currentRevision;
+ expect(await write('walk-bad-scale','actor',{scale:1.1})).toMatchObject({ok:false,code:'invalid-data'});
+ expect(await write('walk-bad-yaw','actor',{baseYawDegrees:30})).toMatchObject({ok:false,code:'invalid-data'});
+ expect(await write('walk-bad-profile','actor',{profile:{...profile,armsDownPose:{LeftUpperArm:[0,0,-80],RightUpperArm:[0,0,80]}}})).toMatchObject({ok:false,code:'invalid-data'});
+ expect(await write('walk-outside','missing')).toMatchObject({ok:false,code:'outside-scope'});
+ expect(room.currentRevision).toBe(revision);
 });

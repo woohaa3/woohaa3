@@ -10,6 +10,7 @@ fn area() -> SceneArea {
     SceneArea {
         node_id: "area".into(),
         title: "大厅".into(),
+        playback: None,
         bounds: SceneAreaBounds {
             min: SceneAreaPoint { u: -2.0, v: -2.0 },
             max: SceneAreaPoint { u: 2.0, v: 2.0 },
@@ -164,4 +165,39 @@ fn scope_title_hits_follow_viewport_and_position_increments() {
     assert_eq!(point_query(generation, probe.x + 100.0, probe.y + 500.0, 0.1, None).hit,
         Some(PointHit::Node { node_id: "g".into() }));
     assert_eq!(point_query(generation, probe.x, probe.y, 0.1, None).hit, None);
+}
+
+#[test]
+fn scene_area_player_queries_share_the_lower_right_render_geometry() {
+    clear_snapshot();
+    let mut scene = scene(vec![], vec![]);
+    let mut scope = area();
+    assert!(crate::canvas_query::scene_area_player::geometry(&scope, 1.0).is_none());
+    scope.playback = Some(crate::protocol::SceneAreaPlayback {
+        time: 1.0,
+        duration: 4.0,
+        playing: false,
+        r#loop: true,
+    });
+    scene.scene_areas = vec![scope];
+    for zoom in [0.3, 1.0, 3.0] {
+        scene.viewport.zoom = zoom;
+        let generation = accept_scene(&scene);
+        let geometry =
+            crate::canvas_query::scene_area_player::geometry(&scene.scene_areas[0], zoom).unwrap();
+        assert!(geometry.center.x > 0.0 && geometry.center.y > 0.0);
+        assert!(geometry.axis.y.abs() > 0.1);
+        let (a, b) = crate::canvas_query::scene_area_player::track(&geometry);
+        for (control, x) in [("play", -108.0), ("track", -40.0), ("loop", 108.0)] {
+            let point = geometry.center + geometry.axis * (x * geometry.scale());
+            assert_eq!(
+                point_query(generation, point.x, point.y, zoom, None).hit,
+                Some(PointHit::SceneAreaPlayback {
+                    node_id: "area".into(),
+                    control: control.into(),
+                    track: [a.x, a.y, b.x, b.y]
+                })
+            );
+        }
+    }
 }

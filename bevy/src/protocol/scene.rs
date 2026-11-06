@@ -358,6 +358,16 @@ pub(crate) struct SceneArea {
     #[serde(default)]
     pub(crate) title: String,
     pub(crate) bounds: SceneAreaBounds,
+    #[serde(default)]
+    pub(crate) playback: Option<SceneAreaPlayback>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub(crate) struct SceneAreaPlayback {
+    pub(crate) time: f32,
+    pub(crate) duration: f32,
+    pub(crate) playing: bool,
+    pub(crate) r#loop: bool,
 }
 
 #[derive(Clone, Deserialize)]

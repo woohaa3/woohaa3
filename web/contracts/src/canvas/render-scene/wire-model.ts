@@ -39,6 +39,10 @@ export const DEFAULT_MODEL_PREVIEW: BevyModelPreview = {
  * 用于 Bevy 判断是否需要替换 ECS entity 树，`sceneVersion` 决定渲染语义。
  */
 export type BevyModelReference = {
+  /** Stable bind-pose anchor in asset XYZ; editor projects it onto world ground. */
+  groundAnchorLocal?: [number, number, number];
+  /** Local additive joint/group rotations; model axes, normalized xyzw quaternion. */
+  partRotations?: Record<string, readonly [number, number, number, number]>;
   /** Scene IR 版本（V1 或 V2）；显式携带以便 Bevy 区分渲染语义。 */
   sceneVersion: string;
   /** 按内容签名注册的资源 key（`sceneVersion:signature`）；不含节点 id。 */

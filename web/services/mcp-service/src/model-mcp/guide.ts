@@ -53,6 +53,10 @@ ${methods}
 - 系统已经有这 ${HUMANOID_V1_JOINT_IDS.length} 个关节：${HUMANOID_V1_JOINT_IDS.join("、")}。
 - 每个可见形状用 rig.joint("LeftUpperLeg") 这类调用做 parent。不要把肢体挂到 Root，也不要自造 thigh、shin、Shoulder、Chest、Neck、Hand。
 - 手和枪用 rig.joint("LeftHand") / rig.joint("RightHand")，它们是前臂挂点，不是关节。
+- 关节原点就是髋、膝、肩、肘。position 以及 segment 的 from/to 是该关节的局部坐标，不是整个人的站立高度。
+- 肢体从关节原点伸向子关节。左大腿用 parent: rig.joint("LeftUpperLeg")，from: [0, 0, 0]，to: [0, -0.4, 0]。左上臂平举到 [0.3, 0, 0]。禁止把 y=1.69 的头或 y=0.06 的脚再挂到关节上，局部坐标会叠到关节位移上，身体会散开。
+- 腹部必须连上髋和脊柱。脊柱在髋上方 0.5 米，中间没有腰关节。不要只在 Hips 和 Spine 原点各放一个小盒子。用这一段填上：scene.segment({ id: "abdomen", parent: rig.joint("Spine"), from: [0, -0.5, 0], to: [0, 0, 0], width: 0.32, depth: 0.24, shape: "box" })。胸甲中心要低于头关节，头在 Spine 上方 0.25 米。
+- 髋在模型原点，脚在负 Y。这是参考姿态。不要改关节位置来把脚挪到 y=0。
 - 动作的 targetId 必须是上面的关节 id。原地跑步要给左右 UpperLeg、LowerLeg、Foot 各写不同的旋转轨道。工具返回成功不等于用了关节。
 - 这条基准只描述模型自身的绝对尺寸；卡片按模型 extent 归一化显示，卡片里看起来一样大不代表
   实际尺寸一致。不要用卡片取景、节点矩形或画布 zoom 反推单位。
@@ -85,7 +89,7 @@ ${methods}
 对象 id 必须稳定且唯一，parent 必须先创建。脚本不得依赖随机数、当前时间、网络或文件系统；
 同一脚本重复执行必须生成完全相同的场景。
 
-连续人物示例（共享肘关节，上臂与前臂连接在同一点）：
+无骨架连接示例（坐标相对模型原点，人形和机甲不要照搬这些绝对高度）：
 ${guide.example}
 
 ${motionApiGuideText()}`;
