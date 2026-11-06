@@ -16,14 +16,25 @@ const VIDEO_ASPECTS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "portrait", 
 export function describeGrsaiModel(model: GrsaiModel): GenerationModelDescription {
   return {
     title: model.title,
-    inputSchema: grsaiInputSchema(model.kind),
+    inputSchema: grsaiInputSchema(model.kind, model.id),
     defaultInput: grsaiDefaultInput(model.kind),
     promptRequirement: "required"
     // 没有远端取消接口：保持缺省的 local（宿主只停本地轮询）。
   };
 }
 
-export function grsaiInputSchema(kind: GrsaiKind): Record<string, unknown> {
+/**
+ * grsai 的视频分辨率是模型级契约。公开模型表目前声明：minimax-h3 使用
+ * `480p/768p/1080p`，agnes-video-2.5 使用 `720p/1080p/2k`。未知模型保留
+ * 通用集合，且不猜默认值，避免把某个模型的值发给另一个模型。
+ */
+export function grsaiVideoResolutions(modelId?: string): readonly string[] {
+  const id = modelId?.trim().toLowerCase();
+  if (id === "agnes-video-2.5") return ["720p", "1080p", "2k"];
+  return ["480p", "768p", "1080p"];
+}
+
+export function grsaiInputSchema(kind: GrsaiKind, modelId?: string): Record<string, unknown> {
   if (kind === "language") {
     return {
       type: "object",
@@ -45,7 +56,7 @@ export function grsaiInputSchema(kind: GrsaiKind): Record<string, unknown> {
         prompt: promptSchema(),
         urls: referenceSchema(9),
         aspectRatio: aspectRatioField({ ratios: VIDEO_ASPECTS, adaptive: false, title: "比例" }),
-        resolution: resolutionField({ tiers: ["480p", "768p", "1080p"], title: "分辨率" }),
+        resolution: resolutionField({ tiers: grsaiVideoResolutions(modelId), title: "分辨率" }),
         duration: { type: "number", title: "时长（秒）", minimum: 1, maximum: 15, "x-component": "NumberPicker" }
       }
     };
