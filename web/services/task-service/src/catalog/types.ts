@@ -8,7 +8,7 @@
  * 把"执行"从 provider 视图里拆出来，是因为执行已经托管给运行时（D14）：
  * 网关提交任务、拿终态，不再自己调 provider。
  */
-import type { CanvasTaskModelType, GenerationModelCapabilityFacts } from "@woohaa3/contracts";
+import type { CanvasReferencePolicy, CanvasTaskModelType, GenerationModelCapabilityFacts } from "@woohaa3/contracts";
 
 /** `PptaskDescription` 的结构子集（避免网关直接依赖 pptask 类型）。 */
 export type DescribedModel = {
@@ -24,6 +24,8 @@ export type DescribedModel = {
   cancel?: "local" | "remote" | "unsupported";
   /** 模型事实能力（Provider 声明；目录校验后透传）。 */
   capabilityFacts?: GenerationModelCapabilityFacts;
+  /** 模型级身份参考策略；缺省 optional（change: 2026-11-06-require-identity-reference）。 */
+  referencePolicy?: CanvasReferencePolicy;
 };
 
 /** Provider 自己的资源条目（注册表为它发行 modelKey）。 */

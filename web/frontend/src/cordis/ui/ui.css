@@ -1051,6 +1051,27 @@
  * ------------------------------------------------------------------ */
 .ref-tile-strip-wrap { position: relative; }
 
+/* 身份参考策略状态与切换（change: 2026-11-06-require-identity-reference）。 */
+.ref-policy-status {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 4px;
+	color: var(--app-web-text-muted);
+	font-size: 11px;
+}
+
+.ref-policy-status[data-identity-required="true"] { color: var(--app-web-text-primary); }
+
+.ref-policy-status__toggle {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--app-interaction-accent);
+	font: inherit;
+	cursor: pointer;
+}
+
 .ref-tile-strip {
 	display: flex;
 	flex-wrap: nowrap;

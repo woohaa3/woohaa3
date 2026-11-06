@@ -110,6 +110,15 @@ export function sanitizeWoohaa3CanvasNodeData(input: unknown): Woohaa3CanvasNode
       // Invalid imported configuration is discarded; strings/numbers never mean true.
       if (normalizedData && normalizedData.retainWhenEmpty !== undefined && typeof normalizedData.retainWhenEmpty !== "boolean") delete normalizedData.retainWhenEmpty;
       if (normalizedData && normalizedData.groupCollapsed !== undefined && typeof normalizedData.groupCollapsed !== "boolean") delete normalizedData.groupCollapsed;
+      // 身份参考策略只接受两个稳定值；非法值在加载边界丢弃，执行时按 optional 处理。
+      if (
+        normalizedData &&
+        normalizedData.referencePolicy !== undefined &&
+        normalizedData.referencePolicy !== "optional" &&
+        normalizedData.referencePolicy !== "identity-required"
+      ) {
+        delete normalizedData.referencePolicy;
+      }
       // 已移除的组徽标展示倍率：读取时静默丢弃，不参与呈现，也不写回或清空权威文档。
       if (normalizedData) omitRemovedNodeDataFields(normalizedData);
       return normalizedNodeId && normalizedData ? [[normalizedNodeId, normalizedData]] : [];

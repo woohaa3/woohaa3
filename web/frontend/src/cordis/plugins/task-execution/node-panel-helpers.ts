@@ -10,7 +10,13 @@ import type {
   CanvasReferenceMediaKind,
   ServerCanvas
 } from "@woohaa3/contracts";
-import { decodeWorldCamera, worldCameraShotContext } from "@woohaa3/contracts";
+import {
+  decodeWorldCamera,
+  hasReadyImageReference,
+  IDENTITY_REFERENCE_REQUIRED_REASON,
+  worldCameraShotContext,
+  type CanvasReferencePolicy
+} from "@woohaa3/contracts";
 import { catalogBlockingReasons, catalogStateBlockingReasons, capabilityForModel } from "./catalog-projection.js";
 import { resolveNodeReferenceInputs } from "./input-resolution.js";
 import { readGenerationMode, validateGenerationModeInputs } from "@woohaa3/contracts";
@@ -60,6 +66,8 @@ export type ResolveBlockingReasonsInput = {
   model: string;
   canvas: ServerCanvas | null;
   panelParameters: Record<string, unknown>;
+  /** 节点设置优先于模型声明的身份参考策略。 */
+  referencePolicy?: CanvasReferencePolicy;
 };
 
 /**
@@ -89,6 +97,12 @@ export function resolveBlockingReasons(input: ResolveBlockingReasonsInput): stri
         bindings: capability.bindings
       });
       reasons.push(...resolution.blockingReasons.filter(reason => reason !== "等待镜头参考图片准备完成"));
+      if (
+        input.referencePolicy === "identity-required" &&
+        !hasReadyImageReference(resolution.inputs)
+      ) {
+        reasons.push(IDENTITY_REFERENCE_REQUIRED_REASON);
+      }
       // 视频生成模式约束（edit_video / first_last_frame）：与 Canvas Service 共用同一规则，
       // 面板在 provider 调用前就给出稳定原因，而不是静默提交注定失败的输入。
       const mode = readGenerationMode(input.panelParameters);

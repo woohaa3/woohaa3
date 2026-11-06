@@ -18,6 +18,7 @@ import { sanitizeWoohaa3CanvasDocument,
 import { normalizeCanvas, type NormalizeCanvasOptions } from "./normalization";
 import { validateWorldIdentities } from "./world-identities.js";
 import { decodeWorldCaptureGenerationBinding } from "../world-capture-pipeline-contract.js";
+import type { CanvasTaskInput } from "../../task/dto.js";
 import { DEFAULT_CANVAS_TITLE,
   type CanvasAssetSource,
   type CanvasAssetStatus,
@@ -279,11 +280,54 @@ function sanitizeStoredJobs(
       // 必须和 runId 一样往返保留，否则导出画布就丢。
       modelKey: isRecord(entry) ? readNonEmptyString(entry.modelKey) : undefined,
       ...(worldCapture?.ok ? { worldCapture: worldCapture.value } : {}),
+      ...(isRecord(entry) && entry.references !== undefined
+        ? { references: sanitizeJobReferences(entry.references) }
+        : {}),
       status: status ?? "idle",
       error: isRecord(entry) ? readNonEmptyString(entry.error) : undefined,
       updatedAt: (isRecord(entry) ? readIsoString(entry.updatedAt) : undefined) ?? now
     });
   });
+  return result;
+}
+
+/**
+ * 参考输入快照：只保留稳定引用与输入槽身份。
+ *
+ * 批次来自不受信任输入；未知附加字段、浏览器 URL、bytes 一律丢弃，不进入规范聚合。
+ */
+function sanitizeJobReferences(input: unknown): CanvasTaskInput[] {
+  if (!Array.isArray(input)) return [];
+  const result: CanvasTaskInput[] = [];
+  for (const entry of input) {
+    if (!isRecord(entry)) continue;
+    const assetId = readNonEmptyString(entry.assetId);
+    const role = readNonEmptyString(entry.role);
+    const storageKey = readNonEmptyString(entry.storageKey);
+    const mediaType = readNonEmptyString(entry.mediaType);
+    if (!assetId || !role || !storageKey || !mediaType) continue;
+    const mediaKind =
+      entry.mediaKind === "image" || entry.mediaKind === "video" || entry.mediaKind === "audio"
+        ? entry.mediaKind
+        : undefined;
+    const slotId = readNonEmptyString(entry.slotId);
+    const sourceNodeId = readNonEmptyString(entry.sourceNodeId);
+    const order =
+      typeof entry.order === "number" && Number.isInteger(entry.order) && entry.order >= 0
+        ? entry.order
+        : undefined;
+    result.push({
+      assetId,
+      role,
+      storageKey,
+      mediaType,
+      ...(mediaKind ? { mediaKind } : {}),
+      ...(slotId ? { slotId } : {}),
+      ...(sourceNodeId ? { sourceNodeId } : {}),
+      ...(order !== undefined ? { order } : {})
+    });
+    if (result.length >= 16) break;
+  }
   return result;
 }
 

@@ -3,7 +3,12 @@
  * （change: 2026-09-29-add-pluggable-model-interactions，任务 4.1）。
  */
 import type { CanvasSession } from "../../contracts.js";
-import type { CanvasTaskCatalogModel, CanvasTaskModelType, ServerCanvas } from "@woohaa3/contracts";
+import type {
+  CanvasReferencePolicy,
+  CanvasTaskCatalogModel,
+  CanvasTaskModelType,
+  ServerCanvas
+} from "@woohaa3/contracts";
 import { planConnectEdge, planDeleteEdge } from "../../../extension-api/command-planner.js";
 import type { ModelReferenceItem } from "../../contract/model-interaction.js";
 
@@ -20,6 +25,23 @@ export function addReference(session: CanvasSession, target: string, source: str
   return session.submitCommands(
     planConnectEdge({ source, target }),
     `web-ref-add-${Date.now().toString(36)}`
+  ).ok;
+}
+
+/**
+ * 切换节点级身份参考策略（受控 Canvas 命令）。
+ *
+ * `nodeData.patch` 合并现有字段，不重写 prompt/参数/输入映射。
+ */
+export function setReferencePolicy(
+  session: CanvasSession,
+  nodeId: string,
+  referencePolicy: CanvasReferencePolicy
+): boolean {
+  if (!session.isWritable()) return false;
+  return session.submitCommands(
+    [{ type: "nodeData.patch", nodeId, value: { referencePolicy } }],
+    `web-ref-policy-${Date.now().toString(36)}`
   ).ok;
 }
 
