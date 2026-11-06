@@ -84,6 +84,13 @@ export type ModelPanelProps = {
   readOnly: boolean;
   presentation: ExecutionPanelPresentation;
   status: ModelExecutionStatus;
+  /**
+   * 视频节点从未提交过任务（无 active run、无产出、未进入终态）。
+   *
+   * Panel 据此显示「未提交 · 待配置」，而不是把空节点读成成功或泛化失败
+   * （change: 2026-11-06-guard-video-generation-inputs）。
+   */
+  unsubmitted?: boolean;
   /** 权威节点任务进度，百分比 0–100；未提供时只显示阶段。 */
   progress?: number;
   /** 失败态的安全错误信息（可选）。 */

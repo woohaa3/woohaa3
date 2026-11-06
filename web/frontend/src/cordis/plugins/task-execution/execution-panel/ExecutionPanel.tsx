@@ -370,11 +370,20 @@ export function ExecutionPanel({
 	);
 
 	// 紧凑面由节点/活动栈与主按钮承载阶段；展开面遮住画布，必须就近保留任务反馈。
+	// 未提交的视频节点在这里明确表达「还没生成」，而不是留空或伪装成失败
+	// （change: 2026-11-06-guard-video-generation-inputs，N12）。
+	const unsubmitted = status === "idle" && data.unsubmitted === true;
 	const statusRow =
 		status === "failed" && !expanded ? (
 			<div className="mc-panel__status-row">
 				<span className="mc-panel__status" data-status={status}>
 					{STATUS_LABEL[status]}
+				</span>
+			</div>
+		) : unsubmitted && !expanded ? (
+			<div className="mc-panel__status-row">
+				<span className="mc-panel__status" data-status="idle">
+					未提交 · 待配置 · 选择模型并填写提示词后提交
 				</span>
 			</div>
 		) : null;
@@ -410,6 +419,7 @@ export function ExecutionPanel({
 			status={status}
 			taskLabel={TASK_LABEL[taskKind]}
 			readOnly={readOnly}
+			{...(unsubmitted ? { unsubmitted } : {})}
 			{...(data.progress !== undefined ? { progress: data.progress } : {})}
 			{...(onViewTask ? { onViewTask } : {})}
 		/>

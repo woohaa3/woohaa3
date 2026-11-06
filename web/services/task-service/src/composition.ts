@@ -49,7 +49,8 @@ import {
   type TaskExecutionState,
   type TaskExecutionDetail,
   withWorldCaptureTaskInput,
-  worldCaptureReferenceInput
+  worldCaptureReferenceInput,
+  resolveModelParameters
 } from "@woohaa3/contracts";
 import { buildProviderInputForResource } from "./composition/provider-input.js";
 import { resolveReferenceUrls, type ReferenceObjectReader } from "./composition/reference-urls.js";
@@ -274,7 +275,14 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
   const submit = async (
     request: TaskSubmitRequest,
     extensionAssociation?: { extensionId: string; configVersion: number }
-  ): Promise<{ reused: boolean; state: TaskExecutionState; conflict?: boolean; mediaError?: string }> => {
+  ): Promise<{
+    reused: boolean;
+    state: TaskExecutionState;
+    conflict?: boolean;
+    mediaError?: string;
+    /** 参数 schema 拒绝：稳定 code 供调用方区分可修正输入与运行时故障。 */
+    parameterError?: { code: "missing-parameter" | "invalid-parameter"; message: string };
+  }> => {
     const association: TaskAssociation = {
       canvasId: request.canvasId,
       nodeId: request.nodeId,
@@ -299,11 +307,6 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
     // metadata. Normalizing here covers in-process ports that did not come through
     // the HTTP decoder; the helper de-duplicates an already materialized input.
     const inputs = withWorldCaptureTaskInput(request.inputs, request.worldCapture);
-    const payloadHash = computeSubmitPayloadHash({ ...request, inputs });
-    const claim = submitKeys.claim(request.workerTaskKey, payloadHash, now);
-    if (claim.conflict) {
-      return { reused: false, state: "queued", conflict: true };
-    }
 
     const resource = registry().resolveResource(request.modelKey);
     const providerId = resource?.providerId ?? "litellm";
@@ -365,6 +368,48 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
         markSubmitFailed(captureReference.message, "CaptureMediaUnavailable");
         return { reused: false, state: "failed", mediaError: captureReference.message };
       }
+    }
+
+    // 模型参数 schema 复验（change: 2026-11-06-guard-video-generation-inputs）：在创建 provider
+    // 任务前按目录模型自己的 schema 拒绝缺参/越界请求，并把默认值并入实际提交参数。描述读取
+    // 失败不在这里拦住：后续 provider 调用会给出真正的失败原因，避免把一个目录读取抖动放大。
+    let description: {
+      modelType?: string;
+      inputSchema?: Record<string, unknown>;
+      defaultInput?: Record<string, unknown>;
+    } | undefined;
+    try {
+      description = await registry().catalog.describe(request.modelKey);
+    } catch (error) {
+      options.logger?.({
+        event: "task-parameter-schema-unavailable",
+        taskKey: request.workerTaskKey,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+    if (description !== undefined) {
+      const guarded = resolveModelParameters(
+        {
+          modelType: description.modelType ?? request.modelType,
+          inputSchema: description.inputSchema,
+          defaultInput: description.defaultInput
+        },
+        request.parameters,
+        { prompt: request.prompt }
+      );
+      if (guarded.issues.length > 0) {
+        const issue = guarded.issues[0]!;
+        const code = issue.kind === "missing" ? "missing-parameter" : "invalid-parameter";
+        markSubmitFailed(issue.message, issue.kind === "missing" ? "MissingParameter" : "InvalidParameter");
+        return { reused: false, state: "failed", parameterError: { code, message: issue.message } };
+      }
+      request = { ...request, parameters: guarded.parameters };
+    }
+
+    const payloadHash = computeSubmitPayloadHash({ ...request, inputs });
+    const claim = submitKeys.claim(request.workerTaskKey, payloadHash, now);
+    if (claim.conflict) {
+      return { reused: false, state: "queued", conflict: true };
     }
 
     if (claim.reused) {

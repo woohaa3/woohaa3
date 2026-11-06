@@ -13,7 +13,7 @@ import type {
 import { decodeWorldCamera, worldCameraShotContext } from "@woohaa3/contracts";
 import { catalogBlockingReasons, catalogStateBlockingReasons, capabilityForModel } from "./catalog-projection.js";
 import { resolveNodeReferenceInputs } from "./input-resolution.js";
-import { readGenerationMode, validateGenerationModeInputs } from "@woohaa3/contracts";
+import { modelParameterBlockingReasons, readGenerationMode, validateGenerationModeInputs } from "@woohaa3/contracts";
 import { resolveModelMcpServerUrl } from "../../mcp-endpoint.js";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
 import type { CatalogState } from "../../contracts.js";
@@ -58,6 +58,10 @@ export type ResolveBlockingReasonsInput = {
   catalog: CanvasTaskCatalog | null;
   catalogState: CatalogState;
   model: string;
+  /** 当前目录模型；Host 用它读取 schema，缺失时参数门禁只按目录状态处理。 */
+  modelDefinition?: CanvasTaskCatalogModel | null;
+  /** 当前受控 prompt；只用于 `required` 里的 prompt 判定（Host 另有一条上游文字规则）。 */
+  prompt?: string;
   canvas: ServerCanvas | null;
   panelParameters: Record<string, unknown>;
 };
@@ -104,6 +108,22 @@ export function resolveBlockingReasons(input: ResolveBlockingReasonsInput): stri
           )
         );
       }
+    }
+    // 模型 schema 门禁：required / allowed values / 数值范围。与 Canvas/Task 服务端共用同一
+    // 纯函数，Host 在提交前重算，插件 Panel 绕过自己的 UI 检查也提交不出去
+    // （change: 2026-11-06-guard-video-generation-inputs）。
+    if (input.modelDefinition) {
+      reasons.push(
+        ...modelParameterBlockingReasons(
+          {
+            modelType: input.modelDefinition.modelType,
+            inputSchema: input.modelDefinition.inputSchema,
+            defaultInput: input.modelDefinition.defaultInput
+          },
+          input.panelParameters,
+          { prompt: input.prompt, skipRequired: ["prompt"] }
+        )
+      );
     }
   }
   return dedupe(reasons);

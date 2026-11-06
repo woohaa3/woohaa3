@@ -427,4 +427,34 @@ describe("L0 溯源：结构化错误", () => {
   it("缺失 status/code 时不伪造字段", () => {
     expect(sanitizeError({ message: "boom" })).toEqual({ message: "boom" });
   });
+
+  it("Provider 参数错误投影为含字段与范围的文案，不落原始响应", () => {
+    const repo = new SqliteTaskHistoryRepository({ path: tempStore() });
+    try {
+      projectExecutionRecord(repo, {
+        id: "run-parameter-error-1",
+        providerId: "videohub",
+        modelType: "video",
+        state: "failed",
+        error: {
+          name: "ProviderHttpError",
+          message: "duration maximum value is 12 seconds, and duration must be greater than 4 seconds",
+          status: 400,
+          code: "invalid_request_error"
+        },
+        events: [],
+        createdAt: "2026-11-06T00:00:00.000Z",
+        updatedAt: "2026-11-06T00:00:01.000Z",
+        durationMs: 1000
+      } as never);
+      const detail = repo.get("run-parameter-error-1");
+      expect(detail?.state).toBe("failed");
+      expect(detail?.error?.message).toContain("时长");
+      expect(detail?.error?.message).toContain("12 秒");
+      expect(detail?.error?.message).toContain("4 秒");
+      expect(detail?.error?.message).not.toContain("maximum value is");
+    } finally {
+      repo.close();
+    }
+  });
 });

@@ -4,6 +4,7 @@
  */
 import type { ExecutionRecord } from "@sdppp/pptask-worker-server/history";
 import type { TaskExecutionState, TaskResultSummary } from "@woohaa3/contracts";
+import { describeTaskFailure } from "@woohaa3/contracts";
 import type { SqliteTaskHistoryRepository } from "../repository/history-repository.js";
 import type { TaskAssociation } from "./types.js";
 
@@ -47,7 +48,11 @@ export function projectExecutionRecord(
     (record.error?.message
       ? {
           name: record.error.name,
-          message: record.error.message,
+          message: describeTaskFailure({
+            message: record.error.message,
+            ...(record.error.status !== undefined ? { status: record.error.status } : {}),
+            ...(record.error.code !== undefined ? { code: record.error.code } : {})
+          }),
           ...(record.error.status !== undefined ? { status: record.error.status } : {}),
           ...(record.error.code !== undefined ? { code: record.error.code } : {})
         }

@@ -35,6 +35,10 @@ export const PROTOCOL_ERROR_CODES = [
   "limit-exceeded",
   /** 请求结构非法。 */
   "malformed-request",
+  /** 模型参数缺少必填项（可修正后重试）。 */
+  "missing-parameter",
+  /** 模型参数不在允许值/范围内（可修正后重试）。 */
+  "invalid-parameter",
   /** 引用的任务记录不存在。 */
   "task-not-found",
   /** 相同幂等 key 使用了不同 payload。 */

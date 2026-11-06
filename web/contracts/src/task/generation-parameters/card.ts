@@ -23,7 +23,7 @@ import type { PresetModelType } from "./types.js";
  * **只登记我们真的会适配的**：加一个厂商就要能维护它的文档与值域，列进来却不维护，
  * 只会让「模型选择器里有一个永远没人更新的卡片」。
  */
-export type PresetVendor = "ark" | "openai" | "google" | "minimax" | "generic";
+export type PresetVendor = "ark" | "openai" | "google" | "minimax" | "agnes" | "generic";
 
 export type PresetCard = {
   /** 稳定标识，只用于诊断与展示；同一类型内唯一。 */
