@@ -3132,6 +3132,41 @@
 	height: 16px;
 }
 
+/* 每条编辑记录的等待/冲突状态：随工具条展示，不阻断画布输入。 */
+.canvas-edit-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11px;
+	color: var(--app-web-text-muted);
+}
+
+.canvas-edit-status__waiting {
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+.canvas-edit-status__conflict {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	color: var(--app-web-text-primary);
+}
+
+.canvas-edit-status__skip {
+	padding: 1px 6px;
+	border: 0;
+	border-radius: 6px;
+	background: var(--app-interaction-accent-soft);
+	color: var(--app-web-text-primary);
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.canvas-edit-status__skip:hover {
+	background: var(--app-interaction-accent);
+}
+
 /* 删除后的撤销提示：底部居中，位于控件面板上方。 */
 .canvas-undo-toast {
 	position: fixed;
