@@ -1,19 +1,19 @@
 /**
- * 百炼（Model Studio / DashScope）生图官方 `size` 语义的**形状与纯函数**——这里没有
+ * 阿里（万相 / Qwen-Image / Z-Image）生图官方 `size` 语义的**形状与纯函数**——这里没有
  * 「某个版本有什么」的数据。
  *
- * 每个模型的能力写在它的卡片上（`generation-parameters/cards/image/bailian/bailian-*.ts` 的
- * `bailian` 块）：比例、档位、默认比例与档位、像素表引用、参考图上限、负向提示词与智能改写。
+ * 每个模型的能力写在它的卡片上（`generation-parameters/cards/image/alibaba/alibaba-*.ts` 的
+ * `alibaba` 块）：比例、档位、默认比例与档位、像素表引用、参考图上限、负向提示词与智能改写。
  * 卡片是唯一事实来源，本模块只提供：
  *
- * 1. `BailianSizePreset`：卡片投影出来的形状，百炼 Provider 与 `image-parameters` 共用；
+ * 1. `AlibabaSizePreset`：卡片投影出来的形状，百炼 Provider 与 `image-parameters` 共用；
  * 2. **官方像素表**：同一张表被多个型号共用（万相 2.7 的两张表、Qwen-Image 全系、Z-Image），
  *    抄进每张卡片就是多份真相，所以按「档位」收敛在这里，卡片只声明用哪几个档位；
  * 3. 查表函数（比例 + 档位 → 像素）。
  *
- * 与即梦的关键差异：百炼的 `size` 用 `宽*高`（星号），不是 `WIDTHxHEIGHT`；而且百炼**没有**
- * `aspect_ratio` 参数，宽高比同样只能通过 `size` 表达。所以像素表里存的就是最终要发的串，
- * 不做二次格式化。
+ * 与即梦的关键差异：百炼通道的 `size` 用 `宽*高`（星号），不是 `WIDTHxHEIGHT`；而且这套 API
+ * **没有** `aspect_ratio` 参数，宽高比同样只能通过 `size` 表达。所以像素表里存的就是最终要发
+ * 的串，不做二次格式化。
  *
  * 事实来源（2026-11-06 核对）：
  * - 生图总览 <https://help.aliyun.com/zh/model-studio/text-to-image>
@@ -24,13 +24,13 @@
  */
 
 /** 官方推荐像素表：比例 → 分辨率档 → `宽*高`。 */
-export type BailianSizeTable = Readonly<Record<string, Readonly<Record<string, string>>>>;
+export type AlibabaSizeTable = Readonly<Record<string, Readonly<Record<string, string>>>>;
 
 /** 万相 / Qwen-Image 共用的比例取值域（官方推荐的五个）。 */
-export const BAILIAN_WAN_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4"] as const;
+export const ALIBABA_WAN_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4"] as const;
 
 /** Z-Image 的比例域多出 2:3 / 3:2 / 21:9。 */
-export const BAILIAN_Z_IMAGE_ASPECT_RATIOS = [
+export const ALIBABA_Z_IMAGE_ASPECT_RATIOS = [
   "1:1", "2:3", "3:2", "3:4", "4:3", "16:9", "9:16", "21:9",
 ] as const;
 
@@ -40,7 +40,7 @@ export const BAILIAN_Z_IMAGE_ASPECT_RATIOS = [
  * 官方只给一张表，4K 档只对 `wan2.7-image-pro` 的文生图有效（带参考图与 2.7-image 都封顶
  * 2048*2048），所以 pro 与普通版分成两张表：普通版没有 4K 档。
  */
-const WAN_27_2K_SIZES: BailianSizeTable = {
+const WAN_27_2K_SIZES: AlibabaSizeTable = {
   "1:1": { "2K": "2048*2048" },
   "16:9": { "2K": "2688*1536" },
   "9:16": { "2K": "1536*2688" },
@@ -48,7 +48,7 @@ const WAN_27_2K_SIZES: BailianSizeTable = {
   "3:4": { "2K": "1728*2368" }
 };
 
-const WAN_27_1K_SIZES: BailianSizeTable = {
+const WAN_27_1K_SIZES: AlibabaSizeTable = {
   "1:1": { "1K": "1280*1280" },
   "16:9": { "1K": "1696*960" },
   "9:16": { "1K": "960*1696" },
@@ -57,7 +57,7 @@ const WAN_27_1K_SIZES: BailianSizeTable = {
 };
 
 /** 万相 pro 的 4K 档（仅纯文生图）。 */
-const WAN_27_4K_SIZES: BailianSizeTable = {
+const WAN_27_4K_SIZES: AlibabaSizeTable = {
   "1:1": { "4K": "4096*4096" },
   "16:9": { "4K": "4096*2304" },
   "9:16": { "4K": "2304*4096" },
@@ -66,7 +66,7 @@ const WAN_27_4K_SIZES: BailianSizeTable = {
 };
 
 /** Qwen-Image 系列：同一张推荐表，`1:1` 就是模型默认的 2048*2048。 */
-const QWEN_IMAGE_SIZES: BailianSizeTable = {
+const QWEN_IMAGE_SIZES: AlibabaSizeTable = {
   "1:1": { "2K": "2048*2048" },
   "16:9": { "2K": "2688*1536" },
   "9:16": { "2K": "1536*2688" },
@@ -75,7 +75,7 @@ const QWEN_IMAGE_SIZES: BailianSizeTable = {
 };
 
 /** Z-Image 只有 1K 档：官方推荐 1024*1024 到 1536*1536 三个总量。 */
-const Z_IMAGE_SIZES: BailianSizeTable = {
+const Z_IMAGE_SIZES: AlibabaSizeTable = {
   "1:1": { "1K": "1280*1280" },
   "2:3": { "1K": "1024*1536" },
   "3:2": { "1K": "1536*1024" },
@@ -88,7 +88,7 @@ const Z_IMAGE_SIZES: BailianSizeTable = {
 
 /** 同一张比例表按档位合并（`mergeSizeTables` 不覆盖同名比例，先给优先）。 */
 function combineSizeTables(
-  ...tables: readonly BailianSizeTable[]
+  ...tables: readonly AlibabaSizeTable[]
 ): Readonly<Record<string, Readonly<Record<string, string>>>> {
   const merged: Record<string, Record<string, string>> = {};
   for (const table of tables) {
@@ -100,23 +100,23 @@ function combineSizeTables(
 }
 
 /** 万相 pro：三档全开（4K 仅纯文生图，靠 `referenceResolutionCap` 收口）。 */
-export const BAILIAN_WAN_PRO_SIZES = combineSizeTables(
+export const ALIBABA_WAN_PRO_SIZES = combineSizeTables(
   WAN_27_4K_SIZES,
   WAN_27_2K_SIZES,
   WAN_27_1K_SIZES
 );
 
 /** 万相 2.7 普通版：没有 4K 档。 */
-export const BAILIAN_WAN_SIZES = combineSizeTables(WAN_27_2K_SIZES, WAN_27_1K_SIZES);
+export const ALIBABA_WAN_SIZES = combineSizeTables(WAN_27_2K_SIZES, WAN_27_1K_SIZES);
 
 /** Qwen-Image 全系：只有 2K 档。 */
-export const BAILIAN_QWEN_SIZES = QWEN_IMAGE_SIZES;
+export const ALIBABA_QWEN_SIZES = QWEN_IMAGE_SIZES;
 
 /** Z-Image：只有 1K 档，但比例最全。 */
-export const BAILIAN_Z_IMAGE_SIZES = Z_IMAGE_SIZES;
+export const ALIBABA_Z_IMAGE_SIZES = Z_IMAGE_SIZES;
 
-/** 卡片投影出来的百炼模型语义（`bailian-cards` 按 id 查找后交给 Provider）。 */
-export type BailianSizePreset = {
+/** 卡片投影出来的阿里模型语义（`alibaba-cards` 按 id 查找后交给 Provider）。 */
+export type AlibabaSizePreset = {
   /** 规范 id（取自卡片），仅用于诊断与测试。 */
   id: string;
   /** 比例取值域（按 UI 优先顺序）。 */
@@ -131,7 +131,7 @@ export type BailianSizePreset = {
    * 尺寸是文档的「推荐分辨率」，不是唯一合法值：上游接受一个像素总量区间，这里只挑官方列出
    * 的那一组，保证出图不踩边界。
    */
-  sizes: BailianSizeTable;
+  sizes: AlibabaSizeTable;
   /** 不传 `size` 时的兜底值（模型自己的默认分辨率）。 */
   fallbackSize: string;
   /**
@@ -157,11 +157,11 @@ export type BailianSizePreset = {
  * 比例 + 档位 → 官方像素值。
  *
  * 表的第一个维度是**比例**（`sizes[ratio][tier]`，与即梦的 `sizes[tier][ratio]` 相反），
- * 因为百炼官方文档就是按比例列出的。
+ * 因为阿里官方文档就是按比例列出的。
  * 比例或档位不在表里时返回 undefined，调用方回退到 `fallbackSize`。
  */
-export function bailianPixelSize(
-  preset: BailianSizePreset,
+export function alibabaPixelSize(
+  preset: AlibabaSizePreset,
   aspectRatio: unknown,
   resolution: unknown
 ): string | undefined {
@@ -177,8 +177,8 @@ export function bailianPixelSize(
  * 用它把面板给的档位收窄到上游接受的范围，同时让「选了 4K 但带参考图」退到 2K 而不是发一个
  * 注定 400 的 `size`。
  */
-export function clampBailianResolution(
-  preset: BailianSizePreset,
+export function clampAlibabaResolution(
+  preset: AlibabaSizePreset,
   resolution: unknown,
   hasReferences: boolean
 ): string {

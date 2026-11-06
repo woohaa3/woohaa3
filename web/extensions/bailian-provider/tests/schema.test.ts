@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bailianFamilySchema, findAdaptiveOption } from "@woohaa3/contracts";
+import { alibabaFamilySchema, findAdaptiveOption } from "@woohaa3/contracts";
 import { BAILIAN_IMAGE_MODELS, findBailianModel } from "../src/catalog.js";
 import { bailianDefaultInput, bailianInputSchema, describeBailianModel, inputSchemaOptions } from "../src/schema.js";
 import { bailianModelDefinitions } from "../src/backend.js";
@@ -97,7 +97,7 @@ describe("百炼参数面板", () => {
 
   it("面板的语义控件就是卡片投影给出的那份", () => {
     for (const model of BAILIAN_IMAGE_MODELS) {
-      const projected = bailianFamilySchema(model);
+      const projected = alibabaFamilySchema(model);
       const properties = bailianInputSchema(model, inputSchemaOptions(model)).properties as Record<string, unknown>;
       for (const [key, schema] of Object.entries(projected.properties)) {
         expect(properties[key], `${model.id} ${key}`).toEqual(schema);

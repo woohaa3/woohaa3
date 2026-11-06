@@ -18,9 +18,13 @@
 ## 模型目录的来源
 
 `src/catalog.ts` 不自己登记模型：它把 `@woohaa3/contracts` 里
-`task/generation-parameters/cards/image/bailian/` 的卡片读成执行路径的形状。比例、档位、官方
+`task/generation-parameters/cards/image/alibaba/` 的卡片读成执行路径的形状。比例、档位、官方
 像素表、带参考图时的档位上限、负向提示词与智能改写都只写在卡片里，参数家族（`image-parameters`）
 读的是同一份。
+
+卡片目录按**研发厂商**归类：万相、Qwen-Image、Z-Image 都是阿里的模型，`alibaba` 指厂商；百炼
+（Model Studio）是承载它们的通道，写在卡片的 `providerId` 上。同一个模型换走网关时，卡片与
+目录都不用动。
 
 卡片本身是**手写**的，不是发现来的：DashScope 没有免鉴权的模型列表接口
 （`/api/v1/models`、`/compatible-mode/v1/models` 都要 Key，且返回全品类部署信息），无法像

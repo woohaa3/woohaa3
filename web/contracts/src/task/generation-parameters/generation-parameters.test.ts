@@ -25,7 +25,7 @@ import {
   type PresetCard
 } from "./index.js";
 import { canvasModelCapabilities } from "../model-capabilities.js";
-import { BAILIAN_CARDS, bailianSizePresetFor } from "./cards/image/bailian/bailian-cards.js";
+import { ALIBABA_CARDS, alibabaSizePresetFor } from "./cards/image/alibaba/alibaba-cards.js";
 import { seedreamSizePresetFor } from "./cards/image/ark/seedream-cards.js";
 import { seedreamSupportsTransparentBackground } from "./cards/image/ark/seedream-spec.js";
 import { videoFamilyFor, videoPixelSize, videoRequestFields } from "../video-parameters.js";
@@ -351,7 +351,7 @@ describe("卡片表", () => {
   });
 
   it("覆盖百炼已登记的生图型号（万相 / Qwen-Image / Z-Image）", () => {
-    const ids = BAILIAN_CARDS.map((card) => card.providerModelId);
+    const ids = ALIBABA_CARDS.map((card) => card.providerModelId);
     expect(ids).toEqual([
       "wan2.7-image-pro",
       "wan2.7-image",
@@ -363,8 +363,8 @@ describe("卡片表", () => {
       "z-image-turbo"
     ]);
     // 每个型号都能查到像素表：未登记的 id 会让 Provider 发出上游不认的 size。
-    for (const card of BAILIAN_CARDS) {
-      const spec = bailianSizePresetFor(card.providerModelId)!;
+    for (const card of ALIBABA_CARDS) {
+      const spec = alibabaSizePresetFor(card.providerModelId)!;
       for (const ratio of spec.aspectRatios) {
         for (const tier of spec.resolutions) {
           expect(spec.sizes[ratio]?.[tier], `${card.id} ${ratio} ${tier}`).toMatch(/^\d+\*\d+$/);
@@ -387,13 +387,13 @@ describe("卡片表", () => {
 
   it("百炼卡片的 keeps 与卡片能力一致：不支持的开关不出现", () => {
     // 与即梦的 transparent 那条同一个道理：卡片说「接不接这个键」，厂商块说「这个模型有没有」。
-    for (const card of BAILIAN_CARDS) {
-      const spec = bailianSizePresetFor(card.providerModelId);
+    for (const card of ALIBABA_CARDS) {
+      const spec = alibabaSizePresetFor(card.providerModelId);
       expect(spec, card.id).toBeDefined();
       expect(card.keeps.includes("negativePrompt"), card.id).toBe(spec!.supportsNegativePrompt);
       expect(card.keeps.includes("promptExtend"), card.id).toBe(spec!.supportsPromptExtend);
       expect(card.keeps.includes("referencesImage"), card.id).toBe(spec!.maxReferenceImages > 0);
-      expect(card.vendor).toBe("bailian");
+      expect(card.vendor).toBe("alibaba");
       // 参考图上限只存一份：卡片的 limits 就是 spec 的 maxReferenceImages。
       expect(card.limits?.references?.image?.max ?? 0).toBe(spec!.maxReferenceImages);
     }

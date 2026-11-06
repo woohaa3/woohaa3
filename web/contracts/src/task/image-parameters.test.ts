@@ -18,9 +18,9 @@ describe("imageParameterFamily", () => {
   });
 
   it("百炼模型按卡片精确命中（不做关键字猜）", () => {
-    expect(imageParameterFamily("qwen-image-2.0-pro")).toBe("bailian");
-    expect(imageParameterFamily("wan2.7-image-pro")).toBe("bailian");
-    expect(imageParameterFamily("z-image-turbo")).toBe("bailian");
+    expect(imageParameterFamily("qwen-image-2.0-pro")).toBe("alibaba");
+    expect(imageParameterFamily("wan2.7-image-pro")).toBe("alibaba");
+    expect(imageParameterFamily("z-image-turbo")).toBe("alibaba");
     // 未登记的百炼同名系列不吃家族兜底：猜错代际会给出另一个版本的参数能力。
     expect(imageParameterFamily("qwen-image-9.9-pro")).toBe("generic");
     expect(imageParameterFamily("wan9.9-image")).toBe("generic");
@@ -84,9 +84,9 @@ describe("imageFamilyParameters", () => {
     expect(imageFamilyParameters("some-unknown-model")).toBeNull();
   });
 
-  it("bailian：比例 + 分辨率，负向提示词与智能改写按模型给", () => {
+  it("alibaba：比例 + 分辨率，负向提示词与智能改写按模型给", () => {
     const qwen20 = imageFamilyParameters("qwen-image-2.0-pro")!;
-    expect(qwen20.schemaVersion).toBe("bailian-image/v1");
+    expect(qwen20.schemaVersion).toBe("alibaba-image/v1");
     expect(Object.keys(qwen20.properties).sort())
       .toEqual(["aspectRatio", "negativePrompt", "promptExtend", "resolution"]);
     expect(qwen20.defaults).toEqual({
@@ -112,7 +112,7 @@ describe("imageFamilyParameters", () => {
     expect(wan.defaults).toEqual({ aspectRatio: "1:1", resolution: "2K" });
   });
 
-  it("bailian：档位随模型收窄，z-image 的智能改写默认关", () => {
+  it("alibaba：档位随模型收窄，z-image 的智能改写默认关", () => {
     const tiers = (id: string) =>
       (imageFamilyParameters(id)!.properties.resolution as { enum: Array<{ value: string }> })
         .enum.map((entry) => entry.value);
@@ -185,7 +185,7 @@ describe("imageRequestFields", () => {
       .toBe("png");
   });
 
-  it("bailian 发 `宽*高`（星号），并固定 watermark=false", () => {
+  it("alibaba 发 `宽*高`（星号），并固定 watermark=false", () => {
     expect(imageRequestFields("qwen-image-2.0-pro", { aspectRatio: "16:9", resolution: "2K" }))
       .toEqual({ size: "2688*1536", watermark: false, prompt_extend: true });
     // 负向提示词按模型上限截断；智能改写按模型默认值补齐。
@@ -204,7 +204,7 @@ describe("imageRequestFields", () => {
     })).toEqual({ size: "4096*4096", watermark: false });
   });
 
-  it("bailian 未知比例/档位回落到模型自己的 fallbackSize", () => {
+  it("alibaba 未知比例/档位回落到模型自己的 fallbackSize", () => {
     // 百炼不认档位串，所以任何组合都必须落到具体像素。
     expect(imageRequestFields("qwen-image-2.0-pro", { aspectRatio: "21:9", resolution: "2K" }))
       .toEqual({ size: "2048*2048", watermark: false, prompt_extend: true });

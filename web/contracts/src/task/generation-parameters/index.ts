@@ -12,7 +12,7 @@
  *
  * 值域：通用部分（档位、步长、枚举）来自家族表（`../image-parameters`、
  * `../video-parameters`），按 `providerModelId` 匹配；**随版本变化的厂商数字写在卡片的
- * 厂商块里**（如 `seedream`、`bailian`），家族与各 Provider 都从卡片读。这样「换一个别名」
+ * 厂商块里**（如 `seedream`、`alibaba`），家族与各 Provider 都从卡片读。这样「换一个别名」
  * 只加一张卡片，「换一个版本」也只改它自己的卡片，参数真相不会抄第二份。
  *
  * 约束（`limits.ts`）单独挂在卡片上，因为其中大部分 `inputSchema` 表达不了：
@@ -74,21 +74,21 @@ export {
   type SeedreamResolutionTier,
   type SeedreamSizePreset
 } from "./cards/image/ark/index.js";
-// 百炼的模型语义同样住在卡片目录里（`cards/image/bailian`），家族与百炼 Provider 按 id 读卡片。
+// 阿里的模型语义同样住在卡片目录里（`cards/image/alibaba`），家族与百炼 Provider 按 id 读卡片。
 export {
-  BAILIAN_CARDS,
-  BAILIAN_SIZE_PRESETS,
-  bailianFamilySchema,
-  bailianNegativePromptField,
-  bailianPixelSize,
-  bailianPromptExtendField,
-  bailianRequestFields,
-  bailianSizePresetFor,
-  bailianSpecOfCard,
-  clampBailianResolution,
-  type BailianSizePreset,
-  type BailianSizeTable
-} from "./cards/image/bailian/index.js";
+  ALIBABA_CARDS,
+  ALIBABA_SIZE_PRESETS,
+  alibabaFamilySchema,
+  alibabaNegativePromptField,
+  alibabaPixelSize,
+  alibabaPromptExtendField,
+  alibabaRequestFields,
+  alibabaSizePresetFor,
+  alibabaSpecOfCard,
+  clampAlibabaResolution,
+  type AlibabaSizePreset,
+  type AlibabaSizeTable
+} from "./cards/image/alibaba/index.js";
 export {
   cardEnumValues,
   cardImageReferenceLimit,

@@ -3,7 +3,7 @@
  *
  * 声明 `providers.bailian` 配置段，向 `ctx.generation` 注册生图模型。
  *
- * 模型清单来自契约层的卡片目录（`@woohaa3/contracts` 的 `cards/image/bailian/`），
+ * 模型清单来自契约层的卡片目录（`@woohaa3/contracts` 的 `cards/image/alibaba/`），
  * `src/catalog.ts` 只把卡片读成本地形状。卡片本身是**手写**的，不是发现来的：DashScope 没有
  * 免鉴权的模型列表接口，管理面接口返回全品类部署信息且需要按「生图」再筛一遍能力。所以设置页
  * 没有刷新按钮，换模型靠升级扩展。这一点在 README 里写明，避免看起来像漏了实现。

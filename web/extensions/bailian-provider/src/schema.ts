@@ -1,7 +1,7 @@
 /**
  * 百炼生图的参数面板与请求体拼装。
  *
- * 面板的**语义控件**来自契约层的卡片投影（`bailianFamilySchema`）：比例、分辨率、负向提示词、
+ * 面板的**语义控件**来自契约层的卡片投影（`alibabaFamilySchema`）：比例、分辨率、负向提示词、
  * 智能改写都是卡片声明的事实，这里不重写一份。本文件只补两件百炼特有的东西：
  *
  * 1. 参考图的键名是 `urls`（DashScope 的字段叫 `input.messages[].content[].image`，任务服务
@@ -10,12 +10,12 @@
  *    `{ model, input: { messages: [{ role: "user", content: [{ image }..., { text }] }] }, parameters }`。
  *    参考图必须排在文本前（文档的多图编辑示例就是这个顺序），且 `text` 只能有一个。
  *
- * `parameters` 由 `bailianRequestFields` 给出（`宽*高` 的 `size`、`watermark: false`、可选的
+ * `parameters` 由 `alibabaRequestFields` 给出（`宽*高` 的 `size`、`watermark: false`、可选的
  * `negative_prompt` / `prompt_extend`），带参考图时的档位收窄也在那里。
  */
 import {
-  bailianFamilySchema,
-  bailianRequestFields,
+  alibabaFamilySchema,
+  alibabaRequestFields,
   type GenerationModelDescription
 } from "@woohaa3/contracts";
 import type { BailianModelSpec } from "./catalog.js";
@@ -58,7 +58,7 @@ export function bailianInputSchema(
   model: BailianModelSpec,
   options: BailianInputSchemaOptions
 ): Record<string, unknown> {
-  const projected = bailianFamilySchema(model);
+  const projected = alibabaFamilySchema(model);
   const properties: Record<string, unknown> = {
     prompt: promptSchema(),
     ...(options.withReferenceImages ? { urls: referenceSchema(model.maxReferenceImages) } : {}),
@@ -74,14 +74,14 @@ export function bailianDefaultInput(
   return {
     prompt: "",
     ...(options.withReferenceImages ? { urls: [] } : {}),
-    ...bailianFamilySchema(model).defaults
+    ...alibabaFamilySchema(model).defaults
   };
 }
 
 /**
  * 组装 DashScope 同步生图请求体。
  *
- * `watermark` / 档位收窄 / 两个开关都在 `bailianRequestFields` 里，本函数只负责把提示词与
+ * `watermark` / 档位收窄 / 两个开关都在 `alibabaRequestFields` 里，本函数只负责把提示词与
  * 参考图排成 DashScope 要求的多模态 `content` 顺序。
  */
 export function buildBailianImageBody(
@@ -98,7 +98,7 @@ export function buildBailianImageBody(
   return {
     model: model.id,
     input: { messages: [{ role: "user", content }] },
-    parameters: bailianRequestFields(model, raw, { hasReferences: references.length > 0 })
+    parameters: alibabaRequestFields(model, raw, { hasReferences: references.length > 0 })
   };
 }
 

@@ -1,22 +1,22 @@
 /**
- * Qwen-Image 2.0 Pro（阿里云百炼）。
+ * Qwen-Image 2.0（阿里）。
  *
- * 2.0 系列是唯一接受 `negative_prompt`（≤500 字符）的一批，同时支持 `prompt_extend`。
- * 一次最多三张参考图（2.1 / 3.0 才是 10 张）。
+ * 与 2.0 Pro 参数能力相同：接受 `negative_prompt`（≤500 字符）与 `prompt_extend`，
+ * 参考图最多 3 张。差别只在出图质量与价格。
  */
 import { MB, imageCard } from "../../../card.js";
 import {
-  BAILIAN_QWEN_SIZES,
-  BAILIAN_WAN_ASPECT_RATIOS
-} from "./bailian-spec.js";
+  ALIBABA_QWEN_SIZES,
+  ALIBABA_WAN_ASPECT_RATIOS
+} from "./alibaba-spec.js";
 
-export const bailianQwenImage20Pro = imageCard({
-  id: "qwen-image-2.0-pro",
-  title: "Qwen-Image 2.0 Pro",
+export const alibabaQwenImage20 = imageCard({
+  id: "qwen-image-2.0",
+  title: "Qwen-Image 2.0",
   providerId: "bailian",
-  vendor: "bailian",
-  providerModelId: "qwen-image-2.0-pro",
-  docs: "https://help.aliyun.com/zh/model-studio/qwen-image-edit-api",
+  vendor: "alibaba",
+  providerModelId: "qwen-image-2.0",
+  docs: "https://help.aliyun.com/zh/model-studio/qwen-image-api",
   note: "Qwen-Image 2.0：支持负向提示词（≤500 字），参考图最多 3 张",
   keeps: [
     "prompt",
@@ -26,12 +26,12 @@ export const bailianQwenImage20Pro = imageCard({
     "negativePrompt",
     "promptExtend"
   ],
-  bailian: {
-    aspectRatios: BAILIAN_WAN_ASPECT_RATIOS,
+  alibaba: {
+    aspectRatios: ALIBABA_WAN_ASPECT_RATIOS,
     resolutions: ["2K"],
     defaultAspectRatio: "1:1",
     defaultResolution: "2K",
-    sizes: BAILIAN_QWEN_SIZES,
+    sizes: ALIBABA_QWEN_SIZES,
     fallbackSize: "2048*2048",
     supportsNegativePrompt: true,
     negativePromptLimit: 500,

@@ -42,12 +42,12 @@ import {
   seedreamRequestFields
 } from './generation-parameters/cards/image/ark/seedream-projection.js';
 import {
-  bailianFamilySchema,
-  bailianRequestFields,
-  bailianSizePresetFor
-} from './generation-parameters/cards/image/bailian/index.js';
+  alibabaFamilySchema,
+  alibabaRequestFields,
+  alibabaSizePresetFor
+} from './generation-parameters/cards/image/alibaba/index.js';
 
-export type ImageParameterFamily = 'gemini' | 'gpt-image' | 'seedream' | 'bailian' | 'generic';
+export type ImageParameterFamily = 'gemini' | 'gpt-image' | 'seedream' | 'alibaba' | 'generic';
 
 /** 画幅 + 分辨率 → 像素 `size`（GPT Image 只接受像素串）。 */
 const GPT_IMAGE_SIZES: Record<string, Record<string, string>> = {
@@ -89,7 +89,7 @@ export function imageParameterFamily(modelId: string): ImageParameterFamily {
   // 百炼的 id 是精确登记的（`qwen-image-2.0-pro` 一类），所以按卡片命中判断，不做关键字猜。
   // 放在关键字判断之前：卡片命中是「我们知道这个模型」，比「名字里像谁」更可信；
   // 未登记的 `qwen-image-9.9` 一类仍会落到 generic，不会被当成某个已知版本。
-  if (bailianSizePresetFor(modelId)) return 'bailian';
+  if (alibabaSizePresetFor(modelId)) return 'alibaba';
   const id = modelId.toLowerCase();
   if (id.includes('gpt-image')) return 'gpt-image';
   if (/gemini|nano.?banana|banana/.test(id)) return 'gemini';
@@ -237,14 +237,14 @@ export function imageFamilyParameters(modelId: string): {
       ...seedreamFamilySchema(spec),
     };
   }
-  if (family === 'bailian') {
-    // 百炼同样是卡片投影（`cards/image/bailian/bailian-projection`）：负向提示词、智能改写、
+  if (family === 'alibaba') {
+    // 阿里同样是卡片投影（`cards/image/alibaba/alibaba-projection`）：负向提示词、智能改写、
     // 档位与像素表都在卡片里，这里只按 id 找到模型并把投影接进目录形状。
-    const spec = bailianSizePresetFor(modelId)!;
+    const spec = alibabaSizePresetFor(modelId)!;
     return {
       maxReferenceImages: spec.maxReferenceImages,
-      schemaVersion: 'bailian-image/v1',
-      ...bailianFamilySchema(spec),
+      schemaVersion: 'alibaba-image/v1',
+      ...alibabaFamilySchema(spec),
     };
   }
   return null;
@@ -264,7 +264,7 @@ export function imageRequestFields(
   if (family === 'gemini') return geminiImageFields(modelId, input);
   if (family === 'gpt-image') return gptImageImageFields(modelId, input);
   if (family === 'seedream') return seedreamRequestFields(seedreamSizePresetFor(modelId), input);
-  if (family === 'bailian') return bailianRequestFields(bailianSizePresetFor(modelId), input);
+  if (family === 'alibaba') return alibabaRequestFields(alibabaSizePresetFor(modelId), input);
   return genericImageFields(modelId, input);
 }
 
