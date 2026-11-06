@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.1"
 description = "Woohaa3 原生录制执行器 supervisor（change: 2026-10-17-add-native-offscreen-film-set-recording）"
-license = "UNLICENSED"
+license = "MIT"
 publish = false
 
 [lib]
