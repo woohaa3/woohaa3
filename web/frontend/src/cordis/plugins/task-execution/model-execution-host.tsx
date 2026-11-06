@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
 import { Button } from "@woohaa3/ui";
+import { isUnsubmittedVideoNode, resolveModelSubmissionParameters } from "@woohaa3/contracts";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";
@@ -167,6 +168,10 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     [workingCanvas, selectedNodeId]
   );
   const pendingSelection = Boolean(context && !canonicalNodeIds.has(context.nodeId));
+  const unsubmitted = useMemo(
+    () => isUnsubmittedVideoNode(context?.nodeType, context?.nodeData),
+    [context]
+  );
 
   const panelKind = context?.panelKind ?? null;
   const modelType = panelKind ? modelTypeForPanelKind(panelKind) : null;
@@ -221,6 +226,10 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     if (!context) return {};
     return derivePanelDraft(context.nodeData, draft).parameters;
   }, [context, draft]);
+  const draftPrompt = useMemo(
+    () => (context ? derivePanelDraft(context.nodeData, draft).prompt : ""),
+    [context, draft]
+  );
 
   const blockingReasons = useMemo(() => {
     if (!panelKind) return [];
@@ -232,10 +241,12 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       catalog,
       catalogState,
       model: targetModelKey,
+      modelDefinition: model,
+      prompt: draftPrompt,
       canvas,
       panelParameters: parameters
     });
-  }, [panelKind, context, disabledReason, pendingSelection, catalog, catalogState, targetModelKey, canvas, parameters]);
+  }, [panelKind, context, disabledReason, pendingSelection, catalog, catalogState, targetModelKey, model, draftPrompt, canvas, parameters]);
 
   // 展示用阻止原因：会话只读（断线）时面板不重复枚举「网络已断开 / 目录尚未加载」这类
   // 会话级状态——左下角同步状态控件的常驻 tooltip 已经承载该信息。主操作仍由 `readOnly`
@@ -365,7 +376,18 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         return { ok: false, error: "模型尚未就绪，任务未提交" };
       }
       const nodeId = context.nodeId;
-      draftStore.persist(nodeId, targetModelKey, { prompt: input.prompt, parameters: input.parameters });
+      // schema 默认值必须进入提交快照（A9 / change: 2026-11-06-guard-video-generation-inputs）：
+      // 面板显示的 720p / 5 秒不能只停在控件上，否则 Provider 仍会收到缺字段的请求。
+      const resolvedParameters = resolveModelSubmissionParameters(
+        {
+          modelType: model?.modelType,
+          inputSchema: model?.inputSchema,
+          defaultInput: model?.defaultInput
+        },
+        input.parameters,
+        { prompt: input.prompt, skipRequired: ["prompt"] }
+      );
+      draftStore.persist(nodeId, targetModelKey, { prompt: input.prompt, parameters: resolvedParameters });
       setSubmitError(null);
 
       const reasons = resolveBlockingReasons({
@@ -376,8 +398,10 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         catalog,
         catalogState,
         model: targetModelKey,
+        modelDefinition: model,
+        prompt: input.prompt,
         canvas,
-        panelParameters: input.parameters
+        panelParameters: resolvedParameters
       });
       if (reasons.length > 0) {
         setSubmitError(reasons[0]!);
@@ -404,7 +428,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         nodeId,
         modelKey: targetModelKey,
         prompt: input.prompt,
-        parameters: input.parameters,
+        parameters: resolvedParameters,
         catalog,
         expectedModelType: modelTypeForPanelKind(panelKind),
         ...(worldCapture ? { worldCapture } : {})
@@ -421,7 +445,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       }
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
     },
-    [catalog, canvas, catalogState, context, disabledReason, draftStore, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
+    [catalog, canvas, catalogState, context, disabledReason, draftStore, model, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
   );
 
   const submitIntent = useCallback(
@@ -526,6 +550,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
             readOnly={readOnly}
             presentation={expanded ? "expanded" : "compact"}
             status={effectiveStatus}
+            {...(unsubmitted ? { unsubmitted } : {})}
             {...(taskState.progress !== undefined ? { progress: taskState.progress } : {})}
             {...(taskState.errorMessage !== undefined
               ? { errorMessage: taskState.errorMessage }

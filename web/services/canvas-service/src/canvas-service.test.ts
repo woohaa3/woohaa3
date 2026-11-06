@@ -334,7 +334,11 @@ function videoCatalog(model: Partial<CanvasTaskCatalog["models"][number]> = {}):
         modelType: "video",
         title: "Seedance",
         interaction: { id: "generic-model", version: 1 },
-        inputSchema: {},
+        inputSchema: {
+          type: "object",
+          required: ["prompt"],
+          properties: { prompt: { type: "string", title: "提示词" } }
+        },
         defaultInput: {},
         bindings: [
           {

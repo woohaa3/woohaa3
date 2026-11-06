@@ -46,20 +46,20 @@ function mergeOptions(
 function familySchema(
   modelType: PresetModelType,
   providerModelId: string
-): { properties: Record<string, unknown>; defaults: Record<string, unknown> } | null {
+): { properties: Record<string, unknown>; defaults: Record<string, unknown>; required: readonly string[] } | null {
   if (modelType === "image") {
     if (imageParameterFamily(providerModelId) === "generic") return null;
     const family = imageFamilyParameters(providerModelId);
     return family === null
       ? null
-      : { properties: { ...family.properties }, defaults: { ...family.defaults } };
+      : { properties: { ...family.properties }, defaults: { ...family.defaults }, required: [] };
   }
   if (modelType === "audio") return null;
   if (videoFamilyFor(providerModelId) === undefined) return null;
   const family = videoFamilyParameters(providerModelId);
   return family === null
     ? null
-    : { properties: { ...family.properties }, defaults: { ...family.defaults } };
+    : { properties: { ...family.properties }, defaults: { ...family.defaults }, required: family.required };
 }
 
 /** 把一张卡片合成目录模型。 */
@@ -117,9 +117,10 @@ export function composePresetCard(card: PresetCard): ComposedPresetCard {
   }
 
   const inputSchema: Record<string, unknown> = { type: "object", properties };
-  if (preset.required.every((key) => kept.has(key))) {
-    inputSchema.required = [...preset.required];
-  }
+  const required = [
+    ...new Set([...preset.required, ...(family?.required ?? [])])
+  ].filter((key) => kept.has(key));
+  if (required.length > 0) inputSchema.required = required;
 
   const model: CanvasTaskCatalogModel = {
     modelKey: card.providerId + ":" + card.id,

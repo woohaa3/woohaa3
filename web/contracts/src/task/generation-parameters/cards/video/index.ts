@@ -5,12 +5,14 @@
  * 新增一个厂商 = 新目录 + 一行 import；新增一个模型 = 厂商目录内加文件 + 一行登记。
  */
 import type { PresetCard } from "../../card.js";
+import { AGNES_VIDEO_CARDS } from "./agnes/index.js";
 import { ARK_VIDEO_CARDS } from "./ark/index.js";
 import { GOOGLE_VIDEO_CARDS } from "./google/index.js";
 import { MINIMAX_VIDEO_CARDS } from "./minimax/index.js";
 import { GENERIC_VIDEO_CARDS } from "./generic/index.js";
 
 export const VIDEO_CARDS: readonly PresetCard[] = [
+  ...AGNES_VIDEO_CARDS,
   ...ARK_VIDEO_CARDS,
   ...GOOGLE_VIDEO_CARDS,
   ...MINIMAX_VIDEO_CARDS,

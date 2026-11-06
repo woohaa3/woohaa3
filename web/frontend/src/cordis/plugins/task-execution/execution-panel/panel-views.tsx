@@ -368,20 +368,22 @@ export function RunActions({
 }
 
 /** 展开工作区的任务反馈，只读取宿主提供的权威阶段与百分比。 */
-export function ExecutionStatus({ status, taskLabel, progress, readOnly, onViewTask }: {
+export function ExecutionStatus({ status, taskLabel, progress, readOnly, unsubmitted, onViewTask }: {
 	status: ExecutionPanelStatus;
 	taskLabel: string;
 	progress?: number;
 	readOnly: boolean;
+	unsubmitted?: boolean;
 	onViewTask?: () => void;
 }) {
-	if (status === "idle" && !readOnly) return null;
+	if (status === "idle" && !readOnly && !unsubmitted) return null;
 	const percentage = typeof progress === "number" && Number.isFinite(progress)
 		? Math.round(Math.min(100, Math.max(0, progress))) : null;
 	const label = readOnly ? "当前画布只读，无法生成"
 		: status === "pending" ? "任务排队中"
 		: status === "processing" ? `${taskLabel}生成中${percentage !== null ? ` · ${percentage}%` : ""}`
 		: status === "successed" ? `${taskLabel}生成已完成`
+		: status === "idle" && unsubmitted ? "未提交 · 待配置 · 选择模型并填写提示词后提交"
 		: "生成失败，请查看错误详情";
 	return (
 		<div className="mc-panel__execution-feedback" data-status={status}>

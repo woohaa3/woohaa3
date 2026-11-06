@@ -73,3 +73,62 @@ describe("ExecutionPanel 提交前参数约束提示", () => {
 		expect(sendButton(html)).not.toContain("disabled");
 	});
 });
+
+/**
+ * 视频模型必填参数（change: 2026-11-06-guard-video-generation-inputs）。
+ *
+ * 与 Provider schema 的 `required` 对齐：缺宽高比 / 分辨率时主操作必须禁用，并说明缺哪个字段。
+ */
+const REQUIRED_CONFIG = {
+	taskKind: "video-generation" as const,
+	surface: "dock" as const,
+	modelConfig: {
+		modelOptions: [{ label: "Agnes", value: "agnes" }],
+		defaultModel: "agnes",
+		parameterSchemaByModel: {
+			agnes: [
+				{ key: "aspectRatio", label: "比例", type: "select" as const, required: true,
+					options: [{ value: "16:9", label: "16:9" }, { value: "9:16", label: "9:16" }] },
+				{ key: "resolution", label: "分辨率", type: "select" as const, required: true,
+					options: [{ value: "720p", label: "720p" }, { value: "1080p", label: "1080p" }] },
+				{ key: "durationSeconds", label: "时长", type: "number" as const, required: true, minimum: 5, maximum: 12, unit: "秒" }
+			]
+		}
+	},
+	onRun: () => undefined
+};
+
+function requiredPanelHtml(parameters: Record<string, unknown>): string {
+	return renderToStaticMarkup(
+		<ExecutionPanel
+			{...REQUIRED_CONFIG}
+			data={{ title: "节点", panelPrompt: "一段动画", parameters }}
+		/>
+	);
+}
+
+describe("ExecutionPanel 视频必填参数", () => {
+	it("缺宽高比时禁用主操作并提示字段", () => {
+		const html = requiredPanelHtml({ model: "agnes", resolution: "720p", durationSeconds: 5 });
+		expect(html).toContain("缺少必填参数：比例");
+		expect(sendButton(html)).toContain("disabled");
+	});
+
+	it("缺分辨率时禁用主操作并提示字段", () => {
+		const html = requiredPanelHtml({ model: "agnes", aspectRatio: "16:9", durationSeconds: 5 });
+		expect(html).toContain("缺少必填参数：分辨率");
+		expect(sendButton(html)).toContain("disabled");
+	});
+
+	it("时长越界时显示允许上限", () => {
+		const html = requiredPanelHtml({ model: "agnes", aspectRatio: "16:9", resolution: "720p", durationSeconds: 13 });
+		expect(html).toContain("时长不能大于 12秒");
+		expect(sendButton(html)).toContain("disabled");
+	});
+
+	it("必填参数齐全时允许执行", () => {
+		const html = requiredPanelHtml({ model: "agnes", aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 });
+		expect(html).not.toContain("缺少必填参数");
+		expect(sendButton(html)).not.toContain("disabled");
+	});
+});

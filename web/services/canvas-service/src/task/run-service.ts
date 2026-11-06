@@ -11,7 +11,7 @@
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import type { CanvasRoom } from "../sync/index.js";
 import type { CanvasTaskCatalog, CanvasTaskModelType, CanvasRunRequest, CanvasTaskNodeType, CanvasTaskInput, WorldCaptureGenerationBinding } from "@woohaa3/contracts";
-import { catalogModelBindings, checkModelCapability, compileVideoEditProviderPrompt, decodeWorldCamera, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, validateGenerationModeInputs, worldCaptureReferenceInput } from "@woohaa3/contracts";
+import { catalogModelBindings, checkModelCapability, compileVideoEditProviderPrompt, decodeWorldCamera, describeTaskFailure, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, resolveModelParameters, validateGenerationModeInputs, worldCaptureReferenceInput } from "@woohaa3/contracts";
 import type { CanvasTaskClient } from "../clients/task-client.js";
 import { collectInputMappings, resolveNodeReferenceInputs } from "./input-resolution.js";
 import { resolveMentionsAndCompile } from "./mention-resolution.js";
@@ -144,6 +144,24 @@ export class CanvasRunService {
       return { ok: false, code: "empty-prompt", message: "请先输入提示词" };
     }
 
+    // 模型参数按 catalog `inputSchema` 权威复验（change: 2026-11-06-guard-video-generation-inputs）：
+    // 浏览器绕过 UI 直接发 run 时也在 provider 任务创建前拒绝，返回稳定 code；默认值同时
+    // 并入提交快照，避免「界面上有值、请求体里没有」。
+    const guarded = resolveModelParameters(
+      { modelType: model.modelType, inputSchema: model.inputSchema, defaultInput: model.defaultInput },
+      request.parameters,
+      { prompt: resolvedPrompt }
+    );
+    if (guarded.issues.length > 0) {
+      const issue = guarded.issues[0]!;
+      return {
+        ok: false,
+        code: issue.kind === "missing" ? "missing-parameter" : "invalid-parameter",
+        message: issue.message
+      };
+    }
+    const parameters = guarded.parameters;
+
     const cameraInputs = new Map<string, CanvasTaskInput>();
     for (const mapping of collectInputMappings(canvas, request.nodeId, canvas.nodeData)) {
       if (mapping.role === "text_prompt" || cameraInputs.has(mapping.sourceNodeId)) continue;
@@ -223,7 +241,7 @@ export class CanvasRunService {
     // port-video-editing-dialogs，design D8）。只有授权且稳定的 annotation preview 才会在
     // prompt 中生成 `@imageN` 引用标记；缺 prompt、越界、超限或临时媒体使提交以稳定错误失败，
     // 不静默跳过。任务输入的 role/数量约束仍由下方 generationMode 校验统一把关。
-    const generationMode = readGenerationMode(request.parameters);
+    const generationMode = readGenerationMode(parameters);
     if (model.modelType === "video" && generationMode === "edit_video") {
       const intentResult = readVideoEditIntents(nodeDataOf(canvas, request.nodeId));
       if (!intentResult.ok) {
@@ -280,7 +298,7 @@ export class CanvasRunService {
             // 保存 authored（token 化原文）；不用编译后的 provider 文本覆盖（design D4）。
             prompt: authored,
             panelPrompt: authored,
-            parameters: { ...request.parameters, model: modelKey },
+            parameters: { ...parameters, model: modelKey },
             error: null,
             errorMessage: null
           }
@@ -331,7 +349,7 @@ export class CanvasRunService {
         ...(canvasTitle ? { canvasTitle } : {}),
         ...(nodeTitle ? { nodeTitle } : {}),
         prompt: providerPrompt,
-        parameters: { ...request.parameters, model: modelKey },
+        parameters: { ...parameters, model: modelKey },
         inputs: taskInputs,
         ...(worldCapture ? { worldCapture } : {})
       });
@@ -339,7 +357,9 @@ export class CanvasRunService {
       // 提交失败当场说清楚：返回 ok:false 让面板立刻显示原因，并把 begin 写下的 processing
       // 结算成 failed。留给投影器会让人一直看到「执行中」——那条路径要等 5s 轮询，而且依赖
       // Task 已经写下失败终态（2026-10-21 现场：节点转了 3 小时）。
-      const message = error instanceof Error && error.message !== "" ? error.message : "任务提交失败";
+      const message = describeTaskFailure({
+        message: error instanceof Error && error.message !== "" ? error.message : "任务提交失败"
+      });
       this.deps.logger?.({
         event: "canvas-run-submit-failed",
         canvasId: request.canvasId,
