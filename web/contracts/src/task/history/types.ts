@@ -45,8 +45,22 @@ export type TaskResultLocation = {
   locator: string;
 };
 
+/**
+ * 二进制媒体材料化阶段（change: 2026-11-06-fix-media-output-readiness）。
+ *
+ * 只表示「provider 已产出、Task worker 正在把结果转存成稳定媒体」，任务本身仍是非终态。
+ * 有它时 UI 显示「媒体准备中」，成功媒体入口保持禁用；绝不能用它充当成功的第二份状态。
+ */
+export type TaskMediaState = "materializing";
+
 export type TaskResultSummary = {
   mediaKind: "text" | "image" | "video" | "audio";
+  /**
+   * 媒体材料化阶段；缺省表示没有正在进行的转存。
+   *
+   * 与 `storageKey` 互斥：materializing 的结果没有任何稳定媒体身份，读取方不得把它当成功产物。
+   */
+  mediaState?: TaskMediaState;
   /**
    * 字节当前位置（宿主在读取详情时补全）。
    *

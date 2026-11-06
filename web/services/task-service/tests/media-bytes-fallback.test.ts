@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { ExecutionRecord } from "@sdppp/pptask-worker-server/history";
 import type { PptaskTaskStore } from "@sdppp/pptask-worker-server";
 import type { MediaMetadata } from "@woohaa3/contracts";
-import { materializeBinaryResult } from "../src/worker/media-materialization.js";
+import { materializeBinaryBytesFromStore, materializeBinaryResult } from "../src/worker/media-materialization.js";
 import type { TaskAssociation, TaskRuntimeOptions } from "../src/worker/types.js";
 import type { SqliteTaskHistoryRepository } from "../src/repository/history-repository.js";
 
@@ -176,6 +176,21 @@ describe("URL 转存失败后的字节回退", () => {
     });
   });
 
+  it("视频：即使 durable 记录里只有 bytes，也不走字节回退，落 failed", async () => {
+    const { runtime, imports, historyUpserts, association } = harness({
+      rawResult: { videos: [PNG_BYTES] }
+    });
+    await materializeBinaryBytesFromStore(runtime, record({ modelType: "video" }), association, "video");
+
+    expect(imports).toEqual([]);
+    expect(historyUpserts.at(-1)).toMatchObject({
+      state: "failed",
+      result: { mediaKind: "video" },
+      error: { name: "MediaImportError", code: "video-bytes-not-supported" }
+    });
+    expect(historyUpserts.at(-1)).not.toHaveProperty("result.storageKey");
+  });
+
   it("图像：URL 失败且记录里没有字节 → 保持 MediaImportError（不伪造成功）", async () => {
     const { runtime, imports, logs, historyUpserts, association } = harness({ rawResult: { images: [] } });
     await materializeBinaryResult(runtime, record(), association, {
@@ -187,7 +202,7 @@ describe("URL 转存失败后的字节回退", () => {
     expect(imports.map((call) => call.kind)).toEqual(["url"]);
     expect(historyUpserts.at(-1)).toMatchObject({
       state: "failed",
-      error: { name: "MediaImportError", message: "provider image 结果转存失败" }
+      error: { name: "MediaImportError", message: expect.stringContaining("provider image 结果转存失败") }
     });
     expect(logs.map((event) => event.event)).toEqual(
       expect.arrayContaining(["media-output-import-bytes-unavailable", "media-output-import-failed"])

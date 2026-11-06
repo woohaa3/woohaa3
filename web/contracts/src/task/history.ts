@@ -25,3 +25,6 @@ export * from "./history/query.js";
 
 // 脱敏白名单与预算。
 export * from "./history/sanitization.js";
+
+// 媒体就绪派生（节点输出、预览、下载与活动项共用）。
+export * from "./history/media-readiness.js";

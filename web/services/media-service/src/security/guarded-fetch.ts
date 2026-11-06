@@ -30,12 +30,15 @@ export type GuardedDownloadResult = {
 };
 
 export class GuardedDownloadError extends Error {
-  readonly code: "blocked-host" | "unsupported-protocol" | "too-large" | "timeout" | "not-media" | "http-error" | "redirect";
+  readonly code: "blocked-host" | "unsupported-protocol" | "too-large" | "timeout" | "not-media" | "http-error" | "redirect" | "network";
+  /** 上游 HTTP 状态（仅 `http-error`）；只保留数字，不含 URL/响应体。 */
+  readonly status?: number;
 
-  constructor(code: GuardedDownloadError["code"], message: string) {
+  constructor(code: GuardedDownloadError["code"], message: string, status?: number) {
     super(message);
     this.name = "GuardedDownloadError";
     this.code = code;
+    if (status !== undefined) this.status = status;
   }
 }
 
@@ -67,7 +70,7 @@ export async function guardedDownload(options: GuardedDownloadOptions): Promise<
     }
 
     if (!response.ok) {
-      throw new GuardedDownloadError("http-error", `受控下载失败：HTTP ${response.status}`);
+      throw new GuardedDownloadError("http-error", `受控下载失败：HTTP ${response.status}`, response.status);
     }
 
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();

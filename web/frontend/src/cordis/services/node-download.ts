@@ -1,5 +1,6 @@
 import {
   GLB_MEDIA_TYPE,
+  hasReadyMediaAsset,
   isGlbModelNodeData,
   readGlbModelAssetId,
   type ServerCanvas,
@@ -55,7 +56,7 @@ export class NodeDownloadService {
           // 文件模型：下载**原始 GLB 字节**（change: 2026-10-28-support-glb-model-nodes）。
           const assetId = readGlbModelAssetId(data);
           const asset = assetId ? canvas.assets.find((entry) => entry.id === assetId) : undefined;
-          if (!asset || asset.status !== "ready") throw new Error("模型资源尚未就绪，暂时无法下载");
+          if (!asset || !hasReadyMediaAsset(asset)) throw new Error("模型资源尚未就绪，暂时无法下载");
           const read = this.options.readMedia ?? readCanonicalMedia;
           const raw = await read(asset, abort.signal, canvas.id);
           abort.signal.throwIfAborted();
@@ -70,7 +71,7 @@ export class NodeDownloadService {
         const asset = data?.mediaContent
           ? await this.options.mediaContent?.resolve(nodeId, "resolvePreview", `download:${crypto.randomUUID()}`)
           : canvas.assets.find(asset => asset.id === data?.outputAssetId);
-        if (!asset || asset.status !== "ready" || asset.mediaKind !== node.type) throw new Error("资源尚未就绪，暂时无法下载");
+        if (!asset || asset.status !== "ready" || !hasReadyMediaAsset(asset) || asset.mediaKind !== node.type) throw new Error("资源尚未就绪，暂时无法下载");
         blob = await (this.options.readMedia ?? readCanonicalMedia)(asset, abort.signal, canvas.id);
         if (!blob.type.startsWith(`${node.type}/`)) throw new Error("资源返回的文件类型不正确，请重试");
       } else throw new Error("此类节点暂不支持下载");

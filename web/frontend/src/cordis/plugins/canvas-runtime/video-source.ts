@@ -1,6 +1,7 @@
 import type { VideoElementLike, PosterImage } from "./video-frame-session.js";
 /** 只解析节点自身 ready 输出的同源媒体，不接受任意 URL。 */
 import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
+import { hasReadyMediaAsset } from "@woohaa3/contracts";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 
 /** 从 canonical 画布解析节点**自身** ready 视频输出（design D5）。 */
@@ -15,7 +16,7 @@ export function resolveNodeVideoSource(
   const nodeData = canvas.nodeData as Record<string, { outputAssetId?: unknown } | undefined>;
   const outputId = nodeData[nodeId]?.outputAssetId;
   const asset = (typeof outputId === "string" && outputId !== "" ? canvas.assets.find((candidate) => candidate.id === outputId) : undefined) ?? runtimeAsset ?? undefined;
-  if (!asset || asset.status !== "ready" || asset.mediaKind !== "video") return null;
+  if (!asset || !hasReadyMediaAsset(asset) || asset.mediaKind !== "video") return null;
   const storageKey = typeof asset.metadata?.storageKey === "string" ? asset.metadata.storageKey : "";
   if (!storageKey) return null;
   // 画布作用域读提示：视频与海报都属于这张画布的媒体。存量镜头参考资产只登记了

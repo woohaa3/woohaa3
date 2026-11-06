@@ -381,6 +381,7 @@ export function ExecutionStatus({ status, taskLabel, progress, readOnly, onViewT
 	const label = readOnly ? "当前画布只读，无法生成"
 		: status === "pending" ? "任务排队中"
 		: status === "processing" ? `${taskLabel}生成中${percentage !== null ? ` · ${percentage}%` : ""}`
+		: status === "materializing" ? `${taskLabel}媒体准备中${percentage !== null ? ` · ${percentage}%` : ""}`
 		: status === "successed" ? `${taskLabel}生成已完成`
 		: "生成失败，请查看错误详情";
 	return (

@@ -6,6 +6,7 @@
  */
 export * from "./application/ingest.js";
 export * from "./application/internal-service.js";
+export * from "./application/url-import.js";
 export * from "./api/public-handler.js";
 export * from "./api/internal-handler.js";
 export * from "./security/guarded-fetch.js";

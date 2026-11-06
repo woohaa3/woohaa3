@@ -12,7 +12,7 @@ it("only canonical ready own output is allowed; input, external, wrong kind and 
   const canvas = createEmptyWoohaa3ServerCanvas("canvas", "2026-10-19T00:00:00Z");
   canvas.document.nodes.push({id:"audio",type:"audio",position:{x:0,y:0}});
   canvas.nodeData.audio = {title:"音频",outputAssetId:"asset"};
-  canvas.assets.push({id:"asset",title:"test.wav",mediaKind:"audio",status:"ready",source:"uploaded",createdAt:"2026-10-19T00:00:00Z",url:"/api/media/test.wav"});
+  canvas.assets.push({id:"asset",title:"test.wav",mediaKind:"audio",status:"ready",source:"uploaded",createdAt:"2026-10-19T00:00:00Z",url:"/api/media/test.wav",metadata:{storageKey:"test.wav",checksum:"a"}});
   expect(resolveAudioPreview(canvas,"audio")).toMatchObject({assetId:"asset",url:"/api/media/test.wav?canvas=canvas"});
   expect(resolveAudioPreview(canvas,"audio","other")).toBeNull();
   expect(resolveAudioPreview(canvas,"missing")).toBeNull();

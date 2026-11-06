@@ -38,7 +38,7 @@ import {
   type PanelPresentationIntent
 } from "./node-panel-directives.js";
 import { useEscapeLayer } from "./execution-panel/panel-shared.js";
-import { useCanvasStoreState, useNodeDraft, useTaskCatalog } from "./use-task-state.js";
+import { useCanvasStoreState, useNodeDraft, useNodeMediaPreparing, useTaskCatalog } from "./use-task-state.js";
 import {
   allModelsForPanel,
   capabilityForModel,
@@ -167,6 +167,8 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     [workingCanvas, selectedNodeId]
   );
   const pendingSelection = Boolean(context && !canonicalNodeIds.has(context.nodeId));
+  // provider 已产出、正在转存稳定媒体：面板显示准备态，成功/下载入口保持禁用。
+  const mediaPreparing = useNodeMediaPreparing(canvasId ?? "", context?.nodeId ?? "");
 
   const panelKind = context?.panelKind ?? null;
   const modelType = panelKind ? modelTypeForPanelKind(panelKind) : null;
@@ -489,7 +491,9 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const status = taskState.taskStatus;
   // Task activity belongs to the dots. This surface always accepts another independent run.
   // Agent turns and aggregate/local operations retain their own execution gates.
-  const effectiveStatus = status === "pending" || status === "processing" ? "idle" : status;
+  const effectiveStatus = mediaPreparing
+    ? "materializing"
+    : status === "pending" || status === "processing" ? "idle" : status;
   const expanded = resolveExecutionPanelSurface(presentation, context.nodeType) === "expanded";
   const binding = definition?.bindings
     ? definition.bindings({ nodeId: context.nodeId, modelKey: targetModelKey, canvas })

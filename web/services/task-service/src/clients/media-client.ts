@@ -85,8 +85,10 @@ export function createMediaClient(options: MediaClientOptions): MediaClient {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
 
-  async function post<T>(path: string, body: unknown): Promise<T> {
-    const maxRetries = options.maxRetries ?? 2;
+  async function post<T>(path: string, body: unknown, transportOptions: { retryTransport?: boolean } = {}): Promise<T> {
+    const maxRetries = transportOptions.retryTransport === false
+      ? 0
+      : options.maxRetries ?? 2;
     for (let attempt = 0; ; attempt += 1) {
       const correlationId = createCorrelationId();
       try {
@@ -143,7 +145,9 @@ export function createMediaClient(options: MediaClientOptions): MediaClient {
     },
 
     async importFromUrl(input) {
-      const result = await post<MediaImportResponse>("/internal/v1/media/import", input);
+      // 转存重试归 Media Service（超时/网络/5xx，有界退避）；这里不再叠一层传输重试，
+      // 否则一次抖动会放大成 9 次 provider 请求。
+      const result = await post<MediaImportResponse>("/internal/v1/media/import", input, { retryTransport: false });
       options.logger?.({
         event: "media-import",
         storageKeyHash: hashStorageKeyForLog(result.storageKey),
