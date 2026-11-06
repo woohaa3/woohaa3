@@ -13,6 +13,7 @@ export function sanitizeResult(result: TaskResultSummary): TaskResultSummary {
     result.text !== undefined && result.text.length > 2000 ? result.text.slice(0, 2000) : result.text;
   return {
     mediaKind: result.mediaKind,
+    ...(result.mediaState !== undefined ? { mediaState: result.mediaState } : {}),
     ...(text !== undefined ? { text } : {}),
     ...(result.textTruncated || (result.text !== undefined && result.text.length > 2000)
       ? { textTruncated: true }

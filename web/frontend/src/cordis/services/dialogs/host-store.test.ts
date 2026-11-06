@@ -120,15 +120,17 @@ describe("media-preview payload 与 canonical 解析", () => {
   it("只接受 ready image 的稳定同源 URL", () => {
     const canvas = {
       assets: [
-        { id: "ok", mediaKind: "image", status: "ready", url: "/api/media/abc" },
-        { id: "not-ready", mediaKind: "image", status: "generating", url: "/api/media/x" },
-        { id: "video", mediaKind: "video", status: "ready", url: "/api/media/v" },
-        { id: "external", mediaKind: "image", status: "ready", url: "https://evil.example/x.png" },
-        { id: "blob", mediaKind: "image", status: "ready", url: "blob:http://localhost/xyz" }
+        { id: "ok", mediaKind: "image", status: "ready", url: "/api/media/abc", metadata: { storageKey: "abc", checksum: "a" } },
+        { id: "not-ready", mediaKind: "image", status: "generating", url: "/api/media/x", metadata: { storageKey: "x", checksum: "b" } },
+        { id: "no-metadata", mediaKind: "image", status: "ready", url: "/api/media/n", metadata: {} },
+        { id: "video", mediaKind: "video", status: "ready", url: "/api/media/v", metadata: { storageKey: "v", checksum: "c" } },
+        { id: "external", mediaKind: "image", status: "ready", url: "https://evil.example/x.png", metadata: { storageKey: "e", checksum: "d" } },
+        { id: "blob", mediaKind: "image", status: "ready", url: "blob:http://localhost/xyz", metadata: { storageKey: "b", checksum: "e" } }
       ]
     };
     expect(resolveImagePreview(canvas, "ok")).toEqual({ url: "/api/media/abc", mediaKind: "image" });
     expect(resolveImagePreview(canvas, "not-ready")).toBeNull();
+    expect(resolveImagePreview(canvas, "no-metadata")).toBeNull();
     expect(resolveImagePreview(canvas, "external")).toBeNull();
     expect(resolveImagePreview(canvas, "blob")).toBeNull();
     expect(resolveImagePreview(canvas, "video")).toBeNull();

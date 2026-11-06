@@ -9,7 +9,7 @@ import type { ExecutionPanelRunSnapshot,
 
 /** 面板是否处于进行中状态。 */
 export function isExecutionBusy(status: ExecutionPanelStatus | undefined): boolean {
-	return status === "pending" || status === "processing";
+	return status === "pending" || status === "processing" || status === "materializing";
 }
 
 /** 是否存在阻止执行的原因。 */

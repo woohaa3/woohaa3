@@ -85,6 +85,7 @@ const STATUS_LABEL: Record<ExecutionPanelStatus, string> = {
 	idle: "待生成",
 	pending: "排队中",
 	processing: "生成中",
+	materializing: "媒体准备中",
 	successed: "已完成",
 	failed: "失败",
 };

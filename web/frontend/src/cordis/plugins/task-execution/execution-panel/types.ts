@@ -22,6 +22,8 @@ export type ExecutionPanelStatus =
 	| "idle"
 	| "pending"
 	| "processing"
+	/** provider 已产出、正在转存稳定媒体（change: 2026-11-06-fix-media-output-readiness）。 */
+	| "materializing"
 	| "successed"
 	| "failed";
 

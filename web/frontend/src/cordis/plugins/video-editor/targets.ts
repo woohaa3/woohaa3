@@ -8,6 +8,7 @@
  * 解析（design D3）。
  */
 import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
+import { hasReadyMediaAsset } from "@woohaa3/contracts";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 
 export type VideoFocusTarget = {
@@ -29,7 +30,7 @@ export function resolveVideoFocusTarget(canvas: ServerCanvas | null, nodeId: str
   const outputId = typeof data?.outputAssetId === "string" ? data.outputAssetId : "";
   if (!outputId) return null;
   const asset = canvas.assets.find((candidate) => candidate.id === outputId);
-  if (!asset || asset.status !== "ready" || asset.mediaKind !== "video") return null;
+  if (!asset || !hasReadyMediaAsset(asset) || asset.mediaKind !== "video") return null;
   const storageKey = typeof asset.metadata?.storageKey === "string" ? asset.metadata.storageKey : "";
   if (!storageKey) return null;
   // 画布内视频聚焦：播放地址与 poster 都带本画布读提示。
