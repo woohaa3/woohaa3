@@ -47,3 +47,7 @@ providers:
     # ep:
     #   video:
     #     doubao-seedance-2-5-260628: ep-20260101000000-xxxxx
+  # 阿里云百炼（Model Studio / DashScope），只接生图。apiKey 见密钥文件。
+  # 北京与新加坡的 Key 不通用；也可填工作空间域名 https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com
+  # bailian:
+  #   baseUrl: https://dashscope.aliyuncs.com
