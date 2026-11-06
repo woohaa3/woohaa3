@@ -58,7 +58,8 @@ export function alibabaFamilySchema(spec: AlibabaSizePreset): {
             })
           }
         : {}),
-      // 负向提示词只有 Qwen-Image 3.0 系列接受；其它模型不给控件，免得暴露会被忽略的字段。
+      // 负向提示词只有 2.0 与 3.0 系列接受（2.1 两处文档都没有）；其它模型不给控件，
+      // 免得暴露会被忽略的字段。
       ...(spec.supportsNegativePrompt ? { negativePrompt: alibabaNegativePromptField() } : {}),
       // 万相用 `thinking_mode` 提质，不认 `prompt_extend`，所以只有 Qwen / Z-Image 出这个开关。
       ...(spec.supportsPromptExtend
