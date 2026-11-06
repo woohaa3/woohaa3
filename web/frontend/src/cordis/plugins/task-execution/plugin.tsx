@@ -10,10 +10,10 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
-import { lazy, Suspense, useSyncExternalStore, type ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import type { ExecutionLaunchFeedback } from "./execution-launch.js";
 import { AuthoringGenerateHost } from "../../host.js";
-import { ExecutionPanelPending, ExecutionPanelSkeleton, ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
+import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
 import { resolveModelMcpServerUrl } from "../../mcp-endpoint.js";
 import {
@@ -50,8 +50,11 @@ import { AgentConversationPanel } from "./execution-panel/agent-conversation-pan
 // 文本宿主随执行面板定义装配：它只做一次节点类型判定并转交 composer，
 // 单独成 chunk 只会让打开文本面板多一次必然请求（change: 2026-10-27-merge-nonessential-panel-chunks）。
 import { TextExecutionHost } from "./text-execution-host.js";
-const ModelExecutionHost = lazy(() => import("./model-execution-host.js").then((module) => ({ default: module.ModelExecutionHost })));
-const ModelParameterPanel = lazy(() => import("./model-parameter-panel.js").then((module) => ({ default: module.ModelParameterPanel })));
+// 模型执行宿主随执行面板定义静态装配：图片/视频/音频是执行面板的主要打开路径，
+// 不再为它承担一次按需请求；加载骨架仍服务 authoring 等按需入口。
+import { ModelExecutionHost } from "./model-execution-host.js";
+// 模型参数面板已随宿主的静态依赖进入启动包，保留 `lazy()` 只会多一次空转 Suspense。
+import { ModelParameterPanel } from "./model-parameter-panel.js";
 
 export const TASK_EXECUTION_PLUGIN_ID = "task-execution";
 export const NODE_EXECUTION_PANEL_TYPE = "node-execution";
@@ -182,13 +185,13 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           };
           // 呈现表面与骨架、宿主共用同一判断（音频没有 expanded 面）。
           const surface = resolveExecutionPanelSurface(presentation, resolvePanelNodeType(route.nodeId));
-          // 文本宿主已静态装配；composer 的懒加载骨架由 `AuthoringGenerateHost` 内部提供，
+          // 文本与模型执行宿主都已静态装配；按需入口的骨架由各自模块内部提供，
           // 这里不再包一层不会触发的 `Suspense`。
           if (resolvePanelNodeType(route.nodeId) === "text") return (
             <TextExecutionHost canvasId={canvasId} nodeId={route.nodeId} writable={writable} runtime={runtime} presentation={surface} onPresentationIntent={submitPresentationIntent} />
           );
           return (
-            <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} runtime={runtime} />}><ModelExecutionHost
+            <ModelExecutionHost
               submitCoordinator={coordinator}
               canvasId={canvasId}
               selectedNodeId={route.nodeId}
@@ -220,7 +223,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
                   apply: input.apply
                 });
               }}
-            /></Suspense>
+            />
           );
         }
       };
@@ -235,14 +238,14 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           if (!resolveSelectionContext(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), route.nodeId)) return null;
           return (
             <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime}>
-              <Suspense fallback={<ExecutionPanelSkeleton />}><ModelParameterPanel
+              <ModelParameterPanel
                 canvasId={canvasId}
                 nodeId={route.nodeId}
                 nodeType={resolveModelPanelNodeType(route.nodeId)}
                 mcpServerUrl={resolveModelMcpServerUrl()}
                 disabledReason={null}
                 renderGenerate={buildModelRenderGenerate(ctx, route.nodeId, writable)}
-              /></Suspense>
+              />
             </ExecutionPanelSurface>
           );
         }
