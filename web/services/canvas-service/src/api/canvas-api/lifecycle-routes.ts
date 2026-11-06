@@ -210,7 +210,9 @@ export async function handleGet(
   const access = await options.catalog?.accessOf(canvasId).catch(() => null);
   const accessField = access === null || access === undefined ? {} : { access };
   try {
-    const canvas = await options.service.getCanvas(canvasId);
+    const canvas = await (options.catalog
+      ? options.catalog.getCanvas(canvasId)
+      : options.service.getCanvas(canvasId));
     res.setHeader("ETag", etagFor(canvas.revision, canvas.updatedAt));
     sendJson(res, 200, { canvas, revision: canvas.revision, ...accessField });
     log?.({ event: "canvas-get", status: 200 });

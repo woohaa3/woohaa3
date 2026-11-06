@@ -84,6 +84,51 @@ describe("CanvasCatalogService", () => {
     });
   });
 
+  it("按 id 读取时返回 published projection，而不是结构化旧快照", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const published = projection("canvas-b");
+    published.title = "Yjs 打开标题";
+    published.revision = 11;
+    published.document.nodes.push({ id: "n1", type: "text", position: { x: 0, y: 0 } });
+    await yjs.createYjsDocument({
+      canvasId: "canvas-b",
+      formatVersion: "1",
+      roomEpoch: "epoch",
+      checkpoint: new Uint8Array(),
+      projection: published,
+      revision: published.revision,
+      createdAt: NOW
+    });
+    const catalog = new CanvasCatalogService({ repository, published: createPublishedReader(yjs) });
+
+    await expect(catalog.getCanvas("canvas-b")).resolves.toMatchObject({
+      title: "Yjs 打开标题",
+      revision: 11,
+      document: { nodes: [{ id: "n1" }] }
+    });
+  });
+
+  it("尚未 bootstrap 时按 id 回退到结构化画布", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const catalog = new CanvasCatalogService({ repository, published: createPublishedReader(yjs) });
+
+    await expect(catalog.getCanvas("canvas-b")).resolves.toMatchObject({
+      title: "结构化旧标题",
+      revision: 1,
+      document: { nodes: [] }
+    });
+  });
+
+  it("结构化画布也不存在时按稳定错误码失败", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const catalog = new CanvasCatalogService({ repository, published: createPublishedReader(yjs) });
+
+    await expect(catalog.getCanvas("missing")).rejects.toMatchObject({ code: "CANVAS_NOT_FOUND" });
+  });
+
   it("projection 损坏时失败，不回退结构化标题", async () => {
     const repository = await seedRepository();
     const broken: CanvasPublishedReader = {
