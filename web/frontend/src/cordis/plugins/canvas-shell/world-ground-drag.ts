@@ -14,6 +14,10 @@
  */
 import {
   createWorldAnimationScript,
+  classifyCameraPoint,
+  worldModelGroundAnchor,
+  quatMul,quatRotate,
+  type Vec3,
   decodeSceneAreaData,
   decodeWorldInstanceData,
   encodeWorldInstanceData,
@@ -23,7 +27,6 @@ import {
   serializeWorldAnimationScript,
   type CanvasCommand,
   type CanvasNodeData,
-  type GroundAabb,
   type GroundPoint,
   type ServerCanvas,
   type WorldPoint
@@ -36,6 +39,8 @@ export type WorldGroundDragTarget = {
   source: string;
   /** 已解码的实例数据；提交时以它为底。 */
   instance: NonNullable<ReturnType<typeof instanceOf>>;
+  /** Frozen prepared bind-pose anchor; null means geometry unavailable. */
+  localAnchor: Vec3 | null;
 };
 
 /** 地面拖动的起点：命中的世界实例、同批拖动的全部实例与按下时的地面点。 */
@@ -72,9 +77,10 @@ export function isWorldDragTarget(canvas: ServerCanvas | null | undefined, nodeI
 export function beginWorldGroundDrag(
   canvas: ServerCanvas | null | undefined,
   nodeId: string | null,
-  ground: GroundPoint | null
+  ground: GroundPoint | null,
+  anchors?: ReadonlyMap<string, Vec3 | null>
 ): WorldGroundDragStart | null {
-  return beginWorldGroundDragMany(canvas, nodeId ? [nodeId] : [], nodeId, ground);
+  return beginWorldGroundDragMany(canvas, nodeId ? [nodeId] : [], nodeId, ground, anchors);
 }
 
 /**
@@ -87,7 +93,8 @@ export function beginWorldGroundDragMany(
   canvas: ServerCanvas | null | undefined,
   nodeIds: readonly string[],
   pressedNodeId: string | null,
-  ground: GroundPoint | null
+  ground: GroundPoint | null,
+  anchors?: ReadonlyMap<string, Vec3 | null>
 ): WorldGroundDragStart | null {
   if (!ground || !Number.isFinite(ground.u) || !Number.isFinite(ground.v)) return null;
   if (!canvas || !pressedNodeId) return null;
@@ -98,11 +105,14 @@ export function beginWorldGroundDragMany(
     seen.add(nodeId);
     const instance = instanceOf(canvas, nodeId);
     if (!instance) continue;
+    const anchor = anchors?.get(nodeId);
     targets.push({
       nodeId,
       // 用解码后的规范化值作并发基线：原始 JSON 的键顺序变化不应误判为外部改写。
       source: JSON.stringify(instance),
-      instance
+      instance,
+      // Legacy pure-rule callers omit resources; live gestures always pass a map.
+      localAnchor: anchors ? (anchor ? [...anchor] as Vec3 : null) : [0, 0, 0]
     });
   }
   const pressed = targets.find(target => target.nodeId === pressedNodeId);
@@ -189,10 +199,6 @@ export type WorldGroundMoveAnimationPlan = {
   unbindCandidates: WorldGroundUnbindCandidate[];
 };
 
-function insideArea(bounds: GroundAabb, point: GroundPoint): boolean {
-  return point.u >= bounds.min.u && point.u <= bounds.max.u
-    && point.v >= bounds.min.v && point.v <= bounds.max.v;
-}
 
 function instancePatch(nodeId: string, instance: ReturnType<typeof instanceOf> & object, position: WorldPoint): CanvasCommand | null {
   const next = { ...instance, transform: { ...instance.transform, position } };
@@ -240,7 +246,7 @@ export function planWorldGroundMoveWithAnimationParts(
     const script = area.value.animationScript;
     const executed = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
     if (!executed.ok) continue;
-    if (!executed.ir.instanceTracks.some(track => instanceIds.has(track.targetId))) continue;
+    if (![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? []),...(executed.ir.walkTracks ?? [])].some(track => instanceIds.has(track.targetId))) continue;
     const unbind = unbindAreaIds?.has(node.id) === true;
     let changed = false;
     const instanceTracks = unbind
@@ -260,21 +266,49 @@ export function planWorldGroundMoveWithAnimationParts(
           to[1] = to[1]! + delta.v;
           return { ...track, from, to };
         });
-    if (!changed) continue;
+    const walkTracks=(executed.ir.walkTracks ?? []).flatMap(track=>{
+      if(!instanceIds.has(track.targetId))return [track];
+      changed=true;
+      return unbind ? [] : [{...track,path:track.path.map(([u,v])=>[u+delta.u,v+delta.v] as [number,number])}];
+    });
+    const partTracks = (executed.ir.partTracks ?? []).filter(track => !unbind || !instanceIds.has(track.targetId));
+    if (partTracks.length !== (executed.ir.partTracks?.length ?? 0)) changed = true;
     const sampled = sampleWorldAnimationInArea(
       executed.ir,
       times?.get(node.id) ?? 0,
       sceneAreaAnimationOrigin(area.value)
     ).instances;
     for (const instanceId of instanceIds) {
-      const position = sampled.get(instanceId)?.position;
+      const motion = sampled.get(instanceId);
+      const position = motion?.position;
       if (position) animatedPositions.set(instanceId, position);
+      const walk=unbind ? executed.ir.walkTracks?.find(track=>track.targetId===instanceId) : undefined;
+      const target=start.targets.find(entry=>entry.instance.instanceId===instanceId);
+      if(walk && target && position){
+        // Removing the generated pose restores the bind legs. Keep the same
+        // ground anchor while restoring their standing height and base yaw.
+        const base=target.instance.transform,anchor=walk.profile.groundAnchorLocal;
+        const current={...base,position,rotation:motion?.rotation ? quatMul([...base.rotation],[...motion.rotation]) : base.rotation};
+        const ground=worldModelGroundAnchor(anchor,current);
+        const offset=quatRotate([...base.rotation],[anchor[0]*base.scale,-anchor[2]*base.scale,anchor[1]*base.scale]);
+        animatedPositions.set(instanceId,{u:ground.u-offset[0],v:ground.v-offset[1],h:-offset[2]});
+      }
       if (!unbind && !unbindAreaIds) {
         const target = start.targets.find(entry => entry.instance.instanceId === instanceId);
-        if (!target) continue;
-        const old = position ?? target.instance.transform.position;
+        if (!target || ![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? []),...(executed.ir.walkTracks ?? [])].some(track => track.targetId === instanceId)) continue;
+        // Missing prepared geometry cannot authorize a destructive unlink.
+        if (!target.localAnchor) return null;
+        const base = target.instance.transform;
+        const transform = {
+          ...base,
+          position: position ?? base.position,
+          rotation: motion?.rotation ? quatMul([...base.rotation], [...motion.rotation]) : base.rotation,
+          scale: motion?.scale ?? base.scale
+        };
+        const old = worldModelGroundAnchor(target.localAnchor, transform);
         const next = { u: old.u + delta.u, v: old.v + delta.v };
-        if (insideArea(area.value.bounds, old) && !insideArea(area.value.bounds, next)) {
+        const inside = (point: GroundPoint) => classifyCameraPoint({ area: area.value.bounds, position: { ...point, h: 0 } }) === "complete";
+        if (inside(old) && !inside(next)) {
           if (!unbindCandidates.some(candidate => candidate.areaNodeId === node.id)) {
             const title = typeof nodeData?.title === "string" && nodeData.title.trim() !== "" ? nodeData.title.trim() : "导演区";
             unbindCandidates.push({ areaNodeId: node.id, title });
@@ -282,8 +316,9 @@ export function planWorldGroundMoveWithAnimationParts(
         }
       }
     }
+    if (!changed && unbindCandidates.length === 0) continue;
     const nextScript = createWorldAnimationScript({
-      script: serializeWorldAnimationScript({ ...executed.ir, instanceTracks }),
+      script: serializeWorldAnimationScript({ ...executed.ir, instanceTracks, partTracks,walkTracks }),
       duration: script.duration,
       loop: script.loop,
       revision: script.revision + 1
@@ -295,7 +330,7 @@ export function planWorldGroundMoveWithAnimationParts(
       ...(nodeData ?? {}),
       sceneArea: nextArea
     }) as unknown as CanvasNodeData;
-    if (unbind && instanceTracks.length === 0 && executed.ir.cameraTracks.length === 0) {
+    if (unbind && instanceTracks.length === 0 && partTracks.length === 0 && walkTracks.length === 0 && executed.ir.cameraTracks.length === 0) {
       const { animationScript: _removed, ...rest } = rawArea;
       forwardAreas.push({ type: "nodeData.patch", nodeId: node.id, value: value(rest) });
     } else {

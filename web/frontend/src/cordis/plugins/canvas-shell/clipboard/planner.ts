@@ -175,7 +175,7 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
     options.onRefusal?.(world.code === "binding-unavailable"
       ? world.field === "memberNodeIds"
         ? `组成员 ${world.reference?.id ?? ""} 不在复制集合中，请将缺失成员一起复制后重试。`
-        : world.field === "animation.tracks.instanceId" || world.field === "animationScript.instanceTracks"
+        : world.field === "animation.tracks.instanceId" || ["animationScript.instanceTracks","animationScript.partTracks","animationScript.walkTracks"].includes(world.field ?? "")
           ? `动画对象 ${world.reference?.id ?? ""} 不在复制集合中，请将动画对象一起复制后重试。`
           : world.field === "animationScript.cameraTracks"
             ? `动画镜头 ${world.reference?.id ?? ""} 不在复制集合中，请将动画镜头一起复制后重试。`

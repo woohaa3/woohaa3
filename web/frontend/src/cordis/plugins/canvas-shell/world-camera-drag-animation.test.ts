@@ -122,3 +122,22 @@ it("asks to unbind when the camera leaves the animating area", () => {
   expect(sceneArea?.animationScript).toBeUndefined();
   expect(areaScript(canvas)).not.toBeNull();
 });
+
+it.each(['rotate','unbind'] as const)('preserves unrelated walking and part motion after camera %s removes its last track',mode=>{
+ const profile={version:'humanoid-walk-v1',groundAnchorLocal:[0,-.86,.08],legs:{Left:{hipLocal:[.2,0,0],upperLength:.4,lowerLength:.35,soleLocal:[0,-.11,.08]},Right:{hipLocal:[-.2,0,0],upperLength:.4,lowerLength:.35,soleLocal:[0,-.11,.08]}},armsDownPose:{LeftUpperArm:[0,0,-90],RightUpperArm:[0,0,90]}};
+ const options={startTime:0,endTime:4,path:[[1,1],[5,1],[5,4],[1,4]],cornerRadius:.6,strideLength:.6,stepHeight:.09,scale:1,baseYawDegrees:0,profile};
+ for(const actorSource of [`motion.instance.walk("walker",${JSON.stringify(options)});`,'motion.part.tween("actor","hand",{property:"rotation",startTime:0,endTime:4,from:[0,0,0],to:[20,0,0]});']){
+  const {canvas}=canvasWithAnimatedCamera();
+  const source=actorSource+'motion.camera.tween({cameraId:"camera-1",property:"rotation",startTime:0,endTime:4,from:[0,0,0],to:[0,0,90]});';
+  (canvas.nodeData.area!.sceneArea as any).animationScript=createWorldAnimationScript({script:source,duration:4,loop:false});
+  const sample=animatedCameraAt(canvas,'camera-1',new Map([['area',0]]))!;
+  const start=beginWorldCameraDrag(canvas,'camera-node',{u:0,v:0},mode==='rotate'?'rotate':'move',sample.camera)!;
+  const plan=planWorldCameraMoveWithAnimationParts(canvas,start,{u:1,v:0},new Map([['area',0]]),mode==='unbind'?new Set(['area']):undefined)!;
+  const forward=plan.forwardAreas[0] as any;
+  expect(forward.value.sceneArea.animationScript).toBeDefined();
+  const compiled=executeWorldAnimationScript(forward.value.sceneArea.animationScript.script,{duration:4,loop:false});
+  expect(compiled.ok).toBe(true);if(!compiled.ok)continue;
+  expect(compiled.ir.cameraTracks).toEqual([]);
+  expect((compiled.ir.walkTracks?.length??0)+(compiled.ir.partTracks?.length??0)).toBe(1);
+ }
+});

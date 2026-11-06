@@ -21,7 +21,7 @@ export const IDENTITY_QUAT: Quat = [0, 0, 0, 1];
 
 /** `[x,y,z]` 角度（度）→ intrinsic Y-X-Z 四元数，等价于 `qy * qx * qz`。 */
 export function quatFromEulerYXZDegrees(rotation: Vec3): Quat {
-  const [x, y, z] = rotation.map((value) => (value * Math.PI) / 180) as Vec3;
+  const [x, y, z] = rotation.map((value) => value * (Math.PI / 180)) as Vec3;
   return quatMul(quatMul(axisAngle([0, 1, 0], y), axisAngle([1, 0, 0], x)), axisAngle([0, 0, 1], z));
 }
 

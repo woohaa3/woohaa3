@@ -1,3 +1,4 @@
+import { modelGroundAnchorLocal, storedHumanoidRig, type Vec3 } from "@woohaa3/contracts";
 /**
  * 共享世界模型的直接地面拖拽手势（从 `interaction-2d-input` 拆出，保持文件体积守卫）。
  *
@@ -30,6 +31,18 @@ export type WorldGroundGestureFamily = {
   cancel: () => void;
 };
 
+let fallbackCommandSeq = 0;
+/** Browser refreshes and separate controllers must never reuse a persisted command ID. */
+function groundMoveCommandId(): string {
+  const bytes = new Uint8Array(16);
+  const crypto = globalThis.crypto;
+  if (typeof crypto?.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+    return `web-world-ground-animation-${Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("")}`;
+  }
+  return `web-world-ground-animation-${Date.now().toString(36)}-${fallbackCommandSeq++}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function createWorldGroundGestureFamily(core: InteractionCore): WorldGroundGestureFamily {
   const { state, submit, schedule, writable } = core;
 
@@ -42,11 +55,19 @@ export function createWorldGroundGestureFamily(core: InteractionCore): WorldGrou
     const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
     // 点击已在选区内的世界模型时，整个选区的世界实例一起移动；未选中则只选/拖这一个。
     const selected = state.selected.includes(nodeId) ? state.selected : [nodeId];
+    const resources = core.options.getModelResources?.();
+    const anchors = new Map<string, Vec3 | null>();
+    for (const id of selected) {
+      const resource = resources?.get(id);
+      const rig = storedHumanoidRig(canvas?.nodeData[id]?.modelRig);
+      anchors.set(id, resource ? modelGroundAnchorLocal(resource.ops, rig.ok ? rig.value : null) : null);
+    }
     const start = beginWorldGroundDragMany(
       canvas,
       selected,
       nodeId,
-      core.queryWorldGround({ x: event.clientX, y: event.clientY })
+      core.queryWorldGround({ x: event.clientX, y: event.clientY }),
+      anchors
     );
     if (!start) return null;
     clearPreview();
@@ -93,26 +114,40 @@ export function createWorldGroundGestureFamily(core: InteractionCore): WorldGrou
       submit(plan.forward);
       return;
     }
-    const commandId = `web-world-ground-animation-${core.nextSeq()}`;
-    const result = session.submitCommands(plan.forward, commandId);
-    if (!result.ok) {
+    const reportFailure = (error: unknown) => {
       schedule("world-ground-preview");
-      return;
-    }
-    const replay = (commands: typeof plan.forward) => {
-      const id = `web-world-ground-animation-${core.nextSeq()}`;
-      const replayResult = session.submitCommands(commands, id);
-      if (!replayResult.ok) return Promise.resolve({ ok: false as const, reason: replayResult.reason });
-      return replayResult.handle.settled.then(settled => settled.state === "committed"
-        ? { ok: true as const }
-        : { ok: false as const, reason: settled.error ?? "移动未提交" });
+      core.options.onInteractionError?.(error instanceof Error ? error : new Error(`移动未保存：${String(error)}`));
     };
-    core.options.recordExternal?.({
-      id: commandId,
-      label: "移动世界对象",
-      undo: () => replay(plan.inverse),
-      redo: () => replay(plan.forward)
-    });
+    const commandId = groundMoveCommandId();
+    try {
+      const result = session.submitCommands(plan.forward, commandId);
+      if (!result.ok) { reportFailure(result.reason); return; }
+      const replay = async (commands: typeof plan.forward) => {
+        try {
+          const replayResult = session.submitCommands(commands, groundMoveCommandId());
+          if (!replayResult.ok) return { ok:false as const,reason:replayResult.reason };
+          const settled = await replayResult.handle.settled;
+          return settled.state === "committed" ? {ok:true as const}
+            : {ok:false as const,reason:settled.error ?? "移动未提交"};
+        } catch (error) {
+          return {ok:false as const,reason:error instanceof Error ? error.message : String(error)};
+        }
+      };
+      void result.handle.settled.then(settled => {
+        if (settled.state !== "committed") { reportFailure(settled.error ?? "移动未提交"); return; }
+        try {
+          const recorded = core.options.recordExternal?.({
+            id: commandId,
+            label: "移动世界对象",
+            undo: () => replay(plan.inverse),
+            redo: () => replay(plan.forward)
+          });
+          if (recorded && !recorded.ok) reportFailure(new Error(`移动已保存，但无法登记撤销：${recorded.reason ?? "历史记录不可用"}`));
+        } catch (error) {
+          reportFailure(new Error(`移动已保存，但无法登记撤销：${error instanceof Error ? error.message : String(error)}`));
+        }
+      }).catch(reportFailure);
+    } catch (error) { reportFailure(error); }
   };
 
   const commit = (event: PointerEvent) => {
@@ -170,7 +205,11 @@ export function createWorldGroundGestureFamily(core: InteractionCore): WorldGrou
       clearPreview();
       if (latest) applyPlan(latest);
       else schedule("world-ground-preview");
-    })();
+    })().catch(error => {
+      clearPreview();
+      schedule("world-ground-preview");
+      core.options.onInteractionError?.(error);
+    });
     return true;
   };
 

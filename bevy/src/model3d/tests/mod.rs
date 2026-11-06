@@ -36,7 +36,7 @@ pub(super) fn scene_with(node: &GraphNode, model: Option<ModelReference>) -> Sce
 /// 由内容快照 + placement 构造节点模型引用（resource_key = sceneVersion:signature）。
 pub(super) fn reference_for(snapshot: &ModelSnapshot, placement: ModelPlacement) -> ModelReference {
     let scene_version = snapshot.scene_version.clone();
-    ModelReference {
+    ModelReference { ground_anchor_local: None, part_rotations: None,
         resource_key: format!(
             "{}:{}",
             scene_version.clone().unwrap_or_default(),

@@ -14,7 +14,7 @@ use super::super::opacity::DesiredOpacity;
 /// 只影响 `animation_playback.node_id` 指向的模型根：其它节点保持各自姿态与时钟。运动求值
 /// 是纯函数（`crate::motion`），不依赖 watch/每帧重跑 JavaScript。节点切换或投影清除时，
 /// 上一节点恢复基础姿态与材质。返回解析出的镜头姿态（供 shot adapter 使用）。
-pub(crate) fn apply_motion_playback(
+fn apply_clip_playback(
     commands: &mut Commands,
     models: &mut ModelVisuals,
     materials: &mut Assets<StandardMaterial>,
@@ -138,4 +138,62 @@ pub(crate) fn compose_delta(base: Transform, delta: &crate::motion::ModelDelta) 
         rotation: base.rotation * delta.rotation,
         scale: base.scale * delta.scale,
     }
+}
+
+/// Apply joint samples after the existing clip, composing from rest every frame.
+pub(crate) fn apply_motion_playback(
+    commands: &mut Commands,
+    models: &mut ModelVisuals,
+    materials: &mut Assets<StandardMaterial>,
+    opacity: &HashMap<Entity, crate::canvas_ecs::components::OpacityMaterialInstance>,
+    scene: &Scene,
+) -> Option<crate::motion::CameraState> {
+    let camera = apply_clip_playback(commands, models, materials, opacity, scene);
+    let current: HashMap<_, _> = scene.nodes.iter().filter_map(|node| {
+        let rotations = node.model.as_ref()?.part_rotations.as_ref()?;
+        Some((node.id.as_str(), rotations))
+    }).collect();
+    if models.joint_targets.is_empty() && current.values().all(|poses| poses.is_empty()) {
+        return camera;
+    }
+    let previous = std::mem::take(&mut models.joint_targets);
+    let active: std::collections::HashSet<&str> = previous.keys().map(String::as_str)
+        .chain(current.keys().copied()).collect();
+    let mut clip = HashMap::new();
+    if let Some(playback) = &scene.animation_playback {
+        let plan = super::super::motion_plan::resolve(models, playback);
+        if let Some(top) = &plan.top {
+            clip = crate::motion::evaluate(top, playback.time, playback.initial_camera_state())
+                .1.into_iter().collect();
+        }
+    }
+    for node_id in active {
+        let Some(root) = models.roots.get(node_id) else { continue };
+        let rotations = current.get(node_id).copied();
+        let targets: std::collections::HashSet<String> = rotations
+            .map(|r| r.keys().cloned().collect()).unwrap_or_default();
+        let mut affected = previous.get(node_id).cloned().unwrap_or_default();
+        affected.extend(targets.iter().cloned());
+        for id in affected {
+            let (Some(entity), Some(base)) = (
+                root.part_entities.get(&id), root.part_bases.get(&id),
+            ) else { continue };
+            let mut pose = *base;
+            if scene.animation_playback.as_ref().is_some_and(|p| p.node_id == node_id) {
+                if let Some(delta) = clip.get(&id) {
+                    pose = compose_delta(pose, delta);
+                }
+            }
+            if let Some(q) = rotations.and_then(|r| r.get(&id)) {
+                pose.rotation *= Quat::from_array(*q);
+            }
+            if let Ok(mut entity) = commands.get_entity(*entity) {
+                entity.insert(pose);
+            }
+        }
+        if !targets.is_empty() {
+            models.joint_targets.insert(node_id.to_owned(), targets);
+        }
+    }
+    camera
 }

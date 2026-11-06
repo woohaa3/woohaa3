@@ -1,3 +1,5 @@
+import { modelGroundAnchorLocal } from "../world-animation-spatial.js";
+import { storedHumanoidRig } from "../humanoid-rig.js";
 import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
@@ -343,10 +345,14 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       ...(capabilities.appearance?.cardLabel ? { cardLabel: capabilities.appearance.cardLabel } : {})
     };
     if (capabilities.modelPreparation && resource) {
+      const storedRig = data?.modelRig == null ? null : storedHumanoidRig(data.modelRig);
+      const groundAnchorLocal = projectedWorld ? modelGroundAnchorLocal(resource.ops, storedRig?.ok ? storedRig.value : null) : null;
       rendered.model = {
+        ...(groundAnchorLocal ? { groundAnchorLocal } : {}),
         sceneVersion: resource.sceneVersion,
         resourceKey: resource.resourceKey,
         signature: resource.signature,
+        ...(animated?.partRotations ? { partRotations: animated.partRotations } : {}),
         ...(placement ? { placement } : {})
       };
     }

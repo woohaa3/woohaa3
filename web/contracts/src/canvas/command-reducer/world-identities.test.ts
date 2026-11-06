@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { applyCanvasCommands } from "../command-reducer.js";
 import { createEmptyWoohaa3ServerCanvas, normalizeCanvas, parseCanvasAggregate } from "../domain/index.js";
+import { HUMANOID_REFERENCE_PARAMETERS } from "../humanoid-rig.js";
 import { serverCanvasToYDoc, yDocToServerCanvas } from "../yjs/mapping.js";
 
 const now = "2026-11-01T00:00:00.000Z";
@@ -176,5 +177,28 @@ describe("world identities", () => {
         expect(reloaded.ok && reloaded.canvas.nodeData.model.parameters).toEqual(parameters);
       }
     }
+  });
+
+  it("keeps a humanoid rig on a shared world model and rejects a malformed one", () => {
+    const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } };
+    const modelRig = { profile: "humanoid", templateId: "humanoid", templateVersion: 1, parameters: HUMANOID_REFERENCE_PARAMETERS };
+    const definition = { modelScript: "scene.box({ id: 'body', parent: rig.joint('Hips') });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "source", contentHash: "content" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, modelRig };
+    const result = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("x", now), [{ type: "node.add", node: node("model", "model3d"), nodeData: { sharedWorldInstance: instance, ...definition } as never }], { now });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    if (!result.ok) return;
+    expect(result.canvas.nodeData.model.modelRig).toEqual(modelRig);
+    const parsed = parseCanvasAggregate(result.canvas);
+    expect(parsed.ok && parsed.canvas.nodeData.model.modelRig).toEqual(modelRig);
+    const patched = applyCanvasCommands(result.canvas, [{ type: "nodeData.patch", nodeId: "model", value: { modelRig } }], { now });
+    expect(patched.ok, JSON.stringify(patched)).toBe(true);
+    if (patched.ok) {
+      const doc = new Y.Doc();
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(serverCanvasToYDoc(patched.canvas)));
+      const reloaded = yDocToServerCanvas(doc, { now });
+      expect(reloaded.ok && reloaded.canvas.nodeData.model.modelRig).toEqual(modelRig);
+    }
+    const malformed = { modelRig: { profile: "rigid", templateId: "humanoid", templateVersion: 1, parameters: HUMANOID_REFERENCE_PARAMETERS } };
+    expect(applyCanvasCommands(result.canvas, [{ type: "nodeData.patch", nodeId: "model", value: malformed as never }], { now }).ok).toBe(false);
+    expect(result.canvas.nodeData.model.modelRig).toEqual(modelRig);
   });
 });

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
+  executeModelWithStoredRig,
+  HUMANOID_REFERENCE_PARAMETERS,
+  type WorldInstanceData,
   type ServerCanvas
 } from "@woohaa3/contracts";
 import {
@@ -125,20 +128,75 @@ function canvasFixture(): ServerCanvas {
 }
 
 describe("world authoring authority", () => {
-  it("classifies complete, partial, outside and camera anchors from authoritative bounds", async () => {
+  it("grants body overflow when the authoritative ground anchor remains inside", async () => {
     const authority = createWorldAuthoringAuthority({ executeScene });
     const prepared = await authority.prepareCanvas(canvasFixture(), { kind: "scene-area", areaId: "area-main" });
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) return;
     const snapshot = prepared.snapshot;
     expect(snapshot.writable.map(target => target.kind === "instance" ? target.instanceId : target.cameraId).sort())
-      .toEqual(["camera-in", "complete-a"]);
-    expect(snapshot.readOnly.map(target => target.kind === "instance" ? target.instanceId : target.cameraId)).toEqual(["partial-b"]);
+      .toEqual(["camera-in", "complete-a", "partial-b"]);
+    expect(snapshot.readOnly.map(target => target.kind === "instance" ? target.instanceId : target.cameraId)).toEqual([]);
     const objects = new Map(snapshot.objects.map(entry => [JSON.stringify(entry.identity), entry.containment]));
     expect(objects.get(JSON.stringify({ kind: "instance", instanceId: "outside-c" }))).toBe("outside");
     expect(objects.get(JSON.stringify({ kind: "camera", cameraId: "camera-out" }))).toBe("outside");
     // The card is far outside the visible area, but the spatial anchor is inside.
     expect(objects.get(JSON.stringify({ kind: "camera", cameraId: "camera-in" }))).toBe("writable");
+  });
+
+  it("keeps anchor-out body overlap reference-only and rejects the same commit poststate", async () => {
+    const canvas = singleInstanceCanvas();
+    const authority = createWorldAuthoringAuthority({ executeScene });
+    const prepared = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+    const target = { kind: "instance" as const, instanceId: "solo-a" };
+    const intent = { requestId: "r", canvasId: canvas.id, runId: "run", epoch: 1, executionId: "exec",
+      scope: prepared.snapshot.scope, writable: prepared.snapshot.writable, readOnly: [] };
+    const after = structuredClone(canvas);
+    const transform = (after.nodeData.solo.sharedWorldInstance as unknown as WorldInstanceData).transform;
+    transform.position.u = 10;
+    // Anchor on the boundary authorizes even though the body extends beyond it.
+    expect(authority.resolve(intent, canvas, after, [target])).not.toBeNull();
+    transform.position.u = 10.5;
+    expect(authority.resolve(intent, canvas, after, [target])).toBeNull();
+    const snapshot = await authority.prepareCanvas(after, { kind: "scene-area", areaId: "area-main" });
+    expect(snapshot.ok && snapshot.snapshot.objects[0]?.containment).toBe("read-only");
+    transform.position.u = 20;
+    const outside = await authority.prepareCanvas(after, { kind: "scene-area", areaId: "area-main" });
+    expect(outside.ok && outside.snapshot.objects[0]?.containment).toBe("outside");
+  });
+
+  it("transforms the actual bottom anchor with tilted rotation and scale instead of testing the origin", async () => {
+    const canvas = singleInstanceCanvas();
+    const transform = (canvas.nodeData.solo.sharedWorldInstance as unknown as WorldInstanceData).transform;
+    // Bottom is local y=-1. World tilt maps it to u=2 after scale, so
+    // an origin outside the left edge still has a valid anchor on the edge.
+    transform.position.u = -2;
+    transform.rotation = [0, -Math.SQRT1_2, 0, Math.SQRT1_2];
+    transform.scale = 2;
+    const authority = createWorldAuthoringAuthority({ executeScene });
+    const prepared = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
+    expect(prepared.ok && prepared.snapshot.objects[0]?.containment).toBe("writable");
+  });
+
+  it("executes and versions stored rig parameters and uses foot geometry rather than the body center", async () => {
+    const canvas = singleInstanceCanvas();
+    const rig = { profile: "humanoid", templateId: "humanoid", templateVersion: 1, parameters: HUMANOID_REFERENCE_PARAMETERS } as const;
+    canvas.nodeData.solo.modelRig = rig;
+    canvas.nodeData.solo.modelScript = 'scene.segment({id:"abdomen",parent:rig.joint("Spine"),from:[0,-0.5,0],to:[0,0,0],width:0.32,depth:0.24,shape:"box"});scene.box({id:"body",parent:rig.joint("Spine"),position:[20,0,0],size:[10,2,2]});scene.box({id:"foot",parent:rig.joint("LeftFoot"),position:[0,-0.04,0.08],size:[0.24,0.14,0.38]});';
+    let received: unknown;
+    const authority = createWorldAuthoringAuthority({ executeScene: async (source, version, options) => {
+      received = options?.rig;
+      const execution = executeModelWithStoredRig(source, version, rig);
+      if (!execution.ok) return execution as never;
+      return { ok: true, version: "woohaa-model-js-v2", sceneVersion: "scene-ir-v2", ops: execution.scene.ops, json: "", sourceHash: "fixture" };
+    } });
+    const prepared = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
+    expect(received).toEqual(rig.parameters);
+    expect(prepared.ok && prepared.snapshot.objects[0]?.containment).toBe("writable");
+    const oldVersion = worldObjectVersion(canvas, { kind: "instance", instanceId: "solo-a" });
+    canvas.nodeData.solo.modelRig = { ...rig, parameters: { ...rig.parameters, height: 4 } };
+    expect(worldObjectVersion(canvas, { kind: "instance", instanceId: "solo-a" })).not.toBe(oldVersion);
   });
 
   it("fails closed when authoritative instance bounds are unknown", async () => {
@@ -165,7 +223,7 @@ describe("world authoring authority", () => {
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.snapshot.writable.map(target => target.kind === "instance" ? target.instanceId : target.cameraId).sort())
-      .toEqual(["camera-in", "complete-a"]);
+      .toEqual(["camera-in", "complete-a", "partial-b"]);
   });
 
   it("keeps genuinely unknown model bounds unauthorized", async () => {

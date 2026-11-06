@@ -21,12 +21,14 @@
  */
 import {
   DEFAULT_MODEL_PLACEMENT,
+  describeWorldModelAnimationRig,
   SHARED_WORLD_VERSION,
   assistantWorldToolsForScope,
   decodeSceneAreaData,
   decodeWorldCamera,
   decodeWorldInstanceData,
   normalizeModelDefinition,
+  humanoidRigForAuthoredScript,
   sceneAreaAnimationOrigin,
   type AssistantWorldCancelInput,
   type AssistantWorldCompletionInput,
@@ -57,7 +59,8 @@ import {
   serializeWorldAnimationScript,
   worldCameraView
 } from "@woohaa3/contracts";
-import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash } from "@woohaa3/contracts/canvas-yjs";
+import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash, stableStringify } from "@woohaa3/contracts/canvas-yjs";
+import { executeSceneIr } from "../model-mcp/script-executor.js";
 import type { CanvasRoom } from "../sync/room.js";
 import type { RoomCommandResult } from "../sync/room-types.js";
 import { stableAuthorityVersion, worldObjectVersion, nextSceneAreaScopeVersion, type WorldAuthoringAuthority } from "./authority.js";
@@ -231,12 +234,15 @@ function runView(record: LeaseRecord): AssistantWorldRunView {
   };
 }
 
-function contentFields(content: AssistantWorldModelContent): Record<string, unknown> {
+function contentFields(content: AssistantWorldModelContent, previousRig?: unknown): Record<string, unknown> {
+  const resolved = humanoidRigForAuthoredScript(content.modelScript, undefined, previousRig);
+  if (!resolved.ok) throw new Error(resolved.message);
   const definition = normalizeModelDefinition({
     modelScript: content.modelScript,
     modelScriptLanguage: "javascript",
     modelScriptVersion: content.modelScriptVersion ?? "woohaa-model-js-v2",
-    placement: DEFAULT_MODEL_PLACEMENT
+    placement: DEFAULT_MODEL_PLACEMENT,
+    rig: resolved.rig
   });
   if (!definition.ok) throw new Error(definition.reason);
   return {
@@ -244,7 +250,8 @@ function contentFields(content: AssistantWorldModelContent): Record<string, unkn
     modelScriptLanguage: definition.value.modelScriptLanguage,
     modelScriptVersion: definition.value.modelScriptVersion,
     modelContentVersion: definition.value.contentVersion,
-    modelPlacement: definition.value.placement
+    modelPlacement: definition.value.placement,
+    ...(definition.value.rig ? { modelRig: definition.value.rig } : {})
   };
 }
 
@@ -316,7 +323,25 @@ function findArea(canvas: ServerCanvas, areaId: string): { node: ServerCanvas["d
   return null;
 }
 
+
 export function createAssistantWorldService(deps: AssistantWorldServiceDeps): AssistantWorldService {
+  const rigCache = new Map<string, import("@woohaa3/contracts").WorldModelAnimationRig | null>();
+async function animationRigOf(fields: Record<string, unknown>): Promise<import("@woohaa3/contracts").WorldModelAnimationRig | null> {
+  if (!fields || typeof fields.modelScript !== "string") return null;
+  const resolved = humanoidRigForAuthoredScript(fields.modelScript, undefined, fields.modelRig);
+  if (!resolved.ok) return null;
+  const rig = resolved.rig;
+  const key = JSON.stringify([fields.modelScript, fields.modelScriptVersion, fields.modelRig]);
+  if (rigCache.has(key)) return rigCache.get(key)!;
+  const execution = await executeSceneIr(fields.modelScript, fields.modelScriptVersion, { ...(rig ? { rig: rig.parameters } : {}) });
+  if (rigCache.size >= 64) rigCache.delete(rigCache.keys().next().value!);
+  if (!execution.ok) { rigCache.set(key, null); return null; }
+  const value = describeWorldModelAnimationRig(execution.ops, rig);
+  if (rigCache.size >= 64) rigCache.delete(rigCache.keys().next().value!);
+  rigCache.set(key, value);
+  return value;
+}
+
   const ledgers = new Map<string, RunLedger>();
   const hostCompletions = new Map<string, HostCompletion>();
   /**
@@ -792,20 +817,25 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
           // dead tracks; a live target outside the writable set still refuses.
           const existing = existingWorldTargets(inspected.canvas);
           const instanceTracks = compiled.ir.instanceTracks.filter(track => existing.instances.has(track.targetId));
+          const partTracks = (compiled.ir.partTracks ?? []).filter(track => existing.instances.has(track.targetId));
+          const walkTracks = (compiled.ir.walkTracks ?? []).filter(track => existing.instances.has(track.targetId));
           const cameraTracks = compiled.ir.cameraTracks.filter(track => existing.cameras.has(track.targetId));
-          const outside = instanceTracks.some(track => !writableInstances.has(track.targetId))
+          const outside = walkTracks.some(track => !writableInstances.has(track.targetId)) || partTracks.some(track => !writableInstances.has(track.targetId))
+            || instanceTracks.some(track => !writableInstances.has(track.targetId))
             || cameraTracks.some(track => !writableCameras.has(track.targetId));
           if (outside) {
             // The write tool replaces the whole script: a filtered read would
             // silently delete hidden tracks on a later local revision.
             return failure("outside-scope", "导演区动画包含本轮不可写的部件，无法安全读取并局部返修；原动画未修改");
           }
-          if (instanceTracks.length !== compiled.ir.instanceTracks.length
-            || cameraTracks.length !== compiled.ir.cameraTracks.length) {
-            animationScript = instanceTracks.length === 0 && cameraTracks.length === 0
+          if (walkTracks.length !== (compiled.ir.walkTracks?.length ?? 0)
+            || instanceTracks.length !== compiled.ir.instanceTracks.length
+            || cameraTracks.length !== compiled.ir.cameraTracks.length
+            || partTracks.length !== (compiled.ir.partTracks ?? []).length) {
+            animationScript = instanceTracks.length === 0 && cameraTracks.length === 0 && partTracks.length === 0 && walkTracks.length === 0
               ? null
               : createWorldAnimationScript({
-                  script: serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks }),
+                  script: serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks, partTracks, walkTracks }),
                   duration: script.duration,
                   loop: script.loop,
                   revision: script.revision
@@ -866,6 +896,14 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
             transform: model.data.transform, localBounds: model.localAabb }];
         })
       };
+    }
+    if (cameraView.sceneModels) {
+      for (const model of cameraView.sceneModels) {
+        const rig = await animationRigOf(inspected.canvas.nodeData[model.nodeId] as Record<string, unknown>);
+        if (rig) model.animationRig = rig;
+      }
+      const stillIssued = resolve(input.contextId);
+      if ("ok" in stillIssued) return stillIssued;
     }
     return {
       ok: true,
@@ -972,6 +1010,31 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     if (outsideInstance) return failure("outside-scope", `实例 ${outsideInstance.targetId} 不在本轮可写范围`);
     const outsideCamera = compiled.ir.cameraTracks.find((track) => !writableCameras.has(track.targetId));
     if (outsideCamera) return failure("outside-scope", `镜头 ${outsideCamera.targetId} 不在本轮可写范围`);
+    for (const track of compiled.ir.partTracks ?? []) {
+      if (!writableInstances.has(track.targetId)) return failure("outside-scope", `实例 ${track.targetId} 不在本轮可写范围`);
+      const model = findInstanceNode(inspected.canvas, track.targetId);
+      const rig = model ? await animationRigOf(model.fields) : null;
+      if (!rig?.groups.some(group => group.id === track.partId)) return failure("invalid-data", `模型 ${track.targetId} 没有可动画部件 ${track.partId}`);
+    }
+    const validateWalkTargets = async (canvas:ServerCanvas, writable:(id:string)=>boolean) => {
+      for(const track of compiled.ir.walkTracks ?? []){
+        if(!writable(track.targetId))return {code:"outside-scope" as const,message:"行走模型不在本轮可写范围"};
+        const model=findInstanceNode(canvas,track.targetId);
+        const rig=model ? await animationRigOf(model.fields) : null;
+        const instance=decodeWorldInstanceData(model?.fields.sharedWorldInstance);
+        const actual=rig?.walkProfile;
+        if(!actual||stableStringify(actual)!==stableStringify(track.profile))return {code:"invalid-data" as const,message:"行走参数与模型实际骨架或脚底几何不匹配；请重新 get_world_model_rig"};
+        if(!instance.ok)return {code:"invalid-data" as const,message:"行走模型变换不可用"};
+        const transform=instance.value.transform,q=transform.rotation;
+        const yaw=2*Math.atan2(q[2],q[3])*180/Math.PI;
+        const difference=((track.baseYawDegrees-yaw+180)%360+360)%360-180;
+        if(Math.abs(q[0])+Math.abs(q[1])>1e-6||Math.abs(difference)>1e-5||Math.abs(track.scale-transform.scale)>1e-6)
+          return {code:"invalid-data" as const,message:"行走只支持直立模型，scale/baseYawDegrees 必须匹配当前基础变换"};
+      }
+      return null;
+    };
+    const walkFailure=await validateWalkTargets(inspected.canvas,id=>writableInstances.has(id));
+    if(walkFailure)return failure(walkFailure.code,walkFailure.message);
     const animationScript = createWorldAnimationScript({
       script: operation.script,
       duration: operation.duration,
@@ -984,6 +1047,16 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       async derive(canvas) {
         const current = findArea(canvas, areaId);
         if (!current) return { ok: false as const, code: "outside-scope", message: "导演区不存在" };
+        const stillIssued = resolve(context.contextId);
+        if ("ok" in stillIssued) return { ok: false as const, code: "outside-scope", message: stillIssued.message };
+        const walkFailure=await validateWalkTargets(canvas,id=>!!findWritable(stillIssued.context,{kind:"instance",instanceId:id}));
+        if(walkFailure)return {ok:false as const,...walkFailure};
+        for (const track of compiled.ir.partTracks ?? []) {
+          if (!findWritable(stillIssued.context, { kind: "instance", instanceId: track.targetId })) return { ok: false as const, code: "outside-scope", message: "动画部件不在本轮可写范围" };
+          const model = findInstanceNode(canvas, track.targetId);
+          const rig = model ? await animationRigOf(model.fields) : null;
+          if (!rig?.groups.some(group => group.id === track.partId)) return { ok: false as const, code: "invalid-data", message: `模型没有动画部件 ${track.partId}` };
+        }
         return {
           ok: true as const,
           batch: {
@@ -1184,7 +1257,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     }
     let definition: Record<string, unknown>;
     try {
-      definition = contentFields(operation.content);
+      definition = contentFields(operation.content, current.fields.modelRig);
     } catch (error) {
       return failure("invalid-data", error instanceof Error ? error.message : "模型脚本无效");
     }
@@ -1194,6 +1267,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       modelScriptLanguage: definition.modelScriptLanguage as string,
       modelScriptVersion: operation.content.modelScriptVersion ?? "woohaa-model-js-v2",
       placement: current.fields.modelPlacement ?? DEFAULT_MODEL_PLACEMENT,
+      rig: definition.modelRig,
       previous: previous && typeof previous.revision === "number" && typeof previous.contentHash === "string"
         ? { revision: previous.revision, sourceHash: String((previous as { sourceHash?: string }).sourceHash ?? ""), contentHash: previous.contentHash }
         : null
@@ -1204,7 +1278,8 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
       modelScriptLanguage: nextDefinition.value.modelScriptLanguage,
       modelScriptVersion: nextDefinition.value.modelScriptVersion,
       modelContentVersion: nextDefinition.value.contentVersion,
-      modelPlacement: nextDefinition.value.placement
+      modelPlacement: nextDefinition.value.placement,
+      ...(nextDefinition.value.rig ? { modelRig: nextDefinition.value.rig } : {})
     };
     const decodedCurrent = decodeWorldInstanceData(current.fields.sharedWorldInstance);
     if (!decodedCurrent.ok) return failure("not-ready", "模型共享世界身份无效");
@@ -2012,6 +2087,7 @@ export function createAssistantWorldService(deps: AssistantWorldServiceDeps): As
     recover,
     verifyCompletion,
     close() {
+      rigCache.clear();
       ledgers.clear();
       hostCompletions.clear();
       recordedCompletions.clear();

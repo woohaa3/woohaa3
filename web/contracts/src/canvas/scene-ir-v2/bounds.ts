@@ -138,3 +138,6 @@ function shapeLocalAabb(op: SceneV2ShapeOp): Aabb | null {
 export function v2SceneSignature(ops: readonly SceneV2Op[]): string {
   return `${SCENE_IR_V2_VERSION}:${JSON.stringify(ops)}`;
 }
+
+/** Shared geometry/pose diagnostics use the same primitive-local semantics. */
+export { shapeLocalAabb as v2ShapeLocalBounds, localTransformOf as v2ShapeLocalTransform };

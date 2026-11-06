@@ -246,3 +246,103 @@ describe("世界模型地面拖动", () => {
     expect(Object.keys(command.value)).toEqual(["sharedWorldInstance"]);
   });
 });
+
+function anchorCanvas(script = 'motion.part.tween("inst-1", "foot", { property: "rotation", startTime: 0, endTime: 4, from: [0,0,0], to: [20,0,0] });'): ServerCanvas {
+  const canvas = canvasWith(instance);
+  canvas.document.nodes.push({ id: "area", type: "scene-area", position: { x: 0, y: 0 } });
+  canvas.nodeData.area = { sceneArea: { kind: "scene-area", version: "shared-world-v1", areaId: "a1", scopeVersion: "s1", bounds: { min: { u: 0, v: -5 }, max: { u: 5, v: -1 } }, animationOrigin: { u: 0, v: 0 }, animationScript: createWorldAnimationScript({ script, duration: 4, loop: false, revision: 1 }) } } as never;
+  return canvas;
+}
+
+it("part-only animation detects anchor crossing and unlinks all part tracks with full undo", () => {
+  const canvas = anchorCanvas();
+  const start = beginWorldGroundDrag(canvas, "m1", { u: 0, v: 0 })!;
+  const detected = planWorldGroundMoveWithAnimationParts(canvas, start, { u: 10, v: 0 })!;
+  expect(detected.unbindCandidates).toHaveLength(1);
+  const plan = planWorldGroundMoveWithAnimationParts(canvas, start, { u: 10, v: 0 }, undefined, new Set(["area"]))!;
+  const patch = plan.forward.find(c => c.type === "nodeData.patch" && c.nodeId === "area") as any;
+  expect(patch.value.sceneArea.animationScript).toBeUndefined();
+  const undo = plan.inverse.find(c => c.type === "nodeData.patch" && c.nodeId === "area") as any;
+  expect(undo.value.sceneArea).toEqual(canvas.nodeData.area.sceneArea);
+});
+
+it("uses frozen scaled and rotated anchor: origin outside is harmless; anchor crossing prompts", () => {
+  const canvas = anchorCanvas();
+  canvas.nodeData.m1.sharedWorldInstance = { ...instance, transform: { ...instance.transform, position: { u: 6, v: -3, h: 0 }, rotation: [0, 0, 1, 0], scale: 2 } } as never;
+  // A half turn maps local x=1 into world u=-2: origin=6, anchor=4.
+  const start = beginWorldGroundDrag(canvas, "m1", { u: 0, v: 0 }, new Map([["m1", [1, 0, 0] as [number, number, number]]]))!;
+  expect(planWorldGroundMoveWithAnimationParts(canvas, start, { u: 1, v: 0 })!.unbindCandidates).toEqual([]);
+  expect(planWorldGroundMoveWithAnimationParts(canvas, start, { u: 1.1, v: 0 })!.unbindCandidates).toHaveLength(1);
+});
+
+it("unknown prepared anchor cancels animated move without guessing origin", () => {
+  const canvas = anchorCanvas();
+  const start = beginWorldGroundDrag(canvas, "m1", { u: 0, v: 0 }, new Map([["m1", null]]))!;
+  expect(planWorldGroundMoveWithAnimationParts(canvas, start, { u: 10, v: 0 })).toBeNull();
+});
+
+it("unlink removes target cycles and preserves other instances, parts, and camera tracks", () => {
+  const script = [
+    'motion.instance.tween("inst-1", { property: "position", startTime: 0, endTime: 4, from: [2,-3,0], to: [3,-3,0] });',
+    'motion.part.cycle("inst-1", "foot", { property: "rotation", startTime: 0, endTime: 4, period: 1, keyframes: [{time:0,value:[0,0,0]},{time:0.5,value:[20,0,0]},{time:1,value:[0,0,0]}] });',
+    'motion.part.tween("other", "foot", { property: "rotation", startTime: 0, endTime: 4, from: [0,0,0], to: [20,0,0] });',
+    'motion.instance.tween("other", { property: "position", startTime: 0, endTime: 4, from: [0,0,0], to: [1,0,0] });',
+    'motion.camera.tween({ targetId: "camera", property: "position", startTime: 0, endTime: 4, from: [0,0,0], to: [1,0,0] });'
+  ].join('\n');
+  const canvas = anchorCanvas(script);
+  const original = executeWorldAnimationScript(script, { duration: 4, loop: false });
+  expect(original.ok).toBe(true);
+  const start = beginWorldGroundDrag(canvas, "m1", { u: 0, v: 0 })!;
+  const plan = planWorldGroundMoveWithAnimationParts(canvas, start, { u: 10, v: 0 }, undefined, new Set(["area"]))!;
+  const areaPatch = plan.forward.find(c => c.type === "nodeData.patch" && c.nodeId === "area") as any;
+  const executed = executeWorldAnimationScript(areaPatch.value.sceneArea.animationScript.script, { duration: 4, loop: false });
+  expect(executed.ok).toBe(true);
+  if (!executed.ok || !original.ok) return;
+  expect(executed.ir.instanceTracks).toEqual(original.ir.instanceTracks.filter(t => t.targetId === "other"));
+  expect(executed.ir.partTracks).toEqual(original.ir.partTracks!.filter(t => t.targetId === "other"));
+  expect(executed.ir.cameraTracks).toEqual(original.ir.cameraTracks);
+});
+
+it("anchor uses current sampled position, rotation and scale instead of stored base pose", () => {
+  const canvas = anchorCanvas([
+    'motion.instance.tween("inst-1", { property: "position", startTime: 0, endTime: 4, from: [6,-3,0], to: [6,-3,0] });',
+    'motion.instance.tween("inst-1", { property: "rotation", startTime: 0, endTime: 4, from: [0,0,180], to: [0,0,180] });',
+    'motion.instance.tween("inst-1", { property: "scale", startTime: 0, endTime: 4, from: [2], to: [2] });'
+  ].join('\n'));
+  canvas.nodeData.m1.sharedWorldInstance = { ...instance, transform: { ...instance.transform, rotation: [0,0,0,1], scale: 1 } } as never;
+  const start = beginWorldGroundDrag(canvas, "m1", { u: 0, v: 0 }, new Map([["m1", [1, 0, 0] as [number, number, number]]]))!;
+  expect(planWorldGroundMoveWithAnimationParts(canvas, start, { u: 1, v: 0 })!.unbindCandidates).toEqual([]);
+  expect(planWorldGroundMoveWithAnimationParts(canvas, start, { u: 1.1, v: 0 })!.unbindCandidates).toHaveLength(1);
+});
+
+it("composes animation rotation with a nonidentity base pose and overrides scale", () => {
+  const canvas = anchorCanvas([
+    'motion.instance.tween("inst-1", { property: "position", startTime: 0, endTime: 4, from: [0,-3,0], to: [0,-3,0] });',
+    'motion.instance.tween("inst-1", { property: "rotation", startTime: 0, endTime: 4, from: [0,0,180], to: [0,0,180] });',
+    'motion.instance.tween("inst-1", { property: "scale", startTime: 0, endTime: 4, from: [2], to: [2] });'
+  ].join('\n'));
+  canvas.nodeData.m1.sharedWorldInstance = { ...instance, transform: { ...instance.transform, rotation: [0,0,1,0], scale: 2 } } as never;
+  // Two half turns compose to identity; sampled absolute scale 2 gives anchor u=4.
+  const start = beginWorldGroundDrag(canvas, "m1", { u: 0, v: 0 }, new Map([["m1", [2, 0, 0] as [number, number, number]]]))!;
+  expect(planWorldGroundMoveWithAnimationParts(canvas, start, { u: 1, v: 0 })!.unbindCandidates).toEqual([]);
+  expect(planWorldGroundMoveWithAnimationParts(canvas, start, { u: 1.1, v: 0 })!.unbindCandidates).toHaveLength(1);
+});
+
+it('moves compact walk waypoints and unlinks them with complete undo',()=>{
+ const profile={version:'humanoid-walk-v1',groundAnchorLocal:[0,-.86,.08],legs:{Left:{hipLocal:[.2,0,0],upperLength:.4,lowerLength:.35,soleLocal:[0,-.11,.08]},Right:{hipLocal:[-.2,0,0],upperLength:.4,lowerLength:.35,soleLocal:[0,-.11,.08]}},armsDownPose:{LeftUpperArm:[0,0,-90],RightUpperArm:[0,0,90]}};
+ const options={startTime:0,endTime:4,path:[[1,-2],[4,-2],[4,-4],[1,-4]],cornerRadius:.5,strideLength:.6,stepHeight:.09,scale:1.25,baseYawDegrees:0,profile};
+ const canvas=anchorCanvas(`motion.instance.walk("inst-1",${JSON.stringify(options)});`);
+ canvas.nodeData.m1.sharedWorldInstance={...instance,transform:{...instance.transform,rotation:[0,0,0,1]}} as never;
+ const start=beginWorldGroundDrag(canvas,'m1',{u:0,v:0},new Map([['m1',[0,-.86,.08] as [number,number,number]]]))!;
+ const plan=planWorldGroundMoveWithAnimationParts(canvas,start,{u:.1,v:.2})!;
+ const patch=plan.forward.find(c=>c.type==='nodeData.patch'&&c.nodeId==='area') as any;
+ const compiled=executeWorldAnimationScript(patch.value.sceneArea.animationScript.script,{duration:4,loop:false});
+ expect(compiled.ok&&compiled.ir.walkTracks?.[0]?.path).toEqual(options.path.map(([u,v])=>[u!+.1,v!+.2]));
+ const unlinked=planWorldGroundMoveWithAnimationParts(canvas,start,{u:10,v:0},undefined,new Set(['area']))!;
+ const areaPatch=unlinked.forward.find(c=>c.type==='nodeData.patch'&&c.nodeId==='area') as any;
+ expect(areaPatch.value.sceneArea.animationScript).toBeUndefined();
+ const grounded=unlinked.forward.find(c=>c.type==='nodeData.patch'&&c.nodeId==='m1') as any;
+ expect(grounded.value.sharedWorldInstance.transform.position.h).toBeCloseTo(.86*options.scale,8);
+ const undo=unlinked.inverse.find(c=>c.type==='nodeData.patch'&&c.nodeId==='area') as any;
+ expect(undo.value.sceneArea).toEqual(canvas.nodeData.area.sceneArea);
+});

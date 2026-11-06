@@ -76,11 +76,21 @@ pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSna
                     };
                     let placement = &reference.expect("model reference").placement;
                     let root = super::layout::model_root_transform(node, &model, placement).to_matrix();
-                    let revision = if motion.0.as_deref() == Some(&node.id) { motion.2 } else { 0 };
+                    let motion_revision = if motion.0.as_deref() == Some(&node.id) { motion.2 } else { 0 };
+                    let mut revision = motion_revision;
+                    if let Some(rotations) = reference.and_then(|r| r.part_rotations.as_ref()) {
+                        use std::hash::{Hash, Hasher};
+                        let mut keys: Vec<_> = rotations.iter().collect();
+                        keys.sort_by_key(|(id, _)| *id);
+                        let mut hash = std::collections::hash_map::DefaultHasher::new();
+                        motion_revision.hash(&mut hash);
+                        for (id, q) in keys { id.hash(&mut hash); q.map(f32::to_bits).hash(&mut hash); }
+                        revision = hash.finish();
+                    }
                     let candidate = if let Some(index) = old.iter().position(|(id, asset, pose, rev, _)| id == &node.id && Arc::ptr_eq(asset, &model) && *pose == root && *rev == revision) {
                         old.swap_remove(index).4
                     } else {
-                        let poses = if revision != 0 { Some(&motion.1) } else { None };
+                        let poses = if motion_revision != 0 { Some(&motion.1) } else { None };
                         let triangles = world_triangles(node, &model, placement, poses);
                         let mut min = Vec3::splat(f32::INFINITY);
                         let mut max = Vec3::splat(f32::NEG_INFINITY);
@@ -193,6 +203,11 @@ pub(crate) fn model_candidates(
 }
 
 fn world_triangles(node: &GraphNode, model: &ModelSnapshot, placement: &crate::protocol::ModelPlacement, poses: Option<&PartPoses>) -> Vec<crate::canvas_query::model_pick::SurfaceTriangle> {
+    let mut combined = poses.cloned().unwrap_or_default();
+    if let Some(rotations) = node.model.as_ref().and_then(|m| m.part_rotations.as_ref()) {
+        for (id, q) in rotations { combined.entry(id.clone()).or_default().rotation *= Quat::from_array(*q); }
+    }
+    let poses = Some(&combined);
     let root = super::layout::model_root_transform(node, model, placement).to_matrix();
     let specs = super::scene::build_entity_specs(model);
     let materials = super::scene::collect_materials(model);
@@ -240,6 +255,21 @@ mod tests {
 
     fn node(json: &str) -> GraphNode {
         serde_json::from_str(json).expect("graph node")
+    }
+
+    #[test]
+    fn part_rotations_move_surface_vertices_with_parent_and_restore() {
+        let mut node = node(r#"{"id":"m","type":"model3d","x":0,"y":0,"width":260,"height":195,"model":{"resourceKey":"m","partRotations":{}}}"#);
+        let mut model = snapshot();
+        model.ops.insert(0, crate::protocol::ModelOp::Group { id: "joint".into(), parent: None, position: [0.;3], rotation: [0.;3], scale: [1.;3] });
+        if let crate::protocol::ModelOp::Box { parent, position, .. } = &mut model.ops[1] { *parent = Some("joint".into()); *position = [3.,1.,0.]; }
+        let placement = node.model.as_ref().unwrap().placement.clone();
+        let base = world_triangles(&node, &model, &placement, None);
+        node.model.as_mut().unwrap().part_rotations.as_mut().unwrap().insert("joint".into(), Quat::from_rotation_z(0.8).to_array());
+        let moved = world_triangles(&node, &model, &placement, None);
+        assert_ne!(base[0].vertices, moved[0].vertices);
+        node.model.as_mut().unwrap().part_rotations = None;
+        assert_eq!(base[0].vertices, world_triangles(&node, &model, &placement, None)[0].vertices);
     }
 
     fn snapshot() -> ModelSnapshot {

@@ -176,6 +176,7 @@ describe("Humanoid V1 绑定", () => {
 });
 
 const HUMANOID_SCRIPT = [
+  "scene.segment({ id: 'abdomen', parent: rig.joint('Spine'), from: [0, -0.5, 0], to: [0, 0, 0], width: 0.32, depth: 0.24, shape: 'box' });",
   "scene.box({ id: 'thigh', parent: rig.joint('LeftUpperLeg'), size: [0.2, 0.4, 0.2], color: '#888888' });",
   "scene.box({ id: 'shin', parent: rig.joint('LeftLowerLeg'), size: [0.15, 0.35, 0.15], color: '#888888' });",
   "scene.box({ id: 'foot', parent: rig.joint('LeftFoot'), size: [0.2, 0.1, 0.28], color: '#888888' });",
@@ -206,6 +207,29 @@ describe("Humanoid V1 脚本与动作", () => {
     expect(run.ir.modelMotion.map((track) => track.targetId)).toEqual(["LeftUpperLeg", "LeftLowerLeg", "LeftFoot"]);
     const flat = executeMotionScript('motion.model.rotate("thigh", { axis: "x", speed: 1 });', { duration: 4, partIds: parts.partIds });
     expect(flat.ok).toBe(false);
+  });
+
+  it("髋和脊柱上各放一个盒子、腰是空的时拒绝", () => {
+    const executed = executeModelScriptVersioned(
+      [
+        "scene.box({ id: 'pelvis', parent: rig.joint('Hips'), size: [0.48, 0.22, 0.28], position: [0, 0.02, 0] });",
+        "scene.box({ id: 'chest', parent: rig.joint('Spine'), size: [0.7, 0.42, 0.34], position: [0, 0.3, 0] });"
+      ].join("\n"),
+      "woohaa-model-js-v2",
+      { rig: PARAMETERS }
+    );
+    expect(executed.ok).toBe(false);
+    if (executed.ok) return;
+    expect(executed.code).toBe("torso-gap");
+  });
+
+  it("沿脊柱骨段连接腹部时可以通过", () => {
+    const executed = executeModelScriptVersioned(
+      "scene.segment({ id: 'abdomen', parent: rig.joint('Spine'), from: [0, -0.5, 0], to: [0, 0, 0], width: 0.32, depth: 0.24, shape: 'box' });",
+      "woohaa-model-js-v2",
+      { rig: PARAMETERS }
+    );
+    expect(executed.ok).toBe(true);
   });
 
   it("平级挂到 Root 的几何不能通过人形执行", () => {
@@ -241,6 +265,8 @@ describe("Humanoid V1 脚本与动作", () => {
     expect(humanoidRigSignature(PARAMETERS)).toBe(humanoidRigSignature({ ...PARAMETERS }));
     expect(humanoidRigSignature({ ...PARAMETERS, leftUpperLeg: 0.5 })).not.toBe(humanoidRigSignature(PARAMETERS));
     expect(humanoidAuthoringText()).toContain("LeftUpperLeg");
+    expect(humanoidAuthoringText()).toContain("local to that joint origin");
+    expect(humanoidAuthoringText()).toContain("from [0, -0.5, 0] to [0, 0, 0]");
   });
 
   it("第一次使用关节时写入参考骨架，之后不能改回平级脚本", () => {

@@ -555,7 +555,7 @@ mod grid_tests {
         let mut node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({"id":"n", "type":"model", "x":9000,"y":0,"width":100,"height":50,
             "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i",
             "transform":{"version":"shared-world-v1","position":{"u":1,"v":2,"h":3},"rotation":[0,0,0,1],"scale":1}}})).unwrap();
-        node.model = Some(ModelReference {
+        node.model = Some(ModelReference { ground_anchor_local: None, part_rotations: None,
             resource_key: key.clone(),
             scene_version: descriptor.scene_version.clone(),
             signature: descriptor.signature.clone(),

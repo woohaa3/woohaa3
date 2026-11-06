@@ -147,6 +147,8 @@ impl ModelDescriptorDto {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ModelReference {
+    #[serde(default)]
+    pub(crate) ground_anchor_local: Option<[f32; 3]>,
     /// Scene IR 版本（V1 或 V2）。
     #[serde(default)]
     #[allow(dead_code)]
@@ -159,6 +161,9 @@ pub(crate) struct ModelReference {
     pub(crate) signature: String,
     #[serde(default)]
     pub(crate) placement: ModelPlacement,
+    /// Per-instance additive local joint rotations; presence preserves the hierarchy.
+    #[serde(default, deserialize_with = "deserialize_part_rotations")]
+    pub(crate) part_rotations: Option<std::collections::HashMap<String, [f32; 4]>>,
 }
 
 /// 坐标轴对齐包围盒（prepared resource 携带，供渲染/取景复用）。
@@ -593,5 +598,29 @@ mod signature_tests {
             canonical_signature("woohaa-model-scene-ir-v2", ops),
             "db83340ea472618b"
         );
+    }
+}
+
+fn deserialize_part_rotations<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<std::collections::HashMap<String, [f32; 4]>>, D::Error> {
+    let value = Option::<std::collections::HashMap<String, [f32; 4]>>::deserialize(deserializer)?;
+    if let Some(poses) = &value {
+        if poses.len() > 4096 || poses.iter().any(|(id, q)| id.is_empty() || id.len() > 256 || q.iter().any(|v| !v.is_finite()) || (q.iter().map(|v| v * v).sum::<f32>() - 1.0).abs() > 0.001) {
+            return Err(serde::de::Error::custom("Invalid model part rotations"));
+        }
+    }
+    Ok(value)
+}
+
+#[cfg(test)]
+mod part_rotation_tests {
+    use super::*;
+    #[test]
+    fn part_rotations_reject_non_unit_and_unbounded_wire() {
+        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partRotations":{"joint":[0,0,0,0]}}"#).is_err());
+        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partRotations":{"joint":[1e50,0,0,1]}}"#).is_err());
+        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partRotations":{"joint":[0,0,0,1]}}"#).is_ok());
+        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m"}"#).unwrap().part_rotations.is_none());
+        let map: std::collections::HashMap<_, _> = (0..4097).map(|i| (i.to_string(), [0.,0.,0.,1.])).collect();
+        assert!(serde_json::from_value::<ModelReference>(serde_json::json!({"resourceKey":"m","partRotations":map})).is_err());
     }
 }
