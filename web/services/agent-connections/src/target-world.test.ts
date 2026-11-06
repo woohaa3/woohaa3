@@ -32,6 +32,8 @@ describe("world target prompt and tools", () => {
     expect(localAgentToolsForMode("world", intent.worldScope)).toEqual([
       "get_model_api",
       ASSISTANT_WORLD_TOOL.readContext,
+      ASSISTANT_WORLD_TOOL.readModelRig,
+      ASSISTANT_WORLD_TOOL.sampleAnimation,
       ASSISTANT_WORLD_TOOL.createModel,
       ASSISTANT_WORLD_TOOL.replaceModel,
       ASSISTANT_WORLD_TOOL.moveModel,

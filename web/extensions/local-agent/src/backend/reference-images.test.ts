@@ -1,4 +1,4 @@
-import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, SHARED_WORLD_VERSION } from "@woohaa3/contracts";
 import { describe, expect, it } from "vitest";
 import { loadMentionedReferenceImages, mentionedTitles, referenceImageNote, titleMentioned } from "./reference-images.js";
 
@@ -23,12 +23,20 @@ describe("组内图片点名", () => {
   it("只读取组内被点名的图片字节", async () => {
     const canvas = createEmptyWoohaa3ServerCanvas("c", "2026-11-03T00:00:00.000Z");
     canvas.document.nodes = [
-      { id: "root", type: "group", position: { x: 0, y: 0 } },
+      { id: "root", type: "workflow-group-2d", position: { x: 0, y: 0 } },
       { id: "shot", type: "image", parentId: "root", position: { x: 10, y: 10 } },
       { id: "other", type: "image", parentId: "root", position: { x: 20, y: 10 } }
     ];
     canvas.nodeData = {
-      root: {},
+      root: {
+        workflowGroup2d: {
+          kind: "workflow-group-2d",
+          version: SHARED_WORLD_VERSION,
+          groupId: "root",
+          scopeVersion: "v1",
+          memberNodeIds: ["shot", "other"]
+        }
+      },
       shot: { title: "Android Compact - 1@3x.png", outputAssetId: "asset-shot" },
       other: { title: "Codex 图片", outputAssetId: "asset-other" }
     };

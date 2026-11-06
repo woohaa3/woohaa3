@@ -64,7 +64,11 @@ const ALLOWED_RUNTIME_PREFIXES = [
   // change: 2026-10-27-harden-plugin-service-access：装配期服务访问守护。零运行时依赖的纯函数
   // 叶子（只 import type cordis），`defineExtensionPlugin` 必须与宿主 `definePlugin` 用同一套
   // 判定，否则扩展侧（出事的那一侧）没有守护。见 docs/design/plugin-service-access.md。
-  "cordis/service-access-guard.js"
+  "cordis/service-access-guard.js",
+  // 桌面壳自定义协议的地址拼装：只读全局 bootstrap 的 `platform` 并返回字符串，
+  // 没有 import、没有宿主装配根。原生文档编辑器（native-document-editor）必须与
+  // 宿主其余桌面调用用同一套 `woohaa-native://` 判定，各算一份会出现平台判断分叉。
+  "desktop/native-protocol.js"
 ];
 
 /** 禁止的宿主装配根/扫描器/业务插件依赖。 */

@@ -361,7 +361,10 @@ describe("前端协议边界审计", () => {
       // 共享索引读取 model-scene 已准备资源（extent/aabb/placement），避免前端再算一份。
       "cordis/plugins/canvas-shell/canvas-node-index.ts -> model-scene",
       // 图库「添加到画布」复用粘贴导入的网格错位（`planImportLayout`），不各算一份。
-      "cordis/plugins/canvas-shell/image-library.ts -> paste-import"
+      "cordis/plugins/canvas-shell/image-library.ts -> paste-import",
+      // 导演区播放条只读取 canvas-runtime 的点选结果类型（`PointHit` 的 scene-area-playback 变体），
+      // 用来把指针位置换算成轨道进度；播放本身仍由 canvas-runtime 拥有。
+      "cordis/plugins/world-scopes/scene-area-progress.tsx -> canvas-runtime"
     ]);
     const extensionsDir = path.join(CORDIS_DIR, "plugins");
     const extensionNames = readdirSync(extensionsDir, { withFileTypes: true })
