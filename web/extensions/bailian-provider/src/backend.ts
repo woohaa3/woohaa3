@@ -161,19 +161,20 @@ export function createBailianProviderPlugin(deps: BailianPluginDependencies = {}
     Config: BAILIAN_CONFIG,
     health: (config) => {
       const apiKey = (config.apiKey ?? "").trim();
-      const baseUrl = bailianResolvedOrigin({
-        workspaceId: config.workspaceId,
-        region: config.region,
-        baseUrl: config.baseUrl
-      });
-      if (apiKey !== "" && baseUrl !== "") return undefined;
-      return {
-        state: "degraded" as const,
-        diagnostics: [{
-          code: "provider-credentials-missing",
-          message: apiKey === "" ? "未配置 API Key，百炼模型当前不可执行" : "API 地址为空，百炼模型当前不可执行"
-        }]
-      };
+      const workspaceId = (config.workspaceId ?? "").trim();
+      // 地址永远有值（`baseUrl` 有默认值），所以只有两种退化：缺 Key，或业务空间 ID 写了但
+      // 拼不出域名——后者会静默退回老域名，用户以为已经走了新域名，必须报出来。
+      const diagnostics = [];
+      if (apiKey === "") {
+        diagnostics.push({ code: "provider-credentials-missing", message: "未配置 API Key，百炼模型当前不可执行" });
+      }
+      if (workspaceId !== "" && bailianWorkspaceOrigin(workspaceId, config.region) === undefined) {
+        diagnostics.push({
+          code: "provider-workspace-id-invalid",
+          message: `业务空间 ID「${workspaceId}」拼不出专属域名（只接受字母、数字与 -），当前用的是 API 地址`
+        });
+      }
+      return diagnostics.length > 0 ? { state: "degraded" as const, diagnostics } : undefined;
     },
     async apply(ctx, config) {
       const apiKey = config.apiKey?.trim() ?? "";

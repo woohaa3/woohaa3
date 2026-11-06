@@ -181,4 +181,12 @@ describe("百炼插件装配", () => {
       });
     }
   });
+
+  it("业务空间 ID 拼不出域名时报出来（它会静默退回老域名）", () => {
+    const plugin = createBailianProviderPlugin();
+    expect(plugin.health?.(configOf({ apiKey: SECRET, workspaceId: "ws-ok" }))).toBeUndefined();
+    const health = plugin.health?.(configOf({ apiKey: SECRET, workspaceId: "ws bad" }));
+    expect(health).toMatchObject({ state: "degraded" });
+    expect(health?.diagnostics?.map((item) => item.code)).toEqual(["provider-workspace-id-invalid"]);
+  });
 });
