@@ -46,7 +46,7 @@ function record(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   };
 }
 
-function harness(options: { rawResult?: Record<string, unknown>; urlError?: Error }) {
+function harness(options: { rawResult?: Record<string, unknown> | null; rawState?: Record<string, unknown>; urlError?: Error }) {
   const imports: Array<{ kind: "url" | "bytes"; input: Record<string, unknown> }> = [];
   const logs: Array<Record<string, unknown>> = [];
   const historyUpserts: Array<Record<string, unknown>> = [];
@@ -86,7 +86,8 @@ function harness(options: { rawResult?: Record<string, unknown>; urlError?: Erro
       createdAt: new Date("2026-10-22T07:42:05.000Z"),
       updatedAt: new Date("2026-10-22T07:42:20.000Z"),
       context: { canvasId: "canvas-1", nodeId: "node-1", runId: "run-fallback", jobId: "job-1" },
-      ...(options.rawResult ? { result: options.rawResult } : { result: {} })
+      ...(options.rawResult !== undefined ? (options.rawResult === null ? {} : { result: options.rawResult }) : { result: {} }),
+      ...(options.rawState ? { state: options.rawState } : {})
     })
   } as unknown as PptaskTaskStore;
   const runtime: TaskRuntimeOptions = {
@@ -122,6 +123,20 @@ describe("URL 转存失败后的字节回退", () => {
     expect(logs.map((event) => event.event)).toEqual(
       expect.arrayContaining(["media-output-imported-from-store"])
     );
+  });
+
+  it("只有 worker 快照含字节时也能恢复媒体（兼容终态 save 竞态）", async () => {
+    const { runtime, imports, historyUpserts, association } = harness({
+      rawResult: null,
+      rawState: { record: { result: { images: [PNG_BYTES] } } }
+    });
+    await materializeBinaryBytesFromStore(runtime, record(), association, "image");
+
+    expect(imports.map((call) => call.kind)).toEqual(["bytes"]);
+    expect(historyUpserts.at(-1)).toMatchObject({
+      state: "succeeded",
+      result: { mediaKind: "image", storageKey: IMAGE_KEY }
+    });
   });
 
   it("记录里已是稳定媒体引用（落库前已归档）→ verify-and-adopt，不再 importBytes", async () => {

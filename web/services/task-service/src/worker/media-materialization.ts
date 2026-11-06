@@ -498,9 +498,20 @@ export async function readStoredBinarySource(
   modelType: BinaryModelType
 ): Promise<StoredBinarySource | undefined> {
   const raw = await taskStore.find(taskKey).catch(() => null);
-  const result = raw?.result;
+  // pptask persists the execution snapshot and the display result in separate
+  // columns.  A terminal notification can race the second save, leaving only
+  // `state.record.result` at the first recovery read.  Treat that snapshot as
+  // an equally durable source; otherwise a provider byte result is projected
+  // without an asset and the retry window cannot recover it once the result
+  // column is never written (old worker versions did this on shutdown).
+  const result = raw?.result ?? readStateResult(raw?.state);
   if (isGenerationStableMediaResult(result)) return { kind: "media", media: result.media };
   return bytesFromResult(result, modelType);
+}
+
+function readStateResult(state: unknown): unknown {
+  if (!isRecord(state) || !isRecord(state.record)) return undefined;
+  return state.record.result;
 }
 
 /** 从 durable task store 的原始 result 恢复首份二进制字节与类型（重启终态对账也用它）。 */
