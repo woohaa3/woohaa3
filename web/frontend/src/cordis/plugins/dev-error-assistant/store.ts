@@ -144,6 +144,17 @@ function resourceUrl(target: EventTarget | null): string | null {
   return candidate?.trim() || null;
 }
 
+/**
+ * 浏览器自己抛出的良性 `error` 事件消息（不是代码异常，丢弃不记）。
+ *
+ * 同一件事两家措辞不同：Chromium 是 "…undelivered notifications."，Firefox 是
+ * "ResizeObserver loop limit exceeded"。
+ */
+const BENIGN_BROWSER_ERRORS: ReadonlySet<string | undefined> = new Set([
+  "ResizeObserver loop completed with undelivered notifications.",
+  "ResizeObserver loop limit exceeded"
+]);
+
 /** 去重键：同源 + 同消息 + 同堆栈首帧才算同一条。 */
 function dedupeKey(kind: CapturedErrorKind, origin: CapturedErrorOrigin, message: string, stack: string | null): string {
   const firstFrame = stack?.split("\n")[1]?.trim() ?? "";
@@ -212,6 +223,11 @@ export function createDevErrorLog(now: () => number = Date.now): DevErrorLog {
       }
 
       const errorEvent = event as ErrorEvent;
+      // ResizeObserver 的回调里又改了尺寸，浏览器当帧送不完通知，推迟到下一帧并抛出这条
+      // `error`。规范里就是良性提示：布局没坏、通知下一帧照常送达，也没有 Error 对象和堆栈
+      // （面板里只会看到页面地址）。留着只会天天占一条红色「异常」，把真错误挤下去。
+      // 只按浏览器固定的两种措辞精确匹配（Chromium / Firefox），不放宽成包含 ResizeObserver。
+      if (BENIGN_BROWSER_ERRORS.has(errorEvent.message?.trim())) return;
       const fromSource = errorEvent.filename
         ? `${errorEvent.filename}:${errorEvent.lineno}:${errorEvent.colno}`
         : null;

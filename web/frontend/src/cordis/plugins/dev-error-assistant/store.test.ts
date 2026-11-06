@@ -104,6 +104,17 @@ describe("install / uninstall", () => {
     expect(entries[0]!.origin).toBe("page");
   });
 
+  it("ResizeObserver 的良性提示不记，同样走 error 事件的真异常照记", () => {
+    // 浏览器当帧送不完 ResizeObserver 通知时抛出，没有 Error 对象，布局并没坏。
+    window.dispatchEvent(new ErrorEvent("error", { message: "ResizeObserver loop completed with undelivered notifications." }));
+    window.dispatchEvent(new ErrorEvent("error", { message: "ResizeObserver loop limit exceeded" }));
+    expect(log.getSnapshot()).toHaveLength(0);
+
+    // 只精确匹配这两句：消息里碰巧带 ResizeObserver 的真异常不能被吞掉。
+    window.dispatchEvent(new ErrorEvent("error", { message: "ResizeObserver callback threw: x is undefined", error: new Error("x is undefined") }));
+    expect(log.getSnapshot()).toHaveLength(1);
+  });
+
   it("资源加载失败单独记成资源错误，不冒充 JS 异常", () => {
     // `<img>` 加载失败触发的是普通 Event，target 是元素，没有 message / error。
     // 不区分就会记成一条信息全无的「未捕获异常」。
