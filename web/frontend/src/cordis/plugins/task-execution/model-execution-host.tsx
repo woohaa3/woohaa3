@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
 import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
+import { effectiveReferencePolicy } from "@woohaa3/contracts";
 import { Button } from "@woohaa3/ui";
 import { isUnsubmittedVideoNode, resolveModelSubmissionParameters } from "@woohaa3/contracts";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
@@ -65,7 +66,8 @@ import {
   mentionTypeFor,
   placeholderModel,
   readPanelLocalSurface,
-  removeReference
+  removeReference,
+  setReferencePolicy as commitReferencePolicy
 } from "./model-execution-host-helpers.js";
 import type { ModelReferenceItem, ModelSubmitOutcome } from "../../contract/model-interaction.js";
 import type { ModelExecutionHostProps } from "./node-execution-panel-types.js";
@@ -212,6 +214,11 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     () => typedModels.find((entry) => entry.modelKey === targetModelKey) ?? null,
     [typedModels, targetModelKey]
   );
+  /** 身份参考策略：节点设置优先，其次模型描述，缺省 optional。 */
+  const referencePolicy = useMemo(
+    () => effectiveReferencePolicy(context?.nodeData.referencePolicy, model?.referencePolicy),
+    [context, model]
+  );
   // T10: capture framing is explicit-only. The panel never scans the canvas for a
   // camera card, so an unrelated world camera cannot change an ordinary generation.
   // T09/T11b supply the production UI that passes `captureCameraId`.
@@ -246,9 +253,10 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       modelDefinition: model,
       prompt: draftPrompt,
       canvas,
-      panelParameters: parameters
+      panelParameters: parameters,
+      referencePolicy
     });
-  }, [panelKind, context, disabledReason, pendingSelection, catalog, catalogState, targetModelKey, model, draftPrompt, canvas, parameters]);
+  }, [panelKind, context, disabledReason, pendingSelection, catalog, catalogState, targetModelKey, model, draftPrompt, canvas, parameters, referencePolicy]);
 
   // 展示用阻止原因：会话只读（断线）时面板不重复枚举「网络已断开 / 目录尚未加载」这类
   // 会话级状态——左下角同步状态控件的常驻 tooltip 已经承载该信息。主操作仍由 `readOnly`
@@ -403,7 +411,8 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         modelDefinition: model,
         prompt: input.prompt,
         canvas,
-        panelParameters: resolvedParameters
+        panelParameters: resolvedParameters,
+        referencePolicy
       });
       if (reasons.length > 0) {
         setSubmitError(reasons[0]!);
@@ -447,7 +456,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       }
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
     },
-    [catalog, canvas, catalogState, context, disabledReason, draftStore, model, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
+    [catalog, canvas, catalogState, context, disabledReason, draftStore, model, panelKind, pendingSelection, referencePolicy, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
   );
 
   const submitIntent = useCallback(
@@ -508,6 +517,14 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       onPickerOpenChange={setPickerOpen}
       onConnect={(sourceNodeId) => addReference(session, context.nodeId, sourceNodeId)}
       onDisconnect={(item) => removeReference(session, canvas, context.nodeId, item.sourceNodeId)}
+      identityRequired={referencePolicy === "identity-required"}
+      onReferencePolicyChange={(required) =>
+        commitReferencePolicy(
+          session,
+          context.nodeId,
+          required ? "identity-required" : "optional"
+        )
+      }
     />
   );
 

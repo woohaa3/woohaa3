@@ -31,6 +31,10 @@ export type NodeExecutionReferencesProps = {
   onConnect: (sourceNodeId: string) => boolean;
   /** 提交 edge 删除（权威命令由宿主完成）。 */
   onDisconnect: (item: ReferenceItem) => void;
+  /** 身份敏感任务已锁定参考：提交前必须有 ready 参考图。 */
+  identityRequired?: boolean;
+  /** 切换节点级身份参考策略；缺省不渲染切换入口。 */
+  onReferencePolicyChange?: (required: boolean) => void;
 };
 
 export function NodeExecutionReferences({
@@ -41,7 +45,9 @@ export function NodeExecutionReferences({
   pickerOpen,
   onPickerOpenChange,
   onConnect,
-  onDisconnect
+  onDisconnect,
+  identityRequired = false,
+  onReferencePolicyChange
 }: NodeExecutionReferencesProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -107,6 +113,20 @@ export function NodeExecutionReferences({
           }
         />
       </div>
+      {identityRequired || onReferencePolicyChange ? (
+        <div className="ref-policy-status" data-identity-required={identityRequired ? "true" : undefined}>
+          <span>{identityRequired ? "身份参考已锁定" : "身份参考可选"}</span>
+          {onReferencePolicyChange ? (
+            <button
+              type="button"
+              className="ref-policy-status__toggle"
+              onClick={() => onReferencePolicyChange(!identityRequired)}
+            >
+              {identityRequired ? "改为可选" : "要求身份参考"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

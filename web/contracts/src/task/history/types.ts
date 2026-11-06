@@ -113,6 +113,10 @@ export type TaskRequestInput = {
   mediaType: string;
   assetId?: string;
   storageKey?: string;
+  /** 本次提交选中的输入槽、来源节点与稳定顺序（change: 2026-11-06-require-identity-reference）。 */
+  slotId?: string;
+  sourceNodeId?: string;
+  order?: number;
 };
 
 /**

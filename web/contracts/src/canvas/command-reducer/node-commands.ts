@@ -26,6 +26,7 @@ import {
   validateMediaContentPatch,
   validateImageEditPatch,
   validateModelCamerasPatch,
+  validateReferencePolicyPatch,
   validateSelfContained3DNodePatch,
   validateVideoEditIntentsPatch
 } from "./node-data-validation.js";
@@ -280,6 +281,8 @@ export function patchNodeData(
     const error = validateWorldIdentities([node], { [nodeId]: candidate });
     if (error) return reject("invalid-command", error);
   }
+  const referencePolicyRejection = validateReferencePolicyPatch(value);
+  if (referencePolicyRejection) return referencePolicyRejection;
   const intentRejection = validateVideoEditIntentsPatch(value);
   if (intentRejection) return intentRejection;
   const cameraRejection = validateModelCamerasPatch(value);

@@ -145,7 +145,16 @@ function sanitizeRequestInputs(inputs: TaskRequestSummary["inputs"]): NonNullabl
         mediaType,
         ...(typeof input.mediaKind === "string" ? { mediaKind: input.mediaKind.slice(0, 32) } : {}),
         ...(typeof input.assetId === "string" ? { assetId: input.assetId.slice(0, 200) } : {}),
-        ...(typeof input.storageKey === "string" ? { storageKey: input.storageKey.slice(0, 400) } : {})
+        ...(typeof input.storageKey === "string" ? { storageKey: input.storageKey.slice(0, 400) } : {}),
+        ...(typeof input.slotId === "string" && input.slotId !== ""
+          ? { slotId: input.slotId.slice(0, 200) }
+          : {}),
+        ...(typeof input.sourceNodeId === "string" && input.sourceNodeId !== ""
+          ? { sourceNodeId: input.sourceNodeId.slice(0, 200) }
+          : {}),
+        ...(typeof input.order === "number" && Number.isInteger(input.order) && input.order >= 0
+          ? { order: input.order }
+          : {})
       }
     ];
   });

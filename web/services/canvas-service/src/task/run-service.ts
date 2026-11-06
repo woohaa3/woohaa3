@@ -11,7 +11,7 @@
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import type { CanvasRoom } from "../sync/index.js";
 import type { CanvasTaskCatalog, CanvasTaskModelType, CanvasRunRequest, CanvasTaskNodeType, CanvasTaskInput, WorldCaptureGenerationBinding } from "@woohaa3/contracts";
-import { catalogModelBindings, checkModelCapability, compileVideoEditProviderPrompt, decodeWorldCamera, describeTaskFailure, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, resolveModelParameters, validateGenerationModeInputs, worldCaptureReferenceInput } from "@woohaa3/contracts";
+import { catalogModelBindings, checkModelCapability, compileVideoEditProviderPrompt, decodeWorldCamera, describeTaskFailure, effectiveReferencePolicy, hasReadyImageReference, IDENTITY_REFERENCE_INVALID_REASON, IDENTITY_REFERENCE_REQUIRED_REASON, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, resolveModelParameters, validateGenerationModeInputs, worldCaptureReferenceInput } from "@woohaa3/contracts";
 import type { CanvasTaskClient } from "../clients/task-client.js";
 import { collectInputMappings, resolveNodeReferenceInputs } from "./input-resolution.js";
 import { resolveMentionsAndCompile } from "./mention-resolution.js";
@@ -186,9 +186,24 @@ export class CanvasRunService {
       if (!reference.ok) return { ok: false, code: reference.code, message: reference.message };
       cameraInputs.set(source.id, reference.input);
     }
+    // 身份参考策略：节点设置优先于模型声明。identity-required 时提交必须带 ready 图片，
+    // 且失效/删除的参考不能被静默当成“没有参考”继续执行（change:
+    // 2026-11-06-require-identity-reference）。
+    const referencePolicy = effectiveReferencePolicy(
+      (canvas.nodeData[request.nodeId] as { referencePolicy?: unknown } | undefined)?.referencePolicy,
+      model.referencePolicy
+    );
     const resolution = resolveNodeReferenceInputs({ canvas, nodeId: request.nodeId, bindings, cameraInputs });
     if (resolution.blockingReasons.length > 0) {
-      return { ok: false, code: "invalid-input", message: resolution.blockingReasons[0] };
+      const reason =
+        referencePolicy === "identity-required"
+          ? `${IDENTITY_REFERENCE_INVALID_REASON}（${resolution.blockingReasons[0]}）`
+          : resolution.blockingReasons[0];
+      return {
+        ok: false,
+        code: referencePolicy === "identity-required" ? "identity-reference-invalid" : "invalid-input",
+        message: reason
+      };
     }
 
     // mention 权威校验与 prompt 编译（change: add-reference-inputs-and-mentions，任务 5.1–5.4）：
@@ -235,6 +250,14 @@ export class CanvasRunService {
           message: `模型 ${model.modelKey} 不接受该取景参考图：${capability.message}`
         };
       }
+    }
+
+    if (referencePolicy === "identity-required" && !hasReadyImageReference(taskInputs)) {
+      return {
+        ok: false,
+        code: "identity-reference-required",
+        message: IDENTITY_REFERENCE_REQUIRED_REASON
+      };
     }
 
     // edit_video：再次 sanitize/validate intents，确定性地编译进 provider prompt（change:
@@ -314,6 +337,8 @@ export class CanvasRunService {
             // （change: l0-generation-provenance）。
             modelKey,
             ...(worldCapture ? { worldCapture } : {}),
+            // 提交快照：参考资产身份、来源节点、slot 与稳定顺序只写一次，不随后续画布变化改写。
+            ...(taskInputs.length > 0 ? { references: taskInputs } : {}),
             status: "running",
             updatedAt: this.deps.now?.() ?? new Date().toISOString()
           }

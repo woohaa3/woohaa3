@@ -10,6 +10,7 @@ export * from "./validation.js";
 export * from "./base-path/app-base-path.mjs";
 export * from "./client/rules.js";
 export * from "./task/dto.js";
+export * from "./task/reference-policy.js";
 export * from "./task/model-identity.js";
 export * from "./task/model-capabilities.js";
 export * from "./task/history.js";
