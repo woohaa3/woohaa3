@@ -15,6 +15,7 @@ export const GENERATION_FAILURE = {
   unsupported: "unsupported",
   unavailable: "unavailable",
   storageFailed: "storage-failed",
+  workerLost: "worker-lost",
 } as const;
 
 /** GenerationFailure 的界面文案。 */
@@ -28,6 +29,7 @@ export const GENERATION_FAILURE_TEXTS: Readonly<Record<string, string>> = {
   "unsupported": "服务端不支持该模型或能力",
   "unavailable": "远端服务暂不可用",
   "storage-failed": "服务端结果存储失败",
+  "worker-lost": "执行任务的算力节点已失联",
 };
 
 export const SESSION_ERROR = {
