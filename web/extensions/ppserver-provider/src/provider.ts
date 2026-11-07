@@ -18,6 +18,7 @@ import {
 import { isPassthroughTemplate, passthroughSource, passthroughTaskId, readPassthroughTaskId } from "./passthrough.js";
 import {
   buildCreateStreamBody,
+  toLanguagePayload,
   buildTaskBody,
   classifyFailure,
   collectResultUrls,
@@ -114,7 +115,7 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
       }
       const body = buildCreateStreamBody({
         templateId,
-        payload: context.input,
+        payload: template.kind === "language" ? toLanguagePayload(context.input) : context.input,
         ...(options.tenantId ? { tenantId: options.tenantId } : {})
       });
       const jobId = await openStreamAndReadJobId({

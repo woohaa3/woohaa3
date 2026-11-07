@@ -176,3 +176,28 @@ describe("ppserver describe 解读", () => {
     expect(without?.capabilities).toBeUndefined();
   });
 });
+
+describe("toLanguagePayload", () => {
+  it("turns the host chat-shaped input into the string prompt ppserver text handlers expect", async () => {
+    const { toLanguagePayload } = await import("../src/protocol.js");
+    const payload = toLanguagePayload({
+      prompt: [{ role: "user", content: [{ type: "text", text: "变成黑毛" }, { type: "image_url", image_url: { url: "https://x/y.png" } }] }],
+      system: "你是提示词润色助手",
+      maxTokens: 1600
+    });
+    expect(payload).toEqual({
+      apiMode: "messages",
+      stream: false,
+      prompt: "变成黑毛",
+      systemPrompt: "你是提示词润色助手",
+      maxOutputTokens: 1600
+    });
+  });
+
+  it("leaves a string prompt and explicit ppserver fields alone", async () => {
+    const { toLanguagePayload } = await import("../src/protocol.js");
+    expect(toLanguagePayload({ prompt: "hi", systemPrompt: "s", maxOutputTokens: 9, reasoningEffort: "low" })).toEqual({
+      apiMode: "messages", stream: false, prompt: "hi", systemPrompt: "s", maxOutputTokens: 9, reasoningEffort: "low"
+    });
+  });
+});

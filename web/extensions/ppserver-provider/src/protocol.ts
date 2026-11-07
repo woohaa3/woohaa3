@@ -30,6 +30,48 @@ export function serializeOptions(options?: RequestOptions, context?: Record<stri
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+/**
+ * 文本（language）模板的 payload 形状。
+ *
+ * 宿主通用输入把文本任务拼成聊天格式：`prompt` 是消息数组、系统提示叫 `system`、上限叫
+ * `maxTokens`。ppserver 的 `crun/gpt-5.6-*` 这类 handler 要的却是**字符串** `prompt`、
+ * `systemPrompt`、`maxOutputTokens`，并带 `apiMode`。数组形状的 `prompt` 会被判为空，
+ * 上游报「requires a non-empty input, prompt, or image」。
+ *
+ * 只转这一类已知的聊天形状，其它字段原样保留；已经是字符串的 `prompt` 不动（幂等）。
+ * 参考图/视频/音频在文本模板里没有对应字段，这里不传（改写类任务只有文本）。
+ */
+export function toLanguagePayload(input: Record<string, unknown>): Record<string, unknown> {
+  const { prompt, system, maxTokens, ...rest } = input;
+  const payload: Record<string, unknown> = { apiMode: "messages", stream: false, ...rest };
+  payload.prompt = typeof prompt === "string" ? prompt : promptTextOf(prompt);
+  if (typeof system === "string" && system.trim() !== "" && payload.systemPrompt === undefined) {
+    payload.systemPrompt = system;
+  }
+  if (typeof maxTokens === "number" && payload.maxOutputTokens === undefined) {
+    payload.maxOutputTokens = maxTokens;
+  }
+  return payload;
+}
+
+/** 从聊天消息数组里取出文本；多条消息或多段文本按顺序换行拼接。 */
+function promptTextOf(prompt: unknown): string {
+  if (!Array.isArray(prompt)) return "";
+  const texts: string[] = [];
+  for (const message of prompt) {
+    const content = isRecord(message) ? message.content : undefined;
+    if (typeof content === "string") {
+      texts.push(content);
+      continue;
+    }
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (isRecord(part) && part.type === "text" && typeof part.text === "string") texts.push(part.text);
+    }
+  }
+  return texts.join("\n").trim();
+}
+
 export function buildCreateStreamBody(input: {
   templateId: string;
   payload: Record<string, unknown>;

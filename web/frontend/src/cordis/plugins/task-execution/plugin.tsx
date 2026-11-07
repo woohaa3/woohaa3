@@ -55,7 +55,7 @@ import { AgentConversationPanel } from "./execution-panel/agent-conversation-pan
 // 文本宿主随执行面板定义装配：它只做一次节点类型判定并转交 composer，
 // 单独成 chunk 只会让打开文本面板多一次必然请求（change: 2026-10-27-merge-nonessential-panel-chunks）。
 import { TextExecutionHost } from "./text-execution-host.js";
-const ModelExecutionHost = lazy(() => import("./model-execution-host.js").then((module) => ({ default: module.ModelExecutionHost })));
+const ModelExecutionHost = lazy(() => import("./prompt-skill-execution-host.js").then((module) => ({ default: module.PromptSkillExecutionHost })));
 const ModelParameterPanel = lazy(() => import("./model-parameter-panel.js").then((module) => ({ default: module.ModelParameterPanel })));
 
 export const TASK_EXECUTION_PLUGIN_ID = "task-execution";
@@ -196,6 +196,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           );
           return (
             <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} runtime={runtime} />}><ModelExecutionHost
+              slots={ctx.slots}
               submitCoordinator={coordinator}
               canvasId={canvasId}
               selectedNodeId={route.nodeId}
