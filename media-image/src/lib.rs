@@ -6,7 +6,11 @@ use wasm_bindgen::prelude::*;
 
 pub const MAX_COMPRESSED_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_SOURCE_PIXELS: u64 = 8192 * 8192;
-pub const MAX_EDGE: u32 = 2048;
+/// Longest edge of a prepared variant. Must equal the top of the frontend residency tier
+/// ladder (`THUMBNAIL_TIERS`, 4096) and the Bevy texture edge limit (`MAX_TEXTURE_EDGE`):
+/// a card zoomed in far enough asks for the 4096 tier, and anything the decoder refuses or
+/// clamps below that shows up as a visibly soft image next to the original.
+pub const MAX_EDGE: u32 = 4096;
 #[cfg(all(feature = "threads", target_arch = "wasm32"))]
 pub use wasm_bindgen_rayon::init_thread_pool;
 
@@ -305,8 +309,26 @@ mod tests {
     #[test]
     fn rejects_bad_content_and_variant() {
         assert!(prepare(b"not an image", 128).is_err());
-        assert!(prepare(&png(vec![0; 4], 1, 1), 2049).is_err());
+        // One past the ceiling is refused; the ceiling itself is covered below.
+        assert!(prepare(&png(vec![0; 4], 1, 1), MAX_EDGE + 1).is_err());
+        assert!(prepare(&png(vec![0; 4], 1, 1), 0).is_err());
         assert!(check_size(32768, 32768).is_err());
+    }
+    /// The residency tier ladder tops out at 4096 so a texture can follow the on-screen size
+    /// of a zoomed-in card. The decoder has to be able to produce that edge, otherwise the
+    /// 4096 tier silently degrades to a smaller texture and the card renders blurry.
+    #[test]
+    fn ceiling_matches_the_top_residency_tier() {
+        assert_eq!(MAX_EDGE, 4096);
+    }
+    #[test]
+    fn downscales_to_the_full_ceiling_not_to_the_old_2048() {
+        let wide = png(vec![200, 100, 50, 255].repeat(4200 * 2), 4200, 2);
+        let at_ceiling = prepare(&wide, 4096).unwrap();
+        assert_eq!((at_ceiling.width, at_ceiling.source_width), (4096, 4200));
+        // A smaller request still yields the smaller variant (no accidental upscaling to the ceiling).
+        let at_old_limit = prepare(&wide, 2048).unwrap();
+        assert_eq!(at_old_limit.width, 2048);
     }
 }
 

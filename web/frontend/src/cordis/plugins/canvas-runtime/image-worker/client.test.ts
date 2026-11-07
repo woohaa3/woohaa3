@@ -74,3 +74,25 @@ it('lets small tiers run more instances than the large-tier default', async () =
   await Promise.all(jobs);
   pool.dispose();
 });
+it('accepts a 4096-edge variant (top residency tier) and refuses anything above it', async () => {
+  const {pool,workers}=setup(1);
+  const ok = pool.decode('/a',4096);
+  expect((workers[0].sent[0] as {maxEdge:number}).maxEdge).toBe(4096);
+  workers[0].reply(); await ok;
+  await expect(pool.decode('/b',4097)).rejects.toThrow('variant-limit');
+  await expect(pool.decode('/c',0)).rejects.toThrow('variant-limit');
+  pool.dispose();
+});
+it('forwards the 4096 tier to the decoder instead of clamping it back to 2048', async () => {
+  const { prepareImageResource } = await import('./client.js');
+  const { registerNativeImagePort } = await import('./native-port.js');
+  const pixels = { kind: 'native-image', handle: 'h', generation: 1, width: 1, height: 1 };
+  const prepare = vi.fn(async () => ({ width: 1, height: 1, sourceWidth: 1, sourceHeight: 1, pixels }));
+  const unregister = registerNativeImagePort({ prepare, apply: vi.fn(), release: vi.fn() } as never);
+  try {
+    // 不同 URL：`sharedPrepare` 按 url+edge 合并在途任务，别让两次调用互相合并。
+    await prepareImageResource('/tier-4096', 4096);
+    await prepareImageResource('/tier-8192', 8192);
+    expect(prepare.mock.calls.map(call => call[1])).toEqual([4096, 4096]);
+  } finally { unregister(); }
+});

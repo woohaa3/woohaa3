@@ -21,7 +21,7 @@ and already-decoded textures are not evicted, so switching tabs back does not re
 re-decode the whole canvas. Demand changes are recomputed on the next visible frame.
 
 The core accepts PNG/JPEG/WebP/GIF/AVIF, up to 32 MiB compressed, 64 megapixels and
-32768 pixels per axis. Output variants have a maximum edge of 2048. Untagged input
+32768 pixels per axis. Output variants have a maximum edge of 4096. Untagged input
 uses sRGB; ICC conversion uses moxcms, malformed or unsupported profiles fail explicitly.
 EXIF orientation is applied. GIF/animated AVIF are static first-frame previews. Resampling
 integrates linear-light premultiplied colours and returns straight-alpha RGBA8. It does not

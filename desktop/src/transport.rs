@@ -11,7 +11,10 @@ use woohaa_bevy_canvas as canvas;
 /// 控制消息上限：与浏览器侧模型资源 payload（16MB）一致，容纳含法线/UV/顶点色的 GLB Scene IR
 /// （change: 2026-10-28-support-glb-model-nodes）。
 const MAX_CONTROL_BYTES: usize = 16 * 1024 * 1024;
-const MAX_TEXTURE_BYTES: usize = 2048 * 2048 * 4;
+/// 单次纹理上传的 RGBA 字节上限：按最大纹理边长（`woohaa_media_image::MAX_EDGE` = 4096，
+/// 与 Bevy `MAX_TEXTURE_EDGE` 一致）的正方形计，否则 4096 档的纹理在传输层先被拒绝。
+const MAX_TEXTURE_BYTES: usize =
+    woohaa_media_image::MAX_EDGE as usize * woohaa_media_image::MAX_EDGE as usize * 4;
 // Two bounded IPC workers isolate editor byte parsing/encoding from Tauri's UI loop.
 type EditorIpcJob = Box<dyn FnOnce() + Send + 'static>;
 fn editor_ipc_workers() -> &'static std::sync::mpsc::SyncSender<EditorIpcJob> {

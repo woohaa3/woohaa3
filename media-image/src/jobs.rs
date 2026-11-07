@@ -156,6 +156,23 @@ pub fn native_jobs() -> &'static NativeImageJobs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The native registrar enforces the same ceiling as `prepare`; both must follow the top
+    /// residency tier (4096) or a zoomed-in card on the desktop shell is refused outright.
+    #[test]
+    fn register_accepts_the_full_ceiling_and_refuses_one_past_it() {
+        let jobs = NativeImageJobs::new();
+        let ok = jobs.register(b"invalid".to_vec(), crate::MAX_EDGE).unwrap();
+        jobs.release(&ok);
+        assert_eq!(
+            jobs.register(b"invalid".to_vec(), crate::MAX_EDGE + 1)
+                .unwrap_err(),
+            "variant-limit"
+        );
+        assert_eq!(
+            jobs.register(b"invalid".to_vec(), 0).unwrap_err(),
+            "variant-limit"
+        );
+    }
     #[test]
     fn releases_are_idempotent_and_late_completion_cannot_restore_a_lease() {
         let jobs = NativeImageJobs::new();

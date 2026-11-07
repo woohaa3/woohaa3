@@ -23,7 +23,7 @@ export class ImageWorkerPool {
   /** Decode already-authorised compressed bytes. `bytes` is optional for the legacy URL-only ABI. */
   decode(url: string, maxEdge: number, signal?: AbortSignal, encoded = false, region?: ImageJob["region"], bytes?: ArrayBuffer): Promise<ImageResult> {
     if (this.disposed || signal?.aborted) return Promise.reject(new Error('image-cancelled'));
-    if (!Number.isInteger(maxEdge) || maxEdge < 1 || maxEdge > 2048) return Promise.reject(new Error('variant-limit'));
+    if (!Number.isInteger(maxEdge) || maxEdge < 1 || maxEdge > MAX_DECODE_EDGE) return Promise.reject(new Error('variant-limit'));
     if (this.queue.length >= 512) return Promise.reject(new ImageLoadError('图片处理队列已满', false));
     return new Promise((resolve, reject) => {
       const request: ImageJob = { version: IMAGE_WORKER_VERSION, id: ++this.sequence, generation: 0, url: new URL(url, globalThis.location.href).href, maxEdge, encoded, allowThreads: experimentalThreads, ...(region ? {region} : {}), ...(bytes ? {bytes} : {}) };
@@ -153,13 +153,16 @@ function workerDecode(url: string, edge: number, signal?: AbortSignal, encoded =
 }
 
 /**
- * Decoder output ceiling, matching Rust `media-image::MAX_EDGE` and the native job
- * registrar. The residency tier table goes up to 4096 so textures can follow the
- * on-screen pixel size, but preparation above 2048 is refused by the decoder
- * (`variant-limit`) — a zoomed-in card would lose its image entirely. Clamp here
- * instead: the texture stays at 2048 and the card keeps rendering.
+ * Decoder output ceiling, matching Rust `media-image::MAX_EDGE`, the native job registrar and
+ * the top of the residency tier ladder (`THUMBNAIL_TIERS`, 4096), so a zoomed-in card gets a
+ * texture that follows its on-screen pixel size all the way up.
+ *
+ * Keep it equal to the Rust constant: if the decoder's limit is ever lowered again, preparation
+ * above it is refused (`variant-limit`) and a zoomed-in card would lose its image entirely, so
+ * the clamp below must be lowered with it (the texture then stays at the ceiling and keeps
+ * rendering, just softer).
  */
-const MAX_DECODE_EDGE = 2048;
+const MAX_DECODE_EDGE = 4096;
 
 /** Per-job decode reservation: small tiers cost half a full-size budget unit. */
 function decodeReservation(edge: number): number {
@@ -233,8 +236,8 @@ export type PrepareImageOptions = {
 
 async function sharedPrepare(requestedEdge:number, url:string, signal:AbortSignal|undefined, purpose:ResidencyPurpose, fetched:boolean, admissionKey:string):Promise<Prepared> {
   if(signal?.aborted)throw new Error('image-cancelled');
-  // 纹理档位可以选到 4096，但解码器只出到 `MAX_DECODE_EDGE`；收敛后再进缓存与预留，
-  // 让同一个 URL 的 2048/4096 两档共用一份结果，也不会按 4096 多计解码预算。
+  // 请求档位超过解码器上限（比如调用方传 8192）时收敛到 `MAX_DECODE_EDGE`，再进缓存与预留，
+  // 让超限的请求与上限档共用一份结果，也不会多计解码预算。
   const edge = Math.min(requestedEdge, MAX_DECODE_EDGE);
   const native=nativeImagePort();
   if(native && !nativeIds.has(native))nativeIds.set(native,++nextNativeId);
