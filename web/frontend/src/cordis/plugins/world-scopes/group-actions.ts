@@ -54,7 +54,7 @@ export type GroupPlanResult =
   | { ok: true; commands: CanvasCommand[]; label: string }
   | { ok: false; reason: string };
 
-function memberSize(node: ServerCanvas["document"]["nodes"][number]): { width: number; height: number } {
+export function memberSize(node: ServerCanvas["document"]["nodes"][number]): { width: number; height: number } {
   if (node.type === "workflow-group-2d") {
     return {
       width: node.width && node.width > 0 ? node.width : GROUP_DEFAULT_WIDTH,

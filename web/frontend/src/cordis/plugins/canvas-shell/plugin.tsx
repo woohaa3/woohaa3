@@ -26,6 +26,7 @@ import { NodeDownloadStatus } from "./node-download-status.js";
 import { resolveNodeDownloadAvailability, resolveModelFocusView, resolveNodeActionToolbarView } from "./node-action-toolbar-view.js";
 import { describeNodeActions, nodeActionSettingsStore, routeNodeActionHit } from "./node-action-host.js";
 import { NodeActionToolbarHost } from "./node-action-toolbar-host.js";
+import { SelectionToolbarHost } from "./selection-toolbar-host.js";
 import { setNodeActionBridge } from "./node-action-bridge.js";
 import type { BevyNodeActionsPresentation } from "@woohaa3/contracts";
 import type { NodeActionContribution, NodeActionContext } from "../../contract/platform.js";
@@ -153,12 +154,16 @@ export function canvasShellExtension(): Plugin.Function<void> {
         id: "node-action-toolbar", owner: CANVAS_SHELL_PLUGIN_ID, priority: 25,
         render: () => <NodeActionToolbarHost ctx={ctx} />
       });
+      const removeSelectionToolbar = ctx.slots.register("canvas.overlay", {
+        id: "selection-toolbar", owner: CANVAS_SHELL_PLUGIN_ID, priority: 25,
+        render: () => <SelectionToolbarHost ctx={ctx} />
+      });
       const removeDownloadStatus = ctx.slots.register("canvas.overlay", {
         id: "node-download-status", owner: CANVAS_SHELL_PLUGIN_ID, priority: 26,
         render: () => <NodeDownloadStatus service={downloads} />
       });
       ctx.effect(() => () => {
-        offBridge(); removeNodeActionToolbar(); offDownload(); removeDownloadAction(); removeModelFocusViewAction(); removeDownloadStatus();
+        offBridge(); removeNodeActionToolbar(); removeSelectionToolbar(); offDownload(); removeDownloadAction(); removeModelFocusViewAction(); removeDownloadStatus();
         nodeActionSettingsStore.close();
         downloads.dispose();
       }, "canvas-shell-downloads");
