@@ -26,6 +26,7 @@ import { fetchRemoteSixiConfig } from "./remote-config.js";
 import { ensureSession, sessionFilePath } from "./session.js";
 import { registerPpserverProxy } from "./routes.js";
 import { registerAccountProxy } from "./account-routes.js";
+import { registerAnnouncementRoute } from "./announcement-route.js";
 import { registerPpserverAuthSessionRoute } from "./auth-session.js";
 import { uploadPpserverReference } from "./upload.js";
 import {
@@ -398,6 +399,11 @@ export function createPpserverProviderPlugin(
         accessToken: resolveAccessToken,
         tenantId: () => tenantId
       });
+      /*
+       * 平台公告：官网上的一个静态文本文件，在官网主域、没有 CORS 头，同样要经宿主代取。
+       * 公开内容，不带令牌。
+       */
+      registerAnnouncementRoute(ctx);
       /*
        * 登录后的会话投递：前端（四喜界面）调完 Authing + authing-bridge3 拿到
        * Supabase 会话后 POST 到这里，由宿主落盘。**有了它，上面的 `resolveAccessToken`
