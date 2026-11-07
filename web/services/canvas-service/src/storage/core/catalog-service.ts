@@ -163,6 +163,25 @@ export class CanvasCatalogService {
   }
 
   /**
+   * 按 id 读取画布内容：已发布的 Yjs projection 是权威快照，尚未 bootstrap 的新画布
+   * 才回退到结构化仓库。列表和打开画布必须使用同一份 canonical 状态，否则列表显示的
+   * 节点/版本会在 GET 时退回创建时的空快照。
+   */
+  async getCanvas(canvasId: string): Promise<ServerCanvas> {
+    const projection = await this.published.loadPublished(canvasId);
+    if (projection !== null) {
+      assertUsableProjection(canvasId, projection);
+      return projection;
+    }
+
+    const structured = await this.repository.getCanvas(canvasId);
+    if (structured === null) {
+      throw new CanvasStorageError("CANVAS_NOT_FOUND", `画布 ${canvasId} 不存在`);
+    }
+    return structured;
+  }
+
+  /**
    * 合并模式：本地全量 + 各远端来源，去重后按 updatedAt 倒序统一分页。
    *
    * 为什么整份合并在内存里做：两个来源各自的分页无法拼成一份正确的 `offset`/`total`

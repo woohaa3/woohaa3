@@ -30,6 +30,7 @@ afterAll(() => {
 });
 
 const IMAGE_KEY = `generation-outputs/${"b".repeat(64)}.png`;
+const VIDEO_KEY = `generation-outputs/${"e".repeat(64)}.mp4`;
 
 function recordingMediaClient() {
   const client = {
@@ -150,21 +151,20 @@ async function startService(provider: GenerationProvider) {
   };
 }
 
-async function submit(base: string): Promise<{ status: number; body: unknown }> {
-  const response = await fetch(`${base}/internal/v1/tasks/${REQUEST.workerTaskKey}`, {
+async function submit(base: string, request: Record<string, unknown> = REQUEST): Promise<{ status: number; body: unknown }> {
+  const response = await fetch(`${base}/internal/v1/tasks/${request.workerTaskKey as string}`, {
     method: "PUT",
     headers: {
       "content-type": "application/json",
       "x-woohaa3-service-token": TOKEN,
       "x-woohaa3-protocol-version": "1"
     },
-    body: JSON.stringify(REQUEST)
+    body: JSON.stringify(request)
   });
   return { status: response.status, body: await response.json().catch(() => undefined) };
 }
 
-describe("prepareInput 收到画布身份与稳定引用", () => {
-  it("透传 canvasId/taskKey/runId，以及参考输入的 assetId/storageKey", async () => {
+describe("prepareInput 收到画布身份与稳定引用", () => {  it("透传 canvasId/taskKey/runId，以及参考输入的 assetId/storageKey", async () => {
     const captured: { prepare?: GenerationPrepareInput } = {};
     const harness = await startService(remoteProvider(captured));
     try {
@@ -194,6 +194,81 @@ describe("prepareInput 收到画布身份与稳定引用", () => {
       ]);
       // provider 自己决定只用稳定引用（不把签名地址交给服务端）。
       expect(harness.worker.submitted[0]).toMatchObject({ urls: [IMAGE_KEY] });
+    } finally {
+      await harness.close();
+    }
+  });
+});
+
+/** 远端托管的视频 Provider：只认自己的输入形状（服务端契约），不读默认视频输入。 */
+function remoteVideoProvider(captured: { prepare?: GenerationPrepareInput }): GenerationProvider {
+  return {
+    extensionId: "remote-server",
+    providerId: "remote-server",
+    available: true,
+    selectionAuthority: "server",
+    provider: {} as never,
+    models: [
+      {
+        providerId: "remote-server",
+        providerModelId: "video-model",
+        modelType: "video",
+        inputSchema: {
+          type: "object",
+          properties: {
+            prompt: { type: "string" },
+            videoUrls: { type: "array", "x-pptask-semantic": "reference-video", maxItems: 4 }
+          }
+        },
+        defaultInput: {}
+      }
+    ],
+    prepareInput: (input) => {
+      captured.prepare = input;
+      return {
+        prompt: input.prompt,
+        seconds: 4,
+        references: input.references.map((reference) => reference.storageKey ?? "")
+      };
+    }
+  };
+}
+
+const VIDEO_REQUEST = {
+  workerTaskKey: "run-remote-video-1",
+  canvasId: "canvas-remote",
+  nodeId: "video-1",
+  runId: "run-remote-video-1",
+  jobId: "job-remote-video-1",
+  nodeType: "video",
+  modelType: "video",
+  modelKey: "remote-server:video-model",
+  prompt: "一只猫在窗边",
+  parameters: { durationSeconds: 4 },
+  inputs: [
+    {
+      assetId: "asset-video-1",
+      role: "reference_video",
+      storageKey: VIDEO_KEY,
+      mediaType: "video/mp4",
+      mediaKind: "video"
+    }
+  ]
+};
+
+describe("默认视频输入的 canvasId 不影响远端托管 Provider", () => {
+  it("提交的是 prepareInput 的产物，画布身份只走 prepareInput 上下文", async () => {
+    const captured: { prepare?: GenerationPrepareInput } = {};
+    const harness = await startService(remoteVideoProvider(captured));
+    try {
+      const submission = await submit(harness.base, VIDEO_REQUEST);
+      expect(submission.status, JSON.stringify(submission.body)).toBe(202);
+      expect(harness.worker.submitted).toEqual([
+        { prompt: "一只猫在窗边", seconds: 4, references: [VIDEO_KEY] }
+      ]);
+      // 默认视频输入里的 canvasId 没有被混进 Provider 自己的输入形状。
+      expect(harness.worker.submitted[0]).not.toHaveProperty("canvasId");
+      expect(captured.prepare).toMatchObject({ modelType: "video", canvasId: "canvas-remote" });
     } finally {
       await harness.close();
     }

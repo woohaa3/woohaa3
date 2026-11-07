@@ -4,6 +4,7 @@
  */
 import type { ExecutionRecord } from "@sdppp/pptask-worker-server/history";
 import type { TaskExecutionState, TaskResultSummary } from "@woohaa3/contracts";
+import { describeTaskFailure } from "@woohaa3/contracts";
 import type { SqliteTaskHistoryRepository } from "../repository/history-repository.js";
 import type { TaskAssociation } from "./types.js";
 
@@ -13,13 +14,30 @@ import type { TaskAssociation } from "./types.js";
  * 这是「history 是唯一事实源」的落点：worker 的 scheduling + execution 事实都合并到
  * 同一 taskKey 记录，并只写安全字段。
  */
+export type ExecutionProjectionOptions = {
+  /**
+   * 媒体材料化投影：记录仍是 running、但 execution record 已带终态时间。
+   *
+   * 只影响 `finishedAt` 的落库；状态与结果由显式 override 决定，避免把在飞任务写成「已结束」。
+   */
+  omitFinishedAt?: boolean;
+  /**
+   * 本次投影不追加 record.events。
+   *
+   * 材料化准备态不消费 provider 的成功事件：成功事件要等稳定媒体真正落定后再进入时间线，
+   * 否则详情里会先出现「succeeded」而任务仍是准备中。
+   */
+  skipEventAppend?: boolean;
+};
+
 export function projectExecutionRecord(
   history: SqliteTaskHistoryRepository,
   record: ExecutionRecord,
   association?: Partial<TaskAssociation>,
   resultOverride?: TaskResultSummary,
   stateOverride?: TaskExecutionState,
-  errorOverride?: { name?: string; message: string }
+  errorOverride?: { name?: string; message: string; status?: number; code?: string },
+  projectionOptions?: ExecutionProjectionOptions
 ): void {
   const state = stateOverride ?? mapState(record.state);
   const result = resultOverride ?? readSafeResult(record);
@@ -30,7 +48,11 @@ export function projectExecutionRecord(
     (record.error?.message
       ? {
           name: record.error.name,
-          message: record.error.message,
+          message: describeTaskFailure({
+            message: record.error.message,
+            ...(record.error.status !== undefined ? { status: record.error.status } : {}),
+            ...(record.error.code !== undefined ? { code: record.error.code } : {})
+          }),
           ...(record.error.status !== undefined ? { status: record.error.status } : {}),
           ...(record.error.code !== undefined ? { code: record.error.code } : {})
         }
@@ -55,7 +77,7 @@ export function projectExecutionRecord(
     createdAt: record.createdAt,
     ...(record.startedAt ? { startedAt: record.startedAt } : {}),
     updatedAt: record.updatedAt,
-    ...(record.finishedAt ? { finishedAt: record.finishedAt } : {}),
+    ...(record.finishedAt && !projectionOptions?.omitFinishedAt ? { finishedAt: record.finishedAt } : {}),
     durationMs: record.durationMs
   });
 
@@ -63,6 +85,7 @@ export function projectExecutionRecord(
   // 之前只写最后一条，导致重试/多次状态变化在历史里看不见；这里按「最后一条已落库事件的时刻 + 该时刻
   // 已落库条数」增量补齐——用时刻定位可以避免事件超上限被裁剪后索引错位，用条数兜住同一毫秒内的
   // 连续状态变化（created/submitting 常落在同一毫秒）。
+  if (projectionOptions?.skipEventAppend) return;
   const tail = history.lastEventTail(record.id);
   const pendingEvents = tail === undefined
     ? record.events

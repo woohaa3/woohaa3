@@ -123,14 +123,14 @@ function recordingWorkerServer() {
   return { submitted, server };
 }
 
-async function startService(signError: Error) {
+async function startService(signError: Error, generationProvider: GenerationProvider = provider()) {
   const media = failingMediaClient(signError);
   const worker = recordingWorkerServer();
   const service: TaskService = createTaskService({
     modelsConfig: MODELS,
     storePath: tempStore(),
     env: { WOOHAA3_TASK_STORE_PATH: tempStore() },
-    generationProviders: () => [provider()],
+    generationProviders: () => [generationProvider],
     mediaClient: media.client as never,
     workerServer: worker.server as never,
     serviceToken: TOKEN
@@ -153,15 +153,15 @@ async function startService(signError: Error) {
   };
 }
 
-async function submit(base: string) {
-  const response = await fetch(`${base}/internal/v1/tasks/${REQUEST.workerTaskKey}`, {
+async function submit(base: string, request: Record<string, unknown> = REQUEST) {
+  const response = await fetch(`${base}/internal/v1/tasks/${String(request.workerTaskKey)}`, {
     method: "PUT",
     headers: {
       "content-type": "application/json",
       "x-woohaa3-service-token": TOKEN,
       "x-woohaa3-protocol-version": "1"
     },
-    body: JSON.stringify(REQUEST)
+    body: JSON.stringify(request)
   });
   return { status: response.status, body: (await response.json().catch(() => undefined)) as { code?: string; message?: string } };
 }
@@ -213,6 +213,109 @@ describe("提交阶段失败落安全失败终态", () => {
       await submit(harness.base);
       const batch = harness.service.history().listSince(0, 50);
       expect(batch.messages.some((message) => message.record.taskKey === REQUEST.workerTaskKey)).toBe(true);
+    } finally {
+      await harness.close();
+    }
+  });
+});
+
+/**
+ * 视频参数 schema 复验（change: 2026-11-06-guard-video-generation-inputs）。
+ *
+ * 绕过 Canvas 直接调用内部提交协议时，Task Service 也必须在创建 provider 任务前拒绝
+ * 缺参/越界请求；不能把 N05/N09 的空 aspectRatio / 越界 duration 交给上游。
+ */
+function videoProvider(defaultInput: Record<string, unknown> = {
+  aspectRatio: "16:9",
+  resolution: "720p",
+  durationSeconds: 5
+}): GenerationProvider {
+  return {
+    extensionId: "video-provider",
+    providerId: "videohub",
+    available: true,
+    provider: {} as never,
+    models: [
+      {
+        providerId: "videohub",
+        providerModelId: "agnes-video-2.5",
+        modelType: "video",
+        inputSchema: {
+          type: "object",
+          required: ["prompt", "aspectRatio", "resolution", "durationSeconds"],
+          properties: {
+            prompt: { type: "string", title: "提示词" },
+            aspectRatio: { type: "string", title: "比例", enum: ["16:9", "9:16", "1:1"] },
+            resolution: { type: "string", title: "分辨率", enum: ["720p", "1080p", "2k"] },
+            durationSeconds: { type: "number", title: "时长", minimum: 5, maximum: 12, unit: "秒" }
+          }
+        },
+        defaultInput: defaultInput
+      }
+    ]
+  };
+}
+
+const VIDEO_REQUEST = {
+  ...REQUEST,
+  workerTaskKey: "run-video-parameters-1",
+  nodeId: "video-1",
+  runId: "run-video-parameters-1",
+  jobId: "job-run-video-parameters-1",
+  nodeType: "video",
+  modelType: "video",
+  modelKey: "videohub:agnes-video-2.5",
+  inputs: []
+};
+
+describe("视频参数 schema 复验", () => {
+  it("缺 aspectRatio 时返回稳定 missing-parameter 且不调用 provider", async () => {
+    const harness = await startService(new Error("不应读取参考输入"), videoProvider({}));
+    try {
+      const submission = await submit(harness.base, {
+        ...VIDEO_REQUEST,
+        parameters: { resolution: "720p", durationSeconds: 5 }
+      });
+      expect(submission.status, JSON.stringify(submission.body)).toBe(400);
+      expect(submission.body?.code).toBe("missing-parameter");
+      expect(submission.body?.message).toContain("缺少必填参数");
+      expect(submission.body?.message).toContain("aspectRatio");
+      expect(harness.worker.submitted).toHaveLength(0);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("时长越界时返回稳定 invalid-parameter 且不调用 provider", async () => {
+    const harness = await startService(new Error("不应读取参考输入"), videoProvider());
+    try {
+      const submission = await submit(harness.base, {
+        ...VIDEO_REQUEST,
+        parameters: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 13 }
+      });
+      expect(submission.status, JSON.stringify(submission.body)).toBe(400);
+      expect(submission.body?.code).toBe("invalid-parameter");
+      expect(submission.body?.message).toContain("时长不能大于 12秒");
+      expect(harness.worker.submitted).toHaveLength(0);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("缺省参数被模型默认值补齐后才调用 provider", async () => {
+    const harness = await startService(new Error("签名失败"), videoProvider());
+    try {
+      const submission = await submit(harness.base, {
+        ...VIDEO_REQUEST,
+        parameters: { aspectRatio: "9:16" }
+      });
+      expect(submission.status, JSON.stringify(submission.body)).toBe(202);
+      expect(harness.worker.submitted).toHaveLength(1);
+      expect(harness.worker.submitted[0]).toMatchObject({
+        aspectRatio: "9:16",
+        resolution: "720p",
+        durationSeconds: 5
+      });
     } finally {
       await harness.close();
     }

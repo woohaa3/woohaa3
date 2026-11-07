@@ -203,6 +203,7 @@ export class RunStateStore {
       state,
       owner: "server",
       ...(progress !== undefined ? { progress } : {}),
+      ...(activity.result?.mediaState === "materializing" ? { mediaState: "materializing" as const } : {}),
       ...(activity.error?.message ? { error: activity.error.message } : {}),
       createdAt: earliestIso(existing?.createdAt, activity.createdAt) ?? new Date(this.now()).toISOString(),
       updatedAt

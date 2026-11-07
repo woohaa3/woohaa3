@@ -5,6 +5,8 @@ import type { AgentConnectionRegistry } from "./agent-connection-registry.js";
 import type { AgentAdapterRegistry } from "./agent-adapter-registry.js";
 import type { ImageDirectorSceneRecord, ImageDirectorSceneStore } from "../repository/image-director-scene-store.js";
 
+const MAX_CANDIDATE_ATTEMPTS = 3;
+
 const digest = (value: unknown) => createHash("sha256").update(stableStringify(value)).digest("hex");
 const delivery = (record: ImageDirectorSceneRecord) => ({ purpose: "image-director-scene" as const, domainRequestId: record.request.requestId, attemptId: "1", ...(record.reservation ? { nodeId: record.reservation.nodeId } : {}) });
 
@@ -200,7 +202,7 @@ export class ImageDirectorSceneService {
         record.stage = feedback ? "repairing" : "generating";
         record.activeAttemptId = attemptId;
         this.deps.store.save(record);
-        const outcome = await adapter.run({ owner: record.owner, canvasId: record.canvasId, connection: record.connection, conversationId: `${record.request.requestId}:${attemptId}`, turnId: record.parentTurnId, requestId: `${record.request.requestId}:${attemptId}`, intent: { ...record.entry, action: "discuss", prompt: `${record.request.instructions}\n只创建静态几何，不使用动画。模型脚本使用 Y-up 米制；世界变换及相机使用 u/v/h 米制和单位四元数。镜头应覆盖全部主要模型。\n${imageDirectorSceneModelGuide()}\nReturn JSON matching the schema. ${feedback}` }, history: context.history, candidate: { images: [{ bytes: Buffer.from(record.imageBase64, "base64"), contentType: record.source.mimeType }], outputSchema: imageDirectorSceneCandidateSchema }, signal: context.signal, emit: context.emit });
+        const outcome = await adapter.run({ owner: record.owner, canvasId: record.canvasId, connection: record.connection, conversationId: `${record.request.requestId}:${attemptId}`, turnId: record.parentTurnId, requestId: `${record.request.requestId}:${attemptId}`, intent: { ...record.entry, action: "discuss", prompt: `${record.request.instructions}\n只创建静态几何，不使用动画。模型脚本使用 Y-up 米制；世界变换及相机使用 u/v/h 米制和单位四元数。镜头应覆盖全部主要模型。\n${imageDirectorSceneModelGuide()}\nReturn only JSON matching this scene candidate schema (the model API above describes models[].script only): ${JSON.stringify(imageDirectorSceneCandidateSchema)}\n${feedback}` }, history: context.history, candidate: { images: [{ bytes: Buffer.from(record.imageBase64, "base64"), contentType: record.source.mimeType }], outputSchema: imageDirectorSceneCandidateSchema }, signal: context.signal, emit: context.emit });
         if (context.signal.aborted || outcome.status === "cancelled") throw new Error("已停止");
         if (outcome.status !== "succeeded") throw new Error(outcome.error?.message ?? "助手执行失败");
         delete record.activeAttemptId;
@@ -213,6 +215,7 @@ export class ImageDirectorSceneService {
           feedback = `Previous candidate: ${JSON.stringify(parsed)}\nDiagnostic: ${!valid.ok ? valid.diagnostic : "invalid candidate"}. Repair it.`;
           record.attempts.push({ id: attemptId, diagnostic: !valid.ok ? valid.diagnostic : "invalid candidate", raw: parsed, ...(decoded.ok ? { candidate: decoded.value } : {}) });
           this.deps.store.save(record);
+          if (record.attempts.length >= MAX_CANDIDATE_ATTEMPTS) throw new Error(`候选格式或内容连续 ${MAX_CANDIDATE_ATTEMPTS} 次未通过校验：${record.attempts.at(-1)?.diagnostic}`);
           continue;
         }
         record.attempts.push({ id: attemptId, candidate: decoded.value });

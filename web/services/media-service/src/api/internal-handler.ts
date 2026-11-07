@@ -31,7 +31,7 @@ import { MediaObjectNotFoundError, isMediaObjectNotFoundError, isStorageExposeUn
 import { computeGeneratedStorageKey, computeSha256Hex, normalizeMediaType } from "../application/ingest.js";
 import { extensionForMediaType, isAllowedMediaType, mediaKindForType, defaultMaxOutputBytesFor } from "@woohaa3/contracts";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../application/ingest.js";
-import { guardedDownload, GuardedDownloadError } from "../security/guarded-fetch.js";
+import { classifyDownloadFailure, downloadProviderUrl } from "../application/url-import.js";
 import { hasScope, resolveServiceIdentity, type ServiceIdentityConfig } from "../security/identity.js";
 
 export { DEFAULT_MEDIA_INTERNAL_BASE_PATH } from "@woohaa3/contracts";
@@ -49,10 +49,13 @@ export type MediaInternalOptions = {
   basePath?: string;
   maxImportBytes?: number;
   importTimeoutMs?: number;
+  /** provider URL 转存的重试退避（默认 300ms/900ms；测试可注入零等待）。 */
+  importRetryDelaysMs?: readonly number[];
+  importSleep?: (ms: number) => Promise<void>;
   signTtlSeconds?: number;
   fetchImpl?: typeof globalThis.fetch;
   resolveHost?: (hostname: string) => Promise<string[]>;
-  logger?: (event: { event: string; status: number; code?: string }) => void;
+  logger?: (event: { event: string; status: number; code?: string; upstreamStatus?: number }) => void;
   /** readiness 覆盖（测试注入 COS 故障）。 */
   readiness?: () => Promise<{ ready: boolean; reason?: string }>;
   now?: () => Date;
@@ -232,20 +235,37 @@ async function handleImport(
 
   let downloaded;
   try {
-    downloaded = await guardedDownload({
+    downloaded = await downloadProviderUrl({
       url: decoded.value.url,
       maxBytes,
       timeoutMs: options.importTimeoutMs ?? DEFAULT_IMPORT_TIMEOUT_MS,
       // 生成结果转存允许图片、视频与音频（provider 输出 URL）。
       allowedMediaTypes: [...GENERATED_IMPORT_MEDIA_TYPES],
       fetchImpl: options.fetchImpl,
-      resolveHost: options.resolveHost
+      resolveHost: options.resolveHost,
+      ...(options.importRetryDelaysMs ? { retryDelaysMs: options.importRetryDelaysMs } : {}),
+      ...(options.importSleep ? { sleep: options.importSleep } : {})
     });
   } catch (error) {
-    const code = error instanceof GuardedDownloadError ? error.code : "http-error";
-    const status = code === "blocked-host" || code === "unsupported-protocol" ? 400 : code === "too-large" ? 413 : 502;
-    log({ event: "media-import", status, code });
-    sendError(res, status, code === "too-large" ? "limit-exceeded" : "unsupported", "受控下载失败");
+    const failure = classifyDownloadFailure(error);
+    log({
+      event: "media-import",
+      status: failure.httpStatus,
+      code: failure.code,
+      ...(failure.upstreamStatus !== undefined ? { upstreamStatus: failure.upstreamStatus } : {})
+    });
+    sendError(
+      res,
+      failure.httpStatus,
+      failure.code === "limit-exceeded"
+        ? "limit-exceeded"
+        : failure.code === "media-not-found"
+          ? "media-not-found"
+          : failure.code === "storage-failed"
+            ? "storage-failed"
+            : "unsupported",
+      "受控下载失败"
+    );
     return true;
   }
 

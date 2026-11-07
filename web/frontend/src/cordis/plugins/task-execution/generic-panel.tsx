@@ -41,6 +41,7 @@ export function GenericModelPanel(props: ModelPanelProps) {
     () => ({
       panelPrompt: draft.prompt,
       taskStatus: status,
+      ...(props.unsubmitted ? { unsubmitted: true } : {}),
       ...(props.progress !== undefined ? { progress: props.progress } : {}),
       ...(errorMessage !== undefined ? { errorMessage } : {}),
       parameters: { ...draft.parameters, model: model.modelKey }

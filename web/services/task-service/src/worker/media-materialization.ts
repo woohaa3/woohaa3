@@ -16,9 +16,100 @@ import {
   type TaskResultSummary,
   type MediaMetadata
 } from "@woohaa3/contracts";
-import { safeProviderMessage } from "./normalize.js";
 import { projectExecutionRecord, readDurationFromRecord } from "./execution-projection.js";
 import type { BinaryModelType, MaterializationContext, TaskAssociation } from "./types.js";
+
+/**
+ * 转存失败的**安全诊断**：只保留稳定 code 与上游/传输 HTTP 状态。
+ *
+ * 绝不把 provider 临时 URL、签名地址、凭据或原始异常消息写进任务错误/日志；可行动信息由
+ * 状态码或稳定 code 表达（change: 2026-11-06-fix-media-output-readiness）。
+ */
+export type SafeMediaFailure = {
+  code: string;
+  status?: number;
+  message: string;
+};
+
+export function safeMediaFailure(
+  error: unknown,
+  modelType: BinaryModelType,
+  stage: "import" | "adopt" = "import"
+): SafeMediaFailure {
+  const code = safeMediaCode(error) ?? (stage === "adopt" ? "media-verify-failed" : "media-import-failed");
+  const status = safeMediaStatus(error);
+  const label = stage === "adopt" ? "结果核验失败" : "结果转存失败";
+  const detail = status !== undefined
+    ? `HTTP ${status}`
+    : code;
+  return {
+    code,
+    ...(status !== undefined ? { status } : {}),
+    message: `provider ${modelType} ${label}（${detail}）`
+  };
+}
+
+function safeMediaCode(error: unknown): string | undefined {
+  if (!isRecord(error)) return undefined;
+  const value = (error as { code?: unknown }).code;
+  if (typeof value !== "string") return undefined;
+  return /^[a-z][a-z0-9._-]{0,60}$/i.test(value) ? value : undefined;
+}
+
+function safeMediaStatus(error: unknown): number | undefined {
+  if (!isRecord(error)) return undefined;
+  const value = (error as { status?: unknown }).status;
+  return typeof value === "number" && Number.isInteger(value) && value >= 400 && value <= 599
+    ? value
+    : undefined;
+}
+
+/**
+ * 判断本次成功结果属于哪种二进制媒体。
+ *
+ * `modelType` 可能缺失（provider 事件历史上并非必填），此时从稳定媒体 contentType、输出
+ * 类型回推；回推不出来才按非媒体处理。缺失时直接写 succeeded 正是「先成功后补媒体」窗口的
+ * 来源之一（N04）。
+ */
+export function inferBinaryModelType(record: ExecutionRecord): BinaryModelType | undefined {
+  if (record.modelType === "image" || record.modelType === "video" || record.modelType === "audio") {
+    return record.modelType;
+  }
+  const stable = readStableMediaResult(record);
+  const stableType = stable?.media.contentType.toLowerCase();
+  if (stableType?.startsWith("video/")) return "video";
+  if (stableType?.startsWith("audio/")) return "audio";
+  if (stableType?.startsWith("image/")) return "image";
+  const output = (record.result?.outputs ?? []).find(
+    (entry) => entry.kind === "image" || entry.kind === "video" || entry.kind === "audio"
+  );
+  if (output?.kind === "image" || output?.kind === "video" || output?.kind === "audio") return output.kind;
+  return undefined;
+}
+
+/**
+ * 在开始异步转存前先投影「媒体准备中」。
+ *
+ * 任务保持非终态（running），结果摘要显式标记 `mediaState: "materializing"`；UI 与画布
+ * 补偿据此显示准备态并禁用成功入口，而不会先看到一个没有媒体身份的 succeeded。
+ */
+export function projectMaterializingRecord(
+  options: MaterializationContext,
+  record: ExecutionRecord,
+  association: Partial<TaskAssociation> | undefined,
+  modelType: BinaryModelType
+): void {
+  projectExecutionRecord(
+    options.history,
+    record,
+    association,
+    { mediaKind: modelType, mediaState: "materializing" },
+    "running",
+    undefined,
+    { omitFinishedAt: true, skipEventAppend: true }
+  );
+  options.logger?.({ event: "media-output-materializing", taskKey: record.id, modelType });
+}
 
 /** 视频结果：主视频 URL + 从 provider 原始结果读取可选海报（末帧）与时长。 */
 export async function materializeVideoResult(
@@ -148,7 +239,8 @@ export async function materializeStableMediaResult(
       "succeeded"
     );
   } catch (error) {
-    options.logger?.({ event: "media-output-adopt-failed", taskKey: record.id, code: safeProviderMessage(error) });
+    const failure = safeMediaFailure(error, modelType, "adopt");
+    options.logger?.({ event: "media-output-adopt-failed", taskKey: record.id, code: failure.code, ...(failure.status !== undefined ? { status: failure.status } : {}) });
     // 与 import 路径同一不变式：核验失败不得落 succeeded（provider 已执行，但产物不可确认）。
     projectExecutionRecord(
       options.history,
@@ -156,7 +248,12 @@ export async function materializeStableMediaResult(
       association,
       { mediaKind: modelType },
       "failed",
-      { name: "MediaImportError", message: `provider ${modelType} 结果核验失败` }
+      {
+        name: "MediaImportError",
+        message: failure.message,
+        ...(failure.status !== undefined ? { status: failure.status } : {}),
+        code: failure.code
+      }
     );
   }
 }
@@ -240,7 +337,8 @@ export async function materializeBinaryResult(
       const adopted = await importStoredBytesAfterUrlFailure(options, record, association, modelType, maxBytes, scope, error);
       if (adopted) return;
     }
-    options.logger?.({ event: "media-output-import-failed", taskKey: record.id, code: safeProviderMessage(error) });
+    const failure = safeMediaFailure(error, modelType);
+    options.logger?.({ event: "media-output-import-failed", taskKey: record.id, code: failure.code, ...(failure.status !== undefined ? { status: failure.status } : {}) });
     // 转存失败：succeeded 不得落地，记录为失败（provider 已执行，但结果未持久化）。
     projectExecutionRecord(
       options.history,
@@ -248,7 +346,12 @@ export async function materializeBinaryResult(
       association,
       { mediaKind: modelType },
       "failed",
-      { name: "MediaImportError", message: `provider ${modelType} 结果转存失败` }
+      {
+        name: "MediaImportError",
+        message: failure.message,
+        ...(failure.status !== undefined ? { status: failure.status } : {}),
+        code: failure.code
+      }
     );
   }
 }
@@ -275,7 +378,7 @@ async function importStoredBytesAfterUrlFailure(
     options.logger?.({
       event: "media-output-import-bytes-unavailable",
       taskKey: record.id,
-      code: safeProviderMessage(urlError)
+      code: safeMediaFailure(urlError, modelType).code
     });
     return false;
   }
@@ -302,7 +405,7 @@ async function importStoredBytesAfterUrlFailure(
     );
     return true;
   } catch (error) {
-    options.logger?.({ event: "media-output-import-bytes-failed", taskKey: record.id, code: safeProviderMessage(error) });
+    options.logger?.({ event: "media-output-import-bytes-failed", taskKey: record.id, code: safeMediaFailure(error, modelType).code });
     return false;
   }
 }
@@ -315,14 +418,37 @@ export async function materializeBinaryBytesFromStore(
   modelType: "image" | "audio" | "video"
 ): Promise<void> {
   if (modelType === "video") {
-    // 视频大对象不允许按字节转存：只接受 URL 路径；按原样投影，不伪造结果。
-    projectExecutionRecord(options.history, record, association);
+    // 视频大对象不允许按字节转存：只接受 URL 路径。provider 只给字节时不伪造成功，
+    // 也不落空视频资产；记录可诊断的稳定失败原因（spec「视频结果不可回退字节」）。
+    projectExecutionRecord(
+      options.history,
+      record,
+      association,
+      { mediaKind: "video" },
+      "failed",
+      {
+        name: "MediaImportError",
+        message: "provider video 结果只提供字节，无法转存为稳定视频（只接受受控视频地址）",
+        code: "video-bytes-not-supported"
+      }
+    );
     return;
   }
   const stored = await readStoredBinarySourceWithRetry(options.taskStore, record.id, modelType);
   if (!stored) {
-    // 没有可转存的来源（文本任务，或结果始终未落盘）：按原样投影，不伪造结果。
-    projectExecutionRecord(options.history, record, association);
+    // 二进制任务既没有可转存来源、也没有稳定结果：不得落「无产物 succeeded」。
+    projectExecutionRecord(
+      options.history,
+      record,
+      association,
+      { mediaKind: modelType },
+      "failed",
+      {
+        name: "MediaImportError",
+        message: `provider ${modelType} 结果缺少可转存来源`,
+        code: "media-source-missing"
+      }
+    );
     return;
   }
   if (stored.kind === "media") {
@@ -372,9 +498,20 @@ export async function readStoredBinarySource(
   modelType: BinaryModelType
 ): Promise<StoredBinarySource | undefined> {
   const raw = await taskStore.find(taskKey).catch(() => null);
-  const result = raw?.result;
+  // pptask persists the execution snapshot and the display result in separate
+  // columns.  A terminal notification can race the second save, leaving only
+  // `state.record.result` at the first recovery read.  Treat that snapshot as
+  // an equally durable source; otherwise a provider byte result is projected
+  // without an asset and the retry window cannot recover it once the result
+  // column is never written (old worker versions did this on shutdown).
+  const result = raw?.result ?? readStateResult(raw?.state);
   if (isGenerationStableMediaResult(result)) return { kind: "media", media: result.media };
   return bytesFromResult(result, modelType);
+}
+
+function readStateResult(state: unknown): unknown {
+  if (!isRecord(state) || !isRecord(state.record)) return undefined;
+  return state.record.result;
 }
 
 /** 从 durable task store 的原始 result 恢复首份二进制字节与类型（重启终态对账也用它）。 */
@@ -397,9 +534,10 @@ function bytesFromResult(result: unknown, modelType: BinaryModelType): StoredBin
       : container.images;
   if (!Array.isArray(list) || list.length === 0) return undefined;
 
-  const bytes = toUint8Array(list[0]);
+  const maxBytes = maxBytesFor(modelType);
+  const bytes = toUint8Array(list[0], maxBytes);
   if (!bytes || bytes.byteLength === 0) return undefined;
-  if (bytes.byteLength > maxBytesFor(modelType)) return undefined;
+  if (bytes.byteLength > maxBytes) return undefined;
 
   return {
     kind: "bytes",
@@ -407,6 +545,31 @@ function bytesFromResult(result: unknown, modelType: BinaryModelType): StoredBin
     contentType: readProviderContentType(result, modelType),
     modelType
   };
+}
+
+/**
+ * pptask normalizes provider audio/image bytes into a JSON-safe descriptor:
+ * `{ type: "base64", data, mediaType }`.  Older records used raw Uint8Array
+ * (or its JSON `{ "0": n, ... }` form).  Accept both at the durable boundary;
+ * otherwise a valid WAV/MP3 is reported as "no transferable source".
+ */
+export function bytesFromBase64Descriptor(value: unknown, maxBytes = Number.POSITIVE_INFINITY): { bytes: Uint8Array; mediaType?: string } | null {
+  if (!isRecord(value) || value.type !== "base64" || typeof value.data !== "string" || value.data.length === 0) return null;
+  const encoded = value.data;
+  // Reject before allocation: base64 expands 3 bytes to 4 chars.  Buffer.from
+  // silently ignores malformed tails, so also require canonical alphabet,
+  // padding and a byte-for-byte round trip.
+  if (Number.isFinite(maxBytes) && encoded.length > 4 * Math.ceil(maxBytes / 3)) return null;
+  if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return null;
+  const mediaType = typeof value.mediaType === "string" ? value.mediaType : undefined;
+  try {
+    const decoded = Buffer.from(encoded, "base64");
+    if (decoded.byteLength === 0 || decoded.byteLength > maxBytes) return null;
+    if (decoded.toString("base64") !== encoded) return null;
+    return { bytes: new Uint8Array(decoded.buffer, decoded.byteOffset, decoded.byteLength), mediaType };
+  } catch {
+    return null;
+  }
 }
 
 function maxBytesFor(modelType: BinaryModelType): number {
@@ -423,6 +586,13 @@ function defaultContentTypeFor(modelType: BinaryModelType): string {
 
 /** 从原始 provider result 的 providerMetadata 读取媒体类型（归档时也要用它定 contentType）。 */
 export function readProviderContentType(raw: unknown, modelType: BinaryModelType): string {
+  const container = isRecord(raw) ? (raw as Record<string, unknown>) : undefined;
+  const direct = container
+    ? (modelType === "image" ? container.images : modelType === "audio" ? container.audios : container.videos)
+    : undefined;
+  const directFirst = Array.isArray(direct) ? direct[0] : undefined;
+  const directMediaType = isRecord(directFirst) ? directFirst.mediaType : undefined;
+  if (typeof directMediaType === "string" && directMediaType.startsWith(`${modelType}/`)) return directMediaType;
   const metadata = isRecord(raw) ? (raw as { providerMetadata?: unknown }).providerMetadata : undefined;
   if (isRecord(metadata)) {
     for (const entry of Object.values(metadata)) {
@@ -441,7 +611,9 @@ export function readProviderContentType(raw: unknown, modelType: BinaryModelType
   return defaultContentTypeFor(modelType);
 }
 
-function toUint8Array(value: unknown): Uint8Array | null {
+function toUint8Array(value: unknown, maxBytes: number): Uint8Array | null {
+  const descriptor = bytesFromBase64Descriptor(value, maxBytes);
+  if (descriptor) return descriptor.bytes;
   if (value instanceof Uint8Array) return value;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (ArrayBuffer.isView(value)) {

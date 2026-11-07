@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { findAdaptiveOption } from "@woohaa3/contracts";
-import { buildChatBody, buildGenerateBody, describeGrsaiModel, grsaiInputSchema } from "../src/schema.js";
+import { buildChatBody, buildGenerateBody, describeGrsaiModel, grsaiInputSchema, grsaiVideoResolutions } from "../src/schema.js";
 import type { GrsaiModel } from "../src/discovery.js";
 
 const image: GrsaiModel = { id: "nano-banana-2", kind: "image", title: "nano-banana-2" };
 const video: GrsaiModel = { id: "minimax-h3", kind: "video", title: "minimax-h3" };
+const agnesVideo: GrsaiModel = { id: "agnes-video-2.5", kind: "video", title: "agnes-video-2.5" };
 const text: GrsaiModel = { id: "gpt-5.5", kind: "language", title: "gpt-5.5" };
 
 describe("grsai 输入表单", () => {
@@ -37,6 +38,18 @@ describe("grsai 输入表单", () => {
     expect(videoProperties.resolution).toMatchObject({ title: "分辨率", "x-pptask-control": "resolution" });
     expect(videoProperties.resolution?.default).toBeUndefined();
   });
+
+  it("视频分辨率按 grsai 模型表取值，agnes 不暴露 minimax 的 768p", () => {
+    expect(grsaiVideoResolutions("minimax-h3")).toEqual(["480p", "768p", "1080p"]);
+    expect(grsaiVideoResolutions("agnes-video-2.5")).toEqual(["720p", "1080p", "2k"]);
+    const properties = describeGrsaiModel({ id: "agnes-video-2.5", kind: "video", title: "agnes-video-2.5" })
+      .inputSchema?.properties as Record<string, Record<string, unknown>>;
+    expect(properties.resolution?.enum).toEqual([
+      { value: "720p", label: "720p" },
+      { value: "1080p", label: "1080p" },
+      { value: "2k", label: "2k" }
+    ]);
+  });
 });
 
 describe("grsai 请求体", () => {
@@ -65,6 +78,11 @@ describe("grsai 请求体", () => {
         resolution: "1080p",
         duration: 8
       });
+  });
+
+  it("agnes 视频发送模型表声明的 1080p 值", () => {
+    expect(buildGenerateBody(agnesVideo, { prompt: "pan", aspectRatio: "16:9", resolution: "1080p", duration: 5 }))
+      .toEqual({ model: "agnes-video-2.5", prompt: "pan", replyType: "async", aspectRatio: "16:9", resolution: "1080p", duration: 5 });
   });
 
   it("文本走 Chat Completions，系统提示词与参考图都归位", () => {

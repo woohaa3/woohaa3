@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { ExecutionRecord } from "@sdppp/pptask-worker-server/history";
 import type { PptaskTaskStore } from "@sdppp/pptask-worker-server";
 import type { MediaMetadata } from "@woohaa3/contracts";
-import { materializeBinaryResult } from "../src/worker/media-materialization.js";
+import { materializeBinaryBytesFromStore, materializeBinaryResult } from "../src/worker/media-materialization.js";
 import type { TaskAssociation, TaskRuntimeOptions } from "../src/worker/types.js";
 import type { SqliteTaskHistoryRepository } from "../src/repository/history-repository.js";
 
@@ -46,7 +46,7 @@ function record(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   };
 }
 
-function harness(options: { rawResult?: Record<string, unknown>; urlError?: Error }) {
+function harness(options: { rawResult?: Record<string, unknown> | null; rawState?: Record<string, unknown>; urlError?: Error }) {
   const imports: Array<{ kind: "url" | "bytes"; input: Record<string, unknown> }> = [];
   const logs: Array<Record<string, unknown>> = [];
   const historyUpserts: Array<Record<string, unknown>> = [];
@@ -86,7 +86,8 @@ function harness(options: { rawResult?: Record<string, unknown>; urlError?: Erro
       createdAt: new Date("2026-10-22T07:42:05.000Z"),
       updatedAt: new Date("2026-10-22T07:42:20.000Z"),
       context: { canvasId: "canvas-1", nodeId: "node-1", runId: "run-fallback", jobId: "job-1" },
-      ...(options.rawResult ? { result: options.rawResult } : { result: {} })
+      ...(options.rawResult !== undefined ? (options.rawResult === null ? {} : { result: options.rawResult }) : { result: {} }),
+      ...(options.rawState ? { state: options.rawState } : {})
     })
   } as unknown as PptaskTaskStore;
   const runtime: TaskRuntimeOptions = {
@@ -124,6 +125,20 @@ describe("URL 转存失败后的字节回退", () => {
     );
   });
 
+  it("只有 worker 快照含字节时也能恢复媒体（兼容终态 save 竞态）", async () => {
+    const { runtime, imports, historyUpserts, association } = harness({
+      rawResult: null,
+      rawState: { record: { result: { images: [PNG_BYTES] } } }
+    });
+    await materializeBinaryBytesFromStore(runtime, record(), association, "image");
+
+    expect(imports.map((call) => call.kind)).toEqual(["bytes"]);
+    expect(historyUpserts.at(-1)).toMatchObject({
+      state: "succeeded",
+      result: { mediaKind: "image", storageKey: IMAGE_KEY }
+    });
+  });
+
   it("记录里已是稳定媒体引用（落库前已归档）→ verify-and-adopt，不再 importBytes", async () => {
     const { runtime, imports, historyUpserts, association } = harness({
       rawResult: {
@@ -159,6 +174,23 @@ describe("URL 转存失败后的字节回退", () => {
     expect(historyUpserts.at(-1)).toMatchObject({ state: "succeeded", result: { storageKey: AUDIO_KEY } });
   });
 
+  it("音频：pptask base64 描述符 → 按 audio/wav 转存字节", async () => {
+    const WAV = Buffer.from([82, 73, 70, 70, 4, 0, 0, 0, 87, 65, 86, 69]);
+    const { runtime, imports, historyUpserts, association } = harness({
+      rawResult: { audios: [{ type: "base64", data: WAV.toString("base64"), mediaType: "audio/wav" }] }
+    });
+    await materializeBinaryResult(runtime, record({ modelType: "audio" }), association, {
+      kind: "url",
+      url: "https://provider.example/out.wav",
+      modelType: "audio"
+    });
+
+    expect(imports.map((call) => call.kind)).toEqual(["url", "bytes"]);
+    expect(imports[1].input).toMatchObject({ contentType: "audio/wav" });
+    expect(Buffer.from(String(imports[1].input.bytesBase64), "base64")).toEqual(WAV);
+    expect(historyUpserts.at(-1)).toMatchObject({ state: "succeeded", result: { storageKey: AUDIO_KEY } });
+  });
+
   it("视频：不回退字节，仍落 failed（大对象只接受地址）", async () => {
     const { runtime, imports, historyUpserts, association } = harness({
       rawResult: { videos: [PNG_BYTES] }
@@ -176,6 +208,21 @@ describe("URL 转存失败后的字节回退", () => {
     });
   });
 
+  it("视频：即使 durable 记录里只有 bytes，也不走字节回退，落 failed", async () => {
+    const { runtime, imports, historyUpserts, association } = harness({
+      rawResult: { videos: [PNG_BYTES] }
+    });
+    await materializeBinaryBytesFromStore(runtime, record({ modelType: "video" }), association, "video");
+
+    expect(imports).toEqual([]);
+    expect(historyUpserts.at(-1)).toMatchObject({
+      state: "failed",
+      result: { mediaKind: "video" },
+      error: { name: "MediaImportError", code: "video-bytes-not-supported" }
+    });
+    expect(historyUpserts.at(-1)).not.toHaveProperty("result.storageKey");
+  });
+
   it("图像：URL 失败且记录里没有字节 → 保持 MediaImportError（不伪造成功）", async () => {
     const { runtime, imports, logs, historyUpserts, association } = harness({ rawResult: { images: [] } });
     await materializeBinaryResult(runtime, record(), association, {
@@ -187,7 +234,7 @@ describe("URL 转存失败后的字节回退", () => {
     expect(imports.map((call) => call.kind)).toEqual(["url"]);
     expect(historyUpserts.at(-1)).toMatchObject({
       state: "failed",
-      error: { name: "MediaImportError", message: "provider image 结果转存失败" }
+      error: { name: "MediaImportError", message: expect.stringContaining("provider image 结果转存失败") }
     });
     expect(logs.map((event) => event.event)).toEqual(
       expect.arrayContaining(["media-output-import-bytes-unavailable", "media-output-import-failed"])

@@ -19,7 +19,7 @@ import { checkProtocolVersion,
   hashStorageKeyForLog,
   checkModelCapability,
   containsWoohaa3CanvasMentionToken,
-  validateAgainstSchema,
+  resolveModelParameters,
   sameModelInteraction,
   WOOHAA3_PROTOCOL_VERSION,
   type CanvasTaskCatalog,
@@ -48,6 +48,8 @@ export type TaskApiDependencies = {
     conflict?: boolean;
     /** 参考输入签名失败（在 provider 调用前失败）。 */
     mediaError?: string;
+    /** 模型参数 schema 拒绝（缺参/越界）；调用方按 400 返回稳定 code。 */
+    parameterError?: { code: "missing-parameter" | "invalid-parameter"; message: string };
   }>;
   cancel: (workerTaskKey: string) => Promise<TaskExecutionState | null>;
   status: (workerTaskKey: string) => Promise<TaskExecutionDetail | undefined>;
@@ -142,7 +144,7 @@ async function handleSubmit(
     sendError(res, 400, "malformed-request", decoded.message);
     return true;
   }
-  const request = decoded.value;
+  let request = decoded.value;
 
   const catalog = await deps.resolveCatalog();
   if (!catalog.available) {
@@ -170,15 +172,22 @@ async function handleSubmit(
     return true;
   }
 
-  // 受限参数 schema 校验（change: 2026-10-04-...，任务 3.4 / design D4）：
-  // 按 catalog 声明的 inputSchema 校验参数；prompt 是独立请求字段，校验时并入。
-  const schemaCheck = validateAgainstSchema({ prompt: request.prompt, ...request.parameters }, model.inputSchema);
-  if (!schemaCheck.ok) {
-    const first = schemaCheck.errors[0];
-    log({ event: "task-submit", status: 400, code: "config-invalid", taskKey: request.workerTaskKey });
-    sendError(res, 400, "malformed-request", `参数不符合模型 schema：${first ? `${first.path} ${first.message}` : "非法参数"}`);
+  // 模型参数 schema 校验 + 默认值合并（change: 2026-11-06-guard-video-generation-inputs）：
+  // 与前端 Host、Canvas Service 共用同一份纯函数。错误带字段名与允许范围；默认值在调用
+  // submit / provider 之前就进入请求，避免「界面显示 720p，请求里却没有 resolution」。
+  const guarded = resolveModelParameters(
+    { modelType: model.modelType, inputSchema: model.inputSchema, defaultInput: model.defaultInput },
+    request.parameters,
+    { prompt: request.prompt }
+  );
+  if (guarded.issues.length > 0) {
+    const issue = guarded.issues[0]!;
+    const code = issue.kind === "missing" ? "missing-parameter" : "invalid-parameter";
+    log({ event: "task-submit", status: 400, code, taskKey: request.workerTaskKey });
+    sendError(res, 400, code, issue.message);
     return true;
   }
+  request = { ...request, parameters: guarded.parameters };
 
   // 模型级 prompt 要求（任务 3.4 / design D4）：required 必须非空；optional/none 允许纯素材。
   const promptRequirement = model.promptRequirement ?? "required";
@@ -232,6 +241,13 @@ async function handleSubmit(
   if (outcome.conflict) {
     log({ event: "task-submit", status: 409, code: "key-reused", taskKey: request.workerTaskKey });
     sendError(res, 409, "key-reused", "相同 workerTaskKey 使用了不同 payload");
+    return true;
+  }
+
+  // 模型参数 schema 拒绝：请求可修正，返回 400 与稳定 code，不触发 provider。
+  if (outcome.parameterError) {
+    log({ event: "task-submit", status: 400, code: outcome.parameterError.code, taskKey: request.workerTaskKey });
+    sendError(res, 400, outcome.parameterError.code, outcome.parameterError.message);
     return true;
   }
 

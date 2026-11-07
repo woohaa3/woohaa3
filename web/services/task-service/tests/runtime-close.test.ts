@@ -134,7 +134,10 @@ describe("runtime.close 等待在飞媒体转存", () => {
     const startedAt = Date.now();
     await runtime.close();
     expect(Date.now() - startedAt).toBeLessThan(2_000);
-    expect(h.records).toHaveLength(0);
+    // 停机时只剩「媒体准备中」的非终态记录；留给下次启动的对账，绝不提前写 succeeded。
+    expect(h.records).toHaveLength(1);
+    expect(h.records[0]).toMatchObject({ taskKey: "run-1", state: "running", result: { mediaState: "materializing" } });
+    expect(h.records.some((record) => record.state === "succeeded")).toBe(false);
     expect(h.logs.map((event) => event.event)).toContain("runtime-shutdown-materialization-timeout");
   });
 });

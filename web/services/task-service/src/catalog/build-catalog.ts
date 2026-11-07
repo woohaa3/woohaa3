@@ -16,6 +16,7 @@ import { DEFAULT_TASK_TIMEOUT_MS,
   GENERIC_MODEL_INTERACTION_VERSION,
   isGenerationModelCapabilityFacts,
   normalizeInputBindings,
+  normalizeReferencePolicy,
   referenceInputCapabilityFromDescription,
   type CanvasTaskCatalog,
   type CanvasTaskCatalogModel,
@@ -96,6 +97,8 @@ function projectModel(resolved: ResolvedModel, description: DescribedModel): Can
     defaultInput: description.defaultInput ?? {},
     // 唯一输入契约：bindings。
     bindings,
+    // 模型级身份参考策略；缺省 optional，节点设置优先。
+    referencePolicy: normalizeReferencePolicy(description.referencePolicy),
     ...(capabilityFacts ? { capabilityFacts } : {}),
     taskTimeoutMs: resolved.taskTimeoutMs ?? DEFAULT_TASK_TIMEOUT_MS[resolved.modelType],
     // 模型级 prompt 要求与取消能力（change: 2026-10-04-...，任务 3.4 / design D4/D6）。

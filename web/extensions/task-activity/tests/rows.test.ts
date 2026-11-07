@@ -53,6 +53,23 @@ describe("任务记录适配器", () => {
     expect(done.actions.close).toBe(true);
   });
 
+  it("provider 已产出、转存未完成时显示媒体准备中且仍不可关闭", () => {
+    const row = adaptTaskRow(
+      task({
+        taskKey: "t",
+        runId: "r",
+        nodeId: "n",
+        state: "running",
+        modelType: "video",
+        result: { mediaKind: "video", mediaState: "materializing" }
+      })
+    );
+    expect(row.status).toBe("媒体准备中");
+    expect(row.tone).toBe("active");
+    expect(row.active).toBe(true);
+    expect(row.actions.close).toBe(false);
+  });
+
   it("主行优先使用注入的展示解析，缺省回退 modelKey / 模型类型 / 通用文案", () => {
     const resolved = adaptTaskRow(
       task({ taskKey: "t", runId: "r", nodeId: "n", modelKey: "gpt-image-2" }),

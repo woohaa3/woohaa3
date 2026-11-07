@@ -31,7 +31,7 @@ function canvasWith(overrides: {
       status: (overrides.status ?? "ready") as never,
       mediaKind: (overrides.mediaKind ?? "image") as never,
       createdAt: "2026-10-28T00:00:00.000Z",
-      ...(url === null ? {} : { url })
+      ...(url === null ? {} : { metadata: { storageKey: "canvas-1/asset-1.png", checksum: "a" }, url })
     }]
   } as unknown as ServerCanvas;
 }
@@ -78,9 +78,9 @@ describe("宿主默认图片聚焦目标", () => {
       },
       nodeData: { a: { outputAssetId: "asset-a" }, c: { outputAssetId: "asset-c" }, d: { outputAssetId: "asset-pending" } },
       assets: [
-        { id: "asset-a", title: "", source: "uploaded", status: "ready", mediaKind: "image", createdAt: "2026-10-28T00:00:00.000Z", url: "/api/media/x/a.png" },
-        { id: "asset-c", title: "", source: "uploaded", status: "ready", mediaKind: "image", createdAt: "2026-10-28T00:00:00.000Z", url: "/api/media/x/c.png" },
-        { id: "asset-pending", title: "", source: "uploaded", status: "generating", mediaKind: "image", createdAt: "2026-10-28T00:00:00.000Z", url: "/api/media/x/d.png" }
+        { id: "asset-a", title: "", source: "uploaded", status: "ready", mediaKind: "image", createdAt: "2026-10-28T00:00:00.000Z", url: "/api/media/x/a.png", metadata: { storageKey: "x/a.png", checksum: "a" } },
+        { id: "asset-c", title: "", source: "uploaded", status: "ready", mediaKind: "image", createdAt: "2026-10-28T00:00:00.000Z", url: "/api/media/x/c.png", metadata: { storageKey: "x/c.png", checksum: "c" } },
+        { id: "asset-pending", title: "", source: "uploaded", status: "generating", mediaKind: "image", createdAt: "2026-10-28T00:00:00.000Z", url: "/api/media/x/d.png", metadata: { storageKey: "x/d.png", checksum: "d" } }
       ]
     } as never;
     expect(imageFocusTargetIds(canvas)).toEqual(["a", "c"]);

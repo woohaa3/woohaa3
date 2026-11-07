@@ -91,6 +91,49 @@ describe("world animation script", () => {
     expect(again.json).toBe(compiled.json);
   });
 
+  it.each([false, true])("plays successive segments and holds their endpoints regardless of declaration order (reverse=%s)", reverse => {
+    const segments = [
+      { startTime: 2, endTime: 4, from: [10, 0, 1], to: [20, 0, 1] },
+      { startTime: 6, endTime: 8, from: [40, 0, 1], to: [50, 0, 1] }
+    ];
+    if (reverse) segments.reverse();
+    const source = segments.flatMap(segment => [
+      `motion.instance.tween("subject", ${JSON.stringify({ ...segment, property: "position" })});`,
+      `motion.camera.tween(${JSON.stringify({ ...segment, cameraId: "subject", property: "position" })});`
+    ]).join("\n");
+    const compiled = executeWorldAnimationScript(source, { duration: 10, loop: false });
+    if (!compiled.ok) throw new Error(compiled.message);
+    for (const [time, u] of [[0, 10], [2, 10], [3, 15], [4, 20], [5, 20], [6, 40], [7, 45], [8, 50], [10, 50]]) {
+      const sample = sampleWorldAnimation(compiled.ir, time!);
+      expect(sample.instances.get("subject")?.position).toEqual({ u, v: 0, h: 1 });
+      expect(sample.cameras.get("subject")?.position).toEqual({ u, v: 0, h: 1 });
+    }
+  });
+
+  it("uses the latest starting overlapping segment and keeps other properties and targets independent", () => {
+    const compiled = executeWorldAnimationScript([
+      'motion.camera.tween({ cameraId: "a", property: "zoom", startTime: 2, endTime: 4, from: [10], to: [20] });',
+      'motion.camera.tween({ cameraId: "a", property: "zoom", startTime: 0, endTime: 6, from: [1], to: [7] });',
+      'motion.camera.tween({ cameraId: "a", property: "position", startTime: 0, endTime: 6, from: [0, 0, 0], to: [6, 0, 0] });',
+      'motion.camera.tween({ cameraId: "b", property: "zoom", startTime: 0, endTime: 6, from: [1], to: [7] });'
+    ].join("\n"), { duration: 6, loop: false });
+    if (!compiled.ok) throw new Error(compiled.message);
+    const atThree = sampleWorldAnimation(compiled.ir, 3);
+    expect(atThree.cameras.get("a")).toEqual({ zoom: 15, position: { u: 3, v: 0, h: 0 } });
+    expect(atThree.cameras.get("b")?.zoom).toBe(4);
+    expect(sampleWorldAnimation(compiled.ir, 5).cameras.get("a")?.zoom).toBe(20);
+  });
+
+  it("keeps the last declaration when segments start together, including before their start", () => {
+    const compiled = executeWorldAnimationScript([
+      'motion.camera.tween({ cameraId: "a", property: "zoom", startTime: 2, endTime: 4, from: [1], to: [3] });',
+      'motion.camera.tween({ cameraId: "a", property: "zoom", startTime: 2, endTime: 4, from: [10], to: [20] });'
+    ].join("\n"), { duration: 4, loop: false });
+    if (!compiled.ok) throw new Error(compiled.message);
+    expect(sampleWorldAnimation(compiled.ir, 0).cameras.get("a")?.zoom).toBe(10);
+    expect(sampleWorldAnimation(compiled.ir, 3).cameras.get("a")?.zoom).toBe(15);
+  });
+
   it("rejects invalid tracks, unknown properties and nondeterministic scripts", () => {
     expect(executeWorldAnimationScript(
       'motion.instance.tween("actor", { property: "position", startTime: 0, endTime: 9, from: [0, 0, 0], to: [1, 0, 0], easing: "linear" });',

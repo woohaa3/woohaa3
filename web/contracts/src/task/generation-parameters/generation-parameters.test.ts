@@ -28,7 +28,7 @@ import { canvasModelCapabilities } from "../model-capabilities.js";
 import { ALIBABA_CARDS, alibabaSizePresetFor } from "./cards/image/alibaba/alibaba-cards.js";
 import { seedreamSizePresetFor } from "./cards/image/ark/seedream-cards.js";
 import { seedreamSupportsTransparentBackground } from "./cards/image/ark/seedream-spec.js";
-import { videoFamilyFor, videoPixelSize, videoRequestFields } from "../video-parameters.js";
+import { videoFamilyFor, videoFamilyParameters, videoPixelSize, videoRequestFields } from "../video-parameters.js";
 import type { CanvasTaskCatalogModel } from "../dto.js";
 
 /**
@@ -238,6 +238,51 @@ describe("音频卡片", () => {
     const format = properties.outputFormat as { enum: Array<{ value: string }> };
     expect(format.enum.map((entry) => entry.value)).toEqual(["mp3", "wav", "opus"]);
     expect(presetLimitsOf(model)).toBeUndefined();
+  });
+});
+
+describe("Agnes Video 2.5 参数描述", () => {
+  /**
+   * 现场失败：`aspectRatio is required`、`resolution is required`、
+   * 时长必须大于 4 秒且不超过 12 秒。卡片与家族必须同时给出默认值、允许值与必填。
+   */
+  it("比例 / 分辨率 / 时长都是必填，并带合法默认值", () => {
+    const { model } = composePresetCard(cardById("agnes-video-2.5"));
+    const properties = propertiesOf(model);
+
+    expect(model.inputSchema.required).toEqual(
+      expect.arrayContaining(["prompt", "aspectRatio", "resolution", "durationSeconds"])
+    );
+    expect(properties.resolution).toMatchObject({ default: "720p" });
+    expect((properties.resolution as { enum: Array<{ value: string }> }).enum.map((entry) => entry.value))
+      .toEqual(["720p", "1080p", "2k"]);
+    expect(properties.durationSeconds).toMatchObject({ minimum: 5, maximum: 12, default: 5, step: 1 });
+    expect(properties.aspectRatio).toMatchObject({ default: "16:9" });
+    expect(model.defaultInput).toMatchObject({
+      aspectRatio: "16:9",
+      resolution: "720p",
+      durationSeconds: 5
+    });
+  });
+
+  it("未拿到卡片、只按家族识别时也保留必填声明", () => {
+    const family = videoFamilyParameters("agnes-video-2.5");
+    expect(family?.required).toEqual(["aspectRatio", "resolution", "durationSeconds"]);
+    expect(family?.defaults).toMatchObject({ aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 });
+  });
+
+  it("2k 能换算成偶数像素尺寸", () => {
+    expect(videoPixelSize("16:9", "2k")).toBe("2560x1440");
+  });
+
+  it("请求保留上游要求的角度比例字段与档位 size", () => {
+    expect(
+      videoRequestFields("agnes-video-2.5", {
+        aspectRatio: "16:9",
+        resolution: "720p",
+        durationSeconds: 5
+      })
+    ).toEqual({ seconds: 5, aspect_ratio: "16:9", size: "720P" });
   });
 });
 

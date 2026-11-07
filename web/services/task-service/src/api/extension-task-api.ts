@@ -24,6 +24,7 @@ import {
   hashStorageKeyForLog,
   checkModelCapability,
   containsWoohaa3CanvasMentionToken,
+  resolveModelParameters,
   type CanvasTaskCatalog,
   type ProtocolErrorCode,
   type TaskExecutionDetail,
@@ -60,6 +61,7 @@ export type TaskExtensionTaskApiDependencies = {
     state: string;
     conflict?: boolean;
     mediaError?: string;
+    parameterError?: { code: "missing-parameter" | "invalid-parameter"; message: string };
   }>;
   cancel: (workerTaskKey: string) => Promise<string | null>;
   status: (workerTaskKey: string) => Promise<TaskExecutionDetail | undefined>;
@@ -169,7 +171,7 @@ async function handleSubmit(
     sendError(res, 400, "malformed-request", decoded.message);
     return true;
   }
-  const request = decoded.value;
+  let request = decoded.value;
 
   const catalog = await deps.resolveCatalog();
   if (!catalog.available) {
@@ -186,6 +188,18 @@ async function handleSubmit(
     sendError(res, 400, capability.code, capability.message);
     return true;
   }
+  // 模型参数 schema 与默认值（change: 2026-11-06-guard-video-generation-inputs）。
+  const guarded = resolveModelParameters(
+    { modelType: model.modelType, inputSchema: model.inputSchema, defaultInput: model.defaultInput },
+    request.parameters,
+    { prompt: request.prompt }
+  );
+  if (guarded.issues.length > 0) {
+    const issue = guarded.issues[0]!;
+    sendError(res, 400, issue.kind === "missing" ? "missing-parameter" : "invalid-parameter", issue.message);
+    return true;
+  }
+  request = { ...request, parameters: guarded.parameters };
   if (containsWoohaa3CanvasMentionToken(request.prompt)) {
     sendError(res, 400, "malformed-request", "任务 prompt 含未编译的内部 mention token");
     return true;
@@ -220,6 +234,10 @@ async function handleSubmit(
   }
   if (outcome.conflict) {
     sendError(res, 409, "key-reused", "相同 workerTaskKey 使用了不同 payload");
+    return true;
+  }
+  if (outcome.parameterError) {
+    sendError(res, 400, outcome.parameterError.code, outcome.parameterError.message);
     return true;
   }
   if (outcome.mediaError) {

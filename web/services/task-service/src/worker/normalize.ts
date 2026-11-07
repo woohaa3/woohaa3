@@ -195,15 +195,17 @@ export function safeProviderMessage(error: unknown): string {
   return "任务执行失败";
 }
 
-const SECRET_PATTERNS = [
-  /(bearer\s+)[^\s"']+/gi,
-  /(authorization["':\s]+)[^\s"',]+/gi,
-  /("?(?:api[_-]?key|access[_-]?token|secret[_-]?key)"?\s*[:=]\s*)"?[^"\s,]+"?/gi
+const SECRET_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/(bearer\s+)[^\s"']+/gi, "$1***"],
+  [/(authorization["':\s]+)[^\s"',]+/gi, "$1***"],
+  [/("?(?:api[_-]?key|access[_-]?token|secret[_-]?key)"?\s*[:=]\s*)"?[^"\s,]+"?/gi, "$1***"],
+  // provider 临时/签名地址不得进入日志：只留占位，保留消息里的 HTTP 状态等可诊断信息。
+  [/https?:\/\/[^\s"'<>]+/gi, "[url]"]
 ];
 
 export function stripSecrets(message: string): string {
   let output = message;
-  for (const pattern of SECRET_PATTERNS) output = output.replace(pattern, "$1***");
+  for (const [pattern, replacement] of SECRET_PATTERNS) output = output.replace(pattern, replacement);
   return output.slice(0, 500);
 }
 

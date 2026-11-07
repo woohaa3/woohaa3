@@ -172,6 +172,26 @@ describe("withModelFamily · 视频", () => {
     const original = serverGenericModel("some-unknown-video", "video");
     expect(withModelFamily(original)).toBe(original);
   });
+
+  it("agnes-video-2.5 补齐必填、默认值与允许值", () => {
+    const model = withModelFamily(serverGenericModel("agnes-video-2.5", "video"));
+    const schema = model.inputSchema!;
+    const properties = schema.properties as Record<string, Record<string, unknown>>;
+
+    expect(schema.required).toEqual(
+      expect.arrayContaining(["prompt", "aspectRatio", "resolution", "durationSeconds"])
+    );
+    expect(properties.durationSeconds).toMatchObject({ minimum: 5, maximum: 12, default: 5 });
+    expect(properties.aspectRatio).toMatchObject({ default: "16:9" });
+    expect(
+      (properties.resolution!.enum as Array<{ value: string }>).map((entry) => entry.value)
+    ).toEqual(["720p", "1080p", "2k"]);
+    expect(model.defaultInput).toMatchObject({
+      aspectRatio: "16:9",
+      resolution: "720p",
+      durationSeconds: 5
+    });
+  });
 });
 
 describe("withModelFamily · 音频", () => {

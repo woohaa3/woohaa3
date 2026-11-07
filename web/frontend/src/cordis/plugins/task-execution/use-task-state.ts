@@ -36,6 +36,25 @@ export function useRunStateBusy(canvasId: string, nodeId: string): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+/**
+ * 节点当前是否处于「媒体准备中」。
+ *
+ * 复用统一 run-state 读模型里的 `mediaState`（由 task.activity 的 materializing 结果投影），
+ * 不新增第二份任务状态；服务缺失时返回 false。
+ */
+export function useNodeMediaPreparing(canvasId: string, nodeId: string): boolean {
+  const service = useOptionalService("runState") as RunStateService | undefined;
+  const subscribe = useCallback(
+    (listener: () => void) => service?.subscribe(listener) ?? (() => undefined),
+    [service]
+  );
+  const getSnapshot = useCallback(
+    () => service?.getNodeSummary(canvasId, nodeId)?.active?.mediaState === "materializing",
+    [service, canvasId, nodeId]
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
 /** 某个 `{ nodeId, modelKey }` 的未提交草稿；返回引用稳定。 */
 export function useNodeDraft(
   nodeId: string | null,

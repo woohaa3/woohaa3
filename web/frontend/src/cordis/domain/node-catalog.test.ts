@@ -17,14 +17,18 @@ describe("node-catalog", () => {
       "image",
       "model3d",
       "video",
-      "audio"
+      "audio",
+      "character-series",
+      "product-series"
     ]);
     expect(NODE_TEMPLATES.map((entry) => entry.label)).toEqual([
       "文本",
       "图片",
       "3D 模型",
       "视频",
-      "音频"
+      "音频",
+      "角色系列",
+      "商品系列"
     ]);
     expect(findNodeTemplate("model")?.nodeType).toBe("model3d");
     expect(findNodeTemplate("model3d")?.nodeType).toBe("model3d");
@@ -39,7 +43,9 @@ describe("node-catalog", () => {
       "image",
       "model3d",
       "video",
-      "audio"
+      "audio",
+      "character-series",
+      "product-series"
     ]);
     expect(findNodeTemplate("shot")).toBeNull();
     expect(findNodeTemplate("generate")).toBeNull();
@@ -54,6 +60,21 @@ describe("node-catalog", () => {
     expect(defaultNodeDataForType("audio")).toEqual({ taskKind: "audio-generation", taskStatus: "idle" });
     // 已下线的旧 generate 类型不再有默认 nodeData（模型定义只走自包含 3D 节点）。
     expect(defaultNodeDataForType("generate")).toBeUndefined();
+  });
+
+  it("角色/商品系列预设写入 identity-required，普通图片节点仍 optional", () => {
+    expect(defaultNodeDataForType("character-series")).toMatchObject({
+      taskKind: "image-generation",
+      referencePolicy: "identity-required"
+    });
+    expect(defaultNodeDataForType("product-series")).toMatchObject({
+      referencePolicy: "identity-required"
+    });
+    expect(defaultNodeDataForType("image")?.referencePolicy).toBeUndefined();
+    expect(connectNodeDataFor({ id: "n1", type: "image" }, "character-series")).toMatchObject({
+      referencePolicy: "identity-required",
+      inputMapping: [{ sourceNodeId: "n1" }]
+    });
   });
 
   it("拉线创建的 nodeData 带指向源节点的输入映射", () => {

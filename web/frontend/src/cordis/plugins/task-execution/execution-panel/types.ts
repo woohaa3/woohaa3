@@ -22,6 +22,8 @@ export type ExecutionPanelStatus =
 	| "idle"
 	| "pending"
 	| "processing"
+	/** provider 已产出、正在转存稳定媒体（change: 2026-11-06-fix-media-output-readiness）。 */
+	| "materializing"
 	| "successed"
 	| "failed";
 
@@ -113,6 +115,8 @@ export interface ExecutionPanelData {
 	title?: string;
 	panelPrompt?: string;
 	taskStatus?: ExecutionPanelStatus;
+	/** 视频节点从未提交过任务：显示「未提交 · 待配置」而不是空状态。 */
+	unsubmitted?: boolean;
 	progress?: number;
 	errorMessage?: string;
 	parameters?: Record<string, unknown>;

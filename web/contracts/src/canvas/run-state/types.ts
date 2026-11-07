@@ -110,6 +110,12 @@ export type CanvasOperationRecord = {
   owner: RunLifecycleOwner;
   /** 0..100；仅非终态有意义。 */
   progress?: number;
+  /**
+   * provider 已产出、正在转存稳定媒体（change: 2026-11-06-fix-media-output-readiness）。
+   *
+   * 仅非终态服务端操作会携带；节点据此显示「媒体准备中」并保持成功入口禁用。
+   */
+  mediaState?: "materializing";
   /** 安全错误摘要（不含堆栈/凭据/本机路径）。 */
   error?: string;
   /** 本地提交被拒（网关拒绝等）；不伪造 canonical 状态。 */

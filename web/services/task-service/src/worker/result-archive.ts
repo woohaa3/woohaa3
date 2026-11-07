@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import { CANVAS_TASK_LIMITS, isGenerationStableMediaResult } from "@woohaa3/contracts";
 import type { MediaClient } from "../clients/media-client.js";
 import type { TaskPayloadSnapshot, TaskPayloadTransform } from "../repository/sqlite-task-store.js";
-import { readProviderContentType } from "./media-materialization.js";
+import { bytesFromBase64Descriptor, readProviderContentType } from "./media-materialization.js";
 import { safeProviderMessage } from "./normalize.js";
 import type { BinaryModelType } from "./types.js";
 
@@ -152,6 +152,10 @@ function withArchivedResult(result: unknown, media: ArchivedMedia): unknown {
   delete rest.images;
   delete rest.audios;
   delete rest.videos;
+  // pptask mirrors the first audio as a top-level base64 string (`audio`) in addition
+  // to `audios`.  Keeping it would retain the full payload in SQLite even after the
+  // descriptor is archived, so remove the duplicate together with the list.
+  delete rest.audio;
   rest.media = media;
   return rest;
 }
@@ -168,7 +172,7 @@ function firstMediaBytes(result: unknown, kind: BinaryModelType): Uint8Array | u
   const key = kind === "image" ? "images" : kind === "audio" ? "audios" : "videos";
   const list = result[key];
   if (!Array.isArray(list) || list.length !== 1) return undefined;
-  return asBytes(list[0]);
+  return asBytes(list[0], maxBytesFor(kind));
 }
 
 /** 内容摘要只用于进程内去重（同一任务 state/result 各一份同样字节）。 */
@@ -176,7 +180,9 @@ function digestBytes(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function asBytes(value: unknown): Uint8Array | undefined {
+function asBytes(value: unknown, maxBytes: number): Uint8Array | undefined {
+  const descriptor = bytesFromBase64Descriptor(value, maxBytes);
+  if (descriptor) return descriptor.bytes;
   if (value instanceof Uint8Array) return value;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);

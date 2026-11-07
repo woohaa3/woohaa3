@@ -50,6 +50,16 @@ describe("put / head / get 往返", () => {
     expect(object.contentType).toBe("image/png");
   });
 
+  it("后端重建后仍能读取已落盘媒体", async () => {
+    const key = "media/generation-outputs/restart.png";
+    await backend.put(key, Uint8Array.of(7, 8, 9), "image/png");
+
+    // 模拟宿主重启：第二个 backend 只复用同一持久目录，不复用第一个实例。
+    const restarted = createLocalBackend({ root });
+    expect(await restarted.head(key)).toEqual({ size: 3, contentType: "image/png" });
+    expect(Array.from((await restarted.get(key)).bytes)).toEqual([7, 8, 9]);
+  });
+
   it("对象落在磁盘的 `${root}/${key}`，并写出 sidecar", async () => {
     await backend.put("media/sha256-abc.png", Uint8Array.of(9, 8), "image/png");
 

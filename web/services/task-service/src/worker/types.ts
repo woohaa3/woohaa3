@@ -40,6 +40,8 @@ export type TaskRuntimeOptions = {
     pending?: number;
     /** 采纳/落库走的是哪条路（locator 还是稳定键）；排障时先看这个。 */
     via?: string;
+    /** 媒体转存涉及的模型类别（安全枚举，不含 prompt/URL）。 */
+    modelType?: string;
   }) => void;
   /** 注入 worker server（测试用）。 */
   server?: PptaskWorkerServer;

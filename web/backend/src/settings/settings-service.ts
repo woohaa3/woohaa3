@@ -175,6 +175,17 @@ function repoWebRoot(cwd: string): string {
     const webDir = path.join(dir, "web");
     const hostModule = path.join(dir, "scripts", "lib", "extension-host.mjs");
     if (fs.existsSync(webDir) && fs.existsSync(hostModule)) return dir;
+    // The parent repository keeps the public client in a `client` submodule.
+    // Backend processes are sometimes started from that parent (for example an
+    // isolated review harness), so the ordinary upward walk would otherwise
+    // miss `client/web/woohaa.config.yml` and silently fall back to defaults.
+    const clientRoot = path.join(dir, "client");
+    if (
+      fs.existsSync(path.join(clientRoot, "web")) &&
+      fs.existsSync(path.join(clientRoot, "scripts", "lib", "extension-host.mjs"))
+    ) {
+      return clientRoot;
+    }
     // 已在 `web/` 内部（`web/backend`）：退到它的父目录再找。
     const parent = path.dirname(dir);
     if (parent === dir) return path.resolve(cwd);

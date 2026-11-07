@@ -17,6 +17,7 @@
  * 因此新增一个同家族的新版本 = 加一份卡片、写清它的数字，不用改 Provider。
  */
 import type { GenerationModelLimits } from "../model-capabilities.js";
+import type { CanvasReferencePolicy } from "../reference-policy.js";
 import type { SeedreamSizePreset } from "./cards/image/ark/seedream-spec.js";
 import type { AlibabaSizePreset } from "./cards/image/alibaba/alibaba-spec.js";
 import type { PresetModelType } from "./types.js";
@@ -27,7 +28,7 @@ import type { PresetModelType } from "./types.js";
  * **只登记我们真的会适配的**：加一个厂商就要能维护它的文档与值域，列进来却不维护，
  * 只会让「模型选择器里有一个永远没人更新的卡片」。
  */
-export type PresetVendor = "ark" | "openai" | "google" | "minimax" | "alibaba" | "generic";
+export type PresetVendor = "ark" | "openai" | "google" | "minimax" | "alibaba" | "agnes" | "generic";
 
 export type PresetCard = {
   /** 稳定标识，只用于诊断与展示；同一类型内唯一。 */
@@ -54,6 +55,13 @@ export type PresetCard = {
   modelType: PresetModelType;
   /** 一句话说明这张卡片的差异，展示在模型选择器里。 */
   note?: string;
+  /**
+   * 身份一致性参考策略；缺省 optional。
+   *
+   * 这是模型级配置来源，节点设置 `nodeData.referencePolicy` 优先。身份敏感模型卡片
+   * （角色/商品系列常用的参考编辑模型）可声明 `identity-required`，不在面板里硬编码。
+   */
+  referencePolicy?: CanvasReferencePolicy;
   /** 保留的语义键；未列出的即被剪枝。 */
   keeps: readonly string[];
   /** 在类型预设之上收窄的值域 / 默认值 / 联动隐藏。 */

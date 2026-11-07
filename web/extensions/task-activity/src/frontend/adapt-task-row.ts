@@ -4,7 +4,7 @@
  * 纯函数：不读时间、不订阅、不写 store。「是否进行中」用 `isActiveTaskState` 判定，这是任务
  * 来源语义，不上提到面板层。主行文案优先用装配注入的 `resolveTaskDisplay`，缺省回退 modelKey。
  */
-import { isActiveTaskState, type CanvasTaskActivity } from "@woohaa3/contracts";
+import { isActiveTaskState, taskMediaReadiness, type CanvasTaskActivity } from "@woohaa3/contracts";
 import type { ActivityFeedItem } from "./store.js";
 import {
   TASK_STATE_LABELS,
@@ -34,6 +34,8 @@ export function taskRowKey(item: Pick<ActivityFeedItem, "runId">): string {
 
 export function adaptTaskRow(item: ActivityFeedItem, capabilities: ActivityRowCapabilities = {}): ActivityRow {
   const active = isActiveTaskState(item.state);
+  const readiness = taskMediaReadiness(item);
+  const preparing = readiness === "preparing";
   const display = capabilities.resolveTaskDisplay?.(item);
   const title = display?.primary ?? defaultTaskTitle(item);
   // 次行沿用既有语义：注入的展示解析优先，其次 modelKey，最后明确的兜底文案。
@@ -59,9 +61,9 @@ export function adaptTaskRow(item: ActivityFeedItem, capabilities: ActivityRowCa
     kind: "task",
     title,
     secondary,
-    status: TASK_STATE_LABELS[item.state],
+    status: preparing ? "媒体准备中" : TASK_STATE_LABELS[item.state],
     state: item.state,
-    tone: TASK_STATE_TONES[item.state],
+    tone: preparing ? "active" : TASK_STATE_TONES[item.state],
     ...(active && fractionProgress(item.progress) !== undefined ? { progress: fractionProgress(item.progress) } : {}),
     nodeId: item.nodeId,
     createdAt: item.createdAt,

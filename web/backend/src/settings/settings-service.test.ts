@@ -102,6 +102,16 @@ describe("createSettingsService", () => {
     expect(resolveSettingsFiles({ WOOHAA3_CONFIG_FILE: "/etc/custom.yml" }, subpackage).configFile).toBe("/etc/custom.yml");
   });
 
+  it("从父仓启动时仍解析 client 子模块的 web 配置", () => {
+    const parentRoot = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-parent-"));
+    dirs.push(parentRoot);
+    fs.mkdirSync(path.join(parentRoot, "client", "web"), { recursive: true });
+    fs.mkdirSync(path.join(parentRoot, "client", "scripts", "lib"), { recursive: true });
+    fs.writeFileSync(path.join(parentRoot, "client", "scripts", "lib", "extension-host.mjs"), "export {};\n");
+
+    expect(resolveSettingsFiles({}, parentRoot).configFile).toBe(path.join(parentRoot, "client", "web", "woohaa.config.yml"));
+  });
+
   it("启动时配置非法直接失败", async () => {
     const files = tempFiles();
     fs.writeFileSync(files.configFile, "telemetry:\n  local:\n    retentionDays: 0\n");
