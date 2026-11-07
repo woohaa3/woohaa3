@@ -28,6 +28,7 @@ import { registerPpserverProxy } from "./routes.js";
 import { registerAccountProxy } from "./account-routes.js";
 import { registerAnnouncementRoute } from "./announcement-route.js";
 import { registerPpserverAuthSessionRoute } from "./auth-session.js";
+import { passthroughTemplate } from "./passthrough.js";
 import { uploadPpserverReference } from "./upload.js";
 import {
   DEFAULT_PPSERVER_BASE_URL,
@@ -370,6 +371,8 @@ export function createPpserverProviderPlugin(
           };
         });
 
+        // 内部直通模板(局部修改的拼合图用,见 passthrough.ts)跟着目录一起登记,不进设置页的「接入模板」
+        templates.push(passthroughTemplate());
         catalog.templates.splice(0, catalog.templates.length, ...templates);
         registration.models.splice(0, registration.models.length, ...ppserverModelDefinitions(templates));
         log({ event: "ppserver-templates-discovered", templateCount: templates.length });

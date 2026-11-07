@@ -15,6 +15,7 @@ import type {
   CanvasRemoteService,
   CanvasScopeService,
   CanvasSession,
+  CanvasStoreFacade,
   ImageLibrarySource,
   MediaRemoteService,
   SlotsService,
@@ -24,6 +25,9 @@ import type {
 import { SIXI_SPIKE_ID } from "../shared.js";
 import { SixiShell } from "../app/SixiShell.js";
 import type { GenerateServices } from "../app/hostGenerateRunner.js";
+import type { ImageEditServices } from "../app/hostImageEditBridge.js";
+import { editableImageOf } from "../app/imageEditEntry.js";
+import { useImageEditStore } from "@/features/imageEdit/model/editStore";
 
 type ExtensionContext = Context & { slots: SlotsService; theme: ThemeService };
 
@@ -54,6 +58,46 @@ export function sixiSpikeExtension(): Plugin.Function<void> {
           for (const dispose of disposers.splice(0)) dispose();
         },
         "sixi-spike-cleanup"
+      );
+
+      /*
+       * 画布页作用域的服务,每次调用现取(渲染时它们可能还没起来)。
+       * 「独立编辑」入口与外壳里的接入点共用这一份,取不到就是 undefined,入口随之不出现。
+       */
+      const imageEditServices = (): ImageEditServices => ({
+        scope: safeGet<CanvasScopeService>(ctx, "canvasScope"),
+        session: safeGet<CanvasSession>(ctx, "canvasSession"),
+        commands: safeGet<CanvasCommandsService>(ctx, "canvasCommands"),
+        remote: safeGet<CanvasRemoteService>(ctx, "canvasRemote"),
+        catalog: safeGet<TaskCatalogService>(ctx, "taskCatalog"),
+        locate: safeGet<CanvasLocateService>(ctx, "canvasLocate"),
+        store: safeGet<CanvasStoreFacade>(ctx, "canvasState"),
+        media: safeGet<MediaRemoteService>(ctx, "mediaRemote")
+      });
+
+      // 图片节点横条上的「独立编辑」:打开四喜外壳里的编辑窗口(窗口与生成链路见 features/imageEdit)
+      disposers.push(
+        ctx.slots.register("canvas.node-action", {
+          id: "sixi-image-edit",
+          owner: SIXI_SPIKE_ID,
+          order: 22,
+          describe: ({ nodeId, nodeType, writable }) => {
+            if (nodeType !== "image") return null;
+            const { store, media } = imageEditServices();
+            if (!editableImageOf(store, media, nodeId)) return null;
+            return {
+              label: "独立编辑",
+              icon: "edit",
+              enabled: writable,
+              ...(writable ? {} : { reason: "画布当前不可写" })
+            };
+          },
+          activate: ({ nodeId }) => {
+            const { store, media } = imageEditServices();
+            const image = editableImageOf(store, media, nodeId);
+            if (image) useImageEditStore.getState().open({ nodeId, ...image });
+          }
+        })
       );
 
       // 外壳：侧栏 + 顶栏 + 四喜全部页面；「创作」路由把内容区让给宿主画布。
@@ -102,6 +146,7 @@ export function sixiSpikeExtension(): Plugin.Function<void> {
               })}
               /* 同样是非严格读:拿不到时 `null` 只让「点当前画布不跳页」与顶栏标题退化成保守行为 */
               currentCanvasId={() => safeGet<CanvasScopeService>(ctx, "canvasScope")?.canvasId() ?? null}
+              imageEditServices={imageEditServices}
             />
           )
         })

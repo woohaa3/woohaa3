@@ -31,3 +31,10 @@ export function modelGroupLabel(capabilities: Record<string, unknown> | undefine
   if (typeof category !== "string") return undefined;
   return GROUP_LABELS[category.trim().toLowerCase()];
 }
+
+/** 内部模板(扩展自己用,如局部修改的拼合直通)的运营分类;不该出现在用户的模型下拉里 */
+const INTERNAL_CATEGORY = "sixi-internal";
+
+export function isInternalModel(capabilities: Record<string, unknown> | undefined): boolean {
+  return capabilities?.category === INTERNAL_CATEGORY;
+}

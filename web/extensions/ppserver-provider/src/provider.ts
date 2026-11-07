@@ -15,6 +15,7 @@ import {
   normalizeProviderConfig,
   type HttpProviderProtocol
 } from "@sdppp/pptask/providers/shared";
+import { isPassthroughTemplate, passthroughSource, passthroughTaskId, readPassthroughTaskId } from "./passthrough.js";
 import {
   buildCreateStreamBody,
   buildTaskBody,
@@ -102,7 +103,15 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
       }
     },
     async start(context) {
-      const templateId = requireTemplate(options.catalog, context.modelId).templateId;
+      const template = requireTemplate(options.catalog, context.modelId);
+      const templateId = template.templateId;
+      if (isPassthroughTemplate(templateId)) {
+        // 内部直通模板:不调 ppserver,图片地址直接编进任务 id(见 passthrough.ts)
+        const source = passthroughSource(context.input);
+        if (!source) throw new Error("直通模板缺少图片输入");
+        const taskId = passthroughTaskId(source);
+        return { operation: { taskId }, metadata: { taskId, templateId } };
+      }
       const body = buildCreateStreamBody({
         templateId,
         payload: context.input,
@@ -121,6 +130,10 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
     async status(context) {
       const taskId = operationTaskId(context.operation);
       if (!taskId) return { state: "failed", error: "ppserver 任务缺少 taskId" };
+      const passthrough = readPassthroughTaskId(taskId);
+      if (passthrough !== undefined) {
+        return { state: "completed", output: { data: [{ url: passthrough }], raw: {} }, metadata: { cost: 0 } };
+      }
 
       const statusPayload = await postJson({
         fetchImpl: config.fetch,
@@ -180,7 +193,7 @@ export function createPpserverProvider(options: PpserverProviderOptions): Pptask
     },
     async cancel(context) {
       const taskId = operationTaskId(context.operation);
-      if (!taskId) return;
+      if (!taskId || readPassthroughTaskId(taskId) !== undefined) return;
       await postJson({
         fetchImpl: config.fetch,
         url: `${origin}${PPSERVER_CANCEL_PATH}`,

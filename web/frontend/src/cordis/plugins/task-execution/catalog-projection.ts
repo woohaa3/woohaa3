@@ -23,7 +23,7 @@ import { TASK_KIND_TO_MODEL_TYPE,
   type ReferenceInputCapability } from "@woohaa3/contracts";
 import type { NodePanelKind } from "./node-panel-registry.js";
 import { projectParameterDefaults, projectParameterFields } from "./parameter-projection.js";
-import { modelGroupLabel } from "./model-groups.js";
+import { isInternalModel, modelGroupLabel } from "./model-groups.js";
 
 /** 专用 Seedance 视频交互：core generic 投影不得把它当作普通视频模型展示。 */
 export const SEEDANCE_VIDEO_INTERACTION = "seedance-video";
@@ -72,7 +72,7 @@ export function modelsForPanel(
   panelKind: NodePanelKind
 ): CanvasTaskCatalogModel[] {
   return allModelsForPanel(catalog, panelKind).filter(
-    (model) => model.interaction.id !== SEEDANCE_VIDEO_INTERACTION
+    (model) => model.interaction.id !== SEEDANCE_VIDEO_INTERACTION && !isInternalModel(model.capabilities)
   );
 }
 

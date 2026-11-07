@@ -30,6 +30,8 @@ import { setAccountSource } from '@/api/accountSource';
 import { ppserverBasePath } from '@/config/env';
 import { setHostCanvas } from '@/app/hostCanvas';
 import { setHostGenerate } from '@/app/hostGenerate';
+import { setHostImageEdit } from '@/app/hostImageEdit';
+import { ImageEditWindow } from '@/features/imageEdit/components/ImageEditWindow';
 import { CanvasTopBar } from '@/layouts/CanvasTopBar';
 import { ROUTES } from '@/app/paths';
 import { useUiStore } from '@/stores/uiStore';
@@ -39,6 +41,7 @@ import { createHostAssetSource } from './hostAssetSource';
 import { createHostCanvasBridge } from './hostCanvasBridge';
 import { createHostGenerateBridge } from './hostGenerateBridge';
 import { HostGenerateRunner, type GenerateServices } from './hostGenerateRunner';
+import { createHostImageEditBridge, type ImageEditServices } from './hostImageEditBridge';
 import { readPendingEntry, writePendingEntry } from './pendingEntry';
 
 
@@ -182,6 +185,7 @@ export function SixiShell({
   imageLibrary,
   mediaRemote,
   generateServices,
+  imageEditServices,
 }: {
   theme: ThemeService;
   /** 宿主画布目录；四喜的「项目」就是它（见 app/hostProjectSource.ts）。 */
@@ -196,6 +200,8 @@ export function SixiShell({
   mediaRemote?: MediaRemoteService;
   /** 画布页作用域的服务,懒取;进入新画布后由 HostGenerateRunner 用(见 app/hostGenerateRunner.tsx)。 */
   generateServices: () => GenerateServices;
+  /** 「独立编辑」要用的画布页服务,懒取(见 app/hostImageEditBridge.ts) */
+  imageEditServices: () => ImageEditServices;
 }) {
   // 只在首次渲染读一次；pending 清除放在 effect 里，避免渲染期副作用。
   // 优先 pendingEntry（整页跳转场景），其次 currentRoute（node-focus 卸载后 remount 场景），
@@ -221,6 +227,9 @@ export function SixiShell({
         <HostGenerateBridgeRef catalog={canvasCatalog} media={mediaRemote} services={generateServices} />
         {/* 进入画布后执行上面留下的交接:放参考图、创建创作组 */}
         <HostGenerateRunner getServices={generateServices} />
+        {/* 画布节点上的「独立编辑」:接入点 + 窗口(窗口是 Modal,画布态与四喜界面态都要能开) */}
+        <HostImageEditRef services={imageEditServices} />
+        <ImageEditWindow />
         <HostCanvasCurtain />
         {/* 持续同步当前路由，供 shell 被卸载后 remount 时恢复位置（如 node-focus 卸载场景）。 */}
         <RouteSync />
@@ -334,6 +343,16 @@ function HostGenerateBridgeRef({
     if (!catalog) return;
     return setHostGenerate(createHostGenerateBridge(catalog, media, { taskCatalog: () => services().catalog }));
   }, [catalog, media, services]);
+  return null;
+}
+
+/**
+ * 把「生成一块 / 放回画布」接成独立编辑窗口的实现。
+ *
+ * 与 `HostGenerateBridgeRef` 同一套生命周期:effect 里设置、卸载时复位。服务懒取,所以依赖不含它们本身。
+ */
+function HostImageEditRef({ services }: { services: () => ImageEditServices }) {
+  useEffect(() => setHostImageEdit(createHostImageEditBridge(services)), [services]);
   return null;
 }
 
