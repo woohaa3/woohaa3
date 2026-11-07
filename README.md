@@ -78,14 +78,6 @@ WooHaa3 通过扩展接入模型服务，包括 RunningHub、火山方舟、fal�
 
 <a href="docs/assets/quick-start/04-new-angle-result.webp"><img src="docs/assets/quick-start/04-new-angle-result.webp" width="480" alt="新视角成图：衣柜成为主体，左侧仅保留沙发一角，右侧是窗户" /></a>
 
-### 5. 查看结果，继续迭代
-
-在任务活动中查看进度，生成完成后，结果会回到对应的作品节点。打开作品历史，可以查看、选择或恢复之前的版本。
-
-<a href="docs/assets/quick-start/05-version-history.webp"><img src="docs/assets/quick-start/05-version-history.webp" width="320" alt="图片节点版本：查看生成历史并选择当前版本" /></a>
-
-你可以继续调整提示词，也可以将这次结果作为其他作品的参考。任务失败时，先查看显示的失败原因，再检查模型服务、参数和参考素材。
-
 完整操作说明见[使用文档](http://woohaa3.zombee.tech/doc)。
 
 ## 许可证与致谢
