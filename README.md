@@ -1,67 +1,85 @@
-# Woohaa client
+<p align="center">
+  <img src="docs/assets/woohaa3-banner.png" width="800" alt="WooHaa3 · 无限画布3D版" />
+</p>
 
-Woohaa combines media generation, assets and 3D scene authoring in a canvas. This repository contains the browser frontend, local host, desktop shell, renderer, generated protocol bindings and public extensions. The client can run locally; remote services and provider accounts are optional integrations.
+<p align="center">
+  <img src="docs/assets/badges/windows.svg" alt="支持 Windows" />
+  <img src="docs/assets/badges/macos.svg" alt="支持 macOS" />
+</p>
 
-## Development
+<h2 align="center">
+  <a href="http://woohaa3.zombee.tech/download">下载</a> ·
+  <a href="http://woohaa3.zombee.tech/">官网</a> ·
+  <a href="http://woohaa3.zombee.tech/doc">教程</a> ·
+  <a href="https://github.com/woohaa3/woohaa3/issues">反馈</a>
+</h2>
 
-Use Node.js 24 or newer, pnpm 11.17.0 and Rust 1.97.1 (pinned in `rust-toolchain.toml`) with `wasm32-unknown-unknown`. Install `wasm-bindgen-cli` 0.2.128 (`cargo install wasm-bindgen-cli --version 0.2.128 --locked`) and Binaryen’s `wasm-opt` on PATH. Bevy’s C++ dependencies require LLVM clang/clang++ with WebAssembly target support (Apple’s system clang does not include it). Install LLVM through Homebrew, your Linux package manager, or the Windows LLVM installer. The build probes PATH and standard LLVM locations and selects `clang`, `clang++`, `llvm-ar`, and `llvm-ranlib` from that LLVM. Apple's `ar` writes an empty archive for WebAssembly objects, which drops meshopt symbols at link time. Override with `CC_wasm32_unknown_unknown`, `CXX_wasm32_unknown_unknown`, `AR_wasm32_unknown_unknown`, and `RANLIB_wasm32_unknown_unknown` when needed. Desktop builds also need the platform prerequisites for Tauri 2.
+WooHaa3 是一款画布式多媒体创作工作台。将文本、图片、音频、视频和 3D 素材放在同一个工作空间，围绕素材完成 AI 生成、编辑和版本追踪。
 
-```sh
-pnpm install
-pnpm -C web install
-pnpm -C api install
-pnpm dev
-```
+## 你可以做什么
 
-The development and production build commands generate the Bevy WASM binaries and JavaScript bindings from source before starting Vite. The first build compiles Rust; later runs reuse build caches. These generated files are not committed. `pnpm build:wasm` builds the renderer bindings explicitly.
+- **组织多媒体素材**：将文本、图片、音频、视频和 3D 素材放入同一张画布，关联参考素材与创作结果。
+- **使用 AI 生成内容**：选择模型、填写提示词，结合已有素材生成新的作品。
+- **继续编辑与迭代**：编辑图片、为视频截帧或添加标注，将结果用于下一轮创作。
+- **创作 3D 场景与镜头**：组织模型、调整镜头，将取景画面用作图片或视频生成的参考。
 
-Bevy WASM builds distinguish three modes: `development` (default for `pnpm dev`, `pnpm dev:frontend`, `pnpm dev:desktop` and `pnpm build:bevy:dev`: incremental dev profile, no `wasm-opt`), `performance` (`pnpm build:bevy:perf`, or `WOOHAA_BEVY_DEV_MODE=performance pnpm dev`: release profile with `wasm-opt -Oz -g` for profiling) and `release` (`pnpm build:bevy`, `pnpm build` and desktop frontend assembly: release profile with `wasm-opt -Oz`). Browser renderer backend selection happens at build time: the build probes the build machine (macOS `system_profiler`, Linux `/dev/dri/renderD*`, Windows `Win32_VideoController`) and chooses WebGPU when a real GPU is found, otherwise WebGL2. Set `WOOHAA_BEVY_RENDERER=webgpu` or `webgl2` to override the probe. `--skip-build` on a development entry skips module and extension builds but still lets Cargo verify and rebuild the selected mode, so changed Rust never loads a stale binary. Build parallelism follows Cargo defaults; set `CARGO_BUILD_JOBS` to limit it. Each build logs its mode, renderer backend, profile, resolved target directory (from `cargo metadata`, honoring `CARGO_TARGET_DIR`), job setting, lock wait and per-stage timings. Legacy `--debug --skip-opt` still means development; `--debug` or `--skip-opt` alone remain documented manual combinations.
+## 跟其他画布有什么不同
 
-`pnpm dev:desktop` opens the desktop development app. `pnpm build` builds the browser client and extensions; `pnpm desktop:bundle` builds the frontend and packages the desktop app for the current platform (it refuses a `web/frontend/dist` older than the sources — pass `--no-build-frontend` to reuse an existing build). `pnpm typecheck`, `pnpm test` and `pnpm boundary:check` check the public client; `pnpm -C api run typecheck` checks the generated bindings. See [desktop](desktop/README.md), [API bindings](api/README.md) and [extensions](web/extensions/README.md).
+- **将 3D 导演台直接和画布融合在一起**
 
-The default storage backend is local. Copy [the configuration example](web/woohaa.config.example.yml) to `web/woohaa.config.yml` only when overriding settings. Provider URLs and keys must be supplied by the user or deployment. Keep credentials in the ignored `web/woohaa.secrets.yml` or environment variables; never commit local configuration or data.
+  白模预演不再是和画布完全割裂的导演台。可以在一个画布生并行组织 3D 场景、镜头和素材，直接将取景画面作为图片或视频生成的参考。
+- **对本地 Agent 极为友好**
 
-The interface targets desktop computers and tablets. Rendering checks require a real GPU; on macOS inspect `system_profiler SPDisplaysDataType`, and on Linux inspect `/dev/dri/renderD*`.
+  支持调用本地 Agent 来进行画布编排。直接用本地 Agent 生成 3D 模型。能将本地 ChatGPT 的图片直接生成到画布上。
+- **极其方便自定制的插件系统**
 
-## Native canvas embedding
+  通过插件系统可以接入各种模型服务，支持自定义模型。插件可以直接在画布中使用，无需切换到其他应用。
+- **深度结合 Photocraft**
 
-`woohaa_bevy_canvas::native_embedding` is the host-neutral Rust contract for
-embedding the Bevy canvas in an external Tauri/native window. A host supplies a
-borrowed parent handle, an explicitly packaged asset root and logical bounds;
-the host owns child-view placement, WebView z-order and its main-thread queue.
-`NativeCanvasRuntime` owns the renderer lifecycle and keeps scene, texture and
-query state across hide/show and resize. Requests carry protocol and generation
-facts and are rejected with stable error codes when stale, oversized or
-disposed. The Woohaa `woohaa-native://` URI remains an adapter for the shell;
-external WebViews do not need a `main` label or Woohaa token.
+  图片节点双击即可进入和 Photoshop 基本一致的界面，进行图片精修。
 
-The embedding surface is source-only and remains `UNLICENSED`/`publish = false`.
-It does not provide a fallback WASM or software renderer. Windows HWND, macOS
-NSView and Linux X11/Wayland child-surface assembly remain host responsibilities
-and require real-GPU/manual verification.
+## 快速入门
 
-## Source and third-party rights
+### 1. 配置模型服务
 
-The project manifests currently use `UNLICENSED`; a project-wide source license has not yet been selected. This snapshot does not grant an open-source license. Third-party license and attribution files remain with their components, including [pptask](web/vendor/pptask/LICENSE). Provider logos have separate attribution in each extension’s `assets/README.md`.
+进入应用，在弹出的 AI 能力中心连接本地 Agent，或者是，填写一个第三方服务的 API Key。然后在插件详情中查看可用模型，确认需要的模型已启用。
 
-## Share development configuration
+WooHaa3 通过扩展接入模型服务，包括 RunningHub、火山方舟、fal、Replicate 等。实际可用的模型、参考类型和参数取决于所选服务与账号权限。
 
-After building the local services (`pnpm services:build`), keep `pnpm dev` running in one terminal and export from another terminal:
+素材整理可以直接在本机进行，无需接入远端 WooHaa3 服务端。调用外部模型需要对应的账号、凭据和网络连接，费用由相应服务决定。
 
-```sh
-pnpm config:export --out ./team.woohaa
-# Custom backend port or mount path:
-pnpm config:export --out ./team-custom.woohaa --from http://127.0.0.1:9000/app/
-```
+<a href="docs/assets/quick-start/01-ai-center.webp"><img src="docs/assets/quick-start/01-ai-center.webp" width="480" alt="AI 能力中心：连接本地 Agent 或模型提供商" /></a>
 
-The exporter reads `web/.env` (or `WOOHAA3_SERVICE_ENV_FILE`) and process environment with the same precedence as the host. It reads the configured settings/secrets YAML files, resolves provider/storage schema fields including legacy environment overrides, exports extension enablement and values from the configured application SQLite database, and includes the configured task model file and persisted model enablement/default/order policies. It exports remote-server deployment address/device credentials from its local deployment file or environment; site settings have priority for the server address. It also reads the running host’s public `/api/generation-models` snapshot, including LiteLLM gateway and server-discovered models, and reports counts by provider. If the host is unavailable or the response is invalid, export fails rather than silently creating an incomplete package. Only loopback sources are allowed; requests do not carry login tokens. An existing output is never overwritten.
+### 2. 填写提示词，生成你的第一张图
 
-It omits machine paths, personal login tokens, sessions, secret references, task/canvas databases, media, plugin secret stores and extension code. Unknown settings are reported instead of copied. Arbitrary extension `config.local.json` files are not copied; only the remote-server deployment fields have a supported portable reader. Locally hosted API URLs are retained: colleagues still need network access to those services.
+创建节点，在生成面板选择模型并填写提示词。添加模型支持的参考素材，检查必填参数后执行生成。
 
-In a newly built desktop app choose **工作区 → 导入配置…** and select the `.woohaa` file. The host stops, backs up existing data, merges the supplied configuration and restarts. Supplied keys replace matching keys; an initialized model policy collection replaces the target model policy collection. Unrelated destination settings, canvas/task/media data and personal credentials remain. Colleagues log in with their own account. Imported discovered models retain their types, names and extension ownership in the settings model list. The snapshot never registers an execution provider or grants permission: execution requires the destination’s configured provider/login. A provider’s fresh discovered catalog takes precedence, including removed models. The snapshot does not replace provider-specific executable schemas or capabilities. New packages use format version 2; the importer still accepts old version 1 packages. Imported model settings and remote deployment settings live under the writable user `config/` directory, outside the app bundle. **导入工作区…** remains a separate operation that replaces the full workspace; it does not accept configuration packages.
+例如，以一张图片作为参考，描述希望保留的主体和需要改变的背景，再选择支持图片参考的模型生成新图。参考图片的数量、尺寸及支持方式以当前面板为准。
 
-The configuration package contains shared API credentials and is not encrypted. Keep it out of Git and distribute it through your agreed internal channel. An older app without **导入配置…** must be rebuilt/upgraded to use these packages.
+<a href="docs/assets/quick-start/02-generate-image.webp"><img src="docs/assets/quick-start/02-generate-image.webp" width="480" alt="图片节点与生成面板：参考素材、提示词、模型和生成按钮" /></a>
 
-Image editing is supplied by the PhotoCraft extension published from the marketplace repository (`woohaa3/woohaa3-marketplace`, `extensions/photocraft`). It is not bundled in this checkout; install it from the GitHub Release source (or a local-file package) and enable it in the plugin list. The host exposes focus presentation, media format registration and completion APIs; editor code and assets are extension-owned.
+### 3. 真正的三维画布：将图片转为 3D，调整镜头，得到另一个角度的白模参考图
 
-Desktop distributions may supply an external native composition project through `WOOHAA_DESKTOP_PROJECT_DIR` to the same packaging script, with `CARGO_TARGET_DIR` selecting its build cache and bundle output root. An optional `WOOHAA_DESKTOP_COMPOSITION_IDENTITY` JSON file is embedded as `native-composition.json` and included in the artifact manifest. The standalone client keeps an empty native editor registry; distribution composition is owned by its caller. Native implementations still require the corresponding installed extension for editing entry points and document integration. `woohaa-desktop --probe-editors` reports the compiled provider declarations without creating a window or GPU.
+图片生成完成后，选中图片并点击「转 3D」。在弹出的面板中选择支持图片输入的助手，确认场景描述后生成模型与导演区，搭建对应的三维场景。
+
+<a href="docs/assets/quick-start/03-convert-3d.webp"><img src="docs/assets/quick-start/03-convert-3d.webp" width="480" alt="转 3D：确认场景描述，选择助手和模型" /></a>
+
+在导演场中选中镜头，点击「编辑」，调整拍摄角度、距离与构图，保存新的取景。然后将镜头取景作为参考，配合原图和提示词再次生成图片，就可以尝试得到同一主体、同一场景的另一个角度版本。
+
+例如，从床、沙发与窗户的全景，切换到衣柜近景：床离开画面，衣柜成为构图主体。
+
+| 原图视角：房间全景 | 新镜头取景：衣柜近景 |
+| --- | --- |
+| <a href="docs/assets/quick-start/03-original-view.webp"><img src="docs/assets/quick-start/03-original-view.webp" width="240" alt="原图视角：床、沙发与窗户的全景" /></a> | <a href="docs/assets/quick-start/03-camera.webp"><img src="docs/assets/quick-start/03-camera.webp" width="320" alt="新镜头取景：对准衣柜，床已离开画面" /></a> |
+
+### 4. 根据白模参考图和原图组合参考，生成新的画面
+
+根据原图和白模参考图的组合，调整提示词，生成新的画面。下图展示同一房间的衣柜近景成图，与上一步的新镜头取景对应。
+
+<a href="docs/assets/quick-start/04-new-angle-result.webp"><img src="docs/assets/quick-start/04-new-angle-result.webp" width="480" alt="新视角成图：衣柜成为主体，左侧仅保留沙发一角，右侧是窗户" /></a>
+
+完整操作说明见[使用文档](http://woohaa3.zombee.tech/doc)。
+
+## 许可证与致谢
+
+WooHaa3 原创代码以 [MIT 许可证](LICENSE)发布。

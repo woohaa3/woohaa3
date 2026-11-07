@@ -2,7 +2,7 @@
  * 执行面板模块边界审计（change: 2026-10-27-merge-nonessential-panel-chunks，任务 5.1）。
  *
  * 约束的是「没有独立激活路径、总与父入口同时执行」的模块不再单独承担一次请求：
- * 1. 文本面板宿主随 `task-execution/plugin.tsx` 静态装配，不再是懒加载入口；
+ * 1. 文本宿主、模型执行宿主与模型参数面板随 `task-execution/plugin.tsx` 静态装配，不再是懒加载入口；
  * 2. model3d authoring 的参考图包装与 composer 由**一个**合并入口一次解析；
  * 3. 打开执行面板不再预加载提交动画（`execution-launch`），它只在提交反馈时按需加载。
  *
@@ -38,6 +38,20 @@ describe("执行面板模块边界：源码", () => {
     expect(plugin).not.toContain("<Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} runtime={runtime} />}>\n            <TextExecutionHost");
   });
 
+  it("模型执行宿主与参数面板由执行面板定义静态装配，不再单独成 chunk", () => {
+    const plugin = read(PLUGIN);
+    // 四喜形态经提示词技能适配层接入宿主（`PromptSkillExecutionHost` 内部静态依赖 `ModelExecutionHost`），
+    // 同样是静态装配：两种导入形态都满足「没有独立激活路径」。
+    expect(plugin).toMatch(
+      /import \{ (?:PromptSkillExecutionHost as )?ModelExecutionHost \} from "\.\/(?:prompt-skill|model)-execution-host\.js";/
+    );
+    expect(plugin).toContain('import { ModelParameterPanel } from "./model-parameter-panel.js";');
+    expect(plugin).not.toContain('lazy(() => import("./model-execution-host.js")');
+    expect(plugin).not.toContain('lazy(() => import("./model-parameter-panel.js")');
+    // 静态入口同样不再需要外层加载骨架。
+    expect(plugin).not.toContain("<Suspense fallback={<ExecutionPanelPending");
+  });
+
   it("model3d 只懒加载合并入口，不再把包装模块作为独立入口", () => {
     const host = read(HOST);
     expect(host).toContain('lazy(() => import("./plugins/task-execution/authoring-model-generate-panel.js")');
@@ -65,10 +79,14 @@ describe("执行面板模块边界：源码", () => {
 });
 
 describe("执行面板模块边界：构建产物", () => {
-  it.skipIf(!distReady)("文本宿主与模型 authoring 包装不再是独立 chunk", () => {
+  it.skipIf(!distReady)("文本/模型执行宿主、参数面板与模型 authoring 包装不再是独立 chunk", () => {
     const entries = readdirSync(DIST_ASSETS);
     const forbiddenChunks = entries.filter(
-      (name) => /^text-execution-host-.*\.js$/.test(name) || /^authoring-model-generate-host-.*\.js$/.test(name)
+      (name) =>
+        /^text-execution-host-.*\.js$/.test(name) ||
+        /^model-execution-host-(?!helpers-).*\.js$/.test(name) ||
+        /^model-parameter-panel-.*\.js$/.test(name) ||
+        /^authoring-model-generate-host-.*\.js$/.test(name)
     );
     expect(
       forbiddenChunks,

@@ -23,10 +23,12 @@ import {
   readBinaryOutputUrl
 } from "./execution-projection.js";
 import {
+  inferBinaryModelType,
   materializeBinaryBytesFromStore,
   materializeBinaryResult,
   materializeStableMediaResult,
   materializeVideoResult,
+  projectMaterializingRecord,
   readStableMediaResult
 } from "./media-materialization.js";
 
@@ -111,16 +113,19 @@ export async function createTaskRuntime(options: TaskRuntimeOptions): Promise<Ta
       // verify-and-adopt：确认对象在画布作用域可读后直接写 summary，不搬运字节。必须在
       // URL/bytes 判断之前，否则会落到 bytes 回退并写成「无产物 succeeded」。
       const stableMedia = readStableMediaResult(record);
+      const modelType = inferBinaryModelType(record);
       if (stableMedia) {
         settled.add(record.id);
+        if (modelType) projectMaterializingRecord(options, record, association, modelType);
         trackMaterialization(materializeStableMediaResult(options, record, association, stableMedia.media));
         return;
       }
-      const modelType = record.modelType;
-      if (modelType === "image" || modelType === "video" || modelType === "audio") {
+      if (modelType) {
         const url = readBinaryOutputUrl(record, modelType);
         if (url) {
           settled.add(record.id);
+          // 先投影「媒体准备中」再下载/转存：历史与 UI 都看不到「已成功但没有稳定媒体」的窗口。
+          projectMaterializingRecord(options, record, association, modelType);
           if (modelType === "video") {
             // 海报/末帧只在 provider 原始结果里（providerMetadata），投影不携带。
             trackMaterialization(materializeVideoResult(options, record, association, url));
@@ -133,6 +138,9 @@ export async function createTaskRuntime(options: TaskRuntimeOptions): Promise<Ta
         }
         if (!hasTextOutput(record)) {
           settled.add(record.id);
+          projectMaterializingRecord(options, record, association, modelType);
+          // 视频不走字节回退（materializeBinaryBytesFromStore 会落 failed）；图片/音频沿用
+          // durable 字节回退。
           trackMaterialization(materializeBinaryBytesFromStore(options, record, association, modelType));
           return;
         }

@@ -29,6 +29,7 @@ export type CanvasCommandRejectionCode =
   | "invalid-video-edit-intent"
   | "invalid-model-cameras"
   | "invalid-image-edit"
+  | "invalid-reference-policy"
   | "missing-edge-id"
   /** 已存在骨架的模型不允许通过命令移除骨架。 */
   | "rig-removed"

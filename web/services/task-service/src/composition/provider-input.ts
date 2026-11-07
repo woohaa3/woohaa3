@@ -84,6 +84,9 @@ export function buildInput(
   return {
     prompt: request.prompt,
     ...request.parameters,
+    // 视频结果要写进任务所属画布作用域（本机 Provider 直接落稳定媒体），其它模型类型不需要。
+    // 放在参数之后：请求里的画布身份是权威值，不能被面板参数覆盖。
+    ...(request.modelType === "video" ? { canvasId: request.canvasId } : {}),
     ...Object.fromEntries(Object.entries(groups).map(([field, refs]) => [field, refs]))
   };
 }

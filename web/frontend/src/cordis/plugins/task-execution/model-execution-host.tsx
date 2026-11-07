@@ -21,7 +21,9 @@ import { planRetypeNode } from "../../../extension-api/command-planner.js";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
 import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
+import { effectiveReferencePolicy } from "@woohaa3/contracts";
 import { Button } from "@woohaa3/ui";
+import { isUnsubmittedVideoNode, resolveModelSubmissionParameters } from "@woohaa3/contracts";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";
@@ -43,7 +45,7 @@ import {
   type PanelPresentationIntent
 } from "./node-panel-directives.js";
 import { useEscapeLayer } from "./execution-panel/panel-shared.js";
-import { useCanvasStoreState, useNodeDraft, useTaskCatalog } from "./use-task-state.js";
+import { useCanvasStoreState, useNodeDraft, useNodeMediaPreparing, useTaskCatalog } from "./use-task-state.js";
 import {
   allModelsForPanel,
   capabilityForModel,
@@ -69,7 +71,8 @@ import {
   mentionTypeFor,
   placeholderModel,
   readPanelLocalSurface,
-  removeReference
+  removeReference,
+  setReferencePolicy as commitReferencePolicy
 } from "./model-execution-host-helpers.js";
 import type { ModelReferenceItem, ModelSubmitOutcome } from "../../contract/model-interaction.js";
 import type { ModelExecutionHostProps } from "./node-execution-panel-types.js";
@@ -173,6 +176,12 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     [workingCanvas, selectedNodeId]
   );
   const pendingSelection = Boolean(context && !canonicalNodeIds.has(context.nodeId));
+  // provider 已产出、正在转存稳定媒体：面板显示准备态，成功/下载入口保持禁用。
+  const mediaPreparing = useNodeMediaPreparing(canvasId ?? "", context?.nodeId ?? "");
+  const unsubmitted = useMemo(
+    () => isUnsubmittedVideoNode(context?.nodeType, context?.nodeData),
+    [context]
+  );
 
   const panelKind = context?.panelKind ?? null;
   const modelType = panelKind ? modelTypeForPanelKind(panelKind) : null;
@@ -211,6 +220,11 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     () => typedModels.find((entry) => entry.modelKey === targetModelKey) ?? null,
     [typedModels, targetModelKey]
   );
+  /** 身份参考策略：节点设置优先，其次模型描述，缺省 optional。 */
+  const referencePolicy = useMemo(
+    () => effectiveReferencePolicy(context?.nodeData.referencePolicy, model?.referencePolicy),
+    [context, model]
+  );
   // T10: capture framing is explicit-only. The panel never scans the canvas for a
   // camera card, so an unrelated world camera cannot change an ordinary generation.
   // T09/T11b supply the production UI that passes `captureCameraId`.
@@ -227,6 +241,10 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     if (!context) return {};
     return derivePanelDraft(context.nodeData, draft).parameters;
   }, [context, draft]);
+  const draftPrompt = useMemo(
+    () => (context ? derivePanelDraft(context.nodeData, draft).prompt : ""),
+    [context, draft]
+  );
 
   const blockingReasons = useMemo(() => {
     if (!panelKind) return [];
@@ -238,10 +256,13 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       catalog,
       catalogState,
       model: targetModelKey,
+      modelDefinition: model,
+      prompt: draftPrompt,
       canvas,
-      panelParameters: parameters
+      panelParameters: parameters,
+      referencePolicy
     });
-  }, [panelKind, context, disabledReason, pendingSelection, catalog, catalogState, targetModelKey, canvas, parameters]);
+  }, [panelKind, context, disabledReason, pendingSelection, catalog, catalogState, targetModelKey, model, draftPrompt, canvas, parameters, referencePolicy]);
 
   // 展示用阻止原因：会话只读（断线）时面板不重复枚举「网络已断开 / 目录尚未加载」这类
   // 会话级状态——左下角同步状态控件的常驻 tooltip 已经承载该信息。主操作仍由 `readOnly`
@@ -371,7 +392,18 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         return { ok: false, error: "模型尚未就绪，任务未提交" };
       }
       const nodeId = context.nodeId;
-      draftStore.persist(nodeId, targetModelKey, { prompt: input.prompt, parameters: input.parameters });
+      // schema 默认值必须进入提交快照（A9 / change: 2026-11-06-guard-video-generation-inputs）：
+      // 面板显示的 720p / 5 秒不能只停在控件上，否则 Provider 仍会收到缺字段的请求。
+      const resolvedParameters = resolveModelSubmissionParameters(
+        {
+          modelType: model?.modelType,
+          inputSchema: model?.inputSchema,
+          defaultInput: model?.defaultInput
+        },
+        input.parameters,
+        { prompt: input.prompt, skipRequired: ["prompt"] }
+      );
+      draftStore.persist(nodeId, targetModelKey, { prompt: input.prompt, parameters: resolvedParameters });
       setSubmitError(null);
 
       const reasons = resolveBlockingReasons({
@@ -382,8 +414,11 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         catalog,
         catalogState,
         model: targetModelKey,
+        modelDefinition: model,
+        prompt: input.prompt,
         canvas,
-        panelParameters: input.parameters
+        panelParameters: resolvedParameters,
+        referencePolicy
       });
       if (reasons.length > 0) {
         setSubmitError(reasons[0]!);
@@ -410,7 +445,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         nodeId,
         modelKey: targetModelKey,
         prompt: input.prompt,
-        parameters: input.parameters,
+        parameters: resolvedParameters,
         catalog,
         expectedModelType: modelTypeForPanelKind(panelKind),
         ...(worldCapture ? { worldCapture } : {})
@@ -427,7 +462,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       }
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
     },
-    [catalog, canvas, catalogState, context, disabledReason, draftStore, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
+    [catalog, canvas, catalogState, context, disabledReason, draftStore, model, panelKind, pendingSelection, referencePolicy, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
   );
 
   const submitIntent = useCallback(
@@ -488,6 +523,14 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       onPickerOpenChange={setPickerOpen}
       onConnect={(sourceNodeId) => addReference(session, context.nodeId, sourceNodeId)}
       onDisconnect={(item) => removeReference(session, canvas, context.nodeId, item.sourceNodeId)}
+      identityRequired={referencePolicy === "identity-required"}
+      onReferencePolicyChange={(required) =>
+        commitReferencePolicy(
+          session,
+          context.nodeId,
+          required ? "identity-required" : "optional"
+        )
+      }
     />
   );
 
@@ -537,7 +580,9 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const status = taskState.taskStatus;
   // Task activity belongs to the dots. This surface always accepts another independent run.
   // Agent turns and aggregate/local operations retain their own execution gates.
-  const effectiveStatus = status === "pending" || status === "processing" ? "idle" : status;
+  const effectiveStatus = mediaPreparing
+    ? "materializing"
+    : status === "pending" || status === "processing" ? "idle" : status;
   const expanded = resolveExecutionPanelSurface(presentation, context.nodeType) === "expanded";
   const binding = definition?.bindings
     ? definition.bindings({ nodeId: context.nodeId, modelKey: targetModelKey, canvas })
@@ -574,6 +619,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
             readOnly={readOnly}
             presentation={expanded ? "expanded" : "compact"}
             status={effectiveStatus}
+            {...(unsubmitted ? { unsubmitted } : {})}
             {...(taskState.progress !== undefined ? { progress: taskState.progress } : {})}
             {...(taskState.errorMessage !== undefined
               ? { errorMessage: taskState.errorMessage }

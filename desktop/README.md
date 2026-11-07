@@ -50,7 +50,7 @@ pnpm recorder:probe
 
 The host check exercises bundled-runtime startup, storage, persistence, shutdown and workspace import/export. Renderer correctness and performance require a real GPU and visible desktop session. Probe macOS with `/usr/sbin/system_profiler SPDisplaysDataType`; `/dev/dri` is a Linux-specific path. Build success alone does not establish installation, rendering, notification delivery or automatic-update behavior on another platform.
 
-Native recording runs in a supervised background worker. Its H.264 encoder is source-built, statically linked OpenH264 (`openh264` 0.9.9), using CPU encoding; rendering still requires a GPU. No system FFmpeg is required. Preserve OpenH264 and dependency license notices. The BSD source license and Cisco's separately distributed binary license have different terms; review applicable codec/patent distribution obligations before publishing a build. This note does not select a license for Woohaa source.
+Native recording runs in a supervised background worker. Its H.264 encoder is source-built, statically linked OpenH264 (`openh264` 0.9.9), using CPU encoding; rendering still requires a GPU. No system FFmpeg is required. Preserve OpenH264 and dependency license notices. The BSD source license and Cisco's separately distributed binary license have different terms; review applicable codec/patent distribution obligations before publishing a build. WooHaa3 original source is covered by the repository's [MIT license](../LICENSE); third-party terms still apply to their respective components.
 
 ## External host contract
 

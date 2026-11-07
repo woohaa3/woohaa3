@@ -91,6 +91,7 @@ describe("扩展声明流水线", () => {
       "grsai-provider",
       "runninghub-provider",
       "ark-provider",
+      "bailian-provider",
       "local-storage",
       "cos-storage"
     ]) {
@@ -110,6 +111,7 @@ describe("扩展声明流水线", () => {
       "grsai-provider": ["language", "image", "video"],
       "runninghub-provider": ["image", "video"],
       "ark-provider": ["language", "image", "video"],
+      "bailian-provider": ["image"],
     })) expect(byId.get(id)?.modelTypes, id).toEqual(types);
 
     // 模型刷新入口由插件自己声明（宿主不再有 Provider → 刷新路径的映射表）。
@@ -127,7 +129,7 @@ describe("扩展声明流水线", () => {
     const { generation } = await boot();
     const ids = generation.list().map((provider) => provider.providerId);
     // 未配凭据的 Provider 仍要装载并注册（否则管理面看不到、也没法预填配置）；模型可用性另算。
-    for (const id of ["tokenhub", "cephalon", "replicate", "fal", "grsai", "runninghub", "ark"]) {
+    for (const id of ["tokenhub", "cephalon", "replicate", "fal", "grsai", "runninghub", "ark", "bailian"]) {
       expect(ids).toContain(id);
     }
   });

@@ -6,7 +6,7 @@ rust-version = "1.97.1"
 # 两个 bin（overlay 宿主与 native-only 调试入口）：Tauri CLI 需要一个明确的默认入口。
 default-run = "woohaa-desktop"
 description = "Woohaa3 Tauri 桌面宿主原型（change: 2026-10-14-migrate-canvas-to-tauri-native-bevy，阶段 P0）"
-license = "UNLICENSED"
+license = "MIT"
 publish = false
 
 [lib]

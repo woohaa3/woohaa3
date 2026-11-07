@@ -182,3 +182,136 @@ describe("提交阶段失败（change: 2026-10-21-record-submit-failures-as-term
     expect(exported.ok && exported.canvas.jobs.some((job) => job.status === "failed")).toBe(false);
   });
 });
+
+/**
+ * 视频参数 schema 权威复验（change: 2026-11-06-guard-video-generation-inputs）。
+ *
+ * N05 / N09：绕过 UI 的非法请求必须在创建 provider 任务前被拒绝，并且不得写 begin / job。
+ */
+describe("视频参数 schema 权威复验", () => {
+  const AGNES_SCHEMA = {
+    type: "object",
+    required: ["prompt", "aspectRatio", "resolution", "durationSeconds"],
+    properties: {
+      prompt: { type: "string", title: "提示词" },
+      aspectRatio: { type: "string", title: "比例", enum: ["16:9", "9:16", "1:1"] },
+      resolution: { type: "string", title: "分辨率", enum: ["720p", "1080p", "2k"] },
+      durationSeconds: { type: "number", title: "时长", minimum: 5, maximum: 12, unit: "秒" }
+    }
+  };
+
+  async function setup(input: {
+    parameters: Record<string, unknown>;
+    inputSchema?: Record<string, unknown>;
+    defaultInput?: Record<string, unknown>;
+  }) {
+    const repository = new InMemoryYjsDocumentRepository();
+    const room = new CanvasRoom({ canvasId: CANVAS, repository, now: () => NOW });
+    await room.initialize({
+      canvas: createEmptyWoohaa3ServerCanvas(CANVAS, NOW),
+      roomEpoch: "epoch-1",
+      createdAt: NOW
+    });
+    await room.submit({
+      protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+      canvasId: CANVAS,
+      commandId: "seed",
+      baseRevision: 0,
+      actorId: "test",
+      commands: [{ type: "node.add", node: { id: "n1", type: "video", position: { x: 0, y: 0 } } }]
+    });
+    const submitted: Array<Record<string, unknown>> = [];
+    const service = new CanvasRunService({
+      resolveRoom: async () => room,
+      taskClient: {
+        submit: async (request: Record<string, unknown>) => { submitted.push(request); },
+        cancel: async () => undefined
+      } as never,
+      resolveCatalog: async () => ({
+        available: true,
+        models: [
+          {
+            modelKey: "test:agnes",
+            providerId: "test",
+            providerModelId: "agnes-video-2.5",
+            modelType: "video",
+            title: "Agnes",
+            interaction: { id: "generic-model", version: 1 },
+            inputSchema: input.inputSchema ?? AGNES_SCHEMA,
+            defaultInput: input.defaultInput ?? {},
+            bindings: [],
+            taskTimeoutMs: 1000
+          }
+        ],
+        defaultModels: {}
+      }),
+      now: () => NOW
+    });
+    const outcome = await service.run({
+      canvasId: CANVAS,
+      nodeId: "n1",
+      runId: "run-1",
+      jobId: "job-1",
+      modelKey: "test:agnes",
+      prompt: "一段动画",
+      parameters: input.parameters
+    });
+    const exported = room.exportCanvas();
+    return { outcome, submitted, canvas: exported.ok ? exported.canvas : null };
+  }
+
+  it("缺 aspectRatio 时拒绝且不创建 provider 任务", async () => {
+    const { outcome, submitted, canvas } = await setup({
+      parameters: { resolution: "720p", durationSeconds: 5 }
+    });
+    expect(outcome).toMatchObject({ ok: false, code: "missing-parameter" });
+    expect(outcome.ok ? "" : outcome.message).toContain("aspectRatio");
+    expect(submitted).toHaveLength(0);
+    // 没有写 begin：节点没有 activeRunId / processing，也没有 job。
+    expect(canvas?.nodeData.n1?.activeRunId).toBeUndefined();
+    expect(canvas?.nodeData.n1?.taskStatus).toBeUndefined();
+    expect(canvas?.jobs).toHaveLength(0);
+  });
+
+  it("时长越界时返回稳定 invalid-parameter", async () => {
+    const { outcome, submitted } = await setup({
+      parameters: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 13 }
+    });
+    expect(outcome).toMatchObject({ ok: false, code: "invalid-parameter" });
+    expect(outcome.ok ? "" : outcome.message).toContain("时长不能大于 12秒");
+    expect(submitted).toHaveLength(0);
+  });
+
+  it("缺 resolution 时拒绝", async () => {
+    const { outcome, submitted } = await setup({
+      parameters: { aspectRatio: "16:9", durationSeconds: 5 }
+    });
+    expect(outcome).toMatchObject({ ok: false, code: "missing-parameter" });
+    expect(submitted).toHaveLength(0);
+  });
+
+  it("合法请求把模型默认值并入提交快照", async () => {
+    const { outcome, submitted } = await setup({
+      parameters: { aspectRatio: "9:16" },
+      defaultInput: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 }
+    });
+    expect(outcome).toMatchObject({ ok: true });
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]?.parameters).toMatchObject({
+      model: "test:agnes",
+      aspectRatio: "9:16",
+      resolution: "720p",
+      durationSeconds: 5
+    });
+  });
+
+  it("视频模型没有参数 schema 时显式拒绝", async () => {
+    const { outcome, submitted } = await setup({
+      parameters: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 },
+      inputSchema: {}
+    });
+    expect(outcome).toMatchObject({ ok: false, code: "invalid-parameter" });
+    expect(outcome.ok ? "" : outcome.message).toContain("没有声明参数 schema");
+    expect(submitted).toHaveLength(0);
+  });
+});

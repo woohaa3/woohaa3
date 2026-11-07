@@ -25,9 +25,10 @@ import {
   type PresetCard
 } from "./index.js";
 import { canvasModelCapabilities } from "../model-capabilities.js";
+import { ALIBABA_CARDS, alibabaSizePresetFor } from "./cards/image/alibaba/alibaba-cards.js";
 import { seedreamSizePresetFor } from "./cards/image/ark/seedream-cards.js";
 import { seedreamSupportsTransparentBackground } from "./cards/image/ark/seedream-spec.js";
-import { videoFamilyFor, videoPixelSize, videoRequestFields } from "../video-parameters.js";
+import { videoFamilyFor, videoFamilyParameters, videoPixelSize, videoRequestFields } from "../video-parameters.js";
 import type { CanvasTaskCatalogModel } from "../dto.js";
 
 /**
@@ -105,6 +106,41 @@ describe("家族优先于类型预设", () => {
     const background = properties.background as { default?: string; enum: Array<{ value: string }> };
     expect(background.default).toBe("opaque");
     expect(background.enum.map((entry) => entry.value)).toEqual(["opaque", "transparent"]);
+  });
+
+  it("百炼命中家族：比例 / 分辨率 / 负向提示词 / 智能改写来自卡片投影", () => {
+    const { model, dropped } = composePresetCard(cardById("qwen-image-2.0-pro"));
+    const properties = propertiesOf(model);
+    expect(properties).toHaveProperty("negativePrompt");
+    expect(properties).toHaveProperty("promptExtend");
+    // 百炼没有质量、数量、背景与输出格式这几档：类型预设里的键被剪掉。
+    for (const key of ["quality", "n", "background", "outputFormat"]) {
+      expect(properties, key).not.toHaveProperty(key);
+      expect(dropped, key).toContain(key);
+    }
+    // 比例不带「自适应」：百炼必须落到具体像素。
+    const aspectRatio = properties.aspectRatio as { enum: Array<{ value: string }> };
+    expect(aspectRatio.enum.map((entry) => entry.value)).not.toContain("auto");
+    expect(model.defaultInput).toMatchObject({
+      aspectRatio: "1:1",
+      resolution: "2K",
+      negativePrompt: "",
+      promptExtend: true
+    });
+  });
+
+  it("百炼的智能改写默认值来自卡片：Z-Image 默认关，Qwen 默认开", () => {
+    const zImage = propertiesOf(composePresetCard(cardById("z-image-turbo")).model);
+    expect(zImage.promptExtend).toMatchObject({ default: false });
+    expect(composePresetCard(cardById("z-image-turbo")).model.defaultInput)
+      .toMatchObject({ promptExtend: false });
+    // Z-Image 只能文生图：卡片不保参考图，面板不会出现上传。
+    expect(zImage).not.toHaveProperty("referencesImage");
+
+    for (const id of ["qwen-image-2.0", "qwen-image-2.1-pro", "qwen-image-3.0-pro"]) {
+      expect(propertiesOf(composePresetCard(cardById(id)).model).promptExtend, id)
+        .toMatchObject({ default: true });
+    }
   });
 
   it("GPT Image 命中家族：质量档位来自家族，而不是类型预设的 4 档", () => {
@@ -202,6 +238,51 @@ describe("音频卡片", () => {
     const format = properties.outputFormat as { enum: Array<{ value: string }> };
     expect(format.enum.map((entry) => entry.value)).toEqual(["mp3", "wav", "opus"]);
     expect(presetLimitsOf(model)).toBeUndefined();
+  });
+});
+
+describe("Agnes Video 2.5 参数描述", () => {
+  /**
+   * 现场失败：`aspectRatio is required`、`resolution is required`、
+   * 时长必须大于 4 秒且不超过 12 秒。卡片与家族必须同时给出默认值、允许值与必填。
+   */
+  it("比例 / 分辨率 / 时长都是必填，并带合法默认值", () => {
+    const { model } = composePresetCard(cardById("agnes-video-2.5"));
+    const properties = propertiesOf(model);
+
+    expect(model.inputSchema.required).toEqual(
+      expect.arrayContaining(["prompt", "aspectRatio", "resolution", "durationSeconds"])
+    );
+    expect(properties.resolution).toMatchObject({ default: "720p" });
+    expect((properties.resolution as { enum: Array<{ value: string }> }).enum.map((entry) => entry.value))
+      .toEqual(["720p", "1080p", "2k"]);
+    expect(properties.durationSeconds).toMatchObject({ minimum: 5, maximum: 12, default: 5, step: 1 });
+    expect(properties.aspectRatio).toMatchObject({ default: "16:9" });
+    expect(model.defaultInput).toMatchObject({
+      aspectRatio: "16:9",
+      resolution: "720p",
+      durationSeconds: 5
+    });
+  });
+
+  it("未拿到卡片、只按家族识别时也保留必填声明", () => {
+    const family = videoFamilyParameters("agnes-video-2.5");
+    expect(family?.required).toEqual(["aspectRatio", "resolution", "durationSeconds"]);
+    expect(family?.defaults).toMatchObject({ aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 });
+  });
+
+  it("2k 能换算成偶数像素尺寸", () => {
+    expect(videoPixelSize("16:9", "2k")).toBe("2560x1440");
+  });
+
+  it("请求保留上游要求的角度比例字段与档位 size", () => {
+    expect(
+      videoRequestFields("agnes-video-2.5", {
+        aspectRatio: "16:9",
+        resolution: "720p",
+        durationSeconds: 5
+      })
+    ).toEqual({ seconds: 5, aspect_ratio: "16:9", size: "720P" });
   });
 });
 
@@ -314,6 +395,29 @@ describe("卡片表", () => {
     expect(ids.some((id) => id.includes("nanobanana") || id.includes("nano-banana"))).toBe(true);
   });
 
+  it("覆盖百炼已登记的生图型号（万相 / Qwen-Image / Z-Image）", () => {
+    const ids = ALIBABA_CARDS.map((card) => card.providerModelId);
+    expect(ids).toEqual([
+      "wan2.7-image-pro",
+      "wan2.7-image",
+      "qwen-image-3.0-pro",
+      "qwen-image-2.1-pro",
+      "qwen-image-2.1-turbo",
+      "qwen-image-2.0-pro",
+      "qwen-image-2.0",
+      "z-image-turbo"
+    ]);
+    // 每个型号都能查到像素表：未登记的 id 会让 Provider 发出上游不认的 size。
+    for (const card of ALIBABA_CARDS) {
+      const spec = alibabaSizePresetFor(card.providerModelId)!;
+      for (const ratio of spec.aspectRatios) {
+        for (const tier of spec.resolutions) {
+          expect(spec.sizes[ratio]?.[tier], `${card.id} ${ratio} ${tier}`).toMatch(/^\d+\*\d+$/);
+        }
+      }
+    }
+  });
+
   it("卡片的 cap 声明与版本表一致：保留 background 的即梦模型必须真的支持透明", () => {
     // 两处各自表达「谁支持透明」——卡片说「接不接这个键」，版本表说「这个版本有没有」。
     // 对不上时 compose 会悄悄退回类型预设的 auto/transparent/opaque，所以在这里钉住。
@@ -323,6 +427,20 @@ describe("卡片表", () => {
       expect(card.keeps.includes("background"), card.id).toBe(
         seedreamSupportsTransparentBackground(preset!)
       );
+    }
+  });
+
+  it("百炼卡片的 keeps 与卡片能力一致：不支持的开关不出现", () => {
+    // 与即梦的 transparent 那条同一个道理：卡片说「接不接这个键」，厂商块说「这个模型有没有」。
+    for (const card of ALIBABA_CARDS) {
+      const spec = alibabaSizePresetFor(card.providerModelId);
+      expect(spec, card.id).toBeDefined();
+      expect(card.keeps.includes("negativePrompt"), card.id).toBe(spec!.supportsNegativePrompt);
+      expect(card.keeps.includes("promptExtend"), card.id).toBe(spec!.supportsPromptExtend);
+      expect(card.keeps.includes("referencesImage"), card.id).toBe(spec!.maxReferenceImages > 0);
+      expect(card.vendor).toBe("alibaba");
+      // 参考图上限只存一份：卡片的 limits 就是 spec 的 maxReferenceImages。
+      expect(card.limits?.references?.image?.max ?? 0).toBe(spec!.maxReferenceImages);
     }
   });
 

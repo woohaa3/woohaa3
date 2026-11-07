@@ -61,7 +61,9 @@ function catalog(): CanvasTaskCatalog {
     modelType,
     title: key,
     interaction: { id: "generic-model", version: 1 },
-    inputSchema: {},
+    // 视频模型必须声明参数 schema（guard-video-generation-inputs）；本测试只关心媒体续接，
+    // 所以只声明 prompt、不加必填参数，避免把参数校验混进续接用例。
+    inputSchema: modelType === "video" ? { type: "object", properties: { prompt: { type: "string", title: "提示词" } } } : {},
     defaultInput: {},
     taskTimeoutMs: 1_000,
     bindings

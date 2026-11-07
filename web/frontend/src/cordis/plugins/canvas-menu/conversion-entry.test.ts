@@ -11,12 +11,14 @@ import { canvasPointToGround } from "@woohaa3/contracts";
 it("submits creation menu actions and routes upload through the import service", async () => {
   let menu: any;
   const record = vi.fn().mockResolvedValue({ ok: true });
+  const selectNode = vi.fn((_nodeId: string) => true);
   const requestFile = vi.fn();
   let writable = true;
   canvasMenuExtension({
     slots: { register: (slot: string, value: unknown) => { if (slot === "canvas.context-menu") menu = value; return () => {}; } },
     canvasNavigation: { registerMenu: () => () => {} }, canvasSession: { isWritable: () => writable },
-    canvasEdit: { record }, dialogs: { open: vi.fn() }, effect: () => {}, on: () => () => undefined, get: (key: string) => key === "slots" ? { list: () => [] } : { requestFile }
+    canvasEdit: { record }, canvasRuntime: { controller: () => ({ selectNode }) },
+    dialogs: { open: vi.fn() }, effect: () => {}, on: () => () => undefined, get: (key: string) => key === "slots" ? { list: () => [] } : { requestFile }
   } as never, undefined);
   const context = { writable: true, world: { x: 128, y: 64 } };
   const items = menu.items(context);
@@ -44,11 +46,15 @@ it("submits creation menu actions and routes upload through the import service",
   const ground = canvasPointToGround(context.world);
   for (const area of areas) expect(area.bounds).toEqual({ min: { u: ground.u - 2, v: ground.v - 2 }, max: { u: ground.u + 2, v: ground.v + 2 } });
   for (const model of models) expect(model.transform.position).toEqual({ ...ground, h: 0 });
+  const createdIds = record.mock.calls.map(call => call[0].find((command: any) => command.type === "node.add").node.id);
+  await vi.waitFor(() => expect(selectNode).toHaveBeenCalledTimes(createdIds.length));
+  expect(new Set(selectNode.mock.calls.map(call => call[0]))).toEqual(new Set(createdIds));
   writable = false;
   menu.onSelect("insert-scope:area", context);
   menu.onSelect("upload", context);
   expect(record).toHaveBeenCalledTimes(6);
   expect(requestFile).toHaveBeenCalledTimes(1);
+  expect(selectNode).toHaveBeenCalledTimes(createdIds.length);
 });
 
 it("confirms, retries and suppresses stale conversion feedback through the menu contribution", async () => {

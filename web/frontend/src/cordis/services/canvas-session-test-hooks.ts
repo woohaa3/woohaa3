@@ -77,6 +77,7 @@ export function installCanvasEditTestHooks(edit: CanvasEditService): void {
         canUndo: snapshot.canUndo,
         canRedo: snapshot.canRedo,
         size: snapshot.size,
+        pending: snapshot.pending,
         undoLabel: snapshot.undoLabel,
         redoLabel: snapshot.redoLabel,
         lastAction: snapshot.lastAction

@@ -20,7 +20,7 @@ import {
 } from "../../domain/node-catalog.js";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
 import { initialCameraCardPosition, revealWorldCamera } from "../../services/world-camera-frame.js";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, SHARED_WORLD_VERSION, WORLD_CAMERA_CARD_SIZE, canvasPointToGround, createDefaultWorldCameraData, createHighEntropyId, newWorldInstance, partitionManagedNodeDeletion, type CanvasNodeData } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, SHARED_WORLD_VERSION, WORLD_CAMERA_CARD_SIZE, canvasPointToGround, createDefaultWorldCameraData, createHighEntropyId, newWorldInstance, partitionManagedNodeDeletion, type CanvasCommand, type CanvasNodeData } from "@woohaa3/contracts";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
 import { definePlugin } from "../../plugin.js";
@@ -52,6 +52,19 @@ export type NodeContextMenuFacts = {
 
 export function conversionFeedbackCurrent(active: boolean, disposed: boolean, expectedCanvasId: string, currentCanvasId?: string): boolean {
   return active && !disposed && currentCanvasId === expectedCanvasId;
+}
+
+/** 一次创建提交里新产生的节点 ID；手动创建时据此选中刚产生的节点。 */
+export function createdNodeIdOf(commands: readonly CanvasCommand[]): string | null {
+  for (const command of commands) {
+    if (command.type === "node.add") return command.node.id;
+  }
+  return null;
+}
+
+/** 经运行时控制器写入选择，保持渲染、手势与选择快照一致。 */
+function selectCreatedNode(ctx: Context, nodeId: string): void {
+  ctx.canvasRuntime.controller()?.selectNode(nodeId);
 }
 
 /** 节点右键菜单项：重命名、删除。 */
@@ -210,17 +223,23 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
               ? { worldCamera: cameraData } as unknown as CanvasNodeData
               : { sceneArea: { kind: "scene-area", version: SHARED_WORLD_VERSION, areaId: id, scopeVersion: version, animationOrigin: { u: ground.u, v: ground.v }, bounds: { min: { u: ground.u - 2, v: ground.v - 2 }, max: { u: ground.u + 2, v: ground.v + 2 } } } };
           const position = cameraData ? initialCameraCardPosition(cameraData) : context.world;
-          void ctx.canvasEdit.record(planInsertNode({
+          const commands = planInsertNode({
             nodeType: group ? "workflow-group-2d" : camera ? "world-camera" : "scene-area",
             // 导演区没有卡片，但节点结构仍需要有限位置：用右键地面点，保证 edit.apply 可规划。
             position,
             nodeData,
             ...(camera ? { width: WORLD_CAMERA_CARD_SIZE.width, height: WORLD_CAMERA_CARD_SIZE.height } : {})
-          }), group ? "创建节点组" : camera ? "创建镜头" : "创建导演区").then(result => {
+          });
+          const createdNodeId = createdNodeIdOf(commands);
+          const pending = ctx.canvasEdit.record(commands, group ? "创建节点组" : camera ? "创建镜头" : "创建导演区");
+          // 提交的同时选中：working projection 已同步包含新节点，失败/拒绝时由帧内失效清理移除选择。
+          if (createdNodeId) selectCreatedNode(ctx, createdNodeId);
+          void pending.then(result => {
             if (!result.ok && !disposed && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
               ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "创建失败", description: result.reason } });
             }
-            if (result.ok && cameraData && !disposed && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
+            if (!result.ok || disposed || workingCanvasOf(woohaa3CanvasStore.getState())?.id !== canvasId) return;
+            if (cameraData) {
               revealWorldCamera(ctx, cameraData, {
                 x: position.x,
                 y: position.y,
@@ -307,8 +326,7 @@ function insertNode(ctx: Context, templateId: string, context: ContextMenuContex
   const label = context.connectFrom ? connectLabelFor(context.connectFrom.nodeType, template.nodeType) : "";
   void Promise.resolve().then(() => {
     if (!active() || workingCanvasOf(woohaa3CanvasStore.getState())?.id !== canvasId || !ctx.canvasSession.isWritable()) return null;
-    return ctx.canvasEdit.record(
-    planInsertNode({
+    const commands = planInsertNode({
       nodeType: template.nodeType,
       position: world,
       nodeData: context.connectFrom && template.nodeType !== "model3d"
@@ -319,12 +337,18 @@ function insertNode(ctx: Context, templateId: string, context: ContextMenuContex
         : nodeData,
       ...(context.connectFrom ? { connectFromNodeId: context.connectFrom.nodeId } : {}),
       ...(label ? { connectLabel: label } : {})
-    }),
-      "创建作品"
-    );
+    });
+    const createdNodeId = createdNodeIdOf(commands);
+    const pending = ctx.canvasEdit.record(commands, "创建作品");
+    // 提交的同时选中：working projection 已同步包含新节点，失败/拒绝时由帧内失效清理移除选择。
+    if (createdNodeId) selectCreatedNode(ctx, createdNodeId);
+    return pending;
   }).then(result => {
-    if (result && !result.ok && active() && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
-      ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "创建失败", description: result.reason } });
+    if (!result) return;
+    if (!result.ok) {
+      if (active() && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
+        ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "创建失败", description: result.reason } });
+      }
     }
   }).catch(error => {
     if (active() && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvasId) {
@@ -402,8 +426,10 @@ function insertExtensionTemplateNode(ctx: Context, contributionId: string, conte
     nodeData = undefined;
   }
   if (nodeData === undefined) return;
-  void ctx.canvasEdit.record(
-    planInsertNode({ nodeType: contribution.nodeType, position: context.world, nodeData }),
-    "创建作品"
-  );
+  if (!workingCanvasOf(woohaa3CanvasStore.getState())?.id) return;
+  const commands = planInsertNode({ nodeType: contribution.nodeType, position: context.world, nodeData });
+  const createdNodeId = createdNodeIdOf(commands);
+  void ctx.canvasEdit.record(commands, "创建作品");
+  // 提交的同时选中：working projection 已同步包含新节点，失败/拒绝时由帧内失效清理移除选择。
+  if (createdNodeId) selectCreatedNode(ctx, createdNodeId);
 }

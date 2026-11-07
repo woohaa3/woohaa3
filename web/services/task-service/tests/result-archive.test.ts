@@ -20,7 +20,7 @@ import { createSqliteTaskStore } from "../src/repository/sqlite-task-store.js";
 import { loadNodeSqlite } from "../src/repository/sqlite-loader.js";
 import type { SqliteTaskHistoryRepository } from "../src/repository/history-repository.js";
 import { createResultArchiver } from "../src/worker/result-archive.js";
-import { materializeBinaryBytesFromStore } from "../src/worker/media-materialization.js";
+import { bytesFromBase64Descriptor, materializeBinaryBytesFromStore } from "../src/worker/media-materialization.js";
 
 const IMAGE_KEY = `generation-outputs/${"a".repeat(64)}.png`;
 const CHECKSUM = "a".repeat(64);
@@ -35,8 +35,8 @@ afterAll(() => {
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
 });
 
-function mediaMetadata(size = 8): MediaMetadata {
-  return { storageKey: IMAGE_KEY, contentType: "image/png", size, checksum: CHECKSUM, mediaKind: "image" };
+function mediaMetadata(size = 8, contentType = "image/png"): MediaMetadata {
+  return { storageKey: IMAGE_KEY, contentType, size, checksum: CHECKSUM, mediaKind: contentType.startsWith("audio/") ? "audio" : "image" };
 }
 
 function makeClient(options: { fail?: boolean } = {}) {
@@ -49,7 +49,7 @@ function makeClient(options: { fail?: boolean } = {}) {
       imports.push(input);
       if (options.fail) throw new Error("storage down");
       const bytesBase64 = String(input.bytesBase64 ?? "");
-      return mediaMetadata(Buffer.from(bytesBase64, "base64").byteLength);
+      return mediaMetadata(Buffer.from(bytesBase64, "base64").byteLength, String(input.contentType ?? "image/png"));
     }
   } as unknown as MediaClient;
   return { client, imports };
@@ -143,6 +143,42 @@ describe("落库前归档（result-archive）", () => {
     expect(await archive(payload)).toBeUndefined();
     expect((payload.result as { images: unknown[] }).images).toEqual([PNG]);
     expect(logs.map((event) => event.event)).toContain("task-result-archive-failed");
+  });
+
+  it("pptask base64 音频描述符：转存 WAV 字节、采用 mediaType，并删除顶层 audio 副本", async () => {
+    const { client, imports } = makeClient();
+    const archive = createResultArchiver({ mediaClient: client });
+    const WAV = Buffer.from([82, 73, 70, 70, 4, 0, 0, 0, 87, 65, 86, 69]);
+    const data = WAV.toString("base64");
+    const shared = { audio: data, audios: [{ type: "base64", data, mediaType: "audio/wav" }], providerMetadata: {} };
+    const payload = record({
+      params: { modelType: "audio", modelId: "minimax-speech-2.8-hd" },
+      result: shared,
+      state: { jobId: "job-1", record: { id: "job-1", state: "succeeded", result: { ...shared } } }
+    });
+
+    const archived = await archive(payload);
+
+    expect(imports).toHaveLength(1);
+    expect(imports[0]).toMatchObject({ contentType: "audio/wav" });
+    expect(Buffer.from(String(imports[0].bytesBase64), "base64")).toEqual(WAV);
+    expect(archived?.result).toMatchObject({ media: { contentType: "audio/wav", size: WAV.length } });
+    expect((archived?.result as Record<string, unknown>).audios).toBeUndefined();
+    expect((archived?.result as Record<string, unknown>).audio).toBeUndefined();
+    const stateRecord = (archived?.state as { record: { result: Record<string, unknown> } }).record;
+    expect(stateRecord.result).toMatchObject({ media: { contentType: "audio/wav" } });
+    expect(stateRecord.result.audio).toBeUndefined();
+    expect(stateRecord.result.audios).toBeUndefined();
+    expect((payload.result as Record<string, unknown>).audios).toEqual([{ type: "base64", data, mediaType: "audio/wav" }]);
+  });
+
+  it("base64 描述符在分配前拒绝畸形/超限输入", () => {
+    const ok = Buffer.from([1, 2, 3, 4]).toString("base64");
+    expect(bytesFromBase64Descriptor({ type: "base64", data: ok }, 4)).not.toBeNull();
+    expect(bytesFromBase64Descriptor({ type: "base64", data: "!!!!" }, 4)).toBeNull();
+    expect(bytesFromBase64Descriptor({ type: "base64", data: ok.slice(0, -1) }, 4)).toBeNull();
+    expect(bytesFromBase64Descriptor({ type: "base64", data: Buffer.alloc(8).toString("base64") }, 4)).toBeNull();
+    expect(bytesFromBase64Descriptor({ type: "base64", data: ok }, 3)).toBeNull();
   });
 
   it("多产物结果不归档（不静默丢弃第二份产物）", async () => {

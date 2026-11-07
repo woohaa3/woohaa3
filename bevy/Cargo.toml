@@ -3,7 +3,7 @@ name = "woohaa_bevy_canvas"
 version = "0.1.0"
 edition = "2024"
 description = "Woohaa3 canvas runtime, ported from xyflow-bevy (change: replace-godot-canvas-runtime-with-bevy)"
-license = "UNLICENSED"
+license = "MIT"
 publish = false
 
 [lib]

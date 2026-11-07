@@ -11,7 +11,7 @@
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import type { CanvasRoom } from "../sync/index.js";
 import type { CanvasTaskCatalog, CanvasTaskModelType, CanvasRunRequest, CanvasTaskNodeType, CanvasTaskInput, WorldCaptureGenerationBinding } from "@woohaa3/contracts";
-import { catalogModelBindings, checkModelCapability, compileVideoEditProviderPrompt, decodeWorldCamera, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, validateGenerationModeInputs, worldCaptureReferenceInput } from "@woohaa3/contracts";
+import { catalogModelBindings, checkModelCapability, compileVideoEditProviderPrompt, decodeWorldCamera, describeTaskFailure, effectiveReferencePolicy, hasReadyImageReference, IDENTITY_REFERENCE_INVALID_REASON, IDENTITY_REFERENCE_REQUIRED_REASON, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, resolveModelParameters, validateGenerationModeInputs, worldCaptureReferenceInput } from "@woohaa3/contracts";
 import type { CanvasTaskClient } from "../clients/task-client.js";
 import { collectInputMappings, resolveNodeReferenceInputs } from "./input-resolution.js";
 import type { RunInputSnapshot } from "@woohaa3/contracts";
@@ -150,6 +150,24 @@ export class CanvasRunService {
       return { ok: false, code: "empty-prompt", message: "请先输入提示词" };
     }
 
+    // 模型参数按 catalog `inputSchema` 权威复验（change: 2026-11-06-guard-video-generation-inputs）：
+    // 浏览器绕过 UI 直接发 run 时也在 provider 任务创建前拒绝，返回稳定 code；默认值同时
+    // 并入提交快照，避免「界面上有值、请求体里没有」。
+    const guarded = resolveModelParameters(
+      { modelType: model.modelType, inputSchema: model.inputSchema, defaultInput: model.defaultInput },
+      request.parameters,
+      { prompt: resolvedPrompt }
+    );
+    if (guarded.issues.length > 0) {
+      const issue = guarded.issues[0]!;
+      return {
+        ok: false,
+        code: issue.kind === "missing" ? "missing-parameter" : "invalid-parameter",
+        message: issue.message
+      };
+    }
+    const parameters = guarded.parameters;
+
     const cameraInputs = new Map<string, CanvasTaskInput>();
     for (const mapping of collectInputMappings(canvas, request.nodeId, canvas.nodeData)) {
       if (mapping.role === "text_prompt" || cameraInputs.has(mapping.sourceNodeId)) continue;
@@ -174,9 +192,24 @@ export class CanvasRunService {
       if (!reference.ok) return { ok: false, code: reference.code, message: reference.message };
       cameraInputs.set(source.id, reference.input);
     }
+    // 身份参考策略：节点设置优先于模型声明。identity-required 时提交必须带 ready 图片，
+    // 且失效/删除的参考不能被静默当成“没有参考”继续执行（change:
+    // 2026-11-06-require-identity-reference）。
+    const referencePolicy = effectiveReferencePolicy(
+      (canvas.nodeData[request.nodeId] as { referencePolicy?: unknown } | undefined)?.referencePolicy,
+      model.referencePolicy
+    );
     const resolution = resolveNodeReferenceInputs({ canvas, nodeId: request.nodeId, bindings, cameraInputs });
     if (resolution.blockingReasons.length > 0) {
-      return { ok: false, code: "invalid-input", message: resolution.blockingReasons[0] };
+      const reason =
+        referencePolicy === "identity-required"
+          ? `${IDENTITY_REFERENCE_INVALID_REASON}（${resolution.blockingReasons[0]}）`
+          : resolution.blockingReasons[0];
+      return {
+        ok: false,
+        code: referencePolicy === "identity-required" ? "identity-reference-invalid" : "invalid-input",
+        message: reason
+      };
     }
 
     // mention 权威校验与 prompt 编译（change: add-reference-inputs-and-mentions，任务 5.1–5.4）：
@@ -225,11 +258,19 @@ export class CanvasRunService {
       }
     }
 
+    if (referencePolicy === "identity-required" && !hasReadyImageReference(taskInputs)) {
+      return {
+        ok: false,
+        code: "identity-reference-required",
+        message: IDENTITY_REFERENCE_REQUIRED_REASON
+      };
+    }
+
     // edit_video：再次 sanitize/validate intents，确定性地编译进 provider prompt（change:
     // port-video-editing-dialogs，design D8）。只有授权且稳定的 annotation preview 才会在
     // prompt 中生成 `@imageN` 引用标记；缺 prompt、越界、超限或临时媒体使提交以稳定错误失败，
     // 不静默跳过。任务输入的 role/数量约束仍由下方 generationMode 校验统一把关。
-    const generationMode = readGenerationMode(request.parameters);
+    const generationMode = readGenerationMode(parameters);
     if (model.modelType === "video" && generationMode === "edit_video") {
       const intentResult = readVideoEditIntents(nodeDataOf(canvas, request.nodeId));
       if (!intentResult.ok) {
@@ -304,7 +345,7 @@ export class CanvasRunService {
             // 保存 authored（token 化原文）；不用编译后的 provider 文本覆盖（design D4）。
             prompt: authored,
             panelPrompt: authored,
-            parameters: { ...request.parameters, model: modelKey },
+            parameters: { ...parameters, model: modelKey },
             error: null,
             errorMessage: null
           }
@@ -321,6 +362,8 @@ export class CanvasRunService {
             modelKey,
             input: inputSnapshot,
             ...(worldCapture ? { worldCapture } : {}),
+            // 提交快照：参考资产身份、来源节点、slot 与稳定顺序只写一次，不随后续画布变化改写。
+            ...(taskInputs.length > 0 ? { references: taskInputs } : {}),
             status: "running",
             updatedAt: this.deps.now?.() ?? new Date().toISOString()
           }
@@ -356,7 +399,7 @@ export class CanvasRunService {
         ...(canvasTitle ? { canvasTitle } : {}),
         ...(nodeTitle ? { nodeTitle } : {}),
         prompt: providerPrompt,
-        parameters: { ...request.parameters, model: modelKey },
+        parameters: { ...parameters, model: modelKey },
         inputs: taskInputs,
         ...(worldCapture ? { worldCapture } : {})
       });
@@ -364,7 +407,9 @@ export class CanvasRunService {
       // 提交失败当场说清楚：返回 ok:false 让面板立刻显示原因，并把 begin 写下的 processing
       // 结算成 failed。留给投影器会让人一直看到「执行中」——那条路径要等 5s 轮询，而且依赖
       // Task 已经写下失败终态（2026-10-21 现场：节点转了 3 小时）。
-      const message = error instanceof Error && error.message !== "" ? error.message : "任务提交失败";
+      const message = describeTaskFailure({
+        message: error instanceof Error && error.message !== "" ? error.message : "任务提交失败"
+      });
       this.deps.logger?.({
         event: "canvas-run-submit-failed",
         canvasId: request.canvasId,

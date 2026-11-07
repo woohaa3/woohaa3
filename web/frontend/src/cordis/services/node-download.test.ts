@@ -9,7 +9,7 @@ function canvas(): ServerCanvas {
   return { ...createEmptyWoohaa3ServerCanvas("test"),
     document: { schemaVersion: "asset-canvas-v1", updatedAt: "2026-10-10T00:00:00Z", nodes: [{ id: "image", type: "image", position: { x: 20, y: 30 } }], edges: [] },
     nodeData: { image: { title: "人/物.webm", outputAssetId: "asset" } },
-    assets: [{ id: "asset", title: "图片", source: "uploaded", mediaKind: "image", status: "ready", createdAt: "2026-10-10T00:00:00Z", url: "/api/media/sha256-test" }]
+    assets: [{ id: "asset", title: "图片", source: "uploaded", mediaKind: "image", status: "ready", createdAt: "2026-10-10T00:00:00Z", url: "/api/media/sha256-test", metadata: { storageKey: "sha256-test", checksum: "test" } }]
   };
 }
 beforeEach(() => vi.stubGlobal("window", globalThis));
@@ -94,7 +94,7 @@ describe("node download recovery", () => {
       modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" },
       modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }
     };
-    state.assets.push({ id: "asset-glb", title: "角色.glb", source: "uploaded", mediaKind: "file", status: "ready", createdAt: NOW, url: "/api/media/sha256-glb" });
+    state.assets.push({ id: "asset-glb", title: "角色.glb", source: "uploaded", mediaKind: "file", status: "ready", createdAt: NOW, url: "/api/media/sha256-glb", metadata: { storageKey: "sha256-glb", contentType: "model/gltf-binary", checksum: "glb" } });
     const original = new Blob([new Uint8Array([0x67, 0x6c, 0x54, 0x46])]);
     const readMedia = vi.fn(async () => original);
     const save = vi.fn();

@@ -37,6 +37,21 @@ export type VideoFamilySpec = {
   adaptiveRatio: boolean;
   /** 参考图上限；0 表示不接受参考图（纯文生视频）。 */
   maxReferenceImages: number;
+  /**
+   * 上游要求显式比例字段时，请求里要带上的字段名（例如 Agnes 的 `aspect_ratio`）。
+   *
+   * 缺省时比例只会收敛成像素 `size`（OpenAI Videos 的通用形状）。
+   */
+  aspectRatioField?: string;
+  /** `size` 直接提交分辨率档位（`720P`），而不是像素宽高；Agnes 一类上游如此。 */
+  sizeAsTier?: boolean;
+  /**
+   * 必须出现在提交快照里的语义键。
+   *
+   * 有默认值的必填项由面板/Host 合并默认值满足；真正缺 schema 或默认值时才会被阻止。
+   * 缺省表示只有 `prompt` 必填。
+   */
+  required?: readonly string[];
 };
 
 /** 常见画幅。多数视频模型只支持前六种。 */
@@ -51,6 +66,25 @@ const RATIOS_WIDE_TALL = ["16:9", "9:16"] as const;
  * 面板最多多一个或少一个选项，不会因为区间写错而把合法请求拦在本地。
  */
 export const VIDEO_FAMILIES: readonly VideoFamilySpec[] = [
+  {
+    // Agnes Video 2.5（https://wiki.agnes-ai.com/en/docs/agnes-video-25）。
+    //
+    // 现场失败：`aspectRatio is required`、`resolution is required`、时长必须是
+    // “大于 4 秒、最多 12 秒”。比例 / 分辨率 / 时长都是请求必填，因此这里同时声明
+    // 默认值与必填，面板打开时就能把它们写进提交快照。
+    id: "agnes-video-2.5",
+    title: "Agnes Video 2.5",
+    prefixes: ["agnes-video-2.5", "agnes-video-2-5"],
+    duration: { min: 5, max: 12, step: 1, default: 5 },
+    ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"],
+    resolutions: ["720p", "1080p", "2k"],
+    defaultResolution: "720p",
+    adaptiveRatio: false,
+    maxReferenceImages: 1,
+    aspectRatioField: "aspect_ratio",
+    sizeAsTier: true,
+    required: ["aspectRatio", "resolution", "durationSeconds"]
+  },
   {
     id: "seedance-2.5",
     title: "Seedance 2.5",
@@ -127,6 +161,7 @@ const SHORT_SIDE: Readonly<Record<string, number>> = {
   "1080p": 1080,
   "1440p": 1440,
   "2160p": 2160,
+  "2k": 1440,
   "4k": 2160
 };
 
@@ -157,6 +192,7 @@ export function videoPixelSize(ratio: string, resolution: string): string | unde
 export function videoFamilyParameters(modelId: string): {
   schemaVersion: string;
   maxReferenceImages: number;
+  required: readonly string[];
   properties: Record<string, unknown>;
   defaults: Record<string, unknown>;
 } | null {
@@ -199,6 +235,7 @@ export function videoFamilyParameters(modelId: string): {
   return {
     schemaVersion: `litellm-${family.id}-video/v1`,
     maxReferenceImages: family.maxReferenceImages,
+    required: family.required ?? [],
     properties,
     defaults: {
       durationSeconds: family.duration.default,
@@ -235,13 +272,23 @@ export function videoRequestFields(
   const resolution = readText(parameters.resolution);
   if (ratio !== undefined && !isAdaptive(ratio)) {
     const safeRatio = family.ratios.includes(ratio) ? ratio : family.ratios[0]!;
+    if (family.aspectRatioField !== undefined) fields[family.aspectRatioField] = safeRatio;
     const safeResolution = resolution && family.resolutions.includes(resolution)
       ? resolution
       : family.defaultResolution;
-    const size = videoPixelSize(safeRatio, safeResolution);
-    if (size !== undefined) fields.size = size;
+    if (family.sizeAsTier) {
+      fields.size = resolutionTier(safeResolution);
+    } else {
+      const size = videoPixelSize(safeRatio, safeResolution);
+      if (size !== undefined) fields.size = size;
+    }
   }
   return fields;
+}
+
+/** 档位 → 上游大小写（`720p` → `720P`、`2k` → `2K`）。 */
+function resolutionTier(resolution: string): string {
+  return resolution.trim().toUpperCase();
 }
 
 /** 未识别家族时原样保留服务端转发的字段（服务端最了解它自己的上游）。 */

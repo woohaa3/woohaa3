@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   conversionFeedbackCurrent,
+  createdNodeIdOf,
   nodeContextMenuItems,
   type CanvasMenuNode
 } from "./plugin.js";
@@ -19,6 +20,15 @@ const nodes: CanvasMenuNode[] = [
 function ids(items: Array<{ id: string }>): string[] {
   return items.map((item) => item.id);
 }
+
+describe("createdNodeIdOf", () => {
+  it("returns the node.add id so creation can select the new node", () => {
+    expect(createdNodeIdOf([
+      { type: "node.add", node: { id: "new-node", type: "text", position: { x: 0, y: 0 } } }
+    ] as never)).toBe("new-node");
+    expect(createdNodeIdOf([{ type: "edge.remove", edgeId: "e" }] as never)).toBeNull();
+  });
+});
 
 describe("nodeContextMenuItems", () => {
   it("rejects conversion feedback after disposal, cancellation or canvas change", () => {

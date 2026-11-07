@@ -134,13 +134,35 @@ function readInputs(raw: unknown): DecodeResult<CanvasTaskInput[]> {
     if (entry.field !== undefined && !isBoundedId(entry.field)) {
       return fail("malformed-request", `inputs[${index}] 的 field 不是受控字段名`);
     }
+    const slotId =
+      entry.slotId === undefined ? undefined : isBoundedId(entry.slotId) ? entry.slotId : null;
+    if (slotId === null) {
+      return fail("malformed-request", `inputs[${index}] 的 slotId 不合法`);
+    }
+    const sourceNodeId =
+      entry.sourceNodeId === undefined ? undefined : isBoundedId(entry.sourceNodeId) ? entry.sourceNodeId : null;
+    if (entry.sourceNodeId !== undefined && sourceNodeId === null) {
+      return fail("malformed-request", `inputs[${index}] 的 sourceNodeId 不合法`);
+    }
+    const order =
+      entry.order === undefined
+        ? undefined
+        : typeof entry.order === "number" && Number.isInteger(entry.order) && entry.order >= 0
+          ? entry.order
+          : null;
+    if (order === null) {
+      return fail("malformed-request", `inputs[${index}] 的 order 必须是非负整数`);
+    }
     inputs.push({
       assetId: entry.assetId,
       role: entry.role,
       storageKey: entry.storageKey,
       mediaType: entry.mediaType,
       ...(mediaKind ? { mediaKind } : {}),
-      ...(typeof entry.field === "string" ? { field: entry.field } : {})
+      ...(typeof entry.field === "string" ? { field: entry.field } : {}),
+      ...(slotId ? { slotId } : {}),
+      ...(sourceNodeId ? { sourceNodeId } : {}),
+      ...(order !== undefined ? { order } : {})
     });
   }
   return { ok: true, value: inputs };

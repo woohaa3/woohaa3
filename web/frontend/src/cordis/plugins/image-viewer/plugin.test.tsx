@@ -27,7 +27,9 @@ function imageCanvas() {
     nodeData: { n1: { title: "海报", outputAssetId: "asset-1" } },
     assets: [{
       id: "asset-1", title: "图片", source: "uploaded", status: "ready", mediaKind: "image",
-      createdAt: "2026-10-28T00:00:00.000Z", url: "/api/media/canvas-1/asset-1.png"
+      createdAt: "2026-10-28T00:00:00.000Z", url: "/api/media/canvas-1/asset-1.png",
+      // 就绪资产必须带稳定 storageKey（fix-media-output-readiness：只带地址的「成功」不算就绪）。
+      metadata: { storageKey: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
     }]
   } as never;
 }

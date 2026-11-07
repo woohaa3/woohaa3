@@ -1,6 +1,8 @@
 import type {
   Experimental_VideoModelV4CallOptions,
+  Experimental_VideoModelV4OperationStatusResult,
   ImageModelV4CallOptions,
+  JSONValue,
   LanguageModelV4CallOptions,
   SpeechModelV4CallOptions,
 } from '@ai-sdk/provider';
@@ -15,7 +17,7 @@ import type {
 } from '../../core/types.ts';
 import { audioInput, imageInput, languageInput, videoInput } from './input.ts';
 import { audioResult, imageResult, languageResult, videoResult } from './output.ts';
-import { providerMetadata, type CommonProviderOptions, type HttpProviderProtocol } from './types.ts';
+import { providerMetadata, type CommonProviderOptions, type HttpProviderProtocol, type HttpStatus } from './types.ts';
 
 export function createHttpProvider(
   protocol: HttpProviderProtocol,
@@ -161,6 +163,8 @@ function operationMethods<OPTIONS extends { abortSignal?: AbortSignal; headers?:
           providerMetadata: providerMetadata(protocol.providerId, status.metadata),
         };
       }
+      const completed = await completedResult(protocol, modelId, modelType, status, options);
+      if (completed !== undefined) return { status: 'completed' as const, ...completed };
       const result = modelType === 'image'
         ? await imageResult(protocol.providerId, modelId, status.output, protocol.fetch, options.abortSignal, status.metadata)
         : modelType === 'audio'
@@ -181,6 +185,34 @@ function operationMethods<OPTIONS extends { abortSignal?: AbortSignal; headers?:
       },
     } : {}),
   };
+}
+
+/**
+ * 问 Provider 要 completed 结果的最终形状。
+ *
+ * 缺省或返回 `undefined` 时调用方继续走内置归一化；两者语义刻意分开：
+ * `undefined` 表示「没有自定义结果」，`null` 等其它值表示「这就是结果」。
+ */
+async function completedResult(
+  protocol: HttpProviderProtocol,
+  modelId: string,
+  modelType: PptaskModelType,
+  status: Extract<HttpStatus, { state: 'completed' }>,
+  options: { operation?: JSONValue; abortSignal?: AbortSignal; headers?: Record<string, string | undefined> },
+): Promise<Record<string, unknown> | undefined> {
+  if (!protocol.completeResult) return undefined;
+  const result = await protocol.completeResult({
+    modelId,
+    modelType,
+    input: {},
+    signal: options.abortSignal,
+    headers: options.headers,
+    output: status.output,
+    ...(status.metadata !== undefined ? { metadata: status.metadata } : {}),
+    fetch: protocol.fetch,
+    ...(options.operation !== undefined ? { operation: options.operation } : {}),
+  });
+  return result === undefined ? undefined : result as Record<string, unknown>;
 }
 
 function videoOperationMethods(protocol: HttpProviderProtocol, modelId: string) {
@@ -224,6 +256,10 @@ function videoOperationMethods(protocol: HttpProviderProtocol, modelId: string) 
           providerMetadata: providerMetadata(protocol.providerId, status.metadata),
           response,
         };
+      }
+      const completed = await completedResult(protocol, modelId, 'video', status, options);
+      if (completed !== undefined) {
+        return { status: 'completed' as const, ...completed } as unknown as Experimental_VideoModelV4OperationStatusResult;
       }
       return { status: 'completed' as const, ...videoResult(protocol.providerId, modelId, status.output, status.metadata) };
     },

@@ -5,8 +5,8 @@
  * 把它的 `rewrite` 接到 `ModelExecutionHost`。扩展只产出改写后的文本；把结果写回草稿、显示
  * 进行中/错误状态都由 Host 与面板拥有。
  *
- * 单独成模块：`ModelExecutionHost` 是懒加载 chunk，这里保持同一条懒加载边界，避免宿主闭包
- * 提前拉起执行面板实现。
+ * 单独成模块：适配层只做 slot 订阅与 `rewrite` 接线，不进入 `ModelExecutionHost` 的实现。
+ * `ModelExecutionHost` 现随执行面板定义静态装配（见 plugin.tsx），这里不再维持懒加载边界。
  */
 import { useCallback, useSyncExternalStore } from "react";
 import type { SlotsService } from "../../contracts.js";

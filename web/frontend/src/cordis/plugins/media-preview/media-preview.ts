@@ -8,6 +8,7 @@
  */
 import { objectPayload } from "../../services/dialogs/registry.js";
 import type { DialogDefinition } from "../../services/dialogs/types.js";
+import { hasReadyMediaAsset } from "@woohaa3/contracts";
 import { isAllowedMediaUrl, isAllowedNodeHistoryPreviewUrl, resolveCanonicalMediaUrl } from "../../services/media-remote.js";
 
 export const MEDIA_PREVIEW_DIALOG_ID = "media-preview";
@@ -24,12 +25,12 @@ export { isAllowedMediaUrl, isAllowedNodeHistoryPreviewUrl, resolveCanonicalMedi
 
 /** 解析给定 asset 是否可作为图片预览（canonical-only，仅 image，design D8）。 */
 export function resolveImagePreview(
-  canvas: { id?: string; assets?: ReadonlyArray<{ id: string; mediaKind?: string; status?: string; url?: string }> } | null | undefined,
+  canvas: { id?: string; assets?: ReadonlyArray<{ id: string; mediaKind?: string; status?: string; url?: string; metadata?: { storageKey?: unknown; checksum?: unknown } }> } | null | undefined,
   assetId: string
 ): { url: string; mediaKind: "image" } | null {
   const asset = canvas?.assets?.find((candidate) => candidate.id === assetId);
   if (!asset) return null;
-  if (asset.status !== "ready") return null;
+  if (!hasReadyMediaAsset(asset)) return null;
   if (asset.mediaKind !== "image") return null;
   // 预览发生在当前画布内：读请求带上画布提示，让宿主按画布路由到远端存储。
   const url = resolveCanonicalMediaUrl(asset, canvas?.id);
@@ -65,7 +66,7 @@ export function resolveAudioPreview(canvas: import("@woohaa3/contracts").ServerC
   const outputId = canvas.nodeData[nodeId]?.outputAssetId;
   if (!outputId || (assetId !== undefined && outputId !== assetId)) return null;
   const asset = canvas.assets.find(asset => asset.id === outputId);
-  if (!asset || asset.status !== "ready" || asset.mediaKind !== "audio") return null;
+  if (!asset || !hasReadyMediaAsset(asset) || asset.mediaKind !== "audio") return null;
   // 试听同样发生在当前画布内，读请求带画布提示。
   const url = resolveCanonicalMediaUrl(asset, canvas.id);
   return url ? { url, assetId: asset.id, title: asset.title || "音频试听", mediaKind: "audio" as const } : null;

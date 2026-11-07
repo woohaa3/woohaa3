@@ -204,8 +204,13 @@ describe("Canvas run service（任务 5.3）", () => {
     expect(outcome.ok).toBe(true);
     expect(submitted).toHaveLength(1);
     expect(submitted[0].workerTaskKey).toBe("r1");
+    // 提交快照带参考身份（slotId / sourceNodeId / order，change: require-identity-reference）
+    // 与字段归属 `field`；它们各管各的，不互相替代。
     expect(submitted[0].inputs).toEqual([
-      { assetId: "asset-up", role: "reference_image", storageKey: STORAGE_KEY, mediaType: "image/png", mediaKind: "image", field: "referenceImages" }
+      {
+        assetId: "asset-up", role: "reference_image", storageKey: STORAGE_KEY, mediaType: "image/png", mediaKind: "image",
+        field: "referenceImages", slotId: "slot-image-up-0", sourceNodeId: "image-up", order: 0
+      }
     ]);
 
     // 事务已把 activeRunId/job 写入权威 Y.Doc。
@@ -370,7 +375,11 @@ function videoCatalog(model: Partial<CanvasTaskCatalog["models"][number]> = {}):
         modelType: "video",
         title: "Seedance",
         interaction: { id: "generic-model", version: 1 },
-        inputSchema: {},
+        inputSchema: {
+          type: "object",
+          required: ["prompt"],
+          properties: { prompt: { type: "string", title: "提示词" } }
+        },
         defaultInput: {},
         bindings: [
           {
@@ -493,7 +502,10 @@ describe("Canvas run service 视频编辑意图编译（change: port-video-editi
     expect(prompt).not.toContain("http");
     // 任务输入仍只有稳定 edit_video 视频引用，没有临时 preview 输入。
     expect(submitted[0].inputs).toEqual([
-      { assetId: "asset-video", role: "edit_video", storageKey: STORAGE_KEY, mediaType: "video/mp4", mediaKind: "video", field: "videoUrls" }
+      {
+        assetId: "asset-video", role: "edit_video", storageKey: STORAGE_KEY, mediaType: "video/mp4", mediaKind: "video",
+        field: "videoUrls", slotId: "slot-video-up-0", sourceNodeId: "video-up", order: 0
+      }
     ]);
   });
 

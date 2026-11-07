@@ -14,6 +14,7 @@ import { CanvasZoomControls } from "./canvas-zoom-controls.js";
 import { CanvasMinimap } from "./canvas-minimap.js";
 import { CanvasSearchPanel } from "../../ui/CanvasSearchPanel.js";
 import { CanvasUndoControls } from "./canvas-undo-controls.js";
+import { CanvasEditStatus } from "./canvas-edit-status.js";
 import { CanvasUndoToast } from "./canvas-undo-toast.js";
 import { SearchIcon } from "@woohaa3/ui/icons";
 import { canvasSearchStore } from "../../services/canvas-search-store.js";
@@ -208,6 +209,16 @@ export function canvasShellExtension(): Plugin.Function<void> {
         render: () => <CanvasUndoControls edit={ctx.canvasEdit} />
       });
       ctx.effect(() => () => removeUndo(), "canvas-shell-undo");
+
+      // 每条编辑记录的等待/冲突状态与显式跳过入口（change: 2026-11-06，任务 4.2/4.3）。
+      // 不再用「正在结算上一次操作」弹窗阻断后续动作。
+      const removeEditStatus = ctx.slots.register("canvas.toolbar", {
+        id: "canvas-edit-status",
+        owner: CANVAS_SHELL_PLUGIN_ID,
+        priority: -9,
+        render: () => <CanvasEditStatus edit={ctx.canvasEdit} />
+      });
+      ctx.effect(() => () => removeEditStatus(), "canvas-shell-edit-status");
 
       // 「查找作品」入口（change: 2026-10-09-improve-canvas-workflow，任务 4.2）：
       // 除 Ctrl/⌘+F 外提供可见图标入口（触屏/首次用户可发现）。

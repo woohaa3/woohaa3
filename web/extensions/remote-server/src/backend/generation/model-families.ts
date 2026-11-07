@@ -98,12 +98,17 @@ export function withModelFamily(model: GenerationModelDefinition): GenerationMod
         ? null
         : videoFamilyParameters(model.providerModelId);
   if (family === null) return model;
+  const required =
+    "required" in family && Array.isArray(family.required)
+      ? family.required.filter((key): key is string => typeof key === "string")
+      : [];
 
   return {
     ...model,
     inputSchema: {
       type: "object",
       properties: family.properties,
+      ...(required.length > 0 ? { required } : {}),
       ...(family.schemaVersion !== undefined ? { "x-pptask-schema-version": family.schemaVersion } : {})
     },
     defaultInput: { ...family.defaults }

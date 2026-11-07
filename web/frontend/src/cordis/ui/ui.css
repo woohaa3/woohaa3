@@ -1051,6 +1051,27 @@
  * ------------------------------------------------------------------ */
 .ref-tile-strip-wrap { position: relative; }
 
+/* 身份参考策略状态与切换（change: 2026-11-06-require-identity-reference）。 */
+.ref-policy-status {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 4px;
+	color: var(--app-web-text-muted);
+	font-size: 11px;
+}
+
+.ref-policy-status[data-identity-required="true"] { color: var(--app-web-text-primary); }
+
+.ref-policy-status__toggle {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--app-interaction-accent);
+	font: inherit;
+	cursor: pointer;
+}
+
 .ref-tile-strip {
 	display: flex;
 	flex-wrap: nowrap;
@@ -3125,6 +3146,41 @@
 	height: 16px;
 }
 
+/* 每条编辑记录的等待/冲突状态：随工具条展示，不阻断画布输入。 */
+.canvas-edit-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11px;
+	color: var(--app-web-text-muted);
+}
+
+.canvas-edit-status__waiting {
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+.canvas-edit-status__conflict {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	color: var(--app-web-text-primary);
+}
+
+.canvas-edit-status__skip {
+	padding: 1px 6px;
+	border: 0;
+	border-radius: 6px;
+	background: var(--app-interaction-accent-soft);
+	color: var(--app-web-text-primary);
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.canvas-edit-status__skip:hover {
+	background: var(--app-interaction-accent);
+}
+
 /* 删除后的撤销提示：底部居中，位于控件面板上方。 */
 .canvas-undo-toast {
 	position: fixed;
@@ -3277,7 +3333,22 @@
 @media (pointer: coarse) {
   .canvas-empty .ui-button { min-height: 44px; min-width: 44px; }
 }
-.canvas-empty { pointer-events: none; }
+/* 空画布入口必须画在 Bevy 画布表面之上：surface 是绝对定位兄弟层，
+   静态流里的 section 会被它整块盖住，表现为引导文案不可见且按钮点击被画布拦截。 */
+.canvas-empty {
+	position: absolute;
+	inset: 0;
+	z-index: 4;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	text-align: center;
+	pointer-events: none;
+}
+.canvas-empty h1 { margin: 0; }
+.canvas-empty p { margin: 0; color: var(--app-text-muted); }
 .canvas-empty .ui-button { pointer-events: auto; }
 
 /* ------------------------------------------------------------------ *

@@ -316,6 +316,7 @@ export function isLocalRejection(
 /** 结果/错误白名单字段（供实现侧裁剪与测试断言复用）。 */
 export const SAFE_ACTIVITY_RESULT_FIELDS = [
   "mediaKind",
+  "mediaState",
   "text",
   "storageKey",
   "contentType",

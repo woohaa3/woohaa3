@@ -12,6 +12,7 @@
  * - 图片成功结果只携带稳定 COS metadata，不携带图片 base64/Blob。
  */
 import type { GenerationModelCapabilityFacts } from "./model-capabilities.js";
+import type { CanvasReferencePolicy } from "./reference-policy.js";
 
 /** 可执行的节点类型。text/image/video/audio 有执行入口。 */
 export type CanvasTaskNodeType = "image" | "text" | "video" | "audio";
@@ -140,6 +141,16 @@ export type CanvasTaskInput = {
    * 旧客户端可缺省：缺省时 Task 按 `role + mediaKind` 找第一个匹配的绑定（旧行为）。
    */
   field?: string;
+  /**
+   * 提交快照里的参考身份（change: 2026-11-06-require-identity-reference）。
+   *
+   * `slotId` / `sourceNodeId` / `order` 只描述这次提交选中的输入槽与稳定顺序；
+   * 它们不授予执行权限，Task Service 仍按 storageKey / assetId 重新校验。
+   * 旧客户端可缺省，服务端按输入数组顺序补全。
+   */
+  slotId?: string;
+  sourceNodeId?: string;
+  order?: number;
 };
 
 /** 浏览器/Canvas 提交的任务请求体。 */
@@ -258,6 +269,11 @@ export type CanvasTaskCatalogModel = {
   defaultInput: Record<string, unknown>;
   /** 规范化多模态参考输入 bindings（新服务只写这一项）。 */
   bindings: CanvasTaskInputBinding[];
+  /**
+   * 模型声明的身份一致性参考策略；缺省 `optional`。
+   * 节点设置 `nodeData.referencePolicy` 优先于本字段。
+   */
+  referencePolicy?: CanvasReferencePolicy;
   taskTimeoutMs: number;
   /**
    * 模型级 prompt 要求（change: 2026-10-04-add-runninghub-and-extensionize-litellm，任务 3.4）。

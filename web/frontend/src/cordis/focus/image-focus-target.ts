@@ -14,6 +14,7 @@
  * 纯函数、只读调用方传入的 canonical 画布；不 import 任何插件实现、不写状态。
  */
 import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
+import { hasReadyMediaAsset } from "@woohaa3/contracts";
 import { resolveCanonicalMediaUrl } from "../services/media-remote.js";
 
 export type ImageFocusTarget = {
@@ -37,7 +38,7 @@ export function resolveImageFocusTarget(canvas: ServerCanvas | null, nodeId: str
   const outputId = typeof data?.outputAssetId === "string" ? data.outputAssetId : "";
   if (!outputId) return null;
   const asset = canvas.assets.find((candidate) => candidate.id === outputId);
-  if (!asset || asset.status !== "ready" || asset.mediaKind !== "image") return null;
+  if (!asset || !hasReadyMediaAsset(asset) || asset.mediaKind !== "image") return null;
   // 路径回溯在编辑扩展侧被明确拒绝；宿主兜底不能比它更宽松，否则会放行一个编辑器打不开的目标。
   if (typeof asset.url === "string" && asset.url.includes("..")) return null;
   const url = resolveCanonicalMediaUrl(asset, canvas.id);

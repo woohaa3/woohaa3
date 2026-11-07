@@ -22,7 +22,7 @@ import {
   normalizeMediaType,
   DEFAULT_MAX_UPLOAD_BYTES
 } from "../application/ingest.js";
-import { guardedDownload, GuardedDownloadError } from "../security/guarded-fetch.js";
+import { classifyDownloadFailure, downloadProviderUrl } from "./url-import.js";
 import { canvasScopeOf } from "./media-scope.js";
 
 /** 生成结果转存允许的媒体类型（图片 + 视频 + 音频）。 */
@@ -52,10 +52,17 @@ export class MediaApplicationError extends Error {
     | "media-not-found"
     | "storage-failed"
     | "unavailable";
-  constructor(code: MediaApplicationError["code"], message: string) {
+  /**
+   * 上游 provider/CDN 的 HTTP 状态（可得时）。
+   *
+   * 只用于任务错误诊断（例如 404 表示 provider 临时 URL 已失效），不携带响应体/URL。
+   */
+  readonly status?: number;
+  constructor(code: MediaApplicationError["code"], message: string, status?: number) {
     super(message);
     this.name = "MediaApplicationError";
     this.code = code;
+    if (status !== undefined) this.status = status;
   }
 }
 
@@ -63,6 +70,9 @@ export type MediaApplicationServiceOptions = {
   storage: MediaStorage;
   maxImportBytes?: number;
   importTimeoutMs?: number;
+  /** provider URL 转存的重试退避（默认 300ms/900ms；测试可注入零等待或关闭重试）。 */
+  importRetryDelaysMs?: readonly number[];
+  importSleep?: (ms: number) => Promise<void>;
   signTtlSeconds?: number;
   fetchImpl?: typeof globalThis.fetch;
   resolveHost?: (hostname: string) => Promise<string[]>;
@@ -73,7 +83,7 @@ export type MediaApplicationServiceOptions = {
    * 进程内 port 直接调本服务，不经 `api/internal-handler.ts`（那条路径自己会 log），所以
    * 没有这个出口时线上只剩一句「受控下载失败」，分不清是超时、403 还是响应类型被拒。
    */
-  logger?: (event: { event: string; status: number; code?: string }) => void;
+  logger?: (event: { event: string; status: number; code?: string; upstreamStatus?: number }) => void;
 };
 
 export type MediaApplicationService = {
@@ -206,27 +216,26 @@ export function createMediaApplicationService(
       const requestedMax = Math.min(input.maxBytes ?? maxImport, maxImport);
       let downloaded;
       try {
-        downloaded = await guardedDownload({
+        downloaded = await downloadProviderUrl({
           url: input.url,
           maxBytes: requestedMax,
           timeoutMs: options.importTimeoutMs ?? DEFAULT_IMPORT_TIMEOUT_MS,
           allowedMediaTypes: [...GENERATED_IMPORT_MEDIA_TYPES],
           fetchImpl: options.fetchImpl,
-          resolveHost: options.resolveHost
+          resolveHost: options.resolveHost,
+          ...(options.importRetryDelaysMs ? { retryDelaysMs: options.importRetryDelaysMs } : {}),
+          ...(options.importSleep ? { sleep: options.importSleep } : {})
         });
       } catch (error) {
-        const code = error instanceof GuardedDownloadError ? error.code : "http-error";
-        // 守卫失败码只进日志（不含 URL / 凭据）：对外文案保持笼统，诊断靠这一行。
+        const failure = classifyDownloadFailure(error);
+        // 守卫失败码只进日志（不含 URL / 凭据）：对外文案保持笼统，诊断靠 code/status。
         options.logger?.({
           event: "media-import",
-          status: code === "blocked-host" || code === "unsupported-protocol" ? 400 : code === "too-large" ? 413 : 502,
-          code
+          status: failure.httpStatus,
+          code: failure.code,
+          ...(failure.upstreamStatus !== undefined ? { upstreamStatus: failure.upstreamStatus } : {})
         });
-        if (code === "blocked-host" || code === "unsupported-protocol") {
-          throw new MediaApplicationError("unsupported", "受控下载失败");
-        }
-        if (code === "too-large") throw new MediaApplicationError("limit-exceeded", "受控下载失败");
-        throw new MediaApplicationError("storage-failed", "受控下载失败");
+        throw new MediaApplicationError(failure.code, "受控下载失败", failure.upstreamStatus);
       }
       return persistBytes({
         bytes: downloaded.bytes,

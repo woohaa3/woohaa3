@@ -557,7 +557,8 @@ export async function installCanvasPageServices(
   // 页面级编辑历史（撤销/重做）；随 page scope dispose 清空（change: 2026-10-09，任务 1.5）。
   const canvasEdit = createCanvasEditService({
     session,
-    getCanvas: () => woohaa3CanvasStore.getState().canvas
+    getCanvas: () => woohaa3CanvasStore.getState().canvas,
+    getWorkingCanvas: () => workingCanvasOf(woohaa3CanvasStore.getState())
   });
   ctx.provide("canvasEdit" as never, canvasEdit as never);
   if (options.testHooks ?? true) {

@@ -406,8 +406,8 @@ export function sampleWorldAnimation(
   const now = Number.isFinite(time) ? Math.max(0, Math.min(time, ir.duration)) : 0;
   const instances = new Map<string, SampledInstanceMotion>();
   const cameras = new Map<string, SampledCameraMotion>();
-  for (const track of [...ir.instanceTracks].sort((a, b) => a.startTime - b.startTime)) {
-    const value = sampleTrack(track, now);
+  for (const track of applicableTracks(ir.instanceTracks, now)) {
+    const value = sampleTrack(track, now, true);
     if (!value) continue;
     const current = instances.get(track.targetId) ?? {};
     if (track.property === "position") current.position = { u: value[0]!, v: value[1]!, h: value[2]! };
@@ -415,8 +415,8 @@ export function sampleWorldAnimation(
     else current.scale = value[0]!;
     instances.set(track.targetId, current);
   }
-  for (const track of [...ir.cameraTracks].sort((a, b) => a.startTime - b.startTime)) {
-    const value = sampleTrack(track, now);
+  for (const track of applicableTracks(ir.cameraTracks, now)) {
+    const value = sampleTrack(track, now, true);
     if (!value) continue;
     const current = cameras.get(track.targetId) ?? {};
     if (track.property === "position") current.position = { u: value[0]!, v: value[1]!, h: value[2]! };
@@ -469,8 +469,27 @@ function interpolateFinite(from: number, to: number, t: number): number {
   return (from >= 0) === (to >= 0) ? from + (to - from) * t : from * (1 - t) + to * t;
 }
 
-function sampleTrack(track: WorldInstanceTrack | WorldCameraTrack | WorldPartTrack, now: number): number[] | null {
-  if (now < track.startTime) return null;
+/** Hold the first segment before it starts, then the most recently started segment (including gaps). */
+function applicableTracks<T extends WorldInstanceTrack | WorldCameraTrack>(tracks: T[], now: number): T[] {
+  const selected = new Map<string, T>();
+  for (const track of tracks) {
+    const key = `${track.targetId}:${track.property}`;
+    const previous = selected.get(key);
+    if (!previous || (track.startTime <= now
+      ? previous.startTime > now || track.startTime >= previous.startTime
+      : previous.startTime > now && track.startTime <= previous.startTime)) {
+      selected.set(key, track);
+    }
+  }
+  return [...selected.values()];
+}
+
+function sampleTrack(
+  track: WorldInstanceTrack | WorldCameraTrack | WorldPartTrack,
+  now: number,
+  holdBeforeStart = false
+): number[] | null {
+  if (now < track.startTime) return holdBeforeStart ? [...track.from] : null;
   if ("cycle" in track && track.cycle) {
     const {period,phase,keyframes} = track.cycle;
     const elapsed = Math.min(now,track.endTime) - track.startTime;

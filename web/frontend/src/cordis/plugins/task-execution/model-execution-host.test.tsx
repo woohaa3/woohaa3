@@ -269,3 +269,140 @@ describe("目录没有该类型模型时的空态面板", () => {
     expect(panel!.querySelector(".mc-panel__grid-control")!.closest(".mc-panel__grid-item--untitled")).not.toBeNull();
   });
 });
+
+/**
+ * 视频参数 schema 门禁（change: 2026-11-06-guard-video-generation-inputs）。
+ *
+ * N05 / N09 的失败输入（缺 aspectRatio、缺 resolution、时长越界）都必须在这里被拦下，
+ * 且默认值要真的进入 submit 快照，而不是只显示在控件上。
+ */
+function videoCatalog(options: {
+  required?: string[];
+  defaults?: Record<string, unknown>;
+} = {}) {
+  return catalogFixture([
+    {
+      modelKey: "video-model",
+      modelType: "video",
+      interaction: { id: "test-panel", version: 1 },
+      inputSchema: {
+        type: "object",
+        required: options.required ?? ["prompt", "aspectRatio", "resolution", "durationSeconds"],
+        properties: {
+          prompt: { type: "string", title: "提示词" },
+          aspectRatio: { type: "string", title: "比例", enum: ["16:9", "9:16", "1:1"] },
+          resolution: { type: "string", title: "分辨率", enum: ["720p", "1080p", "2k"] },
+          durationSeconds: { type: "number", title: "时长", minimum: 5, maximum: 12, unit: "秒" }
+        }
+      },
+      defaultInput: options.defaults ?? {}
+    }
+  ]);
+}
+
+async function mountVideoHost(catalog: CanvasTaskCatalog, submit: ReturnType<typeof vi.fn>) {
+  let panel: ModelPanelProps | undefined;
+  const registry = new ModelInteractionService();
+  registry.register({
+    id: "test-panel",
+    version: 1,
+    owner: "test",
+    Panel: (props) => {
+      panel = props;
+      return <output>{props.blockingReasons?.join("；")}</output>;
+    }
+  });
+  await mount(
+    <ModelExecutionHost
+      canvasId="canvas-1"
+      selectedNodeId={NODE_ID}
+      session={{} as never}
+      runClient={{} as never}
+      writable
+      dialogs={new DialogService()}
+      catalog={new StubCatalogService(catalog)}
+      registry={registry}
+      draftStore={createModelDraftStore()}
+      submitCoordinator={{ submit, cancel: vi.fn() }}
+    />
+  );
+  if (!panel) throw new Error("未渲染视频面板");
+  return panel;
+}
+
+describe("ModelExecutionHost 视频参数门禁", () => {
+  it("缺 aspectRatio 时拒绝提交且不调用协调器", async () => {
+    const submit = vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }));
+    const panel = await mountVideoHost(videoCatalog(), submit);
+    let outcome: Awaited<ReturnType<ModelPanelProps["submit"]>> | undefined;
+    await act(async () => {
+      outcome = await panel.submit({
+        prompt: "一段动画",
+        parameters: { resolution: "720p", durationSeconds: 5 }
+      });
+    });
+    expect(outcome).toMatchObject({ ok: false });
+    expect(outcome !== undefined && !outcome.ok ? outcome.error : "").toContain(
+      "缺少必填参数「比例」（aspectRatio）"
+    );
+    expect(panel.blockingReasons?.join("；")).toContain("缺少必填参数「比例」");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("缺 resolution 时拒绝提交", async () => {
+    const submit = vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }));
+    const panel = await mountVideoHost(videoCatalog(), submit);
+    await act(async () => {
+      await panel.submit({
+        prompt: "一段动画",
+        parameters: { aspectRatio: "16:9", durationSeconds: 5 }
+      });
+    });
+    expect(panel.blockingReasons?.join("；")).toContain("缺少必填参数「分辨率」（resolution）");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("时长越界时拒绝提交并显示范围", async () => {
+    const submit = vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }));
+    const panel = await mountVideoHost(videoCatalog(), submit);
+    let outcome: Awaited<ReturnType<ModelPanelProps["submit"]>> | undefined;
+    await act(async () => {
+      outcome = await panel.submit({
+        prompt: "一段动画",
+        parameters: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 13 }
+      });
+    });
+    expect(outcome).toMatchObject({ ok: false });
+    expect(outcome !== undefined && !outcome.ok ? outcome.error : "").toContain("时长不能大于 12秒");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("提交快照包含模型默认值", async () => {
+    const submit = vi.fn(async (_input: { parameters: Record<string, unknown> }) => ({
+      ok: true as const,
+      runId: "r",
+      jobId: "j"
+    }));
+    const panel = await mountVideoHost(
+      videoCatalog({ defaults: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 } }),
+      submit
+    );
+    await act(async () => {
+      await panel.submit({ prompt: "一段动画", parameters: {} });
+    });
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({
+      parameters: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 }
+    });
+  });
+});
+
+describe("ModelExecutionHost 未提交视频节点", () => {
+  it("从未提交的视频节点向 Panel 标记 unsubmitted", async () => {
+    const panel = await mountVideoHost(
+      videoCatalog({ defaults: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 } }),
+      vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }))
+    );
+    expect(panel.unsubmitted).toBe(true);
+  });
+});
