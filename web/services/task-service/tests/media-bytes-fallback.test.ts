@@ -174,6 +174,23 @@ describe("URL 转存失败后的字节回退", () => {
     expect(historyUpserts.at(-1)).toMatchObject({ state: "succeeded", result: { storageKey: AUDIO_KEY } });
   });
 
+  it("音频：pptask base64 描述符 → 按 audio/wav 转存字节", async () => {
+    const WAV = Buffer.from([82, 73, 70, 70, 4, 0, 0, 0, 87, 65, 86, 69]);
+    const { runtime, imports, historyUpserts, association } = harness({
+      rawResult: { audios: [{ type: "base64", data: WAV.toString("base64"), mediaType: "audio/wav" }] }
+    });
+    await materializeBinaryResult(runtime, record({ modelType: "audio" }), association, {
+      kind: "url",
+      url: "https://provider.example/out.wav",
+      modelType: "audio"
+    });
+
+    expect(imports.map((call) => call.kind)).toEqual(["url", "bytes"]);
+    expect(imports[1].input).toMatchObject({ contentType: "audio/wav" });
+    expect(Buffer.from(String(imports[1].input.bytesBase64), "base64")).toEqual(WAV);
+    expect(historyUpserts.at(-1)).toMatchObject({ state: "succeeded", result: { storageKey: AUDIO_KEY } });
+  });
+
   it("视频：不回退字节，仍落 failed（大对象只接受地址）", async () => {
     const { runtime, imports, historyUpserts, association } = harness({
       rawResult: { videos: [PNG_BYTES] }

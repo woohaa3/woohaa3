@@ -12,7 +12,7 @@
 
 ## 准备开发环境
 
-按照 [README](README.md#从源码运行)安装依赖并启动应用。工具链和构建细节见[开发指南](docs/development.md)，模块入口见[代码地图](CODEMAP.md)，代码组织规则见 [AGENTS.md](AGENTS.md)。
+按照[开发指南](docs/development.md)安装工具链和依赖并启动应用。模块入口见[代码地图](CODEMAP.md)，代码组织规则见 [AGENTS.md](AGENTS.md)。
 
 所有命令在仓库根目录执行。改动应保持客户端能够独立 checkout、构建和运行。
 

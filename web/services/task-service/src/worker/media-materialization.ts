@@ -534,9 +534,10 @@ function bytesFromResult(result: unknown, modelType: BinaryModelType): StoredBin
       : container.images;
   if (!Array.isArray(list) || list.length === 0) return undefined;
 
-  const bytes = toUint8Array(list[0]);
+  const maxBytes = maxBytesFor(modelType);
+  const bytes = toUint8Array(list[0], maxBytes);
   if (!bytes || bytes.byteLength === 0) return undefined;
-  if (bytes.byteLength > maxBytesFor(modelType)) return undefined;
+  if (bytes.byteLength > maxBytes) return undefined;
 
   return {
     kind: "bytes",
@@ -544,6 +545,31 @@ function bytesFromResult(result: unknown, modelType: BinaryModelType): StoredBin
     contentType: readProviderContentType(result, modelType),
     modelType
   };
+}
+
+/**
+ * pptask normalizes provider audio/image bytes into a JSON-safe descriptor:
+ * `{ type: "base64", data, mediaType }`.  Older records used raw Uint8Array
+ * (or its JSON `{ "0": n, ... }` form).  Accept both at the durable boundary;
+ * otherwise a valid WAV/MP3 is reported as "no transferable source".
+ */
+export function bytesFromBase64Descriptor(value: unknown, maxBytes = Number.POSITIVE_INFINITY): { bytes: Uint8Array; mediaType?: string } | null {
+  if (!isRecord(value) || value.type !== "base64" || typeof value.data !== "string" || value.data.length === 0) return null;
+  const encoded = value.data;
+  // Reject before allocation: base64 expands 3 bytes to 4 chars.  Buffer.from
+  // silently ignores malformed tails, so also require canonical alphabet,
+  // padding and a byte-for-byte round trip.
+  if (Number.isFinite(maxBytes) && encoded.length > 4 * Math.ceil(maxBytes / 3)) return null;
+  if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return null;
+  const mediaType = typeof value.mediaType === "string" ? value.mediaType : undefined;
+  try {
+    const decoded = Buffer.from(encoded, "base64");
+    if (decoded.byteLength === 0 || decoded.byteLength > maxBytes) return null;
+    if (decoded.toString("base64") !== encoded) return null;
+    return { bytes: new Uint8Array(decoded.buffer, decoded.byteOffset, decoded.byteLength), mediaType };
+  } catch {
+    return null;
+  }
 }
 
 function maxBytesFor(modelType: BinaryModelType): number {
@@ -560,6 +586,13 @@ function defaultContentTypeFor(modelType: BinaryModelType): string {
 
 /** 从原始 provider result 的 providerMetadata 读取媒体类型（归档时也要用它定 contentType）。 */
 export function readProviderContentType(raw: unknown, modelType: BinaryModelType): string {
+  const container = isRecord(raw) ? (raw as Record<string, unknown>) : undefined;
+  const direct = container
+    ? (modelType === "image" ? container.images : modelType === "audio" ? container.audios : container.videos)
+    : undefined;
+  const directFirst = Array.isArray(direct) ? direct[0] : undefined;
+  const directMediaType = isRecord(directFirst) ? directFirst.mediaType : undefined;
+  if (typeof directMediaType === "string" && directMediaType.startsWith(`${modelType}/`)) return directMediaType;
   const metadata = isRecord(raw) ? (raw as { providerMetadata?: unknown }).providerMetadata : undefined;
   if (isRecord(metadata)) {
     for (const entry of Object.values(metadata)) {
@@ -578,7 +611,9 @@ export function readProviderContentType(raw: unknown, modelType: BinaryModelType
   return defaultContentTypeFor(modelType);
 }
 
-function toUint8Array(value: unknown): Uint8Array | null {
+function toUint8Array(value: unknown, maxBytes: number): Uint8Array | null {
+  const descriptor = bytesFromBase64Descriptor(value, maxBytes);
+  if (descriptor) return descriptor.bytes;
   if (value instanceof Uint8Array) return value;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (ArrayBuffer.isView(value)) {

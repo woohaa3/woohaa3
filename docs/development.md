@@ -2,18 +2,27 @@
 
 [返回项目首页](../README.md) · [配置共享](configuration-sharing.md)
 
-Run all commands from the repository root.
+Clone the repository first:
+
+```sh
+git clone https://github.com/woohaa3/woohaa3.git
+cd woohaa3
+```
+
+Run all commands below from the repository root. The packaged desktop app is available from the [download page](http://woohaa3.zombee.tech/download) and does not require this development setup.
 
 ## Prerequisites and startup
 
 Use Node.js 24 or newer, pnpm 11.17.0 and Rust 1.97.1 (pinned in `rust-toolchain.toml`) with `wasm32-unknown-unknown`. Install `wasm-bindgen-cli` 0.2.128 (`cargo install wasm-bindgen-cli --version 0.2.128 --locked`) and Binaryen’s `wasm-opt` on PATH. Bevy’s C++ dependencies require LLVM clang/clang++ with WebAssembly target support (Apple’s system clang does not include it). Install LLVM through Homebrew, your Linux package manager, or the Windows LLVM installer. The build probes PATH and standard LLVM locations and selects `clang`, `clang++`, `llvm-ar`, and `llvm-ranlib` from that LLVM. Apple's `ar` writes an empty archive for WebAssembly objects, which drops meshopt symbols at link time. Override with `CC_wasm32_unknown_unknown`, `CXX_wasm32_unknown_unknown`, `AR_wasm32_unknown_unknown`, and `RANLIB_wasm32_unknown_unknown` when needed. Desktop builds also need the platform prerequisites for Tauri 2.
 
 ```sh
-pnpm install
-pnpm -C web install
-pnpm -C api install
+pnpm install --frozen-lockfile
+pnpm -C web install --frozen-lockfile
+pnpm -C api install --frozen-lockfile
 pnpm dev
 ```
+
+Open <http://localhost:5173> by default; the local host uses port `5180`. Follow the addresses printed in the terminal if you override the ports.
 
 The development and production build commands generate the Bevy WASM binaries and JavaScript bindings from source before starting Vite. The first build compiles Rust; later runs reuse build caches. These generated files are not committed. `pnpm build:wasm` builds the renderer bindings explicitly.
 

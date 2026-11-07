@@ -3340,7 +3340,22 @@
 @media (pointer: coarse) {
   .canvas-empty .ui-button { min-height: 44px; min-width: 44px; }
 }
-.canvas-empty { pointer-events: none; }
+/* 空画布入口必须画在 Bevy 画布表面之上：surface 是绝对定位兄弟层，
+   静态流里的 section 会被它整块盖住，表现为引导文案不可见且按钮点击被画布拦截。 */
+.canvas-empty {
+	position: absolute;
+	inset: 0;
+	z-index: 4;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	text-align: center;
+	pointer-events: none;
+}
+.canvas-empty h1 { margin: 0; }
+.canvas-empty p { margin: 0; color: var(--app-text-muted); }
 .canvas-empty .ui-button { pointer-events: auto; }
 
 /* ------------------------------------------------------------------ *

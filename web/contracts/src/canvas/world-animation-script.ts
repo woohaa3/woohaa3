@@ -307,7 +307,7 @@ export function sampleWorldAnimation(
   const now = Number.isFinite(time) ? Math.max(0, Math.min(time, ir.duration)) : 0;
   const instances = new Map<string, SampledInstanceMotion>();
   const cameras = new Map<string, SampledCameraMotion>();
-  for (const track of ir.instanceTracks) {
+  for (const track of applicableTracks(ir.instanceTracks, now)) {
     const value = sampleTrack(track, now);
     if (!value) continue;
     const current = instances.get(track.targetId) ?? {};
@@ -316,7 +316,7 @@ export function sampleWorldAnimation(
     else current.scale = value[0]!;
     instances.set(track.targetId, current);
   }
-  for (const track of ir.cameraTracks) {
+  for (const track of applicableTracks(ir.cameraTracks, now)) {
     const value = sampleTrack(track, now);
     if (!value) continue;
     const current = cameras.get(track.targetId) ?? {};
@@ -350,6 +350,21 @@ export function sampleWorldAnimationInArea(
   shift(sample.instances);
   shift(sample.cameras);
   return sample;
+}
+
+/** Hold the first segment before it starts, then the most recently started segment (including gaps). */
+function applicableTracks<T extends WorldInstanceTrack | WorldCameraTrack>(tracks: T[], now: number): T[] {
+  const selected = new Map<string, T>();
+  for (const track of tracks) {
+    const key = `${track.targetId}:${track.property}`;
+    const previous = selected.get(key);
+    if (!previous || (track.startTime <= now
+      ? previous.startTime > now || track.startTime >= previous.startTime
+      : previous.startTime > now && track.startTime <= previous.startTime)) {
+      selected.set(key, track);
+    }
+  }
+  return [...selected.values()];
 }
 
 function sampleTrack(track: WorldInstanceTrack | WorldCameraTrack, now: number): number[] | null {
