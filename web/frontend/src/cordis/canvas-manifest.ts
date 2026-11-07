@@ -43,6 +43,7 @@ import { pasteImportExtension, PASTE_IMPORT_PLUGIN_ID } from "./plugins/paste-im
 import { nodeHistoryExtension, NODE_HISTORY_PLUGIN_ID } from "./plugins/node-history/plugin.js";
 import { videoEditorExtension, VIDEO_EDITOR_PLUGIN_ID } from "./plugins/video-editor/video-editor-plugin.js";
 import { imageViewerExtension, IMAGE_VIEWER_PLUGIN_ID } from "./plugins/image-viewer/plugin.js";
+import { panoramaViewerExtension, PANORAMA_VIEWER_PLUGIN_ID } from "./plugins/panorama-viewer/plugin.js";
 import { focusConnectionsExtension, FOCUS_CONNECTIONS_PLUGIN_ID } from "./plugins/focus-connections/plugin.js";
 import { modelEditorExtension, MODEL_EDITOR_PLUGIN_ID } from "./plugins/model-editor/model-editor-plugin.js";
 import { runStateExtension, RUN_STATE_PLUGIN_ID } from "./plugins/run-state/plugin.js";
@@ -273,6 +274,15 @@ export const CANVAS_PLUGIN_CATALOG: readonly CanvasExtensionCatalogEntry[] = [
     required: true,
     configurable: false,
     create: () => imageViewerExtension()
+  },
+  // required：全景查看（图片节点横条「查看全景」，球面环视 2:1 全景图；只读本地视图）。
+  {
+    id: PANORAMA_VIEWER_PLUGIN_ID,
+    name: "全景查看",
+    description: "图片节点的「查看全景」：在球面里拖动环视等距柱状全景图。",
+    required: true,
+    configurable: false,
+    create: () => panoramaViewerExtension()
   },
   // required：视频聚焦工作区（change: 2026-10-10-add-video-node-focus-workspace）。
   {
