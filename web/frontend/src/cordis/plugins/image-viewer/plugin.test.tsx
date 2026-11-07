@@ -4,7 +4,7 @@
  * 关注的是「扩展缺席也必须能双击看图」与「编辑器装入后必须让位」这一对约束：
  * 同一 focus kind 出现两个工作区贡献会被公共宿主判成歧义（「多个扩展声明了此节点的工作区」）。
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Context } from "@deepseek-ai/cordis";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { startFrontendRuntime, type FrontendRuntime } from "../../kernel.js";
@@ -75,19 +75,19 @@ afterEach(async () => {
 });
 
 describe("宿主默认图片聚焦查看器", () => {
-  it("没有其他图片工作区时注册 kind=image 的独占工作区", async () => {
+  it("注册 kind=image-view 的独占工作区（与编辑器的 kind=image 分开）", async () => {
     const harness = await makeHarness();
     runtime = harness.runtime;
-    const workspaces = harness.slots.list("canvas.focus-workspace").filter((entry) => entry.kind === "image");
+    const workspaces = harness.slots.list("canvas.focus-workspace").filter((entry) => entry.kind === "image-view");
     expect(workspaces.map((entry) => entry.id)).toEqual([IMAGE_VIEWER_WORKSPACE_ID]);
     expect(workspaces[0]?.owner).toBe(IMAGE_VIEWER_PLUGIN_ID);
     expect(workspaces[0]?.exclusive).toBe(true);
   });
 
-  it("编辑器扩展装入后让位，卸载后重新接管", async () => {
+  it("编辑器装入后查看器仍在：两者是不同 kind，不再是让位关系", async () => {
     const harness = await makeHarness();
     runtime = harness.runtime;
-    // 模拟 PhotoCraft 一类图片编辑器装入（同 kind，不同 id）。
+    // 模拟 PhotoCraft 一类图片编辑器装入（kind=image，与查看器的 image-view 并存）。
     const removeEditor = harness.slots.register("canvas.focus-workspace", {
       id: "photocraft-focus",
       owner: "photocraft",
@@ -95,7 +95,8 @@ describe("宿主默认图片聚焦查看器", () => {
       exclusive: true,
       render: () => null
     });
-    expect(harness.slots.list("canvas.focus-workspace").map((entry) => entry.id)).toEqual(["photocraft-focus"]);
+    expect(harness.slots.list("canvas.focus-workspace").map((entry) => entry.kind).sort())
+      .toEqual(["image", "image-view"]);
     removeEditor();
     expect(harness.slots.list("canvas.focus-workspace").map((entry) => entry.id)).toEqual([IMAGE_VIEWER_WORKSPACE_ID]);
   });
@@ -117,5 +118,51 @@ describe("宿主默认图片聚焦查看器", () => {
     await harness.runtime.dispose();
     runtime = null;
     expect(harness.slots.list("canvas.focus-workspace")).toHaveLength(0);
+  });
+});
+
+describe("节点操作横条「去P图」入口", () => {
+  const editAction = (slots: SlotRegistry) => slots.list("canvas.node-action").find((entry) => entry.id === "image-edit-focus");
+
+  it("编辑器缺席时不呈现：点它只会得到只读查看器，与文案不符", async () => {
+    const harness = await makeHarness();
+    runtime = harness.runtime;
+    // 贡献始终在册（这样编辑器热装入后无需重注册），是否呈现由 `describe` 决定。
+    const action = editAction(harness.slots);
+    expect(action).toBeDefined();
+    expect(action!.describe({ nodeId: "n1", nodeType: "image", writable: true })).toBeNull();
+  });
+
+  it("编辑器在位时按图片节点呈现，并排在「转 3D」之后", async () => {
+    const harness = await makeHarness();
+    runtime = harness.runtime;
+    const removeEditor = harness.slots.register("canvas.focus-workspace", {
+      id: "photocraft-focus", owner: "photocraft", kind: "image", exclusive: true, render: () => null
+    });
+    const action = editAction(harness.slots);
+    expect(action).toBeDefined();
+    // 选中「转 3D」的 order 是 20；本动作 21，因此在它右边。
+    expect(action!.order).toBeGreaterThan(20);
+    const descriptor = action!.describe({ nodeId: "n1", nodeType: "image", writable: false });
+    expect(descriptor).toMatchObject({ label: "去P图", icon: "photoshop", enabled: true });
+    // 非图片节点、或图片尚未就绪时不呈现。
+    expect(action!.describe({ nodeId: "missing", nodeType: "text", writable: true })).toBeNull();
+    removeEditor();
+    expect(editAction(harness.slots)).toBeDefined(); // 贡献始终在册，是否呈现由 describe 决定
+    expect(editAction(harness.slots)!.describe({ nodeId: "n1", nodeType: "image", writable: true })).toBeNull();
+  });
+
+  it("激活走与双击同一条进入路径（requestEnterNodeFocus / kind=image）", async () => {
+    const harness = await makeHarness();
+    runtime = harness.runtime;
+    const enter = vi.spyOn(harness.navigation, "requestEnterNodeFocus").mockResolvedValue({ ok: true } as never);
+    const removeEditor = harness.slots.register("canvas.focus-workspace", {
+      id: "photocraft-focus", owner: "photocraft", kind: "image", exclusive: true, render: () => null
+    });
+    editAction(harness.slots)!.activate({
+      nodeId: "n1", nodeType: "image", writable: true, menu: false, requestSettings: () => undefined
+    });
+    expect(enter).toHaveBeenCalledWith({ nodeId: "n1", kind: "image", owner: "direct" });
+    removeEditor();
   });
 });

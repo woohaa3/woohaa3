@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { useSyncExternalStore } from "react";
 import type { ServerCanvas } from "@woohaa3/contracts";
 import type { CanvasNavigationService } from "../navigation/contracts.js";
+import { isImageFocusKind } from "../navigation/contracts.js";
 import type { CanvasSlotProps, SlotContribution, SlotsService } from "../contract/platform.js";
 import { useService } from "../react.js";
 import { Button } from "@woohaa3/ui/primitives";
@@ -93,7 +94,7 @@ export function documentWorkspaceAvailable(slots: Pick<SlotsService, "list">, do
  * 呈现不透明背景，不保留节点媒体取景覆盖层，避免双主图与事件穿透。
  */
 export function showsMediaFocusOverlay(mode: { type: string; kind?: string }): boolean {
-  return mode.type === "node-focus" && (mode.kind === "image" || mode.kind === "video");
+  return mode.type === "node-focus" && (isImageFocusKind(mode.kind) || mode.kind === "video");
 }
 
 /**

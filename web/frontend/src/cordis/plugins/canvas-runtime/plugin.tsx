@@ -211,8 +211,11 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
             ctx.canvasNavigation.invalidateNodeFocus(reason);
           },
           onImageFocusIntent: (request) => {
-            // 双击图片进入图片聚焦（change: 图片聚焦编辑，design D1）。
-            void ctx.canvasNavigation.requestEnterNodeFocus({ nodeId: request.nodeId, kind: "image", owner: "direct" });
+            // 双击图片进入**只读查看**（kind: image-view）。
+            //
+            // 编辑器（PhotoCraft，kind: image）只从节点操作横条的「去P图」进入：双击是「看一眼」，
+            // 不该顺手打开一个会持有草稿、挡住画布的重型编辑器。
+            void ctx.canvasNavigation.requestEnterNodeFocus({ nodeId: request.nodeId, kind: "image-view", owner: "direct" });
           },
           onVideoFocusIntent: (request) => {
             // 双击视频进入视频聚焦（change: 2026-10-10-add-video-node-focus-workspace，design D1）。

@@ -6,7 +6,7 @@
  * 并把有效 transition 转交给 controller。
  */
 import type { InteractionController } from "../canvas-shell/interaction-controller.js";
-import { isDocumentFocusTarget, type CanvasFocusTarget } from "../../navigation/contracts.js";
+import { isDocumentFocusTarget, isImageFocusKind, type CanvasFocusTarget } from "../../navigation/contracts.js";
 
 export type FocusTransitionHost = {
   /** 设置图片聚焦目标 id（`null` 清除）。 */
@@ -52,7 +52,8 @@ export function applyFocusTargetTransition(input: {
   }
   // 图片/视频聚焦由各自 feature 拥有实际 session；host 只维护 history owner 标记与投影清除。
   // 两个二维媒体聚焦互斥：进入其一必须清除另一个的目标与投影。
-  if (target?.kind === "image") {
+  // `image`（编辑器）与 `image-view`（只读查看）共用同一套二维媒体取景与历史语义。
+  if (target && isImageFocusKind(target.kind)) {
     host.setImageFocusTargetId(target.nodeId);
     if (host.hasModelFocus()) host.exitModelFocus();
     host.setVideoFocusTargetId(null);

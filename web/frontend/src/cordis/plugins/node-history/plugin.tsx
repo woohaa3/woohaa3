@@ -27,6 +27,7 @@ const NodeHistoryPanel = lazy(() => import("./panel.js").then(module => ({ defau
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { NODE_HISTORY_SERVICE, INLINE_HISTORY_SERVICE, RUN_STATE_SERVICE, VIDEO_FOCUS_SERVICE, resolveImagePreviewOwner, type InlineHistoryService, type RunStateService, type VideoFocusService } from "../service-keys.js";
 import { definePlugin } from "../../plugin.js";
+import { isImageFocusKind } from "../../navigation/contracts.js";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
 import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { objectPayload } from "../../services/dialogs/registry.js";
@@ -360,8 +361,9 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
           if (appliedImageOverrideEntryId !== null) {
             imageEdit?.setHistoryOverride?.(null, state.nodeId);
             appliedImageOverrideEntryId = null;
-            if (mode.type === "node-focus" && mode.kind === "image") {
-              ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "image", owner: "direct" });
+            if (mode.type === "node-focus" && isImageFocusKind(mode.kind)) {
+              // 保留用户实际进入的那个 kind：从只读查看进入的历史不该被升级成编辑器。
+              ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: mode.kind, owner: "direct" });
             }
           }
           return;
@@ -380,14 +382,16 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
         imageEdit?.setHistoryOverride?.({ url: href }, state.nodeId);
         appliedImageOverrideEntryId = state.selectedEntryId;
         // 中央内容切到 history owner（原子；禁用写工具）。
-        if (mode.type === "node-focus" && mode.kind === "image" && mode.owner === "direct") {
-          ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "image", owner: "history" });
+        // kind 沿用当前呈现（image / image-view 都算图片聚焦）。
+        const historyKind = mode.type === "node-focus" && isImageFocusKind(mode.kind) ? mode.kind : "image";
+        if (mode.type === "node-focus" && isImageFocusKind(mode.kind) && mode.owner === "direct") {
+          ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: historyKind, owner: "history" });
         } else if (mode.type !== "node-focus") {
-          ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "image", owner: "history" });
-        } else if (mode.type === "node-focus" && mode.kind === "image" && mode.owner === "history" && mode.nodeId !== state.nodeId) {
+          ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: historyKind, owner: "history" });
+        } else if (mode.type === "node-focus" && isImageFocusKind(mode.kind) && mode.owner === "history" && mode.nodeId !== state.nodeId) {
           // 历史面板所属节点与当前聚焦节点不一致（多标签/刚切过文档）：把聚焦切回面板节点，
           // 否则标题栏与画布都还停在另一篇文档（A3）。
-          ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "image", owner: "history" });
+          ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: historyKind, owner: "history" });
         }
       };
 
@@ -494,8 +498,8 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
           imageEdit?.setHistoryOverride?.(null, state.nodeId);
           appliedImageOverrideEntryId = null;
           const mode = ctx.canvasNavigation.getSnapshot().mode;
-          if (mode.type === "node-focus" && mode.kind === "image" && mode.nodeId === state.nodeId) {
-            ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "image", owner: "direct" });
+          if (mode.type === "node-focus" && isImageFocusKind(mode.kind) && mode.nodeId === state.nodeId) {
+            ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: mode.kind, owner: "direct" });
           }
           void controller.select(CURRENT_PRESENTATION_ID);
         }

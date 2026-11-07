@@ -14,7 +14,7 @@ import type { ComponentType } from "react";
  * `"extension"`：通用纯模型扩展节点（如 `composite-asset`）聚焦到的**扩展工作区**，工作区覆盖层由
  * extension 经 `canvas.overlay` 贡献；宿主只提供通用导航/呈现（change: 2026-10-10-add-game-furnace-extension）。
  */
-export type CanvasFocusKind = "image" | "video" | "model" | "extension";
+export type CanvasFocusKind = "image" | "image-view" | "video" | "model" | "extension";
 
 /**
  * 独立编辑文档的轻量 presentation identity
@@ -45,6 +45,17 @@ export type CanvasMode =
 
 /** 任何聚焦呈现（节点聚焦或独立文档工作区）。 */
 export type CanvasFocusMode = Extract<CanvasMode, { type: "node-focus" } | { type: "document-workspace" }>;
+
+/**
+ * 是否属于图片聚焦（含只读查看）。
+ *
+ * `"image"` 由图片编辑器扩展（PhotoCraft）贡献，只从节点操作横条的「去P图」进入；
+ * `"image-view"` 是宿主的只读查看器，双击图片进入。两者共用同一套二维媒体取景与历史语义，
+ * 因此凡是要「按图片聚焦处理」的判定都应走这里，而不是只比 `"image"`。
+ */
+export function isImageFocusKind(kind: string | null | undefined): boolean {
+  return kind === "image" || kind === "image-view";
+}
 
 /** 当前 mode 是否为聚焦呈现。 */
 export function isFocusMode(mode: CanvasMode): mode is CanvasFocusMode {

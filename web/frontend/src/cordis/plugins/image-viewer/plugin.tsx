@@ -32,7 +32,6 @@ export function imageViewerExtension(): Plugin.Function<void> {
       let session: ImageViewerSession | null = null;
       let detachViewport: (() => void) | null = null;
       let removeWorkspace: (() => void) | null = null;
-      let syncing = false;
 
       /** 可用内容矩形：与 Bevy 取景和底部控件共用同一表面。 */
       const contentRect = (): FocusContentRect => {
@@ -70,17 +69,47 @@ export function imageViewerExtension(): Plugin.Function<void> {
         void current.start();
       };
 
-      /** 其他扩展是否已贡献 kind=image 工作区（有则本插件让位）。 */
-      const otherImageWorkspace = (): boolean =>
-        ctx.slots.list("canvas.focus-workspace")
-          .some((entry) => entry.kind === "image" && entry.id !== IMAGE_VIEWER_WORKSPACE_ID);
+      /**
+       * 是否存在**编辑器**的 kind=image 工作区（PhotoCraft 一类）。
+       *
+       * 本插件自己占用 `image-view`，不参与这个判断，因此无需排除自身 id。
+       */
+      const hasImageEditorWorkspace = (): boolean =>
+        ctx.slots.list("canvas.focus-workspace").some((entry) => entry.kind === "image");
+
+      // 节点操作横条的「去P图」入口：进入 **kind=image** 的工作区（编辑器扩展在位时即 PhotoCraft）。
+      //
+      // 与双击路径分开：双击 → `image-view`（只读查看），本按钮 → `image`（编辑器）。
+      //
+      // 只在编辑器确实贡献了 kind=image 工作区时出现：编辑器未安装/停用时点它没有任何呈现，
+      // 宁可不显示（查看仍可双击）。
+      //
+      // 进入聚焦是导航而不是写入，因此不看 `writable`（与双击、`model-focus-view` 一致）；
+      // 真正的写入门禁由编辑器在「应用到节点」时自己判。
+      const removeEditAction = ctx.slots.register("canvas.node-action", {
+        id: "image-edit-focus",
+        owner: IMAGE_VIEWER_PLUGIN_ID,
+        order: 21,
+        describe: ({ nodeId }) => {
+          if (!hasImageEditorWorkspace()) return null;
+          if (!resolveImageFocusTarget(getCanvas(), nodeId)) return null;
+          return { label: "去P图", icon: "photoshop", enabled: true };
+        },
+        activate: ({ nodeId }) => {
+          if (!hasImageEditorWorkspace()) return;
+          void ctx.canvasNavigation.requestEnterNodeFocus({ nodeId, kind: "image", owner: "direct" });
+        }
+      });
 
       const registerWorkspace = (): void => {
         if (removeWorkspace) return;
         removeWorkspace = ctx.slots.register("canvas.focus-workspace", {
           id: IMAGE_VIEWER_WORKSPACE_ID,
           owner: IMAGE_VIEWER_PLUGIN_ID,
-          kind: "image",
+          // 只读查看器占用独立的 `image-view` kind，**不与编辑器争同一个 kind**：
+          // 双击 → image-view（本工作区），横条「去P图」→ image（PhotoCraft）。
+          // 两者共用同一套二维媒体取景与历史语义（见 `isImageFocusKind`）。
+          kind: "image-view",
           exclusive: true,
           // 不在这里声明静态 `layout`：公共宿主的 `useFocusLayoutSource` 会在工作区
           // 的 `useFocusLayout` 之后提交，静态配置会把工作区上报的 player/panel 覆盖掉
@@ -92,31 +121,15 @@ export function imageViewerExtension(): Plugin.Function<void> {
         });
       };
 
-      /** 按「是否有其他图片工作区」动态注册/注销，避免同一 kind 出现多个 owner。 */
-      const syncWorkspace = (): void => {
-        if (syncing) return;
-        syncing = true;
-        try {
-          const occupied = otherImageWorkspace();
-          if (occupied) {
-            if (!removeWorkspace) return;
-            removeWorkspace();
-            removeWorkspace = null;
-            // 编辑器接管后本会话不再是活动呈现；导航层按新的 owner 重新解析。
-            exit();
-            return;
-          }
-          registerWorkspace();
-        } finally {
-          syncing = false;
-        }
-      };
-
-      /** 聚焦 mode → 会话：只有 kind=image 且由本插件呈现时建立会话。 */
+      /**
+       * 聚焦 mode → 会话：只有 kind=image-view 时建立会话。
+       *
+       * 编辑器在位时本工作区不再让位（kind 已分开），所以这里只看 mode，不看谁占了 image。
+       */
       const reconcileFocus = (): void => {
         const mode = ctx.canvasNavigation.getSnapshot().mode;
-        if (mode.type !== "node-focus" || mode.kind !== "image") { exit(); return; }
-        if (!otherImageWorkspace() && session?.nodeId !== mode.nodeId) enter(mode.nodeId);
+        if (mode.type !== "node-focus" || mode.kind !== "image-view") { exit(); return; }
+        if (session?.nodeId !== mode.nodeId) enter(mode.nodeId);
       };
       const unsubscribeNav = ctx.canvasNavigation.subscribe(reconcileFocus);
 
@@ -126,14 +139,9 @@ export function imageViewerExtension(): Plugin.Function<void> {
       // 远端回流：canonical 输出变化时重开来源（同地址不动）。
       const unsubscribeCanvas = woohaa3CanvasStore.subscribe(() => session?.refreshFromCanonical());
 
-      syncWorkspace();
-      // 插件可能在聚焦之后才装配（扩展热加载/让位回收）：先对齐当前 mode 再订阅变化。
+      registerWorkspace();
+      // 插件可能在聚焦之后才装配（扩展热加载）：先对齐当前 mode 再订阅变化。
       reconcileFocus();
-      // 工作区贡献集合变化（编辑器装入/卸载）既影响 owner 归属，也可能让本插件重新接管当前聚焦。
-      const unsubscribeSlots = ctx.slots.subscribe("canvas.focus-workspace", () => {
-        syncWorkspace();
-        reconcileFocus();
-      });
 
       // 只读查看 capability：编辑器扩展缺席时，历史面板用它换到旧版本预览
       // （与 `imageEdit` 同形，只实现只读子集；编辑器装入后 history 始终优先 imageEdit）。
@@ -166,7 +174,7 @@ export function imageViewerExtension(): Plugin.Function<void> {
         unsubscribeNav();
         unsubscribeRect();
         unsubscribeCanvas();
-        unsubscribeSlots();
+        removeEditAction();
         disposeParticipant();
         removeWorkspace?.();
         removeWorkspace = null;

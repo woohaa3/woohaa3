@@ -73,7 +73,7 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
     }
     if (!descriptor) continue;
     const menu = descriptor.menu === true;
-    const supportedIcons = ["download", "edit", "box", "arrange-horizontal", "arrange-vertical", "arrange-grid", "arrange-diagonal-up", "arrange-diagonal-down", "collapse-groups", "expand-groups"] as const;
+    const supportedIcons = ["download", "edit", "box", "photoshop", "arrange-horizontal", "arrange-vertical", "arrange-grid", "arrange-diagonal-up", "arrange-diagonal-down", "collapse-groups", "expand-groups"] as const;
     const icon = supportedIcons.find((candidate) => candidate === descriptor.icon);
     actions.push({
       id: contribution.id,

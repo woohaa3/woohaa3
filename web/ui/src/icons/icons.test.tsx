@@ -20,7 +20,8 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
   LocateIcon,
-  LoadingIcon
+  LoadingIcon,
+  PhotoshopIcon
 } from "./icons.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,13 @@ describe("Lucide facade（任务 2.6）", () => {
     for (const name of CUSTOM_ICON_EXCEPTIONS) {
       expect(name.toLowerCase()).not.toMatch(/zoom|close|copy|play|pause|trash|volume|chevron|locate/);
     }
+  });
+
+  it("PhotoshopIcon 必须 evenodd：字母是从方框里挖空的", () => {
+    // 回归：字形路径在 nonzero 下会被判成同一个填充方向，整块方框变成实心，
+    // 字母完全看不见（2026-11-06 踩过，只有渲染出来看才发现）。
+    const html = renderToStaticMarkup(<PhotoshopIcon />);
+    expect(html).toContain('fill-rule="evenodd"');
   });
 
   it("facade 源码只使用具名 import（禁止 namespace import）", () => {

@@ -1,6 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import { nodeActionToolbarLayout, type BevyNodeActionsPresentation, type ScreenRect } from "@woohaa3/contracts";
-import { BoxIcon, ChevronDownIcon, DownloadIcon, PenIcon } from "@woohaa3/ui/icons";
+import { BoxIcon, ChevronDownIcon, DownloadIcon, PenIcon, PhotoshopIcon } from "@woohaa3/ui/icons";
 import { Fragment, useCallback, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import type { CanvasRuntimeService } from "../../contract/canvas-runtime.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
@@ -89,6 +89,7 @@ function ActionIcon({ icon }: { icon: NonNullable<BevyNodeActionsPresentation["a
   if (icon === "download") return <DownloadIcon size={16} />;
   if (icon === "edit") return <PenIcon size={16} />;
   if (icon === "box") return <BoxIcon size={16} />;
+  if (icon === "photoshop") return <PhotoshopIcon size={16} />;
   const paths: Record<string, string> = {
     "arrange-horizontal": "M5 3v18M12 3v18M19 3v18",
     "arrange-vertical": "M3 5h18M3 12h18M3 19h18",
