@@ -27,8 +27,10 @@ import {
   Orbit,
   MoveVertical,
   LockKeyhole,
+  Camera,
   Crop,
   Eye,
+  Keyboard,
   EyeOff,
   FolderPlus,
   Lasso,
@@ -300,6 +302,12 @@ export const ImageIcon = withDefaults(Image);
 
 /** 下载（节点操作横条「下载」；change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.2）。 */
 export const DownloadIcon = withDefaults(Download);
+
+/** 截图（全景查看器工具栏）。 */
+export const CameraIcon = withDefaults(Camera);
+
+/** 快捷键提示（全景查看器工具栏）。 */
+export const KeyboardIcon = withDefaults(Keyboard);
 
 /** 上传（空白画布右键菜单「上传…」）。 */
 export const UploadIcon = withDefaults(Upload);

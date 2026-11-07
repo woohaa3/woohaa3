@@ -53,10 +53,17 @@ describe("resolveGeneratedImage", () => {
     expect(resolveGeneratedImage("/etc/passwd", { codexHome })).toMatchObject({ ok: false, code: "path-outside-generated-images" });
   });
 
-  it("拒绝符号链接", () => {
+  it("拒绝符号链接", ({ skip }) => {
     const target = writeImage("real.png", PNG_HEADER);
     const link = path.join(imagesDir, "link.png");
-    symlinkSync(target, link);
+    try {
+      symlinkSync(target, link);
+    } catch (error) {
+      // Windows 非管理员且未开「开发者模式」时不允许建符号链接（EPERM）：环境做不出被测场景，
+      // 显式跳过（报告里算 skipped，不算通过）；mac / Linux / 有权限的 Windows 照常真跑。
+      if ((error as NodeJS.ErrnoException).code === "EPERM") skip();
+      throw error;
+    }
     expect(resolveGeneratedImage(link, { codexHome })).toMatchObject({ ok: false, code: "not-regular-file" });
   });
 

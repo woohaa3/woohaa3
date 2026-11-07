@@ -87,7 +87,7 @@ it('forwards the 4096 tier to the decoder instead of clamping it back to 2048', 
   const { prepareImageResource } = await import('./client.js');
   const { registerNativeImagePort } = await import('./native-port.js');
   const pixels = { kind: 'native-image', handle: 'h', generation: 1, width: 1, height: 1 };
-  const prepare = vi.fn(async () => ({ width: 1, height: 1, sourceWidth: 1, sourceHeight: 1, pixels }));
+  const prepare = vi.fn(async (_url: string, _edge: number) => ({ width: 1, height: 1, sourceWidth: 1, sourceHeight: 1, pixels }));
   const unregister = registerNativeImagePort({ prepare, apply: vi.fn(), release: vi.fn() } as never);
   try {
     // 不同 URL：`sharedPrepare` 按 url+edge 合并在途任务，别让两次调用互相合并。

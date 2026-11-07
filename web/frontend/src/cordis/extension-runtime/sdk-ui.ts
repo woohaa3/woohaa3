@@ -7,7 +7,7 @@ import { AudioPlayer, MediaDialog } from "@woohaa3/ui/media";
 import { SettingsFeedback, SettingsSection } from "@woohaa3/ui/settings";
 import { ASSISTANT_SETUP_HINT, ASSISTANT_SETUP_TOOLTIP, AssistantComposer, AssistantConnectionSelector, AssistantListSelector, AssistantModelSelector, AssistantToolbar } from "@woohaa3/ui/assistant";
 import { CopyField } from "@woohaa3/ui/feedback";
-import { ActivityIcon, AdaptiveRatioIcon, AdjustmentIcon, AgentIcon, AlignBottomIcon, AlignCenterXIcon, AlignCenterYIcon, AlignLeftIcon, AlignRightIcon, AlignTopIcon, AppSettingsIcon, AppsIcon, BackIcon, BoxIcon, CUSTOM_ICON_EXCEPTIONS, CanvasSwitcherIcon, ChatIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClapperboardIcon, ClippingMaskIcon, ClockIcon, CloseIcon, CloudIcon, CollapseIcon, ConfigIcon, CopyIcon, CropIcon, CubeSolidIcon, DiamondIcon, DownloadIcon, ElevationIcon, EllipseMarqueeIcon, EllipsisIcon, EraserIcon, ExpandIcon, EyeIcon, EyeOffIcon, FileImageIcon, FileTextIcon, FilmIcon, FitScreenIcon, FolderPlusIcon, FolderPlusSolidIcon, GameIcon, GenerationHistoryIcon, GoogleDriveSolidIcon, HandIcon, HistoryIcon, HourglassIcon, IdentityIcon, ImageIcon, ImageSolidIcon, InvalidIcon, LassoIcon, LayerGroupSolidIcon, LayersIcon, LayoutGridIcon, LinkIcon, LoadingIcon, LocateIcon, LockIcon, LogsIcon, MCP_CLIENT_MARKS, MapIcon, MarqueeIcon, MaskIcon, McpClientLogo, MediaIcon, MenuIcon, MenuListIcon, MigrationIcon, MinusIcon, MoonIcon, MoveIcon, MusicIcon, MuteIcon, NetworkIcon, OrbitIcon, PauseIcon, PenIcon, PerformanceIcon, PhotoshopIcon, PinterestSolidIcon, PlayIcon, PluginIcon, PlusIcon, PointerIcon, ProviderIcon, RectangleIcon, RedoIcon, RefreshIcon, RestoreWindowIcon, RotateIcon, ScaleIcon, SearchIcon, SendIcon, ServiceLogo, SidebarIcon, SettingsIcon, SnippetLibraryIcon, SparklesIcon, StarIcon, StorageIcon, SunIcon, SwapColorsIcon, TaskListIcon, ToolsIcon, TrashIcon, TypeIcon, UnavailableIcon, UndoIcon, UnlinkIcon, UploadIcon, VideoIcon, VolumeIcon, WandSparklesIcon, WarningIcon, ZoomInIcon, ZoomOutIcon } from "@woohaa3/ui/icons";
+import { ActivityIcon, AdaptiveRatioIcon, AdjustmentIcon, AgentIcon, AlignBottomIcon, AlignCenterXIcon, AlignCenterYIcon, AlignLeftIcon, AlignRightIcon, AlignTopIcon, AppSettingsIcon, AppsIcon, BackIcon, BoxIcon, CUSTOM_ICON_EXCEPTIONS, CameraIcon, CanvasSwitcherIcon, ChatIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClapperboardIcon, ClippingMaskIcon, ClockIcon, CloseIcon, CloudIcon, CollapseIcon, ConfigIcon, CopyIcon, CropIcon, CubeSolidIcon, DiamondIcon, DownloadIcon, ElevationIcon, EllipseMarqueeIcon, EllipsisIcon, EraserIcon, ExpandIcon, EyeIcon, EyeOffIcon, FileImageIcon, FileTextIcon, FilmIcon, FitScreenIcon, FolderPlusIcon, FolderPlusSolidIcon, GameIcon, GenerationHistoryIcon, GoogleDriveSolidIcon, HandIcon, HistoryIcon, HourglassIcon, IdentityIcon, ImageIcon, ImageSolidIcon, InvalidIcon, KeyboardIcon, LassoIcon, LayerGroupSolidIcon, LayersIcon, LayoutGridIcon, LinkIcon, LoadingIcon, LocateIcon, LockIcon, LogsIcon, MCP_CLIENT_MARKS, MapIcon, MarqueeIcon, MaskIcon, McpClientLogo, MediaIcon, MenuIcon, MenuListIcon, MigrationIcon, MinusIcon, MoonIcon, MoveIcon, MusicIcon, MuteIcon, NetworkIcon, OrbitIcon, PauseIcon, PenIcon, PerformanceIcon, PhotoshopIcon, PinterestSolidIcon, PlayIcon, PluginIcon, PlusIcon, PointerIcon, ProviderIcon, RectangleIcon, RedoIcon, RefreshIcon, RestoreWindowIcon, RotateIcon, ScaleIcon, SearchIcon, SendIcon, ServiceLogo, SidebarIcon, SettingsIcon, SnippetLibraryIcon, SparklesIcon, StarIcon, StorageIcon, SunIcon, SwapColorsIcon, TaskListIcon, ToolsIcon, TrashIcon, TypeIcon, UnavailableIcon, UndoIcon, UnlinkIcon, UploadIcon, VideoIcon, VolumeIcon, WandSparklesIcon, WarningIcon, ZoomInIcon, ZoomOutIcon } from "@woohaa3/ui/icons";
 import { ThemeProvider, color, font, radius, shadow, space, theme, useAppTheme, useOptionalAppTheme, useThemeService } from "@woohaa3/ui/theme";
 export const group = "ui" as const;
 export const namedExports = {
@@ -37,6 +37,7 @@ export const namedExports = {
   BoxIcon,
   Button,
   CUSTOM_ICON_EXCEPTIONS,
+  CameraIcon,
   CanvasSwitcherIcon,
   ChatIcon,
   CheckIcon,
@@ -104,6 +105,7 @@ export const namedExports = {
   ImageIcon,
   ImageSolidIcon,
   InvalidIcon,
+  KeyboardIcon,
   LassoIcon,
   LayerGroupSolidIcon,
   LayersIcon,

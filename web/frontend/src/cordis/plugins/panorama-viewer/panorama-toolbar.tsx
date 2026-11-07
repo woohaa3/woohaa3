@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { CameraIcon, DownloadIcon, KeyboardIcon, RotateIcon } from "@woohaa3/ui/icons";
 
 type Props = {
   shortcutsOpen: boolean;
@@ -72,7 +73,8 @@ function IconButton(props: { label: string; active?: boolean; disabled?: boolean
   );
 }
 
-const svg = { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
+/** 工具栏图标统一 20px、1.5 线宽（与原自绘一致）。 */
+const ICON = { size: 20, strokeWidth: 1.5 } as const;
 
 /** 底部居中的四个图标按钮：快捷键开关 / 截图 / 复位 / 下载。 */
 export function PanoramaToolbar({ shortcutsOpen, onToggleShortcuts, onScreenshot, onReset, onDownload }: Props) {
@@ -111,28 +113,17 @@ export function PanoramaToolbar({ shortcutsOpen, onToggleShortcuts, onScreenshot
       <div style={{ ...row, position: "relative" }}>
         {message ? <div style={note}>{message}</div> : null}
         <IconButton label="快捷键" active={shortcutsOpen} onClick={onToggleShortcuts}>
-          <svg {...svg}>
-            <rect x="2.5" y="6" width="19" height="12" rx="2" />
-            <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
-          </svg>
+          <KeyboardIcon {...ICON} />
         </IconButton>
         <IconButton label="截图" disabled={busy} onClick={() => void screenshot()}>
-          <svg {...svg}>
-            <path d="M4 8h3l1.5-2h7L17 8h3v11H4z" />
-            <circle cx="12" cy="13" r="3.5" />
-          </svg>
+          <CameraIcon {...ICON} />
         </IconButton>
         <IconButton label="复位视角" onClick={onReset}>
-          <svg {...svg}>
-            <path d="M4 12a8 8 0 1 0 2.6-5.9" />
-            <path d="M4 4v4h4" />
-          </svg>
+          <RotateIcon {...ICON} />
         </IconButton>
         <div ref={menuRef} style={{ position: "relative" }}>
           <IconButton label="下载" active={menuOpen} onClick={() => setMenuOpen((value) => !value)}>
-            <svg {...svg}>
-              <path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14" />
-            </svg>
+            <DownloadIcon {...ICON} />
           </IconButton>
           {menuOpen ? (
             <div style={menu}>

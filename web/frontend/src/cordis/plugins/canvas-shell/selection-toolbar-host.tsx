@@ -1,5 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import { nodeActionToolbarLayout, type ScreenRect } from "@woohaa3/contracts";
+import { LayoutGridIcon } from "@woohaa3/ui/icons";
 import { useCallback, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
@@ -82,8 +83,7 @@ export function SelectionToolbarHost({ ctx }: { ctx: Context }) {
     onWheel={event => event.stopPropagation()}>
     <button type="button" className="node-action-toolbar__button" title="把选中的卡片排整齐，并统一成最大卡片的尺寸"
       style={{ width: bar.actions[0]!.width }} onClick={tidy}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-        strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3zM3 12h18M12 3v18" /></svg>
+      <LayoutGridIcon size={16} />
       {TIDY_ACTION.label}
     </button>
   </div>;

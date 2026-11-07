@@ -94,6 +94,12 @@ const LISTENER_EXCEPTIONS = new Set<string>([
   // 共享世界镜头编辑器/飞行输入：浮层生命周期由 world-cameras 自己持有。
   "cordis/plugins/world-cameras/camera-editor.tsx",
   "cordis/plugins/world-cameras/flight-input.ts",
+  // 全景查看器自己的操控输入：Q/E/W/A/S/D 按住逐帧生效、Esc 关闭，需要捕获阶段并
+  // 拦住画布快捷键；它是查看器的输入协议，不是浮层 dismiss。
+  "cordis/plugins/panorama-viewer/panorama-overlay.tsx",
+  // 迁移债：「下载」菜单的外部点击关闭本可换成共享 `Menu` primitive，尚未迁移
+  // （样式要在真实全景节点上目视确认后再换）。迁完请从这里删掉这一行。
+  "cordis/plugins/panorama-viewer/panorama-toolbar.tsx",
 ]);
 
 describe("剩余 Canvas UI 迁移审计（任务 8.2）", () => {

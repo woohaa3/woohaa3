@@ -364,7 +364,10 @@ describe("前端协议边界审计", () => {
       "cordis/plugins/canvas-shell/image-library.ts -> paste-import",
       // 导演区播放条只读取 canvas-runtime 的点选结果类型（`PointHit` 的 scene-area-playback 变体），
       // 用来把指针位置换算成轨道进度；播放本身仍由 canvas-runtime 拥有。
-      "cordis/plugins/world-scopes/scene-area-progress.tsx -> canvas-runtime"
+      "cordis/plugins/world-scopes/scene-area-progress.tsx -> canvas-runtime",
+      // 「整理卡片」按组/普通卡各自的真实尺寸排版，复用 world-scopes 的 `memberSize`
+      // （组卡取显式宽高或组默认尺寸，普通卡取 Bevy 节点尺寸），不在这里再算一份。
+      "cordis/plugins/canvas-shell/selection-tidy.ts -> world-scopes"
     ]);
     const extensionsDir = path.join(CORDIS_DIR, "plugins");
     const extensionNames = readdirSync(extensionsDir, { withFileTypes: true })

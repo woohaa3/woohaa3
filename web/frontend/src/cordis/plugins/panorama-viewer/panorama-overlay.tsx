@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { CloseIcon } from "@woohaa3/ui/icons";
 import { createPanoramaView, type PanoramaViewHandle } from "./panorama-view.js";
 import { isEquirectangular, type PanoramaStore } from "./panorama-store.js";
 import { frameDelta, isPanoramaKey, SHORTCUT_ROWS } from "./panorama-keys.js";
@@ -119,14 +120,6 @@ const kbd: CSSProperties = {
   userSelect: "none"
 };
 
-function CloseIcon({ size = 20 }: { size?: number }): ReactNode {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
-      <path d="M6 6l12 12M18 6L6 18" />
-    </svg>
-  );
-}
-
 /** 全景查看浮层：居中弹窗（85vw × 85vh），球面环视，底部工具条与快捷键面板。 */
 export function PanoramaOverlay({ store, actions }: { store: PanoramaStore; actions: PanoramaActions }) {
   const { nodeId, url, title } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
@@ -235,7 +228,7 @@ function PanoramaStage({ nodeId, url, title, actions, onClose }: StageProps) {
           <div style={pill}>{title || "全景图"}</div>
           <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
             <button type="button" style={closeButton} onClick={onClose} aria-label="关闭">
-              <CloseIcon />
+              <CloseIcon size={20} strokeWidth={1.8} />
             </button>
           </div>
         </div>
@@ -261,7 +254,7 @@ function PanoramaStage({ nodeId, url, title, actions, onClose }: StageProps) {
                 onClick={() => setShowShortcuts(false)}
                 style={{ border: 0, background: "transparent", color: "rgba(255,255,255,0.6)", cursor: "pointer", padding: 2 }}
               >
-                <CloseIcon />
+                <CloseIcon size={20} strokeWidth={1.8} />
               </button>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

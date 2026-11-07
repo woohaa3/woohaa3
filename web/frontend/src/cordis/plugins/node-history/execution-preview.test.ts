@@ -50,7 +50,8 @@ it("selects each new task, keeps every active dot, and returns to the old image 
   const node = { id: "n", busy: true, progress: 70 } as never;
   const project = () => applyRunStateProjection([node], { records, summaries: [], versionsByNode: history, selectedByNode: selected });
   project();
-  expect(node).toMatchObject({ busy: true, historyStrip: { dots: [{selected:false}, {selected:true}, {selected:false}] } });
+  // 缩略图顺序：已落库版本在前，进行中的运行按时间排在最后（1521616b）；新任务 b 是最后一格并被选中。
+  expect(node).toMatchObject({ busy: true, historyStrip: { dots: [{selected:false}, {selected:false}, {selected:true}] } });
   controller.select({ nodeId: "n", presentationId: "operation:old" });
   project();
   expect(node).toMatchObject({ busy: false, progress: 0 });
