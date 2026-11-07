@@ -113,8 +113,16 @@ type ContentEntry = {
   pixels?: import("@woohaa3/contracts").ImagePixelSource;
   width?: number;
   height?: number;
+  /** 解码后的纹理尺寸：受当前缩略图档位限制，只用来上传与估算显存，**不能**拿来定卡片大小。 */
   /** 引用该内容的 nodeId 集合（最后引用结束才关闭像素）。 */
   nodes: Set<string>;
+  /**
+   * 原图像素尺寸（与档位无关）。卡片按图片比例定尺寸时读这个：
+   * 用解码尺寸的话，卡片大小就取决于首次解码时画布缩放到了哪一档（128 档得 128×63，
+   * 且只适配一次、之后不再修正）。
+   */
+  sourceWidth?: number;
+  sourceHeight?: number;
   /** 传输失败后已排定的自动重试计时器（design D2/D8）；内容失败时不设置。 */
   retryTimer?: ReturnType<typeof setTimeout>;
   /** 已用掉的自动重试次数；达到 `IMAGE_RETRY_MAX_ATTEMPTS` 后转为显式重试。 */
@@ -326,9 +334,13 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       target.height = raster.height;
       target.ready = true;
       target.failed = false;
+      const source = sourceSizeOf(raster);
+      target.sourceWidth = source.width;
+      target.sourceHeight = source.height;
       target.retryAttempts = 0;
       for (const nodeId of target.nodes) options.runtime.clearRuntimeIssue?.(`decode:image:${nodeId}`);
-      for (const nodeId of target.nodes) options.onImageSize?.(nodeId, { width: raster.width, height: raster.height });
+      // 上报原图尺寸而不是解码尺寸：卡片据此按图片比例定大小，不能随缩略图档位变。
+      for (const nodeId of target.nodes) options.onImageSize?.(nodeId, source);
     };
     const run = residency
       ? residency.admit<void>({
@@ -454,7 +466,13 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       content.nodes.add(nodeId);
       entries.set(nodeId, { url, contentKey: key, tier, load, sent: false });
       resourceDirty.add(nodeId);
-      if (content.ready && content.width && content.height) options.onImageSize?.(nodeId, { width: content.width, height: content.height });
+      if (content.ready && content.width && content.height) {
+        // 复用路径同样上报原图尺寸；`source*` 缺失（理论上不会）才退回解码尺寸。
+        options.onImageSize?.(nodeId, {
+          width: content.sourceWidth ?? content.width,
+          height: content.sourceHeight ?? content.height
+        });
+      }
       return;
     }
     const entry: NodeEntry = { url, contentKey: key, tier, load, sent: false };
@@ -800,8 +818,21 @@ function rasterize(
   image: HTMLImageElement,
   createCanvas: RasterCanvasFactory,
   maxDimension: number = TEXTURE_MAX_DIMENSION
-): { pixels: import("@woohaa3/contracts").ImagePixelSource; width: number; height: number } | null {
+): { pixels: import("@woohaa3/contracts").ImagePixelSource; width: number; height: number; sourceWidth: number; sourceHeight: number } | null {
   // 保留既有公开 helper 语义：档位不能超过 Bevy 纹理硬上限。
   const limit = Math.min(selectThumbnailTier(maxDimension), TEXTURE_MAX_DIMENSION);
-  return rasterizeDrawable(image, { width: image.width, height: image.height }, createCanvas, limit);
+  const raster = rasterizeDrawable(image, { width: image.width, height: image.height }, createCanvas, limit);
+  // 与 `PreparedImageResource` 同形：除了缩放后的纹理尺寸，还带上原图尺寸。
+  return raster && { ...raster, sourceWidth: image.width, sourceHeight: image.height };
+}
+
+/**
+ * 解码结果里的原图像素尺寸；缺失或非法时退回解码尺寸（至少比 0 / NaN 能用）。
+ *
+ * `width`/`height` 是受缩略图档位限制的纹理尺寸，`sourceWidth`/`sourceHeight` 才是原图。
+ */
+function sourceSizeOf(raster: { width: number; height: number; sourceWidth: number; sourceHeight: number }): { width: number; height: number } {
+  const valid = Number.isFinite(raster.sourceWidth) && Number.isFinite(raster.sourceHeight)
+    && raster.sourceWidth > 0 && raster.sourceHeight > 0;
+  return valid ? { width: raster.sourceWidth, height: raster.sourceHeight } : { width: raster.width, height: raster.height };
 }

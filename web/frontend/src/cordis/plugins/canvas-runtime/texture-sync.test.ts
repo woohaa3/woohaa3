@@ -499,3 +499,85 @@ it("资源增量在 ACK 前保留、合并中间状态，完整基线 ACK 无须
   expect(sync.resourceStateChanges?.()).toEqual([{ id: "n1", texture: false, mediaLoading: true }]);
   sync.dispose();
 });
+
+describe("onImageSize 上报原图尺寸", () => {
+  /*
+   * 回归：卡片按图片比例定尺寸（`planImageCardFit`，长边封顶 640），上报的必须是**原图**像素尺寸。
+   * 若上报的是解码结果（受缩略图档位限制），卡片大小就取决于「首次解码时画布缩到了哪一档」：
+   * 10% 缩放时解码 128 档得到 128×63，卡片从此固定成 128 宽，而且只适配一次、之后不会被修正；
+   * 5529×2709 的图在 256 档上传则固定成 256×125。
+   */
+  function sharedAssetCanvas(nodeIds: string[]): ServerCanvas {
+    const base = canvas(true);
+    return {
+      ...base,
+      document: { ...base.document, nodes: nodeIds.map((id, index) => ({ id, type: "image" as const, position: { x: index * 300, y: 0 } })) },
+      nodeData: Object.fromEntries(nodeIds.map(id => [id, { outputAssetId: "asset-1" }]))
+    };
+  }
+
+  it("低档位解码时仍上报原图尺寸，而不是档位尺寸", async () => {
+    const { context } = fakeCanvasContext();
+    const { runtime, uploaded } = runtimeRecorder();
+    const sizes: Array<{ id: string; width: number; height: number }> = [];
+    const sync = createTextureSync({
+      runtime,
+      getCanvas: () => canvas(true),
+      loadImage: async () => fakeImage(5529, 2709),
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => context }),
+      admissionOf: () => ({ admitted: true, purpose: "visible", tier: 256 }),
+      onImageSize: (id, size) => sizes.push({ id, ...size })
+    });
+    sync.sync();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    sync.sync();
+    // 前提：确实是按 256 档解码上传的（否则这条用例证明不了任何事）。
+    expect(uploaded).toEqual([{ id: "n1", width: 256, height: 125 }]);
+    expect(sizes).toEqual([{ id: "n1", width: 5529, height: 2709 }]);
+    sync.dispose();
+  });
+
+  it("同一内容被后加入的节点复用时，同样上报原图尺寸", async () => {
+    const { context } = fakeCanvasContext();
+    const sizes: Array<{ id: string; width: number; height: number }> = [];
+    let current = sharedAssetCanvas(["n1"]);
+    const sync = createTextureSync({
+      runtime: runtimeRecorder().runtime,
+      getCanvas: () => current,
+      loadImage: async () => fakeImage(5529, 2709),
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => context }),
+      admissionOf: () => ({ admitted: true, purpose: "visible", tier: 128 }),
+      onImageSize: (id, size) => sizes.push({ id, ...size })
+    });
+    sync.sync();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    current = sharedAssetCanvas(["n1", "n2"]);
+    sync.sync();
+    expect(sizes.filter(size => size.id === "n2")).toEqual([{ id: "n2", width: 5529, height: 2709 }]);
+    sync.dispose();
+  });
+
+  it("档位升级重新解码后，上报的尺寸仍是原图尺寸（不随档位变）", async () => {
+    const { context } = fakeCanvasContext();
+    const sizes: Array<{ width: number; height: number }> = [];
+    let tier: 256 | 1024 = 256;
+    const sync = createTextureSync({
+      runtime: runtimeRecorder().runtime,
+      // 每次返回新对象：绑定集合随之重算，档位变化立即生效。
+      getCanvas: () => canvas(true),
+      loadImage: async () => fakeImage(5529, 2709),
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => context }),
+      admissionOf: () => ({ admitted: true, purpose: "visible", tier }),
+      onImageSize: (_id, size) => sizes.push(size)
+    });
+    sync.sync();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    tier = 1024;
+    sync.sync();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // 两档都解码过（不是只测了一档），上报的却始终是同一个原图尺寸。
+    expect(sizes.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(sizes.map(size => size.width + "x" + size.height))).toEqual(new Set(["5529x2709"]));
+    sync.dispose();
+  });
+});
