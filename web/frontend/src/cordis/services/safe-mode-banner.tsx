@@ -75,7 +75,7 @@ export function SafeModeBanner({
       </span>
       {view.lastFailure ? <span className="safe-mode-banner__detail" title={view.lastFailure}>{view.lastFailure}</span> : null}
       {error ? <span className="safe-mode-banner__detail">{error}</span> : null}
-      <Button size="sm" tone="primary" disabled={pending} onClick={() => void exit()}>
+      <Button tone="primary" disabled={pending} onClick={() => void exit()}>
         {pending ? "正在重启…" : "退出安全模式并重启"}
       </Button>
     </div>
