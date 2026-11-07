@@ -166,4 +166,13 @@ describe("ppserver describe 解读", () => {
     ]);
     expect(definition).toMatchObject({ providerId: "ppserver", providerModelId: UUID, modelType: "image" });
   });
+
+  it("模板的运营分类透传到 capabilities.category，没有分类就不带", () => {
+    const [withCategory, without] = ppserverModelDefinitions([
+      { modelId: UUID, templateId: UUID, kind: "image", title: "X", category: "image-21" },
+      { modelId: UUID, templateId: UUID, kind: "image", title: "Y" }
+    ]);
+    expect(withCategory?.capabilities).toEqual({ category: "image-21" });
+    expect(without?.capabilities).toBeUndefined();
+  });
 });

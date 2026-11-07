@@ -75,7 +75,7 @@ export interface ExecutionPanelParameterField {
 
 /** 模型选项与参数模式。 */
 export interface ExecutionPanelModelConfig {
-	modelOptions: ReadonlyArray<{ value: string; label: string; detail?: string; provider?: string }>;
+	modelOptions: ReadonlyArray<{ value: string; label: string; detail?: string; provider?: string; group?: string }>;
 	defaultModel: string;
 	parameterSchemaByModel?: Record<
 		string,

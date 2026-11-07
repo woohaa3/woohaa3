@@ -23,6 +23,7 @@ import { TASK_KIND_TO_MODEL_TYPE,
   type ReferenceInputCapability } from "@woohaa3/contracts";
 import type { NodePanelKind } from "./node-panel-registry.js";
 import { projectParameterDefaults, projectParameterFields } from "./parameter-projection.js";
+import { modelGroupLabel } from "./model-groups.js";
 
 /** 专用 Seedance 视频交互：core generic 投影不得把它当作普通视频模型展示。 */
 export const SEEDANCE_VIDEO_INTERACTION = "seedance-video";
@@ -57,10 +58,12 @@ export function panelModelConfigForCatalog(
 
 /** 模型选项只投影名称与提供方；参数能力由参数表和参考输入控件呈现。 */
 export function modelOptionForCatalog(model: CanvasTaskCatalogModel): ExecutionPanelModelConfig["modelOptions"][number] {
+  const group = modelGroupLabel(model.capabilities);
   return {
     value: model.modelKey,
     label: model.title || model.providerModelId,
-    provider: model.providerId
+    provider: model.providerId,
+    ...(group ? { group } : {})
   };
 }
 

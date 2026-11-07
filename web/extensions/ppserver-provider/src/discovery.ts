@@ -235,6 +235,8 @@ export function ppserverModelDefinitions(templates: readonly PpserverTemplate[])
     modelType: template.kind,
     title: template.title,
     promptRequirement: "required" as const,
+    // 运营分类随目录透传到前端（模型选择器按它分二级菜单）；capabilities 本就是自由摘要，不动契约。
+    ...(template.category ? { capabilities: { category: template.category } } : {}),
     ...(template.inputSchema ? { inputSchema: template.inputSchema } : {}),
     ...(template.defaultInput ? { defaultInput: template.defaultInput } : {})
   }));

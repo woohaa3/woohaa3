@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentProps } from "react";
 import {
 	DropdownMenu,
 	DropdownMenuItem,
+	MenuEntry,
 	MenuRadioGroup,
 	MenuRadioItem,
 	MenuSeparator,
@@ -16,7 +17,24 @@ export const ASSISTANT_SETUP_TOOLTIP = "尚未配置助手，点击这里配置�
 /** 目录较长时才占用一行放搜索框；短列表直接给选项，少一次点击。 */
 const MODEL_SEARCH_THRESHOLD = 8;
 
-type SelectorOption = { value: string; label: string; detail?: string; provider?: string; disabled?: boolean };
+type SelectorOption = { value: string; label: string; detail?: string; provider?: string; group?: string; disabled?: boolean };
+const UNGROUPED_LABEL = "其他";
+
+/**
+ * 按 `group` 归并成二级菜单：一级是系列，二级是该系列下的具体模型。
+ * 保持首次出现的顺序；没有 group 的归到「其他」。只有一个分组时没必要多一层，返回 undefined。
+ */
+function groupOptions(options: ReadonlyArray<SelectorOption>): Array<{ name: string; options: SelectorOption[] }> | undefined {
+	const groups = new Map<string, SelectorOption[]>();
+	for (const option of options) {
+		const name = option.group ?? UNGROUPED_LABEL;
+		const list = groups.get(name);
+		if (list) list.push(option);
+		else groups.set(name, [option]);
+	}
+	if (groups.size < 2) return undefined;
+	return [...groups].map(([name, list]) => ({ name, options: list }));
+}
 type SelectorVariant = {
 	/** 可为空串（「默认 Variant」），因此不能交给忽略空值的单选分段控件。 */
 	value: string;
@@ -73,6 +91,8 @@ export function AssistantListSelector({
 	const selected = options.find((option) => option.value === model);
 	const variantLabel = variant?.options.find(option => option.value === variant.value)?.label;
 	const summary = [selected?.label || model || placeholder || label, variantLabel].filter(Boolean).join(" · ");
+	// 带 Variant 的菜单要在同一面板里接着选 Variant，保持单列；只有纯模型列表才分二级。
+	const grouped = variant ? undefined : groupOptions(options);
 	return (
 		<div className="mc-panel__model assistant-model-selector">
 			<DropdownMenu
@@ -100,7 +120,30 @@ export function AssistantListSelector({
 					</button>
 				}
 			>
-				<MenuRadioGroup value={model} onValueChange={value => {
+				{grouped ? grouped.map(group => (
+					<MenuEntry
+						key={group.name}
+						item={{
+							id: `group:${group.name}`,
+							label: <span className="mc-panel__model-name">{group.name}</span>,
+							onSelect: () => undefined,
+							children: group.options.map(option => ({
+								id: option.value,
+								label: <>
+									<span className="mc-panel__model-name">{option.label}</span>
+									{option.detail ? <span className="mc-panel__model-provider">{option.detail}</span> : null}
+								</>,
+								selected: option.value === model,
+								disabled: disabled || option.disabled,
+								onSelect: value => {
+									if (disabled) return;
+									onChange(value);
+									if (!keepOpenOnModelSelect) onOpenChange(false);
+								}
+							}))
+						}}
+					/>
+				)) : <MenuRadioGroup value={model} onValueChange={value => {
 					if (disabled || !options.some(option => option.value === value && !option.disabled)) return;
 					onChange(value);
 					if (!keepOpenOnModelSelect && !variant) onOpenChange(false);
@@ -119,8 +162,8 @@ export function AssistantListSelector({
 						{option.provider ? <span className="mc-panel__model-provider">提供方 {option.provider}</span> : null}
 					</MenuRadioItem>
 				))}
-				</MenuRadioGroup>
-				{variant ? <>
+				</MenuRadioGroup>}
+					{variant ? <>
 					<MenuSeparator className="ui-menu__separator" />
 					<div className="mc-panel__model-section">Variant</div>
 					<MenuRadioGroup value={variant.value} onValueChange={value => {

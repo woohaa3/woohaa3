@@ -38,3 +38,21 @@ it("短列表不显示搜索框", () => {
   mount(<AssistantModelSelector model="a" options={[{ value: "a", label: "模型 A" }, { value: "b", label: "模型 B" }]} open onOpenChange={vi.fn()} onChange={vi.fn()} />);
   expect(document.querySelector('input[aria-label="搜索模型"]')).toBeNull();
 });
+it("带 group 的模型列表分二级：一级是系列，二级是该系列的模型，选中才触发 onChange", () => {
+  const change = vi.fn();
+  mount(<AssistantListSelector model="a1" open onOpenChange={vi.fn()} onChange={change} options={[
+    { value: "a1", label: "Banana2.1-标准", group: "Banana2.1" },
+    { value: "a2", label: "Banana2.1-特惠", group: "Banana2.1" },
+    { value: "b1", label: "Image2-标准", group: "GPT-Image2" },
+    { value: "c1", label: "无分类模型" }
+  ]} />);
+  const triggers = [...document.querySelectorAll(".ui-menu__submenu-trigger")].map(node => node.textContent);
+  expect(triggers).toEqual(["Banana2.1", "GPT-Image2", "其他"]);
+  expect(document.body.textContent).not.toContain("Banana2.1-特惠");
+  expect(change).not.toHaveBeenCalled();
+});
+it("没有任何 group 时保持原来的单列", () => {
+  mount(<AssistantListSelector model="a" open onOpenChange={vi.fn()} onChange={vi.fn()} options={[{ value: "a", label: "A" }, { value: "b", label: "B" }]} />);
+  expect(document.querySelector(".ui-menu__submenu-trigger")).toBeNull();
+  expect(document.querySelectorAll('[role="menuitemradio"]')).toHaveLength(2);
+});

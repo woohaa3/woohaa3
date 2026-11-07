@@ -351,7 +351,9 @@ function parseCatalogModel(input: unknown): CanvasTaskCatalog["models"][number] 
     inputSchema: isRecord(input.inputSchema) ? input.inputSchema : {},
     defaultInput: isRecord(input.defaultInput) ? input.defaultInput : {},
     bindings: normalizeInputBindings(input.bindings),
-    taskTimeoutMs: readNumber(input.taskTimeoutMs) ?? DEFAULT_TASK_TIMEOUT_MS[modelType]
+    taskTimeoutMs: readNumber(input.taskTimeoutMs) ?? DEFAULT_TASK_TIMEOUT_MS[modelType],
+    // 声明能力摘要原样保留：模型选择器靠其中的 category 分二级菜单（只读，不据此判断可执行性）。
+    ...(isRecord(input.capabilities) ? { capabilities: input.capabilities } : {})
   };
 }
 
