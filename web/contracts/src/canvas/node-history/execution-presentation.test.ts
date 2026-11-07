@@ -71,3 +71,9 @@ it("hands a text assistant activity to its durable version as one logical operat
   expect(archived).toHaveLength(1);
   expect(archived[0]).toMatchObject({ presentationId: active[0]!.presentationId, current: true, recoverable: true });
 });
+it("baseline image sorts before generations even though it was backfilled later", () => {
+  const run = operation("running", "run-1");
+  const baseline = entry({ entryId: "base", createdAt: "2099-01-01T00:00:00Z", source: { label: "上传原图" } });
+  const done = entry({ entryId: "gen", createdAt: "2026-10-20T00:00:02Z", source: { label: "Image generation", runId: "run-0" } });
+  expect(mergeNodeExecutionPresentation([run], [baseline, done]).map(item => item.entryId ?? item.operationId)).toEqual(["base", "gen", "run-1"]);
+});

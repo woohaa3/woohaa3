@@ -16,6 +16,15 @@ export type NodeExecutionPresentation = {
   history?: NodeGenerationHistoryListItem;
 };
 
+/** 底图版本（上传原图 / 已有图片）的来源标签，由服务端在首次生成时补登，见 node-history-service/backfill。 */
+const BASELINE_LABELS: ReadonlySet<string> = new Set(["上传原图", "已有图片"]);
+
+/** 底图是最早的一格，但它是首次生成时才补登的，createdAt 反而晚于那次生成，所以不能只按时间排。 */
+function isBaseline(item: NodeExecutionPresentation): boolean {
+  const entry = item.history;
+  return !!entry && entry.kind === "image" && !entry.source.runId && BASELINE_LABELS.has(entry.source.label);
+}
+
 export function mergeNodeExecutionPresentation(
   records: readonly CanvasOperationRecord[], history: readonly NodeGenerationHistoryListItem[]
 ): NodeExecutionPresentation[] {
@@ -41,8 +50,16 @@ export function mergeNodeExecutionPresentation(
       recoverable: state === "succeeded" && entry.recoverable, localFailure: false,
       ...(entry.preview.kind === "failure" ? { error: entry.preview.message } : {}), history: entry });
   }
-  return [...items.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt)
+  const sorted = [...items.values()].sort((a, b) => Number(isBaseline(b)) - Number(isBaseline(a))
+    || a.createdAt.localeCompare(b.createdAt)
     || a.presentationId.localeCompare(b.presentationId));
+  // 进行中的运行比已落库的版本都新：底图版本是首次生成时才补登的（createdAt 晚于运行记录），
+  // 只按时间排会把它排到进行中的运行之后，缩略图列表里底图就跑到了最上面。
+  const isActive = (item: NodeExecutionPresentation) => !item.entryId && (item.state === "queued" || item.state === "running");
+  const lastEntry = sorted.map(item => !!item.entryId).lastIndexOf(true);
+  const early = sorted.slice(0, lastEntry + 1);
+  if (!early.some(isActive)) return sorted;
+  return [...early.filter(item => !isActive(item)), ...early.filter(isActive), ...sorted.slice(lastEntry + 1)];
 }
 
 /** Shared render/hit/anchor window; retain current, active and latest failure before filling recent items. */
