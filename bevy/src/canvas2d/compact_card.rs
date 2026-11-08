@@ -52,14 +52,13 @@ pub(super) fn draw(
         theme.token_u32("canvasBodyText"),
     )];
     if !node.texture && !node.busy && !(node.model_preview.is_some() && node.model.is_some()) {
-        for (i, line) in node
-            .body
-            .lines()
-            .take((ch / 17.).floor().max(0.) as usize)
+        let max_lines = ((ch / 17.).floor() as usize).max(1);
+        for (i, line) in layout::wrapped_lines(&node.body, cw - 8., 12., max_lines)
+            .into_iter()
             .enumerate()
         {
             labels.push((
-                layout::shortened(line, cw - 8., 12.),
+                line,
                 Vec2::new(cx + 4., cy + 4. + i as f32 * 17.),
                 12.,
                 theme.token_u32("canvasBodyText"),

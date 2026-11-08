@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { webTarget } from "./e2e/target";
+import { reviewBaseUrl, reviewProbeUrl, reviewUseOptions, reviewWebServerEnv, reviewWebServerIgnoreHTTPSErrors } from "./e2e/review-target.js";
 
 /**
  * Yjs 协作同步的专用 E2E 配置（change: add-yjs-canvas-sync，任务 9.1–9.3）。
@@ -7,20 +7,12 @@ import { webTarget } from "./e2e/target";
  * 这些用例直接驱动同步协议 / run-cancel / 任务历史，因此用独立端口与独立 server 实例。
  * 画布存储 + Yjs 同步在所有配置里都启用（frontend 唯一持久化路径）。
  *
+ * 复核通道同样统一走 `e2e/review-target.ts`：配置了 `WOOHAA_REVIEW_CDP_URL` 就连固定复核机
+ * （CDP 模式下自动切到 HTTPS 自签证书并放宽 `ignoreHTTPSErrors`），未配置才用本机回环。
+ *
  *   pnpm exec playwright test -c playwright.yjs.config.ts
  */
 const PORT = Number(process.env.E2E_YJS_PORT ?? 4373);
-const target = webTarget({
-	port: PORT,
-	server: {
-		command: `node e2e/server.mjs --port ${PORT}`,
-		url: `http://127.0.0.1:${PORT}/`,
-		reuseExistingServer: !process.env.CI,
-		timeout: 60_000,
-		stdout: "pipe",
-		stderr: "pipe"
-	}
-});
 
 export default defineConfig({
   testDir: "./e2e",
@@ -32,17 +24,20 @@ export default defineConfig({
   retries: 0,
   reporter: [["list"]],
   use: {
-    baseURL: `http://127.0.0.1:${PORT}`,
+    ...reviewUseOptions,
+    baseURL: reviewBaseUrl(PORT),
     // 与默认配置一致：全屏 Canvas 用例不需要逐动作 DOM 快照，失败仍保留截图与 sources。
     trace: { mode: "retain-on-failure", snapshots: false }
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: `node e2e/server.mjs --port ${PORT}`,
-    url: `http://127.0.0.1:${PORT}/`,
+    url: reviewProbeUrl(PORT),
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
     stdout: "pipe",
-    stderr: "pipe"
+    stderr: "pipe",
+    env: reviewWebServerEnv,
+    ignoreHTTPSErrors: reviewWebServerIgnoreHTTPSErrors
   }
 });

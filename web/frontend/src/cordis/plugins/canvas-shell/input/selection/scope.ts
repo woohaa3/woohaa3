@@ -7,7 +7,8 @@
  * 当前选区已经包含同一容器内的其它子元素时，直接选中/拖动子元素。
  *
  * 只描述选择语义，不读 store、不发命令；2D 组按 `memberNodeIds`（权威成员表），
- * 导演区按 `sceneArea.bounds` 与子元素的世界地面位置。
+ * 导演区按 `sceneArea.bounds` 与子元素的世界地面位置。镜头的 2D 卡片不参与容器优先：
+ * 点卡片直接选中镜头，只有 3D 机位/视锥拾取才先选中容器。
  */
 import {
   decodeSceneAreaData,
@@ -39,6 +40,20 @@ function worldGroundPointOf(canvas: ServerCanvas, nodeId: string): GroundPoint |
     return { u, v };
   }
   return null;
+}
+
+/**
+ * 镜头的 2D 卡片直接选中镜头本身，不先进入所属组/导演区。
+ *
+ * 镜头同时有 2D 卡片和 3D 机位：点卡片是明确的“选这个镜头”，只有渲染器拾取到
+ * 3D 机位/视锥时才继续遵守容器优先，避免把卡片点击也当成“先选片场”。
+ */
+export function selectsCardDirectly(
+  canvas: ServerCanvas | null,
+  nodeId: string,
+  via: "card" | "pick"
+): boolean {
+  return via === "card" && canvas?.nodeData?.[nodeId]?.worldCamera !== undefined;
 }
 
 /**

@@ -422,6 +422,14 @@ pub(crate) fn point_hit_golden(
     let generation = accept_scene(&scene);
     let hit = point_query(generation, x, y, zoom, None).hit;
     Ok(hit.map(|hit| match hit {
+        results::PointHit::SceneAreaPlayback {
+            node_id,
+            control,
+            track,
+        } => format!(
+            "scene-area-playback:{node_id}:{control}:{},{},{},{}",
+            track[0], track[1], track[2], track[3]
+        ),
         results::PointHit::AggregateHandle { direction } => format!("aggregate-handle:{direction}"),
         results::PointHit::Node { node_id } => format!("node:{node_id}"),
         results::PointHit::ModelPreview { node_id } => format!("model-preview:{node_id}"),

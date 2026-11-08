@@ -5,7 +5,7 @@
  * 同容器兄弟切换只维护一份规则。调用方只负责把手势继续下去。
  */
 import type { ServerCanvas } from "@woohaa3/contracts";
-import { enclosingAuthoringScope, hasSelectedSiblingInScope, scopeSelectionPrecedence } from "./scope.js";
+import { enclosingAuthoringScope, hasSelectedSiblingInScope, scopeSelectionPrecedence, selectsCardDirectly } from "./scope.js";
 import type { PressSelectionPlan } from "./types.js";
 
 export function toggleSelected(selected: readonly string[], nodeId: string): string[] {
@@ -19,6 +19,7 @@ export function toggleSelected(selected: readonly string[], nodeId: string): str
  *
  * - Shift 先切换该节点，不进入容器；
  * - 已选节点保持（随后可由领域手势消费，例如拖动/预览旋转）；
+ * - 镜头的 2D 卡片直接选中镜头，不先进入容器；
  * - 容器尚未进入时返回 `scope` 计划，第一次点击选中容器；
  * - 容器已进入（容器自身已选或同区已有兄弟）时直接选子元素，并标记
  *   `sibling-switch`，供双击忽略聚焦。
@@ -28,6 +29,8 @@ export function resolvePressSelection(input: {
   nodeId: string;
   selected: readonly string[];
   additive?: boolean;
+  /** 命中来源：3D 机位/视锥拾取仍走容器优先，2D 镜头卡片直接选中镜头。 */
+  via?: "card" | "pick";
   /** 目标归一化阶段已解析的容器。 */
   scopeId?: string | null;
 }): PressSelectionPlan {
@@ -39,6 +42,14 @@ export function resolvePressSelection(input: {
   }
   if (input.selected.includes(input.nodeId)) {
     return { selection: null, reason: "already-selected", scopeId, gesture: "keep" };
+  }
+  if (selectsCardDirectly(input.canvas, input.nodeId, input.via ?? "pick")) {
+    return {
+      selection: [input.nodeId],
+      reason: hasSelectedSiblingInScope(input.canvas, input.selected, scopeId) ? "sibling-switch" : "child",
+      scopeId,
+      gesture: "child"
+    };
   }
   const scope = scopeSelectionPrecedence({
     canvas: input.canvas,

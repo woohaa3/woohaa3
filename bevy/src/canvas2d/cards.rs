@@ -109,18 +109,25 @@ pub(super) fn draw_static(
             theme.token_u32("canvasCloseIcon"),
         ));
     }
-    let body_lines: Vec<&str> = node.body.lines().collect();
-    for i in 0..6 {
+    // 正文优先用满预览区宽度换行，行数由卡片实际高度派生；只有超出预算才在末行省略。
+    // 历史失败/取消原因尤其依赖这条路径，否则 240 字的报错只剩第一行。
+    let body_lines = if show_content
+        && !node.texture
+        && !node.busy
+        && !(node.model_preview.is_some() && node.model.is_some())
+    {
+        super::layout::wrapped_lines(
+            &node.body,
+            width - 48.,
+            12.,
+            super::layout::body_line_budget(height),
+        )
+    } else {
+        Vec::new()
+    };
+    for i in 0..super::layout::BODY_MAX_LINES {
         labels.push((
-            if show_content
-                && !node.texture
-                && !node.busy
-                && !(node.model_preview.is_some() && node.model.is_some())
-            {
-                shortened(body_lines.get(i).unwrap_or(&""), width - 48., 12.)
-            } else {
-                String::new()
-            },
+            body_lines.get(i).cloned().unwrap_or_default(),
             Vec2::new(x + 24., y + 56. + i as f32 * 18.),
             12.,
             theme.token_u32("canvasBodyText"),
@@ -264,3 +271,62 @@ pub(super) fn draw_resize_grip(
     let color = theme.token_u32("canvasResizeHandle");
     geometry.rounded_rect(grip.x, grip.y, grip.width, grip.height, 2.0, z, color);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card(body: &str, width: f32, height: f32) -> GraphNode {
+        serde_json::from_value(serde_json::json!({
+            "id": "n", "type": "text", "x": 0, "y": 0,
+            "width": width, "height": height,
+            "title": "节点", "body": body
+        }))
+        .unwrap()
+    }
+
+    /// 卡片正文按预览区宽度换行：历史失败/取消原因不能被单行截断。
+    #[test]
+    fn long_failure_reason_wraps_into_multiple_body_lines() {
+        let node = card(&format!("失败：{}", "模型调用超时并重试失败".repeat(12)), 248.0, 232.0);
+        let labels = super::draw_static(
+            &mut Geometry::default(),
+            &ThemeResource::default(),
+            &node,
+            0,
+        );
+        let body: Vec<&str> = labels
+            .iter()
+            .map(|label| label.0.as_str())
+            .filter(|text| !text.is_empty() && (text.contains("失败：") || text.contains("模型调用超时")))
+            .collect();
+        assert!(
+            body.len() > 1,
+            "长报错必须换行，实际只有 {} 行：{:?}",
+            body.len(),
+            body
+        );
+        assert!(body[0].contains("失败："));
+        // 每行都不超过正文可用宽度（width - 48）。
+        for line in &body {
+            assert!(
+                crate::canvas_query::layout::estimated_text_width(line, 12.0) <= 200.0 + 12.0,
+                "行超宽：{line}"
+            );
+        }
+    }
+
+    /// 正文为空时不产生可见正文行（槽位仍存在但不显示文字）。
+    #[test]
+    fn empty_body_produces_no_visible_body_lines() {
+        let node = card("", 248.0, 232.0);
+        let labels = super::draw_static(
+            &mut Geometry::default(),
+            &ThemeResource::default(),
+            &node,
+            0,
+        );
+        assert!(labels.iter().skip(2).all(|label| label.0.is_empty()));
+    }
+}
+

@@ -25,8 +25,8 @@ use crate::theme::ThemeResource;
 use super::geometry::Geometry;
 use super::labels::{Label, LabelRequests, LabelStyle};
 use super::layout::{
-    NODE_ACTION_TOOLBAR_ACTION_HEIGHT, NODE_ACTION_TOOLBAR_ACTION_PAD, NODE_ACTION_TOOLBAR_FONT,
-    NODE_ACTION_TOOLBAR_ICON_GAP, NODE_ACTION_TOOLBAR_ICON_SIZE, NODE_ACTION_TOOLBAR_PAD,
+    NODE_ACTION_TOOLBAR_ACTION_HEIGHT, NODE_ACTION_TOOLBAR_FONT, NODE_ACTION_TOOLBAR_ICON_GAP,
+    NODE_ACTION_TOOLBAR_ICON_SIZE, NODE_ACTION_TOOLBAR_PAD, node_action_content_x,
     node_action_toolbar,
 };
 
@@ -127,13 +127,13 @@ pub(crate) fn draw(
                         | "expand-groups"
                 )
             }) {
-                // 纯图标按钮居中；图标 + 文字时图标贴左，文字紧随其后（与 contracts 同一栅格）。
+                // 纯图标按钮居中；图标 + 文字时整块内容按槽内富余居中，文字紧随图标。
+                let content_x = node_action_content_x(aw / scale, &slot.label, slot.icon.is_some());
                 let center = if slot.icon_only {
                     Vec2::new(ax + aw / 2.0, ay + ah / 2.0)
                 } else {
                     Vec2::new(
-                        ax + (NODE_ACTION_TOOLBAR_ACTION_PAD + NODE_ACTION_TOOLBAR_ICON_SIZE / 2.0)
-                            * scale,
+                        ax + (content_x + NODE_ACTION_TOOLBAR_ICON_SIZE / 2.0) * scale,
                         ay + ah / 2.0,
                     )
                 };
@@ -233,14 +233,15 @@ pub(crate) fn draw(
                 }
             }
             if !slot.icon_only {
+                let content_x = node_action_content_x(aw / scale, &slot.label, slot.icon.is_some());
                 let label_x = ax
-                    + (if slot.icon.is_some() {
-                        NODE_ACTION_TOOLBAR_ACTION_PAD
-                            + NODE_ACTION_TOOLBAR_ICON_SIZE
-                            + NODE_ACTION_TOOLBAR_ICON_GAP
-                    } else {
-                        NODE_ACTION_TOOLBAR_ACTION_PAD
-                    }) * scale;
+                    + (content_x
+                        + if slot.icon.is_some() {
+                            NODE_ACTION_TOOLBAR_ICON_SIZE + NODE_ACTION_TOOLBAR_ICON_GAP
+                        } else {
+                            0.0
+                        })
+                        * scale;
                 let text_y = ay + (ah - world_font) / 2.0 - scale;
                 labels.push((
                     slot.label.clone(),
