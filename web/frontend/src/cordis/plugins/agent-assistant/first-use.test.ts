@@ -23,7 +23,7 @@ function fixture(phase = "ready") {
   for (const dialogId of ["agent-assistant", "other"]) dialogs.registerDialog(dialogId, {
     definition: { validatePayload: payload => ({ ok: true, payload }) },
   });
-  const open = vi.fn(() => dialogs.open({ dialogId: "agent-assistant", payload: { page: "add" } }));
+  const open = vi.fn(() => dialogs.open({ dialogId: "agent-assistant", payload: {} }));
   const options = { service, dialogs, open,
     user: { subscribe, getSnapshot: () => userSnapshot } as Pick<CurrentUserService, "subscribe" | "getSnapshot">,
     session: { subscribe, getStatus: () => ({ phase }) } as Pick<CanvasSession, "subscribe" | "getStatus">,
@@ -41,7 +41,7 @@ function fixture(phase = "ready") {
   };
 }
 
-it("waits for canvas readiness, then opens the add page once and respects closing across restarts", async () => {
+it("waits for canvas readiness, then opens the AI capability center once and respects closing across restarts", async () => {
   const f = fixture("loading");
   const stop = f.start();
   await f.flush();
@@ -49,7 +49,7 @@ it("waits for canvas readiness, then opens the add page once and respects closin
   f.setPhase("ready");
   await f.flush();
   expect(f.open).toHaveBeenCalledOnce();
-  expect(f.dialogs.top()?.payload).toEqual({ page: "add" });
+  expect(f.dialogs.top()?.payload).toEqual({});
   expect(localStorage.getItem(assistantFirstUseKey("first"))).toBe("seen");
   f.dialogs.closeTop(); await f.flush();
   stop(); f.start(); await f.flush();

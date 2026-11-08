@@ -10,6 +10,7 @@ import type { GenerationModelsStatusService } from "../../services/generation-mo
 import { agentDirectory } from "../../services/agent-directory.js";
 import { AssistantSetupTooltip } from "./setup-tooltip.js";
 import { installAssistantFirstUse } from "./first-use.js";
+import { AgentAssistantShell } from "./dialog-shell.js";
 
 export const AGENT_ASSISTANT_DIALOG_ID = "agent-assistant";
 type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string; section?: "generation-history" | "diagnostics" };
@@ -43,8 +44,8 @@ export function agentAssistantExtension(): Plugin.Function<void> {
         const user = ctx.get("currentUser");
         const scope = useSyncExternalStore(user?.subscribe ?? (() => () => {}), () => user ? user.getSnapshot()?.dataScopeId ?? null : "local");
         const payload = useMemo(() => ({ canvasId: ctx.get("canvasScope")?.canvasId(), ...(instance.payload as Payload) }), [instance.payload]);
-        if (scope === null) return <p>正在确认用户数据空间…</p>;
-        return <Suspense fallback={<p>正在打开 AI 助手…</p>}><AgentAssistant key={`${instance.instanceId}:${scope}:${payload.canvasId ?? ""}`} service={ctx.agentConversationService} payload={payload} onClose={requestClose} onHistoryClose={() => ctx.dialogs.requestClose(instance.instanceId).closed} settingsStore={settingsStore} onConfigurationSaved={refreshDirectory} /></Suspense>;
+        if (scope === null) return <AgentAssistantShell onClose={requestClose} loadingMessage="正在确认用户数据空间…" />;
+        return <Suspense fallback={<AgentAssistantShell onClose={requestClose} loadingMessage="正在打开 AI 能力中心…" />}><AgentAssistant key={`${instance.instanceId}:${scope}:${payload.canvasId ?? ""}`} service={ctx.agentConversationService} payload={payload} onClose={requestClose} onHistoryClose={() => ctx.dialogs.requestClose(instance.instanceId).closed} settingsStore={settingsStore} onConfigurationSaved={refreshDirectory} /></Suspense>;
       }
     });
     // 面板主操作：AI 助手排最前（priority 低于其它入口），并使用 primary 实底图标。
@@ -60,7 +61,7 @@ export function agentAssistantExtension(): Plugin.Function<void> {
     const session = ctx.get("canvasSession");
     const stopFirstUse = user && session ? installAssistantFirstUse({
       service: ctx.agentConversationService, user, session, dialogs: ctx.dialogs,
-      open: () => ctx.canvasNavigation.openDialog({ dialogId: AGENT_ASSISTANT_DIALOG_ID, payload: { page: "add" } }),
+      open: () => ctx.canvasNavigation.openDialog({ dialogId: AGENT_ASSISTANT_DIALOG_ID, payload: {} }),
     }) : undefined;
     ctx.effect(() => () => { globalThis.removeEventListener("woohaa3-open-agent-assistant", open);
       stopFirstUse?.();

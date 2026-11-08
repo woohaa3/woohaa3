@@ -495,6 +495,10 @@ export type SettingPluginLayer = "base" | "core" | "extension";
  * 分层与启停范围，让设置页不需要从键名前缀猜插件是谁。
  */
 export type SettingPluginView = {
+  /** 扩展声明的服务商网站。 */
+  website?: string;
+  /** 添加提供商列表的展示顺序；未声明时排在推荐入口之后。 */
+  setupOrder?: number;
   /** 扩展声明的 Provider 输出类型，不等同于当前账号可用模型或已验证权限。 */
   modelTypes?: readonly CanvasTaskModelType[];
   /** 宿主扫描到的插件绝对目录，仅用于展示。 */

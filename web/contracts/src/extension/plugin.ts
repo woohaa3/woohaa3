@@ -83,6 +83,10 @@ export type ExtensionPlugin<F extends HostConfigFields = HostConfigFields> = {
   readonly icon?: PluginIcon;
   /** Provider 适配器支持的输出类型，用于配置前的能力标签；不代表账号已有模型或授权。 */
   readonly modelTypes?: readonly CanvasTaskModelType[];
+  /** 服务商网站，由扩展声明；缺省不提供网站跳转。 */
+  readonly website?: string;
+  /** 添加提供商列表的展示顺序；未声明时排在推荐入口之后。 */
+  readonly setupOrder?: number;
   /**
    * 模型目录刷新入口声明：设置页据此显示「可用模型」一节（说明 + 刷新按钮）。
    *

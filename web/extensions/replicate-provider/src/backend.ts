@@ -117,6 +117,7 @@ export function createReplicateProviderPlugin(deps: ReplicatePluginDependencies 
     name: REPLICATE_PLUGIN_ID,
     label: "Replicate",
     configPrefix: "providers.replicate",
+    website: "https://replicate.com",
     modelTypes: ["language", "image", "video", "audio"],
     // 设置页「可用模型」一节由插件声明驱动：宿主不硬编码 Provider 的刷新入口。
     modelRefresh: { path: REFRESH_PATH, hint: "填写 API Token，以及要使用的模型（逗号或换行分隔，格式 owner/name，例如 black-forest-labs/flux-schnell）。保存后会读取这些模型的输入定义，也可以再刷新。" },

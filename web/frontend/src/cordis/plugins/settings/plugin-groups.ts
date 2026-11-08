@@ -30,6 +30,9 @@ export type SettingsPluginLayerKind = SettingPluginLayer | "site" | "browser";
 
 /** 插件行数据；`entries` 是它自己声明的配置项（没有可配置项时为空）。 */
 export type PluginSettingsGroup = {
+  website?: string;
+  /** 添加提供商列表的展示顺序；未声明时排在推荐入口之后。 */
+  setupOrder?: number;
   /** Provider 声明的模型输出类型，配置前也可展示。 */
   modelTypes?: SettingPluginView["modelTypes"];
   /** 本次启动扫描到的安装信息（目录、是否可写根）；不表达启用状态。 */
@@ -172,6 +175,8 @@ export function providerConfigGroups(snapshot: SettingsSnapshot | null): PluginS
       description: plugin?.description ?? "",
       ...(plugin?.icon ? { icon: plugin.icon } : {}),
       ...(plugin?.modelTypes ? { modelTypes: plugin.modelTypes } : {}),
+      ...(plugin?.website ? { website: plugin.website } : {}),
+      ...(plugin?.setupOrder !== undefined ? { setupOrder: plugin.setupOrder } : {}),
       layer: plugin?.layer ?? "extension",
       siteManaged: plugin?.siteManaged ?? false,
       provider: true,
@@ -354,6 +359,8 @@ export function isBrowserRowPending(row: ExtensionManagerViewRow): boolean {
 function groupOf(plugin: SettingPluginView, entries: SettingsEntryView[]): PluginSettingsGroup {
   return {
     id: plugin.id,
+    ...(plugin.website ? { website: plugin.website } : {}),
+    ...(plugin.setupOrder !== undefined ? { setupOrder: plugin.setupOrder } : {}),
     label: plugin.label,
     description: plugin.description,
     layer: plugin.layer,

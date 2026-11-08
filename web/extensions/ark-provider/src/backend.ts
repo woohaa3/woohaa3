@@ -161,6 +161,7 @@ export function createArkProviderPlugin(deps: ArkPluginDependencies = {}): Exten
     name: ARK_PLUGIN_ID,
     label: "Ark（火山方舟）",
     configPrefix: "providers.ark",
+    website: "https://www.volcengine.com/product/ark",
     modelTypes: ["language", "image", "video"],
     inject: ["log", "generation"],
     Config: ARK_CONFIG,

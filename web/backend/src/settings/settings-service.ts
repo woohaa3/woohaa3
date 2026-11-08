@@ -90,6 +90,9 @@ export type SettingsSection = Record<string, SettingPrimitive>;
 
 /** 登记一个插件：设置页「插件配置」据此列出宿主插件树里的每个插件。 */
 export type SettingsPluginRegistration = {
+  website?: string;
+  /** 添加提供商列表的展示顺序；未声明时排在推荐入口之后。 */
+  setupOrder?: number;
   modelTypes?: SettingPluginView["modelTypes"];
   /** 宿主扫描到的插件绝对目录，仅用于展示。 */
   directory?: string;
@@ -333,6 +336,8 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
         ...(plugin.directory ? { directory: plugin.directory } : {}),
         ...(plugin.icon ? { icon: plugin.icon } : {}),
         ...(plugin.modelTypes ? { modelTypes: plugin.modelTypes } : {}),
+        ...(plugin.website ? { website: plugin.website } : {}),
+        ...(plugin.setupOrder !== undefined ? { setupOrder: plugin.setupOrder } : {}),
         ...(prefix ? { configPrefix: prefix } : {}),
         settingCount: count,
         siteManaged: plugin.siteManaged ?? false,

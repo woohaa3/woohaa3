@@ -152,6 +152,7 @@ export function createBailianProviderPlugin(deps: BailianPluginDependencies = {}
     label: "百炼（阿里云）",
     configPrefix: "providers.bailian",
     // 只接生图。文本与视频不在本次范围内，所以这里不声明。
+    website: "https://bailian.console.aliyun.com",
     modelTypes: ["image"],
     modelRefresh: {
       path: REFRESH_PATH,

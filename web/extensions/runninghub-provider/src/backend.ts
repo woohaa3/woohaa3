@@ -153,6 +153,8 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
     name: RUNNINGHUB_PLUGIN_ID,
     label: "RunningHub",
     configPrefix: "providers.runninghub",
+    setupOrder: 20,
+    website: "https://www.runninghub.ai?inviteCode=rh-v1272",
     modelTypes: ["language", "image", "video"],
     inject: ["log", "generation", "gateway", "access", "storage", "exposer"],
     modelRefresh: {

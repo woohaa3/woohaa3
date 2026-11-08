@@ -2,11 +2,10 @@ import { Component, lazy, Suspense, useEffect, useRef, useState, useSyncExternal
 import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";
 import { useSlot } from "../../host.js";
 import { useOptionalService } from "../../react.js";
-import { Button, SettingsFeedback, ServiceLogo } from "@woohaa3/ui";
-import { BackIcon, CloseIcon, SparklesIcon } from "@woohaa3/ui/icons";
+import { Button, IconButton, SettingsFeedback, ServiceLogo } from "@woohaa3/ui";
+import { BackIcon, CloseIcon } from "@woohaa3/ui/icons";
 import type { BackendSettingsStore } from "../settings/backend-settings-store.js";
 import { UiPortalScope } from "@woohaa3/ui/primitives";
-import { Dialog, DialogHeader, DialogTitle, DialogBody } from "@woohaa3/ui/dialogs";
 import { McpConnectionPanel, type McpPanelSnapshot } from "./mcp-connection-panel.js";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import { providerConfigGroups } from "../settings/plugin-groups.js";
@@ -15,14 +14,14 @@ import { PluginIconMark } from "../settings/plugin-icons.js";
 import { CapabilityOverview, type CapabilityPage } from "./capability-pages.js";
 import type { ActiveCapability } from "./capability-directory.js";
 import { useServiceDirectory, serviceSourceState } from "./service-directory.js";
-import "./style.css";
+import { AgentAssistantShell } from "./dialog-shell.js";
 
 type Page = "connections" | "add" | "configuration";
 type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string; section?: "generation-history" | "diagnostics" };
 const kinds = [
-  { id: "installed", label: "我有本地 agent", title: "连接本地 agent", services: [{ id: "chatgpt", name: "本地 ChatGPT" }, { id: "opencode", name: "本地 OpenCode" }, { id: "codebuddy", name: "本地 CodeBuddy" }], detail: "使用运行本应用的电脑上已安装的 agent。" },
-  { id: "login", label: "我有 ChatGPT 账号", title: "连接 ChatGPT", services: [{ id: "chatgpt", name: "ChatGPT" }], detail: "使用已有的 ChatGPT 账号登录并授权。" },
-  { id: "api-key", label: "我有 API Key", title: "连接自定义兼容服务", services: [], detail: "填写兼容服务的协议、地址和 API Key。" },
+  { id: "installed", setupOrder: 10, label: "我有本地 agent", title: "连接本地 agent", services: [{ id: "chatgpt", name: "本地 ChatGPT" }, { id: "opencode", name: "本地 OpenCode" }, { id: "codebuddy", name: "本地 CodeBuddy" }], detail: "使用运行本应用的电脑上已安装的 agent。" },
+  { id: "login", setupOrder: 40, label: "我有 ChatGPT 账号", title: "连接 ChatGPT", services: [{ id: "chatgpt", name: "ChatGPT" }], detail: "使用已有的 ChatGPT 账号登录并授权。" },
+  { id: "api-key", setupOrder: 10, label: "我有 API Key", title: "连接自定义兼容服务", services: [], detail: "填写兼容服务的协议、地址和 API Key。" },
 ] as const;
 const GenerationProviders = lazy(() => import("../settings/provider-settings-cards.js").then(module => ({ default: module.ProviderSettingsCards })));
 
@@ -114,10 +113,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
     { id: "mcp", label: "MCP 服务", count: mcp?.configured },
     { id: "generation-history", label: "生成历史" },
   ];
-  return <Dialog.Content size="lg" className="agent-assistant" ariaLabel="AI 能力中心">
-    <UiPortalScope>
-      <DialogHeader onClose={onClose}><div className="agent-assistant__title"><span className="agent-assistant__title-mark"><SparklesIcon size={20} /></span><DialogTitle>AI 能力中心</DialogTitle></div></DialogHeader>
-      <DialogBody className="agent-assistant__workspace">
+  return <AgentAssistantShell onClose={onClose}>
         <nav className="agent-assistant__sidebar">{navigation.map(item => <button key={item.id} type="button" data-page={item.id} data-state={page === item.id ? "active" : "inactive"} onClick={() => navigate(item.id)}><span>{item.label}</span>{item.count !== undefined ? <small>{item.count}</small> : null}</button>)}</nav>
         <div className="agent-assistant__content">
           <section hidden={page !== "overview"} className="agent-assistant__page" data-ai-page="overview">
@@ -153,9 +149,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
               : <SettingsFeedback tone="warning">{settingsState?.status === "error" ? settingsState.error : "临时图床配置暂不可用。"}<Button size="sm" onClick={() => void settingsStore?.load()}>重试</Button></SettingsFeedback>}
           </AssistantDrawer> : null}
         </div>
-      </DialogBody>
-    </UiPortalScope>
-  </Dialog.Content>;
+  </AgentAssistantShell>;
 }
 
 class HistoryBoundary extends Component<{ children: ReactNode }, { failed: boolean; revision: number }> {
@@ -169,7 +163,7 @@ class HistoryBoundary extends Component<{ children: ReactNode }, { failed: boole
 function AssistantDrawer({ title, onClose, children, hidden = false, wide = false }: { title: string; onClose: () => void; children: ReactNode; hidden?: boolean; wide?: boolean }) {
   return <div className="agent-assistant__drawer-layer" hidden={hidden} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
     <aside className={`agent-assistant__drawer${wide ? " agent-assistant__drawer--wide" : ""}`}>
-      <div className="agent-assistant__drawer-head"><h2>{title}</h2><Button size="sm" tone="ghost" icon={<CloseIcon size={16} />} onClick={onClose}>关闭详情</Button></div>
+      <div className="agent-assistant__drawer-head"><h2>{title}</h2><IconButton size="sm" label="关闭详情" onClick={onClose}><CloseIcon size={16} /></IconButton></div>
       <div className="agent-assistant__drawer-body"><UiPortalScope>{children}</UiPortalScope></div>
     </aside>
   </div>;
@@ -180,7 +174,7 @@ function isLocalConnection(connection: AgentConnectionView) {
 }
 
 type ConfigurationContribution = { owner?: string; kind: string; render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }> };
-type ProviderTemplate = { id: string; label: string; providerId: string; description: string; icon?: string; modelTypes: readonly string[] };
+type ProviderTemplate = { id: string; label: string; providerId: string; description: string; icon?: string; website?: string; setupOrder?: number; usesApiKey: boolean; modelTypes: readonly string[] };
 const MODEL_TYPE_LABELS = [["language", "文本"], ["image", "图片"], ["video", "视频"], ["audio", "音频"]] as const;
 
 function ModelTypeTags({ types }: { types: readonly string[] }) {
@@ -218,6 +212,11 @@ function ConnectionPanel({ local, compact = false, connections, contributions, p
   </>;
 }
 
+function ProviderWebsite({ website, children, className = "" }: { website?: string; children: ReactNode; className?: string }) {
+  const href = website && /^https?:\/\//i.test(website) ? website : undefined;
+  return <a className={`agent-assistant__provider-website ${className}`} href={href} target={href ? "_blank" : undefined} rel={href ? "noopener noreferrer" : undefined}>{children}</a>;
+}
+
 function AddConnectionForm({ contributions, onSaved, local, providerGroups = [], settingsStore, initialKind, capability }: {
   local: boolean;
   contributions: ReadonlyArray<{ kind: string; render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }> }>;
@@ -243,31 +242,35 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
     if (container) container.scrollTop = selectedKind ? 0 : selectionScrollTop.current;
   }, [selectedKind]);
   const providerMethods = local ? [] : providerGroups.filter(group => !capability || group.modelTypes.includes(capability === "agent" ? "language" : capability));
+  const methods = [
+    ...kinds.filter(item => local ? item.id === "installed" : item.id !== "installed" && (!capability || capability === "agent"))
+      .map(item => ({ type: "connection" as const, id: item.id, setupOrder: item.setupOrder, item })),
+    ...providerMethods.map(group => ({ type: "provider" as const, id: `provider:${group.providerId}`, setupOrder: group.setupOrder ?? 100, group })),
+  ].sort((a, b) => a.setupOrder - b.setupOrder);
   const selectedMethod = selectedKind
     ? kinds.find(item => item.id === selectedKind) ?? providerMethods.find(group => `provider:${group.providerId}` === selectedKind)
     : null;
   const selectedLabel = selectedMethod?.label ?? null;
   return <div ref={addRef} className="agent-assistant__add" data-step={selectedKind ? "configuration" : "selection"}>
-    <div className="agent-assistant__methods" hidden={selectedKind !== null}>{kinds.filter(item => local ? item.id === "installed" : item.id !== "installed" && (!capability || capability === "agent")).map(item => {
-      const available = contributions.some(entry => entry.kind === item.id);
-      return <button key={item.id} type="button" className="agent-assistant__method" data-kind={item.id} data-selected={selectedKind === item.id} disabled={!available}
-        onClick={() => selectMethod(item.id)}>
-        <strong>{item.label}</strong>
-        <span className="agent-assistant__brands">{item.services.map(service => <span className="service-identity" key={service.id}><ServiceLogo service={service.id} size={18} />{service.name}</span>)}</span>
+    <div className="agent-assistant__methods" hidden={selectedKind !== null}>{methods.map(method => {
+      const { id } = method;
+      if (method.type === "provider") {
+        const { group } = method;
+        return <div key={id} className="agent-assistant__method agent-assistant__method--provider" data-kind={id} data-selected={selectedKind === id}>
+          <ProviderWebsite website={group.website}><span className="agent-assistant__provider-mark"><PluginIconMark icon={group.icon} size={22} /></span><strong>{group.label}</strong></ProviderWebsite>
+          <span className="agent-assistant__method-description">{group.description || "使用此提供商的现有配置。"}</span>
+          <div className="agent-assistant__method-footer"><ModelTypeTags types={group.modelTypes} /><div className="agent-assistant__method-actions">{group.usesApiKey ? <ProviderWebsite website={group.website} className="agent-assistant__get-api-key">获取 API Key</ProviderWebsite> : null}<Button size="sm" tone="primary" onClick={() => selectMethod(id)}>配置</Button></div></div>
+        </div>;
+      }
+      const { item } = method;
+      const available = contributions.some(entry => entry.kind === id);
+      const website = id === "login" ? "https://chatgpt.com" : undefined;
+      return <div key={id} className="agent-assistant__method" data-kind={id} data-selected={selectedKind === id} data-disabled={!available}>
+        <ProviderWebsite website={website}><strong>{item.label}</strong></ProviderWebsite>
+        <span className="agent-assistant__brands">{item.services.map(service => <ProviderWebsite website={website} key={service.id}><span className="service-identity"><ServiceLogo service={service.id} size={18} />{service.name}</span></ProviderWebsite>)}</span>
         <span className="agent-assistant__method-description">{available ? item.detail : "当前环境未启用"}</span>
-        {item.id !== "installed" ? <ModelTypeTags types={["language"]} /> : null}
-        <span className="agent-assistant__method-state">{!available ? "不可用" : selectedKind === item.id ? "正在配置" : "点击配置"}</span>
-      </button>;
-    })}{providerMethods.map(group => {
-      const id = `provider:${group.providerId}`;
-      return <button key={id} type="button" className="agent-assistant__method agent-assistant__method--provider" data-kind={id} data-selected={selectedKind === id}
-        onClick={() => selectMethod(id)}>
-        <span className="agent-assistant__provider-mark"><PluginIconMark icon={group.icon} size={22} /></span>
-        <strong>{group.label}</strong>
-        <span className="agent-assistant__method-description">{group.description || "使用此提供商的现有配置。"}</span>
-        <ModelTypeTags types={group.modelTypes} />
-        <span className="agent-assistant__method-state">{selectedKind === id ? "正在配置" : "点击配置"}</span>
-      </button>;
+        <div className="agent-assistant__method-footer">{id !== "installed" ? <ModelTypeTags types={["language"]} /> : null}<Button size="sm" tone="primary" disabled={!available} onClick={() => selectMethod(id)}>配置</Button></div>
+      </div>;
     })}</div>
     {capability && capability !== "agent" && !providerMethods.length && selectedKind === null ? <p className="agent-assistant__empty-note">当前没有可配置的{MODEL_TYPE_LABELS.find(([type]) => type === capability)?.[1]}提供商扩展。</p> : null}
     <div className="agent-assistant__forms" hidden={selectedKind === null}>
@@ -305,7 +308,8 @@ function ServiceSources({ service, connections, contributions, payload, settings
   const modelsService = useOptionalService("generationModelsStatus");
   const modelState = useSyncExternalStore(modelsService?.subscribe ?? (() => () => {}), modelsService?.getSnapshot ?? (() => null));
   const providerGroups: ProviderTemplate[] = settings?.status === "ready" ? providerConfigGroups(settings.snapshot).flatMap(group => group.providerId ? [{
-    id: group.id, label: group.label, providerId: group.providerId, description: group.description, icon: group.icon,
+    id: group.id, label: group.label, providerId: group.providerId, description: group.description, icon: group.icon, website: group.website, setupOrder: group.setupOrder,
+    usesApiKey: group.entries.some(entry => entry.secret && entry.key.endsWith(".apiKey")),
     modelTypes: group.modelTypes ?? (modelState
       ? modelState.models.filter(model => model.providerId === group.providerId && !model.tombstone).map(model => model.modelType)
       : directory?.providers.find(provider => provider.providerId === group.providerId)?.models.map(model => model.type) ?? []),

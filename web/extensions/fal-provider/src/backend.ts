@@ -113,6 +113,7 @@ export function createFalProviderPlugin(deps: FalPluginDependencies = {}): Exten
     name: FAL_PLUGIN_ID,
     label: "fal.ai",
     configPrefix: "providers.fal",
+    website: "https://fal.ai",
     modelTypes: ["language", "image", "video", "audio"],
     // 设置页「可用模型」一节由插件声明驱动：宿主不硬编码 Provider 的刷新入口。
     modelRefresh: { path: REFRESH_PATH, hint: "填写 API Key，以及要使用的模型（逗号或换行分隔，endpoint id，例如 fal-ai/flux/schnell 或 fal-ai/kling-video/v3/pro/text-to-video）。保存后会读取这些模型的队列定义，也可以再刷新。" },

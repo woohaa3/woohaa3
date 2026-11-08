@@ -77,6 +77,8 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyEx
     ...(plugin.directory ? { directory: plugin.directory } : {}),
     ...(plugin.icon ? { icon: plugin.icon } : {}),
     ...(plugin.modelTypes ? { modelTypes: plugin.modelTypes } : {}),
+    ...(plugin.website ? { website: plugin.website } : {}),
+    ...(plugin.setupOrder !== undefined ? { setupOrder: plugin.setupOrder } : {}),
     ...(plugin.modelRefresh ? { modelRefresh: plugin.modelRefresh } : {}),
     configPrefix: prefix,
     siteManaged: gated

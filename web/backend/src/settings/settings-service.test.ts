@@ -259,7 +259,7 @@ describe("createSettingsService", () => {
 
   it("插件清单带上声明的图标（语义名或品牌图形路径）；未声明时不带该字段", async () => {
     const { service } = await start(tempFiles());
-    service.registerPlugin({ id: "ark-provider", label: "Ark（火山方舟）", layer: "extension", configPrefix: "providers.ark", icon: "provider" });
+    service.registerPlugin({ id: "ark-provider", label: "Ark（火山方舟）", layer: "extension", configPrefix: "providers.ark", icon: "provider", website: "https://provider.example.com", setupOrder: 20 });
     service.registerPlugin({
       id: "litellm-provider",
       label: "LiteLLM",
@@ -275,6 +275,8 @@ describe("createSettingsService", () => {
         description: "",
         layer: "extension",
         icon: "provider",
+        website: "https://provider.example.com",
+        setupOrder: 20,
         configPrefix: "providers.ark",
         settingCount: 0,
         siteManaged: false,

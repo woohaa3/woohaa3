@@ -96,6 +96,8 @@ export function createCephalonProviderPlugin(
     name: CEPHALON_PLUGIN_ID,
     label: "端脑云",
     configPrefix: "providers.cephalon",
+    setupOrder: 30,
+    website: "https://cephalon.cloud/share/register-landing?invite_id=m95SDj",
     modelTypes: ["language", "image", "video"],
     // 设置页「可用模型」一节由插件声明驱动：宿主不硬编码 Provider 的刷新入口。
     modelRefresh: {

@@ -102,6 +102,7 @@ export function createTokenHubProviderPlugin(deps: TokenHubPluginDependencies = 
     name: TOKENHUB_PLUGIN_ID,
     label: "TokenHub",
     configPrefix: "providers.tokenhub",
+    website: "https://tokenhub.tencentmaas.com",
     modelTypes: ["language", "image", "video"],
     // 设置页「可用模型」一节由插件声明驱动：宿主不硬编码 Provider 的刷新入口。
     modelRefresh: { path: REFRESH_PATH, hint: "模型从 TokenHub 的模型列表接口发现。保存 API Key 和网关地址后会发现一次，也可以再刷新。文本走对话接口；图片和视频按模型系列调用对应的生成接口。" },

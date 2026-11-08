@@ -113,6 +113,7 @@ export function createGrsaiProviderPlugin(deps: GrsaiPluginDependencies = {}): E
     name: GRSAI_PLUGIN_ID,
     label: "grsai",
     configPrefix: "providers.grsai",
+    website: "https://grsai.ai",
     modelTypes: ["language", "image", "video"],
     // 设置页「可用模型」一节由插件声明驱动：宿主不硬编码 Provider 的刷新入口。
     modelRefresh: { path: REFRESH_PATH, hint: "模型从 grsai 的公开模型表发现，下线或维护中的模型不会注册。保存 API Key 和 API 地址后会发现一次，也可以再刷新。图片和视频走统一生成接口，文本走 OpenAI 兼容对话接口。" },

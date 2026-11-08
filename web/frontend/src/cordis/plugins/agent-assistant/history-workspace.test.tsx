@@ -74,13 +74,31 @@ it("仅首次访问读取；侧栏往返和重复打开保留筛选、分页、�
   expect(f.listConversations).not.toHaveBeenCalled(); expect(f.submitTurn).not.toHaveBeenCalled(); expect(f.write).not.toHaveBeenCalled();
 });
 
+it("确认数据空间时先显示可关闭的能力中心外壳，关闭后身份就绪不重开", async () => {
+  const f = await fixture();
+  await f.changeUser(null);
+  await f.open({});
+  const shell = f.el.querySelector('.agent-assistant.dlg')!;
+  expect(shell.querySelector('.dlg__title')?.textContent).toBe("AI 能力中心");
+  expect(shell.querySelector('.dlg__body .agent-assistant__loading')?.textContent).toBe("正在确认用户数据空间…");
+  expect(shell.querySelector('[data-ai-page]')).toBeNull();
+  expect(f.service.listConnections).not.toHaveBeenCalled();
+  expect(f.service.listServiceConnections).not.toHaveBeenCalled();
+  await f.click('.dlg__close');
+  expect(f.el.querySelector('.agent-assistant')).toBeNull();
+  await f.changeUser("owner-a");
+  expect(f.el.querySelector('.agent-assistant')).toBeNull();
+  expect(f.dialogs.getSnapshot().stack).toHaveLength(0);
+});
+
 it("切换数据空间隔离旧响应；未确认身份时卸载，贡献撤销呈现不可用", async () => {
   const pending: Array<(result: Awaited<ReturnType<CanvasHistoryClient["listCanvas"]>>) => void> = [];
   const f = await fixture(() => new Promise(resolve => pending.push(resolve)));
   await f.open(); await f.changeUser(null);
-  expect(f.el.textContent).toContain("正在确认用户数据空间");
+  expect(f.el.querySelector('.agent-assistant .agent-assistant__loading')?.textContent).toContain("正在确认用户数据空间");
   await act(async () => pending[0]!(page([entry("old-owner")])));
   await f.changeUser("owner-b"); expect(f.listCanvas).toHaveBeenCalledTimes(2);
+  expect(f.el.querySelector('.agent-assistant__loading')).toBeNull();
   expect(f.el.textContent).not.toContain("old-owner");
   await act(async () => pending[1]!(page([entry("new-owner")])));
   expect(f.el.textContent).toContain("new-owner");

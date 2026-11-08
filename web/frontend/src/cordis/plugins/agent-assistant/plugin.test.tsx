@@ -1,48 +1,17 @@
 /** @vitest-environment jsdom */
 import { afterEach, expect, it, vi } from "vitest";
-import { act, useState } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createBackendSettingsStore } from "../settings/backend-settings-store.js";
-import { AgentAssistant } from "./assistant.js";
 import { RuntimeProvider } from "../../react.js";
 import { startFrontendRuntime, type FrontendRuntime } from "../../kernel.js";
 import { SlotRegistry } from "../../slots.js";
-import { SelectInput } from "@woohaa3/ui/forms";
 import { UiProvider } from "@woohaa3/ui/primitives";
-import type { AgentConversationService } from "../../contract/agent-conversation.js";
-import type { GenerationModelsStatusService, GenerationModelsStatusSnapshot } from "../../services/generation-models-status.js";
+import type { GenerationModelsStatusSnapshot } from "../../services/generation-models-status.js";
 import type { AgentConnectionView, ServiceConnectionView, SettingsSnapshot, SettingsEntryView } from "@woohaa3/contracts";
-(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+import { api, cleanupHarness, declaredSite, local, oauth, render } from "./plugin-harness.js";
 let root: Root | undefined; let runtime: FrontendRuntime | undefined;
-function DraftInput() {
-  const [value, setValue] = useState("");
-  return <input aria-label="新增 API Key" value={value} onChange={event => setValue(event.target.value)} />;
-}
-afterEach(async () => { act(() => root?.unmount()); await runtime?.dispose(); document.body.innerHTML = ""; });
-async function render(connections: AgentConnectionView[] = [], configure = false, settingsStore?: ReturnType<typeof createBackendSettingsStore>, payload: {canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string; section?: "generation-history" | "diagnostics"} = {canvasId: "canvas", nodeId: "node"}, overrides: Partial<AgentConversationService> = {}, models?: Pick<GenerationModelsStatusService, "getSnapshot" | "subscribe">) {
-  const slots = new SlotRegistry();
-  if (configure) slots.register("agent-assistant.configuration", { id: "api", owner: "sdk-agent", kind: "api-key", label: "API Key", render: ({ onSaved }) => <><DraftInput /><button onClick={() => onSaved?.("c1")}>保存测试连接</button><SelectInput label="配置类型" value="one" onValueChange={() => {}} options={[{value:"one",label:"类型一"},{value:"two",label:"类型二"}]} /></> });
-  if (configure) slots.register("agent-assistant.configuration", { id: "local", owner: "local-agent", kind: "installed", label: "我有本地 agent", render: () => <p>本机工具配置</p> });
-  if (configure) slots.register("agent-assistant.configuration", { id: "oauth", owner: "oauth-agent", kind: "login", label: "账号授权", render: () => <p>ChatGPT 授权</p> });
-  const listConnections = vi.fn(async () => ({ ok: true as const, value: connections }));
-  const sourceViews = connections.filter(item => item.authMode !== "local-login").map(item => ({
-    serviceConnectionId: `source:${item.connectionId}`, scope: "personal", kind: item.authMode === "oauth" ? "oauth" : "api", name: item.name,
-    bindings: [{ bindingId: item.connectionId, extensionId: item.extensionId, consumer: item.authMode === "oauth" ? "oauth" : "agent", consumerId: item.connectionId, purposes: ["discussion"], modelKeys: [] }],
-    endpoints: [], capabilities: [], enabled: true, removed: false, credentialConfigured: true, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1,
-  })) as ServiceConnectionView[];
-  const service = { listConnections, listServiceConnections: vi.fn(async () => ({ ok: true as const, value: sourceViews })), listConversations: vi.fn(async () => ({ ok: true as const, value: [] })), ...overrides } as unknown as AgentConversationService;
-  runtime = await startFrontendRuntime({ installPlatform: (ctx) => { ctx.provide("slots" as never, slots as never); if (models) ctx.provide("generationModelsStatus" as never, models as never); }, plugins: [] });
-  const el = document.createElement("div"); document.body.append(el); root = createRoot(el);
-  const close = vi.fn();
-  const updatePayload = async (next: typeof payload) => { await act(async () => { root!.render(<RuntimeProvider runtime={runtime!}><UiProvider><AgentAssistant settingsStore={settingsStore} service={service} payload={next} onClose={close} /></UiProvider></RuntimeProvider>); }); };
-  await updatePayload(payload);
-  const click = async (label: string) => { const button = [...el.querySelectorAll("button")].find((item) => !item.closest("[hidden]") && (item.querySelector("strong")?.textContent ?? (item.matches("[data-page]") ? item.querySelector("span")?.textContent : item.textContent)) === label); expect(button).toBeDefined(); await act(async () => button!.click()); };
-  return { el, click, service, listConnections, close, updatePayload };
-}
-const status = { transport: { state: "unknown" }, credential: { state: "ready" }, modelAccess: { state: "unknown" }, tools: { state: "unknown" } };
-const api = { connectionId: "c1", extensionId: "sdk-agent", name: "我的 API", authMode: "api-key", ready: true, status } as AgentConnectionView;
-const local = { ...api, connectionId: "local", extensionId: "local-agent", authMode: "local-login", name: "本地 Codex" } as AgentConnectionView;
-const oauth = { ...api, connectionId: "oauth", extensionId: "oauth-agent", authMode: "oauth", name: "me@example.com" } as AgentConnectionView;
+afterEach(async () => { await cleanupHarness(); act(() => root?.unmount()); await runtime?.dispose(); document.body.innerHTML = ""; });
 
 it("按 demo 显示能力总览和五项侧栏，MCP 与模型提供商独立", async () => {
   const f = await render();
@@ -54,7 +23,7 @@ it("按 demo 显示能力总览和五项侧栏，MCP 与模型提供商独立", 
   await f.click("模型提供商");
   await f.click("添加连接");
   const drawer = f.el.querySelector('.agent-assistant__drawer-layer:not([hidden])')!;
-  expect([...drawer.querySelectorAll('.agent-assistant__method')].map(item => item.querySelector("strong")?.textContent)).toEqual(["我有 ChatGPT 账号", "我有 API Key"]);
+  expect([...drawer.querySelectorAll('.agent-assistant__method')].map(item => item.querySelector("strong")?.textContent)).toEqual(["我有 API Key", "我有 ChatGPT 账号"]);
   expect(drawer.querySelector('[data-kind="api-key"]')?.textContent).not.toMatch(/OpenAI|Anthropic|Gemini/);
   expect(drawer.textContent).not.toContain("安装这个 MCP 服务");
   expect(f.listConnections).toHaveBeenCalledTimes(1);
@@ -99,7 +68,7 @@ it("点击接入方式切换到独立配置页，返回恢复选择位置并保�
   expect(f.el.querySelector("input")).toBeNull();
   const drawerBody = apiButton.closest<HTMLElement>(".agent-assistant__drawer-body")!;
   drawerBody.scrollTop = 320;
-  await f.click("我有 API Key");
+  await f.configure("我有 API Key");
   expect(apiButton.closest("[hidden]")).not.toBeNull();
   expect(drawerBody.scrollTop).toBe(0);
   expect(f.el.querySelector(".agent-assistant__form-heading h3")?.textContent).toBe("我有 API Key");
@@ -119,13 +88,13 @@ it("点击接入方式切换到独立配置页，返回恢复选择位置并保�
   expect(apiButton.closest("[hidden]")).toBeNull();
   expect(field.closest("[hidden]")).not.toBeNull();
   expect(option?.closest("[hidden]")).not.toBeNull();
-  await f.click("我有 ChatGPT 账号");
+  await f.configure("我有 ChatGPT 账号");
   expect(drawerBody.scrollTop).toBe(0);
   expect(f.el.querySelector(".agent-assistant__form-heading h3")?.textContent).toBe("我有 ChatGPT 账号");
   expect(field.closest("[hidden]")).not.toBeNull();
   expect(option?.closest("[hidden]")).not.toBeNull();
   await f.click("返回选择");
-  await f.click("我有 API Key");
+  await f.configure("我有 API Key");
   await f.click("本地 Agent");
   expect(field.closest("[hidden]")).not.toBeNull();
   await f.click("模型提供商");
@@ -243,7 +212,7 @@ it("保存首个 Provider Key 后空引导消失并显示已配置的模型提�
   const sourceState = () => el.querySelector(".agent-assistant__source-list .agent-assistant__state")?.textContent;
   expect(el.querySelector(".agent-assistant__empty--service")).not.toBeNull();
   await act(async () => {
-    el.querySelector<HTMLButtonElement>('[data-kind="provider:test"]')!.click();
+    el.querySelector<HTMLButtonElement>('[data-kind="provider:test"] button')!.click();
     await import("../settings/provider-settings-cards.js");
   });
   const field = el.querySelector<HTMLInputElement>('[data-setting-key="providers.test.apiKey"] input')!;
@@ -394,21 +363,21 @@ it("全部提供商直接出现于添加宫格，关闭抽屉和切换页面后�
   await f.click("添加连接"); // Overview opens the source chooser directly.
   const drawer = () => f.el.querySelector('.agent-assistant__drawer-layer:not([hidden])')!;
   expect([...drawer().querySelectorAll('[data-kind^="provider:"]')].map(item => item.getAttribute("data-kind"))).toEqual(["provider:litellm", "provider:tokenhub", "provider:fal"]);
-  await act(async () => { await f.click("litellm"); await import("../settings/provider-settings-cards.js"); });
+  await act(async () => { await f.configure("litellm"); await import("../settings/provider-settings-cards.js"); });
   const field = f.el.querySelector<HTMLInputElement>('[data-setting-key="providers.litellm.apiKey"] input')!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "unsaved-provider-key");
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await f.click("返回选择");
-  await f.click("tokenhub");
+  await f.configure("tokenhub");
   expect(field.closest("[hidden]")).not.toBeNull();
   await f.click("本地 Agent");
   await f.click("模型提供商");
   await f.click("关闭详情");
   await f.click("添加连接");
   await f.click("返回选择");
-  await f.click("litellm");
+  await f.configure("litellm");
   expect(field.closest("[hidden]")).toBeNull();
   expect(field.value).toBe("unsaved-provider-key");
   expect(write).not.toHaveBeenCalled();
@@ -534,22 +503,12 @@ it("从图片能力添加时仅列出图片提供商，普通添加保留所有�
   const store = createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write: vi.fn() });
   const f = await render([], true, store);
   await f.click("图片");
-  await f.click("添加提供商");
   const drawer = () => f.el.querySelector('.agent-assistant__drawer-layer:not([hidden])')!;
   expect(drawer().textContent).toContain("添加图片提供商");
-  expect([...drawer().querySelectorAll(".agent-assistant__method > strong")].map(item => item.textContent)).toEqual(["图片提供商"]);
+  expect([...drawer().querySelectorAll(".agent-assistant__method strong")].map(item => item.textContent)).toEqual(["图片提供商"]);
   await f.click("关闭详情");
   await f.click("添加连接");
-  expect([...drawer().querySelectorAll(".agent-assistant__method > strong")].map(item => item.textContent)).toEqual(["我有 ChatGPT 账号", "我有 API Key", "图片提供商", "音频提供商"]);
-});
-
-const declaredSite = (overrides: Partial<ServiceConnectionView> = {}): ServiceConnectionView => ({
-  serviceConnectionId: "site-provider", scope: "site", kind: "api", name: "声明提供商",
-  endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }],
-  capabilities: [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }],
-  bindings: [{ bindingId: "provider-assistant:demo", extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion"], modelKeys: ["model"] }],
-  enabled: true, removed: false, credentialConfigured: true, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1,
-  ...overrides,
+  expect([...drawer().querySelectorAll(".agent-assistant__method strong")].map(item => item.textContent)).toEqual(["我有 API Key", "我有 ChatGPT 账号", "图片提供商", "音频提供商"]);
 });
 
 it("提供商声明的共享讨论用途始终开放，不提供关闭入口", async () => {
@@ -762,3 +721,5 @@ it("Agent 详情无目标仅配置，来源不可用禁用使用", async () => {
   expect(disabled?.disabled).toBe(true);
   expect(unavailable.el.querySelector('[data-capability-detail="agent"]')?.textContent).toContain("待配置密钥");
 });
+
+

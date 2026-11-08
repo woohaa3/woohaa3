@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { AgentConnectionView, ServiceConnectionView, TemporaryHostingRouteView } from "@woohaa3/contracts";
 import { Button, SettingsFeedback, Tooltip } from "@woohaa3/ui";
-import { AgentIcon, BackIcon, BoxIcon, ChevronRightIcon, CloudIcon, ImageIcon, LinkIcon, MusicIcon, VideoIcon } from "@woohaa3/ui/icons";
+import { AgentIcon, BackIcon, BoxIcon, ChevronRightIcon, CloudIcon, ImageIcon, LinkIcon, MusicIcon, PlusIcon, VideoIcon } from "@woohaa3/ui/icons";
 import type { McpPanelSnapshot } from "./mcp-connection-panel.js";
 import { capabilitySuppliers, type ActiveCapability, type CapabilityKind, type CapabilitySupplier } from "./capability-directory.js";
 
@@ -106,14 +106,27 @@ export function CapabilityOverview({ local, remote, sources, loading, connection
       const tooltip = item.id === "hosting"
         ? temporaryHosting?.candidates.map(candidate => <span key={candidate.exposerId}><strong>{candidate.label}</strong><span>{candidate.lastError ? "最近调用失败" : candidate.configured ? "已配置" : "未配置"}{candidate.selected ? " · 当前选择" : ""}</span></span>)
         : counted.length ? counted.map(row => <span key={row.id}><strong>{row.name}</strong><span>{row.status}</span></span>) : "尚未配置提供商，点击查看详情。";
-      return <button key={item.id} type="button" className="agent-assistant__capability-card" data-capability={item.id} data-placeholder={reserved} onClick={() => select(item.id)}>
-        <span className="agent-assistant__capability-card-top"><item.icon size={26} /><ChevronRightIcon size={16} /></span>
+      const empty = active !== null && !pending(item.id) && !failed(item.id) && value.local + value.suppliers === 0;
+      const chooseAgent = empty && item.id === "agent" && !rows.length;
+      if (chooseAgent) return <div key={item.id} className="agent-assistant__capability-card" data-capability={item.id} data-placeholder={false} data-empty={true} data-actions={true}>
+        <span className="agent-assistant__capability-card-top"><item.icon size={26} /></span>
         <strong>{item.label}</strong><span className="agent-assistant__capability-description">{item.description}</span>
-        <Tooltip disabled={reserved || pending(item.id) || Boolean(failed(item.id))} side="bottom" align="start" content={<div className="agent-assistant__supplier-tooltip">{tooltip}</div>}>
+        <div className="agent-assistant__capability-add-actions">
+          <Button size="sm" className="agent-assistant__capability-add" icon={<PlusIcon size={14} />} onClick={() => onNavigate("agents")}>连接本地 Agent</Button>
+          <Button size="sm" className="agent-assistant__capability-add" icon={<PlusIcon size={14} />} onClick={() => onAdd("agent")}>添加模型提供商</Button>
+        </div>
+      </div>;
+      return <button key={item.id} type="button" className="agent-assistant__capability-card" data-capability={item.id} data-placeholder={reserved} data-empty={empty} onClick={() => {
+        if (empty && !rows.length) onAdd(item.id as ActiveCapability);
+        else select(item.id);
+      }}>
+        <span className="agent-assistant__capability-card-top"><item.icon size={26} />{empty ? <PlusIcon size={16} /> : <ChevronRightIcon size={16} />}</span>
+        <strong>{item.label}</strong><span className="agent-assistant__capability-description">{item.description}</span>
+        {empty ? <span className="agent-assistant__capability-add"><PlusIcon size={14} />{rows.length ? "完成配置" : item.id === "agent" ? "添加 Agent" : "添加提供商"}</span> : <Tooltip disabled={reserved || pending(item.id) || Boolean(failed(item.id))} side="bottom" align="start" content={<div className="agent-assistant__supplier-tooltip">{tooltip}</div>}>
           <span className="agent-assistant__capability-count" data-split={split} data-error={!reserved && Boolean(failed(item.id))}>
             {split ? <><span data-count="local">已配置 {value.local} 个本地 Agent</span><span data-count="suppliers">已配置 {value.suppliers} 个提供商</span></> : label}
           </span>
-        </Tooltip>
+        </Tooltip>}
       </button>;
     })}</div>
     <div className="agent-assistant__mcp-overview">
