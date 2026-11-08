@@ -4,6 +4,7 @@
  */
 import type { PluginIcon } from "../plugin-icon.js";
 import type { ExtensionInstallJobView, ExtensionTrust } from "../backend/marketplace.js";
+import type { TemporaryHostingCategory, TemporaryHostingRouteView } from "../extension/services/host/exposer.js";
 
 /**
  * 本次启动扫描并装配的扩展（「在场」信息，只读展示）。
@@ -89,6 +90,8 @@ export type SettingExtensionPointProvider = {
   label: string;
   /** 注册这个能力的插件 id；宿主用它打开对应插件详情。未声明时为 null。 */
   ownerExtensionId: string | null;
+  /** 临时图床类别；缺省表示只能手动选择的普通地址提供者。 */
+  temporaryCategory?: TemporaryHostingCategory;
 };
 
 /** 宿主扩展点的可用提供者；按扩展点分组，新增扩展点时在这里加一段。 */
@@ -97,4 +100,6 @@ export type SettingsExtensionPoints = {
   storage?: SettingExtensionPointProvider[];
   /** 对外地址提供者（`exposer.primary` 的可选值）。 */
   exposer?: SettingExtensionPointProvider[];
+  /** 临时图床的权威路由快照（模式、候选、当前选择与最近真实失败）。 */
+  temporaryHosting?: TemporaryHostingRouteView;
 };

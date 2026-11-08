@@ -37,8 +37,8 @@ export const HOST_SERVICES: readonly HostServiceDefinition[] = [
   },
   {
     id: "exposer",
-    label: "对外地址",
-    description: "把存储里的对象变成外部可访问 URL 的提供者；未被选中时只用当前后端自己的签名能力。"
+    label: "临时图床",
+    description: "把存储里的对象变成临时外链的提供者。"
   },
   {
     id: "task",

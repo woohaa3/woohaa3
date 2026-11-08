@@ -54,11 +54,15 @@ export function withServiceSources(service: ConnectionService, port: Application
       : item.consumerId === record.connectionId));
     if (!binding?.purposes.includes("discussion")) return null;
     const revision = Number.parseInt(createHash("sha256").update(JSON.stringify([record.configRevision, source.serviceConnectionId, source.configRevision, source.credentialEpoch, source.enabled, source.removed])).digest("hex").slice(0, 12), 16);
-    // Provider-declared assistant bindings are full Agent connections (discussion + target execution).
-    // Self-filled protocol bindings remain discussion-only, so keep their explicit tools:false evidence.
-    const providerDeclared = source.bindings.some(item => item.bindingId.startsWith("provider-assistant:"));
-    const shared = record.serviceConnectionId ? { name: source.name, models: source.capabilities.filter(capability => capability.purpose === "discussion" && capability.protocol === sdkSourceProtocol(record.adapterId)).map(capability => capability.modelId),
-      ...(providerDeclared ? {} : { modelCapabilities: Object.fromEntries(source.capabilities.filter(capability => capability.purpose === "discussion").map(capability => [capability.modelId, { tools: false }])) }) } : {};
+    // Per-model evidence: a provider-declared assistant binding only grants target execution for
+    // models whose catalog explicitly proves tool support. Self-filled protocol bindings remain
+    // discussion-only, so they keep explicit tools:false evidence.
+    const protocol = sdkSourceProtocol(record.adapterId);
+    const discussion = source.capabilities.filter(capability => capability.purpose === "discussion" && capability.protocol === protocol);
+    const modelCapabilities = Object.fromEntries(discussion.map(capability => [capability.modelId, {
+      tools: source.capabilities.some(item => item.purpose === "target-execution" && item.protocol === protocol && item.modelId === capability.modelId)
+    }]));
+    const shared = record.serviceConnectionId ? { name: source.name, models: discussion.map(capability => capability.modelId), modelCapabilities } : {};
     return { ...record, ...shared, configRevision: revision,
       baseUrl: source.endpoints.find(endpoint => endpoint.protocol === sdkSourceProtocol(record.adapterId))?.baseUrl ?? record.baseUrl };
   };

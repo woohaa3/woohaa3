@@ -36,7 +36,9 @@ export type SettingsApiDependencies = {
    * 与 storageBackends 分开是因为它们是两个扩展点：地址提供者可以是一个与存储无关的实现
    * （例如 CDN 回源、第三方签名服务），设置页也要按各自的 owner 跳转。
    */
-  exposers?: () => readonly { exposerId: string; label?: string; ownerExtensionId?: string }[] | undefined;
+  exposers?: () => readonly { exposerId: string; label?: string; ownerExtensionId?: string; temporaryHosting?: { category: "provider" | "builtin" } }[] | undefined;
+  /** 临时图床权威路由快照；按请求现查，页面读取不触发上传或配置写入。 */
+  temporaryHosting?: () => import("@woohaa3/contracts").TemporaryHostingRouteView | undefined;
   /** 宿主安全模式（D7）；按请求现取（application 在核心层，比 config 晚装载）。 */
   safeMode?: () => HostSafeModeView | null | undefined;
   /**
@@ -56,6 +58,7 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
   const snapshot = (): SettingsSnapshot => {
     const backends = deps.storageBackends?.() ?? [];
     const exposers = deps.exposers?.() ?? [];
+    const hosting = deps.temporaryHosting?.();
     const manager = deps.extensionManager?.();
     return {
       safeMode: deps.safeMode?.() ?? null,
@@ -72,8 +75,10 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
         exposer: exposers.map((exposer) => ({
           id: exposer.exposerId,
           label: exposer.label ?? exposer.exposerId,
-          ownerExtensionId: exposer.ownerExtensionId ?? null
-        }))
+          ownerExtensionId: exposer.ownerExtensionId ?? null,
+          ...(exposer.temporaryHosting ? { temporaryCategory: exposer.temporaryHosting.category } : {})
+        })),
+        ...(hosting ? { temporaryHosting: hosting } : {})
       },
       // browser-local 插件的启停目标状态：来自配置文件，前端只投影、不自持存储。
       extensionToggles: deps.settings.extensionToggles(),

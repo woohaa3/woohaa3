@@ -1,16 +1,19 @@
 /**
  * RunningHub Provider 后端插件入口
- * （change: 2026-10-06-add-runninghub-api-models-and-provider-credentials，任务 1.4/2.3/2.4 / design D1/D1b/D2/D3）。
+ * （change: 2026-10-06-add-runninghub-api-models-and-provider-credentials +
+ *  2026-11-07-add-runninghub-llm-and-provider-temporary-hosting）。
  *
- * 通过 `ctx.generation` 注册 RunningHub provider（协议实现在本扩展 `src/provider/`，
- * 复用 `@sdppp/pptask` 的 core 类型与 shared toolkit），并：
- * - 只注册**入库的 API 逻辑模型**（`data/models.json`；不含 App/webappId）；
- * - 合并模型按输入路由到具体 `api/<endpoint>`（`resolveProviderModel`），并把引用写入
- *   对应媒体字段（`prepareInput`）；
- * - apiKey 是配置段里的 `secret` 字段（写进本地密钥文件）；baseURL 写死常量。
+ * 通过 `ctx.generation` 注册 RunningHub provider：
+ * - 媒体：入库的 API 逻辑模型（`data/models.json`），按输入路由到具体 `api/<endpoint>`；
+ * - 文字：官方 OpenAI 兼容目录（`/v1/models`）与独立端点 `llm.runninghub.ai/v1`，身份 `llm/<id>`；
+ * - 临时图床：新版二进制上传接口返回的 `download_url`，由 `ctx.exposer` 作为提供商候选。
+ *
+ * 同一份 API Key 是唯一凭据权威；图片/视频、文字与临时上传分别记录可用证据，
+ * 文字权限拒绝不会停用仍可用的媒体能力。
  */
 import { defineConfigSchema, type GenerationProvider, type ExtensionPlugin } from "@woohaa3/contracts";
 import { createRunninghubProvider } from "./provider/index.js";
+import { DEFAULT_LLM_BASE_URL } from "./provider/provider.js";
 import {
   DEFAULT_RUNNINGHUB_API_BASE,
   RUNNINGHUB_PLUGIN_ID,
@@ -26,9 +29,17 @@ import {
 } from "./shared.js";
 import { translateRunningHubParameters } from "./model-cards.js";
 import { discoverRunningHubModels } from "./discovery.js";
+import {
+  discoverRunningHubLanguageModels,
+  runningHubLanguageCapabilities,
+  runningHubLanguageCatalogRevision,
+  runningHubLanguageDefinitions,
+  setRunningHubLanguageModels
+} from "./llm-catalog.js";
+import { createRunningHubTemporaryExposer } from "./temporary-hosting.js";
 import { registerRunningHubRefreshRoute, type ModelRefreshResult } from "./refresh-route.js";
 
-export { DEFAULT_RUNNINGHUB_API_BASE };
+export { DEFAULT_RUNNINGHUB_API_BASE, DEFAULT_LLM_BASE_URL };
 
 /** 设置页「刷新可用模型」的路径（`ExtensionPlugin.modelRefresh.path`）。 */
 export const RUNNINGHUB_REFRESH_PATH = "/api/providers/runninghub/refresh";
@@ -40,40 +51,65 @@ export const RUNNINGHUB_CONFIG = defineConfigSchema({
     reload: "hot",
     legacyEnv: "RUNNINGHUB_API_KEY",
     label: "API Key",
-    description: "RunningHub API Key"
+    description: "RunningHub API Key；文字模型与模型 API 需要 Enterprise-Shared Key"
   }
 });
 
 export type RunningHubRegistrationInput = {
   apiKey?: string;
-  /** 受控 API 地址（测试可覆盖；默认写死常量）。 */
+  /** 受控媒体 API 地址（测试可覆盖；默认写死常量）。 */
   apiBaseURL?: string;
+  /** 受控文字 API 地址（测试可覆盖；默认写死常量）。 */
+  languageBaseURL?: string;
   fetchImpl?: typeof globalThis.fetch;
   jobRepository?: unknown;
 };
 
-export type RunningHubPluginDependencies = Pick<RunningHubRegistrationInput, "apiBaseURL" | "fetchImpl" | "jobRepository">;
+export type RunningHubPluginDependencies = Pick<RunningHubRegistrationInput, "apiBaseURL" | "languageBaseURL" | "fetchImpl" | "jobRepository">;
 
 export function createRunningHubRegistration(input: RunningHubRegistrationInput): GenerationProvider {
   const apiKey = (input.apiKey ?? "").trim();
   const available = apiKey !== "";
-  const provider = available
-    ? createRunninghubProvider({
-        apiKey,
-        apiBaseURL: input.apiBaseURL ?? DEFAULT_RUNNINGHUB_API_BASE,
-        ...(input.jobRepository ? { jobRepository: input.jobRepository as never } : {}),
-        ...(input.fetchImpl ? { fetch: input.fetchImpl } : {})
-      } as never)
-    : undefined;
+  const providerOptions = {
+    apiBaseURL: input.apiBaseURL ?? DEFAULT_RUNNINGHUB_API_BASE,
+    languageBaseURL: input.languageBaseURL ?? DEFAULT_LLM_BASE_URL,
+    ...(input.jobRepository ? { jobRepository: input.jobRepository as never } : {}),
+    ...(input.fetchImpl ? { fetch: input.fetchImpl } : {})
+  };
+  const provider = available ? createRunninghubProvider({ apiKey, ...providerOptions } as never) : undefined;
+  const models = [...runningHubModelDefinitions(), ...runningHubLanguageDefinitions()];
   return {
     extensionId: RUNNINGHUB_PLUGIN_ID,
     providerId: RUNNINGHUB_PROVIDER_ID,
     available,
     provider,
-    models: runningHubModelDefinitions(),
-    // 参数 schema 的权威是入库清单（合并逻辑模型的并集），再经卡片投影成面板语义
-    // （见 `model-cards`：上游是落点，卡片是展示真相）；动态 describe 只补 title/cancel。
+    catalogRevision: runningHubLanguageCatalogRevision(),
+    models,
+    serviceConnectionFactory: {
+      protocols: ["chat-completions"],
+      assistantProtocol: "chat-completions",
+      endpoints: { "chat-completions": input.languageBaseURL ?? DEFAULT_LLM_BASE_URL },
+      create: ({ secret, endpoint, fetch: sourceFetch }) => createRunninghubProvider({
+        apiKey: secret,
+        ...providerOptions,
+        languageBaseURL: endpoint || providerOptions.languageBaseURL,
+        ...(sourceFetch ? { fetch: sourceFetch } : {})
+      } as never)
+    },
+    languageCapabilities: (providerModelId) => runningHubLanguageCapabilities(providerModelId),
+    // 参数 schema 的权威是入库清单（合并逻辑模型的并集），再经卡片投影成面板语义；
+    // 文字模型的描述直接来自官方目录的逐模型证据。
     describeModel: ({ providerModelId }) => {
+      if (providerModelId.startsWith("llm/")) {
+        const definition = runningHubLanguageDefinitions().find(model => model.providerModelId === providerModelId);
+        if (!definition) return undefined;
+        return {
+          title: definition.title,
+          inputSchema: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+          promptRequirement: definition.promptRequirement,
+          cancel: definition.cancel
+        };
+      }
       const model = findRunningHubModel(providerModelId);
       if (!model) return undefined;
       const definition = runningHubModelDefinition(model);
@@ -85,19 +121,18 @@ export function createRunningHubRegistration(input: RunningHubRegistrationInput)
         cancel: definition.cancel
       };
     },
-    // 合并逻辑模型 → 具体 endpoint（design D1b）：执行身份按输入选择。
+    // 合并逻辑模型 → 具体 endpoint（design D1b）：执行身份按输入选择；文字模型身份原样保留。
     resolveProviderModel: ({ providerModelId, prompt, parameters, references }) => {
+      if (providerModelId.startsWith("llm/")) return providerModelId;
       const model = findRunningHubModel(providerModelId);
       if (!model) return providerModelId;
       return runningHubEndpointModelId(pickRunningHubRoute(model, { prompt, parameters, references }));
     },
-    // RunningHub 从 `providerOptions.runninghub.input` 读取字段；按同一 route 写入媒体字段。
-    // 同时把字段平铺到顶层：vendored provider 的 imageInput/videoInput 会用它自己的
-    // 顶层 `prompt`/`resolution`/`duration` 覆盖自定义字段，平铺保证两者一致。
+    // RunningHub 从 `providerOptions.runninghub.input` 读取字段；文字模型不经媒体输入组装。
     prepareInput: (input) => {
+      if (input.providerModelId.startsWith("llm/")) return {};
       const model = findRunningHubModel(input.providerModelId);
       if (!model) return {};
-      // 路由看面板原始参数（`x-pptask-routing` 的键在翻译前还在）；字段用翻译后的。
       const route = pickRunningHubRoute(model, {
         prompt: input.prompt,
         parameters: input.parameters,
@@ -117,68 +152,90 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
   return {
     name: RUNNINGHUB_PLUGIN_ID,
     label: "RunningHub",
-    // 品牌图形由扩展包 assets/ 同步发布，路径由宿主按 extension.json 的 icon.asset 注入。
     configPrefix: "providers.runninghub",
-    modelTypes: ["image", "video"],
-    inject: ["log", "generation", "gateway", "access"],
-    // 设置页「可用模型」一节由插件声明驱动；刷新只做增量（见 `discovery.ts`）。
+    modelTypes: ["language", "image", "video"],
+    inject: ["log", "generation", "gateway", "access", "storage", "exposer"],
     modelRefresh: {
       path: RUNNINGHUB_REFRESH_PATH,
-      hint: "模型清单来自 RunningHub 官方公开的端点 registry：刷新会补上新模型，并清理公开清单与站点目录都不再提供的模型。站点仍在售、只是清单没收录的会保留，并在列表里标「站点在售」。RunningHub 没有按 API Key 查询标准模型的接口，API Key 只决定这些模型能不能被调用。"
+      hint: "媒体模型来自 RunningHub 官方公开的端点 registry；文字模型来自官方 OpenAI 兼容目录 /v1/models。刷新会更新两份独立目录，失败时保留上一次成功快照。文字模型与模型 API 需要 Enterprise-Shared Key。"
     },
     Config: RUNNINGHUB_CONFIG,
-    // 没配 API Key 时插件照样装载（模型要留在管理面预填配置），只是它们进不了 catalog。
-    // 站点状态据此报 degraded，而不是笼统的「运行中」。
     health: (config) =>
       (config.apiKey ?? "").trim() === ""
         ? {
             state: "degraded" as const,
             diagnostics: [
-              { code: "provider-credentials-missing", message: "未配置 API Key，RunningHub 模型当前不可执行" }
+              { code: "provider-credentials-missing", message: "未配置 API Key，RunningHub 模型与临时图床当前不可执行" }
             ]
           }
         : undefined,
     apply(ctx, config) {
       const log = ctx.log.scope(RUNNINGHUB_PLUGIN_ID);
-      const registration = createRunningHubRegistration({ ...deps, ...(config.apiKey ? { apiKey: config.apiKey } : {}) });
+      const apiKey = (config.apiKey ?? "").trim();
+      const registration = createRunningHubRegistration({ ...deps, ...(apiKey ? { apiKey } : {}) });
       const refresh = async (): Promise<ModelRefreshResult> => {
         const before = new Set(registration.models.map((model) => model.providerModelId));
-        const result = await discoverRunningHubModels({
+        const mediaResult = await discoverRunningHubModels({
           base: runningHubRegistry().models,
           ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {})
         });
-        if (!result.ok) {
-          log({ event: "runninghub-model-discovery-failed", message: result.message });
-          return result;
+        const languageResult = await discoverRunningHubLanguageModels(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {});
+        const parts: string[] = [];
+
+        if (mediaResult.ok) {
+          setRunningHubModels(mediaResult.models, { liveOnly: mediaResult.liveOnly });
+          const partsMedia = [`上游 ${mediaResult.discovered} 个媒体逻辑模型`];
+          if (mediaResult.removed.length > 0) partsMedia.push(`移除 ${mediaResult.removed.length} 个已下架的`);
+          if (mediaResult.liveOnly.length > 0) partsMedia.push(`保留 ${mediaResult.liveOnly.length} 个站点仍在售的`);
+          if (!mediaResult.catalogChecked) partsMedia.push("站点目录未取到，本次未做下架清理");
+          parts.push(partsMedia.join("，"));
+        } else {
+          log({ event: "runninghub-model-discovery-failed", scope: "media", message: mediaResult.message });
+          parts.push(`媒体目录刷新失败，保留上次成功目录：${mediaResult.message}`);
         }
-        // 保留的模型带「站点在售」标签：列表上要能看出它不在公开 registry 里。
-        setRunningHubModels(result.models, { liveOnly: result.liveOnly });
-        registration.models.splice(0, registration.models.length, ...runningHubModelDefinitions());
-        const added = registration.models.filter((model) => !before.has(model.providerModelId)).length;
-        log({
-          event: "runninghub-models-discovered",
-          modelCount: registration.models.length,
-          added,
-          removed: result.removed,
-          liveOnly: result.liveOnly,
-          catalogChecked: result.catalogChecked
-        });
-        // 文案只说有信息量的事：新增 / 移除 / 仅站点可见。没变化就不报流水账。
-        const parts = [`上游 ${result.discovered} 个逻辑模型`, `新增 ${added} 个`];
-        if (result.removed.length > 0) {
-          parts.push(`移除 ${result.removed.length} 个已下架的（${result.removed.join("、")}）`);
+
+        if (languageResult.ok) {
+          setRunningHubLanguageModels(languageResult.models);
+          const tools = languageResult.models.filter(model => model.capabilities.tools).length;
+          parts.push(`文字目录 ${languageResult.models.length} 个模型（${tools} 个声明工具调用）`);
+        } else {
+          // 失败保留最近成功快照；没有旧目录时仍保留入库 fixture，展示未获取状态由设置面承担。
+          log({ event: "runninghub-llm-discovery-failed", message: languageResult.message });
+          parts.push(`文字目录刷新失败，保留上次成功目录：${languageResult.message}`);
         }
-        if (result.liveOnly.length > 0) {
-          parts.push(
-            `保留 ${result.liveOnly.length} 个公开清单没收录、但站点仍在售的（${result.liveOnly.join("、")}）`
-          );
-        }
-        if (!result.catalogChecked) parts.push("站点目录未取到，本次未做下架清理");
-        return { ok: true, modelCount: registration.models.length, message: parts.join("，") };
+
+        const all = [...runningHubModelDefinitions(), ...runningHubLanguageDefinitions()];
+        registration.models.splice(0, registration.models.length, ...all);
+        // 目录修订参与服务来源 revision：能力变化即使模型 ID 集合不变也要让旧投影失效。
+        registration.catalogRevision = runningHubLanguageCatalogRevision();
+        const added = all.filter((model) => !before.has(model.providerModelId)).length;
+        log({ event: "runninghub-models-discovered", modelCount: all.length, added, mediaOk: mediaResult.ok, languageOk: languageResult.ok });
+        const summary = `新增 ${added} 个`;
+        if (!mediaResult.ok && !languageResult.ok) return { ok: false, message: `${summary}；${parts.join("；")}` };
+        return { ok: true, modelCount: all.length, message: `${summary}；${parts.join("；")}` };
       };
       ctx.effect(() => ctx.generation.register(registration));
       registerRunningHubRefreshRoute(ctx, { path: RUNNINGHUB_REFRESH_PATH, refresh });
+      // 临时图床：同一份 Key，独立于媒体/文字调用证据；未配置时不进入候选。
+      ctx.effect(() => ctx.exposer.register(createRunningHubTemporaryExposer({
+        storage: ctx.storage,
+        getApiKey: () => (config.apiKey ?? "").trim() || undefined,
+        getCredentialEpoch: () => credentialEpoch(config.apiKey),
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {})
+      })));
       log({ event: "runninghub-plugin-activated", available: registration.available, modelCount: registration.models.length });
     }
   };
+}
+
+/** 凭据修订：只用于缓存隔离与请求冻结，不进入日志或公开视图。 */
+function credentialEpoch(secret: string | undefined): number {
+  const value = (secret ?? "").trim();
+  if (value === "") return 0;
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }

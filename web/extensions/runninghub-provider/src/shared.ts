@@ -267,9 +267,9 @@ function assignKind(
 export const RUNNINGHUB_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: RUNNINGHUB_PLUGIN_ID,
   name: "RunningHub Provider",
-  description: "RunningHub 生成 Provider：入库的 API 逻辑模型（t2i/i2i/文生视频/图生视频/多模态）。",
-  // 2.1.0：模型目录刷新（公开 registry + 站点目录）、面板卡片投影、占位标签。
-  version: "2.1.0",
+  description: "RunningHub Provider：图片／视频生成、官方文字模型与临时图床。",
+  // 2.2.0：官方文字目录与独立端点、临时图床提供商候选。
+  version: "2.2.0",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "runninghub-provider-config", schemaVersion: 1 },

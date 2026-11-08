@@ -61,7 +61,7 @@ export function ProviderSettingsCards({
       {groups.map((group) => (
         <section key={group.id} className="provider-settings__card" data-provider-id={group.providerId ?? group.id}>
           <h3 className="settings-page__group-title"><span className="plugin-card__head">{group.icon ? <PluginIconMark icon={group.icon} /> : null}{group.label}</span></h3>
-          {compact ? <ProviderConnectionForm entries={group.entries} store={store} onSaved={onSaved} /> : <ul className="settings-page__list" data-testid={`provider-settings-${group.providerId ?? group.id}`}>
+          {compact ? <ConnectionSettingsForm entries={group.entries} store={store} onSaved={onSaved} /> : <ul className="settings-page__list" data-testid={`provider-settings-${group.providerId ?? group.id}`}>
             {group.entries.map((entry) => (
               <SettingRow key={`${entry.key}:${String(entry.value)}:${entry.configured}`} entry={entry} store={store} />
             ))}
@@ -84,13 +84,13 @@ function missingEndpoint(entry: SettingsEntryView): boolean {
 }
 
 /** 只记录用户编辑的字段，其他 Provider 刷新快照时不覆盖未保存的草稿。 */
-function ProviderConnectionForm({ entries, store, onSaved }: { entries: SettingsEntryView[]; store: BackendSettingsStore; onSaved?: () => void }) {
+export function ConnectionSettingsForm({ entries, store, onSaved, primaryKeys }: { entries: SettingsEntryView[]; store: BackendSettingsStore; onSaved?: () => void; primaryKeys?: readonly string[] }) {
   const [drafts, setDrafts] = useState<Record<string, SettingsWriteValue>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [clearing, setClearing] = useState<string | null>(null);
-  const primary = entries.filter(entry => entry.key.endsWith(".apiKey") || entry.lockedBy !== null || entry.pendingRestart || missingEndpoint(entry));
+  const primary = entries.filter(entry => (primaryKeys ? primaryKeys.includes(entry.key) : entry.key.endsWith(".apiKey")) || entry.lockedBy !== null || entry.pendingRestart || missingEndpoint(entry));
   const advanced = entries.filter(entry => !primary.includes(entry));
   const update = (entry: SettingsEntryView, value: SettingsWriteValue) => {
     setSaved(false);

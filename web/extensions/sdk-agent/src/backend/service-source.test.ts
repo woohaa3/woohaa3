@@ -44,8 +44,8 @@ it("projects declared provider sources from both scopes into stable Agent connec
   expect(new Set(first.map(record => record.serviceConnectionId)).size).toBe(2);
   expect(first.map(record => record.name).sort()).toEqual(["Relay demo", "Relay me"]);
   expect(first.every(record => record.models?.includes("model"))).toBe(true);
-  // Provider-declared assistant connections are not forced into discussion-only mode.
-  expect(first.every(record => record.modelCapabilities === undefined)).toBe(true);
+  // Provider-declared assistant connections carry per-model evidence; this fixture proves tools.
+  expect(first.every(record => record.modelCapabilities?.model?.tools === true)).toBe(true);
   const revisions = first.map(record => record.connectionId + ":" + record.configRevision).sort();
   const again = await bridged.list("alice");
   expect(again.map(record => record.connectionId + ":" + record.configRevision).sort()).toEqual(revisions);

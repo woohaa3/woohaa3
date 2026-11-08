@@ -11,7 +11,7 @@ import { SelectInput } from "@woohaa3/ui/forms";
 import { UiProvider } from "@woohaa3/ui/primitives";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import type { GenerationModelsStatusService, GenerationModelsStatusSnapshot } from "../../services/generation-models-status.js";
-import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";
+import type { AgentConnectionView, ServiceConnectionView, SettingsSnapshot, SettingsEntryView } from "@woohaa3/contracts";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined; let runtime: FrontendRuntime | undefined;
 function DraftInput() {
@@ -48,7 +48,7 @@ it("按 demo 显示能力总览和五项侧栏，MCP 与模型提供商独立", 
   const f = await render();
   expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "模型提供商", "MCP 服务", "生成历史"]);
   expect(f.el.querySelector('.agent-assistant__sidebar [data-state="active"]')?.getAttribute("data-page")).toBe("overview");
-  expect([...f.el.querySelectorAll('[data-ai-page="overview"] [data-capability] > strong')].map(item => item.textContent)).toEqual(["Agent", "图片", "视频", "音频", "3D", "图床"]);
+  expect([...f.el.querySelectorAll('[data-ai-page="overview"] [data-capability] > strong')].map(item => item.textContent)).toEqual(["Agent", "图片", "视频", "音频", "3D", "临时图床"]);
   expect(f.el.querySelector('.agent-assistant__mcp-overview')?.textContent).toContain("MCP");
   expect(f.el.textContent).not.toContain("添加本地助手");
   await f.click("模型提供商");
@@ -189,7 +189,8 @@ it("服务连接按需读取现有 Provider 配置，空密钥不从浏览器回
   const write = vi.fn(async () => ({ ok: false as const, code: "unavailable", error: "test" }));
   const source = { serviceConnectionId: "site-test", scope: "site", kind: "api", name: "测试 Provider", endpoints: [], capabilities: [], bindings: [{ bindingId: "provider:test", extensionId: "test", consumer: "provider", consumerId: "test", purposes: ["text"], modelKeys: [] }], enabled: true, removed: false, credentialConfigured: true, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1 } as import("@woohaa3/contracts").ServiceConnectionView;
   const f = await render([], false, createBackendSettingsStore({ fetchSnapshot, write }), { kind: "mcp" }, { listServiceConnections: async () => ({ ok: true, value: [source] }) });
-  expect(fetchSnapshot).not.toHaveBeenCalled();
+  // 能力中心的临时图床状态需要只读设置快照；打开页面不等于写入或上传。
+  expect(fetchSnapshot).toHaveBeenCalled();
   await act(async () => { await f.click("模型提供商"); await import("../settings/provider-settings-cards.js"); });
   await f.click("添加连接");
   expect(f.el.querySelector('[data-ai-page="sources"] [data-kind="provider:test"]')).not.toBeNull();
@@ -382,7 +383,7 @@ it("本地 Agent 直接展示检测配置，不再有添加按钮或分类宫格
   expect(localPage.querySelector(".agent-assistant__method")).toBeNull();
 });
 
-it("全部供应商直接出现于添加宫格，关闭抽屉和切换页面后保留各自草稿", async () => {
+it("全部提供商直接出现于添加宫格，关闭抽屉和切换页面后保留各自草稿", async () => {
   const snapshot = { settings: ["litellm", "tokenhub", "fal"].map(id => ({
     key: `providers.${id}.apiKey`, kind: "string" as const, label: "API Key", description: "", reload: "hot" as const, secret: true,
     source: null, lockedBy: null, value: null, configured: true, pendingRestart: false, group: id,
@@ -418,7 +419,7 @@ it("全部供应商直接出现于添加宫格，关闭抽屉和切换页面后�
   expect(f.service.listServiceConnections).toHaveBeenCalledTimes(2);
 });
 
-it("添加入口按模型目录标注类型并随目录更新，不混入历史模型或其他供应商", async () => {
+it("添加入口按模型目录标注类型并随目录更新，不混入历史模型或其他提供商", async () => {
   const snapshot = { settings: ["mixed", "images", "empty", "declared"].map(id => ({
     key: `providers.${id}.apiKey`, kind: "string" as const, label: "API Key", description: "", reload: "hot" as const, secret: true,
     source: null, lockedBy: null, value: null, configured: false, pendingRestart: false, group: id,
@@ -454,7 +455,7 @@ it("总览不展示诊断状态或会话历史入口", async () => {
   expect(f.el.textContent).not.toContain("诊断与历史");
   expect(f.el.textContent).not.toContain("待验证");
   expect(f.el.querySelector('[data-capability="agent"] [data-count="local"]')?.textContent).toBe("已配置 1 个本地 Agent");
-  expect(f.el.querySelector('[data-capability="agent"] [data-count="suppliers"]')?.textContent).toBe("已配置 1 个供应商");
+  expect(f.el.querySelector('[data-capability="agent"] [data-count="suppliers"]')?.textContent).toBe("已配置 1 个提供商");
   expect(listConversations).not.toHaveBeenCalled();
 });
 
@@ -490,7 +491,7 @@ it("无显式定位的旧连接入口也尊重用户先行选择", async () => {
   expect(f.el.querySelector('[data-page="mcp"]')?.getAttribute("data-state")).toBe("active");
 });
 
-it("能力按来源身份计数，跨能力共享供应商，详情直接打开原配置", async () => {
+it("能力按来源身份计数，跨能力共享提供商，详情直接打开原配置", async () => {
   const source: ServiceConnectionView = {
     serviceConnectionId: "multi", scope: "personal", kind: "api", name: "多能力来源", endpoints: [],
     capabilities: ["discussion", "image", "image", "video"].map((purpose, index) => ({ purpose, protocol: "chat-completions", modelId: `model-${index}`, imageInput: false, evidence: "adapter" })) as ServiceConnectionView["capabilities"],
@@ -503,8 +504,8 @@ it("能力按来源身份计数，跨能力共享供应商，详情直接打开�
     serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [source, unconfigured, removed], providers: [], duplicates: [] } }),
   });
   expect(f.el.querySelector('[data-capability="agent"] [data-count="local"]')?.textContent).toBe("已配置 1 个本地 Agent");
-  expect(f.el.querySelector('[data-capability="agent"] [data-count="suppliers"]')?.textContent).toBe("已配置 1 个供应商");
-  for (const kind of ["image", "video"]) expect(f.el.querySelector(`[data-capability="${kind}"] .agent-assistant__capability-count`)?.textContent).toBe("已配置 1 个供应商");
+  expect(f.el.querySelector('[data-capability="agent"] [data-count="suppliers"]')?.textContent).toBe("已配置 1 个提供商");
+  for (const kind of ["image", "video"]) expect(f.el.querySelector(`[data-capability="${kind}"] .agent-assistant__capability-count`)?.textContent).toBe("已配置 1 个提供商");
   await f.click("图片");
   const detail = f.el.querySelector('[data-capability-detail="image"]')!;
   expect(detail.textContent).toContain("多能力来源");
@@ -519,31 +520,31 @@ it("能力按来源身份计数，跨能力共享供应商，详情直接打开�
   await f.click("3D");
   const placeholder = f.el.querySelector('[data-capability-detail="model3d"]')!;
   expect(placeholder.textContent).toContain("暂未接入");
-  expect(placeholder.textContent).not.toContain("添加供应商");
+  expect(placeholder.textContent).not.toContain("添加提供商");
 });
 
-it("从图片能力添加时仅列出图片供应商，普通添加保留所有方式", async () => {
+it("从图片能力添加时仅列出图片提供商，普通添加保留所有方式", async () => {
   const snapshot = { settings: ["pictures", "sound"].map(id => ({
     key: `providers.${id}.apiKey`, kind: "string" as const, label: "API Key", description: "", reload: "hot" as const, secret: true,
     source: null, lockedBy: null, value: null, configured: false, pendingRestart: false, group: id,
   })), plugins: [
-    { id: "pictures-provider", configPrefix: "providers.pictures", label: "图片供应商", description: "", layer: "extension" as const, settingCount: 1, siteManaged: false, provider: true, modelTypes: ["image"] as const },
-    { id: "sound-provider", configPrefix: "providers.sound", label: "音频供应商", description: "", layer: "extension" as const, settingCount: 1, siteManaged: false, provider: true, modelTypes: ["audio"] as const },
+    { id: "pictures-provider", configPrefix: "providers.pictures", label: "图片提供商", description: "", layer: "extension" as const, settingCount: 1, siteManaged: false, provider: true, modelTypes: ["image"] as const },
+    { id: "sound-provider", configPrefix: "providers.sound", label: "音频提供商", description: "", layer: "extension" as const, settingCount: 1, siteManaged: false, provider: true, modelTypes: ["audio"] as const },
   ], files: { config: "c", secrets: "s" } };
   const store = createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write: vi.fn() });
   const f = await render([], true, store);
   await f.click("图片");
-  await f.click("添加供应商");
+  await f.click("添加提供商");
   const drawer = () => f.el.querySelector('.agent-assistant__drawer-layer:not([hidden])')!;
-  expect(drawer().textContent).toContain("添加图片供应商");
-  expect([...drawer().querySelectorAll(".agent-assistant__method > strong")].map(item => item.textContent)).toEqual(["图片供应商"]);
+  expect(drawer().textContent).toContain("添加图片提供商");
+  expect([...drawer().querySelectorAll(".agent-assistant__method > strong")].map(item => item.textContent)).toEqual(["图片提供商"]);
   await f.click("关闭详情");
   await f.click("添加连接");
-  expect([...drawer().querySelectorAll(".agent-assistant__method > strong")].map(item => item.textContent)).toEqual(["我有 ChatGPT 账号", "我有 API Key", "图片供应商", "音频供应商"]);
+  expect([...drawer().querySelectorAll(".agent-assistant__method > strong")].map(item => item.textContent)).toEqual(["我有 ChatGPT 账号", "我有 API Key", "图片提供商", "音频提供商"]);
 });
 
 const declaredSite = (overrides: Partial<ServiceConnectionView> = {}): ServiceConnectionView => ({
-  serviceConnectionId: "site-provider", scope: "site", kind: "api", name: "声明供应商",
+  serviceConnectionId: "site-provider", scope: "site", kind: "api", name: "声明提供商",
   endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }],
   capabilities: [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }],
   bindings: [{ bindingId: "provider-assistant:demo", extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion"], modelKeys: ["model"] }],
@@ -551,7 +552,7 @@ const declaredSite = (overrides: Partial<ServiceConnectionView> = {}): ServiceCo
   ...overrides,
 });
 
-it("供应商声明的共享讨论用途始终开放，不提供关闭入口", async () => {
+it("提供商声明的共享讨论用途始终开放，不提供关闭入口", async () => {
   const f = await render([], true, undefined, {}, {
     serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [declaredSite()], duplicates: [], providers: [] } }),
   });
@@ -575,7 +576,7 @@ it("已停用的来源可显式移除，移除动作带冻结版本", async () =
   expect(manage).toHaveBeenCalledWith({ action: "remove", serviceConnectionId: "site-provider", configRevision: 1, credentialEpoch: 1 });
 });
 
-it("无供应商声明的自填来源仍需显式开放共享讨论用途", async () => {
+it("无提供商声明的自填来源仍需显式开放共享讨论用途", async () => {
   const selfFilled = declaredSite({ serviceConnectionId: "site-manual", name: "自填来源", bindings: [] });
   const f = await render([], true, undefined, {}, {
     serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [selfFilled], duplicates: [], providers: [] } }),
@@ -585,9 +586,9 @@ it("无供应商声明的自填来源仍需显式开放共享讨论用途", asyn
   expect(f.el.querySelector('[data-ai-page="sources"]')?.textContent).toContain("开放共享讨论用途");
 });
 
-it("Agent 详情在有目标时显式使用供应商并返回原节点", async () => {
-  const source = declaredSite({ serviceConnectionId: "svc", name: "文字供应商", scope: "personal", managedByAdministrator: false });
-  const connection = { ...api, connectionId: "auto-c1", name: "文字供应商", serviceConnectionId: "svc", ready: true } as AgentConnectionView;
+it("Agent 详情在有目标时显式使用提供商并返回原节点", async () => {
+  const source = declaredSite({ serviceConnectionId: "svc", name: "文字提供商", scope: "personal", managedByAdministrator: false });
+  const connection = { ...api, connectionId: "auto-c1", name: "文字提供商", serviceConnectionId: "svc", ready: true } as AgentConnectionView;
   const selected = vi.fn(); globalThis.addEventListener("woohaa3-agent-assistant-selection", selected);
   try {
     const f = await render([connection], true, undefined, { canvasId: "canvas", nodeId: "node" }, {
@@ -604,9 +605,147 @@ it("Agent 详情在有目标时显式使用供应商并返回原节点", async (
   } finally { globalThis.removeEventListener("woohaa3-agent-assistant-selection", selected); }
 });
 
+it("临时图床展示权威路由快照、当前选择与最近真实失败", async () => {
+  const fetchSnapshot = vi.fn(async () => ({ ok: true as const, snapshot: {
+    settings: [], plugins: [], files: { config: "c", secrets: "s" },
+    extensionPoints: { temporaryHosting: {
+      mode: "auto" as const, selectionSource: "auto" as const, selectedId: "runninghub-temporary",
+      candidates: [
+        { exposerId: "runninghub-temporary", label: "RunningHub 临时图床", category: "provider" as const, ownerExtensionId: "runninghub-provider", priority: 10, configured: true, available: true, selected: true, lastError: "401 unauthorized" },
+        { exposerId: "local-public", label: "Woohaa3 临时图床", category: "builtin" as const, ownerExtensionId: "local-storage", priority: 1000, configured: true, available: true, selected: false, lastError: null }
+      ],
+      error: null, lastFailure: { exposerId: "runninghub-temporary", message: "401 unauthorized" }
+    } }
+  } }));
+  const write = vi.fn(async () => ({ ok: false as const, code: "unavailable", error: "test" }));
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot, write }));
+  await act(async () => { await Promise.resolve(); });
+  expect(write).not.toHaveBeenCalled();
+  expect(f.el.querySelector('[data-capability="hosting"]')?.textContent).toContain("已配置 2 个提供商");
+  expect(f.el.querySelector('[data-capability="hosting"]')?.textContent).not.toMatch(/自动 ·|指定 ·/);
+  await f.click("临时图床");
+  const detail = f.el.querySelector('[data-capability-detail="hosting"]')!;
+  expect(detail.textContent).toContain("RunningHub 临时图床");
+  expect(detail.textContent).toContain("当前选择");
+  expect(detail.textContent).toContain("最近失败：401 unauthorized");
+  expect(detail.textContent).toContain("Woohaa3 临时图床");
+  expect(detail.querySelectorAll("ul")).toHaveLength(1);
+  expect(detail.querySelectorAll("ul li")).toHaveLength(2);
+  expect(detail.textContent).not.toContain("内置服务");
+  expect(detail.textContent).toContain("配置");
+  expect(detail.textContent).not.toContain("暂未接入");
+});
+
+it("临时图床来源未配置时显示未配置，并可从候选进入配置", async () => {
+  const fetchSnapshot = vi.fn(async () => ({ ok: true as const, snapshot: {
+    settings: [], plugins: [], files: { config: "c", secrets: "s" },
+    extensionPoints: { temporaryHosting: {
+      mode: "auto" as const, selectionSource: "auto" as const, selectedId: null,
+      candidates: [
+        { exposerId: "runninghub-temporary", label: "RunningHub 临时图床", category: "provider" as const, ownerExtensionId: "runninghub-provider", priority: 10, configured: false, available: false, selected: false, lastError: null },
+        { exposerId: "local-public", label: "Woohaa3 临时图床", category: "builtin" as const, ownerExtensionId: "local-storage", priority: 1000, configured: false, available: false, selected: false, lastError: null }
+      ],
+      error: "没有可用的临时图床，请检查提供商配置",
+      lastFailure: null
+    } }
+  } }));
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot, write: async () => ({ ok: false as const, code: "unavailable", error: "test" }) }));
+  await act(async () => { await Promise.resolve(); });
+  expect(f.el.querySelector('[data-capability="hosting"]')?.textContent).toContain("已配置 0 个提供商");
+  expect(f.el.querySelector('[data-capability="hosting"]')?.textContent).not.toContain("读取失败");
+  await f.click("临时图床");
+  const detail = f.el.querySelector('[data-capability-detail="hosting"]')!;
+  expect(detail.textContent).toContain("没有可用的临时图床");
+  expect(detail.textContent).toContain("Woohaa3 临时图床");
+  expect(detail.textContent).toContain("配置");
+});
+
+function hostingSnapshot(configured = false, primary = "auto", lockedBy: string | null = null): SettingsSnapshot {
+  const setting = (key: string, extra: Partial<SettingsEntryView>): SettingsEntryView => ({
+    key, kind: "string", label: "来源", description: "", reload: "hot", secret: false,
+    source: "file", lockedBy: null, value: null, configured: true, pendingRestart: false, ...extra,
+  });
+  return {
+    settings: [
+      setting("exposer.primary", { value: primary, lockedBy }),
+      setting("providers.test.apiKey", { label: "API Key", secret: true, configured, ownerExtensionId: "test-provider" }),
+    ], plugins: [], files: { config: "c", secrets: "s" },
+    extensionPoints: { exposer: [{ id: "test-hosting", label: "测试图床", ownerExtensionId: "test-provider" }], temporaryHosting: {
+      mode: primary === "auto" ? "auto" : "manual", selectionSource: primary === "auto" ? "auto" : "manual",
+      selectedId: configured || primary !== "auto" ? "test-hosting" : null,
+      candidates: [{ exposerId: "test-hosting", label: "测试图床", category: "provider", ownerExtensionId: "test-provider", priority: 10, configured, available: configured, selected: configured || primary !== "auto", lastError: null }],
+      error: configured ? null : "没有可用的临时图床", lastFailure: null,
+    } },
+  };
+}
+
+it("模型目录读取失败不影响图床数量与配置，保存失败保留密钥，成功后返回详情刷新状态", async () => {
+  const snapshot = () => hostingSnapshot(configured);
+  let configured = false;
+  const write = vi.fn(async (_values: unknown) => { configured = true; return { ok: true as const, snapshot: snapshot() }; })
+    .mockResolvedValueOnce({ ok: false, code: "unavailable", error: "保存失败，请重试" } as never);
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot: snapshot() }), write }), {}, {
+    listServiceConnections: async () => ({ ok: false, code: "unavailable", error: "目录读取失败" }),
+  });
+  expect(f.el.querySelector('[data-capability="image"]')?.textContent).toContain("读取失败");
+  expect(f.el.querySelector('[data-capability="hosting"]')?.textContent).toContain("已配置 0 个提供商");
+  expect(f.el.querySelector('[data-capability="hosting"]')?.textContent).not.toContain("读取失败");
+  await f.click("临时图床");
+  const rowConfig = f.el.querySelector<HTMLButtonElement>('[data-capability-detail="hosting"] li button')!;
+  await act(async () => rowConfig.click());
+  expect(f.el.querySelector('[data-page="overview"]')?.getAttribute("data-state")).toBe("active");
+  const field = f.el.querySelector<HTMLInputElement>('.agent-assistant__drawer [data-setting-key="providers.test.apiKey"] input')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "test-key");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await f.click("保存");
+  expect(field.value).toBe("test-key");
+  expect(f.el.querySelector(".agent-assistant__drawer")?.textContent).toContain("保存失败，请重试");
+  await f.click("保存");
+  expect(write).toHaveBeenLastCalledWith({ "providers.test.apiKey": "test-key" });
+  expect(f.el.querySelector(".agent-assistant__drawer")).toBeNull();
+  expect(f.el.querySelector('[data-capability-detail="hosting"]')?.textContent).toContain("已配置 1 个提供商");
+  expect(f.el.querySelector('[data-capability-detail="hosting"]')?.textContent).toContain("当前选择");
+});
+
+it("临时图床策略显式保存，失败保留选择，成功后同步指定来源", async () => {
+  const write = vi.fn(async () => ({ ok: true as const, snapshot: hostingSnapshot(true, "test-hosting") }))
+    .mockResolvedValueOnce({ ok: false, code: "unavailable", error: "暂时无法保存" } as never);
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot: hostingSnapshot(true) }), write }));
+  await f.click("临时图床");
+  await f.click("配置");
+  expect(write).not.toHaveBeenCalled();
+  await act(async () => f.el.querySelector<HTMLButtonElement>('.agent-assistant__drawer [aria-label="临时图床来源"]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(item => item.textContent === "测试图床")!.click());
+  expect(write).not.toHaveBeenCalled();
+  await f.click("保存");
+  expect(f.el.querySelector(".agent-assistant__drawer")?.textContent).toContain("暂时无法保存");
+  expect(f.el.querySelector('.agent-assistant__drawer [aria-label="临时图床来源"]')?.textContent).toContain("测试图床");
+  await f.click("保存");
+  expect(write).toHaveBeenLastCalledWith({ "exposer.primary": "test-hosting" });
+  expect(f.el.querySelector(".agent-assistant__drawer")).toBeNull();
+  expect(f.el.querySelector('[data-capability-detail="hosting"] li')?.textContent).toContain("当前选择");
+  expect(f.el.querySelector('[data-capability-detail="hosting"]')?.textContent).not.toMatch(/自动 ·|指定 ·/);
+});
+
+it("环境锁定的图床策略只能查看，手动失效来源仍可辨认", async () => {
+  const snapshot = hostingSnapshot(true, "removed-hosting", "WOOHAA_EXPOSER");
+  snapshot.extensionPoints!.temporaryHosting = { ...snapshot.extensionPoints!.temporaryHosting!, selectedId: "removed-hosting" };
+  const write = vi.fn();
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write }));
+  await f.click("临时图床");
+  await f.click("配置");
+  const select = f.el.querySelector<HTMLButtonElement>('.agent-assistant__drawer [aria-label="临时图床来源"]')!;
+  expect(select.disabled).toBe(true);
+  expect(select.textContent).toContain("removed-hosting（未注册）");
+  expect(f.el.querySelector(".agent-assistant__drawer")?.textContent).toContain("WOOHAA_EXPOSER");
+  expect(write).not.toHaveBeenCalled();
+});
+
 it("Agent 详情无目标仅配置，来源不可用禁用使用", async () => {
-  const source = declaredSite({ serviceConnectionId: "svc", name: "文字供应商", scope: "personal", managedByAdministrator: false });
-  const connection = { ...api, connectionId: "auto-c1", name: "文字供应商", serviceConnectionId: "svc", ready: true } as AgentConnectionView;
+  const source = declaredSite({ serviceConnectionId: "svc", name: "文字提供商", scope: "personal", managedByAdministrator: false });
+  const connection = { ...api, connectionId: "auto-c1", name: "文字提供商", serviceConnectionId: "svc", ready: true } as AgentConnectionView;
   const noTarget = await render([connection], true, undefined, { canvasId: "canvas" }, {
     serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [source], duplicates: [], providers: [] } }),
   });

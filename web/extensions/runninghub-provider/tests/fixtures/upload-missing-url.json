@@ -1,0 +1,9 @@
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "type": "image",
+    "fileName": "openapi/a.png",
+    "size": "3490"
+  }
+}

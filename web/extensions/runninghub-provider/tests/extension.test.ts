@@ -118,7 +118,9 @@ describe("RunningHub 插件装载", () => {
       effect: (execute: () => unknown) => execute(),
       // 插件现在也注册「刷新可用模型」路由（见 refresh-route）：这两个注入在真实宿主里由网关提供。
       gateway: { route: () => () => undefined },
-      access: {}
+      access: {},
+      storage: { bucket: () => ({ head: async () => null, get: async () => { throw new Error("unused"); } }) },
+      exposer: { register: () => () => undefined }
     } as never;
     for (const input of [{ apiKey: "secret" }, {}]) {
       const config = RUNNINGHUB_CONFIG["~standard"].validate(input);
@@ -126,6 +128,36 @@ describe("RunningHub 插件装载", () => {
       createRunningHubProviderPlugin().apply(ctx, config.value);
     }
     expect(registered.map((provider) => provider.available)).toEqual([true, false]);
+  });
+
+  it("同一份 Key 投影文字目录、固定文字端点与独立临时图床", async () => {
+    const { createRunningHubRegistration, createRunningHubProviderPlugin, RUNNINGHUB_CONFIG } = await import("../src/backend.js");
+    const registration = createRunningHubRegistration({ apiKey: "k" });
+    expect(registration.models.some(model => model.providerModelId === "llm/glm/glm-5.2" && model.modelType === "language")).toBe(true);
+    expect(registration.models.some(model => model.providerModelId === "api/bytedance/jimeng-4.6")).toBe(true);
+    expect(registration.serviceConnectionFactory).toMatchObject({
+      protocols: ["chat-completions"],
+      assistantProtocol: "chat-completions",
+      endpoints: { "chat-completions": "https://llm.runninghub.ai/v1" }
+    });
+    expect(registration.languageCapabilities?.("llm/glm/glm-5.2")).toEqual({ tools: true, imageInput: false, streaming: true });
+    expect(registration.languageCapabilities?.("llm/missing")).toBeUndefined();
+
+    const registered: Array<{ exposerId: string; temporaryHosting?: { category: string; ready: () => boolean } }> = [];
+    const ctx = {
+      log: { scope: () => () => undefined },
+      generation: { register: () => () => undefined },
+      effect: (execute: () => unknown) => execute(),
+      gateway: { route: () => () => undefined },
+      access: {},
+      storage: { bucket: () => ({ head: async () => null, get: async () => { throw new Error("unused"); } }) },
+      exposer: { register: (exposer: never) => (registered.push(exposer), () => undefined) }
+    } as never;
+    const parsed = RUNNINGHUB_CONFIG["~standard"].validate({ apiKey: "secret" });
+    if (!("value" in parsed)) throw new Error("config invalid");
+    createRunningHubProviderPlugin().apply(ctx, parsed.value);
+    expect(registered[0]).toMatchObject({ exposerId: "runninghub-temporary", temporaryHosting: { category: "provider" } });
+    expect(registered[0]!.temporaryHosting!.ready()).toBe(true);
   });
 
   it("站点状态：没配 API Key 时报 degraded 与诊断，配上后恢复健康", async () => {
@@ -143,7 +175,7 @@ describe("RunningHub 插件装载", () => {
       expect(plugin.health?.(config(input))).toEqual({
         state: "degraded",
         diagnostics: [
-          { code: "provider-credentials-missing", message: "未配置 API Key，RunningHub 模型当前不可执行" }
+          { code: "provider-credentials-missing", message: "未配置 API Key，RunningHub 模型与临时图床当前不可执行" }
         ]
       });
     }

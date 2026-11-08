@@ -22,6 +22,7 @@ export const configPlugin: HostPlugin<{ env: Record<string, string | undefined>;
       // 核心层比 config 晚装载：按请求现查注册表，构造时不缓存。
       storageBackends: () => ctx.get("storage")?.list(),
       exposers: () => ctx.get("exposer")?.list(),
+      temporaryHosting: () => ctx.get("exposer")?.temporaryHosting(),
       // 安全模式视图归 application（核心层）所有，按请求现取。
       safeMode: () => ctx.get("application")?.safeMode ?? null,
       // 受管扩展归核心层 extensionManager，按请求现取。

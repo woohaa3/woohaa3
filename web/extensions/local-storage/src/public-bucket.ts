@@ -10,8 +10,8 @@
  * - 地址不签名：谁拿到链接都能读，所以只用于临时素材，桶内内容由运维侧定期清理；
  * - 字节搬家由**提供者自己**完成（`requiresReplica: false`）：core 不复制，这里从
  *   `ctx.storage` 读出来再 PUT 到公开桶，键与 URL 用同一份布局；
- * - 它**不是**兜底：`exposer.primary` 未选时不会自动生效，必须显式选择，避免悄悄把
- *   用户素材推到公网。
+ * - 它是自动模式的**内置后备**：没有合格的提供商临时图床时使用；用户仍可手动指定它，
+ *   画布显式禁用则不会被绕过。
  *
  * **桶信息不进公开仓库**：桶名、域名、前缀都由构建期注入（见 `@@WOOHAA3_PUBLIC_BUCKET@@`），
  * 构建环境用 `WOOHAA3_DEFINES` 提供；未注入时三者必须由运行期配置补齐，否则不注册。
@@ -20,10 +20,10 @@
 import COS from "cos-nodejs-sdk-v5";
 import type { HostStorageService, StorageExposer } from "@woohaa3/contracts";
 
-/** 地址提供者 id：`exposer.primary=local-public` 或画布 exposure 覆盖才会启用。 */
+/** 内置临时图床的稳定 id（自动模式的默认后备；也可被手动指定）。 */
 export const LOCAL_PUBLIC_EXPOSER_ID = "local-public";
 /** 设置页与日志里的显示名。 */
-export const LOCAL_PUBLIC_LABEL = "外链地址";
+export const LOCAL_PUBLIC_LABEL = "Woohaa3 临时图床";
 
 /**
  * 构建期注入的桶信息（构建脚本用 esbuild `define` 替换）。

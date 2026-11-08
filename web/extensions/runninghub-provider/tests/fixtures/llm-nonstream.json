@@ -1,0 +1,23 @@
+{
+  "id": "chatcmpl-fixture",
+  "object": "chat.completion",
+  "model": "glm/glm-5.2",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "hello",
+        "tool_calls": [
+          {
+            "id": "call_fixture_1",
+            "type": "function",
+            "function": { "name": "draw", "arguments": "{\"prompt\":\"a cat\"}" }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
+}

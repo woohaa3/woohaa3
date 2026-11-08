@@ -10,6 +10,7 @@ import { Dialog, DialogHeader, DialogTitle, DialogBody } from "@woohaa3/ui/dialo
 import { McpConnectionPanel, type McpPanelSnapshot } from "./mcp-connection-panel.js";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import { providerConfigGroups } from "../settings/plugin-groups.js";
+import { HostingOwnerConfiguration, HostingRouteConfiguration } from "./hosting-configuration.js";
 import { PluginIconMark } from "../settings/plugin-icons.js";
 import { CapabilityOverview, type CapabilityPage } from "./capability-pages.js";
 import type { ActiveCapability } from "./capability-directory.js";
@@ -45,6 +46,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
   const [addRequest, requestAdd] = useState(0);
   const [addCapability, setAddCapability] = useState<ActiveCapability | undefined>();
   const [sourceRequest, setSourceRequest] = useState<{ id: string } | null>(null);
+  const [hostingConfiguration, setHostingConfiguration] = useState<{ ownerId?: string } | null>(null);
   const [overviewRevision, resetOverview] = useState(0);
   const [connections, setConnections] = useState<AgentConnectionView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,6 +56,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
   const directoryState = useServiceDirectory(service, revision);
   const navigate = (next: CapabilityPage) => {
     userNavigated.current = true;
+    setHostingConfiguration(null);
     setPage(next);
     if (next === "overview") resetOverview(value => value + 1);
     if (next === "generation-history") setHistoryVisited(true);
@@ -72,6 +75,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
   }, [service, revision]);
   useEffect(() => {
     userNavigated.current = false;
+    setHostingConfiguration(null);
     setPage(initialPage);
     if (initialPage === "generation-history") setHistoryVisited(true);
     if (initialPage === "sources") setServicesVisited(true);
@@ -95,6 +99,9 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
   };
   const add = (capability?: ActiveCapability) => { setAddCapability(capability); navigate("sources"); requestAdd(value => value + 1); };
   const openSource = (id: string) => { setSourceRequest({ id }); navigate("sources"); };
+  const settingsState = useSyncExternalStore(settingsStore?.subscribe ?? (() => () => {}), settingsStore?.getState ?? (() => null));
+  useEffect(() => { void settingsStore?.load(); }, [settingsStore]);
+  const hostingSaved = () => { setHostingConfiguration(null); saved(); };
   const localConnections = connections.filter(isLocalConnection);
   const sourceConnections = connections.filter(connection => !isLocalConnection(connection));
   const sources = directoryState.directory?.connections ?? [];
@@ -115,7 +122,13 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
         <div className="agent-assistant__content">
           <section hidden={page !== "overview"} className="agent-assistant__page" data-ai-page="overview">
             {error ? <SettingsFeedback tone="danger">{error} <Button size="sm" onClick={() => refresh(value => value + 1)}>重试</Button></SettingsFeedback> : null}
-            <CapabilityOverview key={overviewRevision} local={localConnections} remote={sourceConnections} sources={sources} loading={loading} connectionError={error} sourceLoading={directoryState.loading} sourceError={directoryState.error} mcp={mcp} contextual={Boolean(payload.canvasId && payload.nodeId)} onNavigate={navigate} onAdd={add} onOpenSource={openSource} onUse={chooseById} onRetry={() => refresh(value => value + 1)} />
+            <CapabilityOverview key={overviewRevision} local={localConnections} remote={sourceConnections} sources={sources} loading={loading} connectionError={error} sourceLoading={directoryState.loading} sourceError={directoryState.error} mcp={mcp} contextual={Boolean(payload.canvasId && payload.nodeId)} onNavigate={navigate} onAdd={add} onOpenSource={openSource} onUse={chooseById} onRetry={() => refresh(value => value + 1)}
+              temporaryHosting={settingsState?.status === "ready" ? settingsState.snapshot.extensionPoints?.temporaryHosting ?? null : null}
+              settingsLoading={settingsState?.status === "loading"}
+              settingsError={settingsState?.status === "error" ? settingsState.error : settingsState?.status === "unauthorized" ? "临时图床配置由管理员管理。" : null}
+              onRetrySettings={() => void settingsStore?.load()}
+              onOpenHostingOwner={ownerId => setHostingConfiguration({ ownerId })}
+              onConfigureHosting={() => setHostingConfiguration({})} />
           </section>
           {localVisited ? <section hidden={page !== "agents"} className="agent-assistant__page" data-ai-page="agents"><UiPortalScope>
             <div className="agent-assistant__page-heading"><h2>本地 Agent</h2><span className="agent-assistant__muted">宿主电脑 · {localConnections.length} 个连接</span></div>
@@ -131,6 +144,14 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
             <div className="agent-assistant__page-heading"><h2>生成历史</h2></div>
             {!payload.canvasId ? <p>从画布打开后查看生成历史。</p> : History ? <HistoryBoundary key={`${payload.canvasId}:${historyContributions[0]?.id}`}><Suspense fallback={<p>正在加载生成历史…</p>}><History canvasId={payload.canvasId} active={page === "generation-history"} onClose={onHistoryClose ?? (() => { onClose(); return true; })} /></Suspense></HistoryBoundary> : <SettingsFeedback tone="danger">生成历史不可用：历史模块未装配。</SettingsFeedback>}
           </section> : null}
+          {hostingConfiguration ? <AssistantDrawer title={hostingConfiguration.ownerId
+            ? settingsState?.status === "ready" ? settingsState.snapshot.extensionPoints?.temporaryHosting?.candidates.find(candidate => candidate.ownerExtensionId === hostingConfiguration.ownerId)?.label ?? "来源配置" : "来源配置"
+            : "临时图床配置"} onClose={() => setHostingConfiguration(null)}>
+            {settingsState?.status === "ready" && settingsStore ? hostingConfiguration.ownerId
+              ? <HostingOwnerConfiguration ownerId={hostingConfiguration.ownerId} snapshot={settingsState.snapshot} store={settingsStore} onSaved={hostingSaved} />
+              : <HostingRouteConfiguration snapshot={settingsState.snapshot} store={settingsStore} onSaved={hostingSaved} />
+              : <SettingsFeedback tone="warning">{settingsState?.status === "error" ? settingsState.error : "临时图床配置暂不可用。"}<Button size="sm" onClick={() => void settingsStore?.load()}>重试</Button></SettingsFeedback>}
+          </AssistantDrawer> : null}
         </div>
       </DialogBody>
     </UiPortalScope>
@@ -243,12 +264,12 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
         onClick={() => selectMethod(id)}>
         <span className="agent-assistant__provider-mark"><PluginIconMark icon={group.icon} size={22} /></span>
         <strong>{group.label}</strong>
-        <span className="agent-assistant__method-description">{group.description || "使用此供应商的现有配置。"}</span>
+        <span className="agent-assistant__method-description">{group.description || "使用此提供商的现有配置。"}</span>
         <ModelTypeTags types={group.modelTypes} />
         <span className="agent-assistant__method-state">{selectedKind === id ? "正在配置" : "点击配置"}</span>
       </button>;
     })}</div>
-    {capability && capability !== "agent" && !providerMethods.length && selectedKind === null ? <p className="agent-assistant__empty-note">当前没有可配置的{MODEL_TYPE_LABELS.find(([type]) => type === capability)?.[1]}供应商扩展。</p> : null}
+    {capability && capability !== "agent" && !providerMethods.length && selectedKind === null ? <p className="agent-assistant__empty-note">当前没有可配置的{MODEL_TYPE_LABELS.find(([type]) => type === capability)?.[1]}提供商扩展。</p> : null}
     <div className="agent-assistant__forms" hidden={selectedKind === null}>
       <div className="agent-assistant__form-heading">
         <Button size="sm" tone="ghost" icon={<BackIcon size={14} />} onClick={() => setSelectedKind(null)}>返回选择</Button>
@@ -330,9 +351,9 @@ function ServiceSources({ service, connections, contributions, payload, settings
       const state = serviceSourceState(source);
       return <li key={source.serviceConnectionId}><div className="agent-assistant__identity"><strong>{source.name}</strong></div><span className="agent-assistant__state" data-tone={state.tone}>{state.label}{source.managedByAdministrator ? " · 只读" : ""}</span><div className="agent-assistant__actions"><Button size="sm" tone="ghost" onClick={() => open(source.serviceConnectionId)}>配置</Button>{connection && payload.canvasId && payload.nodeId ? <Button size="sm" disabled={!connection.ready} onClick={() => onChoose(connection)}>使用</Button> : null}</div></li>;
     })}</ul> : null}
-    {addVisited ? <AssistantDrawer title={activeCapability ? `添加${activeCapability === "agent" ? " Agent" : MODEL_TYPE_LABELS.find(([type]) => type === activeCapability)?.[1]}供应商` : "添加模型提供商"} onClose={back} hidden={!adding} wide>
+    {addVisited ? <AssistantDrawer title={activeCapability ? `添加${activeCapability === "agent" ? " Agent" : MODEL_TYPE_LABELS.find(([type]) => type === activeCapability)?.[1]}提供商` : "添加模型提供商"} onClose={back} hidden={!adding} wide>
       <AddConnectionForm key={`${addRequest}:${activeCapability ?? "all"}`} capability={activeCapability} local={false} initialKind={activeCapability ? undefined : payload.kind} contributions={contributions} providerGroups={providerGroups} settingsStore={settingsStore} onSaved={() => { onSaved(); back(); }} />
-      {settings?.status === "loading" ? <p>正在读取供应商…</p> : settings?.status === "error" ? <SettingsFeedback tone="danger">{settings.error} <Button size="sm" onClick={() => void settingsStore?.load()}>重试</Button></SettingsFeedback> : settings?.status === "unauthorized" ? <p>供应商配置由管理员管理。个人 API 与账号授权仍可使用。</p> : null}
+      {settings?.status === "loading" ? <p>正在读取提供商…</p> : settings?.status === "error" ? <SettingsFeedback tone="danger">{settings.error} <Button size="sm" onClick={() => void settingsStore?.load()}>重试</Button></SettingsFeedback> : settings?.status === "unauthorized" ? <p>提供商配置由管理员管理。个人 API 与账号授权仍可使用。</p> : null}
     </AssistantDrawer> : null}
     <AssistantDrawer title={current?.name ?? "连接配置"} onClose={back} hidden={!selected}>
       {error ? <SettingsFeedback tone="danger">{error} <Button size="sm" onClick={onSaved}>重新读取</Button></SettingsFeedback> : null}

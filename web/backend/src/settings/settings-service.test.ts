@@ -73,12 +73,19 @@ describe("createSettingsService", () => {
     const { service } = await start(files, {
       settingDefaults: { "exposer.primary": "local-public", "storage.local.publicEnabled": true }
     });
-    expect(service.get("exposer.primary")).toBe("local-public");
+    // 构建默认里的 local-public 表示「用内置」，迁移为自动；用户显式值仍保留（见下方文件写入）。
+    expect(service.get("exposer.primary")).toBe("auto");
 
     service.register("storage.local", {
       publicEnabled: { kind: "boolean", default: false, reload: "hot", label: "公开桶", description: "" }
     }, "本地存储");
     expect(service.describe().find((entry) => entry.key === "storage.local.publicEnabled")?.value).toBe(true);
+
+    fs.writeFileSync(files.configFile, "exposer:\n  primary: local-public\n", "utf8");
+    await service.reload();
+    // 用户显式写下的 local-public 不是产品默认：保持手动选择。
+    expect(service.get("exposer.primary")).toBe("local-public");
+    expect(service.describe().find((entry) => entry.key === "exposer.primary")?.source).toBe("file");
 
     fs.writeFileSync(files.configFile, "exposer:\n  primary: cos\nstorage:\n  local:\n    publicEnabled: false\n", "utf8");
     await service.reload();

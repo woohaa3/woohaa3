@@ -18,7 +18,7 @@ it("turns a declared assistant protocol into a discussion Agent binding only wit
   settings.register("providers.demo", fields, "Demo", "demo");
   const languageModels = [{ providerModelId: "model", modelType: "language" }];
   const make = (catalog: { providerModelId: string; modelType: string }[] = languageModels, assistantProtocol?: string) => {
-    const provider = () => ({ providerId: "demo", extensionId: "demo", available: true, models: catalog, serviceConnectionFactory: { protocols: ["chat-completions"], ...(assistantProtocol ? { assistantProtocol } : {}) } } as unknown as GenerationProvider);
+    const provider = () => ({ providerId: "demo", extensionId: "demo", available: true, models: catalog, languageCapabilities: () => ({ tools: true, streaming: true }), serviceConnectionFactory: { protocols: ["chat-completions"], ...(assistantProtocol ? { assistantProtocol } : {}) } } as unknown as GenerationProvider);
     return createSiteProviderSource({ providerId: "demo", extensionId: "demo", label: "Demo", prefix: "providers.demo", settings, provider });
   };
   try {
@@ -41,6 +41,47 @@ it("turns a declared assistant protocol into a discussion Agent binding only wit
   }
 });
 
+it("contributes per-protocol fixed endpoints and per-model tool evidence", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-assistant-endpoints-"));
+  const files = { configFile: path.join(directory, "config.yml"), secretsFile: path.join(directory, "secrets.yml"), watch: false };
+  const fields = {
+    apiKey: { kind: "string", secret: true, reload: "hot", label: "Key", description: "Key" },
+    baseUrl: { kind: "url", protocols: ["https:"], reload: "hot", label: "URL", description: "URL", default: "https://media.example/v2" }
+  } as const;
+  const settings = await createSettingsService({ ...files, env: {} });
+  settings.register("providers.demo", fields, "Demo", "demo");
+  let catalogRevision = 1;
+  const provider = () => ({
+    providerId: "demo", extensionId: "demo", available: true, catalogRevision,
+    models: [
+      { providerModelId: "llm/tools", modelType: "language" },
+      { providerModelId: "llm/chat-only", modelType: "language" },
+      { providerModelId: "api/image", modelType: "image" }
+    ],
+    languageCapabilities: (modelId: string) => modelId === "llm/tools" ? { tools: true, imageInput: true, streaming: true } : undefined,
+    serviceConnectionFactory: {
+      protocols: ["chat-completions" as const], assistantProtocol: "chat-completions" as const,
+      endpoints: { "chat-completions": "https://text.example/v1" }
+    }
+  } as unknown as GenerationProvider);
+  const adapter = createSiteProviderSource({ providerId: "demo", extensionId: "demo", label: "Demo", prefix: "providers.demo", settings, provider });
+  try {
+    const first = (await adapter.get("admin", "demo"))!;
+    // Provider 只贡献文字协议：固定端点来自 endpoints，而不是媒体 baseUrl。
+    expect(first.endpoints).toEqual([{ protocol: "chat-completions", baseUrl: "https://text.example/v1" }]);
+    expect(first.capabilities).toContainEqual(expect.objectContaining({ purpose: "target-execution", modelId: "llm/tools" }));
+    expect(first.capabilities).not.toContainEqual(expect.objectContaining({ purpose: "target-execution", modelId: "llm/chat-only" }));
+    expect(first.capabilities).toContainEqual(expect.objectContaining({ purpose: "discussion", modelId: "llm/tools", imageInput: true }));
+
+    catalogRevision = 2;
+    const second = (await adapter.get("admin", "demo"))!;
+    expect(second.configRevision).not.toBe(first.configRevision);
+  } finally {
+    settings.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 it("projects a declared site provider source into a usable Agent connection through the SDK bridge", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-agent-source-"));
   const files = { configFile: path.join(directory, "config.yml"), secretsFile: path.join(directory, "secrets.yml"), watch: false };
@@ -50,7 +91,7 @@ it("projects a declared site provider source into a usable Agent connection thro
   } as const;
   const settings = await createSettingsService({ ...files, env: {} });
   settings.register("providers.demo", fields, "Demo", "demo");
-  const provider = { providerId: "demo", extensionId: "demo", available: true, models: [{ providerModelId: "model", modelType: "language" }], serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" } } as unknown as GenerationProvider;
+  const provider = { providerId: "demo", extensionId: "demo", available: true, models: [{ providerModelId: "model", modelType: "language" }], languageCapabilities: () => ({ tools: true, streaming: true }), serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" } } as unknown as GenerationProvider;
   try {
     expect((await settings.update({ "providers.demo.apiKey": "demo-key" })).ok).toBe(true);
     const documents = createInMemoryDocumentStore(["sdk", "sources"]);
@@ -83,7 +124,7 @@ it("projects one settings authority, rotates all bindings, preserves advanced fi
   const fields = { apiKey: { kind: "string", secret: true, reload: "hot", label: "Key", description: "Key", legacyEnv: "TEST_SOURCE_KEY" }, baseUrl: { kind: "url", protocols: ["https:"], reload: "hot", label: "URL", description: "URL", default: "https://relay.example/v1" }, region: { kind: "string", reload: "hot", label: "Region", description: "Region", default: "region-a" } } as const;
   const settings = await createSettingsService({ ...files, env: {} });
   settings.register("providers.demo", fields, "Demo", "demo");
-  const provider = { providerId: "demo", extensionId: "demo", available: true, models: [{ providerModelId: "model", modelType: "language" }], serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" } } as unknown as GenerationProvider;
+  const provider = { providerId: "demo", extensionId: "demo", available: true, models: [{ providerModelId: "model", modelType: "language" }], languageCapabilities: () => ({ tools: true, streaming: true }), serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" } } as unknown as GenerationProvider;
   let configured = false;
   const adapter = createSiteProviderSource({ providerId: "demo", extensionId: "demo", label: "Demo", prefix: "providers.demo", settings, provider: () => configured ? provider : undefined });
   const documents = createInMemoryDocumentStore(["sources"]).forExtension("sources")!;

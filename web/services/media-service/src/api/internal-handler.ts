@@ -187,7 +187,7 @@ async function handleSign(
   const { storageKey } = decoded.value;
   const ttl = decoded.value.expiresSeconds ?? options.signTtlSeconds ?? DEFAULT_SIGN_TTL_SECONDS;
   if (typeof options.storage.getHttpsUrl !== "function") {
-    sendError(res, 503, "unavailable", "当前存储没有对外地址能力：请在 exposer.primary 选择地址提供者");
+    sendError(res, 503, "unavailable", "当前没有可用的临时图床：请在设置中选择临时图床来源");
     return true;
   }
   try {
@@ -200,9 +200,9 @@ async function handleSign(
     log({ event: "media-sign", status: 200 });
     sendJson(res, 200, { url, expiresAt } satisfies MediaSignResponse);
   } catch (error) {
-    // 「没有可用的对外存储后端」是配置问题：503 + 可操作的原因，而不是笼统的 502。
+    // 「没有可用的临时图床」是配置问题：503 + 可操作的原因，而不是笼统的 502。
     if (isStorageExposeUnavailableError(error)) {
-      sendError(res, 503, "unavailable", error instanceof Error ? error.message : "没有可用的对外存储后端");
+      sendError(res, 503, "unavailable", error instanceof Error ? error.message : "没有可用的临时图床");
       return true;
     }
     if (isMediaObjectNotFoundError(error)) {

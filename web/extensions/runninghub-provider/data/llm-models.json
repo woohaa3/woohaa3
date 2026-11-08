@@ -1,0 +1,162 @@
+{
+  "source": "https://llm.runninghub.ai/v1/models",
+  "fetchedAt": "2026-11-07",
+  "note": "脱敏后的官方文字目录快照：只保留解析所需的身份与逐模型能力字段。模型集合与价格不进产品常量，刷新时以官方接口为准。",
+  "object": "list",
+  "data": [
+    {
+      "id": "glm/glm-5.2",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "streaming": true,
+        "input_modalities": ["text"],
+        "output_modalities": ["text"]
+      }
+    },
+    {
+      "id": "openai/gpt-5.4",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.0-lite",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "document": true,
+        "thinking": true,
+        "streaming": true,
+        "web_search": { "enabled": true, "provider": "volcengine" },
+        "input_modalities": ["text", "image", "video", "document"],
+        "output_modalities": ["text"]
+      }
+    },
+    {
+      "id": "openai/gpt-6.1-sol",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "qwen/qwen3.8-flash-next",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "input_modalities": ["text", "image"],
+        "output_modalities": ["text"]
+      }
+    },
+    {
+      "id": "anthropic/claude-sonnet-4.5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true
+      }
+    },
+    {
+      "id": "google/gemini-3.1-flash-lite-preview",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true
+      }
+    },
+    {
+      "id": "minimax/minimax-m2.7",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 204800,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true
+      }
+    },
+    {
+      "id": "typesafe/jev-1.13",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 32000,
+      "capabilities": {
+        "chat": false,
+        "tools": false,
+        "decisions": true,
+        "streaming": false
+      }
+    },
+    {
+      "id": "legacy/deprecated-chat",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794096952,
+      "context_length": 32000,
+      "capabilities": { "chat": true, "tools": false, "vision": false, "streaming": false },
+      "deprecated": true,
+      "redirect_to": "glm/glm-5.2",
+      "sunset_at": "2026-12-02T15:15:00+08:00"
+    }
+  ]
+}

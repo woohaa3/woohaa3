@@ -98,7 +98,7 @@ describe("storageSettingOptions", () => {
 
   it("对外后端带空选项，保留未注册的当前值并标注", () => {
     const options = storageSettingOptions("storage.expose", providers, "legacy");
-    expect(options[0]).toEqual({ value: "", label: "未选择（不指定提供者）" });
+    expect(options[0]).toEqual({ value: "", label: "跟随临时图床设置" });
     expect(options.at(-1)).toEqual({ value: "legacy", label: "legacy（未注册）" });
   });
 });
@@ -169,14 +169,14 @@ describe("isStorageSettingKey", () => {
 });
 
 describe("对外地址提供者（exposer 扩展点）", () => {
-  it("exposer.primary 是独立的设置键，且选项为空值保留一个「未选择」", () => {
+  it("exposer.primary 是独立的设置键，首个选项是自动模式", () => {
     expect(isStorageSettingKey("exposer.primary")).toBe(true);
     const options = storageSettingOptions(
       "exposer.primary",
       [{ id: "edge", label: "边缘节点", ownerExtensionId: "remote-server", registered: true }],
       ""
     );
-    expect(options[0]).toEqual({ value: "", label: "未选择（不指定提供者）" });
+    expect(options[0]).toEqual({ value: "auto", label: "自动" });
     expect(options.map((option) => option.value)).toContain("edge");
   });
 
@@ -210,7 +210,7 @@ describe("exposer.primary 的无效旧值", () => {
     ];
     const options = storageSettingOptions("exposer.primary", providers, "local");
     // 只剩空值与真正可用的提供者；运行时已把 `local` 按未设置处理。
-    expect(options.map((option) => option.value)).toEqual(["", "local-public"]);
+    expect(options.map((option) => option.value)).toEqual(["auto", "local-public"]);
     expect(options.some((option) => option.label.includes("未注册"))).toBe(false);
   });
 });

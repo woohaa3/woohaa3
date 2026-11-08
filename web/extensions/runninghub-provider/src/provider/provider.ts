@@ -20,9 +20,11 @@ import type {
   PptaskProvider,
   PptaskVideoModelImplementation,
 } from '@sdppp/pptask';
+import { createRunningHubLanguageModel } from './language.js';
 
 const DEFAULT_API_BASE_URL = 'https://www.runninghub.ai/openapi/v2';
 const DEFAULT_APP_BASE_URL = 'https://www.runninghub.ai';
+export const DEFAULT_LLM_BASE_URL = 'https://llm.runninghub.ai/v1';
 
 export type RunninghubProviderOptions = {
   apiKey: string;
@@ -30,6 +32,8 @@ export type RunninghubProviderOptions = {
   baseURL?: string;
   apiBaseURL?: string;
   appBaseURL?: string;
+  /** 文字模型独立端点；缺省 `https://llm.runninghub.ai/v1`。 */
+  languageBaseURL?: string;
   fetch?: typeof globalThis.fetch;
   jobRepository?: PptaskJobRepository;
   pollIntervalMs?: number;
@@ -39,6 +43,7 @@ type RunninghubConfig = {
   apiKey: string;
   appBaseURL: string;
   apiBaseURL: string;
+  languageBaseURL: string;
   fetch: typeof globalThis.fetch;
 };
 
@@ -80,6 +85,11 @@ export function createRunninghubProvider(options: RunninghubProviderOptions): Pp
   const config = normalizeConfig(options);
   return createPptaskProvider({
     providerId: 'runninghub',
+    languageModel: modelId => createRunningHubLanguageModel(languageModelId(modelId), {
+      apiKey: config.apiKey,
+      baseURL: config.languageBaseURL,
+      fetch: config.fetch,
+    }),
     imageModel: modelId => createImageModel(modelId, config),
     videoModel: modelId => createVideoModel(modelId, config),
     files: createFiles(config),
@@ -503,6 +513,11 @@ function fileInput(file: { type: 'url'; url: string } | { type: 'file'; data: st
   return `data:${file.mediaType};base64,${bytesToBase64(file.data)}`;
 }
 
+/** catalog 身份 `llm/<原始 ID>` → 上游原始模型 ID；无前缀时原样使用。 */
+function languageModelId(modelId: string): string {
+  return modelId.startsWith('llm/') ? modelId.slice(4) : modelId;
+}
+
 function parseModelId(modelId: string): RunninghubModelRef {
   const value = modelId.trim();
   if (!value) throw new Error('RunningHub modelId is required');
@@ -539,6 +554,7 @@ function normalizeConfig(options: RunninghubProviderOptions): RunninghubConfig {
     apiKey,
     appBaseURL: stripTrailingSlash(options.appBaseURL ?? defaultHost),
     apiBaseURL: stripTrailingSlash(options.apiBaseURL ?? options.baseURL ?? DEFAULT_API_BASE_URL),
+    languageBaseURL: stripTrailingSlash(options.languageBaseURL ?? DEFAULT_LLM_BASE_URL),
     fetch: fetchImpl,
   };
 }

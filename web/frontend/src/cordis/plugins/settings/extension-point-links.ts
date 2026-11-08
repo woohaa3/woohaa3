@@ -79,7 +79,8 @@ export function providersForSettingKey(
 /**
  * 选项列表。
  *
- * - `exposer.primary` / `storage.expose` 允许空值（不指定提供者，也就没有对外地址；没有默认提供者）；
+ * - `exposer.primary` 提供 `auto`（优先提供商、否则内置），空值也按自动处理；
+ * - `storage.expose` 的空值表示不覆盖新的临时图床设置；
  * - 当前值不在提供者里时保留它并标注「未注册」：不静默吞掉已有配置，也不假装它可用。
  */
 export function storageSettingOptions(
@@ -91,8 +92,10 @@ export function storageSettingOptions(
     value: provider.id,
     label: provider.registered ? provider.label : provider.label + "（未注册）"
   }));
-  if (key === "storage.expose" || key === "exposer.primary") {
-    options.unshift({ value: "", label: "未选择（不指定提供者）" });
+  if (key === "exposer.primary") {
+    options.unshift({ value: "auto", label: "自动" });
+  } else if (key === "storage.expose") {
+    options.unshift({ value: "", label: "跟随临时图床设置" });
   } else if (!currentValue) {
     // 主存储尚未选择时给一个占位项：原生 select 的 value 必须能匹配到 option。
     options.unshift({ value: "", label: "请选择后端" });

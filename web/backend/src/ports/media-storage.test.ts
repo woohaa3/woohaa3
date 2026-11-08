@@ -56,7 +56,8 @@ function fakeExposer(): { exposer: HostExposerService; calls: StorageExposeInput
       async expose(input) {
         calls.push(input);
         return `https://storage.invalid/${input.namespace}/${input.key}?expires=${input.expiresSeconds ?? 900}`;
-      }
+      },
+      temporaryHosting: () => ({ mode: "manual", selectionSource: "manual", selectedId: "cos", candidates: [], error: null, lastFailure: null })
     }
   };
 }

@@ -38,6 +38,12 @@ const CATALOG_HTML = '<button>"/seedream-v5-lite/image-to-image"</button><a href
 function routingFetch(options: { registry?: unknown; catalog?: string | null } = {}) {
   return (async (url: string | URL) => {
     const target = String(url);
+    if (target.endsWith("/v1/models")) {
+      return new Response(JSON.stringify({
+        object: "list",
+        data: [{ id: "glm/glm-5.2", object: "model", capabilities: { chat: true, tools: true, vision: false, streaming: true } }]
+      }), { status: 200 });
+    }
     if (target.includes("standard-api")) {
       if (options.catalog === null) return new Response("nope", { status: 500 });
       return new Response(options.catalog ?? CATALOG_HTML, { status: 200 });
@@ -83,7 +89,14 @@ function fakeContext() {
       access: {
         authenticator: async () => ({ principalId: "admin" }),
         accessEnforcer: { assertAction: async () => undefined }
-      }
+      },
+      storage: {
+        bucket: () => ({
+          head: async () => null,
+          get: async () => { throw new Error("unused"); }
+        })
+      },
+      exposer: { register: () => () => undefined }
     } as never
   };
 }

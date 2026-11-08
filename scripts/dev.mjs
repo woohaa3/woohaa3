@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildDefines, describeBuildProfile, loadBuildProfile } from "./lib/build-profile.mjs";
 import { resolveModelRendererCommand, resolveWorldVideoEncoderCommand } from "./lib/model-renderer-command.mjs";
 import { loadServiceEnv } from "./lib/service-env.mjs";
 import { resolveAppBasePath } from "./lib/app-base-path.mjs";
@@ -21,6 +22,25 @@ import { createAgentSupervisorHost } from "./lib/agent-runtime-supervisor-host.m
 import { agentRuntimeDirectory } from "./lib/agent-runtime-endpoints.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+
+/**
+ * 开发构建也吃 build profile 的构建期常量（公开桶、官方信任根、设置默认值）。
+ *
+ * 这些值只在公开仓库的构建期机制里出现，源码不落具体桶；开发环境若完全不注入，内置
+ * 临时图床会在界面上表现为「未配置」，与同一份 profile 打出的桌面/部署产物不一致。
+ * env 已显式提供 `WOOHAA3_DEFINES` 时以它为准，便于覆盖和排障。
+ */
+const buildProfile = loadBuildProfile({ repoRoot: path.dirname(root), env: process.env });
+if (!buildProfile.ok) {
+  console.warn(`[build-profile] 校验失败，开发沿用现有默认值：${buildProfile.errors.map((error) => `${error.path}: ${error.message}`).join("；")}`);
+} else if (!process.env.WOOHAA3_DEFINES?.trim()) {
+  const defines = buildDefines(buildProfile.resolved);
+  if (defines) {
+    process.env.WOOHAA3_DEFINES = JSON.stringify(defines);
+    console.log(`${describeBuildProfile(buildProfile)}；defines: ${Object.keys(defines).join(", ")}`);
+  }
+}
+
 const args = process.argv.slice(2).filter((value) => value !== "--");
 const usage = `启动 Vite 和统一后端：
   npm run dev -- --frontend-port 5300 --backend-port 5301

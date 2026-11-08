@@ -55,17 +55,14 @@ export function AboutSection({ snapshot }: { snapshot: SettingsSnapshot | null }
         {storagePrimary !== "" ? <code>{storagePrimary}</code> : <span>未设置（缺省 local）</span>}
         <span className="settings-page__hint"> · 已注册：{providersText(storageProviders)}</span>
       </Row>
-      <Row label="对外地址提供者" testId="settings-about-exposer">
-        {exposerPrimary !== "" ? (
+      <Row label="临时图床" testId="settings-about-exposer">
+        {exposerPrimary !== "" && exposerPrimary !== "auto" ? (
           <>
             <code>{exposerProvider?.label ?? exposerPrimary}</code>
             {!exposerRegistered ? <span className="settings-page__badge is-warning">已选择但未注册</span> : null}
           </>
         ) : (
-          <>
-            <span className="settings-page__badge is-warning">未选择</span>
-            <span className="settings-page__hint"> 需要对外地址的生成任务会失败。</span>
-          </>
+          <code>自动</code>
         )}
         <span className="settings-page__hint"> · 已注册：{providersText(exposerProviders)}</span>
       </Row>

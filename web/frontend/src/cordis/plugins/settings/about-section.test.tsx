@@ -23,7 +23,7 @@ const snapshot: SettingsSnapshot = {
 };
 
 describe("设置 · 关于", () => {
-  it("展示版本、存储与对外地址状态，并指出未选择提供者", async () => {
+  it("展示版本、存储与临时图床的自动状态", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -31,7 +31,7 @@ describe("设置 · 关于", () => {
 
     expect(container.querySelector('[data-testid="settings-about-version"]')?.textContent).toContain("未注入");
     expect(container.querySelector('[data-testid="settings-about-storage"]')?.textContent).toContain("local");
-    expect(container.querySelector('[data-testid="settings-about-exposer"]')?.textContent).toContain("未选择");
+    expect(container.querySelector('[data-testid="settings-about-exposer"]')?.textContent).toContain("自动");
     expect(container.querySelector('[data-testid="settings-about-exposer"]')?.textContent).toContain("公开临时桶");
     expect(container.querySelector('[data-testid="settings-about-public-bucket"]')).toBeNull();
     expect(container.querySelector('[data-testid="settings-about-files"]')?.textContent).toContain("woohaa.config.yml");

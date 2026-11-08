@@ -1,0 +1,10 @@
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "type": "image",
+    "download_url": "https://rh-images.example.com/input/openapi/a.png?q-sign-algorithm=sha1&q-sign-time=1767852886%3B1767939286&q-signature=fixture",
+    "fileName": "openapi/a.png",
+    "size": "3490"
+  }
+}

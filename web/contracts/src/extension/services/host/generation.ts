@@ -84,8 +84,23 @@ export type GenerationProvider = {
   serviceConnectionFactory?: {
     protocols: readonly import("../../host/service-connection.js").ServiceConnectionProtocol[];
     assistantProtocol?: import("../../host/service-connection.js").ServiceConnectionProtocol;
+    /**
+     * Provider 贡献的按协议固定端点（例如文字模型与媒体任务走不同域名）。
+     *
+     * core 不识别 Provider id；这里缺省时才回落到用户配置的 `baseUrl` / `baseURL`。
+     * 用户显式配置的地址仍按既有信任规则覆盖。
+     */
+    endpoints?: Partial<Record<import("../../host/service-connection.js").ServiceConnectionProtocol, string>>;
     create(input: { secret: string; endpoint: string; validate: () => Promise<void>; fetch?: typeof globalThis.fetch }): GenerationProviderHandle;
   };
+  /**
+   * 语言模型逐模型能力证据（讨论/工具/图片输入/流式）。
+   *
+   * 缺省或某个模型没有证据时，消费者 MUST 按不支持处理；不得从提供商品牌或媒体模型推测。
+   */
+  languageCapabilities?: (providerModelId: string) =>
+    | { tools?: boolean; imageInput?: boolean; streaming?: boolean }
+    | undefined;
   extensionId: string;
   providerId: string;
   /** 该 Provider 当前是否可执行（凭据/配置就绪）。 */

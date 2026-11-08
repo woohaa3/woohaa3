@@ -6,8 +6,8 @@
  * 的缺省后端 —— 没有 `presign`：本地没有公网身份，字节放在哪它说了算，出不出地址它说了不算。
  *
  * 对外地址的补丁也在这里：本插件可选地注册一个**公开临时桶**提供者（见 `public-bucket.ts`），
- * 把本地字节推到公开只读的对象存储，供第三方 API 直接拉取。它默认关闭、也不是默认提供者
- * （`exposer.primary` 未选就不生效），所以「完全本地」的默认行为不变。
+ * 把本地字节推到公开只读的对象存储，供第三方 API 直接拉取。它是自动模式的内置后备；
+ * 桶信息未配置时如实不可用，不虚构凭据。
  *
  * contentType 用 sidecar 文件 `${root}/${key}.meta.json` 保存（内容 `{"contentType":"..."}`）：
  * 媒体 verify 会比对 contentType，所以 `put` 必须写 sidecar；读不到 sidecar 时按扩展名推断。
@@ -71,44 +71,44 @@ export const LOCAL_STORAGE_CONFIG = defineConfigSchema({
     kind: "boolean",
     reload: "hot",
     legacyEnv: "COS_PUBLIC_ENABLED",
-    default: false,
-    label: "启用外链地址",
-    description: "开启后可用外链地址把素材推到公开只读存储，拿到可直接拉取的地址；内容会被定期清理"
+    default: true,
+    label: "启用 Woohaa3 临时图床",
+    description: "把素材上传到公开存储并获取临时外链；内容会被定期清理"
   },
   publicBucketName: {
     kind: "string",
     ...(PUBLIC_BUCKET_DEFAULTS.bucketName ? { default: PUBLIC_BUCKET_DEFAULTS.bucketName } : {}),
     reload: "hot",
-    label: "外链桶名称",
-    description: "外链存储桶名（含 APPID 后缀）；留空用构建期注入值"
+    label: "临时图床桶名称",
+    description: "临时图床存储桶名（含 APPID 后缀）；留空用构建期注入值"
   },
   publicBucketUrl: {
     kind: "url",
     protocols: ["https:", "http:"],
     ...(PUBLIC_BUCKET_DEFAULTS.bucketUrl ? { default: PUBLIC_BUCKET_DEFAULTS.bucketUrl } : {}),
     reload: "hot",
-    label: "外链地址",
-    description: "外链存储访问域名；留空用构建期注入值，region 由它解析"
+    label: "临时图床地址",
+    description: "临时图床存储访问域名；留空用构建期注入值，region 由它解析"
   },
   publicPrefix: {
     kind: "string",
     ...(PUBLIC_BUCKET_DEFAULTS.prefix ? { default: PUBLIC_BUCKET_DEFAULTS.prefix } : {}),
     reload: "hot",
-    label: "外链前缀",
-    description: "外链存储内的对象前缀；留空用构建期注入值，最终键为 <prefix>/<namespace>/<key>"
+    label: "临时图床前缀",
+    description: "临时图床存储内的对象前缀；留空用构建期注入值，最终键为 <prefix>/<namespace>/<key>"
   },
   publicSecretId: {
     kind: "string",
     secret: true,
     reload: "hot",
-    label: "外链 SecretId",
-    description: "公开读写的桶可留空（匿名写入）；否则依次读 COS_PUBLIC_SECRET_ID、COS_SECRET_ID，或复用「COS / S3 对象存储」的凭据"
+    label: "临时图床 SecretId",
+    description: "临时图床桶可匿名写入时留空；否则依次读 COS_PUBLIC_SECRET_ID、COS_SECRET_ID，或复用「COS / S3 对象存储」的凭据"
   },
   publicSecretKey: {
     kind: "string",
     secret: true,
     reload: "hot",
-    label: "外链 SecretKey",
+    label: "临时图床 SecretKey",
     description: "公开读写的桶可留空（匿名写入）；否则依次读 COS_PUBLIC_SECRET_KEY、COS_SECRET_KEY，或复用「COS / S3 对象存储」的凭据"
   }
 });
@@ -287,8 +287,8 @@ export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE
       ctx.effect(() => ctx.storage.register(backend));
       log({ event: "local-storage-activated", backendId: backend.backendId });
 
-      // 公开临时桶：默认关闭；开启后注册提供者，**不**声明默认，仍要显式选
-      // `exposer.primary = local-public` 才生效——推素材上公网不该是隐式后果。
+      // 内置临时图床：自动模式在没有提供商候选时使用。即使桶信息暂缺也注册为候选，
+      // 让能力中心能显示「未配置」并直达本插件配置；ready=false 时不会参与自动选择。
       if (config.publicEnabled !== true) {
         log({ event: "local-public-disabled" });
         return;
@@ -304,8 +304,8 @@ export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE
       ];
       if (missing.length > 0) {
         // 桶信息是「推到哪」的前提；凭据可以晚到（cos-storage 比本插件晚装载），所以不在这里判。
+        // 仍注册候选，但 ready=false：不虚构凭据、不参与自动选择，配置补齐后热重载生效。
         log({ event: "local-public-unconfigured", missing });
-        return;
       }
       const resolveConfig = (): PublicBucketConfig => {
         // 凭据按用时的最新配置解析：公开桶自己的 → COS_PUBLIC_* → storage.cos / COS_SECRET_*。
@@ -321,7 +321,7 @@ export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE
           env: process.env
         });
         if (!resolved.ok) {
-          throw new StorageExposeUnavailableError(`公开临时桶未配置：${resolved.missing.join("、")}`);
+          throw new StorageExposeUnavailableError(`Woohaa3 临时图床未配置：${resolved.missing.join("、")}`);
         }
         return resolved.config;
       };
@@ -329,11 +329,14 @@ export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE
         ctx.exposer.register({
           ...createPublicBucketExposer({ resolveConfig, storage: ctx.storage }),
           // 设置页据此把「打开该提供者的配置」链回本插件。
-          ownerExtensionId: LOCAL_STORAGE_PLUGIN_ID
+          ownerExtensionId: LOCAL_STORAGE_PLUGIN_ID,
+          // 内置临时图床：提供商候选都不可用时自动模式的后备；也能被手动选择。
+          // 桶信息缺失时 ready=false，能力中心显示未配置，自动路由不会选中。
+          temporaryHosting: { category: "builtin", priority: 1000, validitySeconds: 24 * 60 * 60, ready: () => missing.length === 0 }
         })
       );
       log({
-        event: "local-public-activated",
+        event: missing.length === 0 ? "local-public-activated" : "local-public-registered-unconfigured",
         exposerId: LOCAL_PUBLIC_EXPOSER_ID,
         bucketName,
         bucketUrl,

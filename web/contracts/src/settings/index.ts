@@ -71,17 +71,17 @@ export const SETTING_DEFINITIONS = {
   },
   "exposer.primary": {
     kind: "string",
-    default: "",
+    default: "auto",
     reload: "hot",
-    label: "对外地址提供者",
-    description: "需要外部地址时使用的提供者 id（后端自带签名时也可直接填后端 id）；留空表示不选提供者——没有默认提供者，此时只有当前后端自带签名才有对外地址"
+    label: "临时图床",
+    description: "自动选择可用的临时图床提供商，也可指定来源"
   },
   "storage.expose": {
     kind: "string",
     default: "",
     reload: "hot",
-    label: "对外存储后端（旧键）",
-    description: "已由 exposer.primary 取代；仅在 exposer.primary 为空时作为兼容值读取"
+    label: "临时图床（旧键）",
+    description: "已由 exposer.primary 取代；仅在 exposer.primary 未显式配置时作为兼容值读取"
   },
   "telemetry.local.enabled": {
     kind: "boolean",

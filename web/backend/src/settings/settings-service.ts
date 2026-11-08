@@ -206,8 +206,19 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
   /** 插件清单：按登记顺序排列（设置页「插件配置」的展示顺序）。 */
   const pluginRegistry = new Map<string, SettingsPluginRegistration>();
 
-  const resolve = (layers: RawLayers): ResolvedSettings =>
-    resolveSettings({ ...layers, env }, { definitions, unknownKeys: "collect" });
+  /**
+   * 产品/构建默认里表示「用内置」的 `exposer.primary = local-public` 迁移为自动。
+   *
+   * 只在来源是 `default` 时迁移：用户文件、密钥层或旧环境变量里的显式 `local-public` 必须
+   * 保持手动语义。迁移只改生效值，不重写配置文件；旧键 `storage.expose` 仍按兼容值读取。
+   */
+  const resolve = (layers: RawLayers): ResolvedSettings => {
+    const resolved = resolveSettings({ ...layers, env }, { definitions, unknownKeys: "collect" });
+    if (resolved.sources["exposer.primary"] === "default" && resolved.values["exposer.primary"] === "local-public") {
+      resolved.values["exposer.primary"] = "auto";
+    }
+    return resolved;
+  };
 
   const readLayers = async (): Promise<{ layers: RawLayers; resolved: ResolvedSettings } | { issues: SettingsIssue[] }> => {
     const file = await readYaml(options.configFile, "file");

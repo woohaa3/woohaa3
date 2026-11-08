@@ -134,7 +134,7 @@ async function startService(options: {
   provider: GenerationProvider;
   readReferenceObject?: (storageKey: string, scope?: { canvasId: string }) => Promise<{ bytes: Uint8Array; contentType?: string }>;
   logger?: (event: Record<string, unknown>) => void;
-}): Promise<{ harness: Harness; media: ReturnType<typeof recordingMediaClient>; worker: ReturnType<typeof recordingWorkerServer> }> {
+}): Promise<{ harness: Harness; media: ReturnType<typeof recordingMediaClient>; worker: ReturnType<typeof recordingWorkerServer>; service: TaskService }> {
   const media = recordingMediaClient();
   const worker = recordingWorkerServer();
   const service: TaskService = createTaskService({
@@ -157,6 +157,7 @@ async function startService(options: {
   return {
     media,
     worker,
+    service,
     harness: {
       base: `http://127.0.0.1:${port}`,
       close: async () => {
@@ -259,6 +260,29 @@ describe("参考输入：Provider 自带上传优先", () => {
       expect(called).toBe(0);
       expect(worker.submitted[0]!.urls).toEqual([`https://cos.example/${REFERENCE_KEY}?signature=test`]);
       expect(media.signed).toHaveLength(1);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("执行期地址只在提交前解析，规范资产与长期历史不保存签名 URL；重试重新解析", async () => {
+    const { harness, media, worker, service } = await startService({
+      provider: providerWithUpload(undefined),
+      readReferenceObject: async () => ({ bytes: Uint8Array.of(1), contentType: "image/png" })
+    });
+    try {
+      const first = await submit(harness.base, "run-upload-retry-1");
+      expect(first.status, JSON.stringify(first.body)).toBe(202);
+      expect(worker.submitted[0]!.urls).toEqual([`https://cos.example/${REFERENCE_KEY}?signature=test`]);
+      const record = service.history().get("run-upload-retry-1", { fullText: true, includeRequest: true });
+      expect(JSON.stringify(record)).not.toContain("signature=test");
+      expect((record?.request as { inputs?: Array<{ storageKey?: string }> } | undefined)?.inputs?.[0]?.storageKey).toBe(REFERENCE_KEY);
+
+      // 队列恢复/提交重试是新的地址准备：真正交给远端前重新解析，不沿用旧签名。
+      const retry = await submit(harness.base, "run-upload-retry-2");
+      expect(retry.status, JSON.stringify(retry.body)).toBe(202);
+      expect(worker.submitted[1]!.urls).toEqual([`https://cos.example/${REFERENCE_KEY}?signature=test`]);
+      expect(media.signed).toEqual([REFERENCE_KEY, REFERENCE_KEY]);
     } finally {
       await harness.close();
     }

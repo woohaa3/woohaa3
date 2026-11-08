@@ -62,7 +62,9 @@ afterEach(async () => {
 async function start(
   auth: { authenticator: ApplicationRequestAuthenticator; accessEnforcer: AccessEnforcer },
   directoryControl?: import("../extensions/manifest.js").LoadedExtensionHost["directoryControl"],
-  storageBackends?: () => readonly { backendId: string; label?: string; ownerExtensionId?: string }[]
+  storageBackends?: () => readonly { backendId: string; label?: string; ownerExtensionId?: string }[],
+  exposers?: () => readonly { exposerId: string; label?: string; ownerExtensionId?: string; temporaryHosting?: { category: "provider" | "builtin" } }[],
+  temporaryHosting?: () => import("@woohaa3/contracts").TemporaryHostingRouteView
 ): Promise<{ base: string; settings: SettingsService; dir: string }> {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "settings-api-"));
   const settings = await createSettingsService({
@@ -70,7 +72,7 @@ async function start(
     secretsFile: path.join(dir, "secrets.yml"),
     watch: false
   });
-  const handler = createSettingsApiHandler({ settings, directoryControl, storageBackends, authenticator: auth.authenticator, accessEnforcer: auth.accessEnforcer });
+  const handler = createSettingsApiHandler({ settings, directoryControl, storageBackends, exposers, temporaryHosting, authenticator: auth.authenticator, accessEnforcer: auth.accessEnforcer });
   const server = http.createServer((req, res) => {
     void handler(req, res).then((handled) => {
       if (!handled) {
@@ -168,6 +170,27 @@ describe("settings API", () => {
       { id: "cos", label: "COS", ownerExtensionId: "cos-storage" },
       { id: "custom", label: "custom", ownerExtensionId: null }
     ]);
+  });
+
+  it("临时图床快照只读投影来源类别、当前选择与最近失败", async () => {
+    const { base } = await start(
+      disabledAuth, undefined, undefined,
+      () => [
+        { exposerId: "runninghub-temporary", label: "RunningHub 临时图床", ownerExtensionId: "runninghub-provider", temporaryHosting: { category: "provider" } },
+        { exposerId: "local-public", label: "内置临时图床", ownerExtensionId: "local-storage", temporaryHosting: { category: "builtin" } }
+      ],
+      () => ({
+        mode: "auto", selectionSource: "auto", selectedId: "runninghub-temporary",
+        candidates: [{ exposerId: "runninghub-temporary", label: "RunningHub 临时图床", category: "provider", ownerExtensionId: "runninghub-provider", priority: 10, configured: true, available: true, selected: true, lastError: "401" }],
+        error: null, lastFailure: { exposerId: "runninghub-temporary", message: "401" }
+      })
+    );
+    const snapshot = (await (await fetch(base)).json()) as SettingsSnapshot;
+    expect(snapshot.extensionPoints?.exposer).toEqual([
+      { id: "runninghub-temporary", label: "RunningHub 临时图床", ownerExtensionId: "runninghub-provider", temporaryCategory: "provider" },
+      { id: "local-public", label: "内置临时图床", ownerExtensionId: "local-storage", temporaryCategory: "builtin" }
+    ]);
+    expect(snapshot.extensionPoints?.temporaryHosting).toMatchObject({ selectedId: "runninghub-temporary", lastFailure: { exposerId: "runninghub-temporary" } });
   });
 
   it("非法值返回逐项问题，不写入文件", async () => {

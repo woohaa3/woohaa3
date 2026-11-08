@@ -228,8 +228,8 @@ describe("插件形状", () => {
     expect(plugin.configPrefix).toBe("storage.local");
     expect(plugin.inject).toEqual(["log", "storage", "exposer", "config"]);
     expect(plugin.Config.fields.root.default).toBe(".woohaa3/storage");
-    // 公开临时桶默认关闭：完全本地的部署不会因为装了插件就把素材推上公网。
-    expect(plugin.Config.fields.publicEnabled.default).toBe(false);
+    // 内置临时图床默认开启；桶信息缺失时如实不可用，不会虚构凭据。
+    expect(plugin.Config.fields.publicEnabled.default).toBe(true);
 
     const { ctx, registered, exposers, logs, disposers } = createCtx();
     await plugin.apply(ctx, { root, publicEnabled: false });
@@ -246,7 +246,7 @@ describe("插件形状", () => {
     expect(registered).toEqual([]);
   });
 
-  it("开启公开临时桶后注册 local-public 提供者，但不声明默认", async () => {
+  it("开启内置临时图床后注册 local-public 提供者，作为自动模式的内置后备", async () => {
     const plugin = createLocalStoragePlugin();
     const { ctx, registered, exposers, logs } = createCtx();
     await plugin.apply(ctx, {
@@ -262,8 +262,11 @@ describe("插件形状", () => {
     // 公开桶不是存储后端：它不出现在「主存储」下拉里。
     expect(registered.map((item) => item.backendId)).toEqual(["local"]);
     expect(exposers.map((item) => item.exposerId)).toEqual(["local-public"]);
-    expect(exposers[0]).toMatchObject({ ownerExtensionId: "local-storage", requiresReplica: false });
-    expect("default" in (exposers[0] as object)).toBe(false);
+    expect(exposers[0]).toMatchObject({
+      ownerExtensionId: "local-storage",
+      requiresReplica: false,
+      temporaryHosting: { category: "builtin" }
+    });
     expect(logs).toContainEqual(
       expect.objectContaining({ event: "local-public-activated", exposerId: "local-public" })
     );
@@ -299,15 +302,17 @@ describe("插件形状", () => {
     expect(logs.some((event) => event.event === "local-public-activated")).toBe(true);
   });
 
-  it("缺桶信息时只记日志、不注册提供者（缺项不猜）", async () => {
+  it("缺桶信息时注册未就绪候选（不猜桶、不参与自动选择）", async () => {
     const plugin = createLocalStoragePlugin();
     const { ctx, exposers, logs } = createCtx();
     await plugin.apply(ctx, { root, publicEnabled: true, publicSecretId: "id", publicSecretKey: "key" });
 
-    expect(exposers).toEqual([]);
+    expect(exposers.map((item) => item.exposerId)).toEqual(["local-public"]);
+    expect(exposers[0]!.temporaryHosting?.ready?.()).toBe(false);
     expect(logs).toContainEqual({
       event: "local-public-unconfigured",
       missing: ["publicBucketName", "publicBucketUrl", "publicPrefix"]
     });
+    expect(logs.some((event) => event.event === "local-public-registered-unconfigured")).toBe(true);
   });
 });

@@ -192,7 +192,7 @@ export function createMediaApplicationService(
     async sign(storageKey, expiresSeconds, scope) {
       const checked = checkedScope(scope);
       if (typeof options.storage.getHttpsUrl !== "function") {
-        throw new MediaApplicationError("unavailable", "当前存储没有对外地址能力：请在 exposer.primary 选择地址提供者");
+        throw new MediaApplicationError("unavailable", "当前没有可用的临时图床：请在设置中选择临时图床来源");
       }
       const ttl = expiresSeconds ?? options.signTtlSeconds ?? DEFAULT_SIGN_TTL_SECONDS;
       try {
@@ -202,9 +202,9 @@ export function createMediaApplicationService(
         return url;
       } catch (error) {
         if (error instanceof MediaApplicationError) throw error;
-        // 「没有可用的对外存储后端」是配置问题，如实报 503 并带上可操作的原因。
+        // 「没有可用的临时图床」是配置问题，如实报 503 并带上可操作的原因。
         if (isStorageExposeUnavailableError(error)) {
-          throw new MediaApplicationError("unavailable", error instanceof Error ? error.message : "没有可用的对外存储后端");
+          throw new MediaApplicationError("unavailable", error instanceof Error ? error.message : "没有可用的临时图床");
         }
         if (isMediaObjectNotFoundError(error)) throw new MediaApplicationError("media-not-found", "媒体对象不存在");
         throw new MediaApplicationError("storage-failed", "无法生成签名 URL");
